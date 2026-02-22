@@ -1,0 +1,1294 @@
+"""
+Cone Calorimeter Simulation of Douglas Fir with ALE Mesh Motion and Surface Absorption
+
+This example simulates the pyrolysis of Douglas Fir wood under standard cone 
+calorimeter conditions with ALE (Arbitrary Lagrangian-Eulerian) mesh motion 
+to track the material as it decomposes:
+- 1D simulation through sample thickness
+- ALE mesh motion for accurate shrinkage modeling
+- Surface absorption radiation model for efficient opaque material simulation
+- Multi-step pyrolysis kinetics with char formation
+- Analytical Jacobian for ~50× speedup over finite differences
+- Bruggeman mixing rules for effective properties
+- Species-specific transport (light gases diffuse faster)
+
+Reference: Standard cone calorimeter test per ISO 5660-1
+
+Physical Setup:
+- Sample thickness: 12 mm (typical for wood samples)
+- Exposed surface (z=L): radiant heating + convective/radiative losses + mass release
+- Back surface (z=0): adiabatic + impermeable
+- Surface regresses as material decomposes and gas escapes
+
+Surface Absorption Radiation Model:
+- All incident radiation deposited in the surface cell (z=L)
+- Computationally efficient O(1) with tridiagonal Jacobian
+- Appropriate for opaque materials like wood (optical thickness τ >> 1)
+- Absorption coefficients (α) not used - radiation does not penetrate into depth
+- Provides ~5-15× speedup over Beer-Lambert for opaque materials
+
+Coordinate Convention:
+- z = 0: Bottom (substrate/sample holder), boundary_id = 2, fixed
+- z = L(t): Top (exposed surface), boundary_id = 1, moves with material
+- Heat enters from top, material shrinks toward bottom
+- Mesh follows the shrinking material (ALE formulation)
+
+Douglas Fir Properties (from DF.cmp):
+- Virgin wood density: 530 kg/m³
+- Multi-step decomposition with 5 intermediate states
+- Final char density: 150 kg/m³
+- Includes moisture content with evaporation
+- Products: char + various gases + water vapor
+
+New Features Demonstrated:
+- Surface absorption radiation model (radiation_model=SURFACE_ABSORPTION)
+- Physically-based gas transfer coefficients (λ ~ 1e-5 to 1e-4 m²/s)
+- Darcy-Fick gas transport (diffusion + pressure-driven flow)
+- Temperature-dependent permeability evolution (virgin wood → porous char)
+- Species-specific molar masses for transport scaling
+- ALE mesh motion with analytical Jacobian for performance
+"""
+
+using Pyrolysis
+using Plots
+using LinearSolve
+using KLU
+using OrdinaryDiffEq
+using Statistics
+using LinearSolve: KLUFactorization
+
+# ============================================================================
+# Material Definition: Douglas Fir
+# ============================================================================
+
+"""
+Define Douglas Fir material with temperature-dependent properties.
+
+Douglas Fir undergoes multi-step thermal decomposition:
+	DF → DF_int1 → DF_int2 → DF_int3 → DF_int4 → Char + gases
+
+The material also contains moisture that evaporates:
+	MOISTURE → WATER_VAPOR
+
+Heat capacity format from ThermaKin: cp = c0 + c1*T + c2*T^c3
+For most components: cp = c0 + c1*T (linear)
+"""
+
+# Temperature-dependent heat capacity functions
+# Format from DF.cmp: c0, c1, c2, c3 where cp = c0 + c1*T + c2*T^c3
+df_cp = CallableProperty(T -> begin
+	if T <= 323
+		-53.05 + 4.245*T
+	elseif T <= 425
+		-31.03 + 4.177*T
+	else
+		-2131.0 + 9.119*T
+	end
+end)
+df_int1_cp = CallableProperty(T -> -1983.0 + 8.7 * T)
+df_int2_cp = CallableProperty(T -> -1419.0 + 7.0 * T)
+df_int3_cp = CallableProperty(T -> 1.0 + 2.8 * T)
+df_int4_cp = CallableProperty(T -> 176.0 + 2.3 * T)
+char_cp = CallableProperty(T -> 347.2 + 1.784 * T)
+# Moisture cp: Shomate equation (Chase, 1998), Cp = (A + B*t + C*t^2 + D*t^3 + E/t^2) / M [J/(kg·K)]
+moisture_cp = CallableProperty(T -> begin
+	t = T / 1000.0
+	M = 0.01801528  # kg/mol (H2O)
+	A = -203.6060
+	B = 1523.290
+	C = -3196.413
+	D = 2474.455
+	E = 3.855326
+	(A + B*t + C*t^2 + D*t^3 + E/t^2) / M
+end)
+# Water vapor cp = 2.4e3 - 1.6*T + 2.0e-3*T^2
+water_vapor_cp = CallableProperty(T -> 2.4e3 - 1.6 * T + 2.0e-3 * T^2)
+
+# Moisture-dependent heat of sorption
+# HoS(MC) = 2275 + 860 * exp(-0.120 * MC) [kJ/kg]
+# where MC is moisture content (%) on dry basis: MC = 100 * ξ_moisture / ρ_dry
+# As moisture decreases, more energy is required to release the remaining bound water
+const MOISTURE_IDX = 7           # Component index for moisture
+const ρ_DRY_BASIS = 530.0        # Dry wood density for MC calculation [kg/m³]
+
+heat_of_sorption = StateDependentProperty((T, ξ) -> begin
+	# Moisture content on dry basis (%)
+	MC = 100.0 * ξ[MOISTURE_IDX] / ρ_DRY_BASIS
+	# # Heat of sorption [J/kg] - increases as moisture decreases
+	return (2275.0 + 860.0 * exp(-0.120 * MC)) * 1e3
+	# return 2888.07443e3  # Averaging value 6 - 0 % MC
+end)
+
+# ============================================================================
+# Gas Transfer Coefficients and Permeability (Physically Realistic)
+# ============================================================================
+# 
+# For Fickian transport: J = -λ × ρ × ∂Y/∂x
+# The λ parameter has units [m²/s] and represents an effective diffusion coefficient.
+#
+# Physical guidance for λ (from literature on wood pyrolysis):
+# - Virgin wood: λ ~ 1e-6 m²/s (tight cellular structure, limited porosity)
+# - Porous char: λ ~ 1e-5 m²/s (open pore network after volatiles escape)
+# - Gas phase: λ ~ 1e-5 m²/s (similar to molecular diffusion in porous media)
+# - Lighter gases (H₂O, CO): ~1.5-2× faster diffusion than heavier species
+#
+# References:
+# - Di Blasi (1993): "Modeling and simulation of combustion processes of charring and non-charring solid fuels"
+# - Anca-Couce (2016): "Reaction mechanisms and multi-scale modelling of lignocellulosic biomass pyrolysis"
+# - Park et al. (2010): "Experimental and theoretical investigation of heat and mass transfer processes"
+
+# Base gas transfer coefficients for pyrolysis gases (Fickian diffusion)
+λ_wood = 1.0e-6     # m²/s - virgin wood (tight structure, tortuosity ~3-5)
+λ_char = 1.0e-5     # m²/s - porous char (open structure, porosity ~0.7-0.8)
+λ_gas = 1.0e-5      # m²/s - gas phase diffusion in porous media
+
+# Permeability parameters for Darcy flow (pressure-driven transport)
+# κ is specified per component - effective κ computed via mixing rules
+# 
+# These values are calibrated to match ThermaKin's TRANSPORT coefficients
+# using the conversion: κ = (λ_TK - λ_PJ) × μ/P
+# At T=500K: μ ≈ 2.6e-5 Pa·s, P = 101325 Pa → μ/P ≈ 2.6e-10 s
+#
+# ThermaKin λ values: DF=1e-5, int1=1.2e-5, int2=1.5e-5, int3=2e-5, int4=4e-5, char=5e-5
+κ_virgin = 2.3e-15  # m² - matches ThermaKin DF transport (λ_TK=1e-5, λ_PJ=1e-6)
+κ_char = 1.0e-14    # m² - matches ThermaKin char transport (λ_TK=5e-5, λ_PJ=1e-5)
+
+# Create Douglas Fir material with multiple components:
+# Solid components: DF, DF_int1, DF_int2, DF_int3, DF_int4, Char, MOISTURE
+# Gas components: DF_gas1-5, WATER_VAPOR
+
+douglas_fir = Material(
+	name = :DouglasFir,
+	components = (
+		# 1. Virgin Douglas Fir - solid phase
+		SolidComponent(:DF,
+			ρ = 530.0,                     # kg/m³ - density
+			c = df_cp,                     # J/(kg·K) - temperature-dependent
+			k = 0.145,                      # W/(m·K) - thermal conductivity (virgin)
+			ε = 0.81,                      # surface emissivity
+			α = 0.0,                       # m²/kg - not used with SURFACE_ABSORPTION model
+			λ = λ_wood,                    # m²/s - gas transfer coefficient
+			κ = κ_virgin                   # m² - permeability (matches ThermaKin λ=1e-5)
+		),
+		# 2. Intermediate 1 (partially decomposed, structure beginning to open)
+		SolidComponent(:DF_int1,
+			ρ = 507.2,
+			c = df_int1_cp,
+			# Thermal conductivity interpolated toward char using downstream solid-yield product
+			# Progress to char = 0.80*0.37*0.79*0.74 ≈ 0.1730416
+			# k = k_virgin + (k_char - k_virgin) * progress = 0.145 + (1.0-0.145)*progress
+			# ≈ 0.145 + 0.855*0.1730416 ≈ 0.292951
+			k = 0.292951,
+			# Emissivity interpolated toward char based on downstream solid-yield chain
+			# DF_int1 → DF_int2(0.80) → DF_int3(0.37) → DF_int4(0.79) → Char(0.74)
+			# Progress to char = 0.80*0.37*0.79*0.74 ≈ 0.1730416
+			ε = 0.790965,
+			α = 0.0,                       # m²/kg - not used with SURFACE_ABSORPTION model
+			λ = λ_wood * 1.5,             # 50% increase as structure opens
+			κ = 2.7e-15,                    # m² - matches ThermaKin λ=1.2e-5
+		),
+		# 3. Intermediate 2 (significant decomposition, pore network developing)
+		SolidComponent(:DF_int2,
+			ρ = 419.8,
+			c = df_int2_cp,
+			# Progress to char = 0.37*0.79*0.74 ≈ 0.216302
+			# k = 0.145 + (1.0-0.145)*0.216302 ≈ 0.329938
+			k = 0.329938,
+			# DF_int2 → DF_int3(0.37) → DF_int4(0.79) → Char(0.74)
+			# Progress to char = 0.37*0.79*0.74 ≈ 0.216302
+			ε = 0.786207,
+			α = 0.0,                       # m²/kg - not used with SURFACE_ABSORPTION model
+			λ = λ_wood * 3.0,             # 3× virgin as pores open
+			κ = 3.1e-15,                    # m² - matches ThermaKin λ=1.5e-5
+		),
+		# 4. Intermediate 3 (advanced decomposition, transitioning to char)
+		SolidComponent(:DF_int3,
+			ρ = 203.2,
+			c = df_int3_cp,
+			# Progress to char = 0.79*0.74 ≈ 0.5846
+			# k = 0.145 + (1.0-0.145)*0.5846 ≈ 0.644833
+			k = 0.644833,
+			# DF_int3 → DF_int4(0.79) → Char(0.74)
+			# Progress to char = 0.79*0.74 ≈ 0.5846
+			ε = 0.745694,
+			α = 0.0,                       # m²/kg - not used with SURFACE_ABSORPTION model
+			λ = λ_wood * 6.0,             # 6× virgin, approaching char
+			κ = 3.6e-15,                    # m² - matches ThermaKin λ=2e-5
+		),
+		# 5. Intermediate 4 (nearly char, highly porous)
+		SolidComponent(:DF_int4,
+			ρ = 176.6,
+			c = df_int4_cp,
+			# Progress to char = 0.74
+			# k = 0.145 + (1.0-0.145)*0.74 ≈ 0.777700
+			k = 0.777700,
+			# DF_int4 → Char(0.74)
+			# Progress to char = 0.74
+			ε = 0.728600,
+			α = 0.0,                       # m²/kg - not used with SURFACE_ABSORPTION model
+			λ = λ_char * 0.8,             # 8× virgin, nearly char-like
+			κ = 8.3e-15,                    # m² - matches ThermaKin λ=4e-5
+		),
+		# 6. Char - final solid residue (fully porous)
+		SolidComponent(:Char,
+			ρ = 150.0,
+			c = char_cp,
+			k = 1.0,                      # Char has higher conductivity (char endpoint)
+			ε = 0.70,                     # Char emissivity
+			α = 0.0,                       # m²/kg - not used with SURFACE_ABSORPTION model
+			λ = λ_char,                   # m²/s - porous char (10× virgin)
+			κ = κ_char                     # m² - matches ThermaKin λ=5e-5
+		),
+		# 7. Moisture (liquid water bound in wood structure)
+		# ThermaKin uses ρ=1e6 kg/m³ as a "pseudo-density" to give moisture
+		# negligible volume fraction. This matches L SWELLING: 0 behavior where
+		# bound liquid doesn't contribute to the material's bulk volume.
+		# Physical interpretation: moisture is absorbed into wood cell walls,
+		# not occupying separate volume.
+		LiquidComponent(:MOISTURE,
+			ρ = 1e6,                       # kg/m³ - pseudo-density (matches ThermaKin)
+			c = moisture_cp,               # Moisture contributes to heat capacity
+			k = 0.145,                       # W/(m·K) - but not significantly to k_eff
+			ε = 0.81,
+			α = 0.0,                       # m²/kg - not used with SURFACE_ABSORPTION model
+			κ = 0.0                        # m² - liquid blocks Darcy flow
+		),
+		# 8. DF_gas1 - gaseous product from reaction 1 (low-T volatiles, light organic acids)
+		GaseousComponent(:DF_gas1,
+			M = 0.060,                     # kg/mol - acetic acid-like (CH₃COOH = 60 g/mol)
+			c = 2000.0,                    # J/(kg·K)
+			k = 0.03,                      # W/(m·K) - typical gas conductivity
+			λ = λ_gas * 0.85               # m²/s - moderate weight, slightly slower diffusion
+		),
+		# 9. DF_gas2 - gaseous product from reaction 2 (CO₂ from early decomposition)
+		GaseousComponent(:DF_gas2,
+			M = 0.044,                     # kg/mol - CO₂ (44 g/mol)
+			c = 1800.0,                    # J/(kg·K)
+			k = 0.03,
+			λ = λ_gas * 1.0               # m²/s - medium weight gas
+		),
+		# 10. DF_gas3 - gaseous product from reaction 3 (main pyrolysis tars and heavy volatiles)
+		GaseousComponent(:DF_gas3,
+			M = 0.070,                     # kg/mol - tar-like species (phenols, levoglucosan)
+			c = 2200.0,                    # J/(kg·K)
+			k = 0.025,
+			λ = λ_gas * 0.6                # m²/s - heavy tars diffuse slower (larger molecules)
+		),
+		# 11. DF_gas4 - gaseous product from reaction 4 (light gases: CO, formaldehyde)
+		GaseousComponent(:DF_gas4,
+			M = 0.030,                     # kg/mol - CO (28 g/mol) / CH₂O (30 g/mol)
+			c = 1600.0,                    # J/(kg·K)
+			k = 0.035,
+			λ = λ_gas * 1.3               # m²/s - light gases diffuse faster
+		),
+		# 12. DF_gas5 - gaseous product from reaction 5 (high-T char oxidation/gasification)
+		GaseousComponent(:DF_gas5,
+			M = 0.028,                     # kg/mol - CO (28 g/mol)
+			c = 1500.0,                    # J/(kg·K)
+			k = 0.035,
+			λ = λ_gas * 1.4               # m²/s - CO is light and diffuses fast
+		),
+		# 13. Water vapor - gaseous product from moisture evaporation (lightest, fastest)
+		GaseousComponent(:WATER_VAPOR,
+			M = 0.018,                     # kg/mol - H₂O (18 g/mol, lightest species)
+			c = water_vapor_cp,            # J/(kg·K) - temperature-dependent
+			k = 0.04,                      # W/(m·K) - water vapor has high k
+			λ = λ_gas * 1.6                # m²/s - lightest molecule, fastest diffusion (Graham's law: √(M_heavy/M_light))
+		),
+	),
+	reactions = (
+		# Reaction 1: DF → 0.95 DF_int1 + 0.05 DF_gas1
+		# Heat: 20067 J/kg (positive = endothermic)
+		Reaction(:pyrolysis_step1, 1 => (2, 8),
+			A = 74816.95,                  # s⁻¹
+			E = 71.59e3,                   # J/mol
+			h = -20067.0,                  # J/kg (negative = exothermic in our convention)
+			n = 1.0,
+			yields = (0.95, 0.05),
+		),
+		# Reaction 2: DF_int1 → 0.80 DF_int2 + 0.20 DF_gas2
+		# Heat: 8264 J/kg
+		Reaction(:pyrolysis_step2, 2 => (3, 9),
+			A = 23550492839.0,             # s⁻¹
+			E = 140.9e3,                   # J/mol
+			h = -8264.0,                   # J/kg
+			n = 1.0,
+			yields = (0.80, 0.20),
+		),
+		# Reaction 3: DF_int2 → 0.37 DF_int3 + 0.63 DF_gas3
+		# Heat: -273999 J/kg (negative = exothermic in ThermaKin)
+		Reaction(:pyrolysis_step3, 3 => (4, 10),
+			A = 7.744618e12,               # s⁻¹
+			E = 181.0e3,                   # J/mol
+			h = 273999.0,                  # J/kg (positive = endothermic in our convention)
+			n = 1.0,
+			yields = (0.37, 0.63),
+		),
+		# Reaction 4: DF_int3 → 0.79 DF_int4 + 0.21 DF_gas4
+		# Heat: 224430 J/kg
+		Reaction(:pyrolysis_step4, 4 => (5, 11),
+			A = 103276.14,                 # s⁻¹
+			E = 98.94e3,                   # J/mol
+			h = -224430.0,                 # J/kg
+			n = 1.0,
+			yields = (0.79, 0.21),
+		),
+		# Reaction 5: DF_int4 → 0.74 Char + 0.26 DF_gas5
+		# Heat: -555.6 J/kg
+		Reaction(:pyrolysis_step5, 5 => (6, 12),
+			A = 6.397348,                  # s⁻¹
+			E = 56.01e3,                   # J/mol
+			h = 555.6,                     # J/kg
+			n = 1.0,
+			yields = (0.74, 0.26),
+		),
+		# Reaction 6: MOISTURE → WATER_VAPOR
+		# Heat of sorption: HoS(MC) = 2275 + 860 * exp(-0.120 * MC) [kJ/kg]
+		# Moisture-dependent: increases as moisture content decreases (bound water)
+		Reaction(:moisture_evaporation, 7 => 13,
+			A = 2.997e5,                   # s⁻¹
+			E = 5.0e4,                     # J/mol
+			h = heat_of_sorption,          # State-dependent heat [J/kg]
+			n = 1.0,
+		),
+	),
+	# Mixing rules for effective properties
+	# WEIGHTED matches ThermaKin2Ds default behavior (PARALL CONDUCTIVITY: 0.5)
+	conductivity_mixing = WEIGHTED,
+	β = 0.5,                                # 50/50 parallel/series mixing (ThermaKin default)
+	gas_transfer_mixing = WEIGHTED,         # Weighted average for gas transfer
+	β_λ = 0.5,                              # 50/50 mixing (matching ThermaKin PARALL TRANSPORT: 1.0 → interpreted as default weighted)
+
+	# Permeability mixing for pressure-driven Darcy flow
+	# Effective κ is computed from component κ values via mixing rules
+	# As virgin wood converts to char, effective κ naturally increases
+	permeability_mixing = WEIGHTED,         # Weighted average mixing
+	β_κ = 0.5,                              # 50/50 parallel/series mixing
+)
+
+# ============================================================================
+# Simulation Parameters
+# ============================================================================
+
+# Sample geometry
+sample_thickness = 12.0e-3   # 12 mm typical wood sample
+n_cells = 240             # 240 cells → 0.05 mm resolution
+
+# Time parameters  
+t_final = 600.0             # 10 minutes - typical cone test duration for wood
+dt_initial = 1e-3           # initial timestep
+
+# Environmental conditions
+T_ambient = 300.0           # K - ambient temperature (27°C)
+q_external = 50e3  # W/m² - 50 kW/m² external heat flux
+
+# Convective heat transfer coefficient for cone calorimeter
+h_conv = 10.0                # W/(m²·K)
+
+# ============================================================================
+# Mesh Creation
+# ============================================================================
+
+# Number of components (NC = 13): 
+# 6 solids (DF, DF_int1-4, Char) + 1 liquid (MOISTURE) + 6 gases (DF_gas1-5, WATER_VAPOR)
+
+# Initial concentrations:
+# - DF at full density (530 kg/m³)
+# - Moisture content 15% on dry basis: 530 * 0.15 ≈ 79.5 kg/m³
+# - All others initially zero
+moisture_content_db = 0.06  # 6% moisture content on dry basis
+ρ_DF_initial = 530.0        # Initial wood density (dry)
+# For dry basis, moisture density = MC_db * ρ_dry
+ρ_moisture_initial = moisture_content_db * ρ_DF_initial
+
+mesh = create_uniform_mesh(
+	sample_thickness,      # domain length [m]
+	n_cells,               # number of cells
+	Val(13);               # number of components (NC)
+	T_initial = T_ambient, # initial temperature
+	ξ_initial = (ρ_DF_initial, 0.0, 0.0, 0.0, 0.0, 0.0, ρ_moisture_initial,
+		0.0, 0.0, 0.0, 0.0, 0.0, 0.0),  # DF + moisture, rest zero
+)
+
+println("Mesh created:")
+println("  - Thickness: $(sample_thickness*1000) mm")
+println("  - Number of cells: $n_cells")
+println("  - Cell size: $(sample_thickness/n_cells*1000) mm")
+println("  - Initial wood density: $ρ_DF_initial kg/m³")
+println("  - Initial moisture: $(round(ρ_moisture_initial, digits=1)) kg/m³ ($(round(moisture_content_db*100, digits=1))% dry basis)")
+
+# Diagnostic: Check mass concentrations and fractions
+total_initial_concentration = ρ_DF_initial + ρ_moisture_initial
+wood_mass_fraction = ρ_DF_initial / total_initial_concentration
+moisture_mass_fraction = ρ_moisture_initial / total_initial_concentration
+
+println("  - Initial total concentration: $(round(total_initial_concentration, digits=1)) kg/m³")
+println("  - Wood mass fraction: $(round(wood_mass_fraction, digits=3))")
+println("  - Moisture mass fraction: $(round(moisture_mass_fraction, digits=3))")
+println("  - Sum of mass fractions: $(round(wood_mass_fraction + moisture_mass_fraction, digits=6)) (should be 1.0)")
+
+# ============================================================================
+# Boundary Conditions
+# ============================================================================
+
+# Top surface (boundary_id = 1): exposed surface
+# - External radiant heat flux with Beer-Lambert in-depth absorption
+# - Re-radiation losses (surface radiates to surroundings)
+# - Convective losses (natural + forced convection)
+# Note: RadiativeFluxBC and RadiativeBC now use the effective emissivity from material
+# properties by default (ε = nothing). This automatically tracks the surface emissivity
+# as the material decomposes (e.g., virgin wood → char transition). To override with
+# a fixed value, pass ε = 0.9 or absorptivity = 0.9 explicitly.
+# Note: radiation_model=SURFACE_ABSORPTION controls surface vs in-depth absorption
+top_thermal_bc =
+	RadiativeFluxBC(flux = q_external) +                      # Cone heater (uses material ε)
+	RadiativeBC(T_inf = 300) +                                # Re-radiation losses (uses material ε)
+	ConvectiveBC(h = h_conv, T_inf = 300)                     # Convective losses
+
+# Top surface mass BC: diffusive gas escape with Darcy flow to atmosphere
+# For cone calorimeter with continuous exhaust in nitrogen:
+# - DiffusiveMassBC(h_m): External mass transfer coefficient [m/s] (matches ThermaKin "a" parameter)
+# - DirichletPressureBC: Surface at atmospheric pressure (exhaust maintains ~1 atm)
+# This combines Fickian diffusion (driven by λ) with Darcy flow (driven by pressure)
+# h_m = 0.05 m/s matches ThermaKin boundary condition: "DF_gas1 LIN 0.05 0"
+top_mass_bc = DiffusiveMassBC(0.05) + DirichletPressureBC(101325.0)
+
+# Bottom surface (boundary_id = 2): back face
+# bottom_thermal_bc = RadiativeBC(T_inf = 300) +                                # Re-radiation losses (uses material ε)
+# 					ConvectiveBC(h = h_conv, T_inf = 300)                     # Convective losses
+bottom_thermal_bc = AdiabaticBC()    # Adiabatic (no heat loss through substrate)
+bottom_mass_bc = ImpermeableBC()   # Impermeable (no gas escape through substrate)
+
+# Collect boundary conditions into BoundaryConditionSet
+bc_set = BoundaryConditionSet(
+	thermal_top = top_thermal_bc,      # Top (exposed) surface
+	thermal_bottom = bottom_thermal_bc, # Bottom surface adiabatic
+	mass_top = top_mass_bc,            # Top: gas release
+	mass_bottom = bottom_mass_bc,       # Bottom: impermeable
+)
+
+println("\nBoundary conditions:")
+println("  - Top surface: RadiativeFluxBC ($(q_external/1000) kW/m²) + re-radiation + convection")
+println("  - Top mass: DiffusiveMassBC + DirichletPressureBC (101325 Pa)")
+println("  - Bottom surface: Adiabatic, impermeable")
+
+# ============================================================================
+# Problem Setup
+# ============================================================================
+
+# Initial conditions
+T_initial_func = z -> T_ambient           # Uniform initial temperature
+ξ_initial_funcs = [
+	z -> ρ_DF_initial,     # 1. DF (virgin wood)
+	z -> 0.0,              # 2. DF_int1
+	z -> 0.0,              # 3. DF_int2
+	z -> 0.0,              # 4. DF_int3
+	z -> 0.0,              # 5. DF_int4
+	z -> 0.0,              # 6. Char
+	z -> ρ_moisture_initial, # 7. MOISTURE
+	z -> 0.0,              # 8. DF_gas1
+	z -> 0.0,              # 9. DF_gas2
+	z -> 0.0,              # 10. DF_gas3
+	z -> 0.0,              # 11. DF_gas4
+	z -> 0.0,              # 12. DF_gas5
+	z -> 0.0,              # 13. WATER_VAPOR
+]
+
+println("Creating PyrolysisProblem...")
+flush(stdout)
+
+# Create the pyrolysis problem
+problem = PyrolysisProblem(
+	mesh = mesh,
+	material = douglas_fir,
+	bc_set = bc_set,
+	T_initial = T_initial_func,
+	ξ_initial = ξ_initial_funcs,
+	external_flux = t -> 0.0,              # Not used when RadiativeFluxBC is present
+	ambient_temperature = t -> T_ambient,  # Constant ambient temperature
+	tspan = (0.0, t_final),
+	dt_initial = dt_initial,
+	output_times = collect(range(0.0, t_final, length = 3601)),  # Output every 1s
+)
+
+println("Problem created successfully!")
+flush(stdout)
+
+println("\nProblem created:")
+println("  - Material: $(douglas_fir.name)")
+println("  - Duration: $(t_final) s")
+println("  - External flux: $(q_external/1000) kW/m²")
+println("  - Initial temperature: $(T_ambient) K")
+println("  - Conductivity mixing: WEIGHTED (β = $(douglas_fir.β))")
+println("  - Gas transfer mixing: WEIGHTED (β_λ = $(douglas_fir.β_λ))")
+println("  - Darcy flow: ENABLED (κ_virgin = $(κ_virgin) m², κ_char = $(κ_char) m²)")
+
+# ============================================================================
+# Solve with ALE Mesh Motion and Surface Absorption
+# ============================================================================
+
+println("\nSolving with ALE mesh motion, Darcy-Fick transport, surface absorption, and analytical Jacobian...")
+println("Surface absorption model deposits all radiation in the surface cell.")
+println("Darcy-Fick combines diffusion (λ-driven) + pressure-driven flow (κ-driven).")
+println("This may take several minutes for wood pyrolysis...\n")
+
+# Solve using implicit solver with ALE enabled and surface absorption radiation
+# The analytical Jacobian provides ~50× speedup for this complex 13-component system
+# Surface absorption is appropriate for opaque materials like wood
+solution = solve(problem;
+	abstol = 1e-9,
+	reltol = 1e-7,
+	dtmin = 1e-14,                         # Allow very small timesteps during rapid reaction
+	progress = true,
+	use_ale = true,                        # Enable ALE mesh motion
+	radiation_model = SURFACE_ABSORPTION,  # All radiation absorbed at surface (opaque material)
+	min_thickness = 0.5e-3,                # Stop when sample is < 0.5 mm
+	handle_depletion = false,              # Disable surface cell depletion (uses ALE instead)
+	use_analytical_jacobian = true,        # ~50× speedup with analytical Jacobian (ENABLED)
+	solver = KenCarp4(linsolve = KLUFactorization()),
+)
+
+println("Solve() returned at $(time())!")
+flush(stdout)
+
+println("\nSolution completed!")
+println("  - Return code: $(solution.retcode)")
+println("  - Solve time: $(round(solution.solve_time, digits=2)) s")
+
+# Thickness history
+thickness_times = solution.times
+thickness_values = solution.thickness_history
+final_thickness = isempty(thickness_values) ? sample_thickness : thickness_values[end]
+println("  - Final thickness: $(round(final_thickness*1000, digits=2)) mm")
+
+# ============================================================================
+# Results Analysis
+# ============================================================================
+
+# Extract key results
+times = solution.times
+gas_generation_rate = solution.gas_generation_rate  # kg/(m²·s) - volumetric gas production
+T_surface = solution.surface_temperature  # K
+T_back = solution.back_temperature     # K
+total_mass = solution.total_mass       # kg/m²
+
+# Extract boundary fluxes (computed during solve for accuracy)
+mlr = solution.surface_mass_flux       # kg/(m²·s) - actual mass leaving at surface
+q_absorbed = solution.surface_heat_flux_absorbed      # W/m² - absorbed radiation
+q_reradiation = solution.surface_heat_flux_reradiation  # W/m² - re-radiation loss
+q_convection = solution.surface_heat_flux_convection    # W/m² - convective loss
+q_conduction_surface = solution.surface_heat_flux_conduction  # W/m² - conduction into material
+q_net_surface = solution.surface_heat_flux_net         # W/m² - net heat entering
+ε_eff_front = solution.surface_emissivity              # [-] - effective emissivity
+k_eff_front = solution.surface_conductivity            # W/(m·K) - effective conductivity
+
+println("\nKey Results:")
+println("  - Initial mass: $(round(total_mass[1]*1000, digits=2)) g/m² = $(round(total_mass[1], digits=4)) kg/m²")
+println("  - Final mass: $(round(total_mass[end]*1000, digits=2)) g/m² = $(round(total_mass[end], digits=4)) kg/m²")
+println("  - Mass loss: $(round((1 - total_mass[end]/total_mass[1])*100, digits=1))%")
+println("  - Peak gas generation rate: $(round(maximum(gas_generation_rate)*1000, digits=2)) g/(m²·s)")
+println("  - Peak MLR (surface flux): $(round(maximum(mlr)*1000, digits=2)) g/(m²·s)")
+println("  - Peak surface temperature: $(round(maximum(T_surface), digits=1)) K = $(round(maximum(T_surface)-273.15, digits=1)) °C")
+println("  - Initial thickness: $(sample_thickness*1000) mm")
+println("  - Final thickness: $(round(final_thickness*1000, digits=2)) mm")
+println("  - Thickness change: $(round((1 - final_thickness/sample_thickness)*100, digits=1))%")
+
+println("\nBoundary Heat Fluxes (from solver):")
+println("  - Peak absorbed radiation: $(round(maximum(q_absorbed)/1000, digits=2)) kW/m²")
+println("  - Peak re-radiation loss: $(round(maximum(q_reradiation)/1000, digits=2)) kW/m²")
+println("  - Peak convective loss: $(round(maximum(q_convection)/1000, digits=2)) kW/m²")
+println("  - Peak conductive flux: $(round(maximum(abs.(q_conduction_surface))/1000, digits=2)) kW/m²")
+
+println("\nSurface Properties (from solver):")
+println("  - Final emissivity: $(round(ε_eff_front[end], digits=3))")
+println("  - Final conductivity: $(round(k_eff_front[end], digits=4)) W/(m·K)")
+
+# ============================================================================
+# Compute Component-Specific Gas Generation Rates (Post-Processing)
+# ============================================================================
+#
+# The solution now provides:
+# - solution.surface_mass_flux: Total mass leaving at surface (computed during solve)
+# - solution.gas_generation_rate: Total volumetric gas production (computed during solve)
+#
+# Component-specific rates still require post-processing to separate by species.
+#
+# ============================================================================
+
+println("\nComputing component-specific gas generation rates...")
+
+# Component indices for gas products
+const GAS_COMPONENTS = [8, 9, 10, 11, 12, 13]  # DF_gas1-5, WATER_VAPOR
+const GAS_NAMES = ["DF_gas1", "DF_gas2", "DF_gas3", "DF_gas4", "DF_gas5", "H₂O"]
+
+# Initialize component rate arrays
+n_times = length(times)
+
+# Gas generation rates (volumetric source terms)
+mlr_gen_gas1 = zeros(n_times)      # From reaction 1
+mlr_gen_gas2 = zeros(n_times)      # From reaction 2
+mlr_gen_gas3 = zeros(n_times)      # From reaction 3
+mlr_gen_gas4 = zeros(n_times)      # From reaction 4
+mlr_gen_gas5 = zeros(n_times)      # From reaction 5
+mlr_gen_water = zeros(n_times)     # From reaction 6
+
+# Pre-allocate arrays for reaction rate computation
+NC = 13  # Number of components
+NR = 6   # Number of reactions
+rates = zeros(NR)
+heats = zeros(NR)
+
+# Compute component gas generation rates at each time
+for i in 1:n_times
+	ξ_profile = solution.concentrations[i]
+	T_profile = solution.temperatures[i]
+	n_cells_i = size(ξ_profile, 2)
+
+	# Get volumes at this time (from thickness history for ALE)
+	current_thickness = thickness_values[i]
+	# Assume uniform cells for simplicity (good approximation for this case)
+	cell_vol = current_thickness / n_cells_i * 1.0  # cross-section area = 1 m²
+
+	# === Gas Generation Rates (Volumetric) ===
+	for j in 1:n_cells_i
+		T = T_profile[j]
+		ξ = ntuple(k -> ξ_profile[k, j], NC)
+
+		# Evaluate reaction rates
+		Pyrolysis.Physics.evaluate_reactions!(rates, heats, ξ, T, douglas_fir)
+
+		# Accumulate gas production from each reaction
+		# Reaction 1: DF → 0.95 DF_int1 + 0.05 DF_gas1
+		mlr_gen_gas1[i] += douglas_fir.reactions[1].stoich[4] * rates[1] * cell_vol
+
+		# Reaction 2: DF_int1 → 0.80 DF_int2 + 0.20 DF_gas2
+		mlr_gen_gas2[i] += douglas_fir.reactions[2].stoich[4] * rates[2] * cell_vol
+
+		# Reaction 3: DF_int2 → 0.37 DF_int3 + 0.63 DF_gas3
+		mlr_gen_gas3[i] += douglas_fir.reactions[3].stoich[4] * rates[3] * cell_vol
+
+		# Reaction 4: DF_int3 → 0.79 DF_int4 + 0.21 DF_gas4
+		mlr_gen_gas4[i] += douglas_fir.reactions[4].stoich[4] * rates[4] * cell_vol
+
+		# Reaction 5: DF_int4 → 0.74 Char + 0.26 DF_gas5
+		mlr_gen_gas5[i] += douglas_fir.reactions[5].stoich[4] * rates[5] * cell_vol
+
+		# Reaction 6: MOISTURE → WATER_VAPOR (single product reaction)
+		mlr_gen_water[i] += 1.0 * rates[6] * cell_vol  # yield = 1.0 for single product
+	end
+end
+
+println("\nGas Generation Rates (volumetric source):")
+println("  - Peak DF_gas1 generation: $(round(maximum(mlr_gen_gas1)*1000, digits=2)) g/(m²·s)")
+println("  - Peak DF_gas2 generation: $(round(maximum(mlr_gen_gas2)*1000, digits=2)) g/(m²·s)")
+println("  - Peak DF_gas3 generation: $(round(maximum(mlr_gen_gas3)*1000, digits=2)) g/(m²·s)")
+println("  - Peak DF_gas4 generation: $(round(maximum(mlr_gen_gas4)*1000, digits=2)) g/(m²·s)")
+println("  - Peak DF_gas5 generation: $(round(maximum(mlr_gen_gas5)*1000, digits=2)) g/(m²·s)")
+println("  - Peak H₂O generation: $(round(maximum(mlr_gen_water)*1000, digits=2)) g/(m²·s)")
+
+# Find time to ignition (when MLR exceeds critical value)
+mlr_critical = 3e-3  # kg/(m²·s) ≈ 3 g/(m²·s) - approximate ignition threshold
+tig_idx = findfirst(mlr .> mlr_critical)
+if tig_idx !== nothing
+	t_ignition = times[tig_idx]
+	println("\n  - Time to ignition (MLR > 3 g/m²s): $(round(t_ignition, digits=1)) s")
+end
+
+# ============================================================================
+# Plotting Results
+# ============================================================================
+
+println("\nGenerating plots...")
+
+# Create figure with 6 subplots
+# Plot 1: Mass Loss Rate (MLR) - from solver (accurate)
+p1 = plot(times, mlr .* 1000,  # Convert to g/(m²·s)
+	xlabel = "Time [s]",
+	ylabel = "MLR [g/(m²·s)]",
+	title = "Mass Loss Rate (Surface Flux)",
+	legend = :topright,
+	linewidth = 2.5,
+	color = :black,
+	label = "Total MLR (solver)",
+)
+hline!([mlr_critical*1000], linestyle = :dot, color = :gray, label = "Ignition threshold")
+
+# Plot 1b: Gas Generation Rates (volumetric source)
+p1b = plot(times, gas_generation_rate .* 1000,
+	xlabel = "Time [s]",
+	ylabel = "Generation Rate [g/(m²·s)]",
+	title = "Gas Generation Rate (Volumetric)",
+	legend = :topright,
+	linewidth = 2.5,
+	color = :black,
+	label = "Total (solver)",
+)
+# Add individual component generation rates
+plot!(times, mlr_gen_gas1 .* 1000, linewidth = 1.5, linestyle = :dash, label = "DF_gas1", color = :blue)
+plot!(times, mlr_gen_gas2 .* 1000, linewidth = 1.5, linestyle = :dash, label = "DF_gas2", color = :green)
+plot!(times, mlr_gen_gas3 .* 1000, linewidth = 1.5, linestyle = :dash, label = "DF_gas3", color = :orange)
+plot!(times, mlr_gen_gas4 .* 1000, linewidth = 1.5, linestyle = :dash, label = "DF_gas4", color = :purple)
+plot!(times, mlr_gen_gas5 .* 1000, linewidth = 1.5, linestyle = :dash, label = "DF_gas5", color = :brown)
+plot!(times, mlr_gen_water .* 1000, linewidth = 1.5, linestyle = :dot, label = "H₂O", color = :cyan)
+
+p2 = plot(times, T_surface,
+	xlabel = "Time [s]",
+	ylabel = "Temperature [K]",
+	title = "Surface & Back Temperature",
+	legend = :bottomright,
+	linewidth = 2,
+	color = :orange,
+	label = "Surface",
+)
+plot!(times, T_back, linewidth = 2, color = :blue, label = "Back")
+
+p3 = plot(times, total_mass .* 1000,  # Convert to g/m²
+	xlabel = "Time [s]",
+	ylabel = "Mass [g/m²]",
+	title = "Total Mass",
+	legend = false,
+	linewidth = 2,
+	color = :green,
+	ylims = (0, :auto),
+)
+
+# Sample thickness over time
+p4 = plot(thickness_times, thickness_values .* 1000,  # Convert to mm
+	xlabel = "Time [s]",
+	ylabel = "Thickness [mm]",
+	title = "Sample Thickness",
+	legend = false,
+	linewidth = 2,
+	color = :purple,
+)
+
+# Temperature profiles at selected times
+p5 = plot(xlabel = "Depth [mm]", ylabel = "Temperature [K]", title = "Temperature Profiles")
+profile_times = [30, 60, 120, 180, 300, 450, 600, 750, 900, 1000]  # seconds
+for t in profile_times
+	# Find closest output time
+	idx = argmin(abs.(times .- t))
+	if idx <= length(solution.temperatures)
+		T_profile = solution.temperatures[idx]
+		# Skip if only 1 cell remains
+		if length(T_profile) <= 1
+			continue
+		end
+		# Use current thickness at this time
+		t_idx = isempty(thickness_times) ? 1 : argmin(abs.(thickness_times .- times[idx]))
+		current_thickness = isempty(thickness_values) ? sample_thickness : thickness_values[t_idx]
+		z_coords = range(0, current_thickness*1000, length = length(T_profile))
+		plot!(z_coords, T_profile, label = "t=$(round(times[idx], digits=0))s", linewidth = 1.5)
+	end
+end
+
+# Combine all plots
+final_plot = plot(p1, p1b, p2, p3, p4, p5, layout = (2, 3), size = (1400, 800))
+plot!(plot_title = "Cone Calorimeter Simulation: Douglas Fir at 50 kW/m² (ALE Mesh)")
+
+# Save plot
+savefig(final_plot, "cone_calorimeter_douglas_fir_results.png")
+println("Results saved to: cone_calorimeter_douglas_fir_results.png")
+
+# ============================================================================
+# Component Evolution Plot
+# ============================================================================
+
+println("\nGenerating component evolution plot...")
+
+# Extract component concentrations over time (averaged across thickness)
+n_times = length(solution.concentrations)
+avg_DF = zeros(n_times)
+avg_int1 = zeros(n_times)
+avg_int2 = zeros(n_times)
+avg_int3 = zeros(n_times)
+avg_int4 = zeros(n_times)
+avg_char = zeros(n_times)
+avg_moisture = zeros(n_times)
+
+for i in 1:n_times
+	ξ_profile = solution.concentrations[i]
+	n_cells_i = size(ξ_profile, 2)
+	if n_cells_i > 0
+		avg_DF[i] = sum(ξ_profile[1, :]) / n_cells_i
+		avg_int1[i] = sum(ξ_profile[2, :]) / n_cells_i
+		avg_int2[i] = sum(ξ_profile[3, :]) / n_cells_i
+		avg_int3[i] = sum(ξ_profile[4, :]) / n_cells_i
+		avg_int4[i] = sum(ξ_profile[5, :]) / n_cells_i
+		avg_char[i] = sum(ξ_profile[6, :]) / n_cells_i
+		avg_moisture[i] = sum(ξ_profile[7, :]) / n_cells_i
+	end
+end
+
+p_components = plot(times, avg_DF,
+	xlabel = "Time [s]",
+	ylabel = "Concentration [kg/m³]",
+	title = "Solid Component Evolution",
+	label = "DF (virgin)",
+	linewidth = 2,
+	legend = :right,
+)
+plot!(times, avg_int1, label = "DF_int1", linewidth = 1.5)
+plot!(times, avg_int2, label = "DF_int2", linewidth = 1.5)
+plot!(times, avg_int3, label = "DF_int3", linewidth = 1.5)
+plot!(times, avg_int4, label = "DF_int4", linewidth = 1.5)
+plot!(times, avg_char, label = "Char", linewidth = 2, color = :black)
+plot!(times, avg_moisture, label = "Moisture", linewidth = 1.5, linestyle = :dash)
+
+savefig(p_components, "douglas_fir_component_evolution.png")
+println("Component evolution saved to: douglas_fir_component_evolution.png")
+
+# ============================================================================
+# Compute Additional Diagnostics (Beyond Solver-Computed Quantities)
+# ============================================================================
+#
+# The solver now provides these quantities computed during the solve:
+# - solution.surface_mass_flux: Total MLR (already extracted as `mlr`)
+# - solution.surface_heat_flux_absorbed: Absorbed radiation (already `q_absorbed`)
+# - solution.surface_heat_flux_reradiation: Re-radiation loss (already `q_reradiation`)
+# - solution.surface_heat_flux_convection: Convective loss (already `q_convection`)
+# - solution.surface_heat_flux_conduction: Conduction into material (already `q_conduction_surface`)
+# - solution.surface_heat_flux_net: Net heat entering (already `q_net_surface`)
+# - solution.surface_emissivity: Effective emissivity (already `ε_eff_front`)
+# - solution.surface_conductivity: Effective conductivity (already `k_eff_front`)
+#
+# This section computes ADDITIONAL diagnostics that require post-processing:
+# - Mass balance checks
+# - Component concentrations and averages
+# - Temperature at specific depths
+# - Energy balance and reaction heat rates
+#
+# ============================================================================
+
+println("\nComputing additional diagnostics...")
+
+# Pre-allocate diagnostic arrays for quantities NOT in solver output
+n_times = length(times)
+
+# Mass balance diagnostics
+total_solid_conc = zeros(n_times)
+total_liquid_conc = zeros(n_times)
+total_gas_conc = zeros(n_times)
+sum_all_components = zeros(n_times)
+bulk_density = zeros(n_times)
+mass_balance_error = zeros(n_times)
+
+# Gas concentrations at front surface
+gas1_conc_front = zeros(n_times)
+gas2_conc_front = zeros(n_times)
+gas3_conc_front = zeros(n_times)
+gas4_conc_front = zeros(n_times)
+gas5_conc_front = zeros(n_times)
+water_vapor_conc_front = zeros(n_times)
+
+# Average gas concentrations
+gas1_conc_avg = zeros(n_times)
+gas2_conc_avg = zeros(n_times)
+gas3_conc_avg = zeros(n_times)
+gas4_conc_avg = zeros(n_times)
+gas5_conc_avg = zeros(n_times)
+water_vapor_conc_avg = zeros(n_times)
+
+# Additional effective properties (not in solver output)
+cp_eff_front = zeros(n_times)
+rho_cp_front = zeros(n_times)
+alpha_thermal = zeros(n_times)
+
+# Temperature at specific depths (for spatial comparison)
+T_25pct = zeros(n_times)  # Temperature at 25% depth from surface
+T_50pct = zeros(n_times)  # Temperature at 50% depth (midplane)
+T_75pct = zeros(n_times)  # Temperature at 75% depth from surface
+
+# Energy balance
+energy_stored = zeros(n_times)         # Total thermal energy in sample [J/m²]
+energy_rate = zeros(n_times)           # dE/dt [W/m²]
+total_rxn_heat_domain = zeros(n_times) # Total reaction heat (integrated over domain) [W/m²]
+
+# Reaction rate diagnostics at front surface
+rxn1_rate_front = zeros(n_times)
+rxn2_rate_front = zeros(n_times)
+rxn3_rate_front = zeros(n_times)
+rxn4_rate_front = zeros(n_times)
+rxn5_rate_front = zeros(n_times)
+rxn6_rate_front = zeros(n_times)
+total_rxn_heat_front = zeros(n_times)
+
+# Compute diagnostics for each timestep
+for i in 1:n_times
+	ξ_profile = solution.concentrations[i]
+	T_profile = solution.temperatures[i]
+	n_cells_i = size(ξ_profile, 2)
+
+	if n_cells_i > 0
+		# === Mass Balance Diagnostics (averaged over domain) ===
+		solids = avg_DF[i] + avg_int1[i] + avg_int2[i] + avg_int3[i] + avg_int4[i] + avg_char[i]
+		liquids = avg_moisture[i]
+
+		# Average gas concentrations
+		gas1_conc_avg[i] = sum(ξ_profile[8, :]) / n_cells_i
+		gas2_conc_avg[i] = sum(ξ_profile[9, :]) / n_cells_i
+		gas3_conc_avg[i] = sum(ξ_profile[10, :]) / n_cells_i
+		gas4_conc_avg[i] = sum(ξ_profile[11, :]) / n_cells_i
+		gas5_conc_avg[i] = sum(ξ_profile[12, :]) / n_cells_i
+		water_vapor_conc_avg[i] = sum(ξ_profile[13, :]) / n_cells_i
+
+		gases = gas1_conc_avg[i] + gas2_conc_avg[i] + gas3_conc_avg[i] +
+				gas4_conc_avg[i] + gas5_conc_avg[i] + water_vapor_conc_avg[i]
+
+		total_solid_conc[i] = solids
+		total_liquid_conc[i] = liquids
+		total_gas_conc[i] = gases
+		sum_all_components[i] = solids + liquids + gases
+		bulk_density[i] = total_mass[i] / thickness_values[i]
+		mass_balance_error[i] = (sum_all_components[i] - bulk_density[i]) / bulk_density[i]
+
+		# === Front Surface Diagnostics ===
+		# Front surface is the last cell (z = L, boundary_id = 1)
+		T_front = T_profile[end]
+		ξ_front = ntuple(k -> ξ_profile[k, end], 13)
+
+		# Gas concentrations at front
+		gas1_conc_front[i] = ξ_front[8]
+		gas2_conc_front[i] = ξ_front[9]
+		gas3_conc_front[i] = ξ_front[10]
+		gas4_conc_front[i] = ξ_front[11]
+		gas5_conc_front[i] = ξ_front[12]
+		water_vapor_conc_front[i] = ξ_front[13]
+
+		# Compute additional effective properties at front surface
+		# Total density at front
+		ρ_front = sum(ξ_front)
+
+		# Effective heat capacity: cp_eff = Σ(ξⱼ·cpⱼ) / ρ
+		cp_numerator = 0.0
+		for j in 1:13
+			cp_j = douglas_fir.components[j].heat_capacity(T_front)
+			cp_numerator += ξ_front[j] * cp_j
+		end
+		cp_eff_front[i] = cp_numerator / ρ_front
+		rho_cp_front[i] = ρ_front * cp_eff_front[i]
+
+		# Thermal diffusivity (using solver-computed k_eff_front)
+		alpha_thermal[i] = k_eff_front[i] / rho_cp_front[i]
+
+		# === Temperature at Specific Depths ===
+		# Depth measured from surface (z=L), so:
+		# 25% depth = cell at index ~0.75*n_cells from bottom
+		# 50% depth = midplane
+		# 75% depth = cell at index ~0.25*n_cells from bottom
+		idx_25pct = max(1, round(Int, 0.75 * n_cells_i))
+		idx_50pct = max(1, round(Int, 0.50 * n_cells_i))
+		idx_75pct = max(1, round(Int, 0.25 * n_cells_i))
+		T_25pct[i] = T_profile[idx_25pct]
+		T_50pct[i] = T_profile[idx_50pct]
+		T_75pct[i] = T_profile[idx_75pct]
+
+		# === Energy Balance ===
+		# Total thermal energy: E = ∫ ρ cp T dV (per unit area)
+		# E = Σ (ρ_i × cp_i × T_i × Δz_i)
+		dz_cell = thickness_values[i] / n_cells_i
+		energy_stored[i] = 0.0
+		total_rxn_heat_domain[i] = 0.0
+		for cell_idx in 1:n_cells_i
+			T_cell = T_profile[cell_idx]
+			ξ_cell = ntuple(k -> ξ_profile[k, cell_idx], 13)
+
+			# ρcp for this cell
+			ρ_cell = sum(ξ_cell)
+			cp_cell = 0.0
+			for j in 1:13
+				cp_j = douglas_fir.components[j].heat_capacity(T_cell)
+				cp_cell += ξ_cell[j] * cp_j / ρ_cell
+			end
+
+			# Contribution to thermal energy (relative to 298 K reference)
+			energy_stored[i] += ρ_cell * cp_cell * (T_cell - 298.15) * dz_cell
+
+			# Reaction heat at this cell: Q = -Σ(hᵢ × rᵢ) [W/m³]
+			# heats[i] is in J/kg, rates[i] is in kg/(m³·s)
+			# So heats[i] * rates[i] = W/m³ (volumetric heating rate)
+			# Note: In our convention, h < 0 means exothermic (releases heat)
+			# So Q = -Σ(h × r) gives positive Q for exothermic reactions
+			local_rates = zeros(6)
+			local_heats = zeros(6)
+			Pyrolysis.Physics.evaluate_reactions!(local_rates, local_heats, ξ_cell, T_cell, douglas_fir)
+			# Sum of (-h × r) × dz gives W/m² for each cell contribution
+			for rxn_idx in 1:6
+				total_rxn_heat_domain[i] += -local_heats[rxn_idx] * local_rates[rxn_idx] * dz_cell
+			end
+		end
+
+		# Energy rate: dE/dt (finite difference)
+		if i > 1 && times[i] > times[i-1]
+			dt = times[i] - times[i-1]
+			energy_rate[i] = (energy_stored[i] - energy_stored[i-1]) / dt
+		end
+
+		# === Reaction Rates at Front Surface ===
+		global rates = zeros(6)
+		global heats = zeros(6)
+		Pyrolysis.Physics.evaluate_reactions!(rates, heats, ξ_front, T_front, douglas_fir)
+
+		rxn1_rate_front[i] = rates[1]
+		rxn2_rate_front[i] = rates[2]
+		rxn3_rate_front[i] = rates[3]
+		rxn4_rate_front[i] = rates[4]
+		rxn5_rate_front[i] = rates[5]
+		rxn6_rate_front[i] = rates[6]
+
+		# Total reaction heat at front (W/m³)
+		# Q = -Σ(hᵢ × rᵢ) where h < 0 = exothermic gives Q > 0
+		total_rxn_heat_front[i] = 0.0
+		for rxn_idx in 1:6
+			total_rxn_heat_front[i] += -heats[rxn_idx] * rates[rxn_idx]
+		end
+	end
+end
+
+println("  - Maximum mass balance error: $(round(maximum(abs.(mass_balance_error))*100, digits=2))%")
+println("  - Maximum gas concentration at surface: $(round(maximum([maximum(gas1_conc_front), maximum(gas2_conc_front), maximum(gas3_conc_front), maximum(gas4_conc_front), maximum(gas5_conc_front), maximum(water_vapor_conc_front)]), digits=4)) kg/m³")
+println("  - Average k_eff at surface: $(round(mean(k_eff_front), digits=4)) W/(m·K)")
+println("  - Average net heat flux at surface: $(round(mean(q_net_surface)/1000, digits=2)) kW/m²")
+
+# ============================================================================
+# CSV Output with Comprehensive Diagnostics
+# ============================================================================
+
+println("\nWriting comprehensive CSV output...")
+
+# Write CSV manually with all diagnostic quantities
+open("douglas_fir_results_50kWm2_fit.csv", "w") do io
+	# Header - organized in logical groups
+	header = [
+		# Time and basic state
+		"time", "mass", "mlr", "thickness", "front_temp", "back_temp",
+
+		# Temperature at specific depths (from surface)
+		"T_25pct_depth", "T_50pct_depth", "T_75pct_depth",
+
+		# Solid components (averaged)
+		"DF", "DF_int1", "DF_int2", "DF_int3", "DF_int4", "Char", "Moisture",
+
+		# Mass balance diagnostics
+		"total_solid_conc", "total_liquid_conc", "total_gas_conc",
+		"sum_all_components", "bulk_density", "mass_balance_error",
+
+		# Gas concentrations at front surface
+		"gas1_conc_front", "gas2_conc_front", "gas3_conc_front",
+		"gas4_conc_front", "gas5_conc_front", "water_vapor_conc_front",
+
+		# Gas concentrations (averaged)
+		"gas1_conc_avg", "gas2_conc_avg", "gas3_conc_avg",
+		"gas4_conc_avg", "gas5_conc_avg", "water_vapor_conc_avg",
+
+		# Effective properties at front
+		"k_eff_front", "cp_eff_front", "rho_cp_front", "alpha_thermal", "eps_eff_front",
+
+		# Heat flux components (all in W/m²)
+		"q_absorbed", "q_reradiation", "q_convection", "q_conduction_surface", "q_net_surface",
+
+		# Energy balance (W/m² and J/m²)
+		"energy_stored", "energy_rate", "total_rxn_heat_domain",
+
+		# Reaction rates at front
+		"rxn1_rate_front", "rxn2_rate_front", "rxn3_rate_front",
+		"rxn4_rate_front", "rxn5_rate_front", "rxn6_rate_front",
+		"total_rxn_heat_front",
+
+		# Component-specific gas generation rates (post-processed)
+		"mlr_gen_gas1", "mlr_gen_gas2", "mlr_gen_gas3",
+		"mlr_gen_gas4", "mlr_gen_gas5", "mlr_gen_water",
+	]
+	println(io, join(header, ","))
+
+	# Data rows
+	for i in 1:length(times)
+		data = [
+			# Time and basic state
+			times[i], total_mass[i], mlr[i], thickness_values[i], T_surface[i], T_back[i],
+
+			# Temperature at specific depths
+			T_25pct[i], T_50pct[i], T_75pct[i],
+
+			# Solid components
+			avg_DF[i], avg_int1[i], avg_int2[i], avg_int3[i], avg_int4[i], avg_char[i], avg_moisture[i],
+
+			# Mass balance
+			total_solid_conc[i], total_liquid_conc[i], total_gas_conc[i],
+			sum_all_components[i], bulk_density[i], mass_balance_error[i],
+
+			# Gas concentrations at front
+			gas1_conc_front[i], gas2_conc_front[i], gas3_conc_front[i],
+			gas4_conc_front[i], gas5_conc_front[i], water_vapor_conc_front[i],
+
+			# Gas concentrations (averaged)
+			gas1_conc_avg[i], gas2_conc_avg[i], gas3_conc_avg[i],
+			gas4_conc_avg[i], gas5_conc_avg[i], water_vapor_conc_avg[i],
+
+			# Effective properties (k_eff, ε_eff from solver; cp, rho_cp, alpha from post-process)
+			k_eff_front[i], cp_eff_front[i], rho_cp_front[i], alpha_thermal[i], ε_eff_front[i],
+
+			# Heat fluxes (from solver)
+			q_absorbed[i], q_reradiation[i], q_convection[i], q_conduction_surface[i], q_net_surface[i],
+
+			# Energy balance
+			energy_stored[i], energy_rate[i], total_rxn_heat_domain[i],
+
+			# Reaction rates
+			rxn1_rate_front[i], rxn2_rate_front[i], rxn3_rate_front[i],
+			rxn4_rate_front[i], rxn5_rate_front[i], rxn6_rate_front[i],
+			total_rxn_heat_front[i],
+
+			# Component gas generation rates
+			mlr_gen_gas1[i], mlr_gen_gas2[i], mlr_gen_gas3[i],
+			mlr_gen_gas4[i], mlr_gen_gas5[i], mlr_gen_water[i],
+		]
+		println(io, join(data, ","))
+	end
+end
+
+println("Comprehensive CSV output saved to: douglas_fir_results_50kWm2_fit.csv")
+println("  - Total columns: 59 (6 basic + 3 temps + 7 solids + 6 mass + 12 gas + 5 props + 6 heat + 3 energy + 7 rxn + 6 gen)")
+println("  - Note: mlr and heat flux components now from solver (more accurate)")
+
+# ============================================================================
+# Spatial Data Output (for comparison with ThermaKin)
+# ============================================================================
+
+println("\nWriting spatial data CSV...")
+
+# Select times for spatial output (similar to ThermaKin output intervals)
+spatial_output_times = [0.0, 5.0, 10.0, 15.0, 20.0, 30.0, 40.0, 50.0, 60.0, 80.0, 100.0,
+	150.0, 200.0, 300.0, 400.0, 500.0, 600.0, 700.0, 800.0, 900.0, 1000.0]
+
+open("douglas_fir_spatial_50kWm2_fit.csv", "w") do io
+	# Header
+	header = [
+		"time_s", "from_back_m", "from_front_m", "temperature_K",
+		"conc_DF_kg_m3", "conc_DF_int1_kg_m3", "conc_DF_int2_kg_m3",
+		"conc_DF_int3_kg_m3", "conc_DF_int4_kg_m3", "conc_Char_kg_m3",
+		"conc_Moisture_kg_m3", "conc_gas1_kg_m3", "conc_gas2_kg_m3",
+		"conc_gas3_kg_m3", "conc_gas4_kg_m3", "conc_gas5_kg_m3",
+		"conc_water_vapor_kg_m3", "total_density_kg_m3",
+	]
+	println(io, join(header, ","))
+
+	for target_t in spatial_output_times
+		# Find closest time index
+		idx = argmin(abs.(times .- target_t))
+		actual_t = times[idx]
+
+		# Skip if too far from target
+		if abs(actual_t - target_t) > 1.0 && target_t > 0
+			continue
+		end
+
+		# Get spatial data at this time
+		T_profile = solution.temperatures[idx]
+		ξ_profile = solution.concentrations[idx]
+		n_cells_i = length(T_profile)
+
+		# Get current thickness
+		t_idx = argmin(abs.(thickness_times .- actual_t))
+		current_thickness = thickness_values[t_idx]
+
+		# Cell positions (from back, z=0 at back)
+		dz = current_thickness / n_cells_i
+
+		for cell_idx in 1:n_cells_i
+			from_back = (cell_idx - 0.5) * dz  # Cell center position
+			from_front = current_thickness - from_back
+
+			T_cell = T_profile[cell_idx]
+			ξ_cell = [ξ_profile[k, cell_idx] for k in 1:13]
+			total_density = sum(ξ_cell)
+
+			data = [
+				actual_t, from_back, from_front, T_cell,
+				ξ_cell[1], ξ_cell[2], ξ_cell[3], ξ_cell[4], ξ_cell[5], ξ_cell[6],
+				ξ_cell[7], ξ_cell[8], ξ_cell[9], ξ_cell[10], ξ_cell[11], ξ_cell[12],
+				ξ_cell[13], total_density,
+			]
+			println(io, join(data, ","))
+		end
+	end
+end
+
+println("Spatial data saved to: douglas_fir_spatial_50kWm2_fit.csv")
+
+# ============================================================================
+# Boundary Temperature Information
+# ============================================================================
+# 
+# In cell-centered finite volume, the temperature at the surface is not directly
+# computed - we only know cell-center temperatures. For boundary conditions with
+# strong temperature dependence (especially radiation with T⁴ scaling), using
+# the cell-center temperature causes significant error.
+#
+# Pyrolysis.jl solves for the true surface temperature T_s that satisfies
+# energy balance:
+#     q_applied(T_s) = q_conducted(T_s, T_cell)
+#
+# This is stored in mesh.boundary_states and used for:
+# - Correct boundary flux computation
+# - Accurate surface temperature reporting
+# - Energy balance verification
+
+using Pyrolysis.Discretization: get_surface_temperature, get_back_face_temperature,
+	check_boundary_energy_balance
+
+println("\n" * "="^70)
+println("Boundary Temperature Analysis")
+println("="^70)
+
+# Get final boundary state information
+T_surface_final = get_surface_temperature(mesh)
+T_back_final = get_back_face_temperature(mesh)
+
+# Get cell-center temperatures for comparison
+n_cells_final = length(mesh.cell_states)
+T_cell_top = mesh.cell_states[n_cells_final].T
+T_cell_bottom = mesh.cell_states[1].T
+
+# Compute temperature jumps at boundaries
+ΔT_surface = T_surface_final - T_cell_top
+ΔT_back = T_back_final - T_cell_bottom
+
+println("\nSurface (top) boundary:")
+println("  T_surface (solved)  = $(round(T_surface_final, digits=2)) K")
+println("  T_cell (top cell)   = $(round(T_cell_top, digits=2)) K")
+println("  ΔT = T_surface - T_cell = $(round(ΔT_surface, digits=2)) K")
+println("  (Positive ΔT means surface is hotter than cell center - expected with heating)")
+
+println("\nBack (bottom) boundary:")
+println("  T_back (solved)     = $(round(T_back_final, digits=2)) K")
+println("  T_cell (bottom)     = $(round(T_cell_bottom, digits=2)) K")
+println("  ΔT = T_back - T_cell = $(round(ΔT_back, digits=2)) K")
+
+# Check energy balance at boundaries
+balance_results = check_boundary_energy_balance(mesh)
+println("\nEnergy balance at boundaries (should be < 1e-6):")
+for (boundary_id, imbalance) in balance_results
+	boundary_name = boundary_id == 1 ? "Top surface" : "Back surface"
+	status = imbalance < 1e-6 ? "✓" : "✗"
+	println("  $(boundary_name): relative imbalance = $(round(imbalance, sigdigits=3)) $status")
+end
+
+# Show boundary state details
+println("\nBoundary state details:")
+top_state = mesh.boundary_states[1]
+println("  Top surface:")
+println("    q_applied   = $(round(top_state.q_applied/1000, digits=2)) kW/m²")
+println("    q_conducted = $(round(top_state.q_conducted/1000, digits=2)) kW/m²")
+println("    converged   = $(top_state.converged) ($(top_state.iterations) iterations)")
+
+println("\nSimulation complete!")
+println("\nFeatures used in this example:")
+println("  ✓ WEIGHTED mixing rule for thermal conductivity (β=0.5, matches ThermaKin)")
+println("  ✓ WEIGHTED mixing rule for gas transfer coefficient (β_λ=0.5)")
+println("  ✓ Physically-based gas transfer coefficients (λ ~ 1e-5 to 1e-4 m²/s)")
+println("  ✓ Darcy-Fick gas transport (diffusion + pressure-driven flow)")
+println("  ✓ Temperature-dependent permeability (virgin: $(κ_virgin) m², char: $(κ_char) m²)")
+println("  ✓ Species-specific molar masses for transport scaling")
+println("  ✓ ALE mesh motion with analytical Jacobian")
+println("  ✓ Solver-computed boundary fluxes (MLR, heat flux decomposition)")

@@ -1,0 +1,113 @@
+"""
+	Discretization
+
+Spatial discretization (finite volume) for the Pyrolysis.jl package.
+
+This module provides:
+- Finite volume operators (divergence, RHS assembly)
+- Flux limiters (minmod, vanleer, superbee)
+- Gradient reconstruction
+- ALE flux computation for moving meshes
+- Boundary flux implementation
+- **Boundary temperature solve** for correct surface temperature in cell-centered FVM
+
+## Boundary Temperature Enhancement
+
+In cell-centered finite volume methods, temperature is stored at cell centers, not boundaries.
+For temperature-dependent boundary conditions (especially radiation with T⁴ scaling),
+using the cell-center temperature directly causes significant error (~20% energy imbalance).
+
+The `solve_boundary_temperature` function uses Newton iteration to find the true
+surface temperature T_s satisfying energy balance:
+
+	q_applied(T_s) = q_conducted(T_s, T_cell)
+
+where:
+- `q_applied = q_ext - εσT_s⁴ - h(T_s - T∞)` is the net heat flux from the boundary condition
+- `q_conducted = k(T_s - T_cell)/Δz` is the heat flux into the material
+
+This ensures energy balance at boundaries is satisfied to machine precision.
+The solved surface temperature is stored in `mesh.boundary_states` and used for:
+- Correct flux computation in the RHS
+- Accurate surface temperature output
+- Energy balance diagnostics
+
+See `docs/boundary_temperature_enhancement.md` for detailed physics and implementation.
+"""
+module Discretization
+
+using ..Core
+using ..Core: GAS, DirichletThermalBC
+using ..Geometry
+using ..Properties
+using ..Physics
+using ..ALE
+
+# Include subfiles
+# Note: `darcy_velocity.jl` must be included before `finite_volume.jl`
+# because `finite_volume.jl` calls `apply_pressure_bc_to_darcy_velocity!`.
+include("boundary_fluxes.jl")
+include("boundary_temperature.jl")  # Boundary temperature solve for correct surface T
+include("darcy_velocity.jl")
+include("finite_volume.jl")
+include("flux_limiters.jl")
+include("gradient_reconstruction.jl")
+include("ale_fluxes.jl")
+include("radiation_fluxes.jl")  # P1 radiation flux divergence
+
+# Exports - Finite Volume
+export divergence_1d!, divergence_species_1d!
+export compute_rhs!, compute_rhs_interior!
+export RHSCache, resize_rhs_cache!
+export update_darcy_properties!, compute_rhs_darcy_fick!
+# Type-stable BC application functions
+export apply_thermal_bc_flux!, apply_mass_bc_flux!
+
+# Exports - Flux Limiters
+export Limiter, MINMOD, VANLEER, SUPERBEE, NONE, CENTRAL
+export minmod, vanleer, superbee
+export apply_limiter, limited_face_value, convective_face_value
+
+# Exports - Gradient Reconstruction
+export compute_gradients!, compute_temperature_gradients!
+export face_value_central, face_value_upwind, face_value_weighted
+export face_value_limited, face_value_second_order
+export face_gradient, compute_face_gradients!
+
+# Exports - ALE Fluxes
+# Uses upwind advection formulation (see ALE_Energy_Reformulation.md)
+export ale_convective_flux, ale_convective_flux_limited
+export compute_ale_advection_term!, compute_ale_species_advection!
+export compute_gas_velocity!, estimate_gas_velocity_from_generation!
+# ALE Darcy-Fick integration
+export mesh_velocity_at_face, ale_gas_flux_darcy_fick
+export compute_ale_gas_fluxes_darcy_fick!
+export compute_ale_species_advection_darcy!
+
+# Exports - Darcy Velocity
+export darcy_velocity_face, compute_darcy_velocity!
+export compute_darcy_mobility!, velocity_from_mobility!
+export DarcyVelocityJacobianCoeffs, compute_darcy_velocity_jacobian!
+export apply_pressure_bc_to_darcy_velocity!  # Pressure BC application
+
+# Exports - Boundary Fluxes
+export thermal_bc_flux, mass_bc_flux, mesh_bc_velocity
+export update_flame_state!  # FlameBC state management (stateless FlameBC)
+export compute_boundary_heat_fluxes, compute_surface_mass_flux  # Diagnostic decomposition
+
+# Exports - Boundary Temperature Solve
+export solve_boundary_temperature, update_boundary_state!
+export evaluate_bc_flux_and_derivative
+export check_boundary_energy_balance
+export get_surface_temperature, get_back_face_temperature
+
+# Exports - Radiation Fluxes (P1 approximation)
+export apply_radiation_divergence!
+export compute_radiation_intensity_rhs!
+export solve_quasi_steady_radiation!
+export initialize_g_from_temperature!
+export compute_rhs_with_p1_radiation!
+export update_radiation_properties!
+export compute_radiation_flux_divergence!
+
+end # module Discretization

@@ -1,0 +1,64 @@
+// Cone calorimeter PMMA material definition (ThermaKin2Ds .cmp)
+// MODIFIED: Surface-only radiation absorption (no in-depth penetration)
+// 
+// Original: α = 1.47 m²/kg (semi-transparent, mean absorption depth ~0.56 mm)
+// Modified: α = 1e6 m²/kg (opaque, absorption depth ~0.0008 mm = surface only)
+//
+// Purpose: Test whether radiation absorption algorithm differences cause
+//          the ThermaKin vs Pyrolysis.jl discrepancies
+//
+// Generated to match the Julia example: 5.8 mm PMMA, single-step depolymerization,
+// A = 1.5e14 1/s, E = 203 kJ/mol, endothermic h = 820 kJ/kg,
+// yields: 0.2% char, 99.8% gas.
+// Piecewise properties implemented via a fast phase transition at 378 K (PMMA -> PMMA_glass).
+
+COMPONENT:       PMMA
+STATE:           S
+DENSITY:         1210    0       0       0
+HEAT CAPACITY:   -2290   11.2    0       0
+CONDUCTIVITY:    0.15    0       0       0
+TRANSPORT:       1e-5    0       0       0
+EMISSIVITY & ABSORPTION: 0.96   1e6
+
+COMPONENT:       PMMA_glass
+STATE:           S
+DENSITY:         1210    0       0       0
+HEAT CAPACITY:   1040    3.08    0       0
+CONDUCTIVITY:    0.34    -3.9e-4 0       0
+TRANSPORT:       1e-5    0       0       0
+EMISSIVITY & ABSORPTION: 0.96   1e6
+
+COMPONENT:       PMMA_char
+STATE:           S
+DENSITY:         1210    0       0       0
+HEAT CAPACITY:   1040    3.08    0       0
+CONDUCTIVITY:    0.34    -3.9e-4 0       0
+TRANSPORT:       1e-5    0       0       0
+EMISSIVITY & ABSORPTION: 0.96   1e6
+
+COMPONENT:       PMMA_gas
+STATE:           G
+DENSITY:         1.2     0       0       0
+HEAT CAPACITY:   1500    0       0       0
+CONDUCTIVITY:    0.02    0       0       0
+TRANSPORT:       1e-5    0       0       0
+EMISSIVITY & ABSORPTION: 0      0
+
+MIXTURES
+S SWELLING:              0
+L SWELLING:              0
+G SWELLING LIMIT:        1e-30
+PARALL CONDUCTIVITY:     0.5
+PARALL TRANSPORT:        0.5
+
+REACTION:        PMMA + NOCOMP -> PMMA_glass + NOCOMP
+STOICHIOMETRY:   1      0       1          0
+ARRHENIUS:       1      0
+HEAT:            0      0       0       0
+TEMP LIMIT:      L 378
+
+REACTION:        PMMA_glass + NOCOMP -> PMMA_char + PMMA_gas
+STOICHIOMETRY:   1          0       0.002     0.998
+ARRHENIUS:       1.5e14     2.03e5
+HEAT:            -820000    0       0       0
+TEMP LIMIT:      L 378
