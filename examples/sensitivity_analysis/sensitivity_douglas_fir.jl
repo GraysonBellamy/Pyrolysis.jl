@@ -4,7 +4,14 @@ Sensitivity Analysis of Douglas Fir Cone Calorimeter Simulation
 Propagates uncertainties in thermophysical input parameters through the
 07_douglas_fir_cone.jl simulation using Latin Hypercube Sampling (LHS).
 
-Uncertain parameters (14 total):
+Uncertain parameters (16 total):
+  - Systematic (Type B) instrument biases: ε_STA, ε_HFM (2)
+	  These are correlated multiplicative calibration biases that scale
+	  all heat capacity measurements from each instrument uniformly.
+	  ε_STA ~ N(0, 0.0261²) applies to DSC-based measurements (STA Cp,
+	  char Cp), ε_HFM ~ N(0, 0.007²) applies to HFM measurements.
+	  Following GUM (JCGM 100:2008), these Type B contributions are
+	  combined with the Type A regression uncertainties below.
   - Heat capacity regression coefficients for DF virgin (4) and Char (2)
 	(Segment 2 [323–425 K] is interpolated from segments 1 & 3, not independent)
 	(Intermediate cp's are derived via cumulative-yield interpolation)
@@ -13,9 +20,11 @@ Uncertain parameters (14 total):
 
 Covariance matrices from: Bellamy, McKinnon, Stoliarov, "Thermochemical Properties
 of Wood and Sorbed Moisture for Modeling of Wood Pyrolysis" (energetics.tex).
-Parameters within each group are sampled jointly via MvNormal to preserve
+Type A parameters within each group are sampled jointly via MvNormal to preserve
 cross-correlations (e.g., intercept–slope anti-correlation in cp regressions,
 amplitude–decay correlation in the HoS fit, shared baseline uncertainty in ΔH).
+Type B parameters are sampled independently per instrument (STA, HFM) and applied
+as multiplicative factors (1 + ε) to all Cp values from that instrument.
 
 Kinetic parameters (A, E) and all other properties are held fixed.
 
@@ -66,7 +75,9 @@ using LinearAlgebra
 # distributions. Covariance matrices from the regression JSON files in
 # oxidative_pyrolysis/ (Bellamy, McKinnon, Stoliarov, energetics.tex).
 #
-# Five correlated groups:
+# Seven correlated groups:
+#   0a. ε_HFM (systematic bias)           — 1×1 N(0, 0.007²)
+#   0b. ε_STA (systematic bias)           — 1×1 N(0, 0.0261²)
 #   1. DF virgin cp segment 1 (a1, b1)    — 2×2 from HFM regression
 #   2. DF virgin cp segment 3 (a3, b3)    — 2×2 from STA/DSC regression
 #   3. Char cp (a, b)                      — 2×2 from independent char STA
@@ -82,7 +93,7 @@ using LinearAlgebra
 	CorrelatedGroup
 
 Defines a group of parameters with a joint multivariate normal distribution.
-`indices` maps into the 14-element θ vector passed to build_and_solve.
+`indices` maps into the 16-element θ vector passed to build_and_solve.
 """
 struct CorrelatedGroup
 	name::String
@@ -92,15 +103,17 @@ struct CorrelatedGroup
 end
 
 const PARAM_NAMES = [
-	:df_cp_a1, :df_cp_b1,                                       # indices 1–2
-	:df_cp_a3, :df_cp_b3,                                       # indices 3–4
-	:char_cp_a, :char_cp_b,                                     # indices 5–6
-	:hos_baseline, :hos_amplitude, :hos_decay,                   # indices 7–9
-	:h_rxn1, :h_rxn2, :h_rxn3, :h_rxn4, :h_rxn5,               # indices 10–14
+	:epsilon_hfm, :epsilon_sta,                                  # indices 1–2  (Type B biases)
+	:df_cp_a1, :df_cp_b1,                                       # indices 3–4  (Type A, HFM)
+	:df_cp_a3, :df_cp_b3,                                       # indices 5–6  (Type A, STA/DSC)
+	:char_cp_a, :char_cp_b,                                     # indices 7–8  (Type A, char STA)
+	:hos_baseline, :hos_amplitude, :hos_decay,                   # indices 9–11
+	:h_rxn1, :h_rxn2, :h_rxn3, :h_rxn4, :h_rxn5,               # indices 12–16
 ]
-const N_PARAMS = 14
+const N_PARAMS = 16
 
 const NOMINAL_VALUES = [
+	0.0, 0.0,                  # ε_HFM, ε_STA (zero-mean biases)
 	-53.05, 4.245,             # DF cp seg 1 [J/(kg·K)]
 	-2131.0, 9.119,            # DF cp seg 3 [J/(kg·K)]
 	347.2, 1.784,              # Char cp [J/(kg·K)]
@@ -108,28 +121,51 @@ const NOMINAL_VALUES = [
 	-19150.0, -5570.0, 266700.0, -219640.0, -12380.0,  # ΔH [J/kg]
 ]
 
+# --- Group 0a: Type B systematic bias for HFM (ε_HFM) ---
+# The HFM heat flow calibration uncertainty is 0.58% relative, plus
+# ~0.3% from Type K thermocouple → combined ~0.7% (RSS).
+# This enters as a multiplicative factor (1 + ε_HFM) on all HFM-derived Cp.
+# Sampled as 1×1 Normal(0, 0.007²).
+const GROUP_EPSILON_HFM = CorrelatedGroup("eps_HFM", [1],
+	[0.0],
+	[0.007^2;;])
+
+# --- Group 0b: Type B systematic bias for STA/DSC (ε_STA) ---
+# The DSC heat flow calibration uncertainty is 2.61% relative, plus
+# ~0.3% from temperature → combined ~2.6% (RSS, dominated by calibration).
+# This enters as a multiplicative factor (1 + ε_STA) on all DSC-derived Cp
+# (virgin Cp segment 3 and char Cp). Segment 1 (HFM) uses ε_HFM instead.
+# Sampled as 1×1 Normal(0, 0.0261²).
+const GROUP_EPSILON_STA = CorrelatedGroup("eps_STA", [2],
+	[0.0],
+	[0.0261^2;;])
+
 # --- Group 1: DF virgin cp segment 1 (HFM), T ≤ 323 K ---
 # Source: douglas_fir_hfm/regression_results.json
 # JSON units: J/(g·K) → script units: J/(kg·K), covariance ×1e6
-const GROUP_DF_CP_SEG1 = CorrelatedGroup("DF_cp_seg1", [1, 2],
+# NOTE: This is the Type A (regression) covariance only. Type B is handled
+# by ε_HFM above, applied as (1 + ε_HFM) × Cp in build_and_solve.
+const GROUP_DF_CP_SEG1 = CorrelatedGroup("DF_cp_seg1", [3, 4],
 	[-53.05, 4.245],
 	#         a1              b1          (intercept, slope)
 	[0.21819^2 * 1e6   -1.5350e-4 * 1e6;
-	 -1.5350e-4 * 1e6   7.038e-4^2 * 1e6])
+			  -1.5350e-4 * 1e6   7.038e-4^2 * 1e6])
 
 # --- Group 2: DF virgin cp segment 3 (STA/DSC), T > 425 K ---
 # Source: douglas_fir_sta/regression_results.json
-const GROUP_DF_CP_SEG3 = CorrelatedGroup("DF_cp_seg3", [3, 4],
+# NOTE: Type A only. Type B handled by ε_STA.
+const GROUP_DF_CP_SEG3 = CorrelatedGroup("DF_cp_seg3", [5, 6],
 	[-2131.0, 9.119],
 	[0.056399^2 * 1e6    -7.1999e-6 * 1e6;
-	 -7.1999e-6 * 1e6    1.2769e-4^2 * 1e6])
+			  -7.1999e-6 * 1e6    1.2769e-4^2 * 1e6])
 
 # --- Group 3: Char cp (independent STA measurement) ---
 # Source: douglas_fir_independent_char_sta/regression_results.json
-const GROUP_CHAR_CP = CorrelatedGroup("Char_cp", [5, 6],
+# NOTE: Type A only. Type B handled by ε_STA (same DSC instrument).
+const GROUP_CHAR_CP = CorrelatedGroup("Char_cp", [7, 8],
 	[347.2, 1.784],
 	[3.486e-3^2 * 1e6    -2.0047e-8 * 1e6;
-	 -2.0047e-8 * 1e6    5.782e-6^2 * 1e6])
+			  -2.0047e-8 * 1e6    5.782e-6^2 * 1e6])
 
 # --- Group 4: Heat of sorption (WLS exponential fit) ---
 # Source: papers/energetics/figures/hos_fit_results.json
@@ -137,11 +173,13 @@ const GROUP_CHAR_CP = CorrelatedGroup("Char_cp", [5, 6],
 # NOTE: Nominal values updated to match the published fit (Eq. 18 in manuscript):
 #   a = 2280(13), b = 787(31), c = 0.114(10)
 # Previous values (2286, 867, 0.128) were from an older fit version.
-const GROUP_HOS = CorrelatedGroup("HoS", [7, 8, 9],
+# The ~7% offset from known latent heat is a known bias (not random), not
+# propagated here. Only the Type A fit covariance is sampled.
+const GROUP_HOS = CorrelatedGroup("HoS", [9, 10, 11],
 	[2280.0, 787.0, 0.114],
 	[173.957     22.025     0.09442;
-	  22.025    941.547     0.18431;
-	   0.09442    0.18431   9.715e-5])
+			   22.025    941.547     0.18431;
+				0.09442    0.18431   9.715e-5])
 
 # --- Group 5: Heats of reaction (bootstrap covariance from two-stage optimization) ---
 # Source: scripts/energetics/results/douglas_fir_two_stage_optimized.json
@@ -151,15 +189,19 @@ const GROUP_HOS = CorrelatedGroup("HoS", [7, 8, 9],
 # which is not an explicit parameter in this sensitivity analysis. This correctly
 # inflates the marginal variances beyond the conditional WLS estimates and induces
 # strong positive correlations (r > 0.9) reflecting the shared baseline uncertainty.
-const GROUP_H_RXN = CorrelatedGroup("H_rxn", [10, 11, 12, 13, 14],
+# NOTE: DSC calibration systematic (Type B) cancels in the optimization residual
+# (see energetics.tex Section 2.3.4), so only Type A bootstrap uncertainty is needed.
+const GROUP_H_RXN = CorrelatedGroup("H_rxn", [12, 13, 14, 15, 16],
 	[-19150.0, -5570.0, 266700.0, -219640.0, -12380.0],
-	[  3.8484    8.7615   11.675    50.568    12.615;
-	   8.7615   21.306    29.288   128.490    32.165;
-	  11.675    29.288    40.962   180.627    45.459;
-	  50.568   128.490   180.627   799.953   202.551;
-	  12.615    32.165    45.459   202.551    69.713] .* 1e6)
+	[3.8484    8.7615   11.675    50.568    12.615;
+			  8.7615   21.306    29.288   128.490    32.165;
+			 11.675    29.288    40.962   180.627    45.459;
+			 50.568   128.490   180.627   799.953   202.551;
+			 12.615    32.165    45.459   202.551    69.713] .* 1e6)
 
 const CORR_GROUPS = [
+	GROUP_EPSILON_HFM,
+	GROUP_EPSILON_STA,
 	GROUP_DF_CP_SEG1,
 	GROUP_DF_CP_SEG3,
 	GROUP_CHAR_CP,
@@ -187,7 +229,7 @@ For each correlated group:
   1. Draw LHS samples in [0,1]^k for the group's k dimensions
   2. Transform marginals to standard normal via Φ⁻¹
   3. Apply Cholesky factor of the group covariance to induce correlations:
-     x = μ + L·z,  where Σ = L·Lᵀ
+	 x = μ + L·z,  where Σ = L·Lᵀ
 This preserves LHS stratification in each marginal while reproducing the
 target covariance structure.
 """
@@ -247,47 +289,56 @@ end
 	"""
 		build_and_solve(θ)
 
-	Build a Douglas Fir simulation with the given parameter vector θ (length 14),
+	Build a Douglas Fir simulation with the given parameter vector θ (length 16),
 	solve it, and return the PyrolysisSolution.
 	"""
 	function build_and_solve(θ::Vector{Float64})
-		# Unpack the 14 uncertain parameters
+		# Unpack the 16 uncertain parameters
+		ε_hfm, ε_sta,
 		df_cp_a1, df_cp_b1, df_cp_a3, df_cp_b3,
 		char_cp_a, char_cp_b,
 		hos_baseline, hos_amplitude, hos_decay,
 		h_rxn1, h_rxn2, h_rxn3, h_rxn4, h_rxn5 = θ
 
+		# Type B multiplicative factors for each instrument
+		scale_hfm = 1.0 + ε_hfm   # applies to HFM-derived Cp (segment 1)
+		scale_sta = 1.0 + ε_sta   # applies to STA/DSC-derived Cp (segment 3, char)
+
 		# --- DF virgin heat capacity (piecewise linear, 3 segments) ---
-		# Segment 2 (323–425 K) is linearly interpolated from segment 1 & 3 endpoints
+		# Segment 1 (T ≤ 323 K): HFM instrument → scale by (1 + ε_HFM)
+		# Segment 3 (T > 425 K): STA/DSC instrument → scale by (1 + ε_STA)
+		# Segment 2 (323–425 K): interpolated from endpoints of seg 1 & 3
+		#   so it inherits both biases through the endpoint values
 		function virgin_cp(T)
 			if T <= 323.0
-				df_cp_a1 + df_cp_b1 * T
+				(df_cp_a1 + df_cp_b1 * T) * scale_hfm
 			elseif T <= 425.0
-				cp_low  = df_cp_a1 + df_cp_b1 * 323.0
-				cp_high = df_cp_a3 + df_cp_b3 * 425.0
+				cp_low  = (df_cp_a1 + df_cp_b1 * 323.0) * scale_hfm
+				cp_high = (df_cp_a3 + df_cp_b3 * 425.0) * scale_sta
 				cp_low + (cp_high - cp_low) * (T - 323.0) / 102.0
 			else
-				df_cp_a3 + df_cp_b3 * T
+				(df_cp_a3 + df_cp_b3 * T) * scale_sta
 			end
 		end
 
 		df_cp = CallableProperty(virgin_cp)
 
-		# --- Char heat capacity (linear) ---
-		char_cp_func = CallableProperty(T -> char_cp_a + char_cp_b * T)
+		# --- Char heat capacity (linear, STA instrument → scale by ε_STA) ---
+		char_cp_func = CallableProperty(T -> (char_cp_a + char_cp_b * T) * scale_sta)
 
 		# --- Intermediate cp's derived via cumulative-yield interpolation ---
+		# char endpoint also scaled by scale_sta (same DSC instrument)
 		int1_cp = CallableProperty(T -> (1 - INTERP_PROGRESS[1]) * virgin_cp(T) +
-										INTERP_PROGRESS[1] * (char_cp_a + char_cp_b * T))
+										INTERP_PROGRESS[1] * (char_cp_a + char_cp_b * T) * scale_sta)
 
 		int2_cp = CallableProperty(T -> (1 - INTERP_PROGRESS[2]) * virgin_cp(T) +
-										INTERP_PROGRESS[2] * (char_cp_a + char_cp_b * T))
+										INTERP_PROGRESS[2] * (char_cp_a + char_cp_b * T) * scale_sta)
 
 		int3_cp = CallableProperty(T -> (1 - INTERP_PROGRESS[3]) * virgin_cp(T) +
-										INTERP_PROGRESS[3] * (char_cp_a + char_cp_b * T))
+										INTERP_PROGRESS[3] * (char_cp_a + char_cp_b * T) * scale_sta)
 
 		int4_cp = CallableProperty(T -> (1 - INTERP_PROGRESS[4]) * virgin_cp(T) +
-										INTERP_PROGRESS[4] * (char_cp_a + char_cp_b * T))
+										INTERP_PROGRESS[4] * (char_cp_a + char_cp_b * T) * scale_sta)
 
 		# --- Moisture cp (FIXED — not uncertain) ---
 		moisture_cp = CallableProperty(T -> begin
