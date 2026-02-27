@@ -2,7 +2,7 @@
 Sensitivity Analysis of Douglas Fir Cone Calorimeter Simulation
 
 Propagates uncertainties in thermophysical input parameters through the
-07_douglas_fir_cone.jl simulation using Latin Hypercube Sampling (LHS).
+07_douglas_fir_cone.jl simulation using Sobol quasi-random sampling.
 
 Uncertain parameters (16 total):
   - Systematic (Type B) instrument biases: ε_STA, ε_HFM (2)
@@ -213,32 +213,32 @@ const CORR_GROUPS = [
 # Sampling Configuration
 # ============================================================================
 
-const N_SAMPLES = 1000      # Number of LHS samples (adjust as needed)
+const N_SAMPLES = 1024      # Number of Sobol samples (power of 2 for optimal coverage)
 const RESULTS_DIR = joinpath(@__DIR__, "results")
 
 # ============================================================================
-# Latin Hypercube Sampling
+# Sobol Quasi-Random Sampling
 # ============================================================================
 
 """
 	generate_samples(groups, n_samples)
 
-Generate Latin Hypercube samples with correlated multivariate normal groups.
+Generate Sobol quasi-random samples with correlated multivariate normal groups.
 
 For each correlated group:
-  1. Draw LHS samples in [0,1]^k for the group's k dimensions
+  1. Draw Sobol samples in [0,1]^k for the group's k dimensions
   2. Transform marginals to standard normal via Φ⁻¹
   3. Apply Cholesky factor of the group covariance to induce correlations:
 	 x = μ + L·z,  where Σ = L·Lᵀ
-This preserves LHS stratification in each marginal while reproducing the
+This preserves low-discrepancy coverage in each marginal while reproducing the
 target covariance structure.
 """
 function generate_samples(groups::Vector{CorrelatedGroup}, n_samples::Int)
 	n_params = sum(length(g.indices) for g in groups)
 
-	# LHS in unit hypercube [0,1]^n_params
-	lhs_unit = QuasiMonteCarlo.sample(n_samples, zeros(n_params), ones(n_params),
-		LatinHypercubeSample())
+	# Sobol sequence in unit hypercube [0,1]^n_params
+	sobol_unit = QuasiMonteCarlo.sample(n_samples, zeros(n_params), ones(n_params),
+		SobolSample())
 
 	samples = Matrix{Float64}(undef, n_params, n_samples)
 
@@ -251,7 +251,7 @@ function generate_samples(groups::Vector{CorrelatedGroup}, n_samples::Int)
 		Z = Matrix{Float64}(undef, k, n_samples)
 		for (gi, pi) in enumerate(idx)
 			for j in 1:n_samples
-				Z[gi, j] = quantile(Normal(), lhs_unit[pi, j])
+				Z[gi, j] = quantile(Normal(), sobol_unit[pi, j])
 			end
 		end
 
@@ -641,7 +641,7 @@ function main()
 	println("  ThermaKin3 Sensitivity Analysis — Douglas Fir Cone Calorimeter")
 	println("="^70)
 	println("  Parameters: $N_PARAMS uncertain")
-	println("  Samples:    $N_SAMPLES (Latin Hypercube)")
+	println("  Samples:    $N_SAMPLES (Sobol)")
 	println("  Workers:    $(nworkers())")
 	println("  Est. time:  ~$(round(N_SAMPLES * 7.0 / 60 / nworkers(), digits=1)) hours")
 	println("="^70 * "\n")
@@ -663,7 +663,7 @@ function main()
 
 		if n_existing < N_SAMPLES
 			n_new = N_SAMPLES - n_existing
-			println("  Extending by $n_new additional LHS samples...")
+			println("  Extending by $n_new additional Sobol samples...")
 			new_samples = generate_samples(CORR_GROUPS, n_new)
 			samples = hcat(samples, new_samples)
 			# Rewrite the full parameters file
@@ -671,7 +671,7 @@ function main()
 			println("  Updated $param_file ($n_existing → $N_SAMPLES samples)")
 		end
 	else
-		println("Generating $N_SAMPLES LHS samples for $N_PARAMS parameters...")
+		println("Generating $N_SAMPLES Sobol samples for $N_PARAMS parameters...")
 		samples = generate_samples(CORR_GROUPS, N_SAMPLES)
 		save_parameters_csv(param_file, PARAM_NAMES, samples)
 		println("  Parameter samples saved to $param_file")
