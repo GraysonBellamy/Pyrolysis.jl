@@ -4,14 +4,16 @@ Sensitivity Analysis of Douglas Fir Cone Calorimeter Simulation
 Propagates uncertainties in thermophysical input parameters through the
 07_douglas_fir_cone.jl simulation using Sobol quasi-random sampling.
 
-Uncertain parameters (16 total):
-  - Systematic (Type B) instrument biases: ε_STA, ε_HFM (2)
-	  These are correlated multiplicative calibration biases that scale
-	  all heat capacity measurements from each instrument uniformly.
-	  ε_STA ~ N(0, 0.0261²) applies to DSC-based measurements (STA Cp,
-	  char Cp), ε_HFM ~ N(0, 0.007²) applies to HFM measurements.
-	  Following GUM (JCGM 100:2008), these Type B contributions are
-	  combined with the Type A regression uncertainties below.
+Uncertain parameters (17 total):
+  - Systematic (Type B) instrument biases: ε_HFM, ε_STA, ε_water (3)
+	  Multiplicative calibration biases that scale measurements from each
+	  instrument uniformly. Following GUM (JCGM 100:2008):
+	  ε_HFM ~ N(0, 0.00577²)  — HFM heat flow accuracy (1%/√3, manufacturer spec)
+	  ε_STA ~ N(0, 0.0261²)   — DSC multi-point enthalpy calibration (7 standards)
+	  ε_water ~ N(0, 0.01732²) — isothermal water-evaporation calibration (22 replicates)
+	  ε_STA applies to DSC-derived Cp (virgin seg 3, char) and ΔH.
+	  ε_water applies to HoS (independent calibration pathway, not ε_STA).
+	  ε_HFM applies to HFM-derived Cp (virgin seg 1).
   - Heat capacity regression coefficients for DF virgin (4) and Char (2)
 	(Segment 2 [323–425 K] is interpolated from segments 1 & 3, not independent)
 	(Intermediate cp's are derived via cumulative-yield interpolation)
@@ -75,25 +77,26 @@ using LinearAlgebra
 # distributions. Covariance matrices from the regression JSON files in
 # oxidative_pyrolysis/ (Bellamy, McKinnon, Stoliarov, energetics.tex).
 #
-# Seven correlated groups:
-#   0a. ε_HFM (systematic bias)           — 1×1 N(0, 0.007²)
+# Eight correlated groups:
+#   0a. ε_HFM (systematic bias)           — 1×1 N(0, 0.00577²)
 #   0b. ε_STA (systematic bias)           — 1×1 N(0, 0.0261²)
+#   0c. ε_water (systematic bias)          — 1×1 N(0, 0.01732²)
 #   1. DF virgin cp segment 1 (a1, b1)    — 2×2 from HFM regression
 #   2. DF virgin cp segment 3 (a3, b3)    — 2×2 from STA/DSC regression
 #   3. Char cp (a, b)                      — 2×2 from independent char STA
 #   4. Heat of sorption (a, b, c)          — 3×3 from WLS exponential fit
-#   5. Heats of reaction (ΔH1–ΔH5)        — 5×5 bootstrap covariance
+#   5. Heats of reaction (ΔH1–ΔH5)        — 5×5 conditional covariance (analytical delta method)
 #
 # Cp regressions were fit in J/(g·K); values and covariances are converted
 # to J/(kg·K) below (×1e3 for values, ×1e6 for covariance entries).
 # HoS parameters are in kJ/kg and 1/% (same units as build_and_solve).
-# Heats of reaction bootstrap covariance is in kJ²/kg², converted to J²/kg².
+# Heats of reaction conditional covariance is in kJ²/kg², converted to J²/kg².
 
 """
 	CorrelatedGroup
 
 Defines a group of parameters with a joint multivariate normal distribution.
-`indices` maps into the 16-element θ vector passed to build_and_solve.
+`indices` maps into the 17-element θ vector passed to build_and_solve.
 """
 struct CorrelatedGroup
 	name::String
@@ -103,69 +106,85 @@ struct CorrelatedGroup
 end
 
 const PARAM_NAMES = [
-	:epsilon_hfm, :epsilon_sta,                                  # indices 1–2  (Type B biases)
-	:df_cp_a1, :df_cp_b1,                                       # indices 3–4  (Type A, HFM)
-	:df_cp_a3, :df_cp_b3,                                       # indices 5–6  (Type A, STA/DSC)
-	:char_cp_a, :char_cp_b,                                     # indices 7–8  (Type A, char STA)
-	:hos_baseline, :hos_amplitude, :hos_decay,                   # indices 9–11
-	:h_rxn1, :h_rxn2, :h_rxn3, :h_rxn4, :h_rxn5,               # indices 12–16
+	:epsilon_hfm, :epsilon_sta, :epsilon_water,                  # indices 1–3  (Type B biases)
+	:df_cp_a1, :df_cp_b1,                                       # indices 4–5  (Type A, HFM)
+	:df_cp_a3, :df_cp_b3,                                       # indices 6–7  (Type A, STA/DSC)
+	:char_cp_a, :char_cp_b,                                     # indices 8–9  (Type A, char STA)
+	:hos_baseline, :hos_amplitude, :hos_decay,                   # indices 10–12
+	:h_rxn1, :h_rxn2, :h_rxn3, :h_rxn4, :h_rxn5,               # indices 13–17
 ]
-const N_PARAMS = 16
+const N_PARAMS = 17
 
 const NOMINAL_VALUES = [
-	0.0, 0.0,                  # ε_HFM, ε_STA (zero-mean biases)
+	0.0, 0.0, 0.0,            # ε_HFM, ε_STA, ε_water (zero-mean biases)
 	-53.05, 4.245,             # DF cp seg 1 [J/(kg·K)]
 	-2131.0, 9.119,            # DF cp seg 3 [J/(kg·K)]
 	347.2, 1.784,              # Char cp [J/(kg·K)]
 	2280.0, 787.0, 0.114,     # HoS [kJ/kg, kJ/kg, 1/%]  (Eq. 18)
-	-19150.0, -5570.0, 266700.0, -219640.0, -12380.0,  # ΔH [J/kg]
+	-19153.3, -5573.8, 266699.7, -219638.7, -12381.6,  # ΔH [J/kg]
 ]
 
 # --- Group 0a: Type B systematic bias for HFM (ε_HFM) ---
-# The HFM heat flow calibration uncertainty is 0.58% relative, plus
-# ~0.3% from Type K thermocouple → combined ~0.7% (RSS).
-# This enters as a multiplicative factor (1 + ε_HFM) on all HFM-derived Cp.
-# Sampled as 1×1 Normal(0, 0.007²).
+# HFM heat flow accuracy ±1% (manufacturer spec), rectangular → u_rel = 1%/√3 = 0.577%.
+# Temperature systematic (Type K TC, ±1.5°C → 0.87°C at 1σ) propagates through the
+# Cp slope as an intercept shift (~0.29% relative at midrange) — small and partially
+# degenerate with the Type A intercept uncertainty. Density systematic is negligible
+# (<0.07%). Only the dominant multiplicative heat flow component is sampled here.
+# Source: combined_uncertainty_budget.json → shared_systematics.HFM
 const GROUP_EPSILON_HFM = CorrelatedGroup("eps_HFM", [1],
 	[0.0],
-	[0.007^2;;])
+	[0.005774^2;;])
 
 # --- Group 0b: Type B systematic bias for STA/DSC (ε_STA) ---
-# The DSC heat flow calibration uncertainty is 2.61% relative, plus
-# ~0.3% from temperature → combined ~2.6% (RSS, dominated by calibration).
-# This enters as a multiplicative factor (1 + ε_STA) on all DSC-derived Cp
-# (virgin Cp segment 3 and char Cp). Segment 1 (HFM) uses ε_HFM instead.
-# Sampled as 1×1 Normal(0, 0.0261²).
+# DSC multi-point enthalpy calibration (7 standards after RbNO₃ exclusion):
+# u_rel = 2.61% (1σ). Temperature systematic (~0.3%) and mass (~0.03%) are
+# negligible additions (RSS dominated by calibration at 95.4% of variance).
+# Applied as (1 + ε_STA) to all DSC-derived Cp (virgin seg 3, char) and ΔH.
+# Source: dsc_calibration_model.json, combined_uncertainty_budget.json
 const GROUP_EPSILON_STA = CorrelatedGroup("eps_STA", [2],
 	[0.0],
-	[0.0261^2;;])
+	[0.02613^2;;])
+
+# --- Group 0c: Type B systematic bias for HoS water calibration (ε_water) ---
+# HoS was measured isothermally on the STA, but calibrated independently via
+# water-evaporation runs (S = |∫q dt| / (Δm·Lvap)), NOT the standard multi-point
+# S(T) polynomial. This gives a separate, smaller calibration uncertainty.
+# u_rel = 1.73% (1σ) from 22 replicates (11 DF + 11 RO), 21 dof.
+# Applied as (1 + ε_water) to HoS parameters a (asymptote) and b (amplitude);
+# c (decay constant) is a shape parameter unaffected by sensitivity scaling.
+# Since (1+ε)(a + b·exp(-c·MC)) = (1+ε)·a + (1+ε)·b·exp(-c·MC), scaling a and b
+# is equivalent to scaling the entire HoS expression.
+# Source: isothermal_dsc_calibration_model.json, combined_uncertainty_budget.json
+const GROUP_EPSILON_WATER = CorrelatedGroup("eps_water", [3],
+	[0.0],
+	[0.01732^2;;])
 
 # --- Group 1: DF virgin cp segment 1 (HFM), T ≤ 323 K ---
 # Source: douglas_fir_hfm/regression_results.json
 # JSON units: J/(g·K) → script units: J/(kg·K), covariance ×1e6
 # NOTE: This is the Type A (regression) covariance only. Type B is handled
 # by ε_HFM above, applied as (1 + ε_HFM) × Cp in build_and_solve.
-const GROUP_DF_CP_SEG1 = CorrelatedGroup("DF_cp_seg1", [3, 4],
+const GROUP_DF_CP_SEG1 = CorrelatedGroup("DF_cp_seg1", [4, 5],
 	[-53.05, 4.245],
 	#         a1              b1          (intercept, slope)
 	[0.21819^2 * 1e6   -1.5350e-4 * 1e6;
-			  -1.5350e-4 * 1e6   7.038e-4^2 * 1e6])
+					   -1.5350e-4 * 1e6   7.038e-4^2 * 1e6])
 
 # --- Group 2: DF virgin cp segment 3 (STA/DSC), T > 425 K ---
 # Source: douglas_fir_sta/regression_results.json
 # NOTE: Type A only. Type B handled by ε_STA.
-const GROUP_DF_CP_SEG3 = CorrelatedGroup("DF_cp_seg3", [5, 6],
+const GROUP_DF_CP_SEG3 = CorrelatedGroup("DF_cp_seg3", [6, 7],
 	[-2131.0, 9.119],
 	[0.056399^2 * 1e6    -7.1999e-6 * 1e6;
-			  -7.1999e-6 * 1e6    1.2769e-4^2 * 1e6])
+					   -7.1999e-6 * 1e6    1.2769e-4^2 * 1e6])
 
 # --- Group 3: Char cp (independent STA measurement) ---
 # Source: douglas_fir_independent_char_sta/regression_results.json
 # NOTE: Type A only. Type B handled by ε_STA (same DSC instrument).
-const GROUP_CHAR_CP = CorrelatedGroup("Char_cp", [7, 8],
+const GROUP_CHAR_CP = CorrelatedGroup("Char_cp", [8, 9],
 	[347.2, 1.784],
 	[3.486e-3^2 * 1e6    -2.0047e-8 * 1e6;
-			  -2.0047e-8 * 1e6    5.782e-6^2 * 1e6])
+					   -2.0047e-8 * 1e6    5.782e-6^2 * 1e6])
 
 # --- Group 4: Heat of sorption (WLS exponential fit) ---
 # Source: papers/energetics/figures/hos_fit_results.json
@@ -175,33 +194,51 @@ const GROUP_CHAR_CP = CorrelatedGroup("Char_cp", [7, 8],
 # Previous values (2286, 867, 0.128) were from an older fit version.
 # The ~7% offset from known latent heat is a known bias (not random), not
 # propagated here. Only the Type A fit covariance is sampled.
-const GROUP_HOS = CorrelatedGroup("HoS", [9, 10, 11],
+#
+# Type B (calibration): HoS was measured isothermally on the STA using an
+# independent water-evaporation calibration — NOT the standard multi-point
+# DSC calibration. Therefore ε_STA does not apply to HoS. Instead, ε_water
+# (Group 0c) provides the Type B calibration uncertainty from the isothermal
+# water calibration reproducibility (u_rel = 1.73%, 22 replicates).
+const GROUP_HOS = CorrelatedGroup("HoS", [10, 11, 12],
 	[2280.0, 787.0, 0.114],
 	[173.957     22.025     0.09442;
-			   22.025    941.547     0.18431;
-				0.09442    0.18431   9.715e-5])
+						22.025    941.547     0.18431;
+						 0.09442    0.18431   9.715e-5])
 
-# --- Group 5: Heats of reaction (bootstrap covariance from two-stage optimization) ---
+# --- Group 5: Heats of reaction (CONDITIONAL covariance from two-stage optimization) ---
 # Source: scripts/energetics/results/douglas_fir_two_stage_optimized.json
-# Bootstrap 5×5 sub-block (rows/cols 4:8 of the 9×9 matrix), in kJ²/kg².
-# Converted to J²/kg² by ×1e6.
-# Bootstrap covariance captures propagated Stage 1 uncertainty (pseudo-char cp),
-# which is not an explicit parameter in this sensitivity analysis. This correctly
-# inflates the marginal variances beyond the conditional WLS estimates and induces
-# strong positive correlations (r > 0.9) reflecting the shared baseline uncertainty.
-# NOTE: DSC calibration systematic (Type B) cancels in the optimization residual
-# (see energetics.tex Section 2.3.4), so only Type A bootstrap uncertainty is needed.
-const GROUP_H_RXN = CorrelatedGroup("H_rxn", [12, 13, 14, 15, 16],
-	[-19150.0, -5570.0, 266700.0, -219640.0, -12380.0],
-	[3.8484    8.7615   11.675    50.568    12.615;
-			  8.7615   21.306    29.288   128.490    32.165;
-			 11.675    29.288    40.962   180.627    45.459;
-			 50.568   128.490   180.627   799.953   202.551;
-			 12.615    32.165    45.459   202.551    69.713] .* 1e6)
+#         → conditional_dh_uncertainty.covariance_matrix_kJ_per_kg_sq
+#
+# We use the *conditional* covariance from the analytical delta method (IFT +
+# chain rule), which decomposes as:
+#   Σ_ΔH|cp_virgin = Σ_WLS + J_char @ Σ_char @ J_charᵀ + cross terms
+# where Σ_WLS is the Stage 2 weighted least-squares contribution and J_char
+# propagates Stage 1 pseudo-char cp estimation uncertainty into ΔH.
+# This covariance holds virgin cp at its nominal value, so Groups 2 (DF cp
+# seg 3) and 5 (ΔH) are conditionally independent. The virgin cp → ΔH coupling
+# is handled explicitly by the Jacobian correction J_HRXN_CP × δ(a₃,b₃) in
+# build_and_solve. Using the full bootstrap covariance would double-count:
+# virgin cp uncertainty would enter once through Group 2 (direct perturbation)
+# and again through inflated ΔH variances (implicit perturbation baked in).
+#
+# Type B (DSC calibration): ΔH_fit = (1+ε)·ΔH_true (calibration scales, does not
+# cancel). Applied as (1+ε_STA) multiplicative factor in build_and_solve.
+#
+# Units: kJ²/kg², converted to J²/kg² by ×1e6.
+const GROUP_H_RXN = CorrelatedGroup("H_rxn", [13, 14, 15, 16, 17],
+	[-19153.3, -5573.8, 266699.7, -219638.7, -12381.6],
+	# Conditional covariance (analytical delta method): WLS + char cp + cross terms
+	[3.42252    8.04561   11.3715    50.1601    12.3280;
+					   8.04561   20.7989    28.7027   127.515     31.2934;
+					  11.3715    28.7027    41.1541   178.306     45.5874;
+					  50.1601   127.515    178.306    805.909    176.265;
+					  12.3280    31.2934    45.5874   176.265    313.704] .* 1e6)
 
 const CORR_GROUPS = [
 	GROUP_EPSILON_HFM,
 	GROUP_EPSILON_STA,
+	GROUP_EPSILON_WATER,
 	GROUP_DF_CP_SEG1,
 	GROUP_DF_CP_SEG3,
 	GROUP_CHAR_CP,
@@ -213,7 +250,7 @@ const CORR_GROUPS = [
 # Sampling Configuration
 # ============================================================================
 
-const N_SAMPLES = 1024      # Number of Sobol samples (power of 2 for optimal coverage)
+const N_SAMPLES = 2048      # Number of Sobol samples (power of 2 for optimal coverage)
 const RESULTS_DIR = joinpath(@__DIR__, "results")
 
 # ============================================================================
@@ -284,25 +321,70 @@ end
 	(1 - 0.95 * 0.80 * 0.37 * 0.79) / (1 - FINAL_CHAR_YIELD), # int4: α ≈ 0.9309
 ]
 
+# Nominal virgin cp (high-T) regression coefficients — used as reference point
+# for the Jacobian correction to ΔH.
+@everywhere const NOM_CP_A3 = -2131.0
+@everywhere const NOM_CP_B3 = 9.119
+
+# Jacobian J = ∂ΔH/∂(a₃, b₃): total sensitivity of fitted heats of reaction to
+# the virgin cp (high-T) regression coefficients used as the optimization baseline.
+# Source: conditional_dh_uncertainty.jacobian_dH_wrt_virgin_cp (analytical, IFT +
+# chain rule through pseudo-char cp re-optimization). Includes both the direct
+# baseline shift and the indirect path through Stage 1 pseudo-char cp.
+# Rows = [ΔH₁, ΔH₂, ΔH₃, ΔH₄, ΔH₅], Cols = [a₃ (intercept), b₃ (slope)]
+# Units col 1: (kJ/kg)/(J/(g·K)) = (J/kg)/(J/(kg·K)) → [K]
+# Units col 2: (kJ/kg)/(J/(g·K²)) = (J/kg)/(J/(kg·K²)) → [K²]
+# JSON column order was [slope, intercept]; swapped here to match [a₃, b₃].
+@everywhere const J_HRXN_CP = [
+	-101.8546   -50959.70;
+	 -37.0298   -22263.28;
+	 -12.3170    -7496.43;
+	   1.17179    1237.13;
+	  -3.57531   -2190.76]
+
 @everywhere begin
 
 	"""
 		build_and_solve(θ)
 
-	Build a Douglas Fir simulation with the given parameter vector θ (length 16),
+	Build a Douglas Fir simulation with the given parameter vector θ (length 17),
 	solve it, and return the PyrolysisSolution.
 	"""
 	function build_and_solve(θ::Vector{Float64})
-		# Unpack the 16 uncertain parameters
-		ε_hfm, ε_sta,
+		# Unpack the 17 uncertain parameters
+		ε_hfm, ε_sta, ε_water,
 		df_cp_a1, df_cp_b1, df_cp_a3, df_cp_b3,
 		char_cp_a, char_cp_b,
 		hos_baseline, hos_amplitude, hos_decay,
 		h_rxn1, h_rxn2, h_rxn3, h_rxn4, h_rxn5 = θ
 
 		# Type B multiplicative factors for each instrument
-		scale_hfm = 1.0 + ε_hfm   # applies to HFM-derived Cp (segment 1)
-		scale_sta = 1.0 + ε_sta   # applies to STA/DSC-derived Cp (segment 3, char)
+		scale_hfm   = 1.0 + ε_hfm    # HFM-derived Cp (segment 1)
+		scale_sta   = 1.0 + ε_sta    # STA/DSC-derived Cp (segment 3, char) and ΔH
+		scale_water = 1.0 + ε_water  # isothermal water calibration (HoS only)
+
+		# --- Correct ΔH for virgin cp regression uncertainty (Type A coupling) ---
+		# The two-stage optimization used nominal (a₃, b₃) as fixed input for the
+		# reactant-side sensible heat baseline. When the regression coefficients
+		# deviate from nominal (Type A), the fitted ΔH shifts by J × δ(a₃,b₃).
+		δa3 = df_cp_a3 - NOM_CP_A3
+		δb3 = df_cp_b3 - NOM_CP_B3
+		h_rxn1_adj = h_rxn1 + J_HRXN_CP[1, 1] * δa3 + J_HRXN_CP[1, 2] * δb3
+		h_rxn2_adj = h_rxn2 + J_HRXN_CP[2, 1] * δa3 + J_HRXN_CP[2, 2] * δb3
+		h_rxn3_adj = h_rxn3 + J_HRXN_CP[3, 1] * δa3 + J_HRXN_CP[3, 2] * δb3
+		h_rxn4_adj = h_rxn4 + J_HRXN_CP[4, 1] * δa3 + J_HRXN_CP[4, 2] * δb3
+		h_rxn5_adj = h_rxn5 + J_HRXN_CP[5, 1] * δa3 + J_HRXN_CP[5, 2] * δb3
+
+		# --- Correct ΔH for DSC calibration bias (Type B) ---
+		# The optimization derived ΔH from DSC heat flow using DSC-measured cp as
+		# baseline: q_meas = (1+ε)·q_true, cp_meas = (1+ε)·cp_true, so the residual
+		# yields ΔH_fit = (1+ε)·ΔH_true. The calibration does NOT cancel — it scales
+		# ΔH proportionally, just like cp. Both must be scaled by (1+ε_STA).
+		h_rxn1_adj *= scale_sta
+		h_rxn2_adj *= scale_sta
+		h_rxn3_adj *= scale_sta
+		h_rxn4_adj *= scale_sta
+		h_rxn5_adj *= scale_sta
 
 		# --- DF virgin heat capacity (piecewise linear, 3 segments) ---
 		# Segment 1 (T ≤ 323 K): HFM instrument → scale by (1 + ε_HFM)
@@ -356,9 +438,14 @@ end
 		water_vapor_cp = CallableProperty(T -> 2.4e3 - 1.6 * T + 2.0e-3 * T^2)
 
 		# --- Heat of sorption (parametric) ---
+		# HoS uses an independent isothermal water-evaporation calibration,
+		# NOT the standard DSC multi-point calibration. ε_water (not ε_STA)
+		# provides the Type B calibration uncertainty. Scaling a and b by
+		# (1+ε_water) is equivalent to scaling the full expression since c is
+		# a shape parameter (decay constant) unaffected by sensitivity scaling.
 		hos = StateDependentProperty((T, ξ) -> begin
 			MC = 100.0 * ξ[SA_MOISTURE_IDX] / SA_ρ_DRY_BASIS
-			return (hos_baseline + hos_amplitude * exp(-hos_decay * MC)) * 1e3
+			return (hos_baseline + hos_amplitude * exp(-hos_decay * MC)) * 1e3 * scale_water
 		end)
 
 		# --- Gas transfer coefficients and permeability (FIXED) ---
@@ -411,15 +498,15 @@ end
 			),
 			reactions = (
 				Reaction(:pyrolysis_step1, 1 => (2, 8),
-					A = 74816.95, E = 71.59e3, h = h_rxn1, n = 1.0, yields = (0.95, 0.05)),
+					A = 74816.95, E = 71.59e3, h = h_rxn1_adj, n = 1.0, yields = (0.95, 0.05)),
 				Reaction(:pyrolysis_step2, 2 => (3, 9),
-					A = 23550492839.0, E = 140.9e3, h = h_rxn2, n = 1.0, yields = (0.80, 0.20)),
+					A = 23550492839.0, E = 140.9e3, h = h_rxn2_adj, n = 1.0, yields = (0.80, 0.20)),
 				Reaction(:pyrolysis_step3, 3 => (4, 10),
-					A = 7.744618e12, E = 181.0e3, h = h_rxn3, n = 1.0, yields = (0.37, 0.63)),
+					A = 7.744618e12, E = 181.0e3, h = h_rxn3_adj, n = 1.0, yields = (0.37, 0.63)),
 				Reaction(:pyrolysis_step4, 4 => (5, 11),
-					A = 103276.14, E = 98.94e3, h = h_rxn4, n = 1.0, yields = (0.79, 0.21)),
+					A = 103276.14, E = 98.94e3, h = h_rxn4_adj, n = 1.0, yields = (0.79, 0.21)),
 				Reaction(:pyrolysis_step5, 5 => (6, 12),
-					A = 6.397348, E = 56.01e3, h = h_rxn5, n = 1.0, yields = (0.74, 0.26)),
+					A = 6.397348, E = 56.01e3, h = h_rxn5_adj, n = 1.0, yields = (0.74, 0.26)),
 				Reaction(:moisture_evaporation, 7 => 13,
 					A = 2.997e5, E = 5.0e4, h = hos, n = 1.0),
 			),
