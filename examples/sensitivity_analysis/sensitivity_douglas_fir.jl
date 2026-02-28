@@ -91,6 +91,33 @@ using LinearAlgebra
 # to J/(kg·K) below (×1e3 for values, ×1e6 for covariance entries).
 # HoS parameters are in kJ/kg and 1/% (same units as build_and_solve).
 # Heats of reaction conditional covariance is in kJ²/kg², converted to J²/kg².
+#
+# Complete uncertainty budget traceability (combined_uncertainty_budget.json):
+#
+# INCLUDED:
+#   Type B (systematic):
+#     ε_HFM  — HFM heat flow accuracy, 1%/√3 = 0.577% (manufacturer spec)     [Group 0a]
+#     ε_STA  — DSC multi-point enthalpy calibration, 2.61% (7 standards)        [Group 0b]
+#     ε_water — isothermal water calibration for HoS, 1.73% (22 replicates)     [Group 0c]
+#   Type A (statistical/regression):
+#     HFM cp regression (seg 1)              — 2×2 covariance                   [Group 1]
+#     STA cp regression (seg 3)              — 2×2 covariance                   [Group 2]
+#     Independent char STA cp regression     — 2×2 covariance                   [Group 3]
+#     HoS WLS exponential fit                — 3×3 covariance                   [Group 4]
+#     ΔH conditional (WLS + char cp + cross) — 5×5 covariance                   [Group 5]
+#   Coupling:
+#     Virgin cp → ΔH Jacobian correction     — J_HRXN_CP × δ(a₃,b₃) at runtime
+#     ΔH × ε_STA multiplicative scaling      — applied after Jacobian correction
+#
+# OMITTED (justified):
+#   STA temperature calibration on Cp        — 4.6% of STA Type B variance; negligible
+#   STA temperature calibration on ΔH        — second-order: O(δT²/ΔT²_peak); negligible
+#   STA mass measurement                     — u_rel = 0.03%; ~100× smaller than ε_STA
+#   HFM temperature (Type K TC) on Cp        — additive intercept shift δCp = b·δT ≈ 0.004
+#                                               J/(g·K), negligible vs regression SE of
+#                                               intercept (0.218 J/(g·K))
+#   HFM density systematic                   — u_rel = 0.06%; negligible vs heat flow
+#   Kinetic parameters (A, E)                — held fixed (outside scope of this study)
 
 """
 	CorrelatedGroup
@@ -116,12 +143,12 @@ const PARAM_NAMES = [
 const N_PARAMS = 17
 
 const NOMINAL_VALUES = [
-	0.0, 0.0, 0.0,            # ε_HFM, ε_STA, ε_water (zero-mean biases)
-	-53.05, 4.245,             # DF cp seg 1 [J/(kg·K)]
-	-2131.0, 9.119,            # DF cp seg 3 [J/(kg·K)]
-	347.2, 1.784,              # Char cp [J/(kg·K)]
-	2280.0, 787.0, 0.114,     # HoS [kJ/kg, kJ/kg, 1/%]  (Eq. 18)
-	-19153.3, -5573.8, 266699.7, -219638.7, -12381.6,  # ΔH [J/kg]
+	0.0, 0.0, 0.0,                # ε_HFM, ε_STA, ε_water (zero-mean biases)
+	-53.052, 4.2453,               # DF cp seg 1 [J/(kg·K)]  (HFM regression)
+	-2131.33, 9.11878,             # DF cp seg 3 [J/(kg·K)]  (STA regression)
+	347.212, 1.78423,              # Char cp [J/(kg·K)]       (independent char STA)
+	2279.76, 786.962, 0.11436,    # HoS [kJ/kg, kJ/kg, 1/%] (WLS exponential fit)
+	-19153.3, -5573.79, 266699.7, -219638.7, -12381.6,  # ΔH [J/kg]
 ]
 
 # --- Group 0a: Type B systematic bias for HFM (ε_HFM) ---
@@ -165,7 +192,7 @@ const GROUP_EPSILON_WATER = CorrelatedGroup("eps_water", [3],
 # NOTE: This is the Type A (regression) covariance only. Type B is handled
 # by ε_HFM above, applied as (1 + ε_HFM) × Cp in build_and_solve.
 const GROUP_DF_CP_SEG1 = CorrelatedGroup("DF_cp_seg1", [4, 5],
-	[-53.05, 4.245],
+	[-53.052, 4.2453],
 	#         a1              b1          (intercept, slope)
 	[0.21819^2 * 1e6   -1.5350e-4 * 1e6;
 					   -1.5350e-4 * 1e6   7.038e-4^2 * 1e6])
@@ -174,7 +201,7 @@ const GROUP_DF_CP_SEG1 = CorrelatedGroup("DF_cp_seg1", [4, 5],
 # Source: douglas_fir_sta/regression_results.json
 # NOTE: Type A only. Type B handled by ε_STA.
 const GROUP_DF_CP_SEG3 = CorrelatedGroup("DF_cp_seg3", [6, 7],
-	[-2131.0, 9.119],
+	[-2131.33, 9.11878],
 	[0.056399^2 * 1e6    -7.1999e-6 * 1e6;
 					   -7.1999e-6 * 1e6    1.2769e-4^2 * 1e6])
 
@@ -182,16 +209,15 @@ const GROUP_DF_CP_SEG3 = CorrelatedGroup("DF_cp_seg3", [6, 7],
 # Source: douglas_fir_independent_char_sta/regression_results.json
 # NOTE: Type A only. Type B handled by ε_STA (same DSC instrument).
 const GROUP_CHAR_CP = CorrelatedGroup("Char_cp", [8, 9],
-	[347.2, 1.784],
+	[347.212, 1.78423],
 	[3.486e-3^2 * 1e6    -2.0047e-8 * 1e6;
 					   -2.0047e-8 * 1e6    5.782e-6^2 * 1e6])
 
 # --- Group 4: Heat of sorption (WLS exponential fit) ---
 # Source: papers/energetics/figures/hos_fit_results.json
 # Parameters: a=baseline [kJ/kg], b=amplitude [kJ/kg], c=decay [1/%]
-# NOTE: Nominal values updated to match the published fit (Eq. 18 in manuscript):
-#   a = 2280(13), b = 787(31), c = 0.114(10)
-# Previous values (2286, 867, 0.128) were from an older fit version.
+# NOTE: Nominal values from WLS fit (hos_fit_results.json). Published as
+#   a = 2280(13), b = 787(31), c = 0.114(10) in manuscript Eq. 18.
 # The ~7% offset from known latent heat is a known bias (not random), not
 # propagated here. Only the Type A fit covariance is sampled.
 #
@@ -201,7 +227,7 @@ const GROUP_CHAR_CP = CorrelatedGroup("Char_cp", [8, 9],
 # (Group 0c) provides the Type B calibration uncertainty from the isothermal
 # water calibration reproducibility (u_rel = 1.73%, 22 replicates).
 const GROUP_HOS = CorrelatedGroup("HoS", [10, 11, 12],
-	[2280.0, 787.0, 0.114],
+	[2279.76, 786.962, 0.11436],
 	[173.957     22.025     0.09442;
 						22.025    941.547     0.18431;
 						 0.09442    0.18431   9.715e-5])
@@ -227,7 +253,7 @@ const GROUP_HOS = CorrelatedGroup("HoS", [10, 11, 12],
 #
 # Units: kJ²/kg², converted to J²/kg² by ×1e6.
 const GROUP_H_RXN = CorrelatedGroup("H_rxn", [13, 14, 15, 16, 17],
-	[-19153.3, -5573.8, 266699.7, -219638.7, -12381.6],
+	[-19153.3, -5573.79, 266699.7, -219638.7, -12381.6],
 	# Conditional covariance (analytical delta method): WLS + char cp + cross terms
 	[3.42252    8.04561   11.3715    50.1601    12.3280;
 					   8.04561   20.7989    28.7027   127.515     31.2934;
@@ -323,8 +349,8 @@ end
 
 # Nominal virgin cp (high-T) regression coefficients — used as reference point
 # for the Jacobian correction to ΔH.
-@everywhere const NOM_CP_A3 = -2131.0
-@everywhere const NOM_CP_B3 = 9.119
+@everywhere const NOM_CP_A3 = -2131.33
+@everywhere const NOM_CP_B3 = 9.11878
 
 # Jacobian J = ∂ΔH/∂(a₃, b₃): total sensitivity of fitted heats of reaction to
 # the virgin cp (high-T) regression coefficients used as the optimization baseline.
