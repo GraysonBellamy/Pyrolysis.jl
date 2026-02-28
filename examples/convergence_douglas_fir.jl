@@ -22,6 +22,7 @@ using Pyrolysis
 using LinearSolve
 using KLU
 using OrdinaryDiffEq
+using LinearAlgebra
 using Statistics
 using Printf
 using Plots
