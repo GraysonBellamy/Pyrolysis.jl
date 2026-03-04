@@ -73,32 +73,32 @@ const GROUPS = [
 
 	# 4. Virgin Cp, low-T (HFM regression)
 	ParamGroup("Virgin Cp, low-T", [4, 5],
-		[-53.05, 4.245],
+		[-53.052, 4.2453],
 		[0.21819^2 * 1e6   -1.5350e-4 * 1e6;
 			-1.5350e-4 * 1e6   7.038e-4^2 * 1e6]),
 
 	# 5. Virgin Cp, high-T (DSC regression)
 	ParamGroup("Virgin Cp, high-T", [6, 7],
-		[-2131.0, 9.119],
+		[-2131.33, 9.11878],
 		[0.056399^2 * 1e6    -7.1999e-6 * 1e6;
 			-7.1999e-6 * 1e6    1.2769e-4^2 * 1e6]),
 
 	# 6. Char Cp (independent STA)
 	ParamGroup("Char Cp", [8, 9],
-		[347.2, 1.784],
+		[347.212, 1.78423],
 		[3.486e-3^2 * 1e6    -2.0047e-8 * 1e6;
 			-2.0047e-8 * 1e6    5.782e-6^2 * 1e6]),
 
 	# 7. Heat of sorption (WLS exponential fit)
 	ParamGroup("Heat of sorption", [10, 11, 12],
-		[2280.0, 787.0, 0.114],
+		[2279.76, 786.962, 0.11436],
 		[173.957     22.025     0.09442;
 			 22.025    941.547     0.18431;
 			  0.09442    0.18431   9.715e-5]),
 
 	# 8. Heats of reaction (conditional covariance, kJ²/kg² → J²/kg²)
 	ParamGroup("Heats of reaction", [13, 14, 15, 16, 17],
-		[-19153.3, -5573.8, 266699.7, -219638.7, -12381.6],
+		[-19153.3, -5573.79, 266699.7, -219638.7, -12381.6],
 		[3.42252    8.04561   11.3715    50.1601    12.3280;
 			8.04561   20.7989    28.7027   127.515     31.2934;
 			11.3715    28.7027    41.1541   178.306     45.5874;
@@ -493,7 +493,7 @@ function main()
 	sort_order = sortperm(avg_importance, rev = true)
 
 	# Color palette for groups
-	colors = [:steelblue, :coral, :seagreen, :mediumpurple, :goldenrod, :lightblue, :pink]
+	colors = [:steelblue, :coral, :seagreen, :mediumpurple, :goldenrod, :lightblue, :pink, :sienna]
 
 	# Build stacked bar chart using areaplot-style manual stacking
 	plt_stacked = plot(

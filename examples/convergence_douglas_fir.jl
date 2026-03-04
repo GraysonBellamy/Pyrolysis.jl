@@ -26,6 +26,7 @@ using LinearAlgebra
 using Statistics
 using Printf
 using Plots
+using DelimitedFiles
 using LinearSolve: KLUFactorization
 
 # ============================================================================
@@ -248,6 +249,54 @@ function extract_result(sol, n_cells)
 end
 
 # ============================================================================
+# Save results to CSV
+# ============================================================================
+
+"""
+Write two kinds of CSV files to `dir`:
+  convergence_scalars.csv        – one row per grid size, all scalar QoIs
+  convergence_curves_<N>cells.csv – time-series (time, mlr, T_surf, T_back) per run
+"""
+function save_results(results::Vector{ConvergenceResult}, dir::String)
+	# --- Scalar QoI summary ---
+	scalar_path = joinpath(dir, "convergence_scalars.csv")
+	open(scalar_path, "w") do io
+		println(io, "n_cells,cell_size_mm,peak_mlr_g_m2s,time_to_ignition_s," *
+			"time_to_peak_mlr_s,total_mass_loss_pct,peak_surface_temp_K," *
+			"peak_back_temp_K,final_thickness_mm,solve_time_s,retcode")
+		for r in results
+			tig = isfinite(r.time_to_ignition) ? @sprintf("%.4f", r.time_to_ignition) : "Inf"
+			println(io, @sprintf("%d,%.6f,%.6f,%s,%.4f,%.6f,%.4f,%.4f,%.6f,%.4f,%s",
+				r.n_cells, r.cell_size_mm,
+				r.peak_mlr * 1000,
+				tig,
+				r.time_to_peak_mlr,
+				r.total_mass_loss_pct,
+				r.peak_surface_temp,
+				r.peak_back_temp,
+				r.final_thickness_mm,
+				r.solve_time,
+				string(r.retcode)))
+		end
+	end
+	println("  Saved convergence_scalars.csv")
+
+	# --- Per-run time-series curves ---
+	for r in results
+		curve_path = joinpath(dir, "convergence_curves_$(r.n_cells)cells.csv")
+		open(curve_path, "w") do io
+			println(io, "time_s,mlr_g_m2s,surface_temp_K,back_temp_K")
+			for j in eachindex(r.times)
+				println(io, @sprintf("%.6f,%.8f,%.6f,%.6f",
+					r.times[j], r.mlr_curve[j] * 1000,
+					r.surface_temp_curve[j], r.back_temp_curve[j]))
+			end
+		end
+	end
+	println("  Saved convergence_curves_<N>cells.csv for each grid size")
+end
+
+# ============================================================================
 # Main
 # ============================================================================
 
@@ -282,6 +331,13 @@ function main()
 
 	# Reference = finest grid
 	ref = results[1]
+
+	# ========================================================================
+	# Save results to CSV
+	# ========================================================================
+
+	println("\nSaving results...")
+	save_results(results, RESULTS_DIR)
 
 	# ========================================================================
 	# Convergence Table
@@ -403,22 +459,30 @@ function main()
 	println("  Saved convergence_back_temp.png")
 
 	# --- 4. Relative error vs grid size ---
+	# Helper: replace non-positive values with NaN so log10 scale doesn't blow up
+	pos_or_nan(x) = x > 0.0 ? x : NaN
+
 	n_vec = [r.n_cells for r in results]
-	Δ_peak_mlr = [abs(r.peak_mlr - ref.peak_mlr) / ref.peak_mlr * 100 for r in results]
+	Δ_peak_mlr = [pos_or_nan(abs(r.peak_mlr - ref.peak_mlr) / ref.peak_mlr * 100) for r in results]
 	Δ_tig = [isfinite(r.time_to_ignition) && isfinite(ref.time_to_ignition) ?
-		abs(r.time_to_ignition - ref.time_to_ignition) / ref.time_to_ignition * 100 : NaN
+		pos_or_nan(abs(r.time_to_ignition - ref.time_to_ignition) / ref.time_to_ignition * 100) : NaN
 		for r in results]
-	Δ_mass = [abs(r.total_mass_loss_pct - ref.total_mass_loss_pct) / ref.total_mass_loss_pct * 100
+	Δ_mass = [pos_or_nan(abs(r.total_mass_loss_pct - ref.total_mass_loss_pct) / ref.total_mass_loss_pct * 100)
 		for r in results]
-	Δ_tsurf = [abs(r.peak_surface_temp - ref.peak_surface_temp) / ref.peak_surface_temp * 100
+	Δ_tsurf = [pos_or_nan(abs(r.peak_surface_temp - ref.peak_surface_temp) / ref.peak_surface_temp * 100)
 		for r in results]
+
+	# Compute y-axis limits from finite data so log scale always has valid ticks
+	all_errors = filter(isfinite, vcat(Δ_peak_mlr, Δ_tig, Δ_mass, Δ_tsurf))
+	y_min = isempty(all_errors) ? 1e-4 : max(minimum(all_errors) / 10, 1e-6)
+	y_max = isempty(all_errors) ? 100.0 : maximum(all_errors) * 10
 
 	plt_err = plot(xlabel = "Number of Cells", ylabel = "Relative Error [%]",
 		title = "Scalar QoI Convergence",
 		xscale = :log10, yscale = :log10,
 		legend = :topright, size = (900, 500),
-		xlims = (10, 600))
-	# Skip reference (error = 0)
+		xlims = (10, 600), ylims = (y_min, y_max))
+	# Skip reference (error = 0 by definition)
 	idx = 2:length(results)
 	plot!(n_vec[idx], Δ_peak_mlr[idx], marker = :circle, lw = 2, label = "Peak MLR")
 	if any(isfinite, Δ_tig[idx])
