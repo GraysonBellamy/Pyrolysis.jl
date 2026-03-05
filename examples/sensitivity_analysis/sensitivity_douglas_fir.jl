@@ -35,6 +35,8 @@ Outputs:
   - Time-series: MLR curve, surface temperature, back temperature per run
   - Sensitivity ranking via Standardized Rank Regression Coefficients (SRRC)
   - Uncertainty envelope plots (median, 50% CI, 90% CI)
+  - Uncertainty envelope CSVs: mlr_envelope.csv, surface_temp_envelope.csv,
+	back_temp_envelope.csv (columns: time, p5, p25, p50, p75, p95)
 
 Usage:
   julia -p 8 sensitivity_douglas_fir.jl          # 8 parallel workers
@@ -195,7 +197,7 @@ const GROUP_DF_CP_SEG1 = CorrelatedGroup("DF_cp_seg1", [4, 5],
 	[-53.052, 4.2453],
 	#         a1              b1          (intercept, slope)
 	[0.21819^2 * 1e6   -1.5350e-4 * 1e6;
-								   -1.5350e-4 * 1e6   7.038e-4^2 * 1e6])
+										 -1.5350e-4 * 1e6   7.038e-4^2 * 1e6])
 
 # --- Group 2: DF virgin cp segment 3 (STA/DSC), T > 425 K ---
 # Source: douglas_fir_sta/regression_results.json
@@ -203,7 +205,7 @@ const GROUP_DF_CP_SEG1 = CorrelatedGroup("DF_cp_seg1", [4, 5],
 const GROUP_DF_CP_SEG3 = CorrelatedGroup("DF_cp_seg3", [6, 7],
 	[-2131.33, 9.11878],
 	[0.056399^2 * 1e6    -7.1999e-6 * 1e6;
-								   -7.1999e-6 * 1e6    1.2769e-4^2 * 1e6])
+										 -7.1999e-6 * 1e6    1.2769e-4^2 * 1e6])
 
 # --- Group 3: Char cp (independent STA measurement) ---
 # Source: douglas_fir_independent_char_sta/regression_results.json
@@ -211,7 +213,7 @@ const GROUP_DF_CP_SEG3 = CorrelatedGroup("DF_cp_seg3", [6, 7],
 const GROUP_CHAR_CP = CorrelatedGroup("Char_cp", [8, 9],
 	[347.212, 1.78423],
 	[3.486e-3^2 * 1e6    -2.0047e-8 * 1e6;
-								   -2.0047e-8 * 1e6    5.782e-6^2 * 1e6])
+										 -2.0047e-8 * 1e6    5.782e-6^2 * 1e6])
 
 # --- Group 4: Heat of sorption (WLS exponential fit) ---
 # Source: papers/energetics/figures/hos_fit_results.json
@@ -229,8 +231,8 @@ const GROUP_CHAR_CP = CorrelatedGroup("Char_cp", [8, 9],
 const GROUP_HOS = CorrelatedGroup("HoS", [10, 11, 12],
 	[2279.76, 786.962, 0.11436],
 	[173.957     22.025     0.09442;
-									22.025    941.547     0.18431;
-									 0.09442    0.18431   9.715e-5])
+										  22.025    941.547     0.18431;
+										   0.09442    0.18431   9.715e-5])
 
 # --- Group 5: Heats of reaction (CONDITIONAL covariance from two-stage optimization) ---
 # Source: scripts/energetics/results/douglas_fir_two_stage_optimized.json
@@ -256,10 +258,10 @@ const GROUP_H_RXN = CorrelatedGroup("H_rxn", [13, 14, 15, 16, 17],
 	[-19153.3, -5573.79, 266699.7, -219638.7, -12381.6],
 	# Conditional covariance (analytical delta method): WLS + char cp + cross terms
 	[3.42252    8.04561   11.3715    50.1601    12.3280;
-								   8.04561   20.7989    28.7027   127.515     31.2934;
-								  11.3715    28.7027    41.1541   178.306     45.5874;
-								  50.1601   127.515    178.306    805.909    176.265;
-								  12.3280    31.2934    45.5874   176.265    313.704] .* 1e6)
+										 8.04561   20.7989    28.7027   127.515     31.2934;
+										11.3715    28.7027    41.1541   178.306     45.5874;
+										50.1601   127.515    178.306    805.909    176.265;
+										12.3280    31.2934    45.5874   176.265    313.704] .* 1e6)
 
 const CORR_GROUPS = [
 	GROUP_EPSILON_HFM,
@@ -692,6 +694,15 @@ function save_parameters_csv(filepath, param_names, samples)
 	end
 end
 
+function save_envelope_csv(filepath, times, p5, p25, p50, p75, p95)
+	open(filepath, "w") do io
+		println(io, "time,p5,p25,p50,p75,p95")
+		for i in eachindex(times)
+			println(io, "$(times[i]),$(p5[i]),$(p25[i]),$(p50[i]),$(p75[i]),$(p95[i])")
+		end
+	end
+end
+
 function save_scalar_qois_csv(filepath, sample_ids, results)
 	open(filepath, "w") do io
 		header = "sample_id,retcode," * join(SCALAR_QOI_NAMES, ",")
@@ -1084,6 +1095,10 @@ function main()
 		savefig(plt_mlr, joinpath(RESULTS_DIR, "mlr_uncertainty_envelope.png"))
 		println("  Saved mlr_uncertainty_envelope.png")
 
+		save_envelope_csv(joinpath(RESULTS_DIR, "mlr_envelope.csv"),
+			common_times, p5 .* 1000, p25 .* 1000, p50 .* 1000, p75 .* 1000, p95 .* 1000)
+		println("  Saved mlr_envelope.csv")
+
 		# --- 2. Surface Temperature Envelope ---
 		println("  Loading surface temperature curves...")
 		all_tsurf = Matrix{Float64}(undef, 3601, 0)
@@ -1110,6 +1125,10 @@ function main()
 
 			savefig(plt_ts, joinpath(RESULTS_DIR, "surface_temp_uncertainty_envelope.png"))
 			println("  Saved surface_temp_uncertainty_envelope.png")
+
+			save_envelope_csv(joinpath(RESULTS_DIR, "surface_temp_envelope.csv"),
+				common_times, p5_ts, p25_ts, p50_ts, p75_ts, p95_ts)
+			println("  Saved surface_temp_envelope.csv")
 		end
 
 		# --- 3. Back Temperature Envelope ---
@@ -1138,6 +1157,10 @@ function main()
 
 			savefig(plt_tb, joinpath(RESULTS_DIR, "back_temp_uncertainty_envelope.png"))
 			println("  Saved back_temp_uncertainty_envelope.png")
+
+			save_envelope_csv(joinpath(RESULTS_DIR, "back_temp_envelope.csv"),
+				common_times, p5_tb, p25_tb, p50_tb, p75_tb, p95_tb)
+			println("  Saved back_temp_envelope.csv")
 		end
 	end
 
