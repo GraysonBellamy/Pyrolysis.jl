@@ -28,6 +28,10 @@ using Printf
 
 println("Running with $(nworkers()) worker(s)")
 
+# Load Printf on all workers before the main @everywhere block so that
+# @printf is available when the block is lowered (macro-expanded).
+@everywhere using Printf
+
 # ============================================================================
 # Load packages and define all functions on every worker
 # ============================================================================
