@@ -195,7 +195,7 @@ const GROUP_DF_CP_SEG1 = CorrelatedGroup("DF_cp_seg1", [4, 5],
 	[-53.052, 4.2453],
 	#         a1              b1          (intercept, slope)
 	[0.21819^2 * 1e6   -1.5350e-4 * 1e6;
-					   -1.5350e-4 * 1e6   7.038e-4^2 * 1e6])
+								   -1.5350e-4 * 1e6   7.038e-4^2 * 1e6])
 
 # --- Group 2: DF virgin cp segment 3 (STA/DSC), T > 425 K ---
 # Source: douglas_fir_sta/regression_results.json
@@ -203,7 +203,7 @@ const GROUP_DF_CP_SEG1 = CorrelatedGroup("DF_cp_seg1", [4, 5],
 const GROUP_DF_CP_SEG3 = CorrelatedGroup("DF_cp_seg3", [6, 7],
 	[-2131.33, 9.11878],
 	[0.056399^2 * 1e6    -7.1999e-6 * 1e6;
-					   -7.1999e-6 * 1e6    1.2769e-4^2 * 1e6])
+								   -7.1999e-6 * 1e6    1.2769e-4^2 * 1e6])
 
 # --- Group 3: Char cp (independent STA measurement) ---
 # Source: douglas_fir_independent_char_sta/regression_results.json
@@ -211,7 +211,7 @@ const GROUP_DF_CP_SEG3 = CorrelatedGroup("DF_cp_seg3", [6, 7],
 const GROUP_CHAR_CP = CorrelatedGroup("Char_cp", [8, 9],
 	[347.212, 1.78423],
 	[3.486e-3^2 * 1e6    -2.0047e-8 * 1e6;
-					   -2.0047e-8 * 1e6    5.782e-6^2 * 1e6])
+								   -2.0047e-8 * 1e6    5.782e-6^2 * 1e6])
 
 # --- Group 4: Heat of sorption (WLS exponential fit) ---
 # Source: papers/energetics/figures/hos_fit_results.json
@@ -229,8 +229,8 @@ const GROUP_CHAR_CP = CorrelatedGroup("Char_cp", [8, 9],
 const GROUP_HOS = CorrelatedGroup("HoS", [10, 11, 12],
 	[2279.76, 786.962, 0.11436],
 	[173.957     22.025     0.09442;
-						22.025    941.547     0.18431;
-						 0.09442    0.18431   9.715e-5])
+									22.025    941.547     0.18431;
+									 0.09442    0.18431   9.715e-5])
 
 # --- Group 5: Heats of reaction (CONDITIONAL covariance from two-stage optimization) ---
 # Source: scripts/energetics/results/douglas_fir_two_stage_optimized.json
@@ -256,10 +256,10 @@ const GROUP_H_RXN = CorrelatedGroup("H_rxn", [13, 14, 15, 16, 17],
 	[-19153.3, -5573.79, 266699.7, -219638.7, -12381.6],
 	# Conditional covariance (analytical delta method): WLS + char cp + cross terms
 	[3.42252    8.04561   11.3715    50.1601    12.3280;
-					   8.04561   20.7989    28.7027   127.515     31.2934;
-					  11.3715    28.7027    41.1541   178.306     45.5874;
-					  50.1601   127.515    178.306    805.909    176.265;
-					  12.3280    31.2934    45.5874   176.265    313.704] .* 1e6)
+								   8.04561   20.7989    28.7027   127.515     31.2934;
+								  11.3715    28.7027    41.1541   178.306     45.5874;
+								  50.1601   127.515    178.306    805.909    176.265;
+								  12.3280    31.2934    45.5874   176.265    313.704] .* 1e6)
 
 const CORR_GROUPS = [
 	GROUP_EPSILON_HFM,
@@ -718,7 +718,9 @@ end
 
 Compute Standardized Rank Regression Coefficients (SRRC).
 X is [n_samples × n_params], y is [n_samples].
-Returns vector of SRRC values (one per parameter).
+Returns (β, R²) where β is the vector of SRRC values (one per parameter)
+and R² is the coefficient of determination of the rank regression (measures
+how well a linear-in-ranks model fits; low R² indicates non-monotonic effects).
 """
 function compute_srrc(X::Matrix{Float64}, y::Vector{Float64})
 	n, p = size(X)
@@ -742,7 +744,14 @@ function compute_srrc(X::Matrix{Float64}, y::Vector{Float64})
 
 	# Ordinary least squares on ranked data
 	β = X_ranked \ y_ranked
-	return β
+
+	# R² of the rank regression
+	y_pred = X_ranked * β
+	ss_res = sum((y_ranked .- y_pred) .^ 2)
+	ss_tot = sum(y_ranked .^ 2)  # already zero-mean
+	R2 = 1.0 - ss_res / ss_tot
+
+	return β, R2
 end
 
 # ============================================================================
@@ -765,7 +774,10 @@ function main()
 	mkpath(joinpath(RESULTS_DIR, "surface_temp_curves"))
 	mkpath(joinpath(RESULTS_DIR, "back_temp_curves"))
 
-	# --- Generate or reload samples (extensible) ---
+	# --- Generate or reload samples ---
+	# NOTE: We always generate the full Sobol sequence of length N_SAMPLES to
+	# preserve the low-discrepancy property. Appending a fresh sequence of
+	# length (N_SAMPLES - n_existing) would break the space-filling guarantee.
 	param_file = joinpath(RESULTS_DIR, "parameters.csv")
 	if isfile(param_file)
 		println("Reloading existing samples from $param_file...")
@@ -775,11 +787,17 @@ function main()
 		println("  Loaded $n_existing samples with $(size(samples, 1)) parameters")
 
 		if n_existing < N_SAMPLES
-			n_new = N_SAMPLES - n_existing
-			println("  Extending by $n_new additional Sobol samples...")
-			new_samples = generate_samples(CORR_GROUPS, n_new)
-			samples = hcat(samples, new_samples)
-			# Rewrite the full parameters file
+			println("  Need $N_SAMPLES samples but only have $n_existing.")
+			println("  Regenerating full Sobol sequence of length $N_SAMPLES...")
+			samples = generate_samples(CORR_GROUPS, N_SAMPLES)
+			# Verify existing samples match the first n_existing columns of
+			# the regenerated sequence (they should, since Sobol is deterministic)
+			param_csv_check = Matrix{Float64}(param_csv[1][:, 2:end]')
+			max_diff = maximum(abs.(samples[:, 1:n_existing] .- param_csv_check))
+			if max_diff > 1e-10
+				@warn "Regenerated Sobol sequence differs from saved samples " *
+					  "(max |Δ| = $max_diff). Overwriting with fresh sequence."
+			end
 			save_parameters_csv(param_file, PARAM_NAMES, samples)
 			println("  Updated $param_file ($n_existing → $N_SAMPLES samples)")
 		end
@@ -965,25 +983,37 @@ function main()
 	# Parameter values for successful runs
 	param_data = Matrix(samples[:, sample_ids]')  # [n_success × n_params]
 
-	# --- SRRC Sensitivity Analysis ---
-	println("\nSensitivity Analysis (Standardized Rank Regression Coefficients):")
+	# --- SRRC Sensitivity Analysis (screening diagnostic) ---
+	# NOTE: SRRC is a rank-based screening tool that assumes monotonic
+	# input-output relationships. It does NOT decompose variance. For
+	# publication-quality variance attribution, use the PCE-based Sobol
+	# indices in sensitivity_sobol.jl instead.
+	println("\nSRRC Screening Analysis (Standardized Rank Regression Coefficients):")
 	println("-"^70)
 
 	srrc_results = Dict{String, Vector{Float64}}()
+	srrc_r2 = Dict{String, Float64}()
+
+	# Skip solve_time (not physical) and time_to_ignition (quantized/threshold)
+	skip_qois = Set(["solve_time", "time_to_ignition"])
 
 	for (qi, qname) in enumerate(SCALAR_QOI_NAMES)
-		if qname == "solve_time"
-			continue  # skip solve_time — not a physical QoI
+		if qname ∈ skip_qois
+			continue
 		end
 
 		y = qoi_data[:, qi]
 
 		# Skip if all values are identical or contain Inf/NaN
 		if all(isfinite, y) && std(y) > 0
-			srrc = compute_srrc(param_data, y)
+			srrc, rank_r2 = compute_srrc(param_data, y)
 			srrc_results[qname] = srrc
+			srrc_r2[qname] = rank_r2
 
-			println("\n  $qname:")
+			println(@sprintf("\n  %s (rank R² = %.4f):", qname, rank_r2))
+			if rank_r2 < 0.7
+				println("    ⚠  Low rank R² — non-monotonic or higher-order effects likely")
+			end
 			sorted = sortperm(abs.(srrc), rev = true)
 			for (rank, j) in enumerate(sorted)
 				bar = repeat("█", round(Int, abs(srrc[j]) * 30))
@@ -999,14 +1029,18 @@ function main()
 	# Save SRRC results
 	srrc_file = joinpath(RESULTS_DIR, "srrc_sensitivity.csv")
 	open(srrc_file, "w") do io
-		header = "parameter," * join(keys(srrc_results), ",")
+		qoi_keys = sort(collect(keys(srrc_results)))
+		header = "parameter," * join(qoi_keys, ",")
 		println(io, header)
 		for (pi, pname) in enumerate(PARAM_NAMES)
 			row = "$pname," * join(
 				[haskey(srrc_results, qname) ? @sprintf("%.6f", srrc_results[qname][pi]) : "NaN"
-				 for qname in keys(srrc_results)], ",")
+				 for qname in qoi_keys], ",")
 			println(io, row)
 		end
+		# Append rank R² as a summary row
+		println(io, "rank_R2," * join(
+			[@sprintf("%.6f", srrc_r2[q]) for q in qoi_keys], ","))
 	end
 	println("\n  SRRC results saved to $srrc_file")
 

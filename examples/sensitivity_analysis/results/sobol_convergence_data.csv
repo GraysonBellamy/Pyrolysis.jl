@@ -1,0 +1,241 @@
+qoi,subsample_size,group,S1
+final_thickness,256,HFM calibration,0.000252
+final_thickness,256,DSC calibration,0.563084
+final_thickness,256,Water calibration,0.007207
+final_thickness,256,Virgin Cp, low-T,0.000370
+final_thickness,256,Virgin Cp, high-T,0.001738
+final_thickness,256,Char Cp,0.000008
+final_thickness,256,Heat of sorption,0.000685
+final_thickness,256,Heats of reaction,0.425456
+final_thickness,512,HFM calibration,0.000251
+final_thickness,512,DSC calibration,0.563031
+final_thickness,512,Water calibration,0.007219
+final_thickness,512,Virgin Cp, low-T,0.000371
+final_thickness,512,Virgin Cp, high-T,0.001732
+final_thickness,512,Char Cp,0.000007
+final_thickness,512,Heat of sorption,0.000681
+final_thickness,512,Heats of reaction,0.425504
+final_thickness,1024,HFM calibration,0.000251
+final_thickness,1024,DSC calibration,0.563023
+final_thickness,1024,Water calibration,0.007221
+final_thickness,1024,Virgin Cp, low-T,0.000373
+final_thickness,1024,Virgin Cp, high-T,0.001737
+final_thickness,1024,Char Cp,0.000007
+final_thickness,1024,Heat of sorption,0.000682
+final_thickness,1024,Heats of reaction,0.425492
+final_thickness,1536,HFM calibration,0.000251
+final_thickness,1536,DSC calibration,0.563027
+final_thickness,1536,Water calibration,0.007222
+final_thickness,1536,Virgin Cp, low-T,0.000373
+final_thickness,1536,Virgin Cp, high-T,0.001737
+final_thickness,1536,Char Cp,0.000007
+final_thickness,1536,Heat of sorption,0.000688
+final_thickness,1536,Heats of reaction,0.425481
+final_thickness,2048,HFM calibration,0.000251
+final_thickness,2048,DSC calibration,0.563013
+final_thickness,2048,Water calibration,0.007222
+final_thickness,2048,Virgin Cp, low-T,0.000372
+final_thickness,2048,Virgin Cp, high-T,0.001737
+final_thickness,2048,Char Cp,0.000007
+final_thickness,2048,Heat of sorption,0.000691
+final_thickness,2048,Heats of reaction,0.425494
+peak_back_temp,256,HFM calibration,0.000001
+peak_back_temp,256,DSC calibration,0.000566
+peak_back_temp,256,Water calibration,0.000003
+peak_back_temp,256,Virgin Cp, low-T,0.000013
+peak_back_temp,256,Virgin Cp, high-T,0.000004
+peak_back_temp,256,Char Cp,0.000026
+peak_back_temp,256,Heat of sorption,0.000021
+peak_back_temp,256,Heats of reaction,0.998534
+peak_back_temp,512,HFM calibration,0.000001
+peak_back_temp,512,DSC calibration,0.000470
+peak_back_temp,512,Water calibration,0.000001
+peak_back_temp,512,Virgin Cp, low-T,0.000004
+peak_back_temp,512,Virgin Cp, high-T,0.000005
+peak_back_temp,512,Char Cp,0.000005
+peak_back_temp,512,Heat of sorption,0.000005
+peak_back_temp,512,Heats of reaction,0.999097
+peak_back_temp,1024,HFM calibration,0.000001
+peak_back_temp,1024,DSC calibration,0.000499
+peak_back_temp,1024,Water calibration,0.000000
+peak_back_temp,1024,Virgin Cp, low-T,0.000000
+peak_back_temp,1024,Virgin Cp, high-T,0.000002
+peak_back_temp,1024,Char Cp,0.000002
+peak_back_temp,1024,Heat of sorption,0.000003
+peak_back_temp,1024,Heats of reaction,0.999115
+peak_back_temp,1536,HFM calibration,0.000000
+peak_back_temp,1536,DSC calibration,0.000499
+peak_back_temp,1536,Water calibration,0.000000
+peak_back_temp,1536,Virgin Cp, low-T,0.000000
+peak_back_temp,1536,Virgin Cp, high-T,0.000001
+peak_back_temp,1536,Char Cp,0.000003
+peak_back_temp,1536,Heat of sorption,0.000002
+peak_back_temp,1536,Heats of reaction,0.999121
+peak_back_temp,2048,HFM calibration,0.000000
+peak_back_temp,2048,DSC calibration,0.000503
+peak_back_temp,2048,Water calibration,0.000000
+peak_back_temp,2048,Virgin Cp, low-T,0.000000
+peak_back_temp,2048,Virgin Cp, high-T,0.000001
+peak_back_temp,2048,Char Cp,0.000001
+peak_back_temp,2048,Heat of sorption,0.000001
+peak_back_temp,2048,Heats of reaction,0.999125
+peak_mlr,256,HFM calibration,0.000000
+peak_mlr,256,DSC calibration,0.382954
+peak_mlr,256,Water calibration,0.000000
+peak_mlr,256,Virgin Cp, low-T,0.000000
+peak_mlr,256,Virgin Cp, high-T,0.000019
+peak_mlr,256,Char Cp,0.000001
+peak_mlr,256,Heat of sorption,0.000000
+peak_mlr,256,Heats of reaction,0.616752
+peak_mlr,512,HFM calibration,0.000000
+peak_mlr,512,DSC calibration,0.382956
+peak_mlr,512,Water calibration,0.000000
+peak_mlr,512,Virgin Cp, low-T,0.000000
+peak_mlr,512,Virgin Cp, high-T,0.000021
+peak_mlr,512,Char Cp,0.000001
+peak_mlr,512,Heat of sorption,0.000000
+peak_mlr,512,Heats of reaction,0.616760
+peak_mlr,1024,HFM calibration,0.000000
+peak_mlr,1024,DSC calibration,0.382998
+peak_mlr,1024,Water calibration,0.000000
+peak_mlr,1024,Virgin Cp, low-T,0.000000
+peak_mlr,1024,Virgin Cp, high-T,0.000020
+peak_mlr,1024,Char Cp,0.000001
+peak_mlr,1024,Heat of sorption,0.000000
+peak_mlr,1024,Heats of reaction,0.616726
+peak_mlr,1536,HFM calibration,0.000000
+peak_mlr,1536,DSC calibration,0.382993
+peak_mlr,1536,Water calibration,0.000000
+peak_mlr,1536,Virgin Cp, low-T,0.000000
+peak_mlr,1536,Virgin Cp, high-T,0.000021
+peak_mlr,1536,Char Cp,0.000001
+peak_mlr,1536,Heat of sorption,0.000000
+peak_mlr,1536,Heats of reaction,0.616733
+peak_mlr,2048,HFM calibration,0.000000
+peak_mlr,2048,DSC calibration,0.383004
+peak_mlr,2048,Water calibration,0.000000
+peak_mlr,2048,Virgin Cp, low-T,0.000000
+peak_mlr,2048,Virgin Cp, high-T,0.000020
+peak_mlr,2048,Char Cp,0.000001
+peak_mlr,2048,Heat of sorption,0.000000
+peak_mlr,2048,Heats of reaction,0.616720
+peak_surface_temp,256,HFM calibration,0.000001
+peak_surface_temp,256,DSC calibration,0.001001
+peak_surface_temp,256,Water calibration,0.000001
+peak_surface_temp,256,Virgin Cp, low-T,0.000003
+peak_surface_temp,256,Virgin Cp, high-T,0.000004
+peak_surface_temp,256,Char Cp,0.000018
+peak_surface_temp,256,Heat of sorption,0.000019
+peak_surface_temp,256,Heats of reaction,0.998532
+peak_surface_temp,512,HFM calibration,0.000001
+peak_surface_temp,512,DSC calibration,0.000929
+peak_surface_temp,512,Water calibration,0.000001
+peak_surface_temp,512,Virgin Cp, low-T,0.000001
+peak_surface_temp,512,Virgin Cp, high-T,0.000001
+peak_surface_temp,512,Char Cp,0.000006
+peak_surface_temp,512,Heat of sorption,0.000004
+peak_surface_temp,512,Heats of reaction,0.998841
+peak_surface_temp,1024,HFM calibration,0.000000
+peak_surface_temp,1024,DSC calibration,0.000953
+peak_surface_temp,1024,Water calibration,0.000000
+peak_surface_temp,1024,Virgin Cp, low-T,0.000000
+peak_surface_temp,1024,Virgin Cp, high-T,0.000000
+peak_surface_temp,1024,Char Cp,0.000004
+peak_surface_temp,1024,Heat of sorption,0.000001
+peak_surface_temp,1024,Heats of reaction,0.998832
+peak_surface_temp,1536,HFM calibration,0.000000
+peak_surface_temp,1536,DSC calibration,0.000944
+peak_surface_temp,1536,Water calibration,0.000000
+peak_surface_temp,1536,Virgin Cp, low-T,0.000000
+peak_surface_temp,1536,Virgin Cp, high-T,0.000000
+peak_surface_temp,1536,Char Cp,0.000005
+peak_surface_temp,1536,Heat of sorption,0.000001
+peak_surface_temp,1536,Heats of reaction,0.998850
+peak_surface_temp,2048,HFM calibration,0.000000
+peak_surface_temp,2048,DSC calibration,0.000942
+peak_surface_temp,2048,Water calibration,0.000001
+peak_surface_temp,2048,Virgin Cp, low-T,0.000000
+peak_surface_temp,2048,Virgin Cp, high-T,0.000000
+peak_surface_temp,2048,Char Cp,0.000003
+peak_surface_temp,2048,Heat of sorption,0.000001
+peak_surface_temp,2048,Heats of reaction,0.998857
+time_to_peak_mlr,256,HFM calibration,0.000452
+time_to_peak_mlr,256,DSC calibration,0.805210
+time_to_peak_mlr,256,Water calibration,0.014876
+time_to_peak_mlr,256,Virgin Cp, low-T,0.000813
+time_to_peak_mlr,256,Virgin Cp, high-T,0.002882
+time_to_peak_mlr,256,Char Cp,0.000002
+time_to_peak_mlr,256,Heat of sorption,0.001490
+time_to_peak_mlr,256,Heats of reaction,0.174064
+time_to_peak_mlr,512,HFM calibration,0.000518
+time_to_peak_mlr,512,DSC calibration,0.805114
+time_to_peak_mlr,512,Water calibration,0.014983
+time_to_peak_mlr,512,Virgin Cp, low-T,0.000786
+time_to_peak_mlr,512,Virgin Cp, high-T,0.002895
+time_to_peak_mlr,512,Char Cp,0.000002
+time_to_peak_mlr,512,Heat of sorption,0.001443
+time_to_peak_mlr,512,Heats of reaction,0.174123
+time_to_peak_mlr,1024,HFM calibration,0.000518
+time_to_peak_mlr,1024,DSC calibration,0.805148
+time_to_peak_mlr,1024,Water calibration,0.015065
+time_to_peak_mlr,1024,Virgin Cp, low-T,0.000761
+time_to_peak_mlr,1024,Virgin Cp, high-T,0.002924
+time_to_peak_mlr,1024,Char Cp,0.000001
+time_to_peak_mlr,1024,Heat of sorption,0.001449
+time_to_peak_mlr,1024,Heats of reaction,0.174019
+time_to_peak_mlr,1536,HFM calibration,0.000516
+time_to_peak_mlr,1536,DSC calibration,0.805036
+time_to_peak_mlr,1536,Water calibration,0.015075
+time_to_peak_mlr,1536,Virgin Cp, low-T,0.000772
+time_to_peak_mlr,1536,Virgin Cp, high-T,0.002898
+time_to_peak_mlr,1536,Char Cp,0.000000
+time_to_peak_mlr,1536,Heat of sorption,0.001442
+time_to_peak_mlr,1536,Heats of reaction,0.174143
+time_to_peak_mlr,2048,HFM calibration,0.000517
+time_to_peak_mlr,2048,DSC calibration,0.804776
+time_to_peak_mlr,2048,Water calibration,0.015102
+time_to_peak_mlr,2048,Virgin Cp, low-T,0.000783
+time_to_peak_mlr,2048,Virgin Cp, high-T,0.002897
+time_to_peak_mlr,2048,Char Cp,0.000000
+time_to_peak_mlr,2048,Heat of sorption,0.001444
+time_to_peak_mlr,2048,Heats of reaction,0.174364
+total_mass_loss_pct,256,HFM calibration,0.000252
+total_mass_loss_pct,256,DSC calibration,0.563236
+total_mass_loss_pct,256,Water calibration,0.007209
+total_mass_loss_pct,256,Virgin Cp, low-T,0.000370
+total_mass_loss_pct,256,Virgin Cp, high-T,0.001739
+total_mass_loss_pct,256,Char Cp,0.000008
+total_mass_loss_pct,256,Heat of sorption,0.000685
+total_mass_loss_pct,256,Heats of reaction,0.425303
+total_mass_loss_pct,512,HFM calibration,0.000251
+total_mass_loss_pct,512,DSC calibration,0.563184
+total_mass_loss_pct,512,Water calibration,0.007221
+total_mass_loss_pct,512,Virgin Cp, low-T,0.000371
+total_mass_loss_pct,512,Virgin Cp, high-T,0.001733
+total_mass_loss_pct,512,Char Cp,0.000007
+total_mass_loss_pct,512,Heat of sorption,0.000681
+total_mass_loss_pct,512,Heats of reaction,0.425350
+total_mass_loss_pct,1024,HFM calibration,0.000251
+total_mass_loss_pct,1024,DSC calibration,0.563176
+total_mass_loss_pct,1024,Water calibration,0.007222
+total_mass_loss_pct,1024,Virgin Cp, low-T,0.000373
+total_mass_loss_pct,1024,Virgin Cp, high-T,0.001737
+total_mass_loss_pct,1024,Char Cp,0.000007
+total_mass_loss_pct,1024,Heat of sorption,0.000682
+total_mass_loss_pct,1024,Heats of reaction,0.425338
+total_mass_loss_pct,1536,HFM calibration,0.000251
+total_mass_loss_pct,1536,DSC calibration,0.563180
+total_mass_loss_pct,1536,Water calibration,0.007223
+total_mass_loss_pct,1536,Virgin Cp, low-T,0.000373
+total_mass_loss_pct,1536,Virgin Cp, high-T,0.001738
+total_mass_loss_pct,1536,Char Cp,0.000007
+total_mass_loss_pct,1536,Heat of sorption,0.000688
+total_mass_loss_pct,1536,Heats of reaction,0.425327
+total_mass_loss_pct,2048,HFM calibration,0.000251
+total_mass_loss_pct,2048,DSC calibration,0.563166
+total_mass_loss_pct,2048,Water calibration,0.007224
+total_mass_loss_pct,2048,Virgin Cp, low-T,0.000372
+total_mass_loss_pct,2048,Virgin Cp, high-T,0.001738
+total_mass_loss_pct,2048,Char Cp,0.000007
+total_mass_loss_pct,2048,Heat of sorption,0.000691
+total_mass_loss_pct,2048,Heats of reaction,0.425340
