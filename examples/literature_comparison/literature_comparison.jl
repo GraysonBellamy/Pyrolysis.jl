@@ -1,7 +1,7 @@
 """
 Literature Property Comparison — Douglas Fir Cone Calorimeter
 
-Runs 7 simulations with literature-sourced property values substituted one
+Runs 9 simulations with literature-sourced property values substituted one
 category at a time, using the sensitivity analysis baseline as the reference
 configuration (240 cells, 12 mm slab, 50 kW/m², 6% MC, 600 s).
 
@@ -10,16 +10,18 @@ Variants:
   2. Virgin cp — Dupont et al. (2014), high
   3. Char cp — Hostikka & Matala (2017), low
   4. Char cp — Edrich (1980), high
-  5. Heats of reaction — Rath et al. (2003), ΔH_P = +428 kJ/kg
-  6. Heats of reaction — Jones et al. (2020), ΔH_P = +382 kJ/kg
+  5. Heats of reaction — Rath et al. (2003), ΔH_P = +428 kJ/kg (uniform)
+  6. Heats of reaction — Jones et al. (2020), ΔH_P = +382 kJ/kg (uniform)
   7. Heat of sorption — Free water only (2442 kJ/kg)
+  8. Heats of reaction — Jones et al. (2020), two-zone (f_P=2.244, f_S=0.279)
+  9. Heats of reaction — Rath et al. (2003), two-zone (f_P=2.468, f_S=0.185)
 
 Outputs (saved to results/):
   - {label}_results.csv per run (time, mlr, surface_temp, back_temp, total_mass, thickness)
   - literature_comparison_qois.csv summary table
 
 Usage:
-  julia -p 7 --project=. examples/literature_comparison/literature_comparison.jl
+  julia -p 9 --project=. examples/literature_comparison/literature_comparison.jl
   julia --project=. examples/literature_comparison/literature_comparison.jl   # serial
 """
 
@@ -79,7 +81,7 @@ println("Running with $(nworkers()) worker(s)")
 
 	function baseline_hos(T, ξ)
 		MC = 100.0 * ξ[LC_MOISTURE_IDX] / LC_ρ_DRY_BASIS
-		return (2279.76 + 786.962 * exp(-0.11436 * MC)) * 1e3
+		return (2450.4209 + 875.6441 * exp(-0.11217 * MC)) * 1e3
 	end
 
 	# ========================================================================
@@ -128,7 +130,8 @@ println("Running with $(nworkers()) worker(s)")
 		label::String
 		virgin_cp_key::Symbol
 		char_cp_key::Symbol
-		hrxn_scale::Float64    # 1.0 = nominal; multiply NOMINAL_HRXN by this
+		hrxn_scale::Float64      # uniform scale: multiply all NOMINAL_HRXN by this
+		hrxn_scale_secondary::Float64  # two-zone: secondary zone (rxns 4-5) scale; NaN = use hrxn_scale
 		hos_key::Symbol
 	end
 
@@ -140,7 +143,12 @@ println("Running with $(nworkers()) worker(s)")
 		virgin_cp = VIRGIN_CP_DISPATCH[spec.virgin_cp_key]
 		char_cp   = CHAR_CP_DISPATCH[spec.char_cp_key]
 		hos_func  = HOS_DISPATCH[spec.hos_key]
-		hrxn      = LC_NOMINAL_HRXN .* spec.hrxn_scale
+
+		# Two-zone scaling: primary (rxns 1-3) vs secondary (rxns 4-5)
+		f_p = spec.hrxn_scale
+		f_s = isnan(spec.hrxn_scale_secondary) ? spec.hrxn_scale : spec.hrxn_scale_secondary
+		hrxn = [LC_NOMINAL_HRXN[1] * f_p, LC_NOMINAL_HRXN[2] * f_p, LC_NOMINAL_HRXN[3] * f_p,
+			LC_NOMINAL_HRXN[4] * f_s, LC_NOMINAL_HRXN[5] * f_s]
 
 		# Intermediate cp's via cumulative-yield interpolation
 		int1_cp = CallableProperty(T -> (1 - LC_ALPHA[1]) * virgin_cp(T) + LC_ALPHA[1] * char_cp(T))
@@ -287,28 +295,128 @@ println("Running with $(nworkers()) worker(s)")
 
 	const LC_MLR_IGNITION_THRESHOLD = 3e-3
 
+	# --- New QoI constants ---
+	const LC_FIRST_PEAK_T_START = 30.0       # [s] skip initial moisture transient
+	const LC_PYROLYSIS_ONSET_THRESHOLD = 0.01 # 1% dry mass loss
+	const LC_SOLID_COMPONENT_INDICES = 1:6    # DF, int1-4, Char
+
+	function time_to_threshold(t, curve, fraction)
+		T0 = curve[1]
+		T_max = maximum(curve)
+		threshold = T0 + fraction * (T_max - T0)
+		idx = findfirst(x -> x >= threshold, curve)
+		return idx !== nothing ? t[idx] : Inf
+	end
+
+	function compute_dry_mass_series(sol)
+		nt = length(sol.times)
+		A = sol.problem.mesh.cross_section_area
+		dry_mass = Vector{Float64}(undef, nt)
+		for i in 1:nt
+			ξ = sol.concentrations[i]
+			n_cells = size(ξ, 2)
+			m = 0.0
+			for j in 1:n_cells
+				v = sol.problem.mesh.cell_volumes[j]
+				for k in LC_SOLID_COMPONENT_INDICES
+					m += ξ[k, j] * v
+				end
+			end
+			dry_mass[i] = m / A
+		end
+		return dry_mass
+	end
+
+	function find_first_pyrolysis_peak(t, mlr, global_peak_idx)
+		i_start = findfirst(x -> x >= LC_FIRST_PEAK_T_START, t)
+		if i_start === nothing || i_start >= global_peak_idx
+			return (NaN, NaN)
+		end
+		for i in (i_start+1):(global_peak_idx-1)
+			if mlr[i] >= mlr[i-1] && mlr[i] >= mlr[i+1]
+				return (mlr[i], t[i])
+			end
+		end
+		i_mid = div(i_start + global_peak_idx, 2)
+		if i_mid > i_start
+			local_range = i_start:i_mid
+			idx = local_range[argmax(mlr[local_range])]
+			return (mlr[idx], t[idx])
+		end
+		return (NaN, NaN)
+	end
+
+	function find_pyrolysis_onset(t, dry_mass)
+		m0 = dry_mass[1]
+		threshold_mass = m0 * (1.0 - LC_PYROLYSIS_ONSET_THRESHOLD)
+		idx = findfirst(m -> m <= threshold_mass, dry_mass)
+		if idx === nothing
+			return Inf
+		elseif idx == 1
+			return t[1]
+		else
+			f = (dry_mass[idx-1] - threshold_mass) / (dry_mass[idx-1] - dry_mass[idx])
+			return t[idx-1] + f * (t[idx] - t[idx-1])
+		end
+	end
+
+	function find_back_temp_at_mass_loss(t, total_mass, back_temp, fraction)
+		m0 = total_mass[1]
+		threshold = m0 * (1.0 - fraction)
+		idx = findfirst(m -> m <= threshold, total_mass)
+		if idx === nothing
+			return NaN
+		elseif idx == 1
+			return back_temp[1]
+		else
+			f = (total_mass[idx-1] - threshold) / (total_mass[idx-1] - total_mass[idx])
+			return back_temp[idx-1] + f * (back_temp[idx] - back_temp[idx-1])
+		end
+	end
+
 	function extract_qois(sol)
 		t = sol.times
 		mlr = sol.surface_mass_flux
 		T_surf = sol.surface_temperature
 		T_back = sol.back_temperature
+		total_mass = sol.total_mass
 
 		peak_mlr = maximum(mlr)
-		time_to_peak = t[argmax(mlr)]
+		peak_idx = argmax(mlr)
+		time_to_peak = t[peak_idx]
 
 		tig_idx = findfirst(x -> x > LC_MLR_IGNITION_THRESHOLD, mlr)
 		time_to_ignition = tig_idx !== nothing ? t[tig_idx] : Inf
 
-		total_mass_loss = (1.0 - sol.total_mass[end] / sol.total_mass[1]) * 100.0
+		total_mass_loss = (1.0 - total_mass[end] / total_mass[1]) * 100.0
+
+		# Threshold-crossing times for temperature curves
+		t_surf_70 = time_to_threshold(t, T_surf, 0.70)
+		t_surf_95 = time_to_threshold(t, T_surf, 0.95)
+		t_back_5  = time_to_threshold(t, T_back, 0.05)
+		t_back_95 = time_to_threshold(t, T_back, 0.95)
+
+		# --- New QoIs ---
+		peak_first, time_peak_first = find_first_pyrolysis_peak(t, mlr, peak_idx)
+		dry_mass = compute_dry_mass_series(sol)
+		onset_time = find_pyrolysis_onset(t, dry_mass)
+		T_back_50 = find_back_temp_at_mass_loss(t, total_mass, T_back, 0.50)
 
 		return (
 			peak_mlr = peak_mlr,
 			time_to_peak_mlr = time_to_peak,
 			time_to_ignition = time_to_ignition,
 			total_mass_loss_pct = total_mass_loss,
-			peak_surface_temp = maximum(T_surf),
-			peak_back_temp = maximum(T_back),
+			t_surf_70pct = t_surf_70,
+			t_surf_95pct = t_surf_95,
+			t_back_5pct = t_back_5,
+			t_back_95pct = t_back_95,
 			final_thickness = sol.thickness_history[end],
+			peak_mlr_first = peak_first,
+			time_to_peak_mlr_first = time_peak_first,
+			pyrolysis_onset_time = onset_time,
+			T_back_50pct_mass_loss = T_back_50,
+			dry_mass_curve = dry_mass,
 		)
 	end
 
@@ -323,18 +431,19 @@ println("Running with $(nworkers()) worker(s)")
 
 		qois = extract_qois(sol)
 
-		# Save time-series CSV
+		# Save time-series CSV (including dry mass for new QoI reproducibility)
 		filepath = joinpath(results_dir, "$(spec.label)_results.csv")
 		open(filepath, "w") do io
-			println(io, "time,mlr,surface_temp,back_temp,total_mass,thickness")
+			println(io, "time,mlr,surface_temp,back_temp,total_mass,thickness,dry_mass")
 			for i in eachindex(sol.times)
-				@printf(io, "%.6g,%.10g,%.6g,%.6g,%.10g,%.10g\n",
+				@printf(io, "%.6g,%.10g,%.6g,%.6g,%.10g,%.10g,%.10g\n",
 					sol.times[i],
 					sol.surface_mass_flux[i],
 					sol.surface_temperature[i],
 					sol.back_temperature[i],
 					sol.total_mass[i],
-					sol.thickness_history[i])
+					sol.thickness_history[i],
+					qois.dry_mass_curve[i])
 			end
 		end
 
@@ -351,13 +460,15 @@ end # @everywhere
 const RESULTS_DIR = joinpath(@__DIR__, "results")
 
 const RUNS = [
-	LitCompRunSpec("virgin_cp_harada", :harada, :baseline, 1.0, :baseline),
-	LitCompRunSpec("virgin_cp_dupont", :dupont, :baseline, 1.0, :baseline),
-	LitCompRunSpec("char_cp_hostikka", :baseline, :hostikka, 1.0, :baseline),
-	LitCompRunSpec("char_cp_edrich", :baseline, :edrich, 1.0, :baseline),
-	LitCompRunSpec("hrxn_rath", :baseline, :baseline, 428.0 / 113.74, :baseline),
-	LitCompRunSpec("hrxn_jones", :baseline, :baseline, 382.0 / 113.74, :baseline),
-	LitCompRunSpec("hos_free_water", :baseline, :baseline, 1.0, :free_water),
+	LitCompRunSpec("virgin_cp_harada", :harada, :baseline, 1.0, NaN, :baseline),
+	LitCompRunSpec("virgin_cp_dupont", :dupont, :baseline, 1.0, NaN, :baseline),
+	LitCompRunSpec("char_cp_hostikka", :baseline, :hostikka, 1.0, NaN, :baseline),
+	LitCompRunSpec("char_cp_edrich", :baseline, :edrich, 1.0, NaN, :baseline),
+	LitCompRunSpec("hrxn_rath", :baseline, :baseline, 428.0 / 113.74, NaN, :baseline),
+	LitCompRunSpec("hrxn_jones", :baseline, :baseline, 382.0 / 113.74, NaN, :baseline),
+	LitCompRunSpec("hos_free_water", :baseline, :baseline, 1.0, NaN, :free_water),
+	LitCompRunSpec("hrxn_jones_2zone", :baseline, :baseline, 400.0 / 178.25, -18.0 / -64.51, :baseline),
+	LitCompRunSpec("hrxn_rath_2zone", :baseline, :baseline, 440.0 / 178.25, -12.0 / -64.51, :baseline),
 ]
 
 # ============================================================================
@@ -369,7 +480,7 @@ function main()
 
 	println("\n", "="^60)
 	println("  Literature Property Comparison — Douglas Fir")
-	println("  $(length(RUNS)) variant simulations on $(nworkers()) worker(s)")
+	println("  $(length(RUNS)) variant simulations (incl. 2 two-zone) on $(nworkers()) worker(s)")
 	println("="^60, "\n")
 
 	# Run all simulations in parallel via pmap
@@ -380,23 +491,35 @@ function main()
 		@printf("%-22s  %.1f s  (retcode: %s)\n", r.label, r.elapsed, r.retcode)
 		q = r.qois
 		@printf("  Peak MLR: %.4e kg/(m²·s) at t=%.1f s\n", q.peak_mlr, q.time_to_peak_mlr)
+		@printf("  1st peak MLR: %.4e kg/(m²·s) at t=%.1f s\n", q.peak_mlr_first, q.time_to_peak_mlr_first)
 		@printf("  Total mass loss: %.2f%%\n", q.total_mass_loss_pct)
-		@printf("  Peak T_surf: %.1f K, Peak T_back: %.1f K\n", q.peak_surface_temp, q.peak_back_temp)
+		@printf("  Pyrolysis onset (1%% dry): %.1f s\n", q.pyrolysis_onset_time)
+		@printf("  T_back at 50%% mass loss: %.1f K\n", q.T_back_50pct_mass_loss)
+		@printf("  t_surf 70%%: %.1f s, t_surf 95%%: %.1f s\n", q.t_surf_70pct, q.t_surf_95pct)
+		@printf("  t_back 5%%: %.1f s, t_back 95%%: %.1f s\n", q.t_back_5pct, q.t_back_95pct)
 		@printf("  Final thickness: %.4e m\n\n", q.final_thickness)
 	end
 
 	# Save summary QoI table
 	qoi_file = joinpath(RESULTS_DIR, "literature_comparison_qois.csv")
 	open(qoi_file, "w") do io
-		println(io, "run_id,label,peak_mlr,time_to_peak_mlr,time_to_ignition," *
-					"total_mass_loss_pct,peak_surface_temp,peak_back_temp,final_thickness")
+		println(
+			io,
+			"run_id,label,peak_mlr,time_to_peak_mlr,time_to_ignition," *
+			"total_mass_loss_pct,t_surf_70pct,t_surf_95pct,t_back_5pct,t_back_95pct," *
+			"final_thickness,peak_mlr_first,time_to_peak_mlr_first," *
+			"pyrolysis_onset_time,T_back_50pct_mass_loss",
+		)
 		for (i, r) in enumerate(results)
 			q = r.qois
-			@printf(io, "%d,%s,%.10g,%.6g,%.6g,%.6g,%.6g,%.6g,%.10g\n",
+			@printf(io, "%d,%s,%.10g,%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%.10g,%.10g,%.6g,%.6g,%.6g\n",
 				i, r.label,
 				q.peak_mlr, q.time_to_peak_mlr, q.time_to_ignition,
-				q.total_mass_loss_pct, q.peak_surface_temp, q.peak_back_temp,
-				q.final_thickness)
+				q.total_mass_loss_pct, q.t_surf_70pct, q.t_surf_95pct,
+				q.t_back_5pct, q.t_back_95pct,
+				q.final_thickness,
+				q.peak_mlr_first, q.time_to_peak_mlr_first,
+				q.pyrolysis_onset_time, q.T_back_50pct_mass_loss)
 		end
 	end
 

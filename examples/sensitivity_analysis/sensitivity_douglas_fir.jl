@@ -4,16 +4,16 @@ Sensitivity Analysis of Douglas Fir Cone Calorimeter Simulation
 Propagates uncertainties in thermophysical input parameters through the
 07_douglas_fir_cone.jl simulation using Sobol quasi-random sampling.
 
-Uncertain parameters (17 total):
-  - Systematic (Type B) instrument biases: ε_HFM, ε_STA, ε_water (3)
+Uncertain parameters (16 total):
+  - Systematic (Type B) instrument biases: ε_HFM, ε_STA (2)
 	  Multiplicative calibration biases that scale measurements from each
 	  instrument uniformly. Following GUM (JCGM 100:2008):
 	  ε_HFM ~ N(0, 0.00577²)  — HFM heat flow accuracy (1%/√3, manufacturer spec)
 	  ε_STA ~ N(0, 0.0261²)   — DSC multi-point enthalpy calibration (7 standards)
-	  ε_water ~ N(0, 0.01732²) — isothermal water-evaporation calibration (22 replicates)
 	  ε_STA applies to DSC-derived Cp (virgin seg 3, char) and ΔH.
-	  ε_water applies to HoS (independent calibration pathway, not ε_STA).
 	  ε_HFM applies to HFM-derived Cp (virgin seg 1).
+	  HoS calibration uncertainty is embedded in the total covariance matrix
+	  (see Group 4 below); no separate Type B factor is needed.
   - Heat capacity regression coefficients for DF virgin (4) and Char (2)
 	(Segment 2 [323–425 K] is interpolated from segments 1 & 3, not independent)
 	(Intermediate cp's are derived via cumulative-yield interpolation)
@@ -27,11 +27,13 @@ cross-correlations (e.g., intercept–slope anti-correlation in cp regressions,
 amplitude–decay correlation in the HoS fit, shared baseline uncertainty in ΔH).
 Type B parameters are sampled independently per instrument (STA, HFM) and applied
 as multiplicative factors (1 + ε) to all Cp values from that instrument.
+HoS uses an asymptote-based calibration (f_cal = L_vap(T_iso) / â_uncal) whose
+uncertainty is embedded in the total covariance via Jacobian propagation.
 
 Kinetic parameters (A, E) and all other properties are held fixed.
 
 Outputs:
-  - Scalar QoIs: peak MLR, time to ignition, total mass loss, peak temperatures
+  - Scalar QoIs: peak MLR, time to ignition, total mass loss, temperature rise times
   - Time-series: MLR curve, surface temperature, back temperature per run
   - Sensitivity ranking via Standardized Rank Regression Coefficients (SRRC)
   - Uncertainty envelope plots (median, 50% CI, 90% CI)
@@ -79,14 +81,13 @@ using LinearAlgebra
 # distributions. Covariance matrices from the regression JSON files in
 # oxidative_pyrolysis/ (Bellamy, McKinnon, Stoliarov, energetics.tex).
 #
-# Eight correlated groups:
+# Seven correlated groups:
 #   0a. ε_HFM (systematic bias)           — 1×1 N(0, 0.00577²)
 #   0b. ε_STA (systematic bias)           — 1×1 N(0, 0.0261²)
-#   0c. ε_water (systematic bias)          — 1×1 N(0, 0.01732²)
 #   1. DF virgin cp segment 1 (a1, b1)    — 2×2 from HFM regression
 #   2. DF virgin cp segment 3 (a3, b3)    — 2×2 from STA/DSC regression
 #   3. Char cp (a, b)                      — 2×2 from independent char STA
-#   4. Heat of sorption (a, b, c)          — 3×3 from WLS exponential fit
+#   4. Heat of sorption (a, b, c)          — 3×3 total covariance (WLS + calibration)
 #   5. Heats of reaction (ΔH1–ΔH5)        — 5×5 conditional covariance (analytical delta method)
 #
 # Cp regressions were fit in J/(g·K); values and covariances are converted
@@ -100,16 +101,17 @@ using LinearAlgebra
 #   Type B (systematic):
 #     ε_HFM  — HFM heat flow accuracy, 1%/√3 = 0.577% (manufacturer spec)     [Group 0a]
 #     ε_STA  — DSC multi-point enthalpy calibration, 2.61% (7 standards)        [Group 0b]
-#     ε_water — isothermal water calibration for HoS, 1.73% (22 replicates)     [Group 0c]
 #   Type A (statistical/regression):
 #     HFM cp regression (seg 1)              — 2×2 covariance                   [Group 1]
 #     STA cp regression (seg 3)              — 2×2 covariance                   [Group 2]
 #     Independent char STA cp regression     — 2×2 covariance                   [Group 3]
-#     HoS WLS exponential fit                — 3×3 covariance                   [Group 4]
+#     HoS total (WLS + asymptote cal.)       — 3×3 covariance                   [Group 4]
 #     ΔH conditional (WLS + char cp + cross) — 5×5 covariance                   [Group 5]
 #   Coupling:
 #     Virgin cp → ΔH Jacobian correction     — J_HRXN_CP × δ(a₃,b₃) at runtime
 #     ΔH × ε_STA multiplicative scaling      — applied after Jacobian correction
+#   HoS calibration: embedded in Group 4 total covariance via Jacobian propagation
+#     of f_cal = L_vap(T_iso) / â_uncal (asymptote constraint, delta method)
 #
 # OMITTED (justified):
 #   STA temperature calibration on Cp        — 4.6% of STA Type B variance; negligible
@@ -125,7 +127,7 @@ using LinearAlgebra
 	CorrelatedGroup
 
 Defines a group of parameters with a joint multivariate normal distribution.
-`indices` maps into the 17-element θ vector passed to build_and_solve.
+`indices` maps into the 16-element θ vector passed to build_and_solve.
 """
 struct CorrelatedGroup
 	name::String
@@ -135,22 +137,22 @@ struct CorrelatedGroup
 end
 
 const PARAM_NAMES = [
-	:epsilon_hfm, :epsilon_sta, :epsilon_water,                  # indices 1–3  (Type B biases)
-	:df_cp_a1, :df_cp_b1,                                       # indices 4–5  (Type A, HFM)
-	:df_cp_a3, :df_cp_b3,                                       # indices 6–7  (Type A, STA/DSC)
-	:char_cp_a, :char_cp_b,                                     # indices 8–9  (Type A, char STA)
-	:hos_baseline, :hos_amplitude, :hos_decay,                   # indices 10–12
-	:h_rxn1, :h_rxn2, :h_rxn3, :h_rxn4, :h_rxn5,               # indices 13–17
+	:epsilon_hfm, :epsilon_sta,                                  # indices 1–2  (Type B biases)
+	:df_cp_a1, :df_cp_b1,                                       # indices 3–4  (Type A, HFM)
+	:df_cp_a3, :df_cp_b3,                                       # indices 5–6  (Type A, STA/DSC)
+	:char_cp_a, :char_cp_b,                                     # indices 7–8  (Type A, char STA)
+	:hos_baseline, :hos_amplitude, :hos_decay,                   # indices 9–11 (total cov, WLS + cal.)
+	:h_rxn1, :h_rxn2, :h_rxn3, :h_rxn4, :h_rxn5,               # indices 12–16
 ]
-const N_PARAMS = 17
+const N_PARAMS = 16
 
 const NOMINAL_VALUES = [
-	0.0, 0.0, 0.0,                # ε_HFM, ε_STA, ε_water (zero-mean biases)
-	-53.052, 4.2453,               # DF cp seg 1 [J/(kg·K)]  (HFM regression)
-	-2131.33, 9.11878,             # DF cp seg 3 [J/(kg·K)]  (STA regression)
-	347.212, 1.78423,              # Char cp [J/(kg·K)]       (independent char STA)
-	2279.76, 786.962, 0.11436,    # HoS [kJ/kg, kJ/kg, 1/%] (WLS exponential fit)
-	-19153.3, -5573.79, 266699.7, -219638.7, -12381.6,  # ΔH [J/kg]
+	0.0, 0.0,                      # ε_HFM, ε_STA (zero-mean biases)
+	-53.05211487520359, 4.245295626034723,               # DF cp seg 1 [J/(kg·K)]  (HFM regression)
+	-2131.3324271799936, 9.118778580751729,              # DF cp seg 3 [J/(kg·K)]  (STA regression)
+	347.2115543239091, 1.7842281021527068,               # Char cp [J/(kg·K)]       (independent char STA)
+	2450.4209098210367, 875.6441216446293, 0.11216842711063967, # HoS [kJ/kg, kJ/kg, 1/%] (asymptote-calibrated WLS fit)
+	-18679.656956492707, -4360.408194805666, 268420.48898703894, -211940.9321063604, -9550.130692481673,  # ΔH [J/kg]
 ]
 
 # --- Group 0a: Type B systematic bias for HFM (ε_HFM) ---
@@ -162,7 +164,7 @@ const NOMINAL_VALUES = [
 # Source: combined_uncertainty_budget.json → shared_systematics.HFM
 const GROUP_EPSILON_HFM = CorrelatedGroup("eps_HFM", [1],
 	[0.0],
-	[0.005774^2;;])
+	[0.005773502691896258^2;;])
 
 # --- Group 0b: Type B systematic bias for STA/DSC (ε_STA) ---
 # DSC multi-point enthalpy calibration (7 standards after RbNO₃ exclusion):
@@ -172,68 +174,59 @@ const GROUP_EPSILON_HFM = CorrelatedGroup("eps_HFM", [1],
 # Source: dsc_calibration_model.json, combined_uncertainty_budget.json
 const GROUP_EPSILON_STA = CorrelatedGroup("eps_STA", [2],
 	[0.0],
-	[0.02613^2;;])
-
-# --- Group 0c: Type B systematic bias for HoS water calibration (ε_water) ---
-# HoS was measured isothermally on the STA, but calibrated independently via
-# water-evaporation runs (S = |∫q dt| / (Δm·Lvap)), NOT the standard multi-point
-# S(T) polynomial. This gives a separate, smaller calibration uncertainty.
-# u_rel = 1.73% (1σ) from 22 replicates (11 DF + 11 RO), 21 dof.
-# Applied as (1 + ε_water) to HoS parameters a (asymptote) and b (amplitude);
-# c (decay constant) is a shape parameter unaffected by sensitivity scaling.
-# Since (1+ε)(a + b·exp(-c·MC)) = (1+ε)·a + (1+ε)·b·exp(-c·MC), scaling a and b
-# is equivalent to scaling the entire HoS expression.
-# Source: isothermal_dsc_calibration_model.json, combined_uncertainty_budget.json
-const GROUP_EPSILON_WATER = CorrelatedGroup("eps_water", [3],
-	[0.0],
-	[0.01732^2;;])
+	[0.026126628112973345^2;;])
 
 # --- Group 1: DF virgin cp segment 1 (HFM), T ≤ 323 K ---
 # Source: douglas_fir_hfm/regression_results.json
 # JSON units: J/(g·K) → script units: J/(kg·K), covariance ×1e6
 # NOTE: This is the Type A (regression) covariance only. Type B is handled
 # by ε_HFM above, applied as (1 + ε_HFM) × Cp in build_and_solve.
-const GROUP_DF_CP_SEG1 = CorrelatedGroup("DF_cp_seg1", [4, 5],
-	[-53.052, 4.2453],
+const GROUP_DF_CP_SEG1 = CorrelatedGroup("DF_cp_seg1", [3, 4],
+	[-53.05211487520359, 4.245295626034723],
 	#         a1              b1          (intercept, slope)
-	[0.21819^2 * 1e6   -1.5350e-4 * 1e6;
-										 -1.5350e-4 * 1e6   7.038e-4^2 * 1e6])
+	[0.21818536907225622^2 * 1e6   -0.00015350444295505884 * 1e6;
+																		  -0.00015350444295505884 * 1e6   0.0007038176820430565^2 * 1e6])
 
 # --- Group 2: DF virgin cp segment 3 (STA/DSC), T > 425 K ---
 # Source: douglas_fir_sta/regression_results.json
 # NOTE: Type A only. Type B handled by ε_STA.
-const GROUP_DF_CP_SEG3 = CorrelatedGroup("DF_cp_seg3", [6, 7],
-	[-2131.33, 9.11878],
-	[0.056399^2 * 1e6    -7.1999e-6 * 1e6;
-										 -7.1999e-6 * 1e6    1.2769e-4^2 * 1e6])
+const GROUP_DF_CP_SEG3 = CorrelatedGroup("DF_cp_seg3", [5, 6],
+	[-2131.3324271799936, 9.118778580751729],
+	[0.05639860409139659^2 * 1e6    -7.199865775680076e-06 * 1e6;
+																		  -7.199865775680076e-06 * 1e6    0.00012769474746086228^2 * 1e6])
 
 # --- Group 3: Char cp (independent STA measurement) ---
 # Source: douglas_fir_independent_char_sta/regression_results.json
 # NOTE: Type A only. Type B handled by ε_STA (same DSC instrument).
-const GROUP_CHAR_CP = CorrelatedGroup("Char_cp", [8, 9],
-	[347.212, 1.78423],
-	[3.486e-3^2 * 1e6    -2.0047e-8 * 1e6;
-										 -2.0047e-8 * 1e6    5.782e-6^2 * 1e6])
+const GROUP_CHAR_CP = CorrelatedGroup("Char_cp", [7, 8],
+	[347.2115543239091, 1.7842281021527068],
+	[0.003486073926426707^2 * 1e6    -2.0046889949248706e-08 * 1e6;
+																		  -2.0046889949248706e-08 * 1e6    5.782240725309274e-06^2 * 1e6])
 
-# --- Group 4: Heat of sorption (WLS exponential fit) ---
-# Source: papers/energetics/figures/hos_fit_results.json
-# Parameters: a=baseline [kJ/kg], b=amplitude [kJ/kg], c=decay [1/%]
-# NOTE: Nominal values from WLS fit (hos_fit_results.json). Published as
-#   a = 2280(13), b = 787(31), c = 0.114(10) in manuscript Eq. 18.
-# The ~7% offset from known latent heat is a known bias (not random), not
-# propagated here. Only the Type A fit covariance is sampled.
+# --- Group 4: Heat of sorption (TOTAL covariance: WLS + asymptote calibration) ---
+# Source: papers/energetics/figures/hos_fit_results.json → covariance_matrix_total
+# Parameters: a=asymptote [kJ/kg], b=amplitude [kJ/kg], c=decay [1/%]
 #
-# Type B (calibration): HoS was measured isothermally on the STA using an
-# independent water-evaporation calibration — NOT the standard multi-point
-# DSC calibration. Therefore ε_STA does not apply to HoS. Instead, ε_water
-# (Group 0c) provides the Type B calibration uncertainty from the isothermal
-# water calibration reproducibility (u_rel = 1.73%, 22 replicates).
-const GROUP_HOS = CorrelatedGroup("HoS", [10, 11, 12],
-	[2279.76, 786.962, 0.11436],
-	[173.957     22.025     0.09442;
-										  22.025    941.547     0.18431;
-										   0.09442    0.18431   9.715e-5])
-
+# Calibration: The raw WLS exponential fit is calibrated using the asymptote
+# constraint f_cal = L_vap(T_iso) / â_uncal, which enforces the physical
+# requirement that HoS → L_vap as MC → ∞. This calibration factor (f_cal =
+# 1.060534, u_rel = 0.596%) scales parameters a and b multiplicatively; c (decay
+# constant/shape) is scale-invariant. Calibration uncertainty is propagated
+# into the covariance via the delta method on the ratio L_vap/â:
+#   Cov_total = Cov_conditional + J_cf × Var(f_cal) × J_cfᵀ
+# where Cov_conditional is the raw WLS covariance (f_cal treated as exact)
+# and J_cf = [a_uncal, b_uncal, 0] is the Jacobian of calibrated params
+# w.r.t. f_cal. The total covariance absorbs both Type A (fit) and
+# calibration components — no separate Type B multiplicative factor is needed.
+#
+# NOTE: ε_STA does NOT apply to HoS. HoS calibration is independent of the
+# standard DSC multi-point enthalpy calibration; it uses the asymptote
+# constraint referencing L_vap(T_iso) from the NIST-Webbook Antoine equation.
+const GROUP_HOS = CorrelatedGroup("HoS", [9, 10, 11],
+	[2450.4209098210367, 875.6441216446293, 0.11216842711063967],
+	[422.8825520447299     98.43288530364839     0.09962623051573538;
+																				98.43288530364839   1088.3986105249596     0.18261042051128729;
+																				 0.09962623051573537   0.18261042051128726   8.819241986936302e-05])
 # --- Group 5: Heats of reaction (CONDITIONAL covariance from two-stage optimization) ---
 # Source: scripts/energetics/results/douglas_fir_two_stage_optimized.json
 #         → conditional_dh_uncertainty.covariance_matrix_kJ_per_kg_sq
@@ -254,19 +247,18 @@ const GROUP_HOS = CorrelatedGroup("HoS", [10, 11, 12],
 # cancel). Applied as (1+ε_STA) multiplicative factor in build_and_solve.
 #
 # Units: kJ²/kg², converted to J²/kg² by ×1e6.
-const GROUP_H_RXN = CorrelatedGroup("H_rxn", [13, 14, 15, 16, 17],
-	[-19153.3, -5573.79, 266699.7, -219638.7, -12381.6],
+const GROUP_H_RXN = CorrelatedGroup("H_rxn", [12, 13, 14, 15, 16],
+	[-18679.656956492707, -4360.408194805666, 268420.48898703894, -211940.9321063604, -9550.130692481673],
 	# Conditional covariance (analytical delta method): WLS + char cp + cross terms
-	[3.42252    8.04561   11.3715    50.1601    12.3280;
-										 8.04561   20.7989    28.7027   127.515     31.2934;
-										11.3715    28.7027    41.1541   178.306     45.5874;
-										50.1601   127.515    178.306    805.909    176.265;
-										12.3280    31.2934    45.5874   176.265    313.704] .* 1e6)
+	[6.333174627874863    15.512152336992148   21.963857257090712    97.57757819080862    29.97479139036635;
+																		  15.512152336992141   39.93139848022786    55.852314306485866   249.04311970566448    76.5251414613947;
+																		 21.96385725709072    55.85231430648594    79.66410157173087    350.7339468534618    109.74773629901335;
+																		 97.57757819080858   249.0431197056646    350.7339468534612    1577.602310510771     463.77862475268046;
+																		 29.97479139036626    76.52514146139437   109.74773629901212    463.7786247526774    418.08323450041263] .* 1e6)
 
 const CORR_GROUPS = [
 	GROUP_EPSILON_HFM,
 	GROUP_EPSILON_STA,
-	GROUP_EPSILON_WATER,
 	GROUP_DF_CP_SEG1,
 	GROUP_DF_CP_SEG3,
 	GROUP_CHAR_CP,
@@ -351,8 +343,8 @@ end
 
 # Nominal virgin cp (high-T) regression coefficients — used as reference point
 # for the Jacobian correction to ΔH.
-@everywhere const NOM_CP_A3 = -2131.33
-@everywhere const NOM_CP_B3 = 9.11878
+@everywhere const NOM_CP_A3 = -2131.3324271799936
+@everywhere const NOM_CP_B3 = 9.118778580751729
 
 # Jacobian J = ∂ΔH/∂(a₃, b₃): total sensitivity of fitted heats of reaction to
 # the virgin cp (high-T) regression coefficients used as the optimization baseline.
@@ -364,32 +356,31 @@ end
 # Units col 2: (kJ/kg)/(J/(g·K²)) = (J/kg)/(J/(kg·K²)) → [K²]
 # JSON column order was [slope, intercept]; swapped here to match [a₃, b₃].
 @everywhere const J_HRXN_CP = [
-	-101.8546   -50959.70;
-	 -37.0298   -22263.28;
-	 -12.3170    -7496.43;
-	   1.17179    1237.13;
-	  -3.57531   -2190.76]
+	-101.85716699461705   -50958.34346477685;
+	 -37.03639061442604   -22259.81616866216;
+	 -12.32632451289032    -7491.519003103773;
+	   1.129998286173563    1259.1103018686943;
+	  -3.590886934853404   -2182.690192599356]
 
 @everywhere begin
 
 	"""
 		build_and_solve(θ)
 
-	Build a Douglas Fir simulation with the given parameter vector θ (length 17),
+	Build a Douglas Fir simulation with the given parameter vector θ (length 16),
 	solve it, and return the PyrolysisSolution.
 	"""
 	function build_and_solve(θ::Vector{Float64})
-		# Unpack the 17 uncertain parameters
-		ε_hfm, ε_sta, ε_water,
+		# Unpack the 16 uncertain parameters
+		ε_hfm, ε_sta,
 		df_cp_a1, df_cp_b1, df_cp_a3, df_cp_b3,
 		char_cp_a, char_cp_b,
 		hos_baseline, hos_amplitude, hos_decay,
 		h_rxn1, h_rxn2, h_rxn3, h_rxn4, h_rxn5 = θ
 
 		# Type B multiplicative factors for each instrument
-		scale_hfm   = 1.0 + ε_hfm    # HFM-derived Cp (segment 1)
-		scale_sta   = 1.0 + ε_sta    # STA/DSC-derived Cp (segment 3, char) and ΔH
-		scale_water = 1.0 + ε_water  # isothermal water calibration (HoS only)
+		scale_hfm = 1.0 + ε_hfm    # HFM-derived Cp (segment 1)
+		scale_sta = 1.0 + ε_sta    # STA/DSC-derived Cp (segment 3, char) and ΔH
 
 		# --- Correct ΔH for virgin cp regression uncertainty (Type A coupling) ---
 		# The two-stage optimization used nominal (a₃, b₃) as fixed input for the
@@ -466,14 +457,14 @@ end
 		water_vapor_cp = CallableProperty(T -> 2.4e3 - 1.6 * T + 2.0e-3 * T^2)
 
 		# --- Heat of sorption (parametric) ---
-		# HoS uses an independent isothermal water-evaporation calibration,
-		# NOT the standard DSC multi-point calibration. ε_water (not ε_STA)
-		# provides the Type B calibration uncertainty. Scaling a and b by
-		# (1+ε_water) is equivalent to scaling the full expression since c is
-		# a shape parameter (decay constant) unaffected by sensitivity scaling.
+		# HoS is calibrated via the asymptote constraint f_cal = L_vap(T_iso) / â_uncal.
+		# Calibration uncertainty is embedded in the total covariance matrix of
+		# (hos_baseline, hos_amplitude, hos_decay), so no separate multiplicative
+		# Type B factor is applied. ε_STA does not apply to HoS — the calibration
+		# pathway is independent of the standard DSC multi-point calibration.
 		hos = StateDependentProperty((T, ξ) -> begin
 			MC = 100.0 * ξ[SA_MOISTURE_IDX] / SA_ρ_DRY_BASIS
-			return (hos_baseline + hos_amplitude * exp(-hos_decay * MC)) * 1e3 * scale_water
+			return (hos_baseline + hos_amplitude * exp(-hos_decay * MC)) * 1e3
 		end)
 
 		# --- Gas transfer coefficients and permeability (FIXED) ---
@@ -615,15 +606,140 @@ end # @everywhere
 
 @everywhere const MLR_IGNITION_THRESHOLD = 3e-3  # kg/(m²·s)
 
+# --- New QoI constants ---
+# First pyrolysis peak: skip the initial moisture transient (complete by ~20 s
+# at 50 kW/m²). 30 s is conservative across all parameter realizations.
+@everywhere const FIRST_PEAK_T_START = 30.0  # [s]
+# Pyrolysis onset: 1% dry mass loss, analogous to TGA onset criterion.
+@everywhere const PYROLYSIS_ONSET_THRESHOLD = 0.01
+# Solid component indices (DF, int1-4, Char) — excludes moisture (7) and gases (8-13)
+@everywhere const SOLID_COMPONENT_INDICES = 1:6
+
+@everywhere """
+	time_to_threshold(t, curve, fraction)
+
+Find the time at which `curve` first reaches `fraction` of its total change,
+defined as T₀ + fraction*(T_max - T₀) where T₀ = curve[1].
+Returns Inf if the threshold is never reached.
+"""
+@everywhere function time_to_threshold(t::Vector{Float64}, curve::Vector{Float64}, fraction::Float64)
+	T0 = curve[1]
+	T_max = maximum(curve)
+	threshold = T0 + fraction * (T_max - T0)
+	idx = findfirst(x -> x >= threshold, curve)
+	return idx !== nothing ? t[idx] : Inf
+end
+
+@everywhere """
+	compute_dry_mass_series(sol) -> Vector{Float64}
+
+Compute dry solid mass [kg/m²] at each output time from the concentration profiles.
+Dry mass = sum of solid components (indices 1:6), excluding moisture and gases.
+"""
+@everywhere function compute_dry_mass_series(sol)
+	nt = length(sol.times)
+	A = sol.problem.mesh.cross_section_area
+	dry_mass = Vector{Float64}(undef, nt)
+	for i in 1:nt
+		ξ = sol.concentrations[i]  # [NC × n_cells]
+		n_cells = size(ξ, 2)
+		m = 0.0
+		for j in 1:n_cells
+			v = sol.problem.mesh.cell_volumes[j]
+			for k in SOLID_COMPONENT_INDICES
+				m += ξ[k, j] * v
+			end
+		end
+		dry_mass[i] = m / A
+	end
+	return dry_mass
+end
+
+@everywhere """
+	find_first_pyrolysis_peak(t, mlr, global_peak_idx)
+
+Find the first local MLR maximum after `FIRST_PEAK_T_START` and before the
+global peak. Returns (peak_value, peak_time).
+"""
+@everywhere function find_first_pyrolysis_peak(t::Vector{Float64}, mlr::Vector{Float64},
+	global_peak_idx::Int)
+	i_start = findfirst(x -> x >= FIRST_PEAK_T_START, t)
+	if i_start === nothing || i_start >= global_peak_idx
+		return (NaN, NaN)
+	end
+	# Search for first local maximum in [i_start, global_peak_idx-1]
+	for i in (i_start+1):(global_peak_idx-1)
+		if mlr[i] >= mlr[i-1] && mlr[i] >= mlr[i+1]
+			return (mlr[i], t[i])
+		end
+	end
+	# Fallback: maximum in [i_start, midpoint to global peak]
+	i_mid = div(i_start + global_peak_idx, 2)
+	if i_mid > i_start
+		local_range = i_start:i_mid
+		idx = local_range[argmax(mlr[local_range])]
+		return (mlr[idx], t[idx])
+	end
+	return (NaN, NaN)
+end
+
+@everywhere """
+	find_pyrolysis_onset(t, dry_mass) -> Float64
+
+Time at which cumulative dry mass loss first reaches `PYROLYSIS_ONSET_THRESHOLD`
+(fraction of initial dry mass). Uses linear interpolation between time steps.
+"""
+@everywhere function find_pyrolysis_onset(t::Vector{Float64}, dry_mass::Vector{Float64})
+	m0 = dry_mass[1]
+	threshold_mass = m0 * (1.0 - PYROLYSIS_ONSET_THRESHOLD)
+	idx = findfirst(m -> m <= threshold_mass, dry_mass)
+	if idx === nothing
+		return Inf
+	elseif idx == 1
+		return t[1]
+	else
+		# Linear interpolation for precise crossing
+		f = (dry_mass[idx-1] - threshold_mass) / (dry_mass[idx-1] - dry_mass[idx])
+		return t[idx-1] + f * (t[idx] - t[idx-1])
+	end
+end
+
+@everywhere """
+	find_back_temp_at_mass_loss(t, total_mass, back_temp, fraction) -> Float64
+
+Back-surface temperature at the moment when total mass loss reaches `fraction`
+of the initial total mass. Uses linear interpolation.
+"""
+@everywhere function find_back_temp_at_mass_loss(t::Vector{Float64}, total_mass::Vector{Float64},
+	back_temp::Vector{Float64}, fraction::Float64)
+	m0 = total_mass[1]
+	threshold = m0 * (1.0 - fraction)
+	idx = findfirst(m -> m <= threshold, total_mass)
+	if idx === nothing
+		return NaN
+	elseif idx == 1
+		return back_temp[1]
+	else
+		f = (total_mass[idx-1] - threshold) / (total_mass[idx-1] - total_mass[idx])
+		return back_temp[idx-1] + f * (back_temp[idx] - back_temp[idx-1])
+	end
+end
+
 @everywhere struct SensitivityResult
 	# Scalars
 	peak_mlr::Float64
 	time_to_peak_mlr::Float64
 	time_to_ignition::Float64
 	total_mass_loss_pct::Float64
-	peak_surface_temp::Float64
-	peak_back_temp::Float64
+	t_surf_70pct::Float64
+	t_surf_95pct::Float64
+	t_back_5pct::Float64
+	t_back_95pct::Float64
 	final_thickness::Float64
+	peak_mlr_first::Float64
+	time_to_peak_mlr_first::Float64
+	pyrolysis_onset_time::Float64
+	T_back_50pct_mass_loss::Float64
 	retcode::Symbol
 	solve_time::Float64
 	# Curves
@@ -631,12 +747,18 @@ end # @everywhere
 	mlr_curve::Vector{Float64}
 	surface_temp_curve::Vector{Float64}
 	back_temp_curve::Vector{Float64}
+	dry_mass_curve::Vector{Float64}
+	total_mass_curve::Vector{Float64}
 end
 
 const SCALAR_QOI_NAMES = [
 	"peak_mlr", "time_to_peak_mlr", "time_to_ignition",
-	"total_mass_loss_pct", "peak_surface_temp", "peak_back_temp",
-	"final_thickness", "solve_time",
+	"total_mass_loss_pct", "t_surf_70pct", "t_surf_95pct",
+	"t_back_5pct", "t_back_95pct",
+	"final_thickness",
+	"peak_mlr_first", "time_to_peak_mlr_first",
+	"pyrolysis_onset_time", "T_back_50pct_mass_loss",
+	"solve_time",
 ]
 
 @everywhere function extract_qois(sol)
@@ -644,6 +766,7 @@ const SCALAR_QOI_NAMES = [
 	mlr = sol.surface_mass_flux
 	T_surf = sol.surface_temperature
 	T_back = sol.back_temperature
+	total_mass = sol.total_mass
 
 	peak_mlr_val = maximum(mlr)
 	peak_idx = argmax(mlr)
@@ -652,22 +775,46 @@ const SCALAR_QOI_NAMES = [
 	tig_idx = findfirst(x -> x > MLR_IGNITION_THRESHOLD, mlr)
 	time_to_ignition = tig_idx !== nothing ? t[tig_idx] : Inf
 
-	total_mass_loss = (1.0 - sol.total_mass[end] / sol.total_mass[1]) * 100.0
+	total_mass_loss = (1.0 - total_mass[end] / total_mass[1]) * 100.0
+
+	# Threshold-crossing times for temperature curves
+	t_surf_70 = time_to_threshold(t, T_surf, 0.70)
+	t_surf_95 = time_to_threshold(t, T_surf, 0.95)
+	t_back_5  = time_to_threshold(t, T_back, 0.05)
+	t_back_95 = time_to_threshold(t, T_back, 0.95)
+
+	# --- New QoIs ---
+	# 1. First pyrolysis peak MLR (skip moisture transient)
+	peak_first, time_peak_first = find_first_pyrolysis_peak(t, mlr, peak_idx)
+
+	# 2. Pyrolysis onset (1% dry mass loss)
+	dry_mass = compute_dry_mass_series(sol)
+	onset_time = find_pyrolysis_onset(t, dry_mass)
+
+	# 3. Back temperature at 50% total mass loss
+	T_back_50 = find_back_temp_at_mass_loss(t, total_mass, T_back, 0.50)
 
 	return SensitivityResult(
 		peak_mlr_val, time_to_peak, time_to_ignition,
 		total_mass_loss,
-		maximum(T_surf), maximum(T_back),
+		t_surf_70, t_surf_95,
+		t_back_5, t_back_95,
 		sol.thickness_history[end],
+		peak_first, time_peak_first,
+		onset_time, T_back_50,
 		sol.retcode, sol.solve_time,
-		t, mlr, T_surf, T_back,
+		t, mlr, T_surf, T_back, dry_mass, total_mass,
 	)
 end
 
 function scalar_qoi_vector(r::SensitivityResult)
 	return [r.peak_mlr, r.time_to_peak_mlr, r.time_to_ignition,
-		r.total_mass_loss_pct, r.peak_surface_temp, r.peak_back_temp,
-		r.final_thickness, r.solve_time]
+		r.total_mass_loss_pct, r.t_surf_70pct, r.t_surf_95pct,
+		r.t_back_5pct, r.t_back_95pct,
+		r.final_thickness,
+		r.peak_mlr_first, r.time_to_peak_mlr_first,
+		r.pyrolysis_onset_time, r.T_back_50pct_mass_loss,
+		r.solve_time]
 end
 
 # ============================================================================
@@ -784,6 +931,8 @@ function main()
 	mkpath(joinpath(RESULTS_DIR, "mlr_curves"))
 	mkpath(joinpath(RESULTS_DIR, "surface_temp_curves"))
 	mkpath(joinpath(RESULTS_DIR, "back_temp_curves"))
+	mkpath(joinpath(RESULTS_DIR, "dry_mass_curves"))
+	mkpath(joinpath(RESULTS_DIR, "total_mass_curves"))
 
 	# --- Generate or reload samples ---
 	# NOTE: We always generate the full Sobol sequence of length N_SAMPLES to
@@ -839,7 +988,9 @@ function main()
 		mlr_file = joinpath(RESULTS_DIR, "mlr_curves", @sprintf("run_%04d.csv", i))
 		surf_file = joinpath(RESULTS_DIR, "surface_temp_curves", @sprintf("run_%04d.csv", i))
 		back_file = joinpath(RESULTS_DIR, "back_temp_curves", @sprintf("run_%04d.csv", i))
-		if isfile(mlr_file) && isfile(surf_file) && isfile(back_file)
+		dry_file = joinpath(RESULTS_DIR, "dry_mass_curves", @sprintf("run_%04d.csv", i))
+		tm_file = joinpath(RESULTS_DIR, "total_mass_curves", @sprintf("run_%04d.csv", i))
+		if isfile(mlr_file) && isfile(surf_file) && isfile(back_file) && isfile(dry_file) && isfile(tm_file)
 			push!(completed_ids, i)
 		end
 	end
@@ -871,25 +1022,41 @@ function main()
 					mlr_data = readdlm(joinpath(RESULTS_DIR, "mlr_curves", @sprintf("run_%04d.csv", id)), ','; header = true)[1]
 					surf_data = readdlm(joinpath(RESULTS_DIR, "surface_temp_curves", @sprintf("run_%04d.csv", id)), ','; header = true)[1]
 					back_data = readdlm(joinpath(RESULTS_DIR, "back_temp_curves", @sprintf("run_%04d.csv", id)), ','; header = true)[1]
+					dry_data = readdlm(joinpath(RESULTS_DIR, "dry_mass_curves", @sprintf("run_%04d.csv", id)), ','; header = true)[1]
+					tm_data = readdlm(joinpath(RESULTS_DIR, "total_mass_curves", @sprintf("run_%04d.csv", id)), ','; header = true)[1]
 
 					t = Float64.(mlr_data[:, 1])
 					mlr = Float64.(mlr_data[:, 2])
 					T_surf = Float64.(surf_data[:, 2])
 					T_back = Float64.(back_data[:, 2])
+					dry_mass = Float64.(dry_data[:, 2])
+					total_mass = Float64.(tm_data[:, 2])
 
 					peak_mlr_val = maximum(mlr)
-					time_to_peak = t[argmax(mlr)]
+					peak_idx = argmax(mlr)
+					time_to_peak = t[peak_idx]
 					tig_idx = findfirst(x -> x > MLR_IGNITION_THRESHOLD, mlr)
 					time_to_ignition = tig_idx !== nothing ? t[tig_idx] : Inf
-					total_mass_loss = NaN  # not recoverable from curves alone
-					peak_surface_temp = maximum(T_surf)
-					peak_back_temp = maximum(T_back)
-					final_thickness = NaN  # not recoverable from curves alone
+					total_mass_loss = (1.0 - total_mass[end] / total_mass[1]) * 100.0
+					t_surf_70 = time_to_threshold(t, T_surf, 0.70)
+					t_surf_95 = time_to_threshold(t, T_surf, 0.95)
+					t_back_5 = time_to_threshold(t, T_back, 0.05)
+					t_back_95 = time_to_threshold(t, T_back, 0.95)
+
+					# New QoIs
+					peak_first, time_peak_first = find_first_pyrolysis_peak(t, mlr, peak_idx)
+					onset_time = find_pyrolysis_onset(t, dry_mass)
+					T_back_50 = find_back_temp_at_mass_loss(t, total_mass, T_back, 0.50)
+
+					final_thickness = NaN  # not recoverable from curves
 					solve_time = NaN
 
 					qois = [peak_mlr_val, time_to_peak, time_to_ignition,
-						total_mass_loss, peak_surface_temp, peak_back_temp,
-						final_thickness, solve_time]
+						total_mass_loss, t_surf_70, t_surf_95,
+						t_back_5, t_back_95, final_thickness,
+						peak_first, time_peak_first,
+						onset_time, T_back_50,
+						solve_time]
 					row = "$id,Success," * join([@sprintf("%.10g", q) for q in qois], ",")
 					println(io, row)
 				catch e
@@ -929,6 +1096,12 @@ function main()
 				save_curve_csv(
 					joinpath(RESULTS_DIR, "back_temp_curves", @sprintf("run_%04d.csv", i)),
 					result.times, result.back_temp_curve)
+				save_curve_csv(
+					joinpath(RESULTS_DIR, "dry_mass_curves", @sprintf("run_%04d.csv", i)),
+					result.times, result.dry_mass_curve)
+				save_curve_csv(
+					joinpath(RESULTS_DIR, "total_mass_curves", @sprintf("run_%04d.csv", i)),
+					result.times, result.total_mass_curve)
 
 				return (i, result)
 			catch e
@@ -1166,9 +1339,9 @@ function main()
 
 	# --- 4. Scalar QoI Histograms ---
 	println("  Generating scalar QoI histograms...")
-	hist_qois = ["peak_mlr", "time_to_ignition", "total_mass_loss_pct", "peak_surface_temp"]
+	hist_qois = ["peak_mlr", "time_to_ignition", "total_mass_loss_pct", "t_surf_70pct"]
 	hist_labels = ["Peak MLR [kg/(m²·s)]", "Time to Ignition [s]",
-		"Total Mass Loss [%]", "Peak Surface Temp [K]"]
+		"Total Mass Loss [%]", "Surface Temp 70% Rise Time [s]"]
 	hist_indices = [findfirst(==(q), SCALAR_QOI_NAMES) for q in hist_qois]
 
 	plots_hist = []

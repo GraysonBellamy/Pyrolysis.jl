@@ -17,19 +17,18 @@ Method:
   4. Quantify index uncertainty via nonparametric bootstrap (1000 replicates).
   5. Assess convergence by computing indices on nested subsamples.
 
-The 17 uncertain parameters fall into 8 independent groups (correlations are
+The 16 uncertain parameters fall into 7 independent groups (correlations are
 within-group only), so standard Sobol formulas apply without correlated-input
 extensions.
 
 Groups (by measurement source):
   1. HFM calibration bias (ε_HFM)           — 1 parameter
   2. DSC calibration bias (ε_STA)           — 1 parameter
-  3. Water calibration bias (ε_water)       — 1 parameter
-  4. Virgin Cp, low-T (HFM regression)      — 2 parameters (a₁, b₁)
-  5. Virgin Cp, high-T (DSC regression)     — 2 parameters (a₃, b₃)
-  6. Char Cp (DSC regression)               — 2 parameters (a_char, b_char)
-  7. Heat of sorption (WLS fit)             — 3 parameters (a, b, c)
-  8. Heats of reaction (conditional cov.)   — 5 parameters (ΔH₁–ΔH₅)
+  3. Virgin Cp, low-T (HFM regression)      — 2 parameters (a₁, b₁)
+  4. Virgin Cp, high-T (DSC regression)     — 2 parameters (a₃, b₃)
+  5. Char Cp (DSC regression)               — 2 parameters (a_char, b_char)
+  6. Heat of sorption (total cov: WLS + cal.)— 3 parameters (a, b, c)
+  7. Heats of reaction (conditional cov.)   — 5 parameters (ΔH₁–ΔH₅)
 
 Reads:  results/parameters.csv, results/scalar_qois.csv
 Writes: results/sobol_group_indices.csv, results/sobol_bootstrap_ci.csv,
@@ -57,7 +56,7 @@ const RESULTS_DIR = joinpath(@__DIR__, "results")
 
 struct ParamGroup
 	name::String
-	indices::Vector{Int}     # indices into the 17-element θ vector
+	indices::Vector{Int}     # indices into the 16-element θ vector
 	μ::Vector{Float64}
 	Σ::Matrix{Float64}
 end
@@ -73,60 +72,64 @@ const GROUPS = [
 		[0.0],
 		[0.02613^2;;]),
 
-	# 3. Water calibration bias (isothermal HoS calibration)
-	ParamGroup("Water calibration", [3],
-		[0.0],
-		[0.01732^2;;]),
-
-	# 4. Virgin Cp, low-T (HFM regression)
-	ParamGroup("Virgin Cp, low-T", [4, 5],
+	# 3. Virgin Cp, low-T (HFM regression)
+	ParamGroup("Virgin Cp, low-T", [3, 4],
 		[-53.052, 4.2453],
 		[0.21819^2 * 1e6   -1.5350e-4 * 1e6;
-									-1.5350e-4 * 1e6   7.038e-4^2 * 1e6]),
+									 -1.5350e-4 * 1e6   7.038e-4^2 * 1e6]),
 
-	# 5. Virgin Cp, high-T (DSC regression)
-	ParamGroup("Virgin Cp, high-T", [6, 7],
+	# 4. Virgin Cp, high-T (DSC regression)
+	ParamGroup("Virgin Cp, high-T", [5, 6],
 		[-2131.33, 9.11878],
 		[0.056399^2 * 1e6    -7.1999e-6 * 1e6;
-									-7.1999e-6 * 1e6    1.2769e-4^2 * 1e6]),
+									 -7.1999e-6 * 1e6    1.2769e-4^2 * 1e6]),
 
-	# 6. Char Cp (independent STA)
-	ParamGroup("Char Cp", [8, 9],
+	# 5. Char Cp (independent STA)
+	ParamGroup("Char Cp", [7, 8],
 		[347.212, 1.78423],
 		[3.486e-3^2 * 1e6    -2.0047e-8 * 1e6;
-									-2.0047e-8 * 1e6    5.782e-6^2 * 1e6]),
+									 -2.0047e-8 * 1e6    5.782e-6^2 * 1e6]),
 
-	# 7. Heat of sorption (WLS exponential fit)
-	ParamGroup("Heat of sorption", [10, 11, 12],
-		[2279.76, 786.962, 0.11436],
-		[173.957     22.025     0.09442;
-									 22.025    941.547     0.18431;
-									  0.09442    0.18431   9.715e-5]),
+	# 6. Heat of sorption (total covariance: WLS + asymptote calibration)
+	# Calibration uncertainty (f_cal = L_vap(T_iso)/â_uncal) is embedded in
+	# the total covariance via Jacobian propagation; no separate Type B factor.
+	ParamGroup("Heat of sorption", [9, 10, 11],
+		[2450.4209, 875.6441, 0.11217],
+		[422.883     98.433     0.09963;
+									   98.433   1088.399     0.18261;
+										0.09963    0.18261   8.819e-5]),
 
-	# 8. Heats of reaction (conditional covariance, kJ²/kg² → J²/kg²)
-	ParamGroup("Heats of reaction", [13, 14, 15, 16, 17],
+	# 7. Heats of reaction (conditional covariance, kJ²/kg² → J²/kg²)
+	ParamGroup("Heats of reaction", [12, 13, 14, 15, 16],
 		[-19153.3, -5573.79, 266699.7, -219638.7, -12381.6],
 		[3.42252    8.04561   11.3715    50.1601    12.3280;
-									8.04561   20.7989    28.7027   127.515     31.2934;
-									11.3715    28.7027    41.1541   178.306     45.5874;
-									50.1601   127.515    178.306    805.909    176.265;
-									12.3280    31.2934    45.5874   176.265    313.704] .* 1e6),
+									 8.04561   20.7989    28.7027   127.515     31.2934;
+									 11.3715    28.7027    41.1541   178.306     45.5874;
+									 50.1601   127.515    178.306    805.909    176.265;
+									 12.3280    31.2934    45.5874   176.265    313.704] .* 1e6),
 ]
 
-const N_PARAMS = 17
+const N_PARAMS = 16
 
 # Scalar QoIs to analyze (skip time_to_ignition — quantized, and solve_time — not physical)
 const QOI_NAMES = [
 	"peak_mlr", "time_to_peak_mlr",
-	"total_mass_loss_pct", "peak_surface_temp", "peak_back_temp",
+	"total_mass_loss_pct", "t_surf_70pct", "t_surf_95pct",
+	"t_back_5pct", "t_back_95pct",
 	"final_thickness",
+	"peak_mlr_first", "time_to_peak_mlr_first",
+	"pyrolysis_onset_time", "T_back_50pct_mass_loss",
 ]
 
 # Column indices in scalar_qois.csv (after sample_id and retcode columns)
 const ALL_QOI_NAMES = [
 	"peak_mlr", "time_to_peak_mlr", "time_to_ignition",
-	"total_mass_loss_pct", "peak_surface_temp", "peak_back_temp",
-	"final_thickness", "solve_time",
+	"total_mass_loss_pct", "t_surf_70pct", "t_surf_95pct",
+	"t_back_5pct", "t_back_95pct",
+	"final_thickness",
+	"peak_mlr_first", "time_to_peak_mlr_first",
+	"pyrolysis_onset_time", "T_back_50pct_mass_loss",
+	"solve_time",
 ]
 
 # PCE configuration
@@ -147,8 +150,8 @@ const CONVERGENCE_FRACTIONS = [0.125, 0.25, 0.5, 0.75, 1.0]
 Transform correlated parameter samples to independent standard normal space
 using the Cholesky factors of each group's covariance matrix.
 
-Input:  param_data [n_samples × 17] in physical units
-Output: Z [n_samples × 17] in standard normal space
+Input:  param_data [n_samples × 16] in physical units
+Output: Z [n_samples × 16] in standard normal space
 """
 function transform_to_standard_normal(param_data::Matrix{Float64}, groups::Vector{ParamGroup})
 	n = size(param_data, 1)
@@ -693,7 +696,7 @@ function main()
 
 	# --- Load data ---
 	param_csv = readdlm(joinpath(RESULTS_DIR, "parameters.csv"), ','; header = true)
-	param_matrix = Float64.(param_csv[1][:, 2:end])  # [n_samples × 17]
+	param_matrix = Float64.(param_csv[1][:, 2:end])  # [n_samples × 16]
 	n_total = size(param_matrix, 1)
 	println("Loaded $n_total parameter samples")
 

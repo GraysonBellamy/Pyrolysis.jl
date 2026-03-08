@@ -1,7 +1,0 @@
-qoi,degree,fit_method,R2,Q2_LOO,n_basis,n_samples,oversampling_ratio
-final_thickness,2,OLS,0.999999,0.999998,171,2048,12.0
-peak_back_temp,2,OLS,0.999707,0.999630,171,2048,12.0
-peak_mlr,2,OLS,0.999998,0.999997,171,2048,12.0
-peak_surface_temp,2,OLS,0.999890,0.999858,171,2048,12.0
-time_to_peak_mlr,2,OLS,0.999948,0.999938,171,2048,12.0
-total_mass_loss_pct,2,OLS,0.999999,0.999998,171,2048,12.0

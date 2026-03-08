@@ -173,6 +173,146 @@ f = 382 / 113.74 = **3.359**
    all runs. Only the energy absorbed/released at each moment changes — and it changes
    in proportion to our measured distribution.
 
+#### Two-zone scaling (primary/secondary decomposition)
+
+Both Rath et al. and Jones et al. decompose the heat of pyrolysis into **primary**
+(volatile-forming) and **secondary** (char-stabilizing) contributions, providing two
+constraints instead of one and enabling independent scaling of the primary and secondary
+reaction zones.
+
+**Zone definition in our mechanism:**
+
+| Zone | Reactions | Physical process | Baseline weighted contribution |
+|------|-----------|------------------|-------------------------------|
+| Primary (P) | 1–3 (A→B→C→D) | Drying, devolatilization, depolymerization | +178.25 kJ/kg |
+| Secondary (S) | 4–5 (D→E→F) | Char formation and carbonization | −64.51 kJ/kg |
+| **Total** | | | **+113.74 kJ/kg** |
+
+The two-zone approach scales reactions 1–3 by $f_P$ and reactions 4–5 by $f_S$:
+
+$$
+\Delta H_j^{\text{scaled}} = \begin{cases}
+  f_P \cdot \Delta H_j & j = 1, 2, 3 \\
+  f_S \cdot \Delta H_j & j = 4, 5
+\end{cases}
+$$
+
+$$
+f_P = \frac{\Delta H_P^{\text{primary, target}}}{\text{Zone 1 baseline}} \qquad
+f_S = \frac{\Delta H_P^{\text{secondary, target}}}{\text{Zone 2 baseline}}
+$$
+
+Because ΔH_P is linear in the individual ΔH_j, the net heat is:
+
+$$
+\Delta H_P^{\text{scaled}} = f_P \cdot (\text{Zone 1}) + f_S \cdot (\text{Zone 2})
+= \Delta H_P^{\text{primary, target}} + \Delta H_P^{\text{secondary, target}}
+$$
+
+##### Rath two-zone derivation
+
+Rath decomposes the DSC signal into HP (primary pyrolysis, separated by T_shift ≈ 660–682 K)
+and HS (secondary char stabilization, exothermic and nearly independent of char yield):
+
+- **HP** from Rath Eq. 11 at Y_c = 0.164:
+  HP = ΔH₁·Y_c + ΔH₂·(1 − Y_c) = (−3827)(0.164) + (1277)(0.836) = **+440.0 kJ/kg**
+
+  where ΔH₁ = −3827 J/g (exothermic char formation) and ΔH₂ = +1277 J/g (endothermic
+  volatile formation) for spruce.
+
+- **HS** from Rath Table 4 HS linear regression at Y_c = 0.164:
+  HS = (−632.1)(0.164) + 92.2 = **−11.5 kJ/kg**
+
+  (Extrapolation below the data minimum of Y_c ≈ 0.18; the no-lid spruce average of
+  −26 kJ/kg applies at Y_c ≈ 0.19.)
+
+- **Net:** HP + HS = 440.0 + (−11.5) ≈ **+428 kJ/kg** ← matches uniform target
+
+For self-consistency with the manuscript's +428 target:
+
+| | Target | Our baseline | Scale factor |
+|--|--------|-------------|-------------|
+| Zone 1 (primary) | +440.0 kJ/kg | +178.25 kJ/kg | f_P = **2.468** |
+| Zone 2 (secondary) | −12.0 kJ/kg | −64.51 kJ/kg | f_S = **0.185** |
+| **Net** | **+428.0 kJ/kg** | +113.74 kJ/kg | |
+
+| Reaction | ΔH_j (ours) | Factor | ΔH_j (scaled) | ΔH_j × Y_i (scaled) |
+|----------|-------------|--------|----------------|---------------------|
+| 1        | −19.15      | f_P    | −47.26         | −47.26              |
+| 2        | −5.57       | f_P    | −13.75         | −13.06              |
+| 3        | +266.70     | f_P    | +658.25        | +500.27             |
+| 4        | −219.64     | f_S    | −40.66         | −11.43              |
+| 5        | −12.38      | f_S    | −2.29          | −0.51               |
+| **Total** | | | | **+428.00 kJ/kg** ✓ |
+
+##### Jones two-zone derivation
+
+Jones provides a three-component model decomposing the heat of pyrolysis into primary
+and secondary heterogeneous contributions:
+
+- **ΔH_py,1°** = +400 kJ/kg (primary, at zero sample mass / infinite dilution limit)
+- **ΔH_py,2°,HET** = −1237 kJ/kg (secondary heterogeneous, at maximum extent)
+- Primary char yield y_1°,0 = 0.1628
+- Maximum secondary char yield y_2°,∞,max = 0.0842
+
+At our Y_c = 0.164:
+- Secondary char: y_2° = 0.164 − 0.1628 = 0.0012
+- Secondary fraction: ξ = 0.0012 / 0.0842 = 0.0143 (1.4% of maximum)
+- Secondary contribution: (−1237)(0.0143) = −17.6 kJ/kg
+
+This confirms that at our char yield — which lies almost exactly at the primary char
+yield — secondary reactions are negligible. The literature's large ΔH_P is almost
+entirely primary heat.
+
+For self-consistency with the manuscript's +382 target:
+
+| | Target | Our baseline | Scale factor |
+|--|--------|-------------|-------------|
+| Zone 1 (primary) | +400.0 kJ/kg | +178.25 kJ/kg | f_P = **2.244** |
+| Zone 2 (secondary) | −18.0 kJ/kg | −64.51 kJ/kg | f_S = **0.279** |
+| **Net** | **+382.0 kJ/kg** | +113.74 kJ/kg | |
+
+| Reaction | ΔH_j (ours) | Factor | ΔH_j (scaled) | ΔH_j × Y_i (scaled) |
+|----------|-------------|--------|----------------|---------------------|
+| 1        | −19.15      | f_P    | −42.97         | −42.97              |
+| 2        | −5.57       | f_P    | −12.50         | −11.87              |
+| 3        | +266.70     | f_P    | +598.48        | +454.85             |
+| 4        | −219.64     | f_S    | −61.28         | −17.23              |
+| 5        | −12.38      | f_S    | −3.45          | −0.77               |
+| **Total** | | | | **+382.00 kJ/kg** ✓ |
+
+##### Two-zone vs uniform: physical plausibility comparison
+
+| Reaction | Baseline | Rath Uniform | Rath 2-Zone | Jones Uniform | Jones 2-Zone |
+|----------|----------|-------------|-------------|---------------|--------------|
+| 3 (C→D, endo) | +266.70 | +1003.61 | **+658.25** | +895.74 | **+598.48** |
+| 4 (D→E, exo) | −219.64 | −826.52 | **−40.66** | −737.69 | **−61.28** |
+
+Key insight: Uniform scaling amplifies the exothermic char-forming reaction 4 by 3.4–3.8×
+to values of −740 to −827 kJ/kg, when the literature decompositions indicate that secondary
+reactions should be **reduced** at our low char yield. Two-zone scaling correctly:
+- Moderately amplifies the primary zone (2.2–2.5×)
+- Drastically reduces the secondary zone (0.19–0.28×)
+
+This produces the same net ΔH_P but with a physically more plausible distribution of
+endothermic and exothermic character across the reaction sequence.
+
+##### Why two-zone is an improvement over uniform
+
+1. **Two constraints instead of one.** The two-zone approach uses the published primary/
+   secondary decomposition (HP + HS for Rath; ΔH_py,1° + ΔH_py,2° for Jones) to
+   independently constrain both zones, rather than distributing a single scalar uniformly.
+
+2. **Consistent with minimal secondary reactions at low Yc.** Both Rath and Jones confirm
+   that secondary char formation contributes minimally at our char yield (ξ ≈ 1.4% per
+   Jones; HS → 0 at low Yc per Rath). The two-zone approach captures this physics; uniform
+   scaling cannot.
+
+3. **Same net heat, different temporal distribution.** The two simulations for each source
+   (uniform vs two-zone) produce the same total ΔH_P but different temporal heat flow
+   profiles, directly revealing the sensitivity to how the heat is distributed among
+   primary and secondary reactions.
+
 **Where in the paper:** Add at the end of Section 3.4 (Heats of Pyrolysis Reactions).
 
 ---
@@ -210,11 +350,13 @@ All simulations use the 1D Douglas fir cone calorimeter configuration from Appen
 | 2 | Virgin c_p | Dupont (high) | Same as above |
 | 3 | Char c_p | Hostikka (low) | Replace char c_p for species F and propagate to intermediates |
 | 4 | Char c_p | Edrich (high) | Same as above |
-| 5 | Heats of reaction | Rath +428 kJ/kg (f = 3.763) | Scale all 5 heat_of_reaction values by f |
-| 6 | Heats of reaction | Jones +382 kJ/kg (f = 3.359) | Scale all 5 heat_of_reaction values by f |
+| 5 | Heats of reaction | Rath +428 uniform (f = 3.763) | Scale all 5 ΔH_j by f |
+| 6 | Heats of reaction | Jones +382 uniform (f = 3.359) | Scale all 5 ΔH_j by f |
 | 7 | Heat of sorption | Free water (2442 kJ/kg) | Replace HoS model with constant latent heat |
+| 8 | Heats of reaction | Rath +428 two-zone (f_P=2.468, f_S=0.185) | Scale rxns 1–3 by f_P, rxns 4–5 by f_S |
+| 9 | Heats of reaction | Jones +382 two-zone (f_P=2.244, f_S=0.279) | Scale rxns 1–3 by f_P, rxns 4–5 by f_S |
 
-**Total: 8 simulation runs** (including baseline).
+**Total: 10 simulation runs** (including baseline).
 
 ---
 
@@ -275,8 +417,10 @@ the % deviation from baseline for each QoI and each substitution:
 | Virgin c_p — Dupont | ? | ? | ? | ? | ? | ? |
 | Char c_p — Hostikka | ? | ? | ? | ? | ? | ? |
 | Char c_p — Edrich | ? | ? | ? | ? | ? | ? |
-| ΔH — Rath (+428) | ? | ? | ? | ? | ? | ? |
-| ΔH — Jones (+382) | ? | ? | ? | ? | ? | ? |
+| ΔH — Rath +428 (uniform) | ? | ? | ? | ? | ? | ? |
+| ΔH — Jones +382 (uniform) | ? | ? | ? | ? | ? | ? |
+| ΔH — Rath +428 (two-zone) | ? | ? | ? | ? | ? | ? |
+| ΔH — Jones +382 (two-zone) | ? | ? | ? | ? | ? | ? |
 | HoS — Free water | ? | ? | ? | ? | ? | ? |
 
 ---
@@ -286,14 +430,16 @@ the % deviation from baseline for each QoI and each substitution:
 1. **Create variant TOML configs** (or a Julia driver script that loads the baseline
    config and programmatically overrides the relevant properties for each run).
 
-2. **Run all 8 simulations** and extract the 6 QoIs from each.
+2. **Run all 10 simulations** and extract the 6 QoIs from each.
 
-3. **Generate the 4 comparison figures** (one per property category, 2 panels each).
+3. **Generate the 5 comparison figures** (one per property category with 2 panels each,
+   plus the heats of reaction figure now has 4 literature curves: 2 uniform + 2 two-zone).
 
-4. **Generate the summary table.**
+4. **Generate the summary table** (and optionally a summary bar chart).
 
 5. **Write manuscript text** for each section (1–2 paragraphs per property category
-   interpreting the results).
+   interpreting the results, with extended discussion for the uniform vs two-zone
+   comparison).
 
 ---
 
@@ -302,7 +448,13 @@ the % deviation from baseline for each QoI and each substitution:
 - **Heats of reaction:** Dominant effect (consistent with GSA). Literature ΔH_P values of
   +382–428 kJ/kg (3.4–3.8× our value) should dramatically slow the pyrolysis front, reduce
   peak MLR, and lower peak temperatures. This is the "if you get this wrong, nothing else
-  matters" result.
+  matters" result. The two-zone scaling comparison reveals how the *distribution* of heat
+  among primary and secondary reactions matters even when the net total is identical:
+  uniform scaling erroneously amplifies the exothermic char-forming reaction 4 by 3.4–3.8×,
+  while two-zone scaling correctly reduces it to 0.19–0.28× baseline, reflecting the minimal
+  secondary char formation at our low char yield. If the uniform and two-zone curves diverge
+  appreciably, it demonstrates that the temporal heat flow profile — not just the integrated
+  total — is a first-order model input.
 
 - **Virgin c_p:** Moderate effect despite large literature spread. Harada's weaker
   temperature dependence means less energy required to heat the virgin material to

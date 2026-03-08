@@ -105,7 +105,7 @@ end)
 water_vapor_cp = CallableProperty(T -> 2.4e3 - 1.6 * T + 2.0e-3 * T^2)
 
 # Moisture-dependent heat of sorption
-# HoS(MC) = 2275 + 860 * exp(-0.120 * MC) [kJ/kg]
+# HoS(MC) = 2450.4 + 875.6 * exp(-0.1122 * MC) [kJ/kg]
 # where MC is moisture content (%) on dry basis: MC = 100 * ξ_moisture / ρ_dry
 # As moisture decreases, more energy is required to release the remaining bound water
 const MOISTURE_IDX = 7           # Component index for moisture
@@ -115,8 +115,7 @@ heat_of_sorption = StateDependentProperty((T, ξ) -> begin
 	# Moisture content on dry basis (%)
 	MC = 100.0 * ξ[MOISTURE_IDX] / ρ_DRY_BASIS
 	# # Heat of sorption [J/kg] - increases as moisture decreases
-	return (2275.0 + 860.0 * exp(-0.120 * MC)) * 1e3
-	# return 2888.07443e3  # Averaging value 6 - 0 % MC
+	return (2450.4209 + 875.6441 * exp(-0.11217 * MC)) * 1e3
 end)
 
 # ============================================================================
@@ -343,7 +342,7 @@ douglas_fir = Material(
 			yields = (0.74, 0.26),
 		),
 		# Reaction 6: MOISTURE → WATER_VAPOR
-		# Heat of sorption: HoS(MC) = 2275 + 860 * exp(-0.120 * MC) [kJ/kg]
+		# Heat of sorption: HoS(MC) = 2450.4 + 875.6 * exp(-0.1122 * MC) [kJ/kg]
 		# Moisture-dependent: increases as moisture content decreases (bound water)
 		Reaction(:moisture_evaporation, 7 => 13,
 			A = 2.997e5,                   # s⁻¹
