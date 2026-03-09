@@ -9,7 +9,7 @@ Uncertain parameters (16 total):
 	  Multiplicative calibration biases that scale measurements from each
 	  instrument uniformly. Following GUM (JCGM 100:2008):
 	  ε_HFM ~ N(0, 0.00577²)  — HFM heat flow accuracy (1%/√3, manufacturer spec)
-	  ε_STA ~ N(0, 0.0261²)   — DSC multi-point enthalpy calibration (7 standards)
+	  ε_STA ~ N(0, 0.01995²)  — DSC enthalpy calibration (RMS 150–600°C, 7 standards, dof=3)
 	  ε_STA applies to DSC-derived Cp (virgin seg 3, char) and ΔH.
 	  ε_HFM applies to HFM-derived Cp (virgin seg 1).
 	  HoS calibration uncertainty is embedded in the total covariance matrix
@@ -83,7 +83,7 @@ using LinearAlgebra
 #
 # Seven correlated groups:
 #   0a. ε_HFM (systematic bias)           — 1×1 N(0, 0.00577²)
-#   0b. ε_STA (systematic bias)           — 1×1 N(0, 0.0261²)
+#   0b. ε_STA (systematic bias)           — 1×1 N(0, 0.01995²)
 #   1. DF virgin cp segment 1 (a1, b1)    — 2×2 from HFM regression
 #   2. DF virgin cp segment 3 (a3, b3)    — 2×2 from STA/DSC regression
 #   3. Char cp (a, b)                      — 2×2 from independent char STA
@@ -100,7 +100,7 @@ using LinearAlgebra
 # INCLUDED:
 #   Type B (systematic):
 #     ε_HFM  — HFM heat flow accuracy, 1%/√3 = 0.577% (manufacturer spec)     [Group 0a]
-#     ε_STA  — DSC multi-point enthalpy calibration, 2.61% (7 standards)        [Group 0b]
+#     ε_STA  — DSC enthalpy calibration, ~2.0% RMS (7 stds, dof=3)              [Group 0b]
 #   Type A (statistical/regression):
 #     HFM cp regression (seg 1)              — 2×2 covariance                   [Group 1]
 #     STA cp regression (seg 3)              — 2×2 covariance                   [Group 2]
@@ -167,14 +167,16 @@ const GROUP_EPSILON_HFM = CorrelatedGroup("eps_HFM", [1],
 	[0.005773502691896258^2;;])
 
 # --- Group 0b: Type B systematic bias for STA/DSC (ε_STA) ---
-# DSC multi-point enthalpy calibration (7 standards after RbNO₃ exclusion):
-# u_rel = 2.61% (1σ). Temperature systematic (~0.3%) and mass (~0.03%) are
-# negligible additions (RSS dominated by calibration at 95.4% of variance).
+# DSC enthalpy calibration (7 standards after RbNO₃ Grubbs-test exclusion):
+# u_rel = 1.99% (1σ, RMS of temperature-dependent mean-prediction SE over
+# 150–600°C). Re-fitted P2–P5 with P0, P1 fixed; dof = n_valid - 4 = 3.
+# Temperature systematic (~0.5%) and mass (~0.03%) are negligible additions
+# (RSS dominated by calibration at ~95% of variance).
 # Applied as (1 + ε_STA) to all DSC-derived Cp (virgin seg 3, char) and ΔH.
 # Source: dsc_calibration_model.json, combined_uncertainty_budget.json
 const GROUP_EPSILON_STA = CorrelatedGroup("eps_STA", [2],
 	[0.0],
-	[0.026126628112973345^2;;])
+	[0.019946948876208823^2;;])
 
 # --- Group 1: DF virgin cp segment 1 (HFM), T ≤ 323 K ---
 # Source: douglas_fir_hfm/regression_results.json
