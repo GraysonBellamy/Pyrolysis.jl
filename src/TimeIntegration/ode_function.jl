@@ -204,13 +204,24 @@ function (f::PyrolysisODEFunction)(du, u, p, t)
 end
 
 # Dispatch helper for compute_rhs! using BoundaryConditionSet (type-stable)
+# Checks has_darcy_flow to select between Fickian-only and Darcy-Fick formulations,
+# matching the dispatch logic in PyrolysisODEFunctionALE.
 function _compute_rhs_dispatch!(f::PyrolysisODEFunction{M, Mat, BCS}, t) where {M, Mat, BCS <: BoundaryConditionSet}
-	compute_rhs!(f.dT_work, f.dξ_work,
-		f.mesh, f.prop_cache, f.rhs_cache,
-		f.material, f.bc_set, t,
-		f.top_face_ids, f.bottom_face_ids;
-		I_radiation = f.I_radiation,
-		radiation_model = f.radiation_model)
+	if has_darcy_flow(f.material)
+		compute_rhs_darcy_fick!(f.dT_work, f.dξ_work,
+			f.mesh, f.prop_cache, f.rhs_cache,
+			f.material, f.bc_set, t,
+			f.top_face_ids, f.bottom_face_ids;
+			I_radiation = f.I_radiation,
+			radiation_model = f.radiation_model)
+	else
+		compute_rhs!(f.dT_work, f.dξ_work,
+			f.mesh, f.prop_cache, f.rhs_cache,
+			f.material, f.bc_set, t,
+			f.top_face_ids, f.bottom_face_ids;
+			I_radiation = f.I_radiation,
+			radiation_model = f.radiation_model)
+	end
 end
 
 # ============================================================================
@@ -421,8 +432,8 @@ mutable struct PyrolysisODEFunctionALE{M, Mat, BCS, PC, RC, SV, GC}
 	heats_work::Vector{Float64}       # Heats of reaction [NR]
 	dξ_dt_work::Vector{Float64}       # Species source terms [NC]
 
-	# Convective heat flux work array
-	q_conv_work::Vector{Float64}      # Convective heat flux work array [n_faces]
+	# Gas convective source work array
+	S_conv_work::Vector{Float64}      # Gas convective volumetric source [n_cells]
 
 	# Pre-cached boundary info (computed once at construction)
 	top_face_ids::Vector{Int}         # Faces at top boundary (boundary_id=1)
@@ -517,8 +528,8 @@ function PyrolysisODEFunctionALE(mesh::Mesh1D{NC}, material::Material{NC},
 	heats_work = zeros(NR)
 	dξ_dt_work = zeros(NC)
 
-	# Work array for convective heat flux (Darcy)
-	q_conv_work = zeros(n_faces)
+	# Work array for gas convective source
+	S_conv_work = zeros(n_cells)
 
 	# Pre-cache boundary face and cell IDs (computed once at construction)
 	top_face_ids, top_cell_ids = _get_boundary_info(mesh, 1)
@@ -532,7 +543,7 @@ function PyrolysisODEFunctionALE(mesh::Mesh1D{NC}, material::Material{NC},
 		w_work, w_face, v_gas_face, θ_work,
 		ale_advection, ale_species_advection,
 		rates_work, heats_work, dξ_dt_work,
-		q_conv_work,
+		S_conv_work,
 		top_face_ids, bottom_face_ids, top_cell_ids, bottom_cell_ids,
 		min_thickness, min_density,
 	)

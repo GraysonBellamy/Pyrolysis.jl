@@ -99,8 +99,9 @@ char_cp = CallableProperty(T -> 623.6 + 1.217 * T)
 # Water heat capacity: 5.2e3 - 6.7*T + 1.1e-2*T^2
 water_cp = CallableProperty(T -> 5.2e3 - 6.7 * T + 1.1e-2 * T^2)
 
-# Water vapor heat capacity: 2.4e3 - 1.6*T + 2.0e-3*T^2
-water_vapor_cp = CallableProperty(T -> 2.4e3 - 1.6 * T + 2.0e-3 * T^2)
+# Water vapor heat capacity: fitted to NIST Shomate data (300-1200K)
+# NIST: 1865 (300K), 1955 (500K), 2150 (800K), 2291 (1000K) J/(kg·K)
+water_vapor_cp = CallableProperty(T -> 1716.7 + 0.4154 * T + 1.530e-4 * T^2)
 
 # ============================================================================
 # Gas Transfer Coefficients and Permeability
@@ -165,9 +166,9 @@ ptw_material = Material(
 		# 2. Water vapor - gaseous product from moisture evaporation
 		GaseousComponent(:WATER_VAPOR,
 			M = 0.018,                     # kg/mol - H₂O (18 g/mol)
-			c = water_vapor_cp,            # J/(kg·K) - temperature-dependent
-			k = 0.145,                      # W/(m·K)
-			λ = λ_gas * 1.6                # m²/s - lightest molecule, fastest diffusion
+			c = water_vapor_cp,            # J/(kg·K) - NIST polynomial fit
+			k = 0.025,                     # W/(m·K) - H₂O vapor at ~400K
+			λ = λ_gas * 1.6               # m²/s - lightest molecule, fastest diffusion
 		),
 		# 3. Virgin Pressure Treated Wood - solid phase
 		SolidComponent(:PTW,
@@ -219,32 +220,40 @@ ptw_material = Material(
 			λ = λ_char,
 			κ = κ_char,
 		),
-		# 8. PTW_gas1 - gaseous product from reaction 2
+		# 8. PTW_gas1 - gaseous product from reaction 2 (PTW → PTW1)
+		# First decomposition step: hemicellulose-like breakdown
+		# Products: acetic acid (60), furfural (96), formic acid (46), light tars
 		GaseousComponent(:PTW_gas1,
-			M = 0.044,                     # kg/mol - typical pyrolysis gas (CO₂-like)
-			c = 2100.0,                    # J/(kg·K) - constant
-			k = 0.145,
+			M = 0.060,                     # kg/mol - mix of acids and light organics
+			c = 1500.0,                    # J/(kg·K) - organic vapor cp range
+			k = 0.020,                     # W/(m·K) - organic vapors
 			λ = λ_gas,
 		),
-		# 9. PTW_gas2 - gaseous product from reaction 3
+		# 9. PTW_gas2 - gaseous product from reaction 3 (PTW1 → PTW2)
+		# Main cellulose decomposition (57% gas yield — largest gas-producing step)
+		# Products: levoglucosan (162), anhydrosugars, heavy tars
 		GaseousComponent(:PTW_gas2,
-			M = 0.050,                     # kg/mol
-			c = 2100.0,
-			k = 0.145,
+			M = 0.110,                     # kg/mol - dominated by levoglucosan/tars
+			c = 1300.0,                    # J/(kg·K) - heavy organics have lower mass-specific cp
+			k = 0.020,                     # W/(m·K)
 			λ = λ_gas,
 		),
-		# 10. PTW_gas3 - gaseous product from reaction 4
+		# 10. PTW_gas3 - gaseous product from reaction 4 (PTW2 → PTW3)
+		# Secondary decomposition (18% gas yield)
+		# Products: lighter organics, phenolics from lignin
 		GaseousComponent(:PTW_gas3,
-			M = 0.055,                     # kg/mol
-			c = 2100.0,
-			k = 0.145,
+			M = 0.080,                     # kg/mol - medium organics
+			c = 1500.0,                    # J/(kg·K)
+			k = 0.020,                     # W/(m·K)
 			λ = λ_gas,
 		),
-		# 11. PTW_gas4 - gaseous product from reaction 5
+		# 11. PTW_gas4 - gaseous product from reaction 5 (PTW3 → Char)
+		# Final charring stage (23% gas yield)
+		# Products: lightest remaining volatiles, some CH₄, phenol fragments
 		GaseousComponent(:PTW_gas4,
-			M = 0.060,                     # kg/mol
-			c = 2100.0,
-			k = 0.145,
+			M = 0.050,                     # kg/mol - lighter end of pyrolysis products
+			c = 1600.0,                    # J/(kg·K) - lighter molecules, higher mass-specific cp
+			k = 0.020,                     # W/(m·K)
 			λ = λ_gas,
 		),
 	),
@@ -324,7 +333,7 @@ ptw_material = Material(
 
 # Sample geometry
 sample_thickness = 12.0e-3   # 12 mm typical wood sample
-n_cells = 600             # 600 cells → 0.02 mm resolution
+n_cells = 240             # 240 cells → 0.05 mm resolution
 
 # Time parameters
 t_final = 600.0             # 10 minutes - typical cone test duration for wood

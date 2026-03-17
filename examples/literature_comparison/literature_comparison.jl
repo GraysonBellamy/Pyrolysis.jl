@@ -59,7 +59,7 @@ println("Running with $(nworkers()) worker(s)")
 	]
 	const LC_MOISTURE_IDX = 7
 	const LC_ρ_DRY_BASIS = 530.0
-	const LC_NOMINAL_HRXN = [-19153.3, -5573.79, 266699.7, -219638.7, -12381.6]
+	const LC_NOMINAL_HRXN = [-18679.656956492707, -4360.408194805666, 268420.48898703894, -211940.9321063604, -9550.130692481673]
 
 	# ========================================================================
 	# Baseline property functions
@@ -172,7 +172,7 @@ println("Running with $(nworkers()) worker(s)")
 		end)
 
 		# Water vapor cp (fixed)
-		water_vapor_cp = CallableProperty(T -> 2.4e3 - 1.6 * T + 2.0e-3 * T^2)
+		water_vapor_cp = CallableProperty(T -> 1716.7 + 0.4154 * T + 1.530e-4 * T^2)
 
 		# Heat of sorption
 		hos = StateDependentProperty(hos_func)
@@ -208,12 +208,12 @@ println("Running with $(nworkers()) worker(s)")
 				LiquidComponent(:MOISTURE,
 					ρ = 1e6, c = moisture_cp, k = 0.145,
 					ε = 0.81, α = 0.0, κ = 0.0),
-				GaseousComponent(:DF_gas1, M = 0.060, c = 2000.0, k = 0.03, λ = λ_gas * 0.85),
-				GaseousComponent(:DF_gas2, M = 0.044, c = 1800.0, k = 0.03, λ = λ_gas * 1.0),
-				GaseousComponent(:DF_gas3, M = 0.070, c = 2200.0, k = 0.025, λ = λ_gas * 0.6),
-				GaseousComponent(:DF_gas4, M = 0.030, c = 1600.0, k = 0.035, λ = λ_gas * 1.3),
-				GaseousComponent(:DF_gas5, M = 0.028, c = 1500.0, k = 0.035, λ = λ_gas * 1.4),
-				GaseousComponent(:WATER_VAPOR, M = 0.018, c = water_vapor_cp, k = 0.04, λ = λ_gas * 1.6),
+				GaseousComponent(:DF_gas1, M = 0.060, c = 1400.0, k = 0.020, λ = λ_gas * 0.85),
+				GaseousComponent(:DF_gas2, M = 0.070, c = 1400.0, k = 0.020, λ = λ_gas * 0.80),
+				GaseousComponent(:DF_gas3, M = 0.110, c = 1300.0, k = 0.018, λ = λ_gas * 0.6),
+				GaseousComponent(:DF_gas4, M = 0.070, c = 1500.0, k = 0.020, λ = λ_gas * 0.80),
+				GaseousComponent(:DF_gas5, M = 0.050, c = 1600.0, k = 0.025, λ = λ_gas * 1.0),
+				GaseousComponent(:WATER_VAPOR, M = 0.018, c = water_vapor_cp, k = 0.025, λ = λ_gas * 1.6),
 			),
 			reactions = (
 				Reaction(:pyrolysis_step1, 1 => (2, 8),
@@ -464,11 +464,11 @@ const RUNS = [
 	LitCompRunSpec("virgin_cp_dupont", :dupont, :baseline, 1.0, NaN, :baseline),
 	LitCompRunSpec("char_cp_hostikka", :baseline, :hostikka, 1.0, NaN, :baseline),
 	LitCompRunSpec("char_cp_edrich", :baseline, :edrich, 1.0, NaN, :baseline),
-	LitCompRunSpec("hrxn_rath", :baseline, :baseline, 428.0 / 113.74, NaN, :baseline),
-	LitCompRunSpec("hrxn_jones", :baseline, :baseline, 382.0 / 113.74, NaN, :baseline),
+	LitCompRunSpec("hrxn_rath", :baseline, :baseline, 428.0 / 119.458, NaN, :baseline),
+	LitCompRunSpec("hrxn_jones", :baseline, :baseline, 382.0 / 119.458, NaN, :baseline),
 	LitCompRunSpec("hos_free_water", :baseline, :baseline, 1.0, NaN, :free_water),
-	LitCompRunSpec("hrxn_jones_2zone", :baseline, :baseline, 400.0 / 178.25, -18.0 / -64.51, :baseline),
-	LitCompRunSpec("hrxn_rath_2zone", :baseline, :baseline, 440.0 / 178.25, -12.0 / -64.51, :baseline),
+	LitCompRunSpec("hrxn_jones_2zone", :baseline, :baseline, 400.0 / 181.178, -18.0 / -61.719, :baseline),
+	LitCompRunSpec("hrxn_rath_2zone", :baseline, :baseline, 440.0 / 181.178, -12.0 / -61.719, :baseline),
 ]
 
 # ============================================================================

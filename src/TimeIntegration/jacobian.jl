@@ -82,7 +82,7 @@ function jacobian_sparsity(n_cells::Int, NC::Int; radiation_model::RadiationMode
 		end
 
 		# Temperature depends on neighbor concentrations (through ρcₚ, k, and
-		# gas convective heat flux q_conv which depends on neighbor J_gas)
+		# gas convective source S_conv which depends on neighbor J_gas)
 		for neighbor in max(1, i-1):min(n_cells, i+1)
 			for j in 1:NC
 				ξ_col = n_cells + (j-1)*n_cells + neighbor
@@ -209,7 +209,7 @@ function jacobian_sparsity_ale(n_cells::Int, NC::Int; radiation_model::Radiation
 		end
 
 		# Temperature depends on neighbor concentrations (through ρcₚ, k, and
-		# gas convective heat flux q_conv which depends on neighbor J_gas)
+		# gas convective source S_conv which depends on neighbor J_gas)
 		for neighbor in max(1, i-1):min(n_cells, i+1)
 			for j in 1:NC
 				ξ_col = n_cells + (j-1)*n_cells + neighbor

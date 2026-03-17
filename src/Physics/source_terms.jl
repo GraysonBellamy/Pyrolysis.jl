@@ -52,7 +52,7 @@ mutable struct SourceTermCache
 
 	# Heat fluxes
 	q_cond::Vector{Float64}        # Conductive fluxes at faces
-	q_conv::Vector{Float64}        # Convective fluxes at faces
+	S_conv::Vector{Float64}        # Gas convective volumetric source per cell
 
 	# Gas fluxes (NC × n_faces)
 	J_gas::Matrix{Float64}         # Gas mass fluxes
@@ -71,7 +71,7 @@ function SourceTermCache(n_cells::Int, n_faces::Int, NC::Int, NR::Int)
 		zeros(NC, n_cells),  # dξ_rxn
 		zeros(n_cells),      # Q_rad
 		zeros(n_faces),      # q_cond
-		zeros(n_faces),      # q_conv
+		zeros(n_cells),      # S_conv
 		zeros(NC, n_faces),  # J_gas
 	)
 end
@@ -100,7 +100,7 @@ function resize_source_cache!(cache::SourceTermCache, n_cells::Int, n_faces::Int
 	cache.dξ_rxn = zeros(NC, n_cells)
 	resize!(cache.Q_rad, n_cells)
 	resize!(cache.q_cond, n_faces)
-	resize!(cache.q_conv, n_faces)
+	resize!(cache.S_conv, n_cells)
 	cache.J_gas = zeros(NC, n_faces)
 	return cache
 end

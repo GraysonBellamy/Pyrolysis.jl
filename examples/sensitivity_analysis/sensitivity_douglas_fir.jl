@@ -4,16 +4,16 @@ Sensitivity Analysis of Douglas Fir Cone Calorimeter Simulation
 Propagates uncertainties in thermophysical input parameters through the
 07_douglas_fir_cone.jl simulation using Sobol quasi-random sampling.
 
-Uncertain parameters (16 total):
-  - Systematic (Type B) instrument biases: ε_HFM, ε_STA (2)
+Uncertain parameters (17 total):
+  - Systematic (Type B) instrument biases: ε_HFM, ε_DSC, ε_HoS (3)
 	  Multiplicative calibration biases that scale measurements from each
 	  instrument uniformly. Following GUM (JCGM 100:2008):
-	  ε_HFM ~ N(0, 0.00577²)  — HFM heat flow accuracy (1%/√3, manufacturer spec)
-	  ε_STA ~ N(0, 0.01995²)  — DSC enthalpy calibration (RMS 150–600°C, 7 standards, dof=3)
-	  ε_STA applies to DSC-derived Cp (virgin seg 3, char) and ΔH.
-	  ε_HFM applies to HFM-derived Cp (virgin seg 1).
-	  HoS calibration uncertainty is embedded in the total covariance matrix
-	  (see Group 4 below); no separate Type B factor is needed.
+	  ε_HFM ~ N(0, 0.00462²)  — HFM heat flow calibration (data-driven, SRM 1453/1453e)
+	  ε_DSC ~ N(0, 0.01132²)  — DSC enthalpy calibration (certified-only RMS 1.13%, dof=20)
+	  ε_HoS ~ N(0, 0.00597²)  — HoS asymptote calibration (u_rel = 0.60%)
+	  ε_DSC applies to DSC-derived Cp (virgin high-T, char) and ΔH.
+	  ε_HFM applies to HFM-derived Cp (virgin low-T).
+	  ε_HoS applies as multiplicative bias on HoS parameters.
   - Heat capacity regression coefficients for DF virgin (4) and Char (2)
 	(Segment 2 [323–425 K] is interpolated from segments 1 & 3, not independent)
 	(Intermediate cp's are derived via cumulative-yield interpolation)
@@ -25,10 +25,10 @@ of Wood and Sorbed Moisture for Modeling of Wood Pyrolysis" (energetics.tex).
 Type A parameters within each group are sampled jointly via MvNormal to preserve
 cross-correlations (e.g., intercept–slope anti-correlation in cp regressions,
 amplitude–decay correlation in the HoS fit, shared baseline uncertainty in ΔH).
-Type B parameters are sampled independently per instrument (STA, HFM) and applied
-as multiplicative factors (1 + ε) to all Cp values from that instrument.
-HoS uses an asymptote-based calibration (f_cal = L_vap(T_iso) / â_uncal) whose
-uncertainty is embedded in the total covariance via Jacobian propagation.
+Type B parameters are sampled independently per instrument (HFM, DSC, HoS) and
+applied as multiplicative factors (1 + ε) to all values from that source.
+HoS calibration uncertainty is now a separate Type B group (ε_HoS), with the
+CR2 covariance (conditional on f_cal exact) used for the fit parameters.
 
 Kinetic parameters (A, E) and all other properties are held fixed.
 
@@ -81,16 +81,17 @@ using LinearAlgebra
 # distributions. Covariance matrices from the regression JSON files in
 # oxidative_pyrolysis/ (Bellamy, McKinnon, Stoliarov, energetics.tex).
 #
-# Seven correlated groups:
-#   0a. ε_HFM (systematic bias)           — 1×1 N(0, 0.00577²)
-#   0b. ε_STA (systematic bias)           — 1×1 N(0, 0.01995²)
-#   1. DF virgin cp segment 1 (a1, b1)    — 2×2 from HFM regression
-#   2. DF virgin cp segment 3 (a3, b3)    — 2×2 from STA/DSC regression
-#   3. Char cp (a, b)                      — 2×2 from independent char STA
-#   4. Heat of sorption (a, b, c)          — 3×3 total covariance (WLS + calibration)
-#   5. Heats of reaction (ΔH1–ΔH5)        — 5×5 conditional covariance (analytical delta method)
+# Eight correlated groups:
+#   1. ε_HFM (systematic bias)              — 1×1 N(0, 0.00462²)
+#   2. ε_DSC (systematic bias)              — 1×1 N(0, 0.01132²)
+#   3. ε_HoS (systematic bias)              — 1×1 N(0, 0.00597²)
+#   4. DF virgin cp low-T (a1, b1)          — 2×2 from HFM regression
+#   5. DF virgin cp high-T (a3, b3)         — 2×2 per-curve empirical marginal
+#   6. Char cp (a, b)                        — 2×2 from independent char STA
+#   7. Heat of sorption (a, b, c)            — 3×3 CR2 covariance (conditional on f_cal)
+#   8. Heats of reaction (ΔH1–ΔH5)          — 5×5 conditional covariance
 #
-# Cp regressions were fit in J/(g·K); values and covariances are converted
+# Cp regressions were fit in kJ/(kg·K); values and covariances are converted
 # to J/(kg·K) below (×1e3 for values, ×1e6 for covariance entries).
 # HoS parameters are in kJ/kg and 1/% (same units as build_and_solve).
 # Heats of reaction conditional covariance is in kJ²/kg², converted to J²/kg².
@@ -99,24 +100,24 @@ using LinearAlgebra
 #
 # INCLUDED:
 #   Type B (systematic):
-#     ε_HFM  — HFM heat flow accuracy, 1%/√3 = 0.577% (manufacturer spec)     [Group 0a]
-#     ε_STA  — DSC enthalpy calibration, ~2.0% RMS (7 stds, dof=3)              [Group 0b]
+#     ε_HFM  — HFM heat flow calibration, 0.462% (data-driven, SRM cal.)      [Group 1]
+#     ε_DSC  — DSC enthalpy calibration, 1.13% RMS (certified-only, dof=20)     [Group 2]
+#     ε_HoS  — HoS asymptote calibration, u_rel = 0.60%                         [Group 3]
 #   Type A (statistical/regression):
-#     HFM cp regression (seg 1)              — 2×2 covariance                   [Group 1]
-#     STA cp regression (seg 3)              — 2×2 covariance                   [Group 2]
-#     Independent char STA cp regression     — 2×2 covariance                   [Group 3]
-#     HoS total (WLS + asymptote cal.)       — 3×3 covariance                   [Group 4]
-#     ΔH conditional (WLS + char cp + cross) — 5×5 covariance                   [Group 5]
+#     HFM cp regression (low-T)              — 2×2 covariance                   [Group 4]
+#     STA cp per-curve (high-T)              — 2×2 covariance                   [Group 5]
+#     Independent char STA cp regression     — 2×2 covariance                   [Group 6]
+#     HoS CR2 (conditional on f_cal)         — 3×3 covariance                   [Group 7]
+#     ΔH conditional (per-curve + char cp)   — 5×5 covariance                   [Group 8]
 #   Coupling:
-#     Virgin cp → ΔH Jacobian correction     — J_HRXN_CP × δ(a₃,b₃) at runtime
-#     ΔH × ε_STA multiplicative scaling      — applied after Jacobian correction
-#   HoS calibration: embedded in Group 4 total covariance via Jacobian propagation
-#     of f_cal = L_vap(T_iso) / â_uncal (asymptote constraint, delta method)
+#     Virgin cp → ΔH Jacobian correction     — J_HRXN_CP × δ(slope,int) at runtime
+#     ΔH × ε_DSC multiplicative scaling      — applied after Jacobian correction
+#     HoS × ε_HoS multiplicative scaling     — applied to HoS output
 #
 # OMITTED (justified):
 #   STA temperature calibration on Cp        — 4.6% of STA Type B variance; negligible
 #   STA temperature calibration on ΔH        — second-order: O(δT²/ΔT²_peak); negligible
-#   STA mass measurement                     — u_rel = 0.03%; ~100× smaller than ε_STA
+#   STA mass measurement                     — u_rel = 0.03%; ~100× smaller than ε_DSC
 #   HFM temperature (Type K TC) on Cp        — additive intercept shift δCp = b·δT ≈ 0.004
 #                                               J/(g·K), negligible vs regression SE of
 #                                               intercept (0.218 J/(g·K))
@@ -127,7 +128,7 @@ using LinearAlgebra
 	CorrelatedGroup
 
 Defines a group of parameters with a joint multivariate normal distribution.
-`indices` maps into the 16-element θ vector passed to build_and_solve.
+`indices` maps into the 17-element θ vector passed to build_and_solve.
 """
 struct CorrelatedGroup
 	name::String
@@ -137,130 +138,131 @@ struct CorrelatedGroup
 end
 
 const PARAM_NAMES = [
-	:epsilon_hfm, :epsilon_sta,                                  # indices 1–2  (Type B biases)
-	:df_cp_a1, :df_cp_b1,                                       # indices 3–4  (Type A, HFM)
-	:df_cp_a3, :df_cp_b3,                                       # indices 5–6  (Type A, STA/DSC)
-	:char_cp_a, :char_cp_b,                                     # indices 7–8  (Type A, char STA)
-	:hos_baseline, :hos_amplitude, :hos_decay,                   # indices 9–11 (total cov, WLS + cal.)
-	:h_rxn1, :h_rxn2, :h_rxn3, :h_rxn4, :h_rxn5,               # indices 12–16
+	:epsilon_hfm, :epsilon_dsc, :epsilon_hos,                   # indices 1–3  (Type B biases)
+	:df_cp_a1, :df_cp_b1,                                       # indices 4–5  (Type A, HFM)
+	:df_cp_a3, :df_cp_b3,                                       # indices 6–7  (Type A, STA per-curve)
+	:char_cp_a, :char_cp_b,                                     # indices 8–9  (Type A, independent char STA)
+	:hos_a, :hos_b, :hos_c,                                     # indices 10–12 (CR2 cov, conditional on f_cal)
+	:h_rxn1, :h_rxn2, :h_rxn3, :h_rxn4, :h_rxn5,               # indices 13–17
 ]
-const N_PARAMS = 16
+const N_PARAMS = 17
 
 const NOMINAL_VALUES = [
-	0.0, 0.0,                      # ε_HFM, ε_STA (zero-mean biases)
-	-53.05211487520359, 4.245295626034723,               # DF cp seg 1 [J/(kg·K)]  (HFM regression)
-	-2131.3324271799936, 9.118778580751729,              # DF cp seg 3 [J/(kg·K)]  (STA regression)
-	347.2115543239091, 1.7842281021527068,               # Char cp [J/(kg·K)]       (independent char STA)
-	2450.4209098210367, 875.6441216446293, 0.11216842711063967, # HoS [kJ/kg, kJ/kg, 1/%] (asymptote-calibrated WLS fit)
-	-18679.656956492707, -4360.408194805666, 268420.48898703894, -211940.9321063604, -9550.130692481673,  # ΔH [J/kg]
+	0.0, 0.0, 0.0,                    # ε_HFM, ε_DSC, ε_HoS (zero-mean biases)
+	4.133836600273531, -18.01630709338176,                       # DF cp low-T [J/(kg·K)]  (HFM regression, ×1e3)
+	9.136799235573225, -2139.3044552435705,                      # DF cp high-T [J/(kg·K)] (STA per-curve, ×1e3)
+	1.8372509265710314, 312.4273785167445,                       # Char cp [J/(kg·K)]       (independent char STA, ×1e3)
+	2450.420909987441, 875.6441221735336, 0.1121684273316275,    # HoS [kJ/kg, kJ/kg, 1/%] (CR2 fit)
+	-19200.66288032251, -5263.201466602739, 264424.79037373835, -217151.69043762444, -326.40885469229025,  # ΔH [J/kg] (×1e3)
 ]
 
-# --- Group 0a: Type B systematic bias for HFM (ε_HFM) ---
-# HFM heat flow accuracy ±1% (manufacturer spec), rectangular → u_rel = 1%/√3 = 0.577%.
-# Temperature systematic (Type K TC, ±1.5°C → 0.87°C at 1σ) propagates through the
-# Cp slope as an intercept shift (~0.29% relative at midrange) — small and partially
-# degenerate with the Type A intercept uncertainty. Density systematic is negligible
-# (<0.07%). Only the dominant multiplicative heat flow component is sampled here.
-# Source: combined_uncertainty_budget.json → shared_systematics.HFM
+# --- Group 1: Type B systematic bias for HFM (ε_HFM) ---
+# HFM heat flow calibration: data-driven from NIST SRM 1453/1453e at 3 thicknesses,
+# multiDX piecewise-linear interpolation to DF sample thickness (19.4 mm).
+# u_rel = 0.462% (1σ, RSS of replicate scatter + NIST certified uncertainty).
+# Type K TC offset absorbed into f_cal — not a separate term.
+# Source: hfm_calibration_uncertainty.py → interpolate_cal_at_thickness(DF)
 const GROUP_EPSILON_HFM = CorrelatedGroup("eps_HFM", [1],
 	[0.0],
-	[0.005773502691896258^2;;])
+	[0.0046154243860687^2;;])
 
-# --- Group 0b: Type B systematic bias for STA/DSC (ε_STA) ---
-# DSC enthalpy calibration (7 standards after RbNO₃ Grubbs-test exclusion):
-# u_rel = 1.99% (1σ, RMS of temperature-dependent mean-prediction SE over
-# 150–600°C). Re-fitted P2–P5 with P0, P1 fixed; dof = n_valid - 4 = 3.
-# Temperature systematic (~0.5%) and mass (~0.03%) are negligible additions
-# (RSS dominated by calibration at ~95% of variance).
-# Applied as (1 + ε_STA) to all DSC-derived Cp (virgin seg 3, char) and ΔH.
-# Source: dsc_calibration_model.json, combined_uncertainty_budget.json
-const GROUP_EPSILON_STA = CorrelatedGroup("eps_STA", [2],
+# --- Group 2: Type B systematic bias for DSC (ε_DSC) ---
+# DSC enthalpy calibration (certified-only RMS):
+# u_rel = 1.13% (1σ, pooled across 5 calibration epochs, dof = 20).
+# Applied as (1 + ε_DSC) to all DSC-derived Cp (virgin high-T, char) and ΔH.
+# Source: dsc_calibration_model.json, gsa_parameter_config_douglas_fir.json
+const GROUP_EPSILON_DSC = CorrelatedGroup("eps_DSC", [2],
 	[0.0],
-	[0.019946948876208823^2;;])
+	[0.011322211895623097^2;;])
 
-# --- Group 1: DF virgin cp segment 1 (HFM), T ≤ 323 K ---
+# --- Group 3: Type B systematic bias for HoS calibration (ε_HoS) ---
+# Multiplicative bias on HoS from asymptote calibration:
+# f_cal = L_vap(T_iso) / â_uncal, u_rel = 0.60%.
+# Previously embedded in the total HoS covariance; now separated so that the
+# fit covariance (Group 7) uses CR2 (conditional on f_cal exact).
+# Source: gsa_parameter_config_douglas_fir.json
+const GROUP_EPSILON_HOS = CorrelatedGroup("eps_HoS", [3],
+	[0.0],
+	[0.005974653346763125^2;;])
+
+# --- Group 4: DF virgin cp low-T (HFM), T ≤ 323 K ---
 # Source: douglas_fir_hfm/regression_results.json
-# JSON units: J/(g·K) → script units: J/(kg·K), covariance ×1e6
+# JSON units: kJ/(kg·K) → script units: J/(kg·K), mean ×1e3, covariance ×1e6
 # NOTE: This is the Type A (regression) covariance only. Type B is handled
 # by ε_HFM above, applied as (1 + ε_HFM) × Cp in build_and_solve.
-const GROUP_DF_CP_SEG1 = CorrelatedGroup("DF_cp_seg1", [3, 4],
-	[-53.05211487520359, 4.245295626034723],
-	#         a1              b1          (intercept, slope)
-	[0.21818536907225622^2 * 1e6   -0.00015350444295505884 * 1e6;
-																		  -0.00015350444295505884 * 1e6   0.0007038176820430565^2 * 1e6])
+# dof = 11 (12 specimens, N-1)
+const GROUP_DF_CP_SEG1 = CorrelatedGroup("DF_cp_seg1", [4, 5],
+	[0.004133836600273531 * 1e3, -0.01801630709338176 * 1e3],
+	#         slope                   intercept
+	[7.183142841163425e-05^2 * 1e6    -1.1925585013168409e-06 * 1e6;
+	 -1.1925585013168409e-06 * 1e6    0.01850672773953015^2 * 1e6])
 
-# --- Group 2: DF virgin cp segment 3 (STA/DSC), T > 425 K ---
-# Source: douglas_fir_sta/regression_results.json
-# NOTE: Type A only. Type B handled by ε_STA.
-const GROUP_DF_CP_SEG3 = CorrelatedGroup("DF_cp_seg3", [5, 6],
-	[-2131.3324271799936, 9.118778580751729],
-	[0.05639860409139659^2 * 1e6    -7.199865775680076e-06 * 1e6;
-																		  -7.199865775680076e-06 * 1e6    0.00012769474746086228^2 * 1e6])
+# --- Group 5: DF virgin cp high-T (STA per-curve), T > 425 K ---
+# Source: gsa_parameter_config_douglas_fir.json
+# Per-curve empirical marginal covariance (NOT the old WLS regression).
+# JSON units: kJ/(kg·K) → script units: J/(kg·K), mean ×1e3, covariance ×1e6
+# NOTE: Type A only. Type B handled by ε_DSC.
+# dof = 9 (10 replicates, N-1)
+const GROUP_DF_CP_SEG3 = CorrelatedGroup("DF_cp_seg3", [6, 7],
+	[0.009136799235573225 * 1e3, -2.1393044552435705 * 1e3],
+	[2.7703324106603792e-08 * 1e6    -9.7846678915291e-06 * 1e6;
+	 -9.7846678915291e-06 * 1e6       0.0038340012469450084 * 1e6])
 
-# --- Group 3: Char cp (independent STA measurement) ---
-# Source: douglas_fir_independent_char_sta/regression_results.json
-# NOTE: Type A only. Type B handled by ε_STA (same DSC instrument).
-const GROUP_CHAR_CP = CorrelatedGroup("Char_cp", [7, 8],
-	[347.2115543239091, 1.7842281021527068],
-	[0.003486073926426707^2 * 1e6    -2.0046889949248706e-08 * 1e6;
-																		  -2.0046889949248706e-08 * 1e6    5.782240725309274e-06^2 * 1e6])
+# --- Group 6: Independent char cp (dedicated charring experiments) ---
+# Source: gsa_parameter_config_douglas_fir.json
+# NOT the pseudo char Cp from the optimization — independently measured.
+# JSON units: kJ/(kg·K) → script units: J/(kg·K), mean ×1e3, covariance ×1e6
+# NOTE: Type A only. Type B handled by ε_DSC (same DSC instrument).
+# dof = 4 (5 replicates, N-1)
+const GROUP_CHAR_CP = CorrelatedGroup("Char_cp", [8, 9],
+	[0.0018372509265710314 * 1e3, 0.3124273785167445 * 1e3],
+	[0.00040051156523772673^2 * 1e6    -9.472629865704193e-05 * 1e6;
+	 -9.472629865704193e-05 * 1e6       0.2369805093355783^2 * 1e6])
 
-# --- Group 4: Heat of sorption (TOTAL covariance: WLS + asymptote calibration) ---
-# Source: papers/energetics/figures/hos_fit_results.json → covariance_matrix_total
+# --- Group 7: Heat of sorption (CR2 covariance, conditional on f_cal exact) ---
+# Source: papers/energetics/figures/hos_fit_results.json → covariance_matrix_cr2
 # Parameters: a=asymptote [kJ/kg], b=amplitude [kJ/kg], c=decay [1/%]
 #
-# Calibration: The raw WLS exponential fit is calibrated using the asymptote
-# constraint f_cal = L_vap(T_iso) / â_uncal, which enforces the physical
-# requirement that HoS → L_vap as MC → ∞. This calibration factor (f_cal =
-# 1.060534, u_rel = 0.596%) scales parameters a and b multiplicatively; c (decay
-# constant/shape) is scale-invariant. Calibration uncertainty is propagated
-# into the covariance via the delta method on the ratio L_vap/â:
-#   Cov_total = Cov_conditional + J_cf × Var(f_cal) × J_cfᵀ
-# where Cov_conditional is the raw WLS covariance (f_cal treated as exact)
-# and J_cf = [a_uncal, b_uncal, 0] is the Jacobian of calibrated params
-# w.r.t. f_cal. The total covariance absorbs both Type A (fit) and
-# calibration components — no separate Type B multiplicative factor is needed.
+# Now uses CR2 (conditional on f_cal exact), with the calibration uncertainty
+# handled by the separate ε_HoS group (Group 3). The old code used the total
+# covariance which baked in calibration.
 #
-# NOTE: ε_STA does NOT apply to HoS. HoS calibration is independent of the
+# NOTE: ε_DSC does NOT apply to HoS. HoS calibration is independent of the
 # standard DSC multi-point enthalpy calibration; it uses the asymptote
 # constraint referencing L_vap(T_iso) from the NIST-Webbook Antoine equation.
-const GROUP_HOS = CorrelatedGroup("HoS", [9, 10, 11],
-	[2450.4209098210367, 875.6441216446293, 0.11216842711063967],
-	[422.8825520447299     98.43288530364839     0.09962623051573538;
-																				98.43288530364839   1088.3986105249596     0.18261042051128729;
-																				 0.09962623051573537   0.18261042051128726   8.819241986936302e-05])
-# --- Group 5: Heats of reaction (CONDITIONAL covariance from two-stage optimization) ---
-# Source: scripts/energetics/results/douglas_fir_two_stage_optimized.json
-#         → conditional_dh_uncertainty.covariance_matrix_kJ_per_kg_sq
+# dof = 19 (22 clusters - 3 params)
+const GROUP_HOS = CorrelatedGroup("HoS", [10, 11, 12],
+	[2450.420909987441, 875.6441221735336, 0.1121684273316275],
+	[255.54778632642243     826.4091656069307     0.24363365219954056;
+	 826.4091656069309     4539.412144899307      1.054987399933727;
+	 0.24363365219954064    1.0549873999337271    0.00028091975868012163])
+
+# --- Group 8: Heats of reaction (CONDITIONAL covariance from per-curve decomposition) ---
+# Source: gsa_parameter_config_douglas_fir.json
+#         → conditional covariance from per-curve empirical decomposition
 #
-# We use the *conditional* covariance from the analytical delta method (IFT +
-# chain rule), which decomposes as:
-#   Σ_ΔH|cp_virgin = Σ_WLS + J_char @ Σ_char @ J_charᵀ + cross terms
-# where Σ_WLS is the Stage 2 weighted least-squares contribution and J_char
-# propagates Stage 1 pseudo-char cp estimation uncertainty into ΔH.
-# This covariance holds virgin cp at its nominal value, so Groups 2 (DF cp
-# seg 3) and 5 (ΔH) are conditionally independent. The virgin cp → ΔH coupling
-# is handled explicitly by the Jacobian correction J_HRXN_CP × δ(a₃,b₃) in
-# build_and_solve. Using the full bootstrap covariance would double-count:
-# virgin cp uncertainty would enter once through Group 2 (direct perturbation)
-# and again through inflated ΔH variances (implicit perturbation baked in).
+# This covariance holds virgin cp at its nominal value, so Groups 5 (DF cp
+# high-T) and 8 (ΔH) are conditionally independent. The virgin cp → ΔH coupling
+# is handled explicitly by the Jacobian correction J_HRXN_CP × δ(slope,int) in
+# build_and_solve.
 #
 # Type B (DSC calibration): ΔH_fit = (1+ε)·ΔH_true (calibration scales, does not
-# cancel). Applied as (1+ε_STA) multiplicative factor in build_and_solve.
+# cancel). Applied as (1+ε_DSC) multiplicative factor in build_and_solve.
 #
 # Units: kJ²/kg², converted to J²/kg² by ×1e6.
-const GROUP_H_RXN = CorrelatedGroup("H_rxn", [12, 13, 14, 15, 16],
-	[-18679.656956492707, -4360.408194805666, 268420.48898703894, -211940.9321063604, -9550.130692481673],
-	# Conditional covariance (analytical delta method): WLS + char cp + cross terms
-	[6.333174627874863    15.512152336992148   21.963857257090712    97.57757819080862    29.97479139036635;
-																		  15.512152336992141   39.93139848022786    55.852314306485866   249.04311970566448    76.5251414613947;
-																		 21.96385725709072    55.85231430648594    79.66410157173087    350.7339468534618    109.74773629901335;
-																		 97.57757819080858   249.0431197056646    350.7339468534612    1577.602310510771     463.77862475268046;
-																		 29.97479139036626    76.52514146139437   109.74773629901212    463.7786247526774    418.08323450041263] .* 1e6)
+const GROUP_H_RXN = CorrelatedGroup("H_rxn", [13, 14, 15, 16, 17],
+	[-19.20066288032251 * 1e3, -5.263201466602739 * 1e3, 264.42479037373835 * 1e3, -217.15169043762444 * 1e3, -0.32640885469229025 * 1e3],
+	# Conditional covariance (per-curve decomposition): kJ²/kg² → J²/kg²
+	[12.188429198060906    24.748705356848376   29.002904740480126    88.4320951009737     -6.604044259616362;
+	 24.748705356848376   50.700350890015784    59.67848721837838    184.93304070273382   -13.71270702182141;
+	 29.002904740480123   59.67848721837838     80.78981196904051    246.88080651001275    -7.889710589815444;
+	 88.4320951009737    184.93304070273382     246.88080651001275    837.274115396477       0.9278934423897951;
+	 -6.604044259616367  -13.712707021821425    -7.889710589815465     0.9278934423897454  41.07609754085615] .* 1e6)
 
 const CORR_GROUPS = [
 	GROUP_EPSILON_HFM,
-	GROUP_EPSILON_STA,
+	GROUP_EPSILON_DSC,
+	GROUP_EPSILON_HOS,
 	GROUP_DF_CP_SEG1,
 	GROUP_DF_CP_SEG3,
 	GROUP_CHAR_CP,
@@ -344,104 +346,102 @@ end
 ]
 
 # Nominal virgin cp (high-T) regression coefficients — used as reference point
-# for the Jacobian correction to ΔH.
-@everywhere const NOM_CP_A3 = -2131.3324271799936
-@everywhere const NOM_CP_B3 = 9.118778580751729
+# for the Jacobian correction to ΔH. Per-curve grand mean values in J/(kg·K).
+@everywhere const NOM_CP_SLOPE = 9.136799235573225
+@everywhere const NOM_CP_INT = -2139.3044552435705
 
-# Jacobian J = ∂ΔH/∂(a₃, b₃): total sensitivity of fitted heats of reaction to
-# the virgin cp (high-T) regression coefficients used as the optimization baseline.
-# Source: conditional_dh_uncertainty.jacobian_dH_wrt_virgin_cp (analytical, IFT +
-# chain rule through pseudo-char cp re-optimization). Includes both the direct
-# baseline shift and the indirect path through Stage 1 pseudo-char cp.
-# Rows = [ΔH₁, ΔH₂, ΔH₃, ΔH₄, ΔH₅], Cols = [a₃ (intercept), b₃ (slope)]
-# Units col 1: (kJ/kg)/(J/(g·K)) = (J/kg)/(J/(kg·K)) → [K]
-# Units col 2: (kJ/kg)/(J/(g·K²)) = (J/kg)/(J/(kg·K²)) → [K²]
-# JSON column order was [slope, intercept]; swapped here to match [a₃, b₃].
+# Jacobian J = ∂ΔH/∂(slope, intercept): total sensitivity of fitted heats of
+# reaction to the virgin cp (high-T) regression coefficients used as the
+# optimization baseline.
+# Source: gsa_parameter_config_douglas_fir.json → per-curve empirical J
+# Rows = [ΔH₁, ΔH₂, ΔH₃, ΔH₄, ΔH₅], Cols = [slope, intercept]
+# Units: J_sim = J_kJ (no conversion needed — see derivation in config spec)
 @everywhere const J_HRXN_CP = [
-	-101.85716699461705   -50958.34346477685;
-	 -37.03639061442604   -22259.81616866216;
-	 -12.32632451289032    -7491.519003103773;
-	   1.129998286173563    1259.1103018686943;
-	  -3.590886934853404   -2182.690192599356]
+	-36266.85748394125   -73.02438035269826;
+	-76518.48774219683   -157.57351983306967;
+	-108968.04417626567  -244.32381607518548;
+	-284878.45699294383  -635.1246074430231;
+	27455.93513146396    7.708707967010774]
 
 @everywhere begin
 
 	"""
 		build_and_solve(θ)
 
-	Build a Douglas Fir simulation with the given parameter vector θ (length 16),
+	Build a Douglas Fir simulation with the given parameter vector θ (length 17),
 	solve it, and return the PyrolysisSolution.
 	"""
 	function build_and_solve(θ::Vector{Float64})
-		# Unpack the 16 uncertain parameters
-		ε_hfm, ε_sta,
+		# Unpack the 17 uncertain parameters
+		ε_hfm, ε_dsc, ε_hos,
 		df_cp_a1, df_cp_b1, df_cp_a3, df_cp_b3,
 		char_cp_a, char_cp_b,
-		hos_baseline, hos_amplitude, hos_decay,
+		hos_a, hos_b, hos_c,
 		h_rxn1, h_rxn2, h_rxn3, h_rxn4, h_rxn5 = θ
 
-		# Type B multiplicative factors for each instrument
-		scale_hfm = 1.0 + ε_hfm    # HFM-derived Cp (segment 1)
-		scale_sta = 1.0 + ε_sta    # STA/DSC-derived Cp (segment 3, char) and ΔH
+		# Type B multiplicative factors for each source
+		scale_hfm = 1.0 + ε_hfm    # HFM-derived Cp (low-T)
+		scale_dsc = 1.0 + ε_dsc    # DSC-derived Cp (high-T, char) and ΔH
+		scale_hos = 1.0 + ε_hos    # HoS asymptote calibration
 
 		# --- Correct ΔH for virgin cp regression uncertainty (Type A coupling) ---
-		# The two-stage optimization used nominal (a₃, b₃) as fixed input for the
+		# The two-stage optimization used nominal (slope, intercept) as fixed input for the
 		# reactant-side sensible heat baseline. When the regression coefficients
-		# deviate from nominal (Type A), the fitted ΔH shifts by J × δ(a₃,b₃).
-		δa3 = df_cp_a3 - NOM_CP_A3
-		δb3 = df_cp_b3 - NOM_CP_B3
-		h_rxn1_adj = h_rxn1 + J_HRXN_CP[1, 1] * δa3 + J_HRXN_CP[1, 2] * δb3
-		h_rxn2_adj = h_rxn2 + J_HRXN_CP[2, 1] * δa3 + J_HRXN_CP[2, 2] * δb3
-		h_rxn3_adj = h_rxn3 + J_HRXN_CP[3, 1] * δa3 + J_HRXN_CP[3, 2] * δb3
-		h_rxn4_adj = h_rxn4 + J_HRXN_CP[4, 1] * δa3 + J_HRXN_CP[4, 2] * δb3
-		h_rxn5_adj = h_rxn5 + J_HRXN_CP[5, 1] * δa3 + J_HRXN_CP[5, 2] * δb3
+		# deviate from nominal (Type A), the fitted ΔH shifts by J × δ(slope, int).
+		δslope = df_cp_a3 - NOM_CP_SLOPE
+		δint = df_cp_b3 - NOM_CP_INT
+		h_rxn1_adj = h_rxn1 + J_HRXN_CP[1, 1] * δslope + J_HRXN_CP[1, 2] * δint
+		h_rxn2_adj = h_rxn2 + J_HRXN_CP[2, 1] * δslope + J_HRXN_CP[2, 2] * δint
+		h_rxn3_adj = h_rxn3 + J_HRXN_CP[3, 1] * δslope + J_HRXN_CP[3, 2] * δint
+		h_rxn4_adj = h_rxn4 + J_HRXN_CP[4, 1] * δslope + J_HRXN_CP[4, 2] * δint
+		h_rxn5_adj = h_rxn5 + J_HRXN_CP[5, 1] * δslope + J_HRXN_CP[5, 2] * δint
 
 		# --- Correct ΔH for DSC calibration bias (Type B) ---
 		# The optimization derived ΔH from DSC heat flow using DSC-measured cp as
 		# baseline: q_meas = (1+ε)·q_true, cp_meas = (1+ε)·cp_true, so the residual
 		# yields ΔH_fit = (1+ε)·ΔH_true. The calibration does NOT cancel — it scales
-		# ΔH proportionally, just like cp. Both must be scaled by (1+ε_STA).
-		h_rxn1_adj *= scale_sta
-		h_rxn2_adj *= scale_sta
-		h_rxn3_adj *= scale_sta
-		h_rxn4_adj *= scale_sta
-		h_rxn5_adj *= scale_sta
+		# ΔH proportionally, just like cp. Both must be scaled by (1+ε_DSC).
+		h_rxn1_adj *= scale_dsc
+		h_rxn2_adj *= scale_dsc
+		h_rxn3_adj *= scale_dsc
+		h_rxn4_adj *= scale_dsc
+		h_rxn5_adj *= scale_dsc
 
 		# --- DF virgin heat capacity (piecewise linear, 3 segments) ---
 		# Segment 1 (T ≤ 323 K): HFM instrument → scale by (1 + ε_HFM)
-		# Segment 3 (T > 425 K): STA/DSC instrument → scale by (1 + ε_STA)
+		# Segment 3 (T > 425 K): STA/DSC instrument → scale by (1 + ε_DSC)
 		# Segment 2 (323–425 K): interpolated from endpoints of seg 1 & 3
 		#   so it inherits both biases through the endpoint values
 		function virgin_cp(T)
 			if T <= 323.0
-				(df_cp_a1 + df_cp_b1 * T) * scale_hfm
+				(df_cp_b1 + df_cp_a1 * T) * scale_hfm
 			elseif T <= 425.0
-				cp_low  = (df_cp_a1 + df_cp_b1 * 323.0) * scale_hfm
-				cp_high = (df_cp_a3 + df_cp_b3 * 425.0) * scale_sta
+				cp_low  = (df_cp_b1 + df_cp_a1 * 323.0) * scale_hfm
+				cp_high = (df_cp_b3 + df_cp_a3 * 425.0) * scale_dsc
 				cp_low + (cp_high - cp_low) * (T - 323.0) / 102.0
 			else
-				(df_cp_a3 + df_cp_b3 * T) * scale_sta
+				(df_cp_b3 + df_cp_a3 * T) * scale_dsc
 			end
 		end
 
 		df_cp = CallableProperty(virgin_cp)
 
-		# --- Char heat capacity (linear, STA instrument → scale by ε_STA) ---
-		char_cp_func = CallableProperty(T -> (char_cp_a + char_cp_b * T) * scale_sta)
+		# --- Char heat capacity (linear, STA instrument → scale by ε_DSC) ---
+		char_cp_func = CallableProperty(T -> (char_cp_b + char_cp_a * T) * scale_dsc)
 
 		# --- Intermediate cp's derived via cumulative-yield interpolation ---
-		# char endpoint also scaled by scale_sta (same DSC instrument)
+		# char endpoint also scaled by scale_dsc (same DSC instrument)
 		int1_cp = CallableProperty(T -> (1 - INTERP_PROGRESS[1]) * virgin_cp(T) +
-										INTERP_PROGRESS[1] * (char_cp_a + char_cp_b * T) * scale_sta)
+										INTERP_PROGRESS[1] * (char_cp_b + char_cp_a * T) * scale_dsc)
 
 		int2_cp = CallableProperty(T -> (1 - INTERP_PROGRESS[2]) * virgin_cp(T) +
-										INTERP_PROGRESS[2] * (char_cp_a + char_cp_b * T) * scale_sta)
+										INTERP_PROGRESS[2] * (char_cp_b + char_cp_a * T) * scale_dsc)
 
 		int3_cp = CallableProperty(T -> (1 - INTERP_PROGRESS[3]) * virgin_cp(T) +
-										INTERP_PROGRESS[3] * (char_cp_a + char_cp_b * T) * scale_sta)
+										INTERP_PROGRESS[3] * (char_cp_b + char_cp_a * T) * scale_dsc)
 
 		int4_cp = CallableProperty(T -> (1 - INTERP_PROGRESS[4]) * virgin_cp(T) +
-										INTERP_PROGRESS[4] * (char_cp_a + char_cp_b * T) * scale_sta)
+										INTERP_PROGRESS[4] * (char_cp_b + char_cp_a * T) * scale_dsc)
 
 		# --- Moisture cp (FIXED — not uncertain) ---
 		moisture_cp = CallableProperty(T -> begin
@@ -456,17 +456,16 @@ end
 		end)
 
 		# --- Water vapor cp (FIXED) ---
-		water_vapor_cp = CallableProperty(T -> 2.4e3 - 1.6 * T + 2.0e-3 * T^2)
+		water_vapor_cp = CallableProperty(T -> 1716.7 + 0.4154 * T + 1.530e-4 * T^2)
 
 		# --- Heat of sorption (parametric) ---
-		# HoS is calibrated via the asymptote constraint f_cal = L_vap(T_iso) / â_uncal.
-		# Calibration uncertainty is embedded in the total covariance matrix of
-		# (hos_baseline, hos_amplitude, hos_decay), so no separate multiplicative
-		# Type B factor is applied. ε_STA does not apply to HoS — the calibration
-		# pathway is independent of the standard DSC multi-point calibration.
+		# HoS CR2 covariance is conditional on f_cal exact; calibration uncertainty
+		# is handled by the separate ε_HoS multiplicative factor (Group 3).
+		# ε_DSC does not apply to HoS — the calibration pathway is independent
+		# of the standard DSC multi-point calibration.
 		hos = StateDependentProperty((T, ξ) -> begin
 			MC = 100.0 * ξ[SA_MOISTURE_IDX] / SA_ρ_DRY_BASIS
-			return (hos_baseline + hos_amplitude * exp(-hos_decay * MC)) * 1e3
+			return (hos_a + hos_b * exp(-hos_c * MC)) * 1e3 * scale_hos
 		end)
 
 		# --- Gas transfer coefficients and permeability (FIXED) ---
@@ -509,13 +508,13 @@ end
 					ρ = 1e6, c = moisture_cp, k = 0.145,
 					ε = 0.81, α = 0.0, κ = 0.0),
 				# 8-12. Gas products
-				GaseousComponent(:DF_gas1, M = 0.060, c = 2000.0, k = 0.03, λ = λ_gas * 0.85),
-				GaseousComponent(:DF_gas2, M = 0.044, c = 1800.0, k = 0.03, λ = λ_gas * 1.0),
-				GaseousComponent(:DF_gas3, M = 0.070, c = 2200.0, k = 0.025, λ = λ_gas * 0.6),
-				GaseousComponent(:DF_gas4, M = 0.030, c = 1600.0, k = 0.035, λ = λ_gas * 1.3),
-				GaseousComponent(:DF_gas5, M = 0.028, c = 1500.0, k = 0.035, λ = λ_gas * 1.4),
+				GaseousComponent(:DF_gas1, M = 0.060, c = 1400.0, k = 0.020, λ = λ_gas * 0.85),
+				GaseousComponent(:DF_gas2, M = 0.070, c = 1400.0, k = 0.020, λ = λ_gas * 0.80),
+				GaseousComponent(:DF_gas3, M = 0.110, c = 1300.0, k = 0.018, λ = λ_gas * 0.6),
+				GaseousComponent(:DF_gas4, M = 0.070, c = 1500.0, k = 0.020, λ = λ_gas * 0.80),
+				GaseousComponent(:DF_gas5, M = 0.050, c = 1600.0, k = 0.025, λ = λ_gas * 1.0),
 				# 13. Water vapor
-				GaseousComponent(:WATER_VAPOR, M = 0.018, c = water_vapor_cp, k = 0.04, λ = λ_gas * 1.6),
+				GaseousComponent(:WATER_VAPOR, M = 0.018, c = water_vapor_cp, k = 0.025, λ = λ_gas * 1.6),
 			),
 			reactions = (
 				Reaction(:pyrolysis_step1, 1 => (2, 8),

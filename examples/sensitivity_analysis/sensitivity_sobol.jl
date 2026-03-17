@@ -17,18 +17,19 @@ Method:
   4. Quantify index uncertainty via nonparametric bootstrap (1000 replicates).
   5. Assess convergence by computing indices on nested subsamples.
 
-The 16 uncertain parameters fall into 7 independent groups (correlations are
+The 17 uncertain parameters fall into 8 independent groups (correlations are
 within-group only), so standard Sobol formulas apply without correlated-input
 extensions.
 
 Groups (by measurement source):
   1. HFM calibration bias (ε_HFM)           — 1 parameter
-  2. DSC calibration bias (ε_STA)           — 1 parameter
-  3. Virgin Cp, low-T (HFM regression)      — 2 parameters (a₁, b₁)
-  4. Virgin Cp, high-T (DSC regression)     — 2 parameters (a₃, b₃)
-  5. Char Cp (DSC regression)               — 2 parameters (a_char, b_char)
-  6. Heat of sorption (total cov: WLS + cal.)— 3 parameters (a, b, c)
-  7. Heats of reaction (conditional cov.)   — 5 parameters (ΔH₁–ΔH₅)
+  2. DSC calibration bias (ε_DSC)           — 1 parameter
+  3. HoS calibration bias (ε_HoS)          — 1 parameter
+  4. Virgin Cp, low-T (HFM regression)      — 2 parameters (a₁, b₁)
+  5. Virgin Cp, high-T (STA per-curve)      — 2 parameters (a₃, b₃)
+  6. Char Cp (independent char STA)         — 2 parameters (a_char, b_char)
+  7. Heat of sorption (CR2 cov, cond.)      — 3 parameters (a, b, c)
+  8. Heats of reaction (conditional cov.)   — 5 parameters (ΔH₁–ΔH₅)
 
 Reads:  results/parameters.csv, results/scalar_qois.csv
 Writes: results/sobol_group_indices.csv, results/sobol_bootstrap_ci.csv,
@@ -56,60 +57,68 @@ const RESULTS_DIR = joinpath(@__DIR__, "results")
 
 struct ParamGroup
 	name::String
-	indices::Vector{Int}     # indices into the 16-element θ vector
+	indices::Vector{Int}     # indices into the 17-element θ vector
 	μ::Vector{Float64}
 	Σ::Matrix{Float64}
 end
 
 const GROUPS = [
-	# 1. HFM calibration bias
+	# 1. HFM calibration bias (data-driven, SRM 1453/1453e, DF thickness)
 	ParamGroup("HFM calibration", [1],
 		[0.0],
-		[0.005774^2;;]),
+		[0.0046154243860687^2;;]),
 
-	# 2. DSC calibration bias
+	# 2. DSC calibration bias (certified-only RMS, 1.13%, dof=20)
 	ParamGroup("DSC calibration", [2],
 		[0.0],
-		[0.02613^2;;]),
+		[0.011322211895623097^2;;]),
 
-	# 3. Virgin Cp, low-T (HFM regression)
-	ParamGroup("Virgin Cp, low-T", [3, 4],
-		[-53.052, 4.2453],
-		[0.21819^2 * 1e6   -1.5350e-4 * 1e6;
-									 -1.5350e-4 * 1e6   7.038e-4^2 * 1e6]),
+	# 3. HoS asymptote calibration bias (u_rel = 0.60%)
+	ParamGroup("HoS calibration", [3],
+		[0.0],
+		[0.005974653346763125^2;;]),
 
-	# 4. Virgin Cp, high-T (DSC regression)
-	ParamGroup("Virgin Cp, high-T", [5, 6],
-		[-2131.33, 9.11878],
-		[0.056399^2 * 1e6    -7.1999e-6 * 1e6;
-									 -7.1999e-6 * 1e6    1.2769e-4^2 * 1e6]),
+	# 4. Virgin Cp, low-T (HFM regression, slope/intercept in J/(kg·K))
+	# Source: douglas_fir_hfm/regression_results.json
+	ParamGroup("Virgin Cp, low-T", [4, 5],
+		[0.004133836600273531 * 1e3, -0.01801630709338176 * 1e3],
+		[7.183142841163425e-05^2 * 1e6    -1.1925585013168409e-06 * 1e6;
+		 -1.1925585013168409e-06 * 1e6    0.01850672773953015^2 * 1e6]),
 
-	# 5. Char Cp (independent STA)
-	ParamGroup("Char Cp", [7, 8],
-		[347.212, 1.78423],
-		[3.486e-3^2 * 1e6    -2.0047e-8 * 1e6;
-									 -2.0047e-8 * 1e6    5.782e-6^2 * 1e6]),
+	# 5. Virgin Cp, high-T (STA per-curve, slope/intercept in J/(kg·K))
+	# Source: gsa_parameter_config_douglas_fir.json
+	ParamGroup("Virgin Cp, high-T", [6, 7],
+		[0.009136799235573225 * 1e3, -2.1393044552435705 * 1e3],
+		[2.7703324106603792e-08 * 1e6    -9.7846678915291e-06 * 1e6;
+		 -9.7846678915291e-06 * 1e6       0.0038340012469450084 * 1e6]),
 
-	# 6. Heat of sorption (total covariance: WLS + asymptote calibration)
-	# Calibration uncertainty (f_cal = L_vap(T_iso)/â_uncal) is embedded in
-	# the total covariance via Jacobian propagation; no separate Type B factor.
-	ParamGroup("Heat of sorption", [9, 10, 11],
-		[2450.4209, 875.6441, 0.11217],
-		[422.883     98.433     0.09963;
-									   98.433   1088.399     0.18261;
-										0.09963    0.18261   8.819e-5]),
+	# 6. Char Cp (independent STA, slope/intercept in J/(kg·K))
+	# Source: douglas_fir_independent_char_sta/regression_results.json
+	ParamGroup("Char Cp", [8, 9],
+		[0.0018372509265710314 * 1e3, 0.3124273785167445 * 1e3],
+		[0.00040051156523772673^2 * 1e6    -9.472629865704193e-05 * 1e6;
+		 -9.472629865704193e-05 * 1e6       0.2369805093355783^2 * 1e6]),
 
-	# 7. Heats of reaction (conditional covariance, kJ²/kg² → J²/kg²)
-	ParamGroup("Heats of reaction", [12, 13, 14, 15, 16],
-		[-19153.3, -5573.79, 266699.7, -219638.7, -12381.6],
-		[3.42252    8.04561   11.3715    50.1601    12.3280;
-									 8.04561   20.7989    28.7027   127.515     31.2934;
-									 11.3715    28.7027    41.1541   178.306     45.5874;
-									 50.1601   127.515    178.306    805.909    176.265;
-									 12.3280    31.2934    45.5874   176.265    313.704] .* 1e6),
+	# 7. Heat of sorption (CR2 covariance, conditional on f_cal exact)
+	# Source: papers/energetics/figures/hos_fit_results.json -> covariance_matrix_cr2
+	ParamGroup("Heat of sorption", [10, 11, 12],
+		[2450.420909987441, 875.6441221735336, 0.1121684273316275],
+		[255.54778632642243     826.4091656069307     0.24363365219954056;
+		 826.4091656069309     4539.412144899307      1.054987399933727;
+		 0.24363365219954064    1.0549873999337271    0.00028091975868012163]),
+
+	# 8. Heats of reaction (conditional covariance, kJ²/kg² -> J²/kg²)
+	# Source: gsa_parameter_config_douglas_fir.json -> conditional_covariance
+	ParamGroup("Heats of reaction", [13, 14, 15, 16, 17],
+		[-19.20066288032251 * 1e3, -5.263201466602739 * 1e3, 264.42479037373835 * 1e3, -217.15169043762444 * 1e3, -0.32640885469229025 * 1e3],
+		[12.188429198060906    24.748705356848376   29.002904740480126    88.4320951009737     -6.604044259616362;
+		 24.748705356848376   50.700350890015784    59.67848721837838    184.93304070273382   -13.71270702182141;
+		 29.002904740480123   59.67848721837838     80.78981196904051    246.88080651001275    -7.889710589815444;
+		 88.4320951009737    184.93304070273382     246.88080651001275    837.274115396477       0.9278934423897951;
+		 -6.604044259616367  -13.712707021821425    -7.889710589815465     0.9278934423897454  41.07609754085615] .* 1e6),
 ]
 
-const N_PARAMS = 16
+const N_PARAMS = 17
 
 # Scalar QoIs to analyze (skip time_to_ignition — quantized, and solve_time — not physical)
 const QOI_NAMES = [
@@ -150,8 +159,8 @@ const CONVERGENCE_FRACTIONS = [0.125, 0.25, 0.5, 0.75, 1.0]
 Transform correlated parameter samples to independent standard normal space
 using the Cholesky factors of each group's covariance matrix.
 
-Input:  param_data [n_samples × 16] in physical units
-Output: Z [n_samples × 16] in standard normal space
+Input:  param_data [n_samples × 17] in physical units
+Output: Z [n_samples × 17] in standard normal space
 """
 function transform_to_standard_normal(param_data::Matrix{Float64}, groups::Vector{ParamGroup})
 	n = size(param_data, 1)
@@ -696,7 +705,7 @@ function main()
 
 	# --- Load data ---
 	param_csv = readdlm(joinpath(RESULTS_DIR, "parameters.csv"), ','; header = true)
-	param_matrix = Float64.(param_csv[1][:, 2:end])  # [n_samples × 16]
+	param_matrix = Float64.(param_csv[1][:, 2:end])  # [n_samples × 17]
 	n_total = size(param_matrix, 1)
 	println("Loaded $n_total parameter samples")
 

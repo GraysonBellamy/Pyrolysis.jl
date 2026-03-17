@@ -219,6 +219,19 @@ mutable struct JacobianCache{NC, NR}
 	# Radiation work arrays
 	τ_cumulative::Vector{Float64}  # [n_cells + 1] - optical depth from surface
 
+	# Darcy transport derivatives (for pressure-driven gas flow in non-ALE mode)
+	# These mirror the fields in JacobianCacheALE so that
+	# compute_darcy_transport_jacobian! can operate on either cache type.
+	dP_dT::Vector{Float64}           # [n_cells] - ∂Pᵢ/∂Tᵢ
+	dP_dξ::Matrix{Float64}           # [NC × n_cells] - ∂Pᵢ/∂ξⱼ
+	dvgas_dP_L::Vector{Float64}      # [n_faces] - ∂v_gas,f/∂P_left
+	dvgas_dP_R::Vector{Float64}      # [n_faces] - ∂v_gas,f/∂P_right
+	mobility::Vector{Float64}        # [n_faces] - κ_face/μ_face
+	dφ_dξ::Matrix{Float64}           # [NC × n_cells] - ∂φᵢ/∂ξⱼ (porosity)
+	dκ_dξ::Matrix{Float64}           # [NC × n_cells] - ∂κᵢ/∂ξⱼ (permeability)
+	dvgas_dκ_L::Vector{Float64}      # [n_faces] - ∂v_gas,f/∂κ_L
+	dvgas_dκ_R::Vector{Float64}      # [n_faces] - ∂v_gas,f/∂κ_R
+
 	# Sparsity map for O(1) sparse matrix writes (initialized lazily)
 	# Uses FastSparsityMap for problems <= 5000 DOFs, SparsityMap for larger
 	sparsity_map::Union{Nothing, FastSparsityMap, SparsityMap}
@@ -314,6 +327,17 @@ function JacobianCache(n_cells::Int, n_faces::Int, NC::Int, NR::Int)
 
 		# Radiation work arrays
 		zeros(n_cells + 1),             # τ_cumulative
+
+		# Darcy transport derivatives
+		zeros(n_cells),                 # dP_dT
+		zeros(NC, n_cells),             # dP_dξ
+		zeros(n_faces),                 # dvgas_dP_L
+		zeros(n_faces),                 # dvgas_dP_R
+		zeros(n_faces),                 # mobility
+		zeros(NC, n_cells),             # dφ_dξ
+		zeros(NC, n_cells),             # dκ_dξ
+		zeros(n_faces),                 # dvgas_dκ_L
+		zeros(n_faces),                 # dvgas_dκ_R
 
 		# Sparsity map (initialized lazily on first Jacobian call)
 		nothing,                        # sparsity_map
@@ -1162,14 +1186,26 @@ function compute_analytical_jacobian!(J::AbstractMatrix, u, p, t,
 	# Initialize cache on first call (caches static material properties)
 	initialize!(jac_cache, material)
 
+	# Initialize sparsity map for O(1) sparse writes (only on first call with sparse J)
+	if jac_cache.sparsity_map === nothing && J isa SparseMatrixCSC
+		jac_cache.sparsity_map = create_sparsity_map(J)
+	end
+	smap = jac_cache.sparsity_map
+
 	# Unpack state
 	unpack_state!(mesh, u, sv)
 	Properties.update_properties!(prop_cache, mesh, material)
 
 	# Compute RHS values (needed for property derivative terms: ∂(1/ρcₚ)/∂ξ × RHS)
 	# This populates f.dT_work, f.dξ_work, f.rhs_cache.dξ_rxn
-	Discretization.compute_rhs!(f.dT_work, f.dξ_work, mesh, prop_cache, f.rhs_cache,
-		f.material, f.bc_set, t, f.top_face_ids, f.bottom_face_ids; I_radiation = f.I_radiation)
+	# Must match the RHS dispatch in _compute_rhs_dispatch! (Darcy-Fick when permeability present)
+	if has_darcy_flow(material)
+		Discretization.compute_rhs_darcy_fick!(f.dT_work, f.dξ_work, mesh, prop_cache, f.rhs_cache,
+			f.material, f.bc_set, t, f.top_face_ids, f.bottom_face_ids; I_radiation = f.I_radiation)
+	else
+		Discretization.compute_rhs!(f.dT_work, f.dξ_work, mesh, prop_cache, f.rhs_cache,
+			f.material, f.bc_set, t, f.top_face_ids, f.bottom_face_ids; I_radiation = f.I_radiation)
+	end
 
 	# Zero out Jacobian (efficient O(nnz) for sparse matrices)
 	zero_jacobian!(J)
@@ -1261,23 +1297,32 @@ function compute_analytical_jacobian!(J::AbstractMatrix, u, p, t,
 	end
 
 	# ==========================================================================
-	# Face flux Jacobian terms (conduction, gas transport, convective heat)
+	# Face flux Jacobian terms (conduction, gas transport)
 	# ==========================================================================
 	# Pre-compute ALL cell properties ONCE (Optimization #1)
 	precompute_all_cell_properties!(jac_cache, mesh, material)
 
-	# OPTIMIZATION #3: Use fused face loop to compute all three physics at once
-	# This reduces face iterations from 3× to 1× and shares derivative computations
-	# Expected speedup: 25-30% reduction in Jacobian time
-	compute_all_face_jacobians_fused!(J, nothing, mesh, prop_cache, material,
+	# Fused face loop for conduction and gas transport Jacobians
+	compute_all_face_jacobians_fused!(J, smap, mesh, prop_cache, material,
 		f.rhs_cache.J_gas, n, Val(NC), jac_cache)
+
+	# Cell-centered gas convective source Jacobian
+	compute_gas_convective_source_jacobian!(J, smap, mesh, prop_cache, material,
+		f.rhs_cache.J_gas, n, Val(NC), jac_cache)
+
+	# ==========================================================================
+	# Darcy advective transport Jacobian (if active)
+	# ==========================================================================
+	if has_darcy_flow(material)
+		compute_darcy_transport_jacobian!(J, smap, mesh, prop_cache, material, n, Val(NC), jac_cache)
+	end
 
 	# ==========================================================================
 	# Boundary condition Jacobian terms
 	# ==========================================================================
-	compute_bc_jacobian!(J, nothing, mesh, prop_cache, f.bc_set, n, NC, t,
+	compute_bc_jacobian!(J, smap, mesh, prop_cache, f.bc_set, n, NC, t,
 		f.top_face_ids, f.bottom_face_ids, f.radiation_model)
-	compute_mass_bc_jacobian!(J, nothing, mesh, prop_cache, f.bc_set, material, n, NC, t, f.top_face_ids, f.bottom_face_ids, jac_cache.is_gas, jac_cache)
+	compute_mass_bc_jacobian!(J, smap, mesh, prop_cache, f.bc_set, material, n, NC, t, f.top_face_ids, f.bottom_face_ids, jac_cache.is_gas, jac_cache)
 
 	# NOTE: Boundary convective heat flux Jacobian removed (advection form has zero boundary contribution)
 	# Energy leaving the system is handled by boundary conditions, not by convective heat flux.
@@ -1286,7 +1331,7 @@ function compute_analytical_jacobian!(J::AbstractMatrix, u, p, t,
 	# Radiation Jacobian (non-local Beer-Lambert)
 	# ==========================================================================
 	if f.I_radiation > 0.0
-		compute_radiation_jacobian!(J, nothing, mesh, prop_cache, f.I_radiation, n, NC, jac_cache.comp_absorptions, jac_cache.τ_cumulative)
+		compute_radiation_jacobian!(J, smap, mesh, prop_cache, f.I_radiation, n, NC, jac_cache.comp_absorptions, jac_cache.τ_cumulative)
 	end
 
 	return nothing
@@ -1679,342 +1724,280 @@ end
 
 
 # ============================================================================
-# Convective Heat Flux Jacobian
+# Gas Convective Source Jacobian (cell-centered)
 # ============================================================================
 
 """
-	compute_convective_heat_flux_jacobian!(J, smap, mesh, prop_cache, material, 
-										   J_gas, n, NC, jac_cache)
+	compute_gas_convective_source_jacobian!(J, smap, mesh, prop_cache, material,
+										    J_gas, n, NC, jac_cache)
 
-Add convective heat flux derivatives to the energy equation Jacobian.
+Add gas convective source derivatives to the energy equation Jacobian.
 
-The convective heat flux at face f is computed from gas mass fluxes:
-	q_conv,f = Σⱼ J_j,f × cp,j(T_face) × T_face
+The gas convective source at cell i is:
+	S_conv,i = -Σ_g c_g(T_i) × J̄_g,i × (∂T/∂x)_i
 
-where:
-- J_j,f is the gas mass flux for component j [kg/(m²·s)]
-- cp,j(T) is the heat capacity of component j [J/(kg·K)]
-- T_face is the upwind temperature (T_L if J_j ≥ 0, else T_R)
+where J̄_g,i = (J_g[f_L] + J_g[f_R]) / 2.
 
-The gas mass flux uses the rigorous λρ formulation with harmonic mean:
-	J_j,f = -λρ_face × ∂Y_j/∂x   where Y_j = ξ_j / ρ_total
+Temperature derivatives (diagonal and off-diagonal):
+	∂S/∂T_i: through (∂T/∂x)_i
+	∂S/∂T_{i±1}: through (∂T/∂x)_i neighbor dependence
 
-This function computes:
-1. ∂(dT_i/dt)/∂ξ_j,k: sensitivity to concentration changes
-   - Through ∂J_j,f/∂ξ_j,k (mass flux changes)
-   
-2. ∂(dT_i/dt)/∂T_k: sensitivity to temperature changes
-   - Through T_face (upwind temperature)
-   - Through cp,j(T_face) (temperature-dependent heat capacity)
-
-# Energy equation structure:
-	dT_i/dt = (1/ρcp_i) × (-div_q + Q_rad + Q_rxn)
-	
-where div_q includes the convective heat flux contribution.
-
-# Arguments
-- `J`: Jacobian matrix (modified in-place)
-- `smap`: Sparsity map for fast_sparse_* operations (nothing for dense)
-- `mesh`: Current mesh with cell states
-- `prop_cache`: Cached material properties (ρ, λ, ρcp)
-- `material`: Material definition with components
-- `J_gas`: Pre-computed gas mass fluxes [NC × n_faces], from RHS computation
-- `n`: Number of cells (temperature DOFs 1:n)
-- `NC`: Number of components (static for type stability)
-- `jac_cache`: Jacobian cache with work arrays and cached properties
-
-# Notes
-- Uses upwinding consistent with RHS: T_face = T_L if J_j ≥ 0, else T_R
-- Uses pre-allocated work arrays from jac_cache to avoid allocations
-- The ∂J/∂ξ derivatives use the same λρ formulation as compute_gas_transport_jacobian!
-
-OPTIMIZATION: dρ_dξ and dλ_dξ derivatives are computed once per face (for all k)
-and stored in work arrays, then reused across all gas component j loops.
-This reduces derivative computations from O(n_faces × n_gas × NC × 2) to 
-O(n_faces × NC × 2), a ~6× reduction for typical materials.
+Species derivatives (through J̄_g dependence on ξ):
+	∂S/∂ξ_{j,k}: through ∂J̄/∂ξ at bounding faces
 """
-function compute_convective_heat_flux_jacobian!(J::AbstractMatrix, smap,
+function compute_gas_convective_source_jacobian!(J::AbstractMatrix, smap,
 	mesh, prop_cache, material::Material{NC}, J_gas::Matrix{Float64},
 	n::Int, ::Val{NC}, jac_cache) where NC
 
-	# Get base cache (handles both JacobianCache and JacobianCacheALE)
 	base_cache = jac_cache isa JacobianCacheALE ? jac_cache.base : jac_cache
-
-	# Get work arrays from cache
-	# Note: densities_L/R and lambdas_L/R now use @view into per-cell matrices (set per-face below)
-	v_L = base_cache.volume_fractions
-	v_R = base_cache.ξ_work
-	cp_L = base_cache.work_NC_3
-	cp_R = base_cache.work_NC_4
 	is_gas = base_cache.is_gas
 	swelling_factors = base_cache.swelling_factors
+	λ_mixing = material.gas_transfer_mixing
+	β_λ = material.β_λ
 
-	# Hoisted derivative arrays (computed once per face, reused across all gas components)
-	dρ_L_dξ_arr = base_cache.work_NC_5
-	dρ_R_dξ_arr = base_cache.work_NC_6
-	dλ_L_dξ_arr = base_cache.work_NC_7
-	dλ_R_dξ_arr = base_cache.work_NC_8
+	# Work arrays for volume fractions
+	v_work1 = base_cache.volume_fractions
+	v_work2 = base_cache.ξ_work
 
-	# Get mixing parameters (same as gas transport)
-	mixing = material.gas_transfer_mixing
-	β = material.β_λ
+	# Hoisted derivative arrays
+	dρ_dξ_arr = base_cache.work_NC_5
+	dλ_dξ_arr = base_cache.work_NC_6
 
-	@inbounds for f in eachindex(mesh.faces)
-		face = mesh.faces[f]
-		left_id, right_id = face.cell_ids
+	n_cells = length(mesh.cells)
 
-		# Skip boundary faces
-		if left_id == 0 || right_id == 0
+	@inbounds for i in 1:n_cells
+		T_i = mesh.cell_states[i].T
+		ρcp_i = prop_cache.ρcp[i]
+		inv_ρcp = 1.0 / ρcp_i
+
+		# Bounding faces
+		cell = mesh.cells[i]
+		f_L, f_R = cell.face_ids
+		left_id = mesh.faces[f_L].cell_ids[1]
+		right_id = mesh.faces[f_R].cell_ids[2]
+
+		# Compute dTdx and its derivatives w.r.t. temperatures
+		if left_id == 0 && right_id == 0
+			# Single-cell mesh: no gradient, no contribution
+			continue
+		elseif left_id == 0
+			# Left boundary: dTdx = (T_R - T_i) / d_R
+			T_R = mesh.cell_states[right_id].T
+			d_R = abs(mesh.cell_centers[right_id] - mesh.cell_centers[i])
+			dTdx = (T_R - T_i) / d_R
+			# Derivatives
+			ddTdx_dTi = -1.0 / d_R
+			ddTdx_dTL = 0.0  # no left neighbor
+			ddTdx_dTR = 1.0 / d_R
+		elseif right_id == 0
+			# Right boundary: dTdx = (T_i - T_L) / d_L
+			T_L = mesh.cell_states[left_id].T
+			d_L = abs(mesh.cell_centers[i] - mesh.cell_centers[left_id])
+			dTdx = (T_i - T_L) / d_L
+			# Derivatives
+			ddTdx_dTi = 1.0 / d_L
+			ddTdx_dTL = -1.0 / d_L
+			ddTdx_dTR = 0.0  # no right neighbor
+		else
+			# Interior: dTdx = ((T_i - T_L)/d_L + (T_R - T_i)/d_R) / 2
+			T_L = mesh.cell_states[left_id].T
+			T_R = mesh.cell_states[right_id].T
+			d_L = abs(mesh.cell_centers[i] - mesh.cell_centers[left_id])
+			d_R = abs(mesh.cell_centers[right_id] - mesh.cell_centers[i])
+			dTdx = ((T_i - T_L) / d_L + (T_R - T_i) / d_R) * 0.5
+			# Derivatives
+			ddTdx_dTi = (1.0 / d_L + 1.0 / d_R) * 0.5
+			ddTdx_dTL = -0.5 / d_L
+			ddTdx_dTR = 0.5 / d_R
+		end
+
+		# Compute Σ_g c_g * J̄_g (the coefficient multiplying dTdx)
+		sum_cgJ = 0.0
+		for j in 1:NC
+			if is_gas[j]
+				J_avg = (J_gas[j, f_L] + J_gas[j, f_R]) * 0.5
+				cp_j = material.components[j].heat_capacity(T_i)
+				sum_cgJ += cp_j * J_avg
+			end
+		end
+
+		# ∂S/∂T contributions: S = -sum_cgJ * dTdx
+		# ∂S/∂T_i = -sum_cgJ * ddTdx_dTi
+		# ∂(dT_i/dt)/∂T_i += (1/ρcp) * ∂S/∂T_i
+		T_row = i
+
+		dS_dTi = -sum_cgJ * ddTdx_dTi
+		if abs(dS_dTi) > 1e-30
+			fast_sparse_add!(J, smap, T_row, i, inv_ρcp * dS_dTi)
+		end
+
+		# Left neighbor
+		if left_id != 0 && abs(ddTdx_dTL) > 0.0
+			dS_dTL = -sum_cgJ * ddTdx_dTL
+			if abs(dS_dTL) > 1e-30
+				fast_sparse_add!(J, smap, T_row, left_id, inv_ρcp * dS_dTL)
+			end
+		end
+
+		# Right neighbor
+		if right_id != 0 && abs(ddTdx_dTR) > 0.0
+			dS_dTR = -sum_cgJ * ddTdx_dTR
+			if abs(dS_dTR) > 1e-30
+				fast_sparse_add!(J, smap, T_row, right_id, inv_ρcp * dS_dTR)
+			end
+		end
+
+		# =====================================================================
+		# Species derivatives: ∂S/∂ξ through J̄_g dependence
+		# S = -Σ_g c_g * J̄_g * dTdx
+		# ∂S/∂ξ_{j,k} = -c_g * dTdx * ∂J̄_g/∂ξ_{j,k}
+		# J̄_g = (J[f_L] + J[f_R]) / 2
+		# =====================================================================
+		if abs(dTdx) < 1e-30
+			continue  # No species derivatives if dTdx ≈ 0
+		end
+
+		# Process left face f_L (between left_id and i)
+		# J at f_L depends on ξ of left_id and i
+		if left_id != 0
+			_add_convective_source_species_jacobian_face!(
+				J, smap, mesh, prop_cache, material,
+				J_gas, f_L, left_id, i,
+				T_i, dTdx, inv_ρcp, T_row, n,
+				is_gas, swelling_factors, λ_mixing, β_λ,
+				base_cache, v_work1, v_work2, dρ_dξ_arr, dλ_dξ_arr,
+				0.5)  # factor 0.5 for averaging
+		end
+
+		# Process right face f_R (between i and right_id)
+		if right_id != 0
+			_add_convective_source_species_jacobian_face!(
+				J, smap, mesh, prop_cache, material,
+				J_gas, f_R, i, right_id,
+				T_i, dTdx, inv_ρcp, T_row, n,
+				is_gas, swelling_factors, λ_mixing, β_λ,
+				base_cache, v_work1, v_work2, dρ_dξ_arr, dλ_dξ_arr,
+				0.5)  # factor 0.5 for averaging
+		end
+	end
+
+	return nothing
+end
+
+"""
+Helper: add species Jacobian contributions from one face of the convective source.
+
+For face f between cells cell_L and cell_R:
+J_j,f = -λρ_face * (Y_R - Y_L) / d_LR
+
+Contribution to S_conv,i: -c_g * (J_j,f / 2) * dTdx
+So ∂S/∂ξ_k = -c_g * dTdx * (∂J_j,f/∂ξ_k) / 2 = -c_g * dTdx * factor * ∂J_j,f/∂ξ_k
+"""
+function _add_convective_source_species_jacobian_face!(
+	J::AbstractMatrix, smap, mesh, prop_cache, material::Material{NC},
+	J_gas::Matrix{Float64}, f::Int, cell_L::Int, cell_R::Int,
+	T_i::Float64, dTdx::Float64, inv_ρcp::Float64, T_row::Int,
+	n::Int,
+	is_gas, swelling_factors, λ_mixing, β_λ,
+	base_cache, v_work1, v_work2, dρ_dξ_arr, dλ_dξ_arr,
+	factor::Float64) where NC
+
+	# Cell states at the face
+	ξ_L = mesh.cell_states[cell_L].ξ
+	ξ_R = mesh.cell_states[cell_R].ξ
+	ρ_L = prop_cache.ρ[cell_L]
+	ρ_R = prop_cache.ρ[cell_R]
+	λ_L = prop_cache.λ[cell_L]
+	λ_R = prop_cache.λ[cell_R]
+
+	# Face geometry
+	face_pos = mesh.face_positions[f]
+	d_L = abs(face_pos - mesh.cell_centers[cell_L])
+	d_R = abs(mesh.cell_centers[cell_R] - face_pos)
+	d_LR = d_L + d_R
+
+	# λρ harmonic mean
+	λρ_L = λ_L * ρ_L
+	λρ_R = λ_R * ρ_R
+
+	if λρ_L <= LAMBDA_MIN || λρ_R <= LAMBDA_MIN
+		return nothing
+	end
+
+	R_L = d_L / λρ_L
+	R_R = d_R / λρ_R
+	R_sum = R_L + R_R
+	λρ_face = d_LR / R_sum
+
+	dλρ_face_dλρ_L = d_LR * d_L / (λρ_L * λρ_L * R_sum * R_sum)
+	dλρ_face_dλρ_R = d_LR * d_R / (λρ_R * λρ_R * R_sum * R_sum)
+
+	# Pre-compute per-cell properties for this face
+	densities_L = @view base_cache.comp_densities_per_cell[:, cell_L]
+	lambdas_L = @view base_cache.comp_lambdas_per_cell[:, cell_L]
+	V_total_L = compute_volume_fractions!(v_work1, ξ_L, densities_L)
+	densities_R = @view base_cache.comp_densities_per_cell[:, cell_R]
+	lambdas_R = @view base_cache.comp_lambdas_per_cell[:, cell_R]
+	V_total_R = compute_volume_fractions!(v_work2, ξ_R, densities_R)
+
+	@inbounds for j in 1:NC
+		if !is_gas[j]
 			continue
 		end
 
-		# Face geometry
-		face_pos = mesh.face_positions[f]
-		d_L = abs(face_pos - mesh.cell_centers[left_id])
-		d_R = abs(mesh.cell_centers[right_id] - face_pos)
-		d_LR = d_L + d_R
-		V_L = mesh.cell_volumes[left_id]
-		V_R = mesh.cell_volumes[right_id]
-		A_f = mesh.face_areas[f]
+		cp_j = material.components[j].heat_capacity(T_i)
+		prefactor = -cp_j * dTdx * factor * inv_ρcp
 
-		# Pre-compute division factors
-		A_f_inv_V_L = A_f / V_L
-		A_f_inv_V_R = A_f / V_R
+		Y_L = ξ_L[j] / max(ρ_L, DENSITY_MIN)
+		Y_R = ξ_R[j] / max(ρ_R, DENSITY_MIN)
+		ΔY = Y_R - Y_L
 
-		# Cell states
-		ξ_L = mesh.cell_states[left_id].ξ
-		ξ_R = mesh.cell_states[right_id].ξ
-		T_L = mesh.cell_states[left_id].T
-		T_R = mesh.cell_states[right_id].T
+		# Left cell derivatives
+		for k in 1:NC
+			dρ_dξ = compute_dρ_dξ_cached(ξ_L, k, densities_L, swelling_factors, is_gas)
+			dλ_dξ = compute_dλ_dξ_cached(ξ_L, k, densities_L, lambdas_L, v_work1, V_total_L, λ_mixing, β_λ)
 
-		# Properties
-		ρ_L = prop_cache.ρ[left_id]
-		ρ_R = prop_cache.ρ[right_id]
-		λ_L = prop_cache.λ[left_id]
-		λ_R = prop_cache.λ[right_id]
-		ρcp_L = prop_cache.ρcp[left_id]
-		ρcp_R = prop_cache.ρcp[right_id]
-		inv_ρcp_L = 1.0 / ρcp_L
-		inv_ρcp_R = 1.0 / ρcp_R
+			dλρ_L_dξ = dλ_dξ * ρ_L + λ_L * dρ_dξ
+			dλρ_face_dξ = dλρ_face_dλρ_L * dλρ_L_dξ
+			term1 = dλρ_face_dξ * ΔY
 
-		# Compute λρ products and harmonic mean (same as gas transport)
-		λρ_L = λ_L * ρ_L
-		λρ_R = λ_R * ρ_R
-
-		if λρ_L > LAMBDA_MIN && λρ_R > LAMBDA_MIN
-			R_L = d_L / λρ_L
-			R_R = d_R / λρ_R
-			R_sum = R_L + R_R
-			λρ_face = d_LR / R_sum
-
-			# Derivatives of harmonic mean
-			dλρ_face_dλρ_L = d_LR * d_L / (λρ_L * λρ_L * R_sum * R_sum)
-			dλρ_face_dλρ_R = d_LR * d_R / (λρ_R * λρ_R * R_sum * R_sum)
-		else
-			λρ_face = 0.0
-			dλρ_face_dλρ_L = 0.0
-			dλρ_face_dλρ_R = 0.0
-		end
-
-		# Use pre-computed per-cell properties (zero-cost @view instead of cache_component_properties!)
-		densities_L = @view base_cache.comp_densities_per_cell[:, left_id]
-		lambdas_L = @view base_cache.comp_lambdas_per_cell[:, left_id]
-		V_total_L = compute_volume_fractions!(v_L, ξ_L, densities_L)
-		densities_R = @view base_cache.comp_densities_per_cell[:, right_id]
-		lambdas_R = @view base_cache.comp_lambdas_per_cell[:, right_id]
-		V_total_R = compute_volume_fractions!(v_R, ξ_R, densities_R)
-
-		# Cache heat capacities for both cells (allocation-free via @generated)
-		cache_heat_capacities!(cp_L, T_L, material)
-		cache_heat_capacities!(cp_R, T_R, material)
-
-		# =====================================================================
-		# OPTIMIZATION: Pre-compute dρ_dξ and dλ_dξ for ALL components k
-		# These are computed ONCE per face and reused in the gas component loop
-		# This reduces ~6× redundant derivative computations
-		# =====================================================================
-		@inbounds for k in 1:NC
-			dρ_L_dξ_arr[k] = compute_dρ_dξ_cached(ξ_L, k, densities_L, swelling_factors, is_gas)
-			dρ_R_dξ_arr[k] = compute_dρ_dξ_cached(ξ_R, k, densities_R, swelling_factors, is_gas)
-			dλ_L_dξ_arr[k] = compute_dλ_dξ_cached(ξ_L, k, densities_L, lambdas_L, v_L, V_total_L, mixing, β)
-			dλ_R_dξ_arr[k] = compute_dλ_dξ_cached(ξ_R, k, densities_R, lambdas_R, v_R, V_total_R, mixing, β)
-		end
-
-		# Energy equation rows
-		T_row_L = left_id
-		T_row_R = right_id
-
-		# =====================================================================
-		# Part 1: ∂(dT/dt)/∂ξ from convective heat flux (ADVECTION FORM)
-		# 
-		# q_conv,f = Σⱼ J_j,f × cp,j(T_avg) × (T_R - T_L)
-		# 
-		# The contribution to energy equation cell i:
-		#   ∂(dT_i/dt)/∂ξ_j,k = -(1/ρcp_i) × (A_f/V_i) × ∂q_conv,f/∂ξ_j,k × sign_f
-		# 
-		# where ∂q_conv,f/∂ξ_j,k = ∂J_j,f/∂ξ_j,k × cp,j(T_avg) × (T_R - T_L)
-		# =====================================================================
-
-		# Advection form: use average temperature and temperature difference
-		T_avg = (T_L + T_R) * 0.5
-		ΔT = T_R - T_L
-
-		for j in 1:NC
-			if !is_gas[j]
-				continue
+			if k == j
+				dY_L_dξ = (1.0 - Y_L * dρ_dξ) / max(ρ_L, DENSITY_MIN)
+			else
+				dY_L_dξ = -Y_L * dρ_dξ / max(ρ_L, DENSITY_MIN)
 			end
+			term2 = -λρ_face * dY_L_dξ
 
-			# Get pre-computed mass flux
-			J_j = J_gas[j, f]
+			dJ_dξ = -(term1 + term2) / d_LR
 
-			# Heat capacity at average face temperature (advection form)
-			cp_j = material.components[j].heat_capacity(T_avg)
-
-			# Prefactor for advection form: cp_j × (T_R - T_L)
-			cp_ΔT = cp_j * ΔT
-
-			# Mass fractions for derivative computation
-			Y_L = ξ_L[j] / max(ρ_L, DENSITY_MIN)
-			Y_R = ξ_R[j] / max(ρ_R, DENSITY_MIN)
-
-			# -----------------------------------------------------------------
-			# Derivatives w.r.t. LEFT cell concentrations
-			# -----------------------------------------------------------------
-			for k in 1:NC
-				ξ_col = n + (k - 1) * n + left_id
-
-				# Use pre-computed derivatives (O(1) lookup instead of recomputation)
-				dρ_L_dξ = dρ_L_dξ_arr[k]
-				dλ_L_dξ = dλ_L_dξ_arr[k]
-
-				# d(λρ_L)/dξ_k
-				dλρ_L_dξ = dλ_L_dξ * ρ_L + λ_L * dρ_L_dξ
-
-				# Chain rule: dλρ_face/dξ_L[k]
-				dλρ_face_dξ_L = dλρ_face_dλρ_L * dλρ_L_dξ
-
-				# ΔY = Y_R - Y_L
-				ΔY = Y_R - Y_L
-
-				# Term 1: dλρ_face/dξ_L × ΔY
-				term1 = dλρ_face_dξ_L * ΔY
-
-				# Term 2: λρ_face × dΔY/dξ_L = -λρ_face × dY_L/dξ_L
-				if k == j
-					dY_L_dξ = (1.0 - Y_L * dρ_L_dξ) / max(ρ_L, DENSITY_MIN)
-				else
-					dY_L_dξ = -Y_L * dρ_L_dξ / max(ρ_L, DENSITY_MIN)
-				end
-				term2 = -λρ_face * dY_L_dξ
-
-				# dJ_j/dξ_L[k] = -(term1 + term2) / d_LR
-				dJ_dξ_L = -(term1 + term2) / d_LR
-
-				# ∂q_conv,f/∂ξ_L[k] = dJ_j/dξ_L[k] × cp_j × (T_R - T_L)
-				dq_conv_dξ = dJ_dξ_L * cp_ΔT
-
-				# Add to energy equation for left cell:
-				# dT_L/dt += (1/ρcp_L) × (A_f/V_L) × q_conv (flux enters from right)
-				# ∂(dT_L/dt)/∂ξ = (1/ρcp_L) × (A_f/V_L) × ∂q_conv/∂ξ
-				# But q_conv flows from L to R, so it LEAVES L (subtract from L, add to R)
-				# Convention: positive J means flow from L to R
-				# This removes heat from L: -q_conv contribution to div_q in L
-				fast_sparse_sub!(J, smap, T_row_L, ξ_col, inv_ρcp_L * A_f_inv_V_L * dq_conv_dξ)
-				fast_sparse_add!(J, smap, T_row_R, ξ_col, inv_ρcp_R * A_f_inv_V_R * dq_conv_dξ)
-			end
-
-			# -----------------------------------------------------------------
-			# Derivatives w.r.t. RIGHT cell concentrations
-			# -----------------------------------------------------------------
-			for k in 1:NC
-				ξ_col = n + (k - 1) * n + right_id
-
-				# Use pre-computed derivatives (O(1) lookup instead of recomputation)
-				dρ_R_dξ = dρ_R_dξ_arr[k]
-				dλ_R_dξ = dλ_R_dξ_arr[k]
-
-				# d(λρ_R)/dξ_k
-				dλρ_R_dξ = dλ_R_dξ * ρ_R + λ_R * dρ_R_dξ
-
-				# Chain rule: dλρ_face/dξ_R[k]
-				dλρ_face_dξ_R = dλρ_face_dλρ_R * dλρ_R_dξ
-
-				# ΔY = Y_R - Y_L
-				ΔY = Y_R - Y_L
-
-				# Term 1: dλρ_face/dξ_R × ΔY
-				term1 = dλρ_face_dξ_R * ΔY
-
-				# Term 2: λρ_face × dΔY/dξ_R = +λρ_face × dY_R/dξ_R
-				if k == j
-					dY_R_dξ = (1.0 - Y_R * dρ_R_dξ) / max(ρ_R, DENSITY_MIN)
-				else
-					dY_R_dξ = -Y_R * dρ_R_dξ / max(ρ_R, DENSITY_MIN)
-				end
-				term2 = λρ_face * dY_R_dξ
-
-				# dJ_j/dξ_R[k] = -(term1 + term2) / d_LR
-				dJ_dξ_R = -(term1 + term2) / d_LR
-
-				# ∂q_conv,f/∂ξ_R[k] = dJ_j/dξ_R[k] × cp_j × (T_R - T_L)
-				dq_conv_dξ = dJ_dξ_R * cp_ΔT
-
-				# Add to energy equations (same sign convention as above)
-				fast_sparse_sub!(J, smap, T_row_L, ξ_col, inv_ρcp_L * A_f_inv_V_L * dq_conv_dξ)
-				fast_sparse_add!(J, smap, T_row_R, ξ_col, inv_ρcp_R * A_f_inv_V_R * dq_conv_dξ)
+			ξ_col = n + (k - 1) * n + cell_L
+			if abs(dJ_dξ) > 1e-30
+				fast_sparse_add!(J, smap, T_row, ξ_col, prefactor * dJ_dξ)
 			end
 		end
 
-		# =====================================================================
-		# Part 2: ∂(dT/dt)/∂T from convective heat flux (ADVECTION FORM)
-		#
-		# q_conv,f = Σⱼ J_j,f × cp,j(T_avg) × (T_R - T_L)
-		#
-		# Derivatives w.r.t. temperature (ignoring small dcp/dT term):
-		#   ∂q_conv,f/∂T_L = Σⱼ J_j × cp_j × (-1) = -Σⱼ J_j × cp_j
-		#   ∂q_conv,f/∂T_R = Σⱼ J_j × cp_j × (+1) = +Σⱼ J_j × cp_j
-		#
-		# This is symmetric (no upwind selection) - heat is redistributed.
-		# =====================================================================
+		# Right cell derivatives
+		for k in 1:NC
+			dρ_dξ = compute_dρ_dξ_cached(ξ_R, k, densities_R, swelling_factors, is_gas)
+			dλ_dξ = compute_dλ_dξ_cached(ξ_R, k, densities_R, lambdas_R, v_work2, V_total_R, λ_mixing, β_λ)
 
-		# Compute ∂q_conv/∂T_L and ∂q_conv/∂T_R using advection form
-		# Both derivatives are always non-zero (symmetric formulation)
-		dq_conv_dT_L = 0.0
-		dq_conv_dT_R = 0.0
+			dλρ_R_dξ = dλ_dξ * ρ_R + λ_R * dρ_dξ
+			dλρ_face_dξ = dλρ_face_dλρ_R * dλρ_R_dξ
+			term1 = dλρ_face_dξ * ΔY
 
-		for j in 1:NC
-			if !is_gas[j]
-				continue
+			if k == j
+				dY_R_dξ = (1.0 - Y_R * dρ_dξ) / max(ρ_R, DENSITY_MIN)
+			else
+				dY_R_dξ = -Y_R * dρ_dξ / max(ρ_R, DENSITY_MIN)
 			end
+			term2 = λρ_face * dY_R_dξ
 
-			J_j = J_gas[j, f]
+			dJ_dξ = -(term1 + term2) / d_LR
 
-			# Heat capacity at average temperature (consistent with physics)
-			cp_j = material.components[j].heat_capacity(T_avg)
-
-			# Advection form: q = J × cp × (T_R - T_L)
-			# ∂q/∂T_L = -J × cp (always)
-			# ∂q/∂T_R = +J × cp (always)
-			dq_conv_dT_L -= J_j * cp_j
-			dq_conv_dT_R += J_j * cp_j
-		end
-
-		# Add temperature derivatives to Jacobian
-		# Left cell (T_row_L = left_id):
-		#   ∂(dT_L/dt)/∂T_L from q_conv flowing out
-		#   ∂(dT_L/dt)/∂T_R from q_conv depending on T_R (when flow is R→L)
-
-		# Contribution from ∂q_conv/∂T_L
-		if abs(dq_conv_dT_L) > 1e-30
-			# q_conv leaves L, enters R
-			fast_sparse_sub!(J, smap, T_row_L, left_id, inv_ρcp_L * A_f_inv_V_L * dq_conv_dT_L)
-			fast_sparse_add!(J, smap, T_row_R, left_id, inv_ρcp_R * A_f_inv_V_R * dq_conv_dT_L)
-		end
-
-		# Contribution from ∂q_conv/∂T_R
-		if abs(dq_conv_dT_R) > 1e-30
-			fast_sparse_sub!(J, smap, T_row_L, right_id, inv_ρcp_L * A_f_inv_V_L * dq_conv_dT_R)
-			fast_sparse_add!(J, smap, T_row_R, right_id, inv_ρcp_R * A_f_inv_V_R * dq_conv_dT_R)
+			ξ_col = n + (k - 1) * n + cell_R
+			if abs(dJ_dξ) > 1e-30
+				fast_sparse_add!(J, smap, T_row, ξ_col, prefactor * dJ_dξ)
+			end
 		end
 	end
 
@@ -2029,19 +2012,12 @@ end
 	compute_all_face_jacobians_fused!(J, smap, mesh, prop_cache, material,
 									   J_gas, n, NC, jac_cache)
 
-OPTIMIZATION #3: Fused face loop combining conduction, gas transport, and
-convective heat flux Jacobians.
+Fused face loop combining conduction and gas transport Jacobians.
 
 This function eliminates redundant computations by:
-1. Iterating over faces only ONCE instead of THREE times
+1. Iterating over faces only ONCE instead of twice
 2. Computing shared quantities (geometry, properties, derivatives) once per face
-3. Reusing dρ_dξ and dλ_dξ arrays across both gas transport and convective heat flux
-
-Expected performance improvement: 25-30% reduction in Jacobian time due to:
-- Better cache locality (all face data accessed together)
-- Elimination of redundant property lookups (3× → 1×)
-- Shared derivative arrays between physics (dρ_dξ, dλ_dξ used in both gas transport
-  and convective heat)
+3. Shared derivative arrays between conduction and gas transport
 
 # Arguments
 - `J`: Jacobian matrix (modified in-place)
@@ -2074,11 +2050,9 @@ function compute_all_face_jacobians_fused!(
 	is_gas = base_cache.is_gas
 	swelling_factors = base_cache.swelling_factors
 
-	# Work arrays for volume fractions and heat capacities
+	# Work arrays for volume fractions
 	v_L = base_cache.volume_fractions
 	v_R = base_cache.ξ_work
-	cp_L = base_cache.work_NC_3
-	cp_R = base_cache.work_NC_4
 
 	# Hoisted derivative arrays (computed once per face, reused across all gas components)
 	dρ_L_dξ_arr = base_cache.work_NC_5
@@ -2291,136 +2265,6 @@ function compute_all_face_jacobians_fused!(
 					fast_sparse_sub!(J, smap, ξ_row_L, ξ_col, A_f_inv_V_L * dJ_dξ_R)
 					fast_sparse_add!(J, smap, ξ_row_R, ξ_col, A_f_inv_V_R * dJ_dξ_R)
 				end
-			end
-		end
-
-		# =================================================================
-		# PHYSICS 3: CONVECTIVE HEAT FLUX JACOBIAN
-		# =================================================================
-		# NOTE: Reuses the SAME dρ_dξ, dλ_dξ arrays computed above!
-		# This is a major performance win - no recomputation needed!
-
-		ρcp_L = prop_cache.ρcp[left_id]
-		ρcp_R = prop_cache.ρcp[right_id]
-		inv_ρcp_L_conv = 1.0 / ρcp_L
-		inv_ρcp_R_conv = 1.0 / ρcp_R
-
-		# Cache heat capacities
-		cache_heat_capacities!(cp_L, T_L, material)
-		cache_heat_capacities!(cp_R, T_R, material)
-
-		# Recompute λρ properties for convective heat (same as gas transport)
-		λ_L_conv = prop_cache.λ[left_id]
-		λ_R_conv = prop_cache.λ[right_id]
-		λρ_L_conv = λ_L_conv * ρ_L
-		λρ_R_conv = λ_R_conv * ρ_R
-
-		if λρ_L_conv > LAMBDA_MIN && λρ_R_conv > LAMBDA_MIN
-			R_L_conv = d_L / λρ_L_conv
-			R_R_conv = d_R / λρ_R_conv
-			R_sum_conv = R_L_conv + R_R_conv
-			λρ_face_conv = d_LR / R_sum_conv
-
-			dλρ_face_dλρ_L_conv = d_LR * d_L / (λρ_L_conv * λρ_L_conv * R_sum_conv * R_sum_conv)
-			dλρ_face_dλρ_R_conv = d_LR * d_R / (λρ_R_conv * λρ_R_conv * R_sum_conv * R_sum_conv)
-
-			# Advection form
-			T_avg = (T_L + T_R) * 0.5
-			ΔT_conv = T_R - T_L
-
-			# Energy equation rows
-			T_row_L = left_id
-			T_row_R = right_id
-
-			# Part 1: Concentration derivatives
-			for j in 1:NC
-				if !is_gas[j]
-					continue
-				end
-
-				cp_j = material.components[j].heat_capacity(T_avg)
-				cp_ΔT = cp_j * ΔT_conv
-
-				Y_L_conv = ξ_L[j] / max(ρ_L, DENSITY_MIN)
-				Y_R_conv = ξ_R[j] / max(ρ_R, DENSITY_MIN)
-
-				# Left cell derivatives (REUSE pre-computed arrays!)
-				for k in 1:NC
-					ξ_col = n + (k - 1) * n + left_id
-
-					dρ_L_dξ = dρ_L_dξ_arr[k]  # O(1) lookup!
-					dλ_L_dξ = dλ_L_dξ_arr[k]  # O(1) lookup!
-
-					dλρ_L_dξ = dλ_L_dξ * ρ_L + λ_L_conv * dρ_L_dξ
-					dλρ_face_dξ_L = dλρ_face_dλρ_L_conv * dλρ_L_dξ
-					ΔY_conv = Y_R_conv - Y_L_conv
-					term1 = dλρ_face_dξ_L * ΔY_conv
-
-					if k == j
-						dY_L_dξ = (1.0 - Y_L_conv * dρ_L_dξ) / max(ρ_L, DENSITY_MIN)
-					else
-						dY_L_dξ = -Y_L_conv * dρ_L_dξ / max(ρ_L, DENSITY_MIN)
-					end
-					term2 = -λρ_face_conv * dY_L_dξ
-
-					dJ_dξ_L = -(term1 + term2) / d_LR
-					dq_conv_dξ = dJ_dξ_L * cp_ΔT
-
-					fast_sparse_sub!(J, smap, T_row_L, ξ_col, inv_ρcp_L_conv * A_f_inv_V_L * dq_conv_dξ)
-					fast_sparse_add!(J, smap, T_row_R, ξ_col, inv_ρcp_R_conv * A_f_inv_V_R * dq_conv_dξ)
-				end
-
-				# Right cell derivatives (REUSE pre-computed arrays!)
-				for k in 1:NC
-					ξ_col = n + (k - 1) * n + right_id
-
-					dρ_R_dξ = dρ_R_dξ_arr[k]  # O(1) lookup!
-					dλ_R_dξ = dλ_R_dξ_arr[k]  # O(1) lookup!
-
-					dλρ_R_dξ = dλ_R_dξ * ρ_R + λ_R_conv * dρ_R_dξ
-					dλρ_face_dξ_R = dλρ_face_dλρ_R_conv * dλρ_R_dξ
-					ΔY_conv = Y_R_conv - Y_L_conv
-					term1 = dλρ_face_dξ_R * ΔY_conv
-
-					if k == j
-						dY_R_dξ = (1.0 - Y_R_conv * dρ_R_dξ) / max(ρ_R, DENSITY_MIN)
-					else
-						dY_R_dξ = -Y_R_conv * dρ_R_dξ / max(ρ_R, DENSITY_MIN)
-					end
-					term2 = λρ_face_conv * dY_R_dξ
-
-					dJ_dξ_R = -(term1 + term2) / d_LR
-					dq_conv_dξ = dJ_dξ_R * cp_ΔT
-
-					fast_sparse_sub!(J, smap, T_row_L, ξ_col, inv_ρcp_L_conv * A_f_inv_V_L * dq_conv_dξ)
-					fast_sparse_add!(J, smap, T_row_R, ξ_col, inv_ρcp_R_conv * A_f_inv_V_R * dq_conv_dξ)
-				end
-			end
-
-			# Part 2: Temperature derivatives
-			dq_conv_dT_L = 0.0
-			dq_conv_dT_R = 0.0
-
-			for j in 1:NC
-				if !is_gas[j]
-					continue
-				end
-
-				J_j = J_gas[j, f]
-				cp_j = material.components[j].heat_capacity(T_avg)
-
-				dq_conv_dT_L -= J_j * cp_j
-				dq_conv_dT_R += J_j * cp_j
-			end
-
-			if abs(dq_conv_dT_L) > 1e-30
-				fast_sparse_sub!(J, smap, T_row_L, left_id, inv_ρcp_L_conv * A_f_inv_V_L * dq_conv_dT_L)
-				fast_sparse_add!(J, smap, T_row_R, left_id, inv_ρcp_R_conv * A_f_inv_V_R * dq_conv_dT_L)
-			end
-
-			if abs(dq_conv_dT_R) > 1e-30
-				fast_sparse_sub!(J, smap, T_row_L, right_id, inv_ρcp_L_conv * A_f_inv_V_L * dq_conv_dT_R)
-				fast_sparse_add!(J, smap, T_row_R, right_id, inv_ρcp_R_conv * A_f_inv_V_R * dq_conv_dT_R)
 			end
 		end
 	end
@@ -3003,7 +2847,7 @@ end
 Add geometry derivatives for gas transport fluxes (species and energy equations).
 
 Gas flux: J_j = -λ × ρ × (Y_R - Y_L) / d_LR
-Convective heat flux (advection form): q_conv = Σⱼ J_j × cp_j × (T_R - T_L)
+Gas convective source (handled separately by compute_gas_convective_source_jacobian!)
 
 The derivatives w.r.t. node positions z_k come from:
 1. ∂d_LR/∂z_k - affects the gradient
@@ -3019,7 +2863,6 @@ function compute_gas_transport_geometry_jacobian!(J::AbstractMatrix, smap, mesh,
 	is_gas::AbstractVector{Bool}) where NC
 
 	n_nodes = size(dV_dz, 2)
-	comps = material.components
 
 	@inbounds for f in eachindex(mesh.faces)
 		face = mesh.faces[f]
@@ -3045,113 +2888,25 @@ function compute_gas_transport_geometry_jacobian!(J::AbstractMatrix, smap, mesh,
 		# Cell states - use prop_cache for consistency with RHS
 		ξ_L = mesh.cell_states[left_id].ξ
 		ξ_R = mesh.cell_states[right_id].ξ
-		T_L = mesh.cell_states[left_id].T
-		T_R = mesh.cell_states[right_id].T
 		ρ_L = prop_cache.ρ[left_id]
 		ρ_R = prop_cache.ρ[right_id]
 
 		# Gas transfer coefficient - use λρ_face from prop_cache (rigorous formulation)
 		λρ_face = prop_cache.λρ_face[f]
 
-		# Energy equation properties
-		inv_ρcp_L = 1.0 / prop_cache.ρcp[left_id]
-		inv_ρcp_R = 1.0 / prop_cache.ρcp[right_id]
-
-		# Temperature difference for advection form
-		ΔT = T_R - T_L
-		T_avg = 0.5 * (T_L + T_R)
-
 		# Node indices for geometry derivatives
 		n_left_node = left_id
 		n_right_node = right_id + 1
 
-		# Energy equation row indices
-		T_row_L = left_id
-		T_row_R = right_id
-
 		# ================================================================
-		# PART A: Energy equation geometry derivatives (∂(dT/dt)/∂z_k)
-		#
-		# Convective heat flux (advection form): q_conv = Σⱼ J_j × cp_j × (T_R - T_L)
-		# where J_j = -λρ_face × ΔY_j / d_LR (diffusive gas flux)
-		#
-		# Geometry derivative: ∂q_conv/∂d_LR = Σⱼ ∂J_j/∂d_LR × cp_j × (T_R - T_L)
+		# NOTE: Convective heat source geometry derivatives are omitted here.
+		# S_conv is now cell-centered (-Σ c_g * J̄ * dTdx) and its geometry
+		# dependence through cell_centers is a second-order effect captured
+		# by the FD Jacobian fallback.
 		# ================================================================
 
-		# Compute total convective heat flux and its geometry derivative
-		q_conv = 0.0
-		dq_conv_dd = 0.0
-
-		for j in 1:NC
-			if !is_gas[j]
-				continue
-			end
-
-			comp = comps[j]
-
-			# Mass fractions
-			Y_L = ξ_L[j] / max(ρ_L, DENSITY_MIN)
-			Y_R = ξ_R[j] / max(ρ_R, DENSITY_MIN)
-			ΔY = Y_R - Y_L
-
-			# Diffusive flux: J_j = -λρ_face × ΔY / d_LR
-			J_j = -λρ_face * ΔY * inv_d_LR
-
-			# Heat capacity at face (use average temperature for advection form)
-			cp_j = comp.heat_capacity(T_avg)
-
-			# Contribution to convective heat flux (advection form)
-			# q_conv,j = J_j × cp_j × (T_R - T_L)
-			q_conv += J_j * cp_j * ΔT
-
-			# Geometry derivative: ∂J_j/∂d_LR = λρ_face × ΔY / d_LR²
-			dJ_dd = λρ_face * ΔY * inv_d_LR_sq
-
-			# ∂q_conv/∂d_LR = Σⱼ ∂J_j/∂d_LR × cp_j × (T_R - T_L)
-			dq_conv_dd += dJ_dd * cp_j * ΔT
-		end
-
-		# Apply energy equation geometry derivatives
-		if abs(dq_conv_dd) > FLUX_DERIV_TOL
-			# Energy divergence form: div_q[i] = (q_right - q_left) × A / V
-			# dT_L/dt = ... - q_f × A / (V_L × ρcp_L)
-			# dT_R/dt = ... + q_f × A / (V_R × ρcp_R)
-			#
-			# ∂(dT_L/dt)/∂z_k = -A/(V_L × ρcp_L) × ∂q_conv/∂d_LR × ∂d_LR/∂z_k
-			# ∂(dT_R/dt)/∂z_k = +A/(V_R × ρcp_R) × ∂q_conv/∂d_LR × ∂d_LR/∂z_k
-
-			# ∂d_LR/∂z[n_left_node] = -0.5
-			deriv_TL_left = -inv_ρcp_L * A_f * inv_V_L * dq_conv_dd * (-0.5)
-			deriv_TR_left = +inv_ρcp_R * A_f * inv_V_R * dq_conv_dd * (-0.5)
-			fast_sparse_add!(J, smap, T_row_L, z_offset + n_left_node, deriv_TL_left)
-			fast_sparse_add!(J, smap, T_row_R, z_offset + n_left_node, deriv_TR_left)
-
-			# ∂d_LR/∂z[n_right_node] = +0.5
-			deriv_TL_right = -inv_ρcp_L * A_f * inv_V_L * dq_conv_dd * (+0.5)
-			deriv_TR_right = +inv_ρcp_R * A_f * inv_V_R * dq_conv_dd * (+0.5)
-			fast_sparse_add!(J, smap, T_row_L, z_offset + n_right_node, deriv_TL_right)
-			fast_sparse_add!(J, smap, T_row_R, z_offset + n_right_node, deriv_TR_right)
-		end
-
-		# Volume scaling contribution for energy equation
-		if abs(q_conv) > FLUX_DERIV_TOL
-			for k in 1:n_nodes
-				# Left cell volume dependence
-				if abs(dV_dz[left_id, k]) > FLUX_DERIV_TOL
-					deriv = inv_ρcp_L * A_f * q_conv * inv_V_L_sq * dV_dz[left_id, k]
-					fast_sparse_add!(J, smap, T_row_L, z_offset + k, deriv)
-				end
-
-				# Right cell volume dependence
-				if abs(dV_dz[right_id, k]) > FLUX_DERIV_TOL
-					deriv = -inv_ρcp_R * A_f * q_conv * inv_V_R_sq * dV_dz[right_id, k]
-					fast_sparse_add!(J, smap, T_row_R, z_offset + k, deriv)
-				end
-			end
-		end
-
 		# ================================================================
-		# PART B: Species equation geometry derivatives (∂(dξ/dt)/∂z_k)
+		# Species equation geometry derivatives (∂(dξ/dt)/∂z_k)
 		# ================================================================
 
 		for j in 1:NC
@@ -3539,7 +3294,275 @@ function compute_darcy_transport_jacobian!(J::AbstractMatrix, smap, mesh, prop_c
 end
 
 """
-	compute_darcy_transport_geometry_jacobian!(J, smap, mesh, prop_cache, material, 
+	compute_darcy_transport_jacobian!(J, smap, mesh, prop_cache, material, n, NC, jac_cache::JacobianCache)
+
+Non-ALE (fixed mesh) version of the Darcy advective transport Jacobian.
+Identical physics to the ALE version but reads Darcy work arrays directly from JacobianCache
+(which now has the same fields as JacobianCacheALE) and has no geometry corrections.
+
+The Darcy advective flux for gas component j through face f is:
+
+    J_adv,j = v_gas × ξ_upwind,j
+
+where v_gas = -(κ_face/μ_face) × (P_R - P_L)/d_LR  (Darcy's law)
+
+The Jacobian contributions are:
+  ∂J_adv/∂T  = ξ_upwind × ∂v_gas/∂T     (velocity changes with T via pressure)
+  ∂J_adv/∂ξk = ξ_upwind × ∂v_gas/∂ξk + v_gas × δ_{j,k}  (velocity + upwind source)
+
+where ∂v_gas/∂ξk = ∂v_gas/∂P × ∂P/∂ξk + ∂v_gas/∂κ × ∂κ/∂ξk
+"""
+function compute_darcy_transport_jacobian!(J::AbstractMatrix, smap, mesh, prop_cache,
+	material, n::Int, ::Val{NC}, jac_cache::JacobianCache{NC}) where NC
+
+	is_gas = jac_cache.is_gas
+
+	# Get Darcy work arrays from cache (same field names as JacobianCacheALE)
+	dP_dT = jac_cache.dP_dT
+	dP_dξ = jac_cache.dP_dξ
+	dvgas_dP_L = jac_cache.dvgas_dP_L
+	dvgas_dP_R = jac_cache.dvgas_dP_R
+	mobility = jac_cache.mobility
+
+	# Get permeability derivative arrays from cache
+	dφ_dξ = jac_cache.dφ_dξ
+	dκ_dξ = jac_cache.dκ_dξ
+	dvgas_dκ_L = jac_cache.dvgas_dκ_L
+	dvgas_dκ_R = jac_cache.dvgas_dκ_R
+
+	# Get work vectors for in-place derivative computations
+	work_NC = jac_cache.work_NC
+	work_NC_2 = jac_cache.work_NC_2
+	work_NC_3 = jac_cache.work_NC_3
+
+	# Step 1: Precompute pressure and permeability derivatives at all cells
+	@inbounds for i in 1:n
+		state = mesh.cell_states[i]
+		ξ = state.ξ
+		T = state.T
+
+		# Pressure derivatives (allocation-free)
+		∂P_∂T = pressure_derivatives!(view(dP_dξ, :, i), ξ, T, material)
+		dP_dT[i] = ∂P_∂T
+
+		# Porosity derivatives (allocation-free)
+		Properties.porosity_derivatives!(view(dφ_dξ, :, i), T, material)
+
+		# Permeability derivatives (allocation-free, uses 3 work arrays)
+		Properties.permeability_derivatives!(view(dκ_dξ, :, i), ξ, T, material, work_NC, work_NC_2, work_NC_3)
+	end
+
+	# Step 2: Precompute Darcy velocity Jacobian coefficients at all faces
+	#
+	# MUST match the RHS computation in update_darcy_properties! exactly:
+	# v_gas = -mob_face × ∇P
+	# mob_face = harmonic mean of mob_L, mob_R (distance-weighted)
+	# mob_L = κ_L / μ_L,  mob_R = κ_R / μ_R
+	#
+	@inbounds for f in eachindex(mesh.faces)
+		face = mesh.faces[f]
+		left_id, right_id = face.cell_ids
+
+		# Boundary faces: no interior Darcy transport
+		if left_id == 0 || right_id == 0
+			dvgas_dP_L[f] = 0.0
+			dvgas_dP_R[f] = 0.0
+			dvgas_dκ_L[f] = 0.0
+			dvgas_dκ_R[f] = 0.0
+			mobility[f] = 0.0
+			continue
+		end
+
+		# Cell-centered properties (matching update_darcy_properties!)
+		κ_L = prop_cache.κ[left_id]
+		κ_R = prop_cache.κ[right_id]
+		μ_L = prop_cache.μ[left_id]
+		μ_R = prop_cache.μ[right_id]
+
+		d_LR = abs(mesh.cell_centers[right_id] - mesh.cell_centers[left_id])
+
+		# Pressure gradient
+		P_L = prop_cache.P[left_id]
+		P_R = prop_cache.P[right_id]
+		dP_dz = (P_R - P_L) / d_LR
+
+		# Cell mobilities (matching RHS exactly)
+		mob_L = μ_L > 1e-20 ? κ_L / μ_L : 0.0
+		mob_R = μ_R > 1e-20 ? κ_R / μ_R : 0.0
+
+		# Harmonic mean of mobility (matching RHS exactly)
+		if mob_L > 1e-30 && mob_R > 1e-30
+			mob_face = 2.0 * mob_L * mob_R / (mob_L + mob_R)
+		elseif mob_L > 1e-30
+			mob_face = mob_L
+		elseif mob_R > 1e-30
+			mob_face = mob_R
+		else
+			mob_face = 0.0
+		end
+
+		mobility[f] = mob_face
+
+		# v_gas = -mob_face × (P_R - P_L) / d_LR
+		# ∂v_gas/∂P_L = +mob_face / d_LR
+		# ∂v_gas/∂P_R = -mob_face / d_LR
+		if d_LR > 1e-20
+			mob_over_d = mob_face / d_LR
+			dvgas_dP_L[f] = mob_over_d
+			dvgas_dP_R[f] = -mob_over_d
+		else
+			dvgas_dP_L[f] = 0.0
+			dvgas_dP_R[f] = 0.0
+		end
+
+		# Permeability derivatives via mobility chain rule:
+		# mob_face = 2 × mob_L × mob_R / (mob_L + mob_R)
+		# ∂mob_face/∂mob_L = 2 × mob_R² / S²
+		# ∂mob_face/∂mob_R = 2 × mob_L² / S²
+		# ∂mob/∂κ = 1/μ  (since mob = κ/μ)
+		# ∂v_gas/∂κ_L = -∇P × ∂mob_face/∂mob_L × (1/μ_L)
+		if mob_L > 1e-30 && mob_R > 1e-30 && d_LR > 1e-20
+			mob_sum = mob_L + mob_R
+			mob_sum_sq = mob_sum * mob_sum
+
+			dmob_face_dmob_L = 2.0 * mob_R * mob_R / mob_sum_sq
+			dmob_face_dmob_R = 2.0 * mob_L * mob_L / mob_sum_sq
+
+			dmob_L_dκ_L = 1.0 / μ_L
+			dmob_R_dκ_R = 1.0 / μ_R
+
+			dvgas_dκ_L[f] = -dP_dz * dmob_face_dmob_L * dmob_L_dκ_L
+			dvgas_dκ_R[f] = -dP_dz * dmob_face_dmob_R * dmob_R_dκ_R
+		else
+			dvgas_dκ_L[f] = 0.0
+			dvgas_dκ_R[f] = 0.0
+		end
+	end
+
+	# Step 3: Add Jacobian contributions for each interior face
+	@inbounds for f in eachindex(mesh.faces)
+		face = mesh.faces[f]
+		left_id, right_id = face.cell_ids
+
+		# Skip boundary faces
+		if left_id == 0 || right_id == 0
+			continue
+		end
+
+		# Get Darcy velocity at face
+		v_gas = prop_cache.v_gas[f]
+
+		# Skip if Darcy velocity is negligible
+		if abs(v_gas) < 1e-20 && abs(dvgas_dP_L[f]) < 1e-30
+			continue
+		end
+
+		# Face geometry
+		A_f = mesh.face_areas[f]
+		V_L = mesh.cell_volumes[left_id]
+		V_R = mesh.cell_volumes[right_id]
+		A_f_inv_V_L = A_f / V_L
+		A_f_inv_V_R = A_f / V_R
+
+		# Cell states
+		ξ_L = mesh.cell_states[left_id].ξ
+		ξ_R = mesh.cell_states[right_id].ξ
+
+		# ∂v_gas/∂T_L = ∂v_gas/∂P_L × ∂P_L/∂T_L
+		# ∂v_gas/∂T_R = ∂v_gas/∂P_R × ∂P_R/∂T_R
+		dvgas_dT_L = dvgas_dP_L[f] * dP_dT[left_id]
+		dvgas_dT_R = dvgas_dP_R[f] * dP_dT[right_id]
+
+		# Process each gas component
+		for j in 1:NC
+			if !is_gas[j]
+				continue
+			end
+
+			# Species equation rows
+			ξ_row_L = n + (j - 1) * n + left_id
+			ξ_row_R = n + (j - 1) * n + right_id
+
+			# Upwind selection: positive v_gas means flow from L to R
+			if v_gas >= 0.0
+				ξ_upwind = ξ_L[j]
+				upwind_is_left = true
+			else
+				ξ_upwind = ξ_R[j]
+				upwind_is_left = false
+			end
+
+			# ================================================================
+			# Temperature derivatives: ∂J_adv/∂T = ξ_upwind × ∂v_gas/∂T
+			# ================================================================
+
+			# Left cell temperature
+			dJ_adv_dT_L = ξ_upwind * dvgas_dT_L
+			if abs(dJ_adv_dT_L) > FLUX_DERIV_TOL
+				# Left cell divergence: -(A × J) / V  →  subtract
+				# Right cell divergence: +(A × J) / V  →  add
+				fast_sparse_sub!(J, smap, ξ_row_L, left_id, A_f_inv_V_L * dJ_adv_dT_L)
+				fast_sparse_add!(J, smap, ξ_row_R, left_id, A_f_inv_V_R * dJ_adv_dT_L)
+			end
+
+			# Right cell temperature
+			dJ_adv_dT_R = ξ_upwind * dvgas_dT_R
+			if abs(dJ_adv_dT_R) > FLUX_DERIV_TOL
+				fast_sparse_sub!(J, smap, ξ_row_L, right_id, A_f_inv_V_L * dJ_adv_dT_R)
+				fast_sparse_add!(J, smap, ξ_row_R, right_id, A_f_inv_V_R * dJ_adv_dT_R)
+			end
+
+			# ================================================================
+			# Concentration derivatives: ∂J_adv/∂ξ_k
+			# ∂J_adv/∂ξ_k = ∂v_gas/∂ξ_k × ξ_upwind + v_gas × δ_{j,k}
+			# where ∂v_gas/∂ξ_k = ∂v_gas/∂P × ∂P/∂ξ_k + ∂v_gas/∂κ × ∂κ/∂ξ_k
+			# ================================================================
+
+			for k in 1:NC
+				# Left cell ξ_k derivatives
+				ξ_col_L = n + (k - 1) * n + left_id
+
+				dvgas_dξk_L = dvgas_dP_L[f] * dP_dξ[k, left_id] + dvgas_dκ_L[f] * dκ_dξ[k, left_id]
+
+				# Term 1: velocity derivative contribution
+				dJ_adv_dξk_L = ξ_upwind * dvgas_dξk_L
+
+				# Term 2: direct upwind contribution (if k=j and left is upwind)
+				if upwind_is_left && k == j
+					dJ_adv_dξk_L += v_gas
+				end
+
+				if abs(dJ_adv_dξk_L) > FLUX_DERIV_TOL
+					fast_sparse_sub!(J, smap, ξ_row_L, ξ_col_L, A_f_inv_V_L * dJ_adv_dξk_L)
+					fast_sparse_add!(J, smap, ξ_row_R, ξ_col_L, A_f_inv_V_R * dJ_adv_dξk_L)
+				end
+
+				# Right cell ξ_k derivatives
+				ξ_col_R = n + (k - 1) * n + right_id
+
+				dvgas_dξk_R = dvgas_dP_R[f] * dP_dξ[k, right_id] + dvgas_dκ_R[f] * dκ_dξ[k, right_id]
+
+				# Term 1: velocity derivative contribution
+				dJ_adv_dξk_R = ξ_upwind * dvgas_dξk_R
+
+				# Term 2: direct upwind contribution (if k=j and right is upwind)
+				if !upwind_is_left && k == j
+					dJ_adv_dξk_R += v_gas
+				end
+
+				if abs(dJ_adv_dξk_R) > FLUX_DERIV_TOL
+					fast_sparse_sub!(J, smap, ξ_row_L, ξ_col_R, A_f_inv_V_L * dJ_adv_dξk_R)
+					fast_sparse_add!(J, smap, ξ_row_R, ξ_col_R, A_f_inv_V_R * dJ_adv_dξk_R)
+				end
+			end
+		end
+	end
+
+	return nothing
+end
+
+"""
+	compute_darcy_transport_geometry_jacobian!(J, smap, mesh, prop_cache, material,
 											   dV_dz, n, NC, z_offset, jac_cache)
 
 Add geometry derivatives for Darcy advective transport.
@@ -3567,7 +3590,6 @@ function compute_darcy_transport_geometry_jacobian!(J::AbstractMatrix, smap, mes
 	base_cache = jac_cache.base
 	is_gas = base_cache.is_gas
 	mobility = jac_cache.mobility
-	comps = material.components
 
 	n_nodes = size(dV_dz, 2)
 
@@ -3609,125 +3631,20 @@ function compute_darcy_transport_geometry_jacobian!(J::AbstractMatrix, smap, mes
 		# Cell states
 		ξ_L = mesh.cell_states[left_id].ξ
 		ξ_R = mesh.cell_states[right_id].ξ
-		T_L = mesh.cell_states[left_id].T
-		T_R = mesh.cell_states[right_id].T
 
 		# Node indices affecting d_LR
 		n_left_node = left_id
 		n_right_node = right_id + 1
 
-		# Energy equation properties
-		inv_ρcp_L = 1.0 / prop_cache.ρcp[left_id]
-		inv_ρcp_R = 1.0 / prop_cache.ρcp[right_id]
-
 		# ================================================================
-		# PART A: Energy equation geometry derivatives (∂(dT/dt)/∂z_k)
-		# 
-		# Convective heat flux (advection form): q_conv = Σⱼ J_j × cp_j × (T_R - T_L)
-		# where J_j = v_gas × ξ_upwind (advective part)
-		# 
-		# Energy RHS includes: -(1/ρcp) × div(q_conv) = -(1/ρcp) × A/V × q_conv
-		# So: dT_L/dt gets +(1/ρcp_L) × A/V_L × q_conv (flux into L)
-		#     dT_R/dt gets -(1/ρcp_R) × A/V_R × q_conv (flux out of R into L)
+		# NOTE: Convective heat source geometry derivatives are omitted here.
+		# S_conv is now cell-centered (-Σ c_g * J̄ * dTdx) and its geometry
+		# dependence through cell_centers is a second-order effect captured
+		# by the FD Jacobian fallback.
 		# ================================================================
 
-		# Compute total convective heat flux and its geometry derivative
-		q_conv = 0.0
-		dq_conv_dd = 0.0  # ∂q_conv/∂d_LR
-
-		for j in 1:NC
-			if !is_gas[j]
-				continue
-			end
-
-			comp = comps[j]
-
-			# Upwind values
-			if v_gas >= 0.0
-				ξ_upwind = ξ_L[j]
-				T_upwind = T_L
-			else
-				ξ_upwind = ξ_R[j]
-				T_upwind = T_R
-			end
-
-			# For advection form, use cp at upwind temperature
-			cp_j = comp.heat_capacity(T_upwind)
-
-			# Advective mass flux for component j
-			J_adv = v_gas * ξ_upwind
-
-			# Contribution to convective heat flux (advection form)
-			# q_conv,j = J_j × cp_j × (T_R - T_L)
-			ΔT = T_R - T_L
-			q_conv += J_adv * cp_j * ΔT
-
-			# Geometry derivative of convective heat flux through v_gas
-			# ∂q_conv/∂d_LR = cp_j × (T_R - T_L) × ξ_upwind × ∂v_gas/∂d_LR
-			dq_conv_dd += cp_j * ΔT * ξ_upwind * dvgas_dd
-		end
-
-		# Energy row indices
-		T_row_L = left_id
-		T_row_R = right_id
-
-		# ============================================================
-		# Energy Term 1: ∂q_conv/∂d_LR contribution
-		# 
-		# Divergence form: div_q[i] = (q_right - q_left) × A / V
-		# Energy RHS: dT[i]/dt = -div_q[i]/ρcp + ...
-		# 
-		# For cell L (face f is its RIGHT boundary):
-		#   dT_L/dt = ... - q_f × A / (V_L × ρcp_L)   [minus from divergence]
-		# For cell R (face f is its LEFT boundary):
-		#   dT_R/dt = ... + q_f × A / (V_R × ρcp_R)   [plus: incoming flux]
-		# 
-		# So for geometry derivatives:
-		# ∂(dT_L/dt)/∂z_k = -A/(V_L × ρcp_L) × ∂q_conv/∂d_LR × ∂d_LR/∂z_k
-		# ∂(dT_R/dt)/∂z_k = +A/(V_R × ρcp_R) × ∂q_conv/∂d_LR × ∂d_LR/∂z_k
-		# ============================================================
-		if abs(dq_conv_dd) > FLUX_DERIV_TOL
-			# ∂d_LR/∂z[n_left_node] = -0.5
-			deriv_TL_left = -inv_ρcp_L * A_f * inv_V_L * dq_conv_dd * (-0.5)
-			deriv_TR_left = +inv_ρcp_R * A_f * inv_V_R * dq_conv_dd * (-0.5)
-			fast_sparse_add!(J, smap, T_row_L, z_offset + n_left_node, deriv_TL_left)
-			fast_sparse_add!(J, smap, T_row_R, z_offset + n_left_node, deriv_TR_left)
-
-			# ∂d_LR/∂z[n_right_node] = +0.5
-			deriv_TL_right = -inv_ρcp_L * A_f * inv_V_L * dq_conv_dd * (+0.5)
-			deriv_TR_right = +inv_ρcp_R * A_f * inv_V_R * dq_conv_dd * (+0.5)
-			fast_sparse_add!(J, smap, T_row_L, z_offset + n_right_node, deriv_TL_right)
-			fast_sparse_add!(J, smap, T_row_R, z_offset + n_right_node, deriv_TR_right)
-		end
-
-		# ============================================================
-		# Energy Term 2: ∂(1/V)/∂z_k contribution (volume scaling)
-		# Same sign convention as Term 1:
-		# ∂(dT_L/dt)/∂z_k = -A × q_conv × ∂(1/(V_L × ρcp_L))/∂z_k
-		#                = -A × q_conv / ρcp_L × (-1/V_L²) × ∂V_L/∂z_k
-		#                = +A × q_conv / (ρcp_L × V_L²) × ∂V_L/∂z_k
-		# ∂(dT_R/dt)/∂z_k = +A × q_conv × ∂(1/(V_R × ρcp_R))/∂z_k
-		#                = -A × q_conv / (ρcp_R × V_R²) × ∂V_R/∂z_k
-		# ============================================================
-		if abs(q_conv) > FLUX_DERIV_TOL
-			for k in 1:n_nodes
-				# Left cell volume dependence
-				if abs(dV_dz[left_id, k]) > FLUX_DERIV_TOL
-					deriv = inv_ρcp_L * A_f * q_conv * inv_V_L_sq * dV_dz[left_id, k]
-					fast_sparse_add!(J, smap, T_row_L, z_offset + k, deriv)
-				end
-
-				# Right cell volume dependence
-				if abs(dV_dz[right_id, k]) > FLUX_DERIV_TOL
-					deriv = -inv_ρcp_R * A_f * q_conv * inv_V_R_sq * dV_dz[right_id, k]
-					fast_sparse_add!(J, smap, T_row_R, z_offset + k, deriv)
-				end
-			end
-		end
-
 		# ================================================================
-		# PART B: Species equation geometry derivatives (∂(dξ/dt)/∂z_k)
-		# (existing code)
+		# Species equation geometry derivatives (∂(dξ/dt)/∂z_k)
 		# ================================================================
 
 		for j in 1:NC
@@ -5513,16 +5430,18 @@ function compute_analytical_jacobian_ale!(J::AbstractMatrix, u, p, t,
 	end
 
 	# =========================================================================
-	# Step 5: Conduction, gas transport, and convective heat flux Jacobian
+	# Step 5: Conduction and gas transport Jacobian
 	# =========================================================================
 	# Pre-compute ALL cell properties ONCE (Optimization #1)
 	# This eliminates redundant caching in each face loop
 	precompute_all_cell_properties!(base_cache, mesh, material)
 
-	# OPTIMIZATION #3: Use fused face loop to compute all three physics at once
-	# This reduces face iterations from 3× to 1× and shares derivative computations
-	# Expected speedup: 25-30% reduction in Jacobian time
+	# Fused face loop for conduction and gas transport Jacobians
 	compute_all_face_jacobians_fused!(J, smap, mesh, prop_cache, material,
+		f.rhs_cache.J_gas, n, Val(NC), base_cache)
+
+	# Cell-centered gas convective source Jacobian
+	compute_gas_convective_source_jacobian!(J, smap, mesh, prop_cache, material,
 		f.rhs_cache.J_gas, n, Val(NC), base_cache)
 
 	# =========================================================================

@@ -97,11 +97,16 @@ across groups are statistically independent.
 
 #### Group 1: HFM calibration bias ($\varepsilon_\text{HFM}$) — 1 parameter
 
-The heat flow meter heat flow accuracy is specified as $\pm 1\%$ by the
-manufacturer. Assuming a rectangular distribution and converting to a standard
-uncertainty:
+The heat flow meter heat flow calibration uncertainty was evaluated from actual
+calibration data using NIST SRM 1453 ($U_\text{rel} = 1.5\%$, $k=2$) and
+SRM 1453e ($U_\text{rel} = 1.0\%$, $k=2$) at three thicknesses (13.4, 25, and
+50 mm). Replicate scatter (Type A) and NIST certified conductivity uncertainty
+(Type B) were combined in quadrature at each thickness, then interpolated to
+the Douglas fir sample thickness (19.4 mm) using piecewise-linear (multiDX)
+interpolation. The Type K thermocouple systematic offset is absorbed into the
+calibration factor and is not a separate budget item.
 
-$$\varepsilon_\text{HFM} \sim \mathcal{N}(0,\; (0.01/\sqrt{3})^2) = \mathcal{N}(0,\; 0.005774^2)$$
+$$\varepsilon_\text{HFM} \sim \mathcal{N}(0,\; 0.004615^2)$$
 
 This multiplicative bias scales all HFM-derived specific heat values (virgin
 $c_p$ segment 1, $T \leq 323$ K) via the factor $(1 + \varepsilon_\text{HFM})$.

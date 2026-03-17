@@ -36,9 +36,7 @@ export compute_radiation_source!, compute_surface_radiation_source!, compute_bee
 export total_absorbed_radiation, transmitted_radiation
 export gas_flux, compute_gas_fluxes!, surface_mass_flux
 export gas_flux_darcy_fick, gas_flux_advective, compute_gas_fluxes_darcy_fick!
-export convective_heat_flux_advection, compute_convective_fluxes!
-export compute_convective_heat_fluxes_darcy!
-export compute_convective_heat_fluxes_from_mass_fluxes!
+export compute_gas_convective_source!
 export compute_energy_sources!, SourceTermCache, resize_source_cache!
 export volume_change_rate, compute_cell_volume_rates!
 export ideal_gas_pressure, compute_pressure!, compute_pressure_gradient!, pressure_derivatives, pressure_derivatives!

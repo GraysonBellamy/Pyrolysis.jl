@@ -101,8 +101,9 @@ moisture_cp = CallableProperty(T -> begin
 	E = 3.855326
 	(A + B*t + C*t^2 + D*t^3 + E/t^2) / M
 end)
-# Water vapor cp = 2.4e3 - 1.6*T + 2.0e-3*T^2
-water_vapor_cp = CallableProperty(T -> 2.4e3 - 1.6 * T + 2.0e-3 * T^2)
+# Water vapor heat capacity: fitted to NIST Shomate data (300-1200K)
+# NIST: 1865 (300K), 1955 (500K), 2150 (800K), 2291 (1000K) J/(kg·K)
+water_vapor_cp = CallableProperty(T -> 1716.7 + 0.4154 * T + 1.530e-4 * T^2)
 
 # Moisture-dependent heat of sorption
 # HoS(MC) = 2450.4 + 875.6 * exp(-0.1122 * MC) [kJ/kg]
@@ -252,47 +253,52 @@ douglas_fir = Material(
 			α = 0.0,                       # m²/kg - not used with SURFACE_ABSORPTION model
 			κ = 0.0                        # m² - liquid blocks Darcy flow
 		),
-		# 8. DF_gas1 - gaseous product from reaction 1 (low-T volatiles, light organic acids)
+		# 8. DF_gas1 - gaseous product from reaction 1 (5% yield, low-T onset)
+		# Early hemicellulose decomposition: acetic acid (60), furfural (96), formic acid (46)
 		GaseousComponent(:DF_gas1,
 			M = 0.060,                     # kg/mol - acetic acid-like (CH₃COOH = 60 g/mol)
-			c = 2000.0,                    # J/(kg·K)
-			k = 0.03,                      # W/(m·K) - typical gas conductivity
-			λ = λ_gas * 0.85               # m²/s - moderate weight, slightly slower diffusion
+			c = 1400.0,                    # J/(kg·K) - organic acids/aldehydes
+			k = 0.020,                     # W/(m·K) - organic vapors
+			λ = λ_gas * 0.85              # m²/s - moderate weight, slightly slower diffusion
 		),
-		# 9. DF_gas2 - gaseous product from reaction 2 (CO₂ from early decomposition)
+		# 9. DF_gas2 - gaseous product from reaction 2 (20% yield)
+		# Continued hemicellulose / early cellulose: mix of organic fragments, some CO₂
 		GaseousComponent(:DF_gas2,
-			M = 0.044,                     # kg/mol - CO₂ (44 g/mol)
-			c = 1800.0,                    # J/(kg·K)
-			k = 0.03,
-			λ = λ_gas * 1.0               # m²/s - medium weight gas
+			M = 0.070,                     # kg/mol - mix of organics heavier than pure CO₂
+			c = 1400.0,                    # J/(kg·K) - organic fragments
+			k = 0.020,                     # W/(m·K)
+			λ = λ_gas * 0.80              # m²/s - heavier organics, slower diffusion
 		),
-		# 10. DF_gas3 - gaseous product from reaction 3 (main pyrolysis tars and heavy volatiles)
+		# 10. DF_gas3 - gaseous product from reaction 3 (63% yield — dominant gas-producing step)
+		# Main cellulose pyrolysis: levoglucosan (162), anhydrosugars, heavy tars
 		GaseousComponent(:DF_gas3,
-			M = 0.070,                     # kg/mol - tar-like species (phenols, levoglucosan)
-			c = 2200.0,                    # J/(kg·K)
-			k = 0.025,
-			λ = λ_gas * 0.6                # m²/s - heavy tars diffuse slower (larger molecules)
+			M = 0.110,                     # kg/mol - dominated by levoglucosan/anhydrosugars
+			c = 1300.0,                    # J/(kg·K) - heavy organics, lower mass-specific cp
+			k = 0.018,                     # W/(m·K) - heavy organic vapors
+			λ = λ_gas * 0.6               # m²/s - heavy tars diffuse slower (larger molecules)
 		),
-		# 11. DF_gas4 - gaseous product from reaction 4 (light gases: CO, formaldehyde)
+		# 11. DF_gas4 - gaseous product from reaction 4 (21% yield)
+		# Secondary decomposition: lighter organics, phenol fragments from lignin
 		GaseousComponent(:DF_gas4,
-			M = 0.030,                     # kg/mol - CO (28 g/mol) / CH₂O (30 g/mol)
-			c = 1600.0,                    # J/(kg·K)
-			k = 0.035,
-			λ = λ_gas * 1.3               # m²/s - light gases diffuse faster
+			M = 0.070,                     # kg/mol - phenolics (94), guaiacol (124), lighter organics
+			c = 1500.0,                    # J/(kg·K) - medium organics
+			k = 0.020,                     # W/(m·K)
+			λ = λ_gas * 0.80              # m²/s
 		),
-		# 12. DF_gas5 - gaseous product from reaction 5 (high-T char oxidation/gasification)
+		# 12. DF_gas5 - gaseous product from reaction 5 (26% yield, final charring)
+		# Last volatiles released during charring: CH₄, light hydrocarbons, residual phenolics
 		GaseousComponent(:DF_gas5,
-			M = 0.028,                     # kg/mol - CO (28 g/mol)
-			c = 1500.0,                    # J/(kg·K)
-			k = 0.035,
-			λ = λ_gas * 1.4               # m²/s - CO is light and diffuses fast
+			M = 0.050,                     # kg/mol - mix of CH₄ (16), phenol fragments, light organics
+			c = 1600.0,                    # J/(kg·K) - lighter molecules, higher mass-specific cp
+			k = 0.025,                     # W/(m·K)
+			λ = λ_gas * 1.0               # m²/s - medium weight mix
 		),
 		# 13. Water vapor - gaseous product from moisture evaporation (lightest, fastest)
 		GaseousComponent(:WATER_VAPOR,
 			M = 0.018,                     # kg/mol - H₂O (18 g/mol, lightest species)
-			c = water_vapor_cp,            # J/(kg·K) - temperature-dependent
-			k = 0.04,                      # W/(m·K) - water vapor has high k
-			λ = λ_gas * 1.6                # m²/s - lightest molecule, fastest diffusion (Graham's law: √(M_heavy/M_light))
+			c = water_vapor_cp,            # J/(kg·K) - NIST polynomial fit
+			k = 0.025,                     # W/(m·K) - H₂O vapor at ~400K
+			λ = λ_gas * 1.6               # m²/s - lightest molecule, fastest diffusion
 		),
 	),
 	reactions = (

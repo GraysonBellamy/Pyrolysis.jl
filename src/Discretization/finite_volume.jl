@@ -102,7 +102,7 @@ mutable struct RHSCache
 	# Work arrays for fluxes
 	q_cond::Vector{Float64}      # Conductive heat fluxes at faces
 	q_total::Vector{Float64}     # Total energy fluxes at faces
-	q_conv::Vector{Float64}      # Convective heat fluxes at faces (advection form: J × cp × ΔT)
+	S_conv::Vector{Float64}      # Gas convective volumetric source per cell [W/m³]
 	J_gas::Matrix{Float64}       # Gas species fluxes [NC × n_faces]
 
 	# Work arrays for sources
@@ -129,7 +129,7 @@ function RHSCache(n_cells::Int, n_faces::Int, NC::Int, NR::Int)
 	RHSCache(
 		zeros(n_faces),           # q_cond
 		zeros(n_faces),           # q_total
-		zeros(n_faces),           # q_conv
+		zeros(n_cells),           # S_conv
 		zeros(NC, n_faces),       # J_gas
 		zeros(n_cells),           # Q_rxn
 		zeros(n_cells),           # Q_rad
@@ -163,7 +163,7 @@ Resize RHS cache arrays (e.g., after mesh refinement).
 function resize_rhs_cache!(cache::RHSCache, n_cells::Int, n_faces::Int, NC::Int, NR::Int)
 	resize!(cache.q_cond, n_faces)
 	resize!(cache.q_total, n_faces)
-	resize!(cache.q_conv, n_faces)
+	resize!(cache.S_conv, n_cells)
 	cache.J_gas = zeros(NC, n_faces)
 	resize!(cache.Q_rxn, n_cells)
 	resize!(cache.Q_rad, n_cells)
@@ -277,19 +277,11 @@ function compute_rhs!(dT::Vector{Float64}, dξ::Matrix{Float64},
 		top_face_ids, bottom_face_ids, Val(NC))
 
 	# ========================================================================
-	# Step 5.5: Compute convective heat flux from gas mass fluxes
+	# Step 5.5: Compute gas convective volumetric source
 	# ========================================================================
-	# Advection form: q_conv = Σⱼ Jⱼ × cp,j × (T_R - T_L)
-	# This redistributes heat internally as gas flows through temperature gradients
-	# Boundary faces have q_conv = 0 (no enthalpy flux at boundaries)
-	Physics.compute_convective_heat_fluxes_from_mass_fluxes!(rhs_cache.q_conv,
+	# S_conv = -Σ_g c_g(T) × J_g × ∂T/∂x  (cell-centered source, not a face flux)
+	Physics.compute_gas_convective_source!(rhs_cache.S_conv,
 		rhs_cache.J_gas, mesh, material)
-
-	# Add convective flux to total heat flux
-	n_faces_val = length(mesh.faces)
-	@inbounds for f in 1:n_faces_val
-		rhs_cache.q_total[f] += rhs_cache.q_conv[f]
-	end
 
 	# ========================================================================
 	# Step 6: Compute divergences
@@ -301,9 +293,9 @@ function compute_rhs!(dT::Vector{Float64}, dξ::Matrix{Float64},
 	# Step 7: Assemble final RHS
 	# ========================================================================
 	@inbounds for i in 1:n_cells_val
-		# Energy equation: dT/dt = (1/ρcₚ) * (-∇·q + Q_rad + Q_rxn)
+		# Energy equation: dT/dt = (1/ρcₚ) * (-∇·q + S_conv + Q_rad + Q_rxn)
 		ρcp = prop_cache.ρcp[i]
-		dT[i] = (-rhs_cache.div_q[i] + rhs_cache.Q_rad[i] + rhs_cache.Q_rxn[i]) / ρcp
+		dT[i] = (-rhs_cache.div_q[i] + rhs_cache.S_conv[i] + rhs_cache.Q_rad[i] + rhs_cache.Q_rxn[i]) / ρcp
 
 		# Species equations - use unrolled version for type stability
 		apply_species_residual_unrolled!(dξ, i, rhs_cache.div_J, rhs_cache.dξ_rxn, material)
@@ -699,7 +691,7 @@ permeability, rather than a separate permeability model. Use this when:
 - `dξ`: Output matrix of dξⱼ/dt [kg/(m³·s)], size [NC × n_cells]
 - `mesh`: Mesh with current state
 - `prop_cache`: Property cache (will be updated with Darcy properties)
-- `rhs_cache`: RHS workspace cache (includes q_conv for convective heat fluxes)
+- `rhs_cache`: RHS workspace cache
 - `material`: Material definition with component κ values
 - `bc_set`: Type-stable BoundaryConditionSet
 - `t`: Current time [s]
@@ -711,7 +703,7 @@ permeability, rather than a separate permeability model. Use this when:
 # Notes
 This is the preferred API for Darcy-Fick transport. The effective permeability
 is computed from component values via mixing rules (PARALLEL, SERIES, WEIGHTED).
-Convective heat fluxes are stored in rhs_cache.q_conv.
+Gas convective source is stored in rhs_cache.S_conv.
 """
 function compute_rhs_darcy_fick!(dT::Vector{Float64}, dξ::Matrix{Float64},
 	mesh::Mesh1D{NC}, prop_cache::PropertyCache,
@@ -793,14 +785,9 @@ function compute_rhs_darcy_fick!(dT::Vector{Float64}, dξ::Matrix{Float64},
 		top_face_ids, bottom_face_ids, Val(NC))
 
 	# ========================================================================
-	# Step 8: Compute convective heat flux from gas mass fluxes
+	# Step 8: Compute gas convective volumetric source
 	# ========================================================================
-	Physics.compute_convective_heat_fluxes_from_mass_fluxes!(rhs_cache.q_conv, rhs_cache.J_gas, mesh, material)
-
-	# Add convective flux to total heat flux
-	@inbounds for f in 1:n_faces_val
-		rhs_cache.q_total[f] += rhs_cache.q_conv[f]
-	end
+	Physics.compute_gas_convective_source!(rhs_cache.S_conv, rhs_cache.J_gas, mesh, material)
 
 	# ========================================================================
 	# Step 9: Compute divergences
@@ -814,7 +801,7 @@ function compute_rhs_darcy_fick!(dT::Vector{Float64}, dξ::Matrix{Float64},
 	@inbounds for i in 1:n_cells_val
 		ρcp = prop_cache.ρcp[i]
 
-		dT[i] = (-rhs_cache.div_q[i] + rhs_cache.Q_rad[i] + rhs_cache.Q_rxn[i]) / ρcp
+		dT[i] = (-rhs_cache.div_q[i] + rhs_cache.S_conv[i] + rhs_cache.Q_rad[i] + rhs_cache.Q_rxn[i]) / ρcp
 
 		# Species equations
 		apply_species_residual_unrolled!(dξ, i, rhs_cache.div_J, rhs_cache.dξ_rxn, material)

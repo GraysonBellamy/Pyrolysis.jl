@@ -13,7 +13,7 @@ using Pyrolysis
 using Pyrolysis.Core
 using Pyrolysis.Properties
 using Pyrolysis.Physics
-using Pyrolysis.Physics: convective_heat_flux_advection
+using Pyrolysis.Physics: compute_gas_convective_source!
 using Pyrolysis.Geometry
 using Pyrolysis.Discretization
 
@@ -1269,61 +1269,8 @@ end # main testset
 		end
 	end
 
-	@testset "Convective Heat Flux Advection Form" begin
-		@testset "Point function - temperature difference" begin
-			# Advection form: q = J × cp × (T_R - T_L)
-			J = 0.4       # kg/(m²·s)
-			cp = 1000.0   # J/(kg·K)
-			T_L = 400.0   # K (lower z)
-			T_R = 500.0   # K (higher z)
-
-			q = convective_heat_flux_advection(J, cp, T_L, T_R)
-
-			# q = 0.4 × 1000.0 × (500 - 400) = 0.4 × 1000.0 × 100 = 40000 W/m²
-			q_expected = J * cp * (T_R - T_L)
-			@test q ≈ q_expected atol = 1e-10
-			@test q ≈ 40000.0 atol = 1e-8
-		end
-
-		@testset "Uniform temperature gives zero flux" begin
-			# Key property of advection form: if T_L = T_R, no heat redistribution
-			J = 0.5
-			cp = 1000.0
-			T_uniform = 500.0
-
-			q = convective_heat_flux_advection(J, cp, T_uniform, T_uniform)
-			@test abs(q) < 1e-14
-		end
-
-		@testset "Zero mass flux gives zero heat flux" begin
-			J = 0.0
-			cp = 1000.0
-			T_L = 300.0
-			T_R = 500.0
-
-			q = convective_heat_flux_advection(J, cp, T_L, T_R)
-			@test abs(q) < 1e-14
-		end
-
-		@testset "Negative gradient reverses heat flow" begin
-			J = 0.4
-			cp = 1000.0
-
-			# Case 1: T increases with z (normal pyrolysis)
-			q_up = convective_heat_flux_advection(J, cp, 400.0, 500.0)
-			@test q_up > 0  # Heat flows toward surface
-
-			# Case 2: T decreases with z (inverted gradient)
-			q_down = convective_heat_flux_advection(J, cp, 500.0, 400.0)
-			@test q_down < 0  # Heat flows toward bottom
-
-			# Should be equal magnitude, opposite sign
-			@test q_up ≈ -q_down atol = 1e-10
-		end
-	end
-
-	@testset "Full Convective Heat Flux Computation (Darcy)" begin
-		# Setup two-component material
+	@testset "Gas Convective Source (Volumetric Form)" begin
+		# Setup two-component material with constant gas cp = 1000 J/(kg·K)
 		solid = Pyrolysis.Core.SolidComponent(:solid, ρ = 1000.0, c = 1000.0, k = 0.2)
 		gas = Pyrolysis.Core.GaseousComponent(:gas, M = 0.029, c = 1000.0, k = 0.025, λ = 1e-5)
 		two_comp = Material(name = :test, components = (solid, gas), reactions = ())
@@ -1333,150 +1280,122 @@ end # main testset
 		L = 0.01
 		mesh = create_uniform_mesh(L, n_cells, Val(2))
 		n_faces = length(mesh.faces)
-		n_nodes = length(mesh.nodes)
+		NC = 2
 
-		# Initialize state: temperature gradient, uniform gas
+		# Initialize state: linear temperature gradient, uniform gas
 		ξ_solid = 900.0
 		ξ_gas = 10.0
+		dTdx_exact = 20000.0  # 200 K over 0.01 m
 		for i in 1:n_cells
-			T_i = 300.0 + 200.0 * (i - 1) / (n_cells - 1)  # 300K to 500K
+			x_i = mesh.cell_centers[i]
+			T_i = 300.0 + dTdx_exact * x_i  # Linear T(x) = 300 + 20000*x
 			V = mesh.cell_volumes[i]
 			mesh.cell_states[i] = Pyrolysis.Geometry.CellState{2}(T_i, (ξ_solid, ξ_gas), V)
 		end
 
-		@testset "Zero velocities give zero flux" begin
-			v_gas = zeros(n_faces)
-			w_node = zeros(n_nodes)
+		@testset "Zero gas flux gives zero source" begin
+			J_gas = zeros(NC, n_faces)
+			S_conv = zeros(n_cells)
+			compute_gas_convective_source!(S_conv, J_gas, mesh, two_comp)
 
-			q_conv = zeros(n_faces)
-			compute_convective_heat_fluxes_darcy!(q_conv, mesh, two_comp, v_gas, w_node)
-
-			for f in 1:n_faces
-				@test abs(q_conv[f]) < 1e-14
+			for i in 1:n_cells
+				@test abs(S_conv[i]) < 1e-14
 			end
 		end
 
-		@testset "Positive gas flow transports heat" begin
-			v_gas = fill(0.01, n_faces)
-			v_gas[1] = 0.0
-			v_gas[end] = 0.0
-			w_node = zeros(n_nodes)
+		@testset "Uniform temperature gives zero source" begin
+			# Set uniform temperature
+			for i in 1:n_cells
+				V = mesh.cell_volumes[i]
+				mesh.cell_states[i] = Pyrolysis.Geometry.CellState{2}(400.0, (ξ_solid, ξ_gas), V)
+			end
 
-			q_conv = zeros(n_faces)
-			compute_convective_heat_fluxes_darcy!(q_conv, mesh, two_comp, v_gas, w_node)
+			J_gas = zeros(NC, n_faces)
+			J_gas[2, :] .= 0.5  # Nonzero gas flux
+			S_conv = zeros(n_cells)
+			compute_gas_convective_source!(S_conv, J_gas, mesh, two_comp)
 
-			# Positive v_rel means heat advected from low to high z
-			# With temperature increasing with z, upwind T is lower
-			for f in 2:(n_faces-1)
-				@test q_conv[f] > 0  # Positive flux
+			for i in 1:n_cells
+				@test abs(S_conv[i]) < 1e-12
+			end
+
+			# Restore temperature gradient
+			for i in 1:n_cells
+				x_i = mesh.cell_centers[i]
+				T_i = 300.0 + dTdx_exact * x_i
+				V = mesh.cell_volumes[i]
+				mesh.cell_states[i] = Pyrolysis.Geometry.CellState{2}(T_i, (ξ_solid, ξ_gas), V)
 			end
 		end
 
-		@testset "Matches w=0 to standard version" begin
-			v_gas = fill(0.01, n_faces)
-			v_gas[1] = 0.0
-			v_gas[end] = 0.0
-			w_node = zeros(n_nodes)
+		@testset "Linear T with constant J gives correct S_conv" begin
+			# S_conv = -c_g * J * dT/dx
+			# Linear T: dT/dx = 200/(0.01) = 20000 K/m
+			# With J = 0.5 kg/(m²·s), c_g = 1000 J/(kg·K):
+			# S_conv = -1000 * 0.5 * 20000 = -10,000,000 W/m³
+			J_gas = zeros(NC, n_faces)
+			J_gas[2, :] .= 0.5  # Constant gas flux at all faces
+			S_conv = zeros(n_cells)
+			compute_gas_convective_source!(S_conv, J_gas, mesh, two_comp)
 
-			# Compute with Darcy ALE method
-			q_darcy = zeros(n_faces)
-			compute_convective_heat_fluxes_darcy!(q_darcy, mesh, two_comp, v_gas, w_node)
+			dTdx_expected = 200.0 / L  # = 20000 K/m
+			cp_gas = 1000.0
+			J_val = 0.5
+			S_expected = -cp_gas * J_val * dTdx_expected
 
-			# Compute with mass flux method
-			cache = PropertyCache(n_cells, n_faces)
-			fill!(cache.ρ, ξ_solid + ξ_gas)
-			fill!(cache.λρ_face, 0.01)
+			# Interior cells should match exactly (central difference is exact for linear T)
+			for i in 2:(n_cells-1)
+				@test S_conv[i] ≈ S_expected rtol = 1e-10
+			end
 
-			J = zeros(2, n_faces)
-			compute_gas_fluxes_darcy_fick!(J, mesh, cache, two_comp, v_gas)
+			# Boundary cells use one-sided gradients (also exact for linear T on uniform mesh)
+			@test S_conv[1] ≈ S_expected rtol = 1e-10
+			@test S_conv[n_cells] ≈ S_expected rtol = 1e-10
+		end
 
-			q_from_flux = zeros(n_faces)
-			compute_convective_heat_fluxes_from_mass_fluxes!(q_from_flux, J, mesh, two_comp)
+		@testset "Source proportional to temperature gradient" begin
+			J_gas = zeros(NC, n_faces)
+			J_gas[2, :] .= 0.5
+			S_conv1 = zeros(n_cells)
+			compute_gas_convective_source!(S_conv1, J_gas, mesh, two_comp)
 
-			# With w=0, both methods use advection form: q = J × cp × (T_R - T_L)
-			# Results should match closely (small differences from diffusive J component)
-			for f in 2:(n_faces-1)
-				# Relative tolerance for matching (small diffusion contribution)
-				if abs(q_darcy[f]) > 1e-10
-					@test q_darcy[f] ≈ q_from_flux[f] rtol = 0.1
-				else
-					@test abs(q_from_flux[f]) < 1e-8
+			# Double the temperature gradient
+			dTdx_double = 2.0 * dTdx_exact
+			for i in 1:n_cells
+				x_i = mesh.cell_centers[i]
+				T_i = 300.0 + dTdx_double * x_i
+				V = mesh.cell_volumes[i]
+				mesh.cell_states[i] = Pyrolysis.Geometry.CellState{2}(T_i, (ξ_solid, ξ_gas), V)
+			end
+
+			S_conv2 = zeros(n_cells)
+			compute_gas_convective_source!(S_conv2, J_gas, mesh, two_comp)
+
+			# With doubled gradient, source should double
+			for i in 1:n_cells
+				if abs(S_conv1[i]) > 1e-10
+					@test S_conv2[i] / S_conv1[i] ≈ 2.0 rtol = 0.01
 				end
+			end
+
+			# Restore original gradient
+			for i in 1:n_cells
+				x_i = mesh.cell_centers[i]
+				T_i = 300.0 + dTdx_exact * x_i
+				V = mesh.cell_volumes[i]
+				mesh.cell_states[i] = Pyrolysis.Geometry.CellState{2}(T_i, (ξ_solid, ξ_gas), V)
 			end
 		end
 
-		@testset "Advection Form Properties" begin
-			@testset "Boundary faces have zero convective flux" begin
-				v_gas = fill(0.05, n_faces)  # Significant gas velocity
-				w_node = zeros(n_nodes)
+		@testset "Only gas components contribute" begin
+			# Solid flux should not contribute to S_conv
+			J_gas_solid_only = zeros(NC, n_faces)
+			J_gas_solid_only[1, :] .= 0.5  # Flux in solid component
+			S_conv = zeros(n_cells)
+			compute_gas_convective_source!(S_conv, J_gas_solid_only, mesh, two_comp)
 
-				q_conv = zeros(n_faces)
-				compute_convective_heat_fluxes_darcy!(q_conv, mesh, two_comp, v_gas, w_node)
-
-				# Boundary faces (f=1 bottom, f=n_faces top) should have zero flux
-				# Advection form only redistributes heat internally
-				@test abs(q_conv[1]) < 1e-14
-				@test abs(q_conv[n_faces]) < 1e-14
-			end
-
-			@testset "Uniform temperature gives all zero fluxes" begin
-				# Reset mesh to uniform temperature
-				for i in 1:n_cells
-					V = mesh.cell_volumes[i]
-					mesh.cell_states[i] = Pyrolysis.Geometry.CellState{2}(400.0, (ξ_solid, ξ_gas), V)
-				end
-
-				v_gas = fill(0.05, n_faces)
-				w_node = zeros(n_nodes)
-
-				q_conv = zeros(n_faces)
-				compute_convective_heat_fluxes_darcy!(q_conv, mesh, two_comp, v_gas, w_node)
-
-				# With uniform T, advection form gives zero: q = J × cp × 0 = 0
-				for f in 1:n_faces
-					@test abs(q_conv[f]) < 1e-12
-				end
-
-				# Restore temperature gradient for subsequent tests
-				for i in 1:n_cells
-					T_i = 300.0 + 200.0 * (i - 1) / (n_cells - 1)
-					V = mesh.cell_volumes[i]
-					mesh.cell_states[i] = Pyrolysis.Geometry.CellState{2}(T_i, (ξ_solid, ξ_gas), V)
-				end
-			end
-
-			@testset "Flux proportional to temperature difference" begin
-				v_gas = fill(0.01, n_faces)
-				v_gas[1] = 0.0
-				v_gas[end] = 0.0
-				w_node = zeros(n_nodes)
-
-				q_conv1 = zeros(n_faces)
-				compute_convective_heat_fluxes_darcy!(q_conv1, mesh, two_comp, v_gas, w_node)
-
-				# Double the temperature gradient
-				for i in 1:n_cells
-					T_i = 300.0 + 400.0 * (i - 1) / (n_cells - 1)  # 300K to 700K
-					V = mesh.cell_volumes[i]
-					mesh.cell_states[i] = Pyrolysis.Geometry.CellState{2}(T_i, (ξ_solid, ξ_gas), V)
-				end
-
-				q_conv2 = zeros(n_faces)
-				compute_convective_heat_fluxes_darcy!(q_conv2, mesh, two_comp, v_gas, w_node)
-
-				# With doubled gradient, flux should approximately double
-				for f in 2:(n_faces-1)
-					if abs(q_conv1[f]) > 1e-10
-						@test q_conv2[f] / q_conv1[f] ≈ 2.0 rtol = 0.15
-					end
-				end
-
-				# Restore original gradient
-				for i in 1:n_cells
-					T_i = 300.0 + 200.0 * (i - 1) / (n_cells - 1)
-					V = mesh.cell_volumes[i]
-					mesh.cell_states[i] = Pyrolysis.Geometry.CellState{2}(T_i, (ξ_solid, ξ_gas), V)
-				end
+			for i in 1:n_cells
+				@test abs(S_conv[i]) < 1e-14
 			end
 		end
 	end
