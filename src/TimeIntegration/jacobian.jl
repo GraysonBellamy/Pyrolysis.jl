@@ -561,11 +561,13 @@ For matrices larger than this, use Dict-based to avoid excessive memory usage.
 
 For typical pyrolysis problems (60-240 cells, ~14 DOFs/cell = 840-3360 DOFs),
 FastSparsityMap provides best performance. The memory cost is:
-  n_dof² × 8 bytes = 3360² × 8 ≈ 90 MB for 240 cells
+  n_dof² × 8 bytes = 5000² × 8 ≈ 200 MB for the threshold
 
-Above 3500 DOFs, the memory overhead outweighs the hash-free lookup benefit.
+The dense lookup eliminates Dict hash overhead which dominates Jacobian assembly
+for the Dict-based map. Profiling shows Dict `ht_keyindex` takes >50% of Jacobian
+time at 3601 DOFs. The ~100-200 MB memory cost is acceptable for modern systems.
 """
-const FAST_SPARSITY_THRESHOLD = 3500
+const FAST_SPARSITY_THRESHOLD = 5000
 
 """
 	create_sparsity_map(J::SparseMatrixCSC) -> Union{FastSparsityMap, SparsityMap}
