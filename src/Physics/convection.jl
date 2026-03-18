@@ -46,7 +46,6 @@ function compute_gas_convective_source!(S_conv::Vector{Float64},
 	material::Material{NC}) where NC
 
 	n_cells_val = length(mesh.cells)
-	comps = material.components
 
 	@inbounds for i in 1:n_cells_val
 		T_i = mesh.cell_states[i].T
@@ -84,16 +83,32 @@ function compute_gas_convective_source!(S_conv::Vector{Float64},
 		end
 
 		# S_conv = -Σ_g c_g(T_i) × J̄_g × ∂T/∂x
-		S = 0.0
-		for j in 1:NC
-			if comps[j].phase == GAS
-				J_avg = (J_gas[j, f_L] + J_gas[j, f_R]) * 0.5
-				cp_j = comps[j].heat_capacity(T_i)
-				S -= cp_j * J_avg * dTdx
-			end
-		end
-		S_conv[i] = S
+		# Use compile-time unrolled version for type stability
+		S_conv[i] = _gas_convective_source_unrolled(T_i, dTdx, J_gas, f_L, f_R, material)
 	end
 
 	return nothing
+end
+
+"""
+Compile-time unrolled gas convective source computation.
+Avoids runtime indexing into heterogeneous component tuple.
+"""
+@generated function _gas_convective_source_unrolled(T_i::Float64, dTdx::Float64,
+	J_gas::Matrix{Float64}, f_L::Int, f_R::Int,
+	material::Material{NC}) where NC
+
+	exprs = Expr[]
+	push!(exprs, :(S = 0.0))
+	for j in 1:NC
+		push!(exprs, quote
+			@inbounds if material.components[$j].phase == GAS
+				J_avg = (J_gas[$j, f_L] + J_gas[$j, f_R]) * 0.5
+				cp_j = material.components[$j].heat_capacity(T_i)
+				S -= cp_j * J_avg * dTdx
+			end
+		end)
+	end
+	push!(exprs, :(return S))
+	return Expr(:block, exprs...)
 end

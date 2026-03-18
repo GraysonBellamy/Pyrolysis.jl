@@ -1760,10 +1760,17 @@ function compute_gas_convective_source_jacobian!(J::AbstractMatrix, smap,
 
 	n_cells = length(mesh.cells)
 
+	# Work array for per-cell heat capacities (avoids runtime tuple indexing)
+	cp_work = base_cache.comp_heat_capacities
+
 	@inbounds for i in 1:n_cells
 		T_i = mesh.cell_states[i].T
 		ρcp_i = prop_cache.ρcp[i]
 		inv_ρcp = 1.0 / ρcp_i
+
+		# Cache component heat capacities at this cell's temperature
+		# Uses @generated function to avoid heterogeneous tuple allocations
+		cache_heat_capacities!(cp_work, T_i, material)
 
 		# Bounding faces
 		cell = mesh.cells[i]
@@ -1807,12 +1814,12 @@ function compute_gas_convective_source_jacobian!(J::AbstractMatrix, smap,
 		end
 
 		# Compute Σ_g c_g * J̄_g (the coefficient multiplying dTdx)
+		# Uses pre-cached cp_work[j] to avoid runtime heterogeneous tuple indexing
 		sum_cgJ = 0.0
 		for j in 1:NC
 			if is_gas[j]
 				J_avg = (J_gas[j, f_L] + J_gas[j, f_R]) * 0.5
-				cp_j = material.components[j].heat_capacity(T_i)
-				sum_cgJ += cp_j * J_avg
+				sum_cgJ += cp_work[j] * J_avg
 			end
 		end
 
@@ -1861,7 +1868,7 @@ function compute_gas_convective_source_jacobian!(J::AbstractMatrix, smap,
 				T_i, dTdx, inv_ρcp, T_row, n,
 				is_gas, swelling_factors, λ_mixing, β_λ,
 				base_cache, v_work1, v_work2, dρ_dξ_arr, dλ_dξ_arr,
-				0.5)  # factor 0.5 for averaging
+				0.5, cp_work)  # factor 0.5 for averaging
 		end
 
 		# Process right face f_R (between i and right_id)
@@ -1872,7 +1879,7 @@ function compute_gas_convective_source_jacobian!(J::AbstractMatrix, smap,
 				T_i, dTdx, inv_ρcp, T_row, n,
 				is_gas, swelling_factors, λ_mixing, β_λ,
 				base_cache, v_work1, v_work2, dρ_dξ_arr, dλ_dξ_arr,
-				0.5)  # factor 0.5 for averaging
+				0.5, cp_work)  # factor 0.5 for averaging
 		end
 	end
 
@@ -1895,7 +1902,7 @@ function _add_convective_source_species_jacobian_face!(
 	n::Int,
 	is_gas, swelling_factors, λ_mixing, β_λ,
 	base_cache, v_work1, v_work2, dρ_dξ_arr, dλ_dξ_arr,
-	factor::Float64) where NC
+	factor::Float64, cp_work::Vector{Float64}) where NC
 
 	# Cell states at the face
 	ξ_L = mesh.cell_states[cell_L].ξ
@@ -1940,8 +1947,7 @@ function _add_convective_source_species_jacobian_face!(
 			continue
 		end
 
-		cp_j = material.components[j].heat_capacity(T_i)
-		prefactor = -cp_j * dTdx * factor * inv_ρcp
+		prefactor = -cp_work[j] * dTdx * factor * inv_ρcp
 
 		Φ = ξ_R[j] * T_R - ξ_L[j] * T_L
 
