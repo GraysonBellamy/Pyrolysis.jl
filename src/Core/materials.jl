@@ -520,10 +520,10 @@ end
 
 Unrolled gas flux computation for a single component.
 If component J is GAS, compute flux and store in J[J, f].
-Uses the rigorous λρ_face formulation.
+Uses the volume fraction gradient formulation.
 """
 @generated function _unroll_gas_flux!(J::Matrix, ::Val{IDX}, ξ_L::NTuple{NC}, ξ_R::NTuple{NC},
-	f::Int, λρ_face, ρ_L, ρ_R, d_LR, material::Material{NC}) where {IDX, NC}
+	f::Int, λ_face, T_L, T_R, d_LR, material::Material{NC}) where {IDX, NC}
 	if IDX < 1 || IDX > NC
 		return :(error("Component index $IDX out of range 1:$NC"))
 	end
@@ -531,24 +531,23 @@ Uses the rigorous λρ_face formulation.
 		@inbounds if material.components[$IDX].phase == GAS
 			ξ_L_j = ξ_L[$IDX]
 			ξ_R_j = ξ_R[$IDX]
-			# Rigorous formulation: J = -λρ_face × ΔY / d
-			J[$IDX, f] = -λρ_face * ((ξ_R_j / ρ_R) - (ξ_L_j / ρ_L)) / d_LR
+			# Volume fraction gradient: J = -(λ/T_face) × Δ(ξT) / d
+			T_face = 0.5 * (T_L + T_R)
+			J[$IDX, f] = -λ_face * (ξ_R_j * T_R - ξ_L_j * T_L) / (T_face * d_LR)
 		end
 	end
 end
 
 """
-	compute_gas_fluxes_unrolled!(J, f, ξ_L, ξ_R, λρ_face, ρ_L, ρ_R, d_LR, material::Material{NC})
+	compute_gas_fluxes_unrolled!(J, f, ξ_L, ξ_R, λ_face, T_L, T_R, d_LR, material::Material{NC})
 
 Compute gas fluxes for all components at face f, using compile-time unrolling.
 
-Uses the rigorous λρ_face formulation where λρ_face is the harmonic mean of (λ·ρ):
-	J = -λρ_face × (Y_R - Y_L) / d_LR
-
-This ensures physically correct flux at interfaces with sharp property jumps.
+Uses the volume fraction gradient formulation where λ_face is the harmonic mean of λ:
+	J = -(λ_face / T_face) × (ξ_R × T_R - ξ_L × T_L) / d_LR
 """
 @generated function compute_gas_fluxes_unrolled!(J::Matrix, f::Int,
-	ξ_L::NTuple{NC}, ξ_R::NTuple{NC}, λρ_face, ρ_L, ρ_R, d_LR,
+	ξ_L::NTuple{NC}, ξ_R::NTuple{NC}, λ_face, T_L, T_R, d_LR,
 	material::Material{NC}) where NC
 
 	exprs = Expr[]
@@ -557,8 +556,9 @@ This ensures physically correct flux at interfaces with sharp property jumps.
 			@inbounds if material.components[$j].phase == GAS
 				ξ_L_j = ξ_L[$j]
 				ξ_R_j = ξ_R[$j]
-				# Rigorous formulation: J = -λρ_face × ΔY / d
-				J[$j, f] = -λρ_face * ((ξ_R_j / ρ_R) - (ξ_L_j / ρ_L)) / d_LR
+				# Volume fraction gradient: J = -(λ/T_face) × Δ(ξT) / d
+				T_face = 0.5 * (T_L + T_R)
+				J[$j, f] = -λ_face * (ξ_R_j * T_R - ξ_L_j * T_L) / (T_face * d_LR)
 			end
 		end)
 	end
@@ -567,7 +567,7 @@ end
 
 """
 	compute_gas_fluxes_species_scaled_unrolled!(J::Matrix, f::Int,
-		ξ_L::NTuple{NC}, ξ_R::NTuple{NC}, λρ_face, ρ_L, ρ_R, d_LR,
+		ξ_L::NTuple{NC}, ξ_R::NTuple{NC}, λ_face, T_L, T_R, d_LR,
 		material::Material{NC})
 
 Compute gas fluxes with species-specific molecular weight scaling.
@@ -579,7 +579,7 @@ Same as `compute_gas_fluxes_unrolled!` but scales diffusive flux by √(M_ref/M�
 The reference molar mass M_ref = 0.029 kg/mol (air).
 """
 @generated function compute_gas_fluxes_species_scaled_unrolled!(J::Matrix, f::Int,
-	ξ_L::NTuple{NC}, ξ_R::NTuple{NC}, λρ_face, ρ_L, ρ_R, d_LR,
+	ξ_L::NTuple{NC}, ξ_R::NTuple{NC}, λ_face, T_L, T_R, d_LR,
 	material::Material{NC}) where NC
 
 	M_REF = 0.029  # kg/mol (air)
@@ -594,9 +594,10 @@ The reference molar mass M_ref = 0.029 kg/mol (air).
 				M_j = material.components[$j].molar_mass
 				scale_j = M_j > 1e-6 ? sqrt($M_REF / M_j) : 1.0
 
-				# Rigorous formulation: J = -λρ_face × scale_j × ΔY / d
-				λρ_scaled = λρ_face * scale_j
-				J[$j, f] = -λρ_scaled * ((ξ_R_j / ρ_R) - (ξ_L_j / ρ_L)) / d_LR
+				# Volume fraction gradient with species scaling
+				λ_scaled = λ_face * scale_j
+				T_face = 0.5 * (T_L + T_R)
+				J[$j, f] = -λ_scaled * (ξ_R_j * T_R - ξ_L_j * T_L) / (T_face * d_LR)
 			end
 		end)
 	end
@@ -605,17 +606,17 @@ end
 
 """
 	compute_gas_fluxes_darcy_fick_unrolled!(J::Matrix, f::Int, v_g::Float64,
-		ξ_L::NTuple{NC}, ξ_R::NTuple{NC}, λρ_face, ρ_L, ρ_R, d_LR,
+		ξ_L::NTuple{NC}, ξ_R::NTuple{NC}, λ_face, T_L, T_R, d_LR,
 		material::Material{NC})
 
 Compile-time unrolled Darcy-Fick flux computation for type stability.
 
 Computes J = J_adv + J_diff for each gas component:
 - J_adv = v_g × ξ_upwind (first-order upwind)
-- J_diff = -λρ_face × ΔY / d_LR (Fickian diffusion)
+- J_diff = -(λ_face/T_face) × (ξ_R×T_R - ξ_L×T_L) / d_LR (volume fraction gradient)
 """
 @generated function compute_gas_fluxes_darcy_fick_unrolled!(J::Matrix, f::Int, v_g,
-	ξ_L::NTuple{NC}, ξ_R::NTuple{NC}, λρ_face, ρ_L, ρ_R, d_LR,
+	ξ_L::NTuple{NC}, ξ_R::NTuple{NC}, λ_face, T_L, T_R, d_LR,
 	material::Material{NC}) where NC
 
 	exprs = Expr[]
@@ -625,8 +626,9 @@ Computes J = J_adv + J_diff for each gas component:
 				ξ_L_j = ξ_L[$j]
 				ξ_R_j = ξ_R[$j]
 
-				# Diffusive flux: J_diff = -λρ_face × ΔY / d
-				J_diff = -λρ_face * ((ξ_R_j / ρ_R) - (ξ_L_j / ρ_L)) / d_LR
+				# Diffusive flux (volume fraction gradient)
+				T_face = 0.5 * (T_L + T_R)
+				J_diff = -λ_face * (ξ_R_j * T_R - ξ_L_j * T_L) / (T_face * d_LR)
 
 				# Advective flux: J_adv = v_g × ξ_upwind (first-order upwind)
 				ξ_upwind = v_g >= 0.0 ? ξ_L_j : ξ_R_j
@@ -642,7 +644,7 @@ end
 
 """
 	compute_gas_fluxes_darcy_fick_species_scaled_unrolled!(J::Matrix, f::Int, v_g,
-		ξ_L::NTuple{NC}, ξ_R::NTuple{NC}, λρ_face, ρ_L, ρ_R, d_LR,
+		ξ_L::NTuple{NC}, ξ_R::NTuple{NC}, λ_face, T_L, T_R, d_LR,
 		material::Material{NC})
 
 Darcy-Fick flux with species-specific molecular weight scaling.
@@ -651,7 +653,7 @@ Same as `compute_gas_fluxes_darcy_fick_unrolled!` but scales diffusive flux by �
 Note: Advective flux is NOT scaled - all species move with the bulk gas velocity.
 """
 @generated function compute_gas_fluxes_darcy_fick_species_scaled_unrolled!(J::Matrix, f::Int, v_g,
-	ξ_L::NTuple{NC}, ξ_R::NTuple{NC}, λρ_face, ρ_L, ρ_R, d_LR,
+	ξ_L::NTuple{NC}, ξ_R::NTuple{NC}, λ_face, T_L, T_R, d_LR,
 	material::Material{NC}) where NC
 
 	M_REF = 0.029  # kg/mol (air)
@@ -666,9 +668,10 @@ Note: Advective flux is NOT scaled - all species move with the bulk gas velocity
 				M_j = material.components[$j].molar_mass
 				scale_j = M_j > 1e-6 ? sqrt($M_REF / M_j) : 1.0
 
-				# Diffusive flux: J_diff = -λρ_face × scale_j × ΔY / d
-				λρ_scaled = λρ_face * scale_j
-				J_diff = -λρ_scaled * ((ξ_R_j / ρ_R) - (ξ_L_j / ρ_L)) / d_LR
+				# Diffusive flux with species scaling (volume fraction gradient)
+				λ_scaled = λ_face * scale_j
+				T_face = 0.5 * (T_L + T_R)
+				J_diff = -λ_scaled * (ξ_R_j * T_R - ξ_L_j * T_L) / (T_face * d_LR)
 
 				# Advective flux: J_adv = v_g × ξ_upwind (NOT scaled)
 				ξ_upwind = v_g >= 0.0 ? ξ_L_j : ξ_R_j

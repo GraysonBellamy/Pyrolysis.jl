@@ -146,18 +146,46 @@ Where:
 The full Darcy-Fick formulation combines advective (pressure-driven) and diffusive transport:
 
 ```
-Jⱼ = ξⱼ·v_g - Dⱼ,eff·∇ξⱼ     (combined advection + diffusion)
+Jⱼ = ξⱼ·v_g + J_diff,j     (combined advection + diffusion)
      ↑ advection  ↑ diffusion
 ```
 
 **Fickian Diffusion** (always active):
 ```
-J_diff = -λⱼ·ρⱼ·∇Yⱼ = -λⱼ·ρⱼ·∇(ξⱼ/ρⱼ)    for gaseous components
+J_diff,j = -ρ_gas,j · λ · ∇(ξⱼ/ρ_gas,j)    for gaseous components
 ```
 
 Where:
-- λⱼ: Gas transfer coefficient [m²/s] (diffusion-like parameter)
-- Yⱼ = ξⱼ/ρⱼ: Mass fraction of gas component j
+- λ: Gas transfer coefficient of the mixture [m²/s] (from mixing rules, Eqs. 8-10 analog)
+- ρ_gas,j: Pure gas component density [kg/m³] (from ideal gas law: ρ_gas,j = P_ref·Mⱼ/(R·T))
+- ξⱼ/ρ_gas,j: Volume fraction of gas component j [-]
+
+The driving force is the **volume fraction gradient** (equivalently, the partial pressure gradient).
+This follows from the ideal gas equation of state and is consistent with ThermaKin Eq. 13.
+
+**Equivalent forms** (all mathematically identical for ideal gas):
+```
+J_diff,j = -ρ_gas,j · λ · ∇(ξⱼ/ρ_gas,j)          (volume fraction gradient)
+         = -(λ/T) · ∂(ξⱼT)/∂x                      (product rule form)
+         = -λ · [∂ξⱼ/∂x + (ξⱼ/T)·∂T/∂x]           (expanded form)
+         = -(λ·Mⱼ)/(R·T) · ∂Pⱼ/∂x                  (partial pressure gradient)
+```
+
+The expanded form reveals a **thermal diffusion term** (ξⱼ/T)·∂T/∂x that drives gas from
+hot (high pressure) to cold (low pressure) regions, even when concentration ξ is uniform.
+This term vanishes at uniform temperature, where the formulation reduces to simple Fick's law.
+
+**Discrete formulation**: At a face between cells L and R:
+```
+J_diff,j = -λ_face · (ξⱼ,R·T_R - ξⱼ,L·T_L) / (T_face · d_LR)
+```
+where T_face = (T_L + T_R)/2 (arithmetic mean) and λ_face is the harmonic mean of λ.
+This is equivalent to using ρ_gas,j at each cell and computing the volume fraction difference.
+
+**Note on previous formulation**: An earlier version used mass fraction gradient
+J = -λρ_mix·∇(ξ/ρ_mix), which misses the thermal diffusion term entirely. This was
+corrected based on first-principles derivation from the radiative transfer / partial
+pressure driving force analysis (see test/test_gas_transport_formulation.jl).
 
 **Darcy Flow** (optional, pressure-driven):
 ```
@@ -300,6 +328,60 @@ dI⁺/dz = -(α + σ_s)I⁺ + σ_s·I⁻
 dI⁻/dz = +(α + σ_s)I⁻ - σ_s·I⁺
 ```
 
+### P1 Diffusion Approximation (Volumetric Radiation Transport)
+
+The P1 approximation models radiation transport as a diffusion process for the
+incident radiation G = ∫_{4π} I dΩ [W/m²]. It is valid for optically thick media
+(τ = α·L >> 1) where radiation is nearly isotropic.
+
+**Derivation from the RTE**:
+
+Integrating the radiative transfer equation μ ∂I/∂z = κ(I_b - I) over all
+solid angles (4π steradians) gives:
+```
+∇·q_rad = κ(4σT⁴ - G)       (zeroth moment of the RTE)
+```
+
+The P1 closure approximates the radiative heat flux as:
+```
+q_rad = -(1/3κ)∇G = -D_rad ∇G     where D_rad = 1/(3κ)
+```
+
+**Net Radiation Source**: The energy equation contribution is:
+```
+S_rad = -∇·q_rad = κ(G - 4σT⁴)
+```
+
+Sign convention:
+- S_rad > 0: net absorption (G > 4σT⁴) → material heats up
+- S_rad < 0: net emission (G < 4σT⁴) → material cools down
+
+**Energy equation coupling**:
+```
+ρcₚ ∂T/∂t = ∇·(k∇T) + S_rad + Q_rxn + S_conv
+```
+
+**Quasi-Steady P1 Equation**: Since the radiation time scale τ_rad = 1/(c·κ) ≈ 10⁻¹² s
+is vastly faster than conduction/reaction scales (~10² s), we solve the steady-state:
+```
+∇·(D_rad∇G) = κG - 4σκT⁴
+```
+This is a tridiagonal system solved at each ODE RHS evaluation using the Thomas algorithm.
+
+**Boundary Conditions** (Marshak):
+```
+G/2 + D_rad ∂G/∂n = I_in     (incoming radiation at boundary)
+```
+
+**Code Convention**: The computed quantity `rad_cache.S_rad` stores S_rad = κ(G - 4σT⁴),
+the NET RADIATION SOURCE (positive = heating). This is NOT the flux divergence ∇·q_rad
+(which has the opposite sign). The energy equation adds S_rad directly:
+`dT/dt += S_rad / ρcₚ`.
+
+Note: In the P1 approximation for gray media in LTE, Kirchhoff's law ensures the
+absorption and emission coefficients are equal. Emissivity only appears at boundaries
+(Marshak BC), not in the volumetric source term.
+
 ---
 
 # 3. ALE Formulation
@@ -323,7 +405,12 @@ The time derivative in the ALE frame relates to the spatial frame as:
 ∂φ/∂t|_χ = ∂φ/∂t|_x + w·∇φ
 ```
 
-Where w = ∂x/∂t|_χ is the mesh velocity.
+Where w = ∂x/∂t|_χ is the mesh velocity. This is derived from the chain rule:
+a mesh point χ has position x(χ,t), so df/dt|_χ = ∂f/∂t|_x + w·∂f/∂x.
+
+**Key consequence**: To convert an Eulerian PDE to the ALE frame, substitute
+∂f/∂t|_x = ∂f/∂t|_χ - w·∇f, yielding ∂f/∂t|_χ = (Eulerian RHS) + w·∇f.
+The mesh motion correction is **added**, not subtracted.
 
 ## 3.3 ALE Conservation Laws
 
@@ -338,18 +425,61 @@ Or in integral form over a control volume V(t):
 d/dt ∫_V φ dV + ∮_∂V φ(v - w)·n dA + ∮_∂V F·n dA = ∫_V S dV
 ```
 
-### ALE Energy Equation
+### ALE Energy Equation (Non-Conservative Temperature Form)
+
+Temperature is an intensive variable. Starting from the Eulerian non-conservative form:
 ```
-∂(ρcₚT)/∂t|_χ + ∇·((v_g - w)ρcₚT) = ∇·(k_eff∇T) - ∇·q_rad + Σᵢhᵢrᵢ
+ρcₚ ∂T/∂t|_x = -∇·q + Q_rxn + S_conv + Q_rad
 ```
+Applying the ALE transform (∂T/∂t|_x = ∂T/∂t|_χ - w·∇T):
+```
+ρcₚ (∂T/∂t|_χ - w·∇T) = -∇·q + Q_rxn + S_conv + Q_rad
+```
+Rearranging:
+```
+∂T/∂t|_χ = (-∇·q + Q_rxn + S_conv + Q_rad) / ρcₚ  +  w·∇T
+             \___________________ ___________________/     \_ ALE correction (ADDED)
+                                 V
+                         Eulerian RHS
+```
+
+Where S_conv = -Σ_g c_g J_g ∂T/∂x is the gas convective source term.
+
+Note: The ALE correction +w·∇T is discretized with first-order upwinding based on
+the sign of w (the coefficient of ∇T). No dilation correction (-Tθ) is needed because
+temperature is intensive — verified by manufactured solution (see test_ale_temperature_dilation.jl).
+
+**Upwind gradient distance requirement**: The upwind gradient `(f_i - f_upwind)/Δ`
+must use Δ = center-to-center distance between cell i and its upwind neighbor, NOT
+the cell width Δz_i. On non-uniform meshes, cell width ≠ center-to-center distance.
+Taylor expansion shows that using cell width gives `(d/Δz)·f'` instead of `f'` — a
+zeroth-order multiplicative bias that does not vanish with mesh refinement (for fixed
+stretch ratios). At boundaries, center-to-face distance (half cell width) is used,
+consistent with the zero-gradient ghost cell. This applies to all three ALE advection
+functions: temperature, species, and Darcy species advection.
 
 ### ALE Species Equation
 ```
 ∂ξⱼ/∂t|_χ + ∇·((vⱼ - w)ξⱼ) = Σᵢνᵢⱼrᵢ
 ```
 
-For solids: vⱼ = w (Lagrangian tracking)
-For gases: vⱼ = v_g (transport relative to mesh)
+**For solids and liquids** (vⱼ = w, Lagrangian tracking):
+The (vⱼ - w) = 0 advective term vanishes. Volume change is handled by the
+dilation correction: ∂ξⱼ/∂t|_χ = Sⱼ - ξⱼθ, where θ = (1/V)dV/dt.
+Mesh-bound species (solids and liquids) are locked to the mesh; when the cell
+shrinks, concentration changes. This applies to any component with v = w,
+regardless of phase — e.g., water in wood or molten polymer in a char scaffold.
+
+**For gases** (vⱼ ≈ 0 in simplified model, or vⱼ = v_g with Darcy):
+Gas is spatially stationary (or moves independently of mesh). Using the non-conservative
+ALE transform on the Eulerian equation ∂ξ/∂t|_x = -∇·J + S:
+```
+∂ξⱼ/∂t|_χ = (-∇·Jⱼ + Sⱼ) + w·∇ξⱼ
+```
+The +w·∇ξⱼ term is discretized with upwinding based on sign of w.
+No dilation correction is applied to gas — the non-conservative and conservative
+forms are alternative (not additive) treatments of ALE transport.
+Verified by manufactured solution (see test_ale_gas_dilation.jl).
 
 ## 3.4 Geometric Conservation Law (GCL)
 

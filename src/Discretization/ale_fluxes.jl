@@ -1,21 +1,31 @@
 """
 ALE advection computation using upwind differencing.
 
-Reference: Design Document Section 3.3, ALE_Energy_Reformulation.md
+Reference: Design Document Section 3.2-3.3
 
-In the ALE (Arbitrary Lagrangian-Eulerian) formulation, the correct treatment
-of mesh motion uses advection terms (w·∇φ) rather than conservative flux
-divergence (∇·(φw)). This avoids spurious energy sources/sinks at boundaries.
+In the ALE (Arbitrary Lagrangian-Eulerian) formulation, mesh motion is handled via
+the ALE time derivative identity (chain rule for a moving sample point):
 
-The ALE equations are:
-- Energy: ∂T/∂t = (physics terms) - w·∇T
-- Species: ∂ξ/∂t = (physics terms) - w·∇ξ
+    ∂f/∂t|_χ = ∂f/∂t|_x + w·∇f
 
-The advection terms are discretized using first-order upwind differencing
-based on the direction of mesh motion.
+where ∂/∂t|_x is the Eulerian (fixed-point) rate and ∂/∂t|_χ is the ALE (mesh-point) rate.
+
+The ALE equations are (Eulerian RHS + mesh correction):
+- Energy: ∂T/∂t|_χ = (Eulerian RHS) + w·∇T      (T is intensive, no dilation)
+- Gas species: ∂ξ/∂t|_χ = (Eulerian RHS) + w·∇ξ  (gas is spatially stationary)
+- Mesh-bound species (solid/liquid): ∂ξ/∂t|_χ = S - ξ·θ  (dilation, handled separately)
+
+The w·∇f advection terms are discretized using TVD-limited upwind differencing.
+A 3-point stencil {i-2, i-1, i} (for w>0) is used with a slope limiter to achieve
+second-order accuracy on smooth fields while preventing oscillations near
+discontinuities. The limiter ψ(r) is applied to the ratio of consecutive gradients.
+Falls back to first-order at boundaries where the upwind-upwind cell is unavailable.
+Default limiter: VANLEER.
 """
 
 using ..Core: GAS, SOLID
+# Limiter, VANLEER, NONE, apply_limiter are available from flux_limiters.jl
+# (included before this file in Discretization module)
 
 # ============================================================================
 # ALE Convective Flux Computation
@@ -74,7 +84,7 @@ For simplified pyrolysis models, gas velocity can be estimated from
 mass generation and porosity.
 
 Note: This uses λ (gas transfer coefficient) as a proxy for κ/μ, computed
-as the harmonic mean at faces since the property cache now stores λρ_face.
+as the harmonic mean at faces since the property cache now stores λ_face.
 """
 function compute_gas_velocity!(v_gas::Vector{Float64}, mesh::Mesh1D{NC}, cache,
 	material, pressure_gradient::Vector{Float64}) where NC
@@ -144,20 +154,18 @@ function estimate_gas_velocity_from_generation!(v_gas::Vector{Float64}, mesh::Me
 end
 
 # ============================================================================
-# ALE Advection (Upwind Formulation) - CORRECTED FORMULATION
+# ALE Advection (Upwind Formulation)
 # ============================================================================
-# 
-# The correct ALE energy equation is:
-#     ρcₚ (∂T/∂t + w·∇T) = -∇·q + Q
 #
-# NOT the conservative flux form:
-#     ∂(ρcₚT)/∂t + ∇·(ρcₚTw) = ...  [WRONG]
+# ALE time derivative identity (chain rule):
+#     ∂f/∂t|_χ = ∂f/∂t|_x + w·∇f
 #
-# The advection term w·∇T is discretized using first-order upwind differencing.
-# This avoids the spurious energy sources/sinks that occur with the flux-based
-# formulation at fixed boundaries.
+# For the non-conservative temperature equation:
+#     ρcₚ ∂T/∂t|_x = -∇·q + Q     (Eulerian)
+#     ∂T/∂t|_χ = (-∇·q + Q)/ρcₚ + w·∇T     (ALE = Eulerian + w·∇T)
 #
-# Reference: ALE_Energy_Reformulation.md
+# The w·∇T term is ADDED to the Eulerian RHS (not subtracted).
+# It is discretized using first-order upwind differencing on the sign of w.
 # ============================================================================
 
 """
@@ -165,38 +173,35 @@ end
 								mesh::Mesh1D{NC},
 								w_node::Vector{Float64}) where NC
 
-Compute the ALE advection contribution to dT/dt using upwind differencing.
+Compute the ALE advection term w·∇T using upwind differencing.
 
-The ALE energy equation is:
-	ρcₚ (∂T/∂t + w·∇T) = -∇·q + Q
-
-This function computes (w·∇T)ᵢ for each cell using first-order upwind.
+From the ALE identity: ∂T/∂t|_χ = ∂T/∂t|_x + w·∇T
+The result w·∇T is ADDED to the Eulerian RHS to form the ALE rate.
 
 # Arguments
-- `advection`: Output vector of advection terms [K/s] for each cell
+- `advection`: Output vector of (w·∇T)ᵢ [K/s] for each cell
 - `mesh`: Mesh with current cell states (temperatures)
 - `w_node`: Mesh velocities at nodes [m/s]
 
 # Sign Convention
 - w < 0: mesh contracting (nodes moving toward z=0)
 - w > 0: mesh expanding (nodes moving away from z=0)
-- The result is the advection term that should be SUBTRACTED from dT/dt
+- The result is ADDED to the Eulerian dT/dt to get the ALE dT/dt
 
 # Boundary Treatment
 - Uses zero-gradient extrapolation (Neumann BC) at all boundaries
-- This is physically appropriate for the advection/convection operator
 
 # Algorithm
 For cell i with mesh velocity wᵢ (average of bounding nodes):
-- If wᵢ > 0: use backward difference (T_i - T_left) / Δz  [information from left]
-- If wᵢ < 0: use forward difference (T_right - T_i) / Δz  [information from right]
+- If wᵢ > 0: use backward difference (T_i - T_left) / Δz  [upwind from left]
+- If wᵢ < 0: use forward difference (T_right - T_i) / Δz  [upwind from right]
 
-This ensures numerical stability by using upwind differencing based on the
-direction of mesh motion.
+Upwinding is based on the sign of w (the coefficient of ∇T in the added term).
 """
 function compute_ale_advection_term!(advection::Vector{Float64},
 	mesh::Mesh1D{NC},
-	w_node::Vector{Float64}) where NC
+	w_node::Vector{Float64};
+	limiter::Limiter = VANLEER) where NC
 
 	n_cells = length(mesh.cells)
 
@@ -214,7 +219,6 @@ function compute_ale_advection_term!(advection::Vector{Float64},
 		end
 
 		T_i = mesh.cell_states[i].T
-		Δz = mesh.cell_volumes[i] / mesh.cross_section_area
 
 		# Get neighbor cell IDs via faces
 		f_left, f_right = cell.face_ids
@@ -228,15 +232,26 @@ function compute_ale_advection_term!(advection::Vector{Float64},
 		T_left = _get_boundary_temperature(left_id, T_i, mesh)
 		T_right = _get_boundary_temperature(right_id, T_i, mesh)
 
-		# Upwind discretization: use gradient in direction mesh is moving
+		# TVD-limited upwind gradient (3-point stencil with slope limiter)
+		# Falls back to first-order at boundaries where upwind-upwind unavailable
 		if w_cell > 0
-			# Mesh expanding toward +z: use backward difference
-			# Information flows from left to right
-			dT_dz = (T_i - T_left) / Δz
+			# Upwind from left: stencil {left_left, left, i}
+			left_left_id = _upwind_upwind_id(mesh, left_id, true)
+			T_left_left = _get_boundary_temperature(left_left_id, T_left, mesh)
+			d_i_L = _upwind_gradient_distance(mesh, i, left_id)
+			d_L_LL = left_left_id != 0 ?
+				abs(mesh.cell_centers[left_id] - mesh.cell_centers[left_left_id]) : d_i_L
+			dT_dz = _limited_gradient(T_i, T_left, T_left_left,
+				d_i_L, d_L_LL, left_left_id != 0, limiter, true)
 		else
-			# Mesh contracting toward -z: use forward difference  
-			# Information flows from right to left
-			dT_dz = (T_right - T_i) / Δz
+			# Upwind from right: stencil {right_right, right, i}
+			right_right_id = _upwind_upwind_id(mesh, right_id, false)
+			T_right_right = _get_boundary_temperature(right_right_id, T_right, mesh)
+			d_i_R = _upwind_gradient_distance(mesh, i, right_id)
+			d_R_RR = right_right_id != 0 ?
+				abs(mesh.cell_centers[right_id] - mesh.cell_centers[right_right_id]) : d_i_R
+			dT_dz = _limited_gradient(T_i, T_right, T_right_right,
+				d_i_R, d_R_RR, right_right_id != 0, limiter, false)
 		end
 
 		# Advection term: w · ∇T
@@ -263,6 +278,100 @@ The zero-gradient approach is physically appropriate for the advection operator.
 	# Boundary face - use zero-gradient (cell temperature)
 	# This is physically appropriate for the convective/advective operator
 	return T_cell
+end
+
+"""
+Compute the correct upwind gradient distance: center-to-center distance to
+the upwind neighbor cell.
+
+On non-uniform meshes, this differs from the cell width. Using cell width
+introduces a zeroth-order multiplicative bias in the gradient (the gradient
+converges to (d/Δz)×f' instead of f' as h→0). Center-to-center distance
+gives a consistent first-order upwind approximation.
+
+At boundaries (neighbor_id == 0), the zero-gradient ghost cell is at the
+face, so the distance is from cell center to face ≈ half cell width.
+"""
+@inline function _upwind_gradient_distance(mesh::Mesh1D, i::Int,
+	neighbor_id::Int)
+	if neighbor_id == 0
+		# Boundary: distance from center to face (half cell width)
+		return mesh.cell_volumes[i] / mesh.cross_section_area
+	end
+	return abs(mesh.cell_centers[i] - mesh.cell_centers[neighbor_id])
+end
+
+"""
+Get the upwind-upwind neighbor cell ID for second-order TVD reconstruction.
+Returns 0 if the upwind-upwind cell doesn't exist (boundary or upwind is boundary).
+"""
+@inline function _upwind_upwind_id(mesh::Mesh1D, upwind_id::Int, upwind_from_left::Bool)
+	if upwind_id == 0
+		return 0
+	end
+	cell = mesh.cells[upwind_id]
+	if upwind_from_left
+		f = cell.face_ids[1]
+		return mesh.faces[f].cell_ids[1]
+	else
+		f = cell.face_ids[2]
+		return mesh.faces[f].cell_ids[2]
+	end
+end
+
+"""
+Compute TVD-limited spatial gradient ∂T/∂z at a cell center using upwind
+reconstruction. The gradient is always in the +z direction regardless of
+which side is upwind.
+
+For w > 0 (upwind from left): grad = (T_i - T_left) / d, positive when T increases with z
+For w < 0 (upwind from right): grad = (T_right - T_i) / d, positive when T increases with z
+
+The TVD correction uses a 3-point upwind stencil:
+	grad = grad_1 + ψ(r)/2 × (grad_1 - grad_0)
+
+where grad_1 is the first-order upwind gradient (in +z direction),
+grad_0 is the same gradient one cell further upwind,
+and r = grad_0/grad_1 is the slope ratio.
+
+Arguments use directional convention:
+- T_i, T_upwind, T_upup: values at current, upwind, and upwind-upwind cells
+- upwind_from_left: if true, gradient = (T_i - T_upwind)/d; if false, = (T_upwind - T_i)/d
+
+Falls back to first-order if upwind-upwind cell doesn't exist.
+"""
+@inline function _limited_gradient(T_i::Float64, T_upwind::Float64, T_upup::Float64,
+	d_to_upwind::Float64, d_upwind_to_upup::Float64,
+	has_upup::Bool, limiter::Limiter, upwind_from_left::Bool)
+
+	# First-order gradient in +z direction
+	if upwind_from_left
+		# Upwind is to the left: grad = (T_i - T_left) / d
+		grad_1 = (T_i - T_upwind) / d_to_upwind
+	else
+		# Upwind is to the right: grad = (T_right - T_i) / d
+		grad_1 = (T_upwind - T_i) / d_to_upwind
+	end
+
+	if !has_upup || limiter == NONE
+		return grad_1
+	end
+
+	# Previous gradient (one cell further upwind, same +z direction)
+	if upwind_from_left
+		grad_0 = (T_upwind - T_upup) / d_upwind_to_upup
+	else
+		grad_0 = (T_upup - T_upwind) / d_upwind_to_upup
+	end
+
+	if abs(grad_1) < 1e-20
+		return grad_1
+	end
+	r = grad_0 / grad_1
+
+	ψ = apply_limiter(r, limiter)
+
+	return grad_1 + 0.5 * ψ * (grad_1 - grad_0)
 end
 
 """
@@ -297,7 +406,8 @@ so when the mesh shrinks due to mass loss, thickness tracks mass correctly.
 function compute_ale_species_advection!(advection::Matrix{Float64},
 	mesh::Mesh1D{NC},
 	material::Material{NC},
-	w_node::Vector{Float64}) where NC
+	w_node::Vector{Float64};
+	limiter::Limiter = VANLEER) where NC
 
 	n_cells = length(mesh.cells)
 
@@ -316,8 +426,6 @@ function compute_ale_species_advection!(advection::Matrix{Float64},
 		left_id = face_left.cell_ids[1]
 		right_id = face_right.cell_ids[2]
 
-		Δz = mesh.cell_volumes[i] / mesh.cross_section_area
-
 		# Skip if velocity is essentially zero
 		if abs(w_cell) < 1e-20
 			for j in 1:NC
@@ -326,40 +434,54 @@ function compute_ale_species_advection!(advection::Matrix{Float64},
 			continue
 		end
 
+		# Compute upwind distances and upwind-upwind neighbor for TVD
+		if w_cell > 0
+			d_upwind = _upwind_gradient_distance(mesh, i, left_id)
+			upup_id = _upwind_upwind_id(mesh, left_id, true)
+			d_upup = upup_id != 0 ?
+				abs(mesh.cell_centers[left_id] - mesh.cell_centers[upup_id]) : d_upwind
+		else
+			d_upwind = _upwind_gradient_distance(mesh, i, right_id)
+			upup_id = _upwind_upwind_id(mesh, right_id, false)
+			d_upup = upup_id != 0 ?
+				abs(mesh.cell_centers[right_id] - mesh.cell_centers[upup_id]) : d_upwind
+		end
+		has_upup = upup_id != 0
+
 		# Get cell state and neighbor states for upwind
 		ξ_i = mesh.cell_states[i].ξ
-		ξ_left_all = left_id == 0 ? ξ_i : mesh.cell_states[left_id].ξ
-		ξ_right_all = right_id == 0 ? ξ_i : mesh.cell_states[right_id].ξ
+		ξ_upwind = w_cell > 0 ?
+			(left_id == 0 ? ξ_i : mesh.cell_states[left_id].ξ) :
+			(right_id == 0 ? ξ_i : mesh.cell_states[right_id].ξ)
+		ξ_upup = has_upup ? mesh.cell_states[upup_id].ξ : ξ_upwind
 
 		# Use unrolled version for type stability
-		_compute_species_advection_unrolled!(advection, i, w_cell, Δz,
-			ξ_i, ξ_left_all, ξ_right_all, material)
+		upwind_from_left = w_cell > 0
+		_compute_species_advection_limited_unrolled!(advection, i, w_cell,
+			d_upwind, d_upup, has_upup, upwind_from_left,
+			ξ_i, ξ_upwind, ξ_upup, material, limiter)
 	end
 
 	return nothing
 end
 
-# Dispatch-based unrolled species advection for type stability
-@generated function _compute_species_advection_unrolled!(advection::Matrix{Float64},
-	i::Int, w_cell::Float64, Δz::Float64,
-	ξ_i::NTuple{NC}, ξ_left::NTuple{NC}, ξ_right::NTuple{NC},
-	material::Material{NC}) where NC
+# TVD-limited species advection (compile-time unrolled for type stability)
+@generated function _compute_species_advection_limited_unrolled!(advection::Matrix{Float64},
+	i::Int, w_cell::Float64, d_upwind::Float64, d_upup::Float64, has_upup::Bool,
+	upwind_from_left::Bool,
+	ξ_i::NTuple{NC}, ξ_upwind::NTuple{NC}, ξ_upup::NTuple{NC},
+	material::Material{NC}, limiter::Limiter) where NC
 	exprs = Expr[]
 	for j in 1:NC
 		push!(exprs, quote
 			@inbounds if material.components[$j].phase == GAS
-				# GAS components can move relative to mesh
-				# With v_gas ≈ 0, relative velocity is -w
 				ξ_i_j = ξ_i[$j]
-				ξ_left_j = ξ_left[$j]
-				ξ_right_j = ξ_right[$j]
+				ξ_up_j = ξ_upwind[$j]
+				ξ_upup_j = ξ_upup[$j]
 
-				# Upwind discretization based on mesh velocity direction
-				if w_cell > 0
-					dξ_dz = (ξ_i_j - ξ_left_j) / Δz
-				else
-					dξ_dz = (ξ_right_j - ξ_i_j) / Δz
-				end
+				# TVD-limited gradient in +z direction
+				dξ_dz = _limited_gradient(ξ_i_j, ξ_up_j, ξ_upup_j,
+					d_upwind, d_upup, has_upup, limiter, upwind_from_left)
 				advection[$j, i] = w_cell * dξ_dz
 			else
 				# SOLID and LIQUID components move with the mesh (v = w)
@@ -379,13 +501,13 @@ end
 #     v_rel = v_gas - w_mesh
 #
 # The combined Darcy-Fick flux in ALE frame is:
-#     Jⱼ = ξⱼ × (v_gas - w) - λρ_face × ∂Yⱼ/∂x
-#          ↑ advection (ALE)    ↑ diffusion
+#     Jⱼ = ξⱼ × (v_gas - w) - (λ_face/T_face) × ∂(ξⱼT)/∂x
+#          ↑ advection (ALE)    ↑ diffusion (volume fraction gradient)
 #
 # This properly accounts for:
 # - Gas moving through the porous medium (Darcy flow, v_gas)
 # - Mesh motion (ALE, w)
-# - Diffusive transport (Fick's law)
+# - Diffusive transport (volume fraction gradient)
 # ============================================================================
 
 """
@@ -402,21 +524,21 @@ end
 
 """
 	ale_gas_flux_darcy_fick(v_g::Float64, w::Float64, ξ_L::Float64, ξ_R::Float64,
-							λρ_face::Float64, ρ_L::Float64, ρ_R::Float64,
+							λ_face::Float64, T_L::Float64, T_R::Float64,
 							d_LR::Float64) -> Float64
 
 Compute gas flux at a face in ALE frame using Darcy-Fick formulation [kg/(m²·s)].
 
 Combines advective transport with relative velocity and diffusive transport:
-	J = ξ_upwind × (v_g - w) - λρ_face × (Y_R - Y_L) / d_LR
-		↑ advection (ALE)       ↑ diffusion
+	J = ξ_upwind × (v_g - w) - (λ_face/T_face) × (ξ_R×T_R - ξ_L×T_L) / d_LR
+		↑ advection (ALE)       ↑ diffusion (volume fraction gradient)
 
 # Arguments
 - `v_g`: Darcy gas velocity at face [m/s]
 - `w`: Mesh velocity at face [m/s]
 - `ξ_L, ξ_R`: Mass concentrations on left and right [kg/m³]
-- `λρ_face`: Face transport coefficient [kg/(m·s)]
-- `ρ_L, ρ_R`: Total mixture densities [kg/m³]
+- `λ_face`: Face transport coefficient (harmonic mean of λ) [m²/s]
+- `T_L, T_R`: Temperatures on left and right [K]
 - `d_LR`: Distance between cell centers [m]
 
 # Returns
@@ -424,15 +546,14 @@ Total flux [kg/(m²·s)], positive = flow in +z direction
 """
 @inline function ale_gas_flux_darcy_fick(v_g::Float64, w::Float64,
 	ξ_L::Float64, ξ_R::Float64,
-	λρ_face::Float64, ρ_L::Float64, ρ_R::Float64,
+	λ_face::Float64, T_L::Float64, T_R::Float64,
 	d_LR::Float64)
 	# Relative velocity in ALE frame
 	v_rel = v_g - w
 
-	# Diffusive flux (same as standard Fick)
-	Y_L = ξ_L / ρ_L
-	Y_R = ξ_R / ρ_R
-	J_diff = -λρ_face * (Y_R - Y_L) / d_LR
+	# Diffusive flux (volume fraction / partial pressure gradient)
+	T_face = 0.5 * (T_L + T_R)
+	J_diff = -λ_face * (ξ_R * T_R - ξ_L * T_L) / (T_face * d_LR)
 
 	# Advective flux with first-order upwinding based on relative velocity
 	ξ_upwind = v_rel >= 0.0 ? ξ_L : ξ_R
@@ -452,15 +573,15 @@ Compute gas mass fluxes in ALE frame using full Darcy-Fick formulation.
 This combines:
 - Darcy advective transport (gas flow through porous medium)
 - ALE mesh motion correction
-- Fickian diffusive transport
+- Diffusive transport (volume fraction gradient)
 
 The flux formula is:
-	Jⱼ = ξⱼ × (v_gas - w) - λρ_face × ∂Yⱼ/∂x
+	Jⱼ = ξⱼ × (v_gas - w) - (λ_face/T_face) × ∂(ξⱼT)/∂x
 
 # Arguments
 - `J`: Output matrix J[j,f] = flux of component j at face f [kg/(m²·s)]
 - `mesh`: Mesh with current state
-- `cache`: Property cache (must have λρ_face, ρ computed)
+- `cache`: Property cache (must have λ_face computed)
 - `material`: Material definition
 - `v_gas`: Darcy gas velocity at faces [m/s]
 - `w_node`: Mesh velocity at nodes [m/s]
@@ -493,9 +614,9 @@ function compute_ale_gas_fluxes_darcy_fick!(J::Matrix{Float64}, mesh::Mesh1D{NC}
 
 		# Interior face properties
 		d_LR = abs(mesh.cell_centers[right_id] - mesh.cell_centers[left_id])
-		λρ_face = cache.λρ_face[f]
-		ρ_L = cache.ρ[left_id]
-		ρ_R = cache.ρ[right_id]
+		λ_face = cache.λ_face[f]
+		T_L = mesh.cell_states[left_id].T
+		T_R = mesh.cell_states[right_id].T
 		v_g = v_gas[f]
 
 		# Get concentration tuples for this face
@@ -504,7 +625,7 @@ function compute_ale_gas_fluxes_darcy_fick!(J::Matrix{Float64}, mesh::Mesh1D{NC}
 
 		# Use compile-time unrolled version for type stability
 		_compute_ale_gas_fluxes_darcy_fick_unrolled!(J, f, v_g, w_face,
-			ξ_L, ξ_R, λρ_face, ρ_L, ρ_R, d_LR, material)
+			ξ_L, ξ_R, λ_face, T_L, T_R, d_LR, material)
 	end
 
 	return nothing
@@ -516,7 +637,7 @@ Compile-time unrolled ALE Darcy-Fick flux computation for type stability.
 @generated function _compute_ale_gas_fluxes_darcy_fick_unrolled!(J::Matrix, f::Int,
 	v_g, w_face,
 	ξ_L::NTuple{NC}, ξ_R::NTuple{NC},
-	λρ_face, ρ_L, ρ_R, d_LR,
+	λ_face, T_L, T_R, d_LR,
 	material::Material{NC}) where NC
 
 	exprs = Expr[]
@@ -529,8 +650,9 @@ Compile-time unrolled ALE Darcy-Fick flux computation for type stability.
 				# Relative velocity in ALE frame
 				v_rel = v_g - w_face
 
-				# Diffusive flux: J_diff = -λρ_face × ΔY / d
-				J_diff = -λρ_face * ((ξ_R_j / ρ_R) - (ξ_L_j / ρ_L)) / d_LR
+				# Diffusive flux (volume fraction gradient)
+				T_face = 0.5 * (T_L + T_R)
+				J_diff = -λ_face * (ξ_R_j * T_R - ξ_L_j * T_L) / (T_face * d_LR)
 
 				# Advective flux with relative velocity (first-order upwind)
 				ξ_upwind = v_rel >= 0.0 ? ξ_L_j : ξ_R_j
@@ -571,7 +693,8 @@ function compute_ale_species_advection_darcy!(advection::Matrix{Float64},
 	mesh::Mesh1D{NC},
 	material::Material{NC},
 	v_gas::Vector{Float64},
-	w_node::Vector{Float64}) where NC
+	w_node::Vector{Float64};
+	limiter::Limiter = VANLEER) where NC
 
 	n_cells = length(mesh.cells)
 
@@ -596,8 +719,6 @@ function compute_ale_species_advection_darcy!(advection::Matrix{Float64},
 		# Relative velocity in ALE frame
 		v_rel = v_g_cell - w_cell
 
-		Δz = mesh.cell_volumes[i] / mesh.cross_section_area
-
 		# Skip if relative velocity is essentially zero
 		if abs(v_rel) < 1e-20
 			for j in 1:NC
@@ -606,43 +727,33 @@ function compute_ale_species_advection_darcy!(advection::Matrix{Float64},
 			continue
 		end
 
+		# Compute upwind distances and upwind-upwind neighbor for TVD
+		if v_rel > 0
+			d_upwind = _upwind_gradient_distance(mesh, i, left_id)
+			upup_id = _upwind_upwind_id(mesh, left_id, true)
+			d_upup = upup_id != 0 ?
+				abs(mesh.cell_centers[left_id] - mesh.cell_centers[upup_id]) : d_upwind
+		else
+			d_upwind = _upwind_gradient_distance(mesh, i, right_id)
+			upup_id = _upwind_upwind_id(mesh, right_id, false)
+			d_upup = upup_id != 0 ?
+				abs(mesh.cell_centers[right_id] - mesh.cell_centers[upup_id]) : d_upwind
+		end
+		has_upup = upup_id != 0
+
 		# Get cell state and neighbor states for upwind
 		ξ_i = mesh.cell_states[i].ξ
-		ξ_left_all = left_id == 0 ? ξ_i : mesh.cell_states[left_id].ξ
-		ξ_right_all = right_id == 0 ? ξ_i : mesh.cell_states[right_id].ξ
+		ξ_upwind = v_rel > 0 ?
+			(left_id == 0 ? ξ_i : mesh.cell_states[left_id].ξ) :
+			(right_id == 0 ? ξ_i : mesh.cell_states[right_id].ξ)
+		ξ_upup = has_upup ? mesh.cell_states[upup_id].ξ : ξ_upwind
 
-		# Use unrolled version for type stability
-		_compute_ale_species_advection_darcy_unrolled!(advection, i, v_rel, Δz,
-			ξ_i, ξ_left_all, ξ_right_all, material)
+		# Reuse same TVD-limited unrolled helper as non-Darcy version
+		upwind_from_left = v_rel > 0
+		_compute_species_advection_limited_unrolled!(advection, i, v_rel,
+			d_upwind, d_upup, has_upup, upwind_from_left,
+			ξ_i, ξ_upwind, ξ_upup, material, limiter)
 	end
 
 	return nothing
-end
-
-@generated function _compute_ale_species_advection_darcy_unrolled!(advection::Matrix{Float64},
-	i::Int, v_rel::Float64, Δz::Float64,
-	ξ_i::NTuple{NC}, ξ_left::NTuple{NC}, ξ_right::NTuple{NC},
-	material::Material{NC}) where NC
-	exprs = Expr[]
-	for j in 1:NC
-		push!(exprs, quote
-			@inbounds if material.components[$j].phase == GAS
-				ξ_i_j = ξ_i[$j]
-				ξ_left_j = ξ_left[$j]
-				ξ_right_j = ξ_right[$j]
-
-				# Upwind discretization based on relative velocity direction
-				if v_rel > 0
-					dξ_dz = (ξ_i_j - ξ_left_j) / Δz
-				else
-					dξ_dz = (ξ_right_j - ξ_i_j) / Δz
-				end
-				advection[$j, i] = v_rel * dξ_dz
-			else
-				# SOLID and LIQUID components move with the mesh
-				advection[$j, i] = 0.0
-			end
-		end)
-	end
-	return Expr(:block, exprs...)
 end

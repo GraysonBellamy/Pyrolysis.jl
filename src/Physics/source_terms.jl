@@ -6,11 +6,13 @@ Reference: Design Document Section 4.5
 
 """
 	compute_energy_sources!(Q::Vector{Float64}, mesh::Mesh1D{NC},
-						   rates::Vector{Float64}, heats::Vector{Float64}) where NC
+						   material::Material{NC}, prop_cache) where NC
 
 Compute total energy source term for each cell [W/m³].
 
 Q = -Σᵢ hᵢ rᵢ
+
+Evaluates reactions per-cell using each cell's local state (T, ξ).
 
 Sign convention:
 - h > 0: endothermic (absorbs heat) → Q < 0 (cools)
@@ -18,15 +20,25 @@ Sign convention:
 
 # Arguments
 - `Q`: Output vector of heat sources [W/m³]
-- `mesh`: Mesh (for sizing)
-- `rates`: Reaction rates [kg/(m³·s)]
-- `heats`: Heats of reaction [J/kg]
+- `mesh`: Mesh with current cell states
+- `material`: Material definition with reactions
+- `prop_cache`: Property cache (unused, for API consistency)
+
+# Note
+For production use, prefer the inline per-cell evaluation in `compute_rhs!`
+which avoids allocating temporary rate/heat vectors. This function is provided
+for testing and post-processing convenience.
 """
 function compute_energy_sources!(Q::Vector{Float64}, mesh::Mesh1D{NC},
-	rates::Vector{Float64}, heats::Vector{Float64}) where NC
+	material::Material{NC}, prop_cache = nothing) where NC
 	n_cells_val = length(mesh.cells)
+	NR = n_reactions(material)
+	rates = zeros(NR)
+	heats = zeros(NR)
 
 	@inbounds for i in 1:n_cells_val
+		state = mesh.cell_states[i]
+		evaluate_reactions!(rates, heats, state.ξ, state.T, material)
 		Q[i] = reaction_heat_source(rates, heats)
 	end
 

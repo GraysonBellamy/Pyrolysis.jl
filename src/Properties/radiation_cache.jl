@@ -87,7 +87,7 @@ mutable struct RadiationCache
 
 	# Additional fields for P1 integration (Week 2)
 	α::Vector{Float64}           # Volumetric absorption coefficient [1/m]
-	div_q_rad::Vector{Float64}   # Divergence of radiative flux [W/m³]
+	S_rad::Vector{Float64}       # Net radiation source α(G - 4σT⁴) [W/m³], positive = heating
 
 	# Pre-allocated work arrays for Newton iteration (avoid allocations in hot loop)
 	newton_R::Vector{Float64}    # Residual vector
@@ -119,7 +119,7 @@ function RadiationCache(n_cells::Int)
 		zeros(n_cells),      # Q_emission
 		zeros(n_cells),      # Q_absorption
 		zeros(n_cells),      # α
-		zeros(n_cells),      # div_q_rad
+		zeros(n_cells),      # S_rad
 		zeros(n_cells),      # newton_R
 		zeros(n_cells),      # newton_ΔG
 		zeros(n_cells - 1),  # newton_dl
@@ -158,7 +158,7 @@ function resize_radiation_cache!(cache::RadiationCache, n_cells::Int)
 	resize!(cache.Q_emission, n_cells)
 	resize!(cache.Q_absorption, n_cells)
 	resize!(cache.α, n_cells)
-	resize!(cache.div_q_rad, n_cells)
+	resize!(cache.S_rad, n_cells)
 	resize!(cache.newton_R, n_cells)
 	resize!(cache.newton_ΔG, n_cells)
 	resize!(cache.newton_dl, n_cells - 1)

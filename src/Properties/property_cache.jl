@@ -21,7 +21,7 @@ Pre-allocated storage for evaluated material properties.
 
 ## Per-face properties
 - `k_face::Vector{Float64}`: Face-centered conductivity [W/(m·K)]
-- `λρ_face::Vector{Float64}`: Face-centered gas transport coefficient λ·ρ [kg/(m·s)]
+- `λ_face::Vector{Float64}`: Face-centered gas transfer coefficient [m²/s]
 
 ## Darcy flow properties (optional, for pressure-driven gas transport)
 - `P::Vector{Float64}`: Pressure field [Pa]
@@ -43,7 +43,7 @@ mutable struct PropertyCache
 
 	# Per-face properties (for flux computation)
 	k_face::Vector{Float64}
-	λρ_face::Vector{Float64}
+	λ_face::Vector{Float64}
 
 	# Darcy flow properties (for pressure-driven gas transport)
 	P::Vector{Float64}           # Pressure field [Pa]
@@ -53,6 +53,7 @@ mutable struct PropertyCache
 	v_gas::Vector{Float64}       # Darcy velocity at faces [m/s]
 	∇P::Vector{Float64}          # Pressure gradient at faces [Pa/m]
 end
+
 
 """
 	PropertyCache(n_cells::Int, n_faces::Int)
@@ -69,7 +70,7 @@ function PropertyCache(n_cells::Int, n_faces::Int)
 		zeros(n_cells),  # ε
 		zeros(n_cells),  # α
 		zeros(n_faces),  # k_face
-		zeros(n_faces),  # λρ_face
+		zeros(n_faces),  # λ_face
 		# Darcy flow arrays
 		zeros(n_cells),  # P
 		zeros(n_cells),  # φ
@@ -101,7 +102,7 @@ function resize_cache!(cache::PropertyCache, n_cells::Int, n_faces::Int)
 	resize!(cache.ε, n_cells)
 	resize!(cache.α, n_cells)
 	resize!(cache.k_face, n_faces)
-	resize!(cache.λρ_face, n_faces)
+	resize!(cache.λ_face, n_faces)
 	# Darcy flow arrays
 	resize!(cache.P, n_cells)
 	resize!(cache.φ, n_cells)
@@ -147,12 +148,10 @@ function update_properties!(cache::PropertyCache, mesh::Mesh1D{NC}, material::Ma
 
 	# Compute face-centered properties using distance-weighted harmonic mean
 	# - k_face: harmonic mean of conductivity (for heat flux)
-	# - λρ_face: harmonic mean of λ·ρ product (for gas flux)
+	# - λ_face: harmonic mean of λ (for gas flux with volume fraction gradient)
 	#
 	# The distance-weighted harmonic mean gives: φ_face = (d_L + d_R) / (d_L/φ_L + d_R/φ_R)
 	# This is the correct resistance-in-series interpolation for non-uniform meshes.
-	# The λρ product formulation ensures physically correct flux at interfaces
-	# with sharp property jumps (e.g., solid/gas pore boundaries).
 	@inbounds for f in 1:n_faces_val
 		face = mesh.faces[f]
 		left_id, right_id = face.cell_ids
@@ -161,11 +160,11 @@ function update_properties!(cache::PropertyCache, mesh::Mesh1D{NC}, material::Ma
 		if left_id == 0
 			# Left boundary: use right cell value
 			cache.k_face[f] = cache.k[right_id]
-			cache.λρ_face[f] = cache.λ[right_id] * cache.ρ[right_id]
+			cache.λ_face[f] = cache.λ[right_id]
 		elseif right_id == 0
 			# Right boundary: use left cell value
 			cache.k_face[f] = cache.k[left_id]
-			cache.λρ_face[f] = cache.λ[left_id] * cache.ρ[left_id]
+			cache.λ_face[f] = cache.λ[left_id]
 		else
 			# Interior face: distance-weighted harmonic mean for resistance-in-series
 			# Compute distances from cell centers to face
@@ -174,12 +173,9 @@ function update_properties!(cache::PropertyCache, mesh::Mesh1D{NC}, material::Ma
 
 			cache.k_face[f] = harmonic_mean_weighted(
 				cache.k[left_id], cache.k[right_id], d_L, d_R)
-			# Distance-weighted harmonic mean of λ·ρ product for gas transport
-			cache.λρ_face[f] = harmonic_mean_product_weighted(
-				cache.λ[left_id], cache.ρ[left_id],
-				cache.λ[right_id], cache.ρ[right_id],
-				d_L, d_R,
-			)
+			# Distance-weighted harmonic mean of λ for gas transport
+			cache.λ_face[f] = harmonic_mean_weighted(
+				cache.λ[left_id], cache.λ[right_id], d_L, d_R)
 		end
 	end
 

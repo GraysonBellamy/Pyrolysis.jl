@@ -4,42 +4,40 @@ Gas transport (Darcy-Fick).
 Reference: Design Document Section 2.4, 4.4
 Reference: ThermaKin2Ds Reference Manual, Section 1.2
 
-ThermaKin formulation:
-	J_g = -λ ρ ∂(ξ_g/ρ)/∂x = -λ ρ ∂Y_g/∂x
+Volume fraction gradient formulation:
+	J_g = -ρ_gas × λ × ∂(ξ_g/ρ_gas)/∂x = -(λ/T) × ∂(ξT)/∂x
 
-This is flux driven by mass fraction gradient (thermodynamically consistent
-for porous media transport), not concentration gradient.
+This is the volume fraction gradient formulation (equivalently partial pressure
+gradient for ideal gas). It expands to J = -λ × [∂ξ/∂x + (ξ/T)×∂T/∂x].
 
-At material interfaces, flux continuity requires the harmonic mean of the (λ·ρ)
-product, not separate interpolation of λ and ρ. This is computed as λρ_face
-in the property cache.
+At material interfaces, flux continuity requires the harmonic mean of λ.
+This is computed as λ_face in the property cache.
 """
 
 """
-	gas_flux(λρ_face::Float64, ξ_L::Float64, ξ_R::Float64, 
-			 ρ_L::Float64, ρ_R::Float64, d_LR::Float64) -> Float64
+	gas_flux(λ_face::Float64, ξ_L::Float64, ξ_R::Float64,
+			 T_L::Float64, T_R::Float64, d_LR::Float64) -> Float64
 
 Compute gas mass flux at a face [kg/(m²·s)].
 
-Uses rigorous formulation with harmonic mean of λ·ρ product:
-	J = -λρ_face (Y_R - Y_L) / d_LR
+Uses the volume fraction gradient (partial pressure gradient) formulation:
+	J = -(λ_face / T_face) × (ξ_R × T_R - ξ_L × T_L) / d_LR
 
-where Y = ξ/ρ is mass fraction and λρ_face is the harmonic mean of (λ·ρ).
-This ensures physically correct flux at interfaces with sharp property jumps.
+where T_face = 0.5×(T_L + T_R) and λ_face is the harmonic mean of λ.
+This is equivalent to J = -ρ_gas × λ × ∂(ξ/ρ_gas)/∂x, the volume fraction
+gradient formulation.
 
 # Arguments
-- `λρ_face`: Face transport coefficient (harmonic mean of λ·ρ) [kg/(m·s)]
+- `λ_face`: Face transport coefficient (harmonic mean of λ) [m²/s]
 - `ξ_L, ξ_R`: Mass concentrations on left and right [kg/m³]
-- `ρ_L, ρ_R`: Total mixture densities on left and right [kg/m³]
+- `T_L, T_R`: Temperatures on left and right [K]
 - `d_LR`: Distance between cell centers [m]
 """
-@inline function gas_flux(λρ_face::Float64, ξ_L::Float64, ξ_R::Float64,
-	ρ_L::Float64, ρ_R::Float64, d_LR::Float64)
-	# Rigorous formulation: J = -λρ_face ∂Y/∂x
-	# where λρ_face = harmonic_mean(λ_L·ρ_L, λ_R·ρ_R)
-	Y_L = ξ_L / ρ_L
-	Y_R = ξ_R / ρ_R
-	return -λρ_face * (Y_R - Y_L) / d_LR
+@inline function gas_flux(λ_face::Float64, ξ_L::Float64, ξ_R::Float64,
+	T_L::Float64, T_R::Float64, d_LR::Float64)
+	# Volume fraction gradient: J = -(λ/T_face) × ∂(ξT)/∂x
+	T_face = 0.5 * (T_L + T_R)
+	return -λ_face * (ξ_R * T_R - ξ_L * T_L) / (T_face * d_LR)
 end
 
 # ============================================================================
@@ -48,31 +46,30 @@ end
 
 """
 	gas_flux_darcy_fick(v_g::Float64, ξ_L::Float64, ξ_R::Float64,
-						λρ_face::Float64, ρ_L::Float64, ρ_R::Float64, 
+						λ_face::Float64, T_L::Float64, T_R::Float64,
 						d_LR::Float64) -> Float64
 
 Compute gas mass flux at a face using full Darcy-Fick formulation [kg/(m²·s)].
 
 Combines advective and diffusive transport:
-	J = ξ_upwind × v_g - λρ_face × (Y_R - Y_L) / d_LR
-		↑ advection      ↑ diffusion
+	J = ξ_upwind × v_g - (λ_face/T_face) × (ξ_R×T_R - ξ_L×T_L) / d_LR
+		↑ advection       ↑ diffusion (volume fraction gradient)
 
 # Arguments
 - `v_g`: Darcy gas velocity at face [m/s] (positive = flow in +z direction)
 - `ξ_L, ξ_R`: Mass concentrations on left and right [kg/m³]
-- `λρ_face`: Face transport coefficient (harmonic mean of λ·ρ) [kg/(m·s)]
-- `ρ_L, ρ_R`: Total mixture densities on left and right [kg/m³]
+- `λ_face`: Face transport coefficient (harmonic mean of λ) [m²/s]
+- `T_L, T_R`: Temperatures on left and right [K]
 - `d_LR`: Distance between cell centers [m]
 
 # Returns
 Total flux [kg/(m²·s)], positive = flow in +z direction
 """
 @inline function gas_flux_darcy_fick(v_g::Float64, ξ_L::Float64, ξ_R::Float64,
-	λρ_face::Float64, ρ_L::Float64, ρ_R::Float64, d_LR::Float64)
-	# Diffusive flux (same as gas_flux)
-	Y_L = ξ_L / ρ_L
-	Y_R = ξ_R / ρ_R
-	J_diff = -λρ_face * (Y_R - Y_L) / d_LR
+	λ_face::Float64, T_L::Float64, T_R::Float64, d_LR::Float64)
+	# Diffusive flux (volume fraction / partial pressure gradient)
+	T_face = 0.5 * (T_L + T_R)
+	J_diff = -λ_face * (ξ_R * T_R - ξ_L * T_L) / (T_face * d_LR)
 
 	# Advective flux with first-order upwinding
 	ξ_upwind = v_g >= 0.0 ? ξ_L : ξ_R
@@ -141,9 +138,9 @@ function compute_gas_fluxes!(J::Matrix{Float64}, mesh::Mesh1D{NC},
 
 		# Interior face
 		d_LR = abs(mesh.cell_centers[right_id] - mesh.cell_centers[left_id])
-		λρ_face = cache.λρ_face[f]
-		ρ_L = cache.ρ[left_id]
-		ρ_R = cache.ρ[right_id]
+		λ_face = cache.λ_face[f]
+		T_L = mesh.cell_states[left_id].T
+		T_R = mesh.cell_states[right_id].T
 
 		# Get concentration tuples for this face
 		ξ_L = mesh.cell_states[left_id].ξ
@@ -151,9 +148,9 @@ function compute_gas_fluxes!(J::Matrix{Float64}, mesh::Mesh1D{NC},
 
 		# Use compile-time unrolled version for type stability
 		if use_species_scaling
-			compute_gas_fluxes_species_scaled_unrolled!(J, f, ξ_L, ξ_R, λρ_face, ρ_L, ρ_R, d_LR, material)
+			compute_gas_fluxes_species_scaled_unrolled!(J, f, ξ_L, ξ_R, λ_face, T_L, T_R, d_LR, material)
 		else
-			compute_gas_fluxes_unrolled!(J, f, ξ_L, ξ_R, λρ_face, ρ_L, ρ_R, d_LR, material)
+			compute_gas_fluxes_unrolled!(J, f, ξ_L, ξ_R, λ_face, T_L, T_R, d_LR, material)
 		end
 	end
 
@@ -168,13 +165,13 @@ end
 
 Compute gas mass fluxes at all faces using full Darcy-Fick formulation.
 
-This combines advective transport (Darcy flow) with diffusive transport (Fick's law):
-	Jⱼ = ξⱼ·v_g - λρ_face·∂Yⱼ/∂x
+This combines advective transport (Darcy flow) with diffusive transport (volume fraction gradient):
+	Jⱼ = ξⱼ·v_g - (λ_face/T_face)·∂(ξⱼT)/∂x
 
 # Arguments
 - `J`: Output matrix J[j,f] = flux of component j at face f [kg/(m²·s)]
 - `mesh`: Mesh with current state
-- `cache`: Property cache (must have λρ_face, ρ computed)
+- `cache`: Property cache (must have λ_face computed)
 - `material`: Material definition
 - `v_gas`: Darcy gas velocity at faces [m/s] (from compute_darcy_velocity!)
 - `use_species_scaling`: If true, scale diffusive flux by √(M_ref/Mⱼ) for each species
@@ -211,9 +208,9 @@ function compute_gas_fluxes_darcy_fick!(J::Matrix{Float64}, mesh::Mesh1D{NC},
 
 		# Interior face
 		d_LR = abs(mesh.cell_centers[right_id] - mesh.cell_centers[left_id])
-		λρ_face = cache.λρ_face[f]
-		ρ_L = cache.ρ[left_id]
-		ρ_R = cache.ρ[right_id]
+		λ_face = cache.λ_face[f]
+		T_L = mesh.cell_states[left_id].T
+		T_R = mesh.cell_states[right_id].T
 		v_g = v_gas[f]
 
 		# Get concentration tuples for this face
@@ -223,10 +220,10 @@ function compute_gas_fluxes_darcy_fick!(J::Matrix{Float64}, mesh::Mesh1D{NC},
 		# Use compile-time unrolled version for type stability
 		if use_species_scaling
 			compute_gas_fluxes_darcy_fick_species_scaled_unrolled!(J, f, v_g, ξ_L, ξ_R,
-				λρ_face, ρ_L, ρ_R, d_LR, material)
+				λ_face, T_L, T_R, d_LR, material)
 		else
 			compute_gas_fluxes_darcy_fick_unrolled!(J, f, v_g, ξ_L, ξ_R,
-				λρ_face, ρ_L, ρ_R, d_LR, material)
+				λ_face, T_L, T_R, d_LR, material)
 		end
 	end
 

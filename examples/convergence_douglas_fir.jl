@@ -15,19 +15,28 @@ Outputs:
   - Solve time vs grid size (speedup chart)
 
 Usage:
-  julia convergence_douglas_fir.jl
+  julia convergence_douglas_fir.jl                  # sequential (1 worker)
+  julia -p auto convergence_douglas_fir.jl          # parallel (auto-detect cores)
+  julia -p 4 convergence_douglas_fir.jl             # parallel (4 workers)
 """
 
-using Pyrolysis
-using LinearSolve
-using KLU
-using OrdinaryDiffEq
-using LinearAlgebra
+using Distributed
+
+# Load packages on all workers
+@everywhere begin
+	using Pyrolysis
+	using LinearSolve
+	using KLU
+	using OrdinaryDiffEq
+	using LinearAlgebra
+	using LinearSolve: KLUFactorization
+end
+
+# Main process only
 using Statistics
 using Printf
 using Plots
 using DelimitedFiles
-using LinearSolve: KLUFactorization
 
 # ============================================================================
 # Grid sizes to test (finest first = reference)
@@ -37,25 +46,45 @@ const GRID_SIZES = [480, 240, 120, 60, 30, 15]
 const RESULTS_DIR = joinpath(@__DIR__, "convergence_results")
 
 # ============================================================================
-# Build and solve at a given grid resolution
+# Build and solve at a given grid resolution (available on all workers)
 # ============================================================================
 
-function build_and_solve(n_cells::Int)
-	# --- Temperature-dependent heat capacities ---
+@everywhere function build_and_solve(n_cells::Int)
+	# --- Temperature-dependent heat capacities (nominal from sensitivity analysis) ---
+	# Virgin DF: piecewise linear (3 segments) from HFM (low-T) + STA/DSC (high-T)
+	df_cp_a1 = 4.133836600273531   # slope, T ≤ 323K (HFM)
+	df_cp_b1 = -18.01630709338176  # intercept, T ≤ 323K
+	df_cp_a3 = 9.136799235573225   # slope, T > 425K (STA/DSC)
+	df_cp_b3 = -2139.3044552435705 # intercept, T > 425K
 	df_cp = CallableProperty(T -> begin
-		if T <= 323
-			-53.05 + 4.245 * T
-		elseif T <= 425
-			-31.03 + 4.177 * T
+		if T <= 323.0
+			df_cp_b1 + df_cp_a1 * T
+		elseif T <= 425.0
+			cp_low = df_cp_b1 + df_cp_a1 * 323.0
+			cp_high = df_cp_b3 + df_cp_a3 * 425.0
+			cp_low + (cp_high - cp_low) * (T - 323.0) / 102.0
 		else
-			-2131.0 + 9.119 * T
+			df_cp_b3 + df_cp_a3 * T
 		end
 	end)
-	df_int1_cp = CallableProperty(T -> -1983.0 + 8.7 * T)
-	df_int2_cp = CallableProperty(T -> -1419.0 + 7.0 * T)
-	df_int3_cp = CallableProperty(T -> 1.0 + 2.8 * T)
-	df_int4_cp = CallableProperty(T -> 176.0 + 2.3 * T)
-	char_cp_func = CallableProperty(T -> 347.2 + 1.784 * T)
+
+	# Char cp (linear, from independent char STA measurement)
+	char_cp_a = 1.8372509265710314
+	char_cp_b = 312.4273785167445
+	char_cp_func = CallableProperty(T -> char_cp_b + char_cp_a * T)
+
+	# Intermediate cp: cumulative mass-loss interpolation between virgin and char
+	# α = (1 - cumulative_solid_yield) / (1 - final_char_yield)
+	# final_char_yield = 0.95 × 0.80 × 0.37 × 0.79 × 0.74
+	final_char_yield = 0.95 * 0.80 * 0.37 * 0.79 * 0.74
+	α_int1 = (1 - 0.95) / (1 - final_char_yield)                      # ≈ 0.060
+	α_int2 = (1 - 0.95 * 0.80) / (1 - final_char_yield)              # ≈ 0.287
+	α_int3 = (1 - 0.95 * 0.80 * 0.37) / (1 - final_char_yield)      # ≈ 0.860
+	α_int4 = (1 - 0.95 * 0.80 * 0.37 * 0.79) / (1 - final_char_yield)  # ≈ 0.931
+	df_int1_cp = CallableProperty(T -> (1 - α_int1) * df_cp(T) + α_int1 * char_cp_func(T))
+	df_int2_cp = CallableProperty(T -> (1 - α_int2) * df_cp(T) + α_int2 * char_cp_func(T))
+	df_int3_cp = CallableProperty(T -> (1 - α_int3) * df_cp(T) + α_int3 * char_cp_func(T))
+	df_int4_cp = CallableProperty(T -> (1 - α_int4) * df_cp(T) + α_int4 * char_cp_func(T))
 
 	# Moisture cp: Shomate equation (Chase, 1998)
 	moisture_cp = CallableProperty(T -> begin
@@ -65,25 +94,31 @@ function build_and_solve(n_cells::Int)
 		(A + B * t + C * t^2 + D * t^3 + E / t^2) / M
 	end)
 
-	# Water vapor cp
-	water_vapor_cp = CallableProperty(T -> 2.4e3 - 1.6 * T + 2.0e-3 * T^2)
+	# Water vapor cp (NIST Shomate fit, matches sensitivity analysis)
+	water_vapor_cp = CallableProperty(T -> 1716.7 + 0.4154 * T + 1.530e-4 * T^2)
 
-	# Heat of sorption (state-dependent)
+	# Heat of sorption (state-dependent) — nominal CR2 fit from sensitivity analysis
 	moisture_idx = 7
 	ρ_dry_basis = 530.0
+	hos_a = 2450.420909987441    # kJ/kg - asymptotic baseline
+	hos_b = 875.6441221735336    # kJ/kg - exponential amplitude
+	hos_c = 0.1121684273316275   # 1/% - exponential decay rate
 	hos = StateDependentProperty((T, ξ) -> begin
 		MC = 100.0 * ξ[moisture_idx] / ρ_dry_basis
-		return (2280.0 + 787.0 * exp(-0.114 * MC)) * 1e3
+		return (hos_a + hos_b * exp(-hos_c * MC)) * 1e3
 	end)
 
-	# Gas transfer and permeability
-	λ_wood = 1.0e-6
-	λ_char = 1.0e-5
-	λ_gas  = 1.0e-5
-	κ_virgin = 2.3e-15
-	κ_char = 1.0e-14
+	# Gas transfer and permeability (physically grounded values)
+	# λ_solid: D_free × ε/τ; λ_gas: free molecular diffusion at ~500K
+	# κ: intrinsic matrix permeability for Darcy flow
+	λ_wood = 5.0e-7     # m²/s - virgin wood (ε~0.05, τ~5)
+	λ_char = 1.0e-5     # m²/s - porous char (ε~0.7, τ~2)
+	λ_gas  = 3.0e-5     # m²/s - reference free diffusion (M~29, ~500K)
+	κ_virgin = 1.0e-15  # m² - tight virgin wood
+	κ_char = 1.0e-12    # m² - open char pore network
 
 	# --- Material definition ---
+	# Thermodynamic properties (cp, h_rxn) use nominal values from sensitivity analysis
 	material = Material(
 		name = :DouglasFir,
 		components = (
@@ -92,40 +127,41 @@ function build_and_solve(n_cells::Int)
 				ε = 0.81, α = 0.0, λ = λ_wood, κ = κ_virgin),
 			SolidComponent(:DF_int1,
 				ρ = 507.2, c = df_int1_cp, k = 0.292951,
-				ε = 0.790965, α = 0.0, λ = λ_wood * 1.5, κ = 2.7e-15),
+				ε = 0.790965, α = 0.0, λ = λ_wood * 2.0, κ = κ_virgin * 3.0),
 			SolidComponent(:DF_int2,
 				ρ = 419.8, c = df_int2_cp, k = 0.329938,
-				ε = 0.786207, α = 0.0, λ = λ_wood * 3.0, κ = 3.1e-15),
+				ε = 0.786207, α = 0.0, λ = λ_wood * 5.0, κ = κ_virgin * 10.0),
 			SolidComponent(:DF_int3,
 				ρ = 203.2, c = df_int3_cp, k = 0.644833,
-				ε = 0.745694, α = 0.0, λ = λ_wood * 6.0, κ = 3.6e-15),
+				ε = 0.745694, α = 0.0, λ = λ_char * 0.3, κ = κ_char * 0.01),
 			SolidComponent(:DF_int4,
 				ρ = 176.6, c = df_int4_cp, k = 0.777700,
-				ε = 0.728600, α = 0.0, λ = λ_char * 0.8, κ = 8.3e-15),
+				ε = 0.728600, α = 0.0, λ = λ_char * 0.7, κ = κ_char * 0.1),
 			SolidComponent(:Char,
 				ρ = 150.0, c = char_cp_func, k = 1.0,
 				ε = 0.70, α = 0.0, λ = λ_char, κ = κ_char),
 			LiquidComponent(:MOISTURE,
 				ρ = 1e6, c = moisture_cp, k = 0.145,
 				ε = 0.81, α = 0.0, κ = 0.0),
-			GaseousComponent(:DF_gas1, M = 0.060, c = 2000.0, k = 0.03, λ = λ_gas * 0.85),
-			GaseousComponent(:DF_gas2, M = 0.044, c = 1800.0, k = 0.03, λ = λ_gas * 1.0),
-			GaseousComponent(:DF_gas3, M = 0.070, c = 2200.0, k = 0.025, λ = λ_gas * 0.6),
-			GaseousComponent(:DF_gas4, M = 0.030, c = 1600.0, k = 0.035, λ = λ_gas * 1.3),
-			GaseousComponent(:DF_gas5, M = 0.028, c = 1500.0, k = 0.035, λ = λ_gas * 1.4),
-			GaseousComponent(:WATER_VAPOR, M = 0.018, c = water_vapor_cp, k = 0.04, λ = λ_gas * 1.6),
+			GaseousComponent(:DF_gas1, M = 0.060, c = 1400.0, k = 0.020, λ = λ_gas * sqrt(0.029/0.060)),
+			GaseousComponent(:DF_gas2, M = 0.070, c = 1400.0, k = 0.020, λ = λ_gas * sqrt(0.029/0.070)),
+			GaseousComponent(:DF_gas3, M = 0.110, c = 1300.0, k = 0.018, λ = λ_gas * sqrt(0.029/0.110)),
+			GaseousComponent(:DF_gas4, M = 0.070, c = 1500.0, k = 0.020, λ = λ_gas * sqrt(0.029/0.070)),
+			GaseousComponent(:DF_gas5, M = 0.050, c = 1600.0, k = 0.025, λ = λ_gas * sqrt(0.029/0.050)),
+			GaseousComponent(:WATER_VAPOR, M = 0.018, c = water_vapor_cp, k = 0.025, λ = λ_gas * sqrt(0.029/0.018)),
 		),
 		reactions = (
+			# Heats of reaction: nominal values from sensitivity analysis calibration
 			Reaction(:pyrolysis_step1, 1 => (2, 8),
-				A = 74816.95, E = 71.59e3, h = -19150.0, n = 1.0, yields = (0.95, 0.05)),
+				A = 74816.95, E = 71.59e3, h = -19200.66288032251, n = 1.0, yields = (0.95, 0.05)),
 			Reaction(:pyrolysis_step2, 2 => (3, 9),
-				A = 23550492839.0, E = 140.9e3, h = -5570.0, n = 1.0, yields = (0.80, 0.20)),
+				A = 23550492839.0, E = 140.9e3, h = -5263.201466602739, n = 1.0, yields = (0.80, 0.20)),
 			Reaction(:pyrolysis_step3, 3 => (4, 10),
-				A = 7.744618e12, E = 181.0e3, h = 266700.0, n = 1.0, yields = (0.37, 0.63)),
+				A = 7.744618e12, E = 181.0e3, h = 264424.79037373835, n = 1.0, yields = (0.37, 0.63)),
 			Reaction(:pyrolysis_step4, 4 => (5, 11),
-				A = 103276.14, E = 98.94e3, h = -219640.0, n = 1.0, yields = (0.79, 0.21)),
+				A = 103276.14, E = 98.94e3, h = -217151.69043762444, n = 1.0, yields = (0.79, 0.21)),
 			Reaction(:pyrolysis_step5, 5 => (6, 12),
-				A = 6.397348, E = 56.01e3, h = -12380.0, n = 1.0, yields = (0.74, 0.26)),
+				A = 6.397348, E = 56.01e3, h = -326.40885469229025, n = 1.0, yields = (0.74, 0.26)),
 			Reaction(:moisture_evaporation, 7 => 13,
 				A = 2.997e5, E = 5.0e4, h = hos, n = 1.0),
 		),
@@ -301,32 +337,52 @@ end
 # ============================================================================
 
 function main()
+	n_workers = nworkers()
 	println("\n" * "="^70)
 	println("  Grid Convergence Study — Douglas Fir Cone Calorimeter")
 	println("="^70)
 	println("  Grid sizes: ", join(GRID_SIZES, ", "), " cells")
 	println("  Sample thickness: 12 mm")
 	println("  Cell sizes: ", join([@sprintf("%.3f", 12.0 / n) for n in GRID_SIZES], ", "), " mm")
+	println("  Workers: $n_workers (use `julia -p N` to run in parallel)")
 	println("="^70 * "\n")
 
 	mkpath(RESULTS_DIR)
 
-	results = ConvergenceResult[]
+	if n_workers > 1
+		# --- Parallel execution via pmap ---
+		println("  Running $(length(GRID_SIZES)) grid sizes in parallel on $n_workers workers...")
+		t_wall_start = time()
 
-	for (i, n) in enumerate(GRID_SIZES)
-		cell_mm = 12.0 / n
-		println(@sprintf("  [%d/%d] Running n_cells = %d (Δx = %.3f mm)...",
-			i, length(GRID_SIZES), n, cell_mm))
+		solutions = pmap(build_and_solve, GRID_SIZES)
 
-		t_start = time()
-		sol = build_and_solve(n)
-		elapsed = time() - t_start
+		t_wall = time() - t_wall_start
+		println(@sprintf("  All solves completed in %.1f s wall time\n", t_wall))
 
-		r = extract_result(sol, n)
-		push!(results, r)
+		# Extract results in original order
+		results = [extract_result(sol, n) for (sol, n) in zip(solutions, GRID_SIZES)]
+		for r in results
+			println(@sprintf("    n_cells = %3d  [%s]  peak MLR = %.4f g/(m²·s)  solve = %.1f s",
+				r.n_cells, r.retcode, r.peak_mlr * 1000, r.solve_time))
+		end
+	else
+		# --- Sequential execution ---
+		results = ConvergenceResult[]
+		for (i, n) in enumerate(GRID_SIZES)
+			cell_mm = 12.0 / n
+			println(@sprintf("  [%d/%d] Running n_cells = %d (Δx = %.3f mm)...",
+				i, length(GRID_SIZES), n, cell_mm))
 
-		println(@sprintf("         Done in %.1f s  [%s]  peak MLR = %.4f g/(m²·s)",
-			elapsed, r.retcode, r.peak_mlr * 1000))
+			t_start = time()
+			sol = build_and_solve(n)
+			elapsed = time() - t_start
+
+			r = extract_result(sol, n)
+			push!(results, r)
+
+			println(@sprintf("         Done in %.1f s  [%s]  peak MLR = %.4f g/(m²·s)",
+				elapsed, r.retcode, r.peak_mlr * 1000))
+		end
 	end
 
 	# Reference = finest grid

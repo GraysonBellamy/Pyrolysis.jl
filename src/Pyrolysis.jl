@@ -112,6 +112,7 @@ export AbstractBoundaryCondition, AbstractThermalBC, AbstractMassBC, AbstractMes
 
 # Radiation model exports
 export RadiationModel, NO_RADIATION, SURFACE_ABSORPTION, BEER_LAMBERT, P1_QUASI_STEADY
+export Limiter, MINMOD, VANLEER, SUPERBEE, NONE, CENTRAL
 export requires_absorption_coefficients, has_nonlocal_jacobian_coupling, requires_radiation_cache
 export AbstractRadiationBC, MarshakRadiationBC, ReflectiveRadiationBC, DirichletRadiationBC
 export RadiationBCSet, get_radiation_bc, default_radiation_bcs

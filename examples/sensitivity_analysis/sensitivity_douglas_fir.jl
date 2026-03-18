@@ -469,11 +469,13 @@ end
 		end)
 
 		# --- Gas transfer coefficients and permeability (FIXED) ---
-		λ_wood   = 1.0e-6
-		λ_char   = 1.0e-5
-		λ_gas    = 1.0e-5
-		κ_virgin = 2.3e-15
-		κ_char   = 1.0e-14
+		# λ_solid: D_free × ε/τ; λ_gas: free molecular diffusion at ~500K
+		# κ: intrinsic matrix permeability for Darcy flow
+		λ_wood   = 5.0e-7     # m²/s - virgin wood (ε~0.05, τ~5)
+		λ_char   = 1.0e-5     # m²/s - porous char (ε~0.7, τ~2)
+		λ_gas    = 3.0e-5     # m²/s - reference free diffusion (M~29, ~500K)
+		κ_virgin = 1.0e-15    # m² - tight virgin wood
+		κ_char   = 1.0e-12    # m² - open char pore network
 
 		# --- Build material ---
 		material = Material(
@@ -486,19 +488,19 @@ end
 				# 2. Intermediate 1
 				SolidComponent(:DF_int1,
 					ρ = 507.2, c = int1_cp, k = 0.292951,
-					ε = 0.790965, α = 0.0, λ = λ_wood * 1.5, κ = 2.7e-15),
+					ε = 0.790965, α = 0.0, λ = λ_wood * 2.0, κ = κ_virgin * 3.0),
 				# 3. Intermediate 2
 				SolidComponent(:DF_int2,
 					ρ = 419.8, c = int2_cp, k = 0.329938,
-					ε = 0.786207, α = 0.0, λ = λ_wood * 3.0, κ = 3.1e-15),
+					ε = 0.786207, α = 0.0, λ = λ_wood * 5.0, κ = κ_virgin * 10.0),
 				# 4. Intermediate 3
 				SolidComponent(:DF_int3,
 					ρ = 203.2, c = int3_cp, k = 0.644833,
-					ε = 0.745694, α = 0.0, λ = λ_wood * 6.0, κ = 3.6e-15),
+					ε = 0.745694, α = 0.0, λ = λ_char * 0.3, κ = κ_char * 0.01),
 				# 5. Intermediate 4
 				SolidComponent(:DF_int4,
 					ρ = 176.6, c = int4_cp, k = 0.777700,
-					ε = 0.728600, α = 0.0, λ = λ_char * 0.8, κ = 8.3e-15),
+					ε = 0.728600, α = 0.0, λ = λ_char * 0.7, κ = κ_char * 0.1),
 				# 6. Char
 				SolidComponent(:Char,
 					ρ = 150.0, c = char_cp_func, k = 1.0,
@@ -507,14 +509,14 @@ end
 				LiquidComponent(:MOISTURE,
 					ρ = 1e6, c = moisture_cp, k = 0.145,
 					ε = 0.81, α = 0.0, κ = 0.0),
-				# 8-12. Gas products
-				GaseousComponent(:DF_gas1, M = 0.060, c = 1400.0, k = 0.020, λ = λ_gas * 0.85),
-				GaseousComponent(:DF_gas2, M = 0.070, c = 1400.0, k = 0.020, λ = λ_gas * 0.80),
-				GaseousComponent(:DF_gas3, M = 0.110, c = 1300.0, k = 0.018, λ = λ_gas * 0.6),
-				GaseousComponent(:DF_gas4, M = 0.070, c = 1500.0, k = 0.020, λ = λ_gas * 0.80),
-				GaseousComponent(:DF_gas5, M = 0.050, c = 1600.0, k = 0.025, λ = λ_gas * 1.0),
+				# 8-12. Gas products (λ scaled by √(M_ref/M) from kinetic theory)
+				GaseousComponent(:DF_gas1, M = 0.060, c = 1400.0, k = 0.020, λ = λ_gas * sqrt(0.029/0.060)),
+				GaseousComponent(:DF_gas2, M = 0.070, c = 1400.0, k = 0.020, λ = λ_gas * sqrt(0.029/0.070)),
+				GaseousComponent(:DF_gas3, M = 0.110, c = 1300.0, k = 0.018, λ = λ_gas * sqrt(0.029/0.110)),
+				GaseousComponent(:DF_gas4, M = 0.070, c = 1500.0, k = 0.020, λ = λ_gas * sqrt(0.029/0.070)),
+				GaseousComponent(:DF_gas5, M = 0.050, c = 1600.0, k = 0.025, λ = λ_gas * sqrt(0.029/0.050)),
 				# 13. Water vapor
-				GaseousComponent(:WATER_VAPOR, M = 0.018, c = water_vapor_cp, k = 0.025, λ = λ_gas * 1.6),
+				GaseousComponent(:WATER_VAPOR, M = 0.018, c = water_vapor_cp, k = 0.025, λ = λ_gas * sqrt(0.029/0.018)),
 			),
 			reactions = (
 				Reaction(:pyrolysis_step1, 1 => (2, 8),

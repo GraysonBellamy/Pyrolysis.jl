@@ -175,8 +175,7 @@ where it represents partial reflection at the boundary, not in G itself.
 # Example
 ```julia
 # Isothermal black surface at 500 K
-σ = 5.670374419e-8
-bc = DirichletRadiationBC(G = 4 * σ * 500.0^4)
+bc = DirichletRadiationBC(G = 4 * STEFAN_BOLTZMANN * 500.0^4)
 
 # Time-varying prescribed G
 bc = DirichletRadiationBC(G = t -> 1000.0 * (1 + 0.5*sin(2π*t/60)))

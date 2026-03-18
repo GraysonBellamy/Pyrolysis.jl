@@ -9,6 +9,7 @@ DifferentialEquations.jl solvers and the Pyrolysis discretization.
 
 using ..Discretization: RHSCache, compute_rhs!, resize_rhs_cache!, compute_rhs_darcy_fick!, update_darcy_properties!
 using ..Discretization: update_radiation_properties!, compute_radiation_flux_divergence!, solve_quasi_steady_radiation!
+using ..Discretization: Limiter, VANLEER
 using ..Core: has_darcy_flow
 
 # ============================================================================
@@ -444,6 +445,7 @@ mutable struct PyrolysisODEFunctionALE{M, Mat, BCS, PC, RC, SV, GC}
 	# Settings
 	min_thickness::Float64
 	min_density::Float64              # Minimum density for regression calc
+	ale_limiter::Limiter              # TVD limiter for ALE advection (NONE=first-order, VANLEER=default)
 end
 
 """
@@ -493,7 +495,8 @@ function PyrolysisODEFunctionALE(mesh::Mesh1D{NC}, material::Material{NC},
 	I_radiation::Float64 = 0.0,
 	radiation_model::RadiationModel = NO_RADIATION,
 	min_thickness::Float64 = 1e-6,
-	min_density::Float64 = 1.0) where NC
+	min_density::Float64 = 1.0,
+	ale_limiter::Limiter = VANLEER) where NC
 	n_cells = length(mesh.cells)
 	n_faces = length(mesh.faces)
 	n_nodes = length(mesh.nodes)
@@ -545,7 +548,7 @@ function PyrolysisODEFunctionALE(mesh::Mesh1D{NC}, material::Material{NC},
 		rates_work, heats_work, dξ_dt_work,
 		S_conv_work,
 		top_face_ids, bottom_face_ids, top_cell_ids, bottom_cell_ids,
-		min_thickness, min_density,
+		min_thickness, min_density, ale_limiter,
 	)
 end
 
@@ -639,37 +642,41 @@ function (f::PyrolysisODEFunctionALE{M, Mat, BCS, PC, RC, SV, GC})(
 	fill!(f.v_gas_face, 0.0)
 
 	# =========================================================================
-	# Step 6: Compute ALE advection terms (CORRECTED FORMULATION)
+	# Step 6: Compute ALE advection terms
 	# =========================================================================
-	# Using upwind advection (w·∇φ) instead of conservative flux divergence (∇·(φw))
-	# This avoids spurious energy sources/sinks at fixed boundaries
-	# Reference: ALE_Energy_Reformulation.md
-	Discretization.compute_ale_advection_term!(f.ale_advection, mesh, f.w_work)
-	Discretization.compute_ale_species_advection!(f.ale_species_advection, mesh, material, f.w_work)
+	# ALE identity: ∂f/∂t|_χ = ∂f/∂t|_x + w·∇f
+	# The w·∇f terms are ADDED to the Eulerian RHS.
+	Discretization.compute_ale_advection_term!(f.ale_advection, mesh, f.w_work;
+		limiter = f.ale_limiter)
+	Discretization.compute_ale_species_advection!(f.ale_species_advection, mesh, material, f.w_work;
+		limiter = f.ale_limiter)
 
 	# =========================================================================
-	# Step 7: Subtract ALE advection contributions
+	# Step 7: Apply ALE advection corrections
 	# =========================================================================
-	# Energy: dT/dt = (physics terms) - w·∇T
-	# Species: dξ/dt = (physics terms) - w·∇ξ
-	_subtract_ale_advection!(f.dT_work, f.dξ_work,
+	# Energy:      dT/dt|_ALE = (Eulerian RHS) + w·∇T   (T is intensive)
+	# Gas species: dξ/dt|_ALE = (Eulerian RHS) + w·∇ξ   (gas is spatially stationary)
+	_apply_ale_advection!(f.dT_work, f.dξ_work,
 		f.ale_advection, f.ale_species_advection, NC)
 
 	# =========================================================================
-	# Step 7.5: Apply ALE dilation correction for solid species
+	# Step 7.5: Apply ALE dilation correction for mesh-bound species
 	# =========================================================================
-	# For solids in ALE with volume change, mass conservation requires:
-	#   dξ/dt = S - ξ × θ   (where θ is volumetric strain rate)
-	# This corrects the species equation to account for concentration changes
-	# due to cell volume changes (shrinkage/expansion).
+	# For mesh-bound species (solids and liquids) in ALE with volume change,
+	# mass conservation requires: dξ/dt = S - ξ × θ  (where θ is volumetric
+	# strain rate). This corrects the species equation to account for
+	# concentration changes due to cell volume changes (shrinkage/expansion).
+	# Applies to any component with v = w (phase != GAS).
 	_apply_ale_dilation_correction!(f.dξ_work, f.θ_work, mesh, material)
 
-	# NOTE on energy dilation: Unlike species, the energy equation does NOT need
-	# an explicit -T×θ correction because the temperature formulation implicitly
-	# handles this through the time-varying ρcₚ denominator. The terms cancel:
-	#   Full equation: dT/dt = sources/ρcₚ - T×θ - (T/ρcₚ)(dρcₚ/dt)
-	#   When ρcₚ changes due to reactions, the last two terms largely cancel.
-	# See Enthalpy_Formulation_Refactoring_Plan.md for the proper enthalpy approach.
+	# NOTE on energy dilation: The temperature equation dT/dt = RHS/ρcₚ is
+	# structurally correct without an explicit -T×θ correction, PROVIDED that
+	# the reaction heat h(T) includes the sensible enthalpy correction:
+	#   h(T) = h_ref + ∫(Δcₚ dT')
+	# where Δcₚ = Σ(ν_prod × cₚ_prod) - Σ(ν_react × cₚ_react).
+	# This follows from the total enthalpy conservation derivation — the
+	# d(ρcₚ)/dt term is absorbed into the definition of h(T), not tracked
+	# as a separate correction. See reactions.jl for documentation.
 
 	# =========================================================================
 	# Step 8: Pack results into du
@@ -862,43 +869,39 @@ function _interpolate_node_to_face!(w_face::Vector{Float64},
 end
 
 """
-	_subtract_ale_advection!(dT, dξ, ale_advection, ale_species_advection, NC)
+	_apply_ale_advection!(dT, dξ, ale_advection, ale_species_advection, NC)
 
-Subtract ALE advection contributions from RHS.
+Apply ALE advection corrections to the Eulerian RHS.
 
-This is the CORRECT formulation using upwind advection (w·∇φ) instead of
-conservative flux divergence (∇·(φw)).
+From the ALE time derivative identity (chain rule for moving mesh point):
+	∂f/∂t|_χ = ∂f/∂t|_x + w·∇f
+
+The w·∇f term is ADDED to the Eulerian RHS for both energy and gas species.
 
 The ALE equations are:
-	For temperature (advected with mesh): dT/dt = (physics RHS) - w·∇T
-	For gas species (v≈0, mesh moves away): dξ/dt = (physics RHS) + w·∇ξ
-	For solid species: dξ/dt = (physics RHS) - ξ·θ  (handled separately via dilation correction)
+	Energy (intensive):     dT/dt|_ALE = (Eulerian RHS) + w·∇T
+	Gas species (v_gas≈0):  dξ/dt|_ALE = (Eulerian RHS) + w·∇ξ
+	Mesh-bound (solid/liquid): dξ/dt|_ALE = S - ξ·θ  (dilation, handled separately)
 
 # Arguments
 - `dT`: Temperature RHS vector [K/s], modified in place
 - `dξ`: Species RHS matrix [NC × n_cells, kg/(m³·s)], modified in place
-- `ale_advection`: ALE energy advection term [K/s] for each cell
-- `ale_species_advection`: ALE species advection [NC × n_cells, kg/(m³·s)]
+- `ale_advection`: ALE energy advection term w·∇T [K/s] for each cell
+- `ale_species_advection`: ALE species advection w·∇ξ [NC × n_cells, kg/(m³·s)]
 - `NC`: Number of components
-
-# Reference
-ALE_Energy_Reformulation.md
 """
-function _subtract_ale_advection!(dT::Vector{Float64}, dξ::Matrix{Float64},
+function _apply_ale_advection!(dT::Vector{Float64}, dξ::Matrix{Float64},
 	ale_advection::Vector{Float64},
 	ale_species_advection::Matrix{Float64},
 	NC::Int)
 	n_cells = length(dT)
 
 	@inbounds for i in 1:n_cells
-		# Energy: dT/dt -= w·∇T  (mesh moves, so temperature advects in opposite direction)
-		dT[i] -= ale_advection[i]
+		# Energy: dT/dt|_ALE = (Eulerian RHS) + w·∇T
+		dT[i] += ale_advection[i]
 
-		# Species advection for GAS components:
-		# The ALE equation is: ∂ξ/∂t|_χ + (v - w)·∇ξ = S
-		# For gas with v ≈ 0: ∂ξ/∂t|_χ = S - (-w)·∇ξ = S + w·∇ξ
-		# Since ale_species_advection stores w·∇ξ, we ADD it.
-		# Note: For SOLID components, ale_species_advection[j,i] = 0 (set in compute function)
+		# Gas species: dξ/dt|_ALE = (Eulerian RHS) + w·∇ξ
+		# For SOLID components, ale_species_advection[j,i] = 0 (set in compute function)
 		for j in 1:NC
 			dξ[j, i] += ale_species_advection[j, i]
 		end
@@ -910,7 +913,7 @@ end
 """
 	_apply_ale_dilation_correction!(dξ, θ, mesh, material, NC)
 
-Apply the ALE dilation correction for solid species.
+Apply the ALE dilation correction for mesh-bound species (solids and liquids).
 
 In the ALE formulation with volume-changing cells, mass conservation requires:
 	d(ξV)/dt = S × V    (mass changes only due to reactions)
@@ -919,7 +922,7 @@ Expanding: V × dξ/dt + ξ × dV/dt = S × V
 Since dV/dt = V × θ (where θ is volumetric strain rate):
 	dξ/dt = S - ξ × θ
 
-This function applies the correction term -ξ × θ to solid species.
+This function applies the correction term -ξ × θ to all mesh-bound species.
 Without this correction, mass appears to deplete faster than volume shrinks.
 
 # Arguments
@@ -927,13 +930,15 @@ Without this correction, mass appears to deplete faster than volume shrinks.
 - `θ`: Volumetric strain rate per cell [1/s]
 - `mesh`: Mesh with current cell states (provides ξ values)
 - `material`: Material (provides component phases)
-- `NC`: Number of components
 
 # Note
-This correction is ONLY applied to SOLID components because:
-- Solids move with the mesh (v = w), so no advection term
+This correction is applied to SOLID and LIQUID components because:
+- Both move with the mesh (v = w), so no advection term
 - But they still experience dilution/concentration from volume change
-- Gases have advection terms that already account for flux divergence
+- Gases have advection terms (w·∇ξ) that already account for mesh motion
+The derivation depends only on the kinematic constraint v = w, which applies
+equally to solids (structural matrix) and liquids (bound to matrix, e.g.,
+water in wood, molten polymer in char scaffold).
 """
 function _apply_ale_dilation_correction!(dξ::Matrix{Float64},
 	θ::Vector{Float64},
@@ -958,8 +963,8 @@ end
 	exprs = Expr[]
 	for j in 1:NC
 		push!(exprs, quote
-			@inbounds if material.components[$j].phase == SOLID
-				# Correction: dξ/dt -= ξ × θ
+			@inbounds if material.components[$j].phase != GAS
+				# Correction: dξ/dt -= ξ × θ for mesh-bound species (SOLID and LIQUID)
 				# This ensures mass conservation: d(ξV)/dt = S × V
 				dξ[$j, i] -= ξ_i[$j] * θ_i
 			end
@@ -1287,33 +1292,29 @@ function (f::PyrolysisODEFunctionALEWithP1Radiation)(du, u, p, t)
 	_interpolate_node_to_face!(ode_fn.w_face, ode_fn.w_work, mesh)
 
 	# Compute ALE advection terms
-	Discretization.compute_ale_advection_term!(ode_fn.ale_advection, mesh, ode_fn.w_work)
+	Discretization.compute_ale_advection_term!(ode_fn.ale_advection, mesh, ode_fn.w_work;
+		limiter = ode_fn.ale_limiter)
 	Discretization.compute_ale_species_advection!(ode_fn.ale_species_advection, mesh,
-		material, ode_fn.w_work)
+		material, ode_fn.w_work; limiter = ode_fn.ale_limiter)
 
-	# Subtract ALE advection contributions
-	_subtract_ale_advection!(ode_fn.dT_work, ode_fn.dξ_work,
+	# Apply ALE advection corrections (w·∇f ADDED to Eulerian RHS)
+	_apply_ale_advection!(ode_fn.dT_work, ode_fn.dξ_work,
 		ode_fn.ale_advection, ode_fn.ale_species_advection, NC)
 
-	# Apply ALE dilation correction for solid species
+	# Apply ALE dilation correction for mesh-bound species (solids and liquids)
 	_apply_ale_dilation_correction!(ode_fn.dξ_work, ode_fn.θ_work, mesh, material)
 
 	# =========================================================================
 	# Step 6: Add P1 radiation contribution to energy equation
 	# =========================================================================
-	# The P1 radiation model adds a volumetric source term to the energy equation:
-	#   S_rad = α(G - 4σT⁴) = Q_absorption - Q_emission
+	# S_rad = α(G - 4σT⁴) is the net volumetric radiation source:
 	#   Positive = net absorption (heating), Negative = net emission (cooling)
-	#
-	# Note: Despite the name "div_q_rad", this is the NET RADIATION SOURCE, not
-	# the divergence of flux. The naming comes from the steady-state balance
-	# where ∇·q_rad + S_rad = 0, so S_rad = -∇·q_rad.
-	#
+	# From the RTE: ∇·q_rad = κ(4σT⁴ - G), so S_rad = -∇·q_rad.
 	# Energy equation: ρcₚ dT/dt = (conduction) + (reactions) + S_rad
 	@inbounds for i in 1:n
 		ρcp = ode_fn.prop_cache.ρcp[i]
 		# Add net radiation source (positive = heating)
-		ode_fn.dT_work[i] += f.rad_cache.div_q_rad[i] / ρcp
+		ode_fn.dT_work[i] += f.rad_cache.S_rad[i] / ρcp
 	end
 
 	# =========================================================================

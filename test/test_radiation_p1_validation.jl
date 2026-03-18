@@ -189,13 +189,13 @@ end
 			T_edge = mesh.cell_states[1].T
 
 			# Hot region should lose heat (negative source)
-			Q_mid = rad_cache.div_q_rad[mid]
+			Q_mid = rad_cache.S_rad[mid]
 
 			# Note: The sign depends on convention. What matters is physics:
 			# hot regions should have net outflow, cold regions net inflow.
 			# In equilibrium, hot regions have Q_rad < 0 (losing heat)
 			# Check that middle region has different sign from edges
-			Q_edge = rad_cache.div_q_rad[1]
+			Q_edge = rad_cache.S_rad[1]
 			@test Q_mid * Q_edge < 0 || abs(Q_mid) > abs(Q_edge)
 		end
 
@@ -224,7 +224,7 @@ end
 
 			# Surface cell should have net heat addition (Q_rad > 0)
 			# Convention: Q_rad > 0 means heat added to cell
-			@test rad_cache.div_q_rad[n_cells] > 0  # Top cell gains heat
+			@test rad_cache.S_rad[n_cells] > 0  # Top cell gains heat
 		end
 	end
 
@@ -257,7 +257,7 @@ end
 			compute_radiation_flux_divergence!(rad_cache, mesh, prop_cache)
 
 			# Compute total volumetric source
-			total_Q = sum(rad_cache.div_q_rad[i] * mesh.cell_volumes[i] for i in 1:n_cells)
+			total_Q = sum(rad_cache.S_rad[i] * mesh.cell_volumes[i] for i in 1:n_cells)
 
 			# In steady state, total source = net flux in - net flux out
 			# This is just checking Q_rad sums to something finite
@@ -526,11 +526,11 @@ end
 			compute_radiation_flux_divergence!(rad_cache, mesh, prop_cache)
 
 			# Verify radiation source term is non-zero
-			Q_rad_total = sum(abs.(rad_cache.div_q_rad))
+			Q_rad_total = sum(abs.(rad_cache.S_rad))
 			@test Q_rad_total > 0
 
 			# Verify it affects different cells differently
-			@test length(unique(sign.(rad_cache.div_q_rad))) >= 1  # Has at least one sign
+			@test length(unique(sign.(rad_cache.S_rad))) >= 1  # Has at least one sign
 		end
 	end
 

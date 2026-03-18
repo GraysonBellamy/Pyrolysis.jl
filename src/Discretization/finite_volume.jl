@@ -8,7 +8,7 @@ This module provides:
 - RHS assembly for the complete system of equations
 """
 
-using ..Core: R_GAS, n_components, n_reactions, DirichletThermalBC, RadiationBCSet
+using ..Core: R_GAS, STEFAN_BOLTZMANN, n_components, n_reactions, DirichletThermalBC, RadiationBCSet
 using ForwardDiff
 using ..Geometry: cell_size, cell_volume, face_area, cell_center, face_position,
 	boundary_face_ids, boundary_cell_id, face_area_value
@@ -475,10 +475,10 @@ Inner function for type-stable mass BC application.
 		cell_id = left_id == 0 ? right_id : left_id
 		ξ_surface = mesh.cell_states[cell_id].ξ
 
-		# Get λρ and ρ for diffusive BC (rigorous formulation)
+		# Get λ and ρ for diffusive BC (λρ product for mass_bc_flux interface)
 		λ = prop_cache.λ[cell_id]
 		ρ = prop_cache.ρ[cell_id]
-		λρ = λ * ρ  # Combined transport coefficient
+		λρ = λ * ρ  # Computed locally for BC interface compatibility
 		face_pos = mesh.face_positions[f]
 		cell_center = mesh.cell_centers[cell_id]
 		d = abs(face_pos - cell_center)
@@ -1010,7 +1010,7 @@ function compute_rhs_with_p1_radiation!(dT::Vector{Float64}, dξ::Matrix{Float64
 	# Step 2: Compute P1 radiative flux divergence
 	# ========================================================================
 	# ∇·q_rad = αG - 4σεαT⁴ (absorption - emission)
-	# This is stored in rad_cache.div_q_rad
+	# This is stored in rad_cache.S_rad
 	compute_radiation_flux_divergence!(rad_cache, mesh, prop_cache)
 
 	# ========================================================================
@@ -1023,15 +1023,16 @@ function compute_rhs_with_p1_radiation!(dT::Vector{Float64}, dξ::Matrix{Float64
 	# ========================================================================
 	# Step 4: Add P1 radiation contribution to energy equation
 	# ========================================================================
-	# The compute_rhs! already added Beer-Lambert Q_rad (which should be 0)
-	# Now add P1 radiation: dT += (-div_q_rad) / ρcₚ
-	# Note: div_q_rad = αG - 4σεαT⁴ (positive = net absorption)
-	# Energy equation: ∂T/∂t = -∇·q / ρcₚ, so dT -= div_q_rad / ρcₚ
+	# S_rad = α(G - 4σT⁴) is the net volumetric radiation source:
+	#   Positive = net absorption (material absorbs more than it emits → heating)
+	#   Negative = net emission (material emits more than it absorbs → cooling)
+	#
+	# From the RTE: ∇·q_rad = κ(4σT⁴ - G), so S_rad = -∇·q_rad.
+	# Energy equation: ρcₚ dT/dt = ... + S_rad
 	@inbounds for i in 1:n_cells_val
 		ρcp = prop_cache.ρcp[i]
-		# Subtract because div_q_rad is the divergence of radiative heat flux
-		# and energy equation has -∇·q_total
-		dT[i] -= rad_cache.div_q_rad[i] / ρcp
+		# Add net radiation source (positive = heating)
+		dT[i] += rad_cache.S_rad[i] / ρcp
 	end
 
 	return nothing
@@ -1098,30 +1099,41 @@ end
 """
 	compute_radiation_flux_divergence!(rad_cache::RadiationCache, mesh::Mesh1D, prop_cache::PropertyCache)
 
-Compute the divergence of radiative heat flux from P1 model.
+Compute the net volumetric radiation source from the P1 model.
 
-∇·q_rad = α(G - 4σT⁴)
+	S_rad = α(G - 4σT⁴)
 
 where:
 - α is volumetric absorption coefficient [1/m]
-- G is incident radiation [W/m²]
+- G is incident radiation (P1 primary variable) [W/m²]
 - σ is Stefan-Boltzmann constant
 - T is temperature [K]
 
-Note: For gray medium with emission, 4σT⁴ term represents blackbody emission.
+# Sign Convention
+- Positive S_rad: net absorption (G > 4σT⁴) → material heats up
+- Negative S_rad: net emission (G < 4σT⁴) → material cools down
+
+# Physics Derivation
+Integrating the RTE over all solid angles gives ∇·q_rad = κ(4σT⁴ - G).
+The energy equation has -∇·q_rad = κ(G - 4σT⁴) = S_rad as a source term.
+The result is stored in `rad_cache.S_rad` (not the flux divergence itself).
+
+Note: For gray medium in LTE (Kirchhoff's law), the absorption and emission
+coefficients are equal, so no separate emissivity factor appears here.
+Emissivity only enters at boundaries via Marshak BCs.
 """
 function compute_radiation_flux_divergence!(rad_cache::RadiationCache, mesh::Mesh1D, prop_cache::PropertyCache)
 	n_cells = mesh.n_active_cells
-	σ = 5.670374419e-8  # Stefan-Boltzmann constant
+	σ = STEFAN_BOLTZMANN
 
 	@inbounds for i in 1:n_cells
 		T = mesh.cell_states[i].T
 		G = rad_cache.G[i]
 		α = rad_cache.α[i]
 
-		# ∇·q_rad = α(G - 4σT⁴)
+		# S_rad = α(G - 4σT⁴) = -∇·q_rad
 		# Positive when absorption > emission (net heating)
-		rad_cache.div_q_rad[i] = α * (G - 4.0 * σ * T^4)
+		rad_cache.S_rad[i] = α * (G - 4.0 * σ * T^4)
 	end
 
 	return nothing

@@ -242,15 +242,15 @@ end
 			compute_radiation_flux_divergence!(rad_cache, mesh, prop_cache)
 
 			# Divergence should be computed
-			@test !all(rad_cache.div_q_rad .== 0.0)
+			@test !all(rad_cache.S_rad .== 0.0)
 
 			# For optically thick media (τ >> 1), radiation is in local equilibrium
-			# with G ≈ 4σT⁴. The divergence div_q_rad = ∇·q_rad captures the net 
+			# with G ≈ 4σT⁴. The divergence S_rad = ∇·q_rad captures the net 
 			# radiative heat flow. With a temperature gradient, there's net heat 
 			# flow from hot to cold (in -z direction in this setup since hot is at top).
-			# This manifests as div_q_rad being negative at the hot end (net cooling)
+			# This manifests as S_rad being negative at the hot end (net cooling)
 			# because more radiation leaves than enters.
-			@test rad_cache.div_q_rad[end] < 0  # Hot region net emits (cools)
+			@test rad_cache.S_rad[end] < 0  # Hot region net emits (cools)
 		end
 	end
 

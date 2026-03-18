@@ -123,35 +123,40 @@ end)
 # Gas Transfer Coefficients and Permeability (Physically Realistic)
 # ============================================================================
 # 
-# For Fickian transport: J = -λ × ρ × ∂Y/∂x
-# The λ parameter has units [m²/s] and represents an effective diffusion coefficient.
+# Gas transport uses the volume-fraction-gradient (partial pressure) formulation:
+#   J = -(λ/T) × ∂(ξT)/∂x = -λ × [∂ξ/∂x + (ξ/T)∂T/∂x]
 #
-# Physical guidance for λ (from literature on wood pyrolysis):
-# - Virgin wood: λ ~ 1e-6 m²/s (tight cellular structure, limited porosity)
-# - Porous char: λ ~ 1e-5 m²/s (open pore network after volatiles escape)
-# - Gas phase: λ ~ 1e-5 m²/s (similar to molecular diffusion in porous media)
-# - Lighter gases (H₂O, CO): ~1.5-2× faster diffusion than heavier species
+# Each component has a λ [m²/s] value representing its intrinsic gas diffusivity.
+# The effective mixture λ is computed via WEIGHTED mixing (β=0.5, parallel/series).
 #
-# References:
-# - Di Blasi (1993): "Modeling and simulation of combustion processes of charring and non-charring solid fuels"
-# - Anca-Couce (2016): "Reaction mechanisms and multi-scale modelling of lignocellulosic biomass pyrolysis"
-# - Park et al. (2010): "Experimental and theoretical investigation of heat and mass transfer processes"
+# For SOLID components, λ represents gas diffusion through that phase's pore structure:
+#   λ_solid ≈ D_free × (ε/τ)
+#   where D_free is free molecular diffusion (~3e-5 m²/s at 500K for typical gas),
+#   ε is the porosity, and τ is the tortuosity.
+#
+# For GAS components, λ represents free molecular diffusion of that species:
+#   λ_gas ≈ D_free(T, M) from Chapman-Enskog theory
+#   D_free scales as T^1.5 / √M. At 500K, air-like gas: ~3e-5 m²/s
+#   Lighter molecules (H₂O) diffuse ~1.5-2× faster than heavier ones (tars).
+#
+# For LIQUID (moisture): λ represents moisture migration rate through the wood
+#   structure (capillary + vapor pressure driven). Much faster than gas diffusion.
 
-# Base gas transfer coefficients for pyrolysis gases (Fickian diffusion)
-λ_wood = 1.0e-6     # m²/s - virgin wood (tight structure, tortuosity ~3-5)
-λ_char = 1.0e-5     # m²/s - porous char (open structure, porosity ~0.7-0.8)
-λ_gas = 1.0e-5      # m²/s - gas phase diffusion in porous media
+# Solid phase gas transfer coefficients (D_free × ε/τ estimates)
+# D_free at ~500-600K for typical pyrolysis gas ≈ 3-5e-5 m²/s
+λ_wood = 5.0e-7     # m²/s - virgin wood (ε~0.05, τ~5 → ε/τ~0.01)
+λ_char = 1.0e-5     # m²/s - porous char (ε~0.7, τ~2 → ε/τ~0.35)
 
-# Permeability parameters for Darcy flow (pressure-driven transport)
-# κ is specified per component - effective κ computed via mixing rules
-# 
-# These values are calibrated to match ThermaKin's TRANSPORT coefficients
-# using the conversion: κ = (λ_TK - λ_PJ) × μ/P
-# At T=500K: μ ≈ 2.6e-5 Pa·s, P = 101325 Pa → μ/P ≈ 2.6e-10 s
-#
-# ThermaKin λ values: DF=1e-5, int1=1.2e-5, int2=1.5e-5, int3=2e-5, int4=4e-5, char=5e-5
-κ_virgin = 2.3e-15  # m² - matches ThermaKin DF transport (λ_TK=1e-5, λ_PJ=1e-6)
-κ_char = 1.0e-14    # m² - matches ThermaKin char transport (λ_TK=5e-5, λ_PJ=1e-5)
+# Gas phase free molecular diffusion (at representative ~500K)
+# Reference: D(M=29 gas in air, 500K) ≈ 3e-5 m²/s (Chapman-Enskog)
+λ_gas = 3.0e-5      # m²/s - reference for M~30 gas at ~500K
+
+# Permeability for Darcy flow (pressure-driven bulk transport through solid matrix)
+# κ determines resistance to pressure-driven gas flow, separate from Fickian diffusion.
+# Virgin softwood (transverse): κ ~ 1e-16 to 1e-14 m²
+# Char (open pore network): κ ~ 1e-12 to 1e-11 m²
+κ_virgin = 1.0e-15  # m² - tight virgin wood cellular structure
+κ_char = 1.0e-12    # m² - open char pore network
 
 # Create Douglas Fir material with multiple components:
 # Solid components: DF, DF_int1, DF_int2, DF_int3, DF_int4, Char, MOISTURE
@@ -167,8 +172,8 @@ douglas_fir = Material(
 			k = 0.145,                      # W/(m·K) - thermal conductivity (virgin)
 			ε = 0.81,                      # surface emissivity
 			α = 0.0,                       # m²/kg - not used with SURFACE_ABSORPTION model
-			λ = λ_wood,                    # m²/s - gas transfer coefficient
-			κ = κ_virgin                   # m² - permeability (matches ThermaKin λ=1e-5)
+			λ = λ_wood,                    # m²/s - tight virgin structure
+			κ = κ_virgin                   # m² - low permeability
 		),
 		# 2. Intermediate 1 (partially decomposed, structure beginning to open)
 		SolidComponent(:DF_int1,
@@ -184,8 +189,8 @@ douglas_fir = Material(
 			# Progress to char = 0.80*0.37*0.79*0.74 ≈ 0.1730416
 			ε = 0.790965,
 			α = 0.0,                       # m²/kg - not used with SURFACE_ABSORPTION model
-			λ = λ_wood * 1.5,             # 50% increase as structure opens
-			κ = 2.7e-15,                    # m² - matches ThermaKin λ=1.2e-5
+			λ = λ_wood * 2.0,             # structure beginning to open (ε/τ increasing)
+			κ = κ_virgin * 3.0,            # m² - slightly more permeable
 		),
 		# 3. Intermediate 2 (significant decomposition, pore network developing)
 		SolidComponent(:DF_int2,
@@ -198,8 +203,8 @@ douglas_fir = Material(
 			# Progress to char = 0.37*0.79*0.74 ≈ 0.216302
 			ε = 0.786207,
 			α = 0.0,                       # m²/kg - not used with SURFACE_ABSORPTION model
-			λ = λ_wood * 3.0,             # 3× virgin as pores open
-			κ = 3.1e-15,                    # m² - matches ThermaKin λ=1.5e-5
+			λ = λ_wood * 5.0,             # pore network developing (ε~0.15, τ~3)
+			κ = κ_virgin * 10.0,           # m² - pores opening up
 		),
 		# 4. Intermediate 3 (advanced decomposition, transitioning to char)
 		SolidComponent(:DF_int3,
@@ -212,8 +217,8 @@ douglas_fir = Material(
 			# Progress to char = 0.79*0.74 ≈ 0.5846
 			ε = 0.745694,
 			α = 0.0,                       # m²/kg - not used with SURFACE_ABSORPTION model
-			λ = λ_wood * 6.0,             # 6× virgin, approaching char
-			κ = 3.6e-15,                    # m² - matches ThermaKin λ=2e-5
+			λ = λ_char * 0.3,             # transitioning to char (ε~0.4, τ~2.5)
+			κ = κ_char * 0.01,             # m² - significant porosity
 		),
 		# 5. Intermediate 4 (nearly char, highly porous)
 		SolidComponent(:DF_int4,
@@ -226,8 +231,8 @@ douglas_fir = Material(
 			# Progress to char = 0.74
 			ε = 0.728600,
 			α = 0.0,                       # m²/kg - not used with SURFACE_ABSORPTION model
-			λ = λ_char * 0.8,             # 8× virgin, nearly char-like
-			κ = 8.3e-15,                    # m² - matches ThermaKin λ=4e-5
+			λ = λ_char * 0.7,             # nearly char-like (ε~0.55, τ~2)
+			κ = κ_char * 0.1,              # m² - approaching char permeability
 		),
 		# 6. Char - final solid residue (fully porous)
 		SolidComponent(:Char,
@@ -236,8 +241,8 @@ douglas_fir = Material(
 			k = 1.0,                      # Char has higher conductivity (char endpoint)
 			ε = 0.70,                     # Char emissivity
 			α = 0.0,                       # m²/kg - not used with SURFACE_ABSORPTION model
-			λ = λ_char,                   # m²/s - porous char (10× virgin)
-			κ = κ_char                     # m² - matches ThermaKin λ=5e-5
+			λ = λ_char,                   # m²/s - fully porous char
+			κ = κ_char                     # m² - open pore network
 		),
 		# 7. Moisture (liquid water bound in wood structure)
 		# ThermaKin uses ρ=1e6 kg/m³ as a "pseudo-density" to give moisture
@@ -255,11 +260,14 @@ douglas_fir = Material(
 		),
 		# 8. DF_gas1 - gaseous product from reaction 1 (5% yield, low-T onset)
 		# Early hemicellulose decomposition: acetic acid (60), furfural (96), formic acid (46)
+		# Gas component λ values: free molecular diffusion scaled by √(M_ref/M)
+		# D_free ∝ 1/√M (kinetic theory). Reference: λ_gas at M_ref=0.029 (air).
+		# At 500K: D(M=18)≈5.4e-5, D(M=60)≈2.6e-5, D(M=110)≈1.7e-5 m²/s
 		GaseousComponent(:DF_gas1,
 			M = 0.060,                     # kg/mol - acetic acid-like (CH₃COOH = 60 g/mol)
 			c = 1400.0,                    # J/(kg·K) - organic acids/aldehydes
 			k = 0.020,                     # W/(m·K) - organic vapors
-			λ = λ_gas * 0.85              # m²/s - moderate weight, slightly slower diffusion
+			λ = λ_gas * sqrt(0.029/0.060) # m²/s - ~2.1e-5 (moderate molecule)
 		),
 		# 9. DF_gas2 - gaseous product from reaction 2 (20% yield)
 		# Continued hemicellulose / early cellulose: mix of organic fragments, some CO₂
@@ -267,7 +275,7 @@ douglas_fir = Material(
 			M = 0.070,                     # kg/mol - mix of organics heavier than pure CO₂
 			c = 1400.0,                    # J/(kg·K) - organic fragments
 			k = 0.020,                     # W/(m·K)
-			λ = λ_gas * 0.80              # m²/s - heavier organics, slower diffusion
+			λ = λ_gas * sqrt(0.029/0.070) # m²/s - ~1.9e-5 (heavier organics)
 		),
 		# 10. DF_gas3 - gaseous product from reaction 3 (63% yield — dominant gas-producing step)
 		# Main cellulose pyrolysis: levoglucosan (162), anhydrosugars, heavy tars
@@ -275,7 +283,7 @@ douglas_fir = Material(
 			M = 0.110,                     # kg/mol - dominated by levoglucosan/anhydrosugars
 			c = 1300.0,                    # J/(kg·K) - heavy organics, lower mass-specific cp
 			k = 0.018,                     # W/(m·K) - heavy organic vapors
-			λ = λ_gas * 0.6               # m²/s - heavy tars diffuse slower (larger molecules)
+			λ = λ_gas * sqrt(0.029/0.110) # m²/s - ~1.5e-5 (heavy tars, slowest)
 		),
 		# 11. DF_gas4 - gaseous product from reaction 4 (21% yield)
 		# Secondary decomposition: lighter organics, phenol fragments from lignin
@@ -283,7 +291,7 @@ douglas_fir = Material(
 			M = 0.070,                     # kg/mol - phenolics (94), guaiacol (124), lighter organics
 			c = 1500.0,                    # J/(kg·K) - medium organics
 			k = 0.020,                     # W/(m·K)
-			λ = λ_gas * 0.80              # m²/s
+			λ = λ_gas * sqrt(0.029/0.070) # m²/s - ~1.9e-5
 		),
 		# 12. DF_gas5 - gaseous product from reaction 5 (26% yield, final charring)
 		# Last volatiles released during charring: CH₄, light hydrocarbons, residual phenolics
@@ -291,14 +299,14 @@ douglas_fir = Material(
 			M = 0.050,                     # kg/mol - mix of CH₄ (16), phenol fragments, light organics
 			c = 1600.0,                    # J/(kg·K) - lighter molecules, higher mass-specific cp
 			k = 0.025,                     # W/(m·K)
-			λ = λ_gas * 1.0               # m²/s - medium weight mix
+			λ = λ_gas * sqrt(0.029/0.050) # m²/s - ~2.3e-5 (lighter mix)
 		),
 		# 13. Water vapor - gaseous product from moisture evaporation (lightest, fastest)
 		GaseousComponent(:WATER_VAPOR,
 			M = 0.018,                     # kg/mol - H₂O (18 g/mol, lightest species)
 			c = water_vapor_cp,            # J/(kg·K) - NIST polynomial fit
 			k = 0.025,                     # W/(m·K) - H₂O vapor at ~400K
-			λ = λ_gas * 1.6               # m²/s - lightest molecule, fastest diffusion
+			λ = λ_gas * sqrt(0.029/0.018) # m²/s - ~3.8e-5 (lightest molecule, fastest)
 		),
 	),
 	reactions = (

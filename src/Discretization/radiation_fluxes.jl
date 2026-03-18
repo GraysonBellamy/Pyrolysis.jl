@@ -126,14 +126,14 @@ function apply_radiation_divergence!(dT::Vector{Float64},
 
 		# Radiation flux divergence: (q_out - q_in) / V × A
 		# In 1D: flux at right face - flux at left face
-		div_q_rad = (rad_cache.q_rad[face_R] - rad_cache.q_rad[face_L]) * A / V
+		S_rad = (rad_cache.q_rad[face_R] - rad_cache.q_rad[face_L]) * A / V
 
 		# Add to temperature RHS: dT/dt += ∇·(D_rad∇G) / ρcₚ
-		# Note: We use +div_q_rad because q_rad is defined as heat flux INTO cell
+		# Note: We use +S_rad because q_rad is defined as heat flux INTO cell
 		# from left face (positive in +z) and OUT of cell at right face
 		# The divergence ∇·q = dq/dx represents net flux out, so we use -div
 		# for conservation. But since q_rad is diffusive flux -D∇G, and
-		# we want ∇·(D∇G), we get -∇·q_rad = -div_q_rad
+		# we want ∇·(D∇G), we get -∇·q_rad = -S_rad
 		# 
 		# Actually, let's be consistent with the conduction formulation:
 		# q_cond = -k dT/dx (heat flows down gradient)
@@ -142,11 +142,11 @@ function apply_radiation_divergence!(dT::Vector{Float64},
 		#
 		# For radiation:
 		# q_rad = -D_rad dG/dx (also flows down gradient)
-		# div_q_rad = (q_rad_R - q_rad_L) / V × A
-		# The energy equation has ∇·(D∇G) = -∇·q_rad = -div_q_rad
+		# S_rad = (q_rad_R - q_rad_L) / V × A
+		# The energy equation has ∇·(D∇G) = -∇·q_rad = -S_rad
 		#
-		# So we ADD -div_q_rad to dT:
-		dT[i] += -div_q_rad / ρcp
+		# So we ADD -S_rad to dT:
+		dT[i] += -S_rad / ρcp
 	end
 
 	return nothing
@@ -203,7 +203,7 @@ function compute_radiation_intensity_rhs!(dG::Vector{Float64},
 		V = mesh.cell_volumes[i]
 
 		# Radiation flux divergence
-		div_q_rad = (rad_cache.q_rad[face_R] - rad_cache.q_rad[face_L]) * A / V
+		S_rad = (rad_cache.q_rad[face_R] - rad_cache.q_rad[face_L]) * A / V
 
 		# Get properties and source terms
 		α = prop_cache.α[i]
@@ -214,8 +214,8 @@ function compute_radiation_intensity_rhs!(dG::Vector{Float64},
 		Q_abs = rad_cache.Q_absorption[i]
 
 		# G equation: dG/dt = (c/4σ) × (-∇·q_rad) + α×G - 4σεαT⁴
-		#                   = (c/4σ) × (-div_q_rad) + Q_abs - Q_em
-		dG[i] = (c_light / (4.0 * σ)) * (-div_q_rad) + Q_abs - Q_em
+		#                   = (c/4σ) × (-S_rad) + Q_abs - Q_em
+		dG[i] = (c_light / (4.0 * σ)) * (-S_rad) + Q_abs - Q_em
 	end
 
 	return nothing
@@ -340,15 +340,15 @@ function solve_quasi_steady_radiation!(rad_cache,
 			V = mesh.cell_volumes[i]
 
 			# Divergence of radiation flux
-			div_q_rad = (rad_cache.q_rad[face_R] - rad_cache.q_rad[face_L]) * A / V
+			S_rad = (rad_cache.q_rad[face_R] - rad_cache.q_rad[face_L]) * A / V
 
-			# Since q_rad = -D_rad dG/dx, div_q_rad = -∇·(D_rad∇G)
-			# So ∇·(D_rad∇G) = -div_q_rad
+			# Since q_rad = -D_rad dG/dx, S_rad = -∇·(D_rad∇G)
+			# So ∇·(D_rad∇G) = -S_rad
 
 			# Residual: R = αG - 4σεαT⁴ - ∇·(D_rad∇G)
-			#            = Q_abs - Q_em - (-div_q_rad)
-			#            = Q_abs - Q_em + div_q_rad
-			R[i] = rad_cache.Q_absorption[i] - rad_cache.Q_emission[i] + div_q_rad
+			#            = Q_abs - Q_em - (-S_rad)
+			#            = Q_abs - Q_em + S_rad
+			R[i] = rad_cache.Q_absorption[i] - rad_cache.Q_emission[i] + S_rad
 		end
 
 		# Check convergence using relative tolerance
@@ -361,7 +361,7 @@ function solve_quasi_steady_radiation!(rad_cache,
 		# Assemble Jacobian (tridiagonal)
 		# J[i,j] = ∂R[i]/∂G[j]
 		#
-		# R[i] = α[i]×G[i] - Q_em[i] + div_q_rad[i]
+		# R[i] = α[i]×G[i] - Q_em[i] + S_rad[i]
 		#      = α[i]×G[i] - Q_em[i] + (q_rad[R] - q_rad[L])/V × A
 		#
 		# q_rad[f] = -D_rad[f] × (G[R] - G[L]) / Δx[f]  for interior face
@@ -409,13 +409,13 @@ function solve_quasi_steady_radiation!(rad_cache,
 			#   Right boundary (right_id=0): q_rad = -flux_into (into domain = -z)
 			#
 			# For left boundary (cell 1):
-			#   div_q_rad = (q_rad[R] - q_rad[L]) × A / V
+			#   S_rad = (q_rad[R] - q_rad[L]) × A / V
 			#   q_rad[L] = flux_into, so ∂q_rad[L]/∂G = -1/2
-			#   ∂div_q_rad/∂G[1] from q_rad[L]: -(A/V) × ∂q_rad[L]/∂G[1] = -(A/V) × (-1/2) = +(A/V) × 0.5
+			#   ∂S_rad/∂G[1] from q_rad[L]: -(A/V) × ∂q_rad[L]/∂G[1] = -(A/V) × (-1/2) = +(A/V) × 0.5
 			#
 			# For right boundary (cell n):
 			#   q_rad[R] = -flux_into, so ∂q_rad[R]/∂G = -(-1/2) = +1/2
-			#   ∂div_q_rad/∂G[n] from q_rad[R]: +(A/V) × ∂q_rad[R]/∂G[n] = +(A/V) × (+1/2) = +(A/V) × 0.5
+			#   ∂S_rad/∂G[n] from q_rad[R]: +(A/V) × ∂q_rad[R]/∂G[n] = +(A/V) × (+1/2) = +(A/V) × 0.5
 
 			# Left boundary (i == 1)
 			if i == 1

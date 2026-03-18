@@ -834,59 +834,58 @@ using Pyrolysis.Discretization
 	# ========================================================================
 
 	@testset "Darcy-Fick Single Face Flux" begin
-		# Test gas_flux_darcy_fick function
+		# Test gas_flux_darcy_fick function (volume fraction gradient formulation)
 
 		@testset "Pure diffusion (v_g = 0)" begin
 			# When v_g = 0, should equal gas_flux (diffusion only)
-			λρ_face = 0.01  # kg/(m·s)
+			λ_face = 0.01   # m²/s
 			ξ_L = 0.5       # kg/m³
 			ξ_R = 1.0       # kg/m³
-			ρ_L = 1000.0    # kg/m³
-			ρ_R = 1000.0    # kg/m³
+			T_L = 400.0     # K
+			T_R = 400.0     # K
 			d_LR = 0.001    # m
 			v_g = 0.0       # No advection
 
-			J_df = gas_flux_darcy_fick(v_g, ξ_L, ξ_R, λρ_face, ρ_L, ρ_R, d_LR)
-			J_diff = gas_flux(λρ_face, ξ_L, ξ_R, ρ_L, ρ_R, d_LR)
+			J_df = gas_flux_darcy_fick(v_g, ξ_L, ξ_R, λ_face, T_L, T_R, d_LR)
+			J_diff = gas_flux(λ_face, ξ_L, ξ_R, T_L, T_R, d_LR)
 
 			@test J_df ≈ J_diff rtol = 1e-10
 		end
 
-		@testset "Pure advection (λρ = 0)" begin
-			# When λρ = 0, should be pure upwind advection
-			λρ_face = 0.0
+		@testset "Pure advection (λ = 0)" begin
+			# When λ = 0, should be pure upwind advection
+			λ_face = 0.0
 			ξ_L = 0.5
 			ξ_R = 1.0
-			ρ_L = 1000.0
-			ρ_R = 1000.0
+			T_L = 400.0
+			T_R = 400.0
 			d_LR = 0.001
 
 			# Positive velocity: upwind from left
 			v_g = 0.1  # m/s
-			J_pos = gas_flux_darcy_fick(v_g, ξ_L, ξ_R, λρ_face, ρ_L, ρ_R, d_LR)
+			J_pos = gas_flux_darcy_fick(v_g, ξ_L, ξ_R, λ_face, T_L, T_R, d_LR)
 			@test J_pos ≈ v_g * ξ_L rtol = 1e-10
 
 			# Negative velocity: upwind from right
 			v_g = -0.1
-			J_neg = gas_flux_darcy_fick(v_g, ξ_L, ξ_R, λρ_face, ρ_L, ρ_R, d_LR)
+			J_neg = gas_flux_darcy_fick(v_g, ξ_L, ξ_R, λ_face, T_L, T_R, d_LR)
 			@test J_neg ≈ v_g * ξ_R rtol = 1e-10
 		end
 
 		@testset "Combined advection and diffusion" begin
-			λρ_face = 0.01
+			λ_face = 0.01
 			ξ_L = 0.5
 			ξ_R = 1.0
-			ρ_L = 1000.0
-			ρ_R = 1000.0
+			T_L = 400.0
+			T_R = 400.0
 			d_LR = 0.001
 			v_g = 0.05  # m/s
 
-			J_df = gas_flux_darcy_fick(v_g, ξ_L, ξ_R, λρ_face, ρ_L, ρ_R, d_LR)
+			J_df = gas_flux_darcy_fick(v_g, ξ_L, ξ_R, λ_face, T_L, T_R, d_LR)
 
-			# Manual computation
-			Y_L = ξ_L / ρ_L
-			Y_R = ξ_R / ρ_R
-			J_diff = -λρ_face * (Y_R - Y_L) / d_LR
+			# Manual computation (volume fraction gradient)
+			T_face = 0.5 * (T_L + T_R)
+			J_diff = -λ_face * (ξ_R * T_R - ξ_L * T_L) / (T_face * d_LR)
 			J_adv = v_g * ξ_L  # v_g > 0 so upwind is left
 			J_expected = J_adv + J_diff
 
@@ -896,29 +895,29 @@ using Pyrolysis.Discretization
 		@testset "Peclet number behavior" begin
 			# High Pe: advection dominates
 			# Low Pe: diffusion dominates
-			λρ_face = 0.01
+			λ_face = 0.01
 			ξ_L = 0.5
 			ξ_R = 1.0
-			ρ_L = 1000.0
-			ρ_R = 1000.0
+			T_L = 400.0
+			T_R = 400.0
 			d_LR = 0.001
 
-			# Compute characteristic diffusion velocity
-			Y_L = ξ_L / ρ_L
-			Y_R = ξ_R / ρ_R
-			v_diff = λρ_face * abs(Y_R - Y_L) / (d_LR * max(ξ_L, ξ_R))
+			# Compute characteristic diffusion velocity from volume fraction gradient
+			T_face = 0.5 * (T_L + T_R)
+			J_diff_ref = abs(λ_face * (ξ_R * T_R - ξ_L * T_L) / (T_face * d_LR))
+			v_diff = J_diff_ref / max(ξ_L, ξ_R)
 
 			# High Peclet (advection >> diffusion)
 			v_high = 10.0 * v_diff
-			J_high = gas_flux_darcy_fick(v_high, ξ_L, ξ_R, λρ_face, ρ_L, ρ_R, d_LR)
+			J_high = gas_flux_darcy_fick(v_high, ξ_L, ξ_R, λ_face, T_L, T_R, d_LR)
 			J_adv_only = v_high * ξ_L
 			# Should be close to pure advection (within 30%)
 			@test abs(J_high - J_adv_only) / abs(J_high) < 0.3
 
 			# Low Peclet (diffusion >> advection)
 			v_low = 0.01 * v_diff
-			J_low = gas_flux_darcy_fick(v_low, ξ_L, ξ_R, λρ_face, ρ_L, ρ_R, d_LR)
-			J_diff_only = gas_flux(λρ_face, ξ_L, ξ_R, ρ_L, ρ_R, d_LR)
+			J_low = gas_flux_darcy_fick(v_low, ξ_L, ξ_R, λ_face, T_L, T_R, d_LR)
+			J_diff_only = gas_flux(λ_face, ξ_L, ξ_R, T_L, T_R, d_LR)
 			# Should be close to pure diffusion (within 30%)
 			@test abs(J_low - J_diff_only) / abs(J_diff_only) < 0.3
 		end
@@ -944,7 +943,7 @@ using Pyrolysis.Discretization
 
 		# Set up cache values
 		fill!(cache.ρ, ξ_solid + ξ_gas)
-		fill!(cache.λρ_face, 0.01)  # kg/(m·s)
+		fill!(cache.λ_face, 0.01)  # kg/(m·s)
 
 		@testset "Zero velocity matches diffusion-only" begin
 			v_gas = zeros(n_faces)
@@ -1045,35 +1044,31 @@ end # main testset
 
 	@testset "ALE Gas Flux (Darcy-Fick)" begin
 		@testset "Point function: ale_gas_flux_darcy_fick" begin
-			# Test the pointwise flux formula:
-			# J = ξ_upwind × (v_g - w) - λρ × ΔY / d
+			# Test the pointwise flux formula (volume fraction gradient):
+			# J = ξ_upwind × (v_g - w) - (λ/T_face) × Δ(ξT) / d
 
 			v_g = 0.1     # m/s - Darcy gas velocity
 			w = 0.02      # m/s - mesh velocity
 			ξ_L = 10.0    # kg/m³
 			ξ_R = 15.0    # kg/m³
-			λρ_face = 0.01  # kg/(m·s)
-			ρ_L = 100.0   # kg/m³
-			ρ_R = 100.0   # kg/m³
+			λ_face = 0.01 # m²/s
+			T_L = 400.0   # K
+			T_R = 400.0   # K
 			d_LR = 0.001  # m
 
-			J = ale_gas_flux_darcy_fick(v_g, w, ξ_L, ξ_R, λρ_face, ρ_L, ρ_R, d_LR)
+			J = ale_gas_flux_darcy_fick(v_g, w, ξ_L, ξ_R, λ_face, T_L, T_R, d_LR)
 
 			# Relative velocity
 			v_rel = v_g - w  # = 0.08 m/s (positive, so upwind from left)
 
-			# Mass fractions
-			Y_L = ξ_L / ρ_L  # = 0.10
-			Y_R = ξ_R / ρ_R  # = 0.15
-
-			# Diffusive flux
-			J_diff_expected = -λρ_face * (Y_R - Y_L) / d_LR
-			# = -0.01 * (0.15 - 0.10) / 0.001 = -0.01 * 50 = -0.5 kg/(m²·s)
+			# Diffusive flux (volume fraction gradient)
+			T_face = 0.5 * (T_L + T_R)
+			J_diff_expected = -λ_face * (ξ_R * T_R - ξ_L * T_L) / (T_face * d_LR)
 
 			# Advective flux (upwind from left since v_rel > 0)
-			J_adv_expected = v_rel * ξ_L  # = 0.08 * 10 = 0.8 kg/(m²·s)
+			J_adv_expected = v_rel * ξ_L
 
-			J_expected = J_adv_expected + J_diff_expected  # = 0.8 - 0.5 = 0.3
+			J_expected = J_adv_expected + J_diff_expected
 
 			@test J ≈ J_expected atol = 1e-12
 		end
@@ -1083,15 +1078,15 @@ end # main testset
 			w = 0.0  # No mesh motion
 			ξ_L = 10.0
 			ξ_R = 15.0
-			λρ_face = 0.01
-			ρ_L = 100.0
-			ρ_R = 100.0
+			λ_face = 0.01
+			T_L = 400.0
+			T_R = 400.0
 			d_LR = 0.001
 
-			J_ale = ale_gas_flux_darcy_fick(v_g, w, ξ_L, ξ_R, λρ_face, ρ_L, ρ_R, d_LR)
+			J_ale = ale_gas_flux_darcy_fick(v_g, w, ξ_L, ξ_R, λ_face, T_L, T_R, d_LR)
 
 			# Should match non-ALE Darcy-Fick
-			J_standard = gas_flux_darcy_fick(v_g, ξ_L, ξ_R, λρ_face, ρ_L, ρ_R, d_LR)
+			J_standard = gas_flux_darcy_fick(v_g, ξ_L, ξ_R, λ_face, T_L, T_R, d_LR)
 
 			@test J_ale ≈ J_standard atol = 1e-14
 		end
@@ -1101,17 +1096,16 @@ end # main testset
 			w = 0.1  # Same as gas velocity
 			ξ_L = 10.0
 			ξ_R = 15.0
-			λρ_face = 0.01
-			ρ_L = 100.0
-			ρ_R = 100.0
+			λ_face = 0.01
+			T_L = 400.0
+			T_R = 400.0
 			d_LR = 0.001
 
-			J = ale_gas_flux_darcy_fick(v_g, w, ξ_L, ξ_R, λρ_face, ρ_L, ρ_R, d_LR)
+			J = ale_gas_flux_darcy_fick(v_g, w, ξ_L, ξ_R, λ_face, T_L, T_R, d_LR)
 
 			# v_rel = 0, so only diffusion remains
-			Y_L = ξ_L / ρ_L
-			Y_R = ξ_R / ρ_R
-			J_diff = -λρ_face * (Y_R - Y_L) / d_LR
+			T_face = 0.5 * (T_L + T_R)
+			J_diff = -λ_face * (ξ_R * T_R - ξ_L * T_L) / (T_face * d_LR)
 
 			@test J ≈ J_diff atol = 1e-14
 		end
@@ -1121,12 +1115,12 @@ end # main testset
 			w = 0.1       # Fast mesh motion (mesh moves faster than gas)
 			ξ_L = 10.0
 			ξ_R = 15.0
-			λρ_face = 0.0  # No diffusion for clarity
-			ρ_L = 100.0
-			ρ_R = 100.0
+			λ_face = 0.0  # No diffusion for clarity
+			T_L = 400.0
+			T_R = 400.0
 			d_LR = 0.001
 
-			J = ale_gas_flux_darcy_fick(v_g, w, ξ_L, ξ_R, λρ_face, ρ_L, ρ_R, d_LR)
+			J = ale_gas_flux_darcy_fick(v_g, w, ξ_L, ξ_R, λ_face, T_L, T_R, d_LR)
 
 			# v_rel = 0.01 - 0.1 = -0.09 (negative)
 			# Should upwind from right
@@ -1192,7 +1186,7 @@ end # main testset
 		# Create property cache
 		cache = PropertyCache(n_cells, n_faces)
 		fill!(cache.ρ, ξ_solid + 15.0)  # Average
-		fill!(cache.λρ_face, 0.01)
+		fill!(cache.λ_face, 0.01)
 
 		@testset "Zero velocities give zero flux" begin
 			v_gas = zeros(n_faces)
@@ -1781,7 +1775,7 @@ end  # Pressure Boundary Conditions tests
 
 		cache = PropertyCache(n_cells, n_faces)
 		fill!(cache.ρ, ξ_solid + 1.0)  # Approximate total density
-		fill!(cache.λρ_face, 0.01)  # Same effective λρ for both
+		fill!(cache.λ_face, 0.01)  # Same effective λρ for both
 
 		@testset "Light gas has larger flux magnitude with species scaling" begin
 			J_scaled = zeros(3, n_faces)
@@ -1859,7 +1853,7 @@ end  # Pressure Boundary Conditions tests
 
 		cache = PropertyCache(n_cells, n_faces)
 		fill!(cache.ρ, ξ_solid + 1.0)
-		fill!(cache.λρ_face, 0.01)
+		fill!(cache.λ_face, 0.01)
 
 		# Zero Darcy velocity - should match diffusion-only case
 		v_gas = zeros(n_faces)
@@ -1937,7 +1931,7 @@ end  # Pressure Boundary Conditions tests
 
 		cache = PropertyCache(n_cells, n_faces)
 		fill!(cache.ρ, ξ_solid + 2 * ξ_gas)
-		fill!(cache.λρ_face, 0.01)
+		fill!(cache.λ_face, 0.01)
 
 		J = zeros(3, n_faces)
 		compute_gas_fluxes!(J, mesh, cache, multi_gas; use_species_scaling = true)
