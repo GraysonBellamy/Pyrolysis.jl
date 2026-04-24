@@ -26,17 +26,20 @@ using ..TimeIntegration
 using ..Problem
 using OrdinaryDiffEq
 using OrdinaryDiffEq: CallbackSet, terminate!
+using Sparspak  # Required for SparspakFactorization (default linear solver)
 using ADTypes: AutoFiniteDiff
 using DiffEqCallbacks: PeriodicCallback, ContinuousCallback
 using ProgressMeter: Progress, update!, finish!
 
 # Include subfiles
 include("solve.jl")
+include("ilu_gmres.jl")
 include("callbacks.jl")
 
 # Exports
 # Main solve interface
 export solve
+export ILUGMRESFactorization, ILUBiCGSTABFactorization
 
 # Solution utilities
 export get_profile, get_cell_positions, interpolate_solution

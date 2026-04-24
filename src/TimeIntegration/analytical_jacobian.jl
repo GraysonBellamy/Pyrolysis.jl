@@ -26,6 +26,7 @@ using ..Core: ImpermeableBC, DiffusiveMassBC, ConvectiveMassBC, MassFluxBC, Comb
 using ..Core: DirichletPressureBC, NeumannPressureBC, ConvectivePressureBC
 using ..Core: MixingRule, PARALLEL, SERIES, WEIGHTED
 using ..Core: has_darcy_flow
+using ..Core: RadiationModel, BEER_LAMBERT
 using ..Properties: total_density, mass_fractions
 using ..Properties: effective_gas_viscosity, harmonic_mean_permeability
 using ..Physics: evaluate_reactions!, pressure_derivatives, pressure_derivatives!
@@ -1075,11 +1076,31 @@ contribute to thermal conductivity. Liquids with swelling_factor = 0 ARE include
 	end
 
 	# Temperature derivative from pre-cached ∂k_j/∂T values
-	# For mixing rules: ∂k_eff/∂T = Σⱼ vⱼ × ∂k_j/∂T (approximate, using parallel rule)
-	# More accurate would require finite difference of the mixing formula
-	dk_dT = 0.0
-	@inbounds @simd for j in 1:NC
-		dk_dT += v_work[j] * dk_dT_values[j]
+	# Computed analytically for each mixing rule:
+	#   PARALLEL: dk/dT = Σⱼ vⱼ × dk_j/dT
+	#   SERIES:   dk/dT = k_series² × Σⱼ vⱼ × (dk_j/dT) / k_j²
+	#   WEIGHTED: dk/dT = β × dk_parallel/dT + (1-β) × dk_series/dT
+	# Note: dv_j/dT terms (from density T-dependence) are small and omitted.
+	dk_parallel_dT = 0.0
+	dk_series_dT = 0.0
+	@inbounds for j in 1:NC
+		v_j = v_work[j]
+		if v_j > 0.0
+			dk_parallel_dT += v_j * dk_dT_values[j]
+			k_j = conductivities[j]
+			if k_j > CONDUCTIVITY_MIN
+				dk_series_dT += v_j * dk_dT_values[j] / (k_j * k_j)
+			end
+		end
+	end
+	dk_series_dT *= k_series_sq  # k_series² × Σⱼ vⱼ(dk_j/dT)/k_j²
+
+	if mixing == PARALLEL
+		dk_dT = dk_parallel_dT
+	elseif mixing == SERIES
+		dk_dT = dk_series_dT
+	else  # WEIGHTED
+		dk_dT = β * dk_parallel_dT + (1.0 - β) * dk_series_dT
 	end
 
 	return dk_dT
@@ -1201,10 +1222,12 @@ function compute_analytical_jacobian!(J::AbstractMatrix, u, p, t,
 	# Must match the RHS dispatch in _compute_rhs_dispatch! (Darcy-Fick when permeability present)
 	if has_darcy_flow(material)
 		Discretization.compute_rhs_darcy_fick!(f.dT_work, f.dξ_work, mesh, prop_cache, f.rhs_cache,
-			f.material, f.bc_set, t, f.top_face_ids, f.bottom_face_ids; I_radiation = f.I_radiation)
+			f.material, f.bc_set, t, f.top_face_ids, f.bottom_face_ids;
+			I_radiation = f.I_radiation, radiation_model = f.radiation_model)
 	else
 		Discretization.compute_rhs!(f.dT_work, f.dξ_work, mesh, prop_cache, f.rhs_cache,
-			f.material, f.bc_set, t, f.top_face_ids, f.bottom_face_ids; I_radiation = f.I_radiation)
+			f.material, f.bc_set, t, f.top_face_ids, f.bottom_face_ids;
+			I_radiation = f.I_radiation, radiation_model = f.radiation_model)
 	end
 
 	# Zero out Jacobian (efficient O(nnz) for sparse matrices)
@@ -1330,7 +1353,7 @@ function compute_analytical_jacobian!(J::AbstractMatrix, u, p, t,
 	# ==========================================================================
 	# Radiation Jacobian (non-local Beer-Lambert)
 	# ==========================================================================
-	if f.I_radiation > 0.0
+	if f.I_radiation > 0.0 && f.radiation_model == BEER_LAMBERT
 		compute_radiation_jacobian!(J, smap, mesh, prop_cache, f.I_radiation, n, NC, jac_cache.comp_absorptions, jac_cache.τ_cumulative)
 	end
 
@@ -1768,9 +1791,10 @@ function compute_gas_convective_source_jacobian!(J::AbstractMatrix, smap,
 		ρcp_i = prop_cache.ρcp[i]
 		inv_ρcp = 1.0 / ρcp_i
 
-		# Cache component heat capacities at this cell's temperature
+		# Cache component heat capacities and their T-derivatives at this cell's temperature
 		# Uses @generated function to avoid heterogeneous tuple allocations
-		cache_heat_capacities!(cp_work, T_i, material)
+		# Populates comp_heat_capacities (= cp_work) AND comp_dcp_dT
+		cache_all_component_properties!(base_cache, T_i, material)
 
 		# Bounding faces
 		cell = mesh.cells[i]
@@ -1813,22 +1837,25 @@ function compute_gas_convective_source_jacobian!(J::AbstractMatrix, smap,
 			ddTdx_dTR = 0.5 / d_R
 		end
 
-		# Compute Σ_g c_g * J̄_g (the coefficient multiplying dTdx)
-		# Uses pre-cached cp_work[j] to avoid runtime heterogeneous tuple indexing
+		# Compute Σ_g c_g * J̄_g and Σ_g (dc_g/dT) * J̄_g
+		# Uses pre-cached cp_work[j] and comp_dcp_dT[j] to avoid runtime heterogeneous tuple indexing
 		sum_cgJ = 0.0
+		sum_dcgJ_dT = 0.0
+		dcp_dT_work = base_cache.comp_dcp_dT
 		for j in 1:NC
 			if is_gas[j]
 				J_avg = (J_gas[j, f_L] + J_gas[j, f_R]) * 0.5
 				sum_cgJ += cp_work[j] * J_avg
+				sum_dcgJ_dT += dcp_dT_work[j] * J_avg
 			end
 		end
 
-		# ∂S/∂T contributions: S = -sum_cgJ * dTdx
-		# ∂S/∂T_i = -sum_cgJ * ddTdx_dTi
-		# ∂(dT_i/dt)/∂T_i += (1/ρcp) * ∂S/∂T_i
+		# ∂S/∂T contributions: S = -Σ_g c_g(T) * J̄_g * dTdx
+		# Full derivative: ∂S/∂T_i = -Σ_g [dc_g/dT * J̄_g * dTdx + c_g * J̄_g * ddTdx/dT_i]
+		#                           = -sum_dcgJ_dT * dTdx - sum_cgJ * ddTdx_dTi
 		T_row = i
 
-		dS_dTi = -sum_cgJ * ddTdx_dTi
+		dS_dTi = -sum_cgJ * ddTdx_dTi - sum_dcgJ_dT * dTdx
 		if abs(dS_dTi) > 1e-30
 			fast_sparse_add!(J, smap, T_row, i, inv_ρcp * dS_dTi)
 		end
@@ -2128,6 +2155,9 @@ function compute_all_face_jacobians_fused!(
 		ΔT = T_R - T_L
 
 		# Flux derivatives w.r.t. temperature
+		# q = -k_face × ΔT / d_LR
+		# ∂q/∂T_L = k_face/d_LR + ∂k_face/∂T_L × (-ΔT/d_LR)
+		# ∂q/∂T_R = -k_face/d_LR + ∂k_face/∂T_R × (-ΔT/d_LR)
 		dq_dT_L = k_face / d_LR
 		dq_dT_R = -k_face / d_LR
 
@@ -2137,28 +2167,26 @@ function compute_all_face_jacobians_fused!(
 		coeff_L = inv_ρcp_L * A_f_inv_V_L
 		coeff_R = inv_ρcp_R * A_f_inv_V_R
 
-		# Temperature derivatives in Jacobian (batched: 2 calls instead of 4)
-		fast_sparse_sub_batch!(J, smap, left_id,
-			(left_id, right_id),
-			(coeff_L * dq_dT_L, coeff_L * dq_dT_R))
-		fast_sparse_add_batch!(J, smap, right_id,
-			(left_id, right_id),
-			(coeff_R * dq_dT_L, coeff_R * dq_dT_R))
-
-		# Concentration derivatives (if temperature difference is significant)
+		# Concentration and T-property derivatives (if temperature difference is significant)
 		if abs(ΔT) > JAC_ZERO_TOL
-			# Left cell conductivity derivatives
-			conductivity_derivatives_cached!(dk_L_dξ, ξ_L,
+			# Left cell conductivity derivatives (returns dk_dT scalar)
+			dk_dT_L = conductivity_derivatives_cached!(dk_L_dξ, ξ_L,
 				densities_L, conductivities_L, dk_dT_L_vals,
 				is_gas, swelling_factors, k_mixing, β_k, v_L)
 
-			# Right cell conductivity derivatives
-			conductivity_derivatives_cached!(dk_R_dξ, ξ_R,
+			# Right cell conductivity derivatives (returns dk_dT scalar)
+			dk_dT_R = conductivity_derivatives_cached!(dk_R_dξ, ξ_R,
 				densities_R, conductivities_R, dk_dT_R_vals,
 				is_gas, swelling_factors, k_mixing, β_k, v_R)
 
 			factor = -ΔT / d_LR
 
+			# Add ∂k_face/∂T contribution to temperature derivatives
+			# ∂k_face/∂T_L = dk_dkL × dk_L/dT, ∂k_face/∂T_R = dk_dkR × dk_R/dT
+			dq_dT_L += factor * dk_dkL * dk_dT_L
+			dq_dT_R += factor * dk_dkR * dk_dT_R
+
+			# Concentration derivatives through conductivity
 			for j in 1:NC
 				dq_dξ_jL = factor * dk_dkL * dk_L_dξ[j]
 				dq_dξ_jR = factor * dk_dkR * dk_R_dξ[j]
@@ -2176,6 +2204,14 @@ function compute_all_face_jacobians_fused!(
 				end
 			end
 		end
+
+		# Temperature derivatives in Jacobian (batched: 2 calls instead of 4)
+		fast_sparse_sub_batch!(J, smap, left_id,
+			(left_id, right_id),
+			(coeff_L * dq_dT_L, coeff_L * dq_dT_R))
+		fast_sparse_add_batch!(J, smap, right_id,
+			(left_id, right_id),
+			(coeff_R * dq_dT_L, coeff_R * dq_dT_R))
 
 		# =================================================================
 		# PHYSICS 2: GAS TRANSPORT JACOBIAN (volume fraction gradient)
@@ -2197,6 +2233,15 @@ function compute_all_face_jacobians_fused!(
 			T_face = 0.5 * (T_L + T_R)
 			inv_Tf_dLR = 1.0 / (T_face * d_LR)
 			inv_Tf_sq_dLR = inv_Tf_dLR / T_face
+
+			# Pre-compute ∂λ/∂T for left and right cells (once per face, shared across gas components)
+			# J = -λ_face × Φ / (T_face × d_LR)
+			# ∂J/∂T via λ: (-Φ / (T_face × d_LR)) × ∂λ_face/∂T
+			# where ∂λ_face/∂T_L = dλ_face_dλ_L × dλ_L/dT
+			dλ_L_dT = compute_dλ_dT(ξ_L, T_L, material)
+			dλ_R_dT = compute_dλ_dT(ξ_R, T_R, material)
+			dλ_face_dT_L = dλ_face_dλ_L * dλ_L_dT
+			dλ_face_dT_R = dλ_face_dλ_R * dλ_R_dT
 
 			# For each gas component
 			for j in 1:NC
@@ -2253,9 +2298,15 @@ function compute_all_face_jacobians_fused!(
 					fast_sparse_add!(J, smap, ξ_row_R, ξ_col, A_f_inv_V_R * dJ_dξ_R)
 				end
 
-				# Temperature derivatives (NEW for volume fraction gradient)
+				# Temperature derivatives:
+				# 1. Direct T dependence through Φ and T_face
 				dJ_dT_L = λ_face * (ξ_L[j] * T_face + 0.5 * Φ) * inv_Tf_sq_dLR
 				dJ_dT_R = -λ_face * (ξ_R[j] * T_face - 0.5 * Φ) * inv_Tf_sq_dLR
+
+				# 2. Indirect T dependence through λ_face(T)
+				# ∂J/∂T_L (via λ) = -Φ/(T_face × d_LR) × dλ_face/dT_L
+				dJ_dT_L += -Φ * inv_Tf_dLR * dλ_face_dT_L
+				dJ_dT_R += -Φ * inv_Tf_dLR * dλ_face_dT_R
 
 				if abs(dJ_dT_L) > FLUX_DERIV_TOL || abs(dJ_dT_R) > FLUX_DERIV_TOL
 					fast_sparse_sub!(J, smap, ξ_row_L, left_id, A_f_inv_V_L * dJ_dT_L)
@@ -3050,11 +3101,11 @@ function compute_darcy_transport_jacobian!(J::AbstractMatrix, smap, mesh, prop_c
 	# Step 2: Precompute Darcy velocity Jacobian coefficients at all faces
 	# 
 	# IMPORTANT: Must match the RHS computation in update_darcy_properties!
-	# The RHS uses harmonic mean of MOBILITY (κ/μ), not harmonic mean of κ.
-	# Mobility is computed at each cell using cell-centered viscosity.
+	# The RHS uses distance-weighted harmonic mean of MOBILITY (κ/μ):
+	#   mob_face = (d_L + d_R) / (d_L/mob_L + d_R/mob_R)
+	# This is the correct resistance-in-series interpolation for non-uniform meshes.
 	#
 	# v_gas = -mob_face × ∇P
-	# mob_face = 2 × mob_L × mob_R / (mob_L + mob_R)   [harmonic mean]
 	# mob_L = κ_L / μ_L,  mob_R = κ_R / μ_R
 	#
 	@inbounds for f in eachindex(mesh.faces)
@@ -3077,7 +3128,11 @@ function compute_darcy_transport_jacobian!(J::AbstractMatrix, smap, mesh, prop_c
 		μ_L = prop_cache.μ[left_id]
 		μ_R = prop_cache.μ[right_id]
 
-		d_LR = abs(mesh.cell_centers[right_id] - mesh.cell_centers[left_id])
+		# Distances from cell centers to face (matching RHS exactly)
+		face_pos = mesh.face_positions[f]
+		d_L = abs(face_pos - mesh.cell_centers[left_id])
+		d_R = abs(mesh.cell_centers[right_id] - face_pos)
+		d_LR = d_L + d_R
 
 		# Pressure gradient
 		P_L = prop_cache.P[left_id]
@@ -3088,9 +3143,9 @@ function compute_darcy_transport_jacobian!(J::AbstractMatrix, smap, mesh, prop_c
 		mob_L = μ_L > 1e-20 ? κ_L / μ_L : 0.0
 		mob_R = μ_R > 1e-20 ? κ_R / μ_R : 0.0
 
-		# Harmonic mean of mobility (matching RHS exactly)
+		# Distance-weighted harmonic mean of mobility (matching RHS exactly)
 		if mob_L > 1e-30 && mob_R > 1e-30
-			mob_face = 2.0 * mob_L * mob_R / (mob_L + mob_R)
+			mob_face = d_LR / (d_L / mob_L + d_R / mob_R)
 		elseif mob_L > 1e-30
 			mob_face = mob_L
 		elseif mob_R > 1e-30
@@ -3117,23 +3172,24 @@ function compute_darcy_transport_jacobian!(J::AbstractMatrix, smap, mesh, prop_c
 		# Permeability derivatives (via mobility chain rule)
 		# ============================================================
 		# mob_L = κ_L / μ_L  →  ∂mob_L/∂κ_L = 1/μ_L
-		# mob_face = 2 × mob_L × mob_R / (mob_L + mob_R)
-		# 
-		# Let S = mob_L + mob_R, then mob_face = 2 × mob_L × mob_R / S
-		# ∂mob_face/∂mob_L = 2 × mob_R × (S - mob_L) / S² = 2 × mob_R² / S²
-		# ∂mob_face/∂mob_R = 2 × mob_L² / S²
+		# mob_face = d_total / (d_L/mob_L + d_R/mob_R) = d_total / R_sum
+		# where R_L = d_L/mob_L, R_R = d_R/mob_R, R_sum = R_L + R_R
+		#
+		# ∂mob_face/∂mob_L = d_total × d_L / (mob_L² × R_sum²)
+		# ∂mob_face/∂mob_R = d_total × d_R / (mob_R² × R_sum²)
 		#
 		# v_gas = -mob_face × ∇P
 		# ∂v_gas/∂κ_L = -∇P × ∂mob_face/∂mob_L × ∂mob_L/∂κ_L
-		#             = -∇P × (2 × mob_R² / S²) × (1/μ_L)
 
 		if mob_L > 1e-30 && mob_R > 1e-30 && d_LR > 1e-20
-			mob_sum = mob_L + mob_R
-			mob_sum_sq = mob_sum * mob_sum
+			R_L = d_L / mob_L
+			R_R = d_R / mob_R
+			R_sum = R_L + R_R
+			R_sum_sq = R_sum * R_sum
 
-			# Derivatives of harmonic mean of mobility
-			dmob_face_dmob_L = 2.0 * mob_R * mob_R / mob_sum_sq
-			dmob_face_dmob_R = 2.0 * mob_L * mob_L / mob_sum_sq
+			# Derivatives of distance-weighted harmonic mean of mobility
+			dmob_face_dmob_L = d_LR * d_L / (mob_L * mob_L * R_sum_sq)
+			dmob_face_dmob_R = d_LR * d_R / (mob_R * mob_R * R_sum_sq)
 
 			# Chain rule: ∂mob/∂κ = 1/μ (since mob = κ/μ)
 			dmob_L_dκ_L = 1.0 / μ_L
@@ -3354,7 +3410,7 @@ function compute_darcy_transport_jacobian!(J::AbstractMatrix, smap, mesh, prop_c
 	#
 	# MUST match the RHS computation in update_darcy_properties! exactly:
 	# v_gas = -mob_face × ∇P
-	# mob_face = harmonic mean of mob_L, mob_R (distance-weighted)
+	# mob_face = (d_L + d_R) / (d_L/mob_L + d_R/mob_R)  [distance-weighted harmonic mean]
 	# mob_L = κ_L / μ_L,  mob_R = κ_R / μ_R
 	#
 	@inbounds for f in eachindex(mesh.faces)
@@ -3377,7 +3433,11 @@ function compute_darcy_transport_jacobian!(J::AbstractMatrix, smap, mesh, prop_c
 		μ_L = prop_cache.μ[left_id]
 		μ_R = prop_cache.μ[right_id]
 
-		d_LR = abs(mesh.cell_centers[right_id] - mesh.cell_centers[left_id])
+		# Distances from cell centers to face (matching RHS exactly)
+		face_pos = mesh.face_positions[f]
+		d_L = abs(face_pos - mesh.cell_centers[left_id])
+		d_R = abs(mesh.cell_centers[right_id] - face_pos)
+		d_LR = d_L + d_R
 
 		# Pressure gradient
 		P_L = prop_cache.P[left_id]
@@ -3388,9 +3448,9 @@ function compute_darcy_transport_jacobian!(J::AbstractMatrix, smap, mesh, prop_c
 		mob_L = μ_L > 1e-20 ? κ_L / μ_L : 0.0
 		mob_R = μ_R > 1e-20 ? κ_R / μ_R : 0.0
 
-		# Harmonic mean of mobility (matching RHS exactly)
+		# Distance-weighted harmonic mean of mobility (matching RHS exactly)
 		if mob_L > 1e-30 && mob_R > 1e-30
-			mob_face = 2.0 * mob_L * mob_R / (mob_L + mob_R)
+			mob_face = d_LR / (d_L / mob_L + d_R / mob_R)
 		elseif mob_L > 1e-30
 			mob_face = mob_L
 		elseif mob_R > 1e-30
@@ -3414,17 +3474,19 @@ function compute_darcy_transport_jacobian!(J::AbstractMatrix, smap, mesh, prop_c
 		end
 
 		# Permeability derivatives via mobility chain rule:
-		# mob_face = 2 × mob_L × mob_R / (mob_L + mob_R)
-		# ∂mob_face/∂mob_L = 2 × mob_R² / S²
-		# ∂mob_face/∂mob_R = 2 × mob_L² / S²
+		# mob_face = d_total / (d_L/mob_L + d_R/mob_R) = d_total / R_sum
+		# ∂mob_face/∂mob_L = d_total × d_L / (mob_L² × R_sum²)
+		# ∂mob_face/∂mob_R = d_total × d_R / (mob_R² × R_sum²)
 		# ∂mob/∂κ = 1/μ  (since mob = κ/μ)
 		# ∂v_gas/∂κ_L = -∇P × ∂mob_face/∂mob_L × (1/μ_L)
 		if mob_L > 1e-30 && mob_R > 1e-30 && d_LR > 1e-20
-			mob_sum = mob_L + mob_R
-			mob_sum_sq = mob_sum * mob_sum
+			R_L = d_L / mob_L
+			R_R = d_R / mob_R
+			R_sum = R_L + R_R
+			R_sum_sq = R_sum * R_sum
 
-			dmob_face_dmob_L = 2.0 * mob_R * mob_R / mob_sum_sq
-			dmob_face_dmob_R = 2.0 * mob_L * mob_L / mob_sum_sq
+			dmob_face_dmob_L = d_LR * d_L / (mob_L * mob_L * R_sum_sq)
+			dmob_face_dmob_R = d_LR * d_R / (mob_R * mob_R * R_sum_sq)
 
 			dmob_L_dκ_L = 1.0 / μ_L
 			dmob_R_dκ_R = 1.0 / μ_R
@@ -5334,7 +5396,8 @@ function compute_analytical_jacobian_ale!(J::AbstractMatrix, u, p, t,
 	# We need the reaction rates and species source terms for derivatives
 	# Compute physics RHS (populates f.dT_work, f.dξ_work, f.rhs_cache.dξ_rxn)
 	Discretization.compute_rhs!(f.dT_work, f.dξ_work, mesh, prop_cache, f.rhs_cache,
-		material, f.bc_set, t, f.top_face_ids, f.bottom_face_ids; I_radiation = f.I_radiation)
+		material, f.bc_set, t, f.top_face_ids, f.bottom_face_ids;
+		I_radiation = f.I_radiation, radiation_model = f.radiation_model)
 
 	# =========================================================================
 	# Step 3: Compute current mesh velocity field (needed for advection derivatives)
@@ -5475,7 +5538,7 @@ function compute_analytical_jacobian_ale!(J::AbstractMatrix, u, p, t,
 	# =========================================================================
 	# Step 7: Radiation Jacobian (if active)
 	# =========================================================================
-	if f.I_radiation > 0.0
+	if f.I_radiation > 0.0 && f.radiation_model == BEER_LAMBERT
 		compute_radiation_jacobian!(J, smap, mesh, prop_cache, f.I_radiation, n, NC, base_cache.comp_absorptions, base_cache.τ_cumulative)
 	end
 
@@ -5548,7 +5611,7 @@ function compute_analytical_jacobian_ale!(J::AbstractMatrix, u, p, t,
 	# =========================================================================
 	# Step 11e: Geometry corrections for radiation (∂/∂z terms)
 	# =========================================================================
-	if f.I_radiation > 0.0
+	if f.I_radiation > 0.0 && f.radiation_model == BEER_LAMBERT
 		compute_radiation_geometry_jacobian!(J, smap, mesh, prop_cache, f.I_radiation,
 			n, NC, material, base_cache.τ_cumulative, jac_cache.dΔz_dz, sv.z_offset)
 	end

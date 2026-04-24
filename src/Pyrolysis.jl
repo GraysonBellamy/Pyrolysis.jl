@@ -44,7 +44,7 @@ using StaticArrays
 using ForwardDiff
 using LinearSolve
 using OrdinaryDiffEq
-using RecipesBase
+
 
 # ============================================================================
 # Submodule includes
@@ -217,6 +217,7 @@ export step_profile, linear_profile, gaussian_profile, tanh_profile
 
 # Solver exports
 export solve
+export ILUGMRESFactorization
 export get_profile, get_cell_positions, interpolate_solution
 
 # PostProcess exports

@@ -26,10 +26,10 @@ using Distributed
 @everywhere begin
 	using Pyrolysis
 	using LinearSolve
-	using KLU
+	using Sparspak
 	using OrdinaryDiffEq
 	using LinearAlgebra
-	using LinearSolve: KLUFactorization
+	using LinearSolve: SparspakFactorization
 end
 
 # Main process only
@@ -56,13 +56,16 @@ const RESULTS_DIR = joinpath(@__DIR__, "convergence_results")
 	df_cp_b1 = -18.01630709338176  # intercept, T ≤ 323K
 	df_cp_a3 = 9.136799235573225   # slope, T > 425K (STA/DSC)
 	df_cp_b3 = -2139.3044552435705 # intercept, T > 425K
+	T_HFM_MAX = 323.16
+	T_STA_MIN = 425.02219679025956
+	T_INTERP_WIDTH = T_STA_MIN - T_HFM_MAX
 	df_cp = CallableProperty(T -> begin
-		if T <= 323.0
+		if T <= T_HFM_MAX
 			df_cp_b1 + df_cp_a1 * T
-		elseif T <= 425.0
-			cp_low = df_cp_b1 + df_cp_a1 * 323.0
-			cp_high = df_cp_b3 + df_cp_a3 * 425.0
-			cp_low + (cp_high - cp_low) * (T - 323.0) / 102.0
+		elseif T <= T_STA_MIN
+			cp_low = df_cp_b1 + df_cp_a1 * T_HFM_MAX
+			cp_high = df_cp_b3 + df_cp_a3 * T_STA_MIN
+			cp_low + (cp_high - cp_low) * (T - T_HFM_MAX) / T_INTERP_WIDTH
 		else
 			df_cp_b3 + df_cp_a3 * T
 		end
@@ -227,7 +230,8 @@ const RESULTS_DIR = joinpath(@__DIR__, "convergence_results")
 		min_thickness = 0.5e-3,
 		handle_depletion = false,
 		use_analytical_jacobian = true,
-		solver = KenCarp4(linsolve = KLUFactorization()),
+		use_reduced_jacobian = true,
+		solver = KenCarp4(linsolve = SparspakFactorization()),
 	)
 
 	return solution

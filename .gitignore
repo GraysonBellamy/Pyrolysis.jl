@@ -1,0 +1,37 @@
+# Julia
+*.jl.cov
+*.jl.*.cov
+*.jl.mem
+deps/deps.jl
+deps/build.log
+deps/downloads/
+deps/usr/
+deps/src/
+docs/build/
+docs/site/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# Generated output directories
+/output/
+**/results/
+**/*_results/
+examples/convergence_results/
+
+# Root-level generated plots and result data
+/cone_calorimeter_*.png
+/douglas_fir_*.png
+/douglas_fir_*.csv
+/douglas_fir_spatial_*.csv
+/ptw_*.png
+/ptw_*.csv
+
+# Throwaway scratch tests under examples/
+examples/sensitivity_analysis/test_*.jl
+examples/sensitivity_analysis/test_*.csv

@@ -59,10 +59,10 @@ New Features Demonstrated:
 using Pyrolysis
 using Plots
 using LinearSolve
-using KLU
+using Sparspak
 using OrdinaryDiffEq
 using Statistics
-using LinearSolve: KLUFactorization
+using LinearSolve: SparspakFactorization
 
 # ============================================================================
 # Material Definition: Pressure Treated Wood (PTW)
@@ -490,8 +490,9 @@ solution = solve(problem;
 	radiation_model = SURFACE_ABSORPTION,  # All radiation absorbed at surface (opaque material)
 	min_thickness = 0.5e-3,                # Stop when sample is < 0.5 mm
 	handle_depletion = false,              # Disable surface cell depletion (uses ALE instead)
-	use_analytical_jacobian = true,        # ~50× speedup with analytical Jacobian (ENABLED)
-	solver = KenCarp4(linsolve = KLUFactorization()),
+	use_analytical_jacobian = true,        # Analytical Jacobian (required for reduced Jacobian)
+	use_reduced_jacobian = true,           # 7.8× speedup: omit dense ALE coupling from Jacobian
+	solver = KenCarp4(linsolve = SparspakFactorization()),
 )
 
 println("Solve() returned at $(time())!")

@@ -14,7 +14,6 @@ module PostProcess
 using ..Core
 using ..Geometry
 using ..Properties
-using RecipesBase
 
 # Include subfiles
 include("conservation_checks.jl")

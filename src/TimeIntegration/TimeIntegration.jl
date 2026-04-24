@@ -32,6 +32,7 @@ include("ode_function.jl")
 include("timestep_control.jl")
 include("jacobian.jl")
 include("analytical_jacobian.jl")
+include("reduced_jacobian.jl")
 
 # ============================================================================
 # Exports
@@ -138,6 +139,10 @@ export compute_node_position_jacobian!
 # ALE Analytical Jacobian integration
 export compute_analytical_jacobian_ale!
 export compute_conduction_geometry_jacobian!
+
+# Reduced ALE Jacobian (omits dense mesh velocity coupling for O(N) factorization)
+export jacobian_sparsity_ale_reduced
+export compute_analytical_jacobian_ale_reduced!
 
 # Darcy transport Jacobian
 export compute_darcy_transport_jacobian!

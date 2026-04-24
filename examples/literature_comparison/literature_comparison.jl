@@ -1,27 +1,32 @@
 """
 Literature Property Comparison — Douglas Fir Cone Calorimeter
 
-Runs 9 simulations with literature-sourced property values substituted one
-category at a time, using the sensitivity analysis baseline as the reference
-configuration (240 cells, 12 mm slab, 50 kW/m², 6% MC, 600 s).
+Runs 10 simulations (1 baseline + 9 variants) with literature-sourced property
+values substituted one category at a time, using the sensitivity analysis
+baseline as the reference configuration (240 cells, 12 mm slab, 50 kW/m²,
+6% MC, 600 s).
 
 Variants:
+  0. Baseline — our measured values
   1. Virgin cp — Harada et al. (1998), low
   2. Virgin cp — Dupont et al. (2014), high
   3. Char cp — Hostikka & Matala (2017), low
   4. Char cp — Edrich (1980), high
-  5. Heats of reaction — Rath et al. (2003), ΔH_P = +428 kJ/kg (uniform)
-  6. Heats of reaction — Jones et al. (2020), ΔH_P = +382 kJ/kg (uniform)
+  5. Heats of reaction — Jones et al. (2020), ΔH_P = +306.92 kJ/kg (uniform, f=2.654);
+     Jones with-lid linear fit evaluated at Y_c = 0.17680 (our DF TGA model at
+     Jones's 5 K/min, 823 K endpoint) — see literature_comparison_plan.md for derivation
   7. Heat of sorption — Free water only (2442 kJ/kg)
-  8. Heats of reaction — Jones et al. (2020), two-zone (f_P=2.244, f_S=0.279)
-  9. Heats of reaction — Rath et al. (2003), two-zone (f_P=2.468, f_S=0.185)
+  8. Heats of reaction — Rinta-Paavola et al. (2023), ΔH_P = +112 kJ/kg (uniform, f=0.969)
+  9. Heats of reaction — Rath et al. (2003), two-zone (f_P=1.234, f_S=0.638);
+     delivers Rath's H_P + H_S = +179.46 kJ/kg at Y_c = 0.20741 (our DF TGA model at
+     Rath's 10 K/min, 773 K endpoint) — see literature_comparison_plan.md for derivation
 
 Outputs (saved to results/):
   - {label}_results.csv per run (time, mlr, surface_temp, back_temp, total_mass, thickness)
   - literature_comparison_qois.csv summary table
 
 Usage:
-  julia -p 9 --project=. examples/literature_comparison/literature_comparison.jl
+  julia -p 10 --project=. examples/literature_comparison/literature_comparison.jl
   julia --project=. examples/literature_comparison/literature_comparison.jl   # serial
 """
 
@@ -40,10 +45,11 @@ println("Running with $(nworkers()) worker(s)")
 
 @everywhere begin
 	using Pyrolysis
+	using Pyrolysis: compute_surface_mass_flux, effective_gas_transfer
 	using OrdinaryDiffEq
 	using LinearSolve
-	using KLU
-	using LinearSolve: KLUFactorization
+	using Sparspak
+	using LinearSolve: SparspakFactorization
 	using Printf
 
 	# ========================================================================
@@ -59,29 +65,33 @@ println("Running with $(nworkers()) worker(s)")
 	]
 	const LC_MOISTURE_IDX = 7
 	const LC_ρ_DRY_BASIS = 530.0
-	const LC_NOMINAL_HRXN = [-18679.656956492707, -4360.408194805666, 268420.48898703894, -211940.9321063604, -9550.130692481673]
+	const LC_NOMINAL_HRXN = [-19200.66288032251, -5263.201466602739, 264424.79037373835, -217151.69043762444, -326.40885469229025]
 
 	# ========================================================================
 	# Baseline property functions
 	# ========================================================================
 
+	const LC_T_HFM_MAX = 323.16
+	const LC_T_STA_MIN = 425.02219679025956
+	const LC_T_INTERP_WIDTH = LC_T_STA_MIN - LC_T_HFM_MAX
+
 	function baseline_virgin_cp(T)
-		if T <= 323.0
-			-53.052 + 4.2453 * T
-		elseif T <= 425.0
-			cp_low  = -53.052 + 4.2453 * 323.0
-			cp_high = -2131.33 + 9.11878 * 425.0
-			cp_low + (cp_high - cp_low) * (T - 323.0) / 102.0
+		if T <= LC_T_HFM_MAX
+			-18.01630709338176 + 4.133836600273531 * T
+		elseif T <= LC_T_STA_MIN
+			cp_low  = -18.01630709338176 + 4.133836600273531 * LC_T_HFM_MAX
+			cp_high = -2139.3044552435705 + 9.136799235573225 * LC_T_STA_MIN
+			cp_low + (cp_high - cp_low) * (T - LC_T_HFM_MAX) / LC_T_INTERP_WIDTH
 		else
-			-2131.33 + 9.11878 * T
+			-2139.3044552435705 + 9.136799235573225 * T
 		end
 	end
 
-	baseline_char_cp(T) = 347.212 + 1.78423 * T
+	baseline_char_cp(T) = 312.4273785167445 + 1.8372509265710314 * T
 
 	function baseline_hos(T, ξ)
 		MC = 100.0 * ξ[LC_MOISTURE_IDX] / LC_ρ_DRY_BASIS
-		return (2450.4209 + 875.6441 * exp(-0.11217 * MC)) * 1e3
+		return (2450.420909987441 + 875.6441221735336 * exp(-0.1121684273316275 * MC)) * 1e3
 	end
 
 	# ========================================================================
@@ -283,7 +293,8 @@ println("Running with $(nworkers()) worker(s)")
 			min_thickness = 0.5e-3,
 			handle_depletion = false,
 			use_analytical_jacobian = true,
-			solver = KenCarp4(linsolve = KLUFactorization()),
+			use_reduced_jacobian = true,
+			solver = KenCarp4(linsolve = SparspakFactorization()),
 		)
 
 		return solution
@@ -293,19 +304,62 @@ println("Running with $(nworkers()) worker(s)")
 	# QoI extraction
 	# ========================================================================
 
-	const LC_MLR_IGNITION_THRESHOLD = 3e-3
+	const LC_MLR_IGNITION_THRESHOLD = 4e-3   # kg/(m²·s) — matches sensitivity analysis
 
 	# --- New QoI constants ---
 	const LC_FIRST_PEAK_T_START = 30.0       # [s] skip initial moisture transient
 	const LC_PYROLYSIS_ONSET_THRESHOLD = 0.01 # 1% dry mass loss
 	const LC_SOLID_COMPONENT_INDICES = 1:6    # DF, int1-4, Char
+	# Combustible gas indices (DF_gas1-5, components 8-12) — excludes water vapor (13)
+	const LC_COMBUSTIBLE_GAS_INDICES = 8:12
+	# Critical combustible MLR threshold for ignition/extinction [kg/(m²·s)]
+	const LC_COMBUSTIBLE_MLR_THRESHOLD = 1.5e-3
 
+	"""
+		time_to_threshold(t, curve, fraction)
+
+	Find the time at which `curve` first reaches `fraction` of its total change,
+	defined as T₀ + fraction*(T_max - T₀) where T₀ = curve[1].
+	Uses linear interpolation between time steps. Returns Inf if never reached.
+	"""
 	function time_to_threshold(t, curve, fraction)
 		T0 = curve[1]
 		T_max = maximum(curve)
 		threshold = T0 + fraction * (T_max - T0)
 		idx = findfirst(x -> x >= threshold, curve)
-		return idx !== nothing ? t[idx] : Inf
+		if idx === nothing
+			return Inf
+		elseif idx == 1
+			return t[1]
+		else
+			f = (threshold - curve[idx-1]) / (curve[idx] - curve[idx-1])
+			return t[idx-1] + f * (t[idx] - t[idx-1])
+		end
+	end
+
+	"""
+		parabolic_peak(t, y, i) -> (peak_value, peak_time)
+
+	Fit a parabola through (i-1, i, i+1) and return the interpolated peak.
+	Falls back to the grid point if the parabola opens upward or the vertex
+	falls outside the interval.
+	"""
+	function parabolic_peak(t, y, i)
+		t0, t1, t2 = t[i-1], t[i], t[i+1]
+		y0, y1, y2 = y[i-1], y[i], y[i+1]
+		denom = y0 - 2y1 + y2
+		if denom >= 0
+			return (y1, t1)
+		end
+		h = t1 - t0
+		dt = 0.5 * h * (y0 - y2) / denom
+		t_star = t1 + dt
+		if t_star < t0 || t_star > t2
+			return (y1, t1)
+		end
+		frac = dt / h
+		y_star = y1 - 0.25 * (y0 - y2) * frac
+		return (y_star, t_star)
 	end
 
 	function compute_dry_mass_series(sol)
@@ -334,13 +388,16 @@ println("Running with $(nworkers()) worker(s)")
 		end
 		for i in (i_start+1):(global_peak_idx-1)
 			if mlr[i] >= mlr[i-1] && mlr[i] >= mlr[i+1]
-				return (mlr[i], t[i])
+				return parabolic_peak(t, mlr, i)
 			end
 		end
 		i_mid = div(i_start + global_peak_idx, 2)
 		if i_mid > i_start
 			local_range = i_start:i_mid
 			idx = local_range[argmax(mlr[local_range])]
+			if idx > 1 && idx < length(t)
+				return parabolic_peak(t, mlr, idx)
+			end
 			return (mlr[idx], t[idx])
 		end
 		return (NaN, NaN)
@@ -374,6 +431,69 @@ println("Running with $(nworkers()) worker(s)")
 		end
 	end
 
+	"""
+		compute_combustible_mlr_series(sol) -> Vector{Float64}
+
+	Compute the combustible-only surface mass flux [kg/(m²·s)] at each output
+	time. Mirrors the solver's per-species flux computation but sums only over
+	combustible gas components (indices 8-12), excluding water vapor (13).
+	"""
+	function compute_combustible_mlr_series(sol)
+		nt = length(sol.times)
+		comb_mlr = zeros(nt)
+
+		mesh = sol.problem.mesh
+		material = sol.problem.material
+		bc_set = sol.problem.bc_set
+		mass_bc_top = get_mass_bc(bc_set, Val(1))
+		n_cells = length(mesh.cells)
+
+		d_surface = mesh.cell_volumes[n_cells] / mesh.cross_section_area / 2
+
+		for i in 1:nt
+			t = sol.times[i]
+			ξ_profile = sol.concentrations[i]
+			T_surface = sol.surface_temperature[i]
+
+			ξ_surface = ntuple(k -> ξ_profile[k, n_cells], Val(length(material.components)))
+
+			flux = 0.0
+			for k in LC_COMBUSTIBLE_GAS_INDICES
+				ξ_k = ξ_surface[k]
+				if ξ_k > 0.0
+					λρ = effective_gas_transfer(ξ_surface, T_surface, material) * sum(ξ_surface)
+					ρ_surface = sum(ξ_surface)
+					J_k = compute_surface_mass_flux(mass_bc_top, ξ_k, λρ, ρ_surface, d_surface, t)
+					flux += J_k
+				end
+			end
+			comb_mlr[i] = flux
+		end
+
+		return comb_mlr
+	end
+
+	"""
+		find_threshold_crossing(t, y, threshold, direction) -> Float64
+
+	Find time at which `y` crosses `threshold`. `direction` is `:rising` or
+	`:falling`. Uses linear interpolation. Returns `Inf` if no crossing found.
+	"""
+	function find_threshold_crossing(t, y, threshold, direction::Symbol)
+		for i in 2:length(t)
+			crossed = if direction == :rising
+				y[i-1] <= threshold && y[i] > threshold
+			else
+				y[i-1] >= threshold && y[i] < threshold
+			end
+			if crossed
+				f = (threshold - y[i-1]) / (y[i] - y[i-1])
+				return t[i-1] + f * (t[i] - t[i-1])
+			end
+		end
+		return Inf
+	end
+
 	function extract_qois(sol)
 		t = sol.times
 		mlr = sol.surface_mass_flux
@@ -381,12 +501,18 @@ println("Running with $(nworkers()) worker(s)")
 		T_back = sol.back_temperature
 		total_mass = sol.total_mass
 
-		peak_mlr = maximum(mlr)
 		peak_idx = argmax(mlr)
-		time_to_peak = t[peak_idx]
+		peak_mlr_val, time_to_peak = parabolic_peak(t, mlr, peak_idx)
 
 		tig_idx = findfirst(x -> x > LC_MLR_IGNITION_THRESHOLD, mlr)
-		time_to_ignition = tig_idx !== nothing ? t[tig_idx] : Inf
+		if tig_idx === nothing
+			time_to_ignition = Inf
+		elseif tig_idx == 1
+			time_to_ignition = t[1]
+		else
+			f = (LC_MLR_IGNITION_THRESHOLD - mlr[tig_idx-1]) / (mlr[tig_idx] - mlr[tig_idx-1])
+			time_to_ignition = t[tig_idx-1] + f * (t[tig_idx] - t[tig_idx-1])
+		end
 
 		total_mass_loss = (1.0 - total_mass[end] / total_mass[1]) * 100.0
 
@@ -397,13 +523,49 @@ println("Running with $(nworkers()) worker(s)")
 		t_back_95 = time_to_threshold(t, T_back, 0.95)
 
 		# --- New QoIs ---
+		# 1. First pyrolysis peak MLR (skip moisture transient)
 		peak_first, time_peak_first = find_first_pyrolysis_peak(t, mlr, peak_idx)
+
+		# 2. Pyrolysis onset (1% dry mass loss)
 		dry_mass = compute_dry_mass_series(sol)
 		onset_time = find_pyrolysis_onset(t, dry_mass)
+
+		# 3. Back temperature at 50% total mass loss
 		T_back_50 = find_back_temp_at_mass_loss(t, total_mass, T_back, 0.50)
 
+		# 4. Combustible-only MLR: ignition, extinction, and average burning rate
+		comb_mlr = compute_combustible_mlr_series(sol)
+		t_comb_ign = find_threshold_crossing(t, comb_mlr, LC_COMBUSTIBLE_MLR_THRESHOLD, :rising)
+		t_comb_ext = if isfinite(t_comb_ign)
+			ign_idx = findfirst(ti -> ti >= t_comb_ign, t)
+			find_threshold_crossing(t[ign_idx:end], comb_mlr[ign_idx:end],
+				LC_COMBUSTIBLE_MLR_THRESHOLD, :falling)
+		else
+			Inf
+		end
+
+		avg_comb_mlr = if isfinite(t_comb_ign) && isfinite(t_comb_ext) && t_comb_ext > t_comb_ign
+			burn_mask = t_comb_ign .<= t .<= t_comb_ext
+			burn_idx = findall(burn_mask)
+			if length(burn_idx) >= 2
+				total_integral = 0.0
+				for j in 2:length(burn_idx)
+					i1, i2 = burn_idx[j-1], burn_idx[j]
+					total_integral += 0.5 * (comb_mlr[i1] + comb_mlr[i2]) * (t[i2] - t[i1])
+				end
+				total_integral / (t_comb_ext - t_comb_ign)
+			else
+				NaN
+			end
+		else
+			NaN
+		end
+
+		# 5. Peak surface temperature
+		peak_T_surf = maximum(T_surf)
+
 		return (
-			peak_mlr = peak_mlr,
+			peak_mlr = peak_mlr_val,
 			time_to_peak_mlr = time_to_peak,
 			time_to_ignition = time_to_ignition,
 			total_mass_loss_pct = total_mass_loss,
@@ -416,7 +578,12 @@ println("Running with $(nworkers()) worker(s)")
 			time_to_peak_mlr_first = time_peak_first,
 			pyrolysis_onset_time = onset_time,
 			T_back_50pct_mass_loss = T_back_50,
+			time_to_comb_ignition = t_comb_ign,
+			time_to_comb_extinction = t_comb_ext,
+			avg_mlr_comb_burning = avg_comb_mlr,
+			peak_surface_temp = peak_T_surf,
 			dry_mass_curve = dry_mass,
+			combustible_mlr_curve = comb_mlr,
 		)
 	end
 
@@ -425,25 +592,28 @@ println("Running with $(nworkers()) worker(s)")
 	# ========================================================================
 
 	function run_single(spec::LitCompRunSpec, results_dir::String)
+		mkpath(results_dir)
 		t_start = time()
 		sol = build_and_solve(spec)
 		elapsed = time() - t_start
 
 		qois = extract_qois(sol)
 
-		# Save time-series CSV (including dry mass for new QoI reproducibility)
+		# Save time-series CSV (including dry mass and combustible MLR for
+		# new QoI reproducibility)
 		filepath = joinpath(results_dir, "$(spec.label)_results.csv")
 		open(filepath, "w") do io
-			println(io, "time,mlr,surface_temp,back_temp,total_mass,thickness,dry_mass")
+			println(io, "time,mlr,surface_temp,back_temp,total_mass,thickness,dry_mass,combustible_mlr")
 			for i in eachindex(sol.times)
-				@printf(io, "%.6g,%.10g,%.6g,%.6g,%.10g,%.10g,%.10g\n",
+				@printf(io, "%.6g,%.10g,%.6g,%.6g,%.10g,%.10g,%.10g,%.10g\n",
 					sol.times[i],
 					sol.surface_mass_flux[i],
 					sol.surface_temperature[i],
 					sol.back_temperature[i],
 					sol.total_mass[i],
 					sol.thickness_history[i],
-					qois.dry_mass_curve[i])
+					qois.dry_mass_curve[i],
+					qois.combustible_mlr_curve[i])
 			end
 		end
 
@@ -460,15 +630,16 @@ end # @everywhere
 const RESULTS_DIR = joinpath(@__DIR__, "results")
 
 const RUNS = [
+	LitCompRunSpec("baseline", :baseline, :baseline, 1.0, NaN, :baseline),
 	LitCompRunSpec("virgin_cp_harada", :harada, :baseline, 1.0, NaN, :baseline),
 	LitCompRunSpec("virgin_cp_dupont", :dupont, :baseline, 1.0, NaN, :baseline),
 	LitCompRunSpec("char_cp_hostikka", :baseline, :hostikka, 1.0, NaN, :baseline),
 	LitCompRunSpec("char_cp_edrich", :baseline, :edrich, 1.0, NaN, :baseline),
-	LitCompRunSpec("hrxn_rath", :baseline, :baseline, 428.0 / 119.458, NaN, :baseline),
-	LitCompRunSpec("hrxn_jones", :baseline, :baseline, 382.0 / 119.458, NaN, :baseline),
+	# Rath uniform removed — two-zone (run 9) is the rigorous Rath comparison
+	LitCompRunSpec("hrxn_jones", :baseline, :baseline, 306.92 / 115.627, NaN, :baseline),     # Jones with-lid linear fit at Y_c=0.17680 (our DF at 5 K/min, 823 K) → +306.92 kJ/kg
 	LitCompRunSpec("hos_free_water", :baseline, :baseline, 1.0, NaN, :free_water),
-	LitCompRunSpec("hrxn_jones_2zone", :baseline, :baseline, 400.0 / 181.178, -18.0 / -61.719, :baseline),
-	LitCompRunSpec("hrxn_rath_2zone", :baseline, :baseline, 440.0 / 181.178, -12.0 / -61.719, :baseline),
+	LitCompRunSpec("hrxn_rp_spruce", :baseline, :baseline, 112.0 / 115.627, NaN, :baseline),  # Rinta-Paavola uniform (+112 kJ/kg)
+	LitCompRunSpec("hrxn_rath_2zone", :baseline, :baseline, 218.36 / 177.0, 38.9 / 61.0, :baseline),  # Rath two-zone (f_P=1.234, f_S=0.638)
 ]
 
 # ============================================================================
@@ -480,7 +651,7 @@ function main()
 
 	println("\n", "="^60)
 	println("  Literature Property Comparison — Douglas Fir")
-	println("  $(length(RUNS)) variant simulations (incl. 2 two-zone) on $(nworkers()) worker(s)")
+	println("  $(length(RUNS)) simulations (1 baseline + $(length(RUNS)-1) variants) on $(nworkers()) worker(s)")
 	println("="^60, "\n")
 
 	# Run all simulations in parallel via pmap
@@ -492,11 +663,16 @@ function main()
 		q = r.qois
 		@printf("  Peak MLR: %.4e kg/(m²·s) at t=%.1f s\n", q.peak_mlr, q.time_to_peak_mlr)
 		@printf("  1st peak MLR: %.4e kg/(m²·s) at t=%.1f s\n", q.peak_mlr_first, q.time_to_peak_mlr_first)
+		@printf("  Time to ignition (4 g/m²·s): %.1f s\n", q.time_to_ignition)
 		@printf("  Total mass loss: %.2f%%\n", q.total_mass_loss_pct)
 		@printf("  Pyrolysis onset (1%% dry): %.1f s\n", q.pyrolysis_onset_time)
 		@printf("  T_back at 50%% mass loss: %.1f K\n", q.T_back_50pct_mass_loss)
 		@printf("  t_surf 70%%: %.1f s, t_surf 95%%: %.1f s\n", q.t_surf_70pct, q.t_surf_95pct)
 		@printf("  t_back 5%%: %.1f s, t_back 95%%: %.1f s\n", q.t_back_5pct, q.t_back_95pct)
+		@printf("  Combustible ignition: %.1f s, extinction: %.1f s\n",
+			q.time_to_comb_ignition, q.time_to_comb_extinction)
+		@printf("  Avg combustible MLR (burning): %.4e kg/(m²·s)\n", q.avg_mlr_comb_burning)
+		@printf("  Peak surface temp: %.1f K\n", q.peak_surface_temp)
 		@printf("  Final thickness: %.4e m\n\n", q.final_thickness)
 	end
 
@@ -508,18 +684,23 @@ function main()
 			"run_id,label,peak_mlr,time_to_peak_mlr,time_to_ignition," *
 			"total_mass_loss_pct,t_surf_70pct,t_surf_95pct,t_back_5pct,t_back_95pct," *
 			"final_thickness,peak_mlr_first,time_to_peak_mlr_first," *
-			"pyrolysis_onset_time,T_back_50pct_mass_loss",
+			"pyrolysis_onset_time,T_back_50pct_mass_loss," *
+			"time_to_comb_ignition,time_to_comb_extinction,avg_mlr_comb_burning," *
+			"peak_surface_temp",
 		)
 		for (i, r) in enumerate(results)
 			q = r.qois
-			@printf(io, "%d,%s,%.10g,%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%.10g,%.10g,%.6g,%.6g,%.6g\n",
+			@printf(io,
+				"%d,%s,%.10g,%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%.6g,%.10g,%.10g,%.6g,%.6g,%.6g,%.6g,%.6g,%.10g,%.6g\n",
 				i, r.label,
 				q.peak_mlr, q.time_to_peak_mlr, q.time_to_ignition,
 				q.total_mass_loss_pct, q.t_surf_70pct, q.t_surf_95pct,
 				q.t_back_5pct, q.t_back_95pct,
 				q.final_thickness,
 				q.peak_mlr_first, q.time_to_peak_mlr_first,
-				q.pyrolysis_onset_time, q.T_back_50pct_mass_loss)
+				q.pyrolysis_onset_time, q.T_back_50pct_mass_loss,
+				q.time_to_comb_ignition, q.time_to_comb_extinction,
+				q.avg_mlr_comb_burning, q.peak_surface_temp)
 		end
 	end
 

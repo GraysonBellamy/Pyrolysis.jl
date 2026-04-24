@@ -7,8 +7,6 @@ Reference: Design Document Appendix A
 # Fundamental constants
 const R_GAS = 8.31446261815324           # J/(mol·K) - universal gas constant
 const STEFAN_BOLTZMANN = 5.670374419e-8  # W/(m²·K⁴) - Stefan-Boltzmann constant
-const AVOGADRO = 6.02214076e23           # mol⁻¹ - Avogadro's number
-const BOLTZMANN = 1.380649e-23           # J/K - Boltzmann constant
 
 # Reference conditions
 const T_REF = 298.15                     # K - standard temperature (25°C)

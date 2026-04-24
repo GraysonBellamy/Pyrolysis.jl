@@ -29,7 +29,7 @@ using ..Core: get_radiative_flux_bc, extract_radiative_flux_from_bcs, has_radiat
 	RadiativeBC, CombinedThermalBC, AbstractThermalBC, AbstractRadiationBC,
 	MarshakRadiationBC, ReflectiveRadiationBC, RadiationBCSet, GAS,
 	get_thermal_bc, get_mass_bc
-using LinearSolve: LUFactorization, KLUFactorization  # LU for MKL workaround, KLU for sparse Jacobian
+using LinearSolve: LUFactorization, KLUFactorization, SparspakFactorization  # LU for MKL workaround, Sparspak for sparse Jacobian (28% faster than KLU)
 using SparseArrays: nnz  # For logging sparse Jacobian info
 
 import CommonSolve: solve  # Extend CommonSolve.solve for our problem type
@@ -47,7 +47,7 @@ Solve a pyrolysis problem using DifferentialEquations.jl.
 - `problem`: The PyrolysisProblem to solve
 
 # Keyword Arguments
-- `solver=Rodas5P()`: ODE solver to use (see DifferentialEquations.jl)
+- `solver=KenCarp4(autodiff=AutoFiniteDiff(), linsolve=SparspakFactorization())`: ODE solver to use (see DifferentialEquations.jl)
 - `abstol=1e-8`: Absolute tolerance
 - `reltol=1e-6`: Relative tolerance
 - `maxiters=1000000`: Maximum iterations
@@ -62,6 +62,7 @@ Solve a pyrolysis problem using DifferentialEquations.jl.
 - `handle_depletion=false`: Enable surface cell depletion handling (ALE only)
 - `depletion_threshold=0.05`: Thickness fraction threshold for cell merging (0.05 = 5% of initial)
 - `min_cells=2`: Minimum number of cells before terminating instead of merging
+- `use_reduced_jacobian=false`: Use reduced-sparsity Jacobian for ALE (see below)
 
 # Returns
 A `PyrolysisSolution` containing:
@@ -87,27 +88,49 @@ This prevents the ρcₚ→0 singularity that causes temperature blow-up in mate
 that fully decompose. The mesh is dynamically resized during integration.
 
 # Recommended Solvers
-- `Rodas5P()`: Robust implicit solver, good default (stiff problems) - **fastest**
-- `KenCarp4()`: IMEX solver, similar performance to Rodas5P
-- `QNDF()`: BDF-based, good for very stiff problems (slower than Rodas5P)
-- `Tsit5()`: Explicit, for non-stiff/mildly stiff problems
-- `TRBDF2()`: Implicit, efficient for moderately stiff
+- `KenCarp4(linsolve=SparspakFactorization())`: SDIRK solver, **fastest** — reuses Jacobians aggressively
+- `KenCarp3(linsolve=SparspakFactorization())`: Similar to KenCarp4, slightly less efficient
+- `TRBDF2(linsolve=SparspakFactorization())`: Implicit, good for moderately stiff problems
+- `Rodas5P(linsolve=SparspakFactorization())`: Rosenbrock, re-evaluates Jacobian every step (slow)
+- `QNDF(linsolve=SparspakFactorization())`: BDF-based, high step count
 
-# Sparse Jacobian (Performance Note)
-The `use_sparse_jacobian=true` option uses matrix coloring to reduce finite 
-difference evaluations (~40× fewer calls). However, the sparse assembly overhead
-often exceeds the savings for typical problem sizes. Benchmarks show:
+Benchmarks on Douglas Fir (3601 DOFs, 13 components, 6 reactions, 600s):
+- KenCarp4 + Reduced Jacobian + Sparspak: **~36s** (fastest)
+- KenCarp4 + Full Analytical + Sparspak:  ~282s (7.8× slower)
+- KenCarp4 + SparseFD + KLU:              ~760s
+- Rodas5P + Analytical + KLU:            ~4700s
 
-- Our Douglas Fir problem (1801 DOFs): Dense is **faster** than sparse
-- Sparse FD assembly overhead: ~100ms vs 66ms saved from fewer RHS calls
-- Sparse LU is 2× faster, but doesn't compensate for assembly overhead
+# Why not iterative solvers (GMRES)?
+ILU-preconditioned GMRES is 3.4× faster than KLU on *isolated* linear solves
+at 240 cells (ILU setup 8× cheaper than KLU factorization).  However, in the
+full ODE context, the inexact GMRES solves cause ~46% Newton step rejection
+(vs ~27% for KLU), negating all per-solve savings.  The stiff Arrhenius
+kinetics require exact linear solves for reliable Newton convergence.
+KLU wins by 1.7-3.3× at all mesh sizes for the full 600s simulation.
+See `examples/linear_solver_benchmark.jl` for detailed benchmarks.
+An `ILUGMRESFactorization` is available for experimentation but is not
+recommended for production pyrolysis simulations.
 
-Sparse Jacobian may help for:
-- Very large problems (>5000 DOFs)
-- Expensive RHS (>1ms per call)
-- Very sparse systems (<0.5% fill)
+# Analytical Jacobian
+When `use_analytical_jacobian=true`, the solver uses an exact hand-coded Jacobian
+with sparse factorization. This provides a 1.6-1.9× speedup over sparse finite
+differences by eliminating ~144K redundant RHS evaluations per solve.
 
-For most pyrolysis problems, the default dense Jacobian is optimal.
+# Reduced Jacobian (Recommended for ALE)
+When `use_reduced_jacobian=true` (requires `use_ale=true` and `use_analytical_jacobian=true`),
+the solver provides an approximate Jacobian that omits the dense ALE mesh velocity
+coupling (the lower-triangular C block — 69% of non-zeros at 240 cells). This reduces
+the Jacobian from 588K to 141K non-zeros, restoring O(N) sparse factorization.
+
+The full monolithic RHS is still solved implicitly — Newton converges all equations to
+tolerance. Only the search direction is approximate, so the solution is identical to the
+full Jacobian within solver tolerance. Benchmarks show 7.8× speedup with no change in
+Newton iteration count or step rejection rate.
+
+# Linear Solver
+Sparspak is the recommended sparse LU factorization for pyrolysis problems. It is
+28% faster than KLU for the block-tridiagonal sparsity pattern and benefits
+especially from the reduced Jacobian's sparser structure.
 
 # Example
 ```julia
@@ -120,11 +143,13 @@ solution = solve(problem, progress=false)  # Disable progress bar
 solution = solve(problem, use_ale=true, min_thickness=0.1e-3)
 thickness_history = solution.thickness_history
 
+# With ALE + reduced Jacobian (recommended, 7.8× faster):
+solution = solve(problem,
+    use_ale=true, use_analytical_jacobian=true, use_reduced_jacobian=true,
+    solver=KenCarp4(linsolve=SparspakFactorization()))
+
 # With surface cell depletion handling (prevents blow-up):
 solution = solve(problem, use_ale=true, handle_depletion=true, depletion_threshold=0.01)
-
-# Sparse Jacobian (only for very large problems):
-solution = solve(problem, use_sparse_jacobian=true)
 ```
 """
 
@@ -199,7 +224,7 @@ end
 # ============================================================================
 
 function solve(problem::PyrolysisProblem;
-	solver = Rodas5P(autodiff = AutoFiniteDiff()),  # FiniteDiff for Jacobian (ForwardDiff needs code changes)
+	solver = KenCarp4(autodiff = AutoFiniteDiff(), linsolve = SparspakFactorization()),  # SDIRK + Sparspak: 28% faster than KLU for pyrolysis (see benchmarks)
 	abstol::Real = 1e-8,
 	reltol::Real = 1e-6,
 	maxiters::Int = 1000000,
@@ -215,13 +240,15 @@ function solve(problem::PyrolysisProblem;
 	handle_depletion::Bool = false,
 	depletion_threshold::Real = 0.05,
 	min_cells::Int = 2,
-	# Sparse Jacobian support (significant speedup for large problems)
+	# Sparse Jacobian support (auto-enabled when using KLU without analytical Jacobian)
 	use_sparse_jacobian::Bool = false,
 	# Analytical Jacobian (experimental, significant speedup)
 	use_analytical_jacobian::Bool = false,
 	# Radiation model selection
 	radiation_model::RadiationModel = NO_RADIATION,
-	radiation_bcs::Union{Nothing, RadiationBCSet} = nothing)
+	radiation_bcs::Union{Nothing, RadiationBCSet} = nothing,
+	# Reduced Jacobian: omit dense ALE mesh velocity coupling for O(N) factorization
+	use_reduced_jacobian::Bool = false)
 
 	# Validate problem
 	if validate
@@ -236,6 +263,19 @@ function solve(problem::PyrolysisProblem;
 
 	# Validate radiation model selection
 	_validate_radiation_model(radiation_model, material, radiation_bcs)
+
+	# Validate reduced Jacobian requirements
+	if use_reduced_jacobian
+		if !use_ale
+			error("use_reduced_jacobian=true requires use_ale=true (reduced Jacobian is for ALE mesh motion)")
+		end
+		if !use_analytical_jacobian
+			error("use_reduced_jacobian=true requires use_analytical_jacobian=true")
+		end
+		if handle_depletion
+			error("use_reduced_jacobian=true is not compatible with handle_depletion=true (state vector resizing not supported)")
+		end
+	end
 
 	# Apply initial conditions to mesh
 	set_initial_conditions!(problem)
@@ -328,13 +368,53 @@ function solve(problem::PyrolysisProblem;
 		error("Cannot use both use_analytical_jacobian and use_sparse_jacobian simultaneously")
 	end
 
+	# Auto-enable sparse Jacobian when a sparse factorization is used without
+	# analytical Jacobian. Skip when handle_depletion is active because cell
+	# merging resizes the state vector but not the jac_prototype.
+	_is_sparse_linsolve = hasproperty(solver, :linsolve) &&
+		(solver.linsolve isa KLUFactorization || solver.linsolve isa SparspakFactorization)
+	if !use_analytical_jacobian && !use_sparse_jacobian &&
+			_is_sparse_linsolve && !(use_ale && handle_depletion)
+		use_sparse_jacobian = true
+	end
+
 	if use_analytical_jacobian
 		n_cells_val = length(mesh.cells)
 		n_faces_val = length(mesh.faces)
 		NR = n_reactions(material)
 
-		if use_ale
-			# ALE analytical Jacobian with sparse storage
+		if use_ale && use_reduced_jacobian
+			# ================================================================
+			# Approximate Jacobian: full monolithic RHS, reduced sparsity
+			# ================================================================
+			# The full ALE RHS is solved implicitly (Newton converges all terms),
+			# but the Jacobian omits the dense ALE coupling (C block). Newton
+			# takes more iterations but each uses O(N) factorization instead of
+			# O(N^2.3). The converged solution is exact to solver tolerance.
+			n_nodes_val = length(mesh.nodes)
+			jac_cache = JacobianCacheALE(n_cells_val, n_faces_val, n_nodes_val, NC, NR)
+
+			# Reduced sparsity: block-tridiagonal physics + z diagonal (no dense C block)
+			jac_prototype = jacobian_sparsity_ale_reduced(n_cells_val, NC;
+				radiation_model = radiation_model)
+
+			# Analytical Jacobian computing only physics + dilation terms
+			function approx_jac_ale!(J, u, p, t)
+				compute_analytical_jacobian_ale_reduced!(J, u, p, t, ode_fn, jac_cache)
+			end
+
+			# Regular ODEProblem with full RHS but approximate Jacobian
+			ode_fn_with_jac = OrdinaryDiffEq.ODEFunction(ode_fn;
+				jac = approx_jac_ale!,
+				jac_prototype = jac_prototype)
+			ode_problem = ODEProblem(ode_fn_with_jac, u0, tspan)
+
+			nnz_full = nnz(jacobian_sparsity_ale(n_cells_val, NC))
+			@info "Using approximate Jacobian: full ALE RHS with reduced sparsity " *
+				"($(nnz(jac_prototype)) vs $(nnz_full) nnz, $(round((1 - nnz(jac_prototype)/nnz_full)*100, digits=0))% reduction)"
+
+		elseif use_ale
+			# ALE analytical Jacobian with sparse storage (monolithic, existing path)
 			n_nodes_val = length(mesh.nodes)
 			jac_cache = JacobianCacheALE(n_cells_val, n_faces_val, n_nodes_val, NC, NR)
 
@@ -376,13 +456,18 @@ function solve(problem::PyrolysisProblem;
 			@info "Using analytical Jacobian with sparse storage ($(nnz(jac_prototype)) non-zeros)"
 		end
 
-		# Use solver without autodiff since we provide the Jacobian
-		# Also use KLU for sparse LU factorization - 10× less allocations than UMFPACK
-		if solver isa Rodas5P && solver.autodiff isa AutoFiniteDiff
-			solver = Rodas5P(linsolve = KLUFactorization())  # No autodiff, KLU for sparse
-		elseif solver isa Rodas5P && (solver.linsolve === nothing || !(solver.linsolve isa KLUFactorization))
-			# User provided Rodas5P but without KLU - switch to KLU for performance
-			solver = Rodas5P(linsolve = KLUFactorization())
+		# Log linear solver choice for analytical Jacobian
+		if hasproperty(solver, :linsolve) && solver.linsolve isa ILUGMRESFactorization
+			@warn "Using ILU-GMRES iterative solver (τ=$(solver.linsolve.τ)). " *
+				"Note: Sparspak is 1.7-3.3× faster for production pyrolysis simulations " *
+				"due to Newton step rejection from inexact GMRES solves. " *
+				"Consider KenCarp4(linsolve=SparspakFactorization()) instead." maxlog = 1
+		elseif hasproperty(solver, :linsolve) &&
+				!(solver.linsolve isa SparspakFactorization) &&
+				!(solver.linsolve isa KLUFactorization)
+			@warn "Analytical Jacobian produces sparse matrices — Sparspak is 5× faster than the " *
+				"default dense solver. Pass solver=$(nameof(typeof(solver)))(linsolve=SparspakFactorization()) " *
+				"for best performance."
 		end
 	elseif use_sparse_jacobian
 		# Compute sparsity pattern and coloring for efficient finite differences
@@ -403,6 +488,11 @@ function solve(problem::PyrolysisProblem;
 		ode_problem = ODEProblem(ode_fn_sparse, u0, tspan)
 	else
 		ode_problem = ODEProblem(ode_fn, u0, tspan)
+		# Dense Jacobian is incompatible with sparse solvers — switch to LU
+		if hasproperty(solver, :linsolve) &&
+				(solver.linsolve isa SparspakFactorization || solver.linsolve isa KLUFactorization)
+			solver = KenCarp4(autodiff = AutoFiniteDiff(), linsolve = LUFactorization())
+		end
 	end
 
 	# ============================================================================
@@ -417,20 +507,23 @@ function solve(problem::PyrolysisProblem;
 	#
 	# Workaround: When depletion handling is enabled and the state vector is large,
 	# we switch to Julia's native LUFactorization which handles resize! correctly.
-	# This has a small performance cost but ensures correctness.
+	# KLU also handles resize! correctly, so this only applies when using the
+	# default linear solver (no explicit linsolve set).
 	#
 	# Reference: https://github.com/SciML/LinearSolve.jl (potential upstream bug)
 	# ============================================================================
-	MKL_RESIZE_THRESHOLD = 500  # State vector lengths above this trigger MKL
+	# ============================================================================
+	# MKL LU Factorization Workaround for Depletion Handling
+	# ============================================================================
+	# When using handle_depletion=true with resize!, MKL's pivot array may not
+	# resize correctly. KLU and LUFactorization handle resize! properly.
+	# Since we now default to KLU, this only warns if using the default linsolve.
+	MKL_RESIZE_THRESHOLD = 500
 	if use_ale && handle_depletion && length(u0) > MKL_RESIZE_THRESHOLD
-		# Check if user provided a custom solver or we're using the default
-		if solver isa Rodas5P && !hasproperty(solver, :linsolve) ||
-		   (hasproperty(solver, :linsolve) && solver.linsolve === nothing)
-			@warn """Large state vector ($(length(u0)) elements) with depletion handling enabled.
-			Switching from MKL to Julia's native LUFactorization to avoid resize! bug.
-			This may be slightly slower but ensures correctness during cell merging.
-			To suppress this warning, explicitly pass: solver=Rodas5P(linsolve=LUFactorization())"""
-			solver = Rodas5P(autodiff = AutoFiniteDiff(), linsolve = LUFactorization())
+		if hasproperty(solver, :linsolve) && solver.linsolve === nothing
+			@warn "Large state vector ($(length(u0)) elements) with depletion handling. " *
+				"The default MKL linear solver may fail on resize!. " *
+				"Pass solver=$(nameof(typeof(solver)))(linsolve=SparspakFactorization()) to avoid this."
 		end
 	end
 
@@ -1178,13 +1271,13 @@ This attempts to find the equilibrium state where dT/dt ≈ 0 and dξ/dt ≈ 0.
 Note: Many pyrolysis problems don't have a steady state!
 
 # Keyword Arguments
-- `solver=Rodas5P()`: ODE solver
+- `solver=KenCarp4(autodiff=AutoFiniteDiff(), linsolve=SparspakFactorization())`: ODE solver
 - `ss_abstol=1e-8`: Steady-state absolute tolerance
 - `ss_reltol=1e-6`: Steady-state relative tolerance
 - `tmax=1e6`: Maximum time to simulate
 """
 function solve_steady_state(problem::PyrolysisProblem;
-	solver = Rodas5P(),
+	solver = KenCarp4(autodiff = AutoFiniteDiff(), linsolve = SparspakFactorization()),
 	ss_abstol::Real = 1e-8,
 	ss_reltol::Real = 1e-6,
 	tmax::Real = 1e6,

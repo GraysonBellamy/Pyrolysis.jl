@@ -131,22 +131,19 @@ function update_properties!(cache::PropertyCache, mesh::Mesh1D{NC}, material::Ma
 		resize_cache!(cache, n_cells_val, n_faces_val)
 	end
 
-	# Evaluate cell-centered properties using fused computation
-	# This evaluates each component's density/conductivity/etc. ONCE per cell,
-	# then derives all effective properties, avoiding redundant density evaluations.
+	# Evaluate cell-centered properties
 	@inbounds for i in 1:n_cells_val
 		state = mesh.cell_states[i]
 		T = state.T
 		ξ = state.ξ
 
-		ρ, ρcp, cp, k, λ, ε, α = _compute_all_properties_fused(ξ, T, material)
-		cache.ρ[i] = ρ
-		cache.ρcp[i] = ρcp
-		cache.cp[i] = cp
-		cache.k[i] = k
-		cache.λ[i] = λ
-		cache.ε[i] = ε
-		cache.α[i] = α
+		cache.ρ[i] = mixture_density(ξ, T, material)
+		cache.ρcp[i] = effective_heat_capacity(ξ, T, material)
+		cache.cp[i] = effective_specific_heat(ξ, T, material)
+		cache.k[i] = effective_conductivity(ξ, T, material)
+		cache.λ[i] = effective_gas_transfer(ξ, T, material)
+		cache.ε[i] = effective_emissivity(ξ, T, material)
+		cache.α[i] = effective_absorption(ξ, material)
 	end
 
 	# Compute face-centered properties using distance-weighted harmonic mean

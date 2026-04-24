@@ -16,6 +16,13 @@ include("test_radiation_p1_integration.jl")
 include("test_radiation_p1_jacobian.jl")
 include("test_radiation_p1_validation.jl")
 include("test_conservation_checks.jl")
+include("test_ilu_gmres_solver.jl")
+include("test_ale_advection_verification.jl")
+include("test_ale_upwind_nonuniform.jl")
+include("test_gas_flux_volume_fraction.jl")
+include("test_jacobian_fixes.jl")
+include("test_p1_sign_integration.jl")
+include("test_reduced_jacobian.jl")
 
 @testset "Pyrolysis.jl" begin
 
