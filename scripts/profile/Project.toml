@@ -1,0 +1,16 @@
+# Isolated environment for the deep-profiling harness. Kept separate from the
+# test env (pin-fragile) and the formatter env. PProf pulls in heavy JLL deps
+# (graphviz, pprof) that nothing else needs.
+# Run: julia --project=scripts/profile scripts/profile/profile.jl
+[deps]
+Logging = "56ddb016-857b-54e1-b83d-db4d58db5568"
+PProf = "e4faabce-9ead-11e9-39d9-4379958e3056"
+Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+Profile = "9abbd945-dff8-562f-b5e8-e1ebf5ef1b79"
+Pyrolysis = "910b54fb-7370-4696-a92c-2242b531a32e"
+
+[sources]
+Pyrolysis = {path = "../.."}
+
+[compat]
+PProf = "2, 3"

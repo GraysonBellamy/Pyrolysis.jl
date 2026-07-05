@@ -1,0 +1,17 @@
+# Isolated environment for the code-quality checks (Aqua + JET). Kept separate from
+# test/Project.toml because that env pins Enzyme/GPUCompiler in a way that blocks
+# adding new packages; quality tools only need Pyrolysis loaded, not the AD stack.
+# Pyrolysis is dev-tracked from the repo root (see this dir's Manifest.toml).
+# Run:  julia --project=test/quality test/quality/aqua.jl
+#       julia --project=test/quality test/quality/jet.jl
+[deps]
+Aqua = "4c88cf16-eb10-579e-8560-4a9242c79595"
+JET = "c3a54625-cd67-489e-a8e7-0a5a0ff4e31b"
+Pyrolysis = "910b54fb-7370-4696-a92c-2242b531a32e"
+
+[sources]
+Pyrolysis = {path = "../.."}
+
+[compat]
+Aqua = "0.8"
+JET = "0.9, 0.10, 0.11"

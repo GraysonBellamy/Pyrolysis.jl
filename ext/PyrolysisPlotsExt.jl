@@ -1,0 +1,72 @@
+"""
+PyrolysisPlotsExt — Plots.jl recipes for `PyrolysisSolution`.
+
+Loaded automatically when both `Pyrolysis` and `Plots` (or `RecipesBase`)
+are available in the user's environment. Consumes the fixed core schema
+of `PyrolysisSolution` (`t`, `T`, `ξ`, `z`, `surface_T`, `mass_loss_rate`,
+`energy_residual`) so the recipes work regardless of which optional
+diagnostics extras were turned on.
+
+# Usage
+
+```julia
+using Pyrolysis, Plots
+sol = solve(problem)
+
+plot(sol)                   # surface temperature trace (default)
+plot(sol; kind = :heatmap)  # T(z, t) heatmap
+plot(sol; kind = :mlr)      # mass-loss-rate curve
+plot(sol; kind = :residual) # energy-conservation residual
+plot(sol; kind = :surface_T)# surface-temperature trace (explicit)
+```
+"""
+module PyrolysisPlotsExt
+
+using Pyrolysis: PyrolysisSolution
+using RecipesBase: @recipe, @series
+
+# Default `plot(sol)` is the surface-temperature trace — inexpensive and
+# gives a quick at-a-glance view of the solve.
+@recipe function f(sol::PyrolysisSolution; kind = :surface_T)
+    if kind === :surface_T
+        seriestype --> :line
+        xguide --> "time [s]"
+        yguide --> "surface temperature [K]"
+        title --> "Surface temperature"
+        legend --> false
+        return sol.t, sol.surface_T
+    elseif kind === :mlr
+        seriestype --> :line
+        xguide --> "time [s]"
+        yguide --> "mass-loss rate [kg/(m²·s)]"
+        title --> "Mass-loss rate"
+        legend --> false
+        return sol.t, sol.mass_loss_rate
+    elseif kind === :residual
+        seriestype --> :line
+        xguide --> "time [s]"
+        yguide --> "energy residual [W/m²]"
+        title --> "Energy-conservation residual"
+        legend --> false
+        # `energy_residual` is zero unless the conservation tracker was
+        # enabled; surface that to the user via the y-range.
+        return sol.t, sol.energy_residual
+    elseif kind === :heatmap
+        seriestype --> :heatmap
+        xguide --> "time [s]"
+        yguide --> "cell index (depth)"
+        title --> "Temperature T(z, t)"
+        colorbar_title --> "T [K]"
+        # `sol.T` is (n_cells, n_steps); pass time on x, cell index on y.
+        return sol.t, axes(sol.T, 1), sol.T
+    else
+        throw(
+            ArgumentError(
+                "Unknown plot kind: $(repr(kind)). " *
+                "Expected :surface_T, :mlr, :residual, or :heatmap.",
+            ),
+        )
+    end
+end
+
+end # module

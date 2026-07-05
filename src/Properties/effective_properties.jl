@@ -1,19 +1,25 @@
 """
 Effective property computations.
 
-Reference: Design Document Section 2.4
-
-PERFORMANCE NOTE: All functions that iterate over material.components use
-dispatch-based unrolling (explicit overloads for small tuple sizes) to avoid
-allocations from indexing heterogeneous tuples with runtime indices.
+PERFORMANCE NOTE: helpers that iterate over `material.components` are
+`@generated` so the loop is unrolled at compile time per concrete `NC`. This
+avoids the allocations that bare runtime indexing into a heterogeneous
+`Tuple{...}` would otherwise incur.
 """
 
 # ============================================================================
 # Gas Viscosity (for Darcy flow)
 # ============================================================================
 
+# Robustness floor for gas-property correlations with fractional powers of T
+# (Sutherland viscosity, Chapman-Enskog diffusivity). Newton trial states may
+# carry nonphysical temperatures; clamping keeps the residual evaluable so
+# the nonlinear solver can damp/reject the step instead of the solve dying
+# on a DomainError. 100 K is far below any physical pyrolysis state.
+const T_GAS_PROPERTY_FLOOR = 100.0  # K
+
 """
-	effective_gas_viscosity(T::Float64; μ_ref=1.81e-5, T_ref=300.0, S=110.0) -> Float64
+	effective_gas_viscosity(T::Float64; μ_ref=1.716e-5, T_ref=273.15, S=110.4) -> Float64
 
 Compute effective gas viscosity using Sutherland's law.
 
@@ -24,30 +30,45 @@ and is valid for air-like pyrolysis gases.
 
 # Arguments
 - `T`: Temperature [K]
-- `μ_ref`: Reference viscosity at T_ref [Pa·s] (default: 1.81e-5 for air at 300K)
-- `T_ref`: Reference temperature [K] (default: 300.0)
-- `S`: Sutherland constant [K] (default: 110.0 for air)
+- `μ_ref`: Reference viscosity at T_ref [Pa·s] (default: 1.716e-5 for air at 273.15 K)
+- `T_ref`: Reference temperature [K] (default: 273.15)
+- `S`: Sutherland constant [K] (default: 110.4 for air)
+
+The defaults are the canonical Sutherland air constants (μ₀ = 1.716e-5 Pa·s
+at 273.15 K, S = 110.4 K; e.g. White, *Viscous Fluid Flow*), giving
+μ(300 K) = 1.846e-5 Pa·s.
 
 # Returns
 - `μ`: Dynamic viscosity [Pa·s]
 
 # Example
 ```julia
-μ_300 = effective_gas_viscosity(300.0)   # ≈ 1.81e-5 Pa·s
-μ_600 = effective_gas_viscosity(600.0)   # ≈ 3.06e-5 Pa·s
+μ_300 = effective_gas_viscosity(300.0)   # ≈ 1.846e-5 Pa·s
+μ_600 = effective_gas_viscosity(600.0)   # ≈ 3.016e-5 Pa·s
 ```
 
 # Notes
 - Viscosity increases with temperature (unlike liquids)
 - Default parameters are for air; adjust S for other gases
 - Valid range approximately 200-2000 K
+- `T_ref` here is the viscosity-correlation reference (273.15 K), distinct
+  from the global enthalpy datum T_REF = 298.15 K — do not conflate the two
+- Temperatures below `T_GAS_PROPERTY_FLOOR` (100 K) are clamped: diverging
+  Newton trial states can present nonphysical (even negative) temperatures,
+  and `T^1.5` would throw a `DomainError` that kills the whole solve instead
+  of letting the nonlinear solver reject the step. The floor is far below
+  any physical pyrolysis state and below the correlation's validity range,
+  so it never binds on legitimate states.
 """
-@inline function effective_gas_viscosity(T::Float64;
-	μ_ref::Float64 = 1.81e-5,  # Pa·s at 300K (air)
-	T_ref::Float64 = 300.0,    # K
-	S::Float64 = 110.0)        # Sutherland constant for air
-	T_ratio = T / T_ref
-	return μ_ref * T_ratio^1.5 * (T_ref + S) / (T + S)
+@inline function effective_gas_viscosity(
+    T::Real;
+    μ_ref::Float64 = 1.716e-5,  # Pa·s at 273.15 K (canonical Sutherland air value)
+    T_ref::Float64 = 273.15,    # K
+    S::Float64 = 110.4,
+)        # Sutherland constant for air
+    T_eff = max(T, T_GAS_PROPERTY_FLOOR)
+    T_ratio = T_eff / T_ref
+    return μ_ref * T_ratio^1.5 * (T_ref + S) / (T_eff + S)
 end
 
 """
@@ -66,11 +87,11 @@ Could be extended to use Wilke's mixing rule for multi-component mixtures.
 # Returns
 - `μ`: Dynamic viscosity [Pa·s]
 """
-@inline function mixture_gas_viscosity(ξ::NTuple{NC, Float64}, T::Float64, material) where NC
-	# For simplicity, use single effective viscosity
-	# Could extend to Wilke mixture rule if needed for accuracy with
-	# multi-component gas mixtures of very different molecular weights
-	return effective_gas_viscosity(T)
+@inline function mixture_gas_viscosity(ξ::NTuple{NC,<:Real}, T::Real, material) where {NC}
+    # For simplicity, use single effective viscosity
+    # Could extend to Wilke mixture rule if needed for accuracy with
+    # multi-component gas mixtures of very different molecular weights
+    return effective_gas_viscosity(T)
 end
 
 # ============================================================================
@@ -108,18 +129,18 @@ Neufeld, Janzen, Aziz, J. Chem. Phys. 57, 1100 (1972)
 # Returns
 - `Ω_D`: Dimensionless diffusion collision integral
 """
-@inline function collision_integral_diffusion(T_star::Float64)
-	# Neufeld et al. correlation coefficients
-	A = 1.06036
-	B = 0.15610
-	C = 0.19300
-	D = 0.47635
-	E = 1.03587
-	F = 1.52996
-	G = 1.76474
-	H = 3.89411
+@inline function collision_integral_diffusion(T_star::Real)
+    # Neufeld et al. correlation coefficients
+    A = 1.06036
+    B = 0.15610
+    C = 0.19300
+    D = 0.47635
+    E = 1.03587
+    F = 1.52996
+    G = 1.76474
+    H = 3.89411
 
-	return A / T_star^B + C / exp(D * T_star) + E / exp(F * T_star) + G / exp(H * T_star)
+    return A / T_star^B + C / exp(D * T_star) + E / exp(F * T_star) + G / exp(H * T_star)
 end
 
 """
@@ -157,10 +178,10 @@ For pyrolysis gases, if σ and ε_k are not provided, uses:
 # Examples
 ```julia
 # Water vapor at 500 K
-D_H2O = chapman_enskog_diffusivity(500.0, 0.018)  # ≈ 4.0e-5 m²/s
+D_H2O = chapman_enskog_diffusivity(500.0, 0.018)  # ≈ 5.41e-5 m²/s
 
-# CO₂ at 600 K  
-D_CO2 = chapman_enskog_diffusivity(600.0, 0.044)  # ≈ 3.2e-5 m²/s
+# CO₂ at 600 K
+D_CO2 = chapman_enskog_diffusivity(600.0, 0.044)  # ≈ 5.44e-5 m²/s
 
 # With explicit Lennard-Jones parameters
 D_CH4 = chapman_enskog_diffusivity(500.0, 0.016, σ=3.758, ε_k=148.6)
@@ -176,63 +197,71 @@ D_CH4 = chapman_enskog_diffusivity(500.0, 0.016, σ=3.758, ε_k=148.6)
 - Assumes ideal gas behavior
 - Uses combining rules: σ_AB = (σ_A + σ_B)/2, ε_AB = √(ε_A × ε_B)
 """
-@inline function chapman_enskog_diffusivity(T::Float64, M::Float64;
-	P::Float64 = P_REF,
-	σ::Union{Float64, Nothing} = nothing,
-	ε_k::Union{Float64, Nothing} = nothing)
+@inline function chapman_enskog_diffusivity(
+    T::Real,
+    M::Real;
+    P::Float64 = P_REF,
+    σ::Union{Float64,Nothing} = nothing,
+    ε_k::Union{Float64,Nothing} = nothing,
+)
 
-	# Estimate Lennard-Jones parameters if not provided
-	# Using correlations for organic vapors
-	σ_species = if σ !== nothing
-		σ
-	else
-		# Rough estimate: σ ≈ 1.18 × (Vc)^(1/3) where Vc ~ M/ρ_c
-		# For organic gases, σ typically 3-6 Å, estimate from M
-		3.5 + 0.5 * log10(max(M / 0.016, 1.0))  # Å, anchored to CH4 ≈ 3.8 Å
-	end
+    # Estimate Lennard-Jones parameters if not provided
+    # Using correlations for organic vapors
+    σ_species = if σ !== nothing
+        σ
+    else
+        # Rough estimate: σ ≈ 1.18 × (Vc)^(1/3) where Vc ~ M/ρ_c
+        # For organic gases, σ typically 3-6 Å, estimate from M
+        3.5 + 0.5 * log10(max(M / 0.016, 1.0))  # Å, anchored to CH4 ≈ 3.8 Å
+    end
 
-	ε_k_species = if ε_k !== nothing
-		ε_k
-	else
-		# Rough estimate: ε/k ≈ 0.77 × Tc
-		# For organics, ε/k typically 100-600 K
-		150.0 + 100.0 * (M / 0.044)  # K, scaled roughly to molecular weight
-	end
+    ε_k_species = if ε_k !== nothing
+        ε_k
+    else
+        # Rough estimate: ε/k ≈ 0.77 × Tc
+        # For organics, ε/k typically 100-600 K
+        150.0 + 100.0 * (M / 0.044)  # K, scaled roughly to molecular weight
+    end
 
-	# Combining rules for binary interaction parameters
-	σ_AB = 0.5 * (σ_species + SIGMA_AIR)  # Å
-	ε_k_AB = sqrt(ε_k_species * EPSILON_K_AIR)  # K
+    # Combining rules for binary interaction parameters
+    σ_AB = 0.5 * (σ_species + SIGMA_AIR)  # Å
+    ε_k_AB = sqrt(ε_k_species * EPSILON_K_AIR)  # K
 
-	# Reduced temperature
-	T_star = T / ε_k_AB
+    # Clamp nonphysical Newton trial temperatures (see T_GAS_PROPERTY_FLOOR):
+    # `T^1.5` below would throw a DomainError on a negative iterate.
+    T_eff = max(T, T_GAS_PROPERTY_FLOOR)
 
-	# Collision integral
-	Ω_D = collision_integral_diffusion(T_star)
+    # Reduced temperature
+    T_star = T_eff / ε_k_AB
 
-	# Chapman-Enskog diffusivity
-	# Standard formula (Bird, Stewart, Lightfoot):
-	# D_AB = 1.8583×10⁻³ × T^(3/2) × √(1/M_A + 1/M_B) / (P × σ_AB² × Ω_D)
-	# where T in K, M in g/mol, P in atm, σ in Å → D in cm²/s
-	#
-	# Convert units:
-	# - M: kg/mol → g/mol (multiply by 1000)
-	# - P: Pa → atm (divide by 101325)
-	# - D: cm²/s → m²/s (multiply by 1e-4)
+    # Collision integral
+    Ω_D = collision_integral_diffusion(T_star)
 
-	M_gmol = M * 1000.0        # kg/mol → g/mol
-	M_air_gmol = M_AIR * 1000.0  # kg/mol → g/mol
-	P_atm = P / 101325.0      # Pa → atm
+    # Chapman-Enskog diffusivity
+    # Standard formula (Bird, Stewart, Lightfoot):
+    # D_AB = 1.8583×10⁻³ × T^(3/2) × √(1/M_A + 1/M_B) / (P × σ_AB² × Ω_D)
+    # where T in K, M in g/mol, P in atm, σ in Å → D in cm²/s
+    #
+    # Convert units:
+    # - M: kg/mol → g/mol (multiply by 1000)
+    # - P: Pa → atm (divide by 101325)
+    # - D: cm²/s → m²/s (multiply by 1e-4)
 
-	# Reduced mass factor with M in g/mol
-	reduced_mass_factor = sqrt(1.0 / M_gmol + 1.0 / M_air_gmol)
+    M_gmol = M * 1000.0        # kg/mol → g/mol
+    M_air_gmol = M_AIR * 1000.0  # kg/mol → g/mol
+    P_atm = P / 101325.0      # Pa → atm
 
-	# D in cm²/s
-	D_cm2s = CHAPMAN_ENSKOG_PREFACTOR * T^1.5 * reduced_mass_factor / (P_atm * σ_AB^2 * Ω_D)
+    # Reduced mass factor with M in g/mol
+    reduced_mass_factor = sqrt(1.0 / M_gmol + 1.0 / M_air_gmol)
 
-	# Convert to m²/s
-	D = D_cm2s * 1e-4
+    # D in cm²/s
+    D_cm2s =
+        CHAPMAN_ENSKOG_PREFACTOR * T_eff^1.5 * reduced_mass_factor / (P_atm * σ_AB^2 * Ω_D)
 
-	return D
+    # Convert to m²/s
+    D = D_cm2s * 1e-4
+
+    return D
 end
 
 """
@@ -242,203 +271,112 @@ Compute Chapman-Enskog diffusivity for a gas component.
 
 Uses component's molar mass and any stored Lennard-Jones parameters.
 """
-@inline function chapman_enskog_diffusivity(T::Float64, comp; P::Float64 = P_REF)
-	if comp.phase != GAS || comp.molar_mass < 1e-6
-		return 0.0  # No diffusion for non-gas components
-	end
-	return chapman_enskog_diffusivity(T, comp.molar_mass; P = P)
-end
-
-"""
-	chapman_enskog_λ(T, M; P=P_REF, σ=nothing, ε_k=nothing) -> Float64
-
-Convert Chapman-Enskog diffusivity to equivalent gas transfer coefficient λ.
-
-The relationship between diffusivity D and gas transfer coefficient λ is:
-- For Fickian flux: J = -λ ρ ∂Y/∂x = -D ∂ξ/∂x
-- Therefore: λ = D / ρ_gas ≈ D × (R T) / (P M)
-
-For consistency with existing λ-based transport, this returns the equivalent λ.
-
-# Arguments
-- `T`: Temperature [K]  
-- `M`: Molar mass [kg/mol]
-- `P`: Pressure [Pa]
-- `σ, ε_k`: Optional Lennard-Jones parameters [Å, K]
-
-# Returns  
-- `λ`: Equivalent gas transfer coefficient [m²/s]
-
-# Note
-This λ should NOT be multiplied by the gas density in flux calculations
-when using the Fickian formulation J = -λ ρ ∂Y/∂x, since the density
-is already accounted for in the conversion.
-"""
-@inline function chapman_enskog_λ(T::Float64, M::Float64;
-	P::Float64 = P_REF,
-	σ::Union{Float64, Nothing} = nothing,
-	ε_k::Union{Float64, Nothing} = nothing)
-
-	D = chapman_enskog_diffusivity(T, M; P = P, σ = σ, ε_k = ε_k)
-
-	# Convert D [m²/s] to λ [m²/s]
-	# D = λ × (ρ_gas / something) but our formulation is:
-	# J = -λ × ρ_face × ∂Y/∂x = -λ × ρ_face × ∂(ξ/ρ)/∂x
-	# Standard Fick: J = -D × ∂ξ/∂x
-	# So the relationship is complex. For gas in gas diffusion, λ ≈ D is reasonable.
-	return D
+@inline function chapman_enskog_diffusivity(T::Real, comp; P::Real = P_REF)
+    if !is_gas(comp) || molar_mass(comp) < 1e-6
+        return 0.0  # No diffusion for non-gas components
+    end
+    return chapman_enskog_diffusivity(T, molar_mass(comp); P = P)
 end
 
 # ============================================================================
 # Heat capacity helpers
 # ============================================================================
 
-@inline function _sum_heat_capacity(ξ, T, comps::Tuple{C}, ::Val{1}) where C
-	return ξ[1] * comps[1].heat_capacity(T)
-end
-
-@inline function _sum_heat_capacity(ξ, T, comps::Tuple{C1, C2}, ::Val{2}) where {C1, C2}
-	return ξ[1] * comps[1].heat_capacity(T) + ξ[2] * comps[2].heat_capacity(T)
-end
-
-@inline function _sum_heat_capacity(ξ, T, comps::Tuple{C1, C2, C3}, ::Val{3}) where {C1, C2, C3}
-	return ξ[1] * comps[1].heat_capacity(T) + ξ[2] * comps[2].heat_capacity(T) + ξ[3] * comps[3].heat_capacity(T)
-end
-
-# Generic fallback for any number of components (NC > 3) using generated function
-@generated function _sum_heat_capacity(ξ, T, comps::Tuple, ::Val{NC}) where NC
-	expr = quote
-		result = 0.0
-	end
-	for i in 1:NC
-		push!(expr.args, :(result += ξ[$i] * comps[$i].heat_capacity(T)))
-	end
-	push!(expr.args, :(return result))
-	return expr
+@generated function _sum_heat_capacity(ξ, T, comps::Tuple, ::Val{NC}) where {NC}
+    expr = quote
+        result = zero(_prop_type(ξ, T))
+    end
+    for i = 1:NC
+        # is_gas is a compile-time predicate on the singleton component type;
+        # the branch is eliminated at codegen — no runtime cost.
+        push!(expr.args, quote
+            if !is_gas(comps[$i])
+                result += ξ[$i] * comps[$i].heat_capacity(T)
+            end
+        end)
+    end
+    push!(expr.args, :(return result))
+    return expr
 end
 
 """
 	effective_heat_capacity(ξ::NTuple{NC,Float64}, T::Float64, material::Material) -> Float64
 
-Compute effective volumetric heat capacity [J/(m³·K)].
+Compute the **matrix** volumetric heat capacity used in the temperature-storage
+term of Formulation A's energy equation:
 
-ρcₚ = Σⱼ ξⱼ cₚ,ⱼ(T)
+```
+ρcₚ_eff = Σⱼ∈{solid,liquid} ξⱼ · cₚ,ⱼ(T)
+```
+
+Gas components are excluded — their sensible heat is carried by the volumetric
+advection source `−Σ_g cp_g J_g · ∇T` (`S_conv`). This is a **quasi-steady-gas
+approximation** (gas residence time ≪ diffusion time): in-pore gas storage
+`Σ(ρc)_g ∂T/∂t` is dropped (~0.2 % of the matrix term at 1 atm, scaling with
+pressure). Note this is *not* literally the ThermaKin convention — ThermaKin
+Eq.17 *keeps* `Σ_j ξ_j c_j` summed over all components including gas; the
+exclusion here is the FDS/Gpyro-style approximation. The diagnostics callback
+exposes the cost of this approximation as the *physical-form residual*.
+
+The result is floored at `Materials.RHO_CP_FLOOR` (1e3 J/(m³·K) — the pore-gas
+thermal mass scale): a fully-converted (100%-gas-yield) Eulerian cell would
+otherwise drive the matrix-only ρcₚ → 0 and the `1/ρcₚ` factor in `dT/dt`
+into a stiffness explosion. The floor is inside this function so every
+consumer — residual, property cache, and the structured-Jacobian operators
+that extract `∂ρcₚ/∂(T, ξ)` through Duals — sees the identical clamped value
+and (zero) derivative at the floor.
 """
-@inline function effective_heat_capacity(ξ::NTuple{NC, Float64}, T::Float64, material) where NC
-	return _sum_heat_capacity(ξ, T, material.components, Val(NC))
-end
-
-# ============================================================================
-# Specific heat (mass-averaged) helpers
-# ============================================================================
-
-@inline function _sum_specific_heat(Y, T, comps::Tuple{C}, ::Val{1}) where C
-	return Y[1] * comps[1].heat_capacity(T)
-end
-
-@inline function _sum_specific_heat(Y, T, comps::Tuple{C1, C2}, ::Val{2}) where {C1, C2}
-	return Y[1] * comps[1].heat_capacity(T) + Y[2] * comps[2].heat_capacity(T)
-end
-
-@inline function _sum_specific_heat(Y, T, comps::Tuple{C1, C2, C3}, ::Val{3}) where {C1, C2, C3}
-	return Y[1] * comps[1].heat_capacity(T) + Y[2] * comps[2].heat_capacity(T) + Y[3] * comps[3].heat_capacity(T)
-end
-
-# Generic fallback for any number of components (NC > 3) using generated function
-@generated function _sum_specific_heat(Y, T, comps::Tuple, ::Val{NC}) where NC
-	expr = quote
-		result = 0.0
-	end
-	for i in 1:NC
-		push!(expr.args, :(result += Y[$i] * comps[$i].heat_capacity(T)))
-	end
-	push!(expr.args, :(return result))
-	return expr
+@inline function effective_heat_capacity(ξ::NTuple{NC,<:Real}, T::Real, material) where {NC}
+    return max(_sum_heat_capacity(ξ, T, material.components, Val(NC)), RHO_CP_FLOOR)
 end
 
 """
-	effective_specific_heat(ξ::NTuple{NC,Float64}, T::Float64, material::Material) -> Float64
+	total_heat_capacity(ξ::NTuple{NC,Float64}, T::Float64, material::Material) -> Float64
 
-Compute mass-averaged specific heat capacity [J/(kg·K)].
+Compute the **total** (matrix + gas) volumetric heat capacity. Used by the
+diagnostics tracker to quantify the storage approximation cost via the
+physical-form residual; not used by the RHS itself.
 
-cₚ = Σⱼ Yⱼ cₚ,ⱼ(T)
+```
+ρcₚ_total = Σⱼ ξⱼ · cₚ,ⱼ(T)
+```
 """
-@inline function effective_specific_heat(ξ::NTuple{NC, Float64}, T::Float64, material) where NC
-	Y = mass_fractions(ξ)
-	return _sum_specific_heat(Y, T, material.components, Val(NC))
+@inline function total_heat_capacity(ξ::NTuple{NC,<:Real}, T::Real, material) where {NC}
+    return _sum_heat_capacity_total(ξ, T, material.components, Val(NC))
+end
+
+@generated function _sum_heat_capacity_total(ξ, T, comps::Tuple, ::Val{NC}) where {NC}
+    expr = quote
+        result = zero(_prop_type(ξ, T))
+    end
+    for i = 1:NC
+        push!(expr.args, :(result += ξ[$i] * comps[$i].heat_capacity(T)))
+    end
+    push!(expr.args, :(return result))
+    return expr
 end
 
 # ============================================================================
 # Conductivity helpers
 # ============================================================================
 
-@inline function _conductivity_sums(v, T, comps::Tuple{C}, ::Val{1}) where C
-	k = comps[1].thermal_conductivity(T)
-	k_parallel = v[1] * k
-	inv_k_series = v[1] > 1e-20 && k > 1e-20 ? v[1] / k : 0.0
-	return k_parallel, inv_k_series
-end
-
-@inline function _conductivity_sums(v, T, comps::Tuple{C1, C2}, ::Val{2}) where {C1, C2}
-	k1 = comps[1].thermal_conductivity(T)
-	k2 = comps[2].thermal_conductivity(T)
-
-	k_parallel = v[1] * k1 + v[2] * k2
-
-	inv_k_series = 0.0
-	if v[1] > 1e-20 && k1 > 1e-20
-		;
-		inv_k_series += v[1] / k1;
-	end
-	if v[2] > 1e-20 && k2 > 1e-20
-		;
-		inv_k_series += v[2] / k2;
-	end
-
-	return k_parallel, inv_k_series
-end
-
-@inline function _conductivity_sums(v, T, comps::Tuple{C1, C2, C3}, ::Val{3}) where {C1, C2, C3}
-	k1 = comps[1].thermal_conductivity(T)
-	k2 = comps[2].thermal_conductivity(T)
-	k3 = comps[3].thermal_conductivity(T)
-
-	k_parallel = v[1] * k1 + v[2] * k2 + v[3] * k3
-
-	inv_k_series = 0.0
-	if v[1] > 1e-20 && k1 > 1e-20
-		;
-		inv_k_series += v[1] / k1;
-	end
-	if v[2] > 1e-20 && k2 > 1e-20
-		;
-		inv_k_series += v[2] / k2;
-	end
-	if v[3] > 1e-20 && k3 > 1e-20
-		;
-		inv_k_series += v[3] / k3;
-	end
-
-	return k_parallel, inv_k_series
-end
-
-# Generic fallback for any number of components (NC > 3) using generated function
-@generated function _conductivity_sums(v, T, comps::Tuple, ::Val{NC}) where NC
-	expr = quote
-		k_parallel = 0.0
-		inv_k_series = 0.0
-	end
-	for i in 1:NC
-		push!(expr.args, quote
-			k = comps[$i].thermal_conductivity(T)
-			k_parallel += v[$i] * k
-			if v[$i] > 1e-20 && k > 1e-20
-				inv_k_series += v[$i] / k
-			end
-		end)
-	end
-	push!(expr.args, :(return k_parallel, inv_k_series))
-	return expr
+@generated function _conductivity_sums(v, T, comps::Tuple, ::Val{NC}) where {NC}
+    expr = quote
+        W = _prop_type(v, T)
+        k_parallel = zero(W)
+        inv_k_series = zero(W)
+    end
+    for i = 1:NC
+        push!(expr.args, quote
+            k = comps[$i].thermal_conductivity(T)
+            k_parallel += v[$i] * k
+            if v[$i] > 1e-20 && k > 1e-20
+                inv_k_series += v[$i] / k
+            end
+        end)
+    end
+    push!(expr.args, :(return k_parallel, inv_k_series))
+    return expr
 end
 
 # ============================================================================
@@ -476,6 +414,11 @@ Unlike parallel/series bounds, Bruggeman can capture:
 - Percolation transitions (property drop when continuous phase breaks)
 - Non-linear property changes with composition
 
+An insulating phase (k ≤ 1e-20) contributes its exact k → 0 limit −v/2 to the
+self-consistency equation. That term is what produces the percolation
+threshold: a conducting phase dispersed in an insulator yields k_eff = 0 until
+its volume fraction exceeds 1/3 (e.g. v = (0.5, 0.5), k = (1, 0) → k_eff = 0.25).
+
 # Notes
 - For two phases, there's an analytical solution (not used here for generality)
 - Initial guess is volume-weighted average (parallel mixing)
@@ -485,94 +428,111 @@ Unlike parallel/series bounds, Bruggeman can capture:
 ```julia
 v = (0.7, 0.3)  # 70% phase 1, 30% phase 2
 k = (1.0, 10.0)  # k₁ = 1, k₂ = 10
-k_eff = bruggeman_effective_property(v, k)  # ≈ 2.1 (between series=1.43 and parallel=3.7)
+k_eff = bruggeman_effective_property(v, k)  # ≈ 2.261 (between series = 1.370 and parallel = 3.7)
 ```
 """
-@inline function bruggeman_effective_property(v::NTuple{NC, Float64}, k::NTuple{NC, Float64};
-	tol::Float64 = 1e-10, maxiter::Int = 100) where NC
+@inline function bruggeman_effective_property(
+    v::NTuple{NC,<:Real},
+    k::NTuple{NC,<:Real};
+    tol::Float64 = 1e-10,
+    maxiter::Int = 100,
+    k_init = nothing,
+) where {NC}
 
-	# Handle degenerate cases
-	total_v = sum(v)
-	if total_v < 1e-20
-		return 0.0
-	end
+    # Working scalar type: keeps every early return and the Newton state in
+    # one concrete type when `v`/`k` carry Duals (type-stable, no boxing).
+    W = promote_type(_prop_type(v), _prop_type(k))
 
-	# Count non-zero volume components and compute parallel bound for initial guess
-	k_eff = 0.0
-	n_active = 0
-	for i in 1:NC
-		if v[i] > 1e-20
-			k_eff += v[i] * k[i]  # Parallel mixing as initial guess
-			n_active += 1
-		end
-	end
-	k_eff /= total_v  # Normalize
+    # Handle degenerate cases
+    total_v = sum(v)
+    if total_v < 1e-20
+        return zero(W)
+    end
 
-	# Single component - return its property
-	if n_active == 1
-		return k_eff
-	end
+    # Count non-zero volume components and compute parallel bound (used either
+    # as the initial guess or as a fallback for warm-start when k_init looks
+    # unusable).
+    k_parallel = zero(W)
+    n_active = 0
+    for i = 1:NC
+        if v[i] > 1e-20
+            k_parallel += v[i] * k[i]
+            n_active += 1
+        end
+    end
+    k_parallel /= total_v
 
-	# Newton-Raphson iteration to solve Σ vⱼ(kⱼ - k_eff)/(kⱼ + 2k_eff) = 0
-	for _ in 1:maxiter
-		f = 0.0      # Function value
-		df = 0.0     # Derivative w.r.t. k_eff
+    # Bruggeman warm-start. If a positive `k_init` is supplied
+    # (typically the previous step's converged k_eff for this cell), seed
+    # Newton from it — saves 1–2 iterations on smooth time-stepping. Otherwise
+    # fall back to the parallel-mean initial guess.
+    k_eff = (k_init !== nothing && k_init > 1e-20) ? convert(W, k_init) : k_parallel
 
-		@inbounds for i in 1:NC
-			if v[i] > 1e-20 && k[i] > 1e-20
-				denom = k[i] + 2.0 * k_eff
-				if denom > 1e-20
-					f += v[i] * (k[i] - k_eff) / denom
-					# d/dk_eff of [v(k - k_eff)/(k + 2k_eff)]
-					# = v * [-(k + 2k_eff) - (k - k_eff)*2] / (k + 2k_eff)²
-					# = v * [-k - 2k_eff - 2k + 2k_eff] / (k + 2k_eff)²
-					# = v * [-3k] / (k + 2k_eff)²
-					df += v[i] * (-3.0 * k[i]) / (denom * denom)
-				end
-			end
-		end
+    # Single component - return its property
+    if n_active == 1
+        return k_parallel
+    end
 
-		# Newton update with safeguard
-		if abs(df) < 1e-20
-			break  # Derivative too small, can't continue
-		end
+    # Newton-Raphson iteration to solve Σ vⱼ(kⱼ - k_eff)/(kⱼ + 2k_eff) = 0
+    for _ = 1:maxiter
+        f = zero(W)      # Function value
+        df = zero(W)     # Derivative w.r.t. k_eff
 
-		dk = -f / df
+        @inbounds for i = 1:NC
+            if v[i] > 1e-20
+                if k[i] > 1e-20
+                    denom = k[i] + 2.0 * k_eff
+                    f += v[i] * (k[i] - k_eff) / denom
+                    # d/dk_eff of [v(k - k_eff)/(k + 2k_eff)]
+                    # = v * [-(k + 2k_eff) - (k - k_eff)*2] / (k + 2k_eff)²
+                    # = v * [-k - 2k_eff - 2k + 2k_eff] / (k + 2k_eff)²
+                    # = v * [-3k] / (k + 2k_eff)²
+                    df += v[i] * (-3.0 * k[i]) / (denom * denom)
+                else
+                    # Insulating phase: v(k - k_eff)/(k + 2k_eff) → -v/2 as
+                    # k → 0 (df contribution → 0). This term is what produces
+                    # the v = 1/3 percolation threshold; skipping it makes the
+                    # conducting phase percolate at any volume fraction.
+                    f -= 0.5 * v[i]
+                end
+            end
+        end
 
-		# Limit step size to prevent negative k_eff
-		if k_eff + dk < 0.1 * k_eff
-			dk = -0.9 * k_eff  # Don't reduce by more than 90%
-		end
+        # Newton update with safeguard
+        if abs(df) < 1e-20
+            break  # Derivative too small, can't continue
+        end
 
-		k_eff += dk
+        dk = -f / df
 
-		# Convergence check
-		if abs(f) < tol
-			break
-		end
-	end
+        # Limit step size to prevent negative k_eff
+        if k_eff + dk < 0.1 * k_eff
+            dk = -0.9 * k_eff  # Don't reduce by more than 90%
+        end
 
-	return max(k_eff, 0.0)
+        k_eff += dk
+
+        # Below the percolation threshold (conducting fraction ≤ 1/3) the root
+        # is k_eff = 0 and f < 0 for every k_eff > 0, so the step-capped Newton
+        # decays k_eff geometrically without ever satisfying |f| < tol. Stop
+        # once it has collapsed instead of burning maxiter.
+        if k_eff < 1e-30
+            return zero(W)
+        end
+
+        # Convergence check
+        if abs(f) < tol
+            break
+        end
+    end
+
+    return max(k_eff, zero(W))
 end
 
 # Helper to extract conductivities as tuple for Bruggeman
-@inline function _conductivity_tuple(T, comps::Tuple{C}, ::Val{1}) where C
-	return (comps[1].thermal_conductivity(T),)
-end
-
-@inline function _conductivity_tuple(T, comps::Tuple{C1, C2}, ::Val{2}) where {C1, C2}
-	return (comps[1].thermal_conductivity(T), comps[2].thermal_conductivity(T))
-end
-
-@inline function _conductivity_tuple(T, comps::Tuple{C1, C2, C3}, ::Val{3}) where {C1, C2, C3}
-	return (comps[1].thermal_conductivity(T),
-		comps[2].thermal_conductivity(T),
-		comps[3].thermal_conductivity(T))
-end
-
-@generated function _conductivity_tuple(T, comps::Tuple, ::Val{NC}) where NC
-	exprs = [:(comps[$i].thermal_conductivity(T)) for i in 1:NC]
-	return :(($(exprs...),))
+@generated function _conductivity_tuple(T, comps::Tuple, ::Val{NC}) where {NC}
+    exprs = [:(comps[$i].thermal_conductivity(T)) for i = 1:NC]
+    return :(($(exprs...),))
 end
 
 """
@@ -586,60 +546,65 @@ Uses the mixing rule specified in the material:
 - WEIGHTED: k = β·k_parallel + (1-β)·k_series
 - BRUGGEMAN: Σⱼ vⱼ(kⱼ - k_eff)/(kⱼ + 2k_eff) = 0
 
-Note: Uses solid_volume_fractions which excludes components with swelling_factor ≈ 0.
-This matches ThermaKin behavior: "when γ = 0, gaseous components do not contribute
-to the thermal conductivity" (ThermaKin2Ds Reference, Equations 8-10).
+Note: Uses `mixing_volume_fractions` — the swelling-weighted (matrix) volume
+fractions, excluding γ ≈ 0 components. This matches ThermaKin behavior: "when
+γ = 0, gaseous components do not contribute to the thermal conductivity"
+(ThermaKin2Ds Reference, Equations 8-10). For a fully depleted cell (no
+matrix volume left) it falls back to the actual phase occupancy so k_eff
+degrades to the gas-mixture conductivity instead of 0.
 """
-@inline function effective_conductivity(ξ::NTuple{NC, Float64}, T::Float64, material) where NC
-	# Use solid volume fractions - excludes gas with swelling_factor = 0
-	v = solid_volume_fractions(ξ, T, material)
+@inline function effective_conductivity(ξ::NTuple{NC,<:Real}, T::Real, material) where {NC}
+    v = mixing_volume_fractions(ξ, T, material)
+    return _conductivity_from_v(v, T, material)
+end
 
-	mixing = material.conductivity_mixing
-	if mixing == BRUGGEMAN
-		k_tuple = _conductivity_tuple(T, material.components, Val(NC))
-		return bruggeman_effective_property(v, k_tuple)
-	end
+# Cache-aware variant that takes pre-computed solid volume
+# fractions directly. Used by `update_properties!` to avoid recomputing
+# volume_fractions inside each effective-property call. The tuple type
+# constraint is intentionally loose — AD-derived volume fractions can be a
+# mixed-type tuple (some Float64 zeros, others Dual).
+#
+# The optional `k_init` seeds the Bruggeman Newton iteration
+# from the previous step's converged k_eff for this cell.
+@inline function _conductivity_from_v(
+    v::Tuple,
+    T::Real,
+    material::Material{NC};
+    k_init = nothing,
+) where {NC}
+    W = _prop_type(v, T)
+    mixing = material.mixing.k.rule
+    if mixing == BRUGGEMAN
+        k_tuple = _conductivity_tuple(T, material.components, Val(NC))
+        return convert(W, bruggeman_effective_property(v, k_tuple; k_init = k_init))
+    end
 
-	k_parallel, inv_k_series = _conductivity_sums(v, T, material.components, Val(NC))
-	k_series = inv_k_series > 1e-20 ? 1.0 / inv_k_series : 0.0
+    k_parallel, inv_k_series = _conductivity_sums(v, T, material.components, Val(NC))
+    k_series = inv_k_series > 1e-20 ? convert(W, 1.0 / inv_k_series) : zero(W)
 
-	# Apply mixing rule
-	if mixing == PARALLEL
-		return k_parallel
-	elseif mixing == SERIES
-		return k_series
-	else  # WEIGHTED
-		β = material.β
-		return β * k_parallel + (1.0 - β) * k_series
-	end
+    if mixing == PARALLEL
+        return k_parallel
+    elseif mixing == SERIES
+        return k_series
+    else  # WEIGHTED
+        β = material.mixing.k.β
+        return β * k_parallel + (1.0 - β) * k_series
+    end
 end
 
 # ============================================================================
 # Emissivity helpers
 # ============================================================================
 
-@inline function _sum_emissivity(v, comps::Tuple{C}, ::Val{1}) where C
-	return v[1] * comps[1].emissivity
-end
-
-@inline function _sum_emissivity(v, comps::Tuple{C1, C2}, ::Val{2}) where {C1, C2}
-	return v[1] * comps[1].emissivity + v[2] * comps[2].emissivity
-end
-
-@inline function _sum_emissivity(v, comps::Tuple{C1, C2, C3}, ::Val{3}) where {C1, C2, C3}
-	return v[1] * comps[1].emissivity + v[2] * comps[2].emissivity + v[3] * comps[3].emissivity
-end
-
-# Generic fallback for any number of components (NC > 3) using generated function
-@generated function _sum_emissivity(v, comps::Tuple, ::Val{NC}) where NC
-	expr = quote
-		result = 0.0
-	end
-	for i in 1:NC
-		push!(expr.args, :(result += v[$i] * comps[$i].emissivity))
-	end
-	push!(expr.args, :(return result))
-	return expr
+@generated function _sum_emissivity(v, comps::Tuple, ::Val{NC}) where {NC}
+    expr = quote
+        result = zero(_prop_type(v))
+    end
+    for i = 1:NC
+        push!(expr.args, :(result += v[$i] * comps[$i].emissivity))
+    end
+    push!(expr.args, :(return result))
+    return expr
 end
 
 """
@@ -649,44 +614,38 @@ Compute effective surface emissivity [-].
 
 ε_eff = Σⱼ vⱼ εⱼ
 
-Uses solid_volume_fractions to exclude gaseous components with swelling_factor ≈ 0.
-This matches ThermaKin's treatment of conductivity and is physically correct:
-surface emissivity is determined by the solid/liquid material at the surface,
-not by gases trapped within the porous structure. Gases with γ = 0 fill existing
-pores and don't contribute to surface radiative properties.
+Uses `mixing_volume_fractions` — swelling-weighted (matrix) volume fractions
+excluding γ ≈ 0 components. This matches ThermaKin's treatment of conductivity
+and is physically correct: surface emissivity is determined by the matrix
+material at the surface, not by gases trapped within the porous structure.
+For a fully depleted cell it falls back to the actual phase occupancy —
+for default transparent gases that still yields ε_eff = 0;
+`handle_depletion = true` merges such cells away in production.
 """
-@inline function effective_emissivity(ξ::NTuple{NC, Float64}, T::Float64, material) where NC
-	v = solid_volume_fractions(ξ, T, material)
-	ε_eff = _sum_emissivity(v, material.components, Val(NC))
-	return clamp(ε_eff, 0.0, 1.0)
+@inline function effective_emissivity(ξ::NTuple{NC,<:Real}, T::Real, material) where {NC}
+    v = mixing_volume_fractions(ξ, T, material)
+    return _emissivity_from_v(v, material)
+end
+
+# Cache-aware variant.
+@inline function _emissivity_from_v(v::Tuple, material::Material{NC}) where {NC}
+    ε_eff = _sum_emissivity(v, material.components, Val(NC))
+    return clamp(ε_eff, 0.0, 1.0)
 end
 
 # ============================================================================
 # Absorption helpers
 # ============================================================================
 
-@inline function _sum_absorption(ξ, comps::Tuple{C}, ::Val{1}) where C
-	return ξ[1] * comps[1].absorption_coeff
-end
-
-@inline function _sum_absorption(ξ, comps::Tuple{C1, C2}, ::Val{2}) where {C1, C2}
-	return ξ[1] * comps[1].absorption_coeff + ξ[2] * comps[2].absorption_coeff
-end
-
-@inline function _sum_absorption(ξ, comps::Tuple{C1, C2, C3}, ::Val{3}) where {C1, C2, C3}
-	return ξ[1] * comps[1].absorption_coeff + ξ[2] * comps[2].absorption_coeff + ξ[3] * comps[3].absorption_coeff
-end
-
-# Generic fallback for any number of components (NC > 3) using generated function
-@generated function _sum_absorption(ξ, comps::Tuple, ::Val{NC}) where NC
-	expr = quote
-		result = 0.0
-	end
-	for i in 1:NC
-		push!(expr.args, :(result += ξ[$i] * comps[$i].absorption_coeff))
-	end
-	push!(expr.args, :(return result))
-	return expr
+@generated function _sum_absorption(ξ, comps::Tuple, ::Val{NC}) where {NC}
+    expr = quote
+        result = zero(_prop_type(ξ))
+    end
+    for i = 1:NC
+        push!(expr.args, :(result += ξ[$i] * comps[$i].absorption_coeff))
+    end
+    push!(expr.args, :(return result))
+    return expr
 end
 
 """
@@ -698,127 +657,41 @@ Compute effective absorption coefficient [m⁻¹].
 
 where αⱼ is the mass absorption coefficient [m²/kg].
 """
-@inline function effective_absorption(ξ::NTuple{NC, Float64}, material) where NC
-	return _sum_absorption(ξ, material.components, Val(NC))
+@inline function effective_absorption(ξ::NTuple{NC,<:Real}, material) where {NC}
+    return _sum_absorption(ξ, material.components, Val(NC))
 end
 
 # ============================================================================
 # Gas transfer helpers
 # ============================================================================
 
-@inline function _gas_transfer_sums(v, T, comps::Tuple{C}, ::Val{1}) where C
-	λ = comps[1].gas_transfer_coeff(T)
-	λ_parallel = v[1] * λ
-	# For SERIES: if component has volume but zero transport, it blocks flow (infinite resistance)
-	inv_λ_series = if v[1] > 1e-20
-		λ > 1e-20 ? v[1] / λ : Inf
-	else
-		0.0
-	end
-	return λ_parallel, inv_λ_series
-end
-
-@inline function _gas_transfer_sums(v, T, comps::Tuple{C1, C2}, ::Val{2}) where {C1, C2}
-	λ1 = comps[1].gas_transfer_coeff(T)
-	λ2 = comps[2].gas_transfer_coeff(T)
-
-	λ_parallel = v[1] * λ1 + v[2] * λ2
-
-	# For SERIES: if component has volume but zero transport, it blocks flow (infinite resistance)
-	inv_λ_series = 0.0
-	if v[1] > 1e-20
-		if λ1 > 1e-20
-			inv_λ_series += v[1] / λ1
-		else
-			inv_λ_series = Inf  # Zero λ with nonzero volume blocks transport
-		end
-	end
-	if v[2] > 1e-20 && !isinf(inv_λ_series)
-		if λ2 > 1e-20
-			inv_λ_series += v[2] / λ2
-		else
-			inv_λ_series = Inf  # Zero λ with nonzero volume blocks transport
-		end
-	end
-
-	return λ_parallel, inv_λ_series
-end
-
-@inline function _gas_transfer_sums(v, T, comps::Tuple{C1, C2, C3}, ::Val{3}) where {C1, C2, C3}
-	λ1 = comps[1].gas_transfer_coeff(T)
-	λ2 = comps[2].gas_transfer_coeff(T)
-	λ3 = comps[3].gas_transfer_coeff(T)
-
-	λ_parallel = v[1] * λ1 + v[2] * λ2 + v[3] * λ3
-
-	# For SERIES: if component has volume but zero transport, it blocks flow (infinite resistance)
-	inv_λ_series = 0.0
-	if v[1] > 1e-20
-		if λ1 > 1e-20
-			inv_λ_series += v[1] / λ1
-		else
-			inv_λ_series = Inf
-		end
-	end
-	if v[2] > 1e-20 && !isinf(inv_λ_series)
-		if λ2 > 1e-20
-			inv_λ_series += v[2] / λ2
-		else
-			inv_λ_series = Inf
-		end
-	end
-	if v[3] > 1e-20 && !isinf(inv_λ_series)
-		if λ3 > 1e-20
-			inv_λ_series += v[3] / λ3
-		else
-			inv_λ_series = Inf
-		end
-	end
-
-	return λ_parallel, inv_λ_series
-end
-
-# Generic fallback for any number of components (NC > 3) using generated function
-@generated function _gas_transfer_sums(v, T, comps::Tuple, ::Val{NC}) where NC
-	expr = quote
-		λ_parallel = 0.0
-		inv_λ_series = 0.0
-	end
-	for i in 1:NC
-		push!(expr.args, quote
-			λ = comps[$i].gas_transfer_coeff(T)
-			λ_parallel += v[$i] * λ
-			if v[$i] > 1e-20 && !isinf(inv_λ_series)
-				if λ > 1e-20
-					inv_λ_series += v[$i] / λ
-				else
-					inv_λ_series = Inf
-				end
-			end
-		end)
-	end
-	push!(expr.args, :(return λ_parallel, inv_λ_series))
-	return expr
+@generated function _gas_transfer_sums(v, T, comps::Tuple, ::Val{NC}) where {NC}
+    expr = quote
+        W = _prop_type(v, T)
+        λ_parallel = zero(W)
+        inv_λ_series = zero(W)
+    end
+    for i = 1:NC
+        push!(expr.args, quote
+            λ = comps[$i].gas_transfer_coeff(T)
+            λ_parallel += v[$i] * λ
+            if v[$i] > 1e-20 && !isinf(inv_λ_series)
+                if λ > 1e-20
+                    inv_λ_series += v[$i] / λ
+                else
+                    inv_λ_series = oftype(inv_λ_series, Inf)
+                end
+            end
+        end)
+    end
+    push!(expr.args, :(return λ_parallel, inv_λ_series))
+    return expr
 end
 
 # Helper to extract gas transfer coefficients as tuple for Bruggeman
-@inline function _gas_transfer_tuple(T, comps::Tuple{C}, ::Val{1}) where C
-	return (comps[1].gas_transfer_coeff(T),)
-end
-
-@inline function _gas_transfer_tuple(T, comps::Tuple{C1, C2}, ::Val{2}) where {C1, C2}
-	return (comps[1].gas_transfer_coeff(T), comps[2].gas_transfer_coeff(T))
-end
-
-@inline function _gas_transfer_tuple(T, comps::Tuple{C1, C2, C3}, ::Val{3}) where {C1, C2, C3}
-	return (comps[1].gas_transfer_coeff(T),
-		comps[2].gas_transfer_coeff(T),
-		comps[3].gas_transfer_coeff(T))
-end
-
-@generated function _gas_transfer_tuple(T, comps::Tuple, ::Val{NC}) where NC
-	exprs = [:(comps[$i].gas_transfer_coeff(T)) for i in 1:NC]
-	return :(($(exprs...),))
+@generated function _gas_transfer_tuple(T, comps::Tuple, ::Val{NC}) where {NC}
+    exprs = [:(comps[$i].gas_transfer_coeff(T)) for i = 1:NC]
+    return :(($(exprs...),))
 end
 
 """
@@ -826,122 +699,79 @@ end
 
 Compute effective gas transfer coefficient [m²/s].
 
-Uses the same mixing rules as conductivity:
+Uses the same volume-fraction mixing *rules* as conductivity, EXCEPT BRUGGEMAN:
 - PARALLEL: λ = Σⱼ vⱼ λⱼ
 - SERIES: λ = 1 / Σⱼ (vⱼ / λⱼ)
 - WEIGHTED: λ = β·λ_parallel + (1-β)·λ_series
-- BRUGGEMAN: Σⱼ vⱼ(λⱼ - λ_eff)/(λⱼ + 2λ_eff) = 0
+
+but a different volume-fraction *basis*: the all-phase occupancy
+[`volume_fractions`](@ref) (gas included), not the matrix basis
+[`solid_volume_fractions`](@ref) used for k and ε — gas diffusion happens
+through the pore space, which the matrix basis excludes.
+
+BRUGGEMAN is NOT supported for gas transfer: the EMT closure has no physical
+justification for diffusivities, so this function throws an `ArgumentError` if
+`material.mixing.λ.rule == BRUGGEMAN`. Use PARALLEL (default), SERIES, or WEIGHTED.
 """
-@inline function effective_gas_transfer(ξ::NTuple{NC, Float64}, T::Float64, material) where NC
-	v = volume_fractions(ξ, T, material)
+@inline function effective_gas_transfer(ξ::NTuple{NC,<:Real}, T::Real, material) where {NC}
+    v = volume_fractions(ξ, T, material)
+    return _gas_transfer_from_v(v, T, material)
+end
 
-	mixing = material.gas_transfer_mixing
-	if mixing == BRUGGEMAN
-		λ_tuple = _gas_transfer_tuple(T, material.components, Val(NC))
-		return bruggeman_effective_property(v, λ_tuple)
-	end
+# Cache-aware variant.
+@inline function _gas_transfer_from_v(v::Tuple, T::Real, material::Material{NC}) where {NC}
+    mixing = material.mixing.λ.rule
+    if mixing == BRUGGEMAN
+        throw(
+            ArgumentError(
+                "BRUGGEMAN mixing is not supported for gas-transfer (λ); the EMT closure has no physical justification for diffusivities. Use PARALLEL (default), SERIES, or WEIGHTED.",
+            ),
+        )
+    end
 
-	λ_parallel, inv_λ_series = _gas_transfer_sums(v, T, material.components, Val(NC))
-	λ_series = inv_λ_series > 1e-20 ? 1.0 / inv_λ_series : 0.0
+    W = _prop_type(v, T)
+    λ_parallel, inv_λ_series = _gas_transfer_sums(v, T, material.components, Val(NC))
+    λ_series = inv_λ_series > 1e-20 ? convert(W, 1.0 / inv_λ_series) : zero(W)
 
-	# Apply mixing rule
-	if mixing == PARALLEL
-		return λ_parallel
-	elseif mixing == SERIES
-		return λ_series
-	else  # WEIGHTED
-		β = material.β_λ
-		return β * λ_parallel + (1.0 - β) * λ_series
-	end
+    if mixing == PARALLEL
+        return λ_parallel
+    elseif mixing == SERIES
+        return λ_series
+    else  # WEIGHTED
+        β = material.mixing.λ.β
+        return β * λ_parallel + (1.0 - β) * λ_series
+    end
 end
 
 # ============================================================================
 # Effective Permeability (Component-Based)
 # ============================================================================
 
-# Helper: compute parallel and series sums for permeability
-@inline function _permeability_sums(v, T, comps::Tuple{C}, ::Val{1}) where C
-	κ = get_permeability(comps[1], T)
-	κ_parallel = v[1] * κ
-	inv_κ_series = v[1] > 1e-20 && κ > 1e-30 ? v[1] / κ : 0.0
-	return κ_parallel, inv_κ_series
-end
-
-@inline function _permeability_sums(v, T, comps::Tuple{C1, C2}, ::Val{2}) where {C1, C2}
-	κ1 = get_permeability(comps[1], T)
-	κ2 = get_permeability(comps[2], T)
-
-	κ_parallel = v[1] * κ1 + v[2] * κ2
-
-	inv_κ_series = 0.0
-	if v[1] > 1e-20 && κ1 > 1e-30
-		inv_κ_series += v[1] / κ1
-	end
-	if v[2] > 1e-20 && κ2 > 1e-30
-		inv_κ_series += v[2] / κ2
-	end
-
-	return κ_parallel, inv_κ_series
-end
-
-@inline function _permeability_sums(v, T, comps::Tuple{C1, C2, C3}, ::Val{3}) where {C1, C2, C3}
-	κ1 = get_permeability(comps[1], T)
-	κ2 = get_permeability(comps[2], T)
-	κ3 = get_permeability(comps[3], T)
-
-	κ_parallel = v[1] * κ1 + v[2] * κ2 + v[3] * κ3
-
-	inv_κ_series = 0.0
-	if v[1] > 1e-20 && κ1 > 1e-30
-		inv_κ_series += v[1] / κ1
-	end
-	if v[2] > 1e-20 && κ2 > 1e-30
-		inv_κ_series += v[2] / κ2
-	end
-	if v[3] > 1e-20 && κ3 > 1e-30
-		inv_κ_series += v[3] / κ3
-	end
-
-	return κ_parallel, inv_κ_series
-end
-
-# Generic fallback for any number of components (NC > 3) using generated function
-@generated function _permeability_sums(v, T, comps::Tuple, ::Val{NC}) where NC
-	expr = quote
-		κ_parallel = 0.0
-		inv_κ_series = 0.0
-	end
-	for i in 1:NC
-		push!(expr.args, quote
-			κ = get_permeability(comps[$i], T)
-			κ_parallel += v[$i] * κ
-			if v[$i] > 1e-20 && κ > 1e-30
-				inv_κ_series += v[$i] / κ
-			end
-		end)
-	end
-	push!(expr.args, :(return κ_parallel, inv_κ_series))
-	return expr
-end
-
-# Helper to extract permeabilities as tuple for Bruggeman
-@inline function _permeability_tuple(T, comps::Tuple{C}, ::Val{1}) where C
-	return (get_permeability(comps[1], T),)
-end
-
-@inline function _permeability_tuple(T, comps::Tuple{C1, C2}, ::Val{2}) where {C1, C2}
-	return (get_permeability(comps[1], T), get_permeability(comps[2], T))
-end
-
-@inline function _permeability_tuple(T, comps::Tuple{C1, C2, C3}, ::Val{3}) where {C1, C2, C3}
-	return (get_permeability(comps[1], T),
-		get_permeability(comps[2], T),
-		get_permeability(comps[3], T))
-end
-
-@generated function _permeability_tuple(T, comps::Tuple, ::Val{NC}) where NC
-	exprs = [:(get_permeability(comps[$i], T)) for i in 1:NC]
-	return :(($(exprs...),))
+# Helper: compute parallel and series sums for permeability on the
+# renormalized solid basis (`solid_volume_fractions`). An impermeable phase
+# (κ ≈ 0) with finite volume fraction makes the Wiener series (lower) bound
+# exactly 0 — signalled by `inv_κ_series = Inf`, matching `_gas_transfer_sums`.
+@generated function _permeability_sums(v, T, comps::Tuple, ::Val{NC}) where {NC}
+    expr = quote
+        W = _prop_type(v, T)
+        κ_parallel = zero(W)
+        inv_κ_series = zero(W)
+    end
+    for i = 1:NC
+        push!(expr.args, quote
+            κ = get_permeability(comps[$i], T)
+            κ_parallel += v[$i] * κ
+            if v[$i] > 1e-20 && !isinf(inv_κ_series)
+                if κ > 1e-30
+                    inv_κ_series += v[$i] / κ
+                else
+                    inv_κ_series = oftype(inv_κ_series, Inf)
+                end
+            end
+        end)
+    end
+    push!(expr.args, :(return κ_parallel, inv_κ_series))
+    return expr
 end
 
 """
@@ -953,11 +783,14 @@ Only solid and liquid components contribute to permeability (they form the matri
 Gases flow THROUGH the matrix and do not contribute (has_permeability returns false
 for gases, and get_permeability returns 0.0).
 
-Uses the same mixing rules as conductivity:
+Mixing operates on the renormalized solid basis (`solid_volume_fractions`),
+exactly like conductivity — gas volume is excluded and the surviving weights
+sum to 1, so the Wiener bounds are the matrix's true bounds:
 - PARALLEL: κ = Σⱼ vⱼ κⱼ (upper bound)
-- SERIES: κ = 1 / Σⱼ (vⱼ / κⱼ) (lower bound)
+- SERIES: κ = 1 / Σⱼ (vⱼ / κⱼ) (lower bound; **exactly 0** when any phase
+  with vⱼ > 0 is impermeable — gas cannot cross a series-stacked κ = 0 layer)
 - WEIGHTED: κ = β·κ_parallel + (1-β)·κ_series
-- BRUGGEMAN: Effective medium theory
+- CARMAN_KOZENY: porosity-based closure (see `_carman_kozeny_permeability`)
 
 # Arguments
 - `ξ`: Mass concentrations [kg/m³]
@@ -979,27 +812,77 @@ Typical values:
 As pyrolysis progresses and virgin material converts to char, the effective
 permeability increases, allowing easier gas escape.
 """
-@inline function effective_permeability(ξ::NTuple{NC, Float64}, T::Float64, material) where NC
-	v = volume_fractions(ξ, T, material)
+@inline function effective_permeability(ξ::NTuple{NC,<:Real}, T::Real, material) where {NC}
+    # Carman–Kozeny is a porosity-based closure, not a per-component mix, so it
+    # needs the canonical porosity φ(ξ,T) — the same porosity the pressure
+    # formula uses — rather than the bulk-density volume fractions `v`.
+    if material.mixing.κ.rule == CARMAN_KOZENY
+        φ = porosity(ξ, T, material)
+        return _carman_kozeny_permeability(φ, material.mixing.κ.ℓ)
+    end
+    v = solid_volume_fractions(ξ, T, material)
+    return _permeability_from_v(v, T, material)
+end
 
-	mixing = material.permeability_mixing
-	if mixing == BRUGGEMAN
-		κ_tuple = _permeability_tuple(T, material.components, Val(NC))
-		return bruggeman_effective_property(v, κ_tuple)
-	end
+"""
+	_carman_kozeny_permeability(φ, ℓ) -> κ [m²]
 
-	κ_parallel, inv_κ_series = _permeability_sums(v, T, material.components, Val(NC))
-	κ_series = inv_κ_series > 1e-30 ? 1.0 / inv_κ_series : 0.0
+Kozeny–Carman permeability from porosity `φ` and characteristic particle/pore
+diameter `ℓ` [m]:
 
-	# Apply mixing rule
-	if mixing == PARALLEL
-		return κ_parallel
-	elseif mixing == SERIES
-		return κ_series
-	else  # WEIGHTED
-		β = material.β_κ
-		return β * κ_parallel + (1.0 - β) * κ_series
-	end
+	κ = min( ℓ² · φ³ / (180 · (1 - φ)²),  ℓ² )
+
+The constant 180 is the Kozeny constant for a packed bed of spheres. As φ → 0
+(fully solid) κ → 0 (impermeable). As φ → 1 the packed-bed closure loses
+validity and diverges; κ is **capped at the physical free-flow scale ℓ²**
+(an open channel of width ℓ has κ ~ ℓ²/32 — ℓ² is a generous upper bound).
+The cap binds for φ ≳ 0.93 (where 180(1−φ)² < φ³), replacing the old
+1e-30 denominator floor that only bound at φ = 1.0 exactly and produced
+κ = ℓ²·1e30. A tiny denominator guard remains solely to avoid Inf/NaN at
+φ = 1.0 before `min` resolves.
+
+AD-clean: pure arithmetic, `φ` may be a `Dual`; `min` gives the consistent
+(zero) dκ/dφ on the capped branch, so the ForwardDiff-extracted Jacobian
+chain matches the residual everywhere — value and derivative saturate at the
+same point.
+"""
+@inline function _carman_kozeny_permeability(φ::Real, ℓ::Real)
+    one_minus = 1 - φ
+    denom = 180 * one_minus * one_minus
+    κ_ck = ℓ * ℓ * φ^3 / max(denom, 1e-30)
+    return min(κ_ck, ℓ * ℓ)
+end
+
+# Cache-aware variant. `v` must be the renormalized solid basis
+# (`solid_volume_fractions`), not the all-phase basis.
+@inline function _permeability_from_v(v::Tuple, T::Real, material::Material{NC}) where {NC}
+    mixing = material.mixing.κ.rule
+    if mixing == BRUGGEMAN
+        throw(
+            ArgumentError(
+                "BRUGGEMAN mixing is not supported for permeability (κ); EMT is only defined for scalar transport coefficients. Use PARALLEL/SERIES/WEIGHTED, or CARMAN_KOZENY (porosity-based) for permeability.",
+            ),
+        )
+    elseif mixing == CARMAN_KOZENY
+        throw(
+            ArgumentError(
+                "CARMAN_KOZENY permeability needs concentrations ξ to evaluate porosity; call effective_permeability(ξ, T, material) rather than _permeability_from_v(v, ...).",
+            ),
+        )
+    end
+
+    W = _prop_type(v, T)
+    κ_parallel, inv_κ_series = _permeability_sums(v, T, material.components, Val(NC))
+    κ_series = inv_κ_series > 1e-30 ? convert(W, 1.0 / inv_κ_series) : zero(W)
+
+    if mixing == PARALLEL
+        return κ_parallel
+    elseif mixing == SERIES
+        return κ_series
+    else  # WEIGHTED
+        β = material.mixing.κ.β
+        return β * κ_parallel + (1.0 - β) * κ_series
+    end
 end
 
 """
@@ -1007,13 +890,10 @@ end
 
 Compute derivatives of effective permeability for Jacobian assembly.
 
-Uses numerical differentiation of `effective_permeability()` to compute:
-- `∂κ/∂T`: Temperature derivative of effective permeability
-- `∂κ/∂ξⱼ`: Concentration derivatives (one per component)
-
-This replaces the old chain-rule approach (∂κ/∂φ × ∂φ/∂ξⱼ) which required
-a permeability model. The component-based approach directly differentiates
-the mixture rule.
+Forward-mode differentiation of `effective_permeability` itself — the mixing
+rule has a single source of truth, so these derivatives track every closure
+(solid-basis PARALLEL/SERIES/WEIGHTED including the impermeable-phase series
+zero, CARMAN_KOZENY through the porosity chain, and user-supplied κ(T)).
 
 # Arguments
 - `ξ`: Mass concentrations [kg/m³]
@@ -1023,210 +903,62 @@ the mixture rule.
 # Returns
 - `∂κ_∂T::Float64`: Temperature derivative [m²/K]
 - `∂κ_∂ξ::NTuple{NC,Float64}`: Concentration derivatives [m²/(kg/m³) = m⁵/kg]
-
-# Notes
-For gases (which don't contribute to permeability), ∂κ/∂ξⱼ will be small
-but may not be exactly zero due to indirect effects on volume fractions.
 """
-@inline function permeability_derivatives(ξ::NTuple{NC, Float64}, T::Float64, material) where NC
-	# Compute volume fractions and their derivatives
-	v = volume_fractions(ξ, T, material)
-	∂v_∂ξ = volume_fraction_derivatives(ξ, T, material)
-
-	# Get component permeabilities (κⱼ values are independent of concentration)
-	κ_tuple = _permeability_tuple(T, material.components, Val(NC))
-
-	mixing = material.permeability_mixing
-
-	if mixing == BRUGGEMAN
-		# For Bruggeman, fall back to numerical differentiation
-		# TODO: Implement analytical Bruggeman derivatives
-		ε_T = 1.0
-		κ_plus_T = effective_permeability(ξ, T + ε_T, material)
-		κ_minus_T = effective_permeability(ξ, T - ε_T, material)
-		∂κ_∂T = (κ_plus_T - κ_minus_T) / (2.0 * ε_T)
-
-		∂κ_∂ξ = ntuple(Val(NC)) do j
-			ε_ξ = max(1e-6, abs(ξ[j]) * 1e-6)
-			ξ_plus = ntuple(i -> i == j ? ξ[i] + ε_ξ : ξ[i], Val(NC))
-			ξ_minus = ntuple(i -> i == j ? max(0.0, ξ[i] - ε_ξ) : ξ[i], Val(NC))
-			κ_plus_ξ = effective_permeability(ξ_plus, T, material)
-			κ_minus_ξ = effective_permeability(ξ_minus, T, material)
-			(κ_plus_ξ - κ_minus_ξ) / (2.0 * ε_ξ)
-		end
-
-		return ∂κ_∂T, ∂κ_∂ξ
-	end
-
-	# Analytical derivatives for PARALLEL, SERIES, and WEIGHTED
-
-	# PARALLEL: κ = Σⱼ vⱼκⱼ
-	# ∂κ/∂ξᵢ = Σⱼ κⱼ × ∂vⱼ/∂ξᵢ
-	∂κ_parallel_∂ξ = ntuple(Val(NC)) do i
-		deriv = zero(Float64)
-		for j in 1:NC
-			deriv += κ_tuple[j] * ∂v_∂ξ[j][i]  # ∂vⱼ/∂ξᵢ
-		end
-		deriv
-	end
-
-	# SERIES: κ = 1/(Σⱼ vⱼ/κⱼ)
-	# ∂κ/∂ξᵢ = -κ² × Σⱼ (1/κⱼ) × ∂vⱼ/∂ξᵢ
-	inv_κ_series = zero(Float64)
-	for j in 1:NC
-		if κ_tuple[j] > 1e-30
-			inv_κ_series += v[j] / κ_tuple[j]
-		end
-	end
-	κ_series = inv_κ_series > 1e-30 ? 1.0 / inv_κ_series : 0.0
-
-	∂κ_series_∂ξ = ntuple(Val(NC)) do i
-		if κ_series < 1e-30
-			return 0.0
-		end
-		deriv_sum = zero(Float64)
-		for j in 1:NC
-			if κ_tuple[j] > 1e-30
-				deriv_sum += (1.0 / κ_tuple[j]) * ∂v_∂ξ[j][i]  # ∂vⱼ/∂ξᵢ
-			end
-		end
-		-κ_series^2 * deriv_sum
-	end
-
-	# Compute final derivatives based on mixing rule
-	if mixing == PARALLEL
-		∂κ_∂ξ = ∂κ_parallel_∂ξ
-	elseif mixing == SERIES
-		∂κ_∂ξ = ∂κ_series_∂ξ
-	else  # WEIGHTED
-		β = material.β_κ
-		∂κ_∂ξ = ntuple(i -> β * ∂κ_parallel_∂ξ[i] + (1.0 - β) * ∂κ_series_∂ξ[i], Val(NC))
-	end
-
-	# Temperature derivative: κⱼ(T) may depend on T for temperature-dependent components
-	# For now, assume κⱼ is constant (most common case)
-	# TODO: Add analytical temperature derivatives if needed
-	∂κ_∂T = 0.0
-
-	return ∂κ_∂T, ∂κ_∂ξ
+@inline function permeability_derivatives(
+    ξ::NTuple{NC,Float64},
+    T::Float64,
+    material,
+) where {NC}
+    T_d, ξ_d = _perm_seed_inputs(T, ξ)
+    κ_d = effective_permeability(ξ_d, T_d, material)
+    return _perm_extract(κ_d, Val(NC))
 end
 
-"""
-	permeability_derivatives!(∂κ_∂ξ::AbstractVector, ξ::NTuple{NC,Float64}, T::Float64, 
-							  material, v_work::AbstractVector, κ_work::AbstractVector,
-							  ρ_work::AbstractVector) where NC
+struct _PermDerivTag end
 
-Compute derivatives of effective permeability in-place (allocation-free).
-
-Same as `permeability_derivatives` but writes to a pre-allocated vector instead of
-returning a tuple. This eliminates heap allocations when called in a loop.
-
-# Arguments
-- `∂κ_∂ξ`: Output vector of length NC for concentration derivatives [m⁵/kg]
-- `ξ`: Mass concentrations [kg/m³]
-- `T`: Temperature [K]
-- `material`: Material with components and permeability mixing rules
-- `v_work`: Work vector of length NC for volume fractions
-- `κ_work`: Work vector of length NC for component permeabilities
-- `ρ_work`: Work vector of length NC for component densities
-
-# Returns
-- `∂κ_∂T::Float64`: Temperature derivative [m²/K] (typically 0)
-
-# Notes
-The output vector `∂κ_∂ξ` is modified in-place. Work vectors are used for
-intermediate calculations and their contents are undefined on exit.
-"""
-@inline function permeability_derivatives!(∂κ_∂ξ::AbstractVector, ξ::NTuple{NC, Float64},
-	T::Float64, material, v_work::AbstractVector, κ_work::AbstractVector,
-	ρ_work::AbstractVector) where NC
-	# Step 1: Compute densities, volume fractions, and component permeabilities
-	v_total = 0.0
-	@inbounds for j in 1:NC
-		ρ_j = _get_comp_density(T, material.components, j, Val(NC))
-		ρ_work[j] = ρ_j
-		if ξ[j] > 0.0 && ρ_j > 0.0
-			v_total += ξ[j] / ρ_j
-		end
-		κ_work[j] = _get_comp_permeability(T, material.components, j, Val(NC))
-	end
-
-	inv_v_total = v_total > 1e-20 ? 1.0 / v_total : 0.0
-
-	# Compute volume fractions
-	@inbounds for j in 1:NC
-		ρ_j = ρ_work[j]
-		v_work[j] = ξ[j] > 0.0 && ρ_j > 0.0 ? ξ[j] / ρ_j * inv_v_total : 0.0
-	end
-
-	# Step 2: Compute κ_series for chain rule
-	inv_κ_series = 0.0
-	@inbounds for j in 1:NC
-		if κ_work[j] > 1e-30
-			inv_κ_series += v_work[j] / κ_work[j]
-		end
-	end
-	κ_series = inv_κ_series > 1e-30 ? 1.0 / inv_κ_series : 0.0
-	κ_series_sq = κ_series * κ_series
-
-	# Step 3: Compute ∂κ/∂ξᵢ for each component i
-	mixing = material.permeability_mixing
-	β = material.β_κ
-
-	@inbounds for i in 1:NC
-		inv_ρi = ρ_work[i] > 0.0 ? 1.0 / ρ_work[i] : 0.0
-
-		# Accumulate derivatives over all j
-		∂κ_parallel_∂ξi = 0.0
-		∂κ_series_∂ξi = 0.0
-
-		for j in 1:NC
-			inv_ρj = ρ_work[j] > 0.0 ? 1.0 / ρ_work[j] : 0.0
-			# ∂vⱼ/∂ξᵢ = (δᵢⱼ/ρⱼ - vⱼ/ρᵢ) × inv_v_total
-			if i == j
-				dvj_dxi = (inv_ρj - v_work[j] * inv_ρi) * inv_v_total
-			else
-				dvj_dxi = -v_work[j] * inv_ρi * inv_v_total
-			end
-			# Parallel contribution: κⱼ × ∂vⱼ/∂ξᵢ
-			∂κ_parallel_∂ξi += κ_work[j] * dvj_dxi
-			# Series contribution: -κ² / κⱼ × ∂vⱼ/∂ξᵢ
-			if κ_work[j] > 1e-30
-				∂κ_series_∂ξi -= κ_series_sq / κ_work[j] * dvj_dxi
-			end
-		end
-
-		# Combine based on mixing rule
-		if mixing == PARALLEL
-			∂κ_∂ξ[i] = ∂κ_parallel_∂ξi
-		elseif mixing == SERIES
-			∂κ_∂ξ[i] = ∂κ_series_∂ξi
-		else  # WEIGHTED
-			∂κ_∂ξ[i] = β * ∂κ_parallel_∂ξi + (1.0 - β) * ∂κ_series_∂ξi
-		end
-	end
-
-	return 0.0  # ∂κ/∂T (assuming constant component permeabilities)
+# Seed (T, ξ) as Duals with NC+1 partials: slot 1 = T, slots 2..NC+1 = ξ.
+@generated function _perm_seed_inputs(T::Float64, ξ::NTuple{NC,Float64}) where {NC}
+    N = NC + 1
+    T_p = Expr(:tuple, [i == 1 ? :(1.0) : :(0.0) for i = 1:N]...)
+    ξ_exprs = Expr[]
+    for j = 1:NC
+        jp = j + 1
+        p = Expr(:tuple, [i == jp ? :(1.0) : :(0.0) for i = 1:N]...)
+        push!(
+            ξ_exprs,
+            quote
+                ForwardDiff.Dual{_PermDerivTag,Float64,$N}(
+                    ξ[$j],
+                    ForwardDiff.Partials{$N,Float64}($p),
+                )
+            end,
+        )
+    end
+    return quote
+        T_d = ForwardDiff.Dual{_PermDerivTag,Float64,$N}(
+            T,
+            ForwardDiff.Partials{$N,Float64}($T_p),
+        )
+        ξ_d = $(Expr(:tuple, ξ_exprs...))
+        return T_d, ξ_d
+    end
 end
 
-# Generated helper to get component density (avoids heterogeneous tuple access)
-@generated function _get_comp_density(T::Float64, comps::Tuple, j::Int, ::Val{NC}) where NC
-	# Generate a branch for each possible j value
-	branches = Expr[]
-	for i in 1:NC
-		push!(branches, :(j == $i && return comps[$i].density(T)))
-	end
-	return Expr(:block, branches..., :(return 0.0))
+@generated function _perm_extract(
+    d::ForwardDiff.Dual{_PermDerivTag,Float64,N},
+    ::Val{NC},
+) where {N,NC}
+    N == NC + 1 || error("_perm_extract: N=$N must equal NC+1=$(NC+1)")
+    ξ_t = Expr(:tuple, [:(p[$(j+1)]) for j = 1:NC]...)
+    return quote
+        p = ForwardDiff.partials(d)
+        return p[1], $ξ_t
+    end
 end
 
-# Generated helper to get component permeability
-@generated function _get_comp_permeability(T::Float64, comps::Tuple, j::Int, ::Val{NC}) where NC
-	branches = Expr[]
-	for i in 1:NC
-		push!(branches, :(j == $i && return comps[$i].permeability === nothing ? 0.0 : comps[$i].permeability(T)))
-	end
-	return Expr(:block, branches..., :(return 0.0))
-end
+# κ may come out as a plain Float64 (e.g. the SERIES rule's hard-zero branch,
+# or a Dual-free CARMAN_KOZENY floor) — all derivatives are exactly 0 there.
+@inline _perm_extract(::Float64, ::Val{NC}) where {NC} = (0.0, ntuple(_ -> 0.0, Val(NC)))
 
 """
 	harmonic_mean_weighted(a::Float64, b::Float64, d_a::Float64, d_b::Float64) -> Float64
@@ -1246,106 +978,11 @@ This reduces to the standard harmonic mean 2ab/(a+b) when d_L = d_R.
 - `d_a`: Distance from left cell center to face
 - `d_b`: Distance from right cell center to face
 """
-@inline function harmonic_mean_weighted(a::Float64, b::Float64, d_a::Float64, d_b::Float64)
-	if a < 1e-20 || b < 1e-20
-		return 0.0
-	end
-	return (d_a + d_b) / (d_a / a + d_b / b)
-end
-
-"""
-	harmonic_mean_product_weighted(a1::Float64, b1::Float64, a2::Float64, b2::Float64, 
-								   d_1::Float64, d_2::Float64) -> Float64
-
-Distance-weighted harmonic mean of products for non-uniform meshes.
-
-Computes the harmonic mean of (a1·b1) and (a2·b2) with distance weighting.
-Used for face-centered (λ·ρ) in gas transport on non-uniform meshes.
-
-For gas flux J = -λρ ∂Y/∂x, the product (λ·ρ) is the effective diffusion coefficient
-for mass fraction transport. At an interface between two cells with different properties,
-flux continuity requires: J = -(Y_R - Y_L) / (R_L + R_R) where R_i = d_i / (λ_i·ρ_i).
-
-# Arguments
-- `a1`, `b1`: Values to multiply for left cell (e.g., λ_L, ρ_L)
-- `a2`, `b2`: Values to multiply for right cell (e.g., λ_R, ρ_R)
-- `d_1`: Distance from left cell center to face
-- `d_2`: Distance from right cell center to face
-"""
-@inline function harmonic_mean_product_weighted(a1::Float64, b1::Float64,
-	a2::Float64, b2::Float64,
-	d_1::Float64, d_2::Float64)
-	p1 = a1 * b1
-	p2 = a2 * b2
-	if p1 < 1e-20 || p2 < 1e-20
-		return 0.0
-	end
-	return (d_1 + d_2) / (d_1 / p1 + d_2 / p2)
-end
-# ============================================================================
-# Species-Specific Transport Scaling
-# ============================================================================
-
-# Default reference molecular weight (air ≈ 29 g/mol)
-const M_REF_TRANSPORT = 0.029  # kg/mol
-
-"""
-	species_transport_scaling(M_j::Float64; M_ref::Float64=M_REF_TRANSPORT) -> Float64
-
-Compute molecular weight scaling factor for species-specific gas transport.
-
-Gas diffusivity scales with molecular weight according to kinetic theory:
-- Knudsen diffusion (small pores): D ∝ √(T/M)
-- Molecular diffusion: D_AB ∝ √(1/M_A + 1/M_B)
-
-For simplified species-specific transport, we use:
-	λⱼ = λ_eff × √(M_ref / Mⱼ)
-
-This means:
-- Light species (M < M_ref) diffuse FASTER (scaling > 1)
-- Heavy species (M > M_ref) diffuse SLOWER (scaling < 1)
-
-# Arguments
-- `M_j`: Molar mass of species j [kg/mol]
-- `M_ref`: Reference molar mass [kg/mol] (default: 0.029, air)
-
-# Returns
-Dimensionless scaling factor for transport coefficient.
-
-# Examples
-```julia
-# Water vapor (M = 18 g/mol) diffuses faster
-species_transport_scaling(0.018)  # ≈ 1.27
-
-# MMA (M = 100 g/mol) diffuses slower  
-species_transport_scaling(0.100)  # ≈ 0.54
-
-# CO₂ (M = 44 g/mol) diffuses slightly slower
-species_transport_scaling(0.044)  # ≈ 0.81
-```
-"""
-@inline function species_transport_scaling(M_j::Float64; M_ref::Float64 = M_REF_TRANSPORT)
-	if M_j < 1e-6
-		# Non-physical molar mass (probably a solid), return 1.0
-		return 1.0
-	end
-	return sqrt(M_ref / M_j)
-end
-
-"""
-	species_transport_scaling(comp::Component; M_ref::Float64=M_REF_TRANSPORT) -> Float64
-
-Compute scaling factor for a component's transport.
-
-Only applies to GAS phase components with non-zero molar mass.
-Returns 1.0 for solids and liquids (their λ contributes to effective λ but doesn't 
-represent actual diffusion).
-"""
-@inline function species_transport_scaling(comp; M_ref::Float64 = M_REF_TRANSPORT)
-	if comp.phase != GAS || comp.molar_mass < 1e-6
-		return 1.0
-	end
-	return species_transport_scaling(comp.molar_mass; M_ref = M_ref)
+@inline function harmonic_mean_weighted(a::Real, b::Real, d_a::Real, d_b::Real)
+    if a < 1e-20 || b < 1e-20
+        return 0.0
+    end
+    return (d_a + d_b) / (d_a / a + d_b / b)
 end
 
 # ============================================================================
@@ -1374,49 +1011,9 @@ The harmonic mean gives: 2κ_Lκ_R / (κ_L + κ_R)
 This reduces to the geometric mean for equal values and approaches
 the smaller value when there's a large mismatch (conservative behavior).
 """
-@inline function harmonic_mean_permeability(κ_L::Float64, κ_R::Float64)
-	if κ_L < 1e-30 || κ_R < 1e-30
-		return 0.0
-	end
-	return 2.0 * κ_L * κ_R / (κ_L + κ_R)
-end
-
-"""
-	harmonic_mean_permeability_weighted(κ_L::Float64, κ_R::Float64,
-										d_L::Float64, d_R::Float64) -> Float64
-
-Distance-weighted harmonic mean for permeability (resistance in series).
-
-This is the correct formulation for non-uniform meshes where cell centers
-are not equidistant from the face. The derivation comes from treating
-permeability as resistances in series:
-
-	Total resistance = R_L + R_R = d_L/κ_L + d_R/κ_R
-
-Solving for the effective permeability at the face:
-
-	κ_face = (d_L + d_R) / (d_L/κ_L + d_R/κ_R)
-
-# Arguments
-- `κ_L, κ_R`: Permeability in left and right cells [m²]
-- `d_L, d_R`: Distance from face to left and right cell centers [m]
-
-# Returns
-- `κ_face`: Face-averaged permeability [m²]
-
-# Notes
-- For uniform meshes (d_L = d_R), this reduces to the standard harmonic mean
-- Most significant improvement occurs on stretched meshes (e.g., boundary refinement)
-- Typical accuracy improvement: 1-5% for gas velocities near boundaries
-
-# Reference
-Physics Audit Recommendations (2026), Section 3
-"""
-@inline function harmonic_mean_permeability_weighted(κ_L::Float64, κ_R::Float64,
-													 d_L::Float64, d_R::Float64)
-	if κ_L < 1e-30 || κ_R < 1e-30
-		return 0.0
-	end
-	# Distance-weighted harmonic mean
-	return (d_L + d_R) / (d_L / κ_L + d_R / κ_R)
+@inline function harmonic_mean_permeability(κ_L::Real, κ_R::Real)
+    if κ_L < 1e-30 || κ_R < 1e-30
+        return 0.0
+    end
+    return 2.0 * κ_L * κ_R / (κ_L + κ_R)
 end

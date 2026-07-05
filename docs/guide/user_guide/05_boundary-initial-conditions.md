@@ -1,0 +1,792 @@
+# 5. Boundary and Initial Conditions
+
+Boundary conditions (BCs) tell the solver how heat and gas enter and leave the
+1-D column; initial conditions set the temperature and composition at `t = 0`.
+This chapter shows how to build a `BoundaryConditionSet`, the complete catalogue
+of thermal, mass, pressure, and mesh-motion BCs with every field and default,
+how the surface energy balance is solved, and how to specify initial
+temperature and concentration profiles. The physics and derivations behind each
+BC live in the Technical Reference §12 (and the radiation models in §8); this
+chapter is about *how to specify them correctly*.
+
+> **Coordinate and sign reminders** (see Technical Reference §2). The axial
+> coordinate is `z`. `z = 0` is the **bottom / substrate** (tag `:bottom`,
+> boundary id 2); `z = L` is the **top / exposed surface** (tag `:top`, boundary
+> id 1). Heat normally enters from the top. For *all* BCs in this package the
+> sign convention is: **positive flux = into the domain** (heating, or mass
+> entering). A gas escaping out of the top therefore has a *negative* boundary
+> mass flux in the BC's own convention.
+
+---
+
+## 5.1 The `BoundaryConditionSet`
+
+All boundary conditions are bundled in a single tag-keyed container,
+`BoundaryConditionSet`. It holds exactly two kinds of BC — **thermal** and
+**mass** — each as a `NamedTuple` keyed by boundary tag (`:top`, `:bottom` in
+1-D):
+
+```julia
+using Pyrolysis
+
+bc_set = BoundaryConditionSet(
+    thermal = (top    = HeatFluxBC(50e3) + RadiativeBC(ε = 0.9, T_inf = 300.0),
+               bottom = AdiabaticBC()),
+    mass    = (top    = DiffusiveMassBC(0.01),
+               bottom = ImpermeableBC()),
+)
+```
+
+Both keyword arguments default to fully-insulated, impermeable boundaries:
+
+```julia
+# Equivalent to the explicit defaults below
+bc_set = BoundaryConditionSet()
+#   thermal = (top = AdiabaticBC(),   bottom = AdiabaticBC())
+#   mass    = (top = ImpermeableBC(), bottom = ImpermeableBC())
+```
+
+Key facts about the constructor:
+
+- **Partial specification is allowed.** Whatever you supply is merged over the
+  defaults, so `BoundaryConditionSet(thermal = (top = HeatFluxBC(50e3),))`
+  leaves the bottom adiabatic and both mass faces impermeable. (Note the
+  trailing comma — a one-element `NamedTuple` needs it.)
+- **Type checking is enforced at construction.** Passing a mass BC into a
+  thermal slot (or vice-versa) throws an `ArgumentError` immediately.
+- **It is type-stable.** Each tag compiles to a direct field read via
+  `Val{tag}` dispatch, so the residual specializes statically with zero runtime
+  overhead.
+
+The set is then handed to `PyrolysisProblem` via the `bc_set` keyword:
+
+```julia
+problem = PyrolysisProblem(
+    mesh = mesh,
+    material = material,
+    bc_set = bc_set,
+    T_initial = z -> 300.0,
+    ξ_initial = [z -> 1190.0, z -> 0.0],
+    tspan = (0.0, 100.0),
+)
+```
+
+> **Note on mesh motion and radiation BCs.** The `BoundaryConditionSet` has
+> *only* `thermal` and `mass` fields. ALE mesh motion needs no BC at all — it is
+> computed automatically from the physics (§5.7) — and the P1 radiation
+> BCs (§5.6) are **not** stored in this container: they live in a separate
+> `RadiationBCSet` inside the `Experimental` module. External incident radiation
+> (cone heater, panel) is specified as a **thermal** BC (`RadiativeFluxBC`,
+> §5.2.6), not as a radiation BC.
+
+---
+
+## 5.2 Thermal boundary conditions
+
+Thermal BCs are subtypes of `AbstractThermalBC`. They are the heat-side input to
+the **surface energy balance** that the solver closes by a Newton iteration for
+the surface temperature `T_s` (§5.4). Every flux is reported with the **positive
+= into domain** convention.
+
+| BC type | Physical flux `q_BC` | Key parameters (defaults) |
+|---|---|---|
+| `AdiabaticBC` | `0` | — |
+| `HeatFluxBC` | `q(t)` (prescribed) | `flux` |
+| `ConvectiveBC` | `h·(T_∞ − T_s)` | `h`, `T_inf` |
+| `RadiativeBC` | `F·ε_eff·σ·(T_∞⁴ − T_s⁴)` | `ε` (`nothing`), `T_inf`, `F` (`1.0`) |
+| `RadiativeFluxBC` | `α·Φ_incident` (model-dependent) | `flux`, `absorptivity` (`nothing`) |
+| `DirichletThermalBC` | enforces `T_s = T` | `T` |
+| `CombinedThermalBC` | `Σ_i q_BC,i` | built via `+` |
+
+All exported by `using Pyrolysis`.
+
+### 5.2.1 `AdiabaticBC` — perfect insulation
+
+```julia
+bc = AdiabaticBC()
+```
+
+Zero heat flux. This is the default for both faces and the usual choice for the
+substrate (back face) in a cone-calorimeter idealization where the sample is
+mounted on insulation.
+
+### 5.2.2 `HeatFluxBC` — prescribed flux
+
+```julia
+bc = HeatFluxBC(50e3)                            # constant 50 kW/m² into the surface
+bc = HeatFluxBC(t -> 50e3 * (1 - exp(-t / 10)))  # ramp-up over ~10 s
+```
+
+The single field, `flux`, is the heat flux `q_BC` in W/m², **positive into the
+domain**. It may be a constant (`Real`) or a function of time `t`. Use this for
+direct-contact heating or for an opaque surface where you want to inject a flux
+directly (rather than via the radiation models, see `RadiativeFluxBC`).
+`dq_BC/dT_s = 0`, so it does not couple to the surface temperature.
+
+### 5.2.3 `ConvectiveBC` — Newton cooling
+
+```julia
+bc = ConvectiveBC(h = 10.0, T_inf = 300.0)
+bc = ConvectiveBC(h = 10.0, T_inf = t -> 300 + 0.1 * t)   # warming ambient
+```
+
+Newton's cooling law `q_BC = h·(T_∞ − T_s)`. Fields:
+
+- `h` — convective heat-transfer coefficient `h_conv` in W·m⁻²·K⁻¹. Constant or
+  `h(t)`. Validated to be non-negative.
+- `T_inf` — ambient temperature `T_∞` in K. Constant or `T_∞(t)`. Validated to
+  be positive.
+
+The flux is positive (heating) when `T_∞ > T_s` and negative (cooling) when the
+surface is hotter than the surroundings — the usual re-radiation/convection loss
+direction during pyrolysis. Its temperature derivative `dq_BC/dT_s = −h` makes
+the Newton solve converge quickly. The `T_inf` here is also the value used to
+resolve the ambient temperature for the surface balance (§5.8).
+
+**Blowing correction (opt-in).** Strong outgassing thickens the boundary layer
+and suppresses convective exchange. With `solve(...; use_blowing_correction =
+true)` the coefficient is rescaled by the classical film factor
+`h → h·B/(e^B − 1)`, `B = ṁ″·c_p,g/h`, using the outward gas mass flux at the
+face. At a wood-like peak `ṁ″ ≈ 10 g·m⁻²·s⁻¹` against `h ≈ 10` this is a
+35–50 % reduction of `h`; at PMMA-like peaks (`B ≈ 4`) convective cooling is
+essentially extinguished. The back face is unaffected automatically (no
+outflow → `B = 0`). Off by default because the shipped examples were
+calibrated without it (and without flame feedback — the two partially cancel;
+see the physics roadmap before recalibrating).
+
+### 5.2.4 `RadiativeBC` — surface re-radiation
+
+```julia
+bc = RadiativeBC(T_inf = 300.0)                  # uses material's effective emissivity
+bc = RadiativeBC(ε = 0.9, T_inf = 300.0)         # fixed emissivity
+bc = RadiativeBC(T_inf = 300.0, F = 0.7)         # partially enclosed surface
+bc = RadiativeBC(ε = T -> 0.85 + 0.1*(T-300)/700, T_inf = 300.0)  # T-dependent ε
+```
+
+Gray-body radiative exchange with the surroundings,
+`q_BC = F·ε_eff·σ·(T_∞⁴ − T_s⁴)`, where `σ = 5.670374419×10⁻⁸` W·m⁻²·K⁻⁴.
+Fields:
+
+- `ε` — surface emissivity. Default `nothing`, which means **use the effective
+  emissivity** `ε_eff = Σ_j v_j ε_j` (volume-weighted) computed from the live
+  composition. This is the recommended setting: it automatically tracks the
+  change from virgin polymer to char as the material decomposes. You can also
+  pass a constant in `[0, 1]` or a function `ε(T)`.
+- `T_inf` — surroundings temperature `T_∞` in K (constant or `T_∞(t)`).
+- `F` — view factor in `[0, 1]`, default `1.0` (surface fully sees the
+  surroundings). Use `F < 1` for partially enclosed geometries.
+
+Its temperature derivative is `dq_BC/dT_s = −4·F·ε_eff·σ·T_s³`. When `ε` is a
+function of temperature, the solver **neglects** the `dε/dT` term in this
+derivative; this slightly slows Newton convergence but does not change the
+converged root (see Technical Reference §12.2).
+
+### 5.2.5 `DirichletThermalBC` — prescribed temperature
+
+```julia
+bc = DirichletThermalBC(500.0)            # hold this face at 500 K
+bc = DirichletThermalBC(t -> 300 + 5*t)   # ramped wall temperature
+```
+
+Forces the surface to a prescribed temperature `T = T_s`. This BC bypasses the
+ordinary surface-balance Newton iteration and is instead enforced with a large
+penalty conductance (`h_large = 1e8` W·m⁻²·K⁻¹) plus a special case in the RHS
+assembly. Use it for verification problems or when an experiment fixes the
+surface temperature directly. The single field `T` may be constant or `T(t)`.
+
+### 5.2.6 `RadiativeFluxBC` — external incident radiation
+
+This is the BC for a **cone heater, furnace, or radiant panel** — an external
+radiation source heating the surface. It is distinct from `RadiativeBC` (which
+is the surface's *own* re-radiation loss) and from `HeatFluxBC` (which injects a
+bare flux with no absorptivity or in-depth treatment).
+
+```julia
+bc = RadiativeFluxBC(flux = 25e3)                          # incident 25 kW/m², α = ε_eff
+bc = RadiativeFluxBC(flux = 50e3, absorptivity = 0.9)      # fixed absorptivity
+bc = RadiativeFluxBC(flux = t -> 25e3*(1 - exp(-t/10)))    # time-varying flux
+```
+
+Fields:
+
+- `flux` — incident radiative flux `Φ_incident` in W/m² (constant or `Φ(t)`).
+- `absorptivity` — surface absorptivity `α` in `[0, 1]`. Default `nothing`,
+  which uses the effective emissivity `ε_eff` as the absorptivity (Kirchhoff's
+  law `α = ε_eff`), again tracking composition automatically. You can override
+  with a constant or `α(t)`.
+
+**Its behavior depends on the `radiation_model` keyword passed to `solve()`**
+(see §5.5 and Technical Reference §8):
+
+| `radiation_model` (in `solve`) | What `RadiativeFluxBC` does |
+|---|---|
+| `NO_RADIATION` | Absorbed flux `α·Φ` deposited as a surface boundary heat flux |
+| `SURFACE_ABSORPTION` | Same — absorbed at the surface (opaque material) |
+| `BEER_LAMBERT` | Boundary flux is **zero**; the absorbed `α·Φ` is distributed in-depth volumetrically (`extras.volumetric_absorption`) |
+| `P1_QUASI_STEADY` | Boundary flux is **zero**; radiation handled by the P1 solver (Experimental) |
+
+The boundary flux from this BC has `dq_BC/dT_s = 0` (it is the *incoming* source
+and does not depend on the surface temperature).
+
+> **Do not double-count radiation.** Do not combine `RadiativeFluxBC` and
+> `HeatFluxBC` for the *same* radiation source — that adds the energy twice.
+> `RadiativeFluxBC` is the correct, absorptivity-aware choice for a radiant
+> source.
+
+### 5.2.7 `CombinedThermalBC` — adding BCs with `+`
+
+A real exposed surface usually has several simultaneous heat exchanges:
+incoming radiation, re-radiation loss, and convective loss. Add them with `+`:
+
+```julia
+top_thermal =
+    RadiativeFluxBC(flux = 50e3, absorptivity = 0.96) +  # cone heater (incoming)
+    RadiativeBC(ε = 0.96, T_inf = 330.0) +               # re-radiation loss
+    ConvectiveBC(h = 10.0, T_inf = 330.0)                # convective loss
+```
+
+The combined flux is the sum of the component fluxes,
+`q_BC = Σ_i q_BC,i(T_s, t)`, and the derivative is summed likewise — assembled
+by a generated function for type stability. You can chain any number of thermal
+BCs. The ambient temperature for the surface balance is taken from the first
+component that carries one (preferring `ConvectiveBC`/`RadiativeBC`, see §5.8).
+
+A canonical cone-calorimeter top face:
+
+```julia
+bc_set = BoundaryConditionSet(
+    thermal = (
+        top = RadiativeFluxBC(flux = 50e3, absorptivity = 0.96) +
+              RadiativeBC(ε = 0.96, T_inf = 330.0) +
+              ConvectiveBC(h = 10.0, T_inf = 330.0),
+        bottom = AdiabaticBC(),
+    ),
+    mass = (
+        top    = ConvectiveMassBC(h_m = 0.05, ξ_inf = 0.0),
+        bottom = ImpermeableBC(),
+    ),
+)
+# Pair with:  solve(problem; radiation_model = SURFACE_ABSORPTION)
+```
+
+---
+
+## 5.3 Mass boundary conditions
+
+Mass BCs (subtypes of `AbstractMassBC`) control how **gas** escapes (or enters)
+through a boundary. Solid and liquid components never transport across the
+boundary; only gaseous components do. The sign convention is **positive = mass
+into the domain**, so gas escaping at the top has a negative flux in the BC's
+own convention (the solver applies the correct face orientation internally).
+
+| BC type | Physical flux `J_j` | Key parameters (defaults) |
+|---|---|---|
+| `ImpermeableBC` | `0` | — |
+| `MassFluxBC` | `J(t)` (prescribed) | `flux` |
+| `ConvectiveMassBC` | `h_m·(ξ_∞ − ξ_s)` | `h_m`, `ξ_inf` (`0.0`) |
+| `DiffusiveMassBC` | combined internal + external resistance | `h_m` (`Inf`) |
+| `CombinedMassBC` | `Σ_i J_j,i` | built via `+` |
+
+Pressure BCs (§5.5) are also `AbstractMassBC` subtypes but only act in Darcy
+mode. The first four BC types above (and the pressure BCs) are exported by
+`using Pyrolysis`; `CombinedMassBC` is produced by the `+` operator rather than
+called directly.
+
+### 5.3.1 `ImpermeableBC` — no gas escape
+
+```julia
+bc = ImpermeableBC()
+```
+
+Zero mass flux for every component. This is the default for both faces and the
+usual choice for the substrate.
+
+### 5.3.2 `MassFluxBC` — prescribed mass flux
+
+```julia
+bc = MassFluxBC(0.0)             # constant prescribed flux [kg/(m²·s)]
+bc = MassFluxBC(t -> 1e-3)       # time-varying
+```
+
+Prescribes the boundary mass flux `J` directly (positive = into domain), as a
+constant or `J(t)`. The same value applies to all gas components.
+
+### 5.3.3 `ConvectiveMassBC` — external convective transfer
+
+```julia
+bc = ConvectiveMassBC(h_m = 0.05, ξ_inf = 0.0)   # gas swept away to clean atmosphere
+```
+
+External convective mass transfer, `J_j = h_m·(ξ_{j,∞} − ξ_{j,s})`. Fields:
+
+- `h_m` — external (film) mass-transfer coefficient `h_m` in **m/s**
+  (velocity-based). Constant or `h_m(t)`; validated non-negative. Typical
+  values: natural convection 0.01–0.05 m/s, forced convection 0.05–0.5 m/s. As
+  a rule of thumb from the heat–mass analogy,
+  `h_m ≈ h_conv / (ρ_air · c_{p,air})`; for `h_conv ≈ 10` W·m⁻²·K⁻¹ this gives
+  `h_m ≈ 0.008` m/s.
+- `ξ_inf` — ambient mass concentration `ξ_∞` in kg/m³, default `0.0` (gas
+  escapes into clean surroundings). Accepts a scalar (broadcast to every gas
+  species), a function of time `t -> ξ_∞(t)`, or an `NTuple` with one entry
+  per component (`ξ_inf = (0.0, 0.0, 0.27)` — e.g. ambient air ingress for a
+  background-air species without injecting pyrolyzate). Entries are validated
+  non-negative; a tuple's length must equal the material's component count.
+
+### 5.3.4 `DiffusiveMassBC` — internal diffusion with optional external resistance
+
+```julia
+bc = DiffusiveMassBC()            # pure internal diffusion (h_m = Inf, default)
+bc = DiffusiveMassBC(0.01)        # add a finite external film resistance, h_m = 0.01 m/s
+```
+
+Couples the **internal** Fickian diffusion gradient in the surface cell to an
+optional **external** film resistance. The single field is:
+
+- `h_m` — external mass-transfer coefficient in m/s. Default `Inf` (the
+  no-argument constructor `DiffusiveMassBC()` sets `h_m = Inf`), meaning *no*
+  external resistance — the flux is the pure diffusive limit
+  `J_j = −λ_j ξ_{j,s}/d`, where `d` is the distance from the surface cell center
+  to the boundary face. A finite `h_m` adds a series resistance:
+  `J_j = −λ_j h_m ξ_{j,s}/(λ_j + h_m d)`.
+
+This is the most physically consistent escape BC because it ties the surface
+loss to the same internal transport law used everywhere else (it also keeps the
+species balance consistent with ALE surface recession). Use it (with `Inf` or a
+finite `h_m`) when you want gas escape governed by the material's own gas
+transfer coefficient rather than an imposed convective coefficient.
+
+### 5.3.5 `CombinedMassBC` — adding mass BCs with `+`
+
+```julia
+bc = DiffusiveMassBC(Inf) + ConvectiveMassBC(h_m = 0.01, ξ_inf = 0.0)
+```
+
+Sums component mass fluxes, `J_j = Σ_i J_{j,i}`, via the `+` operator (generated
+function, type-stable). For most pyrolysis runs a single mass BC suffices;
+combined mass BCs are for modeling competing transport mechanisms or
+research/validation studies.
+
+---
+
+## 5.4 The surface energy balance (how thermal BCs are applied)
+
+Thermal BCs are not applied as a raw flux in the cell; instead the solver finds
+the **surface (face) temperature** `T_s` that makes the boundary energy balance
+close, then conducts the resulting flux into the adjacent cell. With the default
+convention (transpiration off), the balance is
+
+```
+q_BC(T_s) = k_eff · (T_s − T_cell) / Δz_{1/2}
+```
+
+— the applied BC flux equals the heat conducted from the surface face into the
+first cell center, with `k_eff` the effective conductivity, `T_cell` the
+adjacent cell temperature, and `Δz_{1/2}` the face-to-center distance. This is
+solved by a damped Newton iteration on `T_s` (see Technical Reference §12.2). You
+do not call this yourself — it runs inside the RHS assembly — but it is worth
+knowing because it explains a few user-visible behaviors:
+
+- **Convergence is robust** for physical BCs: convective flux is linear in `T_s`,
+  radiative is `T_s⁴`; typical solves converge in 2–5 iterations (default
+  tolerance `1e-10`, up to 50 iterations).
+- **Surface temperature is clamped to `[200, 3000] K`** during the iteration to
+  prevent unphysical excursions.
+- The solver is **AD-aware**: it carries `ForwardDiff.Dual` types through the
+  Newton iteration so sensitivities (see the sensitivity-analysis chapter) flow
+  correctly through `T_s`.
+- The converged surface temperature is available afterwards as
+  `solution.surface_T`, and the flux decomposition (absorbed, re-radiation,
+  convection, conducted) is available in `solution.extras` when diagnostics are
+  enabled.
+
+The **surface transpiration enthalpy** term `Σ_g ṁ_g Δh_g(T_s, T_∞)` is an
+optional addition to this balance, controlled by `use_transpiration_bc`. It is
+**off by default and rejected by `solve()` when set to `true`** — see the
+warning in §5.12.
+
+---
+
+## 5.5 Pressure boundary conditions (Darcy mode only)
+
+When the material has a permeability (so the solver runs in Darcy–Fick transport
+mode, see Technical Reference §9), gas transport is pressure-driven and you can
+prescribe **pressure** at a boundary. Pressure BCs are `AbstractMassBC` subtypes,
+so they go in the `mass` slot of the `BoundaryConditionSet`. They do **not**
+contribute a diffusive mass flux; instead they set the Darcy gas velocity at the
+boundary face (via `apply_pressure_bc_to_darcy_velocity!`). In Fickian (non-Darcy)
+mode they have no effect.
+
+| BC type | Effect | Parameters (defaults) |
+|---|---|---|
+| `DirichletPressureBC` | fixed boundary pressure `P` | `P` (`101325.0`) |
+| `NeumannPressureBC` | prescribed pressure gradient `∂P/∂n` | `∂P∂n` (`0.0` = impermeable) |
+| `ConvectivePressureBC` | Robin outflow `v_g·n = h_P·(P_int − P_ext)` | `h_P`, `P_ext` |
+
+All three are exported by `using Pyrolysis`.
+
+### 5.5.1 `DirichletPressureBC` — fixed pressure
+
+```julia
+bc = DirichletPressureBC()           # default: atmospheric, 101325 Pa
+bc = DirichletPressureBC(101325.0)   # explicit atmospheric
+```
+
+Holds the boundary at pressure `P` (Pa, validated positive). The Darcy velocity
+is computed from the gradient between the boundary and the interior cell,
+`v_g = −(κ/μ)·(P_bc − P_interior)/d`. This is the natural exposed-surface
+condition: the outer face sits at atmospheric pressure and gas flows out down the
+pressure gradient built up by pyrolysis.
+
+### 5.5.2 `NeumannPressureBC` — prescribed gradient
+
+```julia
+bc = NeumannPressureBC()        # default: zero gradient (impermeable to gas flow)
+bc = NeumannPressureBC(0.0)     # same as above
+bc = NeumannPressureBC(1000.0)  # prescribed gradient [Pa/m] forcing an outflow
+```
+
+Sets the normal pressure gradient `∂P/∂n` (Pa/m), default `0.0`. A zero gradient
+is a no-flow (impermeable) back face for the pressure field — the usual choice for
+a sealed substrate in Darcy mode.
+
+### 5.5.3 `ConvectivePressureBC` — Robin (resistive) outflow
+
+```julia
+bc = ConvectivePressureBC(1e-6, 101325.0)   # finite surface resistance, atmospheric exterior
+```
+
+A Robin-type condition, `v_g·n = h_P·(P_internal − P_external)`, for a surface
+with finite resistance to gas flow (a char skin, a coating). Fields:
+
+- `h_P` — pressure-transfer coefficient `h_P` in m·Pa⁻¹·s⁻¹.
+- `P_ext` — external pressure `P_external` in Pa.
+
+Limits: `h_P → ∞` approaches `DirichletPressureBC`; `h_P → 0` approaches an
+impermeable (zero-flow) boundary.
+
+---
+
+## 5.6 Radiation boundary conditions (P1 model, Experimental)
+
+The four radiation models are selected by the `radiation_model` keyword of
+`solve()` (default `NO_RADIATION`), not by a BC in the set. For
+`NO_RADIATION`, `SURFACE_ABSORPTION`, and `BEER_LAMBERT`, the incoming radiation
+is specified by a `RadiativeFluxBC` in the thermal slot (§5.2.6) — there is
+nothing else to set.
+
+The **P1 quasi-steady** model (`P1_QUASI_STEADY`) is different: it solves a
+volumetric radiation field and needs its own boundary treatment (Marshak,
+reflective, or Dirichlet on the intensity `G`). These P1 BCs are **experimental**
+and live in `Pyrolysis.Experimental`, not in the `BoundaryConditionSet`:
+
+```julia
+import Pyrolysis.Experimental: MarshakRadiationBC, ReflectiveRadiationBC,
+                               DirichletRadiationBC, RadiationBCSet, P1_QUASI_STEADY
+```
+
+The standard P1 configuration is a **Marshak** condition on the exposed top
+(carrying the external flux and ambient field) and a **reflective** condition on
+the insulated bottom. The Marshak flux is
+`q_BC = c·(G_ext + 4·I_ext − G_surf)` with `c = ε/(2(2−ε))` and
+`G_ext = 4σT_∞⁴` — the external flux carries the half-range weight
+`4c = 2ε/(2−ε)`, the same weight as the ambient term (see Technical Reference
+§8.6 for the derivation).
+
+> **Status caveat.** P1 radiation is in `Pyrolysis.Experimental` and runs through
+> a separate residual path. For most cone-calorimeter and TGA work,
+> `SURFACE_ABSORPTION` (opaque) or `BEER_LAMBERT` (semi-transparent) with a
+> plain `RadiativeFluxBC` is the supported, production route. Reach for P1 only
+> when you specifically need in-depth re-radiation in an optically thick sample.
+
+---
+
+## 5.7 Mesh motion in ALE simulations (no boundary conditions needed)
+
+ALE mesh motion is **not configured through boundary conditions** — there are no
+mesh-motion BC types, and `BoundaryConditionSet` carries only `thermal` and
+`mass` slots. The mesh-velocity boundary treatment is fixed by the formulation:
+the bottom node is pinned (`w_1 = 0`, hard-coded in the residual's mesh-velocity
+integration) and every other node's velocity follows cumulatively from the
+volumetric strain as the material shrinks or swells (see Technical Reference
+§11.3), so the top surface automatically follows the material (recedes or
+expands). You enable the moving mesh simply with `solve(problem; use_ale =
+true)`.
+
+---
+
+## 5.8 Choosing ambient temperatures
+
+Several thermal BCs carry an ambient temperature `T_∞`: `ConvectiveBC` and
+`RadiativeBC` each have their own `T_inf`. This `T_∞` is used both in the BC's own
+flux and as the **reference temperature for the surface energy balance**. The
+resolution rules (see Technical Reference §12.3.8) are:
+
+- `ConvectiveBC` and `RadiativeBC` use their own `T_inf`.
+- BCs without an ambient (`HeatFluxBC`, `AdiabaticBC`, `RadiativeFluxBC`,
+  `DirichletThermalBC`) carry none, and the resolver falls back to the package
+  default `T_REF = 298.15 K`.
+- For a `CombinedThermalBC`, the first child that carries an ambient wins — so a
+  combined top BC with a `RadiativeBC(T_inf = 330)` and a `ConvectiveBC(T_inf = 330)`
+  resolves the surface ambient to 330 K. (Resolution keys on whether a BC *has* an
+  ambient, not on its value: setting `T_inf = 298.15` exactly is honored, never
+  mistaken for "defaulted".)
+
+Practical guidance: set `T_inf` consistently on the loss terms (`RadiativeBC`,
+`ConvectiveBC`) to the experimental surroundings temperature. In a cone
+calorimeter the cone shroud and chamber are warmer than room temperature; values
+in the 300–360 K range are common and used in the shipped examples.
+
+---
+
+## 5.9 Time-dependent parameters
+
+Any BC parameter shown above as "constant or function of `t`" accepts a
+single-argument function. The solver evaluates it at the current time. Examples:
+
+```julia
+# Heat-flux ramp
+HeatFluxBC(t -> 50e3 * min(t / 5.0, 1.0))           # linear ramp to 50 kW/m² over 5 s
+
+# Time-varying incident radiation
+RadiativeFluxBC(flux = t -> 25e3 * (1 - exp(-t / 10)))
+
+# Warming ambient in a convective loss term
+ConvectiveBC(h = 10.0, T_inf = t -> 300 + 0.5 * t)
+
+# Pulsed mass extraction
+MassFluxBC(t -> t < 50 ? 0.0 : -1e-3)
+```
+
+> **Note on time-varying radiation flux.** When `radiation_model` is
+> `SURFACE_ABSORPTION` or `BEER_LAMBERT`, `solve()` re-samples the incident
+> flux of the top `RadiativeFluxBC` at **every** RHS evaluation — constant and
+> time-varying fluxes alike, with no up-front constancy detection. A ramped or
+> modulated flux is therefore always tracked exactly. You do not need to do
+> anything special — just supply `flux = t -> …`.
+
+---
+
+## 5.10 Initial conditions
+
+Initial conditions are supplied to `PyrolysisProblem` as functions of the spatial
+coordinate `z` (in meters, with `z = 0` at the bottom, `z = L` at the top). Two
+inputs:
+
+- `T_initial` — a function `z -> T` returning the initial temperature in K.
+  Default: `z -> 300.0`.
+- `ξ_initial` — the initial mass concentrations `ξ_j(z)` in kg/m³, one entry per
+  component. Accepts a `Vector` of functions (one per component), a single
+  function (broadcast to all components), or you may omit it for the auto-default.
+
+```julia
+problem = PyrolysisProblem(
+    mesh = mesh,
+    material = material,            # NC = 2 here: virgin solid + gas
+    bc_set = bc_set,
+    T_initial = z -> 300.0,                  # uniform 300 K
+    ξ_initial = [z -> 1190.0, z -> 0.0],     # full virgin density, no gas
+    tspan = (0.0, 100.0),
+)
+```
+
+### 5.10.1 Auto-defaults
+
+If you omit `ξ_initial`, the constructor builds a sensible default: the **first
+component, if it is a solid, is placed at its reference density** (its density
+function evaluated at 300 K) and all other components are set to zero. This is
+correct for the common "single virgin solid that decomposes into gas(es) and
+char" setup, where component 1 is the virgin solid. Always double-check it
+matches your component ordering; if not, pass `ξ_initial` explicitly.
+
+`T_initial` defaults to a uniform 300 K.
+
+### 5.10.2 Uniform vs. depth-varying profiles
+
+A uniform value is just a constant-returning closure:
+
+```julia
+T_initial = z -> 300.0
+ξ_initial = [z -> 1190.0, z -> 0.0]   # uniform composition
+```
+
+For a non-uniform start (e.g. a pre-charred surface layer, or a moisture
+gradient) make the closures depend on `z`:
+
+```julia
+L = 0.02  # domain thickness [m]
+# Warmer at the exposed top, cooler at the substrate
+T_initial = z -> 300.0 + 50.0 * (z / L)
+
+# A thin char layer near the surface (component 2 = char), virgin below
+ξ_initial = [
+    z -> z > 0.9 * L ? 200.0 : 1190.0,   # virgin: depleted near top
+    z -> z > 0.9 * L ? 150.0 : 0.0,      # char: present near top
+    z -> 0.0,                            # gas: none initially
+]
+```
+
+The initial conditions are evaluated at each cell center and stored in the mesh.
+They also populate the per-cell **dry-solid mass** denominator used by the
+lateral-shrinkage (χ) dynamics, computed as
+`m_{dry,i} = V_i · Σ_{solid} ξ_{j,i}(0)` (see Technical Reference §12.8 and
+§10.3).
+
+### 5.10.3 Profile helper functions
+
+Convenience profile builders are available in the `Problem` submodule (not
+top-level exported). Import them explicitly when you want them:
+
+```julia
+import Pyrolysis.Problem: step_profile, linear_profile, gaussian_profile, tanh_profile
+
+z_int = 0.9 * L
+# Sharp step: char above the interface, virgin below
+ξ_char_initial = z -> step_profile(z; z_interface = z_int,
+                                       value_left = 0.0, value_right = 150.0)
+
+# Linear temperature ramp through the thickness
+T_initial = z -> linear_profile(z; z_min = 0.0, z_max = L,
+                                    value_min = 300.0, value_max = 350.0)
+
+# Smooth (tanh) interface instead of a hard step
+ξ_char_initial = z -> tanh_profile(z; z_center = z_int, width = 0.001,
+                                      value_left = 0.0, value_right = 150.0)
+
+# Gaussian bump (e.g. a localized moisture pocket)
+ξ_moist_initial = z -> gaussian_profile(z; z_center = 0.5 * L, width = 0.002,
+                                           amplitude = 100.0, baseline = 0.0)
+```
+
+Their signatures:
+
+| Helper | Keyword arguments |
+|---|---|
+| `step_profile(z; z_interface, value_left, value_right)` | step at `z_interface` |
+| `linear_profile(z; z_min, z_max, value_min, value_max)` | clamped linear ramp |
+| `gaussian_profile(z; z_center, width, amplitude, baseline = 0.0)` | Gaussian bump |
+| `tanh_profile(z; z_center, width, value_left, value_right)` | smooth step |
+
+A smooth (`tanh`) interface is generally preferable to a hard `step_profile` for
+the solver: sharp discontinuities at `t = 0` can provoke small startup
+transients.
+
+---
+
+## 5.11 Common configurations (worked recipes)
+
+### 5.11.1 Cone calorimeter (opaque charring solid)
+
+External cone flux absorbed at the surface, with re-radiation and convective
+losses; gas escapes by convective mass transfer; insulated, impermeable back
+face:
+
+```julia
+bc_set = BoundaryConditionSet(
+    thermal = (
+        top = RadiativeFluxBC(flux = 50e3, absorptivity = 0.96) +
+              RadiativeBC(ε = 0.96, T_inf = 330.0) +
+              ConvectiveBC(h = 10.0, T_inf = 330.0),
+        bottom = AdiabaticBC(),
+    ),
+    mass = (
+        top    = ConvectiveMassBC(h_m = 0.05, ξ_inf = 0.0),
+        bottom = ImpermeableBC(),
+    ),
+)
+solution = solve(problem; radiation_model = SURFACE_ABSORPTION)
+```
+
+### 5.11.2 Semi-transparent polymer (in-depth absorption)
+
+Same incoming radiation, but absorbed in depth via Beer–Lambert (requires
+absorption coefficients on the components):
+
+```julia
+bc_set = BoundaryConditionSet(
+    thermal = (
+        top = RadiativeFluxBC(flux = 50e3) +          # α defaults to ε_eff
+              RadiativeBC(T_inf = 300.0) +
+              ConvectiveBC(h = 10.0, T_inf = 300.0),
+        bottom = AdiabaticBC(),
+    ),
+    mass = (top = DiffusiveMassBC(), bottom = ImpermeableBC()),
+)
+solution = solve(problem; radiation_model = BEER_LAMBERT)
+```
+
+### 5.11.3 Furnace temperature program on the exposed face
+
+A prescribed heating program is most directly modeled by holding the surface
+temperature with a time-dependent `DirichletThermalBC`:
+
+```julia
+β = 10.0 / 60.0   # 10 K/min in K/s
+bc_set = BoundaryConditionSet(
+    thermal = (top = DirichletThermalBC(t -> 300.0 + β * t),
+               bottom = AdiabaticBC()),
+    mass    = (top = DiffusiveMassBC(), bottom = ImpermeableBC()),
+)
+```
+
+### 5.11.4 Pressure-driven char (Darcy mode)
+
+With a permeable material, set atmospheric pressure on the exposed face and a
+sealed (zero-gradient) back face. The transport mode switches to Darcy–Fick
+automatically when the material has permeability:
+
+```julia
+bc_set = BoundaryConditionSet(
+    thermal = (top = HeatFluxBC(50e3) + RadiativeBC(ε = 0.9, T_inf = 300.0),
+               bottom = AdiabaticBC()),
+    mass    = (top = DirichletPressureBC(101325.0),    # atmospheric exposed face
+               bottom = NeumannPressureBC(0.0)),       # sealed substrate
+)
+```
+
+---
+
+## 5.12 Caveats and pitfalls
+
+- **Surface transpiration is forbidden in the production path.** `solve()`
+  rejects `use_transpiration_bc = true` with an `ArgumentError`. The reason
+  (Technical Reference §7.6, §12.3): the volumetric gas-advection source
+  `S_conv = −Σ_g c_{p,g} J_g ∂T/∂z` is *always* active and already carries gas
+  enthalpy; adding the surface transpiration term `Σ_g ṁ_g Δh_g(T_s, T_∞)`
+  double-counts it, producing a spurious ~5–10 kW/m² sink that under-predicts
+  surface temperature and mass-loss rate. The supported convention (matching
+  ThermaKin, Gpyro, and FDS) is `S_conv` only, i.e. `use_transpiration_bc =
+  false` (the default). Gas mass transport still works either way — the
+  transpiration term affects only the *energy* balance.
+
+- **`radiation_model` defaults to `NO_RADIATION`.** A `RadiativeFluxBC` only does
+  something if you pass an appropriate `radiation_model` to `solve()`. With the
+  default `NO_RADIATION`, an incident `RadiativeFluxBC` is still absorbed at the
+  surface (the absorbed flux is applied as a boundary heat flux), but choose
+  `SURFACE_ABSORPTION` (opaque) or `BEER_LAMBERT` (semi-transparent) explicitly
+  to make the intent clear and to enable the in-depth distribution.
+
+- **Only thermal and mass BCs go in the set.** `BoundaryConditionSet` accepts
+  only `AbstractThermalBC` and `AbstractMassBC` payloads — a wrong-kind BC
+  throws at construction. ALE mesh motion needs no BC at all (it is automatic
+  with `use_ale = true`), and P1 radiation BCs (`MarshakRadiationBC` etc.) go
+  through the Experimental P1 residual path, not the set.
+
+- **Pressure BCs need Darcy mode.** `DirichletPressureBC`/`NeumannPressureBC`/
+  `ConvectivePressureBC` only have an effect when the material has permeability
+  (Darcy–Fick transport). In Fickian mode they contribute zero flux and are
+  silently inert — use `ImpermeableBC`/`DiffusiveMassBC`/`ConvectiveMassBC` for
+  diffusion-only gas escape.
+
+- **Don't double-specify a radiation source.** Use `RadiativeFluxBC` (not also
+  `HeatFluxBC`) for the cone/panel; use `RadiativeBC` for the surface's own
+  re-radiation loss. They are different physical terms.
+
+- **Match `ξ_initial` to your component order.** The auto-default only fills
+  component 1 (if solid). For multi-solid or moisture-bearing materials, supply
+  `ξ_initial` explicitly so virgin solid, char, moisture, and gases start with
+  the right concentrations.
+
+For deeper background on the boundary physics, the surface Newton solve, and the
+radiation models, see Technical Reference §12 (boundary and initial conditions),
+§8 (thermal radiation), §7 (energy assembly and the `S_conv` convention), and §9
+(gas transport and pressure).

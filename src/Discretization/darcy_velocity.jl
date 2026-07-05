@@ -15,7 +15,7 @@ The velocity is computed at face centers using:
 - Central difference for pressure gradient
 """
 
-using ..Core: GAS
+using ..Materials: GAS
 using ..Properties: effective_gas_viscosity, harmonic_mean_permeability
 
 # ============================================================================
@@ -42,26 +42,31 @@ Uses harmonic mean for permeability and arithmetic mean for temperature
 # Returns
 Darcy velocity [m/s], positive = flow in +z direction (from L to R)
 """
-@inline function darcy_velocity_face(κ_L::Float64, κ_R::Float64,
-	T_L::Float64, T_R::Float64,
-	P_L::Float64, P_R::Float64,
-	d_LR::Float64)
-	# Harmonic mean for permeability (handles heterogeneous interfaces)
-	κ_face = harmonic_mean_permeability(κ_L, κ_R)
+@inline function darcy_velocity_face(
+    κ_L::Float64,
+    κ_R::Float64,
+    T_L::Float64,
+    T_R::Float64,
+    P_L::Float64,
+    P_R::Float64,
+    d_LR::Float64,
+)
+    # Harmonic mean for permeability (handles heterogeneous interfaces)
+    κ_face = harmonic_mean_permeability(κ_L, κ_R)
 
-	# Arithmetic mean temperature for viscosity
-	T_face = 0.5 * (T_L + T_R)
-	μ_face = effective_gas_viscosity(T_face)
+    # Arithmetic mean temperature for viscosity
+    T_face = 0.5 * (T_L + T_R)
+    μ_face = effective_gas_viscosity(T_face)
 
-	# Pressure gradient (central difference)
-	∇P = (P_R - P_L) / d_LR
+    # Pressure gradient (central difference)
+    ∇P = (P_R - P_L) / d_LR
 
-	# Darcy velocity: v = -(κ/μ)∇P
-	if κ_face > 0.0 && μ_face > 1e-20
-		return -κ_face / μ_face * ∇P
-	else
-		return 0.0
-	end
+    # Darcy velocity: v = -(κ/μ)∇P
+    if κ_face > 0.0 && μ_face > 1e-20
+        return -κ_face / μ_face * ∇P
+    else
+        return 0.0
+    end
 end
 
 """
@@ -80,18 +85,22 @@ Compute Darcy velocity at a face given pre-computed face properties.
 # Returns
 Darcy velocity [m/s], positive = flow in +z direction
 """
-@inline function darcy_velocity_face(κ_face::Float64, μ_face::Float64,
-	P_L::Float64, P_R::Float64,
-	d_LR::Float64)
-	# Pressure gradient
-	∇P = (P_R - P_L) / d_LR
+@inline function darcy_velocity_face(
+    κ_face::Float64,
+    μ_face::Float64,
+    P_L::Float64,
+    P_R::Float64,
+    d_LR::Float64,
+)
+    # Pressure gradient
+    ∇P = (P_R - P_L) / d_LR
 
-	# Darcy velocity
-	if κ_face > 0.0 && μ_face > 1e-20
-		return -κ_face / μ_face * ∇P
-	else
-		return 0.0
-	end
+    # Darcy velocity
+    if κ_face > 0.0 && μ_face > 1e-20
+        return -κ_face / μ_face * ∇P
+    else
+        return 0.0
+    end
 end
 
 # ============================================================================
@@ -113,37 +122,37 @@ Simplified version that uses pre-computed permeability at cell centers.
 - `P`: Pressure field at cell centers [Pa]
 - `κ`: Permeability field at cell centers [m²]
 """
-function compute_darcy_velocity!(v_gas::Vector{Float64}, mesh::Mesh1D{NC},
-	P::Vector{Float64},
-	κ::Vector{Float64}) where NC
-	n_faces = length(mesh.faces)
+function compute_darcy_velocity!(
+    v_gas::AbstractVector,
+    state,
+    mesh,
+    P::AbstractVector,
+    κ::AbstractVector,
+)
+    n_faces = length(state.A_face)
 
-	@inbounds for f in 1:n_faces
-		face = mesh.faces[f]
-		left_id, right_id = face.cell_ids
+    @inbounds for f = 1:n_faces
+        face = mesh.faces[f]
+        left_id, right_id = face.cell_ids
 
-		# Boundary faces: no flow
-		if left_id == 0 || right_id == 0
-			v_gas[f] = 0.0
-			continue
-		end
+        if left_id == 0 || right_id == 0
+            v_gas[f] = zero(eltype(v_gas))
+            continue
+        end
 
-		# Get properties
-		T_L = mesh.cell_states[left_id].T
-		T_R = mesh.cell_states[right_id].T
-		κ_L = κ[left_id]
-		κ_R = κ[right_id]
+        T_L = state.T[left_id]
+        T_R = state.T[right_id]
+        κ_L = κ[left_id]
+        κ_R = κ[right_id]
 
-		# Distance between cell centers
-		d_LR = abs(mesh.cell_centers[right_id] - mesh.cell_centers[left_id])
+        d_LR = abs(state.cell_centers[right_id] - state.cell_centers[left_id])
 
-		# Compute Darcy velocity
-		v_gas[f] = darcy_velocity_face(κ_L, κ_R, T_L, T_R,
-			P[left_id], P[right_id], d_LR)
-	end
+        v_gas[f] = darcy_velocity_face(κ_L, κ_R, T_L, T_R, P[left_id], P[right_id], d_LR)
+    end
 
-	return nothing
+    return nothing
 end
+
 
 # ============================================================================
 # Darcy Mobility (κ/μ) Computation
@@ -160,39 +169,37 @@ Compute Darcy mobility using pre-computed permeability field.
 - `mesh`: 1D mesh with cell states  
 - `κ`: Permeability field at cell centers [m²]
 """
-function compute_darcy_mobility!(mobility::Vector{Float64}, mesh::Mesh1D{NC},
-	κ::Vector{Float64}) where NC
-	n_faces = length(mesh.faces)
+function compute_darcy_mobility!(mobility::AbstractVector, state, mesh, κ::AbstractVector)
+    n_faces = length(state.A_face)
 
-	@inbounds for f in 1:n_faces
-		face = mesh.faces[f]
-		left_id, right_id = face.cell_ids
+    @inbounds for f = 1:n_faces
+        face = mesh.faces[f]
+        left_id, right_id = face.cell_ids
 
-		if left_id == 0 || right_id == 0
-			mobility[f] = 0.0
-			continue
-		end
+        if left_id == 0 || right_id == 0
+            mobility[f] = zero(eltype(mobility))
+            continue
+        end
 
-		# Harmonic mean permeability
-		κ_L = κ[left_id]
-		κ_R = κ[right_id]
-		κ_face = harmonic_mean_permeability(κ_L, κ_R)
+        κ_L = κ[left_id]
+        κ_R = κ[right_id]
+        κ_face = harmonic_mean_permeability(κ_L, κ_R)
 
-		# Arithmetic mean temperature for viscosity
-		T_L = mesh.cell_states[left_id].T
-		T_R = mesh.cell_states[right_id].T
-		T_face = 0.5 * (T_L + T_R)
-		μ_face = effective_gas_viscosity(T_face)
+        T_L = state.T[left_id]
+        T_R = state.T[right_id]
+        T_face = (T_L + T_R) / 2
+        μ_face = effective_gas_viscosity(T_face)
 
-		if μ_face > 1e-20
-			mobility[f] = κ_face / μ_face
-		else
-			mobility[f] = 0.0
-		end
-	end
+        if μ_face > 1e-20
+            mobility[f] = κ_face / μ_face
+        else
+            mobility[f] = zero(eltype(mobility))
+        end
+    end
 
-	return nothing
+    return nothing
 end
+
 
 # ============================================================================
 # Velocity from Mobility (for efficient recomputation)
@@ -213,16 +220,18 @@ This is efficient when mobility is constant but pressure changes (implicit solve
 - `mobility`: Pre-computed κ/μ at faces [m²/(Pa·s)]
 - `∇P`: Pressure gradient at faces [Pa/m]
 """
-function velocity_from_mobility!(v_gas::Vector{Float64},
-	mobility::Vector{Float64},
-	∇P::Vector{Float64})
-	n_faces = length(v_gas)
+function velocity_from_mobility!(
+    v_gas::Vector{Float64},
+    mobility::Vector{Float64},
+    ∇P::Vector{Float64},
+)
+    n_faces = length(v_gas)
 
-	@inbounds @simd for f in 1:n_faces
-		v_gas[f] = -mobility[f] * ∇P[f]
-	end
+    @inbounds @simd for f = 1:n_faces
+        v_gas[f] = -mobility[f] * ∇P[f]
+    end
 
-	return nothing
+    return nothing
 end
 
 # ============================================================================
@@ -245,10 +254,10 @@ For v_gas[f] = -(κ_face/μ_face) × (P_R - P_L) / d_LR:
 - `right_ids::Vector{Int}`: Right cell index for each face (0 if boundary)
 """
 struct DarcyVelocityJacobianCoeffs
-	coeff_L::Vector{Float64}
-	coeff_R::Vector{Float64}
-	left_ids::Vector{Int}
-	right_ids::Vector{Int}
+    coeff_L::Vector{Float64}
+    coeff_R::Vector{Float64}
+    left_ids::Vector{Int}
+    right_ids::Vector{Int}
 end
 
 """
@@ -257,12 +266,12 @@ end
 Create empty Jacobian coefficient storage for n_faces faces.
 """
 function DarcyVelocityJacobianCoeffs(n_faces::Int)
-	DarcyVelocityJacobianCoeffs(
-		zeros(n_faces),
-		zeros(n_faces),
-		zeros(Int, n_faces),
-		zeros(Int, n_faces),
-	)
+    DarcyVelocityJacobianCoeffs(
+        zeros(n_faces),
+        zeros(n_faces),
+        zeros(Int, n_faces),
+        zeros(Int, n_faces),
+    )
 end
 
 """
@@ -277,62 +286,64 @@ Compute Jacobian coefficients using pre-computed permeability field.
 - `mesh`: 1D mesh with cell states
 - `κ`: Permeability field at cell centers [m²]
 """
-function compute_darcy_velocity_jacobian!(jac::DarcyVelocityJacobianCoeffs,
-	mesh::Mesh1D{NC},
-	κ::Vector{Float64}) where NC
-	n_faces = length(mesh.faces)
+function compute_darcy_velocity_jacobian!(
+    jac::DarcyVelocityJacobianCoeffs,
+    state,
+    mesh,
+    κ::AbstractVector,
+)
+    n_faces = length(state.A_face)
 
-	@inbounds for f in 1:n_faces
-		face = mesh.faces[f]
-		left_id, right_id = face.cell_ids
+    @inbounds for f = 1:n_faces
+        face = mesh.faces[f]
+        left_id, right_id = face.cell_ids
 
-		jac.left_ids[f] = left_id
-		jac.right_ids[f] = right_id
+        jac.left_ids[f] = left_id
+        jac.right_ids[f] = right_id
 
-		if left_id == 0 || right_id == 0
-			jac.coeff_L[f] = 0.0
-			jac.coeff_R[f] = 0.0
-			continue
-		end
+        if left_id == 0 || right_id == 0
+            jac.coeff_L[f] = 0.0
+            jac.coeff_R[f] = 0.0
+            continue
+        end
 
-		# Harmonic mean permeability
-		κ_L = κ[left_id]
-		κ_R = κ[right_id]
-		κ_face = harmonic_mean_permeability(κ_L, κ_R)
+        κ_L = κ[left_id]
+        κ_R = κ[right_id]
+        κ_face = harmonic_mean_permeability(κ_L, κ_R)
 
-		# Temperature and viscosity
-		T_L = mesh.cell_states[left_id].T
-		T_R = mesh.cell_states[right_id].T
-		T_face = 0.5 * (T_L + T_R)
-		μ_face = effective_gas_viscosity(T_face)
+        T_L = state.T[left_id]
+        T_R = state.T[right_id]
+        T_face = (T_L + T_R) / 2
+        μ_face = effective_gas_viscosity(T_face)
 
-		# Distance
-		d_LR = abs(mesh.cell_centers[right_id] - mesh.cell_centers[left_id])
+        d_LR = abs(state.cell_centers[right_id] - state.cell_centers[left_id])
 
-		if μ_face > 1e-20 && d_LR > 0.0
-			coeff = κ_face / (μ_face * d_LR)
-		else
-			coeff = 0.0
-		end
+        if μ_face > 1e-20 && d_LR > 0.0
+            coeff = κ_face / (μ_face * d_LR)
+        else
+            coeff = zero(typeof(κ_face))
+        end
 
-		jac.coeff_L[f] = coeff
-		jac.coeff_R[f] = -coeff
-	end
+        jac.coeff_L[f] = coeff
+        jac.coeff_R[f] = -coeff
+    end
 
-	return nothing
+    return nothing
 end
+
 
 # ============================================================================
 # Pressure Boundary Condition Application
 # ============================================================================
 
-using ..Core: DirichletPressureBC, NeumannPressureBC, ConvectivePressureBC
-using ..Core: ImpermeableBC, AbstractMassBC
+using ..BoundaryConditions: DirichletPressureBC, NeumannPressureBC, ConvectivePressureBC
+using ..Materials: AbstractMassBC
+using ..BoundaryConditions: ImpermeableBC
 # ============================================================================
 # Type-Stable BoundaryConditionSet Signatures
 # ============================================================================
 
-using ..Core: BoundaryConditionSet, get_mass_bc
+using ..BoundaryConditions: BoundaryConditionSet, get_mass_bc
 
 """
 	apply_pressure_bc_to_darcy_velocity!(v_gas::Vector{Float64},
@@ -352,128 +363,151 @@ Uses pre-cached face IDs computed once at problem setup.
 """
 
 
-# Type-stable helper using pre-cached face IDs (avoids Dict lookup)
-# boundary_id as Val for compile-time dispatch on position
+using ..BoundaryConditions: CombinedMassBC
 
-function _apply_pressure_bc_faces!(v_gas, mesh, P, κ, face_ids::Vector{Int},
-	bc::DirichletPressureBC, ::Val{B}) where B
-	@inbounds for f in face_ids
-		face = mesh.faces[f]
+"""
+	boundary_darcy_velocity(bc, P_int, κ_int, μ_int, d, ::Val{tag}) -> v_z
 
-		# Find the interior cell (one of the cell_ids is 0 for boundary faces)
-		cell_id = face.cell_ids[1] != 0 ? face.cell_ids[1] : face.cell_ids[2]
+Boundary-face Darcy velocity [m/s] in the +z convention, from a pressure BC
+and the interior cell's state. This is the single shared kernel for the
+residual (`apply_pressure_bc_to_darcy_velocity!`), the Jacobian
+(`BCMassOperator`), and the saved-output diagnostics — keep them in lockstep
+by changing only this function. AD-clean (arguments may be `Dual`s).
 
-		# Get interior properties
-		P_int = P[cell_id]
-		κ_int = κ[cell_id]
-		T_int = mesh.cell_states[cell_id].T
+`tag` is `:top` (outward normal +z) or `:bottom` (outward normal −z).
+Non-pressure mass BCs contribute 0; `CombinedMassBC` sums its children.
 
-		# Distance from cell center to boundary face
-		node_pos = mesh.nodes[face.node_id].z
-		cell_center = mesh.cell_centers[cell_id]
-		d = abs(node_pos - cell_center)
+Methods:
+- `DirichletPressureBC`: one-sided gradient v_z = −(κ/μ)·(P_bc − P_int)/d at
+  the top (mirrored at the bottom); 0 for an impermeable interior cell.
+- `NeumannPressureBC`: `∂P∂n` is the pressure gradient along the **outward
+  normal**, so v_z = −(κ/μ)·∂P/∂z = −(κ/μ)·∂P∂n at the top and
+  **+**(κ/μ)·∂P∂n at the bottom (n̂ = −ẑ there).
+- `ConvectivePressureBC`: film law v_out = h_P·(P_int − P_ext) along the
+  outward normal, gated on κ_int > 0 — an impermeable surface cell cannot
+  vent regardless of h_P.
+"""
+function boundary_darcy_velocity end
 
-		if d < 1e-15
-			v_gas[f] = 0.0
-			continue
-		end
-
-		# Viscosity at interior temperature
-		μ_int = effective_gas_viscosity(T_int)
-
-		# Pressure gradient from interior to boundary
-		# B=1 is top (node_pos > cell_center), B=2 is bottom (node_pos < cell_center)
-		if B == 1  # Top boundary
-			∇P = (bc.P - P_int) / d
-		else  # Bottom boundary
-			∇P = (P_int - bc.P) / d
-		end
-
-		# Darcy velocity
-		if κ_int > 0.0 && μ_int > 1e-20
-			v_gas[f] = -κ_int / μ_int * ∇P
-		else
-			v_gas[f] = 0.0
-		end
-	end
+@inline function boundary_darcy_velocity(
+    bc::DirichletPressureBC,
+    P_int::Real,
+    κ_int::Real,
+    μ_int::Real,
+    d::Real,
+    ::Val{tag},
+) where {tag}
+    Tv = promote_type(typeof(P_int), typeof(κ_int), typeof(μ_int), typeof(d))
+    (d < 1e-15 || !(κ_int > 0) || !(μ_int > 1e-20)) && return zero(Tv)
+    ∇P = tag === :top ? (bc.P - P_int) / d : (P_int - bc.P) / d
+    return -κ_int / μ_int * ∇P
 end
 
-function _apply_pressure_bc_faces!(v_gas, mesh, P, κ, face_ids::Vector{Int},
-	bc::NeumannPressureBC, ::Val{B}) where B
-	@inbounds for f in face_ids
-		if abs(bc.∂P∂n) < 1e-20
-			v_gas[f] = 0.0
-		else
-			face = mesh.faces[f]
-			cell_id = face.cell_ids[1] != 0 ? face.cell_ids[1] : face.cell_ids[2]
-
-			κ_int = κ[cell_id]
-			T_int = mesh.cell_states[cell_id].T
-			μ_int = effective_gas_viscosity(T_int)
-
-			if κ_int > 0.0 && μ_int > 1e-20
-				v_gas[f] = -κ_int / μ_int * bc.∂P∂n
-			else
-				v_gas[f] = 0.0
-			end
-		end
-	end
+@inline function boundary_darcy_velocity(
+    bc::NeumannPressureBC,
+    P_int::Real,
+    κ_int::Real,
+    μ_int::Real,
+    d::Real,
+    ::Val{tag},
+) where {tag}
+    Tv = promote_type(typeof(P_int), typeof(κ_int), typeof(μ_int), typeof(d))
+    (abs(bc.∂P∂n) < 1e-20 || !(κ_int > 0) || !(μ_int > 1e-20)) && return zero(Tv)
+    # ∂P∂n is along the outward normal: ∂P/∂z = +∂P∂n at the top (n̂ = +ẑ),
+    # −∂P∂n at the bottom (n̂ = −ẑ); v_z = −(κ/μ)·∂P/∂z.
+    return tag === :top ? -κ_int / μ_int * bc.∂P∂n : κ_int / μ_int * bc.∂P∂n
 end
 
-function _apply_pressure_bc_faces!(v_gas, mesh, P, κ, face_ids::Vector{Int},
-	bc::ConvectivePressureBC, ::Val{B}) where B
-	@inbounds for f in face_ids
-		face = mesh.faces[f]
-		cell_id = face.cell_ids[1] != 0 ? face.cell_ids[1] : face.cell_ids[2]
-		P_int = P[cell_id]
-
-		# Robin BC: v·n = h_P × (P_int - P_ext)
-		if B == 1  # Top boundary: positive v = outflow
-			v_gas[f] = bc.h_P * (P_int - bc.P_ext)
-		else  # Bottom boundary: negative v = outflow
-			v_gas[f] = -bc.h_P * (P_int - bc.P_ext)
-		end
-	end
+@inline function boundary_darcy_velocity(
+    bc::ConvectivePressureBC,
+    P_int::Real,
+    κ_int::Real,
+    μ_int::Real,
+    d::Real,
+    ::Val{tag},
+) where {tag}
+    Tv = promote_type(typeof(P_int), typeof(κ_int), typeof(μ_int), typeof(d))
+    κ_int > 0 || return zero(Tv)
+    v_out = bc.h_P * (P_int - bc.P_ext)
+    return tag === :top ? v_out : -v_out
 end
 
-# Fallback for other BC types - keep v_gas = 0 (default from compute_darcy_velocity!)
-function _apply_pressure_bc_faces!(v_gas, mesh, P, κ, face_ids::Vector{Int},
-	bc::AbstractMassBC, ::Val{B}) where B
-	# No-op: ImpermeableBC and other mass BCs don't modify Darcy velocity
-	return nothing
+# Non-pressure mass BCs contribute no boundary Darcy velocity.
+@inline function boundary_darcy_velocity(
+    ::AbstractMassBC,
+    P_int::Real,
+    κ_int::Real,
+    μ_int::Real,
+    d::Real,
+    ::Val{tag},
+) where {tag}
+    return zero(promote_type(typeof(P_int), typeof(κ_int), typeof(μ_int), typeof(d)))
 end
 
-# CombinedMassBC: iterate through sub-BCs to find and apply pressure BCs
-# This allows combining DiffusiveMassBC + DirichletPressureBC
-# Use @generated to unroll at compile time and avoid allocation from heterogeneous tuple
-@generated function _apply_pressure_bc_faces!(v_gas, mesh, P, κ, face_ids::Vector{Int},
-	bc::CombinedMassBC{BCs}, boundary_val::Val{B}) where {BCs <: Tuple, B}
-	N = length(BCs.parameters)
-	exprs = [
-		quote
-			_apply_pressure_bc_faces!(v_gas, mesh, P, κ, face_ids, bc.bcs[$i], boundary_val)
-		end for i in 1:N
-	]
-	return quote
-		$(exprs...)
-		return nothing
-	end
+@generated function boundary_darcy_velocity(
+    bc::CombinedMassBC{BCs},
+    P_int::Real,
+    κ_int::Real,
+    μ_int::Real,
+    d::Real,
+    boundary_val::Val{tag},
+) where {BCs<:Tuple,tag}
+    N = length(BCs.parameters)
+    exprs = [
+        :(boundary_darcy_velocity(bc.bcs[$i], P_int, κ_int, μ_int, d, boundary_val)) for
+        i = 1:N
+    ]
+    return :(+($(exprs...)))
 end
 
-using ..Core: CombinedMassBC
+# Per-boundary face loop: write the kernel's velocity into v_gas. Non-pressure
+# BCs write 0 — same as the compute_darcy_velocity! default.
+function _apply_pressure_bc_faces!(
+    v_gas,
+    state,
+    mesh,
+    P,
+    κ,
+    face_ids::Vector{Int},
+    bc::AbstractMassBC,
+    ::Val{tag},
+) where {tag}
+    @inbounds for f in face_ids
+        face = mesh.faces[f]
+        cell_id = face.cell_ids[1] != 0 ? face.cell_ids[1] : face.cell_ids[2]
 
-# Type-stable wrapper that applies mass/pressure BCs at the top and bottom
-# faces using the concrete `BoundaryConditionSet` and precomputed face id lists.
-function apply_pressure_bc_to_darcy_velocity!(v_gas::Vector{Float64}, mesh::Mesh1D{NC},
-	P::Vector{Float64}, κ::Vector{Float64}, bc_set::BoundaryConditionSet,
-	top_face_ids::Vector{Int}, bottom_face_ids::Vector{Int}) where NC
-	# Top boundary (boundary id = 1)
-	mass_top = get_mass_bc(bc_set, Val(1))
-	_apply_pressure_bc_faces!(v_gas, mesh, P, κ, top_face_ids, mass_top, Val(1))
+        d = abs(state.face_positions[f] - state.cell_centers[cell_id])
+        μ_int = effective_gas_viscosity(state.T[cell_id])
 
-	# Bottom boundary (boundary id = 2)
-	mass_bottom = get_mass_bc(bc_set, Val(2))
-	_apply_pressure_bc_faces!(v_gas, mesh, P, κ, bottom_face_ids, mass_bottom, Val(2))
+        v_gas[f] = boundary_darcy_velocity(bc, P[cell_id], κ[cell_id], μ_int, d, Val(tag))
+    end
+    return nothing
+end
 
-	return nothing
+function apply_pressure_bc_to_darcy_velocity!(
+    v_gas::AbstractVector,
+    state,
+    mesh,
+    P::AbstractVector,
+    κ::AbstractVector,
+    bc_set::BoundaryConditionSet,
+    top_face_ids::Vector{Int},
+    bottom_face_ids::Vector{Int},
+)
+    mass_top = get_mass_bc(bc_set, Val(:top))
+    _apply_pressure_bc_faces!(v_gas, state, mesh, P, κ, top_face_ids, mass_top, Val(:top))
+
+    mass_bottom = get_mass_bc(bc_set, Val(:bottom))
+    _apply_pressure_bc_faces!(
+        v_gas,
+        state,
+        mesh,
+        P,
+        κ,
+        bottom_face_ids,
+        mass_bottom,
+        Val(:bottom),
+    )
+
+    return nothing
 end

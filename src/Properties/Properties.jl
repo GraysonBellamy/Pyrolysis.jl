@@ -10,8 +10,10 @@ This module provides:
 """
 module Properties
 
-using ..Core
+using ..Materials
+using ..BoundaryConditions
 using ..Geometry
+using ForwardDiff  # permeability_derivatives: forward-mode over effective_permeability
 
 # Include subfiles
 include("mixture_rules.jl")
@@ -20,19 +22,18 @@ include("property_cache.jl")
 include("radiation_cache.jl")
 
 # Exports
-export mixture_density, volume_fractions, solid_volume_fractions, mass_fractions, total_density, porosity
-export porosity_derivatives, porosity_derivatives!
-export effective_heat_capacity, effective_specific_heat, effective_conductivity
+export mixture_density,
+    volume_fractions, solid_volume_fractions, mass_fractions, total_density, porosity
+export effective_heat_capacity, total_heat_capacity, effective_conductivity
 export effective_emissivity, effective_absorption, effective_gas_transfer
-export effective_permeability, permeability_derivatives, permeability_derivatives!  # Component-based permeability
-export harmonic_mean_weighted, harmonic_mean_product_weighted
+export effective_permeability, permeability_derivatives  # Component-based permeability
+export harmonic_mean_weighted
 export effective_gas_viscosity, mixture_gas_viscosity
-export species_transport_scaling, M_REF_TRANSPORT
-export collision_integral_diffusion, chapman_enskog_diffusivity, chapman_enskog_λ
+export collision_integral_diffusion, chapman_enskog_diffusivity
 export CHAPMAN_ENSKOG_PREFACTOR, SIGMA_AIR, EPSILON_K_AIR, M_AIR
 export bruggeman_effective_property
-export PropertyCache, update_properties!, resize_cache!, get_cell_properties
-export harmonic_mean_permeability, harmonic_mean_permeability_weighted
+export PropertyCache, update_properties!, resize_cache!
+export harmonic_mean_permeability
 
 # Radiation cache (P1 approximation)
 export RadiationCache, resize_radiation_cache!

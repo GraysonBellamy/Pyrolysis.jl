@@ -2,6 +2,26 @@
 
 This directory contains example scripts demonstrating the Pyrolysis.jl package.
 
+## Setup
+
+This directory has its own `Project.toml` environment that includes visualization dependencies (Plots) alongside Pyrolysis. This keeps the main package lightweight — users installing Pyrolysis via `Pkg.add()` won't require Plots unless they want to run examples.
+
+To run examples, activate the examples environment:
+
+```julia
+cd("examples")
+using Pkg; Pkg.activate(".")
+Pkg.instantiate()  # first time only
+
+include("06_cone_calorimeter.jl")
+```
+
+Or from the shell:
+```bash
+cd examples
+julia --project=. -e 'include("06_cone_calorimeter.jl")'
+```
+
 ## Available Examples
 
 ### 06_cone_calorimeter.jl - Cone Calorimeter Simulation of PMMA
@@ -49,17 +69,17 @@ velocity depends on the reaction rates of all cells below it (cumulative sum).
 This creates a dense lower-triangular block in the Jacobian that dominates the
 sparse factorization cost (69% of non-zeros at 240 cells, O(N^2.3) scaling).
 
-The `use_reduced_jacobian=true` option omits this dense coupling from the Jacobian
-while still solving the full equations implicitly. Newton converges all terms to
-tolerance — only the search direction is approximate. Benchmarks show **7.8x speedup**
-with identical solutions (0.0001 K temperature difference, 0.0000% peak MLR difference).
+The default `Structured(strategy = DirectSolve())` includes the structured
+coupling exactly. Pass `Structured(strategy = ApproxSolve())` to opt into the
+Schur-style approximation that drops the dense coupling — Newton converges
+all terms to tolerance using the approximate search direction; legacy
+benchmarks measured **~7.8× speedup** at 240 cells with identical solutions.
 
 ```julia
 solution = solve(problem;
     use_ale = true,
-    use_analytical_jacobian = true,
-    use_reduced_jacobian = true,    # 7.8x faster, identical results
-    solver = KenCarp4(linsolve = SparspakFactorization()),
+    jacobian = JacobianSpec(Structured(strategy = ApproxSolve()), problem),
+    integrator = KenCarp4(linsolve = SparspakFactorization()),
 )
 ```
 

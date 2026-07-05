@@ -42,41 +42,58 @@ println("\n1. Defining material...")
 # 1. Virgin solid
 # 2. Char residue
 # 3. Pyrolysis gas
+# 4. Background pore air (initialized at ~1 atm so the pore space does not
+#    start as a vacuum against the atmospheric pressure boundary)
 
-virgin = SolidComponent(:virgin,
-	ρ = 500.0,      # kg/m³ - wood-like density
-	c = 2000.0,     # J/(kg·K)
-	k = 0.15,       # W/(m·K)
-	ε = 0.9,        # emissivity
-	α = 5.0,        # m²/kg - absorption coefficient
-	κ = 1e-15,      # m² - low permeability (tight structure)
+virgin = SolidComponent(
+    :virgin,
+    ρ = 500.0,      # kg/m³ - wood-like bulk density
+    c = 2000.0,     # J/(kg·K)
+    k = 0.15,       # W/(m·K)
+    ε = 0.9,        # emissivity
+    α = 5.0,        # m²/kg - absorption coefficient
+    κ = 1e-15,      # m² - low permeability (tight structure)
+    ρ_intrinsic = 1500.0,  # kg/m³ - cell-wall (skeletal) density → φ ≈ 0.67
 )
 
-char = SolidComponent(:char,
-	ρ = 150.0,      # kg/m³ - char is less dense
-	c = 1500.0,     # J/(kg·K)
-	k = 0.10,       # W/(m·K) - char is less conductive
-	ε = 0.95,       # emissivity
-	α = 50.0,       # m²/kg - char absorbs more radiation
-	κ = 1e-12,      # m² - high permeability (porous char)
+char = SolidComponent(
+    :char,
+    ρ = 150.0,      # kg/m³ - char is less dense (bulk)
+    c = 1500.0,     # J/(kg·K)
+    k = 0.10,       # W/(m·K) - char is less conductive
+    ε = 0.95,       # emissivity
+    α = 50.0,       # m²/kg - char absorbs more radiation
+    κ = 1e-12,      # m² - high permeability (porous char)
+    ρ_intrinsic = 1950.0,  # kg/m³ - carbon skeletal density → φ ≈ 0.92
 )
 
-gas = GaseousComponent(:volatiles,
-	M = 0.044,      # kg/mol - CO₂-like molecular weight
-	c = 1200.0,     # J/(kg·K)
-	k = 0.03,       # W/(m·K)
-	λ = 2e-5,       # m²/s - diffusion coefficient
+gas = GaseousComponent(
+    :volatiles,
+    M = 0.044,      # kg/mol - CO₂-like molecular weight
+    c = 1200.0,     # J/(kg·K)
+    k = 0.03,       # W/(m·K)
+    λ = 2e-5,       # m²/s - diffusion coefficient
+)
+
+air = GaseousComponent(
+    :air,
+    M = 0.02897,    # kg/mol - air
+    c = 1006.0,     # J/(kg·K)
+    k = 0.026,      # W/(m·K) - air at ~300 K
+    λ = 2e-5,       # m²/s - diffusion coefficient
 )
 
 # Define decomposition reaction:
 # virgin → 0.20 char + 0.80 gas (80% mass loss)
-pyrolysis_reaction = Reaction(:pyrolysis, 1 => (2, 3),
-	yields = (0.20, 0.80),    # 1 kg virgin → 0.2 kg char + 0.8 kg gas
-	A = 1.0e13,       # s⁻¹ - pre-exponential factor
-	E = 150e3,        # J/mol - activation energy (~150 kJ/mol)
-	h = 300e3,        # J/kg - heat of reaction (endothermic)
-	T_min = 400.0,    # K - reaction starts above 400 K
-	T_max = 1500.0,    # K
+pyrolysis_reaction = Reaction(
+    :pyrolysis,
+    1 => (2, 3),
+    yields = (0.20, 0.80),    # 1 kg virgin → 0.2 kg char + 0.8 kg gas
+    A = 1.0e13,       # s⁻¹ - pre-exponential factor
+    E = 150e3,        # J/mol - activation energy (~150 kJ/mol)
+    h = 300e3,        # J/kg - heat of reaction (endothermic)
+    T_min = 400.0,    # K - reaction starts above 400 K
+    T_max = 1500.0,    # K
 )
 
 # ============================================================================
@@ -99,17 +116,17 @@ println("   Effective κ computed from composition via mixing rules")
 
 # Create material - Darcy flow is automatically enabled when any component has κ > 0
 material = Material(
-	name = :CharringWood,
-	components = (virgin, char, gas),
-	reactions = (pyrolysis_reaction,),
-	conductivity_mixing = PARALLEL,
-	β = 0.5,
-	permeability_mixing = WEIGHTED,    # Mix component permeabilities
-	β_κ = 0.5,                          # 50/50 parallel/series mixing
+    name = :CharringWood,
+    components = (virgin, char, gas, air),
+    reactions = (pyrolysis_reaction,),
+    mixing = MaterialMixing(
+        k = MixingSpec(PARALLEL, 0.5),
+        κ = MixingSpec(WEIGHTED, 0.5),  # 50/50 parallel/series mixing
+    ),
 )
 
 println("   Material: $(material.name)")
-println("   Components: virgin (κ=1e-15), char (κ=1e-12), volatiles (gas)")
+println("   Components: virgin (κ=1e-15), char (κ=1e-12), volatiles (gas), air (gas)")
 println("   Reaction: virgin → 20% char + 80% gas")
 println("   Darcy-Fick transport: enabled via component κ values")
 
@@ -123,20 +140,33 @@ thickness = 0.010    # 10 mm sample
 n_cells = 50
 T_initial = 300.0    # K
 
-# Initial concentrations: pure virgin material, no gas
+# Initial concentrations: virgin material with the pore space holding
+# background air at 1 atm. A vacuum start (all gas ξ = 0) against the
+# atmospheric pressure boundary would spuriously advect early product gas
+# inward down the absolute-pressure slope.
 ξ_virgin_initial = 500.0  # kg/m³
 ξ_char_initial = 0.0
 ξ_gas_initial = 0.0
+ξ_air_initial = background_gas_concentration(
+    material,
+    :air,
+    (ξ_virgin_initial, 0.0, 0.0, 0.0),
+    T_initial,
+)
 
-mesh = create_uniform_mesh(thickness, n_cells, Val(3);
-	T_initial = T_initial,
-	ξ_initial = (ξ_virgin_initial, ξ_char_initial, ξ_gas_initial),
+mesh = create_uniform_mesh(
+    thickness,
+    n_cells,
+    Val(4);
+    T_initial = T_initial,
+    ξ_initial = (ξ_virgin_initial, ξ_char_initial, ξ_gas_initial, ξ_air_initial),
 )
 
 println("   Thickness: $(thickness*1000) mm")
 println("   Cells: $n_cells")
 println("   Initial T: $T_initial K")
 println("   Initial virgin concentration: $ξ_virgin_initial kg/m³")
+println("   Initial pore air: $(round(ξ_air_initial, digits=3)) kg/m³ (~1 atm)")
 
 # ============================================================================
 # Boundary Conditions
@@ -148,13 +178,21 @@ heat_flux = 75e3  # 75 kW/m² - high heat flux
 
 # Create BoundaryConditionSet
 bc_set = BoundaryConditionSet(
-	thermal_top = HeatFluxBC(heat_flux) + RadiativeBC(ε = 0.9, T_inf = 300.0),  # Top: heat + reradiation
-	thermal_bottom = AdiabaticBC(),  # Bottom: insulated
-	mass_top = DiffusiveMassBC(0.01),  # Top: gas release
-	mass_bottom = ImpermeableBC(),       # Bottom: impermeable
+    thermal = (
+        top = HeatFluxBC(heat_flux) + RadiativeBC(ε = 0.9, T_inf = 300.0),
+        bottom = AdiabaticBC(),
+    ),
+    # Diffusive film escape + atmospheric pressure anchor: the pressure BC is
+    # what gives the boundary face its Darcy venting velocity — without it the
+    # demo would exercise no pressure-driven venting at all.
+    mass = (
+        top = DiffusiveMassBC(0.01) + DirichletPressureBC(101325.0),
+        bottom = ImpermeableBC(),
+    ),
 )
 
 println("   Top surface: $(heat_flux/1000) kW/m² + reradiation")
+println("   Top mass: diffusive film + 1 atm pressure anchor (Darcy venting)")
 println("   Bottom: adiabatic, impermeable")
 
 # ============================================================================
@@ -167,17 +205,19 @@ tspan = (0.0, 120.0)  # 2 minutes
 output_times = collect(0.0:10.0:120.0)
 
 problem = PyrolysisProblem(
-	mesh = mesh,
-	material = material,
-	bc_set = bc_set,
-	T_initial = z -> T_initial,
-	ξ_initial = [
-		z -> ξ_virgin_initial,
-		z -> ξ_char_initial,
-		z -> ξ_gas_initial,
-	],
-	tspan = tspan,
-	output_times = output_times,
+    mesh = mesh,
+    material = material,
+    bc_set = bc_set,
+    T_initial = z -> T_initial,
+    ξ_initial = [
+        z -> ξ_virgin_initial,
+        z -> ξ_char_initial,
+        z -> ξ_gas_initial,
+        z -> ξ_air_initial,
+    ],
+    tspan = tspan,
+    dt_initial = 0.01,
+    output_times = output_times,
 )
 
 println("   Time span: $(tspan[2]) s")
@@ -190,16 +230,18 @@ println("   Output times: every 10 s")
 println("\n6. Solving with Darcy-Fick transport...")
 println("   (Darcy flow enabled via component κ values)")
 
-solution_darcy = solve(problem;
-	use_ale = true,
-	min_thickness = 0.5e-3,   # 0.5 mm minimum
-	dt_initial = 0.01,
-	progress = true,
+solution_darcy = solve(
+    problem;
+    use_ale = true,
+    min_thickness = 0.5e-3,   # 0.5 mm minimum
+    progress = true,
 )
 
 println("\n   Solution status: $(solution_darcy.retcode)")
-println("   Final time: $(solution_darcy.times[end]) s")
-println("   Final thickness: $(round(solution_darcy.thickness_history[end]*1000, digits=2)) mm")
+println("   Final time: $(solution_darcy.t[end]) s")
+println(
+    "   Final thickness: $(round(solution_darcy.extras.thickness_history[end]*1000, digits=2)) mm",
+)
 
 # ============================================================================
 # Results Analysis
@@ -210,26 +252,30 @@ println("-" ^ 50)
 
 # Peak MLR
 if !isempty(solution_darcy.mass_loss_rate)
-	peak_mlr = maximum(solution_darcy.mass_loss_rate)
-	peak_mlr_time = solution_darcy.time_fine[argmax(solution_darcy.mass_loss_rate)]
-	println("   Peak MLR: $(round(peak_mlr*1000, digits=2)) g/(m²·s) at t=$(round(peak_mlr_time, digits=1)) s")
+    peak_mlr = maximum(solution_darcy.mass_loss_rate)
+    peak_mlr_time = solution_darcy.t[argmax(solution_darcy.mass_loss_rate)]
+    println(
+        "   Peak MLR: $(round(peak_mlr*1000, digits=2)) g/(m²·s) at t=$(round(peak_mlr_time, digits=1)) s",
+    )
 end
 
 # Peak surface temperature
-if !isempty(solution_darcy.surface_temperature)
-	peak_T_surface = maximum(solution_darcy.surface_temperature)
-	println("   Peak surface T: $(round(peak_T_surface, digits=0)) K")
+if !isempty(solution_darcy.surface_T)
+    peak_T_surface = maximum(solution_darcy.surface_T)
+    println("   Peak surface T: $(round(peak_T_surface, digits=0)) K")
 end
 
 # Mass conservation
-initial_mass = solution_darcy.total_mass[1]
-final_mass = solution_darcy.total_mass[end]
+initial_mass = solution_darcy.extras.total_mass[1]
+final_mass = solution_darcy.extras.total_mass[end]
 total_mass_released = initial_mass - final_mass
 mass_conversion = (1 - final_mass/initial_mass) * 100
 
 println("   Initial mass: $(round(initial_mass*1000, digits=2)) g/m²")
 println("   Final mass: $(round(final_mass*1000, digits=2)) g/m²")
-println("   Mass released: $(round(total_mass_released*1000, digits=2)) g/m² ($(round(mass_conversion, digits=1))%)")
+println(
+    "   Mass released: $(round(total_mass_released*1000, digits=2)) g/m² ($(round(mass_conversion, digits=1))%)",
+)
 
 # ============================================================================
 # Summary

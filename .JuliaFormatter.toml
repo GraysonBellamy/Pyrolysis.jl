@@ -1,0 +1,11 @@
+# JuliaFormatter configuration for Pyrolysis.jl
+#
+# Format the codebase:   julia --project=test scripts/format.jl
+# Verify only (CI):       julia --project=test scripts/format.jl --check
+#
+# Conservative default style — minimal semantic risk, tracks JuliaFormatter
+# defaults except for the knobs pinned below.
+indent = 4
+margin = 92
+normalize_line_endings = "unix"
+trailing_comma = true

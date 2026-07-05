@@ -1,131 +1,153 @@
 """
 Pressure field computation for gas phases.
 
-Uses ideal gas law: P = Σⱼ (ξⱼ·R·T / Mⱼ) for gas components
-
-Reference: Darcy_Fick_Implementation_Plan.md
+Uses ideal gas law in a porous medium: P = Σⱼ (ξⱼ·R·T / Mⱼ) / φ for gas components,
+where φ is the local porosity (gas volume fraction). The porosity divisor is
+required; omitting it underestimates gas pressure at low porosity.
 """
 
-using ..Core: R_GAS, GAS
+using ..Materials: R_GAS, GAS, is_gas, molar_mass, component_index
+
+# Floor on porosity used as a divisor — prevents 1/0 if a cell ever ends up
+# fully solid. Matches `_compute_porosity` clamping at 0.0.
+const _PHI_FLOOR = 1e-12
 
 # ============================================================================
 # Ideal Gas Pressure Computation
 # ============================================================================
 
-"""
-	_ideal_gas_pressure_impl(ξ, T, comps::Tuple{C}, ::Val{1}) where C
-
-Single-component ideal gas pressure helper.
-"""
-@inline function _ideal_gas_pressure_impl(ξ, T, comps::Tuple{C}, ::Val{1}) where C
-	comp = comps[1]
-	if comp.phase == GAS && comp.molar_mass > 0.0
-		return ξ[1] * R_GAS * T / comp.molar_mass
-	end
-	return 0.0
+# Sum of partial pressures Σⱼ ξⱼ R T / Mⱼ over gas components only.
+@generated function _gas_partial_pressure_sum(ξ, T, comps::Tuple, ::Val{NC}) where {NC}
+    expr = quote
+        N = zero(T)
+    end
+    for i = 1:NC
+        push!(expr.args, quote
+            c = comps[$i]
+            if is_gas(c) && molar_mass(c) > 0.0
+                N += ξ[$i] * R_GAS * T / molar_mass(c)
+            end
+        end)
+    end
+    push!(expr.args, :(return N))
+    return expr
 end
 
 """
-	_ideal_gas_pressure_impl(ξ, T, comps::Tuple{C1,C2}, ::Val{2}) where {C1,C2}
+	ideal_gas_pressure(ξ::NTuple{NC,Float64}, T::Float64, φ::Float64, material) -> Float64
 
-Two-component ideal gas pressure helper.
-"""
-@inline function _ideal_gas_pressure_impl(ξ, T, comps::Tuple{C1, C2}, ::Val{2}) where {C1, C2}
-	P = 0.0
-	c1 = comps[1]
-	if c1.phase == GAS && c1.molar_mass > 0.0
-		P += ξ[1] * R_GAS * T / c1.molar_mass
-	end
-	c2 = comps[2]
-	if c2.phase == GAS && c2.molar_mass > 0.0
-		P += ξ[2] * R_GAS * T / c2.molar_mass
-	end
-	return P
-end
+Compute ideal gas pressure in a porous medium from mass concentrations of gas
+components and local porosity.
 
-"""
-	_ideal_gas_pressure_impl(ξ, T, comps::Tuple{C1,C2,C3}, ::Val{3}) where {C1,C2,C3}
-
-Three-component ideal gas pressure helper.
-"""
-@inline function _ideal_gas_pressure_impl(ξ, T, comps::Tuple{C1, C2, C3}, ::Val{3}) where {C1, C2, C3}
-	P = 0.0
-	c1 = comps[1]
-	if c1.phase == GAS && c1.molar_mass > 0.0
-		P += ξ[1] * R_GAS * T / c1.molar_mass
-	end
-	c2 = comps[2]
-	if c2.phase == GAS && c2.molar_mass > 0.0
-		P += ξ[2] * R_GAS * T / c2.molar_mass
-	end
-	c3 = comps[3]
-	if c3.phase == GAS && c3.molar_mass > 0.0
-		P += ξ[3] * R_GAS * T / c3.molar_mass
-	end
-	return P
-end
-
-"""
-	_ideal_gas_pressure_impl(ξ, T, comps::Tuple, ::Val{NC}) where NC
-
-Generic N-component ideal gas pressure helper using generated function.
-"""
-@generated function _ideal_gas_pressure_impl(ξ, T, comps::Tuple, ::Val{NC}) where NC
-	expr = quote
-		P = 0.0
-	end
-	for i in 1:NC
-		push!(expr.args, quote
-			c = comps[$i]
-			if c.phase == GAS && c.molar_mass > 0.0
-				P += ξ[$i] * R_GAS * T / c.molar_mass
-			end
-		end)
-	end
-	push!(expr.args, :(return P))
-	return expr
-end
-
-"""
-	ideal_gas_pressure(ξ::NTuple{NC,Float64}, T::Float64, material) -> Float64
-
-Compute ideal gas pressure from mass concentrations of gas components.
-
-P = Σⱼ (ξⱼ × R × T / Mⱼ)   for gaseous components j
+	P = Σⱼ (ξⱼ × R × T / Mⱼ) / φ   for gaseous components j
 
 # Arguments
 - `ξ`: Mass concentrations of all components [kg/m³]
 - `T`: Temperature [K]
+- `φ`: Porosity (gas volume fraction) [-], expected in (0, 1]
 - `material`: Material definition with components
 
 # Returns
 - `P`: Pressure [Pa]
 
 # Notes
-Only components with `phase == GAS` and `molar_mass > 0` contribute to pressure.
-Solid and liquid components are ignored.
+Only components with `phase == GAS` and `molar_mass > 0` contribute to the partial
+pressure sum. Solid and liquid components are ignored. `φ` is floored at $(_PHI_FLOOR)
+to keep the divisor well-defined if a cell becomes fully solid.
 """
-@inline function ideal_gas_pressure(ξ::NTuple{NC, Float64}, T::Float64, material) where NC
-	return _ideal_gas_pressure_impl(ξ, T, material.components, Val(NC))
+@inline function ideal_gas_pressure(
+    ξ::NTuple{NC,<:Real},
+    T::Real,
+    φ::Real,
+    material,
+) where {NC}
+    N = _gas_partial_pressure_sum(ξ, T, material.components, Val(NC))
+    return N / max(φ, _PHI_FLOOR)
 end
 
 """
-	compute_pressure!(P::Vector{Float64}, mesh::Mesh1D{NC}, 
-					  material::Material{NC}) where NC
+	background_gas_concentration(material, species, ξ, T; P = 101325.0) -> Float64
 
-Compute pressure field from ideal gas law for all cells.
+Bulk concentration [kg/m³] of gas component `species` whose partial pressure
+equals `P` in the pore space of composition `ξ` at temperature `T` — the
+single-species inverse of [`ideal_gas_pressure`](@ref):
 
-# Arguments
-- `P`: Output pressure vector [Pa], length = n_cells
-- `mesh`: Mesh with current cell states (T, ξ)
-- `material`: Material definition with components
+	ξⱼ = P · Mⱼ · φ(ξ, T) / (R · T)
+
+Use this to initialize a background air component at ambient pressure in
+DarcyFick-mode problems: a pore space initialized to vacuum
+(all gas ξⱼ = 0) against a 101325 Pa pressure boundary spuriously advects
+early product gas *inward* down the absolute-pressure slope, instead of the
+gas being resisted by ~1 atm of pore air.
+
+`species` is a component index or name. Porosity is evaluated from the
+condensed entries of `ξ` (gas entries carry no matrix volume), so passing a
+solids-only initial composition is exact. Partial pressures of coexisting gas
+species add — this function pressurizes `species` alone to `P`.
+
+# Example
+```julia
+air = GaseousComponent(:AIR, M = 0.02897, c = 1006.0, k = 0.026, λ = 2e-5)
+# ... material includes `air`; ξ₀ is the condensed initial composition ...
+ξ_air = background_gas_concentration(material, :AIR, ξ₀, 300.0)
+```
 """
-function compute_pressure!(P::Vector{Float64}, mesh, material)
-	@inbounds for i in eachindex(mesh.cells)
-		state = mesh.cell_states[i]
-		P[i] = ideal_gas_pressure(state.ξ, state.T, material)
-	end
-	return nothing
+function background_gas_concentration(
+    material::Material{NC},
+    species::Symbol,
+    ξ::NTuple{NC,<:Real},
+    T::Real;
+    P::Real = 101325.0,
+) where {NC}
+    return background_gas_concentration(
+        material,
+        component_index(material, species),
+        ξ,
+        T;
+        P,
+    )
+end
+
+function background_gas_concentration(
+    material::Material{NC},
+    j::Integer,
+    ξ::NTuple{NC,<:Real},
+    T::Real;
+    P::Real = 101325.0,
+) where {NC}
+    c = material.components[j]
+    is_gas(c) || throw(
+        ArgumentError("background_gas_concentration: component $(c.name) is not gaseous"),
+    )
+    M = molar_mass(c)
+    M > 0.0 || throw(
+        ArgumentError(
+            "background_gas_concentration: component $(c.name) has no molar mass",
+        ),
+    )
+    φ = porosity(ξ, T, material)
+    return P * M * φ / (R_GAS * T)
+end
+
+"""
+	compute_pressure!(P, φ, state, material)
+
+Compute pressure field from ideal gas law for all cells, reading T and ξ from
+the typed `state::StateCache`. `φ` is a precomputed porosity vector (same
+length as `state.T`).
+"""
+function compute_pressure!(
+    P::AbstractVector,
+    φ::AbstractVector,
+    state,
+    material::Material{NC},
+) where {NC}
+    @inbounds for i in eachindex(state.T)
+        T_i = state.T[i]
+        ξ_i = ntuple(j -> state.ξ[j, i], Val(NC))
+        P[i] = ideal_gas_pressure(ξ_i, T_i, φ[i], material)
+    end
+    return nothing
 end
 
 # ============================================================================
@@ -133,7 +155,7 @@ end
 # ============================================================================
 
 """
-	compute_pressure_gradient!(∇P::Vector{Float64}, P::Vector{Float64}, mesh)
+	compute_pressure_gradient!(∇P::AbstractVector, P::AbstractVector, state, mesh)
 
 Compute pressure gradient at cell faces using central differencing.
 
@@ -142,197 +164,25 @@ Compute pressure gradient at cell faces using central differencing.
 # Arguments
 - `∇P`: Output gradient vector [Pa/m], length = n_faces
 - `P`: Cell-centered pressure values [Pa]
-- `mesh`: Mesh with geometry (cell_centers)
+- `state`: Live geometry provider (`state.cell_centers` is read)
+- `mesh`: Mesh topology (`mesh.faces` is read)
 
 # Notes
 - Boundary faces (left_id=0 or right_id=0) are set to zero; boundary 
   conditions should be applied separately.
 - Gradient is positive when pressure increases in +z direction.
 """
-function compute_pressure_gradient!(∇P::Vector{Float64}, P::Vector{Float64}, mesh)
-	@inbounds for f in eachindex(mesh.faces)
-		face = mesh.faces[f]
-		left_id, right_id = face.cell_ids
+function compute_pressure_gradient!(∇P::AbstractVector, P::AbstractVector, state, mesh)
+    @inbounds for f in eachindex(mesh.faces)
+        face = mesh.faces[f]
+        left_id, right_id = face.cell_ids
 
-		if left_id == 0 || right_id == 0
-			# Boundary face: set to zero, BC will override
-			∇P[f] = 0.0
-		else
-			d_LR = abs(mesh.cell_centers[right_id] - mesh.cell_centers[left_id])
-			∇P[f] = (P[right_id] - P[left_id]) / d_LR
-		end
-	end
-	return nothing
-end
-
-# ============================================================================
-# Pressure Derivatives (for Jacobian computation)
-# ============================================================================
-
-"""
-	pressure_derivatives(ξ::NTuple{NC,Float64}, T::Float64, material) where NC
-
-Compute partial derivatives of pressure with respect to state variables.
-
-For P = Σⱼ (ξⱼ × R × T / Mⱼ):
-- ∂P/∂T = Σⱼ (ξⱼ × R / Mⱼ)
-- ∂P/∂ξⱼ = R × T / Mⱼ   (for gas components)
-- ∂P/∂ξⱼ = 0             (for solid/liquid components)
-
-# Arguments
-- `ξ`: Mass concentrations [kg/m³]
-- `T`: Temperature [K]
-- `material`: Material definition
-
-# Returns
-- `∂P_∂T::Float64`: Derivative with respect to temperature [Pa/K]
-- `∂P_∂ξ::NTuple{NC,Float64}`: Derivatives with respect to each concentration [Pa/(kg/m³)]
-"""
-@inline function pressure_derivatives(ξ::NTuple{NC, Float64}, T::Float64, material) where NC
-	return _pressure_derivatives_impl(ξ, T, material.components, Val(NC))
-end
-
-@inline function _pressure_derivatives_impl(ξ, T, comps::Tuple{C}, ::Val{1}) where C
-	c = comps[1]
-	if c.phase == GAS && c.molar_mass > 0.0
-		∂P_∂T = ξ[1] * R_GAS / c.molar_mass
-		∂P_∂ξ = (R_GAS * T / c.molar_mass,)
-	else
-		∂P_∂T = 0.0
-		∂P_∂ξ = (0.0,)
-	end
-	return ∂P_∂T, ∂P_∂ξ
-end
-
-@inline function _pressure_derivatives_impl(ξ, T, comps::Tuple{C1, C2}, ::Val{2}) where {C1, C2}
-	∂P_∂T = 0.0
-	∂P_∂ξ1 = 0.0
-	∂P_∂ξ2 = 0.0
-
-	c1 = comps[1]
-	if c1.phase == GAS && c1.molar_mass > 0.0
-		∂P_∂T += ξ[1] * R_GAS / c1.molar_mass
-		∂P_∂ξ1 = R_GAS * T / c1.molar_mass
-	end
-
-	c2 = comps[2]
-	if c2.phase == GAS && c2.molar_mass > 0.0
-		∂P_∂T += ξ[2] * R_GAS / c2.molar_mass
-		∂P_∂ξ2 = R_GAS * T / c2.molar_mass
-	end
-
-	return ∂P_∂T, (∂P_∂ξ1, ∂P_∂ξ2)
-end
-
-@inline function _pressure_derivatives_impl(ξ, T, comps::Tuple{C1, C2, C3}, ::Val{3}) where {C1, C2, C3}
-	∂P_∂T = 0.0
-	∂P_∂ξ1 = 0.0
-	∂P_∂ξ2 = 0.0
-	∂P_∂ξ3 = 0.0
-
-	c1 = comps[1]
-	if c1.phase == GAS && c1.molar_mass > 0.0
-		∂P_∂T += ξ[1] * R_GAS / c1.molar_mass
-		∂P_∂ξ1 = R_GAS * T / c1.molar_mass
-	end
-
-	c2 = comps[2]
-	if c2.phase == GAS && c2.molar_mass > 0.0
-		∂P_∂T += ξ[2] * R_GAS / c2.molar_mass
-		∂P_∂ξ2 = R_GAS * T / c2.molar_mass
-	end
-
-	c3 = comps[3]
-	if c3.phase == GAS && c3.molar_mass > 0.0
-		∂P_∂T += ξ[3] * R_GAS / c3.molar_mass
-		∂P_∂ξ3 = R_GAS * T / c3.molar_mass
-	end
-
-	return ∂P_∂T, (∂P_∂ξ1, ∂P_∂ξ2, ∂P_∂ξ3)
-end
-
-@generated function _pressure_derivatives_impl(ξ, T, comps::Tuple, ::Val{NC}) where NC
-	# Build the body of the function
-	expr = quote
-		∂P_∂T = 0.0
-	end
-
-	# Create variables for each derivative
-	for i in 1:NC
-		var = Symbol("∂P_∂ξ", i)
-		push!(expr.args, :($var = 0.0))
-	end
-
-	# Compute derivatives for each component
-	for i in 1:NC
-		var = Symbol("∂P_∂ξ", i)
-		push!(expr.args, quote
-			c = comps[$i]
-			if c.phase == GAS && c.molar_mass > 0.0
-				∂P_∂T += ξ[$i] * R_GAS / c.molar_mass
-				$var = R_GAS * T / c.molar_mass
-			end
-		end)
-	end
-
-	# Build the return tuple
-	vars = [Symbol("∂P_∂ξ", i) for i in 1:NC]
-	tuple_expr = Expr(:tuple, vars...)
-	push!(expr.args, :(return ∂P_∂T, $tuple_expr))
-
-	return expr
-end
-
-# ============================================================================
-# In-place Pressure Derivatives (allocation-free for Jacobian computation)
-# ============================================================================
-
-"""
-	pressure_derivatives!(∂P_∂ξ::AbstractVector, ξ::NTuple{NC,Float64}, T::Float64, material) where NC
-
-Compute partial derivatives of pressure in-place (allocation-free).
-
-Same as `pressure_derivatives` but writes to a pre-allocated vector instead of
-returning a tuple. This eliminates heap allocations when called in a loop.
-
-# Arguments
-- `∂P_∂ξ`: Output vector of length NC for concentration derivatives [Pa/(kg/m³)]
-- `ξ`: Mass concentrations [kg/m³]
-- `T`: Temperature [K]
-- `material`: Material definition
-
-# Returns
-- `∂P_∂T::Float64`: Derivative with respect to temperature [Pa/K]
-
-# Notes
-The output vector `∂P_∂ξ` is modified in-place.
-"""
-@inline function pressure_derivatives!(∂P_∂ξ::AbstractVector, ξ::NTuple{NC, Float64},
-	T::Float64, material) where NC
-	return _pressure_derivatives_inplace!(∂P_∂ξ, ξ, T, material.components, Val(NC))
-end
-
-@generated function _pressure_derivatives_inplace!(∂P_∂ξ::AbstractVector, ξ, T,
-	comps::Tuple, ::Val{NC}) where NC
-	# Build the body of the function
-	expr = quote
-		∂P_∂T = 0.0
-	end
-
-	# Compute derivatives for each component and write to output vector
-	for i in 1:NC
-		push!(expr.args, quote
-			c = comps[$i]
-			if c.phase == GAS && c.molar_mass > 0.0
-				∂P_∂T += ξ[$i] * R_GAS / c.molar_mass
-				@inbounds ∂P_∂ξ[$i] = R_GAS * T / c.molar_mass
-			else
-				@inbounds ∂P_∂ξ[$i] = 0.0
-			end
-		end)
-	end
-
-	push!(expr.args, :(return ∂P_∂T))
-
-	return expr
+        if left_id == 0 || right_id == 0
+            ∇P[f] = zero(eltype(∇P))
+        else
+            d_LR = abs(state.cell_centers[right_id] - state.cell_centers[left_id])
+            ∇P[f] = (P[right_id] - P[left_id]) / d_LR
+        end
+    end
+    return nothing
 end

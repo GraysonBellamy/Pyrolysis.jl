@@ -1,7 +1,5 @@
 """
 Gas transport (Darcy-Fick).
-
-Reference: Design Document Section 2.4, 4.4
 Reference: ThermaKin2Ds Reference Manual, Section 1.2
 
 Volume fraction gradient formulation:
@@ -27,17 +25,34 @@ where T_face = 0.5×(T_L + T_R) and λ_face is the harmonic mean of λ.
 This is equivalent to J = -ρ_gas × λ × ∂(ξ/ρ_gas)/∂x, the volume fraction
 gradient formulation.
 
+# Validity (isobaric assumption)
+`−(λ/T)∂(ξT)/∂z` equals Fick's law `−ρ_g·D·∇Y` (with `Y = ξ/(φρ_g)` and
+`ρ_g = PM/RT`) **only when** `∇(φP) = 0`. The dropped term is proportional to
+`−Y·∇(φP)/(φP)`. This is the inherited ThermaKin convention and is consistent
+in the diffusion-only (Fickian) mode where the model carries no resolved
+pressure field. In DarcyFick mode the code *does* resolve ∇P (and sharp char
+fronts carry ∇φ), so this diffusive kernel is then a known approximation: the
+pressure-driven part of the transport is carried by the Darcy advective term,
+while the diffusive term keeps the isobaric form. Documented contradiction,
+accepted by design; a full `∇(φP)` diffusive correction is future work.
+
 # Arguments
 - `λ_face`: Face transport coefficient (harmonic mean of λ) [m²/s]
 - `ξ_L, ξ_R`: Mass concentrations on left and right [kg/m³]
 - `T_L, T_R`: Temperatures on left and right [K]
 - `d_LR`: Distance between cell centers [m]
 """
-@inline function gas_flux(λ_face::Float64, ξ_L::Float64, ξ_R::Float64,
-	T_L::Float64, T_R::Float64, d_LR::Float64)
-	# Volume fraction gradient: J = -(λ/T_face) × ∂(ξT)/∂x
-	T_face = 0.5 * (T_L + T_R)
-	return -λ_face * (ξ_R * T_R - ξ_L * T_L) / (T_face * d_LR)
+@inline function gas_flux(
+    λ_face::Real,
+    ξ_L::Real,
+    ξ_R::Real,
+    T_L::Real,
+    T_R::Real,
+    d_LR::Real,
+)
+    # Volume fraction gradient: J = -(λ/T_face) × ∂(ξT)/∂x
+    T_face = (T_L + T_R) / 2
+    return -λ_face * (ξ_R * T_R - ξ_L * T_L) / (T_face * d_LR)
 end
 
 # ============================================================================
@@ -45,19 +60,25 @@ end
 # ============================================================================
 
 """
-	gas_flux_darcy_fick(v_g::Float64, ξ_L::Float64, ξ_R::Float64,
-						λ_face::Float64, T_L::Float64, T_R::Float64,
-						d_LR::Float64) -> Float64
+	gas_flux_darcy_fick(v_g, ξ_L, ξ_R, φ_L, φ_R, λ_face, T_L, T_R, d_LR) -> flux
 
 Compute gas mass flux at a face using full Darcy-Fick formulation [kg/(m²·s)].
 
 Combines advective and diffusive transport:
-	J = ξ_upwind × v_g - (λ_face/T_face) × (ξ_R×T_R - ξ_L×T_L) / d_LR
-		↑ advection       ↑ diffusion (volume fraction gradient)
+	J = (ξ_upwind / φ_face) × v_g - (λ_face/T_face) × (ξ_R×T_R - ξ_L×T_L) / d_LR
+		↑ advection                  ↑ diffusion (volume fraction gradient)
+
+ξ is mass per **bulk** volume while the Darcy velocity `v_g = -(κ/μ)∇P` is
+**superficial** (volumetric flux per total cross-section). Mass flux per bulk
+area is intrinsic gas density × superficial velocity, J_adv = (ξ/φ)·v_g —
+equivalently ξ · v_interstitial with v_i = v_g/φ. The face porosity is the
+arithmetic mean φ_face = (φ_L + φ_R)/2, floored at `_PHI_FLOOR` consistently
+with the ideal-gas pressure closure P = Σξ·R·T/(M·φ).
 
 # Arguments
-- `v_g`: Darcy gas velocity at face [m/s] (positive = flow in +z direction)
+- `v_g`: superficial Darcy gas velocity at face [m/s] (positive = +z)
 - `ξ_L, ξ_R`: Mass concentrations on left and right [kg/m³]
+- `φ_L, φ_R`: Porosity (gas volume fraction) on left and right [-]
 - `λ_face`: Face transport coefficient (harmonic mean of λ) [m²/s]
 - `T_L, T_R`: Temperatures on left and right [K]
 - `d_LR`: Distance between cell centers [m]
@@ -65,17 +86,28 @@ Combines advective and diffusive transport:
 # Returns
 Total flux [kg/(m²·s)], positive = flow in +z direction
 """
-@inline function gas_flux_darcy_fick(v_g::Float64, ξ_L::Float64, ξ_R::Float64,
-	λ_face::Float64, T_L::Float64, T_R::Float64, d_LR::Float64)
-	# Diffusive flux (volume fraction / partial pressure gradient)
-	T_face = 0.5 * (T_L + T_R)
-	J_diff = -λ_face * (ξ_R * T_R - ξ_L * T_L) / (T_face * d_LR)
+@inline function gas_flux_darcy_fick(
+    v_g::Real,
+    ξ_L::Real,
+    ξ_R::Real,
+    φ_L::Real,
+    φ_R::Real,
+    λ_face::Real,
+    T_L::Real,
+    T_R::Real,
+    d_LR::Real,
+)
+    # Diffusive flux (volume fraction / partial pressure gradient)
+    T_face = (T_L + T_R) / 2
+    J_diff = -λ_face * (ξ_R * T_R - ξ_L * T_L) / (T_face * d_LR)
 
-	# Advective flux with first-order upwinding
-	ξ_upwind = v_g >= 0.0 ? ξ_L : ξ_R
-	J_adv = v_g * ξ_upwind
+    # Advective flux: intrinsic density (ξ/φ_face) advected by the superficial
+    # velocity, with first-order upwinding of ξ
+    φ_face = max((φ_L + φ_R) / 2, _PHI_FLOOR)
+    ξ_upwind = v_g >= 0 ? ξ_L : ξ_R
+    J_adv = v_g * ξ_upwind / φ_face
 
-	return J_adv + J_diff
+    return J_adv + J_diff
 end
 
 """
@@ -90,15 +122,14 @@ Uses first-order upwinding:
 - `v_g`: Gas velocity at face [m/s]
 - `ξ_L, ξ_R`: Mass concentrations on left and right [kg/m³]
 """
-@inline function gas_flux_advective(v_g::Float64, ξ_L::Float64, ξ_R::Float64)
-	ξ_upwind = v_g >= 0.0 ? ξ_L : ξ_R
-	return v_g * ξ_upwind
+@inline function gas_flux_advective(v_g::Real, ξ_L::Real, ξ_R::Real)
+    ξ_upwind = v_g >= 0 ? ξ_L : ξ_R
+    return v_g * ξ_upwind
 end
 
 """
-	compute_gas_fluxes!(J::Matrix{Float64}, mesh::Mesh1D{NC}, 
-						cache::PropertyCache, material::Material{NC};
-						use_species_scaling::Bool=false) where NC
+	compute_gas_fluxes!(J::Matrix{Float64}, mesh::Mesh1D{NC},
+						cache::PropertyCache, material::Material{NC}) where NC
 
 Compute gas mass fluxes at all faces for all gas components.
 
@@ -107,127 +138,149 @@ Compute gas mass fluxes at all faces for all gas components.
 - `mesh`: Mesh with current state
 - `cache`: Property cache
 - `material`: Material definition
-- `use_species_scaling`: If true, scale diffusive flux by √(M_ref/Mⱼ) for each species
 
 Positive flux = flow in +z direction (toward bottom).
-
-# Species-Specific Transport
-When `use_species_scaling=true`, light gases (low molar mass) diffuse faster than
-heavy gases (high molar mass). This follows kinetic theory where D ∝ 1/√M.
 
 # Performance Note
 This function uses compile-time unrolling via `compute_gas_fluxes_unrolled!`
 to avoid type instability from heterogeneous tuple indexing.
 """
-function compute_gas_fluxes!(J::Matrix{Float64}, mesh::Mesh1D{NC},
-	cache::PropertyCache, material::Material{NC};
-	use_species_scaling::Bool = false) where NC
-	n_faces_val = length(mesh.faces)
+function compute_gas_fluxes!(
+    J::AbstractMatrix,
+    state,
+    mesh,
+    cache::PropertyCache,
+    material::Material{NC},
+) where {NC}
+    n_faces_val = length(state.A_face)
 
-	# Initialize fluxes to zero
-	fill!(J, 0.0)
+    fill!(J, zero(eltype(J)))
 
-	@inbounds for f in 1:n_faces_val
-		face = mesh.faces[f]
-		left_id, right_id = face.cell_ids
+    @inbounds for f = 1:n_faces_val
+        face = mesh.faces[f]
+        left_id, right_id = face.cell_ids
 
-		if left_id == 0 || right_id == 0
-			# Boundary face: flux set by boundary conditions
-			continue
-		end
+        if left_id == 0 || right_id == 0
+            continue
+        end
 
-		# Interior face
-		d_LR = abs(mesh.cell_centers[right_id] - mesh.cell_centers[left_id])
-		λ_face = cache.λ_face[f]
-		T_L = mesh.cell_states[left_id].T
-		T_R = mesh.cell_states[right_id].T
+        d_LR = abs(state.cell_centers[right_id] - state.cell_centers[left_id])
+        λ_face = cache.λ_face[f]
+        T_L = state.T[left_id]
+        T_R = state.T[right_id]
 
-		# Get concentration tuples for this face
-		ξ_L = mesh.cell_states[left_id].ξ
-		ξ_R = mesh.cell_states[right_id].ξ
+        ξ_L = ntuple(j -> state.ξ[j, left_id], Val(NC))
+        ξ_R = ntuple(j -> state.ξ[j, right_id], Val(NC))
 
-		# Use compile-time unrolled version for type stability
-		if use_species_scaling
-			compute_gas_fluxes_species_scaled_unrolled!(J, f, ξ_L, ξ_R, λ_face, T_L, T_R, d_LR, material)
-		else
-			compute_gas_fluxes_unrolled!(J, f, ξ_L, ξ_R, λ_face, T_L, T_R, d_LR, material)
-		end
-	end
+        compute_gas_fluxes_unrolled!(J, f, ξ_L, ξ_R, λ_face, T_L, T_R, d_LR, material)
+    end
 
-	return nothing
+    return nothing
 end
 
 """
-	compute_gas_fluxes_darcy_fick!(J::Matrix{Float64}, mesh::Mesh1D{NC}, 
+	compute_gas_fluxes_darcy_fick!(J::Matrix{Float64}, state, mesh,
 								   cache::PropertyCache, material::Material{NC},
-								   v_gas::Vector{Float64};
-								   use_species_scaling::Bool=false) where NC
+								   v_gas::Vector{Float64}, φ::Vector{Float64}) where NC
 
 Compute gas mass fluxes at all faces using full Darcy-Fick formulation.
 
 This combines advective transport (Darcy flow) with diffusive transport (volume fraction gradient):
-	Jⱼ = ξⱼ·v_g - (λ_face/T_face)·∂(ξⱼT)/∂x
+	Jⱼ = (ξⱼ/φ_face)·v_g - (λ_face/T_face)·∂(ξⱼT)/∂x
+
+ξ is per bulk volume and v_g is superficial, so the advected quantity is the
+intrinsic gas density ξ/φ (see [`gas_flux_darcy_fick`](@ref)).
 
 # Arguments
 - `J`: Output matrix J[j,f] = flux of component j at face f [kg/(m²·s)]
+- `state`: Geometry/state cache (cell centers, face positions, T, ξ)
 - `mesh`: Mesh with current state
 - `cache`: Property cache (must have λ_face computed)
 - `material`: Material definition
-- `v_gas`: Darcy gas velocity at faces [m/s] (from compute_darcy_velocity!)
-- `use_species_scaling`: If true, scale diffusive flux by √(M_ref/Mⱼ) for each species
+- `v_gas`: Darcy gas velocity at faces [m/s], **including** the boundary-face
+  values written by `apply_pressure_bc_to_darcy_velocity!`
+- `φ`: Porosity at cell centers [-] (e.g. `cache.darcy.φ`)
 
 Positive flux = flow in +z direction (toward surface for our convention).
 
-# Species-Specific Transport
-When `use_species_scaling=true`:
-- Diffusive flux is scaled by √(M_ref/Mⱼ) - light gases diffuse faster
-- Advective flux is NOT scaled - all species move with bulk gas velocity
+# Boundary faces
+Boundary faces carry the **advective venting flux** from pressure BCs:
+upwinding against a zero-concentration ambient ghost, only outflow advects,
+J = v_b·ξ_int/φ_int (per gas species). The diffusive film-law part of the
+boundary flux is the mass BC's domain and is **added** afterwards by
+`apply_mass_bc_flux!`. With no pressure BC the boundary `v_gas` is 0 and the
+boundary faces stay zero here.
 
 # Notes
 - When v_gas ≈ 0, this reduces to pure Fickian diffusion (same as compute_gas_fluxes!)
 - Uses first-order upwinding for advective flux (stable, conservative)
-- Boundary faces are skipped (handled by boundary conditions)
 """
-function compute_gas_fluxes_darcy_fick!(J::Matrix{Float64}, mesh::Mesh1D{NC},
-	cache::PropertyCache, material::Material{NC},
-	v_gas::Vector{Float64};
-	use_species_scaling::Bool = false) where NC
-	n_faces_val = length(mesh.faces)
+function compute_gas_fluxes_darcy_fick!(
+    J::AbstractMatrix,
+    state,
+    mesh,
+    cache::PropertyCache,
+    material::Material{NC},
+    v_gas::AbstractVector,
+    φ::AbstractVector,
+) where {NC}
+    n_faces_val = length(state.A_face)
 
-	# Initialize fluxes to zero
-	fill!(J, 0.0)
+    fill!(J, zero(eltype(J)))
 
-	@inbounds for f in 1:n_faces_val
-		face = mesh.faces[f]
-		left_id, right_id = face.cell_ids
+    @inbounds for f = 1:n_faces_val
+        face = mesh.faces[f]
+        left_id, right_id = face.cell_ids
 
-		if left_id == 0 || right_id == 0
-			# Boundary face: flux set by boundary conditions
-			continue
-		end
+        if left_id == 0 && right_id == 0
+            continue
+        end
 
-		# Interior face
-		d_LR = abs(mesh.cell_centers[right_id] - mesh.cell_centers[left_id])
-		λ_face = cache.λ_face[f]
-		T_L = mesh.cell_states[left_id].T
-		T_R = mesh.cell_states[right_id].T
-		v_g = v_gas[f]
+        if left_id == 0 || right_id == 0
+            # Boundary face: advective venting from the pressure BC's Darcy
+            # velocity. The ambient ghost cell carries none of the tracked gas
+            # species (ξ_ghost = 0), so upwinding admits only outflow:
+            # interior-on-left vents at v_g ≥ 0 (top), interior-on-right at
+            # v_g < 0 (bottom).
+            v_g = v_gas[f]
+            cell_id = left_id == 0 ? right_id : left_id
+            outflow = left_id == 0 ? (v_g < 0) : (v_g >= 0)
+            if outflow && v_g != 0
+                v_over_φ = v_g / max(φ[cell_id], _PHI_FLOOR)
+                ξ_int = ntuple(j -> state.ξ[j, cell_id], Val(NC))
+                set_boundary_advective_flux_unrolled!(J, f, v_over_φ, ξ_int, material)
+            end
+            continue
+        end
 
-		# Get concentration tuples for this face
-		ξ_L = mesh.cell_states[left_id].ξ
-		ξ_R = mesh.cell_states[right_id].ξ
+        d_LR = abs(state.cell_centers[right_id] - state.cell_centers[left_id])
+        λ_face = cache.λ_face[f]
+        T_L = state.T[left_id]
+        T_R = state.T[right_id]
+        v_g = v_gas[f]
+        φ_L = φ[left_id]
+        φ_R = φ[right_id]
 
-		# Use compile-time unrolled version for type stability
-		if use_species_scaling
-			compute_gas_fluxes_darcy_fick_species_scaled_unrolled!(J, f, v_g, ξ_L, ξ_R,
-				λ_face, T_L, T_R, d_LR, material)
-		else
-			compute_gas_fluxes_darcy_fick_unrolled!(J, f, v_g, ξ_L, ξ_R,
-				λ_face, T_L, T_R, d_LR, material)
-		end
-	end
+        ξ_L = ntuple(j -> state.ξ[j, left_id], Val(NC))
+        ξ_R = ntuple(j -> state.ξ[j, right_id], Val(NC))
 
-	return nothing
+        compute_gas_fluxes_darcy_fick_unrolled!(
+            J,
+            f,
+            v_g,
+            ξ_L,
+            ξ_R,
+            φ_L,
+            φ_R,
+            λ_face,
+            T_L,
+            T_R,
+            d_LR,
+            material,
+        )
+    end
+
+    return nothing
 end
 
 """
@@ -251,50 +304,50 @@ Uses pre-cached top_face_ids for the surface boundary.
 # Returns
 Total mass flux [kg/(m²·s)] leaving the surface (positive = gas escaping).
 """
-function surface_mass_flux(mesh::Mesh1D{NC}, cache::PropertyCache, material::Material{NC},
-	bc_set::BoundaryConditionSet, top_face_ids::Vector{Int},
-	t::Float64 = 0.0) where NC
+function surface_mass_flux(
+    state,
+    mesh,
+    cache::PropertyCache,
+    material::Material{NC},
+    bc_set::BoundaryConditionSet,
+    top_face_ids::Vector{Int},
+    t::Real = 0.0,
+) where {NC}
 
-	# Use first top face (all should give same result in 1D)
-	if isempty(top_face_ids)
-		return 0.0
-	end
+    if isempty(top_face_ids)
+        return zero(eltype(state.T))
+    end
 
-	f = top_face_ids[1]
-	face = mesh.faces[f]
-	left_id = face.cell_ids[1]  # Cell adjacent to surface
+    f = top_face_ids[1]
+    face = mesh.faces[f]
+    # Single assignment (no conditional reassignment) so the `ntuple` closure
+    # below captures a non-boxed `left_id` — avoids a JET possible-undef report
+    # and the allocation/instability of a boxed captured variable.
+    cell_id_1 = face.cell_ids[1]
+    left_id = cell_id_1 == 0 ? face.cell_ids[2] : cell_id_1
+    if left_id == 0
+        return zero(eltype(state.T))
+    end
 
-	if left_id == 0
-		# Try other cell_id
-		left_id = face.cell_ids[2]
-		if left_id == 0
-			return 0.0
-		end
-	end
+    ξ_surface = ntuple(j -> state.ξ[j, left_id], Val(NC))
+    λ = cache.λ[left_id]
+    ρ = cache.ρ[left_id]
 
-	# Get surface cell state and properties
-	ξ_surface = mesh.cell_states[left_id].ξ
-	λ = cache.λ[left_id]
-	ρ = cache.ρ[left_id]
-	λρ = λ * ρ
+    face_pos = state.face_positions[f]
+    cell_ctr = state.cell_centers[left_id]
+    d = abs(face_pos - cell_ctr)
 
-	# Distance from cell center to surface
-	face_pos = mesh.face_positions[f]
-	cell_center = mesh.cell_centers[left_id]
-	d = abs(face_pos - cell_center)
+    bc = get_mass_bc(bc_set, Val(:top))
 
-	# Get mass BC for top surface using type-stable accessor
-	bc = get_mass_bc(bc_set, Val(1))
+    Tu = promote_type(eltype(state.T), eltype(state.ξ), typeof(t))
+    J_total = zero(Tu)
+    for j = 1:NC
+        if is_gas(material.components[j])
+            J_total += _compute_surface_flux(bc, ξ_surface[j], λ, ρ, d, t, j)
+        end
+    end
 
-	# Compute total flux from all gas components
-	J_total = 0.0
-	for j in 1:NC
-		if material.components[j].phase == GAS
-			J_total += _compute_surface_flux(bc, ξ_surface[j], λρ, ρ, d, t)
-		end
-	end
-
-	return J_total
+    return J_total
 end
 
 # ============================================================================
@@ -319,51 +372,56 @@ end
 # ============================================================================
 
 # Surface flux formulation: At the surface boundary, gas escapes to environment.
-# The flux is J = λρ (Y_surface - Y_env) / d, where Y_env ≈ 0 and Y = ξ/ρ.
-# This gives J = λρ × (ξ/ρ) / d = λξ / d.
-# So effectively, using λρ × Y is equivalent to the simpler λξ form.
-@inline _compute_surface_flux(::Nothing, ξ, λρ, ρ, d, t) = λρ * (ξ / ρ) / d  # = λξ/d
-@inline _compute_surface_flux(::ImpermeableBC, ξ, λρ, ρ, d, t) = 0.0
-# Pressure BCs control Darcy velocity, not diffusive flux - return 0
-# (The pressure BC contribution to mass flux is handled via Darcy velocity)
-@inline _compute_surface_flux(::DirichletPressureBC, ξ, λρ, ρ, d, t) = 0.0
-@inline _compute_surface_flux(::NeumannPressureBC, ξ, λρ, ρ, d, t) = 0.0
-@inline _compute_surface_flux(::ConvectivePressureBC, ξ, λρ, ρ, d, t) = 0.0
+# With ambient gas concentration ≈ 0, the internal diffusion limit is J = λξ/d.
+@inline _compute_surface_flux(::Nothing, ξ, λ, ρ, d, t, j::Integer) = λ * ξ / d
+@inline _compute_surface_flux(::ImpermeableBC, ξ, λ, ρ, d, t, j::Integer) = 0.0
+# Pressure BCs contribute no diffusive film-law flux — return 0. Their
+# advective venting enters the species equations via the boundary-face Darcy
+# velocity (boundary_darcy_velocity → compute_gas_fluxes_darcy_fick!); callers
+# needing the total outward flux must add that channel (see solve.jl's
+# _surface_gas_flux).
+@inline _compute_surface_flux(::DirichletPressureBC, ξ, λ, ρ, d, t, j::Integer) = 0.0
+@inline _compute_surface_flux(::NeumannPressureBC, ξ, λ, ρ, d, t, j::Integer) = 0.0
+@inline _compute_surface_flux(::ConvectivePressureBC, ξ, λ, ρ, d, t, j::Integer) = 0.0
 
-@inline function _compute_surface_flux(bc::DiffusiveMassBC, ξ, λρ, ρ, d, t)
-	h_m = bc.h_m
-	# The flux uses mass fraction Y = ξ/ρ at the surface
-	# J = λρ × Y / d = λρ × (ξ/ρ) / d = λξ/d for h_m=Inf
-	# Extract effective λ for combined resistance calculation
-	λ = λρ / max(ρ, 1e-20)
-	if isinf(h_m)
-		# Pure internal diffusion (no external resistance)
-		# Positive value: gas leaving surface
-		return λ * ξ / d
-	else
-		# Combined resistance: J = λ × h_m × ξ / (λ + h_m × d)
-		# Positive value: gas leaving surface
-		return (λ * h_m * ξ) / (λ + h_m * d)
-	end
+@inline function _compute_surface_flux(bc::DiffusiveMassBC, ξ, λ, ρ, d, t, j::Integer)
+    h_m = bc.h_m
+    if isinf(h_m)
+        # Pure internal diffusion (no external resistance)
+        # Positive value: gas leaving surface
+        return λ * ξ / d
+    else
+        # Combined resistance: J = λ × h_m × ξ / (λ + h_m × d)
+        # Positive value: gas leaving surface
+        return (λ * h_m * ξ) / (λ + h_m * d)
+    end
 end
 
-@inline function _compute_surface_flux(bc::ConvectiveMassBC, ξ, λρ, ρ, d, t)
-	# External convection only: J = h_m × (ξ - ξ_inf)
-	# Note: ξ_inf is typically 0 (ambient has no decomposition gas)
-	h_m = bc.h_m isa Function ? bc.h_m(t) : bc.h_m
-	ξ_inf = bc.ξ_inf isa Function ? bc.ξ_inf(t) : bc.ξ_inf
-	# Positive value: gas leaving surface (when ξ > ξ_inf)
-	return h_m * (ξ - ξ_inf)
+@inline function _compute_surface_flux(bc::ConvectiveMassBC, ξ, λ, ρ, d, t, j::Integer)
+    # External convection only: J = h_m × (ξ - ξ_inf)
+    # ξ_inf resolves per species (scalar broadcasts; NTuple indexes by j).
+    h_m = bc.h_m isa Function ? bc.h_m(t) : bc.h_m
+    ξ_inf = ambient_concentration(bc, t, j)
+    # Positive value: gas leaving surface (when ξ > ξ_inf)
+    return h_m * (ξ - ξ_inf)
 end
 
 # CombinedMassBC: sum contributions from all sub-BCs
 # Use @generated to unroll at compile time and avoid allocation from heterogeneous tuple
-@generated function _compute_surface_flux(bc::CombinedMassBC{BCs}, ξ, λρ, ρ, d, t) where {BCs <: Tuple}
-	N = length(BCs.parameters)
-	exprs = [:(total += _compute_surface_flux(bc.bcs[$i], ξ, λρ, ρ, d, t)) for i in 1:N]
-	return quote
-		total = 0.0
-		$(exprs...)
-		return total
-	end
+@generated function _compute_surface_flux(
+    bc::CombinedMassBC{BCs},
+    ξ,
+    λ,
+    ρ,
+    d,
+    t,
+    j::Integer,
+) where {BCs<:Tuple}
+    N = length(BCs.parameters)
+    exprs = [:(total += _compute_surface_flux(bc.bcs[$i], ξ, λ, ρ, d, t, j)) for i = 1:N]
+    return quote
+        total = 0.0
+        $(exprs...)
+        return total
+    end
 end

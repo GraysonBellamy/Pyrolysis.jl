@@ -1,0 +1,119 @@
+{
+  "material": "MaCFP White Pine",
+  "generated_on": "2026-04-26",
+  "units": {
+    "temperature": "K",
+    "heat_capacity": "J/(g\u00b7K) = kJ/(kg\u00b7K)",
+    "heat_of_reaction": "kJ/kg, per kg of solid entering that step (positive = endothermic)",
+    "density": "kg/m^3",
+    "A": "log10(1/s)",
+    "E": "kJ/mol"
+  },
+  "initial_composition": {
+    "virgin_wood_mass_fraction": 0.996,
+    "ash_mass_fraction": 0.004,
+    "note": "Ash is inert. Kinetic \u03bd_i and \u0394H_i are defined on the reactive (ash-free) basis."
+  },
+  "density": {
+    "virgin": 360.0,
+    "char": 90.0,
+    "ash": 90.0,
+    "note": "Ash density set to char density \u2014 effective bulk density of the ash phase dispersed in the char matrix, appropriate for porous-media pyrolysis solvers (FDS, ThermaKin)."
+  },
+  "kinetics": {
+    "mechanism": "5-step sequential, X_i \u2192 \u03bd_i\u00b7X_{i+1} + (1\u2212\u03bd_i)\u00b7gas, k_i = 10^A_i\u00b7exp(\u2212E_i\u00b71000/(R\u00b7T))",
+    "reactions": [
+      {
+        "step": 1,
+        "A_log10_inv_s": 5.224581,
+        "E_kJ_per_mol": 76.009062,
+        "nu": 0.914206,
+        "heat_of_reaction_kJ_per_kg": -3.072917986831273
+      },
+      {
+        "step": 2,
+        "A_log10_inv_s": 9.623536,
+        "E_kJ_per_mol": 131.985833,
+        "nu": 0.785307,
+        "heat_of_reaction_kJ_per_kg": 9.962405812813428
+      },
+      {
+        "step": 3,
+        "A_log10_inv_s": 12.086253,
+        "E_kJ_per_mol": 173.004437,
+        "nu": 0.386929,
+        "heat_of_reaction_kJ_per_kg": 223.10369172664198
+      },
+      {
+        "step": 4,
+        "A_log10_inv_s": 2.59569,
+        "E_kJ_per_mol": 66.703667,
+        "nu": 0.778861,
+        "heat_of_reaction_kJ_per_kg": -211.701917462439
+      },
+      {
+        "step": 5,
+        "A_log10_inv_s": -1.525875,
+        "E_kJ_per_mol": 23.336201,
+        "nu": 0.697933,
+        "heat_of_reaction_kJ_per_kg": -8.737698321457055
+      }
+    ]
+  },
+  "heat_capacity": {
+    "virgin_piecewise": [
+      {
+        "name": "HFM",
+        "T_range_K": [
+          298.15,
+          318.15
+        ],
+        "intercept": -0.45048819329636997,
+        "slope": 0.006411747341451224
+      },
+      {
+        "name": "bridge",
+        "T_range_K": [
+          318.15,
+          425.0
+        ],
+        "intercept": 1.4415826349220475,
+        "slope": 0.000464644313890584
+      },
+      {
+        "name": "STA",
+        "T_range_K": [
+          425.0,
+          460.0
+        ],
+        "intercept": -1.4474065850950482,
+        "slope": 0.007262266008048457
+      }
+    ],
+    "char": {
+      "T_range_K": [
+        500.0,
+        900.0
+      ],
+      "intercept": 0.6234,
+      "slope": 0.001253,
+      "source": "Bellamy et al., 'Thermochemical Properties of Wood for Pyrolysis Modeling: Measurement, Sensitivity Analysis, and the Penalty of Mixed-Source Inputs' (Eq. cp_char_pooled)."
+    },
+    "ash": {
+      "T_range_K": [
+        500.0,
+        900.0
+      ],
+      "intercept": 0.6234,
+      "slope": 0.001253,
+      "source": "Bellamy et al., 'Thermochemical Properties of Wood for Pyrolysis Modeling: Measurement, Sensitivity Analysis, and the Penalty of Mixed-Source Inputs' (Eq. cp_char_pooled).",
+      "note": "Ash Cp set equal to char Cp, matching the density convention above. Ash is 0.4% of initial mass, so its contribution to the overall enthalpy balance is negligible regardless of the assumed mineral Cp."
+    }
+  },
+  "derived": {
+    "char_yield_reactive": 0.1510040196316026,
+    "total_final_residue_fraction": 0.15440000355307618,
+    "net_heat_of_pyrolysis_kJ_per_kg_reactive": 105.50922363344691,
+    "net_heat_of_pyrolysis_kJ_per_kg_total": 105.08718673891312
+  }
+}

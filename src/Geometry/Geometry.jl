@@ -11,7 +11,8 @@ This module provides:
 """
 module Geometry
 
-using ..Core
+using ..Materials
+using ..BoundaryConditions
 using StaticArrays
 
 # Include all subfiles
@@ -20,50 +21,57 @@ include("cells.jl")
 include("faces.jl")
 include("mesh.jl")
 include("mesh_generation.jl")
-include("mesh_io.jl")
 include("geometric_quantities.jl")
+# Pure topology / geometry split: Mesh1D carries mutable per-step state, while
+# MeshTopology holds the immutable connectivity and MeshGeometry holds the
+# mutable z/V/A buffers consumed by the residual / Jacobian.
+include("topology.jl")
+include("mesh_geometry.jl")
 
 # ============================================================================
 # Exports
 # ============================================================================
 
 # Node types
-export Node1D, Node2D
+export Node1D
 
 # Cell types
-export Cell1D, Cell2D, CellState
+export Cell1D, CellState
 
 # Face types
-export Face1D, Face2D
+export Face1D
 
 # Mesh types
-export Mesh1D, Mesh2D
+export Mesh1D
+
+# `MeshTopology` (immutable connectivity view) and `MeshGeometry` (mutable
+# z/V/A buffers) are the user-facing types for the pure-residual layer.
+# Builders / boundary-id translators (`mesh_topology`, `mesh_geometry`,
+# `sync_geometry_from_mesh!`, `tag_to_boundary_id`, `boundary_id_to_tag`)
+# are deliberately internal — field access on the structs is the
+# canonical read path; the two exported accessors below dereference
+# `Ref`-wrapped scalars and aren't pure field reads.
+export MeshTopology, MeshGeometry
+export resize_geometry!, cross_section_area, mesh_time
 
 # Boundary state (for surface temperature solve)
 export BoundaryState
 
 # Mesh accessors
-export n_nodes, n_cells, n_faces, n_active_cells
-export get_node, get_cell, get_face, is_active
+export n_nodes, n_cells, n_faces
 
 # Mesh generation
 export create_uniform_mesh, create_stretched_mesh
 
 # Geometry operations
-export update_geometry!, update_geometry_from_nodes!
+export update_geometry!
 export cell_volume, face_area, cell_center
-export total_volume, domain_bounds, boundary_face_ids, cell_size
-export boundary_cell_id, face_area_value
+export total_volume, domain_bounds, cell_size
+# Second-order cell-centered gradient on nonuniform stencils
+export opposite_distance_gradient, opposite_distance_gradient_coeffs
 
 # ALE geometry-from-state
 export GeometryCache
-export compute_geometry_from_state!
-export compute_face_distances_from_state!
-export update_geometry_cache!
-export compute_gcl_volume_rate, verify_gcl_compliance
 export resize_geometry_cache!
-
-# I/O
-export save_mesh, load_mesh
 
 end # module Geometry

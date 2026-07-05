@@ -1,0 +1,54 @@
+name: Quality
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  # Formatting is gating: the codebase is normalized, so this should stay green.
+  format:
+    name: Format (JuliaFormatter)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1"
+      - uses: julia-actions/cache@v2
+      - name: Instantiate formatter env
+        run: julia --project=scripts -e 'using Pkg; Pkg.instantiate()'
+      - name: Check formatting
+        run: julia --project=scripts scripts/format.jl --check
+
+  # Aqua gates the safe subset (stale deps, compat, exports) and warns on the rest.
+  aqua:
+    name: Aqua (package hygiene)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1"
+      - uses: julia-actions/cache@v2
+      - name: Instantiate quality env
+        run: julia --project=test/quality -e 'using Pkg; Pkg.instantiate()'
+      - name: Run Aqua
+        run: julia --project=test/quality test/quality/aqua.jl
+
+  # JET is advisory: it reports but must not fail the build yet.
+  jet:
+    name: JET (type analysis)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1"
+      - uses: julia-actions/cache@v2
+      - name: Instantiate quality env
+        run: julia --project=test/quality -e 'using Pkg; Pkg.instantiate()'
+      - name: Run JET
+        run: julia --project=test/quality test/quality/jet.jl

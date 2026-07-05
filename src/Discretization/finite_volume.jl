@@ -1,26 +1,26 @@
 """
 Finite volume operators.
 
-Reference: Design Document Section 8.2
-
 This module provides:
 - Divergence operator for 1D finite volumes
 - RHS assembly for the complete system of equations
 """
 
-using ..Core: R_GAS, STEFAN_BOLTZMANN, n_components, n_reactions, DirichletThermalBC, RadiationBCSet
-using ForwardDiff
-using ..Geometry: cell_size, cell_volume, face_area, cell_center, face_position,
-	boundary_face_ids, boundary_cell_id, face_area_value
-using ..Properties: PropertyCache, update_properties!, effective_permeability
-using ..Physics: compute_conductive_fluxes!, compute_radiation_source!,
-	compute_gas_fluxes!, evaluate_reactions!, species_source_terms!,
-	reaction_heat_source, SourceTermCache
-
-# Helper to safely extract Float64 from Dual during AD passes when storing
-# into Float64 caches. Preserves Float64 unchanged.
-@inline _value(x::ForwardDiff.Dual) = ForwardDiff.value(x)
-@inline _value(x::Real) = x
+using ..Materials: R_GAS, STEFAN_BOLTZMANN, T_REF, n_components, n_reactions
+using ..BoundaryConditions: DirichletThermalBC
+using ..Materials: is_gas, delta_enthalpy
+using ..BoundaryConditions: ambient_temperature
+using ..Materials: evaluate_param
+using ..Geometry: cell_size, cell_volume, face_area, cell_center, face_position
+using ..Properties: PropertyCache, update_properties!, effective_permeability, porosity
+using ..Physics:
+    compute_conductive_fluxes!,
+    compute_radiation_source!,
+    compute_gas_fluxes!,
+    evaluate_reactions!,
+    species_source_terms!,
+    reaction_heat_source,
+    SourceTermCache
 
 # ============================================================================
 # Divergence Operator
@@ -43,22 +43,20 @@ Sign convention:
 - `fluxes`: Face-centered flux values [flux units]
 - `mesh`: 1D mesh with geometry
 """
-function divergence_1d!(div::Vector{Float64}, fluxes::Vector{Float64}, mesh)
-	n_cells_val = length(mesh.cells)
+function divergence_1d!(div::AbstractVector, fluxes::AbstractVector, state, mesh)
+    n_cells_val = length(state.T)
 
-	@inbounds for i in 1:n_cells_val
-		cell = mesh.cells[i]
-		f_left, f_right = cell.face_ids
+    @inbounds @simd for i = 1:n_cells_val
+        cell = mesh.cells[i]
+        f_left, f_right = cell.face_ids
 
-		V_i = mesh.cell_volumes[i]
-		A = mesh.face_areas[f_left]  # Same for both faces in 1D
+        V_i = state.volume[i]
+        A = state.A_face[f_left]
 
-		# Net flux into cell: inflow (left) - outflow (right)
-		# For heat/mass conservation: dφ/dt = -∇·F = -(F_out - F_in)/V
-		div[i] = (fluxes[f_right] - fluxes[f_left]) * A / V_i
-	end
+        div[i] = (fluxes[f_right] - fluxes[f_left]) * A / V_i
+    end
 
-	return nothing
+    return nothing
 end
 
 """
@@ -71,22 +69,22 @@ Compute divergence for species fluxes (multiple components).
 - `J`: Face-centered species fluxes [NC × n_faces]
 - `mesh`: 1D mesh
 """
-function divergence_species_1d!(div::Matrix{Float64}, J::Matrix{Float64}, mesh)
-	NC, n_cells_val = size(div)
+function divergence_species_1d!(div::AbstractMatrix, J::AbstractMatrix, state, mesh)
+    NC, n_cells_val = size(div)
 
-	@inbounds for i in 1:n_cells_val
-		cell = mesh.cells[i]
-		f_left, f_right = cell.face_ids
+    @inbounds for i = 1:n_cells_val
+        cell = mesh.cells[i]
+        f_left, f_right = cell.face_ids
 
-		V_i = mesh.cell_volumes[i]
-		A = mesh.face_areas[f_left]
+        V_i = state.volume[i]
+        A = state.A_face[f_left]
 
-		for j in 1:NC
-			div[j, i] = (J[j, f_right] - J[j, f_left]) * A / V_i
-		end
-	end
+        @simd for j = 1:NC
+            div[j, i] = (J[j, f_right] - J[j, f_left]) * A / V_i
+        end
+    end
 
-	return nothing
+    return nothing
 end
 
 # ============================================================================
@@ -94,65 +92,77 @@ end
 # ============================================================================
 
 """
-	RHSCache
+	RHSCache{Tu}
 
-Pre-allocated workspace for RHS computation.
+Pre-allocated workspace for RHS computation. Parameterized on the live
+scalar type `Tu` so the AD workspace can hold `ForwardDiff.Dual`-typed
+flux/source values without re-allocation.
 """
-mutable struct RHSCache
-	# Work arrays for fluxes
-	q_cond::Vector{Float64}      # Conductive heat fluxes at faces
-	q_total::Vector{Float64}     # Total energy fluxes at faces
-	S_conv::Vector{Float64}      # Gas convective volumetric source per cell [W/m³]
-	J_gas::Matrix{Float64}       # Gas species fluxes [NC × n_faces]
+mutable struct RHSCache{Tu}
+    # Work arrays for fluxes
+    q_cond::Vector{Tu}      # Conductive heat fluxes at faces
+    q_total::Vector{Tu}     # Total energy fluxes at faces
+    S_conv::Vector{Tu}      # Gas convective volumetric source per cell [W/m³]
+    # S_gen is the optional cell-centered "generation-sink" source, only
+    # nonzero when energy_form === :with_generation_sink. Zeroed each RHS so
+    # the energy-equation accumulator can read it unconditionally without a
+    # per-cell branch.
+    S_gen::Vector{Tu}     # -Σ_g Δh_g(T, T_ref) · (∇·J_g)  [W/m³] (true ∫cp via delta_enthalpy)
+    J_gas::Matrix{Tu}       # Gas species fluxes [NC × n_faces]
 
-	# Work arrays for sources
-	Q_rxn::Vector{Float64}       # Reaction heat source per cell
-	Q_rad::Vector{Float64}       # Radiation source per cell
-	dξ_rxn::Matrix{Float64}      # Species source from reactions [NC × n_cells]
+    # Work arrays for sources
+    Q_rxn::Vector{Tu}       # Reaction heat source per cell
+    Q_rad::Vector{Tu}       # Radiation source per cell
+    dξ_rxn::Matrix{Tu}      # Species source from reactions [NC × n_cells]
 
-	# Per-cell reaction workspace
-	rates::Vector{Float64}       # Reaction rates (NR)
-	heats::Vector{Float64}       # Heats of reaction (NR)
-	species_src::Vector{Float64} # Species sources (NC)
+    # Per-cell reaction workspace
+    rates::Vector{Tu}       # Reaction rates (NR)
+    heats::Vector{Tu}       # Heats of reaction (NR)
+    species_src::Vector{Tu} # Species sources (NC)
 
-	# Divergence workspace
-	div_q::Vector{Float64}       # Divergence of heat flux
-	div_J::Matrix{Float64}       # Divergence of species flux [NC × n_cells]
+    # Divergence workspace
+    div_q::Vector{Tu}       # Divergence of heat flux
+    div_J::Matrix{Tu}       # Divergence of species flux [NC × n_cells]
 end
 
 """
-	RHSCache(n_cells::Int, n_faces::Int, NC::Int, NR::Int)
+	RHSCache{Tu}(n_cells::Int, n_faces::Int, NC::Int, NR::Int) where {Tu}
+	RHSCache(n_cells::Int, n_faces::Int, NC::Int, NR::Int)         # Tu = Float64
 
 Create an RHSCache with pre-allocated arrays.
 """
-function RHSCache(n_cells::Int, n_faces::Int, NC::Int, NR::Int)
-	RHSCache(
-		zeros(n_faces),           # q_cond
-		zeros(n_faces),           # q_total
-		zeros(n_cells),           # S_conv
-		zeros(NC, n_faces),       # J_gas
-		zeros(n_cells),           # Q_rxn
-		zeros(n_cells),           # Q_rad
-		zeros(NC, n_cells),       # dξ_rxn
-		zeros(NR),                # rates
-		zeros(NR),                # heats
-		zeros(NC),                # species_src
-		zeros(n_cells),           # div_q
-		zeros(NC, n_cells),       # div_J
-	)
+function RHSCache{Tu}(n_cells::Int, n_faces::Int, NC::Int, NR::Int) where {Tu}
+    RHSCache{Tu}(
+        zeros(Tu, n_faces),           # q_cond
+        zeros(Tu, n_faces),           # q_total
+        zeros(Tu, n_cells),           # S_conv
+        zeros(Tu, n_cells),           # S_gen
+        zeros(Tu, NC, n_faces),       # J_gas
+        zeros(Tu, n_cells),           # Q_rxn
+        zeros(Tu, n_cells),           # Q_rad
+        zeros(Tu, NC, n_cells),       # dξ_rxn
+        zeros(Tu, NR),                # rates
+        zeros(Tu, NR),                # heats
+        zeros(Tu, NC),                # species_src
+        zeros(Tu, n_cells),           # div_q
+        zeros(Tu, NC, n_cells),       # div_J
+    )
 end
+
+RHSCache(n_cells::Int, n_faces::Int, NC::Int, NR::Int) =
+    RHSCache{Float64}(n_cells, n_faces, NC, NR)
 
 """
 	RHSCache(mesh, material)
 
-Create an RHSCache sized for the given mesh and material.
+Create a Float64-typed RHSCache sized for the given mesh and material.
 """
 function RHSCache(mesh, material)
-	n_cells_val = length(mesh.cells)
-	n_faces_val = length(mesh.faces)
-	NC = n_components(material)
-	NR = n_reactions(material)
-	return RHSCache(n_cells_val, n_faces_val, NC, NR)
+    n_cells_val = length(mesh.cells)
+    n_faces_val = length(mesh.faces)
+    NC = n_components(material)
+    NR = n_reactions(material)
+    return RHSCache(n_cells_val, n_faces_val, NC, NR)
 end
 
 """
@@ -160,20 +170,27 @@ end
 
 Resize RHS cache arrays (e.g., after mesh refinement).
 """
-function resize_rhs_cache!(cache::RHSCache, n_cells::Int, n_faces::Int, NC::Int, NR::Int)
-	resize!(cache.q_cond, n_faces)
-	resize!(cache.q_total, n_faces)
-	resize!(cache.S_conv, n_cells)
-	cache.J_gas = zeros(NC, n_faces)
-	resize!(cache.Q_rxn, n_cells)
-	resize!(cache.Q_rad, n_cells)
-	cache.dξ_rxn = zeros(NC, n_cells)
-	resize!(cache.rates, NR)
-	resize!(cache.heats, NR)
-	resize!(cache.species_src, NC)
-	resize!(cache.div_q, n_cells)
-	cache.div_J = zeros(NC, n_cells)
-	return cache
+function resize_rhs_cache!(
+    cache::RHSCache{Tu},
+    n_cells::Int,
+    n_faces::Int,
+    NC::Int,
+    NR::Int,
+) where {Tu}
+    resize!(cache.q_cond, n_faces)
+    resize!(cache.q_total, n_faces)
+    resize!(cache.S_conv, n_cells)
+    resize!(cache.S_gen, n_cells)
+    cache.J_gas = zeros(Tu, NC, n_faces)
+    resize!(cache.Q_rxn, n_cells)
+    resize!(cache.Q_rad, n_cells)
+    cache.dξ_rxn = zeros(Tu, NC, n_cells)
+    resize!(cache.rates, NR)
+    resize!(cache.heats, NR)
+    resize!(cache.species_src, NC)
+    resize!(cache.div_q, n_cells)
+    cache.div_J = zeros(Tu, NC, n_cells)
+    return cache
 end
 
 """
@@ -202,7 +219,9 @@ performance. All boundary condition handling is specialized at compile time.
 - `I_radiation`: Surface radiation intensity [W/m²] (default 0)
 
 # Equations solved
-Energy: ρcₚ dT/dt = -∇·q_cond + Q_rad + Q_rxn
+Energy: ρcₚ dT/dt = -∇·q_cond + S_conv + S_gen + Q_rad + Q_rxn
+		(S_conv = -Σ_g cp_g·J̄_g·∂T/∂x always present; S_gen only under
+		 energy_form === :with_generation_sink, else zero)
 Species: dξⱼ/dt = -∇·Jⱼ + Sⱼ (for gases with transport)
 		 dξⱼ/dt = Sⱼ          (for solids, no transport)
 
@@ -210,359 +229,580 @@ The `NC` type parameter enables the compiler to specialize for the specific
 number of components, eliminating type instability and allocations in the
 inner loops.
 """
-function compute_rhs!(dT::Vector{Float64}, dξ::Matrix{Float64},
-	mesh::Mesh1D{NC}, prop_cache::PropertyCache, rhs_cache::RHSCache,
-	material::Material{NC}, bc_set::BoundaryConditionSet, t,
-	top_face_ids::Vector{Int}, bottom_face_ids::Vector{Int};
-	I_radiation::Float64 = 0.0,
-	radiation_model::RadiationModel = NO_RADIATION) where NC
+function compute_rhs!(
+    dT::AbstractVector,
+    dξ::AbstractMatrix,
+    state,
+    mesh::Mesh1D{NC},
+    prop_cache::PropertyCache,
+    rhs_cache::RHSCache,
+    material::Material{NC},
+    bc_set::BoundaryConditionSet,
+    t,
+    top_face_ids::Vector{Int},
+    bottom_face_ids::Vector{Int};
+    I_radiation::Real = 0.0,
+    radiation_model::RadiationModel = NO_RADIATION,
+    radiation_kirchhoff::Bool = true,
+    energy_form::Symbol = :standard,
+    use_transpiration_bc::Bool = false,
+    use_blowing_correction::Bool = false,
+) where {NC}
 
-	n_cells_val = length(mesh.cells)
-	NR = n_reactions(material)
+    n_cells_val = length(mesh.cells)
+    NR = n_reactions(material)
 
-	# Ensure caches are properly sized
-	if length(rhs_cache.q_cond) != length(mesh.faces)
-		resize_rhs_cache!(rhs_cache, n_cells_val, length(mesh.faces), NC, NR)
-	end
+    # Ensure caches are properly sized
+    if length(rhs_cache.q_cond) != length(mesh.faces)
+        resize_rhs_cache!(rhs_cache, n_cells_val, length(mesh.faces), NC, NR)
+    end
 
-	# ========================================================================
-	# Step 1: Compute conductive heat fluxes at interior faces
-	# ========================================================================
-	compute_conductive_fluxes!(rhs_cache.q_cond, mesh, prop_cache)
+    # ========================================================================
+    # Step 1: Compute conductive heat fluxes at interior faces
+    # ========================================================================
+    compute_conductive_fluxes!(rhs_cache.q_cond, state, mesh, prop_cache)
 
-	# Copy to total flux (will add boundary contributions)
-	copyto!(rhs_cache.q_total, rhs_cache.q_cond)
+    # Copy to total flux (will add boundary contributions)
+    copyto!(rhs_cache.q_total, rhs_cache.q_cond)
 
-	# ========================================================================
-	# Step 2: Apply thermal boundary conditions (static dispatch)
-	# ========================================================================
-	apply_thermal_bc_flux!(rhs_cache.q_total, mesh, bc_set, prop_cache, t,
-		top_face_ids, bottom_face_ids, radiation_model)
+    # ========================================================================
+    # Step 2: Compute reaction rates and source terms for each cell
+    # (must precede the thermal BC solve so dξ_rxn is populated; the boundary
+    # solver also runs after gas fluxes so transpiration uses the actual J_gas
+    # at the boundary face.)
+    # ========================================================================
+    @inbounds for i = 1:n_cells_val
+        T = state.T[i]
+        ξ = ntuple(j -> state.ξ[j, i], Val(NC))
 
-	# ========================================================================
-	# Step 3: Compute radiation source (model-dependent)
-	# ========================================================================
-	compute_radiation_source!(rhs_cache.Q_rad, mesh, prop_cache, I_radiation, radiation_model)
+        # Evaluate reaction rates and heats
+        evaluate_reactions!(rhs_cache.rates, rhs_cache.heats, ξ, T, material)
 
-	# ========================================================================
-	# Step 4: Compute reaction rates and source terms for each cell
-	# ========================================================================
-	@inbounds for i in 1:n_cells_val
-		state = mesh.cell_states[i]
-		T = state.T
-		ξ = state.ξ
+        # Compute reaction heat source
+        rhs_cache.Q_rxn[i] = reaction_heat_source(rhs_cache.rates, rhs_cache.heats)
 
-		# Evaluate reaction rates and heats
-		evaluate_reactions!(rhs_cache.rates, rhs_cache.heats, ξ, T, material)
+        # Compute species source terms
+        species_source_terms!(rhs_cache.species_src, rhs_cache.rates, material, NC)
 
-		# Compute reaction heat source
-		rhs_cache.Q_rxn[i] = reaction_heat_source(rhs_cache.rates, rhs_cache.heats)
+        # Copy to output matrix
+        for j = 1:NC
+            rhs_cache.dξ_rxn[j, i] = rhs_cache.species_src[j]
+        end
+    end
 
-		# Compute species source terms
-		species_source_terms!(rhs_cache.species_src, rhs_cache.rates, material, NC)
+    # ========================================================================
+    # Step 3: Compute gas transport fluxes (interior + boundary)
+    # Must run BEFORE thermal BCs because the surface energy balance uses
+    # Σ_g ṁ_g · Δh_g(T_s, T_∞) with ṁ_g read from rhs_cache.J_gas at the
+    # boundary face.
+    # ========================================================================
+    compute_gas_fluxes!(rhs_cache.J_gas, state, mesh, prop_cache, material)
 
-		# Copy to output matrix
-		for j in 1:NC
-			rhs_cache.dξ_rxn[j, i] = rhs_cache.species_src[j]
-		end
-	end
+    apply_mass_bc_flux!(
+        rhs_cache.J_gas,
+        state,
+        mesh,
+        prop_cache,
+        bc_set,
+        material,
+        t,
+        top_face_ids,
+        bottom_face_ids,
+    )
 
-	# ========================================================================
-	# Step 5: Compute gas transport fluxes
-	# ========================================================================
-	compute_gas_fluxes!(rhs_cache.J_gas, mesh, prop_cache, material)
+    # ========================================================================
+    # Step 4: Apply thermal boundary conditions (static dispatch)
+    # Surface energy balance with transpiration enthalpy now closes against
+    # the gas mass flux populated in Step 3.
+    # ========================================================================
+    apply_thermal_bc_flux!(
+        rhs_cache.q_total,
+        state,
+        mesh,
+        bc_set,
+        prop_cache,
+        material,
+        rhs_cache.J_gas,
+        t,
+        top_face_ids,
+        bottom_face_ids,
+        radiation_model;
+        use_transpiration_bc = use_transpiration_bc,
+        use_blowing_correction = use_blowing_correction,
+    )
 
-	# Apply mass boundary conditions (static dispatch)
-	apply_mass_bc_flux!(rhs_cache.J_gas, mesh, prop_cache, bc_set, t,
-		top_face_ids, bottom_face_ids, Val(NC))
+    # ========================================================================
+    # Step 5: Compute radiation source (model-dependent)
+    # ========================================================================
+    compute_radiation_source!(
+        rhs_cache.Q_rad,
+        state,
+        mesh,
+        prop_cache,
+        I_radiation,
+        radiation_model,
+        radiation_kirchhoff,
+    )
 
-	# ========================================================================
-	# Step 5.5: Compute gas convective volumetric source
-	# ========================================================================
-	# S_conv = -Σ_g c_g(T) × J_g × ∂T/∂x  (cell-centered source, not a face flux)
-	Physics.compute_gas_convective_source!(rhs_cache.S_conv,
-		rhs_cache.J_gas, mesh, material)
+    # ========================================================================
+    # Step 6: Cell-centered gas-coupled energy sources
+    # ------------------------------------------------------------------------
+    # S_conv  = -Σ_g cp_g(T_i) · J̄_g,i · ∂T/∂x|_i      (always present)
+    # S_gen  = -Σ_g Δh_g(T_i, T_ref) · (∇·J_g)_i   (true ∫cp, midpoint rule)
+    #           — added only when energy_form === :with_generation_sink
+    # Needs q_total: the boundary cells' gradient blends in the boundary-face
+    # slope −q/k at the T_s solved in Step 4.
+    # ========================================================================
+    Physics.compute_gas_convective_source!(
+        rhs_cache.S_conv,
+        rhs_cache.J_gas,
+        rhs_cache.q_total,
+        prop_cache.k,
+        state,
+        mesh,
+        material,
+    )
 
-	# ========================================================================
-	# Step 6: Compute divergences
-	# ========================================================================
-	divergence_1d!(rhs_cache.div_q, rhs_cache.q_total, mesh)
-	divergence_species_1d!(rhs_cache.div_J, rhs_cache.J_gas, mesh)
+    # ========================================================================
+    # Step 7: Compute divergences (needed before S_gen, which depends on ∇·J_g)
+    # ========================================================================
+    divergence_1d!(rhs_cache.div_q, rhs_cache.q_total, state, mesh)
+    divergence_species_1d!(rhs_cache.div_J, rhs_cache.J_gas, state, mesh)
 
-	# ========================================================================
-	# Step 7: Assemble final RHS
-	# ========================================================================
-	@inbounds for i in 1:n_cells_val
-		# Energy equation: dT/dt = (1/ρcₚ) * (-∇·q + S_conv + Q_rad + Q_rxn)
-		ρcp = prop_cache.ρcp[i]
-		dT[i] = (-rhs_cache.div_q[i] + rhs_cache.S_conv[i] + rhs_cache.Q_rad[i] + rhs_cache.Q_rxn[i]) / ρcp
+    if energy_form === :with_generation_sink
+        T_ref_volumetric = _resolve_volumetric_T_ref(bc_set, t)
+        Physics.compute_gas_generation_sink!(
+            rhs_cache.S_gen,
+            rhs_cache.div_J,
+            state,
+            material,
+            T_ref_volumetric,
+        )
+    else
+        fill!(rhs_cache.S_gen, zero(eltype(rhs_cache.S_gen)))
+    end
 
-		# Species equations - use unrolled version for type stability
-		apply_species_residual_unrolled!(dξ, i, rhs_cache.div_J, rhs_cache.dξ_rxn, material)
-	end
+    # ========================================================================
+    # Step 8: Assemble final RHS
+    # ========================================================================
+    @inbounds for i = 1:n_cells_val
+        # Energy equation: dT/dt = (-∇·q + S_conv + S_gen + Q_rad + Q_rxn) / ρcp_eff
+        # (ρcp_eff excludes gas storage per Formulation A; gas energy is
+        # carried by S_conv — the default S_conv-only convention. The surface
+        # transpiration BC is opt-in and must not be combined with S_conv.)
+        ρcp = prop_cache.ρcp[i]
+        dT[i] =
+            (
+                -rhs_cache.div_q[i] +
+                rhs_cache.S_conv[i] +
+                rhs_cache.S_gen[i] +
+                rhs_cache.Q_rad[i] +
+                rhs_cache.Q_rxn[i]
+            ) / ρcp
 
-	return nothing
+        # Species equations - use unrolled version for type stability
+        apply_species_residual_unrolled!(dξ, i, rhs_cache.div_J, rhs_cache.dξ_rxn, material)
+    end
+
+    return nothing
 end
 
 # ============================================================================
 # Helper functions for boundary condition application
 # ============================================================================
 
-using ..Core: BoundaryConditionSet, get_thermal_bc, get_mass_bc
-using ..Core: RadiationModel, NO_RADIATION, SURFACE_ABSORPTION, BEER_LAMBERT, P1_QUASI_STEADY
+using ..BoundaryConditions: BoundaryConditionSet, get_thermal_bc, get_mass_bc
+using ..Materials:
+    RadiationModel, NO_RADIATION, SURFACE_ABSORPTION, BEER_LAMBERT, P1_QUASI_STEADY
 
 """
-	apply_thermal_bc_flux!(q::Vector{Float64}, mesh, 
-						   bc_set::BoundaryConditionSet, 
-						   prop_cache, t,
-						   top_face_ids::Vector{Int}, 
+	apply_thermal_bc_flux!(q::Vector{Float64}, mesh,
+						   bc_set::BoundaryConditionSet,
+						   prop_cache,
+						   material::Material{NC},
+						   J_gas::Matrix,
+						   t,
+						   top_face_ids::Vector{Int},
 						   bottom_face_ids::Vector{Int},
-						   radiation_model::RadiationModel = SURFACE_ABSORPTION)
+						   radiation_model::RadiationModel = SURFACE_ABSORPTION) where NC
 
 Apply thermal boundary conditions using static dispatch (type-stable).
 
-This version uses pre-cached face lists and BoundaryConditionSet for maximum
-performance. Each boundary condition type is dispatched at compile time.
+The surface energy balance solved here optionally includes the surface
+transpiration enthalpy term (off by default; `use_transpiration_bc`):
+
+```
+q_BC(T_s) = q_cond(T_s, T_cell) + Σ_g ṁ_g · Δh_g(T_s, T_∞)
+```
+
+When `use_transpiration_bc = false` (default) `ṁ_g` is zeroed and this reduces
+to `q_BC(T_s) = q_cond(T_s, T_cell)`. `ṁ_g` is read from `J_gas[g, face]` at the boundary face — populated by the
+mass-flux pass that runs *before* this thermal BC pass in `compute_rhs!`.
+
+With `use_blowing_correction = true` every `ConvectiveBC` in the surface
+balance is rescaled by the Couette-film blowing factor `h → h·B/(e^B − 1)`,
+`B = ṁ″·c_p,g/h`, built from the **true** outward gas flux at the face
+(`J_gas[g, face]`, which includes the Darcy venting part in Darcy–Fick mode).
+This is independent of the transpiration enthalpy term: blowing reads the
+real flux even while transpiration stays zeroed (the supported S_conv-only
+convention). See `Discretization.blowing_factor`.
 
 # Arguments
 - `q`: Face flux array (modified in-place)
 - `mesh`: The mesh
 - `bc_set`: Type-stable boundary condition set
 - `prop_cache`: Property cache
+- `material`: Material (needed for per-component cp_g and is_gas predicate)
+- `J_gas`: Gas mass-flux matrix `[NC × n_faces]`, with boundary entries populated
 - `t`: Current time
-- `top_face_ids`: Pre-cached face IDs at top boundary (boundary_id=1)
-- `bottom_face_ids`: Pre-cached face IDs at bottom boundary (boundary_id=2)
-- `radiation_model`: Radiation model (determines how RadiativeFluxBC handles absorption)
+- `top_face_ids`, `bottom_face_ids`: Pre-cached boundary face IDs
+- `radiation_model`: Determines how `RadiativeFluxBC` handles absorption
 """
-function apply_thermal_bc_flux!(q::Vector{Float64}, mesh,
-	bc_set::BoundaryConditionSet,
-	prop_cache, t,
-	top_face_ids::Vector{Int},
-	bottom_face_ids::Vector{Int},
-	radiation_model::RadiationModel = SURFACE_ABSORPTION)
-	# Top boundary (boundary_id = 1, z = L)
-	_apply_thermal_bc_static!(q, mesh, bc_set.thermal_top, prop_cache, t,
-		top_face_ids, Val(:top), radiation_model)
+function apply_thermal_bc_flux!(
+    q::AbstractVector,
+    state,
+    mesh,
+    bc_set::BoundaryConditionSet,
+    prop_cache,
+    material::Material{NC},
+    J_gas::AbstractMatrix,
+    t,
+    top_face_ids::Vector{Int},
+    bottom_face_ids::Vector{Int},
+    radiation_model::RadiationModel = SURFACE_ABSORPTION;
+    use_transpiration_bc::Bool = false,
+    use_blowing_correction::Bool = false,
+) where {NC}
+    # Top boundary (boundary_id = 1, z = L)
+    _apply_thermal_bc_static!(
+        q,
+        state,
+        mesh,
+        bc_set.thermal.top,
+        prop_cache,
+        material,
+        J_gas,
+        t,
+        top_face_ids,
+        Val(:top),
+        radiation_model;
+        use_transpiration_bc = use_transpiration_bc,
+        use_blowing_correction = use_blowing_correction,
+    )
 
-	# Bottom boundary (boundary_id = 2, z = 0)
-	_apply_thermal_bc_static!(q, mesh, bc_set.thermal_bottom, prop_cache, t,
-		bottom_face_ids, Val(:bottom), radiation_model)
+    # Bottom boundary (boundary_id = 2, z = 0)
+    _apply_thermal_bc_static!(
+        q,
+        state,
+        mesh,
+        bc_set.thermal.bottom,
+        prop_cache,
+        material,
+        J_gas,
+        t,
+        bottom_face_ids,
+        Val(:bottom),
+        radiation_model;
+        use_transpiration_bc = use_transpiration_bc,
+        use_blowing_correction = use_blowing_correction,
+    )
 
-	return nothing
+    return nothing
 end
+
 
 """
 Inner function for type-stable thermal BC application.
 
 The `Val{boundary}` parameter enables compile-time dispatch on boundary type.
 The `BC` type parameter enables compile-time dispatch on BC type.
-The `radiation_model` determines how RadiativeFluxBC handles absorption.
+The `radiation_model` determines how `RadiativeFluxBC` handles absorption.
 
-For non-Dirichlet BCs, this now uses the boundary temperature solve to find
-the surface temperature T_s that satisfies energy balance:
-	q_BC(T_s) = k_eff × (T_cell - T_s) / Δz_half
+For non-Dirichlet BCs, the boundary-temperature solver finds `T_s` from the
+surface energy balance:
+	q_BC(T_s) = k(T_s − T_cell)/Δz_half + Σ_g ṁ_g · Δh_g(T_s, T_∞)
 
-This ensures proper energy conservation at boundaries, especially important
-for radiative BCs where flux depends on T⁴.
+The transpiration term `Σ_g ṁ_g · Δh_g` is included only when
+`use_transpiration_bc` is true (off by default; `J_boundary_outward` is zeroed
+otherwise). The default S_conv-only convention reduces this to
+`q_BC(T_s) = k(T_s − T_cell)/Δz_half`.
 """
-@inline function _apply_thermal_bc_static!(q::Vector{Float64}, mesh,
-	bc::BC, prop_cache, t,
-	face_ids::Vector{Int},
-	::Val{boundary},
-	radiation_model::RadiationModel = SURFACE_ABSORPTION) where {BC <: AbstractThermalBC, boundary}
-	# Handle DirichletThermalBC specially (needs k and distance)
-	if BC <: DirichletThermalBC
-		@inbounds for f in face_ids
-			face = mesh.faces[f]
-			left_id, right_id = face.cell_ids
-			cell_id = left_id == 0 ? right_id : left_id
-			T_surface = mesh.cell_states[cell_id].T
+@inline function _apply_thermal_bc_static!(
+    q::AbstractVector,
+    state,
+    mesh,
+    bc::BC,
+    prop_cache,
+    material::Material{NC},
+    J_gas::AbstractMatrix,
+    t,
+    face_ids::Vector{Int},
+    ::Val{boundary},
+    radiation_model::RadiationModel = SURFACE_ABSORPTION;
+    use_transpiration_bc::Bool = false,
+    use_blowing_correction::Bool = false,
+) where {BC<:AbstractThermalBC,NC,boundary}
+    # Handle DirichletThermalBC specially (T_s prescribed, no transpiration solve)
+    if BC <: DirichletThermalBC
+        boundary_id = boundary === :top ? 1 : 2
+        @inbounds for f in face_ids
+            face = mesh.faces[f]
+            left_id, right_id = face.cell_ids
+            cell_id = left_id == 0 ? right_id : left_id
+            T_cell = state.T[cell_id]
 
-			# Get prescribed boundary temperature
-			T_bc = evaluate_param(bc.T, t)
+            T_bc = evaluate_param(bc.T, t)
+            k_cell = prop_cache.k[cell_id]
 
-			# Get cell thermal conductivity
-			k_cell = prop_cache.k[cell_id]
+            # Distance from cell center to boundary face (half cell width).
+            # Uses the boundary face's own area — identical to the Newton
+            # path's Δz_half = V/(A_face·2) — so the two paths agree under
+            # a variable cross-section.
+            dz_half = state.volume[cell_id] / state.A_face[f] / 2
 
-			# Distance from cell center to boundary face (half cell width)
-			dz = mesh.cell_volumes[cell_id] / mesh.cross_section_area
-			dz_half = dz / 2.0
+            # Conductive flux: q = -k * dT/dz
+            q_bc = k_cell * (T_bc - T_cell) / dz_half
 
-			# Conductive flux: q = -k * dT/dz
-			q_bc = k_cell * (T_bc - T_surface) / dz_half
+            if boundary === :bottom
+                q[f] = q_bc
+            else
+                q[f] = -q_bc
+            end
 
-			# Apply sign convention based on boundary
-			if boundary === :bottom
-				q[f] = _value(q_bc)
-			else  # :top
-				q[f] = -_value(q_bc)
-			end
-		end
-	else
-		# ================================================================
-		# Use boundary temperature solve for energy-conserving flux
-		# ================================================================
-		# This solves for T_surface such that q_BC(T_s) = k(T_cell - T_s)/Δz_half
-		# ensuring perfect energy balance at the boundary.
+            # Keep the diagnostic boundary state current (the bypass
+            # previously skipped this, so surface-T diagnostics held
+            # 300 K constructor placeholders for Dirichlet runs). Float64
+            # storage, mirroring solve_boundary_temperature!.
+            bstate = mesh.boundary_states[boundary_id]
+            bstate.T_surface = ForwardDiff.value(T_bc)
+            bstate.q_applied = ForwardDiff.value(q_bc)
+            bstate.q_conducted = ForwardDiff.value(q_bc)
+            bstate.q_transpired = 0.0
+            bstate.blowing_mcp = 0.0
+            bstate.T_cell = ForwardDiff.value(T_cell)
+            bstate.k_eff = ForwardDiff.value(k_cell)
+            bstate.Δz_half = ForwardDiff.value(dz_half)
+            bstate.converged = true
+            bstate.iterations = 0
+        end
+    else
+        # Boundary temperature solve for energy-conserving flux
+        boundary_id = boundary === :top ? 1 : 2
 
-		# Determine boundary_id from boundary symbol
-		boundary_id = boundary === :top ? 1 : 2
+        T_ref = ambient_temperature(bc, t, Float64(T_REF))
 
-		# Update boundary state (solves for T_surface satisfying energy balance)
-		# Extract Float64 value from t - the solver doesn't need time derivatives
-		t_val = _value(t)
-		state = update_boundary_state!(mesh, boundary_id, bc, prop_cache, t_val, radiation_model)
+        # Outward gas mass flux at the boundary face. `J_gas[:, f]` follows the
+        # finite-volume +z convention, so escaping gas is +J at the top face and
+        # -J at the bottom face. `J_outward_true` is the physical flux; the
+        # transpiration argument keeps the established convention of being
+        # zeroed when transpiration is off, while the blowing correction always
+        # reads the true flux.
+        face_id_for_J = first(face_ids)
+        J_outward_true = ntuple(NC) do j
+            Jf = J_gas[j, face_id_for_J]
+            boundary === :top ? Jf : -Jf
+        end
+        J_boundary_outward =
+            use_transpiration_bc ? J_outward_true : map(zero, J_outward_true)
 
-		# Apply the conducted flux to all faces on this boundary
-		# q_conducted is positive when heat flows into the domain
-		@inbounds for f in face_ids
-			if boundary === :bottom
-				q[f] = _value(state.q_conducted)
-			else  # :top
-				q[f] = -_value(state.q_conducted)
-			end
-		end
-	end
-	return nothing
+        # Newton solve for T_s with transpiration. The returned q_conducted
+        # is Tu-typed (carries AD sensitivities through T_cell, k, J_gas, …).
+        result = update_boundary_state!(
+            state,
+            mesh,
+            boundary_id,
+            bc,
+            prop_cache,
+            material,
+            J_boundary_outward,
+            T_ref,
+            t,
+            radiation_model;
+            use_blowing = use_blowing_correction,
+            J_blowing = J_outward_true,
+        )
+
+        @inbounds for f in face_ids
+            if boundary === :bottom
+                q[f] = result.q_conducted
+            else
+                q[f] = -result.q_conducted
+            end
+        end
+    end
+    return nothing
+end
+
+# Resolve a single representative T_ref for the volumetric generation-sink
+# term. Prefer the top BC's ambient (the surface where transpiration
+# typically dominates); fall back to the bottom BC; then to T_REF.
+#
+# CAVEAT (single-ambient assumption): this returns ONE datum applied to every
+# cell, whereas the surface transpiration BC uses each boundary's own ambient
+# (`ambient_temperature(bc, ...)` per face). The two agree only when both
+# boundaries share an ambient. If `T_∞,top ≠ T_∞,bottom` AND the back face is
+# permeable (non-zero gas crossing it), the `:with_generation_sink` energy
+# ledger fails to close at the bottom by exactly
+# `Σ_g ṁ_g,bottom · cp_g · (T_∞,top − T_∞,bottom)`. Harmless for the usual
+# impermeable back face (J_gas = 0 there, so both terms vanish) and for equal
+# ambients. To support asymmetric ambients with a permeable back face, S_gen
+# would need a per-cell datum (top ambient over the upper region, bottom over
+# the lower) rather than this single scalar.
+@inline function _resolve_volumetric_T_ref(bc_set::BoundaryConditionSet, t)
+    T_top = ambient_temperature(bc_set.thermal.top, t)
+    T_top !== nothing && return T_top
+    T_bottom = ambient_temperature(bc_set.thermal.bottom, t)
+    T_bottom !== nothing && return T_bottom
+    return Float64(T_REF)
 end
 
 """
-	apply_mass_bc_flux!(J::Matrix{Float64}, mesh, prop_cache,
-						bc_set::BoundaryConditionSet, t,
-						top_face_ids::Vector{Int}, 
-						bottom_face_ids::Vector{Int},
-						::Val{NC}) where NC
+	apply_mass_bc_flux!(J::Matrix{Float64}, state, mesh, prop_cache,
+						bc_set::BoundaryConditionSet, material::Material{NC}, t,
+						top_face_ids::Vector{Int},
+						bottom_face_ids::Vector{Int}) where NC
 
 Apply mass boundary conditions using static dispatch (type-stable).
 
+Only **gas** components receive a boundary flux: mass BCs model gas exchange
+with the ambient (film law / venting), and a condensed phase cannot cross the
+boundary. Writing the film law for solids (as an earlier revision did) put a
+phantom O(100) kg/(m²·s) "solid boundary flux" into `J` that every production
+consumer had to mask out — filtering at write time keeps `J`
+physically meaningful for every reader, including diagnostics.
+
 # Arguments
 - `J`: Species flux matrix [NC × n_faces] (modified in-place)
+- `state`: Geometry/state cache
 - `mesh`: The mesh
 - `prop_cache`: Property cache (for λ, ρ)
 - `bc_set`: Type-stable boundary condition set
+- `material`: Material (compile-time `is_gas` filter)
 - `t`: Current time
 - `top_face_ids`: Pre-cached face IDs at top boundary (boundary_id=1)
 - `bottom_face_ids`: Pre-cached face IDs at bottom boundary (boundary_id=2)
-- `Val{NC}`: Number of components (for type stability)
 """
-function apply_mass_bc_flux!(J::Matrix{Float64}, mesh, prop_cache,
-	bc_set::BoundaryConditionSet, t,
-	top_face_ids::Vector{Int},
-	bottom_face_ids::Vector{Int},
-	::Val{NC}) where NC
-	# Top boundary (boundary_id = 1, z = L)
-	_apply_mass_bc_static!(J, mesh, bc_set.mass_top, prop_cache, t,
-		top_face_ids, Val(:top), Val(NC))
+function apply_mass_bc_flux!(
+    J::AbstractMatrix,
+    state,
+    mesh,
+    prop_cache,
+    bc_set::BoundaryConditionSet,
+    material::Material{NC},
+    t,
+    top_face_ids::Vector{Int},
+    bottom_face_ids::Vector{Int},
+) where {NC}
+    # Top boundary (boundary_id = 1, z = L)
+    _apply_mass_bc_static!(
+        J,
+        state,
+        mesh,
+        bc_set.mass.top,
+        prop_cache,
+        material,
+        t,
+        top_face_ids,
+        Val(:top),
+    )
 
-	# Bottom boundary (boundary_id = 2, z = 0)
-	_apply_mass_bc_static!(J, mesh, bc_set.mass_bottom, prop_cache, t,
-		bottom_face_ids, Val(:bottom), Val(NC))
+    # Bottom boundary (boundary_id = 2, z = 0)
+    _apply_mass_bc_static!(
+        J,
+        state,
+        mesh,
+        bc_set.mass.bottom,
+        prop_cache,
+        material,
+        t,
+        bottom_face_ids,
+        Val(:bottom),
+    )
 
-	return nothing
+    return nothing
 end
 
 """
 Inner function for type-stable mass BC application.
 """
-@inline function _apply_mass_bc_static!(J::Matrix{Float64}, mesh,
-	bc::BC, prop_cache, t,
-	face_ids::Vector{Int},
-	::Val{boundary},
-	::Val{NC}) where {BC <: AbstractMassBC, boundary, NC}
-	@inbounds for f in face_ids
-		face = mesh.faces[f]
-		left_id, right_id = face.cell_ids
-		cell_id = left_id == 0 ? right_id : left_id
-		ξ_surface = mesh.cell_states[cell_id].ξ
+@inline function _apply_mass_bc_static!(
+    J::AbstractMatrix,
+    state,
+    mesh,
+    bc::BC,
+    prop_cache,
+    material::Material{NC},
+    t,
+    face_ids::Vector{Int},
+    ::Val{boundary},
+) where {BC<:AbstractMassBC,boundary,NC}
+    @inbounds for f in face_ids
+        face = mesh.faces[f]
+        left_id, right_id = face.cell_ids
+        cell_id = left_id == 0 ? right_id : left_id
 
-		# Get λ and ρ for diffusive BC (λρ product for mass_bc_flux interface)
-		λ = prop_cache.λ[cell_id]
-		ρ = prop_cache.ρ[cell_id]
-		λρ = λ * ρ  # Computed locally for BC interface compatibility
-		face_pos = mesh.face_positions[f]
-		cell_center = mesh.cell_centers[cell_id]
-		d = abs(face_pos - cell_center)
+        λ = prop_cache.λ[cell_id]
+        ρ = prop_cache.ρ[cell_id]
+        λρ = λ * ρ
+        face_pos = state.face_positions[f]
+        cell_ctr = state.cell_centers[cell_id]
+        d = abs(face_pos - cell_ctr)
 
-		for j in 1:NC
-			J_bc = mass_bc_flux(bc, ξ_surface[j], λρ, ρ, d, t)
-
-			# Sign convention based on boundary
-			if boundary === :bottom
-				J[j, f] = _value(J_bc)   # Mass flux at bottom
-			else  # :top
-				J[j, f] = -_value(J_bc)  # Mass flux at top (gases escape here)
-			end
-		end
-	end
-	return nothing
+        # Sign convention: boundary-tag based. ACCUMULATE — in Darcy-Fick
+        # mode the boundary face already carries the advective venting
+        # flux from the pressure BC (compute_gas_fluxes_darcy_fick!);
+        # the film-law diffusive part adds to it. In Fickian mode the
+        # boundary faces arrive zero, so += reduces to a plain assignment.
+        σ = boundary === :bottom ? 1.0 : -1.0
+        _accumulate_mass_bc_gas_unrolled!(
+            J,
+            f,
+            cell_id,
+            bc,
+            λρ,
+            ρ,
+            d,
+            t,
+            σ,
+            state,
+            material,
+        )
+    end
+    return nothing
 end
 
-# ============================================================================
-# Simplified RHS for testing (no boundary conditions)
-# ============================================================================
-
-"""
-	compute_rhs_interior!(dT::Vector{Float64}, dξ::Matrix{Float64},
-						  mesh::Mesh1D{NC}, prop_cache::PropertyCache, rhs_cache::RHSCache,
-						  material::Material{NC}) where NC
-
-Compute RHS for interior cells only (no boundary condition handling).
-Useful for testing and verification.
-
-The `NC` type parameter enables the compiler to specialize for the specific
-number of components, eliminating type instability and allocations.
-"""
-function compute_rhs_interior!(dT::Vector{Float64}, dξ::Matrix{Float64},
-	mesh::Mesh1D{NC}, prop_cache::PropertyCache, rhs_cache::RHSCache,
-	material::Material{NC}) where NC
-	n_cells_val = length(mesh.cells)
-
-	# Compute conductive fluxes
-	compute_conductive_fluxes!(rhs_cache.q_cond, mesh, prop_cache)
-
-	# Compute reaction sources for each cell
-	@inbounds for i in 1:n_cells_val
-		state = mesh.cell_states[i]
-		evaluate_reactions!(rhs_cache.rates, rhs_cache.heats, state.ξ, state.T, material)
-		rhs_cache.Q_rxn[i] = reaction_heat_source(rhs_cache.rates, rhs_cache.heats)
-		species_source_terms!(rhs_cache.species_src, rhs_cache.rates, material, NC)
-		for j in 1:NC
-			rhs_cache.dξ_rxn[j, i] = rhs_cache.species_src[j]
-		end
-	end
-
-	# Compute gas fluxes
-	compute_gas_fluxes!(rhs_cache.J_gas, mesh, prop_cache, material)
-
-	# Compute divergences
-	divergence_1d!(rhs_cache.div_q, rhs_cache.q_cond, mesh)
-	divergence_species_1d!(rhs_cache.div_J, rhs_cache.J_gas, mesh)
-
-	# Assemble RHS
-	@inbounds for i in 1:n_cells_val
-		ρcp = prop_cache.ρcp[i]
-		dT[i] = (-rhs_cache.div_q[i] + rhs_cache.Q_rxn[i]) / ρcp
-
-		for j in 1:NC
-			if material.components[j].phase == GAS
-				dξ[j, i] = -rhs_cache.div_J[j, i] + rhs_cache.dξ_rxn[j, i]
-			else
-				dξ[j, i] = rhs_cache.dξ_rxn[j, i]
-			end
-		end
-	end
-
-	return nothing
+# Compile-time unrolled per-component accumulation; the `is_gas` predicate is
+# resolved at codegen so solid/liquid rows are never touched.
+@generated function _accumulate_mass_bc_gas_unrolled!(
+    J::AbstractMatrix,
+    f::Int,
+    cell_id::Int,
+    bc::AbstractMassBC,
+    λρ::Real,
+    ρ::Real,
+    d::Real,
+    t::Real,
+    σ::Float64,
+    state,
+    material::Material{NC},
+) where {NC}
+    exprs = Expr[]
+    for j = 1:NC
+        push!(exprs, quote
+            @inbounds if is_gas(material.components[$j])
+                ξ_j = state.ξ[$j, cell_id]
+                J[$j, f] += σ * mass_bc_flux(bc, ξ_j, λρ, ρ, d, t, $j)
+            end
+        end)
+    end
+    push!(exprs, :(return nothing))
+    return Expr(:block, exprs...)
 end
+
 
 # ============================================================================
 # Darcy-Fick RHS Computation
 # ============================================================================
-
-# NOTE: The old Dict-based and perm_model-based `update_darcy_properties!` have been removed
-# in favor of the type-stable API using component-based permeability.
-# The current API: `update_darcy_properties!(cache, mesh, material, bc_set, top_face_ids, bottom_face_ids)`
-# computes effective permeability from component κ values via mixing rules.
 
 """
 	update_darcy_properties!(cache::PropertyCache, mesh::Mesh1D{NC},
@@ -573,10 +813,10 @@ end
 
 Update Darcy-related properties using component-based permeability.
 
-This method computes effective permeability from component κ values via mixing rules,
-rather than using a porosity-based permeability model. Use this when:
-- Components have κ values specified (e.g., SolidComponent(:char, ..., κ=1e-12))
-- No legacy permeability_model is provided
+This method computes effective permeability from component κ values via the
+material's `mixing.κ` rule. Components carry their own κ value (e.g.
+`SolidComponent(:char, ..., κ=1e-12)`); a fully-solid material with κ=0 will
+produce zero effective permeability and zero Darcy velocity.
 
 The effective permeability is computed as a volume-weighted mixture of
 component permeabilities, similar to thermal conductivity.
@@ -584,90 +824,109 @@ component permeabilities, similar to thermal conductivity.
 # Arguments
 - `cache`: PropertyCache (modified in place)
 - `mesh`: Mesh with current cell states
-- `material`: Material definition with component κ values and permeability_mixing
+- `material`: Material definition with component κ values and `mixing.κ` spec
 - `bc_set`: Type-stable BoundaryConditionSet containing mass BCs
 - `top_face_ids`: Pre-cached face IDs at top boundary (boundary_id=1)
 - `bottom_face_ids`: Pre-cached face IDs at bottom boundary (boundary_id=2)
 """
-function update_darcy_properties!(cache::PropertyCache, mesh::Mesh1D{NC},
-	material::Material{NC},
-	bc_set::BoundaryConditionSet,
-	top_face_ids::Vector{Int},
-	bottom_face_ids::Vector{Int}) where NC
-	n_cells = length(mesh.cells)
-	n_faces = length(mesh.faces)
+function update_darcy_properties!(
+    cache::PropertyCache,
+    state,
+    mesh,
+    material::Material{NC},
+    bc_set::BoundaryConditionSet,
+    top_face_ids::Vector{Int},
+    bottom_face_ids::Vector{Int},
+) where {NC}
+    n_cells = length(state.T)
+    n_faces = length(state.A_face)
 
-	# Step 1: Compute cell-centered pressure, porosity, permeability, viscosity
-	@inbounds for i in 1:n_cells
-		state = mesh.cell_states[i]
-		T = state.T
-		ξ = state.ξ
+    darcy = cache.darcy
+    darcy === nothing && error(
+        "update_darcy_properties!: PropertyCache has no Darcy sub-cache; build the workspace with a Darcy-enabled material.",
+    )
 
-		# Pressure from ideal gas law
-		cache.P[i] = Physics.ideal_gas_pressure(ξ, T, material)
+    # Step 1: Compute cell-centered pressure, porosity, permeability, viscosity
+    @inbounds for i = 1:n_cells
+        T_i = state.T[i]
+        ξ_i = ntuple(j -> state.ξ[j, i], Val(NC))
 
-		# Porosity (gas volume fraction)
-		cache.φ[i] = _compute_porosity(ξ, T, material)
+        # Porosity (gas volume fraction) — computed first so the ideal-gas pressure
+        # can divide by it (gas occupies the pore space, not the bulk). Single
+        # canonical implementation lives in `Properties.porosity`, which uses
+        # intrinsic (skeletal) densities so the formula gives realistic values
+        # for materials parameterized with bulk density + measured porosity.
+        φ_i = porosity(ξ_i, T_i, material)
+        darcy.φ[i] = φ_i
 
-		# Permeability from component mixture (NEW: component-based)
-		cache.κ[i] = effective_permeability(ξ, T, material)
+        # Pressure from ideal gas law in porous media: P = Σⱼ (ξⱼ R T / Mⱼ) / φ
+        darcy.P[i] = Physics.ideal_gas_pressure(ξ_i, T_i, φ_i, material)
 
-		# Gas viscosity from Sutherland's law
-		cache.μ[i] = Properties.effective_gas_viscosity(T)
-	end
+        # Permeability from component mixture (component-based)
+        darcy.κ[i] = effective_permeability(ξ_i, T_i, material)
 
-	# Step 2: Compute face-centered pressure gradient and Darcy velocity
-	@inbounds for f in 1:n_faces
-		face = mesh.faces[f]
-		left_id, right_id = face.cell_ids
+        # Gas viscosity from Sutherland's law
+        darcy.μ[i] = Properties.effective_gas_viscosity(T_i)
+    end
 
-		if left_id == 0 || right_id == 0
-			# Boundary face: zero gradient (will be overwritten by BCs)
-			cache.∇P[f] = 0.0
-			cache.v_gas[f] = 0.0
-			continue
-		end
+    # Step 2: Compute face-centered pressure gradient and Darcy velocity
+    @inbounds for f = 1:n_faces
+        face = mesh.faces[f]
+        left_id, right_id = face.cell_ids
 
-		# Distances from cell centers to face (for distance-weighted harmonic mean)
-		face_pos = mesh.face_positions[f]
-		d_L = abs(face_pos - mesh.cell_centers[left_id])
-		d_R = abs(mesh.cell_centers[right_id] - face_pos)
-		d_LR = d_L + d_R
+        if left_id == 0 || right_id == 0
+            # Boundary face: zero gradient (will be overwritten by BCs)
+            darcy.∇P[f] = 0.0
+            darcy.v_gas[f] = 0.0
+            continue
+        end
 
-		# Pressure gradient
-		cache.∇P[f] = (cache.P[right_id] - cache.P[left_id]) / d_LR
+        # Distances from cell centers to face (distance-weighted harmonic mean)
+        face_pos = state.face_positions[f]
+        d_L = abs(face_pos - state.cell_centers[left_id])
+        d_R = abs(state.cell_centers[right_id] - face_pos)
+        d_LR = d_L + d_R
 
-		# Harmonic mean of mobility κ/μ at face
-		κ_L = cache.κ[left_id]
-		κ_R = cache.κ[right_id]
-		μ_L = cache.μ[left_id]
-		μ_R = cache.μ[right_id]
+        # Pressure gradient
+        darcy.∇P[f] = (darcy.P[right_id] - darcy.P[left_id]) / d_LR
 
-		# Mobility = κ/μ
-		mob_L = μ_L > 1e-20 ? κ_L / μ_L : 0.0
-		mob_R = μ_R > 1e-20 ? κ_R / μ_R : 0.0
+        # Harmonic mean of mobility κ/μ at face
+        κ_L = darcy.κ[left_id]
+        κ_R = darcy.κ[right_id]
+        μ_L = darcy.μ[left_id]
+        μ_R = darcy.μ[right_id]
 
-		# Distance-weighted harmonic mean for series resistance (non-uniform meshes)
-		# For uniform meshes (d_L = d_R), this reduces to standard harmonic mean
-		if mob_L > 1e-30 && mob_R > 1e-30
-			mob_face = (d_L + d_R) / (d_L / mob_L + d_R / mob_R)
-		elseif mob_L > 1e-30
-			mob_face = mob_L
-		elseif mob_R > 1e-30
-			mob_face = mob_R
-		else
-			mob_face = 0.0
-		end
+        # Mobility = κ/μ
+        mob_L = μ_L > 1e-20 ? κ_L / μ_L : 0.0
+        mob_R = μ_R > 1e-20 ? κ_R / μ_R : 0.0
 
-		# Darcy velocity: v_g = -κ/μ × ∇P
-		cache.v_gas[f] = -mob_face * cache.∇P[f]
-	end
+        # Distance-weighted harmonic mean for series resistance (non-uniform meshes)
+        # For uniform meshes (d_L = d_R), this reduces to standard harmonic mean.
+        # An impermeable side is an infinite series resistance: gas cannot cross
+        # into a κ ≈ 0 cell, so the face mobility is exactly 0.
+        if mob_L > 1e-30 && mob_R > 1e-30
+            mob_face = (d_L + d_R) / (d_L / mob_L + d_R / mob_R)
+        else
+            mob_face = 0.0
+        end
 
-	# Step 3: Apply pressure boundary conditions using type-stable bc_set
-	apply_pressure_bc_to_darcy_velocity!(cache.v_gas, mesh, cache.P, cache.κ,
-		bc_set, top_face_ids, bottom_face_ids)
+        # Darcy velocity: v_g = -κ/μ × ∇P
+        darcy.v_gas[f] = -mob_face * darcy.∇P[f]
+    end
 
-	return cache
+    # Step 3: Apply pressure boundary conditions using type-stable bc_set
+    apply_pressure_bc_to_darcy_velocity!(
+        darcy.v_gas,
+        state,
+        mesh,
+        darcy.P,
+        darcy.κ,
+        bc_set,
+        top_face_ids,
+        bottom_face_ids,
+    )
+
+    return cache
 end
 
 """
@@ -705,436 +964,180 @@ This is the preferred API for Darcy-Fick transport. The effective permeability
 is computed from component values via mixing rules (PARALLEL, SERIES, WEIGHTED).
 Gas convective source is stored in rhs_cache.S_conv.
 """
-function compute_rhs_darcy_fick!(dT::Vector{Float64}, dξ::Matrix{Float64},
-	mesh::Mesh1D{NC}, prop_cache::PropertyCache,
-	rhs_cache::RHSCache, material::Material{NC},
-	bc_set::BoundaryConditionSet, t,
-	top_face_ids::Vector{Int}, bottom_face_ids::Vector{Int};
-	I_radiation::Float64 = 0.0,
-	radiation_model::RadiationModel = NO_RADIATION) where NC
+function compute_rhs_darcy_fick!(
+    dT::AbstractVector,
+    dξ::AbstractMatrix,
+    state,
+    mesh::Mesh1D{NC},
+    prop_cache::PropertyCache,
+    rhs_cache::RHSCache,
+    material::Material{NC},
+    bc_set::BoundaryConditionSet,
+    t,
+    top_face_ids::Vector{Int},
+    bottom_face_ids::Vector{Int};
+    I_radiation::Real = 0.0,
+    radiation_model::RadiationModel = NO_RADIATION,
+    radiation_kirchhoff::Bool = true,
+    energy_form::Symbol = :standard,
+    use_transpiration_bc::Bool = false,
+    use_blowing_correction::Bool = false,
+) where {NC}
 
-	n_cells_val = length(mesh.cells)
-	n_faces_val = length(mesh.faces)
-	NR = n_reactions(material)
+    n_cells_val = length(mesh.cells)
+    n_faces_val = length(mesh.faces)
+    NR = n_reactions(material)
 
-	# Ensure caches are properly sized
-	if length(rhs_cache.q_cond) != n_faces_val
-		resize_rhs_cache!(rhs_cache, n_cells_val, n_faces_val, NC, NR)
-	end
+    # Ensure caches are properly sized
+    if length(rhs_cache.q_cond) != n_faces_val
+        resize_rhs_cache!(rhs_cache, n_cells_val, n_faces_val, NC, NR)
+    end
 
-	# ========================================================================
-	# Step 1: Update Darcy properties using component-based permeability
-	# ========================================================================
-	update_darcy_properties!(prop_cache, mesh, material,
-		bc_set, top_face_ids, bottom_face_ids)
+    # ========================================================================
+    # Step 1: Update Darcy properties using component-based permeability
+    # ========================================================================
+    update_darcy_properties!(
+        prop_cache,
+        state,
+        mesh,
+        material,
+        bc_set,
+        top_face_ids,
+        bottom_face_ids,
+    )
 
-	# ========================================================================
-	# Step 2: Compute conductive heat fluxes at interior faces
-	# ========================================================================
-	compute_conductive_fluxes!(rhs_cache.q_cond, mesh, prop_cache)
+    # ========================================================================
+    # Step 2: Compute conductive heat fluxes at interior faces
+    # ========================================================================
+    compute_conductive_fluxes!(rhs_cache.q_cond, state, mesh, prop_cache)
+    copyto!(rhs_cache.q_total, rhs_cache.q_cond)
 
-	# Copy to total flux (will add boundary and convective contributions)
-	copyto!(rhs_cache.q_total, rhs_cache.q_cond)
+    # ========================================================================
+    # Step 3: Reactions (precede the thermal BC solve so dξ_rxn is populated;
+    # the boundary solver runs after gas fluxes so transpiration uses the
+    # actual J_gas at the boundary face.)
+    # ========================================================================
+    @inbounds for i = 1:n_cells_val
+        T = state.T[i]
+        ξ = ntuple(j -> state.ξ[j, i], Val(NC))
 
-	# ========================================================================
-	# Step 3: Apply thermal boundary conditions (static dispatch)
-	# ========================================================================
-	apply_thermal_bc_flux!(rhs_cache.q_total, mesh, bc_set, prop_cache, t,
-		top_face_ids, bottom_face_ids, radiation_model)
+        evaluate_reactions!(rhs_cache.rates, rhs_cache.heats, ξ, T, material)
+        rhs_cache.Q_rxn[i] = reaction_heat_source(rhs_cache.rates, rhs_cache.heats)
+        species_source_terms!(rhs_cache.species_src, rhs_cache.rates, material, NC)
+        for j = 1:NC
+            rhs_cache.dξ_rxn[j, i] = rhs_cache.species_src[j]
+        end
+    end
 
-	# ========================================================================
-	# Step 4: (Convective heat flux computed after gas fluxes in Step 8)
-	# ========================================================================
+    # ========================================================================
+    # Step 4: Gas transport (Darcy + Fick) — interior + boundary
+    # Must run BEFORE the thermal BC solve so transpiration enthalpy at the
+    # surface reads the actual ṁ_g. Boundary faces receive the advective
+    # venting flux from the pressure-BC Darcy velocity here; the diffusive
+    # film-law part is then ADDED by `apply_mass_bc_flux!`.
+    # ========================================================================
+    Physics.compute_gas_fluxes_darcy_fick!(
+        rhs_cache.J_gas,
+        state,
+        mesh,
+        prop_cache,
+        material,
+        prop_cache.darcy.v_gas,
+        prop_cache.darcy.φ,
+    )
 
-	# ========================================================================
-	# Step 5: Compute radiation source (model-dependent)
-	# ========================================================================
-	compute_radiation_source!(rhs_cache.Q_rad, mesh, prop_cache, I_radiation, radiation_model)
+    apply_mass_bc_flux!(
+        rhs_cache.J_gas,
+        state,
+        mesh,
+        prop_cache,
+        bc_set,
+        material,
+        t,
+        top_face_ids,
+        bottom_face_ids,
+    )
 
-	# ========================================================================
-	# Step 6: Compute reaction rates and source terms for each cell
-	# ========================================================================
-	@inbounds for i in 1:n_cells_val
-		state = mesh.cell_states[i]
-		T = state.T
-		ξ = state.ξ
+    # ========================================================================
+    # Step 5: Apply thermal boundary conditions (optional surface transpiration)
+    # ========================================================================
+    apply_thermal_bc_flux!(
+        rhs_cache.q_total,
+        state,
+        mesh,
+        bc_set,
+        prop_cache,
+        material,
+        rhs_cache.J_gas,
+        t,
+        top_face_ids,
+        bottom_face_ids,
+        radiation_model;
+        use_transpiration_bc = use_transpiration_bc,
+        use_blowing_correction = use_blowing_correction,
+    )
 
-		# Evaluate reaction rates and heats
-		evaluate_reactions!(rhs_cache.rates, rhs_cache.heats, ξ, T, material)
+    # ========================================================================
+    # Step 6: Compute radiation source (model-dependent)
+    # ========================================================================
+    compute_radiation_source!(
+        rhs_cache.Q_rad,
+        state,
+        mesh,
+        prop_cache,
+        I_radiation,
+        radiation_model,
+        radiation_kirchhoff,
+    )
 
-		# Compute reaction heat source
-		rhs_cache.Q_rxn[i] = reaction_heat_source(rhs_cache.rates, rhs_cache.heats)
+    # ========================================================================
+    # Step 7: Cell-centered gas-coupled energy sources + divergences
+    # (q_total carries the Step-5 thermal-BC boundary flux the boundary-cell
+    # gradient needs.)
+    # ========================================================================
+    Physics.compute_gas_convective_source!(
+        rhs_cache.S_conv,
+        rhs_cache.J_gas,
+        rhs_cache.q_total,
+        prop_cache.k,
+        state,
+        mesh,
+        material,
+    )
 
-		# Compute species source terms
-		species_source_terms!(rhs_cache.species_src, rhs_cache.rates, material, NC)
+    divergence_1d!(rhs_cache.div_q, rhs_cache.q_total, state, mesh)
+    divergence_species_1d!(rhs_cache.div_J, rhs_cache.J_gas, state, mesh)
 
-		# Copy to output matrix
-		for j in 1:NC
-			rhs_cache.dξ_rxn[j, i] = rhs_cache.species_src[j]
-		end
-	end
+    if energy_form === :with_generation_sink
+        T_ref_volumetric = _resolve_volumetric_T_ref(bc_set, t)
+        Physics.compute_gas_generation_sink!(
+            rhs_cache.S_gen,
+            rhs_cache.div_J,
+            state,
+            material,
+            T_ref_volumetric,
+        )
+    else
+        fill!(rhs_cache.S_gen, zero(eltype(rhs_cache.S_gen)))
+    end
 
-	# ========================================================================
-	# Step 7: Compute gas transport fluxes using Darcy-Fick
-	# ========================================================================
-	Physics.compute_gas_fluxes_darcy_fick!(rhs_cache.J_gas, mesh, prop_cache,
-		material, prop_cache.v_gas)
+    # ========================================================================
+    # Step 8: Assemble final RHS
+    # ========================================================================
+    @inbounds for i = 1:n_cells_val
+        ρcp = prop_cache.ρcp[i]
+        dT[i] =
+            (
+                -rhs_cache.div_q[i] +
+                rhs_cache.S_conv[i] +
+                rhs_cache.S_gen[i] +
+                rhs_cache.Q_rad[i] +
+                rhs_cache.Q_rxn[i]
+            ) / ρcp
 
-	# Apply mass boundary conditions (static dispatch)
-	apply_mass_bc_flux!(rhs_cache.J_gas, mesh, prop_cache, bc_set, t,
-		top_face_ids, bottom_face_ids, Val(NC))
+        # Species equations
+        apply_species_residual_unrolled!(dξ, i, rhs_cache.div_J, rhs_cache.dξ_rxn, material)
+    end
 
-	# ========================================================================
-	# Step 8: Compute gas convective volumetric source
-	# ========================================================================
-	Physics.compute_gas_convective_source!(rhs_cache.S_conv, rhs_cache.J_gas, mesh, material)
-
-	# ========================================================================
-	# Step 9: Compute divergences
-	# ========================================================================
-	divergence_1d!(rhs_cache.div_q, rhs_cache.q_total, mesh)
-	divergence_species_1d!(rhs_cache.div_J, rhs_cache.J_gas, mesh)
-
-	# ========================================================================
-	# Step 10: Assemble final RHS
-	# ========================================================================
-	@inbounds for i in 1:n_cells_val
-		ρcp = prop_cache.ρcp[i]
-
-		dT[i] = (-rhs_cache.div_q[i] + rhs_cache.S_conv[i] + rhs_cache.Q_rad[i] + rhs_cache.Q_rxn[i]) / ρcp
-
-		# Species equations
-		apply_species_residual_unrolled!(dξ, i, rhs_cache.div_J, rhs_cache.dξ_rxn, material)
-	end
-
-	return nothing
-end
-
-"""
-Internal helper to compute porosity (gas volume fraction).
-Uses dispatch-based unrolling to avoid allocation from heterogeneous tuple indexing.
-"""
-@inline function _compute_porosity(ξ::NTuple{NC, Float64}, T::Float64,
-	material::Material{NC}) where NC
-	return _compute_porosity_impl(ξ, T, material.components, Val(NC))
-end
-
-# Specialized versions for common component counts
-@inline function _compute_porosity_impl(ξ::NTuple{1, Float64}, T::Float64,
-	comps::Tuple{C1}, ::Val{1}) where {C1}
-	solid_vol_frac = 0.0
-	c1 = comps[1]
-	if c1.phase == SOLID || c1.phase == LIQUID
-		ρ1 = c1.density(T)
-		if ρ1 > 0.0
-			solid_vol_frac += ξ[1] / ρ1
-		end
-	end
-	return clamp(1.0 - solid_vol_frac, 0.0, 1.0)
-end
-
-@inline function _compute_porosity_impl(ξ::NTuple{2, Float64}, T::Float64,
-	comps::Tuple{C1, C2}, ::Val{2}) where {C1, C2}
-	solid_vol_frac = 0.0
-	c1 = comps[1]
-	if c1.phase == SOLID || c1.phase == LIQUID
-		ρ1 = c1.density(T)
-		if ρ1 > 0.0
-			solid_vol_frac += ξ[1] / ρ1
-		end
-	end
-	c2 = comps[2]
-	if c2.phase == SOLID || c2.phase == LIQUID
-		ρ2 = c2.density(T)
-		if ρ2 > 0.0
-			solid_vol_frac += ξ[2] / ρ2
-		end
-	end
-	return clamp(1.0 - solid_vol_frac, 0.0, 1.0)
-end
-
-@inline function _compute_porosity_impl(ξ::NTuple{3, Float64}, T::Float64,
-	comps::Tuple{C1, C2, C3}, ::Val{3}) where {C1, C2, C3}
-	solid_vol_frac = 0.0
-	c1 = comps[1]
-	if c1.phase == SOLID || c1.phase == LIQUID
-		ρ1 = c1.density(T)
-		if ρ1 > 0.0
-			solid_vol_frac += ξ[1] / ρ1
-		end
-	end
-	c2 = comps[2]
-	if c2.phase == SOLID || c2.phase == LIQUID
-		ρ2 = c2.density(T)
-		if ρ2 > 0.0
-			solid_vol_frac += ξ[2] / ρ2
-		end
-	end
-	c3 = comps[3]
-	if c3.phase == SOLID || c3.phase == LIQUID
-		ρ3 = c3.density(T)
-		if ρ3 > 0.0
-			solid_vol_frac += ξ[3] / ρ3
-		end
-	end
-	return clamp(1.0 - solid_vol_frac, 0.0, 1.0)
-end
-
-@inline function _compute_porosity_impl(ξ::NTuple{4, Float64}, T::Float64,
-	comps::Tuple{C1, C2, C3, C4}, ::Val{4}) where {C1, C2, C3, C4}
-	solid_vol_frac = 0.0
-	c1 = comps[1]
-	if c1.phase == SOLID || c1.phase == LIQUID
-		ρ1 = c1.density(T)
-		if ρ1 > 0.0
-			solid_vol_frac += ξ[1] / ρ1
-		end
-	end
-	c2 = comps[2]
-	if c2.phase == SOLID || c2.phase == LIQUID
-		ρ2 = c2.density(T)
-		if ρ2 > 0.0
-			solid_vol_frac += ξ[2] / ρ2
-		end
-	end
-	c3 = comps[3]
-	if c3.phase == SOLID || c3.phase == LIQUID
-		ρ3 = c3.density(T)
-		if ρ3 > 0.0
-			solid_vol_frac += ξ[3] / ρ3
-		end
-	end
-	c4 = comps[4]
-	if c4.phase == SOLID || c4.phase == LIQUID
-		ρ4 = c4.density(T)
-		if ρ4 > 0.0
-			solid_vol_frac += ξ[4] / ρ4
-		end
-	end
-	return clamp(1.0 - solid_vol_frac, 0.0, 1.0)
-end
-
-# Generic fallback using generated function for NC > 4
-@inline function _compute_porosity_impl(ξ::NTuple{NC, Float64}, T::Float64,
-	comps::Tuple, ::Val{NC}) where NC
-	return _compute_porosity_gen(ξ, T, comps)
-end
-
-@generated function _compute_porosity_gen(ξ::NTuple{NC, Float64}, T::Float64,
-	comps::Tuple) where NC
-	expr = quote
-		solid_vol_frac = 0.0
-	end
-	for i in 1:NC
-		push!(expr.args, quote
-			c = comps[$i]
-			if c.phase == SOLID || c.phase == LIQUID
-				ρ = c.density(T)
-				if ρ > 0.0
-					solid_vol_frac += ξ[$i] / ρ
-				end
-			end
-		end)
-	end
-	push!(expr.args, :(return clamp(1.0 - solid_vol_frac, 0.0, 1.0)))
-	return expr
-end
-
-# ============================================================================
-# RHS computation with P1 radiation model
-# ============================================================================
-
-"""
-	compute_rhs_with_p1_radiation!(dT::Vector{Float64}, dξ::Matrix{Float64},
-								  mesh::Mesh1D{NC}, prop_cache::PropertyCache,
-								  rhs_cache::RHSCache, material::Material{NC},
-								  bc_set::BoundaryConditionSet, t::Float64,
-								  top_face_ids::Vector{Int}, bottom_face_ids::Vector{Int},
-								  rad_cache::RadiationCache,
-								  radiation_bcs::RadiationBCSet;
-								  I_radiation::Float64=0.0,
-								  use_quasi_steady::Bool=true) where NC
-
-Compute RHS for energy and species equations with P1 volumetric radiation model.
-
-This function extends `compute_rhs!` to include P1 radiative transport:
-1. Computes standard RHS (conduction, reactions, gas transport)
-2. Solves quasi-steady P1 equation if `use_quasi_steady=true`
-3. Adds radiative flux divergence ∇·q_rad = αG - 4σεαT⁴ to energy equation
-
-# Arguments
-- `dT`: Output temperature rate of change [K/s]
-- `dξ`: Output species concentration rate of change [kg/(m³·s)]
-- `mesh`: 1D mesh with current state
-- `prop_cache`: Cached material properties
-- `rhs_cache`: Pre-allocated work arrays
-- `material`: Material definition
-- `bc_set`: Type-stable BoundaryConditionSet
-- `t`: Current time [s]
-- `top_face_ids`: Pre-cached face IDs at top boundary (boundary_id=1)
-- `bottom_face_ids`: Pre-cached face IDs at bottom boundary (boundary_id=2)
-- `rad_cache`: Radiation cache with G field and work arrays
-- `radiation_bcs`: RadiationBCSet with radiation boundary conditions
-- `I_radiation`: External radiation intensity [W/m²] (for Beer-Lambert, typically 0 with P1)
-- `use_quasi_steady`: If true, solve quasi-steady P1; if false, G is already updated
-
-# Notes
-- The radiative flux divergence replaces/augments Beer-Lambert absorption
-- For quasi-steady mode, G is solved iteratively at each timestep
-- For transient mode, G should be integrated separately as part of the state
-"""
-function compute_rhs_with_p1_radiation!(dT::Vector{Float64}, dξ::Matrix{Float64},
-	mesh::Mesh1D{NC}, prop_cache::PropertyCache,
-	rhs_cache::RHSCache, material::Material{NC},
-	bc_set::BoundaryConditionSet, t::Float64,
-	top_face_ids::Vector{Int}, bottom_face_ids::Vector{Int},
-	rad_cache::RadiationCache,
-	radiation_bcs::RadiationBCSet;
-	I_radiation::Float64 = 0.0,
-	use_quasi_steady::Bool = true) where {NC}
-
-	n_cells_val = mesh.n_active_cells
-
-	# ========================================================================
-	# Step 1: Solve quasi-steady P1 radiation equation (if enabled)
-	# ========================================================================
-	if use_quasi_steady
-		# Update radiation properties in rad_cache from current temperature
-		update_radiation_properties!(rad_cache, mesh, prop_cache)
-
-		# Solve ∇·(D_rad∇G) = αG - 4σεαT⁴ with Newton iteration
-		solve_quasi_steady_radiation!(rad_cache, mesh, prop_cache, radiation_bcs, t)
-	end
-
-	# ========================================================================
-	# Step 2: Compute P1 radiative flux divergence
-	# ========================================================================
-	# ∇·q_rad = αG - 4σεαT⁴ (absorption - emission)
-	# This is stored in rad_cache.S_rad
-	compute_radiation_flux_divergence!(rad_cache, mesh, prop_cache)
-
-	# ========================================================================
-	# Step 3: Compute standard RHS (conduction, reactions, transport)
-	# ========================================================================
-	# Use base compute_rhs! with BoundaryConditionSet (I_radiation=0 since P1 handles radiation)
-	compute_rhs!(dT, dξ, mesh, prop_cache, rhs_cache, material,
-		bc_set, t, top_face_ids, bottom_face_ids; I_radiation = I_radiation)
-
-	# ========================================================================
-	# Step 4: Add P1 radiation contribution to energy equation
-	# ========================================================================
-	# S_rad = α(G - 4σT⁴) is the net volumetric radiation source:
-	#   Positive = net absorption (material absorbs more than it emits → heating)
-	#   Negative = net emission (material emits more than it absorbs → cooling)
-	#
-	# From the RTE: ∇·q_rad = κ(4σT⁴ - G), so S_rad = -∇·q_rad.
-	# Energy equation: ρcₚ dT/dt = ... + S_rad
-	@inbounds for i in 1:n_cells_val
-		ρcp = prop_cache.ρcp[i]
-		# Add net radiation source (positive = heating)
-		dT[i] += rad_cache.S_rad[i] / ρcp
-	end
-
-	return nothing
-end
-
-"""
-	update_radiation_properties!(rad_cache::RadiationCache, mesh::Mesh1D, prop_cache::PropertyCache)
-
-Update radiation properties (α, D_rad) in the radiation cache from current state.
-
-Called before solving the P1 equation to ensure properties match current temperature.
-"""
-function update_radiation_properties!(rad_cache::RadiationCache, mesh::Mesh1D, prop_cache::PropertyCache)
-	n_cells = mesh.n_active_cells
-	n_faces = n_cells + 1
-
-	@inbounds for i in 1:n_cells
-		# Get volumetric absorption coefficient from property cache
-		# Note: prop_cache.α is already volumetric [m⁻¹] from effective_absorption = Σⱼ ξⱼ αⱼ
-		# where ξⱼ [kg/m³] × αⱼ [m²/kg] = [m⁻¹]
-		α_vol = prop_cache.α[i]
-
-		rad_cache.α[i] = α_vol
-
-		# Rosseland diffusion coefficient: D = 1/(3α)
-		# Avoid division by zero for transparent regions
-		if α_vol > 1e-10
-			rad_cache.D_rad[i] = 1.0 / (3.0 * α_vol)
-		else
-			rad_cache.D_rad[i] = 1.0 / 3e-10  # Large but finite for transparent
-		end
-	end
-
-	# Compute face-centered D_rad using harmonic mean
-	@inbounds for f in 1:n_faces
-		face = mesh.faces[f]
-		left_id, right_id = face.cell_ids
-		face_pos = mesh.face_positions[f]
-
-		if left_id == 0
-			# Left boundary: use right cell value
-			rad_cache.D_rad_face[f] = rad_cache.D_rad[right_id]
-		elseif right_id == 0
-			# Right boundary: use left cell value
-			rad_cache.D_rad_face[f] = rad_cache.D_rad[left_id]
-		else
-			# Interior face: distance-weighted harmonic mean
-			d_L = abs(face_pos - mesh.cell_centers[left_id])
-			d_R = abs(mesh.cell_centers[right_id] - face_pos)
-
-			# Harmonic mean weighted by distance
-			rad_cache.D_rad_face[f] = harmonic_mean_weighted(
-				rad_cache.D_rad[left_id],
-				rad_cache.D_rad[right_id],
-				d_L,
-				d_R,
-			)
-		end
-	end
-
-	return nothing
-end
-
-"""
-	compute_radiation_flux_divergence!(rad_cache::RadiationCache, mesh::Mesh1D, prop_cache::PropertyCache)
-
-Compute the net volumetric radiation source from the P1 model.
-
-	S_rad = α(G - 4σT⁴)
-
-where:
-- α is volumetric absorption coefficient [1/m]
-- G is incident radiation (P1 primary variable) [W/m²]
-- σ is Stefan-Boltzmann constant
-- T is temperature [K]
-
-# Sign Convention
-- Positive S_rad: net absorption (G > 4σT⁴) → material heats up
-- Negative S_rad: net emission (G < 4σT⁴) → material cools down
-
-# Physics Derivation
-Integrating the RTE over all solid angles gives ∇·q_rad = κ(4σT⁴ - G).
-The energy equation has -∇·q_rad = κ(G - 4σT⁴) = S_rad as a source term.
-The result is stored in `rad_cache.S_rad` (not the flux divergence itself).
-
-Note: For gray medium in LTE (Kirchhoff's law), the absorption and emission
-coefficients are equal, so no separate emissivity factor appears here.
-Emissivity only enters at boundaries via Marshak BCs.
-"""
-function compute_radiation_flux_divergence!(rad_cache::RadiationCache, mesh::Mesh1D, prop_cache::PropertyCache)
-	n_cells = mesh.n_active_cells
-	σ = STEFAN_BOLTZMANN
-
-	@inbounds for i in 1:n_cells
-		T = mesh.cell_states[i].T
-		G = rad_cache.G[i]
-		α = rad_cache.α[i]
-
-		# S_rad = α(G - 4σT⁴) = -∇·q_rad
-		# Positive when absorption > emission (net heating)
-		rad_cache.S_rad[i] = α * (G - 4.0 * σ * T^4)
-	end
-
-	return nothing
+    return nothing
 end

@@ -1,0 +1,6 @@
+[deps]
+Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+Pyrolysis = "910b54fb-7370-4696-a92c-2242b531a32e"
+
+[compat]
+Documenter = "1"

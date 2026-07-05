@@ -1,0 +1,11 @@
+[deps]
+BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
+PkgBenchmark = "32113eaa-f34f-5b0d-bd6c-c81e245fc73d"
+Pyrolysis = "910b54fb-7370-4696-a92c-2242b531a32e"
+
+[sources]
+Pyrolysis = {path = ".."}
+
+[compat]
+BenchmarkTools = "1"
+PkgBenchmark = "0.2"

@@ -9,6 +9,9 @@ deps/usr/
 deps/src/
 docs/build/
 docs/site/
+docs/refs/
+docs/src/guide/
+docs/Manifest.toml
 
 # OS / editor
 .DS_Store
@@ -18,8 +21,13 @@ Thumbs.db
 .vscode/
 .idea/
 
+# Local tooling
+.claude/
+.codex
+
 # Generated output directories
 /output/
+scripts/profile/output/
 **/results/
 **/*_results/
 examples/convergence_results/
