@@ -81,6 +81,10 @@ if !isdefined(@__MODULE__, :VerificationCase)
     observed_orders(errors, hs) =
         [log(errors[i-1] / errors[i]) / log(hs[i-1] / hs[i]) for i = 2:length(errors)]
 
+    # Set PYROLYSIS_VERIFICATION_PRINT_QOIS=1 to print every observed QoI and
+    # convergence rate — the workflow for (re)pinning tolerances at 3× observed.
+    _print_qois() = get(ENV, "PYROLYSIS_VERIFICATION_PRINT_QOIS", "0") == "1"
+
     const VERIFICATION_CASE_BUILDERS = Function[]
 
     function run_case_ci(case::VerificationCase)
@@ -91,6 +95,10 @@ if !isdefined(@__MODULE__, :VerificationCase)
                 @test sol.retcode == :Success
                 for q in case.qois(sol)
                     @testset "$(q.name)" begin
+                        _print_qois() && println(
+                            "[QoI] $(case.id) | $(q.name) | value=$(q.value) " *
+                            "exact=$(q.exact) error=$(q.error) tol=$(q.tol)",
+                        )
                         if !(q.error < q.tol)
                             @info "QoI out of tolerance" case.id q.name q.value q.exact q.error q.tol q.comment
                         end
@@ -109,6 +117,9 @@ if !isdefined(@__MODULE__, :VerificationCase)
                             push!(hs, 1.0 / n)
                         end
                         rates = observed_orders(errors, hs)
+                        _print_qois() && println(
+                            "[QoI] $(case.id) | convergence | errors=$(errors) rates=$(rates)",
+                        )
                         if !all(r -> r > conv.min_order, rates)
                             @info "convergence rates" case.id errors rates
                         end

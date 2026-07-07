@@ -14,4 +14,6 @@
 # - `x` always denotes depth below the exposed (top, z = L) surface, i.e.
 #   x = L − z in mesh coordinates.
 
+include("roots.jl")
 include("semi_infinite.jl")
+include("slab_series.jl")

@@ -45,4 +45,55 @@
         ]
         @test issorted(θt)
     end
+
+    @testset "slab convective eigenseries (C&J §3.11)" begin
+        # 1. Eigencondition satisfied to bisection precision, roots in-branch.
+        for Bi in (0.1, 1.0, 10.0, 100.0)
+            λs = biot_eigenvalues(Bi, 60)
+            @test all(abs(λ * sin(λ) - Bi * cos(λ)) < 1e-10 * max(1.0, λ * Bi) for λ in λs)
+            @test all((n - 1) * π < λs[n] < (n - 1) * π + π / 2 for n in eachindex(λs))
+        end
+
+        # 2. Limits of λ₁: Bi → ∞ gives π/2 (Dirichlet); Bi → 0 gives √Bi (lumped).
+        @test biot_eigenvalues(1e8, 1)[1] ≈ π / 2 rtol = 1e-6
+        @test biot_eigenvalues(1e-4, 1)[1] ≈ sqrt(1e-4) rtol = 1e-3
+
+        # 3. Initial condition recovered: θ/θᵢ → 1 as Fo → 0 (interior point).
+        λs1 = biot_eigenvalues(1.0, 60)
+        @test slab_convective_theta(0.5, 0.002, λs1) ≈ 1.0 atol = 1e-2
+
+        # 4. Lumped limit: for Bi ≪ 1, θ ≈ exp(−Bi·Fo).
+        λs_small = biot_eigenvalues(0.01, 60)
+        @test slab_convective_theta(0.5, 10.0, λs_small) ≈ exp(-0.01 * 10.0) rtol = 1e-2
+
+        # 5. Dirichlet limit: for Bi ≫ 1 matches the λₙ = (n−1/2)π series.
+        λs_big = biot_eigenvalues(1e10, 60)
+        θ_ref = sum(
+            4 * sin(λ) / (2λ + sin(2λ)) * exp(-λ^2 * 0.1) * cos(λ * 0.3) for
+            λ in [(n - 0.5) * π for n = 1:60]
+        )
+        @test slab_convective_theta(0.3, 0.1, λs_big) ≈ θ_ref rtol = 1e-6
+    end
+
+    @testset "slab constant-flux series (C&J §3.8)" begin
+        # 1. Fourier identity: φ(x̃, 0) = 0 for all x̃ (the series is exactly
+        #    the cosine expansion of −(3x̃²−1)/6). Must be evaluated AT Fo = 0:
+        #    for any Fo > 0 the face value physically rises like 2√(Fo/π).
+        #    Residual is the 5000-term truncation tail, ~4e-5 at the face.
+        for x̃ in (0.0, 0.25, 0.5, 0.75, 1.0)
+            @test abs(slab_constflux_phi(x̃, 0.0)) < 1e-3
+        end
+
+        # 2. Front–back plateau: φ(1) − φ(0) → 1/2 for Fo ≫ 1.
+        @test slab_constflux_phi(1.0, 2.0) - slab_constflux_phi(0.0, 2.0) ≈ 0.5 rtol = 1e-8
+
+        # 3. Global energy: spatial mean ⟨φ⟩ = Fo exactly (trapezoid on a fine
+        #    grid; the parabola and every cosine integrate to zero).
+        for Fo in (0.05, 0.3, 1.0)
+            xs = range(0.0, 1.0, length = 2001)
+            φs = [slab_constflux_phi(x, Fo) for x in xs]
+            mean_φ = (sum(φs) - 0.5 * (φs[1] + φs[end])) / (length(xs) - 1)
+            @test mean_φ ≈ Fo atol = 1e-6
+        end
+    end
 end
