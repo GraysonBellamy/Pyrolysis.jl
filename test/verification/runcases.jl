@@ -20,6 +20,8 @@ using Pyrolysis
 using Pyrolysis.Solver: get_cell_positions
 using Pyrolysis.Materials: DepletionLimiter, STEFAN_BOLTZMANN
 using Pyrolysis.Discretization: BEER_LAMBERT
+using Pyrolysis.Physics: ideal_gas_pressure, background_gas_concentration
+using Pyrolysis.Properties: porosity, effective_gas_viscosity
 using Statistics: mean
 using SpecialFunctions: erfc, erfcx
 
@@ -67,6 +69,13 @@ if !isdefined(@__MODULE__, :VerificationCase)
     Single-source verification-case definition (assert mode consumes `ci`;
     report mode will consume `report`). `build(n_cells) -> PyrolysisProblem`,
     `qois(sol) -> Vector{QoIResult}`.
+
+    `solve_fn` overrides how a built problem is solved: `nothing` (default)
+    uses the standard `solve(problem; progress=false, kwargs...)`; a function
+    is called as `solve_fn(problem; kwargs...)` and must return an object with
+    a `retcode` field (`:Success` on success). MMS cases use this to route
+    through the wrapped-RHS `solve_mms` path (exact/mms.jl). The override
+    applies to the convergence sweep as well.
     """
     Base.@kwdef struct VerificationCase
         id::String
@@ -75,10 +84,15 @@ if !isdefined(@__MODULE__, :VerificationCase)
         references::Vector{String}
         build::Function
         solve_kwargs::NamedTuple = (;)
+        solve_fn::Union{Nothing,Function} = nothing
         qois::Function
         ci::CIConfig
         report::NamedTuple = (;)
     end
+
+    @inline _case_solve(case::VerificationCase, problem; kwargs...) =
+        case.solve_fn === nothing ? solve(problem; progress = false, kwargs...) :
+        case.solve_fn(problem; kwargs...)
 
     observed_orders(errors, hs) =
         [log(errors[i-1] / errors[i]) / log(hs[i-1] / hs[i]) for i = 2:length(errors)]
@@ -93,7 +107,7 @@ if !isdefined(@__MODULE__, :VerificationCase)
         @testset "$(case.id) — $(case.title)" begin
             wall = @elapsed begin
                 problem = case.build(case.ci.n_cells)
-                sol = solve(problem; progress = false, case.solve_kwargs...)
+                sol = _case_solve(case, problem; case.solve_kwargs...)
                 @test sol.retcode == :Success
                 for q in case.qois(sol)
                     @testset "$(q.name)" begin
@@ -114,7 +128,7 @@ if !isdefined(@__MODULE__, :VerificationCase)
                         errors = Float64[]
                         hs = Float64[]
                         for n in conv.n_cells
-                            s = solve(build(n); progress = false, conv.solve_kwargs...)
+                            s = _case_solve(case, build(n); conv.solve_kwargs...)
                             push!(errors, conv.error_fn(s))
                             push!(hs, 1.0 / n)
                         end
