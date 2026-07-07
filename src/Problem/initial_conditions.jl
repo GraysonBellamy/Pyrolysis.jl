@@ -6,24 +6,15 @@ Initial condition specification and application.
 # Apply Initial Conditions
 # ============================================================================
 
-"""
-	apply_initial_conditions!(mesh, problem::PyrolysisProblem)
-
-Apply initial conditions from the problem specification to the mesh cell states.
-
-This function sets:
-- Temperature T(z) for each cell
-- Mass concentrations ξⱼ(z) for each component in each cell
-
-# Arguments
-- `mesh`: The computational mesh with cell_states to be initialized
-- `problem`: The PyrolysisProblem containing initial condition functions
-
-# Notes
-- Initial conditions are evaluated at cell centers
-- Cell volumes are preserved (not modified by this function)
-"""
-function apply_initial_conditions!(mesh::Mesh1D{NC}, problem::PyrolysisProblem) where {NC}
+# Internal: write the problem's T/ξ initial-condition callables into the mesh
+# cell states, evaluated at cell centers. Cell volumes are untouched. Callers
+# go through `apply_initial_conditions!(problem)`, which also populates
+# `mesh.m_dry_solid_initial` — the two writes must stay ordered (the populator
+# reads `cell_states`).
+function _apply_problem_initial_conditions!(
+    mesh::Mesh1D{NC},
+    problem::PyrolysisProblem,
+) where {NC}
     n_cells_val = length(mesh.cells)
 
     for i = 1:n_cells_val
@@ -48,6 +39,12 @@ end
 	apply_initial_conditions!(mesh, material, T_func, ξ_funcs)
 
 Apply initial conditions using functions directly.
+
+Mesh-level utility: writes only `mesh.cell_states` and does **not** touch
+`mesh.m_dry_solid_initial` (the χ progress denominator). For setting up a
+problem for the residual/Jacobian composition, use
+`apply_initial_conditions!(problem)` (or [`initialize_state`](@ref)), which
+populates both.
 
 # Arguments
 - `mesh`: The computational mesh
@@ -81,6 +78,12 @@ end
 	apply_initial_conditions!(mesh, material; T=300.0, ξ=nothing)
 
 Apply uniform initial conditions.
+
+Mesh-level utility: writes only `mesh.cell_states` and does **not** touch
+`mesh.m_dry_solid_initial` (the χ progress denominator). For setting up a
+problem for the residual/Jacobian composition, use
+`apply_initial_conditions!(problem)` (or [`initialize_state`](@ref)), which
+populates both.
 
 # Arguments
 - `mesh`: The computational mesh
@@ -227,15 +230,16 @@ end
 """
 	apply_initial_conditions!(problem::PyrolysisProblem)
 
-Apply initial conditions from a problem to its mesh, including the variable
-cross-section progress denominator `mesh.m_dry_solid_initial`. Convenience
-overload of `apply_initial_conditions!` that wires the per-mesh and per-mass
-populators.
+Apply the problem's initial conditions to its mesh: evaluate the T/ξ
+callables at every cell center AND populate the variable cross-section
+progress denominator `mesh.m_dry_solid_initial` (the χ denominator read
+under a `lateral_shrinkage_law`). This is the single problem-level IC
+method — [`initialize_state`](@ref) calls it as its first step.
 
 Returns the modified mesh.
 """
 function apply_initial_conditions!(problem::PyrolysisProblem)
-    apply_initial_conditions!(problem.mesh, problem)
+    _apply_problem_initial_conditions!(problem.mesh, problem)
     populate_m_dry_solid_initial!(problem.mesh, problem.material)
     return problem.mesh
 end

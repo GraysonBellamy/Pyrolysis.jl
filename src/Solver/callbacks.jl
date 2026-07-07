@@ -476,9 +476,7 @@ A `DiscreteCallback` that handles cell depletion.
 
 # Example
 ```julia
-def = to_problem_def(problem; use_ale = true)
-ws = build_workspace(problem, def)
-u0 = create_state_vector(ws.layout, ws.mesh)
+def, ws, u0 = initialize_state(problem; use_ale = true)
 layout = ws.layout
 
 # Merge cells when they shrink to 5% of original thickness

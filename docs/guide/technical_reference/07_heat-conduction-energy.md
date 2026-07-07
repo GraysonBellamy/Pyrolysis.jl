@@ -23,6 +23,14 @@ flux is transport in the $+z$ direction. The symbol $x$ appears in a few places 
 $\partial T/\partial x$) only because the implementation uses it as a synonym for the
 through-thickness coordinate $z$; the two are identical in this 1D model.
 
+> **Frame of this chapter.** The Eulerian energy balance developed here has
+> no solid-convection term — it assumes the condensed phase carrying
+> $\rho c_p^{\text{eff}}$ is **stationary in the lab frame**. On a fixed
+> (Eulerian) mesh that is exact. Under ALE the matrix *moves* (it subsides
+> with the reaction-driven mesh), and the correct time derivative of the
+> matrix-carried temperature is the *mesh-frame* one, with no additional
+> advection term — see §11.2.2 for the relative-velocity argument.
+
 ---
 
 ## 7.1 Fourier Conduction and the Face Heat Flux

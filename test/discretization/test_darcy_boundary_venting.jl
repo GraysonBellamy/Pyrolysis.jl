@@ -17,8 +17,6 @@ mobility rule.
 
 using Test
 using Pyrolysis
-using Pyrolysis: to_problem_def, build_workspace
-using Pyrolysis.Problem: apply_initial_conditions!, create_state_vector
 using Pyrolysis.Residual: residual!
 using Pyrolysis.Materials
 using Pyrolysis.BoundaryConditions
@@ -48,10 +46,7 @@ function _venting_problem(κ_char; n = 6, T0 = 600.0, ξ_solid = 250.0, ξ_gas =
         ),
     )
     problem = PyrolysisProblem(mesh = mesh, material = mat, bc_set = bc, tspan = (0.0, 1.0))
-    apply_initial_conditions!(problem.mesh, problem)
-    def = to_problem_def(problem; use_ale = false)
-    ws = build_workspace(problem, def)
-    u = create_state_vector(ws.layout, ws.mesh)
+    def, ws, u = initialize_state(problem; use_ale = false)
     for i = 1:n
         u[i] = T0
         u[n+i] = ξ_solid
@@ -127,10 +122,7 @@ end
         )
         problem =
             PyrolysisProblem(mesh = mesh, material = mat, bc_set = bc, tspan = (0.0, 1.0))
-        apply_initial_conditions!(problem.mesh, problem)
-        def = to_problem_def(problem; use_ale = false)
-        ws = build_workspace(problem, def)
-        u = create_state_vector(ws.layout, ws.mesh)
+        def, ws, u = initialize_state(problem; use_ale = false)
         for i = 1:n
             u[i] = 600.0
             u[n+i] = 250.0
@@ -169,14 +161,11 @@ end
         mass = (top = DiffusiveMassBC(0.05), bottom = ImpermeableBC()),
     )
     problem = PyrolysisProblem(mesh = mesh, material = mat, bc_set = bc, tspan = (0.0, 1.0))
-    apply_initial_conditions!(problem.mesh, problem)
-    def = to_problem_def(problem; use_ale = false)
-    ws = build_workspace(problem, def)
+    def, ws, u = initialize_state(problem; use_ale = false)
     state = ws.state_cache
 
     # Cells 1–2 virgin (impermeable), cells 3–4 char with a huge gas
     # overpressure differential across the front.
-    u = create_state_vector(ws.layout, ws.mesh)
     gas_profile = (0.1, 0.1, 5.0, 2.0)     # pressure jump across the front AND
     for i = 1:n                             # within the char region
         u[i] = 600.0

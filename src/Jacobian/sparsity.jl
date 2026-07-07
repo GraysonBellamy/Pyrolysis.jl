@@ -372,9 +372,10 @@ end
 Emit the additional non-local couplings introduced by
 [`Pyrolysis.Jacobian.ALEAdvectionOperator`](@ref):
 
-1. **5-cell limiter window** — the direct chain rule pulls in `(i, upwind,
-   upup)` × both upwind directions. The reach for row `i` is cells
-   `max(1, i-2):min(n, i+2)` (the operator declares `stencil = (cells = -2:2,)`).
+1. **5-cell window** — emitted as `max(1, i-2):min(n, i+2)`, a deliberate
+   superset of the flux-form donor stencil (the operator declares
+   `stencil = (cells = -1:1,)`; the extra ring is retained from the former
+   limiter-based scheme and costs only structural zeros).
 2. **Cumulative mesh-velocity coupling** — the indirect chain rule through
    `w_cell = 0.5·(w_node[n_left] + w_node[n_right])` connects row `i` to
    every upstream cell `j ≤ max(n_left[i], n_right[i]) - 1 ≈ i`. For a
@@ -391,9 +392,10 @@ limiter window `max(1, i-2):min(n, i+2)` is emitted; the cumulative and
 skips its `compose_into!` calls under the same profile, so those entries
 would never receive a write anyway.
 
-Applies to T rows and ξ rows of every component (over-emitting
-solid-component ξ rows is safe; the operator writes zero there and the
-storage cost is negligible).
+Applies to T rows and ξ rows of every component (over-emitting is safe;
+the operator writes nothing to solid-component ξ rows nor — since the
+relative-velocity energy formulation removed the production T-advection —
+to T rows; the storage cost of the structural zeros is negligible).
 
 ALE-only; no-op under Eulerian.
 """

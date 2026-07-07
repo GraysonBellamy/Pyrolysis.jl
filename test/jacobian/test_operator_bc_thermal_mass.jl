@@ -29,7 +29,6 @@ using Test
 using SparseArrays
 using ForwardDiff
 using Pyrolysis
-using Pyrolysis: to_problem_def, build_workspace
 using Pyrolysis.Materials: n_components, Material
 using Pyrolysis.Properties: PropertyCache, update_properties!
 using Pyrolysis.Discretization:
@@ -71,10 +70,7 @@ function _build_eulerian_convective_problem()
     )
     problem =
         PyrolysisProblem(mesh = mesh, material = mat, bc_set = bc, tspan = (0.0, 100.0))
-    Pyrolysis.Problem.apply_initial_conditions!(problem.mesh, problem)
-    def = to_problem_def(problem; use_ale = false)
-    ws = build_workspace(problem, def)
-    u = create_state_vector(ws.layout, ws.mesh)
+    def, ws, u = initialize_state(problem; use_ale = false)
     return def, ws, u
 end
 

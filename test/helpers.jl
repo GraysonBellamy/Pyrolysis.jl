@@ -62,14 +62,12 @@ if !isdefined(@__MODULE__, :fixture_problem)
         radiation_model = NO_RADIATION,
         radiation_intensity::Real = 0.0,
     )
-        def = to_problem_def(
+        def, ws, u = initialize_state(
             problem;
             use_ale = use_ale,
             radiation_model = radiation_model,
             radiation_intensity = radiation_intensity,
         )
-        ws = build_workspace(problem, def)
-        u = create_state_vector(ws.layout, ws.mesh)
         du = similar(u)
         return def, ws, u, du
     end

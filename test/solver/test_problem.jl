@@ -328,6 +328,11 @@ using Pyrolysis.Solver: get_profile, get_cell_positions
             @test mesh.cell_states[1].T ≈ 350.0
             @test mesh.cell_states[1].ξ[1] ≈ 1000.0
             @test mesh.cell_states[1].ξ[2] ≈ 100.0
+
+            # The problem-level method also populates the χ progress
+            # denominator from the freshly written cell states (solid ξ only).
+            @test length(mesh.m_dry_solid_initial) == length(mesh.cells)
+            @test mesh.m_dry_solid_initial[1] ≈ 1000.0 * mesh.cell_volumes[1]
         end
 
         @testset "Uniform initial conditions" begin

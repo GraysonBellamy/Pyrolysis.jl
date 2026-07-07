@@ -386,36 +386,61 @@ slope is flat (|grad_0| < 1e-20, where the ratio is undefined).
 end
 
 """
-	compute_ale_species_advection!(advection::Matrix{Float64},
-								   mesh::Mesh1D{NC},
-								   material::Material{NC},
-								   w_node::Vector{Float64}) where NC
+	compute_ale_species_advection!(advection, state, mesh::Mesh1D{NC},
+								   material::Material{NC}, w_node;
+								   θ_A = 0.0,
+								   top_gas_open = false,
+								   bottom_gas_open = false) where NC
 
-Compute the ALE advection contribution to dξ/dt using upwind differencing.
+Conservative flux-form mesh-motion transport for GAS components.
 
-The ALE species equation is:
-	∂ξⱼ/∂t + (vⱼ - w)·∇ξⱼ = -∇·Jⱼ + Sⱼ
+Gas is NOT mesh-bound (bulk gas velocity v_gas ≈ 0 in the lab frame), so a
+moving mesh exchanges gas with its cells. The per-cell balance on the moving
+volume is `d(ξ_g V)/dt = [ξ_g w A]_faces + (transport + sources)·V`, giving
+the correction ADDED to the Eulerian RHS:
 
-Where (vⱼ - w) is the relative velocity of component j to the mesh.
+```
+dξ_g/dt |mesh-motion = (ξ_face,R·w_R − ξ_face,L·w_L)/Δz − ξ_g,i·(V̇/V)
+V̇/V = (w_R − w_L)/Δz + θ_A
+```
+
+The face-flux difference telescopes over the column, so **total gas mass
+changes only through the boundary faces** — the discrete operator is exactly
+conservative for any mesh motion. (A pointwise `+w·∇ξ_g` discretization would
+not be: it does not telescope, so with shrinking cells and no escape path it
+silently deletes the held gas with the vanishing volume.)
+
+# Face values (first-order donor)
+`ξ_face` is the donor-cell value on the side the face moves INTO
+(`w_face > 0` → upper cell, `w_face < 0` → lower cell) — the gas the face
+sweeps. First-order donor values keep the telescoping exact and match the
+Darcy face-flux upwinding (`ale_gas_flux_darcy_fick`).
+
+# Boundary faces
+- **Impermeable mass BC** (`top_gas_open`/`bottom_gas_open` = false): gas
+  cannot cross the face, so it rides the moving boundary — the face
+  contributes NO sweep flux and the held gas compresses/dilutes through the
+  `ξ·V̇/V` term (total mass exactly conserved in a fully closed column).
+- **Open mass BC** (venting/flux/convective): zero-gradient ghost,
+  `ξ_outside = ξ_cell` — a regressing surface releases the uncovered gas at
+  the cell concentration; an advancing surface ingests at the same value
+  (the mass BC's own diffusive/convective exchange handles far-field
+  equilibration). This keeps the boundary discretization consistent with
+  the continuum `∇·(ξw) − ξ∇·w = w·∇ξ`, which the MMS suite verifies.
+
+Solid / liquid components are mesh-bound and receive NO advection term here;
+their volume-change re-concentration `−ξⱼθ` is applied by the residual's
+dilation step (tech-ref §11.2.3).
 
 # Arguments
-- `advection`: Output matrix [NC × n_cells] of advection terms [kg/(m³·s)]
-- `mesh`: Mesh with current cell states
+- `advection`: Output matrix [NC × n_cells] of correction terms [kg/(m³·s)]
+- `state`: StateCache (reads ξ, volume, A_section)
+- `mesh`: Mesh with connectivity
 - `material`: Material definition (to determine solid vs gas components)
-- `w_node`: Mesh velocities at nodes [m/s]
-
-# Physics
-- For SOLID components: The material moves with the mesh (Lagrangian tracking),
-  so v_solid = w and (v_solid - w) = 0. Therefore, NO advection term for solids.
-- For LIQUID components: Treated same as solids (bound to solid matrix, moves with mesh).
-- For GAS components: In the simplified model where bulk gas velocity v_gas ≈ 0,
-  the relative velocity is (0 - w) = -w, so the relative-velocity advection term
-  in the conservation form is (v-w)·∇ξ = -w·∇ξ. Moving it to the right-hand side,
-  the correction ADDED to the Eulerian RHS is +w·∇ξ_gas — consistent with the
-  file-header convention (∂ξ/∂t|_χ = Eulerian RHS + w·∇ξ) and the code below.
-
-This ensures mass-thickness consistency: solid mass is locked to the mesh,
-so when the mesh shrinks due to mass loss, thickness tracks mass correctly.
+- `w_node`: Applied mesh velocities at nodes [m/s]
+- `θ_A`: Column-global lateral strain rate (WithChi; 0 under NoChi) [1/s]
+- `top_gas_open` / `bottom_gas_open`: whether the boundary mass BC lets gas
+  cross (anything but `ImpermeableBC`)
 """
 function compute_ale_species_advection!(
     advection::AbstractMatrix,
@@ -423,7 +448,9 @@ function compute_ale_species_advection!(
     mesh::Mesh1D{NC},
     material::Material{NC},
     w_node::AbstractVector;
-    limiter::Limiter = VANLEER,
+    θ_A::Real = 0.0,
+    top_gas_open::Bool = false,
+    bottom_gas_open::Bool = false,
 ) where {NC}
 
     n_cells = length(state.T)
@@ -432,65 +459,35 @@ function compute_ale_species_advection!(
     @inbounds for i = 1:n_cells
         cell = mesh.cells[i]
         n_left, n_right = cell.node_ids
-
-        w_cell = (w_node[n_left] + w_node[n_right]) / 2
+        w_L = w_node[n_left]
+        w_R = w_node[n_right]
 
         f_left, f_right = cell.face_ids
-        face_left = mesh.faces[f_left]
-        face_right = mesh.faces[f_right]
+        left_id = mesh.faces[f_left].cell_ids[1]
+        right_id = mesh.faces[f_right].cell_ids[2]
 
-        left_id = face_left.cell_ids[1]
-        right_id = face_right.cell_ids[2]
-
-        if abs(w_cell) < 1e-20
+        if abs(w_L) < 1e-20 && abs(w_R) < 1e-20 && abs(θ_A) < 1e-20
             for j = 1:NC
                 advection[j, i] = zero(eltype(advection))
             end
             continue
         end
 
-        if w_cell > 0
-            # Apparent transport velocity c = -w < 0: donor is the right neighbor.
-            d_upwind = _upwind_gradient_distance(state, i, right_id)
-            upup_id = _upwind_upwind_id(mesh, right_id, false)
-            d_upup =
-                upup_id != 0 ?
-                abs(state.cell_centers[right_id] - state.cell_centers[upup_id]) : d_upwind
-            upwind_id = right_id
-        else
-            # Apparent transport velocity c = -w > 0: donor is the left neighbor.
-            d_upwind = _upwind_gradient_distance(state, i, left_id)
-            upup_id = _upwind_upwind_id(mesh, left_id, true)
-            d_upup =
-                upup_id != 0 ?
-                abs(state.cell_centers[left_id] - state.cell_centers[upup_id]) : d_upwind
-            upwind_id = left_id
-        end
-        has_upup = upup_id != 0
+        Δz = state.volume[i] / state.A_section[]
 
-        # Upwind index uses the current cell when the upwind neighbor is the
-        # boundary ghost (id == 0); upup follows the same fall-back via the
-        # `has_upup` flag (the value passed when `has_upup` is false is
-        # never read inside the limiter).
-        col_i = i
-        col_upwind = upwind_id == 0 ? i : upwind_id
-        col_upup = has_upup ? upup_id : col_upwind
-
-        upwind_from_left = w_cell < 0
-        _compute_species_advection_limited_unrolled!(
+        _compute_species_fluxform_unrolled!(
             advection,
             ξ,
             i,
-            col_i,
-            col_upwind,
-            col_upup,
-            w_cell,
-            d_upwind,
-            d_upup,
-            has_upup,
-            upwind_from_left,
+            left_id,
+            right_id,
+            w_L,
+            w_R,
+            Δz,
+            θ_A,
+            top_gas_open,
+            bottom_gas_open,
             material,
-            limiter,
         )
     end
 
@@ -498,23 +495,22 @@ function compute_ale_species_advection!(
 end
 
 
-# TVD-limited species advection (compile-time unrolled for type stability).
-# Reads ξ values directly from the state matrix using explicit cell indices,
-# avoiding closure allocations from `ntuple(j -> ξ[j, k], Val(NC))`.
-@generated function _compute_species_advection_limited_unrolled!(
+# Conservative flux-form gas transport (compile-time unrolled for type
+# stability). Reads ξ values directly from the state matrix using explicit
+# cell indices, avoiding closure allocations.
+@generated function _compute_species_fluxform_unrolled!(
     advection::AbstractMatrix,
     ξ::AbstractMatrix,
     i::Int,
-    col_i::Int,
-    col_upwind::Int,
-    col_upup::Int,
-    w_cell::Real,
-    d_upwind::Real,
-    d_upup::Real,
-    has_upup::Bool,
-    upwind_from_left::Bool,
+    left_id::Int,
+    right_id::Int,
+    w_L::Real,
+    w_R::Real,
+    Δz::Real,
+    θ_A::Real,
+    top_gas_open::Bool,
+    bottom_gas_open::Bool,
     material::Material{NC},
-    limiter::Limiter,
 ) where {NC}
     exprs = Expr[]
     for j = 1:NC
@@ -522,26 +518,32 @@ end
             exprs,
             quote
                 @inbounds if is_gas(material.components[$j])
-                    ξ_i_j = ξ[$j, col_i]
-                    ξ_up_j = ξ[$j, col_upwind]
-                    ξ_upup_j = ξ[$j, col_upup]
+                    ξ_i = ξ[$j, i]
 
-                    # TVD-limited gradient in +z direction
-                    dξ_dz = _limited_gradient(
-                        ξ_i_j,
-                        ξ_up_j,
-                        ξ_upup_j,
-                        d_upwind,
-                        d_upup,
-                        has_upup,
-                        limiter,
-                        upwind_from_left,
-                    )
-                    advection[$j, i] = w_cell * dξ_dz
+                    # Sweep flux ξ_face·w through each face; donor = side the
+                    # face moves into. Boundary faces per the docstring.
+                    flux_R = if right_id != 0
+                        (w_R > 0 ? ξ[$j, right_id] : ξ_i) * w_R
+                    elseif top_gas_open
+                        ξ_i * w_R           # zero-gradient ghost
+                    else
+                        zero(ξ_i * w_R)     # impermeable: gas rides the face
+                    end
+                    flux_L = if left_id != 0
+                        (w_L > 0 ? ξ_i : ξ[$j, left_id]) * w_L
+                    elseif bottom_gas_open
+                        ξ_i * w_L
+                    else
+                        zero(ξ_i * w_L)
+                    end
+
+                    advection[$j, i] =
+                        (flux_R - flux_L) / Δz - ξ_i * ((w_R - w_L) / Δz + θ_A)
                 else
-                    # SOLID and LIQUID components move with the mesh (v = w)
-                    # So relative velocity (v - w) = 0 → no advection
-                    advection[$j, i] = 0.0
+                    # SOLID and LIQUID components move with the mesh (v = w):
+                    # no relative flux; their dilation term lives in the
+                    # residual's dedicated correction step.
+                    advection[$j, i] = zero(eltype(advection))
                 end
             end,
         )
@@ -783,110 +785,3 @@ Reads ξ values directly from the state matrix to avoid closure allocations.
     return Expr(:block, exprs...)
 end
 
-"""
-	compute_ale_species_advection_darcy!(advection::Matrix{Float64},
-										 mesh::Mesh1D{NC},
-										 material::Material{NC},
-										 v_gas::Vector{Float64},
-										 w_node::Vector{Float64}) where NC
-
-Compute species advection in ALE frame accounting for Darcy gas velocity.
-
-This is an alternative formulation using advection terms (w·∇ξ) rather than
-conservative fluxes. Use when you want to treat advection separately from
-flux-based transport.
-
-For gas components: advection = (v_gas/φ - w) · ∇ξ — gas physically moves at
-the interstitial velocity v_gas/φ (cell-local porosity), not the superficial
-Darcy velocity.
-For solid components: advection = 0 (move with mesh)
-
-# Arguments
-- `advection`: Output matrix [NC × n_cells] of advection terms [kg/(m³·s)]
-- `mesh`: Mesh with current cell states
-- `material`: Material definition
-- `v_gas`: Darcy gas velocity at faces [m/s]
-- `w_node`: Mesh velocities at nodes [m/s]
-"""
-function compute_ale_species_advection_darcy!(
-    advection::AbstractMatrix,
-    state,
-    mesh::Mesh1D{NC},
-    material::Material{NC},
-    v_gas::AbstractVector,
-    w_node::AbstractVector;
-    limiter::Limiter = VANLEER,
-) where {NC}
-
-    n_cells = length(state.T)
-    ξ = state.ξ
-
-    @inbounds for i = 1:n_cells
-        cell = mesh.cells[i]
-        n_left, n_right = cell.node_ids
-
-        w_cell = (w_node[n_left] + w_node[n_right]) / 2
-
-        f_left, f_right = cell.face_ids
-        face_left = mesh.faces[f_left]
-        face_right = mesh.faces[f_right]
-
-        left_id = face_left.cell_ids[1]
-        right_id = face_right.cell_ids[2]
-
-        v_g_cell = (v_gas[f_left] + v_gas[f_right]) / 2
-        # Interstitial gas velocity: the superficial Darcy velocity divided by
-        # the cell porosity (floored consistently with the pressure closure).
-        T_i = state.T[i]
-        ξ_i = ntuple(j -> ξ[j, i], Val(NC))
-        φ_i = porosity(ξ_i, T_i, material)
-        v_rel = v_g_cell / max(φ_i, 1e-12) - w_cell
-
-        if abs(v_rel) < 1e-20
-            for j = 1:NC
-                advection[j, i] = zero(eltype(advection))
-            end
-            continue
-        end
-
-        if v_rel > 0
-            d_upwind = _upwind_gradient_distance(state, i, left_id)
-            upup_id = _upwind_upwind_id(mesh, left_id, true)
-            d_upup =
-                upup_id != 0 ?
-                abs(state.cell_centers[left_id] - state.cell_centers[upup_id]) : d_upwind
-            upwind_id = left_id
-        else
-            d_upwind = _upwind_gradient_distance(state, i, right_id)
-            upup_id = _upwind_upwind_id(mesh, right_id, false)
-            d_upup =
-                upup_id != 0 ?
-                abs(state.cell_centers[right_id] - state.cell_centers[upup_id]) : d_upwind
-            upwind_id = right_id
-        end
-        has_upup = upup_id != 0
-
-        col_i = i
-        col_upwind = upwind_id == 0 ? i : upwind_id
-        col_upup = has_upup ? upup_id : col_upwind
-
-        upwind_from_left = v_rel > 0
-        _compute_species_advection_limited_unrolled!(
-            advection,
-            ξ,
-            i,
-            col_i,
-            col_upwind,
-            col_upup,
-            v_rel,
-            d_upwind,
-            d_upup,
-            has_upup,
-            upwind_from_left,
-            material,
-            limiter,
-        )
-    end
-
-    return nothing
-end

@@ -40,7 +40,6 @@ Regression tests for three fixed Jacobian coupling defects:
 using Test
 using SparseArrays
 using Pyrolysis
-using Pyrolysis: to_problem_def, build_workspace
 using Pyrolysis.Jacobian:
     verify_jacobian_at,
     JacobianSpec,
@@ -83,10 +82,7 @@ function _build_zrow_ale(; n_cells::Int = 6, with_chi::Bool = false)
     bc = BoundaryConditionSet(thermal = (top = HeatFluxBC(50e3), bottom = AdiabaticBC()))
     problem =
         PyrolysisProblem(mesh = mesh, material = mat, bc_set = bc, tspan = (0.0, 100.0))
-    Pyrolysis.Problem.apply_initial_conditions!(problem.mesh, problem)
-    def = to_problem_def(problem; use_ale = true)
-    ws = build_workspace(problem, def)
-    u = create_state_vector(ws.layout, ws.mesh)
+    def, ws, u = initialize_state(problem; use_ale = true)
     return def, ws, u
 end
 
@@ -112,10 +108,7 @@ function _build_boundary_flux_eulerian(;
     )
     problem =
         PyrolysisProblem(mesh = mesh, material = mat, bc_set = bc, tspan = (0.0, 100.0))
-    Pyrolysis.Problem.apply_initial_conditions!(problem.mesh, problem)
-    def = to_problem_def(problem; use_ale = false, energy_form = energy_form)
-    ws = build_workspace(problem, def)
-    u = create_state_vector(ws.layout, ws.mesh)
+    def, ws, u = initialize_state(problem; use_ale = false, energy_form = energy_form)
     n = ws.layout.n_cells
     # Temperature ramp (dT/dx ≠ 0 at both boundaries), gas present everywhere
     # — the regime where the boundary flux dominates the energy row.
@@ -223,6 +216,13 @@ end
         u[idx] = 0.3 + 0.05 * k
     end
 
+    # Guard the m_dry_solid_initial = 0 fixture trap (2026-07-06 audit,
+    # fixed by the initialize_state migration): with an unpopulated χ
+    # denominator, χ̄ degenerates to 0, the θ_A block is zero in BOTH compared
+    # Jacobians, and this testset's named target goes un-exercised while the
+    # z-row assertion passes via the ordinary prefix sum alone.
+    @test column_chi_bar_from_state(u, ws.layout, ws.mesh) > 0
+
     report = _strict_report(def, ws, u)
     @test report.mode == :strict
     @test report.passed
@@ -235,6 +235,14 @@ end
     @test maximum(abs, J_r[zr, 1:3n]) > 1e-6
     @test maximum(abs, J_s[zr, 1:3n] .- J_r[zr, 1:3n]) <=
           1e-10 * max(1.0, maximum(abs, J_r[zr, 1:3n]))
+
+    # The θ_A back-reaction itself is non-zero: the z-rows are sensitive to
+    # the χ block through the lateral-shrinkage law, and the structured
+    # backend reproduces that block per entry.
+    χr = chi_range(ws.layout)
+    @test maximum(abs, J_r[zr, χr]) > 0
+    @test maximum(abs, J_s[zr, χr] .- J_r[zr, χr]) <=
+          1e-10 * max(1.0, maximum(abs, J_r[zr, χr]))
 end
 
 # ----------------------------------------------------------------------------

@@ -71,6 +71,13 @@ mutable struct Workspace{
 
     # ---- ALE work arrays (empty for Eulerian) ----
     w_work::Vector{Tu}
+    # Reaction-driven (physical) mesh velocity, saved before the `w_override`
+    # hook replaces `w_work`. The energy equation advects T by the velocity of
+    # the mesh RELATIVE to the mesh-bound condensed material,
+    # w_rel = w_work − w_physical — identically zero in production (the mesh
+    # rides the collapsing matrix), non-zero only under `w_override`. Only
+    # written when the override is active.
+    w_physical::Vector{Tu}
     w_face::Vector{Tu}
     θ_work::Vector{Tu}
     ale_advection::Vector{Tu}
@@ -97,6 +104,18 @@ mutable struct Workspace{
 
     # ---- per-tag boundary state (NamedTuple keyed by tag) ----
     boundary_states::BCStateT
+
+    # ---- verification hook: prescribed ALE mesh velocity ----
+    # When non-nothing (ALE mode only), the reaction-driven mesh velocity is
+    # REPLACED node-by-node with `w_override(z_node, t)` after the physical
+    # computation (θ_work keeps its reaction-driven values, so the dilation
+    # correction stays physical). Used by the MMS verification suite to test
+    # GCL / moving-mesh transport against manufactured solutions
+    # (free-stream preservation, prescribed smooth motion). The caller is
+    # responsible for keeping the bottom node pinned (w(z_bottom, t) = 0).
+    # NOTE: the structured geometry Jacobian assumes reaction-driven motion —
+    # solve with colored-FD Jacobians when overriding.
+    w_override::Union{Nothing,Function}
 end
 
 @inline n_components(::Workspace{NC}) where {NC} = NC
@@ -178,6 +197,7 @@ function resize_workspace!(
     # ALE work arrays
     if mesh_mode(Mode.instance) isa ALE
         resize!(ws.w_work, n_nodes_new)
+        resize!(ws.w_physical, n_nodes_new)
         resize!(ws.w_face, n_faces_new)
         resize!(ws.θ_work, n_cells_new)
         resize!(ws.ale_advection, n_cells_new)

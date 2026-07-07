@@ -386,6 +386,24 @@ $dq_{\text{BC}}/dT_s=0$. The Newton solve still runs to find the $T_s$ that
 balances this against conduction. Sign: positive $q$ heats the material.
 (`boundary_fluxes.jl:46–47`, `boundary_temperature.jl:319–335`.)
 
+> **$T_s$ is a half-cell extrapolation.** For a pure prescribed-flux boundary
+> the surface Newton reduces to the linear extrapolation
+> $T_s = T_{\text{cell}} + q''\,\Delta z_{1/2}/k_{\text{eff}}$, which assumes
+> the *entire* prescribed flux crosses the boundary half-cell by conduction.
+> When a volumetric consumer sits inside that half-cell (a reaction zone under
+> MW-scale flux, in-depth absorption), the reported $T_s$ is biased by up to
+> tens of K at coarse resolution — a real but $n$-shrinking effect. It enters
+> the Landau traveling-wave identity of V-CPL-02 through
+> $v_{ss}(\text{measured}\ T_s)$: with the reaction zone under-resolved
+> ($\Delta z \approx 2\delta_r$) the identity misses by ≈1.3 %, collapsing to
+> ≈5×10⁻⁴ once $\Delta z \lesssim \delta_r$. (It was *not*, however, the
+> source of the ≲1 % *mesh-independent* residual pinned there before
+> 2026-07-07 — that was the wave-development transient of the uniform-$T_0$
+> start, resolved by moving the measurement window to ≥6 development time
+> constants.) Interpret surface-temperature outputs under `HeatFluxBC`
+> accordingly, and refine the near-surface mesh when $T_s$ itself is a target
+> quantity.
+
 ### 12.3.3 `ConvectiveBC` (Newton's law of cooling)
 
 $$
@@ -914,7 +932,7 @@ Function-valued parameters cannot be checked at construction and are skipped
 
 The initial state is specified by a temperature closure $T_{\text{initial}}(z)$
 and per-component concentration closures $\xi_{j,\text{initial}}(z)$, evaluated at
-each cell center $z_i^c$ (`initial_conditions.jl:28–47`):
+each cell center $z_i^c$ (`initial_conditions.jl`):
 
 $$
 T_i(0) = T_{\text{initial}}(z_i^c), \qquad
@@ -924,6 +942,18 @@ $$
 The closures are evaluated and stored in the mutable mesh's cell states, then
 packed into the flat state vector (§15, Temporal Integration & Structured
 Jacobian). Cell volumes are not altered by initialization.
+
+The single problem-level entry point is `apply_initial_conditions!(problem)`,
+which performs the cell-state write above **and** populates the dry-solid
+denominator of §12.8.3 (the populator reads the freshly written cell states,
+so the two steps are ordered). `solve()` and the exported composition helper
+`initialize_state(problem; …)` both call it before packing `u0`; the
+mesh-level utility overloads `apply_initial_conditions!(mesh, material, …)`
+write only cell states and deliberately do **not** touch
+`m_dry_solid_initial`. Composing the pure-residual layer by hand without the
+problem-level IC step packs the mesh constructor's placeholder state instead
+of the problem's initial conditions (§15.2) — a resolution-independent error
+with a perfectly plausible-looking solution.
 
 ### 12.8.2 Auto-defaults
 
@@ -939,7 +969,7 @@ This "first solid at reference density, everything else zero" default models a
 fresh, uniform virgin slab at room temperature — the standard cone/TGA starting
 point. The uniform-IC variant `apply_initial_conditions!(mesh, material; T, ξ)`
 follows the same rule when $\xi=\texttt{nothing}$
-(`initial_conditions.jl:103–112`). Profile helpers (`step_profile`,
+(`initial_conditions.jl`). Profile helpers (`step_profile`,
 `linear_profile`, `gaussian_profile`, `tanh_profile`) are provided for non-uniform
 seeds (e.g. a pre-heated layer).
 
@@ -949,7 +979,8 @@ A second, BC-adjacent quantity is fixed at initialization: the per-cell initial
 dry-solid mass, which is the constant denominator of the pyrolysis-progress state
 $\chi_i = m_{\text{released,dry},i}/m_{\text{dry},i}$ used by the variable
 cross-section law (§10, Volume Change & Lateral Shrinkage). It is populated by
-`populate_m_dry_solid_initial!` (`initial_conditions.jl:256–272`):
+`populate_m_dry_solid_initial!` (`initial_conditions.jl`), wired into
+`apply_initial_conditions!(problem)` after the cell-state write:
 
 $$
 m_{\text{dry},i} = V_i(0)\,\sum_{j\in\text{solid}} \xi_{j,i}(0),

@@ -76,8 +76,10 @@ with their per-product `stoich` from the `products` tuple.
 Reaction orders must be `n ≥ 0` (enforced at construction; a negative order
 makes the rate singular at reactant depletion). At runtime each reactant also
 contributes a smooth `tanh(ξ/ξ_th)` depletion factor to the rate, and the hard
-temperature gates `H(·)` are realized as smooth tanh ramps — see
-`Pyrolysis.Physics.reaction_rate` and [`DepletionLimiter`](@ref).
+temperature gates `H(·)` are realized as smooth tanh ramps of width
+`gate_width` [K] (`0.5·(1 + tanh((T − T_min)/gate_width))` and mirrored) — see
+`Pyrolysis.Physics.reaction_rate` and [`DepletionLimiter`](@ref). Smaller
+widths approach the hard step at the cost of Jacobian stiffness near the gate.
 
 # Type Parameters
 - `NRin`:  Number of reactants
@@ -93,6 +95,7 @@ temperature gates `H(·)` are realized as smooth tanh ramps — see
 - `heat::Ph`: Heat of reaction [J/kg of reactant₁]
 - `T_min::Float64`: Minimum temperature for reaction [K]
 - `T_max::Float64`: Maximum temperature for reaction [K]
+- `gate_width::Float64`: Width of the smooth tanh temperature gates [K] (> 0, default 1.0)
 
 # Mass-balance convention
 
@@ -117,6 +120,7 @@ struct Reaction{NRin,NRout,Ph<:AbstractPropertyFunction} <: AbstractReaction
     heat::Ph
     T_min::Float64
     T_max::Float64
+    gate_width::Float64                           # tanh temperature-gate width [K]
 
     function Reaction(
         name::Symbol,
@@ -127,6 +131,7 @@ struct Reaction{NRin,NRout,Ph<:AbstractPropertyFunction} <: AbstractReaction
         heat::Ph,
         T_min::Real,
         T_max::Real;
+        gate_width::Real = 1.0,
         validate_mass::Bool = true,
     ) where {NRin,NRout,Ph<:AbstractPropertyFunction}
         for (_, order) in reactants
@@ -138,7 +143,8 @@ struct Reaction{NRin,NRout,Ph<:AbstractPropertyFunction} <: AbstractReaction
         if validate_mass && NRin == 1
             _validate_stoichiometry(products, name)
         end
-        new{NRin,NRout,Ph}(name, reactants, products, A, E, heat, T_min, T_max)
+        _validate_gate_width(gate_width, name)
+        new{NRin,NRout,Ph}(name, reactants, products, A, E, heat, T_min, T_max, gate_width)
     end
 end
 
@@ -163,6 +169,24 @@ function _validate_reaction_order(n::Real, name::Symbol)
             "Reaction :$name has reaction order n = $n; negative orders are " *
             "unphysical in the ξ-power-law rate (ξ^n → ∞ as the reactant " *
             "depletes). Supported orders are n ≥ 0.",
+        ),
+    )
+    return nothing
+end
+
+"""
+	_validate_gate_width(w::Real, name::Symbol)
+
+Reject non-positive or non-finite temperature-gate widths at construction.
+The gates are evaluated as `0.5·(1 + tanh((T − T_min)/gate_width))` (mirrored
+for `T_max`): `w ≤ 0` inverts or degenerates the ramp, and `w = Inf` freezes
+both gates at 0.5 everywhere.
+"""
+function _validate_gate_width(w::Real, name::Symbol)
+    (isfinite(w) && w > 0) || throw(
+        ArgumentError(
+            "Reaction :$name has gate_width = $w; the tanh temperature-gate " *
+            "width must be a finite positive number of kelvin.",
         ),
     )
     return nothing
@@ -231,7 +255,7 @@ end
 # ============================================================================
 
 """
-	Reaction(name, reactant => product; A, E, h, n=1.0, T_min=0.0, T_max=Inf, validate_mass=true)
+	Reaction(name, reactant => product; A, E, h, n=1.0, T_min=0.0, T_max=Inf, gate_width=1.0, validate_mass=true)
 
 Create a simple single-reactant, single-product reaction.
 
@@ -244,6 +268,7 @@ Create a simple single-reactant, single-product reaction.
 - `n=1.0`: Reaction order
 - `T_min=0.0`: Minimum temperature [K]
 - `T_max=Inf`: Maximum temperature [K]
+- `gate_width=1.0`: Width of the smooth tanh temperature gates [K] (> 0)
 - `validate_mass=true`: If true, enforce mass balance in stoichiometry
 
 # Example
@@ -260,6 +285,7 @@ function Reaction(
     n::Real = 1.0,
     T_min::Real = 0.0,
     T_max::Real = Inf,
+    gate_width::Real = 1.0,
     validate_mass::Bool = true,
 )
     reactant, product = pair
@@ -275,12 +301,13 @@ function Reaction(
         to_property(h),
         Float64(T_min),
         Float64(T_max);
+        gate_width = Float64(gate_width),
         validate_mass = validate_mass,
     )
 end
 
 """
-	Reaction(name, reactant => (product1, product2); A, E, h, yields, n=1.0, T_min=0.0, T_max=Inf, validate_mass=true)
+	Reaction(name, reactant => (product1, product2); A, E, h, yields, n=1.0, T_min=0.0, T_max=Inf, gate_width=1.0, validate_mass=true)
 
 Create a reaction with two products.
 
@@ -294,6 +321,7 @@ Create a reaction with two products.
 - `n=1.0`: Reaction order
 - `T_min=0.0`: Minimum temperature [K]
 - `T_max=Inf`: Maximum temperature [K]
+- `gate_width=1.0`: Width of the smooth tanh temperature gates [K] (> 0)
 - `validate_mass=true`: If true, enforce mass balance in stoichiometry
 
 # Example
@@ -312,6 +340,7 @@ function Reaction(
     n::Real = 1.0,
     T_min::Real = 0.0,
     T_max::Real = Inf,
+    gate_width::Real = 1.0,
     validate_mass::Bool = true,
 )
     reactant = pair.first
@@ -329,6 +358,7 @@ function Reaction(
         to_property(h),
         Float64(T_min),
         Float64(T_max);
+        gate_width = Float64(gate_width),
         validate_mass = validate_mass,
     )
 end
@@ -369,11 +399,12 @@ struct PendingReaction{R,P,Ph<:AbstractPropertyFunction} <: AbstractReaction
     yields::Union{Nothing,Tuple{Float64,Float64}}
     T_min::Float64
     T_max::Float64
+    gate_width::Float64
     validate_mass::Bool
 end
 
 """
-	Reaction(name::Symbol, reactant::Symbol => product::Symbol; A, E, h, n=1.0, T_min=0.0, T_max=Inf, validate_mass=true)
+	Reaction(name::Symbol, reactant::Symbol => product::Symbol; A, E, h, n=1.0, T_min=0.0, T_max=Inf, gate_width=1.0, validate_mass=true)
 
 Symbolic single-reactant, single-product reaction constructor. Returns a
 `PendingReaction` that is resolved to a numeric `Reaction` inside the
@@ -392,9 +423,11 @@ function Reaction(
     n::Real = 1.0,
     T_min::Real = 0.0,
     T_max::Real = Inf,
+    gate_width::Real = 1.0,
     validate_mass::Bool = true,
 )
     _validate_reaction_order(n, name)
+    _validate_gate_width(gate_width, name)
     PendingReaction(
         name,
         pair.first,
@@ -406,13 +439,14 @@ function Reaction(
         nothing,
         Float64(T_min),
         Float64(T_max),
+        Float64(gate_width),
         validate_mass,
     )
 end
 
 """
 	Reaction(name::Symbol, reactant::Symbol => (product1::Symbol, product2::Symbol);
-			 A, E, h, yields, n=1.0, T_min=0.0, T_max=Inf, validate_mass=true)
+			 A, E, h, yields, n=1.0, T_min=0.0, T_max=Inf, gate_width=1.0, validate_mass=true)
 
 Symbolic two-product reaction constructor. Returns a `PendingReaction` resolved
 inside `Material(...)`.
@@ -432,9 +466,11 @@ function Reaction(
     n::Real = 1.0,
     T_min::Real = 0.0,
     T_max::Real = Inf,
+    gate_width::Real = 1.0,
     validate_mass::Bool = true,
 )
     _validate_reaction_order(n, name)
+    _validate_gate_width(gate_width, name)
     yields_f64 = (Float64(yields[1]), Float64(yields[2]))
     PendingReaction(
         name,
@@ -447,6 +483,7 @@ function Reaction(
         yields_f64,
         Float64(T_min),
         Float64(T_max),
+        Float64(gate_width),
         validate_mass,
     )
 end
@@ -478,6 +515,7 @@ function resolve_reaction(
         n = rxn.n,
         T_min = rxn.T_min,
         T_max = rxn.T_max,
+        gate_width = rxn.gate_width,
         validate_mass = rxn.validate_mass,
     )
 end
@@ -503,6 +541,7 @@ function resolve_reaction(
         yields = yields,
         T_min = rxn.T_min,
         T_max = rxn.T_max,
+        gate_width = rxn.gate_width,
         validate_mass = rxn.validate_mass,
     )
 end

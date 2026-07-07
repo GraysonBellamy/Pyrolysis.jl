@@ -131,14 +131,15 @@ Callable struct holding everything needed to evaluate the P1 residual: the
 immutable `def`, the mutable `ws`, the radiation cache (which owns the
 quasi-steady G field), and the radiation BCs.
 
-The state vector is the unified layout from `ws.layout` — build `u0` with
-`create_state_vector(ws.layout, ws.mesh)`. Read the G field via
+The state vector is the unified layout from `ws.layout` — build `def`, `ws`,
+and `u0` with `initialize_state(problem; radiation_model = P1_QUASI_STEADY)`
+(which applies the problem's initial conditions before packing; a manual
+`create_state_vector` call packs the mesh as-is). Read the G field via
 `p.rad_cache.G` or [`get_radiation_intensity`](@ref).
 
-The constructor requires `def.options.radiation_model == P1_QUASI_STEADY`
-(use `to_problem_def(problem; radiation_model = P1_QUASI_STEADY)`); this is
-what keeps the incident radiation single-counted between the Marshak BC and
-the thermal boundary conditions.
+The constructor requires `def.options.radiation_model == P1_QUASI_STEADY`;
+this is what keeps the incident radiation single-counted between the Marshak
+BC and the thermal boundary conditions.
 
 Construct explicitly in `Pyrolysis.Experimental`; the core `solve` path keeps
 P1 out of the unified residual until it gets a dedicated radiation trait.

@@ -21,7 +21,6 @@ Eulerian and ALE meshes.
 
 using Test
 using Pyrolysis
-using Pyrolysis: to_problem_def, build_workspace
 using Pyrolysis.Materials: BEER_LAMBERT
 using Pyrolysis.Jacobian:
     verify_jacobian_at, JacobianSpec, DenseAD_ForwardDiff, Structured, DirectSolve
@@ -60,17 +59,14 @@ function _build_beer_lambert_case(;
     )
     problem =
         PyrolysisProblem(mesh = mesh, material = mat, bc_set = bc, tspan = (0.0, 100.0))
-    Pyrolysis.Problem.apply_initial_conditions!(problem.mesh, problem)
     I_eff = explicit_α === nothing ? 50e3 : explicit_α * 50e3
-    def = to_problem_def(
+    def, ws, u = initialize_state(
         problem;
         use_ale = use_ale,
         radiation_model = BEER_LAMBERT,
         radiation_intensity = I_eff,
         radiation_kirchhoff = explicit_α === nothing,
     )
-    ws = build_workspace(problem, def)
-    u = create_state_vector(ws.layout, ws.mesh)
     n = ws.layout.n_cells
     # Hot graded state, mixed composition (ε_eff away from its clamp and
     # strictly between the component values).

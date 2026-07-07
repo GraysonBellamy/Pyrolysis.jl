@@ -321,7 +321,7 @@ $$
 >     dξ[j, i] -= ξ_i[j] * θ_i
 > end
 > ```
-> for each component. The correction is **applied to every non-gas component** (solids *and* liquids — the guard is `!is_gas`, line 467), and **skipped for gases**. The sign is exactly the $-\xi_j\theta_i$ of (10.15). It is applied *after* the ALE advection terms (`_apply_ale_advection!`, step 7 of the residual) and *after* the reaction sources, so it sits on top of the already-assembled species RHS.
+> for each component. The correction is **applied to every non-gas component** (solids *and* liquids — the guard is `!is_gas`), and **skipped for gases** — the gas volume-rate term lives inside the conservative flux-form transport instead (§11.2.3, §13.8.3), so the pairing telescopes. The sign is exactly the $-\xi_j\theta_i$ of (10.15). It is applied *after* the ALE mesh-motion terms (step 7 of the residual) and *after* the reaction sources, so it sits on top of the already-assembled species RHS.
 
 ### 10.7.3 Why gases are excluded
 
@@ -463,3 +463,5 @@ The following limitations are documented in the source and KB notes and should g
 7. **Substring-based water-vapor exclusion.** The dry-gas index set relies on a name substring match (§10.3.3), which is fragile to naming. A type-level or explicit-flag mechanism for "this gas is moisture-derived" would be more robust than the current `"H2O"`/`"water"` heuristic.
 
 8. **Axial/radial split is sequential, not unified.** As noted in the ALE KB, the axial (mesh-motion) and radial (cross-section) channels are computed in sequence with $\theta_A$ subtracted from each cell's $\theta_i$; a fully unified space-time ALE that handles both simultaneously (and a higher-order-in-time mesh update than the forward-Euler node advance) remains future work (see §11.11).
+
+9. **Mesh motion is solid motion (solid-Lagrangian ALE).** The volume-change pipeline of this chapter is what *defines* the mesh velocity: $w$ is the prefix sum of the reaction-driven strain rate $\theta$ (§11.3), and condensed phases ride the mesh with no discrete advection operator (§10.7, §11.1.2). Mesh motion decoupled from the solid material velocity — remeshing, smoothing, prescribed motion, AMR-in-ALE — is not representable without adding a condensed-phase advection operator; see §11.11 item 7 for the full statement of this capability boundary and its consequence for MMS verification (the spatially-uniform-solid rule under `w_override`).

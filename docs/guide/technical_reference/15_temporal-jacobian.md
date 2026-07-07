@@ -95,6 +95,18 @@ and `chi_range(l)`.
 > `_chi_idx`, src/Jacobian/sparsity.jl, and in solution extraction,
 > src/Solver/solve.jl. The block order $[T\mid\xi\mid z\mid\chi]$ is binding: any
 > code that reads or writes raw state must respect it.
+>
+> **IC contract.** `create_state_vector` packs the mesh **as-is** — it does not
+> consult the problem's initial-condition closures (which live on the
+> `PyrolysisProblem`, not the mesh) and does not populate
+> `mesh.m_dry_solid_initial`. The canonical setup path is the exported
+> `initialize_state(problem; …) -> (def, ws, u0)`
+> (src/Problem/adapter.jl), which mirrors `solve()` exactly:
+> `apply_initial_conditions!(problem)` → `to_problem_def` → `build_workspace` →
+> `create_state_vector`. Hand-rolled compositions that skip the IC step
+> integrate from the mesh constructor's placeholder state — a
+> resolution-independent error that still returns `retcode == :Success` —
+> and, under `WithChi`, leave the χ denominator at zero (§12.8.3).
 
 The block-major (rather than cell-major / interleaved) choice is deliberate. It
 makes each physical field a contiguous slice, which (i) lets `block_view` expose
@@ -209,7 +221,12 @@ both `Dual`-typed in the AD pass.
 > `update_state_geometry!`, `update_cross_section_area!`:
 > src/Problem/state_cache.jl. The user-facing `PyrolysisProblem` and the
 > `to_problem_def` adapter: src/Problem/pyrolysis_problem.jl and
-> src/Problem/adapter.jl.
+> src/Problem/adapter.jl. The canonical `(def, ws, u0)` front door is
+> `initialize_state(problem; …)` (same file) — it applies the problem's
+> initial conditions before packing and is the path `solve()` itself takes;
+> `to_problem_def`/`build_workspace`/`create_state_vector` remain public as
+> the advanced layer (AD workspaces, mid-simulation repacking, warm starts)
+> with the IC step on the caller (§15.1.1).
 
 ### 15.2.1 The `energy_form` / transpiration guard
 
@@ -371,26 +388,28 @@ the volume-change / $\chi$ model is in §10.
    1D the face sits at a node, and the cell-centered velocity used by advection
    is $w_{{\rm cell},i}=\tfrac12(w_L+w_R)$.
 
-8. **ALE advection** (`compute_ale_advection_term!`,
-   `compute_ale_species_advection!`). The advection correction is driven by the
-   mesh velocity $w$ alone — the gas Darcy flux is already in the lab-frame RHS
-   from step 4, and the $+w\,\partial_z$ correction converts it to the moving
-   frame (see §11.6, §13.8).
+8. **ALE mesh-motion transport** (`compute_ale_advection_term!` — energy,
+   override-only; `compute_ale_species_advection!` — gas flux form). The gas
+   Darcy flux is already in the lab-frame RHS from step 4; the flux-form
+   correction converts it to the moving frame conservatively (§11.2.3,
+   §13.8.3). The energy kernel runs only under `Workspace.w_override`, with
+   the relative velocity $w_{\rm rel} = w_{\rm applied} − w_{\rm physical}$
+   (§11.2.2): in production the matrix moves with the mesh, so no
+   temperature advection fires.
 
-9. **Apply ALE corrections** to $dT$ and $d\xi$ (`_apply_ale_advection!`). The
-   ALE chain-rule identity (§11.2) adds $w\cdot\nabla f$ for every field whose
-   lab-frame rate the Eulerian RHS already computes — $T$, and gas $\xi_g$
-   (whose full lab-frame transport flux entered in step 4, so the same
-   $+w\cdot\nabla$ frame conversion applies); solids are mesh-bound and get no
+9. **Apply ALE corrections** to $dT$ (override-only,
+   `_apply_ale_T_advection!`) and $d\xi$ (`_apply_ale_species_advection!`):
+   $$
+   \frac{d\xi_{g,i}}{dt}\bigg|_{\rm ALE} \mathrel{+}=
+   \frac{(\xi_{g,{\rm face}}\,w\,A)_R - (\xi_{g,{\rm face}}\,w\,A)_L}{V_i}
+   - \xi_{g,i}\Big(\frac{w_R - w_L}{\Delta z_i} + \theta_A\Big)
+   \quad(\text{gas only}),
+   $$
+   with first-order donor face values upwinded on the side the face moves
+   into, and boundary faces following the mass BCs (impermeable: no sweep
+   flux; open: zero-gradient ghost). Solids are mesh-bound and get no
    advection (their transport *is* the mesh motion, handled by dilation in
-   step 10):
-   $$
-   \frac{dT_i}{dt}\bigg|_{\rm ALE} \mathrel{+}= w_{{\rm cell},i}\Big(\frac{\partial T}{\partial z}\Big)_i,\qquad
-   \frac{d\xi_{g,i}}{dt}\bigg|_{\rm ALE} \mathrel{+}= w_{{\rm cell},i}\Big(\frac{\partial \xi_g}{\partial z}\Big)_i,
-   $$
-   with the gradients computed by a TVD-limited 3-point donor-side stencil (Van
-   Leer default), upwinded on the sign of the apparent transport velocity
-   $c=-w$ (§11.6.1, §13.8).
+   step 10).
 
 10. **Dilation correction** for mesh-bound (non-gas) species
     (`_apply_ale_dilation_correction!`):
@@ -398,8 +417,8 @@ the volume-change / $\chi$ model is in §10.
     \frac{d\xi_{j,i}}{dt}\bigg|_{\rm dilation} \mathrel{-}= \xi_{j,i}\,\theta_i\quad(j\ \text{non-gas}),
     $$
     which makes the solids Lagrangian (their *mass thickness* is locked to the
-    mesh; concentration rises as the cell contracts). Gases are excluded because
-    they flow through the pores and are not mesh-bound.
+    mesh; concentration rises as the cell contracts). Gases are excluded here
+    because their volume-rate term is already inside the flux form of step 9.
 
 11. **Pack the $T,\xi,z$ blocks.** $du[i]=dT_i/dt$ (with the ALE correction),
     $du[n+(j-1)n+i]=d\xi_{j,i}/dt$ (with advection + dilation), and
@@ -425,15 +444,19 @@ $$
 \frac{dz_k}{dt}=w_k,
 $$
 $$
-\frac{dT_i}{dt}=\frac{-(\nabla\cdot\mathbf{q})_i+S_{{\rm conv},i}+S_{{\rm gen},i}+Q_{{\rm rad},i}+Q_{{\rm rxn},i}}{\rho c_p^{\rm eff}{}_{,i}} + w_{{\rm cell},i}\Big(\frac{\partial T}{\partial z}\Big)_i,
+\frac{dT_i}{dt}=\frac{-(\nabla\cdot\mathbf{q})_i+S_{{\rm conv},i}+S_{{\rm gen},i}+Q_{{\rm rad},i}+Q_{{\rm rxn},i}}{\rho c_p^{\rm eff}{}_{,i}}
+\;\Bigl[\,+ w_{{\rm rel},i}\Big(\frac{\partial T}{\partial z}\Big)_i \text{ under \texttt{w\_override} only; } w_{\rm rel}\equiv 0 \text{ in production}\Bigr],
 $$
 $$
-\frac{d\xi_{j,i}}{dt}=-(\nabla\cdot\mathbf{J}_j)_i+S_{j,{\rm rxn},i} + \underbrace{w_{{\rm cell},i}\Big(\tfrac{\partial\xi_j}{\partial z}\Big)_i}_{\text{advection (gas only)}} - \underbrace{\xi_{j,i}\,\theta_i}_{\text{dilation (non-gas)}}.
+\frac{d\xi_{j,i}}{dt}=-(\nabla\cdot\mathbf{J}_j)_i+S_{j,{\rm rxn},i}
++ \underbrace{\frac{(\xi_{j,{\rm face}}wA)_R-(\xi_{j,{\rm face}}wA)_L}{V_i} - \xi_{j,i}\Big(\tfrac{w_R-w_L}{\Delta z_i}+\theta_A\Big)}_{\text{flux-form mesh-motion transport (gas only)}}
+- \underbrace{\xi_{j,i}\,\theta_i}_{\text{dilation (non-gas)}}.
 $$
 
 > **Implementation note.** ALE path: `_residual!(…, ::ALE)`,
 > `_compute_ale_mesh_velocity!`, `_compute_theta_A` / `_compute_theta_A_dispatched`,
-> `_apply_ale_advection!`, `_apply_ale_dilation_correction!`, and
+> `_apply_ale_T_advection!`, `_apply_ale_species_advection!`,
+> `_apply_ale_dilation_correction!`, and
 > `_pack_chi_derivative!` are all in src/Residual/residual.jl. The strain-rate
 > law `volume_change_rate` is in src/Physics/volume_change.jl. The ALE flux
 > kernels are in src/Discretization/ale_fluxes.jl.

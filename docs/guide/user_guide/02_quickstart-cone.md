@@ -181,9 +181,10 @@ Two conventions to internalise:
 
 For a one-product reaction the simpler form `Reaction(:name, 1 => 2; A, E, h)`
 omits `yields` (the single product then has stoichiometry 1.0). Temperature
-gates `T_min`/`T_max` default to `0.0` and `Inf` (always active). See Technical
-Reference §6 for the full rate law, the smooth `tanh` temperature gates, and the
-depletion limiter.
+gates `T_min`/`T_max` default to `0.0` and `Inf` (always active); their smooth
+tanh ramp width is `gate_width` (default `1.0` K — narrow it for hard-switch
+gates, §UG-3.4.1). See Technical Reference §6 for the full rate law, the
+smooth `tanh` temperature gates, and the depletion limiter.
 
 ### 2.2.4 Assemble the `Material`
 

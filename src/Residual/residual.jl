@@ -167,36 +167,67 @@ function _residual!(du, u, def::ProblemDef, t, ws::Workspace, ::ALE)
         θ_A = θ_A_global,
     )
 
+    # Verification hook: replace the reaction-driven mesh velocity with a
+    # prescribed w(z_node, t) — θ_work above keeps its physical values so the
+    # dilation correction is unaffected. See `Workspace.w_override`. Local
+    # binding so the Union{Nothing,Function} field narrows across the branch
+    # (mutable-struct field loads don't flow through `!==` checks).
+    w_ovr = ws.w_override
+    if w_ovr !== nothing
+        copyto!(ws.w_physical, ws.w_work)
+        _apply_mesh_velocity_override!(ws.w_work, u, layout, w_ovr, t)
+    end
+
     _interpolate_node_to_face!(ws.w_face, ws.w_work, mesh)
 
-    # 6) ALE advection (mesh-motion advection only; the Darcy gas flux is
-    #    already in the lab-frame RHS from step 4)
-    Discretization.compute_ale_advection_term!(
-        ws.ale_advection,
-        ws.state_cache,
-        mesh,
-        ws.w_work;
-        limiter = ws.ale_limiter,
-    )
+    # 6) ALE mesh-motion advection (the Darcy gas flux is already in the
+    #    lab-frame RHS from step 4).
+    #
+    #    Energy: condensed species are mesh-bound (v_solid ≡ w, tech-ref
+    #    §11.1.2), so the matrix-carried thermal mass (ρcp_eff is matrix-only)
+    #    is advected relative to the mesh only by w_rel = w_applied −
+    #    w_physical. In production the mesh velocity IS the material velocity
+    #    — w_rel ≡ 0 and the energy kernel does not fire. It fires only under
+    #    the `w_override` verification hook, where w_applied ≠ w_physical.
+    #
+    #    Gas species are NOT mesh-bound: their mesh-motion transport is the
+    #    conservative flux form driven by the full applied mesh velocity
+    #    (solids get no advection term; see tech-ref §11.2.3 — the same
+    #    relative-velocity logic). Boundary sweep fluxes follow the mass BCs:
+    #    an impermeable face carries its gas along (compression), an open
+    #    face exchanges at the zero-gradient ghost value.
+    if w_ovr !== nothing
+        @inbounds for k in eachindex(ws.w_physical)
+            ws.w_physical[k] = ws.w_work[k] - ws.w_physical[k]  # now w_rel
+        end
+        Discretization.compute_ale_advection_term!(
+            ws.ale_advection,
+            ws.state_cache,
+            mesh,
+            ws.w_physical;
+            limiter = ws.ale_limiter,
+        )
+    end
     Discretization.compute_ale_species_advection!(
         ws.ale_species_advection,
         ws.state_cache,
         mesh,
         material,
         ws.w_work;
-        limiter = ws.ale_limiter,
+        θ_A = θ_A_global,
+        top_gas_open = !(bc_set.mass.top isa ImpermeableBC),
+        bottom_gas_open = !(bc_set.mass.bottom isa ImpermeableBC),
     )
 
-    # 7) Apply ALE corrections
-    _apply_ale_advection!(
-        ws.dT_work,
-        ws.dξ_work,
-        ws.ale_advection,
-        ws.ale_species_advection,
-        NC,
-    )
+    # 7) Apply ALE corrections (T advection only when it was computed)
+    if w_ovr !== nothing
+        _apply_ale_T_advection!(ws.dT_work, ws.ale_advection)
+    end
+    _apply_ale_species_advection!(ws.dξ_work, ws.ale_species_advection, NC)
 
-    # 8) Dilation correction for mesh-bound species
+    # 8) Dilation correction for mesh-bound (solid/liquid) species. Gas is
+    #    NOT included here: its volume-rate term is part of the conservative
+    #    flux form in step 6.
     _apply_ale_dilation_correction!(ws.dξ_work, ws.θ_work, ws.state_cache, material)
 
     # 9) Pack du
@@ -428,6 +459,28 @@ function _compute_ale_mesh_velocity!(
     return nothing
 end
 
+"""
+	_apply_mesh_velocity_override!(w, u, layout, override, t)
+
+Replace every node velocity with `override(z_node, t)`, reading node
+positions from the live state's z-block. Verification-only path (see
+`Workspace.w_override`); called after the physical velocity computation so
+`θ_work` retains its reaction-driven values.
+"""
+function _apply_mesh_velocity_override!(
+    w::AbstractVector,
+    u::AbstractVector,
+    layout,
+    override::Function,
+    t::Real,
+)
+    zoff = layout.n_cells * (1 + n_components(layout))
+    @inbounds for i in eachindex(w)
+        w[i] = override(u[zoff+i], t)
+    end
+    return nothing
+end
+
 function _interpolate_node_to_face!(w_face::AbstractVector, w_nodes::AbstractVector, mesh)
     @inbounds for f in eachindex(mesh.faces)
         face = mesh.faces[f]
@@ -436,16 +489,20 @@ function _interpolate_node_to_face!(w_face::AbstractVector, w_nodes::AbstractVec
     return nothing
 end
 
-function _apply_ale_advection!(
-    dT::AbstractVector,
+function _apply_ale_T_advection!(dT::AbstractVector, ale_advection::AbstractVector)
+    @inbounds for i in eachindex(dT)
+        dT[i] += ale_advection[i]
+    end
+    return nothing
+end
+
+function _apply_ale_species_advection!(
     dξ::AbstractMatrix,
-    ale_advection::AbstractVector,
     ale_species_advection::AbstractMatrix,
     NC::Int,
 )
-    n_cells = length(dT)
+    n_cells = size(dξ, 2)
     @inbounds for i = 1:n_cells
-        dT[i] += ale_advection[i]
         for j = 1:NC
             dξ[j, i] += ale_species_advection[j, i]
         end

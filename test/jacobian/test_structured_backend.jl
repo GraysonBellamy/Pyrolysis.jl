@@ -23,7 +23,6 @@ configuration.
 using Test
 using SparseArrays
 using Pyrolysis
-using Pyrolysis: to_problem_def, build_workspace
 using Pyrolysis.Jacobian:
     verify_jacobian_at,
     JacobianSpec,
@@ -213,16 +212,21 @@ const _PROBES = (
         bc = BoundaryConditionSet(thermal = (top = HeatFluxBC(0.0), bottom = AdiabaticBC()))
         problem =
             PyrolysisProblem(mesh = mesh, material = mat, bc_set = bc, tspan = (0.0, 100.0))
-        Pyrolysis.Problem.apply_initial_conditions!(problem.mesh, problem)
-        def = to_problem_def(
+        def, ws, u = initialize_state(
             problem;
             use_ale = true,
             radiation_model = Pyrolysis.Materials.SURFACE_ABSORPTION,
             radiation_intensity = 50e3,
         )
-        ws = build_workspace(problem, def)
-        u = create_state_vector(ws.layout, ws.mesh)
         _set_state!(u, ws.layout.n_cells, 1000.0, (400.0, 0.0))
+        # Non-degenerate χ block: with χ (or the m_dry_solid_initial
+        # denominator) left at zero this fixture sat at the χ̄ = 0 identity
+        # point and the round-trip never exercised the shrinkage coupling
+        # (2026-07-06 audit finding, fixed by the initialize_state migration).
+        for (k, idx) in enumerate(Pyrolysis.Problem.chi_range(ws.layout))
+            u[idx] = 0.2 + 0.05 * k
+        end
+        @test column_chi_bar_from_state(u, ws.layout, ws.mesh) > 0
 
         ref_spec = JacobianSpec(DenseAD_ForwardDiff(), def, ws)
         spec = JacobianSpec(Structured(strategy = ApproxSolve()), def, ws)

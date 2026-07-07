@@ -1,7 +1,6 @@
 using Test
 using SparseArrays
 using Pyrolysis
-using Pyrolysis: to_problem_def, build_workspace
 using Pyrolysis.Jacobian: build_sparsity, sparsity_profile
 using Pyrolysis.Materials: BEER_LAMBERT, SURFACE_ABSORPTION
 
@@ -28,15 +27,12 @@ function _build_ale_withchi_darcy_surface_absorption(; n_cells = PERF_N_CELLS)
     bc = BoundaryConditionSet(thermal = (top = HeatFluxBC(0.0), bottom = AdiabaticBC()))
     problem =
         PyrolysisProblem(mesh = mesh, material = mat, bc_set = bc, tspan = (0.0, 100.0))
-    Pyrolysis.Problem.apply_initial_conditions!(problem.mesh, problem)
-    def = to_problem_def(
+    def, ws, u = initialize_state(
         problem;
         use_ale = true,
         radiation_model = SURFACE_ABSORPTION,
         radiation_intensity = 50e3,
     )
-    ws = build_workspace(problem, def)
-    u = create_state_vector(ws.layout, ws.mesh)
     return def, ws, u
 end
 

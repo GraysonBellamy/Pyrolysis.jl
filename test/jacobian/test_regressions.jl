@@ -1,7 +1,6 @@
 using Test
 using SparseArrays
 using Pyrolysis
-using Pyrolysis: to_problem_def, build_workspace
 using Pyrolysis.Jacobian:
     verify_jacobian_at, JacobianSpec, DenseAD_ForwardDiff, Structured, DirectSolve
 
@@ -37,7 +36,12 @@ end
 # letting us evaluate the Jacobian at temperatures within ~1 K of the
 # window edge where the tanh-window correction term is largest
 # (sech²(1)/(1+tanh(1)) ≈ 0.24).
-function _build_window_problem(; T_min::Float64, T_max::Float64, n_cells::Int = 50)
+function _build_window_problem(;
+    T_min::Float64,
+    T_max::Float64,
+    gate_width::Float64 = 1.0,
+    n_cells::Int = 50,
+)
     virgin = SolidComponent(:virgin, ρ = 1190.0, c = 1420.0, k = 0.21, ε = 0.86)
     gas = GaseousComponent(:MMA, M = 0.100, c = 1500.0, k = 0.02, λ = 1e-5)
     rxn = Reaction(
@@ -48,16 +52,14 @@ function _build_window_problem(; T_min::Float64, T_max::Float64, n_cells::Int = 
         h = -300e3,
         T_min = T_min,
         T_max = T_max,
+        gate_width = gate_width,
     )
     mat = Material(name = :PMMA_window, components = (virgin, gas), reactions = (rxn,))
     mesh = create_uniform_mesh(0.01, n_cells, Val(2))
     bc = BoundaryConditionSet(thermal = (top = HeatFluxBC(50e3), bottom = AdiabaticBC()))
     problem =
         PyrolysisProblem(mesh = mesh, material = mat, bc_set = bc, tspan = (0.0, 100.0))
-    Pyrolysis.Problem.apply_initial_conditions!(problem.mesh, problem)
-    def = to_problem_def(problem; use_ale = false)
-    ws = build_workspace(problem, def)
-    u = create_state_vector(ws.layout, ws.mesh)
+    def, ws, u = initialize_state(problem; use_ale = false)
     return def, ws, u
 end
 
@@ -80,10 +82,8 @@ function _build_generation_sink_problem(; n_cells::Int = 8)
     bc = BoundaryConditionSet(thermal = (top = HeatFluxBC(50e3), bottom = AdiabaticBC()))
     problem =
         PyrolysisProblem(mesh = mesh, material = mat, bc_set = bc, tspan = (0.0, 100.0))
-    Pyrolysis.Problem.apply_initial_conditions!(problem.mesh, problem)
-    def = to_problem_def(problem; use_ale = false, energy_form = :with_generation_sink)
-    ws = build_workspace(problem, def)
-    u = create_state_vector(ws.layout, ws.mesh)
+    def, ws, u =
+        initialize_state(problem; use_ale = false, energy_form = :with_generation_sink)
     return def, ws, u
 end
 
@@ -111,10 +111,8 @@ function _build_generation_sink_tdep_cp_problem(; n_cells::Int = 8)
     bc = BoundaryConditionSet(thermal = (top = HeatFluxBC(50e3), bottom = AdiabaticBC()))
     problem =
         PyrolysisProblem(mesh = mesh, material = mat, bc_set = bc, tspan = (0.0, 100.0))
-    Pyrolysis.Problem.apply_initial_conditions!(problem.mesh, problem)
-    def = to_problem_def(problem; use_ale = false, energy_form = :with_generation_sink)
-    ws = build_workspace(problem, def)
-    u = create_state_vector(ws.layout, ws.mesh)
+    def, ws, u =
+        initialize_state(problem; use_ale = false, energy_form = :with_generation_sink)
     return def, ws, u
 end
 
@@ -180,6 +178,30 @@ end
             def, ws, u = _build_window_problem(T_min = 400.0, T_max = 1500.0)
             n = ws.layout.n_cells
             _set_state!(u, n, 1499.0, (1100.0, 0.0))
+            ref_spec = JacobianSpec(DenseAD_ForwardDiff(), def, ws)
+            spec = JacobianSpec(Structured(strategy = DirectSolve()), def, ws)
+            report = verify_jacobian_at(
+                spec,
+                def,
+                ws,
+                u,
+                0.0;
+                reference_spec = ref_spec,
+                rtol = 1e-6,
+                atol = 1e-10,
+            )
+            @test report.passed
+        end
+
+        # Narrow gate (gate_width = 0.1 K): the sech² slope at the edge is 10×
+        # the default's; the width reaches every Jacobian coupling only through
+        # ForwardDiff-through-`reaction_rate`, so this pins that no path
+        # hard-codes the 1 K ramp. Evaluate mid-ramp (T − T_min = 0.05 = w/2).
+        let
+            def, ws, u =
+                _build_window_problem(T_min = 749.0, T_max = 1500.0, gate_width = 0.1)
+            n = ws.layout.n_cells
+            _set_state!(u, n, 749.05, (1100.0, 0.0))
             ref_spec = JacobianSpec(DenseAD_ForwardDiff(), def, ws)
             spec = JacobianSpec(Structured(strategy = DirectSolve()), def, ws)
             report = verify_jacobian_at(
@@ -450,10 +472,7 @@ end
             BoundaryConditionSet(thermal = (top = HeatFluxBC(50e3), bottom = AdiabaticBC()))
         problem =
             PyrolysisProblem(mesh = mesh, material = mat, bc_set = bc, tspan = (0.0, 100.0))
-        Pyrolysis.Problem.apply_initial_conditions!(problem.mesh, problem)
-        def = to_problem_def(problem; use_ale = false)
-        ws = build_workspace(problem, def)
-        u = create_state_vector(ws.layout, ws.mesh)
+        def, ws, u = initialize_state(problem; use_ale = false)
         _set_state!(u, 1, 1000.0, (1100.0, 0.0))
         _assert_backends_agree(def, ws, u)
     end
@@ -468,10 +487,7 @@ end
             BoundaryConditionSet(thermal = (top = HeatFluxBC(50e3), bottom = AdiabaticBC()))
         problem =
             PyrolysisProblem(mesh = mesh, material = mat, bc_set = bc, tspan = (0.0, 100.0))
-        Pyrolysis.Problem.apply_initial_conditions!(problem.mesh, problem)
-        def = to_problem_def(problem; use_ale = false)
-        ws = build_workspace(problem, def)
-        u = create_state_vector(ws.layout, ws.mesh)
+        def, ws, u = initialize_state(problem; use_ale = false)
         _set_state!(u, 200, 1000.0, (1100.0, 0.5))
         _assert_backends_agree(def, ws, u)
     end
@@ -487,10 +503,7 @@ end
             BoundaryConditionSet(thermal = (top = HeatFluxBC(50e3), bottom = AdiabaticBC()))
         problem =
             PyrolysisProblem(mesh = mesh, material = mat, bc_set = bc, tspan = (0.0, 100.0))
-        Pyrolysis.Problem.apply_initial_conditions!(problem.mesh, problem)
-        def = to_problem_def(problem; use_ale = false)
-        ws = build_workspace(problem, def)
-        u = create_state_vector(ws.layout, ws.mesh)
+        def, ws, u = initialize_state(problem; use_ale = false)
         _set_state!(u, 30, 400.0, (1100.0, 1.0))
         _assert_backends_agree(def, ws, u)
     end
@@ -531,15 +544,12 @@ end
         bc = BoundaryConditionSet(thermal = (top = HeatFluxBC(0.0), bottom = AdiabaticBC()))
         problem =
             PyrolysisProblem(mesh = mesh, material = mat, bc_set = bc, tspan = (0.0, 100.0))
-        Pyrolysis.Problem.apply_initial_conditions!(problem.mesh, problem)
-        def = to_problem_def(
+        def, ws, u = initialize_state(
             problem;
             use_ale = true,
             radiation_model = Pyrolysis.Materials.BEER_LAMBERT,
             radiation_intensity = 50e3,
         )
-        ws = build_workspace(problem, def)
-        u = create_state_vector(ws.layout, ws.mesh)
         _set_state!(u, 50, 900.0, (200.0, 50.0, 3.0))
         _assert_backends_agree(def, ws, u)
     end

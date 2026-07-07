@@ -208,7 +208,13 @@ end
 	create_state_vector(layout::StateLayout, mesh) -> Vector{Float64}
 
 Allocate a fresh state vector sized to `layout` and pack the current
-mesh state into it. Used by `solve()` to build `u0`.
+mesh state into it.
+
+Packs the mesh **as-is**: it does not consult the problem's initial-condition
+callables or populate `mesh.m_dry_solid_initial`. For building `u0`, use
+[`initialize_state`](@ref) (the canonical path, which `solve()` also takes) or
+call `apply_initial_conditions!(problem)` first — otherwise `u0` silently
+carries the mesh constructor's placeholder state.
 """
 function create_state_vector(l::StateLayout, mesh)
     u = Vector{Float64}(undef, state_length(l))

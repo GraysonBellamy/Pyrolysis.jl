@@ -17,7 +17,6 @@ Post-fix convention:
 
 using Test
 using Pyrolysis
-using Pyrolysis: to_problem_def, build_workspace
 using Pyrolysis.Materials: NO_RADIATION, SURFACE_ABSORPTION, BEER_LAMBERT, P1_QUASI_STEADY
 using Pyrolysis.Physics: compute_beer_lambert_source!, compute_radiation_source!
 using Pyrolysis.Properties: effective_emissivity
@@ -50,10 +49,7 @@ function _radiation_fixture()
     )
     problem =
         PyrolysisProblem(mesh = mesh, material = mat, bc_set = bc, tspan = (0.0, 100.0))
-    Pyrolysis.Problem.apply_initial_conditions!(problem.mesh, problem)
-    def = to_problem_def(problem; radiation_model = BEER_LAMBERT)
-    ws = build_workspace(problem, def)
-    u = create_state_vector(ws.layout, ws.mesh)
+    def, ws, u = initialize_state(problem; radiation_model = BEER_LAMBERT)
     n = ws.layout.n_cells
     # Graded hot state with mixed composition (ε_eff strictly between the
     # component values, away from the clamp).
