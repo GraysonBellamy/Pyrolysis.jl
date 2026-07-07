@@ -116,6 +116,54 @@
         @test ξB_at(tpeak) > ξB_at(tpeak + 0.01)
     end
 
+    @testset "radiative cooling implicit solution" begin
+        T∞, Ti = 300.0, 900.0
+
+        # 1. G against composite-Simpson quadrature of ∫dT/(T⁴−T∞⁴) — the
+        #    plan flags this antiderivative as sign-error-prone; this is the
+        #    mandated independent check.
+        for T_hi in (500.0, 700.0, 900.0)
+            T_lo = 400.0
+            n = 4000
+            hstep = (T_hi - T_lo) / n
+            f(T) = 1 / (T^4 - T∞^4)
+            simpson =
+                hstep / 3 * (
+                    f(T_lo) +
+                    f(T_hi) +
+                    4 * sum(f(T_lo + hstep * i) for i = 1:2:(n-1)) +
+                    2 * sum(f(T_lo + hstep * i) for i = 2:2:(n-2))
+                )
+            @test radiative_cooling_G(T_hi, T∞) - radiative_cooling_G(T_lo, T∞) ≈ simpson rtol =
+                1e-10
+        end
+
+        # 2. Round trip: T(t(T)) = T through the bisection inverse.
+        K = 5e-10
+        for T in (850.0, 600.0, 400.0)
+            t = (radiative_cooling_G(Ti, T∞) - radiative_cooling_G(T, T∞)) / K
+            @test radiative_cooling_T(t; Ti = Ti, T∞ = T∞, K = K) ≈ T rtol = 1e-10
+        end
+
+        # 3. Early-time linearization: T ≈ Tᵢ − K(Tᵢ⁴−T∞⁴)t.
+        t_small = 1e-4 / (K * Ti^3)
+        T_lin = Ti - K * (Ti^4 - T∞^4) * t_small
+        @test radiative_cooling_T(t_small; Ti = Ti, T∞ = T∞, K = K) ≈ T_lin rtol = 1e-3
+
+        # 4. Steady balance root: residual is zero and root is bracketed
+        #    sensibly (~732 K for these cone-like parameters).
+        σ = 5.670374419e-8
+        Ts = radiative_convective_equilibrium_Ts(
+            q_abs = 20e3,
+            ε = 0.85,
+            h = 15.0,
+            T∞ = 300.0,
+            σ = σ,
+        )
+        @test abs(20e3 - 0.85 * σ * (Ts^4 - 300.0^4) - 15.0 * (Ts - 300.0)) < 1e-6
+        @test 700.0 < Ts < 760.0
+    end
+
     @testset "slab constant-flux series (C&J §3.8)" begin
         # 1. Fourier identity: φ(x̃, 0) = 0 for all x̃ (the series is exactly
         #    the cosine expansion of −(3x̃²−1)/6). Must be evaluated AT Fo = 0:
