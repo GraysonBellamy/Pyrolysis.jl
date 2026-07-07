@@ -82,6 +82,116 @@ using Pyrolysis.Physics: reaction_rate, DepletionLimiter
         @test d12 ≈ k * (n + 1) * (1e-12)^n / ξ_th rtol = 1e-9
     end
 
+    @testset "temperature gate width" begin
+        # Gate factor is 0.5·(1 + tanh((T − T_min)/gate_width)); default width
+        # 1.0 K reproduces the historical bare-tanh ramp bit-for-bit.
+        T_min = 600.0
+        rxn_default =
+            Reaction(:gate_default, 1 => 2, A = 1e10, E = 150e3, h = 5e5, T_min = T_min)
+        @test rxn_default.gate_width == 1.0
+        r_ref(rxn, T) = reaction_rate(rxn, (1.0, 0.0), T; limiter = no_limiter)
+        r_open(T) = reaction_rate(rxn1, (1.0, 0.0), T; limiter = no_limiter)
+        for T in (T_min - 3.0, T_min, T_min + 3.0)
+            @test r_ref(rxn_default, T) ≈ r_open(T) * 0.5 * (1 + tanh(T - T_min)) rtol =
+                1e-14
+        end
+
+        # Narrow gate sharpens the ramp around T_min without moving it.
+        w = 0.1
+        rxn_narrow = Reaction(
+            :gate_narrow,
+            1 => 2,
+            A = 1e10,
+            E = 150e3,
+            h = 5e5,
+            T_min = T_min,
+            gate_width = w,
+        )
+        for T in (T_min - 0.5, T_min - 0.05, T_min, T_min + 0.05, T_min + 0.5)
+            @test r_ref(rxn_narrow, T) ≈ r_open(T) * 0.5 * (1 + tanh((T - T_min) / w)) rtol =
+                1e-14
+        end
+        # Midpoint pinned at T_min for any width; 5 widths out the gate is open.
+        @test r_ref(rxn_narrow, T_min) ≈ 0.5 * r_open(T_min) rtol = 1e-12
+        @test r_ref(rxn_narrow, T_min + 5w) ≈ r_open(T_min + 5w) * 0.5 * (1 + tanh(5.0)) rtol =
+            1e-12
+
+        # T_max gate uses the same width (mirrored form).
+        T_max = 900.0
+        rxn_tmax = Reaction(
+            :gate_tmax,
+            1 => 2,
+            A = 1e10,
+            E = 150e3,
+            h = 5e5,
+            T_max = T_max,
+            gate_width = w,
+        )
+        rxn_tmax_open = Reaction(:gate_tmax_open, 1 => 2, A = 1e10, E = 150e3, h = 5e5)
+        for T in (T_max - 0.5, T_max, T_max + 0.5)
+            @test r_ref(rxn_tmax, T) ≈
+                  r_ref(rxn_tmax_open, T) * 0.5 * (1 + tanh((T_max - T) / w)) rtol = 1e-14
+        end
+
+        # AD through T stays finite and matches the analytic sech² slope at
+        # the gate midpoint (the width threads through ForwardDiff untouched).
+        rate_T(T) = reaction_rate(rxn_narrow, (1.0, 0.0), T; limiter = no_limiter)
+        dT = ForwardDiff.derivative(rate_T, T_min)
+        k_arr(T) = reaction_rate(rxn1, (1.0, 0.0), T; limiter = no_limiter)
+        dk = ForwardDiff.derivative(k_arr, T_min)
+        @test dT ≈ 0.5 * dk + k_arr(T_min) * 0.5 / w rtol = 1e-10
+
+        # Construction rejects degenerate widths, numeric and symbolic forms.
+        for bad in (0.0, -1.0, Inf, NaN)
+            @test_throws ArgumentError Reaction(
+                :bad_gate,
+                1 => 2,
+                A = 1e10,
+                E = 150e3,
+                h = 5e5,
+                gate_width = bad,
+            )
+            @test_throws ArgumentError Reaction(
+                :bad_gate,
+                :virgin => :gas,
+                A = 1e10,
+                E = 150e3,
+                h = 5e5,
+                gate_width = bad,
+            )
+            @test_throws ArgumentError Reaction(
+                :bad_gate,
+                :virgin => (:char, :gas),
+                A = 1e10,
+                E = 150e3,
+                h = 5e5,
+                yields = (0.3, 0.7),
+                gate_width = bad,
+            )
+        end
+
+        # Symbolic constructors thread the width through Material resolution.
+        mat = Material(
+            name = :gate_thread,
+            components = (
+                SolidComponent(:virgin; ρ = 1000.0, c = 1000.0, k = 0.2),
+                GaseousComponent(:gas; M = 0.05, c = 1000.0, k = 0.02, λ = 1e-5),
+            ),
+            reactions = (
+                Reaction(
+                    :melt,
+                    :virgin => :gas,
+                    A = 1e10,
+                    E = 150e3,
+                    h = 5e5,
+                    T_min = T_min,
+                    gate_width = w,
+                ),
+            ),
+        )
+        @test mat.reactions[1].gate_width == w
+    end
+
     @testset "construction rejects negative orders" begin
         @test_throws ArgumentError Reaction(
             :bad,

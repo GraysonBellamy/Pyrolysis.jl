@@ -17,6 +17,7 @@ module Residual
 
 using ..Materials
 using ..Materials: n_components, n_reactions, is_gas, NO_RADIATION, Material
+using ..BoundaryConditions: ImpermeableBC
 using ..Geometry
 using ..Properties
 using ..Physics

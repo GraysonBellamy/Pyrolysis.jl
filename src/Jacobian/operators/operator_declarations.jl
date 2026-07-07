@@ -32,12 +32,16 @@ using ..Materials: Material
 """
 	ALEAdvectionOperator <: Operator
 
-ALE advective contribution `(w · ∂T/∂x, w · ∂ξ/∂x)` via the limited
-gradient. Reads `:w_cell` from `ALEMeshVelocityOperator` so the framework
-composes the local face Jacobian with the cumulative-mesh-velocity
+Conservative flux-form gas mesh-motion transport (gas components only):
+`(ξ_face·w)_faces/Δz − ξ·(V̇/V)` with first-order donor face values. The
+energy equation has no mesh-motion advection in production — solids are
+mesh-bound, so T is advected only by the mesh−material relative velocity,
+which is identically zero (see the module docstring in `ale_advection.jl`).
+Reads `:w_cell` from `ALEMeshVelocityOperator` so the framework composes
+the local face Jacobian with the cumulative-mesh-velocity
 [`PrefixSumCoupling`](@ref).
 
-`apply!`, `contribute_to_jacobian!`, and the AD workspace
+`apply!`, `contribute_to_jacobian!`, and the workspace
 [`build_ale_advection_workspace`](@ref) live in
 [`operators/ale_advection.jl`](ale_advection.jl).
 """
@@ -45,7 +49,7 @@ struct ALEAdvectionOperator <: Operator end
 
 reads(::ALEAdvectionOperator) = (:w_cell, :theta)
 writes(::ALEAdvectionOperator) = ()
-stencil(::ALEAdvectionOperator) = (cells = -2:2,)
+stencil(::ALEAdvectionOperator) = (cells = -1:1,)
 
 # ============================================================================
 # ALEMeshVelocityOperator (real impl in `ale_mesh_velocity.jl`)

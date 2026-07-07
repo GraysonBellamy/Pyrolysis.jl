@@ -6,12 +6,9 @@ using ..Problem:
     PyrolysisProblem,
     PyrolysisSolution,
     validate_problem,
-    apply_initial_conditions!,
-    to_problem_def,
-    build_workspace,
+    initialize_state,
     StateLayout,
     state_length,
-    create_state_vector,
     get_temperature,
     get_concentration,
     get_node_position,
@@ -700,12 +697,6 @@ function solve(
     # Validate radiation model selection
     _validate_radiation_model(radiation_model, material)
 
-    # Apply initial conditions to mesh
-    apply_initial_conditions!(problem)
-
-    # Create solution container
-    solution = PyrolysisSolution(problem)
-
     # Start timing
     start_time = time()
 
@@ -758,8 +749,11 @@ function solve(
         @info "Using BEER_LAMBERT radiation model"
     end
 
-    def = to_problem_def(
+    # Canonical setup: ICs → ProblemDef → Workspace → u0 (single sequence,
+    # shared with the exported `initialize_state`).
+    def, ws, u0 = initialize_state(
         problem;
+        min_thickness = min_thickness,
         use_ale = use_ale,
         radiation_model = radiation_model,
         radiation_intensity = I_radiation,
@@ -768,8 +762,11 @@ function solve(
         use_transpiration_bc = use_transpiration_bc,
         use_blowing_correction = use_blowing_correction,
     )
-    ws = build_workspace(problem, def; min_thickness = min_thickness)
-    u0 = create_state_vector(ws.layout, ws.mesh)
+
+    # Create solution container (after initialize_state so any mesh state it
+    # snapshots reflects the applied initial conditions).
+    solution = PyrolysisSolution(problem)
+
     if warm_start !== nothing
         _apply_warm_start!(u0, problem, ws.layout, warm_start)
     end

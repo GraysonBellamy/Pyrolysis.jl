@@ -666,7 +666,11 @@ function _compute_jacobian!(
             cache.ale_mesh_vel_ws.w_node,
             cache.ctx,
             cache.ale_advection_ws;
-            limiter = cache.ale_limiter,
+            θ_A = cache.ale_mesh_vel_ws.theta_A[],
+            top_gas_open = !(cache.bc_set.mass.top isa BoundaryConditions.ImpermeableBC),
+            bottom_gas_open = !(
+                cache.bc_set.mass.bottom isa BoundaryConditions.ImpermeableBC
+            ),
             assembly_profile = cache.assembly_profile,
         )
         # ALE dilation correction for solid-phase ξ rows. Mirrors

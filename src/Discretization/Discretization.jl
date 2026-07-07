@@ -82,7 +82,6 @@ export estimate_gas_velocity_from_generation!
 # ALE Darcy-Fick integration
 export mesh_velocity_at_face, ale_gas_flux_darcy_fick
 export compute_ale_gas_fluxes_darcy_fick!
-export compute_ale_species_advection_darcy!
 
 # Exports - Darcy Velocity
 export darcy_velocity_face, compute_darcy_velocity!

@@ -9,7 +9,6 @@ if !isdefined(@__MODULE__, :_PYROLYSIS_PERF_HELPERS_LOADED)
     const _PYROLYSIS_PERF_HELPERS_LOADED = true
 
     using Pyrolysis
-    using Pyrolysis: to_problem_def, build_workspace
     using Pyrolysis.Materials: SURFACE_ABSORPTION, BEER_LAMBERT
 
     const PERF_NC = 2
@@ -24,15 +23,12 @@ if !isdefined(@__MODULE__, :_PYROLYSIS_PERF_HELPERS_LOADED)
         radiation_model = Pyrolysis.Materials.NO_RADIATION,
         radiation_intensity::Real = 0.0,
     )
-        Pyrolysis.Problem.apply_initial_conditions!(problem.mesh, problem)
-        def = to_problem_def(
+        def, ws, u = initialize_state(
             problem;
             use_ale = use_ale,
             radiation_model = radiation_model,
             radiation_intensity = radiation_intensity,
         )
-        ws = build_workspace(problem, def)
-        u = create_state_vector(ws.layout, ws.mesh)
         du = similar(u)
         return def, ws, u, du
     end

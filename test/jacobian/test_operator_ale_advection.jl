@@ -1,23 +1,28 @@
 """
 `ALEAdvectionOperator` correctness tests.
 
+The operator is **gas-species-only** and mirrors the conservative flux-form
+kernel `compute_ale_species_advection!`: production has no energy
+mesh-motion advection (solids are mesh-bound; T is advected only by the
+mesh−material relative velocity, which is identically zero — the
+`w_override` verification hook is the sole exception and is out of
+structured-Jacobian scope). Every gate below therefore expects zero T-row
+contributions.
+
 Three gates:
 
 1. **`apply!` equivalence.** Calling
    `apply!(dT, dξ, ALEAdvectionOperator(), state, mesh, w_node, material)`
-   reproduces the existing residual's ALE advection contribution
-   bit-for-bit. The operator wraps the shared
-   [`compute_ale_advection_term!`](@ref) and
-   [`compute_ale_species_advection!`](@ref) functions — there is no math
+   reproduces the residual's gas flux-form transport bit-for-bit and leaves
+   `dT` untouched. The operator wraps the shared
+   [`compute_ale_species_advection!`](@ref) function — there is no math
    duplication.
 
-2. **`contribute_to_jacobian!` direct chain rule.** Face-local AD over
-   `_limited_gradient` captures the direct (T, ξ) stencil derivatives
-   *including* the limiter chain rule that the legacy analytical kernel
-   skips. We verify against
-   ForwardDiff over a closure that holds `w_node` fixed, so the AD
-   reference and the operator's writes both ignore the indirect (cumulative-
-   `w`) chain rule.
+2. **`contribute_to_jacobian!` direct chain rule.** The flux-form term is
+   linear in ξ at fixed `w_node`, so the operator writes analytic entries.
+   We verify against ForwardDiff over a closure that holds `w_node` fixed,
+   so the AD reference and the operator's writes both ignore the indirect
+   (cumulative-`w`) chain rule.
 
 3. **`contribute_to_jacobian!` indirect chain rule.** Once we densify the
    pushed [`EmbeddedScaledPrefixSumCoupling`](@ref) entries onto the
@@ -36,8 +41,7 @@ using SparseArrays
 using ForwardDiff
 using Pyrolysis
 using Pyrolysis.Materials: n_components, Material
-using Pyrolysis.Discretization:
-    VANLEER, compute_ale_advection_term!, compute_ale_species_advection!
+using Pyrolysis.Discretization: compute_ale_species_advection!
 using Pyrolysis.Problem: populate!, build_ad_workspace
 using Pyrolysis.Residual: _compute_ale_mesh_velocity!
 using Pyrolysis.Jacobian:
@@ -56,23 +60,14 @@ include(joinpath(@__DIR__, "..", "perf", "perf_helpers.jl"))
 const _strain_rate_derivatives! =
     getfield(Pyrolysis.Jacobian, :compute_strain_rate_derivatives!)
 
+# Boundary flags used consistently for operator + references throughout this
+# file (a venting top, impermeable bottom — the common production shape).
+const _TOP_OPEN = true
+const _BOTTOM_OPEN = false
+
 # ---------------------------------------------------------------------------
 # State setters
 # ---------------------------------------------------------------------------
-
-function _set_uniform_state!(u, layout, T_val, ξ_vals)
-    n = layout.n_cells
-    @inbounds for i = 1:n
-        u[i] = T_val
-    end
-    @inbounds for (j, ξj) in enumerate(ξ_vals)
-        off = n + (j - 1) * n
-        for i = 1:n
-            u[off+i] = ξj
-        end
-    end
-    return u
-end
 
 function _set_ramp_state!(u, layout, T_lo, T_hi, ξ_vals)
     n = layout.n_cells
@@ -118,19 +113,14 @@ function _refresh_state!(ws, u, def, material)
 end
 
 # ---------------------------------------------------------------------------
-# Reference: full ALE advection contribution as a function of (u),
+# Reference: full gas-transport contribution as a function of (u),
 # *recomputing* w_node inside the closure so AD captures the indirect chain
-# rule through the cumulative mesh velocity. Output is `[advection_T;
-# advection_ξ_flat]` where `advection_ξ_flat` is the column-major flatten of
+# rule through the cumulative mesh velocity. Output is `[zeros(n_cells);
+# advection_ξ_flat]` — the T rows are identically zero (no production energy
+# mesh-motion advection); `advection_ξ_flat` is the column-major flatten of
 # the gas-only species rows.
 # ---------------------------------------------------------------------------
-function _reference_full_advection_jacobian(
-    u,
-    ws,
-    def,
-    material::Material{NC};
-    limiter = VANLEER,
-) where {NC}
+function _reference_full_advection_jacobian(u, ws, def, material::Material{NC}) where {NC}
 
     layout = ws.layout
     n_cells = layout.n_cells
@@ -149,7 +139,6 @@ function _reference_full_advection_jacobian(
     # Tu-typed scratch for w_node and advection.
     w_node_buf = zeros(Tu, n_nodes)
     θ_buf = zeros(Tu, n_cells)
-    adv_T_buf = zeros(Tu, n_cells)
     adv_ξ_buf = zeros(Tu, NC, n_cells)
 
     f! =
@@ -160,12 +149,10 @@ function _reference_full_advection_jacobian(
             def = def,
             w_node_buf = w_node_buf,
             θ_buf = θ_buf,
-            adv_T_buf = adv_T_buf,
             adv_ξ_buf = adv_ξ_buf,
             out_len = out_len,
             n_cells = n_cells,
-            NC = NC,
-            limiter = limiter
+            NC = NC
 
             (out, x) -> begin
                 populate!(ws_ad.state_cache, x, layout)
@@ -203,27 +190,21 @@ function _reference_full_advection_jacobian(
                     θ_A = zero(Tu),
                 )
 
-                # ALE advection.
-                fill!(adv_T_buf, zero(Tu))
+                # Flux-form gas transport (T rows are identically zero).
                 fill!(adv_ξ_buf, zero(Tu))
-                compute_ale_advection_term!(
-                    adv_T_buf,
-                    ws_ad.state_cache,
-                    mesh,
-                    w_node_buf;
-                    limiter = limiter,
-                )
                 compute_ale_species_advection!(
                     adv_ξ_buf,
                     ws_ad.state_cache,
                     mesh,
                     material,
                     w_node_buf;
-                    limiter = limiter,
+                    θ_A = zero(Tu),
+                    top_gas_open = _TOP_OPEN,
+                    bottom_gas_open = _BOTTOM_OPEN,
                 )
 
                 @inbounds for i = 1:n_cells
-                    out[i] = adv_T_buf[i]
+                    out[i] = zero(Tu)
                 end
                 @inbounds for j = 1:NC, i = 1:n_cells
                     out[n_cells+(j-1)*n_cells+i] = adv_ξ_buf[j, i]
@@ -238,17 +219,15 @@ end
 
 # ---------------------------------------------------------------------------
 # Reference: direct-only chain rule. Holds `w_node` fixed (treated as a
-# Float64 input, not Dual) so AD only captures the (T, ξ) stencil
-# derivatives. Mirrors the operator's `contribute_to_jacobian!` direct
-# chain rule into `jac.A`.
+# Float64 input, not Dual) so AD only captures the ξ stencil derivatives.
+# Mirrors the operator's `contribute_to_jacobian!` direct entries in `jac.A`.
 # ---------------------------------------------------------------------------
 function _reference_direct_advection_jacobian(
     u,
     ws,
     def,
     material::Material{NC},
-    w_node_fixed::AbstractVector;
-    limiter = VANLEER,
+    w_node_fixed::AbstractVector,
 ) where {NC}
 
     layout = ws.layout
@@ -267,7 +246,6 @@ function _reference_direct_advection_jacobian(
     # perturbation).
     w_node_Tu = [Tu(w_node_fixed[k]) for k in eachindex(w_node_fixed)]
 
-    adv_T_buf = zeros(Tu, n_cells)
     adv_ξ_buf = zeros(Tu, NC, n_cells)
 
     f! =
@@ -277,49 +255,41 @@ function _reference_direct_advection_jacobian(
             material = material,
             def = def,
             w_node_Tu = w_node_Tu,
-            adv_T_buf = adv_T_buf,
             adv_ξ_buf = adv_ξ_buf,
             out_len = out_len,
             n_cells = n_cells,
-            NC = NC,
-            limiter = limiter
+            NC = NC
 
             (out, x) -> begin
                 populate!(ws_ad.state_cache, x, layout)
                 Pyrolysis.update_cross_section_area!(
                     ws_ad.state_cache,
                     material,
-                    mesh,
+                    ws_ad.mesh,
                     x,
                     layout,
                     Pyrolysis.Problem.NoChi(),
                 )
                 Pyrolysis.update_state_geometry!(
                     ws_ad.state_cache,
-                    mesh,
+                    ws_ad.mesh,
                     Pyrolysis.Problem.mesh_mode(def.mode),
                 )
 
-                fill!(adv_T_buf, zero(Tu))
                 fill!(adv_ξ_buf, zero(Tu))
-                compute_ale_advection_term!(
-                    adv_T_buf,
-                    ws_ad.state_cache,
-                    mesh,
-                    w_node_Tu;
-                    limiter = limiter,
-                )
                 compute_ale_species_advection!(
                     adv_ξ_buf,
                     ws_ad.state_cache,
-                    mesh,
+                    ws_ad.mesh,
                     material,
                     w_node_Tu;
-                    limiter = limiter,
+                    θ_A = zero(Tu),
+                    top_gas_open = _TOP_OPEN,
+                    bottom_gas_open = _BOTTOM_OPEN,
                 )
 
                 @inbounds for i = 1:n_cells
-                    out[i] = adv_T_buf[i]
+                    out[i] = zero(Tu)
                 end
                 @inbounds for j = 1:NC, i = 1:n_cells
                     out[n_cells+(j-1)*n_cells+i] = adv_ξ_buf[j, i]
@@ -332,6 +302,32 @@ function _reference_direct_advection_jacobian(
     return J
 end
 
+# Permissive dense sparse pattern over the physics block for T + all ξ rows.
+function _permissive_pattern(n_total, n_cells, NC)
+    n_phys = n_cells * (1 + NC)
+    I = Int[]
+    J = Int[]
+    V = Float64[]
+    for i = 1:n_cells
+        for c = 1:n_phys
+            push!(I, i)
+            push!(J, c)
+            push!(V, 1.0)
+        end
+        for j = 1:NC
+            ξ_row = n_cells + (j - 1) * n_cells + i
+            for c = 1:n_phys
+                push!(I, ξ_row)
+                push!(J, c)
+                push!(V, 1.0)
+            end
+        end
+    end
+    A = sparse(I, J, V, n_total, n_total)
+    fill!(A.nzval, 0.0)
+    return A
+end
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -342,11 +338,11 @@ end
         op = ALEAdvectionOperator()
         @test Pyrolysis.Jacobian.reads(op) == (:w_cell, :theta)
         @test Pyrolysis.Jacobian.writes(op) == ()
-        @test Pyrolysis.Jacobian.stencil(op) == (cells = -2:2,)
+        @test Pyrolysis.Jacobian.stencil(op) == (cells = -1:1,)
     end
 
-    # Fixture: ALE NoChi PMMA, hot+gas state with a temperature ramp so the
-    # limiter is active and θ is non-trivial.
+    # Fixture: ALE NoChi PMMA, hot+gas state with a temperature ramp so θ
+    # (and hence w) is non-trivial.
     def, ws, u, _ = build_ale_no_radiation()
     material = def.material
     layout = ws.layout
@@ -361,10 +357,10 @@ end
     _refresh_state!(ws, u, def, material)
 
     # Build the upstream ALEMeshVelocityOperator workspace and run apply! +
-    # strain-rate derivatives. The advection operator needs `w_node` directly
-    # (for direct AD's `w_cell` capture); the indirect-chain-rule couplings
-    # now flow through `ctx.derived_fields[:w_cell]`, populated by the
-    # provider's `contribute_to_structured!`.
+    # strain-rate derivatives. The advection operator needs `w_node` directly;
+    # the indirect-chain-rule couplings flow through
+    # `ctx.derived_fields[:w_cell]`, populated by the provider's
+    # `contribute_to_structured!`.
     op_mv_ws = build_ale_mesh_velocity_workspace(material, n_cells, n_nodes)
     Pyrolysis.Jacobian.apply!(
         op_mv_ws,
@@ -377,17 +373,19 @@ end
     _strain_rate_derivatives!(op_mv_ws, ws.state_cache, material)
     ctx = build_residual_context([ALEMeshVelocityOperator(), ALEAdvectionOperator()])
 
-    @testset "apply! reproduces residual ALE advection (energy + species)" begin
-        # Residual reference.
-        adv_T_ref = zeros(n_cells)
+    @testset "apply! reproduces residual gas transport; dT untouched" begin
+        # Residual reference (gas species only — production has no energy
+        # mesh-motion advection).
         adv_ξ_ref = zeros(NC, n_cells)
-        compute_ale_advection_term!(adv_T_ref, ws.state_cache, mesh, op_mv_ws.w_node)
         compute_ale_species_advection!(
             adv_ξ_ref,
             ws.state_cache,
             mesh,
             material,
-            op_mv_ws.w_node,
+            op_mv_ws.w_node;
+            θ_A = 0.0,
+            top_gas_open = _TOP_OPEN,
+            bottom_gas_open = _BOTTOM_OPEN,
         )
 
         # Operator output.
@@ -400,42 +398,53 @@ end
             ws.state_cache,
             mesh,
             op_mv_ws.w_node,
-            material,
+            material;
+            θ_A = 0.0,
+            top_gas_open = _TOP_OPEN,
+            bottom_gas_open = _BOTTOM_OPEN,
         )
 
-        @test isapprox(dT_op, adv_T_ref; rtol = 1e-12, atol = 1e-12)
+        @test all(iszero, dT_op)
         @test isapprox(dξ_op, adv_ξ_ref; rtol = 1e-12, atol = 1e-12)
     end
 
+    @testset "gas conservation: fully closed column telescopes to zero" begin
+        # With both boundaries impermeable, Σᵢ (advection + ξ·V̇/V)·Vᵢ = 0
+        # exactly: the flux-form contribution must change total gas mass only
+        # through boundary faces, of which there are none open.
+        adv = zeros(NC, n_cells)
+        compute_ale_species_advection!(
+            adv,
+            ws.state_cache,
+            mesh,
+            material,
+            op_mv_ws.w_node;
+            θ_A = 0.0,
+            top_gas_open = false,
+            bottom_gas_open = false,
+        )
+        A_section = ws.state_cache.A_section[]
+        for j = 1:NC
+            Pyrolysis.Materials.is_gas(material.components[j]) || continue
+            # d(total gas mass)/dt from the mesh-motion term:
+            # Σᵢ [advectionᵢ·Vᵢ + ξᵢ·V̇ᵢ] with V̇ᵢ = (w_R − w_L)·A.
+            total = 0.0
+            for i = 1:n_cells
+                cell = mesh.cells[i]
+                n_l, n_r = cell.node_ids
+                V_i = ws.state_cache.volume[i]
+                V̇_i = (op_mv_ws.w_node[n_r] - op_mv_ws.w_node[n_l]) * A_section
+                total += adv[j, i] * V_i + ws.state_cache.ξ[j, i] * V̇_i
+            end
+            scale = maximum(abs, view(adv, j, :)) * maximum(ws.state_cache.volume)
+            @test abs(total) ≤ 1e-12 * max(1.0, scale)
+        end
+    end
+
     @testset "contribute_to_jacobian! direct chain rule matches AD-w-fixed" begin
-        # Build a sparse pattern dense enough to absorb every direct-
-        # stencil entry (3-cell upwind window × (1+NC) columns per cell ×
-        # (1+NC_gas) rows per cell). Use a simpler permissive pattern: full
-        # rows for T and gas-ξ over the full physics block (T and ξ columns).
         n_total = length(u)
         n_phys = n_cells * (1 + NC)
-        I = Int[];
-        J = Int[];
-        V = Float64[]
-        for i = 1:n_cells
-            # T row
-            for c = 1:n_phys
-                push!(I, i);
-                push!(J, c);
-                push!(V, 1.0)
-            end
-            # ξ rows (gas only — but we build all NC; non-gas rows stay zero)
-            for j = 1:NC
-                ξ_row = n_cells + (j - 1) * n_cells + i
-                for c = 1:n_phys
-                    push!(I, ξ_row);
-                    push!(J, c);
-                    push!(V, 1.0)
-                end
-            end
-        end
-        A = sparse(I, J, V, n_total, n_total)
-        fill!(A.nzval, 0.0)
+        A = _permissive_pattern(n_total, n_cells, NC)
         jac = StructuredJacobian(:ale, A)
 
         op = ALEAdvectionOperator()
@@ -462,7 +471,10 @@ end
             layout,
             op_mv_ws.w_node,
             ctx,
-            ws_ad,
+            ws_ad;
+            θ_A = 0.0,
+            top_gas_open = _TOP_OPEN,
+            bottom_gas_open = _BOTTOM_OPEN,
         )
 
         # DenseAD reference with w_node held fixed (= direct chain rule only).
@@ -470,44 +482,18 @@ end
 
         # Compare jac.A on the (T, ξ) physics block.
         J_op = Matrix(jac.A)
-        # J_ref is (out_len = n_cells + NC*n_cells) × n_total.
-        # J_op rows are T rows (1:n_cells) and ξ rows (n_cells+1 : n_cells+NC*n_cells)
-        # matching J_ref's row order exactly.
         J_op_phys = J_op[1:n_phys, 1:n_phys]
         J_ref_phys = J_ref[1:n_phys, 1:n_phys]
 
-        # Tolerance: ramp state with limiter active produces O(1e8)-scale
-        # entries (the reference scale recorded when the ramp-ALE limiter
-        # gap was characterized). Rtol 1e-8 is a conservative AD-vs-AD bound.
         max_dev = maximum(abs, J_op_phys .- J_ref_phys)
         max_ref = maximum(abs, J_ref_phys)
-        @test max_dev ≤ 1e-8 * max(1.0, max_ref)
+        @test max_dev ≤ 1e-10 * max(1.0, max_ref)
     end
 
     @testset "contribute_to_jacobian! + densified embedded coupling = full AD" begin
-        # Build the same dense permissive sparsity for direct writes.
         n_total = length(u)
         n_phys = n_cells * (1 + NC)
-        I = Int[];
-        J = Int[];
-        V = Float64[]
-        for i = 1:n_cells
-            for c = 1:n_phys
-                push!(I, i);
-                push!(J, c);
-                push!(V, 1.0)
-            end
-            for j = 1:NC
-                ξ_row = n_cells + (j - 1) * n_cells + i
-                for c = 1:n_phys
-                    push!(I, ξ_row);
-                    push!(J, c);
-                    push!(V, 1.0)
-                end
-            end
-        end
-        A_sp = sparse(I, J, V, n_total, n_total)
-        fill!(A_sp.nzval, 0.0)
+        A_sp = _permissive_pattern(n_total, n_cells, NC)
         jac = StructuredJacobian(:ale, A_sp)
 
         op = ALEAdvectionOperator()
@@ -534,7 +520,10 @@ end
             layout,
             op_mv_ws.w_node,
             ctx,
-            ws_ad,
+            ws_ad;
+            θ_A = 0.0,
+            top_gas_open = _TOP_OPEN,
+            bottom_gas_open = _BOTTOM_OPEN,
         )
 
         # Combine A + Σⱼ structuredⱼ via densify into a single dense matrix.
@@ -555,11 +544,8 @@ end
 
         max_dev = maximum(abs, M_phys .- J_ref_phys)
         max_ref = maximum(abs, J_ref_phys)
-        # Looser than the direct-only test because the indirect chain rule
-        # adds another AD layer (cumulative-w → cell-averaging → row-scaling).
-        # Rtol 1e-7 is still tight relative to the limiter baseline's `0.3`
-        # rel-err.
-        @test max_dev ≤ 1e-7 * max(1.0, max_ref)
+        # AD-vs-analytic on the same formula: tight bound.
+        @test max_dev ≤ 1e-8 * max(1.0, max_ref)
     end
 
     @testset "EmbeddedScaledPrefixSumCoupling densify! arithmetic" begin
@@ -573,8 +559,8 @@ end
         # Expected per (i, j):
         #   factor = 0.5 * ((j ≤ n_left[i] - 1) + (j ≤ n_right[i] - 1))
         #   M[i, j] = row_scale[i] * factor * v[j]
-        row_off = 0;
-        col_off = 0;
+        row_off = 0
+        col_off = 0
         n_global = N
 
         c = EmbeddedScaledPrefixSumCoupling(
@@ -601,16 +587,34 @@ end
         # n_left[4]=4 → (j ≤ 3): j=1,2,3; n_right[4]=5 → (j ≤ 4): j=1,2,3,4
         #   factor row 4: [1.0, 1.0, 1.0, 0.5]
         factor = [
-            0.5 0.0 0.0 0.0;
-            1.0 0.5 0.0 0.0;
-            1.0 1.0 0.5 0.0;
-            1.0 1.0 1.0 0.5;
+            0.5 0.0 0.0 0.0
+            1.0 0.5 0.0 0.0
+            1.0 1.0 0.5 0.0
+            1.0 1.0 1.0 0.5
         ]
         expected = [row_scale[i] * factor[i, j] * v[j] for i = 1:N, j = 1:N]
 
         @test isapprox(M, expected; rtol = 1e-14)
 
-        # Offset embedding: place the same block at (row_off=2, col_off=3)
+        # Same-node embedding (the flux-form consumer's per-node trick):
+        # passing n_left twice must give the single-node indicator 𝟙[j ≤ n−1].
+        c_same = EmbeddedScaledPrefixSumCoupling(
+            v,
+            n_left,
+            n_left,
+            row_scale,
+            row_off,
+            col_off,
+            N,
+            n_global,
+        )
+        M_same = zeros(N, N)
+        densify!(M_same, c_same)
+        factor_same = [(j <= n_left[i] - 1) ? 1.0 : 0.0 for i = 1:N, j = 1:N]
+        expected_same = [row_scale[i] * factor_same[i, j] * v[j] for i = 1:N, j = 1:N]
+        @test isapprox(M_same, expected_same; rtol = 1e-14)
+
+        # Offset embedding: place the block at (row_off=2, col_off=3)
         # inside a 6×8 global matrix. Other entries must remain zero.
         c_emb = EmbeddedScaledPrefixSumCoupling(v, n_left, n_right, row_scale, 2, 3, N, 12)
         M_g = zeros(6, 8)
@@ -648,8 +652,8 @@ end
         @test isapprox(y_apply, 2 .* (M * x); rtol = 1e-12, atol = 1e-12)
 
         # Embedded at non-trivial offsets inside a larger global vector.
-        row_off = 5;
-        col_off = 9;
+        row_off = 5
+        col_off = 9
         n_global = 20
         c_emb = EmbeddedScaledPrefixSumCoupling(
             v,

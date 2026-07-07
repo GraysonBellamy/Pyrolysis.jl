@@ -89,6 +89,7 @@ export get_temperature,
     compute_volumes_from_state
 export ProblemDef, InitialConditions, get_option
 export Workspace, update_radiation!, resize_workspace!
+export initialize_state
 export to_problem_def, build_workspace, build_ad_workspace
 
 end # module Problem

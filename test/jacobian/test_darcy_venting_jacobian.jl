@@ -22,8 +22,6 @@ boundary-flux energy-row tests in `test_jacobian_coupling_regressions.jl`.
 using Test
 using SparseArrays
 using Pyrolysis
-using Pyrolysis: to_problem_def, build_workspace
-using Pyrolysis.Problem: apply_initial_conditions!, create_state_vector
 using Pyrolysis.Materials
 using Pyrolysis.BoundaryConditions
 using Pyrolysis.Geometry
@@ -49,10 +47,7 @@ using Pyrolysis.Jacobian: JacobianSpec, DenseAD_ForwardDiff, Structured
         ),
     )
     problem = PyrolysisProblem(mesh = mesh, material = mat, bc_set = bc, tspan = (0.0, 1.0))
-    apply_initial_conditions!(problem.mesh, problem)
-    def = to_problem_def(problem; use_ale = false)
-    ws = build_workspace(problem, def)
-    u = create_state_vector(ws.layout, ws.mesh)
+    def, ws, u = initialize_state(problem; use_ale = false)
 
     # Char fraction ramps toward the surface: φ, κ, and P vary cell-to-cell,
     # the first faces have an impermeable side, the top cell has a large

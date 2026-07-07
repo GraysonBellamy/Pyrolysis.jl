@@ -96,12 +96,37 @@ The most rigorous verification tool is the *method of manufactured solutions*
 (MMS): one chooses an analytic field, substitutes it into the governing PDE to
 obtain the exact forcing, supplies that forcing to the discrete solver, and
 confirms that the numerical solution converges to the chosen field at the
-designed order. Pyrolysis.jl does not (yet) ship a general MMS driver, but it
-supports the *analytical-solution* special case of MMS for each isolated physics
-kernel, in which a parameter regime is chosen so that an exact solution of the
-governing equation is already known and no manufactured forcing is needed. These
-are the building blocks; each is independently verifiable and each anchors a
-specific term of `compute_rhs!`.
+designed order. The verification suite ships a coupled MMS driver
+(`test/verification/exact/mms.jl`: `MMSFields`, a ForwardDiff exact-source
+generator, manufactured-BC builders, and the wrapped-RHS `solve_mms` path)
+exercised by the V-MMS cases in `test/verification/cases/` — coupled Eulerian
+MMS, ALE free-stream/GCL preservation, and ALE MMS under prescribed mesh
+motion via the `Workspace.w_override` hook. Two constraints of that driver
+follow from the formulation: the structured geometry Jacobian assumes
+reaction-driven motion, so `w_override` runs use finite-difference Jacobians;
+and because the scheme is a **solid-Lagrangian ALE** (mesh velocity ≡ solid
+material velocity; condensed phases carry no discrete advection operator —
+§11.1.2, §11.11 item 7), manufactured condensed-phase fields must be
+spatially **uniform** under prescribed non-material motion.
+
+> **What MMS cannot see: wrong-PDE defects.** MMS verifies that the
+> discretization solves the code's *own* target PDE at the designed order —
+> the manufactured source is built from that same PDE, so any term the
+> formulation wrongly includes (or omits) is self-consistently compensated
+> in the source and invisible at every order and every resolution. A
+> spurious ALE advection term, for example, would pass every MMS case
+> untouched. Only checks with an *independent physical identity* the code
+> does not get to define — an exact solution (the Landau traveling wave of
+> V-CPL-02), a conservation ledger (V-CPL-03, V-CPL-06) — can catch a
+> wrong-PDE defect. This is why the suite pairs MMS (discretization order)
+> with exact-solution and conservation anchors (formulation correctness):
+> the two families have disjoint blind spots.
+
+In addition, Pyrolysis.jl supports the *analytical-solution* special case of
+MMS for each isolated physics kernel, in which a parameter regime is chosen
+so that an exact solution of the governing equation is already known and no
+manufactured forcing is needed. These are the building blocks; each is
+independently verifiable and each anchors a specific term of `compute_rhs!`.
 
 ### 18.2.1 Pure conduction
 
@@ -1085,12 +1110,15 @@ diagnostics ledgers enabled when first adopted on a new problem.
 
 The V&V coverage above has gaps that a user should weigh:
 
-1. **No general MMS driver.** Verification rests on per-kernel analytical
-   solutions (§18.2) and conservation (§18.4), not on a manufactured-solution
-   forcing applied to the *fully coupled* system. A coupled MMS — choosing
-   analytic $T(z,t)$ and $\xi_j(z,t)$, deriving the exact source, and confirming
-   design-order convergence of the complete residual — would close the strongest
-   remaining verification gap.
+1. **MMS coverage is bounded by the solid-Lagrangian formulation.** The
+   coupled MMS driver (§18.2, `test/verification/exact/mms.jl`) closes the
+   design-order convergence gap for the fully coupled residual, but mesh
+   motion in the MMS cases is either reaction-driven or prescribed via the
+   verification-only `w_override` hook; under prescribed (non-material)
+   motion, manufactured condensed-phase fields must be spatially uniform and
+   the Jacobian falls back to finite differences (§11.11 item 7). General
+   ALE (a condensed-phase advection operator for mesh motion decoupled from
+   the solid) remains out of scope.
 
 2. **Convergence reference is self-consistent, not exact.** The convergence
    studies use the finest mesh as reference (Richardson self-convergence); they

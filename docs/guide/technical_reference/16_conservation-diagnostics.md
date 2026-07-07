@@ -262,17 +262,17 @@ returns the full per-component breakdown (`current_mass`, `expected_mass`,
 `relative_error`, `max_error`, `conserved`).
 
 **Scope of the $10^{-10}$ tolerance.** The roundoff-level closure holds where
-the discrete ledger telescopes exactly: condensed components (mesh-bound,
-flux-form transport), and all components on a fixed (Eulerian) mesh. Under
-ALE the gas-species mesh-motion correction is the *pointwise* chain-rule term
-$+w\,\partial_z\xi_g$ (non-conservative form, §13.8.3) — it is exact as an
-identity on the continuous equations but does not telescope cell-by-cell in
-the discrete sum, so the gas-species ledger closes only to truncation order
-in $(\Delta t, \Delta z)$ on a moving mesh. Loosen `tol` for gas components
-in ALE runs, or compare against a refined-mesh baseline. (A flux-form ALE
-gas correction would restore telescoping; the pointwise form is retained
-because it is what makes the lab-frame Darcy–Fick flux reusable without a
-double count, §13.8.3.)
+the discrete ledger telescopes exactly *and* every escape channel is counted:
+condensed components (mesh-bound, flux-form transport), all components on a
+fixed (Eulerian) mesh, and gas components on a **fully closed** ALE column —
+the gas mesh-motion correction is the conservative flux form (§13.8.3), so a
+collapsing impermeable column conserves each gas component to integrator
+tolerance (V-CPL-03 P4). The remaining gap is bookkeeping, not physics: with
+an *open* mass BC on a moving boundary, the boundary face additionally sweeps
+gas in/out at $\xi_{\text{face}}\,w_{\text{face}}A$ (a regressing surface
+releases the pore gas it uncovers), and the tracker's expected-mass formula
+integrates only the transport flux $J_{\text{gas}}$ — expect a corresponding
+offset in open-boundary ALE runs.
 
 > **Implementation note.** `check_mass_conservation` /
 > `conservation_checks.jl:145–177`; `mass_conservation_report`

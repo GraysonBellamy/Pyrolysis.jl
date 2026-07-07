@@ -427,20 +427,23 @@ named (integer index vs. symbol) and whether there are one or two products.
 ```julia
 # (a) integer index, single product
 Reaction(name, reactant::Int => product::Int;
-         A, E, h, n = 1.0, T_min = 0.0, T_max = Inf, validate_mass = true)
+         A, E, h, n = 1.0, T_min = 0.0, T_max = Inf, gate_width = 1.0,
+         validate_mass = true)
 
 # (b) symbol, single product (resolved by Material)
 Reaction(name, :reactant => :product;
-         A, E, h, n = 1.0, T_min = 0.0, T_max = Inf, validate_mass = true)
+         A, E, h, n = 1.0, T_min = 0.0, T_max = Inf, gate_width = 1.0,
+         validate_mass = true)
 
 # (c) integer index, two products
 Reaction(name, reactant::Int => (p1::Int, p2::Int);
-         A, E, h, yields, n = 1.0, T_min = 0.0, T_max = Inf, validate_mass = true)
+         A, E, h, yields, n = 1.0, T_min = 0.0, T_max = Inf, gate_width = 1.0,
+         validate_mass = true)
 
 # (d) symbol, two products (resolved by Material)
 Reaction(name, :reactant => (:p1, :p2);
          A, E, h, yields = (y1, y2), n = 1.0, T_min = 0.0, T_max = Inf,
-         validate_mass = true)
+         gate_width = 1.0, validate_mass = true)
 ```
 
 | Argument | Symbol | Meaning | Units | Default |
@@ -453,11 +456,21 @@ Reaction(name, :reactant => (:p1, :p2);
 | `n` | `n_{i,j}` | reaction order in the reactant (must be ≥ 0) | – | `1.0` |
 | `T_min` | `T_min,i` | lower temperature gate | K | `0.0` |
 | `T_max` | `T_max,i` | upper temperature gate | K | `Inf` |
+| `gate_width` | `w_gate` | tanh ramp width of both temperature gates (must be > 0 and finite) | K | `1.0` |
 | `validate_mass` | — | enforce `Σ yields = 1` at construction | – | `true` |
 
 Yields must each be ≥ 0 and the order must satisfy `n ≥ 0` — both are enforced
 unconditionally at construction; `validate_mass = false` disables only the
 `Σ yields = 1` sum check.
+
+The temperature gates are smooth tanh ramps,
+`0.5·(1 + tanh((T − T_min)/gate_width))` (mirrored for `T_max`), so the rate
+and its Jacobian stay differentiable across the gate. The default 1 K width
+suits kinetics that turn on over tens of kelvin; for gates that must act
+nearly as hard switches (melting fronts, phase-change surrogates) use a
+narrower width (e.g. `gate_width = 0.1`) and expect a stiffer Jacobian near
+the gate. On a driving ΔT of only a few kelvin, a 1 K ramp visibly shifts
+the effective switching temperature — narrow the gate accordingly.
 
 ### 3.4.2 Symbolic vs. index references
 

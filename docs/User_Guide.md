@@ -497,7 +497,8 @@ A few notes on what each step does and what is defaulted:
   escapes without changing the matrix volume).
 - **`Reaction(:name, reactant => product; A, E, h)`** with symbol payloads creates
   a single-reactant, single-product reaction. `n` (reaction order) defaults to
-  `1.0`, `T_min` to `0.0`, `T_max` to `Inf`. Remember `h > 0` is endothermic.
+  `1.0`, `T_min` to `0.0`, `T_max` to `Inf`, `gate_width` (tanh gate ramp) to
+  `1.0` K. Remember `h > 0` is endothermic.
 - **`create_uniform_mesh(L, n_cells, Val(NC))`** builds the mesh. The third
   argument is the number of components *as a type parameter*, written `Val(2)` for
   two components — it must match the material's component count. Optional keywords
@@ -850,9 +851,10 @@ Two conventions to internalise:
 
 For a one-product reaction the simpler form `Reaction(:name, 1 => 2; A, E, h)`
 omits `yields` (the single product then has stoichiometry 1.0). Temperature
-gates `T_min`/`T_max` default to `0.0` and `Inf` (always active). See Technical
-Reference §6 for the full rate law, the smooth `tanh` temperature gates, and the
-depletion limiter.
+gates `T_min`/`T_max` default to `0.0` and `Inf` (always active); their smooth
+tanh ramp width is `gate_width` (default `1.0` K — narrow it for hard-switch
+gates, §UG-3.4.1). See Technical Reference §6 for the full rate law, the
+smooth `tanh` temperature gates, and the depletion limiter.
 
 ### 2.2.4 Assemble the `Material`
 
@@ -1959,20 +1961,23 @@ named (integer index vs. symbol) and whether there are one or two products.
 ```julia
 # (a) integer index, single product
 Reaction(name, reactant::Int => product::Int;
-         A, E, h, n = 1.0, T_min = 0.0, T_max = Inf, validate_mass = true)
+         A, E, h, n = 1.0, T_min = 0.0, T_max = Inf, gate_width = 1.0,
+         validate_mass = true)
 
 # (b) symbol, single product (resolved by Material)
 Reaction(name, :reactant => :product;
-         A, E, h, n = 1.0, T_min = 0.0, T_max = Inf, validate_mass = true)
+         A, E, h, n = 1.0, T_min = 0.0, T_max = Inf, gate_width = 1.0,
+         validate_mass = true)
 
 # (c) integer index, two products
 Reaction(name, reactant::Int => (p1::Int, p2::Int);
-         A, E, h, yields, n = 1.0, T_min = 0.0, T_max = Inf, validate_mass = true)
+         A, E, h, yields, n = 1.0, T_min = 0.0, T_max = Inf, gate_width = 1.0,
+         validate_mass = true)
 
 # (d) symbol, two products (resolved by Material)
 Reaction(name, :reactant => (:p1, :p2);
          A, E, h, yields = (y1, y2), n = 1.0, T_min = 0.0, T_max = Inf,
-         validate_mass = true)
+         gate_width = 1.0, validate_mass = true)
 ```
 
 | Argument | Symbol | Meaning | Units | Default |
@@ -1985,11 +1990,21 @@ Reaction(name, :reactant => (:p1, :p2);
 | `n` | `n_{i,j}` | reaction order in the reactant (must be ≥ 0) | – | `1.0` |
 | `T_min` | `T_min,i` | lower temperature gate | K | `0.0` |
 | `T_max` | `T_max,i` | upper temperature gate | K | `Inf` |
+| `gate_width` | `w_gate` | tanh ramp width of both temperature gates (must be > 0 and finite) | K | `1.0` |
 | `validate_mass` | — | enforce `Σ yields = 1` at construction | – | `true` |
 
 Yields must each be ≥ 0 and the order must satisfy `n ≥ 0` — both are enforced
 unconditionally at construction; `validate_mass = false` disables only the
 `Σ yields = 1` sum check.
+
+The temperature gates are smooth tanh ramps,
+`0.5·(1 + tanh((T − T_min)/gate_width))` (mirrored for `T_max`), so the rate
+and its Jacobian stay differentiable across the gate. The default 1 K width
+suits kinetics that turn on over tens of kelvin; for gates that must act
+nearly as hard switches (melting fronts, phase-change surrogates) use a
+narrower width (e.g. `gate_width = 0.1`) and expect a stiffer Jacobian near
+the gate. On a driving ΔT of only a few kelvin, a 1 K ramp visibly shifts
+the effective switching temperature — narrow the gate accordingly.
 
 ### 3.4.2 Symbolic vs. index references
 
@@ -7511,10 +7526,9 @@ DenseAD_ForwardDiff(), rtol = 1e-6, atol = 1e-10)`:
 ```julia
 using Pyrolysis
 
-# Build the (def, ws) pair for the mode you intend to solve in.
-def = to_problem_def(problem; use_ale = true)
-ws  = build_workspace(problem, def)
-u   = create_state_vector(ws.layout, ws.mesh)
+# Build the (def, ws, u) triple for the mode you intend to solve in
+# (initialize_state applies the problem's ICs before packing u).
+def, ws, u = initialize_state(problem; use_ale = true)
 
 spec = JacobianSpec(Structured(strategy = ApproxSolve()), def, ws)
 
@@ -7588,33 +7602,38 @@ to external tooling. The three pieces are all top-level exports:
 - `residual!(du, u, def, t, ws)` — the pure ODE right-hand side. Note the
   argument order: `du`, `u`, `def`, `t`, `ws`.
 
-The builders `to_problem_def`, `build_workspace`, and `create_state_vector`
-turn a `PyrolysisProblem` into this lower-level form:
+The canonical builder is `initialize_state`, which turns a `PyrolysisProblem`
+into this lower-level form in one call — applying the problem's initial
+conditions, freezing the definition, allocating the workspace, and packing
+the initial state (the same sequence `solve()` runs internally):
 
 ```julia
 using Pyrolysis
 import OrdinaryDiffEq                                  # from your environment
 
-# 1. Freeze the problem definition (pick the mode flags you want).
-def = to_problem_def(problem;
+# 1. ICs → immutable def → mutable workspace → packed u0 [T, ξ, z (ALE), χ (WithChi)].
+def, ws, u0 = initialize_state(problem;
     use_ale         = false,
     radiation_model = NO_RADIATION,
     energy_form     = :standard)
 
-# 2. Build a mutable workspace (one per worker/thread).
-ws = build_workspace(problem, def)
-
-# 3. Initial state vector, packed [T, ξ, z (ALE), χ (WithChi)].
-u0 = create_state_vector(ws.layout, ws.mesh)
-
-# 4. Wrap residual! in the (du, u, p, t) shape OrdinaryDiffEq expects.
+# 2. Wrap residual! in the (du, u, p, t) shape OrdinaryDiffEq expects.
 #    Note the residual! argument order is (du, u, def, t, ws).
 rhs!(du, u, p, t) = residual!(du, u, def, t, ws)
 
-# 5. Hand-roll your own integration.
+# 3. Hand-roll your own integration.
 prob = OrdinaryDiffEq.ODEProblem(rhs!, u0, problem.tspan)
 raw  = OrdinaryDiffEq.solve(prob, OrdinaryDiffEq.KenCarp4(autodiff = OrdinaryDiffEq.AutoFiniteDiff()))
 ```
+
+The underlying primitives `to_problem_def`, `build_workspace`, and
+`create_state_vector` remain public as the advanced layer (AD workspaces via
+`build_ad_workspace`, mid-simulation repacking via `pack_state!`, warm
+starts). If you compose them by hand, the IC contract is on you:
+`create_state_vector` packs the mesh **as-is**, so call
+`Pyrolysis.Problem.apply_initial_conditions!(problem)` first — otherwise `u0`
+silently carries the mesh constructor's placeholder state instead of the
+problem's `T_initial`/`ξ_initial`, an error no retcode will flag.
 
 `StateLayout` (also exported) describes the packing and provides accessors so
 you can read fields out of a raw state vector without re-deriving the offsets:

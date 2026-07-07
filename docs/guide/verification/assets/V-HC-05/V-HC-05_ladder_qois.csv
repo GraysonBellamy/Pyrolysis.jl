@@ -1,0 +1,16 @@
+"n_cells","qoi","value","exact","error","tol","within_tol"
+20,"L∞ Kirchhoff-profile error (z(T) map, /L)",0.0005774709631981272,NaN,0.0005774709631981272,0.00012,false
+20,"steady flux vs Kirchhoff-exact",32509.139053841358,32500.0,0.0002812016566571681,6.0e-5,false
+20,"steadiness (last half-interval drift)",2.2737367544323206e-13,NaN,2.2737367544323206e-13,1.0e-6,true
+40,"L∞ Kirchhoff-profile error (z(T) map, /L)",0.00015111058656305722,NaN,0.00015111058656305722,0.00012,false
+40,"steady flux vs Kirchhoff-exact",32502.281392564426,32500.0,7.019669429002813e-5,6.0e-5,false
+40,"steadiness (last half-interval drift)",3.6141045711701736e-10,NaN,3.6141045711701736e-10,1.0e-6,true
+80,"L∞ Kirchhoff-profile error (z(T) map, /L)",3.869640879437884e-5,NaN,3.869640879437884e-5,0.00012,true
+80,"steady flux vs Kirchhoff-exact",32500.570137977335,32500.0,1.7542706994908468e-5,6.0e-5,true
+80,"steadiness (last half-interval drift)",3.382183422218077e-10,NaN,3.382183422218077e-10,1.0e-6,true
+160,"L∞ Kirchhoff-profile error (z(T) map, /L)",9.794261387296554e-6,NaN,9.794261387296554e-6,0.00012,true
+160,"steady flux vs Kirchhoff-exact",32500.142521357837,32500.0,4.3852725488250144e-6,6.0e-5,true
+160,"steadiness (last half-interval drift)",5.136143954587169e-9,NaN,5.136143954587169e-9,1.0e-6,true
+320,"L∞ Kirchhoff-profile error (z(T) map, /L)",2.4639376567442883e-6,NaN,2.4639376567442883e-6,0.00012,true
+320,"steady flux vs Kirchhoff-exact",32500.035629682905,32500.0,1.0962979355379223e-6,6.0e-5,true
+320,"steadiness (last half-interval drift)",2.1041890022388543e-5,NaN,2.1041890022388543e-5,1.0e-6,false

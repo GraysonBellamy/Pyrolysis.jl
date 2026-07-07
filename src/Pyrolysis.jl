@@ -168,6 +168,7 @@ export parameter_sweep
 export SimulationMode
 export StateLayout
 export ProblemDef, Workspace
+export initialize_state
 export to_problem_def, build_workspace, build_ad_workspace
 export residual!
 export state_length, pack_state!, update_mesh_from_state!, create_state_vector

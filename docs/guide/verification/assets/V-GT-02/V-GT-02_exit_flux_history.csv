@@ -1,0 +1,4 @@
+"series","t (s)","ṁ″ (kg/m²s)","exact"
+"surface mass flux",0.0,0.0,0.05
+"surface mass flux",0.5,0.04999964495079307,0.05
+"surface mass flux",1.0,0.0499996375970114,0.05

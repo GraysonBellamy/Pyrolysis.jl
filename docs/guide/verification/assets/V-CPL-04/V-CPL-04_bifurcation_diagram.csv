@@ -1,0 +1,9 @@
+"series","δ = (E/RT₀²)·S₀L²/k","θ_max = (T_max − T₀)·E/RT₀²","exact"
+"settled steady state",0.2,0.1095429627272324,0.10953739276232227
+"settled steady state",0.44,0.27678074628903687,0.27673805052846545
+"settled steady state",0.7,0.5520445068249955,0.551798400846892
+"settled steady state",0.82,0.7761526218358858,0.7754152203522972
+"settled steady state",0.86,0.8994846743077324,0.8981278721941999
+"settled steady state",0.9,1.1718647883387985,1.1621271965558844
+"runaway (T_max-gate-capped)",1.0,8.321921281662199,
+"runaway (T_max-gate-capped)",1.32,8.334359365023202,

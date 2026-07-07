@@ -131,14 +131,18 @@ Or equivalently:
 - `material`: Material definition
 - `tol`: Relative error tolerance (default: 1e-10)
 
-# ALE gas-species caveat
-The default `tol = 1e-10` is a bookkeeping-level tolerance and is attainable
-only where the discrete ledger telescopes exactly: condensed components
-(mesh-bound, flux-form), and all components on a fixed (Eulerian) mesh. Under
-ALE the gas-species mesh-motion correction is the **pointwise** chain-rule
-term `+w·∇ξ_g` (non-conservative form), which does not telescope cell-by-cell
-— gas-species closure is then truncation-order in (Δt, Δz), not roundoff.
-Loosen `tol` accordingly for gas components in ALE runs (guide §16.3.3/16.3.4).
+# ALE gas-species note
+The gas mesh-motion correction is the **conservative flux form** (upwinded
+face sweep fluxes `[ξ_g w A]` plus the `ξ_g V̇/V` volume-rate term,
+`compute_ale_species_advection!`), so the discrete gas ledger telescopes to
+boundary fluxes exactly — the same bookkeeping-level closure as condensed
+components. The `expected_mass` formula here counts only the *transport*
+efflux (`J_gas` at the boundary faces): under ALE with an **open** top/bottom
+mass BC, the moving boundary additionally sweeps gas in/out at
+`ξ_face·w_face·A` (a regressing surface releases the pore gas it uncovers),
+which this tracker does not yet integrate — expect a corresponding offset in
+open-boundary ALE runs. Fully closed (impermeable) columns conserve each gas
+component to integrator tolerance (V-CPL-03 P4).
 
 # Returns
 NamedTuple with:

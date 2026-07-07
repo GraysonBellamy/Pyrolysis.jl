@@ -3,19 +3,24 @@ Adapter — bridge between the user-facing `PyrolysisProblem` and the
 unified `ProblemDef` + `Workspace` pair that the residual + Jacobian
 operate on.
 
-Two canonical primitives:
+The canonical front door is [`initialize_state`](@ref), which applies the
+problem's initial conditions and returns the ready `(def, ws, u0)` triple:
+
+```julia
+def, ws, u0 = initialize_state(problem; use_ale=true, radiation_model=BEER_LAMBERT)
+du = similar(u0)
+residual!(du, u0, def, 0.0, ws)
+```
+
+The underlying primitives stay public as the advanced layer:
 
 - [`to_problem_def`](@ref) — produces the immutable `ProblemDef`.
 - [`build_workspace`](@ref) — produces a fresh mutable `Workspace` with
   every cache allocated up front.
 
-Callers compose:
-
-```julia
-def = to_problem_def(problem; use_ale=true, radiation_model=BEER_LAMBERT)
-ws  = build_workspace(problem, def)
-residual!(du, u, def, 0.0, ws)
-```
+Composing them by hand requires `apply_initial_conditions!(problem)`
+first — `create_state_vector` packs the mesh as-is (see
+`initialize_state`'s docstring for the full contract).
 """
 
 using ..Geometry: Mesh1D, MeshTopology, MeshGeometry, mesh_topology, mesh_geometry
@@ -272,6 +277,7 @@ function build_workspace(
     # ------------------------------------------------------------------
     if mesh_mode(mode) isa ALE
         w_work = zeros(Tu, n_nodes)
+        w_physical = zeros(Tu, n_nodes)
         w_face = zeros(Tu, n_faces)
         θ_work = zeros(Tu, n_cells)
         ale_advection = zeros(Tu, n_cells)
@@ -282,6 +288,7 @@ function build_workspace(
         S_conv_work = zeros(Tu, n_cells)
     else
         w_work = Tu[]
+        w_physical = Tu[]
         w_face = Tu[]
         θ_work = Tu[]
         ale_advection = Tu[]
@@ -340,6 +347,7 @@ function build_workspace(
         dT_work,
         dξ_work,
         w_work,
+        w_physical,
         w_face,
         θ_work,
         ale_advection,
@@ -357,7 +365,79 @@ function build_workspace(
         ale_limiter,
         Float64(min_thickness),
         bs_named,
+        nothing,  # w_override — verification hook, off by default
     )
+end
+
+"""
+	initialize_state(problem::PyrolysisProblem;
+	                 min_thickness=1e-6,
+	                 use_ale=false,
+	                 radiation_model=NO_RADIATION,
+	                 radiation_intensity=0.0,
+	                 radiation_kirchhoff=true,
+	                 energy_form=:standard,
+	                 use_transpiration_bc=false,
+	                 use_blowing_correction=false) -> (def, ws, u0)
+
+Canonical setup path from a `PyrolysisProblem` to a ready-to-integrate
+`(ProblemDef, Workspace, u0)` triple. Mirrors `solve()`'s order exactly:
+
+1. [`apply_initial_conditions!`](@ref) — write the problem's T/ξ callables
+   into `mesh.cell_states` and populate `mesh.m_dry_solid_initial` (the χ
+   progress denominator used under a `lateral_shrinkage_law`).
+2. [`to_problem_def`](@ref) — lift to the immutable `ProblemDef` (all
+   keyword switches forwarded).
+3. [`build_workspace`](@ref) — allocate every residual/Jacobian cache
+   (`min_thickness` forwarded).
+4. [`create_state_vector`](@ref) — pack the freshly initialized mesh into
+   `u0`.
+
+`solve()` itself calls this function; use it whenever you need the raw
+residual/Jacobian composition, e.g.
+
+```julia
+def, ws, u0 = initialize_state(problem; use_ale = true)
+du = similar(u0)
+residual!(du, u0, def, 0.0, ws)
+```
+
+# Advanced manual composition
+
+The low-level primitives stay public for the genuinely advanced paths —
+AD workspaces via [`build_ad_workspace`](@ref), mid-simulation repacking
+via [`pack_state!`](@ref), warm starts. If you compose them by hand, the
+IC contract is on you: `create_state_vector` packs the mesh **as-is**, so
+`apply_initial_conditions!(problem)` must run first or `u0` silently
+carries the mesh constructor's placeholder state instead of the problem's
+initial conditions (and `m_dry_solid_initial` stays zero, degenerating the
+χ block under `WithChi`).
+"""
+function initialize_state(
+    problem::PyrolysisProblem;
+    min_thickness::Real = 1e-6,
+    use_ale::Bool = false,
+    radiation_model = NO_RADIATION,
+    radiation_intensity::Real = 0.0,
+    radiation_kirchhoff::Bool = true,
+    energy_form::Symbol = :standard,
+    use_transpiration_bc::Bool = false,
+    use_blowing_correction::Bool = false,
+)
+    apply_initial_conditions!(problem)
+    def = to_problem_def(
+        problem;
+        use_ale = use_ale,
+        radiation_model = radiation_model,
+        radiation_intensity = radiation_intensity,
+        radiation_kirchhoff = radiation_kirchhoff,
+        energy_form = energy_form,
+        use_transpiration_bc = use_transpiration_bc,
+        use_blowing_correction = use_blowing_correction,
+    )
+    ws = build_workspace(problem, def; min_thickness = min_thickness)
+    u0 = create_state_vector(ws.layout, ws.mesh)
+    return def, ws, u0
 end
 
 """
@@ -408,6 +488,7 @@ function build_ad_workspace(
 
     if mesh_mode(mode) isa ALE
         w_work = zeros(Tu, n_nodes)
+        w_physical = zeros(Tu, n_nodes)
         w_face = zeros(Tu, n_faces)
         θ_work = zeros(Tu, n_cells)
         ale_advection = zeros(Tu, n_cells)
@@ -418,6 +499,7 @@ function build_ad_workspace(
         S_conv_work = zeros(Tu, n_cells)
     else
         w_work = Tu[]
+        w_physical = Tu[]
         w_face = Tu[]
         θ_work = Tu[]
         ale_advection = Tu[]
@@ -453,6 +535,7 @@ function build_ad_workspace(
         dT_work,
         dξ_work,
         w_work,
+        w_physical,
         w_face,
         θ_work,
         ale_advection,
@@ -470,5 +553,6 @@ function build_ad_workspace(
         ws.ale_limiter,
         ws.min_thickness,
         ws.boundary_states,
+        ws.w_override,
     )
 end

@@ -1,0 +1,26 @@
+# Isolated environment for the verification-suite report mode (Phase 2 of
+# docs/Verification_Suite_Plan_2026-07-06.md). Kept separate from the test env
+# (pin-fragile) because CairoMakie pulls heavy rendering deps nothing else
+# needs; same pattern as scripts/profile/ and test/quality/. Consumes the case
+# definitions in test/verification/ (via casedefs.jl) and writes figures,
+# CSVs, and guide chapters to docs/guide/verification/.
+# Run: julia --project=scripts/verification scripts/verification/run_reports.jl
+[deps]
+CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
+Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
+ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
+OrdinaryDiffEq = "1dea7af3-3e70-54e6-95c3-0bf5283fa5ed"
+Pkg = "44cfe95a-1eb2-52ea-b672-e2afdf69b78f"
+Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+Pyrolysis = "910b54fb-7370-4696-a92c-2242b531a32e"
+SpecialFunctions = "276daf66-3868-5448-9aa4-cd146d93841b"
+Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
+
+[sources]
+Pyrolysis = {path = "../.."}
+
+[compat]
+CairoMakie = "0.12, 0.13, 0.14, 0.15"
+ForwardDiff = "0.10, 1"
+OrdinaryDiffEq = "6"
+SpecialFunctions = "2"

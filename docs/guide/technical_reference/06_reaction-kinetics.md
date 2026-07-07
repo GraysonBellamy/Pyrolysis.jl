@@ -147,60 +147,69 @@ $$
 g_{\min,i}(T) =
 \begin{cases}
 1, & T_{\min,i}\ \text{not finite or}\ \le 0,\\[4pt]
-\tfrac{1}{2}\bigl(1 + \tanh(T - T_{\min,i})\bigr), & \text{otherwise},
+\tfrac{1}{2}\bigl(1 + \tanh\!\big((T - T_{\min,i})/w_{\text{gate},i}\big)\bigr), & \text{otherwise},
 \end{cases}
 \qquad
 g_{\max,i}(T) =
 \begin{cases}
 1, & T_{\max,i}\ \text{not finite},\\[4pt]
-\tfrac{1}{2}\bigl(1 + \tanh(T_{\max,i} - T)\bigr), & \text{otherwise},
+\tfrac{1}{2}\bigl(1 + \tanh\!\big((T_{\max,i} - T)/w_{\text{gate},i}\big)\bigr), & \text{otherwise},
 \end{cases}
 \tag{6.2}
 $$
 
-and the gated rate is $r_i \leftarrow r_i\, g_{\min,i}(T)\, g_{\max,i}(T)$. The
-implementation is verbatim:
+and the gated rate is $r_i \leftarrow r_i\, g_{\min,i}(T)\, g_{\max,i}(T)$, with
+$w_{\text{gate},i}$ the per-reaction **gate width** (`Reaction(...;
+gate_width)`, default $1.0$ K, validated finite and $>0$). The implementation
+is verbatim:
 
 ```julia
 if isfinite(rxn.T_min) && rxn.T_min > 0.0
-    r *= 0.5 * (1 + tanh(T - rxn.T_min))
+    r *= 0.5 * (1 + tanh((T - rxn.T_min) / rxn.gate_width))
 end
 if isfinite(rxn.T_max)
-    r *= 0.5 * (1 + tanh(rxn.T_max - T))
+    r *= 0.5 * (1 + tanh((rxn.T_max - T) / rxn.gate_width))
 end
 ```
 
-(src/Physics/kinetics.jl:102–108). The default gates are $T_{\min}=0$ and
-$T_{\max}=\infty$ (src/Materials/reactions.jl:128–129, 144–145), so an
+(src/Physics/kinetics.jl). The default gates are $T_{\min}=0$ and
+$T_{\max}=\infty$ (src/Materials/reactions.jl), so an
 unconstrained reaction incurs no gating cost at all — the `T_min > 0.0` guard
 short-circuits the lower ramp and `isfinite(Inf) == false` short-circuits the
 upper ramp.
 
-The ramp $\tfrac12(1 + \tanh(\Delta T))$ rises from $\approx 0$ to $\approx 1$
-over a width set by the argument scale of `tanh`. Because the argument is
-$(T - T_{\min})$ **in Kelvin with unit coefficient**, the transition has a
-characteristic half-width of $\mathcal O(1\text{–}3)$ K and reaches
-$\tfrac12(1+\tanh 5)\approx 0.99995$ only about 5 K inside the window. Equivalently,
-the gate is $\approx 4.5\times10^{-5}$ about 5 K **outside** the window.
+The ramp $\tfrac12(1 + \tanh(\Delta T/w_{\text{gate}}))$ rises from $\approx 0$
+to $\approx 1$ over a width set by $w_{\text{gate}}$. At the default
+$w_{\text{gate}} = 1$ K the transition has a characteristic half-width of
+$\mathcal O(1\text{–}3)$ K and reaches $\tfrac12(1+\tanh 5)\approx 0.99995$
+only about 5 K inside the window; equivalently, the gate is
+$\approx 4.5\times10^{-5}$ about 5 K **outside** the window. All widths scale
+linearly with $w_{\text{gate}}$.
 
-### 6.2.3 The ~10 K leakage caveat
+### 6.2.3 The ~10·w_gate leakage caveat
 
-The smoothing is not free: the reaction is "weakly active" within roughly 10 K of
-each boundary, where a hard step would have it identically off. At the lower edge
-$\tfrac12(1+\tanh(T - T_{\min}))$ takes the value $0.5$ exactly at $T = T_{\min}$,
-$\approx 0.018$ at $T_{\min} - 2$ K, and $\approx 4.5\times10^{-5}$ at
-$T_{\min}-5$ K. For decomposition kinetics, where $T_{\min}$ is a numerical
-convenience rather than a sharp physical threshold, this leakage is immaterial
-because the Arrhenius factor is itself vanishingly small that far below the
-reaction's effective onset. For a reaction used as a sharp phase-transition
-switch the user should be aware that the transition is smeared over a few Kelvin;
-if a crisper gate is needed, $T_{\min}$ should be offset to recentre the ramp.
-There is currently no way to tune the ramp width (it is hard-coded to a unit
-Kelvin scale); see §6.10.
+The smoothing is not free: the reaction is "weakly active" within roughly
+$10\,w_{\text{gate}}$ of each boundary, where a hard step would have it
+identically off. At the lower edge
+$\tfrac12(1+\tanh((T - T_{\min})/w_{\text{gate}}))$ takes the value $0.5$
+exactly at $T = T_{\min}$, $\approx 0.018$ at $T_{\min} - 2\,w_{\text{gate}}$,
+and $\approx 4.5\times10^{-5}$ at $T_{\min}-5\,w_{\text{gate}}$. For
+decomposition kinetics, where $T_{\min}$ is a numerical convenience rather
+than a sharp physical threshold, this leakage is immaterial because the
+Arrhenius factor is itself vanishingly small that far below the reaction's
+effective onset. For a reaction used as a sharp phase-transition switch
+(melting fronts, T-gated latent heat as in V-CPL-01b), narrow the gate
+(`gate_width = 0.1` K makes the smear a tenth of the default) — every
+Jacobian coupling differentiates through `reaction_rate` with ForwardDiff, so
+the width threads through the structured Jacobian automatically, at the cost
+of a stiffer gate-adjacent Jacobian entry. On a driving ΔT of only a few
+kelvin the default 1 K ramp visibly shifts the effective switching point;
+either narrow the gate or offset $T_{\min}$ to recentre the ramp.
 
 > **Implementation note.** Temperature gates: `reaction_rate`,
-> src/Physics/kinetics.jl:102–108. Default `T_min = 0.0`, `T_max = Inf` set in the
-> convenience constructors, src/Materials/reactions.jl.
+> src/Physics/kinetics.jl. `gate_width` field, validation, and the default
+> `T_min = 0.0`, `T_max = Inf` in the convenience constructors,
+> src/Materials/reactions.jl.
 
 ---
 
@@ -998,12 +1007,7 @@ intumescent solids, moisture). Its boundaries, with the source-of-truth guards:
    $(A_i, E_i)$, but there is no built-in quadrature over an activation-energy
    distribution or fitting helper for it.
 
-5. **Tanh gate width is fixed.** The temperature ramp (6.2) has a hard-coded unit-
-   Kelvin argument scale, giving the ~10 K leakage of §6.2.3. It is not currently
-   configurable; a sharper or softer gate would need a width parameter on the
-   reaction.
-
-6. **Depletion-limiter bias.** The limiter (6.3) under-predicts the rate near
+5. **Depletion-limiter bias.** The limiter (6.3) under-predicts the rate near
    and below $\xi_{\mathrm{th}} = 1$ kg·m⁻³ (~24% at the threshold, growing as
    the reactant runs out) and converts exponential burnout tails into algebraic
    ones (§6.3.3). For materials whose physically meaningful residue

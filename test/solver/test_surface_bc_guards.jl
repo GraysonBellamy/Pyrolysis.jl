@@ -5,8 +5,7 @@ exercises the failing regime it guards against.
 
 using Test
 using Pyrolysis
-using Pyrolysis: to_problem_def, build_workspace
-using Pyrolysis.Problem: apply_initial_conditions!, create_state_vector, validate_problem
+using Pyrolysis.Problem: validate_problem
 using Pyrolysis.Residual: residual!
 using Pyrolysis.Materials: SURFACE_ABSORPTION, BEER_LAMBERT, NO_RADIATION
 using Pyrolysis.Discretization: solve_boundary_temperature
@@ -89,10 +88,7 @@ end
         mass = (top = DiffusiveMassBC(0.05), bottom = ImpermeableBC()),
     )
     problem = PyrolysisProblem(mesh = mesh, material = mat, bc_set = bc, tspan = (0.0, 1.0))
-    apply_initial_conditions!(problem.mesh, problem)
-    def = to_problem_def(problem; use_ale = false)
-    ws = build_workspace(problem, def)
-    u = create_state_vector(ws.layout, ws.mesh)
+    def, ws, u = initialize_state(problem; use_ale = false)
     n = 6
     for i = 1:n
         u[i] = 600.0
@@ -152,10 +148,7 @@ end
     )
     problem2 =
         PyrolysisProblem(mesh = mesh2, material = mat, bc_set = bc2, tspan = (0.0, 1.0))
-    apply_initial_conditions!(problem2.mesh, problem2)
-    def2 = to_problem_def(problem2; use_ale = false)
-    ws2 = build_workspace(problem2, def2)
-    u2 = create_state_vector(ws2.layout, ws2.mesh)
+    def2, ws2, u2 = initialize_state(problem2; use_ale = false)
     n = 6
     for i = 1:n
         u2[i] = 400.0

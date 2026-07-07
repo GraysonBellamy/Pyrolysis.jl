@@ -1,0 +1,4 @@
+"qoi","value","exact","error","tol","within_tol","comment"
+"L∞ Kirchhoff-profile error (z(T) map, /L)",2.4639376567442883e-6,NaN,2.4639376567442883e-6,0.00012,true,"implicit profile compared invert-free; n=80 uniform"
+"steady flux vs Kirchhoff-exact",32500.035629682905,32500.0,1.0962979355379223e-6,6.0e-5,true,"q = (k₀/L)[ΔT + βΔ(T²)/2] = 32500.0 W/m²"
+"steadiness (last half-interval drift)",2.1041890022388543e-5,NaN,2.1041890022388543e-5,1.0e-6,false,"t_end = 10·L²/α_min"

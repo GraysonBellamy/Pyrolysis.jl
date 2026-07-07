@@ -212,6 +212,20 @@ used for conductivity/emissivity (Chapter 5, §5.1): every component carries
 weight $\gamma_j\,\xi_j/\rho_j$ there, so a $\gamma_j = 0$ component (the
 canonical gas) carries no weight in the matrix radiative surface.
 
+> **Why the cap $\gamma_j \le 1$ is a model decision, not a missing feature.**
+> Construction rejects $\gamma_j > 1$ (`_validate_swelling_factor`) because
+> the *same* $\gamma$ weight feeds three mixing rules with volume-fraction
+> semantics — the strain kernel, the mixture density, and the $k/\varepsilon$
+> matrix volume fractions — and a weight above 1 corrupts all three (volume
+> fractions no longer sum consistently). Expansion beyond the reactant's
+> volume is already expressible the physical way: give the product a **low
+> bulk density** ($V_f/V_0 = \sum_j y_j\gamma_j\rho_A/\rho_j$ — the V-CPL-03
+> P1 verification permutation demonstrates ×2 growth), with $\gamma \in
+> (0,1]$ tuning how much of that specific volume the matrix keeps. A
+> *decoupled* intumescent expansion factor (strain contribution independent
+> of the mixing weight) would be a separate modeling design; no current use
+> case demands it.
+
 ---
 
 ## 4.2 Component property fields and their roles

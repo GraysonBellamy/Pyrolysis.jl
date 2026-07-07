@@ -1,0 +1,7 @@
+"key","value"
+"integrator","KenCarp4 (default)"
+"julia","1.12.6"
+"Pyrolysis","0.1.0"
+"n_cells_ladder","75 150 300 800"
+"abstol","1.0e-8"
+"reltol","1.0e-6"

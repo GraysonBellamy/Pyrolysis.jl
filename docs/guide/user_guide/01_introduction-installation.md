@@ -468,7 +468,8 @@ A few notes on what each step does and what is defaulted:
   escapes without changing the matrix volume).
 - **`Reaction(:name, reactant => product; A, E, h)`** with symbol payloads creates
   a single-reactant, single-product reaction. `n` (reaction order) defaults to
-  `1.0`, `T_min` to `0.0`, `T_max` to `Inf`. Remember `h > 0` is endothermic.
+  `1.0`, `T_min` to `0.0`, `T_max` to `Inf`, `gate_width` (tanh gate ramp) to
+  `1.0` K. Remember `h > 0` is endothermic.
 - **`create_uniform_mesh(L, n_cells, Val(NC))`** builds the mesh. The third
   argument is the number of components *as a type parameter*, written `Val(2)` for
   two components — it must match the material's component count. Optional keywords

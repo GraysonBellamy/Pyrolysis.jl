@@ -125,9 +125,9 @@ function benchmark_jacobian_backends(
     min_thickness::Real = 1e-6,
     kwargs...,
 )
-    Problem.apply_initial_conditions!(problem.mesh, problem)
-    def = Problem.to_problem_def(
+    def, ws, u = Problem.initialize_state(
         problem;
+        min_thickness = min_thickness,
         use_ale = use_ale,
         radiation_model = radiation_model,
         radiation_intensity = Float64(radiation_intensity),
@@ -135,8 +135,6 @@ function benchmark_jacobian_backends(
         use_transpiration_bc = use_transpiration_bc,
         use_blowing_correction = use_blowing_correction,
     )
-    ws = Problem.build_workspace(problem, def; min_thickness = min_thickness)
-    u = Problem.create_state_vector(ws.layout, ws.mesh)
     return benchmark_jacobian_backends(def, ws, u; kwargs...)
 end
 

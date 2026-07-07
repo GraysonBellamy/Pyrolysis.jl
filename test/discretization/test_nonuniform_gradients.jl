@@ -18,7 +18,6 @@ meshes the package targets.
 
 using Test
 using Pyrolysis
-using Pyrolysis: to_problem_def, build_workspace
 using Pyrolysis.Geometry: opposite_distance_gradient, opposite_distance_gradient_coeffs
 using Pyrolysis.Problem: StateCache
 using Pyrolysis.Discretization:
@@ -242,10 +241,7 @@ function _build_stretched_problem(; darcy::Bool, use_ale::Bool = false)
     )
     problem =
         PyrolysisProblem(mesh = mesh, material = mat, bc_set = bc, tspan = (0.0, 100.0))
-    Pyrolysis.Problem.apply_initial_conditions!(problem.mesh, problem)
-    def = to_problem_def(problem; use_ale = use_ale)
-    ws = build_workspace(problem, def)
-    u = create_state_vector(ws.layout, ws.mesh)
+    def, ws, u = initialize_state(problem; use_ale = use_ale)
     n = ws.layout.n_cells
     # Temperature ramp + gas everywhere: non-trivial dTdx and S_conv on the
     # stretched stencil.

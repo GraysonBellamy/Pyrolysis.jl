@@ -25,6 +25,13 @@ Arrhenius law for ξ ≫ ξ_th and vanishes with bounded ∂r/∂ξ as ξ → 0 
 reaction order n ≥ 0. See [`DepletionLimiter`](@ref).
 
 Pass a custom `DepletionLimiter` via the `limiter` keyword to override per-call.
+
+# Temperature Gates
+The hard steps `H(·)` are realized as smooth tanh ramps of width
+`rxn.gate_width` [K]: `0.5·(1 + tanh((T − T_min)/gate_width))` and the
+mirrored `T_max` form. The default width is 1.0 K; smaller widths approach the
+hard step (all Jacobian couplings differentiate through this function with
+ForwardDiff, so the width needs no derivative threading).
 """
 
 # PERFORMANCE: Fast power function for common reaction orders (0, 1).
@@ -64,13 +71,14 @@ function reaction_rate(
     r = k * conc_factor
 
     # Smooth replacement for H(T - T_min) * H(T_max - T).
-    # Hard step previously here broke Newton/AD smoothness; tanh ramp keeps the
-    # bounds effective (≈1 inside, ≈0 outside) while remaining differentiable.
+    # Hard step previously here broke Newton/AD smoothness; a tanh ramp of
+    # width rxn.gate_width [K] keeps the bounds effective (≈1 inside, ≈0
+    # outside) while remaining differentiable.
     if isfinite(rxn.T_min) && rxn.T_min > 0.0
-        r *= 0.5 * (1 + tanh(T - rxn.T_min))
+        r *= 0.5 * (1 + tanh((T - rxn.T_min) / rxn.gate_width))
     end
     if isfinite(rxn.T_max)
-        r *= 0.5 * (1 + tanh(rxn.T_max - T))
+        r *= 0.5 * (1 + tanh((rxn.T_max - T) / rxn.gate_width))
     end
 
     return r

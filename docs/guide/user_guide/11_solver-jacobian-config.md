@@ -563,10 +563,9 @@ DenseAD_ForwardDiff(), rtol = 1e-6, atol = 1e-10)`:
 ```julia
 using Pyrolysis
 
-# Build the (def, ws) pair for the mode you intend to solve in.
-def = to_problem_def(problem; use_ale = true)
-ws  = build_workspace(problem, def)
-u   = create_state_vector(ws.layout, ws.mesh)
+# Build the (def, ws, u) triple for the mode you intend to solve in
+# (initialize_state applies the problem's ICs before packing u).
+def, ws, u = initialize_state(problem; use_ale = true)
 
 spec = JacobianSpec(Structured(strategy = ApproxSolve()), def, ws)
 
@@ -640,33 +639,38 @@ to external tooling. The three pieces are all top-level exports:
 - `residual!(du, u, def, t, ws)` — the pure ODE right-hand side. Note the
   argument order: `du`, `u`, `def`, `t`, `ws`.
 
-The builders `to_problem_def`, `build_workspace`, and `create_state_vector`
-turn a `PyrolysisProblem` into this lower-level form:
+The canonical builder is `initialize_state`, which turns a `PyrolysisProblem`
+into this lower-level form in one call — applying the problem's initial
+conditions, freezing the definition, allocating the workspace, and packing
+the initial state (the same sequence `solve()` runs internally):
 
 ```julia
 using Pyrolysis
 import OrdinaryDiffEq                                  # from your environment
 
-# 1. Freeze the problem definition (pick the mode flags you want).
-def = to_problem_def(problem;
+# 1. ICs → immutable def → mutable workspace → packed u0 [T, ξ, z (ALE), χ (WithChi)].
+def, ws, u0 = initialize_state(problem;
     use_ale         = false,
     radiation_model = NO_RADIATION,
     energy_form     = :standard)
 
-# 2. Build a mutable workspace (one per worker/thread).
-ws = build_workspace(problem, def)
-
-# 3. Initial state vector, packed [T, ξ, z (ALE), χ (WithChi)].
-u0 = create_state_vector(ws.layout, ws.mesh)
-
-# 4. Wrap residual! in the (du, u, p, t) shape OrdinaryDiffEq expects.
+# 2. Wrap residual! in the (du, u, p, t) shape OrdinaryDiffEq expects.
 #    Note the residual! argument order is (du, u, def, t, ws).
 rhs!(du, u, p, t) = residual!(du, u, def, t, ws)
 
-# 5. Hand-roll your own integration.
+# 3. Hand-roll your own integration.
 prob = OrdinaryDiffEq.ODEProblem(rhs!, u0, problem.tspan)
 raw  = OrdinaryDiffEq.solve(prob, OrdinaryDiffEq.KenCarp4(autodiff = OrdinaryDiffEq.AutoFiniteDiff()))
 ```
+
+The underlying primitives `to_problem_def`, `build_workspace`, and
+`create_state_vector` remain public as the advanced layer (AD workspaces via
+`build_ad_workspace`, mid-simulation repacking via `pack_state!`, warm
+starts). If you compose them by hand, the IC contract is on you:
+`create_state_vector` packs the mesh **as-is**, so call
+`Pyrolysis.Problem.apply_initial_conditions!(problem)` first — otherwise `u0`
+silently carries the mesh constructor's placeholder state instead of the
+problem's `T_initial`/`ξ_initial`, an error no retcode will flag.
 
 `StateLayout` (also exported) describes the packing and provides accessors so
 you can read fields out of a raw state vector without re-deriving the offsets:

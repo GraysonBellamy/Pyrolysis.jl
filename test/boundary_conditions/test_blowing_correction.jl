@@ -23,7 +23,6 @@ Covers the Couette-film blowing correction `h → h·B/(e^B − 1)`,
 using Test
 using ForwardDiff
 using Pyrolysis
-using Pyrolysis: to_problem_def, build_workspace
 using Pyrolysis.Materials
 using Pyrolysis.BoundaryConditions
 using Pyrolysis.Geometry: BoundaryState
@@ -279,10 +278,8 @@ _f_exact(B) = B / (exp(B) - 1)
                 bc_set = bcs,
                 tspan = (0.0, 100.0),
             )
-            Pyrolysis.Problem.apply_initial_conditions!(problem)
-            def = to_problem_def(problem; use_ale = use_ale, use_blowing_correction = true)
-            ws = build_workspace(problem, def)
-            u = create_state_vector(ws.layout, ws.mesh)
+            def, ws, u =
+                initialize_state(problem; use_ale = use_ale, use_blowing_correction = true)
             n = ws.layout.n_cells
             # Hot state with free gas so the boundary mass flux (and hence B)
             # is genuinely nonzero.

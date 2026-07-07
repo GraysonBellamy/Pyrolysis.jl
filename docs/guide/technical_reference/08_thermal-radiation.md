@@ -1028,7 +1028,10 @@ trait-dispatched residual that drives `SURFACE_ABSORPTION`/`BEER_LAMBERT` runs
 state variable: it lives in the `RadiationCache` and is re-solved from the
 current $(T,\xi,z)$ state at **every** residual evaluation. The ODE state
 vector is the ordinary unified `StateLayout` (T, ξ, z when ALE, χ when
-WithChi); build `u0` with `create_state_vector(ws.layout, ws.mesh)` and read
+WithChi); build `def`, `ws`, and `u0` with
+`initialize_state(problem; radiation_model = P1_QUASI_STEADY)` (which applies
+the problem's initial conditions before packing — a bare
+`create_state_vector` call packs the mesh as-is, §15.2) and read
 the field with `p.rad_cache.G` or `get_radiation_intensity(p::P1Residual, i)`
 — always the field of the most recent residual evaluation, never a frozen
 copy.

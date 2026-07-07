@@ -1,0 +1,15 @@
+case,code,label,res,wall_s,note
+V-HC-01,FDS,FDS 6.11.0,133 cells (Δx≈0.38 mm),0.079,custom deck vhc01_semi_infinite; DT=0.1 s; includes ~0.05 s startup
+V-HC-01,Gpyro,Gpyro 0.8200,500 nodes (Δz=0.1 mm),0.484,dt=0.1 s
+V-HC-02a,FDS,FDS 6.11.0,101 cells (Δx≈1 mm),0.315,heat_conduction_d_matched; span matched to ours (Fo 0.5 = 5000 s)
+V-HC-02b,FDS,FDS 6.11.0,101 cells (Δx≈1 mm),0.506,heat_conduction_c_matched; span matched to ours (Fo 0.5)
+V-HC-02c,FDS,FDS 6.11.0,101 cells (Δx≈1 mm),0.397,heat_conduction_b_matched; span matched to ours (Fo 0.5)
+V-HC-02d,FDS,FDS 6.11.0,101 cells (Δx≈1 mm),0.451,heat_conduction_a_ext; span matched to ours (Fo 0.5)
+V-HC-03,Gpyro,Gpyro 0.8200,201 nodes (Δz=0.1 mm),0.913,dt=0.1 s
+V-RAD-01,Gpyro,Gpyro 0.8200,101 nodes (Δz=0.1 mm),0.102,dt=0.1 s
+V-RX-01,FDS,FDS 6.11.0,1 solid cell,0.082,two_step_solid_reaction_matched; span matched to ours (20 s); DT=0.01 s
+V-RX-01,Gpyro,Gpyro 0.8200,0D,0.044,dt=1 ms
+V-RX-02c,FDS,FDS 6.11.0,0D particle,0.250,part_baking_soda_450K_matched; span matched to our 0.9 t_b window (2.4 s); includes the first-order variant too
+V-CPL-01,Gpyro,Gpyro 0.8200,801 nodes (Δz=0.05 mm),15.662,adaptive dt from 0.02 s
+V-CPL-01b,Gpyro,Gpyro 0.8200,801 nodes (Δz=0.05 mm),15.662,same run as V-CPL-01 (one deck serves both routes)
+V-CPL-03,FDS,FDS 6.11.0,4 cells (2 mm slab; stretched),0.082,custom isothermal paths deck; P1+P2 meshes in one run
