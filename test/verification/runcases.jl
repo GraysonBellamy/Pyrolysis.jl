@@ -3,105 +3,24 @@ Verification-case harness (assert mode).
 
 Runs every case in `test/verification/cases/` against its exact solution at
 the CI resolution, with pinned tolerances and a convergence-order spot check.
-The same `VerificationCase` metadata is designed to be consumed later by the
-report-mode runner (`scripts/verification/`, Phase 2) and the guide chapter
-generator — assert mode deliberately does no plotting and no artifact I/O.
-
-Coordinate convention (matches `test_analytical.jl`): z = 0 bottom/substrate,
-z = L top/exposed surface; exact solutions use depth x = L − z.
+The shared case definitions live in `casedefs.jl` (Test-free), which the
+report-mode runner (`scripts/verification/run_reports.jl`) also consumes —
+assert mode deliberately does no plotting and no artifact I/O.
 
 Discovery: `test/runtests.jl` auto-includes `.jl` files directly under
 `test/verification/` (non-recursive), so this file is the single entry point;
-`cases/` and `exact/` are only reached through the includes below.
+`casedefs.jl`, `cases/`, and `exact/` are only reached through the includes
+below.
 """
 
 using Test
-using Pyrolysis
-using Pyrolysis.Solver: get_cell_positions
-using Pyrolysis.Materials: DepletionLimiter, STEFAN_BOLTZMANN
-using Pyrolysis.Discretization: BEER_LAMBERT
-using Pyrolysis.Physics: ideal_gas_pressure, background_gas_concentration
-using Pyrolysis.Properties: porosity, effective_gas_viscosity
-using Statistics: mean
-using SpecialFunctions: erfc, erfcx
 
-if !isdefined(@__MODULE__, :VerificationCase)
-    include(joinpath(@__DIR__, "exact", "exact_solutions.jl"))
+include(joinpath(@__DIR__, "casedefs.jl"))
 
-    """
-    One quantity of interest evaluated from a solved case: `error < tol` is the
-    assertion. `comment` records tolerance provenance (observed error at pin
-    time, per cross-cutting requirement 5 of the suite plan).
-    """
-    Base.@kwdef struct QoIResult
-        name::String
-        value::Float64
-        exact::Float64 = NaN
-        error::Float64
-        tol::Float64
-        comment::String = ""
-    end
-
-    """
-    Spatial convergence spot check: solve `build(n)` for each `n ∈ n_cells`,
-    reduce each solution to a scalar error norm via `error_fn`, and assert the
-    observed order between consecutive resolutions. `build === nothing` reuses
-    the case's own builder. Δz ∝ 1/n is used for the order fit, so `n_cells`
-    must refine the same mesh family.
-    """
-    Base.@kwdef struct ConvergenceSpec
-        n_cells::Vector{Int}
-        error_fn::Function
-        expected_order::Float64
-        min_order::Float64
-        min_mean_order::Float64
-        solve_kwargs::NamedTuple = (;)
-        build::Union{Nothing,Function} = nothing
-    end
-
-    Base.@kwdef struct CIConfig
-        n_cells::Int
-        budget_s::Float64            # recorded target; asserted at 5× for CI variance
-        convergence::Union{Nothing,ConvergenceSpec} = nothing
-    end
-
-    """
-    Single-source verification-case definition (assert mode consumes `ci`;
-    report mode will consume `report`). `build(n_cells) -> PyrolysisProblem`,
-    `qois(sol) -> Vector{QoIResult}`.
-
-    `solve_fn` overrides how a built problem is solved: `nothing` (default)
-    uses the standard `solve(problem; progress=false, kwargs...)`; a function
-    is called as `solve_fn(problem; kwargs...)` and must return an object with
-    a `retcode` field (`:Success` on success). MMS cases use this to route
-    through the wrapped-RHS `solve_mms` path (exact/mms.jl). The override
-    applies to the convergence sweep as well.
-    """
-    Base.@kwdef struct VerificationCase
-        id::String
-        title::String
-        tags::Vector{Symbol}
-        references::Vector{String}
-        build::Function
-        solve_kwargs::NamedTuple = (;)
-        solve_fn::Union{Nothing,Function} = nothing
-        qois::Function
-        ci::CIConfig
-        report::NamedTuple = (;)
-    end
-
-    @inline _case_solve(case::VerificationCase, problem; kwargs...) =
-        case.solve_fn === nothing ? solve(problem; progress = false, kwargs...) :
-        case.solve_fn(problem; kwargs...)
-
-    observed_orders(errors, hs) =
-        [log(errors[i-1] / errors[i]) / log(hs[i-1] / hs[i]) for i = 2:length(errors)]
-
+if !isdefined(@__MODULE__, :run_case_ci)
     # Set PYROLYSIS_VERIFICATION_PRINT_QOIS=1 to print every observed QoI and
     # convergence rate — the workflow for (re)pinning tolerances at 3× observed.
     _print_qois() = get(ENV, "PYROLYSIS_VERIFICATION_PRINT_QOIS", "0") == "1"
-
-    const VERIFICATION_CASE_BUILDERS = Function[]
 
     function run_case_ci(case::VerificationCase)
         @testset "$(case.id) — $(case.title)" begin
@@ -152,11 +71,8 @@ end
 @testset "Verification suite (assert mode)" begin
     include(joinpath(@__DIR__, "exact", "selftests.jl"))
 
-    empty!(VERIFICATION_CASE_BUILDERS)
-    for f in sort(filter(endswith(".jl"), readdir(joinpath(@__DIR__, "cases"))))
-        include(joinpath(@__DIR__, "cases", f))
-    end
-    for case_builder in VERIFICATION_CASE_BUILDERS
-        run_case_ci(case_builder())
+    # invokelatest: the case closures are defined during load (world-age).
+    for case in load_verification_cases()
+        Base.invokelatest(run_case_ci, case)
     end
 end

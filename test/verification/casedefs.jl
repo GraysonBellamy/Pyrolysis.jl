@@ -1,0 +1,162 @@
+"""
+Shared verification-case definitions (Test-free).
+
+Single source consumed by both harnesses: assert mode (`runcases.jl`, run by
+`Pkg.test()`) and report mode (`scripts/verification/run_reports.jl`), per the
+dual-mode architecture in `docs/Verification_Suite_Plan_2026-07-06.md`. This
+file deliberately depends on nothing from `Test` so the report runner can
+include it from its isolated plotting environment.
+
+Coordinate convention (matches `test_analytical.jl`): z = 0 bottom/substrate,
+z = L top/exposed surface; exact solutions use depth x = L − z.
+"""
+
+using Pyrolysis
+using Pyrolysis.Solver: get_cell_positions
+using Pyrolysis.Materials: DepletionLimiter, STEFAN_BOLTZMANN
+using Pyrolysis.Discretization: BEER_LAMBERT
+using Pyrolysis.Problem: step_profile
+using Pyrolysis.Physics: ideal_gas_pressure, background_gas_concentration
+using Pyrolysis.Properties: porosity, effective_gas_viscosity
+using Statistics: mean
+using SpecialFunctions: erfc, erfcx
+
+if !isdefined(@__MODULE__, :VerificationCase)
+    include(joinpath(@__DIR__, "exact", "exact_solutions.jl"))
+
+    """
+    One quantity of interest evaluated from a solved case: `error < tol` is the
+    assertion. `comment` records tolerance provenance (observed error at pin
+    time, per cross-cutting requirement 5 of the suite plan).
+    """
+    Base.@kwdef struct QoIResult
+        name::String
+        value::Float64
+        exact::Float64 = NaN
+        error::Float64
+        tol::Float64
+        comment::String = ""
+    end
+
+    """
+    Spatial convergence spot check: solve `build(n)` for each `n ∈ n_cells`,
+    reduce each solution to a scalar error norm via `error_fn`, and assert the
+    observed order between consecutive resolutions. `build === nothing` reuses
+    the case's own builder. Δz ∝ 1/n is used for the order fit, so `n_cells`
+    must refine the same mesh family.
+    """
+    Base.@kwdef struct ConvergenceSpec
+        n_cells::Vector{Int}
+        error_fn::Function
+        expected_order::Float64
+        min_order::Float64
+        min_mean_order::Float64
+        solve_kwargs::NamedTuple = (;)
+        build::Union{Nothing,Function} = nothing
+    end
+
+    Base.@kwdef struct CIConfig
+        n_cells::Int
+        budget_s::Float64            # recorded target; asserted at 5× for CI variance
+        convergence::Union{Nothing,ConvergenceSpec} = nothing
+    end
+
+    """
+    One plottable data series for report mode: numeric samples plus an optional
+    `exact(x)` callable on the same abscissa. When present, the renderer draws
+    a densely-sampled reference line under the numeric markers and derives the
+    pointwise-error panel `y .- exact.(x)`. Plain data — no plotting deps.
+    """
+    Base.@kwdef struct CurveSeries
+        label::String
+        x::Vector{Float64}
+        y::Vector{Float64}
+        exact::Union{Nothing,Function} = nothing
+    end
+
+    """
+    One report-mode figure: a solver-vs-exact overlay built from `series`.
+    `name` is the stable slug used in artifact filenames and matches the
+    case's `qoi_curves` tag. Consumed only by `scripts/verification/`; inert
+    in assert mode.
+    """
+    Base.@kwdef struct ReportCurve
+        name::Symbol
+        title::String
+        xlabel::String
+        ylabel::String
+        series::Vector{CurveSeries}
+        xscale::Symbol = :identity
+        yscale::Symbol = :identity
+    end
+
+    """
+    Single-source verification-case definition. Assert mode consumes `ci`;
+    report mode consumes `report`. `build(n_cells) -> PyrolysisProblem`,
+    `qois(sol) -> Vector{QoIResult}`.
+
+    `solve_fn` overrides how a built problem is solved: `nothing` (default)
+    uses the standard `solve(problem; progress=false, kwargs...)`; a function
+    is called as `solve_fn(problem; kwargs...)` and must return an object with
+    a `retcode` field (`:Success` on success). MMS cases use this to route
+    through the wrapped-RHS `solve_mms` path (exact/mms.jl). The override
+    applies to the convergence sweep as well.
+
+    `report` keys understood by the report runner (all optional; `(;)` means
+    the case is skipped in report mode):
+
+    - `n_cells_ladder::Vector{Int}` — Richardson resolution ladder
+      (fallback: single run at `ci.n_cells`).
+    - `curves::Function` — `sol -> Vector{ReportCurve}`; the case-authored
+      overlay/error figure data (fallback: tables only, no figures).
+    - `error_norms::Function` — `sol -> NamedTuple` of named error norms,
+      e.g. `(L2 = …, Linf = …)` (fallback: `ci.convergence.error_fn` as a
+      single `(norm = …,)` entry).
+    - `expected_order::Float64` — reference slope for the convergence plot
+      (fallback: `ci.convergence.expected_order`).
+    - `solve_kwargs::NamedTuple` — report-tightened solver settings
+      (fallback: `case.solve_kwargs` merged with convergence `solve_kwargs`).
+    - `temporal_sweep::NamedTuple` — `(n_cells, dts)` fixed-dt time-order
+      sweep (V-MMS-01).
+    - `param_sweep::NamedTuple` — `(name, values, build, measure)` with
+      `build(n_cells, value) -> problem` and `measure(sol) -> NamedTuple`
+      (V-CPL-02 activation-energy ladder).
+    - informational: `profile_times`, `qoi_curves`, `heating`, `note`.
+    """
+    Base.@kwdef struct VerificationCase
+        id::String
+        title::String
+        tags::Vector{Symbol}
+        references::Vector{String}
+        build::Function
+        solve_kwargs::NamedTuple = (;)
+        solve_fn::Union{Nothing,Function} = nothing
+        qois::Function
+        ci::CIConfig
+        report::NamedTuple = (;)
+    end
+
+    @inline _case_solve(case::VerificationCase, problem; kwargs...) =
+        case.solve_fn === nothing ? solve(problem; progress = false, kwargs...) :
+        case.solve_fn(problem; kwargs...)
+
+    observed_orders(errors, hs) =
+        [log(errors[i-1] / errors[i]) / log(hs[i-1] / hs[i]) for i = 2:length(errors)]
+
+    const VERIFICATION_CASE_BUILDERS = Function[]
+
+    """
+    Discover and build every case in `cases/`: empties the registry, includes
+    each file in sorted order (each pushes builders onto
+    `VERIFICATION_CASE_BUILDERS`), and returns the built `VerificationCase`s.
+    """
+    function load_verification_cases()
+        empty!(VERIFICATION_CASE_BUILDERS)
+        for f in sort(filter(endswith(".jl"), readdir(joinpath(@__DIR__, "cases"))))
+            include(joinpath(@__DIR__, "cases", f))
+        end
+        # invokelatest: the builders were defined by `include` DURING this
+        # function call, so they are newer than the function's world age.
+        return [Base.invokelatest(builder) for builder in VERIFICATION_CASE_BUILDERS]
+    end
+end
