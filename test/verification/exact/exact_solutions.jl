@@ -17,3 +17,4 @@
 include("roots.jl")
 include("semi_infinite.jl")
 include("slab_series.jl")
+include("kinetics.jl")

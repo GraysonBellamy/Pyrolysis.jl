@@ -75,6 +75,47 @@
         @test slab_convective_theta(0.3, 0.1, λs_big) ≈ θ_ref rtol = 1e-6
     end
 
+    @testset "isothermal kinetics closed forms" begin
+        # 1. nth-order: dξ/dt = −kξⁿ verified by central finite difference.
+        for n in (0.0, 2.0, 2 / 3)
+            ξ0, k, t = 100.0, 0.5, 5.0
+            δ = 1e-6
+            dξdt =
+                (
+                    nth_order_xi(t + δ; ξ0 = ξ0, k = k, n = n) -
+                    nth_order_xi(t - δ; ξ0 = ξ0, k = k, n = n)
+                ) / (2δ)
+            ξt = nth_order_xi(t; ξ0 = ξ0, k = k, n = n)
+            @test dξdt ≈ -k * ξt^n rtol = 1e-6
+        end
+
+        # 2. Burnout: exact zero at t_b for n < 1, and m^(1/3) linear in t for
+        #    the contracting-sphere order n = 2/3 (FDS NaHCO₃ marker).
+        tb = nth_order_burnout_time(ξ0 = 100.0, k = 5.0, n = 0.0)
+        @test tb == 20.0
+        @test nth_order_xi(tb; ξ0 = 100.0, k = 5.0, n = 0.0) == 0.0
+        tb3 = nth_order_burnout_time(ξ0 = 1.0, k = 0.3, n = 2 / 3)
+        m13(t) = nth_order_xi(t; ξ0 = 1.0, k = 0.3, n = 2 / 3)^(1 / 3)
+        @test m13(0.3 * tb3) ≈ 1 - 0.3 rtol = 1e-12
+        @test m13(0.7 * tb3) ≈ 1 - 0.7 rtol = 1e-12
+
+        # 3. Series chain: ODE residual by finite difference + conservation +
+        #    B peaks at t* = ln(k₁/k₂)/(k₁ − k₂).
+        ξ0, k1, k2 = 1000.0, 0.389, 0.262
+        δ = 1e-6
+        for t in (0.5, 2.0, 8.0)
+            ξA, ξB, _ = series_chain_xi(t; ξ0 = ξ0, k1 = k1, k2 = k2)
+            ξBp = series_chain_xi(t + δ; ξ0 = ξ0, k1 = k1, k2 = k2)[2]
+            ξBm = series_chain_xi(t - δ; ξ0 = ξ0, k1 = k1, k2 = k2)[2]
+            @test (ξBp - ξBm) / (2δ) ≈ k1 * ξA - k2 * ξB rtol = 1e-6
+            @test sum(series_chain_xi(t; ξ0 = ξ0, k1 = k1, k2 = k2)) ≈ ξ0 rtol = 1e-14
+        end
+        tpeak = log(k1 / k2) / (k1 - k2)
+        ξB_at(t) = series_chain_xi(t; ξ0 = ξ0, k1 = k1, k2 = k2)[2]
+        @test ξB_at(tpeak) > ξB_at(tpeak - 0.01)
+        @test ξB_at(tpeak) > ξB_at(tpeak + 0.01)
+    end
+
     @testset "slab constant-flux series (C&J §3.8)" begin
         # 1. Fourier identity: φ(x̃, 0) = 0 for all x̃ (the series is exactly
         #    the cosine expansion of −(3x̃²−1)/6). Must be evaluated AT Fo = 0:
