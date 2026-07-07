@@ -784,4 +784,3 @@ Reads ξ values directly from the state matrix to avoid closure allocations.
     end
     return Expr(:block, exprs...)
 end
-
