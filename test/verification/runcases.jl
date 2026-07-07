@@ -19,6 +19,7 @@ using Test
 using Pyrolysis
 using Pyrolysis.Solver: get_cell_positions
 using Pyrolysis.Materials: DepletionLimiter, STEFAN_BOLTZMANN
+using Pyrolysis.Discretization: BEER_LAMBERT
 using Statistics: mean
 using SpecialFunctions: erfc, erfcx
 

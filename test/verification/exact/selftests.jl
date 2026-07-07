@@ -164,6 +164,60 @@
         @test 700.0 < Ts < 760.0
     end
 
+    @testset "in-depth absorption eigenseries (Lautenberger App. A)" begin
+        δ, κ, k, h, q0, T0 = 0.01, 1000.0, 0.2, 20.0, 25.0e3, 300.0
+        ρc = 1000.0 * 1400.0
+        α = k / ρc
+        ex = make_indepth_absorption_exact(
+            δ = δ,
+            κ = κ,
+            k = k,
+            h = h,
+            α = α,
+            q0 = q0,
+            T0 = T0,
+        )
+
+        # 1. Initial condition reconstructed: series must cancel θ_ss at t=0⁺
+        #    (60-term truncation; amplitude θ_ss(0) = q₀/h = 1250 K).
+        for x in (0.0, 0.002, 0.005, 0.009)
+            @test abs(ex.T_exact(x, 1e-12) - T0) < 1e-3 * (q0 / h)
+        end
+
+        # 2. Steady limit: series decayed ⇒ θ_ss; and steady front loss equals
+        #    the deposited power q₀(1−e^(−κδ)) (identity of the derivation).
+        #    Slowest mode decays like exp(−u₁²·αt/δ²) with u₁ ≈ 0.86 (Bi = 1),
+        #    so αt/δ² = 60 gives e^(−44)·O(10³ K) ≪ machine precision.
+        t_big = 60 * δ^2 / α
+        @test ex.T_exact(0.004, t_big) ≈ T0 + ex.θ_ss(0.004) rtol = 1e-12
+        @test h * ex.θ_ss(0.0) ≈ q0 * (1 - exp(-κ * δ)) rtol = 1e-12
+
+        # 3. PDE residual by finite differences at an interior point and
+        #    mid-transient time: θ_t − αθ_xx − q₀κe^(−κx)/ρc = 0.
+        #    dx must be small: the exponential source gives θ_xxxx ~ q₀κ³/k
+        #    ≈ 1.25e14 K/m⁴, so the central-difference truncation α·θxxxx·dx²/12
+        #    only drops below 1e-4·source for dx ≲ 2e-6.
+        x0, t0 = 0.004, 100.0
+        dx, dt = 1e-6, 1e-2
+        θt = (ex.T_exact(x0, t0 + dt) - ex.T_exact(x0, t0 - dt)) / (2dt)
+        θxx =
+            (ex.T_exact(x0 + dx, t0) - 2 * ex.T_exact(x0, t0) + ex.T_exact(x0 - dx, t0)) /
+            dx^2
+        source = q0 * κ * exp(-κ * x0) / ρc
+        residual = θt - α * θxx - source
+        @test abs(residual) < 3e-4 * source
+
+        # 4. Front BC satisfied at finite t: k·θ_x(0) = h·θ(0). Second-order
+        #    one-sided stencil (plain forward difference carries a θxx·dx/2
+        #    bias ≈ 0.4% from the same strong surface curvature).
+        t1 = 90.0
+        dxb = 1e-6
+        θx0 =
+            (-3 * ex.T_exact(0.0, t1) + 4 * ex.T_exact(dxb, t1) - ex.T_exact(2 * dxb, t1)) /
+            (2 * dxb)
+        @test k * θx0 ≈ h * (ex.T_exact(0.0, t1) - T0) rtol = 1e-3
+    end
+
     @testset "slab constant-flux series (C&J §3.8)" begin
         # 1. Fourier identity: φ(x̃, 0) = 0 for all x̃ (the series is exactly
         #    the cosine expansion of −(3x̃²−1)/6). Must be evaluated AT Fo = 0:
