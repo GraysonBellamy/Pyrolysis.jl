@@ -218,6 +218,121 @@
         @test k * θx0 ≈ h * (ex.T_exact(0.0, t1) - T0) rtol = 1e-3
     end
 
+    @testset "Landau ablation traveling wave (QAM 8:81)" begin
+        q, ρ, c, k = 2.8e6, 1000.0, 1000.0, 1.0
+        α = k / (ρ * c)
+        T0, Tp, ΔH = 300.0, 700.0, 1.0e6
+        v = landau_vss(q = q, ρ = ρ, c = c, ΔH = ΔH, T0 = T0, Tp = Tp)
+
+        # 1. Wave-frame ODE residual α T″ + v T′ = 0 by central differences.
+        for ζ in (1e-4, 5e-4, 2e-3)
+            dζ = 1e-7
+            Tf(z) = landau_T(z; T0 = T0, Tp = Tp, v = v, α = α)
+            T2 = (Tf(ζ + dζ) - 2 * Tf(ζ) + Tf(ζ - dζ)) / dζ^2
+            T1 = (Tf(ζ + dζ) - Tf(ζ - dζ)) / (2 * dζ)
+            scale = v^2 / α^2 * (Tp - T0) # |T″| scale at ζ = 0
+            @test abs(α * T2 + v * T1) < 1e-5 * α * scale
+        end
+
+        # 2. Surface energy balance: q = k|dT/dζ|₀ + ρ v ΔH, with the gradient
+        #    from a second-order one-sided difference (independent of the v_ss
+        #    algebra; a first-order stencil has a (v/2α)·dζ ≈ 1e-5 rel. bias).
+        dζ = 1e-8
+        Tl(z) = landau_T(z; T0 = T0, Tp = Tp, v = v, α = α)
+        grad0 = (-3 * Tl(0.0) + 4 * Tl(dζ) - Tl(2 * dζ)) / (2 * dζ)
+        @test k * abs(grad0) + ρ * v * ΔH ≈ q rtol = 1e-6
+
+        # 3. Boundary values and monotone decay to T₀.
+        @test landau_T(0.0; T0 = T0, Tp = Tp, v = v, α = α) == Tp
+        @test landau_T(20 * α / v; T0 = T0, Tp = Tp, v = v, α = α) ≈ T0 atol =
+            1e-5 * (Tp - T0)
+    end
+
+    @testset "Neumann two-phase Stefan (C&J §11.2 / Gpyro §3.4.3)" begin
+        p = stefan_gpyro_problem()
+        λ = stefan_lambda(p)
+        αs, αl = α_solid(p), α_liquid(p)
+
+        # 1. Published eigenvalue: dissertation reports λ = 0.2317 (4 digits).
+        @test abs(λ - 0.2317) < 5e-5
+        # 2. Root satisfies the eigencondition to bisection precision.
+        @test abs(stefan_eigencondition(λ, p)) < 1e-10
+
+        # 3. Interface: both branches equal T_m at x = s(t).
+        t = 150.0
+        s = stefan_front(t; λ = λ, αs = αs)
+        @test stefan_T(s - 1e-12, t, p, λ) ≈ p.T_m rtol = 1e-10
+        @test stefan_T(s + 1e-12, t, p, λ) ≈ p.T_m rtol = 1e-10
+
+        # 4. Stefan flux-jump condition k_s∂T_s/∂x − k_l∂T_l/∂x = ρΔH_m ds/dt
+        #    via one-sided finite differences on each branch.
+        dx = 1e-7
+        g_s = (stefan_T(s, t, p, λ) - stefan_T(s - dx, t, p, λ)) / dx
+        g_l = (stefan_T(s + dx, t, p, λ) - stefan_T(s, t, p, λ)) / dx
+        dsdt = λ * sqrt(αs / t)
+        @test p.k_s * g_s - p.k_l * g_l ≈ p.ρ * p.ΔH_m * dsdt rtol = 1e-5
+
+        # 5. Both PDEs by finite differences (solid and liquid interior points).
+        for (x0, αx) in ((0.4 * s, αs), (2.5 * s, αl))
+            dxf, dtf = 1e-5, 1e-3
+            Tt = (stefan_T(x0, t + dtf, p, λ) - stefan_T(x0, t - dtf, p, λ)) / (2 * dtf)
+            Txx =
+                (
+                    stefan_T(x0 + dxf, t, p, λ) - 2 * stefan_T(x0, t, p, λ) +
+                    stefan_T(x0 - dxf, t, p, λ)
+                ) / dxf^2
+            @test Tt ≈ αx * Txx rtol = 1e-4
+        end
+
+        # 6. Global energy balance by quadrature (independent check of the
+        #    whole family, λ included): heat extracted at the wall
+        #    Q_w(t) = 2 k_s (T_m − T∞) √t / (erf λ √(π αs))
+        #    must equal latent release ρΔH_m·s(t) plus the sensible change
+        #    ∫ ρ ĉ(x)(T₀ − T(x,t)) dx, where solidified material contributes
+        #    c_l (T₀ → T_m) then c_s (T_m → T). Run on an asymmetric parameter
+        #    set too, which exercises every term of the eigencondition.
+        for p2 in (
+            p,
+            StefanProblem(
+                k_s = 0.45,
+                k_l = 0.20,
+                ρ = 900.0,
+                c_s = 2000.0,
+                c_l = 1500.0,
+                T_m = 433.0,
+                ΔH_m = 80.0e3,
+                T0 = 445.0,
+                T∞ = 415.0,
+            ),
+        )
+            λ2 = stefan_lambda(p2)
+            αs2, αl2 = α_solid(p2), α_liquid(p2)
+            t2 = 200.0
+            s2 = stefan_front(t2; λ = λ2, αs = αs2)
+            Q_wall = 2 * p2.k_s * (p2.T_m - p2.T∞) * sqrt(t2) / (erf(λ2) * sqrt(π * αs2))
+            # sensible deficit by composite trapezoid, split at the front
+            function sens_deficit(a, b, n, phase)
+                xs = range(a, b, length = n + 1)
+                function f(x)
+                    T = stefan_T(x, t2, p2, λ2)
+                    if phase === :solid
+                        return p2.c_l * (p2.T0 - p2.T_m) + p2.c_s * (p2.T_m - T)
+                    else
+                        return p2.c_l * (p2.T0 - T)
+                    end
+                end
+                vals = [f(x) for x in xs]
+                return p2.ρ * (sum(vals) - 0.5 * (vals[1] + vals[end])) * (b - a) / n
+            end
+            x_far = s2 + 14 * sqrt(αl2 * t2)  # erfc tail < 1e-20 beyond
+            E_sens =
+                sens_deficit(0.0, s2, 40_000, :solid) +
+                sens_deficit(s2, x_far, 200_000, :liquid)
+            E_latent = p2.ρ * p2.ΔH_m * s2
+            @test Q_wall ≈ E_latent + E_sens rtol = 1e-8
+        end
+    end
+
     @testset "slab constant-flux series (C&J §3.8)" begin
         # 1. Fourier identity: φ(x̃, 0) = 0 for all x̃ (the series is exactly
         #    the cosine expansion of −(3x̃²−1)/6). Must be evaluated AT Fo = 0:
@@ -238,5 +353,278 @@
             mean_φ = (sum(φs) - 0.5 * (φs[1] + φs[end])) / (length(xs) - 1)
             @test mean_φ ≈ Fo atol = 1e-6
         end
+    end
+end
+
+# MMS driver self-tests (formula-provenance rule applied to the source
+# generator itself): every ForwardDiff-assembled continuous-operator term is
+# checked against an independently hand-derived closed form, then the driver
+# is exercised end-to-end on a heat-only manufactured solution (spatial order
+# ≈ 2, temporal order ≈ 4, analytic-vs-FD Jacobian agreement).
+@testset "MMS driver (exact/mms.jl)" begin
+    @testset "conduction + storage source vs hand derivation" begin
+        ρs, cs, ks = 1000.0, 1200.0, 0.4
+        L, τ = 0.02, 5.0
+        solid = SolidComponent(:s, ρ = ρs, c = cs, k = ks)
+        mat = Material(name = :MMSSelfHC, components = (solid,), reactions = ())
+        fields = MMSFields(
+            (z, t) -> 300.0 + 50.0 * sin(π * z / L) * exp(-t / τ) + 20.0 * z / L,
+            ((z, t) -> ρs,),
+        )
+        for z in (0.0, 0.004, 0.013, L), t in (0.0, 1.0, 4.0)
+            dTdt = -(50.0 / τ) * sin(π * z / L) * exp(-t / τ)
+            dTdz = 50.0 * (π / L) * cos(π * z / L) * exp(-t / τ) + 20.0 / L
+            d2Tdz2 = -50.0 * (π / L)^2 * sin(π * z / L) * exp(-t / τ)
+            @test mms_heat_flux(mat, fields, z, t) ≈ -ks * dTdz rtol = 1e-12
+            S_hand = dTdt - ks * d2Tdz2 / (ρs * cs)
+            @test mms_energy_source(mat, fields, z, t) ≈ S_hand rtol = 1e-12
+        end
+    end
+
+    @testset "kinetics sources vs hand derivation (A→B, E = 0)" begin
+        L = 0.02
+        kA = 0.5          # rate constant [1/s]: A = kA, E = 0
+        h_r = 1.0e5       # endothermic
+        compA = SolidComponent(:A, ρ = 800.0, c = 1000.0, k = 0.3)
+        compB = SolidComponent(:B, ρ = 600.0, c = 900.0, k = 0.2)
+        rxn = Reaction(:r, 1 => 2; A = kA, E = 0.0, h = h_r)
+        mat = Material(
+            name = :MMSSelfRX,
+            components = (compA, compB),
+            reactions = (rxn,),
+            depletion_limiter = DepletionLimiter(enabled = false),
+        )
+        τ = 3.0
+        fields = MMSFields(
+            (z, t) -> 500.0,
+            ((z, t) -> 400.0 + 100.0 * (z / L) * exp(-t / τ), (z, t) -> 150.0),
+        )
+        for z in (0.0, 0.007, L), t in (0.0, 2.0)
+            ξA = 400.0 + 100.0 * (z / L) * exp(-t / τ)
+            dξA_dt = -(100.0 / τ) * (z / L) * exp(-t / τ)
+            rate = kA * ξA
+            @test mms_species_source(mat, fields, 1, z, t) ≈ dξA_dt + rate rtol = 1e-12
+            @test mms_species_source(mat, fields, 2, z, t) ≈ -rate rtol = 1e-12
+            # T* constant ⇒ q* ≡ 0; S_T = −Q_rxn/ρcp = +h·r/ρcp (h > 0 endo).
+            ρcp = ξA * 1000.0 + 150.0 * 900.0
+            @test mms_energy_source(mat, fields, z, t) ≈ h_r * rate / ρcp rtol = 1e-12
+        end
+    end
+
+    @testset "gas flux, S_conv and species source (single gas)" begin
+        L = 0.02
+        λ = 2.0e-5
+        cp_g = 1100.0
+        solid = SolidComponent(:s, ρ = 800.0, c = 1000.0, k = 0.3, λ = λ)
+        gas = GaseousComponent(:g, M = 0.028, c = cp_g, k = 0.03, λ = λ)
+        mat = Material(name = :MMSSelfGT, components = (solid, gas), reactions = ())
+        # Equal component λ ⇒ λ_eff = λ exactly under any volume weighting, so
+        # the hand flux needs no mixture algebra.
+        τ = 4.0
+        T_f(z, t) = 400.0 + 50.0 * z / L
+        ξg_f(z, t) = 2.0 + sin(π * z / L) * exp(-t / τ)
+        fields = MMSFields(T_f, ((z, t) -> 700.0, ξg_f))
+        J_hand(z, t) = begin
+            T = T_f(z, t)
+            dTdz = 50.0 / L
+            dξdz = (π / L) * cos(π * z / L) * exp(-t / τ)
+            -(λ / T) * (dξdz * T + ξg_f(z, t) * dTdz)
+        end
+        for z in (0.0, 0.006, 0.015, L), t in (0.0, 1.5)
+            @test mms_gas_flux(mat, fields, 2, z, t) ≈ J_hand(z, t) rtol = 1e-12
+            @test mms_S_conv(mat, fields, z, t) ≈ -cp_g * J_hand(z, t) * (50.0 / L) rtol =
+                1e-12
+            # Species source: ∂tξ + ∂zJ, with ∂zJ from a central difference of
+            # the hand flux (independent of the ForwardDiff evaluation).
+            δ = 1e-7 * L
+            dJdz = (J_hand(z + δ, t) - J_hand(z - δ, t)) / (2δ)
+            dξdt = -sin(π * z / L) * exp(-t / τ) / τ
+            @test mms_species_source(mat, fields, 2, z, t) ≈ dξdt + dJdz rtol = 1e-6
+        end
+    end
+
+    @testset "end-to-end heat-only MMS (order + Jacobian agreement)" begin
+        ρs, cs, ks = 1000.0, 1200.0, 0.4
+        L, τ = 0.02, 5.0
+        fields = MMSFields(
+            (z, t) -> 300.0 + 50.0 * sin(π * z / L) * exp(-t / τ) + 20.0 * z / L,
+            ((z, t) -> ρs,),
+        )
+        function build(n)
+            solid = SolidComponent(:s, ρ = ρs, c = cs, k = ks)
+            mat = Material(name = :MMSSelfE2E, components = (solid,), reactions = ())
+            mesh = create_uniform_mesh(L, n, Val(1); T_initial = 300.0, ξ_initial = (ρs,))
+            bcs = mms_thermal_bcs(mat, fields, L)
+            bc_set = BoundaryConditionSet(thermal = (top = bcs.top, bottom = bcs.bottom))
+            return PyrolysisProblem(
+                mesh = mesh,
+                material = mat,
+                bc_set = bc_set,
+                T_initial = z -> fields.T(z, 0.0),
+                ξ_initial = [z -> ρs],
+                tspan = (0.0, 2.0),
+                output_times = [0.0, 2.0],
+            )
+        end
+
+        # Spatial order ≈ 2 (L2 of T at t_end; tight tolerances keep temporal
+        # error subdominant).
+        errs = [
+            mms_L2_T(solve_mms(build(n), fields; abstol = 1e-11, reltol = 1e-9), fields) for n in (16, 32)
+        ]
+        order = log(errs[1] / errs[2]) / log(2.0)
+        @test errs[2] < errs[1]
+        @test order > 1.7
+
+        # Analytic Jacobian and colored-FD must agree (the injected source is
+        # state-independent, so the Structured Jacobian stays exact).
+        sol_an = solve_mms(build(16), fields; jacobian = :analytic)
+        sol_fd = solve_mms(build(16), fields; jacobian = :fd)
+        @test sol_an.retcode == :Success && sol_fd.retcode == :Success
+        @test maximum(abs.(sol_an.T[:, end] - sol_fd.T[:, end])) < 1e-5
+
+        # Temporal order ≈ 4 (KenCarp4): fixed mesh, fixed-dt sweep against a
+        # small-dt reference on the SAME mesh so the spatial error cancels.
+        ref = solve_mms(build(16), fields; dt = 0.0125)
+        e_dt = [
+            maximum(abs.(solve_mms(build(16), fields; dt = dt).T[:, end] - ref.T[:, end])) for dt in (0.2, 0.1)
+        ]
+        p_t = log(e_dt[1] / e_dt[2]) / log(2.0)
+        @test p_t > 3.0
+    end
+
+    @testset "induced-motion machinery (θ*, w*, material-frame source)" begin
+        # V-MMS-04 companion checks (formula-provenance rule): the package-
+        # kinetics θ*, the Gauss–Legendre w* = ∫θ*, and the material-frame
+        # condensed source are each verified against an independently
+        # hand-derived closed form. Design mirrors the case: constant ρ_s,
+        # γ_s = 1 / γ_g = 0, single first-order s → g, depletion limiter
+        # numerically inactive (tanh(ξ_s/1.0) ≡ 1.0 in Float64 for
+        # ξ_s ≳ 20 kg/m³ — here ξ_s ≥ 500).
+        L = 0.01
+        ρs = 800.0
+        A_r, E_r = 5.0e4, 80.0e3
+        solid = SolidComponent(:s, ρ = ρs, c = 1200.0, k = 0.2, λ = 2.0e-5, γ = 1.0)
+        gas = GaseousComponent(:g, M = 0.028, c = 1000.0, k = 0.03, λ = 2.0e-5)  # γ = 0
+        rxn = Reaction(:r, 1 => 2; A = A_r, E = E_r, h = 5.0e4)
+        mat = Material(name = :MMSSelfIM, components = (solid, gas), reactions = (rxn,))
+
+        τa, τb = 25.0, 30.0
+        T_f(z, t) = 600.0 + 15.0 * sin(2π * t / 40.0)
+        a_f(t) = 600.0 + 20.0 * cos(2π * t / τa)
+        b_f(t) = 60.0 * exp(-t / τb)
+        ξs_f(z, t) = a_f(t) + b_f(t) * sin(π * z / L)
+        ξg_f(z, t) = 2.0 + 0.8 * sin(π * z / L) * exp(-t / 15.0)
+        fields = MMSFields(T_f, (ξs_f, ξg_f))
+
+        R = Pyrolysis.Materials.R_GAS
+        k_hand(t) = A_r * exp(-E_r / (R * T_f(0.0, t)))
+        rate_hand(z, t) = k_hand(t) * ξs_f(z, t)          # limiter ≡ 1 here
+        θ_hand(z, t) = -rate_hand(z, t) / ρs               # γ_g = 0 drops the gas term
+        # w* = ∫₀ᶻ θ* dζ, closed form for the sin profile:
+        w_hand(z, t) =
+            -(k_hand(t) / ρs) * (a_f(t) * z + b_f(t) * (L / π) * (1.0 - cos(π * z / L)))
+
+        motion = MMSMotion((z, t) -> mms_mesh_velocity(mat, fields, z, t))
+        for z in (0.0, 0.003, 0.007, L), t in (0.0, 6.0, 17.0)
+            @test mms_theta(mat, fields, z, t) ≈ θ_hand(z, t) rtol = 1e-12
+            # 32-node Gauss–Legendre vs the closed-form integral: machine
+            # precision for this smooth integrand (requirement 4).
+            if z > 0.0
+                @test mms_mesh_velocity(mat, fields, z, t) ≈ w_hand(z, t) rtol = 1e-12
+            else
+                @test mms_mesh_velocity(mat, fields, z, t) == 0.0
+            end
+
+            # Material-frame solid source: S_s = ∂tξ* + w*·∂zξ* − ω̇* + ξ*·θ*
+            # with ω̇_s = −rate.
+            dξs_dt =
+                -20.0 * (2π / τa) * sin(2π * t / τa) -
+                (60.0 / τb) * exp(-t / τb) * sin(π * z / L)
+            dξs_dz = b_f(t) * (π / L) * cos(π * z / L)
+            S_hand =
+                dξs_dt + w_hand(z, t) * dξs_dz + rate_hand(z, t) + ξs_f(z, t) * θ_hand(z, t)
+            @test mms_species_source_material(mat, fields, motion, 1, z, t) ≈ S_hand rtol =
+                1e-12
+        end
+    end
+
+    @testset "Frank-Kamenetskii slab (FK limit + full-Arrhenius shooting)" begin
+        # 1. Published criticality constants: δ_c = 0.878, θ_m,c ≈ 1.19.
+        @test abs(fk_delta_crit() - 0.878) < 1e-3
+        @test abs(fk_theta_max_crit() - 1.19) < 5e-3
+
+        # 2. The FK profile satisfies θ″ + δe^θ = 0 (finite differences) and
+        #    its wall BC θ(±1) = 0 to root precision.
+        δ = 0.44
+        θm = fk_theta_max(δ)
+        prof(x̃) = fk_theta_profile(x̃; θm = θm, δ = δ)
+        for x̃ in (0.0, 0.35, 0.8)
+            dx = 1e-5
+            θxx = (prof(x̃ + dx) - 2 * prof(x̃) + prof(x̃ - dx)) / dx^2
+            @test θxx ≈ -δ * exp(prof(x̃)) rtol = 1e-5
+        end
+        @test abs(prof(1.0)) < 1e-12
+        @test abs(prof(-1.0)) < 1e-12
+
+        # 3. Small-δ limit: θ_m → δ/2 (source ≈ constant, parabolic profile).
+        @test fk_theta_max(1e-4) ≈ 5e-5 rtol = 1e-3
+
+        # 4. Supercritical δ must throw (no steady root).
+        @test_throws ArgumentError fk_theta_max(0.9)
+
+        # 5. Full-Arrhenius shooting: wall BC hit to bisection precision, and
+        #    in the deep FK limit (E/RT₀ = 400) the center rise matches the
+        #    FK closed form to O(RT₀/E).
+        R = 8.314462618
+        T0, k, L = 500.0, 0.2, 0.01
+        for (E_over_RT0, rtol_fk) in ((400.0, 3e-3), (40.0, 5e-2))
+            E = E_over_RT0 * R * T0
+            εT = R * T0^2 / E
+            S0 = δ * k * εT / L^2
+            sh = fk_steady_shoot(S0 = S0, E = E, T0 = T0, k = k, L = L)
+            @test abs(sh.T_at(L) - T0) < 1e-8 * T0
+            θ_center = (sh.T_center - T0) / εT
+            @test θ_center ≈ θm rtol = rtol_fk
+            # symmetric interior point against the FK profile shape
+            θ_half = (sh.T_at(0.5 * L) - T0) / εT
+            @test θ_half ≈ prof(0.5) rtol = 2 * rtol_fk
+        end
+    end
+
+    @testset "constant-heating-rate TGA reference" begin
+        ξ0, A, E, β, T0 = 1000.0, 1.0e10, 130.0e3, 0.5, 300.0
+        R = 8.314462618
+
+        # 1. ODE residual by central finite difference: dξ/dt = −A e^(−E/RT) ξ.
+        for t in (500.0, 600.0, 700.0)
+            δt = 1e-3
+            ξp = tga_xi(t + δt; ξ0 = ξ0, A = A, E = E, β = β, T0 = T0)
+            ξm = tga_xi(t - δt; ξ0 = ξ0, A = A, E = E, β = β, T0 = T0)
+            ξt = tga_xi(t; ξ0 = ξ0, A = A, E = E, β = β, T0 = T0)
+            T = T0 + β * t
+            @test (ξp - ξm) / (2 * δt) ≈ -A * exp(-E / (R * T)) * ξt rtol = 1e-6
+        end
+
+        # 2. Temperature integral vs the standard asymptotic expansion
+        #    I ≈ (RT²/E)e^(−E/RT)(1 − 2u + 6u²), u = RT/E; next term is
+        #    24u³ ≈ 4e-4 at u = 0.037 (T = 580 K).
+        for T in (500.0, 580.0, 650.0)
+            u = R * T / E
+            asym = (R * T^2 / E) * exp(-E / (R * T)) * (1 - 2u + 6u^2)
+            @test tga_temperature_integral(T; T0 = T0, E = E) ≈ asym rtol = 30 * u^3
+        end
+
+        # 3. Richardson: doubling the Simpson resolution changes nothing at
+        #    the tolerance the cases rely on.
+        I1 = tga_temperature_integral(650.0; T0 = T0, E = E, n = 20_000)
+        I2 = tga_temperature_integral(650.0; T0 = T0, E = E, n = 40_000)
+        @test I1 ≈ I2 rtol = 1e-10
+
+        # 4. Monotone decay from ξ0 to burnout.
+        @test tga_xi(0.0; ξ0 = ξ0, A = A, E = E, β = β, T0 = T0) == ξ0
+        ξs = [tga_xi(t; ξ0 = ξ0, A = A, E = E, β = β, T0 = T0) for t = 0.0:50.0:800.0]
+        @test issorted(ξs, rev = true)
+        @test ξs[end] / ξ0 < 1e-40
     end
 end

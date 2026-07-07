@@ -128,6 +128,54 @@ function _verification_case_vhc05()
             n_cells_ladder = [20, 40, 80, 160, 320],
             profile_times = [t_end],
             qoi_curves = (:T_profile_steady, :flux_history),
+            solve_kwargs = (abstol = 1e-12, reltol = 1e-10),
+            curves = sol -> begin
+                z = get_cell_positions(sol)
+                n = length(z)
+                i1, i2 = n ÷ 2, n ÷ 2 + 1
+                # invert the implicit Kirchhoff profile z(T) for the overlay
+                T_of_z(zz) = bisect_root(T -> z_of_T(T) - zz, T_bot, T_top)
+                q_interior(j) =
+                    k0 * (
+                        (sol.T[i2, j] - sol.T[i1, j]) +
+                        β * (sol.T[i2, j]^2 - sol.T[i1, j]^2) / 2
+                    ) / (z[i2] - z[i1])
+                [
+                    ReportCurve(
+                        name = :T_profile_steady,
+                        title = "V-HC-05: steady Kirchhoff profile, k(T) = k₀(1+βT)",
+                        xlabel = "z (m)",
+                        ylabel = "T (K)",
+                        series = [
+                            CurveSeries(
+                                label = "steady solver profile",
+                                x = z,
+                                y = sol.T[:, end],
+                                exact = T_of_z,
+                            ),
+                        ],
+                    ),
+                    ReportCurve(
+                        name = :flux_history,
+                        title = "V-HC-05: interior flux approach to Kirchhoff-exact",
+                        xlabel = "t (s)",
+                        ylabel = "q″ (W/m²)",
+                        series = [
+                            CurveSeries(
+                                label = "center-pair Kirchhoff flux",
+                                x = sol.t,
+                                y = [q_interior(j) for j in eachindex(sol.t)],
+                                exact = t -> q_exact,
+                            ),
+                        ],
+                    ),
+                ]
+            end,
+            error_norms = sol -> begin
+                z = get_cell_positions(sol)
+                e = [z_of_T(sol.T[i, end]) - z[i] for i in eachindex(z)]
+                (L2 = sqrt(sum(abs2, e) / length(e)) / L, Linf = maximum(abs, e) / L)
+            end,
         ),
     )
 end

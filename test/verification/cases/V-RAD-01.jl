@@ -182,6 +182,98 @@ function _verification_case_vrad01()
             n_cells_ladder = [25, 50, 100, 200, 400],
             profile_times = times,
             qoi_curves = (:T_profiles, :surface_T_history, :peak_trajectory),
+            solve_kwargs = (abstol = 1e-12, reltol = 1e-10, radiation_model = BEER_LAMBERT),
+            curves = sol -> begin
+                z = get_cell_positions(sol)
+                xs_fine = range(0.0, δ, length = 2001)
+                peak_depth_exact(t) =
+                    xs_fine[argmax([ex.T_exact(x, t) for x in xs_fine])]
+                # Gpyro 0.8200 overlay (reference/gpyro/): dissertation §3.4.2
+                # deck (identical parameters — the same eigenfunction case),
+                # in-depth Beer–Lambert via KAPPA, Δz = 0.1 mm, dt = 0.1 s.
+                gp_t, gp_x, gp_T = reference_columns(
+                    "gpyro/vrad01_result.csv",
+                    "t_s",
+                    "x_m",
+                    "T_K";
+                    header_rows = 1,
+                )
+                gp_ts, gp_Ts = reference_columns(
+                    "gpyro/vrad01_surfaceT.csv",
+                    "t_s",
+                    "T_front_K";
+                    header_rows = 1,
+                )
+                [
+                    ReportCurve(
+                        name = :T_profiles,
+                        title = "V-RAD-01: in-depth absorption profiles (sub-surface peak)",
+                        xlabel = "depth x (m)",
+                        ylabel = "T (K)",
+                        series = vcat(
+                            [
+                                CurveSeries(
+                                    label = "t = $(t) s",
+                                    x = δ .- z,
+                                    y = sol.T[:, j+1],
+                                    exact = x -> ex.T_exact(x, t),
+                                ) for (j, t) in enumerate(times)
+                            ],
+                            [
+                                let rows = findall(τ -> abs(τ - t) < 1e-6, gp_t)
+                                    CurveSeries(
+                                        label = "Gpyro 0.8200, t = $(t) s",
+                                        crosscode = true,
+                                        x = gp_x[rows],
+                                        y = gp_T[rows],
+                                        exact = x -> ex.T_exact(x, t),
+                                    )
+                                end for t in times
+                            ],
+                        ),
+                    ),
+                    ReportCurve(
+                        name = :surface_T_history,
+                        title = "V-RAD-01: front-face temperature",
+                        xlabel = "t (s)",
+                        ylabel = "T_s (K)",
+                        series = [
+                            CurveSeries(
+                                label = "front face",
+                                x = sol.t[2:end],
+                                y = sol.surface_T[2:end],
+                                exact = t -> ex.T_exact(0.0, t),
+                            ),
+                            CurveSeries(
+                                label = "Gpyro 0.8200",
+                                crosscode = true,
+                                x = gp_ts[2:end],
+                                y = gp_Ts[2:end],
+                                exact = t -> ex.T_exact(0.0, t),
+                            ),
+                        ],
+                    ),
+                    ReportCurve(
+                        name = :peak_trajectory,
+                        title = "V-RAD-01: sub-surface peak migration toward the back",
+                        xlabel = "t (s)",
+                        ylabel = "peak depth below surface (m)",
+                        series = [
+                            CurveSeries(
+                                label = "argmax of cell profile (Δz-quantized)",
+                                x = sol.t[2:end],
+                                y = [δ - z[argmax(sol.T[:, j])] for j = 2:length(sol.t)],
+                                exact = peak_depth_exact,
+                            ),
+                        ],
+                    ),
+                ]
+            end,
+            error_norms = sol -> begin
+                z = get_cell_positions(sol)
+                e = [sol.T[i, 4] - ex.T_exact(δ - z[i], 90.0) for i in eachindex(z)]
+                (L2 = sqrt(sum(abs2, e) / length(e)), Linf = maximum(abs, e))
+            end,
         ),
     )
 end

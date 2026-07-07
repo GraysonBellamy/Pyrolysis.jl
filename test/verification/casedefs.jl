@@ -66,12 +66,18 @@ if !isdefined(@__MODULE__, :VerificationCase)
     `exact(x)` callable on the same abscissa. When present, the renderer draws
     a densely-sampled reference line under the numeric markers and derives the
     pointwise-error panel `y .- exact.(x)`. Plain data — no plotting deps.
+
+    `crosscode = true` marks a third-party solver's result (FDS, Gpyro, … from
+    `reference/`): the renderer then emits each figure twice — a clean variant
+    with our series only, and a `_vs_codes` variant where cross-code series
+    are drawn muted (grays, per-code marker shapes) behind ours.
     """
     Base.@kwdef struct CurveSeries
         label::String
         x::Vector{Float64}
         y::Vector{Float64}
         exact::Union{Nothing,Function} = nothing
+        crosscode::Bool = false
     end
 
     """
@@ -120,7 +126,9 @@ if !isdefined(@__MODULE__, :VerificationCase)
       sweep (V-MMS-01).
     - `param_sweep::NamedTuple` — `(name, values, build, measure)` with
       `build(n_cells, value) -> problem` and `measure(sol) -> NamedTuple`
-      (V-CPL-02 activation-energy ladder).
+      (V-CPL-02 activation-energy ladder). `measure(sol, value)` is also
+      accepted, for when the reference depends on the swept value
+      (V-CPL-05 heating-rate ladder).
     - informational: `profile_times`, `qoi_curves`, `heating`, `note`.
     """
     Base.@kwdef struct VerificationCase
@@ -142,6 +150,74 @@ if !isdefined(@__MODULE__, :VerificationCase)
 
     observed_orders(errors, hs) =
         [log(errors[i-1] / errors[i]) / log(hs[i-1] / hs[i]) for i = 2:length(errors)]
+
+    """
+    Third-party solver outputs committed for report-mode overlays (FDS, Gpyro,
+    MaCFP submissions — provenance in `reference/*/README.md`). Loaded only
+    inside report `curves` closures; assert mode never touches these files.
+    """
+    const REFERENCE_DIR = joinpath(@__DIR__, "reference")
+
+    """
+        read_reference_csv(relpath; header_rows = 2) -> (names, cols)
+
+    Parse `reference/<relpath>`: `header_rows` header lines (name row + units
+    row, in either order — some MaCFP institutions swap them, so the row with
+    the most letters is taken as the names), then numeric data. Returns the
+    trimmed column names and one `Vector{Float64}` per column. Short rows pad
+    columns they lack (files with a trailing comma drop the phantom column).
+    """
+    function read_reference_csv(relpath::AbstractString; header_rows::Int = 2)
+        lines = readlines(joinpath(REFERENCE_DIR, relpath))
+        head, body = lines[1:header_rows], lines[(header_rows+1):end]
+        # The names row is the one whose first token is time-like ("Time",
+        # "t_s", …) — letter counting is ambiguous (a units row like
+        # "s,kg/m3,kg/m3" can tie a names row like "Time,Ya,Yb").
+        is_time(tok) = (
+            t = lowercase(strip(c -> isspace(c) || c == '"', tok));
+            startswith(t, "time") || t in ("t", "t_s")
+        )
+        scores = [
+            any(is_time, split(h, ',')[1:1]) ? count(isletter, h) + 1000 :
+            count(isletter, h) for h in head
+        ]
+        name_row = head[argmax(scores)]
+        names = String[
+            strip(c -> isspace(c) || c == '"', s) for
+            s in split(name_row, ',') if !isempty(strip(c -> isspace(c) || c == '"', s))
+        ]
+        cols = [Float64[] for _ in names]
+        for ln in body
+            isempty(strip(ln)) && continue
+            vals = split(ln, ',')
+            for i in eachindex(names)
+                i ≤ length(vals) &&
+                    !isempty(strip(vals[i])) &&
+                    push!(cols[i], parse(Float64, strip(vals[i])))
+            end
+        end
+        return names, cols
+    end
+
+    """
+        reference_columns(relpath, colnames...) -> NTuple{N,Vector{Float64}}
+
+    Fetch named columns from a reference CSV (exact match on trimmed names).
+    """
+    function reference_columns(
+        relpath::AbstractString,
+        colnames::AbstractString...;
+        header_rows::Int = 2,
+    )
+        names, cols = read_reference_csv(relpath; header_rows)
+        return map(colnames) do cn
+            i = findfirst(==(cn), names)
+            i === nothing && error(
+                "column \"$cn\" not in reference/$relpath (has: $(join(names, ", ")))",
+            )
+            cols[i]
+        end
+    end
 
     const VERIFICATION_CASE_BUILDERS = Function[]
 

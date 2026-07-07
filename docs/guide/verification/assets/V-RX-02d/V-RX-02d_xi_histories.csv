@@ -1,0 +1,22 @@
+"series","t (s)","ξ_A (kg/m³)","exact"
+"ξ_A (limiter roll-off near 0)",0.0,100.0,100.0
+"ξ_A (limiter roll-off near 0)",2.0,89.99999999999999,90.0
+"ξ_A (limiter roll-off near 0)",4.0,79.99999999999999,80.0
+"ξ_A (limiter roll-off near 0)",6.0,69.99999999999997,70.0
+"ξ_A (limiter roll-off near 0)",8.0,59.99999999999997,60.0
+"ξ_A (limiter roll-off near 0)",10.0,49.99999999999997,50.0
+"ξ_A (limiter roll-off near 0)",12.0,39.999999999999964,40.0
+"ξ_A (limiter roll-off near 0)",14.0,29.999999999999964,30.0
+"ξ_A (limiter roll-off near 0)",16.0,19.99999999999997,20.0
+"ξ_A (limiter roll-off near 0)",18.0,10.00000000513097,10.0
+"ξ_A (limiter roll-off near 0)",20.0,0.4812119140999864,0.0
+"ξ_A (limiter roll-off near 0)",22.0,2.2699839377690005e-5,0.0
+"ξ_A (limiter roll-off near 0)",24.0,1.0359331241423224e-9,0.0
+"ξ_A (limiter roll-off near 0)",26.0,-9.639778998337578e-13,0.0
+"ξ_A (limiter roll-off near 0)",28.0,-1.1515994446107785e-12,0.0
+"ξ_A (limiter roll-off near 0)",30.0,-1.1515994446107785e-12,0.0
+"ξ_A (limiter roll-off near 0)",32.0,-1.1515994446107785e-12,0.0
+"ξ_A (limiter roll-off near 0)",34.0,-1.1515994446107785e-12,0.0
+"ξ_A (limiter roll-off near 0)",36.0,-1.1515994446107785e-12,0.0
+"ξ_A (limiter roll-off near 0)",38.0,-1.1515994446107785e-12,0.0
+"ξ_A (limiter roll-off near 0)",40.0,-1.1515994446107785e-12,0.0

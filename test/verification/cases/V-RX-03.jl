@@ -140,7 +140,40 @@ function _verification_case_vrx03()
         solve_kwargs = (abstol = 1e-12, reltol = 1e-10),
         qois = qois,
         ci = CIConfig(n_cells = 1, budget_s = 10.0),
-        report = (qoi_curves = (:xi_histories, :T_drift_history), heating = :isothermal),
+        report = (
+            qoi_curves = (:xi_histories, :T_drift_history),
+            heating = :isothermal,
+            curves = sol -> [
+                ReportCurve(
+                    name = :xi_histories,
+                    title = "V-RX-03: competing parallel reactions, yield splits",
+                    xlabel = "t (s)",
+                    ylabel = "ξ (kg/m³)",
+                    series = [
+                        CurveSeries(
+                            label = "ξ_$(species)",
+                            x = sol.t,
+                            y = sol.ξ[idx, 1, :],
+                            exact = t -> ξ_exact(t)[idx],
+                        ) for (species, idx) in ((:A, 1), (:B, 2), (:C, 3), (:G, 4))
+                    ],
+                ),
+                ReportCurve(
+                    name = :T_drift_history,
+                    title = "V-RX-03: reaction-heat superposition (quasi-steady drift)",
+                    xlabel = "t (s)",
+                    ylabel = "T − T_iso (K)",
+                    series = [
+                        CurveSeries(
+                            label = "cell drift",
+                            x = sol.t,
+                            y = sol.T[1, :] .- T_iso,
+                            exact = t -> Q̇(t) * L^2 / (4 * k_cond),
+                        ),
+                    ],
+                ),
+            ],
+        ),
     )
 end
 

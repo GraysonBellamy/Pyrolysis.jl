@@ -1,0 +1,44 @@
+&HEAD CHID='vhc01_semi_infinite', TITLE='Pyrolysis.jl V-HC-01: semi-infinite solid, absorbed flux + convective loss' /
+
+Replicates Pyrolysis.jl verification case V-HC-01 (Gpyro dissertation 3.4.1 variant):
+q_abs = 25 kW/m2 absorbed at surface, h = 20 W/m2K to T_inf = T0 = 300 K,
+k = 0.2 W/mK, rho = 1000 kg/m3, c = 1400 J/kgK, L = 0.05 m, adiabatic back.
+Exact: Carslaw & Jaeger erfc solution toward T_inf_eff = 1550 K.
+TMPA = 26.85 C = 300.00 K. Radiation disabled via EMISSIVITY = 0.
+
+&MESH IJK=3,3,3, XB=-0.15,0.15,-0.15,0.15,0.0,0.3 /
+&TIME T_END=180., WALL_INCREMENT=1, DT=0.1 /
+&MISC SOLID_PHASE_ONLY=.TRUE., TMPA=26.85 /
+&DUMP DT_DEVC=0.2 /
+
+&SURF ID        = 'SLAB'
+      COLOR     = 'RED'
+      TMP_GAS_FRONT = 1276.85
+      HEAT_TRANSFER_COEFFICIENT = 20.
+      BACKING   = 'INSULATED'
+      STRETCH_FACTOR = 1.
+      THICKNESS = 0.05
+      MATL_ID   = 'SOLID' /
+
+&MATL ID            = 'SOLID'
+      EMISSIVITY    = 0.
+      CONDUCTIVITY  = 0.2
+      SPECIFIC_HEAT = 1.4
+      DENSITY       = 1000. /
+
+&VENT XB = -0.05,0.05,-0.05,0.05,0.0,0.0, SURF_ID='SLAB' /
+&VENT MB='XMIN', SURF_ID='OPEN' /
+&VENT MB='XMAX', SURF_ID='OPEN' /
+&VENT MB='YMIN', SURF_ID='OPEN' /
+&VENT MB='YMAX', SURF_ID='OPEN' /
+&VENT MB='ZMAX', SURF_ID='OPEN' /
+
+&DEVC XYZ = 0.0,0.0,0.0, IOR = 3, ID='Front',  QUANTITY = 'WALL TEMPERATURE' /
+&DEVC XYZ = 0.0,0.0,0.0, IOR = 3, ID='5 mm',   QUANTITY = 'INSIDE WALL TEMPERATURE', DEPTH=0.005 /
+&DEVC XYZ = 0.0,0.0,0.0, IOR = 3, ID='10 mm',  QUANTITY = 'INSIDE WALL TEMPERATURE', DEPTH=0.010 /
+&DEVC XYZ = 0.0,0.0,0.0, IOR = 3, ID='15 mm',  QUANTITY = 'INSIDE WALL TEMPERATURE', DEPTH=0.015 /
+&DEVC XYZ = 0.0,0.0,0.0, IOR = 3, ID='20 mm',  QUANTITY = 'INSIDE WALL TEMPERATURE', DEPTH=0.020 /
+&DEVC XYZ = 0.0,0.0,0.0, IOR = 3, ID='30 mm',  QUANTITY = 'INSIDE WALL TEMPERATURE', DEPTH=0.030 /
+&DEVC XYZ = 0.0,0.0,0.0, IOR = 3, ID='Back',   QUANTITY = 'BACK WALL TEMPERATURE' /
+
+&TAIL /

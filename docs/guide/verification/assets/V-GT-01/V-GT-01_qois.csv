@@ -1,0 +1,8 @@
+"qoi","value","exact","error","tol","within_tol","comment"
+"L∞ ξ-profile error / peak, t=2.0 s",7.80888067748982e-5,NaN,7.80888067748982e-5,0.004,true,"Gaussian stays Gaussian; n=160 uniform, σ₀ = 4Δz"
+"L∞ ξ-profile error / peak, t=4.0 s",4.820808517130848e-5,NaN,4.820808517130848e-5,0.004,true,"Gaussian stays Gaussian; n=160 uniform, σ₀ = 4Δz"
+"L∞ ξ-profile error / peak, t=8.0 s",2.7037573587384087e-5,NaN,2.7037573587384087e-5,0.004,true,"Gaussian stays Gaussian; n=160 uniform, σ₀ = 4Δz"
+"gas-mass conservation (sealed)",2.595204522645332e-15,NaN,2.595204522645332e-15,1.0e-13,true,"antisymmetric face fluxes telescope exactly"
+"variance growth, t=2.0 s",5.000000000000005e-6,4.9999999999999996e-6,1.0164395367051604e-15,2.0e-5,true,"Var(t) = σ₀² + 2dt; relative error reported"
+"variance growth, t=4.0 s",8.999999999066506e-6,9.0e-6,1.0372163137535892e-10,2.0e-5,true,"Var(t) = σ₀² + 2dt; relative error reported"
+"variance growth, t=8.0 s",1.699992185548859e-5,1.7e-5,4.596735965308959e-6,2.0e-5,true,"Var(t) = σ₀² + 2dt; relative error reported"

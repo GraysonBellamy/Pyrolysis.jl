@@ -98,7 +98,26 @@ push!(
             solve_kwargs = (abstol = 1e-10, reltol = 1e-8),
             qois = qois,
             ci = CIConfig(n_cells = 4, budget_s = 15.0),
-            report = (qoi_curves = (:T_history_vs_exact,),),
+            report = (
+                qoi_curves = (:T_history_vs_exact,),
+                curves = sol -> [
+                    ReportCurve(
+                        name = :T_history_vs_exact,
+                        title = "V-RX-04a: thermally-thin radiative cooling",
+                        xlabel = "t (s)",
+                        ylabel = "T (K)",
+                        series = [
+                            CurveSeries(
+                                label = "slab mean temperature",
+                                x = sol.t,
+                                y = [mean(sol.T[:, j]) for j in eachindex(sol.t)],
+                                exact = t ->
+                                    radiative_cooling_T(t; Ti = Ti, T∞ = T∞, K = K),
+                            ),
+                        ],
+                    ),
+                ],
+            ),
         )
     end,
 )
@@ -188,7 +207,26 @@ push!(
             solve_kwargs = (abstol = 1e-10, reltol = 1e-8),
             qois = qois,
             ci = CIConfig(n_cells = 20, budget_s = 15.0),
-            report = (qoi_curves = (:surface_T_history,),),
+            report = (
+                qoi_curves = (:surface_T_history,),
+                curves = sol -> [
+                    ReportCurve(
+                        name = :surface_T_history,
+                        title = "V-RX-04b: approach to radiative–convective equilibrium",
+                        xlabel = "t (s)",
+                        ylabel = "T_s (K)",
+                        series = [
+                            CurveSeries(
+                                label = "surface temperature",
+                                x = sol.t,
+                                y = sol.surface_T,
+                                # steady algebraic root as the reference asymptote
+                                exact = t -> Ts_exact,
+                            ),
+                        ],
+                    ),
+                ],
+            ),
         )
     end,
 )

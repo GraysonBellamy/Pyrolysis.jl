@@ -1,0 +1,5 @@
+"qoi","value","exact","error","tol","within_tol","comment"
+"L∞ steady profile vs (quantized) network",1.517719283583574e-11,NaN,1.517719283583574e-11,1.0e-8,true,"harmonic-mean face k is NODALLY EXACT for face-aligned jumps; k-ratio 10.0:1"
+"steady bottom-face flux vs network",909.0909091212325,909.0909090909092,3.3355559025949325e-11,1.0e-8,true,"both faces must carry the exact series flux"
+"steady top-face flux vs network",909.0909090903097,909.0909090909092,6.595428203581831e-13,1.0e-8,true,"both faces must carry the exact series flux"
+"steadiness (last half-interval drift)",8.218989933084231e-10,NaN,8.218989933084231e-10,1.0e-6,true,"t_end = 10·L²/α_min"

@@ -1,0 +1,5 @@
+"n_cells","qoi","value","exact","error","tol","within_tol"
+20,"free-stream T drift (all cells, all snapshots)",5.684341886080802e-14,0.0,5.684341886080802e-14,1.0e-10,true
+20,"free-stream ξ_solid relative drift",1.8947806286936006e-16,0.0,1.8947806286936006e-16,1.0e-12,true
+20,"free-stream ξ_gas relative drift",2.220446049250313e-15,0.0,2.220446049250313e-15,1.0e-12,true
+20,"top cell-center trajectory vs z₀·s(t_end)",0.006824995960532099,0.0068249999999999995,4.0394679007987877e-7,1.5e-6,true

@@ -125,9 +125,107 @@ function _verification_case_vhc03()
             ),
         ),
         report = (
-            n_cells_ladder = [20, 40, 80, 160, 320],
+            n_cells_ladder = [20, 40, 80, 160, 200, 320],
             profile_times = times,
             qoi_curves = (:T_profiles, :front_back_dT_history, :mean_T_history),
+            solve_kwargs = (abstol = 1e-12, reltol = 1e-10),
+            curves = sol -> begin
+                z = get_cell_positions(sol)
+                n = length(z)
+                Fo_of_t(t) = α * t / L^2
+                # Gpyro 0.8200 overlay (reference/gpyro/): our vhc03 deck —
+                # FDS can't express a pure Neumann BC on its 1D solid (see
+                # reference/fds/README.md), Gpyro can (surface-absorbed QE
+                # with RERADIATION off, h = 0). Δz = 0.1 mm; x_m is depth
+                # from the heated face, so x̃ = 1 − x/L; Gpyro's front/back
+                # are true surface nodes (x̃ = 1/0), unlike our cell centers.
+                gp_t, gp_x, gp_T = reference_columns(
+                    "gpyro/vhc03_result.csv",
+                    "t_s",
+                    "x_m",
+                    "T_K";
+                    header_rows = 1,
+                )
+                gp_ht, gp_Tf, gp_Tb = reference_columns(
+                    "gpyro/vhc03_frontback.csv",
+                    "t_s",
+                    "T_front_K",
+                    "T_back_K";
+                    header_rows = 1,
+                )
+                [
+                    ReportCurve(
+                        name = :T_profiles,
+                        title = "V-HC-03: temperature profiles (constant flux)",
+                        xlabel = "x̃ = z/L (adiabatic back at 0)",
+                        ylabel = "T (K)",
+                        series = vcat(
+                            [
+                                CurveSeries(
+                                    label = "Fo = $(Fo)",
+                                    x = z ./ L,
+                                    y = sol.T[:, j+1],
+                                    exact = x̃ -> T_exact(x̃, Fo),
+                                ) for (j, Fo) in enumerate(Fos)
+                            ],
+                            [
+                                let rows = findall(τ -> abs(τ - Fo * L^2 / α) < 1e-6, gp_t)
+                                    CurveSeries(
+                                        label = "Gpyro 0.8200, Fo = $(Fo)",
+                                        crosscode = true,
+                                        x = 1.0 .- gp_x[rows] ./ L,
+                                        y = gp_T[rows],
+                                        exact = x̃ -> T_exact(x̃, Fo),
+                                    )
+                                end for Fo in Fos
+                            ],
+                        ),
+                    ),
+                    ReportCurve(
+                        name = :front_back_dT_history,
+                        title = "V-HC-03: front–back ΔT (plateau q″L/2k)",
+                        xlabel = "t (s)",
+                        ylabel = "ΔT (K)",
+                        series = [
+                            CurveSeries(
+                                label = "cell-center ΔT",
+                                x = sol.t[2:end],
+                                y = [sol.T[n, j] - sol.T[1, j] for j = 2:length(sol.t)],
+                                exact = t ->
+                                    T_exact(z[n] / L, Fo_of_t(t)) -
+                                    T_exact(z[1] / L, Fo_of_t(t)),
+                            ),
+                            CurveSeries(
+                                label = "Gpyro 0.8200 (surface nodes)",
+                                crosscode = true,
+                                x = gp_ht[2:end],
+                                y = gp_Tf[2:end] .- gp_Tb[2:end],
+                                exact = t ->
+                                    T_exact(1.0, Fo_of_t(t)) - T_exact(0.0, Fo_of_t(t)),
+                            ),
+                        ],
+                    ),
+                    ReportCurve(
+                        name = :mean_T_history,
+                        title = "V-HC-03: mean temperature (global energy)",
+                        xlabel = "t (s)",
+                        ylabel = "mean T (K)",
+                        series = [
+                            CurveSeries(
+                                label = "volume mean",
+                                x = sol.t,
+                                y = [mean(sol.T[:, j]) for j in eachindex(sol.t)],
+                                exact = t -> T0 + q * t / (ρ * c * L),
+                            ),
+                        ],
+                    ),
+                ]
+            end,
+            error_norms = sol -> begin
+                z = get_cell_positions(sol)
+                e = [sol.T[i, 2] - T_exact(z[i] / L, 0.1) for i in eachindex(z)]
+                (L2 = sqrt(sum(abs2, e) / length(e)), Linf = maximum(abs, e))
+            end,
         ),
     )
 end

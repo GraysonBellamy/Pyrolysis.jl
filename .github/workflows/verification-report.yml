@@ -1,0 +1,56 @@
+# Report mode of the verification suite (manual): runs the case ladders in
+# scripts/verification/ and opens a PR with the regenerated committed
+# artifacts under docs/guide/verification/ (chapters, figures, CSVs), so the
+# diff is reviewable before the docs deploy publishes it. Assert mode stays in
+# Pkg.test(); this workflow gates nothing.
+name: Verification report
+
+on:
+  workflow_dispatch:
+    inputs:
+      cases:
+        description: "Comma-separated case ids (e.g. V-HC-01,V-CPL-02) or 'all'"
+        required: false
+        default: "all"
+
+concurrency:
+  group: verification-report
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1"
+      - uses: julia-actions/cache@v2
+      - name: Install dependencies
+        run: julia --project=scripts/verification -e 'using Pkg; Pkg.instantiate()'
+      - name: Run report mode
+        run: >
+          julia --project=scripts/verification
+          scripts/verification/run_reports.jl
+          --cases=${{ inputs.cases || 'all' }}
+      - uses: actions/upload-artifact@v5
+        with:
+          name: verification-report
+          path: docs/guide/verification
+      - name: Open PR with regenerated artifacts
+        uses: peter-evans/create-pull-request@v7
+        with:
+          add-paths: docs/guide/verification
+          branch: verification-report/regenerate
+          commit-message: "docs: regenerate verification report artifacts"
+          title: "Regenerate verification report artifacts"
+          body: >
+            Automated report-mode run (`scripts/verification/run_reports.jl`,
+            cases: `${{ inputs.cases || 'all' }}`). Review the figure/CSV/chapter
+            diff; merging updates the published verification guide on the next
+            docs deploy.

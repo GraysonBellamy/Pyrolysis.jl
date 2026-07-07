@@ -1,0 +1,6 @@
+"n_cells","qoi","value","exact","error","tol","within_tol"
+1,"max relative ξ_A error",1.2540700708996155e-9,NaN,1.2540700708996155e-9,1.0e-8,true
+1,"max relative ξ_B error",2.777346708171535e-9,NaN,2.777346708171535e-9,1.0e-8,true
+1,"max relative ξ_C error",1.5232767225370481e-9,NaN,1.5232767225370481e-9,1.0e-8,true
+1,"total-mass conservation (closed chain)",5.684341886080802e-16,NaN,5.684341886080802e-16,1.0e-13,true
+1,"isothermality drift",5.684341886080802e-14,NaN,5.684341886080802e-14,1.0e-12,true

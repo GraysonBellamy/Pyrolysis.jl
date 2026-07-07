@@ -80,6 +80,7 @@ function _vrx02_exact_case(
     ts,
     tol_xi,
     comment = "",
+    overlay_series = () -> CurveSeries[],  # report-only third-party series
 )
     build = _vrx02_build(
         n = n,
@@ -131,7 +132,30 @@ function _vrx02_exact_case(
         solve_kwargs = (abstol = 1e-12, reltol = 1e-10),
         qois = qois,
         ci = CIConfig(n_cells = 1, budget_s = 10.0),
-        report = (qoi_curves = (:xi_histories,), heating = :isothermal),
+        report = (
+            qoi_curves = (:xi_histories,),
+            heating = :isothermal,
+            curves = sol -> [
+                ReportCurve(
+                    name = :xi_histories,
+                    title = "V-RX-02$(label): $(title)",
+                    xlabel = "t (s)",
+                    ylabel = "ξ_A (kg/m³)",
+                    series = vcat(
+                        [
+                            CurveSeries(
+                                label = "ξ_A (n = $(n))",
+                                x = sol.t,
+                                y = sol.ξ[1, 1, :],
+                                exact = t ->
+                                    nth_order_xi(t; ξ0 = ξ0, k = k_conc, n = n),
+                            ),
+                        ],
+                        overlay_series(),
+                    ),
+                ),
+            ],
+        ),
     )
 end
 
@@ -204,6 +228,37 @@ push!(
             tol_xi = 1e-9,  # 3× observed 2.8e-10 (2026-07-06)
             comment = "m^(1/3) linear in t; k_pub=$(round(k_pub, sigdigits=4)) 1/s at 450 K; " *
                       "exercises live Arrhenius (E ≠ 0) at pinned T",
+            # FDS 6.11.0 overlay (reference/fds/custom/): the span-matched
+            # part_baking_soda_450K re-run (T_END = 2.4 s ≈ our window). Its
+            # spherical variant follows the same R3 master curve, but FDS's
+            # input A = 1.33e13 is a surface-regression convention — its
+            # *effective* normalized rate is 3·k_first = 3·3.4e11·e^(−E/RT)
+            # at T = 450.15 K (TMPA = 177 °C; measured 1.13983 s⁻¹ vs this
+            # formula's 1.13997). Overlay in master-curve time:
+            # t_ours = t_FDS · k_eff/k_ours, ξ = ξ0·RHO_S/2200.
+            overlay_series = () -> begin
+                k_eff = 3 * A_pub * exp(-E / (R * 450.15))
+                t_scale = k_eff / k_pub
+                t_fds, ρ_fds = reference_columns(
+                    "fds/custom/part_baking_soda_450K_matched_devc.csv",
+                    "Time",
+                    "RHO_S spherical",
+                )
+                # devc values average over the output interval → −Δt_out/2;
+                # trim to our comparison window (≤ 0.9·t_b): past burnout the
+                # R3 form's fractional power is undefined
+                t_fds = t_fds .- (t_fds[2] - t_fds[1]) / 2
+                keep = findall(t -> 0 < t_scale * t ≤ ts[end], t_fds)
+                [
+                    CurveSeries(
+                        label = "FDS 6.11.0 (rate-rescaled)",
+                        crosscode = true,
+                        x = t_scale .* t_fds[keep],
+                        y = ξ0 .* ρ_fds[keep] ./ 2200.0,
+                        exact = t -> nth_order_xi(t; ξ0 = ξ0, k = k_conc, n = 2 / 3),
+                    ),
+                ]
+            end,
         )
     end,
 )
@@ -262,6 +317,23 @@ push!(
             report = (
                 qoi_curves = (:xi_histories,),
                 note = "limiter roll-off characterization",
+                curves = sol -> [
+                    ReportCurve(
+                        name = :xi_histories,
+                        title = "V-RX-02d: zero-order decay through burnout, limiter ON",
+                        xlabel = "t (s)",
+                        ylabel = "ξ_A (kg/m³)",
+                        series = [
+                            CurveSeries(
+                                label = "ξ_A (limiter roll-off near 0)",
+                                x = sol.t,
+                                y = sol.ξ[1, 1, :],
+                                # unlimited kinetics reference: clamped linear decay
+                                exact = t -> max(0.0, ξ0 - k * t),
+                            ),
+                        ],
+                    ),
+                ],
             ),
         )
     end,

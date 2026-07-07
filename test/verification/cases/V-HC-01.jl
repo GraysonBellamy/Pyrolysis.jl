@@ -135,9 +135,118 @@ function _verification_case_vhc01()
             ),
         ),
         report = (
-            n_cells_ladder = [25, 50, 100, 200, 400],
+            n_cells_ladder = [25, 50, 100, 133, 200, 400, 500],
             profile_times = times,
             qoi_curves = (:T_profiles, :surface_T_history),
+            solve_kwargs = (abstol = 1e-12, reltol = 1e-10),
+            curves = sol -> begin
+                x = L .- get_cell_positions(sol)
+                # FDS 6.11.0 overlay (reference/fds/custom/): our deck
+                # vhc01_semi_infinite.fds solves this exact case via the same
+                # Robin-BC equivalence (pure convection toward T∞_eff = 1550 K,
+                # ε = 0). devc depths from the exposed face; T in °C.
+                fds = reference_columns(
+                    "fds/custom/vhc01_semi_infinite_devc.csv",
+                    "Time",
+                    "Front",
+                    "5 mm",
+                    "10 mm",
+                    "15 mm",
+                    "20 mm",
+                    "30 mm",
+                )
+                fds_depths = [0.0, 0.005, 0.010, 0.015, 0.020, 0.030]
+                fds_T = [c .+ 273.15 for c in fds[2:end]]
+                fds_row(t) = argmin(abs.(fds[1] .- t))
+                # Gpyro 0.8200 overlay (reference/gpyro/): dissertation §3.4.1
+                # deck (identical parameters — our case IS Gpyro's variant),
+                # Δz = 0.1 mm, dt = 0.1 s. Long-format (t, x, T) profiles.
+                gp_t, gp_x, gp_T = reference_columns(
+                    "gpyro/vhc01_result.csv",
+                    "t_s",
+                    "x_m",
+                    "T_K";
+                    header_rows = 1,
+                )
+                gp_ts, gp_Ts = reference_columns(
+                    "gpyro/vhc01_surfaceT.csv",
+                    "t_s",
+                    "T_surface_K";
+                    header_rows = 1,
+                )
+                [
+                    ReportCurve(
+                        name = :T_profiles,
+                        title = "V-HC-01: in-depth temperature profiles",
+                        xlabel = "depth x (m)",
+                        ylabel = "T (K)",
+                        series = vcat(
+                            [
+                                CurveSeries(
+                                    label = "t = $(t) s",
+                                    x = x,
+                                    y = sol.T[:, j+1],
+                                    exact = xx -> T_exact(xx, t),
+                                ) for (j, t) in enumerate(times)
+                            ],
+                            [
+                                CurveSeries(
+                                    label = "FDS 6.11.0, t = $(t) s",
+                                    crosscode = true,
+                                    x = fds_depths,
+                                    y = [fds_T[i][fds_row(t)] for i = 1:6],
+                                    exact = xx -> T_exact(xx, t),
+                                ) for t in times
+                            ],
+                            [
+                                let rows = findall(τ -> abs(τ - t) < 1e-6, gp_t)
+                                    CurveSeries(
+                                        label = "Gpyro 0.8200, t = $(t) s",
+                                        crosscode = true,
+                                        x = gp_x[rows],
+                                        y = gp_T[rows],
+                                        exact = xx -> T_exact(xx, t),
+                                    )
+                                end for t in times
+                            ],
+                        ),
+                    ),
+                    ReportCurve(
+                        name = :surface_T_history,
+                        title = "V-HC-01: surface temperature history",
+                        xlabel = "t (s)",
+                        ylabel = "T_s (K)",
+                        series = [
+                            CurveSeries(
+                                label = "surface Newton solve",
+                                x = sol.t[2:end],  # exact form is 0/0 at t = 0
+                                y = sol.surface_T[2:end],
+                                exact = t -> T_exact(0.0, t),
+                            ),
+                            # devc averages over the 0.2 s output interval
+                            CurveSeries(
+                                label = "FDS 6.11.0",
+                                crosscode = true,
+                                x = fds[1][2:end] .- 0.1,
+                                y = fds_T[1][2:end],
+                                exact = t -> T_exact(0.0, t),
+                            ),
+                            CurveSeries(
+                                label = "Gpyro 0.8200",
+                                crosscode = true,
+                                x = gp_ts[2:end],
+                                y = gp_Ts[2:end],
+                                exact = t -> T_exact(0.0, t),
+                            ),
+                        ],
+                    ),
+                ]
+            end,
+            error_norms = sol -> begin
+                z = get_cell_positions(sol)
+                e = [sol.T[i, 3] - T_exact(L - z[i], 60.0) for i in eachindex(z)]
+                (L2 = sqrt(sum(abs2, e) / length(e)), Linf = maximum(abs, e))
+            end,
         ),
     )
 end

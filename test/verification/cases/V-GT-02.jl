@@ -197,6 +197,60 @@ function _verification_case_vgt02()
             n_cells_ladder = [20, 40, 80, 160, 320],
             profile_times = [t_end],
             qoi_curves = (:P2_profile, :exit_flux_history),
+            curves = sol -> begin
+                mat = sol.problem.material
+                z = get_cell_positions(sol)
+                μ = effective_gas_viscosity(T_iso)
+                ΔP²_coeff = μ * R * T_iso * ġ / (κ_perm * M_gas)
+                P_num = map(eachindex(z)) do i
+                    ξi = (sol.ξ[1, i, end], sol.ξ[2, i, end])
+                    φi = porosity(ξi, sol.T[i, end], mat)
+                    ideal_gas_pressure(ξi, sol.T[i, end], φi, mat)
+                end
+                [
+                    ReportCurve(
+                        name = :P2_profile,
+                        title = "V-GT-02: steady gas-reservoir parabola in P²",
+                        xlabel = "z (m)",
+                        ylabel = "P² (Pa²)",
+                        series = [
+                            CurveSeries(
+                                label = "reconstructed cell pressure²",
+                                x = z,
+                                y = P_num .^ 2,
+                                exact = zz -> P∞^2 + ΔP²_coeff * (L^2 - zz^2),
+                            ),
+                        ],
+                    ),
+                    ReportCurve(
+                        name = :exit_flux_history,
+                        title = "V-GT-02: exit mass flux vs exact ġL",
+                        xlabel = "t (s)",
+                        ylabel = "ṁ″ (kg/m²s)",
+                        series = [
+                            CurveSeries(
+                                label = "surface mass flux",
+                                x = sol.t,
+                                y = sol.extras.surface_mass_flux,
+                                exact = t -> ġ * L,
+                            ),
+                        ],
+                    ),
+                ]
+            end,
+            error_norms = sol -> begin
+                mat = sol.problem.material
+                z = get_cell_positions(sol)
+                μ = effective_gas_viscosity(T_iso)
+                ΔP²_coeff = μ * R * T_iso * ġ / (κ_perm * M_gas)
+                e = map(eachindex(z)) do i
+                    ξi = (sol.ξ[1, i, end], sol.ξ[2, i, end])
+                    φi = porosity(ξi, T_iso, mat)
+                    P = ideal_gas_pressure(ξi, T_iso, φi, mat)
+                    (P^2 - (P∞^2 + ΔP²_coeff * (L^2 - z[i]^2))) / (ΔP²_coeff * L^2)
+                end
+                (L2 = sqrt(sum(abs2, e) / length(e)), Linf = maximum(abs, e))
+            end,
         ),
     )
 end

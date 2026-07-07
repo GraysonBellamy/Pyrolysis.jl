@@ -155,6 +155,52 @@ function _verification_case_vgt01()
             n_cells_ladder = [40, 80, 160, 320, 640],
             profile_times = ts,
             qoi_curves = (:xi_profiles, :variance_history),
+            curves = sol -> begin
+                z = get_cell_positions(sol)
+                Δz = L / length(z)
+                function var_num(j)
+                    m = sum(sol.ξ[2, i, j] for i in eachindex(z)) * Δz
+                    zbar = sum(sol.ξ[2, i, j] * z[i] for i in eachindex(z)) * Δz / m
+                    return sum(sol.ξ[2, i, j] * (z[i] - zbar)^2 for i in eachindex(z)) *
+                           Δz / m
+                end
+                [
+                    ReportCurve(
+                        name = :xi_profiles,
+                        title = "V-GT-01: Gaussian gas-pulse diffusion",
+                        xlabel = "z (m)",
+                        ylabel = "ξ_gas (kg/m³)",
+                        series = [
+                            CurveSeries(
+                                label = "t = $(t) s",
+                                x = z,
+                                y = sol.ξ[2, :, j+1],
+                                exact = zz -> ξ_exact(zz, t),
+                            ) for (j, t) in enumerate(ts)
+                        ],
+                    ),
+                    ReportCurve(
+                        name = :variance_history,
+                        title = "V-GT-01: variance growth Var(t) = σ₀² + 2dt",
+                        xlabel = "t (s)",
+                        ylabel = "Var (m²)",
+                        series = [
+                            CurveSeries(
+                                label = "discrete second moment",
+                                x = sol.t,
+                                y = [var_num(j) for j in eachindex(sol.t)],
+                                exact = σ2,
+                            ),
+                        ],
+                    ),
+                ]
+            end,
+            error_norms = sol -> begin
+                z = get_cell_positions(sol)
+                peak = M_tot / sqrt(2π * σ2(4.0))
+                e = [sol.ξ[2, i, 3] - ξ_exact(z[i], 4.0) for i in eachindex(z)]
+                (L2 = sqrt(sum(abs2, e) / length(e)) / peak, Linf = maximum(abs, e) / peak)
+            end,
         ),
     )
 end

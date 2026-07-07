@@ -116,9 +116,110 @@ function _vhc02_case(label::String, Bi::Float64; with_convergence::Bool)
             end,
         ),
         report = (
-            n_cells_ladder = [20, 40, 80, 160, 320],
+            n_cells_ladder = [20, 40, 80, 101, 160, 320],
             profile_times = times,
             qoi_curves = (:T_profiles, :surface_T_history, :back_T_history),
+            solve_kwargs = (abstol = 1e-12, reltol = 1e-10),
+            curves = sol -> begin
+                z = get_cell_positions(sol)
+                Fo_of_t(t) = α * t / L^2
+                # FDS 6.11.0 overlay (reference/fds/custom/): the shipped
+                # heat_conduction_{a..d} are the same nondimensional problem —
+                # FDS a/b/c/d = Bi 100/10/1/0.1 (labels reversed vs ours),
+                # 20→120 °C with α_FDS = 1e-6 m²/s, so θ and Fo map onto our
+                # axes as T = 300 + 2(T_FDS − 20) and t = 2·t_FDS. All four
+                # overlays use span-matched re-runs (T_END = 5000 s ⇒ Fo = 0.5,
+                # exactly our range — the shipped b/c/d simulate up to 10×
+                # longer, which would distort the wall-time comparison and
+                # stretch the history axes).
+                fds_file = Dict(
+                    0.1 => "fds/custom/heat_conduction_d_matched_devc.csv",
+                    1.0 => "fds/custom/heat_conduction_c_matched_devc.csv",
+                    10.0 => "fds/custom/heat_conduction_b_matched_devc.csv",
+                    100.0 => "fds/custom/heat_conduction_a_ext_devc.csv",
+                )[Bi]
+                # devc DEPTH is from the exposed front; our x̃ from the back.
+                fds_cols = ["Back", "8 cm", "6 cm", "4 cm", "2 cm", "Front"]
+                fds_x̃ = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
+                fds = reference_columns(fds_file, "Time", fds_cols...)
+                fds_t, fds_T =
+                    2.0 .* fds[1], [300.0 .+ 2.0 .* (c .- 20.0) for c in fds[2:end]]
+                fds_at(col, t_ours) = fds_T[col][argmin(abs.(fds_t .- t_ours))]
+                [
+                    ReportCurve(
+                        name = :T_profiles,
+                        title = "V-HC-02$(label) (Bi = $(Bi)): temperature profiles",
+                        xlabel = "x̃ = z/L (adiabatic back at 0)",
+                        ylabel = "T (K)",
+                        series = vcat(
+                            [
+                                CurveSeries(
+                                    label = "Fo = $(Fo)",
+                                    x = z ./ L,
+                                    y = sol.T[:, j+1],
+                                    exact = x̃ -> T_exact(x̃, Fo),
+                                ) for (j, Fo) in enumerate(Fos)
+                            ],
+                            [
+                                CurveSeries(
+                                    label = "FDS 6.11.0, Fo = $(Fo)",
+                                    crosscode = true,
+                                    x = fds_x̃,
+                                    y = [fds_at(i, Fo * L^2 / α) for i = 1:6],
+                                    exact = x̃ -> T_exact(x̃, Fo),
+                                ) for Fo in Fos
+                            ],
+                        ),
+                    ),
+                    ReportCurve(
+                        name = :surface_T_history,
+                        title = "V-HC-02$(label) (Bi = $(Bi)): front-face temperature",
+                        xlabel = "t (s)",
+                        ylabel = "T_s (K)",
+                        series = [
+                            CurveSeries(
+                                label = "front face",
+                                x = sol.t[2:end],
+                                y = sol.surface_T[2:end],
+                                exact = t -> T_exact(1.0, Fo_of_t(t)),
+                            ),
+                            CurveSeries(
+                                label = "FDS 6.11.0",
+                                crosscode = true,
+                                x = fds_t[2:end],
+                                y = fds_T[6][2:end],
+                                exact = t -> T_exact(1.0, Fo_of_t(t)),
+                            ),
+                        ],
+                    ),
+                    ReportCurve(
+                        name = :back_T_history,
+                        title = "V-HC-02$(label) (Bi = $(Bi)): back-face temperature",
+                        xlabel = "t (s)",
+                        ylabel = "T (K)",
+                        series = [
+                            CurveSeries(
+                                label = "adiabatic back face",
+                                x = sol.t[2:end],
+                                y = sol.T[1, 2:end],
+                                exact = t -> T_exact(0.0, Fo_of_t(t)),
+                            ),
+                            CurveSeries(
+                                label = "FDS 6.11.0",
+                                crosscode = true,
+                                x = fds_t[2:end],
+                                y = fds_T[1][2:end],
+                                exact = t -> T_exact(0.0, Fo_of_t(t)),
+                            ),
+                        ],
+                    ),
+                ]
+            end,
+            error_norms = sol -> begin
+                z = get_cell_positions(sol)
+                e = [sol.T[i, 4] - T_exact(z[i] / L, 0.2) for i in eachindex(z)]
+                (L2 = sqrt(sum(abs2, e) / length(e)), Linf = maximum(abs, e))
+            end,
         ),
     )
 end

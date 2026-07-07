@@ -271,8 +271,11 @@ each permutation; the derivation belongs in the case docstring and its algebra
 should be spot-checked against a brute-force fine-mesh run before the value is
 pinned. Mass must be exactly conserved in all permutations. Extends the existing ALE
 mass-conservation test to **exact geometric endpoints**, including the swelling
-(intumescent-like, γ > 1) branch and the χ-driven lateral-area law (WithChi):
-final A/A₀ exact from the prescribed law at χ = 1.
+branch and the χ-driven lateral-area law (WithChi): final A/A₀ exact from the
+prescribed law at χ = 1. (Note: there is no "γ > 1 intumescent branch" — γ is
+validated to [0, 1] because the same weight feeds the density/conductivity
+mixing rules; swelling is exercised through low-bulk-density products,
+ρ_B < ρ_A, as V-CPL-03 P1 does. See tech-ref §4.1.5.)
 
 ### V-CPL-04 — Frank-Kamenetskii critical slab (reaction–conduction bifurcation)
 
@@ -437,6 +440,38 @@ computed → error statement"):
 5. All numeric outputs also written as CSV next to the figures so the guide
    tables regenerate from data, and so future runs can be diffed against a
    committed baseline (regression detection beyond pass/fail).
+6. **Cross-code overlays** (2026-07-07): where a case has a published analog
+   in another solver, that solver's *numerical* result is committed under
+   `test/verification/reference/<code>/` (provenance READMEs per directory)
+   and drawn as an extra `CurveSeries` on the case's overlay/error figures.
+   Sources verified 2026-07-07: FDS 6.11.0 run locally on its shipped
+   verification inputs (FDS never commits its own outputs — firebot
+   regenerates them nightly), Gpyro 0.8200 built from source with decks
+   reconstructed from Lautenberger's dissertation §3.4, and the MaCFP-2 PMMA
+   community submissions (downloadable CSVs; feeds the future B-01).
+   ThermaKin ships as a Windows-only binary (`docs/refs/ThermaKin/`) — its
+   FSS9 verification cases (incl. the V-GT-01 Gaussian) are fully
+   parameterized in the paper, so either run the `.exe` on Windows/wine or
+   request a rerun from the Stoliarov group (stolia@umd.edu); slot the CSVs
+   into `reference/thermakin/`. Since every correct code lies on the exact
+   curve at plot scale, exact-solution overlays compare *error* (their series
+   gets the same `exact` callable, so the renderer derives their pointwise
+   error panel next to ours); solution-curve overlays are reserved for
+   genuinely-disagreeing comparisons (MaCFP, B-02 HEATING/ABAQUS).
+   Presentation (`CurveSeries.crosscode = true` → render.jl): every affected
+   figure is emitted twice — the base variant stays ours-vs-exact only (our
+   error legible on its own scale), and a `_vs_codes` variant adds the other
+   codes as a muted context layer (gray shades + per-code marker shapes,
+   thinned, always drawn *under* our colored series). Cases with reference
+   runs also get a `solve_time` figure: log-x lollipop of our wall time at
+   every ladder rung vs the other codes' runs (`reference/timings.csv`,
+   same-machine 2026-07-07, resolution recorded per row). A discarded warm-up
+   solve precedes the timed ladder so Julia JIT compile is not billed to the
+   coarsest rung. Where a reference run's resolution falls outside our
+   ladder, the case's `n_cells_ladder` carries a matched rung (V-HC-01:
+   133/500, V-HC-02: 101, V-HC-03: 200, V-CPL-01: 800) so error and solve
+   time compare like-for-like; the committed decks also allow the converse
+   (rerun their code at our resolution) if ever needed.
 
 ## Proposed layout & guide scaffolding (Phase 2, after cases land)
 
