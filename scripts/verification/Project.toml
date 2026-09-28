@@ -22,5 +22,5 @@ Pyrolysis = {path = "../.."}
 [compat]
 CairoMakie = "0.12, 0.13, 0.14, 0.15"
 ForwardDiff = "0.10, 1"
-OrdinaryDiffEq = "6"
+OrdinaryDiffEq = "7"
 SpecialFunctions = "2"
