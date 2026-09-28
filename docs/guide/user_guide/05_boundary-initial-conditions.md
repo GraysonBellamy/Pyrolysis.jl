@@ -94,7 +94,7 @@ the surface temperature `T_s` (§5.4). Every flux is reported with the **positiv
 | `HeatFluxBC` | `q(t)` (prescribed) | `flux` |
 | `ConvectiveBC` | `h·(T_∞ − T_s)` | `h`, `T_inf` |
 | `RadiativeBC` | `F·ε_eff·σ·(T_∞⁴ − T_s⁴)` | `ε` (`nothing`), `T_inf`, `F` (`1.0`) |
-| `RadiativeFluxBC` | `α·Φ_incident` (model-dependent) | `flux`, `absorptivity` (`nothing`) |
+| `RadiativeFluxBC` | `α·Φ_incident` (model-dependent) | `flux`, `absorptivity` (`nothing` ⇒ `a_eff`) |
 | `DirichletThermalBC` | enforces `T_s = T` | `T` |
 | `CombinedThermalBC` | `Σ_i q_BC,i` | built via `+` |
 
@@ -168,10 +168,12 @@ Gray-body radiative exchange with the surroundings,
 Fields:
 
 - `ε` — surface emissivity. Default `nothing`, which means **use the effective
-  emissivity** `ε_eff = Σ_j v_j ε_j` (volume-weighted) computed from the live
+  emissivity** `ε_eff = Σ_j v_j ε_j(T)` (volume-weighted, each component
+  emissivity evaluated at the boundary-cell temperature) computed from the live
   composition. This is the recommended setting: it automatically tracks the
-  change from virgin polymer to char as the material decomposes. You can also
-  pass a constant in `[0, 1]` or a function `ε(T)`.
+  change from virgin polymer to char as the material decomposes, and any
+  temperature dependence you gave the component `ε`. You can also pass a
+  constant in `[0, 1]` or a function `ε(T)`.
 - `T_inf` — surroundings temperature `T_∞` in K (constant or `T_∞(t)`).
 - `F` — view factor in `[0, 1]`, default `1.0` (surface fully sees the
   surroundings). Use `F < 1` for partially enclosed geometries.
@@ -202,7 +204,7 @@ is the surface's *own* re-radiation loss) and from `HeatFluxBC` (which injects a
 bare flux with no absorptivity or in-depth treatment).
 
 ```julia
-bc = RadiativeFluxBC(flux = 25e3)                          # incident 25 kW/m², α = ε_eff
+bc = RadiativeFluxBC(flux = 25e3)                          # incident 25 kW/m², α = a_eff
 bc = RadiativeFluxBC(flux = 50e3, absorptivity = 0.9)      # fixed absorptivity
 bc = RadiativeFluxBC(flux = t -> 25e3*(1 - exp(-t/10)))    # time-varying flux
 ```
@@ -211,9 +213,12 @@ Fields:
 
 - `flux` — incident radiative flux `Φ_incident` in W/m² (constant or `Φ(t)`).
 - `absorptivity` — surface absorptivity `α` in `[0, 1]`. Default `nothing`,
-  which uses the effective emissivity `ε_eff` as the absorptivity (Kirchhoff's
-  law `α = ε_eff`), again tracking composition automatically. You can override
-  with a constant or `α(t)`.
+  which uses the material's effective surface absorptivity
+  `a_eff = Σ_j v_j a_j`: each component's own `absorptivity` when set, else its
+  emissivity `ε_j(T)` (Kirchhoff's law). With no component absorptivity set this
+  is exactly `ε_eff`; setting one lets the absorbed heater flux differ from the
+  re-radiation without splitting the BC. Either way it tracks composition and
+  temperature automatically. You can override with a constant or `α(t)`.
 
 **Its behavior depends on the `radiation_model` keyword passed to `solve()`**
 (see §5.5 and Technical Reference §8):
@@ -704,7 +709,7 @@ absorption coefficients on the components):
 ```julia
 bc_set = BoundaryConditionSet(
     thermal = (
-        top = RadiativeFluxBC(flux = 50e3) +          # α defaults to ε_eff
+        top = RadiativeFluxBC(flux = 50e3) +          # α defaults to a_eff (= ε_eff by Kirchhoff)
               RadiativeBC(T_inf = 300.0) +
               ConvectiveBC(h = 10.0, T_inf = 300.0),
         bottom = AdiabaticBC(),

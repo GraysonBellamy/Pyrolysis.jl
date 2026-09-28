@@ -128,13 +128,13 @@ them plainly wherever they appear:
   carries the gas enthalpy, so enabling transpiration would double-count it.
   `use_transpiration_bc = true` is rejected at construction; leave it at its
   default `false` (see Technical Reference §7 and §12).
-- **Surface-cell depletion handling** (`handle_depletion = true`) resizes the
-  state vector mid-solve and is therefore incompatible with a pluggable Jacobian
-  backend. When you enable it, the solver falls back to the integrator's own
-  colored finite-difference Jacobian (see §1.7 and Technical Reference §14, §15).
+- **Depletion handling** (`handle_depletion = true`) parks depleted cells
+  without changing the state size, so it works with every Jacobian backend;
+  it is a sequence of discrete state rewrites, so parameter sensitivities are
+  valid only between park events (Chapter 10, Technical Reference §14, §17).
 - **h-AMR** (cell splitting / coarsening) is quarantined in
   `Pyrolysis.Experimental`; the supported adaptivity in the core package is
-  r-refinement (node relocation) and surface-depletion merging.
+  r-refinement (node relocation) and depleted-cell parking.
 
 ---
 
@@ -415,14 +415,6 @@ For a real end-to-end check, run the minimal example in §1.8 — completing it 
 `retcode == :Success` is the strongest confirmation that conduction, kinetics, gas
 transport, the boundary solve, and the integrator are all working together.
 
-> **Depletion and the Jacobian.** If you later enable surface-cell depletion
-> handling (`solve(...; use_ale = true, handle_depletion = true)`), be aware that
-> it resizes the state vector while integrating, which a pluggable `JacobianSpec`
-> cannot survive. The solver therefore refuses to combine `handle_depletion = true`
-> with an explicit `jacobian` argument and, when depletion is on, falls back to the
-> integrator's own colored finite-difference Jacobian. See UG §10 and Technical
-> Reference §14–§15.
-
 ---
 
 ## 1.8 A minimal "hello pyrolysis" example
@@ -486,7 +478,9 @@ A few notes on what each step does and what is defaulted:
   tuple inside the constructor. Materials and reactions are covered in UG §3 and
   UG §4.
 - **`SolidComponent(:name; ρ, c, k, …)`** requires bulk density `ρ`, heat
-  capacity `c`, and conductivity `k`; `ε` (emissivity) defaults to `0.9`, the
+  capacity `c`, and conductivity `k`; `ε` (emissivity, a number or a property
+  function of temperature) defaults to `0.9`, the surface `absorptivity` for
+  incident radiation to `nothing` (Kirchhoff, `a = ε(T)`), the
   swelling factor `γ` to `1.0`, permeability `κ` to `0.0` (impermeable, so no
   Darcy flow), the gas-transfer coefficient `λ` to `0.0`, and the mass-absorption
   coefficient `α` to `0.0`. Any of `ρ`, `c`, `k` may be a number or a property
@@ -578,7 +572,7 @@ stable, user-facing API. Broadly, the top-level exports cover:
   `phase`, `molar_mass`).
 - **Property functions:** `ConstantProperty`, `LinearProperty`,
   `PolynomialProperty`, `ArrheniusProperty`, `TableProperty`, `CallableProperty`,
-  `StateDependentProperty`.
+  `SutherlandProperty`, `StateDependentProperty`.
 - **Boundary conditions:** the thermal BCs (`HeatFluxBC`, `ConvectiveBC`,
   `RadiativeBC`, `RadiativeFluxBC`, `CombinedThermalBC`, `DirichletThermalBC`,
   `AdiabaticBC`), the mass BCs (`ImpermeableBC`, `MassFluxBC`, `ConvectiveMassBC`,
@@ -756,8 +750,9 @@ pmma_k  = CallableProperty(T -> T < 378.0 ? 0.15 : (0.34 - 3.9e-4 * T))
 
 `CallableProperty` is one of several property-function types. You can also pass
 a bare number (auto-converted to a `ConstantProperty`), a `LinearProperty(a, b)`
-for `a + b·T`, a `PolynomialProperty`, an `ArrheniusProperty`, or a
-`TableProperty` for tabulated data. Property types and their derivatives are
+for `a + b·T`, a `PolynomialProperty`, an `ArrheniusProperty`, a
+`TableProperty` for tabulated data, or a `SutherlandProperty(μ_ref, T_ref, S)`
+for the gas-viscosity correlation μ_ref·(T/T_ref)^{3/2}·(T_ref+S)/(T+S). Property types and their derivatives are
 covered in full in User Guide §UG-3 and Technical Reference §4.
 
 ### 2.2.2 Component constructors
@@ -804,7 +799,8 @@ thermophysical values are keywords. Defaults worth knowing:
 | `ρ` | bulk density [kg/m³] | required | ideal-gas law from `M` |
 | `c` | heat capacity [J/(kg·K)] | required | required |
 | `k` | thermal conductivity [W/(m·K)] | required | required |
-| `ε` | surface emissivity [-] | `0.9` | `0.0` |
+| `ε` | surface emissivity [-] (number or `ε(T)`) | `0.9` | `0.0` |
+| `absorptivity` | surface absorptivity for incident radiation [-] (`nothing` = Kirchhoff, `ε(T)`) | `nothing` | n/a (always Kirchhoff) |
 | `α` | mass absorption coeff. [m²/kg] | `0.0` | `0.0` |
 | `γ` | swelling factor [-] | `1.0` (solid shrinks) | `0.0` (gas escapes) |
 | `λ` | gas-transfer coeff. [m²/s] | `0.0` | required |
@@ -923,10 +919,13 @@ What each piece does:
 
 - **`RadiativeFluxBC(flux, absorptivity)`** is the *incident* external radiation
   from the cone heater. The absorbed flux is `flux × absorptivity`. If you pass
-  `absorptivity = nothing` (the default), the effective surface emissivity is
-  used instead via Kirchhoff's law (`α = ε_eff`), automatically tracking
-  composition as the surface chars. The way this flux is deposited depends on
-  the `radiation_model` you choose at solve time (see §2.6).
+  `absorptivity = nothing` (the default), the material's effective surface
+  absorptivity `a_eff = Σ_j v_j a_j` is used instead, where each component's
+  `a_j` is its own `absorptivity` keyword when set and its emissivity `ε_j(T)`
+  otherwise (Kirchhoff's law, so `a_eff = ε_eff` unless a component sets one).
+  Either way it automatically tracks composition as the surface chars. The way
+  this flux is deposited depends on the `radiation_model` you choose at solve
+  time (see §2.6).
 - **`RadiativeBC(ε, T_inf, F)`** is the surface's own **re-radiation loss**,
   `q = F·ε·σ·(T_∞⁴ − T_s⁴)`. With `ε = nothing` it uses the effective
   emissivity; the view factor `F` defaults to `1.0`. Because `T_s` exceeds
@@ -1139,7 +1138,7 @@ runs in the same session are fast.
 | `use_ale` | `false` | enables moving-mesh tracking of surface recession |
 | `radiation_model` | `NO_RADIATION` | `SURFACE_ABSORPTION` absorbs the cone flux at the surface |
 | `min_thickness` | `1e-6` | ALE termination thickness [m] |
-| `handle_depletion` | `false` | merge thin surface cells (requires `use_ale = true`) |
+| `handle_depletion` | `false` | park depleted cells (ALE or fixed mesh) |
 | `depletion_threshold` | `0.05` | cell-thinness fraction that triggers a merge |
 | `min_cells` | `2` | floor on cell count before termination |
 | `progress` | `true` | progress bar |
@@ -1174,8 +1173,9 @@ Two important caveats:
   `BEER_LAMBERT` mode the boundary-temperature Newton solver still runs (it
   finds the `T_s` that balances conducted, convective, and re-radiation flux),
   but `RadiativeFluxBC` contributes **zero** flux at the boundary; the absorbed
-  fraction of the incident cone radiation — `ε_eff·Φ` by Kirchhoff's law
-  (`α = ε_eff` of the live surface cell), or `α·Φ` with an explicit
+  fraction of the incident cone radiation — `a_eff·Φ` with the live surface
+  cell's effective surface absorptivity (`= ε_eff` by Kirchhoff's law unless a
+  component sets `absorptivity`), or `α·Φ` with an explicit BC
   `absorptivity` — is deposited volumetrically via
   `compute_beer_lambert_source!` and reported in
   `solution.extras.volumetric_absorption`.
@@ -1189,7 +1189,8 @@ These are not needed for this run but round out the picture (full reference in
 User Guide §UG-8):
 
 - **`integrator`** (default `KenCarp4`) and **`linear_solver`** (default
-  `SparspakFactorization`) — the time integrator and sparse linear solver.
+  chosen from the Jacobian's sparsity pattern, §8.4) — the time integrator and
+  sparse linear solver.
 - **`energy_form`** (default `:standard`) — `:standard` carries gas enthalpy via
   the volumetric `S_conv` term; `:with_generation_sink` adds the gas-generation
   enthalpy sink, which is consistent **only with T_ref-datum reaction heats**
@@ -1207,15 +1208,9 @@ User Guide §UG-8):
   §12.3.3).
 - **`diagnostics`** (default `false`) — snapshot the conservation ledgers every
   `diagnostics_stride` steps (default 10) for energy/mass-balance auditing.
-- **`jacobian`** (default `nothing` ⇒ a structured backend with a direct solve)
-  — selects the Jacobian backend. **WARNING:** `handle_depletion = true` is a
-  **hard incompatibility** with a pluggable `jacobian`, not a soft warning: the
-  depletion callback resizes the state vector mid-solve, which the pre-allocated
-  Jacobian caches of the structured backend cannot survive. If you specify
-  **both** `handle_depletion = true` **and** a `jacobian`, `solve` raises an
-  error and refuses to run. To use depletion, **omit the `jacobian` kwarg
-  entirely** — the integrator then falls back to its own colored
-  finite-difference Jacobian. See Technical Reference §15 and User Guide §UG-11.
+- **`handle_depletion`** — park depleted cells (Chapter 10). The state keeps
+  its size, so it combines with any `jacobian`; under ALE it selects
+  `Structured(strategy = ApproxSolve())` as the default backend.
 - **`warm_start`** — reuse a prior solution's final state as the initial
   condition for a continuation run.
 
@@ -1620,7 +1615,7 @@ A solid is the canonical matrix-forming component. The keyword constructor is:
 ```julia
 SolidComponent(name::Symbol;
                ρ, c, k,
-               ε = 0.9, α = 0.0, γ = 1.0,
+               ε = 0.9, absorptivity = nothing, α = 0.0, γ = 1.0,
                λ = 0.0, κ = 0.0,
                ρ_intrinsic = nothing, φ = nothing)
 ```
@@ -1631,7 +1626,8 @@ SolidComponent(name::Symbol;
 | `ρ` | `ρ_j` | **Bulk** (pure-phase) density | kg·m⁻³ | required |
 | `c` | `c_{p,j}` | Specific heat capacity | J·kg⁻¹·K⁻¹ | required |
 | `k` | `k_j` | Thermal conductivity | W·m⁻¹·K⁻¹ | required |
-| `ε` | `ε_j` | Surface emissivity | – | `0.9` |
+| `ε` | `ε_j(T)` | Surface emissivity (number or property function of `T`) | – | `0.9` |
+| `absorptivity` | `a_j` | Surface absorptivity for incident radiation (`nothing` = Kirchhoff, `a_j = ε_j(T)`) | – | `nothing` |
 | `α` | `α_j` | Mass-basis absorption coefficient | m²·kg⁻¹ | `0.0` |
 | `γ` | `γ_j` | Swelling factor (volume-change participation) | – | `1.0` |
 | `λ` | `λ_j` | Gas-transfer (diffusion) coefficient contribution | m²·s⁻¹ | `0.0` |
@@ -1662,8 +1658,17 @@ char = SolidComponent(:char,
 
 Notes on the less-obvious fields:
 
-- **`ε` and `α` are plain `Float64`s, not property functions.** Emissivity and the
-  absorption coefficient do not carry temperature dependence at the component level.
+- **`ε` accepts the same forms as `k`** — a number, a `(p0, p1)` linear tuple, a
+  function of `T`, or a property function — and is evaluated at the cell
+  temperature in the mixing rule `ε_eff = Σ_j v_j ε_j(T)` (UG §3.7, TR §5.8). The
+  surface-emission and Beer–Lambert Jacobians carry the resulting `dε/dT`
+  automatically. `α` and `absorptivity` are plain constants.
+- **`absorptivity` decouples the absorbed heater flux from the emission.** Leave it
+  `nothing` for Kirchhoff's law (`a_j = ε_j(T)`); set the spectrum-specific value
+  when the heater's spectrum differs from a blackbody at the surface temperature
+  (integrating-sphere data typically give it). A `RadiativeFluxBC` with
+  `absorptivity = nothing` then absorbs `Σ_j v_j a_j · Φ` while the surface still
+  re-radiates at `ε_eff` — no need to split the incident flux into two BC terms.
 - **`α` (absorption) is ignored unless an in-depth radiation model is active.** With
   `radiation_model = SURFACE_ABSORPTION` (or `NO_RADIATION`) the absorbed flux `α·Φ`
   is applied at the surface through the boundary energy balance and the component `α`
@@ -1674,6 +1679,11 @@ Notes on the less-obvious fields:
 - **`λ` on a solid** does not transport the solid (solids are stationary); it is the
   solid's *contribution* to the effective mixture gas-transfer coefficient through
   the mixing rule (see §3.5). ThermaKin-style setups typically use `λ ≈ 2e-5`.
+  Leaving it at the default `0.0` in a gas-producing material with Fickian
+  transport stops gas transport in every cell that holds no gas: the gas field
+  ends in a sharp front, and the implicit Newton fails on it again and again.
+  `solve` warns in that configuration; a small value such as `λ = 1e-6` removes
+  the degeneracy (Technical Reference §5.6).
 - **`κ = 0.0` (default) means impermeable.** Setting any solid/liquid component's
   `κ > 0` switches the whole problem into Darcy–Fick (pressure-driven) gas transport
   (§3.6.2 and Technical Reference §9).
@@ -1700,7 +1710,7 @@ the 0.95 matters as soon as you give the liquid γ > 0.)
 LiquidComponent(name::Symbol;
                 ρ, c, k,
                 λ = 2e-5, κ = 0.0,
-                ε = 0.95, α = 0.0, γ = 0.0,
+                ε = 0.95, absorptivity = nothing, α = 0.0, γ = 0.0,
                 ρ_intrinsic = nothing, φ = nothing)
 ```
 
@@ -1709,7 +1719,8 @@ LiquidComponent(name::Symbol;
 | `ρ`, `c`, `k` | bulk density, heat capacity, conductivity | (as solid) | required |
 | `λ` | gas-transfer contribution | m²·s⁻¹ | `2e-5` |
 | `κ` | permeability | m² | `0.0` (liquid blocks pores) |
-| `ε` | emissivity | – | `0.95` (water ≈ 0.96) |
+| `ε` | emissivity (number or `ε(T)`) | – | `0.95` (water ≈ 0.96) |
+| `absorptivity` | surface absorptivity for incident radiation (`nothing` = Kirchhoff) | – | `nothing` |
 | `α` | mass absorption | m²·kg⁻¹ | `0.0` |
 | `γ` | swelling factor | – | `0.0` |
 | `ρ_intrinsic` / `φ` | skeletal density / pure-phase porosity | kg·m⁻³ / – | `= ρ` / `nothing` |
@@ -1742,7 +1753,7 @@ GaseousComponent(name::Symbol;
 | `c` | `c_{p,j}` | Heat capacity | J·kg⁻¹·K⁻¹ | required |
 | `k` | `k_j` | Thermal conductivity | W·m⁻¹·K⁻¹ | required |
 | `λ` | `λ_j` | Gas-transfer (diffusion) coefficient | m²·s⁻¹ | required |
-| `ε` | `ε_j` | Emissivity | – | `0.0` |
+| `ε` | `ε_j(T)` | Emissivity (number or property function; no `absorptivity` — gases always follow Kirchhoff) | – | `0.0` |
 | `α` | `α_j` | Mass absorption | m²·kg⁻¹ | `0.0` |
 | `γ` | `γ_j` | Swelling factor | – | `0.0` |
 
@@ -1941,7 +1952,10 @@ derivatives `∂p/∂ξ_j` are zero for temperature-only properties and adaptive
 finite-difference (`δξ = max(|ξ|·1e-4, 1e-6)`) for `StateDependentProperty`. Because
 table/callable/state-dependent properties use finite differences, prefer the
 analytic types (constant/linear/polynomial/Arrhenius) where you can — they keep the
-Jacobian exact and the solve crisp. See Technical Reference §4.5.
+Jacobian exact and the solve crisp. Every law evaluates on the property bracket
+`[200, 3000]` K (its argument is clamped to it, so a nonphysical Newton trial
+temperature cannot reach a fractional power), and the derivatives are zero
+outside the bracket. See Technical Reference §4.4–§4.5.
 
 ---
 
@@ -2221,8 +2235,9 @@ Two physics notes worth remembering (both in Technical Reference §5):
   includes gas) exists for diagnostics only.
 - **Conductivity and emissivity use the swelling-weighted (matrix) volume
   fractions** — γ = 0 components (canonical gases) carry no weight in these
-  surface/matrix properties, matching the ThermaKin convention; a fully depleted
-  cell falls back to the all-phase occupancy so k_eff degrades to the gas-mixture
+  surface/matrix properties, matching the ThermaKin convention; as a cell's
+  matrix volume fraction drops through `1e-3 … 1e-4` the weights blend smoothly
+  into the all-phase occupancy, so an emptied cell degrades to the gas-mixture
   conductivity instead of 0. **Gas transfer uses the all-phase volume fractions**
   (gas included) — diffusion happens through the pore space the matrix basis
   excludes. Component-based permeability mixes on the matrix basis. Absorption uses
@@ -2241,7 +2256,8 @@ Material(; name::Symbol,
            reactions::Tuple = (),
            mixing = MaterialMixing(),
            lateral_shrinkage_law = nothing,
-           depletion_limiter = DepletionLimiter())
+           depletion_limiter = DepletionLimiter(),
+           gas_viscosity = SutherlandProperty())
 ```
 
 | Keyword | Meaning | Default |
@@ -2252,6 +2268,7 @@ Material(; name::Symbol,
 | `mixing` | `(k, λ, κ)` NamedTuple from `MaterialMixing` | `MaterialMixing()` |
 | `lateral_shrinkage_law` | `A(t)/A_0 = law(χ̄)` or `nothing` (identity) | `nothing` |
 | `depletion_limiter` | `DepletionLimiter` applied to every reaction-rate evaluation (smooth `tanh(ξ/threshold)` roll-off near reactant depletion; §4.10) | `DepletionLimiter()` (`threshold = 1.0` kg·m⁻³, enabled) |
+| `gas_viscosity` | pore-gas dynamic viscosity μ(T) [Pa·s]; number, `(p0, p1)` tuple, `Function`, or property function | `SutherlandProperty()` (air) |
 
 - **Component order defines the index space.** The first component is index 1, the
   second is 2, etc. The state vector's species blocks follow this order, and integer
@@ -2263,6 +2280,25 @@ Material(; name::Symbol,
   hook; it must be a `Function` of the column-average pyrolysis progress `χ̄`, or
   `nothing`. Most simulations leave it `nothing`. See Technical Reference §10.5 and
   Chapter 7.
+- **`gas_viscosity`** matters only in Darcy–Fick mode, where it enters as the
+  mobility `κ/μ` — so getting μ wrong by a factor is exactly the same as getting
+  permeability wrong by the reciprocal factor. The default is air, which is fine
+  for an N₂-swept pore space but overstates the viscosity of wood pyrolyzates by
+  roughly 1.7× at 300 K falling to 1.3× at 1000 K. Supply the blend correlation
+  for the gas your material actually produces:
+
+  ```julia
+  # Cantera mixture-averaged fit, ascending coefficients, valid 280–1200 K
+  Material(name = :WhitePine, components = (...), reactions = (...),
+           gas_viscosity = PolynomialProperty(mu_coeffs))
+  ```
+
+  It is **one curve per material**, so it averages over the pore gas shifting
+  from background air to volatiles as pyrolysis proceeds; it cannot resolve that
+  transition. The constructor rejects a curve that is non-positive or non-finite
+  over 200–1800 K, and the solver floors μ at `MU_FLOOR` outside that range —
+  both because a μ that reaches zero reverses the gas velocity rather than merely
+  degrading it. See Technical Reference §5.9.
 
 ### 3.6.2 Worked example: charring wood with moisture
 
@@ -2376,7 +2412,19 @@ Pyrolysis.Materials.validate_material(wood)   # returns true; warns on problems
 ```
 
 Mass-balance failures are reported as **warnings** (the function still returns
-`true`); index errors **throw**. For a standalone balance check use
+`true`); index errors **throw**.
+
+Property laws are checked when the **component** is built: every temperature-
+dependent `ρ`, `c`, `k`, `λ`, `κ` and `ε` is sampled on the property bracket
+`[200, 3000]` K at 1 K steps, and the constructor throws if a density, heat
+capacity or conductivity is not positive there (a gas may have `c = 0`), if
+`λ` or `κ` is negative, or if `ε` leaves `[0, 1]`. The message names the first
+offending temperature — a linear fit `k = 0.3 − 4.2e-4·T` is rejected at
+715 K, where it would make a cell a perfect insulator. Hold a fit constant
+outside its measured range (`T -> law(clamp(T, T_lo, T_hi))`), or pass
+`validate_properties = false` when the law comes from an optimizer's search
+parameters and an unphysical value should reach the objective instead of
+throwing. For a standalone balance check use
 `Pyrolysis.Materials.check_material_mass_balance(material.reactions)`. Note that the
 two-product `Reaction` constructors already enforce `Σ yields = 1.0` at construction
 time (unless `validate_mass = false`), so a material built normally will pass.
@@ -2396,6 +2444,7 @@ the clearest, earliest error messages during development.
 | Field | Solid | Liquid | Gas |
 |---|---|---|---|
 | `ε` (emissivity) | `0.9` | `0.95` | `0.0` |
+| `absorptivity` (surface absorptivity) | `nothing` (Kirchhoff) | `nothing` (Kirchhoff) | n/a |
 | `α` (absorption) | `0.0` | `0.0` | `0.0` |
 | `γ` (swelling) | `1.0` | `0.0` | `0.0` |
 | `λ` (gas transfer) | `0.0` | `2e-5` | required |
@@ -3147,7 +3196,7 @@ the surface temperature `T_s` (§5.4). Every flux is reported with the **positiv
 | `HeatFluxBC` | `q(t)` (prescribed) | `flux` |
 | `ConvectiveBC` | `h·(T_∞ − T_s)` | `h`, `T_inf` |
 | `RadiativeBC` | `F·ε_eff·σ·(T_∞⁴ − T_s⁴)` | `ε` (`nothing`), `T_inf`, `F` (`1.0`) |
-| `RadiativeFluxBC` | `α·Φ_incident` (model-dependent) | `flux`, `absorptivity` (`nothing`) |
+| `RadiativeFluxBC` | `α·Φ_incident` (model-dependent) | `flux`, `absorptivity` (`nothing` ⇒ `a_eff`) |
 | `DirichletThermalBC` | enforces `T_s = T` | `T` |
 | `CombinedThermalBC` | `Σ_i q_BC,i` | built via `+` |
 
@@ -3221,10 +3270,12 @@ Gray-body radiative exchange with the surroundings,
 Fields:
 
 - `ε` — surface emissivity. Default `nothing`, which means **use the effective
-  emissivity** `ε_eff = Σ_j v_j ε_j` (volume-weighted) computed from the live
+  emissivity** `ε_eff = Σ_j v_j ε_j(T)` (volume-weighted, each component
+  emissivity evaluated at the boundary-cell temperature) computed from the live
   composition. This is the recommended setting: it automatically tracks the
-  change from virgin polymer to char as the material decomposes. You can also
-  pass a constant in `[0, 1]` or a function `ε(T)`.
+  change from virgin polymer to char as the material decomposes, and any
+  temperature dependence you gave the component `ε`. You can also pass a
+  constant in `[0, 1]` or a function `ε(T)`.
 - `T_inf` — surroundings temperature `T_∞` in K (constant or `T_∞(t)`).
 - `F` — view factor in `[0, 1]`, default `1.0` (surface fully sees the
   surroundings). Use `F < 1` for partially enclosed geometries.
@@ -3255,7 +3306,7 @@ is the surface's *own* re-radiation loss) and from `HeatFluxBC` (which injects a
 bare flux with no absorptivity or in-depth treatment).
 
 ```julia
-bc = RadiativeFluxBC(flux = 25e3)                          # incident 25 kW/m², α = ε_eff
+bc = RadiativeFluxBC(flux = 25e3)                          # incident 25 kW/m², α = a_eff
 bc = RadiativeFluxBC(flux = 50e3, absorptivity = 0.9)      # fixed absorptivity
 bc = RadiativeFluxBC(flux = t -> 25e3*(1 - exp(-t/10)))    # time-varying flux
 ```
@@ -3264,9 +3315,12 @@ Fields:
 
 - `flux` — incident radiative flux `Φ_incident` in W/m² (constant or `Φ(t)`).
 - `absorptivity` — surface absorptivity `α` in `[0, 1]`. Default `nothing`,
-  which uses the effective emissivity `ε_eff` as the absorptivity (Kirchhoff's
-  law `α = ε_eff`), again tracking composition automatically. You can override
-  with a constant or `α(t)`.
+  which uses the material's effective surface absorptivity
+  `a_eff = Σ_j v_j a_j`: each component's own `absorptivity` when set, else its
+  emissivity `ε_j(T)` (Kirchhoff's law). With no component absorptivity set this
+  is exactly `ε_eff`; setting one lets the absorbed heater flux differ from the
+  re-radiation without splitting the BC. Either way it tracks composition and
+  temperature automatically. You can override with a constant or `α(t)`.
 
 **Its behavior depends on the `radiation_model` keyword passed to `solve()`**
 (see §5.5 and Technical Reference §8):
@@ -3757,7 +3811,7 @@ absorption coefficients on the components):
 ```julia
 bc_set = BoundaryConditionSet(
     thermal = (
-        top = RadiativeFluxBC(flux = 50e3) +          # α defaults to ε_eff
+        top = RadiativeFluxBC(flux = 50e3) +          # α defaults to a_eff (= ε_eff by Kirchhoff)
               RadiativeBC(T_inf = 300.0) +
               ConvectiveBC(h = 10.0, T_inf = 300.0),
         bottom = AdiabaticBC(),
@@ -4269,7 +4323,9 @@ variable cross-section). This is the right choice for almost all cases: TGA-like
 cone-calorimeter runs without explicit surface recession, and any problem where you do not need
 the mesh to physically move with the receding/swelling material. Surface recession in the
 Eulerian picture is represented through the density/concentration fields and optional adaptive
-surface-cell depletion (Chapter 10), not by moving nodes.
+surface-cell depletion (Chapter 10), not by moving nodes. A fixed mesh parks only its top live
+cell, so a depletion run stops when a cell beneath the surface empties first; a material that
+regresses belongs on the ALE mesh (§10.2.1).
 
 ```julia
 sol = solve(problem; progress = false)            # Eulerian (use_ale = false, the default)
@@ -5041,7 +5097,7 @@ The full keyword signature, with defaults, is:
 | Keyword | Default | What it controls |
 |---|---|---|
 | `integrator` | `nothing` → `KenCarp4` | ODE integrator (constructor or built instance); §8.2 |
-| `linear_solver` | `nothing` → `SparspakFactorization()` | Sparse factorization paired with a constructor `integrator`; §8.4 |
+| `linear_solver` | `nothing` → `KLUFactorization()`, or `UMFPACKFactorization()` for the exact ALE Jacobian | Sparse factorization paired with a constructor `integrator`; §8.4 |
 | `abstol` | `1e-8` | Absolute error tolerance; §8.3 |
 | `reltol` | `1e-6` | Relative error tolerance; §8.3 |
 | `maxiters` | `1000000` | Maximum integrator steps |
@@ -5077,11 +5133,14 @@ Pyrolysis problems are **stiff**: Arrhenius reaction rates change by orders of
 magnitude across a narrow temperature band, and conduction over fine cells
 imposes a small explicit stability limit. The solver therefore defaults to an
 implicit, stiffly stable method. When `integrator = nothing` (the default),
-`solve` builds:
+`solve` builds
 
 ```julia
-KenCarp4(autodiff = AutoFiniteDiff(), linsolve = SparspakFactorization())
+KenCarp4(autodiff = AutoFiniteDiff(), linsolve = KLUFactorization())
 ```
+
+with `UMFPACKFactorization()` in place of KLU for the exact ALE Jacobian
+(§8.4).
 
 `KenCarp4` is a 4th-order ESDIRK method — a good general-purpose choice for the
 moderately stiff systems that pyrolysis produces. The `autodiff = AutoFiniteDiff()`
@@ -5171,24 +5230,43 @@ scale (`dt ∝ Δz²`) shrinks, and the integrator may need very small steps to 
 through the front. If a solve stops with `retcode == :DtLessThanMin`, lower
 `dtmin`. If it stops with `:MaxIters`, raise `maxiters` (or loosen tolerances).
 
+`solve` also caps the step after Newton failures. When an accepted step needed
+Newton retries, the next 20 steps are held at or below 1.25 times that step,
+so the controller cannot regrow the step straight back into the range where
+the Newton failed. A run without Newton failures is unaffected. Compare
+`sol.raw_solution.stats.nnonlinconvfail` with the number of accepted steps
+(`naccept`) to see how often the Newton fails.
+
 ---
 
 ## 8.4 The linear solver
 
-Each implicit step solves a sparse linear system in the `W` matrix. The default
-linear solver is `SparspakFactorization()`, a sparse direct factorization chosen
-because it is fast on the block-tridiagonal sparsity that 1D pyrolysis produces.
+Each implicit step solves a sparse linear system in the `W` matrix. With
+`linear_solver = nothing`, `solve` picks a sparse direct factorization from the
+Jacobian's sparsity pattern:
+
+- **`UMFPACKFactorization()`** for the exact ALE Jacobian
+  (`Structured(strategy = DirectSolve())` under ALE). Its geometry block couples
+  every cell to every node below it, and UMFPACK's supernodal factorization is
+  the fastest on that dense block.
+- **`KLUFactorization()`** for every other sparse Jacobian: every
+  `ApproxSolve` Jacobian (including the ALE default with
+  `handle_depletion = true`) and every Eulerian one. KLU refactors the fixed
+  pattern in place without allocating, and on these patterns it runs several
+  times faster end to end than Sparspak.
+
+The choice depends on the mode and the Jacobian strategy, not on the mesh size.
 
 You select the linear solver either by pairing it with a *constructor*
 `integrator`:
 
 ```julia
-using LinearSolve: SparspakFactorization, KLUFactorization, LUFactorization
+using LinearSolve: SparspakFactorization, UMFPACKFactorization
 
 solve(problem; integrator = KenCarp4,
-               linear_solver = SparspakFactorization())   # default
+               linear_solver = UMFPACKFactorization())
 solve(problem; integrator = KenCarp4,
-               linear_solver = KLUFactorization())        # general-purpose sparse LU
+               linear_solver = SparspakFactorization())   # pure-Julia sparse LU
 ```
 
 or by baking it into a fully built integrator:
@@ -5197,16 +5275,15 @@ or by baking it into a fully built integrator:
 solve(problem; integrator = KenCarp4(linsolve = KLUFactorization()))
 ```
 
-Sparspak and KLU are both interchangeable sparse direct solvers; Sparspak is the
-default for the pyrolysis sparsity pattern. Iterative ILU-preconditioned solvers
-for large ALE problems are covered in §8.14.
+KLU, UMFPACK and Sparspak are interchangeable sparse direct solvers; the
+default only picks the one suited to the pattern. Iterative ILU-preconditioned
+solvers for large ALE problems are covered in §8.14.
 
-> Note: `solve` substitutes `LUFactorization()` (dense) — with a warning, and
-> keeping your integrator type and `autodiff` setting — in two cases where a
-> sparse solver cannot be used: (1) when no pluggable Jacobian is active
-> (`handle_depletion = true`, see §8.10), and (2) when a dense Jacobian
-> backend such as `DenseAD_ForwardDiff` is selected. In both cases there is
-> no sparse Jacobian prototype for a sparse factorization to consume.
+> Note: a dense Jacobian backend such as `DenseAD_ForwardDiff` has no sparse
+> Jacobian prototype for a sparse factorization to consume. `solve` then
+> defaults to `LUFactorization()` (dense), and replaces an explicitly requested
+> sparse factorization with it — with a warning, keeping your integrator type
+> and `autodiff` setting.
 
 ---
 
@@ -5280,11 +5357,10 @@ The mode keywords accepted by `JacobianSpec(backend, problem; ...)` mirror what
 default to Eulerian / no radiation, so a plain Eulerian problem needs none of
 them.
 
-> Caveat: a pluggable `jacobian` is **incompatible** with
-> `handle_depletion = true`. Depletion resizes the state vector mid-solve, which
-> the immutable Jacobian cache cannot survive, so `solve` errors if you request
-> both. With depletion enabled, `solve` falls back to the integrator's own
-> colored finite-difference Jacobian. See §8.10 and Technical Reference §14.
+> Depletion handling (`handle_depletion = true`) keeps the state size and
+> works with any `jacobian`; under ALE it makes
+> `Structured(strategy = ApproxSolve())` the default. See §8.10 and Technical
+> Reference §14.3.
 
 ---
 
@@ -5452,51 +5528,58 @@ be re-validated when imported.)
 
 ---
 
-## 8.10 Surface depletion and termination
+## 8.10 Depletion handling and termination
 
-For ALE charring runs where the surface cell shrinks to near-zero thickness, you
-can merge depleted surface cells into their neighbors instead of dragging tiny
-cells through the integration. This is the production depletion path, enabled
-only together with `use_ale = true`:
+When a layer burns out, its cells shrink (ALE) or empty (fixed mesh) toward a
+state the implicit integrator cannot resolve — a vanishing cell's equations are
+conditioned like `1/Δz²`. Depletion handling **parks** such cells: it merges
+each one into a neighbour, conserving mass and condensed enthalpy, and moves
+its state slot above the live surface as an inert ghost. The state vector,
+mesh and Jacobian keep their size; the boundary conditions act at the live
+surface.
 
 ```julia
 solve(problem;
       use_ale = true,
-      handle_depletion = true,    # merge thin surface cells
-      depletion_threshold = 0.05, # merge a cell once it is < 5% of its initial thickness
-      min_cells = 1,              # keep at least 1 cell; otherwise terminate
-      min_thickness = 0.01e-3)    # terminate when total thickness < 0.01 mm
+      handle_depletion = true,    # park depleted cells
+      depletion_threshold = 0.05, # park a cell once it is < 5% of its initial thickness
+      min_cells = 2,              # keep at least 2 live cells; otherwise terminate
+      min_thickness = 0.01e-3)    # terminate when the live thickness < 0.01 mm
 ```
 
 How it works:
 
-- A discrete callback scans for **thin cells** — those whose current thickness is
-  below `depletion_threshold ×` their **own** initial thickness (default `0.05`,
-  range `(0,1)`). The reference is per-cell, so stretched meshes are judged
-  cell-by-cell rather than against a single surface-cell thickness.
-- A thin surface cell is merged into an interior neighbor with an
+- After every accepted step a callback scans the live cells. Under ALE a cell
+  is depleted when its thickness is below `depletion_threshold ×` its **own**
+  initial thickness (default `0.05`, range `(0,1)`; the reference is per cell, so
+  stretched meshes are judged cell-by-cell). On a fixed mesh (`use_ale = false`)
+  the top live cell is depleted when its condensed concentration has fallen
+  below the same fraction of its initial value.
+- On a fixed mesh only the top live cell parks. When a cell beneath it becomes
+  a void first, the material has gasified from within: the solve stops with a
+  warning and retcode `:Terminated`, and a regressing material belongs on the
+  ALE mesh (§10.2.1).
+- The depleted cell is merged into its interior neighbour with an
   **energy-conserving** temperature merge and a volume-weighted concentration
-  merge, then the state vector is resized.
-- Merging stops once only `min_cells` remain (default `2`); from there the
-  thickness-termination callback ends the solve when total thickness drops below
-  `min_thickness`.
+  merge, and its slot is parked; one cell per step, surface first.
+- Parking stops once only `min_cells` live cells remain (default `2`); the
+  thickness-termination callback ends an ALE solve when the live thickness drops
+  below `min_thickness`.
+- Ghost slots read as `NaN` in `sol.T`, `sol.ξ` and `sol.z`;
+  `sol.extras.live_cells` gives the live count at each output time and
+  `sol.extras.park_times` the event times.
 
-The example `examples/06_cone_calorimeter.jl` uses exactly this configuration
-(`handle_depletion = true`, `depletion_threshold = 0.05`, `min_cells = 1`). An
-alternative is to *not* merge and instead let ALE carry the thin cells, stopping
-purely on `min_thickness` — that is what `examples/07_douglas_fir_cone.jl` does
-(`handle_depletion = false`).
+`examples/06_cone_calorimeter.jl` uses this configuration
+(`handle_depletion = true`, `depletion_threshold = 0.05`).
+`examples/07_douglas_fir_cone.jl` instead lets ALE carry the thin cells and
+stops purely on `min_thickness` (`handle_depletion = false`).
 
-> Important interaction with the Jacobian: because depletion resizes the state
-> vector via `resize!`, it is incompatible with a pluggable `jacobian`. `solve`
-> errors if you pass both. With `handle_depletion = true` the solver
-> automatically uses the integrator's colored finite-difference Jacobian and a
-> dense (resize-safe) LU linear solver; sparse factorizations passed via
-> `linear_solver` are swapped to dense LU with a warning in this mode.
-> The MKL pivot-array resize bug can only bite if you pass a fully built
-> integrator with its `linsolve` left unset, letting LinearSolve auto-select
-> MKL LU; `solve` warns about that combination on large depleting states.
-> Depletion merge theory is in Technical Reference §14.
+> Jacobian: depletion handling keeps the pluggable Jacobian. Under ALE it
+> selects `Structured(strategy = ApproxSolve())` as the default — the reduced
+> ALE pattern is 60–90× cheaper per step than the full one, and with every
+> live cell above the threshold the dropped couplings cost nothing —
+> and `DirectSolve` stays available through `jacobian`. Theory in Technical
+> Reference §14.3.
 
 ---
 
@@ -5505,7 +5588,8 @@ purely on `min_thickness` — that is what `examples/07_douglas_fir_cone.jl` doe
 `solve` assembles a `CallbackSet` internally; you do not manage most of these. In
 order, they are: a step-update callback (always present; syncs the integrator
 state into the mutable mesh), a thickness-termination callback (ALE), a depletion
-callback (ALE + `handle_depletion`), a progress bar (`progress = true`), an
+callback (`handle_depletion`), the Newton-failure step cap (§8.3; integrators
+that solve their stages by Newton), a progress bar (`progress = true`), an
 optional diagnostics callback, an optional Jacobian-verification callback, and
 finally any user callback you supply.
 
@@ -5591,12 +5675,6 @@ solve(problem; saveat = collect(0.0:1.0:600.0))
 interpolation overhead and memory; for the raw dense interpolant use
 `interpolate_solution(solution, t)` (Chapter 9).
 
-> ALE + depletion exception: when `use_ale = true` and `handle_depletion = true`,
-> the integrator cannot interpolate across a state-vector resize, so `solve`
-> internally switches to "save every step" and then filters down to your
-> requested `saveat` times during extraction. You still get output near the times
-> you asked for, plus the final time.
-
 ### Mass-loss-rate gauge normalization
 
 For variable cross-section (WithChi) runs, the mass-loss rate (top-face flux
@@ -5667,12 +5745,10 @@ If the ILU factorization becomes singular during a sharp transient, both solvers
 fall back to diagonal preconditioning automatically.
 
 > Trade-off: inexact iterative solves can cause more Newton-step rejections on
-> stiff Arrhenius transients. For typical 1D pyrolysis problems the direct
-> Sparspak solver is usually faster end-to-end despite being "more expensive" per
-> factorization. `solve` warns when you select ILU-GMRES, recommending Sparspak
-> unless the problem is genuinely factorization-bound. Reserve the iterative
-> solvers for large ALE meshes where the dense structured coupling makes direct
-> factorization the bottleneck.
+> stiff Arrhenius transients, and `solve` warns when you select ILU-GMRES.
+> Benchmark an iterative configuration end-to-end against the default direct
+> factorization, and reserve it for large ALE meshes where the dense structured
+> coupling makes direct factorization the bottleneck.
 
 External factorizations are available through extensions: `using KLU` enables
 `Pyrolysis.klu_factorization()`, `using Pardiso` enables
@@ -6449,101 +6525,117 @@ cone-calorimeter and TGA studies never need them.
 
 ---
 
-## 10.2 Surface-cell depletion handling (the production path)
+## 10.2 Depletion handling: parked cells (the production path)
 
-When a charring solid pyrolyzes under ALE mesh motion (`use_ale = true`), the
-exposed surface cell loses mass and its node moves downward. Eventually that cell
-becomes so thin that its discrete heat capacity collapses and the integrator is
-forced into vanishingly small steps. **Depletion handling** detects such thin
-cells and *merges* them into a neighbor, removing the singularity while
-conserving mass and energy.
+When a solid pyrolyzes away, the cells that held it shrink (ALE mesh motion,
+`use_ale = true`) or empty (fixed mesh). Either way the integrator ends up
+with cells it cannot resolve: a thin cell's equations are conditioned like
+`1/Δz²`, so the Newton iteration loses every digit and the step size collapses.
+**Depletion handling** detects such cells and *parks* them: the cell's mass and
+condensed enthalpy are merged into a neighbour, and its state slot is moved
+above the live surface as an inert ghost. Nothing changes size — the state
+vector, the mesh arrays and the Jacobian keep their allocation for the whole
+solve — and every kernel runs over the live cells `1:mesh.n_active_cells` with
+the boundary conditions applied at the live surface.
 
 ### 10.2.1 Turning it on through `solve`
 
-This is the recommended way to use depletion handling — you do not build the
-callback yourself. Pass `handle_depletion = true` (which **requires**
-`use_ale = true`) to `solve`:
+Pass `handle_depletion = true` to `solve`, in either mesh mode:
 
 ```julia
 using Pyrolysis
 
 sol = solve(problem;
     use_ale             = true,    # node positions become state; mesh can shrink
-    handle_depletion    = true,    # merge thin surface cells instead of stalling
-    depletion_threshold = 0.05,    # merge a cell once it drops below 5% of its
+    handle_depletion    = true,    # park depleted cells instead of stalling
+    depletion_threshold = 0.05,    # park a cell once it drops below 5% of its
                                    #   initial thickness (default; must be in (0,1))
-    min_cells           = 2,       # never merge below this many cells; terminate instead
-    min_thickness       = 1e-6,    # [m] terminate when total thickness < this (default)
+    min_cells           = 2,       # never park below this many live cells; terminate instead
+    min_thickness       = 1e-6,    # [m] terminate when the live thickness < this (default)
     radiation_model     = SURFACE_ABSORPTION,
 )
 ```
 
-Defaults and meaning of each depletion-related keyword (verified against
-`solve(...)` in `src/Solver/solve.jl`):
-
 | Keyword | Default | Meaning |
 |---|---|---|
-| `use_ale` | `false` | Enable ALE mesh motion (node positions enter the state vector). Prerequisite for depletion. |
-| `handle_depletion` | `false` | Detect thin cells and merge them mid-solve. |
-| `depletion_threshold` | `0.05` | Cell is "thin" when current thickness `< threshold ×` its own initial thickness (per-cell reference). Must satisfy `0 < threshold < 1`. |
-| `min_cells` | `2` | Once the active cell count reaches this, the run terminates rather than merging further. Must be `≥ 1`. |
-| `min_thickness` | `1e-6` | [m] Total-sample thickness below which the integrator terminates (separate from per-cell merging). Must be `> 0`. |
+| `use_ale` | `false` | Enable ALE mesh motion (node positions enter the state vector). |
+| `handle_depletion` | `false` | Park depleted cells mid-solve. |
+| `depletion_threshold` | `0.05` | ALE: a cell is depleted when its thickness `< threshold ×` its own initial thickness. Fixed mesh: the top live cell is depleted when its condensed concentration `< threshold ×` its initial value. Must satisfy `0 < threshold < 1`. |
 
-Each callback invocation performs **at most one merge** so the integrator can
-re-adapt its step between topology changes; thin cells are processed
-surface-first (highest `z` first). The merge is **energy-conserving** — see
-§10.2.3.
+| `min_cells` | `2` | Once the live cell count reaches this, the run terminates rather than parking further. Must be `≥ 1`. |
+| `min_thickness` | `1e-6` | [m] Live thickness below which an ALE solve terminates. Must be `> 0`. |
+
+Leave `depletion_threshold` at its default unless a case shows otherwise. A
+larger value merges the hottest cell into a colder one earlier and disturbs the
+surface temperature; on a fast ablation front it does not remove the Newton
+failures either (Technical Reference §14.3.2).
+
+Choose the mesh mode by the material, not by cost. A fixed mesh keeps every
+cell's volume, so a gasifying layer thins in *density*, and only the top live
+cell can park. The layer burns top down when the surface cell is the hottest,
+as under surface absorption. Under in-depth absorption the surface cell of a
+regressing polymer is the coldest: it stays in place as a porous skin while the
+cells beneath it empty, and the model carries no heat across the void they
+leave. A fixed-mesh solve therefore stops at the first cell below the surface
+that becomes a void (matrix volume fraction below 10⁻⁴), warns that the
+material has gasified from within, and returns retcode `:Terminated`
+(Technical Reference §14.3.2). A fixed mesh with depletion suits a char that
+keeps its volume and a layer that burns top down; use `use_ale = true` for
+materials that regress.
+
+Each callback invocation parks **at most one cell** so the integrator can
+re-adapt its step between events; candidates are processed surface-first.
+After a park the integrator restarts from a step of `DT_AFTER_PARK`
+(10⁻⁶ s): the merged cell is off the quasi-steady profiles of its neighbours
+and the pre-park step would fail its Newton repeatedly. The step-size
+controller grows the step back within a few steps, so a park costs a handful
+of extra steps and no failures; expect the step history to show a spike to
+10⁻⁶ s at every entry of `sol.extras.park_times`.
 
 ### 10.2.2 What `solve` wires up under the hood
 
-When `use_ale = true && handle_depletion = true`, `solve` assembles a
-`CallbackSet` containing (among others):
+With `handle_depletion = true`, `solve` assembles a `CallbackSet` containing
+(among others):
 
 1. a **step-update callback** that mirrors the integrator's accepted state back
    into the mutable mesh (so subsequent callbacks see current geometry);
-2. a **thickness-termination callback** (§10.3);
-3. a **depletion callback** that finds thin cells, merges one, resizes the
-   workspace caches, and calls `resize!(integrator, …)` to shrink the ODE state.
+2. a **thickness-termination callback** (ALE, §10.3) on the live thickness;
+3. a **depletion callback** that finds the next depleted cell and parks it.
 
-You can build these manually if you are driving the integrator yourself, but for
-ordinary use the `solve` keywords above are all you need. The public constructors
-(all exported by `using Pyrolysis`) are:
+You can build these yourself if you are driving the integrator directly:
 
 ```julia
-# Build depletion callback state (tracks layout + per-cell initial thicknesses + merge log)
-cb_state = DepletionCallbackState(layout, mesh)         # convenience: thicknesses from mesh
-# or  DepletionCallbackState(layout, initial_cell_thickness::Vector{Float64})  # one entry per cell
+using Pyrolysis.Solver: DepletionCallbackState, create_depletion_callback,
+                        create_thickness_termination_callback
 
-# Build the depletion callback itself
-dep_cb = create_depletion_callback(ws, mesh, material, cb_state;
+# Shared bookkeeping: live count, per-slot depletion reference, park log
+cb_state = DepletionCallbackState(layout, mesh, material, u0)
+
+dep_cb  = create_depletion_callback(ws, mesh, material, cb_state;
     threshold = 0.05,   # same meaning as depletion_threshold above
     min_cells = 2)
 
-# Termination when the whole sample gets too thin
-term_cb = create_thickness_termination_callback(cb_state, 1e-6)  # min_thickness [m]
+term_cb = create_thickness_termination_callback(cb_state, 1e-6)  # live thickness [m]
 ```
 
-`create_depletion_callback` accepts either a bare `StateLayout` or a
-`DepletionCallbackState` as its fourth argument; passing the shared
-`DepletionCallbackState` lets the termination callback see the resized layout
-after each merge. The `material` argument is what makes the temperature merge
-energy-conserving (omit it and the merge falls back to a volume-weighted
-average — see §10.2.3).
-
-### 10.2.3 The merge is mass- and energy-conserving
+### 10.2.3 The park conserves mass and energy
 
 Concentrations are merged volume-weighted (exactly mass-conserving):
 
 ```
-ξ_merged[j] = (V_remove · ξ_remove[j] + V_keep · ξ_keep[j]) / (V_remove + V_keep)
+ξ_keep[j] = (V_park · ξ_park[j] + V_keep · ξ_keep[j]) / V_keep′
 ```
+
+with `V_keep′ = V_park + V_keep` under ALE (the keeper spans both cells) and
+`V_keep′ = V_keep` on a fixed mesh (the keeper's volume is fixed, so its
+concentration rises by the parked mass).
 
 Temperature is merged by **conserving the condensed-phase sensible enthalpy**,
 not by naive volume averaging. With `m_j = V · ξ_j` the per-component condensed
 mass of each cell, the merged temperature solves
 
 ```
-Σ_{j ∉ gas} m_j ∫_{T_ref}^{T_merged} c_p,j(T′) dT′  =  H_remove + H_keep
+Σ_{j ∉ gas} m_j ∫_{T_ref}^{T_merged} c_p,j(T′) dT′  =  H_park + H_keep
 ```
 
 (a bracketed Newton solve — the root always lies between the two cell
@@ -6553,64 +6645,44 @@ thermal energy in the condensed matrix only. For constant `c_p` this reduces to
 the familiar `ρc_p`-weighted mean.
 
 This matters precisely in the depletion regime: merging a nearly-depleted
-(low-`ρc_p`) surface cell with a dense interior cell can introduce a 10–20 %
+(low-`ρc_p`) cell with a dense interior cell can introduce a 10–20 %
 temperature error if you average naively (e.g. ~120 K error when merging a 1 m³
 solid at 800 K with a 1 m³ gas-filled cell at 400 K). The dry-solid mass used as
 the pyrolysis-progress denominator (`m_dry_solid_initial`) is summed across the
-merged cells, so progress accounting stays consistent. See Technical Reference
-§14.3 for the derivation and §10 for the χ progress variable.
+merged cells and the merged `χ` is weighted by it, so progress accounting stays
+consistent. See Technical Reference §14.3 for the derivation and §10 for the χ
+progress variable.
 
-The merge prefers the **interior** neighbor (toward the substrate) for thermal
+The park prefers the **interior** neighbour (toward the substrate) for thermal
 stability; this is `find_merge_neighbor` from `Pyrolysis.Adaptivity`, used
 internally by the callback.
 
 ### 10.2.4 Inspecting what happened
 
-After a solve that used depletion handling, query the merge history with the
-exported helper (note the slightly fragile internals — it returns sentinel
-values rather than throwing if it cannot reach the callback state):
+Ghost slots read as `NaN` in `sol.T`, `sol.ξ` and (ALE) `sol.z`;
+`sol.extras.thickness_history` is the live thickness;
+`sol.extras.live_cells[k]` is the number of live cells at output time `k`, and
+`sol.extras.park_times` lists the event times:
 
 ```julia
-stats = get_depletion_callback_stats(dep_cb)
-# NamedTuple:
-#   stats.n_merges     :: Int               number of cell merges performed
-#   stats.merge_times  :: Vector{Float64}   simulation times [s] of each merge
-#   stats.merged_cells :: Vector{Int}       original indices of merged cells
+n_parks = length(sol.extras.park_times)
+sol.extras.live_cells[end]          # live cells at the end of the run
 ```
 
-In ALE mode the solution arrays carry their own evidence of merges: the cell
-count shrinks over time and removed-cell entries are NaN-padded in
-`sol.T`, `sol.ξ`, and `sol.z` (see Chapter 9). `sol.extras.thickness_history`
-records total sample thickness per output time.
+### 10.2.5 Depletion and the Jacobian
 
-### 10.2.5 Critical caveat: depletion is incompatible with a pluggable Jacobian
+Parking keeps the state size, so the pluggable Jacobian backends and their
+sparse linear solvers run unchanged through burnout; `verify_jacobian` covers
+parked states. Under ALE, `handle_depletion = true` makes
+`Structured(strategy = ApproxSolve())` the default backend: the full ALE
+pattern couples every node to every cell below it and makes the factorized
+matrix effectively dense (60–90× the cost per step of the reduced pattern),
+while with every live cell above the threshold the couplings it drops do not
+change the trajectory. Pass `jacobian = Structured(strategy = DirectSolve())`
+to keep the exact assembly.
 
-Depletion resizes the ODE state vector mid-solve via `resize!(integrator, …)`.
-The structured/dense Jacobian backends carry an **immutable cache built once at
-problem setup** that cannot survive a resize. Consequently:
-
-- Passing **both** `jacobian = …` and `handle_depletion = true` to `solve`
-  raises an error at validation time.
-- With `handle_depletion = true` and the default `jacobian = nothing`, `solve`
-  supplies **no** analytic Jacobian: the integrator falls back to its own
-  **colored finite-difference** Jacobian. Because that dense FD Jacobian is
-  incompatible with the sparse default linear solver, `solve` also switches the
-  linear solver to a dense `LUFactorization`.
-
-In short: **you cannot combine depletion handling with `Structured(...)` /
-`DenseAD_ForwardDiff()` backends.** If you need the structured backend (e.g. for
-a large ALE problem), run without depletion and rely on thickness termination
-instead, or accept the FD fallback. See §10.8 and Technical Reference §14.7 and
-§15.13.
-
-> **MKL note.** The dense `LUFactorization` that `solve` selects under depletion
-> is Julia's native LU and survives `resize!`. Do not pass a sparse
-> factorization (`SparspakFactorization()`, KLU) together with depletion — there
-> is no sparse Jacobian prototype in this mode, and `solve` will warn and swap
-> it for dense LU. The MKL `ipiv` resize bug can only bite if you construct your
-> own `integrator` without an explicit `linsolve`; the solver warns if it
-> detects that combination on a large problem. See Chapter 11 and
-> Technical Reference §15.12.
+A park is a discrete rewrite of the state: parameter sensitivities are valid on
+horizons without park events only (Chapter 13).
 
 ---
 
@@ -6627,17 +6699,17 @@ sol = solve(problem; use_ale = true, min_thickness = 1e-5)  # terminate at 10 µ
 @show sol.retcode    # :Terminated  (vs :Success when the full tspan is reached)
 ```
 
-The callback measures `thickness = z[end] - z[1]` from the node-position block of
-the state vector, so it is meaningful only in ALE mode (`use_ale = true`); in
-Eulerian mode the mesh does not move and the callback is not installed. To build
-it directly:
+The callback measures the live thickness `z[n_live+1] - z[1]` from the
+node-position block of the state vector, so it is meaningful only in ALE mode
+(`use_ale = true`); in Eulerian mode the mesh does not move and the callback is
+not installed. To build it directly:
 
 ```julia
 term_cb = create_thickness_termination_callback(layout, Float64(min_thickness))
 ```
 
 Pass a `DepletionCallbackState` instead of a bare `layout` when you also use
-depletion handling, so the callback tracks the resized layout after each merge.
+depletion handling, so the callback reads the live cell count.
 
 ---
 
@@ -6861,9 +6933,8 @@ The full experimental surface (all under `Pyrolysis.Experimental`) includes
 **Caveats — read before using:**
 
 - **Not in the solve loop.** There is no `solve` keyword to enable h-AMR during
-  integration. Calling these between solve segments is the only supported pattern,
-  and even then the state-vector resize logic that depletion handling uses is not
-  shared here.
+  integration. Calling these between solve segments is the only supported
+  pattern.
 - **Bookkeeping is leaky.** h-refinement appends children and h-coarsening marks
   cells inactive *without compacting the arrays*, so `length(mesh.cells) >
   n_active_cells` is normal. Any code consuming the mesh afterward must iterate
@@ -6881,51 +6952,37 @@ The full experimental surface (all under `Pyrolysis.Experimental`) includes
   on realistic pyrolysis fronts.
 
 For production surface-recession work, prefer the depletion path (§10.2), which
-*is* integrated with the solver and uses the energy-conserving adjacent-cell
-merge (`merge_adjacent_cells!`, `merge_surface_cell!`) that lives in core
-`Adaptivity`. See Technical Reference §14.4 for the h-AMR algorithms and §14.3
-for the production merge.
+*is* integrated with the solver and parks depleted cells with the
+energy-conserving merge (`park_cell!`) that lives in core `Adaptivity`. See
+Technical Reference §14.4 for the h-AMR algorithms and §14.3 for the production
+park.
 
 ---
 
 ## 10.8 Choosing the Jacobian when you use adaptivity
 
-The single most common configuration mistake with adaptivity is combining
-depletion handling with an explicit Jacobian backend. The rule:
+Depletion handling keeps the state size, so every Jacobian backend works with
+it. The defaults:
 
-| Scenario | Jacobian to use |
+| Scenario | Default Jacobian |
 |---|---|
-| ALE, **no** depletion handling | Default `jacobian = nothing` ⇒ `Structured(strategy = DirectSolve())`; or opt into `ApproxSolve` for large ALE problems (Chapter 11). |
-| ALE **with** `handle_depletion = true` | **Leave `jacobian = nothing`.** `solve` supplies no analytic Jacobian and the integrator uses colored FD with a dense `LUFactorization`. Do **not** pass a `JacobianSpec` — it errors. |
-| Verifying a backend during an adaptive run | `solve(...; verify_jacobian = (rtol=1e-6, atol=1e-10, sample_times=[…]))` — but only meaningful when a backend is active (i.e. not with depletion). |
+| ALE, `handle_depletion = false` | `Structured(strategy = DirectSolve())` — exact assembly; a cell may shrink without bound here and the exact couplings buy robustness. |
+| ALE, `handle_depletion = true` | `Structured(strategy = ApproxSolve())` — the reduced ALE pattern; with every live cell above the threshold it follows the same trajectory as `DirectSolve` at a fraction of the cost per step. |
+| Fixed mesh | `Structured(strategy = DirectSolve())` (the strategies coincide without ALE couplings). |
+| Verifying a backend during an adaptive run | `solve(...; verify_jacobian = (rtol=1e-6, atol=1e-10, sample_times=[…]))`, with or without depletion. |
 
-Concretely, this is correct:
+Override with a bare backend, built for the solve's own mode:
 
 ```julia
-# Large ALE problem WITHOUT depletion — opt into the cheaper approximate solve
 sol = solve(problem;
     use_ale = true,
-    jacobian = JacobianSpec(Structured(strategy = ApproxSolve()), problem),
-)
-```
-
-and this **errors** at validation:
-
-```julia
-# WRONG: pluggable Jacobian + depletion are mutually exclusive
-solve(problem;
-    use_ale = true,
     handle_depletion = true,
-    jacobian = JacobianSpec(Structured(strategy = DirectSolve()), problem),  # ← rejected
+    jacobian = Structured(strategy = DirectSolve()),   # exact assembly through burnout
 )
 ```
 
-If you need both the analytic structured Jacobian *and* surface recession, the
-practical recourse is to forgo per-cell merging and rely on the
-thickness-termination callback alone (run until the sample is "thin enough,"
-then stop), keeping the state-vector length fixed so the structured backend's
-cache stays valid. See Chapter 11 for the full Jacobian/linear-solver decision
-guide and Technical Reference §15.10–§15.13 for the strategy internals.
+See Chapter 11 for the full Jacobian/linear-solver decision guide and Technical
+Reference §15.6–§15.10 for the strategy internals.
 
 ---
 
@@ -6949,10 +7006,10 @@ guide and Technical Reference §15.10–§15.13 for the strategy internals.
 | `enforce_quality!(; max_iter)` | `Adaptivity` | `10` | 10.6 |
 | h-AMR (`refine_cell!`, `AMRController`, …) | `Experimental` (not re-exported) | — experimental | 10.7 |
 
-**Key correctness reminders.** Depletion handling requires `use_ale = true`; it
-cannot be combined with a pluggable `jacobian` backend (it falls back to colored
-FD with dense LU); the surface merge conserves species mass exactly and condensed-phase sensible
-enthalpy via the `∫c_p dT` temperature merge (gas excluded); r-refinement,
+**Key correctness reminders.** Depletion handling works in both mesh modes
+and with every `jacobian` backend; the park conserves species mass exactly and
+condensed-phase sensible enthalpy via the `∫c_p dT` temperature merge (gas
+excluded); r-refinement,
 quality enforcement, and h-AMR
 are standalone tools not driven by `solve`; and the h-AMR cluster is experimental
 and reached only through `Pyrolysis.Experimental`. For the physics behind these
@@ -6981,18 +7038,17 @@ chapter:
 
 1. **The Jacobian backend** (`jacobian = ...` keyword) decides *how the matrix*
    `J = ∂(du/dt)/∂u` *is assembled* — by structured operator assembly (the
-   default: `solve` auto-builds `Structured(strategy = DirectSolve())` when
-   `jacobian = nothing`), by dense automatic differentiation (verification
-   only), or by letting the integrator build it via colored finite differences
-   (the fallback used when depletion handling disables the pluggable backend).
+   default: `solve` auto-builds `Structured(strategy = DirectSolve())`, or
+   `ApproxSolve` under ALE with depletion handling, when `jacobian = nothing`),
+   or by dense automatic differentiation (verification only).
 2. **The integrator's linear solver** (`linear_solver = ...` keyword) decides
    *how the implicit-stage system* `W x = b`, with `W = I/(γ_RK Δt) − J`, *is
-   solved* once `J` exists — by sparse-direct factorization (Sparspak, KLU,
-   Pardiso) or by a preconditioned Krylov iteration (ILU-GMRES, ILU-BiCGSTAB).
+   solved* once `J` exists — by sparse-direct factorization (KLU, UMFPACK,
+   Sparspak, Pardiso) or by a preconditioned Krylov iteration (ILU-GMRES, ILU-BiCGSTAB).
 
 You can mix and match: a pluggable structured Jacobian with a sparse-direct
 linear solver, an integrator-built finite-difference Jacobian with KLU, and so
-on. The defaults (auto-built structured Jacobian; `SparspakFactorization`) work well for
+on. The defaults (auto-built structured Jacobian; KLU or UMFPACK chosen from its pattern) work well for
 the typical 1D cone-calorimeter problem and you can ignore this chapter until a
 solve is too slow or you need sensitivities.
 
@@ -7003,40 +7059,41 @@ solve is too slow or you need sensitivities.
 When you call `solve(problem)` with no Jacobian or linear-solver keywords, the
 following happens (see `src/Solver/solve.jl`):
 
-- The integrator defaults to `KenCarp4(autodiff = AutoFiniteDiff(),
-  linsolve = SparspakFactorization())`. `KenCarp4` is an SDIRK (singly
+- The integrator defaults to `KenCarp4(autodiff = AutoFiniteDiff())` with the
+  default linear solver below. `KenCarp4` is an SDIRK (singly
   diagonally implicit Runge–Kutta) method well suited to the moderate stiffness
-  of Arrhenius pyrolysis. The `AutoFiniteDiff()` setting only matters on the
-  rare paths where no pluggable Jacobian is active (depletion handling): there
-  it makes the integrator finite-difference the residual itself.
+  of Arrhenius pyrolysis. `solve` always supplies the Jacobian, so the
+  `AutoFiniteDiff()` setting never builds `J`; it only affects methods that also
+  differentiate the residual in time (the Rosenbrock `∂f/∂t`).
 - The Jacobian defaults to the **structured analytical backend**: with
   `jacobian = nothing` (the default), `solve` constructs
   `Structured(strategy = DirectSolve())` internally — for both Eulerian and
   ALE problems — and hands the integrator an exact sparse Jacobian plus its
-  sparsity prototype. The single exception is `handle_depletion = true`, which
-  disables the pluggable backend (the spec cannot survive a mid-solve state
-  resize) and falls back to the integrator's colored finite differences.
-- The linear solver defaults to `SparspakFactorization()`, a sparse-direct LU
-  that is typically faster than KLU for the block-tridiagonal sparsity pattern
-  of a 1D problem.
+  sparsity prototype. Under ALE with `handle_depletion = true` the default is
+  `Structured(strategy = ApproxSolve())` (§10.8).
+- The linear solver follows the Jacobian's sparsity pattern:
+  `UMFPACKFactorization()` for the ALE geometry block that `DirectSolve`
+  materializes under ALE, `KLUFactorization()` for every other sparse
+  Jacobian (§11.4.1).
 
 In short: by default, **Layer 1 is the structured analytical Jacobian**
 (`Structured(strategy = DirectSolve())`, built for you) and **Layer 2 is
-Sparspak**. The `jacobian` keyword is for *overriding* the strategy
+KLU or UMFPACK**, chosen from that Jacobian's pattern. The `jacobian` keyword is for *overriding* the strategy
 (`ApproxSolve`, `StructuredSolve`, `MatrixFreeSolve`) or supplying a custom
 spec — not for switching the structured machinery on.
 
 ```julia
 using Pyrolysis
 
-# The default solve: auto-built structured Jacobian + Sparspak linear solve.
+# The default solve: auto-built structured Jacobian + KLU/UMFPACK linear solve.
 sol = solve(problem)
 ```
 
 > Defaults at a glance: `integrator = nothing` → `KenCarp4`,
-> `linear_solver = nothing` → `SparspakFactorization()`,
+> `linear_solver = nothing` → `KLUFactorization()` (`UMFPACKFactorization()`
+> for the exact ALE Jacobian),
 > `jacobian = nothing` → auto-built `Structured(strategy = DirectSolve())`
-> (colored-FD fallback only under `handle_depletion = true`),
+> (`ApproxSolve` under ALE with `handle_depletion = true`),
 > `abstol = 1e-8`, `reltol = 1e-6`.
 
 ---
@@ -7104,22 +7161,26 @@ non-local sparsity. Similarly, pass `energy_form = :with_generation_sink` if you
 solve with that energy form. For most users the simplest correct approach is to
 let `solve` build the spec for you — see §11.2.3.
 
-### 11.2.2 When *not* to supply a Jacobian
+### 11.2.2 Building the spec for the right mode
 
-A pluggable `JacobianSpec` is **incompatible with surface-depletion handling**.
-Depletion (`handle_depletion = true`) resizes the state vector mid-solve via
-`resize!(integrator, ...)`, but the spec's cache is built once at setup time and
-cannot survive a resize. `solve` rejects the combination at validation:
+A `JacobianSpec` is built for one state layout. `JacobianSpec(backend,
+problem)` defaults to the Eulerian layout with no radiation; an ALE solve or a
+Beer–Lambert solve needs the same `use_ale` / `radiation_model` keywords the
+solve uses, and `solve` refuses a spec whose state length disagrees with the
+problem's:
 
 ```julia
-# ERROR: handle_depletion + a pluggable jacobian is not allowed.
-solve(problem; jacobian = spec, handle_depletion = true, use_ale = true)
+spec = JacobianSpec(Structured(strategy = ApproxSolve()), problem;
+                    use_ale = true, radiation_model = BEER_LAMBERT)
+solve(problem; use_ale = true, radiation_model = BEER_LAMBERT, jacobian = spec)
 ```
 
-When you need depletion, leave `jacobian = nothing`; the integrator falls back
-to its own colored finite-difference Jacobian, which tolerates the resize. This
-is the only supported configuration for depletion-tracking solves (see Chapter
-10 and Technical Reference §14.7).
+The simpler form is to pass the bare backend and let `solve` build the spec
+for its own mode:
+
+```julia
+solve(problem; use_ale = true, jacobian = Structured(strategy = ApproxSolve()))
+```
 
 ### 11.2.3 Letting `solve` pick the backend
 
@@ -7237,19 +7298,28 @@ sparse-direct factorizations and ILU-preconditioned Krylov iterations.
 
 ### 11.4.1 Sparse-direct factorizations
 
-The default is `SparspakFactorization()` (about 28% faster than KLU for the
-block-tridiagonal 1D pattern). `KLUFactorization()` is a slightly more
-general-purpose alternative with the same interface. You can pass either by
-pairing it with a *constructor* integrator:
+With `linear_solver = nothing` the factorization follows the Jacobian's
+sparsity pattern:
+
+| Jacobian | Default factorization |
+|---|---|
+| `DirectSolve` under ALE (the exact ALE Jacobian, with its dense geometry block) | `UMFPACKFactorization()` |
+| Every other `Structured` Jacobian: `ApproxSolve` (the ALE default with `handle_depletion = true`) and `DirectSolve` on an Eulerian mesh | `KLUFactorization()` |
+| A dense backend (`DenseAD_ForwardDiff`) | `LUFactorization()` |
+
+On 100-cell PMMA and charring-wood cone decks and on the V-BO-01 burnout case,
+KLU runs 2.6–4.4× faster end to end than Sparspak on the local patterns, with
+step counts equal to within 1%, and UMFPACK runs the exact ALE Jacobian
+1.5–1.9× faster than Sparspak (Technical Reference §15.5.1). The Eulerian
+`BEER_LAMBERT` pattern of `DirectSolve` stays on KLU: it is the fastest there,
+and UMFPACK's threshold pivoting returned inaccurate solves on it. Every
+backend stays selectable by pairing it with a *constructor* integrator:
 
 ```julia
-using LinearSolve: KLUFactorization, SparspakFactorization
+using LinearSolve: KLUFactorization, UMFPACKFactorization, SparspakFactorization
 
-# Default (no need to write this explicitly):
-sol = solve(problem; linear_solver = SparspakFactorization())
-
-# Switch to KLU:
-sol = solve(problem; linear_solver = KLUFactorization())
+sol = solve(problem; linear_solver = UMFPACKFactorization())
+sol = solve(problem; linear_solver = SparspakFactorization())   # pure-Julia sparse LU
 ```
 
 > Pairing rule: `linear_solver` is combined with `integrator` only when
@@ -7260,14 +7330,13 @@ sol = solve(problem; linear_solver = KLUFactorization())
 > Passing both a fully constructed `integrator` and a separate `linear_solver`
 > raises an error.
 
-A note on the no-Jacobian path: with `handle_depletion = true` (or a dense
-backend such as `DenseAD_ForwardDiff`), there is no sparse `jac_prototype`,
-so the sparse `Sparspak`/`KLU` factorizations cannot run. `solve` then
-defaults the linear solver to a dense `LUFactorization()` — and if you
-explicitly request a sparse factorization it warns and rebuilds your
-algorithm with `LUFactorization` instead. On the ordinary default path
-(auto-built structured Jacobian) the sparse prototype is present and
-Sparspak applies.
+A note on dense Jacobian backends: `DenseAD_ForwardDiff` has no sparse
+`jac_prototype`, so no sparse factorization can run. `solve` then defaults
+the linear solver to a dense `LUFactorization()` — and if you explicitly
+request a sparse factorization it warns and rebuilds your algorithm with
+`LUFactorization` instead. Every `Structured` Jacobian, including the
+`ApproxSolve` default under depletion handling, carries the sparse
+prototype.
 
 ### 11.4.2 ILU-preconditioned GMRES
 
@@ -7301,7 +7370,7 @@ tolerance, written `τ_ILU` in the nomenclature):
 Caveat: inexact linear solves can increase Newton rejections on Arrhenius
 transients, which sometimes *raises* total wall time despite cheaper individual
 solves. Always benchmark an ILU-GMRES configuration end-to-end against the
-default `SparspakFactorization()` before adopting it for a production study.
+default direct factorization before adopting it for a production study.
 
 ### 11.4.3 ILU-preconditioned BiCGSTAB
 
@@ -7323,29 +7392,14 @@ sol = solve(problem; integrator = alg,
 | `τ` | `0.1` | ILU drop tolerance. |
 | `rtol` | `1e-8` | BiCGSTAB relative convergence tolerance. |
 
-### 11.4.4 The MKL `ipiv` caveat and depletion
+### 11.4.4 Linear solver and depletion
 
-When surface depletion resizes the state vector mid-solve, the integrator must
-also resize its linear-solver workspace. The MKL-backed pivot array (`ipiv`)
-used by some factorizations does not resize cleanly across a state-vector
-length change. Depletion forces `jacobian = nothing` (§11.2.2), so there is no
-sparse Jacobian prototype and the sparse factorizations cannot run on this
-path: `solve` defaults the linear solver to Julia's native, resize-safe
-`LUFactorization()` and rebuilds an explicitly requested
-`SparspakFactorization`/`KLUFactorization` to `LUFactorization`, with a
-warning. A robust depletion configuration is therefore simply:
-
-```julia
-# Depletion-safe: no pluggable Jacobian; solve picks the resize-safe dense LU.
-sol = solve(problem;
-    use_ale             = true,
-    handle_depletion    = true,
-    depletion_threshold = 0.05)
-```
-
-The MKL pitfall survives only when you pass a fully constructed integrator
-whose `linsolve` is unset (LinearSolve's auto-selection may then pick MKL LU);
-`solve` warns when it detects that combination on a large depleting state.
+Depletion handling keeps the state size, so the sparse factorization keeps
+its pattern through every park event and nothing about the linear solver
+changes with `handle_depletion`. The dense LU is used only with the dense
+`DenseAD_ForwardDiff` backend, which attaches no sparse prototype; an explicitly
+requested sparse factorization is then rebuilt to `LUFactorization` inside the
+user's algorithm, with a warning.
 
 ---
 
@@ -7752,7 +7806,7 @@ sol = solve(problem;
     jacobian   = JacobianSpec(Structured(strategy = DirectSolve()), problem; use_ale = true),
     use_ale    = true)
 
-# (f) Depletion tracking — no pluggable Jacobian; solve picks the resize-safe dense LU.
+# (f) Depletion under ALE — the default Jacobian is Structured(strategy = ApproxSolve()).
 sol = solve(problem;
     use_ale          = true,
     handle_depletion = true)
@@ -8470,11 +8524,7 @@ In variable-cross-section/ALE runs use `sol.extras.MLR_gauge` rather than
 `sol.mass_loss_rate` when comparing across grid points: `mass_loss_rate` is per
 *current* area `A(t)`, whereas `MLR_gauge = MLR_local · A(t)/A_0` is normalized to
 the initial gauge area `A_0`, which is the apples-to-apples quantity for cone
-comparisons (see Chapter 8 and Technical Reference §10). Note also that when
-`handle_depletion = true`, the solver falls back to a finite-difference Jacobian
-(a pluggable `jacobian` backend is incompatible with mid-solve state-vector
-resizing); this is automatic and needs no action in the sweep, but it is why
-ALE-with-depletion points are slower per solve (see Chapter 11).
+comparisons (see Chapter 8 and Technical Reference §10).
 
 ---
 
@@ -9069,20 +9119,10 @@ Reference §17.6), but several configurations can still spoil a gradient:
   the sensitivity. Use smooth shrink/swell laws when you intend to differentiate
   through them.
 
-- **Surface-depletion callback discontinuities.** Cell merging
-  (`handle_depletion = true`, requires `use_ale = true`) resizes the state vector
-  mid-solve at a discrete event — a genuine discontinuity in the trajectory and
-  its length. Differentiating across a merge is not meaningful, and the output
-  dimension can change between `θ` probes. **Disable depletion for sensitivity
-  studies** (`handle_depletion = false`, the default); if you need long ALE runs,
-  stop before the first merge or use a thickness-termination criterion instead.
-
-- **Depletion + pluggable Jacobian are mutually exclusive.** `solve` rejects
-  `handle_depletion = true` together with an explicit `jacobian = ...`
-  (state-vector resizing is incompatible with a fixed pluggable backend); when
-  depletion is enabled it falls back to the integrator's colored finite-difference
-  Jacobian. This is a further reason to keep depletion off in sensitivity work,
-  where you want the default `Structured` backend and a smooth path.
+- **Park events are discrete.** With `handle_depletion = true` a park rewrites
+  the state in place; the trajectory is smooth in the parameters between events
+  and jumps across one. Keep depletion off in sensitivity work, or restrict the
+  horizon to one without park events.
 
 - **Transpiration BC is forbidden with the default convention.** Leave
   `use_transpiration_bc = false` (the default). The volumetric advection source
@@ -9365,11 +9405,9 @@ from `src/Solver/solve.jl`):
   depth you would pass `radiation_model = BEER_LAMBERT` (PMMA is
   semi-transparent; the `α = 1.47` values then matter). The surface-absorption
   variant (§14.1.1) passes `SURFACE_ABSORPTION`.
-- **`handle_depletion = true`** turns on the surface-cell merge callback. It
-  requires `use_ale = true`. Because it resizes the state vector mid-solve, it is
-  **incompatible with a pluggable `jacobian` backend** (the solver errors if you
-  pass both) and falls back to the integrator's colored finite-difference
-  Jacobian (Technical Reference §14, §15).
+- **`handle_depletion = true`** turns on cell parking (Chapter 10). Under ALE
+  it selects `Structured(strategy = ApproxSolve())` as the default Jacobian
+  (Technical Reference §14.3, §15.6).
 - **`use_transpiration_bc`** is left at its default `false`. Enabling it is
   rejected: the default `:standard` energy form already carries gas enthalpy via
   the `S_conv` advection term, so a surface-transpiration term would
@@ -10222,10 +10260,6 @@ Reading the examples together, a few idioms recur and are worth internalizing:
 - **Surface transpiration BC is off by default and incompatible with the default
   `:standard` energy form** — enabling `use_transpiration_bc` is rejected because
   `S_conv` already carries gas enthalpy (double counting). Technical Reference §7.
-- **Depletion handling and a pluggable Jacobian are mutually exclusive.**
-  `handle_depletion = true` resizes the state vector mid-solve, so the solver
-  errors if you also pass a `jacobian = JacobianSpec(...)`, and it falls back to
-  the integrator's colored finite-difference Jacobian. Technical Reference §14–§15.
 - **Several cone examples carry parameter sets calibrated under a
   transpiration-plus-`S_conv` convention** and may need re-calibration under the
   `S_conv`-only energy balance; treat their bundled experimental/ThermaKin
@@ -10278,7 +10312,7 @@ The common values and what they mean:
 | `retcode` | Meaning | Typical cause |
 |---|---|---|
 | `:Success` | Reached `tspan[2]` | — |
-| `:Terminated` | A callback stopped the run | Sample fully depleted (ALE thickness termination) or a user callback called `terminate!` |
+| `:Terminated` | A callback stopped the run | Sample fully depleted (ALE thickness termination), an interior void on a fixed mesh (depletion handling), or a user callback called `terminate!` |
 | `:MaxIters` | Hit `maxiters` before `t_end` | Stiff transient; step size collapsed; under-resolved front |
 | `:DtLessThanMin` | Step fell below `dtmin` | Discontinuity, NaN in the RHS, or genuine stiffness wall |
 | `:Unstable` / `:DtNaN` | NaN/Inf in the state | Unphysical state (negative concentration, `ρc_p → 0`), bad property table extrapolation |
@@ -10286,6 +10320,9 @@ The common values and what they mean:
 A `:Terminated` run is *not* an error in ALE mode — it usually means the sample
 burned away. Check `solution.extras.thickness_history[end]` against
 `min_thickness` (default `1e-6` m).
+On a fixed mesh with `handle_depletion = true`, a `:Terminated` run with the
+warning "…the material has gasified from within…" stopped at the first
+interior void (§15.4).
 
 ### 15.1.2 Turn on the conservation ledgers
 
@@ -10345,14 +10382,13 @@ transient; conduction adds a parabolic time scale. If a solve is slow, hits
 ### 15.2.1 Confirm the default integrator is appropriate
 
 The default integrator is `KenCarp4` (an SDIRK method) with a sparse direct
-linear solve; its `autodiff = AutoFiniteDiff()` setting only takes effect on
-the no-Jacobian (depletion) path, since `solve` normally supplies the
-structured analytical Jacobian (§15.2.3). When both `integrator` and
-`linear_solver` are left at `nothing`, `solve` builds:
+linear solve; `solve` always supplies the structured analytical Jacobian
+(§15.2.3), so the `autodiff = AutoFiniteDiff()` setting never builds `J`. When
+both `integrator` and `linear_solver` are left at `nothing`, `solve` builds:
 
 ```julia
-# Internal default:
-# KenCarp4(autodiff = AutoFiniteDiff(), linsolve = SparspakFactorization())
+# Internal default (UMFPACKFactorization() for the exact ALE Jacobian, §8.4):
+# KenCarp4(autodiff = AutoFiniteDiff(), linsolve = KLUFactorization())
 ```
 
 `KenCarp4` is a good default for moderately stiff pyrolysis. For *very* stiff
@@ -10370,7 +10406,7 @@ solution = solve(problem; integrator = FBDF)
 # (b) pass a constructor and a linear solver together:
 solution = solve(problem;
     integrator    = FBDF,
-    linear_solver = SparspakFactorization(),   # re-exported by Pyrolysis.Solver
+    linear_solver = SparspakFactorization(),   # using LinearSolve: SparspakFactorization
 )
 
 # (c) pass a fully-constructed algorithm — then DO NOT also pass linear_solver:
@@ -10405,13 +10441,12 @@ iteration cap.
 
 ### 15.2.3 Use the structured Jacobian (it is already the default)
 
-When `jacobian = nothing` (the default) and `handle_depletion = false`, `solve`
-builds a `Structured(strategy = DirectSolve())` analytical Jacobian and hands a
-sparse prototype to the integrator. This is much faster than the integrator's
-own colored finite-difference Jacobian because it is exact and sparsity-aware
-(see Technical Reference §15). You normally do not need to touch it. The cases
-where you *do* are covered in §15.3 (verification), §15.4 (depletion), and
-§15.7 (large ALE).
+When `jacobian = nothing` (the default), `solve` builds a
+`Structured(strategy = DirectSolve())` analytical Jacobian — or
+`Structured(strategy = ApproxSolve())` under ALE with `handle_depletion = true` —
+and hands a sparse prototype to the integrator (see Technical Reference §15).
+You normally do not need to touch it. The cases where you *do* are covered in
+§15.3 (verification), §15.4 (depletion), and §15.7 (large ALE).
 
 ### 15.2.4 Reduce mesh size or use warm starts
 
@@ -10511,76 +10546,65 @@ against the dense reference in the test suite (Technical Reference §15.13,
 
 ---
 
-## 15.4 Depletion and the pluggable-Jacobian incompatibility
+## 15.4 Depletion runs
 
-Surface-cell depletion (`handle_depletion = true`, ALE only) resizes the state
-vector mid-solve via `resize!(integrator, new_length)` when a surface cell
-thins below `depletion_threshold` of its initial thickness (default 5 %) and
-merges it into its interior neighbour (see Technical Reference §14.3).
-
-The pluggable `JacobianSpec` cache is **immutable** and built once at setup, so
-it cannot survive a resize. The two are therefore mutually exclusive:
-
-```julia
-# ERROR: solve() rejects this combination up front.
-solve(problem;
-    use_ale          = true,
-    handle_depletion = true,
-    jacobian         = JacobianSpec(Structured(strategy = DirectSolve()), problem),
-)
-# → "the `jacobian` kwarg is incompatible with `handle_depletion = true`"
-```
-
-The supported way to run depletion is to **let `solve` pick the Jacobian**: when
-`handle_depletion = true`, the auto-default returns `nothing` and the integrator
-falls back to its own colored finite-difference Jacobian, which *does* survive a
-`resize!`:
+Depletion handling (`handle_depletion = true`) parks a cell when it thins below
+`depletion_threshold` of its initial thickness (ALE) or when the top live cell's
+condensed concentration falls below that fraction of its initial value (fixed
+mesh); the cell is merged into its neighbour and its state slot moved above the
+live surface (Technical Reference §14.3). The state keeps its size, so the
+structured Jacobian and the sparse direct solver run unchanged through burnout.
 
 ```julia
 solution = solve(problem;
     use_ale             = true,
     handle_depletion    = true,
-    depletion_threshold = 0.05,   # merge below 5% of initial thickness
-    min_cells           = 2,      # stop merging at 2 cells
-    min_thickness       = 1e-6,   # terminate when total thickness < this
+    depletion_threshold = 0.05,   # park below 5% of initial thickness
+    min_cells           = 2,      # stop parking at 2 live cells
+    min_thickness       = 1e-6,   # terminate when the live thickness < this
     progress            = false,
 )
 ```
 
-The merge is energy-conserving (it does not blow up when a near-empty cell with
-`ρc_p → 0` is absorbed; Technical Reference §14.3). Consequence: with depletion
-you give up the fast structured Jacobian. If a depletion run is slow, see
-§15.4.1 and the linear-solver choice in §15.11.
+A fixed-mesh depletion run that stops early with the "gasified from within"
+warning is not a solver failure: a cell below the surface emptied first, and a
+fixed mesh parks only its top live cell. Use `use_ale = true` for a material
+that regresses (§10.2.1).
 
-### 15.4.1 The MKL `ipiv` resize bug
+If a depletion run is slow or stalls:
 
-With `handle_depletion = true` and a large state vector (> ~500 elements),
-passing a fully built integrator whose `linsolve` is left unset lets
-LinearSolve.jl's auto-selection pick an MKL LU factorization whose pivot array
-(`ipiv`) is not resized correctly on `resize!`, producing a
-`DimensionMismatch: ipiv has length X, but needs to be Y`. `solve` warns when
-it detects this risky combination.
+- **Check the property laws first.** Sample `k(T)`, `c(T)` of every component on
+  [200, 3000] K. The component constructors reject a law that turns
+  non-positive on that bracket, but a law passed with `validate_properties =
+  false` or a very small positive conductivity at high temperature can still
+  turn a cell into an insulator that heats its neighbours to thousands of
+  kelvin.
+- **Δt collapsing while every live cell is above the threshold** points at a
+  stiff transient in the physics, not at depletion. Look at the surface-Newton
+  warnings and at `solution.extras.radiation_transmitted` (a transparent
+  substrate under Beer–Lambert radiation loses the incident flux through the
+  back face).
+- **Newton failures right after a park** (visible in the integrator stats).
+  The depletion callback restarts the integrator from `DT_AFTER_PARK`
+  (10⁻⁶ s), from which the Newton converges on the post-park transient. A run
+  that still fails several times at every park has a kernel coupling a live
+  cell to a ghost; the equivalence tests
+  `test/residual/test_park_equivalence.jl` and
+  `test/jacobian/test_park_jacobian.jl` pin every kernel and operator against a
+  compacted problem.
+- **Newton failures every few steps on a moving front, away from any park.**
+  Look for the `solve` warning about a zero gas-transfer coefficient first: a
+  condensed component with `λ = 0` stops gas transport in gas-free cells and
+  leaves a front the Newton cannot converge on (§3.2.1; Technical Reference
+  §5.6). The remaining failures come from the step controller regrowing the
+  step beyond the Newton's range after each failure, which the Newton-failure
+  step cap of `solve` holds back (§8.3).
 
-The fix is to let `solve` resolve the linear solver: on the depletion path it
-defaults to Julia's native `LUFactorization()`, which handles `resize!`
-correctly (a sparse factorization cannot run here anyway — there is no sparse
-Jacobian prototype — so an explicit `SparspakFactorization`/`KLUFactorization`
-is rebuilt to `LUFactorization` with a warning):
-
-```julia
-solution = solve(problem;
-    use_ale          = true,
-    handle_depletion = true,
-    progress         = false,
-)
-```
-
-For the optional `KLU`, `Pardiso`, and AMG extensions and how to load them, see
-UG-11. The `klu_factorization`, `pardiso_factorization`, and `amg_preconditioner`
-stubs error with a `MethodError` until you `import` the matching package — that
-error *is* the prompt to load the dependency.
-
----
+Under ALE the default Jacobian for depletion runs is
+`Structured(strategy = ApproxSolve())`. It follows the same trajectory as
+`jacobian = Structured(strategy = DirectSolve())` at a fraction of the cost,
+including on fast ablation fronts, so switching Jacobians is not a remedy for
+Newton failures.
 
 ## 15.5 Negative or unphysical states
 
@@ -10660,7 +10684,7 @@ This audits assembly and should close to integrator tolerance. If it does not:
 - **A callback is mutating state outside the residual.** The mesh is read-only
   during assembly and is synced only by the step-update callback; a custom
   callback that edits `u` or geometry without informing the integrator
-  (`u_modified!`) will break the ledger.
+  (`derivative_discontinuity!(integrator, true)`) will break the ledger.
 - **AMR / depletion masking.** All domain-total sums (`compute_domain_mass`,
   `compute_sensible_energy`) iterate the **active-cell mask**, not
   `eachindex`. If you wrote custom post-processing that loops over all cells
@@ -11006,16 +11030,17 @@ Work top to bottom; each item is cheap to try and the early ones dominate.
    surface with `create_stretched_mesh` (§15.5.4) rather than refining
    uniformly.
 2. **Keep the default structured Jacobian.** `jacobian = nothing` →
-   `Structured(DirectSolve())`, exact and sparse — far faster than colored FD.
-   Only depletion forces the FD fallback (§15.4).
-3. **Pick the right linear solver.** `SparspakFactorization` (the default) is
-   ~28 % faster than KLU for the block-tridiagonal pattern. For large ALE, try
-   `Structured(StructuredSolve())`, then `ApproxSolve()` (§15.7.4). Iterative
+   `Structured(DirectSolve())` (`ApproxSolve()` under ALE with depletion
+   handling), sparse and analytical — far faster than colored FD.
+3. **Keep the default linear solver.** `linear_solver = nothing` picks UMFPACK
+   for the exact ALE Jacobian and KLU for every other sparse Jacobian (§8.4).
+   For large ALE, try `ApproxSolve()` (§15.7.4), which drops the dense
+   geometry block and keeps the pattern local. Iterative
    `ILUGMRESFactorization(τ = 0.1, gmres_rtol = 1e-8, restart = 30)` and
    `ILUBiCGSTABFactorization(τ = 0.1, rtol = 1e-8)` exist for very large
-   systems, but inexact solves cause Newton-step rejections on stiff transients
-   — `solve` warns that Sparspak is usually 1.7–3.3× faster in practice. Treat
-   ILU as a last resort for problems where direct factorization truly dominates.
+   systems, but inexact solves can cause Newton-step rejections on stiff
+   transients, and `solve` warns when you select ILU-GMRES. Treat ILU as a last
+   resort for problems where direct factorization truly dominates.
 4. **Loosen tolerances for exploration.** `abstol`/`reltol` are the most direct
    speed knob; tighten only for validation (§15.2.2).
 5. **Choose the integrator.** `KenCarp4` is the default; a BDF (`FBDF`) can take
@@ -11184,7 +11209,8 @@ GaseousComponent(name::Symbol; M, c, k, λ, ε = 0.0, α = 0.0, γ = 0.0)
 | `k` | thermal conductivity `k_j` | W·m⁻¹·K⁻¹ | required |
 | `λ` | gas-transfer (diffusion) coefficient `λ_j` | m²·s⁻¹ | `0.0` (solid), `2e-5` (liquid), required (gas) |
 | `κ` | permeability `κ_j` (solid/liquid only) | m² | `0.0` |
-| `ε` | emissivity `ε_j` | – | `0.9` (solid), `0.95` (liquid), `0.0` (gas) |
+| `ε` | emissivity `ε_j(T)` (number or property function) | – | `0.9` (solid), `0.95` (liquid), `0.0` (gas) |
+| `absorptivity` | surface absorptivity `a_j` for incident radiation (solid/liquid only; `nothing` = Kirchhoff `ε_j(T)`) | – | `nothing` |
 | `α` | mass absorption coefficient `α_j` | m²·kg⁻¹ | `0.0` |
 | `γ` | swelling factor `γ_j` | – | `1.0` (solid), `0.0` (liquid/gas) |
 | `ρ_intrinsic` | skeletal/intrinsic density `ρ_{i,j}` (porosity formula only) | kg·m⁻³ | `= ρ` |
@@ -11767,7 +11793,7 @@ solve(problem::PyrolysisProblem; kwargs...) -> PyrolysisSolution
 | Keyword | Type | Default | Purpose |
 |---|---|---|---|
 | `integrator` | type / instance / `nothing` | `nothing` → `KenCarp4(…)` | ODE algorithm (constructor or fully-built instance) |
-| `linear_solver` | factorization / `nothing` | `nothing` → `SparspakFactorization()` | sparse/dense linear solver (only paired with a *constructor* `integrator`) |
+| `linear_solver` | factorization / `nothing` | `nothing` → `KLUFactorization()`, or `UMFPACKFactorization()` for the exact ALE Jacobian | sparse/dense linear solver (only paired with a *constructor* `integrator`) |
 | `jacobian` | `JacobianSpec` / `nothing` | `nothing` → `Structured(strategy = DirectSolve())` | pluggable Jacobian backend |
 | `verify_jacobian` | `NamedTuple` / `nothing` | `nothing` | `(rtol=…, atol=…, sample_times=[…])` to compare backend vs. `DenseAD_ForwardDiff` |
 | `abstol` | `Real` | `1e-8` | absolute ODE tolerance |
@@ -11781,10 +11807,10 @@ solve(problem::PyrolysisProblem; kwargs...) -> PyrolysisSolution
 | `progress` | `Bool` | `true` | progress bar |
 | `validate` | `Bool` | `true` | run `validate_problem` first |
 | `use_ale` | `Bool` | `false` | enable ALE moving mesh |
-| `min_thickness` | `Real` | `1e-6` | ALE termination thickness [m] |
-| `handle_depletion` | `Bool` | `false` | merge depleted surface cells (requires `use_ale = true`) |
-| `depletion_threshold` | `Real` | `0.05` | cell-thickness fraction below which a cell merges |
-| `min_cells` | `Int` | `2` | minimum cell count before terminating instead of merging |
+| `min_thickness` | `Real` | `1e-6` | ALE termination on the live thickness [m] |
+| `handle_depletion` | `Bool` | `false` | park depleted cells (ALE: thin cells; fixed mesh: the emptied top cell, and stop at the first interior void) |
+| `depletion_threshold` | `Real` | `0.05` | fraction of the initial thickness (ALE) or initial condensed concentration (fixed mesh) below which a cell parks |
+| `min_cells` | `Int` | `2` | minimum live cell count before terminating instead of parking |
 | `radiation_model` | `RadiationModel` | `NO_RADIATION` | `NO_RADIATION` / `SURFACE_ABSORPTION` / `BEER_LAMBERT` |
 | `diagnostics` | `Bool` | `false` | enable conservation-diagnostics snapshots |
 | `diagnostics_stride` | `Int` | `10` | snapshot every N steps |
@@ -11795,20 +11821,22 @@ solve(problem::PyrolysisProblem; kwargs...) -> PyrolysisSolution
 Key behaviours and constraints:
 
 - **Default integrator / linear solver**: `KenCarp4(autodiff = AutoFiniteDiff(),
-  linsolve = SparspakFactorization())`. KenCarp4 is an SDIRK method suited to the
+  linsolve = KLUFactorization())`, with `UMFPACKFactorization()` for the
+  exact ALE Jacobian (`DirectSolve` under ALE). KenCarp4 is an SDIRK method
+  suited to the
   moderately stiff Arrhenius system. Pass a constructor (e.g. `integrator = KenCarp4`)
   to combine with `linear_solver`, or a fully-built instance
   (e.g. `integrator = KenCarp4(linsolve = ILUGMRESFactorization())`) on its own.
-- **Default Jacobian**: `Structured(strategy = DirectSolve())`. Pass a
-  `JacobianSpec` to opt into other strategies (§16.8).
+- **Default Jacobian**: `Structured(strategy = DirectSolve())`, or
+  `Structured(strategy = ApproxSolve())` under ALE with `handle_depletion = true`.
+  Pass a bare backend or a `JacobianSpec` to opt into other strategies (§16.8).
 - **`radiation_model = P1_QUASI_STEADY`** is rejected (P1 is experimental).
 - **`energy_form`** must be `:standard` (Formulation A, the FDS/Gpyro/ThermaKin
   convention) or `:with_generation_sink` (adds the `−Σ Δh_g ∇·J_g` cell source).
-- **`handle_depletion = true` is incompatible with a pluggable `jacobian`**: the
-  state vector resizes mid-solve, which a pre-built `JacobianSpec` cannot survive.
-  `solve` errors if both are set; with depletion alone it falls back to the
-  integrator's colored finite-difference Jacobian and switches the linear solver
-  to a dense LU.
+- **`handle_depletion = true`** keeps the state size (parked cells become
+  inert ghost slots), so it combines with any `jacobian`; ghost slots read as
+  `NaN` in the solution arrays and `solution.extras.live_cells` /
+  `park_times` record the events.
 - **MLR gauge note**: in variable-cross-section runs, `sol.mass_loss_rate` is per
   current area and `sol.extras.MLR_gauge` is normalized to `A_0`.
 
@@ -11917,13 +11945,6 @@ sol = solve(problem; integrator = KenCarp4(linsolve = Pyrolysis.klu_factorizatio
 `Pyrolysis.amg_preconditioner(A)` (`using AlgebraicMultigrid`) work the same
 way. Calling a stub without its extension loaded raises an error naming the
 package to add.
-
-> **MKL ipiv caveat.** When `handle_depletion = true` resizes the state vector,
-> avoid factorizations with fixed pivot buffers (MKL Pardiso). With depletion
-> the solver already uses a dense, resize-safe `LUFactorization()` and a
-> finite-difference Jacobian (explicit sparse choices are rebuilt to dense LU
-> with a warning), so this is only a concern if you pass a fully built
-> integrator with a non-default `linsolve`.
 
 ---
 
@@ -12036,21 +12057,21 @@ h-refinement/coarsening and the `AMRController` are in `Pyrolysis.Experimental`.
 
 ### 16.11.1 Surface-depletion via `solve`
 
-The simplest path is the `solve` keywords (§16.7): `handle_depletion = true`
-(needs `use_ale = true`), `depletion_threshold` (default `0.05`), `min_cells`
-(default `2`). Remember this falls back to a finite-difference Jacobian.
+The simplest path is the `solve` keywords (§16.7): `handle_depletion = true`,
+`depletion_threshold` (default `0.05`), `min_cells` (default `2`), in either
+mesh mode.
 
 ### 16.11.2 Callbacks (not top-level; use `Internal`/`Solver`)
 
 ```julia
 using Pyrolysis.Solver: create_depletion_callback, create_thickness_termination_callback,
-                        create_step_update_callback, DepletionCallbackState,
-                        get_depletion_callback_stats
+                        create_step_update_callback, DepletionCallbackState, n_live_cells
 
+DepletionCallbackState(layout, mesh, material, u0)      # live count, per-slot reference, park log
 create_thickness_termination_callback(sv_ref, min_thickness::Float64)
-create_depletion_callback(ws, mesh, material, sv_or_state; threshold = 0.05, min_cells = 2)
+create_depletion_callback(ws, mesh, material, cb_state; threshold = 0.05, min_cells = 2)
 create_step_update_callback(ws, material)
-get_depletion_callback_stats(cb)                  # merge history
+n_live_cells(cb_state, t)                                 # live cells in the state saved at t
 ```
 
 You normally do not build these by hand — `solve` assembles them from its
@@ -12160,8 +12181,9 @@ noted TR chapter.
 | `diagnostics_stride` | `10` |
 | `energy_form` | `:standard` |
 | `use_transpiration_bc` | `false` (rejected if `true`) |
-| default integrator | `KenCarp4(autodiff = AutoFiniteDiff(), linsolve = SparspakFactorization())` |
-| default Jacobian | `Structured(strategy = DirectSolve())` |
+| default integrator | `KenCarp4(autodiff = AutoFiniteDiff())` |
+| default linear solver | `KLUFactorization()`; `UMFPACKFactorization()` for the exact ALE Jacobian (`DirectSolve` under ALE) |
+| default Jacobian | `Structured(strategy = DirectSolve())`; `ApproxSolve` under ALE with `handle_depletion = true` |
 
 ### Component / material / reaction defaults
 
@@ -12169,8 +12191,10 @@ noted TR chapter.
 |---|---|
 | `SolidComponent` `ε`, `α`, `γ` | `0.9`, `0.0`, `1.0` |
 | `SolidComponent` `λ`, `κ` | `0.0`, `0.0` |
+| `SolidComponent`/`LiquidComponent` `absorptivity` | `nothing` (Kirchhoff, `a_j = ε_j(T)`) |
 | `LiquidComponent` `λ` | `2e-5` m²·s⁻¹ |
-| `LiquidComponent`/`GaseousComponent` `ε`, `γ` | `0.0`, `0.0` |
+| `LiquidComponent` `ε`, `γ` | `0.95`, `0.0` |
+| `GaseousComponent` `ε`, `γ` | `0.0`, `0.0` |
 | `ρ_intrinsic` (when omitted) | `= ρ` (no pure-phase pores) |
 | `Reaction` `n`, `T_min`, `T_max`, `validate_mass` | `1.0`, `0.0`, `Inf`, `true` |
 | `MixingSpec` `β` | `0.5` |
@@ -12182,7 +12206,7 @@ noted TR chapter.
 | Quantity | Default |
 |---|---|
 | `RadiativeBC` `ε`, `F` | `nothing` (⇒ `ε_eff`), `1.0` |
-| `RadiativeFluxBC` `absorptivity` | `nothing` (⇒ `ε_eff`, Kirchhoff) |
+| `RadiativeFluxBC` `absorptivity` | `nothing` (⇒ `a_eff`; `= ε_eff` by Kirchhoff unless a component sets `absorptivity`) |
 | `ConvectiveMassBC` `ξ_inf` | `0.0` |
 | `DiffusiveMassBC` `h_m` | `Inf` (no external resistance) |
 | `DirichletPressureBC` `P` | `101325` Pa |
@@ -12214,11 +12238,13 @@ noted TR chapter.
 | Quantity (symbol) | Default | TR |
 |---|---|---|
 | depletion limiter threshold | `1.0` kg·m⁻³ | §6 |
-| surface-temperature Newton clamp `[T_min, T_max]` | `[200, 3000]` K | §12 |
+| property bracket `[T_PROPERTY_MIN, T_PROPERTY_MAX]` (law argument clamp, constructor validation, surface-temperature Newton clamp) | `[200, 3000]` K | §4, §12 |
+| mixing-weight blend window (matrix volume fraction) | `1e-4 … 1e-3` | §5 |
 | surface-temperature Newton tol / max-iter | `1e-10` / `50` | §12 |
 | porosity floor (ideal-gas pressure) | `1e-12` | §9 |
 | matrix ρc_p floor (`RHO_CP_FLOOR`) | `1e3` J·m⁻³·K⁻¹ | §5 |
-| Sutherland constant `S` / reference viscosity `μ_ref` | `110.4` K / `1.716e-5` Pa·s (at 273.15 K) | §5 |
+| pore-gas viscosity `Material.gas_viscosity` | `SutherlandProperty()` — air: `μ_ref` `1.716e-5` Pa·s at `T_ref` `273.15` K, `S` `110.4` K | §5 |
+| gas-viscosity floor (`MU_FLOOR`) | `1e-12` Pa·s | §5 |
 | Kozeny constant | `180` | §5 |
 | reference temperature `T_ref` | `298.15` K | §2 |
 | reference pressure `P_ref` | `101325` Pa | §2 |

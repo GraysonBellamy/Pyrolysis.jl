@@ -488,15 +488,43 @@ parabolic stiffness $\sim\Delta t/\Delta z^2$), so the default integrator is an
 L-stable singly-diagonally-implicit Runge–Kutta (SDIRK) method:
 
 $$
-\texttt{KenCarp4}\big(\text{autodiff}=\text{AutoFiniteDiff()},\ \text{linsolve}=\text{SparspakFactorization()}\big).
+\texttt{KenCarp4}\big(\text{autodiff}=\text{AutoFiniteDiff()}\big).
 $$
 
 KenCarp4 is a 4th-order ESDIRK pair with an embedded error estimator for
 adaptive step-size control; its singly-diagonal structure means every implicit
-stage shares the same Newton iteration matrix, which we exploit below. The
-default linear solver is `SparspakFactorization` (reported $\approx28\%$ faster
-than KLU on the block-tridiagonal 1D pattern); KLU and the ILU-Krylov solvers of
-§15.12 are drop-in alternatives.
+stage shares the same Newton iteration matrix, which we exploit below.
+
+**Default linear solver.** `_resolve_integrator` picks the sparse direct
+factorization from the Jacobian's pattern: `UMFPACKFactorization` when the
+Jacobian materializes the ALE geometry block (`DirectSolve` under ALE,
+`materializes_geometry_block`, §15.11.2), and `KLUFactorization` for every
+other sparse Jacobian. The rule depends on the mode and the strategy, never on
+the mesh size. It rests on end-to-end KenCarp4 runs of 100-cell PMMA and
+charring-wood decks (Eulerian and ALE, surface and Beer–Lambert absorption,
+with and without a lateral shrinkage law) and of V-BO-01:
+
+- On the local patterns (every `ApproxSolve` Jacobian, Eulerian `DirectSolve`
+  with surface absorption) KLU is 2.6–4.4× faster than Sparspak and 1.1–1.4×
+  faster than UMFPACK, allocates 8–83 MB per solve against 19–534 MB for
+  Sparspak, and takes the same steps to within 1%.
+- On the exact ALE Jacobian UMFPACK is 1.5–1.9× faster than Sparspak and
+  2.6–2.7× faster than KLU, with identical step and Newton counts.
+- On the Eulerian Beer–Lambert pattern of `DirectSolve` KLU is 1.7× faster
+  than Sparspak. UMFPACK's threshold pivoting (relative pivot tolerance 0.1)
+  produced a factor with growth near $10^{50}$ on a $W$ of condition number
+  about 30; the resulting Newton steps failed, and the run took 50 times the
+  steps. That pattern therefore uses KLU.
+- All three factorizations are backward stable on these systems (normwise
+  backward error below $3\times10^{-15}$). Sparspak does not pivot: on the
+  Darcy decks its componentwise backward error reaches 1 in individual rows,
+  where KLU's and UMFPACK's stay below $10^{-13}$. On the exact ALE Jacobian the
+  relative residuals $\lVert Wx-b\rVert/\lVert b\rVert$ reach
+  $6\times10^{-11}$ for UMFPACK, $2\times10^{-11}$ for KLU and
+  $3\times10^{-9}$ for Sparspak, without effect on the Newton iteration.
+
+Sparspak, KLU, UMFPACK and the ILU-Krylov solvers of §15.12 remain drop-in
+alternatives through `linear_solver`.
 
 > **Implementation note.** Integrator resolution: `_resolve_integrator`,
 > src/Solver/solve.jl. A user may pass a constructor (`integrator=Rodas5`) plus
@@ -527,9 +555,8 @@ sparse block $\mathsf{A}$ diagonally dominant and the Richardson iteration of
 §15.10 converge in a few steps.) Each Newton step solves $W\,\delta\boldsymbol{u}=-r$
 for the stage residual $r$; the linear solve is delegated to the chosen
 `LinearSolveStrategy` (DirectSolve / StructuredSolve / ApproxSolve /
-MatrixFreeSolve, §15.10) or, when no pluggable Jacobian is supplied, to the
-integrator's colored finite-difference Jacobian (`AutoFiniteDiff`) with the
-configured `linsolve`.
+MatrixFreeSolve, §15.10) or, for the dense `DenseAD_ForwardDiff` backend, to a
+dense LU.
 
 The Jacobian $J$ is supplied to the integrator through an `ODEFunction` carrying
 both `jac = jac_fn!` and a `jac_prototype` sparsity pattern (the union of the
@@ -563,11 +590,12 @@ a `CallbackSet`:
 |---|---|---|---|
 | 1 | `StepUpdateCallback` | discrete (every accepted step) | mirror integrator $\boldsymbol{u}\to$ mutable mesh; sync geometry & cross-section |
 | 2 | `ThicknessTerminationCallback` | continuous (ALE) | terminate when $z_{\rm top}-z_{\rm bot}<$ `min_thickness` |
-| 3 | `DepletionCallback` | discrete (ALE, opt-in) | merge cells below their per-cell thickness threshold; resize state |
-| 4 | `ProgressCallback` | periodic | progress bar |
-| 5 | `DiagnosticsCallback` | discrete (every `diagnostics_stride`) | snapshot energy/mass ledgers |
-| 6 | `VerifyJacobianCallback` | discrete (at sample times) | compare active Jacobian vs. dense AD reference |
-| 7 | user callback | — | custom |
+| 3 | `DepletionCallback` | discrete (opt-in) | park cells below their depletion threshold; the state keeps its size |
+| 4 | `NewtonFailureCap` | discrete (every accepted step; Newton integrators) | after a step whose Newton needed retries, hold the proposed step at or below 1.25× that step for 20 steps |
+| 5 | `ProgressCallback` | periodic | progress bar |
+| 6 | `DiagnosticsCallback` | discrete (every `diagnostics_stride`) | snapshot energy/mass ledgers |
+| 7 | `VerifyJacobianCallback` | discrete (at sample times) | compare active Jacobian vs. dense AD reference |
+| 8 | user callback | — | custom |
 
 The **`StepUpdateCallback`** is the linchpin of the read-only-mesh design: after
 each accepted step it sets `mesh.cross_section_area = cross_section_area_from_state(…)`
@@ -577,26 +605,42 @@ post-processing) see a mesh consistent with the integrator state.
 
 The **`DepletionCallback`** (§14.3) detects cells whose current thickness has
 fallen below `depletion_threshold × Δz_init,i` (default $5\%$ of each cell's
-own initial thickness), merges them into a
-neighbor with the condensed-enthalpy-conserving temperature merge of §14.3.2
+own initial thickness; on a fixed mesh, the top live cell whose condensed
+concentration has fallen below the same fraction of its initial value), merges
+it into a neighbour with the condensed-enthalpy-conserving temperature merge of
+§14.3.3,
 
 $$
 \sum_{j\notin{\rm gas}} m_j\!\int_{T_{\rm ref}}^{T_{\rm merged}}\! c_{p,j}\,dT'
 = H_a(T_a) + H_b(T_b)
 \ \text{(bracketed Newton; gas heat capacity excluded)},\qquad
-\xi_{{\rm merged},j} = \frac{V_a\,\xi_{a,j}+V_b\,\xi_{b,j}}{V_a+V_b},
+\xi_{{\rm merged},j} = \frac{V_a\,\xi_{a,j}+V_b\,\xi_{b,j}}{V_{\rm keep}},
 $$
 
-then resizes the workspace caches and the integrator state vector
-(`resize!(integrator, new_len)`; `u_modified!(integrator, true)`). Because the
-state vector changes length mid-solve, depletion is **incompatible with a
-pluggable `JacobianSpec`** (whose caches are sized at setup) — when
-`handle_depletion=true`, `solve` sets `jac_spec=nothing` and falls back to the
-integrator's colored finite-difference Jacobian (§15.13).
+and parks the freed slot above the live surface
+(`derivative_discontinuity!(integrator, true)`). The state keeps its size, so the pluggable `JacobianSpec` stays valid
+and `saveat` interpolation is unaffected (§14.3.5–§14.3.6).
+
+The **`NewtonFailureCap`** is a step cap with a memory of Newton failures. After
+every accepted step it reads the integrator's count of failed nonlinear solves.
+When the step just accepted needed retries, the proposed next step is held at or
+below $g\,\Delta t_{\rm acc}$ with $g = 1.25$ (`FAILURE_MEMORY_GROWTH`) for the
+next $M = 20$ accepted steps (`FAILURE_MEMORY_STEPS`); a further failure
+restarts the memory from the new step. The error controller alone regrows the
+step to its accuracy limit after a failure, and on a strongly nonlinear front
+that limit lies beyond the range in which the stage Newton converges, so the
+integrator settles into a fail–halve–regrow rhythm. On the Landau ablation case
+V-CPL-02 the Newton fails near $\Delta t = 5$ ms and converges at 2.5 ms while
+the controller keeps proposing 5 ms: the cap takes the case from 1087 steps and
+892 Newton failures to 1032 steps and 78 failures. A run without Newton
+failures never triggers the cap and keeps its trajectory exactly. It is
+installed for every integrator that solves its stages by Newton (an
+algorithm with an `nlsolve` field).
 
 > **Implementation note.** Callbacks: src/Solver/callbacks.jl
 > (`create_step_update_callback`, `create_thickness_termination_callback`,
-> `create_depletion_callback`, `create_merged_state_vector`) and src/Solver/solve.jl
+> `create_depletion_callback`, `park!`, `create_newton_failure_cap_callback`)
+> and src/Solver/solve.jl
 > (assembly, diagnostics, verify-Jacobian). The depletion↔pluggable-Jacobian
 > guard is in `_validate_solve_kwargs`, src/Solver/solve.jl.
 
@@ -700,8 +744,8 @@ math; the framework handles the global embedding.
 > implementations under src/Jacobian/operators/. Per-operator `ForwardDiff` chunk
 > sizes: reaction `1+N_C`; conduction $3(1+N_C)$; gas transport $3(1+N_C)$ (or 5
 > with the limiter window); BC thermal $1+N_C$; BC mass $2+N_C$ (the energy row
-> reads the interior neighbor's $T$); ALE advection $5(1+N_C)$;
-> $\chi$ $1+N_C$.
+> reads the interior neighbor's $T$); $\chi$ $1+N_C$. The ALE advection
+> derivatives are analytic.
 
 ### 15.7.2 Layer 2 — `StructuredJacobian`
 
@@ -919,16 +963,20 @@ reusing the cached $d\theta/dT$, $d\theta/d\xi$ from the strain-rate sweep
 > both the prefix-sum builder and the dilation Jacobian; assembly is atomic per
 > Newton step, so the reuse is safe in practice.
 
-### 15.8.5 ALE advection (TVD)
+### 15.8.5 ALE advection
 
-The advection energy row depends on the 5-cell TVD window
-$[i-2,i+2]$ through the limited gradient and on *all upstream cells* through the
-mesh velocity. The direct part is the chain rule
-$\partial dT_i/\partial T_j$ for $j$ in the limiter window; the indirect part is
-$\partial(\,(\partial T/\partial z)_i\,w_{{\rm cell},i})/\partial x_k$ for all
-$k\le i$, realized by composing the provider's prefix-sum coupling with the local
-row scaling $\text{row\_scale}[i]=(\partial T/\partial z)_i$ (and
-$(\partial\xi_j/\partial z)_i$ for gas species). Chunk size $5(1+N_C)$.
+The operator assembles the conservative flux-form mesh-motion transport of the
+gas species rows only. The energy equation has no mesh-motion advection in
+production: the condensed species are mesh-bound (§11.2.2), and the limited
+temperature kernel runs only under the `w_override` verification hook, which
+the structured Jacobian does not support. The face values are first-order
+donor values, so the direct part is analytic on the one-cell stencil
+$[i-1,i+1]$: $+w_R/\Delta z_i$ to the right donor, $-w_L/\Delta z_i$ to the
+left donor, and $-\big((w_R-w_L)/\Delta z_i+\theta_A\big)$ on the diagonal.
+The indirect part, $\partial f_i/\partial w_{{\rm node},n}$ for the two
+bounding nodes, reaches every upstream cell through the mesh velocity; it is
+realized by composing the provider's prefix-sum coupling with the node scales
+$(\xi_{{\rm face},R}-\xi_i)/\Delta z_i$ and $-(\xi_{{\rm face},L}-\xi_i)/\Delta z_i$.
 
 Under the `:ale_reduced` profile (used by `ApproxSolve`), the advection operator
 **skips its `compose_into!` calls entirely** — it emits no structured couplings.
@@ -1258,12 +1306,14 @@ The ALE geometry coupling motivates a **two-pattern** model:
   default path — the surface temperature column $T_{\rm col}(n)$ for every row
   $i<n$, the $\varepsilon_{\rm eff}(T_n,\xi_{\cdot,n})$ transmissivity chain of
   §15.8.7), the $\chi$-row block
-  (cell-local plus the dense $\chi$-column), and the ALE advection limiter +
-  cumulative widening.
+  (cell-local plus the dense $\chi$-column), and the ALE advection donor window
+  plus cumulative widening.
 - **$S_{\rm geom}$** — every coupling with $z$ columns (ALE only; empty for
   Eulerian): physics$\to z$ (cells read nodes; reach $\le i+3$ without $\chi$,
-  full $1{:}n_{\rm nodes}$ with `WithChi` via the $\theta_A$ path), $z\to$physics
-  (node $k$ depends on cells $i<k$, lower-triangular), and $z\to z$
+  full $1{:}n_{\rm nodes}$ with `WithChi` via the $\theta_A$ path, and full for
+  the energy rows under Beer–Lambert, whose optical depth
+  $\tau_i=\sum_{k>i}\alpha_k\Delta z_k$ depends on every node above the cell),
+  $z\to$physics (node $k$ depends on cells $i<k$, lower-triangular), and $z\to z$
   (lower-triangular including the diagonal, the cumulative nature of mesh
   velocity).
 
@@ -1274,10 +1324,13 @@ Five emitter functions compose these patterns, invoked in order by
 2. `_emit_geometry_pattern!` — $z$-columns (ALE);
 3. `_emit_chi_pattern!` — $\chi$-row and dense $\chi$-column (WithChi);
 4. `_emit_radiation_pattern!` — Beer–Lambert suffix (BeerLambert);
-5. `_emit_ale_advection_pattern!` — ALE limiter + cumulative (ALE).
+5. `_emit_ale_advection_pattern!` — ALE donor window + cumulative (ALE).
 
 The integrator's `jac_prototype` is the union $S_{\rm phys}\cup S_{\rm geom}$.
-Patterns are memoized by the fingerprint
+Every row of the union stores its diagonal in every profile, so the shifted
+matrix $W$ of §15.5.2 has exactly the pattern of $J$; where no operator writes
+the diagonal (the node rows and the $\chi$ rows under `:ale_reduced`) it holds
+a structural zero. Patterns are memoized by the fingerprint
 $(\mathrm{typeof}(\text{mode}),N_C,n_{\rm cells},n_{\rm nodes},\text{profile})$ in
 `_SPARSITY_CACHE`.
 
@@ -1288,7 +1341,17 @@ $(\mathrm{typeof}(\text{mode}),N_C,n_{\rm cells},n_{\rm nodes},\text{profile})$ 
 - `:ale_reduced` (`ApproxSolve` only) — drops every structured coupling (the
   cumulative ALE widening, the z-row prefix-sum blocks, the $\theta_A$ rank-1
   channels, the Beer–Lambert suffix, and the $\chi$-column rank-1) and the
-  geometry block. The masked verifier expects exactly this set of omissions.
+  geometry block, of which only the node rows' structural diagonal remains.
+  The masked verifier expects exactly this set of omissions, and counts the
+  stored but never-written diagonals of the node and $\chi$ rows
+  (`structural_zero_diagonal`) among them.
+
+Only `:full` couples cells an arbitrary distance apart, through the couplings
+it materializes: the ALE geometry block and prefix sums, the Beer–Lambert
+suffix, and the $\chi$-column rank-1. Each adds $O(N^2)$ entries; every other
+pattern couples a cell only to cells within the two-cell ALE advection window.
+`materializes_geometry_block(mode, profile)` (`:full` under ALE) selects the
+default factorization (§15.5.1).
 
 ### 15.11.3 Greedy coloring
 
@@ -1341,21 +1404,12 @@ inexact solves can increase Newton rejections on Arrhenius transients, so the
 iterative path is recommended only when the direct factorization is the
 bottleneck.
 
-**The MKL ipiv resize caveat.** When `handle_depletion=true`, the state vector is
-resized mid-solve via `resize!(integrator, …)`. `LinearSolve.jl`'s default solver
-can switch to `MKLLUFactorization` for large systems ($N\gtrsim500$), whose pivot
-array `ipiv` is not always resized correctly, producing
-`DimensionMismatch: ipiv has length X, but needs to be Y`. Julia's native
-`LUFactorization` handles `resize!` correctly, and it is what
-the depletion path uses: with `handle_depletion=true` there is no sparse
-`jac_prototype` (the colored-FD path), so `_resolve_integrator` defaults the
-linear solver to the dense, resize-safe `LUFactorization()` and rebuilds an
-explicitly requested sparse factorization (Sparspak/KLU) into the user's
-algorithm as `LUFactorization`, with a warning. The MKL pitfall therefore
-survives only when a fully constructed integrator is passed with its
-`linsolve` left unset — LinearSolve's auto-selection can then pick the MKL
-LU — and `solve` warns when it detects that combination on a large depleting
-state.
+**Linear-solver family.** A sparse `jac_prototype` (every `Structured`
+strategy) pairs with a sparse direct default chosen from its pattern
+(`KLUFactorization` or `UMFPACKFactorization`, §15.5.1); the dense
+`DenseAD_ForwardDiff` backend has no prototype and `_resolve_integrator`
+gives it a dense `LUFactorization`, rebuilding an explicitly requested sparse
+factorization into the user's algorithm with a warning.
 
 > **Implementation note.** `ILUGMRESFactorization`, `ILUBiCGSTABFactorization`,
 > and the Krylov integration: src/Solver/ilu_gmres.jl. The MKL ipiv warning:
@@ -1407,12 +1461,10 @@ deviation rather than aborting — a single transient outlier should not kill an
 otherwise-good production run; the user reads `max_abs_dev`/`max_rel_dev` to
 judge severity.
 
-A reported incompatibility worth restating: **surface depletion and a pluggable
-`JacobianSpec` cannot coexist** (the cache is sized at setup and cannot survive a
-mid-solve `resize!`); with `handle_depletion=true` the spec is forced to
-`nothing` and the integrator uses its colored finite-difference Jacobian, which
-*is* verified implicitly by the integrator's own error control but is not
-checked against the dense reference.
+Depletion handling (§14.3) keeps the state size and the pluggable Jacobian,
+so `verify_jacobian` runs through park events; the parked states of every
+mode are part of the verifier's own matrix
+(`test/jacobian/test_park_jacobian.jl`).
 
 > **Implementation note.** `verify_jacobian_at`, strict/masked compare:
 > src/Jacobian/verify.jl; `is_approximate`: src/Jacobian/interface.jl;
@@ -1555,10 +1607,9 @@ whole construction is verified against the dense AD reference.
 - **WithChi × Darcy.** `WithChi` is tested mainly with Fickian transport; the
   interaction of the $\chi$ rank-1 coupling with the full Darcy operator set is
   not exhaustively exercised.
-- **Depletion ↔ pluggable Jacobian / sensitivity.** Mid-solve `resize!` is
-  incompatible with the sized `JacobianSpec` cache (forcing the colored-FD
-  fallback) and, transitively, with adjoint sensitivity through depletion. Making
-  the merge callback resize-aware for the structured backend is an open item.
+- **Adjoint sensitivity across park events.** A park is a discrete rewrite of
+  the state (§14.3.4); adjoint sensitivity through such an event is
+  unsupported, and forward sensitivities are valid only between events.
 - **ILU drop tolerance.** The default $\tau=0.1$ for the ILU-Krylov solvers has
   not been swept for optimality across pyrolysis regimes; inexact solves can
   raise Newton rejections on Arrhenius transients.

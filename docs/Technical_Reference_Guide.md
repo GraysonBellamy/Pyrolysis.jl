@@ -389,7 +389,7 @@ The current model carries several known limitations, recorded here so that users
 4. **Composition-change enthalpy not conserved discretely.** The temperature form does not evolve the composition-change enthalpy term $\sum_j h_j(T)\,\partial_t\xi_j$ of a conserved enthalpy density (§3.3.2); its reaction and gas-transport parts reappear as $Q_{\text{rxn}}$ and $S_{\text{conv}}$/$S_{\text{gen}}$, while the condensed-product sensible-generation part is omitted. The discrete energy ledger nonetheless closes to integrator tolerance, but the continuous closure for strongly composition-varying problems is approximate (§16).
 5. **Asymmetric ambient + permeable back face.** With `:with_generation_sink`, a single scalar $T_{\text{ref}}$ is applied to every cell; if the two boundaries have different ambient temperatures *and* the back face is permeable, the energy ledger fails to close at the bottom by exactly $\sum_g\dot m_{g,\text{bottom}}c_{p,g}(T_{\infty,\text{top}}-T_{\infty,\text{bottom}})$ (harmless for the usual impermeable back face; §7, §12).
 6. **Transport closures are first-order / heuristic in places.** Gas advection uses first-order upwind, diffusion applies one mixture transfer coefficient to every gas species (no per-species discrimination, with only heuristic Lennard-Jones parameter estimates available for sizing it), and viscosity mixing omits Wilke's rule (§5, §9).
-7. **Experimental layers.** P1 radiation and h-AMR refinement/coarsening live in `Pyrolysis.Experimental`, use separate code paths (P1 has its own residual), and are explicitly unstable; the surface-depletion-callback adaptivity path is incompatible with the pluggable structured Jacobian and falls back to colored finite differences (§8, §14, §15).
+7. **Experimental layers.** P1 radiation and h-AMR refinement/coarsening live in `Pyrolysis.Experimental`, use separate code paths (P1 has its own residual), and are explicitly unstable. Depletion handling (§14.3) parks cells without changing the state size, so it keeps the structured Jacobian; parameter sensitivities are valid only between park events (§17.7.3).
 8. **Imported calibrations must respect the S_conv-only convention.** Pyrolysis.jl never applies a surface transpiration term on top of $S_{\text{conv}}$ (§1.4.3); parameters calibrated against a solver that does will predict higher $T_s$ and MLR here and should be re-validated (§18).
 
 These limitations bound the model's domain of applicability; within that domain — 1-D, single-reactant, atmospheric-to-moderate-pressure condensed-phase pyrolysis — the formulation is rigorous, differentiable, and conservation-audited.
@@ -1738,30 +1738,37 @@ for printing, logging, and comparison; it is *not* consulted in hot paths.
 property-function fields and three scalar (`Float64`) fields:
 
 ```julia
-struct SolidComponent{Pρ,Pc,Pk,Pλ,Pκ,Pρi} <: AbstractComponent
+struct SolidComponent{Pρ,Pc,Pk,Pλ,Pκ,Pε,Pa,Pρi} <: AbstractComponent
     name::Symbol
     density::Pρ                # bulk density ρ_j           [kg/m³]
     heat_capacity::Pc          # c_{p,j}(T)                 [J/(kg·K)]
     thermal_conductivity::Pk   # k_j(T)                     [W/(m·K)]
     gas_transfer_coeff::Pλ     # λ_j(T)                     [m²/s]
     permeability::Pκ           # κ_j(T)                     [m²]
-    emissivity::Float64        # ε_j                        [-]
+    emissivity::Pε             # ε_j(T)                     [-]
+    surface_absorptivity::Pa   # a_j, Nothing = Kirchhoff   [-]
     absorption_coeff::Float64  # α_j (mass basis)           [m²/kg]
     swelling_factor::Float64   # γ_j                        [-]
     intrinsic_density::Pρi     # skeletal density ρ_{i,j}   [kg/m³]
 end
 ```
 
-The six property fields are each parameterized by their own type (`Pρ`, `Pc`, …),
+The seven property fields are each parameterized by their own type (`Pρ`, `Pc`, …),
 so a component built with a constant conductivity and a polynomial heat capacity
 is a *distinct concrete type* from one built with two constants. This preserves
 type stability and allocation-free evaluation through the heterogeneous component
-tuple. The three scalar fields (`ε_j`, `α_j`, `γ_j`) are stored as plain
-`Float64` rather than property functions because they are not given temperature
-dependence in the current model.
+tuple. The emissivity `ε_j(T)` is a property function like `k_j(T)` (the `ε`
+keyword accepts the same forms) and is evaluated at the cell temperature by the
+mixing rule (§5.8). `surface_absorptivity` is the optional constant absorptivity
+`a_j` for *incident* (heater-spectrum) radiation, `Pa <: Union{Nothing,Float64}`:
+`Nothing` selects Kirchhoff's law `a_j = ε_j(T)` at the type level, so the
+absorptivity mixture (§5.8.2) is a static sum. The two scalar fields (`α_j`, `γ_j`)
+are stored as plain `Float64` because they are not given temperature dependence
+in the current model.
 
 **`LiquidComponent`** has the *identical* field layout to `SolidComponent`
-(bulk and intrinsic density, the four property functions, the three scalars). It
+(bulk and intrinsic density, the five property functions, the optional surface
+absorptivity, the two scalars). It
 is the matrix-forming condensed phase used for moisture / liquid water in
 hygroscopic materials. Its convenience constructor differs only in defaults
 (see §4.1.5): $\lambda$ defaults to $2\times10^{-5}$ m²·s⁻¹, $\varepsilon$ to
@@ -1772,21 +1779,22 @@ $\kappa$ to 0 (a liquid normally fills pore space and blocks gas flow).
 **`GaseousComponent`** represents species that flow *through* the matrix:
 
 ```julia
-struct GaseousComponent{Pρ,Pc,Pk,Pλ} <: AbstractComponent
+struct GaseousComponent{Pρ,Pc,Pk,Pλ,Pε} <: AbstractComponent
     name::Symbol
     molar_mass::Float64        # M_j                        [kg/mol]
     density::Pρ                # ρ_g(T), default ideal gas  [kg/m³]
     heat_capacity::Pc
     thermal_conductivity::Pk
     gas_transfer_coeff::Pλ
-    emissivity::Float64
+    emissivity::Pε             # ε_j(T)
     absorption_coeff::Float64
     swelling_factor::Float64
 end
 ```
 
-A gas has **no permeability field and no intrinsic density** — it is not part of
-the matrix skeleton. It carries instead a `molar_mass` $M_j$, used by the ideal-
+A gas has **no permeability field, no intrinsic density, and no surface
+absorptivity** (`get_absorptivity` always returns its `ε_j(T)`) — it is not part
+of the matrix skeleton. It carries instead a `molar_mass` $M_j$, used by the ideal-
 gas density law (§4.3), the ideal-gas pressure closure (Chapter 9), and the
 Chapman–Enskog diffusivity estimate (§5.10).
 
@@ -1913,7 +1921,8 @@ consumed downstream:
 | `thermal_conductivity` | $k_j(T)$ | W·m⁻¹·K⁻¹ | all | $k_\mathrm{eff}$ (Ch. 5), Fourier flux (Ch. 7) |
 | `gas_transfer_coeff` | $\lambda_j(T)$ | m²·s⁻¹ | all | $\lambda_\mathrm{eff}$ (Ch. 5), gas diffusion (Ch. 9) |
 | `permeability` | $\kappa_j(T)$ | m² | S, L | $\kappa_\mathrm{eff}$ (Ch. 5), Darcy velocity (Ch. 9) |
-| `emissivity` | $\varepsilon_j$ | – | all | $\varepsilon_\mathrm{eff}$ (Ch. 5), radiative BC (Ch. 12) |
+| `emissivity` | $\varepsilon_j(T)$ | – | all | $\varepsilon_\mathrm{eff}$ (Ch. 5), radiative BC (Ch. 12) |
+| `surface_absorptivity` | $a_j$ (or `nothing` ⇒ $\varepsilon_j(T)$) | – | S, L | $a_\mathrm{eff}$ (§5.8.2), incident-flux BC (Ch. 12), Beer–Lambert surface transmissivity (Ch. 8) |
 | `absorption_coeff` | $\alpha_j$ | m²·kg⁻¹ | all | $\alpha_\mathrm{eff}=\sum_j\xi_j\alpha_j$ (Ch. 5, 8) |
 | `swelling_factor` | $\gamma_j$ | – | all | $\rho$, strain rate $\theta$ (Ch. 10) |
 | `molar_mass` | $M_j$ | kg·mol⁻¹ | G | $\rho_g$ (§4.3), $P$ (Ch. 9), Chapman–Enskog estimate (§5.10) |
@@ -2052,6 +2061,30 @@ all but `StateDependentProperty`). This uniformity lets a single component field
 hold any property law, and lets the kinetics evaluator pass $\xi$ to a heat-of-
 reaction property without knowing whether it is composition-dependent.
 
+**The property bracket.** Every temperature-dependent law evaluates on the
+clamped argument $\tilde T = \operatorname{clamp}(T, T_{\min}, T_{\max})$ with
+$[T_{\min}, T_{\max}] = [200, 3000]$ K (`T_PROPERTY_MIN`, `T_PROPERTY_MAX`,
+`src/Materials/constants.jl`; the same bracket clamps the surface-temperature
+Newton iterate, §12). Inside the bracket the clamp is the identity with unit
+derivative, so nothing changes for any physical state; outside it the law sees
+the nearest bracket end. A Newton trial state with a nonphysical (even
+negative) temperature therefore produces a failed Newton step, not a
+`DomainError` out of a fractional power or a fitted polynomial's far
+extrapolation. The analytic derivatives (§4.5) are zero outside the bracket so
+they agree with automatic differentiation of the clamped law everywhere.
+
+The component constructors sample every law on the bracket at 1 K steps and
+reject a component whose bulk or intrinsic density, heat capacity or thermal
+conductivity is not positive there (a gas may have $c_p = 0$), whose gas
+transfer coefficient or permeability is negative, or whose emissivity leaves
+$[0, 1]$. The error names the first offending temperature: a linear fit
+$k = 0.3 - 4.2\times10^{-4}\,T$ is rejected at 715 K because it turns a cell
+into a perfect insulator once it reaches that temperature. Hold a fit constant
+outside its measured range (`T -> law(clamp(T, T_lo, T_hi))`) or pass
+`validate_properties = false` for laws built programmatically from search
+parameters, where an unphysical value should reach the objective function
+instead of throwing.
+
 ### 4.4.1 `ConstantProperty`
 
 $$
@@ -2132,12 +2165,41 @@ the two adjacent slopes.
 
 ### 4.4.6 `CallableProperty`
 
-Wraps an arbitrary callable $f(T)$. Its value is $p(T)=f(T)$; its derivative is the
-same central finite difference with $\delta T = 0.1$ K. This is the type produced
-by `to_property(f)` for a function `f` and is how the ideal-gas density default
+Wraps an arbitrary callable $f(T)$. Its value is $p(T)=f(\tilde T)$ on the
+clamped argument of the property bracket; its derivative is the same central
+finite difference with $\delta T = 0.1$ K. This is the type produced by
+`to_property(f)` for a function `f` and is how the ideal-gas density default
 (Eq. 4.5) is stored.
 
-### 4.4.7 `StateDependentProperty`
+### 4.4.7 `SutherlandProperty`
+
+Sutherland's law for a gas transport property, carrying its own three constants:
+
+$$
+p(T) = \mu_{\text{ref}}
+\left(\frac{T}{T_{\text{ref}}}\right)^{3/2}
+\frac{T_{\text{ref}}+S}{T+S}.
+$$
+
+`SutherlandProperty()` is the canonical **air** triple
+($\mu_{\text{ref}}=1.716\times10^{-5}$ Pa·s, $T_{\text{ref}}=273.15$ K,
+$S=110.4$ K) and is the default `Material.gas_viscosity` (§5.9), so a material
+that says nothing about its pore gas behaves exactly as the package did before
+that field existed. Its derivative is **analytic**,
+
+$$
+\frac{\mathrm{d}p}{\mathrm{d}T} = p(T)\left(\frac{3}{2T} - \frac{1}{T+S}\right),
+$$
+
+which agrees with `ForwardDiff` to machine precision (gated in
+`test/materials/test_gas_viscosity_property.jl`).
+
+The type evaluates the bare correlation and does **not** clamp $T$; the
+low-temperature floor and the positivity floor are applied once, centrally, in
+`effective_gas_viscosity(T, material)` (§5.9), so that every curve a material may
+carry is protected rather than just this one.
+
+### 4.4.8 `StateDependentProperty`
 
 A property that depends on **both** temperature and the full concentration tuple,
 $p(T,\xi)=f(T,\xi)$. Calling it with $T$ alone raises an error (state is
@@ -2158,7 +2220,7 @@ $\partial p/\partial T \approx [p(T+\delta T,\xi)-p(T-\delta T,\xi)]/(2\delta T)
 with $\delta T = 0.1$ K. Its concentration derivative (§4.5.2) uses an *adaptive*
 step.
 
-### 4.4.8 `to_property` conversions
+### 4.4.9 `to_property` conversions
 
 The convenience converter normalizes user inputs to property functions, so that
 component constructors and reaction constructors accept either property objects
@@ -2198,6 +2260,7 @@ The `derivative(p, T)` method dispatches on the property type:
 | `ArrheniusProperty` | $p(T)\,E/(R_g T^2)$ | analytic (Eq. 4.7) |
 | `TableProperty` | central FD, $\delta T=0.1$ K | numerical |
 | `CallableProperty` | central FD, $\delta T=0.1$ K | numerical |
+| `SutherlandProperty` | $p(T)\,(3/(2T) - 1/(T+S))$ | analytic |
 | `StateDependentProperty` | central FD in $T$, $\delta T=0.1$ K | numerical |
 
 The analytic derivatives are exact to machine precision; the finite-difference
@@ -2818,13 +2881,17 @@ volume) is retained with weight γ.
 > zero strain in θ, and zero volume in the mixture density. Such a component
 > contributes its mass and heat capacity but not its k or ε.
 
-> **Depleted-cell floor.** When *no* swelling-weighted volume remains in a
-> cell (fully converted), conductivity/emissivity consumers go through
-> `mixing_volume_fractions`, which falls back to the all-phase occupancy
-> (5.3) — k_eff degrades to the gas-mixture conductivity instead of 0, which
-> would otherwise zero both adjacent harmonic face means and (via Kirchhoff
-> α = ε) kill absorption too. With `handle_depletion = true` such cells are
-> merged away in production.
+> **Void-cell blend.** Conductivity and emissivity consumers go through
+> `mixing_volume_fractions`, which returns the swelling-weighted matrix
+> fractions while the matrix volume fraction $\varphi_m = \sum_j \gamma_j\xi_j/\rho_j$
+> is above $10^{-3}$, the all-phase occupancy (5.3) below $10^{-4}$, and a cubic
+> smoothstep blend of the two in between. A fully converted cell thus degrades
+> to the gas-mixture conductivity instead of 0 (which would zero both adjacent
+> harmonic face means and, via Kirchhoff, its absorption), and because the
+> matrix fractions are normalised by $\varphi_m$ their derivatives grow as
+> $1/\varphi_m^2$ — the smooth blend keeps $\partial k_{\rm eff}/\partial\xi$
+> bounded while a cell empties on a fixed mesh, which parks only its top live
+> cell (§14.3.2).
 
 The three bases and their consumers are summarized below; this mapping is the
 single most error-prone part of effective-property bookkeeping, so it is stated
@@ -3264,6 +3331,24 @@ $$
 
 The default rule for `λ` is **PARALLEL** with `β = 0.5` (`materials.jl:88`).
 
+**Degenerate transport.** `SolidComponent` defaults to $\lambda_j = 0$. A
+condensed component with no gas-transfer coefficient contributes nothing to
+(5.18), so a cell of that component holding no gas has $\lambda_{\text{eff}}
+\approx v_{\rm gas}\lambda_{\rm gas} \to 0$ under PARALLEL (and exactly zero
+under SERIES), and the face harmonic mean (5.29) vanishes when either side does.
+Gas transport then stops where the gas fraction stops: the gas field of a
+gas-producing material ends in a sharp front, and a Newton iterate that drives
+the front cell's gas concentration below zero closes both of its faces and
+flattens its residual row. The implicit solve fails repeatedly on that front.
+On the Landau ablation case V-CPL-02 a solid coefficient of
+$10^{-6}$ m²/s halves the step count and removes more than half of the
+Newton failures, while the measured regression rate moves by $10^{-5}$
+relative.
+`validate_problem`, which `solve` calls, therefore warns when a material with a
+gas-producing reaction and Fickian transport (no permeable component) has a
+condensed component with $\lambda_j = 0$
+(`warn_degenerate_gas_transport`, `src/Problem/problem_validation.jl`).
+
 ### 5.6.1 Bruggeman is rejected for gas transfer
 
 Applying the effective-medium closure (5.15) to a diffusivity is **rejected**:
@@ -3396,28 +3481,63 @@ for standalone use but is not on the production face path.
 ### 5.8.1 Effective emissivity
 
 The surface emissivity is a **solid**-volume-fraction average of the component
-emissivities, clamped to the physical range:
+emissivities, each evaluated at the cell temperature, clamped to the physical
+range:
 
 $$
-\varepsilon_{\text{eff}} \;=\; \operatorname{clamp}\!\left(
-\sum_j v_j^{\text{solid}}\,\varepsilon_j,\ 0,\ 1\right),
+\varepsilon_{\text{eff}}(T,\xi) \;=\; \operatorname{clamp}\!\left(
+\sum_j v_j^{\text{solid}}\,\varepsilon_j(T),\ 0,\ 1\right),
 \tag{5.22}
 $$
 
 `effective_emissivity(ξ, T, material)` builds the solid basis and calls
-`_emissivity_from_v`, which applies `clamp(ε_eff, 0, 1)`
-(`effective_properties.jl:635–644`). The solid basis is used for the same
-physical reason as conductivity (§5.1.3): the radiating surface is the
-solid/liquid material, not trapped non-swelling gas. Component emissivities are
-fixed `Float64` fields with defaults of `0.9` for `SolidComponent`, `0.95` for
-`LiquidComponent` (condensed liquids are strong emitters — water ≈ 0.96), and
-`0.0` for `GaseousComponent` (`src/Materials/components.jl`);
-`ε_j` carries **no** temperature dependence in the current model. The effective
-emissivity is the surface property used by the radiative boundary conditions
-(via Kirchhoff `α = ε_eff`, §12) and as the gray-body factor in the volumetric P1
-emission source (§8).
+`_emissivity_from_v(v, T, material)`, which evaluates `get_emissivity(comp, T)`
+per component and applies `clamp(ε_eff, 0, 1)` (`effective_properties.jl`). The
+solid basis is used for the same physical reason as conductivity (§5.1.3): the
+radiating surface is the solid/liquid material, not trapped non-swelling gas.
+Component emissivities are property functions (`ε` accepts the same forms as
+`k`: number, linear tuple, callable, property function) with defaults of `0.9`
+for `SolidComponent`, `0.95` for `LiquidComponent` (condensed liquids are strong
+emitters — water ≈ 0.96), and `0.0` for `GaseousComponent`
+(`src/Materials/components.jl`). Because the sum is evaluated generically over
+the scalar type, a `ForwardDiff.Dual` temperature returns
+$\partial\varepsilon_{\text{eff}}/\partial T$, which the surface-emission
+(§12) and Beer–Lambert (§8) Jacobians pick up without operator-level
+bookkeeping. The effective emissivity is the surface property used by the
+re-radiation boundary condition (§12) and as the gray-body factor in the
+volumetric P1 emission source (§8).
 
-### 5.8.2 Effective absorption coefficient
+### 5.8.2 Effective surface absorptivity
+
+The absorptivity for *incident* (heater-spectrum) radiation is mixed with the
+same weights,
+
+$$
+a_{\text{eff}}(T,\xi) \;=\; \operatorname{clamp}\!\left(
+\sum_j v_j^{\text{solid}}\,a_j,\ 0,\ 1\right),\qquad
+a_j = \begin{cases}
+\texttt{surface\_absorptivity}_j & \text{if set}\\
+\varepsilon_j(T) & \text{otherwise (Kirchhoff)}
+\end{cases}
+\tag{5.22b}
+$$
+
+via `effective_absorptivity(ξ, T, material)` → `_absorptivity_from_v` →
+`get_absorptivity(comp, T)`. The Kirchhoff branch resolves at compile time
+(`Nothing` vs `Float64` is a type parameter of the component), and for a
+material in which no component sets a surface absorptivity the two generated
+sums perform the same floating-point operations in the same order, so
+$a_{\text{eff}} \equiv \varepsilon_{\text{eff}}$ bit-for-bit — the invariant that
+keeps every Kirchhoff-default case unchanged. A component with an explicit
+$a_j$ decouples the absorbed heater flux from the temperature-dependent
+emission: an emissivity that falls with temperature (integrating-sphere data for
+virgin wood, for instance) does not drag the absorbed cone flux down with it.
+$a_{\text{eff}}$ is consumed by a `RadiativeFluxBC` with
+`absorptivity = nothing` (§12.2.6) and as the Beer–Lambert surface
+transmissivity (§8.3); surface emission always uses
+$\varepsilon_{\text{eff}}$.
+
+### 5.8.3 Effective absorption coefficient
 
 The volumetric (extinction) absorption coefficient used by the in-depth radiation
 models (Beer–Lambert and P1, §8) is a **concentration**-weighted sum of the
@@ -3474,11 +3594,60 @@ These give `μ(300 K) = 1.846 × 10⁻⁵` Pa·s and `μ(600 K) = 3.016 × 10⁻
 Sutherland's law is the Chapman–Enskog rigid-sphere result for a single gas and
 captures the *increase* of gas viscosity with temperature (`μ ∝ T^{1/2}` in the
 high-`T` limit), the opposite of liquid behaviour. It is valid roughly over
-`200–2000 K` for air-like gases. The mixture viscosity
-`mixture_gas_viscosity(ξ, T, material)` currently *ignores* composition and
-returns the single Sutherland value `effective_gas_viscosity(T)`
-(`effective_properties.jl:72–77`); a Wilke mixing rule for multi-component gases
-of very different molar mass is noted as a future extension (§5.16).
+`200–2000 K` for air-like gases.
+
+### Material-supplied viscosity
+
+The air constants are only the **default**. Each `Material` carries its own
+pore-gas viscosity curve in the `gas_viscosity` field, and the Darcy path reads
+it through `effective_gas_viscosity(T, material)`, which evaluates
+`material.gas_viscosity(T)` between two guards. A material that says nothing
+carries `SutherlandProperty()` — the air triple above — so this reduces to
+(5.24) bit for bit and every pre-existing case is unchanged.
+
+The field accepts anything `to_property` understands, so a fitted correlation
+drops in directly:
+
+```julia
+# Cantera mixture-averaged fit for wood pyrolyzates, ascending coefficients,
+# valid 280–1200 K.
+Material(name = :WhitePine, components = (...), reactions = (...),
+         gas_viscosity = PolynomialProperty(mu_coeffs))
+```
+
+**Why the guards matter.** μ enters the model *only* as the Darcy mobility
+κ/μ (§9), never on its own. An error in μ is therefore exactly the reciprocal
+error in permeability — and a μ that reaches zero or changes sign does not
+degrade the answer, it reverses or blows up the gas velocity. Hence:
+
+- the curve is a property law, so it evaluates on the property bracket
+  $[200, 3000]$ K (§4.4): diverging Newton trial states cannot kill the solve
+  on `T^{3/2}` or evaluate a fitted polynomial absurdly far outside its range
+  (the Chapman–Enskog diffusivity formula, which is not a property law, keeps
+  its own 100 K floor `T_GAS_PROPERTY_FLOOR`);
+- the result is floored at `MU_FLOOR` (1e-12 Pa·s, seven orders below any real
+  gas) so an extrapolated fit cannot go non-positive;
+- `Material`'s constructor probes the curve over 200–1800 K and refuses one that
+  is already non-positive or non-finite there, in the spirit of `MixingSpec`'s
+  `CARMAN_KOZENY`/`length_scale` check.
+
+Applying the clamps in `effective_gas_viscosity(T, material)` rather than
+inside the property function means
+every curve a material can carry is protected, not just the built-in Sutherland
+form.
+
+**Accuracy.** Air is within ~2 % for an N₂-swept pore space, but overstates the
+viscosity of wood pyrolyzates by roughly 1.7× at 300 K falling to 1.3× at
+1000 K — a bias in one direction everywhere, growing as the pore space fills
+with volatiles.
+
+**Composition dependence.** `mixture_gas_viscosity(ξ, T, material)` takes `ξ`
+and every Darcy call site passes it, but the function currently returns the
+material's own curve regardless: the model carries **one curve per material**, an average over the
+composition that material is expected to produce. It cannot resolve the pore gas
+shifting from background air to volatiles as pyrolysis proceeds. A
+composition-dependent rule (Wilke) would be introduced by changing that one
+function — but see §5.16 item 1 for why that is not a local change.
 
 ---
 
@@ -3675,6 +3844,7 @@ per-cell arrays (length `n`) are
 | `k` | `k_eff` | W·m⁻¹·K⁻¹ | `_conductivity_from_v` (§5.5) |
 | `λ` | `λ_eff` | m²·s⁻¹ | `_gas_transfer_from_v` (§5.6) |
 | `ε` | `ε_eff` | – | `_emissivity_from_v` (5.22) |
+| `a` | `a_eff` | – | `_absorptivity_from_v` (5.22b) |
 | `α` | `α_eff` | m⁻¹ | `effective_absorption` (5.23) |
 
 and the per-face arrays (length `n+1`) are `k_face` and `λ_face` (5.29). The
@@ -3701,12 +3871,14 @@ cache.ρ[i]   = mixture_density(ξ_i, T_i, material)
 cache.ρcp[i] = effective_heat_capacity(ξ_i, T_i, material)
 cache.k[i]   = _conductivity_from_v(v_solid, T_i, material; k_init = k_prev)
 cache.λ[i]   = _gas_transfer_from_v(v_full, T_i, material)
-cache.ε[i]   = _emissivity_from_v(v_solid, material)
+cache.ε[i]   = _emissivity_from_v(v_solid, T_i, material)
+cache.a[i]   = _absorptivity_from_v(v_solid, T_i, material)
 cache.α[i]   = effective_absorption(ξ_i, material)
 ```
 
 This is the authoritative statement of which basis each property uses:
-**conductivity and emissivity from `v_solid`, gas transfer from `v_full`**
+**conductivity, emissivity, and surface absorptivity from `v_solid`, gas
+transfer from `v_full`**
 (§5.1.3). The previous step's conductivity `k_prev = cache.k[i]` is passed as the
 Bruggeman warm-start `k_init` (§5.5.3). After sizing, the loop is **allocation
 free**: all composition-dependent dispatch is generated (compile-time unrolled),
@@ -3823,10 +3995,28 @@ recorded from the source and KB open questions; several are flagged here for the
 verification and validation discussion of §18.
 
 1. **Single-value mixture gas viscosity.** `mixture_gas_viscosity` ignores
-   composition and returns the air-Sutherland value (5.24). A Wilke mixing rule
-   would be needed for multi-component gases of very different molar mass (e.g.
-   H₂O + CO₂ at high temperature). This is not critical at FDS-scale fidelity but
-   limits accuracy for strongly non-air gas mixtures.
+   composition and returns the material's single viscosity curve. The
+   *material* dependence is resolved — a material supplies the blend correlation
+   for the gas it produces — but the *composition* dependence within a material
+   is not: one curve averages over the pore gas shifting from background air to
+   volatiles as pyrolysis proceeds. A Wilke mixing rule over per-component
+   μⱼ(T) would resolve that transition.
+
+   Two things make this more than a one-function change, and both are worth
+   knowing before attempting it:
+
+   - The production Darcy Jacobian is the **analytical override** in
+     `Jacobian/operators/darcy_transport.jl`, not the AD path (which is retained
+     only as the rtol = 1e-12 equivalence reference). Its mobility chain rule
+     assumes `dμ/dξ = 0` and takes the ξ-path through κ alone; every
+     `dvg_dξ_*_j` expression would need a `− mob·dμ_dξ[j]` term.
+   - That equivalence gate **cannot catch the omission** while every Darcy test
+     fixture carries a single gas component, because a one-species mixture rule
+     is the identity. A multi-gas Darcy fixture has to land first.
+
+   `test/discretization/test_darcy.jl` asserts ξ-invariance of
+   `mixture_gas_viscosity` as a tripwire, so the day this changes the failure is
+   loud and points here.
 
 2. **Unvalidated Chapman–Enskog LJ defaults.** The heuristic `σ(M)` and
    `ε/k_B(M)` correlations (5.27) are rough estimates anchored to small organics
@@ -6037,10 +6227,13 @@ q_{\text{BC}}(T_s) = \Phi_{\text{incident}}\,\alpha
 $$
 
 where $\Phi_{\text{incident}}=I_{\text{ext}}(t)$ is the incident intensity
-[W·m⁻²] and $\alpha$ is the surface absorptivity. By Kirchhoff's law at radiative
-equilibrium the default absorptivity equals the effective surface emissivity,
-$\alpha=\varepsilon_{\text{eff}}=\sum_j v_j^{\text{solid}}\varepsilon_j$ (clamped
-to $[0,1]$); an explicit `absorptivity` overrides this. The temperature derivative
+[W·m⁻²] and $\alpha$ is the surface absorptivity. The default absorptivity is the
+material's effective surface absorptivity
+$\alpha=a_{\text{eff}}=\sum_j v_j^{\text{solid}}a_j$ (§5.8.2, clamped to
+$[0,1]$), where $a_j$ is the component's `absorptivity` when set and otherwise
+its emissivity $\varepsilon_j(T)$ — so with no component absorptivity set this
+is Kirchhoff's law $\alpha=\varepsilon_{\text{eff}}$; an explicit BC
+`absorptivity` overrides this. The temperature derivative
 of this contribution is $\mathrm{d}q_{\text{BC}}/\mathrm{d}T_s=0$ (absorbed
 incident flux is independent of $T_s$). Surface re-radiation loss is supplied
 separately by a `RadiativeBC` term, $q=F\varepsilon_{\text{eff}}\sigma(T_\infty^4-T_s^4)$,
@@ -6134,11 +6327,12 @@ The flux that actually crosses the surface is $\alpha_{\text{surf}}\,
 I_{\text{surface}}$, where $\alpha_{\text{surf}}$ is the surface
 transmissivity: on the default **Kirchhoff path** (the `RadiativeFluxBC`
 carries no explicit `absorptivity`) it is the *live* surface cell's effective
-emissivity $\varepsilon_{\text{eff}}(T_N,\xi_{\cdot,N})$ — absorption and
-surface emission then use the same coefficient (Kirchhoff's law
-$\alpha=\varepsilon$, detailed balance), and the remaining
-$(1-\varepsilon_{\text{eff}})I_{\text{surface}}$ is reflected and never
-enters the medium. With an **explicit BC absorptivity**, $\alpha(t)$ is folded
+surface absorptivity $a_{\text{eff}}(T_N,\xi_{\cdot,N})$ (`cache.a[N]`,
+§5.8.2) — identical to $\varepsilon_{\text{eff}}(T_N,\xi_{\cdot,N})$ unless a
+component sets its own `absorptivity`, so by default absorption and surface
+emission use the same coefficient (Kirchhoff's law $\alpha=\varepsilon$,
+detailed balance) — and the remaining $(1-a_{\text{eff}})I_{\text{surface}}$
+is reflected and never enters the medium. With an **explicit BC absorptivity**, $\alpha(t)$ is folded
 into the extracted intensity upstream and the kernel does not rescale
 (`apply_kirchhoff_absorptivity = false`). The entrance intensity is then the
 cumulative attenuation from the surface down to the top face of cell $i$:
@@ -6156,14 +6350,18 @@ intensity it is given.
 ### 8.3.3 Backward sweep and guards
 
 Because $I_{\text{in}}(i)$ depends only on cells *above* $i$ (larger index, nearer
-the surface), the implementation sweeps from the top cell $N$ down to cell 1,
-carrying a running intensity `I_current`. Forward iteration would require
-not-yet-computed information; the backward sweep is the natural causal order.
+the surface), the implementation sweeps from the live top cell
+$n_{\rm live} = $ `mesh.n_active_cells` down to cell 1, carrying a running
+intensity `I_current`; parked ghost slots above the live surface (§14.3) get
+$q^{\text{rad}} = 0$. Forward iteration would require not-yet-computed
+information; the backward sweep is the natural causal order.
 
 ```julia
+n_cells_val = mesh.n_active_cells
+fill!(q_rad, zero(eltype(q_rad)))
 I_current = oneunit(eltype(q_rad)) * I_surface
 if apply_kirchhoff_absorptivity
-    I_current *= cache.ε[n_cells_val]   # Kirchhoff: α_surf = ε_eff (live surface cell)
+    I_current *= cache.a[n_cells_val]   # α_surf = a_eff of the live surface cell
 end
 A = state.A_section[]
 @inbounds for i = n_cells_val:-1:1
@@ -6191,8 +6389,17 @@ Three details are load-bearing:
 - **Transparency guard.** Cells with $\alpha\le 10^{-20}$ get $q^{\text{rad}}_i=0$
   and do not attenuate the beam, preventing `exp(0)`-degenerate work and spurious
   absorption in radiation-free regions.
-- **Zero-flux short-circuit.** If $I_{\text{surface}}\le 0$, the whole array is
-  zeroed and the routine returns (radiation.jl:60–63).
+- **Zero-flux short-circuit.** If $I_{\text{surface}}\le 0$, the routine returns
+  after zeroing the array.
+- **Transmitted flux.** Whatever intensity is left after cell 1,
+  $I_{\text{surface}}\,e^{-\tau_{\text{tot}}}$, leaves through the back face: the
+  sweep deposits nothing there and the back-face boundary condition describes
+  only the surface it models. That is the right answer for a slab whose back
+  face is open and a modelling error for one that rests on an opaque holder
+  with a transparent absorption coefficient, so the extractor reports the
+  transmitted flux per saved time (`solution.extras.radiation_transmitted`)
+  and a solve that loses more than 1 % of the entering flux at any saved time
+  warns once.
 
 The source is **positive = heating**: it is added to the energy RHS as
 $+q^{\text{rad}}_i/\rho c_p^{\text{eff}}$ (§8.8). Energy conservation holds in the
@@ -8506,7 +8713,7 @@ The following limitations are documented in the source and KB notes and should g
 
 5. **Single-reactant kinetics.** Volume change inherits the single-reactant restriction of the kinetics (§6.5, §6.10): `species_source_terms!` enforces $N_{\mathrm{Rin}}=1$, so $\theta$ and $\chi$ are built from single-reactant sources only. Bimolecular or multi-reactant stoichiometry (e.g. char oxidation consuming both char and O₂) would require extending the source-term machinery before $\theta$/$\chi$ could account for it.
 
-6. **Interaction with adaptive mesh refinement.** The $\chi$ block, the per-cell strain $\theta_i$, and $m_{\mathrm{dry},i}$ must all be carried through any AMR remap (surface-depletion merge, h-refinement). The energy-conserving merge and the mass-exact remap are detailed in §14, *Adaptive Mesh Refinement*; the consistency of $\chi$ accumulation across a merge (summing $m_{\mathrm{dry}}$ denominators) is a subtle invariant that must be preserved, and the interaction of the depletion callback with the pluggable Jacobian (which falls back to colored finite differences) is an open coupling discussed in §14 and §15.
+6. **Interaction with adaptive mesh refinement.** The $\chi$ block, the per-cell strain $\theta_i$, and $m_{\mathrm{dry},i}$ must all be carried through any AMR remap (surface-depletion merge, h-refinement). The energy-conserving merge and the mass-exact remap are detailed in §14, *Adaptive Mesh Refinement*; the consistency of $\chi$ accumulation across a park (summing $m_{\mathrm{dry}}$ denominators and weighting the merged $\chi$ by them) is a subtle invariant that the park primitive preserves (§14.3.4).
 
 7. **Substring-based water-vapor exclusion.** The dry-gas index set relies on a name substring match (§10.3.3), which is fragile to naming. A type-level or explicit-flag mechanism for "this gas is moisture-derived" would be more robust than the current `"H2O"`/`"water"` heuristic.
 
@@ -9975,13 +10182,15 @@ f'(T_s) = \frac{dq_{\text{BC}}}{dT_s} - \frac{k_{\text{eff}}}{\Delta z_{1/2}}
 $$
 
 with under-relaxation $\omega=1$ by default (`boundary_temperature.jl:168–205`).
-The initial guess is a **warm start** from the previously solved surface
-temperature ($T_s^{(0)} = $ `state.T_surface`, the persistent per-boundary
-`BoundaryState`; the very first call starts from the 300 K mesh-construction
-seed) — on smooth time-stepping this saves Newton iterations relative to
-restarting from $T_{\text{cell}}$. (The non-mutating convenience wrapper
-`solve_boundary_temperature` accepts a `T_guess` keyword defaulting to
-$T_{\text{cell}}$.) The conduction derivative
+The initial guess is the adjacent cell temperature clamped to the property
+bracket, $T_s^{(0)} = \min\bigl(\max(T_{\text{cell}}, 200\ \text{K}),
+3000\ \text{K}\bigr)$, so the solve is a pure function of its arguments. The
+per-boundary `BoundaryState` receives the converged $T_s$ and fluxes for
+diagnostics and is never read back; a non-finite final iterate is not stored.
+A residual evaluation therefore never depends on the ones before it: a trial
+state of a diverging outer Newton, with a cell temperature far outside the
+bracket, fails that trial and leaves every later evaluation untouched. The
+conduction derivative
 $dq_{\text{cond}}/dT_s = k_{\text{eff}}/\Delta z_{1/2}$ is exact and always
 present; the BC derivatives are given per-type in §12.2.4.
 
@@ -10044,7 +10253,9 @@ radiation_model)`, which returns $(q_{\text{BC}}, dq_{\text{BC}}/dT_s)$ for each
 concrete thermal BC. The exact pairs (verified against
 `boundary_temperature.jl:307–429`) are collected below; the
 $\varepsilon_{\text{eff}}$ argument is the composition-weighted effective surface
-emissivity from the property cache (§12.2.6).
+emissivity from the property cache and the keyword `a_eff` (default
+$\varepsilon_{\text{eff}}$) the effective surface absorptivity for incident
+radiation (§12.2.6).
 
 | BC | $q_{\text{BC}}(T_s)$ | $dq_{\text{BC}}/dT_s$ |
 |---|---|---|
@@ -10106,26 +10317,44 @@ boundary faces** in `compute_conductive_fluxes!` before BC application, so the
 overwrite here is the sole source of the boundary face flux; there is no
 double-counting.
 
-### 12.2.6 Effective surface emissivity (composition-weighted, Kirchhoff)
+### 12.2.6 Effective surface emissivity and absorptivity (composition-weighted)
 
-When a `RadiativeBC` or `RadiativeFluxBC` is constructed with
-$\varepsilon=\texttt{nothing}$ (resp. $\alpha=\texttt{nothing}$), the surface
-radiative property is taken from the boundary cell's effective emissivity
+When a `RadiativeBC` is constructed with $\varepsilon=\texttt{nothing}$, the
+re-radiation uses the boundary cell's effective emissivity
 $\varepsilon_{\text{eff}}$, computed in the property cache as the volume-weighted
-mean over the solid/liquid components,
+mean over the solid/liquid components with each component emissivity evaluated
+at the cell temperature,
 
 $$
-\varepsilon_{\text{eff}} = \sum_j v_j\,\varepsilon_j,
+\varepsilon_{\text{eff}} = \sum_j v_j\,\varepsilon_j(T_{\text{cell}}),
 $$
 
-clamped to $[0,1]$ (see §5.8). Two physical principles are encoded here. First,
-**Kirchhoff's law** $\alpha=\varepsilon$ at thermal equilibrium lets the same
-quantity serve as both emissivity (re-radiation) and absorptivity (absorbed
-incident flux). Second, surface emissivity is a *geometric* property of the
-exposed mixture, so a volume-weighted (not mass-weighted) average is appropriate
-and it **automatically tracks composition changes** during pyrolysis (e.g.
-polymer $\to$ char as $v_j$ shifts). The boundary solver reads this as
-`cache.ε[cell_id]` (`boundary_temperature.jl`).
+clamped to $[0,1]$ (see §5.8.1). When a `RadiativeFluxBC` is constructed with
+$\alpha=\texttt{nothing}$, the absorbed incident flux uses the boundary cell's
+effective surface absorptivity
+
+$$
+a_{\text{eff}} = \sum_j v_j\,a_j,\qquad
+a_j = \texttt{surface\_absorptivity}_j \text{ if set, else } \varepsilon_j(T_{\text{cell}}),
+$$
+
+(§5.8.2). Two physical principles are encoded here. First, **Kirchhoff's law**
+$\alpha=\varepsilon$ at thermal equilibrium is the default: with no component
+absorptivity set, $a_{\text{eff}}\equiv\varepsilon_{\text{eff}}$ and the same
+quantity serves as both emissivity (re-radiation) and absorptivity (absorbed
+incident flux). A component-level `absorptivity` relaxes this where the heater
+spectrum differs from the surface's own emission spectrum, keeping the two
+mixtures on the same volume weights. Second, surface emissivity is a
+*geometric* property of the exposed mixture, so a volume-weighted (not
+mass-weighted) average is appropriate and it **automatically tracks composition
+changes** during pyrolysis (e.g. polymer $\to$ char as $v_j$ shifts). The
+boundary solver reads these as `cache.ε[cell_id]` and `cache.a[cell_id]` and
+threads them into `solve_boundary_temperature!` as the positional
+$\varepsilon_{\text{eff}}$ and the keyword `a_eff` (`boundary_temperature.jl`);
+the Jacobian operators recompute both on the Dual-seeded $(T,\xi)$, so
+$\partial\varepsilon_{\text{eff}}/\partial T_{\text{cell}}$ and
+$\partial a_{\text{eff}}/\partial T_{\text{cell}}$ from a temperature-dependent
+component emissivity enter the surface energy row exactly.
 
 ### 12.2.7 `BoundaryState` storage
 
@@ -11070,10 +11299,14 @@ in-depth absorbed fraction volumetrically rather than at the face.
    impermeable back face (the bottom gas flux vanishes) and for equal ambients;
    supporting it would require a per-cell datum rather than a scalar.
 
-2. **Temperature-dependent emissivity derivative.** The radiative Newton
-   derivative omits the $F\,(d\varepsilon/dT)\,\sigma\,(T_\infty^4-T_s^4)$ term
-   (§12.2.4). The converged $T_s$ is unbiased, but convergence can become
-   sub-quadratic for strongly temperature-sensitive $\varepsilon(T)$.
+2. **Temperature-dependent emissivity derivative.** For a `RadiativeBC` whose
+   own `ε` is a function of $T_s$, the radiative Newton derivative omits the
+   $F\,(d\varepsilon/dT)\,\sigma\,(T_\infty^4-T_s^4)$ term (§12.2.4). The
+   converged $T_s$ is unbiased, but convergence can become sub-quadratic for
+   strongly temperature-sensitive $\varepsilon(T_s)$. This does not affect
+   component-level $\varepsilon_j(T)$: the mixture $\varepsilon_{\text{eff}}$
+   is evaluated at the *cell* temperature and is a constant of the surface
+   Newton iteration, so that derivative is exact.
 
 3. **Transpiration BC integration.** The surface transpiration term is implemented
    and tested but is opt-in and currently *forbidden* in production because it
@@ -12062,72 +12295,154 @@ transported fields is the caller's responsibility.
 
 ---
 
-## 14.3 Surface depletion (the production path)
+## 14.3 Depletion handling: parked cells (the production path)
 
-The single AMR capability wired into `solve` is **surface-cell depletion
-handling**. As pyrolysis consumes the solid, the ALE mesh recedes (§11): the
-surface cell at $z=L$ thins toward zero thickness. A vanishing cell is
-numerically catastrophic for two reasons. First, its matrix heat capacity
+The single AMR capability wired into `solve` is **depletion handling**. As
+pyrolysis consumes the solid, an ALE cell (§11) thins toward zero thickness; on a
+fixed mesh a cell empties instead. A vanishing or emptied cell is numerically
+catastrophic for two reasons. First, its matrix heat capacity
 $\rho c_p^{\mathrm{eff}} V_i \to 0$ as the solid gasifies, so the energy equation
-$\rho c_p^{\mathrm{eff}}\,\dot T_i = (\text{fluxes})$ becomes singular — a finite
-flux divided by a vanishing capacity produces an unbounded $\dot T$. Second, an
-explicit/semi-implicit CFL-type stability limit scales like $h_i^2$, forcing the
-timestep toward zero. Depletion handling removes the offending cell by **merging
-it with its interior neighbor**, conserving mass and energy.
+$\rho c_p^{\mathrm{eff}}\,\dot T_i = (\text{fluxes})$ becomes singular. Second, the
+transport rows of a thin cell scale as $1/\Delta z_i^2$, so the condition number
+of the implicit stage matrix $W = I/(\gamma\Delta t) - J$ grows as
+$\Delta z_i^{-2}$: at $\Delta z \approx 10^{-7}$ m, $\operatorname{cond}(W)$
+exceeds $10^{13}$ for any $\Delta t \gtrsim 10^{-3}$ s and Newton's linear solves
+carry no usable digits, so the integrator halves $\Delta t$ until the cell's own
+time scale is resolved. No Jacobian accuracy and no regularisation of the
+properties changes this; the cell must leave the nonlinear system.
 
-### 14.3.1 Thinness detection
+Depletion handling **parks** the cell: it merges the cell's mass and condensed
+enthalpy into a neighbour, then moves the freed state slot above the live
+surface as an inert ghost. The state vector, the mesh arrays, the
+`StateLayout`, the sparsity pattern and the Jacobian caches keep their size for
+the whole solve; every kernel runs over the live range, and the boundary
+conditions act at the live surface.
 
-The detector flags a cell as thin when its current thickness falls below a fixed
-fraction of the *initial* cell thickness:
+### 14.3.1 Live range and ghost slots
+
+With $n$ the (fixed) number of state slots and $n_{\rm live}$ =
+`mesh.n_active_cells`:
+
+- live cells are `1:n_live`, live nodes and faces `1:n_live+1`; face
+  `n_live+1` is the exposed boundary face (`Face1D` with `cell_ids =
+  (n_live, 0)`, `boundary_id = 1`; `mesh.boundary_faces[1] == [n_live+1]`) and
+  cell `n_live` the boundary cell;
+- ghost slots are `n_live+1:n` (cells) and `n_live+2:n+1` (nodes);
+  `active_cell_mask[i] == (i ≤ n_live)`;
+- a ghost carries $\xi_j = 0$ for every component, the temperature it was
+  parked with, $\chi = 0$ and `m_dry_solid_initial = 0`. Under ALE its nodes
+  sit on the live surface (zero thickness) and move with it,
+  $\dot z_k = w_{n_{\rm live}+1}$ for $k > n_{\rm live}+1$; on a fixed mesh
+  they keep their geometry;
+- every residual kernel and every Jacobian operator loops over
+  `1:mesh.n_active_cells` (cells) or `1:mesh.n_active_cells+1` (faces) and
+  detects the top boundary through the face connectivity, so no kernel reads a
+  ghost. The pack step writes exactly zero into the ghost $T$, $\xi$ and $\chi$
+  rows. Their Jacobian rows are therefore zero and $W$ is block-diagonal with
+  $I/(\gamma\Delta t)$ in the ghost block — perfectly conditioned — while the
+  error estimate of a ghost component is identically zero;
+- the live thickness is $z_{n_{\rm live}+1} - z_1$; every ledger, mass and
+  energy sum runs over the live cells.
+
+The correctness statement is an **equivalence**: the residual (and the
+Jacobian) of the live rows of a parked state equal, to roundoff, those of the
+same physical configuration built as an $n_{\rm live}$-cell problem
+(`test/residual/test_park_equivalence.jl`, `test/jacobian/test_park_jacobian.jl`,
+for the Eulerian, ALE, Darcy, Beer–Lambert and variable-cross-section modes).
+
+### 14.3.2 Trigger
+
+Under ALE a live cell is depleted when its current thickness falls below a
+fixed fraction of its *initial* thickness,
 
 $$
 \Delta z_i = z_{i+1}-z_i \;<\; \tau_{\mathrm{dep}}\,\Delta z_{i,\mathrm{init}},
 $$
 
-with the default depletion threshold $\tau_{\mathrm{dep}} = 0.05$ (5 %). Node
-positions $z$ are read directly from the ODE state vector (ALE mode), so detection
-sees the live integrator state, not a stale mesh snapshot.
+with the default `depletion_threshold` $\tau_{\mathrm{dep}} = 0.05$. Node
+positions are read from the ODE state, so detection sees the live integrator
+state. The reference thicknesses are stored per state slot in
+`DepletionCallbackState.reference` (computed once as $V_{i,\mathrm{init}}/A_0$),
+so each cell is judged against its *own* initial thickness — the only detector
+that is correct on a stretched mesh, where a single shared reference would, for
+any cell-size ratio above $1/\tau_{\mathrm{dep}} = 20$, flag the fine cells at
+$t = 0$ or never flag the coarse ones. When an interior cell parks, the
+reference entries shift with the cells. `find_thin_cells` returns the thin live
+cells surface first (descending $z$) and throws on a non-positive signed
+thickness: an inverted cell is a mesh-motion failure, not depletion.
 
-Two implementation facts matter for correctness. (i) The reference thicknesses
-$\Delta z_{i,\mathrm{init}}$ are stored in `DepletionCallbackState` as a
-**per-cell vector**, computed once at solve start as $V_{i,\mathrm{init}}/A_0$
-(`DepletionCallbackState(layout, mesh)`), so each cell is judged against its
-*own* initial thickness. This is what makes the detector correct on stretched
-meshes: a single shared reference (e.g. the surface cell's) would, for any
-max/min cell-size ratio above $1/\tau_{\mathrm{dep}} = 20$, either flag the
-fine cells at $t = 0$ (coarse surface cell) or effectively never flag the
-coarse ones (fine surface cell). When a merge removes a cell, its reference
-entry is deleted and the kept cell retains its own reference, so the vector
-stays in lockstep with the state layout (`find_thin_cells` enforces the length
-match and throws `DimensionMismatch` otherwise). (ii) `find_thin_cells`
-returns thin cells **sorted by $z$ descending — surface first**.
-Processing surface cells first prevents orphaning interior cells in a cascade
-where several adjacent cells thin simultaneously.
+The threshold is not a lever for Newton failures. Raising $\tau_{\rm dep}$
+merges the hottest cell into a colder one earlier, which moves the surface
+temperature: on the Landau case V-CPL-02 (2 mm/s on 62.5 µm cells), going
+from 0.05 to 0.3 shifts the Landau identity residual from $7\times10^{-4}$ to
+$2\times10^{-3}$. The Newton failures on a fast ablation front have two
+other causes, degenerate gas transport (§5.6) and a step controller that
+regrows the step beyond the Newton's range (§15.5.3), and are removed there.
+The default stays 0.05.
 
-> **Implementation note.** `is_cell_thin`, `get_cell_thickness`, and
-> `find_thin_cells` in `src/Solver/callbacks.jl`. The depletion
-> *condition* fires whenever `find_thin_cells` is non-empty; the *affect*
-> merges when `n_cells > min_cells` (default `min_cells = 2`) and
-> **terminates the integration** otherwise — at the cell-count floor a thin
-> cell can no longer be merged away, and letting it shrink unbounded would
-> only stall the integrator. `find_thin_cells` also throws on a non-positive
-> signed thickness: an inverted cell is a mesh-motion failure, not
-> depletion, and must not be silently merged away.
+On a fixed mesh cells cannot thin; they empty. The trigger is the **top live
+cell's condensed concentration**,
+$\sum_{j\notin\mathrm{gas}}\xi_{j,n_{\rm live}} < \tau_{\mathrm{dep}}\,
+\sum_{j\notin\mathrm{gas}}\xi_{j,n_{\rm live}}^{\mathrm{init}}$, with the same
+threshold (a cell that starts with no condensed mass never parks). Only the
+top live cell parks, so a fixed mesh burns a layer top down: the surface cell
+empties and parks, and the cell beneath it becomes the surface. That requires
+the surface cell to be the hottest, as under surface absorption. On the PMMA
+burnout of V-BO-02 all 60 cells park one by one from 63 to 452 s, and the
+maximum live-cell temperature stays at 915 K.
 
-### 14.3.2 Energy-conserving temperature merge
+Under in-depth absorption the temperature maximum of a regressing
+non-charring polymer lies below the surface, so the surface cell reacts
+slowest. Under ALE it shrinks and parks, and the surface advances into the
+hotter material. On a fixed mesh the surface cell keeps its volume and loses
+concentration: it persists as a low-density skin while the cells beneath it
+empty, and the layer gasifies from within. A void cell conducts with the gas
+conductivity and absorbs nothing, and nothing in the model carries heat across
+a void by radiation. The flux transmitted through the void column is deposited
+in the first condensed cell below it, which can return that heat upward only
+by conduction through the gas, and the temperatures run away. Continued past its first void, the PMMA
+deck heats the top substrate cell past 1000 K within about 1.5 s and past
+3000 K, the end of the property bracket, about 60 s later. From the first
+interior void on, the model's equations have no solution with valid
+properties.
 
-When two cells $a,b$ of volumes $V_a,V_b$ are merged into one, the concentrations
+A fixed-mesh solve therefore stops at its first interior void. After every
+accepted step the depletion callback tests each live cell below the top live
+cell for a matrix volume fraction
+$\varphi_m = \sum_j \gamma_j\xi_j/\rho_j < 10^{-4}$ (`MIXING_BLEND_LO`), the
+property model's own definition of a void (§5.1); a cell that starts with no
+condensed mass is not tested. On a hit the callback warns that the material
+has gasified from within, that the model carries no heat across a void and
+that a regressing material belongs on the ALE mesh, and terminates the
+integration (retcode `:Terminated`). The in-depth PMMA deck stops at
+337.0 s, when the lowest PMMA cell becomes a void, with the maximum live-cell
+temperature at 912 K (V-BO-05). A fixed
+mesh with depletion is the porous-residue model (a char that keeps its
+volume, burning top down); a material that regresses belongs on the ALE
+mesh.
+
+> **Implementation note.** `is_cell_thin`, `get_cell_thickness`,
+> `find_thin_cells`, `depletion_candidate` and `interior_void_cell` in
+> `src/Solver/callbacks.jl`; `matrix_volume_fraction` in
+> `src/Properties/mixture_rules.jl`. The callback *condition* fires whenever a
+> candidate or (fixed mesh) an interior void exists; the *affect* terminates
+> the integration on a void, parks when `n_live > min_cells` (default
+> `min_cells = 2`) and **terminates the integration** otherwise.
+
+### 14.3.3 Energy-conserving temperature merge
+
+When cells $a,b$ of volumes $V_a,V_b$ are merged into one, the concentrations
 combine by **volume-weighted averaging**, which conserves species mass exactly
 because mass is the extensive product $\xi_j V$:
 
 $$
-\xi_{\mathrm{merged},j} = \frac{V_a\,\xi_{a,j} + V_b\,\xi_{b,j}}{V_a+V_b},
-\qquad
-V_{\mathrm{merged}} = V_a + V_b .
+\xi_{\mathrm{merged},j} = \frac{V_a\,\xi_{a,j} + V_b\,\xi_{b,j}}{V_{\mathrm{keep}}},
 $$
 
-Indeed $\xi_{\mathrm{merged},j}V_{\mathrm{merged}} = \xi_{a,j}V_a + \xi_{b,j}V_b$,
-the sum of the original masses.
+with $V_{\mathrm{keep}} = V_a + V_b$ under ALE (the keeper spans both cells) and
+$V_{\mathrm{keep}} = V_b$ on a fixed mesh (the keeper's volume is fixed; the
+parked cell's mass raises its concentration). Either way
+$\xi_{\mathrm{merged},j}V_{\mathrm{keep}} = \xi_{a,j}V_a + \xi_{b,j}V_b$.
 
 Temperature is **intensive**, and a naive volume-weighted average of $T$ does
 *not* conserve internal energy when the two cells have different heat capacities —
@@ -12150,9 +12465,9 @@ H_b(T_b)$. Two choices are deliberate:
   per merge (always the same sign when a hot surface cell merges into a cooler
   interior one). The integral is evaluated per component by 4-point
   Gauss–Legendre quadrature — exact for polynomial $c_p$ up to degree 7, and
-  merges are rare callback events so the cost is irrelevant. The datum
+  park events are rare so the cost is irrelevant. The datum
   $T_{\mathrm{ref}}$ cancels because each component's total mass is identical
-  before and after the merge (concentrations merge volume-weighted).
+  before and after the merge.
 - **Gas components are excluded.** Formulation A stores thermal energy in the
   condensed matrix only (the gas is thermally quasi-steady; §5, §7), so gas
   heat capacity does not belong in the merge weighting either.
@@ -12183,194 +12498,142 @@ a $120\,$K (20 % of the temperature difference) error avoided.
 > state_b, material)` in `src/Adaptivity/cell_merge.jl`, with a raw-values
 > variant `merge_temperatures_conservatively_from_values`. The component heat
 > capacity is `material.components[j].heat_capacity`, a callable $c_{p,j}(T)$.
-> This is the **single** canonical merge: the solver's
-> `create_merged_state_vector` (`src/Solver/callbacks.jl`) — the routine
-> actually invoked during a live solve — delegates to the raw-values variant,
-> and `merge_adjacent_cells!` and the experimental `coarsen_cells!` call the
-> `CellState` form.
+> This is the **single** canonical merge: the park primitive `park_cell!` and
+> the experimental `coarsen_cells!` both call it.
 
-### 14.3.3 Adjacent-cell merge: topology surgery
+### 14.3.4 The park event
 
-`merge_adjacent_cells!(mesh, cell_to_remove_id, cell_to_keep_id; material)`
-(`src/Adaptivity/cell_merge.jl` lines 276–506) performs the topological merge of
-any two *adjacent* cells (not necessarily refinement siblings — that is the
-defining difference from $h$-coarsening). The sequence:
+`park_cell!(mesh, i_park, i_keep; material, ale)` (`src/Adaptivity/cell_park.jl`)
+performs the mesh side of a park; `park!` (`src/Solver/callbacks.jl`) drives it
+and rewrites the state vector. The sequence:
 
-1. **Validate** that both cells are active and adjacent (share a face, located by
-   `find_shared_face`).
-2. **Determine arrangement** from the cell centers: `is_removing_right` is true
-   when the removed cell is at higher $z$ (the usual surface case).
-3. **Conservative state merge.** Temperature via
-   `merge_temperatures_conservatively` (or volume-weighted if no `material`);
-   concentrations volume-weighted; the kept cell's state is overwritten with the
-   merged $T$, $\xi$, and $V_{\mathrm{merged}}=V_a+V_b$. The reference volume is
-   summed, $V^{\mathrm{ref}}_{\mathrm{keep}} \mathrel{+}= V^{\mathrm{ref}}_{\mathrm{remove}}$.
-4. **Preserve initial dry-solid mass extensively.** If the $\chi$-denominator
-   array is populated, $m_{\mathrm{dry},\mathrm{keep}} \mathrel{+}=
-   m_{\mathrm{dry},\mathrm{remove}}$. This keeps the per-cell pyrolysis-progress
-   denominator consistent across the merge (see §10 for the role of
-   $m_{\mathrm{dry},i}$ in the $\chi$ dynamics).
-5. **Expand node and face connectivity.** The kept cell's node tuple is widened to
-   span both old cells, the removed cell's outward boundary face is repointed to
-   the kept cell, and the kept cell's face tuple is updated to use that boundary
-   face. (The `is_removing_right`/`is_removing_left` branches handle the two
-   orientations symmetrically; a guarded `@error` fires if a node-corruption
-   condition is detected.)
-6. **Mark the removed cell inactive** and decrement `n_active_cells`.
-7. **Update the kept cell's center** from its widened node span.
-8. **Assert AMR invariants** (§14.6).
-
-After this step the removed cell is inactive but **still present** in the mesh
-arrays; the array lengths are unchanged. Mass and energy are conserved by
-construction (step 3); the function returns `cell_to_keep_id`.
-
-`merge_surface_cell!(mesh; material)` (lines 509–525) is the convenience wrapper:
-it finds the surface cell (highest $z$), finds its interior neighbor, and calls
-`merge_adjacent_cells!`. It returns $0$ if no merge is possible (e.g. only one cell
-remains).
-
-### 14.3.4 Neighbor selection
-
-`find_merge_neighbor(mesh, cell_id)` (`src/Adaptivity/surface_depletion.jl` lines
-151–166) chooses the partner for a thin cell:
-
-- If only one neighbor exists (a boundary cell), use it.
-- If both neighbors exist, **prefer the interior neighbor** (toward the substrate).
-
-The interior side is preferred for thermal stability: the substrate side typically
-has the more slowly varying thermal state, so absorbing the thin surface cell into
-the cooler, larger interior cell produces a less abrupt merged temperature. The
-interior/exterior neighbors are themselves found from the cell's left/right faces
-(`find_interior_neighbor` returns the cell at lower $z$ across the left face;
-`find_exterior_neighbor` the cell at higher $z$ across the right face; either is
-$0$ at a domain boundary).
-
-### 14.3.5 Mesh compaction after the merge
-
-A merge leaves an inactive cell, an orphaned node (the node that used to sit
-between the two merged cells), and an orphaned interior face. The ODE state vector,
-however, *shrinks* by exactly one cell's worth of unknowns when depletion fires
-(§14.3.6), so the mesh arrays must be made to match. Two compaction routines do
-this.
-
-`compact_mesh_after_surface_merge!(mesh)` (lines 559–837) is specialized to the
-surface case where the inactive cell is the last-indexed cell. It identifies the
-orphaned node (the one not referenced by any active cell), the orphaned interior
-face (the non-boundary face that still references the removed cell), and the
-boundary face that must be repointed to the new surface cell. It removes the last
-cell by `pop!` from **all** per-cell parallel arrays — `cells`, `cell_states`,
-`cell_centers`, `cell_volumes`, `active_cell_mask`, and the $\chi$ denominator
-`m_dry_solid_initial` (whose last slot is stale after the merge summed it into
-the kept cell) — removes the orphaned face and node by swap-and-pop (swapping the
-orphaned element with the last element, fixing the moved element's id, then
-popping), and finally repairs all connectivity references and the boundary-face
-dictionary. It asserts the 1D counting invariants
-$n_{\mathrm{nodes}}=n_{\mathrm{cells}}+1$,
-$n_{\mathrm{faces}}=n_{\mathrm{cells}}+1$, and that no inactive cells remain.
-
-`compact_mesh_after_merge!(mesh, removed_cell_id)` (lines 870–1078) is the
-general version, used for an arbitrary removed cell (surface, interior, or
-bottom-adjacent). It differs in one essential way: it removes elements by
-**`deleteat!` (shift semantics)**, not swap-and-pop. Shifting decrements every
-index after the removed position by one, which **preserves the spatial ordering**
-(lower index = lower $z$) that all 1D left/right face logic relies on; swap-and-pop
-would scramble that ordering. It builds explicit old→new remapping dictionaries
-for cells, nodes, and faces (with $0$ marking a removed element), applies
-`deleteat!` to all per-cell parallel arrays — including the $\chi$ denominator
-`m_dry_solid_initial`, which every consumer (the $\chi$ residual, the
-$\bar\chi$ mass weighting, the $\chi$ Jacobian operator) indexes by compacted
-cell id — then reindexes every cell, face, and node
-reference (including `parent` pointers, with boundary `cell_ids == 0` preserved as
-$0$), updates the boundary-face dictionary, and asserts the same counting
-invariants. This is the routine the production depletion callback calls.
-
-> **Implementation note.** Both routines are in `src/Adaptivity/cell_merge.jl`.
-> The production solver invokes `merge_adjacent_cells!` then
-> `compact_mesh_after_merge!(mesh, cell_to_remove)` (`src/Solver/callbacks.jl`
-> lines 599–613). The swap-and-pop surface variant exists for direct use but is
-> not on the production hot path.
-
-### 14.3.6 The depletion callback and the resize cascade
-
-The live depletion machinery is a `DiscreteCallback` checked at the end of every
-accepted integrator step (`create_depletion_callback`, `src/Solver/callbacks.jl`
-lines 503–663). Its `affect!` performs **exactly one merge per invocation** so the
-integrator can adapt its step between merges. The merge sequence is:
-
-1. Pick the first (surface-most) thin cell `cell_to_remove`; choose
-   `cell_to_keep = find_merge_neighbor`.
-2. Read the pre-merge volumes $V_{\mathrm{remove}}, V_{\mathrm{keep}}$ and — for
-   the $\chi$ merge — the pre-merge initial dry-solid masses
-   $m_{\mathrm{init,remove}}, m_{\mathrm{init,keep}}$ from the mesh, and snapshot
-   the integrator state `u_old`. (The masses must be captured here: step 3 sums
-   them into the kept cell and compacts the array.)
-3. `merge_adjacent_cells!(mesh, …; material)` (marks the cell inactive) followed
-   by `compact_mesh_after_merge!(mesh, cell_to_remove)` (shrinks the mesh arrays).
-4. **Build the merged state vector** `create_merged_state_vector(u_old, …)`, which
-   applies the *same* energy-conserving temperature merge and volume-weighted
-   $\xi$ merge to the flat state; for `WithChi` layouts the $\chi$ merge is
-   weighted by the **initial dry-solid masses**,
-   $\chi_m = (m_a\chi_a + m_b\chi_b)/(m_a+m_b)$, because
+1. **Neighbour selection.** `find_merge_neighbor(mesh, i_park)`
+   (`src/Adaptivity/surface_depletion.jl`): a boundary cell takes its only
+   neighbour; an interior cell takes the **interior** (lower-$z$) one. The
+   substrate side has the more slowly varying thermal state, so absorbing the
+   thin cell into the cooler, larger interior cell produces the less abrupt
+   merged temperature. Neighbours are found through the cell's faces
+   (`find_interior_neighbor` / `find_exterior_neighbor`; either is 0 at a
+   domain boundary, which is how the live top cell reports no cell above it).
+2. **Conservative merge** of the two `CellState`s per §14.3.3, with
+   $V_{\mathrm{keep}}$ as defined there; `m_dry_solid_initial` is summed into the
+   keeper so the per-cell pyrolysis-progress denominator stays consistent
+   (§10). The freed slot becomes the ghost state ($\xi = 0$, $T = T_{\rm merged}$,
+   zero volume under ALE, its own volume on a fixed mesh, `m_dry_solid_initial = 0`).
+3. **ALE slot permutation.** Cells `i_park+1:n_live` move down one slot and
+   the nodes above the shared node `max(i_park, i_keep)` move down one slot
+   (per-cell and per-node *values*: `cell_states`, `cell_volumes`,
+   `m_dry_solid_initial`, node positions and velocities). The 1-D connectivity
+   is regular — cell $i$ always owns nodes and faces $(i, i+1)$ — so no cell,
+   face or node reference changes; the freed cell slot `n_live` (the last live
+   index) becomes the ghost and the freed node slot lands on the surface. On a
+   fixed mesh only the top live cell parks and nothing shifts.
+4. **Boundary flags.** Face `n_live` (the new count) becomes the exposed
+   boundary face, `cell_ids = (n_live, 0)`, `boundary_id = 1`; the previous top
+   face becomes an inert ghost face; the matching node flags follow;
+   `mesh.boundary_faces[1]` is updated; `n_active_cells` is decremented and
+   `active_cell_mask` cleared for the ghost; the geometry cache is rebuilt and
+   the AMR invariants (§14.6) asserted.
+5. **State vector.** $T$, $\xi$ and (ALE) $z$ are read back from the mesh for
+   every slot — the mesh mirrors the accepted state when the callback runs, so
+   live cells shift exactly as the mesh did and the ghost carries the merged
+   temperature, zero concentrations and the surface position. The $\chi$ block
+   is shifted the same way with
+   $\chi_{\rm merged} = (m_a\chi_a + m_b\chi_b)/(m_a+m_b)$ weighted by the
+   **initial dry-solid masses** (captured before step 2 sums them), because
    $\chi_i = m_{\mathrm{released},i}/m_{\mathrm{dry,init},i}$ makes
-   $\sum_i \chi_i\,m_{\mathrm{dry,init},i}$ the extensive invariant (volume
-   weighting would nearly discard the depleted cell's pyrolysis record, since its
-   $V \to 0$ while its $m_{\mathrm{init}}$ is unchanged). It then drops the
-   removed cell's entries by `remove_cell_from_state_vector`. The node removed
-   from the state is
-   $\max(\text{cell\_to\_remove}, \text{cell\_to\_keep})$ — the shared node between
-   the two cells.
-5. **Resize the workspace cascade** `resize_workspace!(ws, n_nodes_new,
-   n_cells_new, n_faces_new)` (`src/Problem/workspace.jl` lines 149–200). This
-   single call resizes, in order: the `MeshGeometry` view; the `StateLayout`
-   descriptor (rebuilt with the new sizes); the typed `StateCache`; the property
-   cache and RHS cache; the conditional geometry cache (ALE) and radiation cache
-   (P1); the physics work arrays `dT_work`, `dξ_work`; the ALE work arrays
-   (`w_work`, `w_face`, `θ_work`, `ale_advection`,
-   `ale_species_advection`, `S_conv_work`); and finally re-derives the cached
-   top/bottom boundary face and cell ids from the changed mesh topology.
-6. **Resize the integrator** `resize!(integrator, new_state_length)`, copy in
-   `u_new`, and call `u_modified!(integrator, true)` to force a derivative
+   $\sum_i \chi_i\,m_{\mathrm{dry,init},i}$ the extensive invariant; the ghost
+   gets $\chi = 0$. The workspace's cached boundary face and cell ids follow the
+   mesh (they are shared with the Jacobian's AD workspace, so one update serves
+   both), and `derivative_discontinuity!(integrator, true)` forces a derivative
    recomputation.
 
-The callback also updates the shared `DepletionCallbackState` (incrementing the
-merge count, recording the time and merged-cell index, and deleting the merged
-cell's entry from the per-cell initial-thickness vector — the kept cell retains
-its own reference) so that the thickness-termination callback and the
-diagnostics see the new layout. If only
-`min_cells` remain when a merge is requested, the callback terminates the
-integration instead of merging.
+Mass, condensed enthalpy, $\chi$-weighted dry mass and live volume are
+conserved to roundoff at every event (`test/adaptivity/test_cell_park.jl`).
 
-> **Implementation note.** `create_depletion_callback` and
-> `create_merged_state_vector`/`remove_cell_from_state_vector` in
-> `src/Solver/callbacks.jl`. Enabled by `solve(problem; use_ale=true,
-> handle_depletion=true, depletion_threshold=…, min_cells=…)`. Because the merge
-> saves no interpolatable dense output across a size change, the solver sets
-> `save_everystep=true` and filters to the requested output times in
-> post-processing (`extract_solution_ale!`); see §15.
+### 14.3.5 The depletion callback
 
-### 14.3.7 Why depletion forbids a pluggable Jacobian
+The live machinery is a `DiscreteCallback` checked at the end of every
+accepted integrator step (`create_depletion_callback`,
+`src/Solver/callbacks.jl`). Its condition is `depletion_candidate(...) != 0`,
+or on a fixed mesh an interior void (`interior_void_cell(...) != 0`); its
+`affect!` terminates the integration with a warning on an interior void
+(§14.3.2), and otherwise parks **exactly one cell per step**, surface first,
+so the integrator adapts its step between events, or terminates the
+integration when only `min_cells` live cells remain. It records every event in the shared
+`DepletionCallbackState` (`park_times`, `parked_cells`, `n_live`), which the
+thickness-termination callback (live thickness) and solution extraction also
+read.
 
-Surface depletion **resizes the state vector mid-solve**, but a pluggable
-`JacobianSpec` (the structured or dense-AD backend of §15) carries an immutable
-cache — sparsity pattern, coloring, structured operators — built at problem setup
-for a *fixed* state length. That cache cannot survive a `resize!`. The solver
-therefore enforces mutual exclusivity: passing both `jacobian` and
-`handle_depletion=true` raises an `ArgumentError` at validation
-(`src/Solver/solve.jl`), and the auto-default Jacobian spec is set to
-`nothing` whenever `handle_depletion` is true (`_default_jacobian_spec`).
-With no analytic Jacobian, the integrator falls back to its own
-**colored finite-difference** Jacobian (the `AutoFiniteDiff` autodiff of the
-default `KenCarp4`), which transparently tolerates the resize.
+After the park the `affect!` flags the state as modified and proposes
+`DT_AFTER_PARK` ($10^{-6}$ s) for the next step. The merged keeper cell
+conserves mass and enthalpy but sits off the quasi-steady gas-concentration and
+temperature profiles of its neighbours, so the residual at the parked state is
+orders of magnitude above that of the accepted pre-park state, and the
+integrator's extrapolated stage predictor, built from the pre-park derivative,
+starts far from the post-park solution. At the pre-park step size the Newton
+fails until the controller has cut the step far enough; from the proposed step
+it converges at once, and the controller grows the step back within a few
+steps. The reset is a cost setting, not a condition for completing the run: on
+the 60-park PMMA burnout (V-BO-01) the run takes 858 steps and 8 Newton
+failures with it and 1686 steps and 649 failures without it, with the same
+mass-loss history. A cascade (several cells reaching the threshold together)
+proceeds one park per $10^{-6}$-s step.
 
-A related operational caveat: with depletion enabled the solver resolves the
-linear solver to Julia's native dense `LUFactorization`, which survives
-`resize!`; explicitly requested sparse factorizations (Sparspak, KLU) are
-swapped to dense LU with a warning, since no sparse Jacobian prototype exists
-without a pluggable backend. The one remaining pitfall is a user-constructed
-`integrator` that leaves `linsolve` unset: for state lengths above $\sim 500$,
-LinearSolve's internal default can select MKL's LU, whose pivot array (`ipiv`)
-does not survive `resize!`; the solver warns when it detects this combination
-(`src/Solver/solve.jl`).
+The integrator drains `saveat` with the pre-modification interpolant before
+any `DiscreteCallback.affect!` runs, so a state saved at exactly the park time
+carries the pre-park layout: `n_live_cells(cb, t) = n − #{t_park < t}`.
+Extraction NaN-pads the ghost slots of `T`, `ξ` and `z`, reports the live
+thickness $z_{n_{\rm live}+1}-z_1$, sums mass and gas generation over the live
+cells, and exposes `solution.extras.live_cells` and
+`solution.extras.park_times`. No dense output is lost and `saveat`
+interpolation is unaffected because the state never changes size.
+
+### 14.3.6 The Jacobian through burnout
+
+Because the state keeps its size, the pluggable Jacobian (§15.6) stays valid
+through every park:
+
+- the sparsity pattern is built once for $n$ slots and is a superset of every
+  live pattern;
+- every operator assembles the live range only, so ghost rows and columns of
+  the sparse block are zero;
+- the per-cell payload vectors of the structured couplings (the prefix sums of
+  the ALE mesh velocity, the Beer–Lambert suffix sums, the $\chi$ rank-1) are
+  zero above $n_{\rm live}$, so the sums stop at the live surface and every
+  ghost node row reproduces the surface node row, exactly as the residual's
+  $\dot z_{\rm ghost} = w_{n_{\rm live}+1}$ requires;
+- the geometry AD pass (§15.7) differentiates the masked residual and is
+  consistent by construction.
+
+`verify_jacobian` against the dense ForwardDiff reference passes strictly on
+parked states for `Structured(strategy = DirectSolve())`, and the parked
+`ApproxSolve` assembly equals that of the compacted problem on the live block.
+
+Under ALE, `handle_depletion = true` selects `Structured(strategy =
+ApproxSolve())` as the default Jacobian (§15.6). The `:full` ALE pattern
+carries the prefix-sum couplings of every node to every cell below it, which
+makes the factorized $W$ effectively dense and the sparse direct solve 60–90×
+more expensive per step than the reduced pattern; parking keeps every live cell
+above $\tau_{\rm dep}$ of its initial thickness, so the vanishing-cell
+conditioning that makes the dropped couplings matter never arises, and the two
+strategies follow the same trajectory. The post-park transient is not a
+Jacobian effect: `DirectSolve` restarted from $5\times10^{-2}$ s after every
+park fails its Newton more than 500 times on the 60-park PMMA burnout, while
+the reduced strategy with the reset of §14.3.5 needs 858 steps and 8
+failures at a hundredth of the wall time.
+
+The same holds on fast ablation. On a surface regressing at mm/s through a
+reaction front one cell wide (the Landau case V-CPL-02, $v = 2$ mm/s,
+$\Delta z = 62.5$ µm) the dropped mesh-velocity couplings are larger, but the
+reduced modified Newton still contracts by a factor of 0.03 to 0.18 per
+iteration at the controller's steps of 2.5 to 5 ms, and the two strategies
+follow the same trajectory: without the step cap of §15.5.3, 1088 steps and
+894 Newton failures for the reduced strategy against 1064 and 823 for
+`DirectSolve` with UMFPACK, which takes several times the wall time. Those
+Newton failures are not a Jacobian effect either; a Newton that re-evaluates
+the exact Jacobian at every iterate stalls on the same states. They come from
+degenerate gas transport (§5.6) and from the step controller (§15.5.3).
 
 ---
 
@@ -12496,8 +12759,9 @@ end.
 114–242) merges two *siblings* (same parent, both leaves) back into their parent.
 Its preconditions distinguish it sharply from the production adjacent-cell merge:
 it requires a parent–child relationship (`can_coarsen` checks parent $\ne 0$, both
-leaves), whereas `merge_adjacent_cells!` works on any adjacent pair. The merge
-algebra is identical to §14.3.2 — energy-conserving $T$ (or volume-weighted
+leaves), whereas the production park (`park_cell!`, §14.3.4) works on any
+adjacent live pair. The merge
+algebra is identical to §14.3.3 — energy-conserving $T$ (or volume-weighted
 without material), volume-weighted $\xi$, summed $m_{\mathrm{dry}}$ — but the
 *topology* operation restores the parent: the parent's faces are repointed back to
 the parent, the parent is marked active with `children = (0,0)`, the two children
@@ -12670,26 +12934,24 @@ correctness (that is the compaction routines' assertions on
 $n_{\mathrm{nodes}}=n_{\mathrm{cells}}+1$); it catches the most common drift, a
 counter that disagrees with the mask or a parallel array of the wrong length.
 
-Two distinct compaction strategies coexist, by design:
+Two distinct slot strategies coexist, by design:
 
 | Operation | Strategy | Arrays | Index validity |
 |---|---|---|---|
 | $h$-refinement / $h$-coarsening (experimental) | **mark-inactive** | grow / left in place | preserved (no shift) |
-| surface depletion (production) | **compact immediately** | shrink via `deleteat!` | renumbered (shift) |
+| depletion (production) | **park**: shift live values down, ghost at the end | fixed length | live range renumbered (shift), connectivity regular |
 
-The production depletion path *must* compact because the integrator state vector
-shrinks (§14.3.6); it uses shift semantics to preserve the spatial
-lower-index-equals-lower-$z$ ordering. The experimental $h$-AMR path leaves
-orphans (so its arrays grow monotonically across refinement cycles) precisely to
-avoid invalidating indices held elsewhere. A periodic full-compaction pass for the
+The production depletion path shifts because the live cells must stay a
+contiguous prefix `1:n_active_cells` in spatial order (§14.3.1); the arrays keep
+their length and the 1-D connectivity never changes. The experimental $h$-AMR
+path leaves orphans (so its arrays grow monotonically across refinement cycles)
+precisely to avoid invalidating indices held elsewhere. A periodic
+full-compaction pass for the
 $h$-AMR path is an open design question (§14.8).
 
-The resize cascade triggered on every production merge — geometry view, layout,
-state cache, property/RHS caches, conditional ALE/radiation caches, physics work
-arrays, ALE work arrays, and cached boundary ids — is enumerated in §14.3.6
-(`resize_workspace!`). The Jacobian is *not* in this cascade because depletion
-disables the pluggable Jacobian (§14.3.7); the integrator's colored-FD Jacobian
-re-sizes itself.
+No workspace buffer changes size on a park: the caches are allocated once for
+$n$ slots, and the Jacobian's sparsity pattern is a superset of every live
+pattern (§14.3.6).
 
 ---
 
@@ -12716,11 +12978,11 @@ facts complete the picture:
    handles *whole-domain* exhaustion. Depletion also self-terminates when only
    `min_cells` remain.
 
-3. **Depletion ⇒ colored-FD Jacobian.** As derived in §14.3.7, enabling depletion
-   forces `jac_spec = nothing` and the integrator's own colored finite-difference
-   Jacobian. Consequently, sensitivity studies that rely on the structured/AD
-   Jacobian (§17) cannot at present be combined with surface depletion; making the
-   merge callback compatible with a resizable pluggable Jacobian is an open issue.
+3. **Depletion keeps the Jacobian.** A park rewrites the state in place and
+   leaves its size unchanged (§14.3.6), so the structured Jacobian, its sparse
+   linear solver and `verify_jacobian` all run through burnout. A park event is
+   nonetheless a discrete rewrite of the state: parameter sensitivities (§17)
+   are smooth between events and only piecewise smooth across them.
 
 ---
 
@@ -12749,8 +13011,8 @@ receding surface. Mapping their notation to ours on first use:
   Pyrolysis.jl's geometrically stretched mesh (§13.9) plus the interface-proximity
   indicator (§14.1.4) and the interface monitor (§14.2.2), which dynamically pull
   resolution toward the front. Gpyro's "cell disappears" behavior corresponds to
-  Pyrolysis.jl's depletion merge; the energy-conserving temperature combine
-  (§14.3.2) is the careful version of folding a vanishing control volume's energy
+  Pyrolysis.jl's depleted-cell park; the energy-conserving temperature combine
+  (§14.3.3) is the careful version of folding a vanishing control volume's energy
   into its neighbor.
 
 - **FDS** (McGrattan et al.) solves the 1D solid-phase heat equation on a *fixed*
@@ -12832,8 +13094,8 @@ $$
 
 with $m_j = V\,\xi_j$ the per-component condensed mass ($T_{\mathrm{merged}}$ by
 bracketed Newton; reduces to the $\rho c_p$-weighted mean for constant $c_p$;
-§14.3.2), and $\chi_{\mathrm{merged}} = (m_a\chi_a+m_b\chi_b)/(m_a+m_b)$ with $m$
-the initial dry-solid mass (§14.3.6).
+§14.3.3), and $\chi_{\mathrm{merged}} = (m_a\chi_a+m_b\chi_b)/(m_a+m_b)$ with $m$
+the initial dry-solid mass (§14.3.4).
 
 **Refinement marking** (`src/Experimental/h_refinement.jl`):
 $\eta_i>\theta_{\mathrm{refine}}\max\eta \ \wedge\ h_i>2h_{\min}\ \wedge\ \mathrm{level}_i<\mathrm{max\_level}$,
@@ -12884,11 +13146,9 @@ the code itself.
    Integrating it with the implicit time-stepping — sampling the rates at the
    adaptation point — is not yet done (§14.1.3).
 
-4. **Depletion ⇔ pluggable Jacobian incompatibility.** State-vector resizing
-   defeats the immutable structured/AD Jacobian cache, so depletion falls back to
-   colored finite differences (§14.3.7). This blocks structured-Jacobian
-   sensitivity studies on depleting samples; making the merge survive a resizable
-   pluggable Jacobian is desirable.
+4. **Sensitivities across park events.** A park is a discrete rewrite of the
+   state, so trajectories are only piecewise smooth in the parameters across an
+   event (§17.7.3); adjoint sensitivity through a park event is unsupported.
 
 5. **$r$-refinement defaults are untuned, and relocation does not remap.**
    The convergence tolerance ($10^{-3}$) and relaxation ($0.5$) defaults have not
@@ -13396,15 +13656,43 @@ parabolic stiffness $\sim\Delta t/\Delta z^2$), so the default integrator is an
 L-stable singly-diagonally-implicit Runge–Kutta (SDIRK) method:
 
 $$
-\texttt{KenCarp4}\big(\text{autodiff}=\text{AutoFiniteDiff()},\ \text{linsolve}=\text{SparspakFactorization()}\big).
+\texttt{KenCarp4}\big(\text{autodiff}=\text{AutoFiniteDiff()}\big).
 $$
 
 KenCarp4 is a 4th-order ESDIRK pair with an embedded error estimator for
 adaptive step-size control; its singly-diagonal structure means every implicit
-stage shares the same Newton iteration matrix, which we exploit below. The
-default linear solver is `SparspakFactorization` (reported $\approx28\%$ faster
-than KLU on the block-tridiagonal 1D pattern); KLU and the ILU-Krylov solvers of
-§15.12 are drop-in alternatives.
+stage shares the same Newton iteration matrix, which we exploit below.
+
+**Default linear solver.** `_resolve_integrator` picks the sparse direct
+factorization from the Jacobian's pattern: `UMFPACKFactorization` when the
+Jacobian materializes the ALE geometry block (`DirectSolve` under ALE,
+`materializes_geometry_block`, §15.11.2), and `KLUFactorization` for every
+other sparse Jacobian. The rule depends on the mode and the strategy, never on
+the mesh size. It rests on end-to-end KenCarp4 runs of 100-cell PMMA and
+charring-wood decks (Eulerian and ALE, surface and Beer–Lambert absorption,
+with and without a lateral shrinkage law) and of V-BO-01:
+
+- On the local patterns (every `ApproxSolve` Jacobian, Eulerian `DirectSolve`
+  with surface absorption) KLU is 2.6–4.4× faster than Sparspak and 1.1–1.4×
+  faster than UMFPACK, allocates 8–83 MB per solve against 19–534 MB for
+  Sparspak, and takes the same steps to within 1%.
+- On the exact ALE Jacobian UMFPACK is 1.5–1.9× faster than Sparspak and
+  2.6–2.7× faster than KLU, with identical step and Newton counts.
+- On the Eulerian Beer–Lambert pattern of `DirectSolve` KLU is 1.7× faster
+  than Sparspak. UMFPACK's threshold pivoting (relative pivot tolerance 0.1)
+  produced a factor with growth near $10^{50}$ on a $W$ of condition number
+  about 30; the resulting Newton steps failed, and the run took 50 times the
+  steps. That pattern therefore uses KLU.
+- All three factorizations are backward stable on these systems (normwise
+  backward error below $3\times10^{-15}$). Sparspak does not pivot: on the
+  Darcy decks its componentwise backward error reaches 1 in individual rows,
+  where KLU's and UMFPACK's stay below $10^{-13}$. On the exact ALE Jacobian the
+  relative residuals $\lVert Wx-b\rVert/\lVert b\rVert$ reach
+  $6\times10^{-11}$ for UMFPACK, $2\times10^{-11}$ for KLU and
+  $3\times10^{-9}$ for Sparspak, without effect on the Newton iteration.
+
+Sparspak, KLU, UMFPACK and the ILU-Krylov solvers of §15.12 remain drop-in
+alternatives through `linear_solver`.
 
 > **Implementation note.** Integrator resolution: `_resolve_integrator`,
 > src/Solver/solve.jl. A user may pass a constructor (`integrator=Rodas5`) plus
@@ -13435,9 +13723,8 @@ sparse block $\mathsf{A}$ diagonally dominant and the Richardson iteration of
 §15.10 converge in a few steps.) Each Newton step solves $W\,\delta\boldsymbol{u}=-r$
 for the stage residual $r$; the linear solve is delegated to the chosen
 `LinearSolveStrategy` (DirectSolve / StructuredSolve / ApproxSolve /
-MatrixFreeSolve, §15.10) or, when no pluggable Jacobian is supplied, to the
-integrator's colored finite-difference Jacobian (`AutoFiniteDiff`) with the
-configured `linsolve`.
+MatrixFreeSolve, §15.10) or, for the dense `DenseAD_ForwardDiff` backend, to a
+dense LU.
 
 The Jacobian $J$ is supplied to the integrator through an `ODEFunction` carrying
 both `jac = jac_fn!` and a `jac_prototype` sparsity pattern (the union of the
@@ -13471,11 +13758,12 @@ a `CallbackSet`:
 |---|---|---|---|
 | 1 | `StepUpdateCallback` | discrete (every accepted step) | mirror integrator $\boldsymbol{u}\to$ mutable mesh; sync geometry & cross-section |
 | 2 | `ThicknessTerminationCallback` | continuous (ALE) | terminate when $z_{\rm top}-z_{\rm bot}<$ `min_thickness` |
-| 3 | `DepletionCallback` | discrete (ALE, opt-in) | merge cells below their per-cell thickness threshold; resize state |
-| 4 | `ProgressCallback` | periodic | progress bar |
-| 5 | `DiagnosticsCallback` | discrete (every `diagnostics_stride`) | snapshot energy/mass ledgers |
-| 6 | `VerifyJacobianCallback` | discrete (at sample times) | compare active Jacobian vs. dense AD reference |
-| 7 | user callback | — | custom |
+| 3 | `DepletionCallback` | discrete (opt-in) | park cells below their depletion threshold; the state keeps its size |
+| 4 | `NewtonFailureCap` | discrete (every accepted step; Newton integrators) | after a step whose Newton needed retries, hold the proposed step at or below 1.25× that step for 20 steps |
+| 5 | `ProgressCallback` | periodic | progress bar |
+| 6 | `DiagnosticsCallback` | discrete (every `diagnostics_stride`) | snapshot energy/mass ledgers |
+| 7 | `VerifyJacobianCallback` | discrete (at sample times) | compare active Jacobian vs. dense AD reference |
+| 8 | user callback | — | custom |
 
 The **`StepUpdateCallback`** is the linchpin of the read-only-mesh design: after
 each accepted step it sets `mesh.cross_section_area = cross_section_area_from_state(…)`
@@ -13485,26 +13773,42 @@ post-processing) see a mesh consistent with the integrator state.
 
 The **`DepletionCallback`** (§14.3) detects cells whose current thickness has
 fallen below `depletion_threshold × Δz_init,i` (default $5\%$ of each cell's
-own initial thickness), merges them into a
-neighbor with the condensed-enthalpy-conserving temperature merge of §14.3.2
+own initial thickness; on a fixed mesh, the top live cell whose condensed
+concentration has fallen below the same fraction of its initial value), merges
+it into a neighbour with the condensed-enthalpy-conserving temperature merge of
+§14.3.3,
 
 $$
 \sum_{j\notin{\rm gas}} m_j\!\int_{T_{\rm ref}}^{T_{\rm merged}}\! c_{p,j}\,dT'
 = H_a(T_a) + H_b(T_b)
 \ \text{(bracketed Newton; gas heat capacity excluded)},\qquad
-\xi_{{\rm merged},j} = \frac{V_a\,\xi_{a,j}+V_b\,\xi_{b,j}}{V_a+V_b},
+\xi_{{\rm merged},j} = \frac{V_a\,\xi_{a,j}+V_b\,\xi_{b,j}}{V_{\rm keep}},
 $$
 
-then resizes the workspace caches and the integrator state vector
-(`resize!(integrator, new_len)`; `u_modified!(integrator, true)`). Because the
-state vector changes length mid-solve, depletion is **incompatible with a
-pluggable `JacobianSpec`** (whose caches are sized at setup) — when
-`handle_depletion=true`, `solve` sets `jac_spec=nothing` and falls back to the
-integrator's colored finite-difference Jacobian (§15.13).
+and parks the freed slot above the live surface
+(`derivative_discontinuity!(integrator, true)`). The state keeps its size, so the pluggable `JacobianSpec` stays valid
+and `saveat` interpolation is unaffected (§14.3.5–§14.3.6).
+
+The **`NewtonFailureCap`** is a step cap with a memory of Newton failures. After
+every accepted step it reads the integrator's count of failed nonlinear solves.
+When the step just accepted needed retries, the proposed next step is held at or
+below $g\,\Delta t_{\rm acc}$ with $g = 1.25$ (`FAILURE_MEMORY_GROWTH`) for the
+next $M = 20$ accepted steps (`FAILURE_MEMORY_STEPS`); a further failure
+restarts the memory from the new step. The error controller alone regrows the
+step to its accuracy limit after a failure, and on a strongly nonlinear front
+that limit lies beyond the range in which the stage Newton converges, so the
+integrator settles into a fail–halve–regrow rhythm. On the Landau ablation case
+V-CPL-02 the Newton fails near $\Delta t = 5$ ms and converges at 2.5 ms while
+the controller keeps proposing 5 ms: the cap takes the case from 1087 steps and
+892 Newton failures to 1032 steps and 78 failures. A run without Newton
+failures never triggers the cap and keeps its trajectory exactly. It is
+installed for every integrator that solves its stages by Newton (an
+algorithm with an `nlsolve` field).
 
 > **Implementation note.** Callbacks: src/Solver/callbacks.jl
 > (`create_step_update_callback`, `create_thickness_termination_callback`,
-> `create_depletion_callback`, `create_merged_state_vector`) and src/Solver/solve.jl
+> `create_depletion_callback`, `park!`, `create_newton_failure_cap_callback`)
+> and src/Solver/solve.jl
 > (assembly, diagnostics, verify-Jacobian). The depletion↔pluggable-Jacobian
 > guard is in `_validate_solve_kwargs`, src/Solver/solve.jl.
 
@@ -13608,8 +13912,8 @@ math; the framework handles the global embedding.
 > implementations under src/Jacobian/operators/. Per-operator `ForwardDiff` chunk
 > sizes: reaction `1+N_C`; conduction $3(1+N_C)$; gas transport $3(1+N_C)$ (or 5
 > with the limiter window); BC thermal $1+N_C$; BC mass $2+N_C$ (the energy row
-> reads the interior neighbor's $T$); ALE advection $5(1+N_C)$;
-> $\chi$ $1+N_C$.
+> reads the interior neighbor's $T$); $\chi$ $1+N_C$. The ALE advection
+> derivatives are analytic.
 
 ### 15.7.2 Layer 2 — `StructuredJacobian`
 
@@ -13827,16 +14131,20 @@ reusing the cached $d\theta/dT$, $d\theta/d\xi$ from the strain-rate sweep
 > both the prefix-sum builder and the dilation Jacobian; assembly is atomic per
 > Newton step, so the reuse is safe in practice.
 
-### 15.8.5 ALE advection (TVD)
+### 15.8.5 ALE advection
 
-The advection energy row depends on the 5-cell TVD window
-$[i-2,i+2]$ through the limited gradient and on *all upstream cells* through the
-mesh velocity. The direct part is the chain rule
-$\partial dT_i/\partial T_j$ for $j$ in the limiter window; the indirect part is
-$\partial(\,(\partial T/\partial z)_i\,w_{{\rm cell},i})/\partial x_k$ for all
-$k\le i$, realized by composing the provider's prefix-sum coupling with the local
-row scaling $\text{row\_scale}[i]=(\partial T/\partial z)_i$ (and
-$(\partial\xi_j/\partial z)_i$ for gas species). Chunk size $5(1+N_C)$.
+The operator assembles the conservative flux-form mesh-motion transport of the
+gas species rows only. The energy equation has no mesh-motion advection in
+production: the condensed species are mesh-bound (§11.2.2), and the limited
+temperature kernel runs only under the `w_override` verification hook, which
+the structured Jacobian does not support. The face values are first-order
+donor values, so the direct part is analytic on the one-cell stencil
+$[i-1,i+1]$: $+w_R/\Delta z_i$ to the right donor, $-w_L/\Delta z_i$ to the
+left donor, and $-\big((w_R-w_L)/\Delta z_i+\theta_A\big)$ on the diagonal.
+The indirect part, $\partial f_i/\partial w_{{\rm node},n}$ for the two
+bounding nodes, reaches every upstream cell through the mesh velocity; it is
+realized by composing the provider's prefix-sum coupling with the node scales
+$(\xi_{{\rm face},R}-\xi_i)/\Delta z_i$ and $-(\xi_{{\rm face},L}-\xi_i)/\Delta z_i$.
 
 Under the `:ale_reduced` profile (used by `ApproxSolve`), the advection operator
 **skips its `compose_into!` calls entirely** — it emits no structured couplings.
@@ -14166,12 +14474,14 @@ The ALE geometry coupling motivates a **two-pattern** model:
   default path — the surface temperature column $T_{\rm col}(n)$ for every row
   $i<n$, the $\varepsilon_{\rm eff}(T_n,\xi_{\cdot,n})$ transmissivity chain of
   §15.8.7), the $\chi$-row block
-  (cell-local plus the dense $\chi$-column), and the ALE advection limiter +
-  cumulative widening.
+  (cell-local plus the dense $\chi$-column), and the ALE advection donor window
+  plus cumulative widening.
 - **$S_{\rm geom}$** — every coupling with $z$ columns (ALE only; empty for
   Eulerian): physics$\to z$ (cells read nodes; reach $\le i+3$ without $\chi$,
-  full $1{:}n_{\rm nodes}$ with `WithChi` via the $\theta_A$ path), $z\to$physics
-  (node $k$ depends on cells $i<k$, lower-triangular), and $z\to z$
+  full $1{:}n_{\rm nodes}$ with `WithChi` via the $\theta_A$ path, and full for
+  the energy rows under Beer–Lambert, whose optical depth
+  $\tau_i=\sum_{k>i}\alpha_k\Delta z_k$ depends on every node above the cell),
+  $z\to$physics (node $k$ depends on cells $i<k$, lower-triangular), and $z\to z$
   (lower-triangular including the diagonal, the cumulative nature of mesh
   velocity).
 
@@ -14182,10 +14492,13 @@ Five emitter functions compose these patterns, invoked in order by
 2. `_emit_geometry_pattern!` — $z$-columns (ALE);
 3. `_emit_chi_pattern!` — $\chi$-row and dense $\chi$-column (WithChi);
 4. `_emit_radiation_pattern!` — Beer–Lambert suffix (BeerLambert);
-5. `_emit_ale_advection_pattern!` — ALE limiter + cumulative (ALE).
+5. `_emit_ale_advection_pattern!` — ALE donor window + cumulative (ALE).
 
 The integrator's `jac_prototype` is the union $S_{\rm phys}\cup S_{\rm geom}$.
-Patterns are memoized by the fingerprint
+Every row of the union stores its diagonal in every profile, so the shifted
+matrix $W$ of §15.5.2 has exactly the pattern of $J$; where no operator writes
+the diagonal (the node rows and the $\chi$ rows under `:ale_reduced`) it holds
+a structural zero. Patterns are memoized by the fingerprint
 $(\mathrm{typeof}(\text{mode}),N_C,n_{\rm cells},n_{\rm nodes},\text{profile})$ in
 `_SPARSITY_CACHE`.
 
@@ -14196,7 +14509,17 @@ $(\mathrm{typeof}(\text{mode}),N_C,n_{\rm cells},n_{\rm nodes},\text{profile})$ 
 - `:ale_reduced` (`ApproxSolve` only) — drops every structured coupling (the
   cumulative ALE widening, the z-row prefix-sum blocks, the $\theta_A$ rank-1
   channels, the Beer–Lambert suffix, and the $\chi$-column rank-1) and the
-  geometry block. The masked verifier expects exactly this set of omissions.
+  geometry block, of which only the node rows' structural diagonal remains.
+  The masked verifier expects exactly this set of omissions, and counts the
+  stored but never-written diagonals of the node and $\chi$ rows
+  (`structural_zero_diagonal`) among them.
+
+Only `:full` couples cells an arbitrary distance apart, through the couplings
+it materializes: the ALE geometry block and prefix sums, the Beer–Lambert
+suffix, and the $\chi$-column rank-1. Each adds $O(N^2)$ entries; every other
+pattern couples a cell only to cells within the two-cell ALE advection window.
+`materializes_geometry_block(mode, profile)` (`:full` under ALE) selects the
+default factorization (§15.5.1).
 
 ### 15.11.3 Greedy coloring
 
@@ -14249,21 +14572,12 @@ inexact solves can increase Newton rejections on Arrhenius transients, so the
 iterative path is recommended only when the direct factorization is the
 bottleneck.
 
-**The MKL ipiv resize caveat.** When `handle_depletion=true`, the state vector is
-resized mid-solve via `resize!(integrator, …)`. `LinearSolve.jl`'s default solver
-can switch to `MKLLUFactorization` for large systems ($N\gtrsim500$), whose pivot
-array `ipiv` is not always resized correctly, producing
-`DimensionMismatch: ipiv has length X, but needs to be Y`. Julia's native
-`LUFactorization` handles `resize!` correctly, and it is what
-the depletion path uses: with `handle_depletion=true` there is no sparse
-`jac_prototype` (the colored-FD path), so `_resolve_integrator` defaults the
-linear solver to the dense, resize-safe `LUFactorization()` and rebuilds an
-explicitly requested sparse factorization (Sparspak/KLU) into the user's
-algorithm as `LUFactorization`, with a warning. The MKL pitfall therefore
-survives only when a fully constructed integrator is passed with its
-`linsolve` left unset — LinearSolve's auto-selection can then pick the MKL
-LU — and `solve` warns when it detects that combination on a large depleting
-state.
+**Linear-solver family.** A sparse `jac_prototype` (every `Structured`
+strategy) pairs with a sparse direct default chosen from its pattern
+(`KLUFactorization` or `UMFPACKFactorization`, §15.5.1); the dense
+`DenseAD_ForwardDiff` backend has no prototype and `_resolve_integrator`
+gives it a dense `LUFactorization`, rebuilding an explicitly requested sparse
+factorization into the user's algorithm with a warning.
 
 > **Implementation note.** `ILUGMRESFactorization`, `ILUBiCGSTABFactorization`,
 > and the Krylov integration: src/Solver/ilu_gmres.jl. The MKL ipiv warning:
@@ -14315,12 +14629,10 @@ deviation rather than aborting — a single transient outlier should not kill an
 otherwise-good production run; the user reads `max_abs_dev`/`max_rel_dev` to
 judge severity.
 
-A reported incompatibility worth restating: **surface depletion and a pluggable
-`JacobianSpec` cannot coexist** (the cache is sized at setup and cannot survive a
-mid-solve `resize!`); with `handle_depletion=true` the spec is forced to
-`nothing` and the integrator uses its colored finite-difference Jacobian, which
-*is* verified implicitly by the integrator's own error control but is not
-checked against the dense reference.
+Depletion handling (§14.3) keeps the state size and the pluggable Jacobian,
+so `verify_jacobian` runs through park events; the parked states of every
+mode are part of the verifier's own matrix
+(`test/jacobian/test_park_jacobian.jl`).
 
 > **Implementation note.** `verify_jacobian_at`, strict/masked compare:
 > src/Jacobian/verify.jl; `is_approximate`: src/Jacobian/interface.jl;
@@ -14463,10 +14775,9 @@ whole construction is verified against the dense AD reference.
 - **WithChi × Darcy.** `WithChi` is tested mainly with Fickian transport; the
   interaction of the $\chi$ rank-1 coupling with the full Darcy operator set is
   not exhaustively exercised.
-- **Depletion ↔ pluggable Jacobian / sensitivity.** Mid-solve `resize!` is
-  incompatible with the sized `JacobianSpec` cache (forcing the colored-FD
-  fallback) and, transitively, with adjoint sensitivity through depletion. Making
-  the merge callback resize-aware for the structured backend is an open item.
+- **Adjoint sensitivity across park events.** A park is a discrete rewrite of
+  the state (§14.3.4); adjoint sensitivity through such an event is
+  unsupported, and forward sensitivities are valid only between events.
 - **ILU drop tolerance.** The default $\tau=0.1$ for the ILU-Krylov solvers has
   not been swept for optimality across pyrolysis regimes; inexact solves can
   raise Newton rejections on Arrhenius transients.
@@ -15683,8 +15994,8 @@ dual part or silently coerce to `Float64`. The package satisfies this:
   promoted dual type (`src/Physics/kinetics.jl:75–111`).
 
 The time integrator (`KenCarp4` by default, with
-`autodiff=AutoFiniteDiff()` for its *internal* Newton Jacobian and
-`SparspakFactorization` for the linear solve) does **not** need to be
+`autodiff=AutoFiniteDiff()` for its *internal* Newton Jacobian and the
+default sparse factorization for the linear solve) does **not** need to be
 dual-aware: ForwardDiff differentiates the *output of the converged solve*, not
 the integrator's internal Jacobian. OrdinaryDiffEq's `solve` is itself a
 differentiable program, and SciMLSensitivity supplies the dual-compatible
@@ -16132,8 +16443,8 @@ distance-weighted harmonic mean used for face $k_f,\lambda_f,\kappa_f$ (§5.12)
 and the smooth (rather than `min`/`max`) constructions in the gates keep the
 discrete operators differentiable. The few genuinely non-smooth operations that
 remain — `clamp` on porosity/temperature, `max` in the depletion clamp, and the
-state-vector `resize!` at depletion events — are localized and are exactly the
-pitfalls catalogued next.
+state rewrite at park events — are localized and are exactly the pitfalls
+catalogued next.
 
 > **Implementation note.** The smoothness-critical kernels are
 > `reaction_rate` (`src/Physics/kinetics.jl`), `Δh` /
@@ -16178,27 +16489,16 @@ vanishes, a hard switch that is correct physically but non-differentiable.
 **Rule:** use $C^1$ shrinkage laws for sensitivity studies, and avoid evaluating
 at $\bar\chi$ values where the law has a corner or where $\mathrm{law}(\bar\chi)\to 0$.
 
-### 17.7.3 Depletion-callback discontinuities and state resizing
+### 17.7.3 Park-event discontinuities
 
-The surface-depletion path merges thin cells and **resizes the state vector**
-mid-solve (`resize!(integrator, …)`, `src/Solver/callbacks.jl`). This is doubly
-hostile to differentiation:
-
-1. The energy-conserving merge changes the *dimension and identity* of the state,
-   so $\mathbf{u}(t)$ is not a smooth function of $\boldsymbol{\theta}$ across a
-   merge event — a perturbation that shifts the merge *time* produces a jump in
-   the trajectory. The map is only piecewise smooth.
-2. The mechanism is **incompatible with pluggable Jacobian backends**: when
-   `handle_depletion=true`, `solve` sets `jac_spec=nothing` and falls back to the
-   integrator's colored finite-difference Jacobian (`src/Solver/solve.jl:336–341`).
-   Adjoint sensitivity, which needs a stable differentiable solve, cannot be run
-   through a resizing solve. (Solver KB open question 2 asks whether this can be
-   reconciled.)
-
-**Rule:** for sensitivity and inverse analysis, prefer ALE *without*
-`handle_depletion`, or use a thickness-termination cutoff (`min_thickness`)
-rather than cell merging; if depletion is unavoidable, restrict adjoint use to
-$\boldsymbol{\theta}$ regions where no merge event is crossed.
+The depletion path (§14.3) parks a depleted cell: it merges the cell into a
+neighbour and moves the freed slot above the live surface, rewriting the state
+vector in place. The state keeps its size and the structured Jacobian keeps
+working, but the rewrite is a **discrete event**: a perturbation of
+$\boldsymbol{\theta}$ that shifts a park *time* produces a jump in the
+trajectory, so $\mathbf{u}(t)$ is only piecewise smooth in the parameters. Forward
+sensitivities are valid on horizons without park events; adjoint sensitivity,
+which needs a differentiable solve path, cannot be run through a park event.
 
 ### 17.7.4 Arrhenius $(A,E)$ ill-conditioning
 
@@ -16290,12 +16590,11 @@ global indices, all sharing one immutable-problem / mutable-workspace harness.
 Drawing on the open questions recorded in the solver and kinetics knowledge
 bases:
 
-1. **Depletion ↔ adjoint incompatibility (open).** Cell-merge state resizing
-   cannot survive a pluggable/immutable Jacobian cache, so adjoint sensitivity
-   cannot currently run through a depleting (`handle_depletion=true`) solve;
-   `solve` falls back to a colored-FD Jacobian and the trajectory is only
-   piecewise smooth across merge events. Reconciling resizing with a
-   differentiable solve path is an open design problem (Solver KB Q2).
+1. **Adjoint sensitivity across park events (open).** A park is a discrete
+   rewrite of the state, so the trajectory is only piecewise smooth across
+   events and adjoint sensitivity cannot run through a depleting
+   (`handle_depletion=true`) horizon that contains one. Reconciling the event
+   with a differentiable solve path is an open design problem (Solver KB Q2).
 
 2. **Warm-start in sensitivity loops (open).** Whether — and how — reusing a
    prior solution's final state as a fresh initial condition perturbs sensitivity
@@ -16847,20 +17146,18 @@ an otherwise-good production run. This lets a long calibration sweep be run with
 verification armed at negligible extra cost — the reference Jacobian is built
 only at the sample times.
 
-### 18.3.5 The depletion ↔ pluggable-Jacobian incompatibility
+### 18.3.5 Parked states
 
-There is one combination the verifier cannot cover. Surface-cell depletion (§14.3,
-the production AMR path) resizes the state vector mid-solve via
-`resize!(integrator, new_length)`, but the pluggable `JacobianSpec` cache is
-immutable and sized at problem setup. The two are therefore mutually exclusive:
-`solve` raises an error if `jacobian !== nothing && handle_depletion == true`
-(`src/Solver/solve.jl`). When `handle_depletion=true`, the solver falls back to
-the integrator's own colored finite-difference Jacobian, which adapts to the
-resize automatically but is *not* verifiable against the structured backend
-(there is no structured Jacobian to verify). Runs that need both an audited
-Jacobian and depletion must instead use a fixed mesh with a thickness-termination
-callback, or accept the colored-FD Jacobian. This is a known limitation
-(§18.8.3).
+Depletion handling (§14.3) parks cells without changing the state size, so the
+structured Jacobian is the one the integrator uses through burnout and the
+verifier covers it: `test/jacobian/test_park_jacobian.jl` builds the specs on
+the fresh problem, parks surface, interior and bottom cells in every mode
+(Eulerian, ALE, Darcy, Beer–Lambert, variable cross-section), and checks
+`Structured(strategy = DirectSolve())` strictly against the dense reference, the
+zero ghost rows, the ghost node rows equal to the surface node row, and the
+live block of the parked Jacobian against the compacted problem's — for
+`ApproxSolve` too, since that strategy drops couplings by design and is not
+compared against the dense reference on a reacting state.
 
 ---
 
@@ -17345,15 +17642,13 @@ energy update is correct; the bookkeeping formula used to *check* it is
 incomplete. Until it is extended, a non-zero discrete residual during active
 reaction should be interpreted against this known offset, not as a bug.
 
-### 18.8.3 Depletion incompatibilities
+### 18.8.3 Sensitivities across park events
 
-Surface-cell depletion is incompatible with (i) the pluggable structured Jacobian
-(state-vector resize versus immutable cache, §18.3.5 — falls back to colored FD,
-which is unverifiable) and (ii) clean sensitivity analysis (the merge is a
-non-differentiable discrete event, §17.7). Runs that need an audited Jacobian or
-smooth sensitivities must avoid depletion (fixed mesh + thickness termination)
-or accept the limitations. Making the merge compatible with both is open work
-(§15, §17 open issues).
+Depletion handling is a sequence of discrete state rewrites (§14.3.4, §17.7).
+The Jacobian and the verifier run through them (§18.3.5), but smooth
+sensitivity analysis does not: forward sensitivities are valid only between
+park events and adjoint sensitivity through an event is unsupported. Runs that
+need smooth sensitivities must stay on horizons without park events.
 
 ### 18.8.4 No automatic gas-storage switching at high pressure
 
@@ -17440,8 +17735,10 @@ machinery of this chapter has direct test coverage:
 Reproducible numbers require a pinned `Manifest.toml` (the integrator,
 linear-solver, and AD package versions all affect the last digits) and a fixed
 choice of integrator, tolerances, Jacobian backend, and linear solver. The
-defaults — `KenCarp4` with `AutoFiniteDiff`, `SparspakFactorization`,
-`abstol=1e-8`/`reltol=1e-6`, `Structured(DirectSolve())` — are the reference
+defaults — `KenCarp4` with `AutoFiniteDiff`, the pattern-chosen factorization
+(`KLUFactorization` or `UMFPACKFactorization`), `abstol=1e-8`/`reltol=1e-6`,
+`Structured(DirectSolve())` (`ApproxSolve` under ALE with depletion
+handling) — are the reference
 configuration; deviations (e.g. `ApproxSolve` for speed, ILU-GMRES for large ALE)
 trade a controlled amount of accuracy for performance and should be re-checked
 against the reference configuration with `verify_jacobian` armed and the

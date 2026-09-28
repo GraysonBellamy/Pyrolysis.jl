@@ -201,13 +201,15 @@ f'(T_s) = \frac{dq_{\text{BC}}}{dT_s} - \frac{k_{\text{eff}}}{\Delta z_{1/2}}
 $$
 
 with under-relaxation $\omega=1$ by default (`boundary_temperature.jl:168–205`).
-The initial guess is a **warm start** from the previously solved surface
-temperature ($T_s^{(0)} = $ `state.T_surface`, the persistent per-boundary
-`BoundaryState`; the very first call starts from the 300 K mesh-construction
-seed) — on smooth time-stepping this saves Newton iterations relative to
-restarting from $T_{\text{cell}}$. (The non-mutating convenience wrapper
-`solve_boundary_temperature` accepts a `T_guess` keyword defaulting to
-$T_{\text{cell}}$.) The conduction derivative
+The initial guess is the adjacent cell temperature clamped to the property
+bracket, $T_s^{(0)} = \min\bigl(\max(T_{\text{cell}}, 200\ \text{K}),
+3000\ \text{K}\bigr)$, so the solve is a pure function of its arguments. The
+per-boundary `BoundaryState` receives the converged $T_s$ and fluxes for
+diagnostics and is never read back; a non-finite final iterate is not stored.
+A residual evaluation therefore never depends on the ones before it: a trial
+state of a diverging outer Newton, with a cell temperature far outside the
+bracket, fails that trial and leaves every later evaluation untouched. The
+conduction derivative
 $dq_{\text{cond}}/dT_s = k_{\text{eff}}/\Delta z_{1/2}$ is exact and always
 present; the BC derivatives are given per-type in §12.2.4.
 
@@ -270,7 +272,9 @@ radiation_model)`, which returns $(q_{\text{BC}}, dq_{\text{BC}}/dT_s)$ for each
 concrete thermal BC. The exact pairs (verified against
 `boundary_temperature.jl:307–429`) are collected below; the
 $\varepsilon_{\text{eff}}$ argument is the composition-weighted effective surface
-emissivity from the property cache (§12.2.6).
+emissivity from the property cache and the keyword `a_eff` (default
+$\varepsilon_{\text{eff}}$) the effective surface absorptivity for incident
+radiation (§12.2.6).
 
 | BC | $q_{\text{BC}}(T_s)$ | $dq_{\text{BC}}/dT_s$ |
 |---|---|---|
@@ -332,26 +336,44 @@ boundary faces** in `compute_conductive_fluxes!` before BC application, so the
 overwrite here is the sole source of the boundary face flux; there is no
 double-counting.
 
-### 12.2.6 Effective surface emissivity (composition-weighted, Kirchhoff)
+### 12.2.6 Effective surface emissivity and absorptivity (composition-weighted)
 
-When a `RadiativeBC` or `RadiativeFluxBC` is constructed with
-$\varepsilon=\texttt{nothing}$ (resp. $\alpha=\texttt{nothing}$), the surface
-radiative property is taken from the boundary cell's effective emissivity
+When a `RadiativeBC` is constructed with $\varepsilon=\texttt{nothing}$, the
+re-radiation uses the boundary cell's effective emissivity
 $\varepsilon_{\text{eff}}$, computed in the property cache as the volume-weighted
-mean over the solid/liquid components,
+mean over the solid/liquid components with each component emissivity evaluated
+at the cell temperature,
 
 $$
-\varepsilon_{\text{eff}} = \sum_j v_j\,\varepsilon_j,
+\varepsilon_{\text{eff}} = \sum_j v_j\,\varepsilon_j(T_{\text{cell}}),
 $$
 
-clamped to $[0,1]$ (see §5.8). Two physical principles are encoded here. First,
-**Kirchhoff's law** $\alpha=\varepsilon$ at thermal equilibrium lets the same
-quantity serve as both emissivity (re-radiation) and absorptivity (absorbed
-incident flux). Second, surface emissivity is a *geometric* property of the
-exposed mixture, so a volume-weighted (not mass-weighted) average is appropriate
-and it **automatically tracks composition changes** during pyrolysis (e.g.
-polymer $\to$ char as $v_j$ shifts). The boundary solver reads this as
-`cache.ε[cell_id]` (`boundary_temperature.jl`).
+clamped to $[0,1]$ (see §5.8.1). When a `RadiativeFluxBC` is constructed with
+$\alpha=\texttt{nothing}$, the absorbed incident flux uses the boundary cell's
+effective surface absorptivity
+
+$$
+a_{\text{eff}} = \sum_j v_j\,a_j,\qquad
+a_j = \texttt{surface\_absorptivity}_j \text{ if set, else } \varepsilon_j(T_{\text{cell}}),
+$$
+
+(§5.8.2). Two physical principles are encoded here. First, **Kirchhoff's law**
+$\alpha=\varepsilon$ at thermal equilibrium is the default: with no component
+absorptivity set, $a_{\text{eff}}\equiv\varepsilon_{\text{eff}}$ and the same
+quantity serves as both emissivity (re-radiation) and absorptivity (absorbed
+incident flux). A component-level `absorptivity` relaxes this where the heater
+spectrum differs from the surface's own emission spectrum, keeping the two
+mixtures on the same volume weights. Second, surface emissivity is a
+*geometric* property of the exposed mixture, so a volume-weighted (not
+mass-weighted) average is appropriate and it **automatically tracks composition
+changes** during pyrolysis (e.g. polymer $\to$ char as $v_j$ shifts). The
+boundary solver reads these as `cache.ε[cell_id]` and `cache.a[cell_id]` and
+threads them into `solve_boundary_temperature!` as the positional
+$\varepsilon_{\text{eff}}$ and the keyword `a_eff` (`boundary_temperature.jl`);
+the Jacobian operators recompute both on the Dual-seeded $(T,\xi)$, so
+$\partial\varepsilon_{\text{eff}}/\partial T_{\text{cell}}$ and
+$\partial a_{\text{eff}}/\partial T_{\text{cell}}$ from a temperature-dependent
+component emissivity enter the surface energy row exactly.
 
 ### 12.2.7 `BoundaryState` storage
 
@@ -1296,10 +1318,14 @@ in-depth absorbed fraction volumetrically rather than at the face.
    impermeable back face (the bottom gas flux vanishes) and for equal ambients;
    supporting it would require a per-cell datum rather than a scalar.
 
-2. **Temperature-dependent emissivity derivative.** The radiative Newton
-   derivative omits the $F\,(d\varepsilon/dT)\,\sigma\,(T_\infty^4-T_s^4)$ term
-   (§12.2.4). The converged $T_s$ is unbiased, but convergence can become
-   sub-quadratic for strongly temperature-sensitive $\varepsilon(T)$.
+2. **Temperature-dependent emissivity derivative.** For a `RadiativeBC` whose
+   own `ε` is a function of $T_s$, the radiative Newton derivative omits the
+   $F\,(d\varepsilon/dT)\,\sigma\,(T_\infty^4-T_s^4)$ term (§12.2.4). The
+   converged $T_s$ is unbiased, but convergence can become sub-quadratic for
+   strongly temperature-sensitive $\varepsilon(T_s)$. This does not affect
+   component-level $\varepsilon_j(T)$: the mixture $\varepsilon_{\text{eff}}$
+   is evaluated at the *cell* temperature and is a constant of the surface
+   Newton iteration, so that derivative is exact.
 
 3. **Transpiration BC integration.** The surface transpiration term is implemented
    and tested but is opt-in and currently *forbidden* in production because it

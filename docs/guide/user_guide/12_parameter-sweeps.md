@@ -682,11 +682,7 @@ In variable-cross-section/ALE runs use `sol.extras.MLR_gauge` rather than
 `sol.mass_loss_rate` when comparing across grid points: `mass_loss_rate` is per
 *current* area `A(t)`, whereas `MLR_gauge = MLR_local · A(t)/A_0` is normalized to
 the initial gauge area `A_0`, which is the apples-to-apples quantity for cone
-comparisons (see Chapter 8 and Technical Reference §10). Note also that when
-`handle_depletion = true`, the solver falls back to a finite-difference Jacobian
-(a pluggable `jacobian` backend is incompatible with mid-solve state-vector
-resizing); this is automatic and needs no action in the sweep, but it is why
-ALE-with-depletion points are slower per solve (see Chapter 11).
+comparisons (see Chapter 8 and Technical Reference §10).
 
 ---
 

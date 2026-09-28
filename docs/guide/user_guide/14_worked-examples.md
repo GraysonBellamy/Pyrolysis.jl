@@ -234,11 +234,9 @@ from `src/Solver/solve.jl`):
   depth you would pass `radiation_model = BEER_LAMBERT` (PMMA is
   semi-transparent; the `α = 1.47` values then matter). The surface-absorption
   variant (§14.1.1) passes `SURFACE_ABSORPTION`.
-- **`handle_depletion = true`** turns on the surface-cell merge callback. It
-  requires `use_ale = true`. Because it resizes the state vector mid-solve, it is
-  **incompatible with a pluggable `jacobian` backend** (the solver errors if you
-  pass both) and falls back to the integrator's colored finite-difference
-  Jacobian (Technical Reference §14, §15).
+- **`handle_depletion = true`** turns on cell parking (Chapter 10). Under ALE
+  it selects `Structured(strategy = ApproxSolve())` as the default Jacobian
+  (Technical Reference §14.3, §15.6).
 - **`use_transpiration_bc`** is left at its default `false`. Enabling it is
   rejected: the default `:standard` energy form already carries gas enthalpy via
   the `S_conv` advection term, so a surface-transpiration term would
@@ -1091,10 +1089,6 @@ Reading the examples together, a few idioms recur and are worth internalizing:
 - **Surface transpiration BC is off by default and incompatible with the default
   `:standard` energy form** — enabling `use_transpiration_bc` is rejected because
   `S_conv` already carries gas enthalpy (double counting). Technical Reference §7.
-- **Depletion handling and a pluggable Jacobian are mutually exclusive.**
-  `handle_depletion = true` resizes the state vector mid-solve, so the solver
-  errors if you also pass a `jacobian = JacobianSpec(...)`, and it falls back to
-  the integrator's colored finite-difference Jacobian. Technical Reference §14–§15.
 - **Several cone examples carry parameter sets calibrated under a
   transpiration-plus-`S_conv` convention** and may need re-calibration under the
   `S_conv`-only energy balance; treat their bundled experimental/ThermaKin

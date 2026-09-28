@@ -68,30 +68,37 @@ for printing, logging, and comparison; it is *not* consulted in hot paths.
 property-function fields and three scalar (`Float64`) fields:
 
 ```julia
-struct SolidComponent{Pρ,Pc,Pk,Pλ,Pκ,Pρi} <: AbstractComponent
+struct SolidComponent{Pρ,Pc,Pk,Pλ,Pκ,Pε,Pa,Pρi} <: AbstractComponent
     name::Symbol
     density::Pρ                # bulk density ρ_j           [kg/m³]
     heat_capacity::Pc          # c_{p,j}(T)                 [J/(kg·K)]
     thermal_conductivity::Pk   # k_j(T)                     [W/(m·K)]
     gas_transfer_coeff::Pλ     # λ_j(T)                     [m²/s]
     permeability::Pκ           # κ_j(T)                     [m²]
-    emissivity::Float64        # ε_j                        [-]
+    emissivity::Pε             # ε_j(T)                     [-]
+    surface_absorptivity::Pa   # a_j, Nothing = Kirchhoff   [-]
     absorption_coeff::Float64  # α_j (mass basis)           [m²/kg]
     swelling_factor::Float64   # γ_j                        [-]
     intrinsic_density::Pρi     # skeletal density ρ_{i,j}   [kg/m³]
 end
 ```
 
-The six property fields are each parameterized by their own type (`Pρ`, `Pc`, …),
+The seven property fields are each parameterized by their own type (`Pρ`, `Pc`, …),
 so a component built with a constant conductivity and a polynomial heat capacity
 is a *distinct concrete type* from one built with two constants. This preserves
 type stability and allocation-free evaluation through the heterogeneous component
-tuple. The three scalar fields (`ε_j`, `α_j`, `γ_j`) are stored as plain
-`Float64` rather than property functions because they are not given temperature
-dependence in the current model.
+tuple. The emissivity `ε_j(T)` is a property function like `k_j(T)` (the `ε`
+keyword accepts the same forms) and is evaluated at the cell temperature by the
+mixing rule (§5.8). `surface_absorptivity` is the optional constant absorptivity
+`a_j` for *incident* (heater-spectrum) radiation, `Pa <: Union{Nothing,Float64}`:
+`Nothing` selects Kirchhoff's law `a_j = ε_j(T)` at the type level, so the
+absorptivity mixture (§5.8.2) is a static sum. The two scalar fields (`α_j`, `γ_j`)
+are stored as plain `Float64` because they are not given temperature dependence
+in the current model.
 
 **`LiquidComponent`** has the *identical* field layout to `SolidComponent`
-(bulk and intrinsic density, the four property functions, the three scalars). It
+(bulk and intrinsic density, the five property functions, the optional surface
+absorptivity, the two scalars). It
 is the matrix-forming condensed phase used for moisture / liquid water in
 hygroscopic materials. Its convenience constructor differs only in defaults
 (see §4.1.5): $\lambda$ defaults to $2\times10^{-5}$ m²·s⁻¹, $\varepsilon$ to
@@ -102,21 +109,22 @@ $\kappa$ to 0 (a liquid normally fills pore space and blocks gas flow).
 **`GaseousComponent`** represents species that flow *through* the matrix:
 
 ```julia
-struct GaseousComponent{Pρ,Pc,Pk,Pλ} <: AbstractComponent
+struct GaseousComponent{Pρ,Pc,Pk,Pλ,Pε} <: AbstractComponent
     name::Symbol
     molar_mass::Float64        # M_j                        [kg/mol]
     density::Pρ                # ρ_g(T), default ideal gas  [kg/m³]
     heat_capacity::Pc
     thermal_conductivity::Pk
     gas_transfer_coeff::Pλ
-    emissivity::Float64
+    emissivity::Pε             # ε_j(T)
     absorption_coeff::Float64
     swelling_factor::Float64
 end
 ```
 
-A gas has **no permeability field and no intrinsic density** — it is not part of
-the matrix skeleton. It carries instead a `molar_mass` $M_j$, used by the ideal-
+A gas has **no permeability field, no intrinsic density, and no surface
+absorptivity** (`get_absorptivity` always returns its `ε_j(T)`) — it is not part
+of the matrix skeleton. It carries instead a `molar_mass` $M_j$, used by the ideal-
 gas density law (§4.3), the ideal-gas pressure closure (Chapter 9), and the
 Chapman–Enskog diffusivity estimate (§5.10).
 
@@ -243,7 +251,8 @@ consumed downstream:
 | `thermal_conductivity` | $k_j(T)$ | W·m⁻¹·K⁻¹ | all | $k_\mathrm{eff}$ (Ch. 5), Fourier flux (Ch. 7) |
 | `gas_transfer_coeff` | $\lambda_j(T)$ | m²·s⁻¹ | all | $\lambda_\mathrm{eff}$ (Ch. 5), gas diffusion (Ch. 9) |
 | `permeability` | $\kappa_j(T)$ | m² | S, L | $\kappa_\mathrm{eff}$ (Ch. 5), Darcy velocity (Ch. 9) |
-| `emissivity` | $\varepsilon_j$ | – | all | $\varepsilon_\mathrm{eff}$ (Ch. 5), radiative BC (Ch. 12) |
+| `emissivity` | $\varepsilon_j(T)$ | – | all | $\varepsilon_\mathrm{eff}$ (Ch. 5), radiative BC (Ch. 12) |
+| `surface_absorptivity` | $a_j$ (or `nothing` ⇒ $\varepsilon_j(T)$) | – | S, L | $a_\mathrm{eff}$ (§5.8.2), incident-flux BC (Ch. 12), Beer–Lambert surface transmissivity (Ch. 8) |
 | `absorption_coeff` | $\alpha_j$ | m²·kg⁻¹ | all | $\alpha_\mathrm{eff}=\sum_j\xi_j\alpha_j$ (Ch. 5, 8) |
 | `swelling_factor` | $\gamma_j$ | – | all | $\rho$, strain rate $\theta$ (Ch. 10) |
 | `molar_mass` | $M_j$ | kg·mol⁻¹ | G | $\rho_g$ (§4.3), $P$ (Ch. 9), Chapman–Enskog estimate (§5.10) |
@@ -382,6 +391,30 @@ all but `StateDependentProperty`). This uniformity lets a single component field
 hold any property law, and lets the kinetics evaluator pass $\xi$ to a heat-of-
 reaction property without knowing whether it is composition-dependent.
 
+**The property bracket.** Every temperature-dependent law evaluates on the
+clamped argument $\tilde T = \operatorname{clamp}(T, T_{\min}, T_{\max})$ with
+$[T_{\min}, T_{\max}] = [200, 3000]$ K (`T_PROPERTY_MIN`, `T_PROPERTY_MAX`,
+`src/Materials/constants.jl`; the same bracket clamps the surface-temperature
+Newton iterate, §12). Inside the bracket the clamp is the identity with unit
+derivative, so nothing changes for any physical state; outside it the law sees
+the nearest bracket end. A Newton trial state with a nonphysical (even
+negative) temperature therefore produces a failed Newton step, not a
+`DomainError` out of a fractional power or a fitted polynomial's far
+extrapolation. The analytic derivatives (§4.5) are zero outside the bracket so
+they agree with automatic differentiation of the clamped law everywhere.
+
+The component constructors sample every law on the bracket at 1 K steps and
+reject a component whose bulk or intrinsic density, heat capacity or thermal
+conductivity is not positive there (a gas may have $c_p = 0$), whose gas
+transfer coefficient or permeability is negative, or whose emissivity leaves
+$[0, 1]$. The error names the first offending temperature: a linear fit
+$k = 0.3 - 4.2\times10^{-4}\,T$ is rejected at 715 K because it turns a cell
+into a perfect insulator once it reaches that temperature. Hold a fit constant
+outside its measured range (`T -> law(clamp(T, T_lo, T_hi))`) or pass
+`validate_properties = false` for laws built programmatically from search
+parameters, where an unphysical value should reach the objective function
+instead of throwing.
+
 ### 4.4.1 `ConstantProperty`
 
 $$
@@ -462,12 +495,41 @@ the two adjacent slopes.
 
 ### 4.4.6 `CallableProperty`
 
-Wraps an arbitrary callable $f(T)$. Its value is $p(T)=f(T)$; its derivative is the
-same central finite difference with $\delta T = 0.1$ K. This is the type produced
-by `to_property(f)` for a function `f` and is how the ideal-gas density default
+Wraps an arbitrary callable $f(T)$. Its value is $p(T)=f(\tilde T)$ on the
+clamped argument of the property bracket; its derivative is the same central
+finite difference with $\delta T = 0.1$ K. This is the type produced by
+`to_property(f)` for a function `f` and is how the ideal-gas density default
 (Eq. 4.5) is stored.
 
-### 4.4.7 `StateDependentProperty`
+### 4.4.7 `SutherlandProperty`
+
+Sutherland's law for a gas transport property, carrying its own three constants:
+
+$$
+p(T) = \mu_{\text{ref}}
+\left(\frac{T}{T_{\text{ref}}}\right)^{3/2}
+\frac{T_{\text{ref}}+S}{T+S}.
+$$
+
+`SutherlandProperty()` is the canonical **air** triple
+($\mu_{\text{ref}}=1.716\times10^{-5}$ Pa·s, $T_{\text{ref}}=273.15$ K,
+$S=110.4$ K) and is the default `Material.gas_viscosity` (§5.9), so a material
+that says nothing about its pore gas behaves exactly as the package did before
+that field existed. Its derivative is **analytic**,
+
+$$
+\frac{\mathrm{d}p}{\mathrm{d}T} = p(T)\left(\frac{3}{2T} - \frac{1}{T+S}\right),
+$$
+
+which agrees with `ForwardDiff` to machine precision (gated in
+`test/materials/test_gas_viscosity_property.jl`).
+
+The type evaluates the bare correlation and does **not** clamp $T$; the
+low-temperature floor and the positivity floor are applied once, centrally, in
+`effective_gas_viscosity(T, material)` (§5.9), so that every curve a material may
+carry is protected rather than just this one.
+
+### 4.4.8 `StateDependentProperty`
 
 A property that depends on **both** temperature and the full concentration tuple,
 $p(T,\xi)=f(T,\xi)$. Calling it with $T$ alone raises an error (state is
@@ -488,7 +550,7 @@ $\partial p/\partial T \approx [p(T+\delta T,\xi)-p(T-\delta T,\xi)]/(2\delta T)
 with $\delta T = 0.1$ K. Its concentration derivative (§4.5.2) uses an *adaptive*
 step.
 
-### 4.4.8 `to_property` conversions
+### 4.4.9 `to_property` conversions
 
 The convenience converter normalizes user inputs to property functions, so that
 component constructors and reaction constructors accept either property objects
@@ -528,6 +590,7 @@ The `derivative(p, T)` method dispatches on the property type:
 | `ArrheniusProperty` | $p(T)\,E/(R_g T^2)$ | analytic (Eq. 4.7) |
 | `TableProperty` | central FD, $\delta T=0.1$ K | numerical |
 | `CallableProperty` | central FD, $\delta T=0.1$ K | numerical |
+| `SutherlandProperty` | $p(T)\,(3/(2T) - 1/(T+S))$ | analytic |
 | `StateDependentProperty` | central FD in $T$, $\delta T=0.1$ K | numerical |
 
 The analytic derivatives are exact to machine precision; the finite-difference

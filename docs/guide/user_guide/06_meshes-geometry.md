@@ -420,7 +420,9 @@ variable cross-section). This is the right choice for almost all cases: TGA-like
 cone-calorimeter runs without explicit surface recession, and any problem where you do not need
 the mesh to physically move with the receding/swelling material. Surface recession in the
 Eulerian picture is represented through the density/concentration fields and optional adaptive
-surface-cell depletion (Chapter 10), not by moving nodes.
+surface-cell depletion (Chapter 10), not by moving nodes. A fixed mesh parks only its top live
+cell, so a depletion run stops when a cell beneath the surface empties first; a material that
+regresses belongs on the ALE mesh (§10.2.1).
 
 ```julia
 sol = solve(problem; progress = false)            # Eulerian (use_ale = false, the default)

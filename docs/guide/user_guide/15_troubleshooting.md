@@ -37,7 +37,7 @@ The common values and what they mean:
 | `retcode` | Meaning | Typical cause |
 |---|---|---|
 | `:Success` | Reached `tspan[2]` | — |
-| `:Terminated` | A callback stopped the run | Sample fully depleted (ALE thickness termination) or a user callback called `terminate!` |
+| `:Terminated` | A callback stopped the run | Sample fully depleted (ALE thickness termination), an interior void on a fixed mesh (depletion handling), or a user callback called `terminate!` |
 | `:MaxIters` | Hit `maxiters` before `t_end` | Stiff transient; step size collapsed; under-resolved front |
 | `:DtLessThanMin` | Step fell below `dtmin` | Discontinuity, NaN in the RHS, or genuine stiffness wall |
 | `:Unstable` / `:DtNaN` | NaN/Inf in the state | Unphysical state (negative concentration, `ρc_p → 0`), bad property table extrapolation |
@@ -45,6 +45,9 @@ The common values and what they mean:
 A `:Terminated` run is *not* an error in ALE mode — it usually means the sample
 burned away. Check `solution.extras.thickness_history[end]` against
 `min_thickness` (default `1e-6` m).
+On a fixed mesh with `handle_depletion = true`, a `:Terminated` run with the
+warning "…the material has gasified from within…" stopped at the first
+interior void (§15.4).
 
 ### 15.1.2 Turn on the conservation ledgers
 
@@ -104,14 +107,13 @@ transient; conduction adds a parabolic time scale. If a solve is slow, hits
 ### 15.2.1 Confirm the default integrator is appropriate
 
 The default integrator is `KenCarp4` (an SDIRK method) with a sparse direct
-linear solve; its `autodiff = AutoFiniteDiff()` setting only takes effect on
-the no-Jacobian (depletion) path, since `solve` normally supplies the
-structured analytical Jacobian (§15.2.3). When both `integrator` and
-`linear_solver` are left at `nothing`, `solve` builds:
+linear solve; `solve` always supplies the structured analytical Jacobian
+(§15.2.3), so the `autodiff = AutoFiniteDiff()` setting never builds `J`. When
+both `integrator` and `linear_solver` are left at `nothing`, `solve` builds:
 
 ```julia
-# Internal default:
-# KenCarp4(autodiff = AutoFiniteDiff(), linsolve = SparspakFactorization())
+# Internal default (UMFPACKFactorization() for the exact ALE Jacobian, §8.4):
+# KenCarp4(autodiff = AutoFiniteDiff(), linsolve = KLUFactorization())
 ```
 
 `KenCarp4` is a good default for moderately stiff pyrolysis. For *very* stiff
@@ -129,7 +131,7 @@ solution = solve(problem; integrator = FBDF)
 # (b) pass a constructor and a linear solver together:
 solution = solve(problem;
     integrator    = FBDF,
-    linear_solver = SparspakFactorization(),   # re-exported by Pyrolysis.Solver
+    linear_solver = SparspakFactorization(),   # using LinearSolve: SparspakFactorization
 )
 
 # (c) pass a fully-constructed algorithm — then DO NOT also pass linear_solver:
@@ -164,13 +166,12 @@ iteration cap.
 
 ### 15.2.3 Use the structured Jacobian (it is already the default)
 
-When `jacobian = nothing` (the default) and `handle_depletion = false`, `solve`
-builds a `Structured(strategy = DirectSolve())` analytical Jacobian and hands a
-sparse prototype to the integrator. This is much faster than the integrator's
-own colored finite-difference Jacobian because it is exact and sparsity-aware
-(see Technical Reference §15). You normally do not need to touch it. The cases
-where you *do* are covered in §15.3 (verification), §15.4 (depletion), and
-§15.7 (large ALE).
+When `jacobian = nothing` (the default), `solve` builds a
+`Structured(strategy = DirectSolve())` analytical Jacobian — or
+`Structured(strategy = ApproxSolve())` under ALE with `handle_depletion = true` —
+and hands a sparse prototype to the integrator (see Technical Reference §15).
+You normally do not need to touch it. The cases where you *do* are covered in
+§15.3 (verification), §15.4 (depletion), and §15.7 (large ALE).
 
 ### 15.2.4 Reduce mesh size or use warm starts
 
@@ -270,76 +271,65 @@ against the dense reference in the test suite (Technical Reference §15.13,
 
 ---
 
-## 15.4 Depletion and the pluggable-Jacobian incompatibility
+## 15.4 Depletion runs
 
-Surface-cell depletion (`handle_depletion = true`, ALE only) resizes the state
-vector mid-solve via `resize!(integrator, new_length)` when a surface cell
-thins below `depletion_threshold` of its initial thickness (default 5 %) and
-merges it into its interior neighbour (see Technical Reference §14.3).
-
-The pluggable `JacobianSpec` cache is **immutable** and built once at setup, so
-it cannot survive a resize. The two are therefore mutually exclusive:
-
-```julia
-# ERROR: solve() rejects this combination up front.
-solve(problem;
-    use_ale          = true,
-    handle_depletion = true,
-    jacobian         = JacobianSpec(Structured(strategy = DirectSolve()), problem),
-)
-# → "the `jacobian` kwarg is incompatible with `handle_depletion = true`"
-```
-
-The supported way to run depletion is to **let `solve` pick the Jacobian**: when
-`handle_depletion = true`, the auto-default returns `nothing` and the integrator
-falls back to its own colored finite-difference Jacobian, which *does* survive a
-`resize!`:
+Depletion handling (`handle_depletion = true`) parks a cell when it thins below
+`depletion_threshold` of its initial thickness (ALE) or when the top live cell's
+condensed concentration falls below that fraction of its initial value (fixed
+mesh); the cell is merged into its neighbour and its state slot moved above the
+live surface (Technical Reference §14.3). The state keeps its size, so the
+structured Jacobian and the sparse direct solver run unchanged through burnout.
 
 ```julia
 solution = solve(problem;
     use_ale             = true,
     handle_depletion    = true,
-    depletion_threshold = 0.05,   # merge below 5% of initial thickness
-    min_cells           = 2,      # stop merging at 2 cells
-    min_thickness       = 1e-6,   # terminate when total thickness < this
+    depletion_threshold = 0.05,   # park below 5% of initial thickness
+    min_cells           = 2,      # stop parking at 2 live cells
+    min_thickness       = 1e-6,   # terminate when the live thickness < this
     progress            = false,
 )
 ```
 
-The merge is energy-conserving (it does not blow up when a near-empty cell with
-`ρc_p → 0` is absorbed; Technical Reference §14.3). Consequence: with depletion
-you give up the fast structured Jacobian. If a depletion run is slow, see
-§15.4.1 and the linear-solver choice in §15.11.
+A fixed-mesh depletion run that stops early with the "gasified from within"
+warning is not a solver failure: a cell below the surface emptied first, and a
+fixed mesh parks only its top live cell. Use `use_ale = true` for a material
+that regresses (§10.2.1).
 
-### 15.4.1 The MKL `ipiv` resize bug
+If a depletion run is slow or stalls:
 
-With `handle_depletion = true` and a large state vector (> ~500 elements),
-passing a fully built integrator whose `linsolve` is left unset lets
-LinearSolve.jl's auto-selection pick an MKL LU factorization whose pivot array
-(`ipiv`) is not resized correctly on `resize!`, producing a
-`DimensionMismatch: ipiv has length X, but needs to be Y`. `solve` warns when
-it detects this risky combination.
+- **Check the property laws first.** Sample `k(T)`, `c(T)` of every component on
+  [200, 3000] K. The component constructors reject a law that turns
+  non-positive on that bracket, but a law passed with `validate_properties =
+  false` or a very small positive conductivity at high temperature can still
+  turn a cell into an insulator that heats its neighbours to thousands of
+  kelvin.
+- **Δt collapsing while every live cell is above the threshold** points at a
+  stiff transient in the physics, not at depletion. Look at the surface-Newton
+  warnings and at `solution.extras.radiation_transmitted` (a transparent
+  substrate under Beer–Lambert radiation loses the incident flux through the
+  back face).
+- **Newton failures right after a park** (visible in the integrator stats).
+  The depletion callback restarts the integrator from `DT_AFTER_PARK`
+  (10⁻⁶ s), from which the Newton converges on the post-park transient. A run
+  that still fails several times at every park has a kernel coupling a live
+  cell to a ghost; the equivalence tests
+  `test/residual/test_park_equivalence.jl` and
+  `test/jacobian/test_park_jacobian.jl` pin every kernel and operator against a
+  compacted problem.
+- **Newton failures every few steps on a moving front, away from any park.**
+  Look for the `solve` warning about a zero gas-transfer coefficient first: a
+  condensed component with `λ = 0` stops gas transport in gas-free cells and
+  leaves a front the Newton cannot converge on (§3.2.1; Technical Reference
+  §5.6). The remaining failures come from the step controller regrowing the
+  step beyond the Newton's range after each failure, which the Newton-failure
+  step cap of `solve` holds back (§8.3).
 
-The fix is to let `solve` resolve the linear solver: on the depletion path it
-defaults to Julia's native `LUFactorization()`, which handles `resize!`
-correctly (a sparse factorization cannot run here anyway — there is no sparse
-Jacobian prototype — so an explicit `SparspakFactorization`/`KLUFactorization`
-is rebuilt to `LUFactorization` with a warning):
-
-```julia
-solution = solve(problem;
-    use_ale          = true,
-    handle_depletion = true,
-    progress         = false,
-)
-```
-
-For the optional `KLU`, `Pardiso`, and AMG extensions and how to load them, see
-UG-11. The `klu_factorization`, `pardiso_factorization`, and `amg_preconditioner`
-stubs error with a `MethodError` until you `import` the matching package — that
-error *is* the prompt to load the dependency.
-
----
+Under ALE the default Jacobian for depletion runs is
+`Structured(strategy = ApproxSolve())`. It follows the same trajectory as
+`jacobian = Structured(strategy = DirectSolve())` at a fraction of the cost,
+including on fast ablation fronts, so switching Jacobians is not a remedy for
+Newton failures.
 
 ## 15.5 Negative or unphysical states
 
@@ -419,7 +409,7 @@ This audits assembly and should close to integrator tolerance. If it does not:
 - **A callback is mutating state outside the residual.** The mesh is read-only
   during assembly and is synced only by the step-update callback; a custom
   callback that edits `u` or geometry without informing the integrator
-  (`u_modified!`) will break the ledger.
+  (`derivative_discontinuity!(integrator, true)`) will break the ledger.
 - **AMR / depletion masking.** All domain-total sums (`compute_domain_mass`,
   `compute_sensible_energy`) iterate the **active-cell mask**, not
   `eachindex`. If you wrote custom post-processing that loops over all cells
@@ -765,16 +755,17 @@ Work top to bottom; each item is cheap to try and the early ones dominate.
    surface with `create_stretched_mesh` (§15.5.4) rather than refining
    uniformly.
 2. **Keep the default structured Jacobian.** `jacobian = nothing` →
-   `Structured(DirectSolve())`, exact and sparse — far faster than colored FD.
-   Only depletion forces the FD fallback (§15.4).
-3. **Pick the right linear solver.** `SparspakFactorization` (the default) is
-   ~28 % faster than KLU for the block-tridiagonal pattern. For large ALE, try
-   `Structured(StructuredSolve())`, then `ApproxSolve()` (§15.7.4). Iterative
+   `Structured(DirectSolve())` (`ApproxSolve()` under ALE with depletion
+   handling), sparse and analytical — far faster than colored FD.
+3. **Keep the default linear solver.** `linear_solver = nothing` picks UMFPACK
+   for the exact ALE Jacobian and KLU for every other sparse Jacobian (§8.4).
+   For large ALE, try `ApproxSolve()` (§15.7.4), which drops the dense
+   geometry block and keeps the pattern local. Iterative
    `ILUGMRESFactorization(τ = 0.1, gmres_rtol = 1e-8, restart = 30)` and
    `ILUBiCGSTABFactorization(τ = 0.1, rtol = 1e-8)` exist for very large
-   systems, but inexact solves cause Newton-step rejections on stiff transients
-   — `solve` warns that Sparspak is usually 1.7–3.3× faster in practice. Treat
-   ILU as a last resort for problems where direct factorization truly dominates.
+   systems, but inexact solves can cause Newton-step rejections on stiff
+   transients, and `solve` warns when you select ILU-GMRES. Treat ILU as a last
+   resort for problems where direct factorization truly dominates.
 4. **Loosen tolerances for exploration.** `abstol`/`reltol` are the most direct
    speed knob; tighten only for validation (§15.2.2).
 5. **Choose the integrator.** `KenCarp4` is the default; a BDF (`FBDF`) can take

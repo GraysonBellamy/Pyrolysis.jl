@@ -18,18 +18,17 @@ chapter:
 
 1. **The Jacobian backend** (`jacobian = ...` keyword) decides *how the matrix*
    `J = ∂(du/dt)/∂u` *is assembled* — by structured operator assembly (the
-   default: `solve` auto-builds `Structured(strategy = DirectSolve())` when
-   `jacobian = nothing`), by dense automatic differentiation (verification
-   only), or by letting the integrator build it via colored finite differences
-   (the fallback used when depletion handling disables the pluggable backend).
+   default: `solve` auto-builds `Structured(strategy = DirectSolve())`, or
+   `ApproxSolve` under ALE with depletion handling, when `jacobian = nothing`),
+   or by dense automatic differentiation (verification only).
 2. **The integrator's linear solver** (`linear_solver = ...` keyword) decides
    *how the implicit-stage system* `W x = b`, with `W = I/(γ_RK Δt) − J`, *is
-   solved* once `J` exists — by sparse-direct factorization (Sparspak, KLU,
-   Pardiso) or by a preconditioned Krylov iteration (ILU-GMRES, ILU-BiCGSTAB).
+   solved* once `J` exists — by sparse-direct factorization (KLU, UMFPACK,
+   Sparspak, Pardiso) or by a preconditioned Krylov iteration (ILU-GMRES, ILU-BiCGSTAB).
 
 You can mix and match: a pluggable structured Jacobian with a sparse-direct
 linear solver, an integrator-built finite-difference Jacobian with KLU, and so
-on. The defaults (auto-built structured Jacobian; `SparspakFactorization`) work well for
+on. The defaults (auto-built structured Jacobian; KLU or UMFPACK chosen from its pattern) work well for
 the typical 1D cone-calorimeter problem and you can ignore this chapter until a
 solve is too slow or you need sensitivities.
 
@@ -40,40 +39,41 @@ solve is too slow or you need sensitivities.
 When you call `solve(problem)` with no Jacobian or linear-solver keywords, the
 following happens (see `src/Solver/solve.jl`):
 
-- The integrator defaults to `KenCarp4(autodiff = AutoFiniteDiff(),
-  linsolve = SparspakFactorization())`. `KenCarp4` is an SDIRK (singly
+- The integrator defaults to `KenCarp4(autodiff = AutoFiniteDiff())` with the
+  default linear solver below. `KenCarp4` is an SDIRK (singly
   diagonally implicit Runge–Kutta) method well suited to the moderate stiffness
-  of Arrhenius pyrolysis. The `AutoFiniteDiff()` setting only matters on the
-  rare paths where no pluggable Jacobian is active (depletion handling): there
-  it makes the integrator finite-difference the residual itself.
+  of Arrhenius pyrolysis. `solve` always supplies the Jacobian, so the
+  `AutoFiniteDiff()` setting never builds `J`; it only affects methods that also
+  differentiate the residual in time (the Rosenbrock `∂f/∂t`).
 - The Jacobian defaults to the **structured analytical backend**: with
   `jacobian = nothing` (the default), `solve` constructs
   `Structured(strategy = DirectSolve())` internally — for both Eulerian and
   ALE problems — and hands the integrator an exact sparse Jacobian plus its
-  sparsity prototype. The single exception is `handle_depletion = true`, which
-  disables the pluggable backend (the spec cannot survive a mid-solve state
-  resize) and falls back to the integrator's colored finite differences.
-- The linear solver defaults to `SparspakFactorization()`, a sparse-direct LU
-  that is typically faster than KLU for the block-tridiagonal sparsity pattern
-  of a 1D problem.
+  sparsity prototype. Under ALE with `handle_depletion = true` the default is
+  `Structured(strategy = ApproxSolve())` (§10.8).
+- The linear solver follows the Jacobian's sparsity pattern:
+  `UMFPACKFactorization()` for the ALE geometry block that `DirectSolve`
+  materializes under ALE, `KLUFactorization()` for every other sparse
+  Jacobian (§11.4.1).
 
 In short: by default, **Layer 1 is the structured analytical Jacobian**
 (`Structured(strategy = DirectSolve())`, built for you) and **Layer 2 is
-Sparspak**. The `jacobian` keyword is for *overriding* the strategy
+KLU or UMFPACK**, chosen from that Jacobian's pattern. The `jacobian` keyword is for *overriding* the strategy
 (`ApproxSolve`, `StructuredSolve`, `MatrixFreeSolve`) or supplying a custom
 spec — not for switching the structured machinery on.
 
 ```julia
 using Pyrolysis
 
-# The default solve: auto-built structured Jacobian + Sparspak linear solve.
+# The default solve: auto-built structured Jacobian + KLU/UMFPACK linear solve.
 sol = solve(problem)
 ```
 
 > Defaults at a glance: `integrator = nothing` → `KenCarp4`,
-> `linear_solver = nothing` → `SparspakFactorization()`,
+> `linear_solver = nothing` → `KLUFactorization()` (`UMFPACKFactorization()`
+> for the exact ALE Jacobian),
 > `jacobian = nothing` → auto-built `Structured(strategy = DirectSolve())`
-> (colored-FD fallback only under `handle_depletion = true`),
+> (`ApproxSolve` under ALE with `handle_depletion = true`),
 > `abstol = 1e-8`, `reltol = 1e-6`.
 
 ---
@@ -141,22 +141,26 @@ non-local sparsity. Similarly, pass `energy_form = :with_generation_sink` if you
 solve with that energy form. For most users the simplest correct approach is to
 let `solve` build the spec for you — see §11.2.3.
 
-### 11.2.2 When *not* to supply a Jacobian
+### 11.2.2 Building the spec for the right mode
 
-A pluggable `JacobianSpec` is **incompatible with surface-depletion handling**.
-Depletion (`handle_depletion = true`) resizes the state vector mid-solve via
-`resize!(integrator, ...)`, but the spec's cache is built once at setup time and
-cannot survive a resize. `solve` rejects the combination at validation:
+A `JacobianSpec` is built for one state layout. `JacobianSpec(backend,
+problem)` defaults to the Eulerian layout with no radiation; an ALE solve or a
+Beer–Lambert solve needs the same `use_ale` / `radiation_model` keywords the
+solve uses, and `solve` refuses a spec whose state length disagrees with the
+problem's:
 
 ```julia
-# ERROR: handle_depletion + a pluggable jacobian is not allowed.
-solve(problem; jacobian = spec, handle_depletion = true, use_ale = true)
+spec = JacobianSpec(Structured(strategy = ApproxSolve()), problem;
+                    use_ale = true, radiation_model = BEER_LAMBERT)
+solve(problem; use_ale = true, radiation_model = BEER_LAMBERT, jacobian = spec)
 ```
 
-When you need depletion, leave `jacobian = nothing`; the integrator falls back
-to its own colored finite-difference Jacobian, which tolerates the resize. This
-is the only supported configuration for depletion-tracking solves (see Chapter
-10 and Technical Reference §14.7).
+The simpler form is to pass the bare backend and let `solve` build the spec
+for its own mode:
+
+```julia
+solve(problem; use_ale = true, jacobian = Structured(strategy = ApproxSolve()))
+```
 
 ### 11.2.3 Letting `solve` pick the backend
 
@@ -274,19 +278,28 @@ sparse-direct factorizations and ILU-preconditioned Krylov iterations.
 
 ### 11.4.1 Sparse-direct factorizations
 
-The default is `SparspakFactorization()` (about 28% faster than KLU for the
-block-tridiagonal 1D pattern). `KLUFactorization()` is a slightly more
-general-purpose alternative with the same interface. You can pass either by
-pairing it with a *constructor* integrator:
+With `linear_solver = nothing` the factorization follows the Jacobian's
+sparsity pattern:
+
+| Jacobian | Default factorization |
+|---|---|
+| `DirectSolve` under ALE (the exact ALE Jacobian, with its dense geometry block) | `UMFPACKFactorization()` |
+| Every other `Structured` Jacobian: `ApproxSolve` (the ALE default with `handle_depletion = true`) and `DirectSolve` on an Eulerian mesh | `KLUFactorization()` |
+| A dense backend (`DenseAD_ForwardDiff`) | `LUFactorization()` |
+
+On 100-cell PMMA and charring-wood cone decks and on the V-BO-01 burnout case,
+KLU runs 2.6–4.4× faster end to end than Sparspak on the local patterns, with
+step counts equal to within 1%, and UMFPACK runs the exact ALE Jacobian
+1.5–1.9× faster than Sparspak (Technical Reference §15.5.1). The Eulerian
+`BEER_LAMBERT` pattern of `DirectSolve` stays on KLU: it is the fastest there,
+and UMFPACK's threshold pivoting returned inaccurate solves on it. Every
+backend stays selectable by pairing it with a *constructor* integrator:
 
 ```julia
-using LinearSolve: KLUFactorization, SparspakFactorization
+using LinearSolve: KLUFactorization, UMFPACKFactorization, SparspakFactorization
 
-# Default (no need to write this explicitly):
-sol = solve(problem; linear_solver = SparspakFactorization())
-
-# Switch to KLU:
-sol = solve(problem; linear_solver = KLUFactorization())
+sol = solve(problem; linear_solver = UMFPACKFactorization())
+sol = solve(problem; linear_solver = SparspakFactorization())   # pure-Julia sparse LU
 ```
 
 > Pairing rule: `linear_solver` is combined with `integrator` only when
@@ -297,14 +310,13 @@ sol = solve(problem; linear_solver = KLUFactorization())
 > Passing both a fully constructed `integrator` and a separate `linear_solver`
 > raises an error.
 
-A note on the no-Jacobian path: with `handle_depletion = true` (or a dense
-backend such as `DenseAD_ForwardDiff`), there is no sparse `jac_prototype`,
-so the sparse `Sparspak`/`KLU` factorizations cannot run. `solve` then
-defaults the linear solver to a dense `LUFactorization()` — and if you
-explicitly request a sparse factorization it warns and rebuilds your
-algorithm with `LUFactorization` instead. On the ordinary default path
-(auto-built structured Jacobian) the sparse prototype is present and
-Sparspak applies.
+A note on dense Jacobian backends: `DenseAD_ForwardDiff` has no sparse
+`jac_prototype`, so no sparse factorization can run. `solve` then defaults
+the linear solver to a dense `LUFactorization()` — and if you explicitly
+request a sparse factorization it warns and rebuilds your algorithm with
+`LUFactorization` instead. Every `Structured` Jacobian, including the
+`ApproxSolve` default under depletion handling, carries the sparse
+prototype.
 
 ### 11.4.2 ILU-preconditioned GMRES
 
@@ -338,7 +350,7 @@ tolerance, written `τ_ILU` in the nomenclature):
 Caveat: inexact linear solves can increase Newton rejections on Arrhenius
 transients, which sometimes *raises* total wall time despite cheaper individual
 solves. Always benchmark an ILU-GMRES configuration end-to-end against the
-default `SparspakFactorization()` before adopting it for a production study.
+default direct factorization before adopting it for a production study.
 
 ### 11.4.3 ILU-preconditioned BiCGSTAB
 
@@ -360,29 +372,14 @@ sol = solve(problem; integrator = alg,
 | `τ` | `0.1` | ILU drop tolerance. |
 | `rtol` | `1e-8` | BiCGSTAB relative convergence tolerance. |
 
-### 11.4.4 The MKL `ipiv` caveat and depletion
+### 11.4.4 Linear solver and depletion
 
-When surface depletion resizes the state vector mid-solve, the integrator must
-also resize its linear-solver workspace. The MKL-backed pivot array (`ipiv`)
-used by some factorizations does not resize cleanly across a state-vector
-length change. Depletion forces `jacobian = nothing` (§11.2.2), so there is no
-sparse Jacobian prototype and the sparse factorizations cannot run on this
-path: `solve` defaults the linear solver to Julia's native, resize-safe
-`LUFactorization()` and rebuilds an explicitly requested
-`SparspakFactorization`/`KLUFactorization` to `LUFactorization`, with a
-warning. A robust depletion configuration is therefore simply:
-
-```julia
-# Depletion-safe: no pluggable Jacobian; solve picks the resize-safe dense LU.
-sol = solve(problem;
-    use_ale             = true,
-    handle_depletion    = true,
-    depletion_threshold = 0.05)
-```
-
-The MKL pitfall survives only when you pass a fully constructed integrator
-whose `linsolve` is unset (LinearSolve's auto-selection may then pick MKL LU);
-`solve` warns when it detects that combination on a large depleting state.
+Depletion handling keeps the state size, so the sparse factorization keeps
+its pattern through every park event and nothing about the linear solver
+changes with `handle_depletion`. The dense LU is used only with the dense
+`DenseAD_ForwardDiff` backend, which attaches no sparse prototype; an explicitly
+requested sparse factorization is then rebuilt to `LUFactorization` inside the
+user's algorithm, with a warning.
 
 ---
 
@@ -789,7 +786,7 @@ sol = solve(problem;
     jacobian   = JacobianSpec(Structured(strategy = DirectSolve()), problem; use_ale = true),
     use_ale    = true)
 
-# (f) Depletion tracking — no pluggable Jacobian; solve picks the resize-safe dense LU.
+# (f) Depletion under ALE — the default Jacobian is Structured(strategy = ApproxSolve()).
 sol = solve(problem;
     use_ale          = true,
     handle_depletion = true)
