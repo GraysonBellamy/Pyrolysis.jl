@@ -1,3 +1,3 @@
 "qoi","value","exact","error","tol","within_tol","comment"
-"max relative ξ_A error (n=2.0)",1.72479299465067e-8,NaN,1.72479299465067e-8,5.0e-8,true,"ξ = ξ₀/(1+ξ₀kt); k in m³/(kg·s)"
-"total-mass conservation",5.684341886080802e-16,NaN,5.684341886080802e-16,1.0e-13,true,"A→B closed system"
+"max relative ξ_A error (n=2.0)",1.7203838709178852e-8,NaN,1.7203838709178852e-8,5.0e-8,true,"ξ = ξ₀/(1+ξ₀kt); k in m³/(kg·s)"
+"total-mass conservation",1.1368683772161603e-15,NaN,1.1368683772161603e-15,1.0e-13,true,"A→B closed system"

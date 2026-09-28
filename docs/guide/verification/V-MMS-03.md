@@ -48,7 +48,7 @@ assumes reaction-driven mesh velocity (see `Workspace.w_override` note).
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
 | L∞ T error on moving mesh, t=10.0 s | 0.003857 | — | 0.003857 | 0.25 | yes | manufactured T* on 30%-compressed mesh |
-| relative L∞ ξ_solid (mesh-bound) error, t=10.0 s | 6.205e-12 | — | 6.205e-12 | 1e-10 | yes | uniform solid: verifies the Lagrangian (no-advection) solid path + source injection |
+| relative L∞ ξ_solid (mesh-bound) error, t=10.0 s | 6.204e-12 | — | 6.204e-12 | 1e-10 | yes | uniform solid: verifies the Lagrangian (no-advection) solid path + source injection |
 | relative L∞ ξ_gas error, t=10.0 s | 0.0006197 | — | 0.0006197 | 0.006 | yes | gas is advected relative to the mesh: moving-mesh transport error channel |
 
 ![V-MMS-03 T_profiles](assets/V-MMS-03/V-MMS-03_T_profiles.png)
@@ -75,10 +75,10 @@ assumes reaction-driven mesh velocity (see `Workspace.w_override` note).
 
 | n_cells | h | wall (s) | L2_T | Linf_T |
 | --- | --- | --- | --- | --- |
-| 16 | 0.0625 | 0.04061 | 0.2321 | 0.3061 |
-| 32 | 0.03125 | 0.1203 | 0.05006 | 0.06913 |
-| 64 | 0.01562 | 0.5054 | 0.01107 | 0.01579 |
-| 128 | 0.007812 | 1.556 | 0.002632 | 0.003857 |
+| 16 | 0.0625 | 0.1125 | 0.2321 | 0.3061 |
+| 32 | 0.03125 | 0.6345 | 0.05006 | 0.06913 |
+| 64 | 0.01562 | 1.222 | 0.01107 | 0.01579 |
+| 128 | 0.007812 | 8.375 | 0.002632 | 0.003857 |
 
 Observed order 2.156 (L2_T), expected 2.0.
 

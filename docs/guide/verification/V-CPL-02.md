@@ -50,15 +50,14 @@ early. That deficit is the correct transient of the initial-value problem,
 not solver error: the windowed first law (q″Δt = ΔE_stored + ablation
 enthalpy) closes throughout the approach, and the pre-ablation phase
 matches Landau's exact constant-flux heat-up T_s(t) = T₀ + 2q″√(t/(πρck)).
-The steady exact solution is simply not a valid reference before ~6τ. At
-the original window [0.55, 0.95] s (2–4τ) the residual deficit was ≈0.9%
-and mesh-INDEPENDENT (n=60→240 ladder, observed order 0.11 — diagnosed
-2026-07-07). The window now sits at ≥6τ, where the remaining residual is
-the §12.3.2 half-cell T_s closure with the reaction zone inside the
-boundary half-cell — mesh-DEPENDENT as it should be (it shifts
-v_ss(measured T_s) but not the actual regression rate): ~1.3% at
-Δz ≈ 2δ_r, ~5e-4 at the CI mesh Δz ≈ δ_r — so the pinned tolerance
-actually arms the ALE guard.
+The steady exact solution is simply not a valid reference before ~6τ: in
+a window at 2–4τ the residual deficit is ≈0.9% and mesh-INDEPENDENT
+(n=60→240 ladder, observed order 0.11). The window therefore sits at ≥6τ,
+where the remaining residual is the §12.3.2 half-cell T_s closure with the
+reaction zone inside the boundary half-cell — mesh-DEPENDENT as it should
+be (it shifts v_ss(measured T_s) but not the actual regression rate):
+~1.3% at Δz ≈ 2δ_r, ~7e-4 at the CI mesh Δz ≈ δ_r — so the pinned
+tolerance actually arms the ALE guard.
 
 Blowing correction stays OFF (exact solution assumes prescribed net flux).
 Depletion limiter stays ON: the tanh roll-off is part of the regression
@@ -76,12 +75,12 @@ insensitivity check of the ablation-temperature locus.
 
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
-| steady energy balance: v vs Landau v_ss(measured T_s) | 0.001948 | 0.00195 | 0.0009996 | 0.0016 | yes | traveling-wave identity, exact at any E for c_gas = c_solid |
-| regression consistency: thickness slope vs gas generation | 0.001948 | 0.001947 | 0.0007031 | 0.0021 | yes | γ_gas = 0 ⇒ dL/dt = −ṁ‴_gas/ρ exactly |
-| mass ledger closure over plateau window | 0.6797 | 0.6782 | 0.0021 | 0.004 | yes | total-mass drop vs ∫ ṁ″ dt; residual = holdup drift |
-| in-depth profile decay rate (surface-attached frame) | 0.001967 | 0.001948 | 0.009652 | 0.027 | yes | ln(T−T₀) slope over ζ/δ ∈ [0.75, 1.7], 12 cells |
-| design-locus regression rate (loose) | 0.001948 | 0.002 | 0.02582 | 0.1 | yes | leading-order Laplace locus only pins T_p to O(RT_p²/E); informational, tightens as E ↑ (see V-CPL-02b) |
-| back-face rise (semi-infinite validity) | 0.0003541 | 0 | 0.0003541 | 0.01 | yes | guards the semi-infinite assumption |
+| steady energy balance: v vs Landau v_ss(measured T_s) | 0.001948 | 0.00195 | 0.001053 | 0.0021 | yes | traveling-wave identity, exact at any E for c_gas = c_solid |
+| regression consistency: thickness slope vs gas generation | 0.001948 | 0.001948 | 0.0002359 | 0.0021 | yes | γ_gas = 0 ⇒ dL/dt = −ṁ‴_gas/ρ exactly |
+| mass ledger closure over plateau window | 0.7803 | 0.7791 | 0.001598 | 0.0049 | yes | total-mass drop vs ∫ ṁ″ dt; residual = holdup drift |
+| in-depth profile decay rate (surface-attached frame) | 0.001967 | 0.001948 | 0.00965 | 0.027 | yes | ln(T−T₀) slope over ζ/δ ∈ [0.75, 1.7], 12 cells |
+| design-locus regression rate (loose) | 0.001948 | 0.002 | 0.02584 | 0.1 | yes | leading-order Laplace locus only pins T_p to O(RT_p²/E); informational, tightens as E ↑ (see V-CPL-02b) |
+| back-face rise (semi-infinite validity) | 0.0003587 | 0 | 0.0003587 | 0.01 | yes | guards the semi-infinite assumption |
 
 ![V-CPL-02 mlr_history](assets/V-CPL-02/V-CPL-02_mlr_history.png)
 
@@ -103,12 +102,12 @@ insensitivity check of the ablation-temperature locus.
 
 | n_cells | h | wall (s) | balance | consistency |
 | --- | --- | --- | --- | --- |
-| 60 | 0.01667 | 1.798 | 0.01511 | 0.007923 |
-| 100 | 0.01 | 10.84 | 0.01345 | 0.001808 |
-| 160 | 0.00625 | 67.73 | 0.0004999 | 1.197e-05 |
-| 240 | 0.004167 | 335 | 0.0009996 | 0.0007031 |
+| 60 | 0.01667 | 0.392 | 0.01111 | 0.00403 |
+| 100 | 0.01 | 0.8772 | 0.01338 | 0.0001482 |
+| 160 | 0.00625 | 1.596 | 0.0007077 | 0.0002239 |
+| 240 | 0.004167 | 3.111 | 0.001053 | 0.0002359 |
 
-Observed order 2.493 (balance).
+Observed order 2.169 (balance).
 
 ### Solver configuration
 

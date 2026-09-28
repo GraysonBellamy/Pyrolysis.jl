@@ -57,9 +57,9 @@ implementation's constant.
 
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
-| steady surface temperature vs algebraic root | 732.8 | 732.8 | 3.166e-09 | 1e-06 | yes | surface-Newton residual check; Ts_exact ≈ 732.8 K |
+| steady surface temperature vs algebraic root | 732.8 | 732.8 | 3.748e-09 | 1e-06 | yes | surface-Newton residual check; Ts_exact ≈ 732.8 K |
 | steadiness (last half-interval drift) | 0.0001074 | — | 0.0001074 | 0.001 | yes | t_end ≈ 36 thermal time constants |
-| steady uniformity (adiabatic back) | 7.61e-10 | — | 7.61e-10 | 1e-07 | yes | zero steady flux ⇒ uniform slab at Ts |
+| steady uniformity (adiabatic back) | 8.77e-10 | — | 8.77e-10 | 1e-07 | yes | zero steady flux ⇒ uniform slab at Ts |
 
 ![V-RX-04b surface_T_history](assets/V-RX-04b/V-RX-04b_surface_T_history.png)
 

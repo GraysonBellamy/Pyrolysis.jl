@@ -1,5 +1,5 @@
 "n_cells","qoi","value","exact","error","tol","within_tol"
-16,"thin-limit deviation from 0D TGA (L = 0.5 mm)",0.0010019688916866017,NaN,0.0010019688916866017,0.003,true
-16,"L-convergence rate, rung 1 → 2",2.0211908403726966,2.0,0.021190840372696584,0.1,true
-16,"L-convergence rate, rung 2 → 3",2.0056614142133804,2.0,0.0056614142133804,0.1,true
-16,"complete conversion at t_end (coarsest rung)",-4.0321816539805594e-24,0.0,4.0321816539805594e-24,1.0e-6,true
+16,"thin-limit deviation from 0D TGA (L = 0.5 mm)",0.0010019688897399419,NaN,0.0010019688897399419,0.003,true
+16,"L-convergence rate, rung 1 → 2",2.0211908403731855,2.0,0.021190840373185527,0.1,true
+16,"L-convergence rate, rung 2 → 3",2.0056614170158085,2.0,0.005661417015808468,0.1,true
+16,"complete conversion at t_end (coarsest rung)",-1.1492236473601936e-15,0.0,1.1492236473601936e-15,1.0e-6,true

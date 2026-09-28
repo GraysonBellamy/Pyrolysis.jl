@@ -1,0 +1,5 @@
+"n_cells","qoi","value","exact","error","tol","within_tol"
+40,"thickness follows L₀ exp(−r t/ρ) through the park cascades",8.229747252904552e-5,8.229747049020031e-5,1.932434996554136e-7,0.0001,true
+40,"solid concentration stays at ρ_s (dilation removes volume only)",1000.0,1000.0,2.2737367544323206e-16,1.0e-8,true
+40,"isothermal: T stays at T₀",600.0,600.0,1.1368683772161603e-13,1.0e-6,true
+40,"park cascade: 40 → 5 live cells",5.0,5.0,0.0,0.5,true
