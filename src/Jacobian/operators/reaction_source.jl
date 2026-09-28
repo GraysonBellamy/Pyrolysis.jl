@@ -201,9 +201,9 @@ end
 
 """
 	contribute_to_jacobian!(jac, op::ReactionSourceOperator,
-	                        u, ctx, t, ws, material, layout) -> nothing
+	                        u, ctx, t, ws, material, layout, mesh) -> nothing
 
-Default cell-local AD path. For each cell `i`:
+Default cell-local AD path. For each live cell `i` (`1:mesh.n_active_cells`):
 
 1. Pack `(T_i, ξ_{1,i}, …, ξ_{NC,i})` into `ws.x_buf`.
 2. Run `ForwardDiff.jacobian!` over `apply_cell!` to fill `ws.J_local`
@@ -224,6 +224,7 @@ function contribute_to_jacobian!(
     ws::ReactionSourceADWorkspace{Tu,NC,NR},
     material::Material{NC,NR},
     layout,
+    mesh,
 ) where {Tu,NC,NR}
 
     n_cells = layout.n_cells
@@ -247,7 +248,7 @@ function contribute_to_jacobian!(
 
     A = jac.A
     smap = jac.smap
-    @inbounds for i = 1:n_cells
+    @inbounds for i = 1:mesh.n_active_cells
         # Pack stencil-local input from the global state vector.
         # Layout: T at u[i]; ξ_{j,i} at u[n_cells + (j-1)*n_cells + i].
         ws.x_buf[1] = u[i]

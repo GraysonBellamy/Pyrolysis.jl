@@ -46,15 +46,17 @@ if !isdefined(@__MODULE__, :_PYROLYSIS_PERF_HELPERS_LOADED)
     end
 
     # 2-component charring solid with permeability + absorption (Beer-Lambert + Darcy).
-    function _wood_like_material()
+    # The default α = 1000 m²/kg makes the 1 cm column optically thick (τ ≈ 5000);
+    # κ = 0 selects Fickian gas transport instead of Darcy.
+    function _wood_like_material(; α::Real = 1000.0, κ::Real = 1e-14)
         virgin = SolidComponent(
             :wood,
             ρ = 500.0,
             c = 1500.0,
             k = 0.15,
             ε = 0.9,
-            α = 1000.0,        # m²/kg — absorption coefficient for Beer-Lambert
-            κ = 1e-14,         # m² — permeability for Darcy flow
+            α = α,             # m²/kg — absorption coefficient for Beer-Lambert
+            κ = κ,             # m² — permeability for Darcy flow
             λ = 1e-5,          # mass diffusivity (matrix transport coefficient)
         )
         gas = GaseousComponent(:pyrgas, M = 0.06, c = 1800.0, k = 0.03, λ = 5e-5)
@@ -153,6 +155,58 @@ if !isdefined(@__MODULE__, :_PYROLYSIS_PERF_HELPERS_LOADED)
             radiation_model = BEER_LAMBERT,
             radiation_intensity = 50e3,
         )
+    end
+
+    # Optically moderate ALE + Beer-Lambert deck: α = 0.5 m²/kg gives a total
+    # optical depth of about 2.5 over the 1 cm column, so the intensity reaching
+    # every cell depends measurably on the node positions of all cells above it.
+    function _build_ale_beer_lambert_moderate(κ::Real)
+        mat = _wood_like_material(α = 0.5, κ = κ)
+        mesh = create_uniform_mesh(0.01, PERF_N_CELLS, Val(PERF_NC))
+        bc = BoundaryConditionSet(thermal = (top = HeatFluxBC(0.0), bottom = AdiabaticBC()))
+        problem =
+            PyrolysisProblem(mesh = mesh, material = mat, bc_set = bc, tspan = (0.0, 100.0))
+        return _finalize(
+            problem;
+            use_ale = true,
+            radiation_model = BEER_LAMBERT,
+            radiation_intensity = 50e3,
+        )
+    end
+
+    """
+    	build_ale_beer_lambert_darcy_moderate()
+
+    `SimulationMode{ALE, BeerLambert, DarcyFick, NoChi}` on an optically moderate
+    medium (total optical depth ≈ 2.5). Unlike the optically thick
+    [`build_ale_beer_lambert_darcy`](@ref), the energy rows' dependence on the node
+    positions far above each cell does not underflow, so a sparsity pattern that
+    omits those z columns fails the strict comparison.
+    """
+    build_ale_beer_lambert_darcy_moderate() = _build_ale_beer_lambert_moderate(1e-14)
+
+    """
+    	build_ale_beer_lambert_fickian_moderate()
+
+    `SimulationMode{ALE, BeerLambert, Fickian, NoChi}` counterpart of
+    [`build_ale_beer_lambert_darcy_moderate`](@ref) (zero permeability).
+    """
+    build_ale_beer_lambert_fickian_moderate() = _build_ale_beer_lambert_moderate(0.0)
+
+    """
+    	mixed_reacting_state!(u, n_cells)
+
+    Overwrite the T and first two ξ blocks of `u` with a reacting profile:
+    T from 450 to 650 K, the solid density reduced by 5–35%, and a gas
+    concentration from 0.02 to 0.1 kg/m³. Node positions are left unchanged.
+    """
+    function mixed_reacting_state!(u, n_cells)
+        for i = 1:n_cells
+            u[i] = 450.0 + 200.0 * i / n_cells
+            u[n_cells+i] *= 0.65 + 0.3 * i / n_cells
+            u[2n_cells+i] = 0.02 + 0.08 * i / n_cells
+        end
+        return u
     end
 
 end # _PYROLYSIS_PERF_HELPERS_LOADED

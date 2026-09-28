@@ -266,11 +266,14 @@ function _empty_extras()
         surface_heat_flux_conduction = Float64[],
         surface_heat_flux_transpiration = Float64[],
         volumetric_absorption = Float64[],
+        radiation_transmitted = Float64[],
         surface_emissivity = Float64[],
         surface_conductivity = Float64[],
         back_heat_flux = Float64[],
         MLR_gauge = Float64[],
         cross_section_area_history = Float64[],
+        live_cells = Int[],
+        park_times = Float64[],
         diagnostics_log = Any[],
     )
 end
@@ -322,11 +325,14 @@ function _allocate_extras!(sol::PyrolysisSolution, n_times::Int)
         surface_heat_flux_conduction = zeros(n_times),
         surface_heat_flux_transpiration = zeros(n_times),
         volumetric_absorption = zeros(n_times),
+        radiation_transmitted = zeros(n_times),
         surface_emissivity = zeros(n_times),
         surface_conductivity = zeros(n_times),
         back_heat_flux = zeros(n_times),
         MLR_gauge = zeros(n_times),
         cross_section_area_history = zeros(n_times),
+        live_cells = zeros(Int, n_times),
+        park_times = Float64[],
         diagnostics_log = prev_log,
     )
     return sol

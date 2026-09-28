@@ -109,13 +109,13 @@ function apply!(
     χ_off = chi_offset(layout)
     n_cells = layout.n_cells
     m_init = mesh.m_dry_solid_initial
-    rates = zeros(NR);
-    heats = zeros(NR);
+    rates = zeros(NR)
+    heats = zeros(NR)
     dξ = zeros(NC)
     @inbounds for i = 1:n_cells
         T_i = state.T[i]
         ξ_i = ntuple(j -> state.ξ[j, i], Val(NC))
-        fill!(rates, 0.0);
+        fill!(rates, 0.0)
         fill!(heats, 0.0)
         evaluate_reactions!(rates, heats, ξ_i, T_i, material)
         species_source_terms!(dξ, rates, material, NC)
@@ -195,10 +195,10 @@ function contribute_to_jacobian!(
     is_full = assembly_profile === :full
 
     # u_chi drives the χ-row × χ-col rank-1; only allocate / build it under
-    # :full, since the rank-1 push is gated below.
-    u_chi = is_full ? Vector{Float64}(undef, n_cells) : nothing
+    # :full, since the rank-1 push is gated below. Ghost slots carry zero.
+    u_chi = is_full ? zeros(Float64, n_cells) : nothing
 
-    @inbounds for i = 1:n_cells
+    @inbounds for i = 1:mesh.n_active_cells
         denom = max(m_init[i], eps())
         m_inv = 1.0 / denom
         V_i = state.volume[i]

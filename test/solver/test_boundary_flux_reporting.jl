@@ -24,6 +24,69 @@ using Pyrolysis.Materials: NO_RADIATION, SURFACE_ABSORPTION, BEER_LAMBERT
 using Pyrolysis.Discretization: compute_boundary_heat_fluxes
 import Pyrolysis.Discretization: evaluate_bc_flux_and_derivative
 
+@testset "surface gas reporting includes absent-species ambient inflow" begin
+    mat = Material(
+        name = :gas_reporting,
+        components = (
+            SolidComponent(
+                :solid;
+                ρ = 500.0,
+                ρ_intrinsic = 1500.0,
+                c = 1000.0,
+                k = 0.2,
+                κ = 1e-12,
+            ),
+            GaseousComponent(:AIR; M = 0.02897, c = 1006.0, k = 0.026, λ = 1e-5),
+            GaseousComponent(:other; M = 0.028, c = 1000.0, k = 0.03, λ = 1e-5),
+        ),
+        reactions = (),
+    )
+    mass_bc =
+        ConvectiveMassBC(h_m = 0.05, ξ_inf = (0.0, 0.7, 0.0)) +
+        DirichletPressureBC(101325.0)
+    for ale in (false, true)
+        mesh = create_uniform_mesh(
+            0.01,
+            2,
+            Val(3);
+            T_initial = 300.0,
+            ξ_initial = (500.0, 0.7, 0.0),
+        )
+        problem = PyrolysisProblem(
+            mesh = mesh,
+            material = mat,
+            bc_set = BoundaryConditionSet(
+                thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
+                mass = (top = mass_bc, bottom = mass_bc),
+            ),
+            tspan = (0.0, 1.0),
+        )
+        def, ws, u = initialize_state(problem; use_ale = ale)
+        for air in (-1e-12, 0.0, 0.2), other in (0.0, 2.0)
+            u[1:2] .= 300.0
+            u[3:4] .= 500.0
+            u[5:6] .= air
+            u[7:8] .= other
+            residual!(similar(u), u, def, 0.0, ws)
+            ξ = (500.0, air, other)
+            for (side, face, sign) in ((:top, 3, 1.0), (:bottom, 1, -1.0))
+                reported = Pyrolysis.Solver._surface_gas_flux(
+                    mat,
+                    ξ,
+                    300.0,
+                    mass_bc,
+                    0.0025,
+                    0.0,
+                    true,
+                    Val(side),
+                )
+                @test collect(reported) ≈ sign .* ws.rhs_cache.J_gas[:, face] atol=1e-14 rtol=1e-12
+                air == 0.0 && @test reported[2] ≈ -0.035
+            end
+        end
+    end
+end
+
 function _reporting_material()
     virgin = SolidComponent(
         :virgin,

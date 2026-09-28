@@ -57,7 +57,7 @@ if !isdefined(@__MODULE__, :VerificationCase)
 
     Base.@kwdef struct CIConfig
         n_cells::Int
-        budget_s::Float64            # recorded target; asserted at 5× for CI variance
+        budget_s::Float64            # warm-case target (compilation excluded); asserted at 5× for CI variance
         convergence::Union{Nothing,ConvergenceSpec} = nothing
     end
 
@@ -108,6 +108,10 @@ if !isdefined(@__MODULE__, :VerificationCase)
     through the wrapped-RHS `solve_mms` path (exact/mms.jl). The override
     applies to the convergence sweep as well.
 
+    `expected_retcode` is the return code assert mode requires: `:Success`
+    by default, `:Terminated` for a case whose answer is that a callback
+    stops the solve.
+
     `report` keys understood by the report runner (all optional; `(;)` means
     the case is skipped in report mode):
 
@@ -139,6 +143,7 @@ if !isdefined(@__MODULE__, :VerificationCase)
         build::Function
         solve_kwargs::NamedTuple = (;)
         solve_fn::Union{Nothing,Function} = nothing
+        expected_retcode::Symbol = :Success
         qois::Function
         ci::CIConfig
         report::NamedTuple = (;)

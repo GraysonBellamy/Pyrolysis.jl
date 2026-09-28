@@ -97,7 +97,7 @@ end
 # ============================================================================
 
 """
-	Material{NC,NR,C,RT,LSL} <: AbstractMaterial
+	Material{NC,NR,C,RT,LSL,Pμ} <: AbstractMaterial
 
 A complete material definition with components, reactions, mixing rules, and gas transport.
 
@@ -109,6 +109,8 @@ A complete material definition with components, reactions, mixing rules, and gas
 - `LSL`: Lateral shrinkage law type (concrete `Function` subtype, or `Nothing`).
   Parameterizing here lets calls through `material.lateral_shrinkage_law`
   specialize statically — no dynamic dispatch through `Union{Function,Nothing}`.
+- `Pμ`: Pore-gas viscosity property-function type. Parameterized for the same
+  reason as `LSL` — `material.gas_viscosity(T)` stays monomorphic.
 
 # Fields
 - `name::Symbol`: Material identifier
@@ -118,6 +120,34 @@ A complete material definition with components, reactions, mixing rules, and gas
   Mixing rules (and per-rule β) for thermal conductivity (`k`), gas transfer
   coefficient (`λ`), and permeability (`κ`).
 - `lateral_shrinkage_law::LSL`: Optional A(t)/A_0 = law(χ̄). `nothing` ⇒ identity.
+- `gas_viscosity::Pμ`: Dynamic viscosity μ(T) of the pore gas [Pa·s]. Accepts
+  anything `to_property` understands — a number, a `(p0, p1)` tuple, a
+  `Function`, or a property function. Defaults to
+  [`SutherlandProperty`](@ref)`()` (air), which is exactly what the Darcy path
+  used before this field existed, so existing materials are unchanged.
+
+# Pore-gas viscosity
+μ enters the model *only* as the Darcy mobility κ/μ, so an error in μ is
+equivalent to the reciprocal error in permeability. The default is air, which
+is within ~2 % for an N₂-swept pore space but overstates the viscosity of
+pyrolysis volatiles by roughly 1.3–1.7× over 300–1000 K — a bias in the same
+direction everywhere, and one that grows as the pores fill with volatiles.
+Supply a blend correlation for the gas the material actually makes:
+
+```julia
+# Cantera mixture-averaged fit for wood pyrolyzates, ascending coefficients
+# (`PolynomialProperty` uses `evalpoly`), valid 280–1200 K.
+wood = Material(
+	name = :WhitePine,
+	components = (...),
+	reactions = (...),
+	gas_viscosity = PolynomialProperty(mu_coeffs),
+)
+```
+
+Because this is one curve per material, it is an average over the composition
+the material is expected to produce; it cannot resolve the pore gas shifting
+from background air to volatiles as pyrolysis proceeds.
 
 # Gas Transport
 Darcy-Fick gas transport is enabled when any solid/liquid component has κ > 0.
@@ -154,7 +184,7 @@ pmma = Material(
 )
 ```
 """
-struct Material{NC,NR,C<:Tuple,RT<:Tuple,LSL} <: AbstractMaterial
+struct Material{NC,NR,C<:Tuple,RT<:Tuple,LSL,Pμ} <: AbstractMaterial
     name::Symbol
     components::C
     reactions::RT  # Full tuple type to preserve heterogeneous reaction types
@@ -172,30 +202,65 @@ struct Material{NC,NR,C<:Tuple,RT<:Tuple,LSL} <: AbstractMaterial
     # material (smooth tanh(ξ/threshold) roll-off; see DepletionLimiter).
     depletion_limiter::DepletionLimiter
 
+    # Dynamic viscosity of the pore gas, μ(T) [Pa·s]. Enters the model only as
+    # the Darcy mobility κ/μ, so it is a single material-level curve rather
+    # than a per-component property: it describes the gas mixture this material
+    # actually produces. Defaults to `SutherlandProperty()` (air), which is what
+    # the package hard-coded before this field existed.
+    gas_viscosity::Pμ
+
     # Inner constructor with validation
-    function Material{NC,NR,C,RT,LSL}(
+    function Material{NC,NR,C,RT,LSL,Pμ}(
         name::Symbol,
         components::C,
         reactions::RT,
         mixing::NamedTuple{(:k, :λ, :κ),Tuple{MixingSpec,MixingSpec,MixingSpec}},
         lateral_shrinkage_law::LSL,
         depletion_limiter::DepletionLimiter,
-    ) where {NC,NR,C<:Tuple,RT<:Tuple,LSL}
+        gas_viscosity::Pμ,
+    ) where {NC,NR,C<:Tuple,RT<:Tuple,LSL,Pμ}
         # Validate component count matches
         length(components) == NC || throw(ArgumentError("Component count mismatch"))
         length(reactions) == NR || throw(ArgumentError("Reaction count mismatch"))
         LSL === Nothing ||
             LSL <: Function ||
             throw(ArgumentError("lateral_shrinkage_law must be a Function or nothing"))
-        new{NC,NR,C,RT,LSL}(
+        _validate_gas_viscosity(gas_viscosity, name)
+        new{NC,NR,C,RT,LSL,Pμ}(
             name,
             components,
             reactions,
             mixing,
             lateral_shrinkage_law,
             depletion_limiter,
+            gas_viscosity,
         )
     end
+end
+
+# μ enters only as the denominator of the Darcy mobility κ/μ, so a curve that is
+# non-positive or non-finite anywhere in the modelled range does not degrade the
+# answer — it reverses or blows up the gas velocity. Correlations fitted over a
+# finite window (the Cantera surrogate's poly4 is fitted 280–1200 K) can do
+# exactly that on extrapolation. Fail at construction, in the spirit of
+# `MixingSpec`'s CARMAN_KOZENY/`length_scale` check, rather than at hour three of
+# a solve. The probe spans the pyrolysis range plus generous margin; the runtime
+# floor in `Properties.effective_gas_viscosity` remains the backstop for Newton
+# trial states that wander outside it.
+function _validate_gas_viscosity(gas_viscosity, name::Symbol)
+    for T in (200.0, 300.0, 500.0, 800.0, 1200.0, 1800.0)
+        μ = gas_viscosity(T)
+        (isfinite(μ) && μ > 0) || throw(
+            ArgumentError(
+                "Material :$name has a gas_viscosity that is not positive and finite " *
+                "at T = $T K (got $μ). μ appears only as the Darcy mobility κ/μ, so a " *
+                "non-positive value reverses the gas velocity rather than merely " *
+                "degrading it. Check the correlation's validity range — a polynomial " *
+                "fitted over a narrow window will do this on extrapolation.",
+            ),
+        )
+    end
+    return nothing
 end
 
 # ============================================================================
@@ -242,6 +307,7 @@ function Material(;
     mixing::NamedTuple{(:k, :λ, :κ),Tuple{MixingSpec,MixingSpec,MixingSpec}} = MaterialMixing(),
     lateral_shrinkage_law::Union{Function,Nothing} = nothing,
     depletion_limiter::DepletionLimiter = DepletionLimiter(),
+    gas_viscosity = SutherlandProperty(),
 ) where {C<:Tuple}
     # Resolve any PendingReactions (symbolic component names → integer indices)
     # against the components tuple's name → index map.
@@ -257,6 +323,7 @@ function Material(;
         mixing,
         lateral_shrinkage_law,
         depletion_limiter,
+        to_property(gas_viscosity),
     )
 end
 
@@ -267,14 +334,16 @@ function _construct_material(
     mixing,
     lateral_shrinkage_law::LSL,
     depletion_limiter::DepletionLimiter,
-) where {C<:Tuple,RT<:Tuple,LSL}
-    Material{length(components),length(resolved),C,RT,LSL}(
+    gas_viscosity::Pμ,
+) where {C<:Tuple,RT<:Tuple,LSL,Pμ}
+    Material{length(components),length(resolved),C,RT,LSL,Pμ}(
         name,
         components,
         resolved,
         mixing,
         lateral_shrinkage_law,
         depletion_limiter,
+        gas_viscosity,
     )
 end
 
@@ -439,6 +508,14 @@ function Base.show(io::IO, ::MIME"text/plain", m::Material{NC,NR}) where {NC,NR}
     println(io, "  Conductivity mixing: $(m.mixing.k.rule), β=$(m.mixing.k.β)")
     println(io, "  Gas transfer mixing: $(m.mixing.λ.rule), β=$(m.mixing.λ.β)")
     println(io, "  Permeability mixing: $(m.mixing.κ.rule), β=$(m.mixing.κ.β)")
+    if !(m.gas_viscosity isa SutherlandProperty && m.gas_viscosity == SutherlandProperty())
+        println(
+            io,
+            "  Pore-gas viscosity: $(typeof(m.gas_viscosity).name.name) " *
+            "(μ(300 K) = $(round(m.gas_viscosity(300.0) * 1e6, digits = 2)) μPa·s, " *
+            "μ(700 K) = $(round(m.gas_viscosity(700.0) * 1e6, digits = 2)) μPa·s)",
+        )
+    end
 end
 
 # ============================================================================

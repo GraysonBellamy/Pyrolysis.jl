@@ -61,14 +61,19 @@ The reaction is endothermic (absorbs heat).
 # 2. Char residue (solid)
 # 3. MMA gas (gaseous product)
 
-# Temperature-dependent properties for PMMA (piecewise at T = 378 K)
+# Temperature-dependent properties for PMMA (piecewise at T = 378 K). The
+# fits are measured on ~300–700 K and are held constant outside that range:
+# the low-T cp line is negative below 204 K and the high-T k line crosses
+# zero at 872 K, so extrapolating either would give an unphysical law.
 # Heat capacity: cp = -2290 + 11.2*T for T < 378 K
 #                cp = 1040 + 3.08*T  for T > 378 K
-pmma_cp = CallableProperty(T -> T < 378.0 ? (-2290.0 + 11.2 * T) : (1040.0 + 3.08 * T))
+pmma_cp = CallableProperty(
+    T -> T < 378.0 ? (-2290.0 + 11.2 * max(T, 300.0)) : (1040.0 + 3.08 * T),
+)
 
 # Thermal conductivity: k = 0.15 for T < 378 K
 #                       k = 0.34 - 3.9e-4*T for T > 378 K
-pmma_k = CallableProperty(T -> T < 378.0 ? 0.15 : (0.34 - 3.9e-4 * T))
+pmma_k = CallableProperty(T -> T < 378.0 ? 0.15 : (0.34 - 3.9e-4 * min(T, 700.0)))
 
 pmma = Material(
     name = :PMMA,

@@ -75,7 +75,11 @@ using ..Materials: AbstractThermalBC, RadiationModel, SURFACE_ABSORPTION
 using ..BoundaryConditions:
     DirichletThermalBC, BoundaryConditionSet, get_thermal_bc, get_mass_bc
 using ..Geometry: BoundaryState
-using ..Properties: effective_conductivity, effective_heat_capacity, effective_emissivity
+using ..Properties:
+    effective_conductivity,
+    effective_heat_capacity,
+    effective_emissivity,
+    effective_absorptivity
 using ..Discretization: solve_boundary_temperature!
 
 """
@@ -137,10 +141,12 @@ function _bc_thermal_contribution(
     use_blowing::Bool = false,
 ) where {NC,Tu}
 
-    # Cell-local properties (Dual-typed when ξ_cell, T_cell are Dual).
+    # Cell-local properties (Dual-typed when ξ_cell, T_cell are Dual). ε_eff
+    # and a_eff carry ∂/∂T through T-dependent component emissivities.
     k_eff = effective_conductivity(ξ_cell, T_cell, material)
     ρcp = effective_heat_capacity(ξ_cell, T_cell, material)
     ε_eff = effective_emissivity(ξ_cell, T_cell, material)
+    a_eff = effective_absorptivity(ξ_cell, T_cell, material)
 
     # Outward gas flux at this boundary face — hard-zeroed, mirroring the
     # residual: transpiration is rejected at construction
@@ -201,6 +207,7 @@ function _bc_thermal_contribution(
             T_ref,
             t,
             ε_eff;
+            a_eff = a_eff,
             radiation_model = radiation_model,
             use_blowing = use_blowing,
             J_blowing = J_blowing,

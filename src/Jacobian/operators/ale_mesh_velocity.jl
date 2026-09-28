@@ -312,10 +312,11 @@ end
 
 """
 	compute_strain_rate_derivatives!(ws::ALEMeshVelocityWorkspace,
-	                                 state, material) -> nothing
+	                                 state, mesh, material) -> nothing
 
-Populate `ws.dθ_dT` and `ws.dθ_dξ` from the current `state` using cell-
-local ForwardDiff over `θ_cell(T, ξ) = γ ⨁ S(T, ξ) / ρ(T)`. The
+Populate `ws.dθ_dT` and `ws.dθ_dξ` for the live cells from the current
+`state` using cell-local ForwardDiff over `θ_cell(T, ξ) = γ ⨁ S(T, ξ) / ρ(T)`;
+parked ghost slots are zero. The
 existing analytical kernel
 [`Pyrolysis.Jacobian.compute_strain_rate_derivatives!`](@ref) computes
 the same quantity by hand-rolled chain rule; using AD here keeps the
@@ -329,13 +330,20 @@ the existing analytical kernel.
 function compute_strain_rate_derivatives!(
     ws::ALEMeshVelocityWorkspace{Tu,NC,NR},
     state,
+    mesh,
     material::Material{NC,NR},
 ) where {Tu,NC,NR}
 
-    n_cells = length(state.T)
+    n_cells = mesh.n_active_cells
     rates_d = ws.rates_d
     heats_d = ws.heats_d
     dξ_dt_d = ws.dξ_dt_d
+    @inbounds for i = (n_cells+1):length(ws.dθ_dT)
+        ws.dθ_dT[i] = 0.0
+        for j = 1:NC
+            ws.dθ_dξ[j, i] = 0.0
+        end
+    end
     @inbounds for i = 1:n_cells
         # Seed (T_i, ξ_{1,i}, …, ξ_{NC,i}) as stack Duals with unit partials
         # (same pattern as the conduction operator) and run the
@@ -416,7 +424,7 @@ function compute_theta_A_derivatives!(
     law === nothing && return 0.0
 
     m_init = mesh.m_dry_solid_initial
-    n_cells = layout.n_cells
+    n_cells = mesh.n_active_cells
     (n_cells == 0 || length(m_init) < n_cells) && return 0.0
 
     M = 0.0
@@ -641,7 +649,9 @@ function contribute_to_structured!(
     # Refill the persistent bare prefix-sum couplings in place (entry 1 = T
     # channel, 1+j = ξ_j). Same math as `build_prefix_sum_coupling_T` /
     # `build_prefix_sum_coupling_xi`, but writing into workspace-owned
-    # buffers so the hot path allocates nothing.
+    # buffers so the hot path allocates nothing. The strain-rate derivatives
+    # are zero in parked ghost slots, so the prefix sums stop at the live
+    # surface and every ghost node row reproduces the surface node's row.
     couplings = mesh_vel_ws.w_cell_field
     A_section = state.A_section[]
     v_T_pc = mesh_vel_ws.prefix_couplings[1].v

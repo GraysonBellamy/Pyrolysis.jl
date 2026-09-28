@@ -16,6 +16,11 @@ type — the JacobianSpec contract requires it (see `interface.jl` field
 docs). Eulerian's geometry pattern is encoded as `spzeros(Bool, n, n)` rather
 than `nothing`.
 
+Every row of `S_phys ∪ S_geom` stores its diagonal, in every profile, so the
+shifted matrix `W = J − M/(γΔt)` the integrator factors has exactly the
+pattern of `J`. Where no operator writes the diagonal (the ALE node rows and
+the χ rows under `:ale_reduced`) it holds a structural zero.
+
 The four `_emit_*_pattern!` helpers each push (row, col) pairs into a single
 `(I, J)` pair. The orchestrator `build_sparsity` calls them in the right
 order to assemble the two output matrices. Splitting by emitter (rather
@@ -86,10 +91,10 @@ function _emit_physics_pattern!(
 
         # T row ← T_neighbor and T row ← ξ_{j,neighbor}
         for neighbor = max(1, i-1):min(n, i+1)
-            push!(I, T_row);
+            push!(I, T_row)
             push!(J, neighbor)
             for j = 1:NC
-                push!(I, T_row);
+                push!(I, T_row)
                 push!(J, _xi_idx(layout, j, neighbor))
             end
         end
@@ -98,10 +103,10 @@ function _emit_physics_pattern!(
         for j = 1:NC
             ξ_row = _xi_idx(layout, j, i)
             for neighbor = max(1, i-1):min(n, i+1)
-                push!(I, ξ_row);
+                push!(I, ξ_row)
                 push!(J, neighbor)
                 for k = 1:NC
-                    push!(I, ξ_row);
+                    push!(I, ξ_row)
                     push!(J, _xi_idx(layout, k, neighbor))
                 end
             end
@@ -139,6 +144,12 @@ derivative w.r.t. every `z_m`. The same holds for the physics → χ → χ̄ �
 column-global path. Net effect: physics → z, z → physics, and z → z all
 become **full bands** rather than the bounded/triangular shapes above.
 
+**Beer–Lambert widening.** Under `BeerLambert` the intensity reaching cell `i`
+is attenuated by the optical depth `τᵢ = Σₖ>ᵢ αₖ·Δzₖ` of every cell above it,
+so the energy row of cell `i` depends on every node `z[i+1..n_nodes]`. The T
+rows therefore reach `1..n_nodes`. The ξ rows keep the bounded reach: volumetric
+absorption enters only the energy equation.
+
 No-op under Eulerian.
 """
 function _emit_geometry_pattern!(
@@ -153,22 +164,26 @@ function _emit_geometry_pattern!(
     NC = n_components(layout)
     n_nodes = layout.n_nodes
     is_with_chi = chi_mode(mode) isa WithChi
+    is_beer_lambert = radiation_mode(mode) isa BeerLambert
 
     # physics → z: full cumulative reach 1..min(n_nodes, i+3); WithChi widens
-    # this to 1..n_nodes via the θ_A path (column-global χ̄ derivative).
+    # this to 1..n_nodes via the θ_A path (column-global χ̄ derivative), and
+    # Beer–Lambert widens the T rows to 1..n_nodes via the optical depth above
+    # the cell.
     for i = 1:n
         T_row = i
         n_end = is_with_chi ? n_nodes : min(n_nodes, i + 3)
-        for nn = 1:n_end
+        n_end_T = is_beer_lambert ? n_nodes : n_end
+        for nn = 1:n_end_T
             z_col = _z_idx(layout, nn)
-            push!(I, T_row);
+            push!(I, T_row)
             push!(J, z_col)
         end
         for j = 1:NC
             ξ_row = _xi_idx(layout, j, i)
             for nn = 1:n_end
                 z_col = _z_idx(layout, nn)
-                push!(I, ξ_row);
+                push!(I, ξ_row)
                 push!(J, z_col)
             end
         end
@@ -182,10 +197,10 @@ function _emit_geometry_pattern!(
         z_row = _z_idx(layout, nn)
         i_hi = is_with_chi ? n : (nn - 1)
         for i = 1:i_hi
-            push!(I, z_row);
+            push!(I, z_row)
             push!(J, i)
             for j = 1:NC
-                push!(I, z_row);
+                push!(I, z_row)
                 push!(J, _xi_idx(layout, j, i))
             end
         end
@@ -199,7 +214,7 @@ function _emit_geometry_pattern!(
         m_hi = is_with_chi ? n_nodes : nn
         for m = 1:m_hi
             z_col = _z_idx(layout, m)
-            push!(I, z_row);
+            push!(I, z_row)
             push!(J, z_col)
         end
     end
@@ -222,7 +237,8 @@ Under `profile = :full` the full χ block is emitted — row deps plus dense
 column couplings. Under `profile = :ale_reduced`:
 
 - The cell-local χ-row × {T_i, ξ_·,i} entries are still emitted (written by
-  `ChiOperator` regardless of profile).
+  `ChiOperator` regardless of profile), and so is the structural diagonal
+  χ-row × χ_i, which no operator writes under this profile.
 - The χ-row × {z_i, z_{i+1}} entries are dropped: under `:ale_reduced`,
   `GeometryOperator` is skipped, and `ChiOperator` defers z-column writes
   to the geometry AD pass — so under this profile no operator writes those
@@ -249,18 +265,21 @@ function _emit_chi_pattern!(
 
     # χ-row dependencies for each cell:
     #   χ_i ← T_i, ξ_·,i, z_i, z_{i+1}   (z entries only when ALE)
+    # plus the structural diagonal χ_i ← χ_i.
     for i = 1:n
         χ_row = chi_off + i
-        push!(I, χ_row);
+        push!(I, χ_row)
+        push!(J, χ_row)                   # χ_i
+        push!(I, χ_row)
         push!(J, i)                       # T_i
         for j = 1:NC
-            push!(I, χ_row);
+            push!(I, χ_row)
             push!(J, _xi_idx(layout, j, i))  # ξ_{j,i}
         end
         if is_ale && is_full
-            push!(I, χ_row);
+            push!(I, χ_row)
             push!(J, _z_idx(layout, i))      # z_i
-            push!(I, χ_row);
+            push!(I, χ_row)
             push!(J, _z_idx(layout, i + 1))  # z_{i+1}
         end
     end
@@ -274,14 +293,14 @@ function _emit_chi_pattern!(
 
             # T rows
             for i = 1:n
-                push!(I, i);
+                push!(I, i)
                 push!(J, χ_col)
             end
 
             # ξ rows (each component × each cell)
             for k = 1:NC
                 for i = 1:n
-                    push!(I, _xi_idx(layout, k, i));
+                    push!(I, _xi_idx(layout, k, i))
                     push!(J, χ_col)
                 end
             end
@@ -289,14 +308,14 @@ function _emit_chi_pattern!(
             # z rows (k = 2..n_nodes; node 1 fixed)
             if is_ale
                 for k = 2:layout.n_nodes
-                    push!(I, _z_idx(layout, k));
+                    push!(I, _z_idx(layout, k))
                     push!(J, χ_col)
                 end
             end
 
             # χ rows
             for i = 1:n
-                push!(I, chi_off + i);
+                push!(I, chi_off + i)
                 push!(J, χ_col)
             end
         end
@@ -320,12 +339,13 @@ other `RadiationMode` that returns `false` from non-local coupling.
 
 Under `profile = :full` the full T_row × ξ_{j, k ≥ i} block is emitted,
 plus the T_row × T_col(n) surface column: on the Kirchhoff default path
-the injected intensity is `ε_eff(T_n, ξ_·,n)·I`, so every energy row
-additionally depends on the surface cell's temperature through
-`∂ε_eff/∂T_n` (the ξ_·,n dependence is already covered by the `k = n`
+the injected intensity is `a_eff(T_n, ξ_·,n)·I` (the surface absorptivity
+mixture, equal to `ε_eff` unless a component sets its own), so every energy
+row additionally depends on the surface cell's temperature through
+`∂a_eff/∂T_n` (the ξ_·,n dependence is already covered by the `k = n`
 ξ-columns).
 Under `profile = :ale_reduced` only the diagonal `k = i` is emitted: the
-suffix `k > i` (and the ε_eff surface column) is populated by
+suffix `k > i` (and the a_eff surface column) is populated by
 `EmbeddedScaledSuffixSumCoupling` pushes that `RadiationOperator`
 performs only under `:full`.
 """
@@ -346,7 +366,7 @@ function _emit_radiation_pattern!(
         k_hi = is_full ? n : i
         for k = i:k_hi
             for j = 1:NC
-                push!(I, T_row);
+                push!(I, T_row)
                 push!(J, _xi_idx(layout, j, k))
             end
         end
@@ -355,7 +375,7 @@ function _emit_radiation_pattern!(
     # (the i = n diagonal already exists in the block-tridiagonal pattern).
     if is_full
         for i = 1:(n-1)
-            push!(I, i);
+            push!(I, i)
             push!(J, n)
         end
     end
@@ -363,7 +383,7 @@ function _emit_radiation_pattern!(
 end
 
 # ============================================================================
-# Emitter 5: ALE advection (5-cell limiter window + cumulative coupling)
+# Emitter 5: ALE advection (donor window + cumulative coupling)
 # ============================================================================
 
 """
@@ -372,22 +392,21 @@ end
 Emit the additional non-local couplings introduced by
 [`Pyrolysis.Jacobian.ALEAdvectionOperator`](@ref):
 
-1. **5-cell window** — emitted as `max(1, i-2):min(n, i+2)`, a deliberate
-   superset of the flux-form donor stencil (the operator declares
-   `stencil = (cells = -1:1,)`; the extra ring is retained from the former
-   limiter-based scheme and costs only structural zeros).
+1. **Donor window** — `max(1, i-1):min(n, i+1)`, the first-order donor
+   stencil of the flux form (the operator declares
+   `stencil = (cells = -1:1,)`).
 2. **Cumulative mesh-velocity coupling** — the indirect chain rule through
    `w_cell = 0.5·(w_node[n_left] + w_node[n_right])` connects row `i` to
    every upstream cell `j ≤ max(n_left[i], n_right[i]) - 1 ≈ i`. For a
    1-D sequentially-numbered mesh this is `1:i`.
 
-Under `profile = :full` the union for row `i` is `1:min(n, i+2)` —
-strictly lower-triangular plus two superdiagonals. **WithChi widening:**
+Under `profile = :full` the union for row `i` is `1:min(n, i+1)` —
+lower-triangular plus one superdiagonal. **WithChi widening:**
 the column-global `θ_A(χ̄, T, ξ)` enters every `w_cell[i]` through
 `dχ̄/dt = Σⱼ S_dry,j(T_j, ξ_j)·V_j/M`, so every advection row acquires a
 rank-1 dependence on every cell's `(T, ξ)` — the reach becomes the full
-band `1:n`. Under `profile = :ale_reduced` only the bounded 5-cell
-limiter window `max(1, i-2):min(n, i+2)` is emitted; the cumulative and
+band `1:n`. Under `profile = :ale_reduced` only the donor window
+`max(1, i-1):min(n, i+1)` is emitted; the cumulative and
 θ_A widenings are dropped because the consumer (`ALEAdvectionOperator`)
 skips its `compose_into!` calls under the same profile, so those entries
 would never receive a write anyway.
@@ -415,19 +434,19 @@ function _emit_ale_advection_pattern!(
 
     for i = 1:n
         # Column reach for row `i`:
-        #   :full               → 1..min(n, i+2)  (cumulative + limiter)
+        #   :full               → 1..min(n, i+1)  (cumulative + donor)
         #   :full + WithChi     → 1..n            (θ_A rank-1 reaches every cell)
-        #   :ale_reduced        → max(1, i-2)..min(n, i+2)  (limiter only)
-        j_lo = is_reduced ? max(1, i - 2) : 1
-        j_hi = (!is_reduced && is_with_chi) ? n : min(n, i + 2)
+        #   :ale_reduced        → max(1, i-1)..min(n, i+1)  (donor only)
+        j_lo = is_reduced ? max(1, i - 1) : 1
+        j_hi = (!is_reduced && is_with_chi) ? n : min(n, i + 1)
 
         # T row
         T_row = i
         for j = j_lo:j_hi
-            push!(I, T_row);
+            push!(I, T_row)
             push!(J, j)                       # T col
             for k = 1:NC
-                push!(I, T_row);
+                push!(I, T_row)
                 push!(J, _xi_idx(layout, k, j))  # ξₖ col
             end
         end
@@ -440,10 +459,10 @@ function _emit_ale_advection_pattern!(
         for kk = 1:NC
             ξ_row = _xi_idx(layout, kk, i)
             for j = j_lo:j_hi
-                push!(I, ξ_row);
+                push!(I, ξ_row)
                 push!(J, j)
                 for k = 1:NC
-                    push!(I, ξ_row);
+                    push!(I, ξ_row)
                     push!(J, _xi_idx(layout, k, j))
                 end
             end
@@ -465,10 +484,11 @@ Compose the emitters into two patterns:
 - `S_phys` carries every coupling whose **column** is a T, ξ, or χ index:
   block-tridiagonal physics (`_emit_physics_pattern!`), Beer-Lambert
   non-local (`_emit_radiation_pattern!`), the χ block (`_emit_chi_pattern!`),
-  and (ALE only) the ALE-advection limiter+cumulative widening
+  and (ALE only) the ALE-advection donor window + cumulative widening
   (`_emit_ale_advection_pattern!`).
 - `S_geom` carries every coupling whose **column** is a z index: the ALE
-  geometry block (`_emit_geometry_pattern!`).
+  geometry block (`_emit_geometry_pattern!`), or under `:ale_reduced` only
+  the structural diagonal of the node rows.
 
 For Eulerian, `S_geom` is an empty `SparseMatrixCSC{Bool,Int}` of full
 size (no nnz). The shared `SparseMatrixCSC{Bool,Int}` type is required by
@@ -525,19 +545,69 @@ function _build_sparsity_impl(layout::StateLayout, mode::SimulationMode, profile
     _emit_ale_advection_pattern!(I_phys, J_phys, layout, mode, profile)
     S_phys = sparse(I_phys, J_phys, trues(length(I_phys)), n_total, n_total, |)
 
-    # S_geom: pure z-column couplings (ALE only). Empty under :ale_reduced
-    # regardless of mode — the geometry block is the entire reason the
-    # reduced profile exists.
-    if mesh_mode(mode) isa ALE && profile === :full
+    # S_geom: pure z-column couplings (ALE only). Under :ale_reduced it
+    # holds only the structural diagonal of the node rows — dropping the
+    # geometry block is the entire reason the reduced profile exists.
+    if mesh_mode(mode) isa ALE
         I_geom = Int[]
         J_geom = Int[]
-        _emit_geometry_pattern!(I_geom, J_geom, layout, mode)
+        if profile === :full
+            _emit_geometry_pattern!(I_geom, J_geom, layout, mode)
+        else
+            for nn = 1:layout.n_nodes
+                push!(I_geom, _z_idx(layout, nn))
+                push!(J_geom, _z_idx(layout, nn))
+            end
+        end
         S_geom = sparse(I_geom, J_geom, trues(length(I_geom)), n_total, n_total, |)
     else
         S_geom = spzeros(Bool, Int, n_total, n_total)
     end
 
     return (S_phys, S_geom)
+end
+
+# ============================================================================
+# Pattern locality
+# ============================================================================
+
+"""
+	materializes_geometry_block(mode, profile) -> Bool
+
+Whether the pattern `build_sparsity` emits for `mode` under `profile` holds
+the ALE geometry block: under `:full` every cell's rows reach the node
+columns below it, and the node rows reach every cell and node below them,
+O(N²) entries in all. `solve` factors this pattern with UMFPACK, whose
+supernodal factorization handles the dense block, and every other pattern
+with KLU.
+"""
+materializes_geometry_block(mode::SimulationMode, profile::Symbol) =
+    profile === :full && mesh_mode(mode) isa ALE
+
+"""
+	structural_zero_diagonal(layout, mode, profile) -> Vector{Int}
+
+Rows whose stored diagonal no operator writes under `profile`: the node rows
+and the χ rows under `:ale_reduced`, which drops their couplings. The slot
+exists only so that every row stores its diagonal, and its value stays zero.
+[`verify_jacobian_at`](@ref) leaves these slots out of an approximate
+backend's compared support, like every other dropped coupling.
+"""
+function structural_zero_diagonal(
+    layout::StateLayout,
+    mode::SimulationMode,
+    profile::Symbol,
+)
+    rows = Int[]
+    profile === :ale_reduced || return rows
+    if mesh_mode(mode) isa ALE
+        append!(rows, _z_idx(layout, 1):_z_idx(layout, layout.n_nodes))
+    end
+    if chi_mode(mode) isa WithChi
+        chi_off = _chi_offset(layout, mode)
+        append!(rows, (chi_off+1):(chi_off+layout.n_cells))
+    end
+    return rows
 end
 
 # ============================================================================

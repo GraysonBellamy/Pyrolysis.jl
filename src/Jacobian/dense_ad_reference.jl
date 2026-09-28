@@ -86,6 +86,8 @@ function _build_jacobian_spec(
     return JacobianSpec(DenseAD_ForwardDiff(), nothing, nothing, cache, Int[], Int[])
 end
 
+_cache_state_length(cache::DenseADCache) = length(cache.f_cache)
+
 # ============================================================================
 # Compute
 # ============================================================================

@@ -61,7 +61,7 @@ export BoundaryState
 export n_nodes, n_cells, n_faces
 
 # Mesh generation
-export create_uniform_mesh, create_stretched_mesh
+export create_uniform_mesh, create_stretched_mesh, create_mesh_from_nodes
 
 # Geometry operations
 export update_geometry!

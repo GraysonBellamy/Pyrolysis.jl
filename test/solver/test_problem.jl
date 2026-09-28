@@ -302,6 +302,46 @@ using Pyrolysis.Solver: get_profile, get_cell_positions
                 @test validate_problem(problem) == true
             end
         end
+
+        @testset "degenerate Fickian gas transport warns" begin
+            # The Landau ablation deck: a gas-producing reaction, Fickian
+            # transport, and a solid without gas-transfer coefficient.
+            function ablation_material(; λ_solid = 0.0, κ = 0.0, reactive = true)
+                solid = SolidComponent(
+                    :solid,
+                    ρ = 1000.0,
+                    c = 1000.0,
+                    k = 1.0,
+                    λ = λ_solid,
+                    κ = κ,
+                    ρ_intrinsic = 2000.0,
+                )
+                gas = GaseousComponent(:gas, M = 0.05, c = 1000.0, k = 0.02, λ = 1e-4)
+                rxns =
+                    reactive ? (Reaction(:ablate, 1 => 2; A = 1e10, E = 1e5, h = 1e6),) : ()
+                return Material(
+                    name = :ablation,
+                    components = (solid, gas),
+                    reactions = rxns,
+                )
+            end
+            problem_for(mat) = PyrolysisProblem(
+                mesh = create_uniform_mesh(0.01, 10, Val(2)),
+                material = mat,
+                bc_set = BoundaryConditionSet(
+                    thermal = (top = HeatFluxBC(50e3), bottom = AdiabaticBC()),
+                ),
+                tspan = (0.0, 1.0),
+            )
+            @test_logs (:warn, r"gas-transfer coefficient") validate_problem(
+                problem_for(ablation_material()),
+            )
+            # A condensed gas-transfer coefficient, a permeable (Darcy) matrix,
+            # or no gas production keeps validation silent.
+            @test_logs validate_problem(problem_for(ablation_material(λ_solid = 1e-6)))
+            @test_logs validate_problem(problem_for(ablation_material(κ = 1e-14)))
+            @test_logs validate_problem(problem_for(ablation_material(reactive = false)))
+        end
     end
 
     # ========================================================================

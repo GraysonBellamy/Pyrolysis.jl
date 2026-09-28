@@ -25,6 +25,9 @@ Validate a PyrolysisProblem for consistency and correctness.
 7. DarcyFick problems start with consistent porosity/permeability
    (see [`validate_darcy_initial_porosity`](@ref))
 
+It also warns, without failing, when Fickian gas transport degenerates where
+the gas fraction vanishes (see [`warn_degenerate_gas_transport`](@ref)).
+
 # Returns
 `true` if all checks pass, throws an error with details otherwise.
 
@@ -62,6 +65,8 @@ function validate_problem(problem::PyrolysisProblem; strict::Bool = false)
     # pressure inversion blow up on the first implicit trial states.
     darcy_errors = validate_darcy_initial_porosity(problem)
     append!(errors, darcy_errors)
+
+    warn_degenerate_gas_transport(problem.material)
 
     # Additional strict checks
     if strict
@@ -166,6 +171,37 @@ function validate_material_for_problem(material)
     end
 
     return errors
+end
+
+"""
+	warn_degenerate_gas_transport(material)
+
+Warn when a gas-producing material with Fickian transport (no permeable
+component) has a condensed component whose gas-transfer coefficient λ is zero.
+The cell coefficient is the volume-fraction mix of the component values, so a
+cell of that component holding no gas has no gas transport at all. The gas
+field then ends in a sharp front, and a Newton iterate that drives the front
+cell's gas concentration below zero closes both of its faces and flattens its
+residual: the implicit solve fails repeatedly on the front. A small λ on the
+condensed components (`SolidComponent(...; λ = 1e-6)`) keeps the transport
+non-degenerate.
+"""
+function warn_degenerate_gas_transport(material)
+    has_darcy_flow(material) && return nothing
+    comps = material.components
+    produces_gas = any(material.reactions) do rxn
+        any(p -> is_gas(comps[first(p)]), rxn.products)
+    end
+    produces_gas || return nothing
+    names = [c.name for c in comps if !is_gas(c) && iszero(c.gas_transfer_coeff(T_REF))]
+    isempty(names) && return nothing
+    @warn "Material $(repr(material.name)): the condensed component(s) " *
+          "$(join(repr.(names), ", ")) have gas-transfer coefficient λ = 0 under " *
+          "Fickian gas transport. Gas transport vanishes where the gas fraction " *
+          "vanishes, the gas field forms a sharp front, and the implicit Newton " *
+          "fails repeatedly on it. Give the condensed components a small λ " *
+          "(for example `λ = 1e-6` m²/s)." maxlog = 1
+    return nothing
 end
 
 """

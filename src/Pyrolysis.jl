@@ -136,7 +136,7 @@ export MixingRule, PARALLEL, SERIES, WEIGHTED, BRUGGEMAN, CARMAN_KOZENY
 export MixingSpec, MaterialMixing
 
 # Property functions
-export ConstantProperty, LinearProperty, PolynomialProperty
+export ConstantProperty, LinearProperty, PolynomialProperty, SutherlandProperty
 export ArrheniusProperty, TableProperty, CallableProperty, StateDependentProperty
 
 # Boundary conditions
@@ -157,7 +157,7 @@ export background_gas_concentration
 export RadiationModel, NO_RADIATION, SURFACE_ABSORPTION, BEER_LAMBERT
 
 # Geometry
-export create_uniform_mesh, create_stretched_mesh
+export create_uniform_mesh, create_stretched_mesh, create_mesh_from_nodes
 
 # Problem & solve
 export PyrolysisProblem, PyrolysisSolution

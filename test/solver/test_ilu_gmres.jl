@@ -7,9 +7,12 @@ KLUFactorization in ALE pyrolysis simulations with analytical Jacobian.
 
 using Test
 using Pyrolysis
-using Pyrolysis.Solver: ILUGMRESFactorization, KenCarp4
+using Pyrolysis.Solver:
+    ILUGMRESFactorization, ILUBiCGSTABFactorization, KenCarp4, _krylov_solution, Krylov
 using OrdinaryDiffEq
-using LinearSolve: KLUFactorization
+using LinearSolve: LinearSolve, KLUFactorization, LinearProblem
+using SparseArrays: sparse
+const ReturnCode = LinearSolve.SciMLBase.ReturnCode
 
 @testset "ILU-GMRES Linear Solver" begin
 
@@ -178,6 +181,32 @@ using LinearSolve: KLUFactorization
         s = String(take!(buf))
         @test occursin("ILUGMRESFactorization", s)
         @test occursin("0.1", s)
+    end
+
+    @testset "LinearSolve algorithm interface" begin
+        @test isempty(LinearSolve.algorithm_interface_issues(ILUGMRESFactorization()))
+        @test isempty(LinearSolve.algorithm_interface_issues(ILUBiCGSTABFactorization()))
+    end
+
+    @testset "an unconverged Krylov solve is a failure" begin
+        A = sparse([4.0 1.0 0.0 0.5; 1.0 4.0 1.0 0.0; 0.0 1.0 4.0 1.0; 0.5 0.0 1.0 4.0])
+        b = [1.0, 2.0, 3.0, 4.0]
+        for alg in (ILUGMRESFactorization(), ILUBiCGSTABFactorization())
+            cache = LinearSolve.init(LinearProblem(A, b), alg)
+            sol = LinearSolve.solve!(cache)
+            @test sol.retcode == ReturnCode.Success
+            @test A * sol.u ≈ b
+        end
+        # One GMRES iteration without preconditioning cannot reach 1e-14 on a
+        # 4×4 system: the solution reports the failure the Newton acts on.
+        alg = ILUGMRESFactorization()
+        cache = LinearSolve.init(LinearProblem(A, b), alg)
+        ws = cache.cacheval.krylov_solver
+        Krylov.gmres!(ws, A, b; itmax = 1, rtol = 1e-14, atol = 0.0)
+        @test !Krylov.issolved(ws)
+        sol = _krylov_solution(alg, cache, ws)
+        @test sol.retcode == ReturnCode.ConvergenceFailure
+        @test sol.iters == 1
     end
 
 end

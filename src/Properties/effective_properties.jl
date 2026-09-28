@@ -11,12 +11,27 @@ avoids the allocations that bare runtime indexing into a heterogeneous
 # Gas Viscosity (for Darcy flow)
 # ============================================================================
 
-# Robustness floor for gas-property correlations with fractional powers of T
-# (Sutherland viscosity, Chapman-Enskog diffusivity). Newton trial states may
-# carry nonphysical temperatures; clamping keeps the residual evaluable so
-# the nonlinear solver can damp/reject the step instead of the solve dying
-# on a DomainError. 100 K is far below any physical pyrolysis state.
+# Robustness floor for the Chapman-Enskog diffusivity formula (T^{3/2} and a
+# collision integral in T*). Property laws clamp their own argument to the
+# property bracket; this formula is not a property law, so it carries its own
+# floor. Newton trial states may present nonphysical temperatures, and the
+# floor keeps the residual evaluable so the nonlinear solver can reject the
+# step instead of the solve dying on a DomainError. 100 K is far below any
+# physical pyrolysis state.
 const T_GAS_PROPERTY_FLOOR = 100.0  # K
+
+# Positive floor on the gas viscosity. μ appears in the model ONLY as the
+# denominator of the Darcy mobility κ/μ, so a non-positive μ does not merely
+# degrade the answer — it reverses the gas velocity or divides by zero. The
+# built-in Sutherland form cannot go non-positive above `T_GAS_PROPERTY_FLOOR`,
+# but a material may carry an arbitrary correlation (the Cantera blend fit is a
+# quartic valid over 280–1200 K), and Newton trial states reach temperatures no
+# fit was made for. `Material`'s constructor rejects a curve that is already
+# unusable across the pyrolysis range; this is the runtime backstop for
+# excursions outside it. 1e-12 Pa·s is seven orders below any real gas, so it
+# never binds on a legitimate state — and like the `μ > 1e-20` / `mob > 1e-30`
+# guards downstream, the `max` is one-sided differentiable where it does.
+const MU_FLOOR = 1e-12  # Pa·s
 
 """
 	effective_gas_viscosity(T::Float64; μ_ref=1.716e-5, T_ref=273.15, S=110.4) -> Float64
@@ -53,12 +68,10 @@ at 273.15 K, S = 110.4 K; e.g. White, *Viscous Fluid Flow*), giving
 - Valid range approximately 200-2000 K
 - `T_ref` here is the viscosity-correlation reference (273.15 K), distinct
   from the global enthalpy datum T_REF = 298.15 K — do not conflate the two
-- Temperatures below `T_GAS_PROPERTY_FLOOR` (100 K) are clamped: diverging
-  Newton trial states can present nonphysical (even negative) temperatures,
-  and `T^1.5` would throw a `DomainError` that kills the whole solve instead
-  of letting the nonlinear solver reject the step. The floor is far below
-  any physical pyrolysis state and below the correlation's validity range,
-  so it never binds on legitimate states.
+- The temperature is clamped to the property bracket
+  `[T_PROPERTY_MIN, T_PROPERTY_MAX]`, exactly as `SutherlandProperty` does, so
+  a diverging Newton trial state (even a negative temperature) cannot reach
+  `T^1.5` and the two forms agree bit for bit for every argument.
 """
 @inline function effective_gas_viscosity(
     T::Real;
@@ -66,32 +79,81 @@ at 273.15 K, S = 110.4 K; e.g. White, *Viscous Fluid Flow*), giving
     T_ref::Float64 = 273.15,    # K
     S::Float64 = 110.4,
 )        # Sutherland constant for air
-    T_eff = max(T, T_GAS_PROPERTY_FLOOR)
+    T_eff = property_temperature(T)
     T_ratio = T_eff / T_ref
     return μ_ref * T_ratio^1.5 * (T_ref + S) / (T_eff + S)
 end
 
 """
+	effective_gas_viscosity(T::Real, material) -> Real
+
+Dynamic viscosity [Pa·s] of `material`'s pore gas at temperature `T`, read from
+the material's own `gas_viscosity` curve.
+
+This is the form every Darcy call site uses. It differs from the bare
+[`effective_gas_viscosity(T)`](@ref) correlation above in that the material
+supplies the curve: a `Material` that says nothing carries
+`SutherlandProperty()` (air) and this reproduces the bare form bit for bit.
+
+The material's curve is a property function, so it evaluates on the property
+bracket `[T_PROPERTY_MIN, T_PROPERTY_MAX]` like every other law (a diverging
+Newton trial state cannot reach `T^1.5` at a negative temperature or drive a
+fitted polynomial absurdly far outside its range). One guard is added here
+because μ enters the model *only* as the denominator of the Darcy mobility
+κ/μ: the result is floored at `MU_FLOOR`, so a correlation that goes
+non-positive on extrapolation cannot reverse or blow up the gas velocity.
+
+A `NaN` from the curve **propagates** — `max` does not floor it. That is
+deliberate: the constructor already rejects a curve that is non-finite anywhere
+in the pyrolysis range, so a `NaN` here means the correlation is broken somewhere
+the probe did not reach. Substituting `MU_FLOOR` would turn that into a
+plausible-looking wrong answer, whereas a `NaN` residual makes the solver reject
+the step or fail loudly.
+
+# Example
+```julia
+μ = effective_gas_viscosity(650.0, material)
+```
+"""
+@inline function effective_gas_viscosity(T::Real, material)
+    return max(material.gas_viscosity(T), MU_FLOOR)
+end
+
+"""
 	mixture_gas_viscosity(ξ::NTuple{NC,Float64}, T::Float64, material) -> Float64
 
-Compute mixture gas viscosity.
+Dynamic viscosity [Pa·s] of the pore gas mixture at composition `ξ` and
+temperature `T`.
 
-Currently uses a single effective viscosity (Sutherland's law for air-like gases).
-Could be extended to use Wilke's mixing rule for multi-component mixtures.
+The model carries **one viscosity curve per material**, so this currently
+ignores `ξ` and returns [`effective_gas_viscosity(T, material)`](@ref). That is
+a modelling choice, not a stub: μ is supplied as a blend correlation for the gas
+mixture the material is expected to produce (§5.9 of the Technical Reference),
+which averages over the pore gas shifting from background air to volatiles as
+pyrolysis proceeds.
+
+`ξ` is in the signature, and Darcy call sites pass it, so that a
+composition-dependent rule can be introduced by changing this function alone.
+
+!!! warning "Adding composition dependence is not a local change"
+    The production Darcy Jacobian is the **analytical override** in
+    `Jacobian/operators/darcy_transport.jl`, not the AD path, and its mobility
+    chain rule assumes `dμ/dξ == 0`. If this function ever consults `ξ`, that
+    override needs its `dμ/dξ` terms or the Jacobian silently goes stale — and
+    the rtol = 1e-12 equivalence gate cannot catch it while every Darcy test
+    fixture carries a single gas component. `test_gas_viscosity_property.jl`
+    asserts the invariant so the failure is loud.
 
 # Arguments
-- `ξ`: Mass concentrations [kg/m³] (not currently used)
+- `ξ`: Mass concentrations [kg/m³] (reserved; see above)
 - `T`: Temperature [K]
-- `material`: Material definition (not currently used)
+- `material`: Material definition, supplying the viscosity curve
 
 # Returns
 - `μ`: Dynamic viscosity [Pa·s]
 """
 @inline function mixture_gas_viscosity(ξ::NTuple{NC,<:Real}, T::Real, material) where {NC}
-    # For simplicity, use single effective viscosity
-    # Could extend to Wilke mixture rule if needed for accuracy with
-    # multi-component gas mixtures of very different molecular weights
-    return effective_gas_viscosity(T)
+    return effective_gas_viscosity(T, material)
 end
 
 # ============================================================================
@@ -593,26 +655,47 @@ end
 end
 
 # ============================================================================
-# Emissivity helpers
+# Emissivity and surface-absorptivity helpers
 # ============================================================================
+#
+# Both sums share the weights `v` (swelling-weighted matrix volume fractions)
+# and the cell temperature. `get_absorptivity` returns `get_emissivity(comp, T)`
+# for a component without an explicit surface absorptivity, so with none set
+# the two sums are the same floating-point operations in the same order and
+# `a_eff == ε_eff` bit-for-bit — the Kirchhoff default.
 
-@generated function _sum_emissivity(v, comps::Tuple, ::Val{NC}) where {NC}
+@generated function _sum_emissivity(v, T, comps::Tuple, ::Val{NC}) where {NC}
     expr = quote
-        result = zero(_prop_type(v))
+        result = zero(_prop_type(v, T))
     end
     for i = 1:NC
-        push!(expr.args, :(result += v[$i] * comps[$i].emissivity))
+        push!(expr.args, :(result += v[$i] * get_emissivity(comps[$i], T)))
+    end
+    push!(expr.args, :(return result))
+    return expr
+end
+
+@generated function _sum_absorptivity(v, T, comps::Tuple, ::Val{NC}) where {NC}
+    expr = quote
+        result = zero(_prop_type(v, T))
+    end
+    for i = 1:NC
+        push!(expr.args, :(result += v[$i] * get_absorptivity(comps[$i], T)))
     end
     push!(expr.args, :(return result))
     return expr
 end
 
 """
-	effective_emissivity(ξ::NTuple{NC,Float64}, T::Float64, material::Material) -> Float64
+	effective_emissivity(ξ::NTuple{NC,Real}, T::Real, material::Material) -> Real
 
 Compute effective surface emissivity [-].
 
-ε_eff = Σⱼ vⱼ εⱼ
+ε_eff = Σⱼ vⱼ εⱼ(T)
+
+Each component's emissivity is a property function evaluated at the cell
+temperature `T`, so a `ForwardDiff.Dual` `T` returns `dε_eff/dT` (used by the
+surface-emission and Beer-Lambert Jacobians).
 
 Uses `mixing_volume_fractions` — swelling-weighted (matrix) volume fractions
 excluding γ ≈ 0 components. This matches ThermaKin's treatment of conductivity
@@ -621,16 +704,43 @@ material at the surface, not by gases trapped within the porous structure.
 For a fully depleted cell it falls back to the actual phase occupancy —
 for default transparent gases that still yields ε_eff = 0;
 `handle_depletion = true` merges such cells away in production.
+
+See [`effective_absorptivity`](@ref) for the incident-radiation counterpart.
 """
 @inline function effective_emissivity(ξ::NTuple{NC,<:Real}, T::Real, material) where {NC}
     v = mixing_volume_fractions(ξ, T, material)
-    return _emissivity_from_v(v, material)
+    return _emissivity_from_v(v, T, material)
 end
 
 # Cache-aware variant.
-@inline function _emissivity_from_v(v::Tuple, material::Material{NC}) where {NC}
-    ε_eff = _sum_emissivity(v, material.components, Val(NC))
+@inline function _emissivity_from_v(v::Tuple, T::Real, material::Material{NC}) where {NC}
+    ε_eff = _sum_emissivity(v, T, material.components, Val(NC))
     return clamp(ε_eff, 0.0, 1.0)
+end
+
+"""
+	effective_absorptivity(ξ::NTuple{NC,Real}, T::Real, material::Material) -> Real
+
+Compute the effective surface absorptivity [-] for *incident* radiation.
+
+a_eff = Σⱼ vⱼ aⱼ,   aⱼ = surface_absorptivity(compⱼ) or εⱼ(T) when unset
+
+Same weights and clamp as [`effective_emissivity`](@ref). When no component
+sets a `surface_absorptivity` this is identically `ε_eff` (Kirchhoff's law);
+a component with one set decouples the absorbed heater flux from the
+temperature-dependent emission. Consumers: the `RadiativeFluxBC` Kirchhoff
+default (`absorptivity = nothing`) in the surface energy balance and the
+Beer-Lambert surface transmissivity.
+"""
+@inline function effective_absorptivity(ξ::NTuple{NC,<:Real}, T::Real, material) where {NC}
+    v = mixing_volume_fractions(ξ, T, material)
+    return _absorptivity_from_v(v, T, material)
+end
+
+# Cache-aware variant.
+@inline function _absorptivity_from_v(v::Tuple, T::Real, material::Material{NC}) where {NC}
+    a_eff = _sum_absorptivity(v, T, material.components, Val(NC))
+    return clamp(a_eff, 0.0, 1.0)
 end
 
 # ============================================================================
@@ -980,7 +1090,7 @@ This reduces to the standard harmonic mean 2ab/(a+b) when d_L = d_R.
 """
 @inline function harmonic_mean_weighted(a::Real, b::Real, d_a::Real, d_b::Real)
     if a < 1e-20 || b < 1e-20
-        return 0.0
+        return zero(float(promote_type(typeof(a), typeof(b), typeof(d_a), typeof(d_b))))
     end
     return (d_a + d_b) / (d_a / a + d_b / b)
 end

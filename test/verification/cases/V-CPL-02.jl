@@ -43,15 +43,14 @@
 # not solver error: the windowed first law (q″Δt = ΔE_stored + ablation
 # enthalpy) closes throughout the approach, and the pre-ablation phase
 # matches Landau's exact constant-flux heat-up T_s(t) = T₀ + 2q″√(t/(πρck)).
-# The steady exact solution is simply not a valid reference before ~6τ. At
-# the original window [0.55, 0.95] s (2–4τ) the residual deficit was ≈0.9%
-# and mesh-INDEPENDENT (n=60→240 ladder, observed order 0.11 — diagnosed
-# 2026-07-07). The window now sits at ≥6τ, where the remaining residual is
-# the §12.3.2 half-cell T_s closure with the reaction zone inside the
-# boundary half-cell — mesh-DEPENDENT as it should be (it shifts
-# v_ss(measured T_s) but not the actual regression rate): ~1.3% at
-# Δz ≈ 2δ_r, ~5e-4 at the CI mesh Δz ≈ δ_r — so the pinned tolerance
-# actually arms the ALE guard.
+# The steady exact solution is simply not a valid reference before ~6τ: in
+# a window at 2–4τ the residual deficit is ≈0.9% and mesh-INDEPENDENT
+# (n=60→240 ladder, observed order 0.11). The window therefore sits at ≥6τ,
+# where the remaining residual is the §12.3.2 half-cell T_s closure with the
+# reaction zone inside the boundary half-cell — mesh-DEPENDENT as it should
+# be (it shifts v_ss(measured T_s) but not the actual regression rate):
+# ~1.3% at Δz ≈ 2δ_r, ~7e-4 at the CI mesh Δz ≈ δ_r — so the pinned
+# tolerance actually arms the ALE guard.
 #
 # Blowing correction stays OFF (exact solution assumes prescribed net flux).
 # Depletion limiter stays ON: the tanh roll-off is part of the regression
@@ -78,7 +77,10 @@ function _vcpl02_common(; E::Float64, v_target::Float64, n_default::Int)
     # the e^(−t/τ) transient is <1e-3 of v_ss by w1 (see header)
 
     function build(n_cells)
-        solid = SolidComponent(:solid, ρ = ρ, c = c, k = k)
+        # A small gas-transfer coefficient keeps gas transport alive in the
+        # gas-free solid ahead of the front; with none the gas field ends in a
+        # sharp front on which the implicit Newton fails repeatedly.
+        solid = SolidComponent(:solid, ρ = ρ, c = c, k = k, λ = 1e-6)
         # c_gas = c_solid: constant-ΔH(T) anchor — the Landau identity is
         # exact for any kinetics (see header).
         gas = GaseousComponent(:gas, M = 0.05, c = c, k = 0.02, λ = 1e-4)
@@ -139,9 +141,9 @@ function _verification_case_vcpl02()
                 value = m.v_thick,
                 exact = m.v_landau,
                 error = err_bal,
-                tol = 1.6e-3,  # 3× observed: 5.2e-4 (n=160, 2026-07-07, window
-                # [1.5,1.9] s ≈ 6–7.6τ; residual = front-in-half-cell T_s
-                # closure at Δz ≈ δ_r + holdup drift — see case header)
+                tol = 2.1e-3,  # 3× observed: 7.1e-4 (n=160, window [1.5,1.9] s
+                # ≈ 6–7.6τ; residual = front-in-half-cell T_s closure at
+                # Δz ≈ δ_r + holdup drift — see case header)
                 comment = "traveling-wave identity, exact at any E for c_gas = c_solid",
             ),
         )
@@ -154,11 +156,11 @@ function _verification_case_vcpl02()
                 value = m.v_thick,
                 exact = m.v_ggr,
                 error = err_int,
-                tol = 2.1e-3,  # 3× the report-ladder worst: 7.0e-4 (n=240,
-                # 2026-07-07); at the CI mesh the observed is 5.6e-6, but the
-                # identity's floor is NOT monotone in Δz once Δz < δ_r (n=240
-                # rung), so a CI-mesh 3× pin would fail finer meshes. Guard
-                # target is O(1) γ_gas bookkeeping breakage — 2.1e-3 suffices.
+                tol = 2.1e-3,  # 3× the report-ladder worst: 7.0e-4 (n=240);
+                # at the CI mesh the observed is 2.2e-4, but the identity's
+                # floor is NOT monotone in Δz once Δz < δ_r (n=240 rung), so a
+                # CI-mesh 3× pin would fail finer meshes. Guard target is O(1)
+                # γ_gas bookkeeping breakage — 2.1e-3 suffices.
                 comment = "γ_gas = 0 ⇒ dL/dt = −ṁ‴_gas/ρ exactly",
             ),
         )
@@ -175,8 +177,8 @@ function _verification_case_vcpl02()
                 value = m.m_escaped,
                 exact = gen,
                 error = err_ledger,
-                tol = 4e-3,  # 3× observed: 1.4e-3 (n=160, 2026-07-07, flux-form
-                # gas transport; residual = holdup drift incl. surface sweep)
+                tol = 4.9e-3,  # 3× observed: 1.6e-3 (n=160, flux-form gas
+                # transport; residual = holdup drift incl. surface sweep)
                 comment = "total-mass drop vs ∫ ṁ″ dt; residual = holdup drift",
             ),
         )
@@ -211,8 +213,8 @@ function _verification_case_vcpl02()
                 value = v_slope,
                 exact = m.v_thick,
                 error = err_prof,
-                tol = 2.7e-2,  # 3× observed: 8.9e-3 (n=160, 2026-07-07):
-                # reaction-zone edge + residual tail development
+                tol = 2.7e-2,  # 3× observed: 8.9e-3 (n=160): reaction-zone
+                # edge + residual tail development
                 comment = "ln(T−T₀) slope over ζ/δ ∈ [0.75, 1.7], $(n) cells",
             ),
         )
@@ -239,8 +241,8 @@ function _verification_case_vcpl02()
                 value = ΔT_back,
                 exact = 0.0,
                 error = abs(ΔT_back),
-                tol = 0.01,  # observed 3.6e-4 K (n=160, 2026-07-07); loose vs
-                # 3× — the guard is against gross domain-too-short violation
+                tol = 0.01,  # observed 3.7e-4 K (n=160); loose vs 3× — the
+                # guard is against gross domain-too-short violation
                 comment = "guards the semi-infinite assumption",
             ),
         )
@@ -265,7 +267,8 @@ function _verification_case_vcpl02()
             reltol = 1e-5,
         ),
         qois = qois,
-        ci = CIConfig(n_cells = 160, budget_s = 110.0),
+        # Observed 5–6 s for a warm solve and 20 s in the harness (load 18–21).
+        ci = CIConfig(n_cells = 160, budget_s = 30.0),
         report = (
             n_cells_ladder = [60, 100, 160, 240],
             E_ladder = [5e4, 1e5, 1.5e5, 2e5],
@@ -346,7 +349,7 @@ function _verification_case_vcpl02()
             # every E on the constant-ablation-temperature locus — as long as
             # the front stays resolved: δ_r ∝ 1/E, so at n = 160 the E = 2e5
             # point has δ_r ≈ 26 μm < Δz and its ~1% miss is the §12.3.2
-            # front-in-half-cell T_s bias (resolution, not physics; 2026-07-07).
+            # front-in-half-cell T_s bias (resolution, not physics).
             param_sweep = (
                 name = :E,
                 values = [5e4, 1e5, 1.5e5, 2e5],
@@ -370,8 +373,7 @@ function _verification_case_vcpl02b()
     # (δ_r/δ = RT_s²/(E·(T_s−T₀)) ≈ 0.09), resolvable on a coarser mesh. The
     # Landau balance with measured T_s must close at ANY E — comparing the
     # closure here and in V-CPL-02 is the ablation-limit insensitivity check.
-    # n = 100 keeps Δz = 100 μm on the L = 10 mm domain (the pre-window-move
-    # pin used n = 60 on L = 6 mm, the same spacing).
+    # n = 100 keeps Δz = 100 μm on the L = 10 mm domain.
     C = _vcpl02_common(E = 5.0e4, v_target = 2.0e-3, n_default = 100)
 
     function qois(sol)
@@ -384,9 +386,9 @@ function _verification_case_vcpl02b()
                 value = m.v_thick,
                 exact = m.v_landau,
                 error = err_bal,
-                tol = 2e-3,  # 3× observed: 6.8e-4 (n=100, 2026-07-07; Δz ≈ δ_r
-                # here since the E/2 front is twice as wide — matches the
-                # ~5e-4 closure of V-CPL-02 at ITS δ_r-resolving mesh)
+                tol = 2e-3,  # 3× observed: 6.7e-4 (n=100; Δz ≈ δ_r here since
+                # the E/2 front is twice as wide — matches the ~7e-4 closure
+                # of V-CPL-02 at ITS δ_r-resolving mesh)
                 comment = "identity must close at E = 50 kJ/mol as at 100 (locus check)",
             ),
             QoIResult(
@@ -394,7 +396,7 @@ function _verification_case_vcpl02b()
                 value = m.v_thick,
                 exact = m.v_ggr,
                 error = err_int,
-                tol = 2.5e-3,  # 3× observed: 8.3e-4 (n=100, 2026-07-07)
+                tol = 1.7e-3,  # 3× observed: 5.5e-4 (n=100)
                 comment = "γ_gas = 0 ⇒ dL/dt = −ṁ‴_gas/ρ exactly",
             ),
         ]
@@ -415,7 +417,8 @@ function _verification_case_vcpl02b()
             reltol = 1e-5,
         ),
         qois = qois,
-        ci = CIConfig(n_cells = 100, budget_s = 15.0),
+        # Observed 2.1–2.9 s (load 18–21).
+        ci = CIConfig(n_cells = 100, budget_s = 9.0),
         report = (;),
     )
 end

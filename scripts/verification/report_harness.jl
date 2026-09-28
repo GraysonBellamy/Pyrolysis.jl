@@ -135,7 +135,7 @@ function run_case_report(case::VerificationCase, outdir::String)
     for n in ns
         local sol
         wall = @elapsed sol = _case_solve(case, case.build(n); skw...)
-        sol.retcode == :Success ||
+        sol.retcode == case.expected_retcode ||
             error("$(case.id): solve failed at n = $(n) (retcode $(sol.retcode))")
         push!(walls, wall)
         # QoI closures may assume the CI resolution (fit windows etc.); a

@@ -206,18 +206,18 @@ end
     v = zero(_prop_type(ξ, T))
     ρ1 = comps[1].density(T)
     if ξ[1] > 0.0 && ρ1 > 0.0
-        ;
-        v += ξ[1] / ρ1;
+
+        v += ξ[1] / ρ1
     end
     ρ2 = comps[2].density(T)
     if ξ[2] > 0.0 && ρ2 > 0.0
-        ;
-        v += ξ[2] / ρ2;
+
+        v += ξ[2] / ρ2
     end
     ρ3 = comps[3].density(T)
     if ξ[3] > 0.0 && ρ3 > 0.0
-        ;
-        v += ξ[3] / ρ3;
+
+        v += ξ[3] / ρ3
     end
     return v
 end
@@ -436,27 +436,53 @@ matrix basis.
     return _solid_vol_fracs(ξ, T, inv_v_total, comps, Val(NC))
 end
 
+# Matrix volume fraction window over which the mixing weights blend from the
+# matrix basis to the all-phase occupancy. Above `MIXING_BLEND_HI` the cell
+# is an ordinary porous solid; below `MIXING_BLEND_LO` it is a void.
+const MIXING_BLEND_LO = 1.0e-4
+const MIXING_BLEND_HI = 1.0e-3
+
+"""
+	matrix_volume_fraction(ξ::NTuple{NC,<:Real}, T::Real, material) -> Real
+
+Matrix volume fraction `φ_m = Σⱼ γⱼ ξⱼ/ρⱼ(T)` of a cell: the share of its
+volume held by the swelling-weighted condensed matrix. A cell with
+`φ_m < MIXING_BLEND_LO` is a void to the property model
+([`mixing_volume_fractions`](@ref)).
+"""
+@inline matrix_volume_fraction(ξ::NTuple{NC,<:Real}, T::Real, material) where {NC} =
+    _sum_solid_specific_vol(ξ, T, material.components, Val(NC))
+
 """
 	mixing_volume_fractions(ξ::NTuple{NC,<:Real}, T::Real, material) -> NTuple{NC}
 
-Volume-fraction weights for conductivity/emissivity mixing:
-[`solid_volume_fractions`](@ref) while any swelling-weighted matrix volume
-remains, falling back to the actual phase occupancy
-([`volume_fractions`](@ref)) for a fully depleted cell.
+Volume-fraction weights for conductivity/emissivity mixing: the
+swelling-weighted matrix fractions ([`solid_volume_fractions`](@ref)) while
+matrix volume remains, blending smoothly into the all-phase occupancy
+([`volume_fractions`](@ref)) as the matrix vanishes.
 
-The fallback is the depleted-cell floor: without it a fully
-converted cell gets k_eff = ε_eff = 0 — a perfect non-emitting insulator —
-which the harmonic face mean then propagates to *both* adjacent faces, and
-Kirchhoff α = ε kills absorption too. With the fallback the void cell
-degrades to the gas-mixture conductivity (heat still conducts through the
-pore gas). ε_eff for a pure-gas cell is the gas-mixture emissivity (0 for
-default transparent gases) — production runs with `handle_depletion = true`
-merge such cells away before this matters.
+The blend weight is a cubic smoothstep of the matrix volume fraction
+`φ_m = Σⱼ γⱼ ξⱼ/ρⱼ` over `[MIXING_BLEND_LO, MIXING_BLEND_HI]`; above the
+window the weights are exactly the matrix fractions, below it exactly the
+occupancy. Without the occupancy limit a fully converted cell gets
+k_eff = ε_eff = 0 — a perfect non-emitting insulator — which the harmonic
+face mean then propagates to both adjacent faces, and Kirchhoff α = ε kills
+absorption too; with it the void cell degrades to the gas-mixture
+conductivity (heat still conducts through the pore gas). The blend keeps
+∂k_eff/∂ξ bounded through the transition: the matrix fractions are
+normalised by `φ_m`, so their derivatives grow as `1/φ_m²` and a hard switch
+would hand the Jacobian entries of order `1/φ_m²` in a cell that a fixed
+mesh cannot park.
 """
 @inline function mixing_volume_fractions(ξ::NTuple{NC,<:Real}, T::Real, material) where {NC}
-    v = solid_volume_fractions(ξ, T, material)
-    sum(v) > 0.0 && return v
-    return volume_fractions(ξ, T, material)
+    φ_m = matrix_volume_fraction(ξ, T, material)
+    φ_m >= MIXING_BLEND_HI && return solid_volume_fractions(ξ, T, material)
+    v_full = volume_fractions(ξ, T, material)
+    φ_m <= MIXING_BLEND_LO && return v_full
+    v_solid = solid_volume_fractions(ξ, T, material)
+    s = (φ_m - MIXING_BLEND_LO) / (MIXING_BLEND_HI - MIXING_BLEND_LO)
+    w = s * s * (3 - 2 * s)
+    return ntuple(j -> w * v_solid[j] + (1 - w) * v_full[j], Val(NC))
 end
 
 # ============================================================================
@@ -539,12 +565,12 @@ end
 @inline function _porosity_sum(v, comps::Tuple{C1,C2}, ::Val{2}) where {C1,C2}
     φ = zero(_prop_type(v))
     if is_gas(comps[1])
-        ;
-        φ += v[1];
+
+        φ += v[1]
     end
     if is_gas(comps[2])
-        ;
-        φ += v[2];
+
+        φ += v[2]
     end
     return φ
 end
@@ -552,16 +578,16 @@ end
 @inline function _porosity_sum(v, comps::Tuple{C1,C2,C3}, ::Val{3}) where {C1,C2,C3}
     φ = zero(_prop_type(v))
     if is_gas(comps[1])
-        ;
-        φ += v[1];
+
+        φ += v[1]
     end
     if is_gas(comps[2])
-        ;
-        φ += v[2];
+
+        φ += v[2]
     end
     if is_gas(comps[3])
-        ;
-        φ += v[3];
+
+        φ += v[3]
     end
     return φ
 end

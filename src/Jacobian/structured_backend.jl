@@ -127,7 +127,7 @@ per-operator AD cost.
   `bc_convection_ws`, `ale_advection_ws`, `ale_mesh_vel_ws`).
 - `geom_cache::Union{Nothing, GeometryADCache}` — for the ALE z-block
   AD pass that runs after the operator walk. `nothing` under
-  `assembly_profile == :ale_reduced` (the geometry block is empty).
+  `assembly_profile == :ale_reduced` (the geometry block is dropped).
 - `assembly_profile::Symbol` — the assembly profile this cache was built
   for (`:full` or `:ale_reduced`). Read by per-step assembly to gate
   structured-coupling emission and the geometry AD pass.
@@ -467,6 +467,7 @@ function _compute_jacobian!(
         compute_strain_rate_derivatives!(
             cache.ale_mesh_vel_ws,
             ws.state_cache,
+            cache.mesh,
             cache.material,
         )
         contribute_to_structured!(
@@ -506,6 +507,7 @@ function _compute_jacobian!(
         cache.reaction_ws,
         cache.material,
         cache.layout,
+        cache.mesh,
     )
 
     contribute_to_jacobian!(
@@ -570,6 +572,7 @@ function _compute_jacobian!(
         compute_alpha_derivatives!(
             cache.beer_lambert_ws,
             ws.state_cache,
+            cache.mesh,
             ws.prop_cache,
             cache.material,
         )
@@ -687,6 +690,7 @@ function _compute_jacobian!(
             cache.jac,
             cache.ale_mesh_vel_ws,
             ws.state_cache,
+            cache.mesh,
             cache.material,
             cache.layout,
         )
@@ -738,6 +742,7 @@ function _apply_ale_dilation_jacobian!(
     jac::StructuredJacobian,
     ale_ws,
     state,
+    mesh,
     material,
     layout,
 )
@@ -752,7 +757,7 @@ function _apply_ale_dilation_jacobian!(
     # tuple boxes the component on every access; map once, index the Bools.
     gas = map(is_gas, material.components)
 
-    @inbounds for i = 1:n_cells
+    @inbounds for i = 1:mesh.n_active_cells
         θ_i = θ[i]
         for j = 1:NC
             gas[j] && continue

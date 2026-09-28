@@ -5,15 +5,7 @@ ALE mesh motion is integrated directly into the unified workspace.
 Thickness history is extracted from the state vector in extract_solution_ale!.
 """
 
-using DiffEqCallbacks: DiscreteCallback, PeriodicCallback, ContinuousCallback
-using ..Adaptivity:
-    find_surface_cell,
-    find_interior_neighbor,
-    find_exterior_neighbor,
-    merge_adjacent_cells!,
-    compact_mesh_after_merge!,
-    find_merge_neighbor,
-    merge_temperatures_conservatively_from_values
+using ..Adaptivity: find_merge_neighbor, park_cell!
 using ..Problem:
     StateLayout,
     get_node_positions,
@@ -25,45 +17,40 @@ using ..Problem:
     z_offset,
     chi_offset,
     chi_range,
-    resize_workspace!,
     update_mesh_from_state!,
     mesh_mode,
     ALE
 using ..Residual: cross_section_area_from_state
 using ..Geometry: Mesh1D
-using ..Materials: n_components, SOLID
+using ..Materials: n_components, SOLID, is_gas
+using ..Properties: MIXING_BLEND_LO, matrix_volume_fraction
 
 # ============================================================================
 # Cell Thickness Based Depletion Detection
 # ============================================================================
 
 """
-	is_cell_thin(u::AbstractVector, layout::StateLayout{NC}, 
+	is_cell_thin(u::AbstractVector, layout::StateLayout{NC},
 				 cell_idx::Int, initial_thickness::Float64;
 				 threshold::Float64=0.05) where NC -> Bool
 
 Check if a cell has shrunk below a threshold fraction of its initial thickness.
 
-This is the primary depletion detection mechanism for ALE simulations. When
-a cell shrinks significantly, it should be merged with its neighbor to prevent:
-1. Very small timesteps (CFL condition scales with Δx²)
-2. Extreme aspect ratios between cells
-3. Numerical instabilities from thin cells
+This is the depletion trigger for ALE simulations: a cell that has shrunk to
+`threshold` of its own initial thickness is parked (merged into a neighbour
+and moved out of the live range) before its shrinking pitch drives the
+implicit solve's conditioning (∝ 1/Δz²) beyond what the Newton can resolve.
 
 # Arguments
 - `u`: ODE state vector [T₁...Tₙ, ξ₁₁...ξ_NC,n, z₁...z_{n+1}]
 - `layout`: StateLayout descriptor
 - `cell_idx`: Index of the cell to check
 - `initial_thickness`: Original thickness of **this** cell [m] — each cell is
-  judged against its own reference (e.g. `state.initial_cell_thickness[cell_idx]`)
+  judged against its own reference
 - `threshold`: Fraction of initial thickness below which cell is considered depleted
 
 # Returns
 - `true` if current cell thickness < threshold × initial_thickness
-
-# Example
-If threshold=0.05 (5%), a cell that started at 0.4mm and has shrunk to 0.02mm
-(5% of original) will trigger merging.
 """
 function is_cell_thin(
     u::AbstractVector,
@@ -72,14 +59,8 @@ function is_cell_thin(
     initial_thickness::Float64;
     threshold::Float64 = 0.05,
 ) where {NC}
-    # Get node positions from state vector
     z = get_node_positions(u, layout)
-
-    # Compute current cell thickness
-    # Cell i spans from node i to node i+1
     current_thickness = z[cell_idx+1] - z[cell_idx]
-
-    # Check if cell has shrunk below threshold
     return current_thickness < threshold * initial_thickness
 end
 
@@ -96,68 +77,55 @@ end
 """
 	find_thin_cells(u::AbstractVector, layout::StateLayout{NC},
 					initial_thickness::AbstractVector{<:Real},
-					threshold::Float64) where NC -> Vector{Int}
+					threshold::Float64, n_live::Int) where NC -> Vector{Int}
 
-Find all cells thinner than `threshold` × their **own** initial thickness.
+Find the live cells (`1:n_live`) thinner than `threshold` × their **own**
+initial thickness, sorted surface-first (descending z).
 
 Each cell is compared against its own entry of the per-cell reference vector
-`initial_thickness`. A single shared reference would misclassify on any
-nonuniform mesh: with a max/min cell-size ratio above `1/threshold`, a
-surface-cell reference either flags the fine cells at t = 0 or never flags
-the coarse ones.
+`initial_thickness` (one entry per state slot, ghost entries unused). A
+single shared reference would misclassify on any nonuniform mesh: with a
+max/min cell-size ratio above `1/threshold`, a surface-cell reference either
+flags the fine cells at t = 0 or never flags the coarse ones.
 
-Returns the thin-cell IDs sorted by z-position in descending order (surface
-cells first).
-
-# Arguments
-- `u`: ODE state vector [T₁...Tₙ, ξ₁₁...ξ_NC,n, z₁...z_{n+1}]
-- `layout`: StateLayout descriptor
-- `initial_thickness`: Initial thickness of each cell [m], one entry per cell
-- `threshold`: Fraction of a cell's initial thickness below which it is thin
-
-# Returns
-Vector of cell IDs, sorted by z-position descending (surface first).
-
-# Notes
-Processing surface cells first (higher z) prevents "orphaning" interior cells
-when multiple adjacent cells become thin simultaneously. This maintains mesh
-connectivity during cascade scenarios.
+A live cell with non-positive thickness is a tangled mesh, not a depleted
+cell, and raises an error instead of being parked.
 """
 function find_thin_cells(
     u::AbstractVector,
     layout::StateLayout{NC},
     initial_thickness::AbstractVector{<:Real},
     threshold::Float64,
+    n_live::Int,
 ) where {NC}
     length(initial_thickness) == layout.n_cells || throw(
         DimensionMismatch(
             "initial_thickness has $(length(initial_thickness)) entries for " *
-            "$(layout.n_cells) cells — the per-cell reference vector must be " *
-            "compacted alongside the state vector after each merge",
+            "$(layout.n_cells) state slots",
         ),
     )
+    1 <= n_live <= layout.n_cells ||
+        throw(ArgumentError("n_live = $(n_live) outside 1:$(layout.n_cells)"))
     thin = Int[]
     z = get_node_positions(u, layout)
 
-    for i = 1:layout.n_cells
+    for i = 1:n_live
         thickness = z[i+1] - z[i]
         thickness > 0.0 || error(
             "Cell $i has non-positive thickness $(thickness) m: node positions " *
             "are no longer monotone in z (tangled mesh). This is a mesh-motion " *
-            "failure, not depletion — refusing to merge the inverted cell away.",
+            "failure, not depletion — refusing to park the inverted cell.",
         )
         if thickness < threshold * initial_thickness[i]
             push!(thin, i)
         end
     end
 
-    # Sort by position descending (surface first)
-    # Cell center approximated as average of node positions
+    # Surface first, so cascades of neighbouring thin cells park from the top.
     sort!(thin, by = i -> (z[i] + z[i+1]) / 2, rev = true)
     return thin
 end
 
-# ============================================================================
 # ============================================================================
 # Thickness Termination Callback (for ALE simulations)
 # ============================================================================
@@ -165,518 +133,357 @@ end
 """
 	create_thickness_termination_callback(sv_ref, min_thickness) -> ContinuousCallback
 
-Create a callback that terminates the simulation when thickness falls below threshold.
+Create a callback that terminates the simulation when the live thickness
+`z[n_live+1] − z[1]` falls below `min_thickness` [m].
 
-This is used with ALE `StateLayout`s where node positions are part of
-the state vector.
-
-# Arguments
-- `sv_ref`: Either a StateLayout directly, or a DepletionCallbackState (for shared reference)
-- `min_thickness::Float64`: Minimum allowed thickness [m]
-
-# Returns
-A `ContinuousCallback` that terminates when thickness < min_thickness.
-
-# Notes
-When used with depletion handling, pass a DepletionCallbackState so that the
-state vector descriptor is automatically updated when cells are merged.
+`sv_ref` is either a `StateLayout` (every cell is live) or a
+`DepletionCallbackState`, whose `n_live` tracks parked cells.
 """
 function create_thickness_termination_callback(sv_ref, min_thickness::Float64)
-    # Condition function: returns 0 when thickness equals min_thickness
     condition = (u, t, integrator) -> begin
-        # Get the current state vector descriptor (handles both direct layout and callback state)
-        layout = _get_sv(sv_ref)
+        layout, n_live = _layout_and_live(sv_ref)
         z = get_node_positions(u, layout)
-        thickness = z[end] - z[1]
-        return thickness - min_thickness
+        return (z[n_live+1] - z[1]) - min_thickness
     end
-
-    # Affect function: terminate the integrator
     affect! = (integrator) -> terminate!(integrator)
-
-    # Use ContinuousCallback for accurate event detection
     return ContinuousCallback(condition, affect!)
 end
 
+_layout_and_live(layout::StateLayout) = (layout, layout.n_cells)
+
 # ============================================================================
-# Surface Cell Depletion Callback
+# Depletion Callback
 # ============================================================================
 
 """
-	DepletionCallbackState{NC}
+	DepletionCallbackState
 
-Mutable state for tracking depletion callback progress.
-
-This struct stores information needed across callback invocations,
-particularly the current state vector descriptor which changes as cells are merged,
-and the per-cell initial thicknesses for thickness-based depletion detection.
-
-The reference vector is compacted in lockstep with the state vector: when a
-thin cell is merged away, its entry is deleted and the kept cell retains its
-own reference. (On a uniform mesh this reproduces the single-scalar behavior
-exactly; on a stretched mesh it is what makes the thinness test per-cell.)
+Bookkeeping shared by the depletion callback, the thickness-termination
+callback and solution extraction.
 
 # Fields
-- `layout::StateLayout{NC}`: Current state vector descriptor (updated after merges)
-- `initial_cell_thickness::Vector{Float64}`: Initial thickness of each cell [m],
-  one entry per currently-active cell
-- `n_merges::Int`: Total number of cell merges performed
-- `merge_times::Vector{Float64}`: Times at which merges occurred
-- `merged_cells::Vector{Int}`: Original indices of cells that were merged (for diagnostics)
+- `layout::StateLayout`: the (fixed) state layout
+- `n_live::Int`: number of live cells; cells `n_live+1:n` are parked ghosts
+- `reference::Vector{Float64}`: per-slot depletion reference. Under ALE the
+  cell's initial thickness [m]; on a fixed mesh the cell's initial condensed
+  concentration Σ_{j∉gas} ξⱼ [kg/m³]. Shifts with the cells when an interior
+  cell parks; ghost entries are unused.
+- `park_times::Vector{Float64}`: time of each park event
+- `parked_cells::Vector{Int}`: live index of the cell parked at each event
 """
-mutable struct DepletionCallbackState{NC}
-    layout::StateLayout{NC}
-    initial_cell_thickness::Vector{Float64}
-    n_merges::Int
-    merge_times::Vector{Float64}
-    merged_cells::Vector{Int}
+mutable struct DepletionCallbackState{L<:StateLayout}
+    layout::L
+    n_live::Int
+    reference::Vector{Float64}
+    park_times::Vector{Float64}
+    parked_cells::Vector{Int}
 end
 
+"""
+	DepletionCallbackState(layout, mesh, material, u0)
+
+Build the callback state for a fresh solve: every cell live, the reference
+taken from the initial mesh (ALE: cell thickness) or the initial state
+(fixed mesh: condensed concentration).
+"""
 function DepletionCallbackState(
     layout::StateLayout{NC},
-    initial_cell_thickness::Vector{Float64},
-) where {NC}
-    length(initial_cell_thickness) == layout.n_cells || throw(
-        DimensionMismatch(
-            "initial_cell_thickness has $(length(initial_cell_thickness)) " *
-            "entries for $(layout.n_cells) cells",
-        ),
-    )
-    DepletionCallbackState{NC}(layout, initial_cell_thickness, 0, Float64[], Int[])
-end
-
-# Convenience constructor that computes per-cell initial thicknesses from the mesh
-function DepletionCallbackState(layout::StateLayout{NC}, mesh::Mesh1D) where {NC}
-    initial_thickness = mesh.cell_volumes ./ mesh.cross_section_area_initial
-    DepletionCallbackState(layout, initial_thickness)
-end
-
-# Helper to extract state vector from either direct layout or DepletionCallbackState
-_get_sv(layout::StateLayout) = layout
-_get_sv(cb_state::DepletionCallbackState) = cb_state.layout
-
-@inline function _set_temperature!(u, layout::StateLayout, i::Int, T)
-    u[i] = T
-    return u
-end
-
-@inline function _set_concentration!(
-    u,
-    layout::StateLayout{NC},
-    i::Int,
-    j::Int,
-    ξ,
+    mesh::Mesh1D,
+    material,
+    u0::AbstractVector,
 ) where {NC}
     n = layout.n_cells
-    u[n+(j-1)*n+i] = ξ
-    return u
-end
-
-@inline function _set_chi!(u, layout::StateLayout, i::Int, χ)
-    rng = chi_range(layout)
-    isempty(rng) && return u
-    u[first(rng)+i-1] = χ
-    return u
-end
-
-function remove_cell_from_state_vector(
-    u::AbstractVector{Float64},
-    layout::StateLayout{NC},
-    cell_id::Int,
-    node_id::Int,
-) where {NC}
-    n_old = layout.n_cells
-    n_nodes_old = layout.n_nodes
-    n_new = n_old - 1
-    n_nodes_new = n_nodes_old - 1
-    n_new < 1 && error("Cannot remove cell: only 1 cell remaining")
-
-    layout_new = StateLayout(NC, n_new, n_nodes_new, layout.mode)
-    u_new = Vector{Float64}(undef, state_length(layout_new))
-
-    dst = 0
-    @inbounds for i = 1:n_old
-        if i != cell_id
-            dst += 1
-            u_new[dst] = u[i]
-        end
-    end
-
-    @inbounds for j = 1:NC
-        dst = 0
-        for i = 1:n_old
-            if i != cell_id
-                dst += 1
-                src = n_old + (j - 1) * n_old + i
-                dest = n_new + (j - 1) * n_new + dst
-                u_new[dest] = u[src]
-            end
-        end
-    end
-
-    z_old = z_offset(layout)
-    z_new = z_offset(layout_new)
-    dst = 0
-    @inbounds for i = 1:n_nodes_old
-        if i != node_id
-            dst += 1
-            u_new[z_new+dst] = u[z_old+i]
-        end
-    end
-
-    if !isempty(chi_range(layout))
-        χ_old = chi_offset(layout)
-        χ_new = chi_offset(layout_new)
-        dst = 0
-        @inbounds for i = 1:n_old
-            if i != cell_id
-                dst += 1
-                u_new[χ_new+dst] = u[χ_old+i]
-            end
-        end
-    end
-
-    return u_new, layout_new
-end
-
-"""
-	create_merged_state_vector(u, layout, cell_to_remove, cell_to_keep,
-							   V_remove, V_keep;
-							   material = nothing,
-							   m_init_remove = 0.0, m_init_keep = 0.0)
-		-> (u_new, layout_new)
-
-Build the post-merge state vector: conservative ξ (volume-weighted bulk
-concentrations), energy-conserving T (ρcₚ-weighted when `material` is given),
-and — for WithChi layouts — the pyrolysis-progress merge
-
-	χ_merged = (m_init_remove·χ_remove + m_init_keep·χ_keep) / (m_init_remove + m_init_keep)
-
-weighted by the cells' *initial dry-solid masses* (`mesh.m_dry_solid_initial`),
-because χᵢ = m_released,i / m_dry_init,i makes Σᵢ χᵢ·m_dry_init,i the extensive
-invariant. Volume weighting would nearly discard the depleted cell's pyrolysis
-record (V → 0 while its m_init is unchanged), stepping χ̄ down at each merge.
-Callers must capture `m_init_remove` / `m_init_keep` **before** the mesh merge
-sums and compacts `mesh.m_dry_solid_initial`; they are required (positive sum)
-whenever the layout carries a χ block.
-"""
-function create_merged_state_vector(
-    u::AbstractVector{Float64},
-    layout::StateLayout{NC},
-    cell_to_remove::Int,
-    cell_to_keep::Int,
-    V_remove::Float64,
-    V_keep::Float64;
-    material = nothing,
-    m_init_remove::Float64 = 0.0,
-    m_init_keep::Float64 = 0.0,
-) where {NC}
-    n_old = layout.n_cells
-    n_old <= 1 && error("Cannot merge: only 1 cell remaining")
-    V_total = V_remove + V_keep
-    u_work = copy(u)
-
-    T_remove = get_temperature(u_work, layout, cell_to_remove)
-    T_keep = get_temperature(u_work, layout, cell_to_keep)
-    ξ_remove = ntuple(Val(NC)) do j
-        get_concentration(u_work, layout, cell_to_remove, j)
-    end
-    ξ_keep = ntuple(Val(NC)) do j
-        get_concentration(u_work, layout, cell_to_keep, j)
-    end
-
-    ξ_merged = ntuple(Val(NC)) do j
-        (V_remove * ξ_remove[j] + V_keep * ξ_keep[j]) / V_total
-    end
-
-    if material !== nothing
-        # Canonical condensed-enthalpy-conserving merge (Adaptivity/cell_merge.jl).
-        T_merged = merge_temperatures_conservatively_from_values(
-            V_remove,
-            T_remove,
-            ξ_remove,
-            V_keep,
-            T_keep,
-            ξ_keep,
-            material,
-        )
+    length(mesh.cells) == n || throw(
+        DimensionMismatch("mesh has $(length(mesh.cells)) cells for a $(n)-cell layout"),
+    )
+    reference = if mesh_mode(layout.mode) isa ALE
+        mesh.cell_volumes ./ mesh.cross_section_area_initial
     else
-        T_merged = (V_remove * T_remove + V_keep * T_keep) / V_total
+        [_condensed_concentration(u0, layout, material, i) for i = 1:n]
     end
+    return DepletionCallbackState(layout, n, reference, Float64[], Int[])
+end
 
-    _set_temperature!(u_work, layout, cell_to_keep, T_merged)
-    for j = 1:NC
-        _set_concentration!(u_work, layout, cell_to_keep, j, ξ_merged[j])
+_layout_and_live(cb::DepletionCallbackState) = (cb.layout, cb.n_live)
+
+"""
+	n_live_cells(cb::DepletionCallbackState, t) -> Int
+
+Number of live cells in the state saved at time `t`. Park events rewrite the
+state after the saved values at the event time have been recorded, so a
+state saved at exactly `t_park` still carries the pre-park layout.
+"""
+n_live_cells(cb::DepletionCallbackState, t::Real) =
+    cb.layout.n_cells - count(<(t), cb.park_times)
+
+# Σ_{j ∉ gas} ξⱼ of cell `i`: the condensed mass per unit volume, the fixed-mesh
+# depletion measure.
+@inline function _condensed_concentration(
+    u::AbstractVector,
+    layout::StateLayout{NC},
+    material,
+    i::Int,
+) where {NC}
+    s = 0.0
+    @inbounds for j = 1:NC
+        is_gas(material.components[j]) && continue
+        s += get_concentration(u, layout, i, j)
     end
-
-    if !isempty(chi_range(layout))
-        m_total = m_init_remove + m_init_keep
-        m_total > 0.0 || throw(
-            ArgumentError(
-                "create_merged_state_vector: WithChi merge requires the cells' " *
-                "initial dry-solid masses (m_init_remove, m_init_keep) captured " *
-                "before the mesh merge",
-            ),
-        )
-        χ_remove = get_chi(u_work, layout, cell_to_remove)
-        χ_keep = get_chi(u_work, layout, cell_to_keep)
-        χ_merged = (m_init_remove * χ_remove + m_init_keep * χ_keep) / m_total
-        _set_chi!(u_work, layout, cell_to_keep, χ_merged)
-    end
-
-    node_to_remove = cell_to_remove > cell_to_keep ? cell_to_remove : cell_to_keep
-    return remove_cell_from_state_vector(u_work, layout, cell_to_remove, node_to_remove)
+    return s
 end
 
 """
-	create_depletion_callback(ws, mesh, material, layout;
+	depletion_candidate(u, layout, mesh, material, cb::DepletionCallbackState,
+	                    threshold) -> Int
+
+The live cell to park next, or 0. ALE: the surface-most live cell thinner
+than `threshold` × its initial thickness. Fixed mesh: the top live cell when
+its condensed concentration has fallen below `threshold` × its initial value
+(cells that started with no condensed mass never park).
+"""
+function depletion_candidate(
+    u::AbstractVector,
+    layout::StateLayout,
+    mesh::Mesh1D,
+    material,
+    cb::DepletionCallbackState,
+    threshold::Float64,
+)
+    n_live = cb.n_live
+    if mesh_mode(layout.mode) isa ALE
+        thin = find_thin_cells(u, layout, cb.reference, threshold, n_live)
+        return isempty(thin) ? 0 : thin[1]
+    end
+    ref = cb.reference[n_live]
+    ref > 0.0 || return 0
+    return _condensed_concentration(u, layout, material, n_live) < threshold * ref ?
+           n_live : 0
+end
+
+"""
+	interior_void_cell(u, layout, material, cb::DepletionCallbackState) -> Int
+
+Fixed mesh: the lowest live cell below the top live cell whose matrix volume
+fraction ([`matrix_volume_fraction`](@ref)) has fallen below
+`MIXING_BLEND_LO`, the property model's definition of a void, or 0. Cells
+that started with no condensed mass are not tested.
+"""
+function interior_void_cell(
+    u::AbstractVector,
+    layout::StateLayout{NC},
+    material,
+    cb::DepletionCallbackState,
+) where {NC}
+    @inbounds for i = 1:(cb.n_live-1)
+        cb.reference[i] > 0.0 || continue
+        ξ = ntuple(j -> get_concentration(u, layout, i, j), Val(NC))
+        φ_m = matrix_volume_fraction(ξ, get_temperature(u, layout, i), material)
+        φ_m < MIXING_BLEND_LO && return i
+    end
+    return 0
+end
+
+"""
+	park_cell_state!(u, layout, mesh, i_park, i_keep, χ_merged)
+
+Write the post-park state vector after `park_cell!` has rearranged `mesh`:
+T, ξ (and z under ALE) are read back from the mesh for every slot, so live
+cells shift exactly as the mesh did and the ghost slot carries the merged
+temperature, zero concentrations and the surface position. The χ block is
+shifted the same way, with `χ_merged` in the keeper's slot and zero in the
+ghost (the mesh holds no χ).
+"""
+function park_cell_state!(
+    u::AbstractVector{Float64},
+    layout::StateLayout{NC},
+    mesh::Mesh1D,
+    i_park::Int,
+    i_keep::Int,
+    χ_merged::Float64,
+) where {NC}
+    n = layout.n_cells
+    @inbounds for i = 1:n
+        st = mesh.cell_states[i]
+        u[i] = st.T
+        for j = 1:NC
+            u[n+(j-1)*n+i] = st.ξ[j]
+        end
+    end
+    ale = mesh_mode(layout.mode) isa ALE
+    if ale
+        zoff = z_offset(layout)
+        @inbounds for i = 1:layout.n_nodes
+            u[zoff+i] = mesh.nodes[i].z
+        end
+    end
+    rng = chi_range(layout)
+    if !isempty(rng)
+        χoff = first(rng) - 1
+        ghost = mesh.n_active_cells + 1
+        if ale
+            @inbounds for i = i_park:(ghost-1)
+                u[χoff+i] = u[χoff+i+1]
+            end
+        end
+        u[χoff+min(i_park, i_keep)] = χ_merged
+        u[χoff+ghost] = 0.0
+    end
+    return u
+end
+
+"""
+	park!(u, layout, mesh, material, cb::DepletionCallbackState, i_park, t) -> Int
+
+Park live cell `i_park` at time `t`: choose the neighbour, merge
+conservatively (`park_cell!`), rewrite `u`, and record the event. Returns the
+new live-cell count.
+"""
+function park!(
+    u::AbstractVector{Float64},
+    layout::StateLayout,
+    mesh::Mesh1D,
+    material,
+    cb::DepletionCallbackState,
+    i_park::Int,
+    t::Real,
+)
+    i_keep = find_merge_neighbor(mesh, i_park)
+    i_keep > 0 || error("park!: cell $(i_park) has no live neighbour")
+    ale = mesh_mode(layout.mode) isa ALE
+
+    # χ merges by initial dry-solid mass (Σᵢ χᵢ·m_dry_init,i is the extensive
+    # invariant); capture the weights before park_cell! sums them.
+    χ_merged = 0.0
+    if !isempty(chi_range(layout)) && !isempty(mesh.m_dry_solid_initial)
+        m_p = mesh.m_dry_solid_initial[i_park]
+        m_k = mesh.m_dry_solid_initial[i_keep]
+        m_tot = m_p + m_k
+        χ_merged =
+            m_tot > 0.0 ?
+            (m_p * get_chi(u, layout, i_park) + m_k * get_chi(u, layout, i_keep)) / m_tot :
+            0.0
+    end
+
+    n_live = park_cell!(mesh, i_park, i_keep; material = material, ale = ale)
+    park_cell_state!(u, layout, mesh, i_park, i_keep, χ_merged)
+
+    if ale
+        _shift_down!(cb.reference, i_park, n_live + 1)
+    end
+    cb.reference[n_live+1] = 0.0
+    cb.n_live = n_live
+    push!(cb.park_times, Float64(t))
+    push!(cb.parked_cells, i_park)
+    return n_live
+end
+
+@inline function _shift_down!(v::AbstractVector, from::Int, to::Int)
+    @inbounds for i = from:(to-1)
+        v[i] = v[i+1]
+    end
+    return v
+end
+
+"""
+	DT_AFTER_PARK
+
+Step size (s) proposed to the integrator after a park event.
+
+The merged keeper cell is off the quasi-steady gas-concentration and
+temperature profiles of its neighbours, so the residual at the parked state
+is orders of magnitude larger than before the park and the integrator's
+extrapolated predictor lands far from the solution. From this step the
+Newton converges on the transient and the controller grows the step back
+within a few steps. At the pre-park step size the Newton fails repeatedly
+before the controller has cut the step, so the reset saves those failures at
+every park.
+"""
+const DT_AFTER_PARK = 1e-6
+
+"""
+	create_depletion_callback(ws, mesh, material, cb_state::DepletionCallbackState;
 							  threshold=0.05, min_cells=2) -> DiscreteCallback
 
-Create a callback that detects and handles thin cells.
+Create the callback that parks depleted cells.
 
-This callback checks at each timestep whether ANY cell has shrunk below a
-threshold fraction of its initial thickness. When this occurs, the callback:
-1. Finds all thin cells, sorted by z-position (surface first)
-2. Merges the first thin cell with its best neighbor
-3. Resizes the workspace's caches
-4. Resizes the integrator's state vector using `resize!(integrator, ...)`
-5. Remaps the solution to the new mesh
+After every accepted step the condition scans the live cells
+(`depletion_candidate`); when one qualifies the affect! parks it — at most
+one cell per step, so the integrator adapts between events — or terminates
+the solve when only `min_cells` live cells remain. The state vector keeps
+its length; the park rewrites it in place, marks a derivative discontinuity
+(`derivative_discontinuity!`) and proposes [`DT_AFTER_PARK`](@ref) for the
+next step.
 
-Only ONE merge is performed per callback invocation to allow the ODE solver
-to adapt between merges.
-
-This prevents numerical issues from extremely thin cells:
-- Very small timesteps (CFL condition scales with Δx²)
-- Extreme aspect ratios between cells
-- Numerical instabilities
-
-# Arguments
-- `ws`: Mutable `Workspace` being solved
-- `mesh::Mesh1D`: The mesh (will be modified during merges)
-- `material`: Material definition (used for energy-conserving merge)
-- `layout::StateLayout`: Initial state vector descriptor
+On a fixed mesh the condition also scans the cells below the top live cell
+for a void ([`interior_void_cell`](@ref)). A void there means the material
+has gasified from within. The model carries no heat across a void, so the
+affect! warns and terminates the solve.
 
 # Keyword Arguments
-- `threshold::Float64=0.05`: Thickness fraction threshold for depletion detection.
-  Cell is considered depleted when current_thickness < threshold × its own
-  initial thickness. Default 0.05 means cells are merged when shrunk to 5%
-  of their original thickness.
-- `min_cells::Int=2`: Minimum number of cells before terminating instead of merging.
-  When only `min_cells` remain, simulation terminates rather than merging.
-
-# Returns
-A `DiscreteCallback` that handles cell depletion.
-
-# Notes
-- The callback uses `resize!(integrator, new_length)` to inform the ODE solver
-  of the state vector size change
-- Works with the unified ALE workspace and state layout
-- The state vector descriptor in `ws.layout` is automatically updated
-- All cells (surface and interior) are monitored for depletion
-
-# Example
-```julia
-def, ws, u0 = initialize_state(problem; use_ale = true)
-layout = ws.layout
-
-# Merge cells when they shrink to 5% of original thickness
-depletion_cb = create_depletion_callback(ws, mesh, material, layout;
-										 threshold=0.05, min_cells=3)
-
-prob = ODEProblem(ws, u0, tspan)
-sol = solve(prob, Rodas5P(); callback=depletion_cb)
-```
+- `threshold::Float64=0.05`: ALE — fraction of a cell's initial thickness;
+  fixed mesh — fraction of the top cell's initial condensed concentration.
+- `min_cells::Int=2`: terminate instead of parking when `n_live ≤ min_cells`.
 """
 function create_depletion_callback(
     ws,
     mesh::Mesh1D,
     material,
-    sv_or_state;
+    cb_state::DepletionCallbackState;
     threshold::Float64 = 0.05,
     min_cells::Int = 2,
 )
+    layout = cb_state.layout
+    fixed_mesh = !(mesh_mode(layout.mode) isa ALE)
 
-    # Accept either StateLayout or DepletionCallbackState
-    # If just a StateLayout, create callback state with initial thickness from mesh
-    if sv_or_state isa DepletionCallbackState
-        cb_state = sv_or_state
-    else
-        cb_state = DepletionCallbackState(sv_or_state, mesh)
-    end
-    NC = typeof(cb_state).parameters[1]  # Get NC from DepletionCallbackState{NC}
-
-    # Condition function: check if ANY cell has become too thin
+    # The condition must keep firing at n_live ≤ min_cells: the affect!
+    # terminates there, and returning false would let cells shrink without
+    # bound.
     condition =
-        (u, t, integrator) -> begin
-            # Use the current state vector descriptor
-            current_layout = cb_state.layout
+        (u, t, integrator) ->
+            depletion_candidate(u, layout, mesh, material, cb_state, threshold) != 0 ||
+            fixed_mesh && interior_void_cell(u, layout, material, cb_state) != 0
 
-            # Find ALL thin cells (not just surface). At n <= min_cells the
-            # affect! terminates instead of merging, so the condition must
-            # still fire — returning false here would leave cells free to
-            # shrink indefinitely.
-            thin_cells = find_thin_cells(
-                u,
-                current_layout,
-                cb_state.initial_cell_thickness,
-                threshold,
-            )
-            return !isempty(thin_cells)
-        end
-
-    # Affect function: merge the first thin cell (surface-first order)
     affect! =
         (integrator) -> begin
-            current_layout = cb_state.layout
-            n = current_layout.n_cells
             t = integrator.t
-
-            # Check minimum cells
-            if n <= min_cells
+            if fixed_mesh
+                i_void = interior_void_cell(integrator.u, layout, material, cb_state)
+                if i_void != 0
+                    @warn "Cell $i_void, below the top live cell $(cb_state.n_live), is a void " *
+                          "(matrix volume fraction < $MIXING_BLEND_LO) at t=$(round(t, digits=4)) s: " *
+                          "the material has gasified from within. The model carries no heat " *
+                          "across a void, so the fixed-mesh solve stops here. A regressing " *
+                          "material belongs on the ALE mesh (use_ale = true)."
+                    terminate!(integrator)
+                    return
+                end
+            end
+            if cb_state.n_live <= min_cells
                 @warn "At minimum cells ($min_cells), terminating simulation"
                 terminate!(integrator)
                 return
             end
-
-            # Find thin cells (sorted surface-first)
-            thin_cells = find_thin_cells(
+            i_park = depletion_candidate(
                 integrator.u,
-                current_layout,
-                cb_state.initial_cell_thickness,
+                layout,
+                mesh,
+                material,
+                cb_state,
                 threshold,
             )
-
-            if isempty(thin_cells)
-                @warn "Condition triggered but no thin cell found"
-                return
-            end
-
-            # Process only the FIRST thin cell (highest z / surface-most)
-            cell_to_remove = thin_cells[1]
-
-            # Find the best merge neighbor (prefers interior for thermal stability)
-            cell_to_keep = find_merge_neighbor(mesh, cell_to_remove)
-            if cell_to_keep == 0
-                @warn "No valid merge neighbor for cell $cell_to_remove"
-                return
-            end
-
-            # Get current cell thickness for logging
-            current_thickness =
-                get_cell_thickness(integrator.u, current_layout, cell_to_remove)
-            thickness_percent =
-                100 * current_thickness / cb_state.initial_cell_thickness[cell_to_remove]
-
-            @info "Cell $cell_to_remove thin ($(round(thickness_percent, digits=1))% of initial) at t=$(round(t, digits=4))s, merging into cell $cell_to_keep, n_cells=$n"
-
-            # Get cell volumes and initial dry-solid masses BEFORE mesh
-            # modification: the merge sums m_dry_solid_initial into the kept
-            # cell and the compaction reindexes it, so the χ-merge weights
-            # must be captured here.
-            V_remove = mesh.cell_volumes[cell_to_remove]
-            V_keep = mesh.cell_volumes[cell_to_keep]
-            has_m_init = !isempty(mesh.m_dry_solid_initial)
-            m_init_remove = has_m_init ? mesh.m_dry_solid_initial[cell_to_remove] : 0.0
-            m_init_keep = has_m_init ? mesh.m_dry_solid_initial[cell_to_keep] : 0.0
-
-            # Store current state for conservative merge
-            u_old = copy(integrator.u)
-
-            # Merge cells in mesh (marks cell_to_remove as inactive)
-            merged_id = merge_adjacent_cells!(
-                mesh,
-                cell_to_remove,
-                cell_to_keep;
-                material = material,
-            )
-            if merged_id == 0
-                @warn "Failed to merge cell $cell_to_remove"
-                return
-            end
-
-            # Compact the mesh arrays to remove the inactive cell
-            # This is REQUIRED because the state vector actually removes elements,
-            # so the mesh arrays must match in size
-            compact_mesh_after_merge!(mesh, cell_to_remove)
-
-            # Create new state vector with ENERGY-CONSERVING MERGE
-            # Using material enables ρcₚ-weighted energy conservation instead of
-            # simple volume-weighted temperature averaging
-            u_new, layout_new = create_merged_state_vector(
-                u_old,
-                current_layout,
-                cell_to_remove,
-                cell_to_keep,
-                V_remove,
-                V_keep;
-                material = material,
-                m_init_remove = m_init_remove,
-                m_init_keep = m_init_keep,
-            )
-
-            # Get dimensions from the new state vector descriptor (authoritative source)
-            n_cells_new = layout_new.n_cells
-            n_nodes_new = layout_new.n_nodes
-            n_faces_new = n_cells_new + 1  # For 1D mesh
-            new_state_length = length(u_new)
-
-            # Update callback state. The per-cell reference vector is compacted
-            # in lockstep with remove_cell_from_state_vector: the removed cell's
-            # entry is dropped and the kept cell retains its own reference.
-            cb_state.layout = layout_new
-            deleteat!(cb_state.initial_cell_thickness, cell_to_remove)
-            cb_state.n_merges += 1
-            push!(cb_state.merge_times, t)
-            push!(cb_state.merged_cells, cell_to_remove)
-
-            # Resize workspace caches
-            resize_workspace!(ws, n_nodes_new, n_cells_new, n_faces_new)
-
-            # Resize the integrator state vector
-            # This is the key DifferentialEquations.jl interface for size changes
-            resize!(integrator, new_state_length)
-
-            # Copy new state values into integrator
-            integrator.u .= u_new
-
-            # Force recomputation of derivatives
-            u_modified!(integrator, true)
-
-            @info "Merge complete: n_cells=$(n_cells_new), new state length=$(new_state_length)"
+            i_park == 0 && return
+            n_live = park!(integrator.u, layout, mesh, material, cb_state, i_park, t)
+            # The exposed boundary moved down one face; the workspace's
+            # pre-cached boundary ids (shared with the Jacobian's AD workspace)
+            # follow the mesh.
+            ws.top_face_ids[1] = mesh.boundary_faces[1][1]
+            ws.top_cell_ids[1] = n_live
+            derivative_discontinuity!(integrator, true)
+            set_proposed_dt!(integrator, DT_AFTER_PARK)
+            @info "Parked cell $i_park at t=$(round(t, digits=4)) s; $(n_live) live cells"
         end
 
-    # Use DiscreteCallback - checked at end of each accepted step
     return DiscreteCallback(condition, affect!; save_positions = (false, false))
-end
-
-"""
-	get_depletion_callback_stats(cb::DiscreteCallback) -> NamedTuple
-
-Extract statistics from a depletion callback.
-
-This is a utility function to access the merge history from a depletion callback.
-Note: This requires the callback to have been created with create_depletion_callback.
-
-# Returns
-NamedTuple with fields:
-- `n_merges::Int`: Total number of cell merges
-- `merge_times::Vector{Float64}`: Times at which merges occurred
-- `merged_cells::Vector{Int}`: Original indices of merged cells
-"""
-function get_depletion_callback_stats(cb::DiscreteCallback)
-    # Access the closure's captured state
-    # This is somewhat fragile - depends on internal callback structure
-    try
-        # The affect! closure captures cb_state
-        cb_state = cb.affect!.cb_state
-        return (
-            n_merges = cb_state.n_merges,
-            merge_times = copy(cb_state.merge_times),
-            merged_cells = copy(cb_state.merged_cells),
-        )
-    catch
-        return (n_merges = -1, merge_times = Float64[], merged_cells = Int[])
-    end
 end
 
 # ============================================================================
@@ -697,12 +504,22 @@ mirrors the integrator's state vector `u` into the mutable mesh:
   refreshes `mesh.cross_section_area` from the χ block (when WithChi),
   and reruns `Geometry.update_geometry!` so derived geometry is in sync.
 
-The callback dereferences `ws.layout` at every fire so AMR / depletion
-callbacks that swap in a resized layout are picked up automatically.
+The callback dereferences `ws.layout` at every fire so the experimental
+h-AMR callbacks that swap in a resized layout are picked up automatically;
+a park keeps the layout and only rewrites `u`.
 
 The callback is unconditional (`condition` always true). With
 `save_positions=(false, false)` it doesn't perturb the integrator's
 output history.
+
+The callback marks a derivative discontinuity after every accepted step, so
+the integrator re-evaluates the derivative at the new state instead of
+reusing the last Newton stage's, and treats its Jacobian as stale. The
+residual does not read the mirrored fields, but on stiff fine meshes the
+reused stage derivative and the longer Jacobian reuse cost accuracy far
+beyond the one extra residual evaluation per step: on the finite-slab
+heat-conduction case at 320 cells the L2 error grows 15× and the step count
+2.6×.
 """
 function create_step_update_callback(ws, material)
     mesh = ws.mesh
@@ -714,8 +531,77 @@ function create_step_update_callback(ws, material)
         layout = ws.layout
         mesh.cross_section_area = cross_section_area_from_state(mesh, material, u, layout)
         update_mesh_from_state!(mesh, u, layout)
+        derivative_discontinuity!(integrator, true)
         return nothing
     end
 
     return DiscreteCallback(condition, affect!; save_positions = (false, false))
+end
+
+# ============================================================================
+# Newton-failure step cap
+# ============================================================================
+
+"""
+	FAILURE_MEMORY_GROWTH
+
+Growth factor of the Newton-failure step cap: after a step whose Newton needed
+retries, the proposed step stays at or below this multiple of that step
+([`create_newton_failure_cap_callback`](@ref)).
+"""
+const FAILURE_MEMORY_GROWTH = 1.25
+
+"""
+	FAILURE_MEMORY_STEPS
+
+Number of accepted steps over which the Newton-failure step cap holds
+([`create_newton_failure_cap_callback`](@ref)).
+"""
+const FAILURE_MEMORY_STEPS = 20
+
+"""
+	create_newton_failure_cap_callback(; growth = FAILURE_MEMORY_GROWTH,
+									   steps = FAILURE_MEMORY_STEPS) -> DiscreteCallback
+
+Step cap that remembers Newton failures. After every accepted step the
+callback reads the integrator's count of failed nonlinear solves. When the
+step just accepted needed retries, the proposed next step is held at or below
+`growth` times that step, and the cap stays in place for the following
+`steps` accepted steps (a further failure restarts it from the new step).
+
+The error controller regrows the step to its accuracy limit after a Newton
+failure. On a strongly nonlinear front that limit lies beyond the range in
+which the Newton converges, so without the cap the failure recurs every few
+steps. A run without Newton failures never triggers the cap and keeps its
+trajectory exactly.
+"""
+function create_newton_failure_cap_callback(;
+    growth::Float64 = FAILURE_MEMORY_GROWTH,
+    steps::Int = FAILURE_MEMORY_STEPS,
+)
+    n_failed = Ref(0)     # failed nonlinear solves up to the previous accepted step
+    hold = Ref(0)         # accepted steps the cap still holds
+    cap = Ref(Inf)
+
+    affect! =
+        integrator -> begin
+            failures = integrator.stats.nnonlinconvfail
+            if failures > n_failed[]
+                n_failed[] = failures
+                cap[] = growth * (integrator.t - integrator.tprev)
+                hold[] = steps
+            elseif hold[] > 0
+                hold[] -= 1
+                hold[] == 0 && (cap[] = Inf)
+            end
+            get_proposed_dt(integrator) > cap[] && set_proposed_dt!(integrator, cap[])
+            derivative_discontinuity!(integrator, false)
+            return nothing
+        end
+
+    return DiscreteCallback(
+        (u, t, integrator) -> true,
+        affect!;
+        save_positions = (false, false),
+    )
 end

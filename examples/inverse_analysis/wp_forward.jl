@@ -146,9 +146,9 @@ function _conductivities(θ::AbstractVector, ::Val{3})
     # is itself linear in T (closed-form a_i, b_i below).
     k_v_lo, dk_v, k_c_lo, dk_c = θ[1], θ[2], θ[3], θ[4]
 
-    b_v = dk_v / (WP_T_V_HI - WP_T_V_LO);
+    b_v = dk_v / (WP_T_V_HI - WP_T_V_LO)
     a_v = k_v_lo - b_v * WP_T_V_LO
-    b_c = dk_c / (WP_T_C_HI - WP_T_C_LO);
+    b_c = dk_c / (WP_T_C_HI - WP_T_C_LO)
     a_c = k_c_lo - b_c * WP_T_C_LO
 
     int_ks = ntuple(4) do i
@@ -294,6 +294,10 @@ function build_material(
     # char (measured); intermediates interpolate between them by yield-progress.
     ρ_intr_int = ntuple(i -> wp_rho_intrinsic_intermediate(WP_INTERP_PROGRESS[i]), 4)
 
+    # The conductivity laws are linear in T with slopes drawn from the search
+    # box, so positivity over the property bracket is the optimizer bounds'
+    # job (WP_STAGE3_*_BOUNDS keep k > 0 over the anchor windows); a θ outside
+    # that must reach the objective, not throw at construction.
     Material(
         name = :WhitePine,
         components = (
@@ -303,6 +307,7 @@ function build_material(
                 ρ = WP_RHO_VIRGIN,
                 c = virgin_cp_func,
                 k = k_virgin,
+                validate_properties = false,
                 ε = ε_virgin,
                 α = 0.0,
                 λ = WP_LAMBDA_WOOD,
@@ -315,6 +320,7 @@ function build_material(
                 ρ = WP_RHO_INT[1],
                 c = int_cp_funcs[1],
                 k = k_int1,
+                validate_properties = false,
                 ε = ε_int[1],
                 α = 0.0,
                 λ = WP_LAMBDA_WOOD * 2.0,
@@ -326,6 +332,7 @@ function build_material(
                 ρ = WP_RHO_INT[2],
                 c = int_cp_funcs[2],
                 k = k_int2,
+                validate_properties = false,
                 ε = ε_int[2],
                 α = 0.0,
                 λ = WP_LAMBDA_WOOD * 5.0,
@@ -337,6 +344,7 @@ function build_material(
                 ρ = WP_RHO_INT[3],
                 c = int_cp_funcs[3],
                 k = k_int3,
+                validate_properties = false,
                 ε = ε_int[3],
                 α = 0.0,
                 λ = WP_LAMBDA_CHAR * 0.3,
@@ -348,6 +356,7 @@ function build_material(
                 ρ = WP_RHO_INT[4],
                 c = int_cp_funcs[4],
                 k = k_int4,
+                validate_properties = false,
                 ε = ε_int[4],
                 α = 0.0,
                 λ = WP_LAMBDA_CHAR * 0.7,
@@ -360,6 +369,7 @@ function build_material(
                 ρ = WP_RHO_CHAR,
                 c = char_cp_func,
                 k = k_char,
+                validate_properties = false,
                 ε = ε_char,
                 α = 0.0,
                 λ = WP_LAMBDA_CHAR,
@@ -372,6 +382,7 @@ function build_material(
                 ρ = WP_RHO_ASH,
                 c = ash_cp_func,
                 k = k_ash,
+                validate_properties = false,
                 ε = ε_ash,
                 α = 0.0,
                 λ = WP_LAMBDA_CHAR,
@@ -663,7 +674,7 @@ function build_and_solve(
         0.0,                    # 14
     )
     ξ_initial_funcs = [
-        let v = ξ0[j];
+        let v = ξ0[j]
             _ -> v
         end for j = 1:NC_WP
     ]

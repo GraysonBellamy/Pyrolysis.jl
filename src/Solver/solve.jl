@@ -24,11 +24,13 @@ using ..Physics: evaluate_reactions!, ideal_gas_pressure
 using ..Properties:
     RadiationCache,
     effective_emissivity,
+    effective_absorptivity,
     effective_absorption,
     effective_conductivity,
     effective_gas_transfer,
     effective_permeability,
     effective_gas_viscosity,
+    mixture_gas_viscosity,
     porosity
 using ..Discretization:
     compute_boundary_heat_fluxes,
@@ -46,7 +48,7 @@ using ..BoundaryConditions:
     get_thermal_bc,
     get_mass_bc,
     ambient_temperature
-using LinearSolve: LUFactorization, KLUFactorization, SparspakFactorization  # LU for MKL workaround; Sparspak is the default sparse direct solver.
+using LinearSolve: LinearSolve, LUFactorization, KLUFactorization, UMFPACKFactorization  # dense LU for dense backends; KLU / UMFPACK are the sparse defaults
 using SparseArrays: nnz  # For logging sparse Jacobian info
 
 import CommonSolve: solve  # Extend CommonSolve.solve for our problem type
@@ -92,7 +94,7 @@ import CommonSolve: solve  # Extend CommonSolve.solve for our problem type
         φ = porosity(ξ_face, T_face, material)
         P_int = ideal_gas_pressure(ξ_face, T_face, φ, material)
         κ_int = effective_permeability(ξ_face, T_face, material)
-        μ_int = effective_gas_viscosity(T_face)
+        μ_int = mixture_gas_viscosity(ξ_face, T_face, material)
         v_z = boundary_darcy_velocity(mass_bc, P_int, κ_int, μ_int, d_half, Val(tag))
         v_out = tag === :top ? v_z : -v_z
         v_out > 0.0 ? v_out / max(φ, 1e-12) : 0.0
@@ -101,7 +103,10 @@ import CommonSolve: solve  # Extend CommonSolve.solve for our problem type
     end
     ntuple(Val(NC)) do k
         comp = material.components[k]
-        if is_gas(comp) && ξ_face[k] > 0.0
+        # Film/prescribed boundary fluxes can supply an absent species. Match
+        # the applied gas operator for zero and small negative trial/output
+        # concentrations as well; suppressing them hid ambient AIR inflow.
+        if is_gas(comp)
             compute_surface_mass_flux(mass_bc, ξ_face[k], λρ, ρ, d_half, t, k) +
             v_out_over_φ * ξ_face[k]
         else
@@ -211,13 +216,6 @@ function _validate_solve_kwargs(;
     _reject_unknown_kwargs(extra_kwargs)
 
     # Cross-kwarg combinations.
-    if jacobian !== nothing && handle_depletion
-        error(
-            "solve(): the `jacobian` kwarg is incompatible with " *
-            "`handle_depletion = true` (state-vector resizing is not " *
-            "supported by the pluggable backends). Drop one of the two.",
-        )
-    end
     if radiation_model == P1_QUASI_STEADY
         error(
             "solve(): P1_QUASI_STEADY radiation lives in " *
@@ -292,34 +290,24 @@ end
 # Auto-default Jacobian selection.
 # ============================================================================
 #
-# When `jacobian = nothing`, pick `Structured(strategy = DirectSolve())`
-# for both Eulerian and ALE problems. ALE callers wanting the
-# Schur-style approximation can pass
-# `JacobianSpec(Structured(strategy = ApproxSolve()), problem)`.
+# `Structured(strategy = DirectSolve())` is the default: exact assembly of
+# every coupling and a sparse direct solve.
 #
-# ApproxSolve is deliberately NOT the ALE default despite being ~8-10×
-# faster end-to-end on smooth horizons with identical integrator stats
-# (perf fixtures, 2026-06-11: t = 5 s and 15 s gave the same naccept/njacs,
-# nf within 4%). Near burnout the dropped ALE couplings cost real
-# robustness: on the ale_beer_lambert_darcy fixture at t = 30 s (violent
-# depletion tail; 1681 accepted steps) ApproxSolve's larger Newton error
-# admits far-from-physical trial states — it formerly aborted with a
-# DomainError from a negative-temperature iterate reaching Sutherland's
-# T^1.5. The gas-property kernels now clamp (T_GAS_PROPERTY_FLOOR,
-# src/Properties/effective_properties.jl) and that solve completes, but
-# only by surviving wilder iterates than DirectSolve ever produces.
-# Use ApproxSolve explicitly when the simulated horizon stays away from
-# full surface depletion.
+# Under ALE with `handle_depletion = true` the default is
+# `Structured(strategy = ApproxSolve())`. The `:full` ALE pattern carries the
+# prefix-sum couplings of every node to every cell below it, which makes the
+# factorized W matrix effectively dense and the direct solve 60–90× more
+# expensive per step than the reduced pattern. Parking keeps every live cell
+# above `depletion_threshold` of its initial thickness, so the vanishing-cell
+# conditioning that makes the dropped couplings matter never arises. The two
+# strategies then follow the same trajectory, on fire-scale regression (tens of
+# µm/s) and on a surface regressing at mm/s through a front one cell wide alike.
+# Without parking a cell may shrink without bound and the exact couplings buy
+# robustness, so plain ALE solves keep `DirectSolve`.
 
 function _default_jacobian_spec(def, ws, use_ale::Bool, handle_depletion::Bool)
-    if handle_depletion
-        # Depletion resizes the state vector mid-solve via `resize!`; the
-        # pluggable backends carry an immutable `JacobianSpec` cache built
-        # at problem-setup time that does not survive resize. No Jacobian
-        # is supplied — the integrator falls back to its own colored FD.
-        return nothing
-    end
-    return JacobianSpec(Structured(strategy = DirectSolve()), def, ws)
+    strategy = use_ale && handle_depletion ? ApproxSolve() : DirectSolve()
+    return JacobianSpec(Structured(strategy = strategy), def, ws)
 end
 
 # ============================================================================
@@ -370,6 +358,7 @@ function _build_verify_callback(
                       "max_abs_dev=$(report.max_abs_dev), max_rel_dev=$(report.max_rel_dev), " *
                       "worst_index=$(report.worst_index)"
             end
+            derivative_discontinuity!(integrator, false)
             return nothing
         end
 
@@ -380,16 +369,27 @@ end
 # Linear solver / integrator selection
 # ============================================================================
 
-_is_sparse_linsolve(ls) = ls isa SparspakFactorization || ls isa KLUFactorization
+_is_sparse_linsolve(ls) = ls isa LinearSolve.AbstractSparseFactorization
 
 """
-	_resolve_integrator(; integrator, linear_solver, needs_dense_linsolve=false)
+	_resolve_integrator(; integrator, linear_solver, needs_dense_linsolve=false,
+	                    geometry_block=false)
 
 Resolve the user's integrator / linear-solver request against the Jacobian
 path. `needs_dense_linsolve = true` means no sparse `jac_prototype` will be
-attached to the `ODEFunction` (the `jacobian === nothing` colored-FD path —
-e.g. under `handle_depletion` — or a dense Jacobian backend), where a sparse
-factorization cannot run.
+attached to the `ODEFunction` (a dense Jacobian backend such as
+`DenseAD_ForwardDiff`), where a sparse factorization cannot run.
+
+The default linear solver follows the Jacobian pattern: `LUFactorization` for
+a dense Jacobian, `UMFPACKFactorization` when the sparse pattern holds the ALE
+geometry block (`geometry_block`, see [`materializes_geometry_block`](@ref)),
+and `KLUFactorization` for every other sparse pattern. UMFPACK's supernodal
+factorization is the fastest on the dense geometry block. KLU refactors a
+fixed pattern in place without allocating and is the fastest everywhere else,
+including the Beer–Lambert suffix `DirectSolve` materializes on an Eulerian
+mesh, where UMFPACK's threshold pivoting can return an inaccurate solve. The
+rule depends on the mode and profile, not on the mesh size, so a
+configuration uses the same factorization at every resolution.
 
 The user's integrator choice is always preserved: an incompatible sparse
 factorization is swapped for `LUFactorization` **within** the user's
@@ -401,8 +401,15 @@ function _resolve_integrator(;
     integrator,
     linear_solver,
     needs_dense_linsolve::Bool = false,
+    geometry_block::Bool = false,
 )
-    default_ls = needs_dense_linsolve ? LUFactorization() : SparspakFactorization()
+    default_ls = if needs_dense_linsolve
+        LUFactorization()
+    elseif geometry_block
+        UMFPACKFactorization()
+    else
+        KLUFactorization()
+    end
     ls = linear_solver === nothing ? default_ls : linear_solver
     if needs_dense_linsolve && _is_sparse_linsolve(ls)
         @warn "linear_solver = $(typeof(ls)) requires a sparse Jacobian " *
@@ -459,15 +466,21 @@ Solve a pyrolysis problem using DifferentialEquations.jl.
 
 # Keyword Arguments
 - `integrator=nothing`: ODE integrator constructor (e.g. `KenCarp4`) or fully
-  constructed algorithm (e.g. `KenCarp4(linsolve=SparspakFactorization())`).
+  constructed algorithm (e.g. `KenCarp4(linsolve=KLUFactorization())`).
   `nothing` chooses `KenCarp4` with the default `linear_solver`.
-- `linear_solver=nothing`: LinearSolve backend. `nothing` chooses
-  `SparspakFactorization()` for sparse Jacobians. Pair with `integrator` only
-  when `integrator` is a constructor.
-- `jacobian=nothing`: Jacobian handle (`JacobianSpec`). `nothing`
-  picks `Structured(strategy = DirectSolve())`. Pass an explicit
-  `JacobianSpec(Structured(strategy = ApproxSolve()), problem)` for the
-  Schur-style approximation that drops the structured ALE couplings.
+- `linear_solver=nothing`: LinearSolve backend. `nothing` chooses by the
+  Jacobian pattern (see "Linear Solver"): `UMFPACKFactorization()` for the
+  exact ALE Jacobian, `KLUFactorization()` for every other sparse Jacobian,
+  `LUFactorization()` for a dense Jacobian backend. Pair with `integrator`
+  only when `integrator` is a constructor.
+- `jacobian=nothing`: Jacobian handle. `nothing` picks
+  `Structured(strategy = DirectSolve())`, or
+  `Structured(strategy = ApproxSolve())` under ALE with
+  `handle_depletion = true`. A bare backend such as
+  `Structured(strategy = ApproxSolve())` builds the spec for this solve's own
+  mesh mode and options; a prebuilt `JacobianSpec` is used as given and must
+  have been built for the same mode (`solve` rejects a spec whose state
+  length differs from the problem's, naming `use_ale`).
 - `verify_jacobian=nothing`: NamedTuple `(rtol=, atol=, sample_times=)`
   installs a `DiscreteCallback` that compares the active backend against
   a `DenseAD_ForwardDiff` reference at the listed sample times. Reports
@@ -485,11 +498,14 @@ Solve a pyrolysis problem using DifferentialEquations.jl.
 - `progress=true`: Show progress bar during solve
 - `validate=true`: Validate problem before solving
 - `use_ale=false`: Enable ALE mesh motion for shrinking/swelling materials
-- `min_thickness=1e-6`: Minimum thickness before termination (ALE only) [m]
-- `handle_depletion=false`: Enable surface cell depletion handling (ALE only)
-- `depletion_threshold=0.05`: Thickness fraction threshold for cell merging
-  (0.05 = 5% of the cell's own initial thickness)
-- `min_cells=2`: Minimum number of cells before terminating instead of merging
+- `min_thickness=1e-6`: Minimum live thickness before termination (ALE only) [m]
+- `handle_depletion=false`: Park depleted cells (see "Cell depletion" below)
+- `depletion_threshold=0.05`: Depletion trigger. ALE: a cell is parked when
+  its thickness falls below this fraction of its own initial thickness.
+  Fixed mesh: the top live cell is parked when its condensed concentration
+  falls below this fraction of its initial value.
+- `min_cells=2`: Minimum number of live cells; the solve terminates instead
+  of parking below it
 - `use_transpiration_bc=false`: Opt-in surface gas sensible-enthalpy transpiration. **Off by
   default** — the volumetric advection source S_conv already carries the gas enthalpy
   (ThermaKin Eq.17 convention); enabling this alongside S_conv double-counts and is rejected
@@ -509,9 +525,10 @@ Solve a pyrolysis problem using DifferentialEquations.jl.
 
 # Jacobian backend
 
-Pass `jacobian = JacobianSpec(backend, problem)` to override the
-auto-default. The production backend is `Structured`; behavior is
-selected by its strategy:
+Pass `jacobian = backend` (the spec is built for this solve's mode) or
+`jacobian = JacobianSpec(backend, problem; use_ale = …, radiation_model = …)`
+to override the auto-default. The production backend is `Structured`;
+behavior is selected by its strategy:
 
 | Spec                                                   | When to use                              |
 |--------------------------------------------------------|------------------------------------------|
@@ -536,18 +553,31 @@ thickness history is extracted from the state vector and stored in
 `solution.extras.thickness_history`.
 
 # Cell Depletion Handling
-When `handle_depletion=true` (requires `use_ale=true`), the solver monitors
-every cell's thickness. When a cell shrinks below `depletion_threshold`
-fraction of its **own** initial thickness (a per-cell reference, so stretched
-meshes are judged cell-by-cell), it is merged with a neighbor. This prevents
-the ρcₚ→0 singularity that causes temperature blow-up in materials that fully
-decompose. The mesh is dynamically resized during integration.
+When `handle_depletion=true`, in either mesh mode, the solver monitors
+every live cell. Under ALE a cell that has shrunk below `depletion_threshold`
+of its **own** initial thickness (a per-cell reference, so stretched meshes are
+judged cell-by-cell) is parked; on a fixed mesh the top live cell is parked
+once its condensed concentration has fallen below the same fraction of its
+initial value. A fixed-mesh solve stops with a warning (retcode `:Terminated`)
+when a cell below the top live cell becomes a void: the material has gasified
+from within, the model carries no heat across the void, and a regressing
+material belongs on the ALE mesh. A park merges the cell's mass and condensed enthalpy into its
+neighbour and moves the freed state slot above the live surface as an inert
+ghost: the state vector, mesh arrays and Jacobian keep their size, every
+kernel runs over the live range `1:mesh.n_active_cells`, and the boundary
+conditions act at the live surface. Vanishing cells therefore never enter the
+nonlinear system (their `1/Δz²` conditioning is what stalls an implicit
+solve), and the structured Jacobian stays valid through burnout. Under ALE
+`handle_depletion = true` selects `Structured(strategy = ApproxSolve())` as
+the default Jacobian. Ghost slots read as `NaN` in `solution.T`, `solution.ξ`
+and `solution.z`; `solution.extras.live_cells` and
+`solution.extras.park_times` record the events. Parameter sensitivities are
+valid only on horizons without park events.
 
 # Recommended Solvers
-The default is `KenCarp4(autodiff = AutoFiniteDiff(),
-linsolve = SparspakFactorization())` with
-`Structured(strategy = DirectSolve())`. This is the production baseline for
-stiff pyrolysis runs.
+The default is `KenCarp4(autodiff = AutoFiniteDiff())` with the default
+Jacobian (see "Default Jacobian") and the default linear solver (see "Linear
+Solver"). This is the production baseline for stiff pyrolysis runs.
 
 Other stiff ODE algorithms such as `KenCarp3`, `TRBDF2`, `Rodas5P`, and
 `QNDF` can be passed through `integrator`. Rosenbrock and BDF methods may
@@ -563,7 +593,9 @@ solves can increase Newton rejections on strongly Arrhenius transients.
 
 # Default Jacobian
 With `jacobian = nothing` (the default), every mode uses
-`Structured(strategy = DirectSolve())`. The `Structured` backend
+`Structured(strategy = DirectSolve())` except ALE with
+`handle_depletion = true`, which uses `Structured(strategy = ApproxSolve())`
+(see "Cell Depletion Handling"). The `Structured` backend
 assembles per-operator contributions into a `StructuredJacobian` and
 densifies any structured couplings (ALE prefix-sum, χ rank-1, Beer-
 Lambert suffix-sum) at solve time so the linear-solve sees a true
@@ -573,9 +605,16 @@ via `Structured(strategy = ApproxSolve())` — this drops the structured
 couplings, at the cost of an approximate Newton search direction.
 
 # Linear Solver
-Sparspak is the default sparse direct factorization for pyrolysis problems.
-Pass `linear_solver = KLUFactorization()`, another LinearSolve backend, or a
-fully constructed `integrator` when you need to compare factorization choices.
+With `linear_solver = nothing` the sparse factorization follows the Jacobian
+pattern. `Structured(strategy = DirectSolve())` under ALE materializes the
+geometry block, in which every cell couples to every node below it; that
+pattern uses `UMFPACKFactorization()`, whose supernodal factorization handles
+the dense block. Every other sparse Jacobian — every `ApproxSolve` Jacobian,
+and `DirectSolve` on an Eulerian mesh, Beer–Lambert suffix included — uses
+`KLUFactorization()`, which refactors the fixed pattern in place without
+allocating. Pass `linear_solver = SparspakFactorization()`, another
+LinearSolve backend, or a fully constructed `integrator` to choose the
+factorization.
 
 # Example
 ```julia
@@ -589,15 +628,13 @@ solution = solve(problem, progress=false)  # Disable progress bar
 solution = solve(problem, use_ale=true, min_thickness=0.1e-3)
 thickness_history = solution.extras.thickness_history
 
-# With ALE — auto-default Jacobian is Structured(strategy=DirectSolve()):
-solution = solve(problem, use_ale=true,
-    integrator=KenCarp4(linsolve=SparspakFactorization()))
+# Choose the factorization instead of the pattern-based default:
+solution = solve(problem, use_ale=true, linear_solver=SparspakFactorization())
 
-# Opt into the ALE Schur-style approximation:
-solution = solve(problem, use_ale=true,
-    jacobian=JacobianSpec(Structured(strategy=ApproxSolve()), problem))
+# Opt into the ALE Schur-style approximation (spec built for the ALE layout):
+solution = solve(problem, use_ale=true, jacobian=Structured(strategy=ApproxSolve()))
 
-# With surface cell depletion handling (prevents blow-up):
+# With depletion handling (cells park at 1% of their initial thickness):
 solution = solve(problem, use_ale=true, handle_depletion=true, depletion_threshold=0.01)
 
 # Differential-correctness verification at sample times:
@@ -611,9 +648,10 @@ function solve(
     integrator = nothing,
 
     # Pluggable Jacobian + verification:
-    # `jacobian` is the single Jacobian handle. `nothing` →
-    # `Structured(strategy = DirectSolve())`.
-    jacobian::Union{JacobianSpec,Nothing} = nothing,
+    # `jacobian` is the single Jacobian handle: `nothing` →
+    # `Structured(strategy = DirectSolve())`; a bare backend is built for
+    # this solve's (def, ws); a prebuilt spec is size-checked against u0.
+    jacobian::Union{JacobianSpec,JacobianBackend,Nothing} = nothing,
     # `verify_jacobian` installs a `DiscreteCallback` comparing the active
     # backend against a `DenseAD_ForwardDiff` reference at the listed
     # sample times. NamedTuple `(rtol=, atol=, sample_times=)` or `nothing`.
@@ -784,111 +822,91 @@ function solve(
             end
         end
 
-    # Build the ODE problem from the Jacobian spec. The user either supplies
-    # a `JacobianSpec` via the `jacobian` kwarg, or accepts the auto-default
-    # (`Structured(strategy = DirectSolve())`).
-    local ode_problem
-    local jac_spec::Union{Nothing,JacobianSpec} =
-        jacobian === nothing ? _default_jacobian_spec(def, ws, use_ale, handle_depletion) :
-        jacobian
-
-    # The Jacobian path fixes the linear-solver family: a sparse prototype
-    # wants a sparse factorization, while the no-spec colored-FD path and the
-    # dense backends need a dense one. Resolve the integrator only now so the
-    # default linsolve matches the path, and an incompatible explicit choice
-    # is rebuilt inside the *user's* algorithm (with a warning) instead of
-    # being silently replaced by a hard-coded KenCarp4.
-    needs_dense_linsolve = jac_spec === nothing || jac_spec.sparsity_phys === nothing
-    solver_alg = _resolve_integrator(; integrator, linear_solver, needs_dense_linsolve)
-
-    if jac_spec === nothing
-        # No Jacobian: fall back to the integrator's own colored FD. Used
-        # under depletion or by users opting out explicitly via
-        # `jacobian = nothing`.
-        ode_problem = ODEProblem(rhs!, u0, tspan)
+    # Build the ODE problem from the Jacobian spec: the auto-default, a spec
+    # built here from a bare backend, or the user's prebuilt spec.
+    local jac_spec::JacobianSpec = if jacobian === nothing
+        _default_jacobian_spec(def, ws, use_ale, handle_depletion)
+    elseif jacobian isa JacobianBackend
+        JacobianSpec(jacobian, def, ws)
     else
-        # Build the ODEFunction from the active spec. Backends with
-        # sparsity provide a `jac_prototype` for sparse LU factorization;
-        # the verifier-only `DenseAD_ForwardDiff` does not.
-        jac_fn! = let s = jac_spec, def = def, ws = ws
-            (J, u, p, t) -> compute_jacobian!(J, s, u, def, t, ws)
-        end
-
-        jac_prototype = if jac_spec.sparsity_phys !== nothing
-            # Build the union of physics + geometry sparsity as the
-            # allocation template. Both are `SparseMatrixCSC{Bool,Int}`;
-            # the Float64 working matrix is materialized by OrdinaryDiffEq.
-            S_geom = jac_spec.sparsity_geom
-            S_union =
-                S_geom === nothing ? jac_spec.sparsity_phys :
-                (jac_spec.sparsity_phys .| S_geom)
-            # Convert Bool sparsity to Float64 prototype.
-            Float64.(S_union)
-        else
-            nothing
-        end
-
-        ode_fn_with_jac = if jac_prototype !== nothing
-            OrdinaryDiffEq.ODEFunction(rhs!; jac = jac_fn!, jac_prototype = jac_prototype)
-        else
-            OrdinaryDiffEq.ODEFunction(rhs!; jac = jac_fn!)
-        end
-        ode_problem = ODEProblem(ode_fn_with_jac, u0, tspan)
-
-        # Log + warn about linsolve choice. Sparse Jacobians want a
-        # sparse linsolve (Sparspak is 28% faster than KLU for the
-        # block-tridiagonal pattern); dense Jacobians require a dense one.
-        if jac_prototype !== nothing
-            @info "Using `$(typeof(jac_spec.backend))` Jacobian " *
-                  "with sparse storage ($(nnz(jac_prototype)) non-zeros)"
-            if hasproperty(solver_alg, :linsolve) &&
-               solver_alg.linsolve isa ILUGMRESFactorization
-                @warn "Using ILU-GMRES iterative solver (τ=$(solver_alg.linsolve.τ)). " *
-                      "Note: Sparspak is 1.7-3.3× faster for production pyrolysis " *
-                      "simulations due to Newton step rejection from inexact GMRES solves. " *
-                      "Consider KenCarp4(linsolve=SparspakFactorization()) instead." maxlog =
-                    1
-            elseif hasproperty(solver_alg, :linsolve) &&
-                   !(solver_alg.linsolve isa SparspakFactorization) &&
-                   !(solver_alg.linsolve isa KLUFactorization)
-                @warn "Sparse Jacobian — Sparspak is 5× faster than the default " *
-                      "dense solver. Pass linear_solver=SparspakFactorization() " *
-                      "for best performance."
-            end
-        end
-        # Dense backends (no jac_prototype) already received a dense linsolve
-        # in _resolve_integrator above.
+        jacobian
+    end
+    if state_length(jac_spec) != length(u0)
+        error(
+            "solve(): the `jacobian` spec was built for a state vector of length " *
+            "$(state_length(jac_spec)) but this solve integrates $(length(u0)) " *
+            "unknowns (use_ale = $(use_ale), radiation_model = $(radiation_model)). " *
+            "`JacobianSpec(backend, problem)` defaults to the Eulerian layout; pass " *
+            "the same `use_ale`/`radiation_model` keywords it was solved with, or " *
+            "pass the bare backend `jacobian = $(typeof(jac_spec.backend))(…)` and " *
+            "let `solve` build the spec.",
+        )
     end
 
-    # ============================================================================
-    # MKL LU Factorization Workaround for Depletion Handling
-    # ============================================================================
-    # When using handle_depletion=true, the state vector is dynamically resized
-    # during integration via resize!(integrator, new_length). For large problems
-    # (state vector length > ~500), LinearSolve.jl's DefaultLinearSolver switches
-    # to MKLLUFactorization which has a bug where the pivot array (ipiv) is not
-    # properly resized, causing "DimensionMismatch: ipiv has length X, but needs
-    # to be Y" errors.
-    #
-    # Workaround: When depletion handling is enabled and the state vector is large,
-    # we switch to Julia's native LUFactorization which handles resize! correctly.
-    # KLU also handles resize! correctly, so this only applies when using the
-    # default linear solver (no explicit linsolve set).
-    #
-    # Reference: https://github.com/SciML/LinearSolve.jl (potential upstream bug)
-    # ============================================================================
-    # ============================================================================
-    # MKL LU Factorization Workaround for Depletion Handling
-    # ============================================================================
-    # When using handle_depletion=true with resize!, MKL's pivot array may not
-    # resize correctly. KLU and LUFactorization handle resize! properly.
-    # Since we now default to KLU, this only warns if using the default linsolve.
-    MKL_RESIZE_THRESHOLD = 500
-    if use_ale && handle_depletion && length(u0) > MKL_RESIZE_THRESHOLD
-        if hasproperty(solver_alg, :linsolve) && solver_alg.linsolve === nothing
-            @warn "Large state vector ($(length(u0)) elements) with depletion handling. " *
-                  "The default MKL linear solver may fail on resize!. " *
-                  "Pass linear_solver=SparspakFactorization() to avoid this."
+    # Build the ODEFunction from the active spec. Backends with sparsity
+    # provide a `jac_prototype` for sparse LU factorization; the verifier-only
+    # `DenseAD_ForwardDiff` does not.
+    jac_fn! = let s = jac_spec, def = def, ws = ws
+        (J, u, p, t) -> compute_jacobian!(J, s, u, def, t, ws)
+    end
+
+    jac_prototype = if jac_spec.sparsity_phys !== nothing
+        # Build the union of physics + geometry sparsity as the allocation
+        # template. Both are `SparseMatrixCSC{Bool,Int}`; the Float64 working
+        # matrix is materialized by OrdinaryDiffEq.
+        S_geom = jac_spec.sparsity_geom
+        S_union =
+            S_geom === nothing ? jac_spec.sparsity_phys : (jac_spec.sparsity_phys .| S_geom)
+        Float64.(S_union)
+    else
+        nothing
+    end
+
+    # The Jacobian path fixes the linear-solver family: a dense backend wants
+    # a dense LU, a sparse prototype a sparse factorization suited to its
+    # pattern (UMFPACK when it holds the ALE geometry block, KLU otherwise).
+    # Resolve the integrator only now so the default linsolve matches the
+    # path, and an incompatible explicit choice is rebuilt inside the
+    # *user's* algorithm (with a warning) instead of being silently replaced
+    # by a hard-coded KenCarp4.
+    needs_dense_linsolve = jac_prototype === nothing
+    geometry_block =
+        jac_spec.backend isa Structured &&
+        materializes_geometry_block(def.mode, sparsity_profile(jac_spec.backend.strategy))
+    solver_alg = _resolve_integrator(;
+        integrator,
+        linear_solver,
+        needs_dense_linsolve,
+        geometry_block,
+    )
+
+    # `FullSpecialize`: under the default `AutoSpecialize` the integrator stores its
+    # callbacks type-erased, and inference then compiles the stepper for a second,
+    # callback-free integrator type as well, which doubles the compile time of the
+    # first solve of every problem type.
+    ode_fn_with_jac = if jac_prototype !== nothing
+        OrdinaryDiffEq.ODEFunction{true,FullSpecialize}(
+            rhs!;
+            jac = jac_fn!,
+            jac_prototype = jac_prototype,
+        )
+    else
+        OrdinaryDiffEq.ODEFunction{true,FullSpecialize}(rhs!; jac = jac_fn!)
+    end
+    ode_problem = ODEProblem(ode_fn_with_jac, u0, tspan)
+
+    if jac_prototype !== nothing
+        linsolve_note =
+            hasproperty(solver_alg, :linsolve) ?
+            " and `$(nameof(typeof(solver_alg.linsolve)))`" : ""
+        @info "Using `$(typeof(jac_spec.backend))` Jacobian " *
+              "with sparse storage ($(nnz(jac_prototype)) non-zeros)$(linsolve_note)"
+        if hasproperty(solver_alg, :linsolve) &&
+           solver_alg.linsolve isa ILUGMRESFactorization
+            @warn "Using ILU-GMRES iterative solver (τ=$(solver_alg.linsolve.τ)). " *
+                  "Its inexact linear solves can add Newton failures and rejected " *
+                  "steps on strongly Arrhenius transients; the default direct " *
+                  "factorization solves each Newton system exactly." maxlog = 1
         end
     end
 
@@ -906,18 +924,7 @@ function solve(
         solve_kwargs[:sensealg] = sensealg
     end
 
-    # When handling depletion with resize!, we cannot use saveat with interpolation
-    # because the interpolation doesn't handle state vector size changes.
-    # Instead, we save every step and filter to desired times in post-processing.
-    if use_ale && handle_depletion
-        # Save every step (dense output without interpolation)
-        solve_kwargs[:save_everystep] = true
-        # Store the desired saveat times for post-processing
-        requested_saveat = saveat
-    else
-        solve_kwargs[:saveat] = saveat
-        requested_saveat = nothing
-    end
+    solve_kwargs[:saveat] = saveat
 
     # Build callback list
     callbacks_list = []
@@ -929,23 +936,19 @@ function solve(
     # downstream callback that reads mesh.
     push!(callbacks_list, create_step_update_callback(ws, material))
 
-    # Create shared callback state if using depletion handling (so both callbacks see updates)
-    depletion_cb_state = nothing
-    if use_ale && handle_depletion
-        # Pass mesh so DepletionCallbackState can compute per-cell initial thicknesses
-        depletion_cb_state = DepletionCallbackState(ws.layout, mesh)
-    end
+    # Depletion bookkeeping shared by the depletion callback, the thickness
+    # termination callback and solution extraction.
+    depletion_cb_state =
+        handle_depletion ? DepletionCallbackState(ws.layout, mesh, material, u0) : nothing
 
-    # Add thickness termination callback for ALE mode
-    # Use shared state if available so it sees updated sv after cell merges
+    # Thickness termination (ALE): the live thickness z[n_live+1] − z[1].
     if use_ale
         sv_ref = depletion_cb_state !== nothing ? depletion_cb_state : ws.layout
         thickness_cb = create_thickness_termination_callback(sv_ref, Float64(min_thickness))
         push!(callbacks_list, thickness_cb)
     end
 
-    # Add surface cell depletion callback for ALE mode
-    if use_ale && handle_depletion
+    if depletion_cb_state !== nothing
         depletion_cb = create_depletion_callback(
             ws,
             mesh,
@@ -955,6 +958,11 @@ function solve(
             min_cells = min_cells,
         )
         push!(callbacks_list, depletion_cb)
+    end
+
+    # Newton-failure step cap for integrators that solve their stages by Newton.
+    if hasproperty(solver_alg, :nlsolve)
+        push!(callbacks_list, create_newton_failure_cap_callback())
     end
 
     # Add progress callback if requested
@@ -978,6 +986,7 @@ function solve(
                     update!(prog, current_progress)
                     last_progress[] = current_progress
                 end
+                derivative_discontinuity!(integrator, false)
             end,
             check_interval;
             initial_affect = false,
@@ -1025,12 +1034,8 @@ function solve(
     # verify_jacobian DiscreteCallback: fires at the requested sample times
     # and warns (does not throw) if the active backend deviates from the
     # DenseAD reference beyond tolerance.
-    if verify_jacobian !== nothing && jac_spec !== nothing
+    if verify_jacobian !== nothing
         push!(callbacks_list, _build_verify_callback(jac_spec, def, ws, verify_jacobian))
-    elseif verify_jacobian !== nothing
-        @warn "verify_jacobian was requested but no Jacobian spec is " *
-              "active (handle_depletion=true falls back to integrator FD); " *
-              "verification skipped."
     end
 
     # Add user callback if provided
@@ -1072,7 +1077,7 @@ function solve(
             raw_solution,
             problem,
             ws.layout;
-            requested_times = requested_saveat,
+            depletion = depletion_cb_state,
             radiation_model = radiation_model,
             use_transpiration_bc = use_transpiration_bc,
             use_blowing_correction = use_blowing_correction,
@@ -1082,6 +1087,7 @@ function solve(
             solution,
             raw_solution,
             problem;
+            depletion = depletion_cb_state,
             radiation_model = radiation_model,
             use_transpiration_bc = use_transpiration_bc,
             use_blowing_correction = use_blowing_correction,
@@ -1211,6 +1217,7 @@ function extract_solution!(
     solution::PyrolysisSolution,
     raw_solution,
     problem;
+    depletion::Union{Nothing,DepletionCallbackState} = nothing,
     radiation_model::RadiationModel = SURFACE_ABSORPTION,
     use_transpiration_bc::Bool = false,
     use_blowing_correction::Bool = false,
@@ -1231,15 +1238,16 @@ function extract_solution!(
     times = raw_solution.t
     solution.t = copy(times)
 
-    # Pre-allocate output arrays
+    # Pre-allocate output arrays. Parked ghost slots read as NaN.
     n_times = length(times)
-    solution.T = Matrix{Float64}(undef, n_cells_val, n_times)
-    solution.ξ = Array{Float64,3}(undef, NC, n_cells_val, n_times)
+    solution.T = fill(NaN, n_cells_val, n_times)
+    solution.ξ = fill(NaN, NC, n_cells_val, n_times)
     solution.z = Matrix{Float64}(undef, 0, 0)             # Eulerian: no node positions
     solution.surface_T = zeros(n_times)
     solution.mass_loss_rate = zeros(n_times)
     solution.energy_residual = zeros(n_times)
     _allocate_extras!(solution, n_times)
+    depletion === nothing || append!(solution.extras.park_times, depletion.park_times)
 
     # Variable cross-section diagnostics — non-ALE has no χ evolution, so
     # A(t) ≡ cross_section_area_initial and MLR_gauge ≡ MLR_local.
@@ -1260,17 +1268,22 @@ function extract_solution!(
     # Extract data at each saved time
     for (i, t) in enumerate(times)
         u = raw_solution.u[i]
+        n_live = depletion === nothing ? n_cells_val : n_live_cells(depletion, t)
+        solution.extras.live_cells[i] = n_live
+        solution.extras.thickness_history[i] =
+            mesh.face_positions[mesh.cells[n_live].face_ids[2]] -
+            mesh.face_positions[mesh.cells[1].face_ids[1]]
 
-        # Extract temperatures (write directly into T[:, i])
-        T_profile = zeros(n_cells_val)
-        @inbounds for j = 1:n_cells_val
+        # Extract temperatures of the live cells (ghost slots stay NaN)
+        T_profile = zeros(n_live)
+        @inbounds for j = 1:n_live
             T_profile[j] = u[j]
             solution.T[j, i] = T_profile[j]
         end
 
-        # Extract concentrations (write directly into ξ[:, :, i])
-        ξ_profile = zeros(NC, n_cells_val)
-        @inbounds for j = 1:n_cells_val
+        # Extract concentrations
+        ξ_profile = zeros(NC, n_live)
+        @inbounds for j = 1:n_live
             for k = 1:NC
                 ξ_profile[k, j] = u[n_cells_val+(k-1)*n_cells_val+j]
                 solution.ξ[k, j, i] = ξ_profile[k, j]
@@ -1289,14 +1302,14 @@ function extract_solution!(
         T_ref_top = ambient_temperature(thermal_bc_top, t, Float64(T_REF))
         T_ref_bottom = ambient_temperature(thermal_bc_bottom, t, Float64(T_REF))
 
-        # Surface (top, boundary_id=1) — geometry, properties, gas flux
-        T_cell_top = T_profile[n_cells_val]
-        ξ_top = ntuple(k -> ξ_profile[k, n_cells_val], NC)
+        # Surface (top, boundary_id=1) — the live top cell
+        T_cell_top = T_profile[n_live]
+        ξ_top = ntuple(k -> ξ_profile[k, n_live], NC)
         k_top = effective_conductivity(ξ_top, T_cell_top, material)
         ε_top = effective_emissivity(ξ_top, T_cell_top, material)
+        a_top = effective_absorptivity(ξ_top, T_cell_top, material)
         Δz_half_top =
-            mesh.cell_volumes[n_cells_val] /
-            mesh.face_areas[mesh.cells[n_cells_val].face_ids[2]] / 2
+            mesh.cell_volumes[n_live] / mesh.face_areas[mesh.cells[n_live].face_ids[2]] / 2
 
         J_top = _surface_gas_flux(
             material,
@@ -1319,6 +1332,7 @@ function extract_solution!(
             T_ref_top,
             t,
             ε_top;
+            a_eff = a_top,
             radiation_model = radiation_model,
             use_blowing = use_blowing_correction,
             J_blowing = J_top,
@@ -1332,6 +1346,7 @@ function extract_solution!(
         ξ_bottom = ntuple(k -> ξ_profile[k, 1], NC)
         k_bottom = effective_conductivity(ξ_bottom, T_cell_bottom, material)
         ε_bottom = effective_emissivity(ξ_bottom, T_cell_bottom, material)
+        a_bottom = effective_absorptivity(ξ_bottom, T_cell_bottom, material)
         Δz_half_bottom =
             mesh.cell_volumes[1] / mesh.face_areas[mesh.cells[1].face_ids[1]] / 2
         J_bottom = _surface_gas_flux(
@@ -1355,15 +1370,16 @@ function extract_solution!(
             T_ref_bottom,
             t,
             ε_bottom;
+            a_eff = a_bottom,
             radiation_model = radiation_model,
             use_blowing = use_blowing_correction,
             J_blowing = J_bottom,
         )
         solution.extras.back_temperature[i] = state_bottom.T_surface
 
-        # Total mass (integrate ξ over domain)
+        # Total mass (integrate ξ over the live cells)
         total_m = 0.0
-        for j = 1:n_cells_val
+        for j = 1:n_live
             cell_vol = mesh.cell_volumes[j]
             for k = 1:NC
                 total_m += ξ_profile[k, j] * cell_vol
@@ -1394,7 +1410,8 @@ function extract_solution!(
             t,
             ε_top,
             radiation_model,
-            state_top.blowing_mcp,
+            state_top.blowing_mcp;
+            a_eff = a_top,
         )
         solution.extras.surface_heat_flux_absorbed[i] = heat_fluxes.absorbed
         solution.extras.surface_heat_flux_reradiation[i] = heat_fluxes.reradiation
@@ -1424,11 +1441,12 @@ function extract_solution!(
             I_inc, has_explicit_α = extract_radiative_flux_from_bcs(bc_set, Val(:top), t)
             I_eff = has_explicit_α ? I_inc : ε_top * I_inc
             τ_tot = 0.0
-            for j = 1:n_cells_val
+            for j = 1:n_live
                 ξ_j = ntuple(k -> ξ_profile[k, j], NC)
                 τ_tot += effective_absorption(ξ_j, material) * Geometry.cell_size(mesh, j)
             end
             solution.extras.volumetric_absorption[i] = I_eff * (1.0 - exp(-τ_tot))
+            solution.extras.radiation_transmitted[i] = I_eff * exp(-τ_tot)
         end
 
         # Surface MLR: per-species gas flux already used in the boundary
@@ -1453,7 +1471,8 @@ function extract_solution!(
             t,
             ε_bottom,
             radiation_model,
-            state_bottom.blowing_mcp,
+            state_bottom.blowing_mcp;
+            a_eff = a_bottom,
         )
         solution.extras.back_heat_flux[i] =
             thermal_bc_bottom isa DirichletThermalBC ? state_bottom.q_conducted :
@@ -1465,7 +1484,7 @@ function extract_solution!(
         # Total gas generation = Σ_cells Σ_reactions (gas_produced * r * V)
         # This is much smoother than numerical differentiation of total mass
         gen_rate = 0.0
-        for j = 1:n_cells_val
+        for j = 1:n_live
             T = T_profile[j]
             ξ = ntuple(k -> ξ_profile[k, j], NC)
             cell_vol = mesh.cell_volumes[j]
@@ -1490,11 +1509,32 @@ function extract_solution!(
         solution.extras.gas_generation_rate[i] = gen_rate / mesh.cross_section_area_initial
     end
 
-    # For non-ALE mode, thickness is constant (initial mesh thickness)
-    initial_thickness = Geometry.domain_length(mesh)
-    fill!(solution.extras.thickness_history, initial_thickness)
-
+    _warn_transmitted_radiation(solution, radiation_model)
     return solution
+end
+
+# Beer–Lambert radiation that reaches the back face leaves the domain: the
+# sweep deposits nothing there and the back-face boundary condition sees only
+# the surface it describes. That is the right answer for a slab whose back
+# face really is open, and a modelling error for one that sits on an opaque
+# holder with a transparent absorption coefficient, so the extracted
+# `radiation_transmitted` is reported and a run that loses more than 1 % of
+# the entering flux at any saved time says so once.
+function _warn_transmitted_radiation(solution::PyrolysisSolution, radiation_model)
+    radiation_model == BEER_LAMBERT || return nothing
+    tr = solution.extras.radiation_transmitted
+    absorbed = solution.extras.volumetric_absorption
+    isempty(tr) && return nothing
+    I_max = maximum(tr .+ absorbed)
+    I_max > 0 || return nothing
+    frac = maximum(tr) / I_max
+    if frac > 0.01
+        @warn "Beer–Lambert radiation transmitted through the back face: up to " *
+              "$(round(100 * frac, digits = 1)) % of the entering flux leaves the " *
+              "domain (`solution.extras.radiation_transmitted`). If the back face " *
+              "rests on an opaque holder, give the substrate an absorption coefficient."
+    end
+    return nothing
 end
 
 """
@@ -1506,14 +1546,14 @@ For ALE solutions, node positions are part of the state vector, so we can
 reconstruct the geometry at each saved time and compute volumes accordingly.
 This ensures proper mass accounting with the evolving mesh.
 
-Note: When surface cell depletion handling is enabled, the state vector length
-may vary between saved times. This function detects the current number of cells
-from the state vector length and adjusts accordingly.
+With depletion handling the number of live cells at a saved time comes from
+the recorded park events (`n_live_cells`); parked ghost slots of `T`, `ξ`
+and `z` read as `NaN`, the thickness is the live thickness
+`z[n_live+1] − z[1]`, and every sum runs over the live cells.
 
 # Keyword Arguments
-- `requested_times::Union{Nothing,Vector{Float64}}`: If provided, filter the raw solution
-  to only include times closest to these requested times. This is used when
-  depletion handling saves every step and we want specific output times.
+- `depletion::Union{Nothing,DepletionCallbackState}`: park-event record of
+  the solve (`nothing` when depletion handling was off).
 	- `radiation_model::RadiationModel`: Radiation model for boundary flux diagnostics.
 	- `use_transpiration_bc::Bool`: If false, report boundary temperatures/heat fluxes
 	  using the same no-transpiration surface energy balance as the live solve.
@@ -1524,8 +1564,8 @@ function extract_solution_ale!(
     solution::PyrolysisSolution,
     raw_solution,
     problem,
-    layout_initial::StateLayout{NC};
-    requested_times::Union{Nothing,AbstractVector{<:Real}} = nothing,
+    layout::StateLayout{NC};
+    depletion::Union{Nothing,DepletionCallbackState} = nothing,
     radiation_model::RadiationModel = SURFACE_ABSORPTION,
     use_transpiration_bc::Bool = false,
     use_blowing_correction::Bool = false,
@@ -1540,51 +1580,16 @@ function extract_solution_ale!(
     # Get return code
     solution.retcode = Symbol(raw_solution.retcode)
 
-    # Determine which time indices to extract
-    all_times = raw_solution.t
-    if requested_times !== nothing && !isempty(requested_times)
-        # Find closest actual time for each requested time
-        indices_to_extract = Int[]
-        for t_req in requested_times
-            if t_req > all_times[end]
-                break  # Skip requested times beyond simulation end
-            end
-            idx = argmin(abs.(all_times .- t_req))
-            if isempty(indices_to_extract) || idx != indices_to_extract[end]
-                push!(indices_to_extract, idx)
-            end
-        end
-        # Always include the final time
-        if isempty(indices_to_extract) || indices_to_extract[end] != length(all_times)
-            push!(indices_to_extract, length(all_times))
-        end
-    else
-        indices_to_extract = collect(1:length(all_times))
-    end
-
-    # Extract times at selected indices
-    times = all_times[indices_to_extract]
+    times = raw_solution.t
     solution.t = copy(times)
     n_times = length(times)
+    n_cells = layout.n_cells
+    n_nodes = layout.n_nodes
 
-    # Pre-allocate output arrays. Under depletion the per-step n_cells/n_nodes
-    # shrink along the trajectory; allocate at the MAXIMUM cell count across the
-    # extracted snapshots and pad shrunken steps with NaN in T/ξ/z below. Note we
-    # cannot rely on `layout_initial.n_cells` here: cell-merge callbacks mutate the
-    # workspace layout in place, so by the time extraction runs it may already
-    # report the final (merged-down) size. Infer the true maximum from the raw
-    # state-vector lengths instead (state layout: [T, ξ, z] plus optional χ).
-    has_chi_alloc = !isempty(chi_range(layout_initial))
-    per_cell_alloc = NC + 2 + (has_chi_alloc ? 1 : 0)
-    n_cells_max = layout_initial.n_cells
-    for raw_idx in indices_to_extract
-        nc = (length(raw_solution.u[raw_idx]) - 1) ÷ per_cell_alloc
-        n_cells_max = max(n_cells_max, nc)
-    end
-    n_nodes_max = n_cells_max + 1
-    solution.T = fill(NaN, n_cells_max, n_times)
-    solution.ξ = fill(NaN, NC, n_cells_max, n_times)
-    solution.z = fill(NaN, n_nodes_max, n_times)
+    # Pre-allocate output arrays. Parked ghost slots read as NaN.
+    solution.T = fill(NaN, n_cells, n_times)
+    solution.ξ = fill(NaN, NC, n_cells, n_times)
+    solution.z = fill(NaN, n_nodes, n_times)
     solution.surface_T = zeros(n_times)
     solution.mass_loss_rate = zeros(n_times)
     solution.energy_residual = zeros(n_times)
@@ -1601,43 +1606,35 @@ function extract_solution_ale!(
     mass_bc_top = get_mass_bc(bc_set, Val(:top))
     mass_bc_bottom = get_mass_bc(bc_set, Val(:bottom))
 
+    depletion === nothing || append!(solution.extras.park_times, depletion.park_times)
+
     # Extract data at each saved time
-    for (out_idx, raw_idx) in enumerate(indices_to_extract)
-        t = all_times[raw_idx]
-        u = raw_solution.u[raw_idx]
+    for (out_idx, t) in enumerate(times)
+        u = raw_solution.u[out_idx]
+        n_live = depletion === nothing ? n_cells : n_live_cells(depletion, t)
+        solution.extras.live_cells[out_idx] = n_live
 
-        # Determine current number of cells from state vector length.
-        # Layout: [T, ξ, z] plus optional χ.
-        state_len = length(u)
-        has_chi = !isempty(chi_range(layout_initial))
-        n_cells = (state_len - 1) ÷ (NC + 2 + (has_chi ? 1 : 0))
-        n_nodes = n_cells + 1
-
-        # Create layout for current size
-        layout = StateLayout(NC, n_cells, n_nodes, layout_initial.mode)
-
-        # Extract temperatures (write into T[1:n_cells, out_idx]; remaining
-        # rows already NaN from pre-allocation when depletion has shrunk the mesh).
-        T_profile = [get_temperature(u, layout, j) for j = 1:n_cells]
-        @inbounds for j = 1:n_cells
+        # Live temperatures (ghost slots stay NaN)
+        T_profile = [get_temperature(u, layout, j) for j = 1:n_live]
+        @inbounds for j = 1:n_live
             solution.T[j, out_idx] = T_profile[j]
         end
 
-        # Extract concentrations
-        ξ_profile = zeros(NC, n_cells)
-        @inbounds for j = 1:n_cells
+        # Live concentrations
+        ξ_profile = zeros(NC, n_live)
+        @inbounds for j = 1:n_live
             for k = 1:NC
                 ξ_profile[k, j] = get_concentration(u, layout, j, k)
                 solution.ξ[k, j, out_idx] = ξ_profile[k, j]
             end
         end
 
-        # Extract node positions and compute geometry
+        # Live node positions and thickness
         z = get_node_positions(u, layout)
-        @inbounds for j = 1:length(z)
+        @inbounds for j = 1:(n_live+1)
             solution.z[j, out_idx] = z[j]
         end
-        thickness = z[end] - z[1]
+        thickness = z[n_live+1] - z[1]
         solution.extras.thickness_history[out_idx] = thickness
 
         # Compute cell volumes from current node positions and the state-derived A(t).
@@ -1654,12 +1651,13 @@ function extract_solution_ale!(
         T_ref_top = ambient_temperature(thermal_bc_top, t, Float64(T_REF))
         T_ref_bottom = ambient_temperature(thermal_bc_bottom, t, Float64(T_REF))
 
-        # Surface (top, boundary_id=1) — geometry, properties, gas flux
-        T_cell_top = T_profile[n_cells]
-        ξ_top = ntuple(k -> ξ_profile[k, n_cells], NC)
+        # Surface (top, boundary_id=1) — the live top cell
+        T_cell_top = T_profile[n_live]
+        ξ_top = ntuple(k -> ξ_profile[k, n_live], NC)
         k_top = effective_conductivity(ξ_top, T_cell_top, material)
         ε_top = effective_emissivity(ξ_top, T_cell_top, material)
-        Δz_half_top = (z[n_cells+1] - z[n_cells]) / 2
+        a_top = effective_absorptivity(ξ_top, T_cell_top, material)
+        Δz_half_top = (z[n_live+1] - z[n_live]) / 2
 
         J_top = _surface_gas_flux(
             material,
@@ -1682,6 +1680,7 @@ function extract_solution_ale!(
             T_ref_top,
             t,
             ε_top;
+            a_eff = a_top,
             radiation_model = radiation_model,
             use_blowing = use_blowing_correction,
             J_blowing = J_top,
@@ -1695,6 +1694,7 @@ function extract_solution_ale!(
         ξ_bottom = ntuple(k -> ξ_profile[k, 1], NC)
         k_bottom = effective_conductivity(ξ_bottom, T_cell_bottom, material)
         ε_bottom = effective_emissivity(ξ_bottom, T_cell_bottom, material)
+        a_bottom = effective_absorptivity(ξ_bottom, T_cell_bottom, material)
         Δz_half_bottom = (z[2] - z[1]) / 2
         J_bottom = _surface_gas_flux(
             material,
@@ -1717,15 +1717,16 @@ function extract_solution_ale!(
             T_ref_bottom,
             t,
             ε_bottom;
+            a_eff = a_bottom,
             radiation_model = radiation_model,
             use_blowing = use_blowing_correction,
             J_blowing = J_bottom,
         )
         solution.extras.back_temperature[out_idx] = state_bottom.T_surface
 
-        # Total mass (integrate ξ × V using current geometry)
+        # Total mass (integrate ξ × V over the live cells)
         total_m = 0.0
-        for j = 1:n_cells
+        for j = 1:n_live
             for k = 1:NC
                 total_m += ξ_profile[k, j] * volumes[j]
             end
@@ -1754,7 +1755,8 @@ function extract_solution_ale!(
             t,
             ε_top,
             radiation_model,
-            state_top.blowing_mcp,
+            state_top.blowing_mcp;
+            a_eff = a_top,
         )
         solution.extras.surface_heat_flux_absorbed[out_idx] = heat_fluxes.absorbed
         solution.extras.surface_heat_flux_reradiation[out_idx] = heat_fluxes.reradiation
@@ -1780,11 +1782,12 @@ function extract_solution_ale!(
             I_inc, has_explicit_α = extract_radiative_flux_from_bcs(bc_set, Val(:top), t)
             I_eff = has_explicit_α ? I_inc : ε_top * I_inc
             τ_tot = 0.0
-            for j = 1:n_cells
+            for j = 1:n_live
                 ξ_j = ntuple(k -> ξ_profile[k, j], NC)
                 τ_tot += effective_absorption(ξ_j, material) * (z[j+1] - z[j])
             end
             solution.extras.volumetric_absorption[out_idx] = I_eff * (1.0 - exp(-τ_tot))
+            solution.extras.radiation_transmitted[out_idx] = I_eff * exp(-τ_tot)
         end
 
         # Surface MLR: per-species gas flux already used in the boundary
@@ -1812,7 +1815,8 @@ function extract_solution_ale!(
             t,
             ε_bottom,
             radiation_model,
-            state_bottom.blowing_mcp,
+            state_bottom.blowing_mcp;
+            a_eff = a_bottom,
         )
         solution.extras.back_heat_flux[out_idx] =
             thermal_bc_bottom isa DirichletThermalBC ? state_bottom.q_conducted :
@@ -1822,7 +1826,7 @@ function extract_solution_ale!(
         # This is NOT the actual mass loss rate (surface flux), but rather the
         # volumetric production of gases throughout the sample.
         gen_rate = 0.0
-        for j = 1:n_cells
+        for j = 1:n_live
             T = T_profile[j]
             ξ = ntuple(k -> ξ_profile[k, j], NC)
             cell_vol = volumes[j]
@@ -1848,6 +1852,7 @@ function extract_solution_ale!(
             gen_rate / mesh.cross_section_area_initial
     end
 
+    _warn_transmitted_radiation(solution, radiation_model)
     return solution
 end
 

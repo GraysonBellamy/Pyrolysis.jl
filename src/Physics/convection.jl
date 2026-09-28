@@ -91,7 +91,7 @@ function compute_gas_convective_source!(
     material::Material{NC},
 ) where {NC}
 
-    n_cells_val = length(state.T)
+    n_cells_val = mesh.n_active_cells
 
     @inbounds for i = 1:n_cells_val
         T_i = state.T[i]
@@ -218,11 +218,12 @@ function compute_gas_generation_sink!(
     S_gen::AbstractVector,
     div_J::AbstractMatrix,
     state,
+    mesh,
     material::Material{NC},
     T_ref::Real,
 ) where {NC}
 
-    n_cells_val = length(state.T)
+    n_cells_val = mesh.n_active_cells
 
     @inbounds for i = 1:n_cells_val
         T_i = state.T[i]

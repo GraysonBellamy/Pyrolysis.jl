@@ -55,7 +55,7 @@ inside the physics tridiagonal. A single-cell mesh contributes nothing
 This file relies on sibling-operator imports (all operator files share
 the `Pyrolysis.Jacobian` module): `gas_flux`/`harmonic_mean_weighted`
 (gas_transport.jl), `gas_flux_darcy_fick`/`porosity`/`ideal_gas_pressure`/
-`effective_permeability`/`effective_gas_viscosity`/`_dt_mobility_face`
+`effective_permeability`/`mixture_gas_viscosity`/`_dt_mobility_face`
 (darcy_transport.jl), `_bc_boundary_face_fluxes`/`get_mass_bc`
 (bc_mass.jl), and the thermal-BC Newton plumbing (bc_thermal.jl).
 """
@@ -166,8 +166,8 @@ function _bcc_interior_face_fluxes(
         P_hi = ideal_gas_pressure(ξ_hi, T_hi, φ_hi, material)
         κ_lo = effective_permeability(ξ_lo, T_lo, material)
         κ_hi = effective_permeability(ξ_hi, T_hi, material)
-        μ_lo = effective_gas_viscosity(T_lo)
-        μ_hi = effective_gas_viscosity(T_hi)
+        μ_lo = mixture_gas_viscosity(ξ_lo, T_lo, material)
+        μ_hi = mixture_gas_viscosity(ξ_hi, T_hi, material)
         mob_face = _dt_mobility_face(κ_lo, κ_hi, μ_lo, μ_hi, d1, d2)
         v_g = -mob_face * (P_hi - P_lo) / d_LR
         return _dt_face_fluxes(
@@ -215,6 +215,7 @@ function _bc_convection_contribution(
     k_eff = effective_conductivity(ξ_b, T_b, material)
     ρcp = effective_heat_capacity(ξ_b, T_b, material)
     ε_eff = effective_emissivity(ξ_b, T_b, material)
+    a_eff = effective_absorptivity(ξ_b, T_b, material)
 
     # Boundary-face flux in +z orientation: F is positive into the domain,
     # so J_z = σ·F with σ = −1 at the top face, +1 at the bottom face.
@@ -264,6 +265,7 @@ function _bc_convection_contribution(
             T_ref,
             t,
             ε_eff;
+            a_eff = a_eff,
             radiation_model = radiation_model,
             use_blowing = use_blowing,
             J_blowing = J_blowing,

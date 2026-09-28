@@ -370,7 +370,7 @@ end
         material,
         0.0,
     )
-    _strain_rate_derivatives!(op_mv_ws, ws.state_cache, material)
+    _strain_rate_derivatives!(op_mv_ws, ws.state_cache, ws.mesh, material)
     ctx = build_residual_context([ALEMeshVelocityOperator(), ALEAdvectionOperator()])
 
     @testset "apply! reproduces residual gas transport; dT untouched" begin

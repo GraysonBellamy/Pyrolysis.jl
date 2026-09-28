@@ -26,7 +26,7 @@ upwinded to the donor temperature in `_transpiration_flux_and_derivative`
 (entering gas crosses the face at T_∞, contributing zero).
 """
 
-using ..Materials: STEFAN_BOLTZMANN, T_REF
+using ..Materials: STEFAN_BOLTZMANN, T_REF, T_PROPERTY_MIN, T_PROPERTY_MAX
 using ..Materials: evaluate_param, evaluate_param_T
 using ..Materials:
     RadiationModel, NO_RADIATION, SURFACE_ABSORPTION, BEER_LAMBERT, P1_QUASI_STEADY
@@ -56,7 +56,9 @@ Both sides are positive when heat flows INTO the material.
 - `ε_eff::Float64`: Effective surface emissivity from material properties
 
 # Keyword Arguments
-- `T_guess::Float64`: Initial guess (default: T_cell)
+- `a_eff::Float64`: Effective surface absorptivity for incident radiation
+  (default: `ε_eff`, Kirchhoff). Used by a `RadiativeFluxBC` without an
+  explicit `absorptivity`; emission (`RadiativeBC`) always uses `ε_eff`.
 - `tol::Float64`: Convergence tolerance (default: 1e-10)
 - `max_iter::Int`: Maximum iterations (default: 50)
 - `relaxation::Float64`: Under-relaxation factor (default: 1.0)
@@ -74,15 +76,15 @@ function solve_boundary_temperature(
     T_ref::Float64,
     t::Float64,
     ε_eff::Float64;
+    a_eff::Float64 = ε_eff,
     radiation_model::RadiationModel = SURFACE_ABSORPTION,
     use_blowing::Bool = false,
     J_blowing::NTuple{NC,Float64} = J_boundary_outward,
-    T_guess::Float64 = T_cell,
     tol::Float64 = 1e-10,
     max_iter::Int = 50,
     relaxation::Float64 = 1.0,
 ) where {NC}
-    state = BoundaryState(T_guess, 0.0, 0.0, 0.0, T_cell, k_eff, Δz_half, false, 0)
+    state = BoundaryState(T_cell, 0.0, 0.0, 0.0, T_cell, k_eff, Δz_half, false, 0)
     solve_boundary_temperature!(
         state,
         T_cell,
@@ -94,6 +96,7 @@ function solve_boundary_temperature(
         T_ref,
         t,
         ε_eff;
+        a_eff = a_eff,
         radiation_model = radiation_model,
         use_blowing = use_blowing,
         J_blowing = J_blowing,
@@ -112,8 +115,13 @@ In-place Newton solve including the surface transpiration enthalpy term:
 
 	q_BC(T_s) = k_eff · (T_s − T_cell)/Δz_half + Σ_g ṁ_g · Δh_g(T_s, T_ref)
 
+The Newton starts from `T_cell` clamped to the property bracket, so the result
+is a pure function of the arguments. `state` is output only: it receives the
+converged surface temperature and fluxes for diagnostics, and is left untouched
+when the final iterate is not finite.
+
 # Arguments
-- `state::BoundaryState`: Boundary state, updated in place.
+- `state::BoundaryState`: Diagnostic boundary state, written in place.
 - `T_cell::Float64`: Adjacent cell-center temperature [K].
 - `k_eff::Float64`: Effective conductivity at the boundary [W/(m·K)].
 - `Δz_half::Float64`: Distance from boundary face to cell center [m].
@@ -124,7 +132,10 @@ In-place Newton solve including the surface transpiration enthalpy term:
 - `T_ref::Float64`: Reference temperature for enthalpy datum [K]. Resolved
   by the caller from the BC's `ambient_temperature` (T_∞).
 - `t::Float64`: Current time [s].
-- `ε_eff::Float64`: Effective surface emissivity.
+- `ε_eff::Float64`: Effective surface emissivity (surface emission).
+- `a_eff::Float64 = ε_eff` (keyword): Effective surface absorptivity for
+  incident radiation, consumed by a `RadiativeFluxBC` with
+  `absorptivity = nothing`. The default reproduces Kirchhoff's law.
 
 The Newton derivative w.r.t. `T_s` of the transpiration term is
 `Σ_{g: is_gas} ṁ_g · cp_g(T_s)` for outflow (and `0` for inflow, where the
@@ -170,6 +181,7 @@ the outcome either way.
     T_ref::Real,
     t::Real,
     ε_eff::Real;
+    a_eff::Real = ε_eff,
     radiation_model::RadiationModel = SURFACE_ABSORPTION,
     use_blowing::Bool = false,
     J_blowing::NTuple{NC,<:Real} = J_boundary_outward,
@@ -188,13 +200,20 @@ the outcome either way.
         typeof(T_ref),
         typeof(t),
         typeof(ε_eff),
+        typeof(a_eff),
         eltype(J_boundary_outward),
         eltype(J_blowing),
     )
-    T_s::Tu = Tu(state.T_surface)
+    # The Newton starts from the cell temperature clamped to the property bracket,
+    # never from `state`: the result is a pure function of the arguments, so a wild
+    # trial state of the outer Newton cannot leak into later residual evaluations.
+    T_s::Tu = Tu(clamp(ForwardDiff.value(T_cell), T_PROPERTY_MIN, T_PROPERTY_MAX))
     dual_mode = Tu <: ForwardDiff.Dual
     converged = false
     iter = 0
+    f_val = 0.0
+    f_floor = 0.0
+    scale = 1.0
 
     for i = 1:max_iter
         iter = i
@@ -203,8 +222,15 @@ the outcome either way.
         # off → ConvectiveBC applies blowing_factor(0) = 1, the exact
         # uncorrected flux).
         mcp = use_blowing ? _blowing_conductance(material, J_blowing, T_s) : zero(Tu)
-        q_bc, dq_bc_dT =
-            evaluate_bc_flux_and_derivative(bc, T_s, t, ε_eff, radiation_model, mcp)
+        q_bc, dq_bc_dT = evaluate_bc_flux_and_derivative(
+            bc,
+            T_s,
+            t,
+            ε_eff,
+            radiation_model,
+            mcp;
+            a_eff = a_eff,
+        )
 
         q_cond = k_eff * (T_s - T_cell) / Δz_half
         dq_cond_dT = k_eff / Δz_half
@@ -223,7 +249,15 @@ the outcome either way.
             abs(ForwardDiff.value(q_transpire)),
             1.0,
         )
-        if abs(f_val) < tol * scale && !(dual_mode && i == 1)
+        # Round-off floor: the flux change from a few ulps of T_s. The conduction term is a
+        # difference of two ~T numbers, so the residual cannot resolve below this; a face
+        # with near-zero net flux would otherwise stall at round-off and report failure.
+        f_floor =
+            32 *
+            eps(Float64) *
+            max(abs(ForwardDiff.value(T_s)), 1.0) *
+            (abs(ForwardDiff.value(dq_cond_dT)) + abs(ForwardDiff.value(dq_bc_dT)))
+        if abs(f_val) < max(tol * scale, f_floor) && !(dual_mode && i == 1)
             converged = true
             break
         end
@@ -235,12 +269,12 @@ the outcome either way.
         ΔT = -f / df
         T_s = T_s + relaxation * ΔT
         T_s_val = ForwardDiff.value(T_s)
-        if T_s_val < 200.0 || T_s_val > 3000.0
+        if T_s_val < T_PROPERTY_MIN || T_s_val > T_PROPERTY_MAX
             # Reconstructing through Tu(...) zeroes any accumulated Dual
             # partials. Self-healing: the next un-clamped Newton step rebuilds
             # them from (T_cell, f, df) — unless the LAST iterate is clamped,
             # which the post-loop check below reports.
-            T_s = Tu(clamp(T_s_val, 200.0, 3000.0))
+            T_s = Tu(clamp(T_s_val, T_PROPERTY_MIN, T_PROPERTY_MAX))
         end
     end
 
@@ -251,26 +285,34 @@ the outcome either way.
     if !converged
         @warn "Surface-temperature Newton did not converge; using the last \
                iterate for the boundary flux" T_surface = ForwardDiff.value(T_s) T_cell =
-            ForwardDiff.value(T_cell) iterations = iter maxlog = 10
+            ForwardDiff.value(T_cell) iterations = iter residual_W_m2 = f_val tol_W_m2 =
+            tol * scale roundoff_floor_W_m2 = f_floor t = ForwardDiff.value(t) maxlog = 10
     end
 
-    # A final iterate pinned at the [200, 3000] K clamp means
+    # A final iterate pinned at the property-bracket clamp means
     # the surface energy balance has no root in the physical bracket — and in
     # AD passes the clamp has zeroed the Dual partials of T_s (zero is the
     # mathematically correct clamp derivative, but the silent kink is worth a
     # warning).
     T_s_pinned = ForwardDiff.value(T_s)
-    if T_s_pinned == 200.0 || T_s_pinned == 3000.0
+    if T_s_pinned == T_PROPERTY_MIN || T_s_pinned == T_PROPERTY_MAX
         @warn "Surface temperature pinned at the physical clamp; the energy \
-               balance has no root in [200, 3000] K (AD sensitivities of T_s \
-               are zero at the clamp)" T_surface = T_s_pinned T_cell =
+               balance has no root in [$(T_PROPERTY_MIN), $(T_PROPERTY_MAX)] K \
+               (AD sensitivities of T_s are zero at the clamp)" T_surface = T_s_pinned T_cell =
             ForwardDiff.value(T_cell) maxlog = 10
     end
 
     # Final flux evaluation (typed) — these are what the caller will read.
     mcp_final = use_blowing ? _blowing_conductance(material, J_blowing, T_s) : zero(Tu)
-    q_bc_final, _ =
-        evaluate_bc_flux_and_derivative(bc, T_s, t, ε_eff, radiation_model, mcp_final)
+    q_bc_final, _ = evaluate_bc_flux_and_derivative(
+        bc,
+        T_s,
+        t,
+        ε_eff,
+        radiation_model,
+        mcp_final;
+        a_eff = a_eff,
+    )
     q_cond_final = k_eff * (T_s - T_cell) / Δz_half
     # Transpiration enthalpy flux at the converged T_s (stored for diagnostics;
     # zero under the default transpiration-off convention, since J_boundary_outward
@@ -278,7 +320,10 @@ the outcome either way.
     q_transpire_final, _ =
         _transpiration_flux_and_derivative(material, J_boundary_outward, T_s, T_ref)
 
-    # Float64 storage on the diagnostic BoundaryState.
+    # Float64 storage on the diagnostic BoundaryState, skipped for a non-finite
+    # iterate so the diagnostics keep the last finite solve.
+    isfinite(ForwardDiff.value(T_s)) ||
+        return (T_s = T_s, q_applied = q_bc_final, q_conducted = q_cond_final)
     state.T_surface = ForwardDiff.value(T_s)
     state.q_applied = ForwardDiff.value(q_bc_final)
     state.q_conducted = ForwardDiff.value(q_cond_final)
@@ -398,7 +443,7 @@ end
 # ============================================================================
 
 """
-	evaluate_bc_flux_and_derivative(bc, T_s, t, ε_eff)
+	evaluate_bc_flux_and_derivative(bc, T_s, t, ε_eff; a_eff = ε_eff)
 
 Evaluate boundary condition flux and its temperature derivative.
 
@@ -406,7 +451,10 @@ Evaluate boundary condition flux and its temperature derivative.
 - `bc::AbstractThermalBC`: Boundary condition
 - `T_s::Float64`: Surface temperature [K]
 - `t::Float64`: Current time [s]
-- `ε_eff::Float64`: Effective emissivity from material properties
+- `ε_eff::Float64`: Effective emissivity from material properties (emission)
+- `a_eff::Float64 = ε_eff` (keyword): Effective surface absorptivity for
+  incident radiation; only a `RadiativeFluxBC` with `absorptivity = nothing`
+  reads it. Every overload accepts the keyword and forwards it.
 
 # Returns
 - `(q, dq_dT)`: Flux [W/m²] and derivative [W/(m²·K)], positive into domain
@@ -427,9 +475,10 @@ and should therefore contribute **zero** boundary flux here.
     T_s::Real,
     t::Real,
     ε_eff::Real,
-    radiation_model::RadiationModel,
+    radiation_model::RadiationModel;
+    a_eff::Real = ε_eff,
 )
-    return evaluate_bc_flux_and_derivative(bc, T_s, t, ε_eff)
+    return evaluate_bc_flux_and_derivative(bc, T_s, t, ε_eff; a_eff = a_eff)
 end
 
 """
@@ -450,9 +499,17 @@ other BC type ignores `mcp` and falls through to the radiation-model-aware
     t::Real,
     ε_eff::Real,
     radiation_model::RadiationModel,
-    mcp::Real,
+    mcp::Real;
+    a_eff::Real = ε_eff,
 )
-    return evaluate_bc_flux_and_derivative(bc, T_s, t, ε_eff, radiation_model)
+    return evaluate_bc_flux_and_derivative(
+        bc,
+        T_s,
+        t,
+        ε_eff,
+        radiation_model;
+        a_eff = a_eff,
+    )
 end
 
 # ConvectiveBC with blowing: q = h·χ·(T_inf − T_s), χ = blowing_factor(mcp/h).
@@ -468,7 +525,8 @@ end
     t::Real,
     ε_eff::Real,
     radiation_model::RadiationModel,
-    mcp::Real,
+    mcp::Real;
+    a_eff::Real = ε_eff,
 )
     h = evaluate_param(bc.h, t)
     T_inf = evaluate_param(bc.T_inf, t)
@@ -486,11 +544,23 @@ end
     t::Real,
     ε_eff::Real,
     radiation_model::RadiationModel,
-    mcp::Real,
+    mcp::Real;
+    a_eff::Real = ε_eff,
 ) where {BCs}
     N = fieldcount(BCs)
     exprs = Expr[]
-    push!(exprs, :(Tu = promote_type(typeof(T_s), typeof(t), typeof(ε_eff), typeof(mcp))))
+    push!(
+        exprs,
+        :(
+            Tu = promote_type(
+                typeof(T_s),
+                typeof(t),
+                typeof(ε_eff),
+                typeof(a_eff),
+                typeof(mcp),
+            )
+        ),
+    )
     push!(exprs, :(q_total = zero(Tu)))
     push!(exprs, :(dq_total = zero(Tu)))
     for i = 1:N
@@ -503,7 +573,8 @@ end
                     t,
                     ε_eff,
                     radiation_model,
-                    mcp,
+                    mcp;
+                    a_eff = a_eff,
                 )
                 q_total += q_i
                 dq_total += dq_i
@@ -521,7 +592,8 @@ end
     ::AdiabaticBC,
     T_s::Real,
     t::Real,
-    ε_eff::Real,
+    ε_eff::Real;
+    a_eff::Real = ε_eff,
 )
     return 0.0, 0.0
 end
@@ -533,7 +605,8 @@ end
     bc::HeatFluxBC{<:Real},
     T_s::Real,
     t::Real,
-    ε_eff::Real,
+    ε_eff::Real;
+    a_eff::Real = ε_eff,
 )
     return Float64(bc.flux), 0.0
 end
@@ -542,7 +615,8 @@ end
     bc::HeatFluxBC{<:Function},
     T_s::Real,
     t::Real,
-    ε_eff::Real,
+    ε_eff::Real;
+    a_eff::Real = ε_eff,
 )
     return bc.flux(t), 0.0
 end
@@ -554,7 +628,8 @@ end
     bc::ConvectiveBC,
     T_s::Real,
     t::Real,
-    ε_eff::Real,
+    ε_eff::Real;
+    a_eff::Real = ε_eff,
 )
     h = evaluate_param(bc.h, t)
     T_inf = evaluate_param(bc.T_inf, t)
@@ -566,12 +641,14 @@ end
 
 # ----------------------------------------------------------------------------
 # RadiativeBC: q = F × ε × σ × (T_inf⁴ - T_s⁴)
+# Emission always uses ε_eff; `a_eff` is accepted for signature uniformity.
 # ----------------------------------------------------------------------------
 @inline function evaluate_bc_flux_and_derivative(
     bc::RadiativeBC,
     T_s::Real,
     t::Real,
-    ε_eff::Real,
+    ε_eff::Real;
+    a_eff::Real = ε_eff,
 )
     # Use effective emissivity if not specified
     ε = if bc.ε === nothing
@@ -603,7 +680,8 @@ end
     T_s::Real,
     t::Real,
     ε_eff::Real,
-    radiation_model::RadiationModel,
+    radiation_model::RadiationModel;
+    a_eff::Real = ε_eff,
 )
     if radiation_model == P1_QUASI_STEADY
         return 0.0, 0.0
@@ -613,20 +691,23 @@ end
 
 # ----------------------------------------------------------------------------
 # RadiativeFluxBC: q = α × incident_flux (for NO_RADIATION mode)
-# For in-depth radiation models, this is handled volumetrically
+# For in-depth radiation models, this is handled volumetrically.
+# With `absorptivity = nothing` the BC absorbs at the material's mixture
+# surface absorptivity `a_eff` (= ε_eff unless a component overrides it).
 # ----------------------------------------------------------------------------
 @inline function evaluate_bc_flux_and_derivative(
     bc::RadiativeFluxBC,
     T_s::Real,
     t::Real,
-    ε_eff::Real,
+    ε_eff::Real;
+    a_eff::Real = ε_eff,
 )
     # This BC represents incident radiation - absorptivity doesn't depend on T_s
     # If radiation is handled volumetrically, flux should be 0 here
     # For now, we return the absorbed flux (consistent with NO_RADIATION mode)
     flux = evaluate_param(bc.flux, t)
     α = if bc.absorptivity === nothing
-        ε_eff  # Kirchhoff's law: α = ε
+        a_eff
     else
         evaluate_param(bc.absorptivity, t)
     end
@@ -641,14 +722,15 @@ end
     T_s::Real,
     t::Real,
     ε_eff::Real,
-    radiation_model::RadiationModel,
+    radiation_model::RadiationModel;
+    a_eff::Real = ε_eff,
 )
     if radiation_model == NO_RADIATION || radiation_model == SURFACE_ABSORPTION
         # Radiation absorbed at boundary - include in boundary balance
         # This ensures T_surface is physically correct (hotter than T_cell when net heating)
         flux = evaluate_param(bc.flux, t)
         α = if bc.absorptivity === nothing
-            ε_eff
+            a_eff
         else
             evaluate_param(bc.absorptivity, t)
         end
@@ -669,7 +751,8 @@ end
     bc::DirichletThermalBC,
     T_s::Real,
     t::Real,
-    ε_eff::Real,
+    ε_eff::Real;
+    a_eff::Real = ε_eff,
 )
     # Dirichlet BC prescribes temperature directly
     # The "flux" formulation: infinite conductance enforces T_s = T_bc
@@ -693,7 +776,8 @@ end
     bc::CombinedThermalBC{BCs},
     T_s::Real,
     t::Real,
-    ε_eff::Real,
+    ε_eff::Real;
+    a_eff::Real = ε_eff,
 ) where {BCs}
     N = fieldcount(BCs)
     exprs = Expr[]
@@ -703,7 +787,13 @@ end
         push!(
             exprs,
             quote
-                q_i, dq_i = evaluate_bc_flux_and_derivative(bc.bcs[$i], T_s, t, ε_eff)
+                q_i, dq_i = evaluate_bc_flux_and_derivative(
+                    bc.bcs[$i],
+                    T_s,
+                    t,
+                    ε_eff;
+                    a_eff = a_eff,
+                )
                 q_total += q_i
                 dq_total += dq_i
             end,
@@ -718,11 +808,12 @@ end
     T_s::Real,
     t::Real,
     ε_eff::Real,
-    radiation_model::RadiationModel,
+    radiation_model::RadiationModel;
+    a_eff::Real = ε_eff,
 ) where {BCs}
     N = fieldcount(BCs)
     exprs = Expr[]
-    push!(exprs, :(Tu = promote_type(typeof(T_s), typeof(t), typeof(ε_eff))))
+    push!(exprs, :(Tu = promote_type(typeof(T_s), typeof(t), typeof(ε_eff), typeof(a_eff))))
     push!(exprs, :(q_total = zero(Tu)))
     push!(exprs, :(dq_total = zero(Tu)))
     for i = 1:N
@@ -734,7 +825,8 @@ end
                     T_s,
                     t,
                     ε_eff,
-                    radiation_model,
+                    radiation_model;
+                    a_eff = a_eff,
                 )
                 q_total += q_i
                 dq_total += dq_i
@@ -794,6 +886,7 @@ function update_boundary_state!(
     T_cell = state_cache.T[cell_id]
     k_eff = cache.k[cell_id]
     ε_eff = cache.ε[cell_id]
+    a_eff = cache.a[cell_id]
     Δz_half = state_cache.volume[cell_id] / state_cache.A_face[face_id] / 2
 
     state = mesh.boundary_states[boundary_id]
@@ -810,6 +903,7 @@ function update_boundary_state!(
         T_ref,
         t,
         ε_eff;
+        a_eff = a_eff,
         radiation_model = radiation_model,
         use_blowing = use_blowing,
         J_blowing = J_blowing,

@@ -165,7 +165,7 @@ function compute_ale_advection_term!(
     limiter::Limiter = VANLEER,
 ) where {NC}
 
-    n_cells = length(state.T)
+    n_cells = mesh.n_active_cells
 
     @inbounds for i = 1:n_cells
         cell = mesh.cells[i]
@@ -453,7 +453,7 @@ function compute_ale_species_advection!(
     bottom_gas_open::Bool = false,
 ) where {NC}
 
-    n_cells = length(state.T)
+    n_cells = mesh.n_active_cells
     ξ = state.ξ
 
     @inbounds for i = 1:n_cells
@@ -687,7 +687,7 @@ function compute_ale_gas_fluxes_darcy_fick!(
     φ::AbstractVector,
     w_node::AbstractVector,
 ) where {NC}
-    n_faces_val = length(state.A_face)
+    n_faces_val = mesh.n_active_cells + 1
     ξ = state.ξ
 
     fill!(J, zero(eltype(J)))

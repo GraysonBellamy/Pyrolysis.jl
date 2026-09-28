@@ -24,10 +24,17 @@ if !isdefined(@__MODULE__, :run_case_ci)
 
     function run_case_ci(case::VerificationCase)
         @testset "$(case.id) — $(case.title)" begin
+            # Warm-up solve, discarded: the wall-time budget measures the case,
+            # not Julia's compilation of its problem types. Errors surface in
+            # the timed solve below.
+            try
+                _case_solve(case, case.build(case.ci.n_cells); case.solve_kwargs...)
+            catch
+            end
             wall = @elapsed begin
                 problem = case.build(case.ci.n_cells)
                 sol = _case_solve(case, problem; case.solve_kwargs...)
-                @test sol.retcode == :Success
+                @test sol.retcode == case.expected_retcode
                 for q in case.qois(sol)
                     @testset "$(q.name)" begin
                         _print_qois() && println(

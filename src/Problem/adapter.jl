@@ -545,10 +545,12 @@ function build_ad_workspace(
         dξ_dt_work,
         S_conv_work,
         ws.dry_gas_indices,
-        copy(ws.top_face_ids),
-        copy(ws.bottom_face_ids),
-        copy(ws.top_cell_ids),
-        copy(ws.bottom_cell_ids),
+        # Shared with the canonical workspace: a park event moves the exposed
+        # boundary face, and both workspaces must see the new face id.
+        ws.top_face_ids,
+        ws.bottom_face_ids,
+        ws.top_cell_ids,
+        ws.bottom_cell_ids,
         ws.I_radiation,
         ws.ale_limiter,
         ws.min_thickness,

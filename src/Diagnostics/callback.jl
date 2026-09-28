@@ -14,7 +14,7 @@ This is the visibility mechanism that makes the FDS-convention approximations
 on every solve. The log is connected to `PyrolysisSolution.extras`.
 """
 
-using DiffEqCallbacks: DiscreteCallback
+using SciMLBase: DiscreteCallback, derivative_discontinuity!
 
 # Row type — concretely typed so consumers don't have to deal with
 # Dict{Symbol,Any}. Adding a new diagnostic adds a field here, not a key.
@@ -174,8 +174,9 @@ end
 """
     DiagnosticsCallback(record!::Function)
 
-Construct a `DiscreteCallback` (DiffEqCallbacks-compatible) that fires every
-accepted step and runs `record!(integrator)`. Call sites supply a `record!`
+Construct a `DiscreteCallback` that fires every accepted step and runs
+`record!(integrator)`. It only observes the state, so it clears the
+derivative-discontinuity flag. Call sites supply a `record!`
 closure that has access to the live workspace and pushes a row to the
 log when appropriate. This module ships [`snapshot_diagnostics_row`](@ref)
 as the simplest builder; a full ledger callback that calls
@@ -184,6 +185,10 @@ residual layer threads through.
 """
 function DiagnosticsCallback(record!::Function)
     condition(_, _, _) = true
-    affect!(integrator) = record!(integrator)
+    function affect!(integrator)
+        record!(integrator)
+        derivative_discontinuity!(integrator, false)
+        return nothing
+    end
     return DiscreteCallback(condition, affect!; save_positions = (false, false))
 end

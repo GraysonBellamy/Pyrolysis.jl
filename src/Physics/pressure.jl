@@ -130,7 +130,7 @@ function background_gas_concentration(
 end
 
 """
-	compute_pressure!(P, φ, state, material)
+	compute_pressure!(P, φ, state, mesh, material)
 
 Compute pressure field from ideal gas law for all cells, reading T and ξ from
 the typed `state::StateCache`. `φ` is a precomputed porosity vector (same
@@ -140,9 +140,10 @@ function compute_pressure!(
     P::AbstractVector,
     φ::AbstractVector,
     state,
+    mesh,
     material::Material{NC},
 ) where {NC}
-    @inbounds for i in eachindex(state.T)
+    @inbounds for i = 1:mesh.n_active_cells
         T_i = state.T[i]
         ξ_i = ntuple(j -> state.ξ[j, i], Val(NC))
         P[i] = ideal_gas_pressure(ξ_i, T_i, φ[i], material)
@@ -173,7 +174,7 @@ Compute pressure gradient at cell faces using central differencing.
 - Gradient is positive when pressure increases in +z direction.
 """
 function compute_pressure_gradient!(∇P::AbstractVector, P::AbstractVector, state, mesh)
-    @inbounds for f in eachindex(mesh.faces)
+    @inbounds for f = 1:(mesh.n_active_cells+1)
         face = mesh.faces[f]
         left_id, right_id = face.cell_ids
 

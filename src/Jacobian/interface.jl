@@ -114,6 +114,31 @@ end
 # ============================================================================
 
 """
+	state_length(spec::JacobianSpec) -> Int
+
+Length of the state vector the spec was built for. Backends specialize
+[`_cache_state_length`](@ref) on their cache type; the sparse backends can
+also be read from the pattern. `solve()` compares this against `length(u0)`
+so a spec built for the wrong mesh mode fails at entry rather than inside
+the first linear solve.
+"""
+function Problem.state_length(spec::JacobianSpec)
+    spec.sparsity_phys === nothing || return size(spec.sparsity_phys, 1)
+    return _cache_state_length(spec.cache)
+end
+
+"""
+	_cache_state_length(cache) -> Int
+
+Backend hook: the state length recorded in a backend cache. Backends
+without a sparsity pattern must specialize this on their cache type.
+"""
+_cache_state_length(cache) = error(
+    "Jacobian.jl: no `_cache_state_length` method for cache type " *
+    "$(typeof(cache)); the backend must record the state length it was built for.",
+)
+
+"""
 	compute_jacobian!(J, spec::JacobianSpec, u, def, t, ws)
 
 Assemble the Jacobian into `J` using the backend carried by `spec`. This is

@@ -28,8 +28,24 @@ using PrecompileTools: @setup_workload, @compile_workload
     _pmma_k = ConstantProperty(0.21)
 
     _pmma_components = (
-        SolidComponent(:virgin, ρ = 1190.0, c = _pmma_cp, k = _pmma_k, ε = 0.96, α = 0.0),
-        SolidComponent(:char, ρ = 1190.0, c = _pmma_cp, k = _pmma_k, ε = 0.96, α = 0.0),
+        SolidComponent(
+            :virgin,
+            ρ = 1190.0,
+            c = _pmma_cp,
+            k = _pmma_k,
+            ε = 0.96,
+            α = 0.0,
+            λ = 2e-5,
+        ),
+        SolidComponent(
+            :char,
+            ρ = 1190.0,
+            c = _pmma_cp,
+            k = _pmma_k,
+            ε = 0.96,
+            α = 0.0,
+            λ = 2e-5,
+        ),
         GaseousComponent(:MMA, M = 0.10012, c = 1500.0, k = 0.02, λ = 1e-5),
     )
     _pmma_reactions = (
@@ -52,9 +68,7 @@ using PrecompileTools: @setup_workload, @compile_workload
 
     # Charring material (white-pine-like) with Darcy permeability. The
     # skeletal densities (ρ_intrinsic) are required for a permeable material:
-    # without them porosity is exactly 0, which problem validation rejects and
-    # which previously made workload (3) die in a swallowed DomainError —
-    # taking workload (4)'s precompile coverage with it.
+    # without them porosity is exactly 0, which problem validation rejects.
     _wood_components = (
         SolidComponent(
             :virgin,
@@ -102,7 +116,7 @@ using PrecompileTools: @setup_workload, @compile_workload
 
     # Generic 2-component thermoset.
     _ts_components = (
-        SolidComponent(:resin, ρ = 1300.0, c = 1700.0, k = 0.20, ε = 0.9),
+        SolidComponent(:resin, ρ = 1300.0, c = 1700.0, k = 0.20, ε = 0.9, λ = 2e-5),
         GaseousComponent(:vapor, M = 0.080, c = 1400.0, k = 0.03, λ = 1e-5),
     )
     _ts_reactions = (Reaction(:cure, 1 => 2, A = 1e12, E = 1.6e5, h = 300e3, n = 1.0),)

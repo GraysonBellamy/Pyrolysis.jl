@@ -122,6 +122,51 @@ function _hot_uniform_state!(u, n_cells, NC, T_uniform, ξ_vals)
     return u
 end
 
+# A Darcy fixture whose pore-gas viscosity is NOT the built-in Sutherland form.
+# The analytical override takes `dμ/dT` by `ForwardDiff.derivative` on
+# `t -> effective_gas_viscosity(t, material)`, so it must track whatever curve a
+# material carries. With only Sutherland fixtures, a hand-coded Sutherland
+# derivative would pass; this one would not. Coefficients are the Cantera
+# wood-pyrolyzate blend fit (ascending, `evalpoly` order), which is also a
+# stiffer test than Sutherland: a quartic has a sign-varying second derivative.
+function _build_eulerian_darcy_polyvisc()
+    virgin = Pyrolysis.Materials.SolidComponent(
+        :wood,
+        ρ = 500.0,
+        c = 1500.0,
+        k = 0.15,
+        ε = 0.9,
+        α = 1000.0,
+        κ = 1e-14,
+        λ = 1e-5,
+    )
+    gas = Pyrolysis.Materials.GaseousComponent(
+        :pyrgas,
+        M = 0.06,
+        c = 1800.0,
+        k = 0.03,
+        λ = 5e-5,
+    )
+    rxn = Pyrolysis.Materials.Reaction(:pyrolysis, 1 => 2, A = 1e10, E = 150e3, h = -300e3)
+    mat = Material(
+        name = :wood_polyvisc,
+        components = (virgin, gas),
+        reactions = (rxn,),
+        gas_viscosity = Pyrolysis.Materials.PolynomialProperty((
+            -2.590750377731154e-7,
+            3.664256350094585e-8,
+            -6.54432524120188e-14,
+            -6.352113427713809e-15,
+            2.3401486488384493e-18,
+        )),
+    )
+    mesh = create_uniform_mesh(0.01, PERF_N_CELLS, Val(2))
+    bc = BoundaryConditionSet(thermal = (top = HeatFluxBC(50e3), bottom = AdiabaticBC()))
+    problem =
+        PyrolysisProblem(mesh = mesh, material = mat, bc_set = bc, tspan = (0.0, 100.0))
+    return _finalize(problem; use_ale = false)
+end
+
 @testset "DarcyTransportOperator analytical override == AD-default" begin
 
     # Wood solid ρ_intrinsic = 500, so all ξ_solid values stay below 500 to
@@ -146,6 +191,9 @@ end
     configs = [
         ("Eulerian Wood Darcy", build_baseline_eulerian_darcy),
         ("ALE Beer-Lambert Darcy", build_ale_beer_lambert_darcy),
+        # Non-Sutherland μ(T): gates the mobility chain rule against the
+        # MATERIAL's curve rather than the built-in correlation.
+        ("Eulerian Wood Darcy, polynomial μ(T)", _build_eulerian_darcy_polyvisc),
     ]
 
     for (cfg_name, builder) in configs

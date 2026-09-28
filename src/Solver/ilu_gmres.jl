@@ -10,7 +10,7 @@ ALE structured couplings can make direct sparse factorizations expensive on
 large meshes. ILU(τ) builds an approximate factorization by dropping small
 fill-in entries, then GMRES converges against that preconditioner. Treat this
 as an experimental option: benchmark end-to-end solves against the default
-`SparspakFactorization()` before using it for production studies.
+direct factorization before using it for production studies.
 
 # Usage
 
@@ -32,15 +32,30 @@ solution = solve(problem; integrator = alg,
 import LinearSolve
 using LinearSolve: LinearCache, OperatorAssumptions
 using IncompleteLU: ilu
-# Krylov v0.10 renamed GmresSolver → GmresWorkspace
 using Krylov
-const KrylovGMRES =
-    isdefined(Krylov, :GmresWorkspace) ? Krylov.GmresWorkspace : Krylov.GmresSolver
 using SparseArrays: SparseMatrixCSC, getcolptr, rowvals, nonzeros, nnz
 using LinearAlgebra: Diagonal, diag
 
 # SciMLBase is re-exported through LinearSolve
 const SciMLBase = LinearSolve.SciMLBase
+
+# The Krylov iterate as a linear solution: `Success` when the iteration met its
+# tolerance, `ConvergenceFailure` otherwise, which the implicit integrator's
+# Newton treats as a divergent iteration (the step is retried smaller).
+function _krylov_solution(alg, cache::LinearCache, workspace)
+    cache.u .= workspace.x
+    retcode =
+        Krylov.issolved(workspace) ? SciMLBase.ReturnCode.Success :
+        SciMLBase.ReturnCode.ConvergenceFailure
+    return SciMLBase.build_linear_solution(
+        alg,
+        cache.u,
+        nothing,
+        cache;
+        retcode = retcode,
+        iters = workspace.stats.niter,
+    )
+end
 
 """
     ILUGMRESFactorization(; τ=0.1, gmres_rtol=1e-8, restart=30)
@@ -74,7 +89,7 @@ end
 """Cache holding the ILU preconditioner and pre-allocated GMRES workspace."""
 mutable struct ILUGMRESCacheVal
     P::Any                       # IncompleteLU.ILUFactorization or Diagonal fallback
-    krylov_solver::Any           # Krylov GMRES workspace (GmresSolver or GmresWorkspace)
+    krylov_solver::Any           # Krylov.GmresWorkspace
     τ::Float64
     gmres_rtol::Float64
     restart::Int
@@ -96,10 +111,7 @@ function LinearSolve.init_cacheval(
     assumptions::OperatorAssumptions,
 )
     P = ilu(A, τ = alg.τ)
-    # Krylov v0.10: memory is keyword arg; v0.9: positional
-    solver =
-        isdefined(Krylov, :GmresWorkspace) ? KrylovGMRES(A, b; memory = alg.restart) :
-        KrylovGMRES(A, b, alg.restart)
+    solver = Krylov.GmresWorkspace(A, b; memory = alg.restart)
     return ILUGMRESCacheVal(P, solver, alg.τ, alg.gmres_rtol, alg.restart)
 end
 
@@ -138,9 +150,8 @@ function SciMLBase.solve!(cache::LinearCache, alg::ILUGMRESFactorization; kwargs
         cache.isfresh = false
     end
 
-    # Solve (I/(γdt) - J) x = b  using pre-allocated GMRES with ILU preconditioner
-    # gmres! reuses the GmresSolver workspace — no allocations per call
-    # Note: memory/restart size is set at GmresSolver construction, not per-call
+    # Solve (I/(γdt) - J) x = b with the pre-allocated GMRES workspace and the
+    # ILU preconditioner; the restart memory is fixed at workspace construction.
     gmres!(
         cv.krylov_solver,
         A,
@@ -150,9 +161,7 @@ function SciMLBase.solve!(cache::LinearCache, alg::ILUGMRESFactorization; kwargs
         rtol = cv.gmres_rtol,
         restart = true,
     )
-    cache.u .= cv.krylov_solver.x
-
-    return SciMLBase.build_linear_solution(alg, cache.u, nothing, cache)
+    return _krylov_solution(alg, cache, cv.krylov_solver)
 end
 
 # Tell LinearSolve that this solver needs a concrete sparse matrix,
@@ -163,13 +172,10 @@ LinearSolve.needs_concrete_A(::ILUGMRESFactorization) = true
 # ILU-preconditioned BiCGSTAB
 # ============================================================================
 
-const KrylovBiCGSTAB =
-    isdefined(Krylov, :BicgstabWorkspace) ? Krylov.BicgstabWorkspace : Krylov.BicgstabSolver
-
 """
     ILUBiCGSTABFactorization(; τ=0.1, rtol=1e-8)
 
-ILU-preconditioned BiCGSTAB as a drop-in replacement for `SparspakFactorization()`.
+ILU-preconditioned BiCGSTAB as a drop-in replacement for a sparse direct factorization.
 Same approach as `ILUGMRESFactorization` but uses BiCGSTAB instead of GMRES.
 BiCGSTAB has fixed memory cost (no restart parameter) and can be faster for
 some matrix structures.
@@ -204,8 +210,7 @@ function LinearSolve.init_cacheval(
     assumptions::OperatorAssumptions,
 )
     P = ilu(A, τ = alg.τ)
-    solver =
-        isdefined(Krylov, :BicgstabWorkspace) ? KrylovBiCGSTAB(A, b) : KrylovBiCGSTAB(A, b)
+    solver = Krylov.BicgstabWorkspace(A, b)
     return ILUBiCGSTABCacheVal(P, solver, alg.τ, alg.rtol)
 end
 
@@ -240,9 +245,7 @@ function SciMLBase.solve!(cache::LinearCache, alg::ILUBiCGSTABFactorization; kwa
     end
 
     Krylov.bicgstab!(cv.krylov_solver, A, cache.b; M = cv.P, ldiv = true, rtol = cv.rtol)
-    cache.u .= cv.krylov_solver.x
-
-    return SciMLBase.build_linear_solution(alg, cache.u, nothing, cache)
+    return _krylov_solution(alg, cache, cv.krylov_solver)
 end
 
 LinearSolve.needs_concrete_A(::ILUBiCGSTABFactorization) = true

@@ -51,6 +51,54 @@ end
 end
 
 # ============================================================================
+# The residual carries no surface-Newton state between evaluations: after a
+# wild trial state (the kind a diverging outer Newton produces), the residual
+# of a good state equals its residual on a fresh workspace
+# ============================================================================
+@testset "residual is independent of earlier evaluations" begin
+    mat = _minors_material()
+    bc = BoundaryConditionSet(
+        thermal = (
+            top = RadiativeFluxBC(flux = 50e3) +
+                  RadiativeBC(T_inf = 300.0) +
+                  ConvectiveBC(h = 10.0, T_inf = 300.0),
+            bottom = AdiabaticBC(),
+        ),
+        mass = (top = DiffusiveMassBC(0.05), bottom = ImpermeableBC()),
+    )
+    n = 6
+    fresh_setup(use_ale) = initialize_state(
+        PyrolysisProblem(
+            mesh = create_uniform_mesh(0.01, n, Val(2)),
+            material = mat,
+            bc_set = bc,
+            tspan = (0.0, 1.0),
+        );
+        use_ale = use_ale,
+    )
+    for use_ale in (false, true)
+        def, ws, u = fresh_setup(use_ale)
+        for i = 1:n
+            u[i] = 300.0 + 60.0 * i
+            u[2n+i] = 0.1 * i
+        end
+        du_fresh = similar(u)
+        def_f, ws_f, _ = fresh_setup(use_ale)
+        residual!(du_fresh, u, def_f, 0.0, ws_f)
+        @test all(isfinite, du_fresh)
+
+        du = similar(u)
+        for T_wild in (-9.1e40, NaN)
+            u_wild = copy(u)
+            u_wild[n] = T_wild
+            residual!(similar(u), u_wild, def, 0.0, ws)
+            residual!(du, u, def, 0.0, ws)
+            @test isapprox(du, du_fresh; rtol = 1e-12)
+        end
+    end
+end
+
+# ============================================================================
 # A final iterate pinned at the [200, 3000] K clamp warns (the balance has
 # no root in the bracket; AD sensitivities of T_s are zero there)
 # ============================================================================

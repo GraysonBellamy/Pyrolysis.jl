@@ -33,9 +33,12 @@ function thermal_bc_flux end
 # ============================================================================
 # Standard thermal_bc_flux with effective emissivity parameter
 # ============================================================================
-# All thermal BC flux functions now accept an optional ε_eff parameter.
-# This is the effective surface emissivity computed from material properties.
-# BCs that don't need it simply ignore the parameter.
+# All thermal BC flux functions accept an ε_eff parameter — the effective
+# surface emissivity computed from material properties — and the
+# radiation-model-aware overloads additionally take the keyword
+# `a_eff = ε_eff`, the effective surface absorptivity for incident radiation
+# (read only by a `RadiativeFluxBC` without an explicit `absorptivity`).
+# BCs that don't need them simply ignore the parameters.
 
 # Adiabatic: zero flux
 @inline thermal_bc_flux(::AdiabaticBC, T_surface, t, ε_eff) = 0.0
@@ -70,14 +73,16 @@ end
 # - NO_RADIATION/SURFACE_ABSORPTION: absorbed flux returned as boundary flux
 #   This ensures the boundary temperature solve correctly accounts for radiation heating.
 # - BEER_LAMBERT/P1: handled volumetrically, return 0 here
-# If bc.absorptivity is nothing, use ε_eff (Kirchhoff's law: α = ε at equilibrium)
+# If bc.absorptivity is nothing, use a_eff — the material's mixture surface
+# absorptivity, equal to ε_eff (Kirchhoff) unless a component sets its own.
 # NOTE: radiation_model is REQUIRED - no default behavior
 @inline function thermal_bc_flux(
     bc::RadiativeFluxBC,
     T_surface,
     t,
     ε_eff,
-    radiation_model::RadiationModel,
+    radiation_model::RadiationModel;
+    a_eff = ε_eff,
 )
     if radiation_model == BEER_LAMBERT || radiation_model == P1_QUASI_STEADY
         # In-depth absorption handled by volumetric radiation solver
@@ -89,7 +94,7 @@ end
         # (surface hotter than cell when net heating)
         flux = bc.flux isa Function ? bc.flux(t) : Float64(bc.flux)
         α = if bc.absorptivity === nothing
-            ε_eff
+            a_eff
         else
             bc.absorptivity isa Function ? bc.absorptivity(t) : Float64(bc.absorptivity)
         end
@@ -105,7 +110,14 @@ end
 # method below, and the saved-solution extraction substitutes the solved
 # `q_conducted` for `net`.
 @inline thermal_bc_flux(::DirichletThermalBC, T_surface, t, ε_eff) = NaN
-@inline thermal_bc_flux(::DirichletThermalBC, T_surface, t, ε_eff, ::RadiationModel) = NaN
+@inline thermal_bc_flux(
+    ::DirichletThermalBC,
+    T_surface,
+    t,
+    ε_eff,
+    ::RadiationModel;
+    a_eff = ε_eff,
+) = NaN
 
 # Combined: sum of all component fluxes using generated function for type stability
 # NOTE: radiation_model is REQUIRED for CombinedThermalBC since it may contain RadiativeFluxBC
@@ -114,30 +126,59 @@ end
     T_surface,
     t,
     ε_eff,
-    radiation_model::RadiationModel,
+    radiation_model::RadiationModel;
+    a_eff = ε_eff,
 ) where {BCs<:Tuple}
     N = length(BCs.parameters)
-    exprs =
-        [:(thermal_bc_flux(bc.bcs[$i], T_surface, t, ε_eff, radiation_model)) for i = 1:N]
+    exprs = [
+        :(thermal_bc_flux(bc.bcs[$i], T_surface, t, ε_eff, radiation_model; a_eff = a_eff)) for i = 1:N
+    ]
     return :(+($(exprs...)))
 end
 
-# Fallback for BCs that don't care about radiation_model (just ignore it)
-@inline thermal_bc_flux(::AdiabaticBC, T_surface, t, ε_eff, ::RadiationModel) = 0.0
-@inline thermal_bc_flux(bc::HeatFluxBC{<:Real}, T_surface, t, ε_eff, ::RadiationModel) =
-    Float64(bc.flux)
-@inline thermal_bc_flux(bc::HeatFluxBC{<:Function}, T_surface, t, ε_eff, ::RadiationModel) =
-    bc.flux(t)
-@inline thermal_bc_flux(bc::ConvectiveBC, T_surface, t, ε_eff, ::RadiationModel) =
-    thermal_bc_flux(bc, T_surface, t, ε_eff)
+# Fallback for BCs that don't care about radiation_model / a_eff (just ignore them)
+@inline thermal_bc_flux(
+    ::AdiabaticBC,
+    T_surface,
+    t,
+    ε_eff,
+    ::RadiationModel;
+    a_eff = ε_eff,
+) = 0.0
+@inline thermal_bc_flux(
+    bc::HeatFluxBC{<:Real},
+    T_surface,
+    t,
+    ε_eff,
+    ::RadiationModel;
+    a_eff = ε_eff,
+) = Float64(bc.flux)
+@inline thermal_bc_flux(
+    bc::HeatFluxBC{<:Function},
+    T_surface,
+    t,
+    ε_eff,
+    ::RadiationModel;
+    a_eff = ε_eff,
+) = bc.flux(t)
+@inline thermal_bc_flux(
+    bc::ConvectiveBC,
+    T_surface,
+    t,
+    ε_eff,
+    ::RadiationModel;
+    a_eff = ε_eff,
+) = thermal_bc_flux(bc, T_surface, t, ε_eff)
 # RadiativeBC under P1 contributes zero: emission/ambient exchange is carried
 # volumetrically (4σαT⁴ + Marshak BC on G) — see boundary_temperature.jl.
+# Emission always uses ε_eff, never a_eff.
 @inline function thermal_bc_flux(
     bc::RadiativeBC,
     T_surface,
     t,
     ε_eff,
-    radiation_model::RadiationModel,
+    radiation_model::RadiationModel;
+    a_eff = ε_eff,
 )
     radiation_model == P1_QUASI_STEADY && return 0.0
     return thermal_bc_flux(bc, T_surface, t, ε_eff)
@@ -338,9 +379,12 @@ using ..BoundaryConditions: DirichletPressureBC, NeumannPressureBC, ConvectivePr
 
 """
 	compute_boundary_heat_fluxes(bc::AbstractThermalBC, T_surface, t, ε_eff,
-	                             radiation_model)
+	                             radiation_model[, mcp]; a_eff = ε_eff)
 
 Decompose the boundary heat flux into named components for diagnostics.
+`a_eff` is the effective surface absorptivity for incident radiation
+(Kirchhoff default `ε_eff`); it must match what the surface Newton used so
+that `absorbed` reproduces the applied flux.
 
 Returns a NamedTuple with:
 - `absorbed`: incident radiation absorbed *at the boundary face* [W/m²]
@@ -366,7 +410,8 @@ function compute_boundary_heat_fluxes(
     T_surface::Float64,
     t::Float64,
     ε_eff::Float64,
-    radiation_model::RadiationModel,
+    radiation_model::RadiationModel;
+    a_eff::Float64 = ε_eff,
 )
     if radiation_model == BEER_LAMBERT || radiation_model == P1_QUASI_STEADY
         # In-depth absorption: the incident radiation enters volumetrically
@@ -385,7 +430,7 @@ function compute_boundary_heat_fluxes(
         # the surface energy balance (evaluate_bc_flux_and_derivative).
         flux = bc.flux isa Function ? bc.flux(t) : Float64(bc.flux)
         α = if bc.absorptivity === nothing
-            ε_eff
+            a_eff
         else
             bc.absorptivity isa Function ? bc.absorptivity(t) : Float64(bc.absorptivity)
         end
@@ -405,7 +450,8 @@ function compute_boundary_heat_fluxes(
     T_surface::Float64,
     t::Float64,
     ε_eff::Float64,
-    radiation_model::RadiationModel,
+    radiation_model::RadiationModel;
+    a_eff::Float64 = ε_eff,
 )
     # Sum contributions from all component BCs — including each child's `net`,
     # so the combined `net` stays equal to the flux the surface Newton applies
@@ -418,8 +464,14 @@ function compute_boundary_heat_fluxes(
     net = 0.0
 
     for inner_bc in bc.bcs
-        fluxes =
-            compute_boundary_heat_fluxes(inner_bc, T_surface, t, ε_eff, radiation_model)
+        fluxes = compute_boundary_heat_fluxes(
+            inner_bc,
+            T_surface,
+            t,
+            ε_eff,
+            radiation_model;
+            a_eff = a_eff,
+        )
         absorbed += fluxes.absorbed
         reradiation += fluxes.reradiation
         convection += fluxes.convection
@@ -442,7 +494,8 @@ function compute_boundary_heat_fluxes(
     T_surface::Float64,
     t::Float64,
     ε_eff::Float64,
-    ::RadiationModel,
+    ::RadiationModel;
+    a_eff::Float64 = ε_eff,
 )
     return (
         absorbed = 0.0,
@@ -458,7 +511,8 @@ function compute_boundary_heat_fluxes(
     T_surface::Float64,
     t::Float64,
     ε_eff::Float64,
-    ::RadiationModel,
+    ::RadiationModel;
+    a_eff::Float64 = ε_eff,
 )
     q = thermal_bc_flux(bc, T_surface, t, ε_eff)
     return (absorbed = 0.0, reradiation = 0.0, convection = 0.0, prescribed = q, net = q)
@@ -469,7 +523,8 @@ function compute_boundary_heat_fluxes(
     T_surface::Float64,
     t::Float64,
     ε_eff::Float64,
-    ::RadiationModel,
+    ::RadiationModel;
+    a_eff::Float64 = ε_eff,
 )
     q = thermal_bc_flux(bc, T_surface, t, ε_eff)
     q_loss = -q
@@ -487,7 +542,8 @@ function compute_boundary_heat_fluxes(
     T_surface::Float64,
     t::Float64,
     ε_eff::Float64,
-    radiation_model::RadiationModel,
+    radiation_model::RadiationModel;
+    a_eff::Float64 = ε_eff,
 )
     # Under P1 the boundary balance applies zero for this BC (emission and
     # ambient exchange are volumetric) — `net` must match the applied flux.
@@ -507,7 +563,8 @@ function compute_boundary_heat_fluxes(
     T_surface::Float64,
     t::Float64,
     ε_eff::Float64,
-    ::RadiationModel,
+    ::RadiationModel;
+    a_eff::Float64 = ε_eff,
 )
     # Prescribed temperature: the applied flux is whatever conduction demands
     # (k_eff·(T_bc − T_cell)/Δz_half), not computable from (T_surface, t)
@@ -529,7 +586,8 @@ function compute_boundary_heat_fluxes(
     T_surface::Float64,
     t::Float64,
     ε_eff::Float64,
-    ::RadiationModel,
+    ::RadiationModel;
+    a_eff::Float64 = ε_eff,
 )
     # Fallback for other BC types
     q_total = thermal_bc_flux(bc, T_surface, t, ε_eff)
@@ -558,9 +616,17 @@ function compute_boundary_heat_fluxes(
     t::Float64,
     ε_eff::Float64,
     radiation_model::RadiationModel,
-    mcp::Float64,
+    mcp::Float64;
+    a_eff::Float64 = ε_eff,
 )
-    return compute_boundary_heat_fluxes(bc, T_surface, t, ε_eff, radiation_model)
+    return compute_boundary_heat_fluxes(
+        bc,
+        T_surface,
+        t,
+        ε_eff,
+        radiation_model;
+        a_eff = a_eff,
+    )
 end
 
 function compute_boundary_heat_fluxes(
@@ -569,7 +635,8 @@ function compute_boundary_heat_fluxes(
     t::Float64,
     ε_eff::Float64,
     ::RadiationModel,
-    mcp::Float64,
+    mcp::Float64;
+    a_eff::Float64 = ε_eff,
 )
     h = evaluate_param(bc.h, t)
     T_inf = evaluate_param(bc.T_inf, t)
@@ -591,7 +658,8 @@ function compute_boundary_heat_fluxes(
     t::Float64,
     ε_eff::Float64,
     radiation_model::RadiationModel,
-    mcp::Float64,
+    mcp::Float64;
+    a_eff::Float64 = ε_eff,
 )
     absorbed = 0.0
     reradiation = 0.0
@@ -606,7 +674,8 @@ function compute_boundary_heat_fluxes(
             t,
             ε_eff,
             radiation_model,
-            mcp,
+            mcp;
+            a_eff = a_eff,
         )
         absorbed += fluxes.absorbed
         reradiation += fluxes.reradiation

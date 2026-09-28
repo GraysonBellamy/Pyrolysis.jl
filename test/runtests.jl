@@ -46,6 +46,7 @@ _jl_files(dir) = sort(filter(f -> endswith(f, ".jl"), readdir(joinpath(@__DIR__,
         "geometry",
         "materials",
         "physics",
+        "residual",
     ]
         for f in _jl_files(dir)
             include(joinpath(@__DIR__, dir, f))

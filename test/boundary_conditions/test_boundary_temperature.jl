@@ -31,6 +31,8 @@ using Pyrolysis.Discretization:
     evaluate_bc_flux_and_derivative
 using Pyrolysis.Materials: T_REF, GaseousComponent, SolidComponent, Material, Reaction
 using Pyrolysis.BoundaryConditions: ambient_temperature
+using Pyrolysis.Discretization: compute_boundary_heat_fluxes
+using Pyrolysis.Properties: effective_emissivity, effective_absorptivity
 
 # Test helper: constructs a tiny inert single-solid material so that the
 # transpiration loop is well-defined but contributes zero (no gas component).
@@ -495,6 +497,82 @@ _solve_bt(T_cell, k, Δz, bc, t, ε; kwargs...) = solve_boundary_temperature(
             @test dq_bl ≈ -h_conv
         end
 
+        @testset "absorptivity = nothing absorbs at a_eff, emits at ε_eff" begin
+            # `a_eff` is the material's surface-absorptivity mixture; every
+            # overload takes it as a keyword defaulting to ε_eff (Kirchhoff).
+            a_eff = 0.72
+            q, dq = evaluate_bc_flux_and_derivative(
+                bc,
+                T_s,
+                t,
+                ε_eff,
+                NO_RADIATION;
+                a_eff = a_eff,
+            )
+            @test q ≈ I_incident * a_eff
+            @test dq == 0.0
+            q_default, _ =
+                evaluate_bc_flux_and_derivative(bc, T_s, t, ε_eff, SURFACE_ABSORPTION)
+            @test q_default ≈ I_incident * ε_eff
+
+            # An explicit BC absorptivity ignores a_eff.
+            bc_α = RadiativeFluxBC(flux = I_incident, absorptivity = 0.5)
+            q_α, _ = evaluate_bc_flux_and_derivative(
+                bc_α,
+                T_s,
+                t,
+                ε_eff,
+                NO_RADIATION;
+                a_eff = a_eff,
+            )
+            @test q_α ≈ 0.5 * I_incident
+
+            # Emission keeps ε_eff regardless of a_eff; combined BCs forward both.
+            rad = RadiativeBC(T_inf = 300.0)
+            q_emit, dq_emit = evaluate_bc_flux_and_derivative(
+                rad,
+                T_s,
+                t,
+                ε_eff,
+                NO_RADIATION;
+                a_eff = a_eff,
+            )
+            @test q_emit ≈ ε_eff * STEFAN_BOLTZMANN * (300.0^4 - T_s^4)
+            q_c, dq_c = evaluate_bc_flux_and_derivative(
+                bc + rad,
+                T_s,
+                t,
+                ε_eff,
+                NO_RADIATION;
+                a_eff = a_eff,
+            )
+            @test q_c ≈ q + q_emit
+            @test dq_c ≈ dq_emit
+            q6, _ = evaluate_bc_flux_and_derivative(
+                bc + rad,
+                T_s,
+                t,
+                ε_eff,
+                NO_RADIATION,
+                0.0;
+                a_eff = a_eff,
+            )
+            @test q6 ≈ q_c
+            q4, _ = evaluate_bc_flux_and_derivative(bc + rad, T_s, t, ε_eff; a_eff = a_eff)
+            @test q4 ≈ q_c
+
+            # Volumetric models still contribute zero at the face.
+            q_vol, _ = evaluate_bc_flux_and_derivative(
+                bc,
+                T_s,
+                t,
+                ε_eff,
+                BEER_LAMBERT;
+                a_eff = a_eff,
+            )
+            @test q_vol == 0.0
+        end
+
     end
 
     # ========================================================================
@@ -744,3 +822,183 @@ _solve_bt(T_cell, k, Δz, bc, t, ε; kwargs...) = solve_boundary_temperature(
     end
 
 end  # main testset
+
+# Per-component surface absorptivity through the surface Newton solve. A single
+# `RadiativeFluxBC(flux = q)` with `absorptivity = nothing` absorbs a_eff·q and
+# emits at ε_eff. When every component's absorptivity lies on one line with its
+# emissivity, a_j = a + b·ε_j, the mixture is a_eff = a + b·ε_eff and the single
+# BC is interchangeable with the two-piece split `RadiativeFluxBC(b·q)`
+# (Kirchhoff) + `RadiativeFluxBC(a·q, absorptivity = 1)`.
+@testset "surface Newton: a_eff absorption vs. two-piece split" begin
+    a_line, b_line = 0.30, 0.55
+    ε_v, ε_c = 0.90, 0.80
+    gas = GaseousComponent(:g, M = 0.03, c = 1000.0, k = 0.03, λ = 1e-5)
+    virgin = SolidComponent(
+        :v,
+        ρ = 500.0,
+        c = 1500.0,
+        k = 0.15,
+        ε = ε_v,
+        absorptivity = a_line + b_line * ε_v,
+    )
+    char = SolidComponent(
+        :c,
+        ρ = 150.0,
+        c = 1700.0,
+        k = 0.08,
+        ε = ε_c,
+        absorptivity = a_line + b_line * ε_c,
+    )
+    mat = Material(name = :line, components = (virgin, char, gas), reactions = ())
+    virgin_k = SolidComponent(:v, ρ = 500.0, c = 1500.0, k = 0.15, ε = ε_v)
+    char_k = SolidComponent(:c, ρ = 150.0, c = 1700.0, k = 0.08, ε = ε_c)
+    mat_k =
+        Material(name = :kirchhoff, components = (virgin_k, char_k, gas), reactions = ())
+
+    ξ = (300.0, 40.0, 0.5)
+    T_cell = 650.0
+    ε_eff = effective_emissivity(ξ, T_cell, mat)
+    a_eff = effective_absorptivity(ξ, T_cell, mat)
+    @test ε_eff ≈ effective_emissivity(ξ, T_cell, mat_k)
+    @test a_eff ≈ a_line + b_line * ε_eff rtol = 1e-14
+    @test effective_absorptivity(ξ, T_cell, mat_k) ===
+          effective_emissivity(ξ, T_cell, mat_k)
+
+    q_inc = 50e3
+    k_eff, Δz_half, t = 0.12, 2.5e-4, 0.0
+    T_inf, h = 300.0, 10.0
+    J0 = ntuple(_ -> 0.0, Val(3))
+    single =
+        RadiativeFluxBC(flux = q_inc) +
+        RadiativeBC(T_inf = T_inf) +
+        ConvectiveBC(h = h, T_inf = T_inf)
+    split =
+        RadiativeFluxBC(flux = b_line * q_inc) +
+        RadiativeFluxBC(flux = a_line * q_inc, absorptivity = 1.0) +
+        RadiativeBC(T_inf = T_inf) +
+        ConvectiveBC(h = h, T_inf = T_inf)
+
+    s_single = solve_boundary_temperature(
+        T_cell,
+        k_eff,
+        Δz_half,
+        single,
+        mat,
+        J0,
+        T_inf,
+        t,
+        ε_eff;
+        a_eff = a_eff,
+    )
+    s_split = solve_boundary_temperature(
+        T_cell,
+        k_eff,
+        Δz_half,
+        split,
+        mat_k,
+        J0,
+        T_inf,
+        t,
+        ε_eff,
+    )
+    @test s_single.converged && s_split.converged
+    @test s_single.T_surface ≈ s_split.T_surface rtol = 1e-9
+    @test s_single.q_applied ≈ s_split.q_applied rtol = 1e-9
+
+    # The converged balance decomposes as absorbed(a_eff) + emitted(ε_eff) + convective.
+    T_s = s_single.T_surface
+    q_expected =
+        a_eff * q_inc + ε_eff * STEFAN_BOLTZMANN * (T_inf^4 - T_s^4) + h * (T_inf - T_s)
+    @test s_single.q_applied ≈ q_expected rtol = 1e-12
+    @test s_single.q_conducted ≈ k_eff * (T_s - T_cell) / Δz_half rtol = 1e-9
+
+    # Default a_eff = ε_eff: the Kirchhoff material absorbs ε_eff·q instead.
+    s_k = solve_boundary_temperature(
+        T_cell,
+        k_eff,
+        Δz_half,
+        single,
+        mat_k,
+        J0,
+        T_inf,
+        t,
+        ε_eff,
+    )
+    T_k = s_k.T_surface
+    @test s_k.q_applied ≈
+          ε_eff * q_inc + ε_eff * STEFAN_BOLTZMANN * (T_inf^4 - T_k^4) + h * (T_inf - T_k) rtol =
+        1e-12
+    @test T_k != T_s
+
+    # The diagnostic decomposition applies the same a_eff.
+    hf = compute_boundary_heat_fluxes(
+        single,
+        T_s,
+        t,
+        ε_eff,
+        SURFACE_ABSORPTION;
+        a_eff = a_eff,
+    )
+    @test hf.absorbed ≈ a_eff * q_inc
+    @test hf.net ≈ s_single.q_applied rtol = 1e-12
+    hf_mcp = compute_boundary_heat_fluxes(
+        single,
+        T_s,
+        t,
+        ε_eff,
+        SURFACE_ABSORPTION,
+        0.0;
+        a_eff = a_eff,
+    )
+    @test hf_mcp.net ≈ hf.net
+end
+
+# The surface Newton starts from the cell temperature, never from the stored
+# BoundaryState, and stores only a finite iterate: a poisoned state cannot leak
+# into a later solve.
+@testset "surface Newton ignores the stored state" begin
+    solve! = Pyrolysis.Discretization.solve_boundary_temperature!
+    bc =
+        HeatFluxBC(50e3) +
+        RadiativeBC(T_inf = 300.0) +
+        ConvectiveBC(h = 10.0, T_inf = 300.0)
+    T_cell, k_eff, Δz_half, ε = 650.0, 0.2, 1e-3, 0.9
+    fresh = _solve_bt(T_cell, k_eff, Δz_half, bc, 0.0, ε)
+    @test fresh.converged
+
+    poisoned = BoundaryState(NaN, NaN, NaN, NaN, NaN, NaN, NaN, false, 0)
+    result = solve!(
+        poisoned,
+        T_cell,
+        k_eff,
+        Δz_half,
+        bc,
+        _BC_TEST_MAT,
+        _BC_ZERO_J,
+        300.0,
+        0.0,
+        ε,
+    )
+    @test result.T_s == fresh.T_surface
+    @test poisoned.T_surface == fresh.T_surface
+    @test poisoned.q_conducted == fresh.q_conducted
+    @test poisoned.converged
+
+    # A non-finite cell temperature gives a non-finite result, which is returned
+    # and not stored.
+    bad = @test_logs (:warn, r"did not converge") match_mode = :any solve!(
+        poisoned,
+        NaN,
+        k_eff,
+        Δz_half,
+        bc,
+        _BC_TEST_MAT,
+        _BC_ZERO_J,
+        300.0,
+        0.0,
+        ε,
+    )
+    @test isnan(bad.T_s)
+    @test poisoned.T_surface == fresh.T_surface
+    @test poisoned.converged
+end

@@ -44,7 +44,7 @@ Sign convention:
 - `mesh`: 1D mesh with geometry
 """
 function divergence_1d!(div::AbstractVector, fluxes::AbstractVector, state, mesh)
-    n_cells_val = length(state.T)
+    n_cells_val = mesh.n_active_cells
 
     @inbounds @simd for i = 1:n_cells_val
         cell = mesh.cells[i]
@@ -70,7 +70,8 @@ Compute divergence for species fluxes (multiple components).
 - `mesh`: 1D mesh
 """
 function divergence_species_1d!(div::AbstractMatrix, J::AbstractMatrix, state, mesh)
-    NC, n_cells_val = size(div)
+    NC = size(div, 1)
+    n_cells_val = mesh.n_active_cells
 
     @inbounds for i = 1:n_cells_val
         cell = mesh.cells[i]
@@ -249,12 +250,12 @@ function compute_rhs!(
     use_blowing_correction::Bool = false,
 ) where {NC}
 
-    n_cells_val = length(mesh.cells)
+    n_cells_val = mesh.n_active_cells
     NR = n_reactions(material)
 
     # Ensure caches are properly sized
     if length(rhs_cache.q_cond) != length(mesh.faces)
-        resize_rhs_cache!(rhs_cache, n_cells_val, length(mesh.faces), NC, NR)
+        resize_rhs_cache!(rhs_cache, length(mesh.cells), length(mesh.faces), NC, NR)
     end
 
     # ========================================================================
@@ -375,6 +376,7 @@ function compute_rhs!(
             rhs_cache.S_gen,
             rhs_cache.div_J,
             state,
+            mesh,
             material,
             T_ref_volumetric,
         )
@@ -838,8 +840,8 @@ function update_darcy_properties!(
     top_face_ids::Vector{Int},
     bottom_face_ids::Vector{Int},
 ) where {NC}
-    n_cells = length(state.T)
-    n_faces = length(state.A_face)
+    n_cells = mesh.n_active_cells
+    n_faces = n_cells + 1
 
     darcy = cache.darcy
     darcy === nothing && error(
@@ -865,8 +867,8 @@ function update_darcy_properties!(
         # Permeability from component mixture (component-based)
         darcy.κ[i] = effective_permeability(ξ_i, T_i, material)
 
-        # Gas viscosity from Sutherland's law
-        darcy.μ[i] = Properties.effective_gas_viscosity(T_i)
+        # Pore-gas viscosity from the material's own curve (default: Sutherland air)
+        darcy.μ[i] = Properties.mixture_gas_viscosity(ξ_i, T_i, material)
     end
 
     # Step 2: Compute face-centered pressure gradient and Darcy velocity
@@ -921,6 +923,7 @@ function update_darcy_properties!(
         mesh,
         darcy.P,
         darcy.κ,
+        darcy.μ,
         bc_set,
         top_face_ids,
         bottom_face_ids,
@@ -984,13 +987,12 @@ function compute_rhs_darcy_fick!(
     use_blowing_correction::Bool = false,
 ) where {NC}
 
-    n_cells_val = length(mesh.cells)
-    n_faces_val = length(mesh.faces)
+    n_cells_val = mesh.n_active_cells
     NR = n_reactions(material)
 
     # Ensure caches are properly sized
-    if length(rhs_cache.q_cond) != n_faces_val
-        resize_rhs_cache!(rhs_cache, n_cells_val, n_faces_val, NC, NR)
+    if length(rhs_cache.q_cond) != length(mesh.faces)
+        resize_rhs_cache!(rhs_cache, length(mesh.cells), length(mesh.faces), NC, NR)
     end
 
     # ========================================================================
@@ -1114,6 +1116,7 @@ function compute_rhs_darcy_fick!(
             rhs_cache.S_gen,
             rhs_cache.div_J,
             state,
+            mesh,
             material,
             T_ref_volumetric,
         )

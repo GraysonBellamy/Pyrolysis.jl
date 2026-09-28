@@ -220,7 +220,7 @@ end
 
     num = zero(eltype(u))
     M = 0.0
-    @inbounds for i = 1:n
+    @inbounds for i = 1:mesh.n_active_cells
         m_i = m_init[i]
         num += u[χ_offset+i] * m_i
         M += m_i

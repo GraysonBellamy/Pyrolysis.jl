@@ -10,7 +10,7 @@ This module provides:
 - r-refinement (node relocation via equidistribution)
 - Mesh quality metrics (aspect ratio, smoothness, Jacobian)
 - AMR controller for orchestrating adaptation
-- Cell depletion detection and handling (both surface and interior)
+- Depleted-cell parking (surface and interior cells)
 
 ## Usage
 
@@ -35,11 +35,10 @@ controller = AMRController(
 # Adapt mesh
 result = adapt_mesh!(mesh, controller)
 
-# Handle depletion of a thin cell by merging it into a neighbor
+# Park a depleted cell: merge it into its neighbour and move the freed slot
+# above the live surface
 neighbor = find_merge_neighbor(mesh, cell_id)
-if neighbor > 0
-	merge_adjacent_cells!(mesh, cell_id, neighbor; material = material)
-end
+park_cell!(mesh, cell_id, neighbor; material = material, ale = true)
 ```
 """
 module Adaptivity
@@ -85,6 +84,7 @@ function assert_amr_invariants(mesh::Mesh1D)
 end
 
 include("cell_merge.jl")
+include("cell_park.jl")
 include("r_refinement.jl")
 include("mesh_quality.jl")
 include("surface_depletion.jl")
@@ -99,10 +99,8 @@ export GradientIndicator, CurvatureIndicator, ReactionRateIndicator
 export InterfaceProximityIndicator, CompositeIndicator
 export compute_indicator
 
-# Adjacent cell merging for surface depletion (cell_merge.jl)
-export merge_adjacent_cells!, merge_surface_cell!
-export compact_mesh_after_surface_merge!, compact_mesh_after_merge!
-export find_shared_face, are_cells_adjacent
+# Depleted-cell parking (cell_park.jl) and the conservative merge it uses
+export park_cell!
 export merge_temperatures_conservatively, merge_temperatures_conservatively_from_values
 
 # r-refinement
