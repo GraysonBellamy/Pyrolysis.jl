@@ -139,7 +139,7 @@ function build_and_solve_macfp(
         0.0,                    # 14. water vapor
     )
     ξ_initial_funcs = [
-        let v = ξ0[j];
+        let v = ξ0[j]
             _ -> v
         end for j = 1:NC_WP
     ]
@@ -219,11 +219,11 @@ function write_case_csv(path::AbstractString, sol)
     thick_mm = sol.extras.thickness_history .* 1000
 
     # Per-component totals → mass fractions of CURRENT total mass.
-    wf_virgin = zeros(n);
-    wf_int = zeros(n);
+    wf_virgin = zeros(n)
+    wf_int = zeros(n)
     wf_char = zeros(n)
-    wf_ash = zeros(n);
-    wf_gas = zeros(n);
+    wf_ash = zeros(n)
+    wf_gas = zeros(n)
     wf_vap = zeros(n)
     for k = 1:n
         m_v = _per_component_mass(sol, (VIRGIN_IDX,), k)
@@ -315,7 +315,7 @@ function summary_plot(sols, out_dir::AbstractString)
         )
         for (lbl, qx, th, _) in CASES
             qx == q || continue
-            sol = sols[lbl];
+            sol = sols[lbl]
             sol === nothing && continue
             plot!(
                 p,
@@ -339,7 +339,7 @@ function summary_plot(sols, out_dir::AbstractString)
         )
         for (lbl, qx, th, _) in CASES
             qx == q || continue
-            sol = sols[lbl];
+            sol = sols[lbl]
             sol === nothing && continue
             plot!(
                 p,
@@ -362,7 +362,7 @@ function summary_plot(sols, out_dir::AbstractString)
         )
         for (lbl, qx, th, _) in CASES
             qx == q || continue
-            sol = sols[lbl];
+            sol = sols[lbl]
             sol === nothing && continue
             plot!(
                 p,
@@ -394,7 +394,7 @@ function summary_plot(sols, out_dir::AbstractString)
         )
         for (lbl, qx, th, _) in CASES
             qx == q || continue
-            sol = sols[lbl];
+            sol = sols[lbl]
             sol === nothing && continue
             plot!(
                 p,
@@ -546,11 +546,11 @@ function detail_plot(
 
     # Panel 5: composition mass fractions
     n = length(sol.t)
-    wf_v = zeros(n);
-    wf_i = zeros(n);
+    wf_v = zeros(n)
+    wf_i = zeros(n)
     wf_c = zeros(n)
-    wf_a = zeros(n);
-    wf_g = zeros(n);
+    wf_a = zeros(n)
+    wf_g = zeros(n)
     wf_w = zeros(n)
     for k = 1:n
         m_v = _per_component_mass(sol, (VIRGIN_IDX,), k)
@@ -561,11 +561,11 @@ function detail_plot(
         m_w = _per_component_mass(sol, (VAPOR_IDX,), k)
         denom = m_v + m_i + m_c + m_a + m_g + m_w
         denom = denom > 0 ? denom : 1.0
-        wf_v[k] = m_v / denom;
-        wf_i[k] = m_i / denom;
+        wf_v[k] = m_v / denom
+        wf_i[k] = m_i / denom
         wf_c[k] = m_c / denom
-        wf_a[k] = m_a / denom;
-        wf_g[k] = m_g / denom;
+        wf_a[k] = m_a / denom
+        wf_g[k] = m_g / denom
         wf_w[k] = m_w / denom
     end
     p5 = plot(

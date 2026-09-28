@@ -266,8 +266,8 @@ end
         # Build operator's declared support pattern (3-cell tridiagonal on
         # T-row + every ξ row).
         n_total = length(u)
-        I = Int[];
-        J_idx = Int[];
+        I = Int[]
+        J_idx = Int[]
         V = Float64[]
         for i = 1:n
             iL = i == 1 ? 0 : i - 1
@@ -275,36 +275,36 @@ end
             rows = (i, ntuple(j -> n + (j - 1) * n + i, NC)...)
             for r in rows
                 if iL != 0
-                    ;
-                    push!(I, r);
-                    push!(J_idx, iL);
-                    push!(V, 1.0);
+
+                    push!(I, r)
+                    push!(J_idx, iL)
+                    push!(V, 1.0)
                 end
-                push!(I, r);
-                push!(J_idx, i);
+                push!(I, r)
+                push!(J_idx, i)
                 push!(V, 1.0)
                 if iR != 0
-                    ;
-                    push!(I, r);
-                    push!(J_idx, iR);
-                    push!(V, 1.0);
+
+                    push!(I, r)
+                    push!(J_idx, iR)
+                    push!(V, 1.0)
                 end
                 for k = 1:NC
                     ξ_off = n + (k - 1) * n
                     if iL != 0
-                        ;
-                        push!(I, r);
-                        push!(J_idx, ξ_off + iL);
-                        push!(V, 1.0);
+
+                        push!(I, r)
+                        push!(J_idx, ξ_off + iL)
+                        push!(V, 1.0)
                     end
-                    push!(I, r);
-                    push!(J_idx, ξ_off + i);
+                    push!(I, r)
+                    push!(J_idx, ξ_off + i)
                     push!(V, 1.0)
                     if iR != 0
-                        ;
-                        push!(I, r);
-                        push!(J_idx, ξ_off + iR);
-                        push!(V, 1.0);
+
+                        push!(I, r)
+                        push!(J_idx, ξ_off + iR)
+                        push!(V, 1.0)
                     end
                 end
             end

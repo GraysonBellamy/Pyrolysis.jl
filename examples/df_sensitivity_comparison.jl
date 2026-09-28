@@ -107,8 +107,8 @@ function parse_thermakin_output(filepath::String)
             i += 1
             cell_temps = Float64[]
             while i <= length(lines) &&
-                      !isempty(strip(lines[i])) &&
-                      !startswith(lines[i], "Total")
+                  !isempty(strip(lines[i])) &&
+                  !startswith(lines[i], "Total")
                 cell_parts = split(lines[i], '\t')
                 cell_vals = Float64[]
                 for p in cell_parts

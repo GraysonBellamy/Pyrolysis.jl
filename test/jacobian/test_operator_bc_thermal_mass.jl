@@ -372,30 +372,30 @@ end
         # plus NC×(1+NC) mass block at ξ-rows[bdy] × {T-col[bdy], ξ-cols[bdy]}.
         # Boundary cells are 1 and n.
         n_total = length(u)
-        I = Int[];
-        J_idx = Int[];
+        I = Int[]
+        J_idx = Int[]
         V = Float64[]
         for cell_id in (1, n)
             # Thermal + BC-mass energy row: T-row[cell_id]
-            push!(I, cell_id);
-            push!(J_idx, cell_id);
+            push!(I, cell_id)
+            push!(J_idx, cell_id)
             push!(V, 1.0)
             for j = 1:NC
                 ξ_off = n + (j - 1) * n
-                push!(I, cell_id);
-                push!(J_idx, ξ_off + cell_id);
+                push!(I, cell_id)
+                push!(J_idx, ξ_off + cell_id)
                 push!(V, 1.0)
             end
             # Mass: ξ-rows[j, cell_id]
             for r_j = 1:NC
                 gr = n + (r_j - 1) * n + cell_id
-                push!(I, gr);
-                push!(J_idx, cell_id);
+                push!(I, gr)
+                push!(J_idx, cell_id)
                 push!(V, 1.0)
                 for j = 1:NC
                     ξ_off = n + (j - 1) * n
-                    push!(I, gr);
-                    push!(J_idx, ξ_off + cell_id);
+                    push!(I, gr)
+                    push!(J_idx, ξ_off + cell_id)
                     push!(V, 1.0)
                 end
             end
@@ -485,27 +485,27 @@ end
         # (cell-local; the S_conv row with its neighbor reach belongs to
         # BCConvectionOperator).
         n_total = length(u)
-        I = Int[];
-        J_idx = Int[];
+        I = Int[]
+        J_idx = Int[]
         V = Float64[]
         for cell_id in (1, n)
-            push!(I, cell_id);
-            push!(J_idx, cell_id);
+            push!(I, cell_id)
+            push!(J_idx, cell_id)
             push!(V, 1.0)
             for j = 1:NC
                 ξ_off = n + (j - 1) * n
-                push!(I, cell_id);
-                push!(J_idx, ξ_off + cell_id);
+                push!(I, cell_id)
+                push!(J_idx, ξ_off + cell_id)
                 push!(V, 1.0)
                 # mass rows (needed because BCMassOperator scatters them too)
                 gr = n + (j - 1) * n + cell_id
-                push!(I, gr);
-                push!(J_idx, cell_id);
+                push!(I, gr)
+                push!(J_idx, cell_id)
                 push!(V, 1.0)
                 for k = 1:NC
                     ξk_off = n + (k - 1) * n
-                    push!(I, gr);
-                    push!(J_idx, ξk_off + cell_id);
+                    push!(I, gr)
+                    push!(J_idx, ξk_off + cell_id)
                     push!(V, 1.0)
                 end
             end

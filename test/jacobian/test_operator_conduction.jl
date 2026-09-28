@@ -222,45 +222,45 @@ end
         # for each cell i, columns are T at {iL, i, iR} and ξ at {iL, i, iR}
         # (skipping missing-neighbor slots at boundaries). Only T rows.
         n_total = length(u)
-        I = Int[];
-        J = Int[];
+        I = Int[]
+        J = Int[]
         V = Float64[]
         for i = 1:n
             iL = i == 1 ? 0 : i - 1
             iR = i == n ? 0 : i + 1
             # T columns
             if iL != 0
-                ;
-                push!(I, i);
-                push!(J, iL);
-                push!(V, 1.0);
+
+                push!(I, i)
+                push!(J, iL)
+                push!(V, 1.0)
             end
-            push!(I, i);
-            push!(J, i);
+            push!(I, i)
+            push!(J, i)
             push!(V, 1.0)
             if iR != 0
-                ;
-                push!(I, i);
-                push!(J, iR);
-                push!(V, 1.0);
+
+                push!(I, i)
+                push!(J, iR)
+                push!(V, 1.0)
             end
             # ξ columns
             for j = 1:NC
                 ξ_off = n + (j - 1) * n
                 if iL != 0
-                    ;
-                    push!(I, i);
-                    push!(J, ξ_off + iL);
-                    push!(V, 1.0);
+
+                    push!(I, i)
+                    push!(J, ξ_off + iL)
+                    push!(V, 1.0)
                 end
-                push!(I, i);
-                push!(J, ξ_off + i);
+                push!(I, i)
+                push!(J, ξ_off + i)
                 push!(V, 1.0)
                 if iR != 0
-                    ;
-                    push!(I, i);
-                    push!(J, ξ_off + iR);
-                    push!(V, 1.0);
+
+                    push!(I, i)
+                    push!(J, ξ_off + iR)
+                    push!(V, 1.0)
                 end
             end
         end

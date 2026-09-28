@@ -45,7 +45,7 @@ function case_banner(case_file::String)
     end
     filter!(l -> !occursin(r"^=+$", l), banner)
     while !isempty(banner) &&
-        (occursin(r"^V-[A-Z]+-\d+", banner[1]) || isempty(strip(banner[1])))
+          (occursin(r"^V-[A-Z]+-\d+", banner[1]) || isempty(strip(banner[1])))
         popfirst!(banner)
     end
     return strip(join(banner, "\n"))

@@ -180,7 +180,7 @@ function compute_diagnostics(sol)
     # Top-region average for residue density (the heated zone is most-converted).
     n_top = max(1, n_cells_active ÷ 4)
     # Bottom = cell 1, top = cell n. Top region = last n_top cells.
-    m_top = 0.0;
+    m_top = 0.0
     V_top = 0.0
     for i = (n_cells_active-n_top+1):n_cells_active
         mesh.active_cell_mask[i] || continue

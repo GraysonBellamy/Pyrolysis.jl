@@ -73,7 +73,7 @@ function main()
         base = run_one(label, q, false)
         split = run_one(label, q, true)
         if base === nothing || split === nothing
-            @warn "  $label failed";
+            @warn "  $label failed"
             continue
         end
         println()
