@@ -513,7 +513,11 @@ end
 # Boundary conditions
 # ============================================================================
 
-function build_bcs(scenario; use_emission_split::Bool = true)
+function build_bcs(
+    scenario;
+    use_emission_split::Bool = true,
+    blowing::AbstractBlowingModel = CouetteFilm(),
+)
     # Top BC — hemispherical decomposition. The cone subtends F_cone of the
     # sample's upper hemisphere; chamber walls fill the remaining (1−F_cone).
     # The Schmidt-Boelter flux gauge is calibrated cone-only (cold-wall
@@ -549,7 +553,7 @@ function build_bcs(scenario; use_emission_split::Bool = true)
         rad_flux +
         RadiativeBC(F = F_cone, T_inf = 0.0, validate = false) +
         RadiativeBC(F = 1.0 - F_cone, T_inf = scenario.T_top_surr) +
-        ConvectiveBC(h = scenario.h_top, T_inf = scenario.T_top_gas)
+        ConvectiveBC(h = scenario.h_top, T_inf = scenario.T_top_gas, blowing = blowing)
     top_mass = DiffusiveMassBC(0.05) + DirichletPressureBC(101325.0)
 
     # Bottom: free to surroundings, impermeable.
@@ -557,7 +561,7 @@ function build_bcs(scenario; use_emission_split::Bool = true)
     # back surface measurement target), independent of decomposition state.
     bottom_thermal =
         RadiativeBC(ε = scenario.ε_bottom, T_inf = scenario.T_bot_surr) +
-        ConvectiveBC(h = scenario.h_bot, T_inf = scenario.T_bot_gas)
+        ConvectiveBC(h = scenario.h_bot, T_inf = scenario.T_bot_gas, blowing = blowing)
     bottom_mass = ImpermeableBC()
 
     BoundaryConditionSet(
@@ -614,14 +618,13 @@ solve cost on MaCFP-shape problems. Newton absorbs the approximation by
 taking a few extra iterations; for inverse analysis where the same problem
 shape is solved hundreds of times this is a clear win.
 
-`use_blowing_correction` is ON by default for this inverse analysis: every
-`ConvectiveBC` in the surface BC set has its film coefficient rescaled by the
+`blowing` is the blowing model every `ConvectiveBC` of the surface BC set
+carries, `CouetteFilm()` by default: the film coefficient is rescaled by the
 Couette-film factor `B/(exp(B)−1)`, `B = ṁ″·c_p,g/h`, so outgassing pyrolysate
-suppresses convective gain/loss at the hot face. The flag is threaded into both
-the residual (via `solve`) and the Jacobian (via the explicit `JacobianSpec`
-and `solve`'s internal default), keeping them consistent. NOTE: enabling this
-changes the forward model, so conductivities fit without it are no longer
-optimal — re-run the calibration.
+suppresses convective gain/loss at the hot face. The model sits on the BC, so
+the residual and the Jacobian see the same physics. NOTE: changing the model
+changes the forward model, so conductivities fit with another one are no
+longer optimal — re-run the calibration.
 """
 function build_and_solve(
     θ::AbstractVector,
@@ -632,7 +635,7 @@ function build_and_solve(
     log_level::Union{Nothing,Logging.LogLevel} = nothing,
     kinetics_set::Symbol = :constant,
     use_transpiration_bc::Bool = false,
-    use_blowing_correction::Bool = true,
+    blowing::AbstractBlowingModel = CouetteFilm(),
     use_emission_split::Bool = true,
     kinetics_dE = ntuple(_ -> 0.0, 5),
     jacobian_strategy::Union{Nothing,LinearSolveStrategy} = nothing,
@@ -649,7 +652,7 @@ function build_and_solve(
         use_emission_split = use_emission_split,
         kinetics_dE = kinetics_dE,
     )
-    bc_set = build_bcs(scenario; use_emission_split = use_emission_split)
+    bc_set = build_bcs(scenario; use_emission_split = use_emission_split, blowing = blowing)
 
     T0 = scenario.T_initial === nothing ? scenario.T_bot_surr(0.0) : scenario.T_initial
 
@@ -713,7 +716,6 @@ function build_and_solve(
                 use_ale = true,
                 radiation_model = SURFACE_ABSORPTION,
                 use_transpiration_bc = use_transpiration_bc,
-                use_blowing_correction = use_blowing_correction,
                 min_thickness = 0.5e-3,
             )
 
@@ -733,7 +735,6 @@ function build_and_solve(
             handle_depletion = false,
             jacobian = jac_spec,
             use_transpiration_bc = use_transpiration_bc,
-            use_blowing_correction = use_blowing_correction,
             integrator = KenCarp4(linsolve = SparspakFactorization()),
         )
         if log_level === nothing

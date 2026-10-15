@@ -78,7 +78,6 @@ function solve_boundary_temperature(
     ε_eff::Float64;
     a_eff::Float64 = ε_eff,
     radiation_model::RadiationModel = SURFACE_ABSORPTION,
-    use_blowing::Bool = false,
     J_blowing::NTuple{NC,Float64} = J_boundary_outward,
     tol::Float64 = 1e-10,
     max_iter::Int = 50,
@@ -98,7 +97,6 @@ function solve_boundary_temperature(
         ε_eff;
         a_eff = a_eff,
         radiation_model = radiation_model,
-        use_blowing = use_blowing,
         J_blowing = J_blowing,
         tol = tol,
         max_iter = max_iter,
@@ -146,18 +144,16 @@ from the exact derivative of the *midpoint-rule* residual actually evaluated by
 order, so Newton still converges to the residual's root (the converged `T_s` is
 unbiased); only the convergence rate is marginally sub-quadratic.
 
-# Blowing correction (opt-in)
+# Blowing
 
-With `use_blowing = true` every `ConvectiveBC` inside `bc` is rescaled by the
-Couette-film factor `h → h·B/(e^B − 1)`, `B = ṁ″·c_p,g/h`, where the blowing
-conductance `ṁ″·c_p,g = Σ_g J_blowing[g]·cp_g(T_s)` is rebuilt from
-`J_blowing` at every Newton iterate (see [`blowing_factor`](@ref) and
-[`_blowing_conductance`](@ref)). `J_blowing` carries the *true* outward gas
-mass flux and defaults to `J_boundary_outward` — the two are separate
-arguments because under the default S_conv-only convention the caller zeroes
-`J_boundary_outward` (transpiration off) while blowing still needs the real
-flux. The Newton `df` uses the frozen-B derivative `−h·χ` (first-order
-consistent, same convention as the transpiration derivative above).
+Every `ConvectiveBC` inside `bc` applies its blowing model (`bc.blowing`, see
+[`blowing_state`](@ref)) to a [`BlowingFace`](@ref) rebuilt at every Newton
+iterate from `J_blowing` and the current `T_s`. `J_blowing` carries the *true*
+outward gas mass flux and defaults to `J_boundary_outward` — the two are
+separate arguments because under the default S_conv-only convention the caller
+zeroes `J_boundary_outward` (transpiration off) while the blowing models still
+need the real flux. The Newton `df` uses the frozen-χ derivative `−h·χ`
+(first-order consistent, same convention as the transpiration derivative above).
 
 # Non-convergence and clamping
 On max-iteration exhaustion or a singular Newton derivative the solve does NOT
@@ -183,7 +179,6 @@ the outcome either way.
     ε_eff::Real;
     a_eff::Real = ε_eff,
     radiation_model::RadiationModel = SURFACE_ABSORPTION,
-    use_blowing::Bool = false,
     J_blowing::NTuple{NC,<:Real} = J_boundary_outward,
     tol::Float64 = 1e-10,
     max_iter::Int = 50,
@@ -218,17 +213,16 @@ the outcome either way.
     for i = 1:max_iter
         iter = i
 
-        # Blowing conductance at the current iterate (zero when blowing is
-        # off → ConvectiveBC applies blowing_factor(0) = 1, the exact
-        # uncorrected flux).
-        mcp = use_blowing ? _blowing_conductance(material, J_blowing, T_s) : zero(Tu)
+        # The face at the current iterate: every convective member applies its
+        # blowing model to it (`NoBlowing` returns the exact uncorrected flux).
+        face = BlowingFace(J_blowing, T_s, material)
         q_bc, dq_bc_dT = evaluate_bc_flux_and_derivative(
             bc,
             T_s,
             t,
             ε_eff,
             radiation_model,
-            mcp;
+            face;
             a_eff = a_eff,
         )
 
@@ -303,14 +297,14 @@ the outcome either way.
     end
 
     # Final flux evaluation (typed) — these are what the caller will read.
-    mcp_final = use_blowing ? _blowing_conductance(material, J_blowing, T_s) : zero(Tu)
+    face_final = BlowingFace(J_blowing, T_s, material)
     q_bc_final, _ = evaluate_bc_flux_and_derivative(
         bc,
         T_s,
         t,
         ε_eff,
         radiation_model,
-        mcp_final;
+        face_final;
         a_eff = a_eff,
     )
     q_cond_final = k_eff * (T_s - T_cell) / Δz_half
@@ -328,7 +322,7 @@ the outcome either way.
     state.q_applied = ForwardDiff.value(q_bc_final)
     state.q_conducted = ForwardDiff.value(q_cond_final)
     state.q_transpired = ForwardDiff.value(q_transpire_final)
-    state.blowing_mcp = ForwardDiff.value(mcp_final)
+    _record_blowing!(state, bc, face_final, t)
     state.T_cell = ForwardDiff.value(T_cell)
     state.k_eff = ForwardDiff.value(k_eff)
     state.Δz_half = ForwardDiff.value(Δz_half)
@@ -370,71 +364,6 @@ end
         end)
     end
     push!(exprs, :(return q, dq))
-    return Expr(:block, exprs...)
-end
-
-# ============================================================================
-# Blowing (transpiration) correction to the convective coefficient
-# ============================================================================
-
-"""
-	blowing_factor(B) -> Real
-
-Couette-film (Spalding) blowing correction to a convective heat-transfer
-coefficient: `h_eff = h₀ · B/(e^B − 1)` with the blowing parameter
-`B = ṁ″·c_p,g / h₀` built from the outward gas mass flux through the
-boundary layer.
-
-Smooth for all real `B`: `f(0) = 1` (no flow), `f(B) → B·e^(−B) → 0` as
-`B → ∞` (convection extinguished by strong outgassing), `f(B) > 1` for
-`B < 0` (suction enhancement). Three numerically stable branches:
-
-- `|B| < 1e-5`: 4th-order Taylor `1 − B/2 + B²/12` (the naive form is
-  0/0 at the origin; values and first derivatives match the exact form
-  to ~1e-16 at the branch seams).
-- `B > 0`: `B·e^(−B)/(−expm1(−B))` — the naive `B/expm1(B)` overflows to
-  `Inf` near `B ≈ 710` and poisons ForwardDiff partials with `NaN`; this
-  form underflows cleanly to zero with clean Duals.
-- `B < 0`: `B/expm1(B)` — `expm1(B) → −1`, no overflow possible.
-
-AD-clean: generic over `Real`, branches on the primal value only through
-ordinary comparisons, so `ForwardDiff.Dual` inputs propagate exactly.
-"""
-@inline function blowing_factor(B::Real)
-    if abs(B) < 1e-5
-        return 1 - B / 2 + B^2 / 12
-    elseif B > 0
-        return B * exp(-B) / (-expm1(-B))
-    else
-        return B / expm1(B)
-    end
-end
-
-# Net blowing conductance ṁ″·c_p,g = Σ_g ṁ_g · cp_g(T_s) [W/(m²·K)] at a
-# boundary face, summed over gas components with the SIGNED outward mass flux
-# (outflow > 0 pushes the boundary layer off — blowing; net inflow gives a
-# negative conductance — suction — which `blowing_factor` maps to an
-# enhancement). cp is evaluated at the current surface-temperature iterate;
-# the temperature choice is second-order on an O(1) correction (film vs
-# surface differs by ~cp′·(T_s−T_∞)/2, well inside the ±30% uncertainty of
-# h₀ itself) and keeps the residual a pure function of state. Compile-time
-# unrolled, mirroring `_transpiration_flux_and_derivative`.
-@generated function _blowing_conductance(
-    material::Material{NC},
-    ṁ::NTuple{NC,<:Real},
-    T_s::Real,
-) where {NC}
-    exprs = Expr[]
-    push!(exprs, :(Tu = promote_type(eltype(ṁ), typeof(T_s))))
-    push!(exprs, :(mcp = zero(Tu)))
-    for j = 1:NC
-        push!(exprs, quote
-            @inbounds if is_gas(material.components[$j])
-                mcp += ṁ[$j] * material.components[$j].heat_capacity(T_s)
-            end
-        end)
-    end
-    push!(exprs, :(return mcp))
     return Expr(:block, exprs...)
 end
 
@@ -482,16 +411,15 @@ and should therefore contribute **zero** boundary flux here.
 end
 
 """
-	evaluate_bc_flux_and_derivative(bc, T_s, t, ε_eff, radiation_model, mcp)
+	evaluate_bc_flux_and_derivative(bc, T_s, t, ε_eff, radiation_model, face)
 
-Blowing-aware variant. `mcp` is the net blowing conductance
-`ṁ″·c_p,g = Σ_g ṁ_g·cp_g(T_s)` [W/(m²·K)] at this boundary face (see
-[`_blowing_conductance`](@ref)). Only convective BCs consume it — each
-`ConvectiveBC` forms its own blowing parameter `B = mcp/h` against its own
-`h` and rescales `h → h·B/(e^B − 1)` ([`blowing_factor`](@ref)); every
-other BC type ignores `mcp` and falls through to the radiation-model-aware
-5-argument method. `mcp = 0` reproduces the uncorrected flux exactly
-(`blowing_factor(0) ≡ 1`).
+Blowing-aware variant. `face` is the [`BlowingFace`](@ref) at this boundary
+(outward species mass fluxes, surface-temperature iterate, material). Only
+convective BCs consume it — each `ConvectiveBC` asks its own blowing model for
+the ratio `χ = h_eff/h` against its own `h` and ambient temperature
+([`blowing_ratio`](@ref)); every other BC type ignores `face` and falls
+through to the radiation-model-aware 5-argument method. Zero outflow
+reproduces the uncorrected flux exactly for every shipped model.
 """
 @inline function evaluate_bc_flux_and_derivative(
     bc::AbstractThermalBC,
@@ -499,7 +427,7 @@ other BC type ignores `mcp` and falls through to the radiation-model-aware
     t::Real,
     ε_eff::Real,
     radiation_model::RadiationModel,
-    mcp::Real;
+    face::BlowingFace;
     a_eff::Real = ε_eff,
 )
     return evaluate_bc_flux_and_derivative(
@@ -512,27 +440,27 @@ other BC type ignores `mcp` and falls through to the radiation-model-aware
     )
 end
 
-# ConvectiveBC with blowing: q = h·χ·(T_inf − T_s), χ = blowing_factor(mcp/h).
-# The Newton derivative uses the frozen-B form dq/dT_s = −h·χ, dropping the
-# h·f′(B)·(∂B/∂T_s)·(T_inf − T_s) term (∂B/∂T_s needs cp′). Same first-order-
-# consistent convention as the transpiration derivative (see the
-# `solve_boundary_temperature!` docstring): Newton converges to the exact
-# residual root, marginally sub-quadratically; the Dual fixed point is still
-# the exact implicit-function-theorem derivative.
+# ConvectiveBC with blowing: q = h·χ·(T_inf − T_s), χ from the BC's model.
+# The Newton derivative uses the frozen-χ form dq/dT_s = −h·χ, dropping the
+# h·(∂χ/∂T_s)·(T_inf − T_s) term. Same first-order-consistent convention as
+# the transpiration derivative (see the `solve_boundary_temperature!`
+# docstring): Newton converges to the exact residual root, marginally
+# sub-quadratically; the Dual fixed point is still the exact
+# implicit-function-theorem derivative.
 @inline function evaluate_bc_flux_and_derivative(
     bc::ConvectiveBC,
     T_s::Real,
     t::Real,
     ε_eff::Real,
     radiation_model::RadiationModel,
-    mcp::Real;
+    face::BlowingFace;
     a_eff::Real = ε_eff,
 )
     h = evaluate_param(bc.h, t)
     T_inf = evaluate_param(bc.T_inf, t)
-    # h ≤ 0 leaves B undefined; the flux is then ≤ 0·(T_inf − T_s) anyway, so
-    # apply no correction rather than divide by zero.
-    χ = h > zero(h) ? blowing_factor(mcp / h) : one(mcp)
+    # h ≤ 0 leaves the blowing parameter undefined; the flux is then
+    # ≤ 0·(T_inf − T_s) anyway, so apply no correction rather than divide by zero.
+    χ = h > zero(h) ? blowing_ratio(bc.blowing, face, h, T_inf) : one(T_s)
     q = h * χ * (T_inf - T_s)
     dq_dT = -h * χ
     return q, dq_dT
@@ -544,7 +472,7 @@ end
     t::Real,
     ε_eff::Real,
     radiation_model::RadiationModel,
-    mcp::Real;
+    face::BlowingFace;
     a_eff::Real = ε_eff,
 ) where {BCs}
     N = fieldcount(BCs)
@@ -557,7 +485,7 @@ end
                 typeof(t),
                 typeof(ε_eff),
                 typeof(a_eff),
-                typeof(mcp),
+                eltype(face.ṁ),
             )
         ),
     )
@@ -573,7 +501,7 @@ end
                     t,
                     ε_eff,
                     radiation_model,
-                    mcp;
+                    face;
                     a_eff = a_eff,
                 )
                 q_total += q_i
@@ -871,7 +799,6 @@ function update_boundary_state!(
     T_ref::Real,
     t::Real,
     radiation_model::RadiationModel = SURFACE_ABSORPTION;
-    use_blowing::Bool = false,
     J_blowing::NTuple{NC,<:Real} = J_boundary_outward,
 ) where {NC}
     # Cell adjacent to this boundary (1 = top/exposed at z = L; 2 = bottom).
@@ -905,7 +832,6 @@ function update_boundary_state!(
         ε_eff;
         a_eff = a_eff,
         radiation_model = radiation_model,
-        use_blowing = use_blowing,
         J_blowing = J_blowing,
     )
 end

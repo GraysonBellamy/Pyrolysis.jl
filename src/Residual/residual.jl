@@ -52,7 +52,6 @@ function _residual!(du, u, def::ProblemDef, t, ws::Workspace, ::Eulerian)
     radiation_kirchhoff = get_option(def, :radiation_kirchhoff, true)
     energy_form = get_option(def, :energy_form, :standard)
     use_transpiration_bc = get_option(def, :use_transpiration_bc, false)
-    use_blowing_correction = get_option(def, :use_blowing_correction, false)
 
     # 1) Populate the typed state cache from u — single source of truth
     #    for state during residual assembly. Eulerian geometry is constant
@@ -73,7 +72,6 @@ function _residual!(du, u, def::ProblemDef, t, ws::Workspace, ::Eulerian)
         radiation_kirchhoff,
         energy_form,
         use_transpiration_bc,
-        use_blowing_correction,
         transport_mode(def.mode),
     )
 
@@ -118,7 +116,6 @@ function _residual!(du, u, def::ProblemDef, t, ws::Workspace, ::ALE)
     radiation_kirchhoff = get_option(def, :radiation_kirchhoff, true)
     energy_form = get_option(def, :energy_form, :standard)
     use_transpiration_bc = get_option(def, :use_transpiration_bc, false)
-    use_blowing_correction = get_option(def, :use_blowing_correction, false)
 
     # 1) Populate the typed state cache from u (T, ξ, z, χ).
     populate!(ws.state_cache, u, layout)
@@ -150,7 +147,6 @@ function _residual!(du, u, def::ProblemDef, t, ws::Workspace, ::ALE)
         radiation_kirchhoff,
         energy_form,
         use_transpiration_bc,
-        use_blowing_correction,
         transport_mode(def.mode),
     )
 
@@ -281,7 +277,6 @@ end
     radiation_kirchhoff::Bool,
     energy_form::Symbol,
     use_transpiration_bc::Bool,
-    use_blowing_correction::Bool,
     ::Fickian,
 )
     Discretization.compute_rhs!(
@@ -301,7 +296,6 @@ end
         radiation_kirchhoff = radiation_kirchhoff,
         energy_form = energy_form,
         use_transpiration_bc = use_transpiration_bc,
-        use_blowing_correction = use_blowing_correction,
     )
 end
 
@@ -315,7 +309,6 @@ end
     radiation_kirchhoff::Bool,
     energy_form::Symbol,
     use_transpiration_bc::Bool,
-    use_blowing_correction::Bool,
     ::DarcyFick,
 )
     Discretization.compute_rhs_darcy_fick!(
@@ -335,7 +328,6 @@ end
         radiation_kirchhoff = radiation_kirchhoff,
         energy_form = energy_form,
         use_transpiration_bc = use_transpiration_bc,
-        use_blowing_correction = use_blowing_correction,
     )
 end
 

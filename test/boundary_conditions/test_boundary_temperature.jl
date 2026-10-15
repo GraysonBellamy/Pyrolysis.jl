@@ -548,13 +548,22 @@ _solve_bt(T_cell, k, Δz, bc, t, ε; kwargs...) = solve_boundary_temperature(
             )
             @test q_c ≈ q + q_emit
             @test dq_c ≈ dq_emit
+            # The face-aware form with no outflow forwards a_eff the same way.
+            mat_face = Material(
+                name = :face,
+                components = (
+                    SolidComponent(:s; ρ = 1000.0, c = 1000.0, k = 0.2, ε = 0.9),
+                    GaseousComponent(:g; M = 0.03, c = 1000.0, k = 0.03, λ = 1e-5),
+                ),
+                reactions = (),
+            )
             q6, _ = evaluate_bc_flux_and_derivative(
                 bc + rad,
                 T_s,
                 t,
                 ε_eff,
                 NO_RADIATION,
-                0.0;
+                Pyrolysis.Discretization.BlowingFace((0.0, 0.0), T_s, mat_face);
                 a_eff = a_eff,
             )
             @test q6 ≈ q_c
@@ -941,16 +950,16 @@ end  # main testset
     )
     @test hf.absorbed ≈ a_eff * q_inc
     @test hf.net ≈ s_single.q_applied rtol = 1e-12
-    hf_mcp = compute_boundary_heat_fluxes(
+    hf_face = compute_boundary_heat_fluxes(
         single,
         T_s,
         t,
         ε_eff,
         SURFACE_ABSORPTION,
-        0.0;
+        Pyrolysis.Discretization.BlowingFace((0.0, 0.0, 0.0), T_s, mat);
         a_eff = a_eff,
     )
-    @test hf_mcp.net ≈ hf.net
+    @test hf_face.net ≈ hf.net
 end
 
 # The surface Newton starts from the cell temperature, never from the stored

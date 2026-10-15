@@ -247,7 +247,6 @@ function compute_rhs!(
     radiation_kirchhoff::Bool = true,
     energy_form::Symbol = :standard,
     use_transpiration_bc::Bool = false,
-    use_blowing_correction::Bool = false,
 ) where {NC}
 
     n_cells_val = mesh.n_active_cells
@@ -329,7 +328,6 @@ function compute_rhs!(
         bottom_face_ids,
         radiation_model;
         use_transpiration_bc = use_transpiration_bc,
-        use_blowing_correction = use_blowing_correction,
     )
 
     # ========================================================================
@@ -441,13 +439,12 @@ When `use_transpiration_bc = false` (default) `ṁ_g` is zeroed and this reduces
 to `q_BC(T_s) = q_cond(T_s, T_cell)`. `ṁ_g` is read from `J_gas[g, face]` at the boundary face — populated by the
 mass-flux pass that runs *before* this thermal BC pass in `compute_rhs!`.
 
-With `use_blowing_correction = true` every `ConvectiveBC` in the surface
-balance is rescaled by the Couette-film blowing factor `h → h·B/(e^B − 1)`,
-`B = ṁ″·c_p,g/h`, built from the **true** outward gas flux at the face
-(`J_gas[g, face]`, which includes the Darcy venting part in Darcy–Fick mode).
-This is independent of the transpiration enthalpy term: blowing reads the
-real flux even while transpiration stays zeroed (the supported S_conv-only
-convention). See `Discretization.blowing_factor`.
+Every `ConvectiveBC` in the surface balance applies its blowing model
+(`bc.blowing`, see `blowing_state`) to the **true** outward gas flux at the
+face (`J_gas[g, face]`, which includes the Darcy venting part in Darcy–Fick
+mode). This is independent of the transpiration enthalpy term: the blowing
+model reads the real flux even while transpiration stays zeroed (the
+supported S_conv-only convention).
 
 # Arguments
 - `q`: Face flux array (modified in-place)
@@ -473,7 +470,6 @@ function apply_thermal_bc_flux!(
     bottom_face_ids::Vector{Int},
     radiation_model::RadiationModel = SURFACE_ABSORPTION;
     use_transpiration_bc::Bool = false,
-    use_blowing_correction::Bool = false,
 ) where {NC}
     # Top boundary (boundary_id = 1, z = L)
     _apply_thermal_bc_static!(
@@ -489,7 +485,6 @@ function apply_thermal_bc_flux!(
         Val(:top),
         radiation_model;
         use_transpiration_bc = use_transpiration_bc,
-        use_blowing_correction = use_blowing_correction,
     )
 
     # Bottom boundary (boundary_id = 2, z = 0)
@@ -506,7 +501,6 @@ function apply_thermal_bc_flux!(
         Val(:bottom),
         radiation_model;
         use_transpiration_bc = use_transpiration_bc,
-        use_blowing_correction = use_blowing_correction,
     )
 
     return nothing
@@ -542,7 +536,6 @@ otherwise). The default S_conv-only convention reduces this to
     ::Val{boundary},
     radiation_model::RadiationModel = SURFACE_ABSORPTION;
     use_transpiration_bc::Bool = false,
-    use_blowing_correction::Bool = false,
 ) where {BC<:AbstractThermalBC,NC,boundary}
     # Handle DirichletThermalBC specially (T_s prescribed, no transpiration solve)
     if BC <: DirichletThermalBC
@@ -581,6 +574,10 @@ otherwise). The default S_conv-only convention reduces this to
             bstate.q_conducted = ForwardDiff.value(q_bc)
             bstate.q_transpired = 0.0
             bstate.blowing_mcp = 0.0
+            bstate.blowing_ratio = 1.0
+            bstate.pooling_factor = 1.0
+            bstate.face_fraction = 0.0
+            bstate.face_buoyancy = 1.0
             bstate.T_cell = ForwardDiff.value(T_cell)
             bstate.k_eff = ForwardDiff.value(k_cell)
             bstate.Δz_half = ForwardDiff.value(dz_half)
@@ -620,7 +617,6 @@ otherwise). The default S_conv-only convention reduces this to
             T_ref,
             t,
             radiation_model;
-            use_blowing = use_blowing_correction,
             J_blowing = J_outward_true,
         )
 
@@ -984,7 +980,6 @@ function compute_rhs_darcy_fick!(
     radiation_kirchhoff::Bool = true,
     energy_form::Symbol = :standard,
     use_transpiration_bc::Bool = false,
-    use_blowing_correction::Bool = false,
 ) where {NC}
 
     n_cells_val = mesh.n_active_cells
@@ -1076,7 +1071,6 @@ function compute_rhs_darcy_fick!(
         bottom_face_ids,
         radiation_model;
         use_transpiration_bc = use_transpiration_bc,
-        use_blowing_correction = use_blowing_correction,
     )
 
     # ========================================================================

@@ -70,6 +70,7 @@ include("components.jl")
 include("reactions.jl")
 include("materials.jl")
 include("radiation_types.jl")
+include("blowing_models.jl")
 
 # ============================================================================
 # Exports
@@ -105,6 +106,12 @@ export delta_enthalpy                                    # Sensible-enthalpy dif
 export get_permeability, has_permeability  # Permeability accessors for components
 export get_density, get_intrinsic_density  # Bulk vs. skeletal density accessors
 export get_emissivity, get_absorptivity, surface_absorptivity  # Radiative surface accessors
+
+# Blowing models (evaluated in Discretization/blowing.jl)
+export AbstractBlowingModel,
+    NoBlowing, CouetteFilm, PropertyRatioFilm, PoolingFilm, FunctionBlowing
+export GasSpecies, NITROGEN, nasa7_heat_capacity, eucken_viscosity, fuller_diffusivity
+export gas_property_temperature
 
 # Reactions
 export Reaction, ReactionSet

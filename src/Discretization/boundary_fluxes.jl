@@ -379,7 +379,7 @@ using ..BoundaryConditions: DirichletPressureBC, NeumannPressureBC, ConvectivePr
 
 """
 	compute_boundary_heat_fluxes(bc::AbstractThermalBC, T_surface, t, ε_eff,
-	                             radiation_model[, mcp]; a_eff = ε_eff)
+	                             radiation_model[, face]; a_eff = ε_eff)
 
 Decompose the boundary heat flux into named components for diagnostics.
 `a_eff` is the effective surface absorptivity for incident radiation
@@ -601,14 +601,13 @@ function compute_boundary_heat_fluxes(
 end
 
 # ----------------------------------------------------------------------------
-# Blowing-aware decomposition (trailing `mcp` argument)
+# Blowing-aware decomposition (trailing `face` argument)
 # ----------------------------------------------------------------------------
-# `mcp` is the net blowing conductance ṁ″·c_p,g at the converged T_s, read
-# from `BoundaryState.blowing_mcp` (zero when the blowing correction is off).
-# Mirrors `evaluate_bc_flux_and_derivative`: only convective children rescale
-# their h by `blowing_factor(mcp/h)`; every other BC ignores `mcp`. This keeps
-# the diagnostic decomposition consistent with the flux the surface Newton
-# actually applied.
+# `face` is the `BlowingFace` at the converged T_s (outward species fluxes,
+# surface temperature, material). Mirrors `evaluate_bc_flux_and_derivative`:
+# only convective children rescale their h by their blowing model's ratio;
+# every other BC ignores `face`. This keeps the diagnostic decomposition
+# consistent with the flux the surface Newton actually applied.
 
 function compute_boundary_heat_fluxes(
     bc::AbstractThermalBC,
@@ -616,7 +615,7 @@ function compute_boundary_heat_fluxes(
     t::Float64,
     ε_eff::Float64,
     radiation_model::RadiationModel,
-    mcp::Float64;
+    face::BlowingFace;
     a_eff::Float64 = ε_eff,
 )
     return compute_boundary_heat_fluxes(
@@ -635,12 +634,12 @@ function compute_boundary_heat_fluxes(
     t::Float64,
     ε_eff::Float64,
     ::RadiationModel,
-    mcp::Float64;
+    face::BlowingFace;
     a_eff::Float64 = ε_eff,
 )
     h = evaluate_param(bc.h, t)
     T_inf = evaluate_param(bc.T_inf, t)
-    χ = h > 0.0 ? blowing_factor(mcp / h) : 1.0
+    χ = h > 0.0 ? blowing_ratio(bc.blowing, face, h, T_inf) : 1.0
     q = h * χ * (T_inf - T_surface)
     q_loss = -q
     return (
@@ -658,7 +657,7 @@ function compute_boundary_heat_fluxes(
     t::Float64,
     ε_eff::Float64,
     radiation_model::RadiationModel,
-    mcp::Float64;
+    face::BlowingFace;
     a_eff::Float64 = ε_eff,
 )
     absorbed = 0.0
@@ -674,7 +673,7 @@ function compute_boundary_heat_fluxes(
             t,
             ε_eff,
             radiation_model,
-            mcp;
+            face;
             a_eff = a_eff,
         )
         absorbed += fluxes.absorbed

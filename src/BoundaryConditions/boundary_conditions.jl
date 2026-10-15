@@ -103,32 +103,46 @@ end
 HeatFluxBC(flux::Integer) = HeatFluxBC{Float64}(Float64(flux))
 
 """
-	ConvectiveBC{Fh,FT} <: AbstractThermalBC
+	ConvectiveBC{Fh,FT,BM} <: AbstractThermalBC
 
 Convective heat transfer boundary condition: q" = h(T∞ - T_surface)
 
 # Fields
-- `h::Fh`: Heat transfer coefficient [W/(m²·K)]
+- `h::Fh`: Heat transfer coefficient without outflow [W/(m²·K)]
 - `T_inf::FT`: Ambient temperature [K]
+- `blowing::BM`: how gas leaving through this face changes `h`, an
+  `AbstractBlowingModel`. `NoBlowing()` (default) leaves `h` alone;
+  `CouetteFilm()` is the classical film law; `PropertyRatioFilm` and
+  `PoolingFilm` take the gas and the free stream into account. The face's
+  outward gas flux is read from the mass balance at every surface iterate.
 
 # Example
 ```julia
 bc = ConvectiveBC(h=10.0, T_inf=300.0)
 bc = ConvectiveBC(h=10.0, T_inf=t -> 300 + 0.1*t)  # Warming ambient
+bc = ConvectiveBC(h=11.2, T_inf=360.0, blowing=PoolingFilm(NITROGEN))
 ```
 """
-struct ConvectiveBC{Fh,FT} <: AbstractThermalBC
-    h::Fh           # h(t) or constant
-    T_inf::FT       # T∞(t) or constant
+struct ConvectiveBC{Fh,FT,BM<:AbstractBlowingModel} <: AbstractThermalBC
+    h::Fh                    # h(t) or constant
+    T_inf::FT                # T∞(t) or constant
+    blowing::BM              # blowing model
 end
 
-function ConvectiveBC(; h, T_inf, validate::Bool = true)
+ConvectiveBC(h, T_inf) = ConvectiveBC(h, T_inf, NoBlowing())
+
+function ConvectiveBC(;
+    h,
+    T_inf,
+    blowing::AbstractBlowingModel = NoBlowing(),
+    validate::Bool = true,
+)
     if validate
         h_val = _get_scalar_value(h)
         T_val = _get_scalar_value(T_inf)
         validate_bc_params(h = h_val, T = T_val)
     end
-    ConvectiveBC(h, T_inf)
+    ConvectiveBC(h, T_inf, blowing)
 end
 
 """

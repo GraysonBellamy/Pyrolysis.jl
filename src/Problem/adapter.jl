@@ -78,8 +78,7 @@ end
 	                radiation_intensity=0.0,
 	                radiation_kirchhoff=true,
 	                energy_form=:standard,
-	                use_transpiration_bc=false,
-	                use_blowing_correction=false) -> ProblemDef
+	                use_transpiration_bc=false) -> ProblemDef
 
 Lift a user-facing `PyrolysisProblem` into the immutable `ProblemDef`.
 The returned object shares the underlying material/BC/initial-condition
@@ -92,14 +91,12 @@ injection (Kirchhoff α = ε); `false` means the `RadiativeFluxBC`'s explicit
 absorptivity is already folded into the intensity. `solve()` derives it from
 the top thermal BC.
 
-`use_blowing_correction` (off by default) rescales every `ConvectiveBC` in the
-surface energy balance by the Couette-film blowing factor `h → h·B/(e^B − 1)`,
-`B = ṁ″·c_p,g/h`, built from the outward gas mass flux at each boundary face.
-This is the momentum-side companion of the transpiration enthalpy term and is
-fully compatible with the default S_conv-only convention (it modifies the
-convective *coefficient*, not the gas enthalpy accounting). At peak burning
-(B ≳ 1) it suppresses convective cooling substantially — e.g. B = 4 gives
-h_eff/h = 0.075. See `Discretization.blowing_factor`.
+The effect of outgassing on convective exchange is a property of each
+`ConvectiveBC` (its `blowing` model), not a solve option: the surface balance
+feeds every convective member the outward gas mass flux at its face and the
+model returns the coefficient ratio. This modifies the convective
+*coefficient*, not the gas enthalpy accounting, so it is fully compatible
+with the default S_conv-only convention. See `Discretization.blowing_state`.
 
 !!! warning "Calibrated examples"
     Enabling blowing alone on a case calibrated *without* it (and without
@@ -126,7 +123,6 @@ function to_problem_def(
     radiation_kirchhoff::Bool = true,
     energy_form::Symbol = :standard,
     use_transpiration_bc::Bool = false,
-    use_blowing_correction::Bool = false,
 )
     # Validate the energy_form switch once at construction. Acceptable values:
     #   :standard               — default Formulation A (drops T·cp·∇·J),
@@ -188,9 +184,8 @@ function to_problem_def(
                 "use_transpiration_bc=false (S_conv only, ThermaKin Eq.17). The " *
                 "transpiration BC is retained for closed-ledger experiments only " *
                 "and must not be combined with the volumetric advection source. " *
-                "For mass-flux coupling to the convective BC, use the supported " *
-                "use_blowing_correction=true instead (Couette-film h-rescaling; " *
-                "no enthalpy double-count).",
+                "For mass-flux coupling to the convective BC, give the ConvectiveBC " *
+                "a blowing model instead (h-rescaling; no enthalpy double-count).",
             ),
         )
     end
@@ -205,7 +200,6 @@ function to_problem_def(
         output_times = problem.output_times,
         energy_form = energy_form,
         use_transpiration_bc = use_transpiration_bc,
-        use_blowing_correction = use_blowing_correction,
     )
     return ProblemDef(
         material = problem.material,
@@ -389,8 +383,7 @@ end
 	                 radiation_intensity=0.0,
 	                 radiation_kirchhoff=true,
 	                 energy_form=:standard,
-	                 use_transpiration_bc=false,
-	                 use_blowing_correction=false) -> (def, ws, u0)
+	                 use_transpiration_bc=false) -> (def, ws, u0)
 
 Canonical setup path from a `PyrolysisProblem` to a ready-to-integrate
 `(ProblemDef, Workspace, u0)` triple. Mirrors `solve()`'s order exactly:
@@ -434,7 +427,6 @@ function initialize_state(
     radiation_kirchhoff::Bool = true,
     energy_form::Symbol = :standard,
     use_transpiration_bc::Bool = false,
-    use_blowing_correction::Bool = false,
 )
     apply_initial_conditions!(problem)
     def = to_problem_def(
@@ -445,7 +437,6 @@ function initialize_state(
         radiation_kirchhoff = radiation_kirchhoff,
         energy_form = energy_form,
         use_transpiration_bc = use_transpiration_bc,
-        use_blowing_correction = use_blowing_correction,
     )
     ws = build_workspace(problem, def; min_thickness = min_thickness)
     u0 = create_state_vector(ws.layout, ws.mesh)

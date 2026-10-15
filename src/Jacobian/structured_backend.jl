@@ -173,7 +173,6 @@ struct StructuredOpsCache{
     is_with_chi::Bool
     is_beer_lambert::Bool
     is_gen::Bool
-    use_blowing::Bool
     assembly_profile::Symbol
     ale_limiter::Discretization.Limiter
 
@@ -250,7 +249,6 @@ function _build_ops_cache(
     radiation_intensity = Float64(get_option(def, :radiation_intensity, 0.0))
     radiation_kirchhoff = get_option(def, :radiation_kirchhoff, true)
     is_gen = get_option(def, :energy_form, :standard) === :with_generation_sink
-    use_blowing = get_option(def, :use_blowing_correction, false)
     is_reduced = assembly_profile === :ale_reduced
 
     # Required workspaces — every supported mode needs these.
@@ -337,7 +335,6 @@ function _build_ops_cache(
         is_with_chi,
         is_beer_lambert,
         is_gen,
-        use_blowing,
         assembly_profile,
         ws.ale_limiter,
         reaction_ws,
@@ -604,7 +601,6 @@ function _compute_jacobian!(
         cache.bc_set,
         cache.radiation_model,
         cache.darcy_ws !== nothing,  # blowing's ṁ″ includes Darcy venting
-        cache.use_blowing,
     )
 
     contribute_to_jacobian!(
@@ -640,7 +636,6 @@ function _compute_jacobian!(
         cache.bc_set,
         cache.darcy_ws !== nothing,  # interior-face kernel + venting follow the mode
         cache.radiation_model,
-        cache.use_blowing,
     )
 
     if cache.ale_advection_ws !== nothing

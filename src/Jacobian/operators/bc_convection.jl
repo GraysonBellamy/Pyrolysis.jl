@@ -40,10 +40,10 @@ only the linear `ΔS_gen` boundary-face slice on the energy row.
 - `T_s`: the Dual-aware `solve_boundary_temperature!` Newton with the
   *transpiration* mass flux hard-zeroed (the residual's surface balance
   never sees ṁ_g in the enthalpy term — transpiration is rejected at
-  construction). With `use_blowing` the Newton's `J_blowing` is fed the
-  true outward flux −F from the shared boundary-face kernel, so the
-  convective `h·blowing_factor(ṁ″c_p,g/h)` chain is differentiated
-  exactly. Dirichlet BCs take the closed form.
+  construction). The Newton's `J_blowing` is fed the true outward flux −F
+  from the shared boundary-face kernel, so each convective member's blowing
+  model (`h·χ`, χ from `blowing_state`) is differentiated exactly. Dirichlet
+  BCs take the closed form.
 
 # Stencil
 
@@ -208,7 +208,6 @@ function _bc_convection_contribution(
     ::Val{tag},
     darcy_active::Bool,
     radiation_model::RadiationModel,
-    use_blowing::Bool = false,
 ) where {NC,Tu,tag}
 
     # Cell-local properties at the boundary cell (Dual-typed under AD).
@@ -253,7 +252,7 @@ function _bc_convection_contribution(
             0,
         )
         J_zero = ntuple(_ -> zero(Tu), Val(NC))
-        J_blowing = use_blowing ? ntuple(j -> -F[j], Val(NC)) : J_zero
+        J_blowing = ntuple(j -> -F[j], Val(NC))
         result = solve_boundary_temperature!(
             bstate,
             T_b,
@@ -267,7 +266,6 @@ function _bc_convection_contribution(
             ε_eff;
             a_eff = a_eff,
             radiation_model = radiation_model,
-            use_blowing = use_blowing,
             J_blowing = J_blowing,
         )
         result.T_s
@@ -317,7 +315,7 @@ end
 
 """
 	apply!(dT, ::BCConvectionOperator, state, mesh, material, bc_set, t,
-	       darcy_active, radiation_model, use_blowing = false) -> nothing
+	       darcy_active, radiation_model) -> nothing
 
 Accumulate the full boundary-cell `S_conv/ρcp_eff` contribution into
 `dT[bdy_cell]` for both boundaries. No-op on a single-cell mesh.
@@ -332,7 +330,6 @@ function apply!(
     t::Real,
     darcy_active::Bool,
     radiation_model::RadiationModel,
-    use_blowing::Bool = false,
 ) where {NC}
 
     for boundary_id in (1, 2)
@@ -370,7 +367,6 @@ function apply!(
             tag,
             darcy_active,
             radiation_model,
-            use_blowing,
         )
     end
     return nothing
@@ -432,7 +428,6 @@ function contribute_to_jacobian!(
     bc_set::BoundaryConditionSet,
     darcy_active::Bool,
     radiation_model::RadiationModel = SURFACE_ABSORPTION,
-    use_blowing::Bool = false,
 ) where {NC}
 
     n_cells = layout.n_cells
@@ -456,7 +451,6 @@ function contribute_to_jacobian!(
         t,
         darcy_active,
         radiation_model,
-        use_blowing,
     )
     geom_bot = _bcc_geometry(state, mesh, 2)
     geom_bot.has_nb && _bcc_assemble_boundary!(
@@ -473,7 +467,6 @@ function contribute_to_jacobian!(
         t,
         darcy_active,
         radiation_model,
-        use_blowing,
     )
     return nothing
 end
@@ -492,7 +485,6 @@ function _bcc_assemble_boundary!(
     t::Real,
     darcy_active::Bool,
     radiation_model::RadiationModel,
-    use_blowing::Bool,
 ) where {NC}
     T_ref = ambient_temperature(thermal_bc, t, Float64(T_REF))
 
@@ -506,8 +498,7 @@ function _bcc_assemble_boundary!(
             val_nc = Val(NC),
             tag = tag,
             darcy_active = darcy_active,
-            radiation_model = radiation_model,
-            use_blowing = use_blowing
+            radiation_model = radiation_model
 
             (out, x_inner) -> begin
                 T_b, ξ_b, T_nb, ξ_nb = _bcc_unpack(x_inner, val_nc)
@@ -529,7 +520,6 @@ function _bcc_assemble_boundary!(
                     tag,
                     darcy_active,
                     radiation_model,
-                    use_blowing,
                 )
                 return nothing
             end

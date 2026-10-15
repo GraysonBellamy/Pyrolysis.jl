@@ -510,14 +510,6 @@ Solve a pyrolysis problem using DifferentialEquations.jl.
   default** — the volumetric advection source S_conv already carries the gas enthalpy
   (ThermaKin Eq.17 convention); enabling this alongside S_conv double-counts and is rejected
   at problem construction. Retained only for closed-ledger experiments with S_conv disabled.
-- `use_blowing_correction=false`: Opt-in Couette-film blowing correction to every
-  convective BC in the surface energy balance: `h → h·B/(e^B − 1)` with
-  `B = ṁ″·c_p,g/h` built from the outward gas mass flux at the face. The
-  momentum-side companion of the transpiration term — unlike it, fully compatible
-  with the S_conv-only convention (no enthalpy double-count). Suppresses convective
-  cooling at peak burning (B = 4 → h_eff/h = 0.075); the back face is unaffected
-  automatically (no outflow → B = 0). Calibrated examples should enable this only
-  together with flame heat-flux feedback (see the physics roadmap).
 - `warm_start=nothing`: Reuse a prior `PyrolysisSolution`'s final state as the initial state
   (`u0`). Component count, mesh size, and ALE/χ modes must match. `tspan[1]` still defines
   the integrator's start time, so the warm-started solve treats the prior final state as
@@ -693,9 +685,6 @@ function solve(
     # S_conv already carries gas enthalpy, and combining the two double-counts
     # (rejected at problem construction). Mass transport remains active either way.
     use_transpiration_bc::Bool = false,
-    # Opt-in Couette-film blowing correction h → h·B/(e^B − 1) on convective BCs
-    # in the surface energy balance (B = ṁ″·c_p,g/h from the outward gas flux).
-    use_blowing_correction::Bool = false,
 
     # Reuse a prior `PyrolysisSolution`'s final state as the initial state.
     # Length and NC must agree with the new problem; `tspan[1]` still defines
@@ -798,7 +787,6 @@ function solve(
         radiation_kirchhoff = radiation_kirchhoff,
         energy_form = energy_form,
         use_transpiration_bc = use_transpiration_bc,
-        use_blowing_correction = use_blowing_correction,
     )
 
     # Create solution container (after initialize_state so any mesh state it
@@ -1080,7 +1068,6 @@ function solve(
             depletion = depletion_cb_state,
             radiation_model = radiation_model,
             use_transpiration_bc = use_transpiration_bc,
-            use_blowing_correction = use_blowing_correction,
         )
     else
         extract_solution!(
@@ -1090,7 +1077,6 @@ function solve(
             depletion = depletion_cb_state,
             radiation_model = radiation_model,
             use_transpiration_bc = use_transpiration_bc,
-            use_blowing_correction = use_blowing_correction,
         )
     end
 
@@ -1220,7 +1206,6 @@ function extract_solution!(
     depletion::Union{Nothing,DepletionCallbackState} = nothing,
     radiation_model::RadiationModel = SURFACE_ABSORPTION,
     use_transpiration_bc::Bool = false,
-    use_blowing_correction::Bool = false,
 )
     mesh = problem.mesh
     material = problem.material
@@ -1334,10 +1319,13 @@ function extract_solution!(
             ε_top;
             a_eff = a_top,
             radiation_model = radiation_model,
-            use_blowing = use_blowing_correction,
             J_blowing = J_top,
         )
         solution.surface_T[i] = state_top.T_surface
+        solution.extras.surface_blowing_ratio[i] = state_top.blowing_ratio
+        solution.extras.surface_pooling_factor[i] = state_top.pooling_factor
+        solution.extras.surface_face_fraction[i] = state_top.face_fraction
+        solution.extras.surface_face_buoyancy[i] = state_top.face_buoyancy
 
         # Back (bottom, boundary_id=2) — vents through the user-supplied bottom
         # mass BC (zero for the default impermeable holder; the RHS applies
@@ -1372,7 +1360,6 @@ function extract_solution!(
             ε_bottom;
             a_eff = a_bottom,
             radiation_model = radiation_model,
-            use_blowing = use_blowing_correction,
             J_blowing = J_bottom,
         )
         solution.extras.back_temperature[i] = state_bottom.T_surface
@@ -1402,15 +1389,15 @@ function extract_solution!(
         solution.extras.surface_conductivity[i] = k_top
 
         # Compute heat flux components using SOLVED surface temperature.
-        # `blowing_mcp` keeps the convective decomposition consistent with the
-        # blowing-corrected flux the Newton applied (zero when blowing off).
+        # The face the Newton applied the blowing models to, so the convective
+        # decomposition matches the corrected flux.
         heat_fluxes = compute_boundary_heat_fluxes(
             thermal_bc_top,
             T_surface_solved,
             t,
             ε_top,
             radiation_model,
-            state_top.blowing_mcp;
+            BlowingFace(J_top, T_surface_solved, material);
             a_eff = a_top,
         )
         solution.extras.surface_heat_flux_absorbed[i] = heat_fluxes.absorbed
@@ -1471,7 +1458,7 @@ function extract_solution!(
             t,
             ε_bottom,
             radiation_model,
-            state_bottom.blowing_mcp;
+            BlowingFace(J_bottom, T_back_solved, material);
             a_eff = a_bottom,
         )
         solution.extras.back_heat_flux[i] =
@@ -1557,8 +1544,6 @@ and `z` read as `NaN`, the thickness is the live thickness
 	- `radiation_model::RadiationModel`: Radiation model for boundary flux diagnostics.
 	- `use_transpiration_bc::Bool`: If false, report boundary temperatures/heat fluxes
 	  using the same no-transpiration surface energy balance as the live solve.
-	- `use_blowing_correction::Bool`: Apply the same Couette-film blowing rescaling
-	  to convective BCs in the diagnostic boundary solve as the live solve did.
 	"""
 function extract_solution_ale!(
     solution::PyrolysisSolution,
@@ -1568,7 +1553,6 @@ function extract_solution_ale!(
     depletion::Union{Nothing,DepletionCallbackState} = nothing,
     radiation_model::RadiationModel = SURFACE_ABSORPTION,
     use_transpiration_bc::Bool = false,
-    use_blowing_correction::Bool = false,
 ) where {NC}
     mesh = problem.mesh
     material = problem.material
@@ -1682,10 +1666,13 @@ function extract_solution_ale!(
             ε_top;
             a_eff = a_top,
             radiation_model = radiation_model,
-            use_blowing = use_blowing_correction,
             J_blowing = J_top,
         )
         solution.surface_T[out_idx] = state_top.T_surface
+        solution.extras.surface_blowing_ratio[out_idx] = state_top.blowing_ratio
+        solution.extras.surface_pooling_factor[out_idx] = state_top.pooling_factor
+        solution.extras.surface_face_fraction[out_idx] = state_top.face_fraction
+        solution.extras.surface_face_buoyancy[out_idx] = state_top.face_buoyancy
 
         # Back (bottom, boundary_id=2) — vents through the user-supplied bottom
         # mass BC (zero for the default impermeable holder; the RHS applies
@@ -1719,7 +1706,6 @@ function extract_solution_ale!(
             ε_bottom;
             a_eff = a_bottom,
             radiation_model = radiation_model,
-            use_blowing = use_blowing_correction,
             J_blowing = J_bottom,
         )
         solution.extras.back_temperature[out_idx] = state_bottom.T_surface
@@ -1747,15 +1733,15 @@ function extract_solution_ale!(
         solution.extras.surface_conductivity[out_idx] = k_top
 
         # Compute heat flux components using SOLVED surface temperature.
-        # `blowing_mcp` keeps the convective decomposition consistent with the
-        # blowing-corrected flux the Newton applied (zero when blowing off).
+        # The face the Newton applied the blowing models to, so the convective
+        # decomposition matches the corrected flux.
         heat_fluxes = compute_boundary_heat_fluxes(
             thermal_bc_top,
             T_surface_solved,
             t,
             ε_top,
             radiation_model,
-            state_top.blowing_mcp;
+            BlowingFace(J_top, T_surface_solved, material);
             a_eff = a_top,
         )
         solution.extras.surface_heat_flux_absorbed[out_idx] = heat_fluxes.absorbed
@@ -1815,7 +1801,7 @@ function extract_solution_ale!(
             t,
             ε_bottom,
             radiation_model,
-            state_bottom.blowing_mcp;
+            BlowingFace(J_bottom, T_back_solved, material);
             a_eff = a_bottom,
         )
         solution.extras.back_heat_flux[out_idx] =

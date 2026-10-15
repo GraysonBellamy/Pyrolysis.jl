@@ -148,6 +148,11 @@ export HeatFluxBC,
     DirichletThermalBC,
     AdiabaticBC
 export ImpermeableBC, MassFluxBC, ConvectiveMassBC, DiffusiveMassBC, CombinedMassBC
+# Blowing models for ConvectiveBC and the gas data they read
+export AbstractBlowingModel,
+    NoBlowing, CouetteFilm, PropertyRatioFilm, PoolingFilm, FunctionBlowing
+export GasSpecies, NITROGEN, nasa7_heat_capacity, eucken_viscosity, fuller_diffusivity
+export BlowingFace, blowing_state, blowing_ratio, blowing_factor
 export DirichletPressureBC, NeumannPressureBC, ConvectivePressureBC
 export BoundaryConditionSet
 # Background pore-air initialization for DarcyFick-mode problems
