@@ -10,8 +10,9 @@ entries, and the entries the sparse method "skips" are already zero in the
 dense output (i.e., the sparsity pattern is not missing any structural
 contribution).
 
-Coverage: both ALE canonical configs from `perf_helpers.jl`. Eulerian
-configs are skipped — they have no z block.
+Coverage: the ALE configs from `perf_helpers.jl`, including the optically
+moderate Beer–Lambert decks whose energy rows depend on every node above the
+cell. Eulerian configs are skipped — they have no z block.
 """
 
 using Test
@@ -38,6 +39,10 @@ end
     for (name, builder) in (
         ("ale_no_radiation", build_ale_no_radiation),
         ("ale_beer_lambert_darcy", build_ale_beer_lambert_darcy),
+        # Optically moderate: the energy rows' z columns above each cell are
+        # non-negligible, so an under-emitted pattern shows up in check 2.
+        ("ale_beer_lambert_darcy_moderate", build_ale_beer_lambert_darcy_moderate),
+        ("ale_beer_lambert_fickian_moderate", build_ale_beer_lambert_fickian_moderate),
     )
         @testset "$(name)" begin
             def, ws, u, _ = builder()

@@ -37,10 +37,10 @@ mesh-limited); (c) is quantization-dominated and non-monotone in n.
 
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
-| L∞ steady profile vs (quantized) network | 1.518e-11 | — | 1.518e-11 | 1e-08 | yes | harmonic-mean face k is NODALLY EXACT for face-aligned jumps; k-ratio 10.0:1 |
-| steady bottom-face flux vs network | 909.1 | 909.1 | 3.336e-11 | 1e-08 | yes | both faces must carry the exact series flux |
-| steady top-face flux vs network | 909.1 | 909.1 | 6.595e-13 | 1e-08 | yes | both faces must carry the exact series flux |
-| steadiness (last half-interval drift) | 8.219e-10 | — | 8.219e-10 | 1e-06 | yes | t_end = 10·L²/α_min |
+| L∞ steady profile vs (quantized) network | 1.54e-11 | — | 1.54e-11 | 1e-08 | yes | harmonic-mean face k is NODALLY EXACT for face-aligned jumps; k-ratio 10.0:1 |
+| steady bottom-face flux vs network | 909.1 | 909.1 | 3.386e-11 | 1e-08 | yes | both faces must carry the exact series flux |
+| steady top-face flux vs network | 909.1 | 909.1 | 3.344e-13 | 1e-08 | yes | both faces must carry the exact series flux |
+| steadiness (last half-interval drift) | 8.46e-10 | — | 8.46e-10 | 1e-06 | yes | t_end = 10·L²/α_min |
 
 ![V-HC-04a T_profile_steady](assets/V-HC-04a/V-HC-04a_T_profile_steady.png)
 
@@ -83,11 +83,11 @@ mesh-limited); (c) is quantization-dominated and non-monotone in n.
 
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
-| L∞ steady profile vs (quantized) network | 1.518e-11 | — | 1.518e-11 | 1e-08 | yes | harmonic-mean face k is NODALLY EXACT for face-aligned jumps; k-ratio 10.0:1 |
-| steady bottom-face flux vs network | 909.1 | 909.1 | 3.336e-11 | 1e-08 | yes | both faces must carry the exact series flux |
-| steady top-face flux vs network | 909.1 | 909.1 | 6.595e-13 | 1e-08 | yes | both faces must carry the exact series flux |
+| L∞ steady profile vs (quantized) network | 1.54e-11 | — | 1.54e-11 | 1e-08 | yes | harmonic-mean face k is NODALLY EXACT for face-aligned jumps; k-ratio 10.0:1 |
+| steady bottom-face flux vs network | 909.1 | 909.1 | 3.386e-11 | 1e-08 | yes | both faces must carry the exact series flux |
+| steady top-face flux vs network | 909.1 | 909.1 | 3.344e-13 | 1e-08 | yes | both faces must carry the exact series flux |
 | interface-quantization smearing (documented) | 0.01636 | 0 | 0.01636 | 0.02079 | yes | THE laminate-off-mesh error users see: flux off by 1.64% at Δz = 0.0005 m |
-| steadiness (last half-interval drift) | 8.219e-10 | — | 8.219e-10 | 1e-06 | yes | t_end = 10·L²/α_min |
+| steadiness (last half-interval drift) | 8.46e-10 | — | 8.46e-10 | 1e-06 | yes | t_end = 10·L²/α_min |
 
 ![V-HC-04c T_profile_steady](assets/V-HC-04c/V-HC-04c_T_profile_steady.png)
 

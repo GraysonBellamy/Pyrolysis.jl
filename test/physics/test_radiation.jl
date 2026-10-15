@@ -76,9 +76,16 @@ end
     @test 0.85 < ε_surf < 0.95   # mixed composition: strictly between components
 
     q_bare = zeros(n)
-    compute_beer_lambert_source!(q_bare, ws.state_cache, ws.prop_cache, I0, false)
+    compute_beer_lambert_source!(q_bare, ws.state_cache, ws.mesh, ws.prop_cache, I0, false)
     q_kirchhoff = zeros(n)
-    compute_beer_lambert_source!(q_kirchhoff, ws.state_cache, ws.prop_cache, I0, true)
+    compute_beer_lambert_source!(
+        q_kirchhoff,
+        ws.state_cache,
+        ws.mesh,
+        ws.prop_cache,
+        I0,
+        true,
+    )
 
     @testset "Kirchhoff path scales by the live surface ε_eff" begin
         @test q_kirchhoff ≈ ε_surf .* q_bare rtol = 1e-13
@@ -117,7 +124,7 @@ end
         @test I ≈ 0.8 * 50e3
         # Kernel with the flag off leaves the (already-scaled) intensity alone.
         q = zeros(n)
-        compute_beer_lambert_source!(q, ws.state_cache, ws.prop_cache, I, false)
+        compute_beer_lambert_source!(q, ws.state_cache, ws.mesh, ws.prop_cache, I, false)
         @test q ≈ (0.8 * 50e3 / I0) .* q_bare rtol = 1e-13
 
         # Kirchhoff default reports no explicit α and returns the bare flux.

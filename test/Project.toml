@@ -1,11 +1,11 @@
 [deps]
 BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
-Enzyme = "7da242da-08ed-463a-9acd-ee780be4f1d9"
 FiniteDiff = "6a86dc24-6348-571c-b903-95158fe2bd41"
 ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
 JET = "c3a54625-cd67-489e-a8e7-0a5a0ff4e31b"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 LinearSolve = "7ed4a6bd-45f5-4d41-b270-4a48e9bafcae"
+Logging = "56ddb016-857b-54e1-b83d-db4d58db5568"
 OrdinaryDiffEq = "1dea7af3-3e70-54e6-95c3-0bf5283fa5ed"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 Pyrolysis = "910b54fb-7370-4696-a92c-2242b531a32e"
@@ -20,7 +20,6 @@ Pyrolysis = {path = ".."}
 
 [compat]
 BenchmarkTools = "1"
-Enzyme = "0.13"
-JET = "0.9, 0.10, 0.11"
+JET = "0.12"
 SpecialFunctions = "2"
 julia = "1.10"

@@ -1,23 +1,27 @@
 """
-Blowing (transpiration) correction tests.
-
-Covers the Couette-film blowing correction `h → h·B/(e^B − 1)`,
-`B = ṁ″·c_p,g/h` (opt-in via `use_blowing_correction`):
+Blowing correction tests: the film factor, the face interface of the surface
+Newton, and the `CouetteFilm` model end to end.
 
 1. `blowing_factor` — limits, branch-seam continuity (value + derivative),
-   large-B overflow safety under ForwardDiff, suction enhancement.
-2. `evaluate_bc_flux_and_derivative` mcp dispatch — only convective BCs
-   rescale; radiative/flux BCs ignore mcp; combined BCs forward it.
-3. Surface Newton with blowing — converged balance, `blowing_mcp`
-   diagnostic, off/on ordering, exact off-state identity.
-4. AD cleanliness — ForwardDiff derivatives of `T_s` w.r.t. `T_cell` and
-   the blowing mass flux match central finite differences.
-5. Structured-backend Jacobian — strict support-complete agreement with
-   `DenseAD_ForwardDiff` with blowing enabled (Fickian and Darcy–Fick,
-   Eulerian and ALE).
-6. Integration — `solve(use_blowing_correction = true)` raises the surface
-   temperature under convective cooling, and the saved flux decomposition
-   stays consistent with the boundary ledger.
+   large-φ overflow safety under ForwardDiff, suction enhancement.
+2. `evaluate_bc_flux_and_derivative` face dispatch — only convective BCs
+   with a blowing model rescale; `NoBlowing`, radiative and flux BCs leave the
+   flux alone; combined BCs forward the face to each member.
+3. `CouetteFilm` — φ = 2λ·ṁ″·c_p,g/h, each member its own λ, the diagnostic
+   decomposition applies the same factor.
+4. Surface Newton with blowing — converged balance, `blowing_mcp` and
+   `blowing_ratio` diagnostics, off/on ordering, exact no-outflow identity.
+5. AD cleanliness — ForwardDiff derivatives of `T_s` w.r.t. `T_cell` and the
+   blowing mass flux match central finite differences.
+6. Structured-backend Jacobian — strict support-complete agreement with
+   `DenseAD_ForwardDiff` with a blowing model on the top face (Fickian and
+   Darcy–Fick, Eulerian and ALE, film and pooling models).
+7. Integration — `solve` with a film model raises the surface temperature
+   under convective cooling, and the saved flux decomposition stays
+   consistent with the boundary ledger.
+
+The property-ratio and pooling models are checked against their reference
+values in `test_blowing_models.jl`.
 """
 
 using Test
@@ -28,6 +32,9 @@ using Pyrolysis.BoundaryConditions
 using Pyrolysis.Geometry: BoundaryState
 using Pyrolysis.Discretization:
     blowing_factor,
+    BlowingFace,
+    blowing_state,
+    blowing_ratio,
     solve_boundary_temperature,
     solve_boundary_temperature!,
     evaluate_bc_flux_and_derivative,
@@ -41,7 +48,6 @@ using Pyrolysis.Jacobian: verify_jacobian_at, JacobianSpec, DenseAD_ForwardDiff,
 # conductance is exactly J_gas · c_g and every balance is closed-form.
 # ----------------------------------------------------------------------------
 const _CP_GAS = 1000.0
-
 function _blowing_material(; darcy::Bool = false)
     solid_kwargs = darcy ? (; κ = 1e-14) : (;)
     solid =
@@ -105,45 +111,116 @@ _f_exact(B) = B / (exp(B) - 1)
     end
 
     # ========================================================================
-    @testset "evaluate_bc_flux_and_derivative: mcp dispatch" begin
+    @testset "evaluate_bc_flux_and_derivative: face dispatch" begin
+        mat = _blowing_material()
         T_s, t, ε = 600.0, 0.0, 0.9
         h, T_inf = 20.0, 300.0
-        conv = ConvectiveBC(h = h, T_inf = T_inf)
-        mcp = 20.0                      # B = 1
+        J_gas = 0.02                                   # kg/(m²·s) outward
+        face = BlowingFace((0.0, J_gas), T_s, mat)
+        face0 = BlowingFace((0.0, 0.0), T_s, mat)
+        mcp = J_gas * _CP_GAS                          # B = 1
+        @test _blowing_conductance(mat, face.ṁ, T_s) == mcp
         χ = blowing_factor(mcp / h)
 
-        q, dq = evaluate_bc_flux_and_derivative(conv, T_s, t, ε, NO_RADIATION, mcp)
+        conv = ConvectiveBC(h = h, T_inf = T_inf, blowing = CouetteFilm())
+        q, dq = evaluate_bc_flux_and_derivative(conv, T_s, t, ε, NO_RADIATION, face)
         @test q ≈ h * χ * (T_inf - T_s) rtol = 1e-14
         @test dq ≈ -h * χ rtol = 1e-14
 
-        # mcp = 0 reproduces the 5-arg flux exactly.
-        q0, dq0 = evaluate_bc_flux_and_derivative(conv, T_s, t, ε, NO_RADIATION, 0.0)
+        # Zero outflow reproduces the 5-arg flux exactly.
+        q0, dq0 = evaluate_bc_flux_and_derivative(conv, T_s, t, ε, NO_RADIATION, face0)
         q5, dq5 = evaluate_bc_flux_and_derivative(conv, T_s, t, ε, NO_RADIATION)
         @test q0 === q5
         @test dq0 === dq5
 
-        # Non-convective BCs ignore mcp.
+        # The default model leaves the coefficient alone whatever the outflow.
+        bare = ConvectiveBC(h = h, T_inf = T_inf)
+        @test bare.blowing === NoBlowing()
+        @test ConvectiveBC(h, T_inf).blowing === NoBlowing()
+        qb, dqb = evaluate_bc_flux_and_derivative(bare, T_s, t, ε, NO_RADIATION, face)
+        @test qb === q5
+        @test dqb === dq5
+
+        # Non-convective BCs ignore the face.
         rad = RadiativeBC(T_inf = T_inf)
-        qr, dqr = evaluate_bc_flux_and_derivative(rad, T_s, t, ε, NO_RADIATION, mcp)
+        qr, dqr = evaluate_bc_flux_and_derivative(rad, T_s, t, ε, NO_RADIATION, face)
         qr5, dqr5 = evaluate_bc_flux_and_derivative(rad, T_s, t, ε, NO_RADIATION)
         @test qr == qr5 && dqr == dqr5
 
         flux = HeatFluxBC(2e4)
-        qf, _ = evaluate_bc_flux_and_derivative(flux, T_s, t, ε, NO_RADIATION, mcp)
+        qf, _ = evaluate_bc_flux_and_derivative(flux, T_s, t, ε, NO_RADIATION, face)
         @test qf == 2e4
 
         # Combined: convective child rescaled, others untouched.
         combo = flux + conv + rad
-        qc, dqc = evaluate_bc_flux_and_derivative(combo, T_s, t, ε, NO_RADIATION, mcp)
+        qc, dqc = evaluate_bc_flux_and_derivative(combo, T_s, t, ε, NO_RADIATION, face)
         @test qc ≈ qf + q + qr rtol = 1e-14
         @test dqc ≈ dq + dqr rtol = 1e-14
+
+        # A user rule is applied as given.
+        custom = ConvectiveBC(
+            h = h,
+            T_inf = T_inf,
+            blowing = FunctionBlowing((f, hh, Ti) -> 1 / (1 + sum(f.ṁ) / 0.01)),
+        )
+        qu, _ = evaluate_bc_flux_and_derivative(custom, T_s, t, ε, NO_RADIATION, face)
+        @test qu ≈ h / 3 * (T_inf - T_s) rtol = 1e-14
+    end
+
+    # ========================================================================
+    @testset "CouetteFilm: film constant" begin
+        mat = _blowing_material()
+        T_s, t, ε = 600.0, 0.0, 0.9
+        h, T_inf = 20.0, 300.0
+        face = BlowingFace((0.0, 0.02), T_s, mat)
+        mcp = 0.02 * _CP_GAS
+
+        @test CouetteFilm().λ == 0.5
+        @test CouetteFilm(0.31).λ == 0.31
+        @test CouetteFilm(λ = 0.31).λ == 0.31
+        @test_throws ArgumentError CouetteFilm(0.0)
+        @test_throws ArgumentError CouetteFilm(NaN)
+
+        # The Couette default is bit-identical to the plain mcp/h argument.
+        s = blowing_state(CouetteFilm(), face, h, T_inf)
+        @test s.χ === blowing_factor(mcp / h)
+        @test s.φ === mcp / h
+        @test s.ψ == 1 && s.Y == 0 && s.Λ == 1 && s.states == 1
+
+        # φ = 2λ·mcp/h; a smaller λ weakens the reduction of h.
+        λ = 0.31
+        conv = ConvectiveBC(h = h, T_inf = T_inf, blowing = CouetteFilm(λ))
+        χ = blowing_factor(2λ * mcp / h)
+        q, dq = evaluate_bc_flux_and_derivative(conv, T_s, t, ε, NO_RADIATION, face)
+        @test q ≈ h * χ * (T_inf - T_s) rtol = 1e-14
+        @test dq ≈ -h * χ rtol = 1e-14
+        q_def, _ = evaluate_bc_flux_and_derivative(
+            ConvectiveBC(h = h, T_inf = T_inf, blowing = CouetteFilm()),
+            T_s,
+            t,
+            ε,
+            NO_RADIATION,
+            face,
+        )
+        @test abs(q) > abs(q_def)
+
+        # The diagnostic decomposition applies the same factor.
+        dec = compute_boundary_heat_fluxes(conv, T_s, t, ε, NO_RADIATION, face)
+        @test dec.net ≈ q rtol = 1e-14
+        @test dec.convection ≈ -q rtol = 1e-14
+
+        # Inside a combined BC each convective member keeps its own model.
+        combo = ConvectiveBC(h = h, T_inf = T_inf, blowing = CouetteFilm()) + conv
+        qc, _ = evaluate_bc_flux_and_derivative(combo, T_s, t, ε, NO_RADIATION, face)
+        @test qc ≈ q_def + q rtol = 1e-14
     end
 
     # ========================================================================
     @testset "surface Newton with blowing: converged balance" begin
         mat = _blowing_material()
         h, T_inf = 20.0, 300.0
-        bc = HeatFluxBC(2e4) + ConvectiveBC(h = h, T_inf = T_inf)
+        bc = HeatFluxBC(2e4) + ConvectiveBC(h = h, T_inf = T_inf, blowing = CouetteFilm())
+        bc_bare = HeatFluxBC(2e4) + ConvectiveBC(h = h, T_inf = T_inf)
         T_cell, k_eff, Δz_half, t, ε = 600.0, 0.2, 5e-4, 0.0, 0.9
         J_gas = 0.02                                   # kg/(m²·s) outward
         J_zero = (0.0, 0.0)
@@ -159,7 +236,6 @@ _f_exact(B) = B / (exp(B) - 1)
             T_inf,
             t,
             ε;
-            use_blowing = true,
             J_blowing = J_blow,
         )
         @test state.converged
@@ -168,6 +244,9 @@ _f_exact(B) = B / (exp(B) - 1)
         mcp = J_gas * _CP_GAS
         @test state.blowing_mcp ≈ mcp rtol = 1e-12
         χ = blowing_factor(mcp / h)
+        @test state.blowing_ratio ≈ χ rtol = 1e-12
+        @test state.pooling_factor == 1.0
+        @test state.face_fraction == 0.0
 
         # Newton balance: q_applied = q_conducted, with the convective part
         # rescaled by χ.
@@ -178,13 +257,25 @@ _f_exact(B) = B / (exp(B) - 1)
         # Transpiration stays off (S_conv-only convention).
         @test state.q_transpired == 0.0
 
-        # Blowing suppresses convective cooling → hotter surface.
-        state_off =
-            solve_boundary_temperature(T_cell, k_eff, Δz_half, bc, mat, J_zero, T_inf, t, ε)
+        # Blowing suppresses convective cooling → hotter surface than the
+        # bare coefficient under the same outflow.
+        state_off = solve_boundary_temperature(
+            T_cell,
+            k_eff,
+            Δz_half,
+            bc_bare,
+            mat,
+            J_zero,
+            T_inf,
+            t,
+            ε;
+            J_blowing = J_blow,
+        )
         @test state.T_surface > state_off.T_surface
-        @test state_off.blowing_mcp == 0.0
+        @test state_off.blowing_mcp ≈ mcp rtol = 1e-12   # the conductance is reported
+        @test state_off.blowing_ratio == 1.0             # but not applied
 
-        # Zero mass flux with blowing enabled is the exact no-blowing state.
+        # Zero mass flux with a model is the exact no-blowing state.
         state_zero = solve_boundary_temperature(
             T_cell,
             k_eff,
@@ -195,13 +286,24 @@ _f_exact(B) = B / (exp(B) - 1)
             T_inf,
             t,
             ε;
-            use_blowing = true,
             J_blowing = J_zero,
         )
-        @test state_zero.T_surface === state_off.T_surface
-        @test state_zero.q_applied === state_off.q_applied
+        state_bare0 = solve_boundary_temperature(
+            T_cell,
+            k_eff,
+            Δz_half,
+            bc_bare,
+            mat,
+            J_zero,
+            T_inf,
+            t,
+            ε,
+        )
+        @test state_zero.T_surface === state_bare0.T_surface
+        @test state_zero.q_applied === state_bare0.q_applied
+        @test state_zero.blowing_ratio == 1.0
 
-        # Net suction (inflow) enhances cooling → colder surface than off.
+        # Net suction (inflow) enhances cooling → colder surface than bare.
         state_suction = solve_boundary_temperature(
             T_cell,
             k_eff,
@@ -212,18 +314,18 @@ _f_exact(B) = B / (exp(B) - 1)
             T_inf,
             t,
             ε;
-            use_blowing = true,
             J_blowing = (0.0, -J_gas),
         )
         @test state_suction.T_surface < state_off.T_surface
         @test state_suction.blowing_mcp < 0.0
+        @test state_suction.blowing_ratio > 1.0
     end
 
     # ========================================================================
     @testset "AD: T_s derivatives match finite differences" begin
         mat = _blowing_material()
         h, T_inf = 20.0, 300.0
-        bc = HeatFluxBC(2e4) + ConvectiveBC(h = h, T_inf = T_inf)
+        bc = HeatFluxBC(2e4) + ConvectiveBC(h = h, T_inf = T_inf, blowing = CouetteFilm())
         k_eff, Δz_half, t, ε = 0.2, 5e-4, 0.0, 0.9
 
         function _Ts(T_cell::Real, J_gas::Real)
@@ -240,7 +342,6 @@ _f_exact(B) = B / (exp(B) - 1)
                 T_inf,
                 t,
                 ε;
-                use_blowing = true,
                 J_blowing = (zero(J_gas), J_gas),
             )
             return result.T_s
@@ -262,12 +363,13 @@ _f_exact(B) = B / (exp(B) - 1)
 
     # ========================================================================
     @testset "Structured Jacobian: strict agreement with blowing" begin
-        function _build(; darcy::Bool, use_ale::Bool)
+        function _build(; darcy::Bool, use_ale::Bool, model)
             mat = _blowing_material(darcy = darcy)
             mesh = create_uniform_mesh(0.01, 12, Val(2))
             bcs = BoundaryConditionSet(
                 thermal = (
-                    top = HeatFluxBC(50e3) + ConvectiveBC(h = 10.0, T_inf = 300.0),
+                    top = HeatFluxBC(50e3) +
+                          ConvectiveBC(h = 10.0, T_inf = 300.0, blowing = model),
                     bottom = AdiabaticBC(),
                 ),
                 mass = (top = DiffusiveMassBC(0.01), bottom = ImpermeableBC()),
@@ -278,8 +380,7 @@ _f_exact(B) = B / (exp(B) - 1)
                 bc_set = bcs,
                 tspan = (0.0, 100.0),
             )
-            def, ws, u =
-                initialize_state(problem; use_ale = use_ale, use_blowing_correction = true)
+            def, ws, u = initialize_state(problem; use_ale = use_ale)
             n = ws.layout.n_cells
             # Hot state with free gas so the boundary mass flux (and hence B)
             # is genuinely nonzero.
@@ -291,12 +392,18 @@ _f_exact(B) = B / (exp(B) - 1)
             return def, ws, u
         end
 
-        for (name, darcy, use_ale) in (
-            ("eulerian Fickian", false, false),
-            ("eulerian Darcy-Fick", true, false),
-            ("ALE Fickian", false, true),
+        pooling = PoolingFilm(NITROGEN; diffusion_volume = (gas = 60.0,))
+        for (name, darcy, use_ale, model) in (
+            ("eulerian Fickian", false, false, CouetteFilm()),
+            ("eulerian Darcy-Fick", true, false, CouetteFilm()),
+            ("ALE Fickian", false, true, CouetteFilm()),
+            ("eulerian Fickian, λ = 0.31", false, false, CouetteFilm(0.31)),
+            ("eulerian Fickian, property ratio", false, false, PropertyRatioFilm(NITROGEN)),
+            ("eulerian Fickian, pooling", false, false, pooling),
+            ("eulerian Darcy-Fick, pooling", true, false, pooling),
+            ("ALE Fickian, pooling", false, true, pooling),
         )
-            def, ws, u = _build(darcy = darcy, use_ale = use_ale)
+            def, ws, u = _build(darcy = darcy, use_ale = use_ale, model = model)
             ref_spec = JacobianSpec(DenseAD_ForwardDiff(), def, ws)
             spec = JacobianSpec(Structured(), def, ws)
             report = verify_jacobian_at(
@@ -316,7 +423,7 @@ _f_exact(B) = B / (exp(B) - 1)
 
     # ========================================================================
     @testset "integration: solve() with blowing" begin
-        function _solve(; blowing::Bool)
+        function _solve(model)
             mat = _blowing_material()
             mesh = create_uniform_mesh(
                 0.005,
@@ -327,7 +434,8 @@ _f_exact(B) = B / (exp(B) - 1)
             )
             bcs = BoundaryConditionSet(
                 thermal = (
-                    top = HeatFluxBC(50e3) + ConvectiveBC(h = 15.0, T_inf = 300.0),
+                    top = HeatFluxBC(50e3) +
+                          ConvectiveBC(h = 15.0, T_inf = 300.0, blowing = model),
                     bottom = AdiabaticBC(),
                 ),
                 mass = (top = DiffusiveMassBC(0.01), bottom = ImpermeableBC()),
@@ -338,16 +446,11 @@ _f_exact(B) = B / (exp(B) - 1)
                 bc_set = bcs,
                 tspan = (0.0, 5.0),
             )
-            return solve(
-                problem;
-                use_blowing_correction = blowing,
-                saveat = [0.0, 2.5, 5.0],
-                progress = false,
-            )
+            return solve(problem; saveat = [0.0, 2.5, 5.0], progress = false)
         end
 
-        sol_off = _solve(blowing = false)
-        sol_on = _solve(blowing = true)
+        sol_off = _solve(NoBlowing())
+        sol_on = _solve(CouetteFilm())
         @test sol_off.retcode == :Success
         @test sol_on.retcode == :Success
 
@@ -355,6 +458,8 @@ _f_exact(B) = B / (exp(B) - 1)
         # so the blowing-on surface ends hotter and loses mass faster.
         @test sol_on.surface_T[end] > sol_off.surface_T[end]
         @test sol_on.mass_loss_rate[end] > sol_off.mass_loss_rate[end]
+        @test all(sol_off.extras.surface_blowing_ratio .== 1.0)
+        @test sol_on.extras.surface_blowing_ratio[end] < 1.0
 
         # Saved flux decomposition stays consistent with the boundary ledger:
         # at Newton convergence net = conduction (transpiration off), with the
@@ -372,5 +477,13 @@ _f_exact(B) = B / (exp(B) - 1)
         conv_on = sol_on.extras.surface_heat_flux_convection[end]
         @test conv_on < h * (T_s_on - T_inf)
         @test conv_on > 0.0   # still a loss
+
+        # The pooling model runs through the integrator and records its state.
+        sol_pool = _solve(PoolingFilm(NITROGEN; diffusion_volume = (gas = 60.0,)))
+        @test sol_pool.retcode == :Success
+        ψ = sol_pool.extras.surface_pooling_factor[end]
+        @test 0.59 <= ψ <= 1.0
+        @test 0.0 <= sol_pool.extras.surface_face_fraction[end] <= 1.0
+        @test sol_pool.extras.surface_blowing_ratio[end] < 1.0
     end
 end

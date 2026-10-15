@@ -18,8 +18,10 @@
 #   sol.ξ/sol.T via porosity + ideal_gas_pressure with the same material.
 # - Initial gas is seeded with background_gas_concentration so P(z,0) = P∞
 #   (starting from ξ_gas = 0 would start from vacuum).
-# - μ in the exact profile is the code's own Sutherland value
-#   effective_gas_viscosity(T_iso), not a hand-picked constant.
+# - μ in the exact profile is the MATERIAL's own viscosity curve,
+#   effective_gas_viscosity(T_iso, mat), not a hand-picked constant — so the
+#   case stays exact for whatever `gas_viscosity` the material carries, which
+#   is what lets the ×2-viscosity check in test_darcy.jl exercise that field.
 # - λ = 0 on every component kills the Fickian term: pure Darcy outflow.
 # - ρ_intrinsic = 1e5 (φ = 0.99, verification-only value): solid→gas
 #   conversion frees pore volume at dφ/dt = ġ/ρ_intrinsic, and the gas
@@ -87,7 +89,7 @@ function _verification_case_vgt02()
         out = QoIResult[]
         mat = sol.problem.material
         z = get_cell_positions(sol)
-        μ = effective_gas_viscosity(T_iso)
+        μ = effective_gas_viscosity(T_iso, mat)
         ΔP²_coeff = μ * R * T_iso * ġ / (κ_perm * M_gas)
         P²_exact(zz) = P∞^2 + ΔP²_coeff * (L^2 - zz^2)
         ΔP²_scale = ΔP²_coeff * L^2  # back-face overpressure² scale
@@ -159,7 +161,7 @@ function _verification_case_vgt02()
     function p2_error(sol)
         mat = sol.problem.material
         z = get_cell_positions(sol)
-        μ = effective_gas_viscosity(T_iso)
+        μ = effective_gas_viscosity(T_iso, mat)
         ΔP²_coeff = μ * R * T_iso * ġ / (κ_perm * M_gas)
         maximum(eachindex(z)) do i
             ξi = (sol.ξ[1, i, end], sol.ξ[2, i, end])
@@ -200,7 +202,7 @@ function _verification_case_vgt02()
             curves = sol -> begin
                 mat = sol.problem.material
                 z = get_cell_positions(sol)
-                μ = effective_gas_viscosity(T_iso)
+                μ = effective_gas_viscosity(T_iso, mat)
                 ΔP²_coeff = μ * R * T_iso * ġ / (κ_perm * M_gas)
                 P_num = map(eachindex(z)) do i
                     ξi = (sol.ξ[1, i, end], sol.ξ[2, i, end])
@@ -241,7 +243,7 @@ function _verification_case_vgt02()
             error_norms = sol -> begin
                 mat = sol.problem.material
                 z = get_cell_positions(sol)
-                μ = effective_gas_viscosity(T_iso)
+                μ = effective_gas_viscosity(T_iso, mat)
                 ΔP²_coeff = μ * R * T_iso * ġ / (κ_perm * M_gas)
                 e = map(eachindex(z)) do i
                     ξi = (sol.ξ[1, i, end], sol.ξ[2, i, end])

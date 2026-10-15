@@ -139,6 +139,49 @@ struct CallableProperty{F} <: AbstractPropertyFunction
 end
 
 """
+	SutherlandProperty(μ_ref, T_ref, S)
+	SutherlandProperty()   # canonical air constants
+
+Sutherland's law for the temperature dependence of a gas transport property:
+
+	μ(T) = μ_ref × (T/T_ref)^(3/2) × (T_ref + S)/(T + S)
+
+The zero-argument form is the canonical Sutherland **air** triple
+(μ_ref = 1.716e-5 Pa·s at T_ref = 273.15 K, S = 110.4 K; e.g. White, *Viscous
+Fluid Flow*), giving μ(300 K) = 1.846e-5 Pa·s. This is the default carried by
+[`Material`](@ref)'s `gas_viscosity` field, so a material that says nothing
+about its pore gas behaves exactly as the package did before that field
+existed.
+
+# Fields
+- `μ_ref`: Reference viscosity at `T_ref` [Pa·s]
+- `T_ref`: Correlation reference temperature [K] — **not** the global enthalpy
+  datum `T_REF = 298.15 K`; do not conflate the two
+- `S`: Sutherland constant [K]
+
+# Note on the low-temperature clamp
+This type evaluates the bare correlation and does **not** clamp `T`. The floor
+that keeps `T^1.5` evaluable for diverging Newton trial states is applied once,
+centrally, in `Properties.effective_gas_viscosity(T, material)`, so it protects
+every property function a material might carry — not just this one.
+
+# Example
+```julia
+SutherlandProperty()(300.0)                  # ≈ 1.846e-5 Pa·s (air)
+SutherlandProperty(2.0e-5, 350.0, 120.0)     # a different gas
+```
+"""
+struct SutherlandProperty{T<:Real} <: AbstractPropertyFunction
+    μ_ref::T
+    T_ref::T
+    S::T
+end
+
+SutherlandProperty() = SutherlandProperty(1.716e-5, 273.15, 110.4)
+SutherlandProperty(μ_ref::Real, T_ref::Real, S::Real) =
+    SutherlandProperty(promote(float(μ_ref), float(T_ref), float(S))...)
+
+"""
 	StateDependentProperty{F}
 
 A property that depends on both temperature and cell state (concentrations).
@@ -175,26 +218,41 @@ end
 # Callable Interface
 # ============================================================================
 
+"""
+	property_temperature(T) -> T clamped to [T_PROPERTY_MIN, T_PROPERTY_MAX]
+
+The temperature a property law is evaluated at. Inside the bracket this is
+the identity (bit-for-bit, derivative 1); outside it the law sees the
+nearest bracket end, so a nonphysical Newton trial temperature cannot reach
+a fractional power or a fitted polynomial's far extrapolation. The bracket is
+the interval on which the component constructors validate the law.
+"""
+@inline property_temperature(T) = clamp(T, T_PROPERTY_MIN, T_PROPERTY_MAX)
+
 # Temperature-only evaluation
 @inline (p::ConstantProperty)(T) = p.value
-@inline (p::LinearProperty)(T) = p.a + p.b * T
-@inline (p::PolynomialProperty)(T) = evalpoly(T, p.coeffs)
-@inline (p::ArrheniusProperty)(T) = p.A * exp(-p.E / (R_GAS * T))
-@inline (p::CallableProperty)(T) = p.func(T)
+@inline (p::LinearProperty)(T) = (Tp = property_temperature(T); p.a + p.b * Tp)
+@inline (p::PolynomialProperty)(T) = evalpoly(property_temperature(T), p.coeffs)
+@inline (p::ArrheniusProperty)(T) = p.A * exp(-p.E / (R_GAS * property_temperature(T)))
+@inline (p::CallableProperty)(T) = p.func(property_temperature(T))
+@inline function (p::SutherlandProperty)(T)
+    Tp = property_temperature(T)
+    return p.μ_ref * (Tp / p.T_ref)^1.5 * (p.T_ref + p.S) / (Tp + p.S)
+end
 @inline (p::TableProperty{N,T})(Tq::Real) where {N,T} =
-    linear_interpolate(p.temperatures, p.values, Tq)
+    linear_interpolate(p.temperatures, p.values, property_temperature(Tq))
 
 # Temperature and state evaluation (state ignored for non-state-dependent properties)
 @inline (p::ConstantProperty)(T, ξ) = p.value
-@inline (p::LinearProperty)(T, ξ) = p.a + p.b * T
-@inline (p::PolynomialProperty)(T, ξ) = evalpoly(T, p.coeffs)
-@inline (p::ArrheniusProperty)(T, ξ) = p.A * exp(-p.E / (R_GAS * T))
-@inline (p::CallableProperty)(T, ξ) = p.func(T)
-@inline (p::TableProperty{N,T})(Tq::Real, ξ) where {N,T} =
-    linear_interpolate(p.temperatures, p.values, Tq)
+@inline (p::LinearProperty)(T, ξ) = p(T)
+@inline (p::PolynomialProperty)(T, ξ) = p(T)
+@inline (p::ArrheniusProperty)(T, ξ) = p(T)
+@inline (p::CallableProperty)(T, ξ) = p(T)
+@inline (p::SutherlandProperty)(T, ξ) = p(T)
+@inline (p::TableProperty{N,T})(Tq::Real, ξ) where {N,T} = p(Tq)
 
 # StateDependentProperty requires both T and ξ
-@inline (p::StateDependentProperty)(T, ξ) = p.func(T, ξ)
+@inline (p::StateDependentProperty)(T, ξ) = p.func(property_temperature(T), ξ)
 
 @inline function (p::StateDependentProperty)(T)
     error(
@@ -269,19 +327,25 @@ derivative(cp, 300.0)  # Returns 2.5 (the slope)
 """
 function derivative end
 
+# Every law is flat outside the property bracket (its argument is clamped),
+# so the analytic derivatives vanish there and `derivative(p, T)` equals
+# `ForwardDiff.derivative(p, T)` for every T.
+@inline _in_property_bracket(T) = T_PROPERTY_MIN <= T <= T_PROPERTY_MAX
+
 # ConstantProperty: derivative is always zero
 @inline derivative(p::ConstantProperty, T) = 0.0
 @inline derivative(p::ConstantProperty, T, ξ) = 0.0
 
 # LinearProperty: derivative is the slope
-@inline derivative(p::LinearProperty, T) = p.b
-@inline derivative(p::LinearProperty, T, ξ) = p.b
+@inline derivative(p::LinearProperty, T) = _in_property_bracket(T) ? p.b : zero(p.b)
+@inline derivative(p::LinearProperty, T, ξ) = derivative(p, T)
 
 # PolynomialProperty: derivative of polynomial
 # p(T) = c₀ + c₁T + c₂T² + c₃T³ + ...
 # p'(T) = c₁ + 2c₂T + 3c₃T² + ...
 @inline function derivative(p::PolynomialProperty{N,T}, Tq) where {N,T}
     N == 1 && return 0.0
+    _in_property_bracket(Tq) || return 0.0
     # Compute derivative coefficients: (c₁, 2c₂, 3c₃, ...)
     result = p.coeffs[2]
     Tpow = one(Tq)
@@ -295,9 +359,19 @@ end
 
 # ArrheniusProperty: d/dT[A*exp(-E/RT)] = A*exp(-E/RT) * E/(R*T²) = p(T) * E/(R*T²)
 @inline function derivative(p::ArrheniusProperty, T)
+    _in_property_bracket(T) || return 0.0
     return p(T) * p.E / (R_GAS * T^2)
 end
 @inline derivative(p::ArrheniusProperty, T, ξ) = derivative(p, T)
+
+# SutherlandProperty: analytic. With μ = A·T^{3/2}/(T+S),
+# dμ/dT = μ·(3/(2T) − 1/(T+S)) — cheaper and better-conditioned than expanding
+# the quotient rule. Kept in lockstep with the callable above by
+# `test/materials/test_gas_viscosity_property.jl`, which gates it against
+# `ForwardDiff.derivative`.
+@inline derivative(p::SutherlandProperty, T) =
+    _in_property_bracket(T) ? p(T) * (1.5 / T - 1.0 / (T + p.S)) : 0.0
+@inline derivative(p::SutherlandProperty, T, ξ) = derivative(p, T)
 
 # TableProperty: finite difference approximation of derivative
 @inline function derivative(p::TableProperty{N,T}, Tq) where {N,T}
@@ -339,6 +413,7 @@ For StateDependentProperty, uses finite difference approximation.
 @inline derivative_ξ(p::ArrheniusProperty, T, ξ, j::Int) = 0.0
 @inline derivative_ξ(p::TableProperty, T, ξ, j::Int) = 0.0
 @inline derivative_ξ(p::CallableProperty, T, ξ, j::Int) = 0.0
+@inline derivative_ξ(p::SutherlandProperty, T, ξ, j::Int) = 0.0
 
 # StateDependentProperty: finite difference in ξⱼ (holding T and other ξ constant)
 # Note: Uses setindex on mutable copy to avoid ntuple allocation in hot paths

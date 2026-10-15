@@ -277,9 +277,18 @@ function contribute_to_jacobian!(
     end
 
     # ---------------------------------------------------------------
-    # Direct chain rule (analytic) + per-node indirect scales.
+    # Direct chain rule (analytic) + per-node indirect scales. Live cells
+    # only; the scales of parked ghost slots are zero so the prefix-sum
+    # couplings (which span every slot) contribute nothing there.
     # ---------------------------------------------------------------
-    @inbounds for i = 1:n_cells
+    n_live = mesh.n_active_cells
+    @inbounds for i = (n_live+1):n_cells
+        for j = 1:NC
+            ws.scale_L[j, i] = 0.0
+            ws.scale_R[j, i] = 0.0
+        end
+    end
+    @inbounds for i = 1:n_live
         w_L = Float64(w_node[ws.n_left[i]])
         w_R = Float64(w_node[ws.n_right[i]])
         Δz = ws.Δz_per_cell[i]

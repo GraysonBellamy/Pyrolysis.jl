@@ -130,8 +130,8 @@ end
 end
 
 @inline function _gt_unpack_stencil(x::AbstractVector, NC::Int)
-    @inbounds T_L = x[1];
-    @inbounds T_C = x[2];
+    @inbounds T_L = x[1]
+    @inbounds T_C = x[2]
     @inbounds T_R = x[3]
     ξ_L = ntuple(j -> @inbounds(x[3+j]), NC)
     ξ_C = ntuple(j -> @inbounds(x[3+NC+j]), NC)
@@ -342,7 +342,7 @@ end
         d_L_face = abs(state.face_positions[f_left] - state.cell_centers[iL])
         d_LC = abs(state.cell_centers[i] - state.cell_centers[iL])
     else
-        d_L_face = 1.0;
+        d_L_face = 1.0
         d_LC = 1.0
     end
     if has_right
@@ -350,7 +350,7 @@ end
         d_R_face = abs(state.face_positions[f_right] - state.cell_centers[i])
         d_CR = abs(state.cell_centers[iR] - state.cell_centers[i])
     else
-        d_R_face = 1.0;
+        d_R_face = 1.0
         d_CR = 1.0
     end
     return (
@@ -586,7 +586,7 @@ function _contribute_to_jacobian_analytical!(
     is_gas_t = _gt_is_gas_tuple(material.components, Val(NC))
     is_gen = !isnan(T_ref)
 
-    @inbounds for i = 1:n_cells
+    @inbounds for i = 1:mesh.n_active_cells
         geom = _gt_geometry(state, mesh, i)
         has_left = geom.has_left
         has_right = geom.has_right
@@ -621,20 +621,20 @@ function _contribute_to_jacobian_analytical!(
         # is owned whole by `BCConvectionOperator`), which zeroes every S_conv
         # accumulator below while the ξ-rows and S_gen pieces still assemble.
         if has_left && has_right
-            T_L = u[iL];
+            T_L = u[iL]
             T_R = u[iR]
             dTdx = opposite_distance_gradient(T_L, T_C, T_R, geom.d_LC, geom.d_CR)
             (ddTdx_dT_L, ddTdx_dT_C, ddTdx_dT_R) =
                 opposite_distance_gradient_coeffs(geom.d_LC, geom.d_CR)
         elseif has_right
-            T_R = u[iR];
+            T_R = u[iR]
             T_L = T_C   # not used; placeholder
             dTdx = 0.0
             ddTdx_dT_L = 0.0
             ddTdx_dT_C = 0.0
             ddTdx_dT_R = 0.0
         else  # has_left only
-            T_L = u[iL];
+            T_L = u[iL]
             T_R = T_C   # placeholder
             dTdx = 0.0
             ddTdx_dT_L = 0.0
@@ -993,7 +993,8 @@ function _contribute_to_jacobian_ad!(
     smap = jac.smap
     out_dim = 1 + NC
 
-    @inbounds for i = 1:n_cells
+    n_live = mesh.n_active_cells
+    @inbounds for i = 1:n_live
         geom = _gt_geometry(state, mesh, i)
 
         f! = let geom = geom, material = material, NC = NC, T_ref = T_ref
@@ -1029,7 +1030,7 @@ function _contribute_to_jacobian_ad!(
         # Scatter. Output rows: 1 → T_i; 1+j → ξ_{j, i}.
         # Input cols (stencil): 1,2,3 → T_{iL,i,iR}; 3+(k-1)*NC+j → ξ_{j, i_k}.
         iL = i == 1 ? 0 : i - 1
-        iR = i == n_cells ? 0 : i + 1
+        iR = i == n_live ? 0 : i + 1
 
         # Helper: write block_row's contributions into global row `gr`.
         # Skips boundary self-fill columns.

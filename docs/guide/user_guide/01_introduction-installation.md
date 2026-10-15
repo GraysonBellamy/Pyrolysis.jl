@@ -99,13 +99,13 @@ them plainly wherever they appear:
   carries the gas enthalpy, so enabling transpiration would double-count it.
   `use_transpiration_bc = true` is rejected at construction; leave it at its
   default `false` (see Technical Reference §7 and §12).
-- **Surface-cell depletion handling** (`handle_depletion = true`) resizes the
-  state vector mid-solve and is therefore incompatible with a pluggable Jacobian
-  backend. When you enable it, the solver falls back to the integrator's own
-  colored finite-difference Jacobian (see §1.7 and Technical Reference §14, §15).
+- **Depletion handling** (`handle_depletion = true`) parks depleted cells
+  without changing the state size, so it works with every Jacobian backend;
+  it is a sequence of discrete state rewrites, so parameter sensitivities are
+  valid only between park events (Chapter 10, Technical Reference §14, §17).
 - **h-AMR** (cell splitting / coarsening) is quarantined in
   `Pyrolysis.Experimental`; the supported adaptivity in the core package is
-  r-refinement (node relocation) and surface-depletion merging.
+  r-refinement (node relocation) and depleted-cell parking.
 
 ---
 
@@ -386,14 +386,6 @@ For a real end-to-end check, run the minimal example in §1.8 — completing it 
 `retcode == :Success` is the strongest confirmation that conduction, kinetics, gas
 transport, the boundary solve, and the integrator are all working together.
 
-> **Depletion and the Jacobian.** If you later enable surface-cell depletion
-> handling (`solve(...; use_ale = true, handle_depletion = true)`), be aware that
-> it resizes the state vector while integrating, which a pluggable `JacobianSpec`
-> cannot survive. The solver therefore refuses to combine `handle_depletion = true`
-> with an explicit `jacobian` argument and, when depletion is on, falls back to the
-> integrator's own colored finite-difference Jacobian. See UG §10 and Technical
-> Reference §14–§15.
-
 ---
 
 ## 1.8 A minimal "hello pyrolysis" example
@@ -457,7 +449,9 @@ A few notes on what each step does and what is defaulted:
   tuple inside the constructor. Materials and reactions are covered in UG §3 and
   UG §4.
 - **`SolidComponent(:name; ρ, c, k, …)`** requires bulk density `ρ`, heat
-  capacity `c`, and conductivity `k`; `ε` (emissivity) defaults to `0.9`, the
+  capacity `c`, and conductivity `k`; `ε` (emissivity, a number or a property
+  function of temperature) defaults to `0.9`, the surface `absorptivity` for
+  incident radiation to `nothing` (Kirchhoff, `a = ε(T)`), the
   swelling factor `γ` to `1.0`, permeability `κ` to `0.0` (impermeable, so no
   Darcy flow), the gas-transfer coefficient `λ` to `0.0`, and the mass-absorption
   coefficient `α` to `0.0`. Any of `ρ`, `c`, `k` may be a number or a property
@@ -549,7 +543,7 @@ stable, user-facing API. Broadly, the top-level exports cover:
   `phase`, `molar_mass`).
 - **Property functions:** `ConstantProperty`, `LinearProperty`,
   `PolynomialProperty`, `ArrheniusProperty`, `TableProperty`, `CallableProperty`,
-  `StateDependentProperty`.
+  `SutherlandProperty`, `StateDependentProperty`.
 - **Boundary conditions:** the thermal BCs (`HeatFluxBC`, `ConvectiveBC`,
   `RadiativeBC`, `RadiativeFluxBC`, `CombinedThermalBC`, `DirichletThermalBC`,
   `AdiabaticBC`), the mass BCs (`ImpermeableBC`, `MassFluxBC`, `ConvectiveMassBC`,

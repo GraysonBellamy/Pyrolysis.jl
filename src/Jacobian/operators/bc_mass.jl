@@ -55,7 +55,8 @@ using ..Properties:
     mixture_density,
     porosity,
     effective_permeability,
-    effective_gas_viscosity
+    effective_gas_viscosity,
+    mixture_gas_viscosity
 using ..Physics: ideal_gas_pressure
 using ..Discretization: mass_bc_flux, boundary_darcy_velocity
 
@@ -139,7 +140,7 @@ function _bc_boundary_face_fluxes(
         φ = porosity(ξ_cell, T_cell, material)
         P_int = ideal_gas_pressure(ξ_cell, T_cell, φ, material)
         κ_int = effective_permeability(ξ_cell, T_cell, material)
-        μ_int = effective_gas_viscosity(T_cell)
+        μ_int = mixture_gas_viscosity(ξ_cell, T_cell, material)
         v_z = boundary_darcy_velocity(mass_bc, P_int, κ_int, μ_int, d_to_face, Val(tag))
         v_out = tag === :top ? v_z : -v_z
         if v_out > 0

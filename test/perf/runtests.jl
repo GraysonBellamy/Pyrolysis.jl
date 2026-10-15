@@ -19,11 +19,16 @@ include(joinpath(@__DIR__, "perf_helpers.jl"))
 function _load_jet_for_type_stability()
     try
         @eval using JET
-        return true
     catch _
         @info "JET.jl not available; type-stability tests will be skipped"
         return false
     end
+    # JET loads as an inert stub on Julia versions it does not support.
+    if !(@eval JET.JET_AVAILABLE)
+        @info "JET does not support Julia $(VERSION); type-stability tests will be skipped"
+        return false
+    end
+    return true
 end
 
 @testset "performance invariants" begin

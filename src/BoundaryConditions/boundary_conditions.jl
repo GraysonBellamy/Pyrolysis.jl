@@ -103,32 +103,46 @@ end
 HeatFluxBC(flux::Integer) = HeatFluxBC{Float64}(Float64(flux))
 
 """
-	ConvectiveBC{Fh,FT} <: AbstractThermalBC
+	ConvectiveBC{Fh,FT,BM} <: AbstractThermalBC
 
 Convective heat transfer boundary condition: q" = h(T∞ - T_surface)
 
 # Fields
-- `h::Fh`: Heat transfer coefficient [W/(m²·K)]
+- `h::Fh`: Heat transfer coefficient without outflow [W/(m²·K)]
 - `T_inf::FT`: Ambient temperature [K]
+- `blowing::BM`: how gas leaving through this face changes `h`, an
+  `AbstractBlowingModel`. `NoBlowing()` (default) leaves `h` alone;
+  `CouetteFilm()` is the classical film law; `PropertyRatioFilm` and
+  `PoolingFilm` take the gas and the free stream into account. The face's
+  outward gas flux is read from the mass balance at every surface iterate.
 
 # Example
 ```julia
 bc = ConvectiveBC(h=10.0, T_inf=300.0)
 bc = ConvectiveBC(h=10.0, T_inf=t -> 300 + 0.1*t)  # Warming ambient
+bc = ConvectiveBC(h=11.2, T_inf=360.0, blowing=PoolingFilm(NITROGEN))
 ```
 """
-struct ConvectiveBC{Fh,FT} <: AbstractThermalBC
-    h::Fh           # h(t) or constant
-    T_inf::FT       # T∞(t) or constant
+struct ConvectiveBC{Fh,FT,BM<:AbstractBlowingModel} <: AbstractThermalBC
+    h::Fh                    # h(t) or constant
+    T_inf::FT                # T∞(t) or constant
+    blowing::BM              # blowing model
 end
 
-function ConvectiveBC(; h, T_inf, validate::Bool = true)
+ConvectiveBC(h, T_inf) = ConvectiveBC(h, T_inf, NoBlowing())
+
+function ConvectiveBC(;
+    h,
+    T_inf,
+    blowing::AbstractBlowingModel = NoBlowing(),
+    validate::Bool = true,
+)
     if validate
         h_val = _get_scalar_value(h)
         T_val = _get_scalar_value(T_inf)
         validate_bc_params(h = h_val, T = T_val)
     end
-    ConvectiveBC(h, T_inf)
+    ConvectiveBC(h, T_inf, blowing)
 end
 
 """
@@ -253,14 +267,18 @@ The distribution of absorbed radiation depends on the `radiation_model` passed t
 # Fields
 - `flux::F`: Incident radiative flux [W/m²] (constant or time-dependent)
 - `absorptivity::A`: Surface absorptivity (0-1). Can be:
-  - `nothing` (default): Use effective emissivity from material properties (ε_eff = Σⱼ vⱼ εⱼ).
-	By Kirchhoff's law, absorptivity = emissivity at thermal equilibrium.
+  - `nothing` (default): Use the material's effective surface absorptivity
+	`a_eff = Σⱼ vⱼ aⱼ`, where `aⱼ` is the component's `absorptivity` keyword
+	when set and its emissivity `εⱼ(T)` otherwise. With no component
+	absorptivity set this is Kirchhoff's law, `a_eff = ε_eff`; setting one
+	decouples the absorbed heater flux from the temperature-dependent
+	emission (see `SolidComponent`).
   - A constant value (e.g., 0.9)
   - A time-dependent function (e.g., t -> 0.9 + 0.05*t/100)
 
 # Example
 ```julia
-# Use effective emissivity as absorptivity (recommended)
+# Use the material's surface absorptivity (ε_eff by default) — recommended
 bc = RadiativeFluxBC(flux=25e3)
 
 # Override with fixed absorptivity
@@ -275,8 +293,10 @@ solve(problem; radiation_model=BEER_LAMBERT)        # Semi-transparent
 ```
 
 # Note
-When absorptivity=nothing (default), the effective emissivity is used as absorptivity
-(Kirchhoff's law). This automatically tracks composition changes as material decomposes.
+When absorptivity=nothing (default), the material's mixture surface absorptivity
+`a_eff` is used — identical to the effective emissivity (Kirchhoff's law) unless a
+component carries its own `absorptivity`. Either way it automatically tracks
+composition and temperature changes as material decomposes.
 
 Do NOT combine `RadiativeFluxBC` with `HeatFluxBC` for the same radiation source -
 this would double-count the energy input.
@@ -772,7 +792,8 @@ tag dispatch (`Val(:top)`, `Val(:bottom)`, …).
   folded in (`I = α(t)·q_ext`); otherwise `I` is the bare incident flux.
 - `has_explicit_absorptivity`: `true` iff the BC supplied an explicit
   `absorptivity`. When `false` (the Kirchhoff default path), the surface
-  cell's live ε_eff is applied at injection by
+  cell's live `a_eff` (`cache.a[end]`, equal to ε_eff unless a component
+  sets `surface_absorptivity`) is applied at injection by
   `compute_beer_lambert_source!` — consumers must not apply it again.
 """
 function extract_radiative_flux_from_bcs(
@@ -798,8 +819,9 @@ function extract_radiative_flux_from_bcs(
             Float64(rad_bc.absorptivity)
         return (flux * α, true)
     else
-        # Kirchhoff default: bare incident flux; the live surface-cell ε_eff
-        # (α = ε) is applied at injection in compute_beer_lambert_source!.
+        # Kirchhoff default: bare incident flux; the live surface-cell a_eff
+        # (= ε_eff unless a component overrides) is applied at injection in
+        # compute_beer_lambert_source!.
         return (flux, false)
     end
 end

@@ -1,13 +1,13 @@
 "n_cells","qoi","value","exact","error","tol","within_tol"
-16,"L∞ T error on moving mesh, t=10.0 s",0.3061237646064683,NaN,0.3061237646064683,0.25,false
-16,"relative L∞ ξ_solid (mesh-bound) error, t=10.0 s",1.4784973245696166e-12,NaN,1.4784973245696166e-12,1.0e-10,true
-16,"relative L∞ ξ_gas error, t=10.0 s",0.0021166509171282044,NaN,0.0021166509171282044,0.006,true
-32,"L∞ T error on moving mesh, t=10.0 s",0.06912627943773941,NaN,0.06912627943773941,0.25,true
-32,"relative L∞ ξ_solid (mesh-bound) error, t=10.0 s",1.4316962430408846e-12,NaN,1.4316962430408846e-12,1.0e-10,true
-32,"relative L∞ ξ_gas error, t=10.0 s",0.0012257583208357126,NaN,0.0012257583208357126,0.006,true
-64,"L∞ T error on moving mesh, t=10.0 s",0.015790876643222873,NaN,0.015790876643222873,0.25,true
-64,"relative L∞ ξ_solid (mesh-bound) error, t=10.0 s",3.4344793675700204e-12,NaN,3.4344793675700204e-12,1.0e-10,true
-64,"relative L∞ ξ_gas error, t=10.0 s",0.0010284236989049529,NaN,0.0010284236989049529,0.006,true
-128,"L∞ T error on moving mesh, t=10.0 s",0.0038569046560041897,NaN,0.0038569046560041897,0.25,true
-128,"relative L∞ ξ_solid (mesh-bound) error, t=10.0 s",6.204648646720064e-12,NaN,6.204648646720064e-12,1.0e-10,true
-128,"relative L∞ ξ_gas error, t=10.0 s",0.000619663194835122,NaN,0.000619663194835122,0.006,true
+16,"L∞ T error on moving mesh, t=10.0 s",0.30612356006554364,NaN,0.30612356006554364,0.25,false
+16,"relative L∞ ξ_solid (mesh-bound) error, t=10.0 s",1.48039210519831e-12,NaN,1.48039210519831e-12,1.0e-10,true
+16,"relative L∞ ξ_gas error, t=10.0 s",0.002116650780121354,NaN,0.002116650780121354,0.006,true
+32,"L∞ T error on moving mesh, t=10.0 s",0.06912629424545003,NaN,0.06912629424545003,0.25,true
+32,"relative L∞ ξ_solid (mesh-bound) error, t=10.0 s",1.4315067649780152e-12,NaN,1.4315067649780152e-12,1.0e-10,true
+32,"relative L∞ ξ_gas error, t=10.0 s",0.0012257583475721034,NaN,0.0012257583475721034,0.006,true
+64,"L∞ T error on moving mesh, t=10.0 s",0.01579089524932442,NaN,0.01579089524932442,0.25,true
+64,"relative L∞ ξ_solid (mesh-bound) error, t=10.0 s",3.434858323695759e-12,NaN,3.434858323695759e-12,1.0e-10,true
+64,"relative L∞ ξ_gas error, t=10.0 s",0.0010284237284590898,NaN,0.0010284237284590898,0.006,true
+128,"L∞ T error on moving mesh, t=10.0 s",0.0038569038093783092,NaN,0.0038569038093783092,0.25,true
+128,"relative L∞ ξ_solid (mesh-bound) error, t=10.0 s",6.204080212531456e-12,NaN,6.204080212531456e-12,1.0e-10,true
+128,"relative L∞ ξ_gas error, t=10.0 s",0.0006196631904115494,NaN,0.0006196631904115494,0.006,true

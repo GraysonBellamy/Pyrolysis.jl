@@ -86,8 +86,9 @@ pmma_k  = CallableProperty(T -> T < 378.0 ? 0.15 : (0.34 - 3.9e-4 * T))
 
 `CallableProperty` is one of several property-function types. You can also pass
 a bare number (auto-converted to a `ConstantProperty`), a `LinearProperty(a, b)`
-for `a + b·T`, a `PolynomialProperty`, an `ArrheniusProperty`, or a
-`TableProperty` for tabulated data. Property types and their derivatives are
+for `a + b·T`, a `PolynomialProperty`, an `ArrheniusProperty`, a
+`TableProperty` for tabulated data, or a `SutherlandProperty(μ_ref, T_ref, S)`
+for the gas-viscosity correlation μ_ref·(T/T_ref)^{3/2}·(T_ref+S)/(T+S). Property types and their derivatives are
 covered in full in User Guide §UG-3 and Technical Reference §4.
 
 ### 2.2.2 Component constructors
@@ -134,7 +135,8 @@ thermophysical values are keywords. Defaults worth knowing:
 | `ρ` | bulk density [kg/m³] | required | ideal-gas law from `M` |
 | `c` | heat capacity [J/(kg·K)] | required | required |
 | `k` | thermal conductivity [W/(m·K)] | required | required |
-| `ε` | surface emissivity [-] | `0.9` | `0.0` |
+| `ε` | surface emissivity [-] (number or `ε(T)`) | `0.9` | `0.0` |
+| `absorptivity` | surface absorptivity for incident radiation [-] (`nothing` = Kirchhoff, `ε(T)`) | `nothing` | n/a (always Kirchhoff) |
 | `α` | mass absorption coeff. [m²/kg] | `0.0` | `0.0` |
 | `γ` | swelling factor [-] | `1.0` (solid shrinks) | `0.0` (gas escapes) |
 | `λ` | gas-transfer coeff. [m²/s] | `0.0` | required |
@@ -253,10 +255,13 @@ What each piece does:
 
 - **`RadiativeFluxBC(flux, absorptivity)`** is the *incident* external radiation
   from the cone heater. The absorbed flux is `flux × absorptivity`. If you pass
-  `absorptivity = nothing` (the default), the effective surface emissivity is
-  used instead via Kirchhoff's law (`α = ε_eff`), automatically tracking
-  composition as the surface chars. The way this flux is deposited depends on
-  the `radiation_model` you choose at solve time (see §2.6).
+  `absorptivity = nothing` (the default), the material's effective surface
+  absorptivity `a_eff = Σ_j v_j a_j` is used instead, where each component's
+  `a_j` is its own `absorptivity` keyword when set and its emissivity `ε_j(T)`
+  otherwise (Kirchhoff's law, so `a_eff = ε_eff` unless a component sets one).
+  Either way it automatically tracks composition as the surface chars. The way
+  this flux is deposited depends on the `radiation_model` you choose at solve
+  time (see §2.6).
 - **`RadiativeBC(ε, T_inf, F)`** is the surface's own **re-radiation loss**,
   `q = F·ε·σ·(T_∞⁴ − T_s⁴)`. With `ε = nothing` it uses the effective
   emissivity; the view factor `F` defaults to `1.0`. Because `T_s` exceeds
@@ -458,8 +463,11 @@ solution = solve(
 )
 ```
 
-The first run incurs Julia compilation latency (tens of seconds); subsequent
-runs in the same session are fast.
+The first run in a Julia session compiles the residual and Jacobian for this
+problem's material and boundary-condition types, which takes 15–20 s; the time
+integrator itself comes precompiled with the package. Later runs in the same
+session reuse the compiled code, including runs with other parameter values
+(§15.11).
 
 ### 2.6.1 The options you just used
 
@@ -469,7 +477,7 @@ runs in the same session are fast.
 | `use_ale` | `false` | enables moving-mesh tracking of surface recession |
 | `radiation_model` | `NO_RADIATION` | `SURFACE_ABSORPTION` absorbs the cone flux at the surface |
 | `min_thickness` | `1e-6` | ALE termination thickness [m] |
-| `handle_depletion` | `false` | merge thin surface cells (requires `use_ale = true`) |
+| `handle_depletion` | `false` | park depleted cells (ALE or fixed mesh) |
 | `depletion_threshold` | `0.05` | cell-thinness fraction that triggers a merge |
 | `min_cells` | `2` | floor on cell count before termination |
 | `progress` | `true` | progress bar |
@@ -504,8 +512,9 @@ Two important caveats:
   `BEER_LAMBERT` mode the boundary-temperature Newton solver still runs (it
   finds the `T_s` that balances conducted, convective, and re-radiation flux),
   but `RadiativeFluxBC` contributes **zero** flux at the boundary; the absorbed
-  fraction of the incident cone radiation — `ε_eff·Φ` by Kirchhoff's law
-  (`α = ε_eff` of the live surface cell), or `α·Φ` with an explicit
+  fraction of the incident cone radiation — `a_eff·Φ` with the live surface
+  cell's effective surface absorptivity (`= ε_eff` by Kirchhoff's law unless a
+  component sets `absorptivity`), or `α·Φ` with an explicit BC
   `absorptivity` — is deposited volumetrically via
   `compute_beer_lambert_source!` and reported in
   `solution.extras.volumetric_absorption`.
@@ -519,7 +528,8 @@ These are not needed for this run but round out the picture (full reference in
 User Guide §UG-8):
 
 - **`integrator`** (default `KenCarp4`) and **`linear_solver`** (default
-  `SparspakFactorization`) — the time integrator and sparse linear solver.
+  chosen from the Jacobian's sparsity pattern, §8.4) — the time integrator and
+  sparse linear solver.
 - **`energy_form`** (default `:standard`) — `:standard` carries gas enthalpy via
   the volumetric `S_conv` term; `:with_generation_sink` adds the gas-generation
   enthalpy sink, which is consistent **only with T_ref-datum reaction heats**
@@ -527,25 +537,12 @@ User Guide §UG-8):
   §7.7). Leave at `:standard` unless you have a specific reason.
 - **`use_transpiration_bc`** (default `false`) — **leave off.** It double-counts
   gas enthalpy against `S_conv` and `solve` raises an error if set `true`.
-- **`use_blowing_correction`** (default `false`) — opt-in Couette-film blowing
-  correction: every `ConvectiveBC` is rescaled `h → h·B/(e^B − 1)` with
-  `B = ṁ″·c_p,g/h` built from the outward gas flux at the face. Physically real
-  and safe with the default energy convention (it modifies the convective
-  *coefficient*, not the enthalpy accounting), but enable it on calibrated
-  examples only together with flame heat-flux feedback — alone it raises `T_s`
-  and MLR relative to the calibration (§5.2.3 of the Technical Reference,
-  §12.3.3).
+- The effect of outgassing on convective exchange is a property of each
+  `ConvectiveBC` (its `blowing` model, §5.2.3), not a solve option.
 - **`diagnostics`** (default `false`) — snapshot the conservation ledgers every
   `diagnostics_stride` steps (default 10) for energy/mass-balance auditing.
-- **`jacobian`** (default `nothing` ⇒ a structured backend with a direct solve)
-  — selects the Jacobian backend. **WARNING:** `handle_depletion = true` is a
-  **hard incompatibility** with a pluggable `jacobian`, not a soft warning: the
-  depletion callback resizes the state vector mid-solve, which the pre-allocated
-  Jacobian caches of the structured backend cannot survive. If you specify
-  **both** `handle_depletion = true` **and** a `jacobian`, `solve` raises an
-  error and refuses to run. To use depletion, **omit the `jacobian` kwarg
-  entirely** — the integrator then falls back to its own colored
-  finite-difference Jacobian. See Technical Reference §15 and User Guide §UG-11.
+- **`handle_depletion`** — park depleted cells (Chapter 10). The state keeps
+  its size, so it combines with any `jacobian`.
 - **`warm_start`** — reuse a prior solution's final state as the initial
   condition for a continuation run.
 

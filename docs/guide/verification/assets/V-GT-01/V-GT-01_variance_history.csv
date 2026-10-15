@@ -1,5 +1,5 @@
 "series","t (s)","Var (m²)","exact"
 "discrete second moment",0.0,1.0000000000000014e-6,1.0e-6
-"discrete second moment",2.0,5.000000000000005e-6,4.9999999999999996e-6
-"discrete second moment",4.0,8.999999999066506e-6,9.0e-6
-"discrete second moment",8.0,1.699992185548859e-5,1.7e-5
+"discrete second moment",2.0,5.0000000000000055e-6,4.9999999999999996e-6
+"discrete second moment",4.0,8.999999999066509e-6,9.0e-6
+"discrete second moment",8.0,1.6999921855488586e-5,1.7e-5

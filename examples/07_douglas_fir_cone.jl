@@ -1636,14 +1636,16 @@ println("\n" * "="^70)
 println("Boundary Temperature Analysis")
 println("="^70)
 
-# Get final boundary state information
-T_surface_final = get_surface_temperature(mesh)
-T_back_final = get_back_face_temperature(mesh)
+# Get final boundary state information. `solve` integrates its own copy of the
+# mesh; `solution.problem.mesh` holds the final state.
+final_mesh = solution.problem.mesh
+T_surface_final = get_surface_temperature(final_mesh)
+T_back_final = get_back_face_temperature(final_mesh)
 
 # Get cell-center temperatures for comparison
-n_cells_final = length(mesh.cell_states)
-T_cell_top = mesh.cell_states[n_cells_final].T
-T_cell_bottom = mesh.cell_states[1].T
+n_cells_final = length(final_mesh.cell_states)
+T_cell_top = final_mesh.cell_states[n_cells_final].T
+T_cell_bottom = final_mesh.cell_states[1].T
 
 # Compute temperature jumps at boundaries
 ΔT_surface = T_surface_final - T_cell_top
@@ -1661,7 +1663,7 @@ println("  T_cell (bottom)     = $(round(T_cell_bottom, digits=2)) K")
 println("  ΔT = T_back - T_cell = $(round(ΔT_back, digits=2)) K")
 
 # Check energy balance at boundaries
-balance_results = check_boundary_energy_balance(mesh)
+balance_results = check_boundary_energy_balance(final_mesh)
 println("\nEnergy balance at boundaries (should be < 1e-6):")
 for (boundary_id, imbalance) in balance_results
     boundary_name = boundary_id == 1 ? "Top surface" : "Back surface"
@@ -1673,7 +1675,7 @@ end
 
 # Show boundary state details
 println("\nBoundary state details:")
-top_state = mesh.boundary_states[1]
+top_state = final_mesh.boundary_states[1]
 println("  Top surface:")
 println("    q_applied   = $(round(top_state.q_applied/1000, digits=2)) kW/m²")
 println("    q_conducted = $(round(top_state.q_conducted/1000, digits=2)) kW/m²")

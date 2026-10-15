@@ -52,7 +52,6 @@ function _residual!(du, u, def::ProblemDef, t, ws::Workspace, ::Eulerian)
     radiation_kirchhoff = get_option(def, :radiation_kirchhoff, true)
     energy_form = get_option(def, :energy_form, :standard)
     use_transpiration_bc = get_option(def, :use_transpiration_bc, false)
-    use_blowing_correction = get_option(def, :use_blowing_correction, false)
 
     # 1) Populate the typed state cache from u — single source of truth
     #    for state during residual assembly. Eulerian geometry is constant
@@ -73,18 +72,31 @@ function _residual!(du, u, def::ProblemDef, t, ws::Workspace, ::Eulerian)
         radiation_kirchhoff,
         energy_form,
         use_transpiration_bc,
-        use_blowing_correction,
         transport_mode(def.mode),
     )
 
-    # 4) Pack
-    @inbounds for i = 1:n
-        du[i] = ws.dT_work[i]
+    # 4) Pack the live rows; parked ghost rows are identically zero.
+    _pack_cell_rows!(du, ws.dT_work, ws.dξ_work, n, mesh.n_active_cells, NC)
+
+    return nothing
+end
+
+# Live cells 1:n_live take their T and ξ rates; ghost slots n_live+1:n are
+# inert and get exactly zero, so W = I/(γΔt) − J is the identity there.
+@inline function _pack_cell_rows!(du, dT, dξ, n::Int, n_live::Int, NC::Int)
+    @inbounds for i = 1:n_live
+        du[i] = dT[i]
         for j = 1:NC
-            du[n+(j-1)*n+i] = ws.dξ_work[j, i]
+            du[n+(j-1)*n+i] = dξ[j, i]
         end
     end
-
+    z = zero(eltype(du))
+    @inbounds for i = (n_live+1):n
+        du[i] = z
+        for j = 1:NC
+            du[n+(j-1)*n+i] = z
+        end
+    end
     return nothing
 end
 
@@ -104,7 +116,6 @@ function _residual!(du, u, def::ProblemDef, t, ws::Workspace, ::ALE)
     radiation_kirchhoff = get_option(def, :radiation_kirchhoff, true)
     energy_form = get_option(def, :energy_form, :standard)
     use_transpiration_bc = get_option(def, :use_transpiration_bc, false)
-    use_blowing_correction = get_option(def, :use_blowing_correction, false)
 
     # 1) Populate the typed state cache from u (T, ξ, z, χ).
     populate!(ws.state_cache, u, layout)
@@ -136,7 +147,6 @@ function _residual!(du, u, def::ProblemDef, t, ws::Workspace, ::ALE)
         radiation_kirchhoff,
         energy_form,
         use_transpiration_bc,
-        use_blowing_correction,
         transport_mode(def.mode),
     )
 
@@ -221,24 +231,18 @@ function _residual!(du, u, def::ProblemDef, t, ws::Workspace, ::ALE)
 
     # 7) Apply ALE corrections (T advection only when it was computed)
     if w_ovr !== nothing
-        _apply_ale_T_advection!(ws.dT_work, ws.ale_advection)
+        _apply_ale_T_advection!(ws.dT_work, ws.ale_advection, mesh)
     end
-    _apply_ale_species_advection!(ws.dξ_work, ws.ale_species_advection, NC)
+    _apply_ale_species_advection!(ws.dξ_work, ws.ale_species_advection, mesh)
 
     # 8) Dilation correction for mesh-bound (solid/liquid) species. Gas is
     #    NOT included here: its volume-rate term is part of the conservative
     #    flux form in step 6.
-    _apply_ale_dilation_correction!(ws.dξ_work, ws.θ_work, ws.state_cache, material)
+    _apply_ale_dilation_correction!(ws.dξ_work, ws.θ_work, ws.state_cache, mesh, material)
 
-    # 9) Pack du
-    @inbounds for i = 1:n
-        du[i] = ws.dT_work[i]
-    end
-    @inbounds for i = 1:n
-        for j = 1:NC
-            du[n+(j-1)*n+i] = ws.dξ_work[j, i]
-        end
-    end
+    # 9) Pack du. Ghost T/ξ rows are zero; every node — ghost nodes included,
+    #    which ride the live surface — takes its mesh velocity.
+    _pack_cell_rows!(du, ws.dT_work, ws.dξ_work, n, mesh.n_active_cells, NC)
     zoff = n * (1 + NC)
     @inbounds for i = 1:n_nodes
         du[zoff+i] = ws.w_work[i]
@@ -273,7 +277,6 @@ end
     radiation_kirchhoff::Bool,
     energy_form::Symbol,
     use_transpiration_bc::Bool,
-    use_blowing_correction::Bool,
     ::Fickian,
 )
     Discretization.compute_rhs!(
@@ -293,7 +296,6 @@ end
         radiation_kirchhoff = radiation_kirchhoff,
         energy_form = energy_form,
         use_transpiration_bc = use_transpiration_bc,
-        use_blowing_correction = use_blowing_correction,
     )
 end
 
@@ -307,7 +309,6 @@ end
     radiation_kirchhoff::Bool,
     energy_form::Symbol,
     use_transpiration_bc::Bool,
-    use_blowing_correction::Bool,
     ::DarcyFick,
 )
     Discretization.compute_rhs_darcy_fick!(
@@ -327,7 +328,6 @@ end
         radiation_kirchhoff = radiation_kirchhoff,
         energy_form = energy_form,
         use_transpiration_bc = use_transpiration_bc,
-        use_blowing_correction = use_blowing_correction,
     )
 end
 
@@ -414,7 +414,7 @@ function _compute_ale_mesh_velocity!(
 )
     NC = n_components(material)
     NR = n_reactions(material)
-    n_cells = length(state.T)
+    n_cells = mesh.n_active_cells
 
     use_precomputed = precomputed_dξ_rxn !== nothing
     if !use_precomputed
@@ -456,6 +456,11 @@ function _compute_ale_mesh_velocity!(
         w[right_node] = cumulative_velocity
     end
 
+    # Parked ghost nodes sit on the live surface and move with it.
+    @inbounds for k = (n_cells+2):length(w)
+        w[k] = cumulative_velocity
+    end
+
     return nothing
 end
 
@@ -489,8 +494,8 @@ function _interpolate_node_to_face!(w_face::AbstractVector, w_nodes::AbstractVec
     return nothing
 end
 
-function _apply_ale_T_advection!(dT::AbstractVector, ale_advection::AbstractVector)
-    @inbounds for i in eachindex(dT)
+function _apply_ale_T_advection!(dT::AbstractVector, ale_advection::AbstractVector, mesh)
+    @inbounds for i = 1:mesh.n_active_cells
         dT[i] += ale_advection[i]
     end
     return nothing
@@ -499,10 +504,10 @@ end
 function _apply_ale_species_advection!(
     dξ::AbstractMatrix,
     ale_species_advection::AbstractMatrix,
-    NC::Int,
+    mesh,
 )
-    n_cells = size(dξ, 2)
-    @inbounds for i = 1:n_cells
+    NC = size(dξ, 1)
+    @inbounds for i = 1:mesh.n_active_cells
         for j = 1:NC
             dξ[j, i] += ale_species_advection[j, i]
         end
@@ -514,9 +519,10 @@ function _apply_ale_dilation_correction!(
     dξ::AbstractMatrix,
     θ::AbstractVector,
     state,
+    mesh,
     material::Material{NC},
 ) where {NC}
-    n_cells = length(state.T)
+    n_cells = mesh.n_active_cells
     @inbounds for i = 1:n_cells
         θ_i = θ[i]
         ξ_i = ntuple(j -> state.ξ[j, i], Val(NC))
@@ -574,8 +580,9 @@ Identity-law materials skip the dry-gas summation and zero the χ block —
     end
 
     m_init = mesh.m_dry_solid_initial
+    n_live = mesh.n_active_cells
 
-    @inbounds for i = 1:n
+    @inbounds for i = 1:n_live
         S_dry = zero(eltype(dξ_rxn))
         for j in idx_dry
             S_dry += dξ_rxn[j, i]
@@ -584,18 +591,23 @@ Identity-law materials skip the dry-gas summation and zero the χ block —
         denom = max(m_init[i], eps())
         du[χ_offset+i] = S_dry * V_i / denom
     end
+    @inbounds for i = (n_live+1):n
+        du[χ_offset+i] = zero(eltype(du))
+    end
     return nothing
 end
 
 """
-	_compute_theta_A(material, mesh, χ̄, M, dξ_rxn, layout, idx_dry) -> Float64
+	_compute_theta_A(material, state, χ̄, M, dξ_rxn, layout, idx_dry) -> Float64
 
 Column-global radial volumetric strain rate
 
 	θ_A = (1/A) · dA/dt = law'(χ̄) · dχ̄/dt / law(χ̄)
 
 implied by the lateral shrinkage law `A(t)/A_0 = law(χ̄)` and the current
-state. Returns `0.0` for identity-law materials.
+state. Returns `0.0` for identity-law materials. Parked ghost cells have
+zero volume (ALE) and zero reaction source, so summing over every state slot
+is the live-cell sum.
 """
 @inline function _compute_theta_A(
     material,
@@ -611,9 +623,6 @@ state. Returns `0.0` for identity-law materials.
     dξ_rxn === nothing && return zero(typeof(χ̄))
     M <= eps() && return zero(typeof(χ̄))
 
-    # m_dry_solid_initial is a Float64 vector on mesh — but we need it
-    # only for the length comparison and via the caller's M. The volume
-    # weights come from state_cache.
     n = l.n_cells
     n == 0 && return zero(typeof(χ̄))
 

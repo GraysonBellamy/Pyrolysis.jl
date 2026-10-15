@@ -29,8 +29,8 @@ Thumbs.db
 /output/
 scripts/profile/output/
 **/results/
+**/results_*/
 **/*_results/
-examples/convergence_results/
 
 # Root-level generated plots and result data
 /cone_calorimeter_*.png
@@ -43,3 +43,14 @@ examples/convergence_results/
 # Throwaway scratch tests under examples/
 examples/sensitivity_analysis/test_*.jl
 examples/sensitivity_analysis/test_*.csv
+
+# Local working notes: dated investigation reports, handoffs, and their
+# scripts and evidence
+docs/*_[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].md
+**/HANDOFF*.md
+docs/burnout_investigation/
+docs/gpyro_v2_comparison/
+scripts/burnout/
+docs/Performance_Audit.md
+docs/performance_audit/
+scripts/performance_audit/

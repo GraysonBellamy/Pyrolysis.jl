@@ -11,6 +11,7 @@ exactly one side's λ was below the cut.
 """
 
 using Test
+using ForwardDiff
 using Pyrolysis
 using Pyrolysis.Properties: harmonic_mean_weighted
 using Pyrolysis.Jacobian: _harmonic_mean_with_derivs
@@ -39,4 +40,11 @@ using Pyrolysis.Jacobian: _harmonic_mean_with_derivs
     # operator now calls harmonic_mean_weighted itself.
     @test harmonic_mean_weighted(0.0, 1e-5, d_L, d_R) == 0.0
     @test !isdefined(Pyrolysis.Jacobian, :_harmonic_λ_face)
+
+    # The guard branch returns zero of the promoted argument type, as the
+    # regular branch does.
+    dual = ForwardDiff.Dual(1e-25, 1.0)
+    @test harmonic_mean_weighted(dual, 0.2, d_L, d_R) isa typeof(dual)
+    @test harmonic_mean_weighted(dual, 0.2, d_L, d_R) == 0
+    @test harmonic_mean_weighted(0.0f0, 0.2f0, 1.0f-3, 2.0f-3) === 0.0f0
 end

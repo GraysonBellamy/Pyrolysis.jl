@@ -31,7 +31,7 @@ cell-center positions from the typed `state::StateCache` and face
 connectivity from `mesh`.
 """
 function compute_conductive_fluxes!(q_cond, state, mesh, cache::PropertyCache)
-    n_faces_val = length(state.A_face)
+    n_faces_val = mesh.n_active_cells + 1
 
     @inbounds for f = 1:n_faces_val
         face = mesh.faces[f]

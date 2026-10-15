@@ -77,11 +77,10 @@ export has_absorption_coefficients, requires_radiation_cache
 # ============================================================================
 #
 # The h-refinement / h-coarsening / AMR-controller cluster lives here. The
-# core surface-depletion merge machinery (merge_adjacent_cells!,
-# compact_mesh_after_merge!, …) and the find_* depletion helpers stay in core
-# `Adaptivity` (used by the core solve callback) and are reachable via
-# `Pyrolysis.Internal`. The AMR-coarsening path borrows
-# `merge_temperatures_conservatively` from core via `using ..Adaptivity`.
+# depleted-cell park (`park_cell!`) and the find_* neighbour helpers stay in
+# core `Adaptivity` (used by the core solve callback). The AMR-coarsening
+# path borrows `merge_temperatures_conservatively` from core via
+# `using ..Adaptivity`.
 
 include("h_refinement.jl")
 include("h_coarsening.jl")

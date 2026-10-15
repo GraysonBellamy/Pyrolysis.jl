@@ -22,19 +22,21 @@ dT[i] += Q_rad(state, mesh, model) / ρcp_eff(T_i, ξ_i)
 `q_rad[i] = I_in[i+1] · (1 − exp(−α_i Δz_i)) / Δz_i` where
 `I_in[i+1] = α_surf · I_surface · exp(−Σ_{j > i} α_j Δz_j)`. On the
 Kirchhoff default path (`apply_kirchhoff_absorptivity = true`) the surface
-transmissivity is the live surface cell's effective emissivity,
-`α_surf = ε_eff(T_n, ξ_·,n)`; with an explicit BC absorptivity it is
-already folded into `I_surface` and `α_surf = 1`. Chain rule for `j > i`:
+transmissivity is the live surface cell's effective surface absorptivity,
+`α_surf = a_eff(T_n, ξ_·,n)` (`effective_absorptivity`; identical to
+`ε_eff(T_n, ξ_·,n)` unless a component sets `surface_absorptivity`); with an
+explicit BC absorptivity it is already folded into `I_surface` and
+`α_surf = 1`. Chain rule for `j > i`:
 
 ```
 ∂q_rad[i] / ∂x_j = −q_rad[i] · Δz_j · ∂α_j/∂x_j      (i < j < n)
-∂q_rad[i] / ∂x_n = −q_rad[i] · (Δz_n · ∂α_n/∂x_n − (∂ε_eff/∂x_n)/ε_eff)
+∂q_rad[i] / ∂x_n = −q_rad[i] · (Δz_n · ∂α_n/∂x_n − (∂a_eff/∂x_n)/a_eff)
 ∂q_rad[i] / ∂x_i = (I_in[i+1] − q_rad[i] · Δz_i) · ∂α_i/∂x_i  (j == i < n)
 ∂q_rad[i] / ∂x_j = 0                                  (j < i)
 ```
 
-(the `∂ε_eff` terms appear only on the Kirchhoff path; the surface cell's
-own diagonal additionally carries `∂ε_eff/∂x_n · I_surface(1−e^{−τ_n})/Δz_n`,
+(the `∂a_eff` terms appear only on the Kirchhoff path; the surface cell's
+own diagonal additionally carries `∂a_eff/∂x_n · I_surface(1−e^{−τ_n})/Δz_n`,
 captured by the per-cell AD closure below).
 
 The `j > i` block factors as `Diag(−q_rad) · U · diag(v)` where
@@ -72,7 +74,7 @@ using ..Materials:
     P1_QUASI_STEADY,
     n_components
 using ..Properties:
-    PropertyCache, effective_absorption, effective_heat_capacity, effective_emissivity
+    PropertyCache, effective_absorption, effective_heat_capacity, effective_absorptivity
 using ..Physics: compute_beer_lambert_source!
 
 """
@@ -190,6 +192,7 @@ function apply!(
         compute_beer_lambert_source!(
             dT,
             state,
+            mesh,
             prop_cache,
             I_radiation,
             apply_kirchhoff_absorptivity,
@@ -234,6 +237,7 @@ function apply!(
         compute_beer_lambert_source!(
             ws.q_rad,
             state,
+            mesh,
             prop_cache,
             I_radiation,
             apply_kirchhoff_absorptivity,
@@ -242,11 +246,12 @@ function apply!(
         # 2) Re-derive I_in[i+1] from the same monotone integration. Cheap
         #    (same loop structure as compute_beer_lambert_source!) and
         #    cleanly avoids leaking workspace into the physics function.
-        n = length(state.T)
+        n = mesh.n_active_cells
+        fill!(ws.I_in, 0.0)
         A_section = state.A_section[]
         I_current = Float64(I_radiation)
         if apply_kirchhoff_absorptivity && n > 0
-            I_current *= Float64(prop_cache.ε[n])
+            I_current *= Float64(prop_cache.a[n])
         end
         @inbounds for i = n:-1:1
             ws.I_in[i] = I_current
@@ -263,12 +268,13 @@ function apply!(
 end
 
 """
-	compute_alpha_derivatives!(ws::BeerLambertWorkspace, state, prop_cache,
+	compute_alpha_derivatives!(ws::BeerLambertWorkspace, state, mesh, prop_cache,
 	                           material) -> nothing
 
 Populate `ws.dα_dT` and `ws.dα_dξ` via cell-local AD over the
-property's effective absorption coefficient `α(T_i, ξ_i)`. Called once
-per Jacobian assembly, before the α suffix-sum coupling is built.
+property's effective absorption coefficient `α(T_i, ξ_i)` for the live
+cells; ghost entries are zero. Called once per Jacobian assembly, before
+the α suffix-sum coupling is built.
 
 Implementation: per-cell stack-Dual sweep over the property function
 (no `ForwardDiff.gradient` machinery — the per-call closure + config it
@@ -285,13 +291,20 @@ struct _BLPropTag end
 function compute_alpha_derivatives!(
     ws::BeerLambertWorkspace,
     state,
+    mesh,
     prop_cache,
     material::Material{NC,NR},
 ) where {NC,NR}
     # The standard linear-mixing form `α = Σⱼ ξⱼ · αⱼ` makes ∂α/∂T = 0 and
     # ∂α/∂ξⱼ = αⱼ; the Dual sweep keeps this generic for any future
     # ξ-dependent absorption law.
-    n_cells = length(state.T)
+    n_cells = mesh.n_active_cells
+    @inbounds for i = (n_cells+1):length(ws.dα_dT)
+        ws.dα_dT[i] = 0.0
+        for j = 1:NC
+            ws.dα_dξ[j, i] = 0.0
+        end
+    end
     @inbounds for i = 1:n_cells
         ξ_i = ntuple(j -> state.ξ[j, i], Val(NC))
         _, ξ_d = _stack_dual_seed(_BLPropTag, state.T[i], ξ_i)
@@ -360,18 +373,18 @@ Decomposition:
   `(I_in − q_rad·Δz) · ∂α/∂x_i / ρcp` and the ρcp chain
   `−q_rad/ρcp² · ∂ρcp/∂x_i`. On the Kirchhoff path the surface cell's
   closure instead recomputes the live transmissivity,
-  `ε_eff(T, ξ)·I_radiation·(1 − e^{−τ})/(Δz·ρcp)`, so the local
-  `∂ε_eff/∂(T, ξ_·)` enters its diagonal exactly.
+  `a_eff(T, ξ)·I_radiation·(1 − e^{−τ})/(Δz·ρcp)`, so the local
+  `∂a_eff/∂(T, ξ_·)` enters its diagonal exactly.
 - Suffix `j > i`:
   `∂(q_rad[i]/ρcp[i])/∂x_j = (−q_rad[i]/ρcp[i]) · Δz_j · ∂α_j/∂x_j`.
   Pushed onto `jac.structured` as one
   [`EmbeddedScaledSuffixSumCoupling`](@ref) per channel (T + each ξⱼ),
   with `row_scale[i] = −q_rad[i]/ρcp_eff[i]` and `v[k] = Δz_k · ∂α_k/∂x_k`.
   On the Kirchhoff path every row `i < n` also depends on the surface
-  cell through the injected `ε_eff(T_n, ξ_·,n)·I_radiation`; since
-  `q_rad[i] ∝ ε_eff`, the chain `∂(q_rad[i]/ρcp_i)/∂x_n +=
-  (q_rad[i]/ρcp_i)·(∂ε_eff/∂x_n)/ε_eff` folds into the same couplings as
-  `v[n] -= (∂ε_eff/∂x_n)/ε_eff`.
+  cell through the injected `a_eff(T_n, ξ_·,n)·I_radiation`; since
+  `q_rad[i] ∝ a_eff`, the chain `∂(q_rad[i]/ρcp_i)/∂x_n +=
+  (q_rad[i]/ρcp_i)·(∂a_eff/∂x_n)/a_eff` folds into the same couplings as
+  `v[n] -= (∂a_eff/∂x_n)/a_eff`.
 """
 function contribute_to_jacobian!(
     jac::StructuredJacobian,
@@ -397,6 +410,7 @@ function contribute_to_jacobian!(
     model == BEER_LAMBERT || error("RadiationOperator: unknown radiation model $(model).")
 
     n_cells = layout.n_cells
+    n_live = mesh.n_active_cells
     A_section = Float64(state.A_section[])
     A_jac = jac.A
     smap = jac.smap
@@ -406,20 +420,20 @@ function contribute_to_jacobian!(
     # Diagonal contribution: cell-local AD over (T_i, ξ_·,i) with I_in
     # held fixed. Captures the α-diagonal `(I_in - q_rad·Δz) · ∂α/∂x_i`
     # and the ρcp chain `-q_rad/ρcp² · ∂ρcp/∂x_i` in one pass. The
-    # Kirchhoff surface cell recomputes ε_eff(T, ξ) live (with the bare
-    # I_radiation as base) so its diagonal carries ∂ε_eff/∂x_n too.
+    # Kirchhoff surface cell recomputes a_eff(T, ξ) live (with the bare
+    # I_radiation as base) so its diagonal carries ∂a_eff/∂x_n too.
     # ---------------------------------------------------------------
     x_buf = ws.x_buf
     f_buf = ws.f_buf
     J_local = ws.J_local
     cfg = ws.cfg
 
-    @inbounds for i = 1:n_cells
+    @inbounds for i = 1:n_live
         Δz_i = state.volume[i] / A_section
-        surface_kirchhoff = apply_kirchhoff_absorptivity && i == n_cells
-        # ws.I_in[i] = intensity entering cell i from above (includes ε_eff·I
+        surface_kirchhoff = apply_kirchhoff_absorptivity && i == n_live
+        # ws.I_in[i] = intensity entering cell i from above (includes a_eff·I
         # at the surface on the Kirchhoff path). The Kirchhoff surface cell
-        # uses the bare I_radiation as base and re-attaches ε_eff(T, ξ) inside
+        # uses the bare I_radiation as base and re-attaches a_eff(T, ξ) inside
         # the closure so AD sees the live dependence.
         I_base_i = surface_kirchhoff ? Float64(I_radiation) : ws.I_in[i]
 
@@ -441,7 +455,8 @@ function contribute_to_jacobian!(
                     ρcp = effective_heat_capacity(ξ, T, material)
                     τ = α * Δz
                     scale =
-                        surface_kirchhoff ? effective_emissivity(ξ, T, material) : one(ρcp)
+                        surface_kirchhoff ? effective_absorptivity(ξ, T, material) :
+                        one(ρcp)
                     # Numerically stable q_rad = scale·I_base·(1 - exp(-τ)) / Δz; for
                     # very small τ this collapses to scale·I_base·α (Taylor expansion).
                     # Pure expression is fine for ForwardDiff.
@@ -471,41 +486,49 @@ function contribute_to_jacobian!(
         # row_scale[i] = -q_rad[i] / ρcp_eff[i]. One workspace buffer aliased
         # by every suffix coupling pushed below (they only read it).
         row_scale = ws.row_scale
-        @inbounds for i = 1:n_cells
+        @inbounds for i = 1:n_live
             ξ_i = ntuple(j -> state.ξ[j, i], Val(NC))
             ρcp_i = effective_heat_capacity(ξ_i, state.T[i], material)
             row_scale[i] = -ws.q_rad[i] / ρcp_i
         end
+        @inbounds for i = (n_live+1):n_cells
+            row_scale[i] = 0.0
+        end
 
-        # Kirchhoff ε_eff chain at the surface column: q_rad[i] ∝ ε_eff(x_n),
-        # so v[n] -= (∂ε_eff/∂x_n)/ε_eff per channel (see docstring). Skipped
-        # when ε_eff = 0 — then q_rad ≡ 0 and the couplings vanish anyway.
-        dε_dT_n = 0.0
-        dε_dξ_n = ntuple(_ -> 0.0, Val(NC))
-        ε_n = 1.0
-        if apply_kirchhoff_absorptivity && n_cells > 0
-            ε_n = Float64(prop_cache.ε[n_cells])
-            if ε_n > 0.0
-                ξ_n = ntuple(j -> state.ξ[j, n_cells], Val(NC))
-                T_d, ξ_d = _stack_dual_seed(_BLPropTag, state.T[n_cells], ξ_n)
-                ε_d = effective_emissivity(ξ_d, T_d, material)
-                if ε_d isa ForwardDiff.Dual
-                    p = ForwardDiff.partials(ε_d)
-                    dε_dT_n = p[1]
-                    dε_dξ_n = ntuple(j -> p[1+j], Val(NC))
+        # Kirchhoff a_eff chain at the surface column: q_rad[i] ∝ a_eff(x_n),
+        # so v[n] -= (∂a_eff/∂x_n)/a_eff per channel (see docstring). Skipped
+        # when a_eff = 0 — then q_rad ≡ 0 and the couplings vanish anyway.
+        # ∂a_eff/∂T_n is non-zero for T-dependent component ε (Kirchhoff
+        # components) or densities.
+        da_dT_n = 0.0
+        da_dξ_n = ntuple(_ -> 0.0, Val(NC))
+        a_n = 1.0
+        if apply_kirchhoff_absorptivity && n_live > 0
+            a_n = Float64(prop_cache.a[n_live])
+            if a_n > 0.0
+                ξ_n = ntuple(j -> state.ξ[j, n_live], Val(NC))
+                T_d, ξ_d = _stack_dual_seed(_BLPropTag, state.T[n_live], ξ_n)
+                a_d = effective_absorptivity(ξ_d, T_d, material)
+                if a_d isa ForwardDiff.Dual
+                    p = ForwardDiff.partials(a_d)
+                    da_dT_n = p[1]
+                    da_dξ_n = ntuple(j -> p[1+j], Val(NC))
                 end
             end
         end
-        has_ε_chain = apply_kirchhoff_absorptivity && ε_n > 0.0
+        has_a_chain = apply_kirchhoff_absorptivity && a_n > 0.0
 
         # T-channel
-        if any(!iszero, ws.dα_dT) || (has_ε_chain && dε_dT_n != 0.0)
+        if any(!iszero, ws.dα_dT) || (has_a_chain && da_dT_n != 0.0)
             v_T = ws.v_channels[1]
-            @inbounds for k = 1:n_cells
+            @inbounds for k = 1:n_live
                 Δz_k = state.volume[k] / A_section
                 v_T[k] = Δz_k * ws.dα_dT[k]
             end
-            has_ε_chain && (v_T[n_cells] -= dε_dT_n / ε_n)
+            @inbounds for k = (n_live+1):n_cells
+                v_T[k] = 0.0
+            end
+            has_a_chain && (v_T[n_live] -= da_dT_n / a_n)
             push!(
                 jac.structured,
                 EmbeddedScaledSuffixSumCoupling(v_T, row_scale, 0, 0, n_cells, n_global),
@@ -515,14 +538,17 @@ function contribute_to_jacobian!(
         for k_species = 1:NC
             v_ξ = ws.v_channels[1+k_species]
             any_nonzero = false
-            @inbounds for k = 1:n_cells
+            @inbounds for k = 1:n_live
                 Δz_k = state.volume[k] / A_section
                 val = Δz_k * ws.dα_dξ[k_species, k]
                 val != 0.0 && (any_nonzero = true)
                 v_ξ[k] = val
             end
-            if has_ε_chain && dε_dξ_n[k_species] != 0.0
-                v_ξ[n_cells] -= dε_dξ_n[k_species] / ε_n
+            @inbounds for k = (n_live+1):n_cells
+                v_ξ[k] = 0.0
+            end
+            if has_a_chain && da_dξ_n[k_species] != 0.0
+                v_ξ[n_live] -= da_dξ_n[k_species] / a_n
                 any_nonzero = true
             end
             any_nonzero || continue

@@ -175,10 +175,10 @@ function build_and_solve(mc_db::Float64, hos_model::Symbol)
     moisture_cp = CallableProperty(T -> begin
         t = T / 1000.0
         M = 0.01801528
-        A = -203.6060;
-        B = 1523.290;
-        C = -3196.413;
-        D = 2474.455;
+        A = -203.6060
+        B = 1523.290
+        C = -3196.413
+        D = 2474.455
         E = 3.855326
         (A + B*t + C*t^2 + D*t^3 + E/t^2) / M
     end)

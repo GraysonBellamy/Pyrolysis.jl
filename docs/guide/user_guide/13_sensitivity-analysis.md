@@ -506,20 +506,10 @@ Reference §17.6), but several configurations can still spoil a gradient:
   the sensitivity. Use smooth shrink/swell laws when you intend to differentiate
   through them.
 
-- **Surface-depletion callback discontinuities.** Cell merging
-  (`handle_depletion = true`, requires `use_ale = true`) resizes the state vector
-  mid-solve at a discrete event — a genuine discontinuity in the trajectory and
-  its length. Differentiating across a merge is not meaningful, and the output
-  dimension can change between `θ` probes. **Disable depletion for sensitivity
-  studies** (`handle_depletion = false`, the default); if you need long ALE runs,
-  stop before the first merge or use a thickness-termination criterion instead.
-
-- **Depletion + pluggable Jacobian are mutually exclusive.** `solve` rejects
-  `handle_depletion = true` together with an explicit `jacobian = ...`
-  (state-vector resizing is incompatible with a fixed pluggable backend); when
-  depletion is enabled it falls back to the integrator's colored finite-difference
-  Jacobian. This is a further reason to keep depletion off in sensitivity work,
-  where you want the default `Structured` backend and a smooth path.
+- **Park events are discrete.** With `handle_depletion = true` a park rewrites
+  the state in place; the trajectory is smooth in the parameters between events
+  and jumps across one. Keep depletion off in sensitivity work, or restrict the
+  horizon to one without park events.
 
 - **Transpiration BC is forbidden with the default convention.** Leave
   `use_transpiration_bc = false` (the default). The volumetric advection source

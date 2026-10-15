@@ -428,72 +428,154 @@ transported fields is the caller's responsibility.
 
 ---
 
-## 14.3 Surface depletion (the production path)
+## 14.3 Depletion handling: parked cells (the production path)
 
-The single AMR capability wired into `solve` is **surface-cell depletion
-handling**. As pyrolysis consumes the solid, the ALE mesh recedes (§11): the
-surface cell at $z=L$ thins toward zero thickness. A vanishing cell is
-numerically catastrophic for two reasons. First, its matrix heat capacity
+The single AMR capability wired into `solve` is **depletion handling**. As
+pyrolysis consumes the solid, an ALE cell (§11) thins toward zero thickness; on a
+fixed mesh a cell empties instead. A vanishing or emptied cell is numerically
+catastrophic for two reasons. First, its matrix heat capacity
 $\rho c_p^{\mathrm{eff}} V_i \to 0$ as the solid gasifies, so the energy equation
-$\rho c_p^{\mathrm{eff}}\,\dot T_i = (\text{fluxes})$ becomes singular — a finite
-flux divided by a vanishing capacity produces an unbounded $\dot T$. Second, an
-explicit/semi-implicit CFL-type stability limit scales like $h_i^2$, forcing the
-timestep toward zero. Depletion handling removes the offending cell by **merging
-it with its interior neighbor**, conserving mass and energy.
+$\rho c_p^{\mathrm{eff}}\,\dot T_i = (\text{fluxes})$ becomes singular. Second, the
+transport rows of a thin cell scale as $1/\Delta z_i^2$, so the condition number
+of the implicit stage matrix $W = I/(\gamma\Delta t) - J$ grows as
+$\Delta z_i^{-2}$: at $\Delta z \approx 10^{-7}$ m, $\operatorname{cond}(W)$
+exceeds $10^{13}$ for any $\Delta t \gtrsim 10^{-3}$ s and Newton's linear solves
+carry no usable digits, so the integrator halves $\Delta t$ until the cell's own
+time scale is resolved. No Jacobian accuracy and no regularisation of the
+properties changes this; the cell must leave the nonlinear system.
 
-### 14.3.1 Thinness detection
+Depletion handling **parks** the cell: it merges the cell's mass and condensed
+enthalpy into a neighbour, then moves the freed state slot above the live
+surface as an inert ghost. The state vector, the mesh arrays, the
+`StateLayout`, the sparsity pattern and the Jacobian caches keep their size for
+the whole solve; every kernel runs over the live range, and the boundary
+conditions act at the live surface.
 
-The detector flags a cell as thin when its current thickness falls below a fixed
-fraction of the *initial* cell thickness:
+### 14.3.1 Live range and ghost slots
+
+With $n$ the (fixed) number of state slots and $n_{\rm live}$ =
+`mesh.n_active_cells`:
+
+- live cells are `1:n_live`, live nodes and faces `1:n_live+1`; face
+  `n_live+1` is the exposed boundary face (`Face1D` with `cell_ids =
+  (n_live, 0)`, `boundary_id = 1`; `mesh.boundary_faces[1] == [n_live+1]`) and
+  cell `n_live` the boundary cell;
+- ghost slots are `n_live+1:n` (cells) and `n_live+2:n+1` (nodes);
+  `active_cell_mask[i] == (i ≤ n_live)`;
+- a ghost carries $\xi_j = 0$ for every component, the temperature it was
+  parked with, $\chi = 0$ and `m_dry_solid_initial = 0`. Under ALE its nodes
+  sit on the live surface (zero thickness) and move with it,
+  $\dot z_k = w_{n_{\rm live}+1}$ for $k > n_{\rm live}+1$; on a fixed mesh
+  they keep their geometry;
+- every residual kernel and every Jacobian operator loops over
+  `1:mesh.n_active_cells` (cells) or `1:mesh.n_active_cells+1` (faces) and
+  detects the top boundary through the face connectivity, so no kernel reads a
+  ghost. The pack step writes exactly zero into the ghost $T$, $\xi$ and $\chi$
+  rows. Their Jacobian rows are therefore zero and $W$ is block-diagonal with
+  $I/(\gamma\Delta t)$ in the ghost block — perfectly conditioned — while the
+  error estimate of a ghost component is identically zero;
+- the live thickness is $z_{n_{\rm live}+1} - z_1$; every ledger, mass and
+  energy sum runs over the live cells.
+
+The correctness statement is an **equivalence**: the residual (and the
+Jacobian) of the live rows of a parked state equal, to roundoff, those of the
+same physical configuration built as an $n_{\rm live}$-cell problem
+(`test/residual/test_park_equivalence.jl`, `test/jacobian/test_park_jacobian.jl`,
+for the Eulerian, ALE, Darcy, Beer–Lambert and variable-cross-section modes).
+
+### 14.3.2 Trigger
+
+Under ALE a live cell is depleted when its current thickness falls below a
+fixed fraction of its *initial* thickness,
 
 $$
 \Delta z_i = z_{i+1}-z_i \;<\; \tau_{\mathrm{dep}}\,\Delta z_{i,\mathrm{init}},
 $$
 
-with the default depletion threshold $\tau_{\mathrm{dep}} = 0.05$ (5 %). Node
-positions $z$ are read directly from the ODE state vector (ALE mode), so detection
-sees the live integrator state, not a stale mesh snapshot.
+with the default `depletion_threshold` $\tau_{\mathrm{dep}} = 0.05$. Node
+positions are read from the ODE state, so detection sees the live integrator
+state. The reference thicknesses are stored per state slot in
+`DepletionCallbackState.reference` (computed once as $V_{i,\mathrm{init}}/A_0$),
+so each cell is judged against its *own* initial thickness — the only detector
+that is correct on a stretched mesh, where a single shared reference would, for
+any cell-size ratio above $1/\tau_{\mathrm{dep}} = 20$, flag the fine cells at
+$t = 0$ or never flag the coarse ones. When an interior cell parks, the
+reference entries shift with the cells. `find_thin_cells` returns the thin live
+cells surface first (descending $z$) and throws on a non-positive signed
+thickness: an inverted cell is a mesh-motion failure, not depletion.
 
-Two implementation facts matter for correctness. (i) The reference thicknesses
-$\Delta z_{i,\mathrm{init}}$ are stored in `DepletionCallbackState` as a
-**per-cell vector**, computed once at solve start as $V_{i,\mathrm{init}}/A_0$
-(`DepletionCallbackState(layout, mesh)`), so each cell is judged against its
-*own* initial thickness. This is what makes the detector correct on stretched
-meshes: a single shared reference (e.g. the surface cell's) would, for any
-max/min cell-size ratio above $1/\tau_{\mathrm{dep}} = 20$, either flag the
-fine cells at $t = 0$ (coarse surface cell) or effectively never flag the
-coarse ones (fine surface cell). When a merge removes a cell, its reference
-entry is deleted and the kept cell retains its own reference, so the vector
-stays in lockstep with the state layout (`find_thin_cells` enforces the length
-match and throws `DimensionMismatch` otherwise). (ii) `find_thin_cells`
-returns thin cells **sorted by $z$ descending — surface first**.
-Processing surface cells first prevents orphaning interior cells in a cascade
-where several adjacent cells thin simultaneously.
+The threshold is not a lever for Newton failures. Raising $\tau_{\rm dep}$
+merges the hottest cell into a colder one earlier, which moves the surface
+temperature: on the Landau case V-CPL-02 (2 mm/s on 62.5 µm cells), going
+from 0.05 to 0.3 shifts the Landau identity residual from $7\times10^{-4}$ to
+$2\times10^{-3}$. The Newton failures on a fast ablation front have two
+other causes, degenerate gas transport (§5.6) and a step controller that
+regrows the step beyond the Newton's range (§15.5.3), and are removed there.
+The default stays 0.05.
 
-> **Implementation note.** `is_cell_thin`, `get_cell_thickness`, and
-> `find_thin_cells` in `src/Solver/callbacks.jl`. The depletion
-> *condition* fires whenever `find_thin_cells` is non-empty; the *affect*
-> merges when `n_cells > min_cells` (default `min_cells = 2`) and
-> **terminates the integration** otherwise — at the cell-count floor a thin
-> cell can no longer be merged away, and letting it shrink unbounded would
-> only stall the integrator. `find_thin_cells` also throws on a non-positive
-> signed thickness: an inverted cell is a mesh-motion failure, not
-> depletion, and must not be silently merged away.
+On a fixed mesh cells cannot thin; they empty. The trigger is the **top live
+cell's condensed concentration**,
+$\sum_{j\notin\mathrm{gas}}\xi_{j,n_{\rm live}} < \tau_{\mathrm{dep}}\,
+\sum_{j\notin\mathrm{gas}}\xi_{j,n_{\rm live}}^{\mathrm{init}}$, with the same
+threshold (a cell that starts with no condensed mass never parks). Only the
+top live cell parks, so a fixed mesh burns a layer top down: the surface cell
+empties and parks, and the cell beneath it becomes the surface. That requires
+the surface cell to be the hottest, as under surface absorption. On the PMMA
+burnout of V-BO-02 all 60 cells park one by one from 63 to 452 s, and the
+maximum live-cell temperature stays at 915 K.
 
-### 14.3.2 Energy-conserving temperature merge
+Under in-depth absorption the temperature maximum of a regressing
+non-charring polymer lies below the surface, so the surface cell reacts
+slowest. Under ALE it shrinks and parks, and the surface advances into the
+hotter material. On a fixed mesh the surface cell keeps its volume and loses
+concentration: it persists as a low-density skin while the cells beneath it
+empty, and the layer gasifies from within. A void cell conducts with the gas
+conductivity and absorbs nothing, and nothing in the model carries heat across
+a void by radiation. The flux transmitted through the void column is deposited
+in the first condensed cell below it, which can return that heat upward only
+by conduction through the gas, and the temperatures run away. Continued past its first void, the PMMA
+deck heats the top substrate cell past 1000 K within about 1.5 s and past
+3000 K, the end of the property bracket, about 60 s later. From the first
+interior void on, the model's equations have no solution with valid
+properties.
 
-When two cells $a,b$ of volumes $V_a,V_b$ are merged into one, the concentrations
+A fixed-mesh solve therefore stops at its first interior void. After every
+accepted step the depletion callback tests each live cell below the top live
+cell for a matrix volume fraction
+$\varphi_m = \sum_j \gamma_j\xi_j/\rho_j < 10^{-4}$ (`MIXING_BLEND_LO`), the
+property model's own definition of a void (§5.1); a cell that starts with no
+condensed mass is not tested. On a hit the callback warns that the material
+has gasified from within, that the model carries no heat across a void and
+that a regressing material belongs on the ALE mesh, and terminates the
+integration (retcode `:Terminated`). The in-depth PMMA deck stops at
+337.0 s, when the lowest PMMA cell becomes a void, with the maximum live-cell
+temperature at 912 K (V-BO-05). A fixed
+mesh with depletion is the porous-residue model (a char that keeps its
+volume, burning top down); a material that regresses belongs on the ALE
+mesh.
+
+> **Implementation note.** `is_cell_thin`, `get_cell_thickness`,
+> `find_thin_cells`, `depletion_candidate` and `interior_void_cell` in
+> `src/Solver/callbacks.jl`; `matrix_volume_fraction` in
+> `src/Properties/mixture_rules.jl`. The callback *condition* fires whenever a
+> candidate or (fixed mesh) an interior void exists; the *affect* terminates
+> the integration on a void, parks when `n_live > min_cells` (default
+> `min_cells = 2`) and **terminates the integration** otherwise.
+
+### 14.3.3 Energy-conserving temperature merge
+
+When cells $a,b$ of volumes $V_a,V_b$ are merged into one, the concentrations
 combine by **volume-weighted averaging**, which conserves species mass exactly
 because mass is the extensive product $\xi_j V$:
 
 $$
-\xi_{\mathrm{merged},j} = \frac{V_a\,\xi_{a,j} + V_b\,\xi_{b,j}}{V_a+V_b},
-\qquad
-V_{\mathrm{merged}} = V_a + V_b .
+\xi_{\mathrm{merged},j} = \frac{V_a\,\xi_{a,j} + V_b\,\xi_{b,j}}{V_{\mathrm{keep}}},
 $$
 
-Indeed $\xi_{\mathrm{merged},j}V_{\mathrm{merged}} = \xi_{a,j}V_a + \xi_{b,j}V_b$,
-the sum of the original masses.
+with $V_{\mathrm{keep}} = V_a + V_b$ under ALE (the keeper spans both cells) and
+$V_{\mathrm{keep}} = V_b$ on a fixed mesh (the keeper's volume is fixed; the
+parked cell's mass raises its concentration). Either way
+$\xi_{\mathrm{merged},j}V_{\mathrm{keep}} = \xi_{a,j}V_a + \xi_{b,j}V_b$.
 
 Temperature is **intensive**, and a naive volume-weighted average of $T$ does
 *not* conserve internal energy when the two cells have different heat capacities —
@@ -516,9 +598,9 @@ H_b(T_b)$. Two choices are deliberate:
   per merge (always the same sign when a hot surface cell merges into a cooler
   interior one). The integral is evaluated per component by 4-point
   Gauss–Legendre quadrature — exact for polynomial $c_p$ up to degree 7, and
-  merges are rare callback events so the cost is irrelevant. The datum
+  park events are rare so the cost is irrelevant. The datum
   $T_{\mathrm{ref}}$ cancels because each component's total mass is identical
-  before and after the merge (concentrations merge volume-weighted).
+  before and after the merge.
 - **Gas components are excluded.** Formulation A stores thermal energy in the
   condensed matrix only (the gas is thermally quasi-steady; §5, §7), so gas
   heat capacity does not belong in the merge weighting either.
@@ -549,194 +631,141 @@ a $120\,$K (20 % of the temperature difference) error avoided.
 > state_b, material)` in `src/Adaptivity/cell_merge.jl`, with a raw-values
 > variant `merge_temperatures_conservatively_from_values`. The component heat
 > capacity is `material.components[j].heat_capacity`, a callable $c_{p,j}(T)$.
-> This is the **single** canonical merge: the solver's
-> `create_merged_state_vector` (`src/Solver/callbacks.jl`) — the routine
-> actually invoked during a live solve — delegates to the raw-values variant,
-> and `merge_adjacent_cells!` and the experimental `coarsen_cells!` call the
-> `CellState` form.
+> This is the **single** canonical merge: the park primitive `park_cell!` and
+> the experimental `coarsen_cells!` both call it.
 
-### 14.3.3 Adjacent-cell merge: topology surgery
+### 14.3.4 The park event
 
-`merge_adjacent_cells!(mesh, cell_to_remove_id, cell_to_keep_id; material)`
-(`src/Adaptivity/cell_merge.jl` lines 276–506) performs the topological merge of
-any two *adjacent* cells (not necessarily refinement siblings — that is the
-defining difference from $h$-coarsening). The sequence:
+`park_cell!(mesh, i_park, i_keep; material, ale)` (`src/Adaptivity/cell_park.jl`)
+performs the mesh side of a park; `park!` (`src/Solver/callbacks.jl`) drives it
+and rewrites the state vector. The sequence:
 
-1. **Validate** that both cells are active and adjacent (share a face, located by
-   `find_shared_face`).
-2. **Determine arrangement** from the cell centers: `is_removing_right` is true
-   when the removed cell is at higher $z$ (the usual surface case).
-3. **Conservative state merge.** Temperature via
-   `merge_temperatures_conservatively` (or volume-weighted if no `material`);
-   concentrations volume-weighted; the kept cell's state is overwritten with the
-   merged $T$, $\xi$, and $V_{\mathrm{merged}}=V_a+V_b$. The reference volume is
-   summed, $V^{\mathrm{ref}}_{\mathrm{keep}} \mathrel{+}= V^{\mathrm{ref}}_{\mathrm{remove}}$.
-4. **Preserve initial dry-solid mass extensively.** If the $\chi$-denominator
-   array is populated, $m_{\mathrm{dry},\mathrm{keep}} \mathrel{+}=
-   m_{\mathrm{dry},\mathrm{remove}}$. This keeps the per-cell pyrolysis-progress
-   denominator consistent across the merge (see §10 for the role of
-   $m_{\mathrm{dry},i}$ in the $\chi$ dynamics).
-5. **Expand node and face connectivity.** The kept cell's node tuple is widened to
-   span both old cells, the removed cell's outward boundary face is repointed to
-   the kept cell, and the kept cell's face tuple is updated to use that boundary
-   face. (The `is_removing_right`/`is_removing_left` branches handle the two
-   orientations symmetrically; a guarded `@error` fires if a node-corruption
-   condition is detected.)
-6. **Mark the removed cell inactive** and decrement `n_active_cells`.
-7. **Update the kept cell's center** from its widened node span.
-8. **Assert AMR invariants** (§14.6).
-
-After this step the removed cell is inactive but **still present** in the mesh
-arrays; the array lengths are unchanged. Mass and energy are conserved by
-construction (step 3); the function returns `cell_to_keep_id`.
-
-`merge_surface_cell!(mesh; material)` (lines 509–525) is the convenience wrapper:
-it finds the surface cell (highest $z$), finds its interior neighbor, and calls
-`merge_adjacent_cells!`. It returns $0$ if no merge is possible (e.g. only one cell
-remains).
-
-### 14.3.4 Neighbor selection
-
-`find_merge_neighbor(mesh, cell_id)` (`src/Adaptivity/surface_depletion.jl` lines
-151–166) chooses the partner for a thin cell:
-
-- If only one neighbor exists (a boundary cell), use it.
-- If both neighbors exist, **prefer the interior neighbor** (toward the substrate).
-
-The interior side is preferred for thermal stability: the substrate side typically
-has the more slowly varying thermal state, so absorbing the thin surface cell into
-the cooler, larger interior cell produces a less abrupt merged temperature. The
-interior/exterior neighbors are themselves found from the cell's left/right faces
-(`find_interior_neighbor` returns the cell at lower $z$ across the left face;
-`find_exterior_neighbor` the cell at higher $z$ across the right face; either is
-$0$ at a domain boundary).
-
-### 14.3.5 Mesh compaction after the merge
-
-A merge leaves an inactive cell, an orphaned node (the node that used to sit
-between the two merged cells), and an orphaned interior face. The ODE state vector,
-however, *shrinks* by exactly one cell's worth of unknowns when depletion fires
-(§14.3.6), so the mesh arrays must be made to match. Two compaction routines do
-this.
-
-`compact_mesh_after_surface_merge!(mesh)` (lines 559–837) is specialized to the
-surface case where the inactive cell is the last-indexed cell. It identifies the
-orphaned node (the one not referenced by any active cell), the orphaned interior
-face (the non-boundary face that still references the removed cell), and the
-boundary face that must be repointed to the new surface cell. It removes the last
-cell by `pop!` from **all** per-cell parallel arrays — `cells`, `cell_states`,
-`cell_centers`, `cell_volumes`, `active_cell_mask`, and the $\chi$ denominator
-`m_dry_solid_initial` (whose last slot is stale after the merge summed it into
-the kept cell) — removes the orphaned face and node by swap-and-pop (swapping the
-orphaned element with the last element, fixing the moved element's id, then
-popping), and finally repairs all connectivity references and the boundary-face
-dictionary. It asserts the 1D counting invariants
-$n_{\mathrm{nodes}}=n_{\mathrm{cells}}+1$,
-$n_{\mathrm{faces}}=n_{\mathrm{cells}}+1$, and that no inactive cells remain.
-
-`compact_mesh_after_merge!(mesh, removed_cell_id)` (lines 870–1078) is the
-general version, used for an arbitrary removed cell (surface, interior, or
-bottom-adjacent). It differs in one essential way: it removes elements by
-**`deleteat!` (shift semantics)**, not swap-and-pop. Shifting decrements every
-index after the removed position by one, which **preserves the spatial ordering**
-(lower index = lower $z$) that all 1D left/right face logic relies on; swap-and-pop
-would scramble that ordering. It builds explicit old→new remapping dictionaries
-for cells, nodes, and faces (with $0$ marking a removed element), applies
-`deleteat!` to all per-cell parallel arrays — including the $\chi$ denominator
-`m_dry_solid_initial`, which every consumer (the $\chi$ residual, the
-$\bar\chi$ mass weighting, the $\chi$ Jacobian operator) indexes by compacted
-cell id — then reindexes every cell, face, and node
-reference (including `parent` pointers, with boundary `cell_ids == 0` preserved as
-$0$), updates the boundary-face dictionary, and asserts the same counting
-invariants. This is the routine the production depletion callback calls.
-
-> **Implementation note.** Both routines are in `src/Adaptivity/cell_merge.jl`.
-> The production solver invokes `merge_adjacent_cells!` then
-> `compact_mesh_after_merge!(mesh, cell_to_remove)` (`src/Solver/callbacks.jl`
-> lines 599–613). The swap-and-pop surface variant exists for direct use but is
-> not on the production hot path.
-
-### 14.3.6 The depletion callback and the resize cascade
-
-The live depletion machinery is a `DiscreteCallback` checked at the end of every
-accepted integrator step (`create_depletion_callback`, `src/Solver/callbacks.jl`
-lines 503–663). Its `affect!` performs **exactly one merge per invocation** so the
-integrator can adapt its step between merges. The merge sequence is:
-
-1. Pick the first (surface-most) thin cell `cell_to_remove`; choose
-   `cell_to_keep = find_merge_neighbor`.
-2. Read the pre-merge volumes $V_{\mathrm{remove}}, V_{\mathrm{keep}}$ and — for
-   the $\chi$ merge — the pre-merge initial dry-solid masses
-   $m_{\mathrm{init,remove}}, m_{\mathrm{init,keep}}$ from the mesh, and snapshot
-   the integrator state `u_old`. (The masses must be captured here: step 3 sums
-   them into the kept cell and compacts the array.)
-3. `merge_adjacent_cells!(mesh, …; material)` (marks the cell inactive) followed
-   by `compact_mesh_after_merge!(mesh, cell_to_remove)` (shrinks the mesh arrays).
-4. **Build the merged state vector** `create_merged_state_vector(u_old, …)`, which
-   applies the *same* energy-conserving temperature merge and volume-weighted
-   $\xi$ merge to the flat state; for `WithChi` layouts the $\chi$ merge is
-   weighted by the **initial dry-solid masses**,
-   $\chi_m = (m_a\chi_a + m_b\chi_b)/(m_a+m_b)$, because
+1. **Neighbour selection.** `find_merge_neighbor(mesh, i_park)`
+   (`src/Adaptivity/surface_depletion.jl`): a boundary cell takes its only
+   neighbour; an interior cell takes the **interior** (lower-$z$) one. The
+   substrate side has the more slowly varying thermal state, so absorbing the
+   thin cell into the cooler, larger interior cell produces the less abrupt
+   merged temperature. Neighbours are found through the cell's faces
+   (`find_interior_neighbor` / `find_exterior_neighbor`; either is 0 at a
+   domain boundary, which is how the live top cell reports no cell above it).
+2. **Conservative merge** of the two `CellState`s per §14.3.3, with
+   $V_{\mathrm{keep}}$ as defined there; `m_dry_solid_initial` is summed into the
+   keeper so the per-cell pyrolysis-progress denominator stays consistent
+   (§10). The freed slot becomes the ghost state ($\xi = 0$, $T = T_{\rm merged}$,
+   zero volume under ALE, its own volume on a fixed mesh, `m_dry_solid_initial = 0`).
+3. **ALE slot permutation.** Cells `i_park+1:n_live` move down one slot and
+   the nodes above the shared node `max(i_park, i_keep)` move down one slot
+   (per-cell and per-node *values*: `cell_states`, `cell_volumes`,
+   `m_dry_solid_initial`, node positions and velocities). The 1-D connectivity
+   is regular — cell $i$ always owns nodes and faces $(i, i+1)$ — so no cell,
+   face or node reference changes; the freed cell slot `n_live` (the last live
+   index) becomes the ghost and the freed node slot lands on the surface. On a
+   fixed mesh only the top live cell parks and nothing shifts.
+4. **Boundary flags.** Face `n_live` (the new count) becomes the exposed
+   boundary face, `cell_ids = (n_live, 0)`, `boundary_id = 1`; the previous top
+   face becomes an inert ghost face; the matching node flags follow;
+   `mesh.boundary_faces[1]` is updated; `n_active_cells` is decremented and
+   `active_cell_mask` cleared for the ghost; the geometry cache is rebuilt and
+   the AMR invariants (§14.6) asserted.
+5. **State vector.** $T$, $\xi$ and (ALE) $z$ are read back from the mesh for
+   every slot — the mesh mirrors the accepted state when the callback runs, so
+   live cells shift exactly as the mesh did and the ghost carries the merged
+   temperature, zero concentrations and the surface position. The $\chi$ block
+   is shifted the same way with
+   $\chi_{\rm merged} = (m_a\chi_a + m_b\chi_b)/(m_a+m_b)$ weighted by the
+   **initial dry-solid masses** (captured before step 2 sums them), because
    $\chi_i = m_{\mathrm{released},i}/m_{\mathrm{dry,init},i}$ makes
-   $\sum_i \chi_i\,m_{\mathrm{dry,init},i}$ the extensive invariant (volume
-   weighting would nearly discard the depleted cell's pyrolysis record, since its
-   $V \to 0$ while its $m_{\mathrm{init}}$ is unchanged). It then drops the
-   removed cell's entries by `remove_cell_from_state_vector`. The node removed
-   from the state is
-   $\max(\text{cell\_to\_remove}, \text{cell\_to\_keep})$ — the shared node between
-   the two cells.
-5. **Resize the workspace cascade** `resize_workspace!(ws, n_nodes_new,
-   n_cells_new, n_faces_new)` (`src/Problem/workspace.jl` lines 149–200). This
-   single call resizes, in order: the `MeshGeometry` view; the `StateLayout`
-   descriptor (rebuilt with the new sizes); the typed `StateCache`; the property
-   cache and RHS cache; the conditional geometry cache (ALE) and radiation cache
-   (P1); the physics work arrays `dT_work`, `dξ_work`; the ALE work arrays
-   (`w_work`, `w_face`, `θ_work`, `ale_advection`,
-   `ale_species_advection`, `S_conv_work`); and finally re-derives the cached
-   top/bottom boundary face and cell ids from the changed mesh topology.
-6. **Resize the integrator** `resize!(integrator, new_state_length)`, copy in
-   `u_new`, and call `u_modified!(integrator, true)` to force a derivative
+   $\sum_i \chi_i\,m_{\mathrm{dry,init},i}$ the extensive invariant; the ghost
+   gets $\chi = 0$. The workspace's cached boundary face and cell ids follow the
+   mesh (they are shared with the Jacobian's AD workspace, so one update serves
+   both), and `derivative_discontinuity!(integrator, true)` forces a derivative
    recomputation.
 
-The callback also updates the shared `DepletionCallbackState` (incrementing the
-merge count, recording the time and merged-cell index, and deleting the merged
-cell's entry from the per-cell initial-thickness vector — the kept cell retains
-its own reference) so that the thickness-termination callback and the
-diagnostics see the new layout. If only
-`min_cells` remain when a merge is requested, the callback terminates the
-integration instead of merging.
+Mass, condensed enthalpy, $\chi$-weighted dry mass and live volume are
+conserved to roundoff at every event (`test/adaptivity/test_cell_park.jl`).
 
-> **Implementation note.** `create_depletion_callback` and
-> `create_merged_state_vector`/`remove_cell_from_state_vector` in
-> `src/Solver/callbacks.jl`. Enabled by `solve(problem; use_ale=true,
-> handle_depletion=true, depletion_threshold=…, min_cells=…)`. Because the merge
-> saves no interpolatable dense output across a size change, the solver sets
-> `save_everystep=true` and filters to the requested output times in
-> post-processing (`extract_solution_ale!`); see §15.
+### 14.3.5 The depletion callback
 
-### 14.3.7 Why depletion forbids a pluggable Jacobian
+The live machinery is a `DiscreteCallback` checked at the end of every
+accepted integrator step (`create_depletion_callback`,
+`src/Solver/callbacks.jl`). Its condition is `depletion_candidate(...) != 0`,
+or on a fixed mesh an interior void (`interior_void_cell(...) != 0`); its
+`affect!` terminates the integration with a warning on an interior void
+(§14.3.2), and otherwise parks **exactly one cell per step**, surface first,
+so the integrator adapts its step between events, or terminates the
+integration when only `min_cells` live cells remain. It records every event in the shared
+`DepletionCallbackState` (`park_times`, `parked_cells`, `n_live`), which the
+thickness-termination callback (live thickness) and solution extraction also
+read.
 
-Surface depletion **resizes the state vector mid-solve**, but a pluggable
-`JacobianSpec` (the structured or dense-AD backend of §15) carries an immutable
-cache — sparsity pattern, coloring, structured operators — built at problem setup
-for a *fixed* state length. That cache cannot survive a `resize!`. The solver
-therefore enforces mutual exclusivity: passing both `jacobian` and
-`handle_depletion=true` raises an `ArgumentError` at validation
-(`src/Solver/solve.jl`), and the auto-default Jacobian spec is set to
-`nothing` whenever `handle_depletion` is true (`_default_jacobian_spec`).
-With no analytic Jacobian, the integrator falls back to its own
-**colored finite-difference** Jacobian (the `AutoFiniteDiff` autodiff of the
-default `KenCarp4`), which transparently tolerates the resize.
+After the park the `affect!` flags the state as modified and proposes
+`DT_AFTER_PARK` ($10^{-6}$ s) for the next step. The merged keeper cell
+conserves mass and enthalpy but sits off the quasi-steady gas-concentration and
+temperature profiles of its neighbours, so the residual at the parked state is
+orders of magnitude above that of the accepted pre-park state, and the
+integrator's extrapolated stage predictor, built from the pre-park derivative,
+starts far from the post-park solution. At the pre-park step size the Newton
+fails until the controller has cut the step far enough; from the proposed step
+it converges at once, and the controller grows the step back within a few
+steps. The reset is a cost setting, not a condition for completing the run: on
+the 60-park PMMA burnout (V-BO-01) the run takes 858 steps and 8 Newton
+failures with it and 1686 steps and 649 failures without it, with the same
+mass-loss history. A cascade (several cells reaching the threshold together)
+proceeds one park per $10^{-6}$-s step.
 
-A related operational caveat: with depletion enabled the solver resolves the
-linear solver to Julia's native dense `LUFactorization`, which survives
-`resize!`; explicitly requested sparse factorizations (Sparspak, KLU) are
-swapped to dense LU with a warning, since no sparse Jacobian prototype exists
-without a pluggable backend. The one remaining pitfall is a user-constructed
-`integrator` that leaves `linsolve` unset: for state lengths above $\sim 500$,
-LinearSolve's internal default can select MKL's LU, whose pivot array (`ipiv`)
-does not survive `resize!`; the solver warns when it detects this combination
-(`src/Solver/solve.jl`).
+The integrator drains `saveat` with the pre-modification interpolant before
+any `DiscreteCallback.affect!` runs, so a state saved at exactly the park time
+carries the pre-park layout: `n_live_cells(cb, t) = n − #{t_park < t}`.
+Extraction NaN-pads the ghost slots of `T`, `ξ` and `z`, reports the live
+thickness $z_{n_{\rm live}+1}-z_1$, sums mass and gas generation over the live
+cells, and exposes `solution.extras.live_cells` and
+`solution.extras.park_times`. No dense output is lost and `saveat`
+interpolation is unaffected because the state never changes size.
+
+### 14.3.6 The Jacobian through burnout
+
+Because the state keeps its size, the pluggable Jacobian (§15.6) stays valid
+through every park:
+
+- the sparsity pattern is built once for $n$ slots and is a superset of every
+  live pattern;
+- every operator assembles the live range only, so ghost rows and columns of
+  the sparse block are zero;
+- the per-cell payload vectors of the structured couplings (the prefix sums of
+  the ALE mesh velocity, the Beer–Lambert suffix sums, the $\chi$ rank-1) are
+  zero above $n_{\rm live}$, so the sums stop at the live surface and every
+  ghost node row reproduces the surface node row, exactly as the residual's
+  $\dot z_{\rm ghost} = w_{n_{\rm live}+1}$ requires;
+- the geometry AD pass (§15.7) differentiates the masked residual and is
+  consistent by construction.
+
+`verify_jacobian` against the dense ForwardDiff reference passes strictly on
+parked states for `Structured(strategy = DirectSolve())`, and the parked
+`ApproxSolve` assembly equals that of the compacted problem on the live block.
+
+The ALE default Jacobian, `Structured(strategy = ApproxSolve())` (§15.10.3),
+stays the default through parking. The `:full` ALE pattern carries the
+prefix-sum couplings of every node to every cell below it, which makes the
+factorized $W$ effectively dense and the sparse direct solve 60–90× more
+expensive per step than the reduced pattern; parking keeps every live cell
+above $\tau_{\rm dep}$ of its initial thickness, and the two strategies follow
+the same trajectory. The post-park transient is not a
+Jacobian effect: `DirectSolve` restarted from $5\times10^{-2}$ s after every
+park fails its Newton more than 500 times on the 60-park PMMA burnout, while
+the reduced strategy with the reset of §14.3.5 needs 858 steps and 8
+failures at a hundredth of the wall time.
+
+The same holds on fast ablation. On a surface regressing at mm/s through a
+reaction front one cell wide (the Landau case V-CPL-02, $v = 2$ mm/s,
+$\Delta z = 62.5$ µm) the dropped mesh-velocity couplings are larger, but the
+reduced modified Newton still contracts by a factor of 0.03 to 0.18 per
+iteration at the controller's steps of 2.5 to 5 ms, and the two strategies
+follow the same trajectory: without the step cap of §15.5.3, 1088 steps and
+894 Newton failures for the reduced strategy against 1064 and 823 for
+`DirectSolve` with UMFPACK, which takes several times the wall time. Those
+Newton failures are not a Jacobian effect either; a Newton that re-evaluates
+the exact Jacobian at every iterate stalls on the same states. They come from
+degenerate gas transport (§5.6) and from the step controller (§15.5.3).
 
 ---
 
@@ -862,8 +891,9 @@ end.
 114–242) merges two *siblings* (same parent, both leaves) back into their parent.
 Its preconditions distinguish it sharply from the production adjacent-cell merge:
 it requires a parent–child relationship (`can_coarsen` checks parent $\ne 0$, both
-leaves), whereas `merge_adjacent_cells!` works on any adjacent pair. The merge
-algebra is identical to §14.3.2 — energy-conserving $T$ (or volume-weighted
+leaves), whereas the production park (`park_cell!`, §14.3.4) works on any
+adjacent live pair. The merge
+algebra is identical to §14.3.3 — energy-conserving $T$ (or volume-weighted
 without material), volume-weighted $\xi$, summed $m_{\mathrm{dry}}$ — but the
 *topology* operation restores the parent: the parent's faces are repointed back to
 the parent, the parent is marked active with `children = (0,0)`, the two children
@@ -1036,26 +1066,24 @@ correctness (that is the compaction routines' assertions on
 $n_{\mathrm{nodes}}=n_{\mathrm{cells}}+1$); it catches the most common drift, a
 counter that disagrees with the mask or a parallel array of the wrong length.
 
-Two distinct compaction strategies coexist, by design:
+Two distinct slot strategies coexist, by design:
 
 | Operation | Strategy | Arrays | Index validity |
 |---|---|---|---|
 | $h$-refinement / $h$-coarsening (experimental) | **mark-inactive** | grow / left in place | preserved (no shift) |
-| surface depletion (production) | **compact immediately** | shrink via `deleteat!` | renumbered (shift) |
+| depletion (production) | **park**: shift live values down, ghost at the end | fixed length | live range renumbered (shift), connectivity regular |
 
-The production depletion path *must* compact because the integrator state vector
-shrinks (§14.3.6); it uses shift semantics to preserve the spatial
-lower-index-equals-lower-$z$ ordering. The experimental $h$-AMR path leaves
-orphans (so its arrays grow monotonically across refinement cycles) precisely to
-avoid invalidating indices held elsewhere. A periodic full-compaction pass for the
+The production depletion path shifts because the live cells must stay a
+contiguous prefix `1:n_active_cells` in spatial order (§14.3.1); the arrays keep
+their length and the 1-D connectivity never changes. The experimental $h$-AMR
+path leaves orphans (so its arrays grow monotonically across refinement cycles)
+precisely to avoid invalidating indices held elsewhere. A periodic
+full-compaction pass for the
 $h$-AMR path is an open design question (§14.8).
 
-The resize cascade triggered on every production merge — geometry view, layout,
-state cache, property/RHS caches, conditional ALE/radiation caches, physics work
-arrays, ALE work arrays, and cached boundary ids — is enumerated in §14.3.6
-(`resize_workspace!`). The Jacobian is *not* in this cascade because depletion
-disables the pluggable Jacobian (§14.3.7); the integrator's colored-FD Jacobian
-re-sizes itself.
+No workspace buffer changes size on a park: the caches are allocated once for
+$n$ slots, and the Jacobian's sparsity pattern is a superset of every live
+pattern (§14.3.6).
 
 ---
 
@@ -1082,11 +1110,11 @@ facts complete the picture:
    handles *whole-domain* exhaustion. Depletion also self-terminates when only
    `min_cells` remain.
 
-3. **Depletion ⇒ colored-FD Jacobian.** As derived in §14.3.7, enabling depletion
-   forces `jac_spec = nothing` and the integrator's own colored finite-difference
-   Jacobian. Consequently, sensitivity studies that rely on the structured/AD
-   Jacobian (§17) cannot at present be combined with surface depletion; making the
-   merge callback compatible with a resizable pluggable Jacobian is an open issue.
+3. **Depletion keeps the Jacobian.** A park rewrites the state in place and
+   leaves its size unchanged (§14.3.6), so the structured Jacobian, its sparse
+   linear solver and `verify_jacobian` all run through burnout. A park event is
+   nonetheless a discrete rewrite of the state: parameter sensitivities (§17)
+   are smooth between events and only piecewise smooth across them.
 
 ---
 
@@ -1115,8 +1143,8 @@ receding surface. Mapping their notation to ours on first use:
   Pyrolysis.jl's geometrically stretched mesh (§13.9) plus the interface-proximity
   indicator (§14.1.4) and the interface monitor (§14.2.2), which dynamically pull
   resolution toward the front. Gpyro's "cell disappears" behavior corresponds to
-  Pyrolysis.jl's depletion merge; the energy-conserving temperature combine
-  (§14.3.2) is the careful version of folding a vanishing control volume's energy
+  Pyrolysis.jl's depleted-cell park; the energy-conserving temperature combine
+  (§14.3.3) is the careful version of folding a vanishing control volume's energy
   into its neighbor.
 
 - **FDS** (McGrattan et al.) solves the 1D solid-phase heat equation on a *fixed*
@@ -1198,8 +1226,8 @@ $$
 
 with $m_j = V\,\xi_j$ the per-component condensed mass ($T_{\mathrm{merged}}$ by
 bracketed Newton; reduces to the $\rho c_p$-weighted mean for constant $c_p$;
-§14.3.2), and $\chi_{\mathrm{merged}} = (m_a\chi_a+m_b\chi_b)/(m_a+m_b)$ with $m$
-the initial dry-solid mass (§14.3.6).
+§14.3.3), and $\chi_{\mathrm{merged}} = (m_a\chi_a+m_b\chi_b)/(m_a+m_b)$ with $m$
+the initial dry-solid mass (§14.3.4).
 
 **Refinement marking** (`src/Experimental/h_refinement.jl`):
 $\eta_i>\theta_{\mathrm{refine}}\max\eta \ \wedge\ h_i>2h_{\min}\ \wedge\ \mathrm{level}_i<\mathrm{max\_level}$,
@@ -1250,11 +1278,9 @@ the code itself.
    Integrating it with the implicit time-stepping — sampling the rates at the
    adaptation point — is not yet done (§14.1.3).
 
-4. **Depletion ⇔ pluggable Jacobian incompatibility.** State-vector resizing
-   defeats the immutable structured/AD Jacobian cache, so depletion falls back to
-   colored finite differences (§14.3.7). This blocks structured-Jacobian
-   sensitivity studies on depleting samples; making the merge survive a resizable
-   pluggable Jacobian is desirable.
+4. **Sensitivities across park events.** A park is a discrete rewrite of the
+   state, so trajectories are only piecewise smooth in the parameters across an
+   event (§17.7.3); adjoint sensitivity through a park event is unsupported.
 
 5. **$r$-refinement defaults are untuned, and relocation does not remap.**
    The convergence tolerance ($10^{-3}$) and relaxation ($0.5$) defaults have not

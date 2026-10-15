@@ -86,7 +86,7 @@ A solid is the canonical matrix-forming component. The keyword constructor is:
 ```julia
 SolidComponent(name::Symbol;
                ρ, c, k,
-               ε = 0.9, α = 0.0, γ = 1.0,
+               ε = 0.9, absorptivity = nothing, α = 0.0, γ = 1.0,
                λ = 0.0, κ = 0.0,
                ρ_intrinsic = nothing, φ = nothing)
 ```
@@ -97,7 +97,8 @@ SolidComponent(name::Symbol;
 | `ρ` | `ρ_j` | **Bulk** (pure-phase) density | kg·m⁻³ | required |
 | `c` | `c_{p,j}` | Specific heat capacity | J·kg⁻¹·K⁻¹ | required |
 | `k` | `k_j` | Thermal conductivity | W·m⁻¹·K⁻¹ | required |
-| `ε` | `ε_j` | Surface emissivity | – | `0.9` |
+| `ε` | `ε_j(T)` | Surface emissivity (number or property function of `T`) | – | `0.9` |
+| `absorptivity` | `a_j` | Surface absorptivity for incident radiation (`nothing` = Kirchhoff, `a_j = ε_j(T)`) | – | `nothing` |
 | `α` | `α_j` | Mass-basis absorption coefficient | m²·kg⁻¹ | `0.0` |
 | `γ` | `γ_j` | Swelling factor (volume-change participation) | – | `1.0` |
 | `λ` | `λ_j` | Gas-transfer (diffusion) coefficient contribution | m²·s⁻¹ | `0.0` |
@@ -128,8 +129,17 @@ char = SolidComponent(:char,
 
 Notes on the less-obvious fields:
 
-- **`ε` and `α` are plain `Float64`s, not property functions.** Emissivity and the
-  absorption coefficient do not carry temperature dependence at the component level.
+- **`ε` accepts the same forms as `k`** — a number, a `(p0, p1)` linear tuple, a
+  function of `T`, or a property function — and is evaluated at the cell
+  temperature in the mixing rule `ε_eff = Σ_j v_j ε_j(T)` (UG §3.7, TR §5.8). The
+  surface-emission and Beer–Lambert Jacobians carry the resulting `dε/dT`
+  automatically. `α` and `absorptivity` are plain constants.
+- **`absorptivity` decouples the absorbed heater flux from the emission.** Leave it
+  `nothing` for Kirchhoff's law (`a_j = ε_j(T)`); set the spectrum-specific value
+  when the heater's spectrum differs from a blackbody at the surface temperature
+  (integrating-sphere data typically give it). A `RadiativeFluxBC` with
+  `absorptivity = nothing` then absorbs `Σ_j v_j a_j · Φ` while the surface still
+  re-radiates at `ε_eff` — no need to split the incident flux into two BC terms.
 - **`α` (absorption) is ignored unless an in-depth radiation model is active.** With
   `radiation_model = SURFACE_ABSORPTION` (or `NO_RADIATION`) the absorbed flux `α·Φ`
   is applied at the surface through the boundary energy balance and the component `α`
@@ -140,6 +150,11 @@ Notes on the less-obvious fields:
 - **`λ` on a solid** does not transport the solid (solids are stationary); it is the
   solid's *contribution* to the effective mixture gas-transfer coefficient through
   the mixing rule (see §3.5). ThermaKin-style setups typically use `λ ≈ 2e-5`.
+  Leaving it at the default `0.0` in a gas-producing material with Fickian
+  transport stops gas transport in every cell that holds no gas: the gas field
+  ends in a sharp front, and the implicit Newton fails on it again and again.
+  `solve` warns in that configuration; a small value such as `λ = 1e-6` removes
+  the degeneracy (Technical Reference §5.6).
 - **`κ = 0.0` (default) means impermeable.** Setting any solid/liquid component's
   `κ > 0` switches the whole problem into Darcy–Fick (pressure-driven) gas transport
   (§3.6.2 and Technical Reference §9).
@@ -166,7 +181,7 @@ the 0.95 matters as soon as you give the liquid γ > 0.)
 LiquidComponent(name::Symbol;
                 ρ, c, k,
                 λ = 2e-5, κ = 0.0,
-                ε = 0.95, α = 0.0, γ = 0.0,
+                ε = 0.95, absorptivity = nothing, α = 0.0, γ = 0.0,
                 ρ_intrinsic = nothing, φ = nothing)
 ```
 
@@ -175,7 +190,8 @@ LiquidComponent(name::Symbol;
 | `ρ`, `c`, `k` | bulk density, heat capacity, conductivity | (as solid) | required |
 | `λ` | gas-transfer contribution | m²·s⁻¹ | `2e-5` |
 | `κ` | permeability | m² | `0.0` (liquid blocks pores) |
-| `ε` | emissivity | – | `0.95` (water ≈ 0.96) |
+| `ε` | emissivity (number or `ε(T)`) | – | `0.95` (water ≈ 0.96) |
+| `absorptivity` | surface absorptivity for incident radiation (`nothing` = Kirchhoff) | – | `nothing` |
 | `α` | mass absorption | m²·kg⁻¹ | `0.0` |
 | `γ` | swelling factor | – | `0.0` |
 | `ρ_intrinsic` / `φ` | skeletal density / pure-phase porosity | kg·m⁻³ / – | `= ρ` / `nothing` |
@@ -208,7 +224,7 @@ GaseousComponent(name::Symbol;
 | `c` | `c_{p,j}` | Heat capacity | J·kg⁻¹·K⁻¹ | required |
 | `k` | `k_j` | Thermal conductivity | W·m⁻¹·K⁻¹ | required |
 | `λ` | `λ_j` | Gas-transfer (diffusion) coefficient | m²·s⁻¹ | required |
-| `ε` | `ε_j` | Emissivity | – | `0.0` |
+| `ε` | `ε_j(T)` | Emissivity (number or property function; no `absorptivity` — gases always follow Kirchhoff) | – | `0.0` |
 | `α` | `α_j` | Mass absorption | m²·kg⁻¹ | `0.0` |
 | `γ` | `γ_j` | Swelling factor | – | `0.0` |
 
@@ -407,7 +423,10 @@ derivatives `∂p/∂ξ_j` are zero for temperature-only properties and adaptive
 finite-difference (`δξ = max(|ξ|·1e-4, 1e-6)`) for `StateDependentProperty`. Because
 table/callable/state-dependent properties use finite differences, prefer the
 analytic types (constant/linear/polynomial/Arrhenius) where you can — they keep the
-Jacobian exact and the solve crisp. See Technical Reference §4.5.
+Jacobian exact and the solve crisp. Every law evaluates on the property bracket
+`[200, 3000]` K (its argument is clamped to it, so a nonphysical Newton trial
+temperature cannot reach a fractional power), and the derivatives are zero
+outside the bracket. See Technical Reference §4.4–§4.5.
 
 ---
 
@@ -687,8 +706,9 @@ Two physics notes worth remembering (both in Technical Reference §5):
   includes gas) exists for diagnostics only.
 - **Conductivity and emissivity use the swelling-weighted (matrix) volume
   fractions** — γ = 0 components (canonical gases) carry no weight in these
-  surface/matrix properties, matching the ThermaKin convention; a fully depleted
-  cell falls back to the all-phase occupancy so k_eff degrades to the gas-mixture
+  surface/matrix properties, matching the ThermaKin convention; as a cell's
+  matrix volume fraction drops through `1e-3 … 1e-4` the weights blend smoothly
+  into the all-phase occupancy, so an emptied cell degrades to the gas-mixture
   conductivity instead of 0. **Gas transfer uses the all-phase volume fractions**
   (gas included) — diffusion happens through the pore space the matrix basis
   excludes. Component-based permeability mixes on the matrix basis. Absorption uses
@@ -707,7 +727,8 @@ Material(; name::Symbol,
            reactions::Tuple = (),
            mixing = MaterialMixing(),
            lateral_shrinkage_law = nothing,
-           depletion_limiter = DepletionLimiter())
+           depletion_limiter = DepletionLimiter(),
+           gas_viscosity = SutherlandProperty())
 ```
 
 | Keyword | Meaning | Default |
@@ -718,6 +739,7 @@ Material(; name::Symbol,
 | `mixing` | `(k, λ, κ)` NamedTuple from `MaterialMixing` | `MaterialMixing()` |
 | `lateral_shrinkage_law` | `A(t)/A_0 = law(χ̄)` or `nothing` (identity) | `nothing` |
 | `depletion_limiter` | `DepletionLimiter` applied to every reaction-rate evaluation (smooth `tanh(ξ/threshold)` roll-off near reactant depletion; §4.10) | `DepletionLimiter()` (`threshold = 1.0` kg·m⁻³, enabled) |
+| `gas_viscosity` | pore-gas dynamic viscosity μ(T) [Pa·s]; number, `(p0, p1)` tuple, `Function`, or property function | `SutherlandProperty()` (air) |
 
 - **Component order defines the index space.** The first component is index 1, the
   second is 2, etc. The state vector's species blocks follow this order, and integer
@@ -729,6 +751,25 @@ Material(; name::Symbol,
   hook; it must be a `Function` of the column-average pyrolysis progress `χ̄`, or
   `nothing`. Most simulations leave it `nothing`. See Technical Reference §10.5 and
   Chapter 7.
+- **`gas_viscosity`** matters only in Darcy–Fick mode, where it enters as the
+  mobility `κ/μ` — so getting μ wrong by a factor is exactly the same as getting
+  permeability wrong by the reciprocal factor. The default is air, which is fine
+  for an N₂-swept pore space but overstates the viscosity of wood pyrolyzates by
+  roughly 1.7× at 300 K falling to 1.3× at 1000 K. Supply the blend correlation
+  for the gas your material actually produces:
+
+  ```julia
+  # Cantera mixture-averaged fit, ascending coefficients, valid 280–1200 K
+  Material(name = :WhitePine, components = (...), reactions = (...),
+           gas_viscosity = PolynomialProperty(mu_coeffs))
+  ```
+
+  It is **one curve per material**, so it averages over the pore gas shifting
+  from background air to volatiles as pyrolysis proceeds; it cannot resolve that
+  transition. The constructor rejects a curve that is non-positive or non-finite
+  over 200–1800 K, and the solver floors μ at `MU_FLOOR` outside that range —
+  both because a μ that reaches zero reverses the gas velocity rather than merely
+  degrading it. See Technical Reference §5.9.
 
 ### 3.6.2 Worked example: charring wood with moisture
 
@@ -842,7 +883,19 @@ Pyrolysis.Materials.validate_material(wood)   # returns true; warns on problems
 ```
 
 Mass-balance failures are reported as **warnings** (the function still returns
-`true`); index errors **throw**. For a standalone balance check use
+`true`); index errors **throw**.
+
+Property laws are checked when the **component** is built: every temperature-
+dependent `ρ`, `c`, `k`, `λ`, `κ` and `ε` is sampled on the property bracket
+`[200, 3000]` K at 1 K steps, and the constructor throws if a density, heat
+capacity or conductivity is not positive there (a gas may have `c = 0`), if
+`λ` or `κ` is negative, or if `ε` leaves `[0, 1]`. The message names the first
+offending temperature — a linear fit `k = 0.3 − 4.2e-4·T` is rejected at
+715 K, where it would make a cell a perfect insulator. Hold a fit constant
+outside its measured range (`T -> law(clamp(T, T_lo, T_hi))`), or pass
+`validate_properties = false` when the law comes from an optimizer's search
+parameters and an unphysical value should reach the objective instead of
+throwing. For a standalone balance check use
 `Pyrolysis.Materials.check_material_mass_balance(material.reactions)`. Note that the
 two-product `Reaction` constructors already enforce `Σ yields = 1.0` at construction
 time (unless `validate_mass = false`), so a material built normally will pass.
@@ -862,6 +915,7 @@ the clearest, earliest error messages during development.
 | Field | Solid | Liquid | Gas |
 |---|---|---|---|
 | `ε` (emissivity) | `0.9` | `0.95` | `0.0` |
+| `absorptivity` (surface absorptivity) | `nothing` (Kirchhoff) | `nothing` (Kirchhoff) | n/a |
 | `α` (absorption) | `0.0` | `0.0` | `0.0` |
 | `γ` (swelling) | `1.0` | `0.0` | `0.0` |
 | `λ` (gas transfer) | `0.0` | `2e-5` | required |

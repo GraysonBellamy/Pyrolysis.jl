@@ -136,7 +136,7 @@ export MixingRule, PARALLEL, SERIES, WEIGHTED, BRUGGEMAN, CARMAN_KOZENY
 export MixingSpec, MaterialMixing
 
 # Property functions
-export ConstantProperty, LinearProperty, PolynomialProperty
+export ConstantProperty, LinearProperty, PolynomialProperty, SutherlandProperty
 export ArrheniusProperty, TableProperty, CallableProperty, StateDependentProperty
 
 # Boundary conditions
@@ -148,6 +148,11 @@ export HeatFluxBC,
     DirichletThermalBC,
     AdiabaticBC
 export ImpermeableBC, MassFluxBC, ConvectiveMassBC, DiffusiveMassBC, CombinedMassBC
+# Blowing models for ConvectiveBC and the gas data they read
+export AbstractBlowingModel,
+    NoBlowing, CouetteFilm, PropertyRatioFilm, PoolingFilm, FunctionBlowing
+export GasSpecies, NITROGEN, nasa7_heat_capacity, eucken_viscosity, fuller_diffusivity
+export BlowingFace, blowing_state, blowing_ratio, blowing_factor
 export DirichletPressureBC, NeumannPressureBC, ConvectivePressureBC
 export BoundaryConditionSet
 # Background pore-air initialization for DarcyFick-mode problems
@@ -157,7 +162,7 @@ export background_gas_concentration
 export RadiationModel, NO_RADIATION, SURFACE_ABSORPTION, BEER_LAMBERT
 
 # Geometry
-export create_uniform_mesh, create_stretched_mesh
+export create_uniform_mesh, create_stretched_mesh, create_mesh_from_nodes
 
 # Problem & solve
 export PyrolysisProblem, PyrolysisSolution

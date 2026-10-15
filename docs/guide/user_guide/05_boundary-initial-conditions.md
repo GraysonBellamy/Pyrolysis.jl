@@ -94,7 +94,7 @@ the surface temperature `T_s` (§5.4). Every flux is reported with the **positiv
 | `HeatFluxBC` | `q(t)` (prescribed) | `flux` |
 | `ConvectiveBC` | `h·(T_∞ − T_s)` | `h`, `T_inf` |
 | `RadiativeBC` | `F·ε_eff·σ·(T_∞⁴ − T_s⁴)` | `ε` (`nothing`), `T_inf`, `F` (`1.0`) |
-| `RadiativeFluxBC` | `α·Φ_incident` (model-dependent) | `flux`, `absorptivity` (`nothing`) |
+| `RadiativeFluxBC` | `α·Φ_incident` (model-dependent) | `flux`, `absorptivity` (`nothing` ⇒ `a_eff`) |
 | `DirichletThermalBC` | enforces `T_s = T` | `T` |
 | `CombinedThermalBC` | `Σ_i q_BC,i` | built via `+` |
 
@@ -143,16 +143,57 @@ direction during pyrolysis. Its temperature derivative `dq_BC/dT_s = −h` makes
 the Newton solve converge quickly. The `T_inf` here is also the value used to
 resolve the ambient temperature for the surface balance (§5.8).
 
-**Blowing correction (opt-in).** Strong outgassing thickens the boundary layer
-and suppresses convective exchange. With `solve(...; use_blowing_correction =
-true)` the coefficient is rescaled by the classical film factor
-`h → h·B/(e^B − 1)`, `B = ṁ″·c_p,g/h`, using the outward gas mass flux at the
-face. At a wood-like peak `ṁ″ ≈ 10 g·m⁻²·s⁻¹` against `h ≈ 10` this is a
-35–50 % reduction of `h`; at PMMA-like peaks (`B ≈ 4`) convective cooling is
-essentially extinguished. The back face is unaffected automatically (no
-outflow → `B = 0`). Off by default because the shipped examples were
-calibrated without it (and without flame feedback — the two partially cancel;
-see the physics roadmap before recalibrating).
+**Blowing.** Strong outgassing thickens the boundary layer and suppresses
+convective exchange, and a gas denser than the free stream can pool on the
+face. How a `ConvectiveBC` responds is its `blowing` model, `NoBlowing()` by
+default (the coefficient stays `h` whatever leaves the face). The surface
+balance hands the model the outward mass flux of every gas component at the
+face at each iterate, so the back face is unaffected automatically (no
+outflow). Four models ship:
+
+```julia
+ConvectiveBC(h = 15.0, T_inf = 300.0, blowing = CouetteFilm())        # h·B/(e^B − 1), B = ṁ″·c_p,g/h
+ConvectiveBC(h = 11.2, T_inf = 360.0, blowing = CouetteFilm(0.31))    # film law with a fitted constant
+ConvectiveBC(h = 11.2, T_inf = 360.0, blowing = PropertyRatioFilm(NITROGEN))
+ConvectiveBC(h = 11.2, T_inf = 360.0, blowing = PoolingFilm(NITROGEN; volatiles = pyrolysate))
+ConvectiveBC(h = 11.2, T_inf = 360.0, blowing = FunctionBlowing((face, h, T_inf) -> 0.8))
+```
+
+- `CouetteFilm(λ = 0.5)`: the classical film law `h → h·φ/(e^φ − 1)`,
+  `φ = 2λ·ṁ″·c_p,g/h` with the heat capacity of the gas leaving the face.
+  `λ = 0.5` is the Couette film (`φ = B`). At a wood-like peak
+  `ṁ″ ≈ 10 g·m⁻²·s⁻¹` against `h ≈ 10` this is a 35–50 % reduction of `h`;
+  at PMMA-like peaks (`B ≈ 4`) convective cooling is essentially
+  extinguished. A smaller `λ` fitted to a resolved flow holds for that gas
+  only.
+- `PropertyRatioFilm(free_stream; n_Γ = 0.6)`: the film law for any light
+  gas, `φ = (ṁ″·c_p,∞/h)·(Γ_∞/Γ_g)^n_Γ` with `Γ = k/c_p` of the free stream
+  and of the leaving mixture (heat capacity by mass fraction, conductivity by
+  Wilke's rule). No constant is refitted for a new gas.
+- `PoolingFilm(free_stream; n_Γ, n_D, ψ0, Λc, Λw)`: the same with a pooling
+  factor `ψ`, `h → h·φ/(e^{φ/ψ} − 1)`, that falls from 1 to the floor `ψ0`
+  when the gas at the face is denser than the free stream. The face
+  composition comes from a species-by-species film balance with the binary
+  diffusivities into the free stream. The three switch constants belong to
+  the apparatus flow (the defaults are the CAPA chamber's); the gas enters
+  through its properties. Describe the volatiles either through the
+  material's gas components, with Fuller diffusion volumes
+  `diffusion_volume = (name = V, ...)`, or as one lumped `GasSpecies`
+  (`volatiles = ...`).
+- `FunctionBlowing(f)`: your own rule `χ = f(face, h, T_inf)` from the
+  `BlowingFace` (outward species fluxes `face.ṁ`, surface temperature
+  `face.T_s`, `face.material`).
+
+The free stream is a `GasSpecies` (molar mass, `c_p(T)`, `k(T)`, Fuller
+diffusion volume, optional viscosity); `NITROGEN` ships, and
+`nasa7_heat_capacity` builds a heat capacity from NASA-7 coefficients. Each
+convective member of a combined BC applies its own model. The solution
+records the applied ratio and, for the pooling model, `ψ`, the face fraction
+and the face buoyancy in `extras.surface_blowing_ratio`,
+`surface_pooling_factor`, `surface_face_fraction` and
+`surface_face_buoyancy`. The shipped examples were calibrated with the bare
+coefficient (and without flame feedback — the two partially cancel; see the
+physics roadmap before recalibrating).
 
 ### 5.2.4 `RadiativeBC` — surface re-radiation
 
@@ -168,10 +209,12 @@ Gray-body radiative exchange with the surroundings,
 Fields:
 
 - `ε` — surface emissivity. Default `nothing`, which means **use the effective
-  emissivity** `ε_eff = Σ_j v_j ε_j` (volume-weighted) computed from the live
+  emissivity** `ε_eff = Σ_j v_j ε_j(T)` (volume-weighted, each component
+  emissivity evaluated at the boundary-cell temperature) computed from the live
   composition. This is the recommended setting: it automatically tracks the
-  change from virgin polymer to char as the material decomposes. You can also
-  pass a constant in `[0, 1]` or a function `ε(T)`.
+  change from virgin polymer to char as the material decomposes, and any
+  temperature dependence you gave the component `ε`. You can also pass a
+  constant in `[0, 1]` or a function `ε(T)`.
 - `T_inf` — surroundings temperature `T_∞` in K (constant or `T_∞(t)`).
 - `F` — view factor in `[0, 1]`, default `1.0` (surface fully sees the
   surroundings). Use `F < 1` for partially enclosed geometries.
@@ -202,7 +245,7 @@ is the surface's *own* re-radiation loss) and from `HeatFluxBC` (which injects a
 bare flux with no absorptivity or in-depth treatment).
 
 ```julia
-bc = RadiativeFluxBC(flux = 25e3)                          # incident 25 kW/m², α = ε_eff
+bc = RadiativeFluxBC(flux = 25e3)                          # incident 25 kW/m², α = a_eff
 bc = RadiativeFluxBC(flux = 50e3, absorptivity = 0.9)      # fixed absorptivity
 bc = RadiativeFluxBC(flux = t -> 25e3*(1 - exp(-t/10)))    # time-varying flux
 ```
@@ -211,9 +254,12 @@ Fields:
 
 - `flux` — incident radiative flux `Φ_incident` in W/m² (constant or `Φ(t)`).
 - `absorptivity` — surface absorptivity `α` in `[0, 1]`. Default `nothing`,
-  which uses the effective emissivity `ε_eff` as the absorptivity (Kirchhoff's
-  law `α = ε_eff`), again tracking composition automatically. You can override
-  with a constant or `α(t)`.
+  which uses the material's effective surface absorptivity
+  `a_eff = Σ_j v_j a_j`: each component's own `absorptivity` when set, else its
+  emissivity `ε_j(T)` (Kirchhoff's law). With no component absorptivity set this
+  is exactly `ε_eff`; setting one lets the absorbed heater flux differ from the
+  re-radiation without splitting the BC. Either way it tracks composition and
+  temperature automatically. You can override with a constant or `α(t)`.
 
 **Its behavior depends on the `radiation_model` keyword passed to `solve()`**
 (see §5.5 and Technical Reference §8):
@@ -704,7 +750,7 @@ absorption coefficients on the components):
 ```julia
 bc_set = BoundaryConditionSet(
     thermal = (
-        top = RadiativeFluxBC(flux = 50e3) +          # α defaults to ε_eff
+        top = RadiativeFluxBC(flux = 50e3) +          # α defaults to a_eff (= ε_eff by Kirchhoff)
               RadiativeBC(T_inf = 300.0) +
               ConvectiveBC(h = 10.0, T_inf = 300.0),
         bottom = AdiabaticBC(),

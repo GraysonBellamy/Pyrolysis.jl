@@ -134,7 +134,7 @@ end
 
         op_ws = build_ale_mesh_velocity_workspace(material, layout.n_cells, layout.n_nodes)
         apply!(op_ws, ALEMeshVelocityOperator(), ws.state_cache, mesh, material, 0.0)
-        _strain_rate_derivatives!(op_ws, ws.state_cache, material)
+        _strain_rate_derivatives!(op_ws, ws.state_cache, ws.mesh, material)
 
         # Build the bare T-channel primitive.
         c_T = build_prefix_sum_coupling_T(op_ws, ws.state_cache)
@@ -188,7 +188,7 @@ end
 
         op_ws = build_ale_mesh_velocity_workspace(material, layout.n_cells, layout.n_nodes)
         apply!(op_ws, ALEMeshVelocityOperator(), ws.state_cache, mesh, material, 0.0)
-        _strain_rate_derivatives!(op_ws, ws.state_cache, material)
+        _strain_rate_derivatives!(op_ws, ws.state_cache, ws.mesh, material)
 
         # Test the gas-component channel (j=2 for PMMA two-component).
         species_j = 2

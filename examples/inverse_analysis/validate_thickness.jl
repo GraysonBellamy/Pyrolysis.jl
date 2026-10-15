@@ -125,11 +125,11 @@ function run_scenario(label::AbstractString, q_ext::Real)
 
     # Use raw mesh state at end to read χ̄
     χ̄_final = try
-        ;
-        compute_χ̄(sol);
+
+        compute_χ̄(sol)
     catch
-        ;
-        NaN;
+
+        NaN
     end
 
     # Emergent volume ratio and residue bulk density. Volume is density-driven

@@ -277,8 +277,8 @@ function apply!(
         geom = _conduction_geometry(state, mesh, i)
         iL = i == 1 ? i : i - 1
         iR = i == n ? i : i + 1
-        T_L = state.T[iL];
-        T_C = state.T[i];
+        T_L = state.T[iL]
+        T_C = state.T[i]
         T_R = state.T[iR]
         ξ_L = ntuple(j -> state.ξ[j, iL], Val(NC))
         ξ_C = ntuple(j -> state.ξ[j, i], Val(NC))
@@ -506,7 +506,7 @@ function _contribute_to_jacobian_analytical!(
     dQ_dξ_C = ws.dQ_dξ_C_buf
     dQ_dξ_R = ws.dQ_dξ_R_buf
 
-    @inbounds for i = 1:n_cells
+    @inbounds for i = 1:mesh.n_active_cells
         geom = _conduction_geometry(state, mesh, i)
         has_left = geom.has_left
         has_right = geom.has_right
@@ -655,10 +655,11 @@ function _contribute_to_jacobian_ad!(
 ) where {NC}
 
     n_cells = layout.n_cells
+    n_live = mesh.n_active_cells
     A = jac.A
     smap = jac.smap
 
-    @inbounds for i = 1:n_cells
+    @inbounds for i = 1:n_live
         geom = _conduction_geometry(state, mesh, i)
 
         # Capture geometry + material constants in the closure
@@ -697,7 +698,7 @@ function _contribute_to_jacobian_ad!(
         #   x[3 + (k-1)*NC + j] → ξ_{j, i_k} for k ∈ {L=1, C=2, R=3}, j ∈ 1:NC
         # Skip self-filled boundary slots (iL == i for i==1, iR == i for i==n).
         iL = i == 1 ? 0 : i - 1   # 0 = no left neighbor; skip the L column
-        iR = i == n_cells ? 0 : i + 1
+        iR = i == n_live ? 0 : i + 1
 
         # T columns
         if iL != 0

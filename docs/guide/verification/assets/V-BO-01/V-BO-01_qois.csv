@@ -1,0 +1,8 @@
+"qoi","value","exact","error","tol","within_tol","comment"
+"complete burnout: live thickness at t_end is the substrate",0.01199666666918813,0.012,3.3333308118704136e-6,1.0e-5,true,"every PMMA cell parked; 12.00 ± 0.01 mm"
+"mass loss of the gasified PMMA layer",69.92064100011504,69.9147977671139,0.005843233001144199,0.3,true,"percent of the initial mass; exact = ρ_PMMA L_PMMA / m₀"
+"peak MLR",32.469324740309666,32.39,0.002449050333734663,0.03,true,"g m⁻² s⁻¹, gas generation rate"
+"mass ledger closure",0.002557098604704016,0.0,0.002557098604704016,0.001,false,"total-mass drop vs ∫ ṁ″ dt over the run"
+"surface-Newton warnings",0.0,0.0,0.0,0.5,true,"boundary temperature solve converged at every evaluation"
+"time of peak MLR",335.5,335.0,0.0014925373134328358,0.03,true,"s"
+"burnout time (live thickness < 12.02 mm)",363.5,363.5,0.0,0.01,true,"s"

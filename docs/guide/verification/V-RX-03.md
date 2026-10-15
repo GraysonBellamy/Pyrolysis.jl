@@ -40,7 +40,7 @@ the system is closed and Σξ = ξ₀ throughout.
 | max relative ξ_B error | 1.064e-09 | — | 1.064e-09 | 1e-08 | yes | competing-parallel exact split k₁:k₂ × yields |
 | max relative ξ_C error | 3.041e-10 | — | 3.041e-10 | 1e-08 | yes | competing-parallel exact split k₁:k₂ × yields |
 | max relative ξ_G error | 9.123e-10 | — | 9.123e-10 | 1e-08 | yes | competing-parallel exact split k₁:k₂ × yields |
-| total-mass conservation (incl. retained gas) | 4.547e-16 | — | 4.547e-16 | 1e-13 | yes | yields sum to 1 per reaction; gas sealed in |
+| total-mass conservation (incl. retained gas) | 7.958e-16 | — | 7.958e-16 | 1e-13 | yes | yields sum to 1 per reaction; gas sealed in |
 | reaction-heat superposition (quasi-steady cell drift) | 2.767e-05 | — | 2.767e-05 | 0.0001 | yes | T_c − T_bc = Q̇Δz²/(4k) exactly in the discrete steady balance; drift amplitude ~0.02 K at t=0 (h₁k₁+h₂k₂ superposed) |
 
 ![V-RX-03 xi_histories](assets/V-RX-03/V-RX-03_xi_histories.png)

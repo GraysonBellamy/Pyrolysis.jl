@@ -102,7 +102,7 @@ end
     # Liquid emissivity defaults realistically (water ≈ 0.96): a γ = 1
     # surface liquid must RAISE ε_eff toward water, not drag it to 0.
     liq = LiquidComponent(:w, ρ = 1000.0, c = 4186.0, k = 0.6)
-    @test liq.emissivity ≈ 0.95
+    @test liq.emissivity(300.0) ≈ 0.95
     mat_wet = Material(
         name = :wet,
         components = (

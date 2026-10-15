@@ -33,7 +33,9 @@ via `modify(problem, p)`, solved with `solve_kwargs`, then reduced via
 - `grid`: Any iterable of parameter points. Common shapes:
   `Vector{<:NamedTuple}`, `Iterators.product(...)`, `Vector{Vector{Float64}}`.
 - `modify`: `(base_problem, point) -> new_problem`. Must return a fresh
-  `PyrolysisProblem` for each call; do **not** mutate `base_problem`.
+  `PyrolysisProblem` for each call; do **not** mutate `base_problem`. The new
+  problem may reuse the base problem's mesh: `solve` works on its own copy of
+  the mesh, so every point starts from the base geometry.
   The default raises a helpful error pointing to this kwarg.
 - `extract`: `solution -> summary`. Defaults to `identity`. For large
   grids prefer a small `NamedTuple` — full `PyrolysisSolution` instances
@@ -60,9 +62,16 @@ grid = [(A = a, E = e) for a in (1e12, 1e13, 1e14), e in (1.5e5, 2.0e5)]
 
 function modify(prob, p)
 	# Rebuild the material with the swept Arrhenius parameters.
+	mat = prob.material
 	new_rxn = Reaction(:decomp, 1 => 2; A = p.A, E = p.E, h = 200e3)
-	new_mat = Material(prob.material; reactions = (new_rxn,))
-	return PyrolysisProblem(prob; material = new_mat)
+	new_mat = Material(name = mat.name, components = mat.components,
+	                   reactions = (new_rxn,), mixing = mat.mixing,
+	                   lateral_shrinkage_law = mat.lateral_shrinkage_law)
+	return PyrolysisProblem(mesh = prob.mesh, material = new_mat,
+	                        bc_set = prob.bc_set, T_initial = prob.T_initial,
+	                        ξ_initial = prob.ξ_initial, tspan = prob.tspan,
+	                        dt_initial = prob.dt_initial,
+	                        output_times = prob.output_times)
 end
 
 extract(sol) = (peak_T = maximum(sol.surface_T),

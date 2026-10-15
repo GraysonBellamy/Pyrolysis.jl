@@ -1,15 +1,14 @@
 """
-Regression tests for mesh-merge and depletion-callback guards.
+Guards around the conservative merge and the depletion callback.
 
-- The depletion callback's *condition* must keep firing at `n ≤ min_cells`
-  (the affect! terminates there; pre-fix the condition returned false and
-  the terminate branch was unreachable).
+- The depletion callback's *condition* keeps firing at `n_live ≤ min_cells`
+  (the affect! terminates there).
 - The energy-conserving temperature merge conserves the condensed-phase
   sensible enthalpy Σ m_j ∫c_p dT — exact for temperature-dependent c_p,
   and gas heat capacity is excluded.
 - Inverted (tangled) cells are detected from signed widths; the abs()-based
-  cached volumes can never see them, and `find_thin_cells` must refuse to
-  "merge away" an inverted cell.
+  cached volumes can never see them, and `find_thin_cells` refuses to park
+  an inverted cell.
 """
 
 using Test
@@ -17,7 +16,7 @@ using Pyrolysis
 using Pyrolysis.Geometry: CellState, update_geometry!
 using Pyrolysis.Physics: check_mesh_quality, mesh_is_valid
 using Pyrolysis.Adaptivity: merge_temperatures_conservatively
-using Pyrolysis.Solver: find_thin_cells, create_depletion_callback
+using Pyrolysis.Solver: find_thin_cells, create_depletion_callback, DepletionCallbackState
 using Pyrolysis.Problem: z_offset, get_node_positions
 
 include(joinpath(@__DIR__, "..", "helpers.jl"))
@@ -118,34 +117,32 @@ end
 
     # Healthy mesh: nothing thin.
     init = fill(0.01 / 4, 4)
-    @test isempty(find_thin_cells(u, layout, init, 0.05))
+    @test isempty(find_thin_cells(u, layout, init, 0.05, 4))
 
-    # Invert cell 3 in the state vector's z-block: pre-fix the signed
-    # thickness < threshold·init registered it as "thin" and the depletion
-    # callback silently merged the tangled cell away.
+    # Invert cell 3 in the state vector's z-block: a signed thickness below
+    # threshold·init is a tangled mesh, not a depleted cell.
     zoff = z_offset(layout)
     u_bad = copy(u)
     u_bad[zoff+3] = u_bad[zoff+4] + 5e-4
-    @test_throws ErrorException find_thin_cells(u_bad, layout, init, 0.05)
+    @test_throws ErrorException find_thin_cells(u_bad, layout, init, 0.05, 4)
 end
 
 # ============================================================================
-# Depletion condition keeps firing at n ≤ min_cells
+# Depletion condition keeps firing at n_live ≤ min_cells
 # ============================================================================
 @testset "condition fires at the min_cells floor" begin
     n = 4
     problem = fixture_problem(n_cells = n)
     def, ws, u, _ = fixture_state(problem; use_ale = true)
 
-    # min_cells = n: the callback can only terminate, never merge. Pre-fix
-    # the condition returned false unconditionally here, making the
-    # affect!'s terminate branch unreachable and leaving cells free to
-    # shrink without bound.
+    # min_cells = n: the callback can only terminate, never park; the
+    # condition must still fire so the affect!'s terminate branch runs.
+    cb_state = DepletionCallbackState(ws.layout, ws.mesh, problem.material, u)
     cb = create_depletion_callback(
         ws,
         ws.mesh,
         problem.material,
-        ws.layout;
+        cb_state;
         threshold = 0.05,
         min_cells = n,
     )

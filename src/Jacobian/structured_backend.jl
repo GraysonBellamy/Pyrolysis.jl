@@ -18,7 +18,8 @@ core residual matrix:
 
 - `{Eulerian, ALE}` × `{Fickian, DarcyFick}` ×
   `{NoRadiation, SurfaceAbsorption, BeerLambert}` ×
-  `{NoChi, WithChi}` × `{:standard, :with_generation_sink}`.
+  `{NoChi, WithChi}` × `{:standard, :with_generation_sink}`, with `WithChi`
+  under ALE only.
 
 # Backend × strategy is orthogonal
 
@@ -127,7 +128,7 @@ per-operator AD cost.
   `bc_convection_ws`, `ale_advection_ws`, `ale_mesh_vel_ws`).
 - `geom_cache::Union{Nothing, GeometryADCache}` — for the ALE z-block
   AD pass that runs after the operator walk. `nothing` under
-  `assembly_profile == :ale_reduced` (the geometry block is empty).
+  `assembly_profile == :ale_reduced` (the geometry block is dropped).
 - `assembly_profile::Symbol` — the assembly profile this cache was built
   for (`:full` or `:ale_reduced`). Read by per-step assembly to gate
   structured-coupling emission and the geometry AD pass.
@@ -172,7 +173,6 @@ struct StructuredOpsCache{
     is_with_chi::Bool
     is_beer_lambert::Bool
     is_gen::Bool
-    use_blowing::Bool
     assembly_profile::Symbol
     ale_limiter::Discretization.Limiter
 
@@ -249,7 +249,6 @@ function _build_ops_cache(
     radiation_intensity = Float64(get_option(def, :radiation_intensity, 0.0))
     radiation_kirchhoff = get_option(def, :radiation_kirchhoff, true)
     is_gen = get_option(def, :energy_form, :standard) === :with_generation_sink
-    use_blowing = get_option(def, :use_blowing_correction, false)
     is_reduced = assembly_profile === :ale_reduced
 
     # Required workspaces — every supported mode needs these.
@@ -263,14 +262,10 @@ function _build_ops_cache(
     gas_transport_ws = is_darcy ? nothing : build_gas_transport_workspace(material)
     darcy_ws = is_darcy ? build_darcy_transport_workspace(material) : nothing
 
-    # ALE-related workspaces — both ALE and (Eulerian + WithChi) need a
-    # mesh-velocity workspace because `ChiOperator` reads `dA_dχ` from it
-    # and that is computed by `compute_theta_A_derivatives!` regardless of
-    # mesh motion. The advection workspace and geometry-AD cache stay
-    # strictly ALE-only.
-    need_mesh_vel_ws = is_ale || is_with_chi
+    # ALE workspaces. `ChiOperator` reads `dA_dχ` from the mesh-velocity
+    # workspace; WithChi exists only under ALE (`to_problem_def`).
     ale_mesh_vel_ws =
-        need_mesh_vel_ws ?
+        is_ale ?
         build_ale_mesh_velocity_workspace(material, layout.n_cells, layout.n_nodes) :
         nothing
     ale_advection_ws =
@@ -340,7 +335,6 @@ function _build_ops_cache(
         is_with_chi,
         is_beer_lambert,
         is_gen,
-        use_blowing,
         assembly_profile,
         ws.ale_limiter,
         reaction_ws,
@@ -467,6 +461,7 @@ function _compute_jacobian!(
         compute_strain_rate_derivatives!(
             cache.ale_mesh_vel_ws,
             ws.state_cache,
+            cache.mesh,
             cache.material,
         )
         contribute_to_structured!(
@@ -481,18 +476,6 @@ function _compute_jacobian!(
             size(cache.jac.A, 1);
             assembly_profile = cache.assembly_profile,
         )
-    elseif cache.is_with_chi
-        # Eulerian + WithChi: no ALE advection / mesh velocity, but
-        # `ChiOperator` still needs `dA_dχ` for the χ-row × χ-col rank-1.
-        idx_dry = dry_pyrolysis_gas_indices(cache.material)
-        compute_theta_A_derivatives!(
-            cache.ale_mesh_vel_ws,
-            ws.state_cache,
-            cache.mesh,
-            cache.material,
-            cache.layout,
-            idx_dry,
-        )
     end
 
     # 3. Walk the operators in fixed order. Each branch threads only the
@@ -506,6 +489,7 @@ function _compute_jacobian!(
         cache.reaction_ws,
         cache.material,
         cache.layout,
+        cache.mesh,
     )
 
     contribute_to_jacobian!(
@@ -570,6 +554,7 @@ function _compute_jacobian!(
         compute_alpha_derivatives!(
             cache.beer_lambert_ws,
             ws.state_cache,
+            cache.mesh,
             ws.prop_cache,
             cache.material,
         )
@@ -616,7 +601,6 @@ function _compute_jacobian!(
         cache.bc_set,
         cache.radiation_model,
         cache.darcy_ws !== nothing,  # blowing's ṁ″ includes Darcy venting
-        cache.use_blowing,
     )
 
     contribute_to_jacobian!(
@@ -652,7 +636,6 @@ function _compute_jacobian!(
         cache.bc_set,
         cache.darcy_ws !== nothing,  # interior-face kernel + venting follow the mode
         cache.radiation_model,
-        cache.use_blowing,
     )
 
     if cache.ale_advection_ws !== nothing
@@ -687,6 +670,7 @@ function _compute_jacobian!(
             cache.jac,
             cache.ale_mesh_vel_ws,
             ws.state_cache,
+            cache.mesh,
             cache.material,
             cache.layout,
         )
@@ -738,6 +722,7 @@ function _apply_ale_dilation_jacobian!(
     jac::StructuredJacobian,
     ale_ws,
     state,
+    mesh,
     material,
     layout,
 )
@@ -752,7 +737,7 @@ function _apply_ale_dilation_jacobian!(
     # tuple boxes the component on every access; map once, index the Bools.
     gas = map(is_gas, material.components)
 
-    @inbounds for i = 1:n_cells
+    @inbounds for i = 1:mesh.n_active_cells
         θ_i = θ[i]
         for j = 1:NC
             gas[j] && continue

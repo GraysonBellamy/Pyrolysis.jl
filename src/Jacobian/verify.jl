@@ -66,7 +66,9 @@ at state `(u, t)` and report the maximum absolute and relative deviations.
   `max_abs_dev ≤ atol || max_abs_dev / max|J_ref| ≤ rtol`. Approximate
   backends *deliberately* drop coupling contributions, so their in-support
   values legitimately deviate by the dropped magnitude; the masked compare
-  is a sanity check, not an exactness gate. Used by
+  is a sanity check, not an exactness gate. A diagonal slot the profile stores
+  but never writes (`structural_zero_diagonal`) counts as outside the
+  support. Used by
   `Structured(strategy = ApproxSolve())` and any future backend tagged
   approximate.
 
@@ -123,6 +125,14 @@ function verify_jacobian_at(
     else
         Matrix(spec_active.sparsity_phys .| spec_active.sparsity_geom)
     end
+    approximate = is_approximate(spec_active.backend)
+    # A diagonal slot the approximate profile stores but never writes holds a
+    # dropped coupling, like every entry outside its support.
+    if approximate
+        for r in _structural_zero_rows(spec_active.backend, def, ws)
+            mask[r, r] = false
+        end
+    end
 
     # In-support disagreement — backend wrote a value that disagrees with
     # the reference at an entry inside its declared support.
@@ -135,7 +145,6 @@ function verify_jacobian_at(
     out_diff = abs.(J_ref) .* (.!mask)
     max_abs_dev_outside_support = maximum(out_diff)
 
-    approximate = is_approximate(spec_active.backend)
     mode = approximate ? :masked : :strict
 
     if approximate
@@ -248,3 +257,9 @@ function _alloc_active_target(spec::JacobianSpec, n::Int)
         )
     end
 end
+
+# Rows whose stored diagonal the backend leaves as a structural zero (see
+# `structural_zero_diagonal`); none unless the backend declares them.
+_structural_zero_rows(::JacobianBackend, def, ws) = Int[]
+_structural_zero_rows(backend::Structured, def, ws) =
+    structural_zero_diagonal(ws.layout, def.mode, sparsity_profile(backend.strategy))

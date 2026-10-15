@@ -93,7 +93,14 @@ end
 
         # Reference: existing physics path.
         q_ref = zeros(Float64, ws.layout.n_cells)
-        compute_beer_lambert_source!(q_ref, ws.state_cache, ws.prop_cache, 50e3, kirchhoff)
+        compute_beer_lambert_source!(
+            q_ref,
+            ws.state_cache,
+            ws.mesh,
+            ws.prop_cache,
+            50e3,
+            kirchhoff,
+        )
 
         # Operator path: the bare `dT`-targeting overload.
         q_op = zeros(Float64, ws.layout.n_cells)
@@ -117,9 +124,23 @@ end
         N = ws.layout.n_cells
 
         q_bare = zeros(Float64, N)
-        compute_beer_lambert_source!(q_bare, ws.state_cache, ws.prop_cache, 50e3, false)
+        compute_beer_lambert_source!(
+            q_bare,
+            ws.state_cache,
+            ws.mesh,
+            ws.prop_cache,
+            50e3,
+            false,
+        )
         q_kirchhoff = zeros(Float64, N)
-        compute_beer_lambert_source!(q_kirchhoff, ws.state_cache, ws.prop_cache, 50e3, true)
+        compute_beer_lambert_source!(
+            q_kirchhoff,
+            ws.state_cache,
+            ws.mesh,
+            ws.prop_cache,
+            50e3,
+            true,
+        )
 
         ε_surf = ws.prop_cache.ε[N]
         @test 0.0 < ε_surf < 1.0
@@ -153,6 +174,7 @@ end
             compute_beer_lambert_source!(
                 q_ref,
                 ws.state_cache,
+                ws.mesh,
                 ws.prop_cache,
                 50e3,
                 kirchhoff,

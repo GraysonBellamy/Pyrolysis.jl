@@ -138,13 +138,17 @@ volume) is retained with weight γ.
 > zero strain in θ, and zero volume in the mixture density. Such a component
 > contributes its mass and heat capacity but not its k or ε.
 
-> **Depleted-cell floor.** When *no* swelling-weighted volume remains in a
-> cell (fully converted), conductivity/emissivity consumers go through
-> `mixing_volume_fractions`, which falls back to the all-phase occupancy
-> (5.3) — k_eff degrades to the gas-mixture conductivity instead of 0, which
-> would otherwise zero both adjacent harmonic face means and (via Kirchhoff
-> α = ε) kill absorption too. With `handle_depletion = true` such cells are
-> merged away in production.
+> **Void-cell blend.** Conductivity and emissivity consumers go through
+> `mixing_volume_fractions`, which returns the swelling-weighted matrix
+> fractions while the matrix volume fraction $\varphi_m = \sum_j \gamma_j\xi_j/\rho_j$
+> is above $10^{-3}$, the all-phase occupancy (5.3) below $10^{-4}$, and a cubic
+> smoothstep blend of the two in between. A fully converted cell thus degrades
+> to the gas-mixture conductivity instead of 0 (which would zero both adjacent
+> harmonic face means and, via Kirchhoff, its absorption), and because the
+> matrix fractions are normalised by $\varphi_m$ their derivatives grow as
+> $1/\varphi_m^2$ — the smooth blend keeps $\partial k_{\rm eff}/\partial\xi$
+> bounded while a cell empties on a fixed mesh, which parks only its top live
+> cell (§14.3.2).
 
 The three bases and their consumers are summarized below; this mapping is the
 single most error-prone part of effective-property bookkeeping, so it is stated
@@ -584,6 +588,24 @@ $$
 
 The default rule for `λ` is **PARALLEL** with `β = 0.5` (`materials.jl:88`).
 
+**Degenerate transport.** `SolidComponent` defaults to $\lambda_j = 0$. A
+condensed component with no gas-transfer coefficient contributes nothing to
+(5.18), so a cell of that component holding no gas has $\lambda_{\text{eff}}
+\approx v_{\rm gas}\lambda_{\rm gas} \to 0$ under PARALLEL (and exactly zero
+under SERIES), and the face harmonic mean (5.29) vanishes when either side does.
+Gas transport then stops where the gas fraction stops: the gas field of a
+gas-producing material ends in a sharp front, and a Newton iterate that drives
+the front cell's gas concentration below zero closes both of its faces and
+flattens its residual row. The implicit solve fails repeatedly on that front.
+On the Landau ablation case V-CPL-02 a solid coefficient of
+$10^{-6}$ m²/s halves the step count and removes more than half of the
+Newton failures, while the measured regression rate moves by $10^{-5}$
+relative.
+`validate_problem`, which `solve` calls, therefore warns when a material with a
+gas-producing reaction and Fickian transport (no permeable component) has a
+condensed component with $\lambda_j = 0$
+(`warn_degenerate_gas_transport`, `src/Problem/problem_validation.jl`).
+
 ### 5.6.1 Bruggeman is rejected for gas transfer
 
 Applying the effective-medium closure (5.15) to a diffusivity is **rejected**:
@@ -716,28 +738,63 @@ for standalone use but is not on the production face path.
 ### 5.8.1 Effective emissivity
 
 The surface emissivity is a **solid**-volume-fraction average of the component
-emissivities, clamped to the physical range:
+emissivities, each evaluated at the cell temperature, clamped to the physical
+range:
 
 $$
-\varepsilon_{\text{eff}} \;=\; \operatorname{clamp}\!\left(
-\sum_j v_j^{\text{solid}}\,\varepsilon_j,\ 0,\ 1\right),
+\varepsilon_{\text{eff}}(T,\xi) \;=\; \operatorname{clamp}\!\left(
+\sum_j v_j^{\text{solid}}\,\varepsilon_j(T),\ 0,\ 1\right),
 \tag{5.22}
 $$
 
 `effective_emissivity(ξ, T, material)` builds the solid basis and calls
-`_emissivity_from_v`, which applies `clamp(ε_eff, 0, 1)`
-(`effective_properties.jl:635–644`). The solid basis is used for the same
-physical reason as conductivity (§5.1.3): the radiating surface is the
-solid/liquid material, not trapped non-swelling gas. Component emissivities are
-fixed `Float64` fields with defaults of `0.9` for `SolidComponent`, `0.95` for
-`LiquidComponent` (condensed liquids are strong emitters — water ≈ 0.96), and
-`0.0` for `GaseousComponent` (`src/Materials/components.jl`);
-`ε_j` carries **no** temperature dependence in the current model. The effective
-emissivity is the surface property used by the radiative boundary conditions
-(via Kirchhoff `α = ε_eff`, §12) and as the gray-body factor in the volumetric P1
-emission source (§8).
+`_emissivity_from_v(v, T, material)`, which evaluates `get_emissivity(comp, T)`
+per component and applies `clamp(ε_eff, 0, 1)` (`effective_properties.jl`). The
+solid basis is used for the same physical reason as conductivity (§5.1.3): the
+radiating surface is the solid/liquid material, not trapped non-swelling gas.
+Component emissivities are property functions (`ε` accepts the same forms as
+`k`: number, linear tuple, callable, property function) with defaults of `0.9`
+for `SolidComponent`, `0.95` for `LiquidComponent` (condensed liquids are strong
+emitters — water ≈ 0.96), and `0.0` for `GaseousComponent`
+(`src/Materials/components.jl`). Because the sum is evaluated generically over
+the scalar type, a `ForwardDiff.Dual` temperature returns
+$\partial\varepsilon_{\text{eff}}/\partial T$, which the surface-emission
+(§12) and Beer–Lambert (§8) Jacobians pick up without operator-level
+bookkeeping. The effective emissivity is the surface property used by the
+re-radiation boundary condition (§12) and as the gray-body factor in the
+volumetric P1 emission source (§8).
 
-### 5.8.2 Effective absorption coefficient
+### 5.8.2 Effective surface absorptivity
+
+The absorptivity for *incident* (heater-spectrum) radiation is mixed with the
+same weights,
+
+$$
+a_{\text{eff}}(T,\xi) \;=\; \operatorname{clamp}\!\left(
+\sum_j v_j^{\text{solid}}\,a_j,\ 0,\ 1\right),\qquad
+a_j = \begin{cases}
+\texttt{surface\_absorptivity}_j & \text{if set}\\
+\varepsilon_j(T) & \text{otherwise (Kirchhoff)}
+\end{cases}
+\tag{5.22b}
+$$
+
+via `effective_absorptivity(ξ, T, material)` → `_absorptivity_from_v` →
+`get_absorptivity(comp, T)`. The Kirchhoff branch resolves at compile time
+(`Nothing` vs `Float64` is a type parameter of the component), and for a
+material in which no component sets a surface absorptivity the two generated
+sums perform the same floating-point operations in the same order, so
+$a_{\text{eff}} \equiv \varepsilon_{\text{eff}}$ bit-for-bit — the invariant that
+keeps every Kirchhoff-default case unchanged. A component with an explicit
+$a_j$ decouples the absorbed heater flux from the temperature-dependent
+emission: an emissivity that falls with temperature (integrating-sphere data for
+virgin wood, for instance) does not drag the absorbed cone flux down with it.
+$a_{\text{eff}}$ is consumed by a `RadiativeFluxBC` with
+`absorptivity = nothing` (§12.2.6) and as the Beer–Lambert surface
+transmissivity (§8.3); surface emission always uses
+$\varepsilon_{\text{eff}}$.
+
+### 5.8.3 Effective absorption coefficient
 
 The volumetric (extinction) absorption coefficient used by the in-depth radiation
 models (Beer–Lambert and P1, §8) is a **concentration**-weighted sum of the
@@ -794,11 +851,60 @@ These give `μ(300 K) = 1.846 × 10⁻⁵` Pa·s and `μ(600 K) = 3.016 × 10⁻
 Sutherland's law is the Chapman–Enskog rigid-sphere result for a single gas and
 captures the *increase* of gas viscosity with temperature (`μ ∝ T^{1/2}` in the
 high-`T` limit), the opposite of liquid behaviour. It is valid roughly over
-`200–2000 K` for air-like gases. The mixture viscosity
-`mixture_gas_viscosity(ξ, T, material)` currently *ignores* composition and
-returns the single Sutherland value `effective_gas_viscosity(T)`
-(`effective_properties.jl:72–77`); a Wilke mixing rule for multi-component gases
-of very different molar mass is noted as a future extension (§5.16).
+`200–2000 K` for air-like gases.
+
+### Material-supplied viscosity
+
+The air constants are only the **default**. Each `Material` carries its own
+pore-gas viscosity curve in the `gas_viscosity` field, and the Darcy path reads
+it through `effective_gas_viscosity(T, material)`, which evaluates
+`material.gas_viscosity(T)` between two guards. A material that says nothing
+carries `SutherlandProperty()` — the air triple above — so this reduces to
+(5.24) bit for bit and every pre-existing case is unchanged.
+
+The field accepts anything `to_property` understands, so a fitted correlation
+drops in directly:
+
+```julia
+# Cantera mixture-averaged fit for wood pyrolyzates, ascending coefficients,
+# valid 280–1200 K.
+Material(name = :WhitePine, components = (...), reactions = (...),
+         gas_viscosity = PolynomialProperty(mu_coeffs))
+```
+
+**Why the guards matter.** μ enters the model *only* as the Darcy mobility
+κ/μ (§9), never on its own. An error in μ is therefore exactly the reciprocal
+error in permeability — and a μ that reaches zero or changes sign does not
+degrade the answer, it reverses or blows up the gas velocity. Hence:
+
+- the curve is a property law, so it evaluates on the property bracket
+  $[200, 3000]$ K (§4.4): diverging Newton trial states cannot kill the solve
+  on `T^{3/2}` or evaluate a fitted polynomial absurdly far outside its range
+  (the Chapman–Enskog diffusivity formula, which is not a property law, keeps
+  its own 100 K floor `T_GAS_PROPERTY_FLOOR`);
+- the result is floored at `MU_FLOOR` (1e-12 Pa·s, seven orders below any real
+  gas) so an extrapolated fit cannot go non-positive;
+- `Material`'s constructor probes the curve over 200–1800 K and refuses one that
+  is already non-positive or non-finite there, in the spirit of `MixingSpec`'s
+  `CARMAN_KOZENY`/`length_scale` check.
+
+Applying the clamps in `effective_gas_viscosity(T, material)` rather than
+inside the property function means
+every curve a material can carry is protected, not just the built-in Sutherland
+form.
+
+**Accuracy.** Air is within ~2 % for an N₂-swept pore space, but overstates the
+viscosity of wood pyrolyzates by roughly 1.7× at 300 K falling to 1.3× at
+1000 K — a bias in one direction everywhere, growing as the pore space fills
+with volatiles.
+
+**Composition dependence.** `mixture_gas_viscosity(ξ, T, material)` takes `ξ`
+and every Darcy call site passes it, but the function currently returns the
+material's own curve regardless: the model carries **one curve per material**, an average over the
+composition that material is expected to produce. It cannot resolve the pore gas
+shifting from background air to volatiles as pyrolysis proceeds. A
+composition-dependent rule (Wilke) would be introduced by changing that one
+function — but see §5.16 item 1 for why that is not a local change.
 
 ---
 
@@ -995,6 +1101,7 @@ per-cell arrays (length `n`) are
 | `k` | `k_eff` | W·m⁻¹·K⁻¹ | `_conductivity_from_v` (§5.5) |
 | `λ` | `λ_eff` | m²·s⁻¹ | `_gas_transfer_from_v` (§5.6) |
 | `ε` | `ε_eff` | – | `_emissivity_from_v` (5.22) |
+| `a` | `a_eff` | – | `_absorptivity_from_v` (5.22b) |
 | `α` | `α_eff` | m⁻¹ | `effective_absorption` (5.23) |
 
 and the per-face arrays (length `n+1`) are `k_face` and `λ_face` (5.29). The
@@ -1021,12 +1128,14 @@ cache.ρ[i]   = mixture_density(ξ_i, T_i, material)
 cache.ρcp[i] = effective_heat_capacity(ξ_i, T_i, material)
 cache.k[i]   = _conductivity_from_v(v_solid, T_i, material; k_init = k_prev)
 cache.λ[i]   = _gas_transfer_from_v(v_full, T_i, material)
-cache.ε[i]   = _emissivity_from_v(v_solid, material)
+cache.ε[i]   = _emissivity_from_v(v_solid, T_i, material)
+cache.a[i]   = _absorptivity_from_v(v_solid, T_i, material)
 cache.α[i]   = effective_absorption(ξ_i, material)
 ```
 
 This is the authoritative statement of which basis each property uses:
-**conductivity and emissivity from `v_solid`, gas transfer from `v_full`**
+**conductivity, emissivity, and surface absorptivity from `v_solid`, gas
+transfer from `v_full`**
 (§5.1.3). The previous step's conductivity `k_prev = cache.k[i]` is passed as the
 Bruggeman warm-start `k_init` (§5.5.3). After sizing, the loop is **allocation
 free**: all composition-dependent dispatch is generated (compile-time unrolled),
@@ -1143,10 +1252,28 @@ recorded from the source and KB open questions; several are flagged here for the
 verification and validation discussion of §18.
 
 1. **Single-value mixture gas viscosity.** `mixture_gas_viscosity` ignores
-   composition and returns the air-Sutherland value (5.24). A Wilke mixing rule
-   would be needed for multi-component gases of very different molar mass (e.g.
-   H₂O + CO₂ at high temperature). This is not critical at FDS-scale fidelity but
-   limits accuracy for strongly non-air gas mixtures.
+   composition and returns the material's single viscosity curve. The
+   *material* dependence is resolved — a material supplies the blend correlation
+   for the gas it produces — but the *composition* dependence within a material
+   is not: one curve averages over the pore gas shifting from background air to
+   volatiles as pyrolysis proceeds. A Wilke mixing rule over per-component
+   μⱼ(T) would resolve that transition.
+
+   Two things make this more than a one-function change, and both are worth
+   knowing before attempting it:
+
+   - The production Darcy Jacobian is the **analytical override** in
+     `Jacobian/operators/darcy_transport.jl`, not the AD path (which is retained
+     only as the rtol = 1e-12 equivalence reference). Its mobility chain rule
+     assumes `dμ/dξ = 0` and takes the ξ-path through κ alone; every
+     `dvg_dξ_*_j` expression would need a `− mob·dμ_dξ[j]` term.
+   - That equivalence gate **cannot catch the omission** while every Darcy test
+     fixture carries a single gas component, because a one-species mixture rule
+     is the identity. A multi-gas Darcy fixture has to land first.
+
+   `test/discretization/test_darcy.jl` asserts ξ-invariance of
+   `mixture_gas_viscosity` as a tripwire, so the day this changes the failure is
+   loud and points here.
 
 2. **Unvalidated Chapman–Enskog LJ defaults.** The heuristic `σ(M)` and
    `ε/k_B(M)` correlations (5.27) are rough estimates anchored to small organics

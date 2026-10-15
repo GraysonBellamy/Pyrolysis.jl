@@ -163,3 +163,16 @@ M/M0 = 1 to machine output precision; T = 400.0000 K throughout.
 `<case>_run.log` (Gpyro stdout) each end with
 "End of simulation reached successfully"; the vcpl01 log additionally shows
 the 20 early adaptive-dt reductions at the apparent-cp spike (expected).
+
+### vbo01 — V-BO-01 (MaCFP PMMA gasification, 50 kW/m²)
+
+`vbo01_gpyro_v2_pmma.csv` is the **Gpyro V2** (SoftwareX release, GPL-3
+GPYRO-V2 repository) run made here on the authors' MaCFP PMMA deck
+(`docs/gpyro_v2_comparison/reference/pmma/PMMA.data`: 5.9 mm PMMA on 12 mm
+Kaowool, 50 kW/m², power-law k(T) and c(T) fits), copied verbatim from
+`docs/gpyro_v2_comparison/reference/pmma/gpyro_v2_pmma_localrun.csv`. Gpyro V2
+was built with the docker recipe in `docs/gpyro_v2_comparison/README.md`. The
+first header row names the columns; column 2 (`001_MLR`) is the mass loss rate
+in **g m⁻² s⁻¹**, column 6 the remaining thickness in m, columns 3–5 the
+temperatures (°C) at the surface, 12 mm and 17.9 mm. Feeds the V-BO-01 MLR
+overlay in report mode.

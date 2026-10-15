@@ -56,6 +56,11 @@ Darcy velocity [m/s], positive = flow in +z direction (from L to R)
 
     # Arithmetic mean temperature for viscosity
     T_face = 0.5 * (T_L + T_R)
+    # NOTE: uses the bare air-Sutherland correlation, NOT a material's
+    # `gas_viscosity` curve. This helper has no `src/` callers — the live
+    # residual path is `update_darcy_properties!` (finite_volume.jl), which
+    # reads the material's curve. If you ever wire this into a live path,
+    # thread `material` through and switch to `mixture_gas_viscosity`.
     μ_face = effective_gas_viscosity(T_face)
 
     # Pressure gradient (central difference)
@@ -129,7 +134,7 @@ function compute_darcy_velocity!(
     P::AbstractVector,
     κ::AbstractVector,
 )
-    n_faces = length(state.A_face)
+    n_faces = mesh.n_active_cells + 1
 
     @inbounds for f = 1:n_faces
         face = mesh.faces[f]
@@ -170,7 +175,7 @@ Compute Darcy mobility using pre-computed permeability field.
 - `κ`: Permeability field at cell centers [m²]
 """
 function compute_darcy_mobility!(mobility::AbstractVector, state, mesh, κ::AbstractVector)
-    n_faces = length(state.A_face)
+    n_faces = mesh.n_active_cells + 1
 
     @inbounds for f = 1:n_faces
         face = mesh.faces[f]
@@ -188,6 +193,8 @@ function compute_darcy_mobility!(mobility::AbstractVector, state, mesh, κ::Abst
         T_L = state.T[left_id]
         T_R = state.T[right_id]
         T_face = (T_L + T_R) / 2
+        # Bare air correlation — see the note in `darcy_velocity_face`;
+        # this helper has no `src/` callers.
         μ_face = effective_gas_viscosity(T_face)
 
         if μ_face > 1e-20
@@ -292,7 +299,7 @@ function compute_darcy_velocity_jacobian!(
     mesh,
     κ::AbstractVector,
 )
-    n_faces = length(state.A_face)
+    n_faces = mesh.n_active_cells + 1
 
     @inbounds for f = 1:n_faces
         face = mesh.faces[f]
@@ -314,6 +321,8 @@ function compute_darcy_velocity_jacobian!(
         T_L = state.T[left_id]
         T_R = state.T[right_id]
         T_face = (T_L + T_R) / 2
+        # Bare air correlation — see the note in `darcy_velocity_face`;
+        # this helper has no `src/` callers.
         μ_face = effective_gas_viscosity(T_face)
 
         d_LR = abs(state.cell_centers[right_id] - state.cell_centers[left_id])
@@ -347,9 +356,11 @@ using ..BoundaryConditions: BoundaryConditionSet, get_mass_bc
 
 """
 	apply_pressure_bc_to_darcy_velocity!(v_gas::Vector{Float64},
+										 state,
 										 mesh::Mesh1D{NC},
 										 P::Vector{Float64},
 										 κ::Vector{Float64},
+										 μ::Vector{Float64},
 										 bc_set::BoundaryConditionSet,
 										 top_face_ids::Vector{Int},
 										 bottom_face_ids::Vector{Int}) where NC
@@ -358,6 +369,12 @@ Apply pressure boundary conditions using type-stable BoundaryConditionSet.
 
 This is the preferred signature for maximum type stability and zero allocations.
 Uses pre-cached face IDs computed once at problem setup.
+
+`μ` is the per-cell pore-gas viscosity the caller already computed
+(`darcy.μ`), not a value re-derived here: the boundary vent and the interior
+faces must see the same viscosity, and with a material-supplied μ(T) curve
+re-evaluating it would be both a second evaluation and a second chance to
+disagree.
 
 # Arguments
 """
@@ -468,6 +485,7 @@ function _apply_pressure_bc_faces!(
     mesh,
     P,
     κ,
+    μ,
     face_ids::Vector{Int},
     bc::AbstractMassBC,
     ::Val{tag},
@@ -477,9 +495,9 @@ function _apply_pressure_bc_faces!(
         cell_id = face.cell_ids[1] != 0 ? face.cell_ids[1] : face.cell_ids[2]
 
         d = abs(state.face_positions[f] - state.cell_centers[cell_id])
-        μ_int = effective_gas_viscosity(state.T[cell_id])
 
-        v_gas[f] = boundary_darcy_velocity(bc, P[cell_id], κ[cell_id], μ_int, d, Val(tag))
+        v_gas[f] =
+            boundary_darcy_velocity(bc, P[cell_id], κ[cell_id], μ[cell_id], d, Val(tag))
     end
     return nothing
 end
@@ -490,12 +508,23 @@ function apply_pressure_bc_to_darcy_velocity!(
     mesh,
     P::AbstractVector,
     κ::AbstractVector,
+    μ::AbstractVector,
     bc_set::BoundaryConditionSet,
     top_face_ids::Vector{Int},
     bottom_face_ids::Vector{Int},
 )
     mass_top = get_mass_bc(bc_set, Val(:top))
-    _apply_pressure_bc_faces!(v_gas, state, mesh, P, κ, top_face_ids, mass_top, Val(:top))
+    _apply_pressure_bc_faces!(
+        v_gas,
+        state,
+        mesh,
+        P,
+        κ,
+        μ,
+        top_face_ids,
+        mass_top,
+        Val(:top),
+    )
 
     mass_bottom = get_mass_bc(bc_set, Val(:bottom))
     _apply_pressure_bc_faces!(
@@ -504,6 +533,7 @@ function apply_pressure_bc_to_darcy_velocity!(
         mesh,
         P,
         κ,
+        μ,
         bottom_face_ids,
         mass_bottom,
         Val(:bottom),

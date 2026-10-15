@@ -377,13 +377,13 @@ function load_bc_wall_temps(
     ou_lookup = [Dict{Int,Float64}(zip(_round_keys(r.t), r.T_outer)) for r in reps]
 
     t_out = Float64[]
-    Ti_out = Float64[];
+    Ti_out = Float64[]
     To_out = Float64[]
-    Ti_std = Float64[];
+    Ti_std = Float64[]
     To_std = Float64[]
     n_out = Int[]
     for τ in all_times
-        i_vals = Float64[];
+        i_vals = Float64[]
         o_vals = Float64[]
         for k in eachindex(reps)
             if haskey(in_lookup[k], τ)
@@ -393,7 +393,7 @@ function load_bc_wall_temps(
         end
         isempty(i_vals) && continue
         push!(t_out, float(τ))
-        push!(Ti_out, mean(i_vals));
+        push!(Ti_out, mean(i_vals))
         push!(To_out, mean(o_vals))
         push!(Ti_std, length(i_vals) > 1 ? std(i_vals) : 0.0)
         push!(To_std, length(o_vals) > 1 ? std(o_vals) : 0.0)
@@ -442,8 +442,8 @@ function _load_bcs_or_default(
     verbose::Bool = true,
 )
 
-    f_const = let T = float(T_default);
-        _ -> T;
+    f_const = let T = float(T_default)
+        _ -> T
     end
     bcs = Dict{String,Function}(
         "T_top_gas" => f_const,
@@ -695,9 +695,9 @@ function load_fsri_top_surface_temp(
 
     all_t = sort(unique(reduce(vcat, r[1] for r in reps)))
     lookups = [Dict(zip(r[1], r[2])) for r in reps]
-    t_out = Float64[];
-    T_out = Float64[];
-    std_out = Float64[];
+    t_out = Float64[]
+    T_out = Float64[]
+    std_out = Float64[]
     n_out = Int[]
     for τ in all_t
         vals = Float64[]
@@ -766,11 +766,11 @@ function load_fsri_scenario(
 
     T_initial = T_back_exp[1]
     walls = this_study_wall_temps(q_kw; T_amb = T_initial)
-    T_top_surr = let T = walls.T_outer;
-        _ -> T;
+    T_top_surr = let T = walls.T_outer
+        _ -> T
     end
-    T_bot = let T = walls.T_inner;
-        _ -> T;
+    T_bot = let T = walls.T_inner
+        _ -> T
     end
     T_top_gas = this_study_top_gas(q_kw; T_HFG = T_initial)
 
@@ -1057,13 +1057,13 @@ function load_lfa_parallel_priors(;
             k_val = try
                 parse(Float64, string(raw[i, idx_k]))
             catch
-                ;
+
                 nothing
             end
             ks_val = try
                 parse(Float64, string(raw[i, idx_ks]))
             catch
-                ;
+
                 nothing
             end
             if k_val === nothing

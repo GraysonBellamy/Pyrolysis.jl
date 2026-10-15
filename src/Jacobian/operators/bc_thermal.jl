@@ -35,10 +35,11 @@ through the volumetric `S_conv`/`S_gen` instead, owned by
 
 # Blowing correction
 
-With `use_blowing = true` the residual's surface Newton rescales every
-`ConvectiveBC` by `blowing_factor(ṁ″·c_p,g/h)` built from the **true**
-boundary mass flux (`J_gas[:, f]`). This operator then rebuilds that flux
-from the stencil state via the shared [`_bc_boundary_face_fluxes`](@ref)
+The residual's surface Newton applies every `ConvectiveBC`'s blowing model
+(`bc.blowing`, see `blowing_state`) to the **true** boundary mass flux
+(`J_gas[:, f]`). This operator
+then rebuilds that flux from the stencil state via the shared
+[`_bc_boundary_face_fluxes`](@ref)
 kernel (film law + Darcy venting when `darcy_active`, the same kernel the
 residual's mass-BC pass applies) and feeds it to the Newton's `J_blowing`,
 so the `∂(h·χ)/∂(T_b, ξ_b)` chain lands exactly. The transpiration argument
@@ -75,7 +76,11 @@ using ..Materials: AbstractThermalBC, RadiationModel, SURFACE_ABSORPTION
 using ..BoundaryConditions:
     DirichletThermalBC, BoundaryConditionSet, get_thermal_bc, get_mass_bc
 using ..Geometry: BoundaryState
-using ..Properties: effective_conductivity, effective_heat_capacity, effective_emissivity
+using ..Properties:
+    effective_conductivity,
+    effective_heat_capacity,
+    effective_emissivity,
+    effective_absorptivity
 using ..Discretization: solve_boundary_temperature!
 
 """
@@ -134,13 +139,14 @@ function _bc_thermal_contribution(
     d_to_face::Real = Δz_half,
     tag::Val = Val(:top),
     darcy_active::Bool = false,
-    use_blowing::Bool = false,
 ) where {NC,Tu}
 
-    # Cell-local properties (Dual-typed when ξ_cell, T_cell are Dual).
+    # Cell-local properties (Dual-typed when ξ_cell, T_cell are Dual). ε_eff
+    # and a_eff carry ∂/∂T through T-dependent component emissivities.
     k_eff = effective_conductivity(ξ_cell, T_cell, material)
     ρcp = effective_heat_capacity(ξ_cell, T_cell, material)
     ε_eff = effective_emissivity(ξ_cell, T_cell, material)
+    a_eff = effective_absorptivity(ξ_cell, T_cell, material)
 
     # Outward gas flux at this boundary face — hard-zeroed, mirroring the
     # residual: transpiration is rejected at construction
@@ -155,21 +161,17 @@ function _bc_thermal_contribution(
     # state with the same kernel the residual's mass-BC pass applies.
     # `_bc_boundary_face_fluxes` returns F positive INTO the domain, so the
     # outward flux is −F at either face.
-    J_blowing = if use_blowing
-        F = _bc_boundary_face_fluxes(
-            T_cell,
-            ξ_cell,
-            mass_bc,
-            material,
-            d_to_face,
-            t,
-            tag,
-            darcy_active,
-        )
-        ntuple(j -> -F[j], Val(NC))
-    else
-        J_boundary_outward
-    end
+    F = _bc_boundary_face_fluxes(
+        T_cell,
+        ξ_cell,
+        mass_bc,
+        material,
+        d_to_face,
+        t,
+        tag,
+        darcy_active,
+    )
+    J_blowing = ntuple(j -> -F[j], Val(NC))
 
     # Solve for T_s (Dirichlet branch is closed-form; non-Dirichlet uses
     # the Newton solver, which is already Dual-aware).
@@ -201,8 +203,8 @@ function _bc_thermal_contribution(
             T_ref,
             t,
             ε_eff;
+            a_eff = a_eff,
             radiation_model = radiation_model,
-            use_blowing = use_blowing,
             J_blowing = J_blowing,
         )
         result.q_conducted
@@ -241,7 +243,7 @@ end
 
 """
 	apply!(dT, ::BCThermalOperator, state, mesh, material, bc_set, t,
-	       radiation_model, darcy_active = false, use_blowing = false) -> nothing
+	       radiation_model, darcy_active = false) -> nothing
 
 Accumulate `dT[boundary_cell] += q_conducted · A_face / V_cell / ρcp_eff` for
 both top (boundary_id = 1) and bottom (boundary_id = 2) boundaries.
@@ -256,7 +258,6 @@ function apply!(
     t::Real,
     radiation_model::RadiationModel,
     darcy_active::Bool = false,
-    use_blowing::Bool = false,
 ) where {NC}
 
     for (boundary_id, tag) in ((1, Val(:top)), (2, Val(:bottom)))
@@ -287,7 +288,6 @@ function apply!(
             geom.d_to_face,
             tag,
             darcy_active,
-            use_blowing,
         )
 
         dT[geom.cell_id] += dT_contrib
@@ -325,7 +325,7 @@ end
 """
 	contribute_to_jacobian!(jac, op::BCThermalOperator, u, ctx, t, ws, state, mesh,
 	                        material, layout, bc_set, radiation_model,
-	                        darcy_active = false, use_blowing = false) -> nothing
+	                        darcy_active = false) -> nothing
 
 Per-boundary AD path. Each boundary face:
 
@@ -348,7 +348,6 @@ function contribute_to_jacobian!(
     bc_set::BoundaryConditionSet,
     radiation_model::RadiationModel = SURFACE_ABSORPTION,
     darcy_active::Bool = false,
-    use_blowing::Bool = false,
 ) where {NC}
 
     n_cells = layout.n_cells
@@ -374,7 +373,6 @@ function contribute_to_jacobian!(
         t,
         radiation_model,
         darcy_active,
-        use_blowing,
     )
     geom_bot = _bc_thermal_geometry(state, mesh, 2)
     _bct_assemble_boundary!(
@@ -391,7 +389,6 @@ function contribute_to_jacobian!(
         t,
         radiation_model,
         darcy_active,
-        use_blowing,
     )
     return nothing
 end
@@ -410,7 +407,6 @@ function _bct_assemble_boundary!(
     t::Real,
     radiation_model::RadiationModel,
     darcy_active::Bool,
-    use_blowing::Bool,
 ) where {NC}
     T_ref = ambient_temperature(thermal_bc, t, Float64(T_REF))
 
@@ -424,8 +420,7 @@ function _bct_assemble_boundary!(
             radiation_model = radiation_model,
             val_nc = Val(NC),
             tag = tag,
-            darcy_active = darcy_active,
-            use_blowing = use_blowing
+            darcy_active = darcy_active
 
             (out, x_inner) -> begin
                 T_cell, ξ_cell = _bct_unpack(x_inner, val_nc)
@@ -444,7 +439,6 @@ function _bct_assemble_boundary!(
                     geom.d_to_face,
                     tag,
                     darcy_active,
-                    use_blowing,
                 )
                 return nothing
             end

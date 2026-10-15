@@ -410,11 +410,12 @@ piecewise/non-smooth laws give undefined results. The default identity behavior
 
 ### 7.6.2 Interaction with ALE
 
-`WithChi` is most meaningful together with `use_ale = true`: the radial
-(cross-section) strain rate `θ_A = law'(χ̄)/law(χ̄) · dχ̄/dt` is subtracted from
-each cell's volumetric strain to get the axial component that drives mesh motion,
-so the two channels (radial area change and axial node motion) do not
-double-count. With `WithChi`, the state vector carries the χ block as well:
+`WithChi` requires `use_ale = true`: only the ALE residual evolves `χ` and the
+cross-section, so `solve` rejects a lateral shrinkage law on the fixed mesh with
+an `ArgumentError`. The radial (cross-section) strain rate
+`θ_A = law'(χ̄)/law(χ̄) · dχ̄/dt` is subtracted from each cell's volumetric
+strain to get the axial component that drives mesh motion, so the two channels
+(radial area change and axial node motion) do not double-count. With `WithChi`, the state vector carries the χ block as well:
 `[T | ξ_1..ξ_NC | z | χ]`. The χ block is *reconstructed* from the dry-gas source
 at every residual evaluation rather than being a free integrator state, which
 keeps it consistent with the accumulated gas release.

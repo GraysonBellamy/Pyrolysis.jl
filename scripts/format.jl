@@ -16,7 +16,9 @@ paths = String[joinpath(ROOT, t) for t in TARGETS if isdir(joinpath(ROOT, t))]
 
 # `format` returns true when every file was already correctly formatted.
 # With overwrite=false (check mode) it reports without modifying files.
-already_formatted = format(paths; overwrite = !check, verbose = true)
+# `throw_on_error` makes a file the formatter cannot process fail the run;
+# otherwise it is logged and counted as already formatted.
+already_formatted = format(paths; overwrite = !check, verbose = true, throw_on_error = true)
 
 if check && !already_formatted
     @error "Formatting check failed — run `julia --project=scripts scripts/format.jl` to fix."

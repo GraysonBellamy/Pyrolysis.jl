@@ -630,8 +630,8 @@ solution.extras.diagnostics_log           # Vector{DiagnosticsRow} (needs diagno
 get_profile(solution, :T, i)              # field at one time index
 get_cell_positions(solution)              # fixed cell centers (Eulerian) [m]
 interpolate_solution(solution, t)         # raw state vector at continuous t  (== solution(t))
-get_surface_temperature(mesh)             # final-state top face T [K]
-get_back_face_temperature(mesh)           # final-state bottom face T [K]
+get_surface_temperature(solution.problem.mesh)    # final-state top face T [K]
+get_back_face_temperature(solution.problem.mesh)  # final-state bottom face T [K]
 
 # Plotting recipes (need `using Plots`):
 plot(solution)                  # :surface_T (default)

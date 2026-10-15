@@ -127,10 +127,13 @@ q_{\text{BC}}(T_s) = \Phi_{\text{incident}}\,\alpha
 $$
 
 where $\Phi_{\text{incident}}=I_{\text{ext}}(t)$ is the incident intensity
-[W·m⁻²] and $\alpha$ is the surface absorptivity. By Kirchhoff's law at radiative
-equilibrium the default absorptivity equals the effective surface emissivity,
-$\alpha=\varepsilon_{\text{eff}}=\sum_j v_j^{\text{solid}}\varepsilon_j$ (clamped
-to $[0,1]$); an explicit `absorptivity` overrides this. The temperature derivative
+[W·m⁻²] and $\alpha$ is the surface absorptivity. The default absorptivity is the
+material's effective surface absorptivity
+$\alpha=a_{\text{eff}}=\sum_j v_j^{\text{solid}}a_j$ (§5.8.2, clamped to
+$[0,1]$), where $a_j$ is the component's `absorptivity` when set and otherwise
+its emissivity $\varepsilon_j(T)$ — so with no component absorptivity set this
+is Kirchhoff's law $\alpha=\varepsilon_{\text{eff}}$; an explicit BC
+`absorptivity` overrides this. The temperature derivative
 of this contribution is $\mathrm{d}q_{\text{BC}}/\mathrm{d}T_s=0$ (absorbed
 incident flux is independent of $T_s$). Surface re-radiation loss is supplied
 separately by a `RadiativeBC` term, $q=F\varepsilon_{\text{eff}}\sigma(T_\infty^4-T_s^4)$,
@@ -224,11 +227,12 @@ The flux that actually crosses the surface is $\alpha_{\text{surf}}\,
 I_{\text{surface}}$, where $\alpha_{\text{surf}}$ is the surface
 transmissivity: on the default **Kirchhoff path** (the `RadiativeFluxBC`
 carries no explicit `absorptivity`) it is the *live* surface cell's effective
-emissivity $\varepsilon_{\text{eff}}(T_N,\xi_{\cdot,N})$ — absorption and
-surface emission then use the same coefficient (Kirchhoff's law
-$\alpha=\varepsilon$, detailed balance), and the remaining
-$(1-\varepsilon_{\text{eff}})I_{\text{surface}}$ is reflected and never
-enters the medium. With an **explicit BC absorptivity**, $\alpha(t)$ is folded
+surface absorptivity $a_{\text{eff}}(T_N,\xi_{\cdot,N})$ (`cache.a[N]`,
+§5.8.2) — identical to $\varepsilon_{\text{eff}}(T_N,\xi_{\cdot,N})$ unless a
+component sets its own `absorptivity`, so by default absorption and surface
+emission use the same coefficient (Kirchhoff's law $\alpha=\varepsilon$,
+detailed balance) — and the remaining $(1-a_{\text{eff}})I_{\text{surface}}$
+is reflected and never enters the medium. With an **explicit BC absorptivity**, $\alpha(t)$ is folded
 into the extracted intensity upstream and the kernel does not rescale
 (`apply_kirchhoff_absorptivity = false`). The entrance intensity is then the
 cumulative attenuation from the surface down to the top face of cell $i$:
@@ -246,14 +250,18 @@ intensity it is given.
 ### 8.3.3 Backward sweep and guards
 
 Because $I_{\text{in}}(i)$ depends only on cells *above* $i$ (larger index, nearer
-the surface), the implementation sweeps from the top cell $N$ down to cell 1,
-carrying a running intensity `I_current`. Forward iteration would require
-not-yet-computed information; the backward sweep is the natural causal order.
+the surface), the implementation sweeps from the live top cell
+$n_{\rm live} = $ `mesh.n_active_cells` down to cell 1, carrying a running
+intensity `I_current`; parked ghost slots above the live surface (§14.3) get
+$q^{\text{rad}} = 0$. Forward iteration would require not-yet-computed
+information; the backward sweep is the natural causal order.
 
 ```julia
+n_cells_val = mesh.n_active_cells
+fill!(q_rad, zero(eltype(q_rad)))
 I_current = oneunit(eltype(q_rad)) * I_surface
 if apply_kirchhoff_absorptivity
-    I_current *= cache.ε[n_cells_val]   # Kirchhoff: α_surf = ε_eff (live surface cell)
+    I_current *= cache.a[n_cells_val]   # α_surf = a_eff of the live surface cell
 end
 A = state.A_section[]
 @inbounds for i = n_cells_val:-1:1
@@ -281,8 +289,17 @@ Three details are load-bearing:
 - **Transparency guard.** Cells with $\alpha\le 10^{-20}$ get $q^{\text{rad}}_i=0$
   and do not attenuate the beam, preventing `exp(0)`-degenerate work and spurious
   absorption in radiation-free regions.
-- **Zero-flux short-circuit.** If $I_{\text{surface}}\le 0$, the whole array is
-  zeroed and the routine returns (radiation.jl:60–63).
+- **Zero-flux short-circuit.** If $I_{\text{surface}}\le 0$, the routine returns
+  after zeroing the array.
+- **Transmitted flux.** Whatever intensity is left after cell 1,
+  $I_{\text{surface}}\,e^{-\tau_{\text{tot}}}$, leaves through the back face: the
+  sweep deposits nothing there and the back-face boundary condition describes
+  only the surface it models. That is the right answer for a slab whose back
+  face is open and a modelling error for one that rests on an opaque holder
+  with a transparent absorption coefficient, so the extractor reports the
+  transmitted flux per saved time (`solution.extras.radiation_transmitted`)
+  and a solve that loses more than 1 % of the entering flux at any saved time
+  warns once.
 
 The source is **positive = heating**: it is added to the energy RHS as
 $+q^{\text{rad}}_i/\rho c_p^{\text{eff}}$ (§8.8). Energy conservation holds in the

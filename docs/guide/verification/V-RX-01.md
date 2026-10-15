@@ -30,10 +30,10 @@ Setup notes (solver conventions that would corrupt the case):
 
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
-| max relative ξ_A error | 1.254e-09 | — | 1.254e-09 | 1e-08 | yes | Bateman solution, k₁=0.389, k₂=0.262 (FDS/Gpyro values) |
-| max relative ξ_B error | 2.777e-09 | — | 2.777e-09 | 1e-08 | yes | Bateman solution, k₁=0.389, k₂=0.262 (FDS/Gpyro values) |
-| max relative ξ_C error | 1.523e-09 | — | 1.523e-09 | 1e-08 | yes | Bateman solution, k₁=0.389, k₂=0.262 (FDS/Gpyro values) |
-| total-mass conservation (closed chain) | 5.684e-16 | — | 5.684e-16 | 1e-13 | yes | Σξ must equal ξ₀; unit yields |
+| max relative ξ_A error | 1.256e-09 | — | 1.256e-09 | 1e-08 | yes | Bateman solution, k₁=0.389, k₂=0.262 (FDS/Gpyro values) |
+| max relative ξ_B error | 2.781e-09 | — | 2.781e-09 | 1e-08 | yes | Bateman solution, k₁=0.389, k₂=0.262 (FDS/Gpyro values) |
+| max relative ξ_C error | 1.526e-09 | — | 1.526e-09 | 1e-08 | yes | Bateman solution, k₁=0.389, k₂=0.262 (FDS/Gpyro values) |
+| total-mass conservation (closed chain) | 2.274e-15 | — | 2.274e-15 | 1e-13 | yes | Σξ must equal ξ₀; unit yields |
 | isothermality drift | 5.684e-14 | — | 5.684e-14 | 1e-12 | yes | h = 0 both reactions; Dirichlet-pinned single cell |
 
 ![V-RX-01 xi_histories](assets/V-RX-01/V-RX-01_xi_histories.png)

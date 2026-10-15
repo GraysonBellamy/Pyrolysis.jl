@@ -234,11 +234,8 @@ from `src/Solver/solve.jl`):
   depth you would pass `radiation_model = BEER_LAMBERT` (PMMA is
   semi-transparent; the `α = 1.47` values then matter). The surface-absorption
   variant (§14.1.1) passes `SURFACE_ABSORPTION`.
-- **`handle_depletion = true`** turns on the surface-cell merge callback. It
-  requires `use_ale = true`. Because it resizes the state vector mid-solve, it is
-  **incompatible with a pluggable `jacobian` backend** (the solver errors if you
-  pass both) and falls back to the integrator's colored finite-difference
-  Jacobian (Technical Reference §14, §15).
+- **`handle_depletion = true`** turns on cell parking (Chapter 10), which
+  carries the run through burnout (Technical Reference §14.3).
 - **`use_transpiration_bc`** is left at its default `false`. Enabling it is
   rejected: the default `:standard` energy form already carries gas enthalpy via
   the `S_conv` advection term, so a surface-transpiration term would
@@ -430,23 +427,23 @@ solution = solve(problem;
 )
 ```
 
-The default Jacobian is `Structured(strategy = DirectSolve())`, which assembles
-the exact analytical Jacobian including the dense ALE mesh-velocity coupling. For
-large ALE problems you can drop that coupling (a Schur-style approximation that
-still converges every term through Newton) for a substantial speedup:
+Under ALE the default Jacobian is `Structured(strategy = ApproxSolve())`, which
+drops the dense ALE mesh-velocity coupling (a Schur-style approximation that
+still converges every term through Newton). For the exact analytical Jacobian,
+including that coupling, pass `DirectSolve`:
 
 ```julia
 solution = solve(problem;
     use_ale = true,
     radiation_model = SURFACE_ABSORPTION,
-    jacobian = JacobianSpec(Structured(strategy = ApproxSolve()), problem),
+    jacobian = Structured(strategy = DirectSolve()),
     integrator = KenCarp4(linsolve = SparspakFactorization()),
 )
 ```
 
-Legacy benchmarks measured ~7.8× speedup at 240 cells with solutions identical
-to within solver tolerance (Technical Reference §15; see the Solver/Jacobian
-configuration chapter for choosing strategies).
+Both follow the same trajectory; the exact Jacobian costs several times more
+per step (Technical Reference §15.10.3; see the Solver/Jacobian configuration
+chapter for choosing strategies).
 
 ### What to look at
 
@@ -507,8 +504,9 @@ post-processing, read it directly off the returned solution as
 `solution.surface_T` (and the back face as
 `solution.extras.back_temperature`) — these are populated from that
 boundary-temperature Newton solve. At the lower level the solved value is cached
-per boundary in `mesh.boundary_states` and can be queried with
-`get_surface_temperature(mesh)` / `get_back_face_temperature(mesh)` (exported
+per boundary in the final mesh's `boundary_states` (`solution.problem.mesh`) and
+can be queried with `get_surface_temperature(mesh)` /
+`get_back_face_temperature(mesh)` on that mesh (exported
 from the `Pyrolysis.Discretization` submodule), but for normal use the
 `solution` fields are the intended API.
 
@@ -1091,10 +1089,6 @@ Reading the examples together, a few idioms recur and are worth internalizing:
 - **Surface transpiration BC is off by default and incompatible with the default
   `:standard` energy form** — enabling `use_transpiration_bc` is rejected because
   `S_conv` already carries gas enthalpy (double counting). Technical Reference §7.
-- **Depletion handling and a pluggable Jacobian are mutually exclusive.**
-  `handle_depletion = true` resizes the state vector mid-solve, so the solver
-  errors if you also pass a `jacobian = JacobianSpec(...)`, and it falls back to
-  the integrator's colored finite-difference Jacobian. Technical Reference §14–§15.
 - **Several cone examples carry parameter sets calibrated under a
   transpiration-plus-`S_conv` convention** and may need re-calibration under the
   `S_conv`-only energy balance; treat their bundled experimental/ThermaKin

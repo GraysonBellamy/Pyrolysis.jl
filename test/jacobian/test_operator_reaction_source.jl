@@ -116,7 +116,7 @@ function _reference_dense_jacobian(u, layout, material::Material{NC,NR}) where {
         end
         J_local = ForwardDiff.jacobian(f!, zeros(dim), x)
         # Scatter into J_full at the same positions the operator writes.
-        row_T = i;
+        row_T = i
         col_T = i
         J_full[row_T, col_T] = J_local[1, 1]
         for l = 1:NC
@@ -192,30 +192,30 @@ end
         # corresponding global indices. This is the operator's declared
         # support.
         n_total = length(u)
-        I = Int[];
-        J = Int[];
+        I = Int[]
+        J = Int[]
         V = Float64[]
         for i = 1:n
-            row_T = i;
+            row_T = i
             col_T = i
-            push!(I, row_T);
-            push!(J, col_T);
+            push!(I, row_T)
+            push!(J, col_T)
             push!(V, 1.0)
             for l = 1:NC
                 col_ξ = n + (l - 1) * n + i
-                push!(I, row_T);
-                push!(J, col_ξ);
+                push!(I, row_T)
+                push!(J, col_ξ)
                 push!(V, 1.0)
             end
             for j = 1:NC
                 row_ξ = n + (j - 1) * n + i
-                push!(I, row_ξ);
-                push!(J, col_T);
+                push!(I, row_ξ)
+                push!(J, col_T)
                 push!(V, 1.0)
                 for l = 1:NC
                     col_ξ = n + (l - 1) * n + i
-                    push!(I, row_ξ);
-                    push!(J, col_ξ);
+                    push!(I, row_ξ)
+                    push!(J, col_ξ)
                     push!(V, 1.0)
                 end
             end
@@ -228,7 +228,7 @@ end
         ws_ad = build_reaction_source_workspace(material)
         ctx = build_residual_context([op])
 
-        contribute_to_jacobian!(jac, op, u, ctx, 0.0, ws_ad, material, ws.layout)
+        contribute_to_jacobian!(jac, op, u, ctx, 0.0, ws_ad, material, ws.layout, ws.mesh)
 
         # Compare against the DenseAD reference.
         J_ref = _reference_dense_jacobian(u, ws.layout, material)

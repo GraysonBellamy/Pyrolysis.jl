@@ -504,20 +504,18 @@ an otherwise-good production run. This lets a long calibration sweep be run with
 verification armed at negligible extra cost — the reference Jacobian is built
 only at the sample times.
 
-### 18.3.5 The depletion ↔ pluggable-Jacobian incompatibility
+### 18.3.5 Parked states
 
-There is one combination the verifier cannot cover. Surface-cell depletion (§14.3,
-the production AMR path) resizes the state vector mid-solve via
-`resize!(integrator, new_length)`, but the pluggable `JacobianSpec` cache is
-immutable and sized at problem setup. The two are therefore mutually exclusive:
-`solve` raises an error if `jacobian !== nothing && handle_depletion == true`
-(`src/Solver/solve.jl`). When `handle_depletion=true`, the solver falls back to
-the integrator's own colored finite-difference Jacobian, which adapts to the
-resize automatically but is *not* verifiable against the structured backend
-(there is no structured Jacobian to verify). Runs that need both an audited
-Jacobian and depletion must instead use a fixed mesh with a thickness-termination
-callback, or accept the colored-FD Jacobian. This is a known limitation
-(§18.8.3).
+Depletion handling (§14.3) parks cells without changing the state size, so the
+structured Jacobian is the one the integrator uses through burnout and the
+verifier covers it: `test/jacobian/test_park_jacobian.jl` builds the specs on
+the fresh problem, parks surface, interior and bottom cells in every mode
+(Eulerian, ALE, Darcy, Beer–Lambert, variable cross-section), and checks
+`Structured(strategy = DirectSolve())` strictly against the dense reference, the
+zero ghost rows, the ghost node rows equal to the surface node row, and the
+live block of the parked Jacobian against the compacted problem's — for
+`ApproxSolve` too, since that strategy drops couplings by design and is not
+compared against the dense reference on a reacting state.
 
 ---
 
@@ -1002,15 +1000,13 @@ energy update is correct; the bookkeeping formula used to *check* it is
 incomplete. Until it is extended, a non-zero discrete residual during active
 reaction should be interpreted against this known offset, not as a bug.
 
-### 18.8.3 Depletion incompatibilities
+### 18.8.3 Sensitivities across park events
 
-Surface-cell depletion is incompatible with (i) the pluggable structured Jacobian
-(state-vector resize versus immutable cache, §18.3.5 — falls back to colored FD,
-which is unverifiable) and (ii) clean sensitivity analysis (the merge is a
-non-differentiable discrete event, §17.7). Runs that need an audited Jacobian or
-smooth sensitivities must avoid depletion (fixed mesh + thickness termination)
-or accept the limitations. Making the merge compatible with both is open work
-(§15, §17 open issues).
+Depletion handling is a sequence of discrete state rewrites (§14.3.4, §17.7).
+The Jacobian and the verifier run through them (§18.3.5), but smooth
+sensitivity analysis does not: forward sensitivities are valid only between
+park events and adjoint sensitivity through an event is unsupported. Runs that
+need smooth sensitivities must stay on horizons without park events.
 
 ### 18.8.4 No automatic gas-storage switching at high pressure
 
@@ -1097,8 +1093,9 @@ machinery of this chapter has direct test coverage:
 Reproducible numbers require a pinned `Manifest.toml` (the integrator,
 linear-solver, and AD package versions all affect the last digits) and a fixed
 choice of integrator, tolerances, Jacobian backend, and linear solver. The
-defaults — `KenCarp4` with `AutoFiniteDiff`, `SparspakFactorization`,
-`abstol=1e-8`/`reltol=1e-6`, `Structured(DirectSolve())` — are the reference
+defaults — `KenCarp4` with `AutoFiniteDiff`, the pattern-chosen factorization
+(`KLUFactorization` or `UMFPACKFactorization`), `abstol=1e-8`/`reltol=1e-6`,
+`Structured(DirectSolve())` (`ApproxSolve` under ALE) — are the reference
 configuration; deviations (e.g. `ApproxSolve` for speed, ILU-GMRES for large ALE)
 trade a controlled amount of accuracy for performance and should be re-checked
 against the reference configuration with `verify_jacobian` armed and the

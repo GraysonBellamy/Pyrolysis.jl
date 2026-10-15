@@ -32,6 +32,29 @@ include(joinpath(@__DIR__, "..", "helpers.jl"))
         @test !(chi_mode(def.mode) isa WithChi)
     end
 
+    # Only the ALE residual evolves χ and the cross-section, so a lateral
+    # shrinkage law on the fixed mesh is rejected wherever the mode is built.
+    @testset "Lateral Law Needs ALE" begin
+        problem = fixture_problem(n_cells = 5, lateral = true)
+        message(f) =
+            try
+                f()
+                ""
+            catch err
+                err isa ArgumentError ? err.msg : "unexpected $(typeof(err))"
+            end
+        for f in (
+            () -> initialize_state(problem; use_ale = false),
+            () -> solve(problem; progress = false),
+            () -> solve(problem; progress = false, validate = false),
+        )
+            msg = message(f)
+            @test occursin("lateral_shrinkage_law", msg)
+            @test occursin("use_ale = true", msg)
+        end
+        @test chi_mode(initialize_state(problem; use_ale = true)[1].mode) isa WithChi
+    end
+
     @testset "Variable Cross Section Solve" begin
         problem = fixture_problem(n_cells = 5, lateral = true, tspan = (0.0, 0.02))
         sol = solve(

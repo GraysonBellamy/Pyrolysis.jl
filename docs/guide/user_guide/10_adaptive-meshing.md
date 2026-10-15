@@ -44,101 +44,117 @@ cone-calorimeter and TGA studies never need them.
 
 ---
 
-## 10.2 Surface-cell depletion handling (the production path)
+## 10.2 Depletion handling: parked cells (the production path)
 
-When a charring solid pyrolyzes under ALE mesh motion (`use_ale = true`), the
-exposed surface cell loses mass and its node moves downward. Eventually that cell
-becomes so thin that its discrete heat capacity collapses and the integrator is
-forced into vanishingly small steps. **Depletion handling** detects such thin
-cells and *merges* them into a neighbor, removing the singularity while
-conserving mass and energy.
+When a solid pyrolyzes away, the cells that held it shrink (ALE mesh motion,
+`use_ale = true`) or empty (fixed mesh). Either way the integrator ends up
+with cells it cannot resolve: a thin cell's equations are conditioned like
+`1/Δz²`, so the Newton iteration loses every digit and the step size collapses.
+**Depletion handling** detects such cells and *parks* them: the cell's mass and
+condensed enthalpy are merged into a neighbour, and its state slot is moved
+above the live surface as an inert ghost. Nothing changes size — the state
+vector, the mesh arrays and the Jacobian keep their allocation for the whole
+solve — and every kernel runs over the live cells `1:mesh.n_active_cells` with
+the boundary conditions applied at the live surface.
 
 ### 10.2.1 Turning it on through `solve`
 
-This is the recommended way to use depletion handling — you do not build the
-callback yourself. Pass `handle_depletion = true` (which **requires**
-`use_ale = true`) to `solve`:
+Pass `handle_depletion = true` to `solve`, in either mesh mode:
 
 ```julia
 using Pyrolysis
 
 sol = solve(problem;
     use_ale             = true,    # node positions become state; mesh can shrink
-    handle_depletion    = true,    # merge thin surface cells instead of stalling
-    depletion_threshold = 0.05,    # merge a cell once it drops below 5% of its
+    handle_depletion    = true,    # park depleted cells instead of stalling
+    depletion_threshold = 0.05,    # park a cell once it drops below 5% of its
                                    #   initial thickness (default; must be in (0,1))
-    min_cells           = 2,       # never merge below this many cells; terminate instead
-    min_thickness       = 1e-6,    # [m] terminate when total thickness < this (default)
+    min_cells           = 2,       # never park below this many live cells; terminate instead
+    min_thickness       = 1e-6,    # [m] terminate when the live thickness < this (default)
     radiation_model     = SURFACE_ABSORPTION,
 )
 ```
 
-Defaults and meaning of each depletion-related keyword (verified against
-`solve(...)` in `src/Solver/solve.jl`):
-
 | Keyword | Default | Meaning |
 |---|---|---|
-| `use_ale` | `false` | Enable ALE mesh motion (node positions enter the state vector). Prerequisite for depletion. |
-| `handle_depletion` | `false` | Detect thin cells and merge them mid-solve. |
-| `depletion_threshold` | `0.05` | Cell is "thin" when current thickness `< threshold ×` its own initial thickness (per-cell reference). Must satisfy `0 < threshold < 1`. |
-| `min_cells` | `2` | Once the active cell count reaches this, the run terminates rather than merging further. Must be `≥ 1`. |
-| `min_thickness` | `1e-6` | [m] Total-sample thickness below which the integrator terminates (separate from per-cell merging). Must be `> 0`. |
+| `use_ale` | `false` | Enable ALE mesh motion (node positions enter the state vector). |
+| `handle_depletion` | `false` | Park depleted cells mid-solve. |
+| `depletion_threshold` | `0.05` | ALE: a cell is depleted when its thickness `< threshold ×` its own initial thickness. Fixed mesh: the top live cell is depleted when its condensed concentration `< threshold ×` its initial value. Must satisfy `0 < threshold < 1`. |
 
-Each callback invocation performs **at most one merge** so the integrator can
-re-adapt its step between topology changes; thin cells are processed
-surface-first (highest `z` first). The merge is **energy-conserving** — see
-§10.2.3.
+| `min_cells` | `2` | Once the live cell count reaches this, the run terminates rather than parking further. Must be `≥ 1`. |
+| `min_thickness` | `1e-6` | [m] Live thickness below which an ALE solve terminates. Must be `> 0`. |
+
+Leave `depletion_threshold` at its default unless a case shows otherwise. A
+larger value merges the hottest cell into a colder one earlier and disturbs the
+surface temperature; on a fast ablation front it does not remove the Newton
+failures either (Technical Reference §14.3.2).
+
+Choose the mesh mode by the material, not by cost. A fixed mesh keeps every
+cell's volume, so a gasifying layer thins in *density*, and only the top live
+cell can park. The layer burns top down when the surface cell is the hottest,
+as under surface absorption. Under in-depth absorption the surface cell of a
+regressing polymer is the coldest: it stays in place as a porous skin while the
+cells beneath it empty, and the model carries no heat across the void they
+leave. A fixed-mesh solve therefore stops at the first cell below the surface
+that becomes a void (matrix volume fraction below 10⁻⁴), warns that the
+material has gasified from within, and returns retcode `:Terminated`
+(Technical Reference §14.3.2). A fixed mesh with depletion suits a char that
+keeps its volume and a layer that burns top down; use `use_ale = true` for
+materials that regress.
+
+Each callback invocation parks **at most one cell** so the integrator can
+re-adapt its step between events; candidates are processed surface-first.
+After a park the integrator restarts from a step of `DT_AFTER_PARK`
+(10⁻⁶ s): the merged cell is off the quasi-steady profiles of its neighbours
+and the pre-park step would fail its Newton repeatedly. The step-size
+controller grows the step back within a few steps, so a park costs a handful
+of extra steps and no failures; expect the step history to show a spike to
+10⁻⁶ s at every entry of `sol.extras.park_times`.
 
 ### 10.2.2 What `solve` wires up under the hood
 
-When `use_ale = true && handle_depletion = true`, `solve` assembles a
-`CallbackSet` containing (among others):
+With `handle_depletion = true`, `solve` assembles a `CallbackSet` containing
+(among others):
 
 1. a **step-update callback** that mirrors the integrator's accepted state back
    into the mutable mesh (so subsequent callbacks see current geometry);
-2. a **thickness-termination callback** (§10.3);
-3. a **depletion callback** that finds thin cells, merges one, resizes the
-   workspace caches, and calls `resize!(integrator, …)` to shrink the ODE state.
+2. a **thickness-termination callback** (ALE, §10.3) on the live thickness;
+3. a **depletion callback** that finds the next depleted cell and parks it.
 
-You can build these manually if you are driving the integrator yourself, but for
-ordinary use the `solve` keywords above are all you need. The public constructors
-(all exported by `using Pyrolysis`) are:
+You can build these yourself if you are driving the integrator directly:
 
 ```julia
-# Build depletion callback state (tracks layout + per-cell initial thicknesses + merge log)
-cb_state = DepletionCallbackState(layout, mesh)         # convenience: thicknesses from mesh
-# or  DepletionCallbackState(layout, initial_cell_thickness::Vector{Float64})  # one entry per cell
+using Pyrolysis.Solver: DepletionCallbackState, create_depletion_callback,
+                        create_thickness_termination_callback
 
-# Build the depletion callback itself
-dep_cb = create_depletion_callback(ws, mesh, material, cb_state;
+# Shared bookkeeping: live count, per-slot depletion reference, park log
+cb_state = DepletionCallbackState(layout, mesh, material, u0)
+
+dep_cb  = create_depletion_callback(ws, mesh, material, cb_state;
     threshold = 0.05,   # same meaning as depletion_threshold above
     min_cells = 2)
 
-# Termination when the whole sample gets too thin
-term_cb = create_thickness_termination_callback(cb_state, 1e-6)  # min_thickness [m]
+term_cb = create_thickness_termination_callback(cb_state, 1e-6)  # live thickness [m]
 ```
 
-`create_depletion_callback` accepts either a bare `StateLayout` or a
-`DepletionCallbackState` as its fourth argument; passing the shared
-`DepletionCallbackState` lets the termination callback see the resized layout
-after each merge. The `material` argument is what makes the temperature merge
-energy-conserving (omit it and the merge falls back to a volume-weighted
-average — see §10.2.3).
-
-### 10.2.3 The merge is mass- and energy-conserving
+### 10.2.3 The park conserves mass and energy
 
 Concentrations are merged volume-weighted (exactly mass-conserving):
 
 ```
-ξ_merged[j] = (V_remove · ξ_remove[j] + V_keep · ξ_keep[j]) / (V_remove + V_keep)
+ξ_keep[j] = (V_park · ξ_park[j] + V_keep · ξ_keep[j]) / V_keep′
 ```
+
+with `V_keep′ = V_park + V_keep` under ALE (the keeper spans both cells) and
+`V_keep′ = V_keep` on a fixed mesh (the keeper's volume is fixed, so its
+concentration rises by the parked mass).
 
 Temperature is merged by **conserving the condensed-phase sensible enthalpy**,
 not by naive volume averaging. With `m_j = V · ξ_j` the per-component condensed
 mass of each cell, the merged temperature solves
 
 ```
-Σ_{j ∉ gas} m_j ∫_{T_ref}^{T_merged} c_p,j(T′) dT′  =  H_remove + H_keep
+Σ_{j ∉ gas} m_j ∫_{T_ref}^{T_merged} c_p,j(T′) dT′  =  H_park + H_keep
 ```
 
 (a bracketed Newton solve — the root always lies between the two cell
@@ -148,64 +164,43 @@ thermal energy in the condensed matrix only. For constant `c_p` this reduces to
 the familiar `ρc_p`-weighted mean.
 
 This matters precisely in the depletion regime: merging a nearly-depleted
-(low-`ρc_p`) surface cell with a dense interior cell can introduce a 10–20 %
+(low-`ρc_p`) cell with a dense interior cell can introduce a 10–20 %
 temperature error if you average naively (e.g. ~120 K error when merging a 1 m³
 solid at 800 K with a 1 m³ gas-filled cell at 400 K). The dry-solid mass used as
 the pyrolysis-progress denominator (`m_dry_solid_initial`) is summed across the
-merged cells, so progress accounting stays consistent. See Technical Reference
-§14.3 for the derivation and §10 for the χ progress variable.
+merged cells and the merged `χ` is weighted by it, so progress accounting stays
+consistent. See Technical Reference §14.3 for the derivation and §10 for the χ
+progress variable.
 
-The merge prefers the **interior** neighbor (toward the substrate) for thermal
+The park prefers the **interior** neighbour (toward the substrate) for thermal
 stability; this is `find_merge_neighbor` from `Pyrolysis.Adaptivity`, used
 internally by the callback.
 
 ### 10.2.4 Inspecting what happened
 
-After a solve that used depletion handling, query the merge history with the
-exported helper (note the slightly fragile internals — it returns sentinel
-values rather than throwing if it cannot reach the callback state):
+Ghost slots read as `NaN` in `sol.T`, `sol.ξ` and (ALE) `sol.z`;
+`sol.extras.thickness_history` is the live thickness;
+`sol.extras.live_cells[k]` is the number of live cells at output time `k`, and
+`sol.extras.park_times` lists the event times:
 
 ```julia
-stats = get_depletion_callback_stats(dep_cb)
-# NamedTuple:
-#   stats.n_merges     :: Int               number of cell merges performed
-#   stats.merge_times  :: Vector{Float64}   simulation times [s] of each merge
-#   stats.merged_cells :: Vector{Int}       original indices of merged cells
+n_parks = length(sol.extras.park_times)
+sol.extras.live_cells[end]          # live cells at the end of the run
 ```
 
-In ALE mode the solution arrays carry their own evidence of merges: the cell
-count shrinks over time and removed-cell entries are NaN-padded in
-`sol.T`, `sol.ξ`, and `sol.z` (see Chapter 9). `sol.extras.thickness_history`
-records total sample thickness per output time.
+### 10.2.5 Depletion and the Jacobian
 
-### 10.2.5 Critical caveat: depletion is incompatible with a pluggable Jacobian
+Parking keeps the state size, so the pluggable Jacobian backends and their
+sparse linear solvers run unchanged through burnout; `verify_jacobian` covers
+parked states. Under ALE the default backend is
+`Structured(strategy = ApproxSolve())`, with or without parking: the full ALE
+pattern couples every node to every cell below it and makes the factorized
+matrix effectively dense, while the couplings the reduced pattern drops do not
+change the trajectory. Pass `jacobian = Structured(strategy = DirectSolve())`
+to keep the exact assembly.
 
-Depletion resizes the ODE state vector mid-solve via `resize!(integrator, …)`.
-The structured/dense Jacobian backends carry an **immutable cache built once at
-problem setup** that cannot survive a resize. Consequently:
-
-- Passing **both** `jacobian = …` and `handle_depletion = true` to `solve`
-  raises an error at validation time.
-- With `handle_depletion = true` and the default `jacobian = nothing`, `solve`
-  supplies **no** analytic Jacobian: the integrator falls back to its own
-  **colored finite-difference** Jacobian. Because that dense FD Jacobian is
-  incompatible with the sparse default linear solver, `solve` also switches the
-  linear solver to a dense `LUFactorization`.
-
-In short: **you cannot combine depletion handling with `Structured(...)` /
-`DenseAD_ForwardDiff()` backends.** If you need the structured backend (e.g. for
-a large ALE problem), run without depletion and rely on thickness termination
-instead, or accept the FD fallback. See §10.8 and Technical Reference §14.7 and
-§15.13.
-
-> **MKL note.** The dense `LUFactorization` that `solve` selects under depletion
-> is Julia's native LU and survives `resize!`. Do not pass a sparse
-> factorization (`SparspakFactorization()`, KLU) together with depletion — there
-> is no sparse Jacobian prototype in this mode, and `solve` will warn and swap
-> it for dense LU. The MKL `ipiv` resize bug can only bite if you construct your
-> own `integrator` without an explicit `linsolve`; the solver warns if it
-> detects that combination on a large problem. See Chapter 11 and
-> Technical Reference §15.12.
+A park is a discrete rewrite of the state: parameter sensitivities are valid on
+horizons without park events only (Chapter 13).
 
 ---
 
@@ -222,17 +217,17 @@ sol = solve(problem; use_ale = true, min_thickness = 1e-5)  # terminate at 10 µ
 @show sol.retcode    # :Terminated  (vs :Success when the full tspan is reached)
 ```
 
-The callback measures `thickness = z[end] - z[1]` from the node-position block of
-the state vector, so it is meaningful only in ALE mode (`use_ale = true`); in
-Eulerian mode the mesh does not move and the callback is not installed. To build
-it directly:
+The callback measures the live thickness `z[n_live+1] - z[1]` from the
+node-position block of the state vector, so it is meaningful only in ALE mode
+(`use_ale = true`); in Eulerian mode the mesh does not move and the callback is
+not installed. To build it directly:
 
 ```julia
 term_cb = create_thickness_termination_callback(layout, Float64(min_thickness))
 ```
 
 Pass a `DepletionCallbackState` instead of a bare `layout` when you also use
-depletion handling, so the callback tracks the resized layout after each merge.
+depletion handling, so the callback reads the live cell count.
 
 ---
 
@@ -456,9 +451,8 @@ The full experimental surface (all under `Pyrolysis.Experimental`) includes
 **Caveats — read before using:**
 
 - **Not in the solve loop.** There is no `solve` keyword to enable h-AMR during
-  integration. Calling these between solve segments is the only supported pattern,
-  and even then the state-vector resize logic that depletion handling uses is not
-  shared here.
+  integration. Calling these between solve segments is the only supported
+  pattern.
 - **Bookkeeping is leaky.** h-refinement appends children and h-coarsening marks
   cells inactive *without compacting the arrays*, so `length(mesh.cells) >
   n_active_cells` is normal. Any code consuming the mesh afterward must iterate
@@ -476,51 +470,36 @@ The full experimental surface (all under `Pyrolysis.Experimental`) includes
   on realistic pyrolysis fronts.
 
 For production surface-recession work, prefer the depletion path (§10.2), which
-*is* integrated with the solver and uses the energy-conserving adjacent-cell
-merge (`merge_adjacent_cells!`, `merge_surface_cell!`) that lives in core
-`Adaptivity`. See Technical Reference §14.4 for the h-AMR algorithms and §14.3
-for the production merge.
+*is* integrated with the solver and parks depleted cells with the
+energy-conserving merge (`park_cell!`) that lives in core `Adaptivity`. See
+Technical Reference §14.4 for the h-AMR algorithms and §14.3 for the production
+park.
 
 ---
 
 ## 10.8 Choosing the Jacobian when you use adaptivity
 
-The single most common configuration mistake with adaptivity is combining
-depletion handling with an explicit Jacobian backend. The rule:
+Depletion handling keeps the state size, so every Jacobian backend works with
+it. The defaults:
 
-| Scenario | Jacobian to use |
+| Scenario | Default Jacobian |
 |---|---|
-| ALE, **no** depletion handling | Default `jacobian = nothing` ⇒ `Structured(strategy = DirectSolve())`; or opt into `ApproxSolve` for large ALE problems (Chapter 11). |
-| ALE **with** `handle_depletion = true` | **Leave `jacobian = nothing`.** `solve` supplies no analytic Jacobian and the integrator uses colored FD with a dense `LUFactorization`. Do **not** pass a `JacobianSpec` — it errors. |
-| Verifying a backend during an adaptive run | `solve(...; verify_jacobian = (rtol=1e-6, atol=1e-10, sample_times=[…]))` — but only meaningful when a backend is active (i.e. not with depletion). |
+| ALE, with or without `handle_depletion` | `Structured(strategy = ApproxSolve())` — the reduced ALE pattern; it follows the same trajectory as `DirectSolve` at a fraction of the cost per step. Without parking, surface cells that burn away shrink toward zero thickness and stall either Jacobian alike: use `handle_depletion = true` to run through burnout. |
+| Fixed mesh | `Structured(strategy = DirectSolve())` (the strategies coincide without ALE couplings). |
+| Verifying a backend during an adaptive run | `solve(...; verify_jacobian = (rtol=1e-6, atol=1e-10, sample_times=[…]))`, with or without depletion. |
 
-Concretely, this is correct:
+Override with a bare backend, built for the solve's own mode:
 
 ```julia
-# Large ALE problem WITHOUT depletion — opt into the cheaper approximate solve
 sol = solve(problem;
     use_ale = true,
-    jacobian = JacobianSpec(Structured(strategy = ApproxSolve()), problem),
-)
-```
-
-and this **errors** at validation:
-
-```julia
-# WRONG: pluggable Jacobian + depletion are mutually exclusive
-solve(problem;
-    use_ale = true,
     handle_depletion = true,
-    jacobian = JacobianSpec(Structured(strategy = DirectSolve()), problem),  # ← rejected
+    jacobian = Structured(strategy = DirectSolve()),   # exact assembly through burnout
 )
 ```
 
-If you need both the analytic structured Jacobian *and* surface recession, the
-practical recourse is to forgo per-cell merging and rely on the
-thickness-termination callback alone (run until the sample is "thin enough,"
-then stop), keeping the state-vector length fixed so the structured backend's
-cache stays valid. See Chapter 11 for the full Jacobian/linear-solver decision
-guide and Technical Reference §15.10–§15.13 for the strategy internals.
+See Chapter 11 for the full Jacobian/linear-solver decision guide and Technical
+Reference §15.6–§15.10 for the strategy internals.
 
 ---
 
@@ -544,10 +523,10 @@ guide and Technical Reference §15.10–§15.13 for the strategy internals.
 | `enforce_quality!(; max_iter)` | `Adaptivity` | `10` | 10.6 |
 | h-AMR (`refine_cell!`, `AMRController`, …) | `Experimental` (not re-exported) | — experimental | 10.7 |
 
-**Key correctness reminders.** Depletion handling requires `use_ale = true`; it
-cannot be combined with a pluggable `jacobian` backend (it falls back to colored
-FD with dense LU); the surface merge conserves species mass exactly and condensed-phase sensible
-enthalpy via the `∫c_p dT` temperature merge (gas excluded); r-refinement,
+**Key correctness reminders.** Depletion handling works in both mesh modes
+and with every `jacobian` backend; the park conserves species mass exactly and
+condensed-phase sensible enthalpy via the `∫c_p dT` temperature merge (gas
+excluded); r-refinement,
 quality enforcement, and h-AMR
 are standalone tools not driven by `solve`; and the h-AMR cluster is experimental
 and reached only through `Pyrolysis.Experimental`. For the physics behind these

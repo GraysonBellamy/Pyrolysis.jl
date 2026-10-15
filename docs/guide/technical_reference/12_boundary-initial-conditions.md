@@ -201,13 +201,15 @@ f'(T_s) = \frac{dq_{\text{BC}}}{dT_s} - \frac{k_{\text{eff}}}{\Delta z_{1/2}}
 $$
 
 with under-relaxation $\omega=1$ by default (`boundary_temperature.jl:168–205`).
-The initial guess is a **warm start** from the previously solved surface
-temperature ($T_s^{(0)} = $ `state.T_surface`, the persistent per-boundary
-`BoundaryState`; the very first call starts from the 300 K mesh-construction
-seed) — on smooth time-stepping this saves Newton iterations relative to
-restarting from $T_{\text{cell}}$. (The non-mutating convenience wrapper
-`solve_boundary_temperature` accepts a `T_guess` keyword defaulting to
-$T_{\text{cell}}$.) The conduction derivative
+The initial guess is the adjacent cell temperature clamped to the property
+bracket, $T_s^{(0)} = \min\bigl(\max(T_{\text{cell}}, 200\ \text{K}),
+3000\ \text{K}\bigr)$, so the solve is a pure function of its arguments. The
+per-boundary `BoundaryState` receives the converged $T_s$ and fluxes for
+diagnostics and is never read back; a non-finite final iterate is not stored.
+A residual evaluation therefore never depends on the ones before it: a trial
+state of a diverging outer Newton, with a cell temperature far outside the
+bracket, fails that trial and leaves every later evaluation untouched. The
+conduction derivative
 $dq_{\text{cond}}/dT_s = k_{\text{eff}}/\Delta z_{1/2}$ is exact and always
 present; the BC derivatives are given per-type in §12.2.4.
 
@@ -270,7 +272,9 @@ radiation_model)`, which returns $(q_{\text{BC}}, dq_{\text{BC}}/dT_s)$ for each
 concrete thermal BC. The exact pairs (verified against
 `boundary_temperature.jl:307–429`) are collected below; the
 $\varepsilon_{\text{eff}}$ argument is the composition-weighted effective surface
-emissivity from the property cache (§12.2.6).
+emissivity from the property cache and the keyword `a_eff` (default
+$\varepsilon_{\text{eff}}$) the effective surface absorptivity for incident
+radiation (§12.2.6).
 
 | BC | $q_{\text{BC}}(T_s)$ | $dq_{\text{BC}}/dT_s$ |
 |---|---|---|
@@ -332,26 +336,44 @@ boundary faces** in `compute_conductive_fluxes!` before BC application, so the
 overwrite here is the sole source of the boundary face flux; there is no
 double-counting.
 
-### 12.2.6 Effective surface emissivity (composition-weighted, Kirchhoff)
+### 12.2.6 Effective surface emissivity and absorptivity (composition-weighted)
 
-When a `RadiativeBC` or `RadiativeFluxBC` is constructed with
-$\varepsilon=\texttt{nothing}$ (resp. $\alpha=\texttt{nothing}$), the surface
-radiative property is taken from the boundary cell's effective emissivity
+When a `RadiativeBC` is constructed with $\varepsilon=\texttt{nothing}$, the
+re-radiation uses the boundary cell's effective emissivity
 $\varepsilon_{\text{eff}}$, computed in the property cache as the volume-weighted
-mean over the solid/liquid components,
+mean over the solid/liquid components with each component emissivity evaluated
+at the cell temperature,
 
 $$
-\varepsilon_{\text{eff}} = \sum_j v_j\,\varepsilon_j,
+\varepsilon_{\text{eff}} = \sum_j v_j\,\varepsilon_j(T_{\text{cell}}),
 $$
 
-clamped to $[0,1]$ (see §5.8). Two physical principles are encoded here. First,
-**Kirchhoff's law** $\alpha=\varepsilon$ at thermal equilibrium lets the same
-quantity serve as both emissivity (re-radiation) and absorptivity (absorbed
-incident flux). Second, surface emissivity is a *geometric* property of the
-exposed mixture, so a volume-weighted (not mass-weighted) average is appropriate
-and it **automatically tracks composition changes** during pyrolysis (e.g.
-polymer $\to$ char as $v_j$ shifts). The boundary solver reads this as
-`cache.ε[cell_id]` (`boundary_temperature.jl`).
+clamped to $[0,1]$ (see §5.8.1). When a `RadiativeFluxBC` is constructed with
+$\alpha=\texttt{nothing}$, the absorbed incident flux uses the boundary cell's
+effective surface absorptivity
+
+$$
+a_{\text{eff}} = \sum_j v_j\,a_j,\qquad
+a_j = \texttt{surface\_absorptivity}_j \text{ if set, else } \varepsilon_j(T_{\text{cell}}),
+$$
+
+(§5.8.2). Two physical principles are encoded here. First, **Kirchhoff's law**
+$\alpha=\varepsilon$ at thermal equilibrium is the default: with no component
+absorptivity set, $a_{\text{eff}}\equiv\varepsilon_{\text{eff}}$ and the same
+quantity serves as both emissivity (re-radiation) and absorptivity (absorbed
+incident flux). A component-level `absorptivity` relaxes this where the heater
+spectrum differs from the surface's own emission spectrum, keeping the two
+mixtures on the same volume weights. Second, surface emissivity is a
+*geometric* property of the exposed mixture, so a volume-weighted (not
+mass-weighted) average is appropriate and it **automatically tracks composition
+changes** during pyrolysis (e.g. polymer $\to$ char as $v_j$ shifts). The
+boundary solver reads these as `cache.ε[cell_id]` and `cache.a[cell_id]` and
+threads them into `solve_boundary_temperature!` as the positional
+$\varepsilon_{\text{eff}}$ and the keyword `a_eff` (`boundary_temperature.jl`);
+the Jacobian operators recompute both on the Dual-seeded $(T,\xi)$, so
+$\partial\varepsilon_{\text{eff}}/\partial T_{\text{cell}}$ and
+$\partial a_{\text{eff}}/\partial T_{\text{cell}}$ from a temperature-dependent
+component emissivity enter the surface energy row exactly.
 
 ### 12.2.7 `BoundaryState` storage
 
@@ -420,52 +442,116 @@ $-h_{\text{conv}}$, the contribution to the Newton residual is linear and exactl
 resolved in a single step. (`boundary_fluxes.jl:50–54`,
 `boundary_temperature.jl:340–352`.)
 
-**Blowing (transpiration) correction — opt-in.** With
-`use_blowing_correction = true` (a `solve`/`to_problem_def` switch, default
-off) every `ConvectiveBC` in the surface balance is rescaled by the classical
-Couette-film (Spalding) factor
+**Blowing.** Every `ConvectiveBC` carries a blowing model (`bc.blowing`, an
+`AbstractBlowingModel`, default `NoBlowing()`), and the surface balance applies
+it at every Newton iterate to the face state: the **signed outward** gas mass
+flux of every component, read from the same `J_gas[:, f]` the mass-flux pass
+populates (film-law diffusion plus, in Darcy–Fick mode, the pressure-BC venting
+flux), the surface-temperature iterate and the material (`BlowingFace`,
+`Discretization/blowing.jl`). The convective flux is $h\,\chi\,(T_\infty - T_s)$
+with $\chi = h_{\text{eff}}/h$ from the model (`blowing_state`). This is the
+**momentum-side companion** of the transpiration enthalpy term: it modifies
+only the convective *coefficient*, not the gas enthalpy accounting, so it
+composes exactly with the $S_{\text{conv}}$-only convention (§7.6) — no
+double-count is possible. Zero outflow gives $\chi = 1$ exactly for every
+shipped model, so the back face is unaffected automatically.
+
+*Film law with a fitted constant* (`CouetteFilm(λ)`):
 
 $$
-h \;\to\; h\,\frac{B}{e^{B}-1},
+\chi \;=\; \frac{\phi}{e^{\phi}-1},
 \qquad
-B \;=\; \frac{\dot m''\,c_{p,g}}{h},
+\phi \;=\; \frac{2\lambda\,\dot m''\,c_{p,g}}{h},
 \qquad
-\dot m''\,c_{p,g} \;=\; \sum_{g}\dot m_g\,c_{p,g}(T_s),
+\dot m''\,c_{p,g} \;=\; \sum_{g}\dot m_g\,c_{p,g}(T_s).
 $$
 
-where $\dot m_g$ is the **signed outward** gas mass flux at the boundary face,
-read from the same `J_gas[:, f]` the mass-flux pass populates (film-law
-diffusion plus, in Darcy–Fick mode, the pressure-BC venting flux). This is the
-**momentum-side companion** of the transpiration enthalpy term: the gas efflux
-thickens the boundary layer and suppresses convective heat exchange. Unlike
-the (rejected) surface transpiration term it modifies only the convective
-*coefficient*, not the gas enthalpy accounting, so it composes exactly with the
-$S_{\text{conv}}$-only convention (§7.6) — no double-count is possible. Limits:
+$\lambda = 1/2$ is the classical Couette-film (Spalding) factor, $\phi = B =
+\dot m'' c_{p,g}/h$; a smaller $\lambda$ fitted to a resolved flow weakens the
+reduction at a given outflow and holds for that gas only. Limits in $B$:
 $B = 0$ recovers the bare $h$ exactly; $B = 4$ (peak-PMMA outgassing against
-canonical cone $h$) gives $h_{\text{eff}}/h = 0.075$, i.e. convective cooling
-essentially extinguished; $B < 0$ (net inflow) is the smooth suction
-enhancement. The factor is evaluated by the numerically stable
-`blowing_factor` (Taylor branch at $|B|<10^{-5}$, overflow-safe
-$B\,e^{-B}/(1-e^{-B})$ form for large $B$), and the blowing conductance is
-rebuilt at every Newton iterate with $c_{p,g}(T_s)$. The Newton derivative
-uses the frozen-$B$ form $-h\,f(B)$ — first-order consistent, the same
-convention as the transpiration derivative (§12.9), so convergence is
-marginally sub-quadratic and the converged root is exact. Each convective
-member of a `CombinedThermalBC` forms its own $B$ against its own $h$; all
-other BC types are untouched, and the back face is unaffected automatically
-($\dot m''\approx 0$ there). The converged conductance is stored as
-`BoundaryState.blowing_mcp` and consumed by the flux-decomposition
-diagnostics. The structured Jacobian's `BCThermalOperator` and
-`BCConvectionOperator` rebuild $\dot m''$ from the stencil state via the
-shared boundary-face kernel, so the $\partial(h\chi)/\partial(T_b,\xi_b)$
-chain is exact (support-complete strict verification passes with blowing
-enabled in Fickian, Darcy–Fick, and ALE modes). Enabling blowing **alone** on
-a case calibrated without it will raise $T_s$ and MLR; introduce it together
-with flame heat-flux feedback before any recalibration pass (the two
-partially cancel — see the physics roadmap,
-`docs/Physics_Audit_2026-06-09.md`). (`boundary_temperature.jl`
-`blowing_factor`/`_blowing_conductance`, `adapter.jl`
-`use_blowing_correction`.)
+canonical cone $h$) gives $h_{\text{eff}}/h = 0.075$; $B < 0$ (net inflow) is
+the smooth suction enhancement.
+
+*Property-ratio film for any light gas* (`PropertyRatioFilm(free_stream; n_Γ)`),
+anchored on the Couette film of the free stream:
+
+$$
+\phi \;=\; \frac{\dot m''\,c_{p,\infty}(T_s)}{h}\left(\frac{\Gamma_\infty}{\Gamma_g}\right)^{n_\Gamma},
+\qquad \Gamma = \frac{k}{c_p},
+$$
+
+with $\Gamma_\infty$ of the free stream and $\Gamma_g$ of the mixture leaving the
+face (heat capacity weighted by mass fraction, conductivity by Wilke's rule
+over the components with outward flux, each species' viscosity from Eucken's
+relation when the component carries none). $n_\Gamma = 0.6$ is Kays's turbulent
+exponent on the heat-capacity ratio, reproduced by the chamber CFD; with
+$n_\Gamma = 0$ this is the Couette film in the free-stream heat capacity. Under
+net inflow the arriving gas is the free stream and the ratio is 1.
+
+*Pooling* (`PoolingFilm(free_stream; n_Γ, n_D, ψ0, Λc, Λw)`): the same
+$\phi$ with a pooling factor $\psi$, the share of the no-outflow exchange the
+face keeps,
+
+$$
+\chi \;=\; \frac{\phi}{e^{\phi/\psi}-1} \;=\; \psi\,f(\phi/\psi),
+\qquad
+\psi \;=\; \psi_0 + \frac{1-\psi_0}{1+\exp[-(\Lambda-\Lambda_c)/\Lambda_w]},
+\qquad
+\Lambda \;=\; \frac{1-(M_{\text{face}}/T_s)(T_\infty/M_\infty)}{1-T_\infty/T_s},
+$$
+
+where $f$ is the film factor and $\Lambda$ the face buoyancy relative to the
+hot free stream, from the face molar mass $M_{\text{face}}$ of the species
+mass fractions
+
+$$
+Y_i \;=\; \omega_i\left[1-\exp\!\left(-\frac{\dot m''}{\psi\,g\,s_i^{\,n_D}}\right)\right],
+\qquad g = \frac{h}{\bar c_{p,\infty}},
+\qquad s_i = \frac{D_{i,\infty}}{\alpha_\infty},
+$$
+
+with $\omega_i$ the species' share of the outflow, $g$ the gas-exchange
+conductance without outflow (the film analogy: $h$ over the free-stream heat
+capacity averaged between $T_\infty$ and $T_s$, a 5-point Gauss–Legendre mean),
+$D_{i,\infty}$ the binary diffusivity into the free stream (Fuller, from the
+component's diffusion volume on the model, else the Chapman–Enskog estimate
+from its molar mass; a lumped `volatiles` gas states its own) and $n_D = 1/2$
+the penetration-theory exponent. Components whose name matches the free
+stream count in $\dot m''$ but not in the face composition. $\psi$ and the
+$Y_i$ are solved together: $G(\psi) = \Psi(\Lambda(Y(\psi))) - \psi$ has
+$G(\psi_0) > 0$ and $G(1) < 0$, so a 16-interval scan of $[\psi_0, 1]$ on the
+primal values brackets every root, each refined by safeguarded Newton; where
+two states are self-consistent the mean of the lowest and highest is taken
+(the resolved flow alternates between them). One Newton step in the working
+scalar type at the primal root then gives the implicit-function derivative,
+so `ForwardDiff` partials ride through the solve. A face no hotter than the
+free stream keeps $\psi = 1$. The three switch constants belong to the
+apparatus flow, as $h$ does.
+
+*User rule* (`FunctionBlowing(f)`): $\chi = f(\text{face}, h, T_\infty)$.
+
+The factor is evaluated by the numerically stable `blowing_factor` (Taylor
+branch at $|\phi|<10^{-5}$, overflow-safe $\phi\,e^{-\phi}/(1-e^{-\phi})$ form for
+large $\phi$). The Newton derivative uses the frozen-$\chi$ form $-h\,\chi$ —
+first-order consistent, the same convention as the transpiration derivative
+(§12.9), so convergence is marginally sub-quadratic and the converged root is
+exact. Each convective member of a `CombinedThermalBC` applies its own model
+against its own $h$ and $T_\infty$; all other BC types are untouched. At the
+converged $T_s$ the `BoundaryState` records the blowing conductance
+`blowing_mcp`, the applied ratio `blowing_ratio` and, for the pooling model,
+`pooling_factor`, `face_fraction` and `face_buoyancy` (the first convective
+member's), and the solution extras carry them per output time. The structured
+Jacobian's `BCThermalOperator` and `BCConvectionOperator` rebuild $\dot m''$
+from the stencil state via the shared boundary-face kernel, so the
+$\partial(h\chi)/\partial(T_b,\xi_b)$ chain is exact (support-complete strict
+verification passes with the film and pooling models in Fickian, Darcy–Fick
+and ALE modes). Giving a convective BC a model on a case calibrated with the
+bare coefficient will raise $T_s$ and MLR; introduce it together with flame
+heat-flux feedback before any recalibration pass (the two partially cancel —
+see the physics roadmap, `docs/Physics_Audit_2026-06-09.md`).
+(`Materials/blowing_models.jl` types and gas data,
+`Discretization/blowing.jl` evaluation.)
 
 ### 12.3.4 `RadiativeBC` (gray surface exchange with surroundings)
 
@@ -1005,9 +1091,9 @@ the solve begins.
 > **Do not confuse this with the blowing correction.** This section is the
 > *enthalpy-side* transpiration term (rejected in production, §7.6). The
 > *momentum-side* effect of the same gas efflux — suppression of the convective
-> coefficient, $h \to h\,B/(e^B-1)$ — is the supported, opt-in
-> `use_blowing_correction` documented in §12.3.3; it is independent of this
-> term and composes with the default $S_{\text{conv}}$-only convention.
+> coefficient, $h \to h\,\chi$ — is the `blowing` model of each `ConvectiveBC`
+> documented in §12.3.3; it is independent of this term and composes with the
+> default $S_{\text{conv}}$-only convention.
 
 ### 12.9.1 The transpiration term and its derivative
 
@@ -1103,11 +1189,11 @@ re-validated when imported (§18).
 ### 12.10.1 Flux decomposition
 
 For auditing and post-processing, `compute_boundary_heat_fluxes(bc, T_s, t,
-ε_eff, radiation_model[, mcp])` decomposes the boundary flux into named
-components (`boundary_fluxes.jl`). The optional trailing `mcp` is the blowing
-conductance $\dot m'' c_{p,g}$ at the converged $T_s$
-(`BoundaryState.blowing_mcp`); when supplied, the convective component is
-reported with the same $h\,B/(e^B-1)$ rescaling the surface Newton applied
+ε_eff, radiation_model[, face])` decomposes the boundary flux into named
+components (`boundary_fluxes.jl`). The optional trailing `face` is the
+`BlowingFace` at the converged $T_s$ (outward species fluxes, surface
+temperature, material); when supplied, the convective component is reported
+with the same ratio $\chi$ its blowing model gave the surface Newton
 (§12.3.3), keeping the decomposition consistent with `net`. Components:
 
 - `absorbed` — incident radiation absorbed *at the boundary face* [W·m⁻²];
@@ -1296,10 +1382,14 @@ in-depth absorbed fraction volumetrically rather than at the face.
    impermeable back face (the bottom gas flux vanishes) and for equal ambients;
    supporting it would require a per-cell datum rather than a scalar.
 
-2. **Temperature-dependent emissivity derivative.** The radiative Newton
-   derivative omits the $F\,(d\varepsilon/dT)\,\sigma\,(T_\infty^4-T_s^4)$ term
-   (§12.2.4). The converged $T_s$ is unbiased, but convergence can become
-   sub-quadratic for strongly temperature-sensitive $\varepsilon(T)$.
+2. **Temperature-dependent emissivity derivative.** For a `RadiativeBC` whose
+   own `ε` is a function of $T_s$, the radiative Newton derivative omits the
+   $F\,(d\varepsilon/dT)\,\sigma\,(T_\infty^4-T_s^4)$ term (§12.2.4). The
+   converged $T_s$ is unbiased, but convergence can become sub-quadratic for
+   strongly temperature-sensitive $\varepsilon(T_s)$. This does not affect
+   component-level $\varepsilon_j(T)$: the mixture $\varepsilon_{\text{eff}}$
+   is evaluated at the *cell* temperature and is a constant of the surface
+   Newton iteration, so that derivative is exact.
 
 3. **Transpiration BC integration.** The surface transpiration term is implemented
    and tested but is opt-in and currently *forbidden* in production because it

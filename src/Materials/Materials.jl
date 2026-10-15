@@ -70,13 +70,14 @@ include("components.jl")
 include("reactions.jl")
 include("materials.jl")
 include("radiation_types.jl")
+include("blowing_models.jl")
 
 # ============================================================================
 # Exports
 # ============================================================================
 
 # Constants
-export R_GAS, STEFAN_BOLTZMANN, T_REF, P_REF, RHO_CP_FLOOR
+export R_GAS, STEFAN_BOLTZMANN, T_REF, P_REF, RHO_CP_FLOOR, T_PROPERTY_MIN, T_PROPERTY_MAX
 
 # Abstract types
 export AbstractPropertyFunction, AbstractThermalProperty, AbstractTransportProperty
@@ -91,9 +92,11 @@ export AbstractPyrolysisProblem, AbstractPyrolysisSolution
 # Property functions
 export ConstantProperty, LinearProperty, PolynomialProperty
 export ArrheniusProperty, TableProperty, CallableProperty
+export SutherlandProperty  # Sutherland gas-viscosity correlation (Material.gas_viscosity default)
 export StateDependentProperty  # For state-dependent heats of reaction
 export derivative, derivative_ξ  # Temperature and concentration derivatives of property functions
 export evaluate_param, evaluate_param_T  # Unified parameter evaluation (defined in property_functions.jl)
+export property_temperature  # Argument clamp shared by every temperature-dependent law
 
 # Components
 export Phase, SOLID, LIQUID, GAS
@@ -102,6 +105,13 @@ export phase, molar_mass, is_gas, is_solid, is_liquid  # Type-dispatch accessors
 export delta_enthalpy                                    # Sensible-enthalpy difference (midpoint rule)
 export get_permeability, has_permeability  # Permeability accessors for components
 export get_density, get_intrinsic_density  # Bulk vs. skeletal density accessors
+export get_emissivity, get_absorptivity, surface_absorptivity  # Radiative surface accessors
+
+# Blowing models (evaluated in Discretization/blowing.jl)
+export AbstractBlowingModel,
+    NoBlowing, CouetteFilm, PropertyRatioFilm, PoolingFilm, FunctionBlowing
+export GasSpecies, NITROGEN, nasa7_heat_capacity, eucken_viscosity, fuller_diffusivity
+export gas_property_temperature
 
 # Reactions
 export Reaction, ReactionSet

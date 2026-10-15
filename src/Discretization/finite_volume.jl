@@ -44,7 +44,7 @@ Sign convention:
 - `mesh`: 1D mesh with geometry
 """
 function divergence_1d!(div::AbstractVector, fluxes::AbstractVector, state, mesh)
-    n_cells_val = length(state.T)
+    n_cells_val = mesh.n_active_cells
 
     @inbounds @simd for i = 1:n_cells_val
         cell = mesh.cells[i]
@@ -70,7 +70,8 @@ Compute divergence for species fluxes (multiple components).
 - `mesh`: 1D mesh
 """
 function divergence_species_1d!(div::AbstractMatrix, J::AbstractMatrix, state, mesh)
-    NC, n_cells_val = size(div)
+    NC = size(div, 1)
+    n_cells_val = mesh.n_active_cells
 
     @inbounds for i = 1:n_cells_val
         cell = mesh.cells[i]
@@ -246,15 +247,14 @@ function compute_rhs!(
     radiation_kirchhoff::Bool = true,
     energy_form::Symbol = :standard,
     use_transpiration_bc::Bool = false,
-    use_blowing_correction::Bool = false,
 ) where {NC}
 
-    n_cells_val = length(mesh.cells)
+    n_cells_val = mesh.n_active_cells
     NR = n_reactions(material)
 
     # Ensure caches are properly sized
     if length(rhs_cache.q_cond) != length(mesh.faces)
-        resize_rhs_cache!(rhs_cache, n_cells_val, length(mesh.faces), NC, NR)
+        resize_rhs_cache!(rhs_cache, length(mesh.cells), length(mesh.faces), NC, NR)
     end
 
     # ========================================================================
@@ -328,7 +328,6 @@ function compute_rhs!(
         bottom_face_ids,
         radiation_model;
         use_transpiration_bc = use_transpiration_bc,
-        use_blowing_correction = use_blowing_correction,
     )
 
     # ========================================================================
@@ -375,6 +374,7 @@ function compute_rhs!(
             rhs_cache.S_gen,
             rhs_cache.div_J,
             state,
+            mesh,
             material,
             T_ref_volumetric,
         )
@@ -439,13 +439,12 @@ When `use_transpiration_bc = false` (default) `ṁ_g` is zeroed and this reduces
 to `q_BC(T_s) = q_cond(T_s, T_cell)`. `ṁ_g` is read from `J_gas[g, face]` at the boundary face — populated by the
 mass-flux pass that runs *before* this thermal BC pass in `compute_rhs!`.
 
-With `use_blowing_correction = true` every `ConvectiveBC` in the surface
-balance is rescaled by the Couette-film blowing factor `h → h·B/(e^B − 1)`,
-`B = ṁ″·c_p,g/h`, built from the **true** outward gas flux at the face
-(`J_gas[g, face]`, which includes the Darcy venting part in Darcy–Fick mode).
-This is independent of the transpiration enthalpy term: blowing reads the
-real flux even while transpiration stays zeroed (the supported S_conv-only
-convention). See `Discretization.blowing_factor`.
+Every `ConvectiveBC` in the surface balance applies its blowing model
+(`bc.blowing`, see `blowing_state`) to the **true** outward gas flux at the
+face (`J_gas[g, face]`, which includes the Darcy venting part in Darcy–Fick
+mode). This is independent of the transpiration enthalpy term: the blowing
+model reads the real flux even while transpiration stays zeroed (the
+supported S_conv-only convention).
 
 # Arguments
 - `q`: Face flux array (modified in-place)
@@ -471,7 +470,6 @@ function apply_thermal_bc_flux!(
     bottom_face_ids::Vector{Int},
     radiation_model::RadiationModel = SURFACE_ABSORPTION;
     use_transpiration_bc::Bool = false,
-    use_blowing_correction::Bool = false,
 ) where {NC}
     # Top boundary (boundary_id = 1, z = L)
     _apply_thermal_bc_static!(
@@ -487,7 +485,6 @@ function apply_thermal_bc_flux!(
         Val(:top),
         radiation_model;
         use_transpiration_bc = use_transpiration_bc,
-        use_blowing_correction = use_blowing_correction,
     )
 
     # Bottom boundary (boundary_id = 2, z = 0)
@@ -504,7 +501,6 @@ function apply_thermal_bc_flux!(
         Val(:bottom),
         radiation_model;
         use_transpiration_bc = use_transpiration_bc,
-        use_blowing_correction = use_blowing_correction,
     )
 
     return nothing
@@ -540,7 +536,6 @@ otherwise). The default S_conv-only convention reduces this to
     ::Val{boundary},
     radiation_model::RadiationModel = SURFACE_ABSORPTION;
     use_transpiration_bc::Bool = false,
-    use_blowing_correction::Bool = false,
 ) where {BC<:AbstractThermalBC,NC,boundary}
     # Handle DirichletThermalBC specially (T_s prescribed, no transpiration solve)
     if BC <: DirichletThermalBC
@@ -579,6 +574,10 @@ otherwise). The default S_conv-only convention reduces this to
             bstate.q_conducted = ForwardDiff.value(q_bc)
             bstate.q_transpired = 0.0
             bstate.blowing_mcp = 0.0
+            bstate.blowing_ratio = 1.0
+            bstate.pooling_factor = 1.0
+            bstate.face_fraction = 0.0
+            bstate.face_buoyancy = 1.0
             bstate.T_cell = ForwardDiff.value(T_cell)
             bstate.k_eff = ForwardDiff.value(k_cell)
             bstate.Δz_half = ForwardDiff.value(dz_half)
@@ -618,7 +617,6 @@ otherwise). The default S_conv-only convention reduces this to
             T_ref,
             t,
             radiation_model;
-            use_blowing = use_blowing_correction,
             J_blowing = J_outward_true,
         )
 
@@ -838,8 +836,8 @@ function update_darcy_properties!(
     top_face_ids::Vector{Int},
     bottom_face_ids::Vector{Int},
 ) where {NC}
-    n_cells = length(state.T)
-    n_faces = length(state.A_face)
+    n_cells = mesh.n_active_cells
+    n_faces = n_cells + 1
 
     darcy = cache.darcy
     darcy === nothing && error(
@@ -865,8 +863,8 @@ function update_darcy_properties!(
         # Permeability from component mixture (component-based)
         darcy.κ[i] = effective_permeability(ξ_i, T_i, material)
 
-        # Gas viscosity from Sutherland's law
-        darcy.μ[i] = Properties.effective_gas_viscosity(T_i)
+        # Pore-gas viscosity from the material's own curve (default: Sutherland air)
+        darcy.μ[i] = Properties.mixture_gas_viscosity(ξ_i, T_i, material)
     end
 
     # Step 2: Compute face-centered pressure gradient and Darcy velocity
@@ -921,6 +919,7 @@ function update_darcy_properties!(
         mesh,
         darcy.P,
         darcy.κ,
+        darcy.μ,
         bc_set,
         top_face_ids,
         bottom_face_ids,
@@ -981,16 +980,14 @@ function compute_rhs_darcy_fick!(
     radiation_kirchhoff::Bool = true,
     energy_form::Symbol = :standard,
     use_transpiration_bc::Bool = false,
-    use_blowing_correction::Bool = false,
 ) where {NC}
 
-    n_cells_val = length(mesh.cells)
-    n_faces_val = length(mesh.faces)
+    n_cells_val = mesh.n_active_cells
     NR = n_reactions(material)
 
     # Ensure caches are properly sized
-    if length(rhs_cache.q_cond) != n_faces_val
-        resize_rhs_cache!(rhs_cache, n_cells_val, n_faces_val, NC, NR)
+    if length(rhs_cache.q_cond) != length(mesh.faces)
+        resize_rhs_cache!(rhs_cache, length(mesh.cells), length(mesh.faces), NC, NR)
     end
 
     # ========================================================================
@@ -1074,7 +1071,6 @@ function compute_rhs_darcy_fick!(
         bottom_face_ids,
         radiation_model;
         use_transpiration_bc = use_transpiration_bc,
-        use_blowing_correction = use_blowing_correction,
     )
 
     # ========================================================================
@@ -1114,6 +1110,7 @@ function compute_rhs_darcy_fick!(
             rhs_cache.S_gen,
             rhs_cache.div_J,
             state,
+            mesh,
             material,
             T_ref_volumetric,
         )

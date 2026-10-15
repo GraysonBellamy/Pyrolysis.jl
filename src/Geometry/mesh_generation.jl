@@ -300,3 +300,123 @@ function create_stretched_mesh(
 
     return mesh
 end
+
+"""
+    create_mesh_from_nodes(positions, Val(NC); T_initial=300., ξ_initial=nothing,
+                           cross_section_area=1.)
+
+Create a 1D mesh with prescribed, strictly increasing node positions from zero.
+All current/reference cell volumes, geometry caches, and ALE bookkeeping are
+initialized from these positions. Useful for preserving material interfaces
+while refining each region independently.
+"""
+function create_mesh_from_nodes(
+    node_positions::AbstractVector{<:Real},
+    ::Val{NC};
+    T_initial::Real = 300.0,
+    ξ_initial = nothing,
+    cross_section_area::Real = 1.0,
+) where {NC}
+    NC isa Integer && NC > 0 || throw(ArgumentError("NC must be a positive integer"))
+    positions = Float64.(node_positions)
+    length(positions) >= 2 ||
+        throw(ArgumentError("at least two node positions are required"))
+    all(isfinite, positions) || throw(ArgumentError("node positions must be finite"))
+    first(positions) == 0.0 || throw(ArgumentError("node positions must start at zero"))
+    all(>(0.0), diff(positions)) ||
+        throw(ArgumentError("node positions must strictly increase"))
+    isfinite(T_initial) && T_initial > 0 ||
+        throw(ArgumentError("T_initial must be finite and positive"))
+    A = Float64(cross_section_area)
+    isfinite(A) && A > 0 ||
+        throw(ArgumentError("cross_section_area must be finite and positive"))
+    if ξ_initial !== nothing
+        values = ξ_initial isa Real ? (ξ_initial,) : ξ_initial
+        ξ_initial isa Real ||
+            length(values) == NC ||
+            throw(ArgumentError("ξ_initial must have NC entries"))
+        all(isfinite, values) || throw(ArgumentError("ξ_initial must be finite"))
+    end
+    n_nodes = length(positions)
+    n_cells = n_nodes - 1
+    # Initialize mesh
+    mesh = Mesh1D{NC}()
+    mesh.cross_section_area = A
+    mesh.cross_section_area_initial = A
+
+    # Create nodes (z=0 at bottom, z=L at top)
+    for i = 1:n_nodes
+        z = positions[i]
+        if i == 1
+            push!(mesh.nodes, Node1D(i, z, 2))  # bottom boundary (substrate)
+        elseif i == n_nodes
+            push!(mesh.nodes, Node1D(i, z, 1))  # top boundary (exposed surface)
+        else
+            push!(mesh.nodes, Node1D(i, z, 0))  # interior
+        end
+    end
+
+    # Create faces (z=0 at bottom, z=L at top)
+    for i = 1:n_nodes
+        if i == 1
+            # Bottom boundary face (left_id=0)
+            push!(mesh.faces, Face1D(i, i, (0, 1), 2))
+        elseif i == n_nodes
+            # Top boundary face (right_id=0)
+            push!(mesh.faces, Face1D(i, i, (n_cells, 0), 1))
+        else
+            push!(mesh.faces, Face1D(i, i, (i-1, i)))
+        end
+    end
+
+    # Create cells
+    for i = 1:n_cells
+        cell = Cell1D(i, (i, i+1), (i, i+1))
+        push!(mesh.cells, cell)
+    end
+
+    # Initialize cell states
+    if ξ_initial === nothing
+        ξ_init = ntuple(_ -> 0.0, NC)
+    elseif ξ_initial isa Real
+        ξ_init = ntuple(_ -> Float64(ξ_initial), NC)
+    else
+        ξ_init = ntuple(j -> Float64(ξ_initial[j]), NC)
+    end
+
+    for i = 1:n_cells
+        Δz = positions[i+1] - positions[i]
+        V_cell = Δz * A
+        state = CellState{NC}(Float64(T_initial), ξ_init, V_cell)
+        push!(mesh.cell_states, state)
+    end
+
+    # Initialize geometry cache
+    resize!(mesh.cell_centers, n_cells)
+    resize!(mesh.cell_volumes, n_cells)
+    resize!(mesh.face_positions, n_nodes)
+    resize!(mesh.face_areas, n_nodes)
+
+    # Initialize ALE state
+    resize!(mesh.node_velocities, n_nodes)
+    fill!(mesh.node_velocities, 0.0)
+    mesh.mesh_time = 0.0
+
+    # Initialize refinement tracking
+    mesh.max_level = 0
+    mesh.n_active_cells = n_cells
+    mesh.active_cell_mask = trues(n_cells)
+
+    # Pyrolysis-progress denominator (populated by problem setup)
+    resize!(mesh.m_dry_solid_initial, n_cells)
+    fill!(mesh.m_dry_solid_initial, 0.0)
+
+    # Set up boundary faces
+    mesh.boundary_faces[1] = [n_nodes]  # top (exposed surface at z=L)
+    mesh.boundary_faces[2] = [1]        # bottom (substrate at z=0)
+
+    # Compute geometry
+    update_geometry!(mesh)
+
+    return mesh
+end

@@ -64,8 +64,10 @@ buffers are allocated only when actually needed.
 - `ρcp::Vector{Tu}`: Volumetric heat capacity [J/(m³·K)]
 - `k::Vector{Tu}`: Thermal conductivity [W/(m·K)]
 - `λ::Vector{Tu}`: Gas transfer coefficient [m²/s]
-- `ε::Vector{Tu}`: Emissivity [-]
-- `α::Vector{Tu}`: Absorption coefficient [m⁻¹]
+- `ε::Vector{Tu}`: Emissivity [-], `Σⱼ vⱼ εⱼ(T)` (surface emission)
+- `a::Vector{Tu}`: Surface absorptivity [-] for incident radiation,
+  `Σⱼ vⱼ aⱼ`; equals `ε` unless a component sets `surface_absorptivity`
+- `α::Vector{Tu}`: Absorption coefficient [m⁻¹] (Beer-Lambert, in-depth)
 
 ## Per-face properties
 - `k_face::Vector{Tu}`: Face-centered conductivity [W/(m·K)]
@@ -82,6 +84,7 @@ mutable struct PropertyCache{Tu,DarcyT}
     k::Vector{Tu}
     λ::Vector{Tu}
     ε::Vector{Tu}
+    a::Vector{Tu}
     α::Vector{Tu}
 
     # Per-face properties (for flux computation)
@@ -124,6 +127,7 @@ function _build_property_cache(
         zeros(Tu, n_cells),  # k
         zeros(Tu, n_cells),  # λ
         zeros(Tu, n_cells),  # ε
+        zeros(Tu, n_cells),  # a
         zeros(Tu, n_cells),  # α
         zeros(Tu, n_faces),  # k_face
         zeros(Tu, n_faces),  # λ_face
@@ -152,6 +156,7 @@ function resize_cache!(cache::PropertyCache, n_cells::Int, n_faces::Int)
     resize!(cache.k, n_cells)
     resize!(cache.λ, n_cells)
     resize!(cache.ε, n_cells)
+    resize!(cache.a, n_cells)
     resize!(cache.α, n_cells)
     resize!(cache.k_face, n_faces)
     resize!(cache.λ_face, n_faces)
@@ -167,8 +172,10 @@ end
 Evaluate all material properties at the current state and store in cache.
 
 State is read from `state::StateCache` (T, ξ, cell-center / face positions);
-`mesh` is consulted only for face connectivity (`mesh.faces[f].cell_ids`).
-The function is allocation-free after the cache is sized to match.
+`mesh` supplies the face connectivity (`mesh.faces[f].cell_ids`) and the live
+range: cells `1:mesh.n_active_cells` and faces `1:mesh.n_active_cells+1` are
+evaluated, parked ghost slots are left untouched. The function is
+allocation-free after the cache is sized to match.
 """
 function update_properties!(
     cache::PropertyCache,
@@ -176,12 +183,12 @@ function update_properties!(
     mesh,
     material::Material{NC},
 ) where {NC}
-    n_cells_val = length(state.T)
-    n_faces_val = length(state.A_face)
+    n_cells_val = mesh.n_active_cells
+    n_faces_val = n_cells_val + 1
 
     # Ensure cache is properly sized
-    if length(cache.ρ) != n_cells_val
-        resize_cache!(cache, n_cells_val, n_faces_val)
+    if length(cache.ρ) != length(state.T)
+        resize_cache!(cache, length(state.T), length(state.A_face))
     end
 
     # Evaluate cell-centered properties.
@@ -204,7 +211,8 @@ function update_properties!(
         cache.ρcp[i] = effective_heat_capacity(ξ_i, T_i, material)
         cache.k[i] = _conductivity_from_v(v_solid, T_i, material; k_init = k_prev)
         cache.λ[i] = _gas_transfer_from_v(v_full, T_i, material)
-        cache.ε[i] = _emissivity_from_v(v_solid, material)
+        cache.ε[i] = _emissivity_from_v(v_solid, T_i, material)
+        cache.a[i] = _absorptivity_from_v(v_solid, T_i, material)
         cache.α[i] = effective_absorption(ξ_i, material)
     end
 

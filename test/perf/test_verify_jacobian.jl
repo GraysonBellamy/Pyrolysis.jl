@@ -37,6 +37,16 @@ const _CONFIGS = (
         builder = build_ale_beer_lambert_darcy,
         is_ale = true,
     ),
+    (
+        name = "ale_beer_lambert_darcy_moderate",
+        builder = build_ale_beer_lambert_darcy_moderate,
+        is_ale = true,
+    ),
+    (
+        name = "ale_beer_lambert_fickian_moderate",
+        builder = build_ale_beer_lambert_fickian_moderate,
+        is_ale = true,
+    ),
 )
 
 @testset "verify_jacobian CI matrix" begin
@@ -82,6 +92,34 @@ const _CONFIGS = (
         if cfg.is_ale
             @testset "$(cfg.name) × Structured(ApproxSolve)" begin
                 spec = JacobianSpec(Structured(strategy = ApproxSolve()), def, ws)
+                report = verify_jacobian_at(
+                    spec,
+                    def,
+                    ws,
+                    u,
+                    0.0;
+                    reference_spec = ref_spec,
+                    rtol = 1e-6,
+                    atol = 1e-10,
+                )
+                @test report.passed
+            end
+        end
+    end
+end
+
+# The energy rows of an optically moderate Beer-Lambert column depend on every
+# node above the cell. At a reacting state the strict check covers those z
+# columns together with the reaction and gas-transport entries.
+@testset "verify_jacobian, optically moderate Beer-Lambert, reacting state" begin
+    for builder in
+        (build_ale_beer_lambert_darcy_moderate, build_ale_beer_lambert_fickian_moderate)
+        @testset "$(nameof(builder))" begin
+            def, ws, u, _ = builder()
+            mixed_reacting_state!(u, ws.layout.n_cells)
+            ref_spec = JacobianSpec(DenseAD_ForwardDiff(), def, ws)
+            for strategy in (DirectSolve(), ApproxSolve())
+                spec = JacobianSpec(Structured(strategy = strategy), def, ws)
                 report = verify_jacobian_at(
                     spec,
                     def,

@@ -125,7 +125,8 @@ GaseousComponent(name::Symbol; M, c, k, λ, ε = 0.0, α = 0.0, γ = 0.0)
 | `k` | thermal conductivity `k_j` | W·m⁻¹·K⁻¹ | required |
 | `λ` | gas-transfer (diffusion) coefficient `λ_j` | m²·s⁻¹ | `0.0` (solid), `2e-5` (liquid), required (gas) |
 | `κ` | permeability `κ_j` (solid/liquid only) | m² | `0.0` |
-| `ε` | emissivity `ε_j` | – | `0.9` (solid), `0.95` (liquid), `0.0` (gas) |
+| `ε` | emissivity `ε_j(T)` (number or property function) | – | `0.9` (solid), `0.95` (liquid), `0.0` (gas) |
+| `absorptivity` | surface absorptivity `a_j` for incident radiation (solid/liquid only; `nothing` = Kirchhoff `ε_j(T)`) | – | `nothing` |
 | `α` | mass absorption coefficient `α_j` | m²·kg⁻¹ | `0.0` |
 | `γ` | swelling factor `γ_j` | – | `1.0` (solid), `0.0` (liquid/gas) |
 | `ρ_intrinsic` | skeletal/intrinsic density `ρ_{i,j}` (porosity formula only) | kg·m⁻³ | `= ρ` |
@@ -650,13 +651,14 @@ interpolate_solution(sol, t::Real)               # full raw state vector at arbi
 `get_profile(sol, :T, i)` returns `sol.T[:, i]`; `get_profile(sol, :ξ, i)`
 returns the full `NC × n_cells` slice; `get_profile(sol, :ξ1, i)` returns
 component 1. The surface/back-face temperature accessors read the *mesh's* solved
-boundary state, not the solution:
+boundary state, not the solution. `solve` leaves `problem` unchanged and works on
+a copy, kept as `sol.problem`, whose mesh holds the last accepted step:
 
 ```julia
 using Pyrolysis.Discretization: get_surface_temperature, get_back_face_temperature,
                                 check_boundary_energy_balance
-Ts_final    = get_surface_temperature(problem.mesh)   # mesh holds last accepted step
-Tback_final = get_back_face_temperature(problem.mesh)
+Ts_final    = get_surface_temperature(sol.problem.mesh)
+Tback_final = get_back_face_temperature(sol.problem.mesh)
 ```
 
 For per-step surface temperature, prefer `sol.surface_T`.
@@ -708,7 +710,7 @@ solve(problem::PyrolysisProblem; kwargs...) -> PyrolysisSolution
 | Keyword | Type | Default | Purpose |
 |---|---|---|---|
 | `integrator` | type / instance / `nothing` | `nothing` → `KenCarp4(…)` | ODE algorithm (constructor or fully-built instance) |
-| `linear_solver` | factorization / `nothing` | `nothing` → `SparspakFactorization()` | sparse/dense linear solver (only paired with a *constructor* `integrator`) |
+| `linear_solver` | factorization / `nothing` | `nothing` → `KLUFactorization()`, or `UMFPACKFactorization()` for the exact ALE Jacobian | sparse/dense linear solver (only paired with a *constructor* `integrator`) |
 | `jacobian` | `JacobianSpec` / `nothing` | `nothing` → `Structured(strategy = DirectSolve())` | pluggable Jacobian backend |
 | `verify_jacobian` | `NamedTuple` / `nothing` | `nothing` | `(rtol=…, atol=…, sample_times=[…])` to compare backend vs. `DenseAD_ForwardDiff` |
 | `abstol` | `Real` | `1e-8` | absolute ODE tolerance |
@@ -722,10 +724,10 @@ solve(problem::PyrolysisProblem; kwargs...) -> PyrolysisSolution
 | `progress` | `Bool` | `true` | progress bar |
 | `validate` | `Bool` | `true` | run `validate_problem` first |
 | `use_ale` | `Bool` | `false` | enable ALE moving mesh |
-| `min_thickness` | `Real` | `1e-6` | ALE termination thickness [m] |
-| `handle_depletion` | `Bool` | `false` | merge depleted surface cells (requires `use_ale = true`) |
-| `depletion_threshold` | `Real` | `0.05` | cell-thickness fraction below which a cell merges |
-| `min_cells` | `Int` | `2` | minimum cell count before terminating instead of merging |
+| `min_thickness` | `Real` | `1e-6` | ALE termination on the live thickness [m] |
+| `handle_depletion` | `Bool` | `false` | park depleted cells (ALE: thin cells; fixed mesh: the emptied top cell, and stop at the first interior void) |
+| `depletion_threshold` | `Real` | `0.05` | fraction of the initial thickness (ALE) or initial condensed concentration (fixed mesh) below which a cell parks |
+| `min_cells` | `Int` | `2` | minimum live cell count before terminating instead of parking |
 | `radiation_model` | `RadiationModel` | `NO_RADIATION` | `NO_RADIATION` / `SURFACE_ABSORPTION` / `BEER_LAMBERT` |
 | `diagnostics` | `Bool` | `false` | enable conservation-diagnostics snapshots |
 | `diagnostics_stride` | `Int` | `10` | snapshot every N steps |
@@ -736,20 +738,22 @@ solve(problem::PyrolysisProblem; kwargs...) -> PyrolysisSolution
 Key behaviours and constraints:
 
 - **Default integrator / linear solver**: `KenCarp4(autodiff = AutoFiniteDiff(),
-  linsolve = SparspakFactorization())`. KenCarp4 is an SDIRK method suited to the
+  linsolve = KLUFactorization())`, with `UMFPACKFactorization()` for the
+  exact ALE Jacobian (`DirectSolve` under ALE). KenCarp4 is an SDIRK method
+  suited to the
   moderately stiff Arrhenius system. Pass a constructor (e.g. `integrator = KenCarp4`)
   to combine with `linear_solver`, or a fully-built instance
   (e.g. `integrator = KenCarp4(linsolve = ILUGMRESFactorization())`) on its own.
-- **Default Jacobian**: `Structured(strategy = DirectSolve())`. Pass a
-  `JacobianSpec` to opt into other strategies (§16.8).
+- **Default Jacobian**: `Structured(strategy = DirectSolve())` on a fixed mesh,
+  `Structured(strategy = ApproxSolve())` under ALE.
+  Pass a bare backend or a `JacobianSpec` to opt into other strategies (§16.8).
 - **`radiation_model = P1_QUASI_STEADY`** is rejected (P1 is experimental).
 - **`energy_form`** must be `:standard` (Formulation A, the FDS/Gpyro/ThermaKin
   convention) or `:with_generation_sink` (adds the `−Σ Δh_g ∇·J_g` cell source).
-- **`handle_depletion = true` is incompatible with a pluggable `jacobian`**: the
-  state vector resizes mid-solve, which a pre-built `JacobianSpec` cannot survive.
-  `solve` errors if both are set; with depletion alone it falls back to the
-  integrator's colored finite-difference Jacobian and switches the linear solver
-  to a dense LU.
+- **`handle_depletion = true`** keeps the state size (parked cells become
+  inert ghost slots), so it combines with any `jacobian`; ghost slots read as
+  `NaN` in the solution arrays and `solution.extras.live_cells` /
+  `park_times` record the events.
 - **MLR gauge note**: in variable-cross-section runs, `sol.mass_loss_rate` is per
   current area and `sol.extras.MLR_gauge` is normalized to `A_0`.
 
@@ -794,15 +798,14 @@ sol  = solve(problem; jacobian = spec, use_ale = true)
 
 | Strategy | Behaviour | When |
 |---|---|---|
-| `DirectSolve` | materialize `A + Σ densify(couplings)`, factor (exact) | default; small/typical problems |
+| `DirectSolve` | materialize `A + Σ densify(couplings)`, factor (exact) | fixed-mesh default; exact ALE Jacobian |
 | `StructuredSolve` | sparse LU on `A` + preconditioned Richardson (exact, 2–5 iters) | typical, faster assembly |
-| `ApproxSolve` | drop the structured ALE couplings (Schur-style approximation) | large ALE problems (~8× speedup; less-accurate Newton step) |
+| `ApproxSolve` | drop the structured ALE couplings (Schur-style approximation) | ALE default |
 | `MatrixFreeSolve` | GMRES over the operator action (no materialization) | research/experimental |
 
 `ApproxSolve` is marked approximate via the `is_approximate` trait; the
-verifier compares it in masked (in-support) mode. For the Douglas-fir cone case,
-`Structured(strategy = ApproxSolve())` gives roughly an 8× assembly speedup over
-the full Jacobian at solver-tolerance-equivalent results.
+verifier compares it in masked (in-support) mode. It is the ALE default
+(§11.3.3).
 
 ### 16.8.3 Iterative linear solvers (not top-level; use `Internal`/`Solver`)
 
@@ -858,13 +861,6 @@ sol = solve(problem; integrator = KenCarp4(linsolve = Pyrolysis.klu_factorizatio
 `Pyrolysis.amg_preconditioner(A)` (`using AlgebraicMultigrid`) work the same
 way. Calling a stub without its extension loaded raises an error naming the
 package to add.
-
-> **MKL ipiv caveat.** When `handle_depletion = true` resizes the state vector,
-> avoid factorizations with fixed pivot buffers (MKL Pardiso). With depletion
-> the solver already uses a dense, resize-safe `LUFactorization()` and a
-> finite-difference Jacobian (explicit sparse choices are rebuilt to dense LU
-> with a warning), so this is only a concern if you pass a fully built
-> integrator with a non-default `linsolve`.
 
 ---
 
@@ -977,21 +973,21 @@ h-refinement/coarsening and the `AMRController` are in `Pyrolysis.Experimental`.
 
 ### 16.11.1 Surface-depletion via `solve`
 
-The simplest path is the `solve` keywords (§16.7): `handle_depletion = true`
-(needs `use_ale = true`), `depletion_threshold` (default `0.05`), `min_cells`
-(default `2`). Remember this falls back to a finite-difference Jacobian.
+The simplest path is the `solve` keywords (§16.7): `handle_depletion = true`,
+`depletion_threshold` (default `0.05`), `min_cells` (default `2`), in either
+mesh mode.
 
 ### 16.11.2 Callbacks (not top-level; use `Internal`/`Solver`)
 
 ```julia
 using Pyrolysis.Solver: create_depletion_callback, create_thickness_termination_callback,
-                        create_step_update_callback, DepletionCallbackState,
-                        get_depletion_callback_stats
+                        create_step_update_callback, DepletionCallbackState, n_live_cells
 
+DepletionCallbackState(layout, mesh, material, u0)      # live count, per-slot reference, park log
 create_thickness_termination_callback(sv_ref, min_thickness::Float64)
-create_depletion_callback(ws, mesh, material, sv_or_state; threshold = 0.05, min_cells = 2)
+create_depletion_callback(ws, mesh, material, cb_state; threshold = 0.05, min_cells = 2)
 create_step_update_callback(ws, material)
-get_depletion_callback_stats(cb)                  # merge history
+n_live_cells(cb_state, t)                                 # live cells in the state saved at t
 ```
 
 You normally do not build these by hand — `solve` assembles them from its
@@ -1101,8 +1097,9 @@ noted TR chapter.
 | `diagnostics_stride` | `10` |
 | `energy_form` | `:standard` |
 | `use_transpiration_bc` | `false` (rejected if `true`) |
-| default integrator | `KenCarp4(autodiff = AutoFiniteDiff(), linsolve = SparspakFactorization())` |
-| default Jacobian | `Structured(strategy = DirectSolve())` |
+| default integrator | `KenCarp4(autodiff = AutoFiniteDiff())` |
+| default linear solver | `KLUFactorization()`; `UMFPACKFactorization()` for the exact ALE Jacobian (`DirectSolve` under ALE) |
+| default Jacobian | `Structured(strategy = DirectSolve())`; `ApproxSolve` under ALE |
 
 ### Component / material / reaction defaults
 
@@ -1110,8 +1107,10 @@ noted TR chapter.
 |---|---|
 | `SolidComponent` `ε`, `α`, `γ` | `0.9`, `0.0`, `1.0` |
 | `SolidComponent` `λ`, `κ` | `0.0`, `0.0` |
+| `SolidComponent`/`LiquidComponent` `absorptivity` | `nothing` (Kirchhoff, `a_j = ε_j(T)`) |
 | `LiquidComponent` `λ` | `2e-5` m²·s⁻¹ |
-| `LiquidComponent`/`GaseousComponent` `ε`, `γ` | `0.0`, `0.0` |
+| `LiquidComponent` `ε`, `γ` | `0.95`, `0.0` |
+| `GaseousComponent` `ε`, `γ` | `0.0`, `0.0` |
 | `ρ_intrinsic` (when omitted) | `= ρ` (no pure-phase pores) |
 | `Reaction` `n`, `T_min`, `T_max`, `validate_mass` | `1.0`, `0.0`, `Inf`, `true` |
 | `MixingSpec` `β` | `0.5` |
@@ -1123,7 +1122,7 @@ noted TR chapter.
 | Quantity | Default |
 |---|---|
 | `RadiativeBC` `ε`, `F` | `nothing` (⇒ `ε_eff`), `1.0` |
-| `RadiativeFluxBC` `absorptivity` | `nothing` (⇒ `ε_eff`, Kirchhoff) |
+| `RadiativeFluxBC` `absorptivity` | `nothing` (⇒ `a_eff`; `= ε_eff` by Kirchhoff unless a component sets `absorptivity`) |
 | `ConvectiveMassBC` `ξ_inf` | `0.0` |
 | `DiffusiveMassBC` `h_m` | `Inf` (no external resistance) |
 | `DirichletPressureBC` `P` | `101325` Pa |
@@ -1155,11 +1154,13 @@ noted TR chapter.
 | Quantity (symbol) | Default | TR |
 |---|---|---|
 | depletion limiter threshold | `1.0` kg·m⁻³ | §6 |
-| surface-temperature Newton clamp `[T_min, T_max]` | `[200, 3000]` K | §12 |
+| property bracket `[T_PROPERTY_MIN, T_PROPERTY_MAX]` (law argument clamp, constructor validation, surface-temperature Newton clamp) | `[200, 3000]` K | §4, §12 |
+| mixing-weight blend window (matrix volume fraction) | `1e-4 … 1e-3` | §5 |
 | surface-temperature Newton tol / max-iter | `1e-10` / `50` | §12 |
 | porosity floor (ideal-gas pressure) | `1e-12` | §9 |
 | matrix ρc_p floor (`RHO_CP_FLOOR`) | `1e3` J·m⁻³·K⁻¹ | §5 |
-| Sutherland constant `S` / reference viscosity `μ_ref` | `110.4` K / `1.716e-5` Pa·s (at 273.15 K) | §5 |
+| pore-gas viscosity `Material.gas_viscosity` | `SutherlandProperty()` — air: `μ_ref` `1.716e-5` Pa·s at `T_ref` `273.15` K, `S` `110.4` K | §5 |
+| gas-viscosity floor (`MU_FLOOR`) | `1e-12` Pa·s | §5 |
 | Kozeny constant | `180` | §5 |
 | reference temperature `T_ref` | `298.15` K | §2 |
 | reference pressure `P_ref` | `101325` Pa | §2 |

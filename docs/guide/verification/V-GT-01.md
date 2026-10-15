@@ -40,7 +40,7 @@ and the parameter-free variance growth law Var(t) = σ₀² + 2dt.
 | L∞ ξ-profile error / peak, t=4.0 s | 4.821e-05 | — | 4.821e-05 | 0.004 | yes | Gaussian stays Gaussian; n=160 uniform, σ₀ = 4Δz |
 | L∞ ξ-profile error / peak, t=8.0 s | 2.704e-05 | — | 2.704e-05 | 0.004 | yes | Gaussian stays Gaussian; n=160 uniform, σ₀ = 4Δz |
 | gas-mass conservation (sealed) | 2.595e-15 | — | 2.595e-15 | 1e-13 | yes | antisymmetric face fluxes telescope exactly |
-| variance growth, t=2.0 s | 5e-06 | 5e-06 | 1.016e-15 | 2e-05 | yes | Var(t) = σ₀² + 2dt; relative error reported |
+| variance growth, t=2.0 s | 5e-06 | 5e-06 | 1.186e-15 | 2e-05 | yes | Var(t) = σ₀² + 2dt; relative error reported |
 | variance growth, t=4.0 s | 9e-06 | 9e-06 | 1.037e-10 | 2e-05 | yes | Var(t) = σ₀² + 2dt; relative error reported |
 | variance growth, t=8.0 s | 1.7e-05 | 1.7e-05 | 4.597e-06 | 2e-05 | yes | Var(t) = σ₀² + 2dt; relative error reported |
 
@@ -58,11 +58,11 @@ and the parameter-free variance growth law Var(t) = σ₀² + 2dt.
 
 | n_cells | h | wall (s) | L2 | Linf |
 | --- | --- | --- | --- | --- |
-| 40 | 0.025 | 0.02451 | 0.003984 | 0.01214 |
-| 80 | 0.0125 | 0.04219 | 0.0009693 | 0.003074 |
-| 160 | 0.00625 | 0.08338 | 0.0002407 | 0.0007708 |
-| 320 | 0.003125 | 0.9663 | 6.009e-05 | 0.0001928 |
-| 640 | 0.001563 | 0.3462 | 1.501e-05 | 4.821e-05 |
+| 40 | 0.025 | 0.02116 | 0.003984 | 0.01214 |
+| 80 | 0.0125 | 0.03971 | 0.0009693 | 0.003074 |
+| 160 | 0.00625 | 0.078 | 0.0002407 | 0.0007708 |
+| 320 | 0.003125 | 0.156 | 6.009e-05 | 0.0001928 |
+| 640 | 0.001563 | 0.3356 | 1.501e-05 | 4.821e-05 |
 
 Observed order 2.012 (L2), expected 2.0.
 

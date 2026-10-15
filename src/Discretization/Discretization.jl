@@ -47,6 +47,7 @@ using ..Physics
 # Include subfiles
 # Note: `darcy_velocity.jl` must be included before `finite_volume.jl`
 # because `finite_volume.jl` calls `apply_pressure_bc_to_darcy_velocity!`.
+include("blowing.jl")  # blowing models: BlowingFace, blowing_factor, blowing_state
 include("boundary_fluxes.jl")
 include("boundary_temperature.jl")  # Boundary temperature solve for correct surface T
 include("darcy_velocity.jl")
@@ -97,7 +98,7 @@ export compute_boundary_heat_fluxes, compute_surface_mass_flux  # Diagnostic dec
 # Exports - Boundary Temperature Solve
 export solve_boundary_temperature, update_boundary_state!
 export evaluate_bc_flux_and_derivative
-export blowing_factor
+export blowing_factor, BlowingFace, blowing_state, blowing_ratio
 export check_boundary_energy_balance
 export get_surface_temperature, get_back_face_temperature
 

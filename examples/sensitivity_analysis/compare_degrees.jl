@@ -277,11 +277,11 @@ function main()
         Q2_3 = results[3].Q2[qname]
         Q2_4 = results[4].Q2[qname]
 
-        S1_2 = results[2].S1[qname];
+        S1_2 = results[2].S1[qname]
         ST_2 = results[2].ST[qname]
-        S1_3 = results[3].S1[qname];
+        S1_3 = results[3].S1[qname]
         ST_3 = results[3].ST[qname]
-        S1_4 = results[4].S1[qname];
+        S1_4 = results[4].S1[qname]
         ST_4 = results[4].ST[qname]
 
         Δ23_S1 = max_delta(S1_3, S1_2)
@@ -469,14 +469,14 @@ function main()
         end
         println(io, join(header_parts, ","))
         for qname in sort(valid_qois)
-            Q2_2 = results[2].Q2[qname];
-            Q2_3 = results[3].Q2[qname];
+            Q2_2 = results[2].Q2[qname]
+            Q2_3 = results[3].Q2[qname]
             Q2_4 = results[4].Q2[qname]
-            S1_2 = results[2].S1[qname];
-            S1_3 = results[3].S1[qname];
+            S1_2 = results[2].S1[qname]
+            S1_3 = results[3].S1[qname]
             S1_4 = results[4].S1[qname]
-            ST_2 = results[2].ST[qname];
-            ST_3 = results[3].ST[qname];
+            ST_2 = results[2].ST[qname]
+            ST_3 = results[3].ST[qname]
             ST_4 = results[4].ST[qname]
             Δ23 = max(max_delta(S1_3, S1_2), max_delta(ST_3, ST_2))
             Δ34 = max(max_delta(S1_4, S1_3), max_delta(ST_4, ST_3))

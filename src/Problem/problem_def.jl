@@ -72,8 +72,11 @@ is verbose at the call site.
 	InitialConditions{FT, Fξ}
 
 Immutable initial-conditions descriptor used by `ProblemDef`. Mirrors the
-`PyrolysisProblem` fields. Concrete types are stored so the descriptor is
-type-stable for downstream consumers.
+`PyrolysisProblem` fields. [`to_problem_def`](@ref) stores the callables
+untyped (`InitialConditions{Any,Any}`): nothing evaluates them once the state
+is initialized, and their closure types would otherwise enter the type of every
+residual and Jacobian closure, so each new initial-condition function would
+recompile the kernels and the integrator.
 """
 struct InitialConditions{FT,Fξ}
     T_initial::FT

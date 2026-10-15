@@ -464,8 +464,26 @@ using Pyrolysis.Discretization
 
             μ_mix = mixture_gas_viscosity(ξ, T, two_comp)
 
-            # Currently just returns effective_gas_viscosity
+            # Reads the material's own curve; `two_comp` leaves it at the
+            # SutherlandProperty() default, so this is the bare air value.
+            @test μ_mix == effective_gas_viscosity(T, two_comp)
             @test μ_mix ≈ effective_gas_viscosity(T) rtol = 1e-10
+
+            # TRIPWIRE — μ is a function of T alone. The production Darcy
+            # Jacobian is the ANALYTICAL override in
+            # `Jacobian/operators/darcy_transport.jl`, whose mobility chain rule
+            # assumes dμ/dξ == 0 and takes the ξ-path through κ only. If a
+            # composition-dependent rule (Wilke, option B) lands here, this
+            # assert is the thing that must fail loudly: the rtol = 1e-12
+            # analytical-vs-AD gate cannot catch the missing dμ/dξ terms while
+            # every Darcy fixture carries a single gas component, because a
+            # one-species mixture rule is the identity. When you intend to break
+            # this, also add the `− mob·dμ_dξ[j]` terms to every `dvg_dξ_*_j`
+            # expression in that override and land a multi-gas fixture first.
+            # See docs/Gas_Viscosity_Recommendation_2026-09-21.md §1 and §3.
+            for ξ_alt in ((500.0, 0.0), (500.0, 50.0), (10.0, 1.0), (0.0, 1.0))
+                @test mixture_gas_viscosity(ξ_alt, T, two_comp) == μ_mix
+            end
         end
 
         # ====================================================================
@@ -648,7 +666,7 @@ using Pyrolysis.Discretization
             i = 1:length(mesh.cells)
         ]
         P = zeros(length(mesh.cells))
-        compute_pressure!(P, φ, StateCache(mesh, two_comp), two_comp)
+        compute_pressure!(P, φ, StateCache(mesh, two_comp), mesh, two_comp)
 
         # Pressure should increase with temperature (P ∝ T at fixed ξ, φ)
         @test P[end] > P[1]
@@ -1786,6 +1804,10 @@ end  # ALE Integration tests
         # Compute pressure and permeability fields
         P = zeros(n_cells)
         κ = fill(1e-12, n_cells)  # Constant permeability
+        # Per-cell pore-gas viscosity, as `update_darcy_properties!` fills it.
+        μ_cells = [
+            mixture_gas_viscosity(mesh.cell_states[i].ξ, mesh.cell_states[i].T, two_comp) for i = 1:n_cells
+        ]
 
         for i = 1:n_cells
             state = mesh.cell_states[i]
@@ -1813,6 +1835,7 @@ end  # ALE Integration tests
             mesh,
             P,
             κ,
+            μ_cells,
             bc_set,
             top_face_ids,
             bottom_face_ids,
@@ -1843,6 +1866,9 @@ end  # ALE Integration tests
 
         P = fill(150000.0, n_cells)  # Elevated pressure
         κ = fill(1e-12, n_cells)
+        μ_cells = [
+            mixture_gas_viscosity(mesh.cell_states[i].ξ, mesh.cell_states[i].T, two_comp) for i = 1:n_cells
+        ]
         v_gas = zeros(n_faces)
 
         # NeumannPressureBC with zero gradient = impermeable
@@ -1857,6 +1883,7 @@ end  # ALE Integration tests
             mesh,
             P,
             κ,
+            μ_cells,
             bc_set,
             top_face_ids,
             bottom_face_ids,
@@ -1889,6 +1916,9 @@ end  # ALE Integration tests
         end
 
         κ = fill(1e-12, n_cells)
+        μ_cells = [
+            mixture_gas_viscosity(mesh.cell_states[i].ξ, mesh.cell_states[i].T, two_comp) for i = 1:n_cells
+        ]
         v_gas = zeros(n_faces)
 
         P_ext = 101325.0
@@ -1905,6 +1935,7 @@ end  # ALE Integration tests
             mesh,
             P,
             κ,
+            μ_cells,
             bc_set,
             top_face_ids,
             bottom_face_ids,

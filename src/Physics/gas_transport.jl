@@ -152,7 +152,7 @@ function compute_gas_fluxes!(
     cache::PropertyCache,
     material::Material{NC},
 ) where {NC}
-    n_faces_val = length(state.A_face)
+    n_faces_val = mesh.n_active_cells + 1
 
     fill!(J, zero(eltype(J)))
 
@@ -224,7 +224,7 @@ function compute_gas_fluxes_darcy_fick!(
     v_gas::AbstractVector,
     φ::AbstractVector,
 ) where {NC}
-    n_faces_val = length(state.A_face)
+    n_faces_val = mesh.n_active_cells + 1
 
     fill!(J, zero(eltype(J)))
 

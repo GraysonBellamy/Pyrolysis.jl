@@ -1,10 +1,8 @@
 """
-Regression test: when the solve has no sparse Jacobian prototype (the
-`handle_depletion` colored-FD path), an incompatible sparse linear solver
-must be swapped for a dense LU **inside the user's algorithm**, with a
-warning — pre-fix both fallback sites silently replaced the user's entire
-integrator (type, linsolve, autodiff) with a literal
-`KenCarp4(AutoFiniteDiff(), LUFactorization())`.
+When the solve has no sparse Jacobian prototype (a dense Jacobian backend),
+an incompatible sparse linear solver must be swapped for a dense LU **inside
+the user's algorithm**, with a warning, instead of the user's integrator
+(type, linsolve, autodiff) being replaced by a hard-coded default.
 """
 
 using Test
@@ -12,6 +10,7 @@ using Pyrolysis
 using LinearSolve: SparspakFactorization
 using OrdinaryDiffEq: Rodas5P
 using Pyrolysis.Solver: AutoFiniteDiff
+using Pyrolysis.Jacobian: DenseAD_ForwardDiff
 
 function _fallback_problem()
     mat = Material(
@@ -37,33 +36,39 @@ function _fallback_problem()
 end
 
 @testset "incompatible sparse linsolve warns, integrator survives" begin
-    # handle_depletion forces jac_spec === nothing (colored-FD, no sparse
-    # prototype) — the first fallback site. An explicit sparse linear_solver must
-    # warn and run with dense LU inside the USER'S constructor (Rodas5P),
-    # which the pre-fix code silently replaced with KenCarp4.
+    # The dense AD backend attaches no sparse prototype. An explicit sparse
+    # linear_solver must warn and run with dense LU inside the USER'S
+    # constructor (Rodas5P).
     sol =
         @test_logs (:warn, r"requires a sparse Jacobian prototype") match_mode = :any solve(
             _fallback_problem();
             use_ale = true,
-            handle_depletion = true,
+            jacobian = DenseAD_ForwardDiff(),
             integrator = Rodas5P,
             linear_solver = SparspakFactorization(),
+            progress = false,
         )
     @test sol.retcode == :Success
 
     # A fully constructed user algorithm with a sparse linsolve is REBUILT
     # (type + autodiff preserved), not replaced.
     alg = Rodas5P(autodiff = AutoFiniteDiff(), linsolve = SparspakFactorization())
-    sol2 = @test_logs (:warn, r"Rebuilding Rodas5P") match_mode = :any solve(
+    sol2 = @test_logs (:warn, r"Rebuilding .*Rodas5P") match_mode = :any solve(
         _fallback_problem();
         use_ale = true,
-        handle_depletion = true,
+        jacobian = DenseAD_ForwardDiff(),
         integrator = alg,
+        progress = false,
     )
     @test sol2.retcode == :Success
 
-    # Default path under depletion: the resolver now picks the dense LU
-    # directly — no warning, no silent integrator swap needed.
-    sol3 = solve(_fallback_problem(); use_ale = true, handle_depletion = true)
+    # Default path: the structured sparse Jacobian with its default sparse
+    # factorization, no warning.
+    sol3 = solve(
+        _fallback_problem();
+        use_ale = true,
+        handle_depletion = true,
+        progress = false,
+    )
     @test sol3.retcode == :Success
 end

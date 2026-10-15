@@ -146,9 +146,9 @@ function _conductivities(θ::AbstractVector, ::Val{3})
     # is itself linear in T (closed-form a_i, b_i below).
     k_v_lo, dk_v, k_c_lo, dk_c = θ[1], θ[2], θ[3], θ[4]
 
-    b_v = dk_v / (WP_T_V_HI - WP_T_V_LO);
+    b_v = dk_v / (WP_T_V_HI - WP_T_V_LO)
     a_v = k_v_lo - b_v * WP_T_V_LO
-    b_c = dk_c / (WP_T_C_HI - WP_T_C_LO);
+    b_c = dk_c / (WP_T_C_HI - WP_T_C_LO)
     a_c = k_c_lo - b_c * WP_T_C_LO
 
     int_ks = ntuple(4) do i
@@ -294,6 +294,10 @@ function build_material(
     # char (measured); intermediates interpolate between them by yield-progress.
     ρ_intr_int = ntuple(i -> wp_rho_intrinsic_intermediate(WP_INTERP_PROGRESS[i]), 4)
 
+    # The conductivity laws are linear in T with slopes drawn from the search
+    # box, so positivity over the property bracket is the optimizer bounds'
+    # job (WP_STAGE3_*_BOUNDS keep k > 0 over the anchor windows); a θ outside
+    # that must reach the objective, not throw at construction.
     Material(
         name = :WhitePine,
         components = (
@@ -303,6 +307,7 @@ function build_material(
                 ρ = WP_RHO_VIRGIN,
                 c = virgin_cp_func,
                 k = k_virgin,
+                validate_properties = false,
                 ε = ε_virgin,
                 α = 0.0,
                 λ = WP_LAMBDA_WOOD,
@@ -315,6 +320,7 @@ function build_material(
                 ρ = WP_RHO_INT[1],
                 c = int_cp_funcs[1],
                 k = k_int1,
+                validate_properties = false,
                 ε = ε_int[1],
                 α = 0.0,
                 λ = WP_LAMBDA_WOOD * 2.0,
@@ -326,6 +332,7 @@ function build_material(
                 ρ = WP_RHO_INT[2],
                 c = int_cp_funcs[2],
                 k = k_int2,
+                validate_properties = false,
                 ε = ε_int[2],
                 α = 0.0,
                 λ = WP_LAMBDA_WOOD * 5.0,
@@ -337,6 +344,7 @@ function build_material(
                 ρ = WP_RHO_INT[3],
                 c = int_cp_funcs[3],
                 k = k_int3,
+                validate_properties = false,
                 ε = ε_int[3],
                 α = 0.0,
                 λ = WP_LAMBDA_CHAR * 0.3,
@@ -348,6 +356,7 @@ function build_material(
                 ρ = WP_RHO_INT[4],
                 c = int_cp_funcs[4],
                 k = k_int4,
+                validate_properties = false,
                 ε = ε_int[4],
                 α = 0.0,
                 λ = WP_LAMBDA_CHAR * 0.7,
@@ -360,6 +369,7 @@ function build_material(
                 ρ = WP_RHO_CHAR,
                 c = char_cp_func,
                 k = k_char,
+                validate_properties = false,
                 ε = ε_char,
                 α = 0.0,
                 λ = WP_LAMBDA_CHAR,
@@ -372,6 +382,7 @@ function build_material(
                 ρ = WP_RHO_ASH,
                 c = ash_cp_func,
                 k = k_ash,
+                validate_properties = false,
                 ε = ε_ash,
                 α = 0.0,
                 λ = WP_LAMBDA_CHAR,
@@ -502,7 +513,11 @@ end
 # Boundary conditions
 # ============================================================================
 
-function build_bcs(scenario; use_emission_split::Bool = true)
+function build_bcs(
+    scenario;
+    use_emission_split::Bool = true,
+    blowing::AbstractBlowingModel = CouetteFilm(),
+)
     # Top BC — hemispherical decomposition. The cone subtends F_cone of the
     # sample's upper hemisphere; chamber walls fill the remaining (1−F_cone).
     # The Schmidt-Boelter flux gauge is calibrated cone-only (cold-wall
@@ -538,7 +553,7 @@ function build_bcs(scenario; use_emission_split::Bool = true)
         rad_flux +
         RadiativeBC(F = F_cone, T_inf = 0.0, validate = false) +
         RadiativeBC(F = 1.0 - F_cone, T_inf = scenario.T_top_surr) +
-        ConvectiveBC(h = scenario.h_top, T_inf = scenario.T_top_gas)
+        ConvectiveBC(h = scenario.h_top, T_inf = scenario.T_top_gas, blowing = blowing)
     top_mass = DiffusiveMassBC(0.05) + DirichletPressureBC(101325.0)
 
     # Bottom: free to surroundings, impermeable.
@@ -546,7 +561,7 @@ function build_bcs(scenario; use_emission_split::Bool = true)
     # back surface measurement target), independent of decomposition state.
     bottom_thermal =
         RadiativeBC(ε = scenario.ε_bottom, T_inf = scenario.T_bot_surr) +
-        ConvectiveBC(h = scenario.h_bot, T_inf = scenario.T_bot_gas)
+        ConvectiveBC(h = scenario.h_bot, T_inf = scenario.T_bot_gas, blowing = blowing)
     bottom_mass = ImpermeableBC()
 
     BoundaryConditionSet(
@@ -603,14 +618,13 @@ solve cost on MaCFP-shape problems. Newton absorbs the approximation by
 taking a few extra iterations; for inverse analysis where the same problem
 shape is solved hundreds of times this is a clear win.
 
-`use_blowing_correction` is ON by default for this inverse analysis: every
-`ConvectiveBC` in the surface BC set has its film coefficient rescaled by the
+`blowing` is the blowing model every `ConvectiveBC` of the surface BC set
+carries, `CouetteFilm()` by default: the film coefficient is rescaled by the
 Couette-film factor `B/(exp(B)−1)`, `B = ṁ″·c_p,g/h`, so outgassing pyrolysate
-suppresses convective gain/loss at the hot face. The flag is threaded into both
-the residual (via `solve`) and the Jacobian (via the explicit `JacobianSpec`
-and `solve`'s internal default), keeping them consistent. NOTE: enabling this
-changes the forward model, so conductivities fit without it are no longer
-optimal — re-run the calibration.
+suppresses convective gain/loss at the hot face. The model sits on the BC, so
+the residual and the Jacobian see the same physics. NOTE: changing the model
+changes the forward model, so conductivities fit with another one are no
+longer optimal — re-run the calibration.
 """
 function build_and_solve(
     θ::AbstractVector,
@@ -621,7 +635,7 @@ function build_and_solve(
     log_level::Union{Nothing,Logging.LogLevel} = nothing,
     kinetics_set::Symbol = :constant,
     use_transpiration_bc::Bool = false,
-    use_blowing_correction::Bool = true,
+    blowing::AbstractBlowingModel = CouetteFilm(),
     use_emission_split::Bool = true,
     kinetics_dE = ntuple(_ -> 0.0, 5),
     jacobian_strategy::Union{Nothing,LinearSolveStrategy} = nothing,
@@ -638,7 +652,7 @@ function build_and_solve(
         use_emission_split = use_emission_split,
         kinetics_dE = kinetics_dE,
     )
-    bc_set = build_bcs(scenario; use_emission_split = use_emission_split)
+    bc_set = build_bcs(scenario; use_emission_split = use_emission_split, blowing = blowing)
 
     T0 = scenario.T_initial === nothing ? scenario.T_bot_surr(0.0) : scenario.T_initial
 
@@ -663,7 +677,7 @@ function build_and_solve(
         0.0,                    # 14
     )
     ξ_initial_funcs = [
-        let v = ξ0[j];
+        let v = ξ0[j]
             _ -> v
         end for j = 1:NC_WP
     ]
@@ -702,7 +716,6 @@ function build_and_solve(
                 use_ale = true,
                 radiation_model = SURFACE_ABSORPTION,
                 use_transpiration_bc = use_transpiration_bc,
-                use_blowing_correction = use_blowing_correction,
                 min_thickness = 0.5e-3,
             )
 
@@ -722,7 +735,6 @@ function build_and_solve(
             handle_depletion = false,
             jacobian = jac_spec,
             use_transpiration_bc = use_transpiration_bc,
-            use_blowing_correction = use_blowing_correction,
             integrator = KenCarp4(linsolve = SparspakFactorization()),
         )
         if log_level === nothing

@@ -44,9 +44,12 @@ For comparison with in-depth absorption, see example 06_cone_calorimeter.jl
 which uses α = 1.47 m²/kg with radiation_model = BEER_LAMBERT.
 """
 
-# Temperature-dependent properties for PMMA (piecewise at T = 378 K)
-pmma_cp = CallableProperty(T -> T < 378.0 ? (-2290.0 + 11.2 * T) : (1040.0 + 3.08 * T))
-pmma_k = CallableProperty(T -> T < 378.0 ? 0.15 : (0.34 - 3.9e-4 * T))
+# Temperature-dependent properties for PMMA (piecewise at T = 378 K); the fits
+# are held constant outside their ~300–700 K measured range (see example 06).
+pmma_cp = CallableProperty(
+    T -> T < 378.0 ? (-2290.0 + 11.2 * max(T, 300.0)) : (1040.0 + 3.08 * T),
+)
+pmma_k = CallableProperty(T -> T < 378.0 ? 0.15 : (0.34 - 3.9e-4 * min(T, 700.0)))
 
 pmma = Material(
     name = :PMMA_surface_abs,

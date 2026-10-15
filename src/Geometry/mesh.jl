@@ -23,10 +23,15 @@ Used to properly resolve the surface temperature that satisfies energy balance:
 - `Δz_half::Float64`: Distance from boundary to cell center [m]
 - `converged::Bool`: Did Newton iteration converge?
 - `iterations::Int`: Number of iterations used
-- `blowing_mcp::Float64`: Net blowing conductance `ṁ″·c_p,g = Σ_g ṁ_g·cp_g(T_s)`
-  [W/(m²·K)] at the converged `T_s` (see `Discretization.blowing_factor`).
-  Zero when the blowing correction is off. Diagnostic consumers recover the
-  per-BC correction factor as `blowing_factor(blowing_mcp / h)`.
+- `blowing_mcp::Float64`: Blowing conductance `ṁ″·c_p,g = Σ_g ṁ_g·cp_g(T_s)`
+  [W/(m²·K)] of the gas leaving the face at the converged `T_s`.
+- `blowing_ratio::Float64`: Ratio `χ = h/h₀` the first convective member of the
+  thermal BC applied at the converged `T_s` (1 without outflow or without a
+  blowing model).
+- `pooling_factor::Float64`, `face_fraction::Float64`, `face_buoyancy::Float64`:
+  the pooling factor `ψ`, the face mass fraction of the volatiles and the face
+  buoyancy `Λ` of a `PoolingFilm` model (1, 0 and 1 for every other model).
+  See `Discretization.blowing_state`.
 """
 mutable struct BoundaryState
     T_surface::Float64
@@ -38,10 +43,20 @@ mutable struct BoundaryState
     Δz_half::Float64
     converged::Bool
     iterations::Int
+    # Blowing diagnostics at the converged surface temperature: the blowing
+    # conductance ṁ″·c_p,g [W/(m²·K)] of the gas leaving the face, the ratio
+    # χ = h/h₀ the convective boundary applied, and for a pooling model the
+    # pooling factor ψ, the face mass fraction of the volatiles and the face
+    # buoyancy Λ (1, 0 and 1 for the other models).
     blowing_mcp::Float64
+    blowing_ratio::Float64
+    pooling_factor::Float64
+    face_fraction::Float64
+    face_buoyancy::Float64
 end
 
-# Backward-compatible 9-argument constructor (every pre-blowing call site).
+# The surface-solve inputs and outcome; the blowing diagnostics start at their
+# no-outflow values.
 function BoundaryState(
     T_surface::Real,
     q_applied::Real,
@@ -64,6 +79,10 @@ function BoundaryState(
         converged,
         iterations,
         0.0,
+        1.0,
+        1.0,
+        0.0,
+        1.0,
     )
 end
 

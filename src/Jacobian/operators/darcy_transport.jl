@@ -17,7 +17,8 @@ AD closure from cell-local `(P, κ, μ)`:
 - `P_i = ideal_gas_pressure(ξ_i, T_i, φ_i, material)` with `φ_i =
   porosity(ξ_i, T_i, material)`,
 - `κ_i = effective_permeability(ξ_i, T_i, material)`,
-- `μ_i = effective_gas_viscosity(T_i)` (Sutherland),
+- `μ_i = mixture_gas_viscosity(ξ_i, T_i, material)` (the material's own curve;
+  Sutherland air by default),
 - `mob_face` = distance-weighted harmonic mean of `κ/μ`,
 - `v_g_face = -mob_face · (P_R − P_L)/d_LR`.
 
@@ -66,6 +67,7 @@ using ..Properties:
     effective_heat_capacity,
     effective_permeability,
     effective_gas_viscosity,
+    mixture_gas_viscosity,
     porosity,
     harmonic_mean_weighted
 using ..Physics: gas_flux_darcy_fick, ideal_gas_pressure
@@ -144,8 +146,8 @@ end
 end
 
 @inline function _dt_unpack_stencil(x::AbstractVector, NC::Int)
-    @inbounds T_L = x[1];
-    @inbounds T_C = x[2];
+    @inbounds T_L = x[1]
+    @inbounds T_C = x[2]
     @inbounds T_R = x[3]
     ξ_L = ntuple(j -> @inbounds(x[3+j]), NC)
     ξ_C = ntuple(j -> @inbounds(x[3+NC+j]), NC)
@@ -251,7 +253,7 @@ function apply_cell!(
     φ_C = porosity(ξ_C, T_C, material)
     P_C = ideal_gas_pressure(ξ_C, T_C, φ_C, material)
     κ_C = effective_permeability(ξ_C, T_C, material)
-    μ_C = effective_gas_viscosity(T_C)
+    μ_C = mixture_gas_viscosity(ξ_C, T_C, material)
 
     # Left face flux per component.
     J_left = if has_left
@@ -260,7 +262,7 @@ function apply_cell!(
         φ_L = porosity(ξ_L, T_L, material)
         P_L = ideal_gas_pressure(ξ_L, T_L, φ_L, material)
         κ_L = effective_permeability(ξ_L, T_L, material)
-        μ_L = effective_gas_viscosity(T_L)
+        μ_L = mixture_gas_viscosity(ξ_L, T_L, material)
         mob_face = _dt_mobility_face(κ_L, κ_C, μ_L, μ_C, d_L_face, d_LC - d_L_face)
         v_g_L = -mob_face * (P_C - P_L) / d_LC
         _dt_face_fluxes(T_L, T_C, ξ_L, ξ_C, φ_L, φ_C, λ_face_L, v_g_L, d_LC, material)
@@ -275,7 +277,7 @@ function apply_cell!(
         φ_R = porosity(ξ_R, T_R, material)
         P_R = ideal_gas_pressure(ξ_R, T_R, φ_R, material)
         κ_R = effective_permeability(ξ_R, T_R, material)
-        μ_R = effective_gas_viscosity(T_R)
+        μ_R = mixture_gas_viscosity(ξ_R, T_R, material)
         mob_face = _dt_mobility_face(κ_C, κ_R, μ_C, μ_R, d_R_face, d_CR - d_R_face)
         v_g_R = -mob_face * (P_R - P_C) / d_CR
         _dt_face_fluxes(T_C, T_R, ξ_C, ξ_R, φ_C, φ_R, λ_face_R, v_g_R, d_CR, material)
@@ -401,7 +403,7 @@ end
         d_L_face = abs(state.face_positions[f_left] - state.cell_centers[iL])
         d_LC = abs(state.cell_centers[i] - state.cell_centers[iL])
     else
-        d_L_face = 1.0;
+        d_L_face = 1.0
         d_LC = 1.0
     end
     if has_right
@@ -409,7 +411,7 @@ end
         d_R_face = abs(state.face_positions[f_right] - state.cell_centers[i])
         d_CR = abs(state.cell_centers[iR] - state.cell_centers[i])
     else
-        d_R_face = 1.0;
+        d_R_face = 1.0
         d_CR = 1.0
     end
     return (
@@ -491,8 +493,9 @@ end
 #     mobility, and v_g = -mob_face · ΔP / d.
 #   • pressure-path:  P_L, P_R = ideal_gas_pressure(ξ, T, φ(ξ, T), …).
 # `_harmonic_mean_with_derivs` (lifted in `operators/conduction.jl`) is reused
-# for both the λ_face and mob_face derivatives. `μ` is `effective_gas_viscosity(T)`
-# (Sutherland) — `dμ/dT` from `ForwardDiff.derivative` on the scalar function.
+# for both the λ_face and mob_face derivatives. `μ` is the material's own
+# `gas_viscosity` curve via `effective_gas_viscosity(T, material)` — `dμ/dT` from
+# `ForwardDiff.derivative` on that scalar function, so any correlation works.
 # ============================================================================
 
 struct _DTPropTag end
@@ -594,12 +597,24 @@ end
     return (λ, dλ_dT, dλ_dξ, P, dP_dT, dP_dξ, κ, dκ_dT, dκ_dξ, φ, dφ_dT, dφ_dξ)
 end
 
-# Sutherland viscosity + scalar derivative w.r.t. T. Length-1 Dual via
-# `ForwardDiff.derivative` so the formula stays in lockstep with
-# `effective_gas_viscosity` (no hand-coded constants here).
-@inline function _dt_viscosity_with_dT(T::Float64)
-    μ = effective_gas_viscosity(T)
-    dμ_dT = ForwardDiff.derivative(effective_gas_viscosity, T)
+# Pore-gas viscosity + scalar derivative w.r.t. T, from the MATERIAL's own
+# curve. Length-1 Dual via `ForwardDiff.derivative` so the derivative stays in
+# lockstep with whatever correlation the material carries — no hand-coded
+# constants here, and a user-supplied polynomial differentiates as correctly as
+# the default Sutherland form.
+#
+# INVARIANT: μ is a function of T alone, so `dμ/dξ == 0` and the mobility path's
+# ξ-partials below come only from κ. `mixture_gas_viscosity` ignores ξ by design
+# (see its docstring). If that ever changes — the Wilke/option-B direction — this
+# helper must also return `dμ_dξ::NTuple{NC}` and EVERY `dvg_dξ_*_j` expression
+# below must gain a `− mob_*_cell * dμ_*_dξ[j]` term inside its `dmf` factor.
+# Missing that leaves the Jacobian silently stale: the rtol = 1e-12
+# analytical-vs-AD gate cannot see it while every Darcy fixture carries a single
+# gas component, since a one-species mixture rule is the identity. See
+# `docs/Gas_Viscosity_Recommendation_2026-09-21.md` §1.
+@inline function _dt_viscosity_with_dT(T::Float64, material)
+    μ = effective_gas_viscosity(T, material)
+    dμ_dT = ForwardDiff.derivative(t -> effective_gas_viscosity(t, material), T)
     return μ, dμ_dT
 end
 
@@ -694,7 +709,7 @@ function _contribute_to_jacobian_analytical!(
     is_gas_t = _gt_is_gas_tuple(material.components, Val(NC))
     is_gen = !isnan(T_ref)
 
-    @inbounds for i = 1:n_cells
+    @inbounds for i = 1:mesh.n_active_cells
         geom = _dt_geometry(state, mesh, i)
         has_left = geom.has_left
         has_right = geom.has_right
@@ -723,7 +738,7 @@ function _contribute_to_jacobian_analytical!(
             dφ_C_dT,
             dφ_C_dξ,
         ) = _dt_props_at_cell(ξ_C, T_C, material)
-        μ_C, dμ_C_dT = _dt_viscosity_with_dT(T_C)
+        μ_C, dμ_C_dT = _dt_viscosity_with_dT(T_C, material)
         mob_C_cell = κ_C / μ_C
         inv_μ_C = 1.0 / μ_C
         inv_ρcp = 1.0 / ρcp
@@ -743,20 +758,20 @@ function _contribute_to_jacobian_analytical!(
         # energy row is owned whole by `BCConvectionOperator`), zeroing every
         # S_conv accumulator while the ξ-rows and S_gen pieces still assemble.
         if has_left && has_right
-            T_L = u[iL];
+            T_L = u[iL]
             T_R = u[iR]
             dTdx = opposite_distance_gradient(T_L, T_C, T_R, geom.d_LC, geom.d_CR)
             (ddTdx_dT_L, ddTdx_dT_C, ddTdx_dT_R) =
                 opposite_distance_gradient_coeffs(geom.d_LC, geom.d_CR)
         elseif has_right
-            T_R = u[iR];
+            T_R = u[iR]
             T_L = T_C
             dTdx = 0.0
             ddTdx_dT_L = 0.0
             ddTdx_dT_C = 0.0
             ddTdx_dT_R = 0.0
         else
-            T_L = u[iL];
+            T_L = u[iL]
             T_R = T_C
             dTdx = 0.0
             ddTdx_dT_L = 0.0
@@ -800,7 +815,7 @@ function _contribute_to_jacobian_analytical!(
                 dφ_L_dT,
                 dφ_L_dξ,
             ) = _dt_neighbor_props(ξ_L, T_L, material)
-            μ_L, dμ_L_dT = _dt_viscosity_with_dT(T_L)
+            μ_L, dμ_L_dT = _dt_viscosity_with_dT(T_L, material)
             mob_L_cell = κ_L / μ_L
             inv_μ_L = 1.0 / μ_L
 
@@ -978,7 +993,7 @@ function _contribute_to_jacobian_analytical!(
                 dφ_R_dT,
                 dφ_R_dξ,
             ) = _dt_neighbor_props(ξ_R, T_R, material)
-            μ_R, dμ_R_dT = _dt_viscosity_with_dT(T_R)
+            μ_R, dμ_R_dT = _dt_viscosity_with_dT(T_R, material)
             mob_R_cell = κ_R / μ_R
             inv_μ_R = 1.0 / μ_R
 
@@ -1242,7 +1257,8 @@ function _contribute_to_jacobian_ad!(
     A = jac.A
     smap = jac.smap
 
-    @inbounds for i = 1:n_cells
+    n_live = mesh.n_active_cells
+    @inbounds for i = 1:n_live
         geom = _dt_geometry(state, mesh, i)
 
         f! = let geom = geom, material = material, NC = NC, T_ref = T_ref
@@ -1276,7 +1292,7 @@ function _contribute_to_jacobian_ad!(
         ForwardDiff.jacobian!(ws.J_local, f!, ws.f_buf, ws.x_buf, ws.cfg)
 
         iL = i == 1 ? 0 : i - 1
-        iR = i == n_cells ? 0 : i + 1
+        iR = i == n_live ? 0 : i + 1
 
         function _scatter_row(block_row::Int, gr::Int)
             if iL != 0

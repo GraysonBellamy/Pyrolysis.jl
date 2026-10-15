@@ -183,8 +183,8 @@ dual part or silently coerce to `Float64`. The package satisfies this:
   promoted dual type (`src/Physics/kinetics.jl:75–111`).
 
 The time integrator (`KenCarp4` by default, with
-`autodiff=AutoFiniteDiff()` for its *internal* Newton Jacobian and
-`SparspakFactorization` for the linear solve) does **not** need to be
+`autodiff=AutoFiniteDiff()` for its *internal* Newton Jacobian and the
+default sparse factorization for the linear solve) does **not** need to be
 dual-aware: ForwardDiff differentiates the *output of the converged solve*, not
 the integrator's internal Jacobian. OrdinaryDiffEq's `solve` is itself a
 differentiable program, and SciMLSensitivity supplies the dual-compatible
@@ -632,8 +632,8 @@ distance-weighted harmonic mean used for face $k_f,\lambda_f,\kappa_f$ (§5.12)
 and the smooth (rather than `min`/`max`) constructions in the gates keep the
 discrete operators differentiable. The few genuinely non-smooth operations that
 remain — `clamp` on porosity/temperature, `max` in the depletion clamp, and the
-state-vector `resize!` at depletion events — are localized and are exactly the
-pitfalls catalogued next.
+state rewrite at park events — are localized and are exactly the pitfalls
+catalogued next.
 
 > **Implementation note.** The smoothness-critical kernels are
 > `reaction_rate` (`src/Physics/kinetics.jl`), `Δh` /
@@ -678,27 +678,16 @@ vanishes, a hard switch that is correct physically but non-differentiable.
 **Rule:** use $C^1$ shrinkage laws for sensitivity studies, and avoid evaluating
 at $\bar\chi$ values where the law has a corner or where $\mathrm{law}(\bar\chi)\to 0$.
 
-### 17.7.3 Depletion-callback discontinuities and state resizing
+### 17.7.3 Park-event discontinuities
 
-The surface-depletion path merges thin cells and **resizes the state vector**
-mid-solve (`resize!(integrator, …)`, `src/Solver/callbacks.jl`). This is doubly
-hostile to differentiation:
-
-1. The energy-conserving merge changes the *dimension and identity* of the state,
-   so $\mathbf{u}(t)$ is not a smooth function of $\boldsymbol{\theta}$ across a
-   merge event — a perturbation that shifts the merge *time* produces a jump in
-   the trajectory. The map is only piecewise smooth.
-2. The mechanism is **incompatible with pluggable Jacobian backends**: when
-   `handle_depletion=true`, `solve` sets `jac_spec=nothing` and falls back to the
-   integrator's colored finite-difference Jacobian (`src/Solver/solve.jl:336–341`).
-   Adjoint sensitivity, which needs a stable differentiable solve, cannot be run
-   through a resizing solve. (Solver KB open question 2 asks whether this can be
-   reconciled.)
-
-**Rule:** for sensitivity and inverse analysis, prefer ALE *without*
-`handle_depletion`, or use a thickness-termination cutoff (`min_thickness`)
-rather than cell merging; if depletion is unavoidable, restrict adjoint use to
-$\boldsymbol{\theta}$ regions where no merge event is crossed.
+The depletion path (§14.3) parks a depleted cell: it merges the cell into a
+neighbour and moves the freed slot above the live surface, rewriting the state
+vector in place. The state keeps its size and the structured Jacobian keeps
+working, but the rewrite is a **discrete event**: a perturbation of
+$\boldsymbol{\theta}$ that shifts a park *time* produces a jump in the
+trajectory, so $\mathbf{u}(t)$ is only piecewise smooth in the parameters. Forward
+sensitivities are valid on horizons without park events; adjoint sensitivity,
+which needs a differentiable solve path, cannot be run through a park event.
 
 ### 17.7.4 Arrhenius $(A,E)$ ill-conditioning
 
@@ -790,12 +779,11 @@ global indices, all sharing one immutable-problem / mutable-workspace harness.
 Drawing on the open questions recorded in the solver and kinetics knowledge
 bases:
 
-1. **Depletion ↔ adjoint incompatibility (open).** Cell-merge state resizing
-   cannot survive a pluggable/immutable Jacobian cache, so adjoint sensitivity
-   cannot currently run through a depleting (`handle_depletion=true`) solve;
-   `solve` falls back to a colored-FD Jacobian and the trajectory is only
-   piecewise smooth across merge events. Reconciling resizing with a
-   differentiable solve path is an open design problem (Solver KB Q2).
+1. **Adjoint sensitivity across park events (open).** A park is a discrete
+   rewrite of the state, so the trajectory is only piecewise smooth across
+   events and adjoint sensitivity cannot run through a depleting
+   (`handle_depletion=true`) horizon that contains one. Reconciling the event
+   with a differentiable solve path is an open design problem (Solver KB Q2).
 
 2. **Warm-start in sensitivity loops (open).** Whether — and how — reusing a
    prior solution's final state as a fresh initial condition perturbs sensitivity
