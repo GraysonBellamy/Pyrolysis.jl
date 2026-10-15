@@ -515,9 +515,9 @@ Solve a pyrolysis problem using DifferentialEquations.jl.
   (ThermaKin Eq.17 convention); enabling this alongside S_conv double-counts and is rejected
   at problem construction. Retained only for closed-ledger experiments with S_conv disabled.
 - `warm_start=nothing`: Reuse a prior `PyrolysisSolution`'s final state as the initial state
-  (`u0`). Component count, mesh size, and ALE/χ modes must match. `tspan[1]` still defines
-  the integrator's start time, so the warm-started solve treats the prior final state as
-  fresh initial data.
+  (`u0`). Component count, mesh size, and ALE/χ modes must match, and the prior solve must
+  not have parked cells. `tspan[1]` still defines the integrator's start time, so the
+  warm-started solve treats the prior final state as fresh initial data.
 
 # Jacobian backend
 
@@ -1117,6 +1117,8 @@ Overwrite `u0` with the final raw state from a prior `PyrolysisSolution`.
 
 Compatibility checks:
 - `prev.raw_solution` must exist (the prior solve must have populated it).
+- The previous solve must not have parked cells: its final state holds ghost
+  slots, and a new solve starts with every cell live.
 - The previous problem's component count must match `n_components(layout)`.
 - The previous final state vector length must match `length(u0)`. This implicitly
   enforces matching mesh size, ALE/Eulerian mode, and χ mode, since those drive
@@ -1132,6 +1134,13 @@ function _apply_warm_start!(
         error(
             "warm_start: previous solution has no raw_solution. " *
             "The prior solve() may have failed before extraction.",
+        )
+    end
+    if !isempty(prev.extras.park_times)
+        error(
+            "warm_start: the previous solve parked $(length(prev.extras.park_times)) " *
+            "cell(s), so its final state holds ghost slots, while a new solve starts " *
+            "with every cell live. Warm-start only from a solve without park events.",
         )
     end
     prev_NC = n_components(prev.problem.material)
