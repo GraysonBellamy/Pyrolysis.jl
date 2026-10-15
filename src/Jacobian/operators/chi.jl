@@ -187,8 +187,6 @@ function contribute_to_jacobian!(
     A_section = Float64(state.A_section[])
     n_cells = layout.n_cells
     χ_off = chi_offset(layout)
-    z_off = z_offset(layout)
-    is_ale = !isempty(state.z)
     m_init = mesh.m_dry_solid_initial
     A_jac = jac.A
     smap = jac.smap

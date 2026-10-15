@@ -260,11 +260,10 @@ function _emit_chi_pattern!(
     n = layout.n_cells
     NC = n_components(layout)
     chi_off = _chi_offset(layout, mode)
-    is_ale = mesh_mode(mode) isa ALE
     is_full = profile === :full
 
-    # χ-row dependencies for each cell:
-    #   χ_i ← T_i, ξ_·,i, z_i, z_{i+1}   (z entries only when ALE)
+    # χ-row dependencies for each cell (WithChi is ALE-only):
+    #   χ_i ← T_i, ξ_·,i, z_i, z_{i+1}
     # plus the structural diagonal χ_i ← χ_i.
     for i = 1:n
         χ_row = chi_off + i
@@ -276,7 +275,7 @@ function _emit_chi_pattern!(
             push!(I, χ_row)
             push!(J, _xi_idx(layout, j, i))  # ξ_{j,i}
         end
-        if is_ale && is_full
+        if is_full
             push!(I, χ_row)
             push!(J, _z_idx(layout, i))      # z_i
             push!(I, χ_row)
@@ -306,11 +305,9 @@ function _emit_chi_pattern!(
             end
 
             # z rows (k = 2..n_nodes; node 1 fixed)
-            if is_ale
-                for k = 2:layout.n_nodes
-                    push!(I, _z_idx(layout, k))
-                    push!(J, χ_col)
-                end
+            for k = 2:layout.n_nodes
+                push!(I, _z_idx(layout, k))
+                push!(J, χ_col)
             end
 
             # χ rows

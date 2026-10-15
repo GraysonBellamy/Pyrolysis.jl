@@ -51,7 +51,19 @@ using ..Discretization: RHSCache, Limiter, VANLEER
         radiation_model === BEER_LAMBERT ? BeerLambert() : NoRadiation()
     trans_t = has_darcy_flow(problem.material) ? DarcyFick() : Fickian()
     # χ trait follows the material: identity (no law) → NoChi; otherwise WithChi.
-    chi_t = problem.material.lateral_shrinkage_law === nothing ? NoChi() : WithChi()
+    # Only the ALE residual evolves χ and the cross-section it drives.
+    law = problem.material.lateral_shrinkage_law
+    if law !== nothing && !use_ale
+        throw(
+            ArgumentError(
+                "material $(problem.material.name) has a lateral_shrinkage_law, which " *
+                "needs the ALE mesh: on the fixed mesh neither the pyrolysis progress " *
+                "χ nor the cross-section area evolves. Solve with use_ale = true, or " *
+                "build the material without a lateral_shrinkage_law.",
+            ),
+        )
+    end
+    chi_t = law === nothing ? NoChi() : WithChi()
     return SimulationMode(;
         mesh = mesh_t,
         radiation = rad_t,

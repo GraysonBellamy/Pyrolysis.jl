@@ -18,7 +18,8 @@ core residual matrix:
 
 - `{Eulerian, ALE}` × `{Fickian, DarcyFick}` ×
   `{NoRadiation, SurfaceAbsorption, BeerLambert}` ×
-  `{NoChi, WithChi}` × `{:standard, :with_generation_sink}`.
+  `{NoChi, WithChi}` × `{:standard, :with_generation_sink}`, with `WithChi`
+  under ALE only.
 
 # Backend × strategy is orthogonal
 
@@ -263,14 +264,10 @@ function _build_ops_cache(
     gas_transport_ws = is_darcy ? nothing : build_gas_transport_workspace(material)
     darcy_ws = is_darcy ? build_darcy_transport_workspace(material) : nothing
 
-    # ALE-related workspaces — both ALE and (Eulerian + WithChi) need a
-    # mesh-velocity workspace because `ChiOperator` reads `dA_dχ` from it
-    # and that is computed by `compute_theta_A_derivatives!` regardless of
-    # mesh motion. The advection workspace and geometry-AD cache stay
-    # strictly ALE-only.
-    need_mesh_vel_ws = is_ale || is_with_chi
+    # ALE workspaces. `ChiOperator` reads `dA_dχ` from the mesh-velocity
+    # workspace; WithChi exists only under ALE (`to_problem_def`).
     ale_mesh_vel_ws =
-        need_mesh_vel_ws ?
+        is_ale ?
         build_ale_mesh_velocity_workspace(material, layout.n_cells, layout.n_nodes) :
         nothing
     ale_advection_ws =
@@ -481,18 +478,6 @@ function _compute_jacobian!(
             chi_mode_tag,
             size(cache.jac.A, 1);
             assembly_profile = cache.assembly_profile,
-        )
-    elseif cache.is_with_chi
-        # Eulerian + WithChi: no ALE advection / mesh velocity, but
-        # `ChiOperator` still needs `dA_dχ` for the χ-row × χ-col rank-1.
-        idx_dry = dry_pyrolysis_gas_indices(cache.material)
-        compute_theta_A_derivatives!(
-            cache.ale_mesh_vel_ws,
-            ws.state_cache,
-            cache.mesh,
-            cache.material,
-            cache.layout,
-            idx_dry,
         )
     end
 

@@ -13,10 +13,7 @@ include(joinpath(@__DIR__, "..", "perf", "perf_helpers.jl"))
 # `WithChi`; non-zero permeability triggers `DarcyFick`; SURFACE_ABSORPTION
 # is the canonical radiation model for the cone-calorimeter shape).
 # ---------------------------------------------------------------------------
-function _build_ale_withchi_darcy_surface_absorption(;
-    n_cells = PERF_N_CELLS,
-    use_ale = true,
-)
+function _build_ale_withchi_darcy_surface_absorption(; n_cells = PERF_N_CELLS)
     solid =
         SolidComponent(:wood, ρ = 500.0, c = 1500.0, k = 0.15, ε = 0.9, κ = 1e-14, λ = 1e-5)
     gas = GaseousComponent(:pyrgas, M = 0.06, c = 1800.0, k = 0.03, λ = 5e-5)
@@ -33,7 +30,7 @@ function _build_ale_withchi_darcy_surface_absorption(;
         PyrolysisProblem(mesh = mesh, material = mat, bc_set = bc, tspan = (0.0, 100.0))
     def, ws, u = initialize_state(
         problem;
-        use_ale = use_ale,
+        use_ale = true,
         radiation_model = SURFACE_ABSORPTION,
         radiation_intensity = 50e3,
     )
@@ -137,10 +134,6 @@ end
         ("ale_no_radiation", build_ale_no_radiation),
         ("ale_beer_lambert_darcy_moderate", build_ale_beer_lambert_darcy_moderate),
         ("ale_withchi", _build_ale_withchi_darcy_surface_absorption),
-        (
-            "eulerian_withchi",
-            () -> _build_ale_withchi_darcy_surface_absorption(use_ale = false),
-        ),
     )
     for (name, builder) in builders, strategy in (DirectSolve(), ApproxSolve())
         @testset "$name, $(nameof(typeof(strategy)))" begin
@@ -193,10 +186,6 @@ end
         ("ale_no_radiation", build_ale_no_radiation),
         ("ale_beer_lambert_darcy_moderate", build_ale_beer_lambert_darcy_moderate),
         ("ale_withchi", _build_ale_withchi_darcy_surface_absorption),
-        (
-            "eulerian_withchi",
-            () -> _build_ale_withchi_darcy_surface_absorption(use_ale = false),
-        ),
     )
     for (name, builder) in builders, profile in (:full, :ale_reduced)
         @testset "$name, $profile" begin
