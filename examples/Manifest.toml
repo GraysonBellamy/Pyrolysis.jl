@@ -394,19 +394,6 @@ version = "7.21.2"
     Tracker = "9f7883ad-71c0-57eb-9f7f-b5c9e6d3789c"
     Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
 
-[[deps.DiffEqCallbacks]]
-deps = ["ConcreteStructs", "DataStructures", "DiffEqBase", "DifferentiationInterface", "LinearAlgebra", "Markdown", "PrecompileTools", "RecipesBase", "RecursiveArrayTools", "SciMLBase", "StaticArraysCore"]
-git-tree-sha1 = "74d18419405b8c196f8443aa9be9c6527bd3e6e2"
-registries = "General"
-uuid = "459566f4-90b8-5000-8ac3-15dfb0a30def"
-version = "4.19.4"
-
-    [deps.DiffEqCallbacks.extensions]
-    DiffEqCallbacksFunctorsExt = "Functors"
-
-    [deps.DiffEqCallbacks.weakdeps]
-    Functors = "d9f16b24-f501-4c13-a1f2-28368ffc5196"
-
 [[deps.DiffResults]]
 deps = ["StaticArraysCore"]
 git-tree-sha1 = "782dd5f4561f5d267313f23853baaaa4c52ea621"
@@ -1777,7 +1764,7 @@ weakdeps = ["ForwardDiff"]
     PureKLUForwardDiffExt = "ForwardDiff"
 
 [[deps.Pyrolysis]]
-deps = ["ADTypes", "CommonSolve", "DiffEqCallbacks", "Distributed", "FiniteDiff", "ForwardDiff", "IncompleteLU", "Krylov", "LinearAlgebra", "LinearSolve", "OrdinaryDiffEq", "OrdinaryDiffEqSDIRK", "PrecompileTools", "Printf", "ProgressMeter", "RecursiveFactorization", "SciMLBase", "SparseArrays", "Sparspak", "StaticArrays"]
+deps = ["ADTypes", "CommonSolve", "Distributed", "FiniteDiff", "ForwardDiff", "FunctionWrappers", "IncompleteLU", "Krylov", "LinearAlgebra", "LinearSolve", "OrdinaryDiffEq", "OrdinaryDiffEqSDIRK", "PrecompileTools", "Printf", "ProgressMeter", "RecursiveFactorization", "SciMLBase", "SparseArrays", "Sparspak", "StaticArrays"]
 path = ".."
 uuid = "910b54fb-7370-4696-a92c-2242b531a32e"
 version = "0.1.0"

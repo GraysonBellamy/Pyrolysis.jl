@@ -1,7 +1,7 @@
 """
 Diagnostics callback infrastructure.
 
-Builds a `DiscreteCallback` (DiffEqCallbacks-compatible) that fires every
+Builds a `DiscreteCallback` that fires every
 `stride` accepted timesteps (and at the final time) to:
 
 1. Update the running mass / energy / reaction trackers with this substep's
@@ -15,6 +15,7 @@ on every solve. The log is connected to `PyrolysisSolution.extras`.
 """
 
 using SciMLBase: DiscreteCallback, derivative_discontinuity!
+using FunctionWrappers: FunctionWrapper
 
 # Row type — concretely typed so consumers don't have to deal with
 # Dict{Symbol,Any}. Adding a new diagnostic adds a field here, not a key.
@@ -172,21 +173,27 @@ function snapshot_diagnostics_row(t::Float64, mesh::Geometry.Mesh1D, material)
 end
 
 """
-    DiagnosticsCallback(record!::Function)
+    DiagnosticsCallback(record!)
 
 Construct a `DiscreteCallback` that fires every accepted step and runs
-`record!(integrator)`. It only observes the state, so it clears the
+`record!(u, t)` on the integrator's state `u::Vector{Float64}` and time
+`t::Float64`. It only observes the state, so it clears the
 derivative-discontinuity flag. Call sites supply a `record!`
 closure that has access to the live workspace and pushes a row to the
 log when appropriate. This module ships [`snapshot_diagnostics_row`](@ref)
 as the simplest builder; a full ledger callback that calls
 [`record_substep!`](@ref) requires per-substep accumulators that the unified
 residual layer threads through.
+
+`record!` is held behind a fixed-signature `FunctionWrapper`, so the
+callback's type does not depend on the closure's and the integrator it joins
+keeps a problem-independent type.
 """
-function DiagnosticsCallback(record!::Function)
+function DiagnosticsCallback(record!)
+    record_wrapped! = FunctionWrapper{Nothing,Tuple{Vector{Float64},Float64}}(record!)
     condition(_, _, _) = true
     function affect!(integrator)
-        record!(integrator)
+        record_wrapped!(integrator.u, integrator.t)
         derivative_discontinuity!(integrator, false)
         return nothing
     end

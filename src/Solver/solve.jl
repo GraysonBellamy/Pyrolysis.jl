@@ -324,9 +324,32 @@ function _build_verify_callback(
 )
     rtol = get(verify_kwargs, :rtol, 1e-6)
     atol = get(verify_kwargs, :atol, 1e-10)
-    sample_times = collect(get(verify_kwargs, :sample_times, [0.0]))
+    sample_times = Float64.(collect(get(verify_kwargs, :sample_times, [0.0])))
     # Build the dense reference once and reuse it across firings.
     ref_spec = JacobianSpec(DenseAD_ForwardDiff(), def, ws)
+
+    # Behind a wrapper, like every problem-typed function the integrator
+    # reaches (see `ErasedRHS`).
+    verify_at = FunctionWrapper{Nothing,Tuple{_StateVector,Float64}}(
+        (u, t) -> begin
+            report = verify_jacobian_at(
+                spec_active,
+                def,
+                ws,
+                u,
+                t;
+                reference_spec = ref_spec,
+                rtol = rtol,
+                atol = atol,
+            )
+            if !report.passed
+                @warn "verify_jacobian: backend $(typeof(spec_active.backend)) " *
+                      "deviates from DenseAD reference at t=$(t): " *
+                      "max_abs_dev=$(report.max_abs_dev), max_rel_dev=$(report.max_rel_dev), " *
+                      "worst_index=$(report.worst_index)"
+            end
+        end,
+    )
 
     condition =
         (u, t, integrator) -> begin
@@ -336,27 +359,11 @@ function _build_verify_callback(
             any(abs(t - st) <= 0.5 * dt for st in sample_times)
         end
 
-    affect! =
-        (integrator) -> begin
-            report = verify_jacobian_at(
-                spec_active,
-                def,
-                ws,
-                integrator.u,
-                integrator.t;
-                reference_spec = ref_spec,
-                rtol = rtol,
-                atol = atol,
-            )
-            if !report.passed
-                @warn "verify_jacobian: backend $(typeof(spec_active.backend)) " *
-                      "deviates from DenseAD reference at t=$(integrator.t): " *
-                      "max_abs_dev=$(report.max_abs_dev), max_rel_dev=$(report.max_rel_dev), " *
-                      "worst_index=$(report.worst_index)"
-            end
-            derivative_discontinuity!(integrator, false)
-            return nothing
-        end
+    affect! = (integrator) -> begin
+        verify_at(integrator.u, integrator.t)
+        derivative_discontinuity!(integrator, false)
+        return nothing
+    end
 
     return DiscreteCallback(condition, affect!; save_positions = (false, false))
 end
@@ -836,7 +843,7 @@ function solve(
     # Build the ODEFunction from the active spec. Backends with sparsity
     # provide a `jac_prototype` for sparse LU factorization; the verifier-only
     # `DenseAD_ForwardDiff` does not.
-    jac_fn! = let s = jac_spec, def = def, ws = ws
+    jac! = let s = jac_spec, def = def, ws = ws
         (J, u, p, t) -> compute_jacobian!(J, s, u, def, t, ws)
     end
 
@@ -870,18 +877,24 @@ function solve(
         geometry_block,
     )
 
+    # The right-hand side and the Jacobian reach the integrator behind
+    # problem-independent types (`ErasedRHS`, `ErasedJacobian`), as do the
+    # callbacks below: the integrator then compiles once per solver
+    # configuration rather than once per material or boundary-condition type.
     # `FullSpecialize`: under the default `AutoSpecialize` the integrator stores its
     # callbacks type-erased, and inference then compiles the stepper for a second,
-    # callback-free integrator type as well, which doubles the compile time of the
-    # first solve of every problem type.
+    # callback-free integrator type as well, which doubles its compile time.
     ode_fn_with_jac = if jac_prototype !== nothing
         OrdinaryDiffEq.ODEFunction{true,FullSpecialize}(
-            rhs!;
-            jac = jac_fn!,
+            ErasedRHS(rhs!);
+            jac = ErasedJacobian{typeof(jac_prototype)}(jac!),
             jac_prototype = jac_prototype,
         )
     else
-        OrdinaryDiffEq.ODEFunction{true,FullSpecialize}(rhs!; jac = jac_fn!)
+        OrdinaryDiffEq.ODEFunction{true,FullSpecialize}(
+            ErasedRHS(rhs!);
+            jac = ErasedJacobian{Matrix{Float64}}(jac!),
+        )
     end
     ode_problem = ODEProblem(ode_fn_with_jac, u0, tspan)
 
@@ -900,13 +913,14 @@ function solve(
         end
     end
 
-    # Build solver options
+    # Build solver options. The tolerances, step bounds and output times enter
+    # the integrator's type, so they are converted to one type each.
     solve_kwargs = Dict{Symbol,Any}(
-        :abstol => abstol,
-        :reltol => reltol,
+        :abstol => Float64(abstol),
+        :reltol => Float64(reltol),
         :maxiters => maxiters,
-        :dtmin => dtmin,
-        :dtmax => dtmax,
+        :dtmin => Float64(dtmin),
+        :dtmax => Float64(dtmax),
         :dt => problem.dt_initial,
         :progress => false,  # Disable OrdinaryDiffEq's progress, we use our own
     )
@@ -914,7 +928,7 @@ function solve(
         solve_kwargs[:sensealg] = sensealg
     end
 
-    solve_kwargs[:saveat] = saveat
+    solve_kwargs[:saveat] = saveat isa Number ? Float64(saveat) : collect(Float64, saveat)
 
     # Build callback list
     callbacks_list = []
@@ -955,35 +969,27 @@ function solve(
         push!(callbacks_list, create_newton_failure_cap_callback())
     end
 
-    # Add progress callback if requested
-    prog = nothing
-    if progress
-        t_start, t_end = tspan
-        t_span_length = t_end - t_start
-        last_progress = Ref(0)
-
-        # Create progress bar
-        prog = Progress(100; desc = "Solving: ", showspeed = true, enabled = true)
-
-        # Use PeriodicCallback to update progress bar at regular time intervals
-        check_interval = t_span_length / 100  # Check every 1% of simulation time
-
-        progress_cb = PeriodicCallback(
-            integrator -> begin
-                t = integrator.t
-                current_progress = floor(Int, 100 * (t - t_start) / t_span_length)
-                if current_progress > last_progress[]
-                    update!(prog, current_progress)
-                    last_progress[] = current_progress
-                end
-                derivative_discontinuity!(integrator, false)
-            end,
-            check_interval;
-            initial_affect = false,
-            save_positions = (false, false),  # Don't save solution at progress check times
-        )
-        push!(callbacks_list, progress_cb)
-    end
+    # Progress bar, advanced after every accepted step. A callback that fires at
+    # fixed times would force the integrator to stop at each of them. The
+    # callback is installed with the bar disabled too, so both settings give
+    # the integrator the same type and share its compiled code.
+    t_start, t_end = tspan
+    t_span_length = t_end - t_start
+    last_progress = Ref(0)
+    prog = Progress(100; desc = "Solving: ", showspeed = true, enabled = progress)
+    progress_cb = DiscreteCallback(
+        (u, t, integrator) -> true,
+        integrator -> begin
+            current_progress = floor(Int, 100 * (integrator.t - t_start) / t_span_length)
+            if current_progress > last_progress[]
+                update!(prog, current_progress)
+                last_progress[] = current_progress
+            end
+            derivative_discontinuity!(integrator, false)
+        end;
+        save_positions = (false, false),
+    )
+    push!(callbacks_list, progress_cb)
 
     # Add diagnostics callback if requested. Snapshot mode — records
     # E_matrix, E_total, gas_storage_gap at stride boundaries. Cumulative
@@ -1003,16 +1009,13 @@ function solve(
                 material = material_for_diag,
                 layout = ws.layout
 
-                integrator -> begin
+                (u, t) -> begin
                     stride_count[] += 1
                     if stride_count[] % stride == 0
                         # Sync mesh state from the integrator's u so the trackers
                         # read the current cell states.
-                        update_mesh_from_state!(mesh, integrator.u, layout)
-                        push!(
-                            log,
-                            snapshot_diagnostics_row(Float64(integrator.t), mesh, material),
-                        )
+                        update_mesh_from_state!(mesh, u, layout)
+                        push!(log, snapshot_diagnostics_row(t, mesh, material))
                     end
                     return nothing
                 end
@@ -1047,10 +1050,7 @@ function solve(
     # Solve
     raw_solution = OrdinaryDiffEq.solve(ode_problem, solver_alg; solve_kwargs...)
 
-    # Finish progress bar if it was created
-    if prog !== nothing
-        finish!(prog)
-    end
+    progress && finish!(prog)
 
     # Record solve time
     solution.solve_time = time() - start_time

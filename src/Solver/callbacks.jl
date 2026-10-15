@@ -140,11 +140,14 @@ Create a callback that terminates the simulation when the live thickness
 `DepletionCallbackState`, whose `n_live` tracks parked cells.
 """
 function create_thickness_termination_callback(sv_ref, min_thickness::Float64)
-    condition = (u, t, integrator) -> begin
-        layout, n_live = _layout_and_live(sv_ref)
-        z = get_node_positions(u, layout)
-        return (z[n_live+1] - z[1]) - min_thickness
-    end
+    live_thickness = FunctionWrapper{Float64,Tuple{_StateVector}}(
+        u -> begin
+            layout, n_live = _layout_and_live(sv_ref)
+            z = get_node_positions(u, layout)
+            return z[n_live+1] - z[1]
+        end,
+    )
+    condition = (u, t, integrator) -> live_thickness(u) - min_thickness
     affect! = (integrator) -> terminate!(integrator)
     return ContinuousCallback(condition, affect!)
 end
@@ -400,6 +403,9 @@ every park.
 """
 const DT_AFTER_PARK = 1e-6
 
+# What a depletion check did; the callback then acts on the integrator.
+@enum DepletionEvent NO_PARK CELL_PARKED STOP_SOLVE
+
 """
 	create_depletion_callback(ws, mesh, material, cb_state::DepletionCallbackState;
 							  threshold=0.05, min_cells=2) -> DiscreteCallback
@@ -438,50 +444,58 @@ function create_depletion_callback(
     # The condition must keep firing at n_live ≤ min_cells: the affect!
     # terminates there, and returning false would let cells shrink without
     # bound.
-    condition =
-        (u, t, integrator) ->
+    has_event = FunctionWrapper{Bool,Tuple{_StateVector}}(
+        u ->
             depletion_candidate(u, layout, mesh, material, cb_state, threshold) != 0 ||
-            fixed_mesh && interior_void_cell(u, layout, material, cb_state) != 0
+            fixed_mesh && interior_void_cell(u, layout, material, cb_state) != 0,
+    )
 
-    affect! =
-        (integrator) -> begin
-            t = integrator.t
+    # Parks the candidate cell in `u` in place, or reports that the solve must stop.
+    deplete! = FunctionWrapper{DepletionEvent,Tuple{_StateVector,Float64}}(
+        (u, t) -> begin
             if fixed_mesh
-                i_void = interior_void_cell(integrator.u, layout, material, cb_state)
+                i_void = interior_void_cell(u, layout, material, cb_state)
                 if i_void != 0
                     @warn "Cell $i_void, below the top live cell $(cb_state.n_live), is a void " *
                           "(matrix volume fraction < $MIXING_BLEND_LO) at t=$(round(t, digits=4)) s: " *
                           "the material has gasified from within. The model carries no heat " *
                           "across a void, so the fixed-mesh solve stops here. A regressing " *
                           "material belongs on the ALE mesh (use_ale = true)."
-                    terminate!(integrator)
-                    return
+                    return STOP_SOLVE
                 end
             end
             if cb_state.n_live <= min_cells
                 @warn "At minimum cells ($min_cells), terminating simulation"
-                terminate!(integrator)
-                return
+                return STOP_SOLVE
             end
-            i_park = depletion_candidate(
-                integrator.u,
-                layout,
-                mesh,
-                material,
-                cb_state,
-                threshold,
-            )
-            i_park == 0 && return
-            n_live = park!(integrator.u, layout, mesh, material, cb_state, i_park, t)
+            i_park =
+                depletion_candidate(u, layout, mesh, material, cb_state, threshold)
+            i_park == 0 && return NO_PARK
+            n_live = park!(u, layout, mesh, material, cb_state, i_park, t)
             # The exposed boundary moved down one face; the workspace's
             # pre-cached boundary ids (shared with the Jacobian's AD workspace)
             # follow the mesh.
             ws.top_face_ids[1] = mesh.boundary_faces[1][1]
             ws.top_cell_ids[1] = n_live
+            @info "Parked cell $i_park at t=$(round(t, digits=4)) s; $(n_live) live cells"
+            return CELL_PARKED
+        end,
+    )
+
+    condition = (u, t, integrator) -> has_event(u)
+
+    affect! = (integrator) -> begin
+        # The park rewrites the integrator's own state, so it must receive
+        # that vector, not a converted copy.
+        event = deplete!(integrator.u::_StateVector, integrator.t)
+        if event == STOP_SOLVE
+            terminate!(integrator)
+        elseif event == CELL_PARKED
             derivative_discontinuity!(integrator, true)
             set_proposed_dt!(integrator, DT_AFTER_PARK)
-            @info "Parked cell $i_park at t=$(round(t, digits=4)) s; $(n_live) live cells"
         end
+        return nothing
+    end
 
     return DiscreteCallback(condition, affect!; save_positions = (false, false))
 end
@@ -524,13 +538,19 @@ heat-conduction case at 320 cells the L2 error grows 15× and the step count
 function create_step_update_callback(ws, material)
     mesh = ws.mesh
 
+    sync_mesh! = FunctionWrapper{Nothing,Tuple{_StateVector}}(
+        u -> begin
+            layout = ws.layout
+            mesh.cross_section_area =
+                cross_section_area_from_state(mesh, material, u, layout)
+            update_mesh_from_state!(mesh, u, layout)
+        end,
+    )
+
     condition = (u, t, integrator) -> true
 
     function affect!(integrator)
-        u = integrator.u
-        layout = ws.layout
-        mesh.cross_section_area = cross_section_area_from_state(mesh, material, u, layout)
-        update_mesh_from_state!(mesh, u, layout)
+        sync_mesh!(integrator.u)
         derivative_discontinuity!(integrator, true)
         return nothing
     end

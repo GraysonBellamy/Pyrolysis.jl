@@ -2,7 +2,7 @@
 
 julia_version = "1.13.0"
 manifest_format = "2.1"
-project_hash = "bcef27d32b800cf907a3e4b233c5e9cca1a1b570"
+project_hash = "b09a1e37c01d1d0edcad1ea5281fc9e7b42b9f90"
 
 [[deps.ADTypes]]
 deps = ["PrecompileTools"]
@@ -249,13 +249,6 @@ registries = "General"
 uuid = "9a962f9c-6df0-11e9-0e5d-c546b8b5ee8a"
 version = "1.16.0"
 
-[[deps.DataStructures]]
-deps = ["OrderedCollections"]
-git-tree-sha1 = "b0bc6d2cad1fed8b7fd59a1551a991cb3d2809e6"
-registries = "General"
-uuid = "864edb3b-99cc-5e75-8d2d-829cb0a9cfe8"
-version = "0.19.6"
-
 [[deps.DataValueInterfaces]]
 git-tree-sha1 = "bfc1187b79289637fa0ef6d4436ebdfe6905cbd6"
 registries = "General"
@@ -317,19 +310,6 @@ version = "7.21.2"
     SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
     Tracker = "9f7883ad-71c0-57eb-9f7f-b5c9e6d3789c"
     Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
-
-[[deps.DiffEqCallbacks]]
-deps = ["ConcreteStructs", "DataStructures", "DiffEqBase", "DifferentiationInterface", "LinearAlgebra", "Markdown", "PrecompileTools", "RecipesBase", "RecursiveArrayTools", "SciMLBase", "StaticArraysCore"]
-git-tree-sha1 = "74d18419405b8c196f8443aa9be9c6527bd3e6e2"
-registries = "General"
-uuid = "459566f4-90b8-5000-8ac3-15dfb0a30def"
-version = "4.19.4"
-
-    [deps.DiffEqCallbacks.extensions]
-    DiffEqCallbacksFunctorsExt = "Functors"
-
-    [deps.DiffEqCallbacks.weakdeps]
-    Functors = "d9f16b24-f501-4c13-a1f2-28368ffc5196"
 
 [[deps.DiffResults]]
 deps = ["StaticArraysCore"]
@@ -1249,7 +1229,7 @@ weakdeps = ["ForwardDiff"]
     PureKLUForwardDiffExt = "ForwardDiff"
 
 [[deps.Pyrolysis]]
-deps = ["ADTypes", "CommonSolve", "DiffEqCallbacks", "Distributed", "FiniteDiff", "ForwardDiff", "IncompleteLU", "Krylov", "LinearAlgebra", "LinearSolve", "OrdinaryDiffEq", "OrdinaryDiffEqSDIRK", "PrecompileTools", "Printf", "ProgressMeter", "RecursiveFactorization", "SciMLBase", "SparseArrays", "Sparspak", "StaticArrays"]
+deps = ["ADTypes", "CommonSolve", "Distributed", "FiniteDiff", "ForwardDiff", "FunctionWrappers", "IncompleteLU", "Krylov", "LinearAlgebra", "LinearSolve", "OrdinaryDiffEq", "OrdinaryDiffEqSDIRK", "PrecompileTools", "Printf", "ProgressMeter", "RecursiveFactorization", "SciMLBase", "SparseArrays", "Sparspak", "StaticArrays"]
 path = "."
 uuid = "910b54fb-7370-4696-a92c-2242b531a32e"
 version = "0.1.0"

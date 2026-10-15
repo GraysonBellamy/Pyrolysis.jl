@@ -191,7 +191,7 @@ function to_problem_def(
     end
     mode = _simulation_mode_from(problem, use_ale, radiation_model)
     topology = mesh_topology(problem.mesh)
-    initial = InitialConditions(problem.T_initial, problem.ξ_initial)
+    initial = InitialConditions{Any,Any}(problem.T_initial, problem.ξ_initial)
     options = (
         radiation_model = radiation_model,
         radiation_intensity = Float64(radiation_intensity),

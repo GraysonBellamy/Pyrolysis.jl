@@ -43,14 +43,15 @@ using OrdinaryDiffEq: CallbackSet
 # umbrella package's default solver set.
 using OrdinaryDiffEqSDIRK: KenCarp4
 using SciMLBase: terminate!, derivative_discontinuity!, set_proposed_dt!, get_proposed_dt
-using SciMLBase: FullSpecialize
+using SciMLBase: FullSpecialize, NullParameters
 using SciMLBase: DiscreteCallback, ContinuousCallback
 using Sparspak  # Loads LinearSolve's Sparspak extension, so `SparspakFactorization()` is selectable
 using ADTypes: AutoFiniteDiff
-using DiffEqCallbacks: PeriodicCallback
 using ProgressMeter: Progress, update!, finish!
+using FunctionWrappers: FunctionWrapper
 
 # Include subfiles
+include("integrator_functions.jl")
 include("callbacks.jl")
 include("solve.jl")
 include("ilu_gmres.jl")
