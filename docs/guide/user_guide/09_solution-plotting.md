@@ -491,38 +491,25 @@ Each row is a typed `NamedTuple` with these fields:
 | Field | Units | Meaning |
 |---|---|---|
 | `t` | s | Simulation time of the snapshot |
-| `E_matrix` | J | Matrix-only sensible energy `Σ ρc_p^eff T V` |
-| `E_total` | J | Total sensible energy `Σ ρc_p^total T V` (matrix + gas) |
-| `discrete_residual` | J | Discrete energy-balance residual |
-| `discrete_relative` | – | `discrete_residual` relative to `|E_matrix(0)|` |
-| `physical_residual` | J | Physical energy-balance residual |
-| `physical_relative` | – | `physical_residual` relative to `|E_total(0)|` |
-| `gas_storage_gap` | J | `ΔE_gas = E_total − E_matrix` (sensible heat in gas, not evolved) |
+| `E_sensible` | J | Sensible energy `Σ ρc_p^eff T V` (every component) |
+| `energy_residual` | J | Energy-ledger residual |
+| `energy_relative` | – | `energy_residual` relative to `|E_sensible(0)|` |
 | `mass_max_relative_error` | – | Max relative mass-conservation error over components |
 
 **Important caveat about snapshot mode.** With `diagnostics=true`, `solve` uses the
-*snapshot* recorder, which evaluates only the instantaneous energies. In a snapshot row, the
-cumulative-ledger fields — `discrete_residual`, `discrete_relative`, `physical_residual`,
-`physical_relative`, `mass_max_relative_error` — are filled with `NaN`, because the
-cumulative source integrals are not accumulated in this path. The fields you can trust from
-`solve(...; diagnostics=true)` are `t`, `E_matrix`, `E_total`, and `gas_storage_gap`. The
-full cumulative residuals require wiring `record_substep!` into the residual layer, which is
-beyond the standard `solve` interface.
+*snapshot* recorder, which evaluates only the instantaneous energy. In a snapshot row, the
+cumulative-ledger fields — `energy_residual`, `energy_relative`, `mass_max_relative_error`
+— are filled with `NaN`, because the cumulative source integrals are not accumulated in
+this path. The fields you can trust from `solve(...; diagnostics=true)` are `t` and
+`E_sensible`. The full cumulative residuals require wiring `record_substep!` into the
+residual layer, which is beyond the standard `solve` interface.
 
-Reading the energies and the gas-storage gap (the quantity that justifies the matrix-only
-heat-capacity convention, Technical Reference §16):
+Reading the energy history (Technical Reference §16):
 
 ```julia
-log      = solution.extras.diagnostics_log
-ts       = [row.t for row in log]
-E_matrix = [row.E_matrix for row in log]
-E_total  = [row.E_total for row in log]
-gas_gap  = [row.gas_storage_gap for row in log]
-
-# The gas-storage gap should be a small fraction of the matrix energy
-# (< ~0.2% at 1 atm; the physical-form residual should stay < 1%).
-rel_gap = gas_gap ./ E_matrix
-@show maximum(abs, rel_gap)
+log = solution.extras.diagnostics_log
+ts  = [row.t for row in log]
+E   = [row.E_sensible for row in log]
 ```
 
 If you want a true running energy balance with non-`NaN` residuals, the lower-level
@@ -532,8 +519,8 @@ If you want a true running energy balance with non-`NaN` residuals, the lower-le
 Technical Reference §16.
 
 A reminder tied to the energy convention (Technical Reference §7, §16): the default
-`energy_form = :standard` carries gas sensible enthalpy through the advection source
-`S_conv` and **excludes** a separate gas-generation sink. The surface transpiration BC is
+`energy_form = :standard` carries the enthalpy of the gas flux through the advection
+source `S_conv` and **excludes** a separate gas-generation sink. The surface transpiration BC is
 mutually exclusive with that convention — `solve` rejects `use_transpiration_bc=true` to
 avoid double-counting — so under default settings
 `extras.surface_heat_flux_transpiration` is zero. If you switch to

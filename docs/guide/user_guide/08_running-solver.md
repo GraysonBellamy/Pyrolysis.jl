@@ -430,10 +430,11 @@ derived in Technical Reference §8 and §12.
 
 ## 8.9 Energy formulation and the transpiration caveat
 
-The bulk energy equation uses **Formulation A** (the ThermaKin/Gpyro/FDS
-convention): gas sensible storage is excluded from the effective heat capacity
-and the gas enthalpy is carried by the volumetric advection source `S_conv`,
-which is always active. The `energy_form` keyword selects whether an additional
+The bulk energy equation uses **Formulation A** (the ThermaKin Eq. 17
+convention): every component, pore gas included, stores sensible heat in the
+effective heat capacity, and the enthalpy carried by the gas flux relative to
+the skeleton enters through the volumetric advection source `S_conv`, which is
+always active. The `energy_form` keyword selects whether an additional
 gas-generation enthalpy sink is included:
 
 ```julia
@@ -543,8 +544,8 @@ solution = solve(problem; diagnostics = true, diagnostics_stride = 20)
 rows = solution.extras.diagnostics_log    # Vector{DiagnosticsRow}
 ```
 
-Each row captures the matrix sensible energy `E_matrix`, total energy `E_total`,
-and the gas-storage gap. This is **snapshot** logging — not a continuous time
+Each row captures the sensible energy `E_sensible`. This is **snapshot** logging
+— not a continuous time
 history — and is intended for auditing energy/mass balance, not dense
 post-processing. `diagnostics_stride` must be ≥ 1. See Chapter 9 for reading
 diagnostics and Technical Reference §16 for the ledgers.

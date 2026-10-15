@@ -1,8 +1,8 @@
 # 10. Volume Change, Swelling, Intumescence, and Lateral Shrinkage
 
-This chapter derives the complete volume-change model of Pyrolysis.jl: how reaction-driven mass exchange between condensed and gaseous phases produces a per-cell volumetric strain rate $\theta$, how that strain is converted into axial mesh motion (the ALE mesh velocity), and how a column-global *lateral* shrinkage / swelling / intumescence law deforms the cross-sectional area $A(t)$ through the pyrolysis-progress state variable $\chi$. We give the continuous balance, the exact discrete update rules as implemented, the dilation correction that keeps mesh-bound solids Lagrangian, and a careful comparison to the deformation treatments in ThermaKin2Ds, Gpyro, and FDS. Every equation here is grounded in the source: `src/Physics/volume_change.jl`, `src/Residual/residual.jl`, `src/Problem/state_cache.jl`, `src/Problem/initial_conditions.jl`, and `src/Materials/materials.jl`.
+This chapter derives the complete volume-change model of Pyrolysis.jl: how reaction-driven mass exchange between condensed and gaseous phases produces a per-cell volumetric strain rate $\theta$, how that strain is converted into axial mesh motion (the ALE mesh velocity), and how a column-global *lateral* shrinkage / swelling / intumescence law deforms the cross-sectional area $A(t)$ through the pyrolysis-progress state variable $\chi$. We give the continuous balance, the exact discrete update rules as implemented, the dilation correction that keeps every component's cell mass on its reaction-and-flux budget as the mesh moves, and a careful comparison to the deformation treatments in ThermaKin2Ds, Gpyro, and FDS. Every equation here is grounded in the source: `src/Physics/volume_change.jl`, `src/Residual/residual.jl`, `src/Problem/state_cache.jl`, `src/Problem/initial_conditions.jl`, and `src/Materials/materials.jl`.
 
-The axial mesh-motion machinery (cumulative integration of $\theta_L$, the Geometric Conservation Law, the ALE advection operators, and conservative remapping) is developed in §11, *The ALE Framework*; here we develop only the *constitutive* content — the strain rates and the cross-section law that feed §11 — and the species dilation correction that closes the species balance under mesh motion. The state-vector layout that carries the $\chi$ block is detailed in §13, *Finite-Volume Discretization*, and §15, *Temporal Integration & Structured Jacobian*.
+The axial mesh-motion machinery (cumulative integration of $\theta_L$, the Geometric Conservation Law, the mesh-relative temperature advection, and conservative remapping) is developed in §11, *The ALE Framework*; here we develop only the *constitutive* content — the strain rates and the cross-section law that feed §11 — and the species dilation correction that closes the species balance under mesh motion. The state-vector layout that carries the $\chi$ block is detailed in §13, *Finite-Volume Discretization*, and §15, *Temporal Integration & Structured Jacobian*.
 
 **Index convention for this chapter.** Following the binding resolution in §2 (overload I1), $i$ is the **cell index** ($1\le i\le n$), $j$ is the **component/species index** ($1\le j\le N_C$), and $r$ is the **reaction index**. The symbol $\chi$ is *always* pyrolysis progress (overload A1); the cross-section ratio is $A/A_0=\mathrm{law}(\bar\chi)$ and is never written as $\chi$. The symbol $\theta$ is *always* a volumetric strain rate (overload A2); stoichiometry is $\nu_{r,j}$.
 
@@ -284,48 +284,42 @@ This ordering guarantees the radial and axial channels are mutually consistent a
 
 ---
 
-## 10.7 The ALE dilation correction for mesh-bound species
+## 10.7 The ALE dilation correction
 
 ### 10.7.1 The problem
 
-In the moving (ALE) frame, the mesh velocity $w$ already represents the volume change of each cell: when a cell's volume shrinks because its solid is being consumed, the nodes move so that $\Delta z_i$ decreases. But the species concentration $\xi_j$ (mass per unit *bulk* volume) is being advanced by an RHS that contains a *transport/advection* contribution written in flux form for the moving frame. For components that are **bound to the mesh** (solids and liquids, whose material velocity equals the mesh velocity), the advection flux must produce *no net change* in their cell-integrated mass when there is no reaction — they simply ride along with the shrinking cell. The discrete operator, however, leaves a residual term proportional to the cell's dilation, which would spuriously over- or under-deplete the solid. The **dilation correction** removes it.
+In the moving (ALE) frame, the mesh velocity $w$ already represents the volume change of each cell: when a cell's volume shrinks because its solid is being consumed, the nodes move so that $\Delta z_i$ decreases. But the species concentration $\xi_j$ (mass per unit *bulk* volume) is advanced by a right-hand side written for a fixed volume. Every component rides the mesh — the condensed components because they *are* the skeleton, the gas because the transport flux $\mathbf J_g$ the closures return is defined relative to the skeleton (§3.2.3, §11.1.2) — so each component's cell mass must change only by reaction and by $\mathbf J_j$ through the faces. The concentration, however, must also respond to the changing volume; the **dilation correction** supplies that response.
 
 ### 10.7.2 Derivation
 
-For a mesh-bound (Lagrangian) component, the total mass in a cell, $m_j=\xi_j V$, changes only by reaction: $dm_j/dt = S_j^{\mathrm{rxn}}V$. Expanding,
+For any component the mass in a cell, $m_j=\xi_j V$, changes by reaction and by the skeleton-relative flux through the faces: $dm_j/dt = S_j^{\mathrm{rxn}}V - [J_jA]_{\text{faces}}$, with $J_j \equiv 0$ for condensed components. Expanding,
 
 $$
 \frac{d m_j}{dt} = \frac{d(\xi_j V)}{dt} = V\frac{d\xi_j}{dt} + \xi_j\frac{dV}{dt}
 = V\frac{d\xi_j}{dt} + \xi_j V\,\theta,
 $$
 
-so the *concentration* rate that keeps cell mass on its reaction budget is
+so the *concentration* rate that keeps cell mass on its budget is
 
 $$
 \frac{d\xi_j}{dt} = \frac{1}{V}\frac{dm_j}{dt} - \xi_j\,\theta
-= S_j^{\mathrm{rxn}} - \xi_j\,\theta.
+= S_j^{\mathrm{rxn}} - \frac{[J_jA]_{\text{faces}}}{V} - \xi_j\,\theta.
 \tag{10.14}
 $$
 
-The first term ($S_j^{\mathrm{rxn}}$) is the chemical source already in the species RHS; the second term, $-\xi_j\theta$, is the **dilation correction**. It says: when a cell shrinks ($\theta<0$), the concentration of a mesh-bound species must *rise* (mass conserved in less volume), so we *subtract* a negative number, increasing $d\xi_j/dt$; when a cell swells ($\theta>0$), the concentration falls. This is precisely the geometric concentration change that the moving frame must account for in addition to the advective flux form already applied (see §11.2 for how the advective flux and this term combine):
+The first two terms are the reaction source and (for gases) the flux divergence already in the species RHS; the last term, $-\xi_j\theta$, is the **dilation correction**. It says: when a cell shrinks ($\theta<0$), the concentration of every component it carries must *rise* (mass conserved in less volume), so we *subtract* a negative number, increasing $d\xi_j/dt$; when a cell swells ($\theta>0$), the concentration falls. For the pore gas this is the compression of the gas in the shrinking pores, which the pressure closure $P = N/\varphi$ (§9.4) then turns into a Darcy response:
 
 $$
 \boxed{\;\left.\frac{d\xi_j}{dt}\right|_{\mathrm{dilation}} = -\,\xi_j\,\theta_i,
-\qquad j\in\{\text{solids, liquids}\}\;}
+\qquad \text{every component } j\;}
 \tag{10.15}
 $$
 
-> **Implementation note.** `_apply_ale_dilation_correction!(dξ, θ, state, material)` (`src/Residual/residual.jl:442–455`) loops over cells, reads the per-cell strain `θ_i = θ[i]` (the `θ_out` array filled during the mesh-velocity computation, §10.6.2), and calls the compile-time-unrolled `_apply_dilation_correction_unrolled!` (lines 457–473), which executes
-> ```julia
-> if !is_gas(material.components[j])
->     dξ[j, i] -= ξ_i[j] * θ_i
-> end
-> ```
-> for each component. The correction is **applied to every non-gas component** (solids *and* liquids — the guard is `!is_gas`), and **skipped for gases** — the gas volume-rate term lives inside the conservative flux-form transport instead (§11.2.3, §13.8.3), so the pairing telescopes. The sign is exactly the $-\xi_j\theta_i$ of (10.15). It is applied *after* the ALE mesh-motion terms (step 7 of the residual) and *after* the reaction sources, so it sits on top of the already-assembled species RHS.
+> **Implementation note.** `_apply_ale_dilation_correction!(dξ, θ, state, mesh)` (`src/Residual/residual.jl`) loops over cells and components, reads the per-cell strain `θ_i = θ[i]` (the `θ_out` array filled during the mesh-velocity computation, §10.6.2), and executes `dξ[j, i] -= state.ξ[j, i] * θ_i` for every component. The sign is exactly the $-\xi_j\theta_i$ of (10.15). It is applied *after* the reaction sources and the flux divergences, so it sits on top of the already-assembled species RHS, and it is the only mesh-motion term in the species equations.
 
-### 10.7.3 Why gases are excluded
+### 10.7.3 Why the strain rate, not the mesh velocity
 
-Gases are **not** bound to the mesh: they percolate through the pores with their own velocity, and in the simplified upwind ALE formulation the gas frame is taken stationary relative to the mesh (the gas advection is handled in the lab frame by the Darcy–Fick flux plus the $+w\,\partial_z\xi$ ALE correction, §11.2/§13.8. A gas does not "carry mass with the shrinking skeleton"; its concentration responds to transport and reaction, not to the matrix dilation. Applying (10.15) to a gas would incorrectly couple the escaping gas to the solid's volume change and over-deplete it. Hence the `!is_gas` guard. This is consistent with the swelling-factor semantics of §10.2: a $\gamma=0$ gas contributes nothing to $\theta$ in the first place, so its concentration should not be driven by $\theta$ either.
+The volume rate of a cell is $\dot V/V = (w_R - w_L)/\Delta z + \theta_A$, which equals $\theta_i$ in production by construction of the mesh velocity (§10.6.2, §11.3). The correction is written with the cell's own strain rate $\theta_i$ rather than with the node velocities because $\theta_i$ is local to the cell — the structured Jacobian then carries the dilation as a cell-local block (§15.8.4) — and because under the verification hook `Workspace.w_override` the mesh is driven by a prescribed velocity while $\theta_i$ keeps its reaction-driven value, so a reaction-free prescribed compression leaves every concentration unchanged (free-stream preservation, V-MMS-02).
 
 ---
 
@@ -462,6 +456,6 @@ The following limitations are documented in the source and KB notes and should g
 
 7. **Substring-based water-vapor exclusion.** The dry-gas index set relies on a name substring match (§10.3.3), which is fragile to naming. A type-level or explicit-flag mechanism for "this gas is moisture-derived" would be more robust than the current `"H2O"`/`"water"` heuristic.
 
-8. **Axial/radial split is sequential, not unified.** As noted in the ALE KB, the axial (mesh-motion) and radial (cross-section) channels are computed in sequence with $\theta_A$ subtracted from each cell's $\theta_i$; a fully unified space-time ALE that handles both simultaneously (and a higher-order-in-time mesh update than the forward-Euler node advance) remains future work (see §11.11).
+8. **Axial/radial split is sequential, not unified.** As noted in the ALE KB, the axial (mesh-motion) and radial (cross-section) channels are computed in sequence with $\theta_A$ subtracted from each cell's $\theta_i$; a fully unified space-time ALE that handles both simultaneously (and a higher-order-in-time mesh update than the forward-Euler node advance) remains future work (see §11.10).
 
-9. **Mesh motion is solid motion (solid-Lagrangian ALE).** The volume-change pipeline of this chapter is what *defines* the mesh velocity: $w$ is the prefix sum of the reaction-driven strain rate $\theta$ (§11.3), and condensed phases ride the mesh with no discrete advection operator (§10.7, §11.1.2). Mesh motion decoupled from the solid material velocity — remeshing, smoothing, prescribed motion, AMR-in-ALE — is not representable without adding a condensed-phase advection operator; see §11.11 item 7 for the full statement of this capability boundary and its consequence for MMS verification (the spatially-uniform-solid rule under `w_override`).
+9. **Mesh motion is solid motion (solid-Lagrangian ALE).** The volume-change pipeline of this chapter is what *defines* the mesh velocity: $w$ is the prefix sum of the reaction-driven strain rate $\theta$ (§11.3), and every component rides the mesh with no discrete advection operator (§10.7, §11.1.2). Mesh motion decoupled from the solid material velocity — remeshing, smoothing, prescribed motion, AMR-in-ALE — is not representable without adding a species advection operator; see §11.10 item 7 for the full statement of this capability boundary and its consequence for MMS verification (the spatially-uniform-solid rule under `w_override`).

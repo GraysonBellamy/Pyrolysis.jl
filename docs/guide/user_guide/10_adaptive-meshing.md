@@ -154,13 +154,13 @@ not by naive volume averaging. With `m_j = V · ξ_j` the per-component condense
 mass of each cell, the merged temperature solves
 
 ```
-Σ_{j ∉ gas} m_j ∫_{T_ref}^{T_merged} c_p,j(T′) dT′  =  H_park + H_keep
+Σ_j m_j ∫_{T_ref}^{T_merged} c_p,j(T′) dT′  =  H_park + H_keep
 ```
 
 (a bracketed Newton solve — the root always lies between the two cell
 temperatures). The integral form is exact for any temperature-dependent
-`c_p,j(T)`, and gas heat capacity is excluded because Formulation A stores
-thermal energy in the condensed matrix only. For constant `c_p` this reduces to
+`c_p,j(T)`, and every component is included, gas and condensed alike — the
+same `ρc_p` the temperature equation stores. For constant `c_p` this reduces to
 the familiar `ρc_p`-weighted mean.
 
 This matters precisely in the depletion regime: merging a nearly-depleted

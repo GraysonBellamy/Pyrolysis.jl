@@ -74,10 +74,11 @@ Pyrolysis.jl is intended for the same class of problems as **ThermaKin2Ds**,
 **Gpyro**, and the **FDS** solid-phase pyrolysis model: cone-calorimeter
 simulations, TGA/DSC/MCC idealizations, charring and non-charring solids,
 intumescent coatings, pressure-treated wood, and moisture transport. The energy
-equation uses **Formulation A** (the non-conservative convention in which gas
-sensible storage is removed from the matrix heat capacity and carried by the
-advection source `S_conv`), which matches the FDS/Gpyro/ThermaKin convention (see
-Technical Reference §3 and §7).
+equation uses **Formulation A** (the non-conservative temperature equation of a
+one-temperature porous medium: every component, pore gas included, stores
+sensible heat, and the enthalpy carried by the gas flux relative to the skeleton
+enters through the advection source `S_conv`), which is the ThermaKin convention
+(see Technical Reference §3 and §7).
 
 ### What is not modeled
 
@@ -85,9 +86,8 @@ To set expectations up front, the current model does **not** support:
 
 - Multi-dimensional (2D/3D) transport — the model is strictly 1D
   through-thickness.
-- A full two-temperature gas phase (the gas is treated quasi-steady; the cost of
-  this approximation is typically well under 1% at atmospheric pressure — see
-  Technical Reference §3 and §16).
+- A full two-temperature gas phase (the pore gas shares the matrix temperature
+  and stores sensible heat at it — see Technical Reference §3).
 - Multi-reactant reactions — each reaction has a single reactant (`NRin == 1`);
   multi-step schemes are built as *sequences* of single-reactant reactions (see
   Technical Reference §6).
@@ -2213,7 +2213,7 @@ P = Pyrolysis
 T = 600.0
 
 P.Properties.mixture_density(ξ, T, material)         # ρ with swelling
-P.Properties.effective_heat_capacity(ξ, T, material) # ρc_p (matrix only)
+P.Properties.effective_heat_capacity(ξ, T, material) # ρc_p (every component)
 P.Properties.effective_conductivity(ξ, T, material)  # k_eff
 P.Properties.effective_gas_transfer(ξ, T, material)  # λ_eff
 P.Properties.effective_permeability(ξ, T, material)  # κ_eff
@@ -2224,11 +2224,11 @@ P.Properties.porosity(ξ, T, material)                # φ
 
 Two physics notes worth remembering (both in Technical Reference §5):
 
-- **Heat capacity excludes gas storage.** `effective_heat_capacity` sums only
-  solid/liquid components: `ρc_p^eff = Σ_{j∈S,L} ξ_j c_{p,j}(T)`. Gas sensible heat
-  is carried by the advective source term instead (the quasi-steady-gas
-  approximation, ~0.2% of the matrix term at 1 atm). `total_heat_capacity` (which
-  includes gas) exists for diagnostics only.
+- **Heat capacity includes the pore gas.** `effective_heat_capacity` sums every
+  component: `ρc_p^eff = Σ_j ξ_j c_{p,j}(T)`. The gas is at the matrix
+  temperature and stores sensible heat like every other phase; the enthalpy
+  carried by its flux relative to the skeleton enters through the advective
+  source term `S_conv`.
 - **Conductivity and emissivity use the swelling-weighted (matrix) volume
   fractions** — γ = 0 components (canonical gases) carry no weight in these
   surface/matrix properties, matching the ThermaKin convention; as a cell's
@@ -4889,7 +4889,7 @@ formulation. It is passed as the `energy_form` keyword to `solve`:
 
 | Value | Meaning |
 |---|---|
-| `:standard` (default) | Formulation A. The volumetric gas-advection source `S_conv = −Σ_g c_{p,g} J_g ∂T/∂z` is active; the gas-generation enthalpy-divergence term is dropped. This matches the FDS / Gpyro / ThermaKin convention. |
+| `:standard` (default) | Formulation A. The volumetric gas-advection source `S_conv = −Σ_g c_{p,g} J_g ∂T/∂z` is active; the gas-generation enthalpy-divergence term is dropped. This is the ThermaKin convention, exact for heats of reaction quoted at the reaction temperature. |
 | `:with_generation_sink` | Adds the gas-generation enthalpy sink `S_gen = −Σ_g Δh_g(T_i,T_ref)(∇·J_g)_i` as an extra cell source — a *partial* move toward conservative form. **Requires T_ref-datum reaction heats** (see warning below). |
 
 ```julia
@@ -4941,8 +4941,9 @@ solver integrates. The two mesh-motion paths are the primary fork:
 - **ALE path** — geometry is recomputed from the node positions. The residual
   additionally updates the cross-section area (for `WithChi`), computes the
   per-cell strain `θ` and the column radial strain `θ_A`, integrates the
-  cumulative mesh velocity `w` from the bottom up, applies ALE advection and the
-  solid-dilation correction, packs the `z` block, and (for `WithChi`) packs the χ
+  cumulative mesh velocity `w` from the bottom up, applies the dilation
+  correction to every component (every component rides the mesh, so there is
+  no advection term), packs the `z` block, and (for `WithChi`) packs the χ
   derivatives.
 
 Radiation, transport, and cross-section are handled by compile-time dispatch
@@ -5528,10 +5529,11 @@ derived in Technical Reference §8 and §12.
 
 ## 8.9 Energy formulation and the transpiration caveat
 
-The bulk energy equation uses **Formulation A** (the ThermaKin/Gpyro/FDS
-convention): gas sensible storage is excluded from the effective heat capacity
-and the gas enthalpy is carried by the volumetric advection source `S_conv`,
-which is always active. The `energy_form` keyword selects whether an additional
+The bulk energy equation uses **Formulation A** (the ThermaKin Eq. 17
+convention): every component, pore gas included, stores sensible heat in the
+effective heat capacity, and the enthalpy carried by the gas flux relative to
+the skeleton enters through the volumetric advection source `S_conv`, which is
+always active. The `energy_form` keyword selects whether an additional
 gas-generation enthalpy sink is included:
 
 ```julia
@@ -5641,8 +5643,8 @@ solution = solve(problem; diagnostics = true, diagnostics_stride = 20)
 rows = solution.extras.diagnostics_log    # Vector{DiagnosticsRow}
 ```
 
-Each row captures the matrix sensible energy `E_matrix`, total energy `E_total`,
-and the gas-storage gap. This is **snapshot** logging — not a continuous time
+Each row captures the sensible energy `E_sensible`. This is **snapshot** logging
+— not a continuous time
 history — and is intended for auditing energy/mass balance, not dense
 post-processing. `diagnostics_stride` must be ≥ 1. See Chapter 9 for reading
 diagnostics and Technical Reference §16 for the ledgers.
@@ -6362,38 +6364,25 @@ Each row is a typed `NamedTuple` with these fields:
 | Field | Units | Meaning |
 |---|---|---|
 | `t` | s | Simulation time of the snapshot |
-| `E_matrix` | J | Matrix-only sensible energy `Σ ρc_p^eff T V` |
-| `E_total` | J | Total sensible energy `Σ ρc_p^total T V` (matrix + gas) |
-| `discrete_residual` | J | Discrete energy-balance residual |
-| `discrete_relative` | – | `discrete_residual` relative to `|E_matrix(0)|` |
-| `physical_residual` | J | Physical energy-balance residual |
-| `physical_relative` | – | `physical_residual` relative to `|E_total(0)|` |
-| `gas_storage_gap` | J | `ΔE_gas = E_total − E_matrix` (sensible heat in gas, not evolved) |
+| `E_sensible` | J | Sensible energy `Σ ρc_p^eff T V` (every component) |
+| `energy_residual` | J | Energy-ledger residual |
+| `energy_relative` | – | `energy_residual` relative to `|E_sensible(0)|` |
 | `mass_max_relative_error` | – | Max relative mass-conservation error over components |
 
 **Important caveat about snapshot mode.** With `diagnostics=true`, `solve` uses the
-*snapshot* recorder, which evaluates only the instantaneous energies. In a snapshot row, the
-cumulative-ledger fields — `discrete_residual`, `discrete_relative`, `physical_residual`,
-`physical_relative`, `mass_max_relative_error` — are filled with `NaN`, because the
-cumulative source integrals are not accumulated in this path. The fields you can trust from
-`solve(...; diagnostics=true)` are `t`, `E_matrix`, `E_total`, and `gas_storage_gap`. The
-full cumulative residuals require wiring `record_substep!` into the residual layer, which is
-beyond the standard `solve` interface.
+*snapshot* recorder, which evaluates only the instantaneous energy. In a snapshot row, the
+cumulative-ledger fields — `energy_residual`, `energy_relative`, `mass_max_relative_error`
+— are filled with `NaN`, because the cumulative source integrals are not accumulated in
+this path. The fields you can trust from `solve(...; diagnostics=true)` are `t` and
+`E_sensible`. The full cumulative residuals require wiring `record_substep!` into the
+residual layer, which is beyond the standard `solve` interface.
 
-Reading the energies and the gas-storage gap (the quantity that justifies the matrix-only
-heat-capacity convention, Technical Reference §16):
+Reading the energy history (Technical Reference §16):
 
 ```julia
-log      = solution.extras.diagnostics_log
-ts       = [row.t for row in log]
-E_matrix = [row.E_matrix for row in log]
-E_total  = [row.E_total for row in log]
-gas_gap  = [row.gas_storage_gap for row in log]
-
-# The gas-storage gap should be a small fraction of the matrix energy
-# (< ~0.2% at 1 atm; the physical-form residual should stay < 1%).
-rel_gap = gas_gap ./ E_matrix
-@show maximum(abs, rel_gap)
+log = solution.extras.diagnostics_log
+ts  = [row.t for row in log]
+E   = [row.E_sensible for row in log]
 ```
 
 If you want a true running energy balance with non-`NaN` residuals, the lower-level
@@ -6403,8 +6392,8 @@ If you want a true running energy balance with non-`NaN` residuals, the lower-le
 Technical Reference §16.
 
 A reminder tied to the energy convention (Technical Reference §7, §16): the default
-`energy_form = :standard` carries gas sensible enthalpy through the advection source
-`S_conv` and **excludes** a separate gas-generation sink. The surface transpiration BC is
+`energy_form = :standard` carries the enthalpy of the gas flux through the advection
+source `S_conv` and **excludes** a separate gas-generation sink. The surface transpiration BC is
 mutually exclusive with that convention — `solve` rejects `use_transpiration_bc=true` to
 avoid double-counting — so under default settings
 `extras.surface_heat_flux_transpiration` is zero. If you switch to
@@ -6675,13 +6664,13 @@ not by naive volume averaging. With `m_j = V · ξ_j` the per-component condense
 mass of each cell, the merged temperature solves
 
 ```
-Σ_{j ∉ gas} m_j ∫_{T_ref}^{T_merged} c_p,j(T′) dT′  =  H_park + H_keep
+Σ_j m_j ∫_{T_ref}^{T_merged} c_p,j(T′) dT′  =  H_park + H_keep
 ```
 
 (a bracketed Newton solve — the root always lies between the two cell
 temperatures). The integral form is exact for any temperature-dependent
-`c_p,j(T)`, and gas heat capacity is excluded because Formulation A stores
-thermal energy in the condensed matrix only. For constant `c_p` this reduces to
+`c_p,j(T)`, and every component is included, gas and condensed alike — the
+same `ρc_p` the temperature equation stores. For constant `c_p` this reduces to
 the familiar `ρc_p`-weighted mean.
 
 This matters precisely in the depletion regime: merging a nearly-depleted
@@ -10386,31 +10375,22 @@ solution = solve(problem;
 )
 
 for row in solution.extras.diagnostics_log
-    println("t=$(row.t)  E_matrix=$(row.E_matrix)  ",
-            "r_disc(rel)=$(row.discrete_relative)  ",
-            "r_phys(rel)=$(row.physical_relative)  ",
-            "ΔE_gas=$(row.gas_storage_gap)  ",
+    println("t=$(row.t)  E=$(row.E_sensible)  ",
+            "r(rel)=$(row.energy_relative)  ",
             "m_err=$(row.mass_max_relative_error)")
 end
 ```
 
-Each `DiagnosticsRow` carries `t`, `E_matrix`, `E_total`, `discrete_residual`,
-`discrete_relative`, `physical_residual`, `physical_relative`,
-`gas_storage_gap`, and `mass_max_relative_error`. How to read them (see
+Each `DiagnosticsRow` carries `t`, `E_sensible`, `energy_residual`,
+`energy_relative`, and `mass_max_relative_error`. How to read them (see
 Technical Reference §16):
 
-- **`discrete_relative`** audits the *bookkeeping*. It is assembled from exactly
+- **`energy_relative`** audits the *bookkeeping*. It is assembled from exactly
   the terms the RHS computes, so it closes to integrator tolerance (~`1e-6`
   relative) **by construction**. If it is large, you have a bug in flux/source
   assembly or a callback — not a physics problem. (Caveat: with strongly
   time-varying composition it cannot close exactly, because the ledger omits the
   `∫ T ∂(ρc_p)/∂t` and ALE volume-change terms; expect a small floor.)
-- **`physical_relative`** audits the *quasi-steady-gas approximation*. For
-  canonical 1-atm pyrolysis it should stay **< 1 %** of initial energy. A larger
-  value means the regime stresses the gas-storage assumption.
-- **`gas_storage_gap`** (`ΔE_gas = E_total − E_matrix`) is the sensible heat
-  carried by gas that the matrix-only `ρc_p^eff` does not store. Canonically
-  < 0.2 % of `E_matrix`.
 - **`mass_max_relative_error`** is the worst per-component mass-balance error;
   it should be `< 1e-10`.
 
@@ -10684,8 +10664,8 @@ appears to fire slightly early/late, that leakage — not a bug — is the reaso
 
 ### 15.5.2 `ρc_p → 0` blow-up (ALE)
 
-As a cell decomposes to gas, its matrix-only `ρc_p^eff` (gas is excluded by
-Formulation A) shrinks, and `dT/dt = RHS/ρc_p` can blow up. The intended
+As a cell decomposes to gas and the gas leaves, its `ρc_p^eff` shrinks toward
+the pore-gas thermal mass, and `dT/dt = RHS/ρc_p` can blow up. The intended
 remedies are ALE surface depletion (§15.4) to merge the spent surface cell, and
 the thickness-termination callback that stops the run when total thickness drops
 below `min_thickness`. If you run ALE *without* depletion and hit NaNs near full
@@ -10724,7 +10704,7 @@ options (error indicators, `relocate_nodes!`), see UG-10.
 Use the diagnostics rows (§15.1.2) to localise. The two energy residuals fail
 for *different* reasons.
 
-### 15.6.1 `discrete_relative` large
+### 15.6.1 `energy_relative` large
 
 This audits assembly and should close to integrator tolerance. If it does not:
 
@@ -10738,13 +10718,12 @@ This audits assembly and should close to integrator tolerance. If it does not:
   (including merged-away ones), your totals — not the solver's — are wrong.
   Always respect `mesh.active_cell_mask` (Technical Reference §16.1).
 
-### 15.6.2 `physical_relative` large (> 1 %)
+### 15.6.2 `energy_relative` drifts during active reaction
 
-This audits the quasi-steady-gas approximation. A large value means the regime
-genuinely stresses the assumption (gas residence time approaching the thermal
-time scale — unusual at 1 atm). Reconsider the setup rather than the numerics;
-`gas_storage_gap` will corroborate (it will be a non-trivial fraction of
-`E_matrix`).
+A small, composition-rate-dependent residual during active pyrolysis is
+expected: the ledger omits the heat-capacity-change and ALE volume-change terms
+of its `ρc_p·T` proxy (Technical Reference §16.8). A residual that grows with the
+*boundary input* rather than with the reaction rate points at the assembly.
 
 ### 15.6.3 The S_conv vs transpiration double-count
 
@@ -12183,8 +12162,7 @@ DiagnosticsState, DiagnosticsRow, DiagnosticsCallback
 
 # instantaneous quantities
 compute_domain_mass(mesh, material)             # NTuple of per-component mass [kg]
-compute_sensible_energy(mesh, material)         # matrix-only E_matrix [J]
-compute_total_sensible_energy(mesh, material)   # E_total (matrix + gas) [J]
+compute_sensible_energy(mesh, material)         # E_sensible, every component [J]
 
 # checks (return NamedTuples)
 check_mass_conservation(tracker, mesh, material; tol = 1e-10)
@@ -12197,13 +12175,10 @@ energy_conservation_report(tracker, mesh, material)
 reaction_mass_flow_report(tracker, material)
 ```
 
-The energy diagnostics keep two ledgers: a **discrete** form that closes to
-integrator tolerance by construction (audits bookkeeping) and a **physical**
-form that quantifies the gas-storage gap `ΔE_gas = E_total − E_matrix` — a
-runtime measure of the quasi-steady-gas approximation cost (canonically < 1 %).
-A `DiagnosticsRow` carries `t`, `E_matrix`, `E_total`, `discrete_residual`,
-`discrete_relative`, `physical_residual`, `physical_relative`, `gas_storage_gap`,
-`mass_max_relative_error`.
+The energy diagnostics keep one ledger — the sensible energy `Σ ρc_p T V` over
+every component — that closes to integrator tolerance by construction (it audits
+bookkeeping). A `DiagnosticsRow` carries `t`, `E_sensible`, `energy_residual`,
+`energy_relative`, `mass_max_relative_error`.
 
 The low-level residual surface — `ProblemDef`, `Workspace`, `residual!`,
 `to_problem_def`, `build_workspace`, `build_ad_workspace`, `StateLayout` — is

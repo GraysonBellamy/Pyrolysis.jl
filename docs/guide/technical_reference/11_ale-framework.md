@@ -5,12 +5,12 @@ as it gasifies, intumescent chars swell, and the position of the exposed surface
 itself an unknown. This chapter develops the Arbitrary Lagrangian–Eulerian (ALE)
 formulation that Pyrolysis.jl uses to track that motion without solving a moving-
 boundary PDE. We derive the ALE time-derivative identity from the kinematics of a
-moving sample point, specialize it to the energy and species equations (treating
-solids as Lagrangian and gas as Eulerian-in-the-mesh-frame), construct the
+moving sample point, specialize it to the energy and species equations (every
+component rides the skeleton, so the mesh frame adds only the dilation), construct the
 cumulative mesh velocity from the per-cell volumetric strain rate, prove the
 discrete Geometric Conservation Law (GCL) and its time-varying-cross-section
-generalization, document the TVD-limited upwind discretization of the advection
-correction, the ALE Darcy–Fick flux, and the conservative remapping operators used
+generalization, document the TVD-limited upwind discretization of the
+mesh-relative temperature advection, and the conservative remapping operators used
 when the mesh topology changes during adaptive refinement (§14). Throughout, the
 governing relations are tied line-by-line to the implementation in
 `src/Physics/{mesh_motion,gcl,volume_change,remapping}.jl`,
@@ -69,55 +69,56 @@ result is a mesh that shrinks with the material — its nodes ride on the deform
 solid skeleton — yet is rebuilt analytically each step so it never tangles unless
 the physical domain itself collapses.
 
-### 11.1.2 Lagrangian solids versus Eulerian gas
+### 11.1.2 Every component rides the skeleton
 
-The central physical distinction in this framework is the difference in *frame* of
-the condensed and gaseous components:
+The frame of each component follows from the frame of its transport closure:
 
 - **Solid and liquid components** are bound to the deforming matrix skeleton. Their
   material velocity equals the mesh velocity, $\mathbf v_{\text{solid}} = \mathbf w$.
-  In the mesh frame they do not advect; they are **Lagrangian**. Their mass per node
-  (density $\times$ thickness) is locked to the mesh, so when the mesh shrinks their
-  *concentration* $\xi_j$ rises even with no reaction — this is the "dilation"
-  effect handled by a dedicated correction (§11.3.4).
+  In the mesh frame they do not advect; they are **Lagrangian**. Their mass per cell
+  is locked to the mesh, so when the mesh shrinks their *concentration* $\xi_j$ rises
+  even with no reaction — the "dilation" effect handled by a dedicated correction
+  (§11.3.4).
 
-- **Gas components** percolate through the porous skeleton. In the simplified
-  transport model the bulk gas velocity is $\mathbf v_{\text{gas}}\approx 0$ in the
-  laboratory (fixed-$z$) frame, so relative to a mesh moving at $\mathbf w$ the gas
-  has velocity $-\mathbf w$. The gas is therefore **Eulerian-in-the-mesh-frame**:
-  it must advect across the moving cells, and an advection correction term is
-  required to account for the mesh sweeping past the (nearly stationary) gas.
+- **Gas components** percolate through the porous skeleton. Darcy's law is a drag
+  balance between the gas and the pore walls, and the volume-fraction-gradient
+  diffusion law is likewise written relative to the pore walls, so the flux the
+  closures return, $\mathbf J_g = \xi_g(\mathbf v_{\text{gas}} - \mathbf v_{\text{solid}})$,
+  is the gas flux **relative to the skeleton** (§3.2.3, §9). The laboratory-frame gas
+  flux is $\xi_g\mathbf v_{\text{solid}} + \mathbf J_g$: the pore gas is carried with
+  the pores it occupies and slips through them only by $\mathbf J_g$. In the mesh
+  frame the gas is therefore **also Lagrangian** apart from $\mathbf J_g$, which the
+  Eulerian flux divergence already handles. It receives the same dilation
+  correction as the condensed components and no advection term.
 
-This split — Lagrangian solids, Eulerian gas — is the reason ALE is so well suited
-to pyrolysis: it lets the mass-bearing solid be tracked exactly by the mesh while
-the transport of the released gas is handled by the standard finite-volume flux
-machinery (Chapters 9, 13), with only a small advection correction bridging the two
-frames.
+This is the frame ThermaKin writes (its Eq. 15 applies one deformation term to
+every component, gas included) and the frame Gpyro writes (its gas balance, Eq. 58,
+lives on control volumes that deform with the solid, with only $\dot m''$ crossing
+their faces). Treating the gas as fixed in the laboratory instead would count the
+skeleton's motion twice: once inside the frame of $\mathbf J_g$ and once as a sweep
+of the gas by the moving mesh.
 
 > **Formulation-level fact: this is a *solid-Lagrangian* ALE.** The identity
 > $\mathbf v_{\text{solid}} = \mathbf w$ is not merely an assumption about the
 > physics — it is built into the discretization. The mesh velocity is
 > *computed from* the solid volume-change rate (the $\theta$ prefix sum,
-> §11.3), and `compute_ale_species_advection!`
-> (src/Discretization/ale_fluxes.jl) *defines* condensed phases to move with
-> the mesh: solids and liquids carry **no discrete advection operator** (their
-> advection slot is identically zero; only gases get a mesh-motion transport
-> term — the conservative face-sweep flux form, §11.2.3). The temperature
-> equation follows the same relative-velocity logic: the matrix-carried
-> thermal mass is advected only by $w - v_{\text{solid}} \equiv 0$, so
-> **production ALE has no energy advection term** (§11.2.2). The "arbitrary"
-> in ALE is therefore constrained: any mesh motion **decoupled from the solid
-> material velocity** — remeshing, mesh smoothing, prescribed node motion,
-> AMR-inside-ALE — is *not representable* without first adding a
-> condensed-phase advection operator for the slip velocity
-> $w - v_{\text{solid}}$. The verification hook `Workspace.w_override` (which
-> replaces the reaction-driven $w$ with a prescribed $w(z,t)$ for MMS runs,
-> §18.2) inherits exactly this constraint: under prescribed non-material
-> motion, a spatially varying lab-frame-static condensed field has a
-> $w\,\partial_z\xi$ term with no discrete operator to represent it, which is
-> why manufactured condensed-phase fields must be spatially uniform in such
-> runs (the MMS uniform-solid rule; see test/verification/exact/mms.jl and
-> §11.11 item 7). The temperature field, by contrast, *does* get its slip
+> §11.3), and the residual gives **no component** a discrete advection
+> operator: the only mesh-motion term in the species equations is the
+> dilation $-\xi_j\theta_i$ applied to every component. The temperature
+> equation follows the same logic: the thermal mass $\rho c_p^{\text{eff}}$
+> (every component) rides the mesh, so **production ALE has no advection
+> term in any equation** (§11.2.2). The "arbitrary" in ALE is therefore
+> constrained: any mesh motion **decoupled from the solid material
+> velocity** — remeshing, mesh smoothing, prescribed node motion,
+> AMR-inside-ALE — is *not representable* without first adding an advection
+> operator for the slip velocity $w - v_{\text{solid}}$. The verification
+> hook `Workspace.w_override` (which replaces the reaction-driven $w$ with a
+> prescribed $w(z,t)$ for MMS runs, §18.2) inherits exactly this constraint:
+> under prescribed non-material motion a spatially varying lab-frame-static
+> field has a $w\,\partial_z\xi$ term with no discrete operator to represent
+> it, so the manufactured-solution driver assembles every species source in
+> the material-following frame (see test/verification/exact/mms.jl and
+> §11.10 item 7). The temperature field, by contrast, *does* get its slip
 > advection under the override — $T$ is advected by
 > $w_{\text{applied}} - w_{\text{physical}}$, which is non-zero exactly and
 > only there (§11.2.2).
@@ -182,13 +183,14 @@ $$
 = -\nabla\cdot\mathbf q + Q,
 $$
 with $\mathbf q$ the conductive flux and $Q$ the lumped volumetric source
-($Q_{\text{rxn}}+Q_{\text{rad}}+S_{\text{conv}}+\dots$; note $\rho c_p^{\text{eff}}$
-is the **matrix-only** effective heat capacity, gas storage excluded — see §7 and
-§11.2.4). Crucially, that balance — like every fixed-frame heat equation with no
-solid-convection term — is written for a condensed phase that is **stationary in
-the lab frame**. Here it is not: the thermal mass $\rho c_p^{\text{eff}}$ is
-carried by the matrix, and the matrix *moves* — at exactly the mesh velocity,
-$\mathbf v_{\text{solid}} = \mathbf w$ (§11.1.2). The correct lab-frame balance
+($Q_{\text{rxn}}+Q_{\text{rad}}+S_{\text{conv}}+\dots$; $\rho c_p^{\text{eff}}$ is the
+mixture heat capacity, every component included — see §7 and §11.2.4).
+Crucially, that balance — like every fixed-frame heat equation with no
+solid-convection term — is written for a medium that is **stationary in the lab
+frame**. Here it is not: the thermal mass $\rho c_p^{\text{eff}}$ is carried by the
+skeleton together with the pore gas it holds, and the skeleton *moves* — at
+exactly the mesh velocity, $\mathbf v_{\text{solid}} = \mathbf w$ (§11.1.2). The
+correct lab-frame balance
 for the moving matrix therefore carries a solid-convection term,
 $\rho c_p^{\text{eff}}\,(\partial_t T|_x + \mathbf v_{\text{solid}}\cdot\nabla T)
 = -\nabla\cdot\mathbf q + Q$, and converting to the mesh frame with (11.1) leaves
@@ -243,105 +245,75 @@ convective interpretation of the chain rule.
 
 ### 11.2.3 Specialization to the species equations
 
-For component $j$ with material (component) velocity $\mathbf v_j$ and diffusive
-flux $\mathbf J_j$, the Eulerian species balance is
+For component $j$ with laboratory-frame velocity $\mathbf v_j$ and skeleton-relative
+flux $\mathbf J_j = \xi_j(\mathbf v_j - \mathbf v_{\text{solid}})$, the Eulerian species
+balance is
 $$
 \left.\frac{\partial \xi_j}{\partial t}\right|_{x}
-+ \nabla\cdot(\mathbf v_j \xi_j)
-= -\nabla\cdot\mathbf J_j + S_j .
++ \nabla\cdot(\mathbf v_{\text{solid}}\, \xi_j)
+= -\nabla\cdot\mathbf J_j + S_j ,
 $$
-The general ALE form follows from (11.1): substituting
-$\partial\xi/\partial t|_x = -\nabla\cdot(\mathbf v_j\xi_j) - \nabla\cdot\mathbf J_j + S_j$
-and expanding $\nabla\cdot(\mathbf v_j\xi_j) = \mathbf v_j\cdot\nabla\xi_j + \xi_j\nabla\cdot\mathbf v_j$ gives
+with $\mathbf J_j \equiv 0$ for condensed components and $\mathbf J_g$ the Darcy–Fick
+flux for gases (§11.1.2). The general ALE form follows from (11.1): substituting
+$\partial\xi/\partial t|_x = -\nabla\cdot(\mathbf v_{\text{solid}}\xi_j) - \nabla\cdot\mathbf J_j + S_j$
+and expanding $\nabla\cdot(\mathbf v_{\text{solid}}\xi_j) = \mathbf v_{\text{solid}}\cdot\nabla\xi_j + \xi_j\nabla\cdot\mathbf v_{\text{solid}}$ gives
 $$
 \left.\frac{\partial \xi_j}{\partial t}\right|_{\chi}
-= \text{(Eulerian RHS)} - (\mathbf v_j - \mathbf w)\cdot\nabla\xi_j
-\;-\; \xi_j\,\nabla\cdot\mathbf v_j,
+= \text{(Eulerian RHS)} - (\mathbf v_{\text{solid}} - \mathbf w)\cdot\nabla\xi_j
+\;-\; \xi_j\,\theta,
 \tag{11.4}
 $$
-where the last term, $-\xi_j\,\nabla\cdot\mathbf v_j = -\xi_j\theta$, is the
-**volumetric dilation** of the *material* (`ale_fluxes.jl:13–16`;
-`volume_change.md`). For mesh-bound components $\theta$ is the **full**
-volumetric strain rate $\theta_{\text{cell}}$ — axial $\partial w/\partial z$
-*plus* the lateral channel $\theta_A$. Identifying $\theta$ with
-$\nabla\cdot\mathbf w$ is correct only without lateral shrinkage: in 1D,
-$\partial w/\partial z = \theta - \theta_A \ne \theta$ when $\theta_A \ne 0$,
-and applying the full $\theta_{\text{cell}}$ is the unique choice that makes
-$d(\xi V)/dt = SV$ exact (§11.3). The two physical regimes follow:
+where the last term, $-\xi_j\theta$, is the **volumetric dilation** of the skeleton,
+with $\theta$ the **full** volumetric strain rate $\theta_{\text{cell}}$ — axial
+$\partial w/\partial z$ *plus* the lateral channel $\theta_A$. Identifying $\theta$
+with $\nabla\cdot\mathbf w$ is correct only without lateral shrinkage: in 1D,
+$\partial w/\partial z = \theta - \theta_A \ne \theta$ when $\theta_A \ne 0$, and
+applying the full $\theta_{\text{cell}}$ is the unique choice that makes
+$d(\xi V)/dt = SV - [JA]_{\text{faces}}$ exact (§11.3).
 
-- **Solid / liquid components** move with the mesh, $\mathbf v_{\text{solid}} =
-  \mathbf w$, so the relative-velocity advection vanishes,
-  $(\mathbf v_{\text{solid}}-\mathbf w)\cdot\nabla\xi_j = 0$. What survives is only
-  the dilation term:
-  $$
-  \left.\frac{\partial \xi_j}{\partial t}\right|_{\chi}
-  = S_j - \xi_j\,\theta
-  \qquad (\text{solid/liquid}).
-  \tag{11.5}
-  $$
-  This is the "dilation correction," handled separately from advection (§11.3.4).
-
-- **Gas components** have $\mathbf v_{\text{gas}}\approx 0$ in the lab frame,
-  so relative to the mesh the gas streams at $-\mathbf w$: in the continuum,
-  $-(\mathbf v_{\text{gas}}-\mathbf w)\cdot\nabla\xi = +\mathbf
-  w\cdot\nabla\xi_{\text{gas}}$. Gas is **not** mesh-bound, so its
-  mesh-motion transport must be discretized **conservatively** — see the
-  implementation note below.
-
-**Implementation — conservative flux form.** The gas kernel does
-*not* discretize the pointwise term $+w\,\partial\xi_g/\partial z$ directly:
-the pointwise (non-conservative) form does not telescope cell-by-cell, so
-under a collapsing mesh with no escape path it would silently delete the held
-gas with the vanishing volume (an $O(1)$ sink — tens of percent of total mass
-in the fully-closed V-CPL-03 P4 corner). Instead
-`compute_ale_species_advection!` (`ale_fluxes.jl`) applies the balance on the
-moving cell volume,
+In production the mesh moves with the skeleton, $\mathbf w = \mathbf v_{\text{solid}}$,
+so the slip term vanishes for **every** component and (11.4) reduces to
 $$
-\left.\frac{\partial \xi_g}{\partial t}\right|_{\chi}^{\text{mesh-motion}}
-= \frac{(\xi_{g,\text{face}}\,w\,A)_R - (\xi_{g,\text{face}}\,w\,A)_L}{V}
-\;-\; \xi_g\,\frac{\dot V}{V},
-\qquad
-\frac{\dot V}{V} = \frac{w_R - w_L}{\Delta z} + \theta_A,
-\tag{11.4b}
+\boxed{\;
+\left.\frac{\partial \xi_j}{\partial t}\right|_{\chi}
+= S_j - \nabla\cdot\mathbf J_j - \xi_j\,\theta
+\qquad (\text{every component; } \mathbf J_j = 0 \text{ for solid/liquid}).
+\;}
+\tag{11.5}
 $$
-with first-order donor face values ($\xi_{g,\text{face}}$ from the side the
-face moves into — the gas the face sweeps; the same upwinding as the Darcy
-face flux `ale_gas_flux_darcy_fick`). In the continuum (11.4b) reduces to
-$\nabla\cdot(\xi_g\mathbf w) - \xi_g\nabla\cdot\mathbf w - \xi_g\theta_A
-= w\,\partial_z\xi_g - \xi_g\theta_A$, i.e. the chain-rule term plus the
-lateral compression that the pointwise form omitted; discretely the face
-fluxes telescope, so **total gas mass changes only through the boundary
-faces** for any mesh motion. Boundary faces follow the mass BCs:
+The species equations therefore carry **no mesh-motion advection**: the Eulerian
+RHS supplies $S_j - \nabla\cdot\mathbf J_j$ unchanged (the skeleton-relative flux is
+the right flux in the mesh frame) and the residual adds the dilation (11.5) to
+every component (§11.3.4). Integrated over a cell this is
+$d(\xi_jV)/dt = S_jV - [J_jA]_{\text{faces}}$: the mass of every component in a
+cell changes only by reaction and by $\mathbf J_j$ through its faces, so the
+column total changes only through the boundary faces, exactly as on a fixed
+mesh. In a sealed collapsing column the pore gas is compressed cell by cell
+($\xi_g \uparrow$ as $V \downarrow$, V-CPL-03 P4), and under Darcy–Fick transport
+the pressure closure turns that compression into a venting response.
 
-- an **impermeable** face carries its gas with it (no sweep flux) — held gas
-  in a fully closed collapsing column *compresses* ($\xi_g \uparrow$ as
-  $V\downarrow$; under Darcy–Fick transport this produces a genuine — stiff
-  but correct — pressure response), and total gas mass is conserved exactly
-  (V-CPL-03 P4 pins this to integrator tolerance);
-- an **open** face (venting/flux/convective mass BC) uses the zero-gradient
-  ghost $\xi_{\text{outside}} = \xi_{\text{cell}}$ — a regressing surface
-  releases the pore gas it uncovers at the cell concentration, an advancing
-  one ingests at the same value, and the boundary discretization stays
-  consistent with the continuum term (which the MMS suite verifies).
+**Why not a face-sweep flux for the gas.** Treating the gas as fixed in the
+laboratory while the mesh sweeps past it would add $\nabla\cdot(\xi_g\mathbf w)$ to
+(11.5). With $\mathbf J_g$ defined relative to the skeleton that term counts the
+skeleton's motion a second time: in a uniformly collapsing sealed column it
+leaves every interior cell's gas untouched and piles the whole compression into
+the top cell, and at an open regressing surface it releases pore gas at
+$\xi_g\,w$ that the diffusive and Darcy fluxes already account for.
 
-For solids the kernel writes `advection[j,i] = 0` — $(\mathbf
-v_{\text{solid}}-\mathbf w)=0$ — and their dilation `−ξθ` is applied by the
-residual's dedicated correction step (§11.3.4); the gas volume-rate term in
-(11.4b) is the gas counterpart of that correction, folded into the flux form
-so the pairing telescopes.
+### 11.2.4 Why the gas is in $\rho c_p^{\text{eff}}$ (cross-reference)
 
-### 11.2.4 Why gas storage is excluded from $\rho c_p^{\text{eff}}$ (cross-reference)
-
-The advection term in (11.3) is the mesh-frame transport of *sensible* enthalpy.
-The complementary gas convective enthalpy carried by the *gas flux* through the
-matrix is accounted for by the volumetric source $S_{\text{conv}} = -\sum_g
-c_{p,g}\,\bar J_g\,\partial T/\partial z$ (Chapter 7), and the effective volumetric
-heat capacity $\rho c_p^{\text{eff}}$ that divides the energy RHS in (11.3)
-**excludes gas storage** (it is the matrix-only $\rho c_p^{\text{eff}}$, not $\rho
-c_p^{\text{total}}$). This is the "Formulation A" convention shared with FDS, Gpyro
-and ThermaKin (Chapter 7, `problem_residual.md §12.6`); the ALE advection correction
-does not change it. The surface transpiration term is guarded off by default to
-avoid double-counting $S_{\text{conv}}$ (Chapters 7, 12; `problem_residual.md §12.6`).
+The advection term in (11.3) is the mesh-frame transport of *sensible* enthalpy,
+and it vanishes in production because the thermal mass rides the mesh. That
+thermal mass is the mixture heat capacity $\rho c_p^{\text{eff}} = \sum_j\xi_jc_{p,j}$
+over every component (Chapter 7): the pore gas is carried with the pores, so its
+sensible heat moves with the mesh like the matrix's and needs no separate
+advection term either. The complementary gas enthalpy carried by the *flux
+relative to the skeleton* is accounted for by the volumetric source
+$S_{\text{conv}} = -\sum_g c_{p,g}\,\bar J_g\,\partial T/\partial z$ (Chapter 7). This is
+the ThermaKin Eq. 17 convention term for term, including its deformation term,
+which is the $\mathbf v_{\text{solid}}\cdot\nabla T$ piece the mesh frame absorbs. The
+surface transpiration term is rejected at construction because it would count
+the gas heating a second time (Chapters 7, 12).
 
 ---
 
@@ -491,46 +463,40 @@ $$
 co-locate with nodes in 1D) by $w_{\text{face},f} = w_{\text{node}[f.\text{node\_id}]}$
 (`residual.jl:417–423`, `_interpolate_node_to_face!`).
 
-The **dilation correction** implements the surviving term of (11.5) for mesh-bound
-species. For each cell $i$ and each *non-gas* component $j$,
+The **dilation correction** implements the mesh-motion term of (11.5) for every
+component. For each cell $i$ and each component $j$,
 $$
 \boxed{\;
 \left.\frac{d\xi_j}{dt}\right|_{\text{dilation}} = -\,\xi_{j,i}\,\theta_i
-\qquad (\text{non-gas } j)
+\qquad (\text{every } j)
 \;}
 \tag{11.13}
 $$
-(`residual.jl:442–473`, `_apply_ale_dilation_correction!` /
-`_apply_dilation_correction_unrolled!`; the guard `!is_gas(material.components[j])`
-at `residual.jl:467` restricts it to solids/liquids). Physically: in the Lagrangian
-(mesh-following) frame, a shrinking cell ($\theta_i<0$) must *concentrate* the
-mesh-bound mass, so subtracting $\xi_{j,i}\theta_i$ (a positive amount when
-$\theta_i<0$) raises $\dot\xi_j$; conversely an expanding cell dilutes it. Without
-this term, solid species would be spuriously depleted by the mesh motion. Gases are
-excluded because they are not locked to the mesh — their transport is the advection
-correction (11.4), not dilation (`volume_change.md` design subtlety 4).
+(`_apply_ale_dilation_correction!`, `src/Residual/residual.jl`). Physically: in the
+mesh-following frame, a shrinking cell ($\theta_i<0$) must *concentrate* the mass it
+carries, so subtracting $\xi_{j,i}\theta_i$ (a positive amount when $\theta_i<0$)
+raises $\dot\xi_j$; conversely an expanding cell dilutes it. Without this term every
+species would be spuriously depleted by the mesh motion. The pore gas is included
+because it is carried with the pores it occupies (§11.1.2); its compression under
+collapse is what the pressure closure sees.
 
 The combined ALE species update assembled into the residual is therefore
 $$
 \left.\frac{d\xi_{j,i}}{dt}\right|_{\chi}
 =
 \underbrace{-\frac{1}{V_i}(J_{j,R}-J_{j,L})A + S_{j,i}}_{\text{Eulerian RHS}}
-\;+\;
-\underbrace{w_{\text{cell},i}\,\frac{\partial\xi_j}{\partial z}\Big|_i}_{\text{advection (gas only)}}
 \;-\;
-\underbrace{\xi_{j,i}\,\theta_i}_{\text{dilation (non-gas only)}} ,
+\underbrace{\xi_{j,i}\,\theta_i}_{\text{dilation (every component)}} ,
 \tag{11.14}
 $$
-and the energy update is (11.3) with the divergence and sources from Chapter 7
-(`problem_residual.md` Discrete Update Summary).
+and the energy update is (11.3) with the divergence and sources from Chapter 7.
 
 > **Implementation note.** The full ALE residual assembly order is: populate
 > typed state cache → update $A(t)$ from $\bar\chi$ → recompute state geometry from
 > node positions → properties → Eulerian physics RHS (`dξ_rxn` cached) →
-> $\theta_A$ → cumulative mesh velocity → node→face interpolation → advection (T
-> and species) → apply advection → dilation correction → pack `du` (incl.
-> $du[z_{\text{off}}+i]=w_i$) → pack $\chi$ derivatives.
-> `_residual!(…, ::ALE)`, `src/Residual/residual.jl:91–222`.
+> $\theta_A$ → cumulative mesh velocity → (override only) mesh-relative T
+> advection → dilation correction → pack `du` (incl. $du[z_{\text{off}}+i]=w_i$)
+> → pack $\chi$ derivatives. `_residual!(…, ::ALE)`, `src/Residual/residual.jl`.
 
 ---
 
@@ -725,18 +691,14 @@ mesh (Chapter 16, Conservation Diagnostics).
 
 ## 11.6 ALE advection discretization
 
-Two distinct kernels implement the mesh-motion corrections:
-
-- **Energy** (`compute_ale_advection_term!`): the pointwise correction
-  $w_{\text{rel}}\,\partial T/\partial z$ with a donor-side-upwinded,
-  TVD-limited, three-point stencil — derived in this subsection. Since the
-  relative-velocity form of §11.2.2 makes $w_{\text{rel}} \equiv 0$ in
-  production, this kernel fires **only under `Workspace.w_override`** (MMS
-  verification); the derivation below applies with $w = w_{\text{rel}}$.
-- **Gas species** (`compute_ale_species_advection!`): the conservative
-  flux form (11.4b) with first-order donor face values — see §11.2.3. Its
-  donor convention (the side the face moves into) is the face-flux
-  counterpart of the apparent-velocity rule derived here.
+One kernel implements a mesh-motion advection, and only under the verification
+hook: **energy** (`compute_ale_advection_term!`), the pointwise correction
+$w_{\text{rel}}\,\partial T/\partial z$ with a donor-side-upwinded, TVD-limited,
+three-point stencil — derived in this subsection. Since the relative-velocity
+form of §11.2.2 makes $w_{\text{rel}} \equiv 0$ in production, this kernel fires
+**only under `Workspace.w_override`** (MMS verification); the derivation below
+applies with $w = w_{\text{rel}}$. The species equations have no advection kernel
+(§11.2.3).
 
 ### 11.6.1 Upwinding on the sign of the apparent transport velocity $c=-w$
 
@@ -860,75 +822,13 @@ the stencil well-posed:
 
 > **Implementation note.** Energy advection (override-only):
 > `compute_ale_advection_term!` with the shared limited gradient
-> `_limited_gradient`; gas transport (flux form, §11.2.3):
-> `compute_ale_species_advection!` with the compile-time unrolled inner
-> kernel `_compute_species_fluxform_unrolled!`; all in
-> `src/Discretization/ale_fluxes.jl`.
+> `_limited_gradient`, in `src/Discretization/ale_fluxes.jl`. The species
+> dilation is `_apply_ale_dilation_correction!` in `src/Residual/residual.jl`
+> (§11.3.4).
 
 ---
 
-## 11.7 ALE Darcy–Fick flux with relative velocity (test-only form)
-
-**Production note.** The production ALE residual does *not* use this
-combined relative-velocity flux: it keeps the lab-frame Darcy–Fick flux in the
-Eulerian RHS and adds the conservative flux-form mesh-motion correction of
-§11.2.3 (whose face-sweep term $-\xi w$ is exactly the $-\xi w$ piece of the
-relative flux below) — an exact identity with no double-count. The combined
-face flux below is implemented only in the test-only
-`compute_ale_gas_fluxes_darcy_fick!` path, kept as an independent
-cross-check of the identity.
-
-When pressure-driven (Darcy) gas flow is active (transport mode `DarcyFick`, Chapter
-9), the mesh-frame gas flux can equivalently be written with the relative
-**interstitial** velocity $v_{\text{rel}} = v_g/\varphi_f - w$, where $v_g$ is
-the laboratory-frame (superficial) Darcy velocity at the face, $\varphi_f$ the
-face porosity, and $w$ the face mesh velocity: the lab-frame advective flux is
-$(\xi_j/\varphi)\,v_g$ (§9.3) and the moving face sweeps bulk concentration
-$\xi_j w$, so the relative flux is exactly $\xi_j(v_g/\varphi - w)$. The
-continuous ALE Darcy–Fick flux for gas component $j$ is
-$$
-J_j = \xi_j\,\Bigl(\frac{v_g}{\varphi_f} - w\Bigr)\;-\;\frac{\lambda_f}{T_f}\,\frac{\partial(\xi_j T)}{\partial z},
-\tag{11.24}
-$$
-combining advection at the relative velocity with the volume-fraction (partial-
-pressure) gradient diffusion of Chapter 9 (`ale_fluxes.jl:563–581`;
-`discretization.md §7.5`). The discrete face flux is
-$$
-\boxed{\;
-J_j =
-\underbrace{v_{\text{rel}}\,\xi_{\text{upwind}}}_{\text{advection}}
-\;+\;
-\underbrace{\left(-\frac{\lambda_f}{T_f}\,\frac{\xi_R T_R - \xi_L T_L}{d_{LR}}\right)}_{\text{diffusion}},
-\qquad
-v_{\text{rel}} = \frac{v_g}{\varphi_f} - w,
-\;}
-\tag{11.25}
-$$
-with the face temperature $T_f = \tfrac12(T_L+T_R)$, harmonic-mean face transport
-coefficient $\lambda_f$, center-to-center distance $d_{LR}$, and **first-order
-upwinding on the relative velocity**:
-$$
-\xi_{\text{upwind}} = \begin{cases} \xi_L, & v_{\text{rel}}\ge 0 \\ \xi_R, & v_{\text{rel}} < 0 \end{cases}
-$$
-(`ale_gas_flux_darcy_fick`, `ale_fluxes.jl:629–654`; `discretization.md §7.5`). The
-diffusion term is identical in form to the Eulerian gas flux (Chapter 9) — only the
-advective part picks up the mesh velocity through $v_{\text{rel}}$. The first-order
-upwind convective face value (no limiter) for a general ALE convective flux is
-$F = (v-w)\,\varphi_{\text{upwind}}$ (`ale_convective_flux`, `ale_fluxes.jl`;
-test-only — the production TVD reconstruction is the cell-centered
-`_limited_gradient`, §13.8.2). Solid/liquid components carry zero gas flux (their
-transport is mesh motion, §11.2.3). Note that the production residual always uses the simplified
-`compute_ale_advection_term!`/`compute_ale_species_advection!` path of §11.6 —
-the gas Darcy flux lives in the lab-frame RHS and the ALE correction is the
-pure $+w\,\partial\xi/\partial z$ term driven by the mesh velocity alone.
-
-> **Implementation note.** ALE Darcy–Fick: `ale_gas_flux_darcy_fick`,
-> `compute_ale_gas_fluxes_darcy_fick!`, `src/Discretization/ale_fluxes.jl:563–795`
-> (unrolled over gas components via `@generated`).
-
----
-
-## 11.8 Conservative remapping (for AMR / mesh changes)
+## 11.7 Conservative remapping (for AMR / mesh changes)
 
 When the mesh *topology* changes — adaptive refinement or coarsening (Chapter 14),
 or surface-cell depletion — the cell-centered state must be transferred from the old
@@ -937,7 +837,7 @@ does not handle a change in the *number* of cells. The remapping operators in
 `src/Physics/remapping.jl` perform that transfer while preserving the conserved
 integrals (mass per species, thermal energy).
 
-### 11.8.1 State layout for remapping
+### 11.7.1 State layout for remapping
 
 The remap operates on a **cell-interleaved** flat vector,
 $$
@@ -949,7 +849,7 @@ This differs from the *block-major* ODE state vector of Chapter 13 (all $T$, the
 all $\xi_1$, …); the remap routines use their own cell-interleaved convention and
 the caller is responsible for packing/unpacking accordingly.
 
-### 11.8.2 Overlap geometry
+### 11.7.2 Overlap geometry
 
 The unifying primitive is the **overlap volume** of a new cell $i_{\text{new}}$ and
 an old cell $i_{\text{old}}$. With cell extents $[z_L,z_R]$ on each mesh,
@@ -971,7 +871,7 @@ division volumes would silently scale every concentration by
 $A_{\text{old}}/A_{\text{new}}$. $A(t)$ evolution belongs to the ODE (the
 $\chi$ swelling law, Chapter 10), never to the remap.
 
-### 11.8.3 First-order conservative remap
+### 11.7.3 First-order conservative remap
 
 **Temperature — energy-conserving.** When `material` is supplied, each overlap
 contributes its heat capacity $\rho c_p$, so the new-cell temperature conserves
@@ -1009,7 +909,7 @@ total) is exactly what makes $\xi_{\text{new}}V_{\text{new}} = \sum
 > **Implementation note.** `remap_solution!(…, ::FirstOrderRemap; material)`,
 > `src/Physics/remapping.jl:97–214`.
 
-### 11.8.4 Second-order remap with gradient reconstruction
+### 11.7.4 Second-order remap with gradient reconstruction
 
 The second-order method (`SecondOrderRemap`, default limiter `:minmod`,
 `remapping.jl:38–41`) reconstructs the old field linearly about each old cell center
@@ -1037,7 +937,7 @@ clamps enforce a discrete maximum principle (no new extrema, no negative
 concentrations) at the cost of *breaking* exact mass conservation — which the next
 step repairs.
 
-### 11.8.5 Limiter mass error
+### 11.7.5 Limiter mass error
 
 Because the extrema clamps (11.31)–(11.32) perturb the integrals, the
 second-order remap carries a mass error of order $10^{-3}$–$10^{-5}$. (If a
@@ -1046,7 +946,7 @@ $\xi \leftarrow \xi\,M_{\text{old}}/M_{\text{new}}$ against
 `check_remap_conservation`'s ledger is three lines.) First-order remap is
 mass-exact and is what the production depletion path effectively uses.
 
-### 11.8.6 Conservation check and fallback
+### 11.7.6 Conservation check and fallback
 
 `check_remap_conservation` returns, per component, the relative mass error
 $$
@@ -1062,7 +962,7 @@ state of the nearest old cell by center-to-center distance
 
 ---
 
-## 11.9 Mesh quality and safety
+## 11.8 Mesh quality and safety
 
 ALE motion can in principle tangle the mesh ($V_i\le 0$) if a node overtakes its
 neighbor, e.g. under an aggressive time step near complete burnout. Three utilities
@@ -1095,7 +995,7 @@ from collapsing to zero during deep burns.
 
 ---
 
-## 11.10 Comparison to ThermaKin2Ds, Gpyro, and FDS
+## 11.9 Comparison to ThermaKin2Ds, Gpyro, and FDS
 
 The dynamic-mesh strategies of the three reference pyrolysis solvers map onto the
 Pyrolysis.jl ALE framework as follows. On first use we map their notation to ours:
@@ -1130,9 +1030,11 @@ Fernandez-Pello) uses a *fixed* (Eulerian) set of control volumes whose thicknes
 $\Delta z$ can be specified non-uniformly, and accounts for shrinkage/swelling
 through a volume-fraction bookkeeping rather than by physically moving the grid.
 Pyrolysis.jl can reproduce the Eulerian limit (mesh mode `Eulerian`, $w\equiv 0$,
-no $z$-block in the state vector; `problem_residual.md`), in which case the residual
-collapses to the standard fixed-mesh divergence form (Chapter 13) and the ALE
-advection/dilation/GCL machinery is entirely inactive. The ALE mode adds, on top of
+no $z$-block in the state vector), in which case the residual collapses to the
+standard fixed-mesh divergence form (Chapter 13) and the ALE dilation/GCL
+machinery is entirely inactive. Gpyro's gas balance is written on its deforming
+control volumes with only the Darcy flux crossing their faces — the same
+skeleton-bound frame as §11.1.2. The ALE mode adds, on top of
 Gpyro-style physics, the option of *physically* tracking the surface with a moving
 grid, which keeps in-depth resolution concentrated where it is needed without the
 non-uniform-$\Delta z$ tuning Gpyro relies on. Both codes share the same
@@ -1146,10 +1048,9 @@ captured by Pyrolysis.jl's $\mathrm{law}(\bar\chi)$ and $\theta_A$ path.
 McGrattan, et al.) integrates the condensed-phase mass and energy equations on a
 *fixed* one-dimensional solid grid and represents shrinkage/swelling through layer
 thickness updates and a cell-shrinking algorithm rather than a continuously moving
-ALE mesh. FDS shares Pyrolysis.jl's Formulation-A energy convention (matrix-only
-$\rho c_p$, gas convective enthalpy via a source term, gas storage excluded;
-Chapter 7) and the in-depth Beer–Lambert / surface radiation absorption options
-(Chapter 8). The principal contrast is again the treatment of the moving boundary:
+ALE mesh. FDS carries no in-depth gas, so its energy convention is the
+condensed-phase limit of Pyrolysis.jl's (Chapter 7); it shares the in-depth
+Beer–Lambert / surface radiation absorption options (Chapter 8). The principal contrast is again the treatment of the moving boundary:
 FDS adjusts discrete layer thicknesses, while Pyrolysis.jl's ALE evolves node
 positions as continuous state with an exactly enforced GCL. Where FDS uses a fixed
 grid, Pyrolysis.jl's `Eulerian` mode is the corresponding regime; where the surface
@@ -1162,7 +1063,7 @@ guarantees that the moving grid introduces *no* spurious mass or energy.
 
 ---
 
-## 11.11 Limitations and open issues
+## 11.10 Limitations and open issues
 
 The following limitations are documented in the source and KB notes
 (`ale.md §11`, `volume_change.md` Open Questions, `discretization.md §15`,
@@ -1191,7 +1092,7 @@ The following limitations are documented in the source and KB notes
 4. **Remap limiter placement and order selection.** The second-order remap applies
    TVD/extrema limiters *after* volume-weighted averaging rather than *during*
    reconstruction, which can permit small violations of the discrete maximum
-   principle and a $10^{-3}$–$10^{-5}$-level mass error (§11.8.5). The
+   principle and a $10^{-3}$–$10^{-5}$-level mass error (§11.7.5). The
    choice between first- and second-order remap is left to the caller; there
    is no automatic, error-estimate-driven order selection
    (`ale.md §11`, items 4–5).
@@ -1213,21 +1114,21 @@ The following limitations are documented in the source and KB notes
 
 7. **Solid-Lagrangian capability boundary: no general (non-material) mesh
    motion.** As stated in §11.1.2, the formulation identifies mesh velocity
-   with solid material velocity and gives condensed phases no discrete
-   advection operator (`compute_ale_species_advection!` zeroes the solid
-   slots). Consequently mesh motion decoupled from the solid — remeshing,
+   with solid material velocity and gives no component a discrete advection
+   operator. Consequently mesh motion decoupled from the solid — remeshing,
    mesh smoothing/redistribution, prescribed node motion, AMR performed
-   *within* the ALE frame — is outside the representable class: a solid field
-   that is static in the laboratory frame but non-uniform in $z$ cannot be
-   held stationary under such motion, because its $w\,\partial_z\xi$
-   contribution has no operator. Supporting general ALE would require adding
-   a condensed-phase advection operator on the slip velocity
-   $w - v_{\text{solid}}$ (with its own limiter and Jacobian couplings). The
-   verification hook `Workspace.w_override` (prescribed $w(z,t)$ for MMS
-   runs, §18.2) deliberately does *not* lift this boundary — manufactured
-   condensed-phase fields under prescribed motion must be spatially uniform,
-   and the structured geometry Jacobian assumes reaction-driven motion, so
-   override runs use finite-difference Jacobians.
+   *within* the ALE frame — is outside the representable class: a field that
+   is static in the laboratory frame but non-uniform in $z$ cannot be held
+   stationary under such motion, because its $w\,\partial_z\xi$ contribution
+   has no operator. Supporting general ALE would require adding a species
+   advection operator on the slip velocity $w - v_{\text{solid}}$ (with its
+   own limiter and Jacobian couplings). The verification hook
+   `Workspace.w_override` (prescribed $w(z,t)$ for MMS runs, §18.2)
+   deliberately does *not* lift this boundary — the manufactured-solution
+   driver assembles every species source in the material-following frame so
+   the missing operator is never exercised, and the structured geometry
+   Jacobian assumes reaction-driven motion, so override runs use
+   finite-difference Jacobians.
 
 ---
 
@@ -1236,7 +1137,7 @@ The following limitations are documented in the source and KB notes
 - The volumetric strain rate $\theta$, swelling factor $\gamma_j$, lateral shrinkage
   law, and the $\chi$-block dynamics are developed in detail in **Chapter 10, Volume
   Change & Lateral Shrinkage**.
-- The Eulerian energy assembly, $\rho c_p^{\text{eff}}$ (gas excluded),
+- The Eulerian energy assembly, $\rho c_p^{\text{eff}}$ (every component),
   $S_{\text{conv}}$, and harmonic-mean face conductivity are in **Chapter 7, Heat
   Conduction, Convection & Energy Assembly**.
 - The volume-fraction/partial-pressure gas flux and Darcy velocity are in **Chapter

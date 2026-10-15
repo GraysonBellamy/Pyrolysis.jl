@@ -50,7 +50,7 @@ explicitly.
   and surface-temperature histories, against thermogravimetric (TGA) curves, and
   against the published output of established codes (ThermaKin2Ds, Gpyro, the FDS
   solid phase). A validation discrepancy can be a modeling choice
-  (gas-storage exclusion, gray-body radiation, single-reactant kinetics), a
+  (one-temperature gas, gray-body radiation, single-reactant kinetics), a
   parameter-calibration issue, or a genuine missing physics. Validation is never
   exact: it is bounded by measurement uncertainty and by the irreducible
   approximations of a 1D condensed-phase model.
@@ -105,9 +105,10 @@ motion via the `Workspace.w_override` hook. Two constraints of that driver
 follow from the formulation: the structured geometry Jacobian assumes
 reaction-driven motion, so `w_override` runs use finite-difference Jacobians;
 and because the scheme is a **solid-Lagrangian ALE** (mesh velocity ≡ solid
-material velocity; condensed phases carry no discrete advection operator —
-§11.1.2, §11.11 item 7), manufactured condensed-phase fields must be
-spatially **uniform** under prescribed non-material motion.
+material velocity; no component carries a discrete advection operator —
+§11.1.2, §11.10 item 7), every manufactured species source on a moving mesh
+is assembled in the material-following frame, with the prescribed or the
+reaction-driven mesh velocity as its $w$.
 
 > **What MMS cannot see: wrong-PDE defects.** MMS verifies that the
 > discretization solves the code's *own* target PDE at the designed order —
@@ -553,17 +554,15 @@ trapezoidal substep average $A=\tfrac12(A^\mathrm{pre}+A^\mathrm{post})$, which
 keeps the contribution symmetric and consistent with the GCL volume update. A
 mass-balance failure indicates a flux-assembly or callback bug.
 
-### 18.4.2 Energy: dual ledgers
+### 18.4.2 Energy ledger
 
-Energy verification uses *two complementary ledgers*, each auditing a different
-thing (§16.2–16.4):
-
-**Discrete-form ledger** — closes by construction. It uses only the
-matrix-only storage $E_\mathrm{matrix}(t)=\sum_i\rho c_p^\mathrm{eff}\,T_i\,V_i$
-(gas excluded, §16.2) and the *exact terms the RHS assembles*:
+Energy verification uses the sensible-energy ledger of §16.4–16.5. The stored
+quantity is $E(t)=\sum_i\rho c_p^\mathrm{eff}\,T_i\,V_i$ with the mixture
+$\rho c_p^\mathrm{eff}$ (every component, gas included, §16.4), balanced against
+the *exact terms the RHS assembles*:
 
 $$
-E_\mathrm{matrix}(t) = E_\mathrm{matrix}(0)
+E(t) = E(0)
   + \int_0^t\!\Big[
       q_\mathrm{cond,boundary}\,A
       + Q_\mathrm{rxn}
@@ -572,45 +571,20 @@ E_\mathrm{matrix}(t) = E_\mathrm{matrix}(0)
     \Big]\,d\tau .
 $$
 
-The discrete residual $r_\mathrm{discrete}=E_\mathrm{matrix}(t)-E_\mathrm{matrix}
-(0)-\sum(\text{sources})$ should close to integrator tolerance ($\sim10^{-6}$
-relative, `check_energy_conservation` default tol $10^{-6}$) because it is built
-from exactly the terms `compute_rhs!` evaluates. A failure here is a bookkeeping
-bug. The one caveat (§16.9, §18.8) is that this ledger *cannot* close exactly when
-composition varies in time, because it omits the
-$\int T\,\partial(\rho c_p)/\partial t\,dV\,dt$ heat-capacity-change term of its
-$\rho c_p\,T$ proxy density (§16.9) and the ALE volume-change term; the residual
-then carries a small,
-composition-rate-dependent offset that is a known incompleteness of the *audit*,
-not of the *solver*.
+The residual $r=E(t)-E(0)-\sum(\text{sources})$ should close to integrator
+tolerance ($\sim10^{-6}$ relative, `check_energy_conservation` default tol
+$10^{-6}$) because it is built from exactly the terms `compute_rhs!` evaluates. A
+failure here is a bookkeeping bug. The one caveat (§16.8, §18.8) is that this
+ledger *cannot* close exactly when composition varies in time, because it omits
+the $\int T\,\partial(\rho c_p)/\partial t\,dV\,dt$ heat-capacity-change term of its
+$\rho c_p\,T$ proxy density (§16.8) and the ALE volume-change term; the residual
+then carries a small, composition-rate-dependent offset that is a known
+incompleteness of the *audit*, not of the *solver*.
 
-**Physical-form ledger** — quantifies the quasi-steady-gas cost. It uses the
-*total* storage $E_\mathrm{total}(t)=\sum_i\rho c_p^\mathrm{total}\,T_i\,V_i$
-(matrix + all gas, §16.2) and the externally-applied boundary flux:
-
-$$
-E_\mathrm{total}(t) = E_\mathrm{total}(0)
-  + \int_0^t\!\Big[
-      q_\mathrm{BC,applied}\,A
-      + Q_\mathrm{rxn}
-      - \sum_g \dot m_{g,\mathrm{transp}}\,\Delta h_g(T_s,T_\infty)
-    \Big]\,d\tau .
-$$
-
-The transpiration term carries energy *away* (a sink); in the residual it appears
-with a $+$ sign (`cumulative_transpiration` is *added back* to close the balance,
-§16.4). For canonical pyrolysis the *gas-storage gap*
-$\Delta E_\mathrm{gas}=E_\mathrm{total}-E_\mathrm{matrix}$ is small ($<0.2\%$ of
-matrix energy at 1 atm, scaling with pressure), and the physical-form residual
-should stay $<1\%$ of initial energy. A large physical residual is *not a bug* —
-it tells the user the run is stressing the Formulation-A approximation
-(gas residence time approaching the thermal diffusion time), and the gas-storage
-exclusion is becoming inaccurate (§18.7.2).
-
-**The auditing subtlety.** The discrete ledger uses
-$q_\mathrm{cond,boundary}$ (the conducted flux from the surface Newton solve)
-while the physical ledger uses $q_\mathrm{BC,applied}$ (the externally driven
-flux, which may include radiation/convection); these differ whenever the BC sets
+**The boundary flux.** The ledger uses $q_\mathrm{cond,boundary}$ (the conducted
+flux from the surface Newton solve). Under the supported convention — no surface
+transpiration term — it equals the applied boundary flux $q_\mathrm{BC,applied}$
+(the externally driven flux, which may include radiation/convection); the two differ only when a BC sets
 a total flux constraint rather than a temperature. Crucially, the discrete ledger
 *audits bookkeeping, not double-counting*: if the RHS itself double-counts a
 mechanism, the discrete ledger will still close, because it is built from the same
@@ -669,7 +643,7 @@ construction: `to_problem_def(...; use_transpiration_bc=true)` and
 `solve(...; use_transpiration_bc=true)` both raise an `ArgumentError`
 (verified in `test/discretization/test_transpiration_energy_balance.jl`). The
 test additionally measures the double-count magnitude through an *independent*
-ledger — precisely because the discrete-form ledger, built from the same RHS,
+ledger — precisely because the energy ledger, built from the same RHS,
 would *not* catch it. The optional `:with_generation_sink` form adds
 $S_{\mathrm{gen},i}=-\sum_g\Delta h_g(T_i,T_\mathrm{ref})(\nabla\!\cdot\mathbf
 J_g)_i$ using the same midpoint-rule enthalpy quadrature as the transpiration BC,
@@ -749,9 +723,9 @@ control knob is the tolerance pair. A tolerance study sweeps `reltol` (and
 `abstol` in proportion) and tracks a QoI to its tolerance-converged plateau; the
 convergence example uses tightened tolerances (`abstol=1e-9`, `reltol=1e-7`) for
 its reference runs so that the *spatial* error dominates the comparison and is not
-masked by temporal error. The discrete-form energy residual (§18.4.2) provides an
+masked by temporal error. The energy-ledger residual (§18.4.2) provides an
 independent confirmation that the tolerance is tight enough: it closes to roughly
-`reltol`, so a discrete residual that fails to shrink as `reltol` is tightened
+`reltol`, so a residual that fails to shrink as `reltol` is tightened
 indicates a bookkeeping issue rather than under-resolution. The three knobs —
 $\Delta z$, integrator order/`dtmax`, and tolerance — are studied separately so
 that the dominant error source is unambiguous; only when all three are converged
@@ -848,12 +822,10 @@ documented, specific ways; mapping their notation to ours:
 
 - **ThermaKin2Ds.** Maps its stoichiometric coefficients $\theta_i^{\,j}$ to our
   $\nu_{i,j}$ and its component concentrations to our $\xi_j$. ThermaKin's energy
-  equation (its Eq. 17) keeps the gas sensible heat *inside* the storage term
-  $\sum_j\xi_j c_{p,j}$ (summed over *all* components including gas), whereas
-  Pyrolysis.jl uses the matrix-only $\rho c_p^\mathrm{eff}$ and carries the gas
-  enthalpy through $S_\mathrm{conv}$ — the Formulation-A / FDS convention. The two
-  agree to the gas-storage gap ($<0.2\%$ at 1 atm), which the physical-form ledger
-  quantifies exactly (§18.4.2). ThermaKin's convective energy term
+  equation (its Eq. 17) is Pyrolysis.jl's energy equation term for term: the
+  storage term $\sum_j\xi_j c_{p,j}$ summed over *all* components including gas,
+  the convective term, and a deformation term that the ALE mesh frame absorbs
+  (§3.3.2). ThermaKin's convective energy term
   $c_g(J_g\cdot\partial T/\partial x)$ is identical in form to our $S_\mathrm{conv}$
   (the central-difference gradient matches ThermaKin's discretization, §7.4), so
   the convective coupling is a clean cross-check.
@@ -883,14 +855,14 @@ documented, specific ways; mapping their notation to ours:
   pre-exponential $Z$ to our $A_i$. FDS solves 1D Fourier conduction with
   Arrhenius kinetics ($\rho^n O_2^n T^n$ rate forms) and a two-flux
   (Schuster–Schwarzschild) in-depth radiation model; Pyrolysis.jl's Beer–Lambert
-  and P1 models bracket the FDS two-flux treatment. The gas-storage exclusion and
-  the matrix-only $\rho c_p^\mathrm{eff}$ are *shared* with FDS, so the energy
-  conventions align; the FDS TGA-reference kinetic recovery (peak temperature and
+  and P1 models bracket the FDS two-flux treatment. FDS carries no in-depth gas,
+  so its energy equation is the condensed-phase limit of ours; the FDS
+  TGA-reference kinetic recovery (peak temperature and
   rate → $A,E$) is the same recipe used in §18.2.2 and §18.6.2. FDS's surface
   energy balance $-k\,\partial T/\partial x=q_c''+q_r''$ is the multi-mechanism
   analog of our `solve_boundary_temperature` Newton balance (§12.2).
 
-In all three comparisons, agreement *after* matching conventions (gas storage,
+In all three comparisons, agreement *after* matching conventions (gas treatment,
 radiation model, kinetic form) is the verification that the shared physics is
 implemented consistently; *residual* disagreement after convention-matching is
 attributable to the documented modeling differences, not to error.
@@ -918,20 +890,16 @@ confirms the radiation source integrates to the absorbed-minus-emitted flux. The
 absorbed-plus-transmitted identity of §18.2.3 is the underlying conservation
 check; the validity query layers a *regime* judgement on top of it.
 
-### 18.7.2 Gas-storage gap
+### 18.7.2 Pore-gas thermal equilibrium
 
-The Formulation-A gas-storage exclusion (§7.3) is the load-bearing approximation
-of the energy equation. Its cost is quantified continuously by the gas-storage gap
-$\Delta E_\mathrm{gas}=E_\mathrm{total}-E_\mathrm{matrix}$ and by the physical-form
-residual (§18.4.2). The validated regime is $\Delta E_\mathrm{gas}\lesssim0.2\%$
-of matrix energy (1 atm, $\sim$1–10 ms gas residence time) with a physical
-residual $<1\%$; both are reported in the `DiagnosticsRow` log. A run that pushes
-into high pressure or large pore size (longer gas residence time, comparable to
-the thermal diffusion timescale) drives the gap up, signaling that the
-quasi-steady-gas approximation is being stressed and the prediction should be
-treated with caution. The code does *not* automatically switch to a gas-storage-
-inclusive formulation at high pressure (§18.8.4); the diagnostic makes the cost
-*visible* so the user can judge it.
+The energy equation stores the pore gas at the matrix temperature (§7.3). That
+one-temperature assumption holds when the gas equilibrates with the pore walls
+within a cell, which is the case for pore-scale heat-transfer lengths far below
+the cell size — every validated regime here (1 atm, pore sizes well below the
+mesh spacing, gas residence times of milliseconds). A run with coarse open pores
+or very fast, hot throughput, where the gas no longer equilibrates with the
+walls, is outside the model: there is no two-temperature gas option (§3.9), and
+the prediction should be treated with caution.
 
 ### 18.7.3 Péclet number and upwind diffusion
 
@@ -988,16 +956,16 @@ is the physically-consistent one.
 
 ### 18.8.2 Composition-varying discrete energy residual does not close exactly
 
-The discrete-form energy ledger (§18.4.2) is missing the
+The energy ledger (§18.4.2) is missing the
 $\int T\,\partial(\rho c_p)/\partial t\,dV\,dt$ heat-capacity-change term of its
 $\rho c_p\,T$ proxy density (heat capacity changing at constant temperature as
-composition reacts — §16.9) and an ALE volume-change term. As a result it cannot close to integrator tolerance when
+composition reacts — §16.8) and an ALE volume-change term. As a result it cannot close to integrator tolerance when
 composition varies in time; the residual carries a small composition-rate-
 dependent offset. A ledger that closes exactly would require per-substep
 accumulation of $\rho c_p(t_i)\,\Delta T_i\,V(t_i)$ per cell, which is not
 implemented. This is a limitation of the *audit*, not of the solver: the solver's
 energy update is correct; the bookkeeping formula used to *check* it is
-incomplete. Until it is extended, a non-zero discrete residual during active
+incomplete. Until it is extended, a non-zero residual during active
 reaction should be interpreted against this known offset, not as a bug.
 
 ### 18.8.3 Sensitivities across park events
@@ -1008,15 +976,7 @@ sensitivity analysis does not: forward sensitivities are valid only between
 park events and adjoint sensitivity through an event is unsupported. Runs that
 need smooth sensitivities must stay on horizons without park events.
 
-### 18.8.4 No automatic gas-storage switching at high pressure
-
-The gas-storage gap is *quantified* (§18.7.2) but not *acted on*: there is no
-automatic switch to a gas-storage-inclusive energy formulation when pressure (and
-hence the gap) grows. High-pressure validation cases must be checked against the
-physical-form residual and judged manually. A pressure-triggered formulation
-switch is a candidate enhancement (§7.11 open issues).
-
-### 18.8.5 Heuristic and unvalidated closures
+### 18.8.4 Heuristic and unvalidated closures
 
 Several constitutive closures are heuristic and carry their own validation debt:
 the Lennard-Jones parameter estimates for Chapman–Enskog diffusivity
@@ -1112,10 +1072,10 @@ The V&V coverage above has gaps that a user should weigh:
    design-order convergence gap for the fully coupled residual, but mesh
    motion in the MMS cases is either reaction-driven or prescribed via the
    verification-only `w_override` hook; under prescribed (non-material)
-   motion, manufactured condensed-phase fields must be spatially uniform and
-   the Jacobian falls back to finite differences (§11.11 item 7). General
-   ALE (a condensed-phase advection operator for mesh motion decoupled from
-   the solid) remains out of scope.
+   motion the species sources are assembled in the material-following frame
+   and the Jacobian falls back to finite differences (§11.10 item 7). General
+   ALE (a species advection operator for mesh motion decoupled from the
+   solid) remains out of scope.
 
 2. **Convergence reference is self-consistent, not exact.** The convergence
    studies use the finest mesh as reference (Richardson self-convergence); they
@@ -1146,7 +1106,7 @@ The V&V coverage above has gaps that a user should weigh:
    validation task, and is the discipline §18.1.1 requires for a comparison to
    count as validation rather than calibration.
 
-7. **Heuristic closures carry validation debt** (§18.8.5): the LJ diffusivity
+7. **Heuristic closures carry validation debt** (§18.8.4): the LJ diffusivity
    estimates, the empirical shrinkage laws, and the single-datum $T_\mathrm{ref}$
    are unvalidated or simplified, and cases that lean on them inherit that
    uncertainty.

@@ -754,10 +754,9 @@ mass-thickness locking of solids to the mesh (§11) — unambiguous.
 
 The gas flux that feeds this divergence is the diffusion-only flux (Eulerian
 Fickian mode) or the Darcy–Fick flux (when permeability is present), selected by
-the simulation-mode trait (§15.1). In ALE mode the same lab-frame flux feeds the
-divergence; the mesh-motion frame change is the pointwise $+w\,\partial\xi/\partial z$
-correction of §11.6 (the relative-velocity flux of §11.7 is a test-only
-formulation, not the production path).
+the simulation-mode trait (§15.1). In ALE mode the same skeleton-relative flux feeds
+the divergence unchanged: every component rides the mesh, so the moving frame adds
+only the dilation of §11.3.4 and no advective correction.
 
 ### 9.9.2 Coupling to the energy equation
 
@@ -794,10 +793,9 @@ Formulation-A energy equation (derived in detail in §7.4–7.5):
 
 These appear in the assembled temperature RHS
 $\rho c_p^{\text{eff}}\,dT_i/dt = -(\nabla\!\cdot q)_i + S_{\text{conv},i}
-+ S_{\text{gen},i} + Q_{\text{rad},i} + Q_{\text{rxn},i}$, in which the gas
-sensible-heat *storage* term has been deliberately removed from
-$\rho c_p^{\text{eff}}$ (the quasi-steady-gas approximation; §5.4, §7.3) and is
-carried instead by $S_{\text{conv}}$. Crucially, $S_{\text{conv}}$ and the surface
++ S_{\text{gen},i} + Q_{\text{rad},i} + Q_{\text{rxn},i}$, whose storage
+coefficient sums every component including the gas (§5.4, §7.3); the gas
+*flux* enters only through $S_{\text{conv}}$. Crucially, $S_{\text{conv}}$ and the surface
 transpiration BC are **mutually exclusive** — enabling both double-counts the
 advected enthalpy by exactly $\int S_{\text{conv}}\,dz$, so the transpiration BC is
 off by default and rejected at problem construction if combined (see §7.6, §12.3).
@@ -929,12 +927,11 @@ composition + thermal split. Pyrolysis.jl additionally offers the Darcy advectiv
 augmentation (§9.3) for permeable/pressure-driven problems; in the rigid,
 non-swelling limit ($\gamma=0$ for gases) ThermaKin's Boyle's-law Darcy treatment
 maps onto the porous-medium ideal-gas pressure (§9.4) with $\kappa$ controlling the
-flow resistance. A genuine difference is the energy-equation convention:
-Pyrolysis.jl (like FDS/Gpyro) *excludes* gas sensible-heat storage from
-$\rho c_p^{\text{eff}}$ and carries it advectively in $S_{\text{conv}}$ (§9.9.2,
-§5.4), whereas ThermaKin Eq. 17 sums $\sum_j \xi_j c_j$ over *all* components,
-including gas. The cost of the exclusion is ~0.2% of the matrix term at 1 atm and
-is exposed by the physical-form energy residual in the diagnostics (§16.2, §16.4).
+flow resistance. The energy-equation convention is the same as ThermaKin's:
+Eq. 17 sums $\sum_j \xi_j c_j$ over *all* components including gas and carries
+the gas flux through $c_g(\mathbf J_g\cdot\nabla T)$, exactly $\rho c_p^{\text{eff}}$
+(§5.4) and $S_{\text{conv}}$ (§9.9.2). ThermaKin's Eq. 15 applies its deformation
+term to every component, gas included — the skeleton-bound frame of §11.1.2.
 
 ### Gpyro
 
@@ -951,12 +948,13 @@ rather than time-integrated as a separate state. This is **not** an additional
 approximation relative to Gpyro's pressure ODE: gas storage $\partial\xi_g/\partial t$
 is fully retained in the species ODEs, and $P=N/\varphi$ is an exact EOS
 evaluation of that evolving state — summing the species equations reproduces gas
-continuity with no spurious source. (The model's quasi-steady approximation lives
-in the *energy* treatment — neglected gas heat storage, §1.4.1.) Gpyro's
-control-volume conservation of $\bar\rho\,\Delta z$, $\bar\rho Y_i\,\Delta z$, and
-gas mass corresponds to the cell-integrated species divergence of §9.9.1 on the
-moving (ALE) mesh of §11; the harmonic interface interpolation of Gpyro's Patankar
-scheme is the same resistance-in-series face averaging used here (§9.1.4, §13.11).
+continuity with no spurious source. Gpyro's control-volume conservation of
+$\bar\rho\,\Delta z$, $\bar\rho Y_i\,\Delta z$, and gas mass — the gas balance written
+on control volumes that deform with the solid, with only $\dot m''$ crossing their
+faces — corresponds to the cell-integrated species divergence of §9.9.1 on the
+moving (ALE) mesh of §11, where every component rides the mesh; the harmonic
+interface interpolation of Gpyro's Patankar scheme is the same resistance-in-series
+face averaging used here (§9.1.4, §13.11).
 
 ### FDS
 
@@ -965,9 +963,8 @@ and Arrhenius kinetics but, in its standard form, does **not** resolve in-depth
 gaseous mass transport — volatiles are assumed to escape instantaneously to the
 gas phase. The Pyrolysis.jl `NO_RADIATION`/Fickian configuration with negligible
 permeability reduces toward this minimal-transport limit; the explicit
-diffusive/Darcy machinery of this chapter is the generalization FDS lacks. The
-energy-accounting convention (gas storage excluded, advective enthalpy carried
-separately) is, however, aligned with FDS practice.
+diffusive/Darcy machinery of this chapter is the generalization FDS lacks, and
+with no in-depth gas FDS has neither gas storage nor an in-depth $S_{\text{conv}}$.
 
 ---
 
@@ -976,8 +973,8 @@ separately) is, however, aligned with FDS practice.
 - **First-order upwind advection only.** The Eulerian Darcy–Fick advective term
   uses unlimited first-order upwinding (§9.3.1). It is stable and conservative but
   diffusive; sharp composition fronts are smeared. Higher-order TVD limiting is
-  implemented only for the ALE relative-velocity advection (§11.6–11.7) and is not
-  exposed for the Eulerian gas flux.
+  implemented only for the mesh-relative temperature advection of the
+  verification hook (§11.6) and is not exposed for the Eulerian gas flux.
 
 - **No species discrimination in diffusion.** All gas species share one
   effective transfer coefficient $\lambda_{\text{eff}}$ (§9.2): light and heavy
@@ -997,14 +994,13 @@ separately) is, however, aligned with FDS practice.
   §9.8.1). Re-entry or accumulation of products in the boundary layer is not
   modeled.
 
-- **Quasi-steady gas energy.** Gas sensible-heat storage is excluded from the
-  effective heat capacity and carried advectively by $S_{\text{conv}}$ — the
-  quasi-steady-gas assumption (gas residence $\ll$ thermal diffusion time),
-  whose validity degrades at high pressure or under extremely fast heating. The
+- **One-temperature gas energy.** The pore gas is stored at the matrix
+  temperature and its flux enthalpy is carried by $S_{\text{conv}}$; there is no
+  two-temperature gas energy equation, so regimes where the gas does not
+  equilibrate with the pore walls within a cell are outside the model. The
   pressure itself is *not* approximated: $P=N/\varphi$ is an exact
   equation-of-state evaluation with gas mass storage fully retained in the
-  species ODEs (§3.4.2). The diagnostics expose the energy cost but do not flag
-  when it becomes significant (§16.9).
+  species ODEs (§3.4.2).
 
 - **Negative-advective-flux robustness.** When upwinding selects a zero-concentration
   donor cell, the advective term can transiently produce a "wrong-side" flux

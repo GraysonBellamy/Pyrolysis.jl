@@ -966,31 +966,26 @@ volume change (Chapter 10).
 
 ### 4.9.2 Heat capacity and the gas-storage convention
 
-The most consequential modeling choice — and a genuine departure from one of the
-three — concerns gas sensible storage. ThermaKin's energy equation (its Eq. 17)
-sums the volumetric heat capacity over **all** components, gas included:
+ThermaKin's energy equation (its Eq. 17) sums the volumetric heat capacity
+over **all** components, gas included:
 $\rho c_p^{\,\text{ThermaKin}} = \sum_{j\in\text{all}} \xi_j c_{p,j}$. Pyrolysis.jl
-instead uses the **matrix-only** effective heat capacity in the temperature-
-storage term (Formulation A, Chapter 3):
+uses the same sum in the temperature-storage term (Chapter 3):
 
 $$
-\rho c_p^\mathrm{eff} = \sum_{j\in\{S,L\}} \xi_j\, c_{p,j}(T),
+\rho c_p^\mathrm{eff} = \sum_{j=1}^{N_C} \xi_j\, c_{p,j}(T),
 \tag{4.11}
 $$
 
-dropping the in-pore gas storage $\sum_{j\in G}(\rho c)_j\,\partial T/\partial t$
-and carrying the gas sensible energy instead through the advective source
-$S_\mathrm{conv}$ (the quasi-steady-gas approximation; Chapter 5, §5.4 and
-Chapter 7). This is the **FDS/Gpyro-style** convention, *not* ThermaKin's. The
-dropped term is $\sim0.2\%$ of the matrix term at 1 atm and scales with pressure;
-the diagnostics tracker (Chapter 16) quantifies it as the *physical-form
-residual* via the total heat capacity
-$\rho c_p^\mathrm{total} = \sum_{j\in\text{all}} \xi_j c_{p,j}(T)$, which is
-computed for diagnostics only and never enters the RHS.
+because the pore gas shares the matrix temperature and its concentration is an
+integrated state, so its sensible storage is available at no cost (Chapter 5,
+§5.4 and Chapter 7). Gpyro's default thermal-equilibrium form drops the gas
+term (restored by its `FULL_QSG` option) and FDS has no in-depth gas; both are
+approximations of (4.11) that Pyrolysis.jl does not make. The gas *flux*
+relative to the skeleton enters the energy equation only through the advective
+source $S_\mathrm{conv}$.
 
-> **Implementation note.** `effective_heat_capacity` →`_sum_heat_capacity`
-> (gas-excluded, via the compile-time `is_gas` branch) and `total_heat_capacity`
-> →`_sum_heat_capacity_total` (all components), `src/Properties/effective_properties.jl`.
+> **Implementation note.** `effective_heat_capacity` → `_sum_heat_capacity`
+> (every component, no phase branch), `src/Properties/effective_properties.jl`.
 
 ### 4.9.3 Reaction kinetics representation
 

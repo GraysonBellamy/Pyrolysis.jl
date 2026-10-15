@@ -5,7 +5,7 @@ thermophysical and transport properties of a multi-phase pyrolyzing solid into
 the *single* effective property each governing equation needs. It covers the two
 averaging bases (mass fractions and volume fractions, and the two flavours of the
 latter), the swelling-aware mixture density, the intrinsic-density porosity, the
-matrix-only effective heat capacity and its gas-storage gap, the four
+mixture effective heat capacity, the four
 conductivity mixing rules (parallel / series / weighted / Bruggeman) together
 with the Bruggeman Newton solve, the effective gas-transfer and permeability
 closures (component mixing versus Carman–Kozeny), the radiative properties
@@ -17,9 +17,9 @@ been confirmed line-by-line against `src/Properties/mixture_rules.jl`,
 `src/Properties/effective_properties.jl`, `src/Properties/property_cache.jl`,
 `src/Materials/components.jl`, and `src/Materials/materials.jl`; where the
 implementation departs from the textbook form (most importantly which basis each
-property uses, the exclusion of gas storage from `ρc_p`, the harmonic-mean face
-average, and which mixing rules are rejected for which channel), **the code is
-authoritative** and the deviation is called out explicitly.
+property uses, the harmonic-mean face average, and which mixing rules are
+rejected for which channel), **the code is authoritative** and the deviation is
+called out explicitly.
 
 Throughout this chapter `j` is the **component (species) index** running over the
 `N_C` components of a `Material`, and `i` is the **cell index** running over the
@@ -326,89 +326,57 @@ exactly matching the residual's clamped value.
 
 ## 5.4 Effective volumetric heat capacity
 
-### 5.4.1 Matrix-only effective heat capacity
+### 5.4.1 Mixture heat capacity
 
-The temperature-storage term of the Formulation A energy equation (§3, §7) uses
-the **matrix-only** volumetric heat capacity,
+The temperature-storage term of the energy equation (§3, §7) uses the
+**mixture** volumetric heat capacity,
 
 $$
 (\rho c_p)_{\text{eff}}
-\;=\; \sum_{j\in\{\text{solid,liquid}\}} \xi_j\, c_{p,j}(T) ,
+\;=\; \sum_{j=1}^{N_C} \xi_j\, c_{p,j}(T) ,
 \tag{5.9}
 $$
 
 implemented as `effective_heat_capacity(ξ, T, material)` →
-`_sum_heat_capacity` (`effective_properties.jl:305–343`). The generated helper
-adds `ξ[j] * comps[j].heat_capacity(T)` *only when* `!is_gas(comps[j])`
-(`effective_properties.jl:313`), so **gas sensible storage is excluded from the
-left-hand side of the energy equation**. The units check: `[kg·m⁻³] ·
-[J·kg⁻¹·K⁻¹] = [J·m⁻³·K⁻¹]`.
+`_sum_heat_capacity` (`effective_properties.jl`). The generated helper adds
+`ξ[j] * comps[j].heat_capacity(T)` for every component with no phase branch,
+so **gas sensible storage is part of the left-hand side of the energy
+equation**. The units check: `[kg·m⁻³] · [J·kg⁻¹·K⁻¹] = [J·m⁻³·K⁻¹]`.
 
 The result is floored at `RHO_CP_FLOOR = 10³` J·m⁻³·K⁻¹
-(`src/Materials/constants.jl`) — the pore-gas thermal-mass scale
-(ρ_g c_{p,g} ≈ 1.2 × 1000 at ambient; Gpyro floors the same quantity). Without
-it, a fully-converted (100 %-gas-yield) Eulerian cell would drive the
-matrix-only ρc_p → 0 and the 1/ρc_p factor in dT/dt into a stiffness
-explosion. Virgin solids carry ρc_p ~ 10⁵–10⁶ J·m⁻³·K⁻¹, so the floor binds
-only when the condensed phase is essentially gone. The floor is applied
-*inside* `effective_heat_capacity`, so every consumer — the residual, the
-property cache, and the structured-Jacobian operators that extract
-∂ρc_p/∂(T, ξ) through Duals — sees the identical clamped value and the
-consistent (zero) derivative at the floor.
+(`src/Materials/constants.jl`), the thermal mass of pore gas at ambient
+(ρ_g c_{p,g} ≈ 1.2 × 1000; Gpyro floors the same quantity). Because every
+component is summed, ρc_p reaches the floor only in a cell emptied of all
+mass — a burned-out cell whose pore gas has also left; without it the 1/ρc_p
+factor in dT/dt would blow up there. Virgin solids carry ρc_p ~ 10⁵–10⁶
+J·m⁻³·K⁻¹, so the floor never binds in a cell that holds material. The floor
+is applied *inside* `effective_heat_capacity`, so every consumer — the
+residual, the property cache, the park-and-mask temperature merge and the
+structured-Jacobian operators that extract ∂ρc_p/∂(T, ξ) through Duals —
+sees the identical clamped value and the consistent (zero) derivative at the
+floor.
 
-### 5.4.2 Why gas storage is dropped: the quasi-steady-gas approximation
+### 5.4.2 Why the gas is stored
 
-Excluding gas storage is the central modelling approximation of Formulation A.
-The full condensed-phase energy balance would carry a storage term
-`Σ_j (ρ c)_j ∂T/∂t` summed over *all* phases, including the in-pore gas. In
-Pyrolysis.jl that gas sensible heat is instead carried entirely by the volumetric
-advection source `S_conv = −Σ_g c_{p,g}(T)\,\bar J_g\,(\partial T/\partial z)`
-(§7), and the *storage* part `Σ_g (ρ c)_g ∂T/∂t` is dropped.
+The one-temperature model puts the pore gas at the matrix temperature (§3.1.2),
+so the gas stores sensible heat `ξ_g c_{p,g} ∂T/∂t` exactly like every other
+component. Its concentration `ξ_g` is an integrated state, so the term costs
+nothing; dropping it — Gpyro's default *quasi-steady-gas approximation*, which
+its `FULL_QSG` option reverses, and the implicit convention of FDS, which has
+no in-depth gas — would be an approximation with no benefit. The in-pore gas
+heat capacity is roughly `φ ρ_g c_{p,g}` against the matrix `(1−φ) ρ_s c_{p,s}`;
+at 1 atm and pyrolysis temperatures the ratio is a few tenths of a percent and
+it scales with pressure. On white-pine cone decks the term is at most about
+half a percent of ρc_p and shifts the response by a uniform time lag of about
+a tenth of a percent — small, but a thousand times above the solver's noise
+floor and therefore worth keeping exact.
 
-The justification is a **time-scale separation**. The gas-phase residence
-(advection) time through a pore is much shorter than the matrix thermal diffusion
-time, so the in-pore gas is everywhere in local thermal equilibrium with the
-surrounding solid and stores negligible energy in transit. Quantitatively, the
-in-pore gas heat capacity is roughly `φ ρ_g c_{p,g}` versus the matrix
-`(1−φ) ρ_s c_{p,s}`; at 1 atm and pyrolysis temperatures this ratio is
-**~0.2 %**, and it scales linearly with pressure. The package documents this
-exact figure in the source (`effective_properties.jl:333–339`).
-
-This is the **FDS/Gpyro convention**, *not* the literal ThermaKin convention.
-ThermaKin Eq. 17 keeps `Σ_j ξ_j c_j` summed over **all** components, gas
-included; the exclusion in (5.9) is the FDS/Gpyro-style approximation. The
-package is explicit about this in the docstring
-(`effective_properties.jl:336–338`): the omission is deliberate and is tracked.
-
-### 5.4.3 Total heat capacity (diagnostic) and the storage gap
-
-For diagnostics — specifically to *quantify* the cost of the approximation — the
-package also computes the **total** volumetric heat capacity that includes gas:
-
-$$
-(\rho c_p)_{\text{total}}
-\;=\; \sum_{j=1}^{N_C} \xi_j\, c_{p,j}(T) ,
-\tag{5.10}
-$$
-
-`total_heat_capacity(ξ, T, material)` → `_sum_heat_capacity_total`
-(`effective_properties.jl:356–369`), which is identical to (5.9) but without the
-`!is_gas` guard. The difference
-
-$$
-\Delta(\rho c_p) \;=\; (\rho c_p)_{\text{total}} - (\rho c_p)_{\text{eff}}
-\;=\; \sum_{j\in\text{gas}} \xi_j\, c_{p,j}(T)
-\tag{5.11}
-$$
-
-is the **gas-storage gap**. It is never used by the RHS — only by the
-conservation diagnostics (§16), where the dual energy ledgers `E_matrix`
-(matrix-only) and `E_total` (matrix+gas) expose it as the *physical-form
-residual*. A gap below ~1 % is the canonical sign that the quasi-steady-gas
-approximation is holding.
+The gas *flux* relative to the skeleton enters the energy equation only
+through the advective source `S_conv = −Σ_g c_{p,g}(T) J̄_g (∂T/∂z)` (§7). This is
+the ThermaKin Eq. 17 convention term for term (§3.3.2).
 
 No separate mass-averaged specific heat is computed or cached; consumers that
-need `c_p` per unit mass divide `(ρc_p)_total` by `ρ_tot`.
+need `c_p` per unit mass divide `(ρc_p)_eff` by `ρ_tot`.
 
 ---
 
@@ -1109,7 +1077,7 @@ and the per-face arrays (length `n+1`) are `k_face` and `λ_face` (5.29). The
 for pressure-driven modes (`with_darcy = true`) and adds per-cell `P, φ, κ, μ` and
 per-face `v_gas, ∇P` — keeping the four extra per-cell and two per-face arrays out
 of memory for the common Fickian-only configuration. Note `ρcp` caches the
-**matrix-only** `(ρc_p)_eff` of (5.9), not the total — the storage term the energy
+mixture `(ρc_p)_eff` of (5.9) — the storage term the energy
 RHS divides by (§7).
 
 ### 5.13.2 The update kernel
@@ -1157,13 +1125,11 @@ mixture average `\barρ` corresponds to our swelling mixture density `ρ`, and t
 FDS/Gpyro pre-exponential `Z` is our `A_i` (§2).
 
 **Effective heat capacity / gas storage.** ThermaKin (Eq. 17) keeps the gas
-sensible-storage term — it sums `Σ_j ξ_j c_j` over *all* components, gas included.
-FDS and Gpyro adopt the quasi-steady-gas approximation and drop gas storage from
-`ρc_p`, carrying gas enthalpy by advection. Pyrolysis.jl follows the **FDS/Gpyro**
-convention in (5.9) — `effective_heat_capacity` excludes gas — and *quantifies*
-the ThermaKin remainder through the diagnostic `total_heat_capacity` (5.10) and the
-energy-ledger gap (§16). This is stated explicitly in the source docstring
-(`effective_properties.jl:336–338`).
+sensible-storage term — it sums `Σ_j ξ_j c_j` over *all* components, gas included
+— and Pyrolysis.jl does the same in (5.9). Gpyro's default thermal-equilibrium
+form drops gas storage from `ρc_p` (its `FULL_QSG` option restores it) and FDS
+carries no in-depth gas; both are approximations of (5.9) that Pyrolysis.jl
+does not make (§5.4.2).
 
 **Conductivity / emissivity basis.** ThermaKin determines surface properties from
 the *solid* matrix: "when γ = 0, gaseous components do not contribute to the

@@ -146,7 +146,7 @@ S_{j,\text{rxn},i}, & \text{component } j \text{ is solid/liquid}.
 \end{cases}
 $$
 
-The leading `1/ρc_{p,\text{eff}}` uses the **matrix-only** volumetric heat capacity (gas storage excluded — Formulation A; see §7, Heat Conduction & Energy Assembly, and §13.7.5). The gas/solid dispatch is exactly the `is_gas`-branch in `apply_species_residual_unrolled!` (src/Materials/materials.jl): gas → `-div_J + dξ_rxn`, solid/liquid → `dξ_rxn`. The full eight-step assembly order is given in §7.8; this chapter is concerned only with the spatial operators that produce `div_q`, `div_J`, and the face fluxes feeding them.
+The leading `1/ρc_{p,\text{eff}}` uses the mixture volumetric heat capacity (every component; see §7, Heat Conduction & Energy Assembly, and §13.7.5). The gas/solid dispatch is exactly the `is_gas`-branch in `apply_species_residual_unrolled!` (src/Materials/materials.jl): gas → `-div_J + dξ_rxn`, solid/liquid → `dξ_rxn`. The full eight-step assembly order is given in §7.8; this chapter is concerned only with the spatial operators that produce `div_q`, `div_J`, and the face fluxes feeding them.
 
 ---
 
@@ -188,10 +188,11 @@ All three satisfy `ψ(r) = 0` for `r ≤ 0` (extremum → first-order upwind), `
 
 The TVD machinery in `src/Discretization/flux_limiters.jl` consists of the
 limiter functions $\psi(r)$ (minmod, van Leer, superbee; §13.8.2) and the
-`Limiter` enum / `apply_limiter` dispatcher. The **only production consumer**
-is the ALE advection correction's cell-centered limited gradient
-`_limited_gradient` (§11.6.2, §13.8.2), which reconstructs $\partial f/\partial z$
-donor-side with the distance-correct blend $\beta = d_0/(d_0+d_1)$.
+`Limiter` enum / `apply_limiter` dispatcher. Their consumer is the mesh-relative
+temperature advection's cell-centered limited gradient `_limited_gradient`
+(§11.6.2, §13.8.2), which reconstructs $\partial f/\partial z$ donor-side with the
+distance-correct blend $\beta = d_0/(d_0+d_1)$ and runs only under the
+`w_override` verification hook.
 
 There is no limited *face-value* reconstruction in production: the Eulerian
 gas-advection face value is first-order upwind on the Darcy velocity
@@ -316,11 +317,11 @@ the **distance-weighted harmonic mean of the cell mobilities** $\kappa/\mu$, wit
 
 ### 13.7.4 Solid/liquid components carry no transport flux
 
-Solid and liquid components are mesh-bound (Lagrangian): they are not transported by diffusion or Darcy flow. Their face fluxes are identically zero, so `divergence_species_1d!` produces zero for them and the species residual reduces to reactions only (§13.3.4). This is what locks solid mass-thickness `ρ_s·Δz` to the mesh and makes the ALE motion (§13.8) the mechanism by which solids are advected.
+Solid and liquid components are mesh-bound (Lagrangian): they are not transported by diffusion or Darcy flow. Their face fluxes are identically zero, so `divergence_species_1d!` produces zero for them and the species residual reduces to reactions only (§13.3.4). This is what locks solid mass-thickness `ρ_s·Δz` to the mesh and makes the ALE motion (§13.8) the mechanism by which solids are advected. The gas fluxes of §13.7.2–§13.7.3 are defined relative to that skeleton, so under ALE the gas rides the mesh too and the same divergence is the whole of its transport (§11.1.2).
 
 ### 13.7.5 The energy-storage convention (Formulation A)
 
-The conductive divergence feeds the energy equation with the matrix-only heat capacity `ρc_{p,\text{eff}} = Σ_{j∈\{solid,liquid\}} ξ_j c_{p,j}(T)` in the denominator — **gas sensible storage is excluded**. The gas enthalpy transport is instead carried by the volumetric advection source `S_conv` (always on in `:standard` energy form) and, optionally, by `S_gen` (in `:with_generation_sink`). This is the FDS/Gpyro/ThermaKin convention; the quasi-steady-gas approximation it embodies costs ≈0.2% at 1 atm. The discretization layer is agnostic to this choice — it simply assembles `div_q`, `S_conv`, `S_gen`, `Q_rad`, `Q_rxn` and divides by `prop_cache.ρcp[i]` (the matrix-only value). See §7.3–§7.6 for the full derivation, and §13.3.4 for the assembled formula.
+The conductive divergence feeds the energy equation with the mixture heat capacity `ρc_{p,\text{eff}} = Σ_j ξ_j c_{p,j}(T)` in the denominator — every component, gas included, stores sensible heat. The enthalpy carried by the gas flux relative to the skeleton is the volumetric advection source `S_conv` (always on in `:standard` energy form) and, optionally, `S_gen` (in `:with_generation_sink`). This is the ThermaKin Eq. 17 convention. The discretization layer is agnostic to this choice — it simply assembles `div_q`, `S_conv`, `S_gen`, `Q_rad`, `Q_rxn` and divides by `prop_cache.ρcp[i]`. See §7.3–§7.6 for the full derivation, and §13.3.4 for the assembled formula.
 
 ---
 
@@ -368,31 +369,11 @@ The correction is dropped (first order only) when there is no donor-donor cell, 
 
 > **Implementation note.** `compute_ale_advection_term!` (energy) and `_limited_gradient` (src/Discretization/ale_fluxes.jl) implement these formulas; the assignment is `advection[i] = w_cell * dT_dz` and this is added to `dT` in `_apply_ale_T_advection!` (src/Residual/residual.jl) — **only under `Workspace.w_override`**, with `w = w_rel = w_applied − w_physical` (§11.2.2): production ALE has no energy advection because the matrix carrying the thermal mass moves with the mesh.
 
-### 13.8.3 Gas mesh-motion transport: the conservative flux form
+### 13.8.3 Species: dilation only
 
-Gas is not mesh-bound, so its mesh-motion correction is discretized in the **conservative flux form** (§11.2.3, eq. 11.4b) rather than as a pointwise `+w·∇ξ_g` term: per cell, the difference of upwinded face sweep fluxes `[ξ_face·w·A]` divided by cell volume, minus the volume-rate term `ξ_g·(V̇/V)` with `V̇/V = (w_R − w_L)/Δz + θ_A`. The face donor is the side the face moves into (the gas the face sweeps) — the face-flux counterpart of the `c = −w` apparent-velocity rule. Interior face fluxes cancel in pairs, so total gas mass changes only through the boundary faces: an **impermeable** boundary face contributes no sweep flux (held gas compresses as the column collapses — V-CPL-03 P4 pins exact conservation), while an **open** face uses the zero-gradient ghost `ξ_outside = ξ_cell` (a regressing surface releases the pore gas it uncovers), keeping the boundary discretization consistent with the continuum term.
+Every component rides the mesh (§11.1.2), so the species equations carry no mesh-motion advection at all. The Eulerian species RHS (`-div_J + dξ_rxn` for gases, `dξ_rxn` for solids/liquids) is used unchanged, and the residual adds the dilation `−ξ_{j,i}·θ_i` to every component (§11.2.3, §11.3.4): per cell, `d(ξ_j V)/dt = S_j V − [J_j A]_faces`, so each component's mass changes only by reaction and by its skeleton-relative flux through the faces, and the column total changes only through the boundary faces. In a sealed collapsing column the pore gas compresses cell by cell (V-CPL-03 P4 pins exact conservation); at an open face the gas leaves only through the mass BC's diffusive or Darcy flux.
 
-In the continuum the flux form reduces to `∇·(ξ_g w) − ξ_g ∇·w − ξ_g θ_A = w·∇ξ_g − ξ_g θ_A` — the chain-rule conversion of the lab-frame RHS (which already contains the gas's full transport flux) *plus* the lateral compression channel. A pointwise discretization of `+w·∇ξ_g` would be exact as a continuum identity but does not telescope discretely: with shrinking cells and no escape path it silently deletes held gas with the vanishing volume — which is why the flux form is used (the fully-closed V-CPL-03 P4 corner pins exact conservation). Solids/liquids satisfy `v_j = w` (mesh-bound) and carry **no advection term**; their transport is the mesh motion itself plus the dilation term (§11.3.4), of which the gas volume-rate term above is the flux-form counterpart.
-
-> **Implementation note.** `compute_ale_species_advection!` and its `@generated` kernel `_compute_species_fluxform_unrolled!` (src/Discretization/ale_fluxes.jl): for `is_gas` the assignment is `advection[j, i] = (flux_R − flux_L)/Δz − ξ_i·((w_R − w_L)/Δz + θ_A)`; for solid/liquid it is zero. Boundary openness is passed per face from the mass BCs (`top_gas_open`/`bottom_gas_open`; anything but `ImpermeableBC` is open). The unrolling over `NC` is compile-time so the heterogeneous component tuple is never indexed at runtime.
-
-### 13.8.4 ALE Darcy–Fick flux with relative velocity (test-only form)
-
-In the test-only relative-velocity formulation (§11.7; production keeps the lab-frame flux in the RHS + the flux-form mesh-motion correction of §13.8.3), the gas advective term uses the **relative interstitial** velocity `v_rel = v_g/φ_f − w` (the superficial Darcy velocity advects the intrinsic density ξ/φ while the moving face sweeps bulk ξ — exactly ξ·(v_g/φ_f − w), §11.7):
-
-$$
-J_j^{\text{ALE-DF}} = \xi^{\text{upwind}}\,\Bigl(\frac{v_g}{\varphi_f} - w\Bigr) - \lambda_f\,\frac{\xi_R T_R - \xi_L T_L}{T_f\,d_{LR}},
-\qquad
-\xi^{\text{upwind}} =
-\begin{cases}
-\xi_L, & v_g/\varphi_f - w \ge 0,\\
-\xi_R, & v_g/\varphi_f - w < 0.
-\end{cases}
-$$
-
-The diffusive term is unchanged from §13.7.2 (mesh motion does not alter molecular diffusion); only the advective part feels the frame change. The face mesh velocity is taken at the node co-located with the face (`w_f = w_node[node_id]`).
-
-> **Implementation note.** `ale_gas_flux_darcy_fick(v_g, w, ξ_L, ξ_R, φ_L, φ_R, λ_face, T_L, T_R, d_LR)` and the assembly `compute_ale_gas_fluxes_darcy_fick!` (src/Discretization/ale_fluxes.jl) implement this; solid components again get zero flux. See §11.7.
+> **Implementation note.** `_apply_ale_dilation_correction!` (src/Residual/residual.jl): `dξ[j, i] -= state.ξ[j, i] * θ[i]` for every component, with `θ` the cell's reaction-driven strain rate. Its Jacobian is the cell-local block of §15.8.4.
 
 ---
 
@@ -488,7 +469,7 @@ We map the reference codes' notation onto the unified nomenclature of §2 on fir
 
 Gpyro is a 1D (optionally pseudo-2D) generalized condensed-phase pyrolysis solver using a **Patankar-style finite-volume** discretization (control volumes about cell-centered nodes). Mapping its symbols to ours: Gpyro's pre-exponential `Z → A_i`, permeability `K → κ`, kinematic viscosity `ν` (in `ṁ'' = −(K/ν)(∂P/∂z − gρ_g)`), conversion `α_conv`, and the overbarred mixture density `ρ̄`.
 
-- **Conservation form vs. non-conservative.** Gpyro writes integral control-volume balances of `ρ̄Δz`, `ρ̄Y_iΔz`, gas mass, and energy. Pyrolysis.jl uses the same cell-centered FVM divergence operator (§13.3) but solves the **non-conservative (Formulation A)** temperature equation, excluding gas storage from `ρc_p` and carrying gas enthalpy via `S_conv` (§13.7.5). Both telescope to the same boundary-flux balance (§13.3.3).
+- **Conservation form vs. non-conservative.** Gpyro writes integral control-volume balances of `ρ̄Δz`, `ρ̄Y_iΔz`, gas mass, and energy on volumes that deform with the solid. Pyrolysis.jl uses the same cell-centered FVM divergence operator (§13.3) on the ALE mesh, with every component riding the mesh, but solves the **non-conservative (Formulation A)** temperature equation, storing every component in `ρc_p` and carrying the gas-flux enthalpy via `S_conv` (§13.7.5). Both telescope to the same boundary-flux balance (§13.3.3).
 - **Interface interpolation.** Patankar's hallmark is the **harmonic interface conductivity** for diffusion coefficients, justified by flux continuity across a control-volume face — identical in spirit to the harmonic-mean `k_f`, `λ_f`, `κ_f` of §13.7.1–§13.7.3. Pyrolysis.jl additionally distance-weights the harmonic mean for non-uniform meshes.
 - **Convection scheme selection.** Patankar/Gpyro selects the face scheme by the cell **Péclet number** (central below ≈2, upwind/power-law above), a built-in switching. Pyrolysis.jl does not auto-switch on Péclet: diffusion is always the volume-fraction-gradient flux and gas advection is first-order upwind (Darcy–Fick) or TVD-limited (ALE). Choosing resolution to keep the cell Péclet number moderate is left to the user (see §18.7).
 - **Linear solver.** Gpyro is fully implicit (backward Euler) with Patankar linearization solved by **TDMA (Thomas algorithm)** for the tridiagonal system. Pyrolysis.jl delegates time integration to stiff OrdinaryDiffEq integrators with a structured/sparse Jacobian (§15); a TDMA appears internally only in the P1 radiation solve (§8.7).
@@ -499,7 +480,7 @@ Gpyro is a 1D (optionally pseudo-2D) generalized condensed-phase pyrolysis solve
 ThermaKin is a 1D (with 2D extensions) finite-difference pyrolysis solver. Mapping its symbols: stoichiometric coefficient `θ_i^j → ν_{i,j}` (overload A2; ThermaKin's `θ` is stoichiometry, ours is strain rate), and its published heat-of-reaction sign is `h > 0 = exothermic` (overload H1; internally we use `h > 0` endothermic with `Q_rxn = −Σh_r r_r`).
 
 - **Gas transport.** Pyrolysis.jl's volume-fraction-gradient flux `J = −(λ/T)∂(ξT)/∂x` (§13.7.2) is taken directly from ThermaKin's Section 1.2 gas-transport formulation `J = −ρ_g λ ∂(ξ_g/ρ_g)/∂x`. For a rigid non-swelling matrix (`γ = 0`) ThermaKin recovers a Boyle's-law Darcy form; Pyrolysis.jl provides the explicit Darcy–Fick path (§13.7.3) for that regime.
-- **Convective energy term.** ThermaKin's Eq. 17 carries gas sensible enthalpy as `c_g (J_g·∂T/∂x)`, which is exactly the `S_conv` source of §13.7.5 (the default S_conv-only convention) — both keep gas storage out of the matrix heat capacity.
+- **Convective energy term.** ThermaKin's Eq. 17 carries gas sensible enthalpy as `c_g (J_g·∂T/∂x)`, which is exactly the `S_conv` source of §13.7.5 (the default S_conv-only convention), and sums every component in the storage term — both as here.
 - **Time discretization.** ThermaKin uses Crank–Nicolson in the primary (through-thickness, `x`) direction and explicit updates in the transverse `(y, z)` directions; the spatial operators are second-order finite differences on a structured grid. Pyrolysis.jl is finite-**volume** (flux-based, conservative-divergence) rather than finite-difference, and offloads temporal integration to adaptive stiff solvers (§15).
 - **Moving mesh.** ThermaKin performs dynamic mesh adjustment around a single reference point as the material deforms; Pyrolysis.jl recasts the same deformation through the ALE framework (§11) with cumulative mesh velocity built from per-cell dilation, and (optionally) a separate lateral-shrinkage `χ` channel (§10).
 
@@ -511,7 +492,7 @@ The shared lineage (harmonic interface averaging, S_conv gas-enthalpy convention
 
 The following discretization-specific issues are open (drawn from the source annotations and the verification against the implementation):
 
-1. **ALE advection limiter is not exposed through `solve`.** `VANLEER` is the default limiter in `compute_ale_advection_term!` and `compute_ale_species_advection!`. The limiter is selectable only at the workspace level (`build_workspace(...; ale_limiter = MINMOD)` — threaded consistently into the residual and the structured Jacobian); there is no `solve`-level keyword to switch it (minmod/superbee/none), which would aid robustness tuning and verification studies.
+1. **ALE advection limiter is not exposed through `solve`.** `VANLEER` is the default limiter in `compute_ale_advection_term!` (the mesh-relative temperature advection, override-only). The limiter is selectable only at the workspace level (`build_workspace(...; ale_limiter = MINMOD)`); there is no `solve`-level keyword to switch it (minmod/superbee/none), which would aid verification studies.
 
 2. **First-order Darcy–Fick advection only.** The pressure-driven advective face flux uses first-order upwinding (§13.7.3); no TVD/MUSCL option exists for Darcy advection (the TVD machinery is wired only into the ALE advection and the conservative remapping). Sharp pressure-driven composition fronts are therefore smeared at first order unless the mesh is refined.
 
