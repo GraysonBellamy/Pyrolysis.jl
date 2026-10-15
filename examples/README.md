@@ -99,10 +99,12 @@ This ensures:
 - Correct temperature for radiative flux calculation
 - Accurate surface temperature output for comparison with experiments
 
-The solved boundary state is stored in `mesh.boundary_states` and can be accessed via:
+The solved boundary state is stored in the final mesh's `boundary_states`
+(`solution.problem.mesh`) and can be accessed via:
 ```julia
 using Pyrolysis.Discretization: get_surface_temperature, check_boundary_energy_balance
 
+mesh = solution.problem.mesh
 T_surface = get_surface_temperature(mesh)
 balance = check_boundary_energy_balance(mesh)  # Dict{Int, Float64}
 ```

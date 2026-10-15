@@ -1779,7 +1779,7 @@ end
         @test solution.retcode == :Success
 
         # Get numerical surface temperature from boundary state
-        T_s_numerical = get_surface_temperature(mesh)
+        T_s_numerical = get_surface_temperature(solution.problem.mesh)
 
         # Analytical surface temperature
         T_s_analytical = T_surface_analytical(t_final, T_initial, q_ext, k, α)
@@ -1788,7 +1788,7 @@ end
         @test T_s_numerical ≈ T_s_analytical rtol=0.02
 
         # Verify energy balance at boundary - returns Dict{Int, Float64}
-        balance_results = check_boundary_energy_balance(mesh)
+        balance_results = check_boundary_energy_balance(solution.problem.mesh)
         @test balance_results[1] < 1e-6
 
         # Print values for inspection
@@ -1883,7 +1883,7 @@ end
         @test solution.retcode == :Success
 
         # Both boundaries should have excellent energy balance - returns Dict
-        balance_results = check_boundary_energy_balance(mesh)
+        balance_results = check_boundary_energy_balance(solution.problem.mesh)
         @test balance_results[1] < 1e-4
         @test balance_results[2] < 1e-10
     end

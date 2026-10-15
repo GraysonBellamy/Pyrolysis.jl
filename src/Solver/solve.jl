@@ -462,7 +462,11 @@ end
 Solve a pyrolysis problem using DifferentialEquations.jl.
 
 # Arguments
-- `problem`: The PyrolysisProblem to solve
+- `problem`: The PyrolysisProblem to solve. `solve` does not modify it: the run
+  integrates a copy with its own mesh, so every solve of a problem, and every
+  parameter-sweep point that reuses its mesh, starts from the same initial
+  geometry. `solution.problem` is that copy; its mesh holds the run's final
+  geometry, live-cell count and boundary faces.
 
 # Keyword Arguments
 - `integrator=nothing`: ODE integrator constructor (e.g. `KenCarp4`) or fully
@@ -709,6 +713,10 @@ function solve(
         diagnostics_stride = diagnostics_stride,
         verify_jacobian = verify_jacobian,
     )
+
+    # The caller's problem is left untouched; the run integrates a copy (see
+    # `_problem_for_solve`), which the solution keeps as `solution.problem`.
+    problem = _problem_for_solve(problem)
 
     # Validate problem
     if validate
@@ -1086,6 +1094,21 @@ end
 # ============================================================================
 # Helper Functions
 # ============================================================================
+
+# The problem a solve integrates: the caller's, with its own copy of the mesh.
+# The initial conditions, the dry-solid reference masses, the per-step mesh
+# sync, parks and the boundary faces they move all write that copy, so every
+# solve starts from the mesh the caller built, however often it is solved.
+_problem_for_solve(p::PyrolysisProblem) = PyrolysisProblem(
+    deepcopy(p.mesh),
+    p.material,
+    p.bc_set,
+    p.T_initial,
+    p.ξ_initial,
+    p.tspan,
+    p.dt_initial,
+    p.output_times,
+)
 
 """
 	_apply_warm_start!(u0, problem, layout, prev::PyrolysisSolution)

@@ -765,20 +765,22 @@ _solve_bt(T_cell, k, Δz, bc, t, ε; kwargs...) = solve_boundary_temperature(
 
             @test solution.retcode == :Success
 
-            # Verify boundary states were updated
-            @test mesh.boundary_states[1].converged
-            @test mesh.boundary_states[2].converged
+            # The run's mesh (the solve works on its own copy) carries the
+            # updated boundary states.
+            final_mesh = solution.problem.mesh
+            @test final_mesh.boundary_states[1].converged
+            @test final_mesh.boundary_states[2].converged
 
             # Surface temperature should be different from cell temperature
-            T_surface = mesh.boundary_states[1].T_surface
-            T_cell_top = mesh.cell_states[n_cells].T
+            T_surface = final_mesh.boundary_states[1].T_surface
+            T_cell_top = final_mesh.cell_states[n_cells].T
             @test T_surface != T_cell_top
 
             # With 50 kW/m² heating, surface should be hotter than cell center
             @test T_surface > T_cell_top
 
             # Energy balance should be satisfied - check_boundary_energy_balance returns Dict
-            balance_results = check_boundary_energy_balance(mesh)
+            balance_results = check_boundary_energy_balance(final_mesh)
             @test balance_results[1] < 1e-6
             @test balance_results[2] < 1e-6
         end
@@ -819,11 +821,13 @@ _solve_bt(T_cell, k, Δz, bc, t, ε; kwargs...) = solve_boundary_temperature(
             # Get final surface temperature from solution
             T_surf_output = solution.surface_T[end]
 
-            # This should match the boundary state, not the top cell
-            @test T_surf_output ≈ mesh.boundary_states[1].T_surface rtol=0.01
+            # This should match the boundary state of the run's mesh, not the
+            # top cell
+            final_mesh = solution.problem.mesh
+            @test T_surf_output ≈ final_mesh.boundary_states[1].T_surface rtol=0.01
 
             # Surface should be noticeably hotter than top cell
-            T_cell_top = mesh.cell_states[n_cells].T
+            T_cell_top = final_mesh.cell_states[n_cells].T
             ΔT = T_surf_output - T_cell_top
             @test ΔT > 5.0  # Expect meaningful difference with 75 kW/m²
         end
