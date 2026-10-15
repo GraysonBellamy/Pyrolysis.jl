@@ -290,23 +290,19 @@ end
 # Auto-default Jacobian selection.
 # ============================================================================
 #
-# `Structured(strategy = DirectSolve())` is the default: exact assembly of
-# every coupling and a sparse direct solve.
+# On a fixed mesh the default is `Structured(strategy = DirectSolve())`: exact
+# assembly of every coupling and a sparse direct solve.
 #
-# Under ALE with `handle_depletion = true` the default is
-# `Structured(strategy = ApproxSolve())`. The `:full` ALE pattern carries the
-# prefix-sum couplings of every node to every cell below it, which makes the
-# factorized W matrix effectively dense and the direct solve 60–90× more
-# expensive per step than the reduced pattern. Parking keeps every live cell
-# above `depletion_threshold` of its initial thickness, so the vanishing-cell
-# conditioning that makes the dropped couplings matter never arises. The two
-# strategies then follow the same trajectory, on fire-scale regression (tens of
-# µm/s) and on a surface regressing at mm/s through a front one cell wide alike.
-# Without parking a cell may shrink without bound and the exact couplings buy
-# robustness, so plain ALE solves keep `DirectSolve`.
+# Under ALE the default is `Structured(strategy = ApproxSolve())`, with or
+# without depletion handling. The `:full` ALE pattern carries the prefix-sum
+# couplings of every node to every cell below it, which makes the factorized W
+# effectively dense. The reduced pattern drops those couplings and keeps W
+# local; the modified Newton iteration it drives still contracts, and the two
+# strategies follow the same trajectory, through surface cells that collapse
+# without parking too (Technical Reference §15.10.3).
 
-function _default_jacobian_spec(def, ws, use_ale::Bool, handle_depletion::Bool)
-    strategy = use_ale && handle_depletion ? ApproxSolve() : DirectSolve()
+function _default_jacobian_spec(def, ws, use_ale::Bool)
+    strategy = use_ale ? ApproxSolve() : DirectSolve()
     return JacobianSpec(Structured(strategy = strategy), def, ws)
 end
 
@@ -478,9 +474,8 @@ Solve a pyrolysis problem using DifferentialEquations.jl.
   `LUFactorization()` for a dense Jacobian backend. Pair with `integrator`
   only when `integrator` is a constructor.
 - `jacobian=nothing`: Jacobian handle. `nothing` picks
-  `Structured(strategy = DirectSolve())`, or
-  `Structured(strategy = ApproxSolve())` under ALE with
-  `handle_depletion = true`. A bare backend such as
+  `Structured(strategy = DirectSolve())` on a fixed mesh and
+  `Structured(strategy = ApproxSolve())` under ALE. A bare backend such as
   `Structured(strategy = ApproxSolve())` builds the spec for this solve's own
   mesh mode and options; a prebuilt `JacobianSpec` is used as given and must
   have been built for the same mode (`solve` rejects a spec whose state
@@ -528,9 +523,9 @@ behavior is selected by its strategy:
 
 | Spec                                                   | When to use                              |
 |--------------------------------------------------------|------------------------------------------|
-| `Structured(strategy = DirectSolve())`                 | Default; exact assembly + sparse direct  |
+| `Structured(strategy = DirectSolve())`                 | Fixed-mesh default; exact assembly + sparse direct |
 | `Structured(strategy = StructuredSolve())`             | Apply structured couplings without densify |
-| `Structured(strategy = ApproxSolve())`                 | Drops structured couplings (ALE Schur-style approximation) |
+| `Structured(strategy = ApproxSolve())`                 | ALE default; drops the structured couplings (reduced pattern) |
 | `DenseAD_ForwardDiff()` (verifier reference only)      | Internal use — reference for `verify_jacobian` |
 
 # Returns
@@ -563,9 +558,8 @@ ghost: the state vector, mesh arrays and Jacobian keep their size, every
 kernel runs over the live range `1:mesh.n_active_cells`, and the boundary
 conditions act at the live surface. Vanishing cells therefore never enter the
 nonlinear system (their `1/Δz²` conditioning is what stalls an implicit
-solve), and the structured Jacobian stays valid through burnout. Under ALE
-`handle_depletion = true` selects `Structured(strategy = ApproxSolve())` as
-the default Jacobian. Ghost slots read as `NaN` in `solution.T`, `solution.ξ`
+solve), and the structured Jacobian stays valid through burnout. Ghost slots
+read as `NaN` in `solution.T`, `solution.ξ`
 and `solution.z`; `solution.extras.live_cells` and
 `solution.extras.park_times` record the events. Parameter sensitivities are
 valid only on horizons without park events.
@@ -588,17 +582,16 @@ factorization cost dominates, but it is not the default because inexact linear
 solves can increase Newton rejections on strongly Arrhenius transients.
 
 # Default Jacobian
-With `jacobian = nothing` (the default), every mode uses
-`Structured(strategy = DirectSolve())` except ALE with
-`handle_depletion = true`, which uses `Structured(strategy = ApproxSolve())`
-(see "Cell Depletion Handling"). The `Structured` backend
-assembles per-operator contributions into a `StructuredJacobian` and
-densifies any structured couplings (ALE prefix-sum, χ rank-1, Beer-
-Lambert suffix-sum) at solve time so the linear-solve sees a true
-sparse Jacobian. For ALE problems where the dense cumulative C block
-dominates factorization cost, opt into the Schur-style approximation
-via `Structured(strategy = ApproxSolve())` — this drops the structured
-couplings, at the cost of an approximate Newton search direction.
+With `jacobian = nothing` (the default), a fixed mesh uses
+`Structured(strategy = DirectSolve())` and ALE uses
+`Structured(strategy = ApproxSolve())`. The `Structured` backend assembles
+per-operator contributions into a `StructuredJacobian`. `DirectSolve`
+densifies the structured couplings (ALE prefix-sum, χ rank-1, Beer–Lambert
+suffix-sum) at solve time, so the linear solve sees the exact Jacobian.
+`ApproxSolve` drops them: under ALE the exact pattern couples every node to
+every cell below it, and the reduced one keeps the Newton matrix local while
+the modified Newton iteration still converges. Pass
+`jacobian = Structured(strategy = DirectSolve())` for the exact ALE Jacobian.
 
 # Linear Solver
 With `linear_solver = nothing` the sparse factorization follows the Jacobian
@@ -627,8 +620,8 @@ thickness_history = solution.extras.thickness_history
 # Choose the factorization instead of the pattern-based default:
 solution = solve(problem, use_ale=true, linear_solver=SparspakFactorization())
 
-# Opt into the ALE Schur-style approximation (spec built for the ALE layout):
-solution = solve(problem, use_ale=true, jacobian=Structured(strategy=ApproxSolve()))
+# The exact ALE Jacobian instead of the reduced default (factored by UMFPACK):
+solution = solve(problem, use_ale=true, jacobian=Structured(strategy=DirectSolve()))
 
 # With depletion handling (cells park at 1% of their initial thickness):
 solution = solve(problem, use_ale=true, handle_depletion=true, depletion_threshold=0.01)
@@ -644,9 +637,10 @@ function solve(
     integrator = nothing,
 
     # Pluggable Jacobian + verification:
-    # `jacobian` is the single Jacobian handle: `nothing` →
-    # `Structured(strategy = DirectSolve())`; a bare backend is built for
-    # this solve's (def, ws); a prebuilt spec is size-checked against u0.
+    # `jacobian` is the single Jacobian handle: `nothing` → the mode's default
+    # (`DirectSolve` on a fixed mesh, `ApproxSolve` under ALE); a bare backend
+    # is built for this solve's (def, ws); a prebuilt spec is size-checked
+    # against u0.
     jacobian::Union{JacobianSpec,JacobianBackend,Nothing} = nothing,
     # `verify_jacobian` installs a `DiscreteCallback` comparing the active
     # backend against a `DenseAD_ForwardDiff` reference at the listed
@@ -821,7 +815,7 @@ function solve(
     # Build the ODE problem from the Jacobian spec: the auto-default, a spec
     # built here from a bare backend, or the user's prebuilt spec.
     local jac_spec::JacobianSpec = if jacobian === nothing
-        _default_jacobian_spec(def, ws, use_ale, handle_depletion)
+        _default_jacobian_spec(def, ws, use_ale)
     elseif jacobian isa JacobianBackend
         JacobianSpec(jacobian, def, ws)
     else

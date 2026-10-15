@@ -46,7 +46,10 @@ end
 @testset "repeated solves are bit-identical" begin
     for (label, kw) in (
         ("fixed mesh, Beer–Lambert (KLU)", (use_ale = false,)),
-        ("ALE, DirectSolve (UMFPACK)", (use_ale = true,)),
+        (
+            "ALE, DirectSolve (UMFPACK)",
+            (use_ale = true, jacobian = Structured(strategy = DirectSolve())),
+        ),
         (
             "ALE with depletion, ApproxSolve (KLU)",
             (use_ale = true, handle_depletion = true),
