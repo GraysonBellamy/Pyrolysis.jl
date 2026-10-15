@@ -49,7 +49,6 @@ StructuredCoupling
 PrefixSumCoupling
 SuffixSumCoupling
 Rank1Coupling
-EmbeddedScaledPrefixSumCoupling
 EmbeddedScaledSuffixSumCoupling
 EmbeddedRank1Coupling
 ImplicitTerm
