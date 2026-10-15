@@ -651,13 +651,14 @@ interpolate_solution(sol, t::Real)               # full raw state vector at arbi
 `get_profile(sol, :T, i)` returns `sol.T[:, i]`; `get_profile(sol, :ξ, i)`
 returns the full `NC × n_cells` slice; `get_profile(sol, :ξ1, i)` returns
 component 1. The surface/back-face temperature accessors read the *mesh's* solved
-boundary state, not the solution:
+boundary state, not the solution. `solve` leaves `problem` unchanged and works on
+a copy, kept as `sol.problem`, whose mesh holds the last accepted step:
 
 ```julia
 using Pyrolysis.Discretization: get_surface_temperature, get_back_face_temperature,
                                 check_boundary_energy_balance
-Ts_final    = get_surface_temperature(problem.mesh)   # mesh holds last accepted step
-Tback_final = get_back_face_temperature(problem.mesh)
+Ts_final    = get_surface_temperature(sol.problem.mesh)
+Tback_final = get_back_face_temperature(sol.problem.mesh)
 ```
 
 For per-step surface temperature, prefer `sol.surface_T`.
@@ -743,8 +744,8 @@ Key behaviours and constraints:
   moderately stiff Arrhenius system. Pass a constructor (e.g. `integrator = KenCarp4`)
   to combine with `linear_solver`, or a fully-built instance
   (e.g. `integrator = KenCarp4(linsolve = ILUGMRESFactorization())`) on its own.
-- **Default Jacobian**: `Structured(strategy = DirectSolve())`, or
-  `Structured(strategy = ApproxSolve())` under ALE with `handle_depletion = true`.
+- **Default Jacobian**: `Structured(strategy = DirectSolve())` on a fixed mesh,
+  `Structured(strategy = ApproxSolve())` under ALE.
   Pass a bare backend or a `JacobianSpec` to opt into other strategies (§16.8).
 - **`radiation_model = P1_QUASI_STEADY`** is rejected (P1 is experimental).
 - **`energy_form`** must be `:standard` (Formulation A, the FDS/Gpyro/ThermaKin
@@ -797,15 +798,14 @@ sol  = solve(problem; jacobian = spec, use_ale = true)
 
 | Strategy | Behaviour | When |
 |---|---|---|
-| `DirectSolve` | materialize `A + Σ densify(couplings)`, factor (exact) | default; small/typical problems |
+| `DirectSolve` | materialize `A + Σ densify(couplings)`, factor (exact) | fixed-mesh default; exact ALE Jacobian |
 | `StructuredSolve` | sparse LU on `A` + preconditioned Richardson (exact, 2–5 iters) | typical, faster assembly |
-| `ApproxSolve` | drop the structured ALE couplings (Schur-style approximation) | large ALE problems (~8× speedup; less-accurate Newton step) |
+| `ApproxSolve` | drop the structured ALE couplings (Schur-style approximation) | ALE default |
 | `MatrixFreeSolve` | GMRES over the operator action (no materialization) | research/experimental |
 
 `ApproxSolve` is marked approximate via the `is_approximate` trait; the
-verifier compares it in masked (in-support) mode. For the Douglas-fir cone case,
-`Structured(strategy = ApproxSolve())` gives roughly an 8× assembly speedup over
-the full Jacobian at solver-tolerance-equivalent results.
+verifier compares it in masked (in-support) mode. It is the ALE default
+(§11.3.3).
 
 ### 16.8.3 Iterative linear solvers (not top-level; use `Internal`/`Solver`)
 
@@ -1099,7 +1099,7 @@ noted TR chapter.
 | `use_transpiration_bc` | `false` (rejected if `true`) |
 | default integrator | `KenCarp4(autodiff = AutoFiniteDiff())` |
 | default linear solver | `KLUFactorization()`; `UMFPACKFactorization()` for the exact ALE Jacobian (`DirectSolve` under ALE) |
-| default Jacobian | `Structured(strategy = DirectSolve())`; `ApproxSolve` under ALE with `handle_depletion = true` |
+| default Jacobian | `Structured(strategy = DirectSolve())`; `ApproxSolve` under ALE |
 
 ### Component / material / reaction defaults
 

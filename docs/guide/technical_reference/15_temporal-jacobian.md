@@ -535,6 +535,31 @@ alternatives through `linear_solver`.
 > $t=0$ additionally seeds the structured-Jacobian cache's
 > `radiation_intensity`.
 
+**Problem-independent integrator types.** OrdinaryDiffEq compiles its stepper,
+nonlinear solver and factorization for the types of the functions it is handed.
+The RHS and Jacobian closures capture the `ProblemDef` and workspace, whose
+types carry the material, boundary-condition and mode types. `solve` therefore
+hands them to the integrator behind fixed-signature `FunctionWrapper`s:
+`ErasedRHS` for `(du, u, p, t)` with `Vector{Float64}` state and `Float64`
+time, and `ErasedJacobian{M}` for the Jacobian matrix type `M`. The callbacks
+do the same (§15.5.3). The integrator's type then depends only on the solver
+configuration: the mesh mode, depletion handling, the installed optional
+callbacks, the integrator and its factorization. A problem with new material or
+boundary-condition types compiles only the Pyrolysis kernels (initialization,
+residual, Jacobian, solution extraction). The precompile workloads
+(`src/precompile.jl`) cache the integrator for the default configurations. An
+algorithm that calls the RHS with other argument types, such as dual numbers
+for a ForwardDiff time derivative, reaches the closure by dynamic dispatch. A
+call of the Jacobian with a different matrix type is a `MethodError`, because
+a converted copy would silently drop the entries.
+
+> **Implementation note.** src/Solver/integrator_functions.jl (`ErasedRHS`,
+> `ErasedJacobian`); the `ODEFunction` is built in `solve`, src/Solver/solve.jl.
+> `solve` also converts the tolerances, step bounds and `saveat` to `Float64`,
+> because the solve keywords enter the integrator's type.
+> test/solver/test_integrator_type.jl checks that two decks differing in every
+> problem type share one integrator type.
+
 ### 15.5.2 The implicit-RK $W$ matrix and warm start
 
 Each implicit SDIRK stage solves a nonlinear algebraic system for the stage
@@ -592,10 +617,18 @@ a `CallbackSet`:
 | 2 | `ThicknessTerminationCallback` | continuous (ALE) | terminate when $z_{\rm top}-z_{\rm bot}<$ `min_thickness` |
 | 3 | `DepletionCallback` | discrete (opt-in) | park cells below their depletion threshold; the state keeps its size |
 | 4 | `NewtonFailureCap` | discrete (every accepted step; Newton integrators) | after a step whose Newton needed retries, hold the proposed step at or below 1.25× that step for 20 steps |
-| 5 | `ProgressCallback` | periodic | progress bar |
+| 5 | `ProgressCallback` | discrete (every accepted step) | progress bar |
 | 6 | `DiagnosticsCallback` | discrete (every `diagnostics_stride`) | snapshot energy/mass ledgers |
 | 7 | `VerifyJacobianCallback` | discrete (at sample times) | compare active Jacobian vs. dense AD reference |
 | 8 | user callback | — | custom |
+
+Every callback of rows 1–7 keeps its problem-typed work behind a fixed-signature
+`FunctionWrapper` on the state vector and the time: the mesh sync, the
+live-thickness evaluation, the depletion check and park, the diagnostics row and
+the Jacobian comparison. Only the actions on the integrator itself stay in the
+callback: `terminate!`, `set_proposed_dt!`, `derivative_discontinuity!` and the
+reads of its step and Newton-failure counters. The `CallbackSet`'s type
+therefore depends on which callbacks are installed, not on the problem (§15.5.1).
 
 The **`StepUpdateCallback`** is the linchpin of the read-only-mesh design: after
 each accepted step it sets `mesh.cross_section_area = cross_section_area_from_state(…)`
@@ -664,9 +697,9 @@ single user-facing handle `JacobianSpec`:
    as O(N) couplings rather than dense matrix entries.
 
 The auto-default when the user passes no `jacobian` kwarg is
-`Structured(strategy = DirectSolve())` — exact assembly plus a sparse direct
-solve. This is the production baseline; large ALE problems can opt into
-`ApproxSolve` for speed (§15.10).
+`Structured(strategy = DirectSolve())` on a fixed mesh — exact assembly plus a
+sparse direct solve — and `Structured(strategy = ApproxSolve())` under ALE,
+which drops the structured couplings (§15.10.3).
 
 `JacobianSpec` bundles the backend with everything the integrator needs:
 
@@ -1227,8 +1260,8 @@ for c in jac.structured; densify!(M, c); end
 out .= M \ b
 ```
 
-Exact, robust, and the verification anchor; the default backend strategy. It
-pays $O(N^2)$ to densify the non-local couplings, which is why the other
+Exact, robust, the verification anchor, and the default on a fixed mesh. Under
+ALE it pays $O(N^2)$ to densify the non-local couplings, which is why the other
 strategies exist.
 
 ### 15.10.2 `StructuredSolve` (preconditioned Richardson)
@@ -1262,14 +1295,53 @@ Solve $\mathsf{A}^{-1}b$ only, dropping every structured coupling:
 out .= jac.A \ b
 ```
 
-Newton then sees a Jacobian that omits the dense ALE $C$ block — it takes a few
-extra outer iterations, but each linear solve is far cheaper. The KB benchmark
-reports roughly a $7.8\times$ Jacobian-side speedup on large ALE problems
-(treat this as an order-of-magnitude figure, not a guaranteed constant; it
-depends on $N$ and the coupling magnitudes). `ApproxSolve` uses the
-`:ale_reduced` sparsity profile and is the **only** strategy carrying the
-`is_approximate` trait, which switches the verifier to *masked* comparison
-(in-support only) since the dropped couplings are *expected* omissions.
+Newton then sees a Jacobian that omits the dense ALE $C$ block, while each
+linear solve stays local and cheap. `ApproxSolve` uses the `:ale_reduced`
+sparsity profile and is the **only** strategy carrying the `is_approximate`
+trait, which switches the verifier to *masked* comparison (in-support only)
+since the dropped couplings are *expected* omissions.
+
+It is the default under ALE. With $W = I-\gamma\Delta t\,J$ the modified
+Newton iteration that factors the reduced matrix has the error operator
+$E = I - W_{\rm red}^{-1}W_{\rm full}$, whose spectral radius is its
+asymptotic contraction per iteration. It was estimated at every accepted step
+of KenCarp4 runs, at $\gamma$ times the larger of the step taken and the step
+proposed, by power iteration in the integrator's weighted norm and checked
+against dense eigenvalues, on plain-ALE decks without parking at 100 cells:
+PMMA at 25, 50 and 100 kW/m² (solid $\lambda = 10^{-6}$, and 0 at 50 kW/m²)
+run to 5 % of its thickness; a charring wood (Darcy, Beer–Lambert) whose char
+shrinks the cells to 0.83 of their volume under a lateral shrinkage law; an
+intumescent coating that swells 3.6× in volume under a widening lateral law;
+the Landau ablation deck of V-CPL-02; and 80-s cone decks of PMMA and charring
+wood. It never exceeded 0.19, and it peaked before any step collapse, so the
+iteration contracts by at least a factor of five per iteration. $E$ is
+strongly non-normal: because every $z$ column is dropped, its one-iteration
+weighted norm reaches $10^2$ on the cone decks and far more once cells
+collapse, with no visible cost in steps or Newton failures.
+
+The two strategies follow the same trajectories:
+
+- The decks that run to their end take the same steps to within two (54/54,
+  979/979, 82/83, 80/80, 337/336, 286/288 reduced/exact) and agree to
+  $3\times10^{-4}$ K in surface temperature and $5\times10^{-6}$ of the peak
+  in gas generation. PMMA at 25 kW/m² reaches 5 % of its thickness at the same
+  time, 1617.5 s, in 21,036 and 22,607 steps.
+- Without parking, surface cells burn down to $10^{-10}$ to $10^{-13}$ m. On
+  the faster burns the step then collapses, and both strategies stall alike:
+  at equal step counts they reach the same simulated time. PMMA at 50 kW/m²
+  with solid $\lambda = 0$ ends in `DtLessThanMin` at 225 s (reduced) and
+  232.5 s (exact), the ablation deck at 0.25 s with both, and PMMA at 50 and
+  100 kW/m² had not reached 5 % of its thickness after an hour of either. In
+  that regime the surface mass flux changes sign between outputs with either
+  Jacobian, while the gas generation and the thickness stay smooth and agree
+  to $10^{-7}$. Parking (§14.3) is what carries a run through burnout; the
+  exact Jacobian does not.
+
+Per unit of work the reduced strategy with KLU is 8–17× faster than
+`DirectSolve` with UMFPACK on these decks (median CPU time over five
+interleaved rounds: 0.057–0.121 of it where the decks run to their end, and
+0.107–0.120 for the stalling decks over an equal budget of 4000 integrator
+iterations), and allocates 20–8000 times less.
 
 ### 15.10.4 `MatrixFreeSolve` (GMRES over the operator)
 

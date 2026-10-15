@@ -673,14 +673,14 @@ replaced, not augmented), and must never be combined with the volumetric source.
 > source will predict lower $T_s$ and MLR there than here; re-validate imported calibrations
 > (see §18, Verification & Validation).
 
-**The supported mass-flux/convection coupling is the blowing correction.** The
-*momentum-side* effect of the gas efflux — boundary-layer thickening that
-suppresses the convective exchange coefficient — is independent of the enthalpy
-bookkeeping above and is available as the opt-in
-`use_blowing_correction = true`: every `ConvectiveBC` is rescaled by
-$h \to h\,B/(e^B-1)$ with $B=\dot m'' c_{p,g}/h$ (§12.3.3). Because it modifies
-only the coefficient, it composes exactly with the $S_{\text{conv}}$-only
-convention; no double-count arises.
+**The supported mass-flux/convection coupling is the blowing model of each
+`ConvectiveBC`.** The *momentum-side* effect of the gas efflux — boundary-layer
+thickening that suppresses the convective exchange coefficient, and the pooling
+of a dense gas on the face — is independent of the enthalpy bookkeeping above
+and is the `blowing` model a `ConvectiveBC` carries (§12.3.3): the coefficient
+becomes $h\,\chi$ with $\chi$ from the model and the outward gas flux at the
+face. Because it modifies only the coefficient, it composes exactly with the
+$S_{\text{conv}}$-only convention; no double-count arises.
 
 ---
 

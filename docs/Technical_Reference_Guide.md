@@ -5767,14 +5767,14 @@ replaced, not augmented), and must never be combined with the volumetric source.
 > source will predict lower $T_s$ and MLR there than here; re-validate imported calibrations
 > (see §18, Verification & Validation).
 
-**The supported mass-flux/convection coupling is the blowing correction.** The
-*momentum-side* effect of the gas efflux — boundary-layer thickening that
-suppresses the convective exchange coefficient — is independent of the enthalpy
-bookkeeping above and is available as the opt-in
-`use_blowing_correction = true`: every `ConvectiveBC` is rescaled by
-$h \to h\,B/(e^B-1)$ with $B=\dot m'' c_{p,g}/h$ (§12.3.3). Because it modifies
-only the coefficient, it composes exactly with the $S_{\text{conv}}$-only
-convention; no double-count arises.
+**The supported mass-flux/convection coupling is the blowing model of each
+`ConvectiveBC`.** The *momentum-side* effect of the gas efflux — boundary-layer
+thickening that suppresses the convective exchange coefficient, and the pooling
+of a dense gas on the face — is independent of the enthalpy bookkeeping above
+and is the `blowing` model a `ConvectiveBC` carries (§12.3.3): the coefficient
+becomes $h\,\chi$ with $\chi$ from the model and the outward gas flux at the
+face. Because it modifies only the coefficient, it composes exactly with the
+$S_{\text{conv}}$-only convention; no double-count arises.
 
 ---
 
@@ -8625,7 +8625,7 @@ $$
 \tag{10.18}
 $$
 
-with total length $N_{\mathrm{state}} = n(1+N_C) + \delta_{\mathrm{ALE}}\,n_{\mathrm{nodes}} + \delta_{\mathrm{WithChi}}\,n$. The $z$ block is present only in ALE mode and the $\chi$ block only in `WithChi` mode. For example, with $N_C=2$ components, $n=5$ cells (hence $n_{\mathrm{nodes}}=6$), the ALE+WithChi length is $5\cdot 3 + 6 + 5 = 26$, which the test `test/geometry/test_variable_cross_section.jl:14` asserts as `5*(2+3)+1`; the same problem with `lateral=false` (NoChi) has length $5\cdot 3 + 6 = 21$ asserted as `5*3+6` (line 31). The block accessors `temperature_range`, `concentration_range`, `z_range`, `chi_range` (`src/Problem/state_layout.jl`) return empty ranges for absent blocks, and the residual's `_pack_chi_derivative_dispatched!` is a no-op when `chi_range` is empty. The `WithChi`/`NoChi` axis is one of the four bundled `SimulationMode` traits; the detailed layout descriptor `StateLayout` and its role in the structured Jacobian are covered in §13 and §15.1.
+with total length $N_{\mathrm{state}} = n(1+N_C) + \delta_{\mathrm{ALE}}\,n_{\mathrm{nodes}} + \delta_{\mathrm{WithChi}}\,n$. The $z$ block is present only in ALE mode and the $\chi$ block only in `WithChi` mode, which requires ALE: the fixed-mesh residual evolves neither $\chi$ nor $A$, so `to_problem_def` rejects a lateral shrinkage law with `use_ale = false`. For example, with $N_C=2$ components, $n=5$ cells (hence $n_{\mathrm{nodes}}=6$), the ALE+WithChi length is $5\cdot 3 + 6 + 5 = 26$, which the test `test/geometry/test_variable_cross_section.jl:14` asserts as `5*(2+3)+1`; the same problem with `lateral=false` (NoChi) has length $5\cdot 3 + 6 = 21$ asserted as `5*3+6` (line 31). The block accessors `temperature_range`, `concentration_range`, `z_range`, `chi_range` (`src/Problem/state_layout.jl`) return empty ranges for absent blocks, and the residual's `_pack_chi_derivative_dispatched!` is a no-op when `chi_range` is empty. The `WithChi`/`NoChi` axis is one of the four bundled `SimulationMode` traits; the detailed layout descriptor `StateLayout` and its role in the structured Jacobian are covered in §13 and §15.1.
 
 ---
 
@@ -10423,52 +10423,116 @@ $-h_{\text{conv}}$, the contribution to the Newton residual is linear and exactl
 resolved in a single step. (`boundary_fluxes.jl:50–54`,
 `boundary_temperature.jl:340–352`.)
 
-**Blowing (transpiration) correction — opt-in.** With
-`use_blowing_correction = true` (a `solve`/`to_problem_def` switch, default
-off) every `ConvectiveBC` in the surface balance is rescaled by the classical
-Couette-film (Spalding) factor
+**Blowing.** Every `ConvectiveBC` carries a blowing model (`bc.blowing`, an
+`AbstractBlowingModel`, default `NoBlowing()`), and the surface balance applies
+it at every Newton iterate to the face state: the **signed outward** gas mass
+flux of every component, read from the same `J_gas[:, f]` the mass-flux pass
+populates (film-law diffusion plus, in Darcy–Fick mode, the pressure-BC venting
+flux), the surface-temperature iterate and the material (`BlowingFace`,
+`Discretization/blowing.jl`). The convective flux is $h\,\chi\,(T_\infty - T_s)$
+with $\chi = h_{\text{eff}}/h$ from the model (`blowing_state`). This is the
+**momentum-side companion** of the transpiration enthalpy term: it modifies
+only the convective *coefficient*, not the gas enthalpy accounting, so it
+composes exactly with the $S_{\text{conv}}$-only convention (§7.6) — no
+double-count is possible. Zero outflow gives $\chi = 1$ exactly for every
+shipped model, so the back face is unaffected automatically.
+
+*Film law with a fitted constant* (`CouetteFilm(λ)`):
 
 $$
-h \;\to\; h\,\frac{B}{e^{B}-1},
+\chi \;=\; \frac{\phi}{e^{\phi}-1},
 \qquad
-B \;=\; \frac{\dot m''\,c_{p,g}}{h},
+\phi \;=\; \frac{2\lambda\,\dot m''\,c_{p,g}}{h},
 \qquad
-\dot m''\,c_{p,g} \;=\; \sum_{g}\dot m_g\,c_{p,g}(T_s),
+\dot m''\,c_{p,g} \;=\; \sum_{g}\dot m_g\,c_{p,g}(T_s).
 $$
 
-where $\dot m_g$ is the **signed outward** gas mass flux at the boundary face,
-read from the same `J_gas[:, f]` the mass-flux pass populates (film-law
-diffusion plus, in Darcy–Fick mode, the pressure-BC venting flux). This is the
-**momentum-side companion** of the transpiration enthalpy term: the gas efflux
-thickens the boundary layer and suppresses convective heat exchange. Unlike
-the (rejected) surface transpiration term it modifies only the convective
-*coefficient*, not the gas enthalpy accounting, so it composes exactly with the
-$S_{\text{conv}}$-only convention (§7.6) — no double-count is possible. Limits:
+$\lambda = 1/2$ is the classical Couette-film (Spalding) factor, $\phi = B =
+\dot m'' c_{p,g}/h$; a smaller $\lambda$ fitted to a resolved flow weakens the
+reduction at a given outflow and holds for that gas only. Limits in $B$:
 $B = 0$ recovers the bare $h$ exactly; $B = 4$ (peak-PMMA outgassing against
-canonical cone $h$) gives $h_{\text{eff}}/h = 0.075$, i.e. convective cooling
-essentially extinguished; $B < 0$ (net inflow) is the smooth suction
-enhancement. The factor is evaluated by the numerically stable
-`blowing_factor` (Taylor branch at $|B|<10^{-5}$, overflow-safe
-$B\,e^{-B}/(1-e^{-B})$ form for large $B$), and the blowing conductance is
-rebuilt at every Newton iterate with $c_{p,g}(T_s)$. The Newton derivative
-uses the frozen-$B$ form $-h\,f(B)$ — first-order consistent, the same
-convention as the transpiration derivative (§12.9), so convergence is
-marginally sub-quadratic and the converged root is exact. Each convective
-member of a `CombinedThermalBC` forms its own $B$ against its own $h$; all
-other BC types are untouched, and the back face is unaffected automatically
-($\dot m''\approx 0$ there). The converged conductance is stored as
-`BoundaryState.blowing_mcp` and consumed by the flux-decomposition
-diagnostics. The structured Jacobian's `BCThermalOperator` and
-`BCConvectionOperator` rebuild $\dot m''$ from the stencil state via the
-shared boundary-face kernel, so the $\partial(h\chi)/\partial(T_b,\xi_b)$
-chain is exact (support-complete strict verification passes with blowing
-enabled in Fickian, Darcy–Fick, and ALE modes). Enabling blowing **alone** on
-a case calibrated without it will raise $T_s$ and MLR; introduce it together
-with flame heat-flux feedback before any recalibration pass (the two
-partially cancel — see the physics roadmap,
-`docs/Physics_Audit_2026-06-09.md`). (`boundary_temperature.jl`
-`blowing_factor`/`_blowing_conductance`, `adapter.jl`
-`use_blowing_correction`.)
+canonical cone $h$) gives $h_{\text{eff}}/h = 0.075$; $B < 0$ (net inflow) is
+the smooth suction enhancement.
+
+*Property-ratio film for any light gas* (`PropertyRatioFilm(free_stream; n_Γ)`),
+anchored on the Couette film of the free stream:
+
+$$
+\phi \;=\; \frac{\dot m''\,c_{p,\infty}(T_s)}{h}\left(\frac{\Gamma_\infty}{\Gamma_g}\right)^{n_\Gamma},
+\qquad \Gamma = \frac{k}{c_p},
+$$
+
+with $\Gamma_\infty$ of the free stream and $\Gamma_g$ of the mixture leaving the
+face (heat capacity weighted by mass fraction, conductivity by Wilke's rule
+over the components with outward flux, each species' viscosity from Eucken's
+relation when the component carries none). $n_\Gamma = 0.6$ is Kays's turbulent
+exponent on the heat-capacity ratio, reproduced by the chamber CFD; with
+$n_\Gamma = 0$ this is the Couette film in the free-stream heat capacity. Under
+net inflow the arriving gas is the free stream and the ratio is 1.
+
+*Pooling* (`PoolingFilm(free_stream; n_Γ, n_D, ψ0, Λc, Λw)`): the same
+$\phi$ with a pooling factor $\psi$, the share of the no-outflow exchange the
+face keeps,
+
+$$
+\chi \;=\; \frac{\phi}{e^{\phi/\psi}-1} \;=\; \psi\,f(\phi/\psi),
+\qquad
+\psi \;=\; \psi_0 + \frac{1-\psi_0}{1+\exp[-(\Lambda-\Lambda_c)/\Lambda_w]},
+\qquad
+\Lambda \;=\; \frac{1-(M_{\text{face}}/T_s)(T_\infty/M_\infty)}{1-T_\infty/T_s},
+$$
+
+where $f$ is the film factor and $\Lambda$ the face buoyancy relative to the
+hot free stream, from the face molar mass $M_{\text{face}}$ of the species
+mass fractions
+
+$$
+Y_i \;=\; \omega_i\left[1-\exp\!\left(-\frac{\dot m''}{\psi\,g\,s_i^{\,n_D}}\right)\right],
+\qquad g = \frac{h}{\bar c_{p,\infty}},
+\qquad s_i = \frac{D_{i,\infty}}{\alpha_\infty},
+$$
+
+with $\omega_i$ the species' share of the outflow, $g$ the gas-exchange
+conductance without outflow (the film analogy: $h$ over the free-stream heat
+capacity averaged between $T_\infty$ and $T_s$, a 5-point Gauss–Legendre mean),
+$D_{i,\infty}$ the binary diffusivity into the free stream (Fuller, from the
+component's diffusion volume on the model, else the Chapman–Enskog estimate
+from its molar mass; a lumped `volatiles` gas states its own) and $n_D = 1/2$
+the penetration-theory exponent. Components whose name matches the free
+stream count in $\dot m''$ but not in the face composition. $\psi$ and the
+$Y_i$ are solved together: $G(\psi) = \Psi(\Lambda(Y(\psi))) - \psi$ has
+$G(\psi_0) > 0$ and $G(1) < 0$, so a 16-interval scan of $[\psi_0, 1]$ on the
+primal values brackets every root, each refined by safeguarded Newton; where
+two states are self-consistent the mean of the lowest and highest is taken
+(the resolved flow alternates between them). One Newton step in the working
+scalar type at the primal root then gives the implicit-function derivative,
+so `ForwardDiff` partials ride through the solve. A face no hotter than the
+free stream keeps $\psi = 1$. The three switch constants belong to the
+apparatus flow, as $h$ does.
+
+*User rule* (`FunctionBlowing(f)`): $\chi = f(\text{face}, h, T_\infty)$.
+
+The factor is evaluated by the numerically stable `blowing_factor` (Taylor
+branch at $|\phi|<10^{-5}$, overflow-safe $\phi\,e^{-\phi}/(1-e^{-\phi})$ form for
+large $\phi$). The Newton derivative uses the frozen-$\chi$ form $-h\,\chi$ —
+first-order consistent, the same convention as the transpiration derivative
+(§12.9), so convergence is marginally sub-quadratic and the converged root is
+exact. Each convective member of a `CombinedThermalBC` applies its own model
+against its own $h$ and $T_\infty$; all other BC types are untouched. At the
+converged $T_s$ the `BoundaryState` records the blowing conductance
+`blowing_mcp`, the applied ratio `blowing_ratio` and, for the pooling model,
+`pooling_factor`, `face_fraction` and `face_buoyancy` (the first convective
+member's), and the solution extras carry them per output time. The structured
+Jacobian's `BCThermalOperator` and `BCConvectionOperator` rebuild $\dot m''$
+from the stencil state via the shared boundary-face kernel, so the
+$\partial(h\chi)/\partial(T_b,\xi_b)$ chain is exact (support-complete strict
+verification passes with the film and pooling models in Fickian, Darcy–Fick
+and ALE modes). Giving a convective BC a model on a case calibrated with the
+bare coefficient will raise $T_s$ and MLR; introduce it together with flame
+heat-flux feedback before any recalibration pass (the two partially cancel —
+see the physics roadmap, `docs/Physics_Audit_2026-06-09.md`).
+(`Materials/blowing_models.jl` types and gas data,
+`Discretization/blowing.jl` evaluation.)
 
 ### 12.3.4 `RadiativeBC` (gray surface exchange with surroundings)
 
@@ -11008,9 +11072,9 @@ the solve begins.
 > **Do not confuse this with the blowing correction.** This section is the
 > *enthalpy-side* transpiration term (rejected in production, §7.6). The
 > *momentum-side* effect of the same gas efflux — suppression of the convective
-> coefficient, $h \to h\,B/(e^B-1)$ — is the supported, opt-in
-> `use_blowing_correction` documented in §12.3.3; it is independent of this
-> term and composes with the default $S_{\text{conv}}$-only convention.
+> coefficient, $h \to h\,\chi$ — is the `blowing` model of each `ConvectiveBC`
+> documented in §12.3.3; it is independent of this term and composes with the
+> default $S_{\text{conv}}$-only convention.
 
 ### 12.9.1 The transpiration term and its derivative
 
@@ -11106,11 +11170,11 @@ re-validated when imported (§18).
 ### 12.10.1 Flux decomposition
 
 For auditing and post-processing, `compute_boundary_heat_fluxes(bc, T_s, t,
-ε_eff, radiation_model[, mcp])` decomposes the boundary flux into named
-components (`boundary_fluxes.jl`). The optional trailing `mcp` is the blowing
-conductance $\dot m'' c_{p,g}$ at the converged $T_s$
-(`BoundaryState.blowing_mcp`); when supplied, the convective component is
-reported with the same $h\,B/(e^B-1)$ rescaling the surface Newton applied
+ε_eff, radiation_model[, face])` decomposes the boundary flux into named
+components (`boundary_fluxes.jl`). The optional trailing `face` is the
+`BlowingFace` at the converged $T_s$ (outward species fluxes, surface
+temperature, material); when supplied, the convective component is reported
+with the same ratio $\chi$ its blowing model gave the surface Newton
 (§12.3.3), keeping the decomposition consistent with `net`. Components:
 
 - `absorbed` — incident radiation absorbed *at the boundary face* [W·m⁻²];
@@ -12610,14 +12674,13 @@ through every park:
 parked states for `Structured(strategy = DirectSolve())`, and the parked
 `ApproxSolve` assembly equals that of the compacted problem on the live block.
 
-Under ALE, `handle_depletion = true` selects `Structured(strategy =
-ApproxSolve())` as the default Jacobian (§15.6). The `:full` ALE pattern
-carries the prefix-sum couplings of every node to every cell below it, which
-makes the factorized $W$ effectively dense and the sparse direct solve 60–90×
-more expensive per step than the reduced pattern; parking keeps every live cell
-above $\tau_{\rm dep}$ of its initial thickness, so the vanishing-cell
-conditioning that makes the dropped couplings matter never arises, and the two
-strategies follow the same trajectory. The post-park transient is not a
+The ALE default Jacobian, `Structured(strategy = ApproxSolve())` (§15.10.3),
+stays the default through parking. The `:full` ALE pattern carries the
+prefix-sum couplings of every node to every cell below it, which makes the
+factorized $W$ effectively dense and the sparse direct solve 60–90× more
+expensive per step than the reduced pattern; parking keeps every live cell
+above $\tau_{\rm dep}$ of its initial thickness, and the two strategies follow
+the same trajectory. The post-park transient is not a
 Jacobian effect: `DirectSolve` restarted from $5\times10^{-2}$ s after every
 park fails its Newton more than 500 times on the 60-park PMMA burnout, while
 the reduced strategy with the reset of §14.3.5 needs 858 steps and 8
@@ -13703,6 +13766,31 @@ alternatives through `linear_solver`.
 > $t=0$ additionally seeds the structured-Jacobian cache's
 > `radiation_intensity`.
 
+**Problem-independent integrator types.** OrdinaryDiffEq compiles its stepper,
+nonlinear solver and factorization for the types of the functions it is handed.
+The RHS and Jacobian closures capture the `ProblemDef` and workspace, whose
+types carry the material, boundary-condition and mode types. `solve` therefore
+hands them to the integrator behind fixed-signature `FunctionWrapper`s:
+`ErasedRHS` for `(du, u, p, t)` with `Vector{Float64}` state and `Float64`
+time, and `ErasedJacobian{M}` for the Jacobian matrix type `M`. The callbacks
+do the same (§15.5.3). The integrator's type then depends only on the solver
+configuration: the mesh mode, depletion handling, the installed optional
+callbacks, the integrator and its factorization. A problem with new material or
+boundary-condition types compiles only the Pyrolysis kernels (initialization,
+residual, Jacobian, solution extraction). The precompile workloads
+(`src/precompile.jl`) cache the integrator for the default configurations. An
+algorithm that calls the RHS with other argument types, such as dual numbers
+for a ForwardDiff time derivative, reaches the closure by dynamic dispatch. A
+call of the Jacobian with a different matrix type is a `MethodError`, because
+a converted copy would silently drop the entries.
+
+> **Implementation note.** src/Solver/integrator_functions.jl (`ErasedRHS`,
+> `ErasedJacobian`); the `ODEFunction` is built in `solve`, src/Solver/solve.jl.
+> `solve` also converts the tolerances, step bounds and `saveat` to `Float64`,
+> because the solve keywords enter the integrator's type.
+> test/solver/test_integrator_type.jl checks that two decks differing in every
+> problem type share one integrator type.
+
 ### 15.5.2 The implicit-RK $W$ matrix and warm start
 
 Each implicit SDIRK stage solves a nonlinear algebraic system for the stage
@@ -13760,10 +13848,18 @@ a `CallbackSet`:
 | 2 | `ThicknessTerminationCallback` | continuous (ALE) | terminate when $z_{\rm top}-z_{\rm bot}<$ `min_thickness` |
 | 3 | `DepletionCallback` | discrete (opt-in) | park cells below their depletion threshold; the state keeps its size |
 | 4 | `NewtonFailureCap` | discrete (every accepted step; Newton integrators) | after a step whose Newton needed retries, hold the proposed step at or below 1.25× that step for 20 steps |
-| 5 | `ProgressCallback` | periodic | progress bar |
+| 5 | `ProgressCallback` | discrete (every accepted step) | progress bar |
 | 6 | `DiagnosticsCallback` | discrete (every `diagnostics_stride`) | snapshot energy/mass ledgers |
 | 7 | `VerifyJacobianCallback` | discrete (at sample times) | compare active Jacobian vs. dense AD reference |
 | 8 | user callback | — | custom |
+
+Every callback of rows 1–7 keeps its problem-typed work behind a fixed-signature
+`FunctionWrapper` on the state vector and the time: the mesh sync, the
+live-thickness evaluation, the depletion check and park, the diagnostics row and
+the Jacobian comparison. Only the actions on the integrator itself stay in the
+callback: `terminate!`, `set_proposed_dt!`, `derivative_discontinuity!` and the
+reads of its step and Newton-failure counters. The `CallbackSet`'s type
+therefore depends on which callbacks are installed, not on the problem (§15.5.1).
 
 The **`StepUpdateCallback`** is the linchpin of the read-only-mesh design: after
 each accepted step it sets `mesh.cross_section_area = cross_section_area_from_state(…)`
@@ -13832,9 +13928,9 @@ single user-facing handle `JacobianSpec`:
    as O(N) couplings rather than dense matrix entries.
 
 The auto-default when the user passes no `jacobian` kwarg is
-`Structured(strategy = DirectSolve())` — exact assembly plus a sparse direct
-solve. This is the production baseline; large ALE problems can opt into
-`ApproxSolve` for speed (§15.10).
+`Structured(strategy = DirectSolve())` on a fixed mesh — exact assembly plus a
+sparse direct solve — and `Structured(strategy = ApproxSolve())` under ALE,
+which drops the structured couplings (§15.10.3).
 
 `JacobianSpec` bundles the backend with everything the integrator needs:
 
@@ -14395,8 +14491,8 @@ for c in jac.structured; densify!(M, c); end
 out .= M \ b
 ```
 
-Exact, robust, and the verification anchor; the default backend strategy. It
-pays $O(N^2)$ to densify the non-local couplings, which is why the other
+Exact, robust, the verification anchor, and the default on a fixed mesh. Under
+ALE it pays $O(N^2)$ to densify the non-local couplings, which is why the other
 strategies exist.
 
 ### 15.10.2 `StructuredSolve` (preconditioned Richardson)
@@ -14430,14 +14526,53 @@ Solve $\mathsf{A}^{-1}b$ only, dropping every structured coupling:
 out .= jac.A \ b
 ```
 
-Newton then sees a Jacobian that omits the dense ALE $C$ block — it takes a few
-extra outer iterations, but each linear solve is far cheaper. The KB benchmark
-reports roughly a $7.8\times$ Jacobian-side speedup on large ALE problems
-(treat this as an order-of-magnitude figure, not a guaranteed constant; it
-depends on $N$ and the coupling magnitudes). `ApproxSolve` uses the
-`:ale_reduced` sparsity profile and is the **only** strategy carrying the
-`is_approximate` trait, which switches the verifier to *masked* comparison
-(in-support only) since the dropped couplings are *expected* omissions.
+Newton then sees a Jacobian that omits the dense ALE $C$ block, while each
+linear solve stays local and cheap. `ApproxSolve` uses the `:ale_reduced`
+sparsity profile and is the **only** strategy carrying the `is_approximate`
+trait, which switches the verifier to *masked* comparison (in-support only)
+since the dropped couplings are *expected* omissions.
+
+It is the default under ALE. With $W = I-\gamma\Delta t\,J$ the modified
+Newton iteration that factors the reduced matrix has the error operator
+$E = I - W_{\rm red}^{-1}W_{\rm full}$, whose spectral radius is its
+asymptotic contraction per iteration. It was estimated at every accepted step
+of KenCarp4 runs, at $\gamma$ times the larger of the step taken and the step
+proposed, by power iteration in the integrator's weighted norm and checked
+against dense eigenvalues, on plain-ALE decks without parking at 100 cells:
+PMMA at 25, 50 and 100 kW/m² (solid $\lambda = 10^{-6}$, and 0 at 50 kW/m²)
+run to 5 % of its thickness; a charring wood (Darcy, Beer–Lambert) whose char
+shrinks the cells to 0.83 of their volume under a lateral shrinkage law; an
+intumescent coating that swells 3.6× in volume under a widening lateral law;
+the Landau ablation deck of V-CPL-02; and 80-s cone decks of PMMA and charring
+wood. It never exceeded 0.19, and it peaked before any step collapse, so the
+iteration contracts by at least a factor of five per iteration. $E$ is
+strongly non-normal: because every $z$ column is dropped, its one-iteration
+weighted norm reaches $10^2$ on the cone decks and far more once cells
+collapse, with no visible cost in steps or Newton failures.
+
+The two strategies follow the same trajectories:
+
+- The decks that run to their end take the same steps to within two (54/54,
+  979/979, 82/83, 80/80, 337/336, 286/288 reduced/exact) and agree to
+  $3\times10^{-4}$ K in surface temperature and $5\times10^{-6}$ of the peak
+  in gas generation. PMMA at 25 kW/m² reaches 5 % of its thickness at the same
+  time, 1617.5 s, in 21,036 and 22,607 steps.
+- Without parking, surface cells burn down to $10^{-10}$ to $10^{-13}$ m. On
+  the faster burns the step then collapses, and both strategies stall alike:
+  at equal step counts they reach the same simulated time. PMMA at 50 kW/m²
+  with solid $\lambda = 0$ ends in `DtLessThanMin` at 225 s (reduced) and
+  232.5 s (exact), the ablation deck at 0.25 s with both, and PMMA at 50 and
+  100 kW/m² had not reached 5 % of its thickness after an hour of either. In
+  that regime the surface mass flux changes sign between outputs with either
+  Jacobian, while the gas generation and the thickness stay smooth and agree
+  to $10^{-7}$. Parking (§14.3) is what carries a run through burnout; the
+  exact Jacobian does not.
+
+Per unit of work the reduced strategy with KLU is 8–17× faster than
+`DirectSolve` with UMFPACK on these decks (median CPU time over five
+interleaved rounds: 0.057–0.121 of it where the decks run to their end, and
+0.107–0.120 for the stalling decks over an equal budget of 4000 integrator
+iterations), and allocates 20–8000 times less.
 
 ### 15.10.4 `MatrixFreeSolve` (GMRES over the operator)
 
@@ -15649,22 +15784,24 @@ gas-storage gap.
 
 ### 16.10.4 DiagnosticsCallback and solver integration
 
-`DiagnosticsCallback(record!)` (`callback.jl:184–188`) wraps a user closure in a
-`DiffEqCallbacks.DiscreteCallback` whose condition is `true` (fire on every
-accepted step) and whose `affect!` runs `record!(integrator)`, with
-`save_positions = (false, false)` so the callback does not force extra solution
-saves.
+`DiagnosticsCallback(record!)` (src/Diagnostics/callback.jl) wraps a user
+closure in a `SciMLBase.DiscreteCallback` whose condition is `true` (fire on
+every accepted step) and whose `affect!` runs `record!(u, t)` on the
+integrator's state and time, with `save_positions = (false, false)` so the
+callback does not force extra solution saves. `record!` sits behind a
+fixed-signature `FunctionWrapper`, so the callback's type does not depend on the
+closure's (§15.5.3).
 
 In `solve()`, enabling diagnostics (`diagnostics=true`, default `false`;
 `diagnostics_stride` default `10`, validated $\ge1$) installs a snapshot-mode
-closure (`src/Solver/solve.jl:863–896`). The closure maintains its own
+closure (`solve`, src/Solver/solve.jl). The closure maintains its own
 stride counter; on stride boundaries it (i) synchronizes the mesh from the
-integrator's state with `update_mesh_from_state!(mesh, integrator.u, layout)` so
+integrator's state with `update_mesh_from_state!(mesh, u, layout)` so
 the trackers read the current cell states, then (ii) pushes a
 `snapshot_diagnostics_row` to a local `Vector{DiagnosticsRow}`. After the solve,
-the rows are appended to `solution.extras.diagnostics_log`
-(`src/Solver/solve.jl:937–939`; the `extras` schema reserves
-`diagnostics_log` at `src/Problem/pyrolysis_problem.jl:275`). Reading
+the rows are appended to `solution.extras.diagnostics_log` (the `extras`
+schema, `_empty_extras` in src/Problem/pyrolysis_problem.jl, reserves
+`diagnostics_log`). Reading
 `sol.extras.diagnostics_log` therefore yields the energy and gas-gap time series,
 with `NaN` in the cumulative-residual columns under the current production wiring.
 
@@ -17737,8 +17874,7 @@ linear-solver, and AD package versions all affect the last digits) and a fixed
 choice of integrator, tolerances, Jacobian backend, and linear solver. The
 defaults — `KenCarp4` with `AutoFiniteDiff`, the pattern-chosen factorization
 (`KLUFactorization` or `UMFPACKFactorization`), `abstol=1e-8`/`reltol=1e-6`,
-`Structured(DirectSolve())` (`ApproxSolve` under ALE with depletion
-handling) — are the reference
+`Structured(DirectSolve())` (`ApproxSolve` under ALE) — are the reference
 configuration; deviations (e.g. `ApproxSolve` for speed, ILU-GMRES for large ALE)
 trade a controlled amount of accuracy for performance and should be re-checked
 against the reference configuration with `verify_jacobian` armed and the

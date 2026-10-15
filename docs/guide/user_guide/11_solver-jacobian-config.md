@@ -18,8 +18,9 @@ chapter:
 
 1. **The Jacobian backend** (`jacobian = ...` keyword) decides *how the matrix*
    `J = ∂(du/dt)/∂u` *is assembled* — by structured operator assembly (the
-   default: `solve` auto-builds `Structured(strategy = DirectSolve())`, or
-   `ApproxSolve` under ALE with depletion handling, when `jacobian = nothing`),
+   default: `solve` auto-builds `Structured(strategy = DirectSolve())` on a
+   fixed mesh and `Structured(strategy = ApproxSolve())` under ALE when
+   `jacobian = nothing`),
    or by dense automatic differentiation (verification only).
 2. **The integrator's linear solver** (`linear_solver = ...` keyword) decides
    *how the implicit-stage system* `W x = b`, with `W = I/(γ_RK Δt) − J`, *is
@@ -47,10 +48,9 @@ following happens (see `src/Solver/solve.jl`):
   differentiate the residual in time (the Rosenbrock `∂f/∂t`).
 - The Jacobian defaults to the **structured analytical backend**: with
   `jacobian = nothing` (the default), `solve` constructs
-  `Structured(strategy = DirectSolve())` internally — for both Eulerian and
-  ALE problems — and hands the integrator an exact sparse Jacobian plus its
-  sparsity prototype. Under ALE with `handle_depletion = true` the default is
-  `Structured(strategy = ApproxSolve())` (§10.8).
+  `Structured(strategy = DirectSolve())` internally on a fixed mesh and
+  `Structured(strategy = ApproxSolve())` under ALE (§10.8, §11.3.3), and hands
+  the integrator a sparse Jacobian plus its sparsity prototype.
 - The linear solver follows the Jacobian's sparsity pattern:
   `UMFPACKFactorization()` for the ALE geometry block that `DirectSolve`
   materializes under ALE, `KLUFactorization()` for every other sparse
@@ -73,7 +73,7 @@ sol = solve(problem)
 > `linear_solver = nothing` → `KLUFactorization()` (`UMFPACKFactorization()`
 > for the exact ALE Jacobian),
 > `jacobian = nothing` → auto-built `Structured(strategy = DirectSolve())`
-> (`ApproxSolve` under ALE with `handle_depletion = true`),
+> (`ApproxSolve` under ALE),
 > `abstol = 1e-8`, `reltol = 1e-6`.
 
 ---
@@ -167,11 +167,12 @@ solve(problem; use_ale = true, jacobian = Structured(strategy = ApproxSolve()))
 For routine work, the cleanest pattern is to pass `jacobian = nothing` (the
 default) and let `solve` construct the default structured Jacobian for you, *or* to
 opt into a non-default backend explicitly only when you need it. The auto-default when
-`jacobian` is left at its default is `Structured(strategy = DirectSolve())`
-constructed internally with the correct mode flags — you do not have to thread
+`jacobian` is left at its default is `Structured(strategy = DirectSolve())` on a
+fixed mesh and `Structured(strategy = ApproxSolve())` under ALE, constructed
+internally with the correct mode flags — you do not have to thread
 `use_ale` / `radiation_model` through `JacobianSpec` yourself. Supply your own
-spec only when you want a non-default strategy (`ApproxSolve`, `StructuredSolve`,
-`MatrixFreeSolve`) or a custom reference for verification.
+spec only when you want another strategy (`DirectSolve` under ALE,
+`StructuredSolve`, `MatrixFreeSolve`) or a custom reference for verification.
 
 ---
 
@@ -184,26 +185,27 @@ inside the Newton step. All four strategies are top-level exports.
 
 | Strategy | What it does | Exact? | Best for |
 |---|---|---|---|
-| `DirectSolve()` | Densify the structured couplings into `A`, factor the full sparse matrix (KLU/UMFPACK) | Exact | Small/typical problems; the verification anchor |
+| `DirectSolve()` | Densify the structured couplings into `A`, factor the full sparse matrix (KLU/UMFPACK) | Exact | Fixed-mesh default; the verification anchor |
 | `StructuredSolve()` | Sparse-LU on `A` + preconditioned Richardson over the couplings (2–5 iters) | Exact | Large problems where dense assembly is costly but exactness is required |
-| `ApproxSolve()` | Drop the structured couplings; solve `A⁻¹ b` only (Schur-style approximation) | Approximate | Large ALE problems where speed dominates (~7.8× faster assembly) |
+| `ApproxSolve()` | Drop the structured couplings; solve `A⁻¹ b` only (Schur-style approximation) | Approximate | ALE default |
 | `MatrixFreeSolve()` | GMRES over the operator action without densifying | Exact (iterative) | Research / very large `N`; benchmark before relying on it |
 
 Construct any of these as a parameterless instance:
 
 ```julia
-JacobianSpec(Structured(strategy = DirectSolve()),     problem)               # default
+JacobianSpec(Structured(strategy = DirectSolve()),     problem)               # fixed-mesh default
 JacobianSpec(Structured(strategy = StructuredSolve()), problem; use_ale = true)
-JacobianSpec(Structured(strategy = ApproxSolve()),     problem; use_ale = true)
+JacobianSpec(Structured(strategy = ApproxSolve()),     problem; use_ale = true) # ALE default
 JacobianSpec(Structured(strategy = MatrixFreeSolve()), problem; use_ale = true)
 ```
 
-### 11.3.1 `DirectSolve` — the default and the anchor
+### 11.3.1 `DirectSolve` — the fixed-mesh default and the anchor
 
 `DirectSolve` materializes `A + Σⱼ densify(couplingⱼ)` and factors it directly.
-It is exact and predictable. For Eulerian problems and modest ALE meshes it is
-the right choice and the one you get when you do nothing. It is also the backend
-you should verify against first when proving a configuration is correct.
+It is exact and predictable, and on a fixed mesh it is the one you get when you
+do nothing. Under ALE it is the exact Jacobian you opt into; its dense geometry
+block is factored by UMFPACK (§11.4.1). It is also the backend you should
+verify against first when proving a configuration is correct.
 
 ```julia
 spec = JacobianSpec(Structured(strategy = DirectSolve()), problem)
@@ -227,18 +229,22 @@ magnitudes are small relative to `A`'s diagonal — which is the usual ALE regim
 Choose `StructuredSolve` when an ALE mesh is large enough that the dense
 assembly of `DirectSolve` dominates, but you still need an exact Newton step.
 
-### 11.3.3 `ApproxSolve` — fastest, for large ALE
+### 11.3.3 `ApproxSolve` — the ALE default
 
 `ApproxSolve` drops the structured couplings entirely and solves `A⁻¹ b`. The
 Newton step is then a Schur-style approximation: it omits the dense ALE
-mesh-velocity coupling block, takes a few extra Newton iterations, but each
-linear solve and the assembly itself are far cheaper (the assembly profile drops
-to `:ale_reduced`, skipping the cumulative ALE widening, the geometry AD pass,
-the Beer–Lambert suffix, and the χ-column rank-1 term). This is the strategy the
-Douglas-fir ALE example uses for roughly an 8× speedup over the full Jacobian.
+mesh-velocity coupling block, but each linear solve and the assembly itself are
+far cheaper (the assembly profile drops to `:ale_reduced`, skipping the
+cumulative ALE widening, the geometry AD pass, the Beer–Lambert suffix, and the
+χ-column rank-1 term). The modified Newton iteration it drives still contracts
+strongly, so ALE solves take the same steps as with the exact Jacobian and
+follow the same trajectory; `solve` uses it under ALE when `jacobian = nothing`
+(Technical Reference §15.10.3 has the measurements).
 
 ```julia
-# Large ALE cone problem — fast approximate Jacobian.
+# ALE cone problem — the default is already the reduced Jacobian:
+sol = solve(problem; use_ale = true)
+# or explicitly:
 spec = JacobianSpec(Structured(strategy = ApproxSolve()), problem; use_ale = true)
 sol  = solve(problem; jacobian = spec, use_ale = true)
 ```
@@ -284,7 +290,7 @@ sparsity pattern:
 | Jacobian | Default factorization |
 |---|---|
 | `DirectSolve` under ALE (the exact ALE Jacobian, with its dense geometry block) | `UMFPACKFactorization()` |
-| Every other `Structured` Jacobian: `ApproxSolve` (the ALE default with `handle_depletion = true`) and `DirectSolve` on an Eulerian mesh | `KLUFactorization()` |
+| Every other `Structured` Jacobian: `ApproxSolve` (the ALE default) and `DirectSolve` on an Eulerian mesh | `KLUFactorization()` |
 | A dense backend (`DenseAD_ForwardDiff`) | `LUFactorization()` |
 
 On 100-cell PMMA and charring-wood cone decks and on the V-BO-01 burnout case,
@@ -315,8 +321,7 @@ A note on dense Jacobian backends: `DenseAD_ForwardDiff` has no sparse
 the linear solver to a dense `LUFactorization()` — and if you explicitly
 request a sparse factorization it warns and rebuilds your algorithm with
 `LUFactorization` instead. Every `Structured` Jacobian, including the
-`ApproxSolve` default under depletion handling, carries the sparse
-prototype.
+`ApproxSolve` ALE default, carries the sparse prototype.
 
 ### 11.4.2 ILU-preconditioned GMRES
 
@@ -772,8 +777,9 @@ sol = solve(problem)
 spec = JacobianSpec(Structured(strategy = DirectSolve()), problem)
 sol  = solve(problem; jacobian = spec)
 
-# (c) Large ALE, fast approximate Jacobian (~8× faster assembly).
-spec = JacobianSpec(Structured(strategy = ApproxSolve()), problem; use_ale = true)
+# (c) ALE — the default reduced Jacobian; opt into the exact one.
+sol  = solve(problem; use_ale = true)
+spec = JacobianSpec(Structured(strategy = DirectSolve()), problem; use_ale = true)
 sol  = solve(problem; jacobian = spec, use_ale = true)
 
 # (d) Large ALE, exact but cheap assembly via Richardson.
@@ -786,7 +792,7 @@ sol = solve(problem;
     jacobian   = JacobianSpec(Structured(strategy = DirectSolve()), problem; use_ale = true),
     use_ale    = true)
 
-# (f) Depletion under ALE — the default Jacobian is Structured(strategy = ApproxSolve()).
+# (f) Depletion under ALE (the default Jacobian runs through the parks).
 sol = solve(problem;
     use_ale          = true,
     handle_depletion = true)

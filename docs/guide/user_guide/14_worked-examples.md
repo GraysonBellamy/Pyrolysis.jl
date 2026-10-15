@@ -234,9 +234,8 @@ from `src/Solver/solve.jl`):
   depth you would pass `radiation_model = BEER_LAMBERT` (PMMA is
   semi-transparent; the `α = 1.47` values then matter). The surface-absorption
   variant (§14.1.1) passes `SURFACE_ABSORPTION`.
-- **`handle_depletion = true`** turns on cell parking (Chapter 10). Under ALE
-  it selects `Structured(strategy = ApproxSolve())` as the default Jacobian
-  (Technical Reference §14.3, §15.6).
+- **`handle_depletion = true`** turns on cell parking (Chapter 10), which
+  carries the run through burnout (Technical Reference §14.3).
 - **`use_transpiration_bc`** is left at its default `false`. Enabling it is
   rejected: the default `:standard` energy form already carries gas enthalpy via
   the `S_conv` advection term, so a surface-transpiration term would
@@ -428,23 +427,23 @@ solution = solve(problem;
 )
 ```
 
-The default Jacobian is `Structured(strategy = DirectSolve())`, which assembles
-the exact analytical Jacobian including the dense ALE mesh-velocity coupling. For
-large ALE problems you can drop that coupling (a Schur-style approximation that
-still converges every term through Newton) for a substantial speedup:
+Under ALE the default Jacobian is `Structured(strategy = ApproxSolve())`, which
+drops the dense ALE mesh-velocity coupling (a Schur-style approximation that
+still converges every term through Newton). For the exact analytical Jacobian,
+including that coupling, pass `DirectSolve`:
 
 ```julia
 solution = solve(problem;
     use_ale = true,
     radiation_model = SURFACE_ABSORPTION,
-    jacobian = JacobianSpec(Structured(strategy = ApproxSolve()), problem),
+    jacobian = Structured(strategy = DirectSolve()),
     integrator = KenCarp4(linsolve = SparspakFactorization()),
 )
 ```
 
-Legacy benchmarks measured ~7.8× speedup at 240 cells with solutions identical
-to within solver tolerance (Technical Reference §15; see the Solver/Jacobian
-configuration chapter for choosing strategies).
+Both follow the same trajectory; the exact Jacobian costs several times more
+per step (Technical Reference §15.10.3; see the Solver/Jacobian configuration
+chapter for choosing strategies).
 
 ### What to look at
 
@@ -505,8 +504,9 @@ post-processing, read it directly off the returned solution as
 `solution.surface_T` (and the back face as
 `solution.extras.back_temperature`) — these are populated from that
 boundary-temperature Newton solve. At the lower level the solved value is cached
-per boundary in `mesh.boundary_states` and can be queried with
-`get_surface_temperature(mesh)` / `get_back_face_temperature(mesh)` (exported
+per boundary in the final mesh's `boundary_states` (`solution.problem.mesh`) and
+can be queried with `get_surface_temperature(mesh)` /
+`get_back_face_temperature(mesh)` on that mesh (exported
 from the `Pyrolysis.Discretization` submodule), but for normal use the
 `solution` fields are the intended API.
 

@@ -856,22 +856,24 @@ gas-storage gap.
 
 ### 16.10.4 DiagnosticsCallback and solver integration
 
-`DiagnosticsCallback(record!)` (`callback.jl:184–188`) wraps a user closure in a
-`DiffEqCallbacks.DiscreteCallback` whose condition is `true` (fire on every
-accepted step) and whose `affect!` runs `record!(integrator)`, with
-`save_positions = (false, false)` so the callback does not force extra solution
-saves.
+`DiagnosticsCallback(record!)` (src/Diagnostics/callback.jl) wraps a user
+closure in a `SciMLBase.DiscreteCallback` whose condition is `true` (fire on
+every accepted step) and whose `affect!` runs `record!(u, t)` on the
+integrator's state and time, with `save_positions = (false, false)` so the
+callback does not force extra solution saves. `record!` sits behind a
+fixed-signature `FunctionWrapper`, so the callback's type does not depend on the
+closure's (§15.5.3).
 
 In `solve()`, enabling diagnostics (`diagnostics=true`, default `false`;
 `diagnostics_stride` default `10`, validated $\ge1$) installs a snapshot-mode
-closure (`src/Solver/solve.jl:863–896`). The closure maintains its own
+closure (`solve`, src/Solver/solve.jl). The closure maintains its own
 stride counter; on stride boundaries it (i) synchronizes the mesh from the
-integrator's state with `update_mesh_from_state!(mesh, integrator.u, layout)` so
+integrator's state with `update_mesh_from_state!(mesh, u, layout)` so
 the trackers read the current cell states, then (ii) pushes a
 `snapshot_diagnostics_row` to a local `Vector{DiagnosticsRow}`. After the solve,
-the rows are appended to `solution.extras.diagnostics_log`
-(`src/Solver/solve.jl:937–939`; the `extras` schema reserves
-`diagnostics_log` at `src/Problem/pyrolysis_problem.jl:275`). Reading
+the rows are appended to `solution.extras.diagnostics_log` (the `extras`
+schema, `_empty_extras` in src/Problem/pyrolysis_problem.jl, reserves
+`diagnostics_log`). Reading
 `sol.extras.diagnostics_log` therefore yields the energy and gas-gap time series,
 with `NaN` in the cumulative-residual columns under the current production wiring.
 

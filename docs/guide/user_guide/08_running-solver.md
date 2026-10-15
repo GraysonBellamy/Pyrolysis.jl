@@ -29,8 +29,12 @@ solution = solve(problem)   # all defaults: KenCarp4 + structured Jacobian, no r
 That call already does a great deal: it validates the problem, builds the
 immutable problem definition and a mutable workspace, packs the initial state
 vector, constructs the default structured Jacobian, assembles the callback set,
-runs an implicit ODE integrator, and extracts a `PyrolysisSolution`. The
-remaining sections explain how to override each part.
+runs an implicit ODE integrator, and extracts a `PyrolysisSolution`. It leaves
+`problem` unchanged: the run works on a copy with its own mesh, so a problem can
+be solved again (or shared by parameter-sweep points) and always starts from the
+geometry you built. The copy is kept as `solution.problem`; its mesh holds the
+final geometry, live cells and boundary states. The remaining sections explain
+how to override each part.
 
 The full keyword signature, with defaults, is:
 
@@ -190,8 +194,7 @@ Jacobian's sparsity pattern:
   every cell to every node below it, and UMFPACK's supernodal factorization is
   the fastest on that dense block.
 - **`KLUFactorization()`** for every other sparse Jacobian: every
-  `ApproxSolve` Jacobian (including the ALE default with
-  `handle_depletion = true`) and every Eulerian one. KLU refactors the fixed
+  `ApproxSolve` Jacobian (including the ALE default) and every Eulerian one. KLU refactors the fixed
   pattern in place without allocating, and on these patterns it runs several
   times faster end to end than Sparspak.
 
@@ -253,9 +256,9 @@ once; **do not** construct it inside a hot loop.
 
 | Strategy | Behavior | When to use |
 |---|---|---|
-| `DirectSolve()` | Materialize the full Jacobian (block + densified structured couplings) and factor it. Exact. | Default; small to typical problems |
+| `DirectSolve()` | Materialize the full Jacobian (block + densified structured couplings) and factor it. Exact. | Fixed-mesh default; the exact ALE Jacobian when asked for |
 | `StructuredSolve()` | Sparse LU on the local block plus Richardson iterations that apply the structured couplings as fast O(N) operators. Exact, converges in 2–5 iterations. | Typical ALE problems |
-| `ApproxSolve()` | Drop the structured ALE couplings (Schur-style approximation); solve only the local block. Approximate but much cheaper. | Large ALE problems where Newton still converges |
+| `ApproxSolve()` | Drop the structured ALE couplings (Schur-style approximation); solve only the local block. Approximate but much cheaper. | ALE default |
 | `MatrixFreeSolve()` | GMRES on the operator action without materializing. | Research / very large problems |
 
 The verifier-only backend `DenseAD_ForwardDiff()` runs ForwardDiff over the
@@ -278,18 +281,18 @@ spec = JacobianSpec(Structured(strategy = StructuredSolve()), problem)
 solve(problem; jacobian = spec)
 ```
 
-Opt into the approximate ALE solve for a large moving-mesh problem. Because the
+Opt into the exact ALE Jacobian instead of the reduced default. Because the
 spec must match the simulation mode, pass `use_ale = true` to **both** the
 `JacobianSpec` constructor and `solve`:
 
 ```julia
-spec = JacobianSpec(Structured(strategy = ApproxSolve()), problem; use_ale = true)
+spec = JacobianSpec(Structured(strategy = DirectSolve()), problem; use_ale = true)
 solve(problem; jacobian = spec, use_ale = true)
 ```
 
-On the shipped Douglas-fir ALE case, `ApproxSolve` drops the dense mesh-velocity
-coupling and gives a large assembly speedup, with a solution that matches the
-full Jacobian to within solver tolerance.
+The exact Jacobian carries the dense mesh-velocity coupling, which the reduced
+default drops; both follow the same trajectory, and the exact one costs several
+times more per step (Technical Reference §15.10.3).
 
 The mode keywords accepted by `JacobianSpec(backend, problem; ...)` mirror what
 `solve` selects: `use_ale`, `radiation_model`, `radiation_intensity`,
@@ -298,9 +301,7 @@ default to Eulerian / no radiation, so a plain Eulerian problem needs none of
 them.
 
 > Depletion handling (`handle_depletion = true`) keeps the state size and
-> works with any `jacobian`; under ALE it makes
-> `Structured(strategy = ApproxSolve())` the default. See §8.10 and Technical
-> Reference §14.3.
+> works with any `jacobian`. See §8.10 and Technical Reference §14.3.
 
 ---
 
@@ -514,11 +515,9 @@ How it works:
 `examples/07_douglas_fir_cone.jl` instead lets ALE carry the thin cells and
 stops purely on `min_thickness` (`handle_depletion = false`).
 
-> Jacobian: depletion handling keeps the pluggable Jacobian. Under ALE it
-> selects `Structured(strategy = ApproxSolve())` as the default — the reduced
-> ALE pattern is 60–90× cheaper per step than the full one, and with every
-> live cell above the threshold the dropped couplings cost nothing —
-> and `DirectSolve` stays available through `jacobian`. Theory in Technical
+> Jacobian: depletion handling keeps the pluggable Jacobian. The ALE default,
+> `Structured(strategy = ApproxSolve())`, runs through the parks, and
+> `DirectSolve` stays available through `jacobian`. Theory in Technical
 > Reference §14.3.
 
 ---
@@ -556,7 +555,7 @@ You may pass one additional callback (any OrdinaryDiffEq callback type) via
 `callback`. It runs last in the set:
 
 ```julia
-using DiffEqCallbacks  # for the callback types
+using OrdinaryDiffEq: ContinuousCallback, terminate!  # the callback types
 
 stop_at_T = ContinuousCallback(
     (u, t, integ) -> u[1] - 700.0,        # back-face cell (index 1) reaches 700 K
@@ -570,7 +569,8 @@ For automated convergence checks against the dense AD reference, use
 
 ### Progress bar
 
-`progress = true` (default) shows a percent-of-time-span progress bar. Set
+`progress = true` (default) shows a percent-of-time-span progress bar, advanced
+after accepted steps; it leaves the step sequence unchanged. Set
 `progress = false` for batch runs and parameter sweeps (the sweep harness does
 this automatically).
 
@@ -591,7 +591,9 @@ The prior solution's final raw state vector overwrites the new initial
 condition. Compatibility is enforced by a state-vector length check, which
 implicitly requires matching component count, mesh size, ALE mode, and χ mode;
 mismatches raise a clear error (and the prior solve must have stored its raw
-solution). Note that `tspan[1]` of the *new* problem still sets the integrator's
+solution). A solve that parked cells cannot seed a warm start: its final state
+holds ghost slots, while a new solve starts with every cell live. Note that
+`tspan[1]` of the *new* problem still sets the integrator's
 start time — warm-starting treats the prior final state as fresh initial data, it
 does not continue the clock.
 
@@ -641,16 +643,16 @@ Technical Reference §10 and §16 for the gauge convention.
 A short checklist for fast, reliable solves:
 
 1. **Use the default structured Jacobian.** It is dramatically faster than the
-   integrator's finite-difference Jacobian. Only fall back to FD when forced
-   (depletion).
+   integrator's finite-difference Jacobian.
 2. **Right-size the mesh.** Resolution costs scale super-linearly (smaller cells
    force smaller diffusion-limited time steps). Use a stretched mesh refined near
    the surface (`create_stretched_mesh(L, n, Val(NC), 1.1; stretch_from = :top)`)
    instead of a uniformly fine mesh; see Chapter 6 and the
    `convergence_douglas_fir` example.
-3. **For large ALE problems, try `ApproxSolve`.** Dropping the dense ALE
-   couplings cuts assembly cost substantially when Newton still converges (§8.5).
-   Verify with `verify_jacobian` first.
+3. **Under ALE, keep the reduced default.** `ApproxSolve` drops the dense ALE
+   couplings and the Newton iteration still converges; pass `DirectSolve` only
+   to check a configuration against the exact Jacobian (§8.5), or verify with
+   `verify_jacobian`.
 4. **Loosen tolerances for sweeps.** `reltol = 1e-4` is plenty for trend studies.
 5. **Disable the progress bar** (`progress = false`) and use small `extract`
    closures in parameter sweeps (Chapter 12).
@@ -758,9 +760,9 @@ solution = solve(
 @assert solution.retcode in (:Success, :Terminated)
 ```
 
-The default `jacobian = nothing` gives the structured `DirectSolve` Jacobian
-appropriate for this ALE problem; to opt into the approximate solve, add
-`jacobian = JacobianSpec(Structured(strategy = ApproxSolve()), problem; use_ale = true)`.
+The default `jacobian = nothing` gives the reduced `ApproxSolve` Jacobian for
+this ALE problem; for the exact one, add
+`jacobian = Structured(strategy = DirectSolve())`.
 
 From here, Chapter 9 covers the `PyrolysisSolution` object — extracting
 temperature and concentration profiles, surface and back-face temperatures,

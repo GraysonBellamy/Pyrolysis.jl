@@ -1127,8 +1127,11 @@ solution = solve(
 )
 ```
 
-The first run incurs Julia compilation latency (tens of seconds); subsequent
-runs in the same session are fast.
+The first run in a Julia session compiles the residual and Jacobian for this
+problem's material and boundary-condition types, which takes 15–20 s; the time
+integrator itself comes precompiled with the package. Later runs in the same
+session reuse the compiled code, including runs with other parameter values
+(§15.11).
 
 ### 2.6.1 The options you just used
 
@@ -1198,19 +1201,12 @@ User Guide §UG-8):
   §7.7). Leave at `:standard` unless you have a specific reason.
 - **`use_transpiration_bc`** (default `false`) — **leave off.** It double-counts
   gas enthalpy against `S_conv` and `solve` raises an error if set `true`.
-- **`use_blowing_correction`** (default `false`) — opt-in Couette-film blowing
-  correction: every `ConvectiveBC` is rescaled `h → h·B/(e^B − 1)` with
-  `B = ṁ″·c_p,g/h` built from the outward gas flux at the face. Physically real
-  and safe with the default energy convention (it modifies the convective
-  *coefficient*, not the enthalpy accounting), but enable it on calibrated
-  examples only together with flame heat-flux feedback — alone it raises `T_s`
-  and MLR relative to the calibration (§5.2.3 of the Technical Reference,
-  §12.3.3).
+- The effect of outgassing on convective exchange is a property of each
+  `ConvectiveBC` (its `blowing` model, §5.2.3), not a solve option.
 - **`diagnostics`** (default `false`) — snapshot the conservation ledgers every
   `diagnostics_stride` steps (default 10) for energy/mass-balance auditing.
 - **`handle_depletion`** — park depleted cells (Chapter 10). The state keeps
-  its size, so it combines with any `jacobian`; under ALE it selects
-  `Structured(strategy = ApproxSolve())` as the default backend.
+  its size, so it combines with any `jacobian`.
 - **`warm_start`** — reuse a prior solution's final state as the initial
   condition for a continuation run.
 
@@ -3245,16 +3241,57 @@ direction during pyrolysis. Its temperature derivative `dq_BC/dT_s = −h` makes
 the Newton solve converge quickly. The `T_inf` here is also the value used to
 resolve the ambient temperature for the surface balance (§5.8).
 
-**Blowing correction (opt-in).** Strong outgassing thickens the boundary layer
-and suppresses convective exchange. With `solve(...; use_blowing_correction =
-true)` the coefficient is rescaled by the classical film factor
-`h → h·B/(e^B − 1)`, `B = ṁ″·c_p,g/h`, using the outward gas mass flux at the
-face. At a wood-like peak `ṁ″ ≈ 10 g·m⁻²·s⁻¹` against `h ≈ 10` this is a
-35–50 % reduction of `h`; at PMMA-like peaks (`B ≈ 4`) convective cooling is
-essentially extinguished. The back face is unaffected automatically (no
-outflow → `B = 0`). Off by default because the shipped examples were
-calibrated without it (and without flame feedback — the two partially cancel;
-see the physics roadmap before recalibrating).
+**Blowing.** Strong outgassing thickens the boundary layer and suppresses
+convective exchange, and a gas denser than the free stream can pool on the
+face. How a `ConvectiveBC` responds is its `blowing` model, `NoBlowing()` by
+default (the coefficient stays `h` whatever leaves the face). The surface
+balance hands the model the outward mass flux of every gas component at the
+face at each iterate, so the back face is unaffected automatically (no
+outflow). Four models ship:
+
+```julia
+ConvectiveBC(h = 15.0, T_inf = 300.0, blowing = CouetteFilm())        # h·B/(e^B − 1), B = ṁ″·c_p,g/h
+ConvectiveBC(h = 11.2, T_inf = 360.0, blowing = CouetteFilm(0.31))    # film law with a fitted constant
+ConvectiveBC(h = 11.2, T_inf = 360.0, blowing = PropertyRatioFilm(NITROGEN))
+ConvectiveBC(h = 11.2, T_inf = 360.0, blowing = PoolingFilm(NITROGEN; volatiles = pyrolysate))
+ConvectiveBC(h = 11.2, T_inf = 360.0, blowing = FunctionBlowing((face, h, T_inf) -> 0.8))
+```
+
+- `CouetteFilm(λ = 0.5)`: the classical film law `h → h·φ/(e^φ − 1)`,
+  `φ = 2λ·ṁ″·c_p,g/h` with the heat capacity of the gas leaving the face.
+  `λ = 0.5` is the Couette film (`φ = B`). At a wood-like peak
+  `ṁ″ ≈ 10 g·m⁻²·s⁻¹` against `h ≈ 10` this is a 35–50 % reduction of `h`;
+  at PMMA-like peaks (`B ≈ 4`) convective cooling is essentially
+  extinguished. A smaller `λ` fitted to a resolved flow holds for that gas
+  only.
+- `PropertyRatioFilm(free_stream; n_Γ = 0.6)`: the film law for any light
+  gas, `φ = (ṁ″·c_p,∞/h)·(Γ_∞/Γ_g)^n_Γ` with `Γ = k/c_p` of the free stream
+  and of the leaving mixture (heat capacity by mass fraction, conductivity by
+  Wilke's rule). No constant is refitted for a new gas.
+- `PoolingFilm(free_stream; n_Γ, n_D, ψ0, Λc, Λw)`: the same with a pooling
+  factor `ψ`, `h → h·φ/(e^{φ/ψ} − 1)`, that falls from 1 to the floor `ψ0`
+  when the gas at the face is denser than the free stream. The face
+  composition comes from a species-by-species film balance with the binary
+  diffusivities into the free stream. The three switch constants belong to
+  the apparatus flow (the defaults are the CAPA chamber's); the gas enters
+  through its properties. Describe the volatiles either through the
+  material's gas components, with Fuller diffusion volumes
+  `diffusion_volume = (name = V, ...)`, or as one lumped `GasSpecies`
+  (`volatiles = ...`).
+- `FunctionBlowing(f)`: your own rule `χ = f(face, h, T_inf)` from the
+  `BlowingFace` (outward species fluxes `face.ṁ`, surface temperature
+  `face.T_s`, `face.material`).
+
+The free stream is a `GasSpecies` (molar mass, `c_p(T)`, `k(T)`, Fuller
+diffusion volume, optional viscosity); `NITROGEN` ships, and
+`nasa7_heat_capacity` builds a heat capacity from NASA-7 coefficients. Each
+convective member of a combined BC applies its own model. The solution
+records the applied ratio and, for the pooling model, `ψ`, the face fraction
+and the face buoyancy in `extras.surface_blowing_ratio`,
+`surface_pooling_factor`, `surface_face_fraction` and
+`surface_face_buoyancy`. The shipped examples were calibrated with the bare
+coefficient (and without flame feedback — the two partially cancel; see the
+physics roadmap before recalibrating).
 
 ### 5.2.4 `RadiativeBC` — surface re-radiation
 
@@ -4819,11 +4856,12 @@ piecewise/non-smooth laws give undefined results. The default identity behavior
 
 ### 7.6.2 Interaction with ALE
 
-`WithChi` is most meaningful together with `use_ale = true`: the radial
-(cross-section) strain rate `θ_A = law'(χ̄)/law(χ̄) · dχ̄/dt` is subtracted from
-each cell's volumetric strain to get the axial component that drives mesh motion,
-so the two channels (radial area change and axial node motion) do not
-double-count. With `WithChi`, the state vector carries the χ block as well:
+`WithChi` requires `use_ale = true`: only the ALE residual evolves `χ` and the
+cross-section, so `solve` rejects a lateral shrinkage law on the fixed mesh with
+an `ArgumentError`. The radial (cross-section) strain rate
+`θ_A = law'(χ̄)/law(χ̄) · dχ̄/dt` is subtracted from each cell's volumetric
+strain to get the axial component that drives mesh motion, so the two channels
+(radial area change and axial node motion) do not double-count. With `WithChi`, the state vector carries the χ block as well:
 `[T | ξ_1..ξ_NC | z | χ]`. The χ block is *reconstructed* from the dry-gas source
 at every residual evaluation rather than being a free integrator state, which
 keeps it consistent with the accumulated gas release.
@@ -5089,8 +5127,12 @@ solution = solve(problem)   # all defaults: KenCarp4 + structured Jacobian, no r
 That call already does a great deal: it validates the problem, builds the
 immutable problem definition and a mutable workspace, packs the initial state
 vector, constructs the default structured Jacobian, assembles the callback set,
-runs an implicit ODE integrator, and extracts a `PyrolysisSolution`. The
-remaining sections explain how to override each part.
+runs an implicit ODE integrator, and extracts a `PyrolysisSolution`. It leaves
+`problem` unchanged: the run works on a copy with its own mesh, so a problem can
+be solved again (or shared by parameter-sweep points) and always starts from the
+geometry you built. The copy is kept as `solution.problem`; its mesh holds the
+final geometry, live cells and boundary states. The remaining sections explain
+how to override each part.
 
 The full keyword signature, with defaults, is:
 
@@ -5250,8 +5292,7 @@ Jacobian's sparsity pattern:
   every cell to every node below it, and UMFPACK's supernodal factorization is
   the fastest on that dense block.
 - **`KLUFactorization()`** for every other sparse Jacobian: every
-  `ApproxSolve` Jacobian (including the ALE default with
-  `handle_depletion = true`) and every Eulerian one. KLU refactors the fixed
+  `ApproxSolve` Jacobian (including the ALE default) and every Eulerian one. KLU refactors the fixed
   pattern in place without allocating, and on these patterns it runs several
   times faster end to end than Sparspak.
 
@@ -5313,9 +5354,9 @@ once; **do not** construct it inside a hot loop.
 
 | Strategy | Behavior | When to use |
 |---|---|---|
-| `DirectSolve()` | Materialize the full Jacobian (block + densified structured couplings) and factor it. Exact. | Default; small to typical problems |
+| `DirectSolve()` | Materialize the full Jacobian (block + densified structured couplings) and factor it. Exact. | Fixed-mesh default; the exact ALE Jacobian when asked for |
 | `StructuredSolve()` | Sparse LU on the local block plus Richardson iterations that apply the structured couplings as fast O(N) operators. Exact, converges in 2–5 iterations. | Typical ALE problems |
-| `ApproxSolve()` | Drop the structured ALE couplings (Schur-style approximation); solve only the local block. Approximate but much cheaper. | Large ALE problems where Newton still converges |
+| `ApproxSolve()` | Drop the structured ALE couplings (Schur-style approximation); solve only the local block. Approximate but much cheaper. | ALE default |
 | `MatrixFreeSolve()` | GMRES on the operator action without materializing. | Research / very large problems |
 
 The verifier-only backend `DenseAD_ForwardDiff()` runs ForwardDiff over the
@@ -5338,18 +5379,18 @@ spec = JacobianSpec(Structured(strategy = StructuredSolve()), problem)
 solve(problem; jacobian = spec)
 ```
 
-Opt into the approximate ALE solve for a large moving-mesh problem. Because the
+Opt into the exact ALE Jacobian instead of the reduced default. Because the
 spec must match the simulation mode, pass `use_ale = true` to **both** the
 `JacobianSpec` constructor and `solve`:
 
 ```julia
-spec = JacobianSpec(Structured(strategy = ApproxSolve()), problem; use_ale = true)
+spec = JacobianSpec(Structured(strategy = DirectSolve()), problem; use_ale = true)
 solve(problem; jacobian = spec, use_ale = true)
 ```
 
-On the shipped Douglas-fir ALE case, `ApproxSolve` drops the dense mesh-velocity
-coupling and gives a large assembly speedup, with a solution that matches the
-full Jacobian to within solver tolerance.
+The exact Jacobian carries the dense mesh-velocity coupling, which the reduced
+default drops; both follow the same trajectory, and the exact one costs several
+times more per step (Technical Reference §15.10.3).
 
 The mode keywords accepted by `JacobianSpec(backend, problem; ...)` mirror what
 `solve` selects: `use_ale`, `radiation_model`, `radiation_intensity`,
@@ -5358,9 +5399,7 @@ default to Eulerian / no radiation, so a plain Eulerian problem needs none of
 them.
 
 > Depletion handling (`handle_depletion = true`) keeps the state size and
-> works with any `jacobian`; under ALE it makes
-> `Structured(strategy = ApproxSolve())` the default. See §8.10 and Technical
-> Reference §14.3.
+> works with any `jacobian`. See §8.10 and Technical Reference §14.3.
 
 ---
 
@@ -5574,11 +5613,9 @@ How it works:
 `examples/07_douglas_fir_cone.jl` instead lets ALE carry the thin cells and
 stops purely on `min_thickness` (`handle_depletion = false`).
 
-> Jacobian: depletion handling keeps the pluggable Jacobian. Under ALE it
-> selects `Structured(strategy = ApproxSolve())` as the default — the reduced
-> ALE pattern is 60–90× cheaper per step than the full one, and with every
-> live cell above the threshold the dropped couplings cost nothing —
-> and `DirectSolve` stays available through `jacobian`. Theory in Technical
+> Jacobian: depletion handling keeps the pluggable Jacobian. The ALE default,
+> `Structured(strategy = ApproxSolve())`, runs through the parks, and
+> `DirectSolve` stays available through `jacobian`. Theory in Technical
 > Reference §14.3.
 
 ---
@@ -5616,7 +5653,7 @@ You may pass one additional callback (any OrdinaryDiffEq callback type) via
 `callback`. It runs last in the set:
 
 ```julia
-using DiffEqCallbacks  # for the callback types
+using OrdinaryDiffEq: ContinuousCallback, terminate!  # the callback types
 
 stop_at_T = ContinuousCallback(
     (u, t, integ) -> u[1] - 700.0,        # back-face cell (index 1) reaches 700 K
@@ -5630,7 +5667,8 @@ For automated convergence checks against the dense AD reference, use
 
 ### Progress bar
 
-`progress = true` (default) shows a percent-of-time-span progress bar. Set
+`progress = true` (default) shows a percent-of-time-span progress bar, advanced
+after accepted steps; it leaves the step sequence unchanged. Set
 `progress = false` for batch runs and parameter sweeps (the sweep harness does
 this automatically).
 
@@ -5651,7 +5689,9 @@ The prior solution's final raw state vector overwrites the new initial
 condition. Compatibility is enforced by a state-vector length check, which
 implicitly requires matching component count, mesh size, ALE mode, and χ mode;
 mismatches raise a clear error (and the prior solve must have stored its raw
-solution). Note that `tspan[1]` of the *new* problem still sets the integrator's
+solution). A solve that parked cells cannot seed a warm start: its final state
+holds ghost slots, while a new solve starts with every cell live. Note that
+`tspan[1]` of the *new* problem still sets the integrator's
 start time — warm-starting treats the prior final state as fresh initial data, it
 does not continue the clock.
 
@@ -5701,16 +5741,16 @@ Technical Reference §10 and §16 for the gauge convention.
 A short checklist for fast, reliable solves:
 
 1. **Use the default structured Jacobian.** It is dramatically faster than the
-   integrator's finite-difference Jacobian. Only fall back to FD when forced
-   (depletion).
+   integrator's finite-difference Jacobian.
 2. **Right-size the mesh.** Resolution costs scale super-linearly (smaller cells
    force smaller diffusion-limited time steps). Use a stretched mesh refined near
    the surface (`create_stretched_mesh(L, n, Val(NC), 1.1; stretch_from = :top)`)
    instead of a uniformly fine mesh; see Chapter 6 and the
    `convergence_douglas_fir` example.
-3. **For large ALE problems, try `ApproxSolve`.** Dropping the dense ALE
-   couplings cuts assembly cost substantially when Newton still converges (§8.5).
-   Verify with `verify_jacobian` first.
+3. **Under ALE, keep the reduced default.** `ApproxSolve` drops the dense ALE
+   couplings and the Newton iteration still converges; pass `DirectSolve` only
+   to check a configuration against the exact Jacobian (§8.5), or verify with
+   `verify_jacobian`.
 4. **Loosen tolerances for sweeps.** `reltol = 1e-4` is plenty for trend studies.
 5. **Disable the progress bar** (`progress = false`) and use small `extract`
    closures in parameter sweeps (Chapter 12).
@@ -5818,9 +5858,9 @@ solution = solve(
 @assert solution.retcode in (:Success, :Terminated)
 ```
 
-The default `jacobian = nothing` gives the structured `DirectSolve` Jacobian
-appropriate for this ALE problem; to opt into the approximate solve, add
-`jacobian = JacobianSpec(Structured(strategy = ApproxSolve()), problem; use_ale = true)`.
+The default `jacobian = nothing` gives the reduced `ApproxSolve` Jacobian for
+this ALE problem; for the exact one, add
+`jacobian = Structured(strategy = DirectSolve())`.
 
 From here, Chapter 9 covers the `PyrolysisSolution` object — extracting
 temperature and concentration profiles, surface and back-face temperatures,
@@ -6461,8 +6501,8 @@ solution.extras.diagnostics_log           # Vector{DiagnosticsRow} (needs diagno
 get_profile(solution, :T, i)              # field at one time index
 get_cell_positions(solution)              # fixed cell centers (Eulerian) [m]
 interpolate_solution(solution, t)         # raw state vector at continuous t  (== solution(t))
-get_surface_temperature(mesh)             # final-state top face T [K]
-get_back_face_temperature(mesh)           # final-state bottom face T [K]
+get_surface_temperature(solution.problem.mesh)    # final-state top face T [K]
+get_back_face_temperature(solution.problem.mesh)  # final-state bottom face T [K]
 
 # Plotting recipes (need `using Plots`):
 plot(solution)                  # :surface_T (default)
@@ -6673,11 +6713,10 @@ sol.extras.live_cells[end]          # live cells at the end of the run
 
 Parking keeps the state size, so the pluggable Jacobian backends and their
 sparse linear solvers run unchanged through burnout; `verify_jacobian` covers
-parked states. Under ALE, `handle_depletion = true` makes
-`Structured(strategy = ApproxSolve())` the default backend: the full ALE
+parked states. Under ALE the default backend is
+`Structured(strategy = ApproxSolve())`, with or without parking: the full ALE
 pattern couples every node to every cell below it and makes the factorized
-matrix effectively dense (60–90× the cost per step of the reduced pattern),
-while with every live cell above the threshold the couplings it drops do not
+matrix effectively dense, while the couplings the reduced pattern drops do not
 change the trajectory. Pass `jacobian = Structured(strategy = DirectSolve())`
 to keep the exact assembly.
 
@@ -6966,8 +7005,7 @@ it. The defaults:
 
 | Scenario | Default Jacobian |
 |---|---|
-| ALE, `handle_depletion = false` | `Structured(strategy = DirectSolve())` — exact assembly; a cell may shrink without bound here and the exact couplings buy robustness. |
-| ALE, `handle_depletion = true` | `Structured(strategy = ApproxSolve())` — the reduced ALE pattern; with every live cell above the threshold it follows the same trajectory as `DirectSolve` at a fraction of the cost per step. |
+| ALE, with or without `handle_depletion` | `Structured(strategy = ApproxSolve())` — the reduced ALE pattern; it follows the same trajectory as `DirectSolve` at a fraction of the cost per step. Without parking, surface cells that burn away shrink toward zero thickness and stall either Jacobian alike: use `handle_depletion = true` to run through burnout. |
 | Fixed mesh | `Structured(strategy = DirectSolve())` (the strategies coincide without ALE couplings). |
 | Verifying a backend during an adaptive run | `solve(...; verify_jacobian = (rtol=1e-6, atol=1e-10, sample_times=[…]))`, with or without depletion. |
 
@@ -7038,8 +7076,9 @@ chapter:
 
 1. **The Jacobian backend** (`jacobian = ...` keyword) decides *how the matrix*
    `J = ∂(du/dt)/∂u` *is assembled* — by structured operator assembly (the
-   default: `solve` auto-builds `Structured(strategy = DirectSolve())`, or
-   `ApproxSolve` under ALE with depletion handling, when `jacobian = nothing`),
+   default: `solve` auto-builds `Structured(strategy = DirectSolve())` on a
+   fixed mesh and `Structured(strategy = ApproxSolve())` under ALE when
+   `jacobian = nothing`),
    or by dense automatic differentiation (verification only).
 2. **The integrator's linear solver** (`linear_solver = ...` keyword) decides
    *how the implicit-stage system* `W x = b`, with `W = I/(γ_RK Δt) − J`, *is
@@ -7067,10 +7106,9 @@ following happens (see `src/Solver/solve.jl`):
   differentiate the residual in time (the Rosenbrock `∂f/∂t`).
 - The Jacobian defaults to the **structured analytical backend**: with
   `jacobian = nothing` (the default), `solve` constructs
-  `Structured(strategy = DirectSolve())` internally — for both Eulerian and
-  ALE problems — and hands the integrator an exact sparse Jacobian plus its
-  sparsity prototype. Under ALE with `handle_depletion = true` the default is
-  `Structured(strategy = ApproxSolve())` (§10.8).
+  `Structured(strategy = DirectSolve())` internally on a fixed mesh and
+  `Structured(strategy = ApproxSolve())` under ALE (§10.8, §11.3.3), and hands
+  the integrator a sparse Jacobian plus its sparsity prototype.
 - The linear solver follows the Jacobian's sparsity pattern:
   `UMFPACKFactorization()` for the ALE geometry block that `DirectSolve`
   materializes under ALE, `KLUFactorization()` for every other sparse
@@ -7093,7 +7131,7 @@ sol = solve(problem)
 > `linear_solver = nothing` → `KLUFactorization()` (`UMFPACKFactorization()`
 > for the exact ALE Jacobian),
 > `jacobian = nothing` → auto-built `Structured(strategy = DirectSolve())`
-> (`ApproxSolve` under ALE with `handle_depletion = true`),
+> (`ApproxSolve` under ALE),
 > `abstol = 1e-8`, `reltol = 1e-6`.
 
 ---
@@ -7187,11 +7225,12 @@ solve(problem; use_ale = true, jacobian = Structured(strategy = ApproxSolve()))
 For routine work, the cleanest pattern is to pass `jacobian = nothing` (the
 default) and let `solve` construct the default structured Jacobian for you, *or* to
 opt into a non-default backend explicitly only when you need it. The auto-default when
-`jacobian` is left at its default is `Structured(strategy = DirectSolve())`
-constructed internally with the correct mode flags — you do not have to thread
+`jacobian` is left at its default is `Structured(strategy = DirectSolve())` on a
+fixed mesh and `Structured(strategy = ApproxSolve())` under ALE, constructed
+internally with the correct mode flags — you do not have to thread
 `use_ale` / `radiation_model` through `JacobianSpec` yourself. Supply your own
-spec only when you want a non-default strategy (`ApproxSolve`, `StructuredSolve`,
-`MatrixFreeSolve`) or a custom reference for verification.
+spec only when you want another strategy (`DirectSolve` under ALE,
+`StructuredSolve`, `MatrixFreeSolve`) or a custom reference for verification.
 
 ---
 
@@ -7204,26 +7243,27 @@ inside the Newton step. All four strategies are top-level exports.
 
 | Strategy | What it does | Exact? | Best for |
 |---|---|---|---|
-| `DirectSolve()` | Densify the structured couplings into `A`, factor the full sparse matrix (KLU/UMFPACK) | Exact | Small/typical problems; the verification anchor |
+| `DirectSolve()` | Densify the structured couplings into `A`, factor the full sparse matrix (KLU/UMFPACK) | Exact | Fixed-mesh default; the verification anchor |
 | `StructuredSolve()` | Sparse-LU on `A` + preconditioned Richardson over the couplings (2–5 iters) | Exact | Large problems where dense assembly is costly but exactness is required |
-| `ApproxSolve()` | Drop the structured couplings; solve `A⁻¹ b` only (Schur-style approximation) | Approximate | Large ALE problems where speed dominates (~7.8× faster assembly) |
+| `ApproxSolve()` | Drop the structured couplings; solve `A⁻¹ b` only (Schur-style approximation) | Approximate | ALE default |
 | `MatrixFreeSolve()` | GMRES over the operator action without densifying | Exact (iterative) | Research / very large `N`; benchmark before relying on it |
 
 Construct any of these as a parameterless instance:
 
 ```julia
-JacobianSpec(Structured(strategy = DirectSolve()),     problem)               # default
+JacobianSpec(Structured(strategy = DirectSolve()),     problem)               # fixed-mesh default
 JacobianSpec(Structured(strategy = StructuredSolve()), problem; use_ale = true)
-JacobianSpec(Structured(strategy = ApproxSolve()),     problem; use_ale = true)
+JacobianSpec(Structured(strategy = ApproxSolve()),     problem; use_ale = true) # ALE default
 JacobianSpec(Structured(strategy = MatrixFreeSolve()), problem; use_ale = true)
 ```
 
-### 11.3.1 `DirectSolve` — the default and the anchor
+### 11.3.1 `DirectSolve` — the fixed-mesh default and the anchor
 
 `DirectSolve` materializes `A + Σⱼ densify(couplingⱼ)` and factors it directly.
-It is exact and predictable. For Eulerian problems and modest ALE meshes it is
-the right choice and the one you get when you do nothing. It is also the backend
-you should verify against first when proving a configuration is correct.
+It is exact and predictable, and on a fixed mesh it is the one you get when you
+do nothing. Under ALE it is the exact Jacobian you opt into; its dense geometry
+block is factored by UMFPACK (§11.4.1). It is also the backend you should
+verify against first when proving a configuration is correct.
 
 ```julia
 spec = JacobianSpec(Structured(strategy = DirectSolve()), problem)
@@ -7247,18 +7287,22 @@ magnitudes are small relative to `A`'s diagonal — which is the usual ALE regim
 Choose `StructuredSolve` when an ALE mesh is large enough that the dense
 assembly of `DirectSolve` dominates, but you still need an exact Newton step.
 
-### 11.3.3 `ApproxSolve` — fastest, for large ALE
+### 11.3.3 `ApproxSolve` — the ALE default
 
 `ApproxSolve` drops the structured couplings entirely and solves `A⁻¹ b`. The
 Newton step is then a Schur-style approximation: it omits the dense ALE
-mesh-velocity coupling block, takes a few extra Newton iterations, but each
-linear solve and the assembly itself are far cheaper (the assembly profile drops
-to `:ale_reduced`, skipping the cumulative ALE widening, the geometry AD pass,
-the Beer–Lambert suffix, and the χ-column rank-1 term). This is the strategy the
-Douglas-fir ALE example uses for roughly an 8× speedup over the full Jacobian.
+mesh-velocity coupling block, but each linear solve and the assembly itself are
+far cheaper (the assembly profile drops to `:ale_reduced`, skipping the
+cumulative ALE widening, the geometry AD pass, the Beer–Lambert suffix, and the
+χ-column rank-1 term). The modified Newton iteration it drives still contracts
+strongly, so ALE solves take the same steps as with the exact Jacobian and
+follow the same trajectory; `solve` uses it under ALE when `jacobian = nothing`
+(Technical Reference §15.10.3 has the measurements).
 
 ```julia
-# Large ALE cone problem — fast approximate Jacobian.
+# ALE cone problem — the default is already the reduced Jacobian:
+sol = solve(problem; use_ale = true)
+# or explicitly:
 spec = JacobianSpec(Structured(strategy = ApproxSolve()), problem; use_ale = true)
 sol  = solve(problem; jacobian = spec, use_ale = true)
 ```
@@ -7304,7 +7348,7 @@ sparsity pattern:
 | Jacobian | Default factorization |
 |---|---|
 | `DirectSolve` under ALE (the exact ALE Jacobian, with its dense geometry block) | `UMFPACKFactorization()` |
-| Every other `Structured` Jacobian: `ApproxSolve` (the ALE default with `handle_depletion = true`) and `DirectSolve` on an Eulerian mesh | `KLUFactorization()` |
+| Every other `Structured` Jacobian: `ApproxSolve` (the ALE default) and `DirectSolve` on an Eulerian mesh | `KLUFactorization()` |
 | A dense backend (`DenseAD_ForwardDiff`) | `LUFactorization()` |
 
 On 100-cell PMMA and charring-wood cone decks and on the V-BO-01 burnout case,
@@ -7335,8 +7379,7 @@ A note on dense Jacobian backends: `DenseAD_ForwardDiff` has no sparse
 the linear solver to a dense `LUFactorization()` — and if you explicitly
 request a sparse factorization it warns and rebuilds your algorithm with
 `LUFactorization` instead. Every `Structured` Jacobian, including the
-`ApproxSolve` default under depletion handling, carries the sparse
-prototype.
+`ApproxSolve` ALE default, carries the sparse prototype.
 
 ### 11.4.2 ILU-preconditioned GMRES
 
@@ -7792,8 +7835,9 @@ sol = solve(problem)
 spec = JacobianSpec(Structured(strategy = DirectSolve()), problem)
 sol  = solve(problem; jacobian = spec)
 
-# (c) Large ALE, fast approximate Jacobian (~8× faster assembly).
-spec = JacobianSpec(Structured(strategy = ApproxSolve()), problem; use_ale = true)
+# (c) ALE — the default reduced Jacobian; opt into the exact one.
+sol  = solve(problem; use_ale = true)
+spec = JacobianSpec(Structured(strategy = DirectSolve()), problem; use_ale = true)
 sol  = solve(problem; jacobian = spec, use_ale = true)
 
 # (d) Large ALE, exact but cheap assembly via Richardson.
@@ -7806,7 +7850,7 @@ sol = solve(problem;
     jacobian   = JacobianSpec(Structured(strategy = DirectSolve()), problem; use_ale = true),
     use_ale    = true)
 
-# (f) Depletion under ALE — the default Jacobian is Structured(strategy = ApproxSolve()).
+# (f) Depletion under ALE (the default Jacobian runs through the parks).
 sol = solve(problem;
     use_ale          = true,
     handle_depletion = true)
@@ -7991,6 +8035,9 @@ The constructors you rebuild with are the standard keyword constructors (Chapter
 - `Material(; name, components, reactions, mixing, lateral_shrinkage_law)`.
 - `Reaction(name, reactant => product; A, E, h, n, T_min, T_max)` and
   `Reaction(name, reactant => (p1, p2); A, E, h, yields, n, T_min, T_max)`.
+
+Reusing `prob.mesh` in every point is safe, ALE included: `solve` works on its
+own copy of the mesh, so each point starts from the base geometry.
 
 ### 12.3.1 Sweeping Arrhenius parameters (A, E)
 
@@ -9405,9 +9452,8 @@ from `src/Solver/solve.jl`):
   depth you would pass `radiation_model = BEER_LAMBERT` (PMMA is
   semi-transparent; the `α = 1.47` values then matter). The surface-absorption
   variant (§14.1.1) passes `SURFACE_ABSORPTION`.
-- **`handle_depletion = true`** turns on cell parking (Chapter 10). Under ALE
-  it selects `Structured(strategy = ApproxSolve())` as the default Jacobian
-  (Technical Reference §14.3, §15.6).
+- **`handle_depletion = true`** turns on cell parking (Chapter 10), which
+  carries the run through burnout (Technical Reference §14.3).
 - **`use_transpiration_bc`** is left at its default `false`. Enabling it is
   rejected: the default `:standard` energy form already carries gas enthalpy via
   the `S_conv` advection term, so a surface-transpiration term would
@@ -9599,23 +9645,23 @@ solution = solve(problem;
 )
 ```
 
-The default Jacobian is `Structured(strategy = DirectSolve())`, which assembles
-the exact analytical Jacobian including the dense ALE mesh-velocity coupling. For
-large ALE problems you can drop that coupling (a Schur-style approximation that
-still converges every term through Newton) for a substantial speedup:
+Under ALE the default Jacobian is `Structured(strategy = ApproxSolve())`, which
+drops the dense ALE mesh-velocity coupling (a Schur-style approximation that
+still converges every term through Newton). For the exact analytical Jacobian,
+including that coupling, pass `DirectSolve`:
 
 ```julia
 solution = solve(problem;
     use_ale = true,
     radiation_model = SURFACE_ABSORPTION,
-    jacobian = JacobianSpec(Structured(strategy = ApproxSolve()), problem),
+    jacobian = Structured(strategy = DirectSolve()),
     integrator = KenCarp4(linsolve = SparspakFactorization()),
 )
 ```
 
-Legacy benchmarks measured ~7.8× speedup at 240 cells with solutions identical
-to within solver tolerance (Technical Reference §15; see the Solver/Jacobian
-configuration chapter for choosing strategies).
+Both follow the same trajectory; the exact Jacobian costs several times more
+per step (Technical Reference §15.10.3; see the Solver/Jacobian configuration
+chapter for choosing strategies).
 
 ### What to look at
 
@@ -9676,8 +9722,9 @@ post-processing, read it directly off the returned solution as
 `solution.surface_T` (and the back face as
 `solution.extras.back_temperature`) — these are populated from that
 boundary-temperature Newton solve. At the lower level the solved value is cached
-per boundary in `mesh.boundary_states` and can be queried with
-`get_surface_temperature(mesh)` / `get_back_face_temperature(mesh)` (exported
+per boundary in the final mesh's `boundary_states` (`solution.problem.mesh`) and
+can be queried with `get_surface_temperature(mesh)` /
+`get_back_face_temperature(mesh)` on that mesh (exported
 from the `Pyrolysis.Discretization` submodule), but for normal use the
 `solution` fields are the intended API.
 
@@ -10443,7 +10490,7 @@ iteration cap.
 
 When `jacobian = nothing` (the default), `solve` builds a
 `Structured(strategy = DirectSolve())` analytical Jacobian — or
-`Structured(strategy = ApproxSolve())` under ALE with `handle_depletion = true` —
+`Structured(strategy = ApproxSolve())` under ALE —
 and hands a sparse prototype to the integrator (see Technical Reference §15).
 You normally do not need to touch it. The cases where you *do* are covered in
 §15.3 (verification), §15.4 (depletion), and §15.7 (large ALE).
@@ -10824,9 +10871,9 @@ exactness for speed (Technical Reference §15.10):
 
 | Strategy | Exactness | When to use |
 |---|---|---|
-| `DirectSolve()` (default) | Exact; densify + factor | Small/medium problems; verification anchor |
+| `DirectSolve()` (fixed-mesh default) | Exact; densify + factor | Fixed mesh; exact ALE Jacobian; verification anchor |
 | `StructuredSolve()` | Exact; sparse LU on the local block + Richardson (2–5 iters) | Typical ALE problems |
-| `ApproxSolve()` | Approximate; drops structured couplings (`is_approximate == true`) | Large ALE where Newton tolerance can absorb a Schur-style approximation |
+| `ApproxSolve()` (ALE default) | Approximate; drops structured couplings (`is_approximate == true`) | ALE: the modified Newton iteration still converges |
 | `MatrixFreeSolve()` | GMRES on the operator action | Research/experimental |
 
 Select via a `JacobianSpec` (remember: **not** with `handle_depletion = true`):
@@ -11030,12 +11077,12 @@ Work top to bottom; each item is cheap to try and the early ones dominate.
    surface with `create_stretched_mesh` (§15.5.4) rather than refining
    uniformly.
 2. **Keep the default structured Jacobian.** `jacobian = nothing` →
-   `Structured(DirectSolve())` (`ApproxSolve()` under ALE with depletion
-   handling), sparse and analytical — far faster than colored FD.
+   `Structured(DirectSolve())` (`ApproxSolve()` under ALE, which drops the
+   dense geometry block and keeps the pattern local), sparse and analytical —
+   far faster than colored FD.
 3. **Keep the default linear solver.** `linear_solver = nothing` picks UMFPACK
    for the exact ALE Jacobian and KLU for every other sparse Jacobian (§8.4).
-   For large ALE, try `ApproxSolve()` (§15.7.4), which drops the dense
-   geometry block and keeps the pattern local. Iterative
+   Iterative
    `ILUGMRESFactorization(τ = 0.1, gmres_rtol = 1e-8, restart = 30)` and
    `ILUBiCGSTABFactorization(τ = 0.1, rtol = 1e-8)` exist for very large
    systems, but inexact solves can cause Newton-step rejections on stiff
@@ -11054,6 +11101,21 @@ Work top to bottom; each item is cheap to try and the early ones dominate.
    bar in batch/sweep contexts; leave `diagnostics = false` in production runs —
    it costs an extra ledger sweep every `diagnostics_stride` steps and is only
    needed for debugging (§15.1.2).
+9. **Keep one Julia session for many solves.** The first solve of a problem
+   compiles the residual and Jacobian kernels for its types: the component and
+   property types (every `CallableProperty` closure is a type of its own), the
+   reactions, the boundary-condition combination, the component count and the
+   radiation and transport modes. That takes 15–20 s, or about 2 s when the
+   types match a precompiled configuration (constant properties with the cone
+   boundary conditions). The time integrator compiles once per solver
+   configuration and comes precompiled for the defaults: a fixed or ALE mesh,
+   with or without `handle_depletion`, `KenCarp4` with the default
+   factorization. Another integrator, a user `callback`, `diagnostics = true` or
+   `verify_jacobian` compiles it once more per session, at about the cost of a
+   new problem type. Changing values (fluxes, kinetic parameters, mesh size,
+   tolerances) never recompiles. Re-evaluating a property closure at the REPL
+   does, because the new closure is a new type; a sweep's `modify` function
+   builds the same closure type at every point.
 
 The package's allocation-free residual caches, `@generated` component loops, and
 per-operator AD workspaces (Technical Reference §15.7, §15.11) are automatic; you
@@ -11735,13 +11797,14 @@ interpolate_solution(sol, t::Real)               # full raw state vector at arbi
 `get_profile(sol, :T, i)` returns `sol.T[:, i]`; `get_profile(sol, :ξ, i)`
 returns the full `NC × n_cells` slice; `get_profile(sol, :ξ1, i)` returns
 component 1. The surface/back-face temperature accessors read the *mesh's* solved
-boundary state, not the solution:
+boundary state, not the solution. `solve` leaves `problem` unchanged and works on
+a copy, kept as `sol.problem`, whose mesh holds the last accepted step:
 
 ```julia
 using Pyrolysis.Discretization: get_surface_temperature, get_back_face_temperature,
                                 check_boundary_energy_balance
-Ts_final    = get_surface_temperature(problem.mesh)   # mesh holds last accepted step
-Tback_final = get_back_face_temperature(problem.mesh)
+Ts_final    = get_surface_temperature(sol.problem.mesh)
+Tback_final = get_back_face_temperature(sol.problem.mesh)
 ```
 
 For per-step surface temperature, prefer `sol.surface_T`.
@@ -11827,8 +11890,8 @@ Key behaviours and constraints:
   moderately stiff Arrhenius system. Pass a constructor (e.g. `integrator = KenCarp4`)
   to combine with `linear_solver`, or a fully-built instance
   (e.g. `integrator = KenCarp4(linsolve = ILUGMRESFactorization())`) on its own.
-- **Default Jacobian**: `Structured(strategy = DirectSolve())`, or
-  `Structured(strategy = ApproxSolve())` under ALE with `handle_depletion = true`.
+- **Default Jacobian**: `Structured(strategy = DirectSolve())` on a fixed mesh,
+  `Structured(strategy = ApproxSolve())` under ALE.
   Pass a bare backend or a `JacobianSpec` to opt into other strategies (§16.8).
 - **`radiation_model = P1_QUASI_STEADY`** is rejected (P1 is experimental).
 - **`energy_form`** must be `:standard` (Formulation A, the FDS/Gpyro/ThermaKin
@@ -11881,15 +11944,14 @@ sol  = solve(problem; jacobian = spec, use_ale = true)
 
 | Strategy | Behaviour | When |
 |---|---|---|
-| `DirectSolve` | materialize `A + Σ densify(couplings)`, factor (exact) | default; small/typical problems |
+| `DirectSolve` | materialize `A + Σ densify(couplings)`, factor (exact) | fixed-mesh default; exact ALE Jacobian |
 | `StructuredSolve` | sparse LU on `A` + preconditioned Richardson (exact, 2–5 iters) | typical, faster assembly |
-| `ApproxSolve` | drop the structured ALE couplings (Schur-style approximation) | large ALE problems (~8× speedup; less-accurate Newton step) |
+| `ApproxSolve` | drop the structured ALE couplings (Schur-style approximation) | ALE default |
 | `MatrixFreeSolve` | GMRES over the operator action (no materialization) | research/experimental |
 
 `ApproxSolve` is marked approximate via the `is_approximate` trait; the
-verifier compares it in masked (in-support) mode. For the Douglas-fir cone case,
-`Structured(strategy = ApproxSolve())` gives roughly an 8× assembly speedup over
-the full Jacobian at solver-tolerance-equivalent results.
+verifier compares it in masked (in-support) mode. It is the ALE default
+(§11.3.3).
 
 ### 16.8.3 Iterative linear solvers (not top-level; use `Internal`/`Solver`)
 
@@ -12183,7 +12245,7 @@ noted TR chapter.
 | `use_transpiration_bc` | `false` (rejected if `true`) |
 | default integrator | `KenCarp4(autodiff = AutoFiniteDiff())` |
 | default linear solver | `KLUFactorization()`; `UMFPACKFactorization()` for the exact ALE Jacobian (`DirectSolve` under ALE) |
-| default Jacobian | `Structured(strategy = DirectSolve())`; `ApproxSolve` under ALE with `handle_depletion = true` |
+| default Jacobian | `Structured(strategy = DirectSolve())`; `ApproxSolve` under ALE |
 
 ### Component / material / reaction defaults
 

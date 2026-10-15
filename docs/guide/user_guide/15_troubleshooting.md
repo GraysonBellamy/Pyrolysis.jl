@@ -168,7 +168,7 @@ iteration cap.
 
 When `jacobian = nothing` (the default), `solve` builds a
 `Structured(strategy = DirectSolve())` analytical Jacobian — or
-`Structured(strategy = ApproxSolve())` under ALE with `handle_depletion = true` —
+`Structured(strategy = ApproxSolve())` under ALE —
 and hands a sparse prototype to the integrator (see Technical Reference §15).
 You normally do not need to touch it. The cases where you *do* are covered in
 §15.3 (verification), §15.4 (depletion), and §15.7 (large ALE).
@@ -549,9 +549,9 @@ exactness for speed (Technical Reference §15.10):
 
 | Strategy | Exactness | When to use |
 |---|---|---|
-| `DirectSolve()` (default) | Exact; densify + factor | Small/medium problems; verification anchor |
+| `DirectSolve()` (fixed-mesh default) | Exact; densify + factor | Fixed mesh; exact ALE Jacobian; verification anchor |
 | `StructuredSolve()` | Exact; sparse LU on the local block + Richardson (2–5 iters) | Typical ALE problems |
-| `ApproxSolve()` | Approximate; drops structured couplings (`is_approximate == true`) | Large ALE where Newton tolerance can absorb a Schur-style approximation |
+| `ApproxSolve()` (ALE default) | Approximate; drops structured couplings (`is_approximate == true`) | ALE: the modified Newton iteration still converges |
 | `MatrixFreeSolve()` | GMRES on the operator action | Research/experimental |
 
 Select via a `JacobianSpec` (remember: **not** with `handle_depletion = true`):
@@ -755,12 +755,12 @@ Work top to bottom; each item is cheap to try and the early ones dominate.
    surface with `create_stretched_mesh` (§15.5.4) rather than refining
    uniformly.
 2. **Keep the default structured Jacobian.** `jacobian = nothing` →
-   `Structured(DirectSolve())` (`ApproxSolve()` under ALE with depletion
-   handling), sparse and analytical — far faster than colored FD.
+   `Structured(DirectSolve())` (`ApproxSolve()` under ALE, which drops the
+   dense geometry block and keeps the pattern local), sparse and analytical —
+   far faster than colored FD.
 3. **Keep the default linear solver.** `linear_solver = nothing` picks UMFPACK
    for the exact ALE Jacobian and KLU for every other sparse Jacobian (§8.4).
-   For large ALE, try `ApproxSolve()` (§15.7.4), which drops the dense
-   geometry block and keeps the pattern local. Iterative
+   Iterative
    `ILUGMRESFactorization(τ = 0.1, gmres_rtol = 1e-8, restart = 30)` and
    `ILUBiCGSTABFactorization(τ = 0.1, rtol = 1e-8)` exist for very large
    systems, but inexact solves can cause Newton-step rejections on stiff
@@ -779,6 +779,21 @@ Work top to bottom; each item is cheap to try and the early ones dominate.
    bar in batch/sweep contexts; leave `diagnostics = false` in production runs —
    it costs an extra ledger sweep every `diagnostics_stride` steps and is only
    needed for debugging (§15.1.2).
+9. **Keep one Julia session for many solves.** The first solve of a problem
+   compiles the residual and Jacobian kernels for its types: the component and
+   property types (every `CallableProperty` closure is a type of its own), the
+   reactions, the boundary-condition combination, the component count and the
+   radiation and transport modes. That takes 15–20 s, or about 2 s when the
+   types match a precompiled configuration (constant properties with the cone
+   boundary conditions). The time integrator compiles once per solver
+   configuration and comes precompiled for the defaults: a fixed or ALE mesh,
+   with or without `handle_depletion`, `KenCarp4` with the default
+   factorization. Another integrator, a user `callback`, `diagnostics = true` or
+   `verify_jacobian` compiles it once more per session, at about the cost of a
+   new problem type. Changing values (fluxes, kinetic parameters, mesh size,
+   tolerances) never recompiles. Re-evaluating a property closure at the REPL
+   does, because the new closure is a new type; a sweep's `modify` function
+   builds the same closure type at every point.
 
 The package's allocation-free residual caches, `@generated` component loops, and
 per-operator AD workspaces (Technical Reference §15.7, §15.11) are automatic; you

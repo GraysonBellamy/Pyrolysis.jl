@@ -192,11 +192,10 @@ sol.extras.live_cells[end]          # live cells at the end of the run
 
 Parking keeps the state size, so the pluggable Jacobian backends and their
 sparse linear solvers run unchanged through burnout; `verify_jacobian` covers
-parked states. Under ALE, `handle_depletion = true` makes
-`Structured(strategy = ApproxSolve())` the default backend: the full ALE
+parked states. Under ALE the default backend is
+`Structured(strategy = ApproxSolve())`, with or without parking: the full ALE
 pattern couples every node to every cell below it and makes the factorized
-matrix effectively dense (60–90× the cost per step of the reduced pattern),
-while with every live cell above the threshold the couplings it drops do not
+matrix effectively dense, while the couplings the reduced pattern drops do not
 change the trajectory. Pass `jacobian = Structured(strategy = DirectSolve())`
 to keep the exact assembly.
 
@@ -485,8 +484,7 @@ it. The defaults:
 
 | Scenario | Default Jacobian |
 |---|---|
-| ALE, `handle_depletion = false` | `Structured(strategy = DirectSolve())` — exact assembly; a cell may shrink without bound here and the exact couplings buy robustness. |
-| ALE, `handle_depletion = true` | `Structured(strategy = ApproxSolve())` — the reduced ALE pattern; with every live cell above the threshold it follows the same trajectory as `DirectSolve` at a fraction of the cost per step. |
+| ALE, with or without `handle_depletion` | `Structured(strategy = ApproxSolve())` — the reduced ALE pattern; it follows the same trajectory as `DirectSolve` at a fraction of the cost per step. Without parking, surface cells that burn away shrink toward zero thickness and stall either Jacobian alike: use `handle_depletion = true` to run through burnout. |
 | Fixed mesh | `Structured(strategy = DirectSolve())` (the strategies coincide without ALE couplings). |
 | Verifying a backend during an adaptive run | `solve(...; verify_jacobian = (rtol=1e-6, atol=1e-10, sample_times=[…]))`, with or without depletion. |
 

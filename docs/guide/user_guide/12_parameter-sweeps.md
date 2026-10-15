@@ -150,6 +150,9 @@ The constructors you rebuild with are the standard keyword constructors (Chapter
 - `Reaction(name, reactant => product; A, E, h, n, T_min, T_max)` and
   `Reaction(name, reactant => (p1, p2); A, E, h, yields, n, T_min, T_max)`.
 
+Reusing `prob.mesh` in every point is safe, ALE included: `solve` works on its
+own copy of the mesh, so each point starts from the base geometry.
+
 ### 12.3.1 Sweeping Arrhenius parameters (A, E)
 
 The cleanest pattern: rebuild the single reaction you are sweeping, splice it back

@@ -743,14 +743,13 @@ through every park:
 parked states for `Structured(strategy = DirectSolve())`, and the parked
 `ApproxSolve` assembly equals that of the compacted problem on the live block.
 
-Under ALE, `handle_depletion = true` selects `Structured(strategy =
-ApproxSolve())` as the default Jacobian (§15.6). The `:full` ALE pattern
-carries the prefix-sum couplings of every node to every cell below it, which
-makes the factorized $W$ effectively dense and the sparse direct solve 60–90×
-more expensive per step than the reduced pattern; parking keeps every live cell
-above $\tau_{\rm dep}$ of its initial thickness, so the vanishing-cell
-conditioning that makes the dropped couplings matter never arises, and the two
-strategies follow the same trajectory. The post-park transient is not a
+The ALE default Jacobian, `Structured(strategy = ApproxSolve())` (§15.10.3),
+stays the default through parking. The `:full` ALE pattern carries the
+prefix-sum couplings of every node to every cell below it, which makes the
+factorized $W$ effectively dense and the sparse direct solve 60–90× more
+expensive per step than the reduced pattern; parking keeps every live cell
+above $\tau_{\rm dep}$ of its initial thickness, and the two strategies follow
+the same trajectory. The post-park transient is not a
 Jacobian effect: `DirectSolve` restarted from $5\times10^{-2}$ s after every
 park fails its Newton more than 500 times on the 60-park PMMA burnout, while
 the reduced strategy with the reset of §14.3.5 needs 858 steps and 8

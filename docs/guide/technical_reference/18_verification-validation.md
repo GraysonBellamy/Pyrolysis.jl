@@ -1095,8 +1095,7 @@ linear-solver, and AD package versions all affect the last digits) and a fixed
 choice of integrator, tolerances, Jacobian backend, and linear solver. The
 defaults — `KenCarp4` with `AutoFiniteDiff`, the pattern-chosen factorization
 (`KLUFactorization` or `UMFPACKFactorization`), `abstol=1e-8`/`reltol=1e-6`,
-`Structured(DirectSolve())` (`ApproxSolve` under ALE with depletion
-handling) — are the reference
+`Structured(DirectSolve())` (`ApproxSolve` under ALE) — are the reference
 configuration; deviations (e.g. `ApproxSolve` for speed, ILU-GMRES for large ALE)
 trade a controlled amount of accuracy for performance and should be re-checked
 against the reference configuration with `verify_jacobian` armed and the

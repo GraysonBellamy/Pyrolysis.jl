@@ -463,8 +463,11 @@ solution = solve(
 )
 ```
 
-The first run incurs Julia compilation latency (tens of seconds); subsequent
-runs in the same session are fast.
+The first run in a Julia session compiles the residual and Jacobian for this
+problem's material and boundary-condition types, which takes 15–20 s; the time
+integrator itself comes precompiled with the package. Later runs in the same
+session reuse the compiled code, including runs with other parameter values
+(§15.11).
 
 ### 2.6.1 The options you just used
 
@@ -534,19 +537,12 @@ User Guide §UG-8):
   §7.7). Leave at `:standard` unless you have a specific reason.
 - **`use_transpiration_bc`** (default `false`) — **leave off.** It double-counts
   gas enthalpy against `S_conv` and `solve` raises an error if set `true`.
-- **`use_blowing_correction`** (default `false`) — opt-in Couette-film blowing
-  correction: every `ConvectiveBC` is rescaled `h → h·B/(e^B − 1)` with
-  `B = ṁ″·c_p,g/h` built from the outward gas flux at the face. Physically real
-  and safe with the default energy convention (it modifies the convective
-  *coefficient*, not the enthalpy accounting), but enable it on calibrated
-  examples only together with flame heat-flux feedback — alone it raises `T_s`
-  and MLR relative to the calibration (§5.2.3 of the Technical Reference,
-  §12.3.3).
+- The effect of outgassing on convective exchange is a property of each
+  `ConvectiveBC` (its `blowing` model, §5.2.3), not a solve option.
 - **`diagnostics`** (default `false`) — snapshot the conservation ledgers every
   `diagnostics_stride` steps (default 10) for energy/mass-balance auditing.
 - **`handle_depletion`** — park depleted cells (Chapter 10). The state keeps
-  its size, so it combines with any `jacobian`; under ALE it selects
-  `Structured(strategy = ApproxSolve())` as the default backend.
+  its size, so it combines with any `jacobian`.
 - **`warm_start`** — reuse a prior solution's final state as the initial
   condition for a continuation run.
 
