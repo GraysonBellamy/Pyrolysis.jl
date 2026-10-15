@@ -380,95 +380,6 @@ function _emit_radiation_pattern!(
 end
 
 # ============================================================================
-# Emitter 5: ALE advection (donor window + cumulative coupling)
-# ============================================================================
-
-"""
-	_emit_ale_advection_pattern!(I, J, layout, mode, profile)
-
-Emit the additional non-local couplings introduced by
-[`Pyrolysis.Jacobian.ALEAdvectionOperator`](@ref):
-
-1. **Donor window** — `max(1, i-1):min(n, i+1)`, the first-order donor
-   stencil of the flux form (the operator declares
-   `stencil = (cells = -1:1,)`).
-2. **Cumulative mesh-velocity coupling** — the indirect chain rule through
-   `w_cell = 0.5·(w_node[n_left] + w_node[n_right])` connects row `i` to
-   every upstream cell `j ≤ max(n_left[i], n_right[i]) - 1 ≈ i`. For a
-   1-D sequentially-numbered mesh this is `1:i`.
-
-Under `profile = :full` the union for row `i` is `1:min(n, i+1)` —
-lower-triangular plus one superdiagonal. **WithChi widening:**
-the column-global `θ_A(χ̄, T, ξ)` enters every `w_cell[i]` through
-`dχ̄/dt = Σⱼ S_dry,j(T_j, ξ_j)·V_j/M`, so every advection row acquires a
-rank-1 dependence on every cell's `(T, ξ)` — the reach becomes the full
-band `1:n`. Under `profile = :ale_reduced` only the donor window
-`max(1, i-1):min(n, i+1)` is emitted; the cumulative and
-θ_A widenings are dropped because the consumer (`ALEAdvectionOperator`)
-skips its `compose_into!` calls under the same profile, so those entries
-would never receive a write anyway.
-
-Applies to T rows and ξ rows of every component (over-emitting is safe;
-the operator writes nothing to solid-component ξ rows nor — since the
-relative-velocity energy formulation removed the production T-advection —
-to T rows; the storage cost of the structural zeros is negligible).
-
-ALE-only; no-op under Eulerian.
-"""
-function _emit_ale_advection_pattern!(
-    I::Vector{Int},
-    J::Vector{Int},
-    layout::StateLayout,
-    mode::SimulationMode,
-    profile::Symbol = :full,
-)
-    mesh_mode(mode) isa ALE || return nothing
-
-    n = layout.n_cells
-    NC = n_components(layout)
-    is_reduced = profile === :ale_reduced
-    is_with_chi = chi_mode(mode) isa WithChi
-
-    for i = 1:n
-        # Column reach for row `i`:
-        #   :full               → 1..min(n, i+1)  (cumulative + donor)
-        #   :full + WithChi     → 1..n            (θ_A rank-1 reaches every cell)
-        #   :ale_reduced        → max(1, i-1)..min(n, i+1)  (donor only)
-        j_lo = is_reduced ? max(1, i - 1) : 1
-        j_hi = (!is_reduced && is_with_chi) ? n : min(n, i + 1)
-
-        # T row
-        T_row = i
-        for j = j_lo:j_hi
-            push!(I, T_row)
-            push!(J, j)                       # T col
-            for k = 1:NC
-                push!(I, T_row)
-                push!(J, _xi_idx(layout, k, j))  # ξₖ col
-            end
-        end
-
-        # ξ rows for this cell — over-emit for all components (gas + solid)
-        # because the operator writes only to gas rows and `sparse(I, J, …, |)`
-        # deduplicates the resulting union with `_emit_physics_pattern!`. The
-        # extra solid-row entries land as structural zeros that the assembly
-        # never touches.
-        for kk = 1:NC
-            ξ_row = _xi_idx(layout, kk, i)
-            for j = j_lo:j_hi
-                push!(I, ξ_row)
-                push!(J, j)
-                for k = 1:NC
-                    push!(I, ξ_row)
-                    push!(J, _xi_idx(layout, k, j))
-                end
-            end
-        end
-    end
-    return nothing
-end
-
-# ============================================================================
 # Orchestrator
 # ============================================================================
 
@@ -480,9 +391,10 @@ Compose the emitters into two patterns:
 
 - `S_phys` carries every coupling whose **column** is a T, ξ, or χ index:
   block-tridiagonal physics (`_emit_physics_pattern!`), Beer-Lambert
-  non-local (`_emit_radiation_pattern!`), the χ block (`_emit_chi_pattern!`),
-  and (ALE only) the ALE-advection donor window + cumulative widening
-  (`_emit_ale_advection_pattern!`).
+  non-local (`_emit_radiation_pattern!`), and the χ block
+  (`_emit_chi_pattern!`). The ALE dilation `−ξⱼθᵢ` is cell-local and lies
+  inside the physics block; the cumulative mesh velocity couples only the
+  z rows, which live in `S_geom`.
 - `S_geom` carries every coupling whose **column** is a z index: the ALE
   geometry block (`_emit_geometry_pattern!`), or under `:ale_reduced` only
   the structural diagonal of the node rows.
@@ -538,7 +450,6 @@ function _build_sparsity_impl(layout::StateLayout, mode::SimulationMode, profile
     _emit_physics_pattern!(I_phys, J_phys, layout, mode)
     _emit_radiation_pattern!(I_phys, J_phys, layout, mode, profile)
     _emit_chi_pattern!(I_phys, J_phys, layout, mode, profile)
-    _emit_ale_advection_pattern!(I_phys, J_phys, layout, mode, profile)
     S_phys = sparse(I_phys, J_phys, trues(length(I_phys)), n_total, n_total, |)
 
     # S_geom: pure z-column couplings (ALE only). Under :ale_reduced it

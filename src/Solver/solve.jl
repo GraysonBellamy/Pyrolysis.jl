@@ -991,10 +991,9 @@ function solve(
     )
     push!(callbacks_list, progress_cb)
 
-    # Add diagnostics callback if requested. Snapshot mode — records
-    # E_matrix, E_total, gas_storage_gap at stride boundaries. Cumulative
-    # ledger fields (discrete/physical residuals) are filled by the
-    # unified residual layer.
+    # Add diagnostics callback if requested. Snapshot mode — records the
+    # sensible energy at stride boundaries; the cumulative ledger fields
+    # are filled by the unified residual layer.
     diagnostics_log = nothing
     if diagnostics
         diagnostics_log = DiagnosticsRow[]

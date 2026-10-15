@@ -2,38 +2,26 @@
 The `ALEMeshVelocityOperator`.
 
 Provides the ALE cumulative mesh-velocity field
-`w_node(k) = ∫_0^{z_k} θ(z') dz' = Σ_{i<k} (θ_pyrolysis,i − θ_A) · Δzᵢ`
-as a derived field for downstream consumers (the
-[`ALEAdvectionOperator`](@ref)). Also produces the per-cell strain rate
-`θ` and the column-global `θ_A` (zero in NoChi mode) so consumers can
-read them without recomputing.
+`w_node(k) = ∫_0^{z_k} θ(z') dz' = Σ_{i<k} (θ_pyrolysis,i − θ_A) · Δzᵢ`,
+the per-cell strain rate `θ`, and the column-global `θ_A` (zero in NoChi
+mode), together with their cell-local derivatives.
 
-The operator's `apply!` populates these derived fields by wrapping the
-existing Dual-aware physics functions
-([`_compute_ale_mesh_velocity!`](@ref) and
+The operator's `apply!` populates these fields by wrapping the existing
+Dual-aware physics functions ([`_compute_ale_mesh_velocity!`](@ref) and
 [`_compute_theta_A`](@ref)) — no math is duplicated.
 
-# Producer / consumer split
+Every component rides the mesh, so the T and ξ rows carry no mesh-motion
+coupling through `w`; the only mesh-motion term in the species rows is the
+cell-local dilation `−ξⱼθᵢ`, which the backend assembles from this
+operator's cached `∂θ/∂T`, `∂θ/∂ξ`. The cumulative velocity couples only
+the z rows (`dz_k/dt = w_node[k]`), which this operator embeds itself in
+`contribute_to_structured!` as [`EmbeddedNodePrefixSumCoupling`](@ref)
+blocks plus, under WithChi, the θ_A rank-1 channels.
 
-The framework wiring that *composes* the cumulative coupling with a
-consumer's chain rule (e.g. ALE advection's `dT_dz · ∂w_cell/∂T_j`)
-lives in the consumer's `contribute_to_jacobian!`. That consumer is
-[`ALEAdvectionOperator`](@ref), so the consumer-side composition is its
-responsibility.
-
-This operator's deliverable is therefore:
-
-1. A correct `apply!` that populates the derived fields, exact-equal to
-   the existing residual's `_compute_ale_mesh_velocity!` path.
-2. Builder functions [`build_prefix_sum_coupling_T`](@ref) /
-   [`build_prefix_sum_coupling_xi`](@ref) that construct the bare
-   [`StructuredCoupling`](@ref) primitives — the per-cell `v` vectors
-   that capture `Δzᵢ · ∂θ_i/∂x_i`. The rank-1 θ_A back-reaction is built
-   inline in `contribute_to_structured!`. These are consumed by the
-   framework's compose path.
-3. `contribute_to_structured!` is the empty default — the global-state
-   embedding is wired on the consumer side, since pushing bare primitives
-   onto `jac.structured` would not be size-compatible with `jac.A`.
+The bare-primitive builders [`build_prefix_sum_coupling_T`](@ref) /
+[`build_prefix_sum_coupling_xi`](@ref) construct the per-cell `v` vectors
+`Δzᵢ · ∂θ_i/∂x_i` of the [`PrefixSumCoupling`](@ref) primitives; the unit
+tests exercise them directly.
 """
 
 using ForwardDiff
@@ -112,9 +100,6 @@ mutable struct ALEMeshVelocityWorkspace{Tu,NC,NR,D}
     # refilled in place every Jacobian assembly; downstream embedded
     # couplings alias the same vectors, so no per-eval copies are needed.
     prefix_couplings::Vector{PrefixSumCoupling{Float64}}
-    # The same objects as an abstract-typed vector, handed to
-    # `ctx.derived_fields[:w_cell]` without re-allocating each eval.
-    w_cell_field::Vector{StructuredCoupling}
 end
 
 """
@@ -130,7 +115,6 @@ function build_ale_mesh_velocity_workspace(
 ) where {NC,NR}
     D = ForwardDiff.Dual{_ALEStrainTag,Float64,NC + 1}
     prefix_couplings = [PrefixSumCoupling(zeros(Float64, n_cells)) for _ = 1:(1+NC)]
-    w_cell_field = StructuredCoupling[c for c in prefix_couplings]
     return ALEMeshVelocityWorkspace{Float64,NC,NR,D}(
         zeros(Float64, n_nodes),
         zeros(Float64, n_cells),
@@ -150,7 +134,6 @@ function build_ale_mesh_velocity_workspace(
         zeros(D, NR),
         zeros(D, NC),
         prefix_couplings,
-        w_cell_field,
     )
 end
 
@@ -530,9 +513,8 @@ the cumulative interior cells:
                     = ∂w_node[k]/∂T  ·  x
 ```
 
-The framework wiring composes this with a consumer's chain rule
-(e.g. `dT_dz · 0.5·(prefix[n_left] + prefix[n_right])` in
-[`ALEAdvectionOperator`](@ref)).
+The same primitive, embedded at the node rows, is the z-row block of the
+Jacobian (`contribute_to_structured!`).
 
 `compute_strain_rate_derivatives!` must have been called on `ws` for
 the current state before invoking this builder.
@@ -579,32 +561,19 @@ end
 	                          mesh_vel_ws, layout, chi_mode_tag, n_global;
 	                          assembly_profile = :full) -> nothing
 
-The mesh-velocity provider's structured-coupling contribution. Three
+The mesh-velocity provider's structured-coupling contribution. Two
 responsibilities:
 
-1. **Provider primitives for the advection consumer.** Pushes the bare
-   prefix-sum primitives capturing the cumulative `∂w_node[k]/∂x_j` per
-   source channel onto `ctx.derived_fields[:w_cell]`:
-
-   ```
-   ctx.derived_fields[:w_cell][1]      = PrefixSumCoupling(Δzᵢ · ∂θ_i/∂T_i)
-   ctx.derived_fields[:w_cell][1 + j]  = PrefixSumCoupling(Δzᵢ · ∂θ_i/∂ξ_{j,i})  (j ∈ 1:NC)
-   ```
-
-   The consumer ([`ALEAdvectionOperator`](@ref)) reads them, attaches its
-   row-scaling factors (`dT_dz`, `dξ_dz`) and global offsets, and wraps
-   each in an [`EmbeddedScaledPrefixSumCoupling`](@ref) via
-   [`compose_into!`](@ref).
-
-2. **z-row × (T, ξ) block.** The z-row equations `dz_k/dt = w_node[k] =
-   Σ_{i<k}(θ_i − θ_A)·Δzᵢ` are themselves consumers of the cumulative
-   coupling: `∂(dz_k/dt)/∂x_j = 𝟙[j ≤ k-1]·Δzⱼ·∂θⱼ/∂xⱼ`. The same bare
-   primitives are embedded at the z-row offsets as
+1. **z-row × (T, ξ) block.** The z-row equations `dz_k/dt = w_node[k] =
+   Σ_{i<k}(θ_i − θ_A)·Δzᵢ` are the consumers of the cumulative coupling:
+   `∂(dz_k/dt)/∂x_j = 𝟙[j ≤ k-1]·Δzⱼ·∂θⱼ/∂xⱼ`. The bare prefix-sum
+   primitives (`v = Δzᵢ · ∂θ_i/∂x_i` per source channel, entry 1 = T,
+   entry 1+j = ξ_j) are embedded at the z-row offsets as
    [`EmbeddedNodePrefixSumCoupling`](@ref) blocks (rows = nodes,
    lower-triangular). The geometry AD block covers z *columns* only and
    never builds these rows.
 
-3. **WithChi θ_A back-reaction.** When `chi_mode_tag isa WithChi`, θ_A
+2. **WithChi θ_A back-reaction.** When `chi_mode_tag isa WithChi`, θ_A
    couples every `w_node[k]` to the full χ vector *and*, through
    `dχ̄/dt = Σᵢ S_dry,i(T_i, ξ_i)·V_i/M`, to every cell's `(T, ξ)`:
 
@@ -612,11 +581,7 @@ responsibilities:
    ∂w_node[k]/∂y_j = −cumZ_node[k] · ∂θ_A/∂y_j,   y ∈ {χ, T, ξ_1..ξ_NC}
    ```
 
-   The χ channel lands as the bare rank-1 `ctx.derived_fields[:w_node_chi]`
-   plus a z-row × χ-col [`EmbeddedRank1Coupling`](@ref); the `(T, ξ)`
-   channels land as `ctx.derived_fields[:w_node_theta_A]` (1 + NC bare
-   rank-1s consumed by the advection operator) plus z-row × (T, ξ)-col
-   embedded rank-1s.
+   Each channel lands as a z-row [`EmbeddedRank1Coupling`](@ref).
 
 `compute_strain_rate_derivatives!` (and, for WithChi,
 `compute_theta_A_derivatives!`) must have populated the workspace for the
@@ -636,8 +601,7 @@ function contribute_to_structured!(
     assembly_profile::Symbol = :full,
 )
     # Under :ale_reduced no entry on `jac.structured` is materialized
-    # (the consumer `ALEAdvectionOperator` skips `compose_into!`, and
-    # everything this method pushes onto `jac.structured` is dropped by
+    # (everything this method pushes onto `jac.structured` is dropped by
     # `_emit_jacobian!`). Skip the producer entirely.
     assembly_profile === :full || return nothing
 
@@ -652,7 +616,7 @@ function contribute_to_structured!(
     # buffers so the hot path allocates nothing. The strain-rate derivatives
     # are zero in parked ghost slots, so the prefix sums stop at the live
     # surface and every ghost node row reproduces the surface node's row.
-    couplings = mesh_vel_ws.w_cell_field
+    couplings = mesh_vel_ws.prefix_couplings
     A_section = state.A_section[]
     v_T_pc = mesh_vel_ws.prefix_couplings[1].v
     @inbounds for i = 1:n_cells
@@ -666,21 +630,13 @@ function contribute_to_structured!(
             v_j[i] = Δzᵢ * mesh_vel_ws.dθ_dξ[j, i]
         end
     end
-    ctx.derived_fields[:w_cell] = couplings
 
     # z-row × (T, ξ) block: embed the bare prefix sums at the z-row offsets.
     # Row block = nodes 1..n_nodes (node 1 receives nothing — w_node[1] ≡ 0).
-    compose_into!(jac, couplings[1]::PrefixSumCoupling, z_off, 0, n_nodes, Int(n_global))
+    compose_into!(jac, couplings[1], z_off, 0, n_nodes, Int(n_global))
     for k = 1:NC
         ξk_col_off = n_cells + (k - 1) * n_cells
-        compose_into!(
-            jac,
-            couplings[1+k]::PrefixSumCoupling,
-            z_off,
-            ξk_col_off,
-            n_nodes,
-            Int(n_global),
-        )
+        compose_into!(jac, couplings[1+k], z_off, ξk_col_off, n_nodes, Int(n_global))
     end
 
     if chi_mode_tag isa WithChi
@@ -691,37 +647,29 @@ function contribute_to_structured!(
             u_bare[k] = -mesh_vel_ws.cumZ_node[k]
         end
 
-        # χ channel: bare rank-1 for the advection consumer + z-row × χ-col.
-        # Aliases the workspace buffer (couplings are read-only and rebuilt
-        # every eval).
+        # χ channel: z-row × χ-col. Aliases the workspace buffer (couplings
+        # are read-only and rebuilt every eval).
         v_chi = mesh_vel_ws.dθA_dχ
-        ctx.derived_fields[:w_node_chi] = StructuredCoupling[Rank1Coupling(u_bare, v_chi)]
         χ_off = chi_offset(layout)
         push!(
             jac.structured,
             EmbeddedRank1Coupling(u_bare, v_chi, z_off, χ_off, Int(n_global)),
         )
 
-        # (T, ξ) channels — the θ_A back-reaction. Bare rank-1s for the
-        # advection consumer, embedded rank-1s for the z-rows.
+        # (T, ξ) channels — the θ_A back-reaction, embedded at the z-rows.
         v_T = mesh_vel_ws.dθA_dT
-        theta_A_couplings = StructuredCoupling[]
-        sizehint!(theta_A_couplings, 1 + NC)
-        push!(theta_A_couplings, Rank1Coupling(u_bare, v_T))
         push!(jac.structured, EmbeddedRank1Coupling(u_bare, v_T, z_off, 0, Int(n_global)))
         for k = 1:NC
             v_ξk = Vector{Float64}(undef, n_cells)
             @inbounds for j = 1:n_cells
                 v_ξk[j] = mesh_vel_ws.dθA_dξ[k, j]
             end
-            push!(theta_A_couplings, Rank1Coupling(u_bare, v_ξk))
             ξk_col_off = n_cells + (k - 1) * n_cells
             push!(
                 jac.structured,
                 EmbeddedRank1Coupling(u_bare, v_ξk, z_off, ξk_col_off, Int(n_global)),
             )
         end
-        ctx.derived_fields[:w_node_theta_A] = theta_A_couplings
     end
 
     return nothing
@@ -734,10 +682,9 @@ No-op. The cumulative mesh velocity writes no entries into `jac.A`
 directly — every contribution is a structured coupling pushed by
 [`contribute_to_structured!`](@ref): the z-row × (T, ξ) prefix-sum blocks
 and (WithChi) the θ_A rank-1s land on `jac.structured` from the provider
-side, and the T/ξ-row chain rule is composed by the consumer
-([`ALEAdvectionOperator`](@ref)) from `ctx.derived_fields[:w_cell]` /
-`[:w_node_chi]` / `[:w_node_theta_A]`. The geometry AD block covers the
-z *columns* only and plays no part in the z rows' (T, ξ) couplings.
+side. The ξ-row dilation entries are written by the backend from this
+operator's cached strain-rate derivatives. The geometry AD block covers
+the z *columns* only and plays no part in the z rows' (T, ξ) couplings.
 """
 function contribute_to_jacobian!(::StructuredJacobian, ::ALEMeshVelocityOperator, args...)
     return nothing

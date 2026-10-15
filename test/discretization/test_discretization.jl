@@ -339,26 +339,6 @@ using Pyrolysis.Problem: StateCache
         end
     end
 
-    @testset "ALE Flux Functions" begin
-        @testset "ALE Convective Flux" begin
-            φ_L, φ_R = 1.0, 2.0
-
-            # Case 1: v > w (material moving faster than mesh to the right)
-            # Relative velocity positive → upwind is left
-            @test ale_convective_flux(φ_L, φ_R, 2.0, 1.0) ≈ 1.0 * (2.0 - 1.0)
-
-            # Case 2: v < w (mesh moving faster to the right)
-            # Relative velocity negative → upwind is right
-            @test ale_convective_flux(φ_L, φ_R, 1.0, 2.0) ≈ 2.0 * (1.0 - 2.0)
-
-            # Case 3: v = w (Lagrangian)
-            # No relative flux
-            @test ale_convective_flux(φ_L, φ_R, 1.0, 1.0) ≈ 0.0
-
-            @test @inferred ale_convective_flux(φ_L, φ_R, 1.0, 0.5) isa Float64
-        end
-    end
-
     @testset "Darcy-Fick RHS Functions" begin
         @testset "update_darcy_properties!" begin
             # Create a mesh with 10 cells for a charring material

@@ -17,7 +17,6 @@ The table maps each operator tag type to its implementation file:
 | `DarcyTransportOperator`  | `darcy_transport.jl` |
 | `BCThermalOperator`       | `bc_thermal.jl`     |
 | `BCMassOperator`          | `bc_mass.jl`        |
-| `ALEAdvectionOperator`    | `ale_advection.jl`  |
 | `ALEMeshVelocityOperator` | `ale_mesh_velocity.jl` |
 
 The full `Structured()` backend walks this operator list directly.
@@ -26,42 +25,17 @@ The full `Structured()` backend walks this operator list directly.
 using ..Materials: Material
 
 # ============================================================================
-# ALEAdvectionOperator (real impl in `ale_advection.jl`)
-# ============================================================================
-
-"""
-	ALEAdvectionOperator <: Operator
-
-Conservative flux-form gas mesh-motion transport (gas components only):
-`(ξ_face·w)_faces/Δz − ξ·(V̇/V)` with first-order donor face values. The
-energy equation has no mesh-motion advection in production — solids are
-mesh-bound, so T is advected only by the mesh−material relative velocity,
-which is identically zero (see the module docstring in `ale_advection.jl`).
-Reads `:w_cell` from `ALEMeshVelocityOperator` so the framework composes
-the local face Jacobian with the cumulative-mesh-velocity
-[`PrefixSumCoupling`](@ref).
-
-`apply!`, `contribute_to_jacobian!`, and the workspace
-[`build_ale_advection_workspace`](@ref) live in
-[`operators/ale_advection.jl`](ale_advection.jl).
-"""
-struct ALEAdvectionOperator <: Operator end
-
-reads(::ALEAdvectionOperator) = (:w_cell, :theta)
-writes(::ALEAdvectionOperator) = ()
-stencil(::ALEAdvectionOperator) = (cells = -1:1,)
-
-# ============================================================================
 # ALEMeshVelocityOperator (real impl in `ale_mesh_velocity.jl`)
 # ============================================================================
 #
 # The type, workspace, apply!, and bare-primitive coupling builders live
 # in `operators/ale_mesh_velocity.jl`. This operator's `contribute_to_jacobian!`
-# is a no-op — every contribution is a structured coupling: the T/ξ-row chain
-# rule is composed by the consumer ALEAdvectionOperator from the provider's
-# bare primitives, while the z-row × (T, ξ) prefix-sum blocks (and the WithChi
-# θ_A rank-1 channels) are embedded by the provider's own
-# `contribute_to_structured!`.
+# is a no-op — every contribution is a structured coupling: the z-row ×
+# (T, ξ) prefix-sum blocks (and the WithChi θ_A rank-1 channels) are
+# embedded by the provider's own `contribute_to_structured!`. The T and ξ
+# rows carry no mesh-motion coupling: every component rides the mesh, and
+# the dilation `−ξⱼθᵢ` is cell-local (assembled from this operator's cached
+# strain-rate derivatives by the backend).
 
 struct ALEMeshVelocityOperator <: Operator end
 

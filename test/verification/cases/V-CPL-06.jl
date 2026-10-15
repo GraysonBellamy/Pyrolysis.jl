@@ -22,8 +22,11 @@
 # V-CPL-06b (ALE): same column with the fuel band collapsing as it gasifies
 # (γ_gas = 0 ⇒ the overburden subsides — cone-charring kinematics). Pins:
 # - the S_conv-vs-reheat defect stays at the (converged) quasi-steady level;
-# - the ALE energy budget closes: ΔE_matrix = ∫(q_bnd + Q_rxn + S_conv +
-#   hand-off + dilation) dt — with NO mesh-motion T-advection term: the
+# - the ALE energy budget closes: ΔE = ∫(q_bnd + Q_rxn + S_conv + hand-off +
+#   gas hand-off + dilation) dt, with E = Σ ρcp·T·V over every component
+#   (the gas hand-off c_g·Σ ξ̇_g·T·V is the sensible heat the stored pore gas
+#   gains or loses with its concentration) — and with NO mesh-motion
+#   T-advection term: the
 #   relative-velocity formulation (tech-ref §11.2.2) has none in production,
 #   and this case asserts the residual T-advection accumulator is exactly
 #   zero. A full-mesh-velocity `+w·∂T/∂z` term would show up here as an
@@ -147,7 +150,7 @@ function _vcpl06_ledger_solve(problem; use_ale::Bool, t_win = 120.0)
                 xdT += ws.dξ_work[gidx, i] * T * V
                 mg += g * V
                 reheat += g * (T_ftop - T) * V
-                # Solid-sensible hand-off: E_matrix declines as ρcp shrinks.
+                # Condensed sensible hand-off: ρcp changes with composition.
                 for j = 1:NC
                     j == gidx && continue
                     hoE += c_solid * T * rc.dξ_rxn[j, i] * V
@@ -294,7 +297,18 @@ function _verification_case_vcpl06b()
         a = sol.acc
         reheat_ref = -a.gen_reheat
         defect_K = (a.S_conv - reheat_ref) / (sol.c_gas * a.m_gen)
-        pred = a.q_bnd + a.Q_rxn + a.S_conv + a.handoffE + a.ale_T + a.dil
+        # ΔE = Σ[ρcp V Ṫ + T V d(ρcp)/dt + ρcp T V̇]: the first is the
+        # integrated RHS, the second splits into the condensed reaction
+        # hand-off, the gas hand-off c_g·ξ̇_g (full rate: reaction, flux and
+        # dilation) and the condensed dilation, the third is the volume term.
+        pred =
+            a.q_bnd +
+            a.Q_rxn +
+            a.S_conv +
+            a.handoffE +
+            sol.c_gas * a.xidotT +
+            a.ale_T +
+            a.dil
         err_ledger = abs(sol.ΔE - pred) / abs(a.q_bnd)
         return [
             QoIResult(
@@ -326,8 +340,8 @@ function _verification_case_vcpl06b()
                 tol = 1.5e-4,  # 3× observed: 4.7e-5 of ∫q_bnd (n=80, 2026-07-07,
                 # trapezoidal ledger; a rectangle rule leaves a ~30%
                 # pure-quadrature residual on this transient window)
-                comment = "q_bnd + Q_rxn + S_conv + hand-off + dilation; " *
-                          "NO T-advection term",
+                comment = "q_bnd + Q_rxn + S_conv + hand-off + gas hand-off + " *
+                          "dilation; NO T-advection term",
             ),
         ]
     end

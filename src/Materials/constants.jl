@@ -22,11 +22,11 @@ const P_REF = 101325.0                   # Pa - standard pressure (1 atm)
 const T_PROPERTY_MIN = 200.0             # K
 const T_PROPERTY_MAX = 3000.0            # K
 
-# Floor on the matrix volumetric heat capacity ρcₚ_eff [J/(m³·K)]. Formulation A
-# excludes gas storage, so a fully-converted (100%-gas-yield) Eulerian cell
-# drives the matrix-only ρcₚ → 0 and 1/ρcₚ in dT/dt explodes (a stiffness
-# blow-up, not literal Inf). The floor is the thermal mass actually present in
-# such a cell — the pore gas (ρ ≈ 1.2 kg/m³ × cₚ ≈ 1000 J/(kg·K) ≈ 1.2e3 at
-# ambient; Gpyro floors the same quantity). It binds only when the condensed
-# phase is essentially gone: virgin solids have ρcₚ ~ 1e5–1e6 J/(m³·K).
-const RHO_CP_FLOOR = 1.0e3               # J/(m³·K) - matrix ρcₚ floor
+# Floor on the mixture volumetric heat capacity ρcₚ [J/(m³·K)]. ρcₚ sums every
+# component, gas included, so it reaches zero only in a cell emptied of all
+# mass (a burned-out cell whose pore gas has also diffused out); there 1/ρcₚ
+# in dT/dt would explode (a stiffness blow-up, not literal Inf). The floor is
+# the thermal mass of pore gas at ambient (ρ ≈ 1.2 kg/m³ × cₚ ≈ 1000 J/(kg·K);
+# Gpyro floors the same quantity). It binds only when the cell holds
+# essentially nothing: virgin solids have ρcₚ ~ 1e5–1e6 J/(m³·K).
+const RHO_CP_FLOOR = 1.0e3               # J/(m³·K) - mixture ρcₚ floor

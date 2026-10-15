@@ -1,28 +1,18 @@
 """
 `Structured()` backend asserted regressions.
 
-Two gates that depend on the operator-list assembly and limiter /
-cumulative-coupling sparsity widening:
+Two gates on the ALE operator-list assembly against the dense AD reference:
 
-1. **Ramp-ALE regression** — turns a previously prose-only known gap
-   into an asserted gate. The deleted legacy hand-coded analytical
-   backend recorded
-   `max_rel_dev ≈ 0.315` against `DenseAD_ForwardDiff` at the ramp-ALE
-   probe state because it linearized simple upwind while the residual
-   uses VANLEER. The current `Structured` backend captures the limiter
-   chain rule via face-local AD over `_limited_gradient` plus the
-   cumulative-`w` indirect chain rule via
-   `EmbeddedScaledPrefixSumCoupling`. The strict support-complete check
-   should pass: in-support entries agree with dense AD, and there are no
-   missing outside-support entries.
+1. **Ramp-ALE agreement** — a steep temperature ramp with active kinetics
+   and mesh motion. The strict support-complete check must pass: every
+   in-support entry agrees with dense AD and there is no missing
+   outside-support entry. This pins the cumulative-`w` z-row couplings,
+   the cell-local dilation rows and the geometry block together.
 
-2. **Vanleer-kink robustness** — the limiter `ψ(r) = (r + |r|)/(1 + |r|)`
-   is non-smooth at `r = 0` (sign change of `grad_0/grad_1` across a
-   local extremum). Face-local AD returns a one-sided derivative;
-   Newton must still survive. Assert that the Jacobian at a
-   temperature-extremum probe state is finite (no NaN / Inf) and that
-   the in-support deviation against the dense AD reference is bounded
-   (the AD reference has the same one-sided derivative, so they agree).
+2. **Extremum-probe robustness** — the same ramp with a single local
+   temperature minimum. Face-local AD through the upwinded Darcy–Fick and
+   boundary kernels must still produce a finite Jacobian (no NaN / Inf)
+   whose in-support deviation against dense AD stays bounded.
 
 Both gates run against `Structured(strategy = DirectSolve())` because
 that is the verification anchor (densifies structured couplings before
@@ -53,8 +43,7 @@ function _set_ramp_state!(u, n_cells, T_lo, T_hi, ξ_vals)
 end
 
 # Pack a temperature-with-extremum profile: T monotonically rising, then
-# a single dip at cell `i_extremum` (`T[i-1] > T[i] < T[i+1]`). Triggers
-# vanleer's `r = 0` kink at the dip.
+# a single dip at cell `i_extremum` (`T[i-1] > T[i] < T[i+1]`).
 function _set_extremum_state!(u, n_cells, T_lo, T_hi, T_dip, i_extremum, ξ_vals)
     _set_ramp_state!(u, n_cells, T_lo, T_hi, ξ_vals)
     @inbounds u[i_extremum] = T_dip   # local minimum
@@ -63,11 +52,10 @@ end
 
 @testset "Structured() asserted regressions" begin
 
-    @testset "ramp-ALE limiter chain rule" begin
+    @testset "ramp-ALE strict agreement" begin
         def, ws, u, _ = build_ale_no_radiation()
         n = ws.layout.n_cells
-        # The probe state recorded when the legacy backend's limiter gap
-        # was characterized — T_lo=600, T_hi=1100, ξ=(800.0, 1.5).
+        # Probe state: T_lo=600, T_hi=1100, ξ=(800.0, 1.5).
         _set_ramp_state!(u, n, 600.0, 1100.0, (800.0, 1.5))
 
         ref_spec = JacobianSpec(DenseAD_ForwardDiff(), def, ws)
@@ -87,28 +75,23 @@ end
         @test report.passed
         @test report.max_abs_dev_outside_support ≤ 1e-10
 
-        # Every entry the widened sparsity declares should match the dense AD
-        # reference to within rtol. This pins the limiter chain rule plus the
-        # indirect cumulative-w coupling.
+        # Every entry the sparsity declares should match the dense AD
+        # reference to within rtol. This pins the cumulative-w z-row
+        # couplings and the dilation rows.
         ref_scale = max(maximum(abs, report.J_ref), 1e-12)
         in_rel = report.max_abs_dev_in_support / ref_scale
         @test in_rel ≤ 1e-6
 
-        # Hard ceiling: the old hand-coded backend measured
-        # `max_rel_dev = 0.315` at this state before it was deleted. The
-        # Structured backend's in-support rel-dev must be at least 5 orders
-        # of magnitude smaller. (Real value is ~5e-12 in development; the
-        # 1e-7 ceiling is the regression guard.)
+        # Hard ceiling (real value ~5e-12; the 1e-7 ceiling is the
+        # regression guard).
         @test in_rel ≤ 1e-7
     end
 
-    @testset "Vanleer-kink probe — no NaN, AD agreement" begin
+    @testset "extremum probe — no NaN, AD agreement" begin
         def, ws, u, _ = build_ale_no_radiation()
         n = ws.layout.n_cells
         # Ramp with a single local minimum at cell n÷2, ξ at moderate
-        # pyrolysis-relevant values. The `_limited_gradient` ratio
-        # `r = grad_0/grad_1` flips sign across cell `i_extremum`,
-        # triggering vanleer's `r = 0` kink.
+        # pyrolysis-relevant values.
         _set_extremum_state!(u, n, 600.0, 1100.0, 700.0, n ÷ 2, (800.0, 1.5))
 
         ref_spec = JacobianSpec(DenseAD_ForwardDiff(), def, ws)

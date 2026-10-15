@@ -1,6 +1,6 @@
 """
 Parking a depleted cell: `park_cell!` (mesh) and `park!` (mesh + state)
-conserve component mass, condensed enthalpy, χ-weighted dry mass and live
+conserve component mass, sensible enthalpy, χ-weighted dry mass and live
 geometry; the live range stays `1:n_live`, face `n_live+1` is the exposed
 boundary, ghosts carry zero concentration and (ALE) zero thickness.
 """
@@ -45,13 +45,14 @@ function _prepared_state(; n_cells = 6, use_ale = true, lateral = false)
 end
 
 # Extensive invariants over the live cells (fixture: c_solid = c_gas = 1000).
+# The sensible enthalpy sums every component, gas included.
 function _invariants(u, layout, mesh, material)
     n_live = mesh.n_active_cells
     n = layout.n_cells
     V = mesh.cell_volumes
     m_solid = sum(u[n+i] * V[i] for i = 1:n_live)
     m_gas = sum(u[2n+i] * V[i] for i = 1:n_live)
-    H = sum(V[i] * u[n+i] * 1000.0 * (u[i] - T_REF) for i = 1:n_live)
+    H = sum(V[i] * (u[n+i] + u[2n+i]) * 1000.0 * (u[i] - T_REF) for i = 1:n_live)
     rng = chi_range(layout)
     χm =
         isempty(rng) ? 0.0 :

@@ -60,7 +60,6 @@ include("operators/bc_mass.jl")
 include("operators/bc_convection.jl")
 include("operators/operator_declarations.jl")
 include("operators/ale_mesh_velocity.jl")
-include("operators/ale_advection.jl")
 include("operators/chi.jl")
 # Geometry-block AD is wrapped in the `GeometryOperator` interface; the
 # `Structured` backend dispatches via
@@ -106,18 +105,14 @@ export DarcyTransportOperator, build_darcy_transport_workspace
 export BCThermalOperator, build_bc_thermal_workspace
 export BCMassOperator, build_bc_mass_workspace
 export BCConvectionOperator, build_bc_convection_workspace
-export ALEAdvectionOperator,
-    ALEMeshVelocityOperator,
-    build_ale_mesh_velocity_workspace,
-    build_ale_advection_workspace,
-    compute_theta_A_derivatives!
+export ALEMeshVelocityOperator,
+    build_ale_mesh_velocity_workspace, compute_theta_A_derivatives!
 export ChiOperator, build_chi_workspace
 export StructuredJacobian,
     StructuredCoupling,
     PrefixSumCoupling,
     SuffixSumCoupling,
     Rank1Coupling,
-    EmbeddedScaledPrefixSumCoupling,
     EmbeddedScaledSuffixSumCoupling,
     EmbeddedNodePrefixSumCoupling,
     EmbeddedRank1Coupling

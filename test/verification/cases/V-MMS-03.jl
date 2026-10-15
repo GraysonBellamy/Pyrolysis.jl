@@ -10,23 +10,23 @@
 #   w*(z, t) = (ṡ/s)·z,   s(t) = 1 − 0.15·(1 − cos(2πt/20)),  z_i(t) = z_i(0)·s(t)
 #
 # through the `Workspace.w_override` hook. On a grid point moving with w, the
-# grid time derivative is ∂tT* + w·∂zT*; the discrete ALE advection term
-# supplies the w·∂zT* part, so the same Eulerian manufactured sources —
-# evaluated at the LIVE cell centers read from the z-block — make T*, ξ* the
-# exact solution on the moving mesh (see exact/mms.jl header, "ALE"). The
-# error norms therefore measure exactly the moving-mesh transport truncation:
-# ALE advection (van-Leer-limited upwind reconstruction) + lab-frame
-# operators on a nonuniform-in-time mesh.
+# grid time derivative is ∂tT* + w·∂zT*. For T the discrete mesh-relative
+# advection kernel supplies the w·∂zT* part (w_physical = 0 without
+# reactions), so the Eulerian manufactured T source — evaluated at the LIVE
+# cell centers read from the z-block — makes T* exact on the moving mesh. The
+# species ride the applied mesh (no advection operator), so their sources are
+# assembled in the material frame with w = the override (see exact/mms.jl
+# header, "ALE"). The T error norm therefore measures exactly the moving-mesh
+# transport truncation: ALE advection (van-Leer-limited upwind
+# reconstruction) + lab-frame operators on a nonuniform-in-time mesh; the gas
+# error measures the diffusive flux and geometry on the moving mesh.
 #
 # No reactions: mesh motion is prescribed, not volume-change-driven, so the
 # case isolates GCL/advection from kinetics (V-MMS-01 covers those). The
-# solid field is spatially UNIFORM but time-varying: condensed phases are
-# mesh-bound in this ALE formulation (v_solid = w ⇒ no advection operator,
-# see compute_ale_species_advection!), so a z-varying solid target under
-# prescribed non-material motion would have no operator to balance its
-# w·∂zξ* term (constraint documented in exact/mms.jl). The time variation
-# keeps the solid source-injection path active; T and the gas field carry
-# the full space–time structure and exercise the moving-mesh advection.
+# solid field is spatially UNIFORM but time-varying (the material-frame
+# source would admit a z-varying one; uniform keeps the T pins focused on
+# the advection kernel); T and the gas field carry the full space–time
+# structure.
 #
 # Expected order: the limiter's slope reconstruction is formally 2nd order on
 # smooth data but clips at extrema (the sin peak crosses the domain), so the
@@ -47,8 +47,7 @@ function _verification_case_vmms03()
     w_star(z, t) = (sdot(t) / s(t)) * z
 
     # Lab-frame fields over the maximal domain [0, L] (compression-only
-    # motion keeps every node inside it). Solid: uniform in z (mesh-bound
-    # constraint), decaying in t.
+    # motion keeps every node inside it). Solid: uniform in z, decaying in t.
     T_f(z, t) = 480.0 + 120.0 * sin(π * z / L) * cos(ω * t) + 40.0 * z / L
     ξs_f(z, t) = 600.0 + 40.0 * exp(-t / τ)
     ξg_f(z, t) = 1.5 + 0.6 * sin(π * z / L) * exp(-t / τ)
@@ -131,14 +130,14 @@ function _verification_case_vmms03()
                 1,
                 600.0,
                 1e-10,  # observed 7.3e-12 (n=32, 2026-07-06): exact to integrator tol
-                "uniform solid: verifies the Lagrangian (no-advection) solid path + source injection",
+                "uniform solid: verifies the mesh-bound (no-advection) species path + source injection",
             ),
             (
                 "ξ_gas",
                 2,
                 1.5,
-                6e-3,  # 3× observed: 1.9e-3 (n=32, 2026-07-06)
-                "gas is advected relative to the mesh: moving-mesh transport error channel",
+                6e-3,  # 3× observed: 1.8e-3 (n=32), second order
+                "gas rides the applied mesh: diffusive flux + geometry on the moving mesh",
             ),
         )
             err = mms_Linf_xi(sol, fields, idx) / scale

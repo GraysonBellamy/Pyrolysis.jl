@@ -11,7 +11,6 @@ using Pyrolysis.Diagnostics:
     EnergyConservationTracker,
     compute_domain_mass,
     compute_sensible_energy,
-    compute_total_sensible_energy,
     update_mass_tracker!,
     update_energy_tracker!,
     check_mass_conservation,
@@ -194,27 +193,30 @@ using Pyrolysis.Diagnostics:
             # Initialize tracker
             tracker = EnergyConservationTracker(mesh, material)
 
-            # With Formulation A's gas-excluded ρcp_eff, the matrix-only
-            # initial energy is the solid contribution only.
-            expected_matrix = 1000.0 * 1500.0 * T_init * L * mesh.cross_section_area
+            # ρcp sums every component; with no gas present the initial
+            # energy is the solid contribution.
+            expected = 1000.0 * 1500.0 * T_init * L * mesh.cross_section_area
 
-            @test tracker.initial_energy_matrix ≈ expected_matrix rtol=0.01
-            # initial_energy_total includes the (small) gas storage contribution.
-            @test tracker.initial_energy_total ≥ tracker.initial_energy_matrix
+            @test tracker.initial_energy ≈ expected rtol=0.01
             @test tracker.cumulative_boundary_conduction == 0.0
-            @test tracker.cumulative_boundary_applied == 0.0
             @test tracker.cumulative_reaction_heat == 0.0
             @test tracker.cumulative_advection_sink == 0.0
             @test tracker.cumulative_generation_sink == 0.0
-            @test tracker.cumulative_transpiration == 0.0
             @test tracker.last_time == 0.0
 
-            # compute_sensible_energy should match the matrix-only baseline.
-            current_matrix = compute_sensible_energy(mesh, material)
-            @test current_matrix ≈ expected_matrix rtol=0.01
-            # compute_total_sensible_energy adds gas storage.
-            current_total = compute_total_sensible_energy(mesh, material)
-            @test current_total ≥ current_matrix
+            @test compute_sensible_energy(mesh, material) ≈ expected rtol=0.01
+
+            # Pore gas stores sensible heat like every other component.
+            mesh_gas = create_uniform_mesh(
+                L,
+                n_cells,
+                Val(2);
+                T_initial = T_init,
+                ξ_initial = (1000.0, 2.0),
+            )
+            expected_gas =
+                (1000.0 * 1500.0 + 2.0 * 1000.0) * T_init * L * mesh.cross_section_area
+            @test compute_sensible_energy(mesh_gas, material) ≈ expected_gas rtol=0.01
         end
 
         @testset "Energy Tracking with Sources" begin
@@ -232,34 +234,28 @@ using Pyrolysis.Diagnostics:
             )
             tracker = EnergyConservationTracker(mesh, material)
 
-            # Simulate one substep's contributions across the new ledger fields.
+            # Simulate one substep's contributions across the ledger fields.
             A = mesh.cross_section_area
             dt = 0.1
             q_cond_boundary = 5000.0   # conducted into slab
-            q_bc_applied = 5500.0   # applied externally (transpiration takes 500)
             Q_rxn_total = -1000.0  # endothermic reaction heat
             S_conv_total = -200.0   # gas advection sink
             S_gen_total = 0.0      # :standard energy form
-            q_transpiration = 500.0    # = q_bc_applied - q_cond_boundary
 
             update_energy_tracker!(
                 tracker;
                 q_cond_boundary = q_cond_boundary,
-                q_bc_applied = q_bc_applied,
                 Q_rxn_total = Q_rxn_total,
                 S_conv_total = S_conv_total,
                 S_gen_total = S_gen_total,
-                q_transpiration = q_transpiration,
                 A = A,
                 dt = dt,
             )
 
             @test tracker.cumulative_boundary_conduction ≈ q_cond_boundary * A * dt
-            @test tracker.cumulative_boundary_applied ≈ q_bc_applied * A * dt
             @test tracker.cumulative_reaction_heat ≈ Q_rxn_total * dt
             @test tracker.cumulative_advection_sink ≈ S_conv_total * dt
             @test tracker.cumulative_generation_sink ≈ S_gen_total * dt
-            @test tracker.cumulative_transpiration ≈ q_transpiration * A * dt
             @test tracker.last_time ≈ dt
 
             # Multiple substeps accumulate linearly.
@@ -267,11 +263,9 @@ using Pyrolysis.Diagnostics:
                 update_energy_tracker!(
                     tracker;
                     q_cond_boundary = q_cond_boundary,
-                    q_bc_applied = q_bc_applied,
                     Q_rxn_total = Q_rxn_total,
                     S_conv_total = S_conv_total,
                     S_gen_total = S_gen_total,
-                    q_transpiration = q_transpiration,
                     A = A,
                     dt = dt,
                 )
@@ -301,11 +295,9 @@ using Pyrolysis.Diagnostics:
                     mesh,
                     material;
                     q_cond_boundary = 0.0,
-                    q_bc_applied = 0.0,
                     Q_rxn_total = 0.0,
                     S_conv_total = 0.0,
                     S_gen_total = 0.0,
-                    q_transpiration = 0.0,
                     J_boundary = J_boundary,
                     A = mesh.cross_section_area,
                     t = t,
@@ -325,7 +317,7 @@ using Pyrolysis.Diagnostics:
             @test length(state.log) == 1
         end
 
-        @testset "Energy Conservation Check - Perfect Discrete Closure" begin
+        @testset "Energy Conservation Check - Perfect Closure" begin
             virgin = SolidComponent(:virgin, ρ = 1000.0, c = 1500.0, k = 0.2)
             gas = GaseousComponent(:gas, M = 0.044, c = 1000.0, k = 0.025, λ = 1e-5)
             material =
@@ -351,18 +343,16 @@ using Pyrolysis.Diagnostics:
                 update_energy_tracker!(
                     tracker;
                     q_cond_boundary = q_cond_boundary,
-                    q_bc_applied = q_cond_boundary,  # no transpiration in this test
                     Q_rxn_total = 0.0,
                     S_conv_total = 0.0,
                     S_gen_total = 0.0,
-                    q_transpiration = 0.0,
                     A = A,
                     dt = dt,
                 )
 
-                # Match the energy delivered to the tracker: ΔE_matrix = q · A · dt
+                # Match the energy delivered to the tracker: ΔE = q · A · dt
                 total_volume = sum(mesh.cell_volumes)
-                ρcp = 1000.0 * 1500.0   # solid only — gas excluded from ρcp_eff
+                ρcp = 1000.0 * 1500.0   # no gas present in this mesh
                 ΔT = (q_cond_boundary * A * dt) / (ρcp * total_volume)
 
                 for i in eachindex(mesh.cells)
@@ -376,11 +366,10 @@ using Pyrolysis.Diagnostics:
                 end
             end
 
-            # Discrete-form residual must close to ~zero (the matrix-only ledger
-            # is exactly what the tracker accumulates here).
+            # The ledger residual must close to ~zero (constant ρcp and V).
             result = check_energy_conservation(tracker, mesh, material)
-            @test result.discrete_conserved
-            @test result.discrete_relative < 1e-6
+            @test result.conserved
+            @test result.relative < 1e-6
         end
 
         @testset "Energy Conservation Report" begin
@@ -401,10 +390,8 @@ using Pyrolysis.Diagnostics:
             report = energy_conservation_report(tracker, mesh, material)
 
             @test occursin("ENERGY CONSERVATION REPORT", report)
-            @test occursin("DISCRETE-FORM LEDGER", report)
-            @test occursin("PHYSICAL-FORM LEDGER", report)
-            @test occursin("Discrete residual", report)
-            @test occursin("Physical residual", report)
+            @test occursin("E(0):", report)
+            @test occursin("Residual", report)
         end
     end
 
@@ -438,18 +425,15 @@ using Pyrolysis.Diagnostics:
             # For this test, just verify they're initialized correctly
             @test mass_tracker.initial_mass[1] > 0.0  # Virgin material present
             @test mass_tracker.initial_mass[2] ≈ 0.0  # No initial gas
-            @test energy_tracker.initial_energy_matrix > 0.0
-            @test energy_tracker.initial_energy_total >=
-                  energy_tracker.initial_energy_matrix
+            @test energy_tracker.initial_energy > 0.0
 
             # Verify conservation checks work
             mass_result = check_mass_conservation(mass_tracker, mesh, material)
             energy_result = check_energy_conservation(energy_tracker, mesh, material)
 
-            # Initially perfect conservation in both ledgers (no time evolution yet)
+            # Initially perfect conservation (no time evolution yet)
             @test mass_result.conserved == true
-            @test energy_result.discrete_conserved == true
-            @test energy_result.physical_conserved == true
+            @test energy_result.conserved == true
         end
     end
 

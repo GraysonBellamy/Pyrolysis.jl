@@ -2,8 +2,8 @@
 The `ResidualContext` — Layer-1's dependency-graph carrier.
 
 The residual has ordered derived fields:
-`properties → reactions → gas_fluxes → BC implicit T_s → mesh velocity →
-ALE advection`. An [`Operator`](@ref) without declared reads / writes on
+`properties → reactions → gas_fluxes → BC implicit T_s → mesh velocity`.
+An [`Operator`](@ref) without declared reads / writes on
 derived fields recreates the same hidden-coupling problem the rebuild is
 designed to dissolve.
 The `ResidualContext` is the single explicit declaration point: each
@@ -29,10 +29,10 @@ assembly, consumers read them back. Cleared at the start of every
 - `derived_fields::Dict{Symbol, Vector{StructuredCoupling}}` — per-step
   cache of bare prefix-sum / rank-1 / suffix-sum primitives that
   upstream operators push during their `contribute_to_structured!`
-  pass. Consumers look the field up by name (e.g. `:w_cell`) and use
-  the framework's [`compose_into!`](@ref) to wrap each primitive in a
-  globally-embedded coupling. Decouples provider-side construction from
-  consumer-side row scaling.
+  pass. Consumers look the field up by name and use the framework's
+  [`compose_into!`](@ref) to wrap each primitive in a globally-embedded
+  coupling. Decouples provider-side construction from consumer-side row
+  scaling.
 
 A field `s` with no provider is fine — it means `s` is read directly
 from `state`. A field with multiple providers is an error (at most one

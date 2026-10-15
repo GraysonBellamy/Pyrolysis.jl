@@ -75,14 +75,8 @@ export face_value_central, face_value_upwind, face_value_weighted
 export face_value_limited, face_value_second_order
 export face_gradient, compute_face_gradients!
 
-# Exports - ALE Fluxes
-# Uses upwind advection formulation (see ALE_Energy_Reformulation.md)
-export ale_convective_flux
-export compute_ale_advection_term!, compute_ale_species_advection!
-export estimate_gas_velocity_from_generation!
-# ALE Darcy-Fick integration
-export mesh_velocity_at_face, ale_gas_flux_darcy_fick
-export compute_ale_gas_fluxes_darcy_fick!
+# Exports - ALE mesh-relative temperature advection
+export compute_ale_advection_term!
 
 # Exports - Darcy Velocity
 export darcy_velocity_face, compute_darcy_velocity!

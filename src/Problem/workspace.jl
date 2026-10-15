@@ -78,10 +78,8 @@ mutable struct Workspace{
     # rides the collapsing matrix), non-zero only under `w_override`. Only
     # written when the override is active.
     w_physical::Vector{Tu}
-    w_face::Vector{Tu}
     θ_work::Vector{Tu}
     ale_advection::Vector{Tu}
-    ale_species_advection::Matrix{Tu}
     rates_work::Vector{Tu}
     heats_work::Vector{Tu}
     dξ_dt_work::Vector{Tu}
@@ -198,10 +196,8 @@ function resize_workspace!(
     if mesh_mode(Mode.instance) isa ALE
         resize!(ws.w_work, n_nodes_new)
         resize!(ws.w_physical, n_nodes_new)
-        resize!(ws.w_face, n_faces_new)
         resize!(ws.θ_work, n_cells_new)
         resize!(ws.ale_advection, n_cells_new)
-        ws.ale_species_advection = zeros(Tu, NC, n_cells_new)
         resize!(ws.S_conv_work, n_cells_new)
     end
 

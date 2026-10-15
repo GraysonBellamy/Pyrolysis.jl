@@ -544,7 +544,7 @@ end
             dξs_dz = b_f(t) * (π / L) * cos(π * z / L)
             S_hand =
                 dξs_dt + w_hand(z, t) * dξs_dz + rate_hand(z, t) + ξs_f(z, t) * θ_hand(z, t)
-            @test mms_species_source_material(mat, fields, motion, 1, z, t) ≈ S_hand rtol =
+            @test mms_species_source(mat, fields, 1, z, t; w = motion.w) ≈ S_hand rtol =
                 1e-12
         end
     end

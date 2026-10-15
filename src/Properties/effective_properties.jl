@@ -349,13 +349,7 @@ end
         result = zero(_prop_type(ξ, T))
     end
     for i = 1:NC
-        # is_gas is a compile-time predicate on the singleton component type;
-        # the branch is eliminated at codegen — no runtime cost.
-        push!(expr.args, quote
-            if !is_gas(comps[$i])
-                result += ξ[$i] * comps[$i].heat_capacity(T)
-            end
-        end)
+        push!(expr.args, :(result += ξ[$i] * comps[$i].heat_capacity(T)))
     end
     push!(expr.args, :(return result))
     return expr
@@ -364,58 +358,27 @@ end
 """
 	effective_heat_capacity(ξ::NTuple{NC,Float64}, T::Float64, material::Material) -> Float64
 
-Compute the **matrix** volumetric heat capacity used in the temperature-storage
-term of Formulation A's energy equation:
+Volumetric heat capacity of the bulk mixture, the storage coefficient of
+the temperature equation:
 
 ```
-ρcₚ_eff = Σⱼ∈{solid,liquid} ξⱼ · cₚ,ⱼ(T)
+ρcₚ = Σⱼ ξⱼ · cₚ,ⱼ(T)        (every component, gas included)
 ```
 
-Gas components are excluded — their sensible heat is carried by the volumetric
-advection source `−Σ_g cp_g J_g · ∇T` (`S_conv`). This is a **quasi-steady-gas
-approximation** (gas residence time ≪ diffusion time): in-pore gas storage
-`Σ(ρc)_g ∂T/∂t` is dropped (~0.2 % of the matrix term at 1 atm, scaling with
-pressure). Note this is *not* literally the ThermaKin convention — ThermaKin
-Eq.17 *keeps* `Σ_j ξ_j c_j` summed over all components including gas; the
-exclusion here is the FDS/Gpyro-style approximation. The diagnostics callback
-exposes the cost of this approximation as the *physical-form residual*.
+Under local thermal equilibrium the pore gas is at the matrix temperature
+and stores sensible heat like every other phase (ThermaKin Eq. 17). The gas
+is carried with the skeleton, so in ALE the whole ρcₚ rides the mesh and the
+temperature equation has no mesh-motion term; the gas *flux* relative to the
+skeleton enters only through the advective source `S_conv`.
 
-The result is floored at `Materials.RHO_CP_FLOOR` (1e3 J/(m³·K) — the pore-gas
-thermal mass scale): a fully-converted (100%-gas-yield) Eulerian cell would
-otherwise drive the matrix-only ρcₚ → 0 and the `1/ρcₚ` factor in `dT/dt`
-into a stiffness explosion. The floor is inside this function so every
-consumer — residual, property cache, and the structured-Jacobian operators
-that extract `∂ρcₚ/∂(T, ξ)` through Duals — sees the identical clamped value
-and (zero) derivative at the floor.
+The result is floored at `Materials.RHO_CP_FLOOR` so a cell emptied of every
+component cannot drive the `1/ρcₚ` factor in `dT/dt` to infinity. The floor
+is inside this function so every consumer — residual, property cache, and
+the structured-Jacobian operators that extract `∂ρcₚ/∂(T, ξ)` through Duals
+— sees the identical clamped value and (zero) derivative at the floor.
 """
 @inline function effective_heat_capacity(ξ::NTuple{NC,<:Real}, T::Real, material) where {NC}
     return max(_sum_heat_capacity(ξ, T, material.components, Val(NC)), RHO_CP_FLOOR)
-end
-
-"""
-	total_heat_capacity(ξ::NTuple{NC,Float64}, T::Float64, material::Material) -> Float64
-
-Compute the **total** (matrix + gas) volumetric heat capacity. Used by the
-diagnostics tracker to quantify the storage approximation cost via the
-physical-form residual; not used by the RHS itself.
-
-```
-ρcₚ_total = Σⱼ ξⱼ · cₚ,ⱼ(T)
-```
-"""
-@inline function total_heat_capacity(ξ::NTuple{NC,<:Real}, T::Real, material) where {NC}
-    return _sum_heat_capacity_total(ξ, T, material.components, Val(NC))
-end
-
-@generated function _sum_heat_capacity_total(ξ, T, comps::Tuple, ::Val{NC}) where {NC}
-    expr = quote
-        result = zero(_prop_type(ξ, T))
-    end
-    for i = 1:NC
-        push!(expr.args, :(result += ξ[$i] * comps[$i].heat_capacity(T)))
-    end
-    push!(expr.args, :(return result))
-    return expr
 end
 
 # ============================================================================

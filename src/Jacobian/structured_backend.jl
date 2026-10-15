@@ -120,12 +120,10 @@ per-operator AD cost.
   from `def.options`; must match the residual's
   `compute_beer_lambert_source!` call.
 - `is_ale::Bool` — toggle for the ALE-only stages (mesh-velocity
-  workspace populate, `ALEAdvectionOperator`, geometry AD).
-- `ale_limiter` — limiter passed through to
-  [`ALEAdvectionOperator.contribute_to_jacobian!`](@ref).
+  workspace populate, dilation rows, geometry AD).
 - Per-operator AD workspaces (`reaction_ws`, `conduction_ws`,
   `gas_transport_ws`, `darcy_ws`, `bc_thermal_ws`, `bc_mass_ws`,
-  `bc_convection_ws`, `ale_advection_ws`, `ale_mesh_vel_ws`).
+  `bc_convection_ws`, `ale_mesh_vel_ws`).
 - `geom_cache::Union{Nothing, GeometryADCache}` — for the ALE z-block
   AD pass that runs after the operator walk. `nothing` under
   `assembly_profile == :ale_reduced` (the geometry block is dropped).
@@ -153,7 +151,6 @@ struct StructuredOpsCache{
     WSBT,
     WSBM,
     WSBC,
-    WSAA,
     WSAMV,
     WSChi,
     WSBL,
@@ -174,7 +171,6 @@ struct StructuredOpsCache{
     is_beer_lambert::Bool
     is_gen::Bool
     assembly_profile::Symbol
-    ale_limiter::Discretization.Limiter
 
     reaction_ws::WSReact
     conduction_ws::WSCond
@@ -183,7 +179,6 @@ struct StructuredOpsCache{
     bc_thermal_ws::WSBT
     bc_mass_ws::WSBM
     bc_convection_ws::WSBC
-    ale_advection_ws::WSAA
     ale_mesh_vel_ws::WSAMV
     chi_ws::WSChi
     beer_lambert_ws::WSBL
@@ -268,9 +263,6 @@ function _build_ops_cache(
         is_ale ?
         build_ale_mesh_velocity_workspace(material, layout.n_cells, layout.n_nodes) :
         nothing
-    ale_advection_ws =
-        is_ale ? build_ale_advection_workspace(material, layout.n_cells, layout.n_nodes) :
-        nothing
     chi_ws = is_with_chi ? build_chi_workspace(material) : nothing
     beer_lambert_ws =
         is_beer_lambert ? build_beer_lambert_workspace(material, layout.n_cells) : nothing
@@ -296,7 +288,6 @@ function _build_ops_cache(
     push!(ops, BCConvectionOperator())
     if is_ale
         push!(ops, ALEMeshVelocityOperator())
-        push!(ops, ALEAdvectionOperator())
     end
     if is_with_chi
         push!(ops, ChiOperator())
@@ -315,7 +306,6 @@ function _build_ops_cache(
         typeof(bc_thermal_ws),
         typeof(bc_mass_ws),
         typeof(bc_convection_ws),
-        typeof(ale_advection_ws),
         typeof(ale_mesh_vel_ws),
         typeof(chi_ws),
         typeof(beer_lambert_ws),
@@ -336,7 +326,6 @@ function _build_ops_cache(
         is_beer_lambert,
         is_gen,
         assembly_profile,
-        ws.ale_limiter,
         reaction_ws,
         conduction_ws,
         gas_transport_ws,
@@ -344,7 +333,6 @@ function _build_ops_cache(
         bc_thermal_ws,
         bc_mass_ws,
         bc_convection_ws,
-        ale_advection_ws,
         ale_mesh_vel_ws,
         chi_ws,
         beer_lambert_ws,
@@ -415,12 +403,10 @@ function _compute_jacobian!(
 
     # 2a. ALE prep: populate the mesh-velocity workspace (w_node, theta,
     #     cumZ) and cell-local strain-rate derivatives (∂θ/∂T, ∂θ/∂ξ). The
-    #     `ALEAdvectionOperator` reads both. The provider-side
-    #     `contribute_to_structured!` packages the bare per-channel
-    #     `PrefixSumCoupling`s into `ctx.derived_fields[:w_cell]`, emits the
-    #     z-row × (T, ξ) prefix-sum blocks onto `jac.structured`, and (for
-    #     WithChi) pushes the θ_A rank-1 channels (`:w_node_chi`,
-    #     `:w_node_theta_A`) plus their z-row embeddings.
+    #     dilation rows read the derivatives; the provider-side
+    #     `contribute_to_structured!` emits the z-row × (T, ξ) prefix-sum
+    #     blocks onto `jac.structured` and (for WithChi) the θ_A rank-1
+    #     z-row embeddings.
     if cache.is_ale
         chi_mode_tag = chi_mode(def.mode)
         if chi_mode_tag isa PyProblem.WithChi
@@ -638,34 +624,17 @@ function _compute_jacobian!(
         cache.radiation_model,
     )
 
-    if cache.ale_advection_ws !== nothing
-        contribute_to_jacobian!(
-            cache.jac,
-            ALEAdvectionOperator(),
-            ws.state_cache,
-            cache.mesh,
-            cache.material,
-            cache.layout,
-            cache.ale_mesh_vel_ws.w_node,
-            cache.ctx,
-            cache.ale_advection_ws;
-            θ_A = cache.ale_mesh_vel_ws.theta_A[],
-            top_gas_open = !(cache.bc_set.mass.top isa BoundaryConditions.ImpermeableBC),
-            bottom_gas_open = !(
-                cache.bc_set.mass.bottom isa BoundaryConditions.ImpermeableBC
-            ),
-            assembly_profile = cache.assembly_profile,
-        )
-        # ALE dilation correction for solid-phase ξ rows. Mirrors
-        # `_apply_ale_dilation_correction!` in `Problem.residual!` —
-        # `dξ[j, i] -= ξ[j, i] · θ[i]` for non-gas components. The cell-
-        # local Jacobian:
+    if cache.is_ale
+        # ALE dilation for every ξ row. Mirrors
+        # `_apply_ale_dilation_correction!` in `Residual.residual!` —
+        # `dξ[j, i] -= ξ[j, i] · θ[i]` for every component. The cell-local
+        # Jacobian:
         #   ∂(-ξ[j,i]·θ[i])/∂T[i]    = -ξ[j,i] · ∂θ[i]/∂T[i]
         #   ∂(-ξ[j,i]·θ[i])/∂ξ[k,i]  = -ξ[j,i] · ∂θ[i]/∂ξ[k,i]   (k ≠ j)
         #   ∂(-ξ[j,i]·θ[i])/∂ξ[j,i]  = -θ[i] - ξ[j,i] · ∂θ[i]/∂ξ[j,i]
         # Owned here (rather than on `ALEMeshVelocityOperator`) because the
-        # correction acts on the *consumer* row block (ξ rows) using the
-        # upstream operator's cached strain-rate derivatives.
+        # correction acts on the ξ row block using the upstream operator's
+        # cached strain-rate derivatives.
         _apply_ale_dilation_jacobian!(
             cache.jac,
             cache.ale_mesh_vel_ws,
@@ -715,9 +684,9 @@ function _compute_jacobian!(
     return J
 end
 
-# ALE solid-phase dilation correction Jacobian. Mirrors
-# `_apply_ale_dilation_correction!` from `Problem.residual.jl`. Writes
-# cell-local entries on the ξ rows of every non-gas component.
+# ALE dilation Jacobian. Mirrors `_apply_ale_dilation_correction!` from
+# `Residual/residual.jl`. Writes cell-local entries on the ξ rows of every
+# component.
 function _apply_ale_dilation_jacobian!(
     jac::StructuredJacobian,
     ale_ws,
@@ -733,14 +702,10 @@ function _apply_ale_dilation_jacobian!(
     θ = ale_ws.theta
     dθ_dT = ale_ws.dθ_dT
     dθ_dξ = ale_ws.dθ_dξ
-    # NTuple{NC,Bool} — dynamic indexing into the heterogeneous components
-    # tuple boxes the component on every access; map once, index the Bools.
-    gas = map(is_gas, material.components)
 
     @inbounds for i = 1:mesh.n_active_cells
         θ_i = θ[i]
         for j = 1:NC
-            gas[j] && continue
             ξ_ji = state.ξ[j, i]
             ξj_row = n_cells + (j - 1) * n_cells + i
 
@@ -766,11 +731,10 @@ end
 # contributions are densified into `J` so downstream consumers (linear
 # solvers, `verify_jacobian_at`) see the full operator. Under
 # `:ale_reduced` the couplings are *dropped* — that's the profile's
-# defining behavior, mirrored on the assembly side by
-# `ALEAdvectionOperator` skipping its `compose_into!` calls (so
-# `jac.structured` is typically empty already), and the masked-compare
-# verifier accounts for it via the `is_approximate` trait on
-# `Structured{ApproxSolve}`.
+# defining behavior, mirrored on the assembly side by the producers
+# skipping their `compose_into!` calls (so `jac.structured` is typically
+# empty already), and the masked-compare verifier accounts for it via the
+# `is_approximate` trait on `Structured{ApproxSolve}`.
 function _emit_jacobian!(
     J::AbstractMatrix{Float64},
     jac::StructuredJacobian,

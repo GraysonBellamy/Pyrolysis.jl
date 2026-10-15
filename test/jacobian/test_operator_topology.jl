@@ -5,9 +5,9 @@ Every stub operator has been replaced by a real implementation. The
 gates are:
 
 1. **Topo-sort:** the full operator list produces a valid
-   `ResidualContext` whose dependency order satisfies
-   `ALEMeshVelocityOperator before ALEAdvectionOperator`
-   (`:w_cell` provider before consumer).
+   `ResidualContext` whose dependency order places every provider before
+   its consumer (`BCThermalOperator` before `BCConvectionOperator` for
+   `:T_s`).
 
 2. **Real-operator no-op modes** — operators with conditional behavior
    (today: `RadiationOperator` under `NO_RADIATION`) return cleanly.
@@ -25,7 +25,6 @@ using Pyrolysis.Jacobian:
     BCThermalOperator,
     BCMassOperator,
     BCConvectionOperator,
-    ALEAdvectionOperator,
     ALEMeshVelocityOperator
 
 include(joinpath(@__DIR__, "..", "perf", "perf_helpers.jl"))
@@ -42,19 +41,13 @@ include(joinpath(@__DIR__, "..", "perf", "perf_helpers.jl"))
             BCThermalOperator(),         # writes :T_s
             BCMassOperator(),
             BCConvectionOperator(),      # reads :T_s
-            ALEMeshVelocityOperator(),   # writes :w_cell
-            ALEAdvectionOperator(),       # reads :w_cell
+            ALEMeshVelocityOperator(),   # writes :w_node, :w_cell, :theta
         ]
         ctx = build_residual_context(ops)
 
         # All operators present
-        @test length(ctx.order) == 10
-
-        # Provider-before-consumer for :w_cell.
-        mesh_idx = findfirst(o -> o isa ALEMeshVelocityOperator, ctx.order)
-        adv_idx = findfirst(o -> o isa ALEAdvectionOperator, ctx.order)
-        @test mesh_idx !== nothing && adv_idx !== nothing
-        @test mesh_idx < adv_idx
+        @test length(ctx.order) == 9
+        @test findfirst(o -> o isa ALEMeshVelocityOperator, ctx.order) !== nothing
 
         # Provider-before-consumer for :T_s (BCConvection's blended boundary
         # gradient runs through the surface Newton).

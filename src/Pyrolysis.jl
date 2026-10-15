@@ -198,7 +198,6 @@ export Operator,
     PrefixSumCoupling,
     Rank1Coupling,
     SuffixSumCoupling,
-    EmbeddedScaledPrefixSumCoupling,
     EmbeddedScaledSuffixSumCoupling,
     EmbeddedRank1Coupling,
     ImplicitTerm

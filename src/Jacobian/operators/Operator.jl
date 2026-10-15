@@ -112,7 +112,7 @@ framework only requires that the values are integer ranges:
 
 ```julia
 stencil(::ConductionOperator)        = (cells = -1:1,)            # tridiagonal
-stencil(::ALEAdvectionOperator)      = (cells = -2:2,)            # 4-cell upwind window
+stencil(::RadiationOperator)         = (cells = 0:0, suffix = true)  # Beer–Lambert reach
 stencil(::ReactionSourceOperator)    = (cells = 0:0,)             # cell-local
 stencil(::BCThermalOperator)         = (cells = -1:0, faces = 0:0)
 ```
