@@ -94,16 +94,15 @@ Internal trait that maps a strategy to the sparsity / assembly profile the
 `Structured` backend should build for it.
 
 - `:full` — block-tridiagonal physics + Beer-Lambert suffix + χ block + ALE
-  donor stencil + ALE cumulative widening + ALE geometry block. Structured
-  ALE prefix-sum couplings are emitted; `GeometryADCache` is built and the
-  `GeometryOperator` runs every step. Verifier uses the strict /
-  support-complete comparison.
+  geometry block. Structured ALE prefix-sum couplings (z rows) are
+  emitted; `GeometryADCache` is built and the `GeometryOperator` runs
+  every step. Verifier uses the strict / support-complete comparison.
 - `:ale_reduced` — block-tridiagonal physics + diagonal radiation +
-  cell-local χ-row deps + ALE donor stencil. Every contribution that
-  would land on `jac.structured` is omitted at the producer:
+  cell-local χ-row deps. Every contribution that would land on
+  `jac.structured` is omitted at the producer:
 
-    * ALE cumulative T/ξ × T/ξ/χ widening (`ALEAdvectionOperator`,
-      `ALEMeshVelocityOperator`)
+    * z-row × (T, ξ, χ) prefix-sum and rank-1 blocks
+      (`ALEMeshVelocityOperator`)
     * z-column geometry block (`S_geom` holds only the node-row diagonal,
       `GeometryADCache` not built)
     * χ-row × χ-col rank-1 (`ChiOperator`)

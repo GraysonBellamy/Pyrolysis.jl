@@ -688,7 +688,7 @@ P = Pyrolysis
 T = 600.0
 
 P.Properties.mixture_density(ξ, T, material)         # ρ with swelling
-P.Properties.effective_heat_capacity(ξ, T, material) # ρc_p (matrix only)
+P.Properties.effective_heat_capacity(ξ, T, material) # ρc_p (every component)
 P.Properties.effective_conductivity(ξ, T, material)  # k_eff
 P.Properties.effective_gas_transfer(ξ, T, material)  # λ_eff
 P.Properties.effective_permeability(ξ, T, material)  # κ_eff
@@ -699,11 +699,11 @@ P.Properties.porosity(ξ, T, material)                # φ
 
 Two physics notes worth remembering (both in Technical Reference §5):
 
-- **Heat capacity excludes gas storage.** `effective_heat_capacity` sums only
-  solid/liquid components: `ρc_p^eff = Σ_{j∈S,L} ξ_j c_{p,j}(T)`. Gas sensible heat
-  is carried by the advective source term instead (the quasi-steady-gas
-  approximation, ~0.2% of the matrix term at 1 atm). `total_heat_capacity` (which
-  includes gas) exists for diagnostics only.
+- **Heat capacity includes the pore gas.** `effective_heat_capacity` sums every
+  component: `ρc_p^eff = Σ_j ξ_j c_{p,j}(T)`. The gas is at the matrix
+  temperature and stores sensible heat like every other phase; the enthalpy
+  carried by its flux relative to the skeleton enters through the advective
+  source term `S_conv`.
 - **Conductivity and emissivity use the swelling-weighted (matrix) volume
   fractions** — γ = 0 components (canonical gases) carry no weight in these
   surface/matrix properties, matching the ThermaKin convention; as a cell's

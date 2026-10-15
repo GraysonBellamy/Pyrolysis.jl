@@ -239,15 +239,15 @@ at construction time. Two options interact:
   zeroed. This matches FDS/Gpyro/ThermaKin.
 - `energy_form = :with_generation_sink`: adds the cell source
   $S_{\rm gen,i}=-\sum_g \Delta h_g(T_i,T_{\rm ref})(\nabla\cdot\mathbf{J}_g)_i$,
-  a *partial* move toward conservative form (full conservation would also
-  restore gas storage to $\rho c_p^{\rm eff}$).
+  a *partial* datum conversion for $T_{\rm ref}$-referenced heats of reaction
+  (§3.3.2).
 
 The surface transpiration enthalpy term $\sum_g \dot{m}_g\,\Delta h_g(T_s,T_\infty)$
 overlaps $S_{\rm conv}$ exactly by $\int S_{\rm conv}$, so combining both
 double-counts the gas enthalpy and produces a spurious $\sim5\text{–}10\,\mathrm{kW/m^2}$
 surface sink. The adapter therefore **rejects** `use_transpiration_bc=true` at
 construction (and `solve` rejects it in `_validate_solve_kwargs`). The supported
-production path is $S_{\rm conv}$-only; see §7.6 and §16.4 for the energy-ledger
+production path is $S_{\rm conv}$-only; see §7.6 and §16.5 for the energy-ledger
 consequences.
 
 ---
@@ -384,44 +384,26 @@ the volume-change / $\chi$ model is in §10.
    guard `law(χ̄) > ε` prevents the radial channel from diverging as the
    cross-section collapses.
 
-7. **Interpolate node velocities to faces** (`_interpolate_node_to_face!`): in
-   1D the face sits at a node, and the cell-centered velocity used by advection
-   is $w_{{\rm cell},i}=\tfrac12(w_L+w_R)$.
+7. **Mesh-relative temperature advection** (`compute_ale_advection_term!`,
+   override-only). Every component rides the mesh, so the thermal mass
+   $\rho c_p^{\rm eff}$ moves with it and $T$ is advected only by the mesh
+   velocity relative to the material, $w_{\rm rel} = w_{\rm applied} −
+   w_{\rm physical}$ (§11.2.2): in production $w_{\rm rel} \equiv 0$ and nothing
+   fires; under `Workspace.w_override` the TVD-limited kernel adds
+   $w_{\rm rel}\,\partial T/\partial z$ to $dT$.
 
-8. **ALE mesh-motion transport** (`compute_ale_advection_term!` — energy,
-   override-only; `compute_ale_species_advection!` — gas flux form). The gas
-   Darcy flux is already in the lab-frame RHS from step 4; the flux-form
-   correction converts it to the moving frame conservatively (§11.2.3,
-   §13.8.3). The energy kernel runs only under `Workspace.w_override`, with
-   the relative velocity $w_{\rm rel} = w_{\rm applied} − w_{\rm physical}$
-   (§11.2.2): in production the matrix moves with the mesh, so no
-   temperature advection fires.
-
-9. **Apply ALE corrections** to $dT$ (override-only,
-   `_apply_ale_T_advection!`) and $d\xi$ (`_apply_ale_species_advection!`):
+8. **Dilation correction** for every component
+   (`_apply_ale_dilation_correction!`):
    $$
-   \frac{d\xi_{g,i}}{dt}\bigg|_{\rm ALE} \mathrel{+}=
-   \frac{(\xi_{g,{\rm face}}\,w\,A)_R - (\xi_{g,{\rm face}}\,w\,A)_L}{V_i}
-   - \xi_{g,i}\Big(\frac{w_R - w_L}{\Delta z_i} + \theta_A\Big)
-   \quad(\text{gas only}),
+   \frac{d\xi_{j,i}}{dt}\bigg|_{\rm dilation} \mathrel{-}= \xi_{j,i}\,\theta_i\quad(\text{every } j),
    $$
-   with first-order donor face values upwinded on the side the face moves
-   into, and boundary faces following the mass BCs (impermeable: no sweep
-   flux; open: zero-gradient ghost). Solids are mesh-bound and get no
-   advection (their transport *is* the mesh motion, handled by dilation in
-   step 10).
-
-10. **Dilation correction** for mesh-bound (non-gas) species
-    (`_apply_ale_dilation_correction!`):
-    $$
-    \frac{d\xi_{j,i}}{dt}\bigg|_{\rm dilation} \mathrel{-}= \xi_{j,i}\,\theta_i\quad(j\ \text{non-gas}),
-    $$
-    which makes the solids Lagrangian (their *mass thickness* is locked to the
-    mesh; concentration rises as the cell contracts). Gases are excluded here
-    because their volume-rate term is already inside the flux form of step 9.
+   which keeps each component's cell mass on its reaction-and-flux budget as
+   the cell volume changes: $d(\xi_jV)/dt = S_jV − [J_jA]_{\rm faces}$. The gas
+   is included — it is carried with the pores it occupies, and its flux
+   $J_g$ is relative to the skeleton (§11.2.3).
 
 11. **Pack the $T,\xi,z$ blocks.** $du[i]=dT_i/dt$ (with the ALE correction),
-    $du[n+(j-1)n+i]=d\xi_{j,i}/dt$ (with advection + dilation), and
+    $du[n+(j-1)n+i]=d\xi_{j,i}/dt$ (with dilation), and
     $du[n(1+N_C)+k]=w_k$ — i.e. $dz_k/dt=w_k$ (Euler-forward node motion
     realized by the integrator).
 
@@ -449,14 +431,12 @@ $$
 $$
 $$
 \frac{d\xi_{j,i}}{dt}=-(\nabla\cdot\mathbf{J}_j)_i+S_{j,{\rm rxn},i}
-+ \underbrace{\frac{(\xi_{j,{\rm face}}wA)_R-(\xi_{j,{\rm face}}wA)_L}{V_i} - \xi_{j,i}\Big(\tfrac{w_R-w_L}{\Delta z_i}+\theta_A\Big)}_{\text{flux-form mesh-motion transport (gas only)}}
-- \underbrace{\xi_{j,i}\,\theta_i}_{\text{dilation (non-gas)}}.
+- \underbrace{\xi_{j,i}\,\theta_i}_{\text{dilation (every component)}}.
 $$
 
 > **Implementation note.** ALE path: `_residual!(…, ::ALE)`,
 > `_compute_ale_mesh_velocity!`, `_compute_theta_A` / `_compute_theta_A_dispatched`,
-> `_apply_ale_T_advection!`, `_apply_ale_species_advection!`,
-> `_apply_ale_dilation_correction!`, and
+> `_apply_ale_T_advection!`, `_apply_ale_dilation_correction!`, and
 > `_pack_chi_derivative!` are all in src/Residual/residual.jl. The strain-rate
 > law `volume_change_rate` is in src/Physics/volume_change.jl. The ALE flux
 > kernels are in src/Discretization/ale_fluxes.jl.
@@ -469,10 +449,8 @@ inside `compute_rhs!`/`compute_rhs_darcy_fick!` exactly as in the Eulerian path:
 $T_{\rm ref}$ from the boundary ambient and adds $S_{\rm gen}$ using the
 midpoint-rule sensible enthalpy $\Delta h_g$, while `:standard` zeroes
 $S_{\rm gen}$. The diagnostics layer (§16) attaches a per-substep accumulator
-that audits the matrix and total energy ledgers; this is a *callback*, not part
-of the residual, so it does not perturb the integration. The conservation
-audit is what quantifies the quasi-steady-gas cost (the gas-storage gap, $<1\%$
-at 1 atm).
+that audits the energy ledger; this is a *callback*, not part of the residual,
+so it does not perturb the integration.
 
 ---
 
@@ -755,14 +733,15 @@ The fixed assembly walk is
 6. BCMassOperator
 7. BCConvectionOperator                    (boundary-cell S_conv energy row)
 8. (ALE)      ALEMeshVelocityOperator      → contribute_to_structured!
-9. (ALE)      ALEAdvectionOperator
+9. (ALE)      dilation rows                (cell-local, from the provider's ∂θ)
 10.(WithChi)  ChiOperator
 11.(ALE & !ale_reduced) GeometryOperator   (full-residual AD over z-columns)
 12.(WithChi)  ChiOperator                  → contribute_to_structured! (rank-1)
 ```
 
 This order guarantees that providers run before consumers: properties are
-updated first; the ALE mesh velocity is computed before advection reads it; and
+updated first; the ALE mesh velocity and its strain-rate derivatives are
+computed before the dilation rows read them; and
 the $\chi$ derivatives are available to the column-global rank-1 coupling.
 
 The dependency order is made explicit by the **`ResidualContext`**, which
@@ -777,8 +756,8 @@ math; the framework handles the global embedding.
 > implementations under src/Jacobian/operators/. Per-operator `ForwardDiff` chunk
 > sizes: reaction `1+N_C`; conduction $3(1+N_C)$; gas transport $3(1+N_C)$ (or 5
 > with the limiter window); BC thermal $1+N_C$; BC mass $2+N_C$ (the energy row
-> reads the interior neighbor's $T$); $\chi$ $1+N_C$. The ALE advection
-> derivatives are analytic.
+> reads the interior neighbor's $T$); $\chi$ $1+N_C$. The ALE dilation
+> derivatives come from the mesh-velocity provider's strain-rate sweep.
 
 ### 15.7.2 Layer 2 — `StructuredJacobian`
 
@@ -923,7 +902,7 @@ analytical override is the default and is gated against the local-AD fallback at
 > `_dt_mobility_face`, `_dt_J_face_partials`, analytical override
 > `_contribute_to_jacobian_analytical!`).
 
-### 15.8.4 ALE mesh velocity and the solid dilation correction
+### 15.8.4 ALE mesh velocity and the dilation correction
 
 The mesh velocity operator does **not** AD a single residual; it builds the
 analytical chain-rule pieces and emits a structured coupling. Two derivative
@@ -940,10 +919,8 @@ The cumulative velocity $w_k=\sum_{i<k}\theta_{L,i}\Delta z_i$ has the
 \partial\theta_i/\partial x_i$ for $i<k$ (and $0$ for $i\ge k$). The per-cell
 scaling $v[i]=\Delta z_i\,\partial\theta_i/\partial x_i$ is captured as a bare
 `PrefixSumCoupling{Float64}` per source channel ($T$ and each $\xi_j$) and
-consumed twice:
+consumed by the z rows:
 
-- pushed into `derived_fields[:w_cell]` for the advection consumer, which
-  wraps it with its local row scaling (§15.9);
 - embedded **at the z-row offsets** as `EmbeddedNodePrefixSumCoupling` blocks —
   the z-row equations $dz_k/dt = w_k$ are themselves consumers of the
   cumulative coupling, with $\partial(dz_k/dt)/\partial x_j =
@@ -967,15 +944,12 @@ $$
 \frac{\partial S_{{\rm dry},j}}{\partial \xi_{k,j}},
 $$
 
-where $G=\mathrm{law}'(\bar\chi)/\mathrm{law}(\bar\chi)$. The bare rank-1s
-(shared left factor $u[k]=-\text{cumZ}_{\rm node}[k]$) are pushed to
-`derived_fields[:w_node_chi]` ($\chi$ channel) and
-`derived_fields[:w_node_theta_A]` ($T,\xi$ channels) for the advection
-consumer, and embedded directly at the z-rows as `EmbeddedRank1Coupling`
-blocks.
+where $G=\mathrm{law}'(\bar\chi)/\mathrm{law}(\bar\chi)$. The rank-1s (shared
+left factor $u[k]=-\text{cumZ}_{\rm node}[k]$) are embedded directly at the
+z-rows as `EmbeddedRank1Coupling` blocks.
 
-The **solid dilation correction** $d\xi_{j,i}\mathrel{-}=\xi_{j,i}\theta_i$ adds
-the cell-local Jacobian (non-gas $j$ only)
+The **dilation correction** $d\xi_{j,i}\mathrel{-}=\xi_{j,i}\theta_i$ adds the
+cell-local Jacobian (every component $j$)
 
 $$
 \frac{\partial}{\partial T_i}:\ -\xi_{j,i}\frac{\partial\theta_i}{\partial T_i},\qquad
@@ -996,28 +970,18 @@ reusing the cached $d\theta/dT$, $d\theta/d\xi$ from the strain-rate sweep
 > both the prefix-sum builder and the dilation Jacobian; assembly is atomic per
 > Newton step, so the reuse is safe in practice.
 
-### 15.8.5 ALE advection
+### 15.8.5 No ALE advection operator
 
-The operator assembles the conservative flux-form mesh-motion transport of the
-gas species rows only. The energy equation has no mesh-motion advection in
-production: the condensed species are mesh-bound (§11.2.2), and the limited
-temperature kernel runs only under the `w_override` verification hook, which
-the structured Jacobian does not support. The face values are first-order
-donor values, so the direct part is analytic on the one-cell stencil
-$[i-1,i+1]$: $+w_R/\Delta z_i$ to the right donor, $-w_L/\Delta z_i$ to the
-left donor, and $-\big((w_R-w_L)/\Delta z_i+\theta_A\big)$ on the diagonal.
-The indirect part, $\partial f_i/\partial w_{{\rm node},n}$ for the two
-bounding nodes, reaches every upstream cell through the mesh velocity; it is
-realized by composing the provider's prefix-sum coupling with the node scales
-$(\xi_{{\rm face},R}-\xi_i)/\Delta z_i$ and $-(\xi_{{\rm face},L}-\xi_i)/\Delta z_i$.
-
-Under the `:ale_reduced` profile (used by `ApproxSolve`), the advection operator
-**skips its `compose_into!` calls entirely** — it emits no structured couplings.
-This is the defining feature of the reduced profile: it is not merely a sparsity
-choice, it changes which operators contribute to `jac.structured`.
-
-> **Implementation note.** `ALEAdvectionOperator`,
-> src/Jacobian/operators/ale_advection.jl.
+Every component rides the mesh and the thermal mass rides with it (§11.1.2,
+§11.2.2), so neither the ξ rows nor the T row carry a mesh-motion coupling
+through $w$ in production: the only mesh-motion term in the species rows is the
+cell-local dilation of §15.8.4, and the mesh-relative temperature kernel runs
+only under the `w_override` verification hook, which the structured Jacobian
+does not support (override runs use finite-difference Jacobians). The cumulative
+mesh velocity therefore couples only the z rows, through the prefix-sum blocks
+the mesh-velocity provider embeds itself. The physics block of the sparsity
+pattern is identical under the `:full` and `:ale_reduced` profiles; the profiles
+differ only in the geometry block and the structured z-row couplings (§15.11).
 
 ### 15.8.6 Variable cross-section ($\chi$)
 
@@ -1220,12 +1184,9 @@ The bare couplings carry only their local math. The *embedded* variants wrap the
 in a global embedding — row/column offsets plus per-cell scalings — so they can
 be scattered into the full state vector:
 
-- **`EmbeddedScaledPrefixSumCoupling`** — wraps a `PrefixSumCoupling` with a
-  cell-centering average and a per-row scale, capturing
-  $M[\text{row}_i,\text{col}_j]=\text{row\_scale}[i]\cdot\tfrac12(\mathbb{1}[j\le n_L-1]+\mathbb{1}[j\le n_R-1])\,v[j]$.
-  Its apply computes
-  $\text{out}[i]\mathrel{+}=\text{row\_scale}[i]\cdot\tfrac12(S[n_L]+S[n_R])$ with
-  $S[k]=\sum_{j<k}v[j]x[j]$ — the cell-centered mesh velocity entering advection.
+- **`EmbeddedNodePrefixSumCoupling`** — a `PrefixSumCoupling` at the node
+  rows, $M[\text{row}_k,\text{col}_j]=\mathbb{1}[j\le k-1]\,v[j]$ — the
+  cumulative mesh velocity entering the z-row equations.
 - **`EmbeddedScaledSuffixSumCoupling`** — the Beer–Lambert suffix at the right
   row/column offsets.
 - **`EmbeddedRank1Coupling`** — the column-global $\chi$ back-reaction at its
@@ -1377,9 +1338,9 @@ The ALE geometry coupling motivates a **two-pattern** model:
   suffix (row $i$ depends on $\xi$-columns $j\ge i$, plus — on the Kirchhoff
   default path — the surface temperature column $T_{\rm col}(n)$ for every row
   $i<n$, the $\varepsilon_{\rm eff}(T_n,\xi_{\cdot,n})$ transmissivity chain of
-  §15.8.7), the $\chi$-row block
-  (cell-local plus the dense $\chi$-column), and the ALE advection donor window
-  plus cumulative widening.
+  §15.8.7), and the $\chi$-row block
+  (cell-local plus the dense $\chi$-column). The ALE dilation is cell-local and
+  lies inside the block-tridiagonal physics.
 - **$S_{\rm geom}$** — every coupling with $z$ columns (ALE only; empty for
   Eulerian): physics$\to z$ (cells read nodes; reach $\le i+3$ without $\chi$,
   full $1{:}n_{\rm nodes}$ with `WithChi` via the $\theta_A$ path, and full for
@@ -1389,14 +1350,13 @@ The ALE geometry coupling motivates a **two-pattern** model:
   (lower-triangular including the diagonal, the cumulative nature of mesh
   velocity).
 
-Five emitter functions compose these patterns, invoked in order by
+Four emitter functions compose these patterns, invoked in order by
 `build_sparsity(layout, mode; profile)`:
 
 1. `_emit_physics_pattern!` — block-tridiagonal;
 2. `_emit_geometry_pattern!` — $z$-columns (ALE);
 3. `_emit_chi_pattern!` — $\chi$-row and dense $\chi$-column (WithChi);
-4. `_emit_radiation_pattern!` — Beer–Lambert suffix (BeerLambert);
-5. `_emit_ale_advection_pattern!` — ALE donor window + cumulative (ALE).
+4. `_emit_radiation_pattern!` — Beer–Lambert suffix (BeerLambert).
 
 The integrator's `jac_prototype` is the union $S_{\rm phys}\cup S_{\rm geom}$.
 Every row of the union stores its diagonal in every profile, so the shifted
@@ -1411,7 +1371,7 @@ $(\mathrm{typeof}(\text{mode}),N_C,n_{\rm cells},n_{\rm nodes},\text{profile})$ 
 - `:full` (default) — all entries assembled; structured couplings emitted; the
   geometry AD pass runs.
 - `:ale_reduced` (`ApproxSolve` only) — drops every structured coupling (the
-  cumulative ALE widening, the z-row prefix-sum blocks, the $\theta_A$ rank-1
+  z-row prefix-sum blocks, the $\theta_A$ rank-1
   channels, the Beer–Lambert suffix, and the $\chi$-column rank-1) and the
   geometry block, of which only the node rows' structural diagonal remains.
   The masked verifier expects exactly this set of omissions, and counts the
@@ -1421,7 +1381,7 @@ $(\mathrm{typeof}(\text{mode}),N_C,n_{\rm cells},n_{\rm nodes},\text{profile})$ 
 Only `:full` couples cells an arbitrary distance apart, through the couplings
 it materializes: the ALE geometry block and prefix sums, the Beer–Lambert
 suffix, and the $\chi$-column rank-1. Each adds $O(N^2)$ entries; every other
-pattern couples a cell only to cells within the two-cell ALE advection window.
+pattern couples a cell only to its immediate neighbours.
 `materializes_geometry_block(mode, profile)` (`:full` under ALE) selects the
 default factorization (§15.5.1).
 
@@ -1600,7 +1560,7 @@ Contrasts:
   adaptive SDIRK $\gamma_{\rm RK}$.
 - **Energy convention.** ThermaKin (Eq. 17) carries gas enthalpy by the
   convective term $c_g(\mathbf{J}_g\cdot\partial T/\partial x)$ — exactly our
-  $S_{\rm conv}$ — with gas storage excluded from the storage term, which is the
+  $S_{\rm conv}$ — with every component in the storage term, which is the
   Formulation-A convention Pyrolysis.jl adopts as canonical. The sign convention
   for heat of reaction differs in *publication* ($h>0$ exothermic in
   ThermaKin/Gpyro vs. $h>0$ endothermic internally here), but the volumetric
@@ -1620,8 +1580,9 @@ the gas-phase CFD. FDS uses a node-based 1D solid grid and an implicit/explicit
 split appropriate to its multiphysics coupling. Pyrolysis.jl is a *standalone*
 condensed-phase solver: it does not solve a gas-phase flow field, but it provides
 a far richer in-solid model (multi-component effective properties, four radiation
-models, Darcy gas transport, ALE with variable cross-section). FDS shares the
-gas-storage-excluded energy convention and the Arrhenius kinetic form; its
+models, Darcy gas transport, ALE with variable cross-section). FDS carries no
+in-depth gas, so its energy equation is the condensed-phase limit of ours; it
+shares the Arrhenius kinetic form, and its
 two-flux (Schuster–Schwarzschild) radiation maps onto our Beer–Lambert / P1
 choices (§8). On the *temporal/Jacobian* axis specifically, FDS does not expose a
 structured-operator Jacobian of the kind described here — the relevant comparison
@@ -1636,10 +1597,10 @@ Collecting the pieces, the production residual writes, for each cell $i$ and
 component $j$:
 
 $$
-\frac{dT_i}{dt}=\frac{1}{\rho c_p^{\rm eff}{}_{,i}}\Big[-(\nabla\cdot\mathbf{q})_i+S_{{\rm conv},i}+S_{{\rm gen},i}+Q_{{\rm rad},i}+Q_{{\rm rxn},i}\Big] + \underbrace{w_{{\rm cell},i}(\partial T/\partial z)_i}_{\text{ALE only}},
+\frac{dT_i}{dt}=\frac{1}{\rho c_p^{\rm eff}{}_{,i}}\Big[-(\nabla\cdot\mathbf{q})_i+S_{{\rm conv},i}+S_{{\rm gen},i}+Q_{{\rm rad},i}+Q_{{\rm rxn},i}\Big],
 $$
 $$
-\frac{d\xi_{j,i}}{dt}=-(\nabla\cdot\mathbf{J}_j)_i+S_{j,{\rm rxn},i}+\underbrace{w_{{\rm cell},i}(\partial\xi_j/\partial z)_i}_{\text{ALE, gas}}-\underbrace{\xi_{j,i}\theta_i}_{\text{ALE, non-gas}},
+\frac{d\xi_{j,i}}{dt}=-(\nabla\cdot\mathbf{J}_j)_i+S_{j,{\rm rxn},i}-\underbrace{\xi_{j,i}\theta_i}_{\text{ALE, every component}},
 $$
 $$
 \frac{dz_k}{dt}=w_k=\sum_{i<k}(\theta_i-\theta_A)\Delta z_i\quad(\text{ALE}),\qquad

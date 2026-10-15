@@ -45,10 +45,11 @@ Pyrolysis.jl is intended for the same class of problems as **ThermaKin2Ds**,
 **Gpyro**, and the **FDS** solid-phase pyrolysis model: cone-calorimeter
 simulations, TGA/DSC/MCC idealizations, charring and non-charring solids,
 intumescent coatings, pressure-treated wood, and moisture transport. The energy
-equation uses **Formulation A** (the non-conservative convention in which gas
-sensible storage is removed from the matrix heat capacity and carried by the
-advection source `S_conv`), which matches the FDS/Gpyro/ThermaKin convention (see
-Technical Reference §3 and §7).
+equation uses **Formulation A** (the non-conservative temperature equation of a
+one-temperature porous medium: every component, pore gas included, stores
+sensible heat, and the enthalpy carried by the gas flux relative to the skeleton
+enters through the advection source `S_conv`), which is the ThermaKin convention
+(see Technical Reference §3 and §7).
 
 ### What is not modeled
 
@@ -56,9 +57,8 @@ To set expectations up front, the current model does **not** support:
 
 - Multi-dimensional (2D/3D) transport — the model is strictly 1D
   through-thickness.
-- A full two-temperature gas phase (the gas is treated quasi-steady; the cost of
-  this approximation is typically well under 1% at atmospheric pressure — see
-  Technical Reference §3 and §16).
+- A full two-temperature gas phase (the pore gas shares the matrix temperature
+  and stores sensible heat at it — see Technical Reference §3).
 - Multi-reactant reactions — each reaction has a single reactant (`NRin == 1`);
   multi-step schemes are built as *sequences* of single-reactant reactions (see
   Technical Reference §6).

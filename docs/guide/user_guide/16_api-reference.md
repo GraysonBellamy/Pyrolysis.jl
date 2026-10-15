@@ -1037,8 +1037,7 @@ DiagnosticsState, DiagnosticsRow, DiagnosticsCallback
 
 # instantaneous quantities
 compute_domain_mass(mesh, material)             # NTuple of per-component mass [kg]
-compute_sensible_energy(mesh, material)         # matrix-only E_matrix [J]
-compute_total_sensible_energy(mesh, material)   # E_total (matrix + gas) [J]
+compute_sensible_energy(mesh, material)         # E_sensible, every component [J]
 
 # checks (return NamedTuples)
 check_mass_conservation(tracker, mesh, material; tol = 1e-10)
@@ -1051,13 +1050,10 @@ energy_conservation_report(tracker, mesh, material)
 reaction_mass_flow_report(tracker, material)
 ```
 
-The energy diagnostics keep two ledgers: a **discrete** form that closes to
-integrator tolerance by construction (audits bookkeeping) and a **physical**
-form that quantifies the gas-storage gap `ΔE_gas = E_total − E_matrix` — a
-runtime measure of the quasi-steady-gas approximation cost (canonically < 1 %).
-A `DiagnosticsRow` carries `t`, `E_matrix`, `E_total`, `discrete_residual`,
-`discrete_relative`, `physical_residual`, `physical_relative`, `gas_storage_gap`,
-`mass_max_relative_error`.
+The energy diagnostics keep one ledger — the sensible energy `Σ ρc_p T V` over
+every component — that closes to integrator tolerance by construction (it audits
+bookkeeping). A `DiagnosticsRow` carries `t`, `E_sensible`, `energy_residual`,
+`energy_relative`, `mass_max_relative_error`.
 
 The low-level residual surface — `ProblemDef`, `Workspace`, `residual!`,
 `to_problem_def`, `build_workspace`, `build_ad_workspace`, `StateLayout` — is

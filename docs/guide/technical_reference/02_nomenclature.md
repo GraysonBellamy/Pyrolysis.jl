@@ -43,8 +43,7 @@ Conventions:
 | `D_rad` | P1 radiation diffusion coefficient, `1/(3(α+σ_s))` | m |
 | `d`, `d_L`, `d_R`, `d_{LR}` | Distance from cell center to face / between adjacent cell centers | m |
 | `E`, `E_{αβ}`, `E_i` | Activation energy for reaction *i* | J·mol⁻¹ |
-| `E_matrix` | Matrix-only sensible energy of the domain (gas excluded) | J |
-| `E_total` | Total sensible energy of the domain (matrix + gas) | J |
+| `E_sensible` | Sensible energy of the domain, `Σ ρc_p^eff T V` over every component | J |
 | `e` | Euler's number / base of natural log (literal) | – |
 | `F` | Radiative view factor | – |
 | `F_L`, `F_R` | Generic face flux (left/right) in the divergence operator | (flux units)·m⁻² |
@@ -162,8 +161,7 @@ Conventions:
 | `ρ_j` | Bulk (pure-phase) density of component *j* | kg·m⁻³ |
 | `ρ_{i,j}` | Intrinsic / skeletal density of component *j* (porosity formula only) | kg·m⁻³ |
 | `ρ_g` | Gas-phase density (ideal-gas law) | kg·m⁻³ |
-| `ρc_p^eff` | Effective volumetric heat capacity (matrix only) | J·m⁻³·K⁻¹ |
-| `ρc_p^total` | Total volumetric heat capacity (matrix + gas) | J·m⁻³·K⁻¹ |
+| `ρc_p^eff` | Effective (mixture) volumetric heat capacity, every component | J·m⁻³·K⁻¹ |
 | `σ` | Stefan–Boltzmann constant (= 5.670374419×10⁻⁸) | W·m⁻²·K⁻⁴ |
 | `σ_s` | Scattering coefficient (≈ 0 for pyrolysis) | m⁻¹ |
 | `σ_AB` | Lennard-Jones collision diameter | Å |

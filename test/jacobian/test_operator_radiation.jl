@@ -27,8 +27,8 @@ Four gates:
 The bare `SuffixSumCoupling` builder is exercised in
 `test_structured_couplings.jl` against a dense reference; its semantic
 correctness for Beer-Lambert (the `j > i` non-local optical-depth
-chain rule) is composed by the `ALEAdvectionOperator`-style
-framework wiring and tested there. The full structured-vs-DenseAD
+chain rule) is composed by the framework's `compose_into!` wiring and
+tested there. The full structured-vs-DenseAD
 agreement of the Kirchhoff ε_eff chain is in
 `test_kirchhoff_eps_eff_jacobian.jl`.
 """

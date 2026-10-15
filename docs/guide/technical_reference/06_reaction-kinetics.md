@@ -585,8 +585,8 @@ material:
 The source comment states this explicitly (src/Physics/kinetics.jl:251–255). In
 the energy equation $Q_{\mathrm{rxn}}$ enters additively on the right-hand side
 together with the conduction divergence, gas-advection source, and radiation
-source, and the whole is divided by the matrix-only volumetric heat capacity
-$\rho c_p^{\mathrm{eff}}$ (gas storage excluded — Formulation A; see §3, §5, §7):
+source, and the whole is divided by the mixture volumetric heat capacity
+$\rho c_p^{\mathrm{eff}}$ (every component; see §3, §5, §7):
 
 $$
 \frac{dT_{\mathrm{cell}}}{dt} =

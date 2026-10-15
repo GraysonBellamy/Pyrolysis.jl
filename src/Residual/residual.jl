@@ -188,24 +188,13 @@ function _residual!(du, u, def::ProblemDef, t, ws::Workspace, ::ALE)
         _apply_mesh_velocity_override!(ws.w_work, u, layout, w_ovr, t)
     end
 
-    _interpolate_node_to_face!(ws.w_face, ws.w_work, mesh)
-
-    # 6) ALE mesh-motion advection (the Darcy gas flux is already in the
-    #    lab-frame RHS from step 4).
-    #
-    #    Energy: condensed species are mesh-bound (v_solid ≡ w, tech-ref
-    #    §11.1.2), so the matrix-carried thermal mass (ρcp_eff is matrix-only)
-    #    is advected relative to the mesh only by w_rel = w_applied −
-    #    w_physical. In production the mesh velocity IS the material velocity
-    #    — w_rel ≡ 0 and the energy kernel does not fire. It fires only under
-    #    the `w_override` verification hook, where w_applied ≠ w_physical.
-    #
-    #    Gas species are NOT mesh-bound: their mesh-motion transport is the
-    #    conservative flux form driven by the full applied mesh velocity
-    #    (solids get no advection term; see tech-ref §11.2.3 — the same
-    #    relative-velocity logic). Boundary sweep fluxes follow the mass BCs:
-    #    an impermeable face carries its gas along (compression), an open
-    #    face exchanges at the zero-gradient ghost value.
+    # 6) Mesh-relative temperature advection. Every component rides the
+    #    skeleton — the mesh IS the skeleton, and the Darcy–Fick flux in the
+    #    step-4 RHS is relative to it — so the whole thermal mass ρcp (gas
+    #    included) moves with the mesh and T is advected only by the mesh
+    #    velocity RELATIVE to the material, w_rel = w_applied − w_physical
+    #    (tech-ref §11.2.2). In production w_rel ≡ 0 and nothing fires; the
+    #    kernel runs only under the `w_override` verification hook.
     if w_ovr !== nothing
         @inbounds for k in eachindex(ws.w_physical)
             ws.w_physical[k] = ws.w_work[k] - ws.w_physical[k]  # now w_rel
@@ -217,30 +206,16 @@ function _residual!(du, u, def::ProblemDef, t, ws::Workspace, ::ALE)
             ws.w_physical;
             limiter = ws.ale_limiter,
         )
-    end
-    Discretization.compute_ale_species_advection!(
-        ws.ale_species_advection,
-        ws.state_cache,
-        mesh,
-        material,
-        ws.w_work;
-        θ_A = θ_A_global,
-        top_gas_open = !(bc_set.mass.top isa ImpermeableBC),
-        bottom_gas_open = !(bc_set.mass.bottom isa ImpermeableBC),
-    )
-
-    # 7) Apply ALE corrections (T advection only when it was computed)
-    if w_ovr !== nothing
         _apply_ale_T_advection!(ws.dT_work, ws.ale_advection, mesh)
     end
-    _apply_ale_species_advection!(ws.dξ_work, ws.ale_species_advection, mesh)
 
-    # 8) Dilation correction for mesh-bound (solid/liquid) species. Gas is
-    #    NOT included here: its volume-rate term is part of the conservative
-    #    flux form in step 6.
-    _apply_ale_dilation_correction!(ws.dξ_work, ws.θ_work, ws.state_cache, mesh, material)
+    # 7) Dilation. For every component d(ξⱼV)/dt = ω̇ⱼV − [JⱼA]_faces on the
+    #    moving cell, so the concentration rate carries −ξⱼθᵢ with the cell's
+    #    own strain rate (tech-ref §11.2.3). Gas is included: it is carried
+    #    with the pores it occupies and leaves only through Jⱼ.
+    _apply_ale_dilation_correction!(ws.dξ_work, ws.θ_work, ws.state_cache, mesh)
 
-    # 9) Pack du. Ghost T/ξ rows are zero; every node — ghost nodes included,
+    # 8) Pack du. Ghost T/ξ rows are zero; every node — ghost nodes included,
     #    which ride the live surface — takes its mesh velocity.
     _pack_cell_rows!(du, ws.dT_work, ws.dξ_work, n, mesh.n_active_cells, NC)
     zoff = n * (1 + NC)
@@ -248,7 +223,7 @@ function _residual!(du, u, def::ProblemDef, t, ws::Workspace, ::ALE)
         du[zoff+i] = ws.w_work[i]
     end
 
-    # 10) χ block (only when WithChi; with NoChi the chi_range is empty)
+    # 9) χ block (only when WithChi; with NoChi the chi_range is empty)
     _pack_chi_derivative_dispatched!(
         du,
         layout,
@@ -486,14 +461,6 @@ function _apply_mesh_velocity_override!(
     return nothing
 end
 
-function _interpolate_node_to_face!(w_face::AbstractVector, w_nodes::AbstractVector, mesh)
-    @inbounds for f in eachindex(mesh.faces)
-        face = mesh.faces[f]
-        w_face[f] = w_nodes[face.node_id]
-    end
-    return nothing
-end
-
 function _apply_ale_T_advection!(dT::AbstractVector, ale_advection::AbstractVector, mesh)
     @inbounds for i = 1:mesh.n_active_cells
         dT[i] += ale_advection[i]
@@ -501,52 +468,23 @@ function _apply_ale_T_advection!(dT::AbstractVector, ale_advection::AbstractVect
     return nothing
 end
 
-function _apply_ale_species_advection!(
-    dξ::AbstractMatrix,
-    ale_species_advection::AbstractMatrix,
-    mesh,
-)
+"""
+	_apply_ale_dilation_correction!(dξ, θ, state, mesh)
+
+Add the mesh-motion dilation `−ξⱼθᵢ` to every component's rate: the cell
+volume changes at the skeleton strain rate θᵢ and every component, gas
+included, is carried with it, so its concentration rises as the cell
+shrinks and falls as it swells.
+"""
+function _apply_ale_dilation_correction!(dξ::AbstractMatrix, θ::AbstractVector, state, mesh)
     NC = size(dξ, 1)
     @inbounds for i = 1:mesh.n_active_cells
+        θ_i = θ[i]
         for j = 1:NC
-            dξ[j, i] += ale_species_advection[j, i]
+            dξ[j, i] -= state.ξ[j, i] * θ_i
         end
     end
     return nothing
-end
-
-function _apply_ale_dilation_correction!(
-    dξ::AbstractMatrix,
-    θ::AbstractVector,
-    state,
-    mesh,
-    material::Material{NC},
-) where {NC}
-    n_cells = mesh.n_active_cells
-    @inbounds for i = 1:n_cells
-        θ_i = θ[i]
-        ξ_i = ntuple(j -> state.ξ[j, i], Val(NC))
-        _apply_dilation_correction_unrolled!(dξ, i, ξ_i, θ_i, material)
-    end
-    return nothing
-end
-
-@generated function _apply_dilation_correction_unrolled!(
-    dξ::AbstractMatrix,
-    i::Int,
-    ξ_i::NTuple{NC,<:Real},
-    θ_i::Real,
-    material,
-) where {NC}
-    exprs = Expr[]
-    for j = 1:NC
-        push!(exprs, quote
-            @inbounds if !is_gas(material.components[$j])
-                dξ[$j, i] -= ξ_i[$j] * θ_i
-            end
-        end)
-    end
-    return Expr(:block, exprs...)
 end
 
 """

@@ -162,11 +162,12 @@ where $\Delta z_{1/2}$ is the distance from the boundary face to the first cell
 center and $k_{\text{eff}}$ is the effective conductivity of the boundary cell
 (§5, Effective Properties & Mixing Rules). Both sides are positive when heat
 flows into the material. This is **Formulation A**, the non-conservative
-convention in which gas sensible enthalpy is transported by the volumetric source
-$S_{\text{conv}}$ (§7) rather than by a surface blowing term; the gas-storage
-term is omitted from $\rho c_p^{\text{eff}}$ (see §3, §5, §7). The optional
-transpiration extension (§12.9) adds a surface enthalpy sink and is **off by
-default**.
+convention in which the gas enthalpy carried by the flux relative to the
+skeleton is transported by the volumetric source $S_{\text{conv}}$ (§7) rather
+than by a surface blowing term; under local thermal equilibrium the gas crosses
+the surface at $T_s$ on both sides, so no surface enthalpy term exists (§1.4.3).
+The optional transpiration extension (§12.9) adds a surface enthalpy sink and is
+**off by default** and rejected at construction.
 
 The conductive distance is exactly half the boundary cell's thickness, computed
 from state-dependent geometry (AD- and ALE-clean) as

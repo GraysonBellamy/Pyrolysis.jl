@@ -131,18 +131,12 @@ Or equivalently:
 - `material`: Material definition
 - `tol`: Relative error tolerance (default: 1e-10)
 
-# ALE gas-species note
-The gas mesh-motion correction is the **conservative flux form** (upwinded
-face sweep fluxes `[ξ_g w A]` plus the `ξ_g V̇/V` volume-rate term,
-`compute_ale_species_advection!`), so the discrete gas ledger telescopes to
-boundary fluxes exactly — the same bookkeeping-level closure as condensed
-components. The `expected_mass` formula here counts only the *transport*
-efflux (`J_gas` at the boundary faces): under ALE with an **open** top/bottom
-mass BC, the moving boundary additionally sweeps gas in/out at
-`ξ_face·w_face·A` (a regressing surface releases the pore gas it uncovers),
-which this tracker does not yet integrate — expect a corresponding offset in
-open-boundary ALE runs. Fully closed (impermeable) columns conserve each gas
-component to integrator tolerance (V-CPL-03 P4).
+# ALE note
+Every component rides the mesh (its only mesh-motion term is the dilation
+`−ξθ`, which conserves the cell mass `ξV`), so under ALE the mass of every
+component changes only through the transport flux `J` at the boundary faces
+— exactly what `expected_mass` integrates. A fully closed (impermeable)
+column conserves each component to integrator tolerance (V-CPL-03 P4).
 
 # Returns
 NamedTuple with:
@@ -234,84 +228,61 @@ end
 """
     EnergyConservationTracker
 
-Tracks **two complementary energy ledgers** for the Formulation A
-pyrolysis residual:
+Sensible-energy ledger of the temperature equation. The stored quantity is
 
-## 1. Discrete-form ledger (closes to integrator tolerance)
+    E(t) = Σ_i ρcp_i · T_i · V_i,    ρcp = Σ_j ξ_j cp_j(T)  (every component)
 
-Built from the terms the discretized RHS *actually* assembles:
+and the ledger accumulates the terms the discretized RHS actually assembles:
 
-    ΔE_matrix(t) = ∫ q_cond_boundary · A · dt
-                 + ∫ Q_rxn dV · dt
-                 + ∫ S_conv dV · dt
-                 + ∫ S_gen dV · dt          (zero unless `:with_generation_sink`)
+    ΔE(t) = ∫ q_cond_boundary · A · dt
+          + ∫ Q_rxn dV · dt
+          + ∫ S_conv dV · dt
+          + ∫ S_gen dV · dt          (zero unless `:with_generation_sink`)
 
-with `E_matrix = Σ_i ρcp_eff,i · T_i · V_i` using the **gas-excluded**
-`ρcp_eff` (quasi-steady-gas approximation; NOT the ThermaKin convention, which
-keeps gas storage — see `Properties.effective_heat_capacity`). This residual
-closes to roughly integrator tolerance × |E(0)| by construction; failures here
-indicate bugs in flux/source assembly or callbacks. NOTE: because it is built
-from the terms the RHS *actually* assembles, this ledger closes even if the RHS
-itself double-counts a mechanism — it audits discrete bookkeeping, not the
-physical model. `cumulative_transpiration` is zero under the default
-(transpiration-off) convention.
-
-## 2. Physical-form ledger (auditable cost of the FDS-convention approximation)
-
-Built from total sensible energy including gas storage. The physical-form
-residual quantifies the cost of the quasi-steady-gas approximation:
-
-    E_total = Σ_i ρcp_total,i · T_i · V_i     (matrix + gas)
-    physical_residual(t) = E_total(t) − E_total(0)
-                          − cumulative_boundary_applied
-                          − cumulative_reaction_heat
-                          + cumulative_transpiration
-
-For canonical pyrolysis cases (gas residence time ≪ thermal time scale)
-this should be < 1% × |E(0)|; if it is larger, the regime stresses the
-quasi-steady-gas approximation and the user should reconsider.
+`q_cond_boundary` is the conducted boundary flux — the energy the boundary
+cell receives. Under the supported convention (no surface transpiration
+term) it equals the applied boundary flux. The residual closes to roughly
+integrator tolerance × |E(0)| for constant composition and volume; with
+active reactions or a moving mesh it also carries the composition-change
+term `∫ T ∂(ρcp)/∂t dV dt` and the volume term `∫ ρcp T ∂V/∂t dt`, which
+the per-substep accumulation below does not reconstruct. NOTE: because it
+is built from the terms the RHS *actually* assembles, this ledger closes
+even if the RHS itself double-counts a mechanism — it audits discrete
+bookkeeping, not the physical model.
 
 # Fields
-- `initial_energy_matrix::Float64`     — `Σ ρcp_eff · T · V` at t=0 (matrix only).
-- `initial_energy_total::Float64`      — `Σ ρcp_total · T · V` at t=0 (matrix + gas).
+- `initial_energy::Float64`                 — `Σ ρcp · T · V` at t=0.
 - `cumulative_boundary_conduction::Float64` — `∫ q_cond_boundary · A · dt`.
-- `cumulative_boundary_applied::Float64`    — `∫ q_BC_applied · A · dt`.
 - `cumulative_reaction_heat::Float64`       — `∫ Q_rxn dV · dt`.
 - `cumulative_advection_sink::Float64`      — `∫ ∫ S_conv dV · dt`.
-- `cumulative_generation_sink::Float64`    — `∫ ∫ S_gen dV · dt`.
-- `cumulative_transpiration::Float64`       — `∫ Σ_g ṁ_g · Δh_g(T_s, T_∞) · A · dt`.
+- `cumulative_generation_sink::Float64`     — `∫ ∫ S_gen dV · dt`.
 - `last_time::Float64`                      — Time of last update [s].
 """
 mutable struct EnergyConservationTracker
-    initial_energy_matrix::Float64
-    initial_energy_total::Float64
+    initial_energy::Float64
     cumulative_boundary_conduction::Float64
-    cumulative_boundary_applied::Float64
     cumulative_reaction_heat::Float64
     cumulative_advection_sink::Float64
     cumulative_generation_sink::Float64
-    cumulative_transpiration::Float64
     last_time::Float64
 end
 
 """
     EnergyConservationTracker(mesh::Mesh1D, material)
 
-Initialize tracker with current sensible energies (matrix-only and
-total-including-gas).
+Initialize tracker with the current sensible energy.
 """
 function EnergyConservationTracker(mesh::Geometry.Mesh1D, material)
-    E0_matrix = compute_sensible_energy(mesh, material)
-    E0_total = compute_total_sensible_energy(mesh, material)
-    return EnergyConservationTracker(E0_matrix, E0_total, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    E0 = compute_sensible_energy(mesh, material)
+    return EnergyConservationTracker(E0, 0.0, 0.0, 0.0, 0.0, 0.0)
 end
 
 """
     compute_sensible_energy(mesh::Mesh1D{NC}, material) -> Float64
 
-Matrix-only sensible heat: `E_matrix = Σ_i ρcp_eff,i · T_i · V_i`. Gas
-components are excluded from `ρcp_eff` per Formulation A. Only active cells
-(AMR-aware).
+Sensible heat `E = Σ_i ρcp_i · T_i · V_i` with the mixture `ρcp` (every
+component, gas included — `Properties.effective_heat_capacity`). Only active
+cells (AMR-aware).
 """
 function compute_sensible_energy(mesh::Geometry.Mesh1D{NC}, material) where {NC}
     E = 0.0
@@ -332,70 +303,36 @@ function compute_sensible_energy(mesh::Geometry.Mesh1D{NC}, material) where {NC}
 end
 
 """
-    compute_total_sensible_energy(mesh::Mesh1D{NC}, material) -> Float64
-
-Total sensible heat (matrix + gas storage):
-`E_total = Σ_i ρcp_total,i · T_i · V_i`, where `ρcp_total` includes all
-components per `Properties.total_heat_capacity`. Used by the physical-form
-energy residual to quantify the cost of the quasi-steady-gas approximation
-that the matrix-only `ρcp_eff` makes.
-"""
-function compute_total_sensible_energy(mesh::Geometry.Mesh1D{NC}, material) where {NC}
-    E = 0.0
-    @inbounds for i in eachindex(mesh.cells)
-        if !mesh.active_cell_mask[i]
-            continue
-        end
-
-        state = mesh.cell_states[i]
-        T = state.T
-        ξ = state.ξ
-        V = mesh.cell_volumes[i]
-
-        ρcp = Properties.total_heat_capacity(ξ, T, material)
-        E += ρcp * T * V
-    end
-    return E
-end
-
-"""
-    update_energy_tracker!(tracker; q_cond_boundary, q_bc_applied,
-                           Q_rxn_total, S_conv_total, S_gen_total,
-                           q_transpiration, A, dt)
+    update_energy_tracker!(tracker; q_cond_boundary, Q_rxn_total,
+                           S_conv_total, S_gen_total, A, dt)
 
 Update tracker with one substep's contributions.
 
 All `*_total` arguments are **volume-integrals over the cell-source field**
-(`Σ_i field_i · V_i`) computed from the active RHS state. `q_*_boundary`
-are face-flux values [W/m²] (multiplied by A and dt internally).
+(`Σ_i field_i · V_i`) computed from the active RHS state. `q_cond_boundary`
+is a face-flux value [W/m²] (multiplied by A and dt internally).
 
 # Keyword arguments
 - `q_cond_boundary::Float64` — net conducted boundary flux [W/m²], positive into slab.
-- `q_bc_applied::Float64`    — applied external BC flux [W/m²], positive into slab.
 - `Q_rxn_total::Float64`     — `∫ Q_rxn dV` [W].
 - `S_conv_total::Float64`    — `∫ S_conv dV` [W] (typically negative).
-- `S_gen_total::Float64`   — `∫ S_gen dV` [W] (zero unless `:with_generation_sink`).
-- `q_transpiration::Float64` — `Σ_g ṁ_g · Δh_g(T_s, T_∞)` summed over boundary faces [W/m²].
+- `S_gen_total::Float64`     — `∫ S_gen dV` [W] (zero unless `:with_generation_sink`).
 - `A::Float64`               — Cross-sectional area at this substep [m²].
 - `dt::Float64`              — Substep size [s].
 """
 function update_energy_tracker!(
     tracker::EnergyConservationTracker;
     q_cond_boundary::Float64,
-    q_bc_applied::Float64,
     Q_rxn_total::Float64,
     S_conv_total::Float64,
     S_gen_total::Float64,
-    q_transpiration::Float64,
     A::Float64,
     dt::Float64,
 )
     tracker.cumulative_boundary_conduction += q_cond_boundary * A * dt
-    tracker.cumulative_boundary_applied += q_bc_applied * A * dt
     tracker.cumulative_reaction_heat += Q_rxn_total * dt
     tracker.cumulative_advection_sink += S_conv_total * dt
     tracker.cumulative_generation_sink += S_gen_total * dt
-    tracker.cumulative_transpiration += q_transpiration * A * dt
     tracker.last_time += dt
     return nothing
 end
@@ -403,21 +340,14 @@ end
 """
     check_energy_conservation(tracker, mesh, material; tol=1e-6) -> NamedTuple
 
-Compute both the discrete-form residual (closes to integrator tolerance by
-construction) and the physical-form residual (quantifies the quasi-steady-gas
-approximation cost).
+Compute the energy-ledger residual `E(t) − E(0) − Σ contributions`.
 
 # Returns
 NamedTuple with:
-- `discrete_residual::Float64`        — `E_matrix(t) − E_matrix(0) − Σ contributions`. Should be `≈ 0` to integrator tolerance.
-- `discrete_relative::Float64`        — relative magnitude vs `|E_matrix(0)|`.
-- `physical_residual::Float64`        — `E_total(t) − E_total(0) − applied + transpiration − reaction`.
-- `physical_relative::Float64`        — relative magnitude vs `|E_total(0)|`.
-- `current_energy_matrix::Float64`    — current matrix sensible heat.
-- `current_energy_total::Float64`     — current total sensible heat (matrix + gas).
-- `gas_storage_gap::Float64`          — `(E_total − E_matrix)`, the energy held in gas storage that the discrete equation does not evolve.
-- `discrete_conserved::Bool`          — `discrete_relative < tol`.
-- `physical_conserved::Bool`          — `physical_relative < tol`.
+- `residual::Float64`        — `E(t) − E(0) − Σ contributions` [J]. `≈ 0` to integrator tolerance for constant composition and volume.
+- `relative::Float64`        — relative magnitude vs `|E(0)|`.
+- `conserved::Bool`          — `relative < tol`.
+- `current_energy::Float64`  — current sensible heat [J].
 """
 function check_energy_conservation(
     tracker::EnergyConservationTracker,
@@ -425,50 +355,27 @@ function check_energy_conservation(
     material;
     tol::Float64 = 1e-6,
 )
-    E_matrix_now = compute_sensible_energy(mesh, material)
-    E_total_now = compute_total_sensible_energy(mesh, material)
+    E_now = compute_sensible_energy(mesh, material)
 
-    # Discrete-form expectation: only terms the RHS actually assembles
-    # (matrix-only ρcp; S_conv and S_gen already integrated).
-    expected_matrix =
-        tracker.initial_energy_matrix +
+    expected =
+        tracker.initial_energy +
         tracker.cumulative_boundary_conduction +
         tracker.cumulative_reaction_heat +
         tracker.cumulative_advection_sink +
         tracker.cumulative_generation_sink
-    discrete_residual = E_matrix_now - expected_matrix
+    residual = E_now - expected
 
-    # Physical-form expectation: full energy ledger including gas storage,
-    # using applied BC heat (not just conducted) and the transpiration outflow
-    # as the explicit energy "leaving via gas".
-    expected_total =
-        tracker.initial_energy_total +
-        tracker.cumulative_boundary_applied +
-        tracker.cumulative_reaction_heat - tracker.cumulative_transpiration
-    physical_residual = E_total_now - expected_total
-
-    discrete_relative = if abs(tracker.initial_energy_matrix) > eps()
-        abs(discrete_residual) / abs(tracker.initial_energy_matrix)
+    relative = if abs(tracker.initial_energy) > eps()
+        abs(residual) / abs(tracker.initial_energy)
     else
-        abs(discrete_residual)
-    end
-
-    physical_relative = if abs(tracker.initial_energy_total) > eps()
-        abs(physical_residual) / abs(tracker.initial_energy_total)
-    else
-        abs(physical_residual)
+        abs(residual)
     end
 
     return (
-        discrete_residual = discrete_residual,
-        discrete_relative = discrete_relative,
-        discrete_conserved = discrete_relative < tol,
-        physical_residual = physical_residual,
-        physical_relative = physical_relative,
-        physical_conserved = physical_relative < tol,
-        current_energy_matrix = E_matrix_now,
-        current_energy_total = E_total_now,
-        gas_storage_gap = E_total_now - E_matrix_now,
+        residual = residual,
+        relative = relative,
+        conserved = relative < tol,
+        current_energy = E_now,
     )
 end
 
@@ -489,22 +396,12 @@ function energy_conservation_report(
 
     lines = String[]
     push!(lines, "=" ^ 70)
-    push!(lines, "ENERGY CONSERVATION REPORT (Formulation A)")
+    push!(lines, "ENERGY CONSERVATION REPORT")
     push!(lines, "=" ^ 70)
     push!(lines, @sprintf("Time: %.4f s", tracker.last_time))
     push!(lines, "-" ^ 70)
-    push!(
-        lines,
-        "DISCRETE-FORM LEDGER (matrix-only ρcp_eff; closes to integrator tolerance)",
-    )
-    push!(
-        lines,
-        @sprintf("  E_matrix(0):                %12.6e J", tracker.initial_energy_matrix)
-    )
-    push!(
-        lines,
-        @sprintf("  E_matrix(t):                %12.6e J", result.current_energy_matrix)
-    )
+    push!(lines, @sprintf("  E(0):                       %12.6e J", tracker.initial_energy))
+    push!(lines, @sprintf("  E(t):                       %12.6e J", result.current_energy))
     push!(
         lines,
         @sprintf(
@@ -529,54 +426,17 @@ function energy_conservation_report(
     push!(
         lines,
         @sprintf(
-            "  ∫∫ S_gen dV · dt:         %12.6e J",
+            "  ∫∫ S_gen dV · dt:           %12.6e J",
             tracker.cumulative_generation_sink
         )
     )
     push!(
         lines,
         @sprintf(
-            "  Discrete residual:          %12.6e J  (rel. %.2e) %s",
-            result.discrete_residual,
-            result.discrete_relative,
-            result.discrete_conserved ? "✓" : "✗"
-        )
-    )
-    push!(lines, "-" ^ 70)
-    push!(
-        lines,
-        "PHYSICAL-FORM LEDGER (matrix + gas storage; quantifies approximation cost)",
-    )
-    push!(
-        lines,
-        @sprintf("  E_total(0):                 %12.6e J", tracker.initial_energy_total)
-    )
-    push!(
-        lines,
-        @sprintf("  E_total(t):                 %12.6e J", result.current_energy_total)
-    )
-    push!(lines, @sprintf("  Gas storage gap:            %12.6e J", result.gas_storage_gap))
-    push!(
-        lines,
-        @sprintf(
-            "  ∫ q_BC_applied · A · dt:    %12.6e J",
-            tracker.cumulative_boundary_applied
-        )
-    )
-    push!(
-        lines,
-        @sprintf(
-            "  ∫ Σ ṁ·Δh · A · dt (transp): %12.6e J",
-            tracker.cumulative_transpiration
-        )
-    )
-    push!(
-        lines,
-        @sprintf(
-            "  Physical residual:          %12.6e J  (rel. %.2e) %s",
-            result.physical_residual,
-            result.physical_relative,
-            result.physical_conserved ? "✓" : "✗"
+            "  Residual:                   %12.6e J  (rel. %.2e) %s",
+            result.residual,
+            result.relative,
+            result.conserved ? "✓" : "✗"
         )
     )
     push!(lines, "=" ^ 70)

@@ -221,7 +221,7 @@ ledgers (§16, Conservation Diagnostics).
 
 ---
 
-## 7.3 Effective Matrix Heat Capacity and the Formulation A Energy Equation
+## 7.3 Effective Heat Capacity and the Formulation A Energy Equation
 
 ### 7.3.1 The non-conservative temperature equation
 
@@ -252,60 +252,47 @@ with, term by term,
 | $Q_{\text{rxn}}$ | $-\sum_r h_r r_r$ | reaction heat | 7.7 |
 
 The subscript $g$ runs over the **gas** components only (the predicate `is_gas`). The storage
-coefficient $\rho c_p^{\text{eff}}$ is the **matrix-only** volumetric heat capacity, defined
+coefficient $\rho c_p^{\text{eff}}$ is the **mixture** volumetric heat capacity, defined
 next.
 
-### 7.3.2 Matrix-only heat capacity and the quasi-steady-gas approximation
+### 7.3.2 Mixture heat capacity: every component stores sensible heat
 
-The volumetric thermal storage uses only the solid- and liquid-phase heat capacity:
+The volumetric thermal storage sums every component, gas included:
 
 $$
 \boxed{\;
 \rho c_p^{\text{eff}}(T,\xi)
-\;=\!\!\sum_{j\in\{\text{solid},\,\text{liquid}\}}\!\! \xi_j\,c_{p,j}(T)
+\;=\!\!\sum_{j=1}^{N_C}\!\! \xi_j\,c_{p,j}(T)
 \;}
 \qquad [\text{J}\,\text{m}^{-3}\text{K}^{-1}]
 \tag{7.7}
 $$
 
-Gas components are **excluded** from (7.7). This is *not* an oversight but a deliberate
-**quasi-steady-gas approximation**. The full energy equation would carry, on the storage
-side, the in-pore gas sensible-heat term $\sum_g (\rho c)_g\,\partial T/\partial t$. That term
-is dropped because:
+The pore gas is at the matrix temperature (one-temperature model, §3.1.2) and its
+concentration $\xi_g$ is an integrated state, so its storage term costs nothing and is
+kept. Dropping it — the *quasi-steady-gas approximation* of Gpyro's default
+thermal-equilibrium form (restored there by `FULL_QSG`) and the implicit convention of
+FDS, which has no in-depth gas — would be an approximation with no benefit. At
+$1\,\text{atm}$ the in-pore gas heat capacity is a few tenths of a percent of the matrix
+heat capacity (the gas-to-solid density ratio is $\mathcal{O}(10^{-3})$ and the specific
+heats are comparable), scaling with pressure; on white-pine cone decks it is at most
+about half a percent and shifts the response by a uniform time lag of about a tenth
+of a percent.
 
-1. **Time-scale separation.** The gas residence (advection) time through a pore is short
-   compared with the matrix thermal-diffusion time. The gas reaches local thermal equilibrium
-   with the surrounding matrix essentially instantaneously, so it stores no independent
-   thermal history; its sensible heat is carried *with* it as it flows, which is exactly what
-   the advection source $S_{\text{conv}}$ accounts for.
+The gas enters the energy equation in two places and two places only: its storage in
+(7.7) and its *flux relative to the skeleton* through the advective source
+$S_{\text{conv}}$ (§7.4). The derivation of §3.3.2 shows these two terms, plus the
+reaction heat with heats quoted at the reaction temperature, to be the complete
+equation — ThermaKin Eq. 17 term for term. In ALE the whole $\rho c_p^{\text{eff}}$
+rides the mesh with the skeleton, so there is no mesh-motion term in the energy
+equation (§11.2.2).
 
-2. **Magnitude.** At $1\,\text{atm}$ the in-pore gas heat capacity is roughly $0.2\%$ of the
-   matrix heat capacity (the gas-to-solid density ratio is $\mathcal{O}(10^{-3})$ and the
-   specific heats are comparable). The error scales with pressure, since $\rho_g\propto P$.
-
-Dropping gas storage from the left-hand side while carrying gas enthalpy on the right-hand
-side via advection is the convention used by **FDS** and **Gpyro**. It is *not* identical to
-**ThermaKin2Ds**, whose energy equation sums $\sum_j \xi_j c_{p,j}$ over *all* components
-including gas (its Eq. 8–10 storage term retains the gas contribution). Pyrolysis.jl therefore
-matches the FDS/Gpyro storage convention but uses ThermaKin's *advection* term for the gas
-enthalpy transport (§7.4). The cost of the storage approximation is not hidden: the
-diagnostics tracker (§16) carries a parallel **total** heat capacity
-
-$$
-\rho c_p^{\text{total}}(T,\xi) \;=\; \sum_{j}\xi_j\,c_{p,j}(T)
-\tag{7.8}
-$$
-
-(summed over *all* phases) and forms the gas-storage gap $\Delta E_{\text{gas}} =
-E_{\text{total}}-E_{\text{matrix}}$, quantifying the approximation as the *physical-form
-residual*.
-
-> **Implementation note.** $\rho c_p^{\text{eff}}$ is `effective_heat_capacity` and
-> $\rho c_p^{\text{total}}$ is `total_heat_capacity`, both in
-> `src/Properties/effective_properties.jl`. Each is a `@generated` unrolled sum over the
-> component tuple; the matrix version guards each term with `if !is_gas(comps[i])`, a
-> compile-time branch that is eliminated by the code generator (no runtime dispatch). The
-> per-cell value used by the assembly is cached as `prop_cache.ρcp[i]`.
+> **Implementation note.** $\rho c_p^{\text{eff}}$ is `effective_heat_capacity` in
+> `src/Properties/effective_properties.jl`, a `@generated` unrolled sum over the
+> component tuple with no phase branch. The per-cell value used by the assembly is
+> cached as `prop_cache.ρcp[i]`; the same function feeds the structured-Jacobian
+> operators (through Dual evaluation), the park-and-mask temperature merge and the
+> energy ledger.
 
 ### 7.3.3 The discrete temperature update
 
@@ -349,8 +336,8 @@ dT[i] = (-rhs_cache.div_q[i] + rhs_cache.S_conv[i] + rhs_cache.S_gen[i]
          + rhs_cache.Q_rad[i] + rhs_cache.Q_rxn[i]) / ρcp
 ```
 
-so the storage approximation enters at exactly one place — the divisor `ρcp`, which is the
-matrix-only (7.7). In the default `:standard` energy form $S_{\text{gen},i}\equiv 0$ (its
+so the storage coefficient enters at exactly one place — the divisor `ρcp`, the
+mixture value (7.7). In the default `:standard` energy form $S_{\text{gen},i}\equiv 0$ (its
 cache slot is zeroed each RHS), so the active terms are conduction, $S_{\text{conv}}$,
 radiation, and reaction heat.
 
@@ -618,12 +605,11 @@ $\sum_g \Delta h_g(T,T_{\text{ref}})\,\dot m_g'''$ a second time
 pyrolysis itself). `to_problem_def` emits a one-time warning when the sink is
 selected.
 
-Even with $T_{\text{ref}}$-datum heats, $S_{\text{gen}}$ is a **partial** step
-toward fully conservative form: the full conservative-equivalent assembly
-*also* requires gases back in $\rho c_p^{\text{eff}}$ (which Formulation A
-excludes by design, §7.3.2) and the condensed-product sensible-generation
-term $-\sum_{S/L}\Delta h_j(T)\,\dot\omega_j$ (not implemented), so enabling
-$S_{\text{gen}}$ alone does not make the scheme conservative. In the default
+Even with $T_{\text{ref}}$-datum heats, $S_{\text{gen}}$ is a **partial** datum
+conversion: the exact equation also carries the condensed-product term
+$-\sum_{S/L}\Delta h_j(T,T_{\text{ref}})\,\dot\omega_j$ (not implemented), and
+$S_{\text{gen}}$ itself uses $\nabla\!\cdot\mathbf J_g$ in place of $\dot\omega_g$, which
+agree only in the quasi-steady limit (§3.3.2). In the default
 `:standard` form $S_{\text{gen}}$ is dropped, and the gas-enthalpy divergence
 is closed only at the boundary — the FDS/Gpyro convention. Note also that the
 default convention (§7.6) keeps transpiration *off*, and the three-way
@@ -661,8 +647,11 @@ over-counting by $|\!\int S_{\text{conv}}|$. In practice this spurious double si
 order of $5$–$10\,\text{kW}\,\text{m}^{-2}$, which under-predicts the surface temperature and
 the mass-loss rate.
 
-For this reason the supported convention (ThermaKin Eq. 17 / FDS / Gpyro) is **$S_{\text{conv}}$
-only, plain convective+radiative surface BC, transpiration off.** The transpiration path is
+For this reason the supported convention (ThermaKin Eq. 17; Gpyro's thermal-equilibrium
+form is the same term) is **$S_{\text{conv}}$ only, plain convective+radiative surface
+BC, transpiration off.** Under local thermal equilibrium the gas crosses the surface at
+$T_s$ on both sides, so its enthalpy flux is continuous there and the surface balance
+is conducted flux equals applied flux (§1.4.3). The transpiration path is
 retained only for closed-ledger numerical experiments (where $S_{\text{conv}}$ is conceptually
 replaced, not augmented), and must never be combined with the volumetric source.
 
@@ -911,59 +900,59 @@ the gas enthalpy coupling is written, and (iii) the radiation closure.
 
 ### 7.10.2 ThermaKin2Ds
 
-ThermaKin writes the through-thickness energy equation with the gas-advection term
+ThermaKin writes the through-thickness energy equation with the all-component storage
+$\sum_j \xi_j c_{p,j}\,\partial T/\partial t$, the gas-advection term
 $c_g\,(\mathbf{J}_g\!\cdot\!\partial T/\partial x)$ (its Eq. 17) — *exactly* the
-$S_{\text{conv}}$ of (7.12). Pyrolysis.jl adopts this advection term as its default and sole
-gas-enthalpy carrier. ThermaKin maps to our symbols as: ThermaKin's stoichiometric
-$\theta_i^{\,j}\to \nu_{j,r}$ (the strain rate $\theta$ is reserved here for dilation; §2 note
-A2); ThermaKin's bimolecular concentration product $\xi_{\text{COMP1}}\xi_{\text{COMP2}}$ has
-no analog because Pyrolysis.jl enforces a single reactant (§6); ThermaKin's gas flux
-$J=-\rho_g\lambda\,\partial(\xi_g/\rho_g)/\partial x$ is the volume-fraction-gradient form
-implemented here (§9). The key *difference* is the storage term: ThermaKin's
-$(\rho c_p)\partial T/\partial t$ sums $\sum_j \xi_j c_{p,j}$ over **all** components,
-**including** gas, whereas Pyrolysis.jl uses the matrix-only (7.7) (the FDS/Gpyro
-quasi-steady-gas approximation). Pyrolysis.jl is therefore "ThermaKin advection + FDS/Gpyro
-storage."
+$S_{\text{conv}}$ of (7.12) — and a deformation term that is the skeleton-following part
+of the time derivative, which the ALE mesh frame absorbs (§11.2.2). Pyrolysis.jl's energy
+equation is therefore ThermaKin Eq. 17 term for term. ThermaKin maps to our symbols as:
+ThermaKin's stoichiometric $\theta_i^{\,j}\to \nu_{j,r}$ (the strain rate $\theta$ is
+reserved here for dilation; §2 note A2); ThermaKin's bimolecular concentration product
+$\xi_{\text{COMP1}}\xi_{\text{COMP2}}$ has no analog because Pyrolysis.jl enforces a single
+reactant (§6); ThermaKin's gas flux $J=-\rho_g\lambda\,\partial(\xi_g/\rho_g)/\partial x$ is
+the volume-fraction-gradient form implemented here (§9).
 
 ### 7.10.3 Gpyro
 
 Gpyro's energy equation (Lautenberger) uses a control-volume conservative formulation on
 $\bar\rho\,\Delta z$, with the bulk (averaged) density $\bar\rho$ (our $\rho$),
 volume-fraction ($X_\alpha\to v_j$) property averaging, and power-law temperature-dependent
-properties. Its solid-phase enthalpy is transported conservatively and the gas energy equation
-is written separately for the in-pore gas. Gpyro shares the *quasi-steady-gas storage*
-convention with Pyrolysis.jl: the matrix carries the thermal storage and the gas carries its
-enthalpy by advection. The mapping: Gpyro's pre-exponential $Z\to A_r$; its conversion variable
-$\alpha_{\text{conv}}$ has no single analog (Pyrolysis.jl tracks mass concentrations $\xi_j$
-directly, with $\chi$ as a separate progress variable for cross-section, §10); its permeability
-$K\to\kappa$; its mass flux $\dot m''=-(K/\nu)(\partial P/\partial z - g\rho_g)$ is the Darcy
-term of §9 (Pyrolysis.jl omits the gravity/buoyancy term $g\rho_g$ as negligible in the thin
-condensed phase). Numerically Gpyro uses Patankar control-volume discretization with
-Peclet-based scheme selection, harmonic interface interpolation, and a TDMA solve; Pyrolysis.jl
-uses the same harmonic interface interpolation (7.2) but a method-of-lines + stiff-ODE
-integrator with a structured Jacobian (§15) rather than a hand-rolled implicit TDMA sweep.
+properties. Its thermal-equilibrium form carries the gas through the solid-to-gas heat
+transfer $\dot Q_{s-g}''' \approx \dot m'' c_{pg}\,\partial T/\partial z$ (its Eq. 65) — our
+$S_{\text{conv}}$ with the Darcy mass flux — and drops the gas storage
+$\rho_g\bar\psi c_{pg}\,\partial T/\partial t$ by default; its `FULL_QSG` option restores it,
+which makes the equation (7.6) with (7.7). The mapping: Gpyro's pre-exponential
+$Z\to A_r$; its conversion variable $\alpha_{\text{conv}}$ has no single analog
+(Pyrolysis.jl tracks mass concentrations $\xi_j$ directly, with $\chi$ as a separate
+progress variable for cross-section, §10); its permeability $K\to\kappa$; its mass flux
+$\dot m''=-(K/\nu)(\partial P/\partial z - g\rho_g)$ is the Darcy term of §9 (Pyrolysis.jl
+omits the gravity/buoyancy term $g\rho_g$ as negligible in the thin condensed phase).
+Numerically Gpyro uses Patankar control-volume discretization with Peclet-based scheme
+selection, harmonic interface interpolation, and a TDMA solve; Pyrolysis.jl uses the same
+harmonic interface interpolation (7.2) but a method-of-lines + stiff-ODE integrator with a
+structured Jacobian (§15) rather than a hand-rolled implicit TDMA sweep.
 
 ### 7.10.4 FDS
 
 The FDS solid-phase model solves a 1D Fourier conduction equation with the surface balance
 $-k\,\partial T/\partial x = \dot q_c'' + \dot q_r''$, Arrhenius reaction kinetics
-($\rho^n O_2^n T^n$ rate form), and the same quasi-steady-gas storage convention (gas heat
-capacity not stored; gas enthalpy carried out at the surface). FDS maps as: pre-exponential
-$Z\to A_r$; solid absorption coefficient $\kappa_s\to\alpha$; the surface energy balance with
-$\dot q_c''$ (convective) and $\dot q_r''$ (radiative) is the boundary Newton solve of §12. The
-radiation closure differs (FDS uses a two-flux Schuster–Schwarzschild model in-depth;
-Pyrolysis.jl offers SURFACE_ABSORPTION / BEER_LAMBERT / P1, §8). The deepest commonality with
-FDS is exactly the modeling choice this chapter centers on: **gas storage is excluded from
-$\rho c_p$, and the surface gas-enthalpy outflow is closed at the boundary** — except that
-Pyrolysis.jl, following ThermaKin, distributes that outflow volumetrically as $S_{\text{conv}}$
-rather than applying it solely as a surface transpiration term (and forbids doing both — §7.6).
+($\rho^n O_2^n T^n$ rate form), and no in-depth gas: volatiles leave instantaneously, so
+there is no gas storage and no in-depth gas-enthalpy coupling; the gas enthalpy is closed
+at the surface. FDS maps as: pre-exponential $Z\to A_r$; solid absorption coefficient
+$\kappa_s\to\alpha$; the surface energy balance with $\dot q_c''$ (convective) and
+$\dot q_r''$ (radiative) is the boundary Newton solve of §12. The radiation closure differs
+(FDS uses a two-flux Schuster–Schwarzschild model in-depth; Pyrolysis.jl offers
+SURFACE_ABSORPTION / BEER_LAMBERT / P1, §8). Pyrolysis.jl, following ThermaKin, resolves
+the gas in depth and distributes its enthalpy transport volumetrically as $S_{\text{conv}}$
+rather than applying it solely as a surface transpiration term (and forbids doing both —
+§7.6).
 
 ### 7.10.5 Summary table
 
 | feature | Pyrolysis.jl | ThermaKin2Ds | Gpyro | FDS |
 |---|---|---|---|---|
-| storage $\rho c_p$ | matrix only (7.7) | all components (incl. gas) | matrix (quasi-steady gas) | matrix (quasi-steady gas) |
-| gas enthalpy coupling | $S_{\text{conv}}$ volumetric (default); transpiration BC opt-in (exclusive) | $S_{\text{conv}}$ volumetric (Eq. 17) | gas energy eqn + advection | surface transpiration |
+| storage $\rho c_p$ | all components (7.7) | all components (incl. gas) | matrix by default; all with `FULL_QSG` | matrix (no in-depth gas) |
+| gas enthalpy coupling | $S_{\text{conv}}$ volumetric | $S_{\text{conv}}$ volumetric (Eq. 17) | $\dot m'' c_{pg}\,\partial T/\partial z$ (thermal equilibrium) | surface outflow |
 | face conductivity | distance-weighted harmonic mean | harmonic | harmonic (Patankar) | — |
 | conduction discretization | cell-centered FV, MOL + stiff ODE | Crank–Nicolson (x) | Patankar CV + TDMA | implicit FD |
 | radiation | none / surface / Beer–Lambert / P1 | Beer–Lambert + re-radiation | in-depth exp absorption | two-flux S–S |
@@ -976,11 +965,9 @@ rather than applying it solely as a surface transpiration term (and forbids doin
 The energy assembly inherits a small number of known limitations, drawn from the source notes
 and discussed where relevant above:
 
-1. **Pressure-dependence of the gas-storage approximation is not auto-switched.** The
-   quasi-steady-gas exclusion of gas heat capacity from $\rho c_p^{\text{eff}}$ (§7.3.2) costs
-   $\sim 0.2\%$ at $1\,\text{atm}$ and scales with pressure; the cost is *measured* by the
-   diagnostics physical-form residual (§16) but the code does not automatically restore gas
-   storage at elevated pressure. A pressure-threshold switch could be added but has not been.
+1. **One temperature.** The pore gas is stored at the matrix temperature (§7.3.2); there is
+   no two-temperature gas energy equation, so regimes where the gas does not equilibrate
+   with the pore walls within a cell are outside the model (§3.9).
 
 2. **Single-scalar $T_{\text{ref}}$ in $S_{\text{gen}}$ breaks closure for asymmetric ambients
    with a permeable back face** (§7.5.3). Harmless for the usual impermeable back face or equal

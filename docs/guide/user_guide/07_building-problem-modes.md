@@ -443,7 +443,7 @@ formulation. It is passed as the `energy_form` keyword to `solve`:
 
 | Value | Meaning |
 |---|---|
-| `:standard` (default) | Formulation A. The volumetric gas-advection source `S_conv = −Σ_g c_{p,g} J_g ∂T/∂z` is active; the gas-generation enthalpy-divergence term is dropped. This matches the FDS / Gpyro / ThermaKin convention. |
+| `:standard` (default) | Formulation A. The volumetric gas-advection source `S_conv = −Σ_g c_{p,g} J_g ∂T/∂z` is active; the gas-generation enthalpy-divergence term is dropped. This is the ThermaKin convention, exact for heats of reaction quoted at the reaction temperature. |
 | `:with_generation_sink` | Adds the gas-generation enthalpy sink `S_gen = −Σ_g Δh_g(T_i,T_ref)(∇·J_g)_i` as an extra cell source — a *partial* move toward conservative form. **Requires T_ref-datum reaction heats** (see warning below). |
 
 ```julia
@@ -495,8 +495,9 @@ solver integrates. The two mesh-motion paths are the primary fork:
 - **ALE path** — geometry is recomputed from the node positions. The residual
   additionally updates the cross-section area (for `WithChi`), computes the
   per-cell strain `θ` and the column radial strain `θ_A`, integrates the
-  cumulative mesh velocity `w` from the bottom up, applies ALE advection and the
-  solid-dilation correction, packs the `z` block, and (for `WithChi`) packs the χ
+  cumulative mesh velocity `w` from the bottom up, applies the dilation
+  correction to every component (every component rides the mesh, so there is
+  no advection term), packs the `z` block, and (for `WithChi`) packs the χ
   derivatives.
 
 Radiation, transport, and cross-section are handled by compile-time dispatch

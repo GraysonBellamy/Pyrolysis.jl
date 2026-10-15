@@ -7,11 +7,9 @@ Builds a `DiscreteCallback` that fires every
 1. Update the running mass / energy / reaction trackers with this substep's
    contributions, and
 2. Emit a typed `NamedTuple` row to `log::Vector{NamedTuple}` capturing the
-   discrete- and physical-form residuals at this point in the simulation.
+   energy and mass ledger residuals at this point in the simulation.
 
-This is the visibility mechanism that makes the FDS-convention approximations
-(gas-excluded `ρcp_eff`, dropped `T·cp·∇·J` term in `:standard`) auditable
-on every solve. The log is connected to `PyrolysisSolution.extras`.
+The log is connected to `PyrolysisSolution.extras`.
 """
 
 using SciMLBase: DiscreteCallback, derivative_discontinuity!
@@ -20,18 +18,8 @@ using FunctionWrappers: FunctionWrapper
 # Row type — concretely typed so consumers don't have to deal with
 # Dict{Symbol,Any}. Adding a new diagnostic adds a field here, not a key.
 const DiagnosticsRow = NamedTuple{
-    (
-        :t,
-        :E_matrix,
-        :E_total,
-        :discrete_residual,
-        :discrete_relative,
-        :physical_residual,
-        :physical_relative,
-        :gas_storage_gap,
-        :mass_max_relative_error,
-    ),
-    Tuple{Float64,Float64,Float64,Float64,Float64,Float64,Float64,Float64,Float64},
+    (:t, :E_sensible, :energy_residual, :energy_relative, :mass_max_relative_error),
+    Tuple{Float64,Float64,Float64,Float64,Float64},
 }
 
 """
@@ -79,8 +67,7 @@ end
 
 """
     record_substep!(state::DiagnosticsState, mesh, material;
-                    q_cond_boundary, q_bc_applied, Q_rxn_total,
-                    S_conv_total, S_gen_total, q_transpiration,
+                    q_cond_boundary, Q_rxn_total, S_conv_total, S_gen_total,
                     J_boundary, A, t)
 
 Update the trackers with one substep's contributions and append a typed row
@@ -93,11 +80,9 @@ function record_substep!(
     mesh::Geometry.Mesh1D{NC},
     material;
     q_cond_boundary::Float64,
-    q_bc_applied::Float64,
     Q_rxn_total::Float64,
     S_conv_total::Float64,
     S_gen_total::Float64,
-    q_transpiration::Float64,
     J_boundary::Matrix{Float64},
     A::Float64,
     t::Float64,
@@ -117,11 +102,9 @@ function record_substep!(
     update_energy_tracker!(
         state.energy;
         q_cond_boundary = q_cond_boundary,
-        q_bc_applied = q_bc_applied,
         Q_rxn_total = Q_rxn_total,
         S_conv_total = S_conv_total,
         S_gen_total = S_gen_total,
-        q_transpiration = q_transpiration,
         A = A,
         dt = dt,
     )
@@ -132,13 +115,9 @@ function record_substep!(
         mc = check_mass_conservation(state.mass, mesh, material)
         row = DiagnosticsRow((
             t = t,
-            E_matrix = ec.current_energy_matrix,
-            E_total = ec.current_energy_total,
-            discrete_residual = ec.discrete_residual,
-            discrete_relative = ec.discrete_relative,
-            physical_residual = ec.physical_residual,
-            physical_relative = ec.physical_relative,
-            gas_storage_gap = ec.gas_storage_gap,
+            E_sensible = ec.current_energy,
+            energy_residual = ec.residual,
+            energy_relative = ec.relative,
             mass_max_relative_error = mc.max_error,
         ))
         push!(state.log, row)
@@ -149,25 +128,18 @@ end
 """
     snapshot_diagnostics_row(t, mesh, material) -> DiagnosticsRow
 
-Cumulative-free snapshot at a single point: matrix-only energy, total energy
-(includes gas), and the gas-storage gap. Other ledger fields (cumulative
-residuals, mass error) are filled with `NaN` to mark them as not-yet-computed.
-This is what the snapshot-mode callback writes; the cumulative form requires
-per-substep accumulation that the unified residual layer wires
-through `record_substep!`.
+Cumulative-free snapshot at a single point: the sensible energy. The ledger
+fields (cumulative residual, mass error) are filled with `NaN` to mark them
+as not-yet-computed. This is what the snapshot-mode callback writes; the
+cumulative form requires per-substep accumulation that the unified residual
+layer wires through `record_substep!`.
 """
 function snapshot_diagnostics_row(t::Float64, mesh::Geometry.Mesh1D, material)
-    E_matrix = compute_sensible_energy(mesh, material)
-    E_total = compute_total_sensible_energy(mesh, material)
     return DiagnosticsRow((
         t = t,
-        E_matrix = E_matrix,
-        E_total = E_total,
-        discrete_residual = NaN,
-        discrete_relative = NaN,
-        physical_residual = NaN,
-        physical_relative = NaN,
-        gas_storage_gap = E_total - E_matrix,
+        E_sensible = compute_sensible_energy(mesh, material),
+        energy_residual = NaN,
+        energy_relative = NaN,
         mass_max_relative_error = NaN,
     ))
 end

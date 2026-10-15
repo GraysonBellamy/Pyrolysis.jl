@@ -11,7 +11,8 @@
 # ## Continuous system targeted (Eulerian, Fickian transport, no radiation,
 # ## energy_form = :standard — the discretization's consistency target)
 #
-#   ρcp_eff(T,ξ) ∂T/∂t = −∂z q + S_conv + Q_rxn + S_T,      q = −k_eff(T,ξ) ∂z T
+#   ρcp(T,ξ) ∂T/∂t = −∂z q + S_conv + Q_rxn + S_T,      q = −k_eff(T,ξ) ∂z T
+#       ρcp    = Σⱼ ξⱼ cp_j(T)   (every component, gas included)
 #       S_conv = −Σ_g cp_g(T) J_g ∂z T
 #       Q_rxn  = −Σ_r h_r(T,ξ) r_r(ξ,T)
 #   ∂ξ_g/∂t = −∂z J_g + ω̇_g + S_ξg,   J_g = −(λ_eff(T,ξ)/T)·∂z(ξ_g T)
@@ -24,7 +25,7 @@
 # ## Design decisions (mirror the case docstrings before changing)
 #
 # 1. **Sources are injected at the state-derivative level** (K/s for T,
-#    kg/(m³·s) for ξ), with the energy source divided by ρcp_eff evaluated on
+#    kg/(m³·s) for ξ), with the energy source divided by ρcp evaluated on
 #    the *manufactured* fields — a pure function of (z,t). A W/m³ source
 #    divided by the numerical ρcp(u) would be state-dependent and silently
 #    invalidate the analytic Jacobian; this way ∂S/∂u ≡ 0 and the shipped
@@ -45,28 +46,26 @@
 #    transcribe wrong. The hand-derived checks live in selftests.jl.
 #
 # ## ALE
-# The same injection works on a moving mesh for T and GAS fields: on a grid
-# point z_i(t) moving with mesh velocity w, d/dt T*(z_i(t),t) = ∂tT* + w ∂zT*,
-# and the discrete ALE advection term supplies (its approximation of) w ∂zT*,
-# so the Eulerian source formula evaluated at the CURRENT cell center is
-# exactly right — the wrapper reads cell centers from the live z-block. Mesh
-# motion is prescribed through the `Workspace.w_override` hook (free-stream &
-# ALE-MMS cases).
+# Every component rides the mesh (the mesh is the skeleton, and the gas flux
+# J_g is relative to it), so on a moving mesh the species equations carry no
+# advection operator — only the dilation −ξθ with the reaction-driven strain
+# rate θ. A z-varying manufactured field therefore needs its source assembled
+# in the material-following frame (`w` keyword of the source functions):
 #
-# CONSTRAINT — condensed phases are mesh-bound: the ALE formulation tracks
-# solids/liquids Lagrangian-ly (v_solid = w ⇒ NO advection term; see
-# compute_ale_species_advection!), so under a PRESCRIBED motion that is not
-# the material velocity, a z-varying manufactured solid field has no
-# discrete operator to balance its w·∂zξ* term and the error cannot
-# converge. ALE-MMS cases must keep every condensed-phase manufactured field
-# spatially uniform (time variation is fine — it still exercises the source
-# path); gas fields and T carry the full space-time structure.
+#   S_j = ∂tξ*_j + w·∂zξ*_j + [∂zJ*_j]_gas − ω̇*_j + ξ*_j·θ*
 #
-# Under REACTION-DRIVEN (induced) motion — no w_override — the mesh IS the
-# solid material frame, so z-varying condensed fields become representable;
-# their manufactured sources must then be assembled in the material-following
-# frame (S_s = ∂tξ* + w*·∂zξ* − ω̇* + ξ*·θ*). That path is the opt-in
-# `MMSMotion` companion below (V-MMS-04).
+# where w·∂zξ* is the moving-point chain rule (no discrete operator supplies
+# it) and +ξ*θ* balances the discrete dilation. Under REACTION-DRIVEN
+# (induced) motion — the `MMSMotion` companion, no `w_override` — w is the
+# prefix sum of θ* on the manufactured fields (`mms_mesh_velocity`) and the
+# temperature source is assembled in the same frame (the discrete energy
+# equation has no T advection either). Under PRESCRIBED motion
+# (`Workspace.w_override`) the mesh is decoupled from the material: the
+# species still ride the applied mesh (material-frame source with w = the
+# override), while T keeps the Eulerian source because the discrete
+# mesh-relative advection kernel supplies w_rel·∂zT* itself (w_physical = 0
+# without reactions). Sources are evaluated at the LIVE cell centers read
+# from the z-block.
 #
 # Sign conventions (verified against finite_volume.jl):
 #   q_z = −k∂zT, J positive in +z; "into domain" flux at top = −(flux at L),
@@ -184,12 +183,15 @@ end
 Manufactured energy source in **K/s** (state-derivative units — see design
 decision 1):
 
-S_T(z,t) = ∂tT* + (∂z q* − S_conv* − Q_rxn*) / ρcp_eff(T*,ξ*)
+S_T(z,t) = ∂tT* + w·∂zT* + (∂z q* − S_conv* − Q_rxn*) / ρcp(T*,ξ*)
 
 Added to `du` on the temperature block, it makes T* the exact solution of the
 continuous energy equation while leaving the analytic Jacobian untouched.
+`w = nothing` (Eulerian mesh, or prescribed motion whose mesh-relative T
+advection the kernel supplies) drops the chain-rule term; under induced
+motion pass the reaction-driven `w(z,t)`.
 """
-function mms_energy_source(material, fields::MMSFields, z, t)
+function mms_energy_source(material, fields::MMSFields, z, t; w = nothing)
     T = fields.T(z, t)
     ξ = mms_xi_tuple(fields, z, t)
     ρcp = Properties.effective_heat_capacity(ξ, T, material)
@@ -197,25 +199,39 @@ function mms_energy_source(material, fields::MMSFields, z, t)
     div_q = ForwardDiff.derivative(ζ -> mms_heat_flux(material, fields, ζ, t), z)
     S_conv = mms_S_conv(material, fields, z, t)
     Q_rxn = mms_Q_rxn(material, ξ, T)
-    return dTdt + (div_q - S_conv - Q_rxn) / ρcp
+    S = dTdt + (div_q - S_conv - Q_rxn) / ρcp
+    if w !== nothing
+        S += w(z, t) * ForwardDiff.derivative(ζ -> fields.T(ζ, t), z)
+    end
+    return S
 end
 
 """
 Manufactured species source for component `j` in **kg/(m³·s)**:
 
-S_ξj(z,t) = ∂tξ*_j + ∂z J*_j·[gas only] − ω̇*_j
+S_ξj(z,t) = ∂tξ*_j + w·∂zξ*_j + ∂z J*_j·[gas only] − ω̇*_j + ξ*_j·θ*
+
+`w = nothing` (Eulerian mesh) drops the two mesh-motion terms. On a moving
+mesh every component rides it, so pass the mesh velocity `w(z,t)` — the
+reaction-driven `mms_mesh_velocity` under induced motion, the override
+function under prescribed motion — and the source is assembled in the
+material-following frame: `w·∂zξ*` is the moving-point chain rule (no
+discrete operator supplies it) and `+ξ*θ*` balances the discrete dilation
+with the reaction-driven strain rate θ* (`mms_theta`).
 """
-function mms_species_source(material, fields::MMSFields, j::Int, z, t)
+function mms_species_source(material, fields::MMSFields, j::Int, z, t; w = nothing)
     T = fields.T(z, t)
     ξ = mms_xi_tuple(fields, z, t)
     dξdt = ForwardDiff.derivative(τ -> fields.ξ[j](z, τ), t)
-    src = mms_rxn_source(material, j, ξ, T)
+    S = dξdt - mms_rxn_source(material, j, ξ, T)
     if is_gas(material.components[j])
-        divJ = ForwardDiff.derivative(ζ -> mms_gas_flux(material, fields, j, ζ, t), z)
-        return dξdt + divJ - src
-    else
-        return dξdt - src
+        S += ForwardDiff.derivative(ζ -> mms_gas_flux(material, fields, j, ζ, t), z)
     end
+    if w !== nothing
+        dξdz = ForwardDiff.derivative(ζ -> fields.ξ[j](ζ, t), z)
+        S += w(z, t) * dξdz + fields.ξ[j](z, t) * mms_theta(material, fields, z, t)
+    end
+    return S
 end
 
 # ----------------------------------------------------------------------------
@@ -228,18 +244,6 @@ end
 # `dξ_rxn`). The manufactured counterparts below mirror that chain exactly —
 # same kinetics calls, same γ/ρ weighting — per driver design decision 2
 # (never re-derive coefficients by hand).
-#
-# Condensed phases are mesh-bound (no advection operator; dilation −ξθ
-# instead), so with the mesh moving at the SOLID material velocity the
-# manufactured condensed-phase source must be assembled in the
-# material-following frame:
-#
-#   S_s = ∂tξ* + w*·∂zξ* − ω̇* + ξ*·θ*   (evaluated at live cell centers)
-#
-# — the `w*·∂zξ*` term is the moving-point chain rule (no discrete operator
-# supplies it for solids) and `+ξ*·θ*` balances the discrete dilation
-# correction. Gas and T sources keep the existing Eulerian forms. All of this
-# is OPT-IN through the `MMSMotion` companion so V-MMS-01/02/03 are untouched.
 
 """
 Continuous volumetric strain rate θ*(z,t) [1/s] on the manufactured fields:
@@ -283,35 +287,12 @@ end
 Opt-in companion for MMS cases with REACTION-DRIVEN (induced) mesh motion.
 `w(z,t)` must equal ∫₀ᶻ θ* dζ on the manufactured fields — build it with
 [`mms_mesh_velocity`](@ref) (or a case-local closed form verified against
-it). Passed to `solve_mms(...; motion=...)`, it switches every condensed
-(non-gas) component's manufactured source to the material-following frame
-(`mms_species_source_material`); gas and T sources keep the Eulerian forms.
+it). Passed to `solve_mms(...; motion=...)`, it switches every field's
+manufactured source to the material-following frame (`w` keyword of
+`mms_energy_source` / `mms_species_source`).
 """
 struct MMSMotion{WF}
     w::WF
-end
-
-"""
-Manufactured condensed-phase source in the material-following frame
-[kg/(m³·s)] (see the section comment above):
-
-S_j(z,t) = ∂tξ*_j + w*·∂zξ*_j − ω̇*_j + ξ*_j·θ*
-"""
-function mms_species_source_material(
-    material,
-    fields::MMSFields,
-    motion::MMSMotion,
-    j::Int,
-    z,
-    t,
-)
-    T = fields.T(z, t)
-    ξ = mms_xi_tuple(fields, z, t)
-    dξdt = ForwardDiff.derivative(τ -> fields.ξ[j](z, τ), t)
-    dξdz = ForwardDiff.derivative(ζ -> fields.ξ[j](ζ, t), z)
-    ω̇ = mms_rxn_source(material, j, ξ, T)
-    θ = mms_theta(material, fields, z, t)
-    return dξdt + motion.w(z, t) * dξdz - ω̇ + fields.ξ[j](z, t) * θ
 end
 
 # ----------------------------------------------------------------------------
@@ -396,11 +377,13 @@ Keywords:
   from the live z-block each RHS call).
 - `w_override=nothing`: prescribed mesh-velocity function `(z_node, t) -> w`,
   forwarded to the workspace hook (ALE only; requires `jacobian = :fd` — the
-  structured geometry Jacobian assumes reaction-driven motion).
+  structured geometry Jacobian assumes reaction-driven motion). Every
+  species source is then assembled in the material-following frame with
+  the override as `w`; T keeps the Eulerian source (the mesh-relative
+  advection kernel supplies its chain-rule term).
 - `motion=nothing`: opt-in [`MMSMotion`](@ref) for REACTION-DRIVEN mesh
-  motion (ALE only, no `w_override`): condensed-phase sources switch to the
-  material-following frame (`mms_species_source_material`); gas and T keep
-  the Eulerian forms.
+  motion (ALE only, no `w_override`): every source — T and all species —
+  switches to the material-following frame with `motion.w`.
 - `jacobian=:analytic`: `:analytic` attaches the `Structured(DirectSolve())`
   Jacobian; `:approx` attaches `Structured(ApproxSolve())` (valid only for
   reaction-driven motion); `:fd` lets the integrator use its own colored
@@ -449,19 +432,19 @@ function solve_mms(
     NC = n_components(material)
     zoff = n * (1 + NC)
     zc0 = copy(ws.state_cache.cell_centers)
-    gas_mask = ntuple(j -> is_gas(material.components[j]), NC)
+    # Mesh velocity for the material-frame sources (nothing = Eulerian form).
+    w_species =
+        w_override !== nothing ? w_override : (motion === nothing ? nothing : motion.w)
+    w_energy = motion === nothing ? nothing : motion.w
 
     rhs! = function (du, u, p, t)
         residual!(du, u, def, t, ws)
         @inbounds for i = 1:n
             z_i = use_ale ? (u[zoff+i] + u[zoff+i+1]) / 2 : zc0[i]
-            du[i] += mms_energy_source(material, fields, z_i, t)
+            du[i] += mms_energy_source(material, fields, z_i, t; w = w_energy)
             for j = 1:NC
-                du[n+(j-1)*n+i] += if motion !== nothing && !gas_mask[j]
-                    mms_species_source_material(material, fields, motion, j, z_i, t)
-                else
-                    mms_species_source(material, fields, j, z_i, t)
-                end
+                du[n+(j-1)*n+i] +=
+                    mms_species_source(material, fields, j, z_i, t; w = w_species)
             end
         end
         return nothing

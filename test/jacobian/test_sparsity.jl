@@ -69,9 +69,15 @@ end
             @test spec_approx.sparsity_geom == S_geom_red
 
             if is_ale
-                # ALE: reduced profile drops cumulative widening + the geom
-                # block, keeping only the structural diagonal of the node rows.
-                @test nnz(spec_approx.sparsity_phys) < nnz(spec_direct.sparsity_phys)
+                # ALE: the reduced profile drops the geometry block (keeping
+                # only the structural diagonal of the node rows). The physics
+                # pattern loses only the Beer–Lambert suffix when present;
+                # the ALE dilation is cell-local and survives both profiles.
+                if name == "ale_beer_lambert_darcy"
+                    @test nnz(spec_approx.sparsity_phys) < nnz(spec_direct.sparsity_phys)
+                else
+                    @test spec_approx.sparsity_phys == spec_direct.sparsity_phys
+                end
                 z_rows = (Pyrolysis.Problem.z_offset(ws.layout)+1):n
                 @test nnz(spec_approx.sparsity_geom) == length(z_rows)
                 @test all(r -> spec_approx.sparsity_geom[r, r], z_rows)
@@ -227,9 +233,9 @@ end
 end
 
 # ---------------------------------------------------------------------------
-# The reduced profile keeps every cell within the one-cell donor stencil of
-# the ALE advection (the widest local stencil), so KLU sees a band of width
-# one cell.
+# The reduced profile keeps every cell within the one-cell stencil of the
+# block-tridiagonal physics (the widest local stencil), so KLU sees a band of
+# width one cell.
 # ---------------------------------------------------------------------------
 function _max_cell_reach(S, layout)
     n = layout.n_cells
@@ -242,7 +248,7 @@ function _max_cell_reach(S, layout)
     )
 end
 
-@testset "reduced ALE pattern stays within the donor stencil" begin
+@testset "reduced ALE pattern stays within the physics stencil" begin
     for builder in (
         build_ale_no_radiation,
         build_ale_beer_lambert_darcy_moderate,
@@ -273,7 +279,7 @@ end
         S_red, G_red = build_sparsity(layout, mode; profile = :ale_reduced)
 
         # Reduced strictly fewer nnz than full (drops geom block, χ-column
-        # block, χ-row × z entries, ALE cumulative widening); the geometry
+        # block, χ-row × z entries); the geometry
         # pattern keeps only the node rows' structural diagonal.
         @test nnz(S_red) < nnz(S_full)
         @test nnz(G_red) == layout.n_nodes
@@ -327,12 +333,11 @@ end
 
         xi_idx(j, i) = layout.n_cells + (j - 1) * layout.n_cells + i
 
-        # BeerLambert suffix: T_row[i] × ξ_{j, k} for k > i. To isolate the
-        # suffix-only contribution, pick `k` outside the ALE advection
-        # donor window `max(1,i-1):min(n,i+1)` — otherwise the
-        # window emits the same (T_row, ξ_col) entry in both profiles.
+        # BeerLambert suffix: T_row[i] × ξ_{j, k} for k > i. Pick `k` outside
+        # the block-tridiagonal physics stencil so the suffix is the only
+        # source of the entry.
         i = 1
-        k = n_cells  # well outside i+1, BeerLambert is the only source
+        k = n_cells
         @test k > i + 1
         for j = 1:NC
             @test S_full[i, xi_idx(j, k)]

@@ -18,9 +18,8 @@ Two gates:
    [`Pyrolysis.Jacobian.compute_node_velocity_derivatives!`](@ref)
    computes. Same for the ξ-channel primitives.
 
-The consumer `ALEAdvectionOperator` composes these primitives with its
-local face Jacobian (the `:w_cell ∈ reads` declaration); these unit
-tests exercise the primitives directly.
+The provider embeds these primitives at the z rows itself
+(`contribute_to_structured!`); these unit tests exercise them directly.
 """
 
 using Test

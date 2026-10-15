@@ -20,11 +20,11 @@
 # over the manufactured range (tanh(ξ_s/1.0) ≡ 1.0 in Float64 for
 # ξ_s ≳ 20 kg/m³; here ξ_s ≥ 500). T* is spatially UNIFORM (time-varying):
 # V-MMS-01/03 already order-verify the spatial T operators — this case's
-# target is the kinetics→geometry chain. The solid is z-VARYING,
-# ξ_s* = a(t) + b(t)·sin(πz/L): representable here (and only here) because
-# the mesh moves at the solid material velocity, so the material-frame source
-# S_s = ∂tξ* + w*·∂zξ* − ω̇* + ξ*·θ* has the moving-point chain rule built
-# in (`mms_species_source_material` via the `MMSMotion` companion).
+# target is the kinetics→geometry chain. The solid and the gas are both
+# z-VARYING and both ride the reacting mesh: every species source is
+# assembled in the material frame, S = ∂tξ* + w*·∂zξ* + [∂zJ*]_gas − ω̇* +
+# ξ*·θ*, so the moving-point chain rule and the discrete dilation are built
+# in (`mms_species_source` with `w` from the `MMSMotion` companion).
 #
 #   θ*(z,t) = −rate*/ρ_s = −k(T*(t))·ξ_s*(z,t)/ρ_s   (volume_change_rate)
 #   w*(z,t) = ∫₀ᶻ θ* dζ = −(k(t)/ρ_s)·[a(t)·z + b(t)·(L/π)(1 − cos(πz/L))]
@@ -140,9 +140,10 @@ function _verification_case_vmms04()
                 name = "L∞ T error (DirectSolve), t=$(t_end) s",
                 value = mms_Linf_T(sol, fields),
                 error = mms_Linf_T(sol, fields),
-                tol = 1.0e-6,  # observed 8.8e-8 K (n=32, 2026-07-07): integrator-tolerance-limited
-                # (z-uniform T*), pinned ~10× for CI abstol/reltol variance
-                comment = "z-uniform T* — kinetics/source channel, not spatial T operators",
+                tol = 6.0e-5,  # 3× observed: 2.0e-5 K (n=32). z-uniform T*, so the
+                # error is the gas error fed back through ρcp
+                # (ΔT ≈ ∫ Q_rxn/ρcp · δρcp/ρcp dt), not the spatial T operators
+                comment = "z-uniform T* — kinetics/source channel through ρcp(ξ_g)",
             ),
         )
         for (name, idx, scale, tol, comment) in (
@@ -157,8 +158,8 @@ function _verification_case_vmms04()
                 "ξ_gas",
                 2,
                 2.0,
-                6.5e-3,  # 3× observed: 2.17e-3 (n=32, 2026-07-07)
-                "gas advected relative to the reacting, compressing mesh",
+                7.0e-3,  # 3× observed: 2.3e-3 (n=32), second order (0.0184, 0.0046, 0.00115, 0.00029 at n = 16..128)
+                "gas rides the reacting, compressing mesh: dilation −ξθ + diffusion + material-frame source",
             ),
         )
             err = mms_Linf_xi(sol, fields, idx) / scale
@@ -211,7 +212,7 @@ function _verification_case_vmms04()
                     name = "L∞ T error (ApproxSolve), t=$(t_end) s",
                     value = mms_Linf_T(sol_approx, fields),
                     error = mms_Linf_T(sol_approx, fields),
-                    tol = 1.0e-6,  # observed 9.6e-8 K (n=32, 2026-07-07): tolerance-limited, ~10× pin — matches DirectSolve
+                    tol = 6.0e-5,  # 3× observed: 2.0e-5 K (n=32) — matches DirectSolve
                     comment = "requirement 3: ApproxSolve vs known-exact answer",
                 ),
             )

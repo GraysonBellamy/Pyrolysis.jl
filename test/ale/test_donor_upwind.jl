@@ -20,13 +20,7 @@ using Test
 using Pyrolysis
 using Pyrolysis.Problem: StateCache
 using Pyrolysis.Discretization:
-    compute_ale_advection_term!,
-    compute_ale_species_advection!,
-    _limited_gradient,
-    MINMOD,
-    VANLEER,
-    SUPERBEE,
-    NONE
+    compute_ale_advection_term!, _limited_gradient, MINMOD, VANLEER, SUPERBEE, NONE
 using Pyrolysis.Geometry: CellState
 
 @testset "ALE advection donor side" begin
@@ -98,66 +92,6 @@ using Pyrolysis.Geometry: CellState
         # into the INTERIOR (where ∇T is steepest), not the boundary ghost.
         @test advection[n_cells] ≈ w * (T[n_cells] - T[n_cells-1]) / Δz rtol = 1e-12
         @test advection[1] == 0.0
-    end
-
-    @testset "gas flux form: donor faces, interior equivalence, conservation" begin
-        solid = SolidComponent(:s, ρ = 1000.0, c = 1000.0, k = 0.2, ε = 0.9)
-        gas = GaseousComponent(:g, M = 0.05, c = 1000.0, k = 0.02, λ = 1e-5)
-        mat = Material(name = :donor_test, components = (solid, gas), reactions = ())
-
-        mesh = make_mesh(z -> 300.0)
-        for i = 1:n_cells
-            cs = mesh.cell_states[i]
-            z_c = mesh.cell_centers[i]
-            mesh.cell_states[i] = CellState{NC}(
-                cs.T,
-                (1000.0, 0.05 + z_c + 300.0 * z_c^2),
-                cs.volume,
-                cs.volume_ref,
-            )
-        end
-        state = StateCache(mesh)
-        ξg = [state.ξ[2, i] for i = 1:n_cells]
-        n_nodes = length(mesh.nodes)
-
-        # With uniform w the flux difference collapses to the first-order
-        # donor difference in the interior: w > 0 → face donors (i+1, i)
-        # give w·(ξ[i+1] − ξ[i])/Δz; the dilation term vanishes (∇·w = 0).
-        w = 2e-5
-        advection = zeros(NC, n_cells)
-        compute_ale_species_advection!(advection, state, mesh, mat, fill(w, n_nodes))
-        for i = 2:(n_cells-1)
-            @test advection[2, i] ≈ w * (ξg[i+1] - ξg[i]) / Δz rtol = 1e-12
-            # Solids move with the mesh — no advection.
-            @test advection[1, i] == 0.0
-        end
-        # Impermeable (default) boundary faces carry no sweep flux: the top
-        # cell keeps only its left-face exchange, the bottom cell only its
-        # right-face exchange.
-        @test advection[2, n_cells] ≈ -w * ξg[n_cells] / Δz rtol = 1e-12
-        @test advection[2, 1] ≈ w * ξg[2] / Δz rtol = 1e-12
-        # Telescoping: total gas mass change is zero in a closed column
-        # (uniform w ⇒ V̇ᵢ = 0, so Σ advection·V alone must vanish).
-        V = [state.volume[i] for i = 1:n_cells]
-        @test abs(sum(advection[2, i] * V[i] for i = 1:n_cells)) ≤
-              1e-14 * sum(abs, ξg) * abs(w)
-
-        w = -2e-5
-        compute_ale_species_advection!(advection, state, mesh, mat, fill(w, n_nodes))
-        for i = 2:(n_cells-1)
-            @test advection[2, i] ≈ w * (ξg[i] - ξg[i-1]) / Δz rtol = 1e-12
-        end
-        # Open top boundary (regressing surface): the zero-gradient ghost
-        # releases the top cell's gas through the moving face.
-        compute_ale_species_advection!(
-            advection,
-            state,
-            mesh,
-            mat,
-            fill(w, n_nodes);
-            top_gas_open = true,
-        )
-        @test advection[2, n_cells] ≈ w * (ξg[n_cells] - ξg[n_cells-1]) / Δz rtol = 1e-12
     end
 
     @testset "step-profile translation is stable and bounded" begin

@@ -421,7 +421,7 @@ solution onto the moved mesh**. It reads the cell states once at entry
 (`extract_state_arrays`) to evaluate the monitor and then moves nodes; the cell
 *state* (the $T$ and $\xi$ stored per cell) is left attached to its (now-resized)
 cell. In a conservative AMR cycle this must be followed by a conservative remap of
-$T,\xi$ from the old to the new node layout (see §11.8, the ALE conservative
+$T,\xi$ from the old to the new node layout (see §11.7, the ALE conservative
 remapping routine `remap_solution!`). The standalone
 `relocate_nodes!` is therefore a *geometry* operation; conservation of the
 transported fields is the caller's responsibility.
@@ -601,23 +601,23 @@ H_b(T_b)$. Two choices are deliberate:
   park events are rare so the cost is irrelevant. The datum
   $T_{\mathrm{ref}}$ cancels because each component's total mass is identical
   before and after the merge.
-- **Gas components are excluded.** Formulation A stores thermal energy in the
-  condensed matrix only (the gas is thermally quasi-steady; §5, §7), so gas
-  heat capacity does not belong in the merge weighting either.
+- **Every component is included.** The merged enthalpy sums the gas with the
+  condensed components, the same $\rho c_p$ the temperature equation stores
+  (§5, §7).
 
 The solve is a bracketed Newton iteration on
 $[\min(T_a,T_b),\,\max(T_a,T_b)]$: $H$ is strictly monotone ($c_p > 0$), and
 $H_{\mathrm{merged}}(T_{\min}) \le H_{\mathrm{total}} \le
 H_{\mathrm{merged}}(T_{\max})$ guarantees the root lies inside the bracket, so
-the iteration cannot fail. If neither cell carries condensed heat capacity
-(both essentially pure gas) the condensed energy balance is degenerate and the
-routine falls back to the volume-weighted average.
+the iteration cannot fail. If neither cell carries any heat capacity (both
+empty) the energy balance is degenerate and the routine falls back to the
+volume-weighted average.
 
 The accuracy stakes: merging a $1\,$m$^3$ condensed-rich cell at $800\,$K with
 condensed $\rho c_p = 2000\,$kJ m$^{-3}$K$^{-1}$ and a $1\,$m$^3$
 mostly-converted cell at $400\,$K with condensed
 $\rho c_p = 500\,$kJ m$^{-3}$K$^{-1}$ gives, by the wrong volume-weighted rule,
-$T=(800+400)/2 = 600\,$K, whereas conserving the condensed enthalpy (constant
+$T=(800+400)/2 = 600\,$K, whereas conserving the enthalpy (constant
 $c_p$, where the integral form reduces to the familiar
 $\rho c_p$-weighted mean) gives
 
@@ -681,7 +681,7 @@ and rewrites the state vector. The sequence:
    both), and `derivative_discontinuity!(integrator, true)` forces a derivative
    recomputation.
 
-Mass, condensed enthalpy, $\chi$-weighted dry mass and live volume are
+Mass, sensible enthalpy, $\chi$-weighted dry mass and live volume are
 conserved to roundoff at every event (`test/adaptivity/test_cell_park.jl`).
 
 ### 14.3.5 The depletion callback

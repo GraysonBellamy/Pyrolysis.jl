@@ -284,10 +284,8 @@ function build_workspace(
     if mesh_mode(mode) isa ALE
         w_work = zeros(Tu, n_nodes)
         w_physical = zeros(Tu, n_nodes)
-        w_face = zeros(Tu, n_faces)
         θ_work = zeros(Tu, n_cells)
         ale_advection = zeros(Tu, n_cells)
-        ale_species_advection = zeros(Tu, NC, n_cells)
         rates_work = zeros(Tu, NR)
         heats_work = zeros(Tu, NR)
         dξ_dt_work = zeros(Tu, NC)
@@ -295,10 +293,8 @@ function build_workspace(
     else
         w_work = Tu[]
         w_physical = Tu[]
-        w_face = Tu[]
         θ_work = Tu[]
         ale_advection = Tu[]
-        ale_species_advection = zeros(Tu, NC, 0)
         rates_work = zeros(Tu, NR)
         heats_work = zeros(Tu, NR)
         dξ_dt_work = zeros(Tu, NC)
@@ -354,10 +350,8 @@ function build_workspace(
         dξ_work,
         w_work,
         w_physical,
-        w_face,
         θ_work,
         ale_advection,
-        ale_species_advection,
         rates_work,
         heats_work,
         dξ_dt_work,
@@ -492,10 +486,8 @@ function build_ad_workspace(
     if mesh_mode(mode) isa ALE
         w_work = zeros(Tu, n_nodes)
         w_physical = zeros(Tu, n_nodes)
-        w_face = zeros(Tu, n_faces)
         θ_work = zeros(Tu, n_cells)
         ale_advection = zeros(Tu, n_cells)
-        ale_species_advection = zeros(Tu, NC, n_cells)
         rates_work = zeros(Tu, NR)
         heats_work = zeros(Tu, NR)
         dξ_dt_work = zeros(Tu, NC)
@@ -503,10 +495,8 @@ function build_ad_workspace(
     else
         w_work = Tu[]
         w_physical = Tu[]
-        w_face = Tu[]
         θ_work = Tu[]
         ale_advection = Tu[]
-        ale_species_advection = zeros(Tu, NC, 0)
         rates_work = zeros(Tu, NR)
         heats_work = zeros(Tu, NR)
         dξ_dt_work = zeros(Tu, NC)
@@ -539,10 +529,8 @@ function build_ad_workspace(
         dξ_work,
         w_work,
         w_physical,
-        w_face,
         θ_work,
         ale_advection,
-        ale_species_advection,
         rates_work,
         heats_work,
         dξ_dt_work,

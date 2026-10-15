@@ -6,7 +6,7 @@ coarsening in `Experimental/h_coarsening.jl`.
 """
 
 using ..Geometry: Mesh1D, Node1D, Cell1D, Face1D, CellState
-using ..Materials: AbstractMaterial, Material, SOLID, T_REF, is_gas
+using ..Materials: AbstractMaterial, Material, SOLID, T_REF
 
 # ============================================================================
 # Energy-Conserving Temperature Merge
@@ -36,28 +36,25 @@ end
 									   V_b::Float64, state_b::CellState{NC},
 									   material::Material{NC}) where NC -> Float64
 
-Compute the merged temperature by conserving the condensed-phase sensible
-enthalpy.
+Compute the merged temperature by conserving the sensible enthalpy of every
+component.
 
 # Principle
 The conserved functional is
 
 ```
-H(T) = Σ_{j ∉ gas} m_j ∫_{T_REF}^{T} cₚ,j(T′) dT′ ,   m_j = V·ξ_j
+H(T) = Σ_j m_j ∫_{T_REF}^{T} cₚ,j(T′) dT′ ,   m_j = V·ξ_j
 ```
 
-and `T_merged` solves `H_merged(T_merged) = H_a(T_a) + H_b(T_b)`. Two choices
-here are deliberate:
-
-- **∫cₚ dT, not cₚ(T)·T.** For temperature-dependent cₚ the product form is
-  not an enthalpy: with cₚ = a + bT it carries the b-term with coefficient 1
-  instead of ½, a few-K systematic bias per merge when a hot surface cell
-  merges into a cooler interior one. The integral form is exact for any cₚ(T)
-  (4-point Gauss–Legendre per component). The datum `T_REF` cancels because
-  each component's total mass is identical before and after the merge.
-- **Gas components are excluded.** Formulation A stores thermal energy in the
-  condensed matrix only (the gas is thermally quasi-steady), so gas heat
-  capacity does not belong in the merge weighting.
+summed over every component, gas included — the same ρcₚ the temperature
+equation stores — and `T_merged` solves `H_merged(T_merged) = H_a(T_a) +
+H_b(T_b)`. The integral `∫cₚ dT`, not `cₚ(T)·T`, is used deliberately: for
+temperature-dependent cₚ the product form is not an enthalpy (with cₚ = a +
+bT it carries the b-term with coefficient 1 instead of ½, a few-K systematic
+bias per merge when a hot surface cell merges into a cooler interior one).
+The integral form is exact for any cₚ(T) (4-point Gauss–Legendre per
+component). The datum `T_REF` cancels because each component's total mass
+is identical before and after the merge.
 
 The solve is a bracketed Newton iteration on `[min(T_a,T_b), max(T_a,T_b)]`;
 `H` is strictly monotone (cₚ > 0) so the root is unique and always inside the
@@ -71,12 +68,11 @@ bracket.
 - `material`: Material definition with component heat capacity functions
 
 # Returns
-Merged temperature [K] conserving condensed-phase sensible enthalpy.
+Merged temperature [K] conserving sensible enthalpy.
 
 # Edge case
-If neither cell carries condensed heat capacity (both essentially pure gas),
-the condensed energy balance is degenerate and the volume-weighted average is
-returned.
+If neither cell carries any heat capacity (both empty), the energy balance
+is degenerate and the volume-weighted average is returned.
 """
 function merge_temperatures_conservatively(
     V_a::Float64,
@@ -89,15 +85,13 @@ function merge_temperatures_conservatively(
     T_b = state_b.T
     V_total = V_a + V_b
 
-    # Condensed-phase volumetric heat capacities (degenerate-case test and
-    # Newton initial guess) and total condensed sensible enthalpy.
+    # Volumetric heat capacities (degenerate-case test and Newton initial
+    # guess) and total sensible enthalpy, every component included.
     ρcₚ_a = 0.0
     ρcₚ_b = 0.0
     H_total = 0.0
     @inbounds for j = 1:NC
-        comp = material.components[j]
-        is_gas(comp) && continue
-        c_j = comp.heat_capacity
+        c_j = material.components[j].heat_capacity
         ρcₚ_a += state_a.ξ[j] * Float64(c_j(T_a))
         ρcₚ_b += state_b.ξ[j] * Float64(c_j(T_b))
         H_total +=
@@ -106,33 +100,30 @@ function merge_temperatures_conservatively(
     end
 
     if ρcₚ_a < 1e-20 && ρcₚ_b < 1e-20
-        # No condensed matter in either cell: the condensed energy balance
-        # cannot determine T. Fall back to volume-weighted averaging.
+        # Nothing in either cell: the energy balance cannot determine T.
+        # Fall back to volume-weighted averaging.
         return (V_a * T_a + V_b * T_b) / V_total
     end
 
     T_lo, T_hi = minmax(T_a, T_b)
     T_hi - T_lo < 1e-12 && return T_a
 
-    # Merged condensed enthalpy functional and its derivative. Masses are
-    # merged exactly (ξ is volume-weighted), so m_j = V_a ξ_a,j + V_b ξ_b,j.
-    H_merged = T -> begin
-        s = 0.0
-        @inbounds for j = 1:NC
-            comp = material.components[j]
-            is_gas(comp) && continue
-            m_j = V_a * state_a.ξ[j] + V_b * state_b.ξ[j]
-            s += m_j * _integrate_cp(comp.heat_capacity, T_REF, T)
+    # Merged enthalpy functional and its derivative. Masses are merged
+    # exactly (ξ is volume-weighted), so m_j = V_a ξ_a,j + V_b ξ_b,j.
+    H_merged =
+        T -> begin
+            s = 0.0
+            @inbounds for j = 1:NC
+                m_j = V_a * state_a.ξ[j] + V_b * state_b.ξ[j]
+                s += m_j * _integrate_cp(material.components[j].heat_capacity, T_REF, T)
+            end
+            s
         end
-        s
-    end
     Hprime_merged = T -> begin
         s = 0.0
         @inbounds for j = 1:NC
-            comp = material.components[j]
-            is_gas(comp) && continue
             m_j = V_a * state_a.ξ[j] + V_b * state_b.ξ[j]
-            s += m_j * Float64(comp.heat_capacity(T))
+            s += m_j * Float64(material.components[j].heat_capacity(T))
         end
         s
     end

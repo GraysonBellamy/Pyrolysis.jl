@@ -64,31 +64,22 @@ solution = solve(problem;
 )
 
 for row in solution.extras.diagnostics_log
-    println("t=$(row.t)  E_matrix=$(row.E_matrix)  ",
-            "r_disc(rel)=$(row.discrete_relative)  ",
-            "r_phys(rel)=$(row.physical_relative)  ",
-            "ΔE_gas=$(row.gas_storage_gap)  ",
+    println("t=$(row.t)  E=$(row.E_sensible)  ",
+            "r(rel)=$(row.energy_relative)  ",
             "m_err=$(row.mass_max_relative_error)")
 end
 ```
 
-Each `DiagnosticsRow` carries `t`, `E_matrix`, `E_total`, `discrete_residual`,
-`discrete_relative`, `physical_residual`, `physical_relative`,
-`gas_storage_gap`, and `mass_max_relative_error`. How to read them (see
+Each `DiagnosticsRow` carries `t`, `E_sensible`, `energy_residual`,
+`energy_relative`, and `mass_max_relative_error`. How to read them (see
 Technical Reference §16):
 
-- **`discrete_relative`** audits the *bookkeeping*. It is assembled from exactly
+- **`energy_relative`** audits the *bookkeeping*. It is assembled from exactly
   the terms the RHS computes, so it closes to integrator tolerance (~`1e-6`
   relative) **by construction**. If it is large, you have a bug in flux/source
   assembly or a callback — not a physics problem. (Caveat: with strongly
   time-varying composition it cannot close exactly, because the ledger omits the
   `∫ T ∂(ρc_p)/∂t` and ALE volume-change terms; expect a small floor.)
-- **`physical_relative`** audits the *quasi-steady-gas approximation*. For
-  canonical 1-atm pyrolysis it should stay **< 1 %** of initial energy. A larger
-  value means the regime stresses the gas-storage assumption.
-- **`gas_storage_gap`** (`ΔE_gas = E_total − E_matrix`) is the sensible heat
-  carried by gas that the matrix-only `ρc_p^eff` does not store. Canonically
-  < 0.2 % of `E_matrix`.
 - **`mass_max_relative_error`** is the worst per-component mass-balance error;
   it should be `< 1e-10`.
 
@@ -362,8 +353,8 @@ appears to fire slightly early/late, that leakage — not a bug — is the reaso
 
 ### 15.5.2 `ρc_p → 0` blow-up (ALE)
 
-As a cell decomposes to gas, its matrix-only `ρc_p^eff` (gas is excluded by
-Formulation A) shrinks, and `dT/dt = RHS/ρc_p` can blow up. The intended
+As a cell decomposes to gas and the gas leaves, its `ρc_p^eff` shrinks toward
+the pore-gas thermal mass, and `dT/dt = RHS/ρc_p` can blow up. The intended
 remedies are ALE surface depletion (§15.4) to merge the spent surface cell, and
 the thickness-termination callback that stops the run when total thickness drops
 below `min_thickness`. If you run ALE *without* depletion and hit NaNs near full
@@ -402,7 +393,7 @@ options (error indicators, `relocate_nodes!`), see UG-10.
 Use the diagnostics rows (§15.1.2) to localise. The two energy residuals fail
 for *different* reasons.
 
-### 15.6.1 `discrete_relative` large
+### 15.6.1 `energy_relative` large
 
 This audits assembly and should close to integrator tolerance. If it does not:
 
@@ -416,13 +407,12 @@ This audits assembly and should close to integrator tolerance. If it does not:
   (including merged-away ones), your totals — not the solver's — are wrong.
   Always respect `mesh.active_cell_mask` (Technical Reference §16.1).
 
-### 15.6.2 `physical_relative` large (> 1 %)
+### 15.6.2 `energy_relative` drifts during active reaction
 
-This audits the quasi-steady-gas approximation. A large value means the regime
-genuinely stresses the assumption (gas residence time approaching the thermal
-time scale — unusual at 1 atm). Reconsider the setup rather than the numerics;
-`gas_storage_gap` will corroborate (it will be a non-trivial fraction of
-`E_matrix`).
+A small, composition-rate-dependent residual during active pyrolysis is
+expected: the ledger omits the heat-capacity-change and ALE volume-change terms
+of its `ρc_p·T` proxy (Technical Reference §16.8). A residual that grows with the
+*boundary input* rather than with the reaction rate points at the assembly.
 
 ### 15.6.3 The S_conv vs transpiration double-count
 

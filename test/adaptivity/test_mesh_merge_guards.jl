@@ -22,11 +22,11 @@ using Pyrolysis.Problem: z_offset, get_node_positions
 include(joinpath(@__DIR__, "..", "helpers.jl"))
 
 # ============================================================================
-# Condensed-enthalpy-conserving merge
+# Enthalpy-conserving merge (every component)
 # ============================================================================
-@testset "merge conserves Σm∫c_p dT, gas excluded" begin
-    # (a) Constant c_p: reduces to the condensed ρcp-weighted mean — the
-    #     720 K worked example from the docstring/guide.
+@testset "merge conserves Σm∫c_p dT over every component" begin
+    # (a) Constant c_p: reduces to the ρcp-weighted mean — the 720 K worked
+    #     example from the docstring/guide (no gas present).
     mat_const = Material(
         name = :const_cp,
         components = (
@@ -35,16 +35,18 @@ include(joinpath(@__DIR__, "..", "helpers.jl"))
         ),
         reactions = (),
     )
-    a = CellState{2}(800.0, (2.0, 0.0), 1.0)   # condensed ρcp = 2000 J/(m³K)
-    b = CellState{2}(400.0, (0.5, 0.0), 1.0)   # condensed ρcp = 500
+    a = CellState{2}(800.0, (2.0, 0.0), 1.0)   # ρcp = 2000 J/(m³K)
+    b = CellState{2}(400.0, (0.5, 0.0), 1.0)   # ρcp = 500
     T_m = merge_temperatures_conservatively(1.0, a, 1.0, b, mat_const)
     @test T_m ≈ (2000.0 * 800.0 + 500.0 * 400.0) / 2500.0  # = 720 K
 
-    # (b) Gas exclusion: loading the cells with gas (huge c_p) must not move
-    #     the merged temperature at all.
-    a_gas = CellState{2}(800.0, (2.0, 50.0), 1.0)
-    b_gas = CellState{2}(400.0, (0.5, 50.0), 1.0)
-    @test merge_temperatures_conservatively(1.0, a_gas, 1.0, b_gas, mat_const) ≈ T_m
+    # (b) The pore gas stores sensible heat like every other component:
+    #     loading both cells with gas moves the merged temperature to the
+    #     all-component ρcp-weighted mean.
+    a_gas = CellState{2}(800.0, (2.0, 50.0), 1.0)   # ρcp = 2000 + 250000
+    b_gas = CellState{2}(400.0, (0.5, 50.0), 1.0)   # ρcp = 500 + 250000
+    T_gas = (252000.0 * 800.0 + 250500.0 * 400.0) / (252000.0 + 250500.0)
+    @test merge_temperatures_conservatively(1.0, a_gas, 1.0, b_gas, mat_const) ≈ T_gas
 
     # (c) Linear c_p(T) = a + bT: the conserved functional is
     #     h(T) = a(T−T₀) + b/2(T²−T₀²); pre-fix the product form c_p(T)·T

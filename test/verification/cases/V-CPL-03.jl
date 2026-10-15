@@ -32,13 +32,12 @@
 #
 # Permutations (ρ_A = 1000, γ_A = 1, isothermal via E = 0, h = 0, everything
 # impermeable). Mass QoIs: EVERY permutation asserts total-mass conservation
-# to integrator tolerance — the gas mesh-motion transport is the conservative
-# flux form (tech-ref §11.2.3), so held gas in a collapsing impermeable
-# matrix compresses (ξ_g ↑ as V ↓) instead of being deleted with the
-# vanishing volume (a non-telescoping pointwise form would lose tens of
-# percent of total mass in P4 — that configuration is the regression
-# anchor). Gas-producing permutations additionally assert the SOLID ledger
-# (char endpoint = y_char·m_A0 exactly).
+# to integrator tolerance — every component rides the mesh and carries the
+# dilation −ξθ (tech-ref §11.2.3), so the gas held in a collapsing
+# impermeable matrix compresses cell by cell (ξ_g ↑ as V ↓) and leaves only
+# through the (closed) faces. P4 is the sealed-column anchor for that
+# bookkeeping. Gas-producing permutations additionally assert the SOLID
+# ledger (char endpoint = y_char·m_A0 exactly).
 #
 #   P1 swell:            A → B(ρ=500)               V_f/V₀ = 2
 #   P2 shrink:           A → B(ρ=2000)              V_f/V₀ = 1/2
@@ -180,7 +179,7 @@ function _vcpl03_qois_for(r, out::Vector{QoIResult}; tol_thick, tol_mass)
         ),
     )
     # Total-mass conservation: exact for every permutation — impermeable
-    # everywhere and the flux-form gas transport telescopes (case header).
+    # everywhere; every component rides the mesh (case header).
     mass_err =
         abs(sol.extras.total_mass[end] - sol.extras.total_mass[1]) /
         sol.extras.total_mass[1]
@@ -193,8 +192,8 @@ function _vcpl03_qois_for(r, out::Vector{QoIResult}; tol_thick, tol_mass)
             error = mass_err,
             tol = tol_mass,
             comment = r.perm in (:P4, :P5, :P7) ?
-                      "held gas compresses under collapse (flux form); " *
-                      "the P4 corner is the Finding-2 regression anchor" :
+                      "held gas compresses with its cell under collapse; " *
+                      "the sealed P4 corner anchors the dilation bookkeeping" :
                       "solid-only permutation; impermeable everywhere",
         ),
     )
