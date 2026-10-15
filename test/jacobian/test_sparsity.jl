@@ -114,6 +114,33 @@ end
         @test !G[1, z_off+5]
     end
 
+    @testset "concurrent cache misses" begin
+        # Threaded sweeps build their patterns at once; every caller must get
+        # the one cached pattern for its key, and the cache must keep them all.
+        _, ws = build_ale_no_radiation()[1:2]
+        mode = ws.layout.mode
+        NC = Pyrolysis.Problem.n_components(ws.layout)
+        layouts = [Pyrolysis.Problem.StateLayout(NC, n, n + 1, mode) for n = 4:19]
+        expected = [build_sparsity(l, mode; profile = :ale_reduced) for l in layouts]
+        cache = Pyrolysis.Jacobian._SPARSITY_CACHE
+        n_bad = 0
+        for _ = 1:200
+            lock(() -> empty!(cache), Pyrolysis.Jacobian._SPARSITY_CACHE_LOCK)
+            tasks = [
+                Threads.@spawn build_sparsity(l, mode; profile = :ale_reduced) for
+                l in layouts
+            ]
+            got = fetch.(tasks)
+            cached = [build_sparsity(l, mode; profile = :ale_reduced) for l in layouts]
+            ok =
+                got == expected &&
+                all(got[k] === cached[k] for k in eachindex(layouts)) &&
+                length(cache) == length(layouts)
+            n_bad += !ok
+        end
+        @test n_bad == 0
+    end
+
     @testset "sparsity_profile trait" begin
         @test sparsity_profile(DirectSolve()) === :full
         @test sparsity_profile(ApproxSolve()) === :ale_reduced

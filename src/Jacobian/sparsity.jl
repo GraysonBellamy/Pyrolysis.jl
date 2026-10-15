@@ -499,11 +499,13 @@ size (no nnz). The shared `SparseMatrixCSC{Bool,Int}` type is required by
 # assembly profile. We memoize on a structural fingerprint so repeat
 # `solve()` invocations on the same problem skip the rebuild entirely;
 # AMR resizes the workspace (changing the fingerprint), so cache
-# invalidation is automatic.
+# invalidation is automatic. Concurrent solves share the cache, so every
+# access holds `_SPARSITY_CACHE_LOCK`; callers only read the cached patterns.
 const _SPARSITY_CACHE = Dict{
     Tuple{DataType,Int,Int,Int,Symbol},
     Tuple{SparseMatrixCSC{Bool,Int},SparseMatrixCSC{Bool,Int}},
 }()
+const _SPARSITY_CACHE_LOCK = ReentrantLock()
 
 @inline function _sparsity_key(
     layout::StateLayout{NC},
@@ -522,12 +524,9 @@ function build_sparsity(layout::StateLayout, mode::SimulationMode; profile::Symb
             ),
         )
     key = _sparsity_key(layout, mode, profile)
-    cached = get(_SPARSITY_CACHE, key, nothing)
-    cached !== nothing && return cached
-
-    result = _build_sparsity_impl(layout, mode, profile)
-    _SPARSITY_CACHE[key] = result
-    return result
+    return @lock _SPARSITY_CACHE_LOCK get!(_SPARSITY_CACHE, key) do
+        _build_sparsity_impl(layout, mode, profile)
+    end
 end
 
 function _build_sparsity_impl(layout::StateLayout, mode::SimulationMode, profile::Symbol)
