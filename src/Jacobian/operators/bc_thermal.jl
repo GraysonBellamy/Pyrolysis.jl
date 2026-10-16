@@ -19,7 +19,7 @@ ride the derivative through `q_conducted`."
 Cell-local on the boundary cell: `(cells = 0:0,)`. Geometry (`Δz_half`,
 `A_face`, `V`) is captured as Float64 constants in the AD closure. The
 boundary mass flux's effect on the energy row flows through the volumetric
-`S_conv`/`S_gen`, owned by [`BCMassOperator`](@ref).
+`S_conv`, owned by [`BCConvectionOperator`](@ref).
 
 # Blowing correction
 

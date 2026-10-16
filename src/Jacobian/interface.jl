@@ -276,7 +276,6 @@ function _build_jacobian_spec(
     use_ale::Bool = false,
     radiation_model = nothing,
     radiation_intensity::Real = 0.0,
-    energy_form::Symbol = :standard,
     min_thickness::Real = 1e-6,
     kwargs...,
 )
@@ -286,7 +285,6 @@ function _build_jacobian_spec(
         use_ale = use_ale,
         radiation_model = rm,
         radiation_intensity = Float64(radiation_intensity),
-        energy_form = energy_form,
     )
     ws = Problem.build_workspace(problem, def; min_thickness = min_thickness)
     return _build_jacobian_spec(backend, def, ws; kwargs...)

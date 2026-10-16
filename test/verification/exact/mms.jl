@@ -8,8 +8,7 @@
 # sources that make them the exact solution of the FULL coupled system, which
 # gives formal order-of-accuracy verification of the coupled operators.
 #
-# ## Continuous system targeted (Eulerian, Fickian transport, no radiation,
-# ## energy_form = :standard — the discretization's consistency target)
+# ## Continuous system targeted (Eulerian, Fickian transport, no radiation)
 #
 #   ρcp(T,ξ) ∂T/∂t = −∂z q + S_conv + Q_rxn + S_T,      q = −k_eff(T,ξ) ∂z T
 #       ρcp    = Σⱼ ξⱼ cp_j(T)   (every component, gas included)

@@ -39,7 +39,7 @@ export get_radiative_flux_bc, extract_radiative_flux_from_bcs, has_radiative_flu
 export BoundaryConditionSet, get_thermal_bc, get_mass_bc
 
 # Ambient-temperature evaluation (evaluate_param / evaluate_param_T live in Materials)
-export ambient_temperature, ambient_concentration
+export ambient_concentration
 
 # Concrete radiation boundary conditions (Marshak / Reflective / Dirichlet,
 # RadiationBCSet, get_radiation_bc, default_radiation_bcs) live in

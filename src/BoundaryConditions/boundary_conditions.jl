@@ -323,62 +323,6 @@ function RadiativeFluxBC(flux; absorptivity = nothing, validate::Bool = true)
 end
 
 # ============================================================================
-# Ambient Temperature Resolution (for surface transpiration BC)
-# ============================================================================
-
-"""
-	ambient_temperature(bc::AbstractThermalBC, t::Real) -> Union{Float64, Nothing}
-	ambient_temperature(bc::AbstractThermalBC, t::Real, T_default::Real) -> Real
-
-Return the ambient temperature `T_∞` associated with a thermal boundary
-condition, used as the reference temperature `T_ref` for the surface
-transpiration enthalpy term:
-
-```
-q_BC(T_s) = q_cond + Σ_g ṁ_g · Δh_g(T_s, T_∞)
-```
-
-For BCs that carry an ambient temperature (`ConvectiveBC`, `RadiativeBC`),
-the two-argument form returns the BC's own `T_inf`; for BCs without one
-(`HeatFluxBC`, `AdiabaticBC`, `RadiativeFluxBC`, `DirichletThermalBC`) it
-returns `nothing`. The three-argument form substitutes `T_default` (typically
-the package-level `T_REF = 298.15 K`) for `nothing`.
-
-For `CombinedThermalBC`, returns the first non-`nothing` ambient encountered —
-which prefers `ConvectiveBC` / `RadiativeBC` over the flux-only BCs in a
-combined surface BC.
-
-The `nothing` sentinel (rather than comparing against a default value) makes a
-user-set ambient of exactly `T_REF` distinguishable from "this BC has no
-ambient" — resolution never silently falls through to another boundary's
-ambient just because the value happens to equal the default.
-"""
-@inline ambient_temperature(::AbstractThermalBC, t::Real) = nothing
-@inline ambient_temperature(bc::ConvectiveBC, t::Real) = evaluate_param(bc.T_inf, t)
-@inline ambient_temperature(bc::RadiativeBC, t::Real) = evaluate_param(bc.T_inf, t)
-
-@generated function ambient_temperature(bc::CombinedThermalBC{BCs}, t::Real) where {BCs}
-    N = fieldcount(BCs)
-    # Walk children in order; return the first ambient-carrying child.
-    exprs = Expr[]
-    for i = 1:N
-        push!(exprs, quote
-            T_i = ambient_temperature(bc.bcs[$i], t)
-            if T_i !== nothing
-                return T_i
-            end
-        end)
-    end
-    push!(exprs, :(return nothing))
-    return Expr(:block, exprs...)
-end
-
-@inline function ambient_temperature(bc::AbstractThermalBC, t::Real, T_default::Real)
-    T = ambient_temperature(bc, t)
-    return T === nothing ? T_default : T
-end
-
-# ============================================================================
 # Mass Boundary Conditions
 # ============================================================================
 

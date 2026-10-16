@@ -16,7 +16,7 @@ in the default `contribute_to_jacobian!`.
 # Math correspondence with the existing residual
 
 The existing `compute_rhs!` in [`finite_volume.jl`](../../Discretization/finite_volume.jl)
-sums every per-cell source (Q_rxn, Q_rad, S_conv, S_gen, -div_q) and divides
+sums every per-cell source (Q_rxn, Q_rad, S_conv, -div_q) and divides
 the lot by `ρcp` once. Splitting the operator means each operator divides its
 own piece by `ρcp` and the sum still equals `(Σ sources) / ρcp` — exact-equal
 to the existing residual at every state. The Jacobian-by-AD over each

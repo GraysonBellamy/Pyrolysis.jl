@@ -237,7 +237,6 @@ and the ledger accumulates the terms the discretized RHS actually assembles:
     ΔE(t) = ∫ q_cond_boundary · A · dt
           + ∫ Q_rxn dV · dt
           + ∫ S_conv dV · dt
-          + ∫ S_gen dV · dt          (zero unless `:with_generation_sink`)
 
 `q_cond_boundary` is the conducted boundary flux — the energy the boundary
 cell receives. The surface energy balance has no gas-enthalpy term, so it
@@ -255,7 +254,6 @@ bookkeeping, not the physical model.
 - `cumulative_boundary_conduction::Float64` — `∫ q_cond_boundary · A · dt`.
 - `cumulative_reaction_heat::Float64`       — `∫ Q_rxn dV · dt`.
 - `cumulative_advection_sink::Float64`      — `∫ ∫ S_conv dV · dt`.
-- `cumulative_generation_sink::Float64`     — `∫ ∫ S_gen dV · dt`.
 - `last_time::Float64`                      — Time of last update [s].
 """
 mutable struct EnergyConservationTracker
@@ -263,7 +261,6 @@ mutable struct EnergyConservationTracker
     cumulative_boundary_conduction::Float64
     cumulative_reaction_heat::Float64
     cumulative_advection_sink::Float64
-    cumulative_generation_sink::Float64
     last_time::Float64
 end
 
@@ -274,7 +271,7 @@ Initialize tracker with the current sensible energy.
 """
 function EnergyConservationTracker(mesh::Geometry.Mesh1D, material)
     E0 = compute_sensible_energy(mesh, material)
-    return EnergyConservationTracker(E0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    return EnergyConservationTracker(E0, 0.0, 0.0, 0.0, 0.0)
 end
 
 """
@@ -304,7 +301,7 @@ end
 
 """
     update_energy_tracker!(tracker; q_cond_boundary, Q_rxn_total,
-                           S_conv_total, S_gen_total, A, dt)
+                           S_conv_total, A, dt)
 
 Update tracker with one substep's contributions.
 
@@ -316,7 +313,6 @@ is a face-flux value [W/m²] (multiplied by A and dt internally).
 - `q_cond_boundary::Float64` — net conducted boundary flux [W/m²], positive into slab.
 - `Q_rxn_total::Float64`     — `∫ Q_rxn dV` [W].
 - `S_conv_total::Float64`    — `∫ S_conv dV` [W] (typically negative).
-- `S_gen_total::Float64`     — `∫ S_gen dV` [W] (zero unless `:with_generation_sink`).
 - `A::Float64`               — Cross-sectional area at this substep [m²].
 - `dt::Float64`              — Substep size [s].
 """
@@ -325,14 +321,12 @@ function update_energy_tracker!(
     q_cond_boundary::Float64,
     Q_rxn_total::Float64,
     S_conv_total::Float64,
-    S_gen_total::Float64,
     A::Float64,
     dt::Float64,
 )
     tracker.cumulative_boundary_conduction += q_cond_boundary * A * dt
     tracker.cumulative_reaction_heat += Q_rxn_total * dt
     tracker.cumulative_advection_sink += S_conv_total * dt
-    tracker.cumulative_generation_sink += S_gen_total * dt
     tracker.last_time += dt
     return nothing
 end
@@ -361,8 +355,7 @@ function check_energy_conservation(
         tracker.initial_energy +
         tracker.cumulative_boundary_conduction +
         tracker.cumulative_reaction_heat +
-        tracker.cumulative_advection_sink +
-        tracker.cumulative_generation_sink
+        tracker.cumulative_advection_sink
     residual = E_now - expected
 
     relative = if abs(tracker.initial_energy) > eps()
@@ -421,13 +414,6 @@ function energy_conservation_report(
         @sprintf(
             "  ∫∫ S_conv dV · dt:          %12.6e J",
             tracker.cumulative_advection_sink
-        )
-    )
-    push!(
-        lines,
-        @sprintf(
-            "  ∫∫ S_gen dV · dt:           %12.6e J",
-            tracker.cumulative_generation_sink
         )
     )
     push!(

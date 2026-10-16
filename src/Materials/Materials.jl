@@ -102,7 +102,6 @@ export property_temperature  # Argument clamp shared by every temperature-depend
 export Phase, SOLID, LIQUID, GAS
 export SolidComponent, GaseousComponent, LiquidComponent
 export phase, molar_mass, is_gas, is_solid, is_liquid  # Type-dispatch accessors
-export delta_enthalpy                                    # Sensible-enthalpy difference (midpoint rule)
 export get_permeability, has_permeability  # Permeability accessors for components
 export get_density, get_intrinsic_density  # Bulk vs. skeletal density accessors
 export get_emissivity, get_absorptivity, surface_absorptivity  # Radiative surface accessors

@@ -1,8 +1,7 @@
 """
 The `BCMassOperator` — the boundary-condition mass contribution extracted from the residual.
 
-Owns the species rows of the boundary-face gas mass flux and the
-boundary-face slice of the (opt-in) `S_gen` energy source. The transport
+Owns the species rows of the boundary-face gas mass flux. The transport
 operators ([`GasTransportOperator`](@ref) / [`DarcyTransportOperator`](@ref))
 zero their boundary faces; this operator supplies what they drop on those
 rows. The boundary cell's **`S_conv` energy row is NOT owned here** — its
@@ -26,32 +25,18 @@ writes: `v_out` is the outward boundary Darcy speed from
 [`boundary_darcy_velocity`](@ref) (clamped at 0 — inflow advects only the
 zero-concentration ambient) and ξ/φ is the intrinsic gas density.
 
-Energy row (generation-sink form only): the boundary-face divergence slice
-of `S_gen = −Σ_g Δh_g·(∇·J_g)` is `Δ(∇·J)_g = −F_g·A/V`, so
-
-```
-ΔS_gen  = +Σ_g Δh_g(T_bdy, T_ref) · F_g · A_face / V_cell
-dT[bdy] += ΔS_gen / ρcp_eff(T_bdy, ξ_bdy)
-```
-
-`S_gen` is linear in the face fluxes, so this boundary-face slice composes
-exactly with the transport operators' interior-face slice — unlike
-`S_conv`, whose `J̄ × ∂T/∂x` product spans owners and therefore lives
-whole on [`BCConvectionOperator`](@ref).
-
 # Stencil
 
-Cell-local on the boundary cell: the mass-BC closure, the venting chain
-(P, κ, μ, φ), and the `ΔS_gen` slice all depend only on `(T_bdy, ξ_bdy)`.
+Cell-local on the boundary cell: the mass-BC closure and the venting chain
+(P, κ, μ, φ) depend only on `(T_bdy, ξ_bdy)`.
 """
 
 using ForwardDiff
-using ..Materials: Material, is_gas, delta_enthalpy
+using ..Materials: Material, is_gas
 using ..BoundaryConditions: BoundaryConditionSet
 using ..BoundaryConditions: get_mass_bc
 using ..Properties:
     effective_gas_transfer,
-    effective_heat_capacity,
     mixture_density,
     porosity,
     effective_permeability,
@@ -75,8 +60,8 @@ stencil(::BCMassOperator) = (cells = 0:0,)
 	BCMassADWorkspace{NC, CFG}
 
 Per-boundary AD workspace. Stencil dim = `1 + NC` (`T_bdy`, `ξ_bdy[1:NC]`);
-output dim = `1 + NC` (energy row first, then one entry per ξ-component;
-non-gas entries are identically zero).
+output dim = `NC` (one entry per ξ-component; non-gas entries are identically
+zero).
 """
 mutable struct BCMassADWorkspace{NC,CFG}
     x_buf::Vector{Float64}
@@ -87,7 +72,7 @@ end
 
 function build_bc_mass_workspace(::Material{NC}) where {NC}
     stencil_dim = 1 + NC
-    out_dim = 1 + NC
+    out_dim = NC
     x_buf = zeros(Float64, stencil_dim)
     f_buf = zeros(Float64, out_dim)
     J_local = zeros(Float64, out_dim, stencil_dim)
@@ -105,7 +90,7 @@ Per-component boundary-face gas mass flux per area, **positive into the
 domain**: the diffusive film law plus (when `darcy_active`) the pressure-BC
 advective venting that mirrors the boundary-face branch of
 `compute_gas_fluxes_darcy_fick!`. Non-gas components are zero. Shared by
-[`BCMassOperator`](@ref) (species rows, `ΔS_gen` slice) and
+[`BCMassOperator`](@ref) (species rows) and
 [`BCConvectionOperator`](@ref) (the `J̄_g` face average of the boundary
 cell's S_conv energy row); generic over Dual scalar types.
 """
@@ -161,13 +146,10 @@ function _bc_boundary_face_fluxes(
     return F
 end
 
-# Generic per-cell contribution: energy row in `out[1]`, species rows in
-# `out[1 + j]`. `tag` is the boundary orientation (:top/:bottom);
-# `darcy_active` enables the pressure-BC advective venting term, which exists
-# only on the Darcy-Fick transport path (the Fickian residual never consumes
-# a boundary Darcy velocity). `T_ref = NaN` (sentinel) disables the S_gen
-# piece; a finite `T_ref` enables it (the `:with_generation_sink` energy
-# form).
+# Generic per-cell contribution: species rows in `out[j]`. `tag` is the
+# boundary orientation (:top/:bottom); `darcy_active` enables the pressure-BC
+# advective venting term, which exists only on the Darcy-Fick transport path
+# (the Fickian residual never consumes a boundary Darcy velocity).
 function _bc_mass_contribution!(
     out::AbstractVector,
     T_cell::Real,
@@ -180,7 +162,6 @@ function _bc_mass_contribution!(
     t::Real,
     tag::Val,
     darcy_active::Bool,
-    T_ref::Real,
 ) where {NC,Tu}
 
     F = _bc_boundary_face_fluxes(
@@ -194,28 +175,11 @@ function _bc_mass_contribution!(
         darcy_active,
     )
 
-    # Energy row — the boundary-face S_gen slice (generation-sink form only).
-    # The S_conv energy row is owned whole by BCConvectionOperator.
-    is_gen = !isnan(T_ref)
+    # Species rows: scale the per-area flux to the cell update. The boundary
+    # cell's energy row is owned whole by BCConvectionOperator.
     AV = A_face / V_cell
-    ΔS = zero(promote_type(typeof(T_cell), Tu))
-    if is_gen
-        # Boundary-face divergence slice: Δ(∇·J)_g = −F_g·A/V, so
-        # ΔS_gen = −Σ Δh_g·Δ(∇·J)_g = +Σ Δh_g·F_g·A/V.
-        ΣdhF = zero(promote_type(typeof(T_cell), Tu))
-        @inbounds for j = 1:NC
-            if is_gas(material.components[j])
-                ΣdhF += delta_enthalpy(material.components[j], T_cell, T_ref) * F[j]
-            end
-        end
-        ΔS += ΣdhF * AV
-    end
-    ρcp = effective_heat_capacity(ξ_cell, T_cell, material)
-    @inbounds out[1] = ΔS / ρcp
-
-    # Species rows: scale the per-area flux to the cell update.
     @inbounds for j = 1:NC
-        out[1+j] = F[j] * AV
+        out[j] = F[j] * AV
     end
     return nothing
 end
@@ -244,16 +208,14 @@ end
 end
 
 """
-	apply!(dT, dξ, ::BCMassOperator, state, mesh, material, bc_set, t,
-	       darcy_active, T_ref = NaN) -> nothing
+	apply!(dξ, ::BCMassOperator, state, mesh, material, bc_set, t,
+	       darcy_active) -> nothing
 
-Accumulate the boundary mass-flux contribution — species rows (diffusive
-film law plus, when `darcy_active`, the pressure-BC advective venting)
-into `dξ[g, bdy_cell]`, and the boundary-face `S_gen` slice into
-`dT[bdy_cell]` — for both boundaries.
+Accumulate the boundary mass-flux contribution — the diffusive film law plus,
+when `darcy_active`, the pressure-BC advective venting — into
+`dξ[g, bdy_cell]` for both boundaries.
 """
 function apply!(
-    dT::AbstractVector,
     dξ::AbstractMatrix,
     ::BCMassOperator,
     state,
@@ -262,10 +224,9 @@ function apply!(
     bc_set::BoundaryConditionSet,
     t::Real,
     darcy_active::Bool,
-    T_ref::Real = NaN,
 ) where {NC}
 
-    out = zeros(eltype(dξ), 1 + NC)
+    out = zeros(eltype(dξ), NC)
     for boundary_id in (1, 2)
         geom = _bcm_geometry(state, mesh, boundary_id)
         mass_bc =
@@ -289,11 +250,9 @@ function apply!(
             t,
             tag,
             darcy_active,
-            T_ref,
         )
-        dT[geom.cell_id] += out[1]
         @inbounds for j = 1:NC
-            dξ[j, geom.cell_id] += out[1+j]
+            dξ[j, geom.cell_id] += out[j]
         end
     end
     return nothing
@@ -326,15 +285,12 @@ end
 
 """
 	contribute_to_jacobian!(jac, op::BCMassOperator, u, ctx, t, ws, state, mesh,
-	                        material, layout, bc_set, darcy_active,
-	                        T_ref = NaN) -> nothing
+	                        material, layout, bc_set, darcy_active) -> nothing
 
-Per-boundary AD path. Each boundary face writes a `(1 + NC) × (1 + NC)`
-block over the boundary cell's `[T-col, ξ-cols]`: the ξ-rows plus the
-energy row's `ΔS_gen` slice. When `darcy_active`, the block includes the
-pressure-BC advective venting chain (through P, κ, μ, φ of the boundary
-cell); a finite `T_ref` enables the S_gen slice (`:with_generation_sink`
-energy form) — with the NaN sentinel the energy row is identically zero.
+Per-boundary AD path. Each boundary face writes an `NC × (1 + NC)` block of
+ξ-rows over the boundary cell's `[T-col, ξ-cols]`. When `darcy_active`, the
+block includes the pressure-BC advective venting chain (through P, κ, μ, φ
+of the boundary cell).
 """
 function contribute_to_jacobian!(
     jac::StructuredJacobian,
@@ -349,7 +305,6 @@ function contribute_to_jacobian!(
     layout,
     bc_set::BoundaryConditionSet,
     darcy_active::Bool,
-    T_ref::Real = NaN,
 ) where {NC}
 
     n_cells = layout.n_cells
@@ -371,7 +326,6 @@ function contribute_to_jacobian!(
         material,
         t,
         darcy_active,
-        T_ref,
     )
     geom_bot = _bcm_geometry(state, mesh, 2)
     _bcm_assemble_boundary!(
@@ -386,7 +340,6 @@ function contribute_to_jacobian!(
         material,
         t,
         darcy_active,
-        T_ref,
     )
     return nothing
 end
@@ -403,7 +356,6 @@ function _bcm_assemble_boundary!(
     material::Material{NC},
     t::Real,
     darcy_active::Bool,
-    T_ref::Real,
 ) where {NC}
     f! =
         let geom = geom,
@@ -412,8 +364,7 @@ function _bcm_assemble_boundary!(
             t = t,
             val_nc = Val(NC),
             tag = tag,
-            darcy_active = darcy_active,
-            T_ref = T_ref
+            darcy_active = darcy_active
 
             (out, x_inner) -> begin
                 T_cell, ξ_cell = _bcm_unpack(x_inner, val_nc)
@@ -429,7 +380,6 @@ function _bcm_assemble_boundary!(
                     t,
                     tag,
                     darcy_active,
-                    T_ref,
                 )
                 return nothing
             end
@@ -438,29 +388,13 @@ function _bcm_assemble_boundary!(
     _bcm_pack!(ws.x_buf, u, n_cells, NC, geom.cell_id)
     ForwardDiff.jacobian!(ws.J_local, f!, ws.f_buf, ws.x_buf, ws.cfg)
 
-    # Scatter the energy row (block row 1; nonzero only in the
-    # generation-sink form): cols 1 = T_cell, 2..1+NC = ξ_cell[j].
-    @inbounds begin
-        fast_sparse_add!(A, smap, geom.cell_id, geom.cell_id, ws.J_local[1, 1])
-        for j = 1:NC
-            ξ_off = n_cells + (j - 1) * n_cells
-            fast_sparse_add!(
-                A,
-                smap,
-                geom.cell_id,
-                ξ_off + geom.cell_id,
-                ws.J_local[1, 1+j],
-            )
-        end
-    end
-
-    # Scatter NC ξ-rows (block rows 2..1+NC).
+    # Scatter the NC ξ-rows: cols 1 = T_cell, 2..1+NC = ξ_cell[j].
     @inbounds for r = 1:NC
         gr = n_cells + (r - 1) * n_cells + geom.cell_id
-        fast_sparse_add!(A, smap, gr, geom.cell_id, ws.J_local[1+r, 1])
+        fast_sparse_add!(A, smap, gr, geom.cell_id, ws.J_local[r, 1])
         for j = 1:NC
             ξ_off = n_cells + (j - 1) * n_cells
-            fast_sparse_add!(A, smap, gr, ξ_off + geom.cell_id, ws.J_local[1+r, 1+j])
+            fast_sparse_add!(A, smap, gr, ξ_off + geom.cell_id, ws.J_local[r, 1+j])
         end
     end
     return nothing

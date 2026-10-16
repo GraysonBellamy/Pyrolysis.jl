@@ -9,9 +9,8 @@ Three gates:
    `divergence_1d!` / `divergence_species_1d!` at the boundary cells.
    The boundary cell's `S_conv` energy row is NOT part of this slice —
    it is owned whole by `BCConvectionOperator` (tested in
-   `test_operator_bc_convection.jl`); `BCMassOperator`'s energy row
-   carries only the `ΔS_gen` boundary-face slice, which is zero under
-   the `:standard` energy form used here.
+   `test_operator_bc_convection.jl`); `BCMassOperator` owns only the
+   species rows.
 
 2. **`contribute_to_jacobian!` equivalence.** Per-boundary AD agrees with
    `ForwardDiff.jacobian` over the same reference closure on the operators'
@@ -169,8 +168,7 @@ function _reference_bc_contribution(
 
     # No S_conv piece here: the boundary cell's S_conv energy row (whose
     # face-average includes the BC flux) is owned whole by
-    # BCConvectionOperator, and the ΔS_gen slice BCMassOperator does own is
-    # zero under the :standard energy form this fixture uses.
+    # BCConvectionOperator.
     dT_bc = zeros(Tu, n_cells)
     dξ_bc = zeros(Tu, NC, n_cells)
     @inbounds for i = 1:n_cells
@@ -337,7 +335,6 @@ end
             Pyrolysis.Materials.NO_RADIATION,
         )
         Pyrolysis.Jacobian.apply!(
-            dT_op,
             dξ_op,
             BCMassOperator(),
             ws.state_cache,

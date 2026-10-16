@@ -18,11 +18,10 @@ count the same enthalpy twice. The outward gas flux enters only through the
 blowing models of the convective BCs.
 """
 
-using ..Materials: STEFAN_BOLTZMANN, T_REF, T_PROPERTY_MIN, T_PROPERTY_MAX
+using ..Materials: STEFAN_BOLTZMANN, T_PROPERTY_MIN, T_PROPERTY_MAX
 using ..Materials: evaluate_param, evaluate_param_T
 using ..Materials:
     RadiationModel, NO_RADIATION, SURFACE_ABSORPTION, BEER_LAMBERT, P1_QUASI_STEADY
-using ..Materials: is_gas, delta_enthalpy
 using ForwardDiff
 
 # ============================================================================

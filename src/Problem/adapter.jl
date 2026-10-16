@@ -76,8 +76,7 @@ end
 	to_problem_def(problem::PyrolysisProblem; use_ale=false,
 	                radiation_model=NO_RADIATION,
 	                radiation_intensity=0.0,
-	                radiation_kirchhoff=true,
-	                energy_form=:standard) -> ProblemDef
+	                radiation_kirchhoff=true) -> ProblemDef
 
 Lift a user-facing `PyrolysisProblem` into the immutable `ProblemDef`.
 The returned object shares the underlying material/BC/initial-condition
@@ -102,17 +101,6 @@ volumetric source `S_conv`. See `Discretization.blowing_state`.
     flame heat-flux feedback) will raise T_s and MLR; blowing and flame
     feedback partially cancel and should be introduced together before any
     recalibration pass.
-
-!!! warning "energy_form = :with_generation_sink requires T_ref-datum heats"
-    The gas-generation enthalpy sink is consistent only when every reaction
-    heat `h` is referenced to the `T_ref` (≈298.15 K) ambient datum. With
-    DSC-style heats quoted at the local reaction temperature (the usual
-    interpretation of calibrated / ThermaKin / Gpyro heats), the gas
-    products' sensible enthalpy is already inside `h(T)` and the sink
-    subtracts it a second time (~0.7–1.2 MJ per kg of volatiles at 900 K).
-    Under DSC-style heats the default `:standard` is the exact form. A
-    one-time warning is emitted when the sink is selected. See
-    `compute_gas_generation_sink!`.
 """
 function to_problem_def(
     problem::PyrolysisProblem;
@@ -120,49 +108,7 @@ function to_problem_def(
     radiation_model = NO_RADIATION,
     radiation_intensity::Real = 0.0,
     radiation_kirchhoff::Bool = true,
-    energy_form::Symbol = :standard,
 )
-    # Validate the energy_form switch once at construction. Acceptable values:
-    #   :standard               — default Formulation A (drops T·cp·∇·J),
-    #                             matches FDS/Gpyro/ThermaKin convention.
-    #   :with_generation_sink  — adds the −Σ Δh_g·∇·J_g cell source (the
-    #                             gas-generation enthalpy sink: the sensible
-    #                             enthalpy carried away by gas at the local
-    #                             temperature where it is generated; this is the
-    #                             gas-enthalpy-divergence completion term, distinct
-    #                             from compression work).
-    # DATUM REQUIREMENT: :with_generation_sink is consistent ONLY when every
-    # reaction heat h is referenced to the T_ref (≈298.15 K) ambient datum
-    # (formation-style h = Σν_j·h_j(T_ref)). With DSC-style heats quoted at the
-    # local reaction temperature — the usual interpretation of calibrated /
-    # ThermaKin / Gpyro heats — the gas products' sensible enthalpy is already
-    # inside h(T), and adding S_gen subtracts it a SECOND time (~0.7–1.2 MJ per
-    # kg of volatiles at 900 K). Under DSC-style heats :standard is the exact
-    # form. See `compute_gas_generation_sink!` and Guide §6.6.3/§7.5.4.
-    # Note: enabling :with_generation_sink is a *partial* move toward
-    # conservative form; full conservative form would also need gases back in
-    # ρcp_eff (which Formulation A excludes).
-    if !(energy_form === :standard || energy_form === :with_generation_sink)
-        throw(
-            ArgumentError(
-                "energy_form must be :standard or :with_generation_sink, got $(repr(energy_form))",
-            ),
-        )
-    end
-    if energy_form === :with_generation_sink
-        @warn(
-            "energy_form = :with_generation_sink requires every reaction heat h " *
-            "to be referenced to the T_ref (≈298.15 K) ambient datum. With " *
-            "DSC-style heats quoted at the reaction temperature (the usual " *
-            "calibrated/ThermaKin/Gpyro interpretation), the gas sensible " *
-            "enthalpy is already inside h and this option double-counts it " *
-            "(~0.7–1.2 MJ per kg of volatiles at 900 K — comparable to the heat " *
-            "of pyrolysis itself). Use the default :standard unless your heats " *
-            "are T_ref-datum.",
-            maxlog = 1
-        )
-    end
-
     mode = _simulation_mode_from(problem, use_ale, radiation_model)
     topology = mesh_topology(problem.mesh)
     initial = InitialConditions{Any,Any}(problem.T_initial, problem.ξ_initial)
@@ -172,7 +118,6 @@ function to_problem_def(
         radiation_kirchhoff = radiation_kirchhoff,
         dt_initial = problem.dt_initial,
         output_times = problem.output_times,
-        energy_form = energy_form,
     )
     return ProblemDef(
         material = problem.material,
@@ -348,8 +293,7 @@ end
 	                 use_ale=false,
 	                 radiation_model=NO_RADIATION,
 	                 radiation_intensity=0.0,
-	                 radiation_kirchhoff=true,
-	                 energy_form=:standard) -> (def, ws, u0)
+	                 radiation_kirchhoff=true) -> (def, ws, u0)
 
 Canonical setup path from a `PyrolysisProblem` to a ready-to-integrate
 `(ProblemDef, Workspace, u0)` triple. Mirrors `solve()`'s order exactly:
@@ -391,7 +335,6 @@ function initialize_state(
     radiation_model = NO_RADIATION,
     radiation_intensity::Real = 0.0,
     radiation_kirchhoff::Bool = true,
-    energy_form::Symbol = :standard,
 )
     apply_initial_conditions!(problem)
     def = to_problem_def(
@@ -400,7 +343,6 @@ function initialize_state(
         radiation_model = radiation_model,
         radiation_intensity = radiation_intensity,
         radiation_kirchhoff = radiation_kirchhoff,
-        energy_form = energy_form,
     )
     ws = build_workspace(problem, def; min_thickness = min_thickness)
     u0 = create_state_vector(ws.layout, ws.mesh)

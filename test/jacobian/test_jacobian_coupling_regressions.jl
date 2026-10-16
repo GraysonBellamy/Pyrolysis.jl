@@ -19,15 +19,15 @@ Regression tests for three fixed Jacobian coupling defects:
   θ_A → (T, ξ) back-reaction in every w_k.
 
 - **Boundary mass flux on the energy row** — the transport operators
-  zero their boundary faces but the residual's S_conv/S_gen include the
+  zero their boundary faces but the residual's S_conv includes the
   boundary mass flux (filled by `apply_mass_bc_flux!` before the face
   average). Probed with DiffusiveMassBC at both boundaries, Fickian and
-  Darcy, and the `:with_generation_sink` energy form.
+  Darcy.
 
   The boundary cell's whole `S_conv` energy row (face-averaged `J̄` ×
   the blended gradient through the surface-Newton `T_s`) is owned by
-  `BCConvectionOperator`; `BCMassOperator` keeps only the linear
-  `ΔS_gen` boundary-face slice. The same strict per-entry probes gate
+  `BCConvectionOperator`; `BCMassOperator` owns only the species rows.
+  The same strict per-entry probes gate
   the split, plus a case with a nonlinear surface balance (convective +
   reradiative) where the `∂T_s` chain in the blended gradient is
   load-bearing.
@@ -87,7 +87,6 @@ function _build_boundary_flux_eulerian(;
     thermal_top = HeatFluxBC(50e3),
     mass_top = DiffusiveMassBC(),
     mass_bottom = ImpermeableBC(),
-    energy_form::Symbol = :standard,
 )
     virgin = if darcy
         SolidComponent(:wood, ρ = 500.0, c = 1500.0, k = 0.15, ε = 0.9, κ = 1e-14, λ = 1e-5)
@@ -104,7 +103,7 @@ function _build_boundary_flux_eulerian(;
     )
     problem =
         PyrolysisProblem(mesh = mesh, material = mat, bc_set = bc, tspan = (0.0, 100.0))
-    def, ws, u = initialize_state(problem; use_ale = false, energy_form = energy_form)
+    def, ws, u = initialize_state(problem; use_ale = false)
     n = ws.layout.n_cells
     # Temperature ramp (dT/dx ≠ 0 at both boundaries), gas present everywhere
     # — the regime where the boundary flux dominates the energy row.
@@ -252,7 +251,6 @@ end
         "Fickian, permeable both boundaries",
         (darcy = false, mass_bottom = DiffusiveMassBC()),
     ),
-    ("Fickian, generation sink", (darcy = false, energy_form = :with_generation_sink)),
     # Deferred Minor 5: nonlinear surface balance — the blended boundary
     # gradient's ∂T_s chain (through h and εσT_s⁴) is load-bearing in the
     # boundary cell's S_conv row.

@@ -69,30 +69,10 @@ end
 # Sutherland viscosity contribution to ∂v_gas/∂T is meaningful.
 _build_darcy_problem() = build_ale_beer_lambert_darcy()
 
-function _build_generation_sink_problem(; n_cells::Int = 8)
-    virgin = SolidComponent(:virgin, ρ = 1190.0, c = 1420.0, k = 0.21, ε = 0.86)
-    gas = GaseousComponent(:MMA, M = 0.100, c = 1500.0, k = 0.02, λ = 1e-5)
-    rxn = Reaction(:decomp, 1 => 2, A = 8.5e12, E = 188e3, h = -870e3)
-    mat = Material(
-        name = :PMMA_generation_sink,
-        components = (virgin, gas),
-        reactions = (rxn,),
-    )
-    mesh = create_uniform_mesh(0.01, n_cells, Val(2))
-    bc = BoundaryConditionSet(thermal = (top = HeatFluxBC(50e3), bottom = AdiabaticBC()))
-    problem =
-        PyrolysisProblem(mesh = mesh, material = mat, bc_set = bc, tspan = (0.0, 100.0))
-    def, ws, u =
-        initialize_state(problem; use_ale = false, energy_form = :with_generation_sink)
-    return def, ws, u
-end
-
-# Generation-sink problem with a **temperature-dependent** gas cp. The S_gen
-# source uses Δh_g(T,T_ref) = cp_g(T_m)·(T−T_ref) (midpoint rule, T_m=(T+T_ref)/2),
-# whose ∂/∂T = cp_g(T_m) + ½(T−T_ref)·cp_g′(T_m). Constant-cp problems have
-# cp_g′≡0 and so cannot exercise that half-slope chain term; a LinearProperty cp
-# makes cp_g′ = b ≠ 0, validating the analytic S_gen Jacobian against AD.
-function _build_generation_sink_tdep_cp_problem(; n_cells::Int = 8)
+# Problem with a **temperature-dependent** gas cp. S_conv uses cp_g(T_C), whose
+# chain term cp_g′(T_C) vanishes for a constant cp; a LinearProperty cp makes
+# cp_g′ = b ≠ 0, validating that piece of the analytic S_conv Jacobian against AD.
+function _build_tdep_gas_cp_problem(; n_cells::Int = 8)
     virgin = SolidComponent(:virgin, ρ = 1190.0, c = 1420.0, k = 0.21, ε = 0.86)
     gas = GaseousComponent(
         :MMA,
@@ -102,21 +82,16 @@ function _build_generation_sink_tdep_cp_problem(; n_cells::Int = 8)
         λ = 1e-5,
     )
     rxn = Reaction(:decomp, 1 => 2, A = 8.5e12, E = 188e3, h = -870e3)
-    mat = Material(
-        name = :PMMA_generation_sink_tdep,
-        components = (virgin, gas),
-        reactions = (rxn,),
-    )
+    mat = Material(name = :PMMA_tdep_gas_cp, components = (virgin, gas), reactions = (rxn,))
     mesh = create_uniform_mesh(0.01, n_cells, Val(2))
     bc = BoundaryConditionSet(thermal = (top = HeatFluxBC(50e3), bottom = AdiabaticBC()))
     problem =
         PyrolysisProblem(mesh = mesh, material = mat, bc_set = bc, tspan = (0.0, 100.0))
-    def, ws, u =
-        initialize_state(problem; use_ale = false, energy_form = :with_generation_sink)
+    def, ws, u = initialize_state(problem; use_ale = false)
     return def, ws, u
 end
 
-function _set_generation_sink_state!(u, n_cells)
+function _set_gas_rich_state!(u, n_cells)
     @inbounds for i = 1:n_cells
         u[i] = 900.0 + 10.0 * i
         u[n_cells+i] = 700.0 - 20.0 * i
@@ -248,32 +223,10 @@ end
         @test report.passed
     end
 
-    @testset "Structured includes generation-sink derivative" begin
-        def, ws, u = _build_generation_sink_problem()
+    @testset "Structured derivative with T-dependent gas cp" begin
+        def, ws, u = _build_tdep_gas_cp_problem()
         n = ws.layout.n_cells
-        _set_generation_sink_state!(u, n)
-        ref_spec = JacobianSpec(DenseAD_ForwardDiff(), def, ws)
-        spec = JacobianSpec(Structured(strategy = DirectSolve()), def, ws)
-        report = verify_jacobian_at(
-            spec,
-            def,
-            ws,
-            u,
-            0.0;
-            reference_spec = ref_spec,
-            rtol = 1e-6,
-            atol = 1e-10,
-        )
-        @test report.passed
-        @test report.max_abs_dev_outside_support <= 1e-10
-    end
-
-    @testset "Structured generation-sink derivative (T-dependent cp)" begin
-        # Validates the Δh_g = cp_g(T_m)·(T−T_ref) midpoint-rule S_gen Jacobian
-        # (cp evaluated at T_m, explicit chain factor ½·cp_g′(T_m)) against AD.
-        def, ws, u = _build_generation_sink_tdep_cp_problem()
-        n = ws.layout.n_cells
-        _set_generation_sink_state!(u, n)
+        _set_gas_rich_state!(u, n)
         ref_spec = JacobianSpec(DenseAD_ForwardDiff(), def, ws)
         spec = JacobianSpec(Structured(strategy = DirectSolve()), def, ws)
         report = verify_jacobian_at(

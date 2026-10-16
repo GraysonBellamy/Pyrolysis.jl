@@ -23,9 +23,8 @@ the interior-face flux kernel (transport operators), the boundary-face BC
 flux (mass-BC kernel), and the `T_s` implicit chain (thermal-BC Newton) —
 so a split assembly would need `J̄ × ∂(∂T/∂x)/∂x` cross-products spanning
 owners. Instead this operator owns the whole row: the transport operators
-zero their boundary-cell `S_conv` (they keep the boundary cell's ξ-rows
-and the linear `S_gen` interior slice), and [`BCMassOperator`](@ref) keeps
-only the linear `ΔS_gen` boundary-face slice on the energy row.
+zero their boundary-cell `S_conv` (they keep the boundary cell's ξ-rows),
+and [`BCMassOperator`](@ref) owns only the species rows.
 
 # Kernels
 

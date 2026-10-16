@@ -44,7 +44,7 @@ export compute_radiation_source!, compute_beer_lambert_source!
 export total_absorbed_radiation, transmitted_radiation
 export gas_flux, compute_gas_fluxes!, surface_mass_flux
 export gas_flux_darcy_fick, gas_flux_advective, compute_gas_fluxes_darcy_fick!
-export compute_gas_convective_source!, compute_gas_generation_sink!
+export compute_gas_convective_source!
 export compute_energy_sources!, SourceTermCache, resize_source_cache!
 export volume_change_rate, compute_cell_volume_rates!
 export ideal_gas_pressure, compute_pressure!, compute_pressure_gradient!

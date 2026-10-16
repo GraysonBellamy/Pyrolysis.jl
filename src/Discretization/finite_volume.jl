@@ -6,10 +6,9 @@ This module provides:
 - RHS assembly for the complete system of equations
 """
 
-using ..Materials: R_GAS, STEFAN_BOLTZMANN, T_REF, n_components, n_reactions
+using ..Materials: R_GAS, STEFAN_BOLTZMANN, n_components, n_reactions
 using ..BoundaryConditions: DirichletThermalBC
-using ..Materials: is_gas, delta_enthalpy
-using ..BoundaryConditions: ambient_temperature
+using ..Materials: is_gas
 using ..Materials: evaluate_param
 using ..Geometry: cell_size, cell_volume, face_area, cell_center, face_position
 using ..Properties: PropertyCache, update_properties!, effective_permeability, porosity
@@ -104,11 +103,6 @@ mutable struct RHSCache{Tu}
     q_cond::Vector{Tu}      # Conductive heat fluxes at faces
     q_total::Vector{Tu}     # Total energy fluxes at faces
     S_conv::Vector{Tu}      # Gas convective volumetric source per cell [W/m³]
-    # S_gen is the optional cell-centered "generation-sink" source, only
-    # nonzero when energy_form === :with_generation_sink. Zeroed each RHS so
-    # the energy-equation accumulator can read it unconditionally without a
-    # per-cell branch.
-    S_gen::Vector{Tu}     # -Σ_g Δh_g(T, T_ref) · (∇·J_g)  [W/m³] (true ∫cp via delta_enthalpy)
     J_gas::Matrix{Tu}       # Gas species fluxes [NC × n_faces]
 
     # Work arrays for sources
@@ -137,7 +131,6 @@ function RHSCache{Tu}(n_cells::Int, n_faces::Int, NC::Int, NR::Int) where {Tu}
         zeros(Tu, n_faces),           # q_cond
         zeros(Tu, n_faces),           # q_total
         zeros(Tu, n_cells),           # S_conv
-        zeros(Tu, n_cells),           # S_gen
         zeros(Tu, NC, n_faces),       # J_gas
         zeros(Tu, n_cells),           # Q_rxn
         zeros(Tu, n_cells),           # Q_rad
@@ -181,7 +174,6 @@ function resize_rhs_cache!(
     resize!(cache.q_cond, n_faces)
     resize!(cache.q_total, n_faces)
     resize!(cache.S_conv, n_cells)
-    resize!(cache.S_gen, n_cells)
     cache.J_gas = zeros(Tu, NC, n_faces)
     resize!(cache.Q_rxn, n_cells)
     resize!(cache.Q_rad, n_cells)
@@ -220,9 +212,8 @@ performance. All boundary condition handling is specialized at compile time.
 - `I_radiation`: Surface radiation intensity [W/m²] (default 0)
 
 # Equations solved
-Energy: ρcₚ dT/dt = -∇·q_cond + S_conv + S_gen + Q_rad + Q_rxn
-		(S_conv = -Σ_g cp_g·J̄_g·∂T/∂x always present; S_gen only under
-		 energy_form === :with_generation_sink, else zero)
+Energy: ρcₚ dT/dt = -∇·q_cond + S_conv + Q_rad + Q_rxn
+		(S_conv = -Σ_g cp_g·J̄_g·∂T/∂x)
 Species: dξⱼ/dt = -∇·Jⱼ + Sⱼ (for gases with transport)
 		 dξⱼ/dt = Sⱼ          (for solids, no transport)
 
@@ -245,7 +236,6 @@ function compute_rhs!(
     I_radiation::Real = 0.0,
     radiation_model::RadiationModel = NO_RADIATION,
     radiation_kirchhoff::Bool = true,
-    energy_form::Symbol = :standard,
 ) where {NC}
 
     n_cells_val = mesh.n_active_cells
@@ -336,11 +326,9 @@ function compute_rhs!(
     )
 
     # ========================================================================
-    # Step 6: Cell-centered gas-coupled energy sources
+    # Step 6: Cell-centered gas convective source
     # ------------------------------------------------------------------------
-    # S_conv  = -Σ_g cp_g(T_i) · J̄_g,i · ∂T/∂x|_i      (always present)
-    # S_gen  = -Σ_g Δh_g(T_i, T_ref) · (∇·J_g)_i   (true ∫cp, midpoint rule)
-    #           — added only when energy_form === :with_generation_sink
+    # S_conv = -Σ_g cp_g(T_i) · J̄_g,i · ∂T/∂x|_i
     # Needs q_total: the boundary cells' gradient blends in the boundary-face
     # slope −q/k at the T_s solved in Step 4.
     # ========================================================================
@@ -355,30 +343,16 @@ function compute_rhs!(
     )
 
     # ========================================================================
-    # Step 7: Compute divergences (needed before S_gen, which depends on ∇·J_g)
+    # Step 7: Compute divergences
     # ========================================================================
     divergence_1d!(rhs_cache.div_q, rhs_cache.q_total, state, mesh)
     divergence_species_1d!(rhs_cache.div_J, rhs_cache.J_gas, state, mesh)
-
-    if energy_form === :with_generation_sink
-        T_ref_volumetric = _resolve_volumetric_T_ref(bc_set, t)
-        Physics.compute_gas_generation_sink!(
-            rhs_cache.S_gen,
-            rhs_cache.div_J,
-            state,
-            mesh,
-            material,
-            T_ref_volumetric,
-        )
-    else
-        fill!(rhs_cache.S_gen, zero(eltype(rhs_cache.S_gen)))
-    end
 
     # ========================================================================
     # Step 8: Assemble final RHS
     # ========================================================================
     @inbounds for i = 1:n_cells_val
-        # Energy equation: dT/dt = (-∇·q + S_conv + S_gen + Q_rad + Q_rxn) / ρcp
+        # Energy equation: dT/dt = (-∇·q + S_conv + Q_rad + Q_rxn) / ρcp
         # (ρcp sums every component, pore gas included; the gas enthalpy flux
         # is carried by S_conv.)
         ρcp = prop_cache.ρcp[i]
@@ -386,7 +360,6 @@ function compute_rhs!(
             (
                 -rhs_cache.div_q[i] +
                 rhs_cache.S_conv[i] +
-                rhs_cache.S_gen[i] +
                 rhs_cache.Q_rad[i] +
                 rhs_cache.Q_rxn[i]
             ) / ρcp
@@ -590,29 +563,6 @@ surface energy balance:
         end
     end
     return nothing
-end
-
-# Resolve a single representative T_ref for the volumetric generation-sink
-# term. Prefer the top BC's ambient (the surface where transpiration
-# typically dominates); fall back to the bottom BC; then to T_REF.
-#
-# CAVEAT (single-ambient assumption): this returns ONE datum applied to every
-# cell, whereas the surface transpiration BC uses each boundary's own ambient
-# (`ambient_temperature(bc, ...)` per face). The two agree only when both
-# boundaries share an ambient. If `T_∞,top ≠ T_∞,bottom` AND the back face is
-# permeable (non-zero gas crossing it), the `:with_generation_sink` energy
-# ledger fails to close at the bottom by exactly
-# `Σ_g ṁ_g,bottom · cp_g · (T_∞,top − T_∞,bottom)`. Harmless for the usual
-# impermeable back face (J_gas = 0 there, so both terms vanish) and for equal
-# ambients. To support asymmetric ambients with a permeable back face, S_gen
-# would need a per-cell datum (top ambient over the upper region, bottom over
-# the lower) rather than this single scalar.
-@inline function _resolve_volumetric_T_ref(bc_set::BoundaryConditionSet, t)
-    T_top = ambient_temperature(bc_set.thermal.top, t)
-    T_top !== nothing && return T_top
-    T_bottom = ambient_temperature(bc_set.thermal.bottom, t)
-    T_bottom !== nothing && return T_bottom
-    return Float64(T_REF)
 end
 
 """
@@ -939,7 +889,6 @@ function compute_rhs_darcy_fick!(
     I_radiation::Real = 0.0,
     radiation_model::RadiationModel = NO_RADIATION,
     radiation_kirchhoff::Bool = true,
-    energy_form::Symbol = :standard,
 ) where {NC}
 
     n_cells_val = mesh.n_active_cells
@@ -1044,7 +993,7 @@ function compute_rhs_darcy_fick!(
     )
 
     # ========================================================================
-    # Step 7: Cell-centered gas-coupled energy sources + divergences
+    # Step 7: Cell-centered gas convective source + divergences
     # (q_total carries the Step-5 thermal-BC boundary flux the boundary-cell
     # gradient needs.)
     # ========================================================================
@@ -1061,20 +1010,6 @@ function compute_rhs_darcy_fick!(
     divergence_1d!(rhs_cache.div_q, rhs_cache.q_total, state, mesh)
     divergence_species_1d!(rhs_cache.div_J, rhs_cache.J_gas, state, mesh)
 
-    if energy_form === :with_generation_sink
-        T_ref_volumetric = _resolve_volumetric_T_ref(bc_set, t)
-        Physics.compute_gas_generation_sink!(
-            rhs_cache.S_gen,
-            rhs_cache.div_J,
-            state,
-            mesh,
-            material,
-            T_ref_volumetric,
-        )
-    else
-        fill!(rhs_cache.S_gen, zero(eltype(rhs_cache.S_gen)))
-    end
-
     # ========================================================================
     # Step 8: Assemble final RHS
     # ========================================================================
@@ -1084,7 +1019,6 @@ function compute_rhs_darcy_fick!(
             (
                 -rhs_cache.div_q[i] +
                 rhs_cache.S_conv[i] +
-                rhs_cache.S_gen[i] +
                 rhs_cache.Q_rad[i] +
                 rhs_cache.Q_rxn[i]
             ) / ρcp

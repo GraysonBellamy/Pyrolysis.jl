@@ -184,7 +184,7 @@ end
 
 """
 	_validate_solve_kwargs(; extra_kwargs, jacobian, handle_depletion,
-	                          radiation_model, energy_form,
+	                          radiation_model,
 	                          min_thickness, depletion_threshold, min_cells,
 	                          diagnostics_stride, verify_jacobian)
 
@@ -197,7 +197,6 @@ function _validate_solve_kwargs(;
     jacobian,
     handle_depletion,
     radiation_model,
-    energy_form,
     min_thickness,
     depletion_threshold,
     min_cells,
@@ -217,14 +216,6 @@ function _validate_solve_kwargs(;
     end
 
     # Single-kwarg shape checks that fail fast.
-    if !(energy_form === :standard || energy_form === :with_generation_sink)
-        throw(
-            ArgumentError(
-                "solve(): energy_form must be :standard or " *
-                ":with_generation_sink, got $(repr(energy_form)).",
-            ),
-        )
-    end
     min_thickness > 0 ||
         throw(ArgumentError("solve(): min_thickness must be > 0, got $(min_thickness)."))
     (0 < depletion_threshold < 1) || throw(
@@ -651,16 +642,6 @@ function solve(
     # First-class runtime conservation diagnostics.
     diagnostics::Bool = false,
     diagnostics_stride::Int = 10,
-    # `energy_form` selects the bulk energy formulation:
-    #   :standard               — Formulation A (drops the gas-generation sink)
-    #   :with_generation_sink  — adds the −Σ Δh_g·∇·J_g cell source. Requires
-    #                             every reaction heat to be referenced to the
-    #                             T_ref (≈298.15 K) datum; with DSC-style heats
-    #                             quoted at the reaction temperature it
-    #                             double-counts the gas sensible enthalpy
-    #                             (see `Problem.to_problem_def`, which warns).
-    # The :standard gas-energy convention (S_conv only) matches ThermaKin Eq.17.
-    energy_form::Symbol = :standard,
 
     # Reuse a prior `PyrolysisSolution`'s final state as the initial state.
     # Length and NC must agree with the new problem; `tspan[1]` still defines
@@ -677,7 +658,6 @@ function solve(
         jacobian = jacobian,
         handle_depletion = handle_depletion,
         radiation_model = radiation_model,
-        energy_form = energy_form,
         min_thickness = min_thickness,
         depletion_threshold = depletion_threshold,
         min_cells = min_cells,
@@ -764,7 +744,6 @@ function solve(
         radiation_model = radiation_model,
         radiation_intensity = I_radiation,
         radiation_kirchhoff = radiation_kirchhoff,
-        energy_form = energy_form,
     )
 
     # Create solution container (after initialize_state so any mesh state it
