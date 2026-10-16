@@ -36,7 +36,7 @@ Conventions:
 | `A` | Cross-sectional area of the 1D column (may vary in time via lateral-shrinkage law); also face area in the divergence operator | m² |
 | `A_0` | Initial / calibration-reference cross-sectional area (fixed at setup) | m² |
 | `A_{αβ}`, `A_i` | Arrhenius pre-exponential factor for reaction *i* (or *αβ*) | s⁻¹ (1st-order); m³·kg⁻¹·s⁻¹ (bimolecular) |
-| `B` | Spalding mass-transfer number (liquid evaporation, comparison only) | – |
+| `B` | Spalding blowing number `ṁ''c_{p,g}/h` of the convective blowing models (§12.3.3) | – |
 | `c_p`, `c_{p,j}` | Specific heat capacity (of component *j*) | J·kg⁻¹·K⁻¹ |
 | `c` | Speed of light (radiation energy density diagnostic only) | m·s⁻¹ |
 | `D_{AB}`, `D_j` | Binary (Chapman–Enskog) diffusion coefficient | m²·s⁻¹ |
@@ -56,7 +56,7 @@ Conventions:
 | `h_conv` | Convective heat-transfer coefficient | W·m⁻²·K⁻¹ |
 | `h_m` | External mass-transfer (film) coefficient | m·s⁻¹ |
 | `h_P` | Pressure-transfer coefficient (convective pressure BC) | m·Pa⁻¹·s⁻¹ |
-| `Δh`, `Δh_g` | Sensible enthalpy difference (midpoint-rule integral) | J·kg⁻¹ |
+| `Δh`, `Δh_g` | Sensible enthalpy difference `∫ c_p dT` | J·kg⁻¹ |
 | `I(z)`, `I_in` | Radiation intensity along path / at cell entrance (Beer–Lambert) | W·m⁻² |
 | `I_surface`, `I_ext` | Incident radiation intensity at domain surface / external source | W·m⁻² |
 | `J_j` | Mass flux of (gas) component *j* at a face | kg·m⁻²·s⁻¹ |
@@ -71,7 +71,7 @@ Conventions:
 | `M_dry` | Total initial dry-solid mass in the column | kg |
 | `m_j` | Total mass of component *j* in domain | kg |
 | `m_{dry,i}` | Initial dry-solid mass in cell *i* (χ denominator) | kg |
-| `ṁ_g` | Outward gas mass flux at surface (transpiration) | kg·m⁻²·s⁻¹ |
+| `ṁ_g` | Outward gas mass flux at surface | kg·m⁻²·s⁻¹ |
 | `N` | Partial-pressure sum (numerator of ideal-gas pressure) | Pa |
 | `N_C` (`NC`) | Number of chemical components (type parameter) | – |
 | `N_R` (`NR`) | Number of reactions (type parameter) | – |
@@ -93,7 +93,6 @@ Conventions:
 | `S` | Sutherland constant (= 110.4 K, air) in the viscosity law | K |
 | `S_j`, `S_{j,i}` | Species source term for component *j* (in cell *i*) | kg·m⁻³·s⁻¹ |
 | `S_conv` | Volumetric gas-advection (convection) energy source | W·m⁻³ |
-| `S_gen` | Volumetric gas-generation enthalpy sink (optional) | W·m⁻³ |
 | `S_rad` | Net volumetric P1 radiation source, `α(G − 4σT⁴)` | W·m⁻³ |
 | `S_dry,i` | Dry-pyrolysis-gas source term in cell *i* | kg·m⁻³·s⁻¹ |
 | `T` | Absolute temperature | K |
@@ -142,7 +141,7 @@ Conventions:
 | `ε_eff` | Effective (composition-weighted) emissivity | – |
 | `ε_AB` | Lennard-Jones well depth (collision integral) | J |
 | `ζ` | Dummy integration variable along the optical path | m |
-| `η_i` | AMR error-indicator value for cell *i* | varies |
+| `η_i` | Refinement error-indicator value for cell *i* | varies |
 | `θ`, `θ_i` | Volumetric strain rate (dilation) of cell *i*, `(1/V) dV/dt` | s⁻¹ |
 | `θ_A` | Column-global **radial** volumetric strain rate, `(1/A) dA/dt` | s⁻¹ |
 | `θ_L` | **Axial** volumetric strain rate (`θ − θ_A`) | s⁻¹ |
@@ -203,9 +202,9 @@ Conventions:
 | `init`, `0` | Initial value |
 | `top`, `bot` | Top (z=L) / bottom (z=0) boundary |
 | `rxn` | Reaction-source contribution |
-| `cond`, `conv`, `rad`, `gen` | Conduction / convection / radiation / gas-generation contribution |
+| `cond`, `conv`, `rad` | Conduction / convection / radiation contribution |
 | `∥`, `series` | Parallel / series mixing limit |
-| `matrix`, `total` | Matrix-only / matrix+gas (energy, heat capacity) |
+| `total` | All-component total (e.g. `ρ_total = Σ_j ξ_j`) |
 
 ## 4. Superscripts and accents
 
@@ -261,8 +260,8 @@ below is authoritative; writers must use the disambiguating subscript/context.
 - **χ (chi) — A1 [pyrolysis progress vs. cross-section ratio].** The
   `volume_change`, `problem_residual`, and `geometry` subsystems define `χ` as
   the **pyrolysis progress** (dimensionless, cumulative dry-gas mass released per
-  unit initial dry-solid mass). The `jacobian` KB once glosses it as
-  "cross-section area ratio." **Resolution:** `χ` is *always* pyrolysis progress;
+  unit initial dry-solid mass); it is easily misread as the cross-section area
+  ratio. **Resolution:** `χ` is *always* pyrolysis progress;
   the cross-section ratio is `A/A_0 = law(χ̄)` and is never written as `χ`.
 
 - **θ (theta) — A2 [strain rate vs. stoichiometry].** Internally `θ` is the
@@ -310,10 +309,10 @@ below is authoritative; writers must use the disambiguating subscript/context.
   reaction.
 
 - **φ — A8 [porosity only].** `φ` is **porosity**; do not reuse for view factor
-  (that is `F`) or any potential. Two historical porosity definitions exist
-  (volume-fraction `Σ v_j^gas` vs. intrinsic-density `1 − Σ ξ_j/ρ_{i,j}`); the
-  intrinsic-density form is canonical and is what `φ` denotes.
+  (that is `F`) or any potential. `φ` denotes the intrinsic-density form
+  `1 − Σ ξ_j/ρ_{i,j}`; the all-phase gas volume fraction `Σ v_j^gas` is a
+  different quantity and is not written `φ`.
 
 - **S — S1 [source vs. Sutherland constant].** `S` with a subscript
-  (`S_conv`, `S_gen`, `S_rad`, `S_j`) is a source term; bare `S` is the
+  (`S_conv`, `S_rad`, `S_j`) is a source term; bare `S` is the
   Sutherland constant in the viscosity law only.

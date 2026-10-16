@@ -41,7 +41,8 @@ The mesh container type is `Mesh1D{NC}`, parameterized by the number of chemical
 functions described in §6.2. The relationship `n_faces = n_nodes = n_cells + 1` always holds.
 
 Each cell carries a `CellState{NC}` (temperature, an `NTuple{NC}` of concentrations, and a
-cached volume); these are populated from your initial conditions when you call `solve`. The
+cached volume); `solve` populates them from the problem's initial conditions on its own copy
+of the mesh (the mesh you built is left unchanged). The
 volume of cell `i` is computed geometrically from the node positions and the cross-sectional
 area:
 
@@ -159,7 +160,7 @@ cell-to-cell size jumps, which can hurt accuracy and conditioning; the conductio
 schemes use distance-weighted harmonic-mean face properties precisely so that graded meshes
 stay second-order accurate (Technical Reference §7 and §13), but extreme ratios still degrade
 the gradient reconstruction. If you stretch hard, sanity-check the cell-size jump with
-`Pyrolysis.Geometry.aspect_ratio` (§6.5).
+`Pyrolysis.Adaptivity.mesh_quality_summary` (§6.5.4).
 
 > **Tip.** When in doubt, start uniform, run a convergence study (§6.3), and only switch to a
 > stretched mesh if a uniform mesh with the same near-surface resolution is too expensive.
@@ -258,7 +259,7 @@ mesh = create_uniform_mesh(0.01, 100, Val(2); cross_section_area = 1e-2)
 Once you have a `Mesh1D`, you can query its size and geometry. **Note on imports:** the basic
 size accessors and geometry queries are exported by the `Geometry` submodule but are *not* part
 of the curated top-level `Pyrolysis` surface. Reach them either fully qualified
-(`Pyrolysis.Geometry.cell_center`, etc.) or by bringing in the umbrella namespace with
+(`Pyrolysis.Geometry.cell_size`, etc.) or by bringing in the umbrella namespace with
 `using Pyrolysis.Internal`, which re-exports every submodule's public symbols. The two mesh
 *creators* (`create_uniform_mesh`, `create_stretched_mesh`) are top-level exported; the mesh
 *type* (`Mesh1D`) is exported by the `Geometry` submodule — reach it as
@@ -277,7 +278,6 @@ using Pyrolysis.Internal   # makes the accessors below available unqualified
 | `n_cells(mesh)` | Number of cells `n`. |
 | `n_nodes(mesh)` | Number of nodes (`= n + 1`). |
 | `n_faces(mesh)` | Number of faces (`= n + 1`). |
-| `n_active_cells(mesh)` | Number of active (leaf) cells — equals `n_cells` unless adaptive refinement has been applied (Chapter 10). |
 
 ```julia
 mesh = create_uniform_mesh(0.01, 100, Val(2))
@@ -290,25 +290,29 @@ n_faces(mesh)        # 101
 
 | Call | Returns |
 |---|---|
-| `cell_center(mesh, i)` | Center position `z_i^c` of cell `i` `[m]`. |
 | `cell_size(mesh, i)` | Thickness `Δz_i = \|z_{i+1} − z_i\|` of cell `i` `[m]`. |
-| `cell_volume(mesh, i)` | Cached volume `V_i` of cell `i` `[m³]`. |
-| `face_area(mesh, f)` | Area `A` of face `f` `[m²]` (constant in 1D). |
-| `total_volume(mesh)` | Sum of active-cell volumes `[m³]`. |
 | `domain_bounds(mesh)` | Tuple `(z_min, z_max)` from node positions `[m]`. |
-| `boundary_face_ids(mesh, boundary_id)` | Vector of face indices for a boundary id (`1` = top, `2` = bottom). |
-| `cross_section_area(mesh)` | Current `A(t)` `[m²]` (top-level exported). |
+
+The cached geometry is held in plain `Mesh1D` fields, which you read directly:
+
+| Field | Contents |
+|---|---|
+| `mesh.cell_centers` | Center positions `z_i^c` of the cells `[m]`. |
+| `mesh.cell_volumes` | Cell volumes `V_i = A·Δz_i` `[m³]`. |
+| `mesh.face_areas` | Face areas `A` `[m²]` (constant in 1D). |
+| `mesh.boundary_faces` | `Dict` from boundary id (`1` = top, `2` = bottom) to face indices. |
+| `mesh.cross_section_area` | Current area `A(t)` `[m²]` (`mesh.cross_section_area_initial` holds `A_0`). |
 
 ```julia
 domain_bounds(mesh)              # (0.0, 0.01)
-cell_center(mesh, 1)             # ≈ 5.0e-5   (first cell, near z = 0, the bottom)
-cell_center(mesh, n_cells(mesh)) # ≈ 9.95e-3 (last cell, near z = L, the top/exposed surface)
-cell_size(mesh, 1)              # 1.0e-4    (uniform Δz)
-total_volume(mesh)              # 0.01 * 1.0  (length × default area = 0.01 m³)
+mesh.cell_centers[1]             # ≈ 5.0e-5   (first cell, near z = 0, the bottom)
+mesh.cell_centers[end]           # ≈ 9.95e-3 (last cell, near z = L, the top/exposed surface)
+cell_size(mesh, 1)               # 1.0e-4    (uniform Δz)
+sum(mesh.cell_volumes)           # 0.01 * 1.0  (length × default area = 0.01 m³)
 
 # Face indices for the two boundaries (id 1 = top/exposed, id 2 = bottom/substrate)
-boundary_face_ids(mesh, 1)       # [101]  — top face at z = L
-boundary_face_ids(mesh, 2)       # [1]    — bottom face at z = 0
+mesh.boundary_faces[1]           # [101]  — top face at z = L
+mesh.boundary_faces[2]           # [1]    — bottom face at z = 0
 ```
 
 For the user-facing boundary tags (`:top`, `:bottom`) that you use when specifying boundary
@@ -318,33 +322,32 @@ conditions, see Chapter 5; internally `:top` maps to id `1` and `:bottom` to id 
 
 To get all cell-center positions as a vector — for plotting a temperature profile against
 depth — read `mesh.cell_centers` directly, or, after a solve, use the solution accessor
-`get_cell_positions` (top-level exported via the Solver module):
+`get_cell_positions` (exported by the `Solver` submodule; reach it through
+`Pyrolysis.Internal`):
 
 ```julia
 z = mesh.cell_centers                 # Vector{Float64} of length n_cells  [m]
 
 # after solving:
-z = get_cell_positions(solution)      # same vector, taken from solution.problem.mesh
+z = get_cell_positions(solution)      # same values (Eulerian), read from solution.problem.mesh
 ```
 
-### 6.5.4 Mesh-quality metrics (graded/adaptive meshes)
+### 6.5.4 Mesh-quality metrics (graded meshes)
 
-For stretched or adaptively refined meshes you can check grading quality with the metrics in
-the `Geometry` submodule. These four are defined but **not exported** (not even through
-`Pyrolysis.Internal`), so call them **fully qualified** with the `Pyrolysis.Geometry.` prefix:
+For stretched meshes you can check grading quality with the metrics in the `Adaptivity`
+submodule (exported from it, so also available through `Pyrolysis.Internal`):
 
 | Call | Meaning |
 |---|---|
-| `Pyrolysis.Geometry.aspect_ratio(mesh, i)` | Largest size ratio between cell `i` and its neighbours (`1.0` = uniform locally). |
-| `Pyrolysis.Geometry.max_aspect_ratio(mesh)` | Worst cell-to-neighbour size ratio over the active mesh. |
-| `Pyrolysis.Geometry.min_cell_size(mesh)` | Smallest active cell thickness `[m]`. |
-| `Pyrolysis.Geometry.max_cell_size(mesh)` | Largest active cell thickness `[m]`. |
+| `Pyrolysis.Adaptivity.compute_aspect_ratios(mesh)` | Per-cell largest size ratio to a neighbour (`1.0` = uniform locally). |
+| `Pyrolysis.Adaptivity.mesh_quality_summary(mesh)` | NamedTuple with `n_active_cells`, `min_cell_size`, `max_cell_size`, `max_aspect_ratio`, `max_smoothness`, `all_positive_volume`. |
 
 ```julia
 using Pyrolysis
 mesh = create_stretched_mesh(0.01, 50, Val(2), 1.1; stretch_from = :top)
-Pyrolysis.Geometry.max_aspect_ratio(mesh)   # ≈ 1.1 for stretch = 1.1
-Pyrolysis.Geometry.min_cell_size(mesh)      # the smallest cell, at the exposed surface
+q = Pyrolysis.Adaptivity.mesh_quality_summary(mesh)
+q.max_aspect_ratio   # ≈ 1.1 for stretch = 1.1
+q.min_cell_size      # the smallest cell, at the exposed surface
 ```
 
 A `max_aspect_ratio` close to your `stretch` factor is expected and fine. Values far above ~2
@@ -431,8 +434,8 @@ sol = solve(problem; progress = false)            # Eulerian (use_ale = false, t
 ### 6.7.2 ALE (moving mesh) — `use_ale = true`
 
 With `use_ale = true`, the node positions `z_i` become **part of the solved state**. The mesh
-moves with the material: solid components are tracked Lagrangian-style (locked to the nodes)
-while gas is treated Eulerian, so the mesh contracts as the solid pyrolyzes and shrinks (or
+moves with the material: every component, pore gas included, rides the mesh (the gas moves
+relative to it only through its transport flux), so the mesh contracts as the solid pyrolyzes and shrinks (or
 expands for an intumescent/swelling material). The state vector then includes the `z` block
 (see §6.6), and the residual computes a mesh velocity `w` cumulatively from the pinned bottom
 node upward, advancing nodes as `dz_i/dt = w_i`. The cell volumes are recomputed geometrically
@@ -452,8 +455,9 @@ strain and the area law are coupled through the mesh-velocity computation.
 
 > **Caveat — vanishing cross-section / mesh tangling.** ALE meshes can in principle tangle
 > (nodes crossing) or shrink toward zero thickness for very aggressive recession. The solver
-> guards against this with the `min_thickness` keyword of `solve` (default `1e-6 m`) and
-> mesh-quality checks; if a run terminates early or reports a thickness floor, see the
+> guards against this with the `min_thickness` keyword of `solve` (default `1e-6 m`), which
+> terminates the run, and with depleted-cell parking (`handle_depletion = true`, Chapter 10);
+> if a run terminates early or reports a thickness floor, see the
 > troubleshooting notes in Chapter 15 and the ALE quality discussion in Technical Reference §11.
 
 ### 6.7.3 Geometry derived from state (advanced)
@@ -465,12 +469,12 @@ state-layout helpers compute it without touching the mutable mesh:
 thickness = get_thickness_from_state(u, layout)   # current z_top − z_bottom  [m]
 ```
 
-The lower-level routines `compute_geometry_from_state!` / `update_geometry_cache!`
-(in `Pyrolysis.Geometry`) fill pre-allocated arrays of volumes, centers, and face distances
-directly from the `z` block; these are what the residual uses internally and are documented in
-Technical Reference §13. For variable-cross-section runs, `cross_section_area_from_state` and
-`column_chi_bar_from_state` (in `Pyrolysis.Residual`) reconstruct `A(t)` and `χ̄` from the
-state — advanced hooks you will rarely need directly.
+`compute_volumes_from_state(u, layout, A)` (in `Pyrolysis.Problem`) returns the cell volumes
+`A·|z_{i+1} − z_i|` directly from the `z` block, and `update_state_geometry!` fills the
+residual's `StateCache` (volumes, centers, face positions) from the state; the latter is what
+the residual uses internally (Technical Reference §13). For variable-cross-section runs,
+`cross_section_area_from_state` and `column_chi_bar_from_state` (in `Pyrolysis.Residual`)
+reconstruct `A(t)` and `χ̄` from the state — advanced hooks you will rarely need directly.
 
 ---
 
@@ -487,9 +491,10 @@ state — advanced hooks you will rarely need directly.
 - `cross_section_area` (`A_0`, default `1.0 m²`) is a gauge constant; it cancels from intensive
   results and only matters as `A(t) = A_0·law(χ̄)` when a lateral-shrinkage law is active
   (Technical Reference §10).
-- Inspect meshes with `n_cells`/`n_nodes`/`n_faces`, `cell_center`, `cell_size`, `cell_volume`,
-  `total_volume`, `domain_bounds`, and `boundary_face_ids` — qualify with `Pyrolysis.Geometry.`
-  or bring them in via `using Pyrolysis.Internal`.
+- Inspect meshes with `n_cells`/`n_nodes`/`n_faces`, `cell_size` and `domain_bounds` —
+  qualify with `Pyrolysis.Geometry.` or bring them in via `using Pyrolysis.Internal` —
+  and read the cached geometry from the `Mesh1D` fields (`cell_centers`, `cell_volumes`,
+  `face_areas`, `boundary_faces`, `cross_section_area`).
 - The state vector is block-major `[T | ξ_1..ξ_NC | z (ALE) | χ (WithChi)]`; use
   `get_temperature`, `get_concentration`, `block_view`, and the ALE accessors instead of raw
   offsets.
@@ -499,4 +504,5 @@ state — advanced hooks you will rarely need directly.
 For the finite-volume discretization built on this mesh, see Technical Reference §13; for
 moving-mesh mechanics and the Geometric Conservation Law, Technical Reference §11; for how the
 mesh plugs into a problem and how modes are selected, Chapter 7; for boundary conditions on the
-top/bottom faces, Chapter 5; and for adaptive refinement and surface depletion, Chapter 10.
+top/bottom faces, Chapter 5; and for surface depletion and the mesh-adaptation building blocks,
+Chapter 10.

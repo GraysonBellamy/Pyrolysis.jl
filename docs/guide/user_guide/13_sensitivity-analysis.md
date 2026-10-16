@@ -35,7 +35,7 @@ Forward and adjoint are **local**: they linearize about a single parameter point
 output variance to inputs, but it gives no derivative.
 
 `forward_sensitivity` and `adjoint_sensitivity` are exported by `Pyrolysis` as
-**stubs** — they error with a clear message until you load the
+**stubs** — calling one raises a `MethodError` until you load the
 `PyrolysisSciMLSensitivityExt` extension (§13.6). The Sobol path needs no
 extension; it is pure `parameter_sweep` plus your choice of sampling package.
 
@@ -238,8 +238,8 @@ output, J = forward_sensitivity(base, θ0, p_inject;
 > same length for every `θ` ForwardDiff probes. Returning `sol.surface_T`
 > directly is fine because `saveat = output_times` is fixed and independent of
 > `θ`. Returning something whose length depends on the trajectory (e.g. "number
-> of time steps the integrator took", or — in ALE mode — a node array whose
-> length changes after a depletion merge) will break the Jacobian assembly.
+> of time steps the integrator took", or a profile filtered of the `NaN` slots
+> that depletion parking leaves) will break the Jacobian assembly.
 
 ---
 
@@ -336,7 +336,7 @@ different `autojacvec`); pass them through the `sensealg` keyword unchanged.
 ## 13.6 Loading the extension
 
 `forward_sensitivity` and `adjoint_sensitivity` are exported stubs. Without the
-extension they raise a clear error telling you which package to load. The
+extension they have no methods, so calling one raises a `MethodError`. The
 extension `PyrolysisSciMLSensitivityExt` is triggered automatically when **both**
 `SciMLSensitivity` and `Zygote` are present in your environment:
 
@@ -462,7 +462,7 @@ This is the same separation as `parameter_sweep`: an immutable base, a `modify`/
 that pulls out quantities of interest (peak MLR, time to ignition, total mass
 loss, peak surface temperature, MLR/temperature curves, …). The example's solve
 uses `use_ale = true`, `radiation_model = SURFACE_ABSORPTION`, and the default
-`Structured(strategy = DirectSolve())` Jacobian.
+Jacobian, which under ALE is `Structured(strategy = ApproxSolve())`.
 
 **3. Decompose the variance.** `sensitivity_sobol.jl` fits a Polynomial Chaos
 Expansion (PCE) surrogate to each scalar QoI and reads first-order and total
@@ -489,7 +489,7 @@ harness, see Technical Reference §17.5.
 
 Sensitivities are only meaningful where the map `θ -> output` is well-behaved.
 The package is deliberately built to be AD-clean (smooth tanh temperature gates
-and depletion limiter, midpoint-rule enthalpy, smooth flux limiters — Technical
+and depletion limiter, smooth flux limiters — Technical
 Reference §17.6), but several configurations can still spoil a gradient:
 
 - **Warm start.** Reusing a prior solution as the initial state
@@ -510,12 +510,6 @@ Reference §17.6), but several configurations can still spoil a gradient:
   the state in place; the trajectory is smooth in the parameters between events
   and jumps across one. Keep depletion off in sensitivity work, or restrict the
   horizon to one without park events.
-
-- **Transpiration BC is forbidden with the default convention.** Leave
-  `use_transpiration_bc = false` (the default). The volumetric advection source
-  `S_conv` already carries gas enthalpy; enabling the surface transpiration term
-  double-counts it, and problem construction / `solve` rejects it outright. There
-  is no sensitivity question that requires turning it on.
 
 - **Tanh-gate leakage.** The smooth temperature gates leak a few percent of the
   reaction rate within roughly ±10 K of `T_min`/`T_max` (Technical Reference
@@ -544,8 +538,8 @@ Reference §17.6), but several configurations can still spoil a gradient:
 **Defaults to remember.** `forward_sensitivity`: `output_fn = identity`.
 `adjoint_sensitivity`: `sensealg = InterpolatingAdjoint(autojacvec = ReverseDiffVJP())`.
 For sensitivity-safe solves: keep `warm_start = nothing`,
-`handle_depletion = false`, `use_transpiration_bc = false`, the default
-`jacobian = nothing` (→ `Structured(strategy = DirectSolve())`), and tighten
+`handle_depletion = false`, the default `jacobian = nothing`
+(→ `Structured(strategy = DirectSolve())` on a fixed mesh), and tighten
 `abstol`/`reltol`.
 
 For parameter sweeps (discrete response maps) see Chapter 12; for the solution

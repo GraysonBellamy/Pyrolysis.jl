@@ -11,8 +11,8 @@ cell-averaged discretizations, the Marshak/Reflective/Dirichlet boundary closure
 the allocation-free Newton/Thomas solver for the P1 field, and the non-local
 (upper-triangular) Jacobian that Beer–Lambert induces. Every governing form,
 discrete update, constant, sign, factor, guard, and limiter below has been verified
-against the implementation; where a docstring, textbook form, or knowledge-base
-note diverges from the code, **the code is authoritative** and the divergence is
+against the implementation; where a docstring or textbook form diverges from
+the code, **the code is authoritative** and the divergence is
 called out explicitly.
 
 Throughout, the spatial coordinate is $z$ (axial, through-thickness), with $z=0$
@@ -22,7 +22,7 @@ the bottom/substrate (boundary id 2, `:bottom`) and $z=L$ the exposed/top surfac
 $(F_R-F_L)A/V$ is positive when the quantity flows *out* of a cell. The cell index
 is $i$ ($1\le i\le n$), the component index is $j$ ($1\le j\le N_C$). The
 Stefan–Boltzmann constant is $\sigma = 5.670374419\times10^{-8}\ \mathrm{W\,m^{-2}\,K^{-4}}$
-(`STEFAN_BOLTZMANN`, src/Materials/constants.jl:9).
+(`STEFAN_BOLTZMANN`, src/Materials/constants.jl).
 
 ---
 
@@ -32,7 +32,7 @@ Stefan–Boltzmann constant is $\sigma = 5.670374419\times10^{-8}\ \mathrm{W\,m^
 
 Volumetric radiation in Pyrolysis.jl is selected at `solve` time by a single
 enumeration value passed as `radiation_model`. The enum is defined in
-src/Materials/radiation_types.jl:82–87:
+src/Materials/radiation_types.jl:
 
 ```julia
 @enum RadiationModel begin
@@ -77,21 +77,22 @@ deposited and how the material's own re-emission is treated:
    internal re-radiation matters ($T\gtrsim 800$ K, optically thick char). P1 lives
    in the `Experimental` module and runs through a *separate residual* that
    re-solves the quasi-steady $G$ field into its radiation cache at every
-   evaluation — $G$ is not part of the ODE state (§8.12).
+   evaluation — $G$ is not part of the ODE state. `solve` rejects this model;
+   the P1 kernels are called directly (§8.12).
 
 ### 8.1.2 Model traits
 
-Three trait queries (src/Materials/radiation_types.jl:109–149) let the assembly and
-solver configuration branch at compile time without inspecting the model in hot
-loops:
+The enum carries one trait query: `requires_radiation_cache(model)`
+(src/Materials/radiation_types.jl) is true for `P1_QUASI_STEADY` only, where a
+`RadiationCache` for $G$, $D_{\mathrm{rad}}$, and Newton work arrays is allocated.
+The other model-dependent decisions are made where they arise. The Jacobian
+sparsity builder widens the pattern to the upper-triangular Beer–Lambert block when
+the simulation mode's radiation axis is `BeerLambert` (§8.10, §15.11), and `solve`
+checks the material against the model (`_validate_radiation_model`,
+src/Solver/solve.jl): it warns when `SURFACE_ABSORPTION` meets non-zero
+$\alpha_j$ (ignored) and when `BEER_LAMBERT` meets none (no absorption).
 
-| Trait | True for | Meaning |
-|---|---|---|
-| `requires_absorption_coefficients(model)` | `BEER_LAMBERT`, `P1_QUASI_STEADY` | the model needs the per-component mass absorption $\alpha_j$ to form $\alpha_{\text{eff}}$ |
-| `has_nonlocal_jacobian_coupling(model)` | `BEER_LAMBERT` only | the Jacobian is no longer tridiagonal (upper-triangular fill) |
-| `requires_radiation_cache(model)` | `P1_QUASI_STEADY` only | a `RadiationCache` for $G$, $D_{\mathrm{rad}}$, and Newton work arrays is allocated |
-
-The performance/structure summary (radiation_types.jl:74–80):
+The performance/structure summary (radiation_types.jl):
 
 | Model | Loop cost | Jacobian pattern | Extra memory |
 |---|---|---|---|
@@ -102,7 +103,7 @@ The performance/structure summary (radiation_types.jl:74–80):
 
 > **Implementation note.** The dispatch `compute_radiation_source!`
 > (`q_rad, state, mesh, cache, I_surface, model, apply_kirchhoff_absorptivity`,
-> src/Physics/radiation.jl:118–141)
+> src/Physics/radiation.jl)
 > *zeros* `q_rad` for `NO_RADIATION`, `P1_QUASI_STEADY`, **and**
 > `SURFACE_ABSORPTION`, and only calls `compute_beer_lambert_source!` for
 > `BEER_LAMBERT`. P1 is added on a separate residual path (§8.12). The boundary
@@ -191,7 +192,7 @@ $$
 
 where $\xi_j$ [kg·m⁻³] is the mass concentration and $\alpha_j$ [m²·kg⁻¹] is the
 per-component mass absorption coefficient (`effective_absorption`,
-src/Properties/effective_properties.jl:661–672). The product $\xi_j\alpha_j$ has
+src/Properties/effective_properties.jl). The product $\xi_j\alpha_j$ has
 units m⁻¹, so $\alpha_{\text{eff}}$ is a *volumetric* coefficient; it is stored in
 the property cache as `cache.α[i]` (see §5, Effective Properties & Mixing Rules).
 The optical thickness of the whole layer is
@@ -243,9 +244,7 @@ I_{\text{in}}(i) = \alpha_{\text{surf}}\,I_{\text{surface}}\prod_{j=i+1}^{N} e^{
 $$
 
 The transmitted (un-absorbed) fraction leaving the bottom is
-$\alpha_{\text{surf}}\,I_{\text{surface}}\,e^{-\tau}$; the diagnostic
-`transmitted_radiation` (radiation.jl) reports the attenuation factor for the
-intensity it is given.
+$\alpha_{\text{surf}}\,I_{\text{surface}}\,e^{-\tau}$; it leaves through the back face (§8.3.3).
 
 ### 8.3.3 Backward sweep and guards
 
@@ -279,7 +278,7 @@ end
 ```
 (`compute_beer_lambert_source!`, src/Physics/radiation.jl.)
 
-Three details are load-bearing:
+Four details are load-bearing:
 
 - **Cell thickness is geometric.** $\Delta z_i = V_i / A$ from `state.volume[i]`
   and the live cross-section `state.A_section[]`, so the source remains exact under
@@ -299,7 +298,7 @@ Three details are load-bearing:
   with a transparent absorption coefficient, so the extractor reports the
   transmitted flux per saved time (`solution.extras.radiation_transmitted`)
   and a solve that loses more than 1 % of the entering flux at any saved time
-  warns once.
+  warns once (`_warn_transmitted_radiation`, src/Solver/solve.jl).
 
 The source is **positive = heating**: it is added to the energy RHS as
 $+q^{\text{rad}}_i/\rho c_p^{\text{eff}}$ (§8.8). Energy conservation holds in the
@@ -333,8 +332,11 @@ boundary) or a `HeatFluxBC` for back-side radiant heating.
 
 The solver feeds this flux to the ODE by re-sampling it at **every** RHS
 evaluation — `ws.I_radiation = radiation_flux(t)` — whenever the active model
-consumes it (`SURFACE_ABSORPTION` or `BEER_LAMBERT`; src/Solver/solve.jl).
-There is no constant-flux detection: one user-function call per RHS is
+consumes it (`SURFACE_ABSORPTION` or `BEER_LAMBERT`; src/Solver/solve.jl). The
+Jacobian closure refreshes `ws.I_radiation` the same way at its own evaluation
+time, and the radiation operator reads it from there, so the Beer–Lambert
+Jacobian sees the flux at the time it is evaluated. There is no constant-flux
+detection: one user-function call per RHS is
 negligible against the residual cost, and unconditional re-sampling guarantees
 that a ramped or modulated cone flux can never be frozen at its $t=0$ value.
 
@@ -420,15 +422,13 @@ RadiationP1.jl). This algebraic identity is equivalent to $-\nabla\!\cdot\!
 \mathbf{q}_{\mathrm{rad}}$ *only when the discrete $G$ field exactly satisfies the
 P1 equation*; the Newton solve below drives it there.
 
-> **Two divergence forms — only one is on the active path.** An alternative
-> `apply_radiation_divergence!` (radiation_fluxes.jl) instead forms the
-> *flux* divergence $S=(q_{\mathrm{rad}}[R]-q_{\mathrm{rad}}[L])A/V$ from the
-> diffusive face fluxes $q_{\mathrm{rad}}=-D_{\mathrm{rad}}\nabla G$ and adds
-> $\mathrm{d}T_i/\mathrm{d}t \mathrel{+}= -S/\rho c_p$. The minus sign there is
-> correct because $\nabla\!\cdot\!(D\nabla G) = -\nabla\!\cdot\!\mathbf{q}_{\mathrm{rad}}$.
-> The production P1 residual (`compute_p1_residual!`, RadiationP1.jl) calls
-> the *algebraic* `compute_radiation_flux_divergence!`, not this
-> flux-divergence variant; the two agree at the converged $G$.
+> **Algebraic, not flux, divergence.** The flux form
+> $S=(q_{\mathrm{rad}}[R]-q_{\mathrm{rad}}[L])A/V$ built from the diffusive face fluxes
+> $q_{\mathrm{rad}}=-D_{\mathrm{rad}}\nabla G$ would add
+> $\mathrm{d}T_i/\mathrm{d}t \mathrel{+}= -S/\rho c_p$ (the minus sign because
+> $\nabla\!\cdot\!(D\nabla G) = -\nabla\!\cdot\!\mathbf{q}_{\mathrm{rad}}$). The P1
+> residual (`compute_p1_residual!`, RadiationP1.jl) uses the *algebraic*
+> `compute_radiation_flux_divergence!` instead; the two agree at the converged $G$.
 
 ### 8.4.3 The quasi-steady assumption
 
@@ -451,7 +451,7 @@ $G$ alone at fixed $T$.
 ## 8.5 P1 Volumetric Source Terms
 
 The two pieces of the right-hand side of the P1 equation are computed by
-`compute_radiation_source_terms!` (src/Experimental/radiation_p1.jl:98–130):
+`compute_radiation_source_terms!` (src/Experimental/radiation_p1.jl):
 
 **Emission** [W·m⁻³]:
 
@@ -467,12 +467,12 @@ $$
 
 The net source used in the energy equation is $S_{\mathrm{rad}} = Q_{\mathrm{abs}} -
 Q_{\mathrm{em}} = \alpha(G - 4\sigma T^4)$ (§8.4.2), consistent with
-`net_radiation_source` (src/Properties/radiation_cache.jl:255–257).
+`net_radiation_source` (src/Properties/radiation_cache.jl).
 
 > **No emissivity factor in the volumetric emission — the code is authoritative.**
 > Several references (and even the docstrings of `compute_radiation_source_terms!`
 > and the `RadiationCache.Q_emission` field) write emission as $4\sigma
-> \varepsilon\alpha T^4$. The executed code (radiation_p1.jl:122) uses **blackbody**
+> \varepsilon\alpha T^4$. The executed code (radiation_p1.jl) uses **blackbody**
 > emission $4\sigma\alpha T^4$ with **no** $\varepsilon$ factor. The physical
 > justification is that in the P1 approximation the interior is a gray body in local
 > thermodynamic equilibrium ($\varepsilon=1$ locally): a control volume that absorbs
@@ -483,7 +483,7 @@ Q_{\mathrm{em}} = \alpha(G - 4\sigma T^4)$ (§8.4.2), consistent with
 > $\varepsilon$ in the interior emission would break the equilibrium identity.
 
 The $\alpha$ used here is read from `rad_cache.α` when populated (and positive),
-otherwise from `prop_cache.α` (radiation_p1.jl:112–114); both hold the same
+otherwise from `prop_cache.α` (radiation_p1.jl); both hold the same
 volumetric $\alpha_{\text{eff}}=\sum_j\xi_j\alpha_j$. Caching $\alpha$ on the
 radiation cache avoids recomputing it in the source, diffusion-coefficient, and
 Jacobian kernels.
@@ -494,10 +494,10 @@ Jacobian kernels.
 
 P1 boundary conditions act on the radiation field $G$, not on $T$, and are stored
 in a type-stable `RadiationBCSet{B1,B2}` with `top` and `bottom` slots
-(src/Experimental/radiation_boundary.jl:259–277), accessed by
+(src/Experimental/radiation_boundary.jl), accessed by
 `get_radiation_bc(set, Val(1))` (top) / `Val(2)` (bottom). The **default** set is
 a Marshak condition at the top and a reflective condition at the bottom
-(`default_radiation_bcs`, radiation_boundary.jl:232–245).
+(`default_radiation_bcs`, radiation_boundary.jl).
 
 ### 8.6.1 Marshak condition (exposed surface)
 
@@ -576,34 +576,34 @@ the surface-Newton $T_s$ is not available inside the radiation solve.
 > $\varepsilon=0.5$ the correct coefficient is $0.5/(2\cdot1.5)=1/6$ vs. $0.25$).
 
 The flux is applied at the boundary face with the sign-orientation convention of
-the divergence operator (radiation_p1.jl:372–400): at a **right** boundary
+the divergence operator (radiation_p1.jl): at a **right** boundary
 (`right_id==0`, the top) the stored face flux is $-q_{\text{BC}}$; at a **left**
 boundary (the bottom) it is $+q_{\text{BC}}$. Because the `RadiationCache.q_rad`
 array is `Float64`, the Marshak flux is stored via `ForwardDiff.value` to strip any
-dual part during the Float64-only P1 solve (radiation_p1.jl:368–369, 391–392).
+dual part during the Float64-only P1 solve (radiation_p1.jl).
 
 The Marshak BC is constructed as `MarshakRadiationBC(; I_external, T_ambient=300.0,
-emissivity=0.9)` (radiation_boundary.jl:79–116) with validation that
+emissivity=0.9)` (radiation_boundary.jl) with validation that
 $I_{\text{external}}\ge 0$, $T_{\text{ambient}}>0$, and $\varepsilon\in[0,1]$. Any of
 the three fields may be a constant or a callable of $t$ (or $T$ for emissivity).
 
 ### 8.6.2 Reflective condition (insulated / symmetry surface)
 
-`ReflectiveRadiationBC` (radiation_boundary.jl:153) imposes a zero normal gradient,
+`ReflectiveRadiationBC` (radiation_boundary.jl) imposes a zero normal gradient,
 
 $$
 \frac{\partial G}{\partial n} = 0,
 $$
 
 realized by setting the boundary face flux to zero (`_apply_reflective_bc!`,
-radiation_p1.jl:402–408). It is the natural choice for an insulated back face, a
+radiation_p1.jl). It is the natural choice for an insulated back face, a
 symmetry plane, or a reflective substrate. It is the default bottom BC.
 
 ### 8.6.3 Dirichlet condition (prescribed $G$)
 
-`DirichletRadiationBC(; G)` (radiation_boundary.jl:201–206) prescribes the
+`DirichletRadiationBC(; G)` (radiation_boundary.jl) prescribes the
 boundary intensity directly. The current implementation is a placeholder: the
-boundary face flux is set to zero (`_apply_dirichlet_bc!`, radiation_p1.jl:410–417;
+boundary face flux is set to zero (`_apply_dirichlet_bc!`, radiation_p1.jl;
 `radiation_bc_flux` returns `zero(t)`), so $G$ is effectively pinned only through
 the interior gradient. It is used mainly for validation against analytic solutions
 and is rarely used in practice; Marshak is preferred because it couples the
@@ -616,7 +616,7 @@ external source to surface emission physically.
 ### 8.7.1 Face diffusion coefficient (harmonic mean)
 
 Interior face values of $D_{\mathrm{rad}}$ use a **distance-weighted harmonic
-mean** (`update_radiation_properties!`, radiation_p1.jl:178–202):
+mean** (`update_radiation_properties!`, radiation_p1.jl):
 
 $$
 D_{\mathrm{rad,face}} = \frac{d_L + d_R}{\dfrac{d_L}{D_{\mathrm{rad},L}} + \dfrac{d_R}{D_{\mathrm{rad},R}}},
@@ -631,7 +631,7 @@ used.
 ### 8.7.2 Interior diffusive flux
 
 The radiative flux at an interior face is the discrete diffusive flux
-(radiation_p1.jl:245–257):
+(radiation_p1.jl):
 
 $$
 q_{\mathrm{rad}}[f] = -D_{\mathrm{rad,face}}\,\frac{G_R - G_L}{\Delta x},
@@ -640,14 +640,14 @@ $$
 
 with the standard sign convention (positive flux toward $+z$). Boundary faces are
 overwritten by the BC handlers of §8.6 in `_apply_all_radiation_bcs!`
-(radiation_p1.jl:265–296).
+(radiation_p1.jl).
 
 ### 8.7.3 The quasi-steady residual
 
-`solve_quasi_steady_radiation!` (src/Experimental/radiation_fluxes.jl:208–414)
+`solve_quasi_steady_radiation!` (src/Experimental/radiation_fluxes.jl)
 solves the discrete P1 equation for $G$ by Newton–Raphson. The per-cell residual
 combines the algebraic source terms with the discrete flux divergence
-(radiation_fluxes.jl:266–281):
+(radiation_fluxes.jl):
 
 $$
 R_i = Q_{\mathrm{abs}}[i] - Q_{\mathrm{em}}[i] + S_{\mathrm{rad,div}}[i],
@@ -663,7 +663,7 @@ This is the discrete form of $R = \alpha G - 4\sigma\alpha T^4 -
 ### 8.7.4 The tridiagonal Jacobian
 
 Differentiating $R_i$ with respect to the unknowns $G$ gives a tridiagonal Jacobian
-(radiation_fluxes.jl:290–378). With
+(radiation_fluxes.jl). With
 $\mathrm{coeff}_L = \tfrac{A}{V_i}\tfrac{D_{\mathrm{rad},L}}{\Delta x_L}$ and
 $\mathrm{coeff}_R = \tfrac{A}{V_i}\tfrac{D_{\mathrm{rad},R}}{\Delta x_R}$ for
 interior faces,
@@ -703,7 +703,7 @@ thermal state is held fixed during the quasi-steady P1 solve.
 ### 8.7.5 Allocation-free Thomas (TDMA) solve
 
 The tridiagonal system $J\,\Delta G = -R$ is solved by the Thomas algorithm
-(`thomas_solve!`, radiation_fluxes.jl:48–74) using pre-allocated diagonals
+(`thomas_solve!`, radiation_fluxes.jl) using pre-allocated diagonals
 (`newton_dl`, `newton_d`, `newton_du`), a residual buffer `newton_R`, an update
 buffer `newton_ΔG`, and a work array `newton_d_work` that preserves the original
 diagonal across iterations (all on the `RadiationCache`). The solve is therefore
@@ -712,7 +712,7 @@ the diagonally dominant P1 system.
 
 ### 8.7.6 The Newton loop, scaling, and clipping
 
-Per iteration (radiation_fluxes.jl:248–406):
+Per iteration (radiation_fluxes.jl):
 
 1. recompute the radiation fluxes from the current $G$ (`compute_radiation_fluxes!`);
 2. recompute $Q_{\mathrm{em}}$, $Q_{\mathrm{abs}}$ (`compute_radiation_source_terms!`);
@@ -724,7 +724,7 @@ Per iteration (radiation_fluxes.jl:248–406):
 8. test convergence on the update.
 
 **Defaults (the code is authoritative):** `tol = 1e-6`, `maxiter = 20`,
-`damping = 1.0`, `initialize = true` (radiation_fluxes.jl:208–218). (A docstring
+`damping = 1.0`, `initialize = true` (radiation_fluxes.jl). (A docstring
 elsewhere says `tol=1e-10`; the executed signature uses `1e-6`.)
 
 **Relative convergence.** $G$ is large ($10^4$–$10^6\ \mathrm{W\,m^{-2}}$), so an
@@ -747,8 +747,8 @@ update, since the incident radiation cannot be negative.
 ### 8.7.7 Initialization
 
 When $G$ is all-zero on entry (cold start) the field is initialized from local
-thermodynamic equilibrium (`initialize_g_from_temperature!`,
-radiation_fluxes.jl:435–448):
+thermodynamic equilibrium (`initialize_g_from_temperature!(rad_cache, mesh)`,
+radiation_fluxes.jl):
 
 $$
 G_i = 4\sigma T_i^4 ,
@@ -757,18 +757,18 @@ $$
 which makes $S_{\mathrm{rad}}=\alpha(G-4\sigma T^4)$ vanish initially — a good first
 guess that avoids cold-start oscillation. (This same blackbody equilibrium is
 exposed by `initialize_radiation_intensity!`,
-src/Properties/radiation_cache.jl:191–224.)
+src/Properties/radiation_cache.jl.)
 
 ---
 
 ## 8.8 Energy-Equation Coupling for Each Model
 
-The condensed-phase energy equation (Formulation A, §3 Governing Equations and §7)
+The condensed-phase energy equation (§3 Governing Equations and §7)
 carries a volumetric radiation source $Q_{\text{rad}}$ on its right-hand side:
 
 $$
 \rho c_p^{\text{eff}}\,\frac{\partial T}{\partial t}
-= -\nabla\!\cdot\!\mathbf{q}_{\text{cond}} + S_{\text{conv}} + S_{\text{gen}}
+= -\nabla\!\cdot\!\mathbf{q}_{\text{cond}} + S_{\text{conv}}
 + Q_{\text{rad}} + Q_{\text{rxn}} .
 $$
 
@@ -781,11 +781,11 @@ follows.
 - **`SURFACE_ABSORPTION`.** $Q_{\text{rad}}=0$ in the dispatched RHS
   (`compute_radiation_source!` zeroes it). The absorbed incident flux enters through
   the surface-temperature Newton solve as the boundary flux $q_{\text{BC}}=I_{\text{ext}}
-  \alpha$ (boundary_temperature.jl:414–423); see §8.2 and §12.
+  \alpha$ (boundary_temperature.jl); see §8.2 and §12.
 
 - **`BEER_LAMBERT`.** $Q_{\text{rad},i}=q^{\text{rad}}_i$ from §8.3, added to the
-  RHS in step 5 of `compute_rhs!` (src/Discretization/finite_volume.jl:339–348) and
-  divided by $\rho c_p^{\text{eff}}$ in the final assembly (finite_volume.jl:384–404):
+  RHS in step 5 of `compute_rhs!` (src/Discretization/finite_volume.jl) and
+  divided by $\rho c_p^{\text{eff}}$ in the final assembly (finite_volume.jl):
 
   $$
   \Big(\frac{\mathrm{d}T_i}{\mathrm{d}t}\Big)_{\text{rad}}
@@ -793,7 +793,7 @@ follows.
   $$
 
   The `RadiativeFluxBC` boundary flux is set to **zero** in Beer–Lambert mode
-  (boundary_temperature.jl:426–428) so that the incident energy is not double-counted
+  (boundary_temperature.jl) so that the incident energy is not double-counted
   (it is already deposited volumetrically). The structured-operator wrapper
   `RadiationOperator` (src/Jacobian/operators/radiation.jl) routes the same physics
   through `compute_beer_lambert_source!`, treating `dT` as the `q_rad` buffer before
@@ -838,7 +838,7 @@ Three diagnostics quantify whether a chosen model is appropriate.
 (radiation_p1.jl) returns $\tau=\sum_i\alpha_i\Delta z_i=\int_0^L\alpha\,
 \mathrm{d}z$, and `optical_thickness_cell` gives the per-cell
 $\tau_i=\alpha_i\Delta z_i$ (a resolution diagnostic, not a validity
-criterion). The standard validity bands (radiation_types.jl:53–57) are:
+criterion). The standard validity bands (radiation_types.jl) are:
 
 | $\tau=\alpha L$ | regime | recommendation |
 |---|---|---|
@@ -866,7 +866,7 @@ physical $+z$ flux at every face, and $\int(Q_{\mathrm{abs}}-Q_{\mathrm{em}})
 \,\mathrm{d}V + \oint \mathbf{q}\cdot\hat{\mathbf{n}}\,\mathrm{d}A = 0$). A
 speed-of-light radiation energy density $E_{\text{rad}}=G/c$
 ($c=2.998\times10^8\ \mathrm{m\,s^{-1}}$) is also available as a diagnostic
-(radiation_cache.jl:241–244).
+(radiation_cache.jl).
 
 ---
 
@@ -878,7 +878,7 @@ Beer–Lambert makes $q^{\text{rad}}_i$ depend on the absorption coefficient of 
 cell **above** it, through the cumulative attenuation $I_{\text{in}}(i)=
 I_{\text{surface}}\exp(-\sum_{j>i}\alpha_j\Delta z_j)$. Differentiating with respect
 to a state variable $x_j$ (either $T_j$ or $\xi_{k,j}$) gives a structurally
-**upper-triangular** coupling (src/Jacobian/operators/radiation.jl:22–39):
+**upper-triangular** coupling (src/Jacobian/operators/radiation.jl):
 
 $$
 \frac{\partial q^{\text{rad}}_i}{\partial x_j} =
@@ -899,9 +899,8 @@ $$
 $$
 
 so the diagonal coefficient is exactly $\big(I_{\text{in}}-q^{\text{rad}}_i\Delta z_i\big)\partial\alpha_i/\partial x_i$.
-(An alternative form $I_{\text{in}}(1-(1-e^{-\tau})/\tau)$ appears in some notes; it
-is *not* equal to this and is incorrect — the code form above is the verified
-derivative.)
+(The form $I_{\text{in}}(1-(1-e^{-\tau})/\tau)$ is sometimes quoted; it is *not*
+equal to this and is incorrect — the code form above is the verified derivative.)
 
 The **off-diagonal** ($j>i$) term comes from
 $\partial I_{\text{in}}(i)/\partial\alpha_j = -I_{\text{in}}(i)\,\Delta z_j$ for
@@ -932,33 +931,39 @@ absorptivity (`radiation_kirchhoff = false`) the scaling is folded into
 $I_{\text{surface}}$ upstream and none of these terms appear. The chain is
 verified entry-by-entry against the dense AD reference (§18.3).
 
-### 8.10.2 Structured factorization (SuffixSumCoupling)
+### 8.10.2 Structured factorization (suffix-sum coupling)
 
 The $j>i$ block factors as $\mathrm{Diag}(-q^{\text{rad}})\cdot U\cdot
 \mathrm{diag}(v)$ where $v_j=\Delta z_j\,\partial\alpha_j/\partial x_j -
 \delta_{j,n}(\partial\varepsilon_{\text{eff}}/\partial x_n)/\varepsilon_{\text{eff}}$
 (the last term on the Kirchhoff path only) and $U$ is
 the strict upper-triangular all-ones matrix — i.e. a **suffix scan**
-$\sum_{k>i}v_k$. This is the `SuffixSumCoupling(v)` primitive
-(`build_suffix_sum_coupling_alpha`, radiation.jl:256–283; for the energy row the
-per-row scale is $-q^{\text{rad}}_i/\rho c_p^{\text{eff}}_i$, embedded as
-`EmbeddedScaledSuffixSumCoupling`, radiation.jl:416–470). It applies in $O(n)$
-without ever materializing the dense $O(n^2)$ fill. The diagonal term — including
+$\sum_{k>i}v_k$. The operator pushes it as an `EmbeddedScaledSuffixSumCoupling`
+per channel ($T$ and each $\xi_j$) with per-row scale
+$-q^{\text{rad}}_i/\rho c_p^{\text{eff}}_i$ (radiation.jl); the coupling stores
+$O(n)$ data and is written into the sparse Jacobian's upper-triangular block by
+`densify!` under the exact `:full` profile (§15.9.2). The diagonal term — including
 the $\rho c_p$ chain rule $-q^{\text{rad}}/(\rho c_p)^2\,\partial\rho c_p/\partial x_i$
 — is captured by a cell-local ForwardDiff over the closure
 $(T,\xi)\mapsto I_{\text{in}}(1-e^{-\alpha\Delta z})/(\Delta z\,\rho c_p^{\text{eff}})$
-with $I_{\text{in}}$ held fixed (radiation.jl:376–407). For the standard linear
+with $I_{\text{in}}$ held fixed (radiation.jl). For the standard linear
 mixing $\alpha=\sum_j\xi_j\alpha_j$ the derivatives reduce to $\partial\alpha/\partial
 T=0$ and $\partial\alpha/\partial\xi_j=\alpha_j$, so the suffix coupling is cheap;
 the AD path keeps it generic for future $T$-dependent absorption laws. (See §15,
-Temporal Integration & the Structured Jacobian, for how `SuffixSumCoupling` is
-applied and solved.)
+Temporal Integration & the Structured Jacobian, for how the embedded couplings are
+assembled.)
 
-> **Solver impact.** `has_nonlocal_jacobian_coupling(BEER_LAMBERT) == true`, so the
-> sparsity pattern is upper-triangular rather than tridiagonal. The other three
-> models keep the tridiagonal pattern. Under the `:ale_reduced` assembly profile the
-> embedded suffix couplings are dropped (radiation.jl:410–416), trading a small
-> Jacobian inexactness for speed.
+**ALE geometry columns.** Under ALE the deposit also depends on the live geometry
+($\Delta z_i = V_i/A$) through the per-cell factor $(1-e^{-\alpha_i\Delta z_i})/\Delta z_i$
+and the transmission suffix $\exp(-\sum_{j>i}\alpha_j\Delta z_j)$. The radiation operator
+fills the $T$ and $\xi$ columns only; the $z$ columns are written by the
+`GeometryOperator`'s AD pass over the full residual under the exact `:full` profile
+(§15.11.3).
+
+> **Solver impact.** Under `BEER_LAMBERT` the sparsity pattern is upper-triangular rather
+> than tridiagonal; the other three models keep the tridiagonal pattern. Under the
+> `:ale_reduced` assembly profile (`ApproxSolve`) the suffix couplings and every $z$ column
+> are dropped, trading Jacobian inexactness for speed (§15.10).
 
 ---
 
@@ -1039,7 +1044,9 @@ incident field ($G$, P1).
 
 P1 is **Experimental**: it is research-grade and out of scope for the unified
 trait-dispatched residual that drives `SURFACE_ABSORPTION`/`BEER_LAMBERT` runs
-(`RadiationP1.jl` header). Three structural consequences follow.
+(`RadiationP1.jl` header). `solve` rejects `radiation_model = P1_QUASI_STEADY`;
+the P1 kernels and the residual wrapper below are called directly. Three structural
+consequences follow.
 
 **No dedicated state layout.** $G$ is an algebraic (quasi-steady) field, not a
 state variable: it lives in the `RadiationCache` and is re-solved from the
@@ -1056,8 +1063,8 @@ copy.
 **A thin dedicated residual.** `compute_p1_residual!`
 (src/Experimental/RadiationP1.jl) delegates to the unified `residual!` —
 conduction, reactions, transport, ALE, χ all come from the production code
-path — and then (1) mirrors `u` into the legacy `Mesh1D` for the
-Float64-only P1 kernels, (2) updates $\alpha$/$D_{\mathrm{rad}}$ and solves
+path — and then (1) mirrors `u` into the `Mesh1D`, which the
+Float64-only P1 kernels read, (2) updates $\alpha$/$D_{\mathrm{rad}}$ and solves
 the quasi-steady $G$ system, and (3) adds
 $S_{\mathrm{rad}}/\rho c_p = \alpha(G-4\sigma T^4)/\rho c_p$ to the energy
 rows. The `P1Residual` constructor **requires**

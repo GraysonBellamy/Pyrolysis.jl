@@ -5,7 +5,7 @@ integrates it forward in time is `solve`. This chapter is the complete option
 reference for `solve(problem; ...)`: how to pick the time integrator and its
 tolerances, how to choose and configure the structured Jacobian and the linear
 solver behind it, how to switch on optional physics (ALE mesh motion, radiation,
-the gas-generation energy sink), how callbacks are wired in, how warm-starting
+depletion handling), how callbacks are wired in, how warm-starting
 and output saving work, and how to read mass-loss-rate output for variable
 cross-sections. Every keyword shown here is a real `solve` keyword — `solve`
 rejects unknown keywords with an error, so there is no room for typos. The
@@ -47,21 +47,19 @@ The full keyword signature, with defaults, is:
 | `maxiters` | `1000000` | Maximum integrator steps |
 | `dtmin` | `1e-12` | Minimum time step [s] |
 | `dtmax` | `Inf` | Maximum time step [s] |
-| `jacobian` | `nothing` → `Structured(DirectSolve())` | Pluggable Jacobian backend; §8.5 |
+| `jacobian` | `nothing` → `Structured(strategy = DirectSolve())` (fixed mesh) or `Structured(strategy = ApproxSolve())` (ALE) | Jacobian backend; §8.5 |
 | `verify_jacobian` | `nothing` | Compare active Jacobian to a dense AD reference; §8.6 |
 | `use_ale` | `false` | Enable ALE moving-mesh integration; §8.7 |
 | `radiation_model` | `NO_RADIATION` | `NO_RADIATION` / `SURFACE_ABSORPTION` / `BEER_LAMBERT`; §8.8 |
-| `energy_form` | `:standard` | `:standard` or `:with_generation_sink`; §8.9 |
-| `use_transpiration_bc` | `false` | Surface transpiration enthalpy term — must stay `false`; §8.9 |
-| `min_thickness` | `1e-6` | Terminate ALE solve when sample thins below this [m]; §8.7, §8.10 |
-| `handle_depletion` | `false` | Merge depleted surface cells (ALE only); §8.10 |
-| `depletion_threshold` | `0.05` | Cell-thickness fraction that triggers a merge; §8.10 |
-| `min_cells` | `2` | Stop merging once this many cells remain; §8.10 |
-| `diagnostics` | `false` | Snapshot the conservation ledger during the solve; §8.11 |
-| `diagnostics_stride` | `10` | Record a diagnostics snapshot every N steps; §8.11 |
-| `callback` | `nothing` | One extra user callback; §8.11 |
-| `warm_start` | `nothing` | Reuse a prior solution's final state as the IC; §8.12 |
-| `saveat` | `problem.output_times` | Times at which to store output; §8.13 |
+| `min_thickness` | `1e-6` | Terminate ALE solve when sample thins below this [m]; §8.7, §8.9 |
+| `handle_depletion` | `false` | Park depleted cells (ALE or fixed mesh); §8.9 |
+| `depletion_threshold` | `0.05` | Fraction of a cell's initial thickness (ALE) or condensed concentration (fixed mesh) that triggers a park; §8.9 |
+| `min_cells` | `2` | Minimum live cells; the solve terminates instead of parking below it; §8.9 |
+| `diagnostics` | `false` | Log a sensible-energy snapshot during the solve; §8.10 |
+| `diagnostics_stride` | `10` | Record a diagnostics snapshot every N accepted steps; §8.10 |
+| `callback` | `nothing` | One extra user callback; §8.10 |
+| `warm_start` | `nothing` | Reuse a prior solution's final state as the IC; §8.11 |
+| `saveat` | `problem.output_times` | Times at which to store output; §8.12 |
 | `sensealg` | `nothing` | Forwarded to the integrator (used by the sensitivity extension) |
 | `progress` | `true` | Show a progress bar |
 | `validate` | `true` | Run `validate_problem` before solving |
@@ -87,10 +85,10 @@ with `UMFPACKFactorization()` in place of KLU for the exact ALE Jacobian
 (§8.4).
 
 `KenCarp4` is a 4th-order ESDIRK method — a good general-purpose choice for the
-moderately stiff systems that pyrolysis produces. The `autodiff = AutoFiniteDiff()`
-setting tells the integrator to finite-difference its *own* Jacobian when no
-pluggable Jacobian is supplied; when you let the default structured Jacobian take
-over (§8.5), that pluggable Jacobian is used instead.
+moderately stiff systems that pyrolysis produces. `solve` always attaches the
+structured Jacobian (§8.5), so the integrator uses it rather than
+finite-differencing the right-hand side; `autodiff = AutoFiniteDiff()` only sets
+the integrator's own differentiation mode.
 
 You can pass the integrator in three forms:
 
@@ -98,12 +96,17 @@ You can pass the integrator in three forms:
 attaches the chosen linear solver:
 
 ```julia
-using OrdinaryDiffEq            # solver types; `using Pyrolysis` already loads OrdinaryDiffEq
+using OrdinaryDiffEqSDIRK: KenCarp4, TRBDF2   # SDIRK methods (add OrdinaryDiffEqSDIRK to your environment)
+using OrdinaryDiffEq: FBDF                    # OrdinaryDiffEq re-exports only its default set (FBDF, Rodas5P, …)
 
 solve(problem; integrator = KenCarp4)              # rebuilt with default linsolve
 solve(problem; integrator = TRBDF2)                # another SDIRK alternative
 solve(problem; integrator = FBDF)                  # multistep BDF, good for very stiff TGA-like runs
 ```
+
+The integrator names in the examples of this guide (`KenCarp4`, `TRBDF2`,
+`FBDF`, `Rodas5P`) are not exported by `using Pyrolysis`; import them as
+above.
 
 **2. A constructor with a paired `linear_solver`.** Use this when you want a
 specific sparse factorization but still want `solve` to wire it together:
@@ -204,7 +207,7 @@ You select the linear solver either by pairing it with a *constructor*
 `integrator`:
 
 ```julia
-using LinearSolve: SparspakFactorization, UMFPACKFactorization
+using LinearSolve: KLUFactorization, SparspakFactorization, UMFPACKFactorization
 
 solve(problem; integrator = KenCarp4,
                linear_solver = UMFPACKFactorization())
@@ -219,89 +222,70 @@ solve(problem; integrator = KenCarp4(linsolve = KLUFactorization()))
 ```
 
 KLU, UMFPACK and Sparspak are interchangeable sparse direct solvers; the
-default only picks the one suited to the pattern. Iterative ILU-preconditioned
-solvers for large ALE problems are covered in §8.14.
-
-> Note: a dense Jacobian backend such as `DenseAD_ForwardDiff` has no sparse
-> Jacobian prototype for a sparse factorization to consume. `solve` then
-> defaults to `LUFactorization()` (dense), and replaces an explicitly requested
-> sparse factorization with it — with a warning, keeping your integrator type
-> and `autodiff` setting.
+default only picks the one suited to the pattern. An explicit `linear_solver`
+always wins, and any other LinearSolve factorization is passed the same way —
+for example `MKLPardisoFactorize()` once Pardiso/MKL is installed and loaded.
+Iterative ILU-preconditioned solvers for large ALE problems are covered in §8.13.
 
 ---
 
 ## 8.5 Jacobian backend selection
 
-The single most important performance lever is the Jacobian. By default, `solve`
-builds the **structured analytical Jacobian**:
+The single most important performance lever is the Jacobian. `solve` always
+assembles the **structured analytical Jacobian**, `Structured`, with a
+linear-solve *strategy* chosen by the mesh mode when `jacobian = nothing` (the
+default):
 
 ```julia
-Structured(strategy = DirectSolve())
+Structured(strategy = DirectSolve())   # fixed (Eulerian) mesh
+Structured(strategy = ApproxSolve())   # ALE
 ```
 
-This is selected automatically when `jacobian = nothing` (the default) for both
-Eulerian and ALE problems. It assembles the exact Jacobian from per-operator
-analytical and AD contributions (reaction, conduction, gas transport, radiation,
-boundary conditions, and the ALE structured couplings) and hands a sparse matrix
-to the linear solver. It is far faster than letting the integrator
-finite-difference the whole RHS. See Technical Reference §15 for the
-operator-based architecture.
+It assembles the Jacobian from per-operator analytical and AD contributions
+(reaction, conduction, gas transport, radiation, boundary conditions, and the
+ALE structured couplings) and hands a sparse matrix to the linear solver. It is
+far faster than letting the integrator finite-difference the whole RHS. See
+Technical Reference §15 for the operator-based architecture.
 
-You override it through the `jacobian` keyword, passing a `JacobianSpec`. The
-spec is built from a *backend* and a *linear-solve strategy*. The constructor
-`JacobianSpec(backend, problem; ...)` builds the sparsity patterns and AD caches
-once; **do not** construct it inside a hot loop.
+You override the strategy through the `jacobian` keyword, passing the backend
+itself; `solve` builds the sparsity patterns and AD caches for its own mesh copy,
+mode and options.
 
 ### Linear-solve strategies
 
 | Strategy | Behavior | When to use |
 |---|---|---|
 | `DirectSolve()` | Materialize the full Jacobian (block + densified structured couplings) and factor it. Exact. | Fixed-mesh default; the exact ALE Jacobian when asked for |
-| `StructuredSolve()` | Sparse LU on the local block plus Richardson iterations that apply the structured couplings as fast O(N) operators. Exact, converges in 2–5 iterations. | Typical ALE problems |
-| `ApproxSolve()` | Drop the structured ALE couplings (Schur-style approximation); solve only the local block. Approximate but much cheaper. | ALE default |
-| `MatrixFreeSolve()` | GMRES on the operator action without materializing. | Research / very large problems |
+| `ApproxSolve()` | Drop the structured couplings (ALE prefix-sum, χ rank-1, Beer–Lambert suffix-sum; a Schur-style approximation) and solve only the local block. Approximate but much cheaper. | ALE default |
 
 The verifier-only backend `DenseAD_ForwardDiff()` runs ForwardDiff over the
 entire residual to produce a dense reference Jacobian. It is correct by
-construction but slow — use it only for verification (§8.6), never for
-production.
+construction but slow, and it serves only as the reference of `verify_jacobian`
+(§8.6); `jacobian` accepts only a `Structured` backend, so passing
+`DenseAD_ForwardDiff()` (or a prebuilt `JacobianSpec`) raises a `TypeError`.
 
 ### Examples
 
-Production default (no keyword needed):
+Production defaults (no keyword needed):
 
 ```julia
-solve(problem)                                  # Structured(DirectSolve())
+solve(problem)                    # Structured(strategy = DirectSolve())
+solve(problem; use_ale = true)    # Structured(strategy = ApproxSolve())
 ```
 
-Opt into the exact structured/Richardson solve:
+Opt into the exact ALE Jacobian instead of the reduced default:
 
 ```julia
-spec = JacobianSpec(Structured(strategy = StructuredSolve()), problem)
-solve(problem; jacobian = spec)
-```
-
-Opt into the exact ALE Jacobian instead of the reduced default. Because the
-spec must match the simulation mode, pass `use_ale = true` to **both** the
-`JacobianSpec` constructor and `solve`:
-
-```julia
-spec = JacobianSpec(Structured(strategy = DirectSolve()), problem; use_ale = true)
-solve(problem; jacobian = spec, use_ale = true)
+solve(problem; use_ale = true, jacobian = Structured(strategy = DirectSolve()))
 ```
 
 The exact Jacobian carries the dense mesh-velocity coupling, which the reduced
 default drops; both follow the same trajectory, and the exact one costs several
-times more per step (Technical Reference §15.10.3).
-
-The mode keywords accepted by `JacobianSpec(backend, problem; ...)` mirror what
-`solve` selects: `use_ale`, `radiation_model`, `radiation_intensity`,
-`energy_form`, `use_transpiration_bc`, `min_thickness`, `min_density`. They
-default to Eulerian / no radiation, so a plain Eulerian problem needs none of
-them.
+times more per step (Technical Reference §15.10.2). It is factored by
+`UMFPACKFactorization()` unless you pass a `linear_solver` (§8.4).
 
 > Depletion handling (`handle_depletion = true`) keeps the state size and
-> works with any `jacobian`. See §8.10 and Technical Reference §14.3.
+> works with either strategy. See §8.9 and Technical Reference §14.3.
 
 ---
 
@@ -320,13 +304,12 @@ solve(problem;
 
 Allowed keys are exactly `:rtol`, `:atol`, and `:sample_times`; any other key is
 rejected. `rtol` defaults to `1e-6` and `atol` to `1e-10` if omitted. Use this
-when developing a custom backend or diagnosing a "Jacobian mismatch" symptom
-(slow Newton convergence, unexpected step rejections).
-
-Verification is skipped — with a warning — if no Jacobian spec is active, which
-happens under `handle_depletion = true`. For an out-of-solve check at a single
-state point, call `verify_jacobian_at` directly (see Technical Reference §15 and
-Chapter 11).
+when diagnosing a "Jacobian mismatch" symptom (slow Newton convergence,
+unexpected step rejections). It works with depletion handling too. The exact
+`DirectSolve` Jacobian is compared entry by entry; the approximate `ApproxSolve`
+Jacobian deliberately drops couplings, so it is compared only on its own
+support, as a sanity check. For an out-of-solve check at a single state point,
+call `verify_jacobian_at` directly (see Technical Reference §15 and Chapter 11).
 
 ---
 
@@ -351,7 +334,7 @@ With `use_ale = true`:
   it to your physical stopping criterion, e.g. `min_thickness = 0.5e-3`.
 - If the material carries a lateral-shrinkage law, the WithChi cross-section
   state `χ` is integrated too, and the cross-sectional area `A(t)` varies (see
-  §8.13 and Technical Reference §10).
+  §8.12 and Technical Reference §10).
 
 A typical opaque charring cone run:
 
@@ -428,54 +411,12 @@ derived in Technical Reference §8 and §12.
 
 ---
 
-## 8.9 Energy formulation and the transpiration caveat
-
-The bulk energy equation uses **Formulation A** (the ThermaKin Eq. 17
-convention): every component, pore gas included, stores sensible heat in the
-effective heat capacity, and the enthalpy carried by the gas flux relative to
-the skeleton enters through the volumetric advection source `S_conv`, which is
-always active. The `energy_form` keyword selects whether an additional
-gas-generation enthalpy sink is included:
-
-```julia
-solve(problem; energy_form = :standard)              # default: S_conv only
-solve(problem; energy_form = :with_generation_sink)  # adds −Σ Δh_g (∇·J_g) cell source
-```
-
-- `:standard` (default) matches ThermaKin Eq. 17 — `S_conv` alone carries gas
-  enthalpy. This is the recommended convention for almost all work.
-- `:with_generation_sink` adds the per-cell gas-generation sink term, which
-  telescopes with surface transpiration to recover the strict conservative form.
-  Use it only if you specifically need the conservative-form energy balance to
-  close (see Technical Reference §7 and §16).
-
-Any other symbol is rejected.
-
-### Do not enable `use_transpiration_bc`
-
-The surface transpiration enthalpy term `Σṁ_g·Δh_g` would **double-count** gas
-enthalpy because `S_conv` already carries it. `solve` therefore hard-rejects
-`use_transpiration_bc = true`:
-
-```julia
-solve(problem; use_transpiration_bc = false)   # the only accepted value (default)
-```
-
-Leave it at its default `false`. Mass transport across the boundary remains fully
-active either way — this flag concerns only the *enthalpy* sink, not the mass
-flux. (Parameter sets calibrated against solvers that apply a surface transpiration
-term *in addition to* a volumetric advection source embed the double-count; they
-predict lower surface temperature and MLR than the `S_conv`-only balance and should
-be re-validated when imported.)
-
----
-
-## 8.10 Depletion handling and termination
+## 8.9 Depletion handling and termination
 
 When a layer burns out, its cells shrink (ALE) or empty (fixed mesh) toward a
 state the implicit integrator cannot resolve — a vanishing cell's equations are
 conditioned like `1/Δz²`. Depletion handling **parks** such cells: it merges
-each one into a neighbour, conserving mass and condensed enthalpy, and moves
+each one into a neighbour, conserving mass and sensible enthalpy, and moves
 its state slot above the live surface as an inert ghost. The state vector,
 mesh and Jacobian keep their size; the boundary conditions act at the live
 surface.
@@ -504,9 +445,10 @@ How it works:
 - The depleted cell is merged into its interior neighbour with an
   **energy-conserving** temperature merge and a volume-weighted concentration
   merge, and its slot is parked; one cell per step, surface first.
-- Parking stops once only `min_cells` live cells remain (default `2`); the
-  thickness-termination callback ends an ALE solve when the live thickness drops
-  below `min_thickness`.
+- When only `min_cells` live cells remain (default `2`), the next depleted cell
+  terminates the solve with a warning (retcode `:Terminated`) instead of parking;
+  the thickness-termination callback ends an ALE solve when the live thickness
+  drops below `min_thickness`.
 - Ghost slots read as `NaN` in `sol.T`, `sol.ξ` and `sol.z`;
   `sol.extras.live_cells` gives the live count at each output time and
   `sol.extras.park_times` the event times.
@@ -516,14 +458,14 @@ How it works:
 `examples/07_douglas_fir_cone.jl` instead lets ALE carry the thin cells and
 stops purely on `min_thickness` (`handle_depletion = false`).
 
-> Jacobian: depletion handling keeps the pluggable Jacobian. The ALE default,
+> Jacobian: depletion handling keeps the structured Jacobian. The ALE default,
 > `Structured(strategy = ApproxSolve())`, runs through the parks, and
 > `DirectSolve` stays available through `jacobian`. Theory in Technical
 > Reference §14.3.
 
 ---
 
-## 8.11 Callbacks and runtime diagnostics
+## 8.10 Callbacks and runtime diagnostics
 
 `solve` assembles a `CallbackSet` internally; you do not manage most of these. In
 order, they are: a step-update callback (always present; syncs the integrator
@@ -533,22 +475,22 @@ that solve their stages by Newton), a progress bar (`progress = true`), an
 optional diagnostics callback, an optional Jacobian-verification callback, and
 finally any user callback you supply.
 
-### Conservation diagnostics
+### Diagnostics log
 
-Set `diagnostics = true` to snapshot the conservation ledger during the solve.
-Snapshots are recorded every `diagnostics_stride` steps (default `10`) and are
-appended to `solution.extras.diagnostics_log`:
+Set `diagnostics = true` to log a sensible-energy snapshot during the solve.
+Snapshots are recorded every `diagnostics_stride` accepted steps (default `10`)
+and are appended to `solution.extras.diagnostics_log`:
 
 ```julia
 solution = solve(problem; diagnostics = true, diagnostics_stride = 20)
 rows = solution.extras.diagnostics_log    # Vector{DiagnosticsRow}
 ```
 
-Each row captures the sensible energy `E_sensible`. This is **snapshot** logging
-— not a continuous time
-history — and is intended for auditing energy/mass balance, not dense
-post-processing. `diagnostics_stride` must be ≥ 1. See Chapter 9 for reading
-diagnostics and Technical Reference §16 for the ledgers.
+Each row captures the time `t` and the sensible energy `E_sensible`; its
+cumulative-ledger fields (`energy_residual`, `energy_relative`,
+`mass_max_relative_error`) are `NaN`; only `record_substep!` fills them (§9.8).
+This is **snapshot** logging — not a continuous time history. `diagnostics_stride` must be ≥ 1. See Chapter 9 for
+reading diagnostics and Technical Reference §16 for the ledgers.
 
 ### A custom user callback
 
@@ -577,7 +519,7 @@ this automatically).
 
 ---
 
-## 8.12 Warm-starting from a prior solution
+## 8.11 Warm-starting from a prior solution
 
 To start a new solve from the final state of a previous one — useful for
 continuation studies and for warm-starting nearby parameter-sweep points — pass
@@ -599,12 +541,12 @@ start time — warm-starting treats the prior final state as fresh initial data,
 does not continue the clock.
 
 > Caution: warm-starting can introduce subtle artifacts in sensitivity studies
-> because the perturbed solve no longer begins from the canonical initial
+> because the perturbed solve does not begin from the canonical initial
 > condition. Prefer cold starts when computing gradients (Chapter 13).
 
 ---
 
-## 8.13 Output times, saving, and MLR for variable cross-section
+## 8.12 Output times, saving, and MLR for variable cross-section
 
 By default `solve` saves the solution at `problem.output_times` (set when you
 built the problem). Override with `saveat`:
@@ -639,12 +581,13 @@ Technical Reference §10 and §16 for the gauge convention.
 
 ---
 
-## 8.14 Performance tips and iterative linear solvers
+## 8.13 Performance tips and iterative linear solvers
 
 A short checklist for fast, reliable solves:
 
-1. **Use the default structured Jacobian.** It is dramatically faster than the
-   integrator's finite-difference Jacobian.
+1. **Keep the default Jacobian strategy.** `solve` always assembles the
+   structured Jacobian, which is dramatically faster than finite-differencing
+   the right-hand side; the default strategy suits each mesh mode (§8.5).
 2. **Right-size the mesh.** Resolution costs scale super-linearly (smaller cells
    force smaller diffusion-limited time steps). Use a stretched mesh refined near
    the surface (`create_stretched_mesh(L, n, Val(NC), 1.1; stretch_from = :top)`)
@@ -693,16 +636,13 @@ fall back to diagonal preconditioning automatically.
 > factorization, and reserve it for large ALE meshes where the dense structured
 > coupling makes direct factorization the bottleneck.
 
-External factorizations are available through extensions: `using KLU` enables
-`Pyrolysis.klu_factorization()`, `using Pardiso` enables
-`Pyrolysis.pardiso_factorization()`, and `using AlgebraicMultigrid` enables
-`Pyrolysis.amg_preconditioner(A)`. These are covered in Chapter 11. The
-structured-solve strategies and ILU internals are described in Technical
-Reference §15.
+Any other LinearSolve factorization is passed the same way, as `linear_solver`
+or inside a built integrator (§8.4, Chapter 11). The linear-solve strategies and
+ILU internals are described in Technical Reference §15.
 
 ---
 
-## 8.15 Reading the return code
+## 8.14 Reading the return code
 
 `solve` always returns a `PyrolysisSolution`; check `solution.retcode` to confirm
 the run finished as intended:
@@ -728,7 +668,7 @@ in Chapter 15.
 
 ---
 
-## 8.16 A complete annotated `solve` call
+## 8.15 A complete annotated `solve` call
 
 Putting the pieces together, here is a fully specified solve for an opaque
 charring cone-calorimeter case with ALE mesh motion (mirroring the shipped
@@ -736,6 +676,7 @@ Douglas-fir example):
 
 ```julia
 using Pyrolysis
+using OrdinaryDiffEqSDIRK: KenCarp4   # not exported by Pyrolysis
 using LinearSolve: SparspakFactorization
 
 solution = solve(
@@ -749,11 +690,10 @@ solution = solve(
     # physics
     use_ale          = true,               # moving mesh: surface recedes
     radiation_model  = SURFACE_ABSORPTION, # opaque: deposit all flux at the surface
-    energy_form      = :standard,          # S_conv-only (ThermaKin) convention
     min_thickness    = 0.5e-3,             # stop when the sample is < 0.5 mm
-    handle_depletion = false,              # let ALE carry thin cells (no merging)
+    handle_depletion = false,              # let ALE carry thin cells (no parking)
     # diagnostics + output
-    diagnostics = true,                    # snapshot the energy ledger
+    diagnostics = true,                    # log sensible-energy snapshots
     saveat      = collect(0.0:1.0:600.0),  # save once per second
     progress    = true,
 )

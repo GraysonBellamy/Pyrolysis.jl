@@ -60,8 +60,10 @@ $\ell(\boldsymbol{\theta})=\tfrac12\lVert\mathbf{y}(\boldsymbol{\theta})-\mathbf
 Gradient-based optimizers (Gauss–Newton, L-BFGS, Levenberg–Marquardt) require
 $\nabla_{\boldsymbol{\theta}}\ell$, which is exactly an adjoint or a
 Jacobian-vector contraction of $S_{kq}$. The shipped inverse-analysis workflow
-(`examples/inverse_analysis/wp_objective.jl`, `wp_forward.jl`) fits White-Pine
-kinetics and properties to multi-flux cone data this way.
+(`examples/inverse_analysis/inverse_white_pine.jl`, with `wp_objective.jl` and
+`wp_forward.jl`) minimizes such a misfit for White-Pine kinetics and properties
+against multi-flux cone data, derivative-free (`Fminbox(NelderMead())`), with a
+`FiniteDiff` Hessian at the optimum for the standard errors.
 
 **(2) Uncertainty quantification (UQ).** Given parameter uncertainties
 (covariances from instrument calibration and per-curve regression), the
@@ -127,15 +129,15 @@ $$
 
 evaluated at the supplied base point $\boldsymbol{\theta}$. The signature is
 `forward_sensitivity(base_problem, θ, p_inject; output_fn=identity, solve_kwargs...)`;
-`p_inject` is a positional closure and `output_fn` defaults to identity (return
-the whole solution object, which ForwardDiff then differentiates element-wise).
+`p_inject` is a positional closure and `output_fn` defaults to `identity`, which
+returns the `PyrolysisSolution` itself; `ForwardDiff.jacobian` needs an array, so
+pass an `output_fn` that returns a vector (e.g. `sol -> sol.surface_T`).
 
 > **Implementation note.** Forward-mode sensitivity is implemented in
-> `Pyrolysis.forward_sensitivity`,
-> `ext/PyrolysisSciMLSensitivityExt.jl` (lines 30–48), attached to the stub
-> `forward_sensitivity` declared in `src/sensitivity_stubs.jl`. The stub raises a
-> `MethodError`-style error until `using SciMLSensitivity` (and `Zygote`) loads
-> the extension. ForwardDiff is the only differentiation engine used by the
+> `Pyrolysis.forward_sensitivity`, `ext/PyrolysisSciMLSensitivityExt.jl`, attached
+> to the stub `forward_sensitivity` declared in `src/sensitivity_stubs.jl`. The
+> stub has no methods until `using SciMLSensitivity, Zygote` loads the extension;
+> calling it before raises a `MethodError`. ForwardDiff is the only differentiation engine used by the
 > *forward* path; SciMLSensitivity is a load trigger, not an active component
 > here.
 
@@ -164,14 +166,10 @@ dual part or silently coerce to `Float64`. The package satisfies this:
   (connectivity only). Geometry sensitivities therefore propagate (§11, The ALE
   Framework).
 - **Property evaluation.** Property functions are callable on `Real`, hence on
-  duals. The analytical temperature derivatives of §4.5 — e.g. Arrhenius
-  $\mathrm{d}p/\mathrm{d}T = p(T)\,E/(R_g T^2)$ and the unrolled polynomial
-  derivative (`derivative`, `src/Materials/property_functions.jl:283–300`) — are
-  used by the *Jacobian* assembly, but for *forward sensitivity* ForwardDiff
-  differentiates the property's own arithmetic, so even `TableProperty` and
-  `CallableProperty` (which only have finite-difference $\mathrm{d}p/\mathrm{d}T$
-  internally) are differentiated *exactly* with respect to $T$ through their
-  interpolation arithmetic.
+  duals, and carry no derivative methods (§4.5): ForwardDiff differentiates each
+  law's own arithmetic, so even `TableProperty` (slope of the active segment) and
+  `CallableProperty` are differentiated exactly with respect to $T$ and to any
+  parameter inside them.
 - **Boundary-temperature Newton solve.** The surface-temperature solve
   $f(T_s)=0$ (§12.2) detects dual inputs and returns a dual $T_s$; the implicit
   function theorem is realized automatically because Newton's iterate
@@ -180,11 +178,10 @@ dual part or silently coerce to `Float64`. The package satisfies this:
 - **Kinetics.** `reaction_rate` is written with
   `one(promote_type(eltype(ξ), typeof(T)))` and `_fast_pow` so that the
   concentration product, tanh gates, and depletion limiter all stay in the
-  promoted dual type (`src/Physics/kinetics.jl:75–111`).
+  promoted dual type (`src/Physics/kinetics.jl`).
 
-The time integrator (`KenCarp4` by default, with
-`autodiff=AutoFiniteDiff()` for its *internal* Newton Jacobian and the
-default sparse factorization for the linear solve) does **not** need to be
+The time integrator (`KenCarp4` by default, with the structured Jacobian of §15
+as its Newton Jacobian and the default sparse factorization for the linear solve) does **not** need to be
 dual-aware: ForwardDiff differentiates the *output of the converged solve*, not
 the integrator's internal Jacobian. OrdinaryDiffEq's `solve` is itself a
 differentiable program, and SciMLSensitivity supplies the dual-compatible
@@ -270,8 +267,7 @@ The signature is
 `adjoint_sensitivity(base_problem, θ, p_inject, loss_fn; sensealg=InterpolatingAdjoint(autojacvec=ReverseDiffVJP()), solve_kwargs...)`.
 
 > **Implementation note.** Adjoint sensitivity is
-> `Pyrolysis.adjoint_sensitivity`, `ext/PyrolysisSciMLSensitivityExt.jl`
-> (lines 53–74). The `sensealg` is **forwarded to `solve` as a first-class
+> `Pyrolysis.adjoint_sensitivity`, `ext/PyrolysisSciMLSensitivityExt.jl`. The `sensealg` is **forwarded to `solve` as a first-class
 > keyword** — `solve` accepts `sensealg` precisely so SciMLSensitivity can
 > intercept the ODE solve and augment it with adjoint dynamics without tripping
 > `solve`'s unknown-keyword guard (`src/Solver/solve.jl`). Zygote provides the
@@ -325,8 +321,7 @@ The key structural facts:
   transpose of the structured Jacobian of §15. SciMLSensitivity never forms it
   densely; with `autojacvec=ReverseDiffVJP()` it evaluates *vector–Jacobian
   products* $\boldsymbol{\lambda}^{\mathsf T}(\partial\mathbf{f}/\partial\mathbf{u})$
-  by reverse-mode AD of the residual, matching the matrix-free spirit of the
-  `MatrixFreeSolve` strategy.
+  by reverse-mode AD of the residual.
 - The default `InterpolatingAdjoint` stores (and interpolates) the forward
   trajectory so the backward pass can re-evaluate $\mathbf{f}$ and its VJPs at
   the correct states; this trades memory for the avoidance of a backward
@@ -426,8 +421,8 @@ Common $\boldsymbol{\theta}$ entries and how `p_inject` injects them:
   $T_s$ — the sensitivity $\partial T_s/\partial h_r<0$.
 - **Densities / conductivities / emissivities** $\rho_j,k_j,\varepsilon_j$.
   These feed the mixture rules of §5 and the boundary energy balance; their
-  derivatives propagate through the effective-property closures (analytical
-  mixing derivatives for PARALLEL/SERIES/WEIGHTED, AD for BRUGGEMAN). A
+  derivatives propagate through the effective-property closures (ForwardDiff
+  through every mixing rule, Bruggeman's Newton solve included; §5.15). A
   bulk-density change also shifts the initial dry-solid mass $m_{\text{dry},i}$
   (and hence $\chi$, §10), so density is a particularly broad-reaching handle.
 - **Boundary-condition parameters** — incident flux level, convective
@@ -447,8 +442,14 @@ using Pyrolysis, SciMLSensitivity, Zygote   # loads the extension
 
 function p_inject(prob, θ)
     rxn  = Reaction(:decomp, 1 => 2; A = θ[1], E = θ[2], h = θ[3])
-    mat  = Material(prob.material; reactions = (rxn,))
-    return PyrolysisProblem(prob; material = mat)
+    m    = prob.material
+    mat  = Material(; name = m.name, components = m.components, reactions = (rxn,),
+                    mixing = m.mixing, lateral_shrinkage_law = m.lateral_shrinkage_law,
+                    depletion_limiter = m.depletion_limiter, gas_viscosity = m.gas_viscosity)
+    return PyrolysisProblem(; mesh = deepcopy(prob.mesh), material = mat,
+                            bc_set = prob.bc_set, T_initial = prob.T_initial,
+                            ξ_initial = prob.ξ_initial, tspan = prob.tspan,
+                            dt_initial = prob.dt_initial, output_times = prob.output_times)
 end
 
 output_fn(sol) = sol.surface_T               # vector QoI over saved times
@@ -582,14 +583,15 @@ at the gate edges and destroy both the integrator's Newton Jacobian and any AD
 derivative. The code replaces it with the product of tanh ramps
 
 $$
-r \;\mathrel{*}=\; \tfrac12\big(1+\tanh(T-T_{\min})\big)\,
-                   \tfrac12\big(1+\tanh(T_{\max}-T)\big),
+r \;\mathrel{*}=\; \tfrac12\big(1+\tanh((T-T_{\min})/w_{\text{gate}})\big)\,
+                   \tfrac12\big(1+\tanh((T_{\max}-T)/w_{\text{gate}})\big),
 $$
 
-applied only when the bounds are finite/positive (`src/Physics/kinetics.jl:102–108`).
+applied only when the bounds are finite/positive (`src/Physics/kinetics.jl`), with
+the per-reaction gate width $w_{\text{gate}}$ (default 1 K, §6.2.2).
 This is $C^\infty$ in $T$, so all temperature sensitivities of the rate are
-finite. The cost is a $\sim\!10\text{ K}$ leakage of reactivity outside the
-nominal window (the ramp is not unit-step), discussed in §6.2; for sensitivity
+finite. The cost is a leakage of reactivity of about $10\,w_{\text{gate}}$ outside
+the nominal window (the ramp is not unit-step), discussed in §6.2; for sensitivity
 purposes the benefit — globally finite $\partial r/\partial T$ — outweighs it.
 
 **(2) Depletion limiter.** Near zero reactant the bare Arrhenius rate is stiff
@@ -601,33 +603,24 @@ $$
 $$
 
 with default threshold $\xi_{\text{thr}}=1.0\ \text{kg·m}^{-3}$
-(`src/Physics/kinetics.jl:89–95`; reactant clamped via $\max(\xi,0)$ first).
+(`src/Physics/kinetics.jl`; reactant clamped via $\max(\xi,0)$ first).
 The rate vanishes at depletion with a bounded $\partial r/\partial\xi$ for
 every reaction order $n \ge 0$, keeping the reaction-rate Jacobian — and hence
 the parameter sensitivities of MLR near burnout — bounded and well-defined.
 The factor is $C^\infty$ in $\xi > 0$ with no threshold branch; the only
 non-smooth point left is the $\max(\xi,0)$ clip exactly at $\xi=0$ (§17.7).
 
-**(3) Midpoint-rule sensible enthalpy.** The sensible-enthalpy increment
-$\Delta h(T_{\text{hi}},T_{\text{lo}})=c_p\!\big(\tfrac{T_{\text{hi}}+T_{\text{lo}}}2\big)(T_{\text{hi}}-T_{\text{lo}})$
-(`src/Materials/components.jl:515–518`) uses a *single* $c_p$ evaluation at the
-midpoint. It is smooth in both temperatures and in any property parameters
-inside $c_p$, and — crucially — AD returns the derivative of *what the midpoint
-rule actually computes*, not of an idealized exact integral. This consistency
-means energy-balance-derived QoIs differentiate cleanly and match the
-single-point cell-centered $c_p$ used elsewhere.
-
-**(4) Smooth flux limiters and lateral-shrinkage derivative.** The TVD limiters
+**(3) Smooth flux limiters and lateral-shrinkage derivative.** The TVD limiters
 (Van Leer is the ALE default) are continuous, and the $\chi$-driven radial
 strain rate uses an *automatic-differentiation* derivative of the
 lateral-shrinkage law,
 $\theta_A=\dfrac{\mathrm{law}'(\bar\chi)}{\mathrm{law}(\bar\chi)}\dfrac{\mathrm{d}\bar\chi}{\mathrm{d}t}$
 with `dlaw_dχ̄ = ForwardDiff.derivative(law, χ̄)` and a guard
-`A_ratio > eps()` (`src/Residual/residual.jl:559–563`). Because $\mathrm{law}'$
+`A_ratio > eps()` (`src/Residual/residual.jl`). Because $\mathrm{law}'$
 is taken by AD, *any differentiable* law contributes correct geometry
 sensitivities — but a non-smooth law breaks this (see §17.7).
 
-**(5) Harmonic-mean face averaging and tanh-based smoothing elsewhere.** The
+**(4) Harmonic-mean face averaging and tanh-based smoothing elsewhere.** The
 distance-weighted harmonic mean used for face $k_f,\lambda_f,\kappa_f$ (§5.12)
 and the smooth (rather than `min`/`max`) constructions in the gates keep the
 discrete operators differentiable. The few genuinely non-smooth operations that
@@ -636,10 +629,9 @@ state rewrite at park events — are localized and are exactly the pitfalls
 catalogued next.
 
 > **Implementation note.** The smoothness-critical kernels are
-> `reaction_rate` (`src/Physics/kinetics.jl`), `Δh` /
-> `sensible_enthalpy` (`src/Materials/components.jl`), the limiter library
+> `reaction_rate` (`src/Physics/kinetics.jl`), the limiter library
 > (`src/Discretization/flux_limiters.jl`), and `_compute_theta_A`
-> (`src/Residual/residual.jl`). Each was written with `tanh`/midpoint/AD
+> (`src/Residual/residual.jl`). Each was written with `tanh`/AD
 > derivatives *in place of* the textbook step/cutoff/finite-difference form so
 > that the chain $\boldsymbol{\theta}\mapsto\mathbf{y}$ is differentiable.
 
@@ -660,14 +652,13 @@ not see**: the warm-start state was produced at a *different* $\boldsymbol{\thet
 so $\partial\mathbf{u}_0/\partial\theta_q$ is silently set to zero even though
 the true initial condition (had the perturbed problem been integrated from the
 real start) would depend on $\boldsymbol{\theta}$. Differentiating a
-warm-started solve therefore yields a derivative of the *wrong map*. Open
-question 3 in the solver KB flags this explicitly. **Rule:** do not warm-start
+warm-started solve therefore yields a derivative of the *wrong map*. **Rule:** do not warm-start
 solves that are inside `forward_sensitivity`/`adjoint_sensitivity` or a
 sensitivity sweep; integrate each sample from its true initial condition.
 
 ### 17.7.2 Non-smooth lateral-shrinkage laws
 
-The radial strain rate uses $\mathrm{law}'(\bar\chi)$ via AD (§17.6.4). Identity
+The radial strain rate uses $\mathrm{law}'(\bar\chi)$ via AD (§17.6, item 3). Identity
 (`NoChi`) and the smooth linear laws $1\mp k\bar\chi$ are differentiable, but a
 piecewise or table-defined law with kinks makes $\mathrm{law}'$ discontinuous at
 the breakpoints. A sensitivity evaluated *at* a breakpoint is then ill-defined
@@ -728,7 +719,7 @@ in pointwise late-time MLR sensitivities near burnout.
 ## 17.8 Comparison to ThermaKin2Ds, Gpyro, and FDS
 
 Pyrolysis.jl's sensitivity capability is structurally different from its
-condensed-phase peers, which historically expose parameter sensitivity only
+condensed-phase peers, which expose parameter sensitivity only
 *externally* (through driver scripts and finite differences) rather than through
 differentiable internals.
 
@@ -776,18 +767,15 @@ global indices, all sharing one immutable-problem / mutable-workspace harness.
 
 ## 17.9 Limitations and open issues
 
-Drawing on the open questions recorded in the solver and kinetics knowledge
-bases:
-
 1. **Adjoint sensitivity across park events (open).** A park is a discrete
    rewrite of the state, so the trajectory is only piecewise smooth across
    events and adjoint sensitivity cannot run through a depleting
    (`handle_depletion=true`) horizon that contains one. Reconciling the event
-   with a differentiable solve path is an open design problem (Solver KB Q2).
+   with a differentiable solve path is an open design problem.
 
 2. **Warm-start in sensitivity loops (open).** Whether — and how — reusing a
    prior solution's final state as a fresh initial condition perturbs sensitivity
-   estimates is unquantified (Solver KB Q3). The current guidance is to avoid
+   estimates is unquantified. The current guidance is to avoid
    warm-starting inside differentiated solves (§17.7.1).
 
 3. **No native forward-sensitivity ODE / adjoint.** The wrapper approach
@@ -795,7 +783,7 @@ bases:
    machinery rather than a hand-coded sensitivity/adjoint exploiting the
    structured Jacobian and its $\mathcal{O}(N)$ couplings (§15.9). A native
    adjoint that transposes the structured operators directly would be faster and
-   lower-memory; the API surface notes this as a planned future replacement.
+   lower-memory.
 
 4. **Non-smoothness residue.** A handful of guards (`max`/`clamp`, the
    `A_ratio > eps()` switch, hard temperature/

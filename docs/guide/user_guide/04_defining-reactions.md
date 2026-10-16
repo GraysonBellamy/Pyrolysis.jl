@@ -413,8 +413,8 @@ everywhere (no threshold branch): it is ≈ 1 well above `threshold` (within 4%
 at `2·threshold`, indistinguishable from 1 beyond `~20·threshold`) and drives
 the rate to zero with a bounded derivative as the reactant runs out — for every
 reaction order `n ≥ 0`, including zero-order. The limiter is configured by the
-`DepletionLimiter` type, exported by the `Physics` submodule
-(`Pyrolysis.Physics.DepletionLimiter`):
+`DepletionLimiter` type (top-level exported, and also exported by the `Physics`
+and `Materials` submodules):
 
 ```julia
 Base.@kwdef struct DepletionLimiter
@@ -450,7 +450,7 @@ You can evaluate a single rate with a custom or disabled limiter for testing:
 
 ```julia
 using Pyrolysis
-using Pyrolysis.Physics: reaction_rate, DepletionLimiter   # exported by Physics, not re-exported at the top level
+using Pyrolysis.Physics: reaction_rate   # exported by Physics, not re-exported at the top level
 
 # Disable limiting (validation / verification only — may be stiff in a full
 # solve, and removes the only guard that stops zero-order reactions at ξ = 0).
@@ -487,65 +487,39 @@ material = Material(
 ```
 
 A material can also have **no reactions** — pass `reactions = ()` (the default) for
-a pure heat-conduction problem. `Material(...)` resolves symbolic reactions,
-validates that every reaction references a real component, and checks each
-reaction's mass balance at construction. Chapter 3 covers the rest of the
+a pure heat-conduction problem. `Material(...)` resolves symbolic reactions (a
+name that matches no component throws) into `Reaction`s, whose constructor
+checks the mass balance; integer component indices are range-checked when
+`solve` validates the problem (§3.7). Chapter 3 covers the rest of the
 `Material` constructor (components, mixing rules, lateral-shrinkage law).
-
-### Building a reaction set separately
-
-If you want to construct the reaction collection on its own (for reuse or
-inspection), `ReactionSet` wraps a tuple of reactions and is exported:
-
-```julia
-rxns = ReactionSet(
-    Reaction(:step1, :virgin => (:int1, :gas1);
-             A = 7.48e4,  E = 71.6e3,  h = -1.92e4, yields = (0.95, 0.05)),
-    Reaction(:step2, :int1   => (:char, :gas2);
-             A = 2.36e10, E = 140.9e3, h =  2.64e5, yields = (0.80, 0.20)),
-)
-```
-
-In normal use you pass the plain tuple straight to
-`Material(..., reactions = (...))`; `ReactionSet` is mainly an accessor
-convenience.
 
 ---
 
 ## 4.12 Validating reactions
 
-Two helpers let you check mass balance explicitly, beyond the automatic
-check at construction. They are **not** part of the top-level `Pyrolysis`
-exports — reach them through their submodule as
-`Pyrolysis.Materials.verify_stoichiometry` and
-`Pyrolysis.Materials.check_material_mass_balance`, or bring them into scope
-with `using Pyrolysis.Materials: verify_stoichiometry, check_material_mass_balance`.
+One helper lets you check mass balance explicitly, beyond the automatic
+check at construction. It is **not** part of the top-level `Pyrolysis`
+exports — reach it through its submodule as
+`Pyrolysis.Materials.verify_stoichiometry`, or bring it into scope with
+`using Pyrolysis.Materials: verify_stoichiometry`.
 
 **`verify_stoichiometry(rxn; tol=1e-10) -> Bool`** confirms that a single
 reaction's product yields sum to 1.0 (within `tol`). It returns `true` when
 balanced and issues a warning and returns `false` otherwise:
 
 ```julia
-using Pyrolysis.Materials: verify_stoichiometry, check_material_mass_balance
+using Pyrolysis.Materials: verify_stoichiometry
 
 rxn = Reaction(:charring, :virgin => (:char, :gas);
                A = 1e15, E = 200e3, h = 500e3, yields = (0.25, 0.75))
 verify_stoichiometry(rxn)   # true: 0.25 + 0.75 = 1.0
+
+all(verify_stoichiometry, material.reactions)   # every reaction of a material
 ```
 
-**`check_material_mass_balance(reactions; tol=1e-10) -> Bool`** runs
-`verify_stoichiometry` over every reaction in a material and returns `true` only
-if all pass:
-
-```julia
-if !check_material_mass_balance(material.reactions)
-    @warn "Material has reactions with mass-balance issues"
-end
-```
-
-Both are diagnostics: mass conservation is enforced by the single-reactant
-construction convention (§4.3), not by a projection during the solve, so these
-checks are for catching setup mistakes. See Technical Reference §6.8.
+It is a diagnostic: mass conservation is enforced by the single-reactant
+construction convention (§4.3), not by a projection during the solve, so the
+check is for catching setup mistakes. See Technical Reference §6.8.
 
 ---
 
@@ -559,9 +533,9 @@ using Pyrolysis
 # `reaction_rate` lives in the Physics submodule and is exported from it, but is
 # not re-exported at the top level — bring it into scope explicitly.
 using Pyrolysis.Physics: reaction_rate
-# `verify_stoichiometry` / `check_material_mass_balance` are not exported at all;
-# reach them through the Materials submodule.
-using Pyrolysis.Materials: verify_stoichiometry, check_material_mass_balance
+# `verify_stoichiometry` is not exported at all; reach it through the Materials
+# submodule.
+using Pyrolysis.Materials: verify_stoichiometry
 
 # Three components: virgin solid, char residue, gas product.
 virgin = SolidComponent(:virgin, ρ = 1190, c = 1420, k = 0.21, ε = 0.86)
@@ -579,7 +553,7 @@ material = Material(name = :PMMA, components = (virgin, char, gas), reactions = 
 
 # Verify mass balance.
 @assert verify_stoichiometry(rxn)                  # 0.002 + 0.998 = 1.0
-@assert check_material_mass_balance(material.reactions)
+@assert all(verify_stoichiometry, material.reactions)
 
 # Evaluate the rate at one cell state (concentrations in kg/m³, T in K).
 T_cell = 700.0
@@ -615,7 +589,7 @@ Technical Reference §6.7.
 - The **depletion limiter** (default `threshold = 1.0` kg·m⁻³) is applied
   automatically and is rarely tuned; lower it only for genuinely dilute species
   and raise it only to relieve stiffness near full conversion.
-- Validate with `verify_stoichiometry` and `check_material_mass_balance`.
+- Re-check a reaction's mass balance with `verify_stoichiometry`.
 
 For the mathematics behind the rate law, the smooth gates, the depletion limiter,
 the stoichiometric sources, and the heat-source assembly, see Technical Reference

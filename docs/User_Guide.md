@@ -74,11 +74,11 @@ Pyrolysis.jl is intended for the same class of problems as **ThermaKin2Ds**,
 **Gpyro**, and the **FDS** solid-phase pyrolysis model: cone-calorimeter
 simulations, TGA/DSC/MCC idealizations, charring and non-charring solids,
 intumescent coatings, pressure-treated wood, and moisture transport. The energy
-equation uses **Formulation A** (the non-conservative temperature equation of a
-one-temperature porous medium: every component, pore gas included, stores
-sensible heat, and the enthalpy carried by the gas flux relative to the skeleton
-enters through the advection source `S_conv`), which is the ThermaKin convention
-(see Technical Reference §3 and §7).
+equation is the non-conservative temperature equation of a one-temperature porous
+medium: every component, pore gas included, stores sensible heat, and the
+enthalpy carried by the gas flux relative to the skeleton enters through the
+advection source `S_conv`. This is the ThermaKin convention (see Technical
+Reference §3 and §7).
 
 ### What is not modeled
 
@@ -110,9 +110,9 @@ To set expectations up front, the current model does **not** support:
 | Volume change, swelling, intumescence | `swelling_factor` (γ) on components | TR §10 |
 | Lateral shrinkage / variable cross-section | `lateral_shrinkage_law` on the `Material` | TR §10 |
 | Moving mesh (surface recession) | `solve(...; use_ale = true)` | TR §11 |
-| Surface-cell depletion / merging | `solve(...; use_ale = true, handle_depletion = true)` | TR §14 |
-| Adaptive mesh refinement (r-refinement, indicators) | `Pyrolysis.Internal` / submodule access | TR §14 |
-| Conservation diagnostics | `solve(...; diagnostics = true)` | TR §16 |
+| Surface-cell depletion (cell parking) | `solve(...; handle_depletion = true)` | TR §14 |
+| Error indicators, r-refinement, mesh-quality metrics (standalone; not used by `solve`) | `Pyrolysis.Internal` / submodule access | TR §14 |
+| Sensible-energy diagnostics log | `solve(...; diagnostics = true)` | TR §16 |
 | Sensitivity analysis (forward / adjoint) | `forward_sensitivity`, `adjoint_sensitivity` (extension) | TR §17 |
 | Parameter sweeps (parallel) | `parameter_sweep` | UG §12 |
 
@@ -123,18 +123,14 @@ them plainly wherever they appear:
   solve path. The exported radiation models you can pass to `solve` are
   `NO_RADIATION`, `SURFACE_ABSORPTION`, and `BEER_LAMBERT`; requesting
   `P1_QUASI_STEADY` is rejected by `solve` (see Technical Reference §8).
-- The **surface transpiration boundary condition** is incompatible with the
-  default `S_conv` energy convention. The volumetric advection source already
-  carries the gas enthalpy, so enabling transpiration would double-count it.
-  `use_transpiration_bc = true` is rejected at construction; leave it at its
-  default `false` (see Technical Reference §7 and §12).
 - **Depletion handling** (`handle_depletion = true`) parks depleted cells
   without changing the state size, so it works with every Jacobian backend;
   it is a sequence of discrete state rewrites, so parameter sensitivities are
   valid only between park events (Chapter 10, Technical Reference §14, §17).
-- **h-AMR** (cell splitting / coarsening) is quarantined in
-  `Pyrolysis.Experimental`; the supported adaptivity in the core package is
-  r-refinement (node relocation) and depleted-cell parking.
+- **h-refinement / h-coarsening** (cell splitting / coarsening) lives in
+  `Pyrolysis.Experimental`, and its meshes cannot be passed to `solve`. The only
+  mesh adaptation `solve` performs is depleted-cell parking; error indicators,
+  r-refinement, and mesh-quality metrics are standalone building blocks.
 
 ---
 
@@ -331,61 +327,59 @@ Commit both files to version control for any study you want to be reproducible.
 
 ## 1.6 Optional extensions (load-on-demand)
 
-Pyrolysis.jl keeps its core lightweight by declaring several heavy or
-vendor-specific capabilities as **package extensions**. Each extension is wired to
-a *weak dependency* and activates automatically the moment you `using` the
-corresponding package alongside `Pyrolysis` — you never call the extension
-explicitly, you just load its trigger package. The relevant entries from the
-package's `Project.toml` are:
+Pyrolysis.jl keeps its core lightweight by declaring two optional capabilities —
+plotting recipes and SciML sensitivity analysis — as **package extensions**. Each
+extension is wired to *weak dependencies* and activates automatically the moment
+you `using` the corresponding packages alongside `Pyrolysis` — you never call the
+extension explicitly, you just load its trigger packages. The relevant entries
+from the package's `Project.toml` are:
 
 ```toml
+[weakdeps]
+RecipesBase = "3cdcf5f2-1ef4-517c-9805-6587b60abb01"
+SciMLSensitivity = "1ed8b502-d754-442c-8d5d-10ac956f44a1"
+Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
+
 [extensions]
-PyrolysisAMGExt = "AlgebraicMultigrid"
-PyrolysisKLUExt = "KLU"
-PyrolysisPardisoExt = "Pardiso"
 PyrolysisPlotsExt = "RecipesBase"
 PyrolysisSciMLSensitivityExt = ["SciMLSensitivity", "Zygote"]
-PyrolysisSymbolicsExt = "Symbolics"
 ```
 
 The table below summarizes each extension, the package(s) that trigger it, and
-what it adds. None of these is required for a basic solve.
+what it adds. Neither is required for a basic solve.
 
 | Extension | Trigger package(s) | What it provides |
 |---|---|---|
-| `PyrolysisKLUExt` | `KLU` | `Pyrolysis.klu_factorization()` — KLU sparse linear solver |
-| `PyrolysisPardisoExt` | `Pardiso` | `Pyrolysis.pardiso_factorization()` — Intel MKL Pardiso solver |
-| `PyrolysisAMGExt` | `AlgebraicMultigrid` | `Pyrolysis.amg_preconditioner(A)` — AMG preconditioner for Krylov solvers |
 | `PyrolysisPlotsExt` | `Plots` (or `RecipesBase`) | Plot recipes for `PyrolysisSolution` (`plot(sol; kind = …)`) |
 | `PyrolysisSciMLSensitivityExt` | `SciMLSensitivity`, `Zygote` | `forward_sensitivity`, `adjoint_sensitivity` |
-| `PyrolysisSymbolicsExt` | `Symbolics` | `verify_mixing_derivatives` (test/verification only) |
 
 Install the trigger packages you need into the same environment, then load them:
 
 ```julia
 using Pkg
-Pkg.add(["Plots", "KLU", "SciMLSensitivity", "Zygote"])
+Pkg.add(["Plots", "SciMLSensitivity", "Zygote"])
 
 using Pyrolysis
-using Plots           # activates PyrolysisPlotsExt → plot(sol; kind = …)
-using KLU             # activates PyrolysisKLUExt   → klu_factorization()
+using Plots                      # activates PyrolysisPlotsExt → plot(sol; kind = …)
 using SciMLSensitivity, Zygote   # activates PyrolysisSciMLSensitivityExt
 ```
 
+Alternative sparse linear solvers need no extension: any LinearSolve factorization
+(for example `KLUFactorization()`, or `MKLPardisoFactorize()` with Pardiso/MKL
+installed) is passed directly as `linear_solver` after `using LinearSolve` (UG §11.4).
+
 ### Stub behavior when an extension is not loaded
 
-The functions `klu_factorization`, `pardiso_factorization`, `amg_preconditioner`,
-`forward_sensitivity`, `adjoint_sensitivity`, and `verify_mixing_derivatives` are
-exported by `Pyrolysis` as *stubs* with no methods. Calling one before its
-extension is loaded raises a `MethodError` — that is the signal that you need to
-`using` the corresponding trigger package. For example, calling
-`forward_sensitivity(...)` without `SciMLSensitivity` and `Zygote` loaded will
-error; add them and the concrete method appears.
+The functions `forward_sensitivity` and `adjoint_sensitivity` are exported by
+`Pyrolysis` as *stubs* with no methods. Calling one before
+`using SciMLSensitivity, Zygote` raises a `MethodError` — that is the signal that
+you need to load the trigger packages; add them and the concrete methods appear.
+The plotting recipes have no stub: without `Plots` loaded there is no `plot`
+function to call.
 
-The extensions are independent peers — no extension depends on another — so you
-load only the ones a given study requires. Plotting recipes, sensitivity, and
-alternate linear solvers are each covered in detail in their own chapters
-(UG §9, UG §11, UG §13).
+The two extensions are independent — neither depends on the other — so you load
+only the ones a given study requires. Plotting recipes and sensitivity analysis
+are covered in detail in UG §9 and UG §13.
 
 ---
 
@@ -422,9 +416,8 @@ transport, the boundary solve, and the integrator are all working together.
 The script below is a complete, runnable simulation: a 1 cm slab of PMMA-like
 material, modeled as one solid that decomposes into one gas, heated from the top
 by a constant 50 kW/m² flux, insulated at the bottom, integrated for 60 seconds.
-Every function, type, and keyword used here is part of the public API and runs
-against the real package (this exact pattern was verified end-to-end while writing
-this chapter; it returns `retcode = :Success`).
+Every function, type, and keyword used here is part of the public API, and the
+script runs as written, returning `retcode = :Success`.
 
 ```julia
 using Pyrolysis
@@ -433,7 +426,7 @@ using Pyrolysis
 pmma = Material(
     name = :PMMA,
     components = (
-        SolidComponent(:virgin, ρ = 1190, c = 1420, k = 0.21, ε = 0.86),
+        SolidComponent(:virgin, ρ = 1190, c = 1420, k = 0.21, ε = 0.86, λ = 1e-6),
         GaseousComponent(:MMA,  M = 0.100, c = 1500, k = 0.02, λ = 1e-5),
     ),
     reactions = (
@@ -510,9 +503,8 @@ A few notes on what each step does and what is defaulted:
 - **`solve(problem; …)`** returns a `PyrolysisSolution`. Key defaults are
   `integrator = nothing` (→ `KenCarp4`, a stiff SDIRK method),
   `abstol = 1e-8`, `reltol = 1e-6`, `use_ale = false` (fixed Eulerian mesh),
-  `radiation_model = NO_RADIATION`, `energy_form = :standard`,
-  `diagnostics = false`, `validate = true`, `progress = true`,
-  `handle_depletion = false`, and `use_transpiration_bc = false`. Setting
+  `radiation_model = NO_RADIATION`, `diagnostics = false`, `validate = true`,
+  `progress = true`, and `handle_depletion = false`. Setting
   `progress = false` (as above) suppresses the progress bar, which is convenient in
   scripts and tests. The full option set is documented in UG §8.
 
@@ -555,7 +547,6 @@ using Plots
 plot(solution)                       # default: surface temperature trace
 plot(solution; kind = :mlr)          # mass-loss rate vs time
 plot(solution; kind = :heatmap)      # T(z, t) heatmap
-plot(solution; kind = :residual)     # energy-conservation residual
 ```
 
 ---
@@ -566,7 +557,7 @@ plot(solution; kind = :residual)     # energy-conservation residual
 stable, user-facing API. Broadly, the top-level exports cover:
 
 - **Materials:** `Material`, `SolidComponent`, `GaseousComponent`,
-  `LiquidComponent`, `Reaction`, `ReactionSet`, the mixing rules
+  `LiquidComponent`, `Reaction`, `DepletionLimiter`, the mixing rules
   (`PARALLEL`, `SERIES`, `WEIGHTED`, `BRUGGEMAN`, `CARMAN_KOZENY`), `MixingSpec`,
   `MaterialMixing`, and the phase predicates (`is_solid`, `is_gas`, `is_liquid`,
   `phase`, `molar_mass`).
@@ -581,16 +572,14 @@ stable, user-facing API. Broadly, the top-level exports cover:
 - **Radiation models:** `RadiationModel`, `NO_RADIATION`, `SURFACE_ABSORPTION`,
   `BEER_LAMBERT` (the `P1_QUASI_STEADY` value is exported from
   `Pyrolysis.Experimental`).
-- **Geometry:** `create_uniform_mesh`, `create_stretched_mesh`.
+- **Geometry:** `create_uniform_mesh`, `create_stretched_mesh`,
+  `create_mesh_from_nodes`.
 - **Problem and solve:** `PyrolysisProblem`, `PyrolysisSolution`, `solve`,
   `parameter_sweep`.
-- **Jacobian configuration:** `JacobianSpec`, `Structured`, the linear-solve
-  strategies (`DirectSolve`, `StructuredSolve`, `ApproxSolve`, `MatrixFreeSolve`),
-  `DenseAD_ForwardDiff` (a verification reference), `verify_jacobian_at`, and more
-  (UG §11).
-- **Extension stubs:** `klu_factorization`, `pardiso_factorization`,
-  `amg_preconditioner`, `forward_sensitivity`, `adjoint_sensitivity`,
-  `verify_mixing_derivatives`.
+- **Jacobian configuration:** `Structured` and its two linear-solve strategies
+  (`DirectSolve`, `ApproxSolve`), `JacobianSpec`, `DenseAD_ForwardDiff` (a
+  verification reference), `verify_jacobian_at`, and more (UG §11).
+- **Extension stubs:** `forward_sensitivity`, `adjoint_sensitivity`.
 
 Anything not exported at the top level remains reachable in one of two ways:
 
@@ -605,8 +594,9 @@ Pyrolysis.Properties.effective_conductivity
 
 The submodules are: `Materials`, `BoundaryConditions`, `Geometry`, `Properties`,
 `Physics`, `Adaptivity`, `Discretization`, `Problem`, `Residual`, `Jacobian`,
-`Diagnostics`, and `Solver`. The `Experimental` namespace (P1 radiation, h-AMR) is
-*not* part of `Internal` and is accessed only as `Pyrolysis.Experimental.X`.
+`Diagnostics`, and `Solver`. The `Experimental` namespace (P1 radiation,
+h-refinement/coarsening) is *not* part of `Internal` and is accessed only as
+`Pyrolysis.Experimental.X`.
 
 A couple of practical notes you will encounter later in the guide:
 
@@ -622,8 +612,7 @@ A couple of practical notes you will encounter later in the guide:
 
 > **Caveat — API stability.** Top-level `using Pyrolysis` exports are stable.
 > Submodule / `Internal` symbols can move between minor releases. Everything in
-> `Pyrolysis.Experimental` is explicitly unstable and will be restructured or
-> migrated to dedicated extensions in later phases.
+> `Pyrolysis.Experimental` is explicitly unstable.
 
 ---
 
@@ -655,9 +644,10 @@ Pkg.instantiate()            # first time only: resolve the example dependencies
 include("examples/06_cone_calorimeter.jl")
 ```
 
-The `examples/README.md` is the authoritative catalogue of what each script
-covers. With the install verified and the minimal example running, you are ready
-for UG §2, which builds a full cone-calorimeter simulation step by step.
+The **Examples** page of the documentation site (source `docs/src/examples.md`)
+is the authoritative catalogue of what each script covers. With the install
+verified and the minimal example running, you are ready for UG §2, which builds a
+full cone-calorimeter simulation step by step.
 
 
 ---
@@ -996,12 +986,11 @@ Alternatives include `MassFluxBC(J)` (prescribed flux), `DiffusiveMassBC(h_m)`
 means no external resistance), and the pressure BCs used in Darcy mode. See
 User Guide §UG-5.
 
-> **Caveat — do not enable surface transpiration here.** Pyrolysis.jl's default
-> energy form (`energy_form = :standard`) already carries gas enthalpy through a
-> volumetric convection source `S_conv`. The opt-in surface-transpiration term
-> (`use_transpiration_bc = true`) would double-count that enthalpy, and `solve`
-> rejects it with an error. Leave it off (the default). See §2.6 and Technical
-> Reference §7.
+> **The escaping gas carries no enthalpy term at the surface.** The energy
+> equation already carries the gas enthalpy through the volumetric convection
+> source `S_conv`, so the boundary energy balance contains only the applied
+> thermal BC flux and the conducted flux; a surface gas-enthalpy term would
+> count the same enthalpy twice. See §5.4 and Technical Reference §7.
 
 ### 2.3.3 Collect into a `BoundaryConditionSet`
 
@@ -1108,9 +1097,9 @@ next. The simulation-mode trait system is covered in User Guide §UG-7.
 
 `solve(problem; kwargs...)` integrates the problem forward and returns a
 `PyrolysisSolution`. With no options it runs a fixed (Eulerian) mesh, no
-volumetric radiation, the `:standard` energy form, and a stiff implicit
-integrator. For a cone run we make two deliberate choices: track the receding
-surface with ALE mesh motion, and deposit the cone radiation at the surface.
+volumetric radiation, and a stiff implicit integrator. For a cone run we make two
+deliberate choices: track the receding surface with ALE mesh motion, and deposit
+the cone radiation at the surface.
 
 ```julia
 solution = solve(
@@ -1120,8 +1109,8 @@ solution = solve(
     use_ale = true,                         # move the mesh as the sample shrinks
     radiation_model = SURFACE_ABSORPTION,   # absorb cone flux at the surface
     min_thickness = 0.01e-3,                # terminate when sample < 0.01 mm thick
-    handle_depletion = true,                # merge surface cells as they thin out
-    depletion_threshold = 0.05,             # merge a cell below 5 % of its initial Δz
+    handle_depletion = true,                # park surface cells as they thin out
+    depletion_threshold = 0.05,             # park a cell below 5 % of its initial Δz
     min_cells = 1,                          # never go below 1 cell
     progress = true,                        # show a progress bar
 )
@@ -1142,7 +1131,7 @@ session reuse the compiled code, including runs with other parameter values
 | `radiation_model` | `NO_RADIATION` | `SURFACE_ABSORPTION` absorbs the cone flux at the surface |
 | `min_thickness` | `1e-6` | ALE termination thickness [m] |
 | `handle_depletion` | `false` | park depleted cells (ALE or fixed mesh) |
-| `depletion_threshold` | `0.05` | cell-thinness fraction that triggers a merge |
+| `depletion_threshold` | `0.05` | cell-thinness fraction that triggers a park |
 | `min_cells` | `2` | floor on cell count before termination |
 | `progress` | `true` | progress bar |
 
@@ -1194,19 +1183,13 @@ User Guide §UG-8):
 - **`integrator`** (default `KenCarp4`) and **`linear_solver`** (default
   chosen from the Jacobian's sparsity pattern, §8.4) — the time integrator and
   sparse linear solver.
-- **`energy_form`** (default `:standard`) — `:standard` carries gas enthalpy via
-  the volumetric `S_conv` term; `:with_generation_sink` adds the gas-generation
-  enthalpy sink, which is consistent **only with T_ref-datum reaction heats**
-  (it double-counts gas sensible enthalpy under the usual DSC-style heats —
-  §7.7). Leave at `:standard` unless you have a specific reason.
-- **`use_transpiration_bc`** (default `false`) — **leave off.** It double-counts
-  gas enthalpy against `S_conv` and `solve` raises an error if set `true`.
 - The effect of outgassing on convective exchange is a property of each
   `ConvectiveBC` (its `blowing` model, §5.2.3), not a solve option.
-- **`diagnostics`** (default `false`) — snapshot the conservation ledgers every
-  `diagnostics_stride` steps (default 10) for energy/mass-balance auditing.
+- **`diagnostics`** (default `false`) — log a sensible-energy snapshot every
+  `diagnostics_stride` accepted steps (default 10) in
+  `solution.extras.diagnostics_log`.
 - **`handle_depletion`** — park depleted cells (Chapter 10). The state keeps
-  its size, so it combines with any `jacobian`.
+  its size, so it combines with either Jacobian strategy.
 - **`warm_start`** — reuse a prior solution's final state as the initial
   condition for a continuation run.
 
@@ -1359,11 +1342,10 @@ using Plots
 plot(solution)                      # surface-temperature trace (the default)
 plot(solution; kind = :mlr)         # mass-loss-rate curve [kg/(m²·s)]
 plot(solution; kind = :heatmap)     # T(z, t) field as a heatmap
-plot(solution; kind = :residual)    # energy-conservation residual (zeros unless diagnostics on)
 ```
 
-The recognised `kind` values are `:surface_T` (default), `:mlr`, `:heatmap`, and
-`:residual`; any other value raises an informative error.
+The recognised `kind` values are `:surface_T` (default), `:mlr`, and `:heatmap`;
+any other value raises an informative error.
 
 For a publication-style multi-panel figure you build the series yourself from the
 fields. A typical cone summary — an MLR/gas-generation proxy, the surface and
@@ -1386,8 +1368,8 @@ p3 = plot(xlabel = "Depth [mm]", ylabel = "Temperature [K]",
           title = "Temperature profiles")
 for t_target in (30, 120, 300, 600, 1200)
     i = argmin(abs.(times .- t_target))
-    Tp = solution.T[:, i]
-    length(Tp) <= 1 && continue                      # skip if the mesh merged to 1 cell
+    Tp = filter(!isnan, solution.T[:, i])            # live cells (parked slots read NaN)
+    length(Tp) <= 1 && continue                      # skip if one live cell remains
     L_now = solution.extras.thickness_history[i]
     z_mm  = range(0.0, L_now * 1000, length = length(Tp))
     plot!(p3, z_mm, Tp; lw = 1.5, label = "t = $(round(times[i])) s")
@@ -1512,9 +1494,9 @@ plot(solution; kind = :mlr)
   kinetic parameters (User Guide §UG-12), or `forward_sensitivity` /
   `adjoint_sensitivity` to compute gradients of an output with respect to
   `A`, `E`, `h`, or material properties (User Guide §UG-13).
-- **Audit conservation.** Re-run with `diagnostics = true` and inspect
-  `solution.extras.diagnostics_log` to verify the energy and mass ledgers close.
-  (Technical Reference §16.)
+- **Watch the energy history.** Re-run with `diagnostics = true` and inspect
+  `solution.extras.diagnostics_log`, a sensible-energy snapshot every
+  `diagnostics_stride` accepted steps (UG §9.8; Technical Reference §16).
 
 You now have the full pipeline — material, boundary conditions, mesh, problem,
 solve, solution — and can recombine these pieces for any of the worked cases in
@@ -1563,16 +1545,15 @@ The build order is always the same:
 4. **Mixing rules** (`MixingSpec`, `MaterialMixing`) — pick how component thermal
    conductivity `k`, gas-transfer coefficient `λ`, and permeability `κ` are
    homogenized.
-5. **Material** (`Material`) — the assembled object, optionally checked with the
-   internal helper `Pyrolysis.Materials.validate_material` (or simply validated by
-   `solve` when you build the problem; see §3.7).
+5. **Material** (`Material`) — the assembled object, validated together with the
+   rest of the problem by `solve` (see §3.7).
 
 A minimal end-to-end example (one solid, one gas, one reaction) appears in the
 package's top-level docstring and in Chapter 2; this chapter expands every option.
 
 > **A note on what is exported.** `using Pyrolysis` brings the *constructors* into
 > scope: `SolidComponent`, `LiquidComponent`, `GaseousComponent`, `Material`,
-> `Reaction`, `ReactionSet`, all property-function types, the `MixingRule` enum
+> `Reaction`, `DepletionLimiter`, all property-function types, the `MixingRule` enum
 > values, `MixingSpec`, and `MaterialMixing`. The various **helper and inspection
 > functions** used in this chapter are *not* part of the curated top-level surface,
 > so you reach them by qualifying through the submodule that defines them. This works
@@ -1581,12 +1562,10 @@ package's top-level docstring and in Chapter 2; this chapter expands every optio
 >
 > - From the `Materials` submodule: `Pyrolysis.Materials.n_components`,
 >   `Pyrolysis.Materials.n_reactions`, `Pyrolysis.Materials.dry_pyrolysis_gas_indices`,
->   `Pyrolysis.Materials.gas_component_indices`, and `Pyrolysis.Materials.has_darcy_flow`
->   are *exported* from `Materials`; the validation helpers
->   `Pyrolysis.Materials.validate_material`,
->   `Pyrolysis.Materials.verify_stoichiometry`, and
->   `Pyrolysis.Materials.check_material_mass_balance` are *internal* (not exported, not
->   part of the stable public API) but are still callable through the same qualified
+>   and `Pyrolysis.Materials.has_darcy_flow` are *exported* from `Materials`; the
+>   stoichiometry helpers `Pyrolysis.Materials.verify_stoichiometry` and
+>   `Pyrolysis.Materials.mass_balance_error` are *internal* (not exported, not part
+>   of the stable public API) but are still callable through the same qualified
 >   path.
 > - From the `Properties` submodule: the effective-property functions
 >   (`Pyrolysis.Properties.mixture_density`, etc.).
@@ -1594,11 +1573,11 @@ package's top-level docstring and in Chapter 2; this chapter expands every optio
 > For convenience you may `using Pyrolysis.Internal`, which re-exports the union of
 > every submodule's *exports* and so brings the exported helpers
 > (`n_components`, `dry_pyrolysis_gas_indices`, `has_darcy_flow`, …) into scope
-> unqualified — but **not** the internal validation helpers above, which still
+> unqualified — but **not** the internal stoichiometry helpers above, which still
 > require the `Pyrolysis.Materials.` prefix. `Internal` is not the stable public
-> surface; prefer qualified access in production code. If you want validation as part
-> of the public API, build a `PyrolysisProblem` and let `solve` validate (it runs the
-> same checks by default, `validate = true`); see §3.7.
+> surface; prefer qualified access in production code. Material validation happens
+> at the problem level: build a `PyrolysisProblem` and let `solve` validate it (the
+> default, `validate = true`); see §3.7.
 
 ---
 
@@ -1777,8 +1756,7 @@ shrinkage `χ` (Technical Reference §10.3). Name your dry-pyrolysis gas anythin
 (`:gas`, `:MMA`, `:volatiles`). You can inspect the classification:
 
 ```julia
-Pyrolysis.Materials.gas_component_indices(material)        # all gas indices
-Pyrolysis.Materials.dry_pyrolysis_gas_indices(material)    # excludes :H2O / :water*
+Pyrolysis.Materials.dry_pyrolysis_gas_indices(material)    # gas indices, excluding :H2O / :water*
 ```
 
 ### 3.2.4 Bulk vs. intrinsic density and porosity
@@ -1799,10 +1777,9 @@ Two densities coexist, and getting them right matters for porous-media physics:
   permeability model (Technical Reference §5.3, §9.4).
 
 If you never supply an intrinsic density, it **defaults to the bulk density**, which
-makes the pure phase pore-free and gives `φ = 0` for a fully solid cell — the
-historical, backward-compatible default. To model a genuinely porous solid you must
-supply *either* `ρ_intrinsic` *or* `φ` (not both — passing both raises an
-`ArgumentError`):
+makes the pure phase pore-free and gives `φ = 0` for a fully solid cell. To model a
+genuinely porous solid you must supply *either* `ρ_intrinsic` *or* `φ` (not both —
+passing both raises an `ArgumentError`):
 
 ```julia
 # Option A: give the skeletal density directly
@@ -1834,7 +1811,7 @@ phase(virgin)           # SOLID  (a Phase enum value)
 molar_mass(gas)         # 0.044  (0.0 for solids/liquids)
 
 # Density / property accessors (qualify through Materials):
-Pyrolysis.Materials.get_density(virgin, 300.0)            # bulk ρ at T
+virgin.density(300.0)                                     # bulk ρ at T (property field)
 Pyrolysis.Materials.get_intrinsic_density(porous, 300.0)  # skeletal ρ
 Pyrolysis.Materials.get_permeability(char, 500.0)         # κ at T (0 for gases)
 ```
@@ -1939,16 +1916,14 @@ passes `ξ` automatically. See §3.4.5 and Technical Reference §6.6.
 
 ### 3.3.3 Derivatives (for the implicit Jacobian)
 
-You generally do not call these, but it is useful to know they exist and how they
-behave. Temperature derivatives `dp/dT` are exact and closed-form for
-`ConstantProperty` (0), `LinearProperty` (`b`), `PolynomialProperty` (unrolled), and
-`ArrheniusProperty` (`p·E/(R_g T²)`); they are finite-difference (`δT = 0.1 K`) for
-`TableProperty`, `CallableProperty`, and `StateDependentProperty`. Concentration
-derivatives `∂p/∂ξ_j` are zero for temperature-only properties and adaptive
-finite-difference (`δξ = max(|ξ|·1e-4, 1e-6)`) for `StateDependentProperty`. Because
-table/callable/state-dependent properties use finite differences, prefer the
-analytic types (constant/linear/polynomial/Arrhenius) where you can — they keep the
-Jacobian exact and the solve crisp. Every law evaluates on the property bracket
+You never supply derivatives. The structured Jacobian differentiates each
+operator's stencil-local kernel with ForwardDiff (Chapter 11), so every property
+law is evaluated with dual-number arguments and its exact derivative comes out of
+the same evaluation: the slope of the piecewise-linear interpolant for a
+`TableProperty`, the derivative of your function for a `CallableProperty`, and
+both `dp/dT` and `∂p/∂ξ_j` for a `StateDependentProperty`. A callable must
+therefore be generic Julia code — do not restrict its arguments to `Float64`.
+Every law evaluates on the property bracket
 `[200, 3000]` K (its argument is clamped to it, so a nonphysical Newton trial
 temperature cannot reach a fractional power), and the derivatives are zero
 outside the bracket. See Technical Reference §4.4–§4.5.
@@ -2088,19 +2063,19 @@ drying = Reaction(:drying, :moisture => :H2O,
 
 ### 3.4.6 Verifying reactions
 
-Two internal helpers (not exported; qualify through `Materials`) check mass balance
-after the fact:
+The `Reaction` constructor already enforces mass balance (the product yields must
+sum to the reactant mass 1.0) and throws on an imbalance unless you pass
+`validate_mass = false`. To re-check a reaction after the fact, use the internal
+helper (not exported; qualify through `Materials`):
 
 ```julia
-Pyrolysis.Materials.verify_stoichiometry(rxn)                  # Bool, warns on failure
-Pyrolysis.Materials.check_material_mass_balance(mat.reactions) # all reactions
+Pyrolysis.Materials.verify_stoichiometry(rxn)   # Bool, warns on failure
 ```
 
-Both compare the reactant mass (1.0) against the sum of product yields within a
-tolerance of `1e-10` and emit a warning (returning `false`) on imbalance. They are
-also invoked automatically by `validate_material` (§3.7) and by `solve`'s
-problem-level validation, so for routine use you can rely on those rather than
-calling these private helpers directly.
+It compares the reactant mass (1.0) against the sum of product yields within a
+tolerance of `1e-10` and emits a warning (returning `false`) on imbalance.
+`validate_problem(problem; strict = true)` runs it on every reaction of the
+material (§3.7).
 
 ---
 
@@ -2349,16 +2324,12 @@ wood = Material(
     ),
 )
 
-# --- Inspect / validate ---------------------------------------------------
+# --- Inspect ---------------------------------------------------------------
 # All reached via the Materials submodule (none are top-level Pyrolysis exports).
-# n_components / n_reactions / has_darcy_flow / dry_pyrolysis_gas_indices are
-# exported from Materials; validate_material is an internal helper — both kinds work
-# through the qualified `Pyrolysis.Materials.` path.
 Pyrolysis.Materials.n_components(wood)              # 5
 Pyrolysis.Materials.n_reactions(wood)               # 2
 Pyrolysis.Materials.has_darcy_flow(wood)            # true (virgin/char κ > 0)
 Pyrolysis.Materials.dry_pyrolysis_gas_indices(wood) # (4,)  — :H2O (5) excluded
-Pyrolysis.Materials.validate_material(wood)         # true (internal helper)
 ```
 
 ### 3.6.3 Worked example: a simple polymer (PMMA)
@@ -2383,8 +2354,6 @@ pmma = Material(
     ),
     mixing = MaterialMixing(k = MixingSpec(WEIGHTED, 0.5)),
 )
-
-Pyrolysis.Materials.validate_material(pmma)   # true (internal helper, qualified)
 ```
 
 With `κ = 0` on every component, `has_darcy_flow(pmma)` is `false` and gas leaves by
@@ -2395,20 +2364,13 @@ would set `α` on the solid and choose `radiation_model = BEER_LAMBERT` at solve
 
 ## 3.7 Validating a material
 
-`validate_material` is an **internal** helper (not exported; reach it as
-`Pyrolysis.Materials.validate_material`). It is the one call to make if you want an
-explicit material check before building a problem. It checks that:
+A material is checked in two places: its components and reactions validate
+themselves when they are constructed, and the assembled material is validated as
+part of the problem.
 
-- the material has at least one component,
-- every reaction's reactant/product indices are in range `1:NC`, and
-- every reaction is mass-balanced (via `verify_stoichiometry`).
-
-```julia
-Pyrolysis.Materials.validate_material(wood)   # returns true; warns on problems
-```
-
-Mass-balance failures are reported as **warnings** (the function still returns
-`true`); index errors **throw**.
+Each two-product `Reaction` constructor enforces `Σ yields = 1.0` at construction
+time (unless `validate_mass = false`), and a symbolic component reference that
+names no component of the material throws when the `Material` is built.
 
 Property laws are checked when the **component** is built: every temperature-
 dependent `ρ`, `c`, `k`, `λ`, `κ` and `ε` is sampled on the property bracket
@@ -2420,16 +2382,16 @@ offending temperature — a linear fit `k = 0.3 − 4.2e-4·T` is rejected at
 outside its measured range (`T -> law(clamp(T, T_lo, T_hi))`), or pass
 `validate_properties = false` when the law comes from an optimizer's search
 parameters and an unphysical value should reach the objective instead of
-throwing. For a standalone balance check use
-`Pyrolysis.Materials.check_material_mass_balance(material.reactions)`. Note that the
-two-product `Reaction` constructors already enforce `Σ yields = 1.0` at construction
-time (unless `validate_mass = false`), so a material built normally will pass.
+throwing.
 
-Because these helpers are private, the **public** way to validate is to build a
-`PyrolysisProblem` and let `solve` validate by default (`validate = true` on
-`solve`); the problem-level validation runs the same stoichiometry and index checks.
-Calling the internal `validate_material` as you build the material is still useful for
-the clearest, earliest error messages during development.
+The problem-level check runs when `solve` starts (`validate = true`, the default)
+or when you call `Pyrolysis.Problem.validate_problem(problem)` yourself. For the
+material it checks that there is at least one component and that every
+reaction's reactant/product indices are in range `1:NC`; it also warns when a
+gas-producing Fickian material has a condensed component with `λ = 0`.
+`validate_problem(problem; strict = true)` additionally re-checks every
+reaction's mass balance with `verify_stoichiometry`. Errors are collected and
+thrown together in one message; see §7.9 for the full list of problem checks.
 
 ---
 
@@ -2884,8 +2846,8 @@ everywhere (no threshold branch): it is ≈ 1 well above `threshold` (within 4%
 at `2·threshold`, indistinguishable from 1 beyond `~20·threshold`) and drives
 the rate to zero with a bounded derivative as the reactant runs out — for every
 reaction order `n ≥ 0`, including zero-order. The limiter is configured by the
-`DepletionLimiter` type, exported by the `Physics` submodule
-(`Pyrolysis.Physics.DepletionLimiter`):
+`DepletionLimiter` type (top-level exported, and also exported by the `Physics`
+and `Materials` submodules):
 
 ```julia
 Base.@kwdef struct DepletionLimiter
@@ -2921,7 +2883,7 @@ You can evaluate a single rate with a custom or disabled limiter for testing:
 
 ```julia
 using Pyrolysis
-using Pyrolysis.Physics: reaction_rate, DepletionLimiter   # exported by Physics, not re-exported at the top level
+using Pyrolysis.Physics: reaction_rate   # exported by Physics, not re-exported at the top level
 
 # Disable limiting (validation / verification only — may be stiff in a full
 # solve, and removes the only guard that stops zero-order reactions at ξ = 0).
@@ -2958,65 +2920,39 @@ material = Material(
 ```
 
 A material can also have **no reactions** — pass `reactions = ()` (the default) for
-a pure heat-conduction problem. `Material(...)` resolves symbolic reactions,
-validates that every reaction references a real component, and checks each
-reaction's mass balance at construction. Chapter 3 covers the rest of the
+a pure heat-conduction problem. `Material(...)` resolves symbolic reactions (a
+name that matches no component throws) into `Reaction`s, whose constructor
+checks the mass balance; integer component indices are range-checked when
+`solve` validates the problem (§3.7). Chapter 3 covers the rest of the
 `Material` constructor (components, mixing rules, lateral-shrinkage law).
-
-### Building a reaction set separately
-
-If you want to construct the reaction collection on its own (for reuse or
-inspection), `ReactionSet` wraps a tuple of reactions and is exported:
-
-```julia
-rxns = ReactionSet(
-    Reaction(:step1, :virgin => (:int1, :gas1);
-             A = 7.48e4,  E = 71.6e3,  h = -1.92e4, yields = (0.95, 0.05)),
-    Reaction(:step2, :int1   => (:char, :gas2);
-             A = 2.36e10, E = 140.9e3, h =  2.64e5, yields = (0.80, 0.20)),
-)
-```
-
-In normal use you pass the plain tuple straight to
-`Material(..., reactions = (...))`; `ReactionSet` is mainly an accessor
-convenience.
 
 ---
 
 ## 4.12 Validating reactions
 
-Two helpers let you check mass balance explicitly, beyond the automatic
-check at construction. They are **not** part of the top-level `Pyrolysis`
-exports — reach them through their submodule as
-`Pyrolysis.Materials.verify_stoichiometry` and
-`Pyrolysis.Materials.check_material_mass_balance`, or bring them into scope
-with `using Pyrolysis.Materials: verify_stoichiometry, check_material_mass_balance`.
+One helper lets you check mass balance explicitly, beyond the automatic
+check at construction. It is **not** part of the top-level `Pyrolysis`
+exports — reach it through its submodule as
+`Pyrolysis.Materials.verify_stoichiometry`, or bring it into scope with
+`using Pyrolysis.Materials: verify_stoichiometry`.
 
 **`verify_stoichiometry(rxn; tol=1e-10) -> Bool`** confirms that a single
 reaction's product yields sum to 1.0 (within `tol`). It returns `true` when
 balanced and issues a warning and returns `false` otherwise:
 
 ```julia
-using Pyrolysis.Materials: verify_stoichiometry, check_material_mass_balance
+using Pyrolysis.Materials: verify_stoichiometry
 
 rxn = Reaction(:charring, :virgin => (:char, :gas);
                A = 1e15, E = 200e3, h = 500e3, yields = (0.25, 0.75))
 verify_stoichiometry(rxn)   # true: 0.25 + 0.75 = 1.0
+
+all(verify_stoichiometry, material.reactions)   # every reaction of a material
 ```
 
-**`check_material_mass_balance(reactions; tol=1e-10) -> Bool`** runs
-`verify_stoichiometry` over every reaction in a material and returns `true` only
-if all pass:
-
-```julia
-if !check_material_mass_balance(material.reactions)
-    @warn "Material has reactions with mass-balance issues"
-end
-```
-
-Both are diagnostics: mass conservation is enforced by the single-reactant
-construction convention (§4.3), not by a projection during the solve, so these
-checks are for catching setup mistakes. See Technical Reference §6.8.
+It is a diagnostic: mass conservation is enforced by the single-reactant
+construction convention (§4.3), not by a projection during the solve, so the
+check is for catching setup mistakes. See Technical Reference §6.8.
 
 ---
 
@@ -3030,9 +2966,9 @@ using Pyrolysis
 # `reaction_rate` lives in the Physics submodule and is exported from it, but is
 # not re-exported at the top level — bring it into scope explicitly.
 using Pyrolysis.Physics: reaction_rate
-# `verify_stoichiometry` / `check_material_mass_balance` are not exported at all;
-# reach them through the Materials submodule.
-using Pyrolysis.Materials: verify_stoichiometry, check_material_mass_balance
+# `verify_stoichiometry` is not exported at all; reach it through the Materials
+# submodule.
+using Pyrolysis.Materials: verify_stoichiometry
 
 # Three components: virgin solid, char residue, gas product.
 virgin = SolidComponent(:virgin, ρ = 1190, c = 1420, k = 0.21, ε = 0.86)
@@ -3050,7 +2986,7 @@ material = Material(name = :PMMA, components = (virgin, char, gas), reactions = 
 
 # Verify mass balance.
 @assert verify_stoichiometry(rxn)                  # 0.002 + 0.998 = 1.0
-@assert check_material_mass_balance(material.reactions)
+@assert all(verify_stoichiometry, material.reactions)
 
 # Evaluate the rate at one cell state (concentrations in kg/m³, T in K).
 T_cell = 700.0
@@ -3086,7 +3022,7 @@ Technical Reference §6.7.
 - The **depletion limiter** (default `threshold = 1.0` kg·m⁻³) is applied
   automatically and is rarely tuned; lower it only for genuinely dilute species
   and raise it only to relieve stiffness near full conversion.
-- Validate with `verify_stoichiometry` and `check_material_mass_balance`.
+- Re-check a reaction's mass balance with `verify_stoichiometry`.
 
 For the mathematics behind the rate law, the smooth gates, the depletion limiter,
 the stoichiometric sources, and the heat-source assembly, see Technical Reference
@@ -3238,8 +3174,7 @@ Newton's cooling law `q_BC = h·(T_∞ − T_s)`. Fields:
 The flux is positive (heating) when `T_∞ > T_s` and negative (cooling) when the
 surface is hotter than the surroundings — the usual re-radiation/convection loss
 direction during pyrolysis. Its temperature derivative `dq_BC/dT_s = −h` makes
-the Newton solve converge quickly. The `T_inf` here is also the value used to
-resolve the ambient temperature for the surface balance (§5.8).
+the Newton solve converge quickly.
 
 **Blowing.** Strong outgassing thickens the boundary layer and suppresses
 convective exchange, and a gas denser than the free stream can pool on the
@@ -3290,8 +3225,8 @@ records the applied ratio and, for the pooling model, `ψ`, the face fraction
 and the face buoyancy in `extras.surface_blowing_ratio`,
 `surface_pooling_factor`, `surface_face_fraction` and
 `surface_face_buoyancy`. The shipped examples were calibrated with the bare
-coefficient (and without flame feedback — the two partially cancel; see the
-physics roadmap before recalibrating).
+coefficient (and without flame feedback — the two partially cancel; see Technical
+Reference §1.8.1 before recalibrating).
 
 ### 5.2.4 `RadiativeBC` — surface re-radiation
 
@@ -3360,7 +3295,7 @@ Fields:
   temperature automatically. You can override with a constant or `α(t)`.
 
 **Its behavior depends on the `radiation_model` keyword passed to `solve()`**
-(see §5.5 and Technical Reference §8):
+(see §7.4 and Technical Reference §8):
 
 | `radiation_model` (in `solve`) | What `RadiativeFluxBC` does |
 |---|---|
@@ -3392,8 +3327,7 @@ top_thermal =
 The combined flux is the sum of the component fluxes,
 `q_BC = Σ_i q_BC,i(T_s, t)`, and the derivative is summed likewise — assembled
 by a generated function for type stability. You can chain any number of thermal
-BCs. The ambient temperature for the surface balance is taken from the first
-component that carries one (preferring `ConvectiveBC`/`RadiativeBC`, see §5.8).
+BCs. Each term keeps its own `T_inf` (§5.8).
 
 A canonical cone-calorimeter top face:
 
@@ -3516,8 +3450,7 @@ research/validation studies.
 
 Thermal BCs are not applied as a raw flux in the cell; instead the solver finds
 the **surface (face) temperature** `T_s` that makes the boundary energy balance
-close, then conducts the resulting flux into the adjacent cell. With the default
-convention (transpiration off), the balance is
+close, then conducts the resulting flux into the adjacent cell. The balance is
 
 ```
 q_BC(T_s) = k_eff · (T_s − T_cell) / Δz_{1/2}
@@ -3540,13 +3473,14 @@ knowing because it explains a few user-visible behaviors:
   correctly through `T_s`.
 - The converged surface temperature is available afterwards as
   `solution.surface_T`, and the flux decomposition (absorbed, re-radiation,
-  convection, conducted) is available in `solution.extras` when diagnostics are
-  enabled.
+  convection, conducted) is reported in `solution.extras` (§9.3).
 
-The **surface transpiration enthalpy** term `Σ_g ṁ_g Δh_g(T_s, T_∞)` is an
-optional addition to this balance, controlled by `use_transpiration_bc`. It is
-**off by default and rejected by `solve()` when set to `true`** — see the
-warning in §5.12.
+The balance has **no surface gas-enthalpy term**. The enthalpy carried by the
+escaping gas is already in the energy equation as the volumetric advection
+source `S_conv = −Σ_g c_{p,g} J_g ∂T/∂z`; a surface term
+`Σ_g ṁ_g Δh_g(T_s, T_∞)` would overlap it by exactly `∫S_conv` and count that
+enthalpy a second time. The outward gas flux enters the boundary only
+through the blowing model of a `ConvectiveBC` (§5.2.3).
 
 ---
 
@@ -3660,20 +3594,13 @@ true)`.
 
 ## 5.8 Choosing ambient temperatures
 
-Several thermal BCs carry an ambient temperature `T_∞`: `ConvectiveBC` and
-`RadiativeBC` each have their own `T_inf`. This `T_∞` is used both in the BC's own
-flux and as the **reference temperature for the surface energy balance**. The
-resolution rules (see Technical Reference §12.3.8) are:
-
-- `ConvectiveBC` and `RadiativeBC` use their own `T_inf`.
-- BCs without an ambient (`HeatFluxBC`, `AdiabaticBC`, `RadiativeFluxBC`,
-  `DirichletThermalBC`) carry none, and the resolver falls back to the package
-  default `T_REF = 298.15 K`.
-- For a `CombinedThermalBC`, the first child that carries an ambient wins — so a
-  combined top BC with a `RadiativeBC(T_inf = 330)` and a `ConvectiveBC(T_inf = 330)`
-  resolves the surface ambient to 330 K. (Resolution keys on whether a BC *has* an
-  ambient, not on its value: setting `T_inf = 298.15` exactly is honored, never
-  mistaken for "defaulted".)
+Two thermal BCs carry an ambient temperature `T_∞`: `ConvectiveBC` and
+`RadiativeBC` each have their own `T_inf`, which enters only that BC's own flux.
+BCs without an ambient (`HeatFluxBC`, `AdiabaticBC`, `RadiativeFluxBC`,
+`DirichletThermalBC`) carry none. In a `CombinedThermalBC` each term keeps its
+own `T_inf`: a top BC of `RadiativeBC(T_inf = 330)` plus
+`ConvectiveBC(T_inf = 300)` re-radiates to 330 K and convects to 300 K. The
+surface energy balance (§5.4) has no ambient reference temperature of its own.
 
 Practical guidance: set `T_inf` consistently on the loss terms (`RadiativeBC`,
 `ConvectiveBC`) to the experimental surroundings temperature. In a cone
@@ -3891,16 +3818,14 @@ bc_set = BoundaryConditionSet(
 
 ## 5.12 Caveats and pitfalls
 
-- **Surface transpiration is forbidden in the production path.** `solve()`
-  rejects `use_transpiration_bc = true` with an `ArgumentError`. The reason
-  (Technical Reference §7.6, §12.3): the volumetric gas-advection source
-  `S_conv = −Σ_g c_{p,g} J_g ∂T/∂z` is *always* active and already carries gas
-  enthalpy; adding the surface transpiration term `Σ_g ṁ_g Δh_g(T_s, T_∞)`
-  double-counts it, producing a spurious ~5–10 kW/m² sink that under-predicts
-  surface temperature and mass-loss rate. The supported convention (matching
-  ThermaKin, Gpyro, and FDS) is `S_conv` only, i.e. `use_transpiration_bc =
-  false` (the default). Gas mass transport still works either way — the
-  transpiration term affects only the *energy* balance.
+- **The escaping gas carries no surface enthalpy term.** The volumetric
+  gas-advection source `S_conv = −Σ_g c_{p,g} J_g ∂T/∂z` is *always* active and
+  already carries the gas enthalpy (Technical Reference §7.4.3, §12.2); a surface
+  term `Σ_g ṁ_g Δh_g(T_s, T_∞)` on top of it would double-count that enthalpy, a
+  spurious ~5–10 kW/m² sink that under-predicts surface temperature and
+  mass-loss rate. The `S_conv`-only convention matches ThermaKin, Gpyro, and FDS.
+  Parameter sets calibrated with a code that adds a surface gas-enthalpy term
+  may need re-calibration.
 
 - **`radiation_model` defaults to `NO_RADIATION`.** A `RadiativeFluxBC` only does
   something if you pass an appropriate `radiation_model` to `solve()`. With the
@@ -3981,7 +3906,8 @@ The mesh container type is `Mesh1D{NC}`, parameterized by the number of chemical
 functions described in §6.2. The relationship `n_faces = n_nodes = n_cells + 1` always holds.
 
 Each cell carries a `CellState{NC}` (temperature, an `NTuple{NC}` of concentrations, and a
-cached volume); these are populated from your initial conditions when you call `solve`. The
+cached volume); `solve` populates them from the problem's initial conditions on its own copy
+of the mesh (the mesh you built is left unchanged). The
 volume of cell `i` is computed geometrically from the node positions and the cross-sectional
 area:
 
@@ -4099,7 +4025,7 @@ cell-to-cell size jumps, which can hurt accuracy and conditioning; the conductio
 schemes use distance-weighted harmonic-mean face properties precisely so that graded meshes
 stay second-order accurate (Technical Reference §7 and §13), but extreme ratios still degrade
 the gradient reconstruction. If you stretch hard, sanity-check the cell-size jump with
-`Pyrolysis.Geometry.aspect_ratio` (§6.5).
+`Pyrolysis.Adaptivity.mesh_quality_summary` (§6.5.4).
 
 > **Tip.** When in doubt, start uniform, run a convergence study (§6.3), and only switch to a
 > stretched mesh if a uniform mesh with the same near-surface resolution is too expensive.
@@ -4198,7 +4124,7 @@ mesh = create_uniform_mesh(0.01, 100, Val(2); cross_section_area = 1e-2)
 Once you have a `Mesh1D`, you can query its size and geometry. **Note on imports:** the basic
 size accessors and geometry queries are exported by the `Geometry` submodule but are *not* part
 of the curated top-level `Pyrolysis` surface. Reach them either fully qualified
-(`Pyrolysis.Geometry.cell_center`, etc.) or by bringing in the umbrella namespace with
+(`Pyrolysis.Geometry.cell_size`, etc.) or by bringing in the umbrella namespace with
 `using Pyrolysis.Internal`, which re-exports every submodule's public symbols. The two mesh
 *creators* (`create_uniform_mesh`, `create_stretched_mesh`) are top-level exported; the mesh
 *type* (`Mesh1D`) is exported by the `Geometry` submodule — reach it as
@@ -4217,7 +4143,6 @@ using Pyrolysis.Internal   # makes the accessors below available unqualified
 | `n_cells(mesh)` | Number of cells `n`. |
 | `n_nodes(mesh)` | Number of nodes (`= n + 1`). |
 | `n_faces(mesh)` | Number of faces (`= n + 1`). |
-| `n_active_cells(mesh)` | Number of active (leaf) cells — equals `n_cells` unless adaptive refinement has been applied (Chapter 10). |
 
 ```julia
 mesh = create_uniform_mesh(0.01, 100, Val(2))
@@ -4230,25 +4155,29 @@ n_faces(mesh)        # 101
 
 | Call | Returns |
 |---|---|
-| `cell_center(mesh, i)` | Center position `z_i^c` of cell `i` `[m]`. |
 | `cell_size(mesh, i)` | Thickness `Δz_i = \|z_{i+1} − z_i\|` of cell `i` `[m]`. |
-| `cell_volume(mesh, i)` | Cached volume `V_i` of cell `i` `[m³]`. |
-| `face_area(mesh, f)` | Area `A` of face `f` `[m²]` (constant in 1D). |
-| `total_volume(mesh)` | Sum of active-cell volumes `[m³]`. |
 | `domain_bounds(mesh)` | Tuple `(z_min, z_max)` from node positions `[m]`. |
-| `boundary_face_ids(mesh, boundary_id)` | Vector of face indices for a boundary id (`1` = top, `2` = bottom). |
-| `cross_section_area(mesh)` | Current `A(t)` `[m²]` (top-level exported). |
+
+The cached geometry is held in plain `Mesh1D` fields, which you read directly:
+
+| Field | Contents |
+|---|---|
+| `mesh.cell_centers` | Center positions `z_i^c` of the cells `[m]`. |
+| `mesh.cell_volumes` | Cell volumes `V_i = A·Δz_i` `[m³]`. |
+| `mesh.face_areas` | Face areas `A` `[m²]` (constant in 1D). |
+| `mesh.boundary_faces` | `Dict` from boundary id (`1` = top, `2` = bottom) to face indices. |
+| `mesh.cross_section_area` | Current area `A(t)` `[m²]` (`mesh.cross_section_area_initial` holds `A_0`). |
 
 ```julia
 domain_bounds(mesh)              # (0.0, 0.01)
-cell_center(mesh, 1)             # ≈ 5.0e-5   (first cell, near z = 0, the bottom)
-cell_center(mesh, n_cells(mesh)) # ≈ 9.95e-3 (last cell, near z = L, the top/exposed surface)
-cell_size(mesh, 1)              # 1.0e-4    (uniform Δz)
-total_volume(mesh)              # 0.01 * 1.0  (length × default area = 0.01 m³)
+mesh.cell_centers[1]             # ≈ 5.0e-5   (first cell, near z = 0, the bottom)
+mesh.cell_centers[end]           # ≈ 9.95e-3 (last cell, near z = L, the top/exposed surface)
+cell_size(mesh, 1)               # 1.0e-4    (uniform Δz)
+sum(mesh.cell_volumes)           # 0.01 * 1.0  (length × default area = 0.01 m³)
 
 # Face indices for the two boundaries (id 1 = top/exposed, id 2 = bottom/substrate)
-boundary_face_ids(mesh, 1)       # [101]  — top face at z = L
-boundary_face_ids(mesh, 2)       # [1]    — bottom face at z = 0
+mesh.boundary_faces[1]           # [101]  — top face at z = L
+mesh.boundary_faces[2]           # [1]    — bottom face at z = 0
 ```
 
 For the user-facing boundary tags (`:top`, `:bottom`) that you use when specifying boundary
@@ -4258,33 +4187,32 @@ conditions, see Chapter 5; internally `:top` maps to id `1` and `:bottom` to id 
 
 To get all cell-center positions as a vector — for plotting a temperature profile against
 depth — read `mesh.cell_centers` directly, or, after a solve, use the solution accessor
-`get_cell_positions` (top-level exported via the Solver module):
+`get_cell_positions` (exported by the `Solver` submodule; reach it through
+`Pyrolysis.Internal`):
 
 ```julia
 z = mesh.cell_centers                 # Vector{Float64} of length n_cells  [m]
 
 # after solving:
-z = get_cell_positions(solution)      # same vector, taken from solution.problem.mesh
+z = get_cell_positions(solution)      # same values (Eulerian), read from solution.problem.mesh
 ```
 
-### 6.5.4 Mesh-quality metrics (graded/adaptive meshes)
+### 6.5.4 Mesh-quality metrics (graded meshes)
 
-For stretched or adaptively refined meshes you can check grading quality with the metrics in
-the `Geometry` submodule. These four are defined but **not exported** (not even through
-`Pyrolysis.Internal`), so call them **fully qualified** with the `Pyrolysis.Geometry.` prefix:
+For stretched meshes you can check grading quality with the metrics in the `Adaptivity`
+submodule (exported from it, so also available through `Pyrolysis.Internal`):
 
 | Call | Meaning |
 |---|---|
-| `Pyrolysis.Geometry.aspect_ratio(mesh, i)` | Largest size ratio between cell `i` and its neighbours (`1.0` = uniform locally). |
-| `Pyrolysis.Geometry.max_aspect_ratio(mesh)` | Worst cell-to-neighbour size ratio over the active mesh. |
-| `Pyrolysis.Geometry.min_cell_size(mesh)` | Smallest active cell thickness `[m]`. |
-| `Pyrolysis.Geometry.max_cell_size(mesh)` | Largest active cell thickness `[m]`. |
+| `Pyrolysis.Adaptivity.compute_aspect_ratios(mesh)` | Per-cell largest size ratio to a neighbour (`1.0` = uniform locally). |
+| `Pyrolysis.Adaptivity.mesh_quality_summary(mesh)` | NamedTuple with `n_active_cells`, `min_cell_size`, `max_cell_size`, `max_aspect_ratio`, `max_smoothness`, `all_positive_volume`. |
 
 ```julia
 using Pyrolysis
 mesh = create_stretched_mesh(0.01, 50, Val(2), 1.1; stretch_from = :top)
-Pyrolysis.Geometry.max_aspect_ratio(mesh)   # ≈ 1.1 for stretch = 1.1
-Pyrolysis.Geometry.min_cell_size(mesh)      # the smallest cell, at the exposed surface
+q = Pyrolysis.Adaptivity.mesh_quality_summary(mesh)
+q.max_aspect_ratio   # ≈ 1.1 for stretch = 1.1
+q.min_cell_size      # the smallest cell, at the exposed surface
 ```
 
 A `max_aspect_ratio` close to your `stretch` factor is expected and fine. Values far above ~2
@@ -4371,8 +4299,8 @@ sol = solve(problem; progress = false)            # Eulerian (use_ale = false, t
 ### 6.7.2 ALE (moving mesh) — `use_ale = true`
 
 With `use_ale = true`, the node positions `z_i` become **part of the solved state**. The mesh
-moves with the material: solid components are tracked Lagrangian-style (locked to the nodes)
-while gas is treated Eulerian, so the mesh contracts as the solid pyrolyzes and shrinks (or
+moves with the material: every component, pore gas included, rides the mesh (the gas moves
+relative to it only through its transport flux), so the mesh contracts as the solid pyrolyzes and shrinks (or
 expands for an intumescent/swelling material). The state vector then includes the `z` block
 (see §6.6), and the residual computes a mesh velocity `w` cumulatively from the pinned bottom
 node upward, advancing nodes as `dz_i/dt = w_i`. The cell volumes are recomputed geometrically
@@ -4392,8 +4320,9 @@ strain and the area law are coupled through the mesh-velocity computation.
 
 > **Caveat — vanishing cross-section / mesh tangling.** ALE meshes can in principle tangle
 > (nodes crossing) or shrink toward zero thickness for very aggressive recession. The solver
-> guards against this with the `min_thickness` keyword of `solve` (default `1e-6 m`) and
-> mesh-quality checks; if a run terminates early or reports a thickness floor, see the
+> guards against this with the `min_thickness` keyword of `solve` (default `1e-6 m`), which
+> terminates the run, and with depleted-cell parking (`handle_depletion = true`, Chapter 10);
+> if a run terminates early or reports a thickness floor, see the
 > troubleshooting notes in Chapter 15 and the ALE quality discussion in Technical Reference §11.
 
 ### 6.7.3 Geometry derived from state (advanced)
@@ -4405,12 +4334,12 @@ state-layout helpers compute it without touching the mutable mesh:
 thickness = get_thickness_from_state(u, layout)   # current z_top − z_bottom  [m]
 ```
 
-The lower-level routines `compute_geometry_from_state!` / `update_geometry_cache!`
-(in `Pyrolysis.Geometry`) fill pre-allocated arrays of volumes, centers, and face distances
-directly from the `z` block; these are what the residual uses internally and are documented in
-Technical Reference §13. For variable-cross-section runs, `cross_section_area_from_state` and
-`column_chi_bar_from_state` (in `Pyrolysis.Residual`) reconstruct `A(t)` and `χ̄` from the
-state — advanced hooks you will rarely need directly.
+`compute_volumes_from_state(u, layout, A)` (in `Pyrolysis.Problem`) returns the cell volumes
+`A·|z_{i+1} − z_i|` directly from the `z` block, and `update_state_geometry!` fills the
+residual's `StateCache` (volumes, centers, face positions) from the state; the latter is what
+the residual uses internally (Technical Reference §13). For variable-cross-section runs,
+`cross_section_area_from_state` and `column_chi_bar_from_state` (in `Pyrolysis.Residual`)
+reconstruct `A(t)` and `χ̄` from the state — advanced hooks you will rarely need directly.
 
 ---
 
@@ -4427,9 +4356,10 @@ state — advanced hooks you will rarely need directly.
 - `cross_section_area` (`A_0`, default `1.0 m²`) is a gauge constant; it cancels from intensive
   results and only matters as `A(t) = A_0·law(χ̄)` when a lateral-shrinkage law is active
   (Technical Reference §10).
-- Inspect meshes with `n_cells`/`n_nodes`/`n_faces`, `cell_center`, `cell_size`, `cell_volume`,
-  `total_volume`, `domain_bounds`, and `boundary_face_ids` — qualify with `Pyrolysis.Geometry.`
-  or bring them in via `using Pyrolysis.Internal`.
+- Inspect meshes with `n_cells`/`n_nodes`/`n_faces`, `cell_size` and `domain_bounds` —
+  qualify with `Pyrolysis.Geometry.` or bring them in via `using Pyrolysis.Internal` —
+  and read the cached geometry from the `Mesh1D` fields (`cell_centers`, `cell_volumes`,
+  `face_areas`, `boundary_faces`, `cross_section_area`).
 - The state vector is block-major `[T | ξ_1..ξ_NC | z (ALE) | χ (WithChi)]`; use
   `get_temperature`, `get_concentration`, `block_view`, and the ALE accessors instead of raw
   offsets.
@@ -4439,7 +4369,8 @@ state — advanced hooks you will rarely need directly.
 For the finite-volume discretization built on this mesh, see Technical Reference §13; for
 moving-mesh mechanics and the Geometric Conservation Law, Technical Reference §11; for how the
 mesh plugs into a problem and how modes are selected, Chapter 7; for boundary conditions on the
-top/bottom faces, Chapter 5; and for adaptive refinement and surface depletion, Chapter 10.
+top/bottom faces, Chapter 5; and for surface depletion and the mesh-adaptation building blocks,
+Chapter 10.
 
 
 ---
@@ -4524,7 +4455,8 @@ problem = PyrolysisProblem(
 ```
 
 > The component count passed to the mesh (`Val(2)`) **must** equal the number of
-> components in the material. The validator (§7.9) checks this.
+> components in the material. The validator (§7.9) checks that `ξ_initial` has
+> one closure per material component.
 
 ### 7.1.2 Initial conditions
 
@@ -4552,7 +4484,8 @@ problem = PyrolysisProblem(
 )
 ```
 
-Several spatial-profile helpers are exported for non-uniform initial states:
+Several spatial-profile helpers are exported by the `Problem` submodule (import them
+with `import Pyrolysis.Problem: linear_profile`, §5.10.3) for non-uniform initial states:
 `step_profile`, `linear_profile`, `gaussian_profile`, and `tanh_profile`. For
 example, a warm front pre-heated near the top surface (`z = L`):
 
@@ -4655,7 +4588,7 @@ recession matters for the surface temperature and mass-loss rate. For a TGA-like
 or thin-film case where geometry change is negligible, Eulerian is cheaper and
 simpler.
 
-ALE adds work arrays, mesh-velocity integration, advection corrections, and a
+ALE adds work arrays, mesh-velocity integration, the dilation correction, and a
 geometric-conservation-law-exact volume update; the geometry is recomputed from
 the node positions at every residual evaluation. Bottom node 1 is pinned
 (`w_1 = 0`): the substrate is immobile and the material moves as it shrinks or
@@ -4882,57 +4815,48 @@ law, and §11 for how `θ_A` couples into ALE mesh motion.
 
 ---
 
-## 7.7 Energy form (`energy_form`) and the transpiration caveat
+## 7.7 The energy equation
 
-Separate from the four trait axes, a runtime option selects the bulk energy
-formulation. It is passed as the `energy_form` keyword to `solve`:
+The energy equation is the same in every mode; the four trait axes change how its
+terms are computed, not which terms appear:
 
-| Value | Meaning |
-|---|---|
-| `:standard` (default) | Formulation A. The volumetric gas-advection source `S_conv = −Σ_g c_{p,g} J_g ∂T/∂z` is active; the gas-generation enthalpy-divergence term is dropped. This is the ThermaKin convention, exact for heats of reaction quoted at the reaction temperature. |
-| `:with_generation_sink` | Adds the gas-generation enthalpy sink `S_gen = −Σ_g Δh_g(T_i,T_ref)(∇·J_g)_i` as an extra cell source — a *partial* move toward conservative form. **Requires T_ref-datum reaction heats** (see warning below). |
-
-```julia
-sol = solve(problem)                                   # :standard (default)
-sol = solve(problem; energy_form = :with_generation_sink)
+```
+ρc_p ∂T/∂t = −∇·q + S_conv + Q_rad + Q_rxn
 ```
 
-`energy_form` is a runtime field, not a trait — it adds one additive term and is
-cheaper to branch on at run time than to compile as a separate method. Any value
-other than these two raises an `ArgumentError` at problem construction.
+Here `ρc_p` sums every component, pore gas included; `−∇·q` is conduction;
+`S_conv = −Σ_g c_{p,g} J_g ∂T/∂z` carries the sensible enthalpy of the gas flux
+relative to the skeleton; `Q_rad` is the volumetric radiation source
+(`BEER_LAMBERT` only); and `Q_rxn = −Σ_r h_r r_r` is the reaction heat. This is
+the ThermaKin convention (Technical Reference §3 and §7).
 
-> **Warning — `:with_generation_sink` is datum-dependent.** The sink is
-> consistent only when every reaction heat `h` is referenced to the
-> `T_ref ≈ 298.15 K` ambient datum (formation-enthalpy style). If your heats
-> are DSC-style values quoted at the reaction temperature — the usual meaning
-> of calibrated heats, including anything ported from ThermaKin or Gpyro —
-> the gas products' sensible enthalpy is already inside `h`, and enabling the
-> sink subtracts it a **second** time (≈0.7–1.2 MJ per kg of volatiles at
-> 900 K, comparable to the heat of pyrolysis itself). In that case
-> `:standard` is the exact form; leave the default alone. A one-time warning
-> is emitted when the sink is selected (Technical Reference §6.6.3, §7.5.4).
+**Reaction heats are DSC-style.** A heat `h` measured by DSC, or calibrated in
+ThermaKin or Gpyro, is quoted at the reaction temperature, so it already contains
+the gas products' sensible enthalpy at that temperature. The energy equation
+therefore has no separate gas-generation enthalpy term. Such a term,
+`−Σ_g Δh_g(T, T_ref)(∇·J_g)`, belongs only with heats referenced to the
+`T_ref ≈ 298.15 K` ambient datum (formation-enthalpy style); with DSC-style heats
+it would subtract the gas products' sensible enthalpy a second time (≈0.7–1.2 MJ
+per kg of volatiles at 900 K, comparable to the heat of pyrolysis itself). If
+your heats are referenced to the ambient datum, convert them to the reaction
+temperature before use (Technical Reference §6).
 
-### 7.7.1 Do not enable the surface transpiration BC with the default convention
+### 7.7.1 No surface gas-enthalpy term
 
-There is a fourth `solve` keyword, `use_transpiration_bc` (default `false`),
-which would fold a surface transpiration enthalpy term `Σ_g ṁ_g Δh_g(T_s, T_∞)`
-into the boundary energy balance. **It is rejected at problem construction**:
-setting `use_transpiration_bc = true` throws an `ArgumentError`. The reason is a
-double-count. The volumetric advection source `S_conv` is *always* active (in
-both energy forms); the surface transpiration term overlaps it by exactly
-`∫S_conv`, producing a spurious sink of order 5–10 kW/m² that under-predicts
-surface temperature and mass-loss rate. The supported convention is `S_conv` only
-(`use_transpiration_bc = false`) with a plain convective + radiative boundary
-condition. The transpiration path is retained for closed-ledger experiments only
-and must never be combined with the volumetric source. See Technical Reference
-§7.6 and §16.4 for the energy-balance accounting.
+The boundary energy balance contains no gas-enthalpy term: the applied BC flux
+equals the conducted flux (§5.4). A surface term `Σ_g ṁ_g Δh_g(T_s, T_∞)` would
+overlap the always-active volumetric source by exactly `∫S_conv`, a spurious sink
+of order 5–10 kW/m² that under-predicts surface temperature and mass-loss rate.
+Use a plain convective + radiative boundary condition; the escaping gas
+influences the boundary only through the blowing model of a `ConvectiveBC`
+(§5.2.3). See Technical Reference §7 and §16 for the energy-balance accounting.
 
 ---
 
 ## 7.8 How modes map to the residual paths
 
-The four trait axes plus the energy form fully determine the discrete RHS the
-solver integrates. The two mesh-motion paths are the primary fork:
+The four trait axes fully determine the discrete RHS the solver integrates. The
+two mesh-motion paths are the primary fork:
 
 - **Eulerian path** — geometry is constant. The residual populates the typed
   state cache, updates properties, computes the physics RHS (dispatched on
@@ -4950,7 +4874,7 @@ Radiation, transport, and cross-section are handled by compile-time dispatch
 *within* those two paths. The net effect is a small, type-stable set of
 specialized residuals selected entirely by the mode bundle — you do not choose a
 "path" directly; you choose the axes and the path follows. See Technical Reference
-§15.1–§15.3 for the dispatch and the full ALE assembly sequence.
+§15.1–§15.4 for the dispatch and the full ALE assembly sequence.
 
 ---
 
@@ -4959,8 +4883,8 @@ specialized residuals selected entirely by the mode bundle — you do not choose
 Before solving, run the validator to catch structural mistakes early:
 
 ```julia
-validate_problem(problem)                 # throws on any error, returns true if OK
-validate_problem(problem; strict = true)  # adds expensive checks (see below)
+Pyrolysis.Problem.validate_problem(problem)                 # throws on any error, returns true if OK
+Pyrolysis.Problem.validate_problem(problem; strict = true)  # adds expensive checks (see below)
 ```
 
 `solve` calls `validate_problem(problem; strict = false)` automatically unless you
@@ -4969,19 +4893,24 @@ pass `validate = false`. The default checks are:
 - the mesh has cells, nodes, faces, cell states, and initialized geometry;
 - the material has at least one component, and every reaction references valid
   component indices;
-- the mesh has the expected top (id 1) and bottom (id 2) boundaries;
+- the mesh has the expected top (id 1) and bottom (id 2) boundaries, and a
+  per-species `ξ_inf` tuple on a `ConvectiveMassBC` has one entry per component;
 - the time span is valid (`t_start < t_end`, `t_start ≥ 0`, positive `dt_initial`
   no larger than the span);
-- the number of initial concentration closures equals the component count.
+- the number of initial concentration closures equals the component count;
+- a Darcy–Fick material does not start with (near-)zero porosity in a cell whose
+  effective permeability is nonzero (§7.5.1).
+
+It also warns, without failing, when a gas-producing Fickian material has a
+condensed component with gas-transfer coefficient `λ = 0` (gas transport then
+vanishes wherever the gas fraction vanishes; give such components a small `λ`,
+e.g. `1e-6`). Errors are collected and thrown together in one message.
 
 `strict = true` additionally verifies reaction stoichiometric mass balance
 (product yields summing to 1.0), that the initial-condition closures are callable
 at `z = 0`, and that all cell volumes are positive.
 
-Two convenience helpers exist: `is_valid_problem(problem)` returns a `Bool`
-without throwing, and `check_consistency(problem)` returns a NamedTuple
-`(valid, messages)` describing component-count mismatches between mesh, material,
-and initial conditions.
+`Pyrolysis.Problem.is_valid_problem(problem)` returns a `Bool` without throwing.
 
 ---
 
@@ -4990,13 +4919,13 @@ and initial conditions.
 The table below is a quick recipe lookup. "auto" means the axis is inferred from
 the material, not set on `solve`.
 
-| Scenario | `use_ale` | `radiation_model` | transport (auto) | cross-section (auto) | `energy_form` |
-|---|---|---|---|---|---|
-| TGA / DSC-like (thin, no recession) | `false` | `NO_RADIATION` | Fickian (`κ = 0`) | NoChi (no law) | `:standard` |
-| Cone calorimeter, opaque char | `true` | `SURFACE_ABSORPTION` | Fickian or Darcy | NoChi or WithChi | `:standard` |
-| Cone calorimeter, semi-transparent polymer | `true` | `BEER_LAMBERT` (set `α`) | Fickian | NoChi | `:standard` |
-| Intumescent coating (swelling) | `true` | `SURFACE_ABSORPTION` | Darcy (`κ > 0`) | WithChi (swell law) | `:standard` |
-| Pressure-driven char / pressure-treated wood | `true` | `SURFACE_ABSORPTION` | Darcy (`κ > 0`) | NoChi or WithChi | `:standard` |
+| Scenario | `use_ale` | `radiation_model` | transport (auto) | cross-section (auto) |
+|---|---|---|---|---|
+| TGA / DSC-like (thin, no recession) | `false` | `NO_RADIATION` | Fickian (`κ = 0`) | NoChi (no law) |
+| Cone calorimeter, opaque char | `true` | `SURFACE_ABSORPTION` | Fickian or Darcy | NoChi or WithChi |
+| Cone calorimeter, semi-transparent polymer | `true` | `BEER_LAMBERT` (set `α`) | Fickian | NoChi |
+| Intumescent coating (swelling) | `true` | `SURFACE_ABSORPTION` | Darcy (`κ > 0`) | WithChi (swell law) |
+| Pressure-driven char / pressure-treated wood | `true` | `SURFACE_ABSORPTION` | Darcy (`κ > 0`) | NoChi or WithChi |
 
 ### 7.10.1 Worked example: TGA-like, minimal mode
 
@@ -5019,7 +4948,7 @@ bc_set = BoundaryConditionSet(
 problem = PyrolysisProblem(mesh = mesh, material = pmma, bc_set = bc_set,
                            tspan = (0.0, 600.0))
 
-sol = solve(problem)        # Eulerian, NoRadiation, Fickian, NoChi, :standard
+sol = solve(problem)        # Eulerian, NoRadiation, Fickian, NoChi
 ```
 
 ### 7.10.2 Worked example: cone calorimeter, opaque, recession + Darcy
@@ -5061,7 +4990,7 @@ problem = PyrolysisProblem(mesh = mesh, material = wood, bc_set = bc_set,
 sol = solve(problem;
             use_ale         = true,                 # recession
             radiation_model = SURFACE_ABSORPTION)   # opaque: deposit flux at surface
-# transport = DarcyFick (auto, from κ); cross-section = NoChi (no law); energy_form = :standard
+# transport = DarcyFick (auto, from κ); cross-section = NoChi (no law)
 ```
 
 For a production Darcy run, also initialize the pore gas with a background air
@@ -5078,15 +5007,15 @@ automatically — no change to the `solve` call is required.
 - A `PyrolysisProblem` bundles mesh, material, `bc_set`, initial conditions, and
   `tspan`/`output_times`. Component counts must agree across mesh, material, and
   initial conditions.
-- The active physics is the **simulation mode**: four trait axes plus the
-  `energy_form` option.
+- The active physics is the **simulation mode**: four trait axes.
   - *Mesh motion* (`use_ale`, default `false`) and *radiation*
     (`radiation_model`, default `NO_RADIATION`) are chosen at solve time.
   - *Gas transport* (Fickian vs. Darcy–Fick) and *cross-section* (NoChi vs.
     WithChi) are inferred automatically from the material — from component
     permeability `κ` and from `lateral_shrinkage_law`, respectively.
-- `energy_form = :standard` (default) is the canonical convention; the surface
-  transpiration BC is forbidden because it double-counts `S_conv`.
+- There is one energy equation, with gas enthalpy carried by `S_conv` and
+  DSC-style reaction heats; the boundary balance has no surface gas-enthalpy
+  term, which would double-count `S_conv`.
 - `validate_problem` (run automatically by `solve` unless `validate = false`)
   catches structural errors before integration.
 
@@ -5104,7 +5033,7 @@ integrates it forward in time is `solve`. This chapter is the complete option
 reference for `solve(problem; ...)`: how to pick the time integrator and its
 tolerances, how to choose and configure the structured Jacobian and the linear
 solver behind it, how to switch on optional physics (ALE mesh motion, radiation,
-the gas-generation energy sink), how callbacks are wired in, how warm-starting
+depletion handling), how callbacks are wired in, how warm-starting
 and output saving work, and how to read mass-loss-rate output for variable
 cross-sections. Every keyword shown here is a real `solve` keyword — `solve`
 rejects unknown keywords with an error, so there is no room for typos. The
@@ -5146,21 +5075,19 @@ The full keyword signature, with defaults, is:
 | `maxiters` | `1000000` | Maximum integrator steps |
 | `dtmin` | `1e-12` | Minimum time step [s] |
 | `dtmax` | `Inf` | Maximum time step [s] |
-| `jacobian` | `nothing` → `Structured(DirectSolve())` | Pluggable Jacobian backend; §8.5 |
+| `jacobian` | `nothing` → `Structured(strategy = DirectSolve())` (fixed mesh) or `Structured(strategy = ApproxSolve())` (ALE) | Jacobian backend; §8.5 |
 | `verify_jacobian` | `nothing` | Compare active Jacobian to a dense AD reference; §8.6 |
 | `use_ale` | `false` | Enable ALE moving-mesh integration; §8.7 |
 | `radiation_model` | `NO_RADIATION` | `NO_RADIATION` / `SURFACE_ABSORPTION` / `BEER_LAMBERT`; §8.8 |
-| `energy_form` | `:standard` | `:standard` or `:with_generation_sink`; §8.9 |
-| `use_transpiration_bc` | `false` | Surface transpiration enthalpy term — must stay `false`; §8.9 |
-| `min_thickness` | `1e-6` | Terminate ALE solve when sample thins below this [m]; §8.7, §8.10 |
-| `handle_depletion` | `false` | Merge depleted surface cells (ALE only); §8.10 |
-| `depletion_threshold` | `0.05` | Cell-thickness fraction that triggers a merge; §8.10 |
-| `min_cells` | `2` | Stop merging once this many cells remain; §8.10 |
-| `diagnostics` | `false` | Snapshot the conservation ledger during the solve; §8.11 |
-| `diagnostics_stride` | `10` | Record a diagnostics snapshot every N steps; §8.11 |
-| `callback` | `nothing` | One extra user callback; §8.11 |
-| `warm_start` | `nothing` | Reuse a prior solution's final state as the IC; §8.12 |
-| `saveat` | `problem.output_times` | Times at which to store output; §8.13 |
+| `min_thickness` | `1e-6` | Terminate ALE solve when sample thins below this [m]; §8.7, §8.9 |
+| `handle_depletion` | `false` | Park depleted cells (ALE or fixed mesh); §8.9 |
+| `depletion_threshold` | `0.05` | Fraction of a cell's initial thickness (ALE) or condensed concentration (fixed mesh) that triggers a park; §8.9 |
+| `min_cells` | `2` | Minimum live cells; the solve terminates instead of parking below it; §8.9 |
+| `diagnostics` | `false` | Log a sensible-energy snapshot during the solve; §8.10 |
+| `diagnostics_stride` | `10` | Record a diagnostics snapshot every N accepted steps; §8.10 |
+| `callback` | `nothing` | One extra user callback; §8.10 |
+| `warm_start` | `nothing` | Reuse a prior solution's final state as the IC; §8.11 |
+| `saveat` | `problem.output_times` | Times at which to store output; §8.12 |
 | `sensealg` | `nothing` | Forwarded to the integrator (used by the sensitivity extension) |
 | `progress` | `true` | Show a progress bar |
 | `validate` | `true` | Run `validate_problem` before solving |
@@ -5186,10 +5113,10 @@ with `UMFPACKFactorization()` in place of KLU for the exact ALE Jacobian
 (§8.4).
 
 `KenCarp4` is a 4th-order ESDIRK method — a good general-purpose choice for the
-moderately stiff systems that pyrolysis produces. The `autodiff = AutoFiniteDiff()`
-setting tells the integrator to finite-difference its *own* Jacobian when no
-pluggable Jacobian is supplied; when you let the default structured Jacobian take
-over (§8.5), that pluggable Jacobian is used instead.
+moderately stiff systems that pyrolysis produces. `solve` always attaches the
+structured Jacobian (§8.5), so the integrator uses it rather than
+finite-differencing the right-hand side; `autodiff = AutoFiniteDiff()` only sets
+the integrator's own differentiation mode.
 
 You can pass the integrator in three forms:
 
@@ -5197,12 +5124,17 @@ You can pass the integrator in three forms:
 attaches the chosen linear solver:
 
 ```julia
-using OrdinaryDiffEq            # solver types; `using Pyrolysis` already loads OrdinaryDiffEq
+using OrdinaryDiffEqSDIRK: KenCarp4, TRBDF2   # SDIRK methods (add OrdinaryDiffEqSDIRK to your environment)
+using OrdinaryDiffEq: FBDF                    # OrdinaryDiffEq re-exports only its default set (FBDF, Rodas5P, …)
 
 solve(problem; integrator = KenCarp4)              # rebuilt with default linsolve
 solve(problem; integrator = TRBDF2)                # another SDIRK alternative
 solve(problem; integrator = FBDF)                  # multistep BDF, good for very stiff TGA-like runs
 ```
+
+The integrator names in the examples of this guide (`KenCarp4`, `TRBDF2`,
+`FBDF`, `Rodas5P`) are not exported by `using Pyrolysis`; import them as
+above.
 
 **2. A constructor with a paired `linear_solver`.** Use this when you want a
 specific sparse factorization but still want `solve` to wire it together:
@@ -5303,7 +5235,7 @@ You select the linear solver either by pairing it with a *constructor*
 `integrator`:
 
 ```julia
-using LinearSolve: SparspakFactorization, UMFPACKFactorization
+using LinearSolve: KLUFactorization, SparspakFactorization, UMFPACKFactorization
 
 solve(problem; integrator = KenCarp4,
                linear_solver = UMFPACKFactorization())
@@ -5318,89 +5250,70 @@ solve(problem; integrator = KenCarp4(linsolve = KLUFactorization()))
 ```
 
 KLU, UMFPACK and Sparspak are interchangeable sparse direct solvers; the
-default only picks the one suited to the pattern. Iterative ILU-preconditioned
-solvers for large ALE problems are covered in §8.14.
-
-> Note: a dense Jacobian backend such as `DenseAD_ForwardDiff` has no sparse
-> Jacobian prototype for a sparse factorization to consume. `solve` then
-> defaults to `LUFactorization()` (dense), and replaces an explicitly requested
-> sparse factorization with it — with a warning, keeping your integrator type
-> and `autodiff` setting.
+default only picks the one suited to the pattern. An explicit `linear_solver`
+always wins, and any other LinearSolve factorization is passed the same way —
+for example `MKLPardisoFactorize()` once Pardiso/MKL is installed and loaded.
+Iterative ILU-preconditioned solvers for large ALE problems are covered in §8.13.
 
 ---
 
 ## 8.5 Jacobian backend selection
 
-The single most important performance lever is the Jacobian. By default, `solve`
-builds the **structured analytical Jacobian**:
+The single most important performance lever is the Jacobian. `solve` always
+assembles the **structured analytical Jacobian**, `Structured`, with a
+linear-solve *strategy* chosen by the mesh mode when `jacobian = nothing` (the
+default):
 
 ```julia
-Structured(strategy = DirectSolve())
+Structured(strategy = DirectSolve())   # fixed (Eulerian) mesh
+Structured(strategy = ApproxSolve())   # ALE
 ```
 
-This is selected automatically when `jacobian = nothing` (the default) for both
-Eulerian and ALE problems. It assembles the exact Jacobian from per-operator
-analytical and AD contributions (reaction, conduction, gas transport, radiation,
-boundary conditions, and the ALE structured couplings) and hands a sparse matrix
-to the linear solver. It is far faster than letting the integrator
-finite-difference the whole RHS. See Technical Reference §15 for the
-operator-based architecture.
+It assembles the Jacobian from per-operator analytical and AD contributions
+(reaction, conduction, gas transport, radiation, boundary conditions, and the
+ALE structured couplings) and hands a sparse matrix to the linear solver. It is
+far faster than letting the integrator finite-difference the whole RHS. See
+Technical Reference §15 for the operator-based architecture.
 
-You override it through the `jacobian` keyword, passing a `JacobianSpec`. The
-spec is built from a *backend* and a *linear-solve strategy*. The constructor
-`JacobianSpec(backend, problem; ...)` builds the sparsity patterns and AD caches
-once; **do not** construct it inside a hot loop.
+You override the strategy through the `jacobian` keyword, passing the backend
+itself; `solve` builds the sparsity patterns and AD caches for its own mesh copy,
+mode and options.
 
 ### Linear-solve strategies
 
 | Strategy | Behavior | When to use |
 |---|---|---|
 | `DirectSolve()` | Materialize the full Jacobian (block + densified structured couplings) and factor it. Exact. | Fixed-mesh default; the exact ALE Jacobian when asked for |
-| `StructuredSolve()` | Sparse LU on the local block plus Richardson iterations that apply the structured couplings as fast O(N) operators. Exact, converges in 2–5 iterations. | Typical ALE problems |
-| `ApproxSolve()` | Drop the structured ALE couplings (Schur-style approximation); solve only the local block. Approximate but much cheaper. | ALE default |
-| `MatrixFreeSolve()` | GMRES on the operator action without materializing. | Research / very large problems |
+| `ApproxSolve()` | Drop the structured couplings (ALE prefix-sum, χ rank-1, Beer–Lambert suffix-sum; a Schur-style approximation) and solve only the local block. Approximate but much cheaper. | ALE default |
 
 The verifier-only backend `DenseAD_ForwardDiff()` runs ForwardDiff over the
 entire residual to produce a dense reference Jacobian. It is correct by
-construction but slow — use it only for verification (§8.6), never for
-production.
+construction but slow, and it serves only as the reference of `verify_jacobian`
+(§8.6); `jacobian` accepts only a `Structured` backend, so passing
+`DenseAD_ForwardDiff()` (or a prebuilt `JacobianSpec`) raises a `TypeError`.
 
 ### Examples
 
-Production default (no keyword needed):
+Production defaults (no keyword needed):
 
 ```julia
-solve(problem)                                  # Structured(DirectSolve())
+solve(problem)                    # Structured(strategy = DirectSolve())
+solve(problem; use_ale = true)    # Structured(strategy = ApproxSolve())
 ```
 
-Opt into the exact structured/Richardson solve:
+Opt into the exact ALE Jacobian instead of the reduced default:
 
 ```julia
-spec = JacobianSpec(Structured(strategy = StructuredSolve()), problem)
-solve(problem; jacobian = spec)
-```
-
-Opt into the exact ALE Jacobian instead of the reduced default. Because the
-spec must match the simulation mode, pass `use_ale = true` to **both** the
-`JacobianSpec` constructor and `solve`:
-
-```julia
-spec = JacobianSpec(Structured(strategy = DirectSolve()), problem; use_ale = true)
-solve(problem; jacobian = spec, use_ale = true)
+solve(problem; use_ale = true, jacobian = Structured(strategy = DirectSolve()))
 ```
 
 The exact Jacobian carries the dense mesh-velocity coupling, which the reduced
 default drops; both follow the same trajectory, and the exact one costs several
-times more per step (Technical Reference §15.10.3).
-
-The mode keywords accepted by `JacobianSpec(backend, problem; ...)` mirror what
-`solve` selects: `use_ale`, `radiation_model`, `radiation_intensity`,
-`energy_form`, `use_transpiration_bc`, `min_thickness`, `min_density`. They
-default to Eulerian / no radiation, so a plain Eulerian problem needs none of
-them.
+times more per step (Technical Reference §15.10.2). It is factored by
+`UMFPACKFactorization()` unless you pass a `linear_solver` (§8.4).
 
 > Depletion handling (`handle_depletion = true`) keeps the state size and
-> works with any `jacobian`. See §8.10 and Technical Reference §14.3.
+> works with either strategy. See §8.9 and Technical Reference §14.3.
 
 ---
 
@@ -5419,13 +5332,12 @@ solve(problem;
 
 Allowed keys are exactly `:rtol`, `:atol`, and `:sample_times`; any other key is
 rejected. `rtol` defaults to `1e-6` and `atol` to `1e-10` if omitted. Use this
-when developing a custom backend or diagnosing a "Jacobian mismatch" symptom
-(slow Newton convergence, unexpected step rejections).
-
-Verification is skipped — with a warning — if no Jacobian spec is active, which
-happens under `handle_depletion = true`. For an out-of-solve check at a single
-state point, call `verify_jacobian_at` directly (see Technical Reference §15 and
-Chapter 11).
+when diagnosing a "Jacobian mismatch" symptom (slow Newton convergence,
+unexpected step rejections). It works with depletion handling too. The exact
+`DirectSolve` Jacobian is compared entry by entry; the approximate `ApproxSolve`
+Jacobian deliberately drops couplings, so it is compared only on its own
+support, as a sanity check. For an out-of-solve check at a single state point,
+call `verify_jacobian_at` directly (see Technical Reference §15 and Chapter 11).
 
 ---
 
@@ -5450,7 +5362,7 @@ With `use_ale = true`:
   it to your physical stopping criterion, e.g. `min_thickness = 0.5e-3`.
 - If the material carries a lateral-shrinkage law, the WithChi cross-section
   state `χ` is integrated too, and the cross-sectional area `A(t)` varies (see
-  §8.13 and Technical Reference §10).
+  §8.12 and Technical Reference §10).
 
 A typical opaque charring cone run:
 
@@ -5527,54 +5439,12 @@ derived in Technical Reference §8 and §12.
 
 ---
 
-## 8.9 Energy formulation and the transpiration caveat
-
-The bulk energy equation uses **Formulation A** (the ThermaKin Eq. 17
-convention): every component, pore gas included, stores sensible heat in the
-effective heat capacity, and the enthalpy carried by the gas flux relative to
-the skeleton enters through the volumetric advection source `S_conv`, which is
-always active. The `energy_form` keyword selects whether an additional
-gas-generation enthalpy sink is included:
-
-```julia
-solve(problem; energy_form = :standard)              # default: S_conv only
-solve(problem; energy_form = :with_generation_sink)  # adds −Σ Δh_g (∇·J_g) cell source
-```
-
-- `:standard` (default) matches ThermaKin Eq. 17 — `S_conv` alone carries gas
-  enthalpy. This is the recommended convention for almost all work.
-- `:with_generation_sink` adds the per-cell gas-generation sink term, which
-  telescopes with surface transpiration to recover the strict conservative form.
-  Use it only if you specifically need the conservative-form energy balance to
-  close (see Technical Reference §7 and §16).
-
-Any other symbol is rejected.
-
-### Do not enable `use_transpiration_bc`
-
-The surface transpiration enthalpy term `Σṁ_g·Δh_g` would **double-count** gas
-enthalpy because `S_conv` already carries it. `solve` therefore hard-rejects
-`use_transpiration_bc = true`:
-
-```julia
-solve(problem; use_transpiration_bc = false)   # the only accepted value (default)
-```
-
-Leave it at its default `false`. Mass transport across the boundary remains fully
-active either way — this flag concerns only the *enthalpy* sink, not the mass
-flux. (Parameter sets calibrated against solvers that apply a surface transpiration
-term *in addition to* a volumetric advection source embed the double-count; they
-predict lower surface temperature and MLR than the `S_conv`-only balance and should
-be re-validated when imported.)
-
----
-
-## 8.10 Depletion handling and termination
+## 8.9 Depletion handling and termination
 
 When a layer burns out, its cells shrink (ALE) or empty (fixed mesh) toward a
 state the implicit integrator cannot resolve — a vanishing cell's equations are
 conditioned like `1/Δz²`. Depletion handling **parks** such cells: it merges
-each one into a neighbour, conserving mass and condensed enthalpy, and moves
+each one into a neighbour, conserving mass and sensible enthalpy, and moves
 its state slot above the live surface as an inert ghost. The state vector,
 mesh and Jacobian keep their size; the boundary conditions act at the live
 surface.
@@ -5603,9 +5473,10 @@ How it works:
 - The depleted cell is merged into its interior neighbour with an
   **energy-conserving** temperature merge and a volume-weighted concentration
   merge, and its slot is parked; one cell per step, surface first.
-- Parking stops once only `min_cells` live cells remain (default `2`); the
-  thickness-termination callback ends an ALE solve when the live thickness drops
-  below `min_thickness`.
+- When only `min_cells` live cells remain (default `2`), the next depleted cell
+  terminates the solve with a warning (retcode `:Terminated`) instead of parking;
+  the thickness-termination callback ends an ALE solve when the live thickness
+  drops below `min_thickness`.
 - Ghost slots read as `NaN` in `sol.T`, `sol.ξ` and `sol.z`;
   `sol.extras.live_cells` gives the live count at each output time and
   `sol.extras.park_times` the event times.
@@ -5615,14 +5486,14 @@ How it works:
 `examples/07_douglas_fir_cone.jl` instead lets ALE carry the thin cells and
 stops purely on `min_thickness` (`handle_depletion = false`).
 
-> Jacobian: depletion handling keeps the pluggable Jacobian. The ALE default,
+> Jacobian: depletion handling keeps the structured Jacobian. The ALE default,
 > `Structured(strategy = ApproxSolve())`, runs through the parks, and
 > `DirectSolve` stays available through `jacobian`. Theory in Technical
 > Reference §14.3.
 
 ---
 
-## 8.11 Callbacks and runtime diagnostics
+## 8.10 Callbacks and runtime diagnostics
 
 `solve` assembles a `CallbackSet` internally; you do not manage most of these. In
 order, they are: a step-update callback (always present; syncs the integrator
@@ -5632,22 +5503,22 @@ that solve their stages by Newton), a progress bar (`progress = true`), an
 optional diagnostics callback, an optional Jacobian-verification callback, and
 finally any user callback you supply.
 
-### Conservation diagnostics
+### Diagnostics log
 
-Set `diagnostics = true` to snapshot the conservation ledger during the solve.
-Snapshots are recorded every `diagnostics_stride` steps (default `10`) and are
-appended to `solution.extras.diagnostics_log`:
+Set `diagnostics = true` to log a sensible-energy snapshot during the solve.
+Snapshots are recorded every `diagnostics_stride` accepted steps (default `10`)
+and are appended to `solution.extras.diagnostics_log`:
 
 ```julia
 solution = solve(problem; diagnostics = true, diagnostics_stride = 20)
 rows = solution.extras.diagnostics_log    # Vector{DiagnosticsRow}
 ```
 
-Each row captures the sensible energy `E_sensible`. This is **snapshot** logging
-— not a continuous time
-history — and is intended for auditing energy/mass balance, not dense
-post-processing. `diagnostics_stride` must be ≥ 1. See Chapter 9 for reading
-diagnostics and Technical Reference §16 for the ledgers.
+Each row captures the time `t` and the sensible energy `E_sensible`; its
+cumulative-ledger fields (`energy_residual`, `energy_relative`,
+`mass_max_relative_error`) are `NaN`; only `record_substep!` fills them (§9.8).
+This is **snapshot** logging — not a continuous time history. `diagnostics_stride` must be ≥ 1. See Chapter 9 for
+reading diagnostics and Technical Reference §16 for the ledgers.
 
 ### A custom user callback
 
@@ -5676,7 +5547,7 @@ this automatically).
 
 ---
 
-## 8.12 Warm-starting from a prior solution
+## 8.11 Warm-starting from a prior solution
 
 To start a new solve from the final state of a previous one — useful for
 continuation studies and for warm-starting nearby parameter-sweep points — pass
@@ -5698,12 +5569,12 @@ start time — warm-starting treats the prior final state as fresh initial data,
 does not continue the clock.
 
 > Caution: warm-starting can introduce subtle artifacts in sensitivity studies
-> because the perturbed solve no longer begins from the canonical initial
+> because the perturbed solve does not begin from the canonical initial
 > condition. Prefer cold starts when computing gradients (Chapter 13).
 
 ---
 
-## 8.13 Output times, saving, and MLR for variable cross-section
+## 8.12 Output times, saving, and MLR for variable cross-section
 
 By default `solve` saves the solution at `problem.output_times` (set when you
 built the problem). Override with `saveat`:
@@ -5738,12 +5609,13 @@ Technical Reference §10 and §16 for the gauge convention.
 
 ---
 
-## 8.14 Performance tips and iterative linear solvers
+## 8.13 Performance tips and iterative linear solvers
 
 A short checklist for fast, reliable solves:
 
-1. **Use the default structured Jacobian.** It is dramatically faster than the
-   integrator's finite-difference Jacobian.
+1. **Keep the default Jacobian strategy.** `solve` always assembles the
+   structured Jacobian, which is dramatically faster than finite-differencing
+   the right-hand side; the default strategy suits each mesh mode (§8.5).
 2. **Right-size the mesh.** Resolution costs scale super-linearly (smaller cells
    force smaller diffusion-limited time steps). Use a stretched mesh refined near
    the surface (`create_stretched_mesh(L, n, Val(NC), 1.1; stretch_from = :top)`)
@@ -5792,16 +5664,13 @@ fall back to diagonal preconditioning automatically.
 > factorization, and reserve it for large ALE meshes where the dense structured
 > coupling makes direct factorization the bottleneck.
 
-External factorizations are available through extensions: `using KLU` enables
-`Pyrolysis.klu_factorization()`, `using Pardiso` enables
-`Pyrolysis.pardiso_factorization()`, and `using AlgebraicMultigrid` enables
-`Pyrolysis.amg_preconditioner(A)`. These are covered in Chapter 11. The
-structured-solve strategies and ILU internals are described in Technical
-Reference §15.
+Any other LinearSolve factorization is passed the same way, as `linear_solver`
+or inside a built integrator (§8.4, Chapter 11). The linear-solve strategies and
+ILU internals are described in Technical Reference §15.
 
 ---
 
-## 8.15 Reading the return code
+## 8.14 Reading the return code
 
 `solve` always returns a `PyrolysisSolution`; check `solution.retcode` to confirm
 the run finished as intended:
@@ -5827,7 +5696,7 @@ in Chapter 15.
 
 ---
 
-## 8.16 A complete annotated `solve` call
+## 8.15 A complete annotated `solve` call
 
 Putting the pieces together, here is a fully specified solve for an opaque
 charring cone-calorimeter case with ALE mesh motion (mirroring the shipped
@@ -5835,6 +5704,7 @@ Douglas-fir example):
 
 ```julia
 using Pyrolysis
+using OrdinaryDiffEqSDIRK: KenCarp4   # not exported by Pyrolysis
 using LinearSolve: SparspakFactorization
 
 solution = solve(
@@ -5848,11 +5718,10 @@ solution = solve(
     # physics
     use_ale          = true,               # moving mesh: surface recedes
     radiation_model  = SURFACE_ABSORPTION, # opaque: deposit all flux at the surface
-    energy_form      = :standard,          # S_conv-only (ThermaKin) convention
     min_thickness    = 0.5e-3,             # stop when the sample is < 0.5 mm
-    handle_depletion = false,              # let ALE carry thin cells (no merging)
+    handle_depletion = false,              # let ALE carry thin cells (no parking)
     # diagnostics + output
-    diagnostics = true,                    # snapshot the energy ledger
+    diagnostics = true,                    # log sensible-energy snapshots
     saveat      = collect(0.0:1.0:600.0),  # save once per second
     progress    = true,
 )
@@ -5878,7 +5747,7 @@ reference for that object: the concrete fields it always carries, the typed `ext
 NamedTuple of opt-in diagnostics, the accessor functions for pulling out profiles and
 interpolating at arbitrary times, and the `Plots.jl` recipes shipped with the package.
 It closes with practical post-processing recipes — computing surface temperature and
-mass-loss rate, reading the conservation ledger, handling moving (ALE) meshes, and
+mass-loss rate, reading the diagnostics log, handling moving (ALE) meshes, and
 preparing curves for comparison against cone-calorimeter or TGA data. The numerics that
 produce these quantities are derived in the Technical Reference (energy assembly in
 Technical Reference §7, the boundary-temperature solve in §12, conservation diagnostics
@@ -5926,14 +5795,13 @@ snapshot across all of them.
 
 | Field | Type | Shape | Meaning / units |
 |---|---|---|---|
-| `problem` | `PyrolysisProblem` | scalar | The original problem (mesh, material, BCs) |
+| `problem` | `PyrolysisProblem` | scalar | The copy of the problem the run integrated; its mesh holds the final geometry |
 | `t` | `Vector{Float64}` | `(n_steps,)` | Saved solution times [s] |
 | `T` | `Matrix{Float64}` | `(n_cells, n_steps)` | Cell-center temperatures [K] |
 | `ξ` | `Array{Float64,3}` | `(NC, n_cells, n_steps)` | Mass concentrations `ξ_j` [kg·m⁻³] |
 | `z` | `Matrix{Float64}` | `(n_nodes, n_steps)` | Node positions [m]; `0×0` in Eulerian mode |
 | `surface_T` | `Vector{Float64}` | `(n_steps,)` | Top surface temperature `T_s` [K] |
 | `mass_loss_rate` | `Vector{Float64}` | `(n_steps,)` | MLR per current area (top + permeable-bottom) [kg·m⁻²·s⁻¹] |
-| `energy_residual` | `Vector{Float64}` | `(n_steps,)` | Energy-conservation residual; zeros if tracker off |
 | `retcode` | `Symbol` | scalar | ODE-solver return code |
 | `solve_time` | `Float64` | scalar | Wall-clock solve time [s] |
 | `raw_solution` | `Any` | — | Raw `DifferentialEquations.jl` solution (interpolation source) |
@@ -5963,9 +5831,9 @@ A few points worth internalizing:
   thickness-termination callback fired because the sample fully depleted),
   `:MaxIters`, `:DtLessThanMin`.
 
-- **`energy_residual`** is all zeros unless a conservation tracker wrote into it. It is the
-  series the `:residual` plot recipe consumes (§9.6). For the richer per-snapshot ledger,
-  enable `diagnostics=true` and read `extras.diagnostics_log` (§9.8).
+- **Parked cells read `NaN`.** With `handle_depletion = true`, a parked cell's slot in `T`,
+  `ξ` and (ALE) `z` reads `NaN` from the time it parks; `extras.live_cells` gives the live
+  count (§9.7, Chapter 10).
 
 ### Direct field access vs. accessors
 
@@ -6016,21 +5884,24 @@ quantities live.
 | `gas_generation_rate` | kg·m⁻²·s⁻¹ | Volumetric gas production integrated over the column, gauge-normalized |
 | `back_temperature` | K | Back-face (bottom) surface temperature at `z=0` |
 | `total_mass` | kg·m⁻² | Total domain mass per initial cross-section area |
-| `thickness_history` | m | Sample thickness `z[end]-z[1]`; constant in Eulerian mode |
+| `thickness_history` | m | Live sample thickness `z[n_live+1]-z[1]`; constant in Eulerian mode unless cells park |
 | `surface_mass_flux` | kg·m⁻²·s⁻¹ | Per-species summed **top-face** mass flux (excludes any bottom venting; cf. `mass_loss_rate`) |
-| `surface_heat_flux_net` | W·m⁻² | Heat flux the boundary balance applies at the top face (`net = conduction + transpiration`); under `BEER_LAMBERT` it excludes the incident radiation, which is reported in `volumetric_absorption` |
+| `surface_heat_flux_net` | W·m⁻² | Heat flux the boundary balance applies at the top face (equal to the conducted flux at convergence); under `BEER_LAMBERT` it excludes the incident radiation, which is reported in `volumetric_absorption` |
 | `surface_heat_flux_absorbed` | W·m⁻² | Absorbed incident (radiative) flux |
 | `surface_heat_flux_reradiation` | W·m⁻² | Re-radiation loss `εσ(T_∞⁴−T_s⁴)` |
 | `surface_heat_flux_convection` | W·m⁻² | Convective exchange `h_conv(T_∞−T_s)` |
 | `surface_heat_flux_conduction` | W·m⁻² | Heat conducted into the slab at the surface |
-| `surface_heat_flux_transpiration` | W·m⁻² | Enthalpy carried by escaping gas (zero with default S_conv) |
+| `surface_blowing_ratio`, `surface_pooling_factor`, `surface_face_fraction`, `surface_face_buoyancy` | – | Blowing-model state of the top `ConvectiveBC` (§5.2.3) |
 | `volumetric_absorption` | W·m⁻² | Beer–Lambert in-depth absorbed flux `α_surf·q_ext·(1−e^{−τ_tot})`; zero unless `radiation_model = BEER_LAMBERT` |
+| `radiation_transmitted` | W·m⁻² | Beer–Lambert flux leaving through the back face `α_surf·q_ext·e^{−τ_tot}`; zero unless `radiation_model = BEER_LAMBERT` |
 | `surface_emissivity` | – | Composition-weighted `ε_eff` at the surface |
 | `surface_conductivity` | W·m⁻¹·K⁻¹ | Effective surface conductivity `k_eff` |
 | `back_heat_flux` | W·m⁻² | Heat flux at the back face |
 | `MLR_gauge` | kg·m⁻²·s⁻¹ | MLR normalized to initial area `A_0` (cone gauge convention) |
 | `cross_section_area_history` | m² | Cross-section `A(t)` history (varies only in WithChi mode) |
-| `diagnostics_log` | — | `Vector{DiagnosticsRow}`; empty unless `diagnostics=true` (§9.8) |
+| `live_cells` | – | Live-cell count at each saved time (falls as cells park) |
+| `park_times` | s | Times of the park events (empty without depletion handling); not indexed by saved time |
+| `diagnostics_log` | — | `Vector{Any}` of `DiagnosticsRow`s; empty unless `diagnostics=true` (§9.8) |
 
 ```julia
 gen_rate  = solution.extras.gas_generation_rate    # kg/(m²·s)
@@ -6128,12 +5999,12 @@ extractors:
   positions (ALE layouts only).
 
 To rebuild a whole profile, loop over the cells. The `layout` comes from a freshly built
-workspace:
+workspace, set up with the same `use_ale` as the solve (the ALE layout carries the node
+positions after the concentrations):
 
 ```julia
-def     = to_problem_def(solution.problem)
-ws      = build_workspace(solution.problem, def)
-layout  = ws.layout
+def     = to_problem_def(solution.problem; use_ale = true)   # the solve's `use_ale`
+layout  = build_workspace(solution.problem, def).layout
 n_cells = layout.n_cells
 
 T_cells = [get_temperature(u_t, layout, i) for i in 1:n_cells]      # cell temperatures [K]
@@ -6222,7 +6093,7 @@ State this assumption plainly in any comparison; the proxy is only as good as `�
 The `PyrolysisPlotsExt` extension attaches a `Plots.jl` recipe for `PyrolysisSolution`. It
 loads automatically when both `Pyrolysis` and `Plots` (or `RecipesBase`) are present in your
 environment — no explicit `using PyrolysisPlotsExt`. The recipe interprets a `kind` keyword
-to route to one of four plot types; the default is the surface-temperature trace.
+to route to one of three plot types; the default is the surface-temperature trace.
 
 ```julia
 using Pyrolysis, Plots
@@ -6232,7 +6103,6 @@ solution = solve(problem)
 plot(solution)                      # default: surface temperature vs time
 plot(solution; kind = :surface_T)   # surface temperature vs time (explicit)
 plot(solution; kind = :mlr)         # mass-loss rate vs time
-plot(solution; kind = :residual)    # energy-conservation residual vs time
 plot(solution; kind = :heatmap)     # temperature field T(z, t) as a heatmap
 ```
 
@@ -6240,19 +6110,16 @@ plot(solution; kind = :heatmap)     # temperature field T(z, t) as a heatmap
 |---|---|---|---|
 | `:surface_T` (default) | `t` [s] | surface T [K] | `sol.t`, `sol.surface_T` |
 | `:mlr` | `t` [s] | MLR [kg·m⁻²·s⁻¹] | `sol.t`, `sol.mass_loss_rate` |
-| `:residual` | `t` [s] | energy residual [W·m⁻²] | `sol.t`, `sol.energy_residual` |
 | `:heatmap` | `t` [s] | cell index (depth) | `sol.t`, `axes(sol.T,1)`, `sol.T` |
 
 Any unrecognized `kind` raises an `ArgumentError` listing the valid options.
 
 Notes that follow from the recipe implementation:
 
-- The recipes consume only the fixed core schema (`t`, `T`, `surface_T`, `mass_loss_rate`,
-  `energy_residual`), so they work regardless of which `extras` you enabled.
+- The recipes consume only the fixed core schema (`t`, `T`, `surface_T`, `mass_loss_rate`),
+  so they work regardless of which `extras` you enabled.
 - `:mlr` plots `mass_loss_rate` (per current area). For the cone-gauge curve, plot
   `extras.MLR_gauge` yourself (see §9.5).
-- `:residual` plots `energy_residual`, which is zeros unless a conservation tracker filled
-  it; a flat line at zero simply means the tracker was off.
 - `:heatmap` uses **cell index** on the y axis, not physical depth. For a depth-resolved
   heatmap with metric units, build it yourself from `get_cell_positions` (Eulerian) or
   `solution.z` (ALE).
@@ -6293,14 +6160,14 @@ To plot a species field instead, swap `solution.T[:, i]` for `solution.ξ[k, :, 
 When you solve with `use_ale=true`, node positions become part of the state and the mesh
 recedes/expands in time (Technical Reference §11). This changes how you read profiles:
 
-- **`solution.z`** is now `(n_nodes, n_steps)` — node positions in metres at each saved
+- **`solution.z`** is `(n_nodes, n_steps)` — node positions in metres at each saved
   time. `n_nodes = n_cells + 1`.
 - **`solution.extras.thickness_history`** is the sample thickness `z[end] − z[1]` at each
-  time (it shrinks as the surface recedes). In Eulerian mode this is a constant equal to the
-  domain length.
-- If surface-cell **depletion** is enabled (`handle_depletion=true`, which requires
-  `use_ale=true`), the cell count drops over the run. The output arrays are pre-allocated at
-  the *maximum* cell count and rows for cells that no longer exist are filled with `NaN`.
+  time (it shrinks as the surface recedes). In Eulerian mode it is the domain length, less
+  any parked cells.
+- If surface-cell **depletion** is enabled (`handle_depletion=true`), the live cell count
+  drops over the run. The output arrays keep the full cell count and rows for parked cells
+  are filled with `NaN`.
   Always filter `NaN` before plotting or reducing a moving-mesh profile.
 - **`solution.extras.cross_section_area_history`** carries `A(t)` if you used a
   lateral-shrinkage law (WithChi mode); otherwise it stays at `A_0`.
@@ -6349,14 +6216,14 @@ callback fires when thickness drops below `min_thickness`), so `solution.retcode
 
 ## 9.8 Reading the conservation diagnostics
 
-Pass `diagnostics=true` to `solve` to log snapshots of the conservation ledger. The solver
-records a `DiagnosticsRow` every `diagnostics_stride` accepted steps (default 10) into
+Pass `diagnostics=true` to `solve` to log sensible-energy snapshots. The solver records a
+`DiagnosticsRow` every `diagnostics_stride` accepted steps (default 10) into
 `solution.extras.diagnostics_log` (Technical Reference §16).
 
 ```julia
 solution = solve(problem; diagnostics = true, diagnostics_stride = 10)
 
-log = solution.extras.diagnostics_log    # Vector{DiagnosticsRow}; empty if diagnostics=false
+log = solution.extras.diagnostics_log    # DiagnosticsRow entries; empty if diagnostics=false
 ```
 
 Each row is a typed `NamedTuple` with these fields:
@@ -6366,16 +6233,16 @@ Each row is a typed `NamedTuple` with these fields:
 | `t` | s | Simulation time of the snapshot |
 | `E_sensible` | J | Sensible energy `Σ ρc_p^eff T V` (every component) |
 | `energy_residual` | J | Energy-ledger residual |
-| `energy_relative` | – | `energy_residual` relative to `|E_sensible(0)|` |
+| `energy_relative` | – | `energy_residual` relative to `\|E_sensible(0)\|` |
 | `mass_max_relative_error` | – | Max relative mass-conservation error over components |
 
-**Important caveat about snapshot mode.** With `diagnostics=true`, `solve` uses the
-*snapshot* recorder, which evaluates only the instantaneous energy. In a snapshot row, the
-cumulative-ledger fields — `energy_residual`, `energy_relative`, `mass_max_relative_error`
-— are filled with `NaN`, because the cumulative source integrals are not accumulated in
-this path. The fields you can trust from `solve(...; diagnostics=true)` are `t` and
-`E_sensible`. The full cumulative residuals require wiring `record_substep!` into the
-residual layer, which is beyond the standard `solve` interface.
+**Snapshot rows carry no ledger.** With `diagnostics=true`, `solve` records snapshot rows,
+which evaluate only the instantaneous energy. In a snapshot row the cumulative-ledger
+fields — `energy_residual`, `energy_relative`, `mass_max_relative_error` — are `NaN`,
+because `solve` does not accumulate the source integrals. The fields you can use from
+`solve(...; diagnostics=true)` are `t` and `E_sensible`. Only `record_substep!`, driven
+step by step through a `DiagnosticsState`, fills the cumulative fields; that is outside
+the `solve` interface.
 
 Reading the energy history (Technical Reference §16):
 
@@ -6391,14 +6258,11 @@ If you want a true running energy balance with non-`NaN` residuals, the lower-le
 `using Pyrolysis.Internal`; that path is for advanced auditing and is described in the
 Technical Reference §16.
 
-A reminder tied to the energy convention (Technical Reference §7, §16): the default
-`energy_form = :standard` carries the enthalpy of the gas flux through the advection
-source `S_conv` and **excludes** a separate gas-generation sink. The surface transpiration BC is
-mutually exclusive with that convention — `solve` rejects `use_transpiration_bc=true` to
-avoid double-counting — so under default settings
-`extras.surface_heat_flux_transpiration` is zero. If you switch to
-`energy_form = :with_generation_sink`, the conservative-form sink is added back; the
-diagnostics ledger reflects whichever form you chose.
+A reminder tied to the energy convention (§7.7; Technical Reference §7, §16): the energy
+equation carries the enthalpy of the gas flux through the advection source `S_conv`, with
+DSC-style reaction heats and no separate gas-generation term, and the boundary balance has
+no surface gas-enthalpy term. An energy ledger therefore books the gas enthalpy through
+`S_conv` alone.
 
 ---
 
@@ -6496,35 +6360,32 @@ get_back_face_temperature(solution.problem.mesh)  # final-state bottom face T [K
 # Plotting recipes (need `using Plots`):
 plot(solution)                  # :surface_T (default)
 plot(solution; kind = :mlr)     # mass-loss rate
-plot(solution; kind = :residual)# energy residual
 plot(solution; kind = :heatmap) # T(z,t) by cell index
 ```
 
 See the Technical Reference for the physics behind these outputs: energy assembly and the
 `S_conv` convention (§7), the boundary-temperature Newton solve that produces `surface_T`
-(§12), ALE node motion behind `z` and `thickness_history` (§10, §11), and the dual energy
-ledgers behind the diagnostics rows (§16).
+(§12), ALE node motion behind `z` and `thickness_history` (§10, §11), and the energy
+ledger behind the diagnostics rows (§16).
 
 
 ---
 
 # 10. Adaptive Meshing Options
 
-Pyrolysis.jl gives you several ways to let the mesh follow the physics instead of
-fixing it once at problem setup. The most important of these — and the only one
-wired directly into the production `solve` path — is **surface-cell depletion
-handling**, which merges the receding surface cell into its neighbor as the solid
-gasifies and the Arbitrary Lagrangian–Eulerian (ALE) mesh shrinks. Beyond that,
-the `Pyrolysis.Adaptivity` submodule exposes standalone tools for **r-refinement**
-(moving nodes to concentrate them where the solution is steep), **error
-indicators** and **monitor functions** that drive those moves, and **mesh-quality
-metrics** to keep the mesh well-conditioned. A fully topology-changing h-AMR
-cluster (cell splitting and sibling coarsening) also ships, but it lives in
-`Pyrolysis.Experimental` and is not connected to `solve`. This chapter shows how
-to use each, what every option means and defaults to, and where the sharp edges
-are. For the underlying theory (equidistribution, energy-conserving merges, the
-geometric conservation law) see Technical Reference §14 (AMR), §11 (ALE), and
-§13 (finite-volume discretization).
+The only mesh adaptation `solve` performs is **surface-cell depletion
+handling**: as the solid gasifies, a depleted cell is *parked* — merged into its
+neighbour and its state slot retired above the live surface — on a fixed mesh or
+on the shrinking Arbitrary Lagrangian–Eulerian (ALE) mesh. Beyond that, the
+`Pyrolysis.Adaptivity` submodule exposes standalone building blocks that `solve`
+does not use: **error indicators**, **monitor functions** and **r-refinement**
+(moving nodes to concentrate them where a field is steep), and **mesh-quality
+metrics**. Cell splitting and sibling coarsening (h-refinement) ship in
+`Pyrolysis.Experimental`, and the meshes they produce cannot be passed to
+`solve`. This chapter shows how to use each, what every option means and defaults
+to, and where the sharp edges are. For the underlying theory (equidistribution,
+energy-conserving merges, the geometric conservation law) see Technical Reference
+§14, §11 (ALE), and §13 (finite-volume discretization).
 
 > **Coordinate reminder.** `z = 0` is the bottom / substrate (boundary tag
 > `:bottom`, id 2); `z = L` is the top / exposed surface (tag `:top`, id 1). Heat
@@ -6535,22 +6396,22 @@ geometric conservation law) see Technical Reference §14 (AMR), §11 (ALE), and
 
 ## 10.1 When to use adaptivity
 
-Adaptivity costs assembly time and, in some configurations, forces a less
-efficient Jacobian. Reach for it only when the physics warrants it:
+Reach for depletion handling only when the physics warrants it, and size the
+mesh up front for everything else:
 
 | Situation | Symptom | Recommended tool |
 |---|---|---|
-| Surface recession (charring/ablating solid in ALE) | Surface cell thins toward zero; timestep collapses; `ρc_p → 0` trouble | `handle_depletion = true` (§10.2) |
+| Surface recession or burnout (charring/ablating solid) | Surface cell thins or empties toward zero; timestep collapses; `ρc_p → 0` trouble | `handle_depletion = true` (§10.2) |
 | Sample fully consumed | Total thickness approaches zero | thickness termination (automatic in ALE; §10.3) |
-| Steep, *moving* thermal or reaction front on a fixed cell count | Front under-resolved between cells, but you don't want more cells | r-refinement via `relocate_nodes!` (§10.5) |
-| You suspect mesh distortion after ALE motion | Large cell-size jumps, near-zero or inverted volumes | quality metrics + `enforce_quality!` (§10.6) |
-| You want true local h-refinement | — | Experimental h-AMR (§10.7), with caveats |
+| Steep thermal or reaction front | Front under-resolved between cells | a surface-stretched mesh or more cells (Chapter 6) |
+| Grading or distortion of a mesh you built | Large cell-size jumps, near-zero volumes | quality metrics (§10.6) to inspect it before solving |
 
 A good default workflow is: start with a **uniform or surface-stretched fixed
 mesh** (Chapter 6) sized from a convergence study (Technical Reference §18.5),
-and turn on depletion handling only once you run an ALE case where the surface
-actually recedes. Node relocation and h-AMR are advanced, opt-in tools; most
-cone-calorimeter and TGA studies never need them.
+and turn on depletion handling once you run a case where the surface actually
+recedes or burns out. The indicators, r-refinement and quality tools of
+§10.4–§10.6 are building blocks for your own mesh studies; `solve` does not call
+them, and most cone-calorimeter and TGA studies never need them.
 
 ---
 
@@ -6561,7 +6422,7 @@ When a solid pyrolyzes away, the cells that held it shrink (ALE mesh motion,
 with cells it cannot resolve: a thin cell's equations are conditioned like
 `1/Δz²`, so the Newton iteration loses every digit and the step size collapses.
 **Depletion handling** detects such cells and *parks* them: the cell's mass and
-condensed enthalpy are merged into a neighbour, and its state slot is moved
+sensible enthalpy are merged into a neighbour, and its state slot is moved
 above the live surface as an inert ghost. Nothing changes size — the state
 vector, the mesh arrays and the Jacobian keep their allocation for the whole
 solve — and every kernel runs over the live cells `1:mesh.n_active_cells` with
@@ -6590,7 +6451,6 @@ sol = solve(problem;
 | `use_ale` | `false` | Enable ALE mesh motion (node positions enter the state vector). |
 | `handle_depletion` | `false` | Park depleted cells mid-solve. |
 | `depletion_threshold` | `0.05` | ALE: a cell is depleted when its thickness `< threshold ×` its own initial thickness. Fixed mesh: the top live cell is depleted when its condensed concentration `< threshold ×` its initial value. Must satisfy `0 < threshold < 1`. |
-
 | `min_cells` | `2` | Once the live cell count reaches this, the run terminates rather than parking further. Must be `≥ 1`. |
 | `min_thickness` | `1e-6` | [m] Live thickness below which an ALE solve terminates. Must be `> 0`. |
 
@@ -6659,9 +6519,9 @@ with `V_keep′ = V_park + V_keep` under ALE (the keeper spans both cells) and
 `V_keep′ = V_keep` on a fixed mesh (the keeper's volume is fixed, so its
 concentration rises by the parked mass).
 
-Temperature is merged by **conserving the condensed-phase sensible enthalpy**,
-not by naive volume averaging. With `m_j = V · ξ_j` the per-component condensed
-mass of each cell, the merged temperature solves
+Temperature is merged by **conserving the sensible enthalpy**, not by naive
+volume averaging. With `m_j = V · ξ_j` the per-component mass of each cell, the
+merged temperature solves
 
 ```
 Σ_j m_j ∫_{T_ref}^{T_merged} c_p,j(T′) dT′  =  H_park + H_keep
@@ -6700,8 +6560,8 @@ sol.extras.live_cells[end]          # live cells at the end of the run
 
 ### 10.2.5 Depletion and the Jacobian
 
-Parking keeps the state size, so the pluggable Jacobian backends and their
-sparse linear solvers run unchanged through burnout; `verify_jacobian` covers
+Parking keeps the state size, so the structured Jacobian and its sparse linear
+solver run unchanged through burnout; `verify_jacobian` covers
 parked states. Under ALE the default backend is
 `Structured(strategy = ApproxSolve())`, with or without parking: the full ALE
 pattern couples every node to every cell below it and makes the factorized
@@ -6716,7 +6576,7 @@ horizons without park events only (Chapter 13).
 
 ## 10.3 Thickness-termination callback
 
-Independently of merging, a shrinking sample can reach (near-)zero thickness,
+Independently of parking, a shrinking sample can reach (near-)zero thickness,
 which makes the volumetric heat capacity singular. In **ALE mode `solve`
 automatically installs a thickness-termination callback** that stops the
 integration cleanly once the total sample thickness drops below
@@ -6745,8 +6605,8 @@ depletion handling, so the callback reads the live cell count.
 
 Error indicators estimate where the discretization error is largest. They are the
 inputs to refinement/relocation decisions: high indicator value ⇒ resolve more
-there. All indicator types live in `Pyrolysis.Adaptivity` and are re-exported, so
-`using Pyrolysis` makes them available directly. Each implements
+there. All indicator types are exported from `Pyrolysis.Adaptivity` (not from the
+top level), so bring them in with `using Pyrolysis.Internal`. Each implements
 `compute_indicator(ind, mesh)` (returning a per-cell `Vector{Float64}`, with `0`
 for inactive cells).
 
@@ -6754,7 +6614,7 @@ for inactive cells).
 |---|---|---|---|
 | Gradient | `GradientIndicator(:T)` or `GradientIndicator(:T, weight)` | `η = w · hᵢ · \|∇φ\|ᵢ` | Steep fronts (thermal/reaction). Default `weight = 1.0`. |
 | Curvature | `CurvatureIndicator(:T)` or `(:T, weight)` | `η = w · hᵢ² · \|∇²φ\|ᵢ` | Sharper features than gradient; zero at boundaries (needs 3 points). |
-| Reaction rate | `ReactionRateIndicator()` or `(weight)` | `η = w · hᵢ · maxⱼ \|rⱼ\|ᵢ / max(ξⱼ, ε)` | Active reaction zones. Requires `rates = r` (throws `ArgumentError` without it); standalone-only — it cannot run inside the h-AMR controller cycle. |
+| Reaction rate | `ReactionRateIndicator()` or `(weight)` | `η = w · hᵢ · maxⱼ \|rⱼ\|ᵢ / max(ξⱼ, ε)` | Active reaction zones. Requires `rates = r` (throws `ArgumentError` without it). |
 | Interface proximity | `InterfaceProximityIndicator(pos, h_target)` or `(pos, h_target, weight)` | `η = w / (1 + dᵢ/h_target)` | Force resolution near a tracked interface position, regardless of solution. Purely geometric. |
 | Composite | `CompositeIndicator(inds)` or `(inds, combination)` | `:max`, `:l2`, or `:sum` of components, each first normalized by its own maximum over active cells | Blend several indicators. Default `combination = :max`. |
 
@@ -6763,7 +6623,7 @@ concentration. `hᵢ` is the cell size and `dᵢ` the distance from the cell cen
 to the interface. The reaction-rate indicator's `ε = 1e-10` guards the division.
 
 ```julia
-using Pyrolysis
+using Pyrolysis, Pyrolysis.Internal
 
 # A single indicator
 η_T = compute_indicator(GradientIndicator(:T), mesh)        # Vector{Float64}, length n_cells
@@ -6780,18 +6640,16 @@ ind = CompositeIndicator(
 ```
 
 > **Note.** `compute_indicator(ind, mesh)` reads `T` and `ξ` from the mesh's cell
-> states, so make sure the mesh is in sync with the current solution (after a
-> solve, the step-update callback keeps `mesh` consistent; if you are
-> post-processing a `PyrolysisSolution`, rebuild the field arrays yourself and
-> use the four-argument form `compute_indicator(ind, mesh, T, ξ)`). The
+> states, so make sure the mesh holds the state you mean (after a solve,
+> `solution.problem.mesh` holds the final state; to evaluate a saved time of a
+> `PyrolysisSolution`, rebuild the field arrays yourself and use the
+> four-argument form `compute_indicator(ind, mesh, T, ξ)`). The
 > reaction-rate indicator requires a rate matrix that is not available from the
 > mesh alone and **throws** in the convenience form — pass `rates = r` (sized
 > like `ξ` on the current mesh) via the four-argument form.
 
 These indicators are **diagnostic building blocks** — computing one does not
-change the mesh. To act on an indicator you either feed it into the experimental
-h-AMR machinery (§10.7) or, more commonly, use a *monitor function* for
-r-refinement (§10.5).
+change the mesh, and `solve` never computes one.
 
 ---
 
@@ -6814,7 +6672,7 @@ Boundary nodes never move.
 ### 10.5.2 Relocating nodes
 
 ```julia
-using Pyrolysis
+using Pyrolysis, Pyrolysis.Internal
 
 n_iter = relocate_nodes!(mesh;
     monitor    = GradientMonitor(; α = 1.0, variable = :T),
@@ -6841,17 +6699,18 @@ returned iteration count may equal `max_iter` without full convergence.
 > well-conditioned (huge `ω` disparities cause ill-conditioning). Default
 > tolerances (`tol = 1e-3`, `relaxation = 0.5`) are untested on realistic
 > steep-front pyrolysis problems — treat them as starting points. Boundary nodes
-> are pinned. r-refinement is a **standalone mesh operation**: it is not invoked
-> automatically by `solve`. Use it between solve segments (relocate, then warm-
-> start the next segment) or in a custom driver.
+> are pinned. r-refinement is a **standalone mesh operation** that `solve` does
+> not call: it moves the nodes of a `Mesh1D` you hold, and the cell values stay
+> attached to their cells (they are not remapped).
 
 ---
 
 ## 10.6 Mesh-quality metrics and enforcement
 
-After any mesh motion (ALE or r-refinement) you may want to confirm the mesh is
-still well-conditioned, and optionally repair it. The quality types and functions
-are in `Pyrolysis.Adaptivity` (re-exported).
+To confirm that a mesh you built or relocated is well-conditioned, and optionally
+repair it, use the quality types and functions exported from
+`Pyrolysis.Adaptivity` (bring them in with `using Pyrolysis.Internal`). `solve`
+does not run them.
 
 ### 10.6.1 Metrics
 
@@ -6868,7 +6727,7 @@ are in `Pyrolysis.Adaptivity` (re-exported).
 ### 10.6.2 Checking and summarizing
 
 ```julia
-using Pyrolysis
+using Pyrolysis, Pyrolysis.Internal
 
 metric = AspectRatioMetric(2.0)
 
@@ -6898,7 +6757,7 @@ mesh now passes). It is a local, incremental fix and is **not guaranteed to clea
 clustered or severe violations** — check the return value. Boundary nodes are
 not moved.
 
-A typical post-motion guard:
+A typical guard after relocating nodes:
 
 ```julia
 relocate_nodes!(mesh; monitor = GradientMonitor(; variable = :T))
@@ -6915,14 +6774,13 @@ end
 
 ## 10.7 Experimental h-AMR (cell splitting and coarsening)
 
-True topology-changing h-adaptive refinement — splitting cells into children and
-merging sibling cells back — ships with the package but is **quarantined in
-`Pyrolysis.Experimental` and is *not* connected to `solve`.** Unlike the
-`Adaptivity` exports, `Experimental` is **not re-exported at the top level**, so
-you must reach into it explicitly:
+Topology-changing h-adaptive refinement — splitting cells into children and
+merging sibling cells back — ships with the package in `Pyrolysis.Experimental`,
+and **its meshes cannot be passed to `solve`**. `Experimental` is not part of
+`Pyrolysis.Internal`, so you reach into it explicitly:
 
 ```julia
-using Pyrolysis
+using Pyrolysis, Pyrolysis.Internal   # GradientIndicator, AspectRatioMetric
 
 # Single-cell split: returns (child_a_id, child_b_id)
 ca, cb = Pyrolysis.Experimental.refine_cell!(mesh, cell_id)
@@ -6960,9 +6818,10 @@ The full experimental surface (all under `Pyrolysis.Experimental`) includes
 
 **Caveats — read before using:**
 
-- **Not in the solve loop.** There is no `solve` keyword to enable h-AMR during
-  integration. Calling these between solve segments is the only supported
-  pattern.
+- **Not usable with `solve`.** Refinement leaves inactive parent cells among the
+  active ones, while the solver's kernels assume the active cells come first, so
+  a refined or coarsened mesh cannot be solved. There is no `solve` keyword for
+  h-refinement either.
 - **Bookkeeping is leaky.** h-refinement appends children and h-coarsening marks
   cells inactive *without compacting the arrays*, so `length(mesh.cells) >
   n_active_cells` is normal. Any code consuming the mesh afterward must iterate
@@ -6979,24 +6838,23 @@ The full experimental surface (all under `Pyrolysis.Experimental`) includes
   `θ_coarsen = 0.1`, `max_level = 4`, `check_every = 10`) have not been validated
   on realistic pyrolysis fronts.
 
-For production surface-recession work, prefer the depletion path (§10.2), which
-*is* integrated with the solver and parks depleted cells with the
-energy-conserving merge (`park_cell!`) that lives in core `Adaptivity`. See
-Technical Reference §14.4 for the h-AMR algorithms and §14.3 for the production
-park.
+For surface-recession work use the depletion path (§10.2), which is integrated
+with the solver and parks depleted cells with the energy-conserving merge
+(`park_cell!`) that lives in core `Adaptivity`. See Technical Reference §14.4 for
+the h-refinement algorithms and §14.3 for the park.
 
 ---
 
-## 10.8 Choosing the Jacobian when you use adaptivity
+## 10.8 Choosing the Jacobian with depletion handling
 
-Depletion handling keeps the state size, so every Jacobian backend works with
+Depletion handling keeps the state size, so either Jacobian strategy works with
 it. The defaults:
 
 | Scenario | Default Jacobian |
 |---|---|
 | ALE, with or without `handle_depletion` | `Structured(strategy = ApproxSolve())` — the reduced ALE pattern; it follows the same trajectory as `DirectSolve` at a fraction of the cost per step. Without parking, surface cells that burn away shrink toward zero thickness and stall either Jacobian alike: use `handle_depletion = true` to run through burnout. |
-| Fixed mesh | `Structured(strategy = DirectSolve())` (the strategies coincide without ALE couplings). |
-| Verifying a backend during an adaptive run | `solve(...; verify_jacobian = (rtol=1e-6, atol=1e-10, sample_times=[…]))`, with or without depletion. |
+| Fixed mesh | `Structured(strategy = DirectSolve())` (the strategies coincide unless Beer–Lambert couplings are present). |
+| Verifying a backend during a depletion run | `solve(...; verify_jacobian = (rtol=1e-6, atol=1e-10, sample_times=[…]))`, with or without depletion. |
 
 Override with a bare backend, built for the solve's own mode:
 
@@ -7034,13 +6892,13 @@ Reference §15.6–§15.10 for the strategy internals.
 | h-AMR (`refine_cell!`, `AMRController`, …) | `Experimental` (not re-exported) | — experimental | 10.7 |
 
 **Key correctness reminders.** Depletion handling works in both mesh modes
-and with every `jacobian` backend; the park conserves species mass exactly and
-condensed-phase sensible enthalpy via the `∫c_p dT` temperature merge (gas
-excluded); r-refinement,
-quality enforcement, and h-AMR
-are standalone tools not driven by `solve`; and the h-AMR cluster is experimental
-and reached only through `Pyrolysis.Experimental`. For the physics behind these
-operations, see Technical Reference §11 (ALE), §14 (AMR), and §15 (Jacobian).
+and with either Jacobian strategy; the park conserves species mass exactly and
+sensible enthalpy (every component, gas included) via the `∫c_p dT`
+temperature merge; error indicators, r-refinement and quality enforcement are
+standalone tools `solve` does not use; and the h-refinement cluster is
+experimental, reached only through `Pyrolysis.Experimental`, and its meshes
+cannot be passed to `solve`. For the physics behind these operations, see
+Technical Reference §11 (ALE), §14 (mesh adaptation), and §15 (Jacobian).
 
 
 ---
@@ -7049,35 +6907,35 @@ operations, see Technical Reference §11 (ALE), §14 (AMR), and §15 (Jacobian).
 
 This chapter is the reference for tuning *how* Pyrolysis.jl solves a problem,
 as opposed to *what* problem it solves (Chapters 3–7) or *how to read the
-result* (Chapter 9). It covers choosing a Jacobian backend and linear-solve
-strategy by problem size and simulation mode, configuring the integrator's
-linear solver (sparse-direct or ILU-preconditioned Krylov), loading the optional
-vendor and sensitivity extensions, debugging Jacobian correctness with
-`verify_jacobian_at`, and dropping down to the pure-residual layer
-(`ProblemDef` / `Workspace` / `residual!`) when you need to build a custom
-solver loop. The mathematics behind the structured Jacobian and the implicit-RK
-`W` matrix is derived in Technical Reference §15; this chapter is about the
-knobs.
+result* (Chapter 9). It covers choosing the structured Jacobian's linear-solve
+strategy by simulation mode, configuring the integrator's linear solver
+(sparse-direct or ILU-preconditioned Krylov, including any LinearSolve
+factorization passed directly), loading the sensitivity extension, debugging
+Jacobian correctness with `verify_jacobian_at`, and dropping down to the
+pure-residual layer (`ProblemDef` / `Workspace` / `residual!`) when you need to
+build a custom solver loop. The mathematics behind the structured Jacobian and
+the implicit-RK `W` matrix is derived in Technical Reference §15; this chapter is
+about the knobs.
 
 Two distinct linear systems appear in a stiff implicit solve, and Pyrolysis.jl
 lets you configure each one separately. Keeping them straight is the key to this
 chapter:
 
-1. **The Jacobian backend** (`jacobian = ...` keyword) decides *how the matrix*
-   `J = ∂(du/dt)/∂u` *is assembled* — by structured operator assembly (the
-   default: `solve` auto-builds `Structured(strategy = DirectSolve())` on a
-   fixed mesh and `Structured(strategy = ApproxSolve())` under ALE when
-   `jacobian = nothing`),
-   or by dense automatic differentiation (verification only).
+1. **The Jacobian strategy** (`jacobian = ...` keyword) decides *how the matrix*
+   `J = ∂(du/dt)/∂u` *is assembled*. `solve` always assembles it by structured
+   operator assembly; with `jacobian = nothing` it uses
+   `Structured(strategy = DirectSolve())` on a fixed mesh and
+   `Structured(strategy = ApproxSolve())` under ALE. A dense
+   automatic-differentiation backend exists only as a verification reference.
 2. **The integrator's linear solver** (`linear_solver = ...` keyword) decides
    *how the implicit-stage system* `W x = b`, with `W = I/(γ_RK Δt) − J`, *is
    solved* once `J` exists — by sparse-direct factorization (KLU, UMFPACK,
-   Sparspak, Pardiso) or by a preconditioned Krylov iteration (ILU-GMRES, ILU-BiCGSTAB).
+   Sparspak, or any other LinearSolve factorization such as MKL Pardiso) or by a
+   preconditioned Krylov iteration (ILU-GMRES, ILU-BiCGSTAB).
 
-You can mix and match: a pluggable structured Jacobian with a sparse-direct
-linear solver, an integrator-built finite-difference Jacobian with KLU, and so
-on. The defaults (auto-built structured Jacobian; KLU or UMFPACK chosen from its pattern) work well for
-the typical 1D cone-calorimeter problem and you can ignore this chapter until a
+You can pair either strategy with any of these linear solvers. The defaults
+(structured Jacobian; KLU or UMFPACK chosen from its pattern) work well for the
+typical 1D cone-calorimeter problem and you can ignore this chapter until a
 solve is too slow or you need sensitivities.
 
 ---
@@ -7093,33 +6951,33 @@ following happens (see `src/Solver/solve.jl`):
   of Arrhenius pyrolysis. `solve` always supplies the Jacobian, so the
   `AutoFiniteDiff()` setting never builds `J`; it only affects methods that also
   differentiate the residual in time (the Rosenbrock `∂f/∂t`).
-- The Jacobian defaults to the **structured analytical backend**: with
+- The Jacobian is the **structured analytical backend**: with
   `jacobian = nothing` (the default), `solve` constructs
   `Structured(strategy = DirectSolve())` internally on a fixed mesh and
-  `Structured(strategy = ApproxSolve())` under ALE (§10.8, §11.3.3), and hands
-  the integrator a sparse Jacobian plus its sparsity prototype.
+  `Structured(strategy = ApproxSolve())` under ALE (§10.8, §11.3.2), builds its
+  spec for the run's own mesh copy and mode, and hands the integrator a sparse
+  Jacobian plus its sparsity prototype.
 - The linear solver follows the Jacobian's sparsity pattern:
   `UMFPACKFactorization()` for the ALE geometry block that `DirectSolve`
   materializes under ALE, `KLUFactorization()` for every other sparse
-  Jacobian (§11.4.1).
+  Jacobian (§11.4.1). An explicit `linear_solver` always wins.
 
-In short: by default, **Layer 1 is the structured analytical Jacobian**
-(`Structured(strategy = DirectSolve())`, built for you) and **Layer 2 is
-KLU or UMFPACK**, chosen from that Jacobian's pattern. The `jacobian` keyword is for *overriding* the strategy
-(`ApproxSolve`, `StructuredSolve`, `MatrixFreeSolve`) or supplying a custom
-spec — not for switching the structured machinery on.
+In short: **Layer 1 is the structured analytical Jacobian**, built for you, and
+by default **Layer 2 is KLU or UMFPACK**, chosen from that Jacobian's pattern.
+The `jacobian` keyword only overrides the strategy; the structured machinery is
+always on.
 
 ```julia
 using Pyrolysis
 
-# The default solve: auto-built structured Jacobian + KLU/UMFPACK linear solve.
+# The default solve: structured Jacobian + KLU/UMFPACK linear solve.
 sol = solve(problem)
 ```
 
 > Defaults at a glance: `integrator = nothing` → `KenCarp4`,
 > `linear_solver = nothing` → `KLUFactorization()` (`UMFPACKFactorization()`
 > for the exact ALE Jacobian),
-> `jacobian = nothing` → auto-built `Structured(strategy = DirectSolve())`
+> `jacobian = nothing` → `Structured(strategy = DirectSolve())`
 > (`ApproxSolve` under ALE),
 > `abstol = 1e-8`, `reltol = 1e-6`.
 
@@ -7127,123 +6985,96 @@ sol = solve(problem)
 
 ## 11.2 Choosing a Jacobian backend
 
-A **Jacobian backend** is supplied as a `JacobianSpec` to the `jacobian`
-keyword of `solve`. Construct it from a backend tag plus your problem:
+A **Jacobian backend** is passed bare to the `jacobian` keyword of `solve`;
+`solve` builds the `JacobianSpec` for its own mesh copy, mode and options:
 
 ```julia
-spec = JacobianSpec(Structured(strategy = DirectSolve()), problem)
-sol  = solve(problem; jacobian = spec)
+sol = solve(problem; jacobian = Structured(strategy = DirectSolve()))
 ```
 
-There are two production-relevant backend tags, both exported at top level:
+There are two backend tags, both exported at top level:
 
 | Backend tag | Purpose | Use in production? |
 |---|---|---|
-| `Structured(strategy = ...)` | Operator-based structured assembly (fast, exact or approximate per strategy) | Yes |
+| `Structured(strategy = ...)` | Operator-based structured assembly (fast, exact or approximate per strategy) | Yes — the only backend `solve` accepts |
 | `DenseAD_ForwardDiff()` | Whole-residual ForwardDiff; dense Jacobian | No — verification reference only |
 
 `Structured` is parameterized by a **linear-solve strategy** (§11.3) that
-determines how the assembled structured Jacobian is inverted. The default,
-selected when you pass `jacobian = nothing`, is `Structured(strategy =
-DirectSolve())`.
+determines which couplings the assembled Jacobian keeps. The default, selected
+when you pass `jacobian = nothing`, is `Structured(strategy = DirectSolve())` on
+a fixed mesh and `Structured(strategy = ApproxSolve())` under ALE.
 
 `DenseAD_ForwardDiff()` runs ForwardDiff over the entire residual vector and
 returns a dense matrix. It is correct by construction but slow; its only role is
 as the reference against which the structured backend is verified (see §11.7).
-Do not use it for production solves.
+The `jacobian` keyword accepts only a `Structured` backend (or `nothing`):
+passing `DenseAD_ForwardDiff()` or a prebuilt `JacobianSpec` raises a
+`TypeError`.
 
 ### 11.2.1 The `JacobianSpec` constructor
 
-`JacobianSpec` has two forms (`src/Jacobian/interface.jl`):
+A `JacobianSpec` holds a backend together with the sparsity patterns and caches
+it assembles into; its fields are `backend`, `sparsity_phys`, `sparsity_geom`
+(the z columns: the ALE geometry block under `DirectSolve`, only the node-row
+diagonal under `ApproxSolve`, an empty sparse matrix on a fixed mesh, and
+`nothing` only for `DenseAD_ForwardDiff`) and `cache`. It is built from an already-built `(ProblemDef, Workspace)` pair
+(`src/Jacobian/interface.jl`):
 
 ```julia
-# From a PyrolysisProblem (the common form). Pass use_ale = true for ALE.
-JacobianSpec(backend, problem; use_ale = false, radiation_model = nothing,
-             radiation_intensity = 0.0, energy_form = :standard,
-             use_transpiration_bc = false, min_thickness = 1e-6)
-
-# From an already-built (ProblemDef, Workspace) pair (low-level form).
 JacobianSpec(backend, def, ws)
 ```
 
-Important: a `JacobianSpec` builds its sparsity pattern and AD workspaces once,
-at construction time, and it bakes in the simulation mode. **If your solve uses
-ALE, you must tell the spec by passing `use_ale = true`** — otherwise the
-sparsity pattern omits the geometry (z-column) block and the Jacobian will be
-wrong:
-
-```julia
-# WRONG for an ALE solve — the spec is built for the Eulerian mode.
-spec = JacobianSpec(Structured(strategy = ApproxSolve()), problem)
-solve(problem; jacobian = spec, use_ale = true)   # mode mismatch
-
-# RIGHT — the spec's mode matches the solve.
-spec = JacobianSpec(Structured(strategy = ApproxSolve()), problem; use_ale = true)
-solve(problem; jacobian = spec, use_ale = true)
-```
-
-If a problem also uses radiation, pass the matching `radiation_model` (e.g.
-`radiation_model = BEER_LAMBERT`) so the spec includes the Beer–Lambert
-non-local sparsity. Similarly, pass `energy_form = :with_generation_sink` if you
-solve with that energy form. For most users the simplest correct approach is to
-let `solve` build the spec for you — see §11.2.3.
+`solve` calls this for you. You need it yourself only when you drive
+`compute_jacobian!` or `verify_jacobian_at` outside `solve` (§11.7, §11.8). The
+spec builds its sparsity pattern and AD workspaces once, at construction time,
+so **do not** construct it inside a hot loop.
 
 ### 11.2.2 Building the spec for the right mode
 
-A `JacobianSpec` is built for one state layout. `JacobianSpec(backend,
-problem)` defaults to the Eulerian layout with no radiation; an ALE solve or a
-Beer–Lambert solve needs the same `use_ale` / `radiation_model` keywords the
-solve uses, and `solve` refuses a spec whose state length disagrees with the
-problem's:
+A `JacobianSpec` bakes in the simulation mode of its `def`: the ALE geometry
+(z-column) block, the Beer–Lambert non-local sparsity and the χ block are present
+only when the mode has them. Build the `(def, ws)` pair with
+`initialize_state`, passing the same mode keywords the solve would use:
 
 ```julia
-spec = JacobianSpec(Structured(strategy = ApproxSolve()), problem;
-                    use_ale = true, radiation_model = BEER_LAMBERT)
-solve(problem; use_ale = true, radiation_model = BEER_LAMBERT, jacobian = spec)
-```
-
-The simpler form is to pass the bare backend and let `solve` build the spec
-for its own mode:
-
-```julia
-solve(problem; use_ale = true, jacobian = Structured(strategy = ApproxSolve()))
+def, ws, u0 = initialize_state(problem; use_ale = true,
+                               radiation_model = BEER_LAMBERT)
+spec = JacobianSpec(Structured(strategy = ApproxSolve()), def, ws)
 ```
 
 ### 11.2.3 Letting `solve` pick the backend
 
-For routine work, the cleanest pattern is to pass `jacobian = nothing` (the
-default) and let `solve` construct the default structured Jacobian for you, *or* to
-opt into a non-default backend explicitly only when you need it. The auto-default when
-`jacobian` is left at its default is `Structured(strategy = DirectSolve())` on a
-fixed mesh and `Structured(strategy = ApproxSolve())` under ALE, constructed
-internally with the correct mode flags — you do not have to thread
-`use_ale` / `radiation_model` through `JacobianSpec` yourself. Supply your own
-spec only when you want another strategy (`DirectSolve` under ALE,
-`StructuredSolve`, `MatrixFreeSolve`) or a custom reference for verification.
+For routine work, leave `jacobian = nothing` (the default) and let `solve`
+construct the default structured Jacobian, or pass a bare
+`Structured(strategy = ...)` only when you want the other strategy — usually
+`DirectSolve` under ALE, to check a configuration against the exact Jacobian:
+
+```julia
+solve(problem; use_ale = true, jacobian = Structured(strategy = DirectSolve()))
+```
+
+Either way the spec is constructed internally with the correct mode flags, so
+you never thread `use_ale` / `radiation_model` through a spec yourself.
 
 ---
 
 ## 11.3 Linear-solve strategies for the structured Jacobian
 
 The `strategy` argument to `Structured(...)` is a `LinearSolveStrategy`. It
-governs how the structured Jacobian — a sparse local block `A` plus a list of
-fast-apply non-local couplings (prefix-sum, suffix-sum, rank-1) — is inverted
-inside the Newton step. All four strategies are top-level exports.
+governs which part of the structured Jacobian — a sparse local block `A` plus a
+list of non-local couplings (prefix-sum, suffix-sum, rank-1) — reaches the
+linear solver inside the Newton step. Both strategies are top-level exports.
 
 | Strategy | What it does | Exact? | Best for |
 |---|---|---|---|
 | `DirectSolve()` | Densify the structured couplings into `A`, factor the full sparse matrix (KLU/UMFPACK) | Exact | Fixed-mesh default; the verification anchor |
-| `StructuredSolve()` | Sparse-LU on `A` + preconditioned Richardson over the couplings (2–5 iters) | Exact | Large problems where dense assembly is costly but exactness is required |
 | `ApproxSolve()` | Drop the structured couplings; solve `A⁻¹ b` only (Schur-style approximation) | Approximate | ALE default |
-| `MatrixFreeSolve()` | GMRES over the operator action without densifying | Exact (iterative) | Research / very large `N`; benchmark before relying on it |
 
-Construct any of these as a parameterless instance:
+Construct either as a parameterless instance:
 
 ```julia
-JacobianSpec(Structured(strategy = DirectSolve()),     problem)               # fixed-mesh default
-JacobianSpec(Structured(strategy = StructuredSolve()), problem; use_ale = true)
-JacobianSpec(Structured(strategy = ApproxSolve()),     problem; use_ale = true) # ALE default
-JacobianSpec(Structured(strategy = MatrixFreeSolve()), problem; use_ale = true)
+solve(problem; jacobian = Structured(strategy = DirectSolve()))                  # fixed-mesh default
+solve(problem; use_ale = true, jacobian = Structured(strategy = ApproxSolve()))  # ALE default
 ```
 
 ### 11.3.1 `DirectSolve` — the fixed-mesh default and the anchor
@@ -7255,70 +7086,42 @@ block is factored by UMFPACK (§11.4.1). It is also the backend you should
 verify against first when proving a configuration is correct.
 
 ```julia
-spec = JacobianSpec(Structured(strategy = DirectSolve()), problem)
-sol  = solve(problem; jacobian = spec)
+sol = solve(problem; use_ale = true, jacobian = Structured(strategy = DirectSolve()))
 ```
 
-### 11.3.2 `StructuredSolve` — exact, cheaper assembly at scale
-
-`StructuredSolve` keeps the solve exact but avoids densifying the non-local
-ALE/radiation couplings. It factors only the sparse local block `A`, then runs a
-preconditioned Richardson iteration that applies each coupling through its O(N)
-`apply!` method:
-
-```
-F = lu(A); y = F \ b
-repeat:  r = b − A·y − Σⱼ Cⱼ·y;  Δy = F \ r;  y ← y + Δy   (2–5 iterations)
-```
-
-Convergence is fast (2–5 iterations to machine precision) when the coupling
-magnitudes are small relative to `A`'s diagonal — which is the usual ALE regime.
-Choose `StructuredSolve` when an ALE mesh is large enough that the dense
-assembly of `DirectSolve` dominates, but you still need an exact Newton step.
-
-### 11.3.3 `ApproxSolve` — the ALE default
+### 11.3.2 `ApproxSolve` — the ALE default
 
 `ApproxSolve` drops the structured couplings entirely and solves `A⁻¹ b`. The
 Newton step is then a Schur-style approximation: it omits the dense ALE
 mesh-velocity coupling block, but each linear solve and the assembly itself are
-far cheaper (the assembly profile drops to `:ale_reduced`, skipping the
-cumulative ALE widening, the geometry AD pass, the Beer–Lambert suffix, and the
-χ-column rank-1 term). The modified Newton iteration it drives still contracts
-strongly, so ALE solves take the same steps as with the exact Jacobian and
-follow the same trajectory; `solve` uses it under ALE when `jacobian = nothing`
-(Technical Reference §15.10.3 has the measurements).
+far cheaper (the assembly profile drops to `:ale_reduced`, which writes no
+z columns: it skips the cumulative ALE widening, the geometry AD pass, the
+Beer–Lambert z columns and suffix, and the χ-column rank-1 term). The modified
+Newton iteration it drives still contracts strongly, so ALE solves take the same
+steps as with the exact Jacobian and follow the same trajectory; `solve` uses it
+under ALE when `jacobian = nothing` (Technical Reference §15.10.2 has the
+measurements).
 
 ```julia
 # ALE cone problem — the default is already the reduced Jacobian:
 sol = solve(problem; use_ale = true)
 # or explicitly:
-spec = JacobianSpec(Structured(strategy = ApproxSolve()), problem; use_ale = true)
-sol  = solve(problem; jacobian = spec, use_ale = true)
+sol = solve(problem; use_ale = true, jacobian = Structured(strategy = ApproxSolve()))
 ```
 
-`ApproxSolve` is the **only** strategy that deliberately omits known-nonzero
-entries; it carries the `is_approximate` trait, which switches
-`verify_jacobian_at` (§11.7) into masked-comparison mode so the dropped entries
-are reported informationally rather than counted as failures.
+`ApproxSolve` is the strategy that deliberately omits known-nonzero entries; it
+carries the `is_approximate` trait, which switches `verify_jacobian_at` (§11.7)
+into masked-comparison mode so the dropped entries are reported informationally
+rather than counted as failures.
 
-### 11.3.4 `MatrixFreeSolve` — research / very large N
+### 11.3.3 A sizing rule of thumb
 
-`MatrixFreeSolve` runs GMRES over the structured-Jacobian operator action
-without ever forming `A + C`. It is exact in the limit of GMRES convergence and
-useful when even materializing the coupled operator is expensive. It is marked
-experimental in the source; benchmark a specific problem before using it in
-production, and prefer `DirectSolve`/`StructuredSolve` unless the matrix-free
-path measurably wins.
-
-### 11.3.5 A sizing rule of thumb
-
-- Eulerian (fixed mesh), any size, no depletion → `jacobian = nothing`
-  (default) is fine; it already gives you
-  `Structured(strategy = DirectSolve())`.
-- ALE, small/medium mesh → `DirectSolve`.
-- ALE, large mesh, exactness required → `StructuredSolve`.
-- ALE, large mesh, speed over exactness → `ApproxSolve`.
-- Depletion tracking → no pluggable Jacobian (`jacobian = nothing`).
+- Fixed mesh, any size → `jacobian = nothing` (default) is fine; it already
+  gives you `Structured(strategy = DirectSolve())`.
+- ALE, any size → `jacobian = nothing` gives `ApproxSolve`; pass
+  `Structured(strategy = DirectSolve())` to check a configuration against the
+  exact Jacobian.
+- Depletion handling → either strategy; the defaults above apply unchanged.
 
 ---
 
@@ -7338,14 +7141,13 @@ sparsity pattern:
 |---|---|
 | `DirectSolve` under ALE (the exact ALE Jacobian, with its dense geometry block) | `UMFPACKFactorization()` |
 | Every other `Structured` Jacobian: `ApproxSolve` (the ALE default) and `DirectSolve` on an Eulerian mesh | `KLUFactorization()` |
-| A dense backend (`DenseAD_ForwardDiff`) | `LUFactorization()` |
 
 On 100-cell PMMA and charring-wood cone decks and on the V-BO-01 burnout case,
 KLU runs 2.6–4.4× faster end to end than Sparspak on the local patterns, with
 step counts equal to within 1%, and UMFPACK runs the exact ALE Jacobian
 1.5–1.9× faster than Sparspak (Technical Reference §15.5.1). The Eulerian
 `BEER_LAMBERT` pattern of `DirectSolve` stays on KLU: it is the fastest there,
-and UMFPACK's threshold pivoting returned inaccurate solves on it. Every
+and UMFPACK's threshold pivoting can return inaccurate solves on it. Every
 backend stays selectable by pairing it with a *constructor* integrator:
 
 ```julia
@@ -7363,12 +7165,18 @@ sol = solve(problem; linear_solver = SparspakFactorization())   # pure-Julia spa
 > Passing both a fully constructed `integrator` and a separate `linear_solver`
 > raises an error.
 
-A note on dense Jacobian backends: `DenseAD_ForwardDiff` has no sparse
-`jac_prototype`, so no sparse factorization can run. `solve` then defaults
-the linear solver to a dense `LUFactorization()` — and if you explicitly
-request a sparse factorization it warns and rebuilds your algorithm with
-`LUFactorization` instead. Every `Structured` Jacobian, including the
-`ApproxSolve` ALE default, carries the sparse prototype.
+Every `Structured` Jacobian, including the `ApproxSolve` ALE default, carries a
+sparse prototype, and an explicit `linear_solver` always replaces the
+pattern-based default. Any LinearSolve factorization is passed directly; no
+Pyrolysis extension is involved. For Intel MKL Pardiso, for example, install and
+load Pardiso.jl (which provides MKL) and pass LinearSolve's factorization:
+
+```julia
+using LinearSolve: MKLPardisoFactorize
+using Pardiso
+
+sol = solve(problem; linear_solver = MKLPardisoFactorize())
+```
 
 ### 11.4.2 ILU-preconditioned GMRES
 
@@ -7386,7 +7194,7 @@ alg = KenCarp4(linsolve = ILUGMRESFactorization(τ = 0.1))
 
 sol = solve(problem;
     integrator = alg,
-    jacobian   = JacobianSpec(Structured(strategy = DirectSolve()), problem; use_ale = true),
+    jacobian   = Structured(strategy = DirectSolve()),
     use_ale    = true)
 ```
 
@@ -7415,7 +7223,7 @@ parameter), which can be faster for some matrix structures:
 # ILUBiCGSTABFactorization(; τ = 0.1, rtol = 1e-8)
 alg = KenCarp4(linsolve = ILUBiCGSTABFactorization(τ = 0.1, rtol = 1e-8))
 sol = solve(problem; integrator = alg,
-    jacobian = JacobianSpec(Structured(strategy = DirectSolve()), problem; use_ale = true),
+    jacobian = Structured(strategy = DirectSolve()),
     use_ale  = true)
 ```
 
@@ -7428,10 +7236,7 @@ sol = solve(problem; integrator = alg,
 
 Depletion handling keeps the state size, so the sparse factorization keeps
 its pattern through every park event and nothing about the linear solver
-changes with `handle_depletion`. The dense LU is used only with the dense
-`DenseAD_ForwardDiff` backend, which attaches no sparse prototype; an explicitly
-requested sparse factorization is then rebuilt to `LUFactorization` inside the
-user's algorithm, with a warning.
+changes with `handle_depletion`.
 
 ---
 
@@ -7472,74 +7277,25 @@ affect physical accuracy.
 ## 11.6 Loading and using extensions
 
 Optional functionality is delivered through Julia's package-extension system
-(Julia 1.9+). The hooks (`klu_factorization`, `pardiso_factorization`,
-`amg_preconditioner`, `forward_sensitivity`, `adjoint_sensitivity`,
-`verify_mixing_derivatives`) are **exported stubs** in core Pyrolysis.jl. Each
-stub errors with a load hint until you `using` the corresponding optional
-package, at which point the extension attaches a concrete method. No extension
-depends on another; all are independent peers.
+(Julia 1.9+). Two extensions ship, independent of each other:
 
 | Extension | Trigger (`using ...`) | Attaches | Optional dep(s) |
 |---|---|---|---|
-| `PyrolysisKLUExt` | `KLU` | `klu_factorization()` | `KLU` |
-| `PyrolysisPardisoExt` | `Pardiso` | `pardiso_factorization()` | `Pardiso` |
-| `PyrolysisAMGExt` | `AlgebraicMultigrid` | `amg_preconditioner(A)` | `AlgebraicMultigrid` |
 | `PyrolysisSciMLSensitivityExt` | `SciMLSensitivity, Zygote` | `forward_sensitivity`, `adjoint_sensitivity` | `SciMLSensitivity`, `Zygote` |
-| `PyrolysisSymbolicsExt` | `Symbolics` | `verify_mixing_derivatives` | `Symbolics` |
 | `PyrolysisPlotsExt` | `RecipesBase`/`Plots` | `plot(sol; kind = ...)` recipes | `RecipesBase` |
 
-### 11.6.1 Linear-solver extensions: KLU, Pardiso, AMG
+`forward_sensitivity` and `adjoint_sensitivity` are **exported stubs** in core
+Pyrolysis.jl: calling one before `using SciMLSensitivity, Zygote` raises a
+`MethodError`, and loading the two packages attaches the concrete methods. The
+plotting recipes need no stub; they attach to `Plots.plot` once `Plots` is
+loaded (Chapter 9).
 
-These three extensions each expose a vendor solver under a stable
-Pyrolysis-level name so the benchmark harness and out-of-tree code can request
-it without core Pyrolysis taking a hard dependency.
+Linear solvers need no extension. `LinearSolve` is a hard dependency, so a
+factorization such as `KLUFactorization()` (already the default) or
+`MKLPardisoFactorize()` (with Pardiso/MKL installed) is passed directly as
+`linear_solver` or inside a built integrator (§11.4.1).
 
-```julia
-using Pyrolysis
-using KLU                              # triggers PyrolysisKLUExt
-
-ls  = Pyrolysis.klu_factorization()    # -> LinearSolve.KLUFactorization()
-sol = solve(problem; linear_solver = ls)
-```
-
-```julia
-using Pyrolysis
-using Pardiso                          # triggers PyrolysisPardisoExt
-
-# Returns LinearSolve.MKLPardisoFactorize(); for users with an Intel MKL license.
-ls  = Pyrolysis.pardiso_factorization()
-sol = solve(problem; integrator = KenCarp4(linsolve = ls))
-```
-
-```julia
-using Pyrolysis
-using AlgebraicMultigrid               # triggers PyrolysisAMGExt
-using SparseArrays, LinearAlgebra
-
-# Smoothed-aggregation AMG preconditioner for a sparse matrix A, for use as a
-# preconditioner inside a Krylov linsolve.
-A    = sprand(100, 100, 0.05) + 100I   # illustrative sparse matrix
-prec = Pyrolysis.amg_preconditioner(A)
-```
-
-Note that `KLUFactorization` is already reachable as
-`LinearSolve.KLUFactorization` (LinearSolve is a hard dependency); the KLU
-extension simply confirms KLU itself is loaded and exposes it under the stable
-name `Pyrolysis.klu_factorization`. The AMG preconditioner is meant for the
-preconditioner slot of a Krylov solver, not as a `linear_solver` on its own.
-
-**Stub behavior without the trigger.** If you call any of these before loading
-the optional package, you get a `MethodError` pointing at the unloaded
-extension:
-
-```julia
-using Pyrolysis
-Pyrolysis.klu_factorization()   # MethodError — `using KLU` not yet loaded
-```
-
-The fix is always the same: add the corresponding `using` line.
-
-### 11.6.2 Sensitivity extension
+### 11.6.1 Sensitivity extension
 
 `forward_sensitivity` and `adjoint_sensitivity` are stubs until you load
 `SciMLSensitivity` and `Zygote`, which activate `PyrolysisSciMLSensitivityExt`.
@@ -7560,14 +7316,14 @@ using SciMLSensitivity, Zygote          # triggers PyrolysisSciMLSensitivityExt
 function p_inject(base, θ)
     mat = make_material(θ)
     return PyrolysisProblem(base.mesh, mat, base.bc_set, base.tspan;
-                            T_initial = base.T_initial,
+                            T_initial = base.T_initial, ξ_initial = base.ξ_initial,
                             output_times = base.output_times)
 end
 
 # Forward mode (ForwardDiff) — small parameter counts:
 θ = [1e13, 2.0e5]
 output, ∂out_∂θ = forward_sensitivity(base_problem, θ, p_inject;
-                                      output_fn = sol -> maximum(sol.surface_T))
+                                      output_fn = sol -> [maximum(sol.surface_T)])   # ForwardDiff needs a vector output
 
 # Adjoint mode (Zygote + SciMLSensitivity) — large parameter counts, scalar loss:
 loss, grad = adjoint_sensitivity(base_problem, θ, p_inject, sol -> sum(sol.surface_T);
@@ -7578,26 +7334,11 @@ This chapter only covers the *loading* mechanics; the full sensitivity workflow
 (forward vs. adjoint choice, inverse analysis, Sobol global sensitivity) is the
 subject of Chapter 13, and the theory is in Technical Reference §17.
 
-### 11.6.3 Symbolics verification extension (test-only)
-
-`verify_mixing_derivatives` is a test-only stub activated by `using Symbolics`.
-It compares the package's analytical mixing-rule derivatives against
-Symbolics-derived ground truth. Production code never calls it; it exists to
-catch drift bugs in the mixing-rule Jacobian terms.
-
-```julia
-using Pyrolysis
-using Symbolics                         # triggers PyrolysisSymbolicsExt
-
-# Returns a per-rule max relative error (NaN for BRUGGEMAN, which has no closed form).
-report = verify_mixing_derivatives(material; rtol = 1e-8, T_test = 600.0)
-```
-
 ---
 
 ## 11.7 Debugging Jacobian correctness with `verify_jacobian_at`
 
-When a custom or approximate Jacobian configuration produces suspicious Newton
+When a Jacobian configuration produces suspicious Newton
 behavior (excessive rejections, divergence, or wrong steady state), compare it
 against the dense ForwardDiff reference at a state point. There are two ways: a
 one-shot call, and an in-solve callback.
@@ -7633,11 +7374,10 @@ report.max_abs_dev_outside_support # reference magnitude the backend's support o
 ```
 
 Comparison mode is chosen automatically by the backend's `is_approximate`
-trait (§11.3.3):
+trait (§11.3.2):
 
-- **Strict / support-complete** (exact backends, e.g. `DirectSolve`,
-  `StructuredSolve`): every entry of the dense reference is compared against the
-  active backend; a non-zero reference entry that the backend's support omits
+- **Strict / support-complete** (the exact `DirectSolve`): every entry of the
+  dense reference is compared against the active backend; a non-zero reference entry that the backend's support omits
   surfaces as a deviation, and its magnitude appears in
   `max_abs_dev_outside_support`. The strict criterion is per-entry with a
   row-magnitude floor, so a missing coupling in a small-magnitude row cannot
@@ -7660,17 +7400,15 @@ against the dense reference each time the integrator crosses one of the listed
 times and **warns** (does not abort) on a mismatch:
 
 ```julia
-spec = JacobianSpec(Structured(strategy = StructuredSolve()), problem; use_ale = true)
-sol  = solve(problem;
-    jacobian        = spec,
+sol = solve(problem;
+    jacobian        = Structured(strategy = DirectSolve()),
     use_ale         = true,
     verify_jacobian = (rtol = 1e-6, atol = 1e-10, sample_times = [0.0, 1.0, 10.0]))
 ```
 
-The callback only runs when a pluggable `jacobian` is supplied (there is nothing
-to verify against the integrator's own finite-difference Jacobian). It warns
-rather than throws so a single transient outlier does not abort an otherwise
-healthy production run.
+The callback verifies whichever strategy the solve runs, the default included,
+and works with depletion handling. It warns rather than throws so a single
+transient outlier does not abort an otherwise healthy production run.
 
 ---
 
@@ -7681,7 +7419,7 @@ the time integration yourself, build a non-standard solver, or feed the residual
 to external tooling. The three pieces are all top-level exports:
 
 - `ProblemDef` — an **immutable** frozen problem definition (material, mesh
-  topology, BCs, initial conditions, simulation-mode traits, options). Safe to
+  topology, BCs, simulation-mode traits, options). Safe to
   share across threads and sweep workers.
 - `Workspace` — a **mutable** bundle of per-step caches, work arrays, and the
   geometry-from-state machinery. Allocate **one per worker**.
@@ -7696,12 +7434,12 @@ the initial state (the same sequence `solve()` runs internally):
 ```julia
 using Pyrolysis
 import OrdinaryDiffEq                                  # from your environment
+using OrdinaryDiffEqSDIRK: KenCarp4                    # SDIRK methods (add OrdinaryDiffEqSDIRK)
 
 # 1. ICs → immutable def → mutable workspace → packed u0 [T, ξ, z (ALE), χ (WithChi)].
 def, ws, u0 = initialize_state(problem;
     use_ale         = false,
-    radiation_model = NO_RADIATION,
-    energy_form     = :standard)
+    radiation_model = NO_RADIATION)
 
 # 2. Wrap residual! in the (du, u, p, t) shape OrdinaryDiffEq expects.
 #    Note the residual! argument order is (du, u, def, t, ws).
@@ -7709,11 +7447,11 @@ rhs!(du, u, p, t) = residual!(du, u, def, t, ws)
 
 # 3. Hand-roll your own integration.
 prob = OrdinaryDiffEq.ODEProblem(rhs!, u0, problem.tspan)
-raw  = OrdinaryDiffEq.solve(prob, OrdinaryDiffEq.KenCarp4(autodiff = OrdinaryDiffEq.AutoFiniteDiff()))
+raw  = OrdinaryDiffEq.solve(prob, KenCarp4(autodiff = OrdinaryDiffEq.AutoFiniteDiff()))
 ```
 
 The underlying primitives `to_problem_def`, `build_workspace`, and
-`create_state_vector` remain public as the advanced layer (AD workspaces via
+`create_state_vector` are public as the advanced layer (AD workspaces via
 `build_ad_workspace`, mid-simulation repacking via `pack_state!`, warm
 starts). If you compose them by hand, the IC contract is on you:
 `create_state_vector` packs the mesh **as-is**, so call
@@ -7736,25 +7474,26 @@ get_thickness_from_state(u, layout)        # current sample thickness
 block_view(u, layout, ...)                 # a view of one block
 
 # For variable-cross-section runs:
-column_chi_bar_from_state(u, layout, material)        # column-average χ̄
+column_chi_bar_from_state(u, layout, mesh)            # column-average χ̄
 cross_section_area_from_state(mesh, material, u, layout)
 ```
 
 You can also attach a structured Jacobian to your hand-rolled loop. Build a spec
-from the same `(def, ws)` pair and call `compute_jacobian!`:
+from the same `(def, ws)` pair and call `compute_jacobian!` on a sparse matrix
+with the spec's pattern:
 
 ```julia
 spec = JacobianSpec(Structured(strategy = DirectSolve()), def, ws)
-J    = zeros(state_length(layout), state_length(layout))
+J    = Float64.(spec.sparsity_phys .| spec.sparsity_geom)   # the sparse pattern the backend fills
 compute_jacobian!(J, spec, u0, def, 0.0, ws)
 ```
 
 When driving the solver yourself, remember the contract that `solve` normally
 enforces for you: **the residual and Jacobian assembly are mesh-read-only**. The
 mutable mesh state is only meant to be synchronized to the integrator's `u`
-between accepted steps (this is what the built-in `StepUpdateCallback` does
+between accepted steps (this is what the built-in step-update callback does
 inside `solve`). If your custom loop relies on the mesh geometry being current
-for post-processing or AMR, you must call
+for post-processing, you must call
 `update_mesh_from_state!(mesh, u, layout)` between steps yourself.
 
 ---
@@ -7779,8 +7518,9 @@ Use this when you need an internal building block — a mixing function, a flux
 kernel, a cache type — that is not on the curated top-level list. Caveat:
 symbols reached through `Internal` are **not** part of the stable public API and
 may move or change between minor releases; prefer top-level exports in
-production code. (The `Experimental` namespace — P1 radiation, h-AMR — is *not*
-included in `Internal`; reach it explicitly as `Pyrolysis.Experimental.X`.)
+production code. (The `Experimental` namespace — P1 radiation,
+h-refinement/coarsening — is *not* included in `Internal`; reach it explicitly as
+`Pyrolysis.Experimental.X`.)
 
 ### 11.9.2 Importing the simulation-mode trait subtypes
 
@@ -7820,38 +7560,32 @@ axes map to the four residual paths, and Technical Reference §15.1).
 # (a) Default, simplest correct solve — Eulerian, no depletion.
 sol = solve(problem)
 
-# (b) Explicit exact structured Jacobian (Eulerian).
-spec = JacobianSpec(Structured(strategy = DirectSolve()), problem)
-sol  = solve(problem; jacobian = spec)
+# (b) Explicit exact structured Jacobian (Eulerian; the same as the default).
+sol = solve(problem; jacobian = Structured(strategy = DirectSolve()))
 
 # (c) ALE — the default reduced Jacobian; opt into the exact one.
-sol  = solve(problem; use_ale = true)
-spec = JacobianSpec(Structured(strategy = DirectSolve()), problem; use_ale = true)
-sol  = solve(problem; jacobian = spec, use_ale = true)
+sol = solve(problem; use_ale = true)
+sol = solve(problem; use_ale = true, jacobian = Structured(strategy = DirectSolve()))
 
-# (d) Large ALE, exact but cheap assembly via Richardson.
-spec = JacobianSpec(Structured(strategy = StructuredSolve()), problem; use_ale = true)
-sol  = solve(problem; jacobian = spec, use_ale = true)
-
-# (e) ILU-GMRES linear solve for a large W matrix.
+# (d) ILU-GMRES linear solve for a large W matrix.
 sol = solve(problem;
     integrator = KenCarp4(linsolve = ILUGMRESFactorization(τ = 0.1)),
-    jacobian   = JacobianSpec(Structured(strategy = DirectSolve()), problem; use_ale = true),
+    jacobian   = Structured(strategy = DirectSolve()),
     use_ale    = true)
 
-# (f) Depletion under ALE (the default Jacobian runs through the parks).
+# (e) Depletion under ALE (the default Jacobian runs through the parks).
 sol = solve(problem;
     use_ale          = true,
     handle_depletion = true)
 
-# (g) Vendor solver via extension.
-using KLU
-sol = solve(problem; linear_solver = Pyrolysis.klu_factorization())
+# (f) Another LinearSolve factorization, passed directly.
+using LinearSolve: SparspakFactorization
+sol = solve(problem; linear_solver = SparspakFactorization())
 
-# (h) Verify a custom backend against the dense reference during a solve.
-spec = JacobianSpec(Structured(strategy = StructuredSolve()), problem; use_ale = true)
-sol  = solve(problem; jacobian = spec, use_ale = true,
-             verify_jacobian = (rtol = 1e-6, atol = 1e-10, sample_times = [0.0, 5.0]))
+# (g) Verify the exact ALE Jacobian against the dense reference during a solve.
+sol = solve(problem; use_ale = true,
+            jacobian = Structured(strategy = DirectSolve()),
+            verify_jacobian = (rtol = 1e-6, atol = 1e-10, sample_times = [0.0, 5.0]))
 ```
 
 ---
@@ -7861,8 +7595,8 @@ sol  = solve(problem; jacobian = spec, use_ale = true,
 - Structured-Jacobian architecture, the implicit-RK `W = I/(γ_RK Δt) − J`
   matrix, per-operator Jacobian formulas, and the prefix/suffix/rank-1
   couplings: **Technical Reference §15**.
-- Surface-depletion handling and the depletion ↔ pluggable-Jacobian
-  incompatibility: **Chapter 10** and **Technical Reference §14.7**.
+- Surface-depletion handling and its Jacobian defaults: **Chapter 10** and
+  **Technical Reference §14.3**.
 - Building a problem and selecting simulation modes: **Chapter 7**.
 - The `solve` keyword reference and post-processing: **Chapter 8** and
   **Chapter 9**.
@@ -8311,7 +8045,9 @@ errors. (`tspan[1]` still sets the integrator's start time; warm starting just
 reuses the prior final state as fresh initial data.) The prior solution must also
 still carry its `raw_solution`, so warm-starting from a heavily reduced `extract`
 output will not work — keep the full `PyrolysisSolution` for the run you chain
-from.
+from. The prior solve must also have had no park events (`extras.park_times`
+empty): its final state holds ghost slots, while a new solve starts with every
+cell live.
 
 Because `pmap` runs grid points concurrently and out of any meaningful order,
 warm starting is **not compatible with `parallel = true`** — there is no
@@ -8611,8 +8347,8 @@ Chapter 13:
   gradient of a scalar loss for large parameter counts / inverse problems.
 
 These require loading the `PyrolysisSciMLSensitivityExt` extension
-(`using SciMLSensitivity, Zygote`); without it the exported names are stubs that
-error with a hint to load the extension. The `p_inject` closure plays exactly the
+(`using SciMLSensitivity, Zygote`); without it the exported names are stubs with
+no methods, and calling one raises a `MethodError`. The `p_inject` closure plays exactly the
 role `modify` plays here — it rebuilds a fresh problem from a parameter vector —
 so a `modify` you write for a sweep is usually one rename away from a `p_inject`
 you can hand to `forward_sensitivity` (the only difference is the parameter shape:
@@ -8640,7 +8376,7 @@ the input/output table into a Sobol estimator. See the
 | Rebuild, don't mutate | no copy constructors; reuse struct fields and call keyword constructors |
 | Parallel safety | immutable residual reused; mutable `Workspace` allocated per worker `solve` |
 | Define closures on workers | `@everywhere` for `modify`/`extract` and their helpers |
-| Warm start | sequential only; `NC` / mesh / ALE / χ mode must match; prior `raw_solution` required (see §12.6) |
+| Warm start | sequential only; `NC` / mesh / ALE / χ mode must match; prior `raw_solution` required; no park events in the prior solve (see §12.6) |
 | Cross-grid MLR (ALE) | compare `sol.extras.MLR_gauge`, not `sol.mass_loss_rate` |
 | Gradients instead of maps | Chapter 13 (`forward_sensitivity` / `adjoint_sensitivity`) |
 
@@ -8684,7 +8420,7 @@ Forward and adjoint are **local**: they linearize about a single parameter point
 output variance to inputs, but it gives no derivative.
 
 `forward_sensitivity` and `adjoint_sensitivity` are exported by `Pyrolysis` as
-**stubs** — they error with a clear message until you load the
+**stubs** — calling one raises a `MethodError` until you load the
 `PyrolysisSciMLSensitivityExt` extension (§13.6). The Sobol path needs no
 extension; it is pure `parameter_sweep` plus your choice of sampling package.
 
@@ -8887,8 +8623,8 @@ output, J = forward_sensitivity(base, θ0, p_inject;
 > same length for every `θ` ForwardDiff probes. Returning `sol.surface_T`
 > directly is fine because `saveat = output_times` is fixed and independent of
 > `θ`. Returning something whose length depends on the trajectory (e.g. "number
-> of time steps the integrator took", or — in ALE mode — a node array whose
-> length changes after a depletion merge) will break the Jacobian assembly.
+> of time steps the integrator took", or a profile filtered of the `NaN` slots
+> that depletion parking leaves) will break the Jacobian assembly.
 
 ---
 
@@ -8985,7 +8721,7 @@ different `autojacvec`); pass them through the `sensealg` keyword unchanged.
 ## 13.6 Loading the extension
 
 `forward_sensitivity` and `adjoint_sensitivity` are exported stubs. Without the
-extension they raise a clear error telling you which package to load. The
+extension they have no methods, so calling one raises a `MethodError`. The
 extension `PyrolysisSciMLSensitivityExt` is triggered automatically when **both**
 `SciMLSensitivity` and `Zygote` are present in your environment:
 
@@ -9111,7 +8847,7 @@ This is the same separation as `parameter_sweep`: an immutable base, a `modify`/
 that pulls out quantities of interest (peak MLR, time to ignition, total mass
 loss, peak surface temperature, MLR/temperature curves, …). The example's solve
 uses `use_ale = true`, `radiation_model = SURFACE_ABSORPTION`, and the default
-`Structured(strategy = DirectSolve())` Jacobian.
+Jacobian, which under ALE is `Structured(strategy = ApproxSolve())`.
 
 **3. Decompose the variance.** `sensitivity_sobol.jl` fits a Polynomial Chaos
 Expansion (PCE) surrogate to each scalar QoI and reads first-order and total
@@ -9138,7 +8874,7 @@ harness, see Technical Reference §17.5.
 
 Sensitivities are only meaningful where the map `θ -> output` is well-behaved.
 The package is deliberately built to be AD-clean (smooth tanh temperature gates
-and depletion limiter, midpoint-rule enthalpy, smooth flux limiters — Technical
+and depletion limiter, smooth flux limiters — Technical
 Reference §17.6), but several configurations can still spoil a gradient:
 
 - **Warm start.** Reusing a prior solution as the initial state
@@ -9159,12 +8895,6 @@ Reference §17.6), but several configurations can still spoil a gradient:
   the state in place; the trajectory is smooth in the parameters between events
   and jumps across one. Keep depletion off in sensitivity work, or restrict the
   horizon to one without park events.
-
-- **Transpiration BC is forbidden with the default convention.** Leave
-  `use_transpiration_bc = false` (the default). The volumetric advection source
-  `S_conv` already carries gas enthalpy; enabling the surface transpiration term
-  double-counts it, and problem construction / `solve` rejects it outright. There
-  is no sensitivity question that requires turning it on.
 
 - **Tanh-gate leakage.** The smooth temperature gates leak a few percent of the
   reaction rate within roughly ±10 K of `T_min`/`T_max` (Technical Reference
@@ -9193,8 +8923,8 @@ Reference §17.6), but several configurations can still spoil a gradient:
 **Defaults to remember.** `forward_sensitivity`: `output_fn = identity`.
 `adjoint_sensitivity`: `sensealg = InterpolatingAdjoint(autojacvec = ReverseDiffVJP())`.
 For sensitivity-safe solves: keep `warm_start = nothing`,
-`handle_depletion = false`, `use_transpiration_bc = false`, the default
-`jacobian = nothing` (→ `Structured(strategy = DirectSolve())`), and tighten
+`handle_depletion = false`, the default `jacobian = nothing`
+(→ `Structured(strategy = DirectSolve())` on a fixed mesh), and tighten
 `abstol`/`reltol`.
 
 For parameter sweeps (discrete response maps) see Chapter 12; for the solution
@@ -9245,13 +8975,14 @@ A roadmap of what each example demonstrates:
 
 | Example file | Physics highlighted | Modes | §14 |
 |---|---|---|---|
-| `06_cone_calorimeter.jl` | PMMA cone, single-step kinetics, in-depth radiation | ALE, depletion | 14.1 |
+| `06_cone_calorimeter.jl` | PMMA cone, single-step kinetics, incident flux at the surface (`NO_RADIATION`) | ALE, depletion | 14.1 |
 | `06_cone_calorimeter_surface_absorption.jl` | PMMA cone, surface-only radiation | ALE, SURFACE_ABSORPTION | 14.1 |
 | `07_douglas_fir_cone.jl` | Wood, multi-step kinetics, Darcy–Fick, moisture | ALE, SURFACE_ABSORPTION, DarcyFick | 14.2 |
 | `convergence_douglas_fir.jl` | Grid-convergence study | as 07, swept over `n_cells` | 14.3 |
 | `08_pressure_treated_wood_cone.jl`, `ptw_comparison.jl` | Treated wood + moisture, Darcy–Fick | ALE, SURFACE_ABSORPTION, DarcyFick | 14.4 |
 | `08_darcy_fick_demo.jl` | Pressure-driven gas transport, permeability | ALE, DarcyFick | 14.5 |
 | `moisture_hos_comparison.jl` | State-dependent heat of sorption | ALE, SURFACE_ABSORPTION, DarcyFick | 14.6 |
+| `macfp/macfp_gasification.jl` | MaCFP-4 white-pine gasification targets (10/30/60 kW/m², 6/18 mm) | ALE, SURFACE_ABSORPTION | — |
 | `inverse_analysis/inverse_white_pine.jl` | Parameter estimation from data | ALE, optimization | 14.7 |
 | `sensitivity_analysis/sensitivity_douglas_fir.jl`, `sensitivity_sobol.jl`, `compare_degrees.jl`, `df_sensitivity_comparison.jl` | Uncertainty / Sobol / inter-code | parameter sweep, post-process | 14.8 |
 | `literature_comparison/literature_comparison.jl` | Property-variant comparison | as 07, swept over property sets | 14.9 |
@@ -9424,8 +9155,8 @@ solution = solve(problem;
     progress = true,
     use_ale = true,              # moving mesh tracks the receding surface
     min_thickness = 0.01e-3,     # terminate when sample < 0.01 mm
-    handle_depletion = true,     # merge thin surface cells (production depletion path)
-    depletion_threshold = 0.05,  # merge a cell at 5% of its initial thickness
+    handle_depletion = true,     # park thin surface cells
+    depletion_threshold = 0.05,  # park a cell at 5% of its initial thickness
     min_cells = 1,               # keep at least 1 cell
 )
 ```
@@ -9443,10 +9174,6 @@ from `src/Solver/solve.jl`):
   variant (§14.1.1) passes `SURFACE_ABSORPTION`.
 - **`handle_depletion = true`** turns on cell parking (Chapter 10), which
   carries the run through burnout (Technical Reference §14.3).
-- **`use_transpiration_bc`** is left at its default `false`. Enabling it is
-  rejected: the default `:standard` energy form already carries gas enthalpy via
-  the `S_conv` advection term, so a surface-transpiration term would
-  double-count it (Technical Reference §7; see also the Troubleshooting chapter).
 
 ### What to look at
 
@@ -9468,8 +9195,9 @@ println("Mass loss: ", round((1 - total_m[end]/total_m[1]) * 100, digits = 1), "
 `surface_T` and `back_temperature` come from the boundary-temperature Newton
 solve (not raw cell-center temperatures), which closes the surface energy
 balance — important for `T⁴` radiative BCs (Technical Reference §12). The
-script overlays these against bundled ThermaKin reference traces and prints a
-side-by-side comparison at t ≈ 600 s.
+script prints a side-by-side comparison with ThermaKin values at t ≈ 600 s
+(hard-coded in the script) and overlays ThermaKin traces only when
+`docs/thermakin_output/` is present; the repository does not ship those traces.
 
 If you have `Plots` loaded, the package's plot recipe gives quick views:
 
@@ -9480,11 +9208,9 @@ plot(solution; kind = :mlr)         # mass-loss rate
 plot(solution; kind = :heatmap)     # T(z, t) field
 ```
 
-> Caveat: this example's parameter set was calibrated against a solver that
-> applies a surface transpiration term in addition to the volumetric advection
-> source. Under the `S_conv`-only convention used here, surface temperature and
-> MLR shift slightly, so the bundled ThermaKin comparison is indicative, not a
-> regression target; treat the printed peak-surface-T and mass-loss numbers as a
+> Caveat: this example's parameter set is pending re-validation against measured
+> data (Technical Reference §18.8.1), so the ThermaKin comparison is indicative,
+> not a regression target; treat the printed peak-surface-T and mass-loss numbers as a
 > reference for magnitude and time scale rather than exact values to match.
 
 ### 14.1.1 Surface-absorption variant (`06_cone_calorimeter_surface_absorption.jl`)
@@ -9527,9 +9253,10 @@ Reference §5–§12.
 
 ### Material highlights
 
-The material declares 13 components — six solids (`DF`, `DF_int1`…`DF_int4`,
-`Char`), one liquid (`MOISTURE`), and six gases (`DF_gas1`…`DF_gas5`,
-`WATER_VAPOR`) — and six reactions. A few patterns worth lifting:
+The material declares 14 components — six solids (`DF`, `DF_int1`…`DF_int4`,
+`Char`), one liquid (`MOISTURE`), and seven gases (`DF_gas1`…`DF_gas5`,
+`WATER_VAPOR`, and the inert background `AIR` initialized at 1 atm) — and six
+reactions. A few patterns worth lifting:
 
 **Kinetic-theory sizing of the gas `λ` values.** Each gas component's transfer
 coefficient `λ` is *assigned* a value scaled by `√(M_ref/M_j)` from kinetic
@@ -9588,8 +9315,8 @@ Reaction(:pyrolysis_step3, 3 => (4, 10); A = 7.744618e12,   E = 181.0e3,
 # ... steps 2, 4, 5 similarly
 ```
 
-The full 13-component, six-reaction definition is in
-`examples/07_douglas_fir_cone.jl` (lines 216–445).
+The full 14-component, six-reaction definition is the `douglas_fir = Material(...)`
+block of `examples/07_douglas_fir_cone.jl`.
 
 ### Boundary conditions
 
@@ -9620,6 +9347,7 @@ the material has permeability (Darcy–Fick mode).
 
 ```julia
 using OrdinaryDiffEq, LinearSolve
+using OrdinaryDiffEqSDIRK: KenCarp4
 using LinearSolve: SparspakFactorization
 
 solution = solve(problem;
@@ -9649,13 +9377,12 @@ solution = solve(problem;
 ```
 
 Both follow the same trajectory; the exact Jacobian costs several times more
-per step (Technical Reference §15.10.3; see the Solver/Jacobian configuration
+per step (Technical Reference §15.10.2; see the Solver/Jacobian configuration
 chapter for choosing strategies).
 
 ### What to look at
 
-Because radiation is active, the solver records a full boundary-flux
-decomposition in `extras`:
+The solver records a full boundary-flux decomposition in `extras`:
 
 ```julia
 mlr           = solution.extras.surface_mass_flux           # actual MLR at surface [kg/(m²·s)]
@@ -9683,7 +9410,7 @@ yield. Note the access pattern for internal helpers and for the reaction's
 `.products` field:
 
 ```julia
-NC, NR = 13, 6
+NC, NR = 14, 6
 rates, heats = zeros(NR), zeros(NR)
 for j in 1:n_cells
     ξ = ntuple(k -> solution.ξ[k, j, i], NC)
@@ -9771,6 +9498,7 @@ julia -p 4 convergence_douglas_fir.jl       # 4 workers
 using Distributed
 @everywhere begin
     using Pyrolysis, LinearSolve, Sparspak, OrdinaryDiffEq
+    using OrdinaryDiffEqSDIRK: KenCarp4
     using LinearSolve: SparspakFactorization
 end
 solutions = pmap(build_and_solve, [480, 240, 120, 60, 30, 15])
@@ -9925,7 +9653,6 @@ want a reaction to be inactive outside a band.
 solution_darcy = solve(problem;
     use_ale = true,
     min_thickness = 0.5e-3,
-    dt_initial = 0.01,
     progress = true,
 )
 ```
@@ -10094,8 +9821,8 @@ loss, grad = adjoint_sensitivity(base_problem, θ, p_inject,
                                  sol -> sum(abs2, sol.extras.back_temperature .- data))
 ```
 
-> Caveat: warm starts, non-smooth lateral-shrinkage laws, and the
-> depletion-merge callback introduce discontinuities that can confuse
+> Caveat: warm starts, non-smooth lateral-shrinkage laws, and depletion
+> parking introduce discontinuities that can confuse
 > gradient-based methods; the derivative-free NelderMead route is robust to them.
 > See the Sensitivity Analysis chapter and Technical Reference §17.
 
@@ -10126,6 +9853,7 @@ using Distributed
     using Pyrolysis
     using Pyrolysis: compute_surface_mass_flux, effective_gas_transfer
     using OrdinaryDiffEq, LinearSolve, Sparspak
+    using OrdinaryDiffEqSDIRK: KenCarp4
     using LinearSolve: SparspakFactorization
 end
 
@@ -10283,24 +10011,25 @@ Reading the examples together, a few idioms recur and are worth internalizing:
   surface efflux; `solution.extras.gas_generation_rate` is volumetric production;
   `solution.mass_loss_rate` is per current area. They coincide only at
   quasi-steady state.
-- **Use the boundary-flux extras for energy accounting.** With a radiation model
-  active, `surface_heat_flux_*` and `surface_emissivity`/`surface_conductivity`
-  in `extras` give a complete surface energy balance without re-deriving it.
+- **Use the boundary-flux extras for energy accounting.** `surface_heat_flux_*` and
+  `surface_emissivity`/`surface_conductivity` in `extras` give the surface energy
+  balance without re-deriving it; under `BEER_LAMBERT` add
+  `extras.volumetric_absorption`, the in-depth deposit the face fluxes exclude.
 
 ### Caveats to keep in mind
 
 - **`P1_QUASI_STEADY` radiation is experimental** and quarantined in
   `Pyrolysis.Experimental`; the core `solve` rejects it as a `radiation_model`.
-  The shipped examples use `NO_RADIATION` (flux via BC only), `SURFACE_ABSORPTION`,
-  or `BEER_LAMBERT`.
-- **Surface transpiration BC is off by default and incompatible with the default
-  `:standard` energy form** — enabling `use_transpiration_bc` is rejected because
-  `S_conv` already carries gas enthalpy (double counting). Technical Reference §7.
-- **Several cone examples carry parameter sets calibrated under a
-  transpiration-plus-`S_conv` convention** and may need re-calibration under the
-  `S_conv`-only energy balance; treat their bundled experimental/ThermaKin
-  overlays as indicative comparisons rather than tight regression targets
-  (Technical Reference §18).
+  The shipped examples use `NO_RADIATION` (flux via BC only) or `SURFACE_ABSORPTION`;
+  `BEER_LAMBERT` is one keyword away in `06_cone_calorimeter.jl`.
+- **The boundary energy balance has no surface gas-enthalpy term**, because
+  `S_conv` already carries the gas enthalpy (a surface term would double count
+  it; §5.4, Technical Reference §7).
+- **The cone examples' parameter sets are pending re-validation against data**;
+  treat their experimental and ThermaKin overlays as indicative comparisons rather
+  than tight regression targets (Technical Reference §18.8.1). Parameters
+  calibrated in a solver that adds a surface gas-enthalpy term on top of `S_conv`
+  predict a higher surface temperature and MLR here (Technical Reference §1.8).
 
 For deeper troubleshooting (stiff solves, ledger imbalance, ALE mesh tangling,
 radiation surprises), see the Troubleshooting and Performance chapter; for the
@@ -10332,7 +10061,7 @@ substrate (bottom, boundary id 2, tag `:bottom`), `z = L` is the exposed surface
 ## 15.1 First steps: read the return code and run the diagnostics
 
 Before changing anything, look at two things: the solver's return code and the
-conservation ledgers.
+diagnostics log.
 
 ### 15.1.1 The return code
 
@@ -10360,11 +10089,10 @@ On a fixed mesh with `handle_depletion = true`, a `:Terminated` run with the
 warning "…the material has gasified from within…" stopped at the first
 interior void (§15.4).
 
-### 15.1.2 Turn on the conservation ledgers
+### 15.1.2 Turn on the diagnostics log
 
-The single most useful debugging switch is `diagnostics = true`. It installs a
-callback that snapshots the mass and energy ledgers every `diagnostics_stride`
-accepted steps (default 10) and stores typed rows in
+`diagnostics = true` installs a callback that records the sensible energy every
+`diagnostics_stride` accepted steps (default 10) and stores typed rows in
 `solution.extras.diagnostics_log`:
 
 ```julia
@@ -10375,28 +10103,23 @@ solution = solve(problem;
 )
 
 for row in solution.extras.diagnostics_log
-    println("t=$(row.t)  E=$(row.E_sensible)  ",
-            "r(rel)=$(row.energy_relative)  ",
-            "m_err=$(row.mass_max_relative_error)")
+    println("t=$(row.t)  E=$(row.E_sensible)")
 end
 ```
 
 Each `DiagnosticsRow` carries `t`, `E_sensible`, `energy_residual`,
-`energy_relative`, and `mass_max_relative_error`. How to read them (see
-Technical Reference §16):
-
-- **`energy_relative`** audits the *bookkeeping*. It is assembled from exactly
-  the terms the RHS computes, so it closes to integrator tolerance (~`1e-6`
-  relative) **by construction**. If it is large, you have a bug in flux/source
-  assembly or a callback — not a physics problem. (Caveat: with strongly
-  time-varying composition it cannot close exactly, because the ledger omits the
-  `∫ T ∂(ρc_p)/∂t` and ALE volume-change terms; expect a small floor.)
-- **`mass_max_relative_error`** is the worst per-component mass-balance error;
-  it should be `< 1e-10`.
+`energy_relative`, and `mass_max_relative_error`; in the rows `solve` records,
+only `t` and `E_sensible` are filled and the three cumulative-ledger fields are
+`NaN` (§9.8). The sensible-energy history shows where the stored energy changes
+abruptly — a park event, a stiff transient — and can be set against the
+boundary-flux extras (`surface_heat_flux_*`, §9.3). The cumulative energy and
+mass ledgers (`EnergyConservationTracker`, `MassConservationTracker`, driven
+step by step through `record_substep!`) are not part of `solve`; see
+Technical Reference §16.
 
 `diagnostics` is **snapshot-based**, not continuous — it gives you a coarse time
-history adequate for spotting where a ledger drifts, not a dense trace. The
-overhead is one extra energy/mass sweep every `diagnostics_stride` steps.
+history, not a dense trace. The overhead is one extra energy sweep every
+`diagnostics_stride` steps.
 
 ---
 
@@ -10420,9 +10143,11 @@ both `integrator` and `linear_solver` are left at `nothing`, `solve` builds:
 
 `KenCarp4` is a good default for moderately stiff pyrolysis. For *very* stiff
 problems (high pre-exponential `A_i`, sharp ignition) a BDF method often takes
-larger steps. Integrators live in `OrdinaryDiffEq`, which is **not** re-exported
-by `using Pyrolysis`; load it (or the relevant sublibrary) yourself and pass a
-constructor or a fully-built algorithm to the `integrator` kwarg:
+larger steps. Integrators live in `OrdinaryDiffEq` and its sublibraries, which
+are **not** re-exported by `using Pyrolysis`; load them yourself (`FBDF` and
+`Rodas5P` come with `using OrdinaryDiffEq`; `KenCarp4` and `TRBDF2` need
+`using OrdinaryDiffEqSDIRK`) and pass a constructor or a fully-built algorithm
+to the `integrator` kwarg:
 
 ```julia
 using OrdinaryDiffEq            # for FBDF, Rodas5P, etc.
@@ -10490,7 +10215,8 @@ sol2 = solve(problem2; warm_start = sol1, progress = false)
 ```
 
 The state-vector length, component count `NC`, ALE mode, and χ mode of the two
-problems must match (enforced by a length check). `tspan[1]` still sets the
+problems must match (enforced by a length check), and the prior solve must not have
+parked cells (its final state holds ghost slots). `tspan[1]` still sets the
 integrator's start time, so the prior final state is treated as fresh initial
 data.
 
@@ -10498,10 +10224,9 @@ data.
 
 ## 15.3 Jacobian mismatch warnings
 
-If the integrator behaves erratically only when the structured Jacobian is
-active — many rejected steps, sudden step-size collapse that goes away when you
-fall back to the dense reference — suspect a Jacobian that disagrees with the
-residual.
+If the integrator behaves erratically — many rejected steps, repeated Newton
+failures, a sudden step-size collapse — suspect a Jacobian that disagrees with
+the residual.
 
 ### 15.3.1 Compare against the dense reference at sample times
 
@@ -10525,13 +10250,12 @@ when the integrator crosses any sample time within half the current step.
 ### 15.3.2 Verify at a single state point
 
 For a focused check (e.g., debugging an operator), call `verify_jacobian_at`
-directly. You need the `ProblemDef`/`Workspace` pair, which you build from the
-problem:
+directly. You need the `ProblemDef`/`Workspace` pair and a state, which
+`initialize_state` builds from the problem (with its initial conditions
+applied):
 
 ```julia
-def = to_problem_def(problem; use_ale = false, radiation_model = NO_RADIATION)
-ws  = build_workspace(problem, def)
-u   = create_state_vector(ws.layout, ws.mesh)
+def, ws, u = initialize_state(problem; use_ale = false, radiation_model = NO_RADIATION)
 
 spec = JacobianSpec(Structured(strategy = DirectSolve()), def, ws)
 report = verify_jacobian_at(spec, def, ws, u, 0.0;
@@ -10546,14 +10270,14 @@ report.worst_index     # (row, col) of the worst entry
 report.mode            # :strict (exact backends) or :masked (approximate)
 ```
 
-`JacobianSpec` also accepts a `PyrolysisProblem` directly
-(`JacobianSpec(backend, problem)`) if you do not already have a `def`/`ws` pair.
+Pass the same `use_ale` / `radiation_model` keywords the solve uses, so the
+spec has the solve's mode (§11.2.2).
 
 ### 15.3.3 Support-pattern (sparsity) issues
 
 The comparison `mode` matters:
 
-- **`:strict`** — for exact backends (`DirectSolve`, `StructuredSolve`). Both
+- **`:strict`** — for the exact backend (`DirectSolve`). Both
   in-support disagreements *and* reference entries the backend's sparsity
   *omits* count as failures. A strict failure on an outside-support entry means
   the sparsity pattern is too small — the backend is structurally missing a
@@ -10658,24 +10382,24 @@ concentrations, the usual causes are:
 - **A reactant initialised at exactly zero that a reaction consumes.** Make sure
   `ξ_initial` seeds every reactant the scheme needs.
 
-The smooth temperature gates `½(1+tanh(T−T_min))·½(1+tanh(T_max−T))` leak by
-roughly ±10 K around `T_min`/`T_max` (Technical Reference §6.2); if a reaction
+The smooth temperature gates `½(1+tanh((T−T_min)/w))·½(1+tanh((T_max−T)/w))`, with
+`w` the reaction's `gate_width` (default 1 K), leak by roughly ±10·w around `T_min`/`T_max` (Technical Reference §6.2); if a reaction
 appears to fire slightly early/late, that leakage — not a bug — is the reason.
 
 ### 15.5.2 `ρc_p → 0` blow-up (ALE)
 
 As a cell decomposes to gas and the gas leaves, its `ρc_p^eff` shrinks toward
 the pore-gas thermal mass, and `dT/dt = RHS/ρc_p` can blow up. The intended
-remedies are ALE surface depletion (§15.4) to merge the spent surface cell, and
+remedies are surface depletion handling (§15.4) to park the spent surface cell, and
 the thickness-termination callback that stops the run when total thickness drops
 below `min_thickness`. If you run ALE *without* depletion and hit NaNs near full
 burn-out, enable `handle_depletion = true`.
 
 ### 15.5.3 Property-table extrapolation
 
-`TableProperty` interpolates linearly and extrapolates beyond its range. A table
-that stops at 600 K queried at 900 K will extrapolate — possibly to a negative
-`c_p` or `k`, which then produces NaN. Make sure every `TableProperty` covers
+`TableProperty` interpolates linearly and holds its end values outside its range.
+A table that stops at 600 K queried at 900 K returns the 600 K value, which can
+badly misstate `c_p` or `k` at high temperature. Make sure every `TableProperty` covers
 the full temperature span the solve will reach (the Newton boundary solve clamps
 surface temperature to `[200, 3000]` K — see Technical Reference §12.2 — so size
 tables accordingly).
@@ -10694,15 +10418,18 @@ mesh = create_stretched_mesh(0.01, 100, Val(2), 1.05; stretch_from = :top)
 `create_stretched_mesh(L, n_cells, Val(NC), stretch; stretch_from = :top, ...)`
 uses geometric grading; `stretch > 1` grades the cell sizes across the domain.
 Compare against the uniform `create_uniform_mesh(L, n_cells, Val(NC))` to see
-whether near-surface refinement removes the overshoot. For dynamic refinement
-options (error indicators, `relocate_nodes!`), see UG-10.
+whether near-surface refinement removes the overshoot. `solve` does not refine
+the mesh during a run; the error indicators and `relocate_nodes!` of Chapter 10
+are standalone building blocks.
 
 ---
 
 ## 15.6 Energy or mass ledger not closing
 
-Use the diagnostics rows (§15.1.2) to localise. The two energy residuals fail
-for *different* reasons.
+The cumulative ledgers report `energy_relative` and `mass_max_relative_error`
+when they are driven step by step through `record_substep!` (§9.8; the rows
+`solve` logs leave these fields `NaN`). The two failure modes below have
+*different* causes.
 
 ### 15.6.1 `energy_relative` large
 
@@ -10712,63 +10439,18 @@ This audits assembly and should close to integrator tolerance. If it does not:
   during assembly and is synced only by the step-update callback; a custom
   callback that edits `u` or geometry without informing the integrator
   (`derivative_discontinuity!(integrator, true)`) will break the ledger.
-- **AMR / depletion masking.** All domain-total sums (`compute_domain_mass`,
+- **Depletion masking.** All domain-total sums (`compute_domain_mass`,
   `compute_sensible_energy`) iterate the **active-cell mask**, not
   `eachindex`. If you wrote custom post-processing that loops over all cells
-  (including merged-away ones), your totals — not the solver's — are wrong.
+  (including parked ones), your totals — not the solver's — are wrong.
   Always respect `mesh.active_cell_mask` (Technical Reference §16.1).
 
 ### 15.6.2 `energy_relative` drifts during active reaction
 
 A small, composition-rate-dependent residual during active pyrolysis is
 expected: the ledger omits the heat-capacity-change and ALE volume-change terms
-of its `ρc_p·T` proxy (Technical Reference §16.8). A residual that grows with the
+of its `ρc_p·T` proxy (Technical Reference §16.7). A residual that grows with the
 *boundary input* rather than with the reaction rate points at the assembly.
-
-### 15.6.3 The S_conv vs transpiration double-count
-
-This is the most common "my energy balance is off by a constant rate" trap. The
-default energy form (`energy_form = :standard`) carries the gas sensible
-enthalpy through the **always-on** volumetric convection source
-`S_conv = −Σ_g c_{p,g} J̄_g ∂T/∂z` (ThermaKin Eq. 17 convention; Technical
-Reference §7.4). The surface **transpiration** enthalpy term would carry the
-*same* enthalpy at the boundary — enabling both double-counts by exactly
-`∫ S_conv`. The package forbids the combination:
-
-```julia
-# ERROR: solve() rejects this.
-solve(problem; use_transpiration_bc = true)
-# → "use_transpiration_bc=true double-counts gas convective enthalpy
-#    (S_conv is always active ...). Use use_transpiration_bc=false"
-```
-
-So `use_transpiration_bc` is `false` by default and there is no supported way to
-turn it on through `solve`. Mass transport is unaffected either way — gas still
-leaves the domain through the mass BCs; only the *enthalpy bookkeeping* is at
-issue. (Parameter sets calibrated against a solver that applies a transpiration term
-on top of a volumetric advection source embed the double-count and will predict
-higher `T_s` and MLR here; re-validate imported calibrations.)
-
-### 15.6.4 `:standard` vs `:with_generation_sink`
-
-The optional gas-generation sink `S_gen = −Σ_g Δh_g (∇·J_g)` (Technical Reference
-§7.5, §16.4) can be added:
-
-```julia
-solution = solve(problem; energy_form = :with_generation_sink)
-```
-
-`energy_form` accepts only `:standard` (default) or `:with_generation_sink`
-(anything else errors). **Datum warning (see §7.7):** the sink is consistent only
-with `T_ref`-datum (formation-style) reaction heats. With DSC-style heats quoted at
-the reaction temperature — the usual meaning of calibrated heats — the gas sensible
-enthalpy is already inside `h`, and the sink subtracts it a *second* time
-(≈0.7–1.2 MJ per kg of volatiles at 900 K); `solve` emits a one-time warning when it
-is selected. Even with the right datum it is only a *partial* step toward
-conservative form (gas heat storage and condensed-product sensible generation remain
-outside the assembly). The midpoint-rule `Δh_g` makes `∫(S_conv + S_gen)` telescope
-exactly against the surface outflow, which is what the ledger audit checks. For most
-cone/TGA work `:standard` is correct and matches FDS/Gpyro/ThermaKin.
 
 ---
 
@@ -10780,51 +10462,36 @@ ALE (`use_ale = true`) lets the mesh follow the receding/expanding surface
 ### 15.7.1 Mesh tangling and quality
 
 If a swelling/intumescent material moves nodes past each other, cells invert
-(`V ≤ 0`) and the geometry recompute produces NaNs. For diagnosis, the
-mesh-motion utilities expose quality checks. These operate on a `Mesh1D` and
-live in the `Pyrolysis.Internal` umbrella (they are not top-level exports):
+(the signed width `z_{i+1} − z_i` turns non-positive, which the volume
+`A·|z_{i+1} − z_i|` the residual uses does not show). To locate it, check the
+node spacing of the saved times, `diff(solution.z[:, i])`, for non-positive
+entries (parked slots read `NaN`). For a `Mesh1D` you hold — such as
+`solution.problem.mesh`, which carries the final geometry — the quality tools
+of §10.6 apply:
 
 ```julia
-using Pyrolysis.Internal          # mesh-motion helpers are not top-level exports
+using Pyrolysis.Internal          # Adaptivity exports are not top-level exports
 
-q = check_mesh_quality(mesh)       # NamedTuple
-q.valid                            # all cells V > 0 ?
-q.min_volume
+check_quality(mesh, JacobianMetric())        # every live cell has a positive signed width?
+quality_violations(mesh, JacobianMetric())   # indices of inverted cells
+q = mesh_quality_summary(mesh)               # NamedTuple
+q.min_cell_size
 q.max_aspect_ratio
-q.tangled_cells                    # indices with V ≤ 0
-
-mesh_is_valid(mesh)                # quick boolean
 ```
 
-`move_mesh_safe!` rejects a motion (and rolls back) if it would tangle or exceed
-an aspect-ratio bound (default 10). If you are driving the mesh yourself, prefer
-it over the raw `move_mesh!`. For production solves the cumulative mesh velocity
-is computed for you; tangling there points to an unphysical swelling factor `γ`
-or shrinkage law producing a too-large per-step displacement — refine the time
-step (lower `dtmax`) or reduce the swelling magnitude.
+In a solve the cumulative mesh velocity is computed for you; tangling there
+points to an unphysical swelling factor `γ` or shrinkage law producing a
+too-large per-step displacement — refine the time step (lower `dtmax`) or
+reduce the swelling magnitude.
 
-### 15.7.2 GCL violations
+### 15.7.2 Geometric conservation
 
-The discrete Geometric Conservation Law,
-`V_new − V_old = Δt (w_R − w_L) A`, must hold to machine precision or the mesh
-motion injects "phantom" mass (Technical Reference §11.5). Per-step GCL error
-should be `O(1e-12)`–`O(1e-15)`; a value above `1e-10` signals geometric
-degeneracy. To check explicitly:
-
-```julia
-using Pyrolysis.Internal
-
-err = gcl_error(mesh, w, dt)        # predictive relative error (max over cells)
-check_gcl(mesh, w, dt; tol = 1e-12) # Bool
-
-# For a time-varying cross-section (WithChi mode) pass A_old, A_new:
-gcl_residual(mesh, V_old, w, dt; A_old = A0, A_new = A1)
-```
-
-A `GCLTracker` accumulates the error over a run if you wire it into a custom
-driver. In normal use, a GCL violation is not something you tune — it is a
-symptom of a degenerate mesh (a cell driven to near-zero width); address the
-underlying cause (§15.7.3).
+The discrete Geometric Conservation Law holds by construction: every residual
+evaluation recomputes each cell volume as `V = A·|z_{i+1} − z_i|` from the node
+positions in the state (Technical Reference §11.5), so mesh motion injects no
+"phantom" mass. A cell driven to
+near-zero width is still a degenerate state; address the underlying cause
+(§15.7.3).
 
 ### 15.7.3 Vanishing cross-section and thickness
 
@@ -10845,29 +10512,29 @@ MLR looks off by a factor that tracks `A(t)/A_0`, you are reading the wrong one.
 ### 15.7.4 Choosing a linear-solve strategy for large ALE
 
 For large ALE problems the structured ALE couplings (cumulative mesh velocity,
-χ back-reaction) dominate Jacobian assembly/solve cost. The strategies trade
+χ back-reaction) dominate Jacobian assembly/solve cost. The two strategies trade
 exactness for speed (Technical Reference §15.10):
 
 | Strategy | Exactness | When to use |
 |---|---|---|
 | `DirectSolve()` (fixed-mesh default) | Exact; densify + factor | Fixed mesh; exact ALE Jacobian; verification anchor |
-| `StructuredSolve()` | Exact; sparse LU on the local block + Richardson (2–5 iters) | Typical ALE problems |
 | `ApproxSolve()` (ALE default) | Approximate; drops structured couplings (`is_approximate == true`) | ALE: the modified Newton iteration still converges |
-| `MatrixFreeSolve()` | GMRES on the operator action | Research/experimental |
 
-Select via a `JacobianSpec` (remember: **not** with `handle_depletion = true`):
+Select one by passing the bare backend; it works with or without
+`handle_depletion`:
 
 ```julia
 solution = solve(problem;
     use_ale  = true,
-    jacobian = JacobianSpec(Structured(strategy = ApproxSolve()), problem),
+    jacobian = Structured(strategy = DirectSolve()),   # the exact ALE Jacobian
 )
 ```
 
-If `ApproxSolve` increases Newton rejections on Arrhenius transients, fall back
-to `StructuredSolve` (exact, still O(N) per coupling apply) or the default
-`DirectSolve`. Use `verify_jacobian` (§15.3) with the masked mode to confirm an
-approximate backend still tracks the reference inside its support.
+The two strategies follow the same trajectory, and the exact one costs several
+times more per step, so `ApproxSolve` is the default; use
+`DirectSolve` to check a configuration against the exact Jacobian. Use
+`verify_jacobian` (§15.3) with the masked mode to confirm the approximate
+backend still tracks the reference inside its support.
 
 ---
 
@@ -10893,9 +10560,9 @@ solution = solve(problem; radiation_model = BEER_LAMBERT)        # in-depth abso
 | `P1_QUASI_STEADY` | P1 diffusion with re-radiation | **Experimental — rejected by `solve`** |
 
 `NO_RADIATION`, `SURFACE_ABSORPTION`, and `BEER_LAMBERT` are exported by
-`using Pyrolysis`. `P1_QUASI_STEADY` has moved to
-`Pyrolysis.Experimental.RadiationP1` and is **not** part of the core unified
-residual; passing it to `solve` errors with a message pointing you to the
+`using Pyrolysis`. `P1_QUASI_STEADY` is exported from
+`Pyrolysis.Experimental` (its residual lives in `Pyrolysis.Experimental.RadiationP1`)
+and is **not** part of the core unified residual; passing it to `solve` errors with a message pointing you to the
 Experimental module. Do not expect to use it through the standard `solve` path
 (Technical Reference §8.12).
 
@@ -11007,6 +10674,8 @@ function modify(prob, p)
         reactions             = (new_rxn,),
         mixing                = base.mixing,
         lateral_shrinkage_law = base.lateral_shrinkage_law,
+        depletion_limiter     = base.depletion_limiter,
+        gas_viscosity         = base.gas_viscosity,
     )
     return PyrolysisProblem(;
         mesh         = prob.mesh,
@@ -11056,9 +10725,9 @@ Work top to bottom; each item is cheap to try and the early ones dominate.
    surface with `create_stretched_mesh` (§15.5.4) rather than refining
    uniformly.
 2. **Keep the default structured Jacobian.** `jacobian = nothing` →
-   `Structured(DirectSolve())` (`ApproxSolve()` under ALE, which drops the
-   dense geometry block and keeps the pattern local), sparse and analytical —
-   far faster than colored FD.
+   `Structured(strategy = DirectSolve())` (`ApproxSolve()` under ALE, which
+   drops the dense geometry block and keeps the pattern local), sparse and
+   analytical — far faster than finite-differencing the right-hand side.
 3. **Keep the default linear solver.** `linear_solver = nothing` picks UMFPACK
    for the exact ALE Jacobian and KLU for every other sparse Jacobian (§8.4).
    Iterative
@@ -11078,7 +10747,7 @@ Work top to bottom; each item is cheap to try and the early ones dominate.
    (§15.10).
 8. **Disable extras you are not using.** `progress = false` removes the progress
    bar in batch/sweep contexts; leave `diagnostics = false` in production runs —
-   it costs an extra ledger sweep every `diagnostics_stride` steps and is only
+   it costs an extra energy sweep every `diagnostics_stride` steps and is only
    needed for debugging (§15.1.2).
 9. **Keep one Julia session for many solves.** The first solve of a problem
    compiles the residual and Jacobian kernels for its types: the component and
@@ -11106,18 +10775,18 @@ do not configure them. The levers above are the ones you control.
 
 - Conservation ledgers and what each residual proves: Technical Reference §16;
   the post-processing/reading side in UG-9.
-- Jacobian backends, strategies, and the extension stubs
-  (`klu_factorization`, `pardiso_factorization`, `amg_preconditioner`,
-  `forward_sensitivity`, `adjoint_sensitivity`, `verify_mixing_derivatives`):
-  UG-11 and Technical Reference §15.
-- Adaptivity (error indicators, monitors, `relocate_nodes!`, depletion):
-  UG-10 and Technical Reference §14.
+- Jacobian backends, strategies, linear solvers, and the extension stubs
+  (`forward_sensitivity`, `adjoint_sensitivity`): UG-11 and Technical
+  Reference §15.
+- Depletion handling, and the standalone mesh tools (error indicators,
+  monitors, `relocate_nodes!`, quality metrics): UG-10 and Technical
+  Reference §14.
 - The full keyword and default table for `solve`: UG-16.
 
 The escape hatch for anything not on the curated top-level surface is the
 `Pyrolysis.Internal` umbrella (`using Pyrolysis.Internal`), which re-exports
-every submodule's public symbols — the mesh-quality, GCL, and remapping helpers
-in this chapter live there. Symbols reached that way are not part of the stable
+every submodule's public symbols — the mesh-quality and diagnostics helpers in
+this chapter live there. Symbols reached that way are not part of the stable
 public API and may move between minor releases.
 
 
@@ -11175,7 +10844,7 @@ three ways to reach a name:
 > `create_step_update_callback`; the iterative linear solvers
 > `ILUGMRESFactorization`, `ILUBiCGSTABFactorization`; the surface-temperature
 > accessors `get_surface_temperature`, `get_back_face_temperature`; and the
-> geometry accessors (`n_cells`, `cell_center`, `total_volume`, …) are exported
+> geometry accessors (`n_cells`, `cell_size`, `domain_bounds`, …) are exported
 > by their submodules but **not** at the top level. Use `using Pyrolysis.Internal`
 > or a submodule-qualified import to call them.
 
@@ -11187,34 +10856,32 @@ the kind of names it owns. Everything a submodule exports is reachable as
 
 | Submodule | Owns |
 |---|---|
-| `Materials` | `Material`, components, `Reaction`/`ReactionSet`, property-function types, `MixingRule`/`MixingSpec`/`MaterialMixing`, `RadiationModel` enum, physical constants |
-| `BoundaryConditions` | all thermal/mass/pressure/mesh BC types, `BoundaryConditionSet`, `ambient_temperature` |
-| `Geometry` | `Mesh1D`, `Node1D`/`Cell1D`/`Face1D`/`CellState`, `MeshTopology`/`MeshGeometry`, `create_uniform_mesh`/`create_stretched_mesh`, geometry accessors (`n_cells`, `cell_center`, `total_volume`, `domain_bounds`, `cell_size`, `boundary_face_ids`, …) |
+| `Materials` | `Material`, components, `Reaction`/`DepletionLimiter`, property-function types, `MixingRule`/`MixingSpec`/`MaterialMixing`, `RadiationModel` enum, physical constants |
+| `BoundaryConditions` | all thermal/mass/pressure BC types, `BoundaryConditionSet`, `ambient_concentration` |
+| `Geometry` | `Mesh1D`, `Node1D`/`Cell1D`/`Face1D`/`CellState`, `create_uniform_mesh`/`create_stretched_mesh`/`create_mesh_from_nodes`, geometry accessors (`n_cells`, `n_nodes`, `n_faces`, `cell_size`, `domain_bounds`, …); `MeshTopology`/`MeshGeometry` are placeholders for a multi-dimensional extension (the 1D residual reads `Mesh1D` and the `StateCache`) |
 | `Properties` | mixture/effective-property functions, `PropertyCache`, `RadiationCache` |
-| `Physics` | kinetics, conduction, gas transport, radiation (surface/Beer–Lambert), volume change, pressure, ALE mesh motion, GCL, remapping |
-| `Adaptivity` | error indicators, monitors/`relocate_nodes!`, quality metrics, surface-depletion merge machinery, `find_*` helpers |
+| `Physics` | kinetics, conduction, gas transport, radiation (surface/Beer–Lambert), volume change, ideal-gas pressure |
+| `Adaptivity` | depleted-cell parking (`park_cell!`, the conservative temperature merge), `find_*` helpers; standalone error indicators, monitors/`relocate_nodes!`, quality metrics |
 | `Discretization` | finite-volume operators, flux limiters, boundary fluxes, `solve_boundary_temperature`, `get_surface_temperature`/`get_back_face_temperature`, ALE/Darcy fluxes |
 | `Problem` | `PyrolysisProblem`, `PyrolysisSolution`, `ProblemDef`, `Workspace`, `SimulationMode` traits, `StateLayout`, validation, initial-condition helpers |
 | `Residual` | `residual!`, column-average helpers |
 | `Jacobian` | `JacobianBackend`/`JacobianSpec`, `Structured`/`DenseAD_ForwardDiff`, `LinearSolveStrategy` family, operators, structured couplings, `verify_jacobian_at` |
 | `Diagnostics` | conservation trackers, `check_*`/`*_report`, `DiagnosticsCallback`, `DiagnosticsState`/`DiagnosticsRow` |
 | `Solver` | `solve`, `parameter_sweep`, callbacks, ILU solvers, `get_profile`/`get_cell_positions`/`interpolate_solution` |
-| `Experimental` | P1 radiation (`P1_QUASI_STEADY`, Marshak/Reflective/Dirichlet radiation BCs, the P1 residual), h-AMR (refinement/coarsening, `AMRController`) — **unstable**, not in `Internal` |
+| `Experimental` | P1 radiation (`P1_QUASI_STEADY`, Marshak/Reflective/Dirichlet radiation BCs, the P1 residual), h-refinement/coarsening (`AMRController`; its meshes cannot be passed to `solve`) — **unstable**, not in `Internal` |
 
 ### 16.1.2 Extension stubs
 
-Three families of functions are *stubs* in core Pyrolysis that gain concrete
-methods only when an optional dependency is loaded. Calling a stub without its
-extension raises an error telling you which package to add.
+Two functions are *stubs* in core Pyrolysis that gain concrete
+methods only when optional dependencies are loaded. Calling a stub without its
+extension raises a `MethodError`.
 
 | Stub(s) | Triggered by | Provides |
 |---|---|---|
-| `klu_factorization` | `using KLU` | `LinearSolve.KLUFactorization()` under a stable name |
-| `pardiso_factorization` | `using Pardiso` | `LinearSolve.MKLPardisoFactorize()` |
-| `amg_preconditioner` | `using AlgebraicMultigrid` | smoothed-aggregation AMG preconditioner |
 | `forward_sensitivity`, `adjoint_sensitivity` | `using SciMLSensitivity, Zygote` | local forward/adjoint sensitivities (§16.10) |
-| `verify_mixing_derivatives` | `using Symbolics` | symbolic mixing-derivative check (test-only) |
 
+Linear solvers need no extension: pass any LinearSolve factorization (for
+example `KLUFactorization()` or `MKLPardisoFactorize()`) directly (§16.8).
 Plotting recipes (`plot(sol; kind = …)`) attach when `using Plots` (or
 `RecipesBase`) is loaded; see Chapter 9.
 
@@ -11232,14 +10899,15 @@ keyword convenience constructor.
 
 ```julia
 SolidComponent(name::Symbol; ρ, c, k,
-               ε = 0.9, α = 0.0, γ = 1.0, λ = 0.0, κ = 0.0,
-               ρ_intrinsic = nothing, φ = nothing)
+               ε = 0.9, absorptivity = nothing, α = 0.0, γ = 1.0, λ = 0.0, κ = 0.0,
+               ρ_intrinsic = nothing, φ = nothing, validate_properties = true)
 
 LiquidComponent(name::Symbol; ρ, c, k,
-                λ = 2e-5, κ = 0.0, ε = 0.95, α = 0.0, γ = 0.0,
-                ρ_intrinsic = nothing, φ = nothing)
+                λ = 2e-5, κ = 0.0, ε = 0.95, absorptivity = nothing, α = 0.0, γ = 0.0,
+                ρ_intrinsic = nothing, φ = nothing, validate_properties = true)
 
-GaseousComponent(name::Symbol; M, c, k, λ, ε = 0.0, α = 0.0, γ = 0.0)
+GaseousComponent(name::Symbol; M, c, k, λ, ε = 0.0, α = 0.0, γ = 0.0,
+                 validate_properties = true)
 ```
 
 | Keyword | Meaning (symbol) | Units | Default |
@@ -11254,15 +10922,17 @@ GaseousComponent(name::Symbol; M, c, k, λ, ε = 0.0, α = 0.0, γ = 0.0)
 | `absorptivity` | surface absorptivity `a_j` for incident radiation (solid/liquid only; `nothing` = Kirchhoff `ε_j(T)`) | – | `nothing` |
 | `α` | mass absorption coefficient `α_j` | m²·kg⁻¹ | `0.0` |
 | `γ` | swelling factor `γ_j` | – | `1.0` (solid), `0.0` (liquid/gas) |
+| `validate_properties` | sample the laws on `[200, 3000]` K at 1 K steps and reject `ρ`, `c`, `k` ≤ 0, `λ`, `κ` < 0 or `ε` outside `[0, 1]` | – | `true` |
 | `ρ_intrinsic` | skeletal/intrinsic density `ρ_{i,j}` (porosity formula only) | kg·m⁻³ | `= ρ` |
 | `φ` | pure-phase porosity; sets `ρ_intrinsic = ρ/(1−φ)` (constant `ρ` only) | – | `nothing` |
 
-`ρ`, `c`, `k`, `λ`, `κ` accept either a plain number or a property-function
-object (§16.2.2); they are converted with `to_property` automatically. Pass
+`ρ`, `c`, `k` (and `λ` of a liquid or gas) accept either a plain number or a
+property-function object (§16.2.2); they are converted with `to_property`
+automatically. `κ`, and `λ` of a `SolidComponent`, take a number. Pass
 **either** `ρ_intrinsic` or `φ`, never both — supplying both throws an
 `ArgumentError`. The bulk density `ρ` is what mixing rules and mixture density
 use; `ρ_intrinsic` is used **only** in the porosity formula
-`φ = clamp(1 − Σ ξ_j/ρ_{i,j}, 0, 1)` (see §5).
+`φ = clamp(1 − Σ ξ_j/ρ_{i,j}, 0, 1)` (see Technical Reference §5.3).
 
 ```julia
 virgin = SolidComponent(:virgin, ρ = 530, c = 2000, k = 0.12, ε = 0.9, κ = 1e-15)
@@ -11279,8 +10949,8 @@ Phase predicates (top-level exported): `is_solid(c)`, `is_liquid(c)`,
 
 Every property field can be a constant number or one of these callable property
 objects (all top-level exported). They implement `p(T)` (and `p(T, ξ)` for the
-state-dependent one) and carry analytical or finite-difference derivatives used
-in Jacobian assembly (see §4.5).
+state-dependent one); the Jacobian assembly differentiates them with ForwardDiff
+(UG §3.3.3; Technical Reference §4.5).
 
 | Type | Constructor | Value `p(T)` |
 |---|---|---|
@@ -11290,6 +10960,7 @@ in Jacobian assembly (see §4.5).
 | `ArrheniusProperty` | `ArrheniusProperty(A, E, T_ref)` | `A·exp(−E/(R_g·T))` |
 | `TableProperty` | `TableProperty((T1,…), (v1,…))` | linear interpolation; nearest-value extrapolation |
 | `CallableProperty` | `CallableProperty(f)` | `f(T)` |
+| `SutherlandProperty` | `SutherlandProperty(μ_ref, T_ref, S)`; `SutherlandProperty()` = air | `μ_ref·(T/T_ref)^1.5·(T_ref + S)/(T + S)` |
 | `StateDependentProperty` | `StateDependentProperty(f)` | `f(T, ξ)` (errors if called as `p(T)`) |
 
 `TableProperty` requires strictly increasing temperatures (checked at
@@ -11320,11 +10991,12 @@ constructor resolves against the component names.
 ```julia
 # one product, numeric indices
 Reaction(name, reactant::Int => product::Int;
-         A, E, h, n = 1.0, T_min = 0.0, T_max = Inf, validate_mass = true)
+         A, E, h, n = 1.0, T_min = 0.0, T_max = Inf, gate_width = 1.0, validate_mass = true)
 
 # two products, numeric indices
 Reaction(name, reactant::Int => (p1::Int, p2::Int);
-         A, E, h, yields::Tuple, n = 1.0, T_min = 0.0, T_max = Inf, validate_mass = true)
+         A, E, h, yields::Tuple, n = 1.0, T_min = 0.0, T_max = Inf, gate_width = 1.0,
+         validate_mass = true)
 
 # one product, symbolic names
 Reaction(name, reactant::Symbol => product::Symbol; A, E, h, n = 1.0, …)
@@ -11342,6 +11014,7 @@ Reaction(name, reactant::Symbol => (p1::Symbol, p2::Symbol); A, E, h, yields, n 
 | `n` | reaction order `n_{i,reactant}` | – | `1.0` |
 | `T_min` | lower temperature gate `T_min,i` (smooth tanh ramp) | K | `0.0` |
 | `T_max` | upper temperature gate `T_max,i` (smooth tanh ramp) | K | `Inf` |
+| `gate_width` | width `w` of the smooth tanh temperature gates | K | `1.0` |
 | `validate_mass` | enforce mass balance at construction | – | `true` |
 
 Mass-balance convention: the single reactant is consumed with implicit mass 1.0;
@@ -11350,7 +11023,7 @@ automatically). Each yield must additionally be ≥ 0 and the order must satisfy
 `n ≥ 0` — both enforced unconditionally at construction; `validate_mass = false`
 disables only the sum check. `h` accepts a number (`ConstantProperty`), a `(a, b)` tuple
 (`LinearProperty`, i.e. `a + b·T`), or any property object — use
-`StateDependentProperty` for moisture sorption. See §6 for the rate law, tanh
+`StateDependentProperty` for moisture sorption. See Technical Reference §6 for the rate law, tanh
 gates (≈10 K leakage caveat), and the depletion limiter.
 
 ```julia
@@ -11363,13 +11036,12 @@ rxn = Reaction(:charring, :virgin => (:char, :gas);
 rxn2 = Reaction(:char_oxidation, 1 => 2; A = 1e10, E = 160e3, h = -25e6)
 ```
 
-`ReactionSet` is a tuple-based collection type (top-level exported); the common
-path is to pass a plain tuple of reactions to `Material`.
+Reactions are passed to `Material` as a plain tuple.
 
 ### 16.2.4 Mixing rules: `MixingRule`, `MixingSpec`, `MaterialMixing`
 
 Effective conductivity `k`, gas transfer `λ`, and permeability `κ` are each
-mixed with their own rule (see §5). The rule enum (top-level exported) is:
+mixed with their own rule (see Technical Reference §5). The rule enum (top-level exported) is:
 
 ```julia
 @enum MixingRule PARALLEL SERIES WEIGHTED BRUGGEMAN CARMAN_KOZENY
@@ -11423,7 +11095,8 @@ Material(; name::Symbol,
            reactions::Tuple = (),
            mixing = MaterialMixing(),
            lateral_shrinkage_law::Union{Function,Nothing} = nothing,
-           depletion_limiter::DepletionLimiter = DepletionLimiter())
+           depletion_limiter::DepletionLimiter = DepletionLimiter(),
+           gas_viscosity = SutherlandProperty())
 ```
 
 | Keyword | Meaning | Default |
@@ -11434,9 +11107,11 @@ Material(; name::Symbol,
 | `mixing` | `(k, λ, κ)` NamedTuple from `MaterialMixing` | `MaterialMixing()` |
 | `lateral_shrinkage_law` | `χ̄ ↦ A(t)/A_0`; `nothing` ⇒ constant cross-section | `nothing` |
 | `depletion_limiter` | per-material `DepletionLimiter` for the reaction-rate depletion roll-off (see §16.2.3 note and Technical Reference §6.3) | `DepletionLimiter()` |
+| `gas_viscosity` | pore-gas dynamic viscosity μ(T) used in the Darcy mobility `κ/μ` (Darcy–Fick mode only) | `SutherlandProperty()` (air) |
 
 Providing a non-`nothing` `lateral_shrinkage_law` switches the simulation into
-the variable-cross-section (WithChi) mode under ALE (see §10 and §16.6). The law
+the variable-cross-section (WithChi) mode under ALE (see §16.6 and Technical
+Reference §10). The law
 is any function of the column-average pyrolysis progress `χ̄`, e.g.
 `χ̄ -> 1 - 0.3*χ̄` for 30 % lateral shrink at full conversion.
 
@@ -11457,8 +11132,8 @@ pmma = Material(
 `DepletionLimiter(; threshold = 1.0, enabled = true)` — `threshold` [kg·m⁻³] is
 the concentration scale of the smooth `tanh(ξ/threshold)` rate roll-off applied
 per reactant; `enabled = false` removes the only guard that stops zero-order
-reactions at ξ = 0. Exported by the `Physics` and `Materials` submodules (not at
-the top level): `using Pyrolysis.Physics: DepletionLimiter`.
+reactions at ξ = 0. Top-level exported (and also exported by the `Physics` and
+`Materials` submodules).
 
 > Pyrolysis.jl does **not** provide a "copy-with-overrides" `Material(prob.material; …)`
 > or `PyrolysisProblem(prob; …)` constructor. To vary a parameter (e.g. in a
@@ -11489,7 +11164,7 @@ with its own residual.
 ## 16.3 Meshes and geometry
 
 See Technical Reference §13 (discretization) and the geometry notes in §13. Only
-the two mesh creators and the topology/geometry view types are top-level
+the mesh creators and the topology/geometry placeholder types are top-level
 exported; the geometry accessors require `Pyrolysis.Internal` or the `Geometry`
 submodule.
 
@@ -11503,6 +11178,10 @@ create_uniform_mesh(L::Real, n_cells::Int, ::Val{NC};
 create_stretched_mesh(L::Real, n_cells::Int, ::Val{NC}, stretch::Real;
                       T_initial = 300.0, ξ_initial = nothing,
                       cross_section_area = 1.0, stretch_from = :top)
+
+create_mesh_from_nodes(node_positions::AbstractVector{<:Real}, ::Val{NC};
+                       T_initial = 300.0, ξ_initial = nothing,
+                       cross_section_area = 1.0)
 ```
 
 | Argument / keyword | Meaning | Default |
@@ -11533,30 +11212,34 @@ After a solve you usually read geometry through the `PyrolysisSolution`
 (§16.5). When you need to inspect the mesh directly, import from the submodule:
 
 ```julia
-using Pyrolysis.Geometry: n_cells, n_nodes, cell_center, cell_size,
-                          total_volume, domain_bounds, boundary_face_ids
+using Pyrolysis.Geometry: n_cells, n_nodes, n_faces, cell_size, domain_bounds
 
 n = n_cells(mesh)               # number of cells
-zc = [cell_center(mesh, i) for i in 1:n]
+dz = [cell_size(mesh, i) for i in 1:n]
+zc = mesh.cell_centers          # cached cell centers (a Mesh1D field)
 (zmin, zmax) = domain_bounds(mesh)
 ```
 
-`MeshTopology` and `MeshGeometry` (the immutable-connectivity and mutable-geometry
-views used by the low-level residual layer) *are* top-level exported. The
+The cached geometry is held in `Mesh1D` fields: `cell_centers`, `cell_volumes`,
+`face_positions`, `face_areas`, `cross_section_area` (the current area `A`), and
+`boundary_faces` (boundary id → face
+indices). `MeshTopology` and `MeshGeometry` *are* top-level exported, but they are
+placeholders for a multi-dimensional extension: the 1D residual reads `Mesh1D`
+and the `StateCache`, not them. The
 component count of a material is `n_components(material)`, exported from
 `Pyrolysis.Materials` (also in `Internal`).
 
 ### 16.3.3 State-vector layout
 
 The flat ODE state is packed block-major as `[T | ξ_1..ξ_NC | z | χ]`, where the
-`z` block exists only in ALE mode and the `χ` block only in WithChi mode (see §15
-and §16.6). `StateLayout` (top-level exported) is the descriptor; `state_length`,
+`z` block exists only in ALE mode and the `χ` block only in WithChi mode (see §16.6
+and Technical Reference §15.1). `StateLayout` (top-level exported) is the descriptor; `state_length`,
 `pack_state!`, `create_state_vector`, `update_mesh_from_state!`, `block_view`,
 and the accessors `get_temperature`, `get_concentration`, `get_node_position`,
 `get_node_positions`, `get_thickness_from_state`, `column_chi_bar_from_state`,
 `cross_section_area_from_state` are also top-level exported for users who index
 raw state. Most users never touch these — `solve` and the solution object handle
-packing for you. See §16.11 for the low-level residual surface.
+packing for you. See §16.12 for the low-level residual surface.
 
 ---
 
@@ -11572,7 +11255,7 @@ Reflective, Dirichlet) are **not**; they live in `Pyrolysis.Experimental`.
 |---|---|---|
 | `AdiabaticBC` | `AdiabaticBC()` | `0` |
 | `HeatFluxBC` | `HeatFluxBC(flux)` (number or `t -> q`) | `flux` or `flux(t)` |
-| `ConvectiveBC` | `ConvectiveBC(; h, T_inf)` | `h(t)·(T_∞ − T_s)` |
+| `ConvectiveBC` | `ConvectiveBC(; h, T_inf, blowing = NoBlowing())` | `h(t)·(T_∞ − T_s)`, `h` reduced by the `blowing` model |
 | `RadiativeBC` | `RadiativeBC(; ε = nothing, T_inf, F = 1.0)` | `F·ε_eff·σ·(T_∞⁴ − T_s⁴)` |
 | `DirichletThermalBC` | `DirichletThermalBC(T)` | enforces `T_s = T` (penalty in Newton) |
 | `RadiativeFluxBC` | `RadiativeFluxBC(flux; absorptivity = nothing)` or `RadiativeFluxBC(; flux, absorptivity = nothing)` | incident external radiation (model-dependent, below) |
@@ -11582,6 +11265,9 @@ Notes and defaults:
 
 - `ConvectiveBC` requires `h` and `T_inf` keywords; both accept a number or a
   function of `t`.
+- `blowing` takes a blowing model — `NoBlowing()` (default), `CouetteFilm`,
+  `PropertyRatioFilm`, `PoolingFilm`, `FunctionBlowing`, all top-level exported —
+  that reduces `h` with the outward gas flux at the face (§5.2.3).
 - `RadiativeBC`: `ε = nothing` (default) uses the composition-weighted effective
   emissivity `ε_eff` (Kirchhoff), tracking the surface as it chars; pass a
   number or `T -> ε` to override. `F` is the view factor, default `1.0`.
@@ -11597,7 +11283,7 @@ Notes and defaults:
 
 The surface temperature `T_s` is found by a Newton solve of the surface energy
 balance `q_BC(T_s) = k_eff·(T_s − T_cell)/Δz_{1/2}` (clamped to `[200, 3000]` K,
-tol `1e-10`, ≤50 iterations) — see §12.
+tol `1e-10`, ≤50 iterations) — see Technical Reference §12.2.
 
 ### 16.4.2 Mass BCs
 
@@ -11625,7 +11311,7 @@ clean atmosphere); `ξ_inf` also accepts `t -> ξ_∞(t)` or a per-component
 
 `ConvectivePressureBC` takes `h_P` (pressure-transfer coefficient, m·Pa⁻¹·s⁻¹)
 and `P_ext` positionally. Pressure BCs only act when the material enables Darcy
-flow (any solid/liquid `κ > 0`); see §9.
+flow (any solid/liquid `κ > 0`); see Technical Reference §9.
 
 ### 16.4.4 Mesh motion (ALE)
 
@@ -11670,9 +11356,9 @@ others to zero. `T_initial` defaults to `z -> 300.0`. Profile helpers
 (`step_profile`, `linear_profile`, `gaussian_profile`, `tanh_profile`) live in
 `Pyrolysis.Problem`.
 
-> **Transpiration caveat.** The surface gas-transpiration enthalpy term is
-> incompatible with the default `S_conv` gas-convection convention (they
-> double-count). `solve` rejects `use_transpiration_bc = true`. Leave it off.
+> The boundary energy balance has no surface gas-enthalpy term: `S_conv`
+> carries the gas enthalpy volumetrically, and a surface term would
+> double-count it (§5.4).
 
 ---
 
@@ -11717,10 +11403,12 @@ problem = PyrolysisProblem(
 )
 ```
 
-`validate_problem(problem; strict = false)` (in `Pyrolysis.Problem`) checks mesh,
-material stoichiometry, BC coverage, time span, and initial-condition counts;
-`solve` runs it automatically unless `validate = false`. `validate_material(m)`
-(in `Pyrolysis.Materials`) validates a material in isolation.
+`validate_problem(problem; strict = false)` (in `Pyrolysis.Problem`) checks the
+mesh, the material's component count and reaction indices, the boundaries, the
+time span, the initial-condition count, and (Darcy–Fick) the initial porosity;
+`strict = true` adds the stoichiometry, initial-condition-call and positive-volume
+checks (§7.9). `solve` runs it
+automatically unless `validate = false`.
 
 ### 16.5.2 `PyrolysisSolution`
 
@@ -11728,14 +11416,13 @@ material stoichiometry, BC coverage, time span, and initial-condition counts;
 
 | Field | Type | Meaning |
 |---|---|---|
-| `problem` | `PyrolysisProblem` | the originating problem |
+| `problem` | `PyrolysisProblem` | the copy of the problem the run integrated (its mesh holds the final state) |
 | `t` | `Vector{Float64}` | saved times [s] |
 | `T` | `Matrix{Float64}` | temperatures, `(n_cells, n_steps)` [K] |
 | `ξ` | `Array{Float64,3}` | concentrations, `(NC, n_cells, n_steps)` [kg·m⁻³] |
 | `z` | `Matrix{Float64}` | node positions, `(n_nodes, n_steps)` [m]; empty `0×0` in Eulerian mode |
 | `surface_T` | `Vector{Float64}` | solved surface temperature per step [K] |
 | `mass_loss_rate` | `Vector{Float64}` | MLR per **current** area `A(t)` (top + permeable-bottom) [kg·m⁻²·s⁻¹] |
-| `energy_residual` | `Vector{Float64}` | energy-conservation residual (zeros if tracker disabled) |
 | `retcode` | `Symbol` | integrator return code (e.g. `:Success`, `:Terminated`) |
 | `solve_time` | `Float64` | wall-clock solve time [s] |
 | `raw_solution` | (untyped) | the underlying ODE solution (interpolation source) |
@@ -11745,10 +11432,12 @@ material stoichiometry, BC coverage, time span, and initial-condition counts;
 `gas_generation_rate`, `back_temperature`, `total_mass`, `thickness_history`,
 `surface_mass_flux`, `surface_heat_flux_net`, `surface_heat_flux_absorbed`,
 `surface_heat_flux_reradiation`, `surface_heat_flux_convection`,
-`surface_heat_flux_conduction`, `surface_heat_flux_transpiration`,
-`volumetric_absorption`,
+`surface_heat_flux_conduction`, `surface_blowing_ratio`,
+`surface_pooling_factor`, `surface_face_fraction`, `surface_face_buoyancy`,
+`volumetric_absorption`, `radiation_transmitted`,
 `surface_emissivity`, `surface_conductivity`, `back_heat_flux`, `MLR_gauge`,
-`cross_section_area_history`, `diagnostics_log`.
+`cross_section_area_history`, `live_cells`, `park_times`, `diagnostics_log`
+(§9.3).
 
 ```julia
 sol = solve(problem)
@@ -11835,8 +11524,8 @@ solve(problem::PyrolysisProblem; kwargs...) -> PyrolysisSolution
 | Keyword | Type | Default | Purpose |
 |---|---|---|---|
 | `integrator` | type / instance / `nothing` | `nothing` → `KenCarp4(…)` | ODE algorithm (constructor or fully-built instance) |
-| `linear_solver` | factorization / `nothing` | `nothing` → `KLUFactorization()`, or `UMFPACKFactorization()` for the exact ALE Jacobian | sparse/dense linear solver (only paired with a *constructor* `integrator`) |
-| `jacobian` | `JacobianSpec` / `nothing` | `nothing` → `Structured(strategy = DirectSolve())` | pluggable Jacobian backend |
+| `linear_solver` | factorization / `nothing` | `nothing` → `KLUFactorization()`, or `UMFPACKFactorization()` for the exact ALE Jacobian | any LinearSolve factorization (only paired with a *constructor* `integrator`) |
+| `jacobian` | `Structured` / `nothing` | `nothing` → `Structured(strategy = DirectSolve())` (fixed mesh) or `Structured(strategy = ApproxSolve())` (ALE) | Jacobian strategy; `solve` builds the spec |
 | `verify_jacobian` | `NamedTuple` / `nothing` | `nothing` | `(rtol=…, atol=…, sample_times=[…])` to compare backend vs. `DenseAD_ForwardDiff` |
 | `abstol` | `Real` | `1e-8` | absolute ODE tolerance |
 | `reltol` | `Real` | `1e-6` | relative ODE tolerance |
@@ -11854,10 +11543,8 @@ solve(problem::PyrolysisProblem; kwargs...) -> PyrolysisSolution
 | `depletion_threshold` | `Real` | `0.05` | fraction of the initial thickness (ALE) or initial condensed concentration (fixed mesh) below which a cell parks |
 | `min_cells` | `Int` | `2` | minimum live cell count before terminating instead of parking |
 | `radiation_model` | `RadiationModel` | `NO_RADIATION` | `NO_RADIATION` / `SURFACE_ABSORPTION` / `BEER_LAMBERT` |
-| `diagnostics` | `Bool` | `false` | enable conservation-diagnostics snapshots |
-| `diagnostics_stride` | `Int` | `10` | snapshot every N steps |
-| `energy_form` | `Symbol` | `:standard` | `:standard` or `:with_generation_sink` |
-| `use_transpiration_bc` | `Bool` | `false` | **rejected if `true`** (double-counts `S_conv`) |
+| `diagnostics` | `Bool` | `false` | log sensible-energy snapshots in `extras.diagnostics_log` |
+| `diagnostics_stride` | `Int` | `10` | snapshot every N accepted steps |
 | `warm_start` | `PyrolysisSolution` / `nothing` | `nothing` | reuse a prior solution's final state as initial data |
 
 Key behaviours and constraints:
@@ -11871,12 +11558,12 @@ Key behaviours and constraints:
   (e.g. `integrator = KenCarp4(linsolve = ILUGMRESFactorization())`) on its own.
 - **Default Jacobian**: `Structured(strategy = DirectSolve())` on a fixed mesh,
   `Structured(strategy = ApproxSolve())` under ALE.
-  Pass a bare backend or a `JacobianSpec` to opt into other strategies (§16.8).
+  Pass a bare `Structured` backend to opt into the other strategy (§16.8); a
+  `DenseAD_ForwardDiff()` backend or a prebuilt `JacobianSpec` raises a
+  `TypeError`.
 - **`radiation_model = P1_QUASI_STEADY`** is rejected (P1 is experimental).
-- **`energy_form`** must be `:standard` (Formulation A, the FDS/Gpyro/ThermaKin
-  convention) or `:with_generation_sink` (adds the `−Σ Δh_g ∇·J_g` cell source).
 - **`handle_depletion = true`** keeps the state size (parked cells become
-  inert ghost slots), so it combines with any `jacobian`; ghost slots read as
+  inert ghost slots), so it combines with either strategy; ghost slots read as
   `NaN` in the solution arrays and `solution.extras.live_cells` /
   `park_times` record the events.
 - **MLR gauge note**: in variable-cross-section runs, `sol.mass_loss_rate` is per
@@ -11884,6 +11571,8 @@ Key behaviours and constraints:
 
 ```julia
 # Cone calorimeter, opaque, ALE surface recession, default Jacobian:
+using OrdinaryDiffEqSDIRK: KenCarp4
+using LinearSolve: SparspakFactorization
 sol = solve(problem;
             use_ale = true,
             radiation_model = SURFACE_ABSORPTION,
@@ -11902,40 +11591,40 @@ See Technical Reference §15. These names are top-level exported.
 
 | Name | Role |
 |---|---|
-| `Structured` | production operator-based backend; `Structured(; strategy = DirectSolve())` |
+| `Structured` | production operator-based backend; `Structured(; strategy = DirectSolve())` — the only backend the `jacobian` keyword accepts |
 | `DenseAD_ForwardDiff` | dense whole-residual AD reference — verification only, not for production |
 | `JacobianBackend` | abstract supertype |
-| `JacobianSpec` | the single user-facing handle that bundles a backend + sparsity + caches |
+| `JacobianSpec` | bundles a backend with its sparsity patterns and caches (fields `backend`, `sparsity_phys`, `sparsity_geom`, `cache`) |
 
-Build a spec from a problem (the common form) or from a `(def, ws)` pair:
+Pass the bare backend to `solve`, which builds the spec for its own mesh copy and
+mode. Build a spec yourself only to drive `compute_jacobian!` or
+`verify_jacobian_at` outside `solve`, from a `(def, ws)` pair:
 
 ```julia
-JacobianSpec(backend::JacobianBackend, problem::PyrolysisProblem; kwargs...)
-JacobianSpec(backend::JacobianBackend, def::ProblemDef, ws::Workspace; kwargs...)
+sol = solve(problem; use_ale = true, jacobian = Structured(strategy = DirectSolve()))
 
-spec = JacobianSpec(Structured(strategy = ApproxSolve()), problem)
-sol  = solve(problem; jacobian = spec, use_ale = true)
+def, ws, u0 = initialize_state(problem; use_ale = true)
+spec = JacobianSpec(Structured(strategy = ApproxSolve()), def, ws)
 ```
 
 ### 16.8.2 Linear-solve strategies
 
-`Structured` takes a `LinearSolveStrategy` (all top-level exported):
+`Structured` takes a `LinearSolveStrategy` (both top-level exported):
 
 | Strategy | Behaviour | When |
 |---|---|---|
 | `DirectSolve` | materialize `A + Σ densify(couplings)`, factor (exact) | fixed-mesh default; exact ALE Jacobian |
-| `StructuredSolve` | sparse LU on `A` + preconditioned Richardson (exact, 2–5 iters) | typical, faster assembly |
-| `ApproxSolve` | drop the structured ALE couplings (Schur-style approximation) | ALE default |
-| `MatrixFreeSolve` | GMRES over the operator action (no materialization) | research/experimental |
+| `ApproxSolve` | drop the structured couplings (Schur-style approximation) | ALE default |
 
 `ApproxSolve` is marked approximate via the `is_approximate` trait; the
 verifier compares it in masked (in-support) mode. It is the ALE default
-(§11.3.3).
+(§11.3.2).
 
 ### 16.8.3 Iterative linear solvers (not top-level; use `Internal`/`Solver`)
 
 ```julia
 using Pyrolysis.Solver: ILUGMRESFactorization, ILUBiCGSTABFactorization
+using OrdinaryDiffEqSDIRK: KenCarp4
 
 ILUGMRESFactorization(; τ = 0.1, gmres_rtol = 1e-8, restart = 30)
 ILUBiCGSTABFactorization(; τ = 0.1, rtol = 1e-8)
@@ -11960,7 +11649,6 @@ Arrhenius transients).
 ```julia
 verify_jacobian_at(spec, def, ws, u, t; reference = DenseAD_ForwardDiff(), rtol, atol)
 is_approximate(backend)            # trait: true for ApproxSolve
-benchmark_jacobian_backends(...)   # timing harness
 ```
 
 Or run verification *during* a solve at chosen times:
@@ -11973,19 +11661,22 @@ sol = solve(problem; verify_jacobian = (rtol = 1e-6, atol = 1e-10,
 It warns (does not abort) when the active backend deviates from the dense AD
 reference.
 
-### 16.8.5 Solver extensions (vendor factorizations)
+### 16.8.5 Other LinearSolve factorizations
 
-Load the dependency, then pass the factorization to a constructor `integrator`:
+Any LinearSolve factorization is passed directly, as `linear_solver` or inside a
+built integrator; an explicit choice always replaces the pattern-based default:
 
 ```julia
-using Pyrolysis, KLU
-sol = solve(problem; integrator = KenCarp4(linsolve = Pyrolysis.klu_factorization()))
+using Pyrolysis
+using LinearSolve: KLUFactorization, SparspakFactorization
+sol = solve(problem; linear_solver = SparspakFactorization())
+using OrdinaryDiffEqSDIRK: KenCarp4
+sol = solve(problem; integrator = KenCarp4(linsolve = KLUFactorization()))
 ```
 
-`Pyrolysis.pardiso_factorization()` (Intel MKL Pardiso, `using Pardiso`) and
-`Pyrolysis.amg_preconditioner(A)` (`using AlgebraicMultigrid`) work the same
-way. Calling a stub without its extension loaded raises an error naming the
-package to add.
+Intel MKL Pardiso works the same way once Pardiso.jl is installed and loaded:
+`using Pardiso; solve(problem; linear_solver = MKLPardisoFactorize())`, with
+`MKLPardisoFactorize` from LinearSolve.
 
 ---
 
@@ -12026,9 +11717,13 @@ function modify(prob, p)
     new_mat = Material(name = prob.material.name,
                        components = comps,
                        reactions = (new_rxn,),
-                       mixing = prob.material.mixing)
+                       mixing = prob.material.mixing,
+                       lateral_shrinkage_law = prob.material.lateral_shrinkage_law,
+                       depletion_limiter = prob.material.depletion_limiter,
+                       gas_viscosity = prob.material.gas_viscosity)
     return PyrolysisProblem(mesh = prob.mesh, material = new_mat,
-                            bc_set = prob.bc_set, tspan = prob.tspan,
+                            bc_set = prob.bc_set, T_initial = prob.T_initial,
+                            ξ_initial = prob.ξ_initial, tspan = prob.tspan,
                             output_times = prob.output_times)
 end
 
@@ -12070,8 +11765,8 @@ Forward mode (ForwardDiff) suits small `θ`; adjoint mode (Zygote +
 SciMLSensitivity) suits large `θ` / scalar loss (inverse problems). `p_inject` is
 the same pattern as `modify` in §16.9 — rebuild the perturbed problem from
 `θ`. Sensitivities are reliable thanks to the AD-clean design (tanh gates,
-midpoint enthalpy, smooth limiters); avoid warm starts and the depletion
-callback when differentiating (non-smooth).
+smooth limiters); avoid warm starts and depletion parking when differentiating
+(non-smooth).
 
 ```julia
 using Pyrolysis, SciMLSensitivity, Zygote
@@ -12093,8 +11788,10 @@ out, J = forward_sensitivity(problem, θ0, p_inject;
 
 ## 16.11 Adaptivity and callbacks
 
-See Technical Reference §14. The depletion path is production-ready;
-h-refinement/coarsening and the `AMRController` are in `Pyrolysis.Experimental`.
+See Technical Reference §14. Depleted-cell parking is the only mesh adaptation
+`solve` performs. The indicators, monitors and quality metrics are standalone
+building blocks, and h-refinement/coarsening and the `AMRController` are in
+`Pyrolysis.Experimental`; their meshes cannot be passed to `solve`.
 
 ### 16.11.1 Surface-depletion via `solve`
 
@@ -12120,7 +11817,8 @@ keywords. They are exposed for custom solver loops.
 
 ### 16.11.3 Error indicators, monitors, quality metrics (Adaptivity submodule)
 
-For manual r-refinement / mesh-quality work, import from `Pyrolysis.Adaptivity`:
+For manual r-refinement / mesh-quality work on a mesh you hold (`solve` does not
+call these), import from `Pyrolysis.Adaptivity`:
 
 ```julia
 using Pyrolysis.Adaptivity: GradientIndicator, CurvatureIndicator,
@@ -12141,8 +11839,10 @@ nodes are pinned). Quality metrics carry defaults (e.g. `AspectRatioMetric(2.0)`
 
 `refine_cell!`, `perform_h_refinement!`, `coarsen_cells!`, `AMRController`,
 `adapt_mesh!`, `create_default_controller`, etc. are in `Pyrolysis.Experimental`
-and are unstable. The active-cell bookkeeping requires iterating the mask, not
-`eachindex`; treat this path as research-grade.
+and are unstable. A refined or coarsened mesh cannot be passed to `solve`
+(refinement leaves inactive parent cells among the active ones, and the kernels
+assume the active cells come first); the active-cell bookkeeping requires
+iterating the mask, not `eachindex`. Treat this path as research-grade (§10.7).
 
 ---
 
@@ -12156,9 +11856,10 @@ diagnostics = true, diagnostics_stride = N)` — rows land in
 ```julia
 using Pyrolysis.Internal   # or: using Pyrolysis.Diagnostics
 
-# trackers
-MassConservationTracker, EnergyConservationTracker, ReactionMassFlowTracker
+# trackers and the step-by-step ledger
+MassConservationTracker, EnergyConservationTracker
 DiagnosticsState, DiagnosticsRow, DiagnosticsCallback
+record_substep!, snapshot_diagnostics_row
 
 # instantaneous quantities
 compute_domain_mass(mesh, material)             # NTuple of per-component mass [kg]
@@ -12167,29 +11868,30 @@ compute_sensible_energy(mesh, material)         # E_sensible, every component [J
 # checks (return NamedTuples)
 check_mass_conservation(tracker, mesh, material; tol = 1e-10)
 check_energy_conservation(tracker, mesh, material; tol = 1e-6)
-check_reaction_mass_balance(tracker; tol = 1e-10)
 
 # human-readable reports (return String)
 mass_conservation_report(tracker, mesh, material)
 energy_conservation_report(tracker, mesh, material)
-reaction_mass_flow_report(tracker, material)
 ```
 
 The energy diagnostics keep one ledger — the sensible energy `Σ ρc_p T V` over
-every component — that closes to integrator tolerance by construction (it audits
-bookkeeping). A `DiagnosticsRow` carries `t`, `E_sensible`, `energy_residual`,
-`energy_relative`, `mass_max_relative_error`.
+every component — that closes to integrator tolerance by construction for constant composition and volume (it audits
+bookkeeping) when it is driven step by step through `record_substep!`. A
+`DiagnosticsRow` carries `t`, `E_sensible`, `energy_residual`,
+`energy_relative`, `mass_max_relative_error`; the rows `solve` logs
+(`snapshot_diagnostics_row`) fill only `t` and `E_sensible` and leave the
+cumulative fields `NaN` (§9.8).
 
 The low-level residual surface — `ProblemDef`, `Workspace`, `residual!`,
 `to_problem_def`, `build_workspace`, `build_ad_workspace`, `StateLayout` — is
 top-level exported for users building custom solver or sensitivity loops. The
-canonical call is `residual!(du, u, def, t, ws)`; build `(def, ws)` with
-`def = to_problem_def(problem; use_ale, radiation_model, energy_form)` (plus,
-for direct Beer–Lambert use, `radiation_intensity` and `radiation_kirchhoff` —
-set `radiation_kirchhoff = false` if you have already folded an explicit
+canonical call is `residual!(du, u, def, t, ws)`; build `(def, ws, u0)` with
+`initialize_state(problem; use_ale, radiation_model)` (plus, for direct
+Beer–Lambert use, `radiation_intensity` and `radiation_kirchhoff` — set
+`radiation_kirchhoff = false` if you have already folded an explicit
 absorptivity into the intensity, else the live surface `ε_eff` is applied at
-injection) and
-`ws = build_workspace(problem, def)`. See Technical Reference §15.
+injection), which applies the initial conditions and runs `to_problem_def` and
+`build_workspace` with the same keywords. See Technical Reference §15.
 
 ---
 
@@ -12216,8 +11918,6 @@ noted TR chapter.
 | `radiation_model` | `NO_RADIATION` |
 | `diagnostics` | `false` |
 | `diagnostics_stride` | `10` |
-| `energy_form` | `:standard` |
-| `use_transpiration_bc` | `false` (rejected if `true`) |
 | default integrator | `KenCarp4(autodiff = AutoFiniteDiff())` |
 | default linear solver | `KLUFactorization()`; `UMFPACKFactorization()` for the exact ALE Jacobian (`DirectSolve` under ALE) |
 | default Jacobian | `Structured(strategy = DirectSolve())`; `ApproxSolve` under ALE |
@@ -12233,7 +11933,7 @@ noted TR chapter.
 | `LiquidComponent` `ε`, `γ` | `0.95`, `0.0` |
 | `GaseousComponent` `ε`, `γ` | `0.0`, `0.0` |
 | `ρ_intrinsic` (when omitted) | `= ρ` (no pure-phase pores) |
-| `Reaction` `n`, `T_min`, `T_max`, `validate_mass` | `1.0`, `0.0`, `Inf`, `true` |
+| `Reaction` `n`, `T_min`, `T_max`, `gate_width`, `validate_mass` | `1.0`, `0.0`, `Inf`, `1.0` K, `true` |
 | `MixingSpec` `β` | `0.5` |
 | `MaterialMixing` `k`, `λ`, `κ` | `WEIGHTED`, `PARALLEL`, `WEIGHTED` (all `β = 0.5`) |
 | `Material` `reactions`, `lateral_shrinkage_law` | `()`, `nothing` |
@@ -12268,7 +11968,7 @@ noted TR chapter.
 |---|---|
 | `ILUGMRESFactorization` `τ`, `gmres_rtol`, `restart` | `0.1`, `1e-8`, `30` |
 | `ILUBiCGSTABFactorization` `τ`, `rtol` | `0.1`, `1e-8` |
-| `Structured` `strategy` | `DirectSolve()` |
+| `Structured()` `strategy` (constructor default) | `DirectSolve()` |
 
 ### Kernel constants and limits
 
@@ -12287,8 +11987,7 @@ noted TR chapter.
 | reference pressure `P_ref` | `101325` Pa | §2 |
 | gas constant `R_g` | `8.31446261815324` J·mol⁻¹·K⁻¹ | §2 |
 | Stefan–Boltzmann `σ` | `5.670374419e-8` W·m⁻²·K⁻⁴ | §2 |
-| GCL tolerance | `1e-12` | §11 |
-| mass / reaction conservation tol | `1e-10` | §16 |
+| mass conservation tol | `1e-10` | §16 |
 | energy conservation tol | `1e-6` | §16 |
 
 ---
@@ -12299,19 +11998,19 @@ noted TR chapter.
 |---|---|
 | `Material`, components, `Reaction`, property types, `MixingSpec`, `RadiationModel` | top level (`using Pyrolysis`) |
 | BC types, `BoundaryConditionSet` | top level |
-| `create_uniform_mesh`, `create_stretched_mesh` | top level |
+| `create_uniform_mesh`, `create_stretched_mesh`, `create_mesh_from_nodes` | top level |
 | `PyrolysisProblem`, `PyrolysisSolution`, `solve`, `parameter_sweep` | top level |
-| `JacobianSpec`, `Structured`, `DirectSolve`/`ApproxSolve`/…, `verify_jacobian_at` | top level |
+| `JacobianSpec`, `Structured`, `DirectSolve`/`ApproxSolve`, `verify_jacobian_at` | top level |
 | `forward_sensitivity`, `adjoint_sensitivity` | top level (stubs; need `SciMLSensitivity, Zygote`) |
-| `klu_factorization`, `pardiso_factorization`, `amg_preconditioner` | top level (stubs; need the dep) |
-| `ProblemDef`, `Workspace`, `residual!`, `StateLayout`, `to_problem_def`, `build_workspace` | top level |
+| `KLUFactorization`, `UMFPACKFactorization`, `SparspakFactorization`, `MKLPardisoFactorize` | `LinearSolve` (`using LinearSolve: …`; Pardiso/MKL for the last) |
+| `ProblemDef`, `Workspace`, `residual!`, `StateLayout`, `initialize_state`, `to_problem_def`, `build_workspace` | top level |
 | `get_profile`, `get_cell_positions`, `interpolate_solution` | `Pyrolysis.Solver` / `Pyrolysis.Internal` |
 | `get_surface_temperature`, `get_back_face_temperature` | `Pyrolysis.Discretization` / `Internal` |
 | `ILUGMRESFactorization`, `ILUBiCGSTABFactorization`, depletion callbacks | `Pyrolysis.Solver` / `Internal` |
-| geometry accessors (`n_cells`, `cell_center`, `total_volume`, …), `n_components` | `Pyrolysis.Geometry` / `Pyrolysis.Materials` / `Internal` |
+| geometry accessors (`n_cells`, `cell_size`, `domain_bounds`, …), `n_components` | `Pyrolysis.Geometry` / `Pyrolysis.Materials` / `Internal` |
 | conservation trackers, `check_*`, `*_report`, `DiagnosticsCallback` | `Pyrolysis.Diagnostics` / `Internal` |
 | trait subtypes (`Eulerian`, `ALE`, `Fickian`, `DarcyFick`, `NoChi`, `WithChi`) | `Pyrolysis.Problem` |
-| P1 radiation, h-AMR, Marshak/Reflective radiation BCs | `Pyrolysis.Experimental` (unstable) |
+| P1 radiation, h-refinement/coarsening, Marshak/Reflective radiation BCs | `Pyrolysis.Experimental` (unstable) |
 | everything every submodule exports, at once | `using Pyrolysis.Internal` |
 
 

@@ -12,9 +12,8 @@ and sign convention as implemented; explains the type-stable
 initial-condition closures and their auto-defaults. Throughout, the equations are
 checked term-by-term against the source so that the math and the code agree
 exactly — including the boundary-face sign flips, the Kirchhoff emissivity
-coupling, the neglected $d\varepsilon/dT$ term, and the strict mutual exclusion of
-the surface transpiration term with the volumetric advection source
-$S_{\text{conv}}$.
+coupling, the neglected $d\varepsilon/dT$ term, and the absence of a surface
+gas-enthalpy term alongside the volumetric advection source $S_{\text{conv}}$.
 
 This chapter conforms to the unified nomenclature of §2, Nomenclature, and uses
 the three binding sign conventions: positive flux is transport in the $+z$
@@ -38,7 +37,7 @@ are
 
 $$
 \rho c_p^{\text{eff}}\,\frac{\partial T}{\partial t}
-= -\nabla\!\cdot\mathbf{q}_{\text{cond}} + S_{\text{conv}} + S_{\text{gen}}
+= -\nabla\!\cdot\mathbf{q}_{\text{cond}} + S_{\text{conv}}
    + Q_{\text{rad}} + Q_{\text{rxn}},
 \qquad
 \frac{\partial \xi_j}{\partial t}
@@ -80,16 +79,18 @@ supertype declared in the `Materials` module:
   `Experimental` module; see §8, Thermal Radiation).
 
 Concrete types live in the `BoundaryConditions` module
-(`src/BoundaryConditions/boundary_conditions.jl`), flux evaluation lives in
-`src/Discretization/boundary_fluxes.jl`, and the surface-temperature Newton solve
-lives in `src/Discretization/boundary_temperature.jl`. The whole set is stored in
+(`src/BoundaryConditions/boundary_conditions.jl`); the thermal flux laws with their
+$T_s$ derivatives (`evaluate_bc_flux_and_derivative`) and the surface-temperature
+Newton solve live in `src/Discretization/boundary_temperature.jl`, and the mass-BC
+flux laws (`mass_bc_flux`) and the diagnostic heat-flux decomposition
+(`compute_boundary_heat_fluxes`) in `src/Discretization/boundary_fluxes.jl`. The whole set is stored in
 a type-stable, tag-keyed `BoundaryConditionSet` (§12.7) so that the residual
 specializes statically with zero dispatch overhead.
 
 > **Implementation note.** Concrete BC types and the `BoundaryConditionSet`
 > container are defined in `src/BoundaryConditions/boundary_conditions.jl`; flux
-> laws and their derivatives in `src/Discretization/boundary_fluxes.jl` and
-> `src/Discretization/boundary_temperature.jl`; BC application into the flux
+> laws in `src/Discretization/boundary_fluxes.jl` (mass BCs) and, for thermal BCs
+> with their $T_s$ derivatives, `src/Discretization/boundary_temperature.jl`; BC application into the flux
 > arrays in `src/Discretization/finite_volume.jl` (`apply_thermal_bc_flux!`,
 > `apply_mass_bc_flux!`); pressure BCs in `src/Discretization/darcy_velocity.jl`
 > (`apply_pressure_bc_to_darcy_velocity!`).
@@ -97,7 +98,7 @@ specializes statically with zero dispatch overhead.
 ### 12.1.3 The boundary-face sign convention
 
 Two boundaries exist in 1D, with the **binding** id/tag/position mapping
-(`src/Geometry/topology.jl:77`, `src/Geometry/mesh_generation.jl:127–128`):
+(`src/Geometry/topology.jl`, `src/Geometry/mesh_generation.jl`):
 
 | Tag | `boundary_id` | Position | Face id |
 |---|---|---|---|
@@ -119,8 +120,8 @@ q[f_{\text{bottom}}] = +q_{\text{conducted}}, \qquad
 q[f_{\text{top}}] = -q_{\text{conducted}},
 $$
 
-and identically for mass fluxes (`finite_volume.jl:550–554`, `590–596`,
-`712–716`). This is not a bug; it is the consistent realization of the signed
+and identically for mass fluxes (`apply_thermal_bc_flux!`, `apply_mass_bc_flux!`,
+`finite_volume.jl`). This is not a bug; it is the consistent realization of the signed
 divergence. We return to it in §12.2.5 and §12.4.4.
 
 ---
@@ -161,13 +162,12 @@ $$
 where $\Delta z_{1/2}$ is the distance from the boundary face to the first cell
 center and $k_{\text{eff}}$ is the effective conductivity of the boundary cell
 (§5, Effective Properties & Mixing Rules). Both sides are positive when heat
-flows into the material. This is **Formulation A**, the non-conservative
-convention in which the gas enthalpy carried by the flux relative to the
-skeleton is transported by the volumetric source $S_{\text{conv}}$ (§7) rather
-than by a surface blowing term; under local thermal equilibrium the gas crosses
-the surface at $T_s$ on both sides, so no surface enthalpy term exists (§1.4.3).
-The optional transpiration extension (§12.9) adds a surface enthalpy sink and is
-**off by default** and rejected at construction.
+flows into the material. The gas enthalpy carried by the flux relative to the
+skeleton is transported by the volumetric source $S_{\text{conv}}$ (§7), not by
+a surface term; under local thermal equilibrium the gas crosses the surface at
+$T_s$ on both sides, so the balance has no gas-enthalpy term (§1.4.3, §7.4.3). The
+outward gas flux enters the balance only through the blowing model of a
+`ConvectiveBC`, which scales the convective coefficient (§12.3.3).
 
 The conductive distance is exactly half the boundary cell's thickness, computed
 from state-dependent geometry (AD- and ALE-clean) as
@@ -175,7 +175,7 @@ from state-dependent geometry (AD- and ALE-clean) as
 $$
 \Delta z_{1/2}
 = \frac{1}{2}\,\frac{V_{\text{cell}}}{A_{\text{face}}}
-\qquad\text{(`boundary\_temperature.jl:563`)}.
+\qquad\text{(`boundary\_temperature.jl`)}.
 $$
 
 Using the half-width (rather than the full cell width) places the surface at the
@@ -187,21 +187,18 @@ correct one-sided gradient for a cell-centered scheme.
 Define the surface residual
 
 $$
-f(T_s) \;=\; q_{\text{BC}}(T_s)\;-\;q_{\text{cond}}(T_s)\;-\;q_{\text{transpire}}(T_s),
+f(T_s) \;=\; q_{\text{BC}}(T_s)\;-\;q_{\text{cond}}(T_s).
 $$
 
-where the transpiration term $q_{\text{transpire}}=\sum_g \dot m_g\,\Delta
-h_g(T_s,T_\infty)$ is zero in the default configuration (§12.9). The root
-$f(T_s)=0$ is found by damped Newton iteration
+The root $f(T_s)=0$ is found by Newton iteration
 
 $$
-T_s^{(k+1)} = T_s^{(k)} - \omega\,\frac{f(T_s^{(k)})}{f'(T_s^{(k)})},
+T_s^{(k+1)} = T_s^{(k)} - \frac{f(T_s^{(k)})}{f'(T_s^{(k)})},
 \qquad
 f'(T_s) = \frac{dq_{\text{BC}}}{dT_s} - \frac{k_{\text{eff}}}{\Delta z_{1/2}}
-          - \frac{dq_{\text{transpire}}}{dT_s},
 $$
 
-with under-relaxation $\omega=1$ by default (`boundary_temperature.jl:168–205`).
+(`solve_boundary_temperature!`, `boundary_temperature.jl`).
 The initial guess is the adjacent cell temperature clamped to the property
 bracket, $T_s^{(0)} = \min\bigl(\max(T_{\text{cell}}, 200\ \text{K}),
 3000\ \text{K}\bigr)$, so the solve is a pure function of its arguments. The
@@ -218,12 +215,16 @@ present; the BC derivatives are given per-type in §12.2.4.
 the dominant physical flux,
 
 $$
-|f(T_s)| < \texttt{tol}\cdot
-\max\!\bigl(|q_{\text{BC}}|,\,|q_{\text{cond}}|,\,|q_{\text{transpire}}|,\,1\bigr),
+|f(T_s)| < \max\!\Bigl(\texttt{tol}\cdot
+\max\!\bigl(|q_{\text{BC}}|,\,|q_{\text{cond}}|,\,1\bigr),\ f_{\text{floor}}\Bigr),
 \qquad \texttt{tol}=10^{-10},
 $$
 
-with a maximum of 50 iterations (`boundary_temperature.jl:184–193`). Scaling by
+with a maximum of 50 iterations. The floor
+$f_{\text{floor}} = 32\,\epsilon_{\text{mach}}\max(|T_s|,1)\,\bigl(k_{\text{eff}}/\Delta z_{1/2}+|dq_{\text{BC}}/dT_s|\bigr)$
+is the flux change from a few ulps of $T_s$: the conducted flux is a difference of
+two temperatures, so a face with near-zero net flux cannot resolve its residual
+below it. Scaling by
 the dominant flux makes the criterion meaningful whether the surface flux is
 $\sim 10^4$ W·m⁻² (cone) or near zero (near-adiabatic). **Nothing aborts on
 non-convergence**: on max-iterations or a vanishing Jacobian
@@ -233,7 +234,7 @@ flux evaluation at the unconverged iterate; the ODE integrator's step-error
 control is the backstop that rejects a step built on a bad surface state.
 
 **Clamping.** Each Newton iterate is clamped to the physical window
-$[200,\,3000]$ K (`boundary_temperature.jl:202–204`) to prevent unphysical
+$[200,\,3000]$ K to prevent unphysical
 excursions during the transient. The clamp constructs the clamped value with
 **zero ForwardDiff partials** (ForwardDiff `convert` semantics) — derivatives
 do *not* ride along through a clamped iterate. This self-heals in the normal
@@ -254,24 +255,23 @@ unique.
 
 The solver is written to carry whatever scalar type its inputs carry. It promotes
 to the widest type among $(T_{\text{cell}}, k_{\text{eff}}, \Delta z_{1/2},
-T_\infty, t, \varepsilon_{\text{eff}}, \dot m_g)$
-(`boundary_temperature.jl:154–162`); under sensitivity analysis (§17, Sensitivity
+t, \varepsilon_{\text{eff}}, a_{\text{eff}}, \dot m_g)$; under sensitivity analysis (§17, Sensitivity
 Analysis) this is a `ForwardDiff.Dual`. The Newton *convergence test* uses
 `ForwardDiff.value(f)` (the primal residual), so the iteration count is identical
 with or without AD, while the returned tuple $(T_s,\,q_{\text{applied}},\,
 q_{\text{conducted}})$ is fully Dual-typed and carries sensitivities into the
-Jacobian (`boundary_temperature.jl:207–227`). One guard is needed: on the very
-first iteration under AD the perturbed residual may pass the primal tolerance
-while the dual part has not yet propagated, so convergence is suppressed for
-`dual_mode && i==1` (`boundary_temperature.jl:190`). The diagnostic
+Jacobian. One guard is needed: on the very first iteration under AD the
+perturbed residual may pass the primal tolerance while the dual part has not yet
+propagated, so convergence is suppressed for `dual_mode && i==1`. The diagnostic
 `BoundaryState` stores plain `Float64` (it is bookkeeping, never differentiated).
 
 ### 12.2.4 Per-type flux and derivative
 
 The Newton kernel calls `evaluate_bc_flux_and_derivative(bc, T_s, t, ε_eff,
-radiation_model)`, which returns $(q_{\text{BC}}, dq_{\text{BC}}/dT_s)$ for each
+radiation_model, face)` (the `BlowingFace` at the iterate, read only by convective
+BCs, §12.3.3), which returns $(q_{\text{BC}}, dq_{\text{BC}}/dT_s)$ for each
 concrete thermal BC. The exact pairs (verified against
-`boundary_temperature.jl:307–429`) are collected below; the
+`boundary_temperature.jl`) are collected below; the
 $\varepsilon_{\text{eff}}$ argument is the composition-weighted effective surface
 emissivity from the property cache and the keyword `a_eff` (default
 $\varepsilon_{\text{eff}}$) the effective surface absorptivity for incident
@@ -300,12 +300,12 @@ $$
   \;+\; F\,\frac{d\varepsilon}{dT_s}\,\sigma\,(T_\infty^4 - T_s^4),
 $$
 
-but the code keeps only the first term (`boundary_temperature.jl:373–377`). The
+but the code keeps only the first term. The
 omitted term is part of the Newton *Jacobian* of the iteration, not the residual
 itself — the residual still uses the true $\varepsilon(T_s)$ — so the converged
 $T_s$ is unbiased; only the convergence rate degrades from quadratic to
 super-linear when $d\varepsilon/dT$ is large. This is documented as a known
-limitation (§12.13).
+limitation (§12.12).
 
 ### 12.2.5 Application into the flux array and the sign flip
 
@@ -321,7 +321,7 @@ q[f] =
 \end{cases}
 $$
 
-(`finite_volume.jl:590–596`). Writing the conducted flux (rather than the applied
+(`finite_volume.jl`). Writing the conducted flux (rather than the applied
 flux) is what makes the scheme energy-conserving: the divergence operator then
 sees the flux that actually enters the first interior cell, and the surface energy
 balance $q_{\text{BC}}=q_{\text{cond}}$ guarantees that the energy delivered at
@@ -378,10 +378,13 @@ component emissivity enter the surface energy row exactly.
 
 ### 12.2.7 `BoundaryState` storage
 
-The per-boundary diagnostic record (`src/Geometry/mesh.jl:29–39`) holds the
-solved surface temperature, the applied flux, the conducted flux, the
-transpiration flux, the inputs $(T_{\text{cell}}, k_{\text{eff}}, \Delta z_{1/2})$,
-and convergence metadata (`converged`, `iterations`). All fields are `Float64`;
+The per-boundary diagnostic record (`src/Geometry/mesh.jl`) holds the
+solved surface temperature, the applied flux, the conducted flux, the inputs
+$(T_{\text{cell}}, k_{\text{eff}}, \Delta z_{1/2})$, convergence metadata
+(`converged`, `iterations`), and the blowing diagnostics at the converged $T_s$
+(`blowing_mcp`, `blowing_ratio`, and the pooling-model fields `pooling_factor`,
+`face_fraction`, `face_buoyancy`; §12.3.3). The fields are plain `Float64`
+(`converged` a `Bool`, `iterations` an `Int`);
 they are diagnostics and are never differentiated. The live (possibly Dual-typed)
 quantities are returned from the solve and flow into the residual.
 
@@ -398,8 +401,8 @@ Perfect insulation: $q_{\text{BC}}=0$, $dq_{\text{BC}}/dT_s=0$. The surface ener
 balance reduces to $q_{\text{cond}}=0$, hence $T_s=T_{\text{cell}}$ — the surface
 floats to the adjacent cell temperature with zero conduction across the face.
 Typical for the substrate face in a cone-calorimeter idealization with a
-well-insulated back. (`boundary_fluxes.jl:43`,
-`boundary_temperature.jl:307–314`.)
+well-insulated back. (`boundary_fluxes.jl`,
+`boundary_temperature.jl`.)
 
 ### 12.3.2 `HeatFluxBC`
 
@@ -407,7 +410,7 @@ A prescribed flux $q_{\text{BC}}=q(t)$, constant (`HeatFluxBC{<:Real}`) or a
 function of time (`HeatFluxBC{<:Function}`), independent of $T_s$ so
 $dq_{\text{BC}}/dT_s=0$. The Newton solve still runs to find the $T_s$ that
 balances this against conduction. Sign: positive $q$ heats the material.
-(`boundary_fluxes.jl:46–47`, `boundary_temperature.jl:319–335`.)
+(`boundary_fluxes.jl`, `boundary_temperature.jl`.)
 
 > **$T_s$ is a half-cell extrapolation.** For a pure prescribed-flux boundary
 > the surface Newton reduces to the linear extrapolation
@@ -419,11 +422,10 @@ balances this against conduction. Sign: positive $q$ heats the material.
 > the Landau traveling-wave identity of V-CPL-02 through
 > $v_{ss}(\text{measured}\ T_s)$: with the reaction zone under-resolved
 > ($\Delta z \approx 2\delta_r$) the identity misses by ≈1.3 %, collapsing to
-> ≈5×10⁻⁴ once $\Delta z \lesssim \delta_r$. (It was *not*, however, the
-> source of the ≲1 % *mesh-independent* residual pinned there before
-> 2026-07-07 — that was the wave-development transient of the uniform-$T_0$
-> start, resolved by moving the measurement window to ≥6 development time
-> constants.) Interpret surface-temperature outputs under `HeatFluxBC`
+> ≈5×10⁻⁴ once $\Delta z \lesssim \delta_r$. (A *mesh-independent* residual
+> of up to about 1 % has a different source, the wave-development transient of
+> a uniform-$T_0$ start; the case measures after at least six development time
+> constants to exclude it.) Interpret surface-temperature outputs under `HeatFluxBC`
 > accordingly, and refine the near-surface mesh when $T_s$ itself is a target
 > quantity.
 
@@ -440,8 +442,7 @@ Both $h_{\text{conv}}$ and $T_\infty$ may be constants or functions of $t$
 $T_\infty>T_s$ and negative (cooling) otherwise, so for a hot surface in a cool
 ambient this is a convective loss. Because the derivative is the constant
 $-h_{\text{conv}}$, the contribution to the Newton residual is linear and exactly
-resolved in a single step. (`boundary_fluxes.jl:50–54`,
-`boundary_temperature.jl:340–352`.)
+resolved in a single step. (`boundary_temperature.jl`.)
 
 **Blowing.** Every `ConvectiveBC` carries a blowing model (`bc.blowing`, an
 `AbstractBlowingModel`, default `NoBlowing()`), and the surface balance applies
@@ -450,10 +451,9 @@ flux of every component, read from the same `J_gas[:, f]` the mass-flux pass
 populates (film-law diffusion plus, in Darcy–Fick mode, the pressure-BC venting
 flux), the surface-temperature iterate and the material (`BlowingFace`,
 `Discretization/blowing.jl`). The convective flux is $h\,\chi\,(T_\infty - T_s)$
-with $\chi = h_{\text{eff}}/h$ from the model (`blowing_state`). This is the
-**momentum-side companion** of the transpiration enthalpy term: it modifies
+with $\chi = h_{\text{eff}}/h$ from the model (`blowing_state`). It modifies
 only the convective *coefficient*, not the gas enthalpy accounting, so it
-composes exactly with the $S_{\text{conv}}$-only convention (§7.6) — no
+composes exactly with the $S_{\text{conv}}$-only convention (§7.4.3) — no
 double-count is possible. Zero outflow gives $\chi = 1$ exactly for every
 shipped model, so the back face is unaffected automatically.
 
@@ -535,22 +535,23 @@ apparatus flow, as $h$ does.
 The factor is evaluated by the numerically stable `blowing_factor` (Taylor
 branch at $|\phi|<10^{-5}$, overflow-safe $\phi\,e^{-\phi}/(1-e^{-\phi})$ form for
 large $\phi$). The Newton derivative uses the frozen-$\chi$ form $-h\,\chi$ —
-first-order consistent, the same convention as the transpiration derivative
-(§12.9), so convergence is marginally sub-quadratic and the converged root is
-exact. Each convective member of a `CombinedThermalBC` applies its own model
+first-order consistent, so convergence is marginally sub-quadratic and the
+converged root is exact. Each convective member of a `CombinedThermalBC` applies its own model
 against its own $h$ and $T_\infty$; all other BC types are untouched. At the
 converged $T_s$ the `BoundaryState` records the blowing conductance
 `blowing_mcp`, the applied ratio `blowing_ratio` and, for the pooling model,
 `pooling_factor`, `face_fraction` and `face_buoyancy` (the first convective
-member's), and the solution extras carry them per output time. The structured
+member's), and the solution extras carry the ratio and the pooling fields per
+output time (`surface_blowing_ratio`, `surface_pooling_factor`,
+`surface_face_fraction`, `surface_face_buoyancy`). The structured
 Jacobian's `BCThermalOperator` and `BCConvectionOperator` rebuild $\dot m''$
 from the stencil state via the shared boundary-face kernel, so the
 $\partial(h\chi)/\partial(T_b,\xi_b)$ chain is exact (support-complete strict
 verification passes with the film and pooling models in Fickian, Darcy–Fick
 and ALE modes). Giving a convective BC a model on a case calibrated with the
 bare coefficient will raise $T_s$ and MLR; introduce it together with flame
-heat-flux feedback before any recalibration pass (the two partially cancel —
-see the physics roadmap, `docs/Physics_Audit_2026-06-09.md`).
+heat-flux feedback before any recalibration pass (the two partially cancel;
+§1.8.1).
 (`Materials/blowing_models.jl` types and gas data,
 `Discretization/blowing.jl` evaluation.)
 
@@ -572,8 +573,7 @@ $T_\infty$. This term is the surface's own re-radiation to and absorption from a
 gray environment; it is the dominant cooling mechanism for a hot pyrolyzing
 surface. The cubic temperature derivative is the source of the $\sim$20% error
 that would result from naively evaluating radiation at the cell-center
-temperature — and the reason the Newton solve exists. (`boundary_fluxes.jl:58–68`,
-`boundary_temperature.jl:357–380`.)
+temperature — and the reason the Newton solve exists. (`boundary_temperature.jl`.)
 
 The neglected $d\varepsilon/dT$ term (§12.2.4) applies here when $\varepsilon$ is
 temperature-dependent.
@@ -584,12 +584,14 @@ This BC represents incident radiation from an *external* source (cone heater,
 furnace, radiant panel) — not the surface's own emission. The absorbed fraction is
 $\alpha\,q_{\text{ext}}$, where $q_{\text{ext}}=$ `flux` (constant or $q(t)$) and
 the absorptivity $\alpha$ is either supplied or, when `nothing`, defaults to
-$\varepsilon_{\text{eff}}$ via Kirchhoff's law (§12.2.6).
+the mixture surface absorptivity $a_{\text{eff}}$, which equals $\varepsilon_{\text{eff}}$
+by Kirchhoff's law unless a component sets its own `absorptivity` (§12.2.6).
 
 Its behavior is **dispatched on the global `radiation_model`** passed to
 `solve()` (§8, Thermal Radiation). Note the defaults diverge: `solve()`
 defaults to `NO_RADIATION`, while several internal helpers
-(`apply_thermal_bc_flux!`, lower-level RHS entry points) default to
+(`apply_thermal_bc_flux!`, `update_boundary_state!`, `solve_boundary_temperature!`
+and the solution extractors) default to
 `SURFACE_ABSORPTION` — a trap for direct callers of the internals; always
 pass `radiation_model` explicitly when bypassing `solve()`. The crucial
 design point is that incident radiation must be deposited exactly once:
@@ -599,12 +601,12 @@ design point is that incident radiation must be deposited exactly once:
   $$q_{\text{BC}} = \alpha\,q_{\text{ext}}(t), \qquad dq_{\text{BC}}/dT_s = 0,$$
   so the absorbed flux enters the surface energy balance and correctly raises
   $T_s$ above $T_{\text{cell}}$ when there is net heating
-  (`boundary_temperature.jl:414–423`).
+  (`boundary_temperature.jl`).
 - **`BEER_LAMBERT` and `P1_QUASI_STEADY`**: the radiation is deposited
   *volumetrically* by `compute_radiation_source!` (Beer–Lambert) or by the P1
   residual path. To avoid double-counting, the boundary flux is forced to zero,
   $$q_{\text{BC}} = 0, \qquad dq_{\text{BC}}/dT_s = 0$$
-  (`boundary_temperature.jl:425–429`, `boundary_fluxes.jl:84–99`).
+  (`boundary_temperature.jl`, `boundary_fluxes.jl`).
 
 A note on consistency. The *Newton-solve* evaluator
 (`evaluate_bc_flux_and_derivative`) applies $\alpha q_{\text{ext}}$ as a boundary
@@ -618,13 +620,13 @@ boundary flux suppressed. The diagnostic decomposition
 flux the Newton balance actually applies — $\alpha q_{\text{ext}}$ is inside
 `net` under `NO_RADIATION`/`SURFACE_ABSORPTION` and absent under
 `BEER_LAMBERT`/P1, where the volumetric deposit is reported separately as
-`extras.volumetric_absorption` (§12.10.1).
+`extras.volumetric_absorption` (§12.9.1).
 
 > **Implementation note.** The incident intensity is extracted at compile time
 > from the (possibly combined) BC by `extract_radiative_flux_from_bcs(bc_set,
 > Val(tag), t)`, which returns `(I, has_explicit_absorptivity)` — the flux with
 > an explicit absorptivity already folded in, or the bare incident flux whose
-> $\varepsilon_{\text{eff}}$ scaling happens at injection
+> $a_{\text{eff}}$ scaling happens at injection
 > (`boundary_conditions.jl`, §8.3.4). The intensity is passed as `I_radiation`
 > to `compute_rhs!` together with the `radiation_kirchhoff` flag.
 
@@ -681,38 +683,11 @@ q_{\text{BC}} = \sum_m q_{\text{BC},m}(T_s,t),\qquad
 $$
 
 The sum is built by a `@generated` function that unrolls the tuple at compile time
-for type stability (`boundary_temperature.jl:460–514`,
-`boundary_fluxes.jl:109–120`). Because the radiation model can affect a
+for type stability (`boundary_temperature.jl`). Because the radiation model can affect a
 `RadiativeFluxBC` member, the combined evaluator threads `radiation_model` through
 to every child. The `+` operator overloads handle every nesting case (BC+BC,
 combined+BC, BC+combined, combined+combined) so associativity holds
-(`boundary_conditions.jl:231–236`).
-
-### 12.3.8 Ambient (reference) temperature resolution
-
-Convective, radiative, and (when enabled) transpiration terms need a reference
-ambient $T_\infty$. This is resolved per-boundary by `ambient_temperature(bc, t,
-T_{\text{default}})` (`boundary_conditions.jl:331–357`):
-
-- `ConvectiveBC` and `RadiativeBC` return their own `T_inf` (evaluated at $t$);
-- all other thermal BCs (`HeatFluxBC`, `AdiabaticBC`, `RadiativeFluxBC`,
-  `DirichletThermalBC`) carry **no** ambient: the two-argument form
-  `ambient_temperature(bc, t)` returns `nothing` for them, and the three-argument
-  form substitutes the supplied default (typically the package constant
-  $T_{\text{REF}}=298.15$ K);
-- `CombinedThermalBC` walks its children in order and returns the **first
-  ambient-carrying** child's value, which preferentially surfaces the
-  `ConvectiveBC`/`RadiativeBC` ambient over the flux-only members.
-
-The `nothing` sentinel (rather than comparison against a default value) makes a
-user-set ambient of exactly 298.15 K distinguishable from "this BC has no ambient";
-resolution never silently falls through just because the value equals the default.
-
-This lets each boundary carry its own effective ambient without a per-cell datum.
-The same resolver, applied to the top boundary first then the bottom, also selects
-the single scalar $T_{\text{ref}}$ used by the optional volumetric generation sink
-(`finite_volume.jl`, `_resolve_volumetric_T_ref`); the limitation of that single scalar under
-asymmetric ambients is discussed in §12.13.
+(`boundary_conditions.jl`).
 
 ---
 
@@ -815,7 +790,7 @@ limits follow:
 | Quantity | Convention |
 |---|---|
 | `mass_bc_flux(...)` | **negative** = gas escaping (flux-into-domain) |
-| `_compute_surface_flux(...)` (Physics, for ALE regression) | **positive** = gas escaping |
+| `compute_surface_mass_flux(...)` (diagnostic) | **positive** = gas escaping |
 | `J[face]` stored in the flux array | **positive** = flux in $+z$ |
 
 The discretization bridges these by orienting per boundary
@@ -869,10 +844,10 @@ v_g = -\frac{\kappa_{\text{int}}}{\mu_{\text{int}}}\,\nabla P,
 \end{cases}
 $$
 
-with $d$ the cell-center-to-face distance, $\mu_{\text{int}}$ the Sutherland
-viscosity at the cell temperature, and the velocity clamped to zero if
+with $d$ the cell-center-to-face distance, $\mu_{\text{int}}$ the material's
+pore-gas viscosity at the cell temperature (§5.9), and the velocity clamped to zero if
 $\kappa_{\text{int}}\le0$ or $\mu_{\text{int}}<10^{-20}$ Pa·s
-(`darcy_velocity.jl:369–410`). The orientation of the gradient ensures the correct
+(`darcy_velocity.jl`). The orientation of the gradient ensures the correct
 outflow direction at each face: at the top a higher interior pressure
 ($P_{\text{int}}>P_{\text{bc}}$) yields $v_g>0$ (outflow in $+z$); at the bottom
 the same drives $v_g<0$ (outflow in $-z$).
@@ -951,7 +926,7 @@ conservation law.
 ### 12.7.1 Structure and tag keying
 
 All boundaries are bundled into a single type-stable container
-(`boundary_conditions.jl:674–677`):
+(`boundary_conditions.jl`):
 
 ```julia
 struct BoundaryConditionSet{TT<:NamedTuple, MT<:NamedTuple}
@@ -969,7 +944,7 @@ statically.
 
 ### 12.7.2 Constructor, defaults, and validation
 
-The keyword constructor (`boundary_conditions.jl:702–722`) merges the
+The keyword constructor (`boundary_conditions.jl`) merges the
 user-supplied partial NamedTuples with the 1D defaults
 
 $$
@@ -981,7 +956,7 @@ $$
 so a caller may specify only the slots it cares about. After merging it
 **validates** that every thermal payload is an `AbstractThermalBC` and every mass
 payload is an `AbstractMassBC`, throwing an `ArgumentError` if a BC was placed in
-the wrong slot (`boundary_conditions.jl:712–720`). The default — adiabatic and
+the wrong slot. The default — adiabatic and
 impermeable on both faces — is the inert closure: a column with no defined BCs
 neither gains energy nor loses mass.
 
@@ -996,7 +971,7 @@ Access is through `Val{tag}` dispatch:
 
 At a call site such as `get_thermal_bc(bc_set, Val(:top))`, the `Val(:top)`
 resolves at compile time to a direct NamedTuple field read with zero overhead
-(`boundary_conditions.jl:732–741`). The RHS assembly uses these accessors so that
+(`boundary_conditions.jl`). The RHS assembly uses these accessors so that
 each boundary's BC type is known statically and the per-type flux law is inlined.
 The tag$\to$id bridge `tag_to_boundary_id` (§12.1.3) connects the user-facing
 symbol API to the integer-keyed `Mesh1D.boundary_faces` / `boundary_states`
@@ -1005,11 +980,10 @@ dictionaries.
 ### 12.7.4 Constructor parameter validation
 
 Individual BC constructors optionally validate their physical parameters at build
-time (`validate_bc_params`, `boundary_conditions.jl:28–61`): $h\ge0$, $T>0$ K,
+time (`validate_bc_params`, `boundary_conditions.jl`): $h\ge0$, $T>0$ K,
 $\varepsilon\in[0,1]$, $F\in[0,1]$, $\alpha\in[0,1]$, $h_m\ge0$, $P>0$.
 Function-valued parameters cannot be checked at construction and are skipped
-(`_get_scalar_value` returns `nothing` for functions and property functions;
-`boundary_conditions.jl:70–73`).
+(`_get_scalar_value` returns `nothing` for functions and property functions).
 
 ---
 
@@ -1034,9 +1008,9 @@ The single problem-level entry point is `apply_initial_conditions!(problem)`,
 which performs the cell-state write above **and** populates the dry-solid
 denominator of §12.8.3 (the populator reads the freshly written cell states,
 so the two steps are ordered). `solve()` and the exported composition helper
-`initialize_state(problem; …)` both call it before packing `u0`; the
-mesh-level utility overloads `apply_initial_conditions!(mesh, material, …)`
-write only cell states and deliberately do **not** touch
+`initialize_state(problem; …) -> (def, ws, u0)` both call it before packing
+`u0`; the mesh-level utility `apply_initial_conditions!(mesh, material; T, ξ)`
+writes only uniform cell states and deliberately does **not** touch
 `m_dry_solid_initial`. Composing the pure-residual layer by hand without the
 problem-level IC step packs the mesh constructor's placeholder state instead
 of the problem's initial conditions (§15.2) — a resolution-independent error
@@ -1045,7 +1019,7 @@ with a perfectly plausible-looking solution.
 ### 12.8.2 Auto-defaults
 
 If the user supplies no initial conditions, the `PyrolysisProblem` constructor
-synthesizes them (`pyrolysis_problem.jl:106`, `114–134`):
+synthesizes them (`pyrolysis_problem.jl`):
 
 - $T_{\text{initial}}(z)=300$ K uniformly;
 - $\xi_{1,\text{initial}}(z)=\rho_1(300\,\text{K})$ if the first component is a
@@ -1055,8 +1029,8 @@ synthesizes them (`pyrolysis_problem.jl:106`, `114–134`):
 This "first solid at reference density, everything else zero" default models a
 fresh, uniform virgin slab at room temperature — the standard cone/TGA starting
 point. The uniform-IC variant `apply_initial_conditions!(mesh, material; T, ξ)`
-follows the same rule when $\xi=\texttt{nothing}$
-(`initial_conditions.jl`). Profile helpers (`step_profile`,
+follows the same rule when $\xi=\texttt{nothing}$, with the first solid's density
+evaluated at the given $T$ rather than at 300 K (`initial_conditions.jl`). Profile helpers (`step_profile`,
 `linear_profile`, `gaussian_profile`, `tanh_profile`) are provided for non-uniform
 seeds (e.g. a pre-heated layer).
 
@@ -1078,116 +1052,11 @@ gases) at the initial state. This is computed once and stored on the mutable mes
 as `Float64`; under AD the $\chi$ numerator is Dual-typed but this denominator
 stays `Float64` (see §15, §17).
 
-### 12.8.4 Verification
-
-`verify_initial_conditions` checks that every $T_i>0$ and finite, every
-$\xi_{j,i}\ge0$ and finite, and that the total concentration $\sum_j\xi_{j,i}>0$
-in each cell (`initial_conditions.jl`), catching an empty or negative seed before
-the solve begins.
-
 ---
 
-## 12.9 Surface transpiration (optional; off by default)
+## 12.9 Boundary-flux diagnostics
 
-> **Do not confuse this with the blowing correction.** This section is the
-> *enthalpy-side* transpiration term (rejected in production, §7.6). The
-> *momentum-side* effect of the same gas efflux — suppression of the convective
-> coefficient, $h \to h\,\chi$ — is the `blowing` model of each `ConvectiveBC`
-> documented in §12.3.3; it is independent of this term and composes with the
-> default $S_{\text{conv}}$-only convention.
-
-### 12.9.1 The transpiration term and its derivative
-
-The surface energy balance of §12.2 can optionally include the sensible enthalpy
-carried out of the slab by escaping gas (the "blowing" or transpiration term):
-
-$$
-q_{\text{BC}}(T_s) = k_{\text{eff}}\,\frac{T_s-T_{\text{cell}}}{\Delta z_{1/2}}
-   \;+\; \sum_g \dot m_g\,\Delta h_g(T_s, T_\infty),
-$$
-
-where $\dot m_g$ is the per-component outward gas mass flux at the surface
-(positive when leaving) and
-
-$$
-\Delta h_g(T_s,T_\infty) = \int_{T_\infty}^{T_s} c_{p,g}(\tau)\,d\tau
-$$
-
-is the sensible enthalpy difference, computed by the midpoint rule in
-`delta_enthalpy` (the same quadrature used by the volumetric generation sink
-$S_{\text{gen}}$, §7.5). The analytic Newton derivative of the transpiration term,
-used in $f'(T_s)$, is
-
-$$
-\frac{dq_{\text{transpire}}}{dT_s} = \sum_{g:\ \text{is\_gas}} \dot m_g\,c_{p,g}(T_s)
-\qquad (\dot m_g>0,\ \text{outflow}).
-$$
-
-This is the derivative of the *true* integral, which differs from the exact
-derivative of the midpoint-rule residual by $O\bigl((T_s-T_\infty)\,c_{p,g}'\bigr)$;
-the two agree to first order, so Newton still converges to the residual's root
-(unbiased $T_s$, marginally sub-quadratic rate)
-(`boundary_temperature.jl:125–132`).
-
-### 12.9.2 Inflow/outflow upwinding
-
-The transpiration term is **upwinded** on the sign of $\dot m_g$
-(`boundary_temperature.jl:233–263`):
-
-- **Outflow** ($\dot m_g>0$): the donor is the surface at $T_s$; the term carries
-  $\dot m_g\,\Delta h_g(T_s,T_\infty)$ with derivative $\dot m_g\,c_{p,g}(T_s)$.
-- **Inflow** ($\dot m_g\le0$): the donor is the ambient at $T_\infty=T_{\text{ref}}$;
-  the surface enthalpy flux is $\dot m_g\,\Delta h_g(T_{\text{ref}},T_{\text{ref}})=0$
-  with zero derivative. Entering gas is heated to $T_s$ *volumetrically* (by
-  $S_{\text{conv}}$) once inside, not at the face.
-
-Upwinding to the donor temperature is what prevents an unphysical artifact in
-which inflow enthalpy would spuriously heat or cool the surface. The outward flux
-$\dot m_g$ itself is extracted from the gas-flux matrix with the boundary
-orientation: $\dot m_g = +J_{g,f}$ at the top, $\dot m_g=-J_{g,f}$ at the bottom
-(so that "outward" is positive at both faces) (`finite_volume.jl`). Note
-this requires the gas fluxes to be computed *before* the thermal BC solve — hence
-Step 3 (gas transport) precedes Step 4 (thermal BCs) in the RHS sequence (§7.8).
-
-### 12.9.3 Mutual exclusivity with $S_{\text{conv}}$ — and why it is forbidden
-
-The transpiration term is **mutually exclusive** with the volumetric gas-advection
-source $S_{\text{conv}}=-\sum_g c_{p,g}(T_i)\,\bar J_{g,i}\,(\partial T/\partial
-z)_i$, which is always active in the default `:standard` energy form (§7.4). The
-algebraic identity (with constant $c_p$)
-
-$$
-\int \bigl(S_{\text{conv}} + S_{\text{gen}}\bigr)\,dz
-= -\sum_g \dot m_g\,\Delta h_g(T_s, T_{\text{ref}})
-$$
-
-shows that the volumetric sources already account for the gas-enthalpy transport:
-$S_{\text{conv}}$ alone integrates to $-\sum_g\dot m_g\Delta h_g + \int
-S_{\text{gen}}$, i.e. it carries *almost all* of the surface outflow enthalpy.
-Adding the surface transpiration term on top would apply the *full* outflow a
-second time, double-counting the advective enthalpy and producing a spurious sink
-of order $5$–$10$ kW·m⁻² at typical pyrolysis rates.
-
-For this reason `use_transpiration_bc = true` is **rejected at problem
-construction** in `to_problem_def` (`adapter.jl`), and the unsupported
-combination is guarded by a regression test
-(`test/discretization/test_transpiration_energy_balance.jl`). In the default
-configuration the caller zeroes $J_{\text{boundary,outward}}$
-(`finite_volume.jl`), so the transpiration term vanishes and the surface
-balance reduces to $q_{\text{BC}}(T_s)=q_{\text{cond}}$. The supported way to
-*move toward* a conservative formulation is the `:with_generation_sink` energy
-form (§7.5), which adds $S_{\text{gen}}$; only if a future solver disables
-$S_{\text{conv}}$ would the surface transpiration term become consistent (see §16,
-Conservation Diagnostics, for the exact telescoping ledger). The supported convention
-is S_conv-only; parameter sets calibrated against solvers that additionally apply a
-surface transpiration term embed a $\sim$5–10 kW·m⁻² spurious sink and should be
-re-validated when imported (§18).
-
----
-
-## 12.10 Boundary-flux diagnostics
-
-### 12.10.1 Flux decomposition
+### 12.9.1 Flux decomposition
 
 For auditing and post-processing, `compute_boundary_heat_fluxes(bc, T_s, t,
 ε_eff, radiation_model[, face])` decomposes the boundary flux into named
@@ -1208,14 +1077,16 @@ For `ConvectiveBC` and `RadiativeBC`, the loss components are reported with the
 *opposite* sign to the into-domain convention (so a hot surface re-radiating shows
 a positive `reradiation`). Per component, `net` matches
 `evaluate_bc_flux_and_derivative` — the Newton-applied flux — for every
-radiation model, so the ledger identity
-$\texttt{net} = q_{\text{cond}} + q_{\text{transp}}$ holds at convergence
-(§12.10.2, §16.7). For combined BCs the components **and** `net` are summed over
+radiation model, `DirichletThermalBC` excepted (its decomposition is all zero; for a
+bare Dirichlet BC the saved extras report the solved $q_{\text{conducted}}$ as the
+net flux), so the ledger identity
+$\texttt{net} = q_{\text{cond}}$ holds at convergence
+(§12.9.2, §16.6). For combined BCs the components **and** `net` are summed over
 children; `net` is never recomputed from the components. Consequences of the
 model dispatch:
 
 - `NO_RADIATION` / `SURFACE_ABSORPTION`: a `RadiativeFluxBC` contributes
-  `absorbed = net = α·q_ext` (α the explicit BC absorptivity or ε_eff) — the
+  `absorbed = net = α·q_ext` (α the explicit BC absorptivity or a_eff) — the
   flux is applied at the face.
 - `BEER_LAMBERT` / P1: a `RadiativeFluxBC` contributes zero `absorbed` and zero
   `net` — the radiation enters volumetrically (§8.3) and is reported separately
@@ -1223,7 +1094,7 @@ model dispatch:
   (1-e^{-\tau_{\text{tot}}})$, the exact telescoped sum of the Beer–Lambert
   deposit on the saved state.
 
-### 12.10.2 Energy-balance check
+### 12.9.2 Energy-balance check
 
 `check_boundary_energy_balance(mesh)` returns, per boundary, the relative
 imbalance $|q_{\text{applied}}-q_{\text{conducted}}|/|q_{\text{applied}}|$ (the
@@ -1237,7 +1108,7 @@ bottom (id 2) boundaries (`boundary_temperature.jl`).
 
 ---
 
-## 12.11 Worked example: the cone-calorimeter top boundary
+## 12.10 Worked example: the cone-calorimeter top boundary
 
 Assembling the canonical top boundary makes the pieces concrete. A 50 kW·m⁻² cone
 with surface re-radiation and natural convection to a 300 K ambient, on a
@@ -1284,7 +1155,7 @@ energy equation as a volumetric Beer–Lambert source $q'''=\alpha I$ (§8).
 
 ---
 
-## 12.12 Comparison to ThermaKin2Ds, Gpyro, and FDS
+## 12.11 Comparison to ThermaKin2Ds, Gpyro, and FDS
 
 The three reference solvers express the same surface physics in their own
 notation; the subsections below map their symbols to ours on first use and
@@ -1292,7 +1163,7 @@ contrast the modeling choices. (ThermaKin/Gpyro publish $h>0=$ exothermic; our
 internal convention is $h>0=$ endothermic with $Q_{\text{rxn}}=-\sum h_r r_r$, but
 this sign issue is confined to the volumetric reaction heat, not the surface BCs.)
 
-### 12.12.1 ThermaKin2Ds
+### 12.11.1 ThermaKin2Ds
 
 ThermaKin2Ds applies piecewise external/flame boundary conditions and supports an
 external radiant source with surface re-radiation. The exposed-face energy
@@ -1319,10 +1190,10 @@ and the surface re-radiation depend on the *true* surface temperature — is
 realized by ThermaKin through its Crank–Nicolson surface node and by Pyrolysis.jl
 through the explicit Newton surface-balance solve of §12.2. ThermaKin carries gas
 enthalpy via a convective term $c_g(J_g\cdot\partial T/\partial x)$ (its Eq. 17),
-which is precisely our $S_{\text{conv}}$ and the reason transpiration is omitted by
-default (§12.9.3).
+which is precisely our $S_{\text{conv}}$ and the reason the surface balance carries
+no gas-enthalpy term (§7.4.3).
 
-### 12.12.2 Gpyro
+### 12.11.2 Gpyro
 
 Gpyro (Lautenberger & Fernandez-Pello) writes the exposed-surface balance as a
 radiative–convective balance with an impermeable back face by default. In Gpyro
@@ -1346,7 +1217,7 @@ Gpyro's permeability $K$ mapping to our $\kappa$. Gpyro's default impermeable ba
 face corresponds to our default `ImpermeableBC` + `NeumannPressureBC()` (zero
 gradient).
 
-### 12.12.3 FDS
+### 12.11.3 FDS
 
 The FDS solid-phase model imposes the 1D surface boundary condition
 
@@ -1371,19 +1242,9 @@ in-depth absorbed fraction volumetrically rather than at the face.
 
 ---
 
-## 12.13 Limitations and open issues
+## 12.12 Limitations and open issues
 
-1. **Asymmetric ambients with a permeable back face.** The volumetric
-   generation-sink reference $T_{\text{ref}}$ is resolved as a *single* scalar (top
-   ambient, else bottom, else $T_{\text{REF}}$) and applied to every cell
-   (`finite_volume.jl:601–620`). If the top and bottom ambients differ **and** the
-   back face passes gas, the `:with_generation_sink` energy ledger fails to close
-   at the bottom by exactly $\sum_g \dot m_{g,\text{bottom}}\,c_{p,g}
-   (T_{\infty,\text{top}}-T_{\infty,\text{bottom}})$. This is harmless for the usual
-   impermeable back face (the bottom gas flux vanishes) and for equal ambients;
-   supporting it would require a per-cell datum rather than a scalar.
-
-2. **Temperature-dependent emissivity derivative.** For a `RadiativeBC` whose
+1. **Temperature-dependent emissivity derivative.** For a `RadiativeBC` whose
    own `ε` is a function of $T_s$, the radiative Newton derivative omits the
    $F\,(d\varepsilon/dT)\,\sigma\,(T_\infty^4-T_s^4)$ term (§12.2.4). The
    converged $T_s$ is unbiased, but convergence can become sub-quadratic for
@@ -1392,30 +1253,26 @@ in-depth absorbed fraction volumetrically rather than at the face.
    is evaluated at the *cell* temperature and is a constant of the surface
    Newton iteration, so that derivative is exact.
 
-3. **Transpiration BC integration.** The surface transpiration term is implemented
-   and tested but is opt-in and currently *forbidden* in production because it
-   double-counts with $S_{\text{conv}}$ (§12.9.3). A consistent conservative-form
-   path would require disabling $S_{\text{conv}}$ when transpiration is on; that
-   combination is not yet supported by the solver.
-
-4. **Dirichlet thermal BC via penalty.** `DirichletThermalBC` uses a large
+2. **Dirichlet thermal BC via penalty.** `DirichletThermalBC` uses a large
    conductance $h_{\text{large}}=10^8$ in the Newton solve and a special-cased
    direct flux in the RHS (§12.3.6). A genuine algebraic constraint (DAE) would be
    cleaner and would remove the residual conditioning sensitivity of the penalty.
 
-5. **View-factor meaning in 1D.** The `RadiativeBC` view factor $F$ is a scalar
+3. **View-factor meaning in 1D.** The `RadiativeBC` view factor $F$ is a scalar
    surrogate for a 3D geometric quantity; in a strictly 1D model it is best read as
    a tuning factor for partial enclosure rather than a rigorously computed exchange
    factor.
 
-6. **Mass-transfer coefficient estimation.** The film coefficient $h_m$ for
+4. **Mass-transfer coefficient estimation.** The film coefficient $h_m$ for
    `ConvectiveMassBC` / `DiffusiveMassBC` is supplied by the user, typically via
    the heat–mass analogy $h_m\approx h_{\text{conv}}/(\rho_{\text{air}}
    c_{p,\text{air}})$; there is no built-in correlation, so its accuracy depends on
    the user's estimate of $h_{\text{conv}}$ and the flow regime.
 
-7. **Pressure-BC integration maturity.** The three pressure BCs are defined and
-   wired into `apply_pressure_bc_to_darcy_velocity!`, but their interaction with the
-   full Darcy–Fick velocity solve and the structured Jacobian is still maturing
-   relative to the thermal and diffusive-mass paths; in Eulerian/Fickian mode they
-   are inert.
+5. **Pressure-BC scope.** The three pressure BCs act only under Darcy–Fick
+   transport, i.e. when a condensed component is permeable (`has_darcy_flow`); on a
+   Fickian material they are accepted and contribute nothing. Their venting is
+   outflow-only: the ambient ghost carries none of the tracked gas species, so an
+   exterior pressure above the interior pressure draws no gas into the slab
+   (§9.5.3). The residual, the Jacobian and the saved-output diagnostics evaluate
+   the one kernel `boundary_darcy_velocity` (§12.5).

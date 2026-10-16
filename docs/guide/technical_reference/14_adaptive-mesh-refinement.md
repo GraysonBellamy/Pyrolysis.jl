@@ -9,13 +9,12 @@ removes the $\rho c_p\!\to\!0$ singularity of a depleting surface cell, the
 experimental $h$-refinement/$h$-coarsening (cell split/merge) topology operators,
 the mesh-quality metrics that keep the discretization well-conditioned, the
 active-cell bookkeeping that all AMR consumers must respect, and the way the
-depletion callback resizes the entire workspace/state cascade mid-solve. Every
-discrete rule, threshold, guard, and sign convention below is grounded in the
-implementing function so that the mathematics is traceable to the code; where the
-code makes an approximation, a guard, or a choice that differs from the idealized
-form (and there are several, including a temperature-interpolation term that
-vanishes identically and a "GCL-volume" name that does not apply the GCL flux
-formula), we say so and trust the code.
+depletion callback parks a burned-out cell without changing the size of the
+state. Every discrete rule, threshold, guard, and sign convention below is grounded
+in the implementing function so that the mathematics is traceable to the code;
+where the code makes an approximation, a guard, or a choice that differs from the
+idealized form (including a temperature-interpolation term that vanishes
+identically), we say so and trust the code.
 
 Conventions used in this chapter (binding, from §2, Nomenclature):
 
@@ -37,16 +36,17 @@ Conventions used in this chapter (binding, from §2, Nomenclature):
   porosity of §5. The porosity does not appear in this chapter.
 
 The subsystem splits along a maturity line. The **core** `Adaptivity` module
-(`src/Adaptivity/`) holds the error indicators, $r$-refinement, the
-energy-conserving merge and mesh-compaction routines, the cell/neighbor finders,
-the mesh-quality metrics, and the invariant checker — everything the production
-surface-depletion path needs. The **experimental** $h$-AMR cluster
-(`src/Experimental/`) holds cell splitting (`refine_cell!`), sibling coarsening
-(`coarsen_cells!`), the `AMRController` orchestrator, and the combined `hr_adapt!`
-driver. The production solver uses *only* the core surface-depletion merge; the
-$h$-AMR cluster is not wired into `solve` and is exported separately to avoid
-namespace pollution (`src/Experimental/Experimental.jl`). This chapter covers
-both, flagging the experimental status throughout.
+(`src/Adaptivity/`) holds the depleted-cell park (`park_cell!`) with its
+energy-conserving temperature merge and neighbor finders — the only adaptivity
+`solve` uses — and building blocks that `solve` does not call: the error
+indicators, $r$-refinement, the mesh-quality metrics, and the invariant checker.
+The **experimental** $h$-AMR cluster (`src/Experimental/`) holds cell splitting
+(`refine_cell!`), sibling coarsening (`coarsen_cells!`), the `AMRController`
+orchestrator, and the combined `hr_adapt!` driver. It is not wired into `solve`,
+and a mesh it refines cannot be passed to `solve`: refinement leaves inactive
+parent cells among the active ones, and the solver's kernels assume the active
+cells come first (`src/Experimental/Experimental.jl`). This chapter covers both,
+flagging the status of each throughout.
 
 ---
 
@@ -56,7 +56,7 @@ An *error indicator* $\eta_i\ge 0$ assigns to each active cell a scalar estimate
 of the local discretization error, used to decide where to refine (large $\eta$)
 or coarsen (small $\eta$). Pyrolysis.jl implements four physically motivated
 indicators plus a composite, all subtypes of the abstract type
-`AbstractErrorIndicator` (declared in `src/Materials/Materials.jl:57`, so that the
+`AbstractErrorIndicator` (declared in `src/Materials/Materials.jl`, so that the
 type is visible to both the `Adaptivity` and `Experimental` modules). All
 indicator math lives in `src/Adaptivity/error_indicators.jl`.
 
@@ -82,7 +82,7 @@ Taylor expansion: a fixed jump across a cell produces a fixed indicator regardle
 of how the cell is sized, so the indicator flags *resolution relative to the
 feature*, not absolute slope.
 
-The gradient itself (`compute_gradient_1d`, lines 197–237) is the
+The gradient itself (`compute_gradient_1d`) is the
 opposite-distance-weighted mean of the two one-sided slopes
 (`opposite_distance_gradient`, §13.6.1) — second order on non-uniform
 meshes — and degrades gracefully at boundaries:
@@ -100,10 +100,9 @@ $$
 Here $L,R$ index the cells immediately below/above cell $i$, found through the
 cell's left/right faces, $z^c$ are cell-center positions, and
 $d_L = z^c_i - z^c_L$, $d_R = z^c_R - z^c_i$ are the center-to-center
-distances. The boundary cases
-read the field at the *boundary cell itself* in place of an absent neighbor (a
-zero-gradient ghost convention), so a boundary cell never produces a spurious
-gradient from a missing value.
+distances. A boundary cell takes the one-sided difference toward its only
+neighbor, so it never reads a missing value, and a zero center-to-center distance
+returns a zero gradient.
 
 ### 14.1.2 Curvature indicator
 
@@ -114,7 +113,7 @@ $$
 \eta_i^{\mathrm{curv}} = w\, h_i^2 \,\bigl|\nabla^2\phi\bigr|_i .
 $$
 
-The discrete second derivative (`compute_curvature_1d`, lines 276–304) uses the
+The discrete second derivative (`compute_curvature_1d`) uses the
 three-point **non-uniform mesh** stencil:
 
 $$
@@ -171,16 +170,14 @@ depleted cell.
 This indicator is special in that it **requires** the per-cell, per-species
 reaction rate matrix `rates`, passed as a keyword:
 `compute_indicator(ind, mesh, T, ξ; rates = r)` with `r` sized like ξ for the
-*current* mesh. Calling it without rates throws an `ArgumentError` (it
-formerly returned silent zeros — a doubly inert indicator, since no call site
-ever supplied rates), and a `rates` matrix whose column count does not match
+*current* mesh. Calling it without rates throws an `ArgumentError`, and a `rates` matrix whose column count does not match
 the mesh throws `DimensionMismatch`. Because `adapt_mesh!` recomputes
 indicators *after* topology changes — when any precomputed rates are stale —
 this indicator cannot run inside the controller cycle and is standalone-only;
 the default controller uses a gradient + curvature composite instead.
 Supplying live rates inside the time-stepping loop would mean recomputing the
 Arrhenius source at the indicator-evaluation point (see §6, Reaction
-Kinetics) — this coupling gap is an open issue (§14.8).
+Kinetics) — this coupling gap is an open issue (§14.10).
 
 > **Implementation note.** `compute_indicator(::ReactionRateIndicator, mesh, T, ξ;
 > rates=nothing)` in `src/Adaptivity/error_indicators.jl`.
@@ -206,7 +203,7 @@ Because $\eta^{\mathrm{iface}}$ is bounded and smooth, it composes cleanly with 
 solution-driven indicators.
 
 > **Implementation note.** `compute_indicator(::InterfaceProximityIndicator, …)`
-> in `src/Adaptivity/error_indicators.jl` lines 363–385. The struct carries
+> in `src/Adaptivity/error_indicators.jl`. The struct carries
 > `interface_position`, `h_target`, and `weight`; no derivative is computed.
 
 ### 14.1.5 Composite indicator
@@ -237,10 +234,9 @@ normalization, so they tilt the within-indicator shape, while the relative
 scale across indicators is set by the normalization.
 
 > **Implementation note.** `compute_indicator(::CompositeIndicator, …)` in
-> `src/Adaptivity/error_indicators.jl` lines 391–435 dispatches on the
+> `src/Adaptivity/error_indicators.jl` dispatches on the
 > `combination::Symbol` field (`:max`, `:l2`, `:sum`) and errors on any other
-> value. A convenience overload `compute_indicator(ind, mesh)` (lines 467–474)
-> pulls $T$ and $\xi$ from the mesh cell states via `extract_fields` and forwards
+> value. A convenience overload `compute_indicator(ind, mesh)` pulls $T$ and $\xi$ from the mesh cell states via `extract_fields` and forwards
 > to the field-taking method; this dense extraction happens on every call and is
 > not cached.
 
@@ -261,8 +257,9 @@ raw index range. The indicators honor this; downstream marking routines
 $r$-refinement ("relocation refinement") moves the interior nodes of a *fixed
 topology* mesh to concentrate resolution where it is needed, without changing the
 number of cells. Unlike $h$-refinement it adds no degrees of freedom — it is a
-pure remeshing of the existing cells — and so it composes with the ALE state
-vector without resizing it. The governing principle is **equidistribution** of a
+pure remeshing of the existing cells. `solve` does not call it: the ALE mesh moves
+with the solid (§11.1.2), and node relocation decoupled from the solid is not
+representable there (§11.9 item 5). The governing principle is **equidistribution** of a
 user-chosen *monitor function* $\omega(z)>0$. All $r$-refinement code is in
 `src/Adaptivity/r_refinement.jl`.
 
@@ -307,8 +304,8 @@ $\int\sqrt{1+\alpha\,\phi_z^2}\,dz$ is (for $\alpha=1$) the arc length of the
 solution curve, so equidistributing $\omega^{\mathrm{grad}}$ places nodes at equal
 arc-length intervals along the solution — naturally clustering them on steep
 fronts. The gradient is the same distance-weighted center difference used by the
-indicators (`compute_cell_gradient`, lines 189–213), with one-sided forms at
-boundaries.
+indicators (`compute_gradient_1d`, `src/Adaptivity/error_indicators.jl`), with
+one-sided forms at boundaries.
 
 **Interface monitor.** A Gaussian bump concentrates nodes near a prescribed
 interface $z_{\mathrm{int}}$ irrespective of the solution:
@@ -327,8 +324,8 @@ interface-monitor width $\sigma_{\mathrm{mon}}$ of §2.
 `:sum`, or `:product`. The product rule is multiplicative reinforcement (both
 monitors must be large); the max rule is the conservative union.
 
-> **Implementation note.** `evaluate_monitor` (`src/Adaptivity/r_refinement.jl`
-> lines 95–169) dispatches on `GradientMonitor`, `InterfaceMonitor`, and
+> **Implementation note.** `evaluate_monitor` (`src/Adaptivity/r_refinement.jl`)
+> dispatches on `GradientMonitor`, `InterfaceMonitor`, and
 > `CompositeMonitor`; monitors are subtypes of the abstract `MonitorFunction`.
 > Like the indicators, monitor evaluation skips inactive cells. Note that monitor
 > functions are problem-dependent and carry arbitrary units; the user is
@@ -337,7 +334,7 @@ monitors must be large); the max rule is the conservative union.
 
 ### 14.2.3 Computing target node positions
 
-`compute_target_positions(mesh, ω)` (lines 231–299) inverts the discrete
+`compute_target_positions(mesh, ω)` inverts the discrete
 equidistribution relation by piecewise-linear interpolation of the cumulative
 monitor integral. The algorithm:
 
@@ -367,15 +364,12 @@ $$
 The routine returns the empty vector if there are no interior nodes or if
 $\Omega_{\mathrm{total}}\le 0$ (which then disables relocation for that step).
 
-A subtlety worth recording: the code computes a `target_per_segment =
-Ω_total/M` quantity but does not use it for placement; the actual targets use the
-$\tfrac{n}{N+1}\Omega_{\mathrm{total}}$ form above (lines 257 vs. 281). The
-inversion is therefore *node-count* based, not *cell-count* based, which is the
-correct choice for placing the $N$ interior nodes.
+The inversion is *node-count* based ($\tfrac{n}{N+1}\Omega_{\mathrm{total}}$), not
+*cell-count* based, which is the correct choice for placing the $N$ interior nodes.
 
 ### 14.2.4 Relaxed relocation with quality constraints
 
-`relocate_nodes!` (lines 319–409) drives the interior nodes toward their targets
+`relocate_nodes!` drives the interior nodes toward their targets
 by damped fixed-point iteration. Per iteration it:
 
 1. Evaluates the monitor and computes target positions.
@@ -418,19 +412,19 @@ positions are physical domain limits and are fixed by construction.
 
 A critical caveat: `relocate_nodes!` relocates nodes but does **not remap the
 solution onto the moved mesh**. It reads the cell states once at entry
-(`extract_state_arrays`) to evaluate the monitor and then moves nodes; the cell
-*state* (the $T$ and $\xi$ stored per cell) is left attached to its (now-resized)
-cell. In a conservative AMR cycle this must be followed by a conservative remap of
-$T,\xi$ from the old to the new node layout (see §11.7, the ALE conservative
-remapping routine `remap_solution!`). The standalone
-`relocate_nodes!` is therefore a *geometry* operation; conservation of the
-transported fields is the caller's responsibility.
+(`extract_fields`) to evaluate the monitor and then moves nodes; the cell
+*state* (the $T$ and $\xi$ stored per cell) is left attached to its resized
+cell, so a cell's mass $\xi_j V_i$ changes with its volume. The package has no
+conservative remap; `relocate_nodes!` is a *geometry* operation, conservation of
+the transported fields is the caller's responsibility, and `solve` never calls
+it.
 
 ---
 
 ## 14.3 Depletion handling: parked cells (the production path)
 
-The single AMR capability wired into `solve` is **depletion handling**. As
+The single AMR capability wired into `solve` is **depletion handling**, enabled by
+`solve(…; handle_depletion = true)` (default `false`). As
 pyrolysis consumes the solid, an ALE cell (§11) thins toward zero thickness; on a
 fixed mesh a cell empties instead. A vanishing or emptied cell is numerically
 catastrophic for two reasons. First, its matrix heat capacity
@@ -444,7 +438,7 @@ carry no usable digits, so the integrator halves $\Delta t$ until the cell's own
 time scale is resolved. No Jacobian accuracy and no regularisation of the
 properties changes this; the cell must leave the nonlinear system.
 
-Depletion handling **parks** the cell: it merges the cell's mass and condensed
+Depletion handling **parks** the cell: it merges the cell's mass and sensible
 enthalpy into a neighbour, then moves the freed state slot above the live
 surface as an inert ghost. The state vector, the mesh arrays, the
 `StateLayout`, the sparsity pattern and the Jacobian caches keep their size for
@@ -554,8 +548,8 @@ mesh with depletion is the porous-residue model (a char that keeps its
 volume, burning top down); a material that regresses belongs on the ALE
 mesh.
 
-> **Implementation note.** `is_cell_thin`, `get_cell_thickness`,
-> `find_thin_cells`, `depletion_candidate` and `interior_void_cell` in
+> **Implementation note.** `is_cell_thin`, `find_thin_cells`,
+> `depletion_candidate` and `interior_void_cell` in
 > `src/Solver/callbacks.jl`; `matrix_volume_fraction` in
 > `src/Properties/mixture_rules.jl`. The callback *condition* fires whenever a
 > candidate or (fixed mesh) an interior void exists; the *affect* terminates
@@ -581,10 +575,10 @@ Temperature is **intensive**, and a naive volume-weighted average of $T$ does
 *not* conserve internal energy when the two cells have different heat capacities —
 the very situation in depletion, where a hot, dense solid cell is merged with a
 cool, mostly-converted (low-capacity) one. Pyrolysis.jl therefore conserves the
-**condensed-phase sensible enthalpy**
+**sensible enthalpy** of every component
 
 $$
-H(T) \;=\; \sum_{j\,\notin\,\mathrm{gas}} m_j \int_{T_{\mathrm{ref}}}^{T}
+H(T) \;=\; \sum_{j=1}^{N_C} m_j \int_{T_{\mathrm{ref}}}^{T}
 c_{p,j}(T')\,\mathrm{d}T',
 \qquad m_j = V\,\xi_j ,
 $$
@@ -614,8 +608,8 @@ empty) the energy balance is degenerate and the routine falls back to the
 volume-weighted average.
 
 The accuracy stakes: merging a $1\,$m$^3$ condensed-rich cell at $800\,$K with
-condensed $\rho c_p = 2000\,$kJ m$^{-3}$K$^{-1}$ and a $1\,$m$^3$
-mostly-converted cell at $400\,$K with condensed
+$\rho c_p = 2000\,$kJ m$^{-3}$K$^{-1}$ and a $1\,$m$^3$
+mostly-converted cell at $400\,$K with
 $\rho c_p = 500\,$kJ m$^{-3}$K$^{-1}$ gives, by the wrong volume-weighted rule,
 $T=(800+400)/2 = 600\,$K, whereas conserving the enthalpy (constant
 $c_p$, where the integral form reduces to the familiar
@@ -628,8 +622,7 @@ $$
 a $120\,$K (20 % of the temperature difference) error avoided.
 
 > **Implementation note.** `merge_temperatures_conservatively(V_a, state_a, V_b,
-> state_b, material)` in `src/Adaptivity/cell_merge.jl`, with a raw-values
-> variant `merge_temperatures_conservatively_from_values`. The component heat
+> state_b, material)` in `src/Adaptivity/cell_merge.jl`. The component heat
 > capacity is `material.components[j].heat_capacity`, a callable $c_{p,j}(T)$.
 > This is the **single** canonical merge: the park primitive `park_cell!` and
 > the experimental `coarsen_cells!` both call it.
@@ -661,12 +654,12 @@ and rewrites the state vector. The sequence:
    face or node reference changes; the freed cell slot `n_live` (the last live
    index) becomes the ghost and the freed node slot lands on the surface. On a
    fixed mesh only the top live cell parks and nothing shifts.
-4. **Boundary flags.** Face `n_live` (the new count) becomes the exposed
+4. **Boundary flags.** Face `n_live + 1` (`n_live` the new count) becomes the exposed
    boundary face, `cell_ids = (n_live, 0)`, `boundary_id = 1`; the previous top
    face becomes an inert ghost face; the matching node flags follow;
    `mesh.boundary_faces[1]` is updated; `n_active_cells` is decremented and
-   `active_cell_mask` cleared for the ghost; the geometry cache is rebuilt and
-   the AMR invariants (§14.6) asserted.
+   `active_cell_mask` cleared for the ghost; the mesh geometry is recomputed
+   (`update_geometry!`) and the AMR invariants (§14.6) asserted.
 5. **State vector.** $T$, $\xi$ and (ALE) $z$ are read back from the mesh for
    every slot — the mesh mirrors the accepted state when the callback runs, so
    live cells shift exactly as the mesh did and the ghost carries the merged
@@ -676,12 +669,12 @@ and rewrites the state vector. The sequence:
    **initial dry-solid masses** (captured before step 2 sums them), because
    $\chi_i = m_{\mathrm{released},i}/m_{\mathrm{dry,init},i}$ makes
    $\sum_i \chi_i\,m_{\mathrm{dry,init},i}$ the extensive invariant; the ghost
-   gets $\chi = 0$. The workspace's cached boundary face and cell ids follow the
-   mesh (they are shared with the Jacobian's AD workspace, so one update serves
+   gets $\chi = 0$. The workspace's cached top boundary face id follows the
+   mesh (it is shared with the Jacobian's AD workspace, so one update serves
    both), and `derivative_discontinuity!(integrator, true)` forces a derivative
    recomputation.
 
-Mass, sensible enthalpy, $\chi$-weighted dry mass and live volume are
+Mass, sensible enthalpy, $\chi$-weighted dry mass and (under ALE) live volume are
 conserved to roundoff at every event (`test/adaptivity/test_cell_park.jl`).
 
 ### 14.3.5 The depletion callback
@@ -724,7 +717,7 @@ interpolation is unaffected because the state never changes size.
 
 ### 14.3.6 The Jacobian through burnout
 
-Because the state keeps its size, the pluggable Jacobian (§15.6) stays valid
+Because the state keeps its size, the structured Jacobian (§15.6) stays valid
 through every park:
 
 - the sparsity pattern is built once for $n$ slots and is a superset of every
@@ -743,7 +736,7 @@ through every park:
 parked states for `Structured(strategy = DirectSolve())`, and the parked
 `ApproxSolve` assembly equals that of the compacted problem on the live block.
 
-The ALE default Jacobian, `Structured(strategy = ApproxSolve())` (§15.10.3),
+The ALE default Jacobian, `Structured(strategy = ApproxSolve())` (§15.10.2),
 stays the default through parking. The `:full` ALE pattern carries the
 prefix-sum couplings of every node to every cell below it, which makes the
 factorized $W$ effectively dense and the sparse direct solve 60–90× more
@@ -774,14 +767,15 @@ degenerate gas transport (§5.6) and from the step controller (§15.5.3).
 The $h$-adaptivity cluster changes mesh *topology* by splitting a cell into two
 children ($h$-refinement) or merging two refinement siblings back into their
 parent ($h$-coarsening). It lives in `src/Experimental/` and is **not invoked by
-the production `solve` path**; it is exercised by tests and the experimental
-`AMRController`. Because it changes the number of degrees of freedom, it is
-incompatible with a fixed-length state vector and is not yet integrated with the
-time-stepping loop.
+`solve`**; it is exercised by tests and the experimental `AMRController`. A mesh
+it refines cannot be passed to `solve`: refinement leaves inactive parent cells
+among the active ones, while the solver's kernels assume the active cells are the
+contiguous prefix `1:n_active_cells`; it also changes the number of degrees of
+freedom, which the fixed-length state vector of `solve` cannot follow.
 
 ### 14.4.1 Single-cell refinement
 
-`refine_cell!(mesh, cell_id)` (`src/Experimental/h_refinement.jl` lines 45–214)
+`refine_cell!(mesh, cell_id)` (`src/Experimental/h_refinement.jl`)
 splits a leaf cell $p$ into a left child $a$ and a right child $b$:
 
 1. **New center node.** Place a node at the geometric midpoint
@@ -841,18 +835,18 @@ $T\!\cdot\!V$ proxy ($V_a T_a + V_b T_b = V_p T_p$), so `verify_refinement_conse
 reports zero error, but it does not realize the advertised second-order
 reconstruction. With variable heat capacity the constant-$T$ split is also
 energy-conserving in the true $\rho c_p T V$ sense because $\rho c_p$ and $T$ are
-identical in both children. The gradient routine `estimate_gradient` (lines
-221–246) is correct and ready; only the geometric $\Delta z$ argument nullifies it.
+identical in both children. The gradient routine `estimate_gradient` is correct
+and ready; only the geometric $\Delta z$ argument nullifies it.
 
 > **Implementation note.** `refine_cell!` and `estimate_gradient` in
 > `src/Experimental/h_refinement.jl`. The conservation check
-> `verify_refinement_conservation` (lines 407–439) compares parent vs. summed
+> `verify_refinement_conservation` compares parent vs. summed
 > children for mass (per species, against `volume_ref`) and a $T\!\cdot\!V$ energy
 > proxy.
 
 ### 14.4.2 Marking and 2:1 balance
 
-`mark_cells_for_refinement(mesh, η, θ_refine, h_min, max_level)` (lines 269–300)
+`mark_cells_for_refinement(mesh, η, θ_refine, h_min, max_level)`
 flags a cell when **all three** criteria hold:
 
 $$
@@ -868,7 +862,7 @@ the second ensures the children will still exceed $h_{\min}$; the third caps the
 refinement depth. The maximum $\eta$ is taken only over active cells, and the
 routine returns empty if $\max\eta\le 0$.
 
-`enforce_2to1_balance!(mesh, marked, max_level)` (lines 312–358) augments the
+`enforce_2to1_balance!(mesh, marked, max_level)` augments the
 marked set so that, after refinement, adjacent cells differ by at most one
 refinement level. It is a **fixed-point iteration**: for each currently-marked
 cell it inspects both neighbors; if a neighbor is coarser
@@ -881,17 +875,16 @@ already-coarse cell that becomes unbalanced after a complex refinement pattern i
 not retroactively un-marked), and the fixed-point approach is conservative and can
 over-refine.
 
-`perform_h_refinement!(mesh, marked)` (lines 373–393) refines the marked cells in
+`perform_h_refinement!(mesh, marked)` refines the marked cells in
 decreasing index order (for determinism) and calls `update_geometry!` once at the
 end.
 
 ### 14.4.3 Sibling coarsening
 
-`coarsen_cells!(mesh, a, b; material)` (`src/Experimental/h_coarsening.jl` lines
-114–242) merges two *siblings* (same parent, both leaves) back into their parent.
-Its preconditions distinguish it sharply from the production adjacent-cell merge:
+`coarsen_cells!(mesh, a, b; material)` (`src/Experimental/h_coarsening.jl`) merges two *siblings* (same parent, both leaves) back into their parent.
+Its preconditions distinguish it sharply from the depletion park's adjacent-cell merge:
 it requires a parent–child relationship (`can_coarsen` checks parent $\ne 0$, both
-leaves), whereas the production park (`park_cell!`, §14.3.4) works on any
+leaves), whereas the park (`park_cell!`, §14.3.4) works on any
 adjacent live pair. The merge
 algebra is identical to §14.3.3 — energy-conserving $T$ (or volume-weighted
 without material), volume-weighted $\xi$, summed $m_{\mathrm{dry}}$ — but the
@@ -903,10 +896,11 @@ Crucially, `coarsen_cells!` **does not remove the orphaned intermediate node and
 interior face from the arrays** — it only flips the mask. This is the deliberate
 "mark-inactive" strategy (§14.6): removing elements would invalidate indices
 throughout the code, so the experimental $h$-AMR path leaves orphans in place,
-trading memory for index stability. (Contrast the production depletion path, which
-*does* compact, because the state vector must shrink to match.)
+trading memory for index stability. (Contrast the depletion park, which keeps the
+arrays' length and shifts the live values down so the live cells stay a contiguous
+prefix, §14.3.4.)
 
-`mark_cells_for_coarsening(mesh, η, θ_coarsen, h_max)` (lines 264–310) marks a
+`mark_cells_for_coarsening(mesh, η, θ_coarsen, h_max)` marks a
 sibling pair when **both** siblings have low error and the merged cell is not too
 large:
 
@@ -927,8 +921,7 @@ pairs (re-checking both are still active) and refreshes geometry.
 indicator, a quality metric, the refine/coarsen thresholds, the size and level
 bounds, and a check cadence. Its defaults are $\theta_{\mathrm{refine}}=0.7$,
 $\theta_{\mathrm{coarsen}}=0.1$, $h_{\min}=10^{-6}\,$m, $h_{\max}=10^{-2}\,$m,
-`max_level=4`, `check_every=10`. `adapt_mesh!(mesh, controller)` (lines 123–178)
-runs the full cycle:
+`max_level=4`, `check_every=10`. `adapt_mesh!(mesh, controller)` runs the full cycle:
 
 1. Compute indicators on the current state.
 2. Mark for refinement, enforce 2:1 balance, perform $h$-refinement.
@@ -961,8 +954,9 @@ relocation operates on the final cell count.
 
 Quality metrics guard against discretizations that, while topologically valid, are
 numerically dangerous: extreme size jumps degrade interpolation accuracy and
-matrix conditioning; non-positive volumes signal tangling. All metrics are
-subtypes of `AbstractQualityMetric` (`src/Materials/Materials.jl:59`) and live in
+matrix conditioning; non-positive volumes signal tangling. `solve` does not call
+them; they serve the experimental `AMRController` (§14.4.4) and diagnostics. All
+metrics are subtypes of `AbstractQualityMetric` (`src/Materials/Materials.jl`) and live in
 `src/Adaptivity/mesh_quality.jl`. Each metric supports `check_quality` (a boolean)
 and `quality_violations` (the offending cell indices).
 
@@ -1009,7 +1003,7 @@ $$
 sub-metrics pass; its violation set is the union.
 
 **Enforcement by Laplacian smoothing.** `enforce_quality!(mesh, metric;
-max_iter=10)` (lines 320–381) attempts to repair violations by relaxed Laplacian
+max_iter=10)` attempts to repair violations by relaxed Laplacian
 smoothing of the interior nodes of violating cells:
 
 $$
@@ -1029,21 +1023,19 @@ volumes are positive — a one-call diagnostic of mesh health.
 
 > **Implementation note.** All metric types, `check_quality`/`quality_violations`,
 > `compute_aspect_ratios`/`compute_smoothness`, `enforce_quality!`, and
-> `mesh_quality_summary` in `src/Adaptivity/mesh_quality.jl`. The geometry module
-> provides the closely related `aspect_ratio`, `max_aspect_ratio`,
-> `min_cell_size`, `max_cell_size` (`src/Geometry/geometric_quantities.jl`), all of
-> which also mask out inactive cells.
+> `mesh_quality_summary` in `src/Adaptivity/mesh_quality.jl`; all of them mask out
+> inactive cells.
 
 ---
 
 ## 14.6 AMR bookkeeping and invariants
 
-The AMR data model is split for performance (see §13 and the geometry KB):
+The AMR data model is split for performance (see §13):
 **immutable connectivity** (`Cell1D`, `Face1D` are immutable structs; the topology
 graph does not change during a residual evaluation) and **mutable geometry**
-(positions, volumes, areas, the active mask). Refinement and coarsening happen only
-at discrete event times and rebuild the relevant mesh arrays; between events the
-residual reads a frozen mesh.
+(positions, volumes, areas, the active mask). Topology changes — the park inside
+`solve`, refinement and coarsening outside it — happen only between residual
+evaluations; the residual never mutates the mesh.
 
 The central bookkeeping object is the **active-cell mask** `active_cell_mask::
 BitVector`, with `n_active_cells` its population count. The hard rule — call it the
@@ -1062,9 +1054,8 @@ that all five parallel per-cell arrays — `active_cell_mask`, `cell_states`,
 (empty allowed only for hand-built meshes that never sized it) — have length
 equal to `length(mesh.cells)`, and
 that `n_active_cells == count(active_cell_mask)`. It does not check connectivity
-correctness (that is the compaction routines' assertions on
-$n_{\mathrm{nodes}}=n_{\mathrm{cells}}+1$); it catches the most common drift, a
-counter that disagrees with the mask or a parallel array of the wrong length.
+correctness; it catches the most common drift, a counter that disagrees with the
+mask or a parallel array of the wrong length.
 
 Two distinct slot strategies coexist, by design:
 
@@ -1079,7 +1070,7 @@ their length and the 1-D connectivity never changes. The experimental $h$-AMR
 path leaves orphans (so its arrays grow monotonically across refinement cycles)
 precisely to avoid invalidating indices held elsewhere. A periodic
 full-compaction pass for the
-$h$-AMR path is an open design question (§14.8).
+$h$-AMR path is an open design question (§14.10).
 
 No workspace buffer changes size on a park: the caches are allocated once for
 $n$ slots, and the Jacobian's sparsity pattern is a superset of every live
@@ -1089,8 +1080,9 @@ pattern (§14.3.6).
 
 ## 14.7 Interaction with the solver
 
-The relationship between AMR and the time integrator is mediated entirely by
-callbacks (§15) and the read-only-mesh discipline of the residual (§3, §13). Three
+The relationship between depletion parking and the time integrator is mediated
+entirely by callbacks (§15) and the read-only-mesh discipline of the residual (§3,
+§13); the $h$- and $r$-adaptivity of §14.2 and §14.4 has no such link. Three
 facts complete the picture:
 
 1. **Mesh sync is callback-driven.** The residual and Jacobian assembly treat the
@@ -1101,9 +1093,10 @@ facts complete the picture:
    post-processing all see a consistent mesh. The depletion callback runs *after*
    the step-update callback in the `CallbackSet` (see §15).
 
-2. **Termination guards the singular limit.** Alongside depletion, a
-   `ThicknessTerminationCallback` (a `ContinuousCallback` on
-   $z_{\mathrm{top}}-z_{\mathrm{bottom}} - \mathrm{min\_thickness}$, default
+2. **Termination guards the singular limit.** Alongside depletion, under ALE, the
+   thickness-termination callback (`create_thickness_termination_callback`, a
+   `ContinuousCallback` on the live thickness
+   $z_{n_{\mathrm{live}}+1}-z_1 - \mathrm{min\_thickness}$, default
    $\mathrm{min\_thickness}=10^{-6}\,$m) stops the integration when the whole
    sample has receded to near-zero thickness, before $\rho c_p^{\mathrm{eff}}V$
    becomes singular globally. Depletion handles *per-cell* thinning; termination
@@ -1153,9 +1146,9 @@ receding surface. Mapping their notation to ours on first use:
   swelling/shrinking is applied through a density-ratio rule on the cell sizes. The
   FDS surface-node removal is conceptually identical to Pyrolysis.jl's
   surface-depletion merge, with the difference that Pyrolysis.jl folds the removed
-  cell's energy into its interior neighbor by the explicit
-  $T_{\mathrm{merged}}=E_{\mathrm{total}}/(V_{\mathrm{merged}}\rho c_p|_{\mathrm{merged}})$
-  formula, whereas FDS's regression bookkeeping is tied to its fixed-grid layout.
+  cell's sensible enthalpy into its interior neighbor by the enthalpy-conserving
+  merge of §14.3.3, whereas FDS's regression bookkeeping is tied to its fixed-grid
+  layout.
   Neither FDS nor Gpyro carries an indicator-driven $h$-refinement of the kind in
   Pyrolysis.jl's experimental cluster (§14.4).
 
@@ -1167,11 +1160,9 @@ energy-conserving cell merge with a documented thinness criterion, decoupled fro
 the rest of the physics by the callback architecture.
 
 > Note: the reference comparison here is drawn from the general published
-> descriptions of these codes; the Pyrolysis.jl knowledge base did not include
-> dedicated `ref_thermakin`/`ref_gpyro`/`ref_fds` extracts for the AMR chapter, so
-> the mapping above is at the level of modeling strategy rather than equation-by-
-> equation correspondence. The Pyrolysis.jl side of every statement is grounded in
-> the source as cited throughout this chapter.
+> descriptions of these codes, so the mapping above is at the level of modeling
+> strategy rather than equation-by-equation correspondence. The Pyrolysis.jl side
+> of every statement is grounded in the source as cited throughout this chapter.
 
 ---
 
@@ -1193,7 +1184,7 @@ $$
 $$
 
 **Composite combination**:
-$\eta^{\max}=\max_k\eta_k,\ \eta^{\ell_2}=\sqrt{\textstyle\sum_k\eta_k^2},\ \eta^{\Sigma}=\sum_k\eta_k$.
+$\eta^{\max}=\max_k\hat\eta_k,\ \eta^{\ell_2}=\sqrt{\textstyle\sum_k\hat\eta_k^2},\ \eta^{\Sigma}=\sum_k\hat\eta_k$, with $\hat\eta_k=\eta_k/\max_{\text{active}}\eta_k$.
 
 **Equidistribution** (`src/Adaptivity/r_refinement.jl`):
 
@@ -1216,15 +1207,15 @@ $\Delta z_i < \tau_{\mathrm{dep}}\,\Delta z_{i,\mathrm{init}}$, $\tau_{\mathrm{d
 **Conservative merge** (`src/Adaptivity/cell_merge.jl`):
 
 $$
-\xi_{\mathrm{merged},j} = \frac{V_a\xi_{a,j}+V_b\xi_{b,j}}{V_a+V_b},
+\xi_{\mathrm{merged},j} = \frac{V_a\xi_{a,j}+V_b\xi_{b,j}}{V_{\mathrm{keep}}},
 \qquad
-\sum_{j\notin\mathrm{gas}} m_j\!\int_{T_{\mathrm{ref}}}^{T_{\mathrm{merged}}}\! c_{p,j}\,dT'
+\sum_{j} m_j\!\int_{T_{\mathrm{ref}}}^{T_{\mathrm{merged}}}\! c_{p,j}\,dT'
 = H_a(T_a) + H_b(T_b),
 \qquad
 m_{\mathrm{dry},\mathrm{keep}}\mathrel{+}=m_{\mathrm{dry},\mathrm{remove}},
 $$
 
-with $m_j = V\,\xi_j$ the per-component condensed mass ($T_{\mathrm{merged}}$ by
+with $V_{\mathrm{keep}} = V_a+V_b$ under ALE and $V_b$ on a fixed mesh, $m_j = V\,\xi_j$ the mass of component $j$, the sum running over every component ($T_{\mathrm{merged}}$ by
 bracketed Newton; reduces to the $\rho c_p$-weighted mean for constant $c_p$;
 §14.3.3), and $\chi_{\mathrm{merged}} = (m_a\chi_a+m_b\chi_b)/(m_a+m_b)$ with $m$
 the initial dry-solid mass (§14.3.4).
@@ -1245,15 +1236,14 @@ $h_i\ge 10^{-8}$ (min size).
 
 **AMR invariant** (`src/Adaptivity/Adaptivity.jl`):
 $\mathrm{len}(\text{mask})=\mathrm{len}(\text{states})=\mathrm{len}(V)=\mathrm{len}(\text{centers})=\mathrm{len}(\text{cells})$
-and $\mathrm{n\_active\_cells}=\mathrm{count}(\text{mask})$; after compaction
-$n_{\mathrm{nodes}}=n_{\mathrm{faces}}=n_{\mathrm{cells}}+1$.
+and $\mathrm{n\_active\_cells}=\mathrm{count}(\text{mask})$.
 
 ---
 
 ## 14.10 Limitations and open issues
 
-The AMR subsystem is functional in its production (surface-depletion) form and
-experimental in its full $h$-/$r$-adaptive form. The following are the principal
+The adaptivity subsystem is functional in the depletion-parking form `solve` uses
+and experimental in its full $h$-/$r$-adaptive form, which `solve` does not use. The following are the principal
 open issues, several of which are discrepancies or design questions surfaced by
 the code itself.
 

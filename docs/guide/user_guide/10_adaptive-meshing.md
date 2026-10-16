@@ -1,20 +1,18 @@
 # 10. Adaptive Meshing Options
 
-Pyrolysis.jl gives you several ways to let the mesh follow the physics instead of
-fixing it once at problem setup. The most important of these — and the only one
-wired directly into the production `solve` path — is **surface-cell depletion
-handling**, which merges the receding surface cell into its neighbor as the solid
-gasifies and the Arbitrary Lagrangian–Eulerian (ALE) mesh shrinks. Beyond that,
-the `Pyrolysis.Adaptivity` submodule exposes standalone tools for **r-refinement**
-(moving nodes to concentrate them where the solution is steep), **error
-indicators** and **monitor functions** that drive those moves, and **mesh-quality
-metrics** to keep the mesh well-conditioned. A fully topology-changing h-AMR
-cluster (cell splitting and sibling coarsening) also ships, but it lives in
-`Pyrolysis.Experimental` and is not connected to `solve`. This chapter shows how
-to use each, what every option means and defaults to, and where the sharp edges
-are. For the underlying theory (equidistribution, energy-conserving merges, the
-geometric conservation law) see Technical Reference §14 (AMR), §11 (ALE), and
-§13 (finite-volume discretization).
+The only mesh adaptation `solve` performs is **surface-cell depletion
+handling**: as the solid gasifies, a depleted cell is *parked* — merged into its
+neighbour and its state slot retired above the live surface — on a fixed mesh or
+on the shrinking Arbitrary Lagrangian–Eulerian (ALE) mesh. Beyond that, the
+`Pyrolysis.Adaptivity` submodule exposes standalone building blocks that `solve`
+does not use: **error indicators**, **monitor functions** and **r-refinement**
+(moving nodes to concentrate them where a field is steep), and **mesh-quality
+metrics**. Cell splitting and sibling coarsening (h-refinement) ship in
+`Pyrolysis.Experimental`, and the meshes they produce cannot be passed to
+`solve`. This chapter shows how to use each, what every option means and defaults
+to, and where the sharp edges are. For the underlying theory (equidistribution,
+energy-conserving merges, the geometric conservation law) see Technical Reference
+§14, §11 (ALE), and §13 (finite-volume discretization).
 
 > **Coordinate reminder.** `z = 0` is the bottom / substrate (boundary tag
 > `:bottom`, id 2); `z = L` is the top / exposed surface (tag `:top`, id 1). Heat
@@ -25,22 +23,22 @@ geometric conservation law) see Technical Reference §14 (AMR), §11 (ALE), and
 
 ## 10.1 When to use adaptivity
 
-Adaptivity costs assembly time and, in some configurations, forces a less
-efficient Jacobian. Reach for it only when the physics warrants it:
+Reach for depletion handling only when the physics warrants it, and size the
+mesh up front for everything else:
 
 | Situation | Symptom | Recommended tool |
 |---|---|---|
-| Surface recession (charring/ablating solid in ALE) | Surface cell thins toward zero; timestep collapses; `ρc_p → 0` trouble | `handle_depletion = true` (§10.2) |
+| Surface recession or burnout (charring/ablating solid) | Surface cell thins or empties toward zero; timestep collapses; `ρc_p → 0` trouble | `handle_depletion = true` (§10.2) |
 | Sample fully consumed | Total thickness approaches zero | thickness termination (automatic in ALE; §10.3) |
-| Steep, *moving* thermal or reaction front on a fixed cell count | Front under-resolved between cells, but you don't want more cells | r-refinement via `relocate_nodes!` (§10.5) |
-| You suspect mesh distortion after ALE motion | Large cell-size jumps, near-zero or inverted volumes | quality metrics + `enforce_quality!` (§10.6) |
-| You want true local h-refinement | — | Experimental h-AMR (§10.7), with caveats |
+| Steep thermal or reaction front | Front under-resolved between cells | a surface-stretched mesh or more cells (Chapter 6) |
+| Grading or distortion of a mesh you built | Large cell-size jumps, near-zero volumes | quality metrics (§10.6) to inspect it before solving |
 
 A good default workflow is: start with a **uniform or surface-stretched fixed
 mesh** (Chapter 6) sized from a convergence study (Technical Reference §18.5),
-and turn on depletion handling only once you run an ALE case where the surface
-actually recedes. Node relocation and h-AMR are advanced, opt-in tools; most
-cone-calorimeter and TGA studies never need them.
+and turn on depletion handling once you run a case where the surface actually
+recedes or burns out. The indicators, r-refinement and quality tools of
+§10.4–§10.6 are building blocks for your own mesh studies; `solve` does not call
+them, and most cone-calorimeter and TGA studies never need them.
 
 ---
 
@@ -51,7 +49,7 @@ When a solid pyrolyzes away, the cells that held it shrink (ALE mesh motion,
 with cells it cannot resolve: a thin cell's equations are conditioned like
 `1/Δz²`, so the Newton iteration loses every digit and the step size collapses.
 **Depletion handling** detects such cells and *parks* them: the cell's mass and
-condensed enthalpy are merged into a neighbour, and its state slot is moved
+sensible enthalpy are merged into a neighbour, and its state slot is moved
 above the live surface as an inert ghost. Nothing changes size — the state
 vector, the mesh arrays and the Jacobian keep their allocation for the whole
 solve — and every kernel runs over the live cells `1:mesh.n_active_cells` with
@@ -80,7 +78,6 @@ sol = solve(problem;
 | `use_ale` | `false` | Enable ALE mesh motion (node positions enter the state vector). |
 | `handle_depletion` | `false` | Park depleted cells mid-solve. |
 | `depletion_threshold` | `0.05` | ALE: a cell is depleted when its thickness `< threshold ×` its own initial thickness. Fixed mesh: the top live cell is depleted when its condensed concentration `< threshold ×` its initial value. Must satisfy `0 < threshold < 1`. |
-
 | `min_cells` | `2` | Once the live cell count reaches this, the run terminates rather than parking further. Must be `≥ 1`. |
 | `min_thickness` | `1e-6` | [m] Live thickness below which an ALE solve terminates. Must be `> 0`. |
 
@@ -149,9 +146,9 @@ with `V_keep′ = V_park + V_keep` under ALE (the keeper spans both cells) and
 `V_keep′ = V_keep` on a fixed mesh (the keeper's volume is fixed, so its
 concentration rises by the parked mass).
 
-Temperature is merged by **conserving the condensed-phase sensible enthalpy**,
-not by naive volume averaging. With `m_j = V · ξ_j` the per-component condensed
-mass of each cell, the merged temperature solves
+Temperature is merged by **conserving the sensible enthalpy**, not by naive
+volume averaging. With `m_j = V · ξ_j` the per-component mass of each cell, the
+merged temperature solves
 
 ```
 Σ_j m_j ∫_{T_ref}^{T_merged} c_p,j(T′) dT′  =  H_park + H_keep
@@ -190,8 +187,8 @@ sol.extras.live_cells[end]          # live cells at the end of the run
 
 ### 10.2.5 Depletion and the Jacobian
 
-Parking keeps the state size, so the pluggable Jacobian backends and their
-sparse linear solvers run unchanged through burnout; `verify_jacobian` covers
+Parking keeps the state size, so the structured Jacobian and its sparse linear
+solver run unchanged through burnout; `verify_jacobian` covers
 parked states. Under ALE the default backend is
 `Structured(strategy = ApproxSolve())`, with or without parking: the full ALE
 pattern couples every node to every cell below it and makes the factorized
@@ -206,7 +203,7 @@ horizons without park events only (Chapter 13).
 
 ## 10.3 Thickness-termination callback
 
-Independently of merging, a shrinking sample can reach (near-)zero thickness,
+Independently of parking, a shrinking sample can reach (near-)zero thickness,
 which makes the volumetric heat capacity singular. In **ALE mode `solve`
 automatically installs a thickness-termination callback** that stops the
 integration cleanly once the total sample thickness drops below
@@ -235,8 +232,8 @@ depletion handling, so the callback reads the live cell count.
 
 Error indicators estimate where the discretization error is largest. They are the
 inputs to refinement/relocation decisions: high indicator value ⇒ resolve more
-there. All indicator types live in `Pyrolysis.Adaptivity` and are re-exported, so
-`using Pyrolysis` makes them available directly. Each implements
+there. All indicator types are exported from `Pyrolysis.Adaptivity` (not from the
+top level), so bring them in with `using Pyrolysis.Internal`. Each implements
 `compute_indicator(ind, mesh)` (returning a per-cell `Vector{Float64}`, with `0`
 for inactive cells).
 
@@ -244,7 +241,7 @@ for inactive cells).
 |---|---|---|---|
 | Gradient | `GradientIndicator(:T)` or `GradientIndicator(:T, weight)` | `η = w · hᵢ · \|∇φ\|ᵢ` | Steep fronts (thermal/reaction). Default `weight = 1.0`. |
 | Curvature | `CurvatureIndicator(:T)` or `(:T, weight)` | `η = w · hᵢ² · \|∇²φ\|ᵢ` | Sharper features than gradient; zero at boundaries (needs 3 points). |
-| Reaction rate | `ReactionRateIndicator()` or `(weight)` | `η = w · hᵢ · maxⱼ \|rⱼ\|ᵢ / max(ξⱼ, ε)` | Active reaction zones. Requires `rates = r` (throws `ArgumentError` without it); standalone-only — it cannot run inside the h-AMR controller cycle. |
+| Reaction rate | `ReactionRateIndicator()` or `(weight)` | `η = w · hᵢ · maxⱼ \|rⱼ\|ᵢ / max(ξⱼ, ε)` | Active reaction zones. Requires `rates = r` (throws `ArgumentError` without it). |
 | Interface proximity | `InterfaceProximityIndicator(pos, h_target)` or `(pos, h_target, weight)` | `η = w / (1 + dᵢ/h_target)` | Force resolution near a tracked interface position, regardless of solution. Purely geometric. |
 | Composite | `CompositeIndicator(inds)` or `(inds, combination)` | `:max`, `:l2`, or `:sum` of components, each first normalized by its own maximum over active cells | Blend several indicators. Default `combination = :max`. |
 
@@ -253,7 +250,7 @@ concentration. `hᵢ` is the cell size and `dᵢ` the distance from the cell cen
 to the interface. The reaction-rate indicator's `ε = 1e-10` guards the division.
 
 ```julia
-using Pyrolysis
+using Pyrolysis, Pyrolysis.Internal
 
 # A single indicator
 η_T = compute_indicator(GradientIndicator(:T), mesh)        # Vector{Float64}, length n_cells
@@ -270,18 +267,16 @@ ind = CompositeIndicator(
 ```
 
 > **Note.** `compute_indicator(ind, mesh)` reads `T` and `ξ` from the mesh's cell
-> states, so make sure the mesh is in sync with the current solution (after a
-> solve, the step-update callback keeps `mesh` consistent; if you are
-> post-processing a `PyrolysisSolution`, rebuild the field arrays yourself and
-> use the four-argument form `compute_indicator(ind, mesh, T, ξ)`). The
+> states, so make sure the mesh holds the state you mean (after a solve,
+> `solution.problem.mesh` holds the final state; to evaluate a saved time of a
+> `PyrolysisSolution`, rebuild the field arrays yourself and use the
+> four-argument form `compute_indicator(ind, mesh, T, ξ)`). The
 > reaction-rate indicator requires a rate matrix that is not available from the
 > mesh alone and **throws** in the convenience form — pass `rates = r` (sized
 > like `ξ` on the current mesh) via the four-argument form.
 
 These indicators are **diagnostic building blocks** — computing one does not
-change the mesh. To act on an indicator you either feed it into the experimental
-h-AMR machinery (§10.7) or, more commonly, use a *monitor function* for
-r-refinement (§10.5).
+change the mesh, and `solve` never computes one.
 
 ---
 
@@ -304,7 +299,7 @@ Boundary nodes never move.
 ### 10.5.2 Relocating nodes
 
 ```julia
-using Pyrolysis
+using Pyrolysis, Pyrolysis.Internal
 
 n_iter = relocate_nodes!(mesh;
     monitor    = GradientMonitor(; α = 1.0, variable = :T),
@@ -331,17 +326,18 @@ returned iteration count may equal `max_iter` without full convergence.
 > well-conditioned (huge `ω` disparities cause ill-conditioning). Default
 > tolerances (`tol = 1e-3`, `relaxation = 0.5`) are untested on realistic
 > steep-front pyrolysis problems — treat them as starting points. Boundary nodes
-> are pinned. r-refinement is a **standalone mesh operation**: it is not invoked
-> automatically by `solve`. Use it between solve segments (relocate, then warm-
-> start the next segment) or in a custom driver.
+> are pinned. r-refinement is a **standalone mesh operation** that `solve` does
+> not call: it moves the nodes of a `Mesh1D` you hold, and the cell values stay
+> attached to their cells (they are not remapped).
 
 ---
 
 ## 10.6 Mesh-quality metrics and enforcement
 
-After any mesh motion (ALE or r-refinement) you may want to confirm the mesh is
-still well-conditioned, and optionally repair it. The quality types and functions
-are in `Pyrolysis.Adaptivity` (re-exported).
+To confirm that a mesh you built or relocated is well-conditioned, and optionally
+repair it, use the quality types and functions exported from
+`Pyrolysis.Adaptivity` (bring them in with `using Pyrolysis.Internal`). `solve`
+does not run them.
 
 ### 10.6.1 Metrics
 
@@ -358,7 +354,7 @@ are in `Pyrolysis.Adaptivity` (re-exported).
 ### 10.6.2 Checking and summarizing
 
 ```julia
-using Pyrolysis
+using Pyrolysis, Pyrolysis.Internal
 
 metric = AspectRatioMetric(2.0)
 
@@ -388,7 +384,7 @@ mesh now passes). It is a local, incremental fix and is **not guaranteed to clea
 clustered or severe violations** — check the return value. Boundary nodes are
 not moved.
 
-A typical post-motion guard:
+A typical guard after relocating nodes:
 
 ```julia
 relocate_nodes!(mesh; monitor = GradientMonitor(; variable = :T))
@@ -405,14 +401,13 @@ end
 
 ## 10.7 Experimental h-AMR (cell splitting and coarsening)
 
-True topology-changing h-adaptive refinement — splitting cells into children and
-merging sibling cells back — ships with the package but is **quarantined in
-`Pyrolysis.Experimental` and is *not* connected to `solve`.** Unlike the
-`Adaptivity` exports, `Experimental` is **not re-exported at the top level**, so
-you must reach into it explicitly:
+Topology-changing h-adaptive refinement — splitting cells into children and
+merging sibling cells back — ships with the package in `Pyrolysis.Experimental`,
+and **its meshes cannot be passed to `solve`**. `Experimental` is not part of
+`Pyrolysis.Internal`, so you reach into it explicitly:
 
 ```julia
-using Pyrolysis
+using Pyrolysis, Pyrolysis.Internal   # GradientIndicator, AspectRatioMetric
 
 # Single-cell split: returns (child_a_id, child_b_id)
 ca, cb = Pyrolysis.Experimental.refine_cell!(mesh, cell_id)
@@ -450,9 +445,10 @@ The full experimental surface (all under `Pyrolysis.Experimental`) includes
 
 **Caveats — read before using:**
 
-- **Not in the solve loop.** There is no `solve` keyword to enable h-AMR during
-  integration. Calling these between solve segments is the only supported
-  pattern.
+- **Not usable with `solve`.** Refinement leaves inactive parent cells among the
+  active ones, while the solver's kernels assume the active cells come first, so
+  a refined or coarsened mesh cannot be solved. There is no `solve` keyword for
+  h-refinement either.
 - **Bookkeeping is leaky.** h-refinement appends children and h-coarsening marks
   cells inactive *without compacting the arrays*, so `length(mesh.cells) >
   n_active_cells` is normal. Any code consuming the mesh afterward must iterate
@@ -469,24 +465,23 @@ The full experimental surface (all under `Pyrolysis.Experimental`) includes
   `θ_coarsen = 0.1`, `max_level = 4`, `check_every = 10`) have not been validated
   on realistic pyrolysis fronts.
 
-For production surface-recession work, prefer the depletion path (§10.2), which
-*is* integrated with the solver and parks depleted cells with the
-energy-conserving merge (`park_cell!`) that lives in core `Adaptivity`. See
-Technical Reference §14.4 for the h-AMR algorithms and §14.3 for the production
-park.
+For surface-recession work use the depletion path (§10.2), which is integrated
+with the solver and parks depleted cells with the energy-conserving merge
+(`park_cell!`) that lives in core `Adaptivity`. See Technical Reference §14.4 for
+the h-refinement algorithms and §14.3 for the park.
 
 ---
 
-## 10.8 Choosing the Jacobian when you use adaptivity
+## 10.8 Choosing the Jacobian with depletion handling
 
-Depletion handling keeps the state size, so every Jacobian backend works with
+Depletion handling keeps the state size, so either Jacobian strategy works with
 it. The defaults:
 
 | Scenario | Default Jacobian |
 |---|---|
 | ALE, with or without `handle_depletion` | `Structured(strategy = ApproxSolve())` — the reduced ALE pattern; it follows the same trajectory as `DirectSolve` at a fraction of the cost per step. Without parking, surface cells that burn away shrink toward zero thickness and stall either Jacobian alike: use `handle_depletion = true` to run through burnout. |
-| Fixed mesh | `Structured(strategy = DirectSolve())` (the strategies coincide without ALE couplings). |
-| Verifying a backend during an adaptive run | `solve(...; verify_jacobian = (rtol=1e-6, atol=1e-10, sample_times=[…]))`, with or without depletion. |
+| Fixed mesh | `Structured(strategy = DirectSolve())` (the strategies coincide unless Beer–Lambert couplings are present). |
+| Verifying a backend during a depletion run | `solve(...; verify_jacobian = (rtol=1e-6, atol=1e-10, sample_times=[…]))`, with or without depletion. |
 
 Override with a bare backend, built for the solve's own mode:
 
@@ -524,10 +519,10 @@ Reference §15.6–§15.10 for the strategy internals.
 | h-AMR (`refine_cell!`, `AMRController`, …) | `Experimental` (not re-exported) | — experimental | 10.7 |
 
 **Key correctness reminders.** Depletion handling works in both mesh modes
-and with every `jacobian` backend; the park conserves species mass exactly and
-condensed-phase sensible enthalpy via the `∫c_p dT` temperature merge (gas
-excluded); r-refinement,
-quality enforcement, and h-AMR
-are standalone tools not driven by `solve`; and the h-AMR cluster is experimental
-and reached only through `Pyrolysis.Experimental`. For the physics behind these
-operations, see Technical Reference §11 (ALE), §14 (AMR), and §15 (Jacobian).
+and with either Jacobian strategy; the park conserves species mass exactly and
+sensible enthalpy (every component, gas included) via the `∫c_p dT`
+temperature merge; error indicators, r-refinement and quality enforcement are
+standalone tools `solve` does not use; and the h-refinement cluster is
+experimental, reached only through `Pyrolysis.Experimental`, and its meshes
+cannot be passed to `solve`. For the physics behind these operations, see
+Technical Reference §11 (ALE), §14 (mesh adaptation), and §15 (Jacobian).

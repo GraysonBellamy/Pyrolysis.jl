@@ -6,7 +6,7 @@ variables (cell temperature $T$ and component mass concentrations $\xi_j$) and t
 auxiliary states carried only in certain simulation modes (node positions $z_i$ for
 the Arbitrary Lagrangian–Eulerian mesh, and the pyrolysis-progress scalar $\chi_i$
 for variable cross-section), then derive each conservation law: condensed-phase
-mass, per-species transport, the non-conservative ("Formulation A") energy equation,
+mass, per-species transport, the non-conservative energy equation,
 the ideal-gas pressure closure, and Darcy momentum. The chapter is deliberately a
 *statement and justification* of the continuum model; the discrete operators that
 realize it are derived in §7 (Heat Conduction, Convection & Energy Assembly), §9
@@ -81,7 +81,7 @@ $i=1,\dots,n$. Two **auxiliary state blocks** are appended only in the modes tha
 them (the bundled `SimulationMode{Mesh,Rad,Trans,Chi}` trait selects which; see §15):
 
 - **Node positions** $z_i$ [m], $i=1,\dots,n_{\mathrm{nodes}}$, present only in ALE
-  mode (`Mesh = ALE`). The mesh becomes part of the coupled DAE; its evolution is
+  mode (`Mesh = ALE`). The mesh becomes part of the coupled ODE system; its evolution is
   governed by a mesh-velocity field $w$ (§3.6, §11).
 - **Pyrolysis progress** $\chi_i$ [–], present only in variable-cross-section mode
   (`Chi = WithChi`). Each $\chi_i$ accumulates dry-pyrolysis-gas mass released per unit
@@ -115,9 +115,9 @@ Collecting the laws derived below, the continuum model is the coupled system
 
 $$
 \begin{aligned}
-&\text{Energy (Formulation A):}\quad
+&\text{Energy:}\quad
 \rho c_p^{\mathrm{eff}}\,\frac{\partial T}{\partial t}
-= -\nabla\cdot\mathbf q_{\mathrm{cond}} + S_{\mathrm{conv}} + S_{\mathrm{gen}}
+= -\nabla\cdot\mathbf q_{\mathrm{cond}} + S_{\mathrm{conv}}
 + Q_{\mathrm{rad}} + Q_{\mathrm{rxn}}, \\[4pt]
 &\text{Gas species:}\quad
 \frac{\partial \xi_j}{\partial t}
@@ -150,9 +150,8 @@ $$
 $$
 
 This is exact by the definition of $\xi_j$ as mass-per-bulk-volume and requires no
-property evaluation. It is the quantity returned by `total_density` and is used, for
-example, to form mass fractions $Y_j = \xi_j/\rho$ wherever those are needed
-(`mass_fractions`, with a $\rho<10^{-20}$ guard returning zero fractions).
+property evaluation. Mass fractions $Y_j = \xi_j/\rho$ are formed from it wherever
+they are needed.
 
 The **mixture density used by the swelling/specific-volume bookkeeping**,
 `mixture_density`, is a *different* quantity: it is the density a parcel would have if
@@ -178,9 +177,9 @@ the conserved bulk inventory; $\rho_{\mathrm{mix}}$ and the per-component specif
 volumes feed the volume-change rate of §3.6. The full derivation of the swelling
 mixture density and its derivatives is in §5.
 
-> **Implementation notes.** `total_density(ξ) = sum(ξ)` and `mixture_density` are in
-> `src/Properties/mixture_rules.jl` (lines ~170 and ~674). The $\rho_{\mathrm{mix}}$
-> swelling form is `_specific_vol_with_swelling_direct` (same file).
+> **Implementation notes.** `mixture_density` is in `src/Properties/mixture_rules.jl`;
+> the $\rho_{\mathrm{mix}}$ swelling form is `_specific_vol_with_swelling_direct` (same
+> file).
 
 ### 3.2.2 No separate bulk-continuity PDE
 
@@ -198,8 +197,9 @@ $$
 
 so reactions move mass *between* components without creating or destroying it, and the
 only net change in $\rho$ comes from gas transport out of the cell. This build-time
-invariant is checked by `validate_species_source_conservation` (tolerance
-$10^{-12}$) and `check_material_mass_balance` (§6, §16).
+invariant is enforced by the `Reaction` constructor (`_validate_stoichiometry`,
+relative tolerance $10^{-10}$); `mass_balance_error` and `verify_stoichiometry` report
+it (§6).
 
 ### 3.2.3 Phase-resolved mass: solids/liquids are immobile, only gases transport
 
@@ -256,7 +256,7 @@ This is exactly the branch taken by the generated kernel
 divergence is never even formed for the matrix phases.
 
 > **Implementation notes.** The compile-time gas/solid branch is
-> `apply_species_residual_unrolled!` in `src/Materials/materials.jl` (≈ line 890).
+> `apply_species_residual_unrolled!` in `src/Materials/materials.jl`.
 > Species sources $S_{j,i}=\sum_r\nu_{r,j}r_r$ come from `species_source_terms!` in
 > `src/Physics/kinetics.jl`; the per-reaction application enforces the single-reactant
 > mass-balance convention in `_apply_reaction_source!` (same file). The species
@@ -265,7 +265,7 @@ divergence is never even formed for the matrix phases.
 
 ---
 
-## 3.3 The energy equation: Formulation A (non-conservative)
+## 3.3 The energy equation (non-conservative)
 
 ### 3.3.1 Statement
 
@@ -278,7 +278,6 @@ $$
 \rho c_p^{\mathrm{eff}}(T,\xi)\,\frac{\partial T}{\partial t}
 = -\,\nabla\cdot \mathbf q_{\mathrm{cond}}
 + S_{\mathrm{conv}}
-+ S_{\mathrm{gen}}
 + Q_{\mathrm{rad}}
 + Q_{\mathrm{rxn}} .
 \;}
@@ -291,32 +290,30 @@ The terms, with sign conventions, are:
 | $\rho c_p^{\mathrm{eff}}\,\partial_t T$ | sensible-heat storage, every component | $\bigl(\sum_{j}\xi_j c_{p,j}(T)\bigr)\partial_t T$ | J·m⁻³·s⁻¹ |
 | $-\nabla\cdot\mathbf q_{\mathrm{cond}}$ | Fourier conduction | $\mathbf q_{\mathrm{cond}} = -k_{\mathrm{eff}}\nabla T$ | net outflow cools |
 | $S_{\mathrm{conv}}$ | gas advection of sensible enthalpy | $-\sum_g c_{p,g}(T)\,\mathbf J_g\!\cdot\!\nabla T$ | W·m⁻³ |
-| $S_{\mathrm{gen}}$ | optional gas-generation enthalpy sink | $-\sum_g \Delta h_g(T,T_{\mathrm{ref}})\,\nabla\!\cdot\!\mathbf J_g$ | W·m⁻³ |
 | $Q_{\mathrm{rad}}$ | volumetric radiation absorption | model-dependent | W·m⁻³ |
 | $Q_{\mathrm{rxn}}$ | reaction heat | $-\sum_r h_r r_r$ | W·m⁻³ |
 
-This is the "Formulation A" referred to throughout the codebase, selected by the
-default `energy_form = :standard`. The discrete cell update is
+The discrete cell update is
 
 $$
 \frac{dT_i}{dt}
 = \frac{1}{\rho c_{p,i}^{\mathrm{eff}}}
 \Bigl(
--(\nabla\cdot\mathbf q)_i + S_{\mathrm{conv},i} + S_{\mathrm{gen},i}
+-(\nabla\cdot\mathbf q)_i + S_{\mathrm{conv},i}
 + Q_{\mathrm{rad},i} + Q_{\mathrm{rxn},i}
 \Bigr),
 $$
 
 which is precisely the final assembly loop of `compute_rhs!` (the divergence enters
-with a minus sign, the four volumetric sources add, the whole is divided by the
+with a minus sign, the three volumetric sources add, the whole is divided by the
 mixture $\rho c_p$). The detailed discretization of each term — the distance-weighted
 harmonic-mean face conductivity, the second-order cell-centered temperature gradient in
 $S_{\mathrm{conv}}$, the eight-step assembly order — belongs to §7; here we justify the
 *continuous* form.
 
 > **Implementation notes.** The final RHS assembly
-> $dT_i/dt = (-\,\mathrm{div\_q} + S_{\mathrm{conv}} + S_{\mathrm{gen}} + Q_{\mathrm{rad}} + Q_{\mathrm{rxn}})/\rho c_p$
-> is in `compute_rhs!`, `src/Discretization/finite_volume.jl` (Step 8, ≈ line 387).
+> $dT_i/dt = (-\,\mathrm{div\_q} + S_{\mathrm{conv}} + Q_{\mathrm{rad}} + Q_{\mathrm{rxn}})/\rho c_p$
+> is in `compute_rhs!`, `src/Discretization/finite_volume.jl` (Step 8).
 > The mixture heat capacity is `effective_heat_capacity` and the conductive flux is
 > `conductive_flux` / `compute_conductive_fluxes!`.
 
@@ -375,9 +372,9 @@ temperature. Three things follow:
    has been absorbed exactly into $Q_{\mathrm{rxn}}$ and $S_{\mathrm{conv}}$. If the
    heats are instead quoted at a datum $T_{\mathrm{ref}}$, Kirchhoff's law
    $h_r(T) = h_r^0 + \sum_j\nu_{r,j}\Delta h_j(T,T_{\mathrm{ref}})$ adds
-   $-\sum_j\Delta h_j(T,T_{\mathrm{ref}})\,\dot\omega_j$ over *every* component; the
-   optional $S_{\mathrm{gen}}$ of §3.3.4 supplies only the gas part of that sum and
-   only in the quasi-steady limit $\nabla\!\cdot\mathbf J_g \approx \dot\omega_g$.
+   $-\sum_j\Delta h_j(T,T_{\mathrm{ref}})\,\dot\omega_j$ over *every* component, a
+   term the energy equation does not carry. Heats of reaction are therefore supplied
+   at the reaction temperature (§6.6.3).
 3. **The skeleton-following derivative $\partial_t T + \mathbf v_s\!\cdot\!\nabla T$ is
    the mesh-frame rate in ALE**, where the mesh moves with the skeleton (§3.6, §11).
    The temperature equation therefore carries no advection term of any kind in
@@ -409,7 +406,8 @@ entirely model-dependent. For `NO_RADIATION` it is zero; for `SURFACE_ABSORPTION
 the absorbed flux $\alpha\,q_{\mathrm{ext}}$ enters through the *surface energy
 balance* (boundary Newton solve, §12.3.5), not as a volumetric deposit;
 for `BEER_LAMBERT` it follows the in-depth attenuation $q''' = \alpha I(z)$ with
-$I(z) = I_{\mathrm{surface}}\exp(-\int\alpha\,dz')$; for `P1_QUASI_STEADY` it is the net
+$I(z) = I_{\mathrm{surface}}\exp(-\int\alpha\,dz')$; for the experimental `P1_QUASI_STEADY` model (which `solve`
+rejects; §8.12) it is the net
 P1 source $\alpha(G-4\sigma T^4)$ computed from a separate quasi-steady radiation field.
 The four models, their mutual exclusivity, and their numerics are the subject of §8.
 
@@ -428,11 +426,11 @@ moisture-sorption heat $h(T,\xi)$ via `StateDependentProperty`); the rate law $r
 the smoothly-gated Arrhenius form of §6.
 
 > **Implementation notes.** $Q_{\mathrm{rxn}} = -\sum_r h_r r_r$ is
-> `reaction_heat_source` in `src/Physics/kinetics.jl` (≈ line 257), with the negative
+> `reaction_heat_source` in `src/Physics/kinetics.jl`, with the negative
 > sign documented in-source ("Note the negative sign!"). Reaction rates and heats are
 > evaluated together by `evaluate_reactions!` (same file).
 
-### 3.3.4 The advection source $S_{\mathrm{conv}}$ and the optional generation sink $S_{\mathrm{gen}}$
+### 3.3.4 The advection source $S_{\mathrm{conv}}$ and the surface gas enthalpy
 
 **$S_{\mathrm{conv}}$ (always active).** The gas-advection source carries the sensible
 enthalpy convected by the gas flux,
@@ -446,55 +444,31 @@ $$
 where $\bar J_{g,i} = \tfrac12 (J_{g,f_L} + J_{g,f_R})$ is the cell-center average of the
 two face fluxes and $(\partial T/\partial z)_i$ is the second-order opposite-distance
 gradient (boundary cells blend in the boundary-face slope at the solved $T_s$; §7.4.2).
-This term is **always on** in the `:standard` form; it is the
-only carrier of gas sensible enthalpy in the temperature equation under Formulation A.
+It is the only carrier of gas sensible enthalpy in the temperature equation.
 
-**$S_{\mathrm{gen}}$ (optional).** The generation sink is the second product-rule piece,
-written with the *exact* sensible-enthalpy integral rather than a single-point product:
-
-$$
-S_{\mathrm{gen}} = -\sum_g \Delta h_g(T,T_{\mathrm{ref}})\,\nabla\cdot\mathbf J_g,
-\qquad
-\Delta h_g(T,T_{\mathrm{ref}}) = \int_{T_{\mathrm{ref}}}^{T} c_{p,g}(\tau)\,d\tau
-\approx c_{p,g}\!\Bigl(\tfrac{T+T_{\mathrm{ref}}}{2}\Bigr)(T-T_{\mathrm{ref}}),
-$$
-
-the integral being evaluated by the midpoint rule in `delta_enthalpy` (§4) — the very
-same quadrature and datum $T_{\mathrm{ref}}$ used by the optional surface-transpiration
-boundary term. Using the true integral (not $(T-T_{\mathrm{ref}})c_{p,g}(T)$) is what lets
-the discrete energy ledger telescope *exactly* with the surface term. $S_{\mathrm{gen}}$
-is included only when `energy_form = :with_generation_sink`; otherwise it is zeroed.
-It is a *partial* datum conversion: with $T_{\mathrm{ref}}$-datum heats the exact
-equation also needs the condensed-product term
-$-\sum_{j\in S/L}\Delta h_j(T,T_{\mathrm{ref}})\,\dot\omega_j$ (§3.3.2), which is not
-implemented.
-
-**Mutual exclusivity with surface transpiration.** With constant $c_p$ the volumetric
-integral of the two product-rule pieces equals the boundary outflow term,
+**No surface gas-enthalpy term.** The conservative-form gas-enthalpy divergence splits
+by the product rule as
 
 $$
-\int_0^L (S_{\mathrm{conv}} + S_{\mathrm{gen}})\,dz
-= -\sum_g \dot m_g\,\Delta h_g(T_s, T_{\mathrm{ref}}),
+\nabla\cdot\Big(\sum_g \Delta h_g\,\mathbf J_g\Big)
+= \sum_g c_{p,g}\,\mathbf J_g\cdot\nabla T + \sum_g \Delta h_g\,\nabla\cdot\mathbf J_g ,
 $$
 
-i.e. the conservative-form gas-enthalpy divergence is recovered at the boundary. The
-default convention carries this transport *volumetrically* via $S_{\mathrm{conv}}$ and a
-plain convective+radiative surface BC, with **no** surface-transpiration enthalpy term.
-If one also enabled the surface-transpiration BC
-$\sum_g \dot m_g\,\Delta h_g(T_s,T_\infty)$, it would apply the *entire* outflow on top
-of $\int S_{\mathrm{conv}}$, double-counting roughly $5$–$10$ kW·m⁻² as a spurious sink.
-For this reason `use_transpiration_bc = true` is **rejected at problem construction**;
-the supported production path is $S_{\mathrm{conv}}$-only (optionally plus
-$S_{\mathrm{gen}}$, which then telescopes with transpiration only if transpiration were
-permitted — it is not, in production). The surface energy balance and the
-transpiration term are detailed in §7 and §12.
+exactly even for temperature-dependent $c_{p,g}$, since $\nabla\Delta h_g = c_{p,g}(T)\,\nabla T$.
+The first piece is $-S_{\mathrm{conv}}$; the second cancels exactly against the
+transport part of the gas composition-change term ($\partial_t\xi_g = \dot\omega_g -
+\nabla\cdot\mathbf J_g$, §3.3.2), whose reaction part is $Q_{\mathrm{rxn}}$ when the
+heats of reaction are quoted at the reaction temperature. The gas enthalpy is
+therefore carried entirely *volumetrically*, and the surface boundary condition is a
+plain convective + radiative balance, $q_{\mathrm{BC}}(T_s) = q_{\mathrm{cond}}(T_s)$,
+with **no** gas-enthalpy term. A surface term $\sum_g \dot m_g\,\Delta h_g(T_s,T_\infty)$
+would apply the *entire* outflow enthalpy on top of $\int S_{\mathrm{conv}}\,dz$,
+double-counting roughly $5$–$10$ kW·m⁻² as a spurious sink. The gas flux reaches the
+surface balance only through the blowing model of a `ConvectiveBC`, which reduces the
+convective coefficient (§12.3.3). The surface energy balance is detailed in §12.
 
 > **Implementation notes.** $S_{\mathrm{conv}}$ is `compute_gas_convective_source!`
-> and $S_{\mathrm{gen}}$ is `compute_gas_generation_sink!`, both in
-> `src/Physics/convection.jl`. The construction-time guard rejecting
-> `use_transpiration_bc` is in `to_problem_def`, `src/Problem/adapter.jl`.
-> The midpoint-rule `delta_enthalpy` is in `src/Materials/components.jl`
-> (≈ line 492).
+> in `src/Physics/convection.jl`.
 
 ### 3.3.5 Why temperature, not enthalpy: trade-offs of the non-conservative form
 
@@ -504,7 +478,7 @@ and is the FDS/Gpyro/ThermaKin tradition for solid-phase pyrolysis. The price is
 the *discrete* energy balance is only approximately conservative: it does not evolve the
 composition-change enthalpy term $\sum_j h_j(T)\,\partial_t\xi_j$ as part of a conserved
 enthalpy density (§3.3.2) — its reaction and gas-transport parts are re-expressed as
-$Q_{\text{rxn}}$ and $S_{\text{conv}}$/$S_{\text{gen}}$ — and (in ALE) the
+$Q_{\text{rxn}}$ and $S_{\text{conv}}$ — and (in ALE) the
 volume-change contribution to storage is likewise outside the ledger. These
 discrete-closure gaps are bounded and are made visible by the conservation diagnostics
 (§16).
@@ -581,13 +555,13 @@ $$
 where $\rho_{i,j}$ is the **intrinsic (skeletal, cell-wall) density** — the density of
 the condensed material itself, ignoring pore volume — and gases do not enter the sum.
 When a component is constructed without an explicit intrinsic density, $\rho_{i,j}$
-falls back to its bulk density, recovering the legacy "no pores in the pure phase"
-behaviour. (A second, volume-fraction porosity $\varphi=\sum_j v_j^{\text{gas}}$ also
-exists historically, but the intrinsic-density form above is the one used by production
-property updates and by the pressure closure.) The porosity derivatives the Jacobian
+falls back to its bulk density, and the component contributes no pore volume. (The
+all-phase gas volume fraction $\sum_j v_j^{\text{gas}}$ of §5.1.2 is a different
+quantity; the intrinsic-density form above is the porosity the property updates and the
+pressure closure use.) The porosity derivatives the Jacobian
 needs ($\partial\varphi/\partial\xi_j = -1/\rho_{i,j}$ for solid/liquid, $0$ for gas, in
 the clamp-inactive interior) are obtained by forward-mode AD through `porosity`
-itself (§5.3.3, §15).
+itself (§5.3.2, §15).
 
 Pressure matters only when Darcy flow is active (`DarcyFick` mode). In the diffusion-only
 mode the pressure field is never assembled; the gas flux is purely Fickian and the
@@ -596,11 +570,11 @@ $\partial P/\partial\xi_k$ (gas direct term plus the porosity-coupling term) tha
 Jacobian needs are obtained by forward-mode differentiation of the closure itself —
 see §9.6.
 
-> **Implementation notes.** $P = N/\max(\varphi,10^{-12})$ is `ideal_gas_pressure` /
-> `compute_pressure!` in `src/Physics/pressure.jl` (porosity floor `_PHI_FLOOR = 1e-12`,
-> ≈ line 15; gas-only partial-pressure sum `_gas_partial_pressure_sum`, ≈ line 22). The
+> **Implementation notes.** $P = N/\max(\varphi,10^{-12})$ is `ideal_gas_pressure`
+> in `src/Physics/pressure.jl` (porosity floor `_PHI_FLOOR = 1e-12`; gas-only
+> partial-pressure sum `_gas_partial_pressure_sum`). The
 > canonical porosity is `porosity` in `src/Properties/mixture_rules.jl`; its
-> derivatives are taken by AD through the same function (§5.3.3).
+> derivatives are taken by AD through the same function (§5.3.2).
 
 ---
 
@@ -617,7 +591,8 @@ $$
 $$
 
 At a face the production path forms the per-cell **mobility** $\kappa/\mu$ (with
-$\mu$ from Sutherland's law at the cell temperature) and combines the two sides
+$\mu$ the material's pore-gas viscosity at the cell temperature, Sutherland's law for
+air by default) and combines the two sides
 with the distance-weighted harmonic mean (§9.5.2); if either side's mobility is
 $\le 10^{-30}$ the face mobility is exactly $0$ (an impermeable cell is an
 infinite series resistance). The pressure gradient is a central difference
@@ -655,7 +630,8 @@ are detailed in §9.
 > (`src/Discretization/darcy_velocity.jl`). The combined flux is
 > `gas_flux_darcy_fick` / `compute_gas_fluxes_darcy_fick!` in
 > `src/Physics/gas_transport.jl` (advection of the intrinsic density ξ/φ_face).
-> Sutherland viscosity is `effective_gas_viscosity` (§5).
+> The viscosity is `effective_gas_viscosity(T, material)`, the material's
+> `gas_viscosity` property with a positive floor (§5.9).
 
 ### 3.5.2 Where momentum is not solved
 
@@ -696,10 +672,8 @@ driver. The absolute rate is $dV_i/dt = V_i\theta_i$.
 
 > **Implementation notes.** $\theta = \sum_j \gamma_j\,\dot\xi_j/\rho_j(T)$ is
 > `volume_change_rate` (`_volume_change_rate`) in `src/Physics/volume_change.jl`
-> (≈ line 103, with `if γ > 0` guards). Absolute rates are `compute_cell_volume_rates!`.
-> (Some KB glosses write $\theta=-(\sum_j\dot\xi_j)/\rho_{\mathrm{total}}$; the code
-> computes the swelling-weighted per-component form above — that is what is
-> implemented.)
+> (with `if γ > 0` guards). It is the swelling-weighted per-component form, not
+> $-(\sum_j\dot\xi_j)/\rho$.
 
 ### 3.6.2 The ThermaKin/Gpyro single-reference-point deformation source
 
@@ -734,7 +708,7 @@ the mesh frame introduces **no advection term** in any equation; the only mesh-m
 term is the **dilation correction** $\Delta(d\xi_j/dt) = -\xi_j\theta_i$ applied to
 every component, which keeps each cell's component masses on their reaction-and-flux
 budget as its volume changes. The mesh kinematics, the dilation correction, and the
-GCL machinery are derived in full in §11 (The ALE Framework) and §10 (Volume Change &
+geometric conservation law are derived in full in §11 (The ALE Framework) and §10 (Volume Change &
 Lateral Shrinkage). This chapter records only that the deformation physics is *the same* as
 ThermaKin/Gpyro's; the implementation choice is a moving mesh rather than a
 reference-point source.
@@ -775,7 +749,7 @@ are in §10.
 
 > **Implementation notes.** The cumulative mesh velocity
 > $w_{i+1}=w_i+(\theta_i-\theta_A)\Delta z_i$ is in `_compute_ale_mesh_velocity!`,
-> `src/Residual/residual.jl` (≈ lines 355–415, with `w[1]=0`). The χ dynamics
+> `src/Residual/residual.jl` (with `w[1]=0`). The χ dynamics
 > $d\chi_i/dt = S_{\mathrm{dry},i}V_i/m_{\mathrm{dry},i}$ is `_pack_chi_derivative!`;
 > $\theta_A$ is `_compute_theta_A` (same file). The area update
 > $A=A_0\,\mathrm{law}(\bar\chi)$ is `update_cross_section_area!` in
@@ -816,7 +790,7 @@ supports bimolecular reactions; Pyrolysis.jl currently enforces a single reactan
 
 ### 3.7.2 Energy equation
 
-| Aspect | Pyrolysis.jl (Formulation A) | ThermaKin2Ds | Gpyro | FDS |
+| Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro | FDS |
 |---|---|---|---|---|
 | Primary unknown | temperature $T$ | $T$ | $T$ | $T$ |
 | Storage coefficient | all phases $\sum_j\xi_j c_{p,j}$ | all phases $\sum_j\xi_j c_{p,j}$ (Eq. 17) | matrix by default; all phases with `FULL_QSG` | matrix (no in-depth gas) |
@@ -830,8 +804,7 @@ $S_{\mathrm{conv}}$), and the deformation term, which the ALE mesh frame absorbs
 (§3.3.2, §11.2.2). Gpyro's thermal-equilibrium form drops the gas storage
 $\rho_g\bar\psi c_{pg}\,\partial T/\partial t$ by default and restores it with
 `FULL_QSG`, which makes its Eq. 65 the same equation; FDS carries no in-depth gas, so
-the gas storage is identically zero there. The optional $S_{\mathrm{gen}}$ is a
-datum-conversion term for $T_{\mathrm{ref}}$-referenced heats of reaction (§3.3.2).
+the gas storage is identically zero there.
 The one-dimensional Cartesian energy equation is otherwise identical in all four
 codes; ThermaKin additionally supports a cylindrical
 (radial) Laplacian $\frac1r\partial_r(rk\partial_r T)$, which Pyrolysis.jl approximates
@@ -877,19 +850,18 @@ the residual a *pure function* of the state.
 | Governing equation / term | Closure | Constitutive law | Chapter |
 |---|---|---|---|
 | Total density $\rho$ | exact | $\rho=\sum_j\xi_j$ | §3.2, §5 |
-| Matrix storage $\rho c_p^{\mathrm{eff}}$ | property + mixing | $\sum_{S/L}\xi_j c_{p,j}(T)$ | §4, §5 |
+| Storage $\rho c_p^{\mathrm{eff}}$ | property + mixing | $\sum_j\xi_j c_{p,j}(T)$, every component | §4, §5 |
 | Conductive flux $\mathbf q_{\mathrm{cond}}$ | Fourier + mixing | $-k_{\mathrm{eff}}(T,\xi)\nabla T$, harmonic-mean face $k$ | §5, §7 |
 | Reaction rate $r_r$ | Arrhenius | $A_r e^{-E_r/R_gT}\prod_j\xi_j^{n_{r,j}}$, tanh gates/limiter | §6 |
 | Species source $S_{j}$ | stoichiometry | $\sum_r\nu_{r,j}r_r$ | §6 |
 | Reaction heat $Q_{\mathrm{rxn}}$ | enthalpy of reaction | $-\sum_r h_r(T,\xi)\,r_r$ | §6 |
 | Radiation source $Q_{\mathrm{rad}}$ | radiation model | surface / Beer–Lambert / P1 | §8 |
 | Gas advection $S_{\mathrm{conv}}$ | gas flux + $c_{p,g}$ | $-\sum_g c_{p,g}\mathbf J_g\!\cdot\!\nabla T$ | §7, §9 |
-| Gas generation sink $S_{\mathrm{gen}}$ | enthalpy integral | $-\sum_g\Delta h_g\,\nabla\!\cdot\!\mathbf J_g$ (optional) | §7, §9 |
 | Gas diffusive flux $\mathbf J_j^{\mathrm{diff}}$ | Fick (volume-fraction gradient) | $-\lambda_{\mathrm{face}}(\xi_R T_R-\xi_L T_L)/(T_{\mathrm{face}}d_{LR})$ | §9 |
 | Gas advective flux $\mathbf J_j^{\mathrm{adv}}$ | upwind intrinsic density $\times$ Darcy | $(\xi_j^{\mathrm{upwind}}/\varphi_{\mathrm{face}})\,v_g$ | §9 |
 | Pressure $P$ | ideal gas in pores | $N(\xi,T)/\varphi$ | §9 |
 | Porosity $\varphi$ | intrinsic density | $\operatorname{clamp}(1-\sum_{S/L}\xi_j/\rho_{i,j},0,1)$ | §5 |
-| Gas velocity $v_g$ | Darcy | $-(\kappa/\mu)\nabla P$, distance-weighted harmonic mobility $\kappa/\mu$, Sutherland $\mu$ | §9 |
+| Gas velocity $v_g$ | Darcy | $-(\kappa/\mu)\nabla P$, distance-weighted harmonic mobility $\kappa/\mu$, material $\mu(T)$ | §9 |
 | Effective $k_{\mathrm{eff}},\lambda_{\mathrm{eff}},\kappa_{\mathrm{eff}},\varepsilon_{\mathrm{eff}},\alpha_{\mathrm{eff}}$ | mixing rules | parallel/series/weighted/Bruggeman/Carman–Kozeny | §5 |
 | Volume-change rate $\theta$ | swelling continuity | $\sum_j\gamma_j\dot\xi_j/\rho_j(T)$ | §10 |
 | Mesh velocity $w$ | cumulative strain | $w_{i+1}=w_i+(\theta_i-\theta_A)\Delta z_i$ | §11 |
@@ -915,7 +887,7 @@ regimes. The most important, with the section that quantifies or discusses each:
 
 - **One temperature.** Matrix and in-pore gas are assumed in local thermal equilibrium;
   there is no two-temperature gas energy equation. This breaks for very fast, hot gas
-  throughput, where the pore gas no longer equilibrates with the walls within a cell.
+  throughput, where the pore gas does not equilibrate with the walls within a cell.
 - **Algebraic (not evolved) pressure.** Pressure is closed instantaneously by
   $P=N/\varphi$ (§3.4.2) with a $\varphi$ floor of $10^{-12}$; there is no transient
   gas-mass-balance pressure PDE as in Gpyro. Acoustic and fast compressibility transients
@@ -939,11 +911,6 @@ regimes. The most important, with the section that quantifies or discusses each:
   quantity (§3.3.2) and (in ALE) leaves volume-change storage outside the discrete energy
   ledger; these gaps are bounded and made visible by diagnostics (§16) but are not closed
   exactly.
-- **Asymmetric ambients with a permeable back face.** The $S_{\mathrm{gen}}$ form uses a
-  single scalar $T_{\mathrm{ref}}$; if the two boundaries have different ambient
-  temperatures and the back face is permeable, the energy ledger fails to close by
-  exactly $\sum_g\dot m_{g,\mathrm{bottom}}c_{p,g}(T_{\infty,\mathrm{top}}-T_{\infty,\mathrm{bottom}})$.
-  Harmless for the usual impermeable back face (§3.3.4, §7).
 
 These limitations are inherited by every downstream chapter; where a later chapter
 relaxes or quantifies one of them (e.g. §16 for the energy/mass ledgers, §18 for

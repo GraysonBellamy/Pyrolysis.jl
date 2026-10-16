@@ -109,8 +109,8 @@ transfer coefficients (§9.1.4). This is exactly
 end
 ```
 
-*Implementation note.* Implemented in `gas_flux`, `src/Physics/gas_transport.jl`
-(lines 36–47), and assembled face-by-face by `compute_gas_fluxes!` (with the
+*Implementation note.* Implemented in `gas_flux`, `src/Physics/gas_transport.jl`,
+and assembled face-by-face by `compute_gas_fluxes!` (with the
 compile-time-unrolled inner helper `compute_gas_fluxes_unrolled!`).
 
 ### 9.1.3 The exact product-rule identity
@@ -145,7 +145,7 @@ J_j = -\lambda_{\text{face}}\!\left(\frac{\xi_R-\xi_L}{d_{LR}}
 $$
 
 This equivalence is verified to machine precision (`atol = 1e-14`) in
-`test/discretization/test_gas_flux.jl` (lines 99–113).
+`test/discretization/test_gas_flux.jl`.
 
 ### 9.1.4 Why the harmonic mean is applied to $\lambda$, not $\lambda\rho$
 
@@ -162,7 +162,7 @@ $$
 where $d_L,d_R$ are the distances from the two cell centers to the face. On a
 uniform mesh ($d_L=d_R$) this reduces to the standard harmonic mean
 $2\lambda_L\lambda_R/(\lambda_L+\lambda_R)$. The distance weighting makes the
-scheme correct on stretched meshes (e.g. surface-refined grids); see §13.6 for
+scheme correct on stretched meshes (e.g. surface-refined grids); see §13.7.1 for
 the general resistance-in-series argument and §7.1 for the identical treatment of
 thermal conductivity. A small-value guard returns $0$ if either $\lambda_L$ or
 $\lambda_R$ is below $10^{-20}$.
@@ -179,7 +179,7 @@ exercised in `test/discretization/test_gas_flux.jl`.
 
 *Implementation note.* `λ_face` is precomputed once per step in the
 `PropertyCache` via `harmonic_mean_weighted`,
-`src/Properties/effective_properties.jl` (lines 1154–1159); per-cell $\lambda_i$
+`src/Properties/effective_properties.jl`; per-cell $\lambda_i$
 comes from `effective_gas_transfer` (§9.2 and §5).
 
 ### 9.1.5 Partial-pressure equivalence
@@ -195,7 +195,7 @@ $$
 To see the equivalence, note $\xi_j T = P_j M_j / R_g$, so
 $\xi_R T_R - \xi_L T_L = (M_j/R_g)(P_{j,R}-P_{j,L})$, and substituting into the
 discrete kernel gives the boxed pressure form directly. This is verified to
-`atol = 1e-12` in `test/discretization/test_gas_flux.jl` (lines 119–142). The
+`atol = 1e-12` in `test/discretization/test_gas_flux.jl`. The
 partial-pressure reading reinforces the physical picture: gas diffuses down its
 own partial-pressure gradient, with mobility $\lambda M_j/(R_g T)$.
 
@@ -273,7 +273,8 @@ This first-order upwind rule is unconditionally stable and conservative (the sam
 face value enters the two cells sharing the face with opposite divergence signs).
 It is total-variation-diminishing but only first-order accurate; no TVD/MUSCL
 slope limiting is applied to the Eulerian Darcy–Fick advective term. (Higher-order
-limited advection *is* available in the ALE relative-velocity flux; see §11.6–11.7,
+limited advection exists only for the mesh-relative temperature advection of the
+`w_override` verification hook; see §11.6,
 *The ALE Framework*, and §13.4–13.5 for the limiter library.) A practical
 consequence: when upwinding selects a cell with zero concentration adjacent to a
 cell with positive concentration, the advective contribution can momentarily
@@ -292,7 +293,7 @@ diffusion-only flux of §9.1 — the two assembly paths agree, which is checked 
 the gas-flux test suite.
 
 *Implementation note.* `gas_flux_darcy_fick`,
-`src/Physics/gas_transport.jl` (lines 74–92); assembled by
+`src/Physics/gas_transport.jl`; assembled by
 `compute_gas_fluxes_darcy_fick!`.
 
 ---
@@ -337,9 +338,9 @@ $\varphi = \mathrm{clamp}\!\big(1-\sum_{j\in\text{S/L}}\xi_j/\rho_{i,j},\,0,\,1\
 (§9.5.2), so the pressure and the permeability share a single consistent void
 fraction.
 
-*Implementation note.* `ideal_gas_pressure`,
-`src/Physics/pressure.jl` (lines 60–68); field assembly via `compute_pressure!`
-(lines 77–89). Constant $R_g = 8.314462618$ J·mol⁻¹·K⁻¹.
+*Implementation note.* `ideal_gas_pressure`, `src/Physics/pressure.jl`; the cell
+field is assembled in `update_darcy_properties!` (`src/Discretization/finite_volume.jl`).
+Constant $R_g = 8.314462618$ J·mol⁻¹·K⁻¹.
 
 ---
 
@@ -359,8 +360,8 @@ physical pressure boundary conditions are applied separately to the Darcy veloci
 (§9.5.3, §12.5). The sign convention is the usual one: $(\nabla P)_f>0$ when
 pressure increases toward $+z$.
 
-*Implementation note.* `compute_pressure_gradient!`,
-`src/Physics/pressure.jl` (lines 112–125).
+*Implementation note.* The face gradient is formed in `update_darcy_properties!`
+(`src/Discretization/finite_volume.jl`), together with the Darcy velocity.
 
 ### 9.5.2 Darcy velocity
 
@@ -399,7 +400,8 @@ two cells consistently with their physical roles:
   smoothly varying gas property, so it is evaluated per cell at the cell
   temperature, $\mu_i=\mu_g(T_i)$, and enters the face through the per-cell
   mobilities $\kappa_i/\mu_i$ that the distance-weighted harmonic mean
-  combines, using Sutherland's law (§5.9):
+  combines. $\mu_g$ is the material's `gas_viscosity` (§5.9); the default is
+  Sutherland's law for air,
 
   $$
   \mu_g(T) = \mu_{\text{ref}}\left(\frac{T}{T_{\text{ref}}^{\mu}}\right)^{3/2}
@@ -417,12 +419,9 @@ two cells consistently with their physical roles:
   mobility, which zeroes the mobility of both adjacent faces (a fully solid or
   numerically degenerate cell carries no Darcy flow).
 
-*Implementation note.* The production face mobility and velocity are
-assembled in `update_darcy_properties!`
-(`src/Discretization/finite_volume.jl`); `effective_gas_viscosity`,
-`src/Properties/effective_properties.jl`. The `darcy_velocity_face` /
-`harmonic_mean_permeability` family in `darcy_velocity.jl` is a test-only
-alternative path — it never runs in production.
+*Implementation note.* The face mobility and velocity are assembled in
+`update_darcy_properties!` (`src/Discretization/finite_volume.jl`); the viscosity is
+`effective_gas_viscosity(T, material)`, `src/Properties/effective_properties.jl`.
 
 The effective permeability $\kappa$ entering the cell-center field is either a
 component mixing rule (PARALLEL/SERIES/WEIGHTED on the renormalized solid
@@ -506,7 +505,7 @@ gauge pressure). Two ingredients make the initial state physical:
 1. **A real pore space.** The condensed components must declare an intrinsic
    (skeletal) density via `ρ_intrinsic` (or the `φ` porosity kwarg) on
    `SolidComponent`/`LiquidComponent`. Without it, `get_intrinsic_density`
-   falls back to the bulk density — the legacy "no-pores" model — and a cell
+   falls back to the bulk density — a phase with no pores of its own — and a cell
    at full bulk density has $\varphi = 0$: there is no pore volume to hold
    air, and any generated gas hits the $\varphi$ floor ($10^{-12}$) in
    $P = N/\varphi$, producing absurd pressures.
@@ -600,11 +599,6 @@ $(T,\xi)$ — through $P$, $\varphi$, $\kappa(T,\xi)$, and $\mu(T)$ — from the
 forward-mode pass of §9.6, with an analytical override gated against the AD path
 at `rtol = 1e-12`.
 
-(`compute_darcy_mobility!`, `velocity_from_mobility!`,
-`DarcyVelocityJacobianCoeffs`, and `compute_darcy_velocity_jacobian!` in
-src/Discretization/darcy_velocity.jl are exported scalar utilities for
-standalone analysis; none of them runs in the production residual or Jacobian.)
-
 ---
 
 ## 9.8 Surface diffusive mass flux
@@ -661,10 +655,9 @@ acts through the Darcy velocity, §9.5.3).
 
 ### 9.8.2 Two sign conventions, reconciled
 
-The surface-flux helpers `_compute_surface_flux` (in `Physics/gas_transport.jl`)
-return **positive flux for gas escaping** — the natural sense for ALE surface
-regression (positive efflux $\Rightarrow$ the surface recedes). This is the
-*opposite* of the general BC convention used by `mass_bc_flux`
+The diagnostic `compute_surface_mass_flux` (`Discretization/boundary_fluxes.jl`)
+returns **positive flux for gas escaping** — the natural sense for a surface efflux.
+This is the *opposite* of the general BC convention used by `mass_bc_flux`
 (`Discretization/boundary_fluxes.jl`), which returns **negative for gas escaping**
 because its convention is "positive = into the domain."
 
@@ -685,15 +678,14 @@ balance. The full sign-convention summary is:
 | Quantity | Convention |
 |---|---|
 | Interior face flux $J_j[f]$ | $+$ = transport in $+z$ |
-| `_compute_surface_flux` (ALE) | $+$ = gas escaping |
+| `compute_surface_mass_flux` | $+$ = gas escaping |
 | `mass_bc_flux` (BC) | $-$ = gas escaping |
 | Stored top-face flux | $J[f]=-J_{\text{bc}}$ |
 | Stored bottom-face flux | $J[f]=+J_{\text{bc}}$ |
 
-*Implementation note.* `_compute_surface_flux` dispatch,
-`src/Physics/gas_transport.jl` (lines 369–401, with the sign-convention block at
-lines 350–363); `mass_bc_flux(::DiffusiveMassBC, …)`,
-`src/Discretization/boundary_fluxes.jl` (lines 248–264); face application in
+*Implementation note.* `mass_bc_flux(bc, ξ_surface, λρ, ρ, d, t, j)` (with the
+sign-convention block on the `DiffusiveMassBC` method) and
+`compute_surface_mass_flux`, `src/Discretization/boundary_fluxes.jl`; face application in
 `apply_mass_bc_flux!`, `src/Discretization/finite_volume.jl`. See §12.4 for the
 full mass-BC catalogue (Impermeable, MassFlux, Convective, Diffusive, Combined).
 
@@ -760,54 +752,35 @@ only the dilation of §11.3.4 and no advective correction.
 
 ### 9.9.2 Coupling to the energy equation
 
-Gas transport feeds back on temperature through two volumetric sources in the
-Formulation-A energy equation (derived in detail in §7.4–7.5):
+Gas transport feeds back on temperature through one volumetric source of the energy
+equation, the advective source (the advection piece of the gas-enthalpy divergence,
+derived in detail in §7.4):
 
-- **Always-present advective source** (the advection piece of the gas-enthalpy
-  divergence):
+$$
+S_{\text{conv},i} = -\sum_{j:\,\text{gas}} c_{p,j}(T_i)\,\bar{J}_{j,i}\,
+    \left(\frac{\partial T}{\partial z}\right)_i,
+\qquad \bar{J}_{j,i}=\tfrac12\big(J_j^{L}+J_j^{R}\big),
+$$
 
-  $$
-  S_{\text{conv},i} = -\sum_{j:\,\text{gas}} c_{p,j}(T_i)\,\bar{J}_{j,i}\,
-      \left(\frac{\partial T}{\partial z}\right)_i,
-  \qquad \bar{J}_{j,i}=\tfrac12\big(J_j^{L}+J_j^{R}\big),
-  $$
+with $(\partial T/\partial z)_i$ the opposite-distance-weighted gradient in the
+interior; boundary cells blend the interior one-sided slope with the
+boundary-face slope at the solved $T_s$ (§7.4.2).
 
-  with $(\partial T/\partial z)_i$ the opposite-distance-weighted gradient in the
-  interior; boundary cells blend the interior one-sided slope with the
-  boundary-face slope at the solved $T_s$ (§7.4.2).
-
-- **Optional generation-enthalpy sink** (the divergence-completion piece, added
-  only when `energy_form = :with_generation_sink`):
-
-  $$
-  S_{\text{gen},i} = -\sum_{j:\,\text{gas}} \Delta h_j(T_i,T_{\text{ref}})\,
-      (\nabla\!\cdot J_j)_i,
-  \qquad
-  \Delta h_j(T_i,T_{\text{ref}}) = \int_{T_{\text{ref}}}^{T_i} c_{p,j}(\tau)\,d\tau,
-  $$
-
-  using the *true* sensible-enthalpy integral (midpoint quadrature via
-  `delta_enthalpy`, §4.6) rather than a single-point product, so that the discrete
-  energy ledger telescopes exactly with the surface transpiration BC, which uses
-  the identical quadrature and $T_{\text{ref}}$.
-
-These appear in the assembled temperature RHS
+It appears in the assembled temperature RHS
 $\rho c_p^{\text{eff}}\,dT_i/dt = -(\nabla\!\cdot q)_i + S_{\text{conv},i}
-+ S_{\text{gen},i} + Q_{\text{rad},i} + Q_{\text{rxn},i}$, whose storage
-coefficient sums every component including the gas (§5.4, §7.3); the gas
-*flux* enters only through $S_{\text{conv}}$. Crucially, $S_{\text{conv}}$ and the surface
-transpiration BC are **mutually exclusive** — enabling both double-counts the
-advected enthalpy by exactly $\int S_{\text{conv}}\,dz$, so the transpiration BC is
-off by default and rejected at problem construction if combined (see §7.6, §12.3).
++ Q_{\text{rad},i} + Q_{\text{rxn},i}$, whose storage coefficient sums every
+component including the gas (§5.4, §7.3); the gas *flux* enters only through
+$S_{\text{conv}}$. The surface energy balance therefore carries no gas-enthalpy
+term: one on top of $S_{\text{conv}}$ would count the advected enthalpy a second
+time (§7.4.3, §12.2).
 
 *Implementation note.* `divergence_species_1d!`,
-`src/Discretization/finite_volume.jl` (lines 81–97);
-`apply_species_residual_unrolled!`, `src/Materials/materials.jl` (lines 890–909);
-`compute_gas_convective_source!` and `compute_gas_generation_sink!`,
-`src/Physics/convection.jl` (lines 67–139, 178–220). The 8-step `compute_rhs!`
-ordering (interior conductive fluxes $\to$ reactions $\to$ gas transport $\to$
-thermal/mass BCs $\to$ radiation $\to$ $S_{\text{conv}}$ $\to$ divergences $\to$
-$S_{\text{gen}}$ $\to$ final RHS) is described in §7.8.
+`src/Discretization/finite_volume.jl`; `apply_species_residual_unrolled!`,
+`src/Materials/materials.jl`; `compute_gas_convective_source!`,
+`src/Physics/convection.jl`. The 8-step `compute_rhs!` ordering (transport
+properties and interior conductive fluxes $\to$ reactions $\to$ gas transport
+$\to$ thermal BCs $\to$ radiation $\to$ $S_{\text{conv}}$ $\to$ divergences
+$\to$ final RHS) is described in §7.6.
 
 ---
 
@@ -881,20 +854,19 @@ Beyond these direct partials, the operator composes two additional chains:
   block as $\text{out}[1+j]=-\text{div}_J$ for gas components and $0$ for
   solids/liquids.
 
-The analytic path (`_contribute_to_jacobian_analytical!`) is the default; an
-AD-default path (`_contribute_to_jacobian_ad!`, ForwardDiff over the full
-`apply_cell!` closure) is preserved for validation and is gated against the
-analytic version at `rtol = 1e-12` in
+The operator's `contribute_to_jacobian!` is the analytical override
+(`_contribute_to_jacobian_analytical!`); a ForwardDiff reference over the full
+`apply_cell!` closure (`_contribute_to_jacobian_ad!`) is kept for validation and is
+gated against it at `rtol = 1e-12` in
 `test/jacobian/test_operator_gas_transport_analytical.jl`. Boundary-face
 contributions are zeroed in the operator — the mass BCs and pressure BCs are
 handled by `BCMassOperator`, and the boundary cell's $S_{\rm conv}$ energy row
 by `BCConvectionOperator` (§15.8.8) — keeping
 the stencil pure and avoiding double-counting.
 
-*Implementation note.* `_gt_J_direct_partials`,
-`src/Jacobian/operators/gas_transport.jl` (lines 532–551);
-`_gt_species_div_unrolled!` (lines 299–313) and the analytic operator
-`_contribute_to_jacobian_analytical!` (from line 565). The Darcy-velocity pressure
+*Implementation note.* `_gt_J_direct_partials`, `_gt_species_div_unrolled!`, and
+the analytic operator `_contribute_to_jacobian_analytical!`, all in
+`src/Jacobian/operators/gas_transport.jl`. The Darcy-velocity pressure
 derivatives that close the advective term's Jacobian are in §9.7. See §15.7–15.9
 for how these operator contributions assemble into the structured Jacobian.
 
@@ -940,8 +912,8 @@ $\dot m'' = -(K/\nu)(\partial P/\partial z - g\rho_g)$ together with a
 pressure-evolution equation derived from gas continuity and the ideal-gas law.
 Pyrolysis.jl uses the same Darcy constitutive law,
 $v_g=-(\kappa/\mu)\nabla P$ (§9.5.2), with the distance-weighted harmonic mean
-of the per-cell mobilities $\kappa/\mu$ (Sutherland viscosity at the cell
-temperature); the gravity/buoyancy term $g\rho_g$ is omitted (negligible
+of the per-cell mobilities $\kappa/\mu$ (the material's viscosity curve at the
+cell temperature); the gravity/buoyancy term $g\rho_g$ is omitted (negligible
 for thin condensed-phase samples in the through-thickness direction). The pressure
 is closed algebraically by the porous-medium ideal-gas law $P=N/\varphi$ (§9.4)
 rather than time-integrated as a separate state. This is **not** an additional
@@ -983,11 +955,12 @@ with no in-depth gas FDS has neither gas storage nor an in-depth $S_{\text{conv}
   Chapman–Enskog Lennard-Jones parameter estimates available for sizing
   $\lambda$ (§5.10) are heuristic and unvalidated for pyrolysis vapors.
 
-- **No Wilke mixing for viscosity.** The Darcy viscosity uses a single Sutherland
-  value for an air-like gas (§9.5.2); a Wilke mixing rule would be required to
-  capture mixtures of very different molecular weights (e.g. H₂O + CO₂ at high
-  temperature; §5 open questions). The Sutherland reference temperature (273.15 K)
-  differs from the enthalpy datum (298.15 K) and must not be conflated.
+- **No Wilke mixing for viscosity.** The Darcy viscosity is one curve per material
+  (Sutherland's law for air by default; §5.9, §9.5.2), independent of the pore-gas
+  composition; a Wilke mixing rule would be required to capture mixtures of very
+  different molecular weights (e.g. H₂O + CO₂ at high temperature; §5.16). The
+  Sutherland reference temperature (273.15 K) differs from the enthalpy datum
+  (298.15 K) and must not be conflated.
 
 - **Zero-exterior-concentration surface assumption.** Surface diffusive fluxes
   assume the environment holds no decomposition products ($\xi_\infty=0$ implicit;

@@ -42,8 +42,8 @@ explicitly.
   an incorrect limiter), not a modeling deficiency. Verification can, in
   principle, be made exact: a correctly implemented conservative scheme conserves
   mass to round-off, a correctly assembled Jacobian matches its AD reference to
-  AD precision, and a GCL-compliant mesh update reproduces the swept volume to
-  $10^{-15}$.
+  AD precision, and cell volumes recomputed from the node positions satisfy the
+  geometric conservation law as an identity.
 
 - **Validation** — *Are we solving the right equations?* This is external. It
   compares the code's predictions against measured cone-calorimeter mass-loss
@@ -66,8 +66,9 @@ a given run leans on an approximation.
 
 ### 18.1.2 The verification hierarchy in Pyrolysis.jl
 
-Pyrolysis.jl is built so that the cheaper, more fundamental verification layers
-can run *during every production solve*, not only in a dedicated test suite:
+Pyrolysis.jl layers its verification from cheap, fundamental checks to experimental
+validation; of these, the Jacobian comparison can also be armed during a
+production solve (§18.3.4):
 
 1. **Unit-level analytical checks** (§18.2): isolated kernels — conduction,
    single-reaction kinetics, Beer–Lambert attenuation, the GCL, the P1 sign —
@@ -75,9 +76,10 @@ can run *during every production solve*, not only in a dedicated test suite:
 2. **Jacobian verification** (§18.3): the production structured Jacobian compared
    against a whole-residual ForwardDiff reference, either as a one-shot call or
    as an in-solve callback.
-3. **Conservation ledgers** (§18.4): mass, energy (dual ledgers), and
-   per-reaction mass-flow trackers that run as `DiscreteCallback`s and flag any
-   drift beyond a per-quantity tolerance.
+3. **Conservation ledgers** (§18.4): the mass and energy trackers of §16, driven
+   by the tests and by the verification cases that carry their own per-step
+   ledgers; in a production solve `diagnostics = true` logs sensible-energy
+   snapshots (§16.8.3).
 4. **Convergence studies** (§18.5): spatial, temporal, and integrator-tolerance
    refinement, confirming that the discretization error shrinks at the designed
    rate.
@@ -85,8 +87,117 @@ can run *during every production solve*, not only in a dedicated test suite:
    fir, pressure-treated wood, moisture transport, against measurements and
    reference-code output.
 
-The first three are automated; the latter two are scripted examples shipped in
-`examples/`.
+The first three run in the test suite (the verification suite of §18.1.3 also
+checks convergence orders), while the convergence studies of §18.5 and the validation cases are scripted
+examples shipped in `examples/`.
+
+### 18.1.3 The verification suite: test mode and report mode
+
+The exact-solution and manufactured-solution cases (catalogued below; the MMS
+driver is described in §18.2) form a
+verification suite that runs in two modes from a single case definition. The
+whole suite has to stay cheap enough for `Pkg.test()`, while publishable
+evidence — fine meshes, resolution ladders, figures — is far too expensive for it
+and needs plotting dependencies the test environment should not carry.
+
+- **Test (assert) mode** runs inside `Pkg.test()`. `test/runtests.jl` picks up the
+  `.jl` files directly under `test/verification/` (non-recursively), and
+  `runcases.jl` among them is the suite's entry point: it runs every case at its CI resolution, asserts each quantity of interest (QoI)
+  against a pinned tolerance, runs a short spatial-convergence check where the
+  case defines one, and asserts the wall time (after a discarded warm-up solve)
+  against five times the case's budget. It plots nothing and writes no files.
+  Setting `PYROLYSIS_VERIFICATION_PRINT_QOIS=1` prints every observed QoI and
+  convergence rate, which is how tolerances are re-pinned.
+- **Report mode** runs in the isolated environment `scripts/verification/` (its
+  own `Project.toml` with CairoMakie, so the test manifest stays free of plotting
+  dependencies; the same pattern as `scripts/profile/` and `test/quality/`):
+
+  ```
+  julia --project=scripts/verification scripts/verification/run_reports.jl [--cases=… --outdir=… --chapters=…]
+  ```
+
+  `run_reports.jl` runs each case over its report resolution ladder with its
+  report solver settings and writes the artifact set under
+  `<outdir>/assets/<case id>/`: overlay figures (solver values as markers over
+  densely sampled exact curves), pointwise-error figures that show *where* the
+  discretization struggles, a log–log convergence figure with the fitted observed
+  order and an expected-order reference slope, and CSVs of every curve, the
+  resolution ladder, the QoIs at the finest rung, the ladder QoI errors, and the
+  solver configuration (`report_harness.jl`, with all plotting in `render.jl`).
+  `chapters.jl` then writes one Markdown chapter per case family — problem
+  statement, figures, error and order tables — plus an index dashboard. Report
+  mode does not assert the QoIs (a failed solve still aborts the run): coarse ladder rungs may exceed the pinned tolerances,
+  and the tables record within-tolerance yes/no instead. The default output
+  directory is the committed `docs/guide/verification/`; the documentation build
+  copies it into the published site, and the manual `verification-report`
+  workflow regenerates it and opens a pull request with the diff.
+
+**The shared case definition.** `test/verification/casedefs.jl` declares the
+types both modes consume and depends on nothing from `Test`, so the report runner
+can include it from its isolated environment. Each file in
+`test/verification/cases/` defines a `VerificationCase` with
+
+- identity and provenance: `id`, `title`, physics `tags`, `references`;
+- `build(n_cells) -> PyrolysisProblem`, optional `solve_kwargs`, a `solve_fn`
+  when the case solves through its own path (the MMS cases use the wrapped-RHS
+  `solve_mms`), and `expected_retcode` (`:Success` by default, `:Terminated`
+  when a callback stopping the solve is the answer);
+- `qois(sol) -> Vector{QoIResult}`: each QoI's value, exact value, error, and
+  tolerance, with a `comment` recording the tolerance provenance (tolerances are
+  pinned at about three times the error observed when pinned);
+- `ci::CIConfig`: the CI resolution, the wall-time budget, and an optional
+  `ConvergenceSpec` (resolutions, error functional, expected and minimum observed
+  order);
+- `report::NamedTuple`: the report-mode keys — the resolution ladder
+  `n_cells_ladder`, `curves(sol) -> Vector{ReportCurve}` (plain data:
+  `CurveSeries` samples, each with an optional `exact` callable on the same
+  abscissa from which the pointwise error is derived), `error_norms`,
+  `expected_order`, report `solve_kwargs`, and optional temporal or parameter
+  sweeps. A case with `report = (;)` is skipped in report mode.
+
+The case file's leading comment banner is the problem statement the report
+chapter prints, so the published chapter cannot drift from what the test runs.
+Reference solutions are computed in the run at high precision (series summed to
+machine tolerance, transcendental roots by bisection), never hard-coded; they
+live in the shared library `test/verification/exact/` (series, roots, the MMS
+driver), which carries its own self-tests.
+
+**Case catalogue.** Each case family has one file in `test/verification/cases/`;
+lettered members such as V-HC-02a–d share the family file and its report chapter.
+Most families compare against an exact or manufactured solution; the burnout
+family and V-CPL-06 check budgets and a pinned reference run instead.
+
+| Family | Cases | Reference solution | What it verifies |
+|---|---|---|---|
+| Heat conduction | V-HC-01 – V-HC-05 | Carslaw–Jaeger erfc and eigenfunction series, resistance network, Kirchhoff transform | the convective-BC surface Newton (V-HC-01; Biot sweep V-HC-02), the constant-flux slab to its back-face plateau (V-HC-03), the harmonic-mean face conductivity at a layer jump (V-HC-04), $k(T)$ (V-HC-05) |
+| Kinetics and surface radiation | V-RX-01 – V-RX-04 | Bateman chain, Khawam–Flanagan isothermal integrals, parallel-reaction splits, implicit radiative-cooling law | multi-step coupling, reaction order and the depletion limiter, two-product yields and heat superposition, `RadiativeBC` through the surface Newton |
+| In-depth radiation | V-RAD-01 | Lautenberger eigenfunction series | Beer–Lambert absorption with conduction and a convective face, including the sub-surface temperature peak |
+| Gas transport | V-GT-01, V-GT-02 | Gaussian plane source; steady compressible Darcy $P^2$ profile | the Fickian operator and mass conservation; the pressure closure, Darcy mobility and outflow BC |
+| Coupled physics | V-CPL-01 – V-CPL-06 | Neumann two-phase Stefan solution, Landau ablation wave, exact shrink/swell endpoints, Frank-Kamenetskii slab, 0D TGA curve, discrete gas-enthalpy ledger | a latent-heat front, ALE surface regression, volume change and the lateral-shrinkage law, the reaction–conduction bifurcation, the BC/volume coupling of kinetics, $S_\mathrm{conv}$ (§18.4.3) |
+| Manufactured solutions | V-MMS-01 – V-MMS-04 | the MMS driver of §18.2 | design order of the coupled Eulerian residual in space and time, free-stream preservation under prescribed motion, ALE order under prescribed and reaction-driven motion |
+| Burnout | V-BO-01 – V-BO-05 | exact exponential thickness (V-BO-04); otherwise mass budgets and a pinned reference run | parked-cell depletion through complete burnout on ALE and fixed meshes (§14.3), the transmitted-flux warning, the interior-void stop (`expected_retcode = :Terminated`, V-BO-05) |
+
+Kernel-level analytic checks are in `test/verification/test_analytical.jl`, which
+`Pkg.test()` runs beside the suite: semi-infinite conduction, the Beer–Lambert
+profile and energy split, isothermal and constant-heating-rate kinetics, and the
+mass and energy ledgers. Two conventions matter when a case transcribes
+literature parameters: $h>0$ is endothermic here, the opposite of ThermaKin,
+Gpyro and FDS; and most exact-kinetics cases disable the depletion limiter
+(`DepletionLimiter(enabled = false)`) and open the temperature gates (§18.2.2),
+while V-RX-02d keeps the limiter on as a guard.
+
+**Cross-code overlays.** Where a case has a published analog in another code,
+that code's numerical output is committed under
+`test/verification/reference/<code>/` with a provenance README (FDS and Gpyro runs
+on the same problems; MaCFP-2 PMMA community submissions, which no case reads) and
+read only inside a case's
+report `curves`. A series marked `crosscode = true` is drawn as a muted context
+layer in a separate `_vs_codes` variant of each affected figure, so the base
+figure keeps the solver's own error on its own scale; for exact-solution cases the
+other codes' *errors* against the same exact solution are compared.
+`reference/timings.csv` feeds a wall-time comparison at every ladder rung, and a
+case's ladder includes a rung matched to the reference run's resolution where
+needed.
 
 ---
 
@@ -100,13 +211,14 @@ designed order. The verification suite ships a coupled MMS driver
 (`test/verification/exact/mms.jl`: `MMSFields`, a ForwardDiff exact-source
 generator, manufactured-BC builders, and the wrapped-RHS `solve_mms` path)
 exercised by the V-MMS cases in `test/verification/cases/` — coupled Eulerian
-MMS, ALE free-stream/GCL preservation, and ALE MMS under prescribed mesh
-motion via the `Workspace.w_override` hook. Two constraints of that driver
+MMS, ALE free-stream/GCL preservation, ALE MMS under prescribed mesh motion via
+the `Workspace.w_override` hook, and ALE MMS under reaction-driven motion
+(V-MMS-04, `MMSMotion`). Two constraints of that driver
 follow from the formulation: the structured geometry Jacobian assumes
 reaction-driven motion, so `w_override` runs use finite-difference Jacobians;
 and because the scheme is a **solid-Lagrangian ALE** (mesh velocity ≡ solid
 material velocity; no component carries a discrete advection operator —
-§11.1.2, §11.10 item 7), every manufactured species source on a moving mesh
+§11.1.2, §11.9 item 5), every manufactured species source on a moving mesh
 is assembled in the material-following frame, with the prescribed or the
 reaction-driven mesh velocity as its $w$.
 
@@ -181,7 +293,7 @@ harmonic (resistance-in-series) face value reproduces the analytic interface
 temperature.
 
 **Implementation note.** Interior conductive fluxes are assembled by
-`compute_conductive_fluxes!` (`src/Physics/heat_conduction.jl:29`), which zeroes
+`compute_conductive_fluxes!` (`src/Physics/heat_conduction.jl`), which zeroes
 boundary faces (the BC solver overwrites them); the divergence
 $(\nabla\!\cdot\mathbf q)_i=(q_{f_R}-q_{f_L})A/V_i$ is `divergence_1d!`
 (`src/Discretization/finite_volume.jl`). The RHS assembles
@@ -236,16 +348,16 @@ Two implementation subtleties must be accounted for when this check is made
 - **Mass-concentration basis.** The rate law is evaluated on mass concentration
   $\xi_j$ (kg m$^{-3}$), not mole fraction or normalized conversion:
   $r_i=A_i\exp(-E_i/R_gT)\prod_j\xi_j^{\,n_{i,j}}\tanh(\xi_j/\xi_{\mathrm{th}})$ (Eq. 1 of §6,
-  `reaction_rate`, `src/Physics/kinetics.jl:75`). For a first-order single
+  `reaction_rate`, `src/Physics/kinetics.jl`). For a first-order single
   reactant this is linear in $\xi_1$ and the analytic solution above holds with
   $\xi_1(0)$ the *initial concentration*.
 - **Smooth gates and the depletion limiter perturb the tails.** The hard
   Heaviside gates $H(T-T_\mathrm{min})H(T_\mathrm{max}-T)$ are replaced by tanh
   ramps $\tfrac12(1+\tanh(T-T_\mathrm{min}))\cdot\tfrac12(1+\tanh(T_\mathrm{max}
-  -T))$ (§6.2, `kinetics.jl:102`), which leak $\sim\!10$ K outside the nominal
+  -T))$ (§6.2, `kinetics.jl`), which leak $\sim\!10$ K outside the nominal
   window; and the depletion limiter multiplies the rate by
   $\tanh(\xi_1/\text{threshold})$ (default threshold $1.0$ kg m$^{-3}$, §6.3,
-  `kinetics.jl:89–95`). To compare against the bare-Arrhenius analytic solution one
+  `kinetics.jl`). To compare against the bare-Arrhenius analytic solution one
   must either set $T_\mathrm{min},T_\mathrm{max}$ far outside the active range
   (so the gates read $\approx 1$) and keep $\xi_1$ well above the limiter
   threshold throughout, or disable the limiter via
@@ -269,7 +381,7 @@ $$
 
 assembled by `compute_beer_lambert_source!` in a top-to-bottom sweep
 ($i=n\!:\!-1\!:\!1$) so that absorbed flux upstream correctly attenuates the
-intensity reaching downstream cells (`src/Physics/radiation.jl:75–87`). Two exact
+intensity reaching downstream cells (`src/Physics/radiation.jl`). Two exact
 energy-balance identities verify this kernel:
 
 - **Total absorbed flux.** Summing the volumetric source times cell thickness,
@@ -286,25 +398,20 @@ energy-balance identities verify this kernel:
   absorptivity is already folded into the intensity), is a telescoping sum that
   is *exact at the discrete level* — independent of cell count — because each
   cell deposits $I_\mathrm{in}(1-e^{-\tau_i})$ and passes
-  $I_\mathrm{in}e^{-\tau_i}$ to the next. The diagnostic
-  `total_absorbed_radiation(q_rad, mesh)` computes
-  $\sum_i q_\mathrm{rad}[i]\,\mathrm{cell\_size}(mesh,i)$
-  (`src/Physics/radiation.jl:155–161`) and must equal this analytic value.
+  $I_\mathrm{in}e^{-\tau_i}$ to the next. The solution reports it as
+  `extras.volumetric_absorption`, and the sum of the deposited source over the
+  cells must equal this analytic value.
 
 - **Transmitted fraction.** The flux escaping the back face is
-  $\alpha_\mathrm{surf}\,I_\mathrm{surface}\,e^{-\tau_\mathrm{total}}$; the
-  diagnostic `transmitted_radiation(I_surface, mesh, cache)` returns
-  $I_\mathrm{surface}\exp(-\tau_\mathrm{total})$ for the intensity it is given,
-  with $\tau_\mathrm{total}=\sum_i\alpha_i\Delta z_i$
-  (`src/Physics/radiation.jl:171–187`) — the $\alpha_\mathrm{surf}$ bookkeeping
-  belongs to the caller (§8.3.2). Conservation requires
+  $\alpha_\mathrm{surf}\,I_\mathrm{surface}\,e^{-\tau_\mathrm{total}}$, reported as
+  `extras.radiation_transmitted` (§8.3.2). Conservation requires
   $\text{absorbed}+\text{transmitted}=\alpha_\mathrm{surf}\,I_\mathrm{surface}$
   to round-off — the remaining $(1-\alpha_\mathrm{surf})\,I_\mathrm{surface}$ is
   reflected at the surface and never enters the medium — which is the strongest
   single check on the Beer–Lambert path.
 
 The transparent-cell guard ($\alpha>10^{-20}$, else $q'''_i=0$,
-`radiation.jl:79`) is verified by the $\alpha\to0$ limit, where $1-e^{-\tau}\to
+`radiation.jl`) is verified by the $\alpha\to0$ limit, where $1-e^{-\tau}\to
 0$ and all flux is transmitted. The opposite limit $\tau_1\gg1$ in the surface
 cell deposits the entire entering flux
 $\alpha_\mathrm{surf}\,I_\mathrm{surface}$ in the top cell — consistent with
@@ -318,47 +425,24 @@ The single most decisive ALE verification is the Geometric Conservation Law
 (GCL, §11.5). A moving-mesh scheme that does not reproduce the swept cell volume
 exactly injects *phantom* mass and energy sources proportional to the volume
 error; over hundreds of stiff steps these can swamp the genuine reaction-driven
-mass loss. The continuous 1D GCL is $dV_i/dt = A\,(w_R-w_L)$, and its discrete
-form is
+mass loss. The continuous 1D GCL is $dV_i/dt = A\,(w_R-w_L)$ (plus the
+area-change term $|z_R-z_L|\,dA/dt$ under a lateral shrinkage law). Pyrolysis.jl
+satisfies it *geometrically*: the node positions are state ($dz_i/dt=w_i$) and
+every residual evaluation recomputes $V_i=A(t)\,|z_R-z_L|$ from them, so the
+volume the scheme uses is always the swept one and no separately evolved volume
+can drift (§11.5.2). With the cumulative mesh velocity this gives
+$dV_i/dt=V_i\theta_i$ identically, and with the dilation correction a uniform
+field with no sources and no fluxes stays uniform.
 
-$$
-V_i^\mathrm{new}-V_i^\mathrm{old}
-  = \Delta t\,(w_R-w_L)\,A
-$$
-
-(`src/Physics/gcl.jl`). Pyrolysis.jl enforces this *geometrically*: rather than
-applying the flux formula, `move_mesh!` advances the nodes by
-$z_i^\mathrm{new}=z_i^\mathrm{old}+\Delta t\,w_i$ and recomputes
-$V_i=A\,|z_R-z_L|$ from geometry (`mesh_motion.jl`). Because geometry, computed
-consistently, *inherently* satisfies the GCL, the residual between the geometric
-volume change and the flux prediction is pure round-off,
-
-$$
-\text{rel\_error}
-  = \max_i
-    \frac{\big|\Delta V_i^\mathrm{actual}-\Delta t\,(w_R-w_L)A\big|}{|V_i|}
-  \approx 10^{-15}.
-$$
-
-The verification functions are `gcl_error` (predictive, before motion),
-`gcl_error_post_motion` (after motion, against a pre-motion volume snapshot), and
-the boolean `check_gcl` (default tolerance $10^{-12}$, `gcl.jl:152`). For a
-time-varying cross-section (WithChi mode, §10) the generalized residual adds the
-area-change term,
-
-$$
-\Delta V_i \approx
-  \Delta t\,(w_R-w_L)\,A_\mathrm{new}
-  + (A_\mathrm{new}-A_\mathrm{old})\,L_\mathrm{old},
-\qquad L_\mathrm{old}=V_\mathrm{old}/A_\mathrm{old},
-$$
-
-checked by `gcl_residual` with explicit `A_old`, `A_new` (`gcl.jl:245`). The
-running `GCLTracker` (default tolerance $10^{-10}$, `gcl.jl:296`) accumulates
-$\int|e(t)|\,dt$ and counts per-step violations, so a systematic geometric bias
-shows up even when individual steps look clean. A GCL error that grows above
-$10^{-10}$ is diagnostic of mesh degeneracy or an ill-conditioned cross-section
-law, not of round-off.
+The verification case V-MMS-02 asserts exactly that: a spatially uniform state
+with no reactions and zero-flux boundaries, on a mesh compressed to 70 % of its
+thickness through the `Workspace.w_override` hook with the uniform-stretch
+velocity $w^*(z,t)=(\dot s/s)\,z$, must stay uniform to machine precision. The
+node trajectories $z_i(t)=z_i(0)\,s(t)$ are known exactly, so the top-cell-center
+position doubles as a check on the prescribed-motion path. V-MMS-03 then measures
+the observed order of a smooth manufactured solution under prescribed smooth
+mesh motion. A drift in V-MMS-02 is a moving-mesh transport defect that the
+smooth-field order study could hide inside its truncation error.
 
 ### 18.2.5 P1 sign test
 
@@ -469,9 +553,8 @@ backend (§15.6, §15.10):
   support surfaces as a deviation — a *missing-entry* failure. The verifier
   separately reports `max_abs_dev_in_support` (genuine disagreement on a
   claimed entry) and `max_abs_dev_outside_support` (magnitude of reference
-  entries the support omits). Every backend claiming to be exact —
-  `Structured(DirectSolve())`, `Structured(StructuredSolve())`,
-  `Structured(MatrixFreeSolve())` — must pass this regime.
+  entries the support omits). The exact backend, `Structured(DirectSolve())`,
+  must pass this regime.
 
 - **Masked** (approximate backends, `is_approximate == true`): entries outside
   the active backend's support are zeroed in the difference, so only in-support
@@ -482,9 +565,8 @@ backend (§15.6, §15.10):
   structured ALE couplings (the cumulative mesh-velocity prefix sum, the z-row
   prefix blocks, the Beer–Lambert suffix, the $\theta_A$ rank-1 back-reaction,
   the geometry $z$-columns) under the `:ale_reduced` sparsity profile. Its
-  in-support values legitimately deviate by the dropped coupling magnitudes
-  (e.g. the limiter-window slots also carry indirect $w$-coupling
-  contributions in the reference), so masked comparison is a sanity check
+  in-support values legitimately deviate by the dropped coupling magnitudes,
+  so masked comparison is a sanity check
   rather than an exactness gate; the dropped couplings are by design (they
   cost accuracy in the Newton step, not in the converged solution).
 
@@ -522,18 +604,20 @@ compared against the dense reference on a reacting state.
 
 ## 18.4 Conservation-based verification
 
-The conservation ledgers of §16 are not merely post-mortem diagnostics: armed via
-`solve(problem; diagnostics=true)` they run as `DiscreteCallback`s and provide
-*continuous* self-verification. They divide cleanly into checks that must close
-by construction (so a failure is a bug) and checks that quantify an approximation
-(so a large value is a regime warning, not a bug).
+The conservation ledgers of §16 serve as verification where the tests and the
+verification cases drive them per step (`record_substep!`, or a case's own
+per-step ledger callback); a production `solve(problem; diagnostics=true)` logs
+only sensible-energy snapshots, with the ledger columns NaN (§16.8.3). The checks
+divide cleanly into those that must close by construction (so a failure is a bug)
+and those that quantify an approximation (so a large value is a regime warning,
+not a bug).
 
 ### 18.4.1 Mass ledger
 
 The per-component mass tracker (`MassConservationTracker`,
 `src/Diagnostics/conservation_checks.jl`) maintains
-$m_j(t)=\sum_{i\in\mathrm{active}}\xi_j^{(i)}V_i$ (AMR-masked: only active cells,
-§16.1) and accumulates boundary efflux
+$m_j(t)=\sum_{i\in\mathrm{active}}\xi_j^{(i)}V_i$ (masked: only active cells,
+§16.3.1) and accumulates boundary efflux
 $\Delta m_{\mathrm{out},j}=-(J_{\mathrm{top},j}+J_{\mathrm{bot},j})\,A\,\Delta t$
 with the convention that positive $J$ is *inflow*, so positive flux *reduces*
 efflux. The balance check is
@@ -551,8 +635,8 @@ zero or near-zero mass (e.g. char before any reaction), the check switches from
 relative to *absolute* error to avoid division by a vanishing baseline. For ALE
 runs with a time-varying cross-section the area in the efflux term is the
 trapezoidal substep average $A=\tfrac12(A^\mathrm{pre}+A^\mathrm{post})$, which
-keeps the contribution symmetric and consistent with the GCL volume update. A
-mass-balance failure indicates a flux-assembly or callback bug.
+keeps the contribution symmetric and consistent with the geometric volume update.
+A mass-balance failure indicates a flux-assembly or callback bug.
 
 ### 18.4.2 Energy ledger
 
@@ -567,59 +651,32 @@ E(t) = E(0)
       q_\mathrm{cond,boundary}\,A
       + Q_\mathrm{rxn}
       + S_\mathrm{conv}
-      + S_\mathrm{gen}
     \Big]\,d\tau .
 $$
 
 The residual $r=E(t)-E(0)-\sum(\text{sources})$ should close to integrator
 tolerance ($\sim10^{-6}$ relative, `check_energy_conservation` default tol
 $10^{-6}$) because it is built from exactly the terms `compute_rhs!` evaluates. A
-failure here is a bookkeeping bug. The one caveat (§16.8, §18.8) is that this
+failure here is a bookkeeping bug. The one caveat (§16.7, §18.8) is that this
 ledger *cannot* close exactly when composition varies in time, because it omits
 the $\int T\,\partial(\rho c_p)/\partial t\,dV\,dt$ heat-capacity-change term of its
-$\rho c_p\,T$ proxy density (§16.8) and the ALE volume-change term; the residual
+$\rho c_p\,T$ proxy density (§16.7) and the ALE volume-change term; the residual
 then carries a small, composition-rate-dependent offset that is a known
 incompleteness of the *audit*, not of the *solver*.
 
 **The boundary flux.** The ledger uses $q_\mathrm{cond,boundary}$ (the conducted
-flux from the surface Newton solve). Under the supported convention — no surface
-transpiration term — it equals the applied boundary flux $q_\mathrm{BC,applied}$
-(the externally driven flux, which may include radiation/convection); the two differ only when a BC sets
-a total flux constraint rather than a temperature. Crucially, the discrete ledger
+flux from the surface Newton solve). The surface balance has no gas-enthalpy
+term, so it equals the applied boundary flux $q_\mathrm{BC,applied}$
+(the externally driven flux, which may include radiation/convection; §16.6).
+Crucially, the discrete ledger
 *audits bookkeeping, not double-counting*: if the RHS itself double-counts a
 mechanism, the discrete ledger will still close, because it is built from the same
-(buggy) terms. Detecting a double-count requires the *independent* physical
-ledger or a dedicated guard — which is exactly what protects the transpiration
-case (§18.4.4).
+(buggy) terms. Detecting a double-count requires an *independent* check — an
+exact solution or a ledger built from outside the RHS (§18.4.3).
 
-### 18.4.3 Per-reaction mass-flow ledger
+### 18.4.3 Independent closure of the gas-enthalpy coupling
 
-`ReactionMassFlowTracker` accumulates, per reaction, the consumed reactant mass
-and generated product mass with $m_\mathrm{flow}=r_i\,V_\mathrm{total}\,\Delta t$,
-and checks
-
-$$
-\text{error}_i =
-  \frac{\big|\sum_j\text{product\_generated}_{j,i}
-             -\sum_j\text{reactant\_consumed}_{j,i}\big|}
-       {\sum_j\text{reactant\_consumed}_{j,i}}
-  < 10^{-10}
-$$
-
-(default tol $10^{-10}$, §16.6). This is a build-time-invariant check at runtime:
-because the stoichiometry validation already enforces $\sum_\mathrm{products}
-\nu_{p,j}=1.0$ at material construction (§6.5, `verify_stoichiometry`,
-`check_material_mass_balance`), the per-reaction error closing to $10^{-10}$
-confirms the species-source assembly applied that stoichiometry correctly. The
-matching build-time check
-$\sum_j S_j=0$ (`validate_species_source_conservation`, rtol $10^{-12}$,
-`src/Physics/kinetics.jl`) verifies the same invariant at the kernel level.
-
-### 18.4.4 Conservation as a guard: the transpiration double-count
-
-The cleanest illustration of conservation-as-verification is the surface
-transpiration guard. The default `:standard` energy form carries gas sensible
-enthalpy entirely through the always-on volumetric advection source
+The gas enthalpy is carried entirely by the always-on volumetric advection source
 
 $$
 S_{\mathrm{conv},i}
@@ -627,30 +684,36 @@ S_{\mathrm{conv},i}
       \Big(\frac{\partial T}{\partial z}\Big)_i
 $$
 
-(§7.4, `compute_gas_convective_source!`). The surface transpiration BC
-$\sum_g\dot m_g\,\Delta h_g(T_s,T_\infty)$ applies the *full* surface enthalpy
-outflow at the boundary. Because the algebraic identity (for constant $c_p$)
+(§7.4, `compute_gas_convective_source!`), and the surface balance carries no
+gas-enthalpy term (§7.4.3). A surface term $\sum_g\dot m_g\,\Delta h_g(T_s,T_\infty)$
+added on top of $S_\mathrm{conv}$ would count the advected enthalpy twice, yet
+the energy ledger of §18.4.2, built from the same RHS terms, would record both
+and still close. The coupling is therefore pinned by a ledger built independently
+of the RHS: the verification case V-CPL-06 (a char-layer column whose gas forms in
+a cool band and vents through a hot layer, $h=0$ so only the sensible ledger acts)
+checks
 
-$$
-\int_V (S_\mathrm{conv}+S_\mathrm{gen})\,dV
-  = -\sum_g \dot m_{g,\mathrm{surface}}\,\Delta h_g(T_s,T_\infty)
-$$
+- **V-CPL-06a (Eulerian):** the discrete summation-by-parts identity
+  $\int S_\mathrm{conv}\,dV\,dt = -c_g\big(\int J_\mathrm{top}T_{f,\mathrm{top}}A\,dt
+  - \int\sum_i(\mathrm{gen}_i-\dot\xi_{g,i})\,T_i V_i\,dt\big)$ — the energy
+  $S_\mathrm{conv}$ removes from the field equals the energy the species ledger
+  says the gas picks up between formation and exit — and the physical reheat
+  reference $-c_g\sum\mathrm{gen}\,(T_\mathrm{exit}-T_\mathrm{form})\,V$ to
+  quasi-steady accuracy;
+- **V-CPL-06b (ALE):** the same column with the fuel band collapsing; the ALE
+  energy budget closes with $E=\sum\rho c_p T V$ over every component, and the
+  mesh-relative $T$-advection accumulator is exactly zero (§11.2.2).
 
-shows that $S_\mathrm{conv}$ already accounts for the bulk of that outflow,
-enabling the transpiration BC *on top of* $S_\mathrm{conv}$ double-counts the gas
-enthalpy by exactly $\int S_\mathrm{conv}$. The code refuses the combination at
-construction: `to_problem_def(...; use_transpiration_bc=true)` and
-`solve(...; use_transpiration_bc=true)` both raise an `ArgumentError`
-(verified in `test/discretization/test_transpiration_energy_balance.jl`). The
-test additionally measures the double-count magnitude through an *independent*
-ledger — precisely because the energy ledger, built from the same RHS,
-would *not* catch it. The optional `:with_generation_sink` form adds
-$S_{\mathrm{gen},i}=-\sum_g\Delta h_g(T_i,T_\mathrm{ref})(\nabla\!\cdot\mathbf
-J_g)_i$ using the same midpoint-rule enthalpy quadrature as the transpiration BC,
-so that $S_\mathrm{conv}+S_\mathrm{gen}$ telescopes *exactly* with the surface
-outflow — but that closed-ledger mode is only consistent with transpiration when
-$S_\mathrm{conv}$ is the sole bulk carrier, which is why the production default
-keeps transpiration off and uses $S_\mathrm{conv}$ alone.
+Its ledger runs in a per-accepted-step callback around the pure `residual!` with
+trapezoidal time quadrature (a rectangle rule leaves an $O(\Delta t\,\dot X)$
+residual that is pure quadrature). V-CPL-06a shows that $S_\mathrm{conv}$ alone
+removes the whole gas reheat, so a surface gas-enthalpy term would remove it a
+second time; a mesh-velocity $T$-advection term would appear in V-CPL-06b as a
+sink of about 66 kJ per kg of volatiles. The absence of the surface term is
+asserted directly by `test/boundary_conditions/test_boundary_temperature.jl`
+(testset "Outward gas flux enters only through blowing"): under a prescribed-flux
+BC, the solved surface temperature and conducted flux are identical with and
+without a gas flux across the face.
 
 ---
 
@@ -749,9 +812,9 @@ mass-loss rate (MLR), surface temperature, and oxygen-consumption heat-release
 rate (HRR) are recorded. Pyrolysis.jl, being a condensed-phase solver, predicts
 MLR and $T_s$ directly and an HRR *proxy* via the effective heat of combustion
 times the gas-generation rate; the gas-phase flame is not modeled. The shipped
-`examples/06_cone_calorimeter.jl` (PMMA, 50 kW m$^{-2}$, top convection +
-re-radiation, adiabatic impermeable back face, single-step Arrhenius,
-temperature-dependent properties) is the reference workflow; its surface-
+`examples/06_cone_calorimeter.jl` (PMMA, 25 kW m$^{-2}$, top convection +
+re-radiation, back-face re-radiation and convection with an impermeable back,
+single-step Arrhenius, temperature-dependent properties) is the reference workflow; its surface-
 absorption variant `06_cone_calorimeter_surface_absorption.jl` exercises the
 opaque-material radiation path.
 
@@ -779,7 +842,8 @@ materially affect quantitative agreement and are themselves verified:
 
 `examples/07_douglas_fir_cone.jl` is the most fully-featured validation case:
 multi-step wood decomposition kinetics, surface-absorption radiation (wood is
-opaque), Darcy–Fick gas transport with species-specific diffusion scaling, ALE
+opaque), Darcy–Fick gas transport (species molar masses enter the pressure
+closure; all gases share one diffusive transfer coefficient, §5.11), ALE
 tracking of the shrinking sample, and the `ApproxSolve` reduced Jacobian for a
 $\sim$8× speedup over the full structured Jacobian. The companion
 `convergence_douglas_fir.jl` (§18.5.1) establishes the mesh resolution at which
@@ -897,7 +961,7 @@ one-temperature assumption holds when the gas equilibrates with the pore walls
 within a cell, which is the case for pore-scale heat-transfer lengths far below
 the cell size — every validated regime here (1 atm, pore sizes well below the
 mesh spacing, gas residence times of milliseconds). A run with coarse open pores
-or very fast, hot throughput, where the gas no longer equilibrates with the
+or very fast, hot throughput, where the gas does not equilibrate with the
 walls, is outside the model: there is no two-temperature gas option (§3.9), and
 the prediction should be treated with caution.
 
@@ -922,13 +986,14 @@ be insensitive to both within their physically-negligible range. The *depletion
 limiter* threshold (default $1.0$ kg m$^{-3}$, min $0.01$, §6.3) sets where the
 tanh rate-suppression begins; the *surface-depletion* threshold (default 5% of
 each cell's own initial thickness, `depletion_threshold=0.05`, §14.3,
-`src/Solver/solve.jl`) sets when a thinned cell is merged in ALE mode. A sensitivity check varies
+`src/Solver/solve.jl`) sets when a thinned (ALE) or emptied (fixed mesh) cell is
+parked. A sensitivity check varies
 each threshold by an order of magnitude and confirms the QoIs (peak MLR, char
 yield) move by less than the tolerance; a strong dependence means the threshold is
 acting in a physically-active region rather than only suppressing
 numerical stiffness near true depletion, and the value should be lowered. These
 are AD-relevant: the limiter is tanh-smooth (so sensitivities are well-defined,
-§17.6), but the surface-depletion merge is a discrete event (a state-vector resize)
+§17.6), but a park is a discrete rewrite of the state (whose size stays fixed)
 and is *not* differentiable — a caveat for sensitivity studies (§17.7, §18.8.3).
 
 ---
@@ -938,28 +1003,26 @@ and is *not* differentiable — a caveat for sensitivity studies (§17.7, §18.8
 Honest V&V records the open items. The following are documented incompletenesses
 that affect, or require re-checking of, validated results.
 
-### 18.8.1 Surface-transpiration convention and calibrated examples
+### 18.8.1 Surface gas-enthalpy convention and calibrated examples
 
 The energy balance follows the $S_\mathrm{conv}$-only convention (ThermaKin
-Eq. 17 / FDS): $S_\mathrm{conv}$ carries the escaping-gas enthalpy, the
-surface-transpiration enthalpy term is *off by default*, and `solve` guards
-against combining the two (§18.4.4), which would double-count the sink. A
-double-counting balance (the surface term active alongside $S_\mathrm{conv}$)
-artificially depresses the surface temperature, so parameter sets calibrated
-under it read a *higher* $T_s$ and mass-loss rate when run under the
-$S_\mathrm{conv}$-only balance. The bundled calibrated examples — the
-inverse-analysis cases and the cone runs — carry fitted kinetic and property
-parameters in exactly that state and *need re-validation*: their parameters
-must be re-fit to data under the $S_\mathrm{conv}$-only energy balance. This
-is a validation-state issue, not a verification failure — the guarded balance
-is the physically-consistent one.
+Eq. 17 / FDS): $S_\mathrm{conv}$ carries the escaping-gas enthalpy and the
+surface balance has no gas-enthalpy term (§7.4.3), since a surface term would
+count that enthalpy a second time. A balance that adds a surface term alongside
+$S_\mathrm{conv}$ artificially depresses the surface temperature, so parameter
+sets calibrated in a solver that does so read a *higher* $T_s$ and mass-loss rate
+here (§1.8, item 7). The fitted kinetic and property parameters of the bundled
+calibrated examples — the inverse-analysis cases and the cone runs — *need
+re-validation* against data, together with the flame heat-flux feedback and blowing that a
+recalibration should include (§1.8.1). This is a validation-state issue, not a
+verification failure.
 
 ### 18.8.2 Composition-varying discrete energy residual does not close exactly
 
 The energy ledger (§18.4.2) is missing the
 $\int T\,\partial(\rho c_p)/\partial t\,dV\,dt$ heat-capacity-change term of its
 $\rho c_p\,T$ proxy density (heat capacity changing at constant temperature as
-composition reacts — §16.8) and an ALE volume-change term. As a result it cannot close to integrator tolerance when
+composition reacts — §16.7) and an ALE volume-change term. As a result it cannot close to integrator tolerance when
 composition varies in time; the residual carries a small composition-rate-
 dependent offset. A ledger that closes exactly would require per-substep
 accumulation of $\rho c_p(t_i)\,\Delta T_i\,V(t_i)$ per cell, which is not
@@ -983,11 +1046,10 @@ the Lennard-Jones parameter estimates for Chapman–Enskog diffusivity
 ($\sigma\approx3.5+0.5\log_{10}(M/0.016)$,
 $\varepsilon/k\approx150+100(M/0.044)$, §5.10) are explicitly flagged unvalidated;
 the lateral-shrinkage laws (§10.5) are empirical rather than first-principles; and
-the single global radiation model and single $T_\mathrm{ref}$ datum (§7.5,
-asymmetric-ambient caveat) are simplifications. Validation cases that depend
+the single global radiation model is a simplification. Validation cases that depend
 sensitively on these closures should report that dependence.
 
-### 18.8.6 Stale-flux and Marshak-coefficient regressions
+### 18.8.5 Stale-flux and Marshak-coefficient regressions
 
 Two silent-failure modes carry standing regression guards. The incident
 radiation flux is re-sampled at *every* RHS evaluation with no constancy
@@ -1020,7 +1082,7 @@ package's own Manifest is not pinned to their dependencies):
 - **JET.jl** — static type-stability and dispatch analysis. Because the hot paths
   rely on `@generated` unrolling over heterogeneous component tuples and on
   end-to-end `Tu`-typed (Float64 or `ForwardDiff.Dual`) caches for AD-cleanliness
-  (§4.8, §7.9), a JET regression that introduces a type instability or a dynamic
+  (§4.6.5, §7.7), a JET regression that introduces a type instability or a dynamic
   dispatch would both slow the solve and threaten the AD/sensitivity paths.
 
 These run via dedicated project environments (`--project=scripts`,
@@ -1038,9 +1100,12 @@ machinery of this chapter has direct test coverage:
   `verify_jacobian_at` over the canonical-configuration × backend matrix;
   per-operator tests (`test/jacobian/test_operator_*.jl`) check each operator's
   Jacobian row against AD.
-- Conservation: `test/discretization/test_transpiration_energy_balance.jl`
-  guards the double-count; the tracker tests exercise the mass/energy/reaction
-  ledgers.
+- Conservation: the tracker tests exercise the mass and energy ledgers, and the
+  verification case V-CPL-06 pins the gas-enthalpy coupling, and
+  `test/boundary_conditions/test_boundary_temperature.jl` asserts that the surface
+  balance carries no gas-enthalpy term (§18.4.3).
+- The verification suite: `test/verification/runcases.jl` runs every case of
+  `test/verification/cases/` in assert mode (§18.1.3).
 - Radiation: `test/radiation/test_p1_sign.jl` (sign), `test_p1_validation.jl`
   (analytic limits), `test/jacobian/test_operator_radiation.jl` (Beer–Lambert
   upper-triangular structure).
@@ -1056,10 +1121,11 @@ choice of integrator, tolerances, Jacobian backend, and linear solver. The
 defaults — `KenCarp4` with `AutoFiniteDiff`, the pattern-chosen factorization
 (`KLUFactorization` or `UMFPACKFactorization`), `abstol=1e-8`/`reltol=1e-6`,
 `Structured(DirectSolve())` (`ApproxSolve` under ALE) — are the reference
-configuration; deviations (e.g. `ApproxSolve` for speed, ILU-GMRES for large ALE)
+configuration; deviations (e.g. `ApproxSolve` on a fixed mesh, `ILUGMRESFactorization`
+for large ALE runs)
 trade a controlled amount of accuracy for performance and should be re-checked
-against the reference configuration with `verify_jacobian` armed and the
-diagnostics ledgers enabled when first adopted on a new problem.
+against the reference configuration with `verify_jacobian` armed when first
+adopted on a new problem.
 
 ---
 
@@ -1073,7 +1139,7 @@ The V&V coverage above has gaps that a user should weigh:
    motion in the MMS cases is either reaction-driven or prescribed via the
    verification-only `w_override` hook; under prescribed (non-material)
    motion the species sources are assembled in the material-following frame
-   and the Jacobian falls back to finite differences (§11.10 item 7). General
+   and the Jacobian falls back to finite differences (§11.9 item 5). General
    ALE (a species advection operator for mesh motion decoupled from the
    solid) remains out of scope.
 
@@ -1089,10 +1155,10 @@ The V&V coverage above has gaps that a user should weigh:
    reaction; the missing heat-capacity-change and volume-change terms must be
    accounted for when interpreting it.
 
-4. **Depletion is outside the audited path** (§18.8.3): it disables the
-   structured Jacobian verification and is non-differentiable, so the most
-   strongly-shrinking cases (deep char, ablation) are the least
-   machinery-verified.
+4. **Depletion is non-differentiable** (§18.8.3): the structured Jacobian and its
+   verifier run through park events (§18.3.5), but sensitivities are valid only
+   between them, so the most strongly-shrinking cases (deep char, ablation) have
+   the narrowest sensitivity horizons.
 
 5. **P1 radiation is Experimental and separately verified** (§18.2.5, §8.12): it
    has its own residual outside the production `solve` path, so its V&V does not
@@ -1100,13 +1166,12 @@ The V&V coverage above has gaps that a user should weigh:
    tests.
 
 6. **Validation is parameter-entangled.** Several cone/inverse cases were
-   calibrated against the data they are compared to, and the transpiration fix
-   (§18.8.1) has invalidated those calibrations. Re-fitting against held-out data
+   calibrated against the data they are compared to, and those calibrations need
+   re-fitting (§18.8.1). Re-fitting against held-out data
    — keeping calibration and validation data disjoint — is the outstanding
    validation task, and is the discipline §18.1.1 requires for a comparison to
    count as validation rather than calibration.
 
 7. **Heuristic closures carry validation debt** (§18.8.4): the LJ diffusivity
-   estimates, the empirical shrinkage laws, and the single-datum $T_\mathrm{ref}$
-   are unvalidated or simplified, and cases that lean on them inherit that
+   estimates and the empirical shrinkage laws are unvalidated or simplified, and cases that lean on them inherit that
    uncertainty.

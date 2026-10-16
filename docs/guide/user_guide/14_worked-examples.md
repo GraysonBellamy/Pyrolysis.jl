@@ -38,13 +38,14 @@ A roadmap of what each example demonstrates:
 
 | Example file | Physics highlighted | Modes | §14 |
 |---|---|---|---|
-| `06_cone_calorimeter.jl` | PMMA cone, single-step kinetics, in-depth radiation | ALE, depletion | 14.1 |
+| `06_cone_calorimeter.jl` | PMMA cone, single-step kinetics, incident flux at the surface (`NO_RADIATION`) | ALE, depletion | 14.1 |
 | `06_cone_calorimeter_surface_absorption.jl` | PMMA cone, surface-only radiation | ALE, SURFACE_ABSORPTION | 14.1 |
 | `07_douglas_fir_cone.jl` | Wood, multi-step kinetics, Darcy–Fick, moisture | ALE, SURFACE_ABSORPTION, DarcyFick | 14.2 |
 | `convergence_douglas_fir.jl` | Grid-convergence study | as 07, swept over `n_cells` | 14.3 |
 | `08_pressure_treated_wood_cone.jl`, `ptw_comparison.jl` | Treated wood + moisture, Darcy–Fick | ALE, SURFACE_ABSORPTION, DarcyFick | 14.4 |
 | `08_darcy_fick_demo.jl` | Pressure-driven gas transport, permeability | ALE, DarcyFick | 14.5 |
 | `moisture_hos_comparison.jl` | State-dependent heat of sorption | ALE, SURFACE_ABSORPTION, DarcyFick | 14.6 |
+| `macfp/macfp_gasification.jl` | MaCFP-4 white-pine gasification targets (10/30/60 kW/m², 6/18 mm) | ALE, SURFACE_ABSORPTION | — |
 | `inverse_analysis/inverse_white_pine.jl` | Parameter estimation from data | ALE, optimization | 14.7 |
 | `sensitivity_analysis/sensitivity_douglas_fir.jl`, `sensitivity_sobol.jl`, `compare_degrees.jl`, `df_sensitivity_comparison.jl` | Uncertainty / Sobol / inter-code | parameter sweep, post-process | 14.8 |
 | `literature_comparison/literature_comparison.jl` | Property-variant comparison | as 07, swept over property sets | 14.9 |
@@ -217,8 +218,8 @@ solution = solve(problem;
     progress = true,
     use_ale = true,              # moving mesh tracks the receding surface
     min_thickness = 0.01e-3,     # terminate when sample < 0.01 mm
-    handle_depletion = true,     # merge thin surface cells (production depletion path)
-    depletion_threshold = 0.05,  # merge a cell at 5% of its initial thickness
+    handle_depletion = true,     # park thin surface cells
+    depletion_threshold = 0.05,  # park a cell at 5% of its initial thickness
     min_cells = 1,               # keep at least 1 cell
 )
 ```
@@ -236,10 +237,6 @@ from `src/Solver/solve.jl`):
   variant (§14.1.1) passes `SURFACE_ABSORPTION`.
 - **`handle_depletion = true`** turns on cell parking (Chapter 10), which
   carries the run through burnout (Technical Reference §14.3).
-- **`use_transpiration_bc`** is left at its default `false`. Enabling it is
-  rejected: the default `:standard` energy form already carries gas enthalpy via
-  the `S_conv` advection term, so a surface-transpiration term would
-  double-count it (Technical Reference §7; see also the Troubleshooting chapter).
 
 ### What to look at
 
@@ -261,8 +258,9 @@ println("Mass loss: ", round((1 - total_m[end]/total_m[1]) * 100, digits = 1), "
 `surface_T` and `back_temperature` come from the boundary-temperature Newton
 solve (not raw cell-center temperatures), which closes the surface energy
 balance — important for `T⁴` radiative BCs (Technical Reference §12). The
-script overlays these against bundled ThermaKin reference traces and prints a
-side-by-side comparison at t ≈ 600 s.
+script prints a side-by-side comparison with ThermaKin values at t ≈ 600 s
+(hard-coded in the script) and overlays ThermaKin traces only when
+`docs/thermakin_output/` is present; the repository does not ship those traces.
 
 If you have `Plots` loaded, the package's plot recipe gives quick views:
 
@@ -273,11 +271,9 @@ plot(solution; kind = :mlr)         # mass-loss rate
 plot(solution; kind = :heatmap)     # T(z, t) field
 ```
 
-> Caveat: this example's parameter set was calibrated against a solver that
-> applies a surface transpiration term in addition to the volumetric advection
-> source. Under the `S_conv`-only convention used here, surface temperature and
-> MLR shift slightly, so the bundled ThermaKin comparison is indicative, not a
-> regression target; treat the printed peak-surface-T and mass-loss numbers as a
+> Caveat: this example's parameter set is pending re-validation against measured
+> data (Technical Reference §18.8.1), so the ThermaKin comparison is indicative,
+> not a regression target; treat the printed peak-surface-T and mass-loss numbers as a
 > reference for magnitude and time scale rather than exact values to match.
 
 ### 14.1.1 Surface-absorption variant (`06_cone_calorimeter_surface_absorption.jl`)
@@ -320,9 +316,10 @@ Reference §5–§12.
 
 ### Material highlights
 
-The material declares 13 components — six solids (`DF`, `DF_int1`…`DF_int4`,
-`Char`), one liquid (`MOISTURE`), and six gases (`DF_gas1`…`DF_gas5`,
-`WATER_VAPOR`) — and six reactions. A few patterns worth lifting:
+The material declares 14 components — six solids (`DF`, `DF_int1`…`DF_int4`,
+`Char`), one liquid (`MOISTURE`), and seven gases (`DF_gas1`…`DF_gas5`,
+`WATER_VAPOR`, and the inert background `AIR` initialized at 1 atm) — and six
+reactions. A few patterns worth lifting:
 
 **Kinetic-theory sizing of the gas `λ` values.** Each gas component's transfer
 coefficient `λ` is *assigned* a value scaled by `√(M_ref/M_j)` from kinetic
@@ -381,8 +378,8 @@ Reaction(:pyrolysis_step3, 3 => (4, 10); A = 7.744618e12,   E = 181.0e3,
 # ... steps 2, 4, 5 similarly
 ```
 
-The full 13-component, six-reaction definition is in
-`examples/07_douglas_fir_cone.jl` (lines 216–445).
+The full 14-component, six-reaction definition is the `douglas_fir = Material(...)`
+block of `examples/07_douglas_fir_cone.jl`.
 
 ### Boundary conditions
 
@@ -413,6 +410,7 @@ the material has permeability (Darcy–Fick mode).
 
 ```julia
 using OrdinaryDiffEq, LinearSolve
+using OrdinaryDiffEqSDIRK: KenCarp4
 using LinearSolve: SparspakFactorization
 
 solution = solve(problem;
@@ -442,13 +440,12 @@ solution = solve(problem;
 ```
 
 Both follow the same trajectory; the exact Jacobian costs several times more
-per step (Technical Reference §15.10.3; see the Solver/Jacobian configuration
+per step (Technical Reference §15.10.2; see the Solver/Jacobian configuration
 chapter for choosing strategies).
 
 ### What to look at
 
-Because radiation is active, the solver records a full boundary-flux
-decomposition in `extras`:
+The solver records a full boundary-flux decomposition in `extras`:
 
 ```julia
 mlr           = solution.extras.surface_mass_flux           # actual MLR at surface [kg/(m²·s)]
@@ -476,7 +473,7 @@ yield. Note the access pattern for internal helpers and for the reaction's
 `.products` field:
 
 ```julia
-NC, NR = 13, 6
+NC, NR = 14, 6
 rates, heats = zeros(NR), zeros(NR)
 for j in 1:n_cells
     ξ = ntuple(k -> solution.ξ[k, j, i], NC)
@@ -564,6 +561,7 @@ julia -p 4 convergence_douglas_fir.jl       # 4 workers
 using Distributed
 @everywhere begin
     using Pyrolysis, LinearSolve, Sparspak, OrdinaryDiffEq
+    using OrdinaryDiffEqSDIRK: KenCarp4
     using LinearSolve: SparspakFactorization
 end
 solutions = pmap(build_and_solve, [480, 240, 120, 60, 30, 15])
@@ -718,7 +716,6 @@ want a reaction to be inactive outside a band.
 solution_darcy = solve(problem;
     use_ale = true,
     min_thickness = 0.5e-3,
-    dt_initial = 0.01,
     progress = true,
 )
 ```
@@ -887,8 +884,8 @@ loss, grad = adjoint_sensitivity(base_problem, θ, p_inject,
                                  sol -> sum(abs2, sol.extras.back_temperature .- data))
 ```
 
-> Caveat: warm starts, non-smooth lateral-shrinkage laws, and the
-> depletion-merge callback introduce discontinuities that can confuse
+> Caveat: warm starts, non-smooth lateral-shrinkage laws, and depletion
+> parking introduce discontinuities that can confuse
 > gradient-based methods; the derivative-free NelderMead route is robust to them.
 > See the Sensitivity Analysis chapter and Technical Reference §17.
 
@@ -919,6 +916,7 @@ using Distributed
     using Pyrolysis
     using Pyrolysis: compute_surface_mass_flux, effective_gas_transfer
     using OrdinaryDiffEq, LinearSolve, Sparspak
+    using OrdinaryDiffEqSDIRK: KenCarp4
     using LinearSolve: SparspakFactorization
 end
 
@@ -1076,24 +1074,25 @@ Reading the examples together, a few idioms recur and are worth internalizing:
   surface efflux; `solution.extras.gas_generation_rate` is volumetric production;
   `solution.mass_loss_rate` is per current area. They coincide only at
   quasi-steady state.
-- **Use the boundary-flux extras for energy accounting.** With a radiation model
-  active, `surface_heat_flux_*` and `surface_emissivity`/`surface_conductivity`
-  in `extras` give a complete surface energy balance without re-deriving it.
+- **Use the boundary-flux extras for energy accounting.** `surface_heat_flux_*` and
+  `surface_emissivity`/`surface_conductivity` in `extras` give the surface energy
+  balance without re-deriving it; under `BEER_LAMBERT` add
+  `extras.volumetric_absorption`, the in-depth deposit the face fluxes exclude.
 
 ### Caveats to keep in mind
 
 - **`P1_QUASI_STEADY` radiation is experimental** and quarantined in
   `Pyrolysis.Experimental`; the core `solve` rejects it as a `radiation_model`.
-  The shipped examples use `NO_RADIATION` (flux via BC only), `SURFACE_ABSORPTION`,
-  or `BEER_LAMBERT`.
-- **Surface transpiration BC is off by default and incompatible with the default
-  `:standard` energy form** — enabling `use_transpiration_bc` is rejected because
-  `S_conv` already carries gas enthalpy (double counting). Technical Reference §7.
-- **Several cone examples carry parameter sets calibrated under a
-  transpiration-plus-`S_conv` convention** and may need re-calibration under the
-  `S_conv`-only energy balance; treat their bundled experimental/ThermaKin
-  overlays as indicative comparisons rather than tight regression targets
-  (Technical Reference §18).
+  The shipped examples use `NO_RADIATION` (flux via BC only) or `SURFACE_ABSORPTION`;
+  `BEER_LAMBERT` is one keyword away in `06_cone_calorimeter.jl`.
+- **The boundary energy balance has no surface gas-enthalpy term**, because
+  `S_conv` already carries the gas enthalpy (a surface term would double count
+  it; §5.4, Technical Reference §7).
+- **The cone examples' parameter sets are pending re-validation against data**;
+  treat their experimental and ThermaKin overlays as indicative comparisons rather
+  than tight regression targets (Technical Reference §18.8.1). Parameters
+  calibrated in a solver that adds a surface gas-enthalpy term on top of `S_conv`
+  predict a higher surface temperature and MLR here (Technical Reference §1.8).
 
 For deeper troubleshooting (stiff solves, ledger imbalance, ALE mesh tangling,
 radiation surprises), see the Troubleshooting and Performance chapter; for the

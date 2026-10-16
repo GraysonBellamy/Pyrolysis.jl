@@ -2,7 +2,7 @@
 
 This chapter derives the complete volume-change model of Pyrolysis.jl: how reaction-driven mass exchange between condensed and gaseous phases produces a per-cell volumetric strain rate $\theta$, how that strain is converted into axial mesh motion (the ALE mesh velocity), and how a column-global *lateral* shrinkage / swelling / intumescence law deforms the cross-sectional area $A(t)$ through the pyrolysis-progress state variable $\chi$. We give the continuous balance, the exact discrete update rules as implemented, the dilation correction that keeps every component's cell mass on its reaction-and-flux budget as the mesh moves, and a careful comparison to the deformation treatments in ThermaKin2Ds, Gpyro, and FDS. Every equation here is grounded in the source: `src/Physics/volume_change.jl`, `src/Residual/residual.jl`, `src/Problem/state_cache.jl`, `src/Problem/initial_conditions.jl`, and `src/Materials/materials.jl`.
 
-The axial mesh-motion machinery (cumulative integration of $\theta_L$, the Geometric Conservation Law, the mesh-relative temperature advection, and conservative remapping) is developed in §11, *The ALE Framework*; here we develop only the *constitutive* content — the strain rates and the cross-section law that feed §11 — and the species dilation correction that closes the species balance under mesh motion. The state-vector layout that carries the $\chi$ block is detailed in §13, *Finite-Volume Discretization*, and §15, *Temporal Integration & Structured Jacobian*.
+The axial mesh-motion machinery (cumulative integration of $\theta_L$, the geometric volume from the node positions, and the verification-only mesh-relative temperature advection) is developed in §11, *The ALE Framework*; here we develop only the *constitutive* content — the strain rates and the cross-section law that feed §11 — and the species dilation correction that closes the species balance under mesh motion. The state-vector layout that carries the $\chi$ block is detailed in §13, *Finite-Volume Discretization*, and §15, *Temporal Integration & Structured Jacobian*.
 
 **Index convention for this chapter.** Following the binding resolution in §2 (overload I1), $i$ is the **cell index** ($1\le i\le n$), $j$ is the **component/species index** ($1\le j\le N_C$), and $r$ is the **reaction index**. The symbol $\chi$ is *always* pyrolysis progress (overload A1); the cross-section ratio is $A/A_0=\mathrm{law}(\bar\chi)$ and is never written as $\chi$. The symbol $\theta$ is *always* a volumetric strain rate (overload A2); stoichiometry is $\nu_{r,j}$.
 
@@ -42,7 +42,7 @@ $$
 
 with SI units of $\mathrm{s^{-1}}$. The interpretation is transparent: a unit decrease in the mass concentration of solid $j$ ($d\xi_j/dt<0$) frees a pure-phase volume of $1/\rho_j$ per unit mass, contracting the matrix ($\theta<0$); a gas that does not contribute ($\gamma_g=0$) is invisible to $\theta$ regardless of how fast it is produced.
 
-> **Implementation note.** $\theta$ is computed by `volume_change_rate(dξ, T, material)` / the dispatch helpers `_volume_change_rate`, in `src/Physics/volume_change.jl` (the inline $N_C\in\{1,2,3\}$ overloads at lines 15–63 and the `@generated` form for $N_C>3$ at lines 66–90). The exact loop is
+> **Implementation note.** $\theta$ is computed by `volume_change_rate(dξ, T, material)` / the dispatch helpers `_volume_change_rate`, in `src/Physics/volume_change.jl` (inline overloads for $N_C\in\{1,2,3\}$ and a `@generated` form for $N_C>3$). The exact loop is
 > ```julia
 > θ += γⱼ * dξ[j] / ρⱼ        # ρⱼ = comps[j].density(T)
 > ```
@@ -50,9 +50,9 @@ with SI units of $\mathrm{s^{-1}}$. The interpretation is transparent: a unit de
 
 ### 10.1.2 What $d\xi_j/dt$ is in (10.2)
 
-A subtle and load-bearing point: the $d\xi_j/dt$ fed into (10.2) is the **reaction source term only**, not the full species RHS (which also includes gas transport and ALE advection). This is correct because $\theta$ measures the rate at which mass is *converted between phases by chemistry* — the only process that changes the additive-volume balance (10.1). Transport of an already-gaseous species through the pores does not change the matrix volume, and the ALE advection / dilation terms are bookkeeping for the moving frame, not new mass exchange. Including them would double-count the volume change that ALE motion is itself representing.
+A subtle and load-bearing point: the $d\xi_j/dt$ fed into (10.2) is the **reaction source term only**, not the full species RHS (which also includes gas transport and the ALE dilation). This is correct because $\theta$ measures the rate at which mass is *converted between phases by chemistry* — the only process that changes the additive-volume balance (10.1). Transport of an already-gaseous species through the pores does not change the matrix volume, and the ALE dilation term is bookkeeping for the moving frame, not new mass exchange. Including them would double-count the volume change that ALE motion is itself representing.
 
-> **Implementation note.** In the ALE residual (`_residual!(..., ::ALE)`, `src/Residual/residual.jl:91–222`) the reaction source matrix `ws.rhs_cache.dξ_rxn` is populated by the physics RHS at step 4 (line 123) and is the array passed as `precomputed_dξ_rxn` to `_compute_ale_mesh_velocity!` (line 156). Inside that function (lines 389–401), `dξ_dt[j] = precomputed_dξ_rxn[j, cell_idx]`, and then `θ_cell = Physics.volume_change_rate(dξ_dt, T_cell, material)`. So $\theta$ is built from `dξ_rxn`, the pure reaction source — exactly the per-cell strain rate of (10.2).
+> **Implementation note.** In the ALE residual (`_residual!(..., ::ALE)`, `src/Residual/residual.jl`) the reaction source matrix `ws.rhs_cache.dξ_rxn` is populated by the physics RHS at step 4 and is passed as the positional argument `dξ_rxn` of `_compute_ale_mesh_velocity!`. Inside that function, `dξ_dt[j] = dξ_rxn[j, cell_idx]`, and then `θ_cell = Physics.volume_change_rate(dξ_dt, T_cell, material)`. So $\theta$ is built from `dξ_rxn`, the pure reaction source — exactly the per-cell strain rate of (10.2).
 
 ### 10.1.3 Absolute cell volume rate
 
@@ -63,7 +63,7 @@ $$
 \tag{10.3}
 $$
 
-> **Implementation note.** `compute_cell_volume_rates!(dV, state, dξ_matrix, material)` (`src/Physics/volume_change.jl:126–149`) reads $V_i$ and $T_i$ from the typed `StateCache`, takes $d\xi/dt$ from a precomputed matrix, evaluates $\theta_i$ via `volume_change_rate`, and writes `dV[i] = V * θ`. This batch helper is provided for diagnostics; the production ALE path uses $\theta_i$ directly in the mesh-velocity integration (§10.6) rather than materializing $dV_i/dt$.
+> **Implementation note.** No routine materializes $dV_i/dt$: the ALE path evaluates $\theta_i$ with `volume_change_rate` (`src/Physics/volume_change.jl`) inside the mesh-velocity integration (§10.6) and recomputes $V_i$ from the node positions (§11.4.1).
 
 ---
 
@@ -82,7 +82,7 @@ The swelling factor $\gamma_j$ is a per-component scalar field on every `Abstrac
 **Modeling guidance.**
 
 - **Non-charring shrinkage (e.g. melting/charring polymer to gas):** keep the virgin solid at $\gamma=1$ and the gas product at $\gamma=0$. As the solid converts to gas, $\theta<0$ and the column recedes — the classic shrinking-slab picture.
-- **Charring with a rigid char:** give the char $\gamma=0$ to "freeze" its volume contribution (`rigid_char = SolidComponent(:char, ...; γ=0.0)`, the documented example at `components.jl:182`); then only the mass converted out of the cell drives axial motion, and the char does not re-inflate or collapse with the mesh. (This is a modeling choice, not a default; the default char is $\gamma=1$.)
+- **Charring with a rigid char:** give the char $\gamma=0$ to "freeze" its volume contribution (`rigid_char = SolidComponent(:char, ...; γ=0.0)`, the documented example at `components.jl`); then only the mass converted out of the cell drives axial motion, and the char does not re-inflate or collapse with the mesh. (This is a modeling choice, not a default; the default char is $\gamma=1$.)
 - **Intumescence (gas-producing expansion):** assign the trapped/blowing gas a swelling factor $\gamma_g\in(0,1]$. A positive $d\xi_g/dt$ (gas being produced) with $\gamma_g>0$ contributes $\theta>0$, i.e. the matrix *inflates*. Combined with a swelling lateral law (§10.5) this reproduces the order-of-magnitude expansion of intumescent coatings. Axial intumescence (through-thickness swell) is captured by $\theta>0$ in (10.2); radial intumescence (lateral swell of the column) is captured by $\mathrm{law}(\bar\chi)>1$ in (10.8).
 
 Because $\gamma_j$ is a free per-component parameter, the model spans the full range from pure shrinkage ($\gamma=1$ solid, $\gamma=0$ gas) through volume-neutral ($\gamma=0$ everywhere) to intumescent ($\gamma_g>0$).
@@ -113,7 +113,7 @@ $$
 
 i.e. exactly the fractional dry-gas mass release. By construction $\chi_i$ starts at $0$ and, for a fully decomposing solid that converts entirely to dry gas, tends to $1$; with char yield it saturates below $1$.
 
-> **Implementation note.** Computed in `_pack_chi_derivative!` (`src/Residual/residual.jl:484–517`). The exact write is
+> **Implementation note.** Computed in `_pack_chi_derivative!` (`src/Residual/residual.jl`). The exact write is
 > ```julia
 > S_dry = Σ_{j ∈ idx_dry} dξ_rxn[j, i]
 > denom = max(m_init[i], eps())
@@ -130,17 +130,17 @@ m_{\mathrm{dry},i} \;=\; V_i(0)\sum_{j\in\mathrm{solid}}\xi_{j,i}(0).
 \tag{10.6}
 $$
 
-> **Implementation note.** `populate_m_dry_solid_initial!(mesh, material)` (`src/Problem/initial_conditions.jl:256–272`) sums `mesh.cell_states[i].ξ[j]` over components for which `is_solid(material.components[j])` is true, multiplied by `mesh.cell_volumes[i]`. Crucially the sum is over **solids only** — liquids (e.g. bound moisture) are *not* counted in the denominator, even though they are matrix-forming. This is deliberate: $\chi$ is a *dry-decomposition* progress variable, and water mass is excluded from both numerator (dry-gas only) and denominator (solids only). The array is stored as `Float64` on the immutable mesh and is constant for the whole solve.
+> **Implementation note.** `populate_m_dry_solid_initial!(mesh, material)` (`src/Problem/initial_conditions.jl`) sums `mesh.cell_states[i].ξ[j]` over components for which `is_solid(material.components[j])` is true, multiplied by `mesh.cell_volumes[i]`. Crucially the sum is over **solids only** — liquids (e.g. bound moisture) are *not* counted in the denominator, even though they are matrix-forming. This is deliberate: $\chi$ is a *dry-decomposition* progress variable, and water mass is excluded from both numerator (dry-gas only) and denominator (solids only). The array is stored as `Float64` on the mesh and changes only at a park event, which adds the parked cell's entry to the keeper's (§14.3.4), so the column total $M_{\mathrm{dry}}$ is fixed for the whole solve.
 
 ### 10.3.3 Dry-gas identification and the water-vapor caveat
 
 The index set $\{j\in\mathrm{dry\ gas}\}$ collects all GAS-phase components *except* water vapor / moisture-derived gases. Phase is a compile-time (type-level) property, but the water-vapor exclusion is done by **name matching**:
 
-> **Implementation note.** `dry_pyrolysis_gas_indices(material)` (`src/Materials/materials.jl:625–652`) recurses over the component tuple at compile time (`_collect_dry_pyrolysis_gas_indices`) and includes index $j$ iff `is_gas(comp) && !_is_water_vapor_name(comp.name)`. The name filter `_is_water_vapor_name` (line 645) is a **case-insensitive substring match**: a name is treated as water vapor if its string contains `"H2O"`, or (lowercased) contains `"water"`, or equals `"h2o"`. The resulting tuple is cached once at workspace construction (`ws.dry_gas_indices`) to avoid a per-residual `Symbol→String` allocation. **Caveat:** because identification is by substring, a dry-gas species accidentally named (say) `:water_gas` would be misclassified as moisture and excluded from $\chi$. Users modeling moisture must name the water-vapor component so it matches (e.g. `:water_vapor` or `:H2O`), and must avoid those substrings in genuine dry-gas names.
+> **Implementation note.** `dry_pyrolysis_gas_indices(material)` (`src/Materials/materials.jl`) recurses over the component tuple at compile time (`_collect_dry_pyrolysis_gas_indices`) and includes index $j$ iff `is_gas(comp) && !_is_water_vapor_name(comp.name)`. The name filter `_is_water_vapor_name` is a **case-insensitive substring match**: a name is treated as water vapor if its string contains `"H2O"`, or (lowercased) contains `"water"`, or equals `"h2o"`. The resulting tuple is cached once at workspace construction (`ws.dry_gas_indices`) to avoid a per-residual `Symbol→String` allocation. **Caveat:** because identification is by substring, a dry-gas species accidentally named (say) `:water_gas` would be misclassified as moisture and excluded from $\chi$. Users modeling moisture must name the water-vapor component so it matches (e.g. `:water_vapor` or `:H2O`), and must avoid those substrings in genuine dry-gas names.
 
 ### 10.3.4 Why $\chi$ is reconstructed, not freely integrated
 
-Although $\chi$ occupies a trailing block of the state vector $\mathbf{u}$ (the "$\chi$ block"; see §10.9 and §15.1) and is advanced by the ODE integrator, its derivative $d\chi_i/dt$ is *recomputed from the reaction sources on every residual evaluation* by `_pack_chi_derivative!` rather than being a free dynamical degree of freedom with independent physics. Because the RHS for $\chi$ is a pure function of the (reaction part of the) other states and geometry, $\chi$ stays exactly synchronized with cumulative dry-gas production regardless of the integrator's internal representation. For identity-law materials (no lateral shrinkage), the $\chi$ block is absent from the state vector entirely (the `chi_range` is empty), and `_pack_chi_derivative!` returns immediately (line 494) — so $\chi$ carries zero memory/compute cost when it is not needed. When a law is present but identity-valued, the block is zeroed (lines 498–502) because $\chi$ is undefined when the cross-section is fixed.
+Although $\chi$ occupies a trailing block of the state vector $\mathbf{u}$ (the "$\chi$ block"; see §10.9 and §15.1) and is advanced by the ODE integrator, its derivative $d\chi_i/dt$ is *recomputed from the reaction sources on every residual evaluation* by `_pack_chi_derivative!` rather than being a free dynamical degree of freedom with independent physics. Because the RHS for $\chi$ is a pure function of the (reaction part of the) other states and geometry, $\chi$ stays exactly synchronized with cumulative dry-gas production regardless of the integrator's internal representation. For identity-law materials (no lateral shrinkage), the $\chi$ block is absent from the state vector entirely (the `chi_range` is empty), and `_pack_chi_derivative!` returns immediately — so $\chi$ carries zero memory/compute cost when it is not needed.
 
 ---
 
@@ -159,7 +159,7 @@ $$
 
 Weighting by the *initial* dry-solid mass (rather than by volume, or uniformly) means $\bar\chi$ is the fraction of the column's *total decomposable solid mass* that has been released as dry gas — a physically meaningful, conserved-denominator average. Because $M_{\mathrm{dry}}$ is fixed at setup, $\bar\chi\in[0,1]$ moves monotonically as the column decomposes.
 
-> **Implementation note.** `_chi_bar_from_state(u, layout, mesh)` (`src/Problem/state_cache.jl:195–217`) reads the $\chi$ block from `u` and the weights from `mesh.m_dry_solid_initial`, returning the tuple $(\bar\chi, M_{\mathrm{dry}})$. The numerator `num += u[χ_offset+i] * m_i` accumulates in the scalar type of `u` (which is `ForwardDiff.Dual` in a Jacobian/sensitivity pass), while the denominator `M` accumulates in `Float64`. The division `num / M` therefore returns a Dual when `u` is Dual — the average is **AD-safe**, carrying sensitivities of $\bar\chi$ with respect to every state through which $\chi_i$ depends. Guards: an empty `m_dry_solid_initial` or empty `chi_range` returns $(0,0)$, and $M_{\mathrm{dry}}\le\varepsilon$ returns $(0,0)$ (line 215). The public wrapper is `column_chi_bar_from_state(u, layout, mesh)` (`src/Residual/residual.jl:574–575`).
+> **Implementation note.** `_chi_bar_from_state(u, layout, mesh)` (`src/Problem/state_cache.jl`) reads the $\chi$ block from `u` and the weights from `mesh.m_dry_solid_initial`, returning the tuple $(\bar\chi, M_{\mathrm{dry}})$. The numerator `num += u[χ_offset+i] * m_i` accumulates in the scalar type of `u` (which is `ForwardDiff.Dual` in a Jacobian/sensitivity pass), while the denominator `M` accumulates in `Float64`. The division `num / M` therefore returns a Dual when `u` is Dual — the average is **AD-safe**, carrying sensitivities of $\bar\chi$ with respect to every state through which $\chi_i$ depends. Guards: an empty `m_dry_solid_initial` or empty `chi_range` returns $(0,0)$, and $M_{\mathrm{dry}}\le\varepsilon$ returns $(0,0)$. The public wrapper is `column_chi_bar_from_state(u, layout, mesh)` (`src/Residual/residual.jl`).
 
 ---
 
@@ -176,13 +176,13 @@ $$
 
 where $A_0$ is the calibration-reference area fixed at setup and $\mathrm{law}:\,[0,1]\to(0,\infty)$ is a user-supplied smooth function (or `nothing`, meaning identity). The area $A(t)$ is uniform along $z$ (the column has one cross-section at any instant) but time-varying.
 
-> **Implementation note.** Stored as `material.lateral_shrinkage_law::LSL` (`src/Materials/materials.jl:171`), a concrete `Function` subtype or `Nothing`. The constructor validates that it is a `Function` or `nothing` (line 186) and the public `Material(...; lateral_shrinkage_law = nothing)` keyword defaults to identity. $A_0$ is `mesh.cross_section_area_initial` (`src/Geometry/mesh.jl:109`), set once at mesh construction. The update is performed by `update_cross_section_area!(cache, material, mesh, u, layout, ::WithChi)` (`src/Problem/state_cache.jl:175–192`):
+> **Implementation note.** Stored as `material.lateral_shrinkage_law::LSL` (`src/Materials/materials.jl`), a concrete `Function` subtype or `Nothing`. The constructor validates that it is a `Function` or `nothing` and the public `Material(...; lateral_shrinkage_law = nothing)` keyword defaults to identity. $A_0$ is `mesh.cross_section_area_initial` (`src/Geometry/mesh.jl`), set once at mesh construction. The update is performed by `update_cross_section_area!(cache, material, mesh, u, layout, ::WithChi)` (`src/Problem/state_cache.jl`):
 > ```julia
 > χ̄, M = _chi_bar_from_state(u, layout, mesh)
 > A = mesh.cross_section_area_initial * material.lateral_shrinkage_law(χ̄)
 > cache.A_section[] = A
 > ```
-> The result is stored in `cache.A_section[]` carrying `eltype(u)` (Dual-safe), and the function returns $(A,\bar\chi,M_{\mathrm{dry}})$ for downstream use. For identity-law materials it short-circuits and returns the unchanged $A_0$ (lines 184–186); for `NoChi` mode it is a no-op returning the current area (lines 166–173). Note the code uses the field name `cross_section_area_initial` for $A_0$; the mutable `cross_section_area` holds the current $A(t)$.
+> The result is stored in `cache.A_section[]` carrying `eltype(u)` (Dual-safe), and the function returns $(A,\bar\chi,M_{\mathrm{dry}})$ for downstream use. For identity-law materials it short-circuits and returns the unchanged $A_0$; for `NoChi` mode it is a no-op returning the current area. Note the code uses the field name `cross_section_area_initial` for $A_0$; the mutable `cross_section_area` holds the current $A(t)$.
 
 ### 10.5.2 Canonical laws
 
@@ -193,7 +193,7 @@ where $A_0$ is the calibration-reference area fixed at setup and $\mathrm{law}:\
 | Linear swell | $1+k\bar\chi$, $k>0$ | Area expands (intumescence) |
 | Smooth (sigmoid) | $1-\tfrac{k}{1+e^{-s(\bar\chi-\bar\chi_0)}}$ | Onset-localized transition |
 
-For example, the verification fixture uses $\mathrm{law}(\bar\chi)=1-0.2\,\bar\chi$, so at $\bar\chi=0.5$ the area is $A=0.9\,A_0$ (`test/geometry/test_variable_cross_section.jl:9–19`, which asserts `A ≈ A0 * 0.9`).
+For example, the verification fixture uses $\mathrm{law}(\bar\chi)=1-0.2\,\bar\chi$, so at $\bar\chi=0.5$ the area is $A=0.9\,A_0$ (`test/geometry/test_variable_cross_section.jl`, which asserts `A ≈ A0 * 0.9`).
 
 ### 10.5.3 First-principles status
 
@@ -234,7 +234,7 @@ $$
 
 The $m_{\mathrm{dry},i}$ cancels per cell, leaving a clean volume-weighted sum of the dry-gas source over the column, divided by the total initial dry-solid mass. This is exactly the discrete form used.
 
-> **Implementation note.** `_compute_theta_A(material, state, χ̄, M, dξ_rxn, layout, idx_dry)` (`src/Residual/residual.jl:529–564`) computes
+> **Implementation note.** `_compute_theta_A(material, state, χ̄, M, dξ_rxn, layout, idx_dry)` (`src/Residual/residual.jl`) computes
 > ```julia
 > dχ̄_dt = Σ_i ( Σ_{j ∈ idx_dry} dξ_rxn[j,i] ) * state.volume[i]   # = Σ S_dry,i V_i
 > dχ̄_dt /= M                                                       # M = M_dry
@@ -242,7 +242,7 @@ The $m_{\mathrm{dry},i}$ cancels per cell, leaving a clean volume-weighted sum o
 > dlaw_dχ̄ = ForwardDiff.derivative(law, χ̄)                        # law'(χ̄) by AD
 > return dlaw_dχ̄ * dχ̄_dt / A_ratio
 > ```
-> matching (10.10)–(10.11) term for term. The derivative $\mathrm{law}'(\bar\chi)$ is obtained at runtime by `ForwardDiff.derivative` (line 562), so the user supplies only $\mathrm{law}$, never its derivative, and any smooth law works. **Guards** return $0$ when: the law is identity (`law === nothing`, line 539); the reaction source is unavailable (`dξ_rxn === nothing`, line 540); $M_{\mathrm{dry}}\le\varepsilon$ (line 541); the cell count is zero (line 547); or the area ratio $\mathrm{law}(\bar\chi)\le\varepsilon$ (line 560) — the last prevents the $1/\mathrm{law}(\bar\chi)$ in (10.10) from blowing up as the cross-section vanishes. The mode dispatch `_compute_theta_A_dispatched(...)` returns `0.0` for `NoChi` (line 302) and calls `_compute_theta_A` for `WithChi` (line 313).
+> matching (10.10)–(10.11) term for term. The derivative $\mathrm{law}'(\bar\chi)$ is obtained at runtime by `ForwardDiff.derivative`, so the user supplies only $\mathrm{law}$, never its derivative, and any smooth law works. **Guards** return $0$ when: the law is identity (`law === nothing`); the reaction source is unavailable (`dξ_rxn === nothing`); $M_{\mathrm{dry}}\le\varepsilon$; the cell count is zero; or the area ratio $\mathrm{law}(\bar\chi)\le\varepsilon$ — the last prevents the $1/\mathrm{law}(\bar\chi)$ in (10.10) from blowing up as the cross-section vanishes. The mode dispatch `_compute_theta_A_dispatched(...)` returns `0.0` for `NoChi` and calls `_compute_theta_A` for `WithChi`.
 
 ### 10.6.2 Axial residual strain and double-counting avoidance
 
@@ -265,13 +265,13 @@ w_{i+1} \;=\; w_i + \theta_{L,i}\,\Delta z_i
 \tag{10.13}
 $$
 
-Equivalently $w_{i+1}=\sum_{k=1}^{i}\theta_{L,k}\Delta z_k$, with the bottom node pinned at $w_1=0$ (the substrate is immobile; material recedes downward and the surface moves). The full development of (10.13) — its discrete Geometric Conservation Law, the node-position update $z_i^{\text{new}}=z_i^{\text{old}}+\Delta t\,w_i$, and the generalized GCL with the area-change term — is the subject of §11, *The ALE Framework*. Here we only establish the *constitutive split* (10.12) and why $\theta_A$ must be removed.
+Equivalently $w_{i+1}=\sum_{k=1}^{i}\theta_{L,k}\Delta z_k$, with the bottom node pinned at $w_1=0$ (the substrate is immobile; material recedes downward and the surface moves). The full development of (10.13) — the node positions as state ($dz_i/dt = w_i$), the geometric volume $V_i = A|z_{i+1}-z_i|$ recomputed from them, and the role of the area-change term — is the subject of §11, *The ALE Framework*. Here we only establish the *constitutive split* (10.12) and why $\theta_A$ must be removed.
 
-> **Implementation note.** `_compute_ale_mesh_velocity!` (`src/Residual/residual.jl:355–415`) initializes `w[1] = 0` and `cumulative_velocity = 0` (lines 382–383), then for each cell computes `Δz_cell = state.volume[cell_idx] / state.A_section[]` (line 387, i.e. $\Delta z_i=V_i/A$), evaluates `θ_cell` via `volume_change_rate` (line 401), forms `θ_L = θ_cell - θ_A` (line 407), accumulates `cumulative_velocity += θ_L * Δz_cell` (line 408), and assigns the result to the cell's right node `w[right_node] = cumulative_velocity` (lines 410–411). The radial channel `θ_A` is passed in as the keyword `θ_A` (default `0.0`), so for `NoChi` it is identically zero and (10.13) collapses to the constant-cross-section integral $w_{i+1}=w_i+\theta_i\Delta z_i$. The per-cell $\theta_i$ is also exported through the optional `θ_out` array (line 403), which is later consumed by the dilation correction (§10.7).
+> **Implementation note.** `_compute_ale_mesh_velocity!(w, state, mesh, material, dξ_rxn; θ_out, dξ_dt, θ_A)` (`src/Residual/residual.jl`) takes the per-cell reaction species sources `dξ_rxn` (`NC × n_cells`) as a positional argument, initializes `w[1] = 0`, then for each live cell computes `Δz_cell = state.volume[cell_idx] / state.A_section[]` (i.e. $\Delta z_i=V_i/A$), evaluates `θ_cell` via `volume_change_rate`, forms `θ_L = θ_cell - θ_A`, accumulates `cumulative_velocity += θ_L * Δz_cell`, and assigns the result to the cell's right node; parked ghost nodes take the surface velocity. The radial channel `θ_A` is passed in as the keyword `θ_A` (default `0.0`), so for `NoChi` it is identically zero and (10.13) collapses to the constant-cross-section integral $w_{i+1}=w_i+\theta_i\Delta z_i$. The per-cell $\theta_i$ is also exported through the optional `θ_out` array, which is later consumed by the dilation correction (§10.7). The residual and the `ALEMeshVelocityOperator` of the Jacobian call this one function (and `_compute_theta_A`); the operator first re-evaluates the per-cell reaction sources into its own `dξ_rxn` buffer from the same state.
 
 ### 10.6.3 Sequencing of the area update and the strain integration
 
-The two channels are computed in a specific order each residual evaluation, because $\theta_A$ depends on $\bar\chi$ (through $\mathrm{law}$ and $\mathrm{law}'$) and on the reaction sources, while the axial integration depends on $\theta_A$ and on the *current* geometry (volumes $V_i$ and area $A$). The ALE residual therefore does, in sequence (`src/Residual/residual.jl:104–161`):
+The two channels are computed in a specific order each residual evaluation, because $\theta_A$ depends on $\bar\chi$ (through $\mathrm{law}$ and $\mathrm{law}'$) and on the reaction sources, while the axial integration depends on $\theta_A$ and on the *current* geometry (volumes $V_i$ and area $A$). The ALE residual therefore does, in sequence (`src/Residual/residual.jl`):
 
 1. `populate!` the state cache from $\mathbf{u}$ (T, ξ, z, χ).
 2. `update_cross_section_area!` → returns $(A,\bar\chi,M_{\mathrm{dry}})$ and stores $A$ in `cache.A_section[]`.
@@ -335,7 +335,7 @@ V_i \;=\; \lvert z_{i+1}-z_i\rvert\,A,
 \tag{10.16}
 $$
 
-> **Implementation note.** `update_state_geometry!(cache, mesh, ::ALE)` (`src/Problem/state_cache.jl:336–354`) sets `cache.volume[i] = abs(z_right - z_left) * A` with `A = cache.A_section[]`, and face areas `cache.A_face[f] = A`, cell centers `(z_left + z_right)/2`. All quantities preserve `eltype(cache.z)` so AD passes carry geometry sensitivities (e.g. $\partial V_i/\partial\chi$ via $A$) through into every kernel that reads volumes or face areas. This is the link by which a perturbation in $\chi$ propagates to the energy and species balances: a larger $A$ enlarges every $V_i$ and every face area, rescaling divergences and the cell-integrated masses. The absolute value $\lvert\cdot\rvert$ guards against transient node inversion during a Newton/AD probe.
+> **Implementation note.** `update_state_geometry!(cache, mesh, ::ALE)` (`src/Problem/state_cache.jl`) sets `cache.volume[i] = abs(z_right - z_left) * A` with `A = cache.A_section[]`, and face areas `cache.A_face[f] = A`, cell centers `(z_left + z_right)/2`. All quantities preserve `eltype(cache.z)` so AD passes carry geometry sensitivities (e.g. $\partial V_i/\partial\chi$ via $A$) through into every kernel that reads volumes or face areas. This is the link by which a perturbation in $\chi$ propagates to the energy and species balances: a larger $A$ enlarges every $V_i$ and every face area, rescaling divergences and the cell-integrated masses. The absolute value $\lvert\cdot\rvert$ guards against transient node inversion during a Newton/AD probe.
 
 ### 10.8.2 Mass-loss-rate gauge for variable cross-section
 
@@ -364,7 +364,7 @@ $$
 \tag{10.18}
 $$
 
-with total length $N_{\mathrm{state}} = n(1+N_C) + \delta_{\mathrm{ALE}}\,n_{\mathrm{nodes}} + \delta_{\mathrm{WithChi}}\,n$. The $z$ block is present only in ALE mode and the $\chi$ block only in `WithChi` mode, which requires ALE: the fixed-mesh residual evolves neither $\chi$ nor $A$, so `to_problem_def` rejects a lateral shrinkage law with `use_ale = false`. For example, with $N_C=2$ components, $n=5$ cells (hence $n_{\mathrm{nodes}}=6$), the ALE+WithChi length is $5\cdot 3 + 6 + 5 = 26$, which the test `test/geometry/test_variable_cross_section.jl:14` asserts as `5*(2+3)+1`; the same problem with `lateral=false` (NoChi) has length $5\cdot 3 + 6 = 21$ asserted as `5*3+6` (line 31). The block accessors `temperature_range`, `concentration_range`, `z_range`, `chi_range` (`src/Problem/state_layout.jl`) return empty ranges for absent blocks, and the residual's `_pack_chi_derivative_dispatched!` is a no-op when `chi_range` is empty. The `WithChi`/`NoChi` axis is one of the four bundled `SimulationMode` traits; the detailed layout descriptor `StateLayout` and its role in the structured Jacobian are covered in §13 and §15.1.
+with total length $N_{\mathrm{state}} = n(1+N_C) + \delta_{\mathrm{ALE}}\,n_{\mathrm{nodes}} + \delta_{\mathrm{WithChi}}\,n$. The $z$ block is present only in ALE mode and the $\chi$ block only in `WithChi` mode, which requires ALE: the fixed-mesh residual evolves neither $\chi$ nor $A$, so `to_problem_def` rejects a lateral shrinkage law with `use_ale = false`. For example, with $N_C=2$ components, $n=5$ cells (hence $n_{\mathrm{nodes}}=6$), the ALE+WithChi length is $5\cdot 3 + 6 + 5 = 26$, which the test `test/geometry/test_variable_cross_section.jl` asserts as `5*(2+3)+1`; the same problem with `lateral=false` (NoChi) has length $5\cdot 3 + 6 = 21$ asserted as `5*3+6`. The block accessors `temperature_range`, `concentration_range`, `z_range`, `chi_range` (`src/Problem/state_layout.jl`) return empty ranges for absent blocks, and the residual's `_pack_chi_derivative_dispatched!` is a no-op when `chi_range` is empty. The `WithChi`/`NoChi` axis is one of the four bundled `SimulationMode` traits; the detailed layout descriptor `StateLayout` and its role in the structured Jacobian are covered in §13 and §15.1.
 
 ---
 
@@ -440,7 +440,7 @@ In FDS notation (their $\rho_{s,\alpha}$ for solid component densities, $X_\alph
 
 ## 10.12 Limitations and open issues
 
-The following limitations are documented in the source and KB notes and should guide use and future work:
+The following limitations are documented in the source and should guide use and future work:
 
 1. **Density time-averaging in $\theta$.** Equation (10.2) uses $\rho_j(T)$ evaluated at the *current* cell temperature, and the density-rate term $\xi_j\,d(1/\rho_j)/dt$ is neglected (§10.1.1). For materials with strongly temperature-dependent pure-phase densities and steep thermal gradients this is an approximation; whether an implicit or time-averaged density would materially change $\theta$ has not been quantified.
 
@@ -452,10 +452,10 @@ The following limitations are documented in the source and KB notes and should g
 
 5. **Single-reactant kinetics.** Volume change inherits the single-reactant restriction of the kinetics (§6.5, §6.10): `species_source_terms!` enforces $N_{\mathrm{Rin}}=1$, so $\theta$ and $\chi$ are built from single-reactant sources only. Bimolecular or multi-reactant stoichiometry (e.g. char oxidation consuming both char and O₂) would require extending the source-term machinery before $\theta$/$\chi$ could account for it.
 
-6. **Interaction with adaptive mesh refinement.** The $\chi$ block, the per-cell strain $\theta_i$, and $m_{\mathrm{dry},i}$ must all be carried through any AMR remap (surface-depletion merge, h-refinement). The energy-conserving merge and the mass-exact remap are detailed in §14, *Adaptive Mesh Refinement*; the consistency of $\chi$ accumulation across a park (summing $m_{\mathrm{dry}}$ denominators and weighting the merged $\chi$ by them) is a subtle invariant that the park primitive preserves (§14.3.4).
+6. **Interaction with depletion parking.** The $\chi$ block, the per-cell strain $\theta_i$, and $m_{\mathrm{dry},i}$ must all be carried through a park event. The energy-conserving merge is detailed in §14.3; the consistency of $\chi$ accumulation across a park (summing $m_{\mathrm{dry}}$ denominators and weighting the merged $\chi$ by them) is a subtle invariant that the park primitive preserves (§14.3.4).
 
 7. **Substring-based water-vapor exclusion.** The dry-gas index set relies on a name substring match (§10.3.3), which is fragile to naming. A type-level or explicit-flag mechanism for "this gas is moisture-derived" would be more robust than the current `"H2O"`/`"water"` heuristic.
 
-8. **Axial/radial split is sequential, not unified.** As noted in the ALE KB, the axial (mesh-motion) and radial (cross-section) channels are computed in sequence with $\theta_A$ subtracted from each cell's $\theta_i$; a fully unified space-time ALE that handles both simultaneously (and a higher-order-in-time mesh update than the forward-Euler node advance) remains future work (see §11.10).
+8. **Axial/radial split is sequential, not unified.** The axial (mesh-motion) and radial (cross-section) channels are computed in sequence with $\theta_A$ subtracted from each cell's $\theta_i$; a fully unified space-time ALE that handles both simultaneously remains future work (see §11.9).
 
-9. **Mesh motion is solid motion (solid-Lagrangian ALE).** The volume-change pipeline of this chapter is what *defines* the mesh velocity: $w$ is the prefix sum of the reaction-driven strain rate $\theta$ (§11.3), and every component rides the mesh with no discrete advection operator (§10.7, §11.1.2). Mesh motion decoupled from the solid material velocity — remeshing, smoothing, prescribed motion, AMR-in-ALE — is not representable without adding a species advection operator; see §11.10 item 7 for the full statement of this capability boundary and its consequence for MMS verification (the spatially-uniform-solid rule under `w_override`).
+9. **Mesh motion is solid motion (solid-Lagrangian ALE).** The volume-change pipeline of this chapter is what *defines* the mesh velocity: $w$ is the prefix sum of the reaction-driven strain rate $\theta$ (§11.3), and every component rides the mesh with no discrete advection operator (§10.7, §11.1.2). Mesh motion decoupled from the solid material velocity — remeshing, smoothing, prescribed motion, refinement under ALE — is not representable without adding a species advection operator; see §11.9 item 5 for the full statement of this capability boundary and its consequence for MMS verification (the spatially-uniform-solid rule under `w_override`).
