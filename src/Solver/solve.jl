@@ -660,9 +660,21 @@ function solve(
     # Build the Jacobian spec for this solve's own (def, ws).
     backend = jacobian === nothing ? _default_jacobian_backend(use_ale) : jacobian
     jac_spec = JacobianSpec(backend, def, ws)
-    jac! = let s = jac_spec, def = def, ws = ws
-        (J, u, p, t) -> compute_jacobian!(J, s, u, def, t, ws)
-    end
+    # The Jacobian refreshes the incident flux at its own `t`, as the RHS does.
+    jac! =
+        let s = jac_spec,
+            def = def,
+            ws = ws,
+            radiation_flux = radiation_flux,
+            uses_radiation = uses_radiation
+
+            (J, u, p, t) -> begin
+                if uses_radiation
+                    ws.I_radiation = radiation_flux(t)
+                end
+                compute_jacobian!(J, s, u, def, t, ws)
+            end
+        end
 
     # The union of physics + geometry sparsity is the allocation template.
     # Both are `SparseMatrixCSC{Bool,Int}`; the Float64 working matrix is

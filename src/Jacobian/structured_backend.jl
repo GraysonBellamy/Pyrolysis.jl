@@ -155,7 +155,6 @@ struct StructuredOpsCache{
     layout::LayoutT
     mesh::MeshT
     radiation_model::RadiationModel
-    radiation_intensity::Float64
     radiation_kirchhoff::Bool
     is_ale::Bool
     assembly_profile::Symbol
@@ -221,7 +220,6 @@ function _build_ops_cache(
     is_with_chi = chi_mode(def.mode) isa PyProblem.WithChi
     rad = get_option(def, :radiation_model, NO_RADIATION)
     is_beer_lambert = rad == BEER_LAMBERT
-    radiation_intensity = Float64(get_option(def, :radiation_intensity, 0.0))
     radiation_kirchhoff = get_option(def, :radiation_kirchhoff, true)
     is_reduced = assembly_profile === :ale_reduced
 
@@ -277,7 +275,6 @@ function _build_ops_cache(
         layout,
         mesh,
         rad,
-        radiation_intensity,
         radiation_kirchhoff,
         is_ale,
         assembly_profile,
@@ -453,7 +450,7 @@ function _compute_jacobian!(
             cache.mesh,
             ws.prop_cache,
             cache.material,
-            cache.radiation_intensity,
+            ws.I_radiation,
             cache.radiation_model,
             cache.radiation_kirchhoff,
         )
@@ -475,7 +472,7 @@ function _compute_jacobian!(
             ws.prop_cache,
             cache.material,
             cache.layout,
-            cache.radiation_intensity,
+            ws.I_radiation,
             cache.radiation_model,
             cache.radiation_kirchhoff;
             assembly_profile = cache.assembly_profile,
@@ -563,6 +560,9 @@ function _compute_jacobian!(
     #    against the z subvector. Writes directly into `cache.jac.A` since
     #    the sparsity pattern includes the geometry columns.
     if cache.geom_cache !== nothing
+        # The AD workspace carries its own copy of the incident flux: it takes
+        # the value the caller set on `ws` for this `t`.
+        cache.geom_cache.ws_ad.I_radiation = ws.I_radiation
         contribute_to_jacobian!(cache.jac, GeometryOperator(), u, t, cache.geom_cache, def)
     end
 

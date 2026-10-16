@@ -101,6 +101,9 @@ function _compute_jacobian!(
     t,
     ws,
 )
+    # The Dual-typed workspace carries its own copy of the incident flux: it
+    # takes the value the caller set on `ws` for this `t`.
+    cache.ws_ad.I_radiation = ws.I_radiation
     # The closure dispatches `residual!` on the Dual-typed workspace so leaf
     # kernels see Duals end-to-end. `let` captures concrete bindings.
     f! = let def = def, ws_ad = cache.ws_ad, t = t

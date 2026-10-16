@@ -209,3 +209,34 @@ end
     @test maximum(abs, fd0[rows]) <= 1e-9 * scale0
     @test maximum(abs, report0.J_ref[rows, n]) <= 1e-12 * scale0
 end
+
+@testset "Jacobians read the incident flux set on the workspace ($(case))" for (
+    case,
+    use_ale,
+) in (
+    ("Eulerian", false),
+    ("ALE", true),
+)
+    # The specs are built at the construction flux; the flux then changes, as
+    # `solve` changes it between evaluations for a time-varying flux. Both the
+    # structured backend (geometry block included) and the dense reference
+    # must see the new value.
+    def, ws, u = _build_beer_lambert_case(; use_ale = use_ale)
+    ref_spec = JacobianSpec(DenseAD_ForwardDiff(), def, ws)
+    spec = JacobianSpec(Structured(strategy = DirectSolve()), def, ws)
+    at_50 = verify_jacobian_at(spec, def, ws, u, 0.0; reference_spec = ref_spec)
+    ws.I_radiation = 80e3
+    at_80 = verify_jacobian_at(spec, def, ws, u, 0.0; reference_spec = ref_spec)
+    fresh = verify_jacobian_at(
+        JacobianSpec(Structured(strategy = DirectSolve()), def, ws),
+        def,
+        ws,
+        u,
+        0.0;
+        reference_spec = JacobianSpec(DenseAD_ForwardDiff(), def, ws),
+    )
+    @test at_80.passed
+    @test !isapprox(at_80.J_ref, at_50.J_ref; rtol = 1e-6)
+    @test isapprox(at_80.J_ref, fresh.J_ref; rtol = 1e-12)
+    @test isapprox(Matrix(at_80.J_active), Matrix(fresh.J_active); rtol = 1e-12)
+end
