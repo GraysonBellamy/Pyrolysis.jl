@@ -213,7 +213,7 @@ inside `extras` are mutable, so the per-step extraction code and the
 diagnostics callback write through the NamedTuple in place. Names:
 `gas_generation_rate`, `back_temperature`, `total_mass`, `thickness_history`,
 `surface_mass_flux`, `surface_heat_flux_{net,absorbed,reradiation,convection,
-conduction,transpiration}`, `surface_emissivity`, `surface_conductivity`,
+conduction}`, `surface_emissivity`, `surface_conductivity`,
 `back_heat_flux`, `MLR_gauge`, `cross_section_area_history`, `diagnostics_log`.
 
 # Accessors
@@ -264,7 +264,6 @@ function _empty_extras()
         surface_heat_flux_reradiation = Float64[],
         surface_heat_flux_convection = Float64[],
         surface_heat_flux_conduction = Float64[],
-        surface_heat_flux_transpiration = Float64[],
         surface_blowing_ratio = Float64[],
         surface_pooling_factor = Float64[],
         surface_face_fraction = Float64[],
@@ -327,7 +326,6 @@ function _allocate_extras!(sol::PyrolysisSolution, n_times::Int)
         surface_heat_flux_reradiation = zeros(n_times),
         surface_heat_flux_convection = zeros(n_times),
         surface_heat_flux_conduction = zeros(n_times),
-        surface_heat_flux_transpiration = zeros(n_times),
         surface_blowing_ratio = ones(n_times),
         surface_pooling_factor = ones(n_times),
         surface_face_fraction = zeros(n_times),

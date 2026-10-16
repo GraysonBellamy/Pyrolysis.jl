@@ -67,7 +67,7 @@ end
 
 """
     record_substep!(state::DiagnosticsState, mesh, material;
-                    q_cond_boundary, Q_rxn_total, S_conv_total, S_gen_total,
+                    q_cond_boundary, Q_rxn_total, S_conv_total,
                     J_boundary, A, t)
 
 Update the trackers with one substep's contributions and append a typed row
@@ -82,7 +82,6 @@ function record_substep!(
     q_cond_boundary::Float64,
     Q_rxn_total::Float64,
     S_conv_total::Float64,
-    S_gen_total::Float64,
     J_boundary::Matrix{Float64},
     A::Float64,
     t::Float64,
@@ -104,7 +103,6 @@ function record_substep!(
         q_cond_boundary = q_cond_boundary,
         Q_rxn_total = Q_rxn_total,
         S_conv_total = S_conv_total,
-        S_gen_total = S_gen_total,
         A = A,
         dt = dt,
     )

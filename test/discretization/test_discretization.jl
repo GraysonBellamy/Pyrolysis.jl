@@ -217,11 +217,15 @@ using Pyrolysis.Problem: StateCache
         end
     end
 
-    @testset "Boundary transpiration face orientation" begin
+    @testset "Boundary gas-flux face orientation" begin
         solid = SolidComponent(:solid, ρ = 1000.0, c = 1000.0, k = 0.2, ε = 0.9)
         gas = GaseousComponent(:gas, M = 0.044, c = 1500.0, k = 0.03, λ = 1e-5)
         mat = Material(name = :sign_test, components = (solid, gas))
 
+        # `J_gas` is stored in the +z convention: escaping gas is +J at the top
+        # face and −J at the bottom face. The blowing model sees the outward
+        # flux, so outflow suppresses the convective coefficient (χ < 1) and
+        # inflow enhances it (χ > 1) at either face.
         function boundary_state_for(; boundary::Symbol, J_face::Float64)
             mesh = create_uniform_mesh(
                 0.001,
@@ -234,8 +238,11 @@ using Pyrolysis.Problem: StateCache
             prop_cache = PropertyCache(mesh)
             update_properties!(prop_cache, state, mesh, mat)
 
-            top_bc = boundary === :top ? HeatFluxBC(30000.0) : AdiabaticBC()
-            bottom_bc = boundary === :bottom ? HeatFluxBC(30000.0) : AdiabaticBC()
+            exposed =
+                HeatFluxBC(30000.0) +
+                ConvectiveBC(h = 20.0, T_inf = 300.0, blowing = CouetteFilm())
+            top_bc = boundary === :top ? exposed : AdiabaticBC()
+            bottom_bc = boundary === :bottom ? exposed : AdiabaticBC()
             bc_set = BoundaryConditionSet(
                 thermal = (top = top_bc, bottom = bottom_bc),
                 mass = (top = ImpermeableBC(), bottom = ImpermeableBC()),
@@ -259,41 +266,23 @@ using Pyrolysis.Problem: StateCache
                 0.0,
                 mesh.boundary_faces[1],
                 mesh.boundary_faces[2],
-                SURFACE_ABSORPTION;
-                use_transpiration_bc = true,
+                SURFACE_ABSORPTION,
             )
 
             boundary_id = boundary === :top ? 1 : 2
-            return mesh.boundary_states[boundary_id], q[face]
+            return mesh.boundary_states[boundary_id]
         end
 
-        top_no_blowing, top_q0 = boundary_state_for(boundary = :top, J_face = 0.0)
-        top_outward, top_qout = boundary_state_for(boundary = :top, J_face = 0.04)
-        top_inward, top_qin = boundary_state_for(boundary = :top, J_face = -0.04)
-
-        # Outflow carries sensible enthalpy out of the slab → lower T_s and
-        # reduced conduction. Inflow is UPWINDED to the donor (ambient)
-        # temperature, so the entering gas crosses the face at T_∞ carrying
-        # Δh_g(T_∞,T_∞)=0 — it contributes nothing to the surface balance
-        # (it is heated to T_s volumetrically inside). Hence inward blowing
-        # leaves T_s and q_conducted equal to the no-blowing case.
-        @test top_outward.T_surface < top_no_blowing.T_surface
-        @test top_outward.q_conducted < top_no_blowing.q_conducted
-        @test top_inward.T_surface ≈ top_no_blowing.T_surface
-        @test top_inward.q_conducted ≈ top_no_blowing.q_conducted
-        @test top_qout > top_q0  # top face stores -q_conducted in +z convention
-        @test top_qin ≈ top_q0
-
-        bottom_no_blowing, bottom_q0 = boundary_state_for(boundary = :bottom, J_face = 0.0)
-        bottom_outward, bottom_qout = boundary_state_for(boundary = :bottom, J_face = -0.04)
-        bottom_inward, bottom_qin = boundary_state_for(boundary = :bottom, J_face = 0.04)
-
-        @test bottom_outward.T_surface < bottom_no_blowing.T_surface
-        @test bottom_outward.q_conducted < bottom_no_blowing.q_conducted
-        @test bottom_inward.T_surface ≈ bottom_no_blowing.T_surface
-        @test bottom_inward.q_conducted ≈ bottom_no_blowing.q_conducted
-        @test bottom_qout < bottom_q0  # bottom face stores +q_conducted
-        @test bottom_qin ≈ bottom_q0
+        for (boundary, σ) in ((:top, 1.0), (:bottom, -1.0))
+            none = boundary_state_for(boundary = boundary, J_face = 0.0)
+            outflow = boundary_state_for(boundary = boundary, J_face = σ * 0.01)
+            inflow = boundary_state_for(boundary = boundary, J_face = -σ * 0.01)
+            @test none.blowing_ratio == 1.0
+            @test outflow.blowing_ratio < 1.0
+            @test inflow.blowing_ratio > 1.0
+            # Suppressed convective cooling → hotter surface, and vice versa.
+            @test outflow.T_surface > none.T_surface > inflow.T_surface
+        end
     end
 
     @testset "MMS Verification - Conduction" begin

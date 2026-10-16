@@ -16,8 +16,6 @@ Used to properly resolve the surface temperature that satisfies energy balance:
 - `T_surface::Float64`: Solved surface temperature [K]
 - `q_applied::Float64`: Heat flux from boundary condition [W/m²]
 - `q_conducted::Float64`: Heat flux conducted into material [W/m²]
-- `q_transpired::Float64`: Surface transpiration enthalpy flux `Σ_g ṁ_g·Δh_g(T_s,T_∞)`
-  at the converged `T_s` [W/m²]. Zero under the default (transpiration-off) convention.
 - `T_cell::Float64`: Adjacent cell temperature [K]
 - `k_eff::Float64`: Effective conductivity at boundary [W/(m·K)]
 - `Δz_half::Float64`: Distance from boundary to cell center [m]
@@ -37,7 +35,6 @@ mutable struct BoundaryState
     T_surface::Float64
     q_applied::Float64
     q_conducted::Float64
-    q_transpired::Float64
     T_cell::Float64
     k_eff::Float64
     Δz_half::Float64
@@ -61,7 +58,6 @@ function BoundaryState(
     T_surface::Real,
     q_applied::Real,
     q_conducted::Real,
-    q_transpired::Real,
     T_cell::Real,
     k_eff::Real,
     Δz_half::Real,
@@ -72,7 +68,6 @@ function BoundaryState(
         T_surface,
         q_applied,
         q_conducted,
-        q_transpired,
         T_cell,
         k_eff,
         Δz_half,
@@ -87,7 +82,7 @@ function BoundaryState(
 end
 
 # Default constructor
-BoundaryState() = BoundaryState(300.0, 0.0, 0.0, 0.0, 300.0, 0.2, 1e-5, false, 0)
+BoundaryState() = BoundaryState(300.0, 0.0, 0.0, 300.0, 0.2, 1e-5, false, 0)
 
 # ============================================================================# 1D Mesh
 # ============================================================================

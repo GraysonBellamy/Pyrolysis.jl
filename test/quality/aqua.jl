@@ -17,11 +17,9 @@ using Test
 # no NEW unbound-arg method appears. Identified by function-name symbol.
 const ALLOWED_UNBOUND = Set([
     :_gt_face_fluxes,
-    :_gt_S_gen_unrolled,
     :_gt_S_conv_unrolled,
     :_gt_species_div_unrolled!,
     :_dt_face_fluxes,
-    :_dt_S_gen_unrolled,
     :_dt_S_conv_unrolled,
     :_dt_species_div_unrolled!,
     :_bc_mass_contribution!,

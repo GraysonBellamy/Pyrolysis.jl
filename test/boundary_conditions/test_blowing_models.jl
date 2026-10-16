@@ -428,7 +428,6 @@ const REFERENCE = (
         k_eff, Δz_half, t, ε = 0.2, 5e-4, 0.0, 0.9
         function _Ts(J::Real)
             st = BoundaryState()
-            Jz = (zero(J), zero(J))
             r = solve_boundary_temperature!(
                 st,
                 800.0,
@@ -436,11 +435,9 @@ const REFERENCE = (
                 Δz_half,
                 bc,
                 mat,
-                Jz,
-                T_inf,
+                (zero(J), J),
                 t,
-                ε;
-                J_blowing = (zero(J), J),
+                ε,
             )
             return r.T_s
         end

@@ -84,7 +84,7 @@ end
 # the temperature choice is second-order on an O(1) correction (film vs
 # surface differs by ~cp′·(T_s−T_∞)/2, well inside the ±30% uncertainty of
 # h₀ itself) and keeps the residual a pure function of state. Compile-time
-# unrolled, mirroring `_transpiration_flux_and_derivative`.
+# unrolled, so the `is_gas` predicate is eliminated at codegen.
 @generated function _blowing_conductance(
     material::Material{NC},
     ṁ::NTuple{NC,<:Real},

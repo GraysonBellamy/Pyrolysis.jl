@@ -5,10 +5,6 @@ The residual specializes on a single `SimulationMode{Mesh,Rad,Trans,Chi}`
 type parameter rather than fanning out across orthogonal axes. Adding a
 new orthogonal axis (e.g. a future combustion model) extends the bundled
 type, not every signature.
-
-**`energy_form` is a runtime field, not a trait**: it adds one additive
-term to the surface energy balance and one to the cell residual; a
-runtime `if` is cheaper than a separate compiled method.
 """
 
 # ============================================================================

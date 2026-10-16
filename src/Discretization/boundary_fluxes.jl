@@ -396,7 +396,7 @@ Returns a NamedTuple with:
 
 Convention: `net` is the **applied** face flux — per component it matches
 `evaluate_bc_flux_and_derivative`, so the total satisfies the Newton balance
-`net = q_cond + q_transp` at convergence. Under `BEER_LAMBERT` (and the
+`net = q_cond` at convergence. Under `BEER_LAMBERT` (and the
 experimental P1) the incident radiation enters the domain *volumetrically*,
 not through the face, so a `RadiativeFluxBC` contributes zero `absorbed` and
 zero `net` here; the volumetric deposit is reported separately as

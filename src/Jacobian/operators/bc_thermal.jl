@@ -6,11 +6,8 @@ Dirichlet BCs the surface temperature `T_s` is the solution of the surface
 energy balance:
 
 ```
-q_BC(T_s) = k_eff·(T_s − T_cell)/Δz_half + Σ_g ṁ_g · Δh_g(T_s, T_∞)
+q_BC(T_s) = k_eff·(T_s − T_cell)/Δz_half
 ```
-
-The transpiration term is present only in the opt-in path (off by default);
-the default S_conv-only convention zeroes `ṁ_g` here.
 
 The existing `solve_boundary_temperature!` is **already Dual-aware** (see
 [`boundary_temperature.jl`](../Discretization/boundary_temperature.jl)),
@@ -21,31 +18,19 @@ ride the derivative through `q_conducted`."
 
 Cell-local on the boundary cell: `(cells = 0:0,)`. Geometry (`Δz_half`,
 `A_face`, `V`) is captured as Float64 constants in the AD closure. The
-outward mass flux fed to the surface Newton's *transpiration* argument is
-**hard-zeroed**, mirroring the residual: `to_problem_def` rejects
-`use_transpiration_bc = true` at construction, and `apply_thermal_bc_flux!`
-zeroes `J_boundary_outward` whenever transpiration is off — so the
-residual's surface energy balance never sees ṁ_g in the enthalpy term, and
-neither must this operator. (Rebuilding ṁ_g from the mass BC here — as an
-earlier revision did — makes the Jacobian differentiate a *different*
-surface balance than the residual applies whenever a permeable mass BC is
-configured.) The boundary mass flux's effect on the energy row flows
-through the volumetric `S_conv`/`S_gen` instead, owned by
-[`BCMassOperator`](@ref).
+boundary mass flux's effect on the energy row flows through the volumetric
+`S_conv`, owned by [`BCConvectionOperator`](@ref).
 
 # Blowing correction
 
 The residual's surface Newton applies every `ConvectiveBC`'s blowing model
-(`bc.blowing`, see `blowing_state`) to the **true** boundary mass flux
-(`J_gas[:, f]`). This operator
-then rebuilds that flux from the stencil state via the shared
-[`_bc_boundary_face_fluxes`](@ref)
-kernel (film law + Darcy venting when `darcy_active`, the same kernel the
-residual's mass-BC pass applies) and feeds it to the Newton's `J_blowing`,
-so the `∂(h·χ)/∂(T_b, ξ_b)` chain lands exactly. The transpiration argument
-stays hard-zeroed — blowing and transpiration are independent terms. Under
-ALE the face distance `d_to_face` is a Float64 constant in the closure,
-consistent with this operator's existing frozen-geometry convention (the
+(`bc.blowing`, see `blowing_state`) to the boundary mass flux
+(`J_gas[:, f]`). This operator rebuilds that flux from the stencil state via
+the shared [`_bc_boundary_face_fluxes`](@ref) kernel (film law + Darcy
+venting when `darcy_active`, the same kernel the residual's mass-BC pass
+applies) and feeds it to the Newton, so the `∂(h·χ)/∂(T_b, ξ_b)` chain lands
+exactly. Under ALE the face distance `d_to_face` is a Float64 constant in the
+closure, consistent with this operator's frozen-geometry convention (the
 omitted z-channel degrades only Newton convergence, never the residual).
 
 # Sign convention
@@ -69,9 +54,8 @@ out the orientation handling that `_apply_thermal_bc_static!` does on
 """
 
 using ForwardDiff
-using ..Materials: Material, T_REF
+using ..Materials: Material
 using ..Materials: evaluate_param
-using ..BoundaryConditions: ambient_temperature
 using ..Materials: AbstractThermalBC, RadiationModel, SURFACE_ABSORPTION
 using ..BoundaryConditions:
     DirichletThermalBC, BoundaryConditionSet, get_thermal_bc, get_mass_bc
@@ -133,7 +117,6 @@ function _bc_thermal_contribution(
     V_cell::Real,
     Δz_half::Real,
     t::Real,
-    T_ref::Real,
     radiation_model::RadiationModel,
     mass_bc = nothing,
     d_to_face::Real = Δz_half,
@@ -148,16 +131,7 @@ function _bc_thermal_contribution(
     ε_eff = effective_emissivity(ξ_cell, T_cell, material)
     a_eff = effective_absorptivity(ξ_cell, T_cell, material)
 
-    # Outward gas flux at this boundary face — hard-zeroed, mirroring the
-    # residual: transpiration is rejected at construction
-    # (`to_problem_def(use_transpiration_bc = true)` throws) and
-    # `apply_thermal_bc_flux!` zeroes `J_boundary_outward` when it is off,
-    # so the residual's surface Newton never sees ṁ_g in the enthalpy term.
-    # The Jacobian must differentiate the same surface balance the residual
-    # applies.
-    J_boundary_outward = ntuple(_ -> zero(Tu), Val(NC))
-
-    # Blowing reads the TRUE boundary mass flux: rebuild it from the stencil
+    # Blowing reads the boundary mass flux: rebuild it from the stencil
     # state with the same kernel the residual's mass-BC pass applies.
     # `_bc_boundary_face_fluxes` returns F positive INTO the domain, so the
     # outward flux is −F at either face.
@@ -171,7 +145,7 @@ function _bc_thermal_contribution(
         tag,
         darcy_active,
     )
-    J_blowing = ntuple(j -> -F[j], Val(NC))
+    J_outward = ntuple(j -> -F[j], Val(NC))
 
     # Solve for T_s (Dirichlet branch is closed-form; non-Dirichlet uses
     # the Newton solver, which is already Dual-aware).
@@ -183,7 +157,6 @@ function _bc_thermal_contribution(
         # for storage but the returned tuple carries Tu).
         state = BoundaryState(
             Float64(ForwardDiff.value(T_cell)),
-            0.0,
             0.0,
             0.0,
             Float64(ForwardDiff.value(T_cell)),
@@ -199,13 +172,11 @@ function _bc_thermal_contribution(
             Δz_half,
             thermal_bc,
             material,
-            J_boundary_outward,
-            T_ref,
+            J_outward,
             t,
             ε_eff;
             a_eff = a_eff,
             radiation_model = radiation_model,
-            J_blowing = J_blowing,
         )
         result.q_conducted
     end
@@ -268,7 +239,6 @@ function apply!(
         mass_bc =
             boundary_id == 1 ? get_mass_bc(bc_set, Val(:top)) :
             get_mass_bc(bc_set, Val(:bottom))
-        T_ref = ambient_temperature(thermal_bc, t, Float64(T_REF))
 
         T_cell = state.T[geom.cell_id]
         ξ_cell = ntuple(j -> state.ξ[j, geom.cell_id], Val(NC))
@@ -282,7 +252,6 @@ function apply!(
             geom.V_cell,
             geom.Δz_half,
             t,
-            T_ref,
             radiation_model,
             mass_bc,
             geom.d_to_face,
@@ -408,15 +377,12 @@ function _bct_assemble_boundary!(
     radiation_model::RadiationModel,
     darcy_active::Bool,
 ) where {NC}
-    T_ref = ambient_temperature(thermal_bc, t, Float64(T_REF))
-
     f! =
         let geom = geom,
             thermal_bc = thermal_bc,
             mass_bc = mass_bc,
             material = material,
             t = t,
-            T_ref = T_ref,
             radiation_model = radiation_model,
             val_nc = Val(NC),
             tag = tag,
@@ -433,7 +399,6 @@ function _bct_assemble_boundary!(
                     geom.V_cell,
                     geom.Δz_half,
                     t,
-                    T_ref,
                     radiation_model,
                     mass_bc,
                     geom.d_to_face,

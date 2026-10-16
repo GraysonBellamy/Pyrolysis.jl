@@ -201,7 +201,6 @@ using Pyrolysis.Diagnostics:
             @test tracker.cumulative_boundary_conduction == 0.0
             @test tracker.cumulative_reaction_heat == 0.0
             @test tracker.cumulative_advection_sink == 0.0
-            @test tracker.cumulative_generation_sink == 0.0
             @test tracker.last_time == 0.0
 
             @test compute_sensible_energy(mesh, material) ≈ expected rtol=0.01
@@ -240,14 +239,12 @@ using Pyrolysis.Diagnostics:
             q_cond_boundary = 5000.0   # conducted into slab
             Q_rxn_total = -1000.0  # endothermic reaction heat
             S_conv_total = -200.0   # gas advection sink
-            S_gen_total = 0.0      # :standard energy form
 
             update_energy_tracker!(
                 tracker;
                 q_cond_boundary = q_cond_boundary,
                 Q_rxn_total = Q_rxn_total,
                 S_conv_total = S_conv_total,
-                S_gen_total = S_gen_total,
                 A = A,
                 dt = dt,
             )
@@ -255,7 +252,6 @@ using Pyrolysis.Diagnostics:
             @test tracker.cumulative_boundary_conduction ≈ q_cond_boundary * A * dt
             @test tracker.cumulative_reaction_heat ≈ Q_rxn_total * dt
             @test tracker.cumulative_advection_sink ≈ S_conv_total * dt
-            @test tracker.cumulative_generation_sink ≈ S_gen_total * dt
             @test tracker.last_time ≈ dt
 
             # Multiple substeps accumulate linearly.
@@ -265,7 +261,6 @@ using Pyrolysis.Diagnostics:
                     q_cond_boundary = q_cond_boundary,
                     Q_rxn_total = Q_rxn_total,
                     S_conv_total = S_conv_total,
-                    S_gen_total = S_gen_total,
                     A = A,
                     dt = dt,
                 )
@@ -297,7 +292,6 @@ using Pyrolysis.Diagnostics:
                     q_cond_boundary = 0.0,
                     Q_rxn_total = 0.0,
                     S_conv_total = 0.0,
-                    S_gen_total = 0.0,
                     J_boundary = J_boundary,
                     A = mesh.cross_section_area,
                     t = t,
@@ -345,7 +339,6 @@ using Pyrolysis.Diagnostics:
                     q_cond_boundary = q_cond_boundary,
                     Q_rxn_total = 0.0,
                     S_conv_total = 0.0,
-                    S_gen_total = 0.0,
                     A = A,
                     dt = dt,
                 )

@@ -117,20 +117,6 @@ using Pyrolysis.Solver: get_profile, get_cell_positions
             @test occursin("Components:", str_full)
         end
 
-        @testset "Generation-sink datum warning" begin
-            problem = PyrolysisProblem(mesh, material, bc_set, (0.0, 10.0))
-
-            # :with_generation_sink is consistent only with T_ref-datum
-            # reaction heats; selecting it must warn about the datum
-            # requirement (DSC-style heats double-count gas sensible enthalpy)
-            @test_logs (:warn, r"T_ref.*datum"s) match_mode = :any Pyrolysis.Problem.to_problem_def(
-                problem;
-                energy_form = :with_generation_sink,
-            )
-
-            # The default :standard form stays silent
-            @test_logs Pyrolysis.Problem.to_problem_def(problem)
-        end
     end
 
     # ========================================================================

@@ -330,8 +330,8 @@ end
 
 function _validate_gas_properties(c::GaseousComponent)
     n = c.name
-    # A gas with c = 0 carries no sensible enthalpy (S_conv and transpiration
-    # vanish); the matrix heat capacity floor keeps the energy equation
+    # A gas with c = 0 carries no sensible enthalpy (S_conv vanishes); the
+    # matrix heat capacity floor keeps the energy equation
     # well posed, so zero is admissible here where it is not for a solid.
     _validate_property_law(
         c.heat_capacity,
@@ -719,44 +719,6 @@ liquids (which do not carry a molar-mass field).
 """
 @inline molar_mass(comp::GaseousComponent) = comp.molar_mass
 @inline molar_mass(::AbstractComponent) = 0.0
-
-# ============================================================================
-# Sensible-Enthalpy Difference (midpoint rule, AD-clean)
-# ============================================================================
-
-"""
-	delta_enthalpy(comp::AbstractComponent, T_hi, T_lo) -> Real
-
-Sensible-enthalpy difference of a single component between two temperatures:
-
-```
-Δh(T_hi, T_lo) = ∫_{T_lo}^{T_hi} cp(τ) dτ ≈ cp((T_hi + T_lo)/2) · (T_hi − T_lo)
-```
-
-Implemented as the **midpoint rule** — second-order accurate in cp variation,
-one cp evaluation per call. This matches the single-point cell-centered cp
-evaluation used by the volumetric advection source `−Σ cp_g(T_i) J_g · ∇T`,
-so the surface transpiration BC is consistent in discretization order with the
-bulk gas-energy transport.
-
-Quadrature error: the single-interval midpoint rule carries `−cp″(T_m)·ΔT³/24`
-— ≈ −0.8 % for a typically curved char/gas cp over a 300 → 800 K span, and
-≈ −2.5 % only for strongly curved cp. Accepted by design: a composite rule
-would buy < 1 % at N× the cp-evaluation cost in Jacobian-hot paths.
-
-AD-clean: `T_hi` and `T_lo` may be `ForwardDiff.Dual`; the cp callable receives
-the live mean temperature and returns a Dual whose partial flows through
-`(T_hi − T_lo)` end-to-end. The derivative of the *true* integral w.r.t. `T_hi`
-is `cp(T_hi)`, but the derivative of *this midpoint-rule expression* is
-`cp(T_m) + ½(T_hi − T_lo)cp′(T_m)` with `T_m = (T_hi+T_lo)/2` — they agree only
-to first order. ForwardDiff differentiates the quadrature actually evaluated
-here, so a Dual passed through this function yields the midpoint-rule derivative
-(consistent with the value it returns), not the exact `cp(T_hi)`.
-"""
-@inline function delta_enthalpy(comp::AbstractComponent, T_hi, T_lo)
-    T_mean = (T_hi + T_lo) * 0.5
-    return comp.heat_capacity(T_mean) * (T_hi - T_lo)
-end
 
 # ============================================================================
 # Radiation Property Queries

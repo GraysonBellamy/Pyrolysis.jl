@@ -22,11 +22,6 @@ AD closure from cell-local `(P, κ, μ)`:
 - `mob_face` = distance-weighted harmonic mean of `κ/μ`,
 - `v_g_face = -mob_face · (P_R − P_L)/d_LR`.
 
-The optional generation-sink source `S_gen = −Σ_g Δh_g(T_C, T_ref) · (∇·J_g)`
-(with `Δh_g = cp_g(T_m)·(T_C − T_ref)`, `T_m = (T_C+T_ref)/2`; true ∫cp midpoint
-rule, matching `Physics.compute_gas_generation_sink!`) is included via the
-`T_ref` keyword on `apply_cell!` and threaded through `contribute_to_jacobian!`;
-sentinel `T_ref = NaN` disables the term.
 Species-mass scaling is **deferred** to a later refinement.
 
 # Stencil
@@ -43,9 +38,8 @@ Boundary-face fluxes are zeroed (`has_left` / `has_right` gates), matching
 [`GasTransportOperator`](@ref), and boundary cells contribute **no S_conv**
 here — the whole boundary-cell S_conv energy row is owned by
 [`BCConvectionOperator`](@ref). The boundary mass flux — the diffusive film
-law AND the pressure-BC advective venting, on the species rows and the
-energy row's `S_gen` boundary-face slice — belongs to
-[`BCMassOperator`](@ref).
+law AND the pressure-BC advective venting, on the species rows — belongs
+to [`BCMassOperator`](@ref).
 
 # Sharp-feature smoothness
 
@@ -61,7 +55,7 @@ energy row's `S_gen` boundary-face slice — belongs to
 """
 
 using ForwardDiff
-using ..Materials: Material, is_gas, delta_enthalpy
+using ..Materials: Material, is_gas
 using ..Properties:
     effective_gas_transfer,
     effective_heat_capacity,
@@ -242,7 +236,6 @@ function apply_cell!(
     has_left::Bool,
     has_right::Bool,
     material::Material{NC},
-    T_ref::Real = NaN,
 ) where {NC,Tu}
 
     # Cell-local properties at C.
@@ -290,7 +283,7 @@ function apply_cell!(
     # `Physics.compute_gas_convective_source!`. At boundary cells the WHOLE
     # S_conv energy row — boundary-face flux × T_s-aware gradient — is owned
     # by `BCConvectionOperator`, so this operator contributes no S_conv there
-    # (dTdx = 0 zeroes it; the ξ-rows and the linear S_gen slice stay here).
+    # (dTdx = 0 zeroes it; the ξ-rows stay here).
     dTdx = if has_left && has_right
         opposite_distance_gradient(T_L, T_C, T_R, d_LC, d_CR)
     else
@@ -299,45 +292,9 @@ function apply_cell!(
 
     S_conv = _dt_S_conv_unrolled(T_C, dTdx, J_left, J_right, material)
 
-    # S_gen,C = -Σ_{g: is_gas} Δh_g(T_C, T_ref) · div_J[g]
-    #             (only when energy_form === :with_generation_sink; sentinel
-    #              T_ref = NaN disables the term).
-    S_gen = if isnan(T_ref)
-        zero(promote_type(typeof(T_C), Tu))
-    else
-        _dt_S_gen_unrolled(T_C, J_left, J_right, A_left, A_right, V_C, T_ref, material)
-    end
-
-    @inbounds out[1] = (S_conv + S_gen) / ρcp
+    @inbounds out[1] = S_conv / ρcp
     _dt_species_div_unrolled!(out, J_left, J_right, A_left, A_right, V_C, material)
     return nothing
-end
-
-# S_gen,C = -Σ_{g: is_gas} Δh_g(T_C, T_ref) · div_J[g]
-# (matches Physics.compute_gas_generation_sink! — true ∫cp via delta_enthalpy)
-@generated function _dt_S_gen_unrolled(
-    T_C::Real,
-    J_left::NTuple{NC,Tu},
-    J_right::NTuple{NC,Tu},
-    A_left::Real,
-    A_right::Real,
-    V_C::Real,
-    T_ref::Real,
-    material::Material{NC},
-) where {NC,Tu}
-    exprs = Expr[]
-    push!(exprs, :(s = zero(promote_type(typeof(T_C), Tu))))
-    for j = 1:NC
-        push!(exprs, quote
-            @inbounds if is_gas(material.components[$j])
-                div_J = (J_right[$j] * A_right - J_left[$j] * A_left) / V_C
-                cmp = material.components[$j]
-                s += delta_enthalpy(cmp, T_C, T_ref) * div_J
-            end
-        end)
-    end
-    push!(exprs, :(return -s))
-    return Expr(:block, exprs...)
 end
 
 @generated function _dt_S_conv_unrolled(
@@ -700,14 +657,12 @@ function _contribute_to_jacobian_analytical!(
     mesh,
     material::Material{NC},
     layout,
-    T_ref::Real = NaN,
 ) where {NC}
 
     n_cells = layout.n_cells
     A = jac.A
     smap = jac.smap
     is_gas_t = _gt_is_gas_tuple(material.components, Val(NC))
-    is_gen = !isnan(T_ref)
 
     @inbounds for i = 1:mesh.n_active_cells
         geom = _dt_geometry(state, mesh, i)
@@ -745,18 +700,11 @@ function _contribute_to_jacobian_analytical!(
         inv_ρcp_sq = inv_ρcp * inv_ρcp
 
         (cp_t, dcp_dT_t) = _gt_cp_per_component(T_C, material.components, Val(NC))
-        # S_gen uses the midpoint enthalpy Δh_g = cp_g(T_m)·(T_C−T_ref),
-        # T_m = (T_C+T_ref)/2 — cp evaluated at T_m (S_conv keeps cp at T_C). The
-        # explicit ∂Δh_g/∂T_C cp-chain factor is ½·cp_g′(T_m).
-        (cpm_t, dcpm_dT_t) =
-            is_gen ?
-            _gt_cp_per_component(0.5 * (T_C + T_ref), material.components, Val(NC)) :
-            (cp_t, dcp_dT_t)
 
         # dTdx and its (T_L, T_C, T_R) coefficients — same shape as
         # gas_transport: boundary cells have dTdx ≡ 0 here (their S_conv
         # energy row is owned whole by `BCConvectionOperator`), zeroing every
-        # S_conv accumulator while the ξ-rows and S_gen pieces still assemble.
+        # S_conv accumulator while the ξ-rows still assemble.
         if has_left && has_right
             T_L = u[iL]
             T_R = u[iR]
@@ -793,10 +741,6 @@ function _contribute_to_jacobian_analytical!(
         end
         ΣcgJavg = 0.0
         Σdcg_dT_Javg = 0.0
-        # S_gen accumulators (used only when is_gen).
-        ΣcgDivJ = 0.0
-        ΣdcgDT_DivJ = 0.0
-        dT_gen = is_gen ? (T_C - T_ref) : 0.0
 
         # === Left face (between iL and i) ===
         if has_left
@@ -929,19 +873,8 @@ function _contribute_to_jacobian_analytical!(
                 ΣcgJavg += cp_g * (J / 2)
                 Σdcg_dT_Javg += dcp_g_dT * (J / 2)
 
-                # S_gen contribution: L-face contributes -J_L · A_L / V_C to
-                # div_J_g. Stencil-derivative factor (S_conv + S_gen combined):
-                # cp_g · (-0.5·dTdx + dT_gen·coef_AV).
+                # Stencil-derivative factor of S_conv for this face.
                 factor_T = -cp_g * 0.5 * dTdx
-                if is_gen
-                    # S_gen uses Δh_g = cp_g(T_m)·(T_C−T_ref): cp at T_m here,
-                    # and the explicit cp-chain factor is ½·cp_g′(T_m).
-                    cp_g_m = cpm_t[g]
-                    dcp_g_m = dcpm_dT_t[g]
-                    factor_T += dT_gen * cp_g_m * coef_AV
-                    ΣcgDivJ += cp_g_m * (-J * coef_AV)
-                    ΣdcgDT_DivJ += 0.5 * dcp_g_m * (-J * coef_AV)
-                end
 
                 dS_dT_L += factor_T * dJ_dT_L_full
                 dS_dT_C += factor_T * dJ_dT_C_full
@@ -1100,19 +1033,8 @@ function _contribute_to_jacobian_analytical!(
                 ΣcgJavg += cp_g * (J / 2)
                 Σdcg_dT_Javg += dcp_g_dT * (J / 2)
 
-                # S_gen contribution: R-face contributes +J_R · A_R / V_C to
-                # div_J_g. Stencil-derivative factor (S_conv + S_gen combined):
-                # cp_g · (-0.5·dTdx − dT_gen·coef_AV).
+                # Stencil-derivative factor of S_conv for this face.
                 factor_T = -cp_g * 0.5 * dTdx
-                if is_gen
-                    # S_gen uses Δh_g = cp_g(T_m)·(T_C−T_ref): cp at T_m here,
-                    # and the explicit cp-chain factor is ½·cp_g′(T_m).
-                    cp_g_m = cpm_t[g]
-                    dcp_g_m = dcpm_dT_t[g]
-                    factor_T -= dT_gen * cp_g_m * coef_AV
-                    ΣcgDivJ += cp_g_m * (J * coef_AV)
-                    ΣdcgDT_DivJ += 0.5 * dcp_g_m * (J * coef_AV)
-                end
 
                 dS_dT_C += factor_T * dJ_dT_C_full
                 dS_dT_R += factor_T * dJ_dT_R_full
@@ -1149,24 +1071,15 @@ function _contribute_to_jacobian_analytical!(
 
         # === Compose T-row Jacobian ===
         S_conv = -ΣcgJavg * dTdx
-        S_gen = is_gen ? -dT_gen * ΣcgDivJ : 0.0
-        S_total = S_conv + S_gen
 
         dS_dT_L += -ΣcgJavg * ddTdx_dT_L
         dS_dT_C += -ΣcgJavg * ddTdx_dT_C - Σdcg_dT_Javg * dTdx
         dS_dT_R += -ΣcgJavg * ddTdx_dT_R
 
-        # T_C explicit S_gen terms: ∂Δh_g/∂T_C = cp_g(T_m) + ½(T_C−T_ref)cp_g′(T_m).
-        # First piece via ΣcgDivJ (= Σ cp_g(T_m)·div_J), second via ΣdcgDT_DivJ
-        # (= Σ ½·cp_g′(T_m)·div_J), scaled by dT_gen = (T_C−T_ref).
-        if is_gen
-            dS_dT_C += -ΣcgDivJ - dT_gen * ΣdcgDT_DivJ
-        end
-
         if has_left
             fast_sparse_add!(A, smap, i, iL, dS_dT_L * inv_ρcp)
         end
-        fast_sparse_add!(A, smap, i, i, dS_dT_C * inv_ρcp - S_total * dρcp_dT * inv_ρcp_sq)
+        fast_sparse_add!(A, smap, i, i, dS_dT_C * inv_ρcp - S_conv * dρcp_dT * inv_ρcp_sq)
         if has_right
             fast_sparse_add!(A, smap, i, iR, dS_dT_R * inv_ρcp)
         end
@@ -1180,7 +1093,7 @@ function _contribute_to_jacobian_analytical!(
                 smap,
                 i,
                 ξ_off + i,
-                dS_dξ_C_buf[j] * inv_ρcp - S_total * dρcp_dξ[j] * inv_ρcp_sq,
+                dS_dξ_C_buf[j] * inv_ρcp - S_conv * dρcp_dξ[j] * inv_ρcp_sq,
             )
             if has_right
                 fast_sparse_add!(A, smap, i, ξ_off + iR, dS_dξ_R_buf[j] * inv_ρcp)
@@ -1205,7 +1118,6 @@ function contribute_to_jacobian!(
     mesh,
     material::Material{NC},
     layout,
-    T_ref::Real = NaN,
 ) where {NC}
     return _contribute_to_jacobian_analytical!(
         jac,
@@ -1218,7 +1130,6 @@ function contribute_to_jacobian!(
         mesh,
         material,
         layout,
-        T_ref,
     )
 end
 
@@ -1250,7 +1161,6 @@ function _contribute_to_jacobian_ad!(
     mesh,
     material::Material{NC},
     layout,
-    T_ref::Real = NaN,
 ) where {NC}
 
     n_cells = layout.n_cells
@@ -1261,7 +1171,7 @@ function _contribute_to_jacobian_ad!(
     @inbounds for i = 1:n_live
         geom = _dt_geometry(state, mesh, i)
 
-        f! = let geom = geom, material = material, NC = NC, T_ref = T_ref
+        f! = let geom = geom, material = material, NC = NC
             (out, x_inner) -> begin
                 T_L, T_C, T_R, ξ_L, ξ_C, ξ_R = _dt_unpack_stencil(x_inner, NC)
                 apply_cell!(
@@ -1283,7 +1193,6 @@ function _contribute_to_jacobian_ad!(
                     geom.has_left,
                     geom.has_right,
                     material,
-                    T_ref,
                 )
             end
         end

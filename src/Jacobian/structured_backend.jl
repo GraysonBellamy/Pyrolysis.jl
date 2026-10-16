@@ -18,8 +18,7 @@ core residual matrix:
 
 - `{Eulerian, ALE}` × `{Fickian, DarcyFick}` ×
   `{NoRadiation, SurfaceAbsorption, BeerLambert}` ×
-  `{NoChi, WithChi}` × `{:standard, :with_generation_sink}`, with `WithChi`
-  under ALE only.
+  `{NoChi, WithChi}`, with `WithChi` under ALE only.
 
 # Backend × strategy is orthogonal
 
@@ -44,9 +43,7 @@ using ..Materials:
     BEER_LAMBERT,
     n_components,
     is_gas,
-    dry_pyrolysis_gas_indices,
-    T_REF
-using ..BoundaryConditions: ambient_temperature
+    dry_pyrolysis_gas_indices
 using ..Problem:
     ProblemDef,
     Workspace,
@@ -169,7 +166,6 @@ struct StructuredOpsCache{
     is_ale::Bool
     is_with_chi::Bool
     is_beer_lambert::Bool
-    is_gen::Bool
     assembly_profile::Symbol
 
     reaction_ws::WSReact
@@ -243,7 +239,6 @@ function _build_ops_cache(
     is_beer_lambert = rad == BEER_LAMBERT
     radiation_intensity = Float64(get_option(def, :radiation_intensity, 0.0))
     radiation_kirchhoff = get_option(def, :radiation_kirchhoff, true)
-    is_gen = get_option(def, :energy_form, :standard) === :with_generation_sink
     is_reduced = assembly_profile === :ale_reduced
 
     # Required workspaces — every supported mode needs these.
@@ -324,7 +319,6 @@ function _build_ops_cache(
         is_ale,
         is_with_chi,
         is_beer_lambert,
-        is_gen,
         assembly_profile,
         reaction_ws,
         conduction_ws,
@@ -340,29 +334,6 @@ function _build_ops_cache(
         ctx,
         jac,
     )
-end
-
-# Resolve a single representative `T_ref` for the volumetric generation-sink
-# term. Mirrors `Discretization._resolve_volumetric_T_ref`: prefer the top BC's
-# ambient (the surface where transpiration typically dominates), fall back to
-# the bottom BC's ambient, then to `T_REF`. Returns `NaN` when the
-# `:with_generation_sink` energy form is not active — the per-operator
-# dispatchers skip the S_gen block on the NaN sentinel.
-#
-# Inherits the same single-ambient assumption documented at
-# `Discretization._resolve_volumetric_T_ref`: one datum for all cells, while the
-# transpiration BC uses per-boundary ambient. Exact only when both boundaries
-# share an ambient (or the back face is impermeable). Keeping this rule
-# byte-identical to the RHS resolver is what makes the preconditioner consistent
-# with the residual it approximates.
-@inline function _resolve_T_ref(cache::StructuredOpsCache, t)
-    cache.is_gen || return NaN
-    bc_set = cache.bc_set
-    T_top = ambient_temperature(bc_set.thermal.top, t)
-    T_top !== nothing && return T_top
-    T_bottom = ambient_temperature(bc_set.thermal.bottom, t)
-    T_bottom !== nothing && return T_bottom
-    return Float64(T_REF)
 end
 
 # ============================================================================
@@ -491,7 +462,6 @@ function _compute_jacobian!(
         cache.layout,
     )
 
-    T_ref = _resolve_T_ref(cache, t)
     if cache.darcy_ws !== nothing
         contribute_to_jacobian!(
             cache.jac,
@@ -504,7 +474,6 @@ function _compute_jacobian!(
             cache.mesh,
             cache.material,
             cache.layout,
-            T_ref,
         )
     else
         contribute_to_jacobian!(
@@ -518,7 +487,6 @@ function _compute_jacobian!(
             cache.mesh,
             cache.material,
             cache.layout,
-            T_ref,
         )
     end
 
@@ -602,7 +570,6 @@ function _compute_jacobian!(
         cache.layout,
         cache.bc_set,
         cache.darcy_ws !== nothing,  # venting term exists only on the Darcy path
-        T_ref,                       # finite ⇒ S_gen boundary slice on the energy row
     )
 
     # Boundary-cell S_conv energy row — single owner of the J̄ × ∂T/∂x(T_s)

@@ -226,18 +226,7 @@ _f_exact(B) = B / (exp(B) - 1)
         J_zero = (0.0, 0.0)
         J_blow = (0.0, J_gas)
 
-        state = solve_boundary_temperature(
-            T_cell,
-            k_eff,
-            Δz_half,
-            bc,
-            mat,
-            J_zero,
-            T_inf,
-            t,
-            ε;
-            J_blowing = J_blow,
-        )
+        state = solve_boundary_temperature(T_cell, k_eff, Δz_half, bc, mat, J_blow, t, ε)
         @test state.converged
 
         # Constant cp_g → mcp is exactly J·cp, independent of T_s.
@@ -254,68 +243,27 @@ _f_exact(B) = B / (exp(B) - 1)
         @test state.q_applied ≈ 2e4 + h * χ * (T_inf - T_s) rtol = 1e-10
         @test state.q_applied ≈ state.q_conducted rtol = 1e-8
         @test state.q_conducted ≈ k_eff * (T_s - T_cell) / Δz_half rtol = 1e-10
-        # Transpiration stays off (S_conv-only convention).
-        @test state.q_transpired == 0.0
 
         # Blowing suppresses convective cooling → hotter surface than the
         # bare coefficient under the same outflow.
-        state_off = solve_boundary_temperature(
-            T_cell,
-            k_eff,
-            Δz_half,
-            bc_bare,
-            mat,
-            J_zero,
-            T_inf,
-            t,
-            ε;
-            J_blowing = J_blow,
-        )
+        state_off =
+            solve_boundary_temperature(T_cell, k_eff, Δz_half, bc_bare, mat, J_blow, t, ε)
         @test state.T_surface > state_off.T_surface
         @test state_off.blowing_mcp ≈ mcp rtol = 1e-12   # the conductance is reported
         @test state_off.blowing_ratio == 1.0             # but not applied
 
         # Zero mass flux with a model is the exact no-blowing state.
-        state_zero = solve_boundary_temperature(
-            T_cell,
-            k_eff,
-            Δz_half,
-            bc,
-            mat,
-            J_zero,
-            T_inf,
-            t,
-            ε;
-            J_blowing = J_zero,
-        )
-        state_bare0 = solve_boundary_temperature(
-            T_cell,
-            k_eff,
-            Δz_half,
-            bc_bare,
-            mat,
-            J_zero,
-            T_inf,
-            t,
-            ε,
-        )
+        state_zero =
+            solve_boundary_temperature(T_cell, k_eff, Δz_half, bc, mat, J_zero, t, ε)
+        state_bare0 =
+            solve_boundary_temperature(T_cell, k_eff, Δz_half, bc_bare, mat, J_zero, t, ε)
         @test state_zero.T_surface === state_bare0.T_surface
         @test state_zero.q_applied === state_bare0.q_applied
         @test state_zero.blowing_ratio == 1.0
 
         # Net suction (inflow) enhances cooling → colder surface than bare.
-        state_suction = solve_boundary_temperature(
-            T_cell,
-            k_eff,
-            Δz_half,
-            bc,
-            mat,
-            J_zero,
-            T_inf,
-            t,
-            ε;
-            J_blowing = (0.0, -J_gas),
-        )
+        state_suction =
+            solve_boundary_temperature(T_cell, k_eff, Δz_half, bc, mat, (0.0, -J_gas), t, ε)
         @test state_suction.T_surface < state_off.T_surface
         @test state_suction.blowing_mcp < 0.0
         @test state_suction.blowing_ratio > 1.0
@@ -330,7 +278,6 @@ _f_exact(B) = B / (exp(B) - 1)
 
         function _Ts(T_cell::Real, J_gas::Real)
             st = BoundaryState()
-            Jz = (zero(J_gas), zero(J_gas))
             result = solve_boundary_temperature!(
                 st,
                 T_cell,
@@ -338,11 +285,9 @@ _f_exact(B) = B / (exp(B) - 1)
                 Δz_half,
                 bc,
                 mat,
-                Jz,
-                T_inf,
+                (zero(J_gas), J_gas),
                 t,
-                ε;
-                J_blowing = (zero(J_gas), J_gas),
+                ε,
             )
             return result.T_s
         end
@@ -462,13 +407,12 @@ _f_exact(B) = B / (exp(B) - 1)
         @test sol_on.extras.surface_blowing_ratio[end] < 1.0
 
         # Saved flux decomposition stays consistent with the boundary ledger:
-        # at Newton convergence net = conduction (transpiration off), with the
-        # convective component blowing-rescaled inside `net`.
+        # at Newton convergence net = conduction, with the convective
+        # component blowing-rescaled inside `net`.
         for sol in (sol_on, sol_off)
             net = sol.extras.surface_heat_flux_net[end]
             cond = sol.extras.surface_heat_flux_conduction[end]
             @test net ≈ cond rtol = 1e-6
-            @test sol.extras.surface_heat_flux_transpiration[end] == 0.0
         end
         # Blowing-on convective loss is strictly smaller in magnitude than the
         # uncorrected h·(T_s − T_∞) at its own (hotter) surface temperature.

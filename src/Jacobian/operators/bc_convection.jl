@@ -23,9 +23,8 @@ the interior-face flux kernel (transport operators), the boundary-face BC
 flux (mass-BC kernel), and the `T_s` implicit chain (thermal-BC Newton) —
 so a split assembly would need `J̄ × ∂(∂T/∂x)/∂x` cross-products spanning
 owners. Instead this operator owns the whole row: the transport operators
-zero their boundary-cell `S_conv` (they keep the boundary cell's ξ-rows
-and the linear `S_gen` interior slice), and [`BCMassOperator`](@ref) keeps
-only the linear `ΔS_gen` boundary-face slice on the energy row.
+zero their boundary-cell `S_conv` (they keep the boundary cell's ξ-rows),
+and [`BCMassOperator`](@ref) owns only the species rows.
 
 # Kernels
 
@@ -37,13 +36,10 @@ only the linear `ΔS_gen` boundary-face slice on the energy row.
   [`gas_flux_darcy_fick`](@ref) with the cell-local `(P, κ, μ, φ)`
   reconstruction and harmonic face mobility, byte-matching the transport
   operators' kernels.
-- `T_s`: the Dual-aware `solve_boundary_temperature!` Newton with the
-  *transpiration* mass flux hard-zeroed (the residual's surface balance
-  never sees ṁ_g in the enthalpy term — transpiration is rejected at
-  construction). The Newton's `J_blowing` is fed the true outward flux −F
-  from the shared boundary-face kernel, so each convective member's blowing
-  model (`h·χ`, χ from `blowing_state`) is differentiated exactly. Dirichlet
-  BCs take the closed form.
+- `T_s`: the Dual-aware `solve_boundary_temperature!` Newton, fed the
+  outward flux −F from the shared boundary-face kernel, so each convective
+  member's blowing model (`h·χ`, χ from `blowing_state`) is differentiated
+  exactly. Dirichlet BCs take the closed form.
 
 # Stencil
 
@@ -204,7 +200,6 @@ function _bc_convection_contribution(
     d1_int::Real,
     d2_int::Real,
     t::Real,
-    T_ref::Real,
     ::Val{tag},
     darcy_active::Bool,
     radiation_model::RadiationModel,
@@ -233,16 +228,13 @@ function _bc_convection_contribution(
     σ = tag === :top ? -1.0 : 1.0
     J_bc = ntuple(j -> σ * F[j], Val(NC))
 
-    # Surface temperature — mirrors `_bc_thermal_contribution`: the
-    # transpiration mass flux is hard-zeroed (the residual's surface balance
-    # never sees ṁ_g in the enthalpy term), while blowing reads the true
-    # outward flux −F; Dirichlet closed-form, Dual-aware Newton otherwise.
+    # Surface temperature — mirrors `_bc_thermal_contribution`: blowing reads
+    # the outward flux −F; Dirichlet closed-form, Dual-aware Newton otherwise.
     T_s = if thermal_bc isa DirichletThermalBC
         evaluate_param(thermal_bc.T, t)
     else
         bstate = BoundaryState(
             Float64(ForwardDiff.value(T_b)),
-            0.0,
             0.0,
             0.0,
             Float64(ForwardDiff.value(T_b)),
@@ -251,8 +243,7 @@ function _bc_convection_contribution(
             false,
             0,
         )
-        J_zero = ntuple(_ -> zero(Tu), Val(NC))
-        J_blowing = ntuple(j -> -F[j], Val(NC))
+        J_outward = ntuple(j -> -F[j], Val(NC))
         result = solve_boundary_temperature!(
             bstate,
             T_b,
@@ -260,13 +251,11 @@ function _bc_convection_contribution(
             Δz_half,
             thermal_bc,
             material,
-            J_zero,
-            T_ref,
+            J_outward,
             t,
             ε_eff;
             a_eff = a_eff,
             radiation_model = radiation_model,
-            J_blowing = J_blowing,
         )
         result.T_s
     end
@@ -342,7 +331,6 @@ function apply!(
             boundary_id == 1 ? get_mass_bc(bc_set, Val(:top)) :
             get_mass_bc(bc_set, Val(:bottom))
         tag = boundary_id == 1 ? Val(:top) : Val(:bottom)
-        T_ref = ambient_temperature(thermal_bc, t, Float64(T_REF))
 
         T_b = state.T[geom.cell_id]
         T_nb = state.T[geom.nb_id]
@@ -363,7 +351,6 @@ function apply!(
             geom.d1_int,
             geom.d2_int,
             t,
-            T_ref,
             tag,
             darcy_active,
             radiation_model,
@@ -486,15 +473,12 @@ function _bcc_assemble_boundary!(
     darcy_active::Bool,
     radiation_model::RadiationModel,
 ) where {NC}
-    T_ref = ambient_temperature(thermal_bc, t, Float64(T_REF))
-
     f! =
         let geom = geom,
             thermal_bc = thermal_bc,
             mass_bc = mass_bc,
             material = material,
             t = t,
-            T_ref = T_ref,
             val_nc = Val(NC),
             tag = tag,
             darcy_active = darcy_active,
@@ -516,7 +500,6 @@ function _bcc_assemble_boundary!(
                     geom.d1_int,
                     geom.d2_int,
                     t,
-                    T_ref,
                     tag,
                     darcy_active,
                     radiation_model,

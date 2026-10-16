@@ -50,8 +50,6 @@ function _residual!(du, u, def::ProblemDef, t, ws::Workspace, ::Eulerian)
     NC = n_components(layout)
     radiation_model = get_option(def, :radiation_model, NO_RADIATION)
     radiation_kirchhoff = get_option(def, :radiation_kirchhoff, true)
-    energy_form = get_option(def, :energy_form, :standard)
-    use_transpiration_bc = get_option(def, :use_transpiration_bc, false)
 
     # 1) Populate the typed state cache from u — single source of truth
     #    for state during residual assembly. Eulerian geometry is constant
@@ -70,8 +68,6 @@ function _residual!(du, u, def::ProblemDef, t, ws::Workspace, ::Eulerian)
         t,
         radiation_model,
         radiation_kirchhoff,
-        energy_form,
-        use_transpiration_bc,
         transport_mode(def.mode),
     )
 
@@ -114,8 +110,6 @@ function _residual!(du, u, def::ProblemDef, t, ws::Workspace, ::ALE)
     NC = n_components(layout)
     radiation_model = get_option(def, :radiation_model, NO_RADIATION)
     radiation_kirchhoff = get_option(def, :radiation_kirchhoff, true)
-    energy_form = get_option(def, :energy_form, :standard)
-    use_transpiration_bc = get_option(def, :use_transpiration_bc, false)
 
     # 1) Populate the typed state cache from u (T, ξ, z, χ).
     populate!(ws.state_cache, u, layout)
@@ -145,8 +139,6 @@ function _residual!(du, u, def::ProblemDef, t, ws::Workspace, ::ALE)
         t,
         radiation_model,
         radiation_kirchhoff,
-        energy_form,
-        use_transpiration_bc,
         transport_mode(def.mode),
     )
 
@@ -250,8 +242,6 @@ end
     t,
     radiation_model,
     radiation_kirchhoff::Bool,
-    energy_form::Symbol,
-    use_transpiration_bc::Bool,
     ::Fickian,
 )
     Discretization.compute_rhs!(
@@ -269,8 +259,6 @@ end
         I_radiation = ws.I_radiation,
         radiation_model = radiation_model,
         radiation_kirchhoff = radiation_kirchhoff,
-        energy_form = energy_form,
-        use_transpiration_bc = use_transpiration_bc,
     )
 end
 
@@ -282,8 +270,6 @@ end
     t,
     radiation_model,
     radiation_kirchhoff::Bool,
-    energy_form::Symbol,
-    use_transpiration_bc::Bool,
     ::DarcyFick,
 )
     Discretization.compute_rhs_darcy_fick!(
@@ -301,8 +287,6 @@ end
         I_radiation = ws.I_radiation,
         radiation_model = radiation_model,
         radiation_kirchhoff = radiation_kirchhoff,
-        energy_form = energy_form,
-        use_transpiration_bc = use_transpiration_bc,
     )
 end
 
