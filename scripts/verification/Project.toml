@@ -1,7 +1,7 @@
-# Isolated environment for the verification-suite report mode (Phase 2 of
-# docs/Verification_Suite_Plan_2026-07-06.md). Kept separate from the test env
-# (pin-fragile) because CairoMakie pulls heavy rendering deps nothing else
-# needs; same pattern as scripts/profile/ and test/quality/. Consumes the case
+# Isolated environment for the verification-suite report mode (Technical
+# Reference Guide §18.1.3). Kept separate from the test env (pin-fragile)
+# because CairoMakie pulls heavy rendering deps nothing else needs; same
+# pattern as scripts/profile/ and test/quality/. Consumes the case
 # definitions in test/verification/ (via casedefs.jl) and writes figures,
 # CSVs, and guide chapters to docs/guide/verification/.
 # Run: julia --project=scripts/verification scripts/verification/run_reports.jl

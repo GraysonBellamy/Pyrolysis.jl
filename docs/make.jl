@@ -20,7 +20,7 @@ guide_pages(name) =
 
 # Verification chapters are generated OFFLINE by scripts/verification/
 # run_reports.jl into the COMMITTED docs/guide/verification/ (heavy solver
-# ladders + figures; report mode of the verification suite plan). The docs
+# ladders + figures; the verification suite's report mode). The docs
 # build only copies them into the gitignored Documenter tree.
 let src = joinpath(@__DIR__, "guide", "verification"),
     dst = joinpath(@__DIR__, "src", "guide", "verification")

@@ -3,7 +3,7 @@
 # =============================================================================
 #
 # Reference implementations of the closed-form solutions the verification
-# cases compare against. Conventions (see docs/Verification_Suite_Plan):
+# cases compare against. Conventions:
 #
 # - Every formula is transcribed from a cited source and carries a permanent
 #   self-test in `selftests.jl` (independent check: algebraic identity, limit

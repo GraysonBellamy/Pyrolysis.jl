@@ -145,10 +145,7 @@ function _verification_case_vcpl05()
         id = "V-CPL-05",
         title = "TGA-to-gasification consistency ladder (1D → 0D thin limit)",
         tags = [:kinetics, :consistency_ladder, :thin_limit, :bc_coupling],
-        references = [
-            "MaCFP condensed-phase guidelines (2020) — TGA target simulations",
-            "Verification Suite Plan 2026-07-06, V-CPL-05",
-        ],
+        references = ["MaCFP condensed-phase guidelines (2020) — TGA target simulations"],
         build = build,
         solve_kwargs = (abstol = 1e-10, reltol = 1e-8),
         qois = qois,

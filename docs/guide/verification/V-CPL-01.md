@@ -17,7 +17,7 @@ eigenvalue in exact/stefan.jl (λ = 0.2317 for the dissertation parameters —
 self-tested against the published value and an independent quadrature
 energy balance).
 
-Two solver realizations, per the suite plan:
+Two solver realizations:
 
 Route A (this case): apparent heat capacity — Gaussian c_p peak of variance
   σ² = 0.1 K² (Gpyro Eq. 3.5c with σ_m² = 0.1) carrying the full ΔH_m,
@@ -45,8 +45,8 @@ used uniform 50 μm).
 No CI ConvergenceSpec: with fixed peak width σ (route A) or gate width
 (route B) the solver converges to the smeared problem, whose offset from
 the sharp-front Stefan solution dominates the mesh error — a meaningful
-order study is the σ → 0 + mesh ladder (report mode, as the plan's
-peak-width convergence study).
+order study is the σ → 0 + mesh ladder (a report-mode peak-width
+convergence study).
 
 ## V-CPL-01 — Neumann Stefan problem via apparent heat capacity (Gpyro params)
 

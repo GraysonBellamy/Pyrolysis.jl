@@ -5,7 +5,6 @@
 **References:**
 
 - D.A. Frank-Kamenetskii, Diffusion and Heat Exchange in Chemical Kinetics
-- Verification Suite Plan 2026-07-06, V-CPL-04
 
 ## Problem statement
 

@@ -4,13 +4,12 @@
 
 **References:**
 
-- docs/Verification_Suite_Plan_2026-07-06.md Tier 3 (ALE-MMS deliverable)
+- docs/guide/technical_reference/18_verification-validation.md §18.2 (MMS driver, ALE cases)
 - Thomas & Lombard, AIAA J. 17 (1979) — geometric conservation law
 
 ## Problem statement
 
-The moving-mesh order-verification companion to V-MMS-01 (and the "hardest
-and most valuable single test" of the suite plan's Tier 3): non-trivial
+The moving-mesh order-verification companion to V-MMS-01: non-trivial
 manufactured fields solved on a mesh compressed to 70 % of its thickness by
 the prescribed uniform-stretch velocity
 

@@ -26,5 +26,5 @@ so the spread mixes code differences with calibration differences. For a
 comparison that isolates our solver, run our PMMA case with the
 community-designated "central" model `MaCFP_PMMA_UMD.json` (committed here;
 from `PMMA/Material_Properties/2021/`) under the v1.3 scenario and present
-these curves as the community envelope. Intended consumer: the planned B-01
-case (`docs/Verification_Suite_Plan_2026-07-06.md`, Tier 4).
+these curves as the community envelope. No verification case reads these
+files yet; they are staged for a MaCFP-2 PMMA code-to-code case.

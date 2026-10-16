@@ -2,9 +2,8 @@
 Shared verification-case definitions (Test-free).
 
 Single source consumed by both harnesses: assert mode (`runcases.jl`, run by
-`Pkg.test()`) and report mode (`scripts/verification/run_reports.jl`), per the
-dual-mode architecture in `docs/Verification_Suite_Plan_2026-07-06.md`. This
-file deliberately depends on nothing from `Test` so the report runner can
+`Pkg.test()`) and report mode (`scripts/verification/run_reports.jl`); the
+Technical Reference Guide §18.1.3 describes both modes. This file deliberately depends on nothing from `Test` so the report runner can
 include it from its isolated plotting environment.
 
 Coordinate convention (matches `test_analytical.jl`): z = 0 bottom/substrate,
@@ -26,8 +25,8 @@ if !isdefined(@__MODULE__, :VerificationCase)
 
     """
     One quantity of interest evaluated from a solved case: `error < tol` is the
-    assertion. `comment` records tolerance provenance (observed error at pin
-    time, per cross-cutting requirement 5 of the suite plan).
+    assertion. `comment` records tolerance provenance (the observed error when
+    the tolerance was pinned).
     """
     Base.@kwdef struct QoIResult
         name::String

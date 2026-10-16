@@ -5,7 +5,6 @@
 **References:**
 
 - partial-fraction antiderivative re-derived in exact/radiative_cooling.jl
-- suite plan V-RX-04 (transient T⁴ closed form)
 
 ## Problem statement
 

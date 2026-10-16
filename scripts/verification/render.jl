@@ -4,7 +4,7 @@
 #
 # All plotting lives here; the harness hands over the plain data structs from
 # test/verification/casedefs.jl (`ReportCurve`/`CurveSeries`). Three figure
-# kinds, per the suite plan's standard artifact set:
+# kinds make up the standard artifact set:
 #   1. overlay          — solver values as markers over densely-sampled exact
 #                         reference lines (FDS Verification Guide style)
 #   2. pointwise error  — y − exact(x) per series, shows WHERE the

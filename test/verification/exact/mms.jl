@@ -269,8 +269,8 @@ const _MMS_GL_NODES, _MMS_GL_WEIGHTS = _gauss_legendre(32)
 """
 Continuous mesh velocity under reaction-driven motion:
 w*(z,t) = ∫₀ᶻ θ*(ζ,t) dζ, by 32-node Gauss–Legendre quadrature — machine
-precision for the smooth θ* fields used in MMS cases (cross-cutting
-requirement 4), with the package kinetics as the θ source of truth.
+precision for the smooth θ* fields used in MMS cases, with the package
+kinetics as the θ source of truth.
 """
 function mms_mesh_velocity(material, fields::MMSFields, z, t)
     half = z / 2

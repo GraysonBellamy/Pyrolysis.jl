@@ -31,7 +31,7 @@ and a pure solid product ends exactly at bulk density ρ_B/γ_B. All ρ here
 are the components' BULK densities (the strain kernel uses bulk ρ, not
 ρ_intrinsic — see the SolidComponent docstring note).
 
-NOTE the plan's "γ > 1 intumescent branch" is NOT representable: γ is
+NOTE a γ > 1 intumescent branch is NOT representable: γ is
 validated to [0, 1] (universal volume-fraction semantics shared with
 mixture density and conductivity mixing). Swelling is exercised through
 ρ_B < ρ_A (P1) and the partial-contribution branch through γ_B ∈ (0, 1)

@@ -2,16 +2,15 @@
 # V-MMS-04 — induced-motion ALE manufactured solution (reaction-driven mesh)
 # =============================================================================
 #
-# The Tier-3 completion case: V-MMS-02/03 verify GCL + moving-mesh transport
+# V-MMS-02/03 verify GCL + moving-mesh transport
 # under PRESCRIBED motion (`w_override`) and deliberately bypass the θ
 # prefix-sum mesh velocity, the dilation correction −ξθ with θ ≠ 0, and the
 # structured geometry Jacobian. Here the kinetics are manufactured so the
 # rates are analytic on the manufactured fields and the motion is genuinely
 # REACTION-DRIVEN — no `w_override` — closing the kinetics→θ→w→geometry
 # chain and making both `DirectSolve` AND `ApproxSolve` valid backends. The
-# fixed-resolution ApproxSolve solve whose exact-error QoI sits next to
-# DirectSolve's is cross-cutting requirement 3 of the suite plan (quantify
-# ApproxSolve against a known-exact answer).
+# fixed-resolution ApproxSolve solve, whose exact-error QoI sits next to
+# DirectSolve's, quantifies ApproxSolve against a known-exact answer.
 #
 # ## Manufactured design (see exact/mms.jl, "Induced mesh motion")
 #
@@ -193,7 +192,7 @@ function _verification_case_vmms04()
             ),
         )
 
-        # Cross-cutting requirement 3: ApproxSolve error against the SAME
+        # ApproxSolve error against the SAME
         # exact answer, side by side with DirectSolve's. Same resolution as
         # the CI run; the reduced (`:ale_reduced`) Jacobian profile changes
         # only Newton convergence, not the converged solution, so the exact
@@ -257,7 +256,8 @@ function _verification_case_vmms04()
         title = "Induced-motion ALE manufactured solution (reaction-driven mesh)",
         tags = [:mms, :ale, :kinetics, :order_verification, :approx_jacobian],
         references = [
-            "docs/Verification_Suite_Plan_2026-07-06.md Tier 3 + cross-cutting requirement 3",
+            "Roache, Verification and Validation in Computational Science (MMS methodology)",
+            "docs/guide/technical_reference/18_verification-validation.md §18.2 (MMS driver, ALE cases)",
         ],
         build = build,
         solve_kwargs = (abstol = 1e-10, reltol = 1e-8),

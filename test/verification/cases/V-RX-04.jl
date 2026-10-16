@@ -92,7 +92,6 @@ push!(
             tags = [:radiation, :radiative_bc, :surface_newton, :thermally_thin],
             references = [
                 "partial-fraction antiderivative re-derived in exact/radiative_cooling.jl",
-                "suite plan V-RX-04 (transient T⁴ closed form)",
             ],
             build = build,
             solve_kwargs = (abstol = 1e-10, reltol = 1e-8),
@@ -202,7 +201,9 @@ push!(
             id = "V-RX-04b",
             title = "steady radiative–convective surface equilibrium",
             tags = [:radiation, :radiative_bc, :convective_bc, :surface_newton, :steady],
-            references = ["suite plan V-RX-04 companion (algebraic Ts root)"],
+            references = [
+                "steady surface balance: radiative_convective_equilibrium_Ts in exact/radiative_cooling.jl",
+            ],
             build = build,
             solve_kwargs = (abstol = 1e-10, reltol = 1e-8),
             qois = qois,

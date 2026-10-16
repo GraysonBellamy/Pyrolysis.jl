@@ -198,7 +198,6 @@ function _verification_case_vcpl04()
         tags = [:reaction_conduction, :bifurcation, :exothermic, :coupled_jacobian],
         references = [
             "D.A. Frank-Kamenetskii, Diffusion and Heat Exchange in Chemical Kinetics",
-            "Verification Suite Plan 2026-07-06, V-CPL-04",
         ],
         build = build,
         solve_kwargs = (abstol = 1e-8, reltol = 1e-6),

@@ -4,8 +4,8 @@ Exact-solution verification of Pyrolysis.jl: every case solves a
 problem with a closed-form (or manufactured) reference solution and
 reports error norms, pinned tolerances with provenance, and observed
 convergence orders. Methodology, case selection, and the dual-mode
-(CI assert / report) architecture are described in
-`docs/Verification_Suite_Plan_2026-07-06.md`; the assert-mode twin of
+(CI assert / report) architecture are described in the Technical
+Reference Guide, §18.1–§18.2; the assert-mode twin of
 this report runs in `Pkg.test()` from the same case definitions
 (`test/verification/`).
 
