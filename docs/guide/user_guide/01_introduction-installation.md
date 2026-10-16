@@ -84,7 +84,7 @@ To set expectations up front, the current model does **not** support:
 | Surface-cell depletion (cell parking) | `solve(...; handle_depletion = true)` | TR §14 |
 | Error indicators, r-refinement, mesh-quality metrics (standalone; not used by `solve`) | `Pyrolysis.Internal` / submodule access | TR §14 |
 | Sensible-energy diagnostics log | `solve(...; diagnostics = true)` | TR §16 |
-| Sensitivity analysis (forward / adjoint) | `forward_sensitivity`, `adjoint_sensitivity` (extension) | TR §17 |
+| Sensitivity analysis (local finite differences, global Sobol) | finite differences of `solve`; `parameter_sweep` | UG §13 |
 | Parameter sweeps (parallel) | `parameter_sweep` | UG §12 |
 
 A few features are explicitly **experimental** or carry caveats; this guide flags
@@ -298,59 +298,43 @@ Commit both files to version control for any study you want to be reproducible.
 
 ## 1.6 Optional extensions (load-on-demand)
 
-Pyrolysis.jl keeps its core lightweight by declaring two optional capabilities —
-plotting recipes and SciML sensitivity analysis — as **package extensions**. Each
-extension is wired to *weak dependencies* and activates automatically the moment
-you `using` the corresponding packages alongside `Pyrolysis` — you never call the
-extension explicitly, you just load its trigger packages. The relevant entries
-from the package's `Project.toml` are:
+Pyrolysis.jl keeps its core lightweight by declaring its plotting recipes as a
+**package extension**. The extension is wired to a *weak dependency* and
+activates automatically the moment you `using` its trigger package alongside
+`Pyrolysis` — you never call the extension explicitly. The relevant entries from
+the package's `Project.toml` are:
 
 ```toml
 [weakdeps]
 RecipesBase = "3cdcf5f2-1ef4-517c-9805-6587b60abb01"
-SciMLSensitivity = "1ed8b502-d754-442c-8d5d-10ac956f44a1"
-Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 
 [extensions]
 PyrolysisPlotsExt = "RecipesBase"
-PyrolysisSciMLSensitivityExt = ["SciMLSensitivity", "Zygote"]
 ```
-
-The table below summarizes each extension, the package(s) that trigger it, and
-what it adds. Neither is required for a basic solve.
 
 | Extension | Trigger package(s) | What it provides |
 |---|---|---|
 | `PyrolysisPlotsExt` | `Plots` (or `RecipesBase`) | Plot recipes for `PyrolysisSolution` (`plot(sol; kind = …)`) |
-| `PyrolysisSciMLSensitivityExt` | `SciMLSensitivity`, `Zygote` | `forward_sensitivity`, `adjoint_sensitivity` |
 
-Install the trigger packages you need into the same environment, then load them:
+It is not required for a basic solve. Install the trigger package into the same
+environment, then load it:
 
 ```julia
 using Pkg
-Pkg.add(["Plots", "SciMLSensitivity", "Zygote"])
+Pkg.add("Plots")
 
 using Pyrolysis
 using Plots                      # activates PyrolysisPlotsExt → plot(sol; kind = …)
-using SciMLSensitivity, Zygote   # activates PyrolysisSciMLSensitivityExt
 ```
+
+Without `Plots` loaded there is no `plot` function to call; the recipes are
+covered in UG §9.
 
 Alternative sparse linear solvers need no extension: any LinearSolve factorization
 (for example `KLUFactorization()`, or `MKLPardisoFactorize()` with Pardiso/MKL
 installed) is passed directly as `linear_solver` after `using LinearSolve` (UG §11.4).
-
-### Stub behavior when an extension is not loaded
-
-The functions `forward_sensitivity` and `adjoint_sensitivity` are exported by
-`Pyrolysis` as *stubs* with no methods. Calling one before
-`using SciMLSensitivity, Zygote` raises a `MethodError` — that is the signal that
-you need to load the trigger packages; add them and the concrete methods appear.
-The plotting recipes have no stub: without `Plots` loaded there is no `plot`
-function to call.
-
-The two extensions are independent — neither depends on the other — so you load
-only the ones a given study requires. Plotting recipes and sensitivity analysis
-are covered in detail in UG §9 and UG §13.
+Sensitivity analysis needs none either: it takes finite differences of ordinary
+`solve` calls (UG §13).
 
 ---
 
@@ -550,7 +534,6 @@ stable, user-facing API. Broadly, the top-level exports cover:
 - **Jacobian configuration:** `Structured` and its two linear-solve strategies
   (`DirectSolve`, `ApproxSolve`), `JacobianSpec`, `DenseAD_ForwardDiff` (a
   verification reference), `verify_jacobian_at`, and more (UG §11).
-- **Extension stubs:** `forward_sensitivity`, `adjoint_sensitivity`.
 
 Anything not exported at the top level remains reachable in one of two ways:
 

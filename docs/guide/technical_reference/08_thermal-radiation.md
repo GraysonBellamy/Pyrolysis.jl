@@ -1078,10 +1078,10 @@ volumetric $4\sigma\alpha T^4$ emission (§8.8).
 **Float64-only.** The `RadiationCache` arrays are `Float64`, and the P1 Newton
 solve runs in Float64; AD `Dual` parts of the time variable are stripped via
 `ForwardDiff.value` when storing boundary fluxes (radiation_p1.jl), and
-state-vector `Dual`s are not supported. Consequently P1 sensitivities through
+state-vector `Dual`s are not supported. Consequently derivatives through
 the $G$ field are not propagated by forward-mode AD the way the core models'
 Jacobians are; P1 stays here until the trait system gains a first-class
-`P1Radiation` mode (§15, §17 Sensitivity Analysis).
+`P1Radiation` mode (§15).
 
 ---
 
@@ -1121,9 +1121,9 @@ the open issues most likely to matter in practice.
    field *only* through the Marshak boundary; users expecting a volumetric
    $\varepsilon\sigma T^4$ emission will not find one.
 
-6. **P1 is AD-opaque (Float64-only).** Sensitivities through the $G$ field are not
+6. **P1 is AD-opaque (Float64-only).** Derivatives through the $G$ field are not
    propagated by the forward-mode AD path used elsewhere; P1 remains Experimental and
-   outside the unified trait dispatch (§8.12, §15, §17).
+   outside the unified trait dispatch (§8.12, §15).
 
 7. **`SURFACE_ABSORPTION` assumes an opaque first cell** (§8.2). Absorbed
    incident radiation enters through the *boundary balance*; the model is

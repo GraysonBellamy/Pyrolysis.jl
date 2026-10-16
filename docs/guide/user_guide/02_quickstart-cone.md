@@ -837,9 +837,9 @@ plot(solution; kind = :mlr)
   time, `RadiativeFluxBC(flux = t -> ramp(t), absorptivity = 0.96)`; the solver
   re-samples the flux at every RHS evaluation.
 - **Sweep parameters.** Use `parameter_sweep` to run a grid of heat fluxes or
-  kinetic parameters (User Guide §UG-12), or `forward_sensitivity` /
-  `adjoint_sensitivity` to compute gradients of an output with respect to
-  `A`, `E`, `h`, or material properties (User Guide §UG-13).
+  kinetic parameters (User Guide §UG-12), or finite differences of the same
+  solves to estimate derivatives of an output with respect to `A`, `E`, `h`,
+  or material properties (User Guide §UG-13).
 - **Watch the energy history.** Re-run with `diagnostics = true` and inspect
   `solution.extras.diagnostics_log`, a sensible-energy snapshot every
   `diagnostics_stride` accepted steps (UG §9.8; Technical Reference §16).

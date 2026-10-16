@@ -735,8 +735,7 @@ do not configure them. The levers above are the ones you control.
 
 - Conservation ledgers and what each residual proves: Technical Reference §16;
   the post-processing/reading side in UG-9.
-- Jacobian backends, strategies, linear solvers, and the extension stubs
-  (`forward_sensitivity`, `adjoint_sensitivity`): UG-11 and Technical
+- Jacobian backends, strategies and linear solvers: UG-11 and Technical
   Reference §15.
 - Depletion handling, and the standalone mesh tools (error indicators,
   monitors, `relocate_nodes!`, quality metrics): UG-10 and Technical

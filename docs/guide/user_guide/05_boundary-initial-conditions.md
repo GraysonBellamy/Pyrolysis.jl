@@ -435,7 +435,7 @@ knowing because it explains a few user-visible behaviors:
 - **Surface temperature is clamped to `[200, 3000] K`** during the iteration to
   prevent unphysical excursions.
 - The solver is **AD-aware**: it carries `ForwardDiff.Dual` types through the
-  Newton iteration so sensitivities (see the sensitivity-analysis chapter) flow
+  Newton iteration so the Jacobian's derivatives with respect to the state flow
   correctly through `T_s`.
 - The converged surface temperature is available afterwards as
   `solution.surface_T`, and the flux decomposition (absorbed, re-radiation,

@@ -60,7 +60,6 @@ The full keyword signature, with defaults, is:
 | `callback` | `nothing` | One extra user callback; §8.10 |
 | `warm_start` | `nothing` | Reuse a prior solution's final state as the IC; §8.11 |
 | `saveat` | `problem.output_times` | Times at which to store output; §8.12 |
-| `sensealg` | `nothing` | Forwarded to the integrator (used by the sensitivity extension) |
 | `progress` | `true` | Show a progress bar |
 | `validate` | `true` | Run `validate_problem` before solving |
 

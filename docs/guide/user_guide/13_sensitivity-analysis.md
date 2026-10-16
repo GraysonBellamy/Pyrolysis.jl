@@ -1,16 +1,16 @@
 # 13. Sensitivity Analysis
 
 *Sensitivity analysis* asks how the outputs of a pyrolysis simulation change when
-its inputs change. Pyrolysis.jl supports three complementary flavors: **local
-forward** sensitivities (`∂output/∂θ` by automatic differentiation through the
-whole solve), **local adjoint** sensitivities (`∂loss/∂θ` for a scalar loss, the
-efficient mode for inverse problems with many parameters), and **global /
-variance-based** (Sobol) sensitivities built on the parameter-sweep harness from
-Chapter 12. This chapter shows how to use each, what can legitimately be a
-parameter, how to wire your parameters into a fresh problem, and the numerical
-pitfalls that make a sensitivity ill-defined. For the mathematics behind the
-methods — Dual-number propagation, the augmented adjoint ODE, and the variance
-decomposition — see Technical Reference §17.
+its inputs change. Pyrolysis.jl supports two complementary flavors: **local**
+sensitivities (`∂output/∂θ` at one parameter point, by finite differences of
+whole solves) and **global / variance-based** (Sobol) sensitivities built on the
+parameter-sweep harness from Chapter 12. Neither has a dedicated API; both are
+short scripts around `solve`. This chapter shows how to write them, what can
+legitimately be a parameter, how to wire your parameters into a fresh problem,
+how to choose a finite-difference step the solver's own noise does not swamp,
+and the pitfalls that make a sensitivity ill-defined. For the mathematics — the
+finite-difference error balance and the variance decomposition — see Technical
+Reference §17.
 
 > **Coordinate and symbol conventions.** `z = 0` is the bottom/substrate
 > (boundary id 2, tag `:bottom`); `z = L` is the top/exposed surface (boundary id
@@ -24,38 +24,40 @@ decomposition — see Technical Reference §17.
 
 ## 13.1 Overview: when to use which method
 
-| Method | Entry point | Returns | Cost scaling | Best when |
+| Method | How | Returns | Cost | Best when |
 |---|---|---|---|---|
-| **Local forward** | `forward_sensitivity` | output value + Jacobian `∂out/∂θ` | linear in `length(θ)` | few parameters (`≲ 20`), one or many outputs |
-| **Local adjoint** | `adjoint_sensitivity` | scalar loss + gradient `∂loss/∂θ` | ~independent of `length(θ)` | many parameters, **one scalar** loss (calibration, optimization) |
-| **Global (Sobol)** | `parameter_sweep` + a Sobol design | variance indices per parameter/group | `O(N_samples)` solves | uncertainty quantification, importance ranking over wide ranges |
+| **Local** | central differences of `solve` with `FiniteDiff` (§13.3) | output + Jacobian `∂out/∂θ` | `2p + 1` solves for `p` parameters | a handful of parameters, one or many outputs, gradients for calibration |
+| **Global (Sobol)** | `parameter_sweep` + a Sobol design (§13.8) | variance indices per parameter/group | `O(N_samples)` solves | uncertainty quantification, importance ranking over wide ranges |
 
-Forward and adjoint are **local**: they linearize about a single parameter point
-`θ`. Sobol is **global**: it explores a distribution of inputs and attributes
-output variance to inputs, but it gives no derivative.
+Local sensitivities linearize about a single parameter point `θ`. Sobol is
+**global**: it explores a distribution of inputs and attributes output variance
+to inputs, but it gives no derivative.
 
-`forward_sensitivity` and `adjoint_sensitivity` are exported by `Pyrolysis` as
-**stubs** — calling one raises a `MethodError` until you load the
-`PyrolysisSciMLSensitivityExt` extension (§13.6). The Sobol path needs no
-extension; it is pure `parameter_sweep` plus your choice of sampling package.
+Neither needs an extension. The local recipe uses `FiniteDiff`, which you add to
+your own environment (`Pkg.add("FiniteDiff")`); the Sobol path is
+`parameter_sweep` plus your choice of sampling package.
+
+Automatic differentiation through `solve` is not available. The material
+constructors convert every number to `Float64` and the integrator is
+`Float64`-typed, so a `θ` carrying `ForwardDiff.Dual` numbers fails at
+construction (`MethodError: no method matching Float64(::ForwardDiff.Dual{…})`)
+and reverse-mode tools have no parameter vector to differentiate (Technical
+Reference §17.3).
 
 ---
 
 ## 13.2 The `p_inject` pattern: turning a vector into a problem
 
-Both local methods share one idea. You hand them a **base problem**, a
-**parameter vector `θ`**, and a **closure** that rebuilds a fresh
-`PyrolysisProblem` from `(base_problem, θ)`:
+Both methods share one idea: a **closure** that rebuilds a fresh
+`PyrolysisProblem` from a **base problem** and a **parameter vector `θ`**:
 
 ```julia
 p_inject(base_problem, θ) -> PyrolysisProblem
 ```
 
-The extension differentiates the chain `θ -> output_fn(solve(p_inject(base, θ)))`
-end-to-end. The whole solver (state cache, geometry, the boundary-temperature
-Newton solve, the property derivatives) is type-generic in the scalar element
-type, so when ForwardDiff passes a `Dual` vector the sensitivities propagate
-through every stage. You never rewrite the residual.
+The local recipe evaluates `θ -> output(solve(p_inject(base, θ)))` at perturbed
+copies of `θ`; a Sobol study evaluates it at sampled `θ`. You never touch the
+residual.
 
 > **Pyrolysis types are immutable: rebuild, do not mutate.** There is no
 > `Material(existing; ...)` or `PyrolysisProblem(existing; ...)` copy
@@ -68,21 +70,21 @@ through every stage. You never rewrite the residual.
 
 A minimal, correct `p_inject` for a single charring reaction whose
 pre-exponential `A`, activation energy `E`, and heat of reaction `h` we want to
-differentiate:
+perturb (with `A` passed as `log10(A)`, see the rules below):
 
 ```julia
 using Pyrolysis
 
-# θ = [A, E, h]
+# θ = [log10(A), E, h]
 function p_inject(base, θ)
-    A, E, h = θ[1], θ[2], θ[3]
+    A, E, h = 10.0^θ[1], θ[2], θ[3]
 
     virgin = SolidComponent(:virgin; ρ = 1190.0, c = 1500.0, k = 0.20)
     char   = SolidComponent(:char;   ρ = 200.0,  c = 1200.0, k = 0.10)
     gas    = GaseousComponent(:gas;   M = 0.100, c = 1500.0, k = 0.02, λ = 1e-5)
 
     rxn = Reaction(:decomp, 1 => (2, 3);
-                   A = A, E = E, h = h,        # ← the differentiated parameters
+                   A = A, E = E, h = h,        # ← the perturbed parameters
                    yields = (0.2, 0.8), n = 1.0)
 
     material = Material(
@@ -112,17 +114,18 @@ function p_inject(base, θ)
 end
 ```
 
-A few rules that keep `p_inject` differentiable and consistent:
+A few rules that keep `p_inject` consistent:
 
-- **Place `θ` entries directly into the constructor calls.** The element type of
-  `θ` flows into the `Reaction` and `SolidComponent` fields. Do not round, clamp,
-  or `Float64(...)` a `θ` entry — that would break AD by stripping the `Dual`.
 - **Everything not in `θ` is fixed.** Read fixed values from `base` if it is
   convenient, or just hard-code them as above.
-- **Constructors that *must* receive `Float64`** (e.g. `tspan`, `output_times`,
-  mesh thickness, `n_cells`) should be plain `Float64`/`Int` literals, never
-  functions of `θ`. You differentiate physical parameters, not the time grid or
-  the mesh count.
+- **Keep the time grid and the mesh fixed.** `tspan`, `output_times`, mesh
+  thickness and `n_cells` should be plain literals, never functions of `θ`, so
+  every perturbed solve reports the same outputs at the same times. You perturb
+  physical parameters, not the time grid or the mesh count.
+- **Scale the parameters.** `A ~ 10¹³`, `E ~ 10⁵` and `h ~ 10⁶` differ by many
+  orders of magnitude, and a finite-difference step is relative to each entry.
+  Pass `log10(A)` rather than `A` and apply the inverse transform inside
+  `p_inject`, as above; the same scaling helps an optimizer (§13.7).
 - **`yields` must sum to 1.0** for mass conservation (Technical Reference §6.5);
   `Reaction(...)` validates this at construction. If you make a yield a parameter
   you must rebuild the complementary yields so they still sum to 1.
@@ -134,19 +137,19 @@ handles:
 
 | Parameter | Where it lives | Notes |
 |---|---|---|
-| `A_i`, `E_i` | `Reaction(...; A=, E=)` | the dominant kinetic sensitivities |
+| `A_i`, `E_i` | `Reaction(...; A=, E=)` | the dominant kinetic sensitivities; pass `log10(A)` |
 | `h` (heat of reaction) | `Reaction(...; h=)` | scalar, tuple `(a,b)` → linear, or a closure |
-| `ρ_j`, `c_p`, `k_j` | `SolidComponent(...; ρ=, c=, k=)` | pass a number, or wrap a `θ`-dependent `CallableProperty` |
+| `ρ_j`, `c_p`, `k_j` | `SolidComponent(...; ρ=, c=, k=)` | pass a number, or a `CallableProperty` closing over `θ` |
 | `λ_j`, `κ_j` | component `λ=`, `κ=` | gas-transfer / permeability for Darcy mode |
 | `ε_j`, `α_j` | component `ε=`, `α=` | emissivity / mass-absorption |
 | BC parameters | `HeatFluxBC`, `ConvectiveBC(h=,T_inf=)`, `RadiativeFluxBC(flux=)`, … | external flux, `h_conv`, `T_∞` |
 | mixing `β` | `MixingSpec(WEIGHTED, β)` | conductivity / transport blend weight |
 
 For a temperature-dependent property whose coefficients are parameters, build the
-property as a closure over `θ` so the `Dual` propagates:
+property as a closure over `θ`:
 
 ```julia
-# θ = [a, b]; c_p(T) = a + b*T as a differentiable callable
+# θ = [a, b]; c_p(T) = a + b*T
 cp = CallableProperty(T -> θ[1] + θ[2] * T)
 virgin = SolidComponent(:virgin; ρ = 1190.0, c = cp, k = 0.20)
 ```
@@ -159,248 +162,167 @@ state-dependent form for heat of sorption.
 
 ---
 
-## 13.3 Forward-mode local sensitivity
+## 13.3 Local sensitivity by finite differences
 
-`forward_sensitivity` differentiates an output (scalar or vector) with respect to
-`θ` using `ForwardDiff.jacobian`. Its signature (attached by the extension to the
-exported stub) is:
+A central difference of the whole solve approximates the Jacobian of an output
+`y` with respect to `θ`:
 
-```julia
-forward_sensitivity(
-    base_problem,
-    θ::AbstractVector,
-    p_inject::Function;
-    output_fn::Function = identity,   # solution -> output (scalar or vector)
-    solve_kwargs...,                  # forwarded to every internal solve()
-) -> (output, ∂output_∂θ)
+```text
+∂y/∂θ_k ≈ [ y(θ + h_k e_k) − y(θ − h_k e_k) ] / (2 h_k)
 ```
 
-- `output` is `output_fn(solve(p_inject(base, θ)))` evaluated at the base `θ`.
-- `∂output_∂θ` is the Jacobian: if `output` is a length-`m` vector and `θ` has
-  length `n`, the result is `m × n`. If `output_fn` returns a scalar, wrap it in a
-  1-vector (ForwardDiff differentiates vector-valued functions).
-
-`output_fn` reduces a `PyrolysisSolution` to the quantity you care about. Use the
-solution's documented fields and accessors (Chapter 9): `sol.surface_T`,
-`sol.mass_loss_rate`, `sol.T`, `sol.ξ`, `sol.extras.total_mass`,
-`sol.extras.surface_mass_flux`, etc.
-
-> **Cost.** ForwardDiff carries one extra "tangent" per parameter, so the solve
-> cost scales roughly linearly in `length(θ)`. Forward mode is the right choice
-> for a handful of parameters and is robust because it differentiates the exact
-> code path the solver runs. For dozens of parameters and a single scalar loss,
-> prefer adjoint mode (§13.5).
-
-### Worked example: sensitivity of peak surface temperature to `(A, E, h)`
+`FiniteDiff.finite_difference_jacobian` does the bookkeeping. With the
+`p_inject` of §13.2:
 
 ```julia
-using Pyrolysis
-using SciMLSensitivity, Zygote   # loads PyrolysisSciMLSensitivityExt
+using Pyrolysis, FiniteDiff
 
-θ0 = [1.0e13, 1.88e5, 8.70e5]     # [A (1/s), E (J/mol), h (J/kg)]
+θ0 = [13.0, 1.88e5, 8.70e5]          # [log10(A / s⁻¹), E (J/mol), h (J/kg)]
+base = p_inject(nothing, θ0)          # this p_inject ignores `base`
 
-# Scalar QoI wrapped in a 1-vector so ForwardDiff differentiates it.
-peak_Ts(sol) = [maximum(sol.surface_T)]
+solve_opts = (radiation_model = SURFACE_ABSORPTION, abstol = 1e-9, reltol = 1e-7)
+qoi(sol) = [sol.extras.total_mass[end],                     # mass left [kg]
+            sum(sol.surface_T) / length(sol.surface_T)]     # mean surface T [K]
+y(θ) = qoi(solve(p_inject(base, θ); progress = false, solve_opts...))
 
-# `base` is unused inside p_inject here, but it must still be passed
-# (and could supply fixed pieces if you wire it in).
-base = p_inject(nothing, θ0)
-
-output, J = forward_sensitivity(base, θ0, p_inject;
-                                output_fn = peak_Ts,
-                                radiation_model = SURFACE_ABSORPTION,
-                                abstol = 1e-9, reltol = 1e-7)
-
-peak     = output[1]              # peak surface temperature [K] at θ0
-dpeak_dA = J[1, 1]               # ∂(peak T_s)/∂A   [K·s]
-dpeak_dE = J[1, 2]               # ∂(peak T_s)/∂E   [K·mol/J]
-dpeak_dh = J[1, 3]              # ∂(peak T_s)/∂h   [K·kg/J]
+y0 = y(θ0)
+J  = FiniteDiff.finite_difference_jacobian(y, θ0, Val(:central); relstep = 1e-2)
+# J[i, k] = ∂y_i/∂θ_k; column 1 is per decade of A
 ```
 
-`solve_kwargs` (here `radiation_model`, `abstol`, `reltol`) are forwarded
-verbatim to each internal `solve` call; `progress = false` is forced internally.
+- `y` must return a vector of the same length at every `θ`. Values on the fixed
+  `output_times` grid are fine; anything whose length depends on the trajectory
+  (the number of steps taken, a profile filtered of the `NaN` slots that
+  depletion parking leaves) breaks the Jacobian assembly.
+- For a scalar output use
+  `FiniteDiff.finite_difference_gradient(f, θ, Val(:central); relstep)`.
+- The step for entry `k` is `max(relstep * abs(θ_k), absstep)`, and `absstep`
+  defaults to `relstep`. `FiniteDiff`'s default `relstep` (about `6e-6` for
+  central differences) is far too small for a solve; §13.4 explains how to pick
+  one.
+- The cost is `2p` perturbed solves for `p = length(θ)`, plus the base solve.
+  They are independent, so they parallelize (§13.5).
 
-### Differentiating a whole curve
-
-`output_fn` may return a vector — e.g. the surface-temperature history sampled at
-the problem's `output_times`. The Jacobian then has one row per saved time:
-
-```julia
-Ts_history(sol) = copy(sol.surface_T)             # length = number of saved times
-
-output, J = forward_sensitivity(base, θ0, p_inject;
-                                output_fn = Ts_history,
-                                radiation_model = SURFACE_ABSORPTION)
-# J[i, k] = ∂T_s(t_i)/∂θ_k
-```
-
-> **Keep the output dimension fixed.** `output_fn` must return a vector of the
-> same length for every `θ` ForwardDiff probes. Returning `sol.surface_T`
-> directly is fine because `saveat = output_times` is fixed and independent of
-> `θ`. Returning something whose length depends on the trajectory (e.g. "number
-> of time steps the integrator took", or a profile filtered of the `NaN` slots
-> that depletion parking leaves) will break the Jacobian assembly.
+Pass every option that changes the solution — `radiation_model`, `use_ale`,
+`jacobian`, tolerances — identically to every solve, here through
+`solve_opts`.
 
 ---
 
-## 13.4 Manual forward sensitivity (without the extension)
+## 13.4 Choosing the step
 
-`forward_sensitivity` is a thin convenience wrapper. If you would rather not pull
-in `SciMLSensitivity`/`Zygote` just for forward mode, you can call `ForwardDiff`
-yourself on the same `θ -> output_fn(solve(p_inject(base, θ)))` chain:
+A finite difference balances two errors: truncation error, which grows as `h²`
+for central differences, and the solver's own noise `ε` in `y`, which
+contributes `ε/h`. The textbook rule picks `h` from the integrator tolerance,
+but the noise in a Pyrolysis.jl output is not set by `reltol` alone. Adaptive
+step-size and Newton decisions change discretely with `θ`, and around abrupt
+events — a reaction front reaching the surface cell, a cell burning out — a
+trajectory can carry short-lived errors far above the tolerance whose timing
+shifts from one `θ` to the next. A finite difference across such a point
+measures that error, not the derivative.
 
-```julia
-using Pyrolysis
-using ForwardDiff
+So measure the noise and choose the step from it:
 
-g(θ) = [maximum(solve(p_inject(base, θ);
-                      progress = false,
-                      radiation_model = SURFACE_ABSORPTION).surface_T)]
+1. **Measure.** Solve at a few `θ` very close together (relative offsets of
+   `1e-6` to `1e-4` in one entry) and look at how far each output scatters about
+   a straight line. That scatter is `ε`.
+2. **Size the step** so the output change `|∂y/∂θ_k| · h_k` is at least ~100 `ε`.
+   In practice `relstep` lands between `1e-3` and `1e-2`.
+3. **Check** by repeating with `h/2` (or `2h`). If the two estimates disagree by
+   more than you can accept, that output is too noisy for a pointwise derivative
+   at this `θ`.
 
-output = g(θ0)
-J = ForwardDiff.jacobian(g, θ0)
-```
+On the §13.2 problem at `reltol = 1e-7`, the derivative estimates behave very
+differently from one output to the next:
 
-This is exactly what the extension does internally; the extension just packages it
-and provides the matching adjoint method. Forward mode needs only `ForwardDiff`
-(a hard dependency of Pyrolysis), so this manual route works in any environment.
+| Output | Noise `ε` | Change in the derivative when the step changes |
+|---|---|---|
+| final mass, `total_mass[end]` | ~1e-4 kg | ≤ 2 % (`relstep` 1e-2 vs 5e-3) |
+| mean surface temperature | — | ≤ 4 % (`relstep` 1e-2 vs 5e-3) |
+| peak surface temperature | — | up to 28 % (`relstep` 1e-2 vs 1e-3) |
+| `T_s` at `t = 150 s` | 0.03–0.05 K | the sign changes |
 
----
-
-## 13.5 Adjoint-mode local sensitivity
-
-For a **scalar loss** and **many parameters**, reverse mode (adjoint) computes the
-full gradient at a cost roughly independent of `length(θ)`. The entry point is:
-
-```julia
-adjoint_sensitivity(
-    base_problem,
-    θ::AbstractVector,
-    p_inject::Function,
-    loss_fn::Function;                # solution -> scalar ℝ
-    sensealg = InterpolatingAdjoint(autojacvec = ReverseDiffVJP()),
-    solve_kwargs...,
-) -> (loss, ∂loss_∂θ)
-```
-
-- `loss_fn` reduces a solution to a single real number (a misfit, an objective).
-- `sensealg` is a SciMLSensitivity reverse-mode algorithm. The default is
-  `InterpolatingAdjoint(autojacvec = ReverseDiffVJP())`. It is forwarded to
-  `solve` as the first-class `sensealg` keyword (the only reason `solve` accepts a
-  `sensealg` kwarg at all), so the ODE integrator augments the solve with adjoint
-  dynamics. The gradient is taken with `Zygote.gradient`.
-
-### Worked example: gradient of a TGA/cone misfit
-
-A typical calibration loss is the sum of squared errors between the simulated and
-measured surface-temperature (or MLR) histories on the saved time grid:
-
-```julia
-using Pyrolysis
-using SciMLSensitivity, Zygote
-
-# Measured surface temperature at the same output_times as the problem.
-T_data = load_my_surface_temperature()   # Vector{Float64}, your data
-
-loss_fn(sol) = sum(abs2, sol.surface_T .- T_data)
-
-θ0 = [1.0e13, 1.88e5, 8.70e5]
-base = p_inject(nothing, θ0)
-
-loss, grad = adjoint_sensitivity(base, θ0, p_inject, loss_fn;
-                                 radiation_model = SURFACE_ABSORPTION,
-                                 abstol = 1e-9, reltol = 1e-7)
-# grad[k] = ∂loss/∂θ_k  — feed straight into a gradient-based optimizer
-```
-
-`grad` is what an optimizer (e.g. `Optim.LBFGS`, `Optimisers.Adam`) consumes to
-fit `(A, E, h, …)` to data. This is the inverse-analysis recipe in §13.7.
-
-> **Try forward mode first for small problems.** Adjoint mode carries
-> significant machinery (continuous adjoint ODE, VJP construction) and can be
-> sensitive to `sensealg` choice on stiff Arrhenius transients. For `≲ 20`
-> parameters, forward mode is usually simpler and just as fast in wall-clock
-> terms. Reserve adjoint mode for genuinely high-dimensional fits.
-
-### Choosing a `sensealg`
-
-`sensealg` is forwarded straight to the underlying ODE solve. SciMLSensitivity
-offers several reverse-mode algorithms; the default `InterpolatingAdjoint` stores
-a continuous interpolation of the forward solution and is a good general choice.
-If you hit instability or excessive memory use, consult the SciMLSensitivity
-documentation for alternatives (e.g. `QuadratureAdjoint`, `GaussAdjoint`, or a
-different `autojacvec`); pass them through the `sensealg` keyword unchanged.
+Prefer **integrated outputs** — masses, time averages, sums over the saved
+trajectory — to values at one time or at a peak: integration averages the
+transient errors out. Tightening `reltol` does not help here: the noise of the
+pointwise outputs was the same at `reltol = 1e-7` and `1e-9`.
 
 ---
 
-## 13.6 Loading the extension
+## 13.5 Running the perturbed solves in parallel
 
-`forward_sensitivity` and `adjoint_sensitivity` are exported stubs. Without the
-extension they have no methods, so calling one raises a `MethodError`. The
-extension `PyrolysisSciMLSensitivityExt` is triggered automatically when **both**
-`SciMLSensitivity` and `Zygote` are present in your environment:
+The `2p` perturbed solves are independent. `parameter_sweep` (Chapter 12) runs a
+list of parameter vectors with `p_inject` as its `modify` and distributes them
+over `Distributed` workers when any are present:
 
 ```julia
-using Pyrolysis
-using SciMLSensitivity     # both are required to trigger the extension
-using Zygote
+h   = max.(1e-2 .* abs.(θ0), 1e-2)                           # FiniteDiff's step, relstep 1e-2
+pts = [θ0 .+ s .* h[k] .* (eachindex(θ0) .== k) for k in eachindex(θ0) for s in (1, -1)]
+ys  = parameter_sweep(base, pts; modify = p_inject, extract = qoi, solve_opts...)
+J   = reduce(hcat, [(ys[2k-1] .- ys[2k]) ./ (2h[k]) for k in eachindex(θ0)])
 ```
 
-The extension is declared in `Project.toml` as
-`PyrolysisSciMLSensitivityExt = ["SciMLSensitivity", "Zygote"]`, so both packages
-must be installed and loaded. (Forward mode via `ForwardDiff`, §13.4, does not
-need the extension.) Once loaded, the concrete methods attach to the exported
-stubs and the calls above work.
+This builds the same central-difference Jacobian as §13.3. Define `p_inject`
+and `qoi` with `@everywhere` when you run on workers (Chapter 12).
+
+---
+
+## 13.6 What the derivative means
+
+A finite difference of `solve` is the derivative of the *discretized* model —
+mesh, tolerances and all — not of the continuum equations. It changes with the
+mesh like any other output, so take sensitivities on the mesh you calibrate on,
+and recheck them if you refine it. Near a point where the output is not smooth
+in `θ` (§13.9) the two one-sided differences disagree and the central difference
+averages them; compare `y(θ + h e_k) − y(θ)` with `y(θ) − y(θ − h e_k)` when you
+suspect one.
 
 ---
 
 ## 13.7 Inverse analysis: fitting parameters to data
 
-The forward/adjoint machinery exists to support **inverse analysis** — recovering
-material parameters from TGA, DSC, MCC, or cone-calorimeter measurements. The
-pattern is:
+Sensitivities support **inverse analysis** — recovering material parameters from
+TGA, DSC, MCC, or cone-calorimeter measurements. The pattern is:
 
 1. **Write `p_inject(base, θ)`** that rebuilds the problem with the candidate
    parameters at the right places (§13.2). Make sure `output_times` matches the
    times at which you have data so simulated and measured curves align.
-2. **Write a scalar `loss_fn(sol)`** comparing the relevant simulated field
+2. **Write a scalar loss** comparing the relevant simulated field
    (`sol.surface_T`, `sol.mass_loss_rate`, `sol.extras.total_mass`, …) to data.
-3. **Get the gradient** with `adjoint_sensitivity` (many parameters) or assemble
-   it from `forward_sensitivity` on a 1-vector output (few parameters).
-4. **Drive an optimizer** with `(loss, grad)`.
+3. **Minimize it.** A derivative-free optimizer needs only the loss; a
+   gradient-based one also needs a finite-difference gradient (`2p` solves per
+   gradient).
 
-A compact LBFGS loop using forward-mode gradients (no extension required):
+The shipped fitting workflow, `examples/inverse_analysis/inverse_white_pine.jl`,
+is derivative-free: `Optim.jl`'s `Fminbox(NelderMead())` on the loss, with a
+`FiniteDiff` Hessian at the optimum for the standard errors (§14.7). It is robust
+to the noise of §13.4 and is the recommended starting point.
+
+A gradient-based alternative hands `Optim` a central-difference gradient:
 
 ```julia
-using Pyrolysis, ForwardDiff, Optim
+using Pyrolysis, FiniteDiff, Optim
 
-T_data = load_my_surface_temperature()
-loss(θ) = sum(abs2, solve(p_inject(base, θ);
-                          progress = false,
-                          radiation_model = SURFACE_ABSORPTION).surface_T .- T_data)
+T_data = load_my_surface_temperature()   # Vector{Float64} at output_times, your data
+loss(θ) = sum(abs2, solve(p_inject(base, θ); progress = false,
+                          solve_opts...).surface_T .- T_data)
+g!(G, θ) = FiniteDiff.finite_difference_gradient!(G, loss, θ, Val(:central);
+                                                  relstep = 1e-2)
 
-θ0 = [1.0e13, 1.88e5, 8.70e5]
-res = optimize(loss, θ0, LBFGS(); autodiff = :forward)   # ForwardDiff under the hood
+θ0  = [13.0, 1.88e5, 8.70e5]             # [log10(A), E, h]
+res = optimize(loss, g!, θ0, LBFGS())
 θ_fit = Optim.minimizer(res)
 ```
 
-For larger parameter vectors, supply an explicit adjoint gradient instead:
+The loss sums over the whole curve, so it is an integrated output in the sense of
+§13.4. Gradient methods still stall when the step-to-step noise of the loss is
+comparable to its decrease along the search direction; switch to `NelderMead()`
+if the line search keeps failing.
 
-```julia
-function g!(G, θ)
-    _, grad = adjoint_sensitivity(base, θ, p_inject,
-                                  sol -> sum(abs2, sol.surface_T .- T_data);
-                                  radiation_model = SURFACE_ABSORPTION)
-    G .= grad
-end
-res = optimize(loss, g!, θ0, LBFGS())
-```
-
-> **Scale your parameters.** `A ~ 10¹³`, `E ~ 10⁵`, and `h ~ 10⁶` differ by many
-> orders of magnitude. Optimize in log-space for `A` (`θ = log10(A)`) or
-> non-dimensionalize so the optimizer sees comparable scales; otherwise the line
-> search struggles and gradients are numerically lopsided. Apply the inverse
-> transform inside `p_inject` (e.g. `A = 10^θ[1]`).
+> **Scale your parameters.** Optimize `log10(A)` rather than `A`, and
+> non-dimensionalize the rest if their magnitudes differ widely, so the optimizer
+> sees comparable scales; otherwise the line search struggles and the gradient is
+> lopsided.
 
 The shipped `examples/df_sensitivity_comparison.jl` is **not** a programmatic
 fitter — it parses a ThermaKin2Ds reference output
@@ -480,6 +402,9 @@ need only the sampled `(θ, QoI)` pairs and no surrogate.
 > *decomposition* with interaction terms. Either way, the expensive part is the
 > `N_samples` solves, which the harness parallelizes.
 
+Global sampling spans parameter ranges far wider than a finite-difference step,
+so the solver noise of §13.4 is small next to the response it measures.
+
 For the theory of variance-based sensitivity and its relation to the sweep
 harness, see Technical Reference §17.5.
 
@@ -488,28 +413,32 @@ harness, see Technical Reference §17.5.
 ## 13.9 Pitfalls
 
 Sensitivities are only meaningful where the map `θ -> output` is well-behaved.
-The package is deliberately built to be AD-clean (smooth tanh temperature gates
-and depletion limiter, smooth flux limiters — Technical
-Reference §17.6), but several configurations can still spoil a gradient:
+The package uses smooth constructions where it can (tanh temperature gates and
+depletion limiter, smooth flux limiters — Technical Reference §17.6), but several
+configurations still spoil a derivative:
+
+- **Solver noise.** Finite differences of pointwise outputs can be dominated by
+  transient integration errors that tolerances do not remove (§13.4). Measure
+  the noise, prefer integrated outputs, and check the step.
 
 - **Warm start.** Reusing a prior solution as the initial state
-  (`warm_start = previous_solution`) makes the result depend on history, which is
-  *not* differentiated by `p_inject`. For sensitivity studies, **start each solve
-  from the problem's own initial conditions** (do not pass `warm_start`), so the
-  differentiated chain is self-contained. This is why the sweep/sensitivity
+  (`warm_start = previous_solution`) makes the result depend on history that
+  `p_inject` does not rebuild. For sensitivity studies, **start each solve from
+  the problem's own initial conditions** (do not pass `warm_start`), so every
+  perturbed solve integrates the same map. This is why the sweep/sensitivity
   examples build a fresh problem per point and do not warm-start.
 
 - **Non-smooth lateral-shrinkage laws (WithChi mode).** The cross-section law
   `A(t) = A_0 · law(χ̄)` is differentiated with ForwardDiff inside the residual
   (Technical Reference §10.6). A `law` with a kink (e.g. a hard `min`/`max` or a
-  piecewise definition with a slope discontinuity) injects a non-smooth point into
-  the sensitivity. Use smooth shrink/swell laws when you intend to differentiate
-  through them.
+  piecewise definition with a slope discontinuity) makes the output non-smooth in
+  any parameter that moves `χ̄` across the kink. Use smooth shrink/swell laws.
 
 - **Park events are discrete.** With `handle_depletion = true` a park rewrites
   the state in place; the trajectory is smooth in the parameters between events
-  and jumps across one. Keep depletion off in sensitivity work, or restrict the
-  horizon to one without park events.
+  and jumps across one. A finite difference whose perturbed solves park at
+  different times measures the jump. Keep depletion off in sensitivity work, or
+  restrict the horizon to one without park events.
 
 - **Tanh-gate leakage.** The smooth temperature gates leak a few percent of the
   reaction rate within roughly ±10 K of `T_min`/`T_max` (Technical Reference
@@ -517,32 +446,22 @@ Reference §17.6), but several configurations can still spoil a gradient:
   not physically meaningful at the very edge of the window; interpret
   gate-boundary sensitivities with care.
 
-- **Integrator tolerances set a noise floor.** Finite `abstol`/`reltol` introduce
-  small, parameter-dependent integration error. For tight sensitivities (and for
-  reproducible adjoints), tighten tolerances (e.g. `abstol = 1e-9`,
-  `reltol = 1e-7`, as the Douglas-fir example does) so the sensitivity signal sits
-  well above the tolerance noise.
-
 ---
 
 ## 13.10 Quick reference
 
 | Task | Call |
 |---|---|
-| Forward Jacobian of an output | `forward_sensitivity(base, θ, p_inject; output_fn)` |
-| Forward Jacobian, no extension | `ForwardDiff.jacobian(θ -> out(solve(p_inject(base, θ))), θ)` |
-| Adjoint gradient of a scalar loss | `adjoint_sensitivity(base, θ, p_inject, loss_fn; sensealg)` |
-| Load the extension | `using SciMLSensitivity, Zygote` |
+| Jacobian of an output | `FiniteDiff.finite_difference_jacobian(θ -> y(solve(p_inject(base, θ))), θ0, Val(:central); relstep)` |
+| Gradient of a scalar loss | `FiniteDiff.finite_difference_gradient(loss, θ0, Val(:central); relstep)` |
+| Perturbed solves in parallel | `parameter_sweep(base, pts; modify = p_inject, extract)` (§13.5) |
 | Global/Sobol | sample → `pmap`/`parameter_sweep` → PCE or SRRC (see examples) |
 
-**Defaults to remember.** `forward_sensitivity`: `output_fn = identity`.
-`adjoint_sensitivity`: `sensealg = InterpolatingAdjoint(autojacvec = ReverseDiffVJP())`.
-For sensitivity-safe solves: keep `warm_start = nothing`,
-`handle_depletion = false`, the default `jacobian = nothing`
-(→ `Structured(strategy = DirectSolve())` on a fixed mesh), and tighten
-`abstol`/`reltol`.
+**Defaults to remember.** Start from `relstep` between `1e-3` and `1e-2` and
+check it by halving (§13.4); pass `log10(A)`, not `A`. For sensitivity-safe
+solves: keep `warm_start = nothing`, `handle_depletion = false`, and the same
+`solve` options for every perturbed solve.
 
 For parameter sweeps (discrete response maps) see Chapter 12; for the solution
-fields and accessors used in `output_fn`/`loss_fn` see Chapter 9; for the solver
-options forwarded through `solve_kwargs` see Chapter 8; for the underlying theory
-see Technical Reference §17.
+fields and accessors used in the outputs see Chapter 9; for the solver options
+see Chapter 8; for the underlying theory see Technical Reference §17.

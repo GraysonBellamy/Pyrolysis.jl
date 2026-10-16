@@ -699,8 +699,7 @@ via `RHSCache(mesh, material)`, defaulting to `Tu = Float64`.
 `RHSCache{Tu}`, `PropertyCache{Tu,DarcyT}`, and the typed state cache are all parameterized on
 a single live scalar type `Tu`. In ordinary integration `Tu = Float64`. During forward-mode
 automatic differentiation — used by the structured-Jacobian operators' stencil-local
-ForwardDiff kernels, by the dense reference Jacobian of the verifier, and end-to-end for
-sensitivity analysis (§17) —
+ForwardDiff kernels and by the dense reference Jacobian of the verifier —
 `Tu = ForwardDiff.Dual`. Because every flux, source, property, and geometric quantity is held
 at type `Tu`, the entire RHS assembly propagates dual sensitivities without a single
 re-allocation or type conversion. The compile-time component unrolling (`@generated` functions

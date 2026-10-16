@@ -104,7 +104,7 @@ to the Gpyro and FDS interpretation (§6.9).
 
 The single-reaction kernel is `reaction_rate` (src/Physics/kinetics.jl). It
 is fully scalar-type-generic (`<:Real` arguments), so `ForwardDiff.Dual` numbers
-propagate cleanly through it for Jacobian and sensitivity work (§15, §17).
+propagate cleanly through it for the Jacobian (§15).
 
 > **Implementation note.** Single-reaction rate: `reaction_rate`,
 > src/Physics/kinetics.jl. All-reaction evaluation: `evaluate_reactions!`
@@ -134,8 +134,8 @@ of Pyrolysis.jl:
    it the step contributes nothing — Newton sees a flat rate that suddenly jumps.
 2. Automatic differentiation (`ForwardDiff`) of a discontinuous function returns a
    derivative of zero almost everywhere and is simply wrong at the breakpoint,
-   corrupting both the structured Jacobian (§15) and forward-mode sensitivities
-   (§17).
+   corrupting the structured Jacobian (§15); a finite-difference sensitivity
+   (§17) across the breakpoint measures the jump instead of a derivative.
 
 ### 6.2.2 The tanh ramp
 

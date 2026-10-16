@@ -195,15 +195,6 @@ export Operator,
     EmbeddedRank1Coupling
 
 # ============================================================================
-# Sensitivity-analysis entry points — concrete methods are attached by
-# `ext/PyrolysisSciMLSensitivityExt.jl`.
-# ============================================================================
-
-include("sensitivity_stubs.jl")
-
-export forward_sensitivity, adjoint_sensitivity
-
-# ============================================================================
 # Precompile workload — warms up the canonical Material × SimulationMode
 # combinations so TTFX drops to seconds for standard cases.
 # ============================================================================

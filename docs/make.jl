@@ -64,7 +64,6 @@ append!(
             "api/solve.md",
             "api/residual.md",
             "api/jacobian.md",
-            "api/sensitivity.md",
             "api/diagnostics.md",
             "api/adaptivity.md",
             "api/experimental.md",

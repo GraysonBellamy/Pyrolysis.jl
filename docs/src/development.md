@@ -8,7 +8,7 @@ with the [User Guide](guide/user_guide/01_introduction-installation.md).
 | Path | Contents |
 |:---|:---|
 | `src/` | The package, organised into submodules: `Materials`, `BoundaryConditions`, `Geometry`, `Properties`, `Physics`, `Adaptivity`, `Discretization`, `Problem`, `Residual`, `Jacobian`, `Experimental`, `Diagnostics`, `Solver`, plus the `Internal` umbrella. |
-| `ext/` | Package extensions (Plots recipes, SciMLSensitivity). |
+| `ext/` | Package extension (Plots recipes). |
 | `test/` | Test suite mirroring the `src/` module layout; `runtests.jl` walks the directories. |
 | `benchmark/` | PkgBenchmark.jl regression suite over the canonical problems. |
 | `examples/` | End-to-end studies with their own project environment. |

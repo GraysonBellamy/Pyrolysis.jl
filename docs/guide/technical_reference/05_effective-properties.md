@@ -1005,7 +1005,7 @@ read by the conduction, transport, radiation, and boundary kernels.
 
 `PropertyCache{Tu, DarcyT}` (`property_cache.jl`) is parameterized on the
 live scalar type `Tu` so the entire cache holds `ForwardDiff.Dual` values
-unchanged during automatic differentiation (§17), and on `DarcyT` so the
+unchanged during automatic differentiation (§15), and on `DarcyT` so the
 optional Darcy sub-cache is either present (`DarcyCache{Tu}`) or `Nothing`. The
 per-cell arrays (length `n`) are
 
@@ -1143,8 +1143,8 @@ which is differentiable because every operation in the iteration is smooth (the
 step limiter is inactive and the per-term branch selection is locally constant
 at a converged interior solution).
 This AD-cleanliness — together with the smooth `tanh` kinetics gates (§6) and the
-clamped property laws (§4.4) — is what makes the end-to-end sensitivities of §17
-well-defined.
+clamped property laws (§4.4) — is what keeps the structured Jacobian (§15) exact
+and the finite-difference sensitivities of §17 well-defined.
 
 **Warm-start caveat.** The Bruggeman iteration's convergence test is on the
 *value* only, and in an AD pass the Dual-typed cache means the warm start
