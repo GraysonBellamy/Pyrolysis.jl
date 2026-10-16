@@ -8,7 +8,7 @@ to track the material as it decomposes:
 - ALE mesh motion for accurate shrinkage modeling
 - Surface absorption radiation model for efficient opaque material simulation
 - Multi-step pyrolysis kinetics with char formation
-- Structured Jacobian (`Structured(strategy=DirectSolve())`) for fast assembly
+- Structured Jacobian (`ApproxSolve`, the ALE default) for fast assembly
 - Bruggeman mixing rules for effective properties
 - Temperature-limited reactions (piecewise activation)
 

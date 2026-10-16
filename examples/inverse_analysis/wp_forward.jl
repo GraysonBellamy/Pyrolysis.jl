@@ -76,9 +76,8 @@ function Scenario(;
     # Pre-test cross-sectional area. Defaults to the multi-replicate
     # overall mean (D_0 = 69.50 mm, n=10 across 30/50/70 kW). Use
     # `wp_A0_for_flux(q_kW)` to override with the per-flux mean if needed.
-    # NOTE: earlier versions defaulted to A = 1 m² via create_uniform_mesh;
-    # D_0 = 73 mm (nominal) and D_0 = 69.62 mm (single R1 sample) are both
-    # wrong defaults. See docs/variable_cross_section_plan.md §1.1.
+    # Neither the nominal D_0 = 73 mm nor a single sample's diameter is a
+    # suitable default.
     A_0::Real = WP_A0,
     n_cells::Int = 160,
     t_final::Real,
@@ -88,8 +87,8 @@ function Scenario(;
     # When false, the material is built with `lateral_shrinkage_law = nothing`
     # and the solver skips the χ-block tracking + dense ∂physics/∂χⱼ Jacobian
     # coupling — the inverse fit doesn't need post-test thickness/diameter and
-    # pays a real per-evaluation cost for it. Validation drivers
-    # (validate_thickness.jl, closure_check_70kW.jl) leave the default on.
+    # pays a real per-evaluation cost for it. The validation driver
+    # (validate_thickness.jl) leaves the default on.
     use_variable_cross_section::Bool = true,
 )
     return (
@@ -602,7 +601,6 @@ solution. Returns `nothing` if the solve fails (allowing the caller to apply a
 penalty in the loss function).
 
 Initial moisture concentration is read from `scenario.c0_moisture` (kg/m³).
-For older Scenario tuples lacking that field, the slot defaults to 0.
 `kinetics_set` selects `:constant`, `:kirchhoff_123`, or `:kirchhoff_all`.
 
 `jacobian_strategy` overrides the Jacobian strategy. `nothing` (default)

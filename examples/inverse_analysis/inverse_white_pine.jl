@@ -147,8 +147,8 @@ const FSRI_HEAT_FLUX_CAL = 0.98
 # back-surface temperatures and hence the fitted properties. The naive "q″·A and
 # k·A·∂T/∂z both scale with A so it cancels" argument holds only at *fixed*
 # geometry; A enters the geometry evolution, which is exactly where the law acts.
-# The radial channel is calibrated/validated (validate_thickness.jl,
-# closure_check_70kW.jl) against the experimental conversion χ̄=1−m_f/m_0; its
+# The radial channel is calibrated/validated (validate_thickness.jl) against
+# the experimental conversion χ̄=1−m_f/m_0; its
 # fit residual sits at the ±0.013 D-measurement noise floor (see WP_SR2 block),
 # so `true` is the more physical setting. Cost is per-eval only (χ-block
 # tracking + a denser ∂physics/∂χⱼ Jacobian coupling).

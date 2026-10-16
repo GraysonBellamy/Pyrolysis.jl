@@ -457,7 +457,7 @@ function build_and_solve(mc_db::Float64, hos_model::Symbol)
         radiation_model = SURFACE_ABSORPTION,
         min_thickness = 0.5e-3,
         handle_depletion = false,
-        # Default Jacobian is `Structured(strategy = DirectSolve())`.
+        # Default Jacobian under ALE is `Structured(strategy = ApproxSolve())`.
         integrator = KenCarp4(linsolve = SparspakFactorization()),
     )
 
