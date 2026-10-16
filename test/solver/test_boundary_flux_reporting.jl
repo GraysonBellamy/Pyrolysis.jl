@@ -79,13 +79,14 @@ import Pyrolysis.Discretization: evaluate_bc_flux_and_derivative
     end
 end
 
-function _reporting_material()
+function _reporting_material(; absorptivity = nothing)
     virgin = SolidComponent(
         :virgin,
         ρ = 600.0,
         c = 1500.0,
         k = 0.15,
         ε = 0.95,
+        absorptivity = absorptivity,
         α = 200.0,
         λ = 1e-5,
     )
@@ -184,4 +185,37 @@ end
         @test all(iszero, ex.volumetric_absorption)
         @test all(ex.surface_heat_flux_absorbed .> 0.0)
     end
+end
+
+@testset "Beer–Lambert extras use a_eff (use_ale = $use_ale)" for use_ale in (false, true)
+    # ε = 0.95 but a = 0.6: the residual deposits a·q_ext, so the reported
+    # deposit plus the transmitted flux must add up to a·q_ext, not ε·q_ext.
+    # The gas has γ = 0, so a_eff is the virgin value at every state.
+    a = 0.6
+    q_ext = 50e3
+    mesh = create_uniform_mesh(0.005, 8, Val(2))
+    bc = BoundaryConditionSet(
+        thermal = (
+            top = RadiativeFluxBC(flux = q_ext) +
+                  RadiativeBC(T_inf = 300.0) +
+                  ConvectiveBC(h = 10.0, T_inf = 300.0),
+            bottom = AdiabaticBC(),
+        ),
+        mass = (top = DiffusiveMassBC(), bottom = ImpermeableBC()),
+    )
+    problem = PyrolysisProblem(
+        mesh = mesh,
+        material = _reporting_material(absorptivity = a),
+        bc_set = bc,
+        tspan = (0.0, 10.0),
+        output_times = collect(0.0:2.0:10.0),
+    )
+    sol = solve(problem; radiation_model = BEER_LAMBERT, use_ale = use_ale)
+    @test sol.retcode == :Success
+
+    ex = sol.extras
+    @test all(ex.surface_emissivity .≈ 0.95)
+    @test all(ex.volumetric_absorption .> 0.0)
+    @test ex.volumetric_absorption .+ ex.radiation_transmitted ≈
+          fill(a * q_ext, length(sol.t)) rtol = 1e-12
 end

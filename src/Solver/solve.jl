@@ -1197,10 +1197,10 @@ function extract_solution!(
         # the energy-ledger companion to the face-applied
         # `surface_heat_flux_net`, which excludes it. α_surf is the BC's
         # explicit absorptivity (already folded into the extracted flux) or
-        # the surface cell's live ε_eff on the Kirchhoff default path.
+        # the surface cell's live a_eff, the same factor the residual applies.
         if radiation_model == BEER_LAMBERT
             I_inc, has_explicit_α = extract_radiative_flux_from_bcs(bc_set, Val(:top), t)
-            I_eff = has_explicit_α ? I_inc : ε_top * I_inc
+            I_eff = has_explicit_α ? I_inc : a_top * I_inc
             τ_tot = 0.0
             for j = 1:n_live
                 ξ_j = ntuple(k -> ξ_profile[k, j], NC)
@@ -1518,7 +1518,7 @@ function extract_solution_ale!(
         # Eulerian extractor for the convention.
         if radiation_model == BEER_LAMBERT
             I_inc, has_explicit_α = extract_radiative_flux_from_bcs(bc_set, Val(:top), t)
-            I_eff = has_explicit_α ? I_inc : ε_top * I_inc
+            I_eff = has_explicit_α ? I_inc : a_top * I_inc
             τ_tot = 0.0
             for j = 1:n_live
                 ξ_j = ntuple(k -> ξ_profile[k, j], NC)
