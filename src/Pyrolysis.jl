@@ -191,7 +191,6 @@ export Structured, LinearSolveStrategy, DirectSolve, ApproxSolve
 export DenseAD_ForwardDiff   # verifier reference only
 export verify_jacobian_at, is_approximate
 export Operator,
-    ResidualContext,
     StructuredJacobian,
     StructuredCoupling,
     PrefixSumCoupling,

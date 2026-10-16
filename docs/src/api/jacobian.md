@@ -40,7 +40,6 @@ verify_jacobian_at
 
 ```@docs
 Operator
-ResidualContext
 StructuredJacobian
 StructuredCoupling
 PrefixSumCoupling

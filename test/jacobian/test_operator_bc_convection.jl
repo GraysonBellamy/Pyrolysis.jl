@@ -42,10 +42,7 @@ using Pyrolysis.Physics:
     compute_gas_fluxes!, compute_gas_fluxes_darcy_fick!, compute_gas_convective_source!
 using Pyrolysis.Problem: populate!, build_ad_workspace
 using Pyrolysis.Jacobian:
-    BCConvectionOperator,
-    build_bc_convection_workspace,
-    StructuredJacobian,
-    build_residual_context
+    BCConvectionOperator, build_bc_convection_workspace, StructuredJacobian
 
 include(joinpath(@__DIR__, "..", "perf", "perf_helpers.jl"))
 
@@ -232,13 +229,6 @@ end
 
 @testset "BCConvectionOperator" begin
 
-    @testset "interface declarations" begin
-        op = BCConvectionOperator()
-        @test Pyrolysis.Jacobian.reads(op) == (:T_s,)
-        @test Pyrolysis.Jacobian.writes(op) == ()
-        @test Pyrolysis.Jacobian.stencil(op) == (cells = -1:1,)
-    end
-
     @testset "apply! matches residual boundary S_conv slice ($(mode))" for (mode, darcy) in
                                                                            (
         ("Fickian", false),
@@ -331,14 +321,12 @@ end
         A = sparse(I, J_idx, V, n_total, n_total)
         fill!(A.nzval, 0.0)
         jac = StructuredJacobian(A)
-        ctx = build_residual_context([BCConvectionOperator()])
         ws_op = build_bc_convection_workspace(material)
 
         Pyrolysis.Jacobian.contribute_to_jacobian!(
             jac,
             BCConvectionOperator(),
             u,
-            ctx,
             0.0,
             ws_op,
             ws.state_cache,

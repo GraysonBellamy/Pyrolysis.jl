@@ -52,10 +52,6 @@ Stateless tag.
 """
 struct BCMassOperator <: Operator end
 
-reads(::BCMassOperator) = ()
-writes(::BCMassOperator) = ()
-stencil(::BCMassOperator) = (cells = 0:0,)
-
 """
 	BCMassADWorkspace{NC, CFG}
 
@@ -284,7 +280,7 @@ end
 end
 
 """
-	contribute_to_jacobian!(jac, op::BCMassOperator, u, ctx, t, ws, state, mesh,
+	contribute_to_jacobian!(jac, op::BCMassOperator, u, t, ws, state, mesh,
 	                        material, layout, bc_set, darcy_active) -> nothing
 
 Per-boundary AD path. Each boundary face writes an `NC × (1 + NC)` block of
@@ -296,7 +292,6 @@ function contribute_to_jacobian!(
     jac::StructuredJacobian,
     ::BCMassOperator,
     u::AbstractVector,
-    ctx::ResidualContext,
     t::Real,
     ws::BCMassADWorkspace{NC},
     state,

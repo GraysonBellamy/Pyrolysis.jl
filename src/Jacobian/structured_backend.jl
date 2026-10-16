@@ -5,10 +5,9 @@ Jacobian architecture.
 `Structured(strategy = DirectSolve())` produces a `JacobianSpec`
 backed by:
 
-- a [`StructuredJacobian`](@ref) (sparse `A` + structured couplings +
-  implicit terms);
-- a [`ResidualContext`](@ref) topologically ordering an operator list;
-- the chosen [`LinearSolveStrategy`](@ref) for downstream solves.
+- a [`StructuredJacobian`](@ref) (sparse `A` + structured couplings);
+- per-operator AD workspaces, walked in a fixed order;
+- the chosen [`LinearSolveStrategy`](@ref), which fixes the assembly profile.
 
 # Assembly path
 
@@ -126,8 +125,6 @@ per-operator AD cost.
 - `assembly_profile::Symbol` — the assembly profile this cache was built
   for (`:full` or `:ale_reduced`). Read by per-step assembly to gate
   structured-coupling emission and the geometry AD pass.
-- `ctx::ResidualContext` — topo-sorted operator list, used today only
-  for documentation; the dispatcher walks operators in a fixed order.
 - `jac::StructuredJacobian`.
 """
 # Every field is concretely typed (note `DefT`/`JacT` for the parametric
@@ -177,7 +174,6 @@ struct StructuredOpsCache{
     beer_lambert_ws::WSBL
     geom_cache::GC
 
-    ctx::ResidualContext
     jac::JacT
 end
 
@@ -258,27 +254,6 @@ function _build_ops_cache(
         (is_ale && !is_reduced) ? GeometryADCache(def, ws; chunk_size = chunk_size) :
         nothing
 
-    # Operator list (used for the topo-sort; the dispatcher walks operators
-    # in a fixed order, but the context enables future hooks like
-    # `:T_s ∈ reads(op)`-based composition).
-    ops = Operator[ReactionSourceOperator(), ConductionOperator()]
-    if is_darcy
-        push!(ops, DarcyTransportOperator())
-    else
-        push!(ops, GasTransportOperator())
-    end
-    push!(ops, RadiationOperator())
-    push!(ops, BCThermalOperator())
-    push!(ops, BCMassOperator())
-    push!(ops, BCConvectionOperator())
-    if is_ale
-        push!(ops, ALEMeshVelocityOperator())
-    end
-    if is_with_chi
-        push!(ops, ChiOperator())
-    end
-    ctx = build_residual_context(ops)
-
     return StructuredOpsCache{
         typeof(material),
         typeof(bc_set),
@@ -319,7 +294,6 @@ function _build_ops_cache(
         chi_ws,
         beer_lambert_ws,
         geom_cache,
-        ctx,
         jac,
     )
 end
@@ -340,9 +314,6 @@ function _compute_jacobian!(
     ws,
 )
     zero!(cache.jac)
-    # Per-step state on the context: drop any prior provider-pushed
-    # derived-field primitives so consumers see a fresh map.
-    empty!(cache.ctx.derived_fields)
 
     # 1. Populate the typed state cache from `u` (Float64), refresh ALE
     #    geometry, then properties. Mirrors the order in `Problem._residual!`.
@@ -413,7 +384,6 @@ function _compute_jacobian!(
             cache.jac,
             ALEMeshVelocityOperator(),
             ws.state_cache,
-            cache.ctx,
             t,
             cache.ale_mesh_vel_ws,
             cache.layout,
@@ -429,7 +399,6 @@ function _compute_jacobian!(
         cache.jac,
         ReactionSourceOperator(),
         u,
-        cache.ctx,
         t,
         cache.reaction_ws,
         cache.material,
@@ -441,7 +410,6 @@ function _compute_jacobian!(
         cache.jac,
         ConductionOperator(),
         u,
-        cache.ctx,
         t,
         cache.conduction_ws,
         ws.state_cache,
@@ -455,7 +423,6 @@ function _compute_jacobian!(
             cache.jac,
             DarcyTransportOperator(),
             u,
-            cache.ctx,
             t,
             cache.darcy_ws,
             ws.state_cache,
@@ -468,7 +435,6 @@ function _compute_jacobian!(
             cache.jac,
             GasTransportOperator(),
             u,
-            cache.ctx,
             t,
             cache.gas_transport_ws,
             ws.state_cache,
@@ -504,7 +470,6 @@ function _compute_jacobian!(
             cache.jac,
             RadiationOperator(),
             u,
-            cache.ctx,
             t,
             cache.beer_lambert_ws,
             ws.state_cache,
@@ -522,7 +487,6 @@ function _compute_jacobian!(
             cache.jac,
             RadiationOperator(),
             u,
-            cache.ctx,
             t,
             nothing,
             cache.radiation_model,
@@ -533,7 +497,6 @@ function _compute_jacobian!(
         cache.jac,
         BCThermalOperator(),
         u,
-        cache.ctx,
         t,
         cache.bc_thermal_ws,
         ws.state_cache,
@@ -549,7 +512,6 @@ function _compute_jacobian!(
         cache.jac,
         BCMassOperator(),
         u,
-        cache.ctx,
         t,
         cache.bc_mass_ws,
         ws.state_cache,
@@ -567,7 +529,6 @@ function _compute_jacobian!(
         cache.jac,
         BCConvectionOperator(),
         u,
-        cache.ctx,
         t,
         cache.bc_convection_ws,
         ws.state_cache,
@@ -604,15 +565,7 @@ function _compute_jacobian!(
     #    against the z subvector. Writes directly into `cache.jac.A` since
     #    the sparsity pattern includes the geometry columns.
     if cache.geom_cache !== nothing
-        contribute_to_jacobian!(
-            cache.jac,
-            GeometryOperator(),
-            u,
-            cache.ctx,
-            t,
-            cache.geom_cache,
-            def,
-        )
+        contribute_to_jacobian!(cache.jac, GeometryOperator(), u, t, cache.geom_cache, def)
     end
 
     # 5. χ-row block (variable cross-section) — WithChi only. Writes the
@@ -623,7 +576,6 @@ function _compute_jacobian!(
             cache.jac,
             ChiOperator(),
             u,
-            cache.ctx,
             t,
             cache.chi_ws,
             ws.state_cache,

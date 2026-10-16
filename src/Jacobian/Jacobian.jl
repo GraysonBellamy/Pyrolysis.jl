@@ -47,7 +47,6 @@ include("sparsity.jl")
 include("strategies.jl")
 include("structured_couplings.jl")
 include("operators/Operator.jl")
-include("residual_context.jl")
 include("structured.jl")
 include("operators/reaction_source.jl")
 include("operators/conduction.jl")
@@ -57,7 +56,6 @@ include("operators/radiation.jl")
 include("operators/bc_thermal.jl")
 include("operators/bc_mass.jl")
 include("operators/bc_convection.jl")
-include("operators/operator_declarations.jl")
 include("operators/ale_mesh_velocity.jl")
 include("operators/chi.jl")
 # Geometry-block AD is wrapped in the `GeometryOperator` interface; the
@@ -94,7 +92,7 @@ export LinearSolveStrategy, DirectSolve, ApproxSolve
 
 # Operator interface (Layer 1) — visible so tests / downstream phases can
 # define their own operators.
-export Operator, ResidualContext, build_residual_context
+export Operator
 export ReactionSourceOperator, build_reaction_source_workspace
 export ConductionOperator, build_conduction_workspace
 export GasTransportOperator, build_gas_transport_workspace

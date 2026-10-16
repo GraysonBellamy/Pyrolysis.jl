@@ -50,10 +50,6 @@ Stateless tag; per-problem AD workspace lives on the backend cache.
 """
 struct GasTransportOperator <: Operator end
 
-reads(::GasTransportOperator) = ()
-writes(::GasTransportOperator) = ()
-stencil(::GasTransportOperator) = (cells = -1:1,)
-
 """
 	GasTransportADWorkspace{NC, CFG}
 
@@ -527,7 +523,6 @@ function _contribute_to_jacobian_analytical!(
     jac::StructuredJacobian,
     ::GasTransportOperator,
     u::AbstractVector,
-    ctx::ResidualContext,
     t::Real,
     ws::GasTransportADWorkspace{NC},
     state,
@@ -836,7 +831,6 @@ function contribute_to_jacobian!(
     jac::StructuredJacobian,
     op::GasTransportOperator,
     u::AbstractVector,
-    ctx::ResidualContext,
     t::Real,
     ws::GasTransportADWorkspace{NC},
     state,
@@ -848,7 +842,6 @@ function contribute_to_jacobian!(
         jac,
         op,
         u,
-        ctx,
         t,
         ws,
         state,
@@ -865,7 +858,7 @@ end
 
 """
 	contribute_to_jacobian!(jac, op::GasTransportOperator,
-	                        u, ctx, t, ws, state, mesh, material, layout) -> nothing
+	                        u, t, ws, state, mesh, material, layout) -> nothing
 
 Per-cell AD path. Each cell `i`:
 
@@ -880,7 +873,6 @@ function _contribute_to_jacobian_ad!(
     jac::StructuredJacobian,
     ::GasTransportOperator,
     u::AbstractVector,
-    ctx::ResidualContext,
     t::Real,
     ws::GasTransportADWorkspace{NC},
     state,

@@ -19,8 +19,6 @@ using Pyrolysis.Materials: Material
 using Pyrolysis.Jacobian:
     StructuredJacobian,
     DarcyTransportOperator,
-    ResidualContext,
-    build_residual_context,
     DarcyTransportADWorkspace,
     build_darcy_transport_workspace,
     build_sparsity
@@ -49,7 +47,6 @@ function _assemble_darcy(def, ws, u, t, path::Symbol)
     jac = StructuredJacobian(A)
 
     dw = build_darcy_transport_workspace(def.material)
-    ctx = build_residual_context([DarcyTransportOperator()])
 
     populate!(ws.state_cache, u, ws.layout)
     if mesh_mode(def.mode) isa Pyrolysis.Problem.ALE
@@ -69,7 +66,6 @@ function _assemble_darcy(def, ws, u, t, path::Symbol)
             jac,
             DarcyTransportOperator(),
             u,
-            ctx,
             Float64(t),
             dw,
             ws.state_cache,
@@ -82,7 +78,6 @@ function _assemble_darcy(def, ws, u, t, path::Symbol)
             jac,
             DarcyTransportOperator(),
             u,
-            ctx,
             Float64(t),
             dw,
             ws.state_cache,

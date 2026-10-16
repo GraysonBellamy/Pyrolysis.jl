@@ -28,10 +28,7 @@ using Pyrolysis.Physics: compute_gas_fluxes!, compute_gas_convective_source!
 using Pyrolysis.Discretization: divergence_species_1d!
 using Pyrolysis.Problem: populate!, build_ad_workspace
 using Pyrolysis.Jacobian:
-    GasTransportOperator,
-    build_gas_transport_workspace,
-    StructuredJacobian,
-    build_residual_context
+    GasTransportOperator, build_gas_transport_workspace, StructuredJacobian
 
 include(joinpath(@__DIR__, "..", "perf", "perf_helpers.jl"))
 
@@ -168,13 +165,6 @@ end
 
 @testset "GasTransportOperator (Fickian)" begin
 
-    @testset "interface declarations" begin
-        op = GasTransportOperator()
-        @test Pyrolysis.Jacobian.reads(op) == ()
-        @test Pyrolysis.Jacobian.writes(op) == ()
-        @test Pyrolysis.Jacobian.stencil(op) == (cells = -1:1,)
-    end
-
     def, ws, u, _ = build_baseline_eulerian()
     n = ws.layout.n_cells
     NC = n_components(ws.layout)
@@ -271,7 +261,6 @@ end
 
         op = GasTransportOperator()
         ws_ad = build_gas_transport_workspace(material)
-        ctx = build_residual_context([op])
 
         populate!(ws.state_cache, u, ws.layout)
         Pyrolysis.Problem.update_state_geometry!(
@@ -284,7 +273,6 @@ end
             jac,
             op,
             u,
-            ctx,
             0.0,
             ws_ad,
             ws.state_cache,

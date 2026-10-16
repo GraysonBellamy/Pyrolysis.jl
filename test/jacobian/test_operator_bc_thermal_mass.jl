@@ -44,8 +44,7 @@ using Pyrolysis.Jacobian:
     BCMassOperator,
     build_bc_thermal_workspace,
     build_bc_mass_workspace,
-    StructuredJacobian,
-    build_residual_context
+    StructuredJacobian
 
 include(joinpath(@__DIR__, "..", "perf", "perf_helpers.jl"))
 
@@ -270,17 +269,6 @@ end
 
 @testset "BCThermalOperator + BCMassOperator" begin
 
-    @testset "interface declarations" begin
-        thermal = BCThermalOperator()
-        mass = BCMassOperator()
-        @test Pyrolysis.Jacobian.reads(thermal) == ()
-        @test Pyrolysis.Jacobian.writes(thermal) == (:T_s,)
-        @test Pyrolysis.Jacobian.stencil(thermal) == (cells = 0:0,)
-        @test Pyrolysis.Jacobian.reads(mass) == ()
-        @test Pyrolysis.Jacobian.writes(mass) == ()
-        @test Pyrolysis.Jacobian.stencil(mass) == (cells = 0:0,)
-    end
-
     def, ws, u = _build_eulerian_convective_problem()
     n = ws.layout.n_cells
     NC = n_components(ws.layout)
@@ -397,7 +385,6 @@ end
         fill!(A.nzval, 0.0)
         jac = StructuredJacobian(A)
 
-        ctx = build_residual_context([BCThermalOperator(), BCMassOperator()])
         ws_thermal = build_bc_thermal_workspace(material)
         ws_mass = build_bc_mass_workspace(material)
 
@@ -405,7 +392,6 @@ end
             jac,
             BCThermalOperator(),
             u,
-            ctx,
             0.0,
             ws_thermal,
             ws.state_cache,
@@ -419,7 +405,6 @@ end
             jac,
             BCMassOperator(),
             u,
-            ctx,
             0.0,
             ws_mass,
             ws.state_cache,
@@ -506,7 +491,6 @@ end
         A = sparse(I, J_idx, V, n_total, n_total)
         fill!(A.nzval, 0.0)
         jac = StructuredJacobian(A)
-        ctx = build_residual_context([BCThermalOperator(), BCMassOperator()])
         ws_thermal = build_bc_thermal_workspace(material)
         ws_mass = build_bc_mass_workspace(material)
 
@@ -514,7 +498,6 @@ end
             jac,
             BCThermalOperator(),
             u,
-            ctx,
             0.0,
             ws_thermal,
             ws.state_cache,
@@ -528,7 +511,6 @@ end
             jac,
             BCMassOperator(),
             u,
-            ctx,
             0.0,
             ws_mass,
             ws.state_cache,

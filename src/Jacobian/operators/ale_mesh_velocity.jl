@@ -30,6 +30,16 @@ using ..Problem: NoChi, WithChi
 using ..Residual: _compute_ale_mesh_velocity!, _compute_theta_A
 
 """
+	ALEMeshVelocityOperator <: Operator
+
+Stateless tag. Every contribution is a structured coupling, pushed by
+`contribute_to_structured!`: the z-row × (T, ξ) prefix-sum blocks and, under
+WithChi, the θ_A rank-1 channels. The backend assembles the cell-local ξ-row
+dilation `−ξⱼθᵢ` from this operator's cached strain-rate derivatives.
+"""
+struct ALEMeshVelocityOperator <: Operator end
+
+"""
 	ALEMeshVelocityWorkspace{Tu, NC, NR}
 
 Per-problem workspace for [`ALEMeshVelocityOperator`](@ref). Holds the
@@ -470,7 +480,7 @@ end
 # ============================================================================
 
 """
-	contribute_to_structured!(jac, op::ALEMeshVelocityOperator, state, ctx, t,
+	contribute_to_structured!(jac, op::ALEMeshVelocityOperator, state, t,
 	                          mesh_vel_ws, layout, chi_mode_tag, n_global;
 	                          assembly_profile = :full) -> nothing
 
@@ -505,7 +515,6 @@ function contribute_to_structured!(
     jac::StructuredJacobian,
     ::ALEMeshVelocityOperator,
     state,
-    ctx::ResidualContext,
     ::Real,
     mesh_vel_ws::ALEMeshVelocityWorkspace,
     layout,

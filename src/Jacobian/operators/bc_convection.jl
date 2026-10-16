@@ -63,10 +63,6 @@ Stateless tag.
 """
 struct BCConvectionOperator <: Operator end
 
-reads(::BCConvectionOperator) = (:T_s,)
-writes(::BCConvectionOperator) = ()
-stencil(::BCConvectionOperator) = (cells = -1:1,)
-
 """
 	BCConvectionADWorkspace{NC, CFG}
 
@@ -391,7 +387,7 @@ end
 end
 
 """
-	contribute_to_jacobian!(jac, op::BCConvectionOperator, u, ctx, t, ws,
+	contribute_to_jacobian!(jac, op::BCConvectionOperator, u, t, ws,
 	                        state, mesh, material, layout, bc_set,
 	                        darcy_active, radiation_model) -> nothing
 
@@ -405,7 +401,6 @@ function contribute_to_jacobian!(
     jac::StructuredJacobian,
     ::BCConvectionOperator,
     u::AbstractVector,
-    ctx::ResidualContext,
     t::Real,
     ws::BCConvectionADWorkspace{NC},
     state,

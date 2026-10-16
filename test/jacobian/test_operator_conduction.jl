@@ -29,11 +29,7 @@ using Pyrolysis.Properties: PropertyCache, update_properties!, effective_heat_ca
 using Pyrolysis.Physics: compute_conductive_fluxes!
 using Pyrolysis.Discretization: divergence_1d!
 using Pyrolysis.Problem: populate!, build_ad_workspace
-using Pyrolysis.Jacobian:
-    ConductionOperator,
-    build_conduction_workspace,
-    StructuredJacobian,
-    build_residual_context
+using Pyrolysis.Jacobian: ConductionOperator, build_conduction_workspace, StructuredJacobian
 
 include(joinpath(@__DIR__, "..", "perf", "perf_helpers.jl"))
 
@@ -158,13 +154,6 @@ end
 
 @testset "ConductionOperator" begin
 
-    @testset "interface declarations" begin
-        op = ConductionOperator()
-        @test Pyrolysis.Jacobian.reads(op) == ()
-        @test Pyrolysis.Jacobian.writes(op) == ()
-        @test Pyrolysis.Jacobian.stencil(op) == (cells = -1:1,)
-    end
-
     # ----------------------------------------------------------
     # Eulerian PMMA fixture
     # ----------------------------------------------------------
@@ -270,7 +259,6 @@ end
 
         op = ConductionOperator()
         ws_ad = build_conduction_workspace(material)
-        ctx = build_residual_context([op])
 
         # Populate state cache for the operator.
         populate!(ws.state_cache, u, ws.layout)
@@ -284,7 +272,6 @@ end
             jac,
             op,
             u,
-            ctx,
             0.0,
             ws_ad,
             ws.state_cache,

@@ -20,8 +20,6 @@ using Pyrolysis.Materials: Material
 using Pyrolysis.Jacobian:
     StructuredJacobian,
     ConductionOperator,
-    ResidualContext,
-    build_residual_context,
     ConductionADWorkspace,
     build_conduction_workspace,
     JacobianSpec,
@@ -56,7 +54,6 @@ function _assemble_conduction(def, ws, u, t, path::Symbol)
     jac = StructuredJacobian(A)
 
     cond_ws = build_conduction_workspace(def.material)
-    ctx = build_residual_context([ConductionOperator()])
 
     # Populate state cache & geometry (mirrors what
     # `Structured._compute_jacobian!` does before walking operators).
@@ -78,7 +75,6 @@ function _assemble_conduction(def, ws, u, t, path::Symbol)
             jac,
             ConductionOperator(),
             u,
-            ctx,
             Float64(t),
             cond_ws,
             ws.state_cache,
@@ -91,7 +87,6 @@ function _assemble_conduction(def, ws, u, t, path::Symbol)
             jac,
             ConductionOperator(),
             u,
-            ctx,
             Float64(t),
             cond_ws,
             ws.state_cache,

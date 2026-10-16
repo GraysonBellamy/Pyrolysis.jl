@@ -41,10 +41,6 @@ cross-section (WithChi) materials.
 """
 struct ChiOperator <: Operator end
 
-reads(::ChiOperator) = ()
-writes(::ChiOperator) = ()
-stencil(::ChiOperator) = (cells = 0:0,)
-
 """
 	ChiADWorkspace{Tu, NC, NR, CFG}
 
@@ -155,7 +151,7 @@ function _chi_residual_kernel!(
 end
 
 """
-	contribute_to_jacobian!(jac, op::ChiOperator, u, ctx, t, ws,
+	contribute_to_jacobian!(jac, op::ChiOperator, u, t, ws,
 	                        state, mesh, material, layout, ale_mesh_vel_ws)
 	    -> nothing
 
@@ -170,7 +166,6 @@ function contribute_to_jacobian!(
     jac::StructuredJacobian,
     ::ChiOperator,
     u::AbstractVector,
-    ctx::ResidualContext,
     t::Real,
     ws::ChiADWorkspace{Tu,NC,NR},
     state,

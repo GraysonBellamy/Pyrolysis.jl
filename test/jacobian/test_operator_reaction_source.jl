@@ -35,8 +35,6 @@ using Pyrolysis.Jacobian:
     ReactionSourceOperator,
     build_reaction_source_workspace,
     StructuredJacobian,
-    ResidualContext,
-    build_residual_context,
     contribute_to_jacobian!,
     FastSparsityMap
 
@@ -144,19 +142,6 @@ end
     material = def.material
     NR = n_reactions(material)
 
-    @testset "interface declarations" begin
-        op = ReactionSourceOperator()
-        @test Pyrolysis.Jacobian.reads(op) == ()
-        @test Pyrolysis.Jacobian.writes(op) == ()
-        @test Pyrolysis.Jacobian.stencil(op) == (cells = 0:0,)
-    end
-
-    @testset "ResidualContext: solo operator topo-sorts to length 1" begin
-        ctx = build_residual_context([ReactionSourceOperator()])
-        @test length(ctx.order) == 1
-        @test ctx.order[1] isa ReactionSourceOperator
-    end
-
     @testset "apply! matches per-cell residual slice — hot+gas state" begin
         _set_state!(u, n, 1200.0, (400.0, 8.0))
         populate!(ws.state_cache, u, ws.layout)
@@ -226,9 +211,8 @@ end
 
         op = ReactionSourceOperator()
         ws_ad = build_reaction_source_workspace(material)
-        ctx = build_residual_context([op])
 
-        contribute_to_jacobian!(jac, op, u, ctx, 0.0, ws_ad, material, ws.layout, ws.mesh)
+        contribute_to_jacobian!(jac, op, u, 0.0, ws_ad, material, ws.layout, ws.mesh)
 
         # Compare against the DenseAD reference.
         J_ref = _reference_dense_jacobian(u, ws.layout, material)

@@ -85,14 +85,6 @@ volumetric source whose Jacobian factors as
 """
 struct RadiationOperator <: Operator end
 
-# Beer-Lambert reads property `:alpha` (effective absorption coeff)
-# and writes the derived field `:q_rad` plus its working `:I_in` for
-# the framework composition. Other modes use empty declarations
-# (the apply! / contribute_to_jacobian! is a no-op).
-reads(::RadiationOperator) = ()
-writes(::RadiationOperator) = ()
-stencil(::RadiationOperator) = (cells = 0:0,)
-
 """
 	BeerLambertWorkspace
 
@@ -326,7 +318,7 @@ end
 
 """
 	contribute_to_jacobian!(jac, op::RadiationOperator,
-	                        u, ctx, t, ws, model) -> nothing
+	                        u, t, ws, model) -> nothing
 
 No-op for `NO_RADIATION` / `SURFACE_ABSORPTION` / `P1_QUASI_STEADY`. For
 `BEER_LAMBERT`, callers must dispatch to the workspace-carrying overload
@@ -336,7 +328,6 @@ function contribute_to_jacobian!(
     ::StructuredJacobian,
     ::RadiationOperator,
     ::AbstractVector,
-    ::ResidualContext,
     ::Real,
     ::Nothing,
     model::RadiationModel,
@@ -355,7 +346,7 @@ function contribute_to_jacobian!(
 end
 
 """
-	contribute_to_jacobian!(jac, op::RadiationOperator, u, ctx, t, ws,
+	contribute_to_jacobian!(jac, op::RadiationOperator, u, t, ws,
 	                        state, mesh, prop_cache, material, layout, I_radiation,
 	                        model::RadiationModel, apply_kirchhoff_absorptivity) -> nothing
 
@@ -388,7 +379,6 @@ function contribute_to_jacobian!(
     jac::StructuredJacobian,
     ::RadiationOperator,
     u::AbstractVector,
-    ctx::ResidualContext,
     t::Real,
     ws::BeerLambertWorkspace,
     state,

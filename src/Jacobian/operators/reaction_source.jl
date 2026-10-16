@@ -42,14 +42,8 @@ of `contribute_to_jacobian!`.
 """
 struct ReactionSourceOperator <: Operator end
 
-# Cell-local: no derived-field reads / writes at the framework level. Properties
-# (ρcp_eff) are recomputed inside `apply_cell!` so the chain rule is captured
-# by the local AD frontier; we deliberately do not declare `:ρcp` as a
-# `:reads` field here — properties are inlined per operator; a dedicated
-# `PropertyEvaluationOperator` is deferred.
-reads(::ReactionSourceOperator) = ()
-writes(::ReactionSourceOperator) = ()
-stencil(::ReactionSourceOperator) = (cells = 0:0,)
+# Cell-local. Properties (ρcp_eff) are recomputed inside `apply_cell!`, so the
+# local AD captures their chain rule.
 
 """
 	ReactionScratch{Tu, NC, NR}
@@ -201,7 +195,7 @@ end
 
 """
 	contribute_to_jacobian!(jac, op::ReactionSourceOperator,
-	                        u, ctx, t, ws, material, layout, mesh) -> nothing
+	                        u, t, ws, material, layout, mesh) -> nothing
 
 Default cell-local AD path. For each live cell `i` (`1:mesh.n_active_cells`):
 
@@ -219,7 +213,6 @@ function contribute_to_jacobian!(
     jac::StructuredJacobian,
     op::ReactionSourceOperator,
     u::AbstractVector,
-    ctx::ResidualContext,
     t::Real,
     ws::ReactionSourceADWorkspace{Tu,NC,NR},
     material::Material{NC,NR},

@@ -43,10 +43,6 @@ Stateless tag. Per-problem AD workspace lives on the backend cache.
 """
 struct ConductionOperator <: Operator end
 
-reads(::ConductionOperator) = ()
-writes(::ConductionOperator) = ()
-stencil(::ConductionOperator) = (cells = -1:1,)
-
 """
 	ConductionADWorkspace{NC, CFG}
 
@@ -465,7 +461,7 @@ there, with zero sensitivity to either side).
 end
 
 """
-	_contribute_to_jacobian_analytical!(jac, op::ConductionOperator, u, ctx, t,
+	_contribute_to_jacobian_analytical!(jac, op::ConductionOperator, u, t,
 	                                     ws, state, mesh, material, layout)
 
 Analytical override of `contribute_to_jacobian!` for
@@ -487,7 +483,6 @@ function _contribute_to_jacobian_analytical!(
     jac::StructuredJacobian,
     ::ConductionOperator,
     u::AbstractVector,
-    ctx::ResidualContext,
     t::Real,
     ws::ConductionADWorkspace{NC},
     state,
@@ -628,7 +623,7 @@ end
 
 """
 	contribute_to_jacobian!(jac, op::ConductionOperator,
-	                        u, ctx, t, ws, state, mesh, material, layout) -> nothing
+	                        u, t, ws, state, mesh, material, layout) -> nothing
 
 Default per-cell AD path. For each cell `i`:
 
@@ -645,7 +640,6 @@ function _contribute_to_jacobian_ad!(
     jac::StructuredJacobian,
     ::ConductionOperator,
     u::AbstractVector,
-    ctx::ResidualContext,
     t::Real,
     ws::ConductionADWorkspace{NC},
     state,
@@ -736,7 +730,6 @@ function contribute_to_jacobian!(
     jac::StructuredJacobian,
     op::ConductionOperator,
     u::AbstractVector,
-    ctx::ResidualContext,
     t::Real,
     ws::ConductionADWorkspace{NC},
     state,
@@ -748,7 +741,6 @@ function contribute_to_jacobian!(
         jac,
         op,
         u,
-        ctx,
         t,
         ws,
         state,
