@@ -594,7 +594,7 @@ const WP_XI0_DRY = (
 )
 
 """
-	build_and_solve(θ, scenario; stage=1, n_output=601, verbose=false, kinetics_set=:constant, use_transpiration_bc=false, jacobian_strategy=nothing)
+	build_and_solve(θ, scenario; stage=1, n_output=601, verbose=false, kinetics_set=:constant, jacobian_strategy=nothing)
 
 Build a white pine pyrolysis problem with conductivities determined by θ at the
 given parameter stage, run it for `scenario.t_final` seconds, and return the
@@ -604,10 +604,6 @@ penalty in the loss function).
 Initial moisture concentration is read from `scenario.c0_moisture` (kg/m³).
 For older Scenario tuples lacking that field, the slot defaults to 0.
 `kinetics_set` selects `:constant`, `:kirchhoff_123`, or `:kirchhoff_all`.
-`use_transpiration_bc` is OFF by default — gas sensible enthalpy is carried by
-the volumetric advection source S_conv (ThermaKin Eq.17); enabling the surface
-transpiration term alongside it double-counts and is rejected at construction.
-Gas mass transport and MLR are unaffected by this flag.
 
 `jacobian_strategy` overrides the Jacobian linear-solve strategy. `nothing`
 (default) keeps the package default `Structured(strategy = DirectSolve())`.
@@ -634,7 +630,6 @@ function build_and_solve(
     verbose::Bool = false,
     log_level::Union{Nothing,Logging.LogLevel} = nothing,
     kinetics_set::Symbol = :constant,
-    use_transpiration_bc::Bool = false,
     blowing::AbstractBlowingModel = CouetteFilm(),
     use_emission_split::Bool = true,
     kinetics_dE = ntuple(_ -> 0.0, 5),
@@ -715,7 +710,6 @@ function build_and_solve(
                 problem;
                 use_ale = true,
                 radiation_model = SURFACE_ABSORPTION,
-                use_transpiration_bc = use_transpiration_bc,
                 min_thickness = 0.5e-3,
             )
 
@@ -734,7 +728,6 @@ function build_and_solve(
             min_thickness = 0.5e-3,
             handle_depletion = false,
             jacobian = jac_spec,
-            use_transpiration_bc = use_transpiration_bc,
             integrator = KenCarp4(linsolve = SparspakFactorization()),
         )
         if log_level === nothing

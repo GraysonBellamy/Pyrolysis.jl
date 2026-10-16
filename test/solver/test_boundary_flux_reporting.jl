@@ -13,9 +13,8 @@ Post-fix convention: per-BC `net` is the flux the surface energy balance
 actually applies at the face (it matches `evaluate_bc_flux_and_derivative`
 for every model), `CombinedThermalBC` sums children's nets, and the
 Beer–Lambert volumetric deposit is reported separately as
-`extras.volumetric_absorption`. The ledger identity
-`net = q_conduction + q_transpiration` (at the solved T_s) therefore holds
-in every radiation regime.
+`extras.volumetric_absorption`. The ledger identity `net = q_conduction`
+(at the solved T_s) therefore holds in every radiation regime.
 """
 
 using Test
@@ -173,10 +172,9 @@ end
 
     ex = sol.extras
     for i in eachindex(sol.t)
-        # Ledger identity: applied net = conduction + transpiration at the
-        # solved T_s. Pre-fix, BEER_LAMBERT broke this by +α·q_ext (~45 kW/m²).
-        @test ex.surface_heat_flux_net[i] ≈
-              ex.surface_heat_flux_conduction[i] + ex.surface_heat_flux_transpiration[i] atol =
+        # Ledger identity: applied net = conduction at the solved T_s.
+        # Re-including α·q_ext under BEER_LAMBERT would break this by ~45 kW/m².
+        @test ex.surface_heat_flux_net[i] ≈ ex.surface_heat_flux_conduction[i] atol =
             max(1.0, 1e-6 * abs(ex.surface_heat_flux_net[i]))
     end
 

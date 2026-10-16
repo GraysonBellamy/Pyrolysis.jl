@@ -108,8 +108,8 @@ function _reference_bc_contribution(
     update_properties!(prop_cache, state, mesh, material)
 
     # Match `compute_rhs!` ordering: populate J_gas (interior + BC) BEFORE
-    # the thermal BC solve so the surface transpiration term sees the actual
-    # boundary-face mass flux.
+    # the thermal BC solve so the blowing models see the actual boundary-face
+    # mass flux.
     compute_gas_fluxes!(J_gas_buf, state, mesh, prop_cache, material)
     apply_mass_bc_flux!(
         J_gas_buf,
@@ -125,10 +125,7 @@ function _reference_bc_contribution(
 
     # Conductive heat flux at interior faces (zero at boundary).
     compute_conductive_fluxes!(q_buf, state, mesh, prop_cache)
-    # Apply thermal BCs — overwrites q_buf at boundary faces. Transpiration
-    # is OFF, matching production: `to_problem_def` rejects
-    # `use_transpiration_bc = true`, so the residual's surface Newton always
-    # sees ṁ_g = 0 and the Jacobian must differentiate that same balance.
+    # Apply thermal BCs — overwrites q_buf at boundary faces.
     apply_thermal_bc_flux!(
         q_buf,
         state,
@@ -140,8 +137,7 @@ function _reference_bc_contribution(
         t,
         top_face_ids,
         bottom_face_ids,
-        radiation_model;
-        use_transpiration_bc = false,
+        radiation_model,
     )
     # Isolate BC's contribution to dT via divergence of (zero interior, BC at
     # boundary).
@@ -560,9 +556,9 @@ end
         # Entries of interest at the top cell's T-row: the T column, and the
         # ξ-solid column — the ∂T_s/∂ξ chain through k_eff(ξ) that the legacy
         # analytical path missed. (The ξ-gas column is exactly zero here:
-        # conductivity mixes on the renormalized solid basis, and with
-        # transpiration hard-zeroed — matching the residual — no other
-        # thermal-BC path reaches ξ_gas at a uniform-T state.)
+        # conductivity mixes on the renormalized solid basis, and without a
+        # blowing model no other thermal-BC path reaches ξ_gas at a uniform-T
+        # state.)
         top = n
         ξ_solid_off = n + (1 - 1) * n   # solid is component 1
         ξ_gas_off = n + (2 - 1) * n     # gas is component 2

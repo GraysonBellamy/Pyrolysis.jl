@@ -19,27 +19,22 @@ The two gas-coupled volumetric sources implemented here:
    enthalpy carried away by gas *at the local temperature where it is generated*,
    measured from the `T_ref` datum. Dropped in `:standard` and added back as a
    cell-centered source when `energy_form = :with_generation_sink`. `T_ref` is
-   the surface ambient temperature; the same `Δh_g` quadrature as the surface
-   transpiration BC is used so the two share one discrete ledger.
+   the surface ambient temperature.
    **Datum requirement:** `S_gen` is consistent only with `T_ref`-datum reaction
    heats — see `compute_gas_generation_sink!`.
 
-**Convention (S_conv only).** The supported default is the ThermaKin Eq.17 /
-FDS / Gpyro convention: gas enthalpy transport is carried **entirely** by the
-volumetric advection term `S_conv`, with a plain convective+radiative surface BC
-and **no** surface transpiration term. Note the algebraic identity (constant cp):
+**Convention (S_conv only).** Gas enthalpy transport is carried **entirely**
+by the volumetric advection term `S_conv`, with a plain convective+radiative
+surface BC and no surface gas-enthalpy term (the ThermaKin Eq.17 / FDS / Gpyro
+convention). Note the algebraic identity (constant cp):
 
 ```
 ∫(S_conv + S_gen) dz = −G,    G ≡ Σ_g ṁ_g · Δh_g(T_s, T_ref) > 0   (surface outflow)
 ```
 
-so `∫S_conv = −G − ∫S_gen`. Dropping `S_gen` in `:standard` therefore leaves a
-deficit of only `|∫S_gen|`, **not** the full outflow `G`. The
-surface transpiration BC, if also enabled, applies the *full* `G` on top of the
-already-present `∫S_conv` — double-counting the advective enthalpy by `|∫S_conv|`.
-For this reason the transpiration BC must NOT be combined with `S_conv`; it is
-off by default and rejected at problem construction when combined (see
-`Problem.to_problem_def`).
+so `∫S_conv = −G − ∫S_gen`: `S_conv` already carries all but `|∫S_gen|` of the
+outflow enthalpy `G`. A surface term applying the full `G` on top of `S_conv`
+would double-count the advective enthalpy by `|∫S_conv|`.
 
 Reference: ThermaKin Eq 17 (advection term only), Bird/Stewart/Lightfoot Ch 11.
 The approximation costs are visible at runtime via the diagnostics callback.
@@ -189,9 +184,8 @@ S_gen,i = −Σ_{g: is_gas} Δh_g(T_i, T_ref) · (∇·J_g)_i      [W/m³]
 
 where `Δh_g(T_i, T_ref) = ∫_{T_ref}^{T_i} cp_g dτ` is the true sensible-enthalpy
 integral (midpoint rule, via `delta_enthalpy`). Using the integral rather than the
-single-point product `(T_i − T_ref)·cp_g(T_i)` is required for the discrete energy
-ledger to telescope exactly with the surface transpiration BC, which uses the same
-`Δh_g` quadrature and the same `T_ref` (ambient temperature from the BC).
+single-point product `(T_i − T_ref)·cp_g(T_i)` keeps the term an exact enthalpy
+difference; `T_ref` is the ambient temperature from the BC.
 
 **DATUM REQUIREMENT — read before enabling.** `S_gen` is consistent ONLY when
 every reaction heat `h_r` is referenced to the `T_ref` (≈298.15 K) ambient
@@ -234,9 +228,7 @@ function compute_gas_generation_sink!(
 end
 
 # Compile-time unrolled inner sum: Σ_{g: is_gas} Δh_g(T_i, T_ref) · (∇·J_g)_i.
-# Uses the true sensible-enthalpy integral `delta_enthalpy` (midpoint rule), the
-# same quadrature as the surface transpiration BC, so the discrete energy ledger
-# telescopes exactly: ∫(S_conv + S_gen) = −Σ_g ṁ_g·Δh_g(T_s, T_ref).
+# Uses the true sensible-enthalpy integral `delta_enthalpy` (midpoint rule).
 @generated function _gas_generation_sink_unrolled(
     T_i::Real,
     div_J::AbstractMatrix,

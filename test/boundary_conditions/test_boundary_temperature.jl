@@ -29,33 +29,20 @@ using Pyrolysis.Discretization:
     check_boundary_energy_balance,
     update_boundary_state!,
     evaluate_bc_flux_and_derivative
-using Pyrolysis.Materials: T_REF, GaseousComponent, SolidComponent, Material, Reaction
-using Pyrolysis.BoundaryConditions: ambient_temperature
+using Pyrolysis.Materials: GaseousComponent, SolidComponent, Material, Reaction
 using Pyrolysis.Discretization: compute_boundary_heat_fluxes
 using Pyrolysis.Properties: effective_emissivity, effective_absorptivity
 
-# Test helper: constructs a tiny inert single-solid material so that the
-# transpiration loop is well-defined but contributes zero (no gas component).
-# Tests below pass this material with `zero_J = ()` to recover the
-# no-blowing limit — equivalent to the no-blowing boundary solve and
+# Test helper: a tiny inert single-solid material (no gas component). Tests
+# below pass it with a zero outward flux to recover the no-blowing limit,
 # convenient for closed-form analytic verification.
 const _BC_TEST_SOLID = SolidComponent(:test_solid; ρ = 1000.0, c = 1000.0, k = 0.2)
 const _BC_TEST_MAT = Material(name = :bc_test_mat, components = (_BC_TEST_SOLID,))
 const _BC_ZERO_J = ntuple(_ -> 0.0, Val(1))
 
-# Wrapper: no-blowing call, T_ref resolved from BC ambient (or T_REF fallback).
-_solve_bt(T_cell, k, Δz, bc, t, ε; kwargs...) = solve_boundary_temperature(
-    T_cell,
-    k,
-    Δz,
-    bc,
-    _BC_TEST_MAT,
-    _BC_ZERO_J,
-    ambient_temperature(bc, t, Float64(T_REF)),
-    t,
-    ε;
-    kwargs...,
-)
+# Wrapper: no-blowing call.
+_solve_bt(T_cell, k, Δz, bc, t, ε; kwargs...) =
+    solve_boundary_temperature(T_cell, k, Δz, bc, _BC_TEST_MAT, _BC_ZERO_J, t, ε; kwargs...)
 
 @testset "Boundary Temperature Solver" begin
 
@@ -250,75 +237,25 @@ _solve_bt(T_cell, k, Δz, bc, t, ε; kwargs...) = solve_boundary_temperature(
             @test state50.T_surface > state10.T_surface
         end
 
-        @testset "Transpiration enthalpy sign" begin
+        @testset "Outward gas flux enters only through blowing" begin
             solid = SolidComponent(:test_solid; ρ = 1000.0, c = 1000.0, k = 0.2)
             gas = GaseousComponent(:test_gas; M = 0.044, c = 1500.0, k = 0.03, λ = 1e-5)
-            material = Material(name = :transpiration_sign_test, components = (solid, gas))
+            material = Material(name = :gas_flux_test, components = (solid, gas))
 
-            T_cell = 700.0
-            T_ref = 300.0
-            k_eff = 0.2
-            Δz_half = 50e-6
-            q_ext = 30000.0
-            ε_eff = 0.9
-            bc = HeatFluxBC(q_ext)
-
-            no_blowing = solve_boundary_temperature(
-                T_cell,
-                k_eff,
-                Δz_half,
-                bc,
-                material,
-                (0.0, 0.0),
-                T_ref,
-                0.0,
-                ε_eff,
-            )
-            outward_hot_gas = solve_boundary_temperature(
-                T_cell,
-                k_eff,
-                Δz_half,
-                bc,
-                material,
-                (0.0, 0.04),
-                T_ref,
-                0.0,
-                ε_eff,
-            )
-            inward_hot_gas = solve_boundary_temperature(
-                T_cell,
-                k_eff,
-                Δz_half,
-                bc,
-                material,
-                (0.0, -0.04),
-                T_ref,
-                0.0,
-                ε_eff,
-            )
-
-            @test no_blowing.converged
-            @test outward_hot_gas.converged
-            @test inward_hot_gas.converged
-
-            # Positive outward gas carries sensible enthalpy away from the surface,
-            # reducing the conducted heat needed to balance the imposed flux.
-            @test outward_hot_gas.T_surface < no_blowing.T_surface
-            @test outward_hot_gas.q_conducted < no_blowing.q_conducted
-            @test outward_hot_gas.q_applied - outward_hot_gas.q_conducted > 0.0
-
-            # Negative "outward" flux is gas entering from the ambient side. The
-            # transpiration term is UPWINDED to the donor temperature: entering
-            # gas crosses the face at T_∞ = T_ref carrying Δh_g(T_ref,T_ref) = 0,
-            # so it makes no contribution to the surface balance (it is heated to
-            # T_s volumetrically inside). Inflow therefore leaves the surface
-            # temperature and conducted flux unchanged from the no-blowing case.
-            @test inward_hot_gas.T_surface ≈ no_blowing.T_surface
-            @test inward_hot_gas.q_conducted ≈ no_blowing.q_conducted
-            @test inward_hot_gas.q_applied - inward_hot_gas.q_conducted ≈ 0.0 atol = 1e-9
-            @test inward_hot_gas.q_transpired ≈ 0.0 atol = 1e-9
-            # Outward gas, by contrast, records a positive transpiration sink.
-            @test outward_hot_gas.q_transpired > 0.0
+            # A prescribed flux has no convective member, so the gas crossing
+            # the face changes nothing: the surface balance carries no
+            # gas-enthalpy term (S_conv carries it volumetrically).
+            bc = HeatFluxBC(30000.0)
+            solve(J) =
+                solve_boundary_temperature(700.0, 0.2, 50e-6, bc, material, J, 0.0, 0.9)
+            no_flux = solve((0.0, 0.0))
+            @test no_flux.converged
+            for J in ((0.0, 0.04), (0.0, -0.04))
+                st = solve(J)
+                @test st.converged
+                @test st.T_surface == no_flux.T_surface
+                @test st.q_conducted == no_flux.q_conducted
+            end
         end
 
     end
@@ -602,7 +539,6 @@ _solve_bt(T_cell, k, Δz, bc, t, ε; kwargs...) = solve_boundary_temperature(
                 T_top,
                 50000.0,
                 50000.0,
-                0.0,
                 750.0,
                 0.2,
                 50e-6,
@@ -611,7 +547,6 @@ _solve_bt(T_cell, k, Δz, bc, t, ε; kwargs...) = solve_boundary_temperature(
             )
             mesh.boundary_states[2] = Pyrolysis.Geometry.BoundaryState(
                 T_bottom,
-                0.0,
                 0.0,
                 0.0,
                 350.0,
@@ -636,16 +571,14 @@ _solve_bt(T_cell, k, Δz, bc, t, ε; kwargs...) = solve_boundary_temperature(
                 600.0,    # T_surface
                 10000.0,  # q_applied
                 10000.0,  # q_conducted (matching!)
-                0.0,      # q_transpired
                 550.0,    # T_cell
                 0.2,      # k_eff
                 50e-6,    # Δz_half
                 true,     # converged
-                3,         # iterations
+                3,        # iterations
             )
             mesh_test.boundary_states[2] = Pyrolysis.Geometry.BoundaryState(
                 350.0,
-                0.0,
                 0.0,
                 0.0,
                 350.0,
@@ -665,12 +598,11 @@ _solve_bt(T_cell, k, Δz, bc, t, ε; kwargs...) = solve_boundary_temperature(
                 600.0,    # T_surface
                 10000.0,  # q_applied
                 8000.0,   # q_conducted (20% error!)
-                0.0,      # q_transpired
                 550.0,    # T_cell
                 0.2,      # k_eff
                 50e-6,    # Δz_half
                 true,     # converged
-                3,         # iterations
+                3,        # iterations
             )
 
             balance_results_bad = check_boundary_energy_balance(mesh_test)
@@ -898,22 +830,11 @@ end  # main testset
         single,
         mat,
         J0,
-        T_inf,
         t,
         ε_eff;
         a_eff = a_eff,
     )
-    s_split = solve_boundary_temperature(
-        T_cell,
-        k_eff,
-        Δz_half,
-        split,
-        mat_k,
-        J0,
-        T_inf,
-        t,
-        ε_eff,
-    )
+    s_split = solve_boundary_temperature(T_cell, k_eff, Δz_half, split, mat_k, J0, t, ε_eff)
     @test s_single.converged && s_split.converged
     @test s_single.T_surface ≈ s_split.T_surface rtol = 1e-9
     @test s_single.q_applied ≈ s_split.q_applied rtol = 1e-9
@@ -926,17 +847,7 @@ end  # main testset
     @test s_single.q_conducted ≈ k_eff * (T_s - T_cell) / Δz_half rtol = 1e-9
 
     # Default a_eff = ε_eff: the Kirchhoff material absorbs ε_eff·q instead.
-    s_k = solve_boundary_temperature(
-        T_cell,
-        k_eff,
-        Δz_half,
-        single,
-        mat_k,
-        J0,
-        T_inf,
-        t,
-        ε_eff,
-    )
+    s_k = solve_boundary_temperature(T_cell, k_eff, Δz_half, single, mat_k, J0, t, ε_eff)
     T_k = s_k.T_surface
     @test s_k.q_applied ≈
           ε_eff * q_inc + ε_eff * STEFAN_BOLTZMANN * (T_inf^4 - T_k^4) + h * (T_inf - T_k) rtol =
@@ -979,19 +890,8 @@ end
     fresh = _solve_bt(T_cell, k_eff, Δz_half, bc, 0.0, ε)
     @test fresh.converged
 
-    poisoned = BoundaryState(NaN, NaN, NaN, NaN, NaN, NaN, NaN, false, 0)
-    result = solve!(
-        poisoned,
-        T_cell,
-        k_eff,
-        Δz_half,
-        bc,
-        _BC_TEST_MAT,
-        _BC_ZERO_J,
-        300.0,
-        0.0,
-        ε,
-    )
+    poisoned = BoundaryState(NaN, NaN, NaN, NaN, NaN, NaN, false, 0)
+    result = solve!(poisoned, T_cell, k_eff, Δz_half, bc, _BC_TEST_MAT, _BC_ZERO_J, 0.0, ε)
     @test result.T_s == fresh.T_surface
     @test poisoned.T_surface == fresh.T_surface
     @test poisoned.q_conducted == fresh.q_conducted
@@ -1007,7 +907,6 @@ end
         bc,
         _BC_TEST_MAT,
         _BC_ZERO_J,
-        300.0,
         0.0,
         ε,
     )

@@ -183,8 +183,7 @@ end
 # higher T (~50–150 K above the DSC peak), so applying the constant DSC
 # value over-extracts energy from the matrix per Kirchhoff's law. This
 # helper builds a Δh_r(T) closure using the midpoint rule for the Kirchhoff
-# integral, matching the package's existing idiom for the transpiration-BC
-# enthalpy integral (components.jl:493-496).
+# integral.
 #
 # The returned closure has signature `T -> Real` — single-argument, so that
 # `to_property(::Function)` wraps it in `CallableProperty`, whose 1- and

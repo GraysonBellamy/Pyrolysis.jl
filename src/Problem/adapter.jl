@@ -77,8 +77,7 @@ end
 	                radiation_model=NO_RADIATION,
 	                radiation_intensity=0.0,
 	                radiation_kirchhoff=true,
-	                energy_form=:standard,
-	                use_transpiration_bc=false) -> ProblemDef
+	                energy_form=:standard) -> ProblemDef
 
 Lift a user-facing `PyrolysisProblem` into the immutable `ProblemDef`.
 The returned object shares the underlying material/BC/initial-condition
@@ -95,8 +94,8 @@ The effect of outgassing on convective exchange is a property of each
 `ConvectiveBC` (its `blowing` model), not a solve option: the surface balance
 feeds every convective member the outward gas mass flux at its face and the
 model returns the coefficient ratio. This modifies the convective
-*coefficient*, not the gas enthalpy accounting, so it is fully compatible
-with the default S_conv-only convention. See `Discretization.blowing_state`.
+*coefficient*, not the gas enthalpy accounting, which stays with the
+volumetric source `S_conv`. See `Discretization.blowing_state`.
 
 !!! warning "Calibrated examples"
     Enabling blowing alone on a case calibrated *without* it (and without
@@ -122,7 +121,6 @@ function to_problem_def(
     radiation_intensity::Real = 0.0,
     radiation_kirchhoff::Bool = true,
     energy_form::Symbol = :standard,
-    use_transpiration_bc::Bool = false,
 )
     # Validate the energy_form switch once at construction. Acceptable values:
     #   :standard               — default Formulation A (drops T·cp·∇·J),
@@ -165,30 +163,6 @@ function to_problem_def(
         )
     end
 
-    # Guard against the gas-convective-enthalpy DOUBLE-COUNT. The volumetric
-    # advection source S_conv = -Σ_g cp_g J_g ∂T/∂x is ALWAYS active (both
-    # energy_form values include it). The surface transpiration term
-    # Σ_g ṁ_g·Δh_g(T_s,T_∞), folded into the boundary energy balance, overlaps
-    # S_conv by exactly ∫S_conv — applying both produces a spurious ~5-10 kW/m²
-    # sink that under-predicts surface temperature and mass-loss rate. The
-    # supported convention (ThermaKin Eq.17 / FDS / Gpyro) is S_conv only with a
-    # plain convective+radiative BC. The transpiration path is retained for
-    # closed-ledger experiments only and must never be combined with S_conv.
-    if use_transpiration_bc
-        throw(
-            ArgumentError(
-                "use_transpiration_bc=true double-counts gas convective enthalpy: " *
-                "the volumetric advection source S_conv is always active and the " *
-                "surface transpiration enthalpy term overlaps it by ∫S_conv " *
-                "(a spurious ~5-10 kW/m² sink). Use the supported convention " *
-                "use_transpiration_bc=false (S_conv only, ThermaKin Eq.17). The " *
-                "transpiration BC is retained for closed-ledger experiments only " *
-                "and must not be combined with the volumetric advection source. " *
-                "For mass-flux coupling to the convective BC, give the ConvectiveBC " *
-                "a blowing model instead (h-rescaling; no enthalpy double-count).",
-            ),
-        )
-    end
     mode = _simulation_mode_from(problem, use_ale, radiation_model)
     topology = mesh_topology(problem.mesh)
     initial = InitialConditions{Any,Any}(problem.T_initial, problem.ξ_initial)
@@ -199,7 +173,6 @@ function to_problem_def(
         dt_initial = problem.dt_initial,
         output_times = problem.output_times,
         energy_form = energy_form,
-        use_transpiration_bc = use_transpiration_bc,
     )
     return ProblemDef(
         material = problem.material,
@@ -376,8 +349,7 @@ end
 	                 radiation_model=NO_RADIATION,
 	                 radiation_intensity=0.0,
 	                 radiation_kirchhoff=true,
-	                 energy_form=:standard,
-	                 use_transpiration_bc=false) -> (def, ws, u0)
+	                 energy_form=:standard) -> (def, ws, u0)
 
 Canonical setup path from a `PyrolysisProblem` to a ready-to-integrate
 `(ProblemDef, Workspace, u0)` triple. Mirrors `solve()`'s order exactly:
@@ -420,7 +392,6 @@ function initialize_state(
     radiation_intensity::Real = 0.0,
     radiation_kirchhoff::Bool = true,
     energy_form::Symbol = :standard,
-    use_transpiration_bc::Bool = false,
 )
     apply_initial_conditions!(problem)
     def = to_problem_def(
@@ -430,7 +401,6 @@ function initialize_state(
         radiation_intensity = radiation_intensity,
         radiation_kirchhoff = radiation_kirchhoff,
         energy_form = energy_form,
-        use_transpiration_bc = use_transpiration_bc,
     )
     ws = build_workspace(problem, def; min_thickness = min_thickness)
     u0 = create_state_vector(ws.layout, ws.mesh)

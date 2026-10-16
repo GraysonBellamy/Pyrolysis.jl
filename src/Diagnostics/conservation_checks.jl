@@ -240,8 +240,8 @@ and the ledger accumulates the terms the discretized RHS actually assembles:
           + ∫ S_gen dV · dt          (zero unless `:with_generation_sink`)
 
 `q_cond_boundary` is the conducted boundary flux — the energy the boundary
-cell receives. Under the supported convention (no surface transpiration
-term) it equals the applied boundary flux. The residual closes to roughly
+cell receives. The surface energy balance has no gas-enthalpy term, so it
+equals the applied boundary flux. The residual closes to roughly
 integrator tolerance × |E(0)| for constant composition and volume; with
 active reactions or a moving mesh it also carries the composition-change
 term `∫ T ∂(ρcp)/∂t dV dt` and the volume term `∫ ρcp T ∂V/∂t dt`, which

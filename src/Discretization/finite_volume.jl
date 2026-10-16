@@ -246,7 +246,6 @@ function compute_rhs!(
     radiation_model::RadiationModel = NO_RADIATION,
     radiation_kirchhoff::Bool = true,
     energy_form::Symbol = :standard,
-    use_transpiration_bc::Bool = false,
 ) where {NC}
 
     n_cells_val = mesh.n_active_cells
@@ -267,9 +266,6 @@ function compute_rhs!(
 
     # ========================================================================
     # Step 2: Compute reaction rates and source terms for each cell
-    # (must precede the thermal BC solve so dξ_rxn is populated; the boundary
-    # solver also runs after gas fluxes so transpiration uses the actual J_gas
-    # at the boundary face.)
     # ========================================================================
     @inbounds for i = 1:n_cells_val
         T = state.T[i]
@@ -292,9 +288,8 @@ function compute_rhs!(
 
     # ========================================================================
     # Step 3: Compute gas transport fluxes (interior + boundary)
-    # Must run BEFORE thermal BCs because the surface energy balance uses
-    # Σ_g ṁ_g · Δh_g(T_s, T_∞) with ṁ_g read from rhs_cache.J_gas at the
-    # boundary face.
+    # Must run BEFORE thermal BCs: the blowing models of the convective BCs
+    # read the outward gas flux from rhs_cache.J_gas at the boundary face.
     # ========================================================================
     compute_gas_fluxes!(rhs_cache.J_gas, state, mesh, prop_cache, material)
 
@@ -312,8 +307,6 @@ function compute_rhs!(
 
     # ========================================================================
     # Step 4: Apply thermal boundary conditions (static dispatch)
-    # Surface energy balance with transpiration enthalpy now closes against
-    # the gas mass flux populated in Step 3.
     # ========================================================================
     apply_thermal_bc_flux!(
         rhs_cache.q_total,
@@ -326,8 +319,7 @@ function compute_rhs!(
         t,
         top_face_ids,
         bottom_face_ids,
-        radiation_model;
-        use_transpiration_bc = use_transpiration_bc,
+        radiation_model,
     )
 
     # ========================================================================
@@ -386,10 +378,9 @@ function compute_rhs!(
     # Step 8: Assemble final RHS
     # ========================================================================
     @inbounds for i = 1:n_cells_val
-        # Energy equation: dT/dt = (-∇·q + S_conv + S_gen + Q_rad + Q_rxn) / ρcp_eff
-        # (ρcp_eff excludes gas storage per Formulation A; gas energy is
-        # carried by S_conv — the default S_conv-only convention. The surface
-        # transpiration BC is opt-in and must not be combined with S_conv.)
+        # Energy equation: dT/dt = (-∇·q + S_conv + S_gen + Q_rad + Q_rxn) / ρcp
+        # (ρcp sums every component, pore gas included; the gas enthalpy flux
+        # is carried by S_conv.)
         ρcp = prop_cache.ρcp[i]
         dT[i] =
             (
@@ -428,23 +419,12 @@ using ..Materials:
 
 Apply thermal boundary conditions using static dispatch (type-stable).
 
-The surface energy balance solved here optionally includes the surface
-transpiration enthalpy term (off by default; `use_transpiration_bc`):
-
-```
-q_BC(T_s) = q_cond(T_s, T_cell) + Σ_g ṁ_g · Δh_g(T_s, T_∞)
-```
-
-When `use_transpiration_bc = false` (default) `ṁ_g` is zeroed and this reduces
-to `q_BC(T_s) = q_cond(T_s, T_cell)`. `ṁ_g` is read from `J_gas[g, face]` at the boundary face — populated by the
-mass-flux pass that runs *before* this thermal BC pass in `compute_rhs!`.
-
-Every `ConvectiveBC` in the surface balance applies its blowing model
-(`bc.blowing`, see `blowing_state`) to the **true** outward gas flux at the
-face (`J_gas[g, face]`, which includes the Darcy venting part in Darcy–Fick
-mode). This is independent of the transpiration enthalpy term: the blowing
-model reads the real flux even while transpiration stays zeroed (the
-supported S_conv-only convention).
+The surface energy balance solved here is `q_BC(T_s) = q_cond(T_s, T_cell)`.
+Every `ConvectiveBC` in it applies its blowing model (`bc.blowing`, see
+`blowing_state`) to the outward gas flux at the face, read from
+`J_gas[g, face]` (which includes the Darcy venting part in Darcy–Fick mode).
+`J_gas` is populated by the mass-flux pass that runs *before* this thermal BC
+pass in `compute_rhs!`.
 
 # Arguments
 - `q`: Face flux array (modified in-place)
@@ -468,8 +448,7 @@ function apply_thermal_bc_flux!(
     t,
     top_face_ids::Vector{Int},
     bottom_face_ids::Vector{Int},
-    radiation_model::RadiationModel = SURFACE_ABSORPTION;
-    use_transpiration_bc::Bool = false,
+    radiation_model::RadiationModel = SURFACE_ABSORPTION,
 ) where {NC}
     # Top boundary (boundary_id = 1, z = L)
     _apply_thermal_bc_static!(
@@ -483,8 +462,7 @@ function apply_thermal_bc_flux!(
         t,
         top_face_ids,
         Val(:top),
-        radiation_model;
-        use_transpiration_bc = use_transpiration_bc,
+        radiation_model,
     )
 
     # Bottom boundary (boundary_id = 2, z = 0)
@@ -499,8 +477,7 @@ function apply_thermal_bc_flux!(
         t,
         bottom_face_ids,
         Val(:bottom),
-        radiation_model;
-        use_transpiration_bc = use_transpiration_bc,
+        radiation_model,
     )
 
     return nothing
@@ -516,12 +493,7 @@ The `radiation_model` determines how `RadiativeFluxBC` handles absorption.
 
 For non-Dirichlet BCs, the boundary-temperature solver finds `T_s` from the
 surface energy balance:
-	q_BC(T_s) = k(T_s − T_cell)/Δz_half + Σ_g ṁ_g · Δh_g(T_s, T_∞)
-
-The transpiration term `Σ_g ṁ_g · Δh_g` is included only when
-`use_transpiration_bc` is true (off by default; `J_boundary_outward` is zeroed
-otherwise). The default S_conv-only convention reduces this to
-`q_BC(T_s) = k(T_s − T_cell)/Δz_half`.
+	q_BC(T_s) = k(T_s − T_cell)/Δz_half
 """
 @inline function _apply_thermal_bc_static!(
     q::AbstractVector,
@@ -534,10 +506,9 @@ otherwise). The default S_conv-only convention reduces this to
     t,
     face_ids::Vector{Int},
     ::Val{boundary},
-    radiation_model::RadiationModel = SURFACE_ABSORPTION;
-    use_transpiration_bc::Bool = false,
+    radiation_model::RadiationModel = SURFACE_ABSORPTION,
 ) where {BC<:AbstractThermalBC,NC,boundary}
-    # Handle DirichletThermalBC specially (T_s prescribed, no transpiration solve)
+    # Handle DirichletThermalBC specially (T_s prescribed, no Newton solve)
     if BC <: DirichletThermalBC
         boundary_id = boundary === :top ? 1 : 2
         @inbounds for f in face_ids
@@ -572,7 +543,6 @@ otherwise). The default S_conv-only convention reduces this to
             bstate.T_surface = ForwardDiff.value(T_bc)
             bstate.q_applied = ForwardDiff.value(q_bc)
             bstate.q_conducted = ForwardDiff.value(q_bc)
-            bstate.q_transpired = 0.0
             bstate.blowing_mcp = 0.0
             bstate.blowing_ratio = 1.0
             bstate.pooling_factor = 1.0
@@ -588,24 +558,17 @@ otherwise). The default S_conv-only convention reduces this to
         # Boundary temperature solve for energy-conserving flux
         boundary_id = boundary === :top ? 1 : 2
 
-        T_ref = ambient_temperature(bc, t, Float64(T_REF))
-
         # Outward gas mass flux at the boundary face. `J_gas[:, f]` follows the
         # finite-volume +z convention, so escaping gas is +J at the top face and
-        # -J at the bottom face. `J_outward_true` is the physical flux; the
-        # transpiration argument keeps the established convention of being
-        # zeroed when transpiration is off, while the blowing correction always
-        # reads the true flux.
+        # -J at the bottom face.
         face_id_for_J = first(face_ids)
-        J_outward_true = ntuple(NC) do j
+        J_outward = ntuple(NC) do j
             Jf = J_gas[j, face_id_for_J]
             boundary === :top ? Jf : -Jf
         end
-        J_boundary_outward =
-            use_transpiration_bc ? J_outward_true : map(zero, J_outward_true)
 
-        # Newton solve for T_s with transpiration. The returned q_conducted
-        # is Tu-typed (carries AD sensitivities through T_cell, k, J_gas, …).
+        # Newton solve for T_s. The returned q_conducted is Tu-typed (carries
+        # AD sensitivities through T_cell, k, J_gas, …).
         result = update_boundary_state!(
             state,
             mesh,
@@ -613,11 +576,9 @@ otherwise). The default S_conv-only convention reduces this to
             bc,
             prop_cache,
             material,
-            J_boundary_outward,
-            T_ref,
+            J_outward,
             t,
-            radiation_model;
-            J_blowing = J_outward_true,
+            radiation_model,
         )
 
         @inbounds for f in face_ids
@@ -979,7 +940,6 @@ function compute_rhs_darcy_fick!(
     radiation_model::RadiationModel = NO_RADIATION,
     radiation_kirchhoff::Bool = true,
     energy_form::Symbol = :standard,
-    use_transpiration_bc::Bool = false,
 ) where {NC}
 
     n_cells_val = mesh.n_active_cells
@@ -1010,9 +970,7 @@ function compute_rhs_darcy_fick!(
     copyto!(rhs_cache.q_total, rhs_cache.q_cond)
 
     # ========================================================================
-    # Step 3: Reactions (precede the thermal BC solve so dξ_rxn is populated;
-    # the boundary solver runs after gas fluxes so transpiration uses the
-    # actual J_gas at the boundary face.)
+    # Step 3: Reactions
     # ========================================================================
     @inbounds for i = 1:n_cells_val
         T = state.T[i]
@@ -1028,10 +986,10 @@ function compute_rhs_darcy_fick!(
 
     # ========================================================================
     # Step 4: Gas transport (Darcy + Fick) — interior + boundary
-    # Must run BEFORE the thermal BC solve so transpiration enthalpy at the
-    # surface reads the actual ṁ_g. Boundary faces receive the advective
-    # venting flux from the pressure-BC Darcy velocity here; the diffusive
-    # film-law part is then ADDED by `apply_mass_bc_flux!`.
+    # Must run BEFORE the thermal BC solve: the blowing models of the
+    # convective BCs read the outward gas flux. Boundary faces receive the
+    # advective venting flux from the pressure-BC Darcy velocity here; the
+    # diffusive film-law part is then ADDED by `apply_mass_bc_flux!`.
     # ========================================================================
     Physics.compute_gas_fluxes_darcy_fick!(
         rhs_cache.J_gas,
@@ -1056,7 +1014,7 @@ function compute_rhs_darcy_fick!(
     )
 
     # ========================================================================
-    # Step 5: Apply thermal boundary conditions (optional surface transpiration)
+    # Step 5: Apply thermal boundary conditions
     # ========================================================================
     apply_thermal_bc_flux!(
         rhs_cache.q_total,
@@ -1069,8 +1027,7 @@ function compute_rhs_darcy_fick!(
         t,
         top_face_ids,
         bottom_face_ids,
-        radiation_model;
-        use_transpiration_bc = use_transpiration_bc,
+        radiation_model,
     )
 
     # ========================================================================

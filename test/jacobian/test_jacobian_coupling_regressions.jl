@@ -21,12 +21,8 @@ Regression tests for three fixed Jacobian coupling defects:
 - **Boundary mass flux on the energy row** — the transport operators
   zero their boundary faces but the residual's S_conv/S_gen include the
   boundary mass flux (filled by `apply_mass_bc_flux!` before the face
-  average). Additionally, `BCThermalOperator` used to feed the
-  surface Newton a film-law ṁ_g while the residual hard-zeroes it
-  (transpiration is rejected at construction) — a Jacobian–residual
-  inconsistency active under any permeable mass BC. Probed with
-  DiffusiveMassBC at both boundaries, Fickian and Darcy, and the
-  `:with_generation_sink` energy form.
+  average). Probed with DiffusiveMassBC at both boundaries, Fickian and
+  Darcy, and the `:with_generation_sink` energy form.
 
   The boundary cell's whole `S_conv` energy row (face-averaged `J̄` ×
   the blended gradient through the surface-Newton `T_s`) is owned by

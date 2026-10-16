@@ -37,7 +37,6 @@ end
             bc,
             mat,
             J0,
-            300.0,
             0.0,
             0.9;
             max_iter = 1,
@@ -46,7 +45,7 @@ end
     @test state.iterations == 1
 
     # The same call with the default budget converges silently.
-    state_ok = solve_boundary_temperature(800.0, 0.15, 1e-3, bc, mat, J0, 300.0, 0.0, 0.9)
+    state_ok = solve_boundary_temperature(800.0, 0.15, 1e-3, bc, mat, J0, 0.0, 0.9)
     @test state_ok.converged
 end
 
@@ -117,7 +116,6 @@ end
             bc,
             mat,
             J0,
-            300.0,
             0.0,
             0.9,
         )

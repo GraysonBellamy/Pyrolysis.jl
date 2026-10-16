@@ -148,8 +148,7 @@ function _reference_bcc_contribution(
         t,
         top_face_ids,
         bottom_face_ids,
-        Pyrolysis.Materials.NO_RADIATION;
-        use_transpiration_bc = false,
+        Pyrolysis.Materials.NO_RADIATION,
     )
     compute_gas_convective_source!(
         S_conv_buf,

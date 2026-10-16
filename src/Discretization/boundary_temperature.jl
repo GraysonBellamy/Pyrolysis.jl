@@ -2,28 +2,20 @@
 Boundary temperature solver for cell-centered finite volume method.
 
 This module implements Newton iteration to solve for the surface temperature T_s
-that satisfies the surface energy balance at boundaries (Formulation A):
+that satisfies the surface energy balance at boundaries:
 
-	q_BC(T_s) = q_cond(T_s, T_cell) + Σ_g ṁ_g · Δh_g(T_s, T_∞)
+	q_BC(T_s) = q_cond(T_s, T_cell)
 
 where:
 - q_BC = q_ext - εσT_s⁴ - h(T_s - T_∞)  [applied heat flux, positive into domain]
 - q_cond = k(T_s - T_cell) / Δz_half    [conduction into material, positive when T_s > T_cell]
-- ṁ_g                                   [outward gas mass flux at the surface, positive when leaving]
-- Δh_g(T_s, T_∞) = ∫_{T_∞}^{T_s} cp_g dτ  [sensible enthalpy carried out per unit mass; midpoint rule]
 
-**Default convention (transpiration OFF).** The supported default is the
-ThermaKin Eq.17 / FDS / Gpyro convention: gas enthalpy transport is carried
-entirely by the volumetric advection source `−Σ_g cp_g J_g · ∇T` (`S_conv`) and
-the surface balance is the plain `q_BC(T_s) = q_cond(T_s, T_cell)` (the
-transpiration term is zero because the caller zeroes `ṁ_g`).
-
-The surface transpiration term `Σ_g ṁ_g · Δh_g(T_s, T_∞)` is an **opt-in**
-alternative, NOT the default and NOT to be combined with `S_conv`: applying both
-double-counts the advective enthalpy by `∫S_conv` (see `Physics.convection` and
-`Problem.to_problem_def`, which rejects the combination). The inflow case is
-upwinded to the donor temperature in `_transpiration_flux_and_derivative`
-(entering gas crosses the face at T_∞, contributing zero).
+The balance has no gas-enthalpy term. The sensible enthalpy of the gas crossing
+the slab is carried by the volumetric advection source `−Σ_g cp_g J_g · ∇T`
+(`S_conv`, see `Physics.convection`), the ThermaKin Eq.17 / FDS / Gpyro
+convention. A surface term `Σ_g ṁ_g · Δh_g(T_s, T_∞)` on top of `S_conv` would
+count the same enthalpy twice. The outward gas flux enters only through the
+blowing models of the convective BCs.
 """
 
 using ..Materials: STEFAN_BOLTZMANN, T_REF, T_PROPERTY_MIN, T_PROPERTY_MAX
@@ -38,7 +30,7 @@ using ForwardDiff
 # ============================================================================
 
 """
-	solve_boundary_temperature(T_cell, k_eff, Δz_half, bc, t, ε_eff; kwargs...)
+	solve_boundary_temperature(T_cell, k_eff, Δz_half, bc, material, J_outward, t, ε_eff; kwargs...)
 
 Solve for surface temperature satisfying energy balance using Newton iteration.
 
@@ -52,6 +44,9 @@ Both sides are positive when heat flows INTO the material.
 - `k_eff::Float64`: Effective thermal conductivity [W/(m·K)]
 - `Δz_half::Float64`: Distance from boundary to cell center [m]
 - `bc::AbstractThermalBC`: Thermal boundary condition
+- `material::Material{NC}`: Material (gas heat capacities for blowing)
+- `J_outward::NTuple{NC,Float64}`: Per-component outward gas mass flux at the
+  face [kg/(m²·s)], positive leaving the slab; read by the blowing models
 - `t::Float64`: Current time [s]
 - `ε_eff::Float64`: Effective surface emissivity from material properties
 
@@ -72,18 +67,16 @@ function solve_boundary_temperature(
     Δz_half::Float64,
     bc::AbstractThermalBC,
     material::Material{NC},
-    J_boundary_outward::NTuple{NC,Float64},
-    T_ref::Float64,
+    J_outward::NTuple{NC,Float64},
     t::Float64,
     ε_eff::Float64;
     a_eff::Float64 = ε_eff,
     radiation_model::RadiationModel = SURFACE_ABSORPTION,
-    J_blowing::NTuple{NC,Float64} = J_boundary_outward,
     tol::Float64 = 1e-10,
     max_iter::Int = 50,
     relaxation::Float64 = 1.0,
 ) where {NC}
-    state = BoundaryState(T_cell, 0.0, 0.0, 0.0, T_cell, k_eff, Δz_half, false, 0)
+    state = BoundaryState(T_cell, 0.0, 0.0, T_cell, k_eff, Δz_half, false, 0)
     solve_boundary_temperature!(
         state,
         T_cell,
@@ -91,13 +84,11 @@ function solve_boundary_temperature(
         Δz_half,
         bc,
         material,
-        J_boundary_outward,
-        T_ref,
+        J_outward,
         t,
         ε_eff;
         a_eff = a_eff,
         radiation_model = radiation_model,
-        J_blowing = J_blowing,
         tol = tol,
         max_iter = max_iter,
         relaxation = relaxation,
@@ -107,11 +98,11 @@ end
 
 """
 	solve_boundary_temperature!(state::BoundaryState, T_cell, k_eff, Δz_half,
-		bc, material, J_boundary_outward, T_ref, t, ε_eff; kwargs...)
+		bc, material, J_outward, t, ε_eff; kwargs...)
 
-In-place Newton solve including the surface transpiration enthalpy term:
+In-place Newton solve of the surface energy balance
 
-	q_BC(T_s) = k_eff · (T_s − T_cell)/Δz_half + Σ_g ṁ_g · Δh_g(T_s, T_ref)
+	q_BC(T_s) = k_eff · (T_s − T_cell)/Δz_half
 
 The Newton starts from `T_cell` clamped to the property bracket, so the result
 is a pure function of the arguments. `state` is output only: it receives the
@@ -125,35 +116,22 @@ when the final iterate is not finite.
 - `Δz_half::Float64`: Distance from boundary face to cell center [m].
 - `bc::AbstractThermalBC`: Thermal BC.
 - `material::Material{NC}`: Material (component cp_g, is_gas predicate).
-- `J_boundary_outward::NTuple{NC,Float64}`: Per-component outward mass flux at
-  this boundary face [kg/(m²·s)]. Outward is positive (gas leaving the slab).
-- `T_ref::Float64`: Reference temperature for enthalpy datum [K]. Resolved
-  by the caller from the BC's `ambient_temperature` (T_∞).
+- `J_outward::NTuple{NC,Float64}`: Per-component outward gas mass flux at this
+  boundary face [kg/(m²·s)]. Outward is positive (gas leaving the slab).
 - `t::Float64`: Current time [s].
 - `ε_eff::Float64`: Effective surface emissivity (surface emission).
 - `a_eff::Float64 = ε_eff` (keyword): Effective surface absorptivity for
   incident radiation, consumed by a `RadiativeFluxBC` with
   `absorptivity = nothing`. The default reproduces Kirchhoff's law.
 
-The Newton derivative w.r.t. `T_s` of the transpiration term is
-`Σ_{g: is_gas} ṁ_g · cp_g(T_s)` for outflow (and `0` for inflow, where the
-donor is the ambient). Note this is the analytic derivative of the *true*
-integral `∫_{T_ref}^{T_s} cp_g(τ) dτ`, which differs at O((T_s−T_ref)·cp_g′)
-from the exact derivative of the *midpoint-rule* residual actually evaluated by
-`delta_enthalpy` (= `½cp_g(T_m) + ½(T_s−T_ref)cp_g′(T_m)`). They agree to first
-order, so Newton still converges to the residual's root (the converged `T_s` is
-unbiased); only the convergence rate is marginally sub-quadratic.
-
 # Blowing
 
 Every `ConvectiveBC` inside `bc` applies its blowing model (`bc.blowing`, see
 [`blowing_state`](@ref)) to a [`BlowingFace`](@ref) rebuilt at every Newton
-iterate from `J_blowing` and the current `T_s`. `J_blowing` carries the *true*
-outward gas mass flux and defaults to `J_boundary_outward` — the two are
-separate arguments because under the default S_conv-only convention the caller
-zeroes `J_boundary_outward` (transpiration off) while the blowing models still
-need the real flux. The Newton `df` uses the frozen-χ derivative `−h·χ`
-(first-order consistent, same convention as the transpiration derivative above).
+iterate from `J_outward` and the current `T_s`. The Newton `df` uses the
+frozen-χ derivative `−h·χ`: Newton still converges to the exact residual root,
+marginally sub-quadratically, and the Dual fixed point is the exact
+implicit-function-theorem derivative.
 
 # Non-convergence and clamping
 On max-iteration exhaustion or a singular Newton derivative the solve does NOT
@@ -173,13 +151,11 @@ the outcome either way.
     Δz_half::Real,
     bc::AbstractThermalBC,
     material::Material{NC},
-    J_boundary_outward::NTuple{NC,<:Real},
-    T_ref::Real,
+    J_outward::NTuple{NC,<:Real},
     t::Real,
     ε_eff::Real;
     a_eff::Real = ε_eff,
     radiation_model::RadiationModel = SURFACE_ABSORPTION,
-    J_blowing::NTuple{NC,<:Real} = J_boundary_outward,
     tol::Float64 = 1e-10,
     max_iter::Int = 50,
     relaxation::Float64 = 1.0,
@@ -192,12 +168,10 @@ the outcome either way.
         typeof(T_cell),
         typeof(k_eff),
         typeof(Δz_half),
-        typeof(T_ref),
         typeof(t),
         typeof(ε_eff),
         typeof(a_eff),
-        eltype(J_boundary_outward),
-        eltype(J_blowing),
+        eltype(J_outward),
     )
     # The Newton starts from the cell temperature clamped to the property bracket,
     # never from `state`: the result is a pure function of the arguments, so a wild
@@ -215,7 +189,7 @@ the outcome either way.
 
         # The face at the current iterate: every convective member applies its
         # blowing model to it (`NoBlowing` returns the exact uncorrected flux).
-        face = BlowingFace(J_blowing, T_s, material)
+        face = BlowingFace(J_outward, T_s, material)
         q_bc, dq_bc_dT = evaluate_bc_flux_and_derivative(
             bc,
             T_s,
@@ -229,20 +203,12 @@ the outcome either way.
         q_cond = k_eff * (T_s - T_cell) / Δz_half
         dq_cond_dT = k_eff / Δz_half
 
-        q_transpire, dq_transpire_dT =
-            _transpiration_flux_and_derivative(material, J_boundary_outward, T_s, T_ref)
-
-        f = q_bc - q_cond - q_transpire
-        df = dq_bc_dT - dq_cond_dT - dq_transpire_dT
+        f = q_bc - q_cond
+        df = dq_bc_dT - dq_cond_dT
 
         # Convergence on value (Newton residual; Dual derivatives ride along).
         f_val = ForwardDiff.value(f)
-        scale = max(
-            abs(ForwardDiff.value(q_bc)),
-            abs(ForwardDiff.value(q_cond)),
-            abs(ForwardDiff.value(q_transpire)),
-            1.0,
-        )
+        scale = max(abs(ForwardDiff.value(q_bc)), abs(ForwardDiff.value(q_cond)), 1.0)
         # Round-off floor: the flux change from a few ulps of T_s. The conduction term is a
         # difference of two ~T numbers, so the residual cannot resolve below this; a face
         # with near-zero net flux would otherwise stall at round-off and report failure.
@@ -297,7 +263,7 @@ the outcome either way.
     end
 
     # Final flux evaluation (typed) — these are what the caller will read.
-    face_final = BlowingFace(J_blowing, T_s, material)
+    face_final = BlowingFace(J_outward, T_s, material)
     q_bc_final, _ = evaluate_bc_flux_and_derivative(
         bc,
         T_s,
@@ -308,11 +274,6 @@ the outcome either way.
         a_eff = a_eff,
     )
     q_cond_final = k_eff * (T_s - T_cell) / Δz_half
-    # Transpiration enthalpy flux at the converged T_s (stored for diagnostics;
-    # zero under the default transpiration-off convention, since J_boundary_outward
-    # is then zeroed by the caller).
-    q_transpire_final, _ =
-        _transpiration_flux_and_derivative(material, J_boundary_outward, T_s, T_ref)
 
     # Float64 storage on the diagnostic BoundaryState, skipped for a non-finite
     # iterate so the diagnostics keep the last finite solve.
@@ -321,7 +282,6 @@ the outcome either way.
     state.T_surface = ForwardDiff.value(T_s)
     state.q_applied = ForwardDiff.value(q_bc_final)
     state.q_conducted = ForwardDiff.value(q_cond_final)
-    state.q_transpired = ForwardDiff.value(q_transpire_final)
     _record_blowing!(state, bc, face_final, t)
     state.T_cell = ForwardDiff.value(T_cell)
     state.k_eff = ForwardDiff.value(k_eff)
@@ -330,41 +290,6 @@ the outcome either way.
     state.iterations = iter
 
     return (T_s = T_s, q_applied = q_bc_final, q_conducted = q_cond_final)
-end
-
-# Per-component sum of outward mass flux × Δh_g(T_s, T_ref), with analytic
-# Newton derivative ∂/∂T_s = Σ ṁ_g · cp_g(T_s). Compile-time unrolled — the
-# `is_gas` predicate is eliminated at codegen.
-@generated function _transpiration_flux_and_derivative(
-    material::Material{NC},
-    ṁ::NTuple{NC,<:Real},
-    T_s::Real,
-    T_ref::Real,
-) where {NC}
-    exprs = Expr[]
-    push!(exprs, :(Tu = promote_type(eltype(ṁ), typeof(T_s), typeof(T_ref))))
-    push!(exprs, :(q = zero(Tu)))
-    push!(exprs, :(dq = zero(Tu)))
-    for j = 1:NC
-        push!(exprs, quote
-            @inbounds if is_gas(material.components[$j])
-                cmp = material.components[$j]
-                mj = ṁ[$j]
-                if mj > zero(mj)
-                    # Outflow: donor is the surface (T_s). Carry the sensible
-                    # enthalpy relative to the ambient datum out of the slab.
-                    q += mj * delta_enthalpy(cmp, T_s, T_ref)
-                    dq += mj * cmp.heat_capacity(T_s)
-                end
-                # Inflow (mj ≤ 0): the donor is the ambient (T_∞ = T_ref), so the
-                # surface enthalpy flux is ṁ·Δh_g(T_ref, T_ref) = 0 and its
-                # derivative w.r.t. T_s is 0. The entering gas is heated to T_s
-                # volumetrically (by S_conv) once inside, not at the face.
-            end
-        end)
-    end
-    push!(exprs, :(return q, dq))
-    return Expr(:block, exprs...)
 end
 
 # ============================================================================
@@ -442,11 +367,9 @@ end
 
 # ConvectiveBC with blowing: q = h·χ·(T_inf − T_s), χ from the BC's model.
 # The Newton derivative uses the frozen-χ form dq/dT_s = −h·χ, dropping the
-# h·(∂χ/∂T_s)·(T_inf − T_s) term. Same first-order-consistent convention as
-# the transpiration derivative (see the `solve_boundary_temperature!`
-# docstring): Newton converges to the exact residual root, marginally
-# sub-quadratically; the Dual fixed point is still the exact
-# implicit-function-theorem derivative.
+# h·(∂χ/∂T_s)·(T_inf − T_s) term. The derivative is first-order consistent:
+# Newton converges to the exact residual root, marginally sub-quadratically;
+# the Dual fixed point is still the exact implicit-function-theorem derivative.
 @inline function evaluate_bc_flux_and_derivative(
     bc::ConvectiveBC,
     T_s::Real,
@@ -770,23 +693,15 @@ end
 # ============================================================================
 
 """
-	update_boundary_state!(mesh, boundary_id, bc, cache, material,
-	                       J_boundary_outward, T_ref, t, radiation_model)
+	update_boundary_state!(state_cache, mesh, boundary_id, bc, cache, material,
+	                       J_outward, t, radiation_model)
 
-Solve for `T_s` satisfying the surface energy balance:
-
-	q_BC(T_s) = k_eff·(T_s − T_cell)/Δz_half + Σ_g ṁ_g · Δh_g(T_s, T_ref)
-
-where `J_boundary_outward[j]` is the per-component outward mass flux at
-the boundary face (positive = leaving the slab) and `T_ref` is the enthalpy
-reference (`T_∞` from the BC, typically). The transpiration term is present only
-in the opt-in path; under the default S_conv-only convention the caller passes
-`J_boundary_outward = 0`, reducing this to `q_BC(T_s) = q_cond`.
-
-Auxiliary callers that don't have access to the live `J_gas` (post-processing
-diagnostics, Jacobian-preconditioner code paths) pass
-`J_boundary_outward = ntuple(_ -> 0.0, Val(NC))` and `T_ref = T_REF` to
-recover the no-blowing limit; this is documented at each call site.
+Solve for `T_s` satisfying the surface energy balance
+`q_BC(T_s) = k_eff·(T_s − T_cell)/Δz_half` at boundary `boundary_id`
+(1 = top, 2 = bottom). `J_outward[j]` is the per-component outward gas mass
+flux at the boundary face (positive = leaving the slab), read by the blowing
+models of the convective BCs. Auxiliary callers without the live `J_gas` pass
+zeros, the no-blowing limit.
 """
 function update_boundary_state!(
     state_cache,
@@ -795,11 +710,9 @@ function update_boundary_state!(
     bc::AbstractThermalBC,
     cache::PropertyCache,
     material::Material{NC},
-    J_boundary_outward::NTuple{NC,<:Real},
-    T_ref::Real,
+    J_outward::NTuple{NC,<:Real},
     t::Real,
-    radiation_model::RadiationModel = SURFACE_ABSORPTION;
-    J_blowing::NTuple{NC,<:Real} = J_boundary_outward,
+    radiation_model::RadiationModel = SURFACE_ABSORPTION,
 ) where {NC}
     # Cell adjacent to this boundary (1 = top/exposed at z = L; 2 = bottom).
     if boundary_id == 1
@@ -826,13 +739,11 @@ function update_boundary_state!(
         Δz_half,
         bc,
         material,
-        J_boundary_outward,
-        T_ref,
+        J_outward,
         t,
         ε_eff;
         a_eff = a_eff,
         radiation_model = radiation_model,
-        J_blowing = J_blowing,
     )
 end
 

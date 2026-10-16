@@ -330,8 +330,8 @@ end
 
 function _validate_gas_properties(c::GaseousComponent)
     n = c.name
-    # A gas with c = 0 carries no sensible enthalpy (S_conv and transpiration
-    # vanish); the matrix heat capacity floor keeps the energy equation
+    # A gas with c = 0 carries no sensible enthalpy (S_conv vanishes); the
+    # matrix heat capacity floor keeps the energy equation
     # well posed, so zero is admissible here where it is not for a solid.
     _validate_property_law(
         c.heat_capacity,
@@ -735,9 +735,7 @@ Sensible-enthalpy difference of a single component between two temperatures:
 
 Implemented as the **midpoint rule** — second-order accurate in cp variation,
 one cp evaluation per call. This matches the single-point cell-centered cp
-evaluation used by the volumetric advection source `−Σ cp_g(T_i) J_g · ∇T`,
-so the surface transpiration BC is consistent in discretization order with the
-bulk gas-energy transport.
+evaluation used by the volumetric advection source `−Σ cp_g(T_i) J_g · ∇T`.
 
 Quadrature error: the single-interval midpoint rule carries `−cp″(T_m)·ΔT³/24`
 — ≈ −0.8 % for a typically curved char/gas cp over a 300 → 800 K span, and

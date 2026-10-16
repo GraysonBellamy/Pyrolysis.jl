@@ -37,7 +37,7 @@ using ..Discretization:
     compute_surface_mass_flux,
     solve_boundary_temperature,
     boundary_darcy_velocity
-using ..Materials: AbstractThermalBC, AbstractRadiationBC, GAS, T_REF, has_darcy_flow
+using ..Materials: AbstractThermalBC, AbstractRadiationBC, GAS, has_darcy_flow
 using ..BoundaryConditions:
     get_radiative_flux_bc,
     extract_radiative_flux_from_bcs,
@@ -46,8 +46,7 @@ using ..BoundaryConditions:
     CombinedThermalBC,
     DirichletThermalBC,
     get_thermal_bc,
-    get_mass_bc,
-    ambient_temperature
+    get_mass_bc
 using LinearSolve: LinearSolve, LUFactorization, KLUFactorization, UMFPACKFactorization  # dense LU for dense backends; KLU / UMFPACK are the sparse defaults
 using SparseArrays: nnz  # For logging sparse Jacobian info
 
@@ -58,15 +57,9 @@ import CommonSolve: solve  # Extend CommonSolve.solve for our problem type
 # ============================================================================
 #
 # The saved-output extraction needs the same per-species gas mass flux at the
-# boundary that the live RHS computes, so the boundary-temperature solve here
-# matches what the integrator saw during the run. Without this, the saved
-# `surface_temperature` and `surface_heat_flux_*` fields silently use a
-# zero-blowing approximation while the live solve uses the full transpiration
-# BC, producing diagnostic values that are inconsistent with the integrator
-# state. These helpers also let us audit the transpiration energy sink as a
-# stored field on `PyrolysisSolution`.
-# (Long-term these belong in Discretization; for now they live alongside
-# the extraction code that uses them.)
+# boundary that the live RHS computes: the blowing models of the convective
+# BCs read it, so the boundary-temperature solve here reproduces what the
+# integrator saw during the run.
 
 # Per-species outward gas mass flux at a boundary face [kg/(m²·s)],
 # evaluated the same way the live mass BC application does: diffusive film
@@ -191,7 +184,7 @@ end
 
 """
 	_validate_solve_kwargs(; extra_kwargs, jacobian, handle_depletion,
-	                          radiation_model, energy_form, use_transpiration_bc,
+	                          radiation_model, energy_form,
 	                          min_thickness, depletion_threshold, min_cells,
 	                          diagnostics_stride, verify_jacobian)
 
@@ -205,7 +198,6 @@ function _validate_solve_kwargs(;
     handle_depletion,
     radiation_model,
     energy_form,
-    use_transpiration_bc,
     min_thickness,
     depletion_threshold,
     min_cells,
@@ -230,19 +222,6 @@ function _validate_solve_kwargs(;
             ArgumentError(
                 "solve(): energy_form must be :standard or " *
                 ":with_generation_sink, got $(repr(energy_form)).",
-            ),
-        )
-    end
-    # Guard the gas-convective-enthalpy double-count (see to_problem_def): the
-    # volumetric S_conv is always active, so enabling the surface transpiration
-    # term too over-applies the gas enthalpy sink by ∫S_conv.
-    if use_transpiration_bc
-        throw(
-            ArgumentError(
-                "solve(): use_transpiration_bc=true double-counts gas convective " *
-                "enthalpy (S_conv is always active and overlaps the surface " *
-                "transpiration term by ∫S_conv). Use use_transpiration_bc=false " *
-                "(the default, S_conv-only ThermaKin Eq.17 convention).",
             ),
         )
     end
@@ -512,10 +491,6 @@ Solve a pyrolysis problem using DifferentialEquations.jl.
   falls below this fraction of its initial value.
 - `min_cells=2`: Minimum number of live cells; the solve terminates instead
   of parking below it
-- `use_transpiration_bc=false`: Opt-in surface gas sensible-enthalpy transpiration. **Off by
-  default** — the volumetric advection source S_conv already carries the gas enthalpy
-  (ThermaKin Eq.17 convention); enabling this alongside S_conv double-counts and is rejected
-  at problem construction. Retained only for closed-ledger experiments with S_conv disabled.
 - `warm_start=nothing`: Reuse a prior `PyrolysisSolution`'s final state as the initial state
   (`u0`). Component count, mesh size, and ALE/χ modes must match, and the prior solve must
   not have parked cells. `tspan[1]` still defines the integrator's start time, so the
@@ -686,10 +661,6 @@ function solve(
     #                             (see `Problem.to_problem_def`, which warns).
     # The :standard gas-energy convention (S_conv only) matches ThermaKin Eq.17.
     energy_form::Symbol = :standard,
-    # Opt-in surface gas transpiration enthalpy. OFF by default: the volumetric
-    # S_conv already carries gas enthalpy, and combining the two double-counts
-    # (rejected at problem construction). Mass transport remains active either way.
-    use_transpiration_bc::Bool = false,
 
     # Reuse a prior `PyrolysisSolution`'s final state as the initial state.
     # Length and NC must agree with the new problem; `tspan[1]` still defines
@@ -707,7 +678,6 @@ function solve(
         handle_depletion = handle_depletion,
         radiation_model = radiation_model,
         energy_form = energy_form,
-        use_transpiration_bc = use_transpiration_bc,
         min_thickness = min_thickness,
         depletion_threshold = depletion_threshold,
         min_cells = min_cells,
@@ -795,7 +765,6 @@ function solve(
         radiation_intensity = I_radiation,
         radiation_kirchhoff = radiation_kirchhoff,
         energy_form = energy_form,
-        use_transpiration_bc = use_transpiration_bc,
     )
 
     # Create solution container (after initialize_state so any mesh state it
@@ -1068,7 +1037,6 @@ function solve(
             ws.layout;
             depletion = depletion_cb_state,
             radiation_model = radiation_model,
-            use_transpiration_bc = use_transpiration_bc,
         )
     else
         extract_solution!(
@@ -1077,7 +1045,6 @@ function solve(
             problem;
             depletion = depletion_cb_state,
             radiation_model = radiation_model,
-            use_transpiration_bc = use_transpiration_bc,
         )
     end
 
@@ -1230,7 +1197,6 @@ function extract_solution!(
     problem;
     depletion::Union{Nothing,DepletionCallbackState} = nothing,
     radiation_model::RadiationModel = SURFACE_ABSORPTION,
-    use_transpiration_bc::Bool = false,
 )
     mesh = problem.mesh
     material = problem.material
@@ -1302,15 +1268,10 @@ function extract_solution!(
 
         # ================================================================
         # Solve for true boundary temperatures (not cell-center values).
-        # We reconstruct the per-species gas mass flux at the top face the
-        # same way the live mass BC application does, then pass it to the
-        # boundary-temperature solve so transpiration cooling is included
-        # — keeping the saved diagnostics consistent with the integrator
-        # state. The back face has no mass BC (insulated sample holder),
-        # so J_bottom is zero by construction.
+        # The per-species gas mass flux at each face is reconstructed the
+        # same way the live mass BC application does, so the blowing models
+        # see the flux the integrator saw.
         # ================================================================
-        T_ref_top = ambient_temperature(thermal_bc_top, t, Float64(T_REF))
-        T_ref_bottom = ambient_temperature(thermal_bc_bottom, t, Float64(T_REF))
 
         # Surface (top, boundary_id=1) — the live top cell
         T_cell_top = T_profile[n_live]
@@ -1330,7 +1291,6 @@ function extract_solution!(
             t,
             has_darcy_flow(material),
         )
-        J_top_thermal = use_transpiration_bc ? J_top : ntuple(_ -> 0.0, Val(NC))
 
         state_top = solve_boundary_temperature(
             T_cell_top,
@@ -1338,13 +1298,11 @@ function extract_solution!(
             Δz_half_top,
             thermal_bc_top,
             material,
-            J_top_thermal,
-            T_ref_top,
+            J_top,
             t,
             ε_top;
             a_eff = a_top,
             radiation_model = radiation_model,
-            J_blowing = J_top,
         )
         solution.surface_T[i] = state_top.T_surface
         solution.extras.surface_blowing_ratio[i] = state_top.blowing_ratio
@@ -1372,20 +1330,17 @@ function extract_solution!(
             has_darcy_flow(material),
             Val(:bottom),
         )
-        J_bottom_thermal = use_transpiration_bc ? J_bottom : ntuple(_ -> 0.0, Val(NC))
         state_bottom = solve_boundary_temperature(
             T_cell_bottom,
             k_bottom,
             Δz_half_bottom,
             thermal_bc_bottom,
             material,
-            J_bottom_thermal,
-            T_ref_bottom,
+            J_bottom,
             t,
             ε_bottom;
             a_eff = a_bottom,
             radiation_model = radiation_model,
-            J_blowing = J_bottom,
         )
         solution.extras.back_temperature[i] = state_bottom.T_surface
 
@@ -1436,12 +1391,6 @@ function extract_solution!(
         # Conductive heat flux at surface: use solved boundary state
         # This is consistent with the boundary temperature solve and ensures energy balance
         solution.extras.surface_heat_flux_conduction[i] = state_top.q_conducted
-
-        # Transpiration: sensible heat carried out by escaping gas. Closes
-        # the surface energy ledger as q_net − q_transpire = q_conduction. Read
-        # from the solved boundary state so the diagnostic matches the actual
-        # boundary solve (incl. inflow upwinding); zero when transpiration off.
-        solution.extras.surface_heat_flux_transpiration[i] = state_top.q_transpired
 
         # Volumetric radiative absorption (BEER_LAMBERT only): the in-depth
         # deposit Σ q'''·Δz telescopes to α_surf·q_ext·(1 − e^{−τ_tot}) —
@@ -1566,10 +1515,8 @@ and `z` read as `NaN`, the thickness is the live thickness
 # Keyword Arguments
 - `depletion::Union{Nothing,DepletionCallbackState}`: park-event record of
   the solve (`nothing` when depletion handling was off).
-	- `radiation_model::RadiationModel`: Radiation model for boundary flux diagnostics.
-	- `use_transpiration_bc::Bool`: If false, report boundary temperatures/heat fluxes
-	  using the same no-transpiration surface energy balance as the live solve.
-	"""
+- `radiation_model::RadiationModel`: Radiation model for boundary flux diagnostics.
+"""
 function extract_solution_ale!(
     solution::PyrolysisSolution,
     raw_solution,
@@ -1577,7 +1524,6 @@ function extract_solution_ale!(
     layout::StateLayout{NC};
     depletion::Union{Nothing,DepletionCallbackState} = nothing,
     radiation_model::RadiationModel = SURFACE_ABSORPTION,
-    use_transpiration_bc::Bool = false,
 ) where {NC}
     mesh = problem.mesh
     material = problem.material
@@ -1651,14 +1597,10 @@ function extract_solution_ale!(
         volumes = compute_volumes_from_state(u, layout, A_t)
 
         # ================================================================
-        # Solve for true boundary temperatures. We reconstruct the per-species
-        # gas mass flux at the top face the same way the live mass BC does,
-        # so the boundary-temperature solve here matches the integrator's
-        # transpiration BC. The back face has no mass BC (insulated holder),
-        # so J_bottom is zero by construction.
+        # Solve for true boundary temperatures. The per-species gas mass flux
+        # at each face is reconstructed the same way the live mass BC does,
+        # so the blowing models see the flux the integrator saw.
         # ================================================================
-        T_ref_top = ambient_temperature(thermal_bc_top, t, Float64(T_REF))
-        T_ref_bottom = ambient_temperature(thermal_bc_bottom, t, Float64(T_REF))
 
         # Surface (top, boundary_id=1) — the live top cell
         T_cell_top = T_profile[n_live]
@@ -1677,7 +1619,6 @@ function extract_solution_ale!(
             t,
             has_darcy_flow(material),
         )
-        J_top_thermal = use_transpiration_bc ? J_top : ntuple(_ -> 0.0, Val(NC))
 
         state_top = solve_boundary_temperature(
             T_cell_top,
@@ -1685,13 +1626,11 @@ function extract_solution_ale!(
             Δz_half_top,
             thermal_bc_top,
             material,
-            J_top_thermal,
-            T_ref_top,
+            J_top,
             t,
             ε_top;
             a_eff = a_top,
             radiation_model = radiation_model,
-            J_blowing = J_top,
         )
         solution.surface_T[out_idx] = state_top.T_surface
         solution.extras.surface_blowing_ratio[out_idx] = state_top.blowing_ratio
@@ -1718,20 +1657,17 @@ function extract_solution_ale!(
             has_darcy_flow(material),
             Val(:bottom),
         )
-        J_bottom_thermal = use_transpiration_bc ? J_bottom : ntuple(_ -> 0.0, Val(NC))
         state_bottom = solve_boundary_temperature(
             T_cell_bottom,
             k_bottom,
             Δz_half_bottom,
             thermal_bc_bottom,
             material,
-            J_bottom_thermal,
-            T_ref_bottom,
+            J_bottom,
             t,
             ε_bottom;
             a_eff = a_bottom,
             radiation_model = radiation_model,
-            J_blowing = J_bottom,
         )
         solution.extras.back_temperature[out_idx] = state_bottom.T_surface
 
@@ -1779,12 +1715,6 @@ function extract_solution_ale!(
         # Conductive heat flux at surface: use solved boundary state
         # This is consistent with the boundary temperature solve and ensures energy balance
         solution.extras.surface_heat_flux_conduction[out_idx] = state_top.q_conducted
-
-        # Transpiration: sensible heat carried out by escaping gas. Closes
-        # the surface energy ledger as q_net − q_transpire = q_conduction. Read
-        # from the solved boundary state so the diagnostic matches the actual
-        # boundary solve (incl. inflow upwinding); zero when transpiration off.
-        solution.extras.surface_heat_flux_transpiration[out_idx] = state_top.q_transpired
 
         # Volumetric radiative absorption (BEER_LAMBERT only) on the live ALE
         # geometry: Σ q'''·Δz = α_surf·q_ext·(1 − e^{−τ_tot}); see the

@@ -120,7 +120,6 @@ function benchmark_jacobian_backends(
     radiation_model = NO_RADIATION,
     radiation_intensity::Real = 0.0,
     energy_form::Symbol = :standard,
-    use_transpiration_bc::Bool = false,
     min_thickness::Real = 1e-6,
     kwargs...,
 )
@@ -131,7 +130,6 @@ function benchmark_jacobian_backends(
         radiation_model = radiation_model,
         radiation_intensity = Float64(radiation_intensity),
         energy_form = energy_form,
-        use_transpiration_bc = use_transpiration_bc,
     )
     return benchmark_jacobian_backends(def, ws, u; kwargs...)
 end
