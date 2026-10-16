@@ -12,7 +12,7 @@ For a monitor function ω(z), we want:
 This concentrates cells where ω is large.
 """
 
-using ..Geometry: Mesh1D, Node1D, cell_size, cell_center, update_geometry!, n_cells, n_nodes
+using ..Geometry: Mesh1D, Node1D, cell_size, update_geometry!, n_cells, n_nodes
 using ..Geometry: domain_bounds
 
 # Nodes referenced by at least one active cell. h-coarsening leaves orphaned

@@ -388,33 +388,6 @@ Get the number of reactions in a material.
 n_reactions(::Material{NC,NR}) where {NC,NR} = NR
 
 """
-	n_solids(m::Material)
-
-Get the number of solid-phase components.
-"""
-function n_solids(m::Material)
-    count(is_solid, m.components)
-end
-
-"""
-	n_liquids(m::Material)
-
-Get the number of liquid-phase components.
-"""
-function n_liquids(m::Material)
-    count(is_liquid, m.components)
-end
-
-"""
-	n_gases(m::Material)
-
-Get the number of gas-phase components.
-"""
-function n_gases(m::Material)
-    count(is_gas, m.components)
-end
-
-"""
 	has_darcy_flow(m::Material) -> Bool
 
 Check if material uses Darcy-Fick gas transport.
@@ -447,42 +420,6 @@ function component_index(m::Material, name::Symbol)
         c.name == name && return i
     end
     error("Component :$name not found in material $(m.name)")
-end
-
-# ============================================================================
-# Validation
-# ============================================================================
-
-"""
-	validate_material(m::Material)
-
-Validate material definition for consistency.
-
-Checks:
-- All reaction indices refer to valid components
-- Stoichiometry is mass-balanced
-- At least one component exists
-"""
-function validate_material(m::Material{NC,NR}) where {NC,NR}
-    # Must have at least one component
-    NC >= 1 || error("Material must have at least one component")
-
-    # Validate reactions
-    for (i, rxn) in enumerate(m.reactions)
-        for (idx, _order) in rxn.reactants
-            1 <= idx <= NC ||
-                error("Reaction $i ($(rxn.name)): reactant index $idx out of range 1:$NC")
-        end
-        for (idx, _ν) in rxn.products
-            1 <= idx <= NC ||
-                error("Reaction $i ($(rxn.name)): product index $idx out of range 1:$NC")
-        end
-
-        # Check mass balance
-        verify_stoichiometry(rxn) || @warn "Reaction $i ($(rxn.name)) fails mass balance"
-    end
-
-    return true
 end
 
 # ============================================================================
@@ -525,126 +462,6 @@ end
 # These functions use @generated to unroll loops at compile time, avoiding
 # the type instability that occurs when indexing heterogeneous tuples at runtime.
 # This is critical for performance in hot paths like RHS evaluation.
-
-"""
-	is_gas_phase(material::Material, j::Int) -> Bool
-
-Check if component j is in gas phase. Uses dispatch for type stability.
-"""
-@generated function is_gas_phase(material::Material{NC}, ::Val{J}) where {NC,J}
-    if J < 1 || J > NC
-        return :(error("Component index $J out of range 1:$NC"))
-    end
-    return :(is_gas(material.components[$J]))
-end
-
-# Convenience method that takes Int (not type-stable, but used in non-critical paths)
-is_gas_phase(material::Material, j::Int) = is_gas(material.components[j])
-
-"""
-	is_solid_phase(material::Material, j::Int) -> Bool
-
-Check if component j is in solid phase. Uses dispatch for type stability.
-"""
-@generated function is_solid_phase(material::Material{NC}, ::Val{J}) where {NC,J}
-    if J < 1 || J > NC
-        return :(error("Component index $J out of range 1:$NC"))
-    end
-    return :(is_solid(material.components[$J]))
-end
-
-# Convenience method
-is_solid_phase(material::Material, j::Int) = is_solid(material.components[j])
-
-"""
-	get_swelling_factor(material::Material, ::Val{J}) -> Float64
-
-Get swelling factor for component J. Type-stable via dispatch.
-"""
-@generated function get_swelling_factor(material::Material{NC}, ::Val{J}) where {NC,J}
-    if J < 1 || J > NC
-        return :(error("Component index $J out of range 1:$NC"))
-    end
-    return :(material.components[$J].swelling_factor)
-end
-
-"""
-	get_component_density(material::Material, ::Val{J}, T) -> Float64
-
-Get density of component J at temperature T. Type-stable via dispatch.
-"""
-@generated function get_component_density(material::Material{NC}, ::Val{J}, T) where {NC,J}
-    if J < 1 || J > NC
-        return :(error("Component index $J out of range 1:$NC"))
-    end
-    return :(material.components[$J].density(T))
-end
-
-"""
-	foreach_component(f, material::Material{NC}) where NC
-
-Apply function f to each component index, using dispatch for type stability.
-f should take (material, Val{j}) as arguments.
-
-Example:
-	foreach_component(material) do mat, j_val
-		if is_gas_phase(mat, j_val)
-			# do something
-		end
-	end
-"""
-@generated function foreach_component(f::F, material::Material{NC}) where {F,NC}
-    exprs = [:(f(material, Val{$j}())) for j = 1:NC]
-    return Expr(:block, exprs...)
-end
-
-"""
-	foreach_gas_component(f, material::Material{NC}) where NC
-
-Apply function f only to gas component indices. Type-stable.
-f should take (material, component_index::Int) as arguments.
-"""
-@generated function foreach_gas_component(f::F, material::Material{NC}) where {F,NC}
-    # Build list of gas components at compile time
-    exprs = Expr[]
-    for j = 1:NC
-        push!(exprs, :(
-            if is_gas(material.components[$j])
-                ;f(material, $j);
-            end
-        ))
-    end
-    return Expr(:block, exprs...)
-end
-
-"""
-	gas_component_indices(::Material{NC,NR,C,RT}) where {NC,NR,C,RT}
-
-Return a tuple of gas component indices at compile time. Use this instead of
-building an array at runtime.
-"""
-@generated function gas_component_indices(material::Material{NC}) where {NC}
-    # This generates the expression to build a tuple of gas indices
-    # We need to evaluate at generated function time, which is tricky
-    # Instead, return code that builds the right tuple
-    return quote
-        _collect_gas_indices(material.components)
-    end
-end
-
-# Helper that recursively collects gas indices - unrolled at compile time
-# Phase test is now a type-level check via `is_gas`, so this resolves at compile time.
-@inline _collect_gas_indices(::Tuple{}) = ()
-@inline function _collect_gas_indices(comps::Tuple)
-    first_comp = comps[1]
-    rest = Base.tail(comps)
-    rest_indices = _collect_gas_indices(rest)
-    if is_gas(first_comp)
-        return (1, map(x -> x + 1, rest_indices)...)
-    else
-        return map(x -> x + 1, rest_indices)
-    end
-end
 
 """
 	dry_pyrolysis_gas_indices(material::Material{NC}) where NC
@@ -691,39 +508,6 @@ end
 # ============================================================================
 # Unrolled Component Loops for Hot Paths
 # ============================================================================
-
-"""
-	_unroll_gas_flux!(J::Matrix, j::Val{J}, ξ_L, ξ_R, f, flux_fn, material) where J
-
-Unrolled gas flux computation for a single component.
-If component J is GAS, compute flux and store in J[J, f].
-Uses the volume fraction gradient formulation.
-"""
-@generated function _unroll_gas_flux!(
-    J::Matrix,
-    ::Val{IDX},
-    ξ_L::NTuple{NC},
-    ξ_R::NTuple{NC},
-    f::Int,
-    λ_face,
-    T_L,
-    T_R,
-    d_LR,
-    material::Material{NC},
-) where {IDX,NC}
-    if IDX < 1 || IDX > NC
-        return :(error("Component index $IDX out of range 1:$NC"))
-    end
-    return quote
-        @inbounds if is_gas(material.components[$IDX])
-            ξ_L_j = ξ_L[$IDX]
-            ξ_R_j = ξ_R[$IDX]
-            # Volume fraction gradient: J = -(λ/T_face) × Δ(ξT) / d
-            T_face = 0.5 * (T_L + T_R)
-            J[$IDX, f] = -λ_face * (ξ_R_j * T_R - ξ_L_j * T_L) / (T_face * d_LR)
-        end
-    end
-end
 
 """
 	compute_gas_fluxes_unrolled!(J, f, ξ_L, ξ_R, λ_face, T_L, T_R, d_LR, material::Material{NC})

@@ -71,13 +71,11 @@ using Pyrolysis.Problem: chi_range, mesh_mode, get_option
             use_ale = true,
             radiation_model = SURFACE_ABSORPTION,
             radiation_intensity = 42.0e3,
-            min_thickness = 2.0e-6,
         )
         @test mesh_mode(def.mode) isa Pyrolysis.Problem.ALE
         @test get_option(def, :radiation_model, NO_RADIATION) == SURFACE_ABSORPTION
         @test get_option(def, :radiation_intensity, 0.0) == 42.0e3
         @test ws.I_radiation == 42.0e3
-        @test ws.min_thickness == 2.0e-6
         # ALE layout carries the node block, packed from the live mesh.
         @test get_node_position(u0, ws.layout, 1) ≈ problem.mesh.nodes[1].z
     end

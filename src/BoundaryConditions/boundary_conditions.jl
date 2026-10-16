@@ -31,7 +31,6 @@ function validate_bc_params(;
     α::Union{Real,Nothing} = nothing,
     h_m::Union{Real,Nothing} = nothing,
     P::Union{Real,Nothing} = nothing,
-    flux::Union{Real,Nothing} = nothing,
 )
 
     if h !== nothing && h < 0
@@ -306,14 +305,9 @@ struct RadiativeFluxBC{F,A} <: AbstractThermalBC
     absorptivity::A   # nothing = use effective, or constant, or function
 end
 
-# Constructors with optional absorptivity
-function RadiativeFluxBC(; flux, absorptivity = nothing, validate::Bool = true)
-    if validate && absorptivity !== nothing
-        α_val = _get_scalar_value(absorptivity)
-        validate_bc_params(α = α_val)
-    end
-    RadiativeFluxBC(flux, absorptivity)
-end
+# Constructors with optional absorptivity (flux positional or keyword)
+RadiativeFluxBC(; flux, absorptivity = nothing, validate::Bool = true) =
+    RadiativeFluxBC(flux; absorptivity = absorptivity, validate = validate)
 function RadiativeFluxBC(flux; absorptivity = nothing, validate::Bool = true)
     if validate && absorptivity !== nothing
         α_val = _get_scalar_value(absorptivity)

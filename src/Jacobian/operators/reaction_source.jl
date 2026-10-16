@@ -150,7 +150,7 @@ function apply_cell!(
 
     out[1] = Q_rxn / ρcp
 
-    species_source_terms!(species_src, rates, material, NC)
+    species_source_terms!(species_src, rates, material)
     @inbounds for j = 1:NC
         out[1+j] = species_src[j]
     end

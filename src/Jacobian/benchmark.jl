@@ -119,12 +119,10 @@ function benchmark_jacobian_backends(
     use_ale::Bool = false,
     radiation_model = NO_RADIATION,
     radiation_intensity::Real = 0.0,
-    min_thickness::Real = 1e-6,
     kwargs...,
 )
     def, ws, u = Problem.initialize_state(
         problem;
-        min_thickness = min_thickness,
         use_ale = use_ale,
         radiation_model = radiation_model,
         radiation_intensity = Float64(radiation_intensity),

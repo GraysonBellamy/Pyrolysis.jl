@@ -75,7 +75,7 @@ function _reference_reaction_contribution(state, material::Material{NC,NR}) wher
         Q_rxn = reaction_heat_source(rates, heats)
         ρcp = effective_heat_capacity(ξ, T, material)
         dT_ref[i] = Q_rxn / ρcp
-        species_source_terms!(src, rates, material, NC)
+        species_source_terms!(src, rates, material)
         for j = 1:NC
             dξ_ref[j, i] = src[j]
         end
@@ -108,7 +108,7 @@ function _reference_dense_jacobian(u, layout, material::Material{NC,NR}) where {
             Q_rxn = reaction_heat_source(rates, heats)
             ρcp = effective_heat_capacity(ξ, T, material)
             out[1] = Q_rxn / ρcp
-            species_source_terms!(src, rates, material, NC)
+            species_source_terms!(src, rates, material)
             for j = 1:NC
                 out[1+j] = src[j]
             end

@@ -3,9 +3,9 @@ PyrolysisPlotsExt — Plots.jl recipes for `PyrolysisSolution`.
 
 Loaded automatically when both `Pyrolysis` and `Plots` (or `RecipesBase`)
 are available in the user's environment. Consumes the fixed core schema
-of `PyrolysisSolution` (`t`, `T`, `ξ`, `z`, `surface_T`, `mass_loss_rate`,
-`energy_residual`) so the recipes work regardless of which optional
-diagnostics extras were turned on.
+of `PyrolysisSolution` (`t`, `T`, `ξ`, `z`, `surface_T`, `mass_loss_rate`)
+so the recipes work regardless of which optional diagnostics extras were
+turned on.
 
 # Usage
 
@@ -16,7 +16,6 @@ sol = solve(problem)
 plot(sol)                   # surface temperature trace (default)
 plot(sol; kind = :heatmap)  # T(z, t) heatmap
 plot(sol; kind = :mlr)      # mass-loss-rate curve
-plot(sol; kind = :residual) # energy-conservation residual
 plot(sol; kind = :surface_T)# surface-temperature trace (explicit)
 ```
 """
@@ -42,15 +41,6 @@ using RecipesBase: @recipe, @series
         title --> "Mass-loss rate"
         legend --> false
         return sol.t, sol.mass_loss_rate
-    elseif kind === :residual
-        seriestype --> :line
-        xguide --> "time [s]"
-        yguide --> "energy residual [W/m²]"
-        title --> "Energy-conservation residual"
-        legend --> false
-        # `energy_residual` is zero unless the conservation tracker was
-        # enabled; surface that to the user via the y-range.
-        return sol.t, sol.energy_residual
     elseif kind === :heatmap
         seriestype --> :heatmap
         xguide --> "time [s]"
@@ -63,7 +53,7 @@ using RecipesBase: @recipe, @series
         throw(
             ArgumentError(
                 "Unknown plot kind: $(repr(kind)). " *
-                "Expected :surface_T, :mlr, :residual, or :heatmap.",
+                "Expected :surface_T, :mlr, or :heatmap.",
             ),
         )
     end

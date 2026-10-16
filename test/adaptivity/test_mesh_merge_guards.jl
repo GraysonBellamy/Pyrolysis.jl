@@ -14,7 +14,6 @@ Guards around the conservative merge and the depletion callback.
 using Test
 using Pyrolysis
 using Pyrolysis.Geometry: CellState, update_geometry!
-using Pyrolysis.Physics: check_mesh_quality, mesh_is_valid
 using Pyrolysis.Adaptivity: merge_temperatures_conservatively
 using Pyrolysis.Solver: find_thin_cells, create_depletion_callback, DepletionCallbackState
 using Pyrolysis.Problem: z_offset, get_node_positions
@@ -95,21 +94,17 @@ end
 # ============================================================================
 @testset "inverted cells are detected (signed widths)" begin
     mesh = create_uniform_mesh(0.01, 4, Val(2))
-    @test check_mesh_quality(mesh).valid
-    @test mesh_is_valid(mesh)
+    signed_widths(m) =
+        [m.nodes[c.node_ids[2]].z - m.nodes[c.node_ids[1]].z for c in m.cells]
+    @test all(>(0.0), signed_widths(mesh))
 
     # Push node 3 past node 4: cell 3 inverts. The cached volumes pass
-    # through abs(), so every V > 0 check passed pre-fix.
+    # through abs(), so only the signed width sees the inversion.
     z4 = mesh.nodes[4].z
     mesh.nodes[3].z = z4 + 5e-4
     update_geometry!(mesh)
     @test all(>(0.0), mesh.cell_volumes)   # the abs() blind spot, by design
-
-    q = check_mesh_quality(mesh)
-    @test !q.valid
-    @test 3 in q.tangled_cells
-    @test q.min_volume < 0.0
-    @test !mesh_is_valid(mesh)
+    @test signed_widths(mesh)[3] < 0.0
 end
 
 @testset "find_thin_cells refuses inverted cells" begin

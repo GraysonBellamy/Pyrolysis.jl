@@ -131,7 +131,7 @@ include("Internal.jl")
 # Materials
 export Material, SolidComponent, GaseousComponent, LiquidComponent
 export phase, molar_mass, is_gas, is_solid, is_liquid
-export Reaction, ReactionSet, DepletionLimiter
+export Reaction, DepletionLimiter
 export MixingRule, PARALLEL, SERIES, WEIGHTED, BRUGGEMAN, CARMAN_KOZENY
 export MixingSpec, MaterialMixing
 

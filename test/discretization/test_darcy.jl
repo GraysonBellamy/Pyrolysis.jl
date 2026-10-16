@@ -3,9 +3,8 @@ Tests for Darcy-Fick infrastructure.
 
 Tests cover:
 - Ideal gas pressure computation
-- Component-based permeability (effective_permeability, permeability_derivatives)
+- Component-based permeability (effective_permeability)
 - Gas viscosity (Sutherland's law)
-- Pressure gradient computation
 """
 
 using Test
@@ -284,10 +283,13 @@ using Pyrolysis.Discretization
             @test effective_permeability(ξ, T, mk2(WEIGHTED)) ≈ 0.5 * (0.2 / 0.7) * 1e-12 rtol =
                 1e-12
 
-            # permeability_derivatives is exact on both branches: finite
-            # differences across the WEIGHTED rule.
+            # ForwardDiff through effective_permeability is exact on both
+            # branches: finite differences across the WEIGHTED rule.
             let mat = mk2(WEIGHTED)
-                ∂T_, ∂ξ_ = permeability_derivatives(ξ, T, mat)
+                ∂ξ_ = ForwardDiff.gradient(
+                    x -> effective_permeability(Tuple(x), T, mat),
+                    [ξ...],
+                )
                 h = 1e-3
                 for i = 1:3
                     ξp = ntuple(j -> j == i ? ξ[j] + h : ξ[j], 3)
@@ -354,58 +356,6 @@ using Pyrolysis.Discretization
             )
             @test has_darcy_flow(mat_no_κ) == false
         end
-
-        # ====================================================================
-        @testset "Permeability Derivatives" begin
-            mat = Material(
-                name = :deriv_test,
-                components = (
-                    SolidComponent(:virgin, ρ = 1000.0, c = 1000.0, k = 0.2, κ = 1e-15),
-                    SolidComponent(:char, ρ = 200.0, c = 800.0, k = 0.1, κ = 1e-12),
-                    GaseousComponent(:gas, M = 0.044, c = 1000.0, k = 0.03, λ = 1e-4),
-                ),
-                reactions = (),
-            )
-
-            ξ = (500.0, 100.0, 0.5)
-            T = 500.0
-
-            ∂κ_∂T, ∂κ_∂ξ = permeability_derivatives(ξ, T, mat)
-
-            # Verify with finite differences
-            ε_T = 1e-4
-            κ_plus = effective_permeability(ξ, T + ε_T, mat)
-            κ_minus = effective_permeability(ξ, T - ε_T, mat)
-            ∂κ_∂T_fd = (κ_plus - κ_minus) / (2.0 * ε_T)
-
-            @test ∂κ_∂T ≈ ∂κ_∂T_fd atol = 1e-15  # Use absolute tolerance for near-zero values
-
-            # Check ∂κ/∂ξ₁ (virgin)
-            ε_ξ = 1e-3
-            ξ_plus = (ξ[1] + ε_ξ, ξ[2], ξ[3])
-            ξ_minus = (ξ[1] - ε_ξ, ξ[2], ξ[3])
-            κ_plus_ξ = effective_permeability(ξ_plus, T, mat)
-            κ_minus_ξ = effective_permeability(ξ_minus, T, mat)
-            ∂κ_∂ξ1_fd = (κ_plus_ξ - κ_minus_ξ) / (2.0 * ε_ξ)
-
-            @test ∂κ_∂ξ[1] ≈ ∂κ_∂ξ1_fd rtol = 1e-2
-        end
-
-        # ====================================================================
-        @testset "Harmonic mean permeability" begin
-            κ_L = 1e-12
-            κ_R = 1e-11
-
-            κ_face = harmonic_mean_permeability(κ_L, κ_R)
-
-            # Harmonic mean: 2ab/(a+b)
-            expected = 2 * κ_L * κ_R / (κ_L + κ_R)
-            @test κ_face ≈ expected rtol = 1e-10
-
-            # With one zero, should return zero
-            @test harmonic_mean_permeability(0.0, κ_R) == 0.0
-            @test harmonic_mean_permeability(κ_L, 0.0) == 0.0
-        end
     end
 
     # ========================================================================
@@ -414,21 +364,21 @@ using Pyrolysis.Discretization
         @testset "Reference condition" begin
             # At T_ref = 273.15 K, should return the canonical Sutherland
             # air reference μ_ref = 1.716e-5 Pa·s
-            μ = effective_gas_viscosity(273.15)
+            μ = SutherlandProperty()(273.15)
             @test μ ≈ 1.716e-5 rtol = 1e-10
 
             # Air at 300 K: 1.846e-5 Pa·s (the old default 1.81e-5 was the
             # ≈292.5 K value, a −2% bias on every Darcy velocity)
-            μ_300 = effective_gas_viscosity(300.0)
+            μ_300 = SutherlandProperty()(300.0)
             @test μ_300 ≈ 1.846e-5 rtol = 1e-3
         end
 
         # ====================================================================
         @testset "Temperature dependence" begin
             # Viscosity should increase with temperature (gas property)
-            μ_300 = effective_gas_viscosity(300.0)
-            μ_600 = effective_gas_viscosity(600.0)
-            μ_1000 = effective_gas_viscosity(1000.0)
+            μ_300 = SutherlandProperty()(300.0)
+            μ_600 = SutherlandProperty()(600.0)
+            μ_1000 = SutherlandProperty()(1000.0)
 
             @test μ_600 > μ_300
             @test μ_1000 > μ_600
@@ -440,21 +390,20 @@ using Pyrolysis.Discretization
             # enough to reject the previous constants (μ_ref = 1.81e-5 @ 300 K,
             # S = 110.0), which deviate ≈2.2% at these points.
             # At 400K, air viscosity ≈ 2.29e-5 Pa·s
-            μ_400 = effective_gas_viscosity(400.0)
+            μ_400 = SutherlandProperty()(400.0)
             @test μ_400 ≈ 2.29e-5 rtol = 0.01
 
             # At 500K, air viscosity ≈ 2.67e-5 Pa·s
-            μ_500 = effective_gas_viscosity(500.0)
+            μ_500 = SutherlandProperty()(500.0)
             @test μ_500 ≈ 2.67e-5 rtol = 0.01
         end
 
         # ====================================================================
         @testset "Custom parameters" begin
             # Test with custom reference values
-            μ_custom =
-                effective_gas_viscosity(400.0; μ_ref = 2.0e-5, T_ref = 350.0, S = 120.0)
+            μ_custom = SutherlandProperty(2.0e-5, 350.0, 120.0)(400.0)
             @test μ_custom > 0.0
-            @test μ_custom != effective_gas_viscosity(400.0)  # Different from default
+            @test μ_custom != SutherlandProperty()(400.0)  # Different from default
         end
 
         # ====================================================================
@@ -467,7 +416,7 @@ using Pyrolysis.Discretization
             # Reads the material's own curve; `two_comp` leaves it at the
             # SutherlandProperty() default, so this is the bare air value.
             @test μ_mix == effective_gas_viscosity(T, two_comp)
-            @test μ_mix ≈ effective_gas_viscosity(T) rtol = 1e-10
+            @test μ_mix ≈ SutherlandProperty()(T) rtol = 1e-10
 
             # TRIPWIRE — μ is a function of T alone. The production Darcy
             # Jacobian is the ANALYTICAL override in
@@ -492,12 +441,12 @@ using Pyrolysis.Discretization
             # negative) temperatures; T^1.5 must not throw a DomainError —
             # it killed an entire ApproxSolve ALE solve near burnout
             # (2026-06-11). The kernels clamp at T_GAS_PROPERTY_FLOOR.
-            μ_neg = effective_gas_viscosity(-43.0)
+            μ_neg = SutherlandProperty()(-43.0)
             @test isfinite(μ_neg) && μ_neg > 0.0
             # The floor binds: any T below it gives the floor's value.
-            @test μ_neg == effective_gas_viscosity(0.0)
+            @test μ_neg == SutherlandProperty()(0.0)
             # The floor never binds on physical states (≥ ~200 K).
-            @test effective_gas_viscosity(300.0) ≈ 1.846e-5 rtol = 1e-3
+            @test SutherlandProperty()(300.0) ≈ 1.846e-5 rtol = 1e-3
 
             D_neg = chapman_enskog_diffusivity(-43.0, 0.06)
             @test isfinite(D_neg) && D_neg > 0.0
@@ -612,355 +561,12 @@ using Pyrolysis.Discretization
 
         # ====================================================================
         # ====================================================================
-        @testset "Component-based interface" begin
-            gas = Pyrolysis.Materials.GaseousComponent(
-                :test_gas,
-                M = 0.044,
-                c = 1000.0,
-                k = 0.03,
-                λ = 1e-5,
-            )
-            T = 500.0
-
-            D = chapman_enskog_diffusivity(T, gas)
-            @test D > 0.0
-            @test D ≈ chapman_enskog_diffusivity(T, 0.044) rtol = 1e-10
-
-            # Solid component should return 0
-            solid = Pyrolysis.Materials.SolidComponent(
-                :test_solid,
-                ρ = 1000.0,
-                c = 1500.0,
-                k = 0.2,
-                κ = 0.0,
-            )
-            D_solid = chapman_enskog_diffusivity(T, solid)
-            @test D_solid == 0.0
-        end
-
-        # ====================================================================
         @testset "Physical constants" begin
             @test CHAPMAN_ENSKOG_PREFACTOR > 0.0
             @test SIGMA_AIR ≈ 3.617 rtol = 0.01
             @test EPSILON_K_AIR ≈ 97.0 rtol = 0.01
             @test M_AIR ≈ 0.029 rtol = 0.01
         end
-    end
-
-    # ========================================================================
-    @testset "Pressure Field Computation" begin
-        # Create a simple mesh (Val(2) for 2 components)
-        mesh = create_uniform_mesh(0.01, 10, Val(2))  # 1cm, 10 cells
-
-        # Initialize with gas (use existing cell volumes)
-        for i = 1:length(mesh.cells)
-            T = 300.0 + 50.0 * (i - 1)  # Temperature gradient
-            ξ_gas = 0.5  # Constant gas concentration
-            V = mesh.cell_volumes[i]
-            mesh.cell_states[i] = Pyrolysis.Geometry.CellState{2}(T, (0.0, ξ_gas), V)
-        end
-
-        # Compute porosity at each cell, then pressure
-        φ = [
-            porosity(mesh.cell_states[i].ξ, mesh.cell_states[i].T, two_comp) for
-            i = 1:length(mesh.cells)
-        ]
-        P = zeros(length(mesh.cells))
-        compute_pressure!(P, φ, StateCache(mesh, two_comp), mesh, two_comp)
-
-        # Pressure should increase with temperature (P ∝ T at fixed ξ, φ)
-        @test P[end] > P[1]
-
-        # Check specific values: P = (ξ_gas R T / M_gas) / φ. With ξ_solid = 0
-        # and a gas-only state, φ = 1 and the formula collapses to the classical form.
-        M_gas = 0.044
-        for i = 1:length(mesh.cells)
-            T_i = mesh.cell_states[i].T
-            ξ_gas = mesh.cell_states[i].ξ[2]
-            P_expected = (ξ_gas * R_GAS * T_i / M_gas) / φ[i]
-            @test P[i] ≈ P_expected rtol = 1e-10
-        end
-    end
-
-    # ========================================================================
-    @testset "Pressure Gradient Computation" begin
-        # Create mesh (Val(2) for 2 components)
-        mesh = create_uniform_mesh(0.01, 10, Val(2))  # 1cm, 10 cells
-
-        # Linear pressure profile
-        n_cells = length(mesh.cells)
-        P = [100000.0 + 1000.0 * i for i = 1:n_cells]  # Linear increase
-
-        # Compute gradient
-        ∇P = zeros(length(mesh.faces))
-        compute_pressure_gradient!(∇P, P, StateCache(mesh, two_comp), mesh)
-
-        # Interior faces should have constant gradient
-        # ∇P = ΔP / Δx = 1000 / (0.01/10) = 1000 / 0.001 = 1e6 Pa/m
-        cell_size = 0.01 / 10
-
-        for f = 2:(length(mesh.faces)-1)
-            # Interior faces
-            @test ∇P[f] ≈ 1000.0 / cell_size rtol = 1e-10
-        end
-
-        # Boundary faces should be zero (to be set by BC)
-        @test ∇P[1] == 0.0 || mesh.faces[1].cell_ids[1] != 0
-        @test ∇P[end] == 0.0 || mesh.faces[end].cell_ids[2] != 0
-    end
-
-    # ========================================================================
-    # Darcy Velocity Tests
-    # ========================================================================
-
-    @testset "Darcy Velocity - Single Face" begin
-        # Test darcy_velocity_face function
-
-        @testset "Basic velocity computation" begin
-            κ_L = 1e-12   # m²
-            κ_R = 1e-12   # m²
-            T_L = 400.0   # K
-            T_R = 400.0   # K
-            P_L = 101325.0  # Pa
-            P_R = 102325.0  # Pa (1000 Pa higher)
-            d_LR = 0.001  # m
-
-            v = darcy_velocity_face(κ_L, κ_R, T_L, T_R, P_L, P_R, d_LR)
-
-            # v = -(κ/μ) × ∇P = -(1e-12 / μ(400K)) × (1000/0.001)
-            μ_expected = effective_gas_viscosity(400.0)
-            ∇P = (P_R - P_L) / d_LR  # 1e6 Pa/m
-            v_expected = -κ_L / μ_expected * ∇P
-
-            @test v ≈ v_expected rtol = 1e-10
-            @test v < 0  # Flow from high P to low P (R to L, negative direction)
-        end
-
-        @testset "Zero permeability" begin
-            v = darcy_velocity_face(0.0, 0.0, 400.0, 400.0, 101325.0, 102325.0, 0.001)
-            @test v == 0.0
-        end
-
-        @testset "Zero pressure gradient" begin
-            v = darcy_velocity_face(1e-12, 1e-12, 400.0, 400.0, 101325.0, 101325.0, 0.001)
-            @test v == 0.0
-        end
-
-        @testset "Harmonic mean permeability" begin
-            # When κ_L = 0, harmonic mean should be 0 (blocks flow)
-            v = darcy_velocity_face(0.0, 1e-12, 400.0, 400.0, 101325.0, 102325.0, 0.001)
-            @test v == 0.0
-
-            # Symmetric case
-            v1 = darcy_velocity_face(1e-12, 2e-12, 400.0, 400.0, 101325.0, 102325.0, 0.001)
-            v2 = darcy_velocity_face(2e-12, 1e-12, 400.0, 400.0, 101325.0, 102325.0, 0.001)
-            @test v1 ≈ v2 rtol = 1e-10  # Harmonic mean is symmetric
-            @test v1 ≈ v2 rtol = 1e-10  # Harmonic mean is symmetric
-        end
-
-        @testset "Temperature affects viscosity" begin
-            # Sutherland's law: higher T → higher viscosity → LOWER velocity magnitude
-            v_low_T =
-                darcy_velocity_face(1e-12, 1e-12, 300.0, 300.0, 101325.0, 102325.0, 0.001)
-            v_high_T =
-                darcy_velocity_face(1e-12, 1e-12, 600.0, 600.0, 101325.0, 102325.0, 0.001)
-
-            # Both negative (flow from R to L), but high T has LOWER magnitude
-            # due to higher viscosity
-            @test abs(v_high_T) < abs(v_low_T)
-
-            # Verify the relationship quantitatively
-            μ_low = effective_gas_viscosity(300.0)
-            μ_high = effective_gas_viscosity(600.0)
-            @test μ_high > μ_low  # Confirm viscosity increases with T
-        end
-    end
-
-    @testset "Darcy Velocity - Full Mesh" begin
-        # Create mesh with 2 components (solid + gas)
-        mesh = create_uniform_mesh(0.01, 10, Val(2))
-        n_cells = length(mesh.cells)
-        n_faces = length(mesh.faces)
-
-        # Set up state with uniform temperature
-        T_uniform = 400.0
-        for i = 1:n_cells
-            V = mesh.cell_volumes[i]
-            mesh.cell_states[i] =
-                Pyrolysis.Geometry.CellState{2}(T_uniform, (500.0, 0.5), V)
-        end
-
-        # Component-based permeability field
-        κ_value = 1e-12
-        κ_field = fill(κ_value, n_cells)
-
-        @testset "Uniform pressure → zero velocity" begin
-            P = fill(101325.0, n_cells)
-            v_gas = zeros(n_faces)
-
-            compute_darcy_velocity!(v_gas, StateCache(mesh, two_comp), mesh, P, κ_field)
-
-            # All interior faces should have zero velocity
-            for f = 1:n_faces
-                @test abs(v_gas[f]) < 1e-20
-            end
-        end
-
-        @testset "Linear pressure → constant velocity" begin
-            # Linear pressure profile: P increases from bottom to top
-            P = [101325.0 + 1000.0 * (i-1) for i = 1:n_cells]
-            v_gas = zeros(n_faces)
-
-            compute_darcy_velocity!(v_gas, StateCache(mesh, two_comp), mesh, P, κ_field)
-
-            # Compute expected velocity
-            cell_size = 0.01 / 10
-            μ = effective_gas_viscosity(T_uniform)
-            ∇P = 1000.0 / cell_size  # Pa/m
-            v_expected = -κ_value / μ * ∇P
-
-            # Check interior faces (skip boundaries)
-            for f = 2:(n_faces-1)
-                face = mesh.faces[f]
-                if face.cell_ids[1] != 0 && face.cell_ids[2] != 0
-                    @test v_gas[f] ≈ v_expected rtol = 1e-10
-                end
-            end
-
-            # Boundary faces should be zero
-            @test v_gas[1] == 0.0 || mesh.faces[1].cell_ids[1] != 0
-        end
-
-        @testset "Non-uniform permeability field" begin
-            # Variable permeability (e.g., from Kozeny-Carman computation)
-            # κ increases with cell index
-            κ_variable = [1e-12 * (1.0 + 0.1 * (i-1)) for i = 1:n_cells]
-            P = [101325.0 + 1000.0 * (i-1) for i = 1:n_cells]
-            v_gas = zeros(n_faces)
-
-            compute_darcy_velocity!(v_gas, StateCache(mesh, two_comp), mesh, P, κ_variable)
-
-            # Interior faces should have non-zero velocity
-            interior_velocities = Float64[]
-            for f = 2:(n_faces-1)
-                face = mesh.faces[f]
-                if face.cell_ids[1] != 0 && face.cell_ids[2] != 0
-                    push!(interior_velocities, v_gas[f])
-                end
-            end
-
-            @test length(interior_velocities) > 0
-            @test all(v -> v != 0.0, interior_velocities)
-            @test all(v -> v < 0, interior_velocities)  # Flow from high P to low P
-        end
-    end
-
-    @testset "Darcy Mobility" begin
-        mesh = create_uniform_mesh(0.01, 10, Val(2))
-        n_cells = length(mesh.cells)
-        n_faces = length(mesh.faces)
-
-        # Uniform temperature
-        T_uniform = 400.0
-        for i = 1:n_cells
-            V = mesh.cell_volumes[i]
-            mesh.cell_states[i] =
-                Pyrolysis.Geometry.CellState{2}(T_uniform, (500.0, 0.5), V)
-        end
-
-        κ_value = 1e-12
-        κ_field = fill(κ_value, n_cells)
-        mobility = zeros(n_faces)
-
-        compute_darcy_mobility!(mobility, StateCache(mesh, two_comp), mesh, κ_field)
-
-        # Expected mobility: κ/μ
-        μ = effective_gas_viscosity(T_uniform)
-        mobility_expected = κ_value / μ
-
-        # Check interior faces
-        for f = 2:(n_faces-1)
-            face = mesh.faces[f]
-            if face.cell_ids[1] != 0 && face.cell_ids[2] != 0
-                @test mobility[f] ≈ mobility_expected rtol = 1e-10
-            end
-        end
-
-        # Boundary faces should have zero mobility
-        @test mobility[1] == 0.0 || mesh.faces[1].cell_ids[1] != 0
-    end
-
-    @testset "Velocity from Mobility" begin
-        n_faces = 10
-        mobility = fill(1e-6, n_faces)  # m²/(Pa·s)
-        ∇P = fill(1e5, n_faces)         # Pa/m
-        v_gas = zeros(n_faces)
-
-        velocity_from_mobility!(v_gas, mobility, ∇P)
-
-        # v = -mobility × ∇P = -1e-6 × 1e5 = -0.1 m/s
-        v_expected = -1e-6 * 1e5
-        for f = 1:n_faces
-            @test v_gas[f] ≈ v_expected rtol = 1e-10
-        end
-    end
-
-    @testset "Variable Permeability with Darcy Velocity" begin
-        # Tests Darcy velocity with spatially varying permeability field
-        # (analogous to what Kozeny-Carman would produce)
-        mesh = create_uniform_mesh(0.01, 10, Val(2))
-        n_cells = length(mesh.cells)
-        n_faces = length(mesh.faces)
-
-        T_uniform = 400.0
-        for i = 1:n_cells
-            V = mesh.cell_volumes[i]
-            mesh.cell_states[i] =
-                Pyrolysis.Geometry.CellState{2}(T_uniform, (500.0, 0.5), V)
-        end
-
-        # Pre-compute permeability using Kozeny-Carman formula
-        # κ = κ₀ × (φ/φ₀)³ × ((1-φ₀)/(1-φ))²
-        κ₀ = 1e-12
-        φ₀ = 0.3
-
-        # Variable porosity: increases from bottom to top
-        φ = [0.2 + 0.02 * (i-1) for i = 1:n_cells]
-
-        # Compute κ field from Kozeny-Carman formula
-        κ_field = zeros(n_cells)
-        for i = 1:n_cells
-            φ_i = φ[i]
-            if φ_i > 0.0 && φ_i < 1.0
-                φ_ratio = (φ_i / φ₀)^3
-                void_ratio = ((1.0 - φ₀) / (1.0 - φ_i))^2
-                κ_field[i] = κ₀ * φ_ratio * void_ratio
-            else
-                κ_field[i] = 0.0
-            end
-        end
-
-        # Linear pressure
-        P = [101325.0 + 1000.0 * (i-1) for i = 1:n_cells]
-        v_gas = zeros(n_faces)
-
-        compute_darcy_velocity!(v_gas, StateCache(mesh, two_comp), mesh, P, κ_field)
-
-        # Velocity should be non-zero for interior faces
-        # and vary due to changing permeability
-        interior_velocities = Float64[]
-        for f = 2:(n_faces-1)
-            face = mesh.faces[f]
-            if face.cell_ids[1] != 0 && face.cell_ids[2] != 0
-                push!(interior_velocities, v_gas[f])
-            end
-        end
-
-        @test length(interior_velocities) > 0
-        @test all(v -> v != 0.0, interior_velocities)
-
-        # All velocities should be negative (flow from high P to low P)
-        @test all(v -> v < 0, interior_velocities)
     end
 
     # ========================================================================
@@ -1199,21 +805,6 @@ using Pyrolysis.Discretization
                 @test J_df[1, f] == 0.0
             end
         end
-    end
-
-    @testset "Advective Flux Helper" begin
-        # Test gas_flux_advective function
-        ξ_L = 0.5
-        ξ_R = 1.0
-
-        # Positive velocity: upwind from left
-        @test gas_flux_advective(0.1, ξ_L, ξ_R) ≈ 0.1 * ξ_L
-
-        # Negative velocity: upwind from right
-        @test gas_flux_advective(-0.1, ξ_L, ξ_R) ≈ -0.1 * ξ_R
-
-        # Zero velocity
-        @test gas_flux_advective(0.0, ξ_L, ξ_R) == 0.0
     end
 
 end # main testset
@@ -1525,7 +1116,7 @@ end  # ALE Integration tests
         P_atm = 101325.0
         @test all(P .> P_atm)
 
-        # Initialize v_gas to zeros (as compute_darcy_velocity! does for boundaries)
+        # Initialize v_gas to zeros (boundary faces start at zero)
         v_gas = zeros(n_faces)
 
         # Apply DirichletPressureBC at top boundary (boundary_id=1, face at high z)
@@ -1999,16 +1590,6 @@ end  # Bruggeman tests
         g = ForwardDiff.derivative(_κ_of_solid, 800.0)
         @test isfinite(g)
         @test g < 0.0  # more solid → less porosity → less permeability
-    end
-
-    @testset "permeability_derivatives match AD" begin
-        T = 400.0
-        ξ = (800.0, 0.05)
-        g = ForwardDiff.derivative(_κ_of_solid, 800.0)
-
-        ∂κ_∂T, ∂κ_∂ξ = permeability_derivatives(ξ, T, ck_mat)
-        @test isapprox(∂κ_∂ξ[1], g; rtol = 1e-8)
-        @test ∂κ_∂ξ[2] == 0.0  # gas does not change porosity
     end
 
     @testset "Cache-aware _permeability_from_v rejects CK (needs ξ)" begin

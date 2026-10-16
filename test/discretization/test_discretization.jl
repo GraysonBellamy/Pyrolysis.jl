@@ -55,47 +55,6 @@ using Pyrolysis.Problem: StateCache
 
     end
 
-    @testset "Gradient Reconstruction" begin
-        # Create a simple mesh
-        mesh = create_uniform_mesh(0.01, 10, Val(2))
-        n = n_cells(mesh)
-
-        # Set up linear temperature profile: T = 300 + 20000*z
-        # dT/dz = 20000 K/m = 200 K/cm
-        for i = 1:n
-            z = cell_center(mesh, i)
-            T = 300.0 + 20000.0 * z
-            mesh.cell_states[i].T = T
-        end
-
-        # Compute gradients
-        ∇T = zeros(n)
-        state = StateCache(mesh)
-        compute_temperature_gradients!(∇T, state, mesh)
-
-        # Interior cells should have gradient ≈ 20000
-        for i = 2:(n-1)
-            @test ∇T[i] ≈ 20000.0 rtol=0.01
-        end
-
-        @testset "Face Value Interpolation" begin
-            # Central interpolation
-            @test face_value_central(1.0, 3.0) ≈ 2.0
-            @test @inferred face_value_central(1.0, 3.0) isa Float64
-
-            # Upwind interpolation
-            @test face_value_upwind(1.0, 3.0, 1.0) ≈ 1.0   # v > 0: use left
-            @test face_value_upwind(1.0, 3.0, -1.0) ≈ 3.0  # v < 0: use right
-            @test face_value_upwind(1.0, 3.0, 0.0) ≈ 1.0   # v = 0: use left
-            @test @inferred face_value_upwind(1.0, 3.0, 1.0) isa Float64
-
-            # Weighted interpolation
-            @test face_value_weighted(1.0, 3.0, 0.5) ≈ 2.0
-            @test face_value_weighted(1.0, 3.0, 1.0) ≈ 1.0
-            @test face_value_weighted(1.0, 3.0, 0.0) ≈ 3.0
-        end
-    end
-
     @testset "Divergence Operator" begin
         # Create mesh and test divergence
         mesh = create_uniform_mesh(0.01, 10, Val(2))
@@ -136,7 +95,7 @@ using Pyrolysis.Problem: StateCache
             divergence_1d!(div, fluxes, StateCache(mesh), mesh)
 
             # Integral of divergence
-            int_div = sum(div[i] * cell_volume(mesh, i) for i = 1:n_cells_val)
+            int_div = sum(div[i] * mesh.cell_volumes[i] for i = 1:n_cells_val)
 
             # Boundary flux difference (right boundary - left boundary) * area
             A = mesh.cross_section_area
@@ -594,131 +553,6 @@ using Pyrolysis.Problem: StateCache
             avg_velocity =
                 sum(prop_cache.darcy.v_gas[interior_faces]) / length(interior_faces)
             @test avg_velocity < 0.0
-        end
-
-        @testset "DarcyVelocityJacobianCoeffs" begin
-            # Test Darcy velocity Jacobian coefficients
-            # Use higher gas fraction to ensure non-zero porosity and permeability
-            n = 10
-            thickness = 0.006
-            mesh = create_uniform_mesh(
-                thickness,
-                n,
-                Val(2);
-                T_initial = 400.0,
-                ξ_initial = (500.0, 100.0),  # Moderate gas fraction for non-zero porosity
-            )
-
-            mat = Material(
-                name = :test,
-                components = (
-                    SolidComponent(
-                        :solid,
-                        ρ = ConstantProperty(1000.0),
-                        c = ConstantProperty(1500.0),
-                        k = ConstantProperty(0.2),
-                        ε = 0.9,
-                        κ = 1e-10,
-                    ),
-                    GaseousComponent(
-                        :gas,
-                        M = 0.044,
-                        c = ConstantProperty(1000.0),
-                        k = ConstantProperty(0.03),
-                        λ = ConstantProperty(1e-5),
-                    ),
-                ),
-                reactions = (),
-            )
-
-            prop_cache = PropertyCache(mesh)
-            update_properties!(prop_cache, StateCache(mesh, mat), mesh, mat)
-
-            bc_set = BoundaryConditionSet()
-            top_face_ids = mesh.boundary_faces[1]
-            bottom_face_ids = mesh.boundary_faces[2]
-            update_darcy_properties!(
-                prop_cache,
-                StateCache(mesh, mat),
-                mesh,
-                mat,
-                bc_set,
-                top_face_ids,
-                bottom_face_ids,
-            )
-
-            # Verify we have non-zero porosity and permeability
-            @test all(prop_cache.darcy.φ .> 0.0)
-            @test all(prop_cache.darcy.κ .> 0.0)
-
-            # Create Jacobian coefficient storage
-            n_f = n_faces(mesh)
-            jac_coeffs = DarcyVelocityJacobianCoeffs(n_f)
-
-            # Compute Jacobian coefficients
-            compute_darcy_velocity_jacobian!(
-                jac_coeffs,
-                StateCache(mesh, mat),
-                mesh,
-                prop_cache.darcy.κ,
-            )
-
-            # Test 1: Boundary faces should have zero coefficients
-            @test jac_coeffs.coeff_L[1] == 0.0
-            @test jac_coeffs.coeff_R[1] == 0.0
-            @test jac_coeffs.coeff_L[n_f] == 0.0
-            @test jac_coeffs.coeff_R[n_f] == 0.0
-
-            # Test 2: Interior faces should have non-zero coefficients
-            for f = 2:(n_f-1)
-                @test jac_coeffs.coeff_L[f] > 0.0  # ∂v/∂P_L > 0 (increasing P_L increases v)
-                @test jac_coeffs.coeff_R[f] < 0.0  # ∂v/∂P_R < 0 (increasing P_R decreases v)
-            end
-
-            # Test 3: coeff_L = -coeff_R (equal magnitude, opposite sign)
-            for f = 2:(n_f-1)
-                @test isapprox(jac_coeffs.coeff_L[f], -jac_coeffs.coeff_R[f], rtol = 1e-10)
-            end
-
-            # Test 4: Cell indices should be correct
-            for f = 2:(n_f-1)
-                face = mesh.faces[f]
-                @test jac_coeffs.left_ids[f] == face.cell_ids[1]
-                @test jac_coeffs.right_ids[f] == face.cell_ids[2]
-            end
-
-            # Test 5: Verify against finite difference
-            # ∂v/∂P_L ≈ (v(P_L + ε) - v(P_L)) / ε
-            ε = 1.0  # 1 Pa perturbation
-            f_test = n_f ÷ 2  # Middle face
-            left_id = jac_coeffs.left_ids[f_test]
-            right_id = jac_coeffs.right_ids[f_test]
-
-            # Get current velocity
-            v_base = prop_cache.darcy.v_gas[f_test]
-
-            # Perturb left pressure
-            P_orig = prop_cache.darcy.P[left_id]
-            prop_cache.darcy.P[left_id] = P_orig + ε
-
-            # Recompute velocity at this face
-            d_LR = abs(mesh.cell_centers[right_id] - mesh.cell_centers[left_id])
-            v_pert = darcy_velocity_face(
-                prop_cache.darcy.κ[left_id],
-                prop_cache.darcy.κ[right_id],
-                mesh.cell_states[left_id].T,
-                mesh.cell_states[right_id].T,
-                prop_cache.darcy.P[left_id],
-                prop_cache.darcy.P[right_id],
-                d_LR,
-            )
-
-            # Restore
-            prop_cache.darcy.P[left_id] = P_orig
-
-            # Check FD matches analytical coefficient
-            dv_dP_fd = (v_pert - v_base) / ε
-            @test isapprox(jac_coeffs.coeff_L[f_test], dv_dP_fd, rtol = 1e-4)
         end
     end
 

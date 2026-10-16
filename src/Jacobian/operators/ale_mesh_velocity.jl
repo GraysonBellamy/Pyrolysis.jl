@@ -274,7 +274,7 @@ function _compute_theta_A_inplace(
         fill!(rates_buf, zero(eltype(rates_buf)))
         fill!(heats_buf, zero(eltype(heats_buf)))
         evaluate_reactions!(rates_buf, heats_buf, ξ_i, T_i, material)
-        species_source_terms!(dξ_buf, rates_buf, material, NC)
+        species_source_terms!(dξ_buf, rates_buf, material)
         S_dry = zero(eltype(dξ_buf))
         for j in idx_dry
             S_dry += dξ_buf[j]
@@ -336,7 +336,7 @@ function compute_strain_rate_derivatives!(
         ξ_i = ntuple(j -> state.ξ[j, i], Val(NC))
         T_d, ξ_d = _stack_dual_seed(_ALEStrainTag, state.T[i], ξ_i)
         evaluate_reactions!(rates_d, heats_d, ξ_d, T_d, material)
-        species_source_terms!(dξ_dt_d, rates_d, material, NC)
+        species_source_terms!(dξ_dt_d, rates_d, material)
         θ_d = volume_change_rate(dξ_dt_d, T_d, material)
 
         p = ForwardDiff.partials(θ_d)
@@ -443,7 +443,7 @@ function compute_theta_A_derivatives!(
                 heats_d = zeros(eltype(x_inner), NR)
                 dξ_dt_d = zeros(eltype(x_inner), NC)
                 evaluate_reactions!(rates_d, heats_d, ξ_d, T_d, material)
-                species_source_terms!(dξ_dt_d, rates_d, material, NC)
+                species_source_terms!(dξ_dt_d, rates_d, material)
                 S_dry = zero(eltype(x_inner))
                 for j in dry_gas_indices
                     S_dry += dξ_dt_d[j]

@@ -20,8 +20,7 @@ using Test
 using Pyrolysis
 using Pyrolysis.Geometry: opposite_distance_gradient, opposite_distance_gradient_coeffs
 using Pyrolysis.Problem: StateCache
-using Pyrolysis.Discretization:
-    _limited_gradient, CENTRAL, VANLEER, compute_gradients!, compute_temperature_gradients!
+using Pyrolysis.Discretization: _limited_gradient, CENTRAL, VANLEER
 using Pyrolysis.Jacobian:
     verify_jacobian_at, JacobianSpec, DenseAD_ForwardDiff, Structured, DirectSolve
 
@@ -51,34 +50,6 @@ _dquad(z) = 5.0e4 + 4.0e6 * z
                 @test !isapprox(wide, _dquad(z_C); rtol = 1e-6)
                 @test !isapprox(halfmean, _dquad(z_C); rtol = 1e-6)
             end
-        end
-    end
-
-    @testset "compute_temperature_gradients! second order on stretched mesh" begin
-        n = 12
-        mesh = create_stretched_mesh(0.01, n, Val(2), 1.5)
-        for i = 1:n
-            mesh.cell_states[i].T = _quad(mesh.cell_centers[i])
-        end
-        state = StateCache(mesh)
-        ∇T = zeros(n)
-        compute_temperature_gradients!(∇T, state, mesh)
-        for i = 2:(n-1)
-            @test ∇T[i] ≈ _dquad(mesh.cell_centers[i]) rtol = 1e-10
-        end
-        # boundary cells stay one-sided (first order) — just finite
-        @test isfinite(∇T[1]) && isfinite(∇T[n])
-    end
-
-    @testset "compute_gradients! second order on stretched mesh" begin
-        n = 12
-        mesh = create_stretched_mesh(0.01, n, Val(2), 1.5)
-        state = StateCache(mesh)
-        φ = [_quad(mesh.cell_centers[i]) for i = 1:n]
-        ∇φ = zeros(n)
-        compute_gradients!(∇φ, φ, state, mesh)
-        for i = 2:(n-1)
-            @test ∇φ[i] ≈ _dquad(mesh.cell_centers[i]) rtol = 1e-10
         end
     end
 

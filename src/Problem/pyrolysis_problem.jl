@@ -200,8 +200,6 @@ diagnostics.
   empty `0×0` matrix in Eulerian mode
 - `surface_T::Vector{Float64}`: Surface temperature at each saved time [K]
 - `mass_loss_rate::Vector{Float64}`: Surface MLR per current area `A(t)` [kg/(m²·s)]
-- `energy_residual::Vector{Float64}`: Energy-conservation residual; zeros when
-  the conservation tracker is disabled
 - `retcode::Symbol`: Return code from ODE solver
 - `solve_time::Float64`: Wall-clock solve time [s]
 - `raw_solution`: Raw DifferentialEquations.jl solution object (interpolation source)
@@ -234,7 +232,6 @@ mutable struct PyrolysisSolution{P<:AbstractPyrolysisProblem,ExtraT<:NamedTuple}
     z::Matrix{Float64}
     surface_T::Vector{Float64}
     mass_loss_rate::Vector{Float64}
-    energy_residual::Vector{Float64}
     retcode::Symbol
     solve_time::Float64
     # Raw integrator solution; left untyped so reassignment from `nothing`
@@ -297,7 +294,6 @@ function PyrolysisSolution(problem::PyrolysisProblem)
         Matrix{Float64}(undef, 0, 0),         # z
         Float64[],                            # surface_T
         Float64[],                            # mass_loss_rate
-        Float64[],                            # energy_residual
         :Default,                             # retcode
         0.0,                                  # solve_time
         nothing,                              # raw_solution

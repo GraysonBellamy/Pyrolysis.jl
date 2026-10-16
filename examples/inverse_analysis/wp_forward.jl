@@ -710,7 +710,6 @@ function build_and_solve(
                 problem;
                 use_ale = true,
                 radiation_model = SURFACE_ABSORPTION,
-                min_thickness = 0.5e-3,
             )
 
         solver_kwargs = (

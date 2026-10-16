@@ -118,7 +118,7 @@ function apply!(
         fill!(rates, 0.0)
         fill!(heats, 0.0)
         evaluate_reactions!(rates, heats, ξ_i, T_i, material)
-        species_source_terms!(dξ, rates, material, NC)
+        species_source_terms!(dξ, rates, material)
         S_dry = 0.0
         for j in idx_dry
             S_dry += dξ[j]
@@ -145,7 +145,7 @@ function _chi_residual_kernel!(
     fill!(rates, zero(eltype(rates)))
     fill!(heats, zero(eltype(heats)))
     evaluate_reactions!(rates, heats, ξ, T, material)
-    species_source_terms!(dξ_dt, rates, material, NC)
+    species_source_terms!(dξ_dt, rates, material)
     S_dry = zero(eltype(rates))
     for j in idx_dry
         S_dry += dξ_dt[j]
@@ -279,7 +279,7 @@ function _eval_S_dry(
     heats = zeros(Float64, NR)
     dξ = zeros(Float64, NC)
     evaluate_reactions!(rates, heats, ξ, T, material)
-    species_source_terms!(dξ, rates, material, NC)
+    species_source_terms!(dξ, rates, material)
     S = 0.0
     @inbounds for j in idx_dry
         S += dξ[j]

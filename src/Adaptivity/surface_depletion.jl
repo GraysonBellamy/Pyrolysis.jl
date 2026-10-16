@@ -19,7 +19,7 @@ exterior = find_exterior_neighbor(mesh, cell_id)
 ```
 """
 
-using ..Geometry: Mesh1D, cell_size, cell_center, n_cells
+using ..Geometry: Mesh1D, cell_size, n_cells
 
 # ============================================================================
 # Surface Cell Detection

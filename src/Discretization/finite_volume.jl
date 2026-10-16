@@ -10,7 +10,7 @@ using ..Materials: R_GAS, STEFAN_BOLTZMANN, n_components, n_reactions
 using ..BoundaryConditions: DirichletThermalBC
 using ..Materials: is_gas
 using ..Materials: evaluate_param
-using ..Geometry: cell_size, cell_volume, face_area, cell_center, face_position
+using ..Geometry: cell_size
 using ..Properties: PropertyCache, update_properties!, effective_permeability, porosity
 using ..Physics:
     compute_conductive_fluxes!,
@@ -18,8 +18,7 @@ using ..Physics:
     compute_gas_fluxes!,
     evaluate_reactions!,
     species_source_terms!,
-    reaction_heat_source,
-    SourceTermCache
+    reaction_heat_source
 
 # ============================================================================
 # Divergence Operator
@@ -160,33 +159,6 @@ function RHSCache(mesh, material)
 end
 
 """
-	resize_rhs_cache!(cache::RHSCache, n_cells::Int, n_faces::Int, NC::Int, NR::Int)
-
-Resize RHS cache arrays (e.g., after mesh refinement).
-"""
-function resize_rhs_cache!(
-    cache::RHSCache{Tu},
-    n_cells::Int,
-    n_faces::Int,
-    NC::Int,
-    NR::Int,
-) where {Tu}
-    resize!(cache.q_cond, n_faces)
-    resize!(cache.q_total, n_faces)
-    resize!(cache.S_conv, n_cells)
-    cache.J_gas = zeros(Tu, NC, n_faces)
-    resize!(cache.Q_rxn, n_cells)
-    resize!(cache.Q_rad, n_cells)
-    cache.dξ_rxn = zeros(Tu, NC, n_cells)
-    resize!(cache.rates, NR)
-    resize!(cache.heats, NR)
-    resize!(cache.species_src, NC)
-    resize!(cache.div_q, n_cells)
-    cache.div_J = zeros(Tu, NC, n_cells)
-    return cache
-end
-
-"""
 	compute_rhs!(dT::Vector{Float64}, dξ::Matrix{Float64},
 				 mesh::Mesh1D{NC}, prop_cache::PropertyCache, rhs_cache::RHSCache,
 				 material::Material{NC}, bc_set::BoundaryConditionSet, t,
@@ -239,12 +211,6 @@ function compute_rhs!(
 ) where {NC}
 
     n_cells_val = mesh.n_active_cells
-    NR = n_reactions(material)
-
-    # Ensure caches are properly sized
-    if length(rhs_cache.q_cond) != length(mesh.faces)
-        resize_rhs_cache!(rhs_cache, length(mesh.cells), length(mesh.faces), NC, NR)
-    end
 
     # ========================================================================
     # Step 1: Compute conductive heat fluxes at interior faces
@@ -268,7 +234,7 @@ function compute_rhs!(
         rhs_cache.Q_rxn[i] = reaction_heat_source(rhs_cache.rates, rhs_cache.heats)
 
         # Compute species source terms
-        species_source_terms!(rhs_cache.species_src, rhs_cache.rates, material, NC)
+        species_source_terms!(rhs_cache.species_src, rhs_cache.rates, material)
 
         # Copy to output matrix
         for j = 1:NC
@@ -892,12 +858,6 @@ function compute_rhs_darcy_fick!(
 ) where {NC}
 
     n_cells_val = mesh.n_active_cells
-    NR = n_reactions(material)
-
-    # Ensure caches are properly sized
-    if length(rhs_cache.q_cond) != length(mesh.faces)
-        resize_rhs_cache!(rhs_cache, length(mesh.cells), length(mesh.faces), NC, NR)
-    end
 
     # ========================================================================
     # Step 1: Update Darcy properties using component-based permeability
@@ -927,7 +887,7 @@ function compute_rhs_darcy_fick!(
 
         evaluate_reactions!(rhs_cache.rates, rhs_cache.heats, ξ, T, material)
         rhs_cache.Q_rxn[i] = reaction_heat_source(rhs_cache.rates, rhs_cache.heats)
-        species_source_terms!(rhs_cache.species_src, rhs_cache.rates, material, NC)
+        species_source_terms!(rhs_cache.species_src, rhs_cache.rates, material)
         for j = 1:NC
             rhs_cache.dξ_rxn[j, i] = rhs_cache.species_src[j]
         end

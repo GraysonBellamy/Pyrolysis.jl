@@ -6,7 +6,7 @@ adaptive mesh refinement. High indicator values suggest refinement
 is needed; low values suggest coarsening is safe.
 """
 
-using ..Geometry: Mesh1D, cell_size, cell_center, n_cells
+using ..Geometry: Mesh1D, cell_size, n_cells
 
 # ============================================================================
 # Error Indicator Types

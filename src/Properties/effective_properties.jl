@@ -34,66 +34,13 @@ const T_GAS_PROPERTY_FLOOR = 100.0  # K
 const MU_FLOOR = 1e-12  # Pa·s
 
 """
-	effective_gas_viscosity(T::Float64; μ_ref=1.716e-5, T_ref=273.15, S=110.4) -> Float64
-
-Compute effective gas viscosity using Sutherland's law.
-
-μ(T) = μ_ref × (T/T_ref)^(3/2) × (T_ref + S)/(T + S)
-
-This correlation captures the temperature dependence of gas viscosity
-and is valid for air-like pyrolysis gases.
-
-# Arguments
-- `T`: Temperature [K]
-- `μ_ref`: Reference viscosity at T_ref [Pa·s] (default: 1.716e-5 for air at 273.15 K)
-- `T_ref`: Reference temperature [K] (default: 273.15)
-- `S`: Sutherland constant [K] (default: 110.4 for air)
-
-The defaults are the canonical Sutherland air constants (μ₀ = 1.716e-5 Pa·s
-at 273.15 K, S = 110.4 K; e.g. White, *Viscous Fluid Flow*), giving
-μ(300 K) = 1.846e-5 Pa·s.
-
-# Returns
-- `μ`: Dynamic viscosity [Pa·s]
-
-# Example
-```julia
-μ_300 = effective_gas_viscosity(300.0)   # ≈ 1.846e-5 Pa·s
-μ_600 = effective_gas_viscosity(600.0)   # ≈ 3.016e-5 Pa·s
-```
-
-# Notes
-- Viscosity increases with temperature (unlike liquids)
-- Default parameters are for air; adjust S for other gases
-- Valid range approximately 200-2000 K
-- `T_ref` here is the viscosity-correlation reference (273.15 K), distinct
-  from the global enthalpy datum T_REF = 298.15 K — do not conflate the two
-- The temperature is clamped to the property bracket
-  `[T_PROPERTY_MIN, T_PROPERTY_MAX]`, exactly as `SutherlandProperty` does, so
-  a diverging Newton trial state (even a negative temperature) cannot reach
-  `T^1.5` and the two forms agree bit for bit for every argument.
-"""
-@inline function effective_gas_viscosity(
-    T::Real;
-    μ_ref::Float64 = 1.716e-5,  # Pa·s at 273.15 K (canonical Sutherland air value)
-    T_ref::Float64 = 273.15,    # K
-    S::Float64 = 110.4,
-)        # Sutherland constant for air
-    T_eff = property_temperature(T)
-    T_ratio = T_eff / T_ref
-    return μ_ref * T_ratio^1.5 * (T_ref + S) / (T_eff + S)
-end
-
-"""
 	effective_gas_viscosity(T::Real, material) -> Real
 
 Dynamic viscosity [Pa·s] of `material`'s pore gas at temperature `T`, read from
 the material's own `gas_viscosity` curve.
 
-This is the form every Darcy call site uses. It differs from the bare
-[`effective_gas_viscosity(T)`](@ref) correlation above in that the material
-supplies the curve: a `Material` that says nothing carries
-`SutherlandProperty()` (air) and this reproduces the bare form bit for bit.
+This is the form every Darcy call site uses. A `Material` that says nothing
+carries `SutherlandProperty()` (air).
 
 The material's curve is a property function, so it evaluates on the property
 bracket `[T_PROPERTY_MIN, T_PROPERTY_MAX]` like every other law (a diverging
@@ -324,20 +271,6 @@ D_CH4 = chapman_enskog_diffusivity(500.0, 0.016, σ=3.758, ε_k=148.6)
     D = D_cm2s * 1e-4
 
     return D
-end
-
-"""
-	chapman_enskog_diffusivity(T, comp::Component; P=P_REF) -> Float64
-
-Compute Chapman-Enskog diffusivity for a gas component.
-
-Uses component's molar mass and any stored Lennard-Jones parameters.
-"""
-@inline function chapman_enskog_diffusivity(T::Real, comp; P::Real = P_REF)
-    if !is_gas(comp) || molar_mass(comp) < 1e-6
-        return 0.0  # No diffusion for non-gas components
-    end
-    return chapman_enskog_diffusivity(T, molar_mass(comp); P = P)
 end
 
 # ============================================================================
@@ -761,12 +694,6 @@ end
     return expr
 end
 
-# Helper to extract gas transfer coefficients as tuple for Bruggeman
-@generated function _gas_transfer_tuple(T, comps::Tuple, ::Val{NC}) where {NC}
-    exprs = [:(comps[$i].gas_transfer_coeff(T)) for i = 1:NC]
-    return :(($(exprs...),))
-end
-
 """
 	effective_gas_transfer(ξ::NTuple{NC,Float64}, T::Float64, material::Material) -> Float64
 
@@ -959,81 +886,6 @@ end
 end
 
 """
-	permeability_derivatives(ξ::NTuple{NC,Float64}, T::Float64, material) -> (∂κ/∂T, ∂κ/∂ξ)
-
-Compute derivatives of effective permeability for Jacobian assembly.
-
-Forward-mode differentiation of `effective_permeability` itself — the mixing
-rule has a single source of truth, so these derivatives track every closure
-(solid-basis PARALLEL/SERIES/WEIGHTED including the impermeable-phase series
-zero, CARMAN_KOZENY through the porosity chain, and user-supplied κ(T)).
-
-# Arguments
-- `ξ`: Mass concentrations [kg/m³]
-- `T`: Temperature [K]
-- `material`: Material with components and permeability mixing rules
-
-# Returns
-- `∂κ_∂T::Float64`: Temperature derivative [m²/K]
-- `∂κ_∂ξ::NTuple{NC,Float64}`: Concentration derivatives [m²/(kg/m³) = m⁵/kg]
-"""
-@inline function permeability_derivatives(
-    ξ::NTuple{NC,Float64},
-    T::Float64,
-    material,
-) where {NC}
-    T_d, ξ_d = _perm_seed_inputs(T, ξ)
-    κ_d = effective_permeability(ξ_d, T_d, material)
-    return _perm_extract(κ_d, Val(NC))
-end
-
-struct _PermDerivTag end
-
-# Seed (T, ξ) as Duals with NC+1 partials: slot 1 = T, slots 2..NC+1 = ξ.
-@generated function _perm_seed_inputs(T::Float64, ξ::NTuple{NC,Float64}) where {NC}
-    N = NC + 1
-    T_p = Expr(:tuple, [i == 1 ? :(1.0) : :(0.0) for i = 1:N]...)
-    ξ_exprs = Expr[]
-    for j = 1:NC
-        jp = j + 1
-        p = Expr(:tuple, [i == jp ? :(1.0) : :(0.0) for i = 1:N]...)
-        push!(
-            ξ_exprs,
-            quote
-                ForwardDiff.Dual{_PermDerivTag,Float64,$N}(
-                    ξ[$j],
-                    ForwardDiff.Partials{$N,Float64}($p),
-                )
-            end,
-        )
-    end
-    return quote
-        T_d = ForwardDiff.Dual{_PermDerivTag,Float64,$N}(
-            T,
-            ForwardDiff.Partials{$N,Float64}($T_p),
-        )
-        ξ_d = $(Expr(:tuple, ξ_exprs...))
-        return T_d, ξ_d
-    end
-end
-
-@generated function _perm_extract(
-    d::ForwardDiff.Dual{_PermDerivTag,Float64,N},
-    ::Val{NC},
-) where {N,NC}
-    N == NC + 1 || error("_perm_extract: N=$N must equal NC+1=$(NC+1)")
-    ξ_t = Expr(:tuple, [:(p[$(j+1)]) for j = 1:NC]...)
-    return quote
-        p = ForwardDiff.partials(d)
-        return p[1], $ξ_t
-    end
-end
-
-# κ may come out as a plain Float64 (e.g. the SERIES rule's hard-zero branch,
-# or a Dual-free CARMAN_KOZENY floor) — all derivatives are exactly 0 there.
-@inline _perm_extract(::Float64, ::Val{NC}) where {NC} = (0.0, ntuple(_ -> 0.0, Val(NC)))
-
-"""
 	harmonic_mean_weighted(a::Float64, b::Float64, d_a::Float64, d_b::Float64) -> Float64
 
 Distance-weighted harmonic mean for non-uniform meshes.
@@ -1056,37 +908,4 @@ This reduces to the standard harmonic mean 2ab/(a+b) when d_L = d_R.
         return zero(float(promote_type(typeof(a), typeof(b), typeof(d_a), typeof(d_b))))
     end
     return (d_a + d_b) / (d_a / a + d_b / b)
-end
-
-# ============================================================================
-# Permeability Utility Functions
-# ============================================================================
-
-"""
-	harmonic_mean_permeability(κ_L::Float64, κ_R::Float64) -> Float64
-
-Compute harmonic mean of permeabilities for face-centered value.
-
-Harmonic mean is appropriate for resistances in series (flux through
-heterogeneous media). This is the correct averaging for Darcy flow
-across a material interface.
-
-# Arguments
-- `κ_L`: Permeability in left cell [m²]
-- `κ_R`: Permeability in right cell [m²]
-
-# Returns
-Harmonic mean permeability [m²]. Returns 0.0 if either input is near zero.
-
-# Notes
-The harmonic mean gives: 2κ_Lκ_R / (κ_L + κ_R)
-
-This reduces to the geometric mean for equal values and approaches
-the smaller value when there's a large mismatch (conservative behavior).
-"""
-@inline function harmonic_mean_permeability(κ_L::Real, κ_R::Real)
-    if κ_L < 1e-30 || κ_R < 1e-30
-        return 0.0
-    end
-    return 2.0 * κ_L * κ_R / (κ_L + κ_R)
 end

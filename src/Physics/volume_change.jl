@@ -119,34 +119,3 @@ Vector version for pre-allocated storage.
 ) where {NC}
     return _volume_change_rate(dξ, T, material.components, Val(NC))
 end
-
-"""
-	compute_cell_volume_rates!(dV, state, dξ_matrix, material::Material{NC})
-
-Compute volume change rate for all cells, reading T and current cell volume
-from the typed `state::StateCache`.
-"""
-function compute_cell_volume_rates!(
-    dV::AbstractVector,
-    state,
-    dξ_matrix::AbstractMatrix,
-    material::Material{NC},
-) where {NC}
-    n_cells_val = length(state.T)
-
-    @inbounds for i = 1:n_cells_val
-        V = state.volume[i]
-        T = state.T[i]
-
-        # Get dξ/dt for this cell
-        dξ = view(dξ_matrix, :, i)
-
-        # Relative volume change rate
-        θ = volume_change_rate(dξ, T, material)
-
-        # Absolute volume change
-        dV[i] = V * θ
-    end
-
-    return nothing
-end

@@ -16,7 +16,6 @@ using ..Materials: n_reactions, SOLID
 using ..BoundaryConditions: ImpermeableBC
 import ..Materials: n_components  # Import to extend
 using ..Geometry
-using ..Geometry: BoundaryState
 using ..Properties
 using ..Physics
 using ..Adaptivity
@@ -75,11 +74,7 @@ export StateLayout,
     state_length, temperature_range, concentration_range, z_range, chi_range, block_view
 export pack_state!, update_mesh_from_state!, create_state_vector
 export StateCache,
-    populate!,
-    resize_state_cache!,
-    mirror_eulerian_geometry!,
-    update_cross_section_area!,
-    update_state_geometry!
+    populate!, mirror_eulerian_geometry!, update_cross_section_area!, update_state_geometry!
 export get_temperature,
     get_concentration,
     get_node_position,
@@ -87,8 +82,8 @@ export get_temperature,
     get_chi,
     get_thickness_from_state,
     compute_volumes_from_state
-export ProblemDef, InitialConditions, get_option
-export Workspace, update_radiation!, resize_workspace!
+export ProblemDef, get_option
+export Workspace, update_radiation!
 export initialize_state
 export to_problem_def, build_workspace, build_ad_workspace
 

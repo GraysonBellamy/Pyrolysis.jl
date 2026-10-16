@@ -230,33 +230,6 @@ end
 end
 
 """
-	resize_state_cache!(cache::StateCache, layout::StateLayout, n_faces::Int)
-
-Resize all blocks in-place to match the given layout and face count. The
-`A_section` ref is left untouched.
-"""
-function resize_state_cache!(
-    cache::StateCache{NC,Tu,Mode},
-    layout::StateLayout{NC,Mode},
-    n_faces::Int,
-) where {NC,Tu,Mode}
-    n_cells = layout.n_cells
-    n_nodes = layout.n_nodes
-    z_len = mesh_mode(layout.mode) isa ALE ? n_nodes : 0
-    χ_len = chi_mode(layout.mode) isa WithChi ? n_cells : 0
-
-    resize!(cache.T, n_cells)
-    cache.ξ = zeros(Tu, NC, n_cells)
-    resize!(cache.z, z_len)
-    resize!(cache.χ, χ_len)
-    resize!(cache.volume, n_cells)
-    resize!(cache.A_face, n_faces)
-    resize!(cache.cell_centers, n_cells)
-    resize!(cache.face_positions, n_faces)
-    return cache
-end
-
-"""
 	populate!(cache::StateCache, u::AbstractVector, layout::StateLayout) -> cache
 
 Read the flat state vector `u` into the typed cache. Carries whatever

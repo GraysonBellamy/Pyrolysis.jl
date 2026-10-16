@@ -81,7 +81,7 @@ advanced users. Highlights:
 
 | Group | Names |
 |-------|-------|
-| Materials | `Material`, `SolidComponent`, `GaseousComponent`, `LiquidComponent`, `Reaction`, `ReactionSet`, `MaterialMixing`, `MixingSpec`, `PARALLEL`, `SERIES`, `WEIGHTED`, `BRUGGEMAN` |
+| Materials | `Material`, `SolidComponent`, `GaseousComponent`, `LiquidComponent`, `Reaction`, `MaterialMixing`, `MixingSpec`, `PARALLEL`, `SERIES`, `WEIGHTED`, `BRUGGEMAN` |
 | Properties | `ConstantProperty`, `LinearProperty`, `PolynomialProperty`, `ArrheniusProperty`, `TableProperty`, `CallableProperty`, `StateDependentProperty` |
 | Boundary conditions | `HeatFluxBC`, `ConvectiveBC`, `RadiativeBC`, `RadiativeFluxBC`, `CombinedThermalBC`, `DirichletThermalBC`, `AdiabaticBC`, `ImpermeableBC`, `MassFluxBC`, `ConvectiveMassBC`, `DiffusiveMassBC`, `BoundaryConditionSet` |
 | Radiation | `RadiationModel`, `NO_RADIATION`, `SURFACE_ABSORPTION`, `BEER_LAMBERT` |

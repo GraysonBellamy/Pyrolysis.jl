@@ -19,7 +19,6 @@ using ..Problem:
     chi_range,
     _allocate_extras!
 using ..Residual: residual!, cross_section_area_from_state
-using ..Geometry: cell_center
 using ..Physics: evaluate_reactions!, ideal_gas_pressure
 using ..Properties:
     RadiationCache,
@@ -739,7 +738,6 @@ function solve(
     # shared with the exported `initialize_state`).
     def, ws, u0 = initialize_state(
         problem;
-        min_thickness = min_thickness,
         use_ale = use_ale,
         radiation_model = radiation_model,
         radiation_intensity = I_radiation,
@@ -1200,7 +1198,6 @@ function extract_solution!(
     solution.z = Matrix{Float64}(undef, 0, 0)             # Eulerian: no node positions
     solution.surface_T = zeros(n_times)
     solution.mass_loss_rate = zeros(n_times)
-    solution.energy_residual = zeros(n_times)
     _allocate_extras!(solution, n_times)
     depletion === nothing || append!(solution.extras.park_times, depletion.park_times)
 
@@ -1526,7 +1523,6 @@ function extract_solution_ale!(
     solution.z = fill(NaN, n_nodes, n_times)
     solution.surface_T = zeros(n_times)
     solution.mass_loss_rate = zeros(n_times)
-    solution.energy_residual = zeros(n_times)
     _allocate_extras!(solution, n_times)
 
     # Pre-allocate work arrays for reaction rate computation

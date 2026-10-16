@@ -7,7 +7,7 @@
 # are cross-checkable against both codes), isothermal, exact Bateman solution
 # in exact/kinetics.jl.
 #
-# Exercises multi-step ReactionSet coupling: intermediate B is produced by
+# Exercises multi-step reaction coupling: intermediate B is produced by
 # reaction 1 and consumed by reaction 2 SIMULTANEOUSLY (the existing
 # isothermal test is single-step).
 #

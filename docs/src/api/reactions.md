@@ -11,6 +11,5 @@ Technical Reference's
 
 ```@docs
 Reaction
-ReactionSet
 DepletionLimiter
 ```

@@ -163,8 +163,6 @@ function _residual!(du, u, def::ProblemDef, t, ws::Workspace, ::ALE)
         t,
         θ_out = ws.θ_work,
         precomputed_dξ_rxn = ws.rhs_cache.dξ_rxn,
-        rates = ws.rates_work,
-        heats = ws.heats_work,
         dξ_dt = ws.dξ_dt_work,
         θ_A = θ_A_global,
     )
@@ -195,8 +193,7 @@ function _residual!(du, u, def::ProblemDef, t, ws::Workspace, ::ALE)
             ws.ale_advection,
             ws.state_cache,
             mesh,
-            ws.w_physical;
-            limiter = ws.ale_limiter,
+            ws.w_physical,
         )
         _apply_ale_T_advection!(ws.dT_work, ws.ale_advection, mesh)
     end
@@ -399,7 +396,7 @@ function _compute_ale_mesh_velocity!(
             fill!(rates, zero(eltype(rates)))
             fill!(heats, zero(eltype(heats)))
             Physics.evaluate_reactions!(rates, heats, ξ_cell, T_cell, material)
-            Physics.species_source_terms!(dξ_dt, rates, material, NC)
+            Physics.species_source_terms!(dξ_dt, rates, material)
         end
 
         θ_cell = Physics.volume_change_rate(dξ_dt, T_cell, material)

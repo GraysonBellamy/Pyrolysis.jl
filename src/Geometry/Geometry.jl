@@ -65,13 +65,8 @@ export create_uniform_mesh, create_stretched_mesh, create_mesh_from_nodes
 
 # Geometry operations
 export update_geometry!
-export cell_volume, face_area, cell_center
-export total_volume, domain_bounds, cell_size
+export domain_bounds, cell_size
 # Second-order cell-centered gradient on nonuniform stencils
 export opposite_distance_gradient, opposite_distance_gradient_coeffs
-
-# ALE geometry-from-state
-export GeometryCache
-export resize_geometry_cache!
 
 end # module Geometry

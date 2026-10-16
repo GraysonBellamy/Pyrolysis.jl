@@ -28,13 +28,7 @@ gets a `P1Radiation` mode.
 
 using ..Materials: NO_RADIATION, P1_QUASI_STEADY
 using ..Problem:
-    ProblemDef,
-    Workspace,
-    get_option,
-    chi_mode,
-    WithChi,
-    resize_workspace!,
-    update_mesh_from_state!
+    ProblemDef, Workspace, get_option, chi_mode, WithChi, update_mesh_from_state!
 using ..Properties: RadiationCache, resize_radiation_cache!
 using ..Residual: residual!
 
@@ -183,25 +177,8 @@ it is not part of the ODE state vector.
 """
 @inline get_radiation_intensity(p::P1Residual, i::Int) = p.rad_cache.G[i]
 
-"""
-	resize_p1_residual!(p::P1Residual, n_nodes_new, n_cells_new, n_faces_new)
-
-Resize the P1 residual after AMR / depletion: walks the workspace (which
-rebuilds `ws.layout`) and the radiation cache.
-"""
-function resize_p1_residual!(
-    p::P1Residual,
-    n_nodes_new::Int,
-    n_cells_new::Int,
-    n_faces_new::Int,
-)
-    resize_workspace!(p.ws, n_nodes_new, n_cells_new, n_faces_new)
-    resize_radiation_cache!(p.rad_cache, n_cells_new)
-    return p
-end
-
 # ============================================================================
 # Exports
 # ============================================================================
 
-export compute_p1_residual!, P1Residual, resize_p1_residual!, get_radiation_intensity
+export compute_p1_residual!, P1Residual, get_radiation_intensity

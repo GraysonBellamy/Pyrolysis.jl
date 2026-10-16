@@ -47,7 +47,7 @@ using ..Materials
 using ..BoundaryConditions
 using ..Geometry
 using ..Geometry: Mesh1D, Node1D, Cell1D, Face1D, CellState
-using ..Geometry: cell_size, cell_center, update_geometry!, n_cells, n_nodes
+using ..Geometry: cell_size, update_geometry!, n_cells, n_nodes
 using ..Geometry: domain_bounds
 
 # Include subfiles
