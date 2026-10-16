@@ -4,7 +4,7 @@ Combined h+r adaptation driver.
 `hr_adapt!` runs h-adaptivity (topology change via the experimental h-AMR
 refine/coarsen path) followed by r-adaptivity (node relocation). It lives in
 Experimental because it depends on the h-AMR cluster. The pure r-refinement
-machinery (`relocate_nodes!`, monitors, `extract_state_arrays`) stays in core
+machinery (`relocate_nodes!`, monitors, `extract_fields`) stays in core
 `Adaptivity/r_refinement.jl` and is imported here.
 """
 
@@ -16,7 +16,7 @@ using ..Adaptivity:
     GradientMonitor,
     AbstractErrorIndicator,
     GradientIndicator,
-    extract_state_arrays
+    extract_fields
 
 """
 	hr_adapt!(mesh::Mesh1D{NC};
@@ -51,7 +51,7 @@ function hr_adapt!(
 ) where {NC}
 
     # 1. h-adaptivity
-    T, ξ = extract_state_arrays(mesh)
+    T, ξ = extract_fields(mesh)
     η = compute_indicator(h_indicator, mesh, T, ξ)
 
     # Refine
@@ -60,7 +60,7 @@ function hr_adapt!(
     perform_h_refinement!(mesh, marked_refine)
 
     # Coarsen
-    T, ξ = extract_state_arrays(mesh)  # Re-extract after refinement
+    T, ξ = extract_fields(mesh)  # Re-extract after refinement
     η = compute_indicator(h_indicator, mesh, T, ξ)
     marked_coarsen = mark_cells_for_coarsening(mesh, η, θ_coarsen, h_max)
     perform_h_coarsening!(mesh, marked_coarsen; material)

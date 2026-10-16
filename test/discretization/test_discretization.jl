@@ -151,11 +151,11 @@ using Pyrolysis.Problem: StateCache
 
         # Create property cache and update
         prop_cache = PropertyCache(mesh)
-        update_properties!(prop_cache, StateCache(mesh, mat), mesh, mat)
+        update_properties!(prop_cache, StateCache(mesh), mesh, mat)
 
         # Compute conductive fluxes
         q_cond = zeros(n_faces(mesh))
-        compute_conductive_fluxes!(q_cond, StateCache(mesh, mat), mesh, prop_cache)
+        compute_conductive_fluxes!(q_cond, StateCache(mesh), mesh, prop_cache)
 
         # For linear T profile, INTERIOR fluxes should be constant
         # q = -k * dT/dz = -0.2 * (T_cold - T_hot) / L = -0.2 * (-300) / 0.01 = 6000 W/m²
@@ -193,7 +193,7 @@ using Pyrolysis.Problem: StateCache
                 T_initial = 700.0,
                 ξ_initial = (1000.0, 0.0),
             )
-            state = StateCache(mesh, mat)
+            state = StateCache(mesh)
             prop_cache = PropertyCache(mesh)
             update_properties!(prop_cache, state, mesh, mat)
 
@@ -270,11 +270,11 @@ using Pyrolysis.Problem: StateCache
         inert = SolidComponent(:inert, ρ = 1000, c = 1000, k = k, ε = 0.9)
         mat = Material(name = :test, components = (inert,))
         prop_cache = PropertyCache(mesh)
-        update_properties!(prop_cache, StateCache(mesh, mat), mesh, mat)
+        update_properties!(prop_cache, StateCache(mesh), mesh, mat)
 
         # Compute conductive fluxes
         q_cond = zeros(n_faces(mesh))
-        compute_conductive_fluxes!(q_cond, StateCache(mesh, mat), mesh, prop_cache)
+        compute_conductive_fluxes!(q_cond, StateCache(mesh), mesh, prop_cache)
 
         # Check interior fluxes match expected gradient
         # q = -k * dT/dz = -k * A * (π/L) * cos(π * z / L)
@@ -313,7 +313,7 @@ using Pyrolysis.Problem: StateCache
 
             # Create property cache and update basic properties
             prop_cache = PropertyCache(mesh)
-            update_properties!(prop_cache, StateCache(mesh, mat), mesh, mat)
+            update_properties!(prop_cache, StateCache(mesh), mesh, mat)
 
 
             # Run update_darcy_properties! using type-stable API
@@ -322,7 +322,7 @@ using Pyrolysis.Problem: StateCache
             bottom_face_ids = mesh.boundary_faces[2]
             update_darcy_properties!(
                 prop_cache,
-                StateCache(mesh, mat),
+                StateCache(mesh),
                 mesh,
                 mat,
                 bc_set,
@@ -358,7 +358,7 @@ using Pyrolysis.Problem: StateCache
             end
         end
 
-        @testset "compute_rhs_darcy_fick!" begin
+        @testset "compute_rhs! with Darcy transport" begin
             # Create a mesh for testing full RHS
             L = 0.01  # 1 cm
             n = 20
@@ -379,7 +379,7 @@ using Pyrolysis.Problem: StateCache
 
             # Create caches
             prop_cache = PropertyCache(mesh)
-            update_properties!(prop_cache, StateCache(mesh, mat), mesh, mat)
+            update_properties!(prop_cache, StateCache(mesh), mesh, mat)
             rhs_cache = RHSCache(n, n_faces(mesh), 2, 0)
 
             # Boundary conditions
@@ -396,11 +396,11 @@ using Pyrolysis.Problem: StateCache
             dT = zeros(n)
             dξ = zeros(2, n)
 
-            # Run compute_rhs_darcy_fick!
-            compute_rhs_darcy_fick!(
+            # A property cache with a Darcy sub-cache selects Darcy–Fick transport.
+            compute_rhs!(
                 dT,
                 dξ,
-                StateCache(mesh, mat),
+                StateCache(mesh),
                 mesh,
                 prop_cache,
                 rhs_cache,
@@ -448,7 +448,7 @@ using Pyrolysis.Problem: StateCache
 
             # Create caches
             prop_cache = PropertyCache(mesh)
-            update_properties!(prop_cache, StateCache(mesh, mat), mesh, mat)
+            update_properties!(prop_cache, StateCache(mesh), mesh, mat)
             rhs_cache = RHSCache(n, n_faces(mesh), 2, 0)
 
             # BCs
@@ -463,10 +463,10 @@ using Pyrolysis.Problem: StateCache
 
             dT_darcy = zeros(n)
             dξ_darcy = zeros(2, n)
-            compute_rhs_darcy_fick!(
+            compute_rhs!(
                 dT_darcy,
                 dξ_darcy,
-                StateCache(mesh, mat),
+                StateCache(mesh),
                 mesh,
                 prop_cache,
                 rhs_cache,
@@ -477,15 +477,17 @@ using Pyrolysis.Problem: StateCache
                 bottom_face_ids,
             )
 
-            # Compute pure diffusion RHS
+            # Compute pure diffusion RHS (no Darcy sub-cache → Fickian transport)
+            prop_cache_fick = PropertyCache{Float64}(n, n_faces(mesh); with_darcy = false)
+            update_properties!(prop_cache_fick, StateCache(mesh), mesh, mat)
             dT_diff = zeros(n)
             dξ_diff = zeros(2, n)
             compute_rhs!(
                 dT_diff,
                 dξ_diff,
-                StateCache(mesh, mat),
+                StateCache(mesh),
                 mesh,
-                prop_cache,
+                prop_cache_fick,
                 rhs_cache,
                 mat,
                 bc_set,
@@ -527,14 +529,14 @@ using Pyrolysis.Problem: StateCache
 
             # Create caches
             prop_cache = PropertyCache(mesh)
-            update_properties!(prop_cache, StateCache(mesh, mat), mesh, mat)
+            update_properties!(prop_cache, StateCache(mesh), mesh, mat)
 
             bc_set = BoundaryConditionSet()
             top_face_ids = mesh.boundary_faces[1]
             bottom_face_ids = mesh.boundary_faces[2]
             update_darcy_properties!(
                 prop_cache,
-                StateCache(mesh, mat),
+                StateCache(mesh),
                 mesh,
                 mat,
                 bc_set,

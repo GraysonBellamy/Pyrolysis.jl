@@ -127,8 +127,6 @@ _dquad(z) = 5.0e4 + 4.0e6 * z
         for i = 2:(n-1)
             g = Pyrolysis.Adaptivity.compute_gradient_1d(φ, mesh, i)
             @test g ≈ _dquad(mesh.cell_centers[i]) rtol = 1e-10
-            g2 = Pyrolysis.Adaptivity.compute_cell_gradient(φ, mesh, i)
-            @test g2 ≈ _dquad(mesh.cell_centers[i]) rtol = 1e-10
         end
     end
 

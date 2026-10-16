@@ -200,37 +200,21 @@ function compute_gradient_1d(φ::AbstractVector{Float64}, mesh::Mesh1D, i::Int)
     left_id = left_face.cell_ids[1]
     right_id = right_face.cell_ids[2]
 
-    # Get left and right values
-    if left_id == 0  # Left boundary
-        φ_L = φ[i]  # Use cell value (zero gradient at boundary approx)
-    else
-        φ_L = φ[left_id]
-    end
-
-    if right_id == 0  # Right boundary  
-        φ_R = φ[i]  # Use cell value
-    else
-        φ_R = φ[right_id]
-    end
-
-    # Distance between neighbors
     if left_id == 0 && right_id == 0
-        # Single cell - no gradient
         return 0.0
     elseif left_id == 0
-        # One-sided (right)
         dz = mesh.cell_centers[right_id] - mesh.cell_centers[i]
-        return (φ_R - φ[i]) / dz
+        return abs(dz) > 0 ? (φ[right_id] - φ[i]) / dz : 0.0
     elseif right_id == 0
-        # One-sided (left)
         dz = mesh.cell_centers[i] - mesh.cell_centers[left_id]
-        return (φ[i] - φ_L) / dz
+        return abs(dz) > 0 ? (φ[i] - φ[left_id]) / dz : 0.0
     else
         # Opposite-distance-weighted slopes: second order on nonuniform
         # meshes
         d_L = mesh.cell_centers[i] - mesh.cell_centers[left_id]
         d_R = mesh.cell_centers[right_id] - mesh.cell_centers[i]
-        return opposite_distance_gradient(φ_L, φ[i], φ_R, d_L, d_R)
+        return (abs(d_L) > 0 && abs(d_R) > 0) ?
+               opposite_distance_gradient(φ[left_id], φ[i], φ[right_id], d_L, d_R) : 0.0
     end
 end
 

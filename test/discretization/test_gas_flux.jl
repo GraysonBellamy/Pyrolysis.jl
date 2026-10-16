@@ -177,12 +177,12 @@ using Pyrolysis.Geometry: CellState
 
         # Create property cache and update
         cache = PropertyCache(mesh)
-        update_properties!(cache, StateCache(mesh, mat), mesh, mat)
+        update_properties!(cache, StateCache(mesh), mesh, mat)
 
         # Compute gas fluxes
         n_faces = length(mesh.faces)
         J = zeros(NC, n_faces)
-        compute_gas_fluxes!(J, StateCache(mesh, mat), mesh, cache, mat)
+        compute_gas_fluxes!(J, StateCache(mesh), mesh, cache, mat)
 
         # Check that interior face fluxes for the gas component (index 2) are non-zero
         # Interior faces are indices 2 through n_faces-1

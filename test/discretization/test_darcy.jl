@@ -716,14 +716,14 @@ using Pyrolysis.Discretization
 
             compute_gas_fluxes_darcy_fick!(
                 J_df,
-                StateCache(mesh, two_comp),
+                StateCache(mesh),
                 mesh,
                 cache,
                 two_comp,
                 v_gas,
                 fill(1.0, n_cells),
             )
-            compute_gas_fluxes!(J_diff, StateCache(mesh, two_comp), mesh, cache, two_comp)
+            compute_gas_fluxes!(J_diff, StateCache(mesh), mesh, cache, two_comp)
 
             # Should be identical
             for f = 1:n_faces
@@ -752,14 +752,14 @@ using Pyrolysis.Discretization
 
             compute_gas_fluxes_darcy_fick!(
                 J_df,
-                StateCache(mesh, two_comp),
+                StateCache(mesh),
                 mesh,
                 cache,
                 two_comp,
                 v_gas,
                 fill(1.0, n_cells),
             )
-            compute_gas_fluxes!(J_diff, StateCache(mesh, two_comp), mesh, cache, two_comp)
+            compute_gas_fluxes!(J_diff, StateCache(mesh), mesh, cache, two_comp)
 
             # Darcy-Fick should differ from diffusion-only due to advection
             interior_differ = false
@@ -792,7 +792,7 @@ using Pyrolysis.Discretization
 
             compute_gas_fluxes_darcy_fick!(
                 J_df,
-                StateCache(mesh, two_comp),
+                StateCache(mesh),
                 mesh,
                 cache,
                 two_comp,
@@ -856,7 +856,7 @@ end # main testset
         @testset "Zero gas flux gives zero source" begin
             J_gas = zeros(NC, n_faces)
             S_conv = zeros(n_cells)
-            state = StateCache(mesh, two_comp)
+            state = StateCache(mesh)
             Pyrolysis.Properties.update_properties!(prop_cache, state, mesh, two_comp)
             compute_gas_convective_source!(
                 S_conv,
@@ -884,7 +884,7 @@ end # main testset
             J_gas = zeros(NC, n_faces)
             J_gas[2, :] .= 0.5  # Nonzero gas flux
             S_conv = zeros(n_cells)
-            state = StateCache(mesh, two_comp)
+            state = StateCache(mesh)
             Pyrolysis.Properties.update_properties!(prop_cache, state, mesh, two_comp)
             compute_gas_convective_source!(
                 S_conv,
@@ -918,7 +918,7 @@ end # main testset
             J_gas = zeros(NC, n_faces)
             J_gas[2, :] .= 0.5  # Constant gas flux at all faces
             S_conv = zeros(n_cells)
-            state = StateCache(mesh, two_comp)
+            state = StateCache(mesh)
             Pyrolysis.Properties.update_properties!(prop_cache, state, mesh, two_comp)
             # Boundary fluxes consistent with the linear profile: q = −k·dT/dz
             # at both boundary faces (the +z convention), so the blended
@@ -956,7 +956,7 @@ end # main testset
             J_gas = zeros(NC, n_faces)
             J_gas[2, :] .= 0.5
             S_conv1 = zeros(n_cells)
-            state1 = StateCache(mesh, two_comp)
+            state1 = StateCache(mesh)
             Pyrolysis.Properties.update_properties!(prop_cache, state1, mesh, two_comp)
             compute_gas_convective_source!(
                 S_conv1,
@@ -979,7 +979,7 @@ end # main testset
             end
 
             S_conv2 = zeros(n_cells)
-            state2 = StateCache(mesh, two_comp)
+            state2 = StateCache(mesh)
             Pyrolysis.Properties.update_properties!(prop_cache, state2, mesh, two_comp)
             compute_gas_convective_source!(
                 S_conv2,
@@ -1013,7 +1013,7 @@ end # main testset
             J_gas_solid_only = zeros(NC, n_faces)
             J_gas_solid_only[1, :] .= 0.5  # Flux in solid component
             S_conv = zeros(n_cells)
-            state = StateCache(mesh, two_comp)
+            state = StateCache(mesh)
             Pyrolysis.Properties.update_properties!(prop_cache, state, mesh, two_comp)
             compute_gas_convective_source!(
                 S_conv,
@@ -1128,7 +1128,7 @@ end  # ALE Integration tests
         bottom_face_ids = mesh.boundary_faces[2]
         apply_pressure_bc_to_darcy_velocity!(
             v_gas,
-            StateCache(mesh, two_comp),
+            StateCache(mesh),
             mesh,
             P,
             κ,
@@ -1176,7 +1176,7 @@ end  # ALE Integration tests
         bottom_face_ids = mesh.boundary_faces[2]
         apply_pressure_bc_to_darcy_velocity!(
             v_gas,
-            StateCache(mesh, two_comp),
+            StateCache(mesh),
             mesh,
             P,
             κ,
@@ -1228,7 +1228,7 @@ end  # ALE Integration tests
         bottom_face_ids = mesh.boundary_faces[2]
         apply_pressure_bc_to_darcy_velocity!(
             v_gas,
-            StateCache(mesh, two_comp),
+            StateCache(mesh),
             mesh,
             P,
             κ,
@@ -1266,7 +1266,7 @@ end  # ALE Integration tests
 
         # Create property cache
         cache = PropertyCache(mesh)
-        update_properties!(cache, StateCache(mesh, two_comp), mesh, two_comp)
+        update_properties!(cache, StateCache(mesh), mesh, two_comp)
 
         # Debug: Check that update_properties! worked
         if cache.ρ[1] == 0.0
@@ -1289,7 +1289,7 @@ end  # ALE Integration tests
         bottom_face_ids = mesh.boundary_faces[2]
         update_darcy_properties!(
             cache,
-            StateCache(mesh, two_comp),
+            StateCache(mesh),
             mesh,
             two_comp,
             bc_set,

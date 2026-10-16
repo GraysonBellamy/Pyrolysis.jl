@@ -215,9 +215,7 @@ function apply!(
         ws.w_node,
         state,
         mesh,
-        nothing,
-        material,
-        t;
+        material;
         θ_out = ws.theta,
         precomputed_dξ_rxn = dξ_rxn,
         rates = ws.rates,

@@ -233,13 +233,13 @@ end
 
         # Set up property cache
         prop_cache = PropertyCache(n_cells, n_cells + 1)
-        update_properties!(prop_cache, StateCache(mesh, mat), mesh, mat)
+        update_properties!(prop_cache, StateCache(mesh), mesh, mat)
 
         # Compute radiation source
         q_rad = zeros(n_cells)
         compute_radiation_source!(
             q_rad,
-            StateCache(mesh, mat),
+            StateCache(mesh),
             mesh,
             prop_cache,
             I_surface,
@@ -301,12 +301,12 @@ end
         mesh = create_uniform_mesh(L, n_cells, Val(1); T_initial = 300.0, ξ_initial = (ρ,))
 
         prop_cache = PropertyCache(n_cells, n_cells + 1)
-        update_properties!(prop_cache, StateCache(mesh, mat), mesh, mat)
+        update_properties!(prop_cache, StateCache(mesh), mesh, mat)
 
         q_rad = zeros(n_cells)
         compute_radiation_source!(
             q_rad,
-            StateCache(mesh, mat),
+            StateCache(mesh),
             mesh,
             prop_cache,
             I_surface,
@@ -1428,7 +1428,7 @@ end
 #
 @testset "Darcy-Fick Mass Conservation" begin
     using Pyrolysis.Discretization:
-        compute_rhs_darcy_fick!, PropertyCache, RHSCache, update_properties!
+        compute_rhs!, PropertyCache, RHSCache, update_properties!
 
     # Material with gas generation from solid
     solid = SolidComponent(:solid, ρ = 1000.0, c = 1500.0, k = 0.3)
@@ -1463,7 +1463,7 @@ end
 
         # Property cache
         prop_cache = PropertyCache(mesh)
-        update_properties!(prop_cache, StateCache(mesh, material), mesh, material)
+        update_properties!(prop_cache, StateCache(mesh), mesh, material)
 
         # RHS cache
         rhs_cache = RHSCache(mesh, material)
@@ -1493,10 +1493,10 @@ end
         dξ = zeros(2, n_cells)
         t = 0.0
 
-        compute_rhs_darcy_fick!(
+        compute_rhs!(
             dT,
             dξ,
-            StateCache(mesh, material),
+            StateCache(mesh),
             mesh,
             prop_cache,
             rhs_cache,

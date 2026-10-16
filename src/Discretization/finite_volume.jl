@@ -10,8 +10,7 @@ using ..Materials: R_GAS, STEFAN_BOLTZMANN, n_components, n_reactions
 using ..BoundaryConditions: DirichletThermalBC
 using ..Materials: is_gas
 using ..Materials: evaluate_param
-using ..Geometry: cell_size
-using ..Properties: PropertyCache, update_properties!, effective_permeability, porosity
+using ..Properties: PropertyCache, effective_permeability, porosity
 using ..Physics:
     compute_conductive_fluxes!,
     compute_radiation_source!,
@@ -159,16 +158,24 @@ function RHSCache(mesh, material)
 end
 
 """
-	compute_rhs!(dT::Vector{Float64}, dξ::Matrix{Float64},
-				 mesh::Mesh1D{NC}, prop_cache::PropertyCache, rhs_cache::RHSCache,
-				 material::Material{NC}, bc_set::BoundaryConditionSet, t,
+	compute_rhs!(dT, dξ, state, mesh::Mesh1D{NC}, prop_cache::PropertyCache,
+				 rhs_cache::RHSCache, material::Material{NC},
+				 bc_set::BoundaryConditionSet, t,
 				 top_face_ids::Vector{Int}, bottom_face_ids::Vector{Int};
-				 I_radiation::Float64=0.0) where NC
+				 I_radiation=0.0, radiation_model=NO_RADIATION,
+				 radiation_kirchhoff=true) where NC
 
 Compute the right-hand side of the governing equations using type-stable BCs.
 
 This version uses pre-cached face lists and static dispatch for maximum
 performance. All boundary condition handling is specialized at compile time.
+
+The gas transport law follows the property cache: with a Darcy sub-cache
+(`prop_cache.darcy !== nothing`, Darcy–Fick transport) the Darcy properties
+are refreshed first and the gas flux carries the pressure-driven advection
+(boundary faces receive the pressure-BC venting flux, to which
+`apply_mass_bc_flux!` adds the diffusive film-law part); without one the gas
+flux is Fickian.
 
 # Arguments
 - `dT`: Output vector of dT/dt [K/s]
@@ -213,8 +220,19 @@ function compute_rhs!(
     n_cells_val = mesh.n_active_cells
 
     # ========================================================================
-    # Step 1: Compute conductive heat fluxes at interior faces
+    # Step 1: Transport properties (Darcy–Fick only) and conductive heat
+    # fluxes at interior faces
     # ========================================================================
+    _update_transport_properties!(
+        prop_cache.darcy,
+        prop_cache,
+        state,
+        mesh,
+        material,
+        bc_set,
+        top_face_ids,
+        bottom_face_ids,
+    )
     compute_conductive_fluxes!(rhs_cache.q_cond, state, mesh, prop_cache)
 
     # Copy to total flux (will add boundary contributions)
@@ -247,7 +265,14 @@ function compute_rhs!(
     # Must run BEFORE thermal BCs: the blowing models of the convective BCs
     # read the outward gas flux from rhs_cache.J_gas at the boundary face.
     # ========================================================================
-    compute_gas_fluxes!(rhs_cache.J_gas, state, mesh, prop_cache, material)
+    _compute_gas_fluxes!(
+        prop_cache.darcy,
+        rhs_cache.J_gas,
+        state,
+        mesh,
+        prop_cache,
+        material,
+    )
 
     apply_mass_bc_flux!(
         rhs_cache.J_gas,
@@ -336,6 +361,50 @@ function compute_rhs!(
 
     return nothing
 end
+
+# Transport-law hooks of `compute_rhs!`, dispatched on the property cache's
+# Darcy sub-cache (`nothing` for Fickian transport).
+@inline _update_transport_properties!(
+    ::Nothing,
+    prop_cache,
+    state,
+    mesh,
+    material,
+    bc_set,
+    top_face_ids,
+    bottom_face_ids,
+) = nothing
+@inline _update_transport_properties!(
+    darcy,
+    prop_cache,
+    state,
+    mesh,
+    material,
+    bc_set,
+    top_face_ids,
+    bottom_face_ids,
+) = update_darcy_properties!(
+    prop_cache,
+    state,
+    mesh,
+    material,
+    bc_set,
+    top_face_ids,
+    bottom_face_ids,
+)
+
+@inline _compute_gas_fluxes!(::Nothing, J, state, mesh, prop_cache, material) =
+    compute_gas_fluxes!(J, state, mesh, prop_cache, material)
+@inline _compute_gas_fluxes!(darcy, J, state, mesh, prop_cache, material) =
+    Physics.compute_gas_fluxes_darcy_fick!(
+        J,
+        state,
+        mesh,
+        prop_cache,
+        material,
+        darcy.v_gas,
+        darcy.φ,
+    )
 
 # ============================================================================
 # Helper functions for boundary condition application
@@ -803,189 +872,4 @@ function update_darcy_properties!(
     )
 
     return cache
-end
-
-"""
-	compute_rhs_darcy_fick!(dT::Vector{Float64}, dξ::Matrix{Float64},
-							mesh::Mesh1D{NC}, prop_cache::PropertyCache,
-							rhs_cache::RHSCache, material::Material{NC},
-							bc_set::BoundaryConditionSet, t,
-							top_face_ids::Vector{Int}, bottom_face_ids::Vector{Int};
-							I_radiation::Float64=0.0,
-							radiation_model::RadiationModel=NO_RADIATION) where NC
-
-Compute RHS with full Darcy-Fick gas transport using component-based permeability.
-
-This version uses component κ values and mixing rules to compute effective
-permeability, rather than a separate permeability model. Use this when:
-- Components have κ values specified (e.g., SolidComponent(:char, ..., κ=1e-12))
-- No legacy permeability_model is provided
-
-# Arguments
-- `dT`: Output vector of dT/dt [K/s]
-- `dξ`: Output matrix of dξⱼ/dt [kg/(m³·s)], size [NC × n_cells]
-- `mesh`: Mesh with current state
-- `prop_cache`: Property cache (will be updated with Darcy properties)
-- `rhs_cache`: RHS workspace cache
-- `material`: Material definition with component κ values
-- `bc_set`: Type-stable BoundaryConditionSet
-- `t`: Current time [s]
-- `top_face_ids`: Pre-cached face IDs at top boundary (boundary_id=1)
-- `bottom_face_ids`: Pre-cached face IDs at bottom boundary (boundary_id=2)
-- `I_radiation`: Surface radiation intensity [W/m²]
-- `radiation_model`: Radiation model type
-
-# Notes
-This is the preferred API for Darcy-Fick transport. The effective permeability
-is computed from component values via mixing rules (PARALLEL, SERIES, WEIGHTED).
-Gas convective source is stored in rhs_cache.S_conv.
-"""
-function compute_rhs_darcy_fick!(
-    dT::AbstractVector,
-    dξ::AbstractMatrix,
-    state,
-    mesh::Mesh1D{NC},
-    prop_cache::PropertyCache,
-    rhs_cache::RHSCache,
-    material::Material{NC},
-    bc_set::BoundaryConditionSet,
-    t,
-    top_face_ids::Vector{Int},
-    bottom_face_ids::Vector{Int};
-    I_radiation::Real = 0.0,
-    radiation_model::RadiationModel = NO_RADIATION,
-    radiation_kirchhoff::Bool = true,
-) where {NC}
-
-    n_cells_val = mesh.n_active_cells
-
-    # ========================================================================
-    # Step 1: Update Darcy properties using component-based permeability
-    # ========================================================================
-    update_darcy_properties!(
-        prop_cache,
-        state,
-        mesh,
-        material,
-        bc_set,
-        top_face_ids,
-        bottom_face_ids,
-    )
-
-    # ========================================================================
-    # Step 2: Compute conductive heat fluxes at interior faces
-    # ========================================================================
-    compute_conductive_fluxes!(rhs_cache.q_cond, state, mesh, prop_cache)
-    copyto!(rhs_cache.q_total, rhs_cache.q_cond)
-
-    # ========================================================================
-    # Step 3: Reactions
-    # ========================================================================
-    @inbounds for i = 1:n_cells_val
-        T = state.T[i]
-        ξ = ntuple(j -> state.ξ[j, i], Val(NC))
-
-        evaluate_reactions!(rhs_cache.rates, rhs_cache.heats, ξ, T, material)
-        rhs_cache.Q_rxn[i] = reaction_heat_source(rhs_cache.rates, rhs_cache.heats)
-        species_source_terms!(rhs_cache.species_src, rhs_cache.rates, material)
-        for j = 1:NC
-            rhs_cache.dξ_rxn[j, i] = rhs_cache.species_src[j]
-        end
-    end
-
-    # ========================================================================
-    # Step 4: Gas transport (Darcy + Fick) — interior + boundary
-    # Must run BEFORE the thermal BC solve: the blowing models of the
-    # convective BCs read the outward gas flux. Boundary faces receive the
-    # advective venting flux from the pressure-BC Darcy velocity here; the
-    # diffusive film-law part is then ADDED by `apply_mass_bc_flux!`.
-    # ========================================================================
-    Physics.compute_gas_fluxes_darcy_fick!(
-        rhs_cache.J_gas,
-        state,
-        mesh,
-        prop_cache,
-        material,
-        prop_cache.darcy.v_gas,
-        prop_cache.darcy.φ,
-    )
-
-    apply_mass_bc_flux!(
-        rhs_cache.J_gas,
-        state,
-        mesh,
-        prop_cache,
-        bc_set,
-        material,
-        t,
-        top_face_ids,
-        bottom_face_ids,
-    )
-
-    # ========================================================================
-    # Step 5: Apply thermal boundary conditions
-    # ========================================================================
-    apply_thermal_bc_flux!(
-        rhs_cache.q_total,
-        state,
-        mesh,
-        bc_set,
-        prop_cache,
-        material,
-        rhs_cache.J_gas,
-        t,
-        top_face_ids,
-        bottom_face_ids,
-        radiation_model,
-    )
-
-    # ========================================================================
-    # Step 6: Compute radiation source (model-dependent)
-    # ========================================================================
-    compute_radiation_source!(
-        rhs_cache.Q_rad,
-        state,
-        mesh,
-        prop_cache,
-        I_radiation,
-        radiation_model,
-        radiation_kirchhoff,
-    )
-
-    # ========================================================================
-    # Step 7: Cell-centered gas convective source + divergences
-    # (q_total carries the Step-5 thermal-BC boundary flux the boundary-cell
-    # gradient needs.)
-    # ========================================================================
-    Physics.compute_gas_convective_source!(
-        rhs_cache.S_conv,
-        rhs_cache.J_gas,
-        rhs_cache.q_total,
-        prop_cache.k,
-        state,
-        mesh,
-        material,
-    )
-
-    divergence_1d!(rhs_cache.div_q, rhs_cache.q_total, state, mesh)
-    divergence_species_1d!(rhs_cache.div_J, rhs_cache.J_gas, state, mesh)
-
-    # ========================================================================
-    # Step 8: Assemble final RHS
-    # ========================================================================
-    @inbounds for i = 1:n_cells_val
-        ρcp = prop_cache.ρcp[i]
-        dT[i] =
-            (
-                -rhs_cache.div_q[i] +
-                rhs_cache.S_conv[i] +
-                rhs_cache.Q_rad[i] +
-                rhs_cache.Q_rxn[i]
-            ) / ρcp
-
-        # Species equations
-        apply_species_residual_unrolled!(dξ, i, rhs_cache.div_J, rhs_cache.dξ_rxn, material)
-    end
-
-    return nothing
 end

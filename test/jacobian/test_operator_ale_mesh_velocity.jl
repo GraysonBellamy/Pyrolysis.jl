@@ -90,9 +90,7 @@ end
             w_ref,
             ws.state_cache,
             mesh,
-            ws.prop_cache,
-            material,
-            0.0;
+            material;
             θ_out = θ_ref,
             θ_A = 0.0,
         )

@@ -6,74 +6,6 @@ Initial condition specification and application.
 # Apply Initial Conditions
 # ============================================================================
 
-# Internal: write the problem's T/ξ initial-condition callables into the mesh
-# cell states, evaluated at cell centers. Cell volumes are untouched. Callers
-# go through `apply_initial_conditions!(problem)`, which also populates
-# `mesh.m_dry_solid_initial` — the two writes must stay ordered (the populator
-# reads `cell_states`).
-function _apply_problem_initial_conditions!(
-    mesh::Mesh1D{NC},
-    problem::PyrolysisProblem,
-) where {NC}
-    n_cells_val = length(mesh.cells)
-
-    for i = 1:n_cells_val
-        # Get cell center position
-        z = mesh.cell_centers[i]
-
-        # Get current cell state
-        state = mesh.cell_states[i]
-
-        # Apply initial temperature
-        state.T = Float64(problem.T_initial(z))
-
-        # Apply initial concentrations
-        ξ_new = ntuple(j -> Float64(problem.ξ_initial[j](z)), NC)
-        state.ξ = ξ_new
-    end
-
-    return mesh
-end
-
-"""
-	apply_initial_conditions!(mesh, material, T_func, ξ_funcs)
-
-Apply initial conditions using functions directly.
-
-Mesh-level utility: writes only `mesh.cell_states` and does **not** touch
-`mesh.m_dry_solid_initial` (the χ progress denominator). For setting up a
-problem for the residual/Jacobian composition, use
-`apply_initial_conditions!(problem)` (or [`initialize_state`](@ref)), which
-populates both.
-
-# Arguments
-- `mesh`: The computational mesh
-- `material`: Material definition (for component count)
-- `T_func`: Function z -> T(z) for initial temperature
-- `ξ_funcs`: Vector of functions [z -> ξⱼ(z)] for initial concentrations
-"""
-function apply_initial_conditions!(
-    mesh::Mesh1D{NC},
-    material::Material{NC},
-    T_func::Function,
-    ξ_funcs::Vector,
-) where {NC}
-    n_cells_val = length(mesh.cells)
-
-    @assert length(ξ_funcs) == NC "Number of concentration functions must match component count"
-
-    for i = 1:n_cells_val
-        z = mesh.cell_centers[i]
-        state = mesh.cell_states[i]
-
-        state.T = Float64(T_func(z))
-        ξ_new = ntuple(j -> Float64(ξ_funcs[j](z)), NC)
-        state.ξ = ξ_new
-    end
-
-    return mesh
-end
-
 """
 	apply_initial_conditions!(mesh, material; T=300.0, ξ=nothing)
 
@@ -239,9 +171,17 @@ method — [`initialize_state`](@ref) calls it as its first step.
 Returns the modified mesh.
 """
 function apply_initial_conditions!(problem::PyrolysisProblem)
-    _apply_problem_initial_conditions!(problem.mesh, problem)
-    populate_m_dry_solid_initial!(problem.mesh, problem.material)
-    return problem.mesh
+    mesh = problem.mesh
+    NC = n_components(problem.material)
+    # Cell states first: the dry-solid populator reads them.
+    for i in eachindex(mesh.cells)
+        z = mesh.cell_centers[i]
+        state = mesh.cell_states[i]
+        state.T = Float64(problem.T_initial(z))
+        state.ξ = ntuple(j -> Float64(problem.ξ_initial[j](z)), NC)
+    end
+    populate_m_dry_solid_initial!(mesh, problem.material)
+    return mesh
 end
 
 """
@@ -272,59 +212,4 @@ function populate_m_dry_solid_initial!(mesh::Mesh1D{NC}, material::Material{NC})
     end
 
     return mesh
-end
-
-# ============================================================================
-# Verification Helpers
-# ============================================================================
-
-"""
-	verify_initial_conditions(mesh, material)
-
-Verify that initial conditions are physically reasonable.
-
-# Checks
-- Temperature is positive
-- All concentrations are non-negative
-- Total concentration is positive (material present)
-- No NaN or Inf values
-
-# Returns
-`true` if all checks pass, throws an error otherwise.
-"""
-function verify_initial_conditions(mesh, material)
-    n_cells_val = length(mesh.cells)
-    NC = n_components(material)
-
-    for i = 1:n_cells_val
-        state = mesh.cell_states[i]
-
-        # Check temperature
-        if state.T <= 0.0
-            error("Cell $i has non-positive temperature: T = $(state.T)")
-        end
-        if !isfinite(state.T)
-            error("Cell $i has invalid temperature: T = $(state.T)")
-        end
-
-        # Check concentrations
-        total_ξ = 0.0
-        for j = 1:NC
-            ξ_j = state.ξ[j]
-            if ξ_j < 0.0
-                error("Cell $i, component $j has negative concentration: ξ = $ξ_j")
-            end
-            if !isfinite(ξ_j)
-                error("Cell $i, component $j has invalid concentration: ξ = $ξ_j")
-            end
-            total_ξ += ξ_j
-        end
-
-        # Check that some material is present
-        if total_ξ <= 0.0
-            error("Cell $i has no material: total ξ = $total_ξ")
-        end
-    end
-
-    return true
 end

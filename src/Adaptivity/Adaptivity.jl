@@ -101,7 +101,7 @@ export compute_indicator
 
 # Depleted-cell parking (cell_park.jl) and the conservative merge it uses
 export park_cell!
-export merge_temperatures_conservatively, merge_temperatures_conservatively_from_values
+export merge_temperatures_conservatively
 
 # r-refinement
 export MonitorFunction, GradientMonitor, InterfaceMonitor, CompositeMonitor
@@ -117,7 +117,6 @@ export compute_aspect_ratios, compute_smoothness
 export enforce_quality!, mesh_quality_summary
 
 # Cell depletion utilities
-export find_surface_cell, find_bottom_cell
 export find_interior_neighbor, find_exterior_neighbor
 export find_merge_neighbor
 

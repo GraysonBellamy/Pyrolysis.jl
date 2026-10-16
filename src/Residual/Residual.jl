@@ -16,8 +16,7 @@ P1 radiation has its own residual in `Pyrolysis.Experimental.RadiationP1`.
 module Residual
 
 using ..Materials
-using ..Materials: n_components, n_reactions, is_gas, NO_RADIATION, Material
-using ..BoundaryConditions: ImpermeableBC
+using ..Materials: n_components, n_reactions, NO_RADIATION, Material
 using ..Geometry
 using ..Properties
 using ..Physics
@@ -34,7 +33,6 @@ using ..Problem:
     get_option,
     chi_range,
     mesh_mode,
-    transport_mode,
     chi_mode,
     populate!,
     update_cross_section_area!,
@@ -42,17 +40,11 @@ using ..Problem:
     _chi_bar_from_state,
     Eulerian,
     ALE,
-    Fickian,
-    DarcyFick,
     NoChi,
     WithChi
 
 include("residual.jl")
 
-export residual!,
-    column_chi_bar_from_state,
-    cross_section_area_from_state,
-    _compute_theta_A,
-    _compute_ale_mesh_velocity!
+export residual!, column_chi_bar_from_state, cross_section_area_from_state
 
 end # module Residual

@@ -135,10 +135,6 @@ function StateCache(mesh::Mesh1D{NC}; mode::SimulationMode = SimulationMode()) w
     return cache
 end
 
-# Convenience: ignore material when present (NC is on mesh).
-StateCache(mesh::Mesh1D, ::Material; mode::SimulationMode = SimulationMode()) =
-    StateCache(mesh; mode = mode)
-
 # ----------------------------------------------------------------------------
 # Cross-section update
 # ----------------------------------------------------------------------------

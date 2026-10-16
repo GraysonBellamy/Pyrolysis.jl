@@ -93,9 +93,7 @@ Apply the specified limiter to slope ratio r.
         return superbee(rf)
     elseif limiter == NONE
         return zero(rf)
-    elseif limiter == CENTRAL
+    else  # CENTRAL
         return one(rf)
-    else
-        return minmod(rf)  # Default to minmod
     end
 end

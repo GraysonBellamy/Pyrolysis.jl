@@ -37,7 +37,6 @@ module Discretization
 
 using ..Materials
 using ..BoundaryConditions
-using ..Materials: GAS
 using ..BoundaryConditions: DirichletThermalBC
 using ..Geometry
 using ..Properties
@@ -58,7 +57,7 @@ include("ale_fluxes.jl")
 export divergence_1d!, divergence_species_1d!
 export compute_rhs!
 export RHSCache
-export update_darcy_properties!, compute_rhs_darcy_fick!
+export update_darcy_properties!
 # Type-stable BC application functions
 export apply_thermal_bc_flux!, apply_mass_bc_flux!
 
@@ -75,7 +74,7 @@ export apply_pressure_bc_to_darcy_velocity!  # Pressure BC application
 export boundary_darcy_velocity  # Shared boundary-face Darcy velocity kernel
 
 # Exports - Boundary Fluxes
-export thermal_bc_flux, mass_bc_flux
+export mass_bc_flux
 export compute_boundary_heat_fluxes, compute_surface_mass_flux  # Diagnostic decomposition
 
 # Exports - Boundary Temperature Solve

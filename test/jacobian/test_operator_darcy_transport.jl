@@ -50,7 +50,7 @@ function _set_state_ramp_darcy!(u, n_cells, T_lo, T_hi, ξ_vals)
 end
 
 # Reference Darcy-Fick contribution: matches the *interior-flux-only* slice
-# of `compute_rhs_darcy_fick!`. Generic on state's scalar eltype.
+# of `compute_rhs!` under Darcy–Fick transport. Generic on state's scalar eltype.
 function _reference_darcy_transport(
     state,
     mesh,

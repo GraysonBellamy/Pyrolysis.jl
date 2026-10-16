@@ -9,10 +9,6 @@ the mesh. These are used by the depletion callback in the Solver module.
 ```julia
 using Pyrolysis.Adaptivity
 
-# Find surface and bottom cells
-surface = find_surface_cell(mesh)
-bottom = find_bottom_cell(mesh)
-
 # Find neighbors
 interior = find_interior_neighbor(mesh, cell_id)
 exterior = find_exterior_neighbor(mesh, cell_id)
@@ -22,60 +18,8 @@ exterior = find_exterior_neighbor(mesh, cell_id)
 using ..Geometry: Mesh1D, cell_size, n_cells
 
 # ============================================================================
-# Surface Cell Detection
+# Neighbor Lookup
 # ============================================================================
-
-"""
-	find_surface_cell(mesh::Mesh1D) -> Int
-
-Find the ID of the current surface cell (highest z, active).
-
-In the coordinate convention:
-- z = 0 is the bottom (substrate)
-- z = L is the top (exposed surface)
-
-The surface cell is the active cell with the highest z center.
-"""
-function find_surface_cell(mesh::Mesh1D)
-    max_z = -Inf
-    surface_id = 0
-
-    @inbounds for i in eachindex(mesh.cells)
-        if mesh.active_cell_mask[i]
-            z_center = mesh.cell_centers[i]
-            if z_center > max_z
-                max_z = z_center
-                surface_id = i
-            end
-        end
-    end
-
-    return surface_id
-end
-
-"""
-	find_bottom_cell(mesh::Mesh1D) -> Int
-
-Find the ID of the bottom cell (lowest z, active).
-
-This is the cell at z = 0 (substrate side).
-"""
-function find_bottom_cell(mesh::Mesh1D)
-    min_z = Inf
-    bottom_id = 0
-
-    @inbounds for i in eachindex(mesh.cells)
-        if mesh.active_cell_mask[i]
-            z_center = mesh.cell_centers[i]
-            if z_center < min_z
-                min_z = z_center
-                bottom_id = i
-            end
-        end
-    end
-
-    return bottom_id
-end
 
 """
 	find_interior_neighbor(mesh::Mesh1D, cell_id::Int) -> Int

@@ -283,8 +283,8 @@ end
     sol = solve(problem)
     @test sol.retcode == :Success
 
-    # Pre-fix: surface_T reported the 300 K constructor placeholder and
-    # surface_heat_flux_* were NaN-poisoned by thermal_bc_flux = NaN.
+    # surface_T and surface_heat_flux_* report the solved Dirichlet face (no
+    # constructor placeholder, no NaN).
     # (The solved T_s sits ~q/1e8 ≈ 5e-4 K below the target: the Newton path
     # enforces Dirichlet through the h = 1e8 penalty.)
     @test all(T -> isapprox(T, 600.0; atol = 0.01), sol.surface_T)

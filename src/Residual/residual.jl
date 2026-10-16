@@ -13,8 +13,8 @@ chain is:
 			::Eulerian → Eulerian path
 			::ALE      → ALE path
 
-Inside each path, transport is dispatched via `transport_mode(def.mode)`
-(`Fickian` vs `DarcyFick`) and the χ block is included iff
+Inside each path, the gas transport law follows the property cache (a Darcy
+sub-cache exists only in `DarcyFick` mode) and the χ block is included iff
 `chi_mode(def.mode) isa WithChi`.
 
 P1 radiation has its own residual in `Pyrolysis.Experimental.RadiationP1`
@@ -59,7 +59,7 @@ function _residual!(du, u, def::ProblemDef, t, ws::Workspace, ::Eulerian)
     # 2) Update material properties at current state
     Properties.update_properties!(ws.prop_cache, ws.state_cache, mesh, material)
 
-    # 3) Physics RHS — dispatch on transport
+    # 3) Physics RHS
     _compute_physics_rhs!(
         ws,
         mesh,
@@ -68,7 +68,6 @@ function _residual!(du, u, def::ProblemDef, t, ws::Workspace, ::Eulerian)
         t,
         radiation_model,
         radiation_kirchhoff,
-        transport_mode(def.mode),
     )
 
     # 4) Pack the live rows; parked ghost rows are identically zero.
@@ -139,7 +138,6 @@ function _residual!(du, u, def::ProblemDef, t, ws::Workspace, ::ALE)
         t,
         radiation_model,
         radiation_kirchhoff,
-        transport_mode(def.mode),
     )
 
     # 5) Mesh velocity. θ_A_global picks up the column-global radial channel
@@ -158,9 +156,7 @@ function _residual!(du, u, def::ProblemDef, t, ws::Workspace, ::ALE)
         ws.w_work,
         ws.state_cache,
         mesh,
-        ws.prop_cache,
-        material,
-        t,
+        material;
         θ_out = ws.θ_work,
         precomputed_dξ_rxn = ws.rhs_cache.dξ_rxn,
         dξ_dt = ws.dξ_dt_work,
@@ -228,9 +224,11 @@ function _residual!(du, u, def::ProblemDef, t, ws::Workspace, ::ALE)
 end
 
 # ============================================================================
-# Transport-mode dispatch
+# Physics RHS
 # ============================================================================
 
+# The transport law (Fickian or Darcy–Fick) follows the property cache's Darcy
+# sub-cache, which `build_workspace` sizes from the simulation mode.
 @inline function _compute_physics_rhs!(
     ws,
     mesh,
@@ -239,37 +237,8 @@ end
     t,
     radiation_model,
     radiation_kirchhoff::Bool,
-    ::Fickian,
 )
     Discretization.compute_rhs!(
-        ws.dT_work,
-        ws.dξ_work,
-        ws.state_cache,
-        mesh,
-        ws.prop_cache,
-        ws.rhs_cache,
-        material,
-        bc_set,
-        t,
-        ws.top_face_ids,
-        ws.bottom_face_ids;
-        I_radiation = ws.I_radiation,
-        radiation_model = radiation_model,
-        radiation_kirchhoff = radiation_kirchhoff,
-    )
-end
-
-@inline function _compute_physics_rhs!(
-    ws,
-    mesh,
-    material,
-    bc_set,
-    t,
-    radiation_model,
-    radiation_kirchhoff::Bool,
-    ::DarcyFick,
-)
-    Discretization.compute_rhs_darcy_fick!(
         ws.dT_work,
         ws.dξ_work,
         ws.state_cache,
@@ -346,7 +315,7 @@ end
 end
 
 """
-	_compute_ale_mesh_velocity!(w, state, mesh, prop_cache, material, t; ...)
+	_compute_ale_mesh_velocity!(w, state, mesh, material; ...)
 
 Cumulative mesh velocity from per-cell volume change of every cell from
 the bottom node up. With the default identity lateral-shrinkage law,
@@ -358,9 +327,7 @@ function _compute_ale_mesh_velocity!(
     w::AbstractVector,
     state,
     mesh,
-    prop_cache,
-    material::Material,
-    t::Real;
+    material::Material;
     θ_out::Union{Nothing,AbstractVector} = nothing,
     precomputed_dξ_rxn::Union{Nothing,AbstractMatrix} = nothing,
     rates::Union{Nothing,AbstractVector} = nothing,

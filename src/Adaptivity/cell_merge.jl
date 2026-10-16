@@ -6,7 +6,7 @@ coarsening in `Experimental/h_coarsening.jl`.
 """
 
 using ..Geometry: Mesh1D, Node1D, Cell1D, Face1D, CellState
-using ..Materials: AbstractMaterial, Material, SOLID, T_REF
+using ..Materials: Material, T_REF
 
 # ============================================================================
 # Energy-Conserving Temperature Merge
@@ -151,29 +151,4 @@ function merge_temperatures_conservatively(
         T = T_new
     end
     return T
-end
-
-"""
-	merge_temperatures_conservatively_from_values(V_a::Float64, T_a::Float64, ξ_a::NTuple{NC,Float64},
-												   V_b::Float64, T_b::Float64, ξ_b::NTuple{NC,Float64},
-												   material::Material{NC}) where NC -> Float64
-
-Alternate interface for energy-conserving temperature merge using raw values instead of CellState.
-Useful when working directly with state vectors.
-"""
-function merge_temperatures_conservatively_from_values(
-    V_a::Float64,
-    T_a::Float64,
-    ξ_a::NTuple{NC,Float64},
-    V_b::Float64,
-    T_b::Float64,
-    ξ_b::NTuple{NC,Float64},
-    material::Material{NC},
-) where {NC}
-
-    # Create temporary cell states
-    state_a = CellState{NC}(T_a, ξ_a, V_a, V_a)
-    state_b = CellState{NC}(T_b, ξ_b, V_b, V_b)
-
-    return merge_temperatures_conservatively(V_a, state_a, V_b, state_b, material)
 end

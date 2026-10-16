@@ -55,7 +55,6 @@ Both sides are positive when heat flows INTO the material.
   explicit `absorptivity`; emission (`RadiativeBC`) always uses `ε_eff`.
 - `tol::Float64`: Convergence tolerance (default: 1e-10)
 - `max_iter::Int`: Maximum iterations (default: 50)
-- `relaxation::Float64`: Under-relaxation factor (default: 1.0)
 
 # Returns
 - `BoundaryState`: Solved boundary state with T_surface, fluxes, convergence info
@@ -73,7 +72,6 @@ function solve_boundary_temperature(
     radiation_model::RadiationModel = SURFACE_ABSORPTION,
     tol::Float64 = 1e-10,
     max_iter::Int = 50,
-    relaxation::Float64 = 1.0,
 ) where {NC}
     state = BoundaryState(T_cell, 0.0, 0.0, T_cell, k_eff, Δz_half, false, 0)
     solve_boundary_temperature!(
@@ -90,7 +88,6 @@ function solve_boundary_temperature(
         radiation_model = radiation_model,
         tol = tol,
         max_iter = max_iter,
-        relaxation = relaxation,
     )
     return state
 end
@@ -157,7 +154,6 @@ the outcome either way.
     radiation_model::RadiationModel = SURFACE_ABSORPTION,
     tol::Float64 = 1e-10,
     max_iter::Int = 50,
-    relaxation::Float64 = 1.0,
 ) where {NC}
     # Newton iterates carry whatever scalar type the inputs do (Float64 in
     # the canonical RHS, ForwardDiff.Dual under AD). Storage on `state` stays
@@ -226,7 +222,7 @@ the outcome either way.
         end
 
         ΔT = -f / df
-        T_s = T_s + relaxation * ΔT
+        T_s = T_s + ΔT
         T_s_val = ForwardDiff.value(T_s)
         if T_s_val < T_PROPERTY_MIN || T_s_val > T_PROPERTY_MAX
             # Reconstructing through Tu(...) zeroes any accumulated Dual
@@ -621,38 +617,6 @@ end
 # ----------------------------------------------------------------------------
 # CombinedThermalBC: Sum of component fluxes
 # ----------------------------------------------------------------------------
-# Use regular function instead of @generated to avoid excessive compilation time
-@generated function evaluate_bc_flux_and_derivative(
-    bc::CombinedThermalBC{BCs},
-    T_s::Real,
-    t::Real,
-    ε_eff::Real;
-    a_eff::Real = ε_eff,
-) where {BCs}
-    N = fieldcount(BCs)
-    exprs = Expr[]
-    push!(exprs, :(q_total = 0.0))
-    push!(exprs, :(dq_total = 0.0))
-    for i = 1:N
-        push!(
-            exprs,
-            quote
-                q_i, dq_i = evaluate_bc_flux_and_derivative(
-                    bc.bcs[$i],
-                    T_s,
-                    t,
-                    ε_eff;
-                    a_eff = a_eff,
-                )
-                q_total += q_i
-                dq_total += dq_i
-            end,
-        )
-    end
-    push!(exprs, :(return q_total, dq_total))
-    return Expr(:block, exprs...)
-end
-
 @generated function evaluate_bc_flux_and_derivative(
     bc::CombinedThermalBC{BCs},
     T_s::Real,

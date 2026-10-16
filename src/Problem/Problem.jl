@@ -12,16 +12,15 @@ module Problem
 
 using ..Materials
 using ..BoundaryConditions
-using ..Materials: n_reactions, SOLID
+using ..Materials: n_reactions
 using ..BoundaryConditions: ImpermeableBC
 import ..Materials: n_components  # Import to extend
 using ..Geometry
 using ..Properties
 using ..Physics
-using ..Adaptivity
 using ..Discretization
 using ForwardDiff
-import ..Materials: verify_stoichiometry, mass_balance_error, RadiationModel
+import ..Materials: verify_stoichiometry, mass_balance_error
 
 # Include subfiles
 include("pyrolysis_problem.jl")
@@ -50,10 +49,9 @@ export n_timesteps, succeeded
 # Initial conditions
 export apply_initial_conditions!
 export step_profile, linear_profile, gaussian_profile, tanh_profile
-export verify_initial_conditions
 
 # Validation
-export validate_problem, is_valid_problem, check_consistency
+export validate_problem, is_valid_problem
 
 # Pure-residual + Workspace surface.
 #

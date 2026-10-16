@@ -387,7 +387,7 @@ using Pyrolysis.Experimental: update_radiation_properties!
         fill!(rad_cache.G, 2000.0)  # W/m²
 
         # Update properties
-        update_properties!(prop_cache, StateCache(mesh, material), mesh, material)
+        update_properties!(prop_cache, StateCache(mesh), mesh, material)
 
         # Check that α is correctly populated
         # α_eff = ξ * α_mass = 1000 * 5.0 = 5000 m⁻¹
@@ -446,7 +446,7 @@ using Pyrolysis.Experimental: update_radiation_properties!
         rad_cache = RadiationCache(n_cells)
 
         # Update thermal properties first
-        update_properties!(prop_cache, StateCache(mesh, material), mesh, material)
+        update_properties!(prop_cache, StateCache(mesh), mesh, material)
 
         # Update radiation properties
         update_radiation_properties!(rad_cache, mesh, prop_cache)
@@ -490,7 +490,7 @@ using Pyrolysis.Experimental: update_radiation_properties!
         end
 
         # Update properties
-        update_properties!(prop_cache, StateCache(mesh, material), mesh, material)
+        update_properties!(prop_cache, StateCache(mesh), mesh, material)
         update_radiation_properties!(rad_cache, mesh, prop_cache)
 
         # Compute fluxes
@@ -535,7 +535,7 @@ using Pyrolysis.Experimental: update_radiation_properties!
         )
 
         prop_cache = PropertyCache(mesh)
-        update_properties!(prop_cache, StateCache(mesh, material), mesh, material)
+        update_properties!(prop_cache, StateCache(mesh), mesh, material)
 
         # α_eff = ξ × α_mass = 1000 × 5.0 = 5000 m⁻¹
         # τ = α_eff × L = 5000 × 0.002 = 10
@@ -586,12 +586,7 @@ using Pyrolysis.Experimental: update_radiation_properties!
             ξ_initial = (ξ_solid,),
         )
         prop_thick = PropertyCache(mesh_thick)
-        update_properties!(
-            prop_thick,
-            StateCache(mesh_thick, mat_thick),
-            mesh_thick,
-            mat_thick,
-        )
+        update_properties!(prop_thick, StateCache(mesh_thick), mesh_thick, mat_thick)
         validity = check_p1_validity(mesh_thick, prop_thick, warn = false)
         @test validity.τ_total ≈ 100.0 rtol=1e-3
         @test validity.valid == true
@@ -611,7 +606,7 @@ using Pyrolysis.Experimental: update_radiation_properties!
             ξ_initial = (ξ_solid,),
         )
         prop_int = PropertyCache(mesh_int)
-        update_properties!(prop_int, StateCache(mesh_int, mat_int), mesh_int, mat_int)
+        update_properties!(prop_int, StateCache(mesh_int), mesh_int, mat_int)
         validity = check_p1_validity(mesh_int, prop_int, warn = false)
         @test 1.0 < validity.τ_total < 10.0
         @test validity.valid == true
@@ -627,7 +622,7 @@ using Pyrolysis.Experimental: update_radiation_properties!
             ξ_initial = (ξ_solid,),
         )
         prop_thin = PropertyCache(mesh_thin)
-        update_properties!(prop_thin, StateCache(mesh_thin, mat_thin), mesh_thin, mat_thin)
+        update_properties!(prop_thin, StateCache(mesh_thin), mesh_thin, mat_thin)
         validity = check_p1_validity(mesh_thin, prop_thin, warn = false)
         @test 0.1 < validity.τ_total < 1.0
         @test validity.valid == true
@@ -644,12 +639,7 @@ using Pyrolysis.Experimental: update_radiation_properties!
             ξ_initial = (ξ_solid,),
         )
         prop_trans = PropertyCache(mesh_trans)
-        update_properties!(
-            prop_trans,
-            StateCache(mesh_trans, mat_trans),
-            mesh_trans,
-            mat_trans,
-        )
+        update_properties!(prop_trans, StateCache(mesh_trans), mesh_trans, mat_trans)
         validity = check_p1_validity(mesh_trans, prop_trans, warn = false)
         @test validity.τ_total < 0.1
         @test validity.valid == false
@@ -679,7 +669,7 @@ using Pyrolysis.Experimental: update_radiation_properties!
 
         # Initialize G and compute sources
         initialize_radiation_intensity!(rad_cache, 500.0)
-        update_properties!(prop_cache, StateCache(mesh, material), mesh, material)
+        update_properties!(prop_cache, StateCache(mesh), mesh, material)
 
         compute_radiation_source_terms!(
             rad_cache.Q_emission,

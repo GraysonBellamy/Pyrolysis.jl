@@ -471,38 +471,3 @@ function is_valid_problem(problem::PyrolysisProblem)
         return false
     end
 end
-
-"""
-	check_consistency(problem::PyrolysisProblem)
-
-Check consistency between problem components (mesh, material, BCs).
-Returns a named tuple with status and messages.
-"""
-function check_consistency(problem::PyrolysisProblem)
-    messages = String[]
-    is_consistent = true
-
-    # Check NC consistency
-    NC_material = n_components(problem.material)
-    if !isempty(problem.mesh.cell_states)
-        NC_mesh = length(problem.mesh.cell_states[1].ξ)
-        if NC_material != NC_mesh
-            push!(
-                messages,
-                "Component count mismatch: material has $NC_material, mesh has $NC_mesh",
-            )
-            is_consistent = false
-        end
-    end
-
-    # Check ξ_initial count
-    if length(problem.ξ_initial) != NC_material
-        push!(
-            messages,
-            "ξ_initial count ($(length(problem.ξ_initial))) doesn't match component count ($NC_material)",
-        )
-        is_consistent = false
-    end
-
-    return (valid = is_consistent, messages = messages)
-end
