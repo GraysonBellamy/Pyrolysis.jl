@@ -156,9 +156,9 @@ function _residual!(du, u, def::ProblemDef, t, ws::Workspace, ::ALE)
         ws.w_work,
         ws.state_cache,
         mesh,
-        material;
+        material,
+        ws.rhs_cache.dξ_rxn;
         θ_out = ws.θ_work,
-        precomputed_dξ_rxn = ws.rhs_cache.dξ_rxn,
         dξ_dt = ws.dξ_dt_work,
         θ_A = θ_A_global,
     )
@@ -315,10 +315,13 @@ end
 end
 
 """
-	_compute_ale_mesh_velocity!(w, state, mesh, material; ...)
+	_compute_ale_mesh_velocity!(w, state, mesh, material, dξ_rxn;
+	                            θ_out = nothing, dξ_dt = nothing, θ_A = 0.0)
 
 Cumulative mesh velocity from per-cell volume change of every cell from
-the bottom node up. With the default identity lateral-shrinkage law,
+the bottom node up, given the per-cell reaction species sources `dξ_rxn`
+(`NC × n_cells`). `θ_out` receives the per-cell strain rate; `dξ_dt` is a
+length-`NC` scratch vector. With the default identity lateral-shrinkage law,
 the column-global radial channel `θ_A ≡ 0` and behavior reduces to the
 constant-cross-section formulation. State (T, ξ, geometry) is read from
 the typed `state::StateCache`.
@@ -327,24 +330,14 @@ function _compute_ale_mesh_velocity!(
     w::AbstractVector,
     state,
     mesh,
-    material::Material;
+    material::Material,
+    dξ_rxn::AbstractMatrix;
     θ_out::Union{Nothing,AbstractVector} = nothing,
-    precomputed_dξ_rxn::Union{Nothing,AbstractMatrix} = nothing,
-    rates::Union{Nothing,AbstractVector} = nothing,
-    heats::Union{Nothing,AbstractVector} = nothing,
     dξ_dt::Union{Nothing,AbstractVector} = nothing,
     θ_A::Real = 0.0,
 )
     NC = n_components(material)
-    NR = n_reactions(material)
     n_cells = mesh.n_active_cells
-
-    use_precomputed = precomputed_dξ_rxn !== nothing
-    if !use_precomputed
-        Tu = eltype(state.T)
-        rates === nothing && (rates = zeros(Tu, NR))
-        heats === nothing && (heats = zeros(Tu, NR))
-    end
     dξ_dt === nothing && (dξ_dt = zeros(eltype(state.T), NC))
 
     w[1] = zero(eltype(w))
@@ -354,16 +347,8 @@ function _compute_ale_mesh_velocity!(
         T_cell = state.T[cell_idx]
         Δz_cell = state.volume[cell_idx] / state.A_section[]
 
-        if use_precomputed
-            for j = 1:NC
-                dξ_dt[j] = precomputed_dξ_rxn[j, cell_idx]
-            end
-        else
-            ξ_cell = ntuple(j -> state.ξ[j, cell_idx], Val(NC))
-            fill!(rates, zero(eltype(rates)))
-            fill!(heats, zero(eltype(heats)))
-            Physics.evaluate_reactions!(rates, heats, ξ_cell, T_cell, material)
-            Physics.species_source_terms!(dξ_dt, rates, material)
+        for j = 1:NC
+            dξ_dt[j] = dξ_rxn[j, cell_idx]
         end
 
         θ_cell = Physics.volume_change_rate(dξ_dt, T_cell, material)
@@ -500,13 +485,12 @@ is the live-cell sum.
     state,
     χ̄::Real,
     M::Real,
-    dξ_rxn::Union{Nothing,AbstractMatrix},
+    dξ_rxn::AbstractMatrix,
     l::StateLayout,
     idx_dry,
 )
     law = material.lateral_shrinkage_law
     law === nothing && return zero(typeof(χ̄))
-    dξ_rxn === nothing && return zero(typeof(χ̄))
     M <= eps() && return zero(typeof(χ̄))
 
     n = l.n_cells

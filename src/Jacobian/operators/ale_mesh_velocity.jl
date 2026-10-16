@@ -23,8 +23,7 @@ workspace's [`PrefixSumCoupling`](@ref)s, refilled every assembly.
 """
 
 using ForwardDiff
-using ..Materials: Material, n_components, n_reactions
-using ..Properties: PropertyCache
+using ..Materials: Material
 using ..Physics: volume_change_rate, evaluate_reactions!, species_source_terms!
 using ..Problem: NoChi, WithChi
 using ..Residual: _compute_ale_mesh_velocity!, _compute_theta_A
@@ -61,6 +60,9 @@ structured-coupling builders consume.
   length `n_cells`. WithChi only; zeros for NoChi.
 - `dθA_dξ::Matrix{Float64}` — `∂θ_A/∂ξ_{k,j}`, `(NC, n_cells)`. WithChi
   only; zeros for NoChi.
+- `dξ_rxn::Matrix{Float64}` — per-cell reaction species sources, `(NC,
+  n_cells)`, filled by `apply!` for the residual's mesh-velocity and θ_A
+  functions.
 - internal scratch (`rates`, `heats`, `dξ_dt`) for the apply!.
 """
 # Tag for the strain-rate stack-Dual sweep — keeps these duals from
@@ -83,6 +85,7 @@ mutable struct ALEMeshVelocityWorkspace{Tu,NC,NR,D}
     # `apply!` and reused by the consumer-side z-row / advection χ-coupling.
     cumZ_node::Vector{Float64}
 
+    dξ_rxn::Matrix{Tu}
     rates::Vector{Tu}
     heats::Vector{Tu}
     dξ_dt::Vector{Tu}
@@ -125,6 +128,7 @@ function build_ale_mesh_velocity_workspace(
         zeros(Float64, n_cells),
         zeros(Float64, NC, n_cells),
         zeros(Float64, n_nodes),
+        zeros(Float64, NC, n_cells),
         zeros(Float64, NR),
         zeros(Float64, NR),
         zeros(Float64, NC),
@@ -141,17 +145,16 @@ end
 	       χ̄ = nothing, M_ξ = nothing,
 	       layout = nothing, dry_gas_indices = nothing) -> nothing
 
-Populate the derived-field buffers on `ws` from `state`. Wraps the
-existing [`_compute_ale_mesh_velocity!`](@ref) path so the math is
-exactly the same one the residual sees — there is no duplicate
-implementation of the cumulative integral.
+Populate the derived-field buffers on `ws` from `state`. Evaluates the
+per-cell reaction species sources into `ws.dξ_rxn`, then calls the
+residual's own [`_compute_theta_A`](@ref) and
+[`_compute_ale_mesh_velocity!`](@ref) with them, so the math is exactly the
+one the residual sees.
 
 Computes:
 1. `θ_A` (zero in NoChi; column-global in WithChi).
 2. `w_node[k]` (cumulative from bottom) and `θ[i]` (per-cell strain).
 3. `cumZ_node[k]` (cumulative Δz from the bottom).
-
-The species source terms are evaluated per cell from the state.
 
 # Required keyword arguments by mode
 
@@ -172,8 +175,18 @@ function apply!(
     dry_gas_indices = nothing,
 ) where {Tu,NC,NR}
 
-    # 1) Column-global θ_A (zero for NoChi), computing S_dry per cell on the
-    # fly via `ws.rates / ws.heats / ws.dξ_dt`.
+    # Per-cell reaction species sources, every state slot: θ_A sums over all
+    # of them (parked ghost slots have zero volume).
+    @inbounds for i in axes(ws.dξ_rxn, 2)
+        ξ_i = ntuple(j -> state.ξ[j, i], Val(NC))
+        evaluate_reactions!(ws.rates, ws.heats, ξ_i, state.T[i], material)
+        species_source_terms!(ws.dξ_dt, ws.rates, material)
+        for j = 1:NC
+            ws.dξ_rxn[j, i] = ws.dξ_dt[j]
+        end
+    end
+
+    # 1) Column-global θ_A (zero for NoChi).
     θ_A_value = if chi_mode isa WithChi
         χ̄ === nothing && error("ALEMeshVelocityOperator(WithChi): χ̄ required.")
         M_ξ === nothing && error("ALEMeshVelocityOperator(WithChi): M_ξ required.")
@@ -181,34 +194,21 @@ function apply!(
             error("ALEMeshVelocityOperator(WithChi): layout required.")
         dry_gas_indices === nothing &&
             error("ALEMeshVelocityOperator(WithChi): dry_gas_indices required.")
-        _compute_theta_A_inplace(
-            material,
-            state,
-            χ̄,
-            M_ξ,
-            layout,
-            dry_gas_indices,
-            ws.rates,
-            ws.heats,
-            ws.dξ_dt,
-        )
+        _compute_theta_A(material, state, χ̄, M_ξ, ws.dξ_rxn, layout, dry_gas_indices)
     else
         0.0
     end
     ws.theta_A[] = Float64(θ_A_value)
 
-    # 2) Cumulative mesh velocity + per-cell θ. The shared physics
-    # function writes both ws.w_node (cumulative from bottom) and
-    # ws.theta (per-cell strain), recomputing the species source terms via
-    # ws.rates / ws.heats / ws.dξ_dt.
+    # 2) Cumulative mesh velocity + per-cell θ: ws.w_node (cumulative from
+    # bottom) and ws.theta (per-cell strain).
     _compute_ale_mesh_velocity!(
         ws.w_node,
         state,
         mesh,
-        material;
+        material,
+        ws.dξ_rxn;
         θ_out = ws.theta,
-        rates = ws.rates,
-        heats = ws.heats,
         dξ_dt = ws.dξ_dt,
         θ_A = ws.theta_A[],
     )
@@ -224,49 +224,6 @@ function apply!(
     end
 
     return nothing
-end
-
-# In-place θ_A computation when no precomputed dξ_rxn matrix is available.
-# Mirrors `Pyrolysis.Problem._compute_theta_A` but evaluates the per-cell
-# species source on the fly using caller-supplied scratch (`rates_buf`,
-# `heats_buf`, `dξ_buf`) so it's allocation-free.
-function _compute_theta_A_inplace(
-    material::Material{NC,NR},
-    state,
-    χ̄::Real,
-    M::Real,
-    l,
-    idx_dry,
-    rates_buf::AbstractVector,
-    heats_buf::AbstractVector,
-    dξ_buf::AbstractVector,
-) where {NC,NR}
-    law = material.lateral_shrinkage_law
-    law === nothing && return zero(typeof(χ̄))
-    M <= eps() && return zero(typeof(χ̄))
-    n = l.n_cells
-    n == 0 && return zero(typeof(χ̄))
-
-    dχ̄_dt = zero(eltype(state.T))
-    @inbounds for i = 1:n
-        T_i = state.T[i]
-        ξ_i = ntuple(j -> state.ξ[j, i], Val(NC))
-        fill!(rates_buf, zero(eltype(rates_buf)))
-        fill!(heats_buf, zero(eltype(heats_buf)))
-        evaluate_reactions!(rates_buf, heats_buf, ξ_i, T_i, material)
-        species_source_terms!(dξ_buf, rates_buf, material)
-        S_dry = zero(eltype(dξ_buf))
-        for j in idx_dry
-            S_dry += dξ_buf[j]
-        end
-        dχ̄_dt += S_dry * state.volume[i]
-    end
-    dχ̄_dt /= M
-
-    A_ratio = law(χ̄)
-    A_ratio > eps() || return zero(typeof(χ̄))
-    dlaw_dχ̄ = ForwardDiff.derivative(law, χ̄)
-    return dlaw_dχ̄ * dχ̄_dt / A_ratio
 end
 
 # ============================================================================

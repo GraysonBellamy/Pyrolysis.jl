@@ -16,7 +16,7 @@ P1 radiation has its own residual in `Pyrolysis.Experimental.RadiationP1`.
 module Residual
 
 using ..Materials
-using ..Materials: n_components, n_reactions, NO_RADIATION, Material
+using ..Materials: n_components, NO_RADIATION, Material
 using ..Geometry
 using ..Properties
 using ..Physics
