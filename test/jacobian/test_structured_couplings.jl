@@ -1,127 +1,94 @@
 """
-`StructuredCoupling` primitives unit tests.
+`StructuredCoupling` unit tests.
 
-Verifies `apply!` / `apply_inverse!` / `densify!` against dense
-references for the two concrete couplings:
+Checks `densify!` of the three embedded couplings, and `compose_into!` of a
+`PrefixSumCoupling`, against dense references:
 
-- [`PrefixSumCoupling`](@ref) — `L · diag(v)`, the prefix-sum operator
-  that captures the ALE cumulative mesh-velocity coupling.
-- [`Rank1Coupling`](@ref) — `u · vᵀ`, used for column-global modes
-  (today: θ_A back-reaction in WithChi).
+- [`EmbeddedNodePrefixSumCoupling`](@ref) — the ALE cumulative mesh-velocity
+  coupling at the node rows.
+- [`EmbeddedScaledSuffixSumCoupling`](@ref) — the Beer–Lambert suffix sum
+  with a per-row scale.
+- [`EmbeddedRank1Coupling`](@ref) — `u · vᵀ` (the WithChi θ_A channels).
 
-Both are wired into the real ALE assembly; this test pins the
-math at the primitive level so wiring bugs don't get blamed on
-algebra bugs (and vice versa).
+The assembled couplings are also gated end-to-end against DenseAD by the
+operator and backend tests; this file pins the algebra at the block level.
 """
 
 using Test
-using LinearAlgebra
-using Pyrolysis.Jacobian: PrefixSumCoupling, SuffixSumCoupling, Rank1Coupling
-using Pyrolysis.Jacobian: apply!, densify!
-import Pyrolysis.Jacobian: apply_inverse!
+using SparseArrays
+using Pyrolysis.Jacobian:
+    PrefixSumCoupling,
+    EmbeddedNodePrefixSumCoupling,
+    EmbeddedScaledSuffixSumCoupling,
+    EmbeddedRank1Coupling,
+    StructuredJacobian,
+    compose_into!,
+    densify!
 
-@testset "StructuredCoupling primitives" begin
+@testset "StructuredCoupling blocks" begin
+    v = [0.5, -1.0, 2.0, 0.25]
+    n_global = 12
+    row_off, col_off = 3, 1
 
-    @testset "PrefixSumCoupling" begin
-        N = 8
-        v = collect(range(0.5, 4.0, length = N))
-        c = PrefixSumCoupling(v)
-
-        # Dense reference: L * diag(v) where L is exclusive lower-triangular.
-        # (L · diag(v))[i, j] = v[j] if j ≤ i-1 else 0.
-        M_ref = zeros(N, N)
-        for j = 1:N, i = 1:N
-            if j <= i - 1
-                M_ref[i, j] = v[j]
-            end
+    @testset "EmbeddedNodePrefixSumCoupling" begin
+        n_nodes = length(v) + 1
+        M = zeros(n_global, n_global)
+        densify!(M, EmbeddedNodePrefixSumCoupling(v, row_off, col_off, n_nodes, n_global))
+        ref = zeros(n_global, n_global)
+        for k = 1:n_nodes, j = 1:length(v)
+            j <= k - 1 && (ref[row_off+k, col_off+j] += v[j])
         end
-
-        # `densify!` matches the dense reference.
-        M = zeros(N, N)
-        densify!(M, c)
-        @test M ≈ M_ref
-
-        # `apply!` matches the dense reference's matvec.
-        x = randn(N)
-        y = zeros(N)
-        apply!(y, c, x)
-        @test y ≈ M_ref * x
-
-        # `apply_inverse!` round-trips for x in the column space — i.e.
-        # any vector `M_ref * z` should map back to a vector y satisfying
-        # `M_ref * y[2:end] = M_ref * z`. The first row is identically zero
-        # (consistent system requires x[1] == 0); we ignore y[1].
-        z = randn(N)
-        x2 = M_ref * z
-        y2 = zeros(N)
-        apply_inverse!(y2, c, x2)
-        @test M_ref * y2 ≈ x2 atol = 1e-10
+        @test M == ref
+        @test all(iszero, M[row_off+1, :])   # node 1 is the fixed bottom node
     end
 
-    @testset "SuffixSumCoupling" begin
-        N = 8
-        v = collect(range(0.5, 4.0, length = N))
-        c = SuffixSumCoupling(v)
-
-        # Dense reference: U * diag(v) where U is exclusive upper-triangular.
-        # (U · diag(v))[i, j] = v[j] if j ≥ i+1 else 0.
-        M_ref = zeros(N, N)
-        for j = 1:N, i = 1:N
-            if j >= i + 1
-                M_ref[i, j] = v[j]
-            end
+    @testset "EmbeddedScaledSuffixSumCoupling" begin
+        row_scale = [1.0, -2.0, 3.0, 0.5]
+        N = length(v)
+        M = zeros(n_global, n_global)
+        densify!(
+            M,
+            EmbeddedScaledSuffixSumCoupling(v, row_scale, row_off, col_off, N, n_global),
+        )
+        ref = zeros(n_global, n_global)
+        for i = 1:N, j = 1:N
+            j > i && (ref[row_off+i, col_off+j] += row_scale[i] * v[j])
         end
-
-        # `densify!` matches the dense reference.
-        M = zeros(N, N)
-        densify!(M, c)
-        @test M ≈ M_ref
-
-        # `apply!` matches the dense reference's matvec.
-        x = randn(N)
-        y = zeros(N)
-        apply!(y, c, x)
-        @test y ≈ M_ref * x
-
-        # `apply!` accumulates additively (matches docstring contract).
-        y .= 1.0
-        apply!(y, c, x)
-        @test y ≈ ones(N) .+ M_ref * x
-
-        # `apply_inverse!` round-trips for x in the column space — i.e.
-        # any vector `M_ref * z` should map back to a vector y satisfying
-        # `M_ref * y = M_ref * z`. The last row is identically zero
-        # (consistent system requires x[N] == 0); the first index is in
-        # the right-nullspace and is set to zero by convention.
-        z = randn(N)
-        x2 = M_ref * z
-        y2 = zeros(N)
-        apply_inverse!(y2, c, x2)
-        @test M_ref * y2 ≈ x2 atol = 1e-10
+        @test M == ref
+        @test_throws DimensionMismatch EmbeddedScaledSuffixSumCoupling(
+            v,
+            row_scale[1:3],
+            row_off,
+            col_off,
+            N,
+            n_global,
+        )
     end
 
-    @testset "Rank1Coupling" begin
-        N = 6
-        u = randn(N)
-        v = randn(N)
-        c = Rank1Coupling(u, v)
+    @testset "EmbeddedRank1Coupling" begin
+        u = [1.0, -2.0, 0.0]
+        w = [3.0, 0.5]
+        M = zeros(n_global, n_global)
+        densify!(M, EmbeddedRank1Coupling(u, w, row_off, col_off, n_global))
+        ref = zeros(n_global, n_global)
+        for i = 1:length(u), j = 1:length(w)
+            ref[row_off+i, col_off+j] = u[i] * w[j]
+        end
+        @test M == ref
+    end
 
-        M_ref = u * v'
-
-        # `densify!`.
-        M = zeros(N, N)
+    @testset "compose_into! embeds a PrefixSumCoupling at the node rows" begin
+        jac = StructuredJacobian(spzeros(Float64, n_global, n_global))
+        n_nodes = length(v) + 1
+        compose_into!(jac, PrefixSumCoupling(v), row_off, col_off, n_nodes, n_global)
+        @test length(jac.structured) == 1
+        c = only(jac.structured)
+        @test c isa EmbeddedNodePrefixSumCoupling
+        @test c.v === v   # aliases the factors, no copy
+        M = zeros(n_global, n_global)
         densify!(M, c)
-        @test M ≈ M_ref
-
-        # `apply!` is one inner product + scaled add.
-        x = randn(N)
-        y = zeros(N)
-        apply!(y, c, x)
-        @test y ≈ M_ref * x
-
-        # `apply!` accumulates additively (matches the docstring contract).
-        y .= 1.0
-        apply!(y, c, x)
-        @test y ≈ ones(N) .+ M_ref * x
+        ref = zeros(n_global, n_global)
+        densify!(ref, EmbeddedNodePrefixSumCoupling(v, row_off, col_off, n_nodes, n_global))
+        @test M == ref
     end
 end

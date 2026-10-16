@@ -39,11 +39,7 @@ include(joinpath(@__DIR__, "..", "helpers.jl"))
             use_ale = true,
             progress = false,
             validate = false,
-            jacobian = JacobianSpec(
-                Structured(strategy = DirectSolve()),
-                problem;
-                use_ale = true,
-            ),
+            jacobian = Structured(strategy = DirectSolve()),
         )
         @test sol.retcode == :Success
     end

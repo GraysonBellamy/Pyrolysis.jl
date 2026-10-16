@@ -23,9 +23,8 @@ core residual matrix:
 # Backend × strategy is orthogonal
 
 `Structured` is the *backend* (the assembling rule). `DirectSolve` /
-`StructuredSolve` / `ApproxSolve` / `MatrixFreeSolve` is the *strategy*
-(the inversion rule). Exact strategies include the structured couplings;
-`ApproxSolve` deliberately drops them.
+`ApproxSolve` is the *strategy*: `DirectSolve` includes the structured
+couplings, `ApproxSolve` deliberately drops them.
 
 # Approximation trait
 
@@ -164,8 +163,6 @@ struct StructuredOpsCache{
     radiation_intensity::Float64
     radiation_kirchhoff::Bool
     is_ale::Bool
-    is_with_chi::Bool
-    is_beer_lambert::Bool
     assembly_profile::Symbol
 
     reaction_ws::WSReact
@@ -207,18 +204,11 @@ function _build_jacobian_spec(
         copy(S_union.rowval),
         zeros(Float64, length(S_union.nzval)),
     )
-    mode_tag = _structured_mode_tag(def.mode)
-    jac = StructuredJacobian(mode_tag, A)
+    jac = StructuredJacobian(A)
 
     cache =
         _build_ops_cache(def, ws, jac; chunk_size = chunk_size, assembly_profile = profile)
-    return JacobianSpec(backend, S_phys, S_geom, cache, Int[], Int[])
-end
-
-# Map SimulationMode → Symbol for the StructuredJacobian{Mode} parameter.
-function _structured_mode_tag(mode)
-    is_ale = mesh_mode(mode) isa PyProblem.ALE
-    return is_ale ? :ale : :eulerian
+    return JacobianSpec(backend, S_phys, S_geom, cache)
 end
 
 function _build_ops_cache(
@@ -317,8 +307,6 @@ function _build_ops_cache(
         radiation_intensity,
         radiation_kirchhoff,
         is_ale,
-        is_with_chi,
-        is_beer_lambert,
         assembly_profile,
         reaction_ws,
         conduction_ws,
@@ -341,7 +329,7 @@ end
 # ============================================================================
 
 function _compute_jacobian!(
-    J::AbstractMatrix{Float64},
+    J::SparseMatrixCSC{Float64,Int},
     b::Structured,
     cache::StructuredOpsCache,
     sparsity_phys,
@@ -703,21 +691,11 @@ end
 # empty already), and the masked-compare verifier accounts for it via the
 # `is_approximate` trait on `Structured{ApproxSolve}`.
 function _emit_jacobian!(
-    J::AbstractMatrix{Float64},
+    J::SparseMatrixCSC{Float64,Int},
     jac::StructuredJacobian,
     assembly_profile::Symbol,
 )
-    A = jac.A
-    if J isa SparseMatrixCSC
-        copyto!(J.nzval, A.nzval)
-    else
-        fill!(J, 0.0)
-        @inbounds for col = 1:A.n
-            for nz = A.colptr[col]:(A.colptr[col+1]-1)
-                J[A.rowval[nz], col] = A.nzval[nz]
-            end
-        end
-    end
+    copyto!(J.nzval, jac.A.nzval)
     if assembly_profile === :full
         for c in jac.structured
             densify!(J, c)

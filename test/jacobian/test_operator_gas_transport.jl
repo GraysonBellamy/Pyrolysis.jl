@@ -267,7 +267,7 @@ end
         end
         A = sparse(I, J_idx, V, n_total, n_total)
         fill!(A.nzval, 0.0)
-        jac = StructuredJacobian(:eulerian, A)
+        jac = StructuredJacobian(A)
 
         op = GasTransportOperator()
         ws_ad = build_gas_transport_workspace(material)

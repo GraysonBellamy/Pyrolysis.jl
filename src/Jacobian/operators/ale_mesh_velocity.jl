@@ -18,10 +18,8 @@ the z rows (`dz_k/dt = w_node[k]`), which this operator embeds itself in
 `contribute_to_structured!` as [`EmbeddedNodePrefixSumCoupling`](@ref)
 blocks plus, under WithChi, the θ_A rank-1 channels.
 
-The bare-primitive builders [`build_prefix_sum_coupling_T`](@ref) /
-[`build_prefix_sum_coupling_xi`](@ref) construct the per-cell `v` vectors
-`Δzᵢ · ∂θ_i/∂x_i` of the [`PrefixSumCoupling`](@ref) primitives; the unit
-tests exercise them directly.
+The per-cell factors `Δzᵢ · ∂θ_i/∂x_i` of those blocks live in the
+workspace's [`PrefixSumCoupling`](@ref)s, refilled every assembly.
 """
 
 using ForwardDiff
@@ -35,15 +33,12 @@ using ..Residual: _compute_ale_mesh_velocity!, _compute_theta_A
 	ALEMeshVelocityWorkspace{Tu, NC, NR}
 
 Per-problem workspace for [`ALEMeshVelocityOperator`](@ref). Holds the
-derived-field output buffers (`w_node`, `w_cell`, `theta`, `theta_A`)
-plus the per-cell derivative buffers (`dθ_dT`, `dθ_dξ`, `dθA_dχ`) that
-the structured-coupling builders consume.
+derived-field output buffers (`w_node`, `theta`, `theta_A`) plus the
+per-cell derivative buffers (`dθ_dT`, `dθ_dξ`, `dθA_dχ`) that the
+structured-coupling builders consume.
 
 # Fields
 - `w_node::Vector{Float64}` — length `n_nodes`. Output of `apply!`.
-- `w_cell::Vector{Float64}` — length `n_cells`. Cell-centered mesh
-  velocity (`0.5·(w_node[n_left] + w_node[n_right])`), populated for
-  consumer convenience.
 - `theta::Vector{Float64}`  — length `n_cells`. Per-cell strain rate
   `θ_pyrolysis = Σⱼ γⱼ/ρⱼ · Sⱼ`.
 - `theta_A::Base.RefValue{Float64}` — column-global radial channel.
@@ -57,11 +52,6 @@ the structured-coupling builders consume.
 - `dθA_dξ::Matrix{Float64}` — `∂θ_A/∂ξ_{k,j}`, `(NC, n_cells)`. WithChi
   only; zeros for NoChi.
 - internal scratch (`rates`, `heats`, `dξ_dt`) for the apply!.
-
-# Status
-The buffers exist on this workspace; they are *not* plumbed
-through a `ResidualContext.derived_fields` map. The operator's caller
-passes the workspace explicitly.
 """
 # Tag for the strain-rate stack-Dual sweep — keeps these duals from
 # colliding with any outer AD that may be in flight.
@@ -69,7 +59,6 @@ struct _ALEStrainTag end
 
 mutable struct ALEMeshVelocityWorkspace{Tu,NC,NR,D}
     w_node::Vector{Float64}
-    w_cell::Vector{Float64}
     theta::Vector{Float64}
     theta_A::Base.RefValue{Float64}
 
@@ -118,7 +107,6 @@ function build_ale_mesh_velocity_workspace(
     return ALEMeshVelocityWorkspace{Float64,NC,NR,D}(
         zeros(Float64, n_nodes),
         zeros(Float64, n_cells),
-        zeros(Float64, n_cells),
         Ref(0.0),
         zeros(Float64, n_cells),
         zeros(Float64, NC, n_cells),
@@ -140,7 +128,7 @@ end
 """
 	apply!(ws::ALEMeshVelocityWorkspace, op::ALEMeshVelocityOperator,
 	       state, mesh, material, t; chi_mode = NoChi(),
-	       χ̄ = nothing, M_ξ = nothing, dξ_rxn = nothing,
+	       χ̄ = nothing, M_ξ = nothing,
 	       layout = nothing, dry_gas_indices = nothing) -> nothing
 
 Populate the derived-field buffers on `ws` from `state`. Wraps the
@@ -149,17 +137,16 @@ exactly the same one the residual sees — there is no duplicate
 implementation of the cumulative integral.
 
 Computes:
-1. `θ_A` (zero in NoChi; column-global in WithChi via `_compute_theta_A`).
+1. `θ_A` (zero in NoChi; column-global in WithChi).
 2. `w_node[k]` (cumulative from bottom) and `θ[i]` (per-cell strain).
-3. `w_cell[i]` (face-average of bounding nodes).
+3. `cumZ_node[k]` (cumulative Δz from the bottom).
+
+The species source terms are evaluated per cell from the state.
 
 # Required keyword arguments by mode
 
 - **NoChi:** none — `θ_A ≡ 0`, the operator falls through.
-- **WithChi:** `χ̄`, `M_ξ`, `dξ_rxn`, `layout`, `dry_gas_indices` — the
-  inputs `_compute_theta_A` consumes. The caller (framework
-  wiring or unit test) is responsible for supplying these from the
-  shared `ResidualContext` cache.
+- **WithChi:** `χ̄`, `M_ξ`, `layout`, `dry_gas_indices`.
 """
 function apply!(
     ws::ALEMeshVelocityWorkspace{Tu,NC,NR},
@@ -171,13 +158,11 @@ function apply!(
     chi_mode = NoChi(),
     χ̄::Union{Nothing,Real} = nothing,
     M_ξ::Union{Nothing,Real} = nothing,
-    dξ_rxn::Union{Nothing,AbstractMatrix} = nothing,
     layout = nothing,
     dry_gas_indices = nothing,
 ) where {Tu,NC,NR}
 
-    # 1) Column-global θ_A (zero for NoChi). When `dξ_rxn` is supplied, defer
-    # to the shared physics function; otherwise compute S_dry per cell on the
+    # 1) Column-global θ_A (zero for NoChi), computing S_dry per cell on the
     # fly via `ws.rates / ws.heats / ws.dξ_dt`.
     θ_A_value = if chi_mode isa WithChi
         χ̄ === nothing && error("ALEMeshVelocityOperator(WithChi): χ̄ required.")
@@ -186,21 +171,17 @@ function apply!(
             error("ALEMeshVelocityOperator(WithChi): layout required.")
         dry_gas_indices === nothing &&
             error("ALEMeshVelocityOperator(WithChi): dry_gas_indices required.")
-        if dξ_rxn !== nothing
-            _compute_theta_A(material, state, χ̄, M_ξ, dξ_rxn, layout, dry_gas_indices)
-        else
-            _compute_theta_A_inplace(
-                material,
-                state,
-                χ̄,
-                M_ξ,
-                layout,
-                dry_gas_indices,
-                ws.rates,
-                ws.heats,
-                ws.dξ_dt,
-            )
-        end
+        _compute_theta_A_inplace(
+            material,
+            state,
+            χ̄,
+            M_ξ,
+            layout,
+            dry_gas_indices,
+            ws.rates,
+            ws.heats,
+            ws.dξ_dt,
+        )
     else
         0.0
     end
@@ -208,30 +189,21 @@ function apply!(
 
     # 2) Cumulative mesh velocity + per-cell θ. The shared physics
     # function writes both ws.w_node (cumulative from bottom) and
-    # ws.theta (per-cell strain) given precomputed dξ_rxn. If dξ_rxn
-    # wasn't supplied we let _compute_ale_mesh_velocity! recompute the
-    # species source terms internally via ws.rates / ws.heats / ws.dξ_dt.
+    # ws.theta (per-cell strain), recomputing the species source terms via
+    # ws.rates / ws.heats / ws.dξ_dt.
     _compute_ale_mesh_velocity!(
         ws.w_node,
         state,
         mesh,
         material;
         θ_out = ws.theta,
-        precomputed_dξ_rxn = dξ_rxn,
         rates = ws.rates,
         heats = ws.heats,
         dξ_dt = ws.dξ_dt,
         θ_A = ws.theta_A[],
     )
 
-    # 3) Cell-centered velocity from bounding-node average.
-    @inbounds for i in eachindex(mesh.cells)
-        cell = mesh.cells[i]
-        n_left, n_right = cell.node_ids
-        ws.w_cell[i] = 0.5 * (ws.w_node[n_left] + ws.w_node[n_right])
-    end
-
-    # 4) Cumulative Δz from bottom to each node — reused by both the rank-1
+    # 3) Cumulative Δz from bottom to each node — reused by both the rank-1
     # χ builder (u_node[k] = -cumZ[k]) and the consumer-side z-row × χ-col
     # composition. cumZ[1] = 0; cumZ[k] = Σ_{i<k} Δzᵢ.
     A_section = Float64(state.A_section[])
@@ -494,63 +466,6 @@ function compute_theta_A_derivatives!(
 end
 
 # ============================================================================
-# Bare-primitive coupling builders — consumed by the framework wiring
-# ============================================================================
-
-"""
-	build_prefix_sum_coupling_T(ws::ALEMeshVelocityWorkspace, state)
-	    -> PrefixSumCoupling
-
-Build the [`PrefixSumCoupling`](@ref) primitive whose `v` vector is
-`Δzᵢ · ∂θ_i/∂T_i`. Its `apply!` produces `∂w_node[k]/∂T_j` summed over
-the cumulative interior cells:
-
-```
-(L · diag(v) · x)[k] = Σ_{i ≤ k-1} v[i] · x[i]
-                    = Σ_{i ≤ k-1} Δzᵢ · ∂θ_i/∂T_i · x[i]
-                    = ∂w_node[k]/∂T  ·  x
-```
-
-The same primitive, embedded at the node rows, is the z-row block of the
-Jacobian (`contribute_to_structured!`).
-
-`compute_strain_rate_derivatives!` must have been called on `ws` for
-the current state before invoking this builder.
-"""
-function build_prefix_sum_coupling_T(ws::ALEMeshVelocityWorkspace, state)
-    A = state.A_section[]
-    n_cells = length(ws.dθ_dT)
-    v = Vector{Float64}(undef, n_cells)
-    @inbounds for i = 1:n_cells
-        Δzᵢ = state.volume[i] / A
-        v[i] = Δzᵢ * ws.dθ_dT[i]
-    end
-    return PrefixSumCoupling(v)
-end
-
-"""
-	build_prefix_sum_coupling_xi(ws::ALEMeshVelocityWorkspace, state, j)
-	    -> PrefixSumCoupling
-
-Same as [`build_prefix_sum_coupling_T`](@ref), but for the `j`-th
-species channel. `v[i] = Δzᵢ · ∂θ_i/∂ξ_{j,i}`. NC primitives are
-needed (one per species column) — built lazily so the test path can
-exercise individual channels.
-"""
-function build_prefix_sum_coupling_xi(ws::ALEMeshVelocityWorkspace, state, j::Integer)
-    A = state.A_section[]
-    NC = size(ws.dθ_dξ, 1)
-    1 ≤ j ≤ NC || throw(BoundsError(ws.dθ_dξ, j))
-    n_cells = size(ws.dθ_dξ, 2)
-    v = Vector{Float64}(undef, n_cells)
-    @inbounds for i = 1:n_cells
-        Δzᵢ = state.volume[i] / A
-        v[i] = Δzᵢ * ws.dθ_dξ[j, i]
-    end
-    return PrefixSumCoupling(v)
-end
-
-# ============================================================================
 # Framework hooks
 # ============================================================================
 
@@ -609,9 +524,8 @@ function contribute_to_structured!(
     z_off = z_offset(layout)
 
     # Refill the persistent bare prefix-sum couplings in place (entry 1 = T
-    # channel, 1+j = ξ_j). Same math as `build_prefix_sum_coupling_T` /
-    # `build_prefix_sum_coupling_xi`, but writing into workspace-owned
-    # buffers so the hot path allocates nothing. The strain-rate derivatives
+    # channel, 1+j = ξ_j): `v[i] = Δzᵢ · ∂θᵢ/∂xᵢ`, written into
+    # workspace-owned buffers so the hot path allocates nothing. The strain-rate derivatives
     # are zero in parked ghost slots, so the prefix sums stop at the live
     # surface and every ghost node row reproduces the surface node's row.
     couplings = mesh_vel_ws.prefix_couplings
@@ -670,20 +584,5 @@ function contribute_to_structured!(
         end
     end
 
-    return nothing
-end
-
-"""
-	contribute_to_jacobian!(jac, op::ALEMeshVelocityOperator, …)
-
-No-op. The cumulative mesh velocity writes no entries into `jac.A`
-directly — every contribution is a structured coupling pushed by
-[`contribute_to_structured!`](@ref): the z-row × (T, ξ) prefix-sum blocks
-and (WithChi) the θ_A rank-1s land on `jac.structured` from the provider
-side. The ξ-row dilation entries are written by the backend from this
-operator's cached strain-rate derivatives. The geometry AD block covers
-the z *columns* only and plays no part in the z rows' (T, ξ) couplings.
-"""
-function contribute_to_jacobian!(::StructuredJacobian, ::ALEMeshVelocityOperator, args...)
     return nothing
 end

@@ -187,20 +187,16 @@ export MeshTopology, MeshGeometry
 # `using Pyrolysis` exposes them without forcing users to reach into
 # `Pyrolysis.Jacobian`.
 export JacobianBackend, JacobianSpec, compute_jacobian!
-export Structured,
-    LinearSolveStrategy, DirectSolve, StructuredSolve, ApproxSolve, MatrixFreeSolve
+export Structured, LinearSolveStrategy, DirectSolve, ApproxSolve
 export DenseAD_ForwardDiff   # verifier reference only
-export benchmark_jacobian_backends, verify_jacobian_at, is_approximate
+export verify_jacobian_at, is_approximate
 export Operator,
     ResidualContext,
     StructuredJacobian,
     StructuredCoupling,
     PrefixSumCoupling,
-    Rank1Coupling,
-    SuffixSumCoupling,
     EmbeddedScaledSuffixSumCoupling,
-    EmbeddedRank1Coupling,
-    ImplicitTerm
+    EmbeddedRank1Coupling
 
 # Linear-solver extensions (PyrolysisKLUExt, etc.) attach concrete
 # factorizations to these stubs. Calling without the matching `using ...`

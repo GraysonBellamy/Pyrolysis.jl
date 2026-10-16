@@ -142,16 +142,3 @@ Override only if a hand-rolled analytical derivative wins benchmark-
 verified equivalence against the AD default at rtol=1e-12.
 """
 function contribute_to_jacobian! end
-
-"""
-	contribute_to_structured!(jac::StructuredJacobian, op::Operator,
-	                          state, ctx::ResidualContext, t) -> nothing
-
-Operators that *produce* a structured coupling (today: only
-[`ALEMeshVelocityOperator`](@ref) registers a [`PrefixSumCoupling`](@ref)
-and optionally a [`Rank1Coupling`](@ref)) override this to push the
-coupling onto `jac.structured`. Default: no-op.
-"""
-function contribute_to_structured!(jac, op::Operator, state, ctx, t)
-    return nothing
-end

@@ -266,7 +266,7 @@ end
         end
         A = sparse(I, J, V, n_total, n_total)
         fill!(A.nzval, 0.0)
-        jac = StructuredJacobian(:eulerian, A)
+        jac = StructuredJacobian(A)
 
         op = ConductionOperator()
         ws_ad = build_conduction_workspace(material)

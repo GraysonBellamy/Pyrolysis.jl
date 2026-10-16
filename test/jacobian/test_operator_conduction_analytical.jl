@@ -28,7 +28,6 @@ using Pyrolysis.Jacobian:
     Structured,
     DirectSolve,
     build_sparsity,
-    create_sparsity_map,
     FastSparsityMap
 using Pyrolysis.Jacobian: _contribute_to_jacobian_analytical!, _contribute_to_jacobian_ad!
 using Pyrolysis.Problem:
@@ -54,8 +53,7 @@ function _assemble_conduction(def, ws, u, t, path::Symbol)
         copy(S_union.rowval),
         zeros(Float64, length(S_union.nzval)),
     )
-    mode_tag = mesh_mode(def.mode) isa Pyrolysis.Problem.ALE ? :ale : :eulerian
-    jac = StructuredJacobian(mode_tag, A)
+    jac = StructuredJacobian(A)
 
     cond_ws = build_conduction_workspace(def.material)
     ctx = build_residual_context([ConductionOperator()])

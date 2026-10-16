@@ -395,7 +395,7 @@ end
         end
         A = sparse(I, J_idx, V, n_total, n_total)
         fill!(A.nzval, 0.0)
-        jac = StructuredJacobian(:eulerian, A)
+        jac = StructuredJacobian(A)
 
         ctx = build_residual_context([BCThermalOperator(), BCMassOperator()])
         ws_thermal = build_bc_thermal_workspace(material)
@@ -505,7 +505,7 @@ end
         end
         A = sparse(I, J_idx, V, n_total, n_total)
         fill!(A.nzval, 0.0)
-        jac = StructuredJacobian(:eulerian, A)
+        jac = StructuredJacobian(A)
         ctx = build_residual_context([BCThermalOperator(), BCMassOperator()])
         ws_thermal = build_bc_thermal_workspace(material)
         ws_mass = build_bc_mass_workspace(material)

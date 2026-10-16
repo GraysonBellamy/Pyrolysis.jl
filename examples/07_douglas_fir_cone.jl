@@ -698,10 +698,9 @@ solution = solve(
     radiation_model = SURFACE_ABSORPTION,  # All radiation absorbed at surface (opaque material)
     min_thickness = 0.5e-3,                # Stop when sample is < 0.5 mm
     handle_depletion = false,              # Disable surface cell depletion (uses ALE instead)
-    # Default Jacobian is Structured(strategy = DirectSolve()). Pass
-    # `jacobian = JacobianSpec(Structured(strategy = ApproxSolve()), problem)`
-    # to opt into the Schur-style approximation that drops the dense ALE
-    # mesh-velocity coupling.
+    # The ALE default Jacobian is Structured(strategy = ApproxSolve()), which
+    # drops the dense ALE mesh-velocity coupling. Pass
+    # `jacobian = Structured(strategy = DirectSolve())` for the exact one.
     integrator = KenCarp4(linsolve = SparspakFactorization()),
 )
 

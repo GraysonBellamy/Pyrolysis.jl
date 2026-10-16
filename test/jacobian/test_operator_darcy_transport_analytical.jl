@@ -46,8 +46,7 @@ function _assemble_darcy(def, ws, u, t, path::Symbol)
         copy(S_union.rowval),
         zeros(Float64, length(S_union.nzval)),
     )
-    mode_tag = mesh_mode(def.mode) isa Pyrolysis.Problem.ALE ? :ale : :eulerian
-    jac = StructuredJacobian(mode_tag, A)
+    jac = StructuredJacobian(A)
 
     dw = build_darcy_transport_workspace(def.material)
     ctx = build_residual_context([DarcyTransportOperator()])

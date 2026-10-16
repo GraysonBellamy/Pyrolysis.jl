@@ -83,10 +83,9 @@ function _build_jacobian_spec(
     ws_ad = build_ad_workspace(def, ws, Tu)
     cache =
         DenseADCache{actual_chunk_size,Tu,typeof(ws_ad),typeof(cfg)}(ws_ad, cfg, f_cache)
-    return JacobianSpec(DenseAD_ForwardDiff(), nothing, nothing, cache, Int[], Int[])
+    return JacobianSpec(DenseAD_ForwardDiff(), nothing, nothing, cache)
 end
 
-_cache_state_length(cache::DenseADCache) = length(cache.f_cache)
 
 # ============================================================================
 # Compute

@@ -64,12 +64,8 @@ const ReturnCode = LinearSolve.SciMLBase.ReturnCode
             problem;
             integrator = KenCarp4(linsolve = ILUGMRESFactorization(τ = 0.1)),
             use_ale = true,
-            # Default Structured backend assembles the full ALE Jacobian.
-            jacobian = JacobianSpec(
-                Structured(strategy = DirectSolve()),
-                problem;
-                use_ale = true,
-            ),
+            # The exact ALE Jacobian (DirectSolve assembles the full pattern).
+            jacobian = Structured(strategy = DirectSolve()),
             min_thickness = 0.1e-3,
             abstol = 1e-8,
             reltol = 1e-6,
@@ -89,12 +85,8 @@ const ReturnCode = LinearSolve.SciMLBase.ReturnCode
             problem_klu;
             integrator = KenCarp4(linsolve = KLUFactorization()),
             use_ale = true,
-            # Default Structured backend assembles the full ALE Jacobian.
-            jacobian = JacobianSpec(
-                Structured(strategy = DirectSolve()),
-                problem_klu;
-                use_ale = true,
-            ),
+            # The exact ALE Jacobian (DirectSolve assembles the full pattern).
+            jacobian = Structured(strategy = DirectSolve()),
             min_thickness = 0.1e-3,
             abstol = 1e-8,
             reltol = 1e-6,
@@ -106,12 +98,8 @@ const ReturnCode = LinearSolve.SciMLBase.ReturnCode
             problem_ilu;
             integrator = KenCarp4(linsolve = ILUGMRESFactorization(τ = 0.1)),
             use_ale = true,
-            # Default Structured backend assembles the full ALE Jacobian.
-            jacobian = JacobianSpec(
-                Structured(strategy = DirectSolve()),
-                problem_ilu;
-                use_ale = true,
-            ),
+            # The exact ALE Jacobian (DirectSolve assembles the full pattern).
+            jacobian = Structured(strategy = DirectSolve()),
             min_thickness = 0.1e-3,
             abstol = 1e-8,
             reltol = 1e-6,
@@ -134,12 +122,8 @@ const ReturnCode = LinearSolve.SciMLBase.ReturnCode
             problem1;
             integrator = KenCarp4(linsolve = ILUGMRESFactorization(τ = 0.01)),
             use_ale = true,
-            # Default Structured backend assembles the full ALE Jacobian.
-            jacobian = JacobianSpec(
-                Structured(strategy = DirectSolve()),
-                problem1;
-                use_ale = true,
-            ),
+            # The exact ALE Jacobian (DirectSolve assembles the full pattern).
+            jacobian = Structured(strategy = DirectSolve()),
             min_thickness = 0.1e-3,
             progress = false,
         )
@@ -151,12 +135,8 @@ const ReturnCode = LinearSolve.SciMLBase.ReturnCode
             problem2;
             integrator = KenCarp4(linsolve = ILUGMRESFactorization(τ = 0.5)),
             use_ale = true,
-            # Default Structured backend assembles the full ALE Jacobian.
-            jacobian = JacobianSpec(
-                Structured(strategy = DirectSolve()),
-                problem2;
-                use_ale = true,
-            ),
+            # The exact ALE Jacobian (DirectSolve assembles the full pattern).
+            jacobian = Structured(strategy = DirectSolve()),
             min_thickness = 0.1e-3,
             progress = false,
         )

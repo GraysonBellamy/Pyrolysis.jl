@@ -16,8 +16,7 @@ The single production backend is `Structured` (`src/Jacobian/structured_backend.
 `DenseAD_ForwardDiff` (`dense_ad_reference.jl`) is preserved exclusively
 as the reference path used by `verify_jacobian_at`. Sparsity construction
 (`build_sparsity` and the four `_emit_*_pattern!` helpers) lives in
-`sparsity.jl`. Verification (`verify_jacobian` solve mode) and
-benchmarking are siblings of those.
+`sparsity.jl`; verification (`verify_jacobian_at`) in `verify.jl`.
 """
 module Jacobian
 
@@ -72,7 +71,6 @@ include("structured_backend.jl")
 # `Structured(...)`, the verifier uses this as a ground-truth comparison.
 include("dense_ad_reference.jl")
 
-include("benchmark.jl")
 include("verify.jl")
 
 # ============================================================================
@@ -83,7 +81,7 @@ include("verify.jl")
 export JacobianBackend, JacobianSpec, compute_jacobian!
 
 # Sparsity construction
-export build_sparsity, matrix_colors
+export build_sparsity
 
 # Verifier reference. Internal use only — production callers use
 # `Structured(...)` directly. Surfaced here so `verify_jacobian_at`
@@ -92,7 +90,7 @@ export DenseAD_ForwardDiff
 
 # Rebuilt-architecture backend and its strategies — the production path.
 export Structured
-export LinearSolveStrategy, DirectSolve, StructuredSolve, ApproxSolve, MatrixFreeSolve
+export LinearSolveStrategy, DirectSolve, ApproxSolve
 
 # Operator interface (Layer 1) — visible so tests / downstream phases can
 # define their own operators.
@@ -111,20 +109,14 @@ export ChiOperator, build_chi_workspace
 export StructuredJacobian,
     StructuredCoupling,
     PrefixSumCoupling,
-    SuffixSumCoupling,
-    Rank1Coupling,
     EmbeddedScaledSuffixSumCoupling,
     EmbeddedNodePrefixSumCoupling,
     EmbeddedRank1Coupling
-export ImplicitTerm
 
-export benchmark_jacobian_backends
 export verify_jacobian_at, is_approximate
 export GeometryOperator, GeometryADCache, apply_geometry_jacobian!
 
 # Sparse-write helper.
-export FastSparsityMap, create_sparsity_map
-export fast_sparse_write!, fast_sparse_add!, fast_sparse_sub!
-export fast_sparse_add_batch!, fast_sparse_sub_batch!
+export FastSparsityMap, fast_sparse_add!
 
 end # module Jacobian

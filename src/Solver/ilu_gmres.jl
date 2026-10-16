@@ -17,7 +17,7 @@ direct factorization before using it for production studies.
 ```julia
 alg = KenCarp4(linsolve = ILUGMRESFactorization(τ = 0.1))
 solution = solve(problem; integrator = alg,
-    jacobian = JacobianSpec(Structured(strategy = DirectSolve()), problem),
+    jacobian = Structured(strategy = DirectSolve()),
     use_ale = true)
 ```
 
@@ -33,7 +33,7 @@ import LinearSolve
 using LinearSolve: LinearCache, OperatorAssumptions
 using IncompleteLU: ilu
 using Krylov
-using SparseArrays: SparseMatrixCSC, getcolptr, rowvals, nonzeros, nnz
+using SparseArrays: SparseMatrixCSC, nnz
 using LinearAlgebra: Diagonal, diag
 
 # SciMLBase is re-exported through LinearSolve
@@ -92,7 +92,6 @@ mutable struct ILUGMRESCacheVal
     krylov_solver::Any           # Krylov.GmresWorkspace
     τ::Float64
     gmres_rtol::Float64
-    restart::Int
 end
 
 # --- LinearSolve interface methods ---
@@ -112,7 +111,7 @@ function LinearSolve.init_cacheval(
 )
     P = ilu(A, τ = alg.τ)
     solver = Krylov.GmresWorkspace(A, b; memory = alg.restart)
-    return ILUGMRESCacheVal(P, solver, alg.τ, alg.gmres_rtol, alg.restart)
+    return ILUGMRESCacheVal(P, solver, alg.τ, alg.gmres_rtol)
 end
 
 # Fallback for non-Float64 sparse or non-sparse matrices

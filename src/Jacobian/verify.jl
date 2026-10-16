@@ -116,7 +116,7 @@ function verify_jacobian_at(
         reference_spec === nothing ? JacobianSpec(reference, def, ws) : reference_spec
     compute_jacobian!(J_ref, ref_spec, u, def, Float64(t), ws)
 
-    J_active = _alloc_active_target(spec_active, n)
+    J_active = _alloc_target(spec_active, n)
     compute_jacobian!(J_active, spec_active, u, def, Float64(t), ws)
 
     J_active_dense = J_active isa SparseMatrixCSC ? Matrix(J_active) : J_active
@@ -240,10 +240,9 @@ function _strict_per_entry_compare(
     return passed, max_abs_dev, max_rel_dev, worst_idx
 end
 
-# Internal: build the active backend's J target — sparse if it carries a
-# pattern, dense otherwise. Mirrors the `_alloc_target` in benchmark.jl;
-# kept private here so verify.jl stays self-contained.
-function _alloc_active_target(spec::JacobianSpec, n::Int)
+# Internal: allocate a backend's Jacobian target — sparse on its pattern when
+# it carries one, dense otherwise (the `DenseAD_ForwardDiff` reference).
+function _alloc_target(spec::JacobianSpec, n::Int)
     if spec.sparsity_phys === nothing
         return zeros(Float64, n, n)
     else

@@ -48,13 +48,7 @@ using PProf
 using Pyrolysis
 using Pyrolysis: residual!
 using Pyrolysis.Jacobian:
-    JacobianSpec,
-    Structured,
-    DirectSolve,
-    ApproxSolve,
-    StructuredSolve,
-    MatrixFreeSolve,
-    compute_jacobian!
+    JacobianSpec, Structured, DirectSolve, ApproxSolve, compute_jacobian!
 using Pyrolysis.Materials: SURFACE_ABSORPTION, BEER_LAMBERT, NO_RADIATION
 
 const ROOT = dirname(dirname(@__DIR__))
@@ -97,12 +91,7 @@ end
 
 _expand(value, all_names) = value == "all" ? all_names : [value]
 
-const STRATEGIES = Dict(
-    "direct" => DirectSolve,
-    "approx" => ApproxSolve,
-    "structured" => StructuredSolve,
-    "matrixfree" => MatrixFreeSolve,
-)
+const STRATEGIES = Dict("direct" => DirectSolve, "approx" => ApproxSolve)
 
 # ---------------------------------------------------------------------------
 # End-to-end solve cases — mirror the canonical hot-op configs, but with the
@@ -181,17 +170,7 @@ function build_solve_case(name; t_final, strat_name = "direct")
     )
     kwargs = (progress = false, use_ale = use_ale, radiation_model = radiation_model)
     if strat_name != "direct"
-        # The (backend, problem) constructor defaults to Eulerian/no-radiation;
-        # the mode flags must match what `solve` runs or the layouts disagree.
-        kwargs = (
-            kwargs...,
-            jacobian = JacobianSpec(
-                Structured(strategy = STRATEGIES[strat_name]()),
-                problem;
-                use_ale = use_ale,
-                radiation_model = radiation_model,
-            ),
-        )
+        kwargs = (kwargs..., jacobian = Structured(strategy = STRATEGIES[strat_name]()))
     end
     return problem, kwargs
 end

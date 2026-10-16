@@ -2,16 +2,15 @@
 The default Jacobian is `DirectSolve` on a fixed mesh and `ApproxSolve` under
 ALE. The default linear solver follows the Jacobian pattern: UMFPACK when
 `DirectSolve` materializes the ALE geometry block, KLU for every other sparse
-Jacobian (the Eulerian Beer–Lambert suffix included), dense LU for a dense
-Jacobian backend. An explicit `linear_solver` always wins.
+Jacobian (the Eulerian Beer–Lambert suffix included). An explicit
+`linear_solver` always wins.
 """
 
 using Test
 using Pyrolysis
 using Pyrolysis.Materials: SURFACE_ABSORPTION, BEER_LAMBERT
-using Pyrolysis.Solver: _resolve_integrator, _default_jacobian_spec
-using LinearSolve:
-    KLUFactorization, UMFPACKFactorization, LUFactorization, SparspakFactorization
+using Pyrolysis.Solver: _resolve_integrator, _default_jacobian_backend
+using LinearSolve: KLUFactorization, UMFPACKFactorization, SparspakFactorization
 
 function _default_linsolve_problem()
     mat = Material(
@@ -42,10 +41,8 @@ end
 _linsolve(sol) = sol.raw_solution.alg.linsolve
 
 @testset "default Jacobian: DirectSolve on a fixed mesh, ApproxSolve under ALE" begin
-    for (use_ale, strategy) in ((false, DirectSolve), (true, ApproxSolve))
-        def, ws, _ = initialize_state(_default_linsolve_problem(); use_ale)
-        @test _default_jacobian_spec(def, ws, use_ale).backend.strategy isa strategy
-    end
+    @test _default_jacobian_backend(false).strategy isa DirectSolve
+    @test _default_jacobian_backend(true).strategy isa ApproxSolve
 end
 
 @testset "default linear solver follows the Jacobian pattern" begin
@@ -56,11 +53,6 @@ end
         linear_solver = nothing,
         geometry_block = true,
     ).linsolve isa UMFPACKFactorization
-    @test _resolve_integrator(
-        integrator = nothing,
-        linear_solver = nothing,
-        needs_dense_linsolve = true,
-    ).linsolve isa LUFactorization
 
     for (kw, expected) in (
         ((use_ale = false, radiation_model = SURFACE_ABSORPTION), KLUFactorization),

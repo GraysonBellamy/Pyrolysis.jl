@@ -15,7 +15,7 @@ dT[i] += Q_rad(state, mesh, model) / ρcp_eff(T_i, ξ_i)
 | `NO_RADIATION`      | no-op                                     | no-op                        |
 | `SURFACE_ABSORPTION`| no-op (handled by BC)                     | no-op                        |
 | `P1_QUASI_STEADY`   | no-op (handled in radiation cache)        | no-op                        |
-| `BEER_LAMBERT`      | wraps `compute_beer_lambert_source!`      | bare-primitive `SuffixSumCoupling`, composed at consumer time |
+| `BEER_LAMBERT`      | wraps `compute_beer_lambert_source!`      | `EmbeddedScaledSuffixSumCoupling` per channel |
 
 # Beer-Lambert math
 
@@ -41,11 +41,9 @@ captured by the per-cell AD closure below).
 
 The `j > i` block factors as `Diag(−q_rad) · U · diag(v)` where
 `v[j] = Δz_j · ∂α_j/∂x_j − δ_{j,n}·(∂ε_eff/∂x_n)/ε_eff` and `U` is the
-strict upper-triangular all-ones matrix — i.e.
-`Diag(−q_rad) · SuffixSumCoupling(v)`. The bare `SuffixSumCoupling(v)`
-primitive (α part only) is built inline; the framework wiring multiplies the
-resulting per-row vector by `−q_rad[i]` and adds the diagonal `j == i`
-term separately.
+strict upper-triangular all-ones matrix. It is pushed as an
+[`EmbeddedScaledSuffixSumCoupling`](@ref) with row scale `−q_rad[i]`; the
+diagonal `j == i` term is added separately.
 
 # Known approximation under ALE — missing z-channel
 
@@ -83,7 +81,7 @@ using ..Physics: compute_beer_lambert_source!
 Stateless tag. No-op for `NO_RADIATION` / `SURFACE_ABSORPTION` /
 `P1_QUASI_STEADY` modes; for `BEER_LAMBERT` it produces a non-local
 volumetric source whose Jacobian factors as
-`Diag(−q_rad) · SuffixSumCoupling(v)` plus a diagonal contribution.
+`Diag(−q_rad) · U · diag(v)` plus a diagonal contribution.
 """
 struct RadiationOperator <: Operator end
 

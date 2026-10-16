@@ -222,7 +222,7 @@ end
         end
         A = sparse(I, J, V, n_total, n_total)
         fill!(A.nzval, 0.0)
-        jac = StructuredJacobian(:eulerian, A)
+        jac = StructuredJacobian(A)
 
         op = ReactionSourceOperator()
         ws_ad = build_reaction_source_workspace(material)

@@ -89,7 +89,7 @@ advanced users. Highlights:
 | Problem & solve | `PyrolysisProblem`, `PyrolysisSolution`, `solve`, `parameter_sweep` |
 | Sensitivities | `forward_sensitivity`, `adjoint_sensitivity` (load `SciMLSensitivity`) |
 | Verification | `verify_mixing_derivatives` (load `Symbolics`) |
-| Jacobian backends | `JacobianBackend`, `JacobianSpec`, `Structured`, `LinearSolveStrategy`, `DirectSolve`, `StructuredSolve`, `ApproxSolve`, `MatrixFreeSolve`, `compute_jacobian!` |
+| Jacobian backends | `JacobianBackend`, `JacobianSpec`, `Structured`, `LinearSolveStrategy`, `DirectSolve`, `ApproxSolve`, `compute_jacobian!` |
 
 ## Package extensions
 

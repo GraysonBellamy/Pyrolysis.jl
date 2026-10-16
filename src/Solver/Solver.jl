@@ -25,12 +25,10 @@ using ..Discretization
 using ..Jacobian
 using ..Jacobian:
     JacobianSpec,
-    JacobianBackend,
     compute_jacobian!,
     Structured,
     DirectSolve,
     ApproxSolve,
-    StructuredSolve,
     DenseAD_ForwardDiff,
     verify_jacobian_at,
     sparsity_profile,
@@ -73,6 +71,6 @@ export create_step_update_callback
 export create_newton_failure_cap_callback, FAILURE_MEMORY_GROWTH, FAILURE_MEMORY_STEPS
 
 # Thickness-based detection (used by depletion callback)
-export is_cell_thin, get_cell_thickness, find_thin_cells
+export is_cell_thin, find_thin_cells
 
 end # module Solver

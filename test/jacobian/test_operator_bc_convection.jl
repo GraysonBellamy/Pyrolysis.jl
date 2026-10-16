@@ -330,7 +330,7 @@ end
         end
         A = sparse(I, J_idx, V, n_total, n_total)
         fill!(A.nzval, 0.0)
-        jac = StructuredJacobian(:eulerian, A)
+        jac = StructuredJacobian(A)
         ctx = build_residual_context([BCConvectionOperator()])
         ws_op = build_bc_convection_workspace(material)
 

@@ -66,11 +66,7 @@ end
         sol = solve(
             problem;
             use_ale = true,
-            jacobian = JacobianSpec(
-                Structured(strategy = ApproxSolve()),
-                problem;
-                use_ale = true,
-            ),
+            jacobian = Structured(strategy = ApproxSolve()),
             progress = false,
             validate = false,
         )
