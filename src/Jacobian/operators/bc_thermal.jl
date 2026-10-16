@@ -65,7 +65,7 @@ using ..Properties:
     effective_heat_capacity,
     effective_emissivity,
     effective_absorptivity
-using ..Discretization: solve_boundary_temperature!
+using ..Discretization: solve_boundary_temperature!, _bc_boundary_face_fluxes
 
 """
 	BCThermalOperator <: Operator

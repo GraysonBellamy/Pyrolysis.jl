@@ -8,31 +8,19 @@ using ..Problem:
     validate_problem,
     initialize_state,
     StateLayout,
-    state_length,
     get_temperature,
     get_concentration,
-    get_node_position,
     get_node_positions,
     compute_volumes_from_state,
-    z_offset,
-    chi_range,
     _allocate_extras!
 using ..Residual: residual!, cross_section_area_from_state
-using ..Physics: ideal_gas_pressure
 using ..Properties:
     effective_emissivity,
     effective_absorptivity,
     effective_absorption,
-    effective_conductivity,
-    effective_gas_transfer,
-    effective_permeability,
-    mixture_gas_viscosity,
-    porosity
+    effective_conductivity
 using ..Discretization:
-    compute_boundary_heat_fluxes,
-    compute_surface_mass_flux,
-    solve_boundary_temperature,
-    boundary_darcy_velocity
+    compute_boundary_heat_fluxes, solve_boundary_temperature, _bc_boundary_face_fluxes
 using ..Materials: has_darcy_flow
 using ..BoundaryConditions:
     get_radiative_flux_bc,
@@ -55,14 +43,11 @@ import CommonSolve: solve  # Extend CommonSolve.solve for our problem type
 # BCs read it, so the boundary-temperature solve here reproduces what the
 # integrator saw during the run.
 
-# Per-species outward gas mass flux at a boundary face [kg/(m²·s)],
-# evaluated the same way the live mass BC application does: diffusive film
-# law plus, in Darcy-Fick mode, the pressure-BC advective venting
-# v_out·ξ/φ (same `boundary_darcy_velocity` kernel as the RHS; outflow only —
-# inflow advects the zero-concentration ambient). `tag` is the boundary
-# orientation: at the bottom the outward normal is −z, so outflow is v_z < 0
-# (the bottom face vents too when a permeable mass BC is configured there;
-# "positive = leaving the slab" at both boundaries).
+# Per-species outward gas mass flux at a boundary face [kg/(m²·s)], positive
+# leaving the slab at either boundary (`tag` is the boundary orientation): the
+# boundary-face kernel the live mass BC and the Jacobian share (film law plus,
+# in Darcy-Fick mode, the pressure-BC venting), with its into-the-domain sign
+# flipped. `0.0 - F` keeps a zero flux at +0.0.
 @inline function _surface_gas_flux(
     material::Material{NC},
     ξ_face::NTuple{NC,Float64},
@@ -71,35 +56,19 @@ import CommonSolve: solve  # Extend CommonSolve.solve for our problem type
     d_half::Float64,
     t::Float64,
     darcy_active::Bool,
-    ::Val{tag} = Val(:top),
-) where {NC,tag}
-    ρ = sum(ξ_face)
-    λρ = effective_gas_transfer(ξ_face, T_face, material) * ρ
-    # Single assignment (no conditional reassignment) so the `ntuple` closure
-    # below captures a non-boxed value — avoids a JET possible-undef report.
-    v_out_over_φ = if darcy_active
-        φ = porosity(ξ_face, T_face, material)
-        P_int = ideal_gas_pressure(ξ_face, T_face, φ, material)
-        κ_int = effective_permeability(ξ_face, T_face, material)
-        μ_int = mixture_gas_viscosity(ξ_face, T_face, material)
-        v_z = boundary_darcy_velocity(mass_bc, P_int, κ_int, μ_int, d_half, Val(tag))
-        v_out = tag === :top ? v_z : -v_z
-        v_out > 0.0 ? v_out / max(φ, 1e-12) : 0.0
-    else
-        0.0
-    end
-    ntuple(Val(NC)) do k
-        comp = material.components[k]
-        # Film/prescribed boundary fluxes can supply an absent species. Match
-        # the applied gas operator for zero and small negative trial/output
-        # concentrations as well; suppressing them hid ambient AIR inflow.
-        if is_gas(comp)
-            compute_surface_mass_flux(mass_bc, ξ_face[k], λρ, ρ, d_half, t, k) +
-            v_out_over_φ * ξ_face[k]
-        else
-            0.0
-        end
-    end
+    tag::Val = Val(:top),
+) where {NC}
+    F = _bc_boundary_face_fluxes(
+        T_face,
+        ξ_face,
+        mass_bc,
+        material,
+        d_half,
+        t,
+        tag,
+        darcy_active,
+    )
+    return map(F_k -> 0.0 - F_k, F)
 end
 
 # ============================================================================
