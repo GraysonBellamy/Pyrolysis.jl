@@ -197,43 +197,6 @@ export Operator,
     EmbeddedScaledSuffixSumCoupling,
     EmbeddedRank1Coupling
 
-# Linear-solver extensions (PyrolysisKLUExt, etc.) attach concrete
-# factorizations to these stubs. Calling without the matching `using ...`
-# errors via `MethodError`, prompting the user to load the dep.
-
-"""
-	klu_factorization()
-
-KLU sparse-direct factorization for the integrator's linear solves, suitable
-as the `linear_solver` keyword of `solve`. The concrete method is attached by
-the `PyrolysisKLUExt` extension: load `KLU` first (`using KLU`); calling the
-stub without it raises a `MethodError`.
-"""
-function klu_factorization end
-
-"""
-	pardiso_factorization()
-
-MKL Pardiso sparse-direct factorization for the integrator's linear solves,
-suitable as the `linear_solver` keyword of `solve`. The concrete method is
-attached by the `PyrolysisPardisoExt` extension: load `Pardiso` first
-(`using Pardiso`); calling the stub without it raises a `MethodError`.
-"""
-function pardiso_factorization end
-
-"""
-	amg_preconditioner(A)
-
-Algebraic-multigrid preconditioner built from the sparse matrix `A`, for use
-with the ILU/Krylov iterative linear solvers. The concrete method is attached
-by the `PyrolysisAMGExt` extension: load `AlgebraicMultigrid` first
-(`using AlgebraicMultigrid`); calling the stub without it raises a
-`MethodError`.
-"""
-function amg_preconditioner end
-
-export klu_factorization, pardiso_factorization, amg_preconditioner
-
 # ============================================================================
 # Sensitivity-analysis entry points — concrete methods are attached by
 # `ext/PyrolysisSciMLSensitivityExt.jl`.
@@ -242,15 +205,6 @@ export klu_factorization, pardiso_factorization, amg_preconditioner
 include("sensitivity_stubs.jl")
 
 export forward_sensitivity, adjoint_sensitivity
-
-# ============================================================================
-# Symbolic-verification entry points (test-only) — concrete methods attached
-# by `ext/PyrolysisSymbolicsExt.jl`.
-# ============================================================================
-
-include("symbolics_stubs.jl")
-
-export verify_mixing_derivatives
 
 # ============================================================================
 # Precompile workload — warms up the canonical Material × SimulationMode

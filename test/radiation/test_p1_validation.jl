@@ -124,7 +124,7 @@ end
             @test τ > 50  # Very optically thick
 
             # Initialize G from equilibrium
-            initialize_g_from_temperature!(rad_cache, mesh, prop_cache)
+            initialize_g_from_temperature!(rad_cache, mesh)
 
             # At initialization, G should be 4σT⁴ (blackbody, NO emissivity factor)
             # In the standard P1 approximation, volumetric equilibrium is ALWAYS blackbody.
@@ -158,7 +158,7 @@ end
             update_properties!(prop_cache, StateCache(mesh), mesh, material)
             rad_cache = RadiationCache(n_cells)
             update_radiation_properties!(rad_cache, mesh, prop_cache)
-            initialize_g_from_temperature!(rad_cache, mesh, prop_cache)
+            initialize_g_from_temperature!(rad_cache, mesh)
 
             # G in hot region should be ~16x G in cold region (T⁴ ratio = (800/400)⁴ = 16)
             G_cold_avg = mean([rad_cache.G[i] for i = 1:div(n_cells, 2)])
@@ -196,7 +196,7 @@ end
             )
 
             # Solve radiation field
-            initialize_g_from_temperature!(rad_cache, mesh, prop_cache)
+            initialize_g_from_temperature!(rad_cache, mesh)
             solve_quasi_steady_radiation!(rad_cache, mesh, prop_cache, radiation_bcs, 0.0)
             compute_radiation_flux_divergence!(rad_cache, mesh, prop_cache)
 
@@ -235,7 +235,7 @@ end
                 bottom = ReflectiveRadiationBC(),
             )
 
-            initialize_g_from_temperature!(rad_cache, mesh, prop_cache)
+            initialize_g_from_temperature!(rad_cache, mesh)
             solve_quasi_steady_radiation!(rad_cache, mesh, prop_cache, radiation_bcs, 0.0)
             compute_radiation_flux_divergence!(rad_cache, mesh, prop_cache)
 
@@ -271,7 +271,7 @@ end
                 bottom = ReflectiveRadiationBC(),
             )
 
-            initialize_g_from_temperature!(rad_cache, mesh, prop_cache)
+            initialize_g_from_temperature!(rad_cache, mesh)
             solve_quasi_steady_radiation!(rad_cache, mesh, prop_cache, radiation_bcs, 0.0)
             compute_radiation_flux_divergence!(rad_cache, mesh, prop_cache)
 
@@ -313,7 +313,7 @@ end
             flux_into_top = map((0.0, I_ext)) do I
                 rad_cache = RadiationCache(n_cells)
                 update_radiation_properties!(rad_cache, mesh, prop_cache)
-                initialize_g_from_temperature!(rad_cache, mesh, prop_cache)
+                initialize_g_from_temperature!(rad_cache, mesh)
                 bcs = RadiationBCSet(
                     top = MarshakRadiationBC(
                         I_external = I,
@@ -368,7 +368,7 @@ end
                 bottom = ReflectiveRadiationBC(),
             )
 
-            initialize_g_from_temperature!(rad_cache, mesh, prop_cache)
+            initialize_g_from_temperature!(rad_cache, mesh)
             solve_quasi_steady_radiation!(rad_cache, mesh, prop_cache, radiation_bcs, 0.0)
 
             # In closed reflective system, total G should be conserved
@@ -463,7 +463,7 @@ end
                 bottom = ReflectiveRadiationBC(),
             )
 
-            initialize_g_from_temperature!(rad_cache, mesh, prop_cache)
+            initialize_g_from_temperature!(rad_cache, mesh)
             solve_quasi_steady_radiation!(rad_cache, mesh, prop_cache, radiation_bcs, 0.0)
 
             # Gradient at boundaries should be zero for reflective BC
@@ -493,7 +493,7 @@ end
                 bottom = ReflectiveRadiationBC(),
             )
 
-            initialize_g_from_temperature!(rad_cache, mesh, prop_cache)
+            initialize_g_from_temperature!(rad_cache, mesh)
             solve_quasi_steady_radiation!(rad_cache, mesh, prop_cache, radiation_bcs, 0.0)
 
             # Surface should lose heat (G at surface lower than equilibrium)
@@ -519,7 +519,7 @@ end
                 bottom = ReflectiveRadiationBC(),
             )
 
-            initialize_g_from_temperature!(rad_cache, mesh, prop_cache)
+            initialize_g_from_temperature!(rad_cache, mesh)
             solve_quasi_steady_radiation!(rad_cache, mesh, prop_cache, radiation_bcs, 0.0)
 
             # Check that G field is valid
@@ -557,7 +557,7 @@ end
                     bottom = ReflectiveRadiationBC(),
                 )
 
-                initialize_g_from_temperature!(rad_cache, mesh, prop_cache)
+                initialize_g_from_temperature!(rad_cache, mesh)
                 solve_quasi_steady_radiation!(
                     rad_cache,
                     mesh,
@@ -615,7 +615,7 @@ end
             # Setup radiation
             rad_cache = RadiationCache(n_cells)
             update_radiation_properties!(rad_cache, mesh, prop_cache)
-            initialize_g_from_temperature!(rad_cache, mesh, prop_cache)
+            initialize_g_from_temperature!(rad_cache, mesh)
 
             radiation_bcs = RadiationBCSet(
                 top = MarshakRadiationBC(I_external = 50e3, emissivity = 0.9),

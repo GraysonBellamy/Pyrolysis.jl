@@ -1,44 +1,34 @@
 """
 	Adaptivity
 
-Adaptive mesh refinement for the Pyrolysis.jl package.
+Mesh adaptation for Pyrolysis.jl.
 
-This module provides:
-- Error indicators (gradient, curvature, reaction rate, composite)
-- h-refinement (cell splitting)
-- h-coarsening (cell merging)
-- r-refinement (node relocation via equidistribution)
-- Mesh quality metrics (aspect ratio, smoothness, Jacobian)
-- AMR controller for orchestrating adaptation
-- Depleted-cell parking (surface and interior cells)
+`solve` uses the depleted-cell parking: a cell that burns out is merged into
+a neighbour (`find_merge_neighbor`, `park_cell!`, with a conservative
+temperature merge) and its slot moves above the live surface, so the state
+vector keeps its size.
+
+The module also holds building blocks for mesh refinement that `solve` does
+not use: error indicators (gradient, curvature, reaction rate, interface
+proximity, composite), r-refinement (node relocation by equidistribution of
+a monitor function) and mesh-quality metrics. The h-refinement,
+h-coarsening and AMR-controller routines built on them live in
+`Pyrolysis.Experimental`. A mesh they refine cannot be passed to `solve`:
+refinement leaves inactive parent cells among the active ones, and the
+solver's kernels assume the active cells come first.
 
 ## Usage
 
 ```julia
 using Pyrolysis.Adaptivity
 
-# Create error indicator
-indicator = GradientIndicator(:T)
-
-# Compute indicators
-η = compute_indicator(indicator, mesh)
-
-# Create AMR controller
-controller = AMRController(
-	error_indicator = indicator,
-	θ_refine = 0.7,
-	θ_coarsen = 0.1,
-	h_min = 1e-6,
-	max_level = 4
-)
-
-# Adapt mesh
-result = adapt_mesh!(mesh, controller)
-
 # Park a depleted cell: merge it into its neighbour and move the freed slot
 # above the live surface
 neighbor = find_merge_neighbor(mesh, cell_id)
 park_cell!(mesh, cell_id, neighbor; material = material, ale = true)
+
+# Refinement indicator on a mesh
+η = compute_indicator(GradientIndicator(:T), mesh)
 ```
 """
 module Adaptivity

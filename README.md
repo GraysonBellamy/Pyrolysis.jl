@@ -19,8 +19,7 @@ transport (Darcy–Fick).
 - Adaptive mesh refinement (h- and r-adaptivity)
 - Operator-based `Structured` Jacobian with selectable solve strategies,
   a dense AD verifier, and pluggable linear solvers
-- Pluggable extensions for Plots recipes, SciML sensitivities, and
-  symbolic-derivative verification
+- Pluggable extensions for Plots recipes and SciML sensitivities
 
 ## Quick start
 
@@ -88,7 +87,6 @@ advanced users. Highlights:
 | Geometry | `create_uniform_mesh`, `create_stretched_mesh` |
 | Problem & solve | `PyrolysisProblem`, `PyrolysisSolution`, `solve`, `parameter_sweep` |
 | Sensitivities | `forward_sensitivity`, `adjoint_sensitivity` (load `SciMLSensitivity`) |
-| Verification | `verify_mixing_derivatives` (load `Symbolics`) |
 | Jacobian backends | `JacobianBackend`, `JacobianSpec`, `Structured`, `LinearSolveStrategy`, `DirectSolve`, `ApproxSolve`, `compute_jacobian!` |
 
 ## Package extensions
@@ -98,12 +96,8 @@ present in the user's environment:
 
 | Extension | Trigger | Provides |
 |-----------|---------|----------|
-| `PyrolysisKLUExt` | `using KLU` | `klu_factorization` linear-solver hook |
-| `PyrolysisAMGExt` | `using AlgebraicMultigrid` | `amg_preconditioner` |
-| `PyrolysisPardisoExt` | `using Pardiso` | `pardiso_factorization` |
 | `PyrolysisPlotsExt` | `using RecipesBase` (or `Plots`) | Plot recipes for `PyrolysisSolution` |
 | `PyrolysisSciMLSensitivityExt` | `using SciMLSensitivity, Zygote` | Forward / adjoint sensitivity |
-| `PyrolysisSymbolicsExt` | `using Symbolics` | Symbolic verification of mixing derivatives (test-only) |
 
 ## Parameter sweeps
 

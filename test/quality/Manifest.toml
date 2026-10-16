@@ -1286,20 +1286,12 @@ uuid = "910b54fb-7370-4696-a92c-2242b531a32e"
 version = "0.1.0"
 
     [deps.Pyrolysis.extensions]
-    PyrolysisAMGExt = "AlgebraicMultigrid"
-    PyrolysisKLUExt = "KLU"
-    PyrolysisPardisoExt = "Pardiso"
     PyrolysisPlotsExt = "RecipesBase"
     PyrolysisSciMLSensitivityExt = ["SciMLSensitivity", "Zygote"]
-    PyrolysisSymbolicsExt = "Symbolics"
 
     [deps.Pyrolysis.weakdeps]
-    AlgebraicMultigrid = "2169fc97-5a83-5252-b627-83903c6c433c"
-    KLU = "ef3ab10e-7fda-4108-b977-705223b18434"
-    Pardiso = "46dd5b70-b6fb-58fa-8a37-7c0c5e98c4a4"
     RecipesBase = "3cdcf5f2-1ef4-517c-9805-6587b60abb01"
     SciMLSensitivity = "1ed8b502-d754-442c-8d5d-10ac956f44a1"
-    Symbolics = "0c5d862f-8b57-4792-8d23-62f2024744c7"
     Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 
 [[deps.REPL]]

@@ -8,14 +8,14 @@ change between releases; prefer the stable top-level exports when possible.
 
 Contents:
 
-- **P1 quasi-steady radiation** (residual wrapper + G kernels). Lives in
-  `RadiationP1.jl` — built on top of the unified `(def, ws)` pair and the
-  unified `StateLayout`; the quasi-steady G field lives in the
-  `RadiationCache`, not in the ODE state vector.
+- **P1 quasi-steady radiation** (residual wrapper + G kernels), in
+  `RadiationP1.jl`, built on the `(def, ws)` pair and the `StateLayout`; the
+  quasi-steady G field lives in the `RadiationCache`, not in the ODE state
+  vector. `solve` rejects `P1_QUASI_STEADY`; the kernels are called directly.
 
-- **h-AMR** (h-refinement, h-coarsening, AMR controller, adjacent-cell merging,
-  surface-depletion utilities). Will move to a dedicated `AdaptivityH`
-  extension once the active-cell desync invariants are reworked.
+- **h-AMR** (h-refinement, h-coarsening, AMR controller). Its meshes cannot be
+  passed to `solve`: refinement leaves inactive parent cells among the active
+  ones, and the solver's kernels assume the active cells come first.
 """
 module Experimental
 
@@ -28,12 +28,9 @@ using ..Discretization
 using ..Adaptivity
 using ..Problem
 using ..Residual
-import ..Materials: n_components
 # Unexported BoundaryConditions helper used by the moved radiation_boundary.jl.
 using ..BoundaryConditions: _get_scalar_value
 using LinearAlgebra: norm
-using SparseArrays: spzeros
-using ForwardDiff
 
 # ============================================================================
 # P1 quasi-steady radiation
@@ -50,8 +47,7 @@ include("radiation_p1.jl")
 include("radiation_fluxes.jl")
 include("RadiationP1.jl")
 
-# Public radiation-mode enum value (the type stays in Core for trait dispatch;
-# only the public-API export moves here).
+# Public radiation-mode enum value (the enum itself is defined in Materials).
 export P1_QUASI_STEADY
 
 # Marshak / reflective / Dirichlet BCs (used only by P1)

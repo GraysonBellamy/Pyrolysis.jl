@@ -15,5 +15,4 @@ covers the underlying formulations.
 ```@docs
 forward_sensitivity
 adjoint_sensitivity
-verify_mixing_derivatives
 ```

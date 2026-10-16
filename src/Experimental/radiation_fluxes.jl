@@ -74,80 +74,6 @@ The system has the form:
 end
 
 # ============================================================================
-# Radiation Flux Divergence for Energy Equation
-# ============================================================================
-
-"""
-	apply_radiation_divergence!(dT::Vector{Float64}, mesh, rad_cache, prop_cache)
-
-Add radiation flux divergence contribution to temperature RHS.
-
-	dT[i] += (1/ρcₚ[i]) × (1/V[i]) × (q_rad[R] - q_rad[L]) × A
-
-This implements the ∇·(D_rad∇G) term in the energy equation.
-
-# Arguments
-- `dT`: Temperature RHS vector [K/s] (modified in-place)
-- `mesh`: Mesh with geometry
-- `rad_cache`: Radiation cache with computed q_rad fluxes
-- `prop_cache`: Property cache with ρcₚ values
-
-# Notes
-The radiation flux q_rad must be computed first using `compute_radiation_fluxes!`.
-Sign convention: positive flux = into domain at boundaries, in +z direction for interior.
-
-# Example
-```julia
-# First compute radiation fluxes
-update_radiation_properties!(rad_cache, mesh, prop_cache)
-compute_radiation_fluxes!(rad_cache, mesh, prop_cache, radiation_bcs, t)
-
-# Then add to temperature RHS
-apply_radiation_divergence!(dT, mesh, rad_cache, prop_cache)
-```
-"""
-function apply_radiation_divergence!(dT::Vector{Float64}, mesh, rad_cache, prop_cache)
-    n_cells = length(mesh.cells)
-    A = mesh.cross_section_area
-
-    @inbounds for i = 1:n_cells
-        # Face indices (1D: cell i has faces i and i+1)
-        face_L = i
-        face_R = i + 1
-
-        # Cell volume and ρcₚ
-        V = mesh.cell_volumes[i]
-        ρcp = prop_cache.ρcp[i]
-
-        # Radiation flux divergence: (q_out - q_in) / V × A
-        # In 1D: flux at right face - flux at left face
-        S_rad = (rad_cache.q_rad[face_R] - rad_cache.q_rad[face_L]) * A / V
-
-        # Add to temperature RHS: dT/dt += ∇·(D_rad∇G) / ρcₚ
-        # Note: We use +S_rad because q_rad is defined as heat flux INTO cell
-        # from left face (positive in +z) and OUT of cell at right face
-        # The divergence ∇·q = dq/dx represents net flux out, so we use -div
-        # for conservation. But since q_rad is diffusive flux -D∇G, and
-        # we want ∇·(D∇G), we get -∇·q_rad = -S_rad
-        # 
-        # Actually, let's be consistent with the conduction formulation:
-        # q_cond = -k dT/dx (heat flows down gradient)
-        # div_q = (q_R - q_L) / V × A
-        # dT/dt = -div_q / ρcₚ  (minus because we want -∇·q)
-        #
-        # For radiation:
-        # q_rad = -D_rad dG/dx (also flows down gradient)
-        # S_rad = (q_rad_R - q_rad_L) / V × A
-        # The energy equation has ∇·(D∇G) = -∇·q_rad = -S_rad
-        #
-        # So we ADD -S_rad to dT:
-        dT[i] += -S_rad / ρcp
-    end
-
-    return nothing
-end
-
-# ============================================================================
 # Quasi-Steady Radiation Solver
 # ============================================================================
 
@@ -217,19 +143,12 @@ function solve_quasi_steady_radiation!(
     initialize::Bool = true,
 )
 
-    # Fast zero check without allocating a temporary Bool array
-    @inline function _all_zero(vec)
-        @inbounds for v in vec
-            iszero(v) || return false
-        end
-        return true
-    end
     n = length(mesh.cells)
     A = mesh.cross_section_area
 
     # Initialize G from temperature if requested and G appears uninitialized
-    if initialize && _all_zero(rad_cache.G)
-        initialize_g_from_temperature!(rad_cache, mesh, prop_cache)
+    if initialize && all(iszero, rad_cache.G)
+        initialize_g_from_temperature!(rad_cache, mesh)
     end
 
     # Use pre-allocated work arrays from RadiationCache (avoid allocations in hot loop)
@@ -246,11 +165,10 @@ function solve_quasi_steady_radiation!(
     G_scale = max(norm(rad_cache.G, Inf), 1.0)
 
     for iter = 1:maxiter
-        # Update radiation fluxes with current G (compute_radiation_fluxes! is
-        # local to Experimental — was Physics.compute_radiation_fluxes! before the move)
+        # Update radiation fluxes with current G
         compute_radiation_fluxes!(rad_cache, mesh, prop_cache, radiation_bcs, t)
 
-        # Compute source terms with current G (local to Experimental now)
+        # Compute source terms with current G
         compute_radiation_source_terms!(
             rad_cache.Q_emission,
             rad_cache.Q_absorption,
@@ -435,7 +353,7 @@ end
 # ============================================================================
 
 """
-	initialize_g_from_temperature!(rad_cache, mesh, prop_cache)
+	initialize_g_from_temperature!(rad_cache, mesh)
 
 Initialize G field from local equilibrium with temperature.
 
@@ -447,9 +365,8 @@ in the volumetric source term. At equilibrium: αG = 4σαT⁴ → G = 4σT⁴
 # Arguments
 - `rad_cache`: Radiation cache (G is updated in-place)
 - `mesh`: Mesh with temperature state
-- `prop_cache`: Property cache (not used, kept for API compatibility)
 """
-function initialize_g_from_temperature!(rad_cache, mesh, prop_cache)
+function initialize_g_from_temperature!(rad_cache, mesh)
     n_cells = length(mesh.cells)
     σ = STEFAN_BOLTZMANN
 
