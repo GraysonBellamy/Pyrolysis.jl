@@ -436,7 +436,9 @@ errors. (`tspan[1]` still sets the integrator's start time; warm starting just
 reuses the prior final state as fresh initial data.) The prior solution must also
 still carry its `raw_solution`, so warm-starting from a heavily reduced `extract`
 output will not work — keep the full `PyrolysisSolution` for the run you chain
-from.
+from. The prior solve must also have had no park events (`extras.park_times`
+empty): its final state holds ghost slots, while a new solve starts with every
+cell live.
 
 Because `pmap` runs grid points concurrently and out of any meaningful order,
 warm starting is **not compatible with `parallel = true`** — there is no
@@ -736,8 +738,8 @@ Chapter 13:
   gradient of a scalar loss for large parameter counts / inverse problems.
 
 These require loading the `PyrolysisSciMLSensitivityExt` extension
-(`using SciMLSensitivity, Zygote`); without it the exported names are stubs that
-error with a hint to load the extension. The `p_inject` closure plays exactly the
+(`using SciMLSensitivity, Zygote`); without it the exported names are stubs with
+no methods, and calling one raises a `MethodError`. The `p_inject` closure plays exactly the
 role `modify` plays here — it rebuilds a fresh problem from a parameter vector —
 so a `modify` you write for a sweep is usually one rename away from a `p_inject`
 you can hand to `forward_sensitivity` (the only difference is the parameter shape:
@@ -765,6 +767,6 @@ the input/output table into a Sobol estimator. See the
 | Rebuild, don't mutate | no copy constructors; reuse struct fields and call keyword constructors |
 | Parallel safety | immutable residual reused; mutable `Workspace` allocated per worker `solve` |
 | Define closures on workers | `@everywhere` for `modify`/`extract` and their helpers |
-| Warm start | sequential only; `NC` / mesh / ALE / χ mode must match; prior `raw_solution` required (see §12.6) |
+| Warm start | sequential only; `NC` / mesh / ALE / χ mode must match; prior `raw_solution` required; no park events in the prior solve (see §12.6) |
 | Cross-grid MLR (ALE) | compare `sol.extras.MLR_gauge`, not `sol.mass_loss_rate` |
 | Gradients instead of maps | Chapter 13 (`forward_sensitivity` / `adjoint_sensitivity`) |

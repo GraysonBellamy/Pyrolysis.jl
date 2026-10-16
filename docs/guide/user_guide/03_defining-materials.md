@@ -38,16 +38,15 @@ The build order is always the same:
 4. **Mixing rules** (`MixingSpec`, `MaterialMixing`) — pick how component thermal
    conductivity `k`, gas-transfer coefficient `λ`, and permeability `κ` are
    homogenized.
-5. **Material** (`Material`) — the assembled object, optionally checked with the
-   internal helper `Pyrolysis.Materials.validate_material` (or simply validated by
-   `solve` when you build the problem; see §3.7).
+5. **Material** (`Material`) — the assembled object, validated together with the
+   rest of the problem by `solve` (see §3.7).
 
 A minimal end-to-end example (one solid, one gas, one reaction) appears in the
 package's top-level docstring and in Chapter 2; this chapter expands every option.
 
 > **A note on what is exported.** `using Pyrolysis` brings the *constructors* into
 > scope: `SolidComponent`, `LiquidComponent`, `GaseousComponent`, `Material`,
-> `Reaction`, `ReactionSet`, all property-function types, the `MixingRule` enum
+> `Reaction`, `DepletionLimiter`, all property-function types, the `MixingRule` enum
 > values, `MixingSpec`, and `MaterialMixing`. The various **helper and inspection
 > functions** used in this chapter are *not* part of the curated top-level surface,
 > so you reach them by qualifying through the submodule that defines them. This works
@@ -56,12 +55,10 @@ package's top-level docstring and in Chapter 2; this chapter expands every optio
 >
 > - From the `Materials` submodule: `Pyrolysis.Materials.n_components`,
 >   `Pyrolysis.Materials.n_reactions`, `Pyrolysis.Materials.dry_pyrolysis_gas_indices`,
->   `Pyrolysis.Materials.gas_component_indices`, and `Pyrolysis.Materials.has_darcy_flow`
->   are *exported* from `Materials`; the validation helpers
->   `Pyrolysis.Materials.validate_material`,
->   `Pyrolysis.Materials.verify_stoichiometry`, and
->   `Pyrolysis.Materials.check_material_mass_balance` are *internal* (not exported, not
->   part of the stable public API) but are still callable through the same qualified
+>   and `Pyrolysis.Materials.has_darcy_flow` are *exported* from `Materials`; the
+>   stoichiometry helpers `Pyrolysis.Materials.verify_stoichiometry` and
+>   `Pyrolysis.Materials.mass_balance_error` are *internal* (not exported, not part
+>   of the stable public API) but are still callable through the same qualified
 >   path.
 > - From the `Properties` submodule: the effective-property functions
 >   (`Pyrolysis.Properties.mixture_density`, etc.).
@@ -69,11 +66,11 @@ package's top-level docstring and in Chapter 2; this chapter expands every optio
 > For convenience you may `using Pyrolysis.Internal`, which re-exports the union of
 > every submodule's *exports* and so brings the exported helpers
 > (`n_components`, `dry_pyrolysis_gas_indices`, `has_darcy_flow`, …) into scope
-> unqualified — but **not** the internal validation helpers above, which still
+> unqualified — but **not** the internal stoichiometry helpers above, which still
 > require the `Pyrolysis.Materials.` prefix. `Internal` is not the stable public
-> surface; prefer qualified access in production code. If you want validation as part
-> of the public API, build a `PyrolysisProblem` and let `solve` validate (it runs the
-> same checks by default, `validate = true`); see §3.7.
+> surface; prefer qualified access in production code. Material validation happens
+> at the problem level: build a `PyrolysisProblem` and let `solve` validate it (the
+> default, `validate = true`); see §3.7.
 
 ---
 
@@ -252,8 +249,7 @@ shrinkage `χ` (Technical Reference §10.3). Name your dry-pyrolysis gas anythin
 (`:gas`, `:MMA`, `:volatiles`). You can inspect the classification:
 
 ```julia
-Pyrolysis.Materials.gas_component_indices(material)        # all gas indices
-Pyrolysis.Materials.dry_pyrolysis_gas_indices(material)    # excludes :H2O / :water*
+Pyrolysis.Materials.dry_pyrolysis_gas_indices(material)    # gas indices, excluding :H2O / :water*
 ```
 
 ### 3.2.4 Bulk vs. intrinsic density and porosity
@@ -274,10 +270,9 @@ Two densities coexist, and getting them right matters for porous-media physics:
   permeability model (Technical Reference §5.3, §9.4).
 
 If you never supply an intrinsic density, it **defaults to the bulk density**, which
-makes the pure phase pore-free and gives `φ = 0` for a fully solid cell — the
-historical, backward-compatible default. To model a genuinely porous solid you must
-supply *either* `ρ_intrinsic` *or* `φ` (not both — passing both raises an
-`ArgumentError`):
+makes the pure phase pore-free and gives `φ = 0` for a fully solid cell. To model a
+genuinely porous solid you must supply *either* `ρ_intrinsic` *or* `φ` (not both —
+passing both raises an `ArgumentError`):
 
 ```julia
 # Option A: give the skeletal density directly
@@ -309,7 +304,7 @@ phase(virgin)           # SOLID  (a Phase enum value)
 molar_mass(gas)         # 0.044  (0.0 for solids/liquids)
 
 # Density / property accessors (qualify through Materials):
-Pyrolysis.Materials.get_density(virgin, 300.0)            # bulk ρ at T
+virgin.density(300.0)                                     # bulk ρ at T (property field)
 Pyrolysis.Materials.get_intrinsic_density(porous, 300.0)  # skeletal ρ
 Pyrolysis.Materials.get_permeability(char, 500.0)         # κ at T (0 for gases)
 ```
@@ -414,16 +409,14 @@ passes `ξ` automatically. See §3.4.5 and Technical Reference §6.6.
 
 ### 3.3.3 Derivatives (for the implicit Jacobian)
 
-You generally do not call these, but it is useful to know they exist and how they
-behave. Temperature derivatives `dp/dT` are exact and closed-form for
-`ConstantProperty` (0), `LinearProperty` (`b`), `PolynomialProperty` (unrolled), and
-`ArrheniusProperty` (`p·E/(R_g T²)`); they are finite-difference (`δT = 0.1 K`) for
-`TableProperty`, `CallableProperty`, and `StateDependentProperty`. Concentration
-derivatives `∂p/∂ξ_j` are zero for temperature-only properties and adaptive
-finite-difference (`δξ = max(|ξ|·1e-4, 1e-6)`) for `StateDependentProperty`. Because
-table/callable/state-dependent properties use finite differences, prefer the
-analytic types (constant/linear/polynomial/Arrhenius) where you can — they keep the
-Jacobian exact and the solve crisp. Every law evaluates on the property bracket
+You never supply derivatives. The structured Jacobian differentiates each
+operator's stencil-local kernel with ForwardDiff (Chapter 11), so every property
+law is evaluated with dual-number arguments and its exact derivative comes out of
+the same evaluation: the slope of the piecewise-linear interpolant for a
+`TableProperty`, the derivative of your function for a `CallableProperty`, and
+both `dp/dT` and `∂p/∂ξ_j` for a `StateDependentProperty`. A callable must
+therefore be generic Julia code — do not restrict its arguments to `Float64`.
+Every law evaluates on the property bracket
 `[200, 3000]` K (its argument is clamped to it, so a nonphysical Newton trial
 temperature cannot reach a fractional power), and the derivatives are zero
 outside the bracket. See Technical Reference §4.4–§4.5.
@@ -563,19 +556,19 @@ drying = Reaction(:drying, :moisture => :H2O,
 
 ### 3.4.6 Verifying reactions
 
-Two internal helpers (not exported; qualify through `Materials`) check mass balance
-after the fact:
+The `Reaction` constructor already enforces mass balance (the product yields must
+sum to the reactant mass 1.0) and throws on an imbalance unless you pass
+`validate_mass = false`. To re-check a reaction after the fact, use the internal
+helper (not exported; qualify through `Materials`):
 
 ```julia
-Pyrolysis.Materials.verify_stoichiometry(rxn)                  # Bool, warns on failure
-Pyrolysis.Materials.check_material_mass_balance(mat.reactions) # all reactions
+Pyrolysis.Materials.verify_stoichiometry(rxn)   # Bool, warns on failure
 ```
 
-Both compare the reactant mass (1.0) against the sum of product yields within a
-tolerance of `1e-10` and emit a warning (returning `false`) on imbalance. They are
-also invoked automatically by `validate_material` (§3.7) and by `solve`'s
-problem-level validation, so for routine use you can rely on those rather than
-calling these private helpers directly.
+It compares the reactant mass (1.0) against the sum of product yields within a
+tolerance of `1e-10` and emits a warning (returning `false`) on imbalance.
+`validate_problem(problem; strict = true)` runs it on every reaction of the
+material (§3.7).
 
 ---
 
@@ -824,16 +817,12 @@ wood = Material(
     ),
 )
 
-# --- Inspect / validate ---------------------------------------------------
+# --- Inspect ---------------------------------------------------------------
 # All reached via the Materials submodule (none are top-level Pyrolysis exports).
-# n_components / n_reactions / has_darcy_flow / dry_pyrolysis_gas_indices are
-# exported from Materials; validate_material is an internal helper — both kinds work
-# through the qualified `Pyrolysis.Materials.` path.
 Pyrolysis.Materials.n_components(wood)              # 5
 Pyrolysis.Materials.n_reactions(wood)               # 2
 Pyrolysis.Materials.has_darcy_flow(wood)            # true (virgin/char κ > 0)
 Pyrolysis.Materials.dry_pyrolysis_gas_indices(wood) # (4,)  — :H2O (5) excluded
-Pyrolysis.Materials.validate_material(wood)         # true (internal helper)
 ```
 
 ### 3.6.3 Worked example: a simple polymer (PMMA)
@@ -858,8 +847,6 @@ pmma = Material(
     ),
     mixing = MaterialMixing(k = MixingSpec(WEIGHTED, 0.5)),
 )
-
-Pyrolysis.Materials.validate_material(pmma)   # true (internal helper, qualified)
 ```
 
 With `κ = 0` on every component, `has_darcy_flow(pmma)` is `false` and gas leaves by
@@ -870,20 +857,13 @@ would set `α` on the solid and choose `radiation_model = BEER_LAMBERT` at solve
 
 ## 3.7 Validating a material
 
-`validate_material` is an **internal** helper (not exported; reach it as
-`Pyrolysis.Materials.validate_material`). It is the one call to make if you want an
-explicit material check before building a problem. It checks that:
+A material is checked in two places: its components and reactions validate
+themselves when they are constructed, and the assembled material is validated as
+part of the problem.
 
-- the material has at least one component,
-- every reaction's reactant/product indices are in range `1:NC`, and
-- every reaction is mass-balanced (via `verify_stoichiometry`).
-
-```julia
-Pyrolysis.Materials.validate_material(wood)   # returns true; warns on problems
-```
-
-Mass-balance failures are reported as **warnings** (the function still returns
-`true`); index errors **throw**.
+Each two-product `Reaction` constructor enforces `Σ yields = 1.0` at construction
+time (unless `validate_mass = false`), and a symbolic component reference that
+names no component of the material throws when the `Material` is built.
 
 Property laws are checked when the **component** is built: every temperature-
 dependent `ρ`, `c`, `k`, `λ`, `κ` and `ε` is sampled on the property bracket
@@ -895,16 +875,16 @@ offending temperature — a linear fit `k = 0.3 − 4.2e-4·T` is rejected at
 outside its measured range (`T -> law(clamp(T, T_lo, T_hi))`), or pass
 `validate_properties = false` when the law comes from an optimizer's search
 parameters and an unphysical value should reach the objective instead of
-throwing. For a standalone balance check use
-`Pyrolysis.Materials.check_material_mass_balance(material.reactions)`. Note that the
-two-product `Reaction` constructors already enforce `Σ yields = 1.0` at construction
-time (unless `validate_mass = false`), so a material built normally will pass.
+throwing.
 
-Because these helpers are private, the **public** way to validate is to build a
-`PyrolysisProblem` and let `solve` validate by default (`validate = true` on
-`solve`); the problem-level validation runs the same stoichiometry and index checks.
-Calling the internal `validate_material` as you build the material is still useful for
-the clearest, earliest error messages during development.
+The problem-level check runs when `solve` starts (`validate = true`, the default)
+or when you call `Pyrolysis.Problem.validate_problem(problem)` yourself. For the
+material it checks that there is at least one component and that every
+reaction's reactant/product indices are in range `1:NC`; it also warns when a
+gas-producing Fickian material has a condensed component with `λ = 0`.
+`validate_problem(problem; strict = true)` additionally re-checks every
+reaction's mass balance with `verify_stoichiometry`. Errors are collected and
+thrown together in one message; see §7.9 for the full list of problem checks.
 
 ---
 

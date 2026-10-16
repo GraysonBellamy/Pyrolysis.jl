@@ -57,7 +57,7 @@ function _vhc02_case(label::String, Bi::Float64; with_convergence::Bool)
                     name = "L∞ T-profile error, Fo=$(Fo)",
                     value = err,
                     error = err,
-                    tol = 0.06,  # 3× worst across the sweep: 0.020 K (Bi=100, Fo=0.05; n=80, 2026-07-06)
+                    tol = 0.06,  # 3× worst across the sweep: 0.020 K (Bi=100, Fo=0.05; n=80)
                     comment = "observed max per Bi: 2.3e-4 (0.1), 2.4e-3 (1), 1.8e-2 (10), 2.0e-2 (100) K",
                 ),
             )
@@ -70,7 +70,7 @@ function _vhc02_case(label::String, Bi::Float64; with_convergence::Bool)
                     value = Ts_num,
                     exact = Ts_exact,
                     error = abs(Ts_num - Ts_exact),
-                    tol = 0.015,  # 3× worst across the sweep: 4.9e-3 K (Bi=10, Fo=0.05; n=80, 2026-07-06)
+                    tol = 0.015,  # 3× worst across the sweep: 4.9e-3 K (Bi=10, Fo=0.05; n=80)
                     comment = "front face from the surface Newton solve vs series at x̃=1; " *
                               "observed max per Bi: 9.2e-4 (0.1), 4.4e-3 (1), 4.9e-3 (10), 9.8e-4 (100) K",
                 ),
@@ -103,7 +103,7 @@ function _vhc02_case(label::String, Bi::Float64; with_convergence::Bool)
             budget_s = 20.0,
             convergence = if with_convergence
                 ConvergenceSpec(
-                    # observed rates 2.0005, 2.0001 at Bi=10 (2026-07-06)
+                    # observed rates 2.0005, 2.0001 at Bi=10
                     n_cells = [40, 80, 160],
                     error_fn = l2_error_fo02,
                     expected_order = 2.0,

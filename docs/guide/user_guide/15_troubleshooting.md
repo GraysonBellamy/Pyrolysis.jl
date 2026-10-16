@@ -21,7 +21,7 @@ substrate (bottom, boundary id 2, tag `:bottom`), `z = L` is the exposed surface
 ## 15.1 First steps: read the return code and run the diagnostics
 
 Before changing anything, look at two things: the solver's return code and the
-conservation ledgers.
+diagnostics log.
 
 ### 15.1.1 The return code
 
@@ -49,11 +49,10 @@ On a fixed mesh with `handle_depletion = true`, a `:Terminated` run with the
 warning "…the material has gasified from within…" stopped at the first
 interior void (§15.4).
 
-### 15.1.2 Turn on the conservation ledgers
+### 15.1.2 Turn on the diagnostics log
 
-The single most useful debugging switch is `diagnostics = true`. It installs a
-callback that snapshots the mass and energy ledgers every `diagnostics_stride`
-accepted steps (default 10) and stores typed rows in
+`diagnostics = true` installs a callback that records the sensible energy every
+`diagnostics_stride` accepted steps (default 10) and stores typed rows in
 `solution.extras.diagnostics_log`:
 
 ```julia
@@ -64,28 +63,23 @@ solution = solve(problem;
 )
 
 for row in solution.extras.diagnostics_log
-    println("t=$(row.t)  E=$(row.E_sensible)  ",
-            "r(rel)=$(row.energy_relative)  ",
-            "m_err=$(row.mass_max_relative_error)")
+    println("t=$(row.t)  E=$(row.E_sensible)")
 end
 ```
 
 Each `DiagnosticsRow` carries `t`, `E_sensible`, `energy_residual`,
-`energy_relative`, and `mass_max_relative_error`. How to read them (see
-Technical Reference §16):
-
-- **`energy_relative`** audits the *bookkeeping*. It is assembled from exactly
-  the terms the RHS computes, so it closes to integrator tolerance (~`1e-6`
-  relative) **by construction**. If it is large, you have a bug in flux/source
-  assembly or a callback — not a physics problem. (Caveat: with strongly
-  time-varying composition it cannot close exactly, because the ledger omits the
-  `∫ T ∂(ρc_p)/∂t` and ALE volume-change terms; expect a small floor.)
-- **`mass_max_relative_error`** is the worst per-component mass-balance error;
-  it should be `< 1e-10`.
+`energy_relative`, and `mass_max_relative_error`; in the rows `solve` records,
+only `t` and `E_sensible` are filled and the three cumulative-ledger fields are
+`NaN` (§9.8). The sensible-energy history shows where the stored energy changes
+abruptly — a park event, a stiff transient — and can be set against the
+boundary-flux extras (`surface_heat_flux_*`, §9.3). The cumulative energy and
+mass ledgers (`EnergyConservationTracker`, `MassConservationTracker`, driven
+step by step through `record_substep!`) are not part of `solve`; see
+Technical Reference §16.
 
 `diagnostics` is **snapshot-based**, not continuous — it gives you a coarse time
-history adequate for spotting where a ledger drifts, not a dense trace. The
-overhead is one extra energy/mass sweep every `diagnostics_stride` steps.
+history, not a dense trace. The overhead is one extra energy sweep every
+`diagnostics_stride` steps.
 
 ---
 
@@ -109,9 +103,11 @@ both `integrator` and `linear_solver` are left at `nothing`, `solve` builds:
 
 `KenCarp4` is a good default for moderately stiff pyrolysis. For *very* stiff
 problems (high pre-exponential `A_i`, sharp ignition) a BDF method often takes
-larger steps. Integrators live in `OrdinaryDiffEq`, which is **not** re-exported
-by `using Pyrolysis`; load it (or the relevant sublibrary) yourself and pass a
-constructor or a fully-built algorithm to the `integrator` kwarg:
+larger steps. Integrators live in `OrdinaryDiffEq` and its sublibraries, which
+are **not** re-exported by `using Pyrolysis`; load them yourself (`FBDF` and
+`Rodas5P` come with `using OrdinaryDiffEq`; `KenCarp4` and `TRBDF2` need
+`using OrdinaryDiffEqSDIRK`) and pass a constructor or a fully-built algorithm
+to the `integrator` kwarg:
 
 ```julia
 using OrdinaryDiffEq            # for FBDF, Rodas5P, etc.
@@ -179,7 +175,8 @@ sol2 = solve(problem2; warm_start = sol1, progress = false)
 ```
 
 The state-vector length, component count `NC`, ALE mode, and χ mode of the two
-problems must match (enforced by a length check). `tspan[1]` still sets the
+problems must match (enforced by a length check), and the prior solve must not have
+parked cells (its final state holds ghost slots). `tspan[1]` still sets the
 integrator's start time, so the prior final state is treated as fresh initial
 data.
 
@@ -187,10 +184,9 @@ data.
 
 ## 15.3 Jacobian mismatch warnings
 
-If the integrator behaves erratically only when the structured Jacobian is
-active — many rejected steps, sudden step-size collapse that goes away when you
-fall back to the dense reference — suspect a Jacobian that disagrees with the
-residual.
+If the integrator behaves erratically — many rejected steps, repeated Newton
+failures, a sudden step-size collapse — suspect a Jacobian that disagrees with
+the residual.
 
 ### 15.3.1 Compare against the dense reference at sample times
 
@@ -214,13 +210,12 @@ when the integrator crosses any sample time within half the current step.
 ### 15.3.2 Verify at a single state point
 
 For a focused check (e.g., debugging an operator), call `verify_jacobian_at`
-directly. You need the `ProblemDef`/`Workspace` pair, which you build from the
-problem:
+directly. You need the `ProblemDef`/`Workspace` pair and a state, which
+`initialize_state` builds from the problem (with its initial conditions
+applied):
 
 ```julia
-def = to_problem_def(problem; use_ale = false, radiation_model = NO_RADIATION)
-ws  = build_workspace(problem, def)
-u   = create_state_vector(ws.layout, ws.mesh)
+def, ws, u = initialize_state(problem; use_ale = false, radiation_model = NO_RADIATION)
 
 spec = JacobianSpec(Structured(strategy = DirectSolve()), def, ws)
 report = verify_jacobian_at(spec, def, ws, u, 0.0;
@@ -235,14 +230,14 @@ report.worst_index     # (row, col) of the worst entry
 report.mode            # :strict (exact backends) or :masked (approximate)
 ```
 
-`JacobianSpec` also accepts a `PyrolysisProblem` directly
-(`JacobianSpec(backend, problem)`) if you do not already have a `def`/`ws` pair.
+Pass the same `use_ale` / `radiation_model` keywords the solve uses, so the
+spec has the solve's mode (§11.2.2).
 
 ### 15.3.3 Support-pattern (sparsity) issues
 
 The comparison `mode` matters:
 
-- **`:strict`** — for exact backends (`DirectSolve`, `StructuredSolve`). Both
+- **`:strict`** — for the exact backend (`DirectSolve`). Both
   in-support disagreements *and* reference entries the backend's sparsity
   *omits* count as failures. A strict failure on an outside-support entry means
   the sparsity pattern is too small — the backend is structurally missing a
@@ -347,24 +342,24 @@ concentrations, the usual causes are:
 - **A reactant initialised at exactly zero that a reaction consumes.** Make sure
   `ξ_initial` seeds every reactant the scheme needs.
 
-The smooth temperature gates `½(1+tanh(T−T_min))·½(1+tanh(T_max−T))` leak by
-roughly ±10 K around `T_min`/`T_max` (Technical Reference §6.2); if a reaction
+The smooth temperature gates `½(1+tanh((T−T_min)/w))·½(1+tanh((T_max−T)/w))`, with
+`w` the reaction's `gate_width` (default 1 K), leak by roughly ±10·w around `T_min`/`T_max` (Technical Reference §6.2); if a reaction
 appears to fire slightly early/late, that leakage — not a bug — is the reason.
 
 ### 15.5.2 `ρc_p → 0` blow-up (ALE)
 
 As a cell decomposes to gas and the gas leaves, its `ρc_p^eff` shrinks toward
 the pore-gas thermal mass, and `dT/dt = RHS/ρc_p` can blow up. The intended
-remedies are ALE surface depletion (§15.4) to merge the spent surface cell, and
+remedies are surface depletion handling (§15.4) to park the spent surface cell, and
 the thickness-termination callback that stops the run when total thickness drops
 below `min_thickness`. If you run ALE *without* depletion and hit NaNs near full
 burn-out, enable `handle_depletion = true`.
 
 ### 15.5.3 Property-table extrapolation
 
-`TableProperty` interpolates linearly and extrapolates beyond its range. A table
-that stops at 600 K queried at 900 K will extrapolate — possibly to a negative
-`c_p` or `k`, which then produces NaN. Make sure every `TableProperty` covers
+`TableProperty` interpolates linearly and holds its end values outside its range.
+A table that stops at 600 K queried at 900 K returns the 600 K value, which can
+badly misstate `c_p` or `k` at high temperature. Make sure every `TableProperty` covers
 the full temperature span the solve will reach (the Newton boundary solve clamps
 surface temperature to `[200, 3000]` K — see Technical Reference §12.2 — so size
 tables accordingly).
@@ -383,15 +378,18 @@ mesh = create_stretched_mesh(0.01, 100, Val(2), 1.05; stretch_from = :top)
 `create_stretched_mesh(L, n_cells, Val(NC), stretch; stretch_from = :top, ...)`
 uses geometric grading; `stretch > 1` grades the cell sizes across the domain.
 Compare against the uniform `create_uniform_mesh(L, n_cells, Val(NC))` to see
-whether near-surface refinement removes the overshoot. For dynamic refinement
-options (error indicators, `relocate_nodes!`), see UG-10.
+whether near-surface refinement removes the overshoot. `solve` does not refine
+the mesh during a run; the error indicators and `relocate_nodes!` of Chapter 10
+are standalone building blocks.
 
 ---
 
 ## 15.6 Energy or mass ledger not closing
 
-Use the diagnostics rows (§15.1.2) to localise. The two energy residuals fail
-for *different* reasons.
+The cumulative ledgers report `energy_relative` and `mass_max_relative_error`
+when they are driven step by step through `record_substep!` (§9.8; the rows
+`solve` logs leave these fields `NaN`). The two failure modes below have
+*different* causes.
 
 ### 15.6.1 `energy_relative` large
 
@@ -401,63 +399,18 @@ This audits assembly and should close to integrator tolerance. If it does not:
   during assembly and is synced only by the step-update callback; a custom
   callback that edits `u` or geometry without informing the integrator
   (`derivative_discontinuity!(integrator, true)`) will break the ledger.
-- **AMR / depletion masking.** All domain-total sums (`compute_domain_mass`,
+- **Depletion masking.** All domain-total sums (`compute_domain_mass`,
   `compute_sensible_energy`) iterate the **active-cell mask**, not
   `eachindex`. If you wrote custom post-processing that loops over all cells
-  (including merged-away ones), your totals — not the solver's — are wrong.
+  (including parked ones), your totals — not the solver's — are wrong.
   Always respect `mesh.active_cell_mask` (Technical Reference §16.1).
 
 ### 15.6.2 `energy_relative` drifts during active reaction
 
 A small, composition-rate-dependent residual during active pyrolysis is
 expected: the ledger omits the heat-capacity-change and ALE volume-change terms
-of its `ρc_p·T` proxy (Technical Reference §16.8). A residual that grows with the
+of its `ρc_p·T` proxy (Technical Reference §16.7). A residual that grows with the
 *boundary input* rather than with the reaction rate points at the assembly.
-
-### 15.6.3 The S_conv vs transpiration double-count
-
-This is the most common "my energy balance is off by a constant rate" trap. The
-default energy form (`energy_form = :standard`) carries the gas sensible
-enthalpy through the **always-on** volumetric convection source
-`S_conv = −Σ_g c_{p,g} J̄_g ∂T/∂z` (ThermaKin Eq. 17 convention; Technical
-Reference §7.4). The surface **transpiration** enthalpy term would carry the
-*same* enthalpy at the boundary — enabling both double-counts by exactly
-`∫ S_conv`. The package forbids the combination:
-
-```julia
-# ERROR: solve() rejects this.
-solve(problem; use_transpiration_bc = true)
-# → "use_transpiration_bc=true double-counts gas convective enthalpy
-#    (S_conv is always active ...). Use use_transpiration_bc=false"
-```
-
-So `use_transpiration_bc` is `false` by default and there is no supported way to
-turn it on through `solve`. Mass transport is unaffected either way — gas still
-leaves the domain through the mass BCs; only the *enthalpy bookkeeping* is at
-issue. (Parameter sets calibrated against a solver that applies a transpiration term
-on top of a volumetric advection source embed the double-count and will predict
-higher `T_s` and MLR here; re-validate imported calibrations.)
-
-### 15.6.4 `:standard` vs `:with_generation_sink`
-
-The optional gas-generation sink `S_gen = −Σ_g Δh_g (∇·J_g)` (Technical Reference
-§7.5, §16.4) can be added:
-
-```julia
-solution = solve(problem; energy_form = :with_generation_sink)
-```
-
-`energy_form` accepts only `:standard` (default) or `:with_generation_sink`
-(anything else errors). **Datum warning (see §7.7):** the sink is consistent only
-with `T_ref`-datum (formation-style) reaction heats. With DSC-style heats quoted at
-the reaction temperature — the usual meaning of calibrated heats — the gas sensible
-enthalpy is already inside `h`, and the sink subtracts it a *second* time
-(≈0.7–1.2 MJ per kg of volatiles at 900 K); `solve` emits a one-time warning when it
-is selected. Even with the right datum it is only a *partial* step toward
-conservative form (gas heat storage and condensed-product sensible generation remain
-outside the assembly). The midpoint-rule `Δh_g` makes `∫(S_conv + S_gen)` telescope
-exactly against the surface outflow, which is what the ledger audit checks. For most
-cone/TGA work `:standard` is correct and matches FDS/Gpyro/ThermaKin.
 
 ---
 
@@ -469,51 +422,36 @@ ALE (`use_ale = true`) lets the mesh follow the receding/expanding surface
 ### 15.7.1 Mesh tangling and quality
 
 If a swelling/intumescent material moves nodes past each other, cells invert
-(`V ≤ 0`) and the geometry recompute produces NaNs. For diagnosis, the
-mesh-motion utilities expose quality checks. These operate on a `Mesh1D` and
-live in the `Pyrolysis.Internal` umbrella (they are not top-level exports):
+(the signed width `z_{i+1} − z_i` turns non-positive, which the volume
+`A·|z_{i+1} − z_i|` the residual uses does not show). To locate it, check the
+node spacing of the saved times, `diff(solution.z[:, i])`, for non-positive
+entries (parked slots read `NaN`). For a `Mesh1D` you hold — such as
+`solution.problem.mesh`, which carries the final geometry — the quality tools
+of §10.6 apply:
 
 ```julia
-using Pyrolysis.Internal          # mesh-motion helpers are not top-level exports
+using Pyrolysis.Internal          # Adaptivity exports are not top-level exports
 
-q = check_mesh_quality(mesh)       # NamedTuple
-q.valid                            # all cells V > 0 ?
-q.min_volume
+check_quality(mesh, JacobianMetric())        # every live cell has a positive signed width?
+quality_violations(mesh, JacobianMetric())   # indices of inverted cells
+q = mesh_quality_summary(mesh)               # NamedTuple
+q.min_cell_size
 q.max_aspect_ratio
-q.tangled_cells                    # indices with V ≤ 0
-
-mesh_is_valid(mesh)                # quick boolean
 ```
 
-`move_mesh_safe!` rejects a motion (and rolls back) if it would tangle or exceed
-an aspect-ratio bound (default 10). If you are driving the mesh yourself, prefer
-it over the raw `move_mesh!`. For production solves the cumulative mesh velocity
-is computed for you; tangling there points to an unphysical swelling factor `γ`
-or shrinkage law producing a too-large per-step displacement — refine the time
-step (lower `dtmax`) or reduce the swelling magnitude.
+In a solve the cumulative mesh velocity is computed for you; tangling there
+points to an unphysical swelling factor `γ` or shrinkage law producing a
+too-large per-step displacement — refine the time step (lower `dtmax`) or
+reduce the swelling magnitude.
 
-### 15.7.2 GCL violations
+### 15.7.2 Geometric conservation
 
-The discrete Geometric Conservation Law,
-`V_new − V_old = Δt (w_R − w_L) A`, must hold to machine precision or the mesh
-motion injects "phantom" mass (Technical Reference §11.5). Per-step GCL error
-should be `O(1e-12)`–`O(1e-15)`; a value above `1e-10` signals geometric
-degeneracy. To check explicitly:
-
-```julia
-using Pyrolysis.Internal
-
-err = gcl_error(mesh, w, dt)        # predictive relative error (max over cells)
-check_gcl(mesh, w, dt; tol = 1e-12) # Bool
-
-# For a time-varying cross-section (WithChi mode) pass A_old, A_new:
-gcl_residual(mesh, V_old, w, dt; A_old = A0, A_new = A1)
-```
-
-A `GCLTracker` accumulates the error over a run if you wire it into a custom
-driver. In normal use, a GCL violation is not something you tune — it is a
-symptom of a degenerate mesh (a cell driven to near-zero width); address the
-underlying cause (§15.7.3).
+The discrete Geometric Conservation Law holds by construction: every residual
+evaluation recomputes each cell volume as `V = A·|z_{i+1} − z_i|` from the node
+positions in the state (Technical Reference §11.5), so mesh motion injects no
+"phantom" mass. A cell driven to
+near-zero width is still a degenerate state; address the underlying cause
+(§15.7.3).
 
 ### 15.7.3 Vanishing cross-section and thickness
 
@@ -534,29 +472,29 @@ MLR looks off by a factor that tracks `A(t)/A_0`, you are reading the wrong one.
 ### 15.7.4 Choosing a linear-solve strategy for large ALE
 
 For large ALE problems the structured ALE couplings (cumulative mesh velocity,
-χ back-reaction) dominate Jacobian assembly/solve cost. The strategies trade
+χ back-reaction) dominate Jacobian assembly/solve cost. The two strategies trade
 exactness for speed (Technical Reference §15.10):
 
 | Strategy | Exactness | When to use |
 |---|---|---|
 | `DirectSolve()` (fixed-mesh default) | Exact; densify + factor | Fixed mesh; exact ALE Jacobian; verification anchor |
-| `StructuredSolve()` | Exact; sparse LU on the local block + Richardson (2–5 iters) | Typical ALE problems |
 | `ApproxSolve()` (ALE default) | Approximate; drops structured couplings (`is_approximate == true`) | ALE: the modified Newton iteration still converges |
-| `MatrixFreeSolve()` | GMRES on the operator action | Research/experimental |
 
-Select via a `JacobianSpec` (remember: **not** with `handle_depletion = true`):
+Select one by passing the bare backend; it works with or without
+`handle_depletion`:
 
 ```julia
 solution = solve(problem;
     use_ale  = true,
-    jacobian = JacobianSpec(Structured(strategy = ApproxSolve()), problem),
+    jacobian = Structured(strategy = DirectSolve()),   # the exact ALE Jacobian
 )
 ```
 
-If `ApproxSolve` increases Newton rejections on Arrhenius transients, fall back
-to `StructuredSolve` (exact, still O(N) per coupling apply) or the default
-`DirectSolve`. Use `verify_jacobian` (§15.3) with the masked mode to confirm an
-approximate backend still tracks the reference inside its support.
+The two strategies follow the same trajectory, and the exact one costs several
+times more per step, so `ApproxSolve` is the default; use
+`DirectSolve` to check a configuration against the exact Jacobian. Use
+`verify_jacobian` (§15.3) with the masked mode to confirm the approximate
+backend still tracks the reference inside its support.
 
 ---
 
@@ -582,9 +520,9 @@ solution = solve(problem; radiation_model = BEER_LAMBERT)        # in-depth abso
 | `P1_QUASI_STEADY` | P1 diffusion with re-radiation | **Experimental — rejected by `solve`** |
 
 `NO_RADIATION`, `SURFACE_ABSORPTION`, and `BEER_LAMBERT` are exported by
-`using Pyrolysis`. `P1_QUASI_STEADY` has moved to
-`Pyrolysis.Experimental.RadiationP1` and is **not** part of the core unified
-residual; passing it to `solve` errors with a message pointing you to the
+`using Pyrolysis`. `P1_QUASI_STEADY` is exported from
+`Pyrolysis.Experimental` (its residual lives in `Pyrolysis.Experimental.RadiationP1`)
+and is **not** part of the core unified residual; passing it to `solve` errors with a message pointing you to the
 Experimental module. Do not expect to use it through the standard `solve` path
 (Technical Reference §8.12).
 
@@ -696,6 +634,8 @@ function modify(prob, p)
         reactions             = (new_rxn,),
         mixing                = base.mixing,
         lateral_shrinkage_law = base.lateral_shrinkage_law,
+        depletion_limiter     = base.depletion_limiter,
+        gas_viscosity         = base.gas_viscosity,
     )
     return PyrolysisProblem(;
         mesh         = prob.mesh,
@@ -745,9 +685,9 @@ Work top to bottom; each item is cheap to try and the early ones dominate.
    surface with `create_stretched_mesh` (§15.5.4) rather than refining
    uniformly.
 2. **Keep the default structured Jacobian.** `jacobian = nothing` →
-   `Structured(DirectSolve())` (`ApproxSolve()` under ALE, which drops the
-   dense geometry block and keeps the pattern local), sparse and analytical —
-   far faster than colored FD.
+   `Structured(strategy = DirectSolve())` (`ApproxSolve()` under ALE, which
+   drops the dense geometry block and keeps the pattern local), sparse and
+   analytical — far faster than finite-differencing the right-hand side.
 3. **Keep the default linear solver.** `linear_solver = nothing` picks UMFPACK
    for the exact ALE Jacobian and KLU for every other sparse Jacobian (§8.4).
    Iterative
@@ -767,7 +707,7 @@ Work top to bottom; each item is cheap to try and the early ones dominate.
    (§15.10).
 8. **Disable extras you are not using.** `progress = false` removes the progress
    bar in batch/sweep contexts; leave `diagnostics = false` in production runs —
-   it costs an extra ledger sweep every `diagnostics_stride` steps and is only
+   it costs an extra energy sweep every `diagnostics_stride` steps and is only
    needed for debugging (§15.1.2).
 9. **Keep one Julia session for many solves.** The first solve of a problem
    compiles the residual and Jacobian kernels for its types: the component and
@@ -795,16 +735,16 @@ do not configure them. The levers above are the ones you control.
 
 - Conservation ledgers and what each residual proves: Technical Reference §16;
   the post-processing/reading side in UG-9.
-- Jacobian backends, strategies, and the extension stubs
-  (`klu_factorization`, `pardiso_factorization`, `amg_preconditioner`,
-  `forward_sensitivity`, `adjoint_sensitivity`, `verify_mixing_derivatives`):
-  UG-11 and Technical Reference §15.
-- Adaptivity (error indicators, monitors, `relocate_nodes!`, depletion):
-  UG-10 and Technical Reference §14.
+- Jacobian backends, strategies, linear solvers, and the extension stubs
+  (`forward_sensitivity`, `adjoint_sensitivity`): UG-11 and Technical
+  Reference §15.
+- Depletion handling, and the standalone mesh tools (error indicators,
+  monitors, `relocate_nodes!`, quality metrics): UG-10 and Technical
+  Reference §14.
 - The full keyword and default table for `solve`: UG-16.
 
 The escape hatch for anything not on the curated top-level surface is the
 `Pyrolysis.Internal` umbrella (`using Pyrolysis.Internal`), which re-exports
-every submodule's public symbols — the mesh-quality, GCL, and remapping helpers
-in this chapter live there. Symbols reached that way are not part of the stable
+every submodule's public symbols — the mesh-quality and diagnostics helpers in
+this chapter live there. Symbols reached that way are not part of the stable
 public API and may move between minor releases.

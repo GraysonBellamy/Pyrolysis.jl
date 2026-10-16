@@ -108,7 +108,7 @@ function _verification_case_vgt02()
                 name = "P² profile error / overpressure² scale",
                 value = err_P²,
                 error = err_P²,
-                tol = 2.5e-3,  # 3× observed 7.1e-4 (n=80, 2026-07-06)
+                tol = 2.5e-3,  # 3× observed 7.1e-4 (n=80)
                 comment = "steady gas-reservoir parabola in P²; n=80 uniform",
             ),
         )
@@ -121,7 +121,7 @@ function _verification_case_vgt02()
                 value = P_num[1],
                 exact = P_back_exact,
                 error = abs(P_num[1] - P_back_exact) / (P_back_exact - P∞),
-                tol = 2.5e-3,  # 3× observed 7.2e-4 relative to overpressure (2026-07-06)
+                tol = 2.5e-3,  # 3× observed 7.2e-4 relative to overpressure
                 comment = "overpressure ≈ $(round(P_back_exact - P∞, digits = 0)) Pa " *
                           "(wood-pyrolysis magnitude)",
             ),
@@ -136,7 +136,7 @@ function _verification_case_vgt02()
                 value = flux_num,
                 exact = flux_exact,
                 error = abs(flux_num - flux_exact) / flux_exact,
-                tol = 5e-5,  # 3× observed 7.2e-6 (2026-07-06; residual φ-growth storage bias)
+                tol = 5e-5,  # 3× observed 7.2e-6 (residual φ-growth storage bias)
                 comment = "parameter-free exact steady outflow",
             ),
         )
@@ -150,7 +150,7 @@ function _verification_case_vgt02()
                 name = "steadiness of exit flux",
                 value = steadiness,
                 error = steadiness,
-                tol = 1e-6,  # observed 2.6e-8 (2026-07-06)
+                tol = 1e-6,  # observed 2.6e-8
                 comment = "fill timescale ≈ 0.07 s ≪ t_end = 1 s",
             ),
         )
@@ -186,7 +186,7 @@ function _verification_case_vgt02()
             n_cells = 80,
             budget_s = 30.0,
             convergence = ConvergenceSpec(
-                # first-order upwind advection; observed rates 0.89, 0.94 (2026-07-06)
+                # first-order upwind advection; observed rates 0.89, 0.94
                 n_cells = [40, 80, 160],
                 error_fn = p2_error,
                 expected_order = 1.0,

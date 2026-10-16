@@ -7,9 +7,9 @@ stencil) produce the same Jacobian rows at rtol = 1e-12 on the
 canonical configurations × probe states. Only floating-point summation
 order differs between the two paths; the underlying math is the same.
 
-If this test fails, the analytical override has drifted from the
-residual's `apply_cell!` and must be fixed before it ships as the
-public `contribute_to_jacobian!` default.
+If this test fails, the analytical override — the public
+`contribute_to_jacobian!` path — has drifted from the residual's
+`apply_cell!`.
 """
 
 using Test

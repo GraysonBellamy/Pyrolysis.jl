@@ -169,7 +169,7 @@ end
 # At early times before significant mesh deformation, ALE and Eulerian
 # should give similar surface temperatures and mass loss rates.
 #
-# This tests that the ALE advection correction (now with w ≠ 0) doesn't
+# This tests that the ALE advection correction (with w ≠ 0) doesn't
 # introduce spurious temperature changes.
 #
 @testset "ALE vs Eulerian: Reacting Material (early time)" begin

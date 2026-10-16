@@ -111,18 +111,19 @@ Total flux [kg/(m²·s)], positive = flow in +z direction
 end
 
 """
-	compute_gas_fluxes!(J::Matrix{Float64}, mesh::Mesh1D{NC},
-						cache::PropertyCache, material::Material{NC}) where NC
+	compute_gas_fluxes!(J, state, mesh, cache::PropertyCache,
+						material::Material{NC}) where NC
 
 Compute gas mass fluxes at all faces for all gas components.
 
 # Arguments
 - `J`: Output matrix J[j,f] = flux of component j at face f [kg/(m²·s)]
-- `mesh`: Mesh with current state
+- `state`: State cache (cell centers, T, ξ)
+- `mesh`: Mesh (connectivity)
 - `cache`: Property cache
 - `material`: Material definition
 
-Positive flux = flow in +z direction (toward bottom).
+Positive flux = flow in +z direction (toward the top surface).
 
 # Performance Note
 This function uses compile-time unrolling via `compute_gas_fluxes_unrolled!`
@@ -177,7 +178,7 @@ intrinsic gas density ξ/φ (see [`gas_flux_darcy_fick`](@ref)).
 # Arguments
 - `J`: Output matrix J[j,f] = flux of component j at face f [kg/(m²·s)]
 - `state`: Geometry/state cache (cell centers, face positions, T, ξ)
-- `mesh`: Mesh with current state
+- `mesh`: Mesh (connectivity)
 - `cache`: Property cache (must have λ_face computed)
 - `material`: Material definition
 - `v_gas`: Darcy gas velocity at faces [m/s], **including** the boundary-face

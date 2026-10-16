@@ -15,7 +15,7 @@
 #
 # Off-face variant (c): composition step ICs are SAMPLED AT CELL CENTERS, so
 # a prescribed interface that is not on a face quantizes to the nearest face —
-# there are no mixed cells. Measured 2026-07-06: the numerics match the
+# there are no mixed cells. Measured: the numerics match the
 # QUANTIZED-interface network to 1e-11 (i.e. the scheme is still nodally
 # exact), and the entire user-facing error is the true-vs-quantized network
 # gap (1.64% in flux, 1.47 K in profile at Δz = 0.5 mm) — pinned here against
@@ -84,7 +84,7 @@ function _vhc04_case(label::String; k1::Float64, k2::Float64, z_i::Float64, n_ci
                 name = "L∞ steady profile vs (quantized) network",
                 value = err,
                 error = err,
-                tol = 1e-8,  # observed 1.5e-11 (a), 3.0e-11 (b), same for c (2026-07-06)
+                tol = 1e-8,  # observed 1.5e-11 (a), 3.0e-11 (b), same for c
                 comment = "harmonic-mean face k is NODALLY EXACT for face-aligned jumps; " *
                           "k-ratio $(k1 / k2):1",
             ),
@@ -102,7 +102,7 @@ function _vhc04_case(label::String; k1::Float64, k2::Float64, z_i::Float64, n_ci
                     value = q_num,
                     exact = q_q,
                     error = abs(q_num - q_q) / q_q,
-                    tol = 1e-8,  # observed ≤ 4.1e-10 (2026-07-06)
+                    tol = 1e-8,  # observed ≤ 4.1e-10
                     comment = "both faces must carry the exact series flux",
                 ),
             )
@@ -135,7 +135,7 @@ function _vhc04_case(label::String; k1::Float64, k2::Float64, z_i::Float64, n_ci
                 name = "steadiness (last half-interval drift)",
                 value = steadiness,
                 error = steadiness,
-                tol = 1e-6,  # observed ≤ 3.1e-9 K (2026-07-06)
+                tol = 1e-6,  # observed ≤ 3.1e-9 K
                 comment = "t_end = 10·L²/α_min",
             ),
         )

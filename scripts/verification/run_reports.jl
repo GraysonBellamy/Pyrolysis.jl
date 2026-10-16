@@ -1,5 +1,5 @@
 # =============================================================================
-# Verification-suite report mode (Phase 2 of the suite plan).
+# Verification-suite report mode.
 # =============================================================================
 #
 # Runs verification cases through their report resolution ladders and writes

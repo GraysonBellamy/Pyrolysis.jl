@@ -15,8 +15,8 @@ Two gates (mirroring the ReactionSource tests):
    over the conduction-only residual function — restricted to the operator's
    declared support pattern.
 
-The operator is **not yet wired into `Structured(...)`** — it is exercised
-standalone (the swap is deferred until all 10 operators land).
+These tests exercise the operator standalone, outside the `Structured(...)`
+operator-list walk.
 """
 
 using Test

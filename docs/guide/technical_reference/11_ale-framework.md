@@ -7,13 +7,13 @@ formulation that Pyrolysis.jl uses to track that motion without solving a moving
 boundary PDE. We derive the ALE time-derivative identity from the kinematics of a
 moving sample point, specialize it to the energy and species equations (every
 component rides the skeleton, so the mesh frame adds only the dilation), construct the
-cumulative mesh velocity from the per-cell volumetric strain rate, prove the
-discrete Geometric Conservation Law (GCL) and its time-varying-cross-section
-generalization, document the TVD-limited upwind discretization of the
-mesh-relative temperature advection, and the conservative remapping operators used
-when the mesh topology changes during adaptive refinement (§14). Throughout, the
+cumulative mesh velocity from the per-cell volumetric strain rate, show that the
+discrete Geometric Conservation Law (GCL) holds identically because every cell volume
+is recomputed from the node positions in the state (including with a time-varying
+cross-section), and document the TVD-limited upwind discretization of the
+mesh-relative temperature advection used by the verification hook. Throughout, the
 governing relations are tied line-by-line to the implementation in
-`src/Physics/{mesh_motion,gcl,volume_change,remapping}.jl`,
+`src/Physics/volume_change.jl`, `src/Problem/state_cache.jl`,
 `src/Discretization/ale_fluxes.jl`, and `src/Residual/residual.jl`, and every sign
 convention is verified against the code.
 
@@ -110,7 +110,7 @@ of the gas by the moving mesh.
 > term in any equation** (§11.2.2). The "arbitrary" in ALE is therefore
 > constrained: any mesh motion **decoupled from the solid material
 > velocity** — remeshing, mesh smoothing, prescribed node motion,
-> AMR-inside-ALE — is *not representable* without first adding an advection
+> refinement inside ALE — is *not representable* without first adding an advection
 > operator for the slip velocity $w - v_{\text{solid}}$. The verification
 > hook `Workspace.w_override` (which replaces the reaction-driven $w$ with a
 > prescribed $w(z,t)$ for MMS runs, §18.2) inherits exactly this constraint:
@@ -118,7 +118,7 @@ of the gas by the moving mesh.
 > field has a $w\,\partial_z\xi$ term with no discrete operator to represent
 > it, so the manufactured-solution driver assembles every species source in
 > the material-following frame (see test/verification/exact/mms.jl and
-> §11.10 item 7). The temperature field, by contrast, *does* get its slip
+> §11.9 item 5). The temperature field, by contrast, *does* get its slip
 > advection under the override — $T$ is advected by
 > $w_{\text{applied}} - w_{\text{physical}}$, which is non-zero exactly and
 > only there (§11.2.2).
@@ -155,7 +155,7 @@ $$
 \;}
 \tag{11.1}
 $$
-(`ale_fluxes.jl:8–10`). Here $\partial/\partial t|_{\chi}$ is the **ALE
+(`ale_fluxes.jl`). Here $\partial/\partial t|_{\chi}$ is the **ALE
 (mesh-point)** rate — the rate at which $f$ changes for a node carried by the mesh —
 and $\partial/\partial t|_{x}$ is the **Eulerian (fixed-point)** rate that the
 underlying conservation laws of Chapter 3 are written in. The advection correction
@@ -269,7 +269,7 @@ $\partial w/\partial z$ *plus* the lateral channel $\theta_A$. Identifying $\the
 with $\nabla\cdot\mathbf w$ is correct only without lateral shrinkage: in 1D,
 $\partial w/\partial z = \theta - \theta_A \ne \theta$ when $\theta_A \ne 0$, and
 applying the full $\theta_{\text{cell}}$ is the unique choice that makes
-$d(\xi V)/dt = SV - [JA]_{\text{faces}}$ exact (§11.3).
+$d(\xi V)/dt = SV - [JA]_{\text{faces}}$ exact (§11.5.2).
 
 In production the mesh moves with the skeleton, $\mathbf w = \mathbf v_{\text{solid}}$,
 so the slip term vanishes for **every** component and (11.4) reduces to
@@ -312,8 +312,8 @@ relative to the skeleton* is accounted for by the volumetric source
 $S_{\text{conv}} = -\sum_g c_{p,g}\,\bar J_g\,\partial T/\partial z$ (Chapter 7). This is
 the ThermaKin Eq. 17 convention term for term, including its deformation term,
 which is the $\mathbf v_{\text{solid}}\cdot\nabla T$ piece the mesh frame absorbs. The
-surface transpiration term is rejected at construction because it would count
-the gas heating a second time (Chapters 7, 12).
+surface balance carries no gas-enthalpy term, which would count the gas heating a
+second time (§7.4.3, Chapter 12).
 
 ---
 
@@ -322,7 +322,7 @@ the gas heating a second time (Chapters 7, 12).
 The ALE freedom is fixed by *choosing* $w(z,t)$. Pyrolysis.jl chooses it so that the
 mesh exactly absorbs the local volume change of the material, with the substrate
 pinned. This section derives the cumulative-integral formula, its discrete form, and
-the cell-centered interpolation used by the advection kernels.
+the dilation correction that the mesh motion induces in the species equations.
 
 ### 11.3.1 The volumetric strain rate $\theta$
 
@@ -337,20 +337,20 @@ $$
 \;}
 \tag{11.6}
 $$
-(`volume_change.jl:93–105`). Here:
+(`volume_change.jl`). Here:
 
 - $\gamma_j$ is the **swelling factor** of component $j$ (component field
   `swelling_factor`): $\gamma=1$ for solids by default (when a solid depletes, the
   matrix loses that volume), $\gamma=0$ for gases by default (escaping gas does not
   change the skeleton volume), and $\gamma\in[0,1]$ for intumescent/partial
   contributors. Only components with $\gamma_j>0$ enter the sum (the implementation
-  early-exits on $\gamma_j\le 0$, `volume_change.jl:17,28–36,48–61`).
+  early-exits on $\gamma_j\le 0$, `volume_change.jl`).
 - $\rho_j(T)$ is the **bulk** (pure-phase) density of component $j$, evaluated at the
   cell temperature; the temperature dependence is honored through the property
-  function `comp.density(T)` (`volume_change.jl:19,29,…`).
+  function `comp.density(T)` (`volume_change.jl`).
 - $d\xi_j/dt$ is the **species reaction source term** $S_j$ — the *reaction* part of
   the species RHS, supplied as the pre-computed `dξ_rxn` matrix
-  (`residual.jl:389–399`). It is negative for a consumed solid and positive for a
+  (`residual.jl`). It is negative for a consumed solid and positive for a
   produced char/gas.
 
 **Physical reading and sign.** When a solid of density $\rho_j$ is consumed
@@ -359,13 +359,12 @@ $\theta<0$: the cell shrinks. A net char-producing or swelling reaction with the
 appropriate $\gamma$ can yield $\theta>0$ (expansion/intumescence). Note that
 (11.6) is the *swelling-factor-weighted* form; the loose statement "$\theta =
 -(\sum_j d\xi_j/dt)/\rho_{\text{total}}$" sometimes used as shorthand
-(`problem_residual.md`) is only correct in the special case of a single solid with
+is only correct in the special case of a single solid with
 $\gamma=1$ and constant $\rho$ — the code always uses (11.6).
 
 > **Implementation note.** Relative strain rate: `volume_change_rate` /
 > `_volume_change_rate` (dispatch-unrolled for $N_C\in\{1,2,3\}$, `@generated` for
-> $N_C>3$), `src/Physics/volume_change.jl`. Batch absolute rate
-> $dV_i/dt = V_i\theta_i$: `compute_cell_volume_rates!`, same file (lines 126–149).
+> $N_C>3$), `src/Physics/volume_change.jl`.
 
 ### 11.3.2 Continuous-to-discrete: integrating strain into mesh velocity
 
@@ -380,8 +379,8 @@ $$
 where $\theta_A$ is the **column-global radial channel** subtracted to avoid
 double-counting any cross-section change (§11.3.3); for constant cross-section
 $\theta_A\equiv 0$ and $w$ integrates the full local strain. The axial residual
-strain is $\theta_L = \theta - \theta_A$ (`residual.jl:407`,
-`volume_change.md:77`). Discretizing the integral cell-by-cell with the bottom node
+strain is $\theta_L = \theta - \theta_A$ (`_compute_ale_mesh_velocity!`,
+`residual.jl`). Discretizing the integral cell-by-cell with the bottom node
 pinned gives the **cumulative mesh-velocity recursion**
 $$
 \boxed{\;
@@ -391,7 +390,7 @@ w_{i+1} = w_i + (\theta_i - \theta_A)\,\Delta z_i
 \tag{11.8}
 $$
 with cell thickness $\Delta z_i = V_i/A_{\text{section}}$
-(`residual.jl:387,407–411`). Equivalently, $w$ at the right node of cell $i$ is the
+(`residual.jl`). Equivalently, $w$ at the right node of cell $i$ is the
 exclusive prefix sum
 $$
 w_{i+1} = \sum_{k=1}^{i}(\theta_k - \theta_A)\,\Delta z_k
@@ -399,18 +398,18 @@ w_{i+1} = \sum_{k=1}^{i}(\theta_k - \theta_A)\,\Delta z_k
 \tag{11.9}
 $$
 
-The bottom-up sweep (loop `cell_idx = 1:n_cells`, `residual.jl:385`) starts at
-`w[1]=0` (substrate pinned, `residual.jl:382`) and accumulates
+The bottom-up sweep (loop `cell_idx = 1:n_cells`, `residual.jl`) starts at
+`w[1]=0` (substrate pinned, `residual.jl`) and accumulates
 `cumulative_velocity += θ_L * Δz_cell`, assigning the running total to the cell's
-right node (`residual.jl:407–411`). Because the strain rates of all cells below a
+right node (`residual.jl`). Because the strain rates of all cells below a
 node are summed, the top node moves at $w_{n+1} = \sum_k \theta_{L,k}\Delta z_k$,
 i.e. the surface velocity equals the total axial volume-change rate of the column,
 exactly tracking the receding (or expanding) surface.
 
 **Substrate boundary condition.** Pinning $w_1=0$ enforces zero normal mesh velocity
 at the impermeable substrate: the bottom node never moves, all motion is taken up
-above it, and the material "stacks up" toward the surface as it is consumed
-(`ale.md §6.2`, `volume_change.md` design subtlety 5). This is the natural choice
+above it, and the material "stacks up" toward the surface as it is consumed.
+This is the natural choice
 for a slab on a non-receding backing.
 
 ### 11.3.3 The column-global radial channel $\theta_A$ (WithChi)
@@ -428,7 +427,7 @@ $$
 \;}
 \tag{11.10}
 $$
-(`residual.jl:519–564`, `_compute_theta_A`). The column-average progress rate is the
+(`residual.jl`, `_compute_theta_A`). The column-average progress rate is the
 volume-weighted dry-gas production normalized by the total initial dry-solid mass,
 $$
 \frac{d\bar\chi}{dt} = \frac{1}{M_{\text{dry}}}\sum_{i=1}^{n}
@@ -437,21 +436,21 @@ $$
 M_{\text{dry}} = \sum_i m_{\text{dry},i},
 \tag{11.11}
 $$
-computed at `residual.jl:549–557`, with $\mathrm{law}'(\bar\chi)$ obtained by
-automatic differentiation `ForwardDiff.derivative(law, χ̄)` (`residual.jl:562`).
+computed at `residual.jl`, with $\mathrm{law}'(\bar\chi)$ obtained by
+automatic differentiation `ForwardDiff.derivative(law, χ̄)` (`residual.jl`).
 Guards: $\theta_A=0$ for identity-law materials, for missing `dξ_rxn`, for
 $M_{\text{dry}}\le\epsilon$, and for $\mathrm{law}(\bar\chi)\le\epsilon$ (preventing
-division by a vanishing cross-section, `residual.jl:539–541,560`). For the default
+division by a vanishing cross-section, `residual.jl`). For the default
 constant-cross-section material the dispatch returns exactly `0.0`
-(`residual.jl:293–302`, `NoChi`), and (11.8) reduces to the pure cumulative-strain
+(`residual.jl`, `NoChi`), and (11.8) reduces to the pure cumulative-strain
 integral. The interaction of $\theta_A$ with $\chi$-block dynamics and the lateral
 law is developed fully in Chapter 10; here it enters only as the scalar subtracted
 in (11.8).
 
 ### 11.3.4 Cell-centered velocity and the dilation correction
 
-The advection kernels need a *cell-centered* mesh velocity. It is the arithmetic
-mean of the bounding node velocities:
+The verification-only temperature advection (§11.2.2, §11.6) needs a *cell-centered*
+mesh velocity. It is the arithmetic mean of the bounding node velocities:
 $$
 \boxed{\;
 w_{\text{cell},i} = \tfrac12\big(w_{\text{left}} + w_{\text{right}}\big)
@@ -459,9 +458,7 @@ w_{\text{cell},i} = \tfrac12\big(w_{\text{left}} + w_{\text{right}}\big)
 \;}
 \tag{11.12}
 $$
-(`ale_fluxes.jl:227,449`). Node velocities are also interpolated to faces (faces
-co-locate with nodes in 1D) by $w_{\text{face},f} = w_{\text{node}[f.\text{node\_id}]}$
-(`residual.jl:417–423`, `_interpolate_node_to_face!`).
+(`compute_ale_advection_term!`, `ale_fluxes.jl`).
 
 The **dilation correction** implements the mesh-motion term of (11.5) for every
 component. For each cell $i$ and each component $j$,
@@ -503,7 +500,7 @@ and the energy update is (11.3) with the divergence and sources from Chapter 7.
 ## 11.4 Node-position update and geometric volume recompute
 
 In ALE mode the node positions $z_i$ are part of the ODE state vector (Chapter 13;
-`geometry.md §10`, `state_layout`), packed in the $z$-block at offset $n(1+N_C)$.
+`StateLayout`), packed in the $z$-block at offset $n(1+N_C)$.
 Their evolution equation is simply the mesh velocity,
 $$
 \boxed{\;
@@ -511,29 +508,14 @@ $$
 \;}
 \tag{11.15}
 $$
-written into the residual as `du[zoff+i] = ws.w_work[i]` (`residual.jl:204–207`).
+written into the residual as `du[zoff+i] = ws.w_work[i]` (`residual.jl`).
 The time integrator (Chapter 15) advances $z_i$ together with $(T,\xi,\chi)$ as one
 coupled stiff system; the structured Jacobian carries the $z$-*column* couplings
 in the geometry AD block and the $z$-*row* dependence on $(T,\xi)$ as embedded
 prefix-sum couplings (plus the WithChi $\theta_A$ rank-1 channels) emitted by
-the mesh-velocity provider (Chapter 15, §15.8.4 and §15.11.4).
+the `ALEMeshVelocityOperator` (Chapter 15, §15.8.4 and §15.11.3).
 
-### 11.4.1 Explicit node advance (mesh-motion utility)
-
-For the diagnostic / mesh-management path (`move_mesh!`), node positions are
-advanced by an explicit forward-Euler step,
-$$
-z_i^{\text{new}} = z_i^{\text{old}} + \Delta t\, w_i ,
-\tag{11.16}
-$$
-realized by constructing a fresh immutable `Node1D` per node (`mesh_motion.jl:44–56`;
-`ale.md §1.1`). The reference position $z_{\text{ref}}$ is left untouched so that
-displacements $z_i - z_{\text{ref},i}$ remain available (`mesh_motion.jl:267–276`).
-Within the implicit ODE solve, by contrast, $z_i$ is evolved through (11.15) by the
-integrator's own (higher-order, implicit) scheme — the explicit (11.16) is the
-formula used by the standalone `move_mesh!` and by the predictive GCL check.
-
-### 11.4.2 Geometric volume recompute
+### 11.4.1 Geometric volume recompute
 
 After the nodes are at their new positions, all cell volumes are recomputed
 **analytically from geometry**, not carried forward by a flux formula:
@@ -542,31 +524,28 @@ $$
 V_i^{\text{new}} = A(t)\,\big|z_{\text{right}} - z_{\text{left}}\big|
 = A(t)\,|z_{i+1}-z_i|
 \;}
-\tag{11.17}
+\tag{11.16}
 $$
 with the current (possibly $\chi$-updated) cross-section $A(t)$. Cell centers are the
 node midpoints,
 $$
 z_i^c = \tfrac12\big(z_i + z_{i+1}\big),
-\tag{11.18}
+\tag{11.17}
 $$
-and in 1D all face areas equal the global cross-section, $A_f = A(t)$
-(`mesh_motion.jl:62–83,100–106,113–134`; `geometry.md §6.1`,
-`geometric_quantities.jl:20–46`). During residual evaluation the same geometry is
-rebuilt directly from the state-vector node positions, type-stably (carrying
-`eltype(u)` so AD propagates through geometry), by
-`update_state_geometry!(…, ::ALE)` (`state_cache.jl:336–354`,
-`volume_change.md:153–166`) and `compute_geometry_from_state!`
-(`geometry.md §7.2`). This keeps the residual a pure function of $u$ that never
-mutates the mesh.
+and in 1D all face areas equal the global cross-section, $A_f = A(t)$. During
+residual evaluation this geometry is rebuilt directly from the state-vector node
+positions, type-stably (carrying `eltype(u)` so AD propagates through geometry), by
+`update_state_geometry!(…, ::ALE)` (`src/Problem/state_cache.jl`), after
+`update_cross_section_area!` has set $A(t)$. This keeps the residual a pure function
+of $u$ that never mutates the mesh; no separate volume is evolved, and the residual
+never reads the mesh's mirrored `cell_volumes`.
 
 **Why geometric recompute rather than a flux update?** Recomputing $V = A(t)\,L$
 from current node positions is robust to a simultaneous change in the cross-section
 $A(t)$ (variable-area mode): carrying $V_{\text{old}}$ across an $A(t)$ change via a
 pure axial-flux formula would freeze the old radial area into the volume. The
-geometric path bakes the current $A(t)$ into every volume automatically. As proved
-in §11.5, when geometry is computed correctly this path *still* satisfies the GCL to
-machine precision (`mesh_motion.jl:68–71` comment; `ale.md §6.1`).
+geometric path bakes the current $A(t)$ into every volume automatically. As shown
+in §11.5, this path satisfies the GCL as an algebraic identity.
 
 ---
 
@@ -586,106 +565,47 @@ and a right face (outward normal $+\hat z$, velocity $w_{\text{right}}$), both o
 area $A$, so
 $$
 \frac{dV_i}{dt} = A\,w_{\text{right}} - A\,w_{\text{left}} = A\,(w_{\text{right}} - w_{\text{left}})
-\tag{11.19}
+\tag{11.18}
 $$
-(`gcl.jl:1–9`; `geometry.md §8.1`, `compute_gcl_volume_rate`). Integrating over
-$[t,t+\Delta t]$ gives the **discrete GCL**:
-$$
-\boxed{\;
-V_i^{\text{new}} - V_i^{\text{old}} = \Delta t\,(w_{\text{right}} - w_{\text{left}})\,A
-\;}
-\tag{11.20}
-$$
-(`gcl.jl:24`). Why this matters: a GCL violation $\delta V$ acts as a *spurious mass
-and energy source*. If the discrete volume does not change by exactly the swept
-volume, the cell appears to gain or lose conserved quantity from nothing. Even tiny
-violations $\delta V/V\sim 10^{-6}$ accumulate over thousands of time steps and can
-dominate the genuine reaction-driven mass loss (`ale.md §7.2`). Exact GCL is
-therefore non-negotiable for long-time accuracy.
+for a constant cross-section. Why this matters: a GCL violation $\delta V$ acts as a
+*spurious mass and energy source*. If the discrete volume does not change by exactly
+the swept volume, the cell appears to gain or lose conserved quantity from nothing,
+and even tiny violations accumulate over thousands of time steps until they can
+dominate the genuine reaction-driven mass loss. Exact GCL is therefore
+non-negotiable for long-time accuracy.
 
 ### 11.5.2 Exactness of the geometric path
 
-Pyrolysis.jl's `move_mesh!` (with `use_gcl_volumes=true`, the default) does **not**
-apply the flux formula (11.20) directly; it recomputes $V_i = A|z_{i+1}-z_i|$ from
-the advanced nodes (11.17). We show these coincide to machine precision for constant
-$A$. After the explicit advance $z_{\text{left}}^{\text{new}} =
-z_{\text{left}}+\Delta t\,w_{\text{left}}$ and $z_{\text{right}}^{\text{new}} =
-z_{\text{right}}+\Delta t\,w_{\text{right}}$,
+Pyrolysis.jl never evolves a cell volume. The node positions are state (11.15) and
+every residual evaluation recomputes $V_i = A(t)\,|z_{i+1}-z_i|$ from them (11.16);
+every volume the residual uses (the divergences, the face distances, the
+$\chi$ source) is this one, so there is no second copy that could drift.
+Differentiating (11.16) along the semi-discrete trajectory, with $dz_i/dt = w_i$,
 $$
-V_i^{\text{new}} = A\,(z_{\text{right}}^{\text{new}} - z_{\text{left}}^{\text{new}})
-= A\big[(z_{\text{right}}-z_{\text{left}}) + \Delta t\,(w_{\text{right}}-w_{\text{left}})\big]
-= V_i^{\text{old}} + \Delta t\,(w_{\text{right}}-w_{\text{left}})\,A ,
+\frac{dV_i}{dt} = A\,(w_{i+1} - w_i) + |z_{i+1}-z_i|\,\frac{dA}{dt},
 $$
-which is exactly (11.20). The only deviation is floating-point round-off in the
-subtraction and multiplication, of order $10^{-15}$ relative (`ale.md §2.3, §6.1`).
-Hence the geometric path is GCL-exact by algebraic identity, while remaining robust
-to $A(t)$ changes. The explicit flux update is also available as the inline helper
-$$
-V_{\text{new}} = V_{\text{old}} + \Delta t\,(w_{\text{right}} - w_{\text{left}})\,A
-$$
-(`gcl_volume_update`, `gcl.jl:183–191`) for custom schemes, but it is *not* the path
-`move_mesh!` takes.
-
-### 11.5.3 GCL diagnostics
-
-Several verification functions monitor GCL compliance:
-
-- **Predictive check** `gcl_error(mesh, w, dt)` (`gcl.jl:34–77`): assuming the motion
-  has *not yet* occurred, computes for each cell the GCL-predicted change $\Delta
-  V_{\text{GCL}} = \Delta t\,(w_R-w_L)A$ and the would-be geometric change
-  $\Delta V_{\text{actual}} = |z_R^{\text{new}}-z_L^{\text{new}}|A - V_i$, and
-  returns the maximum relative error $\max_i |\Delta V_{\text{actual}} - \Delta
-  V_{\text{GCL}}|/|V_i|$. Expected value $\approx 10^{-15}$.
-
-- **Post-motion check** `gcl_error_post_motion(mesh, V_old, w, dt)`
-  (`gcl.jl:96–131`): after `move_mesh!`, compares the *actual* recorded $V_i^{\text
-  {new}}-V_i^{\text{old}}$ against $\Delta t\,(w_R-w_L)A$, returning the maximum
-  relative error.
-
-- **Boolean** `check_gcl(mesh, w, dt; tol=1e-12)` (`gcl.jl:152–155`): returns
-  `gcl_error(...) < tol`; the default tolerance is $10^{-12}$.
-
-- **Wrapped motion** `move_mesh_gcl!` (`mesh_motion.jl:354–381`): snapshots
-  $V_{\text{old}}$, calls `move_mesh!`, then `gcl_error_post_motion`, and `@warn`s
-  if the error exceeds `gcl_tol` (default $10^{-10}$).
-
-### 11.5.4 Generalized GCL for time-varying cross-section
-
-When the cross-section changes during the step ($A_{\text{old}}\ne A_{\text{new}}$,
-WithChi), the swept volume has two contributions: the axial face motion *and* the
-radial area change at constant length. The generalized discrete GCL is
+which is (11.18) plus the radial area change at constant length — the GCL for a
+time-varying cross-section holds by construction, with no separate correction. With
+the cumulative mesh velocity (11.8), $A(w_{i+1}-w_i) = A\,(\theta_i-\theta_A)\,\Delta z_i
+= V_i(\theta_i - \theta_A)$, and with $\theta_A = (1/A)\,dA/dt$ (11.10) the area term is
+$V_i\theta_A$, so
 $$
 \boxed{\;
-V_i^{\text{new}} - V_i^{\text{old}}
-\approx
-\underbrace{\Delta t\,(w_{\text{right}} - w_{\text{left}})\,A_{\text{new}}}_{\text{axial face flux}}
-\;+\;
-\underbrace{(A_{\text{new}} - A_{\text{old}})\,L_{\text{old}}}_{\text{radial area change}}
+\frac{dV_i}{dt} = V_i\,\theta_i
 \;}
-\tag{11.21}
 $$
-with $L_{\text{old}} = V_i^{\text{old}}/A_{\text{old}}$ (`gcl.jl:226–278`,
-`gcl_residual`; `ale.md §2.7`). The helper `gcl_residual(mesh, V_old, w, dt;
-A_old, A_new)` returns the maximum relative residual of (11.21) across active cells;
-pass `A_old`, `A_new` explicitly when verifying a step that crossed an $A(t)$ change.
-For $A_{\text{old}}=A_{\text{new}}$ the second term vanishes and (11.21) collapses to
-(11.20).
-
-### 11.5.5 GCL tracking over a run
-
-The `GCLTracker` (`gcl.jl:296–376`) accumulates the GCL error across the whole
-simulation:
-$$
-\text{max\_error} = \max_n e_n, \qquad
-\text{cumulative\_error} = \sum_n |e_n|\,\Delta t_n = \int_0^T|e(t)|\,dt ,
-$$
-counts steps with $e_n>$ tolerance (default $10^{-10}$), and records a
-`(time, error)` history (`update!`, `gcl.jl:328–339`; `report`, `gcl.jl:354–363`).
-The time-integrated norm $\int|e|\,dt$ is sensitive to *systematic* (rather than
-transient) bias, which is precisely what threatens long-time conservation
-(`ale.md §6.7`). In a healthy run per-step errors sit at $10^{-12}$–$10^{-14}$;
-sustained errors above $10^{-10}$ signal geometric degeneracy or an ill-conditioned
-mesh (Chapter 16, Conservation Diagnostics).
+exactly. Combined with the dilation correction (11.13), every component then obeys
+$d(\xi_{j,i}V_i)/dt = \big(S_{j,i} - (\nabla\!\cdot\mathbf J_j)_i\big)V_i$: a uniform
+field with no sources and no fluxes is preserved exactly, and a cell's mass changes
+only by reaction and by the skeleton-relative flux through its faces. After time
+discretization the integrator advances $z$ (hence $V$) and $\xi$ as one coupled
+system, so the identity holds to the integrator's local error with no additional
+geometric error term. The induced-motion MMS case V-MMS-04, whose mesh velocity is
+reaction-driven, verifies it; the free-stream and prescribed-motion cases V-MMS-02
+and V-MMS-03 (§18.2) drive the mesh through `Workspace.w_override`, where
+$\theta_i$ keeps its reaction-driven value, so they check the geometric path (a
+uniform field stays uniform, smooth fields converge at the design order) rather
+than this identity.
 
 ---
 
@@ -737,7 +657,7 @@ Both forms are written so the gradient is expressed in the $+z$ direction (posit
 when $f$ increases with $z$), and the advection term is then
 $$
 \text{advection}[i] = w_{\text{cell}}\,\left.\frac{\partial f}{\partial z}\right|_i
-\tag{11.22}
+\tag{11.19}
 $$
 (`compute_ale_advection_term!` for $T$ — override-only, with
 $w = w_{\text{rel}}$; `src/Discretization/ale_fluxes.jl`).
@@ -759,7 +679,7 @@ r = \frac{\text{grad}_1}{\text{grad}_0},
 \qquad
 \beta = \frac{d_0}{d_0+d_1}
 \;}
-\tag{11.23}
+\tag{11.20}
 $$
 (`_limited_gradient`, `src/Discretization/ale_fluxes.jl`), where $d_0$ is the
 center-to-center distance of the near slope segment (cell $i$ to the donor) and
@@ -784,8 +704,8 @@ $$
 \psi_{\text{vanleer}}(r)=\frac{r+|r|}{1+|r|},\quad
 \psi_{\text{superbee}}(r)=\max\!\big(0,\min(2r,1),\min(r,2)\big).
 $$
-The default for ALE advection is **Van Leer** (`limiter::Limiter = VANLEER`;
-`ale.md §4.4`). Guards: if there is no donor-donor cell, or the limiter is
+The default for ALE advection is **Van Leer** (the `limiter::Limiter = VANLEER`
+keyword of `compute_ale_advection_term!`). Guards: if there is no donor-donor cell, or the limiter is
 `NONE`, or $|\text{grad}_0|<10^{-20}$ (flat far slope — the ratio is undefined),
 the scheme falls back to first-order $\text{grad}_1$.
 
@@ -796,8 +716,7 @@ the stencil well-posed:
 
 1. **Zero-gradient ghost value.** A boundary ghost takes the boundary cell's own
    value, $f_{\text{ghost}} = f_{\text{cell}}$ (`_get_boundary_temperature`,
-   `ale_fluxes.jl:257–263`; analogous for $\xi$ via `col_upwind = i` when the upwind
-   neighbor is the boundary, `ale_fluxes.jl:487`). This is a Neumann (no-flux)
+   `ale_fluxes.jl`). This is a Neumann (no-flux)
    condition for scalar advection — physically appropriate, since there is no
    advective transport across the closed domain edge.
 
@@ -806,8 +725,8 @@ the stencil well-posed:
    $$
    d = \frac{V_i}{A_{\text{section}}} = \Delta z_i,
    $$
-   (`ale_fluxes.jl:288–297`). This is precisely `face_distance` evaluated at the
-   upwind face: the **center-to-center** spacing $|z_i^c - z_{\text{neighbor}}^c|$ for
+   (`ale_fluxes.jl`). This is the distance across the upwind face: the
+   **center-to-center** spacing $|z_i^c - z_{\text{neighbor}}^c|$ for
    an interior neighbor, and the center-to-ghost-cell spacing
    $\Delta z_i = 2\times(\text{center-to-face})$ for a boundary. Reusing the genuine
    center-to-center distance (rather than a naive cell width) preserves first-order
@@ -816,9 +735,9 @@ the stencil well-posed:
    value of $d$ is in any case **immaterial**: the closed edge uses a zero-gradient
    ghost (the upwind value is set equal to the cell's own value), so the first-order
    gradient is identically zero there and the TVD branch is disabled. Consequently
-   $d$ divides a zero numerator in the residual and the $+w/d$ and $-w/d$ face-local
-   AD partials cancel exactly in the structured-Jacobian scatter — no residual,
-   Jacobian, or dense-reference entry depends on it.
+   $d$ divides a zero numerator in the residual, and no residual or Jacobian entry
+   depends on it (the structured Jacobian carries no advection operator, §15.8.5;
+   override runs use finite-difference Jacobians).
 
 > **Implementation note.** Energy advection (override-only):
 > `compute_ale_advection_term!` with the shared limited gradient
@@ -828,174 +747,24 @@ the stencil well-posed:
 
 ---
 
-## 11.7 Conservative remapping (for AMR / mesh changes)
-
-When the mesh *topology* changes — adaptive refinement or coarsening (Chapter 14),
-or surface-cell depletion — the cell-centered state must be transferred from the old
-mesh to the new one. ALE node motion (§11.4) handles *continuous* deformation; it
-does not handle a change in the *number* of cells. The remapping operators in
-`src/Physics/remapping.jl` perform that transfer while preserving the conserved
-integrals (mass per species, thermal energy).
-
-### 11.7.1 State layout for remapping
-
-The remap operates on a **cell-interleaved** flat vector,
-$$
-u = [\,T_1, \xi_{1,1}, \dots, \xi_{N_C,1},\; T_2, \xi_{1,2},\dots,\; \dots\,],
-\qquad \text{idx}(i) = (i-1)(1+N_C),
-$$
-with $T$ first then the $N_C$ concentrations *per cell* (`remapping.jl:108,148–152`).
-This differs from the *block-major* ODE state vector of Chapter 13 (all $T$, then
-all $\xi_1$, …); the remap routines use their own cell-interleaved convention and
-the caller is responsible for packing/unpacking accordingly.
-
-### 11.7.2 Overlap geometry
-
-The unifying primitive is the **overlap volume** of a new cell $i_{\text{new}}$ and
-an old cell $i_{\text{old}}$. With cell extents $[z_L,z_R]$ on each mesh,
-$$
-z_L^{\text{ov}} = \max(z_L^{\text{new}},z_L^{\text{old}}),\quad
-z_R^{\text{ov}} = \min(z_R^{\text{new}},z_R^{\text{old}}),
-$$
-and, when $z_R^{\text{ov}}>z_L^{\text{ov}}$ (overlap exists),
-$$
-V_{\text{ov}} = (z_R^{\text{ov}} - z_L^{\text{ov}})\,A
-\tag{11.26}
-$$
-All conserved-quantity accumulation is weighted by $V_{\text{ov}}$. The remap
-is an instantaneous re-gridding at fixed time, so both meshes must describe
-the same physical configuration: the routines **validate** that the two
-meshes share one cross-section area $A$ (throwing `ArgumentError` otherwise)
-— mixing $A_{\text{old}}$ in the overlap volumes with $A_{\text{new}}$ in the
-division volumes would silently scale every concentration by
-$A_{\text{old}}/A_{\text{new}}$. $A(t)$ evolution belongs to the ODE (the
-$\chi$ swelling law, Chapter 10), never to the remap.
-
-### 11.7.3 First-order conservative remap
-
-**Temperature — energy-conserving.** When `material` is supplied, each overlap
-contributes its heat capacity $\rho c_p$, so the new-cell temperature conserves
-thermal energy:
-$$
-\boxed{\;
-T_{\text{new},i} = \frac{\sum_{\text{ov}}\rho c_p\,T_{\text{old}}\,V_{\text{ov}}}
-{\sum_{\text{ov}}\rho c_p\,V_{\text{ov}}}
-\;}
-\tag{11.27}
-$$
-with $\rho c_p = $ `effective_heat_capacity(ξ_old, T_old, material)`
-(`remapping.jl:155–159,180`). When `material === nothing` it degrades gracefully to
-plain volume weighting,
-$$
-T_{\text{new},i} = \frac{\sum_{\text{ov}} T_{\text{old}}\,V_{\text{ov}}}{\sum_{\text{ov}} V_{\text{ov}}}
-\tag{11.28}
-$$
-(`remapping.jl:161–163`). Energy-conserving is the recommended default for pyrolysis,
-where solid and char differ markedly in $\rho c_p$ (`ale.md §6.3`).
-
-**Concentration — mass-conserving.** Each component accumulates mass $\sum_{\text{ov}}
-\xi_{\text{old}}V_{\text{ov}}$, then is divided by the **new** cell volume so that the
-new-cell mass equals the summed contributions:
-$$
-\boxed{\;
-\xi_{\text{new},j,i} = \frac{\sum_{\text{ov}} \xi_{\text{old},j}\,V_{\text{ov}}}{V_{\text{new},i}}
-\;}
-\tag{11.29}
-$$
-(`remapping.jl:167–168,184–186`). Dividing by $V_{\text{new}}$ (not the overlap
-total) is exactly what makes $\xi_{\text{new}}V_{\text{new}} = \sum
-\xi_{\text{old}}V_{\text{ov}}$, i.e. mass-exact for partitioning meshes.
-
-> **Implementation note.** `remap_solution!(…, ::FirstOrderRemap; material)`,
-> `src/Physics/remapping.jl:97–214`.
-
-### 11.7.4 Second-order remap with gradient reconstruction
-
-The second-order method (`SecondOrderRemap`, default limiter `:minmod`,
-`remapping.jl:38–41`) reconstructs the old field linearly about each old cell center
-before integrating over overlaps. The reconstructed value at an overlap center
-$z_{\text{ov}}$ is
-$$
-T_{\text{recon}} = T_{\text{old},i} + \nabla T_{\text{old},i}\,(z_{\text{ov}} - z_{\text{old},i}^c),
-\tag{11.30}
-$$
-with cell-centered gradients computed by central, one-sided, or zero rules over the
-*actual* center-to-center distances on the (non-uniform, possibly partly inactive)
-old mesh (`compute_gradients_for_remap`, `remapping.jl:342–408`). The reconstructed
-contributions are accumulated and averaged exactly as in first order, then two
-**extrema-clamping limiters** are applied to suppress reconstruction overshoot:
-$$
-T_{\text{new}} \leftarrow \text{clamp}\big(T_{\text{new}},\,T_{\min}^{\text{old}},\,T_{\max}^{\text{old}}\big),
-\tag{11.31}
-$$
-$$
-\xi_{\text{new},j} \leftarrow \min\!\big(\max(\xi_{\text{new},j},0),\,\xi_{\max,j}^{\text{old}}\big),
-\tag{11.32}
-$$
-where the old-mesh extrema come from `extrema_values` (`remapping.jl:414–431`). The
-clamps enforce a discrete maximum principle (no new extrema, no negative
-concentrations) at the cost of *breaking* exact mass conservation — which the next
-step repairs.
-
-### 11.7.5 Limiter mass error
-
-Because the extrema clamps (11.31)–(11.32) perturb the integrals, the
-second-order remap carries a mass error of order $10^{-3}$–$10^{-5}$. (If a
-caller needs exact second-order conservation, a global per-component rescale
-$\xi \leftarrow \xi\,M_{\text{old}}/M_{\text{new}}$ against
-`check_remap_conservation`'s ledger is three lines.) First-order remap is
-mass-exact and is what the production depletion path effectively uses.
-
-### 11.7.6 Conservation check and fallback
-
-`check_remap_conservation` returns, per component, the relative mass error
-$$
-\text{mass\_error}_j = \frac{|M_{\text{new},j} - M_{\text{old},j}|}{|M_{\text{old},j}|},
-\quad M_j = \sum_i\xi_{j,i}V_i
-\tag{11.34}
-$$
-Expected: $\approx 10^{-14}$ for first-order without limiters;
-$10^{-3}$–$10^{-5}$ for second-order with limiting. When a new cell overlaps
-*no* active old cell (rare edge case), both methods fall back to copying the
-state of the nearest old cell by center-to-center distance
-(`find_nearest_cell`).
-
----
-
-## 11.8 Mesh quality and safety
+## 11.7 Mesh safety
 
 ALE motion can in principle tangle the mesh ($V_i\le 0$) if a node overtakes its
-neighbor, e.g. under an aggressive time step near complete burnout. Three utilities
-guard against this.
-
-- **`check_mesh_quality(mesh)`** (`mesh_motion.jl`) returns a named tuple:
-  `valid`, `min_volume`, `max_aspect_ratio` (largest ratio of spatially
-  adjacent active-cell sizes), and `tangled_cells`. Tangling is detected from
-  the **signed** cell width $z_R - z_L$ in node order, not from the cached
-  `cell_volumes` — those pass through `abs()`, so an inverted cell would
-  otherwise look like a perfectly valid thin cell and the rollback below
-  could never fire. Aspect-ratio adjacency is taken in spatial order (sorted
-  by cell center), which diverges from index order after h-refinement.
-
-- **`mesh_is_valid(mesh)`** (`mesh_motion.jl`) is the cheap boolean: `false`
-  if any active cell has non-positive signed width.
-
-- **`move_mesh_safe!(mesh, w, dt; max_aspect_ratio=10.0)`**
-  (`mesh_motion.jl:229–256`) snapshots nodes/volumes/time, performs the motion,
-  checks quality, and **rolls back** (restoring nodes, volumes, time, and
-  recomputing geometry) returning `false` if the result is invalid or the aspect
-  ratio exceeds the cap; otherwise returns `true`. This is the transactional motion
-  used where a step must be all-or-nothing.
-
-Within the implicit solve the integrator's own step-size control (Chapter 15) is the
-first line of defense; these utilities back the explicit mesh-management path and
-the AMR/depletion machinery (Chapter 14). The minimum-thickness floor `min_thickness`
-carried on the `Workspace` (`problem_residual.md`) likewise prevents surface cells
-from collapsing to zero during deep burns.
+neighbor, e.g. under an aggressive time step near complete burnout. Within the
+implicit solve the integrator's own step-size control (Chapter 15) is the first line
+of defense. With `handle_depletion = true`, depletion parking (Chapter 14) removes a cell that has thinned below a
+fraction of its initial thickness before it collapses; its detector
+(`find_thin_cells`) throws on a non-positive signed thickness, reporting an inverted
+cell as a mesh-motion failure rather than as depletion. The `min_thickness` keyword
+of `solve` (default
+$10^{-6}$ m) stops the solve through a termination callback when the live thickness
+$z_{n_{\text{live}}+1} - z_1$ falls below it (`create_thickness_termination_callback`,
+`src/Solver/callbacks.jl`). The mesh-quality metrics of §14.5 are diagnostics that
+`solve` does not call.
 
 ---
 
-## 11.9 Comparison to ThermaKin2Ds, Gpyro, and FDS
+## 11.8 Comparison to ThermaKin2Ds, Gpyro, and FDS
 
 The dynamic-mesh strategies of the three reference pyrolysis solvers map onto the
 Pyrolysis.jl ALE framework as follows. On first use we map their notation to ours:
@@ -1039,8 +808,7 @@ Gpyro-style physics, the option of *physically* tracking the surface with a movi
 grid, which keeps in-depth resolution concentrated where it is needed without the
 non-uniform-$\Delta z$ tuning Gpyro relies on. Both codes share the same
 distance-weighted harmonic-mean face conductivity and volume-fraction/partial-
-pressure gradient gas-transport formulation (Chapters 7, 9;
-`discretization.md §3,§4`), so on a constant cross-section with $w=0$ the two
+pressure gradient gas-transport formulation (Chapters 7, 9), so on a constant cross-section with $w=0$ the two
 discretizations are directly comparable. Gpyro's lateral (in-plane) area changes are
 captured by Pyrolysis.jl's $\mathrm{law}(\bar\chi)$ and $\theta_A$ path.
 
@@ -1063,60 +831,45 @@ guarantees that the moving grid introduces *no* spurious mass or energy.
 
 ---
 
-## 11.10 Limitations and open issues
+## 11.9 Limitations and open issues
 
-The following limitations are documented in the source and KB notes
-(`ale.md §11`, `volume_change.md` Open Questions, `discretization.md §15`,
-`jacobian.md`):
+The principal limitations and open issues are:
 
 1. **Dimensionality.** The framework is implemented only for 1D ($D=1$). The mesh
-   data structures (`MeshTopology{D,…}`, `MeshGeometry{D}`) are parameterized by
-   dimension, and the GCL is written as a face-flux sum, but a 2D/3D extension would
+   data structures `MeshTopology{D,…}` and `MeshGeometry{D}` are parameterized by
+   dimension but are placeholders for a multi-dimensional extension — the 1D
+   residual reads `Mesh1D` and the `StateCache`, not them. A 2D/3D extension would
    require vector node positions, per-face normals and variable areas, the full
-   divergence-theorem GCL, and surface-integral fluxes (`geometry.md §13`,
-   `ale.md §11`). The current code assumes a spatially uniform (though time-varying)
-   cross-section.
+   divergence-theorem GCL, and surface-integral fluxes. The current code assumes a
+   spatially uniform (though time-varying) cross-section.
 
 2. **Separation of axial and radial motion.** Variable cross-section is handled by
    splitting axial ALE motion (with $\theta_A$ subtracted) from a separate radial
    cross-section update via $\mathrm{law}(\bar\chi)$, requiring careful sequencing
    (compute axial velocity, then update area). A unified space-time ALE treatment of
-   both channels simultaneously is not implemented (`ale.md §11`, item 1).
+   both channels simultaneously is not implemented.
 
-3. **Order of the explicit mesh advance.** The standalone `move_mesh!` advances nodes
-   with first-order forward Euler (11.16). Higher-order *explicit* mesh motion would
-   need substeps or a space-time formulation; within the implicit ODE solve, $z_i$ is
-   integrated to the solver's order, so this limitation affects only the diagnostic
-   mesh-management path (`ale.md §11`, item 3).
-
-4. **Remap limiter placement and order selection.** The second-order remap applies
-   TVD/extrema limiters *after* volume-weighted averaging rather than *during*
-   reconstruction, which can permit small violations of the discrete maximum
-   principle and a $10^{-3}$–$10^{-5}$-level mass error (§11.7.5). The
-   choice between first- and second-order remap is left to the caller; there
-   is no automatic, error-estimate-driven order selection
-   (`ale.md §11`, items 4–5).
-
-5. **Density evaluation in the strain rate.** The volume-change rate (11.6) uses
+3. **Density evaluation in the strain rate.** The volume-change rate (11.6) uses
    $\rho_j(T)$ at the instantaneous cell temperature; whether an implicit or
    time-averaged density would improve consistency near steep thermal transients is
    an open modeling question, as is the extension of the volume-change accounting to
-   multi-reactant stoichiometry (`volume_change.md` open questions 1–2).
+   multi-reactant stoichiometry.
 
-6. **Jacobian profile trade-offs.** The structured Jacobian (Chapter 15) represents
-   the cumulative mesh velocity as a `PrefixSumCoupling`, the column-global $\theta_A$
-   back-reaction as a `Rank1Coupling`, and the $z$-columns as a dedicated geometry
-   AD block. Under the `:ale_reduced` profile (used by `ApproxSolve`) the cumulative
-   widening, geometry block, and $\chi$-column rank-1 are *dropped*, trading exact
+4. **Jacobian profile trade-offs.** The structured Jacobian (Chapter 15) represents
+   the cumulative mesh velocity as embedded prefix-sum couplings, the column-global
+   $\theta_A$ back-reaction as `EmbeddedRank1Coupling`s, and the $z$-columns as a
+   dedicated geometry AD block. Under the `:ale_reduced` profile (used by `ApproxSolve`) every structured
+   coupling (the prefix sums and the $\theta_A$ rank-1 channels, $\chi$ column
+   included) and the geometry block are *dropped*, trading exact
    coupling for speed; the WithChi$\times$Darcy interaction is exercised mainly with
-   Fickian transport (`jacobian.md`, open issues). These are solver-accuracy/cost
-   choices rather than physical limitations of the ALE formulation itself.
+   Fickian transport. These are solver-accuracy/cost choices rather than physical
+   limitations of the ALE formulation itself.
 
-7. **Solid-Lagrangian capability boundary: no general (non-material) mesh
+5. **Solid-Lagrangian capability boundary: no general (non-material) mesh
    motion.** As stated in §11.1.2, the formulation identifies mesh velocity
    with solid material velocity and gives no component a discrete advection
    operator. Consequently mesh motion decoupled from the solid — remeshing,
-   mesh smoothing/redistribution, prescribed node motion, AMR performed
+   mesh smoothing/redistribution, prescribed node motion, refinement performed
    *within* the ALE frame — is outside the representable class: a field that
    is static in the laboratory frame but non-uniform in $z$ cannot be held
    stationary under such motion, because its $w\,\partial_z\xi$ contribution
@@ -1143,10 +896,10 @@ The following limitations are documented in the source and KB notes
 - The volume-fraction/partial-pressure gas flux and Darcy velocity are in **Chapter
   9, Gas-Phase Mass Transport & Pressure**.
 - Flux limiters and the finite-volume divergence operator are in **Chapter 13,
-  Finite-Volume Discretization**; the remap operators support **Chapter 14, Adaptive
-  Mesh Refinement**.
-- The structured Jacobian couplings for ALE mesh velocity, advection, dilation, and
-  the geometry block, and the time integration of the coupled $(T,\xi,z,\chi)$ system
+  Finite-Volume Discretization**; depletion parking, which changes the live cell
+  count under ALE, is in **Chapter 14, Adaptive Mesh Refinement and Surface
+  Depletion**.
+- The structured Jacobian couplings for ALE mesh velocity, dilation, and the
+  geometry block, and the time integration of the coupled $(T,\xi,z,\chi)$ system
   are in **Chapter 15, Temporal Integration & Structured Jacobian**.
-- GCL tracking as a conservation diagnostic is in **Chapter 16, Conservation
-  Diagnostics**.
+- The mass and energy ledgers are in **Chapter 16, Conservation Diagnostics**.

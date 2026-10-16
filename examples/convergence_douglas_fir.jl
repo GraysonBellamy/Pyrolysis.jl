@@ -392,7 +392,7 @@ const RESULTS_DIR = joinpath(@__DIR__, "convergence_results")
         radiation_model = SURFACE_ABSORPTION,
         min_thickness = 0.5e-3,
         handle_depletion = false,
-        # Default Jacobian is `Structured(strategy = DirectSolve())`.
+        # Default Jacobian under ALE is `Structured(strategy = ApproxSolve())`.
         integrator = KenCarp4(linsolve = SparspakFactorization()),
     )
 

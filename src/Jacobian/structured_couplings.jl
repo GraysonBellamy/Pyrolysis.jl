@@ -90,10 +90,10 @@ dz_k/dt = w_node[k] = Σ_{i ≤ k-1} (θ_i − θ_A) · Δzᵢ
 ```
 
 so `∂(dz_k/dt)/∂x_j = 𝟙[j ≤ k-1] · v[j]` with `v[j] = Δzⱼ · ∂θⱼ/∂xⱼ`
-(the `v` of the bare [`PrefixSumCoupling`](@ref) the mesh-velocity
-provider builds). This block is the raw node-indexed prefix sum:
-`n_nodes` rows × `n_cells` columns, unit row scaling. Node 1 is the fixed bottom node (`w_node[1] ≡ 0`); its
-row receives no entries.
+(the `v` of the [`PrefixSumCoupling`](@ref) the mesh-velocity operator
+fills). This block is the raw node-indexed prefix sum: `n_nodes` rows ×
+`n_cells` columns, unit row scaling. Node 1 is the fixed bottom node
+(`w_node[1] ≡ 0`); its row receives no entries.
 
 # What it represents
 

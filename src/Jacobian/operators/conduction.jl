@@ -1,5 +1,5 @@
 """
-The `ConductionOperator` — the conductive-divergence contribution extracted from the residual.
+The `ConductionOperator` — the conductive-divergence contribution to the residual.
 
 Represents the per-cell conductive-divergence contribution to `dT`:
 
@@ -22,7 +22,7 @@ contributes zero — the closure ignores the corresponding inputs and the AD
 column is identically zero, which the operator's scatter respects (no write
 to the missing entry).
 
-# Math correspondence with the existing residual
+# Correspondence with the residual
 
 `compute_rhs!` populates `q_cond` via `compute_conductive_fluxes!`, copies
 into `q_total`, then BC application **overwrites** `q_total` at boundary
@@ -47,13 +47,13 @@ struct ConductionOperator <: Operator end
 	ConductionADWorkspace{NC, CFG}
 
 Workspace for `ConductionOperator.contribute_to_jacobian!`. Carries both
-the AD-default plumbing (`x_buf`, `f_buf`, `J_local`, `cfg`) and the
+the ForwardDiff reference plumbing (`x_buf`, `f_buf`, `J_local`, `cfg`) and the
 analytical override's per-cell scratch arrays (`dQ_dξ_L_buf` / `_C_buf`
 / `_R_buf`) so the per-cell ntuple-closure allocations are avoided.
 
 # Fields
 - `x_buf::Vector{Float64}` — `(3 · (1 + NC))`-length input buffer for
-  the AD-default's stencil pack.
+  the ForwardDiff reference's stencil pack.
 - `f_buf::Vector{Float64}` — length-1 output (`dT_cond[i]`).
 - `J_local::Matrix{Float64}` — `1 × (3 · (1 + NC))` per-cell Jacobian row.
 - `cfg::CFG` — `ForwardDiff.JacobianConfig` sized for the stencil dim.
@@ -308,15 +308,15 @@ end
 # Analytical override — hand-derived chain rule
 #
 # Computes the same Jacobian entries as `_contribute_to_jacobian_ad!` below
-# (the AD-default), but without ForwardDiff over the full 3-cell stencil.
+# (the ForwardDiff reference), but without ForwardDiff over the full 3-cell stencil.
 # Property derivatives `∂k/∂T, ∂k/∂ξ, ∂ρcp/∂T, ∂ρcp/∂ξ` are obtained by
 # evaluating `effective_conductivity` / `effective_heat_capacity` once per
 # cell under stack-allocated `Dual{Tag, Float64, NC+1}` (input dim = NC+1
-# vs. 3·(NC+1) for the AD-default — so the dual arithmetic is much cheaper).
+# vs. 3·(NC+1) for the ForwardDiff reference — so the dual arithmetic is much cheaper).
 # Face-flux composition, divergence, and the `1/ρcp` chain rule are then
 # done by hand.
 #
-# Equivalence with the AD-default is gated at rtol = 1e-12 in
+# Equivalence with the ForwardDiff reference is gated at rtol = 1e-12 in
 # `test/jacobian/test_operator_conduction_analytical.jl`. Only floating-
 # point summation order differs between the two paths; the math is the
 # same.
@@ -475,9 +475,9 @@ each face composes the harmonic-mean chain rule, the per-face
 `ρcp` with the `−q · ∂ρcp/∂x / ρcp²` correction on the cell-center
 columns.
 
-Workspace is the same `ConductionADWorkspace{NC}` as the AD-default —
-the only field used is `ws.x_buf` (as scratch for stencil packing during
-debug); workspace fields could be slimmed in a follow-up.
+Workspace is the same `ConductionADWorkspace{NC}` as the ForwardDiff reference;
+the override reads only its `dQ_dξ_L_buf` / `dQ_dξ_C_buf` / `dQ_dξ_R_buf` scratch
+arrays.
 """
 function _contribute_to_jacobian_analytical!(
     jac::StructuredJacobian,
@@ -617,15 +617,16 @@ function _contribute_to_jacobian_analytical!(
 end
 
 # ============================================================================
-# AD-default path (preserved as `_contribute_to_jacobian_ad!` for the
-# rtol=1e-12 equivalence test against the analytical override).
+# ForwardDiff path `_contribute_to_jacobian_ad!`: the rtol=1e-12 equivalence
+# reference for the analytical override.
 # ============================================================================
 
 """
-	contribute_to_jacobian!(jac, op::ConductionOperator,
-	                        u, t, ws, state, mesh, material, layout) -> nothing
+	_contribute_to_jacobian_ad!(jac, op::ConductionOperator,
+	                            u, t, ws, state, mesh, material, layout) -> nothing
 
-Default per-cell AD path. For each cell `i`:
+Per-cell ForwardDiff path, the equivalence reference for the analytical
+override. For each cell `i`:
 
 1. Pack `(T_{i-1}, T_i, T_{i+1}, ξ_{:,i-1}, ξ_{:,i}, ξ_{:,i+1})` into
    `ws.x_buf` (with self-fill for missing neighbors at boundaries).
@@ -722,9 +723,8 @@ end
 # ============================================================================
 #
 # `contribute_to_jacobian!` is the public method consumed by the Structured
-# backend's operator-list walk. It dispatches to the analytical override —
-# the AD-default `_contribute_to_jacobian_ad!` is preserved alongside as the
-# rtol=1e-12 equivalence reference.
+# backend's operator-list walk. It dispatches to the analytical override;
+# `_contribute_to_jacobian_ad!` is the rtol=1e-12 equivalence reference.
 
 function contribute_to_jacobian!(
     jac::StructuredJacobian,

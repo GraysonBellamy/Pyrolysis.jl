@@ -5,7 +5,7 @@
 **References:**
 
 - Thomas & Lombard, AIAA J. 17 (1979) — geometric conservation law
-- docs/Verification_Suite_Plan_2026-07-06.md Tier 3 (ALE-MMS deliverable)
+- docs/guide/technical_reference/18_verification-validation.md §18.2 (MMS driver, ALE cases)
 
 ## Problem statement
 

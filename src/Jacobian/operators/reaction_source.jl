@@ -1,7 +1,7 @@
 """
-The `ReactionSourceOperator` — the per-cell reaction source extracted from the residual.
+The `ReactionSourceOperator`: the per-cell reaction source.
 
-Represents the per-cell reaction source's contribution to the residual:
+Its contribution to the residual is
 
 ```
 dT[i]    += Q_rxn(T_i, ξ_i) / ρcp_eff(T_i, ξ_i)
@@ -9,23 +9,17 @@ dξ[j, i] += dξ_rxn[j](T_i, ξ_i)
 ```
 
 where `Q_rxn = -Σ heats[r] · rates[r]` and `dξ_rxn[j] = Σ ν[r,j] · rates[r]`.
-The contribution is purely cell-local (`stencil = (cells = 0:0,)`); the chain
-rule through `ρcp_eff(T, ξ)` is captured automatically by the cell-local AD
-in the default `contribute_to_jacobian!`.
+The contribution is cell-local; `contribute_to_jacobian!` runs ForwardDiff
+over it cell by cell, which captures the chain rule through
+`ρcp_eff(T, ξ)`.
 
-# Math correspondence with the existing residual
-
-The existing `compute_rhs!` in [`finite_volume.jl`](../../Discretization/finite_volume.jl)
-sums every per-cell source (Q_rxn, Q_rad, S_conv, -div_q) and divides
-the lot by `ρcp` once. Splitting the operator means each operator divides its
-own piece by `ρcp` and the sum still equals `(Σ sources) / ρcp` — exact-equal
-to the existing residual at every state. The Jacobian-by-AD over each
-operator's `apply!` captures the per-source chain rule independently; their
-sum reconstructs the full `∂dT/∂state` row.
-
-The existing residual path (`Pyrolysis.Problem.residual!`) keeps using the
-cached `rhs_cache.Q_rxn` loop unchanged. This operator's `apply!` is
-exercised through the `Structured` backend's Jacobian assembly only.
+`compute_rhs!` ([`finite_volume.jl`](../../Discretization/finite_volume.jl))
+sums every per-cell energy source (Q_rxn, Q_rad, S_conv, −∇·q) and divides by
+`ρcp` once. Each Jacobian operator divides its own piece by `ρcp`; the pieces
+sum to the residual's energy row (up to rounding), so the per-operator
+derivatives sum to the full `∂dT/∂state` row. This operator's `apply!` serves
+the Jacobian assembly only; the residual keeps its own loop over
+`rhs_cache.Q_rxn`.
 """
 
 using ForwardDiff

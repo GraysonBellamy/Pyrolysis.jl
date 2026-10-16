@@ -17,11 +17,10 @@ Three gates:
    declared support; off-pattern entries are zero
    (support-completeness on the BC slice).
 
-3. **`∂T_s/∂ξ` regression.** ConvectiveBC + ConvectiveMassBC at
-   `hot+gas` state — the regime where the legacy `bcs.jl:343-353` no-blowing
-   chain rule misses `∂T_s/∂ξ` via `k_eff(ξ)`. The AD-through-Newton path
-   recovers full agreement at rtol=1e-6. The baseline rel error
-   (2.1e-5, the gap measured before the fix) drops to ≤ rtol.
+3. **`∂T_s/∂ξ` chain.** ConvectiveBC + ConvectiveMassBC at `hot+gas`
+   state — the regime where `∂T_s/∂ξ` via `k_eff(ξ)` is non-trivial (an
+   analytical chain rule that drops it is off by ~2e-5 relative). The
+   AD-through-Newton path agrees with DenseAD at rtol=1e-6.
 """
 
 using Test
@@ -348,8 +347,8 @@ end
         )
 
         # Build sparse pattern: 1×(1+NC) thermal/energy block at T-row[bdy] ×
-        # {T-col[bdy], ξ-cols[bdy]} (both operators are cell-local now —
-        # the neighbor-reaching S_conv row belongs to BCConvectionOperator),
+        # {T-col[bdy], ξ-cols[bdy]} (both operators are cell-local — the
+        # neighbor-reaching S_conv row belongs to BCConvectionOperator),
         # plus NC×(1+NC) mass block at ξ-rows[bdy] × {T-col[bdy], ξ-cols[bdy]}.
         # Boundary cells are 1 and n.
         n_total = length(u)
@@ -447,11 +446,9 @@ end
     end
 
     @testset "∂T_s/∂ξ via k_eff(ξ) recovered" begin
-        # At hot+gas state, the legacy `_compute_boundary_flux_jacobian` uses
-        # `zero_J` and misses the chain rule through k_eff(ξ). The baseline
-        # records `max_rel_dev = 2.116e-5` on the analytical path.
-        # The AD-through-Newton operator must agree with DenseAD at rtol=1e-6
-        # (i.e., the baseline number drops by orders of magnitude).
+        # At hot+gas state the chain rule through k_eff(ξ) is non-trivial:
+        # dropping it gives `max_rel_dev ≈ 2.1e-5`. The AD-through-Newton
+        # operator must agree with DenseAD at rtol=1e-6.
         populate!(ws.state_cache, u, ws.layout)
         Pyrolysis.Problem.update_state_geometry!(
             ws.state_cache,
@@ -533,11 +530,10 @@ end
         )
 
         # Entries of interest at the top cell's T-row: the T column, and the
-        # ξ-solid column — the ∂T_s/∂ξ chain through k_eff(ξ) that the legacy
-        # analytical path missed. (The ξ-gas column is exactly zero here:
-        # conductivity mixes on the renormalized solid basis, and without a
-        # blowing model no other thermal-BC path reaches ξ_gas at a uniform-T
-        # state.)
+        # ξ-solid column — the ∂T_s/∂ξ chain through k_eff(ξ). (The ξ-gas
+        # column is exactly zero here: conductivity mixes on the renormalized
+        # solid basis, and without a blowing model no other thermal-BC path
+        # reaches ξ_gas at a uniform-T state.)
         top = n
         ξ_solid_off = n + (1 - 1) * n   # solid is component 1
         ξ_gas_off = n + (2 - 1) * n     # gas is component 2
@@ -554,8 +550,7 @@ end
         @test thermal_ξgT_dev / ref_scale_T < 1e-6
 
         # Sanity: the ∂T_s/∂ξ_solid entry is genuinely non-zero (otherwise the
-        # regression test is meaningless — it would pass even on the legacy
-        # zero-J path).
+        # test is meaningless — it would pass even with a zero ∂T_s/∂ξ).
         @test abs(J_ref_full[top, ξ_solid_off+top]) > 1e-6
     end
 end

@@ -1,5 +1,5 @@
 """
-`BCConvectionOperator` correctness tests (deferred audit Minor 5).
+`BCConvectionOperator` correctness tests.
 
 The operator is the single owner of the boundary cell's `S_conv` energy
 row — the product `−Σ_g cp_g·J̄_g·(∂T/∂x)_b` whose blended gradient runs

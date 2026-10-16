@@ -1,15 +1,14 @@
 """
-Regression tests for Beer–Lambert surface absorptivity: the default
-(Kirchhoff) Beer–Lambert path never applied a surface absorptivity — the
-medium absorbed 100 % of the incident flux while emitting with ε_eff, so
-switching SURFACE_ABSORPTION → BEER_LAMBERT changed the absorbed power by
-1/ε_eff (≈ 11 % at ε = 0.9).
+Tests for Beer–Lambert surface absorptivity. Absorption and emission use
+the same surface coefficient, so switching SURFACE_ABSORPTION →
+BEER_LAMBERT does not change the absorbed power by 1/ε_eff (≈ 11 % at
+ε = 0.9).
 
-Post-fix convention:
+Convention:
 - Kirchhoff path (`apply_kirchhoff_absorptivity = true`, no explicit BC
   absorptivity): the flux entering the medium is ε_eff·I, with ε_eff the
   *live* surface cell's effective emissivity — absorption and emission use
-  the same coefficient (detailed balance restored).
+  the same coefficient (detailed balance).
 - Explicit-absorptivity path (`false`): α(t)·I is folded into the intensity
   upstream (`extract_radiative_flux_from_bcs`) and the kernel does not
   rescale.
@@ -97,15 +96,15 @@ end
     @testset "absorbed power: ε_eff·I·(1 − e^{−τ_tot}), conservation exact" begin
         absorbed = sum(q_kirchhoff[i] * Δz[i] for i = 1:n)
         @test absorbed ≈ ε_surf * I0 * (1 - exp(-τ_tot)) rtol = 1e-12
-        # Pre-fix the absorbed power was I0·(1 − e^{−τ_tot}) — the 1/ε_eff
-        # model-switch jump. Guard against regression:
+        # Absorbing I0·(1 − e^{−τ_tot}) would be the 1/ε_eff model-switch
+        # jump:
         @test !isapprox(absorbed, I0 * (1 - exp(-τ_tot)), rtol = 1e-3)
     end
 
     @testset "model consistency: BEER_LAMBERT → SURFACE_ABSORPTION as τ → ∞" begin
         # SURFACE_ABSORPTION applies ε_eff·I at the face (boundary Newton).
         # The Beer-Lambert absorbed power must approach the same ε_eff·I for
-        # an optically thick sample — NOT 1/ε_eff times it (the old defect).
+        # an optically thick sample — NOT 1/ε_eff times it.
         absorbed = sum(q_kirchhoff[i] * Δz[i] for i = 1:n)
         @test absorbed / (ε_surf * I0) ≈ 1 - exp(-τ_tot) rtol = 1e-12
         @test absorbed <= ε_surf * I0 + 1e-9

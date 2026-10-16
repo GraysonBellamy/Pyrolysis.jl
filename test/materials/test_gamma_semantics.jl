@@ -1,15 +1,13 @@
 """
-Regression tests for the swelling-factor (γ) semantics.
+Tests for the swelling-factor (γ) semantics.
 
 - The swelling factor γ has ONE semantics everywhere — every component
   contributes v_j = γ_j·ξ_j/ρ_j to the dilation rate θ, the mixture
-  density, and the conductivity/emissivity volume weights. Pre-fix the
-  three kernels disagreed for partial-γ condensed phases (γ applied to
-  every component in θ, to gases only in the density, and as a binary
-  gas-exclusion predicate in the mixing weights).
-- A fully-converted cell no longer becomes a perfect non-emitting
-  insulator: k_eff falls back to the gas-mixture conductivity. Liquids
-  default to a realistic emissivity (0.95) instead of 0.
+  density, and the conductivity/emissivity volume weights, so the three
+  kernels agree for partial-γ condensed phases.
+- A fully-converted cell is not a perfect non-emitting insulator: k_eff
+  falls back to the gas-mixture conductivity. Liquids default to a
+  realistic emissivity (0.95), not 0.
 - γ range validation at construction.
 """
 
@@ -43,12 +41,12 @@ end
     # γ = 0 liquid: consistently volumeless.
     mat0 = _gamma_material(γ_liq = 0.0)
     # mixture density: only the solid's volume counts. Y_s = 0.5,
-    # 1/ρ = 0.5/1000 → ρ = 2000 (pre-fix: condensed always contributed → 1000).
+    # 1/ρ = 0.5/1000 → ρ = 2000 (counting the liquid would give 1000).
     @test mixture_density(ξ, T, mat0) ≈ 2000.0
-    # mixing weights: all on the solid (pre-fix: split 50/50 with the liquid).
+    # mixing weights: all on the solid (not split 50/50 with the liquid).
     @test solid_volume_fractions(ξ, T, mat0)[1] ≈ 1.0
     @test solid_volume_fractions(ξ, T, mat0)[2] == 0.0
-    # θ: evaporating liquid adds no strain (this was already γ-weighted).
+    # θ: evaporating liquid adds no strain.
     @test volume_change_rate((0.0, -10.0, 10.0), T, mat0) == 0.0
 
     # γ = 1 liquid: full contribution in all three kernels.
@@ -89,9 +87,9 @@ end
     @test effective_conductivity(ξ_ok, T, mat) > 0.1
     @test effective_emissivity(ξ_ok, T, mat) ≈ 0.90
 
-    # Fully converted cell (only pore gas left): pre-fix k_eff = ε_eff = 0 —
-    # a perfect non-emitting insulator whose zero also wiped both adjacent
-    # harmonic face means. Post-fix k_eff degrades to the gas conductivity.
+    # Fully converted cell (only pore gas left): k_eff degrades to the gas
+    # conductivity. A zero k_eff would make the cell a perfect insulator and
+    # wipe both adjacent harmonic face means.
     ξ_void = (0.0, 0.0, 1.0)
     @test mixing_volume_fractions(ξ_void, T, mat)[3] ≈ 1.0
     @test effective_conductivity(ξ_void, T, mat) ≈ 0.03 rtol = 1e-10
@@ -113,5 +111,5 @@ end
         reactions = (),
     )
     ε_wet = effective_emissivity((900.0, 100.0, 0.0), 300.0, mat_wet)
-    @test ε_wet > 0.90   # pre-fix (liquid ε = 0): 0.9·0.9 + 0.1·0 = 0.81
+    @test ε_wet > 0.90   # a liquid ε = 0 would give 0.9·0.9 + 0.1·0 = 0.81
 end

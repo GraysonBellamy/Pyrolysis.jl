@@ -828,8 +828,7 @@ Returns a NamedTuple with:
     precomputed for the coordinate-descent denominator.
   - `n_dead`::Int — number of columns zeroed out (for diagnostics).
 
-The computation is deterministic and identical to the inline version previously
-in `fit_pce_lasso`, so bit-for-bit output is preserved when this helper is used.
+The computation is deterministic.
 """
 function standardize_design_matrix(
     Φ::Matrix{Float64};
@@ -1348,8 +1347,8 @@ function fit_pce_lasso(
     #
     # Note: col_sq_norms[j] == n for all j (by construction of
     # standardize_design_matrix), so dividing z_j by n IS the correct LASSO
-    # update here. This is why the full-data refit is unaffected by the bug
-    # that used to plague run_cv_fold! — see the LONG comment there.
+    # update here; `run_cv_fold!` instead rescales by the training-row norms
+    # (see the comment there).
     c = zeros(p)
     r_full = copy(y_centered)
     active_full = Int[]
@@ -1486,8 +1485,8 @@ end
 # ============================================================================
 
 """
-	bootstrap_sobol_ci(Z, y, mop, groups, n_boot; ci_level=0.95, use_sparse=false,
-		Φ=nothing, c_hat=nothing,
+	bootstrap_sobol_ci(y, mop, groups, n_boot; Φ, ci_level=0.95, use_sparse=false,
+		c_hat=nothing,
 		jack_Φ=nothing, jack_c=nothing, jack_h_diag=nothing,
 		jack_residuals=nothing, jack_support=nothing)
 
@@ -1531,14 +1530,13 @@ When jack_* are not provided, falls back to simple percentile intervals.
 Returns (S1_median, S1_lo, S1_hi, ST_median, ST_lo, ST_hi) each of length n_groups.
 """
 function bootstrap_sobol_ci(
-    Z::Matrix{Float64},
     y::Vector{Float64},
     mop::MultiOrthoPoly,
     groups::Vector{ParamGroup},
     n_boot::Int;
     ci_level::Float64 = 0.95,
     use_sparse::Bool = false,
-    Φ::Union{Nothing,Matrix{Float64}} = nothing,
+    Φ::Matrix{Float64},
     c_hat::Union{Nothing,Vector{Float64}} = nothing,
     jack_Φ::Union{Nothing,Matrix{Float64}} = nothing,
     jack_c::Union{Nothing,Vector{Float64}} = nothing,
@@ -1560,31 +1558,10 @@ function bootstrap_sobol_ci(
     rng = MersenneTwister(123)
     boot_indices = [rand(rng, 1:n, n) for _ = 1:n_boot]
 
-    # If the caller supplied Φ, use Φ[idx, :] instead of rebuilding the
-    # design matrix via build_design_matrix(Z[idx, :], mop) per replicate.
-    #
-    # Rationale (verified empirically, not assumed):
-    #   1. PolyChaos.build_design_matrix is thread-safe on shared mop
-    #      (verified in test_polychaos_threadsafety.jl: 96.9M entries
-    #      bit-for-bit identical between sequential and 12-thread parallel
-    #      execution with shared MultiOrthoPoly).
-    #   2. However, the original bootstrap loop used to hang at production
-    #      scale (n=8192, degree 3, 1000 replicates). The likely cause is
-    #      GC pressure from per-replicate allocations: each call to
-    #      build_design_matrix allocates a ~64 MB Φ_b matrix plus ~1 MB
-    #      Z_b = Z[idx, :] plus ~10-20 MB LAPACK workspace. Across 1000
-    #      replicates that's ~80 GB of allocation churn hitting Julia's
-    #      stop-the-world GC.
-    #   3. Φ[idx, :] reuses the already-computed Φ (no rebuild) and is
-    #      mathematically identical to build_design_matrix(Z[idx, :], mop)
-    #      by the row-wise definition of the PCE basis. This equivalence
-    #      is verified empirically in test_bootstrap_phi_equivalence.jl on
-    #      the actual publication data: all 40M+ entries bit-for-bit equal
-    #      at degrees 2, 3, and 4.
-    #
-    # The chunked per-task preallocation below (Fix A) further reduces GC
-    # pressure by reusing Φ_b buffers across all replicates in a chunk.
-    use_direct_phi = !isnothing(Φ)
+    # Each replicate's design matrix is Φ[idx, :]: the PCE basis is defined
+    # row by row, so it equals build_design_matrix(Z[idx, :], mop) without
+    # rebuilding it. Copying into per-chunk buffers (below) keeps the
+    # allocation per chunk rather than per replicate.
     p_basis = mop.dim
 
     # Chunked task parallelism with per-chunk preallocated buffers.
@@ -1617,7 +1594,7 @@ function bootstrap_sobol_ci(
             # additionally needs G (p×p), b_vec (p), and c_sol (p). These
             # are small compared to Φ_b and preallocating them avoids ~15 KB
             # of allocation per replicate.
-            Φ_b_buf = use_direct_phi ? Matrix{Float64}(undef, n, p_basis) : nothing
+            Φ_b_buf = Matrix{Float64}(undef, n, p_basis)
             y_b_buf = Vector{Float64}(undef, n)
             G_buf = use_sparse ? nothing : Matrix{Float64}(undef, p_basis, p_basis)
             b_vec_buf = use_sparse ? nothing : Vector{Float64}(undef, p_basis)
@@ -1631,33 +1608,23 @@ function bootstrap_sobol_ci(
                     y_b_buf[k] = y[idx[k]]
                 end
 
-                # Build Φ_b: either copy into preallocated buffer (fast path)
-                # or rebuild from Z (legacy fallback for callers not passing Φ)
-                Φ_b_local = if use_direct_phi
-                    # Column-major friendly copy: iterate j (outer), k (inner).
-                    # Inside column j of Φ_b_buf we write sequentially.
-                    # Reads from Φ[idx[k], j] are strided (random within column)
-                    # but column j of Φ is ≤64 KB and fits in L2/L3 cache.
-                    @inbounds for j = 1:p_basis
-                        for k = 1:n
-                            Φ_b_buf[k, j] = Φ[idx[k], j]
-                        end
+                # Copy Φ_b into the preallocated buffer. Column-major friendly:
+                # iterate j (outer), k (inner), writing column j sequentially.
+                # Reads from Φ[idx[k], j] are strided (random within column)
+                # but column j of Φ is ≤64 KB and fits in L2/L3 cache.
+                @inbounds for j = 1:p_basis
+                    for k = 1:n
+                        Φ_b_buf[k, j] = Φ[idx[k], j]
                     end
-                    Φ_b_buf
-                else
-                    # Legacy path: rebuild per replicate. NOT thread-safe
-                    # with shared mop, so this branch only works correctly
-                    # if the caller arranges for sequential execution.
-                    build_design_matrix(Z[idx, :], mop)
                 end
+                Φ_b_local = Φ_b_buf
 
                 if use_sparse
                     c_b, _, _, _ = fit_pce_lasso(Φ_b_local, y_b_buf)
                 else
-                    # Normal equations + Cholesky (Fix B).
-                    #
-                    # Replaces `Φ_b \ y_b` (LAPACK QR via dgels) with the
-                    # symmetric-positive-definite normal-equations approach.
+                    # Normal equations + Cholesky instead of `Φ_b \ y_b`
+                    # (LAPACK QR via dgels): the symmetric-positive-definite
+                    # normal-equations approach.
                     # Verified on real data at degree 3 with n=8192, p=969:
                     #
                     #   - κ(Φ'Φ) = 11.21 (extremely well-conditioned)
@@ -1892,11 +1859,9 @@ each level; these should be powers of two so each prefix is a well-distributed
 The fit method at each subsample is chosen based on the LOCAL oversampling
 ratio `ns / mop_sub.dim`, not on the full-data method. This prevents OLS from
 being used at rank-deficient subsample sizes (e.g., at degree 3 with
-ns = 1024, n_basis = 969, oversampling ≈ 1.06 — ill-posed for OLS). Previously,
-if the full-data fit used OLS (oversampling > SPARSE_THRESHOLD on the full
-data), the subsample fits inherited OLS regardless of their own oversampling,
-producing noisy/garbage indices at small ns and triggering false "not
-converged" diagnostics.
+ns = 1024, n_basis = 969, oversampling ≈ 1.06 — ill-posed for OLS): a
+subsample that inherited the full-data OLS choice would produce noisy indices
+at small ns and false "not converged" diagnostics.
 
 Returns (sample_sizes, S1_by_size) where S1_by_size[i] is the n_groups-length
 first-order index vector at subsample size sample_sizes[i].
@@ -2248,11 +2213,11 @@ function main()
                 end
             end
 
-            # Process QoIs in batches. After the memory refactor, each fold task
+            # Process QoIs in batches. Each fold task
             # allocates only O(n) working buffers (r_full, y_pred_full, col_sq_train,
             # c_fold — totalling <100 KB per fold at degree 4), and Φ_scaled is
-            # shared across all QoIs via precomp_d. Memory pressure is no longer a
-            # concern, but batching still helps bound GC churn from temporary
+            # shared across all QoIs via precomp_d. Memory is not the constraint;
+            # batching bounds GC churn from temporary
             # allocations. Override with JULIA_LASSO_BATCH=N if needed.
             batch_size_qoi = parse(
                 Int,
@@ -2842,7 +2807,6 @@ function main()
             flush(stdout)
 
             S1_med, S1_lo, S1_hi, ST_med, ST_lo, ST_hi = bootstrap_sobol_ci(
-                Z,
                 y,
                 mop,
                 GROUPS,

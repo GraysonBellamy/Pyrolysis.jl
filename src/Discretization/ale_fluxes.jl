@@ -187,9 +187,9 @@ ever supply a non-trivial (inflow/Dirichlet) ghost.
 @inline function _upwind_gradient_distance(state, i::Int, neighbor_id::Int)
     if neighbor_id == 0
         # Boundary: center-to-ghost-cell distance = full cell thickness Δz_i
-        # (= V_i/A_section = 2 × center-to-face), matching the mesh boundary
-        # face-distance convention. The returned value is inert in practice — the
-        # zero-gradient ghost forces the gradient numerator to zero (see above).
+        # (= V_i/A_section = 2 × center-to-face). The returned value is inert in
+        # practice — the zero-gradient ghost forces the gradient numerator to zero
+        # (see above).
         return state.volume[i] / state.A_section[]
     end
     return abs(state.cell_centers[i] - state.cell_centers[neighbor_id])

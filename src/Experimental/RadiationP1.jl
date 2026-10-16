@@ -22,8 +22,7 @@ This module ships:
 P1 is **Experimental**: research-grade, Float64-only (the G Newton solve and
 the radiation cache are Float64; state-vector `Dual`s are not supported), and
 out of scope for the unified trait dispatch. New code paths should use
-`SURFACE_ABSORPTION` or `BEER_LAMBERT`. P1 stays here until the trait system
-gets a `P1Radiation` mode.
+`SURFACE_ABSORPTION` or `BEER_LAMBERT`.
 """
 
 using ..Materials: NO_RADIATION, P1_QUASI_STEADY
@@ -66,7 +65,7 @@ Steps:
    `radiation_model = P1_QUASI_STEADY` (enforced), which zeroes the boundary
    `RadiativeFluxBC`/`RadiativeBC` fluxes and the core volumetric radiation
    source — P1 owns all radiation energy.
-2. Mirror `u` into the legacy `Mesh1D` (the P1 kernels are Float64-only and
+2. Mirror `u` into the `Mesh1D` (the P1 kernels are Float64-only and
    read cell temperatures and live geometry from the mesh).
 3. Update radiation properties (α, D_rad) and solve the quasi-steady P1
    system for G. This happens on **every** evaluation — G is an algebraic
@@ -92,7 +91,7 @@ function compute_p1_residual!(
     #    ws.state_cache / ws.prop_cache consistent with u.
     residual!(du, u, def, t, ws)
 
-    # 2) Legacy mesh sync for the Float64-only P1 kernels. residual! is
+    # 2) Mesh sync for the Float64-only P1 kernels. residual! is
     #    mesh-read-only, so the mesh must be refreshed here. The χ-driven
     #    cross-section area must land before the geometry update so cell
     #    volumes are rebuilt against the current A(t).
@@ -136,7 +135,7 @@ this is what keeps the incident radiation single-counted between the Marshak
 BC and the thermal boundary conditions.
 
 Construct explicitly in `Pyrolysis.Experimental`; the core `solve` path keeps
-P1 out of the unified residual until it gets a dedicated radiation trait.
+P1 out of the unified residual.
 """
 struct P1Residual{D,W,RC,RBC}
     def::D

@@ -79,7 +79,7 @@ end
 
 Lift a user-facing `PyrolysisProblem` into the immutable `ProblemDef`.
 The returned object shares the underlying material/BC data with the input
-but no longer carries any mutable mesh state.
+and carries no mutable mesh state.
 
 `radiation_kirchhoff` records the surface-transmissivity convention for the
 Beer–Lambert injection: `true` (the default) means `radiation_intensity` is

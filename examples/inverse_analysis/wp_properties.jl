@@ -39,9 +39,8 @@ const WP_RHO_ASH = WP_RHO_CHAR  # JSON note: ash ρ = char ρ for porous-media s
 # int4         476      0.16      83.2         83.2
 # char         812      0.15      89.2         89.2
 #
-# The old q-based front-loaded interpolation for intermediate density was a
-# closure fit to cone-test residue geometry. These dilatometry values are
-# direct component inputs, so density is no longer inferred from progress.
+# These dilatometry values are direct component inputs: the intermediate
+# densities are measured, not inferred from conversion progress.
 const WP_RHO_DILATOMETRY_RAW =
     (virgin = 357.5, int = (317.4, 283.9, 134.5, 83.2), char = 89.2)
 
@@ -726,9 +725,6 @@ const WP_STAGE3_BOUNDS =
 # measured χ̄_exp = 0.523, so it over-removes volume and (via the χ̄-driven
 # area law) over-shrinks the radius. Fix the low-flux kinetics and the
 # emergent L_f follows; see derive_shrinkage.py §[5] and validate_thickness.jl.
-#
-# Record: the former docs/variable_cross_section_plan.md has been removed;
-# this block is the authoritative derivation.
 
 const WP_D0 = 0.06950                    # m, overall pre-test mean (n=10)
 const WP_A0 = π * (WP_D0 / 2)^2          # m² ≈ 3.795e-3

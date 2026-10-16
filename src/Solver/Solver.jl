@@ -4,13 +4,13 @@
 Solution algorithms for the Pyrolysis.jl package.
 
 This module provides:
-- Main solve interface
-- Operator splitting
-- Callbacks
-- Steady-state solver
+- the `solve` interface and solution extraction;
+- the integrator callbacks (step update, cell parking, Newton-failure cap,
+  diagnostics);
+- the ILU-GMRES linear solver and `parameter_sweep`.
 
-ALE mesh motion is integrated into the unified residual / workspace pair.
-This ensures proper mass conservation.
+ALE mesh motion is part of the residual's state (node positions), so mesh and
+material move together in one implicit system.
 """
 module Solver
 

@@ -149,9 +149,7 @@ Sutherland's law for the temperature dependence of a gas transport property:
 The zero-argument form is the canonical Sutherland **air** triple
 (μ_ref = 1.716e-5 Pa·s at T_ref = 273.15 K, S = 110.4 K; e.g. White, *Viscous
 Fluid Flow*), giving μ(300 K) = 1.846e-5 Pa·s. This is the default carried by
-[`Material`](@ref)'s `gas_viscosity` field, so a material that says nothing
-about its pore gas behaves exactly as the package did before that field
-existed.
+[`Material`](@ref)'s `gas_viscosity` field.
 
 # Fields
 - `μ_ref`: Reference viscosity at `T_ref` [Pa·s]
@@ -159,11 +157,12 @@ existed.
   datum `T_REF = 298.15 K`; do not conflate the two
 - `S`: Sutherland constant [K]
 
-# Note on the low-temperature clamp
-This type evaluates the bare correlation and does **not** clamp `T`. The floor
-that keeps `T^1.5` evaluable for diverging Newton trial states is applied once,
-centrally, in `Properties.effective_gas_viscosity(T, material)`, so it protects
-every property function a material might carry — not just this one.
+# Temperature bracket
+Like every property law, it evaluates at `property_temperature(T)`, the
+temperature clamped to `[T_PROPERTY_MIN, T_PROPERTY_MAX]`, so a diverging
+Newton trial state cannot reach `T^1.5` at a negative temperature. The
+viscosity floor `MU_FLOOR` is applied separately, in
+`Properties.effective_gas_viscosity(T, material)`.
 
 # Example
 ```julia

@@ -31,7 +31,7 @@ using ..Diagnostics
 using ..Solver
 
 # Resolve all submodule references through the parent (`Pyrolysis`) instead of
-# bare names (some, e.g. a former `Core`, would shadow Base under Julia 1.12).
+# bare names, which could shadow Base names.
 const _SUBMODULES = let p = parentmodule(@__MODULE__)
     (
         p.Materials,

@@ -45,21 +45,14 @@ strict upper-triangular all-ones matrix. It is pushed as an
 [`EmbeddedScaledSuffixSumCoupling`](@ref) with row scale `−q_rad[i]`; the
 diagonal `j == i` term is added separately.
 
-# Known approximation under ALE — missing z-channel
+# z columns under ALE
 
-This operator fills **T and ξ columns only**. Under ALE the residual's
-Beer–Lambert deposit also depends on the live geometry (`Δz_i = V_i/A` from
-the z block of the state): `∂q_rad[i]/∂z_node ≠ 0` through both the per-cell
+This operator fills **T and ξ columns only**. Under ALE the deposit also
+depends on the live geometry (`Δz_i = V_i/A`), through the per-cell
 `(1 − e^{−α_iΔz_i})/Δz_i` factor and the transmission suffix
-`exp(−Σ_{j>i} α_jΔz_j)`. Those z-columns are **deliberately omitted** — the
-Jacobian is exact in (T, ξ) and inexact in z whenever
-`radiation_model == BEER_LAMBERT` and the mesh moves. This degrades only the
-implicit integrator's Newton convergence (sensitivities do not consume this
-Jacobian); the residual itself is exact. The omission cannot be expressed
-through the backend-level `is_approximate` trait (it is mode- and
-layout-dependent, not backend-dependent) — verifier runs that perturb the z
-block under BEER_LAMBERT + ALE must expect mismatches in these slots. A full
-z-channel needs geometry-suffix couplings analogous to the α suffix above.
+`exp(−Σ_{j>i} α_jΔz_j)`. Those z columns are written by the
+[`GeometryOperator`](@ref)'s AD pass over the full residual under the exact
+`:full` profile; `:ale_reduced` drops the z columns altogether.
 """
 
 using ForwardDiff
@@ -257,6 +250,11 @@ function apply!(
     error("RadiationOperator: unknown radiation model $(model).")
 end
 
+# Tag for the Beer-Lambert property stack-Dual sweeps (α and the
+# Kirchhoff ε_eff chain). Keeps these duals from colliding with any
+# outer AD in flight.
+struct _BLPropTag end
+
 """
 	compute_alpha_derivatives!(ws::BeerLambertWorkspace, state, mesh, prop_cache,
 	                           material) -> nothing
@@ -272,12 +270,6 @@ builds dominated the Beer-Lambert Jacobian allocation profile). For
 materials whose `α` is state-independent (constant per component,
 weighted by ξ), the derivatives reduce to constants and this is cheap.
 """
-
-# Tag for the Beer-Lambert property stack-Dual sweeps (α and the
-# Kirchhoff ε_eff chain). Keeps these duals from colliding with any
-# outer AD in flight.
-struct _BLPropTag end
-
 function compute_alpha_derivatives!(
     ws::BeerLambertWorkspace,
     state,

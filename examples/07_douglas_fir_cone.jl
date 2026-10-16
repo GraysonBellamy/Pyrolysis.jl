@@ -8,7 +8,7 @@ to track the material as it decomposes:
 - ALE mesh motion for accurate shrinkage modeling
 - Surface absorption radiation model for efficient opaque material simulation
 - Multi-step pyrolysis kinetics with char formation
-- Structured Jacobian (`Structured(strategy=DirectSolve())`) for fast assembly
+- Structured Jacobian (`ApproxSolve`, the ALE default) for fast assembly
 - Bruggeman mixing rules for effective properties
 - Species-specific transport (light gases diffuse faster)
 
@@ -45,7 +45,7 @@ New Features Demonstrated:
 - Physically-based gas transfer coefficients (λ ~ 1e-5 to 1e-4 m²/s)
 - Darcy-Fick gas transport (diffusion + pressure-driven flow)
 - Temperature-dependent permeability evolution (virgin wood → porous char)
-- Species-specific molar masses for transport scaling
+- Species molar masses in the ideal-gas pore pressure (Darcy)
 - ALE mesh motion with analytical Jacobian for performance
 """
 
@@ -484,7 +484,10 @@ dt_initial = 1e-3           # initial timestep
 
 # Environmental conditions
 T_ambient = 300.0           # K - ambient temperature (27°C)
-q_external = 75e3  # W/m² - 50 kW/m² external heat flux
+q_external = 75e3  # W/m² - external heat flux
+# Output files carry the flux, e.g. douglas_fir_results_75kWm2_fit.csv.
+results_csv = "douglas_fir_results_$(round(Int, q_external / 1000))kWm2_fit.csv"
+spatial_csv = "douglas_fir_spatial_$(round(Int, q_external / 1000))kWm2_fit.csv"
 
 # Convective heat transfer coefficient for cone calorimeter
 h_conv = 10.0                # W/(m²·K)
@@ -1020,7 +1023,9 @@ end
 
 # Combine all plots
 final_plot = plot(p1, p1b, p2, p3, p4, p5, layout = (2, 3), size = (1400, 800))
-plot!(plot_title = "Cone Calorimeter Simulation: Douglas Fir at 50 kW/m² (ALE Mesh)")
+plot!(
+    plot_title = "Cone Calorimeter Simulation: Douglas Fir at $(round(Int, q_external / 1000)) kW/m² (ALE Mesh)",
+)
 
 # Save plot
 savefig(final_plot, "cone_calorimeter_douglas_fir_results.png")
@@ -1314,7 +1319,7 @@ println(
 println("\nWriting comprehensive CSV output...")
 
 # Write CSV manually with all diagnostic quantities
-open("douglas_fir_results_75kWm2_fit.csv", "w") do io
+open(results_csv, "w") do io
     # Header - organized in logical groups
     header = [
         # Time and basic state
@@ -1490,7 +1495,7 @@ open("douglas_fir_results_75kWm2_fit.csv", "w") do io
     end
 end
 
-println("Comprehensive CSV output saved to: douglas_fir_results_75kWm2_fit.csv")
+println("Comprehensive CSV output saved to: $(results_csv)")
 println(
     "  - Total columns: 59 (6 basic + 3 temps + 7 solids + 6 mass + 12 gas + 5 props + 6 heat + 3 energy + 7 rxn + 6 gen)",
 )
@@ -1527,7 +1532,7 @@ spatial_output_times = [
     1000.0,
 ]
 
-open("douglas_fir_spatial_75kWm2_fit.csv", "w") do io
+open(spatial_csv, "w") do io
     # Header
     header = [
         "time_s",
@@ -1608,7 +1613,7 @@ open("douglas_fir_spatial_75kWm2_fit.csv", "w") do io
     end
 end
 
-println("Spatial data saved to: douglas_fir_spatial_75kWm2_fit.csv")
+println("Spatial data saved to: $(spatial_csv)")
 
 # ============================================================================
 # Boundary Temperature Information
@@ -1689,6 +1694,6 @@ println("  ✓ Darcy-Fick gas transport (diffusion + pressure-driven flow)")
 println(
     "  ✓ Temperature-dependent permeability (virgin: $(κ_virgin) m², char: $(κ_char) m²)",
 )
-println("  ✓ Species-specific molar masses for transport scaling")
+println("  ✓ Species molar masses in the ideal-gas pore pressure (Darcy)")
 println("  ✓ ALE mesh motion with analytical Jacobian")
 println("  ✓ Solver-computed boundary fluxes (MLR, heat flux decomposition)")

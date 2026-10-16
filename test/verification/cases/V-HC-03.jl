@@ -53,7 +53,7 @@ function _verification_case_vhc03()
                     name = "L∞ T-profile error, Fo=$(Fo)",
                     value = err,
                     error = err,
-                    tol = 0.006,  # 3× observed max: 2.0e-3 K at Fo=0.1 (n=80, 2026-07-06)
+                    tol = 0.006,  # 3× observed max: 2.0e-3 K at Fo=0.1 (n=80)
                     comment = "observed 2.0e-3/1.5e-3/1.3e-3 K at Fo=0.1/0.5/1.5",
                 ),
             )
@@ -72,7 +72,7 @@ function _verification_case_vhc03()
                 value = ΔT_num,
                 exact = ΔT_exact,
                 error = abs(ΔT_num - ΔT_exact),
-                tol = 1e-5,  # observed 3.2e-7 K (n=80, 2026-07-06); generous vs integrator tol
+                tol = 1e-5,  # observed 3.2e-7 K (n=80); generous vs integrator tol
                 comment = "steady-shape plateau q″L/2k = 100 K between faces",
             ),
         )
@@ -88,7 +88,7 @@ function _verification_case_vhc03()
                 value = rise_num,
                 exact = rise_exact,
                 error = abs(rise_num - rise_exact),
-                tol = 1e-5,  # observed 5.7e-14 K of 200 K (n=80, 2026-07-06); integrator headroom
+                tol = 1e-5,  # observed 5.7e-14 K of 200 K (n=80); integrator headroom
                 comment = "exact constant q″/(ρcL) = 0.25 K/s; integrator-tolerance limited",
             ),
         )
@@ -115,7 +115,7 @@ function _verification_case_vhc03()
             n_cells = 80,
             budget_s = 20.0,
             convergence = ConvergenceSpec(
-                # observed rates 1.9999, 1.9999 (2026-07-06)
+                # observed rates 1.9999, 1.9999
                 n_cells = [40, 80, 160],
                 error_fn = l2_error_fo01,
                 expected_order = 2.0,

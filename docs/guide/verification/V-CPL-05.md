@@ -5,7 +5,6 @@
 **References:**
 
 - MaCFP condensed-phase guidelines (2020) — TGA target simulations
-- Verification Suite Plan 2026-07-06, V-CPL-05
 
 ## Problem statement
 

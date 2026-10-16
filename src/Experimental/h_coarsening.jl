@@ -231,9 +231,8 @@ function coarsen_cells!(
 
     mesh.n_active_cells -= 1  # Net loss of 1 (removed 2, added 1)
 
-    # Note: The intermediate face and node are left in the arrays but are now orphaned.
-    # A full mesh compaction would be needed to remove them, but that would invalidate
-    # indices throughout the code. For now, we just leave them.
+    # The intermediate face and node stay in the arrays, orphaned: compacting
+    # them away would invalidate indices held throughout the code.
 
     assert_amr_invariants(mesh)
     return parent_id

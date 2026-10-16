@@ -8,7 +8,7 @@ absorptivity.
 - `absorptivity` is an optional constant per condensed component. The
   mixture `a_eff = Σⱼ vⱼ aⱼ` uses `aⱼ = εⱼ(T)` (Kirchhoff) for components
   that leave it unset, so with none set `a_eff == ε_eff` bit-for-bit — the
-  invariant that keeps every pre-existing case unchanged.
+  invariant for materials that set no absorptivity.
 - The property cache carries both (`cache.ε`, `cache.a`).
 - ForwardDiff through `effective_emissivity` / `effective_absorptivity`
   yields the component-emissivity slope.
@@ -152,7 +152,7 @@ end
     end
     @test effective_emissivity(ξ, 500.0, mat) != effective_emissivity(ξ, 1000.0, mat)
 
-    # Scalar ε on every component: the historical constant sum.
+    # Scalar ε on every component: the constant volume-weighted sum.
     mat_c = Material(
         name = :ea_const,
         components = (

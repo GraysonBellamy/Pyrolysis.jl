@@ -332,12 +332,11 @@ Alternatives include `MassFluxBC(J)` (prescribed flux), `DiffusiveMassBC(h_m)`
 means no external resistance), and the pressure BCs used in Darcy mode. See
 User Guide §UG-5.
 
-> **Caveat — do not enable surface transpiration here.** Pyrolysis.jl's default
-> energy form (`energy_form = :standard`) already carries gas enthalpy through a
-> volumetric convection source `S_conv`. The opt-in surface-transpiration term
-> (`use_transpiration_bc = true`) would double-count that enthalpy, and `solve`
-> rejects it with an error. Leave it off (the default). See §2.6 and Technical
-> Reference §7.
+> **The escaping gas carries no enthalpy term at the surface.** The energy
+> equation already carries the gas enthalpy through the volumetric convection
+> source `S_conv`, so the boundary energy balance contains only the applied
+> thermal BC flux and the conducted flux; a surface gas-enthalpy term would
+> count the same enthalpy twice. See §5.4 and Technical Reference §7.
 
 ### 2.3.3 Collect into a `BoundaryConditionSet`
 
@@ -444,9 +443,9 @@ next. The simulation-mode trait system is covered in User Guide §UG-7.
 
 `solve(problem; kwargs...)` integrates the problem forward and returns a
 `PyrolysisSolution`. With no options it runs a fixed (Eulerian) mesh, no
-volumetric radiation, the `:standard` energy form, and a stiff implicit
-integrator. For a cone run we make two deliberate choices: track the receding
-surface with ALE mesh motion, and deposit the cone radiation at the surface.
+volumetric radiation, and a stiff implicit integrator. For a cone run we make two
+deliberate choices: track the receding surface with ALE mesh motion, and deposit
+the cone radiation at the surface.
 
 ```julia
 solution = solve(
@@ -456,8 +455,8 @@ solution = solve(
     use_ale = true,                         # move the mesh as the sample shrinks
     radiation_model = SURFACE_ABSORPTION,   # absorb cone flux at the surface
     min_thickness = 0.01e-3,                # terminate when sample < 0.01 mm thick
-    handle_depletion = true,                # merge surface cells as they thin out
-    depletion_threshold = 0.05,             # merge a cell below 5 % of its initial Δz
+    handle_depletion = true,                # park surface cells as they thin out
+    depletion_threshold = 0.05,             # park a cell below 5 % of its initial Δz
     min_cells = 1,                          # never go below 1 cell
     progress = true,                        # show a progress bar
 )
@@ -478,7 +477,7 @@ session reuse the compiled code, including runs with other parameter values
 | `radiation_model` | `NO_RADIATION` | `SURFACE_ABSORPTION` absorbs the cone flux at the surface |
 | `min_thickness` | `1e-6` | ALE termination thickness [m] |
 | `handle_depletion` | `false` | park depleted cells (ALE or fixed mesh) |
-| `depletion_threshold` | `0.05` | cell-thinness fraction that triggers a merge |
+| `depletion_threshold` | `0.05` | cell-thinness fraction that triggers a park |
 | `min_cells` | `2` | floor on cell count before termination |
 | `progress` | `true` | progress bar |
 
@@ -530,19 +529,13 @@ User Guide §UG-8):
 - **`integrator`** (default `KenCarp4`) and **`linear_solver`** (default
   chosen from the Jacobian's sparsity pattern, §8.4) — the time integrator and
   sparse linear solver.
-- **`energy_form`** (default `:standard`) — `:standard` carries gas enthalpy via
-  the volumetric `S_conv` term; `:with_generation_sink` adds the gas-generation
-  enthalpy sink, which is consistent **only with T_ref-datum reaction heats**
-  (it double-counts gas sensible enthalpy under the usual DSC-style heats —
-  §7.7). Leave at `:standard` unless you have a specific reason.
-- **`use_transpiration_bc`** (default `false`) — **leave off.** It double-counts
-  gas enthalpy against `S_conv` and `solve` raises an error if set `true`.
 - The effect of outgassing on convective exchange is a property of each
   `ConvectiveBC` (its `blowing` model, §5.2.3), not a solve option.
-- **`diagnostics`** (default `false`) — snapshot the conservation ledgers every
-  `diagnostics_stride` steps (default 10) for energy/mass-balance auditing.
+- **`diagnostics`** (default `false`) — log a sensible-energy snapshot every
+  `diagnostics_stride` accepted steps (default 10) in
+  `solution.extras.diagnostics_log`.
 - **`handle_depletion`** — park depleted cells (Chapter 10). The state keeps
-  its size, so it combines with any `jacobian`.
+  its size, so it combines with either Jacobian strategy.
 - **`warm_start`** — reuse a prior solution's final state as the initial
   condition for a continuation run.
 
@@ -695,11 +688,10 @@ using Plots
 plot(solution)                      # surface-temperature trace (the default)
 plot(solution; kind = :mlr)         # mass-loss-rate curve [kg/(m²·s)]
 plot(solution; kind = :heatmap)     # T(z, t) field as a heatmap
-plot(solution; kind = :residual)    # energy-conservation residual (zeros unless diagnostics on)
 ```
 
-The recognised `kind` values are `:surface_T` (default), `:mlr`, `:heatmap`, and
-`:residual`; any other value raises an informative error.
+The recognised `kind` values are `:surface_T` (default), `:mlr`, and `:heatmap`;
+any other value raises an informative error.
 
 For a publication-style multi-panel figure you build the series yourself from the
 fields. A typical cone summary — an MLR/gas-generation proxy, the surface and
@@ -722,8 +714,8 @@ p3 = plot(xlabel = "Depth [mm]", ylabel = "Temperature [K]",
           title = "Temperature profiles")
 for t_target in (30, 120, 300, 600, 1200)
     i = argmin(abs.(times .- t_target))
-    Tp = solution.T[:, i]
-    length(Tp) <= 1 && continue                      # skip if the mesh merged to 1 cell
+    Tp = filter(!isnan, solution.T[:, i])            # live cells (parked slots read NaN)
+    length(Tp) <= 1 && continue                      # skip if one live cell remains
     L_now = solution.extras.thickness_history[i]
     z_mm  = range(0.0, L_now * 1000, length = length(Tp))
     plot!(p3, z_mm, Tp; lw = 1.5, label = "t = $(round(times[i])) s")
@@ -848,9 +840,9 @@ plot(solution; kind = :mlr)
   kinetic parameters (User Guide §UG-12), or `forward_sensitivity` /
   `adjoint_sensitivity` to compute gradients of an output with respect to
   `A`, `E`, `h`, or material properties (User Guide §UG-13).
-- **Audit conservation.** Re-run with `diagnostics = true` and inspect
-  `solution.extras.diagnostics_log` to verify the energy and mass ledgers close.
-  (Technical Reference §16.)
+- **Watch the energy history.** Re-run with `diagnostics = true` and inspect
+  `solution.extras.diagnostics_log`, a sensible-energy snapshot every
+  `diagnostics_stride` accepted steps (UG §9.8; Technical Reference §16).
 
 You now have the full pipeline — material, boundary conditions, mesh, problem,
 solve, solution — and can recombine these pieces for any of the worked cases in

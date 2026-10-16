@@ -24,7 +24,7 @@
 # are the components' BULK densities (the strain kernel uses bulk ρ, not
 # ρ_intrinsic — see the SolidComponent docstring note).
 #
-# NOTE the plan's "γ > 1 intumescent branch" is NOT representable: γ is
+# NOTE a γ > 1 intumescent branch is NOT representable: γ is
 # validated to [0, 1] (universal volume-fraction semantics shared with
 # mixture density and conductivity mixing). Swelling is exercised through
 # ρ_B < ρ_A (P1) and the partial-contribution branch through γ_B ∈ (0, 1)
@@ -245,8 +245,8 @@ function _verification_case_vcpl03()
         out = QoIResult[]
         # tolerances: residual conversion e⁻¹⁶ ≈ 1.1e-7 plus integrator error;
         # pin at 3× observed via the print run.
-        tol_thick = 3e-6   # 3× observed max: 7.1e-7 (P1, 2026-07-06)
-        tol_mass = 2e-6    # 3× observed max: 6.5e-7 (P1 total mass, 2026-07-06)
+        tol_thick = 3e-6   # 3× observed max: 7.1e-7 (P1)
+        tol_mass = 2e-6    # 3× observed max: 6.5e-7 (P1 total mass)
         # P1 from the harness solve
         r1 = (; sol, exact_Vf = 2.0, L = 2e-3, ρ_A = 1000.0, perm = :P1)
         _vcpl03_qois_for(r1, out; tol_thick = tol_thick, tol_mass = tol_mass)

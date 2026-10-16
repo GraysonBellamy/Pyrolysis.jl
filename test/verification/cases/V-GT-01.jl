@@ -75,7 +75,7 @@ function _verification_case_vgt01()
                     name = "L∞ ξ-profile error / peak, t=$(t) s",
                     value = err,
                     error = err,
-                    tol = 4e-3,  # 3× observed max: 1.25e-3 at t=2 s (n=160, 2026-07-06)
+                    tol = 4e-3,  # 3× observed max: 1.25e-3 at t=2 s (n=160)
                     comment = "Gaussian stays Gaussian; n=160 uniform, σ₀ = 4Δz",
                 ),
             )
@@ -93,7 +93,7 @@ function _verification_case_vgt01()
                 name = "gas-mass conservation (sealed)",
                 value = m_err,
                 error = m_err,
-                tol = 1e-13,  # observed 1.7e-15 (2026-07-06)
+                tol = 1e-13,  # observed 1.7e-15
                 comment = "antisymmetric face fluxes telescope exactly",
             ),
         )
@@ -111,7 +111,7 @@ function _verification_case_vgt01()
                     value = var_num,
                     exact = σ2(t),
                     error = abs(var_num - σ2(t)) / σ2(t),
-                    tol = 2e-5,  # 3× observed max: 5.0e-6 at t=8 s (2026-07-06; grows w/ boundary truncation)
+                    tol = 2e-5,  # 3× observed max: 5.0e-6 at t=8 s (grows w/ boundary truncation)
                     comment = "Var(t) = σ₀² + 2dt; relative error reported",
                 ),
             )
@@ -142,7 +142,7 @@ function _verification_case_vgt01()
             n_cells = 160,
             budget_s = 20.0,
             convergence = ConvergenceSpec(
-                # observed rates 2.009, 2.002 (2026-07-06)
+                # observed rates 2.009, 2.002
                 n_cells = [80, 160, 320],
                 error_fn = l2_error_t4,
                 expected_order = 2.0,

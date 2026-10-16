@@ -121,7 +121,7 @@ function _verification_case_vmms01()
                     name = "L∞ T error, t=$(t) s",
                     value = mms_Linf_T(sol, fields; m = m),
                     error = mms_Linf_T(sol, fields; m = m),
-                    tol = 0.05,  # 3× observed max: 0.0163 K at t=10 s (n=40, 2026-07-06)
+                    tol = 0.05,  # 3× observed max: 0.0163 K at t=10 s (n=40)
                     comment = "manufactured T* recovered on the coupled system; " *
                               "observed 0.0163/0.0124 K at t=10/20 s",
                 ),
@@ -139,7 +139,7 @@ function _verification_case_vmms01()
                     name = "relative L∞ $(name) error, t=$(t_end) s",
                     value = err,
                     error = err,
-                    tol = tol,  # 3× observed (n=40, 2026-07-06)
+                    tol = tol,  # 3× observed (n=40)
                     comment = "scale = manufactured baseline; observed $(obs); " *
                               "L∞ ξ orders ≈ 2.0 on [20,40,80] at pin time",
                 ),
@@ -156,7 +156,7 @@ function _verification_case_vmms01()
         tags = [:mms, :coupled, :kinetics, :gas_transport, :order_verification],
         references = [
             "Roache, Verification and Validation in Computational Science (MMS methodology)",
-            "docs/src/guide/technical_reference/18_verification-validation.md §18.2 (the documented gap)",
+            "docs/guide/technical_reference/18_verification-validation.md §18.2 (the documented gap)",
             "FDS Verification Guide (MMS usage precedent, fluid phase)",
         ],
         build = build,
@@ -167,7 +167,7 @@ function _verification_case_vmms01()
             n_cells = 40,
             budget_s = 30.0,
             convergence = ConvergenceSpec(
-                # observed rates 1.980, 1.994 (2026-07-06); L∞ ξ_A/ξ_gas also
+                # observed rates 1.980, 1.994; L∞ ξ_A/ξ_gas also
                 # order ≈ 2.00 on the same ladder at pin time
                 n_cells = [20, 40, 80],
                 error_fn = l2_T_final,

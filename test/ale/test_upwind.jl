@@ -88,8 +88,9 @@ using Pyrolysis.Geometry: update_geometry!, CellState
 
         # First-order upwind error = d/(2z) × T''/T', which is large near z≈0.
         # Check that the error DECREASES away from z=0 (not a constant bias).
-        # With the bug, ALL cells would show ~50% error regardless of position.
-        # With the fix, only cells near z≈0 have large error (inherent to upwind).
+        # A cell-width gradient would show ~50% error in ALL cells regardless
+        # of position; here only cells near z≈0 have large error (inherent to
+        # upwind).
         @test checked > 5
 
         # Check that cells far from z=0 have small error (< 10%)
@@ -143,7 +144,8 @@ using Pyrolysis.Geometry: update_geometry!, CellState
         end
 
         # First-order upwind should give rate ≥ 1
-        # With the bug: rate ≈ 0 (error doesn't decrease on fixed stretch ratio)
+        # A cell-width gradient gives rate ≈ 0 (the error doesn't decrease on a
+        # fixed stretch ratio)
         @test !isempty(rates)
         avg_rate = sum(rates) / length(rates)
         @test avg_rate > 0.8

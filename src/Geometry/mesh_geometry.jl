@@ -6,9 +6,10 @@ moves (ALE) or is regenerated (AMR): node positions, cell volumes, face areas
 and (for D ≥ 2) face normals. The cross-sectional area `A(t)` for the 1D
 specialization lives here as a scalar.
 
-Geometry instances live inside the `Workspace` so the immutable
-[`MeshTopology`](@ref) does not have to be rebuilt every time `z` or `V`
-changes.
+The `Workspace` carries one, built from the mesh at construction, as the
+mutable counterpart of the immutable [`MeshTopology`](@ref) for a multi-dimensional
+extension. The 1D residual reads its geometry from the `StateCache`, not from
+this type.
 
 # Type Parameters
 - `D`: Spatial dimension (1 today; 2/3 are the design target)
@@ -77,7 +78,7 @@ end
 	resize_geometry!(g::MeshGeometry, n_nodes_new, n_cells_new, n_faces_new)
 
 Resize all internal buffers in-place. Existing values are preserved up to
-the new size; new entries are zero. Used after AMR or h-refinement.
+the new size; new entries are zero.
 """
 function resize_geometry!(
     g::MeshGeometry,

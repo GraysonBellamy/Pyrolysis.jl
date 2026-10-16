@@ -60,8 +60,7 @@ end
         @test get_radiation_intensity(p1, 1) == rad_cache.G[1]
 
         # Heat the state: the next evaluation must re-solve G from the new
-        # temperatures (the old state-vector G block stayed at its initial
-        # value forever).
+        # temperatures rather than keep G at its initial value.
         u2 = copy(u)
         u2[1:n] .+= 300.0
         p1(du, u2, nothing, 0.0)

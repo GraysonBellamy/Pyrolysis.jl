@@ -93,7 +93,7 @@ function _verification_case_vrx03()
                     name = "max relative ξ_$(species) error",
                     value = err,
                     error = err,
-                    tol = 1e-8,  # 3× observed max: 2.3e-9 (ξ_A; abstol=1e-12, 2026-07-06)
+                    tol = 1e-8,  # 3× observed max: 2.3e-9 (ξ_A; abstol=1e-12)
                     comment = "competing-parallel exact split k₁:k₂ × yields",
                 ),
             )
@@ -105,7 +105,7 @@ function _verification_case_vrx03()
                 name = "total-mass conservation (incl. retained gas)",
                 value = mass_err,
                 error = mass_err,
-                tol = 1e-13,  # observed 8.0e-16 (2026-07-06)
+                tol = 1e-13,  # observed 8.0e-16
                 comment = "yields sum to 1 per reaction; gas sealed in",
             ),
         )
@@ -120,7 +120,7 @@ function _verification_case_vrx03()
                 name = "reaction-heat superposition (quasi-steady cell drift)",
                 value = drift_err,
                 error = drift_err,
-                tol = 1e-4,  # 3× observed 2.8e-5 K of ~0.02 K amplitude (2026-07-06)
+                tol = 1e-4,  # 3× observed 2.8e-5 K of ~0.02 K amplitude
                 comment = "T_c − T_bc = Q̇Δz²/(4k) exactly in the discrete steady balance; " *
                           "drift amplitude ~0.02 K at t=0 (h₁k₁+h₂k₂ superposed)",
             ),

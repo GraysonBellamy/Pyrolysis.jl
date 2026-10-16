@@ -5,7 +5,7 @@
 **References:**
 
 - Roache, Verification and Validation in Computational Science (MMS methodology)
-- docs/src/guide/technical_reference/18_verification-validation.md §18.2 (the documented gap)
+- docs/guide/technical_reference/18_verification-validation.md §18.2 (the documented gap)
 - FDS Verification Guide (MMS usage precedent, fluid phase)
 
 ## Problem statement

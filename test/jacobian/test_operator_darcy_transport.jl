@@ -85,7 +85,7 @@ function _reference_darcy_transport(
         prop_cache.darcy.φ,
     )
     # Cell-centered convective source. The q_faces argument feeds only the
-    # boundary cells' blended gradient, which this operator no longer owns
+    # boundary cells' blended gradient, which this operator does not own
     # (BCConvectionOperator does) — pass zeros and zero the boundary cells
     # below to match the operator's contract.
     q_zero = zeros(eltype(S_conv_buf), length(state.A_face))

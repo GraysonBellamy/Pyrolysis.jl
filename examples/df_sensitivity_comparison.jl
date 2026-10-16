@@ -1,11 +1,13 @@
 """
 Douglas Fir Cone Calorimeter: ThermaKin vs Julia Comparison
 
-Parses ThermaKin output (DF_sensitivity_Cone_output.txt) and Julia results
-(douglas_fir_results_50kWm2_fit.csv) and generates comparison plots.
+Parses ThermaKin output (DF_sensitivity_Cone_output.txt, a 50 kW/m² run) and
+Julia results (douglas_fir_results_50kWm2_fit.csv) and generates comparison
+plots. The Julia results come from `examples/07_douglas_fir_cone.jl` run from
+the repository root with `q_external = 50e3`.
 
 Usage:
-  julia --project=. examples/df_sensitivity_comparison.jl
+  julia --project=examples examples/df_sensitivity_comparison.jl
 """
 
 using Plots

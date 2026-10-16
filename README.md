@@ -4,7 +4,7 @@
 
 A Julia package for simulating thermal decomposition (pyrolysis) of
 materials under high heat flux. Uses an Arbitrary Lagrangian-Eulerian
-(ALE) finite-volume discretisation with adaptive meshing, Arrhenius
+(ALE) finite-volume discretisation with surface-cell depletion, Arrhenius
 kinetics, in-depth radiation absorption, and pressure-driven gas
 transport (Darcy–Fick).
 
@@ -16,7 +16,7 @@ transport (Darcy–Fick).
 - In-depth radiation absorption via Beer–Lambert (or surface absorption)
 - Material volume changes — shrinkage, swelling, intumescence
 - ALE mesh motion with surface regression and internal interface tracking
-- Adaptive mesh refinement (h- and r-adaptivity)
+- Surface burnout by depleted-cell parking
 - Operator-based `Structured` Jacobian with selectable solve strategies,
   a dense AD verifier, and pluggable linear solvers
 - Pluggable extensions for Plots recipes and SciML sensitivities
@@ -34,7 +34,7 @@ pmma = Material(
     ),
     reactions = (
         Reaction(:decomposition, :virgin => :MMA;
-                 A = 8.5e12, E = 188e3, h = -870e3),
+                 A = 8.5e12, E = 188e3, h = 870e3),
     ),
 )
 
@@ -58,7 +58,6 @@ using Plots
 plot(sol)                     # surface temperature trace
 plot(sol; kind = :heatmap)    # T(z, t) heatmap
 plot(sol; kind = :mlr)        # mass-loss rate
-plot(sol; kind = :residual)   # energy-conservation residual
 ```
 
 ## Installation
@@ -72,16 +71,15 @@ Pkg.add(url = "https://github.com/GraysonBellamy/Pyrolysis.jl")
 
 ## Public API
 
-The top-level surface is intentionally curated relative to the pre-refactor
-package, while keeping the primary problem-building and solver hooks easy to
-reach. Everything else is reachable as `Pyrolysis.<Submodule>.X` or via the
+The top-level surface exports the problem-building and solver names.
+Everything else is reachable as `Pyrolysis.<Submodule>.X` or via the
 `Pyrolysis.Internal` umbrella module (`using Pyrolysis.Internal`) for
 advanced users. Highlights:
 
 | Group | Names |
 |-------|-------|
 | Materials | `Material`, `SolidComponent`, `GaseousComponent`, `LiquidComponent`, `Reaction`, `MaterialMixing`, `MixingSpec`, `PARALLEL`, `SERIES`, `WEIGHTED`, `BRUGGEMAN` |
-| Properties | `ConstantProperty`, `LinearProperty`, `PolynomialProperty`, `ArrheniusProperty`, `TableProperty`, `CallableProperty`, `StateDependentProperty` |
+| Properties | `ConstantProperty`, `LinearProperty`, `PolynomialProperty`, `ArrheniusProperty`, `TableProperty`, `CallableProperty`, `SutherlandProperty`, `StateDependentProperty` |
 | Boundary conditions | `HeatFluxBC`, `ConvectiveBC`, `RadiativeBC`, `RadiativeFluxBC`, `CombinedThermalBC`, `DirichletThermalBC`, `AdiabaticBC`, `ImpermeableBC`, `MassFluxBC`, `ConvectiveMassBC`, `DiffusiveMassBC`, `BoundaryConditionSet` |
 | Radiation | `RadiationModel`, `NO_RADIATION`, `SURFACE_ABSORPTION`, `BEER_LAMBERT` |
 | Geometry | `create_uniform_mesh`, `create_stretched_mesh` |
@@ -115,7 +113,7 @@ function modify(prob, p)
         name = prob.material.name,
         components = prob.material.components,
         reactions = (Reaction(:decomp, :virgin => :MMA;
-                              A = p.A, E = p.E, h = -870e3),),
+                              A = p.A, E = p.E, h = 870e3),),
         mixing = prob.material.mixing,
         lateral_shrinkage_law = prob.material.lateral_shrinkage_law,
     )
@@ -172,5 +170,3 @@ The canonical sources live under [`docs/`](docs/):
   [`docs/guide/`](docs/guide/))
 - [`docs/make.jl`](docs/make.jl) — the Documenter.jl site build (see the
   site's Development page for build instructions)
-- [`docs/archive/`](docs/archive/) — historical design memos retained
-  for provenance

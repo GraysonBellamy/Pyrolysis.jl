@@ -4,8 +4,6 @@ Radiation boundary condition types for P1 radiation transport.
 These boundary conditions apply to the incident radiation intensity field G
 solved by the P1 approximation. They work alongside thermal BCs to couple
 radiation and temperature at domain boundaries.
-
-Reference: P1_Volumetric_Reradiation_Implementation.md Section 2.3, 4.2
 """
 
 # ============================================================================
@@ -178,9 +176,9 @@ This is rarely used in practice but can be useful for:
 - Specialized boundary treatments
 
 !!! warning "Placeholder implementation"
-	The production P1 assembly does **not** yet honor the prescribed value:
+	The production P1 assembly does **not** honor the prescribed value:
 	`bc.G` is never read, and the boundary flux path returns zero — a
-	`DirichletRadiationBC` currently behaves identically to
+	`DirichletRadiationBC` behaves identically to
 	`ReflectiveRadiationBC`. Prescribing G requires a Dirichlet row in the
 	P1 tridiagonal solve, which is not implemented.
 

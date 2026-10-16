@@ -31,7 +31,7 @@ _This document is the canonical source; the per-chapter views in `docs/guide/tec
 
 # 1. Introduction, Scope, and Modeling Philosophy
 
-This chapter establishes what Pyrolysis.jl is, the class of physical problems it solves, and the modeling decisions that govern every later chapter. Pyrolysis.jl is a one-dimensional (through-thickness) condensed-phase pyrolysis solver: it integrates the coupled heat-conduction, multi-species reaction-transport, and (optionally) gas-pressure equations that describe a solid heated to thermal decomposition. We position the code relative to the three established reference solvers it is most often compared to — ThermaKin2Ds, Gpyro, and the FDS solid-phase pyrolysis model — and we state the binding conventions (coordinate orientation, flux sign, divergence sign, heat-of-reaction sign) and the central "Formulation A" energy approximation that the remainder of the Technical Reference Guide derives and exploits. Everything asserted here is grounded in the actual implementation; where a textbook form and the code differ, the code is authoritative and the deviation is flagged.
+This chapter establishes what Pyrolysis.jl is, the class of physical problems it solves, and the modeling decisions that govern every later chapter. Pyrolysis.jl is a one-dimensional (through-thickness) condensed-phase pyrolysis solver: it integrates the coupled heat-conduction, multi-species reaction-transport, and (optionally) gas-pressure equations that describe a solid heated to thermal decomposition. We position the code relative to the three established reference solvers it is most often compared to — ThermaKin2Ds, Gpyro, and the FDS solid-phase pyrolysis model — and we state the binding conventions (coordinate orientation, flux sign, divergence sign, heat-of-reaction sign) and the energy equation that the remainder of the Technical Reference Guide derives and exploits. Everything asserted here is grounded in the actual implementation; where a textbook form and the code differ, the code is authoritative and the deviation is flagged.
 
 ---
 
@@ -81,7 +81,7 @@ The scope boundary is as important as the scope itself. The following are explic
 
 - **Multi-dimensional geometry.** The model is strictly 1-D in $z$. The cross-section $A$ is a scalar gauge, not a resolved 2-D/3-D field; lateral shrinkage is a column-global area scaling driven by an empirical law (§10), not a resolved lateral transport. A genuine 2-D/3-D generalization of the ALE framework is listed as an open issue (§11).
 - **Full two-temperature gas.** The gas phase is *not* given its own energy equation with a separate gas temperature. Gas is assumed to be in local thermal equilibrium with the matrix at the cell temperature $T$: it stores sensible heat like every other phase, and its flux relative to the skeleton carries sensible enthalpy through the advective source $S_{\text{conv}}$ (§1.4.1, §7).
-- **Multi-reactant reactions.** Each `Reaction` supports exactly one reactant ($N_{\text{in}}=1$ enforced at construction; see `Reaction` / `src/Materials/reactions.jl`). The reactant is consumed with unit mass stoichiometry and products are explicit yields summing to 1.0 (§6). Bimolecular or competitive oxygen-sensitive schemes (which ThermaKin and Gpyro support natively) must be approximated as sequences of single-reactant steps. Extending the reactant tuple to a 3-ary `(idx, order, mass_stoich)` form is an enumerated open question.
+- **Multi-reactant reactions.** Each `Reaction` supports exactly one reactant ($N_{\text{in}}=1$; a reaction with more is rejected when its species source is applied, `_apply_reaction_source!` in `src/Physics/kinetics.jl`). The reactant is consumed with unit mass stoichiometry and products are explicit yields summing to 1.0 (§6). Bimolecular or competitive oxygen-sensitive schemes (which ThermaKin and Gpyro support natively) must be approximated as sequences of single-reactant steps. Extending the reactant tuple to a 3-ary `(idx, order, mass_stoich)` form is an open item (§1.8.1).
 - **Pressure- or oxygen-dependent kinetics, and distributed activation energy.** The Arrhenius pre-exponential $A_i$ is temperature-independent, the rate has no explicit pressure or oxygen factor, and there is no built-in distributed-activation-energy (DAEM) tooling (§6).
 
 These exclusions are not accidental: they are the modeling simplifications that make the 1-D solver fast, type-stable, and differentiable end-to-end, and they are shared (to varying degrees) by the reference codes discussed in §1.6.
@@ -117,11 +117,11 @@ The unified entry point `residual!(du, u, def, t, ws)` dispatches first on `mesh
 
 The same opt-in philosophy governs the constitutive layers. Each of the following is off (or set to its cheapest closure) by default and is enabled only when the problem requires it:
 
-- **Radiation in depth.** `NO_RADIATION` performs no volumetric absorption; `SURFACE_ABSORPTION` routes the absorbed flux through the surface energy balance (boundary Newton; no volumetric deposit) at $O(1)$ cost and preserves the tridiagonal Jacobian; `BEER_LAMBERT` resolves exponential in-depth absorption at the cost of a non-local (upper-triangular) Jacobian coupling; `P1_QUASI_STEADY` solves a diffusion equation for the radiation field. These are mutually exclusive and are queried by traits such as `requires_absorption_coefficients`, `has_nonlocal_jacobian_coupling`, and `requires_radiation_cache` (§8).
+- **Radiation in depth.** `NO_RADIATION` performs no volumetric absorption; `SURFACE_ABSORPTION` routes the absorbed flux through the surface energy balance (boundary Newton; no volumetric deposit) at $O(1)$ cost and preserves the tridiagonal Jacobian; `BEER_LAMBERT` resolves exponential in-depth absorption at the cost of a non-local (upper-triangular) Jacobian coupling; `P1_QUASI_STEADY` solves a diffusion equation for the radiation field, lives in `Pyrolysis.Experimental`, and is rejected by `solve`. These are mutually exclusive (§8).
 - **Darcy gas flow.** With `Fickian` transport, gas migrates only by (volume-fraction-gradient) diffusion. Selecting `DarcyFick` adds pressure-driven bulk flow $v_g=-(\kappa/\mu)\nabla P$ with the ideal-gas pressure closure (§9), and allocates the Darcy sub-cache.
 - **ALE moving mesh.** A fixed Eulerian mesh suffices for thermally-thin or non-receding problems. Enabling `ALE` makes the mesh track the receding/expanding surface, with the node positions integrated as part of the coupled state and the Geometric Conservation Law enforced to machine precision (§11).
 - **Variable cross-section.** `WithChi` enables lateral shrinkage/swelling through the pyrolysis-progress variable $\chi$ and an empirical area law (§10).
-- **Adaptivity.** Surface-cell depletion merging is the production adaptivity path; r-refinement (node relocation) and the Experimental h-refinement are additional opt-in layers (§14, Adaptive Mesh Refinement).
+- **Adaptivity.** Depleted-cell parking is the only adaptivity `solve` uses. Error indicators, r-refinement (node relocation), and mesh-quality metrics are building blocks that `solve` does not call; h-refinement lives in `Pyrolysis.Experimental`, and its meshes cannot be passed to `solve` (§14, Adaptive Mesh Refinement).
 
 The cost of an optional layer is therefore paid only when it is used, and the modeling assumptions of the default (cheapest) configuration are exactly those of the reference codes (§1.6).
 
@@ -130,16 +130,16 @@ The cost of an optional layer is therefore paid only when it is used, and the mo
 Three implementation properties are treated as first-class requirements throughout the code, and they drive many modeling micro-decisions documented in later chapters:
 
 1. **Type stability.** Every hot-path function is written so the Julia compiler can infer concrete types, using heterogeneous tuples for the component/reaction lists and `@generated` functions to unroll loops over $N_C$ components and $N_R$ reactions (e.g. `_sum_heat_capacity`, `_gas_convective_source_unrolled`, `dry_pyrolysis_gas_indices`). The number of components $N_C$ and reactions $N_R$ are static type parameters of `Material{NC,NR,…}` (§4).
-2. **Allocation-free assembly.** The residual evaluates with zero heap allocation. All scratch storage lives in pre-allocated caches (`RHSCache`, `SourceTermCache`, `PropertyCache`, `StateCache`) owned by the `Workspace`; the mutable mesh is read-only during assembly, and the typed `StateCache` is the single source of truth for state and state-derived geometry (§15.2). A dedicated test (`test/perf/test_zero_allocation_rhs.jl`) enforces this.
-3. **AD-compatibility (differentiability).** The entire residual — including geometry updates, the boundary-temperature Newton solve, and property evaluations — propagates `ForwardDiff.Dual` numbers end-to-end. The `StateCache{NC,Tu,Mode}` carries a scalar eltype `Tu` that is `Float64` for ordinary evaluation and `ForwardDiff.Dual` for Jacobian/sensitivity passes. This requires every non-smooth construct to be replaced by a smooth surrogate: hard temperature gates become $\tfrac12(1+\tanh(\cdot))$ ramps, the depletion cutoff becomes a smooth multiplicative $\tanh(\xi/\text{threshold})$ rate factor, and the sensible-enthalpy integral is taken by the AD-clean midpoint rule (§4, §6). Differentiability is what makes the structured analytic Jacobian (§15) and forward/adjoint sensitivity analysis (§17, Sensitivity Analysis) possible.
+2. **Allocation-free assembly.** The residual evaluates with zero heap allocation. All scratch storage lives in pre-allocated caches (`RHSCache`, `PropertyCache`, `StateCache`) owned by the `Workspace`; the mutable mesh is read-only during assembly, and the typed `StateCache` is the single source of truth for state and state-derived geometry (§15.2). A dedicated test (`test/perf/test_zero_allocation_rhs.jl`) enforces this.
+3. **AD-compatibility (differentiability).** The entire residual — including geometry updates, the boundary-temperature Newton solve, and property evaluations — propagates `ForwardDiff.Dual` numbers end-to-end. The `StateCache{NC,Tu,Mode}` carries a scalar eltype `Tu` that is `Float64` for ordinary evaluation and `ForwardDiff.Dual` for Jacobian/sensitivity passes. This requires every non-smooth construct to be replaced by a smooth surrogate: hard temperature gates become $\tfrac12(1+\tanh(\cdot))$ ramps, the depletion cutoff becomes a smooth multiplicative $\tanh(\xi/\text{threshold})$ rate factor, and every property law is evaluated on a temperature clamped to its validity bracket (§4.4, §6). Differentiability is what makes the structured analytic Jacobian (§15) and forward/adjoint sensitivity analysis (§17, Sensitivity Analysis) possible.
 
 These three goals are not merely engineering niceties: AD-compatibility in particular *constrains the physics formulation*, because every modeling term must be expressible as a smooth function of the state.
 
 ---
 
-## 1.4 Formulation A: the canonical energy convention
+## 1.4 The energy equation
 
-The single most important modeling decision in Pyrolysis.jl is the form of the energy equation. The code solves the **non-conservative (Formulation A) temperature equation** of a one-temperature porous medium: the pore gas is in local thermal equilibrium with the matrix, **every component stores sensible heat**, and the gas flux relative to the skeleton carries sensible enthalpy through a volumetric advective source. This subsection states the equation, derives it from the mixture enthalpy balance, and explains how it maps onto the reference codes.
+The single most important modeling decision in Pyrolysis.jl is the form of the energy equation. The code solves the **non-conservative temperature equation** of a one-temperature porous medium: the pore gas is in local thermal equilibrium with the matrix, **every component stores sensible heat**, and the gas flux relative to the skeleton carries sensible enthalpy through a volumetric advective source. This subsection states the equation, derives it from the mixture enthalpy balance, and explains how it maps onto the reference codes.
 
 ### 1.4.1 The energy equation and its derivation
 
@@ -149,7 +149,6 @@ $$
 \rho c_{p}^{\text{eff}}\,\frac{\partial T}{\partial t}
 = -\nabla\!\cdot\mathbf{q}_{\text{cond}}
 \;+\; S_{\text{conv}}
-\;+\; S_{\text{gen}}
 \;+\; Q_{\text{rad}}
 \;+\; Q_{\text{rxn}}.
 \tag{1.1}
@@ -190,40 +189,25 @@ $$
 \tag{1.3}
 $$
 
-which is ThermaKin Eq. 17 term for term: the all-component storage sum, the convective term $c_g(\mathbf J_g\!\cdot\!\nabla T)$, and the deformation term, which is the $\mathbf v_s\!\cdot\!\nabla T$ part of $D_sT/Dt$. On a fixed mesh $D_s/Dt = \partial_t$; in ALE the mesh moves with the skeleton, so $D_sT/Dt$ is the mesh-frame rate and (1.1) holds with no advection term of any kind (§11.2.2). The optional $S_{\text{gen}}$ is the datum-conversion term that appears only when the heats of reaction are quoted at a reference temperature instead (§1.4.3, §7.5).
+which is ThermaKin Eq. 17 term for term: the all-component storage sum, the convective term $c_g(\mathbf J_g\!\cdot\!\nabla T)$, and the deformation term, which is the $\mathbf v_s\!\cdot\!\nabla T$ part of $D_sT/Dt$. On a fixed mesh $D_s/Dt = \partial_t$; in ALE the mesh moves with the skeleton, so $D_sT/Dt$ is the mesh-frame rate and (1.1) holds with no advection term of any kind (§11.2.2).
 
 **Why the gas is stored.** The gas concentration $\xi_g$ is an integrated state, so the term $\xi_g c_{p,g}\,\partial_t T$ is available at no cost and dropping it would be an approximation with no benefit. Gpyro drops it in its default thermal-equilibrium form (the quasi-steady-gas approximation, restored by its `FULL_QSG` option); FDS has no in-depth gas, so the term is identically zero there. On white-pine cone decks the term is at most about half a percent of $\rho c_p$ and shifts the response by a uniform time lag of about a tenth of a percent — small, but a thousand times above the solver's noise floor and therefore worth keeping exact.
 
 ### 1.4.2 Why "non-conservative"
 
-Equation (1.1) is *non-conservative* because the temperature time derivative $\partial T/\partial t$, not a conserved quantity, appears on the left. The conserved quantity is the volumetric enthalpy $\sum_j \xi_j h_j(T)$ — **not** $\rho c_p^{\text{eff}}\,T$, which is not an enthalpy density ($h_j(T) \ne c_{p,j}\,T$ in general). A strictly conservative form would write $\partial_t\!\sum_j \xi_j h_j(T)$, whose product-rule expansion is $\rho c_p\,\partial_t T + \sum_j h_j(T)\,\partial_t\xi_j$: the companion term tracks the enthalpy carried by composition change. The derivation above shows where it goes — its reaction part becomes the reaction heat $Q_{\text{rxn}}$ (exactly, when the $h_r$ datum is the local reaction temperature) and its gas-transport part becomes $S_{\text{conv}}$ (see also §3.3.2 and §6.6). Pyrolysis.jl uses the non-conservative form for three reasons: it is the form for which $T$ is the natural ODE unknown; it matches the reference codes (§1.6); and the conservation diagnostics (§16) audit the resulting bookkeeping so the discrete energy ledger still closes to integrator tolerance. What the temperature form gives up is exact *discrete* enthalpy conservation; that gap is one of the known limitations enumerated in §16.
+Equation (1.1) is *non-conservative* because the temperature time derivative $\partial T/\partial t$, not a conserved quantity, appears on the left. The conserved quantity is the volumetric enthalpy $\sum_j \xi_j h_j(T)$ — **not** $\rho c_p^{\text{eff}}\,T$, which is not an enthalpy density ($h_j(T) \ne c_{p,j}\,T$ in general). A strictly conservative form would write $\partial_t\!\sum_j \xi_j h_j(T)$, whose product-rule expansion is $\rho c_p\,\partial_t T + \sum_j h_j(T)\,\partial_t\xi_j$: the companion term tracks the enthalpy carried by composition change. The derivation above shows where it goes — its reaction part becomes the reaction heat $Q_{\text{rxn}}$ (exactly, when the $h_r$ datum is the local reaction temperature) and its gas-transport part becomes $S_{\text{conv}}$ (see also §3.3.2 and §6.6). Pyrolysis.jl uses the non-conservative form for three reasons: it is the form for which $T$ is the natural ODE unknown; it matches the reference codes (§1.6); and the conservation diagnostics (§16) audit the resulting bookkeeping; the energy ledger closes to integrator tolerance only at constant composition and cell volume (§16.7). What the temperature form gives up is exact *discrete* enthalpy conservation; that gap is one of the known limitations enumerated in §16.
 
-### 1.4.3 The source terms and the $S_{\text{conv}}$ / transpiration mutual exclusivity
+### 1.4.3 The source terms and the surface gas enthalpy
 
 The right-hand-side sources in (1.1) are (full derivations in §7, §8, §6):
 
 - $-\nabla\!\cdot\mathbf{q}_{\text{cond}}$, the conductive flux divergence, with Fourier's law $\mathbf{q}_{\text{cond}}=-k\,\nabla T$ and a distance-weighted harmonic-mean face conductivity (§1.4.4).
-- $S_{\text{conv}} = -\sum_g c_{p,g}(T)\,\overline{J}_{g}\,\partial T/\partial z$, the **gas advective source**, carrying the sensible heat convected by the through-flow of volatiles relative to the skeleton. This term is **always active** in the standard energy form; it is the only place the gas flux enters the energy equation.
-- $S_{\text{gen}} = -\sum_g \Delta h_g(T,T_{\text{ref}})\,(\nabla\!\cdot\mathbf{J}_g)$, the **optional gas-generation enthalpy sink**, included only when `energy_form = :with_generation_sink`. It is a *partial* datum conversion and is consistent **only with $T_{\text{ref}}$-datum reaction heats** — with DSC-style heats quoted at the reaction temperature it double-counts the gas sensible enthalpy (§6.6.3, §7.5.4).
+- $S_{\text{conv}} = -\sum_g c_{p,g}(T)\,\overline{J}_{g}\,\partial T/\partial z$, the **gas advective source**, carrying the sensible heat convected by the through-flow of volatiles relative to the skeleton. This term is always active; it is the only place the gas flux enters the energy equation.
 - $Q_{\text{rad}}$, the volumetric radiation absorption (model-dependent; §8).
 - $Q_{\text{rxn}} = -\sum_r h_r r_r$, the reaction heat source (sign convention in §1.5.3).
 
-A subtle but critical convention follows. The two source terms $S_{\text{conv}}$ and $S_{\text{gen}}$ together are the volumetric decomposition of the conservative-form sensible-enthalpy divergence:
+The surface itself carries no gas-enthalpy term. Under local thermal equilibrium the gas crosses the exposed face at $T_s$ on both sides, so its enthalpy flux is continuous there and the surface balance reduces to conducted flux equals applied flux, $q_{\text{BC}}(T_s) = q_{\text{cond}}(T_s)$. The sensible heat the escaping gas carries away is already accounted for in depth: its enthalpy at formation sits in $h_r(T)$, and its heating from the formation temperature to $T_s$ is $S_{\text{conv}}$ integrated along its path. A surface term $\sum_g \dot m_g \Delta h_g$ applied on top of $S_{\text{conv}}$ would count that heating a second time, producing a spurious $\sim$5–10 kW·m⁻² sink that under-predicts surface temperature and MLR. The surface balance is therefore a plain convective + radiative balance — the ThermaKin Eq. 17 convention, which Gpyro's thermal-equilibrium form shares. The only boundary use of the gas flux is the blowing model of a convective BC, which reads the outward gas flux to reduce the heat-transfer coefficient (§12.3.3).
 
-$$
-\nabla\!\cdot\!\Big(\sum_g \Delta h_g(T,T_{\text{ref}})\,\mathbf{J}_g\Big)
-= \underbrace{\sum_g c_{p,g}\mathbf{J}_g\!\cdot\!\nabla T}_{-S_{\text{conv}}}
-+ \underbrace{\sum_g \Delta h_g(T,T_{\text{ref}})\,\nabla\!\cdot\mathbf{J}_g}_{-S_{\text{gen}}},
-\tag{1.4}
-$$
-
-an identity that is exact even for temperature-dependent $c_{p,g}$, since $\nabla\Delta h_g = c_{p,g}(T)\,\nabla T$. Integrated over the column, the two terms telescope to the surface transpiration outflow:
-
-$$
-\int (S_{\text{conv}} + S_{\text{gen}})\,dz = -\sum_g \dot m_g\,\Delta h_g(T_s,T_{\text{ref}}).
-$$
-
-The surface itself carries no gas-enthalpy term. Under local thermal equilibrium the gas crosses the exposed face at $T_s$ on both sides, so its enthalpy flux is continuous there and the surface balance reduces to conducted flux equals applied flux. The sensible heat the escaping gas carries away has already been accounted for in depth: its enthalpy at formation sits in $h_r(T)$, and its heating from the formation temperature to $T_s$ is $S_{\text{conv}}$ integrated along its path. Applying a **surface transpiration boundary term** $\sum_g \dot m_g \Delta h_g$ on top of $S_{\text{conv}}$ would therefore count that heating a second time, producing a spurious $\sim$5–10 kW·m⁻² sink that under-predicts surface temperature and MLR. For this reason the transpiration BC is **rejected at problem construction**: `to_problem_def` throws an `ArgumentError` if `use_transpiration_bc=true` (file `src/Problem/adapter.jl`). The supported convention is $S_{\text{conv}}$-only with a plain convective + radiative surface balance — the ThermaKin Eq. 17 convention, which Gpyro's thermal-equilibrium form shares.
 ### 1.4.4 The discrete energy update
 
 Discretizing (1.1) over a finite-volume cell $i$ gives the per-cell ODE that the integrator advances (verified against `compute_rhs!`, Step 8, `finite_volume.jl`):
@@ -234,7 +218,6 @@ $$
 \Big(
 -(\nabla\!\cdot\mathbf{q})_i
 + S_{\text{conv},i}
-+ S_{\text{gen},i}
 + Q_{\text{rad},i}
 + Q_{\text{rxn},i}
 \Big),
@@ -254,7 +237,7 @@ $$
 
 The face conductivity $k_f$ is the **distance-weighted harmonic mean** (resistance-in-series) of the two adjacent cell-center conductivities. This is derived from flux continuity across the interface (the total thermal resistance $R = d_L/(k_L A) + d_R/(k_R A)$ inverts to the harmonic mean) and reduces to the textbook $2k_Lk_R/(k_L+k_R)$ on a uniform mesh ($d_L=d_R$); on stretched meshes it improves near-boundary flux accuracy by roughly 1–5 % (§7). The same distance-weighted harmonic mean is applied to permeability and gas-transfer face values (§5, §9).
 
-> **Implementation note.** Conductive face fluxes are computed in `conductive_flux` / `compute_conductive_fluxes!` (`src/Physics/heat_conduction.jl`); boundary faces are explicitly zeroed there and overwritten by the boundary-temperature solver. The mixture heat capacity is `effective_heat_capacity` (`src/Properties/effective_properties.jl`); the gas advective source is `compute_gas_convective_source!` (`src/Physics/convection.jl`); the divergence operator is `divergence_1d!` (`src/Discretization/finite_volume.jl`). The full eight-step RHS assembly sequence — interior conductive fluxes → reactions → gas transport → thermal/mass BCs → radiation → $S_{\text{conv}}$ → divergences/$S_{\text{gen}}$ → final RHS — is documented in §7.
+> **Implementation note.** Conductive face fluxes are computed in `conductive_flux` / `compute_conductive_fluxes!` (`src/Physics/heat_conduction.jl`); boundary faces are explicitly zeroed there and overwritten by the boundary-temperature solver. The mixture heat capacity is `effective_heat_capacity` (`src/Properties/effective_properties.jl`); the gas advective source is `compute_gas_convective_source!` (`src/Physics/convection.jl`); the divergence operator is `divergence_1d!` (`src/Discretization/finite_volume.jl`). The full eight-step RHS assembly sequence — interior conductive fluxes → reactions → gas transport with the mass BCs → thermal BCs → radiation → $S_{\text{conv}}$ → divergences → final RHS — is documented in §7.
 
 The species equation, by contrast, is solved in conservative form (the conserved quantity $\xi_j$ is itself the unknown), and transport applies only to gas components (§3):
 
@@ -306,7 +289,7 @@ Two further nomenclature overloads that recur in this guide and are worth flaggi
 
 ### 1.5.4 Fixed physical constants
 
-The constants used throughout are defined in `src/Materials/constants.jl` and match the nomenclature table exactly:
+The constants used throughout are defined in `src/Materials/constants.jl` (the air molar mass of the Chapman–Enskog estimate is `M_AIR` in `src/Properties/effective_properties.jl`) and match the nomenclature table exactly:
 
 | Constant | Symbol | Value | Units |
 |---|---|---|---|
@@ -326,7 +309,7 @@ Pyrolysis.jl deliberately adopts the established modeling conventions of three r
 
 ThermaKin2Ds is a 1-D/quasi-2-D condensed-phase pyrolysis solver widely used for inverse parameter estimation from cone/TGA data. The correspondence:
 
-- **Energy convention.** ThermaKin's energy equation (its Eq. 17) is the same equation as (1.3): the storage term sums $c_p$ over **all** components including gas, the convective term $c_g(\mathbf{J}_g\!\cdot\!\nabla T)$ is exactly the Pyrolysis.jl $S_{\text{conv}}$ term, and its deformation term is the skeleton-following derivative that the ALE mesh frame absorbs (§11). Adopting the convective term (rather than a surface transpiration BC) is why transpiration is forbidden alongside $S_{\text{conv}}$ (§1.4.3). ThermaKin's Eq. 15 applies the same deformation term to every component, gas included — the frame choice Pyrolysis.jl makes in §11.1.2.
+- **Energy convention.** ThermaKin's energy equation (its Eq. 17) is the same equation as (1.3): the storage term sums $c_p$ over **all** components including gas, the convective term $c_g(\mathbf{J}_g\!\cdot\!\nabla T)$ is exactly the Pyrolysis.jl $S_{\text{conv}}$ term, and its deformation term is the skeleton-following derivative that the ALE mesh frame absorbs (§11). Because the convective term carries the gas enthalpy, the surface balance has no gas-enthalpy term (§1.4.3). ThermaKin's Eq. 15 applies the same deformation term to every component, gas included — the frame choice Pyrolysis.jl makes in §11.1.2.
 - **Stoichiometry.** ThermaKin writes stoichiometric coefficients as $\theta_i^j$; Pyrolysis.jl uses $\nu_{i,j}$ (negative for reactants, positive for products). The symbol $\theta$ is reserved here for the volumetric strain rate, so $\theta_i^j$ appears only in ThermaKin-comparison passages and is mapped immediately to $\nu_{i,j}$ (overload A2, §2).
 - **Kinetics.** ThermaKin supports bimolecular rates ($\xi_{\text{COMP1}}\xi_{\text{COMP2}}$); Pyrolysis.jl is single-reactant only (§6).
 - **Boundary fluxes and mesh.** ThermaKin uses piecewise external/flame BCs with reflected incident flux, and a dynamically adjusted mesh; Pyrolysis.jl's ALE framework (§11) and boundary-temperature Newton solve (§12) are the analogs.
@@ -373,10 +356,10 @@ The last row is the distinguishing capability: Pyrolysis.jl is built to be autom
 The Technical Reference Guide proceeds from continuum theory to discretization to numerics to verification:
 
 - **§2 Nomenclature** — the verbatim symbol table and the three sign conventions; binding overload resolutions.
-- **§3 Governing Equations of the Continuum Model** — the full coupled PDE system, the gas-vs-solid species dispatch, the Formulation A energy equation, the ideal-gas pressure closure, and side-by-side comparison tables with the reference codes.
+- **§3 Governing Equations of the Continuum Model** — the full coupled PDE system, the gas-vs-solid species dispatch, the energy equation, the ideal-gas pressure closure, and side-by-side comparison tables with the reference codes.
 - **§4 Materials & Property Functions** and **§5 Effective Properties & Mixing Rules** — the constitutive layer: components, phases, property-function types and their analytic derivatives, mixture density and porosity, and the conductivity/transfer/permeability mixing rules.
 - **§6 Reaction Kinetics** — the Arrhenius rate law, smooth temperature gates, the depletion limiter, stoichiometry, and the heat-of-reaction source.
-- **§7 Heat Conduction, Convection & Energy Assembly** — Fourier conduction, the gas advective and generation-sink sources, and the complete RHS assembly sequence.
+- **§7 Heat Conduction, Convection & Energy Assembly** — Fourier conduction, the gas advective source, and the complete RHS assembly sequence.
 - **§8 Thermal Radiation** — the four radiation models, their volumetric sources, and the P1 boundary conditions.
 - **§9 Gas-Phase Mass Transport & Pressure** and **§10 Volume Change & Lateral Shrinkage** — diffusive and Darcy fluxes, the ideal-gas pressure, the strain-rate / $\chi$ machinery.
 - **§11 ALE Framework**, **§12 Boundary & Initial Conditions**, **§13 Finite-Volume Discretization**, **§14 Adaptive Mesh Refinement** — the discretization and moving-mesh apparatus.
@@ -393,13 +376,38 @@ The current model carries several known limitations, recorded here so that users
 1. **Dimensionality and lateral transport.** The model is strictly 1-D; lateral shrinkage is a column-global area scaling driven by an *empirical* law $A/A_0=\mathrm{law}(\bar\chi)$, not a resolved 2-D field. The physical justification of the shrinkage law and its interaction with multi-dimensional geometry is an open question (§10).
 2. **One temperature.** The matrix and the pore gas share one temperature (local thermal equilibrium); there is no two-temperature gas energy equation, so regimes with very fast, hot gas throughput are outside the model (§3.9).
 3. **Single-reactant kinetics only.** Multi-reactant (bimolecular, competitive) reactions are unsupported, as are temperature-dependent activation energy, pressure dependence, and distributed-activation-energy tooling (§6).
-4. **Composition-change enthalpy not conserved discretely.** The temperature form does not evolve the composition-change enthalpy term $\sum_j h_j(T)\,\partial_t\xi_j$ of a conserved enthalpy density (§3.3.2); its reaction and gas-transport parts reappear as $Q_{\text{rxn}}$ and $S_{\text{conv}}$/$S_{\text{gen}}$, while the condensed-product sensible-generation part is omitted. The discrete energy ledger nonetheless closes to integrator tolerance, but the continuous closure for strongly composition-varying problems is approximate (§16).
-5. **Asymmetric ambient + permeable back face.** With `:with_generation_sink`, a single scalar $T_{\text{ref}}$ is applied to every cell; if the two boundaries have different ambient temperatures *and* the back face is permeable, the energy ledger fails to close at the bottom by exactly $\sum_g\dot m_{g,\text{bottom}}c_{p,g}(T_{\infty,\text{top}}-T_{\infty,\text{bottom}})$ (harmless for the usual impermeable back face; §7, §12).
-6. **Transport closures are first-order / heuristic in places.** Gas advection uses first-order upwind, diffusion applies one mixture transfer coefficient to every gas species (no per-species discrimination, with only heuristic Lennard-Jones parameter estimates available for sizing it), and viscosity mixing omits Wilke's rule (§5, §9).
-7. **Experimental layers.** P1 radiation and h-AMR refinement/coarsening live in `Pyrolysis.Experimental`, use separate code paths (P1 has its own residual), and are explicitly unstable. Depletion handling (§14.3) parks cells without changing the state size, so it keeps the structured Jacobian; parameter sensitivities are valid only between park events (§17.7.3).
-8. **Imported calibrations must respect the S_conv-only convention.** Pyrolysis.jl never applies a surface transpiration term on top of $S_{\text{conv}}$ (§1.4.3); parameters calibrated against a solver that does will predict higher $T_s$ and MLR here and should be re-validated (§18).
+4. **Composition-change enthalpy not conserved discretely.** The temperature form does not evolve the composition-change enthalpy term $\sum_j h_j(T)\,\partial_t\xi_j$ of a conserved enthalpy density (§3.3.2); its reaction and gas-transport parts reappear as $Q_{\text{rxn}}$ and $S_{\text{conv}}$, exactly when the heats of reaction are quoted at the reaction temperature (§3.3.2). The discrete energy ledger closes to integrator tolerance only for constant composition and cell volume, and the continuous closure for strongly composition-varying problems is approximate (§16.7).
+5. **Transport closures are first-order / heuristic in places.** Gas advection uses first-order upwind, diffusion applies one mixture transfer coefficient to every gas species (no per-species discrimination, with only heuristic Lennard-Jones parameter estimates available for sizing it), and the pore-gas viscosity is one curve per material with no composition-dependent (Wilke) mixing (§5, §9).
+6. **Experimental layers.** P1 radiation and h-refinement/coarsening live in `Pyrolysis.Experimental`: `solve` rejects `P1_QUASI_STEADY` (the P1 kernels are called directly), and an h-refined mesh cannot be passed to `solve`. Depletion handling (§14.3) parks cells without changing the state size, so it keeps the structured Jacobian; parameter sensitivities are valid only between park events (§17.7.3).
+7. **Imported calibrations must respect the $S_{\text{conv}}$-only convention.** Pyrolysis.jl carries the gas enthalpy in $S_{\text{conv}}$ and applies no surface gas-enthalpy term (§1.4.3); parameters calibrated against a solver that applies both will predict higher $T_s$ and MLR here and should be re-validated (§18).
 
 These limitations bound the model's domain of applicability; within that domain — 1-D, single-reactant, atmospheric-to-moderate-pressure condensed-phase pyrolysis — the formulation is rigorous, differentiable, and conservation-audited.
+
+### 1.8.1 Known gaps and missing physics
+
+The physics below is absent from the model. It is ordered by its expected effect on the current validation cases; items already listed above are cross-referenced rather than repeated.
+
+**Likely to bias the current validation cases**
+
+1. **Flame heat-flux feedback.** There is no ignition-triggered flame heat-flux boundary condition. After ignition a cone-calorimeter flame returns roughly 20–30 kW·m⁻² (PMMA) or 10–15 kW·m⁻² (wood) to the surface, 40–60 % on top of a 50 kW·m⁻² exposure, so parameters calibrated without it absorb that net-flux bias. The natural form is a flame-flux BC switched on by a critical-MLR or critical-$T_s$ callback. Flame feedback and the blowing reduction of the convective coefficient (the `blowing` model of `ConvectiveBC`, §12.3.3) act in opposite directions and partially cancel: enabling a blowing model alone on a cone example calibrated without either raises $T_s$ and MLR. Both belong in place before the cone examples are recalibrated.
+2. **Multi-reactant kinetics** (item 3 above). A reaction with more than one reactant is rejected when its species source is applied (`_apply_reaction_source!`, `src/Physics/kinetics.jl`). This blocks char oxidation, recondensation, and autocatalysis (Prout–Tompkins fits cannot be represented). The extension point is a 3-ary reactant tuple `(idx, order, mass_stoich)`; it touches the reaction type, the kinetics, the volumetric strain rate, and the reaction-source Jacobian operator.
+
+**Relevant to near-term applications**
+
+3. **Oxidative pyrolysis and char oxidation with O₂ ingress** (about 32.8 MJ per kg of carbon). It dominates at sub-critical fluxes, after flameout, and in smoldering, and it controls the late-time MLR tail and the residue mass of the Douglas-fir case. It needs multi-reactant kinetics (item 2) and a per-species ambient concentration, which `ConvectiveMassBC` already accepts (`ξ_inf` per species). The upwind Darcy outflow suppresses ingress at high MLR.
+4. **Equilibrium (pressure-dependent) moisture evaporation and recondensation.** Drying is a pressure-independent Arrhenius reaction; no saturation pressure $P_{\text{sat}}(T)$ appears anywhere. Vapor recondensation ahead of the drying front (which raises the local moisture content by 30–50 %) is absent, and at the 1.5–2 atm pore pressure of pressure-treated wood the boiling point shifts to 112–121 °C, which Arrhenius drying cannot represent. It needs item 2 and a smooth $r \propto (P_v - P_{\text{sat}}(T))$ closure; the pressure is already in the property cache.
+5. **Backing layer and contact resistance at the back face.** There is no contact-resistance or substrate model. An adiabatic back face over-predicts late-time back-half temperatures (the missing loss is about 0.7–3 kW·m⁻² for 25 mm of wood over 10–20 min); a lumped Robin condition on the bottom face (radiative + convective, as in example `06_cone_calorimeter.jl`) is the available approximation. A contact conductance plus a semi-infinite-substrate $h(t)$ would close the gap.
+6. **Kinetics expressiveness.** Normalized-conversion ($\alpha$) tracking, a $T^n$ pre-factor, and DAEM-style stacking are absent. Any real order $n \ge 0$ per reactant ($\xi^n$) is supported and equals $\xi_0^n(1-\alpha)^n$ up to a rescaling of $A_i$, so the gap is $\alpha$-normalization, not the conversion order.
+7. **Transport-closure accuracy** (item 5 above): no composition-dependent (Wilke) viscosity mixing, air-default Lennard-Jones parameters for the Chapman–Enskog estimate, and first-order upwind Darcy advection with no TVD limiter; and in `DarcyFick` mode the diffusive flux keeps the isobaric driving potential $-(\lambda/T)\,\partial(\xi T)/\partial z$, dropping the term proportional to $\nabla(\varphi P)$ that a resolved pressure field and sharp char fronts carry (`gas_flux`, `src/Physics/gas_transport.jl`).
+
+**Niche or future**
+
+- Spectral (two-band) radiation and in-depth emission from glowing char (the regime for which §8 points to P1).
+- Substrate reflection; scattering ($\sigma_s$ is plumbed only in the Experimental P1 model and never exercised); view-factor edge fall-off.
+- Knudsen/Klinkenberg slip, $\kappa_{\text{eff}} = \kappa(1 + b/P)$: $b \approx 28$ kPa for 1 µm pores but about 280 kPa for 0.1 µm, up to about 4× $\kappa$ at 1 atm in sub-µm char.
+- Stefan–Maxwell multicomponent diffusion (first relevant with O₂ ingress against the pyrolyzate efflux) and a tortuosity factor ($\phi/\tau$, a factor of 2–10) on the diffusivity and the gas-transfer coefficient.
+- Liquid free-water capillarity (relevant only above the fiber-saturation point, about 30 % moisture content) and bound-water diffusion ($\sqrt{Dt} \approx 0.25$ mm over a cone test, negligible at fire heating rates).
+- Mechanics (char cracking, delamination, spalling), anisotropic conductivity (about 2× along the wood grain), melting and dripping, and 2-D/3-D edge burning (about a 10–20 % effect on late-time MLR in cone tests; item 1 above).
 
 
 ---
@@ -442,7 +450,7 @@ Conventions:
 | `A` | Cross-sectional area of the 1D column (may vary in time via lateral-shrinkage law); also face area in the divergence operator | m² |
 | `A_0` | Initial / calibration-reference cross-sectional area (fixed at setup) | m² |
 | `A_{αβ}`, `A_i` | Arrhenius pre-exponential factor for reaction *i* (or *αβ*) | s⁻¹ (1st-order); m³·kg⁻¹·s⁻¹ (bimolecular) |
-| `B` | Spalding mass-transfer number (liquid evaporation, comparison only) | – |
+| `B` | Spalding blowing number `ṁ''c_{p,g}/h` of the convective blowing models (§12.3.3) | – |
 | `c_p`, `c_{p,j}` | Specific heat capacity (of component *j*) | J·kg⁻¹·K⁻¹ |
 | `c` | Speed of light (radiation energy density diagnostic only) | m·s⁻¹ |
 | `D_{AB}`, `D_j` | Binary (Chapman–Enskog) diffusion coefficient | m²·s⁻¹ |
@@ -462,7 +470,7 @@ Conventions:
 | `h_conv` | Convective heat-transfer coefficient | W·m⁻²·K⁻¹ |
 | `h_m` | External mass-transfer (film) coefficient | m·s⁻¹ |
 | `h_P` | Pressure-transfer coefficient (convective pressure BC) | m·Pa⁻¹·s⁻¹ |
-| `Δh`, `Δh_g` | Sensible enthalpy difference (midpoint-rule integral) | J·kg⁻¹ |
+| `Δh`, `Δh_g` | Sensible enthalpy difference `∫ c_p dT` | J·kg⁻¹ |
 | `I(z)`, `I_in` | Radiation intensity along path / at cell entrance (Beer–Lambert) | W·m⁻² |
 | `I_surface`, `I_ext` | Incident radiation intensity at domain surface / external source | W·m⁻² |
 | `J_j` | Mass flux of (gas) component *j* at a face | kg·m⁻²·s⁻¹ |
@@ -477,7 +485,7 @@ Conventions:
 | `M_dry` | Total initial dry-solid mass in the column | kg |
 | `m_j` | Total mass of component *j* in domain | kg |
 | `m_{dry,i}` | Initial dry-solid mass in cell *i* (χ denominator) | kg |
-| `ṁ_g` | Outward gas mass flux at surface (transpiration) | kg·m⁻²·s⁻¹ |
+| `ṁ_g` | Outward gas mass flux at surface | kg·m⁻²·s⁻¹ |
 | `N` | Partial-pressure sum (numerator of ideal-gas pressure) | Pa |
 | `N_C` (`NC`) | Number of chemical components (type parameter) | – |
 | `N_R` (`NR`) | Number of reactions (type parameter) | – |
@@ -499,7 +507,6 @@ Conventions:
 | `S` | Sutherland constant (= 110.4 K, air) in the viscosity law | K |
 | `S_j`, `S_{j,i}` | Species source term for component *j* (in cell *i*) | kg·m⁻³·s⁻¹ |
 | `S_conv` | Volumetric gas-advection (convection) energy source | W·m⁻³ |
-| `S_gen` | Volumetric gas-generation enthalpy sink (optional) | W·m⁻³ |
 | `S_rad` | Net volumetric P1 radiation source, `α(G − 4σT⁴)` | W·m⁻³ |
 | `S_dry,i` | Dry-pyrolysis-gas source term in cell *i* | kg·m⁻³·s⁻¹ |
 | `T` | Absolute temperature | K |
@@ -548,7 +555,7 @@ Conventions:
 | `ε_eff` | Effective (composition-weighted) emissivity | – |
 | `ε_AB` | Lennard-Jones well depth (collision integral) | J |
 | `ζ` | Dummy integration variable along the optical path | m |
-| `η_i` | AMR error-indicator value for cell *i* | varies |
+| `η_i` | Refinement error-indicator value for cell *i* | varies |
 | `θ`, `θ_i` | Volumetric strain rate (dilation) of cell *i*, `(1/V) dV/dt` | s⁻¹ |
 | `θ_A` | Column-global **radial** volumetric strain rate, `(1/A) dA/dt` | s⁻¹ |
 | `θ_L` | **Axial** volumetric strain rate (`θ − θ_A`) | s⁻¹ |
@@ -609,9 +616,9 @@ Conventions:
 | `init`, `0` | Initial value |
 | `top`, `bot` | Top (z=L) / bottom (z=0) boundary |
 | `rxn` | Reaction-source contribution |
-| `cond`, `conv`, `rad`, `gen` | Conduction / convection / radiation / gas-generation contribution |
+| `cond`, `conv`, `rad` | Conduction / convection / radiation contribution |
 | `∥`, `series` | Parallel / series mixing limit |
-| `matrix`, `total` | Matrix-only / matrix+gas (energy, heat capacity) |
+| `total` | All-component total (e.g. `ρ_total = Σ_j ξ_j`) |
 
 ## 4. Superscripts and accents
 
@@ -667,8 +674,8 @@ below is authoritative; writers must use the disambiguating subscript/context.
 - **χ (chi) — A1 [pyrolysis progress vs. cross-section ratio].** The
   `volume_change`, `problem_residual`, and `geometry` subsystems define `χ` as
   the **pyrolysis progress** (dimensionless, cumulative dry-gas mass released per
-  unit initial dry-solid mass). The `jacobian` KB once glosses it as
-  "cross-section area ratio." **Resolution:** `χ` is *always* pyrolysis progress;
+  unit initial dry-solid mass); it is easily misread as the cross-section area
+  ratio. **Resolution:** `χ` is *always* pyrolysis progress;
   the cross-section ratio is `A/A_0 = law(χ̄)` and is never written as `χ`.
 
 - **θ (theta) — A2 [strain rate vs. stoichiometry].** Internally `θ` is the
@@ -716,12 +723,12 @@ below is authoritative; writers must use the disambiguating subscript/context.
   reaction.
 
 - **φ — A8 [porosity only].** `φ` is **porosity**; do not reuse for view factor
-  (that is `F`) or any potential. Two historical porosity definitions exist
-  (volume-fraction `Σ v_j^gas` vs. intrinsic-density `1 − Σ ξ_j/ρ_{i,j}`); the
-  intrinsic-density form is canonical and is what `φ` denotes.
+  (that is `F`) or any potential. `φ` denotes the intrinsic-density form
+  `1 − Σ ξ_j/ρ_{i,j}`; the all-phase gas volume fraction `Σ v_j^gas` is a
+  different quantity and is not written `φ`.
 
 - **S — S1 [source vs. Sutherland constant].** `S` with a subscript
-  (`S_conv`, `S_gen`, `S_rad`, `S_j`) is a source term; bare `S` is the
+  (`S_conv`, `S_rad`, `S_j`) is a source term; bare `S` is the
   Sutherland constant in the viscosity law only.
 
 
@@ -735,7 +742,7 @@ variables (cell temperature $T$ and component mass concentrations $\xi_j$) and t
 auxiliary states carried only in certain simulation modes (node positions $z_i$ for
 the Arbitrary Lagrangian–Eulerian mesh, and the pyrolysis-progress scalar $\chi_i$
 for variable cross-section), then derive each conservation law: condensed-phase
-mass, per-species transport, the non-conservative ("Formulation A") energy equation,
+mass, per-species transport, the non-conservative energy equation,
 the ideal-gas pressure closure, and Darcy momentum. The chapter is deliberately a
 *statement and justification* of the continuum model; the discrete operators that
 realize it are derived in §7 (Heat Conduction, Convection & Energy Assembly), §9
@@ -810,7 +817,7 @@ $i=1,\dots,n$. Two **auxiliary state blocks** are appended only in the modes tha
 them (the bundled `SimulationMode{Mesh,Rad,Trans,Chi}` trait selects which; see §15):
 
 - **Node positions** $z_i$ [m], $i=1,\dots,n_{\mathrm{nodes}}$, present only in ALE
-  mode (`Mesh = ALE`). The mesh becomes part of the coupled DAE; its evolution is
+  mode (`Mesh = ALE`). The mesh becomes part of the coupled ODE system; its evolution is
   governed by a mesh-velocity field $w$ (§3.6, §11).
 - **Pyrolysis progress** $\chi_i$ [–], present only in variable-cross-section mode
   (`Chi = WithChi`). Each $\chi_i$ accumulates dry-pyrolysis-gas mass released per unit
@@ -844,9 +851,9 @@ Collecting the laws derived below, the continuum model is the coupled system
 
 $$
 \begin{aligned}
-&\text{Energy (Formulation A):}\quad
+&\text{Energy:}\quad
 \rho c_p^{\mathrm{eff}}\,\frac{\partial T}{\partial t}
-= -\nabla\cdot\mathbf q_{\mathrm{cond}} + S_{\mathrm{conv}} + S_{\mathrm{gen}}
+= -\nabla\cdot\mathbf q_{\mathrm{cond}} + S_{\mathrm{conv}}
 + Q_{\mathrm{rad}} + Q_{\mathrm{rxn}}, \\[4pt]
 &\text{Gas species:}\quad
 \frac{\partial \xi_j}{\partial t}
@@ -879,9 +886,8 @@ $$
 $$
 
 This is exact by the definition of $\xi_j$ as mass-per-bulk-volume and requires no
-property evaluation. It is the quantity returned by `total_density` and is used, for
-example, to form mass fractions $Y_j = \xi_j/\rho$ wherever those are needed
-(`mass_fractions`, with a $\rho<10^{-20}$ guard returning zero fractions).
+property evaluation. Mass fractions $Y_j = \xi_j/\rho$ are formed from it wherever
+they are needed.
 
 The **mixture density used by the swelling/specific-volume bookkeeping**,
 `mixture_density`, is a *different* quantity: it is the density a parcel would have if
@@ -907,9 +913,9 @@ the conserved bulk inventory; $\rho_{\mathrm{mix}}$ and the per-component specif
 volumes feed the volume-change rate of §3.6. The full derivation of the swelling
 mixture density and its derivatives is in §5.
 
-> **Implementation notes.** `total_density(ξ) = sum(ξ)` and `mixture_density` are in
-> `src/Properties/mixture_rules.jl` (lines ~170 and ~674). The $\rho_{\mathrm{mix}}$
-> swelling form is `_specific_vol_with_swelling_direct` (same file).
+> **Implementation notes.** `mixture_density` is in `src/Properties/mixture_rules.jl`;
+> the $\rho_{\mathrm{mix}}$ swelling form is `_specific_vol_with_swelling_direct` (same
+> file).
 
 ### 3.2.2 No separate bulk-continuity PDE
 
@@ -927,8 +933,9 @@ $$
 
 so reactions move mass *between* components without creating or destroying it, and the
 only net change in $\rho$ comes from gas transport out of the cell. This build-time
-invariant is checked by `validate_species_source_conservation` (tolerance
-$10^{-12}$) and `check_material_mass_balance` (§6, §16).
+invariant is enforced by the `Reaction` constructor (`_validate_stoichiometry`,
+relative tolerance $10^{-10}$); `mass_balance_error` and `verify_stoichiometry` report
+it (§6).
 
 ### 3.2.3 Phase-resolved mass: solids/liquids are immobile, only gases transport
 
@@ -985,7 +992,7 @@ This is exactly the branch taken by the generated kernel
 divergence is never even formed for the matrix phases.
 
 > **Implementation notes.** The compile-time gas/solid branch is
-> `apply_species_residual_unrolled!` in `src/Materials/materials.jl` (≈ line 890).
+> `apply_species_residual_unrolled!` in `src/Materials/materials.jl`.
 > Species sources $S_{j,i}=\sum_r\nu_{r,j}r_r$ come from `species_source_terms!` in
 > `src/Physics/kinetics.jl`; the per-reaction application enforces the single-reactant
 > mass-balance convention in `_apply_reaction_source!` (same file). The species
@@ -994,7 +1001,7 @@ divergence is never even formed for the matrix phases.
 
 ---
 
-## 3.3 The energy equation: Formulation A (non-conservative)
+## 3.3 The energy equation (non-conservative)
 
 ### 3.3.1 Statement
 
@@ -1007,7 +1014,6 @@ $$
 \rho c_p^{\mathrm{eff}}(T,\xi)\,\frac{\partial T}{\partial t}
 = -\,\nabla\cdot \mathbf q_{\mathrm{cond}}
 + S_{\mathrm{conv}}
-+ S_{\mathrm{gen}}
 + Q_{\mathrm{rad}}
 + Q_{\mathrm{rxn}} .
 \;}
@@ -1020,32 +1026,30 @@ The terms, with sign conventions, are:
 | $\rho c_p^{\mathrm{eff}}\,\partial_t T$ | sensible-heat storage, every component | $\bigl(\sum_{j}\xi_j c_{p,j}(T)\bigr)\partial_t T$ | J·m⁻³·s⁻¹ |
 | $-\nabla\cdot\mathbf q_{\mathrm{cond}}$ | Fourier conduction | $\mathbf q_{\mathrm{cond}} = -k_{\mathrm{eff}}\nabla T$ | net outflow cools |
 | $S_{\mathrm{conv}}$ | gas advection of sensible enthalpy | $-\sum_g c_{p,g}(T)\,\mathbf J_g\!\cdot\!\nabla T$ | W·m⁻³ |
-| $S_{\mathrm{gen}}$ | optional gas-generation enthalpy sink | $-\sum_g \Delta h_g(T,T_{\mathrm{ref}})\,\nabla\!\cdot\!\mathbf J_g$ | W·m⁻³ |
 | $Q_{\mathrm{rad}}$ | volumetric radiation absorption | model-dependent | W·m⁻³ |
 | $Q_{\mathrm{rxn}}$ | reaction heat | $-\sum_r h_r r_r$ | W·m⁻³ |
 
-This is the "Formulation A" referred to throughout the codebase, selected by the
-default `energy_form = :standard`. The discrete cell update is
+The discrete cell update is
 
 $$
 \frac{dT_i}{dt}
 = \frac{1}{\rho c_{p,i}^{\mathrm{eff}}}
 \Bigl(
--(\nabla\cdot\mathbf q)_i + S_{\mathrm{conv},i} + S_{\mathrm{gen},i}
+-(\nabla\cdot\mathbf q)_i + S_{\mathrm{conv},i}
 + Q_{\mathrm{rad},i} + Q_{\mathrm{rxn},i}
 \Bigr),
 $$
 
 which is precisely the final assembly loop of `compute_rhs!` (the divergence enters
-with a minus sign, the four volumetric sources add, the whole is divided by the
+with a minus sign, the three volumetric sources add, the whole is divided by the
 mixture $\rho c_p$). The detailed discretization of each term — the distance-weighted
 harmonic-mean face conductivity, the second-order cell-centered temperature gradient in
 $S_{\mathrm{conv}}$, the eight-step assembly order — belongs to §7; here we justify the
 *continuous* form.
 
 > **Implementation notes.** The final RHS assembly
-> $dT_i/dt = (-\,\mathrm{div\_q} + S_{\mathrm{conv}} + S_{\mathrm{gen}} + Q_{\mathrm{rad}} + Q_{\mathrm{rxn}})/\rho c_p$
-> is in `compute_rhs!`, `src/Discretization/finite_volume.jl` (Step 8, ≈ line 387).
+> $dT_i/dt = (-\,\mathrm{div\_q} + S_{\mathrm{conv}} + Q_{\mathrm{rad}} + Q_{\mathrm{rxn}})/\rho c_p$
+> is in `compute_rhs!`, `src/Discretization/finite_volume.jl` (Step 8).
 > The mixture heat capacity is `effective_heat_capacity` and the conductive flux is
 > `conductive_flux` / `compute_conductive_fluxes!`.
 
@@ -1104,9 +1108,9 @@ temperature. Three things follow:
    has been absorbed exactly into $Q_{\mathrm{rxn}}$ and $S_{\mathrm{conv}}$. If the
    heats are instead quoted at a datum $T_{\mathrm{ref}}$, Kirchhoff's law
    $h_r(T) = h_r^0 + \sum_j\nu_{r,j}\Delta h_j(T,T_{\mathrm{ref}})$ adds
-   $-\sum_j\Delta h_j(T,T_{\mathrm{ref}})\,\dot\omega_j$ over *every* component; the
-   optional $S_{\mathrm{gen}}$ of §3.3.4 supplies only the gas part of that sum and
-   only in the quasi-steady limit $\nabla\!\cdot\mathbf J_g \approx \dot\omega_g$.
+   $-\sum_j\Delta h_j(T,T_{\mathrm{ref}})\,\dot\omega_j$ over *every* component, a
+   term the energy equation does not carry. Heats of reaction are therefore supplied
+   at the reaction temperature (§6.6.3).
 3. **The skeleton-following derivative $\partial_t T + \mathbf v_s\!\cdot\!\nabla T$ is
    the mesh-frame rate in ALE**, where the mesh moves with the skeleton (§3.6, §11).
    The temperature equation therefore carries no advection term of any kind in
@@ -1138,7 +1142,8 @@ entirely model-dependent. For `NO_RADIATION` it is zero; for `SURFACE_ABSORPTION
 the absorbed flux $\alpha\,q_{\mathrm{ext}}$ enters through the *surface energy
 balance* (boundary Newton solve, §12.3.5), not as a volumetric deposit;
 for `BEER_LAMBERT` it follows the in-depth attenuation $q''' = \alpha I(z)$ with
-$I(z) = I_{\mathrm{surface}}\exp(-\int\alpha\,dz')$; for `P1_QUASI_STEADY` it is the net
+$I(z) = I_{\mathrm{surface}}\exp(-\int\alpha\,dz')$; for the experimental `P1_QUASI_STEADY` model (which `solve`
+rejects; §8.12) it is the net
 P1 source $\alpha(G-4\sigma T^4)$ computed from a separate quasi-steady radiation field.
 The four models, their mutual exclusivity, and their numerics are the subject of §8.
 
@@ -1157,11 +1162,11 @@ moisture-sorption heat $h(T,\xi)$ via `StateDependentProperty`); the rate law $r
 the smoothly-gated Arrhenius form of §6.
 
 > **Implementation notes.** $Q_{\mathrm{rxn}} = -\sum_r h_r r_r$ is
-> `reaction_heat_source` in `src/Physics/kinetics.jl` (≈ line 257), with the negative
+> `reaction_heat_source` in `src/Physics/kinetics.jl`, with the negative
 > sign documented in-source ("Note the negative sign!"). Reaction rates and heats are
 > evaluated together by `evaluate_reactions!` (same file).
 
-### 3.3.4 The advection source $S_{\mathrm{conv}}$ and the optional generation sink $S_{\mathrm{gen}}$
+### 3.3.4 The advection source $S_{\mathrm{conv}}$ and the surface gas enthalpy
 
 **$S_{\mathrm{conv}}$ (always active).** The gas-advection source carries the sensible
 enthalpy convected by the gas flux,
@@ -1175,55 +1180,31 @@ $$
 where $\bar J_{g,i} = \tfrac12 (J_{g,f_L} + J_{g,f_R})$ is the cell-center average of the
 two face fluxes and $(\partial T/\partial z)_i$ is the second-order opposite-distance
 gradient (boundary cells blend in the boundary-face slope at the solved $T_s$; §7.4.2).
-This term is **always on** in the `:standard` form; it is the
-only carrier of gas sensible enthalpy in the temperature equation under Formulation A.
+It is the only carrier of gas sensible enthalpy in the temperature equation.
 
-**$S_{\mathrm{gen}}$ (optional).** The generation sink is the second product-rule piece,
-written with the *exact* sensible-enthalpy integral rather than a single-point product:
-
-$$
-S_{\mathrm{gen}} = -\sum_g \Delta h_g(T,T_{\mathrm{ref}})\,\nabla\cdot\mathbf J_g,
-\qquad
-\Delta h_g(T,T_{\mathrm{ref}}) = \int_{T_{\mathrm{ref}}}^{T} c_{p,g}(\tau)\,d\tau
-\approx c_{p,g}\!\Bigl(\tfrac{T+T_{\mathrm{ref}}}{2}\Bigr)(T-T_{\mathrm{ref}}),
-$$
-
-the integral being evaluated by the midpoint rule in `delta_enthalpy` (§4) — the very
-same quadrature and datum $T_{\mathrm{ref}}$ used by the optional surface-transpiration
-boundary term. Using the true integral (not $(T-T_{\mathrm{ref}})c_{p,g}(T)$) is what lets
-the discrete energy ledger telescope *exactly* with the surface term. $S_{\mathrm{gen}}$
-is included only when `energy_form = :with_generation_sink`; otherwise it is zeroed.
-It is a *partial* datum conversion: with $T_{\mathrm{ref}}$-datum heats the exact
-equation also needs the condensed-product term
-$-\sum_{j\in S/L}\Delta h_j(T,T_{\mathrm{ref}})\,\dot\omega_j$ (§3.3.2), which is not
-implemented.
-
-**Mutual exclusivity with surface transpiration.** With constant $c_p$ the volumetric
-integral of the two product-rule pieces equals the boundary outflow term,
+**No surface gas-enthalpy term.** The conservative-form gas-enthalpy divergence splits
+by the product rule as
 
 $$
-\int_0^L (S_{\mathrm{conv}} + S_{\mathrm{gen}})\,dz
-= -\sum_g \dot m_g\,\Delta h_g(T_s, T_{\mathrm{ref}}),
+\nabla\cdot\Big(\sum_g \Delta h_g\,\mathbf J_g\Big)
+= \sum_g c_{p,g}\,\mathbf J_g\cdot\nabla T + \sum_g \Delta h_g\,\nabla\cdot\mathbf J_g ,
 $$
 
-i.e. the conservative-form gas-enthalpy divergence is recovered at the boundary. The
-default convention carries this transport *volumetrically* via $S_{\mathrm{conv}}$ and a
-plain convective+radiative surface BC, with **no** surface-transpiration enthalpy term.
-If one also enabled the surface-transpiration BC
-$\sum_g \dot m_g\,\Delta h_g(T_s,T_\infty)$, it would apply the *entire* outflow on top
-of $\int S_{\mathrm{conv}}$, double-counting roughly $5$–$10$ kW·m⁻² as a spurious sink.
-For this reason `use_transpiration_bc = true` is **rejected at problem construction**;
-the supported production path is $S_{\mathrm{conv}}$-only (optionally plus
-$S_{\mathrm{gen}}$, which then telescopes with transpiration only if transpiration were
-permitted — it is not, in production). The surface energy balance and the
-transpiration term are detailed in §7 and §12.
+exactly even for temperature-dependent $c_{p,g}$, since $\nabla\Delta h_g = c_{p,g}(T)\,\nabla T$.
+The first piece is $-S_{\mathrm{conv}}$; the second cancels exactly against the
+transport part of the gas composition-change term ($\partial_t\xi_g = \dot\omega_g -
+\nabla\cdot\mathbf J_g$, §3.3.2), whose reaction part is $Q_{\mathrm{rxn}}$ when the
+heats of reaction are quoted at the reaction temperature. The gas enthalpy is
+therefore carried entirely *volumetrically*, and the surface boundary condition is a
+plain convective + radiative balance, $q_{\mathrm{BC}}(T_s) = q_{\mathrm{cond}}(T_s)$,
+with **no** gas-enthalpy term. A surface term $\sum_g \dot m_g\,\Delta h_g(T_s,T_\infty)$
+would apply the *entire* outflow enthalpy on top of $\int S_{\mathrm{conv}}\,dz$,
+double-counting roughly $5$–$10$ kW·m⁻² as a spurious sink. The gas flux reaches the
+surface balance only through the blowing model of a `ConvectiveBC`, which reduces the
+convective coefficient (§12.3.3). The surface energy balance is detailed in §12.
 
 > **Implementation notes.** $S_{\mathrm{conv}}$ is `compute_gas_convective_source!`
-> and $S_{\mathrm{gen}}$ is `compute_gas_generation_sink!`, both in
-> `src/Physics/convection.jl`. The construction-time guard rejecting
-> `use_transpiration_bc` is in `to_problem_def`, `src/Problem/adapter.jl`.
-> The midpoint-rule `delta_enthalpy` is in `src/Materials/components.jl`
-> (≈ line 492).
+> in `src/Physics/convection.jl`.
 
 ### 3.3.5 Why temperature, not enthalpy: trade-offs of the non-conservative form
 
@@ -1233,7 +1214,7 @@ and is the FDS/Gpyro/ThermaKin tradition for solid-phase pyrolysis. The price is
 the *discrete* energy balance is only approximately conservative: it does not evolve the
 composition-change enthalpy term $\sum_j h_j(T)\,\partial_t\xi_j$ as part of a conserved
 enthalpy density (§3.3.2) — its reaction and gas-transport parts are re-expressed as
-$Q_{\text{rxn}}$ and $S_{\text{conv}}$/$S_{\text{gen}}$ — and (in ALE) the
+$Q_{\text{rxn}}$ and $S_{\text{conv}}$ — and (in ALE) the
 volume-change contribution to storage is likewise outside the ledger. These
 discrete-closure gaps are bounded and are made visible by the conservation diagnostics
 (§16).
@@ -1310,13 +1291,13 @@ $$
 where $\rho_{i,j}$ is the **intrinsic (skeletal, cell-wall) density** — the density of
 the condensed material itself, ignoring pore volume — and gases do not enter the sum.
 When a component is constructed without an explicit intrinsic density, $\rho_{i,j}$
-falls back to its bulk density, recovering the legacy "no pores in the pure phase"
-behaviour. (A second, volume-fraction porosity $\varphi=\sum_j v_j^{\text{gas}}$ also
-exists historically, but the intrinsic-density form above is the one used by production
-property updates and by the pressure closure.) The porosity derivatives the Jacobian
+falls back to its bulk density, and the component contributes no pore volume. (The
+all-phase gas volume fraction $\sum_j v_j^{\text{gas}}$ of §5.1.2 is a different
+quantity; the intrinsic-density form above is the porosity the property updates and the
+pressure closure use.) The porosity derivatives the Jacobian
 needs ($\partial\varphi/\partial\xi_j = -1/\rho_{i,j}$ for solid/liquid, $0$ for gas, in
 the clamp-inactive interior) are obtained by forward-mode AD through `porosity`
-itself (§5.3.3, §15).
+itself (§5.3.2, §15).
 
 Pressure matters only when Darcy flow is active (`DarcyFick` mode). In the diffusion-only
 mode the pressure field is never assembled; the gas flux is purely Fickian and the
@@ -1325,11 +1306,11 @@ $\partial P/\partial\xi_k$ (gas direct term plus the porosity-coupling term) tha
 Jacobian needs are obtained by forward-mode differentiation of the closure itself —
 see §9.6.
 
-> **Implementation notes.** $P = N/\max(\varphi,10^{-12})$ is `ideal_gas_pressure` /
-> `compute_pressure!` in `src/Physics/pressure.jl` (porosity floor `_PHI_FLOOR = 1e-12`,
-> ≈ line 15; gas-only partial-pressure sum `_gas_partial_pressure_sum`, ≈ line 22). The
+> **Implementation notes.** $P = N/\max(\varphi,10^{-12})$ is `ideal_gas_pressure`
+> in `src/Physics/pressure.jl` (porosity floor `_PHI_FLOOR = 1e-12`; gas-only
+> partial-pressure sum `_gas_partial_pressure_sum`). The
 > canonical porosity is `porosity` in `src/Properties/mixture_rules.jl`; its
-> derivatives are taken by AD through the same function (§5.3.3).
+> derivatives are taken by AD through the same function (§5.3.2).
 
 ---
 
@@ -1346,7 +1327,8 @@ $$
 $$
 
 At a face the production path forms the per-cell **mobility** $\kappa/\mu$ (with
-$\mu$ from Sutherland's law at the cell temperature) and combines the two sides
+$\mu$ the material's pore-gas viscosity at the cell temperature, Sutherland's law for
+air by default) and combines the two sides
 with the distance-weighted harmonic mean (§9.5.2); if either side's mobility is
 $\le 10^{-30}$ the face mobility is exactly $0$ (an impermeable cell is an
 infinite series resistance). The pressure gradient is a central difference
@@ -1384,7 +1366,8 @@ are detailed in §9.
 > (`src/Discretization/darcy_velocity.jl`). The combined flux is
 > `gas_flux_darcy_fick` / `compute_gas_fluxes_darcy_fick!` in
 > `src/Physics/gas_transport.jl` (advection of the intrinsic density ξ/φ_face).
-> Sutherland viscosity is `effective_gas_viscosity` (§5).
+> The viscosity is `effective_gas_viscosity(T, material)`, the material's
+> `gas_viscosity` property with a positive floor (§5.9).
 
 ### 3.5.2 Where momentum is not solved
 
@@ -1425,10 +1408,8 @@ driver. The absolute rate is $dV_i/dt = V_i\theta_i$.
 
 > **Implementation notes.** $\theta = \sum_j \gamma_j\,\dot\xi_j/\rho_j(T)$ is
 > `volume_change_rate` (`_volume_change_rate`) in `src/Physics/volume_change.jl`
-> (≈ line 103, with `if γ > 0` guards). Absolute rates are `compute_cell_volume_rates!`.
-> (Some KB glosses write $\theta=-(\sum_j\dot\xi_j)/\rho_{\mathrm{total}}$; the code
-> computes the swelling-weighted per-component form above — that is what is
-> implemented.)
+> (with `if γ > 0` guards). It is the swelling-weighted per-component form, not
+> $-(\sum_j\dot\xi_j)/\rho$.
 
 ### 3.6.2 The ThermaKin/Gpyro single-reference-point deformation source
 
@@ -1463,7 +1444,7 @@ the mesh frame introduces **no advection term** in any equation; the only mesh-m
 term is the **dilation correction** $\Delta(d\xi_j/dt) = -\xi_j\theta_i$ applied to
 every component, which keeps each cell's component masses on their reaction-and-flux
 budget as its volume changes. The mesh kinematics, the dilation correction, and the
-GCL machinery are derived in full in §11 (The ALE Framework) and §10 (Volume Change &
+geometric conservation law are derived in full in §11 (The ALE Framework) and §10 (Volume Change &
 Lateral Shrinkage). This chapter records only that the deformation physics is *the same* as
 ThermaKin/Gpyro's; the implementation choice is a moving mesh rather than a
 reference-point source.
@@ -1504,7 +1485,7 @@ are in §10.
 
 > **Implementation notes.** The cumulative mesh velocity
 > $w_{i+1}=w_i+(\theta_i-\theta_A)\Delta z_i$ is in `_compute_ale_mesh_velocity!`,
-> `src/Residual/residual.jl` (≈ lines 355–415, with `w[1]=0`). The χ dynamics
+> `src/Residual/residual.jl` (with `w[1]=0`). The χ dynamics
 > $d\chi_i/dt = S_{\mathrm{dry},i}V_i/m_{\mathrm{dry},i}$ is `_pack_chi_derivative!`;
 > $\theta_A$ is `_compute_theta_A` (same file). The area update
 > $A=A_0\,\mathrm{law}(\bar\chi)$ is `update_cross_section_area!` in
@@ -1545,7 +1526,7 @@ supports bimolecular reactions; Pyrolysis.jl currently enforces a single reactan
 
 ### 3.7.2 Energy equation
 
-| Aspect | Pyrolysis.jl (Formulation A) | ThermaKin2Ds | Gpyro | FDS |
+| Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro | FDS |
 |---|---|---|---|---|
 | Primary unknown | temperature $T$ | $T$ | $T$ | $T$ |
 | Storage coefficient | all phases $\sum_j\xi_j c_{p,j}$ | all phases $\sum_j\xi_j c_{p,j}$ (Eq. 17) | matrix by default; all phases with `FULL_QSG` | matrix (no in-depth gas) |
@@ -1559,8 +1540,7 @@ $S_{\mathrm{conv}}$), and the deformation term, which the ALE mesh frame absorbs
 (§3.3.2, §11.2.2). Gpyro's thermal-equilibrium form drops the gas storage
 $\rho_g\bar\psi c_{pg}\,\partial T/\partial t$ by default and restores it with
 `FULL_QSG`, which makes its Eq. 65 the same equation; FDS carries no in-depth gas, so
-the gas storage is identically zero there. The optional $S_{\mathrm{gen}}$ is a
-datum-conversion term for $T_{\mathrm{ref}}$-referenced heats of reaction (§3.3.2).
+the gas storage is identically zero there.
 The one-dimensional Cartesian energy equation is otherwise identical in all four
 codes; ThermaKin additionally supports a cylindrical
 (radial) Laplacian $\frac1r\partial_r(rk\partial_r T)$, which Pyrolysis.jl approximates
@@ -1606,19 +1586,18 @@ the residual a *pure function* of the state.
 | Governing equation / term | Closure | Constitutive law | Chapter |
 |---|---|---|---|
 | Total density $\rho$ | exact | $\rho=\sum_j\xi_j$ | §3.2, §5 |
-| Matrix storage $\rho c_p^{\mathrm{eff}}$ | property + mixing | $\sum_{S/L}\xi_j c_{p,j}(T)$ | §4, §5 |
+| Storage $\rho c_p^{\mathrm{eff}}$ | property + mixing | $\sum_j\xi_j c_{p,j}(T)$, every component | §4, §5 |
 | Conductive flux $\mathbf q_{\mathrm{cond}}$ | Fourier + mixing | $-k_{\mathrm{eff}}(T,\xi)\nabla T$, harmonic-mean face $k$ | §5, §7 |
 | Reaction rate $r_r$ | Arrhenius | $A_r e^{-E_r/R_gT}\prod_j\xi_j^{n_{r,j}}$, tanh gates/limiter | §6 |
 | Species source $S_{j}$ | stoichiometry | $\sum_r\nu_{r,j}r_r$ | §6 |
 | Reaction heat $Q_{\mathrm{rxn}}$ | enthalpy of reaction | $-\sum_r h_r(T,\xi)\,r_r$ | §6 |
 | Radiation source $Q_{\mathrm{rad}}$ | radiation model | surface / Beer–Lambert / P1 | §8 |
 | Gas advection $S_{\mathrm{conv}}$ | gas flux + $c_{p,g}$ | $-\sum_g c_{p,g}\mathbf J_g\!\cdot\!\nabla T$ | §7, §9 |
-| Gas generation sink $S_{\mathrm{gen}}$ | enthalpy integral | $-\sum_g\Delta h_g\,\nabla\!\cdot\!\mathbf J_g$ (optional) | §7, §9 |
 | Gas diffusive flux $\mathbf J_j^{\mathrm{diff}}$ | Fick (volume-fraction gradient) | $-\lambda_{\mathrm{face}}(\xi_R T_R-\xi_L T_L)/(T_{\mathrm{face}}d_{LR})$ | §9 |
 | Gas advective flux $\mathbf J_j^{\mathrm{adv}}$ | upwind intrinsic density $\times$ Darcy | $(\xi_j^{\mathrm{upwind}}/\varphi_{\mathrm{face}})\,v_g$ | §9 |
 | Pressure $P$ | ideal gas in pores | $N(\xi,T)/\varphi$ | §9 |
 | Porosity $\varphi$ | intrinsic density | $\operatorname{clamp}(1-\sum_{S/L}\xi_j/\rho_{i,j},0,1)$ | §5 |
-| Gas velocity $v_g$ | Darcy | $-(\kappa/\mu)\nabla P$, distance-weighted harmonic mobility $\kappa/\mu$, Sutherland $\mu$ | §9 |
+| Gas velocity $v_g$ | Darcy | $-(\kappa/\mu)\nabla P$, distance-weighted harmonic mobility $\kappa/\mu$, material $\mu(T)$ | §9 |
 | Effective $k_{\mathrm{eff}},\lambda_{\mathrm{eff}},\kappa_{\mathrm{eff}},\varepsilon_{\mathrm{eff}},\alpha_{\mathrm{eff}}$ | mixing rules | parallel/series/weighted/Bruggeman/Carman–Kozeny | §5 |
 | Volume-change rate $\theta$ | swelling continuity | $\sum_j\gamma_j\dot\xi_j/\rho_j(T)$ | §10 |
 | Mesh velocity $w$ | cumulative strain | $w_{i+1}=w_i+(\theta_i-\theta_A)\Delta z_i$ | §11 |
@@ -1644,7 +1623,7 @@ regimes. The most important, with the section that quantifies or discusses each:
 
 - **One temperature.** Matrix and in-pore gas are assumed in local thermal equilibrium;
   there is no two-temperature gas energy equation. This breaks for very fast, hot gas
-  throughput, where the pore gas no longer equilibrates with the walls within a cell.
+  throughput, where the pore gas does not equilibrate with the walls within a cell.
 - **Algebraic (not evolved) pressure.** Pressure is closed instantaneously by
   $P=N/\varphi$ (§3.4.2) with a $\varphi$ floor of $10^{-12}$; there is no transient
   gas-mass-balance pressure PDE as in Gpyro. Acoustic and fast compressibility transients
@@ -1668,11 +1647,6 @@ regimes. The most important, with the section that quantifies or discusses each:
   quantity (§3.3.2) and (in ALE) leaves volume-change storage outside the discrete energy
   ledger; these gaps are bounded and made visible by diagnostics (§16) but are not closed
   exactly.
-- **Asymmetric ambients with a permeable back face.** The $S_{\mathrm{gen}}$ form uses a
-  single scalar $T_{\mathrm{ref}}$; if the two boundaries have different ambient
-  temperatures and the back face is permeable, the energy ledger fails to close by
-  exactly $\sum_g\dot m_{g,\mathrm{bottom}}c_{p,g}(T_{\infty,\mathrm{top}}-T_{\infty,\mathrm{bottom}})$.
-  Harmless for the usual impermeable back face (§3.3.4, §7).
 
 These limitations are inherited by every downstream chapter; where a later chapter
 relaxes or quantifies one of them (e.g. §16 for the energy/mass ledgers, §18 for
@@ -1747,8 +1721,9 @@ for printing, logging, and comparison; it is *not* consulted in hot paths.
 
 ### 4.1.2 The three component types
 
-**`SolidComponent`** is the matrix-forming condensed phase. It carries six
-property-function fields and three scalar (`Float64`) fields:
+**`SolidComponent`** is the matrix-forming condensed phase. It carries seven
+property-function fields, an optional constant surface absorptivity, and two
+scalar (`Float64`) fields:
 
 ```julia
 struct SolidComponent{Pρ,Pc,Pk,Pλ,Pκ,Pε,Pa,Pρi} <: AbstractComponent
@@ -1834,10 +1809,11 @@ return exactly `0.0`, which is the algebraically correct value for the matrix
 mixing rules (a gas contributes nothing to permeability or to the solid
 skeleton).
 
-> **Implementation note.** Accessors `get_density`, `get_intrinsic_density`,
-> `get_heat_capacity`, `get_conductivity`, `get_gas_transfer`,
-> `get_permeability`, `has_permeability`, `is_solid/is_liquid/is_gas`, `phase`,
-> `molar_mass`, all in `src/Materials/components.jl`.
+> **Implementation note.** Accessors `get_intrinsic_density`, `get_permeability`,
+> `has_permeability`, `get_emissivity`, `get_absorptivity`,
+> `is_solid/is_liquid/is_gas`, `phase`, `molar_mass`, all in
+> `src/Materials/components.jl`. Kernels read the remaining property fields
+> (`density`, `heat_capacity`, …) directly.
 
 ### 4.1.4 Bulk versus intrinsic (skeletal) density
 
@@ -1861,9 +1837,8 @@ between two densities (overload note A7 of Chapter 2):
   Field `intrinsic_density`.
 
 When a component is constructed without an explicit intrinsic density, the field
-defaults to the bulk density, $\rho_{i,j}=\rho_j$, which recovers the legacy
-"pure phase has no internal pores" assumption — every example that predates the
-intrinsic-density feature behaves unchanged. The resolution logic enforces that a
+defaults to the bulk density, $\rho_{i,j}=\rho_j$: the pure phase is assumed to
+have no internal pores. The resolution logic enforces that a
 caller pass *either* `ρ_intrinsic` *or* a pure-phase porosity $\phi$ (from which
 $\rho_{i,j}=\rho_j/(1-\phi)$ is computed, requiring a constant bulk $\rho_j$),
 never both:
@@ -1908,7 +1883,7 @@ canonical gas) carries no weight in the matrix radiative surface.
 > the *same* $\gamma$ weight feeds three mixing rules with volume-fraction
 > semantics — the strain kernel, the mixture density, and the $k/\varepsilon$
 > matrix volume fractions — and a weight above 1 corrupts all three (volume
-> fractions no longer sum consistently). Expansion beyond the reactant's
+> fractions would not sum consistently). Expansion beyond the reactant's
 > volume is already expressible the physical way: give the product a **low
 > bulk density** ($V_f/V_0 = \sum_j y_j\gamma_j\rho_A/\rho_j$ — the V-CPL-03
 > P1 verification permutation demonstrates ×2 growth), with $\gamma \in
@@ -1930,7 +1905,7 @@ consumed downstream:
 |---|---|---|---|---|
 | `density` | $\rho_j$ | kg·m⁻³ | all | mixing rules, $\rho$ (§4.2.2), volume change (Ch. 10) |
 | `intrinsic_density` | $\rho_{i,j}$ | kg·m⁻³ | S, L | porosity $\phi$ (§4.2.3, Eq. 4.2) |
-| `heat_capacity` | $c_{p,j}(T)$ | J·kg⁻¹·K⁻¹ | all | $\rho c_p^\mathrm{eff}$, $\Delta h$, advection source (Ch. 5, 7) |
+| `heat_capacity` | $c_{p,j}(T)$ | J·kg⁻¹·K⁻¹ | all | $\rho c_p^\mathrm{eff}$, advection source, park-merge enthalpy (Ch. 5, 7, 14) |
 | `thermal_conductivity` | $k_j(T)$ | W·m⁻¹·K⁻¹ | all | $k_\mathrm{eff}$ (Ch. 5), Fourier flux (Ch. 7) |
 | `gas_transfer_coeff` | $\lambda_j(T)$ | m²·s⁻¹ | all | $\lambda_\mathrm{eff}$ (Ch. 5), gas diffusion (Ch. 9) |
 | `permeability` | $\kappa_j(T)$ | m² | S, L | $\kappa_\mathrm{eff}$ (Ch. 5), Darcy velocity (Ch. 9) |
@@ -1943,8 +1918,10 @@ consumed downstream:
 Note that $\alpha_j$ is a **mass-basis** absorption coefficient [m²·kg⁻¹]; it is
 multiplied by concentration to give the volumetric (extinction) absorption
 coefficient $\alpha_\mathrm{eff}=\sum_j\xi_j\alpha_j$ [m⁻¹] used in Beer–Lambert
-and P1 radiation (Chapter 8). Even a solid carries a nonzero $\lambda_j$ default
-in practice (e.g. $2\times10^{-5}$ m²·s⁻¹): although solids do not themselves
+and P1 radiation (Chapter 8). A solid usually carries a nonzero $\lambda_j$
+in practice (e.g. $2\times10^{-5}$ m²·s⁻¹; the `SolidComponent` default is 0, and
+`validate_problem` warns when a gas-producing Fickian material leaves it there,
+§5.6): although solids do not themselves
 diffuse, their $\lambda_j$ contributes to the *mixture* gas-transfer coefficient
 through the volume-weighted mixing rule, matching the ThermaKin convention.
 
@@ -2003,15 +1980,14 @@ $$
 A gas does not enter $\phi$ because it occupies the void that the solid frame
 leaves; adding gas mass does not displace skeletal material. Porosity feeds (i)
 the ideal-gas pressure closure $P=N(\xi,T)/\phi$ (Chapter 9) and (ii) the
-Carman–Kozeny permeability closure (Chapter 5, §5.7). A *second*, volume-fraction
-porosity $\phi=\sum_{j\in G} v_j$ also exists in the codebase
-(`_porosity_sum`/`_porosity_sum_gen`) but the **intrinsic-density form Eq. (4.2)
-is canonical** and is what `porosity` and `update_properties!` actually use
+Carman–Kozeny permeability closure (Chapter 5, §5.7). The all-phase gas volume
+fraction $\sum_{j\in G} v_j$ is a different quantity; the **intrinsic-density form
+Eq. (4.2) is canonical** and is what `porosity` computes and `update_darcy_properties!` uses
 (overload note A8 of Chapter 2).
 
 > **Implementation note.** Canonical porosity: `porosity` →
 > `_porosity_void_frac`, in `src/Properties/mixture_rules.jl` (derivatives are
-> taken by forward-mode AD through `porosity` itself; §5.3.3). In
+> taken by forward-mode AD through `porosity` itself; §5.3.2). In
 > `_porosity_void_frac` a component
 > contributes $\xi_j/\rho_{i,j}$ only when `is_solid(c) || is_liquid(c)` *and*
 > $\rho_{i,j}>0$. Full development is in Chapter 5.
@@ -2068,7 +2044,7 @@ Two modeling points deserve emphasis:
 
 A *property function* is a callable object $p$ such that $p(T)$ (or, for
 state-dependent properties, $p(T,\xi)$) returns the property value at the given
-state. All seven concrete types subtype `AbstractPropertyFunction` and implement
+state. All eight concrete types subtype `AbstractPropertyFunction` and implement
 both the `(p)(T)` and `(p)(T, ξ)` call signatures (the latter ignoring $\xi$ for
 all but `StateDependentProperty`). This uniformity lets a single component field
 hold any property law, and lets the kinetics evaluator pass $\xi$ to a heat-of-
@@ -2083,8 +2059,10 @@ derivative, so nothing changes for any physical state; outside it the law sees
 the nearest bracket end. A Newton trial state with a nonphysical (even
 negative) temperature therefore produces a failed Newton step, not a
 `DomainError` out of a fractional power or a fitted polynomial's far
-extrapolation. The analytic derivatives (§4.5) are zero outside the bracket so
-they agree with automatic differentiation of the clamped law everywhere.
+extrapolation. No derivative is hand-coded: the Jacobian and sensitivity passes
+evaluate each law on `ForwardDiff.Dual` arguments (§4.5), so the derivatives
+quoted below are what automatic differentiation of the law returns — and, through
+the clamp, zero outside the bracket.
 
 The component constructors sample every law on the bracket at 1 K steps and
 reject a component whose bulk or intrinsic density, heat capacity or thermal
@@ -2105,7 +2083,7 @@ p(T) = \texttt{value}, \qquad \frac{\mathrm{d}p}{\mathrm{d}T}=0.
 $$
 
 The workhorse for properties given a single number. It has a *fast path* in the
-parameter-evaluation interface (§4.8) that bypasses the dynamic-dispatch hop.
+parameter-evaluation interface (§4.7) that bypasses the dynamic-dispatch hop.
 
 ### 4.4.2 `LinearProperty`
 
@@ -2123,16 +2101,14 @@ p(T) = \sum_{m=0}^{N-1} c_m\, T^{m} = c_0 + c_1 T + c_2 T^2 + \cdots,
 $$
 
 evaluated with `evalpoly` (Horner's scheme) for numerical stability and to avoid
-recomputing powers. The analytical derivative is computed by an unrolled loop
-(no allocation, no `evalpoly` of a derived coefficient tuple):
+recomputing powers. Forward-mode AD through Horner's scheme returns the exact
+derivative
 
 $$
 \frac{\mathrm{d}p}{\mathrm{d}T} = \sum_{m=1}^{N-1} m\,c_m\,T^{m-1}
 = c_1 + 2c_2 T + 3c_3 T^2 + \cdots .
 \tag{4.6}
 $$
-
-For $N=1$ (a degenerate constant polynomial) the derivative returns `0.0`.
 
 ### 4.4.4 `ArrheniusProperty`
 
@@ -2145,12 +2121,8 @@ $$
 
 Fields `A` (pre-exponential), `E` (activation energy [J·mol⁻¹]), and `T_ref` (a
 reference temperature, defaulting to $T_\mathrm{ref}=298.15$ K, carried for
-normalization purposes but not used in the value itself). The closed-form
-derivative in Eq. (4.7) is obtained by differentiating
-$A\exp(-E/(R_gT))$: $\frac{\mathrm{d}}{\mathrm{d}T}[-E/(R_gT)] = E/(R_gT^2)$, hence
-$p'(T)=p(T)\cdot E/(R_gT^2)$. This is the *only* property type with a nonzero
-closed-form $T$-derivative beyond the polynomial/linear forms, and it shares its
-functional form with the reaction-rate constant (§4.5, Chapter 6).
+normalization purposes but not used in the value itself). The law shares its
+functional form with the reaction-rate constant (§4.5.3, Chapter 6).
 
 ### 4.4.5 `TableProperty`
 
@@ -2170,17 +2142,16 @@ v_N & T_q \ge T_N.
 $$
 
 The interval search is **linear for $N\le 8$** (fewer comparisons than a binary
-search on small tables) and **binary for $N>8$** (logarithmic). The derivative is
-a *central finite difference* with a fixed step $\delta T = 0.1$ K,
-$\mathrm{d}p/\mathrm{d}T \approx [p(T_q+\delta T) - p(T_q-\delta T)]/(2\delta T)$.
-On a smooth segment this recovers the segment slope exactly; near a knot it blends
-the two adjacent slopes.
+search on small tables) and **binary for $N>8$** (logarithmic). Under AD the
+derivative is the slope of the segment containing $T_q$ (the right-hand segment at
+a knot) and zero in the flat extrapolation; it jumps at every knot.
 
 ### 4.4.6 `CallableProperty`
 
 Wraps an arbitrary callable $f(T)$. Its value is $p(T)=f(\tilde T)$ on the
-clamped argument of the property bracket; its derivative is the same central
-finite difference with $\delta T = 0.1$ K. This is the type produced by
+clamped argument of the property bracket; its derivative is whatever AD
+propagates through $f$, so $f$ must accept `ForwardDiff.Dual` arguments (no
+`Float64` annotations or conversions inside). This is the type produced by
 `to_property(f)` for a function `f` and is how the ideal-gas density default
 (Eq. 4.5) is stored.
 
@@ -2197,18 +2168,17 @@ $$
 `SutherlandProperty()` is the canonical **air** triple
 ($\mu_{\text{ref}}=1.716\times10^{-5}$ Pa·s, $T_{\text{ref}}=273.15$ K,
 $S=110.4$ K) and is the default `Material.gas_viscosity` (§5.9), so a material
-that says nothing about its pore gas behaves exactly as the package did before
-that field existed. Its derivative is **analytic**,
+that says nothing about its pore gas uses air. Its derivative, as AD returns it, is
 
 $$
 \frac{\mathrm{d}p}{\mathrm{d}T} = p(T)\left(\frac{3}{2T} - \frac{1}{T+S}\right),
 $$
 
-which agrees with `ForwardDiff` to machine precision (gated in
+(the AD-cleanliness of the type is tested in
 `test/materials/test_gas_viscosity_property.jl`).
 
-The type evaluates the bare correlation and does **not** clamp $T$; the
-low-temperature floor and the positivity floor are applied once, centrally, in
+Like every property law it evaluates on the clamped argument $\tilde T$ of the
+property bracket. The positivity floor `MU_FLOOR` is applied once, centrally, in
 `effective_gas_viscosity(T, material)` (§5.9), so that every curve a material may
 carry is protected rather than just this one.
 
@@ -2228,10 +2198,9 @@ concentration tuple. The kinetics evaluator always passes $\xi$ to the heat
 property (§4.5, Chapter 6), so a `StateDependentProperty` heat is evaluated with
 the live composition.
 
-Its $T$-derivative is a central finite difference at fixed $\xi$,
-$\partial p/\partial T \approx [p(T+\delta T,\xi)-p(T-\delta T,\xi)]/(2\delta T)$
-with $\delta T = 0.1$ K. Its concentration derivative (§4.5.2) uses an *adaptive*
-step.
+Its derivatives in $T$ and in each $\xi_j$ are propagated by AD through $f$
+(§4.5), so $f$ must accept a `Dual` temperature and a tuple of `Dual`
+concentrations.
 
 ### 4.4.9 `to_property` conversions
 
@@ -2246,7 +2215,7 @@ or bare values:
 | a `Tuple{Real,Real}` $(a,b)$ | `LinearProperty(a, b)` |
 | a `Function` | `CallableProperty(f)` |
 
-> **Implementation note.** All property types, their value/derivative methods,
+> **Implementation note.** All property types, their call methods,
 > `linear_interpolate`, and `to_property` are in
 > `src/Materials/property_functions.jl`.
 
@@ -2259,147 +2228,75 @@ $\partial(\text{RHS})/\partial u$. Because effective properties depend on $T$ an
 $\xi$, and the RHS depends on effective properties, the per-component derivatives
 $\mathrm{d}p_j/\mathrm{d}T$ and $\partial p_j/\partial \xi_k$ propagate through the
 chain rule into the structured Jacobian (Chapter 5, §5.15 for the mixing-rule
-chain; Chapter 15 for assembly). Two derivative families are provided.
+chain; Chapter 15 for assembly). The property types carry no derivative methods.
+Each Jacobian operator either runs ForwardDiff over a stencil-local kernel that
+evaluates the property laws on `Dual` arguments, or implements an analytical
+override tested against a ForwardDiff reference (Chapter 15). Either way the
+property derivative is the derivative of the law as written.
 
 ### 4.5.1 Temperature derivative $\mathrm{d}p/\mathrm{d}T$
 
-The `derivative(p, T)` method dispatches on the property type:
+What forward-mode AD returns for each type, inside the property bracket:
 
-| Type | $\mathrm{d}p/\mathrm{d}T$ | Method |
-|---|---|---|
-| `ConstantProperty` | $0$ | analytic |
-| `LinearProperty` | $b$ | analytic |
-| `PolynomialProperty` | $\sum_{m\ge 1} m c_m T^{m-1}$ | analytic, unrolled (Eq. 4.6) |
-| `ArrheniusProperty` | $p(T)\,E/(R_g T^2)$ | analytic (Eq. 4.7) |
-| `TableProperty` | central FD, $\delta T=0.1$ K | numerical |
-| `CallableProperty` | central FD, $\delta T=0.1$ K | numerical |
-| `SutherlandProperty` | $p(T)\,(3/(2T) - 1/(T+S))$ | analytic |
-| `StateDependentProperty` | central FD in $T$, $\delta T=0.1$ K | numerical |
+| Type | $\mathrm{d}p/\mathrm{d}T$ |
+|---|---|
+| `ConstantProperty` | $0$ |
+| `LinearProperty` | $b$ |
+| `PolynomialProperty` | $\sum_{m\ge 1} m c_m T^{m-1}$ (Eq. 4.6) |
+| `ArrheniusProperty` | $p(T)\,E/(R_g T^2)$ (Eq. 4.7) |
+| `TableProperty` | slope of the active segment; $0$ in the flat extrapolation |
+| `CallableProperty` | $f'(T)$, as propagated through `f` |
+| `SutherlandProperty` | $p(T)\,(3/(2T) - 1/(T+S))$ |
+| `StateDependentProperty` | $\partial f/\partial T$ at fixed $\xi$ |
 
-The analytic derivatives are exact to machine precision; the finite-difference
-derivatives carry an $O(\delta T^2)$ truncation error from the central scheme,
-which at $\delta T=0.1$ K is negligible for the smooth thermophysical laws this
-machinery serves. (The Jacobian itself may also be obtained by forward-mode
-automatic differentiation, in which case these hand-coded derivatives are not the
-source of truth; see §4.6 and Chapter 15. The hand-coded forms exist for the
-*structured* Jacobian backend, which assembles per-operator contributions
-analytically for speed.)
+These values are exact derivatives of the evaluated law, with no truncation
+error. A `TableProperty` has a discontinuous derivative at every knot, which the
+Newton iteration sees as a kink; a smooth law (polynomial, Arrhenius, Sutherland)
+avoids it.
 
 ### 4.5.2 Concentration derivative $\partial p/\partial \xi_j$
 
-For every property type *except* `StateDependentProperty`, the value does not
-depend on $\xi$, so $\partial p/\partial \xi_j = 0$ exactly. For a
-`StateDependentProperty` the derivative is an adaptive central finite difference,
+For every property type *except* `StateDependentProperty`, the two-argument call
+`p(T, ξ)` ignores $\xi$, so $\partial p/\partial \xi_j = 0$ exactly. For a
+`StateDependentProperty` the derivative is $\partial f/\partial \xi_j$, propagated by
+AD through `f(T, ξ)` with the concentration tuple carrying `Dual` entries. The
+kinetics evaluator passes the live $\xi$ to every heat-of-reaction property, so a
+moisture-dependent heat of sorption contributes its composition derivative to the
+reaction-source block of the Jacobian.
 
-$$
-\frac{\partial p}{\partial \xi_j} \approx
-\frac{p(T,\xi^{+}) - p(T,\xi^{-})}{2\,\delta\xi_j},
-\qquad
-\delta\xi_j = \max\!\bigl(|\xi_j|\cdot10^{-4},\;10^{-6}\bigr),
-\tag{4.9}
-$$
-
-where $\xi^{\pm}$ are the concentration tuple with the $j$-th entry perturbed by
-$\pm\delta\xi_j$ (using `Base.setindex` on the immutable tuple to avoid heap
-allocation). The adaptive step is *relative* for non-small concentrations (the
-$10^{-4}$ factor gives good FD accuracy) and switches to an *absolute floor*
-$10^{-6}$ for vanishing $\xi_j$ to avoid catastrophic cancellation. At a boundary
-where $\xi_j - \delta\xi_j < 0$ (which would push the concentration negative,
-potentially out of the physical domain of $f$) the scheme falls back to a
-**forward difference** $[p(T,\xi^{+})-p(T,\xi)]/\delta\xi_j$ to keep the
-evaluation in the non-negative region; in the central branch the negative
-perturbation is non-negative by construction.
-
-> **Implementation note.** `derivative(p, T)` and
-> `derivative_ξ(p, T, ξ, j)` in `src/Materials/property_functions.jl`. The default
-> `derivative_ξ(::AbstractPropertyFunction, …) = 0.0` covers all $T$-only
-> property types; only the `StateDependentProperty` method computes Eq. (4.9).
+> **Implementation note.** The call methods `(p)(T)` and `(p)(T, ξ)` are in
+> `src/Materials/property_functions.jl`; the per-cell reaction-source Jacobian that
+> differentiates the heats is `ReactionSourceOperator`
+> (`src/Jacobian/operators/reaction_source.jl`).
 
 ### 4.5.3 The reaction-rate connection
 
 The Arrhenius derivative (Eq. 4.7) is identical in form to the
 temperature-derivative of the reaction-rate constant
-$k(T)=A\exp(-E/(R_g T))$, since $\mathrm{d}k/\mathrm{d}T = k\,E/(R_g T^2)$. This is
-why the reaction-rate Jacobian energy block (Chapter 15) reuses the same
-expression. The full reaction-rate derivative including the depletion limiter and
+$k(T)=A\exp(-E/(R_g T))$, since $\mathrm{d}k/\mathrm{d}T = k\,E/(R_g T^2)$; the
+reaction-source Jacobian obtains it by ForwardDiff over the per-cell kernel
+(Chapter 15). The full reaction-rate derivative including the depletion limiter and
 temperature gates is developed in Chapter 6.
 
 ---
 
-## 4.6 The sensible-enthalpy difference (midpoint rule)
+## 4.6 Material assembly
 
-Several energy terms — the surface transpiration enthalpy (Chapter 12), the
-gas-generation enthalpy sink $S_\mathrm{gen}$ (Chapter 7), and the energy ledgers
-(Chapter 16) — require the **sensible-enthalpy difference** of a single component
-between two temperatures, $\Delta h = \int_{T_\mathrm{lo}}^{T_\mathrm{hi}}
-c_p(\tau)\,\mathrm{d}\tau$. Pyrolysis.jl evaluates this with the **midpoint rule**:
-
-$$
-\Delta h(T_\mathrm{hi}, T_\mathrm{lo})
-= c_p\!\left(\frac{T_\mathrm{hi}+T_\mathrm{lo}}{2}\right)\,
-  \bigl(T_\mathrm{hi}-T_\mathrm{lo}\bigr).
-\tag{4.10}
-$$
-
-### 4.6.1 Why the midpoint rule
-
-Three reasons justify Eq. (4.10) over alternatives such as trapezoidal,
-endpoint, or analytic integration of a polynomial $c_p$:
-
-1. **Second-order accuracy with a single evaluation.** The midpoint rule has
-   truncation error $\tfrac{1}{24}c_p''(T_m)\,(\Delta T)^3$, i.e. it is exact for
-   $c_p$ linear in $T$ and $O(\Delta T^2)$ for general $c_p$ — the same order as
-   the trapezoidal rule but with **one** $c_p$ call instead of two. In a residual
-   evaluated tens of thousands of times this halves the cost.
-
-2. **Consistency with the cell-centered $c_p$.** The volumetric gas-advection
-   source uses a *single* cell-centered evaluation $c_{p,g}(T_i)$ (Chapter 7,
-   $S_\mathrm{conv} = -\sum_g c_{p,g}(T_i)\bar J_g (\partial T/\partial z)$).
-   Using the midpoint rule for $\Delta h$ keeps the surface-transpiration BC at
-   the *same discretization order* as the bulk gas-energy transport, so the two
-   do not introduce inconsistent enthalpy accounting at the surface.
-
-3. **AD-cleanliness.** Eq. (4.10) is a smooth composition of $c_p(\cdot)$ and
-   multiplication, so both $T_\mathrm{hi}$ and $T_\mathrm{lo}$ may be
-   `ForwardDiff.Dual`. ForwardDiff returns the derivative of *the midpoint-rule
-   expression actually evaluated*, namely
-
-   $$
-   \frac{\partial(\Delta h)}{\partial T_\mathrm{hi}}
-   = c_p(T_m) + \tfrac{1}{2}(T_\mathrm{hi}-T_\mathrm{lo})\,c_p'(T_m),
-   \quad T_m=\tfrac{T_\mathrm{hi}+T_\mathrm{lo}}{2},
-   $$
-
-   which differs from the *true* integral derivative $c_p(T_\mathrm{hi})$ at
-   $O(\Delta T)$ but is **exactly consistent** with the value the function
-   returns. This consistency (value and derivative come from the same quadrature)
-   is precisely what makes the Newton surface-energy solve and the sensitivity
-   machinery well-behaved; an inconsistent value/derivative pair would corrupt
-   the Newton convergence.
-
-> **Implementation note.** `delta_enthalpy(comp, T_hi, T_lo)`,
-> `src/Materials/components.jl`, which computes
-> `comp.heat_capacity((T_hi+T_lo)*0.5) * (T_hi - T_lo)`. It dispatches on any
-> `AbstractComponent` (uses only the `heat_capacity` field).
-
----
-
-## 4.7 Material assembly
-
-### 4.7.1 The `Material` type
+### 4.6.1 The `Material` type
 
 A `Material` is the static, fully type-specialized aggregate that every physics
 kernel reads. It is **immutable** and **heterogeneously typed** so the compiler
 can specialize every loop over its components and reactions:
 
 ```julia
-struct Material{NC,NR,C<:Tuple,RT<:Tuple,LSL} <: AbstractMaterial
+struct Material{NC,NR,C<:Tuple,RT<:Tuple,LSL,Pμ} <: AbstractMaterial
     name::Symbol
     components::C          # heterogeneous component tuple
     reactions::RT          # heterogeneous reaction tuple
     mixing::NamedTuple{(:k,:λ,:κ),Tuple{MixingSpec,MixingSpec,MixingSpec}}
     lateral_shrinkage_law::LSL   # A(t)/A₀ = law(χ̄), or nothing
     depletion_limiter::DepletionLimiter   # tanh(ξ/threshold) rate roll-off (§6.3)
+    gas_viscosity::Pμ      # pore-gas μ(T), default SutherlandProperty() (§5.9)
 end
 ```
 
@@ -2417,6 +2314,10 @@ The type parameters carry compile-time information:
   `material.lateral_shrinkage_law` specialize statically rather than dispatch
   through a `Union{Function,Nothing}` (Chapter 10). The inner constructor
   enforces `LSL === Nothing || LSL <: Function`.
+- `Pμ` — the type of the pore-gas viscosity property function, parameterized for
+  the same reason so `material.gas_viscosity(T)` stays monomorphic. The inner
+  constructor probes the curve at 200–1800 K and rejects one that is not positive
+  and finite there (§5.9).
 
 The `mixing` field bundles three `MixingSpec`s — one each for thermal
 conductivity ($k$), gas transfer ($\lambda$), and permeability ($\kappa$) — in a
@@ -2444,10 +2345,9 @@ reaction-rate evaluation (§6.3).
 
 > **Implementation note.** `Material`, its inner/outer constructors,
 > `_construct_material`, `MixingRule`, `MixingSpec`, `MaterialMixing`, in
-> `src/Materials/materials.jl`. Counts via `n_components`, `n_reactions`,
-> `n_solids`, `n_liquids`, `n_gases`.
+> `src/Materials/materials.jl`. Counts via `n_components`, `n_reactions`.
 
-### 4.7.2 `PendingReaction` and symbolic resolution
+### 4.6.2 `PendingReaction` and symbolic resolution
 
 Reactions may be written against component **symbols** rather than integer
 indices, which is far less error-prone for the user:
@@ -2475,7 +2375,7 @@ Numeric reactions (built against integer indices directly) bypass resolution.
 > `resolve_reaction`, and `_resolve_reactions` (called from the `Material`
 > constructor) in `src/Materials/reactions.jl` and `src/Materials/materials.jl`.
 
-### 4.7.3 The single-reactant mass-balance convention
+### 4.6.3 The single-reactant mass-balance convention
 
 The `Reaction` type is n-ary in both reactants and products in principle, but the
 current model **supports only single-reactant reactions** ($N_\mathrm{in}=1$). The
@@ -2499,26 +2399,10 @@ Passing `validate_mass=false` disables only the sum check (not recommended);
 the non-negativity and order checks always run.
 
 > **Implementation note.** `_validate_stoichiometry`, `verify_stoichiometry`
-> (tol $10^{-10}$, returns `false` + `@warn` on failure), `mass_balance_error`,
-> and `check_material_mass_balance` in `src/Materials/reactions.jl`.
+> (tol $10^{-10}$, returns `false` + `@warn` on failure), and `mass_balance_error`
+> in `src/Materials/reactions.jl`.
 
-### 4.7.4 `validate_material`
-
-After assembly, `validate_material(m)` performs whole-material consistency checks:
-
-1. at least one component exists ($N_C\ge 1$, else `error`);
-2. every reactant and product index in every reaction lies in $1\!:\!N_C$ (else
-   `error`);
-3. every reaction is mass-balanced (else `@warn` via `verify_stoichiometry`).
-
-It returns `true` on success. This is a *build-time* invariant: by the time the
-residual runs, indices are guaranteed valid and stoichiometry is (warned-)
-balanced.
-
-> **Implementation note.** `validate_material(m::Material)`,
-> `src/Materials/materials.jl`.
-
-### 4.7.5 Dry-pyrolysis-gas identification
+### 4.6.4 Dry-pyrolysis-gas identification
 
 For variable-cross-section (lateral shrinkage, Chapter 10) the pyrolysis-progress
 state $\chi$ counts only **dry** pyrolysis gas — water vapor is excluded because
@@ -2541,21 +2425,28 @@ pyrolyzate regardless of its actual chemistry.
 > `src/Materials/materials.jl`. The result is a statically known tuple of indices,
 > constant-folded by the compiler.
 
-### 4.7.6 Type-stable iteration over heterogeneous tuples
+### 4.6.5 Type-stable iteration over heterogeneous tuples
 
 The defining performance pattern of the Materials subsystem is the use of
 `@generated` functions and recursive tuple decomposition to **unroll** every
 loop over the (heterogeneous) component and reaction tuples at compile time. A
 naive `for c in material.components` over a heterogeneous tuple would box each
-element and allocate; instead, e.g.,
+element and allocate; instead, e.g., the mixture heat capacity is
 
 ```julia
-@generated function foreach_component(f::F, material::Material{NC}) where {F,NC}
-    return Expr(:block, [:(f(material, Val{$j}())) for j in 1:NC]...)
+@generated function _sum_heat_capacity(ξ, T, comps::Tuple, ::Val{NC}) where {NC}
+    expr = quote
+        result = zero(_prop_type(ξ, T))
+    end
+    for i = 1:NC
+        push!(expr.args, :(result += ξ[$i] * comps[$i].heat_capacity(T)))
+    end
+    push!(expr.args, :(return result))
+    return expr
 end
 ```
 
-emits $N_C$ statically dispatched calls with no runtime loop. The same idiom
+which emits $N_C$ statically dispatched terms with no runtime loop. The same idiom
 appears in `evaluate_reactions!`, the species-source and gas-flux kernels, the
 mixing-rule sums (Chapter 5), and the porosity sums. The net effect is that the
 entire property-evaluation loop in `update_properties!` is **allocation-free**
@@ -2565,7 +2456,7 @@ dictionary lookups in hot paths.
 
 ---
 
-## 4.8 Time- and temperature-parameter evaluation
+## 4.7 Time- and temperature-parameter evaluation
 
 Several kernels accept "flexible" parameters that may be a constant, a function
 of time, or a property function — for example a boundary heat flux $q(t)$, a
@@ -2614,12 +2505,12 @@ per cell per step.
 
 ---
 
-## 4.9 Comparison to ThermaKin2Ds, Gpyro, and FDS
+## 4.8 Comparison to ThermaKin2Ds, Gpyro, and FDS
 
 Pyrolysis.jl's material model is a deliberate synthesis of the three reference
 condensed-phase pyrolysis codes. We map their notation to ours on first use.
 
-### 4.9.1 Component / species representation
+### 4.8.1 Component / species representation
 
 **ThermaKin2Ds** represents a material as a set of *components* with mass
 concentrations as the primary state — the convention Pyrolysis.jl adopts wholesale
@@ -2647,7 +2538,7 @@ coefficient $\kappa_s$ maps to our volumetric $\alpha$ (overload note A5). FDS's
 material density-ratio swell/shrink rule corresponds to our $\gamma_j$-weighted
 volume change (Chapter 10).
 
-### 4.9.2 Heat capacity and the gas-storage convention
+### 4.8.2 Heat capacity and the gas-storage convention
 
 ThermaKin's energy equation (its Eq. 17) sums the volumetric heat capacity
 over **all** components, gas included:
@@ -2656,21 +2547,21 @@ uses the same sum in the temperature-storage term (Chapter 3):
 
 $$
 \rho c_p^\mathrm{eff} = \sum_{j=1}^{N_C} \xi_j\, c_{p,j}(T),
-\tag{4.11}
+\tag{4.9}
 $$
 
 because the pore gas shares the matrix temperature and its concentration is an
 integrated state, so its sensible storage is available at no cost (Chapter 5,
 §5.4 and Chapter 7). Gpyro's default thermal-equilibrium form drops the gas
 term (restored by its `FULL_QSG` option) and FDS has no in-depth gas; both are
-approximations of (4.11) that Pyrolysis.jl does not make. The gas *flux*
+approximations of (4.9) that Pyrolysis.jl does not make. The gas *flux*
 relative to the skeleton enters the energy equation only through the advective
 source $S_\mathrm{conv}$.
 
 > **Implementation note.** `effective_heat_capacity` → `_sum_heat_capacity`
 > (every component, no phase branch), `src/Properties/effective_properties.jl`.
 
-### 4.9.3 Reaction kinetics representation
+### 4.8.3 Reaction kinetics representation
 
 ThermaKin supports bimolecular rates $\propto \xi_{\text{COMP1}}\xi_{\text{COMP2}}$;
 Gpyro uses an nth-order-in-conversion rate with optional O₂ sensitivity
@@ -2683,7 +2574,7 @@ representation of heats of reaction as property functions — including the
 state-dependent moisture-sorption heat via `StateDependentProperty` — generalizes
 all three codes' scalar heats. The full kinetic comparison is in Chapter 6.
 
-### 4.9.4 Property functions and temperature dependence
+### 4.8.4 Property functions and temperature dependence
 
 ThermaKin and Gpyro both permit temperature-dependent properties (tabulated or
 power-law). Pyrolysis.jl's property-function abstraction subsumes both: a Gpyro
@@ -2695,7 +2586,7 @@ sorption) without a special-case code path.
 
 ---
 
-## 4.10 Limitations and open issues
+## 4.9 Limitations and open issues
 
 The following are documented limitations of the constitutive layer; several are
 revisited where the relevant physics is developed.
@@ -2706,42 +2597,35 @@ revisited where the relevant physics is developed.
    extending the reactant tuple to 3-ary `(idx, order, mass_stoich)` and a
    revised mass-balance convention (Chapter 6).
 
-2. **Two coexisting porosity definitions.** The intrinsic-density form (Eq. 4.2)
-   is canonical and is what the pressure and permeability closures use, but a
-   volume-fraction porosity also exists in the code. They differ for materials
-   with internal pore structure; the choice is not user-selectable.
-
-3. **Intrinsic-density fallback may be unphysical.** When $\rho_{i,j}$ is not
+2. **Intrinsic-density fallback may be unphysical.** When $\rho_{i,j}$ is not
    supplied it defaults to the bulk $\rho_j$, asserting the pure phase has no
    internal pores. For genuinely microporous solids this under-predicts porosity
    and over-predicts the matrix volume.
 
-4. **Name-based dry-gas identification.** Water vapor is excluded from the
+3. **Name-based dry-gas identification.** Water vapor is excluded from the
    pyrolysis-progress source by a substring match on the component name
    (`_is_water_vapor_name`). A water species named outside the recognized tokens
    would be (incorrectly) counted as dry pyrolyzate, and a non-water species named
    with a water token would be (incorrectly) excluded.
 
-5. **Finite-difference derivatives for table/callable/state-dependent properties.**
-   `TableProperty`, `CallableProperty`, and the $T$- and $\xi$-derivatives of
-   `StateDependentProperty` use fixed-step ($\delta T=0.1$ K) or adaptive-step
-   (Eq. 4.9) finite differences. These carry truncation/round-off error and can
-   degrade the structured-Jacobian accuracy relative to the analytic property
-   types. (The AD-based Jacobian backend avoids this by differentiating the
-   actual evaluation.)
+4. **Kinked and AD-dependent property laws.** A `TableProperty` is differentiated
+   segment by segment, so its derivative jumps at every knot and the Newton
+   iteration sees a kink there. `CallableProperty` and `StateDependentProperty`
+   are differentiated by propagating `ForwardDiff.Dual` numbers through the user's
+   function, which must therefore be generic in its argument types (§4.5).
 
-6. **Heterogeneous-tuple compilation cost.** Preserving the exact component and
+5. **Heterogeneous-tuple compilation cost.** Preserving the exact component and
    reaction tuple types yields allocation-free, type-stable hot paths, but at the
    cost of recompiling the residual for each distinct material *shape*. Materials
    that differ only in numerical parameters share a compiled type; materials that
    differ in the *types* of their property functions do not.
 
-7. **No temperature-dependent pre-exponential or pressure-dependent kinetics.**
+6. **No temperature-dependent pre-exponential or pressure-dependent kinetics.**
    The Arrhenius property and `Reaction` carry constant $A$ and $E$ (no Kissinger/
    Ozawa $T$-dependent activation energy, no distributed-activation-energy
    tooling, no explicit pressure dependence). See Chapter 6.
 
-8. **Heat-of-reaction sign mapping to reference codes.** Internally $h>0$ is
+7. **Heat-of-reaction sign mapping to reference codes.** Internally $h>0$ is
    endothermic ($Q_\mathrm{rxn}=-\sum_r h_r r_r$), whereas ThermaKin/Gpyro publish
    $h>0$ as exothermic. Users porting parameters from those codes must flip the
    sign (Chapter 2, overload note H1; Chapter 6).
@@ -2761,8 +2645,8 @@ conductivity mixing rules (parallel / series / weighted / Bruggeman) together
 with the Bruggeman Newton solve, the effective gas-transfer and permeability
 closures (component mixing versus Carman–Kozeny), the radiative properties
 (emissivity and absorption), the gas viscosity (Sutherland) and Chapman–Enskog
-diffusivity, the molar-mass transport scaling, the distance-weighted harmonic
-face averaging, the property cache, and the analytical mixing derivatives the
+diffusivity, the absence of per-species transport scaling, the distance-weighted
+harmonic face averaging, the property cache, and the mixing derivatives the
 Jacobian consumes. Every equation, constant, guard, threshold, and sign below has
 been confirmed line-by-line against `src/Properties/mixture_rules.jl`,
 `src/Properties/effective_properties.jl`, `src/Properties/property_cache.jl`,
@@ -2800,8 +2684,7 @@ $$
 \tag{5.1}
 $$
 
-implemented as `total_density(ξ) = sum(ξ)` (`mixture_rules.jl:170`). This is the
-density in *bulk-density space* — the mass per unit bulk volume — before any
+This is the density in *bulk-density space* — the mass per unit bulk volume — before any
 swelling correction (§5.2). It is the natural denominator for **per-unit-mass**
 properties, because such a property averaged over the mixture must weight each
 component by its share of the mass.
@@ -2813,20 +2696,11 @@ Y_j \;=\; \frac{\xi_j}{\rho_{\text{tot}}}, \qquad \sum_j Y_j = 1 ,
 \tag{5.2}
 $$
 
-computed by `mass_fractions(ξ)` (`mixture_rules.jl:18–25`). The implementation
-guards against an empty cell: if `ρ_tot < 1e-20` it returns the zero tuple rather
-than dividing by zero. Mass fractions are the conceptual weights for the
-swelling mixture density (§5.2), where `Y_j` is folded in inline; the
-heat-capacity storage term weights by the raw concentrations `ξ_j` directly
-(§5.4). They are *not* the right weights for transport properties, which act
-over volumes.
-
-> **Implementation note.** `mass_fractions`, `total_density`, and all the
-> tuple helpers are written with explicit per-`N_C` specializations
-> (`_zero_ntuple`, `_scale_ntuple`) for `N_C ∈ [1,16]` so that no heap
-> allocation occurs while building the result tuple
-> (`mixture_rules.jl:29–163`). This matters because these functions are called
-> once per cell per residual evaluation, inside the AD-typed hot path.
+Mass fractions are the conceptual weights for the swelling mixture density
+(§5.2), where `Y_j` is folded in inline (with an empty-cell guard
+`ρ_tot < 1e-20`) so that no mass-fraction tuple is built; the heat-capacity
+storage term weights by the raw concentrations `ξ_j` directly (§5.4). They are
+*not* the right weights for transport properties, which act over volumes.
 
 ### 5.1.2 All-phase volume fractions
 
@@ -2844,15 +2718,16 @@ where `ρ_j(T)` is the component's **bulk** density evaluated through its proper
 function (constant, polynomial, table, or callable — §4). The quantity
 `ξ_j/ρ_j` is the volume occupied by component `j` per unit bulk volume, so (5.3)
 normalizes those volumes to a partition of unity. This is `volume_fractions(ξ, T,
-material)` (`mixture_rules.jl:266–276`).
+material)` (`mixture_rules.jl`).
 
 The function builds the denominator `v_total = Σ_k ξ_k/ρ_k` via
 `_sum_specific_vol` and, if `v_total < 1e-20` (a vanished cell), returns the zero
 tuple. Each per-component term is itself guarded `ξ_k > 0 && ρ_k > 0`, so a
 component with zero concentration or a (non-physical) zero density contributes
-nothing. The all-phase basis is used for **gas transfer** (§5.6) and
-**component-based permeability** (§5.7), where every phase — including the gas
-that occupies pore space — participates in the volumetric averaging.
+nothing. The all-phase basis is used for **gas transfer** (§5.6), where every
+phase — including the gas that occupies pore space — participates in the
+volumetric averaging; component-based permeability (§5.7.1) uses the
+swelling-weighted basis (5.4).
 
 ### 5.1.3 Swelling-weighted (matrix) volume fractions and why surface properties use them
 
@@ -2904,41 +2779,18 @@ volume) is retained with weight γ.
 The three bases and their consumers are summarized below; this mapping is the
 single most error-prone part of effective-property bookkeeping, so it is stated
 once authoritatively from the code in `update_properties!`
-(`property_cache.jl:201–211`):
+(`property_cache.jl`):
 
 | Basis | Symbol | Built by | Consumed by |
 |---|---|---|---|
-| Mass fraction | `Y_j` | `mass_fractions` | diagnostics / `CellState` accessors (the heat-capacity storage term weights by raw `ξ_j`, §5.4) |
-| All-phase volume fraction | `v_j` | `volume_fractions` | `effective_gas_transfer`, component permeability mixing |
-| Swelling-weighted volume fraction | `v_j^solid` | `solid_volume_fractions` (via `mixing_volume_fractions`, which adds the depleted-cell all-phase fallback) | `effective_conductivity`, `effective_emissivity` |
+| Mass fraction | `Y_j` | inline in `_specific_vol_with_swelling_direct` | swelling mixture density (§5.2; the heat-capacity storage term weights by raw `ξ_j`, §5.4) |
+| All-phase volume fraction | `v_j` | `volume_fractions` | `effective_gas_transfer` |
+| Swelling-weighted volume fraction | `v_j^solid` | `solid_volume_fractions` (via `mixing_volume_fractions`, which adds the depleted-cell all-phase fallback) | `effective_conductivity`, `effective_emissivity`, `effective_absorptivity`; `effective_permeability` reads `solid_volume_fractions` directly |
 
 Note in particular that **gas transfer uses the all-phase basis `v_j`** while
 **conductivity and emissivity use the solid basis `v_j^solid`** — this is what
 `update_properties!` does (`cache.λ[i] = _gas_transfer_from_v(v_full, …)` versus
-`cache.k[i] = _conductivity_from_v(v_solid, …)`). The KB prose elsewhere is
-imprecise on this point; the code is unambiguous and is what is documented here.
-
-### 5.1.4 Analytical volume-fraction derivatives
-
-For the structured Jacobian (§15) the package supplies the exact derivative of
-each volume fraction with respect to each concentration. Differentiating (5.3),
-with `V_{\text{tot}} = \sum_k \xi_k/\rho_k`,
-
-$$
-\frac{\partial v_j}{\partial \xi_i}
-\;=\; \frac{\delta_{ij}}{\rho_j\, V_{\text{tot}}}
-\;-\; \frac{v_j}{\rho_i\, V_{\text{tot}}},
-\tag{5.5}
-$$
-
-a rank-1 correction (the `−v_j/(ρ_i V_tot)` term, the same for every `j`) added
-to a diagonal (`δ_{ij}/(ρ_j V_tot)`). This is
-`volume_fraction_derivatives(ξ, T, material)` (`mixture_rules.jl:289–322`), which
-returns an `N_C × N_C` tuple-of-tuples with element `[j][i] = ∂v_j/∂ξ_i`. It is
-the analytical kernel reused throughout the permeability derivatives (§5.15). The
-densities `ρ_i, ρ_j` are taken as `comp.density(T)`, so any *temperature*
-dependence of the volume fractions enters the Jacobian only through the explicit
-`∂/∂T` paths, not through (5.5).
+`cache.k[i] = _conductivity_from_v(v_solid, …)`).
 
 ---
 
@@ -2984,7 +2836,7 @@ constitutive density.
 
 > **Implementation note.** `mixture_density` computes the mass fractions
 > *inline* via `_specific_vol_with_swelling_direct(ξ, inv_ρ, T, comps, Val(NC))`
-> (`mixture_rules.jl:683`), folding `Y_j = ξ_j · (1/ρ_tot)` into the
+> (`mixture_rules.jl`), folding `Y_j = ξ_j · (1/ρ_tot)` into the
 > specific-volume accumulation so that no intermediate `Y` tuple is allocated.
 > Two empty-cell guards bracket the computation: `ρ_tot < 1e-20 ⇒ 0`, and
 > `v_specific < 1e-20 ⇒ 0` (`mixture_rules.jl`). The swelling factor is
@@ -3009,7 +2861,7 @@ $$
 $$
 
 implemented as `porosity(ξ, T, material)` →
-`_porosity_void_frac` (`mixture_rules.jl:788–814`). The sum runs over **solid and
+`_porosity_void_frac` (`mixture_rules.jl`). The sum runs over **solid and
 liquid** components only — the generated code branches on
 `is_solid(c) || is_liquid(c)`, and each term is taken only if
 `ρ_intr > 0`. Gases are *excluded from the sum* because they occupy the pore
@@ -3023,10 +2875,10 @@ micro-pores inside the pure phase; the *bulk* density is the apparent density of
 that phase as it sits in the composite. For a porous solid these differ, and
 using the intrinsic density in (5.7) correctly recovers the void fraction. When a
 component is constructed **without** an explicit intrinsic density,
-`get_intrinsic_density` falls back to the bulk density (`components.jl:397–398`),
-which makes the summand `ξ_j/ρ_j` and recovers the legacy "pure phase has no
-internal pores" definition. For a gas, `get_intrinsic_density(::GaseousComponent,
-::Real) = 0.0` (`components.jl:399`), consistent with its exclusion from the sum.
+`get_intrinsic_density` falls back to the bulk density (`components.jl`),
+which makes the summand `ξ_j/ρ_j`: the pure phase is taken to have no internal
+pores. For a gas, `get_intrinsic_density(::GaseousComponent,
+::Real) = 0.0`, consistent with its exclusion from the sum.
 
 Porosity feeds two downstream models:
 
@@ -3035,20 +2887,7 @@ Porosity feeds two downstream models:
    Mass Transport and Pressure); and
 2. the **Carman–Kozeny permeability** closure (§5.7).
 
-### 5.3.2 The two coexisting definitions
-
-A second, *volume-fraction-based* porosity, `φ = Σ_{j∈gas} v_j` (sum of gas
-volume fractions in bulk-density space), appears in some helper code and KB
-prose. It is **not** the production definition. The canonical implementation used
-by property updates and the pressure formula is the intrinsic-density form (5.7),
-as the `porosity` docstring states explicitly ("The single canonical
-implementation used by production property updates lives here",
-`mixture_rules.jl:786–787`). The two agree only when intrinsic densities equal
-bulk densities *and* the gas fully occupies the complement of the solid volume;
-in general they differ, and overload resolution A8 (§2) binds `φ` to the
-intrinsic-density form.
-
-### 5.3.3 Porosity derivatives
+### 5.3.2 Porosity derivatives
 
 Differentiating (5.7) term by term, and recognizing that the clamp is inactive in
 the physical interior `0 < φ < 1` (where derivatives are needed), gives
@@ -3066,9 +2905,9 @@ $$
 The sign is negative for the skeleton: adding solid mass reduces the void
 fraction. Gases contribute zero — they fill pore space already accounted for by
 the solid complement, so changing a gas concentration does not change `φ`.
-These derivatives are not hand-coded: the Jacobian paths that need them
-(the Carman–Kozeny permeability chain in `permeability_derivatives`, and the
-`DarcyTransportOperator`'s pressure chain, §5.15, §15.8.3) differentiate
+These derivatives are not hand-coded: the Jacobian path that needs them
+(the `DarcyTransportOperator`'s Carman–Kozeny permeability and pressure
+chains, §5.15, §15.8.3) differentiates
 `porosity` itself with forward-mode `Dual`s, which is clamp-consistent by
 construction — at the `clamp(·, 0, 1)` bounds the propagated derivative is 0,
 exactly matching the residual's clamped value.
@@ -3102,7 +2941,7 @@ mass — a burned-out cell whose pore gas has also left; without it the 1/ρc_p
 factor in dT/dt would blow up there. Virgin solids carry ρc_p ~ 10⁵–10⁶
 J·m⁻³·K⁻¹, so the floor never binds in a cell that holds material. The floor
 is applied *inside* `effective_heat_capacity`, so every consumer — the
-residual, the property cache, the park-and-mask temperature merge and the
+residual, the property cache and the
 structured-Jacobian operators that extract ∂ρc_p/∂(T, ξ) through Duals —
 sees the identical clamped value and the consistent (zero) derivative at the
 floor.
@@ -3139,8 +2978,8 @@ volume fractions `v_j^solid` (5.4) and the per-component conductivities
 `effective_conductivity(ξ, T, material)` builds
 `v = mixing_volume_fractions(…)` (the (5.4) weights, with the depleted-cell
 all-phase fallback of §5.1.3) then dispatches to `_conductivity_from_v`
-(`effective_properties.jl:568–605`). The default rule is `WEIGHTED` with
-`β = 0.5` (`materials.jl:87`).
+(`effective_properties.jl`). The default rule is `WEIGHTED` with
+`β = 0.5` (`materials.jl`).
 
 ### 5.5.1 Parallel and series bounds
 
@@ -3170,12 +3009,12 @@ Hashin–Shtrikman-bracketed bounds.
 
 > **Implementation note.** Both sums are produced in one pass by the generated
 > `_conductivity_sums(v, T, comps, Val(NC))`
-> (`effective_properties.jl:402–418`). The series accumulation is guarded:
+> (`effective_properties.jl`). The series accumulation is guarded:
 > `inv_k_series += v[i]/k` is taken only when `v[i] > 1e-20 && k > 1e-20`, so a
 > phase with zero volume or (pathologically) zero conductivity does not blow up
 > the harmonic sum. After the loop
 > `k_series = inv_k_series > 1e-20 ? 1/inv_k_series : 0`
-> (`effective_properties.jl:595`).
+> (`effective_properties.jl`).
 
 ### 5.5.2 Weighted blend
 
@@ -3188,11 +3027,11 @@ k_{\text{eff}} \;=\; \beta\, k_\parallel + (1-\beta)\, k_{\text{series}} .
 $$
 
 `β = 1` recovers the parallel upper bound, `β = 0` the series lower bound, and the
-default `β = 0.5` (`MixingSpec` default, `materials.jl:63`) is the arithmetic mean
+default `β = 0.5` (`MixingSpec` default, `materials.jl`) is the arithmetic mean
 of the two bounds. The blend is the package's default conductivity model
-(`materials.jl:87`) because, lacking microstructural information, the mean of the
+(`materials.jl`) because, lacking microstructural information, the mean of the
 rigorous bounds is the least-biased single estimate. The `β` value is validated to
-lie in `[0,1]` at `MixingSpec` construction (`materials.jl:64`).
+lie in `[0,1]` at `MixingSpec` construction (`materials.jl`).
 
 ### 5.5.3 Bruggeman effective-medium theory
 
@@ -3219,7 +3058,7 @@ phase) reflects an isotropic, statistically self-similar microstructure.
 
 Equation (5.15) is solved by Newton's method in
 `bruggeman_effective_property(v, k; tol, maxiter, k_init)`
-(`effective_properties.jl:467–545`). Writing the residual
+(`effective_properties.jl`). Writing the residual
 `f(k_{\text{eff}}) = \sum_j v_j (k_j - k_{\text{eff}})/(k_j + 2 k_{\text{eff}})`,
 the exact derivative is
 
@@ -3229,23 +3068,23 @@ $$
 \tag{5.16}
 $$
 
-derived in the source comment line-by-line (`effective_properties.jl:516–518`):
+derived in the source comment line-by-line (`effective_properties.jl`):
 the numerator of `d/dk_eff [v(k−k_eff)/(k+2k_eff)]` collapses
 `−(k+2k_eff) − 2(k−k_eff)` to `−3k`. The Newton update is
 `k_eff ← k_eff − f/df`, with the following exact guards and conventions taken from
 the implementation:
 
 - **Degenerate volume.** If `Σ v_j < 1e-20`, return 0
-  (`effective_properties.jl:476–479`).
+  (`effective_properties.jl`).
 - **Single active phase.** Active phases are those with `v_i > 1e-20`; if exactly
   one is active, return its (volume-weighted) parallel mean `k_parallel`
-  immediately (`effective_properties.jl:501–503`). This is exact, since a
+  immediately (`effective_properties.jl`). This is exact, since a
   single-phase Bruggeman medium is that phase.
 - **Warm start.** The Newton seed is `k_init` when a positive `k_init` is supplied
   (`k_init > 1e-20`), otherwise the parallel mean `k_parallel`
-  (`effective_properties.jl:498`). In production `k_init` is the *previous time
+  (`effective_properties.jl`). In production `k_init` is the *previous time
   step's converged* `k_eff` for the cell (passed by `update_properties!` as
-  `cache.k[i]`, `property_cache.jl:208`), so on smooth time-stepping the solve
+  `cache.k[i]`, `property_cache.jl`), so on smooth time-stepping the solve
   needs only 1–3 iterations.
 - **Per-term contributions.** A phase enters the residual when `v_i > 1e-20`.
   A conducting phase (`k_i > 1e-20`) contributes the standard term; an
@@ -3260,22 +3099,22 @@ the implementation:
   immediately instead of burning `maxiter`.
 - **Singular-derivative bail-out.** If `|df| < 1e-20` the iteration breaks
   (it cannot take a Newton step; the problem is locally ill-posed)
-  (`effective_properties.jl:525–527`).
+  (`effective_properties.jl`).
 - **Step limiter (positivity).** The raw step `dk = −f/df` is clipped so the
   update never reduces `k_eff` by more than 90 %: if
   `k_eff + dk < 0.1·k_eff`, set `dk = −0.9·k_eff`
-  (`effective_properties.jl:531–534`). This prevents Newton from overshooting
+  (`effective_properties.jl`). This prevents Newton from overshooting
   into a negative conductivity.
 - **Convergence and return.** Iterate up to `maxiter = 100`, stopping when
   `|f| < tol = 1e-10`; the return is `max(k_eff, 0.0)`
-  (`effective_properties.jl:539–544`).
+  (`effective_properties.jl`).
 
 > **Implementation note.** The component conductivities are gathered into a tuple
 > by the generated `_conductivity_tuple(T, comps, Val(NC))`
-> (`effective_properties.jl:548–551`), so the Bruggeman path is allocation-free.
+> (`effective_properties.jl`), so the Bruggeman path is allocation-free.
 > The dispatch in `_conductivity_from_v` checks `mixing == BRUGGEMAN` first and
 > only otherwise computes the parallel/series sums
-> (`effective_properties.jl:588–605`).
+> (`effective_properties.jl`).
 
 ---
 
@@ -3293,10 +3132,10 @@ $$
 $$
 
 `effective_gas_transfer(ξ, T, material)` builds `v = volume_fractions(…)` and
-dispatches to `_gas_transfer_from_v` (`effective_properties.jl:717–744`). This is
+dispatches to `_gas_transfer_from_v` (`effective_properties.jl`). This is
 confirmed in `update_properties!` where the cached gas-transfer property is
 `cache.λ[i] = _gas_transfer_from_v(v_full, T_i, material)`
-(`property_cache.jl:209`). The supported rules mirror conductivity:
+(`property_cache.jl`). The supported rules mirror conductivity:
 
 $$
 \lambda_\parallel = \sum_j v_j\,\lambda_j,\qquad
@@ -3305,7 +3144,7 @@ $$
 \tag{5.18}
 $$
 
-The default rule for `λ` is **PARALLEL** with `β = 0.5` (`materials.jl:88`).
+The default rule for `λ` is **PARALLEL** with `β = 0.5` (`materials.jl`).
 
 **Degenerate transport.** `SolidComponent` defaults to $\lambda_j = 0$. A
 condensed component with no gas-transfer coefficient contributes nothing to
@@ -3329,18 +3168,18 @@ condensed component with $\lambda_j = 0$
 
 Applying the effective-medium closure (5.15) to a diffusivity is **rejected**:
 `_gas_transfer_from_v` throws an `ArgumentError` if `mixing == BRUGGEMAN`
-(`effective_properties.jl:725–731`), with the message that the EMT closure "has
+(`effective_properties.jl`), with the message that the EMT closure "has
 no physical justification for diffusivities." The reasoning is that a Fickian
 transfer coefficient is already an average over a heterogeneous pore network
 (molecular and Knudsen regimes), so wrapping it in a *second* effective-medium
 self-consistency relation derived for a thermodynamic-like coefficient is not
 physically supported. (The `effective_gas_transfer` docstring
-(`effective_properties.jl:711–715`) explicitly states that `BRUGGEMAN` is **not**
+(`effective_properties.jl`) explicitly states that `BRUGGEMAN` is **not**
 supported for gas transfer and lists only `PARALLEL`/`SERIES`/`WEIGHTED`,
 matching the running code, which is authoritative.)
 
 > **Implementation note.** The series guard for `λ` is more elaborate than for
-> `k`: in `_gas_transfer_sums` (`effective_properties.jl:678–698`), once any
+> `k`: in `_gas_transfer_sums` (`effective_properties.jl`), once any
 > active phase has `λ ≤ 1e-20` the running `inv_λ_series` is set to `Inf` and the
 > rest of the sum is short-circuited, which drives `λ_series → 0`. This is the
 > correct series limit: a single impermeable-to-diffusion layer blocks the
@@ -3353,10 +3192,10 @@ matching the running code, which is authoritative.)
 Permeability `κ` [m²] is the resistance-to-flow property in Darcy's law
 `v_g = −(κ/μ)∇P` (§9). Only **solid and liquid** components carry a permeability;
 gases flow *through* the matrix and `get_permeability(::GaseousComponent, T) =
-0.0` (`components.jl:430`). Pyrolysis.jl offers two **mutually exclusive**
+0.0` (`components.jl`). Pyrolysis.jl offers two **mutually exclusive**
 closures, selected by `material.mixing.κ.rule`
-(`effective_permeability(ξ, T, material)`, `effective_properties.jl:810–820`).
-The default rule for `κ` is **WEIGHTED** with `β = 0.5` (`materials.jl:89`).
+(`effective_permeability(ξ, T, material)`, `effective_properties.jl`).
+The default rule for `κ` is **WEIGHTED** with `β = 0.5` (`materials.jl`).
 
 ### 5.7.1 Component mixing
 
@@ -3394,7 +3233,7 @@ $$
 \tag{5.20}
 $$
 
-`_carman_kozeny_permeability(φ, ℓ)` (`effective_properties.jl:834–838`), where
+`_carman_kozeny_permeability(φ, ℓ)` (`effective_properties.jl`), where
 `ℓ` is the characteristic particle/pore diameter [m] supplied through the
 `MixingSpec` `length_scale` and `φ` is the *canonical* porosity (5.7). The
 constant **180** is the Kozeny constant for a packed bed of spheres. The
@@ -3411,13 +3250,13 @@ Because Carman–Kozeny needs the porosity (which depends on `ξ` through the
 intrinsic densities), it must be called through `effective_permeability(ξ, T,
 material)` — calling the cache-aware `_permeability_from_v` with this rule throws
 an `ArgumentError` explaining that concentrations are required
-(`effective_properties.jl:856–862`). `MixingSpec(CARMAN_KOZENY; length_scale=ℓ)`
+(`effective_properties.jl`). `MixingSpec(CARMAN_KOZENY; length_scale=ℓ)`
 fails fast at construction if `ℓ` is not a positive, finite number
-(`materials.jl:65–72`).
+(`materials.jl`).
 
-The closure derivative needed for the Jacobian (§5.15) is not hand-coded:
-`permeability_derivatives` and the `DarcyTransportOperator` (§15) differentiate
-`effective_permeability` itself by forward-mode AD, so the Carman–Kozeny chain
+The closure derivative needed for the Jacobian (§5.15) is not hand-coded: the
+`DarcyTransportOperator` (§15) differentiates `effective_permeability` itself by
+forward-mode AD, so the Carman–Kozeny chain
 (through the porosity's composition dependence) is picked up automatically. On
 the capped branch the `min` gives the value-consistent zero `dκ/dφ` — value and
 derivative saturate at the same point.
@@ -3427,7 +3266,7 @@ derivative saturate at the same point.
 As with gas transfer, `BRUGGEMAN` is rejected for permeability:
 `_permeability_from_v` throws an `ArgumentError` if `mixing == BRUGGEMAN`
 ("EMT is only defined for scalar transport coefficients … use
-PARALLEL/SERIES/WEIGHTED, or CARMAN_KOZENY", `effective_properties.jl:850–855`).
+PARALLEL/SERIES/WEIGHTED, or CARMAN_KOZENY", `effective_properties.jl`).
 Permeability is a flow-resistance of the matrix geometry, not a polarizable
 scalar property to which the symmetric EMT applies. Carman–Kozeny is the
 physically motivated porosity-based alternative for the percolation-like
@@ -3445,10 +3284,7 @@ distance-weighted harmonic mean (§5.12),
 
 with mob_face = 0 exactly when either side's mobility is below `1e-30` — an
 impermeable cell is an infinite series resistance, so gas cannot cross into it.
-The Jacobian operator's `_dt_mobility_face` applies the identical rule. A plain
-scalar helper `harmonic_mean_permeability(κ_L, κ_R) = 2κ_Lκ_R/(κ_L+κ_R)`
-(`effective_properties.jl`, zero if either input is below `1e-30`) is exported
-for standalone use but is not on the production face path.
+The Jacobian operator's `_dt_mobility_face` applies the identical rule.
 
 ---
 
@@ -3481,7 +3317,8 @@ $\partial\varepsilon_{\text{eff}}/\partial T$, which the surface-emission
 (§12) and Beer–Lambert (§8) Jacobians pick up without operator-level
 bookkeeping. The effective emissivity is the surface property used by the
 re-radiation boundary condition (§12) and as the gray-body factor in the
-volumetric P1 emission source (§8).
+volumetric P1 emission source of the experimental P1 model (§8), which `solve`
+does not accept.
 
 ### 5.8.2 Effective surface absorptivity
 
@@ -3503,8 +3340,8 @@ via `effective_absorptivity(ξ, T, material)` → `_absorptivity_from_v` →
 (`Nothing` vs `Float64` is a type parameter of the component), and for a
 material in which no component sets a surface absorptivity the two generated
 sums perform the same floating-point operations in the same order, so
-$a_{\text{eff}} \equiv \varepsilon_{\text{eff}}$ bit-for-bit — the invariant that
-keeps every Kirchhoff-default case unchanged. A component with an explicit
+$a_{\text{eff}} \equiv \varepsilon_{\text{eff}}$ bit-for-bit — a material that sets no absorptivity
+absorbs exactly as Kirchhoff's law predicts. A component with an explicit
 $a_j$ decouples the absorbed heater flux from the temperature-dependent
 emission: an emissivity that falls with temperature (integrating-sphere data for
 virgin wood, for instance) does not drag the absorbed cone flux down with it.
@@ -3516,7 +3353,7 @@ $\varepsilon_{\text{eff}}$.
 ### 5.8.3 Effective absorption coefficient
 
 The volumetric (extinction) absorption coefficient used by the in-depth radiation
-models (Beer–Lambert and P1, §8) is a **concentration**-weighted sum of the
+models (Beer–Lambert, and the experimental P1 model, §8) is a **concentration**-weighted sum of the
 component *mass* absorption coefficients `α_j` [m²·kg⁻¹]:
 
 $$
@@ -3525,7 +3362,7 @@ $$
 $$
 
 `effective_absorption(ξ, material)` → `_sum_absorption`
-(`effective_properties.jl:650–672`). The dimensional bookkeeping is the key
+(`effective_properties.jl`). The dimensional bookkeeping is the key
 point: a *mass* absorption coefficient `α_j` [m²·kg⁻¹] times a mass concentration
 `ξ_j` [kg·m⁻³] yields a *volumetric* absorption coefficient [m⁻¹], which is what
 the Beer–Lambert optical thickness `τ = α Δz` and the P1 diffusion coefficient
@@ -3539,8 +3376,8 @@ dependence.
 
 ## 5.9 Gas viscosity (Sutherland's law)
 
-The dynamic viscosity of the escaping gas, needed for Darcy's law (§9), follows
-**Sutherland's law**,
+The dynamic viscosity of the escaping gas, needed for Darcy's law (§9), is the
+material's `gas_viscosity` property. Its default is **Sutherland's law** for air,
 
 $$
 \mu(T) \;=\; \mu_{\text{ref}}
@@ -3549,23 +3386,22 @@ $$
 \tag{5.24}
 $$
 
-`effective_gas_viscosity(T; μ_ref, T_ref, S)`
-(`effective_properties.jl:46–54`). The default parameters are the **canonical
-Sutherland air constants** (e.g. White, *Viscous Fluid Flow*):
+carried by `SutherlandProperty()` (§4.4.7) with the **canonical Sutherland air
+constants** (e.g. White, *Viscous Fluid Flow*):
 
 | Parameter | Default | Source |
 |---|---|---|
-| `μ_ref` | `1.716 × 10⁻⁵` Pa·s | `effective_properties.jl` |
-| `T_ref` | `273.15` K | `effective_properties.jl` |
-| `S` (Sutherland constant) | `110.4` K | `effective_properties.jl` |
+| `μ_ref` | `1.716 × 10⁻⁵` Pa·s | `SutherlandProperty()`, `property_functions.jl` |
+| `T_ref` | `273.15` K | `SutherlandProperty()`, `property_functions.jl` |
+| `S` (Sutherland constant) | `110.4` K | `SutherlandProperty()`, `property_functions.jl` |
 
 These give `μ(300 K) = 1.846 × 10⁻⁵` Pa·s and `μ(600 K) = 3.016 × 10⁻⁵` Pa·s.
 
 > **Caution (reference temperature).** The viscosity reference temperature here
 > is **`T_ref = 273.15 K`**, the temperature at which `μ_ref` is quoted for air —
 > this is a *local default of the viscosity correlation* and is distinct from the
-> global enthalpy datum `T_REF = 298.15 K` (§2). Do not conflate the two; the
-> code passes `T_ref = 273.15` to (5.24) specifically.
+> global enthalpy datum `T_REF = 298.15 K` (§2). Do not conflate the two;
+> `SutherlandProperty()` carries `T_ref = 273.15` in its own field.
 
 Sutherland's law is the Chapman–Enskog rigid-sphere result for a single gas and
 captures the *increase* of gas viscosity with temperature (`μ ∝ T^{1/2}` in the
@@ -3577,9 +3413,10 @@ high-`T` limit), the opposite of liquid behaviour. It is valid roughly over
 The air constants are only the **default**. Each `Material` carries its own
 pore-gas viscosity curve in the `gas_viscosity` field, and the Darcy path reads
 it through `effective_gas_viscosity(T, material)`, which evaluates
-`material.gas_viscosity(T)` between two guards. A material that says nothing
+`material.gas_viscosity(T)` on the property bracket and floors the result at
+`MU_FLOOR`. A material that says nothing
 carries `SutherlandProperty()` — the air triple above — so this reduces to
-(5.24) bit for bit and every pre-existing case is unchanged.
+(5.24).
 
 The field accepts anything `to_property` understands, so a fitted correlation
 drops in directly:
@@ -3607,10 +3444,9 @@ degrade the answer, it reverses or blows up the gas velocity. Hence:
   is already non-positive or non-finite there, in the spirit of `MixingSpec`'s
   `CARMAN_KOZENY`/`length_scale` check.
 
-Applying the clamps in `effective_gas_viscosity(T, material)` rather than
-inside the property function means
-every curve a material can carry is protected, not just the built-in Sutherland
-form.
+Because the bracket belongs to every property law and the floor is applied in
+`effective_gas_viscosity(T, material)`, every curve a material can carry is
+protected, not just the built-in Sutherland form.
 
 **Accuracy.** Air is within ~2 % for an N₂-swept pore space, but overstates the
 viscosity of wood pyrolyzates by roughly 1.7× at 300 K falling to 1.3× at
@@ -3618,7 +3454,7 @@ viscosity of wood pyrolyzates by roughly 1.7× at 300 K falling to 1.3× at
 with volatiles.
 
 **Composition dependence.** `mixture_gas_viscosity(ξ, T, material)` takes `ξ`
-and every Darcy call site passes it, but the function currently returns the
+and every Darcy call site passes it, but the function returns the
 material's own curve regardless: the model carries **one curve per material**, an average over the
 composition that material is expected to produce. It cannot resolve the pore gas
 shifting from background air to volatiles as pyrolysis proceeds. A
@@ -3645,12 +3481,12 @@ with `T` in K, `M_A, M_B` in **kg·mol⁻¹**, `P` in **Pa**, `σ_{AB}` in **Å*
 `D_{AB}` in **m²·s⁻¹**.
 
 `chapman_enskog_diffusivity(T, M; P, σ, ε_k)`
-(`effective_properties.jl:182–242`). The prefactor and unit handling deserve
+(`effective_properties.jl`). The prefactor and unit handling deserve
 care, because the *textbook* Chapman–Enskog constant is `1.8583 × 10⁻³` in
 **cgs-mixed** units (`T` in K, `M` in g·mol⁻¹, `P` in atm, `σ` in Å, `D` in
 cm²·s⁻¹), stored as `CHAPMAN_ENSKOG_PREFACTOR = 1.8583e-3`
-(`effective_properties.jl:86`). The implementation converts inputs and output to
-SI explicitly (`effective_properties.jl:228–239`), and **every** conversion
+(`effective_properties.jl`). The implementation converts inputs and output to
+SI explicitly (`effective_properties.jl`), and **every** conversion
 contributes to the lumped prefactor — not just the `D` output conversion:
 
 - `M`: kg·mol⁻¹ → g·mol⁻¹ (`×1000`). This appears *inside* `√(1/M)`, so it
@@ -3678,7 +3514,7 @@ are `D ∝ T^{3/2}` (through the explicit `T^{1.5}` and weak `Ω_D` dependence),
 ### 5.10.1 Combining rules and the collision integral
 
 The binary interaction parameters use the standard Lennard-Jones combining rules
-(`effective_properties.jl:209–210`):
+(`effective_properties.jl`):
 
 $$
 \sigma_{AB} = \tfrac12(\sigma_A + \sigma_B), \qquad
@@ -3686,7 +3522,7 @@ $$
 $$
 
 and the **reduced temperature** is `T* = T/(ε_AB/k_B)`
-(`effective_properties.jl:213`). The **diffusion collision integral** `Ω_D(T*)`
+(`effective_properties.jl`). The **diffusion collision integral** `Ω_D(T*)`
 is evaluated with the Neufeld et al. (1972) correlation,
 
 $$
@@ -3695,8 +3531,8 @@ $$
 \tag{5.26}
 $$
 
-`collision_integral_diffusion(T*)` (`effective_properties.jl:114–126`), with the
-coefficients verified against the source (`effective_properties.jl:116–123`):
+`collision_integral_diffusion(T*)` (`effective_properties.jl`), with the
+coefficients verified against the source (`effective_properties.jl`):
 
 | | | | |
 |---|---|---|---|
@@ -3705,19 +3541,14 @@ coefficients verified against the source (`effective_properties.jl:116–123`):
 
 The fit is valid for `0.3 ≤ T* ≤ 400` with <0.1 % error.
 
-> **Correction (Neufeld G).** The coefficient `G` is **`1.76474`**, as in the
-> running code (`effective_properties.jl:122`) and the original Neufeld, Janzen &
-> Aziz (1972) correlation. The knowledge-base note
-> `property_functions.md:342` transcribes it as `1.74474`; that is a typo (the
-> companion note `effective_properties.md:261` has the correct `1.76474`). The
-> value used by the implementation, and therefore the value documented here, is
-> `1.76474`.
+> **Note (Neufeld G).** The coefficient `G` is **`1.76474`**, as in the code
+> and the original Neufeld, Janzen & Aziz (1972) correlation.
 
 ### 5.10.2 Heuristic Lennard-Jones defaults and their unvalidated status
 
 When the user does not supply `σ` or `ε/k_B` for a species, the code estimates
 them from the molar mass via rough correlations anchored to small organics
-(`effective_properties.jl:192–206`):
+(`effective_properties.jl`):
 
 $$
 \sigma_{\text{species}} \approx 3.5 + 0.5\log_{10}\!\Bigl(\max(M/0.016,\,1)\Bigr)\ [\text{Å}],
@@ -3727,7 +3558,7 @@ $$
 $$
 
 with the air background fixed at `σ_air = 3.617 Å`, `ε/k_B|_air = 97 K`,
-`M_air = 0.029 kg·mol⁻¹` (`effective_properties.jl:89–91`). These are **rough
+`M_air = 0.029 kg·mol⁻¹` (`effective_properties.jl`). These are **rough
 estimates** suitable for organic vapours; they have **not** been validated
 against tabulated LJ parameters for the specific multi-component gas mixtures that
 arise in pyrolysis, and precise values should be supplied when available (§5.16).
@@ -3774,7 +3605,7 @@ $$
 $$
 
 `harmonic_mean_weighted(a, b, d_a, d_b)`
-(`effective_properties.jl:1151–1156`). The derivation: the conductance of each
+(`effective_properties.jl`). The derivation: the conductance of each
 half-cell along the flux path is `φ/d`, the two resistances `d_L/φ_L` and
 `d_R/φ_R` add, and the effective face property over the total span `d_L + d_R` is
 (5.29). On a uniform mesh `d_L = d_R` and (5.29) reduces to the standard harmonic
@@ -3784,10 +3615,10 @@ distance weighting corrects the averaging and improves boundary fluxes by ~1–5
 > **Implementation note.** `update_properties!` applies (5.29) to fill `k_face`
 > and `λ_face` for every interior face; at a boundary face (where one
 > `cell_id == 0`) it simply copies the adjacent interior cell's value
-> (`property_cache.jl:216–238`). The distances are computed from the live state
+> (`property_cache.jl`). The distances are computed from the live state
 > positions `d_L = |z_face − z^c_L|`, `d_R = |z^c_R − z_face|`, so the averaging
 > is correct under ALE mesh motion. A small-value guard returns 0 if either input
-> is below `1e-20` (`effective_properties.jl:1152–1154`), preventing `Inf`/`NaN`
+> is below `1e-20` (`effective_properties.jl`), preventing `Inf`/`NaN`
 > from a vanished cell. The harmonic mean is applied to `λ` itself, **not** to
 > the product `λρ` that a mass-fraction-gradient discretization
 > `J = −λρ ∂Y/∂x` would average: the volume-fraction-gradient flux used by the
@@ -3807,7 +3638,7 @@ read by the conduction, transport, radiation, and boundary kernels.
 
 ### 5.13.1 Layout
 
-`PropertyCache{Tu, DarcyT}` (`property_cache.jl:79–95`) is parameterized on the
+`PropertyCache{Tu, DarcyT}` (`property_cache.jl`) is parameterized on the
 live scalar type `Tu` so the entire cache holds `ForwardDiff.Dual` values
 unchanged during automatic differentiation (§17), and on `DarcyT` so the
 optional Darcy sub-cache is either present (`DarcyCache{Tu}`) or `Nothing`. The
@@ -3824,7 +3655,7 @@ per-cell arrays (length `n`) are
 | `α` | `α_eff` | m⁻¹ | `effective_absorption` (5.23) |
 
 and the per-face arrays (length `n+1`) are `k_face` and `λ_face` (5.29). The
-**Darcy sub-cache** `DarcyCache{Tu}` (`property_cache.jl:23–39`) is allocated only
+**Darcy sub-cache** `DarcyCache{Tu}` (`property_cache.jl`) is allocated only
 for pressure-driven modes (`with_darcy = true`) and adds per-cell `P, φ, κ, μ` and
 per-face `v_gas, ∇P` — keeping the four extra per-cell and two per-face arrays out
 of memory for the common Fickian-only configuration. Note `ρcp` caches the
@@ -3834,13 +3665,14 @@ RHS divides by (§7).
 ### 5.13.2 The update kernel
 
 `update_properties!(cache, state, mesh, material)`
-(`property_cache.jl:177–241`) is the single entry point. It (i) resizes the cache
-if the mesh changed (AMR, §14); (ii) loops over cells, building `v_full =
+(`property_cache.jl`) is the single entry point. It (i) resizes the cache
+if its length differs from the state's; (ii) loops over the live cells
+`1:n_active_cells` (parked ghost slots, §14.3, are left untouched), building `v_full =
 volume_fractions(ξ_i, T_i, …)` and `v_solid = mixing_volume_fractions(ξ_i, T_i,
 …)` (the swelling-weighted basis with the depleted-cell fallback, §5.1.3)
 once each and threading them into the effective-property helpers; and (iii)
 loops over faces applying the distance-weighted harmonic mean. The cell loop is
-exactly (`property_cache.jl:205–211`):
+exactly:
 
 ```julia
 cache.ρ[i]   = mixture_density(ξ_i, T_i, material)
@@ -3861,8 +3693,7 @@ free**: all composition-dependent dispatch is generated (compile-time unrolled),
 all intermediate tuples are statically sized, and the Bruggeman Newton iteration
 reuses scalars.
 
-`resize_cache!`
-(`property_cache.jl:152–166`) grows all arrays (and the Darcy sub-cache, if
+`resize_cache!` grows all arrays (and the Darcy sub-cache, if
 present) in place after a mesh change.
 
 ---
@@ -3912,41 +3743,42 @@ mixing as a mutually exclusive alternative.
 
 ---
 
-## 5.15 Analytical mixing derivatives for the Jacobian
+## 5.15 Mixing derivatives for the Jacobian
 
 The structured Jacobian (§15) needs the sensitivity of each effective property to
-the state `(T, ξ)`. The foundational kernel is the volume-fraction derivative
-(5.5). The package supplies hand-coded analytical derivatives for permeability and
-porosity (the channels with the most non-trivial composition dependence) and
-relies on AD or the property-function derivatives `dp/dT` (§4) for the rest.
+the state `(T, ξ)`. No mixing rule carries a hand-coded derivative: the Jacobian
+operators evaluate the mixing functions on `ForwardDiff.Dual` arguments, so every
+derivative follows the closure as implemented.
 
-### 5.15.1 Permeability derivatives
+### 5.15.1 Permeability and porosity derivatives
 
-`permeability_derivatives(ξ, T, material)` (`effective_properties.jl`) returns
-`(∂κ/∂T, ∂κ/∂ξ)` by forward-mode differentiation of `effective_permeability`
-itself (a single stack-allocated `Dual` pass with `NC+1` partials). The mixing
-rule therefore has a single source of truth: the derivatives track every
-closure — the renormalized-solid-basis PARALLEL/SERIES/WEIGHTED mixing
+The `DarcyTransportOperator` (§15) differentiates `effective_permeability` and
+`porosity` per cell with a single stack-allocated `Dual` pass over `(T, ξ)`
+(`NC+1` partials) and feeds the results into its analytical Darcy-flux Jacobian.
+The mixing rule therefore has a single source of truth: the derivatives track
+every closure — the renormalized-solid-basis PARALLEL/SERIES/WEIGHTED mixing
 including the impermeable-phase series hard-zero (where the derivative is
 exactly 0 on the zero branch), the CARMAN_KOZENY porosity chain, and any
-user-supplied `κ_j(T)` (so `∂κ/∂T` is exact for temperature-dependent κ). The
-production structured Jacobian differentiates `effective_permeability` the same
-way inside `DarcyTransportOperator` (§15), so the two paths cannot diverge.
-BRUGGEMAN throws an `ArgumentError`, consistent with §5.7.3.
+user-supplied `κ_j(T)` (so `∂κ/∂T` is exact for temperature-dependent κ).
+BRUGGEMAN is rejected for permeability (§5.7.3).
 
 ### 5.15.2 Conductivity, gas-transfer, and other derivatives
 
-For `k_eff`, `λ_eff`, `ε_eff`, and `α_eff`, the temperature dependence enters
-through the component property derivatives `dk_j/dT`, `dλ_j/dT` (the analytical
-`b`, unrolled-polynomial, or Arrhenius `p·E/(R_g T²)` forms of §4) and the
-composition dependence through (5.5); these are assembled either by forward-mode
-AD on the cached property functions or by the structured operators (§15). The
-Bruggeman `k_eff` is differentiated by AD through the warm-started Newton solve,
+For `k_eff`, `λ_eff`, `ε_eff`, `a_eff`, and `α_eff`, the temperature dependence
+enters through the component laws `k_j(T)`, `λ_j(T)`, `ε_j(T)` (§4.5) and the
+composition dependence through the volume fractions (5.3)/(5.4) (for `α_eff`,
+through ξ directly). The conduction, gas-transport and Beer–Lambert operators
+evaluate these mixing functions once per cell on `Dual` arguments over `(T, ξ)`
+and compose the face fluxes or the transmission chain by hand in their
+analytical Jacobians; the reaction-source and boundary operators run ForwardDiff
+over stencil-local kernels (§15). The Bruggeman `k_eff` is differentiated by AD
+through its Newton solve (started from `k_parallel` in the Jacobian, warm-started
+from the cached `k` in `update_properties!`),
 which is differentiable because every operation in the iteration is smooth (the
 step limiter is inactive and the per-term branch selection is locally constant
 at a converged interior solution).
 This AD-cleanliness — together with the smooth `tanh` kinetics gates (§6) and the
-midpoint enthalpy rule (§4) — is what makes the end-to-end sensitivities of §17
+clamped property laws (§4.4) — is what makes the end-to-end sensitivities of §17
 well-defined.
 
 **Warm-start caveat.** The Bruggeman iteration's convergence test is on the
@@ -3965,7 +3797,7 @@ degenerate inputs (all contrasts ≈ 0) that do not arise from valid materials.
 ## 5.16 Limitations and open issues
 
 The following modelling limitations of the effective-property subsystem are
-recorded from the source and KB open questions; several are flagged here for the
+recorded from the source; several are flagged here for the
 verification and validation discussion of §18.
 
 1. **Single-value mixture gas viscosity.** `mixture_gas_viscosity` ignores
@@ -4000,7 +3832,7 @@ verification and validation discussion of §18.
 3. **Permeability microstructure evolution.** Real materials may exhibit
    permeability changes with thermal stress and cracking beyond what the
    `κ_j(T)` property functions and porosity-based closures can represent;
-   `permeability_derivatives` differentiates whatever closure is supplied
+   the Darcy Jacobian differentiates whatever closure is supplied
    (including `κ_j(T)` and the Carman–Kozeny porosity chain), but the closure
    itself remains the modelling limitation.
 
@@ -4020,12 +3852,6 @@ verification and validation discussion of §18.
    Kozeny constant 180 is empirical for a packed bed of spheres. Real porous char
    may have a fractal or anisotropic pore structure for which a different closure
    (or a measured `κ(φ)` curve) would be more accurate.
-
-7. **Porosity-definition coexistence.** Two porosity definitions exist in the
-   code base (intrinsic-density and gas-volume-fraction); only the
-   intrinsic-density form (5.7) is canonical and used in production. The presence
-   of the second form in helper code is a maintenance hazard, resolved here by
-   overload binding A8 (§2).
 
 The matching subsystem discussions are: the energy assembly that consumes
 `(ρc_p)_eff` and the face conductivities — §7 (Heat Conduction, Convection &
@@ -4085,7 +3911,7 @@ Here
   generally with units that make $r_i$ come out in kg·m⁻³·s⁻¹ — see §6.4),
 - $E_i$ is the activation energy (J·mol⁻¹),
 - $R_g = 8.31446261815324$ J·mol⁻¹·K⁻¹ is the universal gas constant
-  (`R_GAS`, src/Materials/constants.jl:8),
+  (`R_GAS`, src/Materials/constants.jl),
 - $n_{i,j}$ is the reaction order of reaction $i$ with respect to reactant $j$
   ($n_{i,j} \ge 0$, enforced at construction),
 - $\tanh(\xi_j/\xi_{\mathrm{th}})$ is the smooth **depletion rate factor**
@@ -4098,14 +3924,14 @@ $\prod_j \xi_j^{n_{i,j}}\tanh(\xi_j/\xi_{\mathrm{th}})$ is exact and is exploite
 directly by the code:
 
 ```julia
-k = rxn.A * exp(-rxn.E / (R_GAS * T))     # kinetics.jl:60
+k = rxn.A * exp(-rxn.E / (R_GAS * T))
 ```
 
 The rate constant carries the classical Arrhenius physical interpretation: $A_i$
 is the collision/attempt frequency (modulated by an entropic steric factor), and
 $\exp(-E_i/R_g T)$ is the Boltzmann fraction of molecular configurations that
 surmount the activation barrier $E_i$. Both $A_i$ and $E_i$ are stored as plain
-`Float64` scalars on the `Reaction` struct (src/Materials/reactions.jl:61–62), so
+`Float64` scalars on the `Reaction` struct (src/Materials/reactions.jl), so
 they are temperature-independent constants — see §6.10 for the consequences.
 
 **Mass-concentration (not molar) basis.** The composition dependence in (6.1) is
@@ -4127,7 +3953,7 @@ condensed-phase pyrolysis literature (ThermaKin, Gpyro, FDS all do the same — 
 The finite-volume discretisation (§13, Finite-Volume Discretization) collocates
 all state at cell centres. Within `compute_rhs!` the reaction model is evaluated
 once per cell from the cell-centred state $(T, \xi_1,\dots,\xi_{N_C})$
-(src/Discretization/finite_volume.jl:279–296):
+(src/Discretization/finite_volume.jl):
 
 ```julia
 T = state.T[i]
@@ -4143,14 +3969,14 @@ all spatial coupling enters through transport (conduction §7, gas diffusion/Dar
 each control volume behaves, kinetically, like an isolated TGA sample, identical
 to the Gpyro and FDS interpretation (§6.9).
 
-The single-reaction kernel is `reaction_rate` (src/Physics/kinetics.jl:75–111). It
+The single-reaction kernel is `reaction_rate` (src/Physics/kinetics.jl). It
 is fully scalar-type-generic (`<:Real` arguments), so `ForwardDiff.Dual` numbers
 propagate cleanly through it for Jacobian and sensitivity work (§15, §17).
 
 > **Implementation note.** Single-reaction rate: `reaction_rate`,
-> src/Physics/kinetics.jl:75. All-reaction evaluation: `evaluate_reactions!`
+> src/Physics/kinetics.jl. All-reaction evaluation: `evaluate_reactions!`
 > dispatching to the `@generated` kernel `_evaluate_reactions_gen!`,
-> src/Physics/kinetics.jl:109–142.
+> src/Physics/kinetics.jl.
 
 ---
 
@@ -4261,8 +4087,8 @@ either narrow the gate or offset $T_{\min}$ to recentre the ramp.
 As a reactant is consumed, $\xi_j \to 0$. For a first-order reaction ($n_{i,j}=1$)
 the bare rate $r_i = k_i(T)\,\xi_j$ approaches zero linearly, which is benign. But
 the **Jacobian entry** $\partial r_i/\partial \xi_j = k_i(T)$ does not vanish: at
-high temperature $k_i(T)$ can be enormous ($A_i$ ranges over $10^8$–$10^{20}$ s⁻¹,
-src/Materials/constants.jl:28). A control volume holding a numerically tiny,
+high temperature $k_i(T)$ can be enormous ($A_i$ ranges over $10^8$–$10^{20}$ s⁻¹
+in typical fits). A control volume holding a numerically tiny,
 possibly slightly-negative-from-roundoff residue of reactant therefore presents
 the implicit solver with a stiff, fast-relaxing mode whose eigenvalue is
 $-k_i(T)$ even though essentially no mass remains to react. This manifests as
@@ -4298,14 +4124,14 @@ if limiter.enabled
 end
 ```
 
-(src/Physics/kinetics.jl:89–95). The `max(ξ, 0)` clip guarantees a non-negative
+(src/Physics/kinetics.jl). The `max(ξ, 0)` clip guarantees a non-negative
 base for the power even if the integrator transiently produces $\xi_j < 0$, and
 it pins the depletion factor at $\tanh 0 = 0$ there — an overshooting cell
 consumes nothing. `_depletion_factor` short-circuits to `one(ξ)` above
 $20\,\xi_{\mathrm{th}}$, which is **bit-identical** to evaluating the `tanh`
 (Float64 `tanh(x)` rounds to exactly `1.0` for $x \gtrsim 19.1$), so the common
 path — bulk concentrations orders of magnitude above the threshold — pays no
-transcendental (src/Physics/kinetics.jl:68–73).
+transcendental (src/Physics/kinetics.jl).
 
 Applying the factor to the rate rather than substituting an effective
 concentration into the power-law base matters for low orders: a base-applied
@@ -4399,7 +4225,7 @@ $$
 
 Each reactant is stored as an `(component_index, reaction_order)` pair in the
 `reactants::NTuple{NRin, Tuple{Int,Float64}}` field
-(src/Materials/reactions.jl:59), so the order $n_{i,j}$ is a **`Float64`** and may
+(src/Materials/reactions.jl), so the order $n_{i,j}$ is a **`Float64`** and may
 be non-integer (e.g. $n=0.5$, $n=1.5$, common in TGA fits and in nucleation/
 diffusion reaction models). Orders must satisfy $n_{i,j} \ge 0$ — negative
 orders are rejected at construction (§6.3.3). The tuple is iterated with the
@@ -4412,7 +4238,7 @@ most common orders:
 @inline _fast_pow(x::Real, n::Real) = n == 1 ? x : (n == 0 ? one(x) : x^n)
 ```
 
-(src/Physics/kinetics.jl:66). For $n=1$ it returns $x$ directly (no `pow` call);
+(src/Physics/kinetics.jl). For $n=1$ it returns $x$ directly (no `pow` call);
 for $n=0$ it returns `one(x)` — a zero-order reactant contributes no
 concentration dependence to the power law, but its depletion factor
 $\tanh(\xi/\xi_{\mathrm{th}})$ still gates the rate to zero as it runs out
@@ -4425,7 +4251,7 @@ initialised at the promoted scalar type so Duals carry through:
 conc_factor = one(promote_type(eltype(ξ), typeof(T)))
 ```
 
-(src/Physics/kinetics.jl:89).
+(src/Physics/kinetics.jl).
 
 **Units of the pre-exponential.** Dimensional consistency of (6.1) forces
 
@@ -4437,7 +4263,7 @@ $$
 
 For a first-order single reactant ($\sum_j n_{i,j}=1$) this reduces to s⁻¹; for a
 second-order/bimolecular case it becomes m³·kg⁻¹·s⁻¹. The struct docstring records
-this convention ("[s⁻¹] or [m³/(kg·s)]", src/Materials/reactions.jl:37) but the
+this convention ("[s⁻¹] or [m³/(kg·s)]", src/Materials/reactions.jl) but the
 code does **not** check it — the user is responsible for supplying $A_i$ in units
 consistent with the chosen orders.
 
@@ -4481,11 +4307,11 @@ yields. The kernel that applies one reaction to the source vector is:
 end
 ```
 
-(src/Physics/kinetics.jl:182–191). The `NRin == 1` guard **errors at runtime** if
+(src/Physics/kinetics.jl). The `NRin == 1` guard **errors at runtime** if
 a multi-reactant reaction is ever applied — multi-reactant support would require
 extending the reactant tuple to a 3-ary `(idx, order, mass_stoich)` form so that a
 mass stoichiometry (not just a rate order) could be attached to each reactant
-(src/Materials/reactions.jl:43–49). Note the asymmetry baked into the model: a
+(src/Materials/reactions.jl). Note the asymmetry baked into the model: a
 reactant carries a rate **order** $n_{i,j}$ (how its concentration scales the
 rate) but its **mass** stoichiometry is fixed at $1$; a product carries a mass
 **yield** but no rate order (products never appear in $\Phi_i$).
@@ -4551,7 +4377,7 @@ validation utilities of §6.8 exist purely as diagnostics.
 
 The species source $S_j$ is the same expression for every phase; the phase
 distinction lives in the *conservation equation* into which $S_j$ is inserted, not
-in the kinetics. At final RHS assembly (src/Discretization/finite_volume.jl:403)
+in the kinetics. At final RHS assembly (src/Discretization/finite_volume.jl)
 the code calls `apply_species_residual_unrolled!`, which assembles
 
 $$
@@ -4571,9 +4397,9 @@ run-time branching. The full energy/species RHS assembly sequence is documented 
 §7, Heat Conduction, Convection & Energy Assembly.
 
 > **Implementation note.** Species source: `species_source_terms!` and the
-> `@generated` kernel `_species_source_terms_gen!`, src/Physics/kinetics.jl:159–242;
-> per-reaction application `_apply_reaction_source!`, src/Physics/kinetics.jl:182.
-> Build-time balance: `_validate_stoichiometry`, src/Materials/reactions.jl:90.
+> `@generated` kernel `_species_source_terms_gen!`, src/Physics/kinetics.jl;
+> per-reaction application `_apply_reaction_source!` (same file).
+> Build-time balance: `_validate_stoichiometry`, src/Materials/reactions.jl.
 
 ---
 
@@ -4601,7 +4427,7 @@ $$
 end
 ```
 
-(src/Physics/kinetics.jl:257–264). The single minus sign is the entire content of
+(src/Physics/kinetics.jl). The single minus sign is the entire content of
 the sign convention, and it is worth stating precisely because it is the most
 error-prone point in the whole model.
 
@@ -4623,7 +4449,7 @@ material:
 - **Exothermic** ($h_i < 0$, $r_i > 0$): $Q_{\mathrm{rxn}} = -h_i r_i > 0$ — the
   cell is heated, as char oxidation should.
 
-The source comment states this explicitly (src/Physics/kinetics.jl:251–255). In
+The source comment states this explicitly (src/Physics/kinetics.jl). In
 the energy equation $Q_{\mathrm{rxn}}$ enters additively on the right-hand side
 together with the conduction divergence, gas-advection source, and radiation
 source, and the whole is divided by the mixture volumetric heat capacity
@@ -4631,12 +4457,12 @@ $\rho c_p^{\mathrm{eff}}$ (every component; see §3, §5, §7):
 
 $$
 \frac{dT_{\mathrm{cell}}}{dt} =
-\frac{-\,(\nabla\!\cdot\! q_{\mathrm{cond}}) + S_{\mathrm{conv}} + S_{\mathrm{gen}}
+\frac{-\,(\nabla\!\cdot\! q_{\mathrm{cond}}) + S_{\mathrm{conv}}
 + Q_{\mathrm{rad}} + Q_{\mathrm{rxn}}}{\rho c_p^{\mathrm{eff}}}
 \tag{6.9}
 $$
 
-(src/Discretization/finite_volume.jl:393–400).
+(`compute_rhs!`, Step 8, src/Discretization/finite_volume.jl).
 
 **Units check.** $[h_i] = $ J·kg⁻¹ (per kg of first reactant) and $[r_i] = $
 kg·m⁻³·s⁻¹, so $[h_i r_i] = $ J·m⁻³·s⁻¹ $=$ W·m⁻³, the volumetric power density
@@ -4647,7 +4473,7 @@ $r_i$, and $h_i$ is the enthalpy per unit of that mass.
 ### 6.6.2 Temperature- and state-dependent heat
 
 $h_i$ is not restricted to a constant. The `heat::Ph` field is typed by any
-`AbstractPropertyFunction` (src/Materials/reactions.jl:63), and in
+`AbstractPropertyFunction` (src/Materials/reactions.jl), and in
 `evaluate_reactions!` the heat is evaluated with **both** $T$ and the full
 concentration tuple $\boldsymbol{\xi}$:
 
@@ -4655,8 +4481,8 @@ concentration tuple $\boldsymbol{\xi}$:
 heats[$i] = rxn.heat(T, ξ)   # Pass ξ for state-dependent heats
 ```
 
-(src/Physics/kinetics.jl:136). The two-argument call dispatches as follows
-(src/Materials/property_functions.jl:188–197):
+(src/Physics/kinetics.jl). The two-argument call dispatches as follows
+(src/Materials/property_functions.jl):
 
 - `ConstantProperty(h)` $\to h$ (the `(T,ξ)` method ignores both arguments);
 - `LinearProperty(a,b)` $\to a + bT$ (affine in temperature, $\xi$ ignored);
@@ -4665,7 +4491,7 @@ heats[$i] = rxn.heat(T, ξ)   # Pass ξ for state-dependent heats
   actually consumes $\boldsymbol{\xi}$.
 
 A constant heat is created by passing a number, an affine heat by passing a
-`(a,b)` tuple, through `to_property` (src/Materials/property_functions.jl:387–390):
+`(a,b)` tuple, through `to_property` (src/Materials/property_functions.jl):
 
 ```julia
 Reaction(:decomp, 1 => 2; A=8.5e12, E=188e3, h=870e3)          # ConstantProperty
@@ -4686,26 +4512,22 @@ h_{\mathrm{sorp}}(T,\boldsymbol{\xi}) =
 \qquad MC = 100\,\frac{\xi_{\mathrm{moist}}}{\sum_{k}\xi_k},
 $$
 
-encoded as a closure over the moisture index (src/Materials/property_functions.jl:
-158–162). Because the closure is passed $\boldsymbol{\xi}$ at evaluation, the
+encoded as a closure over the moisture index (src/Materials/property_functions.jl).
+Because the closure is passed $\boldsymbol{\xi}$ at evaluation, the
 sorption heat self-consistently rises as the wood dries — a behaviour impossible
 to represent with a temperature-only property. Calling a `StateDependentProperty`
-with only $T$ raises an error (src/Materials/property_functions.jl:199–203),
+with only $T$ raises an error (src/Materials/property_functions.jl),
 guaranteeing the state argument is never silently dropped.
 
-The midpoint-rule sensible-enthalpy helper $\Delta h(T_{\mathrm{hi}},T_{\mathrm{lo}})
-= c_p(\tfrac{T_{\mathrm{hi}}+T_{\mathrm{lo}}}{2})(T_{\mathrm{hi}}-T_{\mathrm{lo}})$
-(src/Materials/components.jl:515–518) is used for transpiration/gas-generation
-enthalpy bookkeeping (§7, §12), **not** for the reaction heat itself. Whether
-the reaction heat is "separate from" the sensible-enthalpy transport of the
-released gases is precisely the **datum question** of §6.6.3 — the partition
+Whether the reaction heat is "separate from" the sensible-enthalpy transport of
+the released gases is precisely the **datum question** of §6.6.3 — the partition
 between "chemical" and "sensible" enthalpy depends on the temperature at which
 $h_i$ is referenced.
 
 > **Implementation note.** Heat source: `reaction_heat_source`,
-> src/Physics/kinetics.jl:257. Heat evaluation with state:
-> `_evaluate_reactions_gen!`, src/Physics/kinetics.jl:136. Property dispatch:
-> src/Materials/property_functions.jl:188–197.
+> src/Physics/kinetics.jl. Heat evaluation with state:
+> `_evaluate_reactions_gen!` (same file). Property dispatch:
+> src/Materials/property_functions.jl.
 
 ### 6.6.3 The enthalpy datum: heats at reaction temperature vs the $T_{\text{ref}}$ datum
 
@@ -4717,24 +4539,25 @@ A heat of reaction is only defined relative to a **datum**: $h_i$ may be quoted
 - **at the fixed ambient datum** $T_{\text{ref}} = 298.15$ K —
   $h_i = \sum_j \nu_{ji}\,h_j(T_{\text{ref}})$, the formation-enthalpy style.
 
-The distinction is immaterial for the default `:standard` energy form: with
-heats at the local reaction temperature, subtracting the species equations
-from the total-enthalpy balance gives the **exact** temperature equation
+The energy equation (§3.3) uses the first. With heats at the local reaction
+temperature, subtracting the species equations from the total-enthalpy balance
+gives the **exact** temperature equation
 $\rho c_p\,\partial_t T = -\nabla\cdot q + S_{\text{conv}} + Q_{\text{rad}} +
-Q_{\text{rxn}}$ — no generation-sink term exists, because the gas products'
-sensible enthalpy $\Delta h_g(T, T_{\text{ref}})$ is already *inside*
-$h_i(T)$. The default form is therefore the consistent one for DSC-style
-heats (its only approximation is the dropped gas heat storage, ≈0.2%).
+Q_{\text{rxn}}$ — no further term exists, because the gas products' sensible
+enthalpy $\Delta h_g(T, T_{\text{ref}}) = \int_{T_{\text{ref}}}^{T} c_{p,g}\,\mathrm{d}T'$ is already *inside* $h_i(T)$.
 
-The distinction is **load-bearing** for `energy_form = :with_generation_sink`
-(§7.5): the sink $S_{\text{gen}} = -\sum_g \Delta h_g(T,T_{\text{ref}})\,
-\dot m_g'''$ is exactly the conversion term between the two datums, so it is
-consistent **only with $T_{\text{ref}}$-datum heats**. Enabling it with
-DSC-style heats subtracts the gas sensible enthalpy a *second* time —
-$\Delta h_g(900\,\text{K}, 298.15\,\text{K}) = 0.66$–$1.20$ MJ·kg⁻¹ for
-$c_{p,g} = 1.1$–$2.0$ kJ·kg⁻¹·K⁻¹, comparable to or larger than typical
-wood/polymer pyrolysis endotherms (0.1–0.9 MJ·kg⁻¹). `to_problem_def` emits a
-one-time warning when the sink is selected (src/Problem/adapter.jl).
+A heat quoted at the $T_{\text{ref}}$ datum is converted by Kirchhoff's law,
+$h_i(T) = h_i(T_{\text{ref}}) + \sum_j \nu_{ji}\,\Delta h_j(T, T_{\text{ref}})$,
+with the sum running over the reactant ($\nu = -1$) and the products; the
+converted heat can be supplied as a temperature-dependent heat property (§6.6.2).
+The conversion is the integral of the heat-capacity change across the reaction,
+$\int_{T_{\text{ref}}}^{T}\bigl(\sum_p y_{i,p}c_{p,p} - c_{p,\text{reactant}}\bigr)\,\mathrm{d}T'$.
+The gas products' share alone, $\Delta h_g(900\,\text{K}, 298.15\,\text{K}) =
+0.66$–$1.20$ MJ·kg⁻¹ for $c_{p,g} = 1.1$–$2.0$ kJ·kg⁻¹·K⁻¹, is largely offset by
+the reactant's, but a heat-capacity change of 0.5 kJ·kg⁻¹·K⁻¹ still shifts the heat
+by 0.3 MJ·kg⁻¹ at 900 K, comparable to typical wood/polymer pyrolysis endotherms
+(0.1–0.9 MJ·kg⁻¹). A $T_{\text{ref}}$-datum heat used unconverted mis-states the
+reaction endotherm by that integral.
 
 ---
 
@@ -4742,51 +4565,46 @@ one-time warning when the sink is selected (src/Problem/adapter.jl).
 
 The reaction model sits in the innermost loop of every residual and Jacobian
 evaluation, so it is engineered to allocate nothing and to specialise completely
-on the (compile-time-known) reaction and component counts $N_R$ and $N_C$. Three
-`@generated` kernels achieve this.
+on the (compile-time-known) reaction and component counts $N_R$ and $N_C$. Two
+`@generated` kernels and one inline reduction achieve this.
 
 **Rate and heat evaluation.** `evaluate_reactions!` forwards to
-`_evaluate_reactions_gen!` (src/Physics/kinetics.jl:122–142), which the compiler
+`_evaluate_reactions_gen!` (src/Physics/kinetics.jl), which the compiler
 expands into a flat block — one explicit `rates[i] = reaction_rate(...)` and
 `heats[i] = rxn.heat(T, ξ)` statement per reaction — with no run-time loop over
 the heterogeneous `reactions` tuple. Heterogeneity (each `Reaction` may have a
 different `NRin`, `NRout`, and heat property type) is therefore handled by static
 dispatch with no `Union` boxing and no allocation.
 
-**Species sources.** `species_source_terms!` zeroes the output and calls
-`_species_source_terms_gen!` (src/Physics/kinetics.jl:201–242), again unrolled to
-one `_apply_reaction_source!` per reaction. A second method accepts a plain `Int`
-for `NC` and routes to the same `@generated` kernel
-(src/Physics/kinetics.jl:213–222), which is the form called from `compute_rhs!`.
-There is also a tuple-returning variant (src/Physics/kinetics.jl:159–175) that
-builds the source in a stack-allocated `MVector` for local use.
+**Species sources.** `species_source_terms!(sources, rates, material)` zeroes the
+output and calls `_species_source_terms_gen!`, again unrolled to one
+`_apply_reaction_source!` per reaction. It is the single method, called from
+`compute_rhs!` and from the Jacobian operators that need the reaction sources.
 
 **Heat sum.** `reaction_heat_source` is a single `@inline` reduction over the
-pre-filled `rates`/`heats` vectors (src/Physics/kinetics.jl:257–264), promoting the
+pre-filled `rates`/`heats` vectors (src/Physics/kinetics.jl), promoting the
 accumulator type so Duals carry through.
 
 All three use the promoted scalar type so that, in a Dual-typed (AD) pass, the
 caches hold Duals and derivatives propagate end-to-end. The per-cell scratch
 (`rates`, `heats`, `dξ_rxn`, `Q_rxn`) lives in the RHS cache and is sized by
-$N_R$, $N_C$, and the cell count (src/Physics/source_terms.jl:59–95;
-src/Discretization/finite_volume.jl:123–154), so the hot loop reuses storage
+$N_R$, $N_C$, and the cell count (`RHSCache`,
+src/Discretization/finite_volume.jl), so the hot loop reuses storage
 across cells and time steps.
 
-> **Implementation note.** Generated kernels: `_evaluate_reactions_gen!`
-> (src/Physics/kinetics.jl:146), `_species_source_terms_gen!`
-> (src/Physics/kinetics.jl:249). Compile-time constants $N_C, N_R$ are the
+> **Implementation note.** Generated kernels: `_evaluate_reactions_gen!` and
+> `_species_source_terms_gen!` (src/Physics/kinetics.jl). Compile-time constants $N_C, N_R$ are the
 > `Material{NC,NR}` type parameters (src/Materials/materials.jl).
 
 ---
 
 ## 6.8 Validation Utilities
 
-The kinetics module ships several diagnostics. They are not in the production hot
-path; they exist to catch stoichiometry errors during model development.
+Stoichiometry errors are caught when a reaction is built (§6.5.3); two small
+diagnostics check a reaction afterwards.
 
-**`verify_stoichiometry(rxn; tol=1e-10)`** (src/Materials/reactions.jl:518–525)
-computes the mass-balance error of a single reaction via `mass_balance_error`
-(src/Materials/reactions.jl:503–511):
+**`verify_stoichiometry(rxn; tol=1e-10)`** computes the mass-balance error of a
+single reaction via `mass_balance_error`:
 
 $$
 \varepsilon_{\mathrm{mb}}(i) = \Bigl|\,1 - \textstyle\sum_p y_{i,p}\,\Bigr|.
@@ -4795,41 +4613,19 @@ $$
 For a single-reactant reaction it compares the implicit unit reactant mass against
 the product-yield sum; for $N_{\mathrm{in}} > 1$ it returns `NaN` (unsupported).
 The function warns and returns `false` if $\varepsilon_{\mathrm{mb}} > $ `tol`.
+`validate_problem`, which `solve` calls unless `validate = false`, checks that the
+material has at least one component and that every reactant and product index
+lies in $1..N_C$ (numeric reactions are not index-checked when the `Material` is
+built); with `strict = true` it also runs `verify_stoichiometry` over every
+reaction of the material.
 
-**`check_material_mass_balance(reactions; tol=1e-10)`**
-(src/Materials/reactions.jl:547–557) iterates `verify_stoichiometry` over a
-material's reaction tuple, returning `true` only if all balance.
+Symbolic reactions are resolved to integer indices by `resolve_reaction` against
+the component name→index map when the `Material` is built, so a reaction that
+names a non-existent component errors with a clear message before any solve.
 
-**`validate_material(m)`** (src/Materials/materials.jl:437–457) is called as part
-of material assembly: it checks $N_C \ge 1$, that every reactant/product index lies
-in $1..N_C$, and that each reaction passes `verify_stoichiometry` (warning on
-failure). Symbolic reactions are resolved to integer indices first by
-`resolve_reaction` against the component name→index map
-(src/Materials/reactions.jl:351–395), so a reaction that names a non-existent
-component errors with a clear message before any solve.
-
-**`validate_species_source_conservation(sources; rtol=1e-12)`**
-(src/Physics/kinetics.jl:296–304) audits a computed source vector at run time:
-
-$$
-\Bigl|\textstyle\sum_j S_j\Bigr| \le \mathrm{rtol}\cdot \max_j |S_j|,
-\qquad \max_j|S_j| \ \text{floored at}\ 1,
-$$
-
-with default $\mathrm{rtol} = 10^{-12}$ — a very tight relative tolerance
-appropriate because the sum is mathematically zero by construction (§6.5.3) and
-should fail only on a genuine bug. The checked wrapper
-`species_source_terms_checked!` (src/Physics/kinetics.jl:337–360) computes the
-sources, runs the audit, and either warns or (with `throw_on_error=true`) errors.
-For production runs the unchecked `species_source_terms!` is used directly; the
-audit's cost (one sum, one max) is negligible but pointless once a material is
-known-good.
-
-> **Implementation note.** `verify_stoichiometry`/`mass_balance_error`/
-> `check_material_mass_balance`: src/Materials/reactions.jl:503–557.
-> `validate_species_source_conservation`/`species_source_terms_checked!`:
-> src/Physics/kinetics.jl:296–360. Material-level validation:
-> `validate_material`, src/Materials/materials.jl:437.
+> **Implementation note.** `verify_stoichiometry`, `mass_balance_error`,
+> `resolve_reaction`: src/Materials/reactions.jl. `validate_problem`:
+> src/Problem/problem_validation.jl.
 
 ---
 
@@ -4939,8 +4735,8 @@ thus Gpyro's per-reactant-consumed heat (the $\Delta H_{\mathrm{sol}} =
 specify a heat "per kg of reactant consumed" — precisely our per-first-reactant
 basis (§6.6.1). Gpyro additionally separates sensible-enthalpy transport into the
 $\sum(\dot\omega_f - \dot\omega_d)h_i$ term of its gas energy equation; in
-Pyrolysis.jl that bookkeeping is the gas-advection / generation source machinery of
-§7, kept strictly separate from the chemical $h_i$.
+Pyrolysis.jl that bookkeeping is the gas-advection source $S_{\text{conv}}$ of
+§7 together with the reaction-temperature datum of $h_i$ (§6.6.3).
 
 ### 6.9.3 FDS
 
@@ -5018,14 +4814,14 @@ The kinetics model is deliberately the simplest one that covers the target
 applications (cone calorimetry, TGA/DSC/MCC idealisation, charring/non-charring/
 intumescent solids, moisture). Its boundaries, with the source-of-truth guards:
 
-1. **Single reactant only.** `_apply_reaction_source!` errors for $N_{\mathrm{in}}
-   > 1$ (src/Physics/kinetics.jl:183–185), and `mass_balance_error` returns `NaN`
-   for multi-reactant reactions (src/Materials/reactions.jl:504). True bimolecular
+1. **Single reactant only.** `_apply_reaction_source!` (src/Physics/kinetics.jl)
+   errors for $N_{\mathrm{in}} > 1$, and `mass_balance_error` returns `NaN`
+   for multi-reactant reactions (src/Materials/reactions.jl). True bimolecular
    chemistry (ThermaKin's COMP1·COMP2, char oxidation consuming a gaseous O₂
    reactant) is not representable. Extending it requires a 3-ary reactant tuple
    `(idx, order, mass_stoich)` so a mass stoichiometry can be attached to each
    reactant; the outer struct shape already anticipates this
-   (src/Materials/reactions.jl:43–49). Multi-step schemes are instead built as
+   (src/Materials/reactions.jl). Multi-step schemes are instead built as
    **sequences** of single-reactant reactions.
 
 2. **No oxygen or pressure dependence.** The rate (6.1) depends only on $T$ and
@@ -5036,7 +4832,7 @@ intumescent solids, moisture). Its boundaries, with the source-of-truth guards:
    transport/permeability block (§9), never the rate constant.
 
 3. **Constant pre-exponential and activation energy.** $A_i$ and $E_i$ are scalar
-   `Float64` fields (src/Materials/reactions.jl:61–62). There is no
+   `Float64` fields (src/Materials/reactions.jl). There is no
    temperature-dependent $A(T)$, no explicit $T^{n_t}$ power (FDS's fourth factor),
    no kinetic compensation rule $A(E)=A_0 e^{\beta E}$, and no isokinetic shift. A
    temperature-dependent rate constant would require wrapping the entire constant
@@ -5056,8 +4852,7 @@ intumescent solids, moisture). Its boundaries, with the source-of-truth guards:
    be lowered (at some cost in stiffness) or the limiter disabled for
    validation.
 
-These limitations are consistent across the kinetics and materials knowledge
-bases; where a richer model is required (bimolecular oxidation, oxygen-sensitive
+These limitations are consistent across the kinetics and materials chapters; where a richer model is required (bimolecular oxidation, oxygen-sensitive
 char burnout, DAEM), the present architecture's chief virtue is that the
 allocation-free, AD-clean, compile-time-specialised kernels of §6.7 provide a
 clean foundation onto which the additional factors can be grafted without
@@ -5069,18 +4864,18 @@ disturbing the surrounding finite-volume and Jacobian machinery (§13, §15).
 # 7. Heat Conduction, Gas Convection, and Energy Assembly
 
 This chapter derives the condensed-phase energy equation as Pyrolysis.jl solves it: the
-non-conservative **Formulation A** temperature equation, in which the volumetric thermal
-storage carries only the solid/liquid *matrix* heat capacity while the sensible heat of the
-percolating gas is transported by an explicit volumetric advection source. We develop each
-term from its continuous form to its finite-volume discretization — Fourier conduction with
-distance-weighted harmonic-mean face conductivity, the discrete divergence operator, the gas
-convective source $S_{\text{conv}}$ and its optional companion the gas-generation enthalpy
-sink $S_{\text{gen}}$, the reaction-heat source $Q_{\text{rxn}}$, and the radiation source
-$Q_{\text{rad}}$ — and we trace the exact eight-step assembly sequence in `compute_rhs!`
-that produces $dT_i/dt$ and $d\xi_{j,i}/dt$. Particular care is taken with the three sign
-conventions of §2 (Nomenclature), with the precise set of terms the code includes and
-excludes, and with the mutual-exclusivity constraint between $S_{\text{conv}}$ and the
-surface-transpiration boundary term. Where useful, the Pyrolysis.jl forms are mapped to and
+non-conservative temperature equation, in which the volumetric thermal storage sums the
+heat capacity of every component, pore gas included, while the sensible heat carried by the
+gas flux relative to the skeleton is transported by an explicit volumetric advection source.
+We develop each term from its continuous form to its finite-volume discretization — Fourier
+conduction with distance-weighted harmonic-mean face conductivity, the discrete divergence
+operator, the gas convective source $S_{\text{conv}}$, the reaction-heat source
+$Q_{\text{rxn}}$, and the radiation source $Q_{\text{rad}}$ — and we trace the exact
+eight-step assembly sequence in `compute_rhs!` that produces $dT_i/dt$ and
+$d\xi_{j,i}/dt$. Particular care is taken with the three sign conventions of §2
+(Nomenclature), with the precise set of terms the code includes and excludes, and with why
+the surface energy balance carries no gas-enthalpy term alongside $S_{\text{conv}}$. Where
+useful, the Pyrolysis.jl forms are mapped to and
 contrasted with ThermaKin2Ds, Gpyro, and FDS.
 
 Index conventions for this chapter follow §2 overload note I1: **$i$ is the cell index**
@@ -5198,13 +4993,10 @@ cell has been driven to a vanishing conductivity (e.g. a near-fully-depleted cel
 numerical safety net; physically realistic conductivities are many orders above the
 threshold.
 
-> **Implementation note.** The single-face flux is `conductive_flux` in
-> `src/Physics/heat_conduction.jl`. Two methods exist: the six-argument
-> `conductive_flux(k_L, k_R, T_L, T_R, d_L, d_R)` forms $k_f$ via `harmonic_mean_weighted`
-> (in `src/Properties/effective_properties.jl`) and then applies (7.1); the four-argument
-> `conductive_flux(k_face, T_L, T_R, d_LR)` consumes a *pre-computed* face conductivity and
-> is the one actually called in the assembly loop, because face conductivities are cached.
-> The `<1e-20` guard lives in `harmonic_mean_weighted`.
+> **Implementation note.** The single-face flux is `conductive_flux(k_face, T_L, T_R, d_LR)`
+> in `src/Physics/heat_conduction.jl`; it consumes the face conductivity $k_f$ that
+> `update_properties!` pre-computes with `harmonic_mean_weighted`
+> (`src/Properties/effective_properties.jl`), where the `<1e-20` guard lives.
 
 ### 7.1.3 Interior flux pass and the boundary-face zeroing convention
 
@@ -5221,7 +5013,7 @@ q_f \;=\; 0 .
 $$
 
 The zeroing in (7.3) is deliberate, not a skip: the boundary face flux is **overwritten**
-later (Step 4 of §7.8) by the surface energy-balance solver, which computes the true
+later (Step 4 of §7.6) by the surface energy-balance solver, which computes the true
 conductive flux into the boundary cell from the solved surface temperature $T_s$ (see §12,
 Boundary & Initial Conditions). Zeroing first guarantees that if the BC step did not touch a
 face, that face contributes nothing rather than a stale value, and it keeps the interior
@@ -5272,9 +5064,7 @@ $$
 $$
 
 with units $\text{kg}\,\text{m}^{-3}\text{s}^{-1}$ when $J$ is in $\text{kg}\,\text{m}^{-2}\text{s}^{-1}$ — i.e.
-$(\nabla\!\cdot\mathbf{J}_j)_i$ is the volumetric net mass-efflux rate of species $j$, which
-also serves as the proxy for local gas generation in the optional sink term $S_{\text{gen}}$
-(§7.5).
+$(\nabla\!\cdot\mathbf{J}_j)_i$ is the volumetric net mass-efflux rate of species $j$.
 
 > **Implementation note.** `divergence_1d!` (scalar heat flux) and `divergence_species_1d!`
 > (matrix species flux, `[N_C × n_cells]`) are in `src/Discretization/finite_volume.jl`. Both
@@ -5289,12 +5079,11 @@ ledgers (§16, Conservation Diagnostics).
 
 ---
 
-## 7.3 Effective Heat Capacity and the Formulation A Energy Equation
+## 7.3 Effective Heat Capacity and the Energy Equation
 
 ### 7.3.1 The non-conservative temperature equation
 
-Pyrolysis.jl solves the energy balance in **non-conservative (temperature-form)** shape,
-called **Formulation A**:
+Pyrolysis.jl solves the energy balance in **non-conservative (temperature-form)** shape:
 
 $$
 \boxed{\;
@@ -5302,7 +5091,6 @@ $$
 \;=\;
 -\,\nabla\!\cdot\mathbf{q}_{\text{cond}}
 \;+\; S_{\text{conv}}
-\;+\; S_{\text{gen}}
 \;+\; Q_{\text{rad}}
 \;+\; Q_{\text{rxn}}
 \;}
@@ -5315,9 +5103,8 @@ with, term by term,
 |---|---|---|---|
 | $\mathbf{q}_{\text{cond}}$ | $-k\,\nabla T$ | Fourier conduction | 7.1 |
 | $S_{\text{conv}}$ | $-\sum_g c_{p,g}(T)\,\mathbf{J}_g\!\cdot\!\nabla T$ | gas sensible-enthalpy advection | 7.4 |
-| $S_{\text{gen}}$ | $-\sum_g \Delta h_g(T,T_{\text{ref}})\,(\nabla\!\cdot\mathbf{J}_g)$ | gas-generation enthalpy sink (optional) | 7.5 |
-| $Q_{\text{rad}}$ | model-dependent | volumetric radiation absorption | 7.7, §8 |
-| $Q_{\text{rxn}}$ | $-\sum_r h_r r_r$ | reaction heat | 7.7 |
+| $Q_{\text{rad}}$ | model-dependent | volumetric radiation absorption | 7.5, §8 |
+| $Q_{\text{rxn}}$ | $-\sum_r h_r r_r$ | reaction heat | 7.5 |
 
 The subscript $g$ runs over the **gas** components only (the predicate `is_gas`). The storage
 coefficient $\rho c_p^{\text{eff}}$ is the **mixture** volumetric heat capacity, defined
@@ -5359,12 +5146,13 @@ equation (§11.2.2).
 > `src/Properties/effective_properties.jl`, a `@generated` unrolled sum over the
 > component tuple with no phase branch. The per-cell value used by the assembly is
 > cached as `prop_cache.ρcp[i]`; the same function feeds the structured-Jacobian
-> operators (through Dual evaluation), the park-and-mask temperature merge and the
-> energy ledger.
+> operators (through Dual evaluation) and the energy ledger; the park-and-mask
+> temperature merge (`merge_temperatures_conservatively`, `src/Adaptivity/cell_merge.jl`)
+> sums the same every-component heat capacities directly.
 
 ### 7.3.3 The discrete temperature update
 
-Substituting the discrete divergence (7.4) into (7.6) and dividing by the cached matrix heat
+Substituting the discrete divergence (7.4) into (7.6) and dividing by the cached mixture heat
 capacity gives the cell temperature time derivative used by the integrator:
 
 $$
@@ -5375,7 +5163,6 @@ $$
 \Bigl(
 -\,(\nabla\!\cdot\mathbf{q})_i
 \;+\; S_{\text{conv},i}
-\;+\; S_{\text{gen},i}
 \;+\; Q_{\text{rad},i}
 \;+\; Q_{\text{rxn},i}
 \Bigr)
@@ -5391,23 +5178,26 @@ $$
 \frac{1}{V_i\,\rho c_{p,i}^{\text{eff}}}
 \Bigl[
 -\bigl(q_{f_R}-q_{f_L}\bigr)A
-+ V_i\bigl(S_{\text{conv},i}+S_{\text{gen},i}+Q_{\text{rad},i}+Q_{\text{rxn},i}\bigr)
++ V_i\bigl(S_{\text{conv},i}+Q_{\text{rad},i}+Q_{\text{rxn},i}\bigr)
 \Bigr].
 $$
 
-The four volumetric source terms are *cell-centered* (units $\text{W}\,\text{m}^{-3}$); only
+The three volumetric source terms are *cell-centered* (units $\text{W}\,\text{m}^{-3}$); only
 the conduction term arrives as a flux divergence. The exact code is
 
 ```julia
 ρcp = prop_cache.ρcp[i]
-dT[i] = (-rhs_cache.div_q[i] + rhs_cache.S_conv[i] + rhs_cache.S_gen[i]
-         + rhs_cache.Q_rad[i] + rhs_cache.Q_rxn[i]) / ρcp
+dT[i] =
+    (
+        -rhs_cache.div_q[i] +
+        rhs_cache.S_conv[i] +
+        rhs_cache.Q_rad[i] +
+        rhs_cache.Q_rxn[i]
+    ) / ρcp
 ```
 
 so the storage coefficient enters at exactly one place — the divisor `ρcp`, the
-mixture value (7.7). In the default `:standard` energy form $S_{\text{gen},i}\equiv 0$ (its
-cache slot is zeroed each RHS), so the active terms are conduction, $S_{\text{conv}}$,
-radiation, and reaction heat.
+mixture value (7.7).
 
 ### 7.3.4 Species equations (companion to the energy equation)
 
@@ -5458,7 +5248,7 @@ $$
 \tag{7.11}
 $$
 
-Formulation A keeps the **advection** piece as a volumetric source on the right-hand side of
+The energy equation keeps the **advection** piece as a volumetric source on the right-hand side of
 the temperature equation, with a leading minus sign (because the conservative term sits on the
 storage/transport side; moving it to the source side flips the sign):
 
@@ -5470,11 +5260,12 @@ S_{\text{conv}} \;=\; -\sum_g c_{p,g}(T)\,\mathbf{J}_g\!\cdot\!\nabla T
 \tag{7.12}
 $$
 
-The second (generation) piece of (7.11) is the basis of the *optional* sink $S_{\text{gen}}$
-(§7.5). Physically, $S_{\text{conv}}$ is the rate at which flowing gas deposits or removes
+The second (generation) piece of (7.11) needs no term of its own: with heats of reaction
+quoted at the reaction temperature it is already part of $Q_{\text{rxn}}$ (§3.3.2, §6.6.3).
+Physically, $S_{\text{conv}}$ is the rate at which flowing gas deposits or removes
 sensible heat as it crosses a temperature gradient: gas moving from hot toward cold heats the
-cell it passes through, and vice versa. This is the mechanism by which **Formulation A**
-transports gas enthalpy *without* storing it (cf. §7.3.2).
+cell it passes through, and vice versa. It carries the enthalpy of the gas *flux* relative to
+the skeleton; the gas *storage* sits in $\rho c_p^{\text{eff}}$ (§7.3.2).
 
 ### 7.4.2 Discretization
 
@@ -5532,9 +5323,8 @@ $$
 $$
 
 — second order up to the boundary (exact on quadratics), and sensitive to the
-transpiration-relevant surface-side gradient that a plain interior one-sided difference
-misses. The implementation never reads the Float64-stripped diagnostic
-`boundary_states.T_surface`; it recovers the face slope AD-cleanly as
+surface-side gradient, where the outflowing gas is hottest, that a plain interior
+one-sided difference misses. The implementation recovers the face slope AD-cleanly as
 $s_{\rm face} = -q_{\rm total}[f]/k_i$, which is *algebraically* identical because the
 thermal-BC pass writes the boundary flux as exactly
 $q_{\rm total}[f] = \mp k_i (T_s - T_i)/\Delta z_{1/2}$ at the solved $T_s$ (the $k_i$
@@ -5545,7 +5335,7 @@ $S_{\text{conv},i}=0$.
 On a uniform mesh ($d_L=d_R=\Delta z$), (7.15) reduces to the standard central difference
 $(T_R-T_L)/(2\Delta z)$. The unweighted mean of one-sided slopes and the wide-stencil form
 $(T_R-T_L)/(z_R^c-z_L^c)$ both carry a first-order $\mathcal{O}(|d_R-d_L|)\,T''$ error on
-stretched/AMR meshes and are not used.
+stretched meshes and are not used.
 
 > **Implementation note.** `compute_gas_convective_source!` in `src/Physics/convection.jl`
 > builds $\overline{J}_{g,i}$ and the gradient per cell; the inner sum over gas components is
@@ -5555,195 +5345,46 @@ stretched/AMR meshes and are not used.
 > initialized to `zero(promote_type(typeof(T_i), typeof(dTdx), eltype(J_gas)))` so it is
 > type-stable under AD.
 
-### 7.4.3 "Always on" in the standard form
+### 7.4.3 The surface carries no gas-enthalpy term
 
-$S_{\text{conv}}$ is **always present** in both supported energy forms (`:standard` and
-`:with_generation_sink`). It is the sole carrier of gas sensible-enthalpy transport in the
-default `:standard` form, and it is the reason the surface boundary condition can be a *plain*
-convective+radiative balance with no surface transpiration term — the gas energy leaving the
-domain has already been accounted for volumetrically as it advected up to the surface. The
-interplay with the surface-transpiration term, and why the two must not be combined, is the
-subject of §7.6.
+$S_{\text{conv}}$ is always active and is the sole carrier of gas sensible-enthalpy
+transport. It is also the reason the surface boundary condition is a *plain*
+convective + radiative balance, $q_{\text{BC}}(T_s) = q_{\text{cond}}(T_s)$, with no
+gas-enthalpy term: the gas energy leaving the domain has already been accounted for
+volumetrically as it advected up to the surface.
 
----
+Integrating (7.11) over the column shows the bookkeeping. With heats of reaction at the
+reaction temperature, the generation piece of (7.11)
+is inside $Q_{\text{rxn}}$, and the remaining advection piece, $\int_0^L S_{\text{conv}}\,dz$,
+is the heating of the gas from its formation temperature to $T_s$ along its path. Under local
+thermal equilibrium the gas crosses the surface at $T_s$ on both sides, so its enthalpy flux
+is continuous there and the surface balance is conducted flux equals applied flux (§1.4.3).
+A surface term $\sum_g \dot m_g\,\Delta h_g(T_s,T_\infty)$ added to that balance would apply
+the outflow a second time, on top of $\int S_{\text{conv}}\,dz$ — a spurious sink of order
+$5$–$10\,\text{kW}\,\text{m}^{-2}$ that under-predicts the surface temperature and the
+mass-loss rate. The convention is ThermaKin Eq. 17; Gpyro's thermal-equilibrium form uses the
+same term. Parameter sets calibrated against a solver that applies a surface gas-enthalpy term
+*in addition to* a volumetric advection source predict lower $T_s$ and MLR there than here;
+re-validate imported calibrations (§18).
 
-## 7.5 The Optional Gas-Generation Enthalpy Sink $S_{\text{gen}}$
+**The mass-flux/convection coupling is the blowing model of each `ConvectiveBC`.** The
+*momentum-side* effect of the gas efflux — boundary-layer thickening that suppresses the
+convective exchange coefficient, and the pooling of a dense gas on the face — is independent
+of the enthalpy bookkeeping above and is the `blowing` model a `ConvectiveBC` carries
+(§12.3.3): the coefficient becomes $h\,\chi$ with $\chi$ from the model and the outward gas
+flux at the face. Because it modifies only the coefficient, it composes exactly with the
+$S_{\text{conv}}$-only convention; no double-count arises. This is the only use of the gas
+flux in the surface balance.
 
-### 7.5.1 Definition
-
-The second (generation) piece of the gas-enthalpy divergence (7.11) is implemented as an
-*opt-in* cell-centered source, activated when `energy_form === :with_generation_sink`:
-
-$$
-\boxed{\;
-S_{\text{gen},i}
-\;=\;
--\sum_{g:\,\text{is\_gas}} \Delta h_g(T_i,\,T_{\text{ref}})\,(\nabla\!\cdot\mathbf{J}_g)_i
-\;}
-\qquad [\text{W}\,\text{m}^{-3}]
-\tag{7.16}
-$$
-
-Using $(\nabla\!\cdot\mathbf{J}_g)_i = \dot m_{g,i}'''$ (the volumetric gas-mass generation
-rate, from (7.5)), this is $-\sum_g \Delta h_g(T_i,T_{\text{ref}})\,\dot m_{g,i}'''$: the
-sensible enthalpy that the freshly generated gas carries away, *at the local temperature where
-it is generated*, measured relative to the reference (ambient) datum $T_{\text{ref}}$. The
-historical label "compression work" for this term is a misnomer; it is a divergence-completion
-/ generation term.
-
-### 7.5.2 Why the true enthalpy integral, evaluated by the midpoint rule
-
-The enthalpy factor is the **true sensible-enthalpy integral**
-
-$$
-\Delta h_g(T_i,T_{\text{ref}})
-=
-\int_{T_{\text{ref}}}^{T_i} c_{p,g}(\tau)\,d\tau ,
-\tag{7.17}
-$$
-
-*not* the single-point product $(T_i-T_{\text{ref}})\,c_{p,g}(T_i)$. The integral is evaluated
-by the **midpoint rule**,
-
-$$
-\Delta h_g(T_i,T_{\text{ref}})
-\;\approx\;
-c_{p,g}\!\left(\frac{T_i+T_{\text{ref}}}{2}\right)(T_i-T_{\text{ref}}),
-\tag{7.18}
-$$
-
-which is second-order accurate in the variation of $c_{p,g}$ and costs one $c_p$ evaluation.
-The reason the *true integral* (rather than the single-point product) is required is exact
-discrete telescoping with the surface transpiration boundary term: the boundary balance uses
-the **same** $\Delta h_g$ quadrature (7.18) and the **same** scalar $T_{\text{ref}}$, so when
-both are present the cell-by-cell $S_{\text{gen}}$ contributions plus the surface contribution
-sum to a clean total with no quadrature mismatch. With constant $c_p$ the algebraic identity is
-exact:
-
-$$
-\int_0^L \bigl(S_{\text{conv}}+S_{\text{gen}}\bigr)\,dz
-\;=\;
--\sum_g \dot m_g\,\Delta h_g(T_s,T_{\text{ref}}),
-\tag{7.19}
-$$
-
-i.e. the volumetric integral of the two gas-enthalpy sources equals (minus) the surface
-gas-enthalpy outflow $G\equiv \sum_g \dot m_g\,\Delta h_g(T_s,T_{\text{ref}})$.
-
-> **Implementation note.** $\Delta h_g$ is `delta_enthalpy(comp, T_hi, T_lo)` in
-> `src/Materials/components.jl`, returning `comp.heat_capacity((T_hi+T_lo)/2)*(T_hi-T_lo)`.
-> It is AD-clean: a `Dual`-typed $T_i$ propagates through the mean temperature and the
-> difference, so the derivative ForwardDiff returns is the derivative of the *midpoint-rule
-> expression actually evaluated* (which agrees with the exact $c_{p,g}(T_i)$ only to first
-> order — the code differentiates the quadrature it computes, keeping value and derivative
-> mutually consistent). $S_{\text{gen}}$ itself is `compute_gas_generation_sink!` in
-> `src/Physics/convection.jl`, with the `@generated` inner sum `_gas_generation_sink_unrolled`.
-> The cell divergence $(\nabla\!\cdot\mathbf{J}_g)_i$ is the same `div_J` computed in Step 7.
-
-### 7.5.3 The single-scalar $T_{\text{ref}}$ and its caveat
-
-The reference temperature in (7.16) is resolved *once* per RHS to a single scalar by
-`_resolve_volumetric_T_ref` (`src/Discretization/finite_volume.jl`): it prefers the **top**
-boundary's ambient temperature (the surface where transpiration dominates), falling back to
-the bottom boundary's ambient, then to the global default $T_{\text{ref}}=298.15\,\text{K}$.
-This single datum is applied to every cell.
-
-The caveat: the surface transpiration BC uses each boundary's *own* ambient via
-`ambient_temperature(bc, …)` per face, whereas $S_{\text{gen}}$ uses the one scalar. They
-agree only when both boundaries share an ambient. If $T_{\infty,\text{top}}\ne
-T_{\infty,\text{bottom}}$ **and** the back face is permeable (non-zero gas crossing it), the
-`:with_generation_sink` energy ledger fails to close at the bottom by exactly
-$\sum_g \dot m_{g,\text{bottom}}\,c_{p,g}\,(T_{\infty,\text{top}}-T_{\infty,\text{bottom}})$.
-For the usual **impermeable back face** ($\mathbf{J}_g=0$ at $z=0$) both terms vanish and the
-closure is exact; for equal ambients it is also exact. Supporting asymmetric ambients with a
-permeable back face would require a per-cell datum (top ambient over the upper region, bottom
-over the lower) rather than the single scalar.
-
-### 7.5.4 When to enable it
-
-**Only with $T_{\text{ref}}$-datum reaction heats (§6.6.3).** $S_{\text{gen}}$
-is the datum-conversion term between formation-style heats
-($h_i = \sum_j \nu_{ji} h_j(T_{\text{ref}})$) and heats at the local reaction
-temperature. With DSC-style / inverse-calibrated heats (the usual case), the
-gas products' sensible enthalpy is already inside $h_i(T)$ and the **exact**
-temperature equation contains conduction $+\,S_{\text{conv}}+Q_{\text{rxn}}$
-only — enabling $S_{\text{gen}}$ then subtracts
-$\sum_g \Delta h_g(T,T_{\text{ref}})\,\dot m_g'''$ a second time
-(0.66–1.20 MJ per kg of volatiles at 900 K, comparable to the heat of
-pyrolysis itself). `to_problem_def` emits a one-time warning when the sink is
-selected.
-
-Even with $T_{\text{ref}}$-datum heats, $S_{\text{gen}}$ is a **partial** datum
-conversion: the exact equation also carries the condensed-product term
-$-\sum_{S/L}\Delta h_j(T,T_{\text{ref}})\,\dot\omega_j$ (not implemented), and
-$S_{\text{gen}}$ itself uses $\nabla\!\cdot\mathbf J_g$ in place of $\dot\omega_g$, which
-agree only in the quasi-steady limit (§3.3.2). In the default
-`:standard` form $S_{\text{gen}}$ is dropped, and the gas-enthalpy divergence
-is closed only at the boundary — the FDS/Gpyro convention. Note also that the
-default convention (§7.6) keeps transpiration *off*, and the three-way
-combination ($S_{\text{conv}}+S_{\text{gen}}+$ transpiration) is rejected at
-problem construction: by (7.19) the volumetric pair already integrates to the
-full surface outflow $-G$, so adding the transpiration term on top would
-remove $\approx 2G$ — a double-count, not a closed ledger.
+> **Implementation note.** The surface Newton solve is in
+> `src/Discretization/boundary_temperature.jl`; it takes the outward gas flux at the face as
+> its only gas-flux argument and passes it to the blowing models.
 
 ---
 
-## 7.6 Mutual Exclusivity of $S_{\text{conv}}$ and the Surface Transpiration Term
+## 7.5 Reaction-Heat and Radiation Sources
 
-A surface energy balance can account for gas-borne enthalpy leaving the domain by adding a
-**transpiration** term $\sum_g \dot m_g\,\Delta h_g(T_s,T_\infty)$ to the boundary balance
-(see §12). Pyrolysis.jl supports this term as an opt-in alternative, but it is **incompatible
-with the always-on volumetric advection source $S_{\text{conv}}$** and is rejected at problem
-construction when requested.
-
-The reasoning is the algebraic identity (7.19). The supported default carries the *entire*
-gas-enthalpy transport volumetrically through $S_{\text{conv}}$; from (7.19),
-
-$$
-\int_0^L S_{\text{conv}}\,dz \;=\; -G - \int_0^L S_{\text{gen}}\,dz
-\;\;\Longrightarrow\;\;
-\bigl|\!\int S_{\text{conv}}\bigr| \;=\; G - \bigl|\!\int S_{\text{gen}}\bigr| ,
-$$
-
-so in the `:standard` form (where $S_{\text{gen}}=0$) the volumetric advection already
-supplies a magnitude $|\!\int S_{\text{conv}}| = G$ of the surface outflow. Dropping
-$S_{\text{gen}}$ therefore leaves a deficit of only $|\!\int S_{\text{gen}}|$, **not** the full
-outflow $G$. If one **additionally** turns on the surface transpiration BC, it applies the
-*full* $G$ at the surface *on top of* the already-present $\int S_{\text{conv}}$, so the
-advective enthalpy is counted **twice** — once volumetrically and once at the boundary —
-over-counting by $|\!\int S_{\text{conv}}|$. In practice this spurious double sink is on the
-order of $5$–$10\,\text{kW}\,\text{m}^{-2}$, which under-predicts the surface temperature and
-the mass-loss rate.
-
-For this reason the supported convention (ThermaKin Eq. 17; Gpyro's thermal-equilibrium
-form is the same term) is **$S_{\text{conv}}$ only, plain convective+radiative surface
-BC, transpiration off.** Under local thermal equilibrium the gas crosses the surface at
-$T_s$ on both sides, so its enthalpy flux is continuous there and the surface balance
-is conducted flux equals applied flux (§1.4.3). The transpiration path is
-retained only for closed-ledger numerical experiments (where $S_{\text{conv}}$ is conceptually
-replaced, not augmented), and must never be combined with the volumetric source.
-
-> **Implementation note.** The guard is in `to_problem_def` (`src/Problem/adapter.jl`): if
-> `use_transpiration_bc == true` the constructor throws an `ArgumentError` explaining the
-> double-count. `use_transpiration_bc` defaults to `false`. Parameter sets calibrated against
-> solvers that apply a surface transpiration term *in addition to* a volumetric advection
-> source will predict lower $T_s$ and MLR there than here; re-validate imported calibrations
-> (see §18, Verification & Validation).
-
-**The supported mass-flux/convection coupling is the blowing model of each
-`ConvectiveBC`.** The *momentum-side* effect of the gas efflux — boundary-layer
-thickening that suppresses the convective exchange coefficient, and the pooling
-of a dense gas on the face — is independent of the enthalpy bookkeeping above
-and is the `blowing` model a `ConvectiveBC` carries (§12.3.3): the coefficient
-becomes $h\,\chi$ with $\chi$ from the model and the outward gas flux at the
-face. Because it modifies only the coefficient, it composes exactly with the
-$S_{\text{conv}}$-only convention; no double-count arises.
-
----
-
-## 7.7 Reaction-Heat and Radiation Sources
-
-### 7.7.1 Reaction heat $Q_{\text{rxn}}$ and its sign
+### 7.5.1 Reaction heat $Q_{\text{rxn}}$ and its sign
 
 The volumetric reaction-heat source is
 
@@ -5752,7 +5393,7 @@ $$
 Q_{\text{rxn},i} \;=\; -\sum_r h_r\,r_r
 \;}
 \qquad [\text{W}\,\text{m}^{-3}]
-\tag{7.20}
+\tag{7.16}
 $$
 
 where $r_r$ is the rate of reaction $r$ (units $\text{kg}\,\text{m}^{-3}\text{s}^{-1}$; §6)
@@ -5765,7 +5406,7 @@ is
 - $h_r < 0$ **exothermic** (the reaction *releases* heat). Then $Q_{\text{rxn}}>0$: the cell
   **heats**.
 
-The leading minus sign in (7.20) converts the enthalpy-of-reaction convention into the
+The leading minus sign in (7.16) converts the enthalpy-of-reaction convention into the
 heat-source convention. This sign is the most error-prone in the whole assembly, so it is
 worth stating precisely against the implementation: the accumulator computes
 `Q -= heats[i] * rates[i]` — i.e. $Q=-\sum_r h_r r_r$ — with rates $r_r\ge 0$ for forward
@@ -5773,18 +5414,16 @@ reactions, so an exothermic reaction ($h_r<0$) produces $Q>0$.
 
 > **Caution on external conventions.** ThermaKin and Gpyro publish $h>0=$ *exothermic*, the
 > opposite of the internal storage convention here. The mapping is absorbed by the minus sign
-> in (7.20): with their published $h$ one would write $Q_{\text{rxn}}=+\sum h r$.
+> in (7.16): with their published $h$ one would write $Q_{\text{rxn}}=+\sum h r$.
 > Pyrolysis.jl stores $h$ with $h>0=$ endothermic and forms $Q_{\text{rxn}}=-\sum h r$, so a
 > user porting a ThermaKin heat of reaction must flip its sign (see §6).
 
 > **Implementation note.** `reaction_heat_source(rates, heats)` in `src/Physics/kinetics.jl`
 > performs the negated sum. The per-cell reaction rates and heats are evaluated by
 > `evaluate_reactions!` (§6) at the cell's local $(T_i,\xi_i)$, and the stoichiometric species
-> sources by `species_source_terms!`. A test-only convenience wrapper `compute_energy_sources!`
-> (`src/Physics/source_terms.jl`) recomputes $Q_{\text{rxn}}$ for the whole field but
-> allocates; the production path inlines it in `compute_rhs!`.
+> sources by `species_source_terms!`; `compute_rhs!` evaluates them inline, cell by cell.
 
-### 7.7.2 Radiation source $Q_{\text{rad}}$ (dispatch only)
+### 7.5.2 Radiation source $Q_{\text{rad}}$ (dispatch only)
 
 The volumetric radiation absorption source is computed by `compute_radiation_source!` and
 dispatched on the active radiation model:
@@ -5797,7 +5436,7 @@ dispatched on the active radiation model:
 - **`BEER_LAMBERT`**: in-depth absorption, $q'''(z)=\alpha(z)I(z)$ with
   $I(z)=I_{\text{surface}}\exp(-\!\int\!\alpha\,dz')$, assembled cell-exact via a backward
   sweep from the surface.
-- **`P1_QUASI_STEADY`**: handled by a separate quasi-steady radiation residual.
+- **`P1_QUASI_STEADY`**: $Q_{\text{rad},i}=0$ here; P1 lives in `Pyrolysis.Experimental` with its own residual wrapper, and `solve` rejects it (§8.12).
 
 The full derivation of each model — Beer–Lambert cell-averaged form, P1 diffusion, Marshak
 boundary conditions, the energy-equation coupling, and the regime diagnostics — is the subject
@@ -5809,33 +5448,36 @@ coupling discussion.
 
 ---
 
-## 7.8 The `compute_rhs!` Eight-Step Assembly Sequence
+## 7.6 The `compute_rhs!` Eight-Step Assembly Sequence
 
 The complete energy + species RHS is assembled in `compute_rhs!`
 (`src/Discretization/finite_volume.jl`) in a **fixed eight-step order**. The ordering is not
 arbitrary: several steps consume results produced by earlier steps, and getting the order
-wrong would break the surface energy balance or the ALE mesh velocity. The sequence (for the
-Eulerian / Fickian path; the Darcy–Fick path `compute_rhs_darcy_fick!` is identical except for
-an added Darcy property/velocity update at the front — §9) is:
+wrong would break the surface energy balance, the boundary-cell $S_{\text{conv}}$, or the heat
+divergence. One function serves
+both transport laws: the law follows the property cache's Darcy sub-cache (`nothing` ⇔
+Fickian), which selects the Darcy property refresh in Step 1 and the gas-flux form in Step 3
+(§9). The sequence is:
 
-**Step 1 — Interior conductive fluxes.** `compute_conductive_fluxes!` fills $q_f$ at all
-interior faces via (7.1) and zeroes boundary faces (7.3). The result is copied into the
-working flux vector `q_total` (`copyto!`), which will be modified at the boundaries in Step 4.
+**Step 1 — Transport properties and interior conductive fluxes.** In Darcy–Fick mode
+`update_darcy_properties!` refreshes the cell pressure, porosity, permeability, and viscosity
+and the face Darcy velocity (§9); in Fickian mode this is a no-op. `compute_conductive_fluxes!`
+then fills $q_f$ at all interior faces via (7.1) and zeroes boundary faces (7.3). The result is
+copied into the working flux vector `q_total` (`copyto!`), which will be modified at the
+boundaries in Step 4.
 
 **Step 2 — Reaction rates, heat source, and species sources.** For each cell,
 `evaluate_reactions!` gives the rates $r_r$ and heats $h_r$; `reaction_heat_source` forms
-$Q_{\text{rxn},i}$ (7.20); `species_source_terms!` forms $S_{j,\text{rxn},i}$, which is stored
-in `dξ_rxn`. *This must precede the thermal-BC solve* (Step 4) so that the species reaction
-source is populated, and, in the ALE residual, so the reaction species sources are available
-for the strain-rate/mesh-velocity computation that precedes the moving-frame gas fluxes.
+$Q_{\text{rxn},i}$ (7.16); `species_source_terms!` forms $S_{j,\text{rxn},i}$, which is stored
+in `dξ_rxn`. Step 8 reads both; in the ALE residual the strain rate and the mesh velocity
+are built from `dξ_rxn` after `compute_rhs!` returns (§10.1.2, §11.3).
 
-**Step 3 — Gas transport fluxes (interior + boundary).** `compute_gas_fluxes!` fills the
-interior gas-flux matrix `J_gas` (Fickian volume-fraction-gradient form, §9), then
-`apply_mass_bc_flux!` applies the mass boundary conditions at the top and bottom faces. *This
-must complete before the thermal-BC solve* (Step 4): the surface energy balance — when the
-transpiration term is used — needs the surface gas mass flux $\dot m_g$ read from `J_gas` at
-the boundary face. (Even with transpiration off, ordering gas transport before the thermal BC
-keeps the dependency structure uniform.)
+**Step 3 — Gas transport fluxes (interior + boundary).** `compute_gas_fluxes!` (Fickian
+volume-fraction-gradient form) or `compute_gas_fluxes_darcy_fick!` (Darcy–Fick, with the
+pressure-BC venting flux on the boundary faces) fills the gas-flux matrix `J_gas` (§9), then
+`apply_mass_bc_flux!` adds the mass boundary conditions at the top and bottom faces. *This
+must complete before the thermal-BC solve* (Step 4): the blowing model of each
+`ConvectiveBC` reads the outward gas flux at its face from `J_gas` (§7.4.3, §12.3.3).
 
 **Step 4 — Thermal boundary conditions.** `apply_thermal_bc_flux!` solves, at each
 non-Dirichlet boundary, the surface energy balance for the surface temperature $T_s$ by Newton
@@ -5848,7 +5490,7 @@ k_{\text{eff}}(T_s-T_{\text{cell}})/\Delta z_{\text{half}}$, its derivative, the
 $[200,3000]\,\text{K}$ clamp, and the convergence criterion — is in §12.
 
 **Step 5 — Radiation source.** `compute_radiation_source!` fills $Q_{\text{rad}}$ per the
-active model (§7.7.2, §8).
+active model (§7.5.2, §8).
 
 **Step 6 — Gas convective source.** `compute_gas_convective_source!` fills $S_{\text{conv}}$
 (7.13) from `J_gas`, the cell-centered temperature gradients, and — at the two boundary
@@ -5856,25 +5498,21 @@ cells — the boundary entries of `q_total` written in Step 4, from which the bo
 slope at the solved $T_s$ is recovered as $-q_{\rm total}[f]/k_i$ (7.15b). (It uses the
 full face-averaged gas fluxes, including the boundary-applied values, now in `J_gas`.)
 
-**Step 7 — Divergences, then the optional generation sink.** `divergence_1d!` forms
-$(\nabla\!\cdot\mathbf{q})_i$ from `q_total` (now including the boundary fluxes from Step 4),
-and `divergence_species_1d!` forms $(\nabla\!\cdot\mathbf{J}_j)_i$. *The species divergence
-must come before $S_{\text{gen}}$* because (7.16) is built from it. If
-`energy_form === :with_generation_sink`, `_resolve_volumetric_T_ref` picks $T_{\text{ref}}$ and
-`compute_gas_generation_sink!` fills $S_{\text{gen}}$; otherwise `S_gen` is zeroed via
-`fill!`.
+**Step 7 — Divergences.** `divergence_1d!` forms $(\nabla\!\cdot\mathbf{q})_i$ from
+`q_total` (now including the boundary fluxes from Step 4), and `divergence_species_1d!` forms
+$(\nabla\!\cdot\mathbf{J}_j)_i$.
 
 **Step 8 — Final RHS assembly.** For each cell, the temperature derivative (7.9) is formed by
-combining $-(\nabla\!\cdot\mathbf{q})_i$, $S_{\text{conv},i}$, $S_{\text{gen},i}$,
+combining $-(\nabla\!\cdot\mathbf{q})_i$, $S_{\text{conv},i}$,
 $Q_{\text{rad},i}$, $Q_{\text{rxn},i}$ and dividing by `prop_cache.ρcp[i]`; the species
 derivative (7.10) is formed by `apply_species_residual_unrolled!`.
 
-### 7.8.1 The ordering dependency graph
+### 7.6.1 The ordering dependency graph
 
 The dependencies that *fix* the order are:
 
-1. **Gas fluxes (Step 3) → thermal BC solve (Step 4):** the surface balance's optional
-   transpiration term needs $\dot m_g$ at the boundary.
+1. **Gas fluxes (Step 3) → thermal BC solve (Step 4):** the blowing models of the
+   convective BCs need the outward gas flux at the boundary.
 2. **Thermal BC solve (Step 4) → gas convective source (Step 6) and heat divergence
    (Step 7):** both read the boundary fluxes that Step 4 wrote into `q_total` — the
    divergence directly, and $S_{\text{conv}}$ through the boundary cells' face slope
@@ -5882,21 +5520,19 @@ The dependencies that *fix* the order are:
 3. **Reaction sources (Step 2) → everything downstream:** $Q_{\text{rxn}}$ and the species
    reaction sources are needed in Step 8; in the *ALE* residual (§11, §15) the reaction species
    sources also feed the strain rate $\theta_i$ and hence the cumulative mesh velocity $w$ — so
-   reaction rates must be available *before* the gas fluxes are computed in the moving frame.
-4. **Species divergence (Step 7) → generation sink (Step 7, later):** $S_{\text{gen}}$ is a
-   function of $(\nabla\!\cdot\mathbf{J}_g)_i$.
+   reaction rates must be available *before* the mesh velocity is computed.
 
-The full-residual entry point `residual!`, the four trait-dispatched residual paths
-(Eulerian/ALE × Fickian/DarcyFick), and the ALE-specific extensions to this sequence (strain
-rate, mesh velocity, advection, dilation correction, $\chi$ dynamics) are described in §15
+The full-residual entry point `residual!`, its two trait-dispatched paths (Eulerian and ALE),
+and the ALE-specific extensions to this sequence (strain rate, mesh velocity, dilation
+correction, $\chi$ dynamics) are described in §15
 (Temporal Integration & Structured Jacobian) and §11 (ALE Framework). This chapter's
 `compute_rhs!` is the Eulerian core that those paths build on.
 
 ---
 
-## 7.9 Caches and Type Parameterization for AD
+## 7.7 Caches and Type Parameterization for AD
 
-### 7.9.1 `RHSCache{Tu}`
+### 7.7.1 `RHSCache{Tu}`
 
 All RHS intermediates are stored in a pre-allocated `RHSCache{Tu}`
 (`src/Discretization/finite_volume.jl`), eliminating per-call allocations (verified by the
@@ -5907,7 +5543,6 @@ zero-allocation RHS test). Its fields:
 | `q_cond` | $n_{\text{faces}}$ | conductive face fluxes | $\text{W}\,\text{m}^{-2}$ |
 | `q_total` | $n_{\text{faces}}$ | total energy face fluxes ($q_{\text{cond}}$ + BC) | $\text{W}\,\text{m}^{-2}$ |
 | `S_conv` | $n_{\text{cells}}$ | gas convective source | $\text{W}\,\text{m}^{-3}$ |
-| `S_gen` | $n_{\text{cells}}$ | gas-generation enthalpy sink (zeroed unless enabled) | $\text{W}\,\text{m}^{-3}$ |
 | `J_gas` | $N_C\times n_{\text{faces}}$ | gas species face fluxes | $\text{kg}\,\text{m}^{-2}\text{s}^{-1}$ |
 | `Q_rxn` | $n_{\text{cells}}$ | reaction heat source | $\text{W}\,\text{m}^{-3}$ |
 | `Q_rad` | $n_{\text{cells}}$ | radiation source | $\text{W}\,\text{m}^{-3}$ |
@@ -5917,41 +5552,42 @@ zero-allocation RHS test). Its fields:
 | `div_q` | $n_{\text{cells}}$ | $\nabla\!\cdot\mathbf{q}$ | $\text{W}\,\text{m}^{-3}$ |
 | `div_J` | $N_C\times n_{\text{cells}}$ | $\nabla\!\cdot\mathbf{J}_j$ | $\text{kg}\,\text{m}^{-3}\text{s}^{-1}$ |
 
-The cache is resizable (`resize_rhs_cache!`) so AMR refinement/coarsening and ALE surface
-depletion can change the cell/face counts between steps (§14). It is constructed sized to a
-mesh and material via `RHSCache(mesh, material)`, defaulting to `Tu = Float64`.
+The cache keeps a fixed size for the whole solve: depleted-cell parking (§14.3) leaves
+ghost slots in place instead of changing the cell/face counts, and `compute_rhs!` loops
+over the live cells `1:n_active_cells` only. It is constructed sized to a mesh and material
+via `RHSCache(mesh, material)`, defaulting to `Tu = Float64`.
 
-### 7.9.2 The scalar type parameter `Tu`
+### 7.7.2 The scalar type parameter `Tu`
 
 `RHSCache{Tu}`, `PropertyCache{Tu,DarcyT}`, and the typed state cache are all parameterized on
 a single live scalar type `Tu`. In ordinary integration `Tu = Float64`. During forward-mode
-automatic differentiation — used both for the structured-Jacobian operators' AD-default paths
-and for the dense reference Jacobian, and end-to-end for sensitivity analysis (§17) —
+automatic differentiation — used by the structured-Jacobian operators' stencil-local
+ForwardDiff kernels, by the dense reference Jacobian of the verifier, and end-to-end for
+sensitivity analysis (§17) —
 `Tu = ForwardDiff.Dual`. Because every flux, source, property, and geometric quantity is held
 at type `Tu`, the entire RHS assembly propagates dual sensitivities without a single
 re-allocation or type conversion. The compile-time component unrolling (`@generated` functions
-for the heat-capacity sums, $S_{\text{conv}}$, $S_{\text{gen}}$, and the species residual) is
+for the heat-capacity sums, $S_{\text{conv}}$, and the species residual) is
 what makes this type stability achievable over the heterogeneous component tuple: the gas/solid
 branches are resolved at code generation, so there is no runtime tuple indexing (which would
 allocate) and the compiler specializes each arithmetic line to the concrete `Tu`.
 
-> **Implementation note.** `SourceTermCache` (`src/Physics/source_terms.jl`) is a separate,
-> simpler pre-allocated store used by the test/post-processing source helpers; the production
-> assembly uses `RHSCache` exclusively. The `PropertyCache` (§5) supplies `ρ`, `ρcp`,
-> `k`, `λ`, `ε`, `α` per cell and `k_face`, `λ_face` per face (plus an optional Darcy sub-cache
-> of `P`, `φ`, `κ`, `μ`); it must be refreshed by `update_properties!` before `compute_rhs!` is
+> **Implementation note.** The production assembly uses `RHSCache` exclusively. The
+> `PropertyCache` (§5) supplies `ρ`, `ρcp`,
+> `k`, `λ`, `ε`, `a`, `α` per cell and `k_face`, `λ_face` per face (plus an optional Darcy sub-cache
+> of `P`, `φ`, `κ`, `μ` per cell and `v_gas`, `∇P` per face); it must be refreshed by `update_properties!` before `compute_rhs!` is
 > called.
 
 ---
 
-## 7.10 Comparison to ThermaKin2Ds, Gpyro, and FDS
+## 7.8 Comparison to ThermaKin2Ds, Gpyro, and FDS
 
 We map each reference code's notation to the unified nomenclature on first use and contrast the
 energy assembly. (The reference codes are condensed-phase pyrolysis / fire solvers:
 ThermaKin2Ds by Stoliarov et al.; Gpyro by Lautenberger & Fernandez-Pello; the FDS solid-phase
 model by McGrattan et al.)
 
-### 7.10.1 The energy-equation skeleton
+### 7.8.1 The energy-equation skeleton
 
 All four codes solve a 1D (through-thickness) Fourier-conduction energy balance with
 volumetric reaction heat and a gas-enthalpy coupling. In our symbols the common skeleton is
@@ -5966,7 +5602,7 @@ $$
 and the codes differ mainly in (i) whether gas heat capacity is in the storage term, (ii) how
 the gas enthalpy coupling is written, and (iii) the radiation closure.
 
-### 7.10.2 ThermaKin2Ds
+### 7.8.2 ThermaKin2Ds
 
 ThermaKin writes the through-thickness energy equation with the all-component storage
 $\sum_j \xi_j c_{p,j}\,\partial T/\partial t$, the gas-advection term
@@ -5980,7 +5616,7 @@ $\xi_{\text{COMP1}}\xi_{\text{COMP2}}$ has no analog because Pyrolysis.jl enforc
 reactant (§6); ThermaKin's gas flux $J=-\rho_g\lambda\,\partial(\xi_g/\rho_g)/\partial x$ is
 the volume-fraction-gradient form implemented here (§9).
 
-### 7.10.3 Gpyro
+### 7.8.3 Gpyro
 
 Gpyro's energy equation (Lautenberger) uses a control-volume conservative formulation on
 $\bar\rho\,\Delta z$, with the bulk (averaged) density $\bar\rho$ (our $\rho$),
@@ -6000,7 +5636,7 @@ selection, harmonic interface interpolation, and a TDMA solve; Pyrolysis.jl uses
 harmonic interface interpolation (7.2) but a method-of-lines + stiff-ODE integrator with a
 structured Jacobian (§15) rather than a hand-rolled implicit TDMA sweep.
 
-### 7.10.4 FDS
+### 7.8.4 FDS
 
 The FDS solid-phase model solves a 1D Fourier conduction equation with the surface balance
 $-k\,\partial T/\partial x = \dot q_c'' + \dot q_r''$, Arrhenius reaction kinetics
@@ -6012,10 +5648,10 @@ $\dot q_r''$ (radiative) is the boundary Newton solve of §12. The radiation clo
 (FDS uses a two-flux Schuster–Schwarzschild model in-depth; Pyrolysis.jl offers
 SURFACE_ABSORPTION / BEER_LAMBERT / P1, §8). Pyrolysis.jl, following ThermaKin, resolves
 the gas in depth and distributes its enthalpy transport volumetrically as $S_{\text{conv}}$
-rather than applying it solely as a surface transpiration term (and forbids doing both —
-§7.6).
+rather than as a surface outflow term, and the surface balance carries no gas-enthalpy term
+on top of it (§7.4.3).
 
-### 7.10.5 Summary table
+### 7.8.5 Summary table
 
 | feature | Pyrolysis.jl | ThermaKin2Ds | Gpyro | FDS |
 |---|---|---|---|---|
@@ -6028,7 +5664,7 @@ rather than applying it solely as a surface transpiration term (and forbids doin
 
 ---
 
-## 7.11 Limitations and Open Issues
+## 7.9 Limitations and Open Issues
 
 The energy assembly inherits a small number of known limitations, drawn from the source notes
 and discussed where relevant above:
@@ -6037,15 +5673,10 @@ and discussed where relevant above:
    no two-temperature gas energy equation, so regimes where the gas does not equilibrate
    with the pore walls within a cell are outside the model (§3.9).
 
-2. **Single-scalar $T_{\text{ref}}$ in $S_{\text{gen}}$ breaks closure for asymmetric ambients
-   with a permeable back face** (§7.5.3). Harmless for the usual impermeable back face or equal
-   ambients; a per-cell datum would be required to support the asymmetric permeable case
-   exactly.
-
-3. **One global radiation model.** $Q_{\text{rad}}$ is dispatched on a single model for the
+2. **One global radiation model.** $Q_{\text{rad}}$ is dispatched on a single model for the
    whole domain; per-cell or temperature-dependent model switching is not supported (§8).
 
-4. **Discrete energy-balance closure for composition-varying mixtures.** The energy ledger
+3. **Discrete energy-balance closure for composition-varying mixtures.** The energy ledger
    (§16) audits bookkeeping closure to integrator tolerance but does not carry the
    composition-change enthalpy $\sum_j h_j(T)\,\partial_t\xi_j$ as a conserved quantity
    (§3.3.2) or the ALE volume-change work, so the *physical* balance (as opposed to the
@@ -6072,8 +5703,8 @@ cell-averaged discretizations, the Marshak/Reflective/Dirichlet boundary closure
 the allocation-free Newton/Thomas solver for the P1 field, and the non-local
 (upper-triangular) Jacobian that Beer–Lambert induces. Every governing form,
 discrete update, constant, sign, factor, guard, and limiter below has been verified
-against the implementation; where a docstring, textbook form, or knowledge-base
-note diverges from the code, **the code is authoritative** and the divergence is
+against the implementation; where a docstring or textbook form diverges from
+the code, **the code is authoritative** and the divergence is
 called out explicitly.
 
 Throughout, the spatial coordinate is $z$ (axial, through-thickness), with $z=0$
@@ -6083,7 +5714,7 @@ the bottom/substrate (boundary id 2, `:bottom`) and $z=L$ the exposed/top surfac
 $(F_R-F_L)A/V$ is positive when the quantity flows *out* of a cell. The cell index
 is $i$ ($1\le i\le n$), the component index is $j$ ($1\le j\le N_C$). The
 Stefan–Boltzmann constant is $\sigma = 5.670374419\times10^{-8}\ \mathrm{W\,m^{-2}\,K^{-4}}$
-(`STEFAN_BOLTZMANN`, src/Materials/constants.jl:9).
+(`STEFAN_BOLTZMANN`, src/Materials/constants.jl).
 
 ---
 
@@ -6093,7 +5724,7 @@ Stefan–Boltzmann constant is $\sigma = 5.670374419\times10^{-8}\ \mathrm{W\,m^
 
 Volumetric radiation in Pyrolysis.jl is selected at `solve` time by a single
 enumeration value passed as `radiation_model`. The enum is defined in
-src/Materials/radiation_types.jl:82–87:
+src/Materials/radiation_types.jl:
 
 ```julia
 @enum RadiationModel begin
@@ -6138,21 +5769,22 @@ deposited and how the material's own re-emission is treated:
    internal re-radiation matters ($T\gtrsim 800$ K, optically thick char). P1 lives
    in the `Experimental` module and runs through a *separate residual* that
    re-solves the quasi-steady $G$ field into its radiation cache at every
-   evaluation — $G$ is not part of the ODE state (§8.12).
+   evaluation — $G$ is not part of the ODE state. `solve` rejects this model;
+   the P1 kernels are called directly (§8.12).
 
 ### 8.1.2 Model traits
 
-Three trait queries (src/Materials/radiation_types.jl:109–149) let the assembly and
-solver configuration branch at compile time without inspecting the model in hot
-loops:
+The enum carries one trait query: `requires_radiation_cache(model)`
+(src/Materials/radiation_types.jl) is true for `P1_QUASI_STEADY` only, where a
+`RadiationCache` for $G$, $D_{\mathrm{rad}}$, and Newton work arrays is allocated.
+The other model-dependent decisions are made where they arise. The Jacobian
+sparsity builder widens the pattern to the upper-triangular Beer–Lambert block when
+the simulation mode's radiation axis is `BeerLambert` (§8.10, §15.11), and `solve`
+checks the material against the model (`_validate_radiation_model`,
+src/Solver/solve.jl): it warns when `SURFACE_ABSORPTION` meets non-zero
+$\alpha_j$ (ignored) and when `BEER_LAMBERT` meets none (no absorption).
 
-| Trait | True for | Meaning |
-|---|---|---|
-| `requires_absorption_coefficients(model)` | `BEER_LAMBERT`, `P1_QUASI_STEADY` | the model needs the per-component mass absorption $\alpha_j$ to form $\alpha_{\text{eff}}$ |
-| `has_nonlocal_jacobian_coupling(model)` | `BEER_LAMBERT` only | the Jacobian is no longer tridiagonal (upper-triangular fill) |
-| `requires_radiation_cache(model)` | `P1_QUASI_STEADY` only | a `RadiationCache` for $G$, $D_{\mathrm{rad}}$, and Newton work arrays is allocated |
-
-The performance/structure summary (radiation_types.jl:74–80):
+The performance/structure summary (radiation_types.jl):
 
 | Model | Loop cost | Jacobian pattern | Extra memory |
 |---|---|---|---|
@@ -6163,7 +5795,7 @@ The performance/structure summary (radiation_types.jl:74–80):
 
 > **Implementation note.** The dispatch `compute_radiation_source!`
 > (`q_rad, state, mesh, cache, I_surface, model, apply_kirchhoff_absorptivity`,
-> src/Physics/radiation.jl:118–141)
+> src/Physics/radiation.jl)
 > *zeros* `q_rad` for `NO_RADIATION`, `P1_QUASI_STEADY`, **and**
 > `SURFACE_ABSORPTION`, and only calls `compute_beer_lambert_source!` for
 > `BEER_LAMBERT`. P1 is added on a separate residual path (§8.12). The boundary
@@ -6252,7 +5884,7 @@ $$
 
 where $\xi_j$ [kg·m⁻³] is the mass concentration and $\alpha_j$ [m²·kg⁻¹] is the
 per-component mass absorption coefficient (`effective_absorption`,
-src/Properties/effective_properties.jl:661–672). The product $\xi_j\alpha_j$ has
+src/Properties/effective_properties.jl). The product $\xi_j\alpha_j$ has
 units m⁻¹, so $\alpha_{\text{eff}}$ is a *volumetric* coefficient; it is stored in
 the property cache as `cache.α[i]` (see §5, Effective Properties & Mixing Rules).
 The optical thickness of the whole layer is
@@ -6304,9 +5936,7 @@ I_{\text{in}}(i) = \alpha_{\text{surf}}\,I_{\text{surface}}\prod_{j=i+1}^{N} e^{
 $$
 
 The transmitted (un-absorbed) fraction leaving the bottom is
-$\alpha_{\text{surf}}\,I_{\text{surface}}\,e^{-\tau}$; the diagnostic
-`transmitted_radiation` (radiation.jl) reports the attenuation factor for the
-intensity it is given.
+$\alpha_{\text{surf}}\,I_{\text{surface}}\,e^{-\tau}$; it leaves through the back face (§8.3.3).
 
 ### 8.3.3 Backward sweep and guards
 
@@ -6340,7 +5970,7 @@ end
 ```
 (`compute_beer_lambert_source!`, src/Physics/radiation.jl.)
 
-Three details are load-bearing:
+Four details are load-bearing:
 
 - **Cell thickness is geometric.** $\Delta z_i = V_i / A$ from `state.volume[i]`
   and the live cross-section `state.A_section[]`, so the source remains exact under
@@ -6360,7 +5990,7 @@ Three details are load-bearing:
   with a transparent absorption coefficient, so the extractor reports the
   transmitted flux per saved time (`solution.extras.radiation_transmitted`)
   and a solve that loses more than 1 % of the entering flux at any saved time
-  warns once.
+  warns once (`_warn_transmitted_radiation`, src/Solver/solve.jl).
 
 The source is **positive = heating**: it is added to the energy RHS as
 $+q^{\text{rad}}_i/\rho c_p^{\text{eff}}$ (§8.8). Energy conservation holds in the
@@ -6394,8 +6024,11 @@ boundary) or a `HeatFluxBC` for back-side radiant heating.
 
 The solver feeds this flux to the ODE by re-sampling it at **every** RHS
 evaluation — `ws.I_radiation = radiation_flux(t)` — whenever the active model
-consumes it (`SURFACE_ABSORPTION` or `BEER_LAMBERT`; src/Solver/solve.jl).
-There is no constant-flux detection: one user-function call per RHS is
+consumes it (`SURFACE_ABSORPTION` or `BEER_LAMBERT`; src/Solver/solve.jl). The
+Jacobian closure refreshes `ws.I_radiation` the same way at its own evaluation
+time, and the radiation operator reads it from there, so the Beer–Lambert
+Jacobian sees the flux at the time it is evaluated. There is no constant-flux
+detection: one user-function call per RHS is
 negligible against the residual cost, and unconditional re-sampling guarantees
 that a ramped or modulated cone flux can never be frozen at its $t=0$ value.
 
@@ -6481,15 +6114,13 @@ RadiationP1.jl). This algebraic identity is equivalent to $-\nabla\!\cdot\!
 \mathbf{q}_{\mathrm{rad}}$ *only when the discrete $G$ field exactly satisfies the
 P1 equation*; the Newton solve below drives it there.
 
-> **Two divergence forms — only one is on the active path.** An alternative
-> `apply_radiation_divergence!` (radiation_fluxes.jl) instead forms the
-> *flux* divergence $S=(q_{\mathrm{rad}}[R]-q_{\mathrm{rad}}[L])A/V$ from the
-> diffusive face fluxes $q_{\mathrm{rad}}=-D_{\mathrm{rad}}\nabla G$ and adds
-> $\mathrm{d}T_i/\mathrm{d}t \mathrel{+}= -S/\rho c_p$. The minus sign there is
-> correct because $\nabla\!\cdot\!(D\nabla G) = -\nabla\!\cdot\!\mathbf{q}_{\mathrm{rad}}$.
-> The production P1 residual (`compute_p1_residual!`, RadiationP1.jl) calls
-> the *algebraic* `compute_radiation_flux_divergence!`, not this
-> flux-divergence variant; the two agree at the converged $G$.
+> **Algebraic, not flux, divergence.** The flux form
+> $S=(q_{\mathrm{rad}}[R]-q_{\mathrm{rad}}[L])A/V$ built from the diffusive face fluxes
+> $q_{\mathrm{rad}}=-D_{\mathrm{rad}}\nabla G$ would add
+> $\mathrm{d}T_i/\mathrm{d}t \mathrel{+}= -S/\rho c_p$ (the minus sign because
+> $\nabla\!\cdot\!(D\nabla G) = -\nabla\!\cdot\!\mathbf{q}_{\mathrm{rad}}$). The P1
+> residual (`compute_p1_residual!`, RadiationP1.jl) uses the *algebraic*
+> `compute_radiation_flux_divergence!` instead; the two agree at the converged $G$.
 
 ### 8.4.3 The quasi-steady assumption
 
@@ -6512,7 +6143,7 @@ $G$ alone at fixed $T$.
 ## 8.5 P1 Volumetric Source Terms
 
 The two pieces of the right-hand side of the P1 equation are computed by
-`compute_radiation_source_terms!` (src/Experimental/radiation_p1.jl:98–130):
+`compute_radiation_source_terms!` (src/Experimental/radiation_p1.jl):
 
 **Emission** [W·m⁻³]:
 
@@ -6528,12 +6159,12 @@ $$
 
 The net source used in the energy equation is $S_{\mathrm{rad}} = Q_{\mathrm{abs}} -
 Q_{\mathrm{em}} = \alpha(G - 4\sigma T^4)$ (§8.4.2), consistent with
-`net_radiation_source` (src/Properties/radiation_cache.jl:255–257).
+`net_radiation_source` (src/Properties/radiation_cache.jl).
 
 > **No emissivity factor in the volumetric emission — the code is authoritative.**
 > Several references (and even the docstrings of `compute_radiation_source_terms!`
 > and the `RadiationCache.Q_emission` field) write emission as $4\sigma
-> \varepsilon\alpha T^4$. The executed code (radiation_p1.jl:122) uses **blackbody**
+> \varepsilon\alpha T^4$. The executed code (radiation_p1.jl) uses **blackbody**
 > emission $4\sigma\alpha T^4$ with **no** $\varepsilon$ factor. The physical
 > justification is that in the P1 approximation the interior is a gray body in local
 > thermodynamic equilibrium ($\varepsilon=1$ locally): a control volume that absorbs
@@ -6544,7 +6175,7 @@ Q_{\mathrm{em}} = \alpha(G - 4\sigma T^4)$ (§8.4.2), consistent with
 > $\varepsilon$ in the interior emission would break the equilibrium identity.
 
 The $\alpha$ used here is read from `rad_cache.α` when populated (and positive),
-otherwise from `prop_cache.α` (radiation_p1.jl:112–114); both hold the same
+otherwise from `prop_cache.α` (radiation_p1.jl); both hold the same
 volumetric $\alpha_{\text{eff}}=\sum_j\xi_j\alpha_j$. Caching $\alpha$ on the
 radiation cache avoids recomputing it in the source, diffusion-coefficient, and
 Jacobian kernels.
@@ -6555,10 +6186,10 @@ Jacobian kernels.
 
 P1 boundary conditions act on the radiation field $G$, not on $T$, and are stored
 in a type-stable `RadiationBCSet{B1,B2}` with `top` and `bottom` slots
-(src/Experimental/radiation_boundary.jl:259–277), accessed by
+(src/Experimental/radiation_boundary.jl), accessed by
 `get_radiation_bc(set, Val(1))` (top) / `Val(2)` (bottom). The **default** set is
 a Marshak condition at the top and a reflective condition at the bottom
-(`default_radiation_bcs`, radiation_boundary.jl:232–245).
+(`default_radiation_bcs`, radiation_boundary.jl).
 
 ### 8.6.1 Marshak condition (exposed surface)
 
@@ -6637,34 +6268,34 @@ the surface-Newton $T_s$ is not available inside the radiation solve.
 > $\varepsilon=0.5$ the correct coefficient is $0.5/(2\cdot1.5)=1/6$ vs. $0.25$).
 
 The flux is applied at the boundary face with the sign-orientation convention of
-the divergence operator (radiation_p1.jl:372–400): at a **right** boundary
+the divergence operator (radiation_p1.jl): at a **right** boundary
 (`right_id==0`, the top) the stored face flux is $-q_{\text{BC}}$; at a **left**
 boundary (the bottom) it is $+q_{\text{BC}}$. Because the `RadiationCache.q_rad`
 array is `Float64`, the Marshak flux is stored via `ForwardDiff.value` to strip any
-dual part during the Float64-only P1 solve (radiation_p1.jl:368–369, 391–392).
+dual part during the Float64-only P1 solve (radiation_p1.jl).
 
 The Marshak BC is constructed as `MarshakRadiationBC(; I_external, T_ambient=300.0,
-emissivity=0.9)` (radiation_boundary.jl:79–116) with validation that
+emissivity=0.9)` (radiation_boundary.jl) with validation that
 $I_{\text{external}}\ge 0$, $T_{\text{ambient}}>0$, and $\varepsilon\in[0,1]$. Any of
 the three fields may be a constant or a callable of $t$ (or $T$ for emissivity).
 
 ### 8.6.2 Reflective condition (insulated / symmetry surface)
 
-`ReflectiveRadiationBC` (radiation_boundary.jl:153) imposes a zero normal gradient,
+`ReflectiveRadiationBC` (radiation_boundary.jl) imposes a zero normal gradient,
 
 $$
 \frac{\partial G}{\partial n} = 0,
 $$
 
 realized by setting the boundary face flux to zero (`_apply_reflective_bc!`,
-radiation_p1.jl:402–408). It is the natural choice for an insulated back face, a
+radiation_p1.jl). It is the natural choice for an insulated back face, a
 symmetry plane, or a reflective substrate. It is the default bottom BC.
 
 ### 8.6.3 Dirichlet condition (prescribed $G$)
 
-`DirichletRadiationBC(; G)` (radiation_boundary.jl:201–206) prescribes the
+`DirichletRadiationBC(; G)` (radiation_boundary.jl) prescribes the
 boundary intensity directly. The current implementation is a placeholder: the
-boundary face flux is set to zero (`_apply_dirichlet_bc!`, radiation_p1.jl:410–417;
+boundary face flux is set to zero (`_apply_dirichlet_bc!`, radiation_p1.jl;
 `radiation_bc_flux` returns `zero(t)`), so $G$ is effectively pinned only through
 the interior gradient. It is used mainly for validation against analytic solutions
 and is rarely used in practice; Marshak is preferred because it couples the
@@ -6677,7 +6308,7 @@ external source to surface emission physically.
 ### 8.7.1 Face diffusion coefficient (harmonic mean)
 
 Interior face values of $D_{\mathrm{rad}}$ use a **distance-weighted harmonic
-mean** (`update_radiation_properties!`, radiation_p1.jl:178–202):
+mean** (`update_radiation_properties!`, radiation_p1.jl):
 
 $$
 D_{\mathrm{rad,face}} = \frac{d_L + d_R}{\dfrac{d_L}{D_{\mathrm{rad},L}} + \dfrac{d_R}{D_{\mathrm{rad},R}}},
@@ -6692,7 +6323,7 @@ used.
 ### 8.7.2 Interior diffusive flux
 
 The radiative flux at an interior face is the discrete diffusive flux
-(radiation_p1.jl:245–257):
+(radiation_p1.jl):
 
 $$
 q_{\mathrm{rad}}[f] = -D_{\mathrm{rad,face}}\,\frac{G_R - G_L}{\Delta x},
@@ -6701,14 +6332,14 @@ $$
 
 with the standard sign convention (positive flux toward $+z$). Boundary faces are
 overwritten by the BC handlers of §8.6 in `_apply_all_radiation_bcs!`
-(radiation_p1.jl:265–296).
+(radiation_p1.jl).
 
 ### 8.7.3 The quasi-steady residual
 
-`solve_quasi_steady_radiation!` (src/Experimental/radiation_fluxes.jl:208–414)
+`solve_quasi_steady_radiation!` (src/Experimental/radiation_fluxes.jl)
 solves the discrete P1 equation for $G$ by Newton–Raphson. The per-cell residual
 combines the algebraic source terms with the discrete flux divergence
-(radiation_fluxes.jl:266–281):
+(radiation_fluxes.jl):
 
 $$
 R_i = Q_{\mathrm{abs}}[i] - Q_{\mathrm{em}}[i] + S_{\mathrm{rad,div}}[i],
@@ -6724,7 +6355,7 @@ This is the discrete form of $R = \alpha G - 4\sigma\alpha T^4 -
 ### 8.7.4 The tridiagonal Jacobian
 
 Differentiating $R_i$ with respect to the unknowns $G$ gives a tridiagonal Jacobian
-(radiation_fluxes.jl:290–378). With
+(radiation_fluxes.jl). With
 $\mathrm{coeff}_L = \tfrac{A}{V_i}\tfrac{D_{\mathrm{rad},L}}{\Delta x_L}$ and
 $\mathrm{coeff}_R = \tfrac{A}{V_i}\tfrac{D_{\mathrm{rad},R}}{\Delta x_R}$ for
 interior faces,
@@ -6764,7 +6395,7 @@ thermal state is held fixed during the quasi-steady P1 solve.
 ### 8.7.5 Allocation-free Thomas (TDMA) solve
 
 The tridiagonal system $J\,\Delta G = -R$ is solved by the Thomas algorithm
-(`thomas_solve!`, radiation_fluxes.jl:48–74) using pre-allocated diagonals
+(`thomas_solve!`, radiation_fluxes.jl) using pre-allocated diagonals
 (`newton_dl`, `newton_d`, `newton_du`), a residual buffer `newton_R`, an update
 buffer `newton_ΔG`, and a work array `newton_d_work` that preserves the original
 diagonal across iterations (all on the `RadiationCache`). The solve is therefore
@@ -6773,7 +6404,7 @@ the diagonally dominant P1 system.
 
 ### 8.7.6 The Newton loop, scaling, and clipping
 
-Per iteration (radiation_fluxes.jl:248–406):
+Per iteration (radiation_fluxes.jl):
 
 1. recompute the radiation fluxes from the current $G$ (`compute_radiation_fluxes!`);
 2. recompute $Q_{\mathrm{em}}$, $Q_{\mathrm{abs}}$ (`compute_radiation_source_terms!`);
@@ -6785,7 +6416,7 @@ Per iteration (radiation_fluxes.jl:248–406):
 8. test convergence on the update.
 
 **Defaults (the code is authoritative):** `tol = 1e-6`, `maxiter = 20`,
-`damping = 1.0`, `initialize = true` (radiation_fluxes.jl:208–218). (A docstring
+`damping = 1.0`, `initialize = true` (radiation_fluxes.jl). (A docstring
 elsewhere says `tol=1e-10`; the executed signature uses `1e-6`.)
 
 **Relative convergence.** $G$ is large ($10^4$–$10^6\ \mathrm{W\,m^{-2}}$), so an
@@ -6808,8 +6439,8 @@ update, since the incident radiation cannot be negative.
 ### 8.7.7 Initialization
 
 When $G$ is all-zero on entry (cold start) the field is initialized from local
-thermodynamic equilibrium (`initialize_g_from_temperature!`,
-radiation_fluxes.jl:435–448):
+thermodynamic equilibrium (`initialize_g_from_temperature!(rad_cache, mesh)`,
+radiation_fluxes.jl):
 
 $$
 G_i = 4\sigma T_i^4 ,
@@ -6818,18 +6449,18 @@ $$
 which makes $S_{\mathrm{rad}}=\alpha(G-4\sigma T^4)$ vanish initially — a good first
 guess that avoids cold-start oscillation. (This same blackbody equilibrium is
 exposed by `initialize_radiation_intensity!`,
-src/Properties/radiation_cache.jl:191–224.)
+src/Properties/radiation_cache.jl.)
 
 ---
 
 ## 8.8 Energy-Equation Coupling for Each Model
 
-The condensed-phase energy equation (Formulation A, §3 Governing Equations and §7)
+The condensed-phase energy equation (§3 Governing Equations and §7)
 carries a volumetric radiation source $Q_{\text{rad}}$ on its right-hand side:
 
 $$
 \rho c_p^{\text{eff}}\,\frac{\partial T}{\partial t}
-= -\nabla\!\cdot\!\mathbf{q}_{\text{cond}} + S_{\text{conv}} + S_{\text{gen}}
+= -\nabla\!\cdot\!\mathbf{q}_{\text{cond}} + S_{\text{conv}}
 + Q_{\text{rad}} + Q_{\text{rxn}} .
 $$
 
@@ -6842,11 +6473,11 @@ follows.
 - **`SURFACE_ABSORPTION`.** $Q_{\text{rad}}=0$ in the dispatched RHS
   (`compute_radiation_source!` zeroes it). The absorbed incident flux enters through
   the surface-temperature Newton solve as the boundary flux $q_{\text{BC}}=I_{\text{ext}}
-  \alpha$ (boundary_temperature.jl:414–423); see §8.2 and §12.
+  \alpha$ (boundary_temperature.jl); see §8.2 and §12.
 
 - **`BEER_LAMBERT`.** $Q_{\text{rad},i}=q^{\text{rad}}_i$ from §8.3, added to the
-  RHS in step 5 of `compute_rhs!` (src/Discretization/finite_volume.jl:339–348) and
-  divided by $\rho c_p^{\text{eff}}$ in the final assembly (finite_volume.jl:384–404):
+  RHS in step 5 of `compute_rhs!` (src/Discretization/finite_volume.jl) and
+  divided by $\rho c_p^{\text{eff}}$ in the final assembly (finite_volume.jl):
 
   $$
   \Big(\frac{\mathrm{d}T_i}{\mathrm{d}t}\Big)_{\text{rad}}
@@ -6854,7 +6485,7 @@ follows.
   $$
 
   The `RadiativeFluxBC` boundary flux is set to **zero** in Beer–Lambert mode
-  (boundary_temperature.jl:426–428) so that the incident energy is not double-counted
+  (boundary_temperature.jl) so that the incident energy is not double-counted
   (it is already deposited volumetrically). The structured-operator wrapper
   `RadiationOperator` (src/Jacobian/operators/radiation.jl) routes the same physics
   through `compute_beer_lambert_source!`, treating `dT` as the `q_rad` buffer before
@@ -6899,7 +6530,7 @@ Three diagnostics quantify whether a chosen model is appropriate.
 (radiation_p1.jl) returns $\tau=\sum_i\alpha_i\Delta z_i=\int_0^L\alpha\,
 \mathrm{d}z$, and `optical_thickness_cell` gives the per-cell
 $\tau_i=\alpha_i\Delta z_i$ (a resolution diagnostic, not a validity
-criterion). The standard validity bands (radiation_types.jl:53–57) are:
+criterion). The standard validity bands (radiation_types.jl) are:
 
 | $\tau=\alpha L$ | regime | recommendation |
 |---|---|---|
@@ -6927,7 +6558,7 @@ physical $+z$ flux at every face, and $\int(Q_{\mathrm{abs}}-Q_{\mathrm{em}})
 \,\mathrm{d}V + \oint \mathbf{q}\cdot\hat{\mathbf{n}}\,\mathrm{d}A = 0$). A
 speed-of-light radiation energy density $E_{\text{rad}}=G/c$
 ($c=2.998\times10^8\ \mathrm{m\,s^{-1}}$) is also available as a diagnostic
-(radiation_cache.jl:241–244).
+(radiation_cache.jl).
 
 ---
 
@@ -6939,7 +6570,7 @@ Beer–Lambert makes $q^{\text{rad}}_i$ depend on the absorption coefficient of 
 cell **above** it, through the cumulative attenuation $I_{\text{in}}(i)=
 I_{\text{surface}}\exp(-\sum_{j>i}\alpha_j\Delta z_j)$. Differentiating with respect
 to a state variable $x_j$ (either $T_j$ or $\xi_{k,j}$) gives a structurally
-**upper-triangular** coupling (src/Jacobian/operators/radiation.jl:22–39):
+**upper-triangular** coupling (src/Jacobian/operators/radiation.jl):
 
 $$
 \frac{\partial q^{\text{rad}}_i}{\partial x_j} =
@@ -6960,9 +6591,8 @@ $$
 $$
 
 so the diagonal coefficient is exactly $\big(I_{\text{in}}-q^{\text{rad}}_i\Delta z_i\big)\partial\alpha_i/\partial x_i$.
-(An alternative form $I_{\text{in}}(1-(1-e^{-\tau})/\tau)$ appears in some notes; it
-is *not* equal to this and is incorrect — the code form above is the verified
-derivative.)
+(The form $I_{\text{in}}(1-(1-e^{-\tau})/\tau)$ is sometimes quoted; it is *not*
+equal to this and is incorrect — the code form above is the verified derivative.)
 
 The **off-diagonal** ($j>i$) term comes from
 $\partial I_{\text{in}}(i)/\partial\alpha_j = -I_{\text{in}}(i)\,\Delta z_j$ for
@@ -6993,33 +6623,39 @@ absorptivity (`radiation_kirchhoff = false`) the scaling is folded into
 $I_{\text{surface}}$ upstream and none of these terms appear. The chain is
 verified entry-by-entry against the dense AD reference (§18.3).
 
-### 8.10.2 Structured factorization (SuffixSumCoupling)
+### 8.10.2 Structured factorization (suffix-sum coupling)
 
 The $j>i$ block factors as $\mathrm{Diag}(-q^{\text{rad}})\cdot U\cdot
 \mathrm{diag}(v)$ where $v_j=\Delta z_j\,\partial\alpha_j/\partial x_j -
 \delta_{j,n}(\partial\varepsilon_{\text{eff}}/\partial x_n)/\varepsilon_{\text{eff}}$
 (the last term on the Kirchhoff path only) and $U$ is
 the strict upper-triangular all-ones matrix — i.e. a **suffix scan**
-$\sum_{k>i}v_k$. This is the `SuffixSumCoupling(v)` primitive
-(`build_suffix_sum_coupling_alpha`, radiation.jl:256–283; for the energy row the
-per-row scale is $-q^{\text{rad}}_i/\rho c_p^{\text{eff}}_i$, embedded as
-`EmbeddedScaledSuffixSumCoupling`, radiation.jl:416–470). It applies in $O(n)$
-without ever materializing the dense $O(n^2)$ fill. The diagonal term — including
+$\sum_{k>i}v_k$. The operator pushes it as an `EmbeddedScaledSuffixSumCoupling`
+per channel ($T$ and each $\xi_j$) with per-row scale
+$-q^{\text{rad}}_i/\rho c_p^{\text{eff}}_i$ (radiation.jl); the coupling stores
+$O(n)$ data and is written into the sparse Jacobian's upper-triangular block by
+`densify!` under the exact `:full` profile (§15.9.2). The diagonal term — including
 the $\rho c_p$ chain rule $-q^{\text{rad}}/(\rho c_p)^2\,\partial\rho c_p/\partial x_i$
 — is captured by a cell-local ForwardDiff over the closure
 $(T,\xi)\mapsto I_{\text{in}}(1-e^{-\alpha\Delta z})/(\Delta z\,\rho c_p^{\text{eff}})$
-with $I_{\text{in}}$ held fixed (radiation.jl:376–407). For the standard linear
+with $I_{\text{in}}$ held fixed (radiation.jl). For the standard linear
 mixing $\alpha=\sum_j\xi_j\alpha_j$ the derivatives reduce to $\partial\alpha/\partial
 T=0$ and $\partial\alpha/\partial\xi_j=\alpha_j$, so the suffix coupling is cheap;
 the AD path keeps it generic for future $T$-dependent absorption laws. (See §15,
-Temporal Integration & the Structured Jacobian, for how `SuffixSumCoupling` is
-applied and solved.)
+Temporal Integration & the Structured Jacobian, for how the embedded couplings are
+assembled.)
 
-> **Solver impact.** `has_nonlocal_jacobian_coupling(BEER_LAMBERT) == true`, so the
-> sparsity pattern is upper-triangular rather than tridiagonal. The other three
-> models keep the tridiagonal pattern. Under the `:ale_reduced` assembly profile the
-> embedded suffix couplings are dropped (radiation.jl:410–416), trading a small
-> Jacobian inexactness for speed.
+**ALE geometry columns.** Under ALE the deposit also depends on the live geometry
+($\Delta z_i = V_i/A$) through the per-cell factor $(1-e^{-\alpha_i\Delta z_i})/\Delta z_i$
+and the transmission suffix $\exp(-\sum_{j>i}\alpha_j\Delta z_j)$. The radiation operator
+fills the $T$ and $\xi$ columns only; the $z$ columns are written by the
+`GeometryOperator`'s AD pass over the full residual under the exact `:full` profile
+(§15.11.3).
+
+> **Solver impact.** Under `BEER_LAMBERT` the sparsity pattern is upper-triangular rather
+> than tridiagonal; the other three models keep the tridiagonal pattern. Under the
+> `:ale_reduced` assembly profile (`ApproxSolve`) the suffix couplings and every $z$ column
+> are dropped, trading Jacobian inexactness for speed (§15.10).
 
 ---
 
@@ -7100,7 +6736,9 @@ incident field ($G$, P1).
 
 P1 is **Experimental**: it is research-grade and out of scope for the unified
 trait-dispatched residual that drives `SURFACE_ABSORPTION`/`BEER_LAMBERT` runs
-(`RadiationP1.jl` header). Three structural consequences follow.
+(`RadiationP1.jl` header). `solve` rejects `radiation_model = P1_QUASI_STEADY`;
+the P1 kernels and the residual wrapper below are called directly. Three structural
+consequences follow.
 
 **No dedicated state layout.** $G$ is an algebraic (quasi-steady) field, not a
 state variable: it lives in the `RadiationCache` and is re-solved from the
@@ -7117,8 +6755,8 @@ copy.
 **A thin dedicated residual.** `compute_p1_residual!`
 (src/Experimental/RadiationP1.jl) delegates to the unified `residual!` —
 conduction, reactions, transport, ALE, χ all come from the production code
-path — and then (1) mirrors `u` into the legacy `Mesh1D` for the
-Float64-only P1 kernels, (2) updates $\alpha$/$D_{\mathrm{rad}}$ and solves
+path — and then (1) mirrors `u` into the `Mesh1D`, which the
+Float64-only P1 kernels read, (2) updates $\alpha$/$D_{\mathrm{rad}}$ and solves
 the quasi-steady $G$ system, and (3) adds
 $S_{\mathrm{rad}}/\rho c_p = \alpha(G-4\sigma T^4)/\rho c_p$ to the energy
 rows. The `P1Residual` constructor **requires**
@@ -7309,8 +6947,8 @@ transfer coefficients (§9.1.4). This is exactly
 end
 ```
 
-*Implementation note.* Implemented in `gas_flux`, `src/Physics/gas_transport.jl`
-(lines 36–47), and assembled face-by-face by `compute_gas_fluxes!` (with the
+*Implementation note.* Implemented in `gas_flux`, `src/Physics/gas_transport.jl`,
+and assembled face-by-face by `compute_gas_fluxes!` (with the
 compile-time-unrolled inner helper `compute_gas_fluxes_unrolled!`).
 
 ### 9.1.3 The exact product-rule identity
@@ -7345,7 +6983,7 @@ J_j = -\lambda_{\text{face}}\!\left(\frac{\xi_R-\xi_L}{d_{LR}}
 $$
 
 This equivalence is verified to machine precision (`atol = 1e-14`) in
-`test/discretization/test_gas_flux.jl` (lines 99–113).
+`test/discretization/test_gas_flux.jl`.
 
 ### 9.1.4 Why the harmonic mean is applied to $\lambda$, not $\lambda\rho$
 
@@ -7362,7 +7000,7 @@ $$
 where $d_L,d_R$ are the distances from the two cell centers to the face. On a
 uniform mesh ($d_L=d_R$) this reduces to the standard harmonic mean
 $2\lambda_L\lambda_R/(\lambda_L+\lambda_R)$. The distance weighting makes the
-scheme correct on stretched meshes (e.g. surface-refined grids); see §13.6 for
+scheme correct on stretched meshes (e.g. surface-refined grids); see §13.7.1 for
 the general resistance-in-series argument and §7.1 for the identical treatment of
 thermal conductivity. A small-value guard returns $0$ if either $\lambda_L$ or
 $\lambda_R$ is below $10^{-20}$.
@@ -7379,7 +7017,7 @@ exercised in `test/discretization/test_gas_flux.jl`.
 
 *Implementation note.* `λ_face` is precomputed once per step in the
 `PropertyCache` via `harmonic_mean_weighted`,
-`src/Properties/effective_properties.jl` (lines 1154–1159); per-cell $\lambda_i$
+`src/Properties/effective_properties.jl`; per-cell $\lambda_i$
 comes from `effective_gas_transfer` (§9.2 and §5).
 
 ### 9.1.5 Partial-pressure equivalence
@@ -7395,7 +7033,7 @@ $$
 To see the equivalence, note $\xi_j T = P_j M_j / R_g$, so
 $\xi_R T_R - \xi_L T_L = (M_j/R_g)(P_{j,R}-P_{j,L})$, and substituting into the
 discrete kernel gives the boxed pressure form directly. This is verified to
-`atol = 1e-12` in `test/discretization/test_gas_flux.jl` (lines 119–142). The
+`atol = 1e-12` in `test/discretization/test_gas_flux.jl`. The
 partial-pressure reading reinforces the physical picture: gas diffuses down its
 own partial-pressure gradient, with mobility $\lambda M_j/(R_g T)$.
 
@@ -7473,7 +7111,8 @@ This first-order upwind rule is unconditionally stable and conservative (the sam
 face value enters the two cells sharing the face with opposite divergence signs).
 It is total-variation-diminishing but only first-order accurate; no TVD/MUSCL
 slope limiting is applied to the Eulerian Darcy–Fick advective term. (Higher-order
-limited advection *is* available in the ALE relative-velocity flux; see §11.6–11.7,
+limited advection exists only for the mesh-relative temperature advection of the
+`w_override` verification hook; see §11.6,
 *The ALE Framework*, and §13.4–13.5 for the limiter library.) A practical
 consequence: when upwinding selects a cell with zero concentration adjacent to a
 cell with positive concentration, the advective contribution can momentarily
@@ -7492,7 +7131,7 @@ diffusion-only flux of §9.1 — the two assembly paths agree, which is checked 
 the gas-flux test suite.
 
 *Implementation note.* `gas_flux_darcy_fick`,
-`src/Physics/gas_transport.jl` (lines 74–92); assembled by
+`src/Physics/gas_transport.jl`; assembled by
 `compute_gas_fluxes_darcy_fick!`.
 
 ---
@@ -7537,9 +7176,9 @@ $\varphi = \mathrm{clamp}\!\big(1-\sum_{j\in\text{S/L}}\xi_j/\rho_{i,j},\,0,\,1\
 (§9.5.2), so the pressure and the permeability share a single consistent void
 fraction.
 
-*Implementation note.* `ideal_gas_pressure`,
-`src/Physics/pressure.jl` (lines 60–68); field assembly via `compute_pressure!`
-(lines 77–89). Constant $R_g = 8.314462618$ J·mol⁻¹·K⁻¹.
+*Implementation note.* `ideal_gas_pressure`, `src/Physics/pressure.jl`; the cell
+field is assembled in `update_darcy_properties!` (`src/Discretization/finite_volume.jl`).
+Constant $R_g = 8.314462618$ J·mol⁻¹·K⁻¹.
 
 ---
 
@@ -7559,8 +7198,8 @@ physical pressure boundary conditions are applied separately to the Darcy veloci
 (§9.5.3, §12.5). The sign convention is the usual one: $(\nabla P)_f>0$ when
 pressure increases toward $+z$.
 
-*Implementation note.* `compute_pressure_gradient!`,
-`src/Physics/pressure.jl` (lines 112–125).
+*Implementation note.* The face gradient is formed in `update_darcy_properties!`
+(`src/Discretization/finite_volume.jl`), together with the Darcy velocity.
 
 ### 9.5.2 Darcy velocity
 
@@ -7599,7 +7238,8 @@ two cells consistently with their physical roles:
   smoothly varying gas property, so it is evaluated per cell at the cell
   temperature, $\mu_i=\mu_g(T_i)$, and enters the face through the per-cell
   mobilities $\kappa_i/\mu_i$ that the distance-weighted harmonic mean
-  combines, using Sutherland's law (§5.9):
+  combines. $\mu_g$ is the material's `gas_viscosity` (§5.9); the default is
+  Sutherland's law for air,
 
   $$
   \mu_g(T) = \mu_{\text{ref}}\left(\frac{T}{T_{\text{ref}}^{\mu}}\right)^{3/2}
@@ -7617,12 +7257,9 @@ two cells consistently with their physical roles:
   mobility, which zeroes the mobility of both adjacent faces (a fully solid or
   numerically degenerate cell carries no Darcy flow).
 
-*Implementation note.* The production face mobility and velocity are
-assembled in `update_darcy_properties!`
-(`src/Discretization/finite_volume.jl`); `effective_gas_viscosity`,
-`src/Properties/effective_properties.jl`. The `darcy_velocity_face` /
-`harmonic_mean_permeability` family in `darcy_velocity.jl` is a test-only
-alternative path — it never runs in production.
+*Implementation note.* The face mobility and velocity are assembled in
+`update_darcy_properties!` (`src/Discretization/finite_volume.jl`); the viscosity is
+`effective_gas_viscosity(T, material)`, `src/Properties/effective_properties.jl`.
 
 The effective permeability $\kappa$ entering the cell-center field is either a
 component mixing rule (PARALLEL/SERIES/WEIGHTED on the renormalized solid
@@ -7706,7 +7343,7 @@ gauge pressure). Two ingredients make the initial state physical:
 1. **A real pore space.** The condensed components must declare an intrinsic
    (skeletal) density via `ρ_intrinsic` (or the `φ` porosity kwarg) on
    `SolidComponent`/`LiquidComponent`. Without it, `get_intrinsic_density`
-   falls back to the bulk density — the legacy "no-pores" model — and a cell
+   falls back to the bulk density — a phase with no pores of its own — and a cell
    at full bulk density has $\varphi = 0$: there is no pore volume to hold
    air, and any generated gas hits the $\varphi$ floor ($10^{-12}$) in
    $P = N/\varphi$, producing absurd pressures.
@@ -7800,11 +7437,6 @@ $(T,\xi)$ — through $P$, $\varphi$, $\kappa(T,\xi)$, and $\mu(T)$ — from the
 forward-mode pass of §9.6, with an analytical override gated against the AD path
 at `rtol = 1e-12`.
 
-(`compute_darcy_mobility!`, `velocity_from_mobility!`,
-`DarcyVelocityJacobianCoeffs`, and `compute_darcy_velocity_jacobian!` in
-src/Discretization/darcy_velocity.jl are exported scalar utilities for
-standalone analysis; none of them runs in the production residual or Jacobian.)
-
 ---
 
 ## 9.8 Surface diffusive mass flux
@@ -7861,10 +7493,9 @@ acts through the Darcy velocity, §9.5.3).
 
 ### 9.8.2 Two sign conventions, reconciled
 
-The surface-flux helpers `_compute_surface_flux` (in `Physics/gas_transport.jl`)
-return **positive flux for gas escaping** — the natural sense for ALE surface
-regression (positive efflux $\Rightarrow$ the surface recedes). This is the
-*opposite* of the general BC convention used by `mass_bc_flux`
+The diagnostic `compute_surface_mass_flux` (`Discretization/boundary_fluxes.jl`)
+returns **positive flux for gas escaping** — the natural sense for a surface efflux.
+This is the *opposite* of the general BC convention used by `mass_bc_flux`
 (`Discretization/boundary_fluxes.jl`), which returns **negative for gas escaping**
 because its convention is "positive = into the domain."
 
@@ -7885,15 +7516,14 @@ balance. The full sign-convention summary is:
 | Quantity | Convention |
 |---|---|
 | Interior face flux $J_j[f]$ | $+$ = transport in $+z$ |
-| `_compute_surface_flux` (ALE) | $+$ = gas escaping |
+| `compute_surface_mass_flux` | $+$ = gas escaping |
 | `mass_bc_flux` (BC) | $-$ = gas escaping |
 | Stored top-face flux | $J[f]=-J_{\text{bc}}$ |
 | Stored bottom-face flux | $J[f]=+J_{\text{bc}}$ |
 
-*Implementation note.* `_compute_surface_flux` dispatch,
-`src/Physics/gas_transport.jl` (lines 369–401, with the sign-convention block at
-lines 350–363); `mass_bc_flux(::DiffusiveMassBC, …)`,
-`src/Discretization/boundary_fluxes.jl` (lines 248–264); face application in
+*Implementation note.* `mass_bc_flux(bc, ξ_surface, λρ, ρ, d, t, j)` (with the
+sign-convention block on the `DiffusiveMassBC` method) and
+`compute_surface_mass_flux`, `src/Discretization/boundary_fluxes.jl`; face application in
 `apply_mass_bc_flux!`, `src/Discretization/finite_volume.jl`. See §12.4 for the
 full mass-BC catalogue (Impermeable, MassFlux, Convective, Diffusive, Combined).
 
@@ -7960,54 +7590,35 @@ only the dilation of §11.3.4 and no advective correction.
 
 ### 9.9.2 Coupling to the energy equation
 
-Gas transport feeds back on temperature through two volumetric sources in the
-Formulation-A energy equation (derived in detail in §7.4–7.5):
+Gas transport feeds back on temperature through one volumetric source of the energy
+equation, the advective source (the advection piece of the gas-enthalpy divergence,
+derived in detail in §7.4):
 
-- **Always-present advective source** (the advection piece of the gas-enthalpy
-  divergence):
+$$
+S_{\text{conv},i} = -\sum_{j:\,\text{gas}} c_{p,j}(T_i)\,\bar{J}_{j,i}\,
+    \left(\frac{\partial T}{\partial z}\right)_i,
+\qquad \bar{J}_{j,i}=\tfrac12\big(J_j^{L}+J_j^{R}\big),
+$$
 
-  $$
-  S_{\text{conv},i} = -\sum_{j:\,\text{gas}} c_{p,j}(T_i)\,\bar{J}_{j,i}\,
-      \left(\frac{\partial T}{\partial z}\right)_i,
-  \qquad \bar{J}_{j,i}=\tfrac12\big(J_j^{L}+J_j^{R}\big),
-  $$
+with $(\partial T/\partial z)_i$ the opposite-distance-weighted gradient in the
+interior; boundary cells blend the interior one-sided slope with the
+boundary-face slope at the solved $T_s$ (§7.4.2).
 
-  with $(\partial T/\partial z)_i$ the opposite-distance-weighted gradient in the
-  interior; boundary cells blend the interior one-sided slope with the
-  boundary-face slope at the solved $T_s$ (§7.4.2).
-
-- **Optional generation-enthalpy sink** (the divergence-completion piece, added
-  only when `energy_form = :with_generation_sink`):
-
-  $$
-  S_{\text{gen},i} = -\sum_{j:\,\text{gas}} \Delta h_j(T_i,T_{\text{ref}})\,
-      (\nabla\!\cdot J_j)_i,
-  \qquad
-  \Delta h_j(T_i,T_{\text{ref}}) = \int_{T_{\text{ref}}}^{T_i} c_{p,j}(\tau)\,d\tau,
-  $$
-
-  using the *true* sensible-enthalpy integral (midpoint quadrature via
-  `delta_enthalpy`, §4.6) rather than a single-point product, so that the discrete
-  energy ledger telescopes exactly with the surface transpiration BC, which uses
-  the identical quadrature and $T_{\text{ref}}$.
-
-These appear in the assembled temperature RHS
+It appears in the assembled temperature RHS
 $\rho c_p^{\text{eff}}\,dT_i/dt = -(\nabla\!\cdot q)_i + S_{\text{conv},i}
-+ S_{\text{gen},i} + Q_{\text{rad},i} + Q_{\text{rxn},i}$, whose storage
-coefficient sums every component including the gas (§5.4, §7.3); the gas
-*flux* enters only through $S_{\text{conv}}$. Crucially, $S_{\text{conv}}$ and the surface
-transpiration BC are **mutually exclusive** — enabling both double-counts the
-advected enthalpy by exactly $\int S_{\text{conv}}\,dz$, so the transpiration BC is
-off by default and rejected at problem construction if combined (see §7.6, §12.3).
++ Q_{\text{rad},i} + Q_{\text{rxn},i}$, whose storage coefficient sums every
+component including the gas (§5.4, §7.3); the gas *flux* enters only through
+$S_{\text{conv}}$. The surface energy balance therefore carries no gas-enthalpy
+term: one on top of $S_{\text{conv}}$ would count the advected enthalpy a second
+time (§7.4.3, §12.2).
 
 *Implementation note.* `divergence_species_1d!`,
-`src/Discretization/finite_volume.jl` (lines 81–97);
-`apply_species_residual_unrolled!`, `src/Materials/materials.jl` (lines 890–909);
-`compute_gas_convective_source!` and `compute_gas_generation_sink!`,
-`src/Physics/convection.jl` (lines 67–139, 178–220). The 8-step `compute_rhs!`
-ordering (interior conductive fluxes $\to$ reactions $\to$ gas transport $\to$
-thermal/mass BCs $\to$ radiation $\to$ $S_{\text{conv}}$ $\to$ divergences $\to$
-$S_{\text{gen}}$ $\to$ final RHS) is described in §7.8.
+`src/Discretization/finite_volume.jl`; `apply_species_residual_unrolled!`,
+`src/Materials/materials.jl`; `compute_gas_convective_source!`,
+`src/Physics/convection.jl`. The 8-step `compute_rhs!` ordering (transport
+properties and interior conductive fluxes $\to$ reactions $\to$ gas transport
+$\to$ thermal BCs $\to$ radiation $\to$ $S_{\text{conv}}$ $\to$ divergences
+$\to$ final RHS) is described in §7.6.
 
 ---
 
@@ -8081,20 +7692,19 @@ Beyond these direct partials, the operator composes two additional chains:
   block as $\text{out}[1+j]=-\text{div}_J$ for gas components and $0$ for
   solids/liquids.
 
-The analytic path (`_contribute_to_jacobian_analytical!`) is the default; an
-AD-default path (`_contribute_to_jacobian_ad!`, ForwardDiff over the full
-`apply_cell!` closure) is preserved for validation and is gated against the
-analytic version at `rtol = 1e-12` in
+The operator's `contribute_to_jacobian!` is the analytical override
+(`_contribute_to_jacobian_analytical!`); a ForwardDiff reference over the full
+`apply_cell!` closure (`_contribute_to_jacobian_ad!`) is kept for validation and is
+gated against it at `rtol = 1e-12` in
 `test/jacobian/test_operator_gas_transport_analytical.jl`. Boundary-face
 contributions are zeroed in the operator — the mass BCs and pressure BCs are
 handled by `BCMassOperator`, and the boundary cell's $S_{\rm conv}$ energy row
 by `BCConvectionOperator` (§15.8.8) — keeping
 the stencil pure and avoiding double-counting.
 
-*Implementation note.* `_gt_J_direct_partials`,
-`src/Jacobian/operators/gas_transport.jl` (lines 532–551);
-`_gt_species_div_unrolled!` (lines 299–313) and the analytic operator
-`_contribute_to_jacobian_analytical!` (from line 565). The Darcy-velocity pressure
+*Implementation note.* `_gt_J_direct_partials`, `_gt_species_div_unrolled!`, and
+the analytic operator `_contribute_to_jacobian_analytical!`, all in
+`src/Jacobian/operators/gas_transport.jl`. The Darcy-velocity pressure
 derivatives that close the advective term's Jacobian are in §9.7. See §15.7–15.9
 for how these operator contributions assemble into the structured Jacobian.
 
@@ -8140,8 +7750,8 @@ $\dot m'' = -(K/\nu)(\partial P/\partial z - g\rho_g)$ together with a
 pressure-evolution equation derived from gas continuity and the ideal-gas law.
 Pyrolysis.jl uses the same Darcy constitutive law,
 $v_g=-(\kappa/\mu)\nabla P$ (§9.5.2), with the distance-weighted harmonic mean
-of the per-cell mobilities $\kappa/\mu$ (Sutherland viscosity at the cell
-temperature); the gravity/buoyancy term $g\rho_g$ is omitted (negligible
+of the per-cell mobilities $\kappa/\mu$ (the material's viscosity curve at the
+cell temperature); the gravity/buoyancy term $g\rho_g$ is omitted (negligible
 for thin condensed-phase samples in the through-thickness direction). The pressure
 is closed algebraically by the porous-medium ideal-gas law $P=N/\varphi$ (§9.4)
 rather than time-integrated as a separate state. This is **not** an additional
@@ -8183,11 +7793,12 @@ with no in-depth gas FDS has neither gas storage nor an in-depth $S_{\text{conv}
   Chapman–Enskog Lennard-Jones parameter estimates available for sizing
   $\lambda$ (§5.10) are heuristic and unvalidated for pyrolysis vapors.
 
-- **No Wilke mixing for viscosity.** The Darcy viscosity uses a single Sutherland
-  value for an air-like gas (§9.5.2); a Wilke mixing rule would be required to
-  capture mixtures of very different molecular weights (e.g. H₂O + CO₂ at high
-  temperature; §5 open questions). The Sutherland reference temperature (273.15 K)
-  differs from the enthalpy datum (298.15 K) and must not be conflated.
+- **No Wilke mixing for viscosity.** The Darcy viscosity is one curve per material
+  (Sutherland's law for air by default; §5.9, §9.5.2), independent of the pore-gas
+  composition; a Wilke mixing rule would be required to capture mixtures of very
+  different molecular weights (e.g. H₂O + CO₂ at high temperature; §5.16). The
+  Sutherland reference temperature (273.15 K) differs from the enthalpy datum
+  (298.15 K) and must not be conflated.
 
 - **Zero-exterior-concentration surface assumption.** Surface diffusive fluxes
   assume the environment holds no decomposition products ($\xi_\infty=0$ implicit;
@@ -8214,7 +7825,7 @@ with no in-depth gas FDS has neither gas storage nor an in-depth $S_{\text{conv}
 
 This chapter derives the complete volume-change model of Pyrolysis.jl: how reaction-driven mass exchange between condensed and gaseous phases produces a per-cell volumetric strain rate $\theta$, how that strain is converted into axial mesh motion (the ALE mesh velocity), and how a column-global *lateral* shrinkage / swelling / intumescence law deforms the cross-sectional area $A(t)$ through the pyrolysis-progress state variable $\chi$. We give the continuous balance, the exact discrete update rules as implemented, the dilation correction that keeps every component's cell mass on its reaction-and-flux budget as the mesh moves, and a careful comparison to the deformation treatments in ThermaKin2Ds, Gpyro, and FDS. Every equation here is grounded in the source: `src/Physics/volume_change.jl`, `src/Residual/residual.jl`, `src/Problem/state_cache.jl`, `src/Problem/initial_conditions.jl`, and `src/Materials/materials.jl`.
 
-The axial mesh-motion machinery (cumulative integration of $\theta_L$, the Geometric Conservation Law, the mesh-relative temperature advection, and conservative remapping) is developed in §11, *The ALE Framework*; here we develop only the *constitutive* content — the strain rates and the cross-section law that feed §11 — and the species dilation correction that closes the species balance under mesh motion. The state-vector layout that carries the $\chi$ block is detailed in §13, *Finite-Volume Discretization*, and §15, *Temporal Integration & Structured Jacobian*.
+The axial mesh-motion machinery (cumulative integration of $\theta_L$, the geometric volume from the node positions, and the verification-only mesh-relative temperature advection) is developed in §11, *The ALE Framework*; here we develop only the *constitutive* content — the strain rates and the cross-section law that feed §11 — and the species dilation correction that closes the species balance under mesh motion. The state-vector layout that carries the $\chi$ block is detailed in §13, *Finite-Volume Discretization*, and §15, *Temporal Integration & Structured Jacobian*.
 
 **Index convention for this chapter.** Following the binding resolution in §2 (overload I1), $i$ is the **cell index** ($1\le i\le n$), $j$ is the **component/species index** ($1\le j\le N_C$), and $r$ is the **reaction index**. The symbol $\chi$ is *always* pyrolysis progress (overload A1); the cross-section ratio is $A/A_0=\mathrm{law}(\bar\chi)$ and is never written as $\chi$. The symbol $\theta$ is *always* a volumetric strain rate (overload A2); stoichiometry is $\nu_{r,j}$.
 
@@ -8254,7 +7865,7 @@ $$
 
 with SI units of $\mathrm{s^{-1}}$. The interpretation is transparent: a unit decrease in the mass concentration of solid $j$ ($d\xi_j/dt<0$) frees a pure-phase volume of $1/\rho_j$ per unit mass, contracting the matrix ($\theta<0$); a gas that does not contribute ($\gamma_g=0$) is invisible to $\theta$ regardless of how fast it is produced.
 
-> **Implementation note.** $\theta$ is computed by `volume_change_rate(dξ, T, material)` / the dispatch helpers `_volume_change_rate`, in `src/Physics/volume_change.jl` (the inline $N_C\in\{1,2,3\}$ overloads at lines 15–63 and the `@generated` form for $N_C>3$ at lines 66–90). The exact loop is
+> **Implementation note.** $\theta$ is computed by `volume_change_rate(dξ, T, material)` / the dispatch helpers `_volume_change_rate`, in `src/Physics/volume_change.jl` (inline overloads for $N_C\in\{1,2,3\}$ and a `@generated` form for $N_C>3$). The exact loop is
 > ```julia
 > θ += γⱼ * dξ[j] / ρⱼ        # ρⱼ = comps[j].density(T)
 > ```
@@ -8262,9 +7873,9 @@ with SI units of $\mathrm{s^{-1}}$. The interpretation is transparent: a unit de
 
 ### 10.1.2 What $d\xi_j/dt$ is in (10.2)
 
-A subtle and load-bearing point: the $d\xi_j/dt$ fed into (10.2) is the **reaction source term only**, not the full species RHS (which also includes gas transport and ALE advection). This is correct because $\theta$ measures the rate at which mass is *converted between phases by chemistry* — the only process that changes the additive-volume balance (10.1). Transport of an already-gaseous species through the pores does not change the matrix volume, and the ALE advection / dilation terms are bookkeeping for the moving frame, not new mass exchange. Including them would double-count the volume change that ALE motion is itself representing.
+A subtle and load-bearing point: the $d\xi_j/dt$ fed into (10.2) is the **reaction source term only**, not the full species RHS (which also includes gas transport and the ALE dilation). This is correct because $\theta$ measures the rate at which mass is *converted between phases by chemistry* — the only process that changes the additive-volume balance (10.1). Transport of an already-gaseous species through the pores does not change the matrix volume, and the ALE dilation term is bookkeeping for the moving frame, not new mass exchange. Including them would double-count the volume change that ALE motion is itself representing.
 
-> **Implementation note.** In the ALE residual (`_residual!(..., ::ALE)`, `src/Residual/residual.jl:91–222`) the reaction source matrix `ws.rhs_cache.dξ_rxn` is populated by the physics RHS at step 4 (line 123) and is the array passed as `precomputed_dξ_rxn` to `_compute_ale_mesh_velocity!` (line 156). Inside that function (lines 389–401), `dξ_dt[j] = precomputed_dξ_rxn[j, cell_idx]`, and then `θ_cell = Physics.volume_change_rate(dξ_dt, T_cell, material)`. So $\theta$ is built from `dξ_rxn`, the pure reaction source — exactly the per-cell strain rate of (10.2).
+> **Implementation note.** In the ALE residual (`_residual!(..., ::ALE)`, `src/Residual/residual.jl`) the reaction source matrix `ws.rhs_cache.dξ_rxn` is populated by the physics RHS at step 4 and is passed as the positional argument `dξ_rxn` of `_compute_ale_mesh_velocity!`. Inside that function, `dξ_dt[j] = dξ_rxn[j, cell_idx]`, and then `θ_cell = Physics.volume_change_rate(dξ_dt, T_cell, material)`. So $\theta$ is built from `dξ_rxn`, the pure reaction source — exactly the per-cell strain rate of (10.2).
 
 ### 10.1.3 Absolute cell volume rate
 
@@ -8275,7 +7886,7 @@ $$
 \tag{10.3}
 $$
 
-> **Implementation note.** `compute_cell_volume_rates!(dV, state, dξ_matrix, material)` (`src/Physics/volume_change.jl:126–149`) reads $V_i$ and $T_i$ from the typed `StateCache`, takes $d\xi/dt$ from a precomputed matrix, evaluates $\theta_i$ via `volume_change_rate`, and writes `dV[i] = V * θ`. This batch helper is provided for diagnostics; the production ALE path uses $\theta_i$ directly in the mesh-velocity integration (§10.6) rather than materializing $dV_i/dt$.
+> **Implementation note.** No routine materializes $dV_i/dt$: the ALE path evaluates $\theta_i$ with `volume_change_rate` (`src/Physics/volume_change.jl`) inside the mesh-velocity integration (§10.6) and recomputes $V_i$ from the node positions (§11.4.1).
 
 ---
 
@@ -8294,7 +7905,7 @@ The swelling factor $\gamma_j$ is a per-component scalar field on every `Abstrac
 **Modeling guidance.**
 
 - **Non-charring shrinkage (e.g. melting/charring polymer to gas):** keep the virgin solid at $\gamma=1$ and the gas product at $\gamma=0$. As the solid converts to gas, $\theta<0$ and the column recedes — the classic shrinking-slab picture.
-- **Charring with a rigid char:** give the char $\gamma=0$ to "freeze" its volume contribution (`rigid_char = SolidComponent(:char, ...; γ=0.0)`, the documented example at `components.jl:182`); then only the mass converted out of the cell drives axial motion, and the char does not re-inflate or collapse with the mesh. (This is a modeling choice, not a default; the default char is $\gamma=1$.)
+- **Charring with a rigid char:** give the char $\gamma=0$ to "freeze" its volume contribution (`rigid_char = SolidComponent(:char, ...; γ=0.0)`, the documented example at `components.jl`); then only the mass converted out of the cell drives axial motion, and the char does not re-inflate or collapse with the mesh. (This is a modeling choice, not a default; the default char is $\gamma=1$.)
 - **Intumescence (gas-producing expansion):** assign the trapped/blowing gas a swelling factor $\gamma_g\in(0,1]$. A positive $d\xi_g/dt$ (gas being produced) with $\gamma_g>0$ contributes $\theta>0$, i.e. the matrix *inflates*. Combined with a swelling lateral law (§10.5) this reproduces the order-of-magnitude expansion of intumescent coatings. Axial intumescence (through-thickness swell) is captured by $\theta>0$ in (10.2); radial intumescence (lateral swell of the column) is captured by $\mathrm{law}(\bar\chi)>1$ in (10.8).
 
 Because $\gamma_j$ is a free per-component parameter, the model spans the full range from pure shrinkage ($\gamma=1$ solid, $\gamma=0$ gas) through volume-neutral ($\gamma=0$ everywhere) to intumescent ($\gamma_g>0$).
@@ -8325,7 +7936,7 @@ $$
 
 i.e. exactly the fractional dry-gas mass release. By construction $\chi_i$ starts at $0$ and, for a fully decomposing solid that converts entirely to dry gas, tends to $1$; with char yield it saturates below $1$.
 
-> **Implementation note.** Computed in `_pack_chi_derivative!` (`src/Residual/residual.jl:484–517`). The exact write is
+> **Implementation note.** Computed in `_pack_chi_derivative!` (`src/Residual/residual.jl`). The exact write is
 > ```julia
 > S_dry = Σ_{j ∈ idx_dry} dξ_rxn[j, i]
 > denom = max(m_init[i], eps())
@@ -8342,17 +7953,17 @@ m_{\mathrm{dry},i} \;=\; V_i(0)\sum_{j\in\mathrm{solid}}\xi_{j,i}(0).
 \tag{10.6}
 $$
 
-> **Implementation note.** `populate_m_dry_solid_initial!(mesh, material)` (`src/Problem/initial_conditions.jl:256–272`) sums `mesh.cell_states[i].ξ[j]` over components for which `is_solid(material.components[j])` is true, multiplied by `mesh.cell_volumes[i]`. Crucially the sum is over **solids only** — liquids (e.g. bound moisture) are *not* counted in the denominator, even though they are matrix-forming. This is deliberate: $\chi$ is a *dry-decomposition* progress variable, and water mass is excluded from both numerator (dry-gas only) and denominator (solids only). The array is stored as `Float64` on the immutable mesh and is constant for the whole solve.
+> **Implementation note.** `populate_m_dry_solid_initial!(mesh, material)` (`src/Problem/initial_conditions.jl`) sums `mesh.cell_states[i].ξ[j]` over components for which `is_solid(material.components[j])` is true, multiplied by `mesh.cell_volumes[i]`. Crucially the sum is over **solids only** — liquids (e.g. bound moisture) are *not* counted in the denominator, even though they are matrix-forming. This is deliberate: $\chi$ is a *dry-decomposition* progress variable, and water mass is excluded from both numerator (dry-gas only) and denominator (solids only). The array is stored as `Float64` on the mesh and changes only at a park event, which adds the parked cell's entry to the keeper's (§14.3.4), so the column total $M_{\mathrm{dry}}$ is fixed for the whole solve.
 
 ### 10.3.3 Dry-gas identification and the water-vapor caveat
 
 The index set $\{j\in\mathrm{dry\ gas}\}$ collects all GAS-phase components *except* water vapor / moisture-derived gases. Phase is a compile-time (type-level) property, but the water-vapor exclusion is done by **name matching**:
 
-> **Implementation note.** `dry_pyrolysis_gas_indices(material)` (`src/Materials/materials.jl:625–652`) recurses over the component tuple at compile time (`_collect_dry_pyrolysis_gas_indices`) and includes index $j$ iff `is_gas(comp) && !_is_water_vapor_name(comp.name)`. The name filter `_is_water_vapor_name` (line 645) is a **case-insensitive substring match**: a name is treated as water vapor if its string contains `"H2O"`, or (lowercased) contains `"water"`, or equals `"h2o"`. The resulting tuple is cached once at workspace construction (`ws.dry_gas_indices`) to avoid a per-residual `Symbol→String` allocation. **Caveat:** because identification is by substring, a dry-gas species accidentally named (say) `:water_gas` would be misclassified as moisture and excluded from $\chi$. Users modeling moisture must name the water-vapor component so it matches (e.g. `:water_vapor` or `:H2O`), and must avoid those substrings in genuine dry-gas names.
+> **Implementation note.** `dry_pyrolysis_gas_indices(material)` (`src/Materials/materials.jl`) recurses over the component tuple at compile time (`_collect_dry_pyrolysis_gas_indices`) and includes index $j$ iff `is_gas(comp) && !_is_water_vapor_name(comp.name)`. The name filter `_is_water_vapor_name` is a **case-insensitive substring match**: a name is treated as water vapor if its string contains `"H2O"`, or (lowercased) contains `"water"`, or equals `"h2o"`. The resulting tuple is cached once at workspace construction (`ws.dry_gas_indices`) to avoid a per-residual `Symbol→String` allocation. **Caveat:** because identification is by substring, a dry-gas species accidentally named (say) `:water_gas` would be misclassified as moisture and excluded from $\chi$. Users modeling moisture must name the water-vapor component so it matches (e.g. `:water_vapor` or `:H2O`), and must avoid those substrings in genuine dry-gas names.
 
 ### 10.3.4 Why $\chi$ is reconstructed, not freely integrated
 
-Although $\chi$ occupies a trailing block of the state vector $\mathbf{u}$ (the "$\chi$ block"; see §10.9 and §15.1) and is advanced by the ODE integrator, its derivative $d\chi_i/dt$ is *recomputed from the reaction sources on every residual evaluation* by `_pack_chi_derivative!` rather than being a free dynamical degree of freedom with independent physics. Because the RHS for $\chi$ is a pure function of the (reaction part of the) other states and geometry, $\chi$ stays exactly synchronized with cumulative dry-gas production regardless of the integrator's internal representation. For identity-law materials (no lateral shrinkage), the $\chi$ block is absent from the state vector entirely (the `chi_range` is empty), and `_pack_chi_derivative!` returns immediately (line 494) — so $\chi$ carries zero memory/compute cost when it is not needed. When a law is present but identity-valued, the block is zeroed (lines 498–502) because $\chi$ is undefined when the cross-section is fixed.
+Although $\chi$ occupies a trailing block of the state vector $\mathbf{u}$ (the "$\chi$ block"; see §10.9 and §15.1) and is advanced by the ODE integrator, its derivative $d\chi_i/dt$ is *recomputed from the reaction sources on every residual evaluation* by `_pack_chi_derivative!` rather than being a free dynamical degree of freedom with independent physics. Because the RHS for $\chi$ is a pure function of the (reaction part of the) other states and geometry, $\chi$ stays exactly synchronized with cumulative dry-gas production regardless of the integrator's internal representation. For identity-law materials (no lateral shrinkage), the $\chi$ block is absent from the state vector entirely (the `chi_range` is empty), and `_pack_chi_derivative!` returns immediately — so $\chi$ carries zero memory/compute cost when it is not needed.
 
 ---
 
@@ -8371,7 +7982,7 @@ $$
 
 Weighting by the *initial* dry-solid mass (rather than by volume, or uniformly) means $\bar\chi$ is the fraction of the column's *total decomposable solid mass* that has been released as dry gas — a physically meaningful, conserved-denominator average. Because $M_{\mathrm{dry}}$ is fixed at setup, $\bar\chi\in[0,1]$ moves monotonically as the column decomposes.
 
-> **Implementation note.** `_chi_bar_from_state(u, layout, mesh)` (`src/Problem/state_cache.jl:195–217`) reads the $\chi$ block from `u` and the weights from `mesh.m_dry_solid_initial`, returning the tuple $(\bar\chi, M_{\mathrm{dry}})$. The numerator `num += u[χ_offset+i] * m_i` accumulates in the scalar type of `u` (which is `ForwardDiff.Dual` in a Jacobian/sensitivity pass), while the denominator `M` accumulates in `Float64`. The division `num / M` therefore returns a Dual when `u` is Dual — the average is **AD-safe**, carrying sensitivities of $\bar\chi$ with respect to every state through which $\chi_i$ depends. Guards: an empty `m_dry_solid_initial` or empty `chi_range` returns $(0,0)$, and $M_{\mathrm{dry}}\le\varepsilon$ returns $(0,0)$ (line 215). The public wrapper is `column_chi_bar_from_state(u, layout, mesh)` (`src/Residual/residual.jl:574–575`).
+> **Implementation note.** `_chi_bar_from_state(u, layout, mesh)` (`src/Problem/state_cache.jl`) reads the $\chi$ block from `u` and the weights from `mesh.m_dry_solid_initial`, returning the tuple $(\bar\chi, M_{\mathrm{dry}})$. The numerator `num += u[χ_offset+i] * m_i` accumulates in the scalar type of `u` (which is `ForwardDiff.Dual` in a Jacobian/sensitivity pass), while the denominator `M` accumulates in `Float64`. The division `num / M` therefore returns a Dual when `u` is Dual — the average is **AD-safe**, carrying sensitivities of $\bar\chi$ with respect to every state through which $\chi_i$ depends. Guards: an empty `m_dry_solid_initial` or empty `chi_range` returns $(0,0)$, and $M_{\mathrm{dry}}\le\varepsilon$ returns $(0,0)$. The public wrapper is `column_chi_bar_from_state(u, layout, mesh)` (`src/Residual/residual.jl`).
 
 ---
 
@@ -8388,13 +7999,13 @@ $$
 
 where $A_0$ is the calibration-reference area fixed at setup and $\mathrm{law}:\,[0,1]\to(0,\infty)$ is a user-supplied smooth function (or `nothing`, meaning identity). The area $A(t)$ is uniform along $z$ (the column has one cross-section at any instant) but time-varying.
 
-> **Implementation note.** Stored as `material.lateral_shrinkage_law::LSL` (`src/Materials/materials.jl:171`), a concrete `Function` subtype or `Nothing`. The constructor validates that it is a `Function` or `nothing` (line 186) and the public `Material(...; lateral_shrinkage_law = nothing)` keyword defaults to identity. $A_0$ is `mesh.cross_section_area_initial` (`src/Geometry/mesh.jl:109`), set once at mesh construction. The update is performed by `update_cross_section_area!(cache, material, mesh, u, layout, ::WithChi)` (`src/Problem/state_cache.jl:175–192`):
+> **Implementation note.** Stored as `material.lateral_shrinkage_law::LSL` (`src/Materials/materials.jl`), a concrete `Function` subtype or `Nothing`. The constructor validates that it is a `Function` or `nothing` and the public `Material(...; lateral_shrinkage_law = nothing)` keyword defaults to identity. $A_0$ is `mesh.cross_section_area_initial` (`src/Geometry/mesh.jl`), set once at mesh construction. The update is performed by `update_cross_section_area!(cache, material, mesh, u, layout, ::WithChi)` (`src/Problem/state_cache.jl`):
 > ```julia
 > χ̄, M = _chi_bar_from_state(u, layout, mesh)
 > A = mesh.cross_section_area_initial * material.lateral_shrinkage_law(χ̄)
 > cache.A_section[] = A
 > ```
-> The result is stored in `cache.A_section[]` carrying `eltype(u)` (Dual-safe), and the function returns $(A,\bar\chi,M_{\mathrm{dry}})$ for downstream use. For identity-law materials it short-circuits and returns the unchanged $A_0$ (lines 184–186); for `NoChi` mode it is a no-op returning the current area (lines 166–173). Note the code uses the field name `cross_section_area_initial` for $A_0$; the mutable `cross_section_area` holds the current $A(t)$.
+> The result is stored in `cache.A_section[]` carrying `eltype(u)` (Dual-safe), and the function returns $(A,\bar\chi,M_{\mathrm{dry}})$ for downstream use. For identity-law materials it short-circuits and returns the unchanged $A_0$; for `NoChi` mode it is a no-op returning the current area. Note the code uses the field name `cross_section_area_initial` for $A_0$; the mutable `cross_section_area` holds the current $A(t)$.
 
 ### 10.5.2 Canonical laws
 
@@ -8405,7 +8016,7 @@ where $A_0$ is the calibration-reference area fixed at setup and $\mathrm{law}:\
 | Linear swell | $1+k\bar\chi$, $k>0$ | Area expands (intumescence) |
 | Smooth (sigmoid) | $1-\tfrac{k}{1+e^{-s(\bar\chi-\bar\chi_0)}}$ | Onset-localized transition |
 
-For example, the verification fixture uses $\mathrm{law}(\bar\chi)=1-0.2\,\bar\chi$, so at $\bar\chi=0.5$ the area is $A=0.9\,A_0$ (`test/geometry/test_variable_cross_section.jl:9–19`, which asserts `A ≈ A0 * 0.9`).
+For example, the verification fixture uses $\mathrm{law}(\bar\chi)=1-0.2\,\bar\chi$, so at $\bar\chi=0.5$ the area is $A=0.9\,A_0$ (`test/geometry/test_variable_cross_section.jl`, which asserts `A ≈ A0 * 0.9`).
 
 ### 10.5.3 First-principles status
 
@@ -8446,7 +8057,7 @@ $$
 
 The $m_{\mathrm{dry},i}$ cancels per cell, leaving a clean volume-weighted sum of the dry-gas source over the column, divided by the total initial dry-solid mass. This is exactly the discrete form used.
 
-> **Implementation note.** `_compute_theta_A(material, state, χ̄, M, dξ_rxn, layout, idx_dry)` (`src/Residual/residual.jl:529–564`) computes
+> **Implementation note.** `_compute_theta_A(material, state, χ̄, M, dξ_rxn, layout, idx_dry)` (`src/Residual/residual.jl`) computes
 > ```julia
 > dχ̄_dt = Σ_i ( Σ_{j ∈ idx_dry} dξ_rxn[j,i] ) * state.volume[i]   # = Σ S_dry,i V_i
 > dχ̄_dt /= M                                                       # M = M_dry
@@ -8454,7 +8065,7 @@ The $m_{\mathrm{dry},i}$ cancels per cell, leaving a clean volume-weighted sum o
 > dlaw_dχ̄ = ForwardDiff.derivative(law, χ̄)                        # law'(χ̄) by AD
 > return dlaw_dχ̄ * dχ̄_dt / A_ratio
 > ```
-> matching (10.10)–(10.11) term for term. The derivative $\mathrm{law}'(\bar\chi)$ is obtained at runtime by `ForwardDiff.derivative` (line 562), so the user supplies only $\mathrm{law}$, never its derivative, and any smooth law works. **Guards** return $0$ when: the law is identity (`law === nothing`, line 539); the reaction source is unavailable (`dξ_rxn === nothing`, line 540); $M_{\mathrm{dry}}\le\varepsilon$ (line 541); the cell count is zero (line 547); or the area ratio $\mathrm{law}(\bar\chi)\le\varepsilon$ (line 560) — the last prevents the $1/\mathrm{law}(\bar\chi)$ in (10.10) from blowing up as the cross-section vanishes. The mode dispatch `_compute_theta_A_dispatched(...)` returns `0.0` for `NoChi` (line 302) and calls `_compute_theta_A` for `WithChi` (line 313).
+> matching (10.10)–(10.11) term for term. The derivative $\mathrm{law}'(\bar\chi)$ is obtained at runtime by `ForwardDiff.derivative`, so the user supplies only $\mathrm{law}$, never its derivative, and any smooth law works. **Guards** return $0$ when: the law is identity (`law === nothing`); the reaction source is unavailable (`dξ_rxn === nothing`); $M_{\mathrm{dry}}\le\varepsilon$; the cell count is zero; or the area ratio $\mathrm{law}(\bar\chi)\le\varepsilon$ — the last prevents the $1/\mathrm{law}(\bar\chi)$ in (10.10) from blowing up as the cross-section vanishes. The mode dispatch `_compute_theta_A_dispatched(...)` returns `0.0` for `NoChi` and calls `_compute_theta_A` for `WithChi`.
 
 ### 10.6.2 Axial residual strain and double-counting avoidance
 
@@ -8477,13 +8088,13 @@ w_{i+1} \;=\; w_i + \theta_{L,i}\,\Delta z_i
 \tag{10.13}
 $$
 
-Equivalently $w_{i+1}=\sum_{k=1}^{i}\theta_{L,k}\Delta z_k$, with the bottom node pinned at $w_1=0$ (the substrate is immobile; material recedes downward and the surface moves). The full development of (10.13) — its discrete Geometric Conservation Law, the node-position update $z_i^{\text{new}}=z_i^{\text{old}}+\Delta t\,w_i$, and the generalized GCL with the area-change term — is the subject of §11, *The ALE Framework*. Here we only establish the *constitutive split* (10.12) and why $\theta_A$ must be removed.
+Equivalently $w_{i+1}=\sum_{k=1}^{i}\theta_{L,k}\Delta z_k$, with the bottom node pinned at $w_1=0$ (the substrate is immobile; material recedes downward and the surface moves). The full development of (10.13) — the node positions as state ($dz_i/dt = w_i$), the geometric volume $V_i = A|z_{i+1}-z_i|$ recomputed from them, and the role of the area-change term — is the subject of §11, *The ALE Framework*. Here we only establish the *constitutive split* (10.12) and why $\theta_A$ must be removed.
 
-> **Implementation note.** `_compute_ale_mesh_velocity!` (`src/Residual/residual.jl:355–415`) initializes `w[1] = 0` and `cumulative_velocity = 0` (lines 382–383), then for each cell computes `Δz_cell = state.volume[cell_idx] / state.A_section[]` (line 387, i.e. $\Delta z_i=V_i/A$), evaluates `θ_cell` via `volume_change_rate` (line 401), forms `θ_L = θ_cell - θ_A` (line 407), accumulates `cumulative_velocity += θ_L * Δz_cell` (line 408), and assigns the result to the cell's right node `w[right_node] = cumulative_velocity` (lines 410–411). The radial channel `θ_A` is passed in as the keyword `θ_A` (default `0.0`), so for `NoChi` it is identically zero and (10.13) collapses to the constant-cross-section integral $w_{i+1}=w_i+\theta_i\Delta z_i$. The per-cell $\theta_i$ is also exported through the optional `θ_out` array (line 403), which is later consumed by the dilation correction (§10.7).
+> **Implementation note.** `_compute_ale_mesh_velocity!(w, state, mesh, material, dξ_rxn; θ_out, dξ_dt, θ_A)` (`src/Residual/residual.jl`) takes the per-cell reaction species sources `dξ_rxn` (`NC × n_cells`) as a positional argument, initializes `w[1] = 0`, then for each live cell computes `Δz_cell = state.volume[cell_idx] / state.A_section[]` (i.e. $\Delta z_i=V_i/A$), evaluates `θ_cell` via `volume_change_rate`, forms `θ_L = θ_cell - θ_A`, accumulates `cumulative_velocity += θ_L * Δz_cell`, and assigns the result to the cell's right node; parked ghost nodes take the surface velocity. The radial channel `θ_A` is passed in as the keyword `θ_A` (default `0.0`), so for `NoChi` it is identically zero and (10.13) collapses to the constant-cross-section integral $w_{i+1}=w_i+\theta_i\Delta z_i$. The per-cell $\theta_i$ is also exported through the optional `θ_out` array, which is later consumed by the dilation correction (§10.7). The residual and the `ALEMeshVelocityOperator` of the Jacobian call this one function (and `_compute_theta_A`); the operator first re-evaluates the per-cell reaction sources into its own `dξ_rxn` buffer from the same state.
 
 ### 10.6.3 Sequencing of the area update and the strain integration
 
-The two channels are computed in a specific order each residual evaluation, because $\theta_A$ depends on $\bar\chi$ (through $\mathrm{law}$ and $\mathrm{law}'$) and on the reaction sources, while the axial integration depends on $\theta_A$ and on the *current* geometry (volumes $V_i$ and area $A$). The ALE residual therefore does, in sequence (`src/Residual/residual.jl:104–161`):
+The two channels are computed in a specific order each residual evaluation, because $\theta_A$ depends on $\bar\chi$ (through $\mathrm{law}$ and $\mathrm{law}'$) and on the reaction sources, while the axial integration depends on $\theta_A$ and on the *current* geometry (volumes $V_i$ and area $A$). The ALE residual therefore does, in sequence (`src/Residual/residual.jl`):
 
 1. `populate!` the state cache from $\mathbf{u}$ (T, ξ, z, χ).
 2. `update_cross_section_area!` → returns $(A,\bar\chi,M_{\mathrm{dry}})$ and stores $A$ in `cache.A_section[]`.
@@ -8547,7 +8158,7 @@ V_i \;=\; \lvert z_{i+1}-z_i\rvert\,A,
 \tag{10.16}
 $$
 
-> **Implementation note.** `update_state_geometry!(cache, mesh, ::ALE)` (`src/Problem/state_cache.jl:336–354`) sets `cache.volume[i] = abs(z_right - z_left) * A` with `A = cache.A_section[]`, and face areas `cache.A_face[f] = A`, cell centers `(z_left + z_right)/2`. All quantities preserve `eltype(cache.z)` so AD passes carry geometry sensitivities (e.g. $\partial V_i/\partial\chi$ via $A$) through into every kernel that reads volumes or face areas. This is the link by which a perturbation in $\chi$ propagates to the energy and species balances: a larger $A$ enlarges every $V_i$ and every face area, rescaling divergences and the cell-integrated masses. The absolute value $\lvert\cdot\rvert$ guards against transient node inversion during a Newton/AD probe.
+> **Implementation note.** `update_state_geometry!(cache, mesh, ::ALE)` (`src/Problem/state_cache.jl`) sets `cache.volume[i] = abs(z_right - z_left) * A` with `A = cache.A_section[]`, and face areas `cache.A_face[f] = A`, cell centers `(z_left + z_right)/2`. All quantities preserve `eltype(cache.z)` so AD passes carry geometry sensitivities (e.g. $\partial V_i/\partial\chi$ via $A$) through into every kernel that reads volumes or face areas. This is the link by which a perturbation in $\chi$ propagates to the energy and species balances: a larger $A$ enlarges every $V_i$ and every face area, rescaling divergences and the cell-integrated masses. The absolute value $\lvert\cdot\rvert$ guards against transient node inversion during a Newton/AD probe.
 
 ### 10.8.2 Mass-loss-rate gauge for variable cross-section
 
@@ -8576,7 +8187,7 @@ $$
 \tag{10.18}
 $$
 
-with total length $N_{\mathrm{state}} = n(1+N_C) + \delta_{\mathrm{ALE}}\,n_{\mathrm{nodes}} + \delta_{\mathrm{WithChi}}\,n$. The $z$ block is present only in ALE mode and the $\chi$ block only in `WithChi` mode, which requires ALE: the fixed-mesh residual evolves neither $\chi$ nor $A$, so `to_problem_def` rejects a lateral shrinkage law with `use_ale = false`. For example, with $N_C=2$ components, $n=5$ cells (hence $n_{\mathrm{nodes}}=6$), the ALE+WithChi length is $5\cdot 3 + 6 + 5 = 26$, which the test `test/geometry/test_variable_cross_section.jl:14` asserts as `5*(2+3)+1`; the same problem with `lateral=false` (NoChi) has length $5\cdot 3 + 6 = 21$ asserted as `5*3+6` (line 31). The block accessors `temperature_range`, `concentration_range`, `z_range`, `chi_range` (`src/Problem/state_layout.jl`) return empty ranges for absent blocks, and the residual's `_pack_chi_derivative_dispatched!` is a no-op when `chi_range` is empty. The `WithChi`/`NoChi` axis is one of the four bundled `SimulationMode` traits; the detailed layout descriptor `StateLayout` and its role in the structured Jacobian are covered in §13 and §15.1.
+with total length $N_{\mathrm{state}} = n(1+N_C) + \delta_{\mathrm{ALE}}\,n_{\mathrm{nodes}} + \delta_{\mathrm{WithChi}}\,n$. The $z$ block is present only in ALE mode and the $\chi$ block only in `WithChi` mode, which requires ALE: the fixed-mesh residual evolves neither $\chi$ nor $A$, so `to_problem_def` rejects a lateral shrinkage law with `use_ale = false`. For example, with $N_C=2$ components, $n=5$ cells (hence $n_{\mathrm{nodes}}=6$), the ALE+WithChi length is $5\cdot 3 + 6 + 5 = 26$, which the test `test/geometry/test_variable_cross_section.jl` asserts as `5*(2+3)+1`; the same problem with `lateral=false` (NoChi) has length $5\cdot 3 + 6 = 21$ asserted as `5*3+6`. The block accessors `temperature_range`, `concentration_range`, `z_range`, `chi_range` (`src/Problem/state_layout.jl`) return empty ranges for absent blocks, and the residual's `_pack_chi_derivative_dispatched!` is a no-op when `chi_range` is empty. The `WithChi`/`NoChi` axis is one of the four bundled `SimulationMode` traits; the detailed layout descriptor `StateLayout` and its role in the structured Jacobian are covered in §13 and §15.1.
 
 ---
 
@@ -8652,7 +8263,7 @@ In FDS notation (their $\rho_{s,\alpha}$ for solid component densities, $X_\alph
 
 ## 10.12 Limitations and open issues
 
-The following limitations are documented in the source and KB notes and should guide use and future work:
+The following limitations are documented in the source and should guide use and future work:
 
 1. **Density time-averaging in $\theta$.** Equation (10.2) uses $\rho_j(T)$ evaluated at the *current* cell temperature, and the density-rate term $\xi_j\,d(1/\rho_j)/dt$ is neglected (§10.1.1). For materials with strongly temperature-dependent pure-phase densities and steep thermal gradients this is an approximation; whether an implicit or time-averaged density would materially change $\theta$ has not been quantified.
 
@@ -8664,13 +8275,13 @@ The following limitations are documented in the source and KB notes and should g
 
 5. **Single-reactant kinetics.** Volume change inherits the single-reactant restriction of the kinetics (§6.5, §6.10): `species_source_terms!` enforces $N_{\mathrm{Rin}}=1$, so $\theta$ and $\chi$ are built from single-reactant sources only. Bimolecular or multi-reactant stoichiometry (e.g. char oxidation consuming both char and O₂) would require extending the source-term machinery before $\theta$/$\chi$ could account for it.
 
-6. **Interaction with adaptive mesh refinement.** The $\chi$ block, the per-cell strain $\theta_i$, and $m_{\mathrm{dry},i}$ must all be carried through any AMR remap (surface-depletion merge, h-refinement). The energy-conserving merge and the mass-exact remap are detailed in §14, *Adaptive Mesh Refinement*; the consistency of $\chi$ accumulation across a park (summing $m_{\mathrm{dry}}$ denominators and weighting the merged $\chi$ by them) is a subtle invariant that the park primitive preserves (§14.3.4).
+6. **Interaction with depletion parking.** The $\chi$ block, the per-cell strain $\theta_i$, and $m_{\mathrm{dry},i}$ must all be carried through a park event. The energy-conserving merge is detailed in §14.3; the consistency of $\chi$ accumulation across a park (summing $m_{\mathrm{dry}}$ denominators and weighting the merged $\chi$ by them) is a subtle invariant that the park primitive preserves (§14.3.4).
 
 7. **Substring-based water-vapor exclusion.** The dry-gas index set relies on a name substring match (§10.3.3), which is fragile to naming. A type-level or explicit-flag mechanism for "this gas is moisture-derived" would be more robust than the current `"H2O"`/`"water"` heuristic.
 
-8. **Axial/radial split is sequential, not unified.** As noted in the ALE KB, the axial (mesh-motion) and radial (cross-section) channels are computed in sequence with $\theta_A$ subtracted from each cell's $\theta_i$; a fully unified space-time ALE that handles both simultaneously (and a higher-order-in-time mesh update than the forward-Euler node advance) remains future work (see §11.10).
+8. **Axial/radial split is sequential, not unified.** The axial (mesh-motion) and radial (cross-section) channels are computed in sequence with $\theta_A$ subtracted from each cell's $\theta_i$; a fully unified space-time ALE that handles both simultaneously remains future work (see §11.9).
 
-9. **Mesh motion is solid motion (solid-Lagrangian ALE).** The volume-change pipeline of this chapter is what *defines* the mesh velocity: $w$ is the prefix sum of the reaction-driven strain rate $\theta$ (§11.3), and every component rides the mesh with no discrete advection operator (§10.7, §11.1.2). Mesh motion decoupled from the solid material velocity — remeshing, smoothing, prescribed motion, AMR-in-ALE — is not representable without adding a species advection operator; see §11.10 item 7 for the full statement of this capability boundary and its consequence for MMS verification (the spatially-uniform-solid rule under `w_override`).
+9. **Mesh motion is solid motion (solid-Lagrangian ALE).** The volume-change pipeline of this chapter is what *defines* the mesh velocity: $w$ is the prefix sum of the reaction-driven strain rate $\theta$ (§11.3), and every component rides the mesh with no discrete advection operator (§10.7, §11.1.2). Mesh motion decoupled from the solid material velocity — remeshing, smoothing, prescribed motion, refinement under ALE — is not representable without adding a species advection operator; see §11.9 item 5 for the full statement of this capability boundary and its consequence for MMS verification (the spatially-uniform-solid rule under `w_override`).
 
 
 ---
@@ -8684,13 +8295,13 @@ formulation that Pyrolysis.jl uses to track that motion without solving a moving
 boundary PDE. We derive the ALE time-derivative identity from the kinematics of a
 moving sample point, specialize it to the energy and species equations (every
 component rides the skeleton, so the mesh frame adds only the dilation), construct the
-cumulative mesh velocity from the per-cell volumetric strain rate, prove the
-discrete Geometric Conservation Law (GCL) and its time-varying-cross-section
-generalization, document the TVD-limited upwind discretization of the
-mesh-relative temperature advection, and the conservative remapping operators used
-when the mesh topology changes during adaptive refinement (§14). Throughout, the
+cumulative mesh velocity from the per-cell volumetric strain rate, show that the
+discrete Geometric Conservation Law (GCL) holds identically because every cell volume
+is recomputed from the node positions in the state (including with a time-varying
+cross-section), and document the TVD-limited upwind discretization of the
+mesh-relative temperature advection used by the verification hook. Throughout, the
 governing relations are tied line-by-line to the implementation in
-`src/Physics/{mesh_motion,gcl,volume_change,remapping}.jl`,
+`src/Physics/volume_change.jl`, `src/Problem/state_cache.jl`,
 `src/Discretization/ale_fluxes.jl`, and `src/Residual/residual.jl`, and every sign
 convention is verified against the code.
 
@@ -8787,7 +8398,7 @@ of the gas by the moving mesh.
 > term in any equation** (§11.2.2). The "arbitrary" in ALE is therefore
 > constrained: any mesh motion **decoupled from the solid material
 > velocity** — remeshing, mesh smoothing, prescribed node motion,
-> AMR-inside-ALE — is *not representable* without first adding an advection
+> refinement inside ALE — is *not representable* without first adding an advection
 > operator for the slip velocity $w - v_{\text{solid}}$. The verification
 > hook `Workspace.w_override` (which replaces the reaction-driven $w$ with a
 > prescribed $w(z,t)$ for MMS runs, §18.2) inherits exactly this constraint:
@@ -8795,7 +8406,7 @@ of the gas by the moving mesh.
 > field has a $w\,\partial_z\xi$ term with no discrete operator to represent
 > it, so the manufactured-solution driver assembles every species source in
 > the material-following frame (see test/verification/exact/mms.jl and
-> §11.10 item 7). The temperature field, by contrast, *does* get its slip
+> §11.9 item 5). The temperature field, by contrast, *does* get its slip
 > advection under the override — $T$ is advected by
 > $w_{\text{applied}} - w_{\text{physical}}$, which is non-zero exactly and
 > only there (§11.2.2).
@@ -8832,7 +8443,7 @@ $$
 \;}
 \tag{11.1}
 $$
-(`ale_fluxes.jl:8–10`). Here $\partial/\partial t|_{\chi}$ is the **ALE
+(`ale_fluxes.jl`). Here $\partial/\partial t|_{\chi}$ is the **ALE
 (mesh-point)** rate — the rate at which $f$ changes for a node carried by the mesh —
 and $\partial/\partial t|_{x}$ is the **Eulerian (fixed-point)** rate that the
 underlying conservation laws of Chapter 3 are written in. The advection correction
@@ -8946,7 +8557,7 @@ $\partial w/\partial z$ *plus* the lateral channel $\theta_A$. Identifying $\the
 with $\nabla\cdot\mathbf w$ is correct only without lateral shrinkage: in 1D,
 $\partial w/\partial z = \theta - \theta_A \ne \theta$ when $\theta_A \ne 0$, and
 applying the full $\theta_{\text{cell}}$ is the unique choice that makes
-$d(\xi V)/dt = SV - [JA]_{\text{faces}}$ exact (§11.3).
+$d(\xi V)/dt = SV - [JA]_{\text{faces}}$ exact (§11.5.2).
 
 In production the mesh moves with the skeleton, $\mathbf w = \mathbf v_{\text{solid}}$,
 so the slip term vanishes for **every** component and (11.4) reduces to
@@ -8989,8 +8600,8 @@ relative to the skeleton* is accounted for by the volumetric source
 $S_{\text{conv}} = -\sum_g c_{p,g}\,\bar J_g\,\partial T/\partial z$ (Chapter 7). This is
 the ThermaKin Eq. 17 convention term for term, including its deformation term,
 which is the $\mathbf v_{\text{solid}}\cdot\nabla T$ piece the mesh frame absorbs. The
-surface transpiration term is rejected at construction because it would count
-the gas heating a second time (Chapters 7, 12).
+surface balance carries no gas-enthalpy term, which would count the gas heating a
+second time (§7.4.3, Chapter 12).
 
 ---
 
@@ -8999,7 +8610,7 @@ the gas heating a second time (Chapters 7, 12).
 The ALE freedom is fixed by *choosing* $w(z,t)$. Pyrolysis.jl chooses it so that the
 mesh exactly absorbs the local volume change of the material, with the substrate
 pinned. This section derives the cumulative-integral formula, its discrete form, and
-the cell-centered interpolation used by the advection kernels.
+the dilation correction that the mesh motion induces in the species equations.
 
 ### 11.3.1 The volumetric strain rate $\theta$
 
@@ -9014,20 +8625,20 @@ $$
 \;}
 \tag{11.6}
 $$
-(`volume_change.jl:93–105`). Here:
+(`volume_change.jl`). Here:
 
 - $\gamma_j$ is the **swelling factor** of component $j$ (component field
   `swelling_factor`): $\gamma=1$ for solids by default (when a solid depletes, the
   matrix loses that volume), $\gamma=0$ for gases by default (escaping gas does not
   change the skeleton volume), and $\gamma\in[0,1]$ for intumescent/partial
   contributors. Only components with $\gamma_j>0$ enter the sum (the implementation
-  early-exits on $\gamma_j\le 0$, `volume_change.jl:17,28–36,48–61`).
+  early-exits on $\gamma_j\le 0$, `volume_change.jl`).
 - $\rho_j(T)$ is the **bulk** (pure-phase) density of component $j$, evaluated at the
   cell temperature; the temperature dependence is honored through the property
-  function `comp.density(T)` (`volume_change.jl:19,29,…`).
+  function `comp.density(T)` (`volume_change.jl`).
 - $d\xi_j/dt$ is the **species reaction source term** $S_j$ — the *reaction* part of
   the species RHS, supplied as the pre-computed `dξ_rxn` matrix
-  (`residual.jl:389–399`). It is negative for a consumed solid and positive for a
+  (`residual.jl`). It is negative for a consumed solid and positive for a
   produced char/gas.
 
 **Physical reading and sign.** When a solid of density $\rho_j$ is consumed
@@ -9036,13 +8647,12 @@ $\theta<0$: the cell shrinks. A net char-producing or swelling reaction with the
 appropriate $\gamma$ can yield $\theta>0$ (expansion/intumescence). Note that
 (11.6) is the *swelling-factor-weighted* form; the loose statement "$\theta =
 -(\sum_j d\xi_j/dt)/\rho_{\text{total}}$" sometimes used as shorthand
-(`problem_residual.md`) is only correct in the special case of a single solid with
+is only correct in the special case of a single solid with
 $\gamma=1$ and constant $\rho$ — the code always uses (11.6).
 
 > **Implementation note.** Relative strain rate: `volume_change_rate` /
 > `_volume_change_rate` (dispatch-unrolled for $N_C\in\{1,2,3\}$, `@generated` for
-> $N_C>3$), `src/Physics/volume_change.jl`. Batch absolute rate
-> $dV_i/dt = V_i\theta_i$: `compute_cell_volume_rates!`, same file (lines 126–149).
+> $N_C>3$), `src/Physics/volume_change.jl`.
 
 ### 11.3.2 Continuous-to-discrete: integrating strain into mesh velocity
 
@@ -9057,8 +8667,8 @@ $$
 where $\theta_A$ is the **column-global radial channel** subtracted to avoid
 double-counting any cross-section change (§11.3.3); for constant cross-section
 $\theta_A\equiv 0$ and $w$ integrates the full local strain. The axial residual
-strain is $\theta_L = \theta - \theta_A$ (`residual.jl:407`,
-`volume_change.md:77`). Discretizing the integral cell-by-cell with the bottom node
+strain is $\theta_L = \theta - \theta_A$ (`_compute_ale_mesh_velocity!`,
+`residual.jl`). Discretizing the integral cell-by-cell with the bottom node
 pinned gives the **cumulative mesh-velocity recursion**
 $$
 \boxed{\;
@@ -9068,7 +8678,7 @@ w_{i+1} = w_i + (\theta_i - \theta_A)\,\Delta z_i
 \tag{11.8}
 $$
 with cell thickness $\Delta z_i = V_i/A_{\text{section}}$
-(`residual.jl:387,407–411`). Equivalently, $w$ at the right node of cell $i$ is the
+(`residual.jl`). Equivalently, $w$ at the right node of cell $i$ is the
 exclusive prefix sum
 $$
 w_{i+1} = \sum_{k=1}^{i}(\theta_k - \theta_A)\,\Delta z_k
@@ -9076,18 +8686,18 @@ w_{i+1} = \sum_{k=1}^{i}(\theta_k - \theta_A)\,\Delta z_k
 \tag{11.9}
 $$
 
-The bottom-up sweep (loop `cell_idx = 1:n_cells`, `residual.jl:385`) starts at
-`w[1]=0` (substrate pinned, `residual.jl:382`) and accumulates
+The bottom-up sweep (loop `cell_idx = 1:n_cells`, `residual.jl`) starts at
+`w[1]=0` (substrate pinned, `residual.jl`) and accumulates
 `cumulative_velocity += θ_L * Δz_cell`, assigning the running total to the cell's
-right node (`residual.jl:407–411`). Because the strain rates of all cells below a
+right node (`residual.jl`). Because the strain rates of all cells below a
 node are summed, the top node moves at $w_{n+1} = \sum_k \theta_{L,k}\Delta z_k$,
 i.e. the surface velocity equals the total axial volume-change rate of the column,
 exactly tracking the receding (or expanding) surface.
 
 **Substrate boundary condition.** Pinning $w_1=0$ enforces zero normal mesh velocity
 at the impermeable substrate: the bottom node never moves, all motion is taken up
-above it, and the material "stacks up" toward the surface as it is consumed
-(`ale.md §6.2`, `volume_change.md` design subtlety 5). This is the natural choice
+above it, and the material "stacks up" toward the surface as it is consumed.
+This is the natural choice
 for a slab on a non-receding backing.
 
 ### 11.3.3 The column-global radial channel $\theta_A$ (WithChi)
@@ -9105,7 +8715,7 @@ $$
 \;}
 \tag{11.10}
 $$
-(`residual.jl:519–564`, `_compute_theta_A`). The column-average progress rate is the
+(`residual.jl`, `_compute_theta_A`). The column-average progress rate is the
 volume-weighted dry-gas production normalized by the total initial dry-solid mass,
 $$
 \frac{d\bar\chi}{dt} = \frac{1}{M_{\text{dry}}}\sum_{i=1}^{n}
@@ -9114,21 +8724,21 @@ $$
 M_{\text{dry}} = \sum_i m_{\text{dry},i},
 \tag{11.11}
 $$
-computed at `residual.jl:549–557`, with $\mathrm{law}'(\bar\chi)$ obtained by
-automatic differentiation `ForwardDiff.derivative(law, χ̄)` (`residual.jl:562`).
+computed at `residual.jl`, with $\mathrm{law}'(\bar\chi)$ obtained by
+automatic differentiation `ForwardDiff.derivative(law, χ̄)` (`residual.jl`).
 Guards: $\theta_A=0$ for identity-law materials, for missing `dξ_rxn`, for
 $M_{\text{dry}}\le\epsilon$, and for $\mathrm{law}(\bar\chi)\le\epsilon$ (preventing
-division by a vanishing cross-section, `residual.jl:539–541,560`). For the default
+division by a vanishing cross-section, `residual.jl`). For the default
 constant-cross-section material the dispatch returns exactly `0.0`
-(`residual.jl:293–302`, `NoChi`), and (11.8) reduces to the pure cumulative-strain
+(`residual.jl`, `NoChi`), and (11.8) reduces to the pure cumulative-strain
 integral. The interaction of $\theta_A$ with $\chi$-block dynamics and the lateral
 law is developed fully in Chapter 10; here it enters only as the scalar subtracted
 in (11.8).
 
 ### 11.3.4 Cell-centered velocity and the dilation correction
 
-The advection kernels need a *cell-centered* mesh velocity. It is the arithmetic
-mean of the bounding node velocities:
+The verification-only temperature advection (§11.2.2, §11.6) needs a *cell-centered*
+mesh velocity. It is the arithmetic mean of the bounding node velocities:
 $$
 \boxed{\;
 w_{\text{cell},i} = \tfrac12\big(w_{\text{left}} + w_{\text{right}}\big)
@@ -9136,9 +8746,7 @@ w_{\text{cell},i} = \tfrac12\big(w_{\text{left}} + w_{\text{right}}\big)
 \;}
 \tag{11.12}
 $$
-(`ale_fluxes.jl:227,449`). Node velocities are also interpolated to faces (faces
-co-locate with nodes in 1D) by $w_{\text{face},f} = w_{\text{node}[f.\text{node\_id}]}$
-(`residual.jl:417–423`, `_interpolate_node_to_face!`).
+(`compute_ale_advection_term!`, `ale_fluxes.jl`).
 
 The **dilation correction** implements the mesh-motion term of (11.5) for every
 component. For each cell $i$ and each component $j$,
@@ -9180,7 +8788,7 @@ and the energy update is (11.3) with the divergence and sources from Chapter 7.
 ## 11.4 Node-position update and geometric volume recompute
 
 In ALE mode the node positions $z_i$ are part of the ODE state vector (Chapter 13;
-`geometry.md §10`, `state_layout`), packed in the $z$-block at offset $n(1+N_C)$.
+`StateLayout`), packed in the $z$-block at offset $n(1+N_C)$.
 Their evolution equation is simply the mesh velocity,
 $$
 \boxed{\;
@@ -9188,29 +8796,14 @@ $$
 \;}
 \tag{11.15}
 $$
-written into the residual as `du[zoff+i] = ws.w_work[i]` (`residual.jl:204–207`).
+written into the residual as `du[zoff+i] = ws.w_work[i]` (`residual.jl`).
 The time integrator (Chapter 15) advances $z_i$ together with $(T,\xi,\chi)$ as one
 coupled stiff system; the structured Jacobian carries the $z$-*column* couplings
 in the geometry AD block and the $z$-*row* dependence on $(T,\xi)$ as embedded
 prefix-sum couplings (plus the WithChi $\theta_A$ rank-1 channels) emitted by
-the mesh-velocity provider (Chapter 15, §15.8.4 and §15.11.4).
+the `ALEMeshVelocityOperator` (Chapter 15, §15.8.4 and §15.11.3).
 
-### 11.4.1 Explicit node advance (mesh-motion utility)
-
-For the diagnostic / mesh-management path (`move_mesh!`), node positions are
-advanced by an explicit forward-Euler step,
-$$
-z_i^{\text{new}} = z_i^{\text{old}} + \Delta t\, w_i ,
-\tag{11.16}
-$$
-realized by constructing a fresh immutable `Node1D` per node (`mesh_motion.jl:44–56`;
-`ale.md §1.1`). The reference position $z_{\text{ref}}$ is left untouched so that
-displacements $z_i - z_{\text{ref},i}$ remain available (`mesh_motion.jl:267–276`).
-Within the implicit ODE solve, by contrast, $z_i$ is evolved through (11.15) by the
-integrator's own (higher-order, implicit) scheme — the explicit (11.16) is the
-formula used by the standalone `move_mesh!` and by the predictive GCL check.
-
-### 11.4.2 Geometric volume recompute
+### 11.4.1 Geometric volume recompute
 
 After the nodes are at their new positions, all cell volumes are recomputed
 **analytically from geometry**, not carried forward by a flux formula:
@@ -9219,31 +8812,28 @@ $$
 V_i^{\text{new}} = A(t)\,\big|z_{\text{right}} - z_{\text{left}}\big|
 = A(t)\,|z_{i+1}-z_i|
 \;}
-\tag{11.17}
+\tag{11.16}
 $$
 with the current (possibly $\chi$-updated) cross-section $A(t)$. Cell centers are the
 node midpoints,
 $$
 z_i^c = \tfrac12\big(z_i + z_{i+1}\big),
-\tag{11.18}
+\tag{11.17}
 $$
-and in 1D all face areas equal the global cross-section, $A_f = A(t)$
-(`mesh_motion.jl:62–83,100–106,113–134`; `geometry.md §6.1`,
-`geometric_quantities.jl:20–46`). During residual evaluation the same geometry is
-rebuilt directly from the state-vector node positions, type-stably (carrying
-`eltype(u)` so AD propagates through geometry), by
-`update_state_geometry!(…, ::ALE)` (`state_cache.jl:336–354`,
-`volume_change.md:153–166`) and `compute_geometry_from_state!`
-(`geometry.md §7.2`). This keeps the residual a pure function of $u$ that never
-mutates the mesh.
+and in 1D all face areas equal the global cross-section, $A_f = A(t)$. During
+residual evaluation this geometry is rebuilt directly from the state-vector node
+positions, type-stably (carrying `eltype(u)` so AD propagates through geometry), by
+`update_state_geometry!(…, ::ALE)` (`src/Problem/state_cache.jl`), after
+`update_cross_section_area!` has set $A(t)$. This keeps the residual a pure function
+of $u$ that never mutates the mesh; no separate volume is evolved, and the residual
+never reads the mesh's mirrored `cell_volumes`.
 
 **Why geometric recompute rather than a flux update?** Recomputing $V = A(t)\,L$
 from current node positions is robust to a simultaneous change in the cross-section
 $A(t)$ (variable-area mode): carrying $V_{\text{old}}$ across an $A(t)$ change via a
 pure axial-flux formula would freeze the old radial area into the volume. The
-geometric path bakes the current $A(t)$ into every volume automatically. As proved
-in §11.5, when geometry is computed correctly this path *still* satisfies the GCL to
-machine precision (`mesh_motion.jl:68–71` comment; `ale.md §6.1`).
+geometric path bakes the current $A(t)$ into every volume automatically. As shown
+in §11.5, this path satisfies the GCL as an algebraic identity.
 
 ---
 
@@ -9263,106 +8853,47 @@ and a right face (outward normal $+\hat z$, velocity $w_{\text{right}}$), both o
 area $A$, so
 $$
 \frac{dV_i}{dt} = A\,w_{\text{right}} - A\,w_{\text{left}} = A\,(w_{\text{right}} - w_{\text{left}})
-\tag{11.19}
+\tag{11.18}
 $$
-(`gcl.jl:1–9`; `geometry.md §8.1`, `compute_gcl_volume_rate`). Integrating over
-$[t,t+\Delta t]$ gives the **discrete GCL**:
-$$
-\boxed{\;
-V_i^{\text{new}} - V_i^{\text{old}} = \Delta t\,(w_{\text{right}} - w_{\text{left}})\,A
-\;}
-\tag{11.20}
-$$
-(`gcl.jl:24`). Why this matters: a GCL violation $\delta V$ acts as a *spurious mass
-and energy source*. If the discrete volume does not change by exactly the swept
-volume, the cell appears to gain or lose conserved quantity from nothing. Even tiny
-violations $\delta V/V\sim 10^{-6}$ accumulate over thousands of time steps and can
-dominate the genuine reaction-driven mass loss (`ale.md §7.2`). Exact GCL is
-therefore non-negotiable for long-time accuracy.
+for a constant cross-section. Why this matters: a GCL violation $\delta V$ acts as a
+*spurious mass and energy source*. If the discrete volume does not change by exactly
+the swept volume, the cell appears to gain or lose conserved quantity from nothing,
+and even tiny violations accumulate over thousands of time steps until they can
+dominate the genuine reaction-driven mass loss. Exact GCL is therefore
+non-negotiable for long-time accuracy.
 
 ### 11.5.2 Exactness of the geometric path
 
-Pyrolysis.jl's `move_mesh!` (with `use_gcl_volumes=true`, the default) does **not**
-apply the flux formula (11.20) directly; it recomputes $V_i = A|z_{i+1}-z_i|$ from
-the advanced nodes (11.17). We show these coincide to machine precision for constant
-$A$. After the explicit advance $z_{\text{left}}^{\text{new}} =
-z_{\text{left}}+\Delta t\,w_{\text{left}}$ and $z_{\text{right}}^{\text{new}} =
-z_{\text{right}}+\Delta t\,w_{\text{right}}$,
+Pyrolysis.jl never evolves a cell volume. The node positions are state (11.15) and
+every residual evaluation recomputes $V_i = A(t)\,|z_{i+1}-z_i|$ from them (11.16);
+every volume the residual uses (the divergences, the face distances, the
+$\chi$ source) is this one, so there is no second copy that could drift.
+Differentiating (11.16) along the semi-discrete trajectory, with $dz_i/dt = w_i$,
 $$
-V_i^{\text{new}} = A\,(z_{\text{right}}^{\text{new}} - z_{\text{left}}^{\text{new}})
-= A\big[(z_{\text{right}}-z_{\text{left}}) + \Delta t\,(w_{\text{right}}-w_{\text{left}})\big]
-= V_i^{\text{old}} + \Delta t\,(w_{\text{right}}-w_{\text{left}})\,A ,
+\frac{dV_i}{dt} = A\,(w_{i+1} - w_i) + |z_{i+1}-z_i|\,\frac{dA}{dt},
 $$
-which is exactly (11.20). The only deviation is floating-point round-off in the
-subtraction and multiplication, of order $10^{-15}$ relative (`ale.md §2.3, §6.1`).
-Hence the geometric path is GCL-exact by algebraic identity, while remaining robust
-to $A(t)$ changes. The explicit flux update is also available as the inline helper
-$$
-V_{\text{new}} = V_{\text{old}} + \Delta t\,(w_{\text{right}} - w_{\text{left}})\,A
-$$
-(`gcl_volume_update`, `gcl.jl:183–191`) for custom schemes, but it is *not* the path
-`move_mesh!` takes.
-
-### 11.5.3 GCL diagnostics
-
-Several verification functions monitor GCL compliance:
-
-- **Predictive check** `gcl_error(mesh, w, dt)` (`gcl.jl:34–77`): assuming the motion
-  has *not yet* occurred, computes for each cell the GCL-predicted change $\Delta
-  V_{\text{GCL}} = \Delta t\,(w_R-w_L)A$ and the would-be geometric change
-  $\Delta V_{\text{actual}} = |z_R^{\text{new}}-z_L^{\text{new}}|A - V_i$, and
-  returns the maximum relative error $\max_i |\Delta V_{\text{actual}} - \Delta
-  V_{\text{GCL}}|/|V_i|$. Expected value $\approx 10^{-15}$.
-
-- **Post-motion check** `gcl_error_post_motion(mesh, V_old, w, dt)`
-  (`gcl.jl:96–131`): after `move_mesh!`, compares the *actual* recorded $V_i^{\text
-  {new}}-V_i^{\text{old}}$ against $\Delta t\,(w_R-w_L)A$, returning the maximum
-  relative error.
-
-- **Boolean** `check_gcl(mesh, w, dt; tol=1e-12)` (`gcl.jl:152–155`): returns
-  `gcl_error(...) < tol`; the default tolerance is $10^{-12}$.
-
-- **Wrapped motion** `move_mesh_gcl!` (`mesh_motion.jl:354–381`): snapshots
-  $V_{\text{old}}$, calls `move_mesh!`, then `gcl_error_post_motion`, and `@warn`s
-  if the error exceeds `gcl_tol` (default $10^{-10}$).
-
-### 11.5.4 Generalized GCL for time-varying cross-section
-
-When the cross-section changes during the step ($A_{\text{old}}\ne A_{\text{new}}$,
-WithChi), the swept volume has two contributions: the axial face motion *and* the
-radial area change at constant length. The generalized discrete GCL is
+which is (11.18) plus the radial area change at constant length — the GCL for a
+time-varying cross-section holds by construction, with no separate correction. With
+the cumulative mesh velocity (11.8), $A(w_{i+1}-w_i) = A\,(\theta_i-\theta_A)\,\Delta z_i
+= V_i(\theta_i - \theta_A)$, and with $\theta_A = (1/A)\,dA/dt$ (11.10) the area term is
+$V_i\theta_A$, so
 $$
 \boxed{\;
-V_i^{\text{new}} - V_i^{\text{old}}
-\approx
-\underbrace{\Delta t\,(w_{\text{right}} - w_{\text{left}})\,A_{\text{new}}}_{\text{axial face flux}}
-\;+\;
-\underbrace{(A_{\text{new}} - A_{\text{old}})\,L_{\text{old}}}_{\text{radial area change}}
+\frac{dV_i}{dt} = V_i\,\theta_i
 \;}
-\tag{11.21}
 $$
-with $L_{\text{old}} = V_i^{\text{old}}/A_{\text{old}}$ (`gcl.jl:226–278`,
-`gcl_residual`; `ale.md §2.7`). The helper `gcl_residual(mesh, V_old, w, dt;
-A_old, A_new)` returns the maximum relative residual of (11.21) across active cells;
-pass `A_old`, `A_new` explicitly when verifying a step that crossed an $A(t)$ change.
-For $A_{\text{old}}=A_{\text{new}}$ the second term vanishes and (11.21) collapses to
-(11.20).
-
-### 11.5.5 GCL tracking over a run
-
-The `GCLTracker` (`gcl.jl:296–376`) accumulates the GCL error across the whole
-simulation:
-$$
-\text{max\_error} = \max_n e_n, \qquad
-\text{cumulative\_error} = \sum_n |e_n|\,\Delta t_n = \int_0^T|e(t)|\,dt ,
-$$
-counts steps with $e_n>$ tolerance (default $10^{-10}$), and records a
-`(time, error)` history (`update!`, `gcl.jl:328–339`; `report`, `gcl.jl:354–363`).
-The time-integrated norm $\int|e|\,dt$ is sensitive to *systematic* (rather than
-transient) bias, which is precisely what threatens long-time conservation
-(`ale.md §6.7`). In a healthy run per-step errors sit at $10^{-12}$–$10^{-14}$;
-sustained errors above $10^{-10}$ signal geometric degeneracy or an ill-conditioned
-mesh (Chapter 16, Conservation Diagnostics).
+exactly. Combined with the dilation correction (11.13), every component then obeys
+$d(\xi_{j,i}V_i)/dt = \big(S_{j,i} - (\nabla\!\cdot\mathbf J_j)_i\big)V_i$: a uniform
+field with no sources and no fluxes is preserved exactly, and a cell's mass changes
+only by reaction and by the skeleton-relative flux through its faces. After time
+discretization the integrator advances $z$ (hence $V$) and $\xi$ as one coupled
+system, so the identity holds to the integrator's local error with no additional
+geometric error term. The induced-motion MMS case V-MMS-04, whose mesh velocity is
+reaction-driven, verifies it; the free-stream and prescribed-motion cases V-MMS-02
+and V-MMS-03 (§18.2) drive the mesh through `Workspace.w_override`, where
+$\theta_i$ keeps its reaction-driven value, so they check the geometric path (a
+uniform field stays uniform, smooth fields converge at the design order) rather
+than this identity.
 
 ---
 
@@ -9414,7 +8945,7 @@ Both forms are written so the gradient is expressed in the $+z$ direction (posit
 when $f$ increases with $z$), and the advection term is then
 $$
 \text{advection}[i] = w_{\text{cell}}\,\left.\frac{\partial f}{\partial z}\right|_i
-\tag{11.22}
+\tag{11.19}
 $$
 (`compute_ale_advection_term!` for $T$ — override-only, with
 $w = w_{\text{rel}}$; `src/Discretization/ale_fluxes.jl`).
@@ -9436,7 +8967,7 @@ r = \frac{\text{grad}_1}{\text{grad}_0},
 \qquad
 \beta = \frac{d_0}{d_0+d_1}
 \;}
-\tag{11.23}
+\tag{11.20}
 $$
 (`_limited_gradient`, `src/Discretization/ale_fluxes.jl`), where $d_0$ is the
 center-to-center distance of the near slope segment (cell $i$ to the donor) and
@@ -9461,8 +8992,8 @@ $$
 \psi_{\text{vanleer}}(r)=\frac{r+|r|}{1+|r|},\quad
 \psi_{\text{superbee}}(r)=\max\!\big(0,\min(2r,1),\min(r,2)\big).
 $$
-The default for ALE advection is **Van Leer** (`limiter::Limiter = VANLEER`;
-`ale.md §4.4`). Guards: if there is no donor-donor cell, or the limiter is
+The default for ALE advection is **Van Leer** (the `limiter::Limiter = VANLEER`
+keyword of `compute_ale_advection_term!`). Guards: if there is no donor-donor cell, or the limiter is
 `NONE`, or $|\text{grad}_0|<10^{-20}$ (flat far slope — the ratio is undefined),
 the scheme falls back to first-order $\text{grad}_1$.
 
@@ -9473,8 +9004,7 @@ the stencil well-posed:
 
 1. **Zero-gradient ghost value.** A boundary ghost takes the boundary cell's own
    value, $f_{\text{ghost}} = f_{\text{cell}}$ (`_get_boundary_temperature`,
-   `ale_fluxes.jl:257–263`; analogous for $\xi$ via `col_upwind = i` when the upwind
-   neighbor is the boundary, `ale_fluxes.jl:487`). This is a Neumann (no-flux)
+   `ale_fluxes.jl`). This is a Neumann (no-flux)
    condition for scalar advection — physically appropriate, since there is no
    advective transport across the closed domain edge.
 
@@ -9483,8 +9013,8 @@ the stencil well-posed:
    $$
    d = \frac{V_i}{A_{\text{section}}} = \Delta z_i,
    $$
-   (`ale_fluxes.jl:288–297`). This is precisely `face_distance` evaluated at the
-   upwind face: the **center-to-center** spacing $|z_i^c - z_{\text{neighbor}}^c|$ for
+   (`ale_fluxes.jl`). This is the distance across the upwind face: the
+   **center-to-center** spacing $|z_i^c - z_{\text{neighbor}}^c|$ for
    an interior neighbor, and the center-to-ghost-cell spacing
    $\Delta z_i = 2\times(\text{center-to-face})$ for a boundary. Reusing the genuine
    center-to-center distance (rather than a naive cell width) preserves first-order
@@ -9493,9 +9023,9 @@ the stencil well-posed:
    value of $d$ is in any case **immaterial**: the closed edge uses a zero-gradient
    ghost (the upwind value is set equal to the cell's own value), so the first-order
    gradient is identically zero there and the TVD branch is disabled. Consequently
-   $d$ divides a zero numerator in the residual and the $+w/d$ and $-w/d$ face-local
-   AD partials cancel exactly in the structured-Jacobian scatter — no residual,
-   Jacobian, or dense-reference entry depends on it.
+   $d$ divides a zero numerator in the residual, and no residual or Jacobian entry
+   depends on it (the structured Jacobian carries no advection operator, §15.8.5;
+   override runs use finite-difference Jacobians).
 
 > **Implementation note.** Energy advection (override-only):
 > `compute_ale_advection_term!` with the shared limited gradient
@@ -9505,174 +9035,24 @@ the stencil well-posed:
 
 ---
 
-## 11.7 Conservative remapping (for AMR / mesh changes)
-
-When the mesh *topology* changes — adaptive refinement or coarsening (Chapter 14),
-or surface-cell depletion — the cell-centered state must be transferred from the old
-mesh to the new one. ALE node motion (§11.4) handles *continuous* deformation; it
-does not handle a change in the *number* of cells. The remapping operators in
-`src/Physics/remapping.jl` perform that transfer while preserving the conserved
-integrals (mass per species, thermal energy).
-
-### 11.7.1 State layout for remapping
-
-The remap operates on a **cell-interleaved** flat vector,
-$$
-u = [\,T_1, \xi_{1,1}, \dots, \xi_{N_C,1},\; T_2, \xi_{1,2},\dots,\; \dots\,],
-\qquad \text{idx}(i) = (i-1)(1+N_C),
-$$
-with $T$ first then the $N_C$ concentrations *per cell* (`remapping.jl:108,148–152`).
-This differs from the *block-major* ODE state vector of Chapter 13 (all $T$, then
-all $\xi_1$, …); the remap routines use their own cell-interleaved convention and
-the caller is responsible for packing/unpacking accordingly.
-
-### 11.7.2 Overlap geometry
-
-The unifying primitive is the **overlap volume** of a new cell $i_{\text{new}}$ and
-an old cell $i_{\text{old}}$. With cell extents $[z_L,z_R]$ on each mesh,
-$$
-z_L^{\text{ov}} = \max(z_L^{\text{new}},z_L^{\text{old}}),\quad
-z_R^{\text{ov}} = \min(z_R^{\text{new}},z_R^{\text{old}}),
-$$
-and, when $z_R^{\text{ov}}>z_L^{\text{ov}}$ (overlap exists),
-$$
-V_{\text{ov}} = (z_R^{\text{ov}} - z_L^{\text{ov}})\,A
-\tag{11.26}
-$$
-All conserved-quantity accumulation is weighted by $V_{\text{ov}}$. The remap
-is an instantaneous re-gridding at fixed time, so both meshes must describe
-the same physical configuration: the routines **validate** that the two
-meshes share one cross-section area $A$ (throwing `ArgumentError` otherwise)
-— mixing $A_{\text{old}}$ in the overlap volumes with $A_{\text{new}}$ in the
-division volumes would silently scale every concentration by
-$A_{\text{old}}/A_{\text{new}}$. $A(t)$ evolution belongs to the ODE (the
-$\chi$ swelling law, Chapter 10), never to the remap.
-
-### 11.7.3 First-order conservative remap
-
-**Temperature — energy-conserving.** When `material` is supplied, each overlap
-contributes its heat capacity $\rho c_p$, so the new-cell temperature conserves
-thermal energy:
-$$
-\boxed{\;
-T_{\text{new},i} = \frac{\sum_{\text{ov}}\rho c_p\,T_{\text{old}}\,V_{\text{ov}}}
-{\sum_{\text{ov}}\rho c_p\,V_{\text{ov}}}
-\;}
-\tag{11.27}
-$$
-with $\rho c_p = $ `effective_heat_capacity(ξ_old, T_old, material)`
-(`remapping.jl:155–159,180`). When `material === nothing` it degrades gracefully to
-plain volume weighting,
-$$
-T_{\text{new},i} = \frac{\sum_{\text{ov}} T_{\text{old}}\,V_{\text{ov}}}{\sum_{\text{ov}} V_{\text{ov}}}
-\tag{11.28}
-$$
-(`remapping.jl:161–163`). Energy-conserving is the recommended default for pyrolysis,
-where solid and char differ markedly in $\rho c_p$ (`ale.md §6.3`).
-
-**Concentration — mass-conserving.** Each component accumulates mass $\sum_{\text{ov}}
-\xi_{\text{old}}V_{\text{ov}}$, then is divided by the **new** cell volume so that the
-new-cell mass equals the summed contributions:
-$$
-\boxed{\;
-\xi_{\text{new},j,i} = \frac{\sum_{\text{ov}} \xi_{\text{old},j}\,V_{\text{ov}}}{V_{\text{new},i}}
-\;}
-\tag{11.29}
-$$
-(`remapping.jl:167–168,184–186`). Dividing by $V_{\text{new}}$ (not the overlap
-total) is exactly what makes $\xi_{\text{new}}V_{\text{new}} = \sum
-\xi_{\text{old}}V_{\text{ov}}$, i.e. mass-exact for partitioning meshes.
-
-> **Implementation note.** `remap_solution!(…, ::FirstOrderRemap; material)`,
-> `src/Physics/remapping.jl:97–214`.
-
-### 11.7.4 Second-order remap with gradient reconstruction
-
-The second-order method (`SecondOrderRemap`, default limiter `:minmod`,
-`remapping.jl:38–41`) reconstructs the old field linearly about each old cell center
-before integrating over overlaps. The reconstructed value at an overlap center
-$z_{\text{ov}}$ is
-$$
-T_{\text{recon}} = T_{\text{old},i} + \nabla T_{\text{old},i}\,(z_{\text{ov}} - z_{\text{old},i}^c),
-\tag{11.30}
-$$
-with cell-centered gradients computed by central, one-sided, or zero rules over the
-*actual* center-to-center distances on the (non-uniform, possibly partly inactive)
-old mesh (`compute_gradients_for_remap`, `remapping.jl:342–408`). The reconstructed
-contributions are accumulated and averaged exactly as in first order, then two
-**extrema-clamping limiters** are applied to suppress reconstruction overshoot:
-$$
-T_{\text{new}} \leftarrow \text{clamp}\big(T_{\text{new}},\,T_{\min}^{\text{old}},\,T_{\max}^{\text{old}}\big),
-\tag{11.31}
-$$
-$$
-\xi_{\text{new},j} \leftarrow \min\!\big(\max(\xi_{\text{new},j},0),\,\xi_{\max,j}^{\text{old}}\big),
-\tag{11.32}
-$$
-where the old-mesh extrema come from `extrema_values` (`remapping.jl:414–431`). The
-clamps enforce a discrete maximum principle (no new extrema, no negative
-concentrations) at the cost of *breaking* exact mass conservation — which the next
-step repairs.
-
-### 11.7.5 Limiter mass error
-
-Because the extrema clamps (11.31)–(11.32) perturb the integrals, the
-second-order remap carries a mass error of order $10^{-3}$–$10^{-5}$. (If a
-caller needs exact second-order conservation, a global per-component rescale
-$\xi \leftarrow \xi\,M_{\text{old}}/M_{\text{new}}$ against
-`check_remap_conservation`'s ledger is three lines.) First-order remap is
-mass-exact and is what the production depletion path effectively uses.
-
-### 11.7.6 Conservation check and fallback
-
-`check_remap_conservation` returns, per component, the relative mass error
-$$
-\text{mass\_error}_j = \frac{|M_{\text{new},j} - M_{\text{old},j}|}{|M_{\text{old},j}|},
-\quad M_j = \sum_i\xi_{j,i}V_i
-\tag{11.34}
-$$
-Expected: $\approx 10^{-14}$ for first-order without limiters;
-$10^{-3}$–$10^{-5}$ for second-order with limiting. When a new cell overlaps
-*no* active old cell (rare edge case), both methods fall back to copying the
-state of the nearest old cell by center-to-center distance
-(`find_nearest_cell`).
-
----
-
-## 11.8 Mesh quality and safety
+## 11.7 Mesh safety
 
 ALE motion can in principle tangle the mesh ($V_i\le 0$) if a node overtakes its
-neighbor, e.g. under an aggressive time step near complete burnout. Three utilities
-guard against this.
-
-- **`check_mesh_quality(mesh)`** (`mesh_motion.jl`) returns a named tuple:
-  `valid`, `min_volume`, `max_aspect_ratio` (largest ratio of spatially
-  adjacent active-cell sizes), and `tangled_cells`. Tangling is detected from
-  the **signed** cell width $z_R - z_L$ in node order, not from the cached
-  `cell_volumes` — those pass through `abs()`, so an inverted cell would
-  otherwise look like a perfectly valid thin cell and the rollback below
-  could never fire. Aspect-ratio adjacency is taken in spatial order (sorted
-  by cell center), which diverges from index order after h-refinement.
-
-- **`mesh_is_valid(mesh)`** (`mesh_motion.jl`) is the cheap boolean: `false`
-  if any active cell has non-positive signed width.
-
-- **`move_mesh_safe!(mesh, w, dt; max_aspect_ratio=10.0)`**
-  (`mesh_motion.jl:229–256`) snapshots nodes/volumes/time, performs the motion,
-  checks quality, and **rolls back** (restoring nodes, volumes, time, and
-  recomputing geometry) returning `false` if the result is invalid or the aspect
-  ratio exceeds the cap; otherwise returns `true`. This is the transactional motion
-  used where a step must be all-or-nothing.
-
-Within the implicit solve the integrator's own step-size control (Chapter 15) is the
-first line of defense; these utilities back the explicit mesh-management path and
-the AMR/depletion machinery (Chapter 14). The minimum-thickness floor `min_thickness`
-carried on the `Workspace` (`problem_residual.md`) likewise prevents surface cells
-from collapsing to zero during deep burns.
+neighbor, e.g. under an aggressive time step near complete burnout. Within the
+implicit solve the integrator's own step-size control (Chapter 15) is the first line
+of defense. With `handle_depletion = true`, depletion parking (Chapter 14) removes a cell that has thinned below a
+fraction of its initial thickness before it collapses; its detector
+(`find_thin_cells`) throws on a non-positive signed thickness, reporting an inverted
+cell as a mesh-motion failure rather than as depletion. The `min_thickness` keyword
+of `solve` (default
+$10^{-6}$ m) stops the solve through a termination callback when the live thickness
+$z_{n_{\text{live}}+1} - z_1$ falls below it (`create_thickness_termination_callback`,
+`src/Solver/callbacks.jl`). The mesh-quality metrics of §14.5 are diagnostics that
+`solve` does not call.
 
 ---
 
-## 11.9 Comparison to ThermaKin2Ds, Gpyro, and FDS
+## 11.8 Comparison to ThermaKin2Ds, Gpyro, and FDS
 
 The dynamic-mesh strategies of the three reference pyrolysis solvers map onto the
 Pyrolysis.jl ALE framework as follows. On first use we map their notation to ours:
@@ -9716,8 +9096,7 @@ Gpyro-style physics, the option of *physically* tracking the surface with a movi
 grid, which keeps in-depth resolution concentrated where it is needed without the
 non-uniform-$\Delta z$ tuning Gpyro relies on. Both codes share the same
 distance-weighted harmonic-mean face conductivity and volume-fraction/partial-
-pressure gradient gas-transport formulation (Chapters 7, 9;
-`discretization.md §3,§4`), so on a constant cross-section with $w=0$ the two
+pressure gradient gas-transport formulation (Chapters 7, 9), so on a constant cross-section with $w=0$ the two
 discretizations are directly comparable. Gpyro's lateral (in-plane) area changes are
 captured by Pyrolysis.jl's $\mathrm{law}(\bar\chi)$ and $\theta_A$ path.
 
@@ -9740,60 +9119,45 @@ guarantees that the moving grid introduces *no* spurious mass or energy.
 
 ---
 
-## 11.10 Limitations and open issues
+## 11.9 Limitations and open issues
 
-The following limitations are documented in the source and KB notes
-(`ale.md §11`, `volume_change.md` Open Questions, `discretization.md §15`,
-`jacobian.md`):
+The principal limitations and open issues are:
 
 1. **Dimensionality.** The framework is implemented only for 1D ($D=1$). The mesh
-   data structures (`MeshTopology{D,…}`, `MeshGeometry{D}`) are parameterized by
-   dimension, and the GCL is written as a face-flux sum, but a 2D/3D extension would
+   data structures `MeshTopology{D,…}` and `MeshGeometry{D}` are parameterized by
+   dimension but are placeholders for a multi-dimensional extension — the 1D
+   residual reads `Mesh1D` and the `StateCache`, not them. A 2D/3D extension would
    require vector node positions, per-face normals and variable areas, the full
-   divergence-theorem GCL, and surface-integral fluxes (`geometry.md §13`,
-   `ale.md §11`). The current code assumes a spatially uniform (though time-varying)
-   cross-section.
+   divergence-theorem GCL, and surface-integral fluxes. The current code assumes a
+   spatially uniform (though time-varying) cross-section.
 
 2. **Separation of axial and radial motion.** Variable cross-section is handled by
    splitting axial ALE motion (with $\theta_A$ subtracted) from a separate radial
    cross-section update via $\mathrm{law}(\bar\chi)$, requiring careful sequencing
    (compute axial velocity, then update area). A unified space-time ALE treatment of
-   both channels simultaneously is not implemented (`ale.md §11`, item 1).
+   both channels simultaneously is not implemented.
 
-3. **Order of the explicit mesh advance.** The standalone `move_mesh!` advances nodes
-   with first-order forward Euler (11.16). Higher-order *explicit* mesh motion would
-   need substeps or a space-time formulation; within the implicit ODE solve, $z_i$ is
-   integrated to the solver's order, so this limitation affects only the diagnostic
-   mesh-management path (`ale.md §11`, item 3).
-
-4. **Remap limiter placement and order selection.** The second-order remap applies
-   TVD/extrema limiters *after* volume-weighted averaging rather than *during*
-   reconstruction, which can permit small violations of the discrete maximum
-   principle and a $10^{-3}$–$10^{-5}$-level mass error (§11.7.5). The
-   choice between first- and second-order remap is left to the caller; there
-   is no automatic, error-estimate-driven order selection
-   (`ale.md §11`, items 4–5).
-
-5. **Density evaluation in the strain rate.** The volume-change rate (11.6) uses
+3. **Density evaluation in the strain rate.** The volume-change rate (11.6) uses
    $\rho_j(T)$ at the instantaneous cell temperature; whether an implicit or
    time-averaged density would improve consistency near steep thermal transients is
    an open modeling question, as is the extension of the volume-change accounting to
-   multi-reactant stoichiometry (`volume_change.md` open questions 1–2).
+   multi-reactant stoichiometry.
 
-6. **Jacobian profile trade-offs.** The structured Jacobian (Chapter 15) represents
-   the cumulative mesh velocity as a `PrefixSumCoupling`, the column-global $\theta_A$
-   back-reaction as a `Rank1Coupling`, and the $z$-columns as a dedicated geometry
-   AD block. Under the `:ale_reduced` profile (used by `ApproxSolve`) the cumulative
-   widening, geometry block, and $\chi$-column rank-1 are *dropped*, trading exact
+4. **Jacobian profile trade-offs.** The structured Jacobian (Chapter 15) represents
+   the cumulative mesh velocity as embedded prefix-sum couplings, the column-global
+   $\theta_A$ back-reaction as `EmbeddedRank1Coupling`s, and the $z$-columns as a
+   dedicated geometry AD block. Under the `:ale_reduced` profile (used by `ApproxSolve`) every structured
+   coupling (the prefix sums and the $\theta_A$ rank-1 channels, $\chi$ column
+   included) and the geometry block are *dropped*, trading exact
    coupling for speed; the WithChi$\times$Darcy interaction is exercised mainly with
-   Fickian transport (`jacobian.md`, open issues). These are solver-accuracy/cost
-   choices rather than physical limitations of the ALE formulation itself.
+   Fickian transport. These are solver-accuracy/cost choices rather than physical
+   limitations of the ALE formulation itself.
 
-7. **Solid-Lagrangian capability boundary: no general (non-material) mesh
+5. **Solid-Lagrangian capability boundary: no general (non-material) mesh
    motion.** As stated in §11.1.2, the formulation identifies mesh velocity
    with solid material velocity and gives no component a discrete advection
    operator. Consequently mesh motion decoupled from the solid — remeshing,
-   mesh smoothing/redistribution, prescribed node motion, AMR performed
+   mesh smoothing/redistribution, prescribed node motion, refinement performed
    *within* the ALE frame — is outside the representable class: a field that
    is static in the laboratory frame but non-uniform in $z$ cannot be held
    stationary under such motion, because its $w\,\partial_z\xi$ contribution
@@ -9820,13 +9184,13 @@ The following limitations are documented in the source and KB notes
 - The volume-fraction/partial-pressure gas flux and Darcy velocity are in **Chapter
   9, Gas-Phase Mass Transport & Pressure**.
 - Flux limiters and the finite-volume divergence operator are in **Chapter 13,
-  Finite-Volume Discretization**; the remap operators support **Chapter 14, Adaptive
-  Mesh Refinement**.
-- The structured Jacobian couplings for ALE mesh velocity, advection, dilation, and
-  the geometry block, and the time integration of the coupled $(T,\xi,z,\chi)$ system
+  Finite-Volume Discretization**; depletion parking, which changes the live cell
+  count under ALE, is in **Chapter 14, Adaptive Mesh Refinement and Surface
+  Depletion**.
+- The structured Jacobian couplings for ALE mesh velocity, dilation, and the
+  geometry block, and the time integration of the coupled $(T,\xi,z,\chi)$ system
   are in **Chapter 15, Temporal Integration & Structured Jacobian**.
-- GCL tracking as a conservation diagnostic is in **Chapter 16, Conservation
-  Diagnostics**.
+- The mass and energy ledgers are in **Chapter 16, Conservation Diagnostics**.
 
 
 ---
@@ -9845,9 +9209,8 @@ and sign convention as implemented; explains the type-stable
 initial-condition closures and their auto-defaults. Throughout, the equations are
 checked term-by-term against the source so that the math and the code agree
 exactly — including the boundary-face sign flips, the Kirchhoff emissivity
-coupling, the neglected $d\varepsilon/dT$ term, and the strict mutual exclusion of
-the surface transpiration term with the volumetric advection source
-$S_{\text{conv}}$.
+coupling, the neglected $d\varepsilon/dT$ term, and the absence of a surface
+gas-enthalpy term alongside the volumetric advection source $S_{\text{conv}}$.
 
 This chapter conforms to the unified nomenclature of §2, Nomenclature, and uses
 the three binding sign conventions: positive flux is transport in the $+z$
@@ -9871,7 +9234,7 @@ are
 
 $$
 \rho c_p^{\text{eff}}\,\frac{\partial T}{\partial t}
-= -\nabla\!\cdot\mathbf{q}_{\text{cond}} + S_{\text{conv}} + S_{\text{gen}}
+= -\nabla\!\cdot\mathbf{q}_{\text{cond}} + S_{\text{conv}}
    + Q_{\text{rad}} + Q_{\text{rxn}},
 \qquad
 \frac{\partial \xi_j}{\partial t}
@@ -9913,16 +9276,18 @@ supertype declared in the `Materials` module:
   `Experimental` module; see §8, Thermal Radiation).
 
 Concrete types live in the `BoundaryConditions` module
-(`src/BoundaryConditions/boundary_conditions.jl`), flux evaluation lives in
-`src/Discretization/boundary_fluxes.jl`, and the surface-temperature Newton solve
-lives in `src/Discretization/boundary_temperature.jl`. The whole set is stored in
+(`src/BoundaryConditions/boundary_conditions.jl`); the thermal flux laws with their
+$T_s$ derivatives (`evaluate_bc_flux_and_derivative`) and the surface-temperature
+Newton solve live in `src/Discretization/boundary_temperature.jl`, and the mass-BC
+flux laws (`mass_bc_flux`) and the diagnostic heat-flux decomposition
+(`compute_boundary_heat_fluxes`) in `src/Discretization/boundary_fluxes.jl`. The whole set is stored in
 a type-stable, tag-keyed `BoundaryConditionSet` (§12.7) so that the residual
 specializes statically with zero dispatch overhead.
 
 > **Implementation note.** Concrete BC types and the `BoundaryConditionSet`
 > container are defined in `src/BoundaryConditions/boundary_conditions.jl`; flux
-> laws and their derivatives in `src/Discretization/boundary_fluxes.jl` and
-> `src/Discretization/boundary_temperature.jl`; BC application into the flux
+> laws in `src/Discretization/boundary_fluxes.jl` (mass BCs) and, for thermal BCs
+> with their $T_s$ derivatives, `src/Discretization/boundary_temperature.jl`; BC application into the flux
 > arrays in `src/Discretization/finite_volume.jl` (`apply_thermal_bc_flux!`,
 > `apply_mass_bc_flux!`); pressure BCs in `src/Discretization/darcy_velocity.jl`
 > (`apply_pressure_bc_to_darcy_velocity!`).
@@ -9930,7 +9295,7 @@ specializes statically with zero dispatch overhead.
 ### 12.1.3 The boundary-face sign convention
 
 Two boundaries exist in 1D, with the **binding** id/tag/position mapping
-(`src/Geometry/topology.jl:77`, `src/Geometry/mesh_generation.jl:127–128`):
+(`src/Geometry/topology.jl`, `src/Geometry/mesh_generation.jl`):
 
 | Tag | `boundary_id` | Position | Face id |
 |---|---|---|---|
@@ -9952,8 +9317,8 @@ q[f_{\text{bottom}}] = +q_{\text{conducted}}, \qquad
 q[f_{\text{top}}] = -q_{\text{conducted}},
 $$
 
-and identically for mass fluxes (`finite_volume.jl:550–554`, `590–596`,
-`712–716`). This is not a bug; it is the consistent realization of the signed
+and identically for mass fluxes (`apply_thermal_bc_flux!`, `apply_mass_bc_flux!`,
+`finite_volume.jl`). This is not a bug; it is the consistent realization of the signed
 divergence. We return to it in §12.2.5 and §12.4.4.
 
 ---
@@ -9994,13 +9359,12 @@ $$
 where $\Delta z_{1/2}$ is the distance from the boundary face to the first cell
 center and $k_{\text{eff}}$ is the effective conductivity of the boundary cell
 (§5, Effective Properties & Mixing Rules). Both sides are positive when heat
-flows into the material. This is **Formulation A**, the non-conservative
-convention in which the gas enthalpy carried by the flux relative to the
-skeleton is transported by the volumetric source $S_{\text{conv}}$ (§7) rather
-than by a surface blowing term; under local thermal equilibrium the gas crosses
-the surface at $T_s$ on both sides, so no surface enthalpy term exists (§1.4.3).
-The optional transpiration extension (§12.9) adds a surface enthalpy sink and is
-**off by default** and rejected at construction.
+flows into the material. The gas enthalpy carried by the flux relative to the
+skeleton is transported by the volumetric source $S_{\text{conv}}$ (§7), not by
+a surface term; under local thermal equilibrium the gas crosses the surface at
+$T_s$ on both sides, so the balance has no gas-enthalpy term (§1.4.3, §7.4.3). The
+outward gas flux enters the balance only through the blowing model of a
+`ConvectiveBC`, which scales the convective coefficient (§12.3.3).
 
 The conductive distance is exactly half the boundary cell's thickness, computed
 from state-dependent geometry (AD- and ALE-clean) as
@@ -10008,7 +9372,7 @@ from state-dependent geometry (AD- and ALE-clean) as
 $$
 \Delta z_{1/2}
 = \frac{1}{2}\,\frac{V_{\text{cell}}}{A_{\text{face}}}
-\qquad\text{(`boundary\_temperature.jl:563`)}.
+\qquad\text{(`boundary\_temperature.jl`)}.
 $$
 
 Using the half-width (rather than the full cell width) places the surface at the
@@ -10020,21 +9384,18 @@ correct one-sided gradient for a cell-centered scheme.
 Define the surface residual
 
 $$
-f(T_s) \;=\; q_{\text{BC}}(T_s)\;-\;q_{\text{cond}}(T_s)\;-\;q_{\text{transpire}}(T_s),
+f(T_s) \;=\; q_{\text{BC}}(T_s)\;-\;q_{\text{cond}}(T_s).
 $$
 
-where the transpiration term $q_{\text{transpire}}=\sum_g \dot m_g\,\Delta
-h_g(T_s,T_\infty)$ is zero in the default configuration (§12.9). The root
-$f(T_s)=0$ is found by damped Newton iteration
+The root $f(T_s)=0$ is found by Newton iteration
 
 $$
-T_s^{(k+1)} = T_s^{(k)} - \omega\,\frac{f(T_s^{(k)})}{f'(T_s^{(k)})},
+T_s^{(k+1)} = T_s^{(k)} - \frac{f(T_s^{(k)})}{f'(T_s^{(k)})},
 \qquad
 f'(T_s) = \frac{dq_{\text{BC}}}{dT_s} - \frac{k_{\text{eff}}}{\Delta z_{1/2}}
-          - \frac{dq_{\text{transpire}}}{dT_s},
 $$
 
-with under-relaxation $\omega=1$ by default (`boundary_temperature.jl:168–205`).
+(`solve_boundary_temperature!`, `boundary_temperature.jl`).
 The initial guess is the adjacent cell temperature clamped to the property
 bracket, $T_s^{(0)} = \min\bigl(\max(T_{\text{cell}}, 200\ \text{K}),
 3000\ \text{K}\bigr)$, so the solve is a pure function of its arguments. The
@@ -10051,12 +9412,16 @@ present; the BC derivatives are given per-type in §12.2.4.
 the dominant physical flux,
 
 $$
-|f(T_s)| < \texttt{tol}\cdot
-\max\!\bigl(|q_{\text{BC}}|,\,|q_{\text{cond}}|,\,|q_{\text{transpire}}|,\,1\bigr),
+|f(T_s)| < \max\!\Bigl(\texttt{tol}\cdot
+\max\!\bigl(|q_{\text{BC}}|,\,|q_{\text{cond}}|,\,1\bigr),\ f_{\text{floor}}\Bigr),
 \qquad \texttt{tol}=10^{-10},
 $$
 
-with a maximum of 50 iterations (`boundary_temperature.jl:184–193`). Scaling by
+with a maximum of 50 iterations. The floor
+$f_{\text{floor}} = 32\,\epsilon_{\text{mach}}\max(|T_s|,1)\,\bigl(k_{\text{eff}}/\Delta z_{1/2}+|dq_{\text{BC}}/dT_s|\bigr)$
+is the flux change from a few ulps of $T_s$: the conducted flux is a difference of
+two temperatures, so a face with near-zero net flux cannot resolve its residual
+below it. Scaling by
 the dominant flux makes the criterion meaningful whether the surface flux is
 $\sim 10^4$ W·m⁻² (cone) or near zero (near-adiabatic). **Nothing aborts on
 non-convergence**: on max-iterations or a vanishing Jacobian
@@ -10066,7 +9431,7 @@ flux evaluation at the unconverged iterate; the ODE integrator's step-error
 control is the backstop that rejects a step built on a bad surface state.
 
 **Clamping.** Each Newton iterate is clamped to the physical window
-$[200,\,3000]$ K (`boundary_temperature.jl:202–204`) to prevent unphysical
+$[200,\,3000]$ K to prevent unphysical
 excursions during the transient. The clamp constructs the clamped value with
 **zero ForwardDiff partials** (ForwardDiff `convert` semantics) — derivatives
 do *not* ride along through a clamped iterate. This self-heals in the normal
@@ -10087,24 +9452,23 @@ unique.
 
 The solver is written to carry whatever scalar type its inputs carry. It promotes
 to the widest type among $(T_{\text{cell}}, k_{\text{eff}}, \Delta z_{1/2},
-T_\infty, t, \varepsilon_{\text{eff}}, \dot m_g)$
-(`boundary_temperature.jl:154–162`); under sensitivity analysis (§17, Sensitivity
+t, \varepsilon_{\text{eff}}, a_{\text{eff}}, \dot m_g)$; under sensitivity analysis (§17, Sensitivity
 Analysis) this is a `ForwardDiff.Dual`. The Newton *convergence test* uses
 `ForwardDiff.value(f)` (the primal residual), so the iteration count is identical
 with or without AD, while the returned tuple $(T_s,\,q_{\text{applied}},\,
 q_{\text{conducted}})$ is fully Dual-typed and carries sensitivities into the
-Jacobian (`boundary_temperature.jl:207–227`). One guard is needed: on the very
-first iteration under AD the perturbed residual may pass the primal tolerance
-while the dual part has not yet propagated, so convergence is suppressed for
-`dual_mode && i==1` (`boundary_temperature.jl:190`). The diagnostic
+Jacobian. One guard is needed: on the very first iteration under AD the
+perturbed residual may pass the primal tolerance while the dual part has not yet
+propagated, so convergence is suppressed for `dual_mode && i==1`. The diagnostic
 `BoundaryState` stores plain `Float64` (it is bookkeeping, never differentiated).
 
 ### 12.2.4 Per-type flux and derivative
 
 The Newton kernel calls `evaluate_bc_flux_and_derivative(bc, T_s, t, ε_eff,
-radiation_model)`, which returns $(q_{\text{BC}}, dq_{\text{BC}}/dT_s)$ for each
+radiation_model, face)` (the `BlowingFace` at the iterate, read only by convective
+BCs, §12.3.3), which returns $(q_{\text{BC}}, dq_{\text{BC}}/dT_s)$ for each
 concrete thermal BC. The exact pairs (verified against
-`boundary_temperature.jl:307–429`) are collected below; the
+`boundary_temperature.jl`) are collected below; the
 $\varepsilon_{\text{eff}}$ argument is the composition-weighted effective surface
 emissivity from the property cache and the keyword `a_eff` (default
 $\varepsilon_{\text{eff}}$) the effective surface absorptivity for incident
@@ -10133,12 +9497,12 @@ $$
   \;+\; F\,\frac{d\varepsilon}{dT_s}\,\sigma\,(T_\infty^4 - T_s^4),
 $$
 
-but the code keeps only the first term (`boundary_temperature.jl:373–377`). The
+but the code keeps only the first term. The
 omitted term is part of the Newton *Jacobian* of the iteration, not the residual
 itself — the residual still uses the true $\varepsilon(T_s)$ — so the converged
 $T_s$ is unbiased; only the convergence rate degrades from quadratic to
 super-linear when $d\varepsilon/dT$ is large. This is documented as a known
-limitation (§12.13).
+limitation (§12.12).
 
 ### 12.2.5 Application into the flux array and the sign flip
 
@@ -10154,7 +9518,7 @@ q[f] =
 \end{cases}
 $$
 
-(`finite_volume.jl:590–596`). Writing the conducted flux (rather than the applied
+(`finite_volume.jl`). Writing the conducted flux (rather than the applied
 flux) is what makes the scheme energy-conserving: the divergence operator then
 sees the flux that actually enters the first interior cell, and the surface energy
 balance $q_{\text{BC}}=q_{\text{cond}}$ guarantees that the energy delivered at
@@ -10211,10 +9575,13 @@ component emissivity enter the surface energy row exactly.
 
 ### 12.2.7 `BoundaryState` storage
 
-The per-boundary diagnostic record (`src/Geometry/mesh.jl:29–39`) holds the
-solved surface temperature, the applied flux, the conducted flux, the
-transpiration flux, the inputs $(T_{\text{cell}}, k_{\text{eff}}, \Delta z_{1/2})$,
-and convergence metadata (`converged`, `iterations`). All fields are `Float64`;
+The per-boundary diagnostic record (`src/Geometry/mesh.jl`) holds the
+solved surface temperature, the applied flux, the conducted flux, the inputs
+$(T_{\text{cell}}, k_{\text{eff}}, \Delta z_{1/2})$, convergence metadata
+(`converged`, `iterations`), and the blowing diagnostics at the converged $T_s$
+(`blowing_mcp`, `blowing_ratio`, and the pooling-model fields `pooling_factor`,
+`face_fraction`, `face_buoyancy`; §12.3.3). The fields are plain `Float64`
+(`converged` a `Bool`, `iterations` an `Int`);
 they are diagnostics and are never differentiated. The live (possibly Dual-typed)
 quantities are returned from the solve and flow into the residual.
 
@@ -10231,8 +9598,8 @@ Perfect insulation: $q_{\text{BC}}=0$, $dq_{\text{BC}}/dT_s=0$. The surface ener
 balance reduces to $q_{\text{cond}}=0$, hence $T_s=T_{\text{cell}}$ — the surface
 floats to the adjacent cell temperature with zero conduction across the face.
 Typical for the substrate face in a cone-calorimeter idealization with a
-well-insulated back. (`boundary_fluxes.jl:43`,
-`boundary_temperature.jl:307–314`.)
+well-insulated back. (`boundary_fluxes.jl`,
+`boundary_temperature.jl`.)
 
 ### 12.3.2 `HeatFluxBC`
 
@@ -10240,7 +9607,7 @@ A prescribed flux $q_{\text{BC}}=q(t)$, constant (`HeatFluxBC{<:Real}`) or a
 function of time (`HeatFluxBC{<:Function}`), independent of $T_s$ so
 $dq_{\text{BC}}/dT_s=0$. The Newton solve still runs to find the $T_s$ that
 balances this against conduction. Sign: positive $q$ heats the material.
-(`boundary_fluxes.jl:46–47`, `boundary_temperature.jl:319–335`.)
+(`boundary_fluxes.jl`, `boundary_temperature.jl`.)
 
 > **$T_s$ is a half-cell extrapolation.** For a pure prescribed-flux boundary
 > the surface Newton reduces to the linear extrapolation
@@ -10252,11 +9619,10 @@ balances this against conduction. Sign: positive $q$ heats the material.
 > the Landau traveling-wave identity of V-CPL-02 through
 > $v_{ss}(\text{measured}\ T_s)$: with the reaction zone under-resolved
 > ($\Delta z \approx 2\delta_r$) the identity misses by ≈1.3 %, collapsing to
-> ≈5×10⁻⁴ once $\Delta z \lesssim \delta_r$. (It was *not*, however, the
-> source of the ≲1 % *mesh-independent* residual pinned there before
-> 2026-07-07 — that was the wave-development transient of the uniform-$T_0$
-> start, resolved by moving the measurement window to ≥6 development time
-> constants.) Interpret surface-temperature outputs under `HeatFluxBC`
+> ≈5×10⁻⁴ once $\Delta z \lesssim \delta_r$. (A *mesh-independent* residual
+> of up to about 1 % has a different source, the wave-development transient of
+> a uniform-$T_0$ start; the case measures after at least six development time
+> constants to exclude it.) Interpret surface-temperature outputs under `HeatFluxBC`
 > accordingly, and refine the near-surface mesh when $T_s$ itself is a target
 > quantity.
 
@@ -10273,8 +9639,7 @@ Both $h_{\text{conv}}$ and $T_\infty$ may be constants or functions of $t$
 $T_\infty>T_s$ and negative (cooling) otherwise, so for a hot surface in a cool
 ambient this is a convective loss. Because the derivative is the constant
 $-h_{\text{conv}}$, the contribution to the Newton residual is linear and exactly
-resolved in a single step. (`boundary_fluxes.jl:50–54`,
-`boundary_temperature.jl:340–352`.)
+resolved in a single step. (`boundary_temperature.jl`.)
 
 **Blowing.** Every `ConvectiveBC` carries a blowing model (`bc.blowing`, an
 `AbstractBlowingModel`, default `NoBlowing()`), and the surface balance applies
@@ -10283,10 +9648,9 @@ flux of every component, read from the same `J_gas[:, f]` the mass-flux pass
 populates (film-law diffusion plus, in Darcy–Fick mode, the pressure-BC venting
 flux), the surface-temperature iterate and the material (`BlowingFace`,
 `Discretization/blowing.jl`). The convective flux is $h\,\chi\,(T_\infty - T_s)$
-with $\chi = h_{\text{eff}}/h$ from the model (`blowing_state`). This is the
-**momentum-side companion** of the transpiration enthalpy term: it modifies
+with $\chi = h_{\text{eff}}/h$ from the model (`blowing_state`). It modifies
 only the convective *coefficient*, not the gas enthalpy accounting, so it
-composes exactly with the $S_{\text{conv}}$-only convention (§7.6) — no
+composes exactly with the $S_{\text{conv}}$-only convention (§7.4.3) — no
 double-count is possible. Zero outflow gives $\chi = 1$ exactly for every
 shipped model, so the back face is unaffected automatically.
 
@@ -10368,22 +9732,23 @@ apparatus flow, as $h$ does.
 The factor is evaluated by the numerically stable `blowing_factor` (Taylor
 branch at $|\phi|<10^{-5}$, overflow-safe $\phi\,e^{-\phi}/(1-e^{-\phi})$ form for
 large $\phi$). The Newton derivative uses the frozen-$\chi$ form $-h\,\chi$ —
-first-order consistent, the same convention as the transpiration derivative
-(§12.9), so convergence is marginally sub-quadratic and the converged root is
-exact. Each convective member of a `CombinedThermalBC` applies its own model
+first-order consistent, so convergence is marginally sub-quadratic and the
+converged root is exact. Each convective member of a `CombinedThermalBC` applies its own model
 against its own $h$ and $T_\infty$; all other BC types are untouched. At the
 converged $T_s$ the `BoundaryState` records the blowing conductance
 `blowing_mcp`, the applied ratio `blowing_ratio` and, for the pooling model,
 `pooling_factor`, `face_fraction` and `face_buoyancy` (the first convective
-member's), and the solution extras carry them per output time. The structured
+member's), and the solution extras carry the ratio and the pooling fields per
+output time (`surface_blowing_ratio`, `surface_pooling_factor`,
+`surface_face_fraction`, `surface_face_buoyancy`). The structured
 Jacobian's `BCThermalOperator` and `BCConvectionOperator` rebuild $\dot m''$
 from the stencil state via the shared boundary-face kernel, so the
 $\partial(h\chi)/\partial(T_b,\xi_b)$ chain is exact (support-complete strict
 verification passes with the film and pooling models in Fickian, Darcy–Fick
 and ALE modes). Giving a convective BC a model on a case calibrated with the
 bare coefficient will raise $T_s$ and MLR; introduce it together with flame
-heat-flux feedback before any recalibration pass (the two partially cancel —
-see the physics roadmap, `docs/Physics_Audit_2026-06-09.md`).
+heat-flux feedback before any recalibration pass (the two partially cancel;
+§1.8.1).
 (`Materials/blowing_models.jl` types and gas data,
 `Discretization/blowing.jl` evaluation.)
 
@@ -10405,8 +9770,7 @@ $T_\infty$. This term is the surface's own re-radiation to and absorption from a
 gray environment; it is the dominant cooling mechanism for a hot pyrolyzing
 surface. The cubic temperature derivative is the source of the $\sim$20% error
 that would result from naively evaluating radiation at the cell-center
-temperature — and the reason the Newton solve exists. (`boundary_fluxes.jl:58–68`,
-`boundary_temperature.jl:357–380`.)
+temperature — and the reason the Newton solve exists. (`boundary_temperature.jl`.)
 
 The neglected $d\varepsilon/dT$ term (§12.2.4) applies here when $\varepsilon$ is
 temperature-dependent.
@@ -10417,12 +9781,14 @@ This BC represents incident radiation from an *external* source (cone heater,
 furnace, radiant panel) — not the surface's own emission. The absorbed fraction is
 $\alpha\,q_{\text{ext}}$, where $q_{\text{ext}}=$ `flux` (constant or $q(t)$) and
 the absorptivity $\alpha$ is either supplied or, when `nothing`, defaults to
-$\varepsilon_{\text{eff}}$ via Kirchhoff's law (§12.2.6).
+the mixture surface absorptivity $a_{\text{eff}}$, which equals $\varepsilon_{\text{eff}}$
+by Kirchhoff's law unless a component sets its own `absorptivity` (§12.2.6).
 
 Its behavior is **dispatched on the global `radiation_model`** passed to
 `solve()` (§8, Thermal Radiation). Note the defaults diverge: `solve()`
 defaults to `NO_RADIATION`, while several internal helpers
-(`apply_thermal_bc_flux!`, lower-level RHS entry points) default to
+(`apply_thermal_bc_flux!`, `update_boundary_state!`, `solve_boundary_temperature!`
+and the solution extractors) default to
 `SURFACE_ABSORPTION` — a trap for direct callers of the internals; always
 pass `radiation_model` explicitly when bypassing `solve()`. The crucial
 design point is that incident radiation must be deposited exactly once:
@@ -10432,12 +9798,12 @@ design point is that incident radiation must be deposited exactly once:
   $$q_{\text{BC}} = \alpha\,q_{\text{ext}}(t), \qquad dq_{\text{BC}}/dT_s = 0,$$
   so the absorbed flux enters the surface energy balance and correctly raises
   $T_s$ above $T_{\text{cell}}$ when there is net heating
-  (`boundary_temperature.jl:414–423`).
+  (`boundary_temperature.jl`).
 - **`BEER_LAMBERT` and `P1_QUASI_STEADY`**: the radiation is deposited
   *volumetrically* by `compute_radiation_source!` (Beer–Lambert) or by the P1
   residual path. To avoid double-counting, the boundary flux is forced to zero,
   $$q_{\text{BC}} = 0, \qquad dq_{\text{BC}}/dT_s = 0$$
-  (`boundary_temperature.jl:425–429`, `boundary_fluxes.jl:84–99`).
+  (`boundary_temperature.jl`, `boundary_fluxes.jl`).
 
 A note on consistency. The *Newton-solve* evaluator
 (`evaluate_bc_flux_and_derivative`) applies $\alpha q_{\text{ext}}$ as a boundary
@@ -10451,13 +9817,13 @@ boundary flux suppressed. The diagnostic decomposition
 flux the Newton balance actually applies — $\alpha q_{\text{ext}}$ is inside
 `net` under `NO_RADIATION`/`SURFACE_ABSORPTION` and absent under
 `BEER_LAMBERT`/P1, where the volumetric deposit is reported separately as
-`extras.volumetric_absorption` (§12.10.1).
+`extras.volumetric_absorption` (§12.9.1).
 
 > **Implementation note.** The incident intensity is extracted at compile time
 > from the (possibly combined) BC by `extract_radiative_flux_from_bcs(bc_set,
 > Val(tag), t)`, which returns `(I, has_explicit_absorptivity)` — the flux with
 > an explicit absorptivity already folded in, or the bare incident flux whose
-> $\varepsilon_{\text{eff}}$ scaling happens at injection
+> $a_{\text{eff}}$ scaling happens at injection
 > (`boundary_conditions.jl`, §8.3.4). The intensity is passed as `I_radiation`
 > to `compute_rhs!` together with the `radiation_kirchhoff` flag.
 
@@ -10514,38 +9880,11 @@ q_{\text{BC}} = \sum_m q_{\text{BC},m}(T_s,t),\qquad
 $$
 
 The sum is built by a `@generated` function that unrolls the tuple at compile time
-for type stability (`boundary_temperature.jl:460–514`,
-`boundary_fluxes.jl:109–120`). Because the radiation model can affect a
+for type stability (`boundary_temperature.jl`). Because the radiation model can affect a
 `RadiativeFluxBC` member, the combined evaluator threads `radiation_model` through
 to every child. The `+` operator overloads handle every nesting case (BC+BC,
 combined+BC, BC+combined, combined+combined) so associativity holds
-(`boundary_conditions.jl:231–236`).
-
-### 12.3.8 Ambient (reference) temperature resolution
-
-Convective, radiative, and (when enabled) transpiration terms need a reference
-ambient $T_\infty$. This is resolved per-boundary by `ambient_temperature(bc, t,
-T_{\text{default}})` (`boundary_conditions.jl:331–357`):
-
-- `ConvectiveBC` and `RadiativeBC` return their own `T_inf` (evaluated at $t$);
-- all other thermal BCs (`HeatFluxBC`, `AdiabaticBC`, `RadiativeFluxBC`,
-  `DirichletThermalBC`) carry **no** ambient: the two-argument form
-  `ambient_temperature(bc, t)` returns `nothing` for them, and the three-argument
-  form substitutes the supplied default (typically the package constant
-  $T_{\text{REF}}=298.15$ K);
-- `CombinedThermalBC` walks its children in order and returns the **first
-  ambient-carrying** child's value, which preferentially surfaces the
-  `ConvectiveBC`/`RadiativeBC` ambient over the flux-only members.
-
-The `nothing` sentinel (rather than comparison against a default value) makes a
-user-set ambient of exactly 298.15 K distinguishable from "this BC has no ambient";
-resolution never silently falls through just because the value equals the default.
-
-This lets each boundary carry its own effective ambient without a per-cell datum.
-The same resolver, applied to the top boundary first then the bottom, also selects
-the single scalar $T_{\text{ref}}$ used by the optional volumetric generation sink
-(`finite_volume.jl`, `_resolve_volumetric_T_ref`); the limitation of that single scalar under
-asymmetric ambients is discussed in §12.13.
+(`boundary_conditions.jl`).
 
 ---
 
@@ -10648,7 +9987,7 @@ limits follow:
 | Quantity | Convention |
 |---|---|
 | `mass_bc_flux(...)` | **negative** = gas escaping (flux-into-domain) |
-| `_compute_surface_flux(...)` (Physics, for ALE regression) | **positive** = gas escaping |
+| `compute_surface_mass_flux(...)` (diagnostic) | **positive** = gas escaping |
 | `J[face]` stored in the flux array | **positive** = flux in $+z$ |
 
 The discretization bridges these by orienting per boundary
@@ -10702,10 +10041,10 @@ v_g = -\frac{\kappa_{\text{int}}}{\mu_{\text{int}}}\,\nabla P,
 \end{cases}
 $$
 
-with $d$ the cell-center-to-face distance, $\mu_{\text{int}}$ the Sutherland
-viscosity at the cell temperature, and the velocity clamped to zero if
+with $d$ the cell-center-to-face distance, $\mu_{\text{int}}$ the material's
+pore-gas viscosity at the cell temperature (§5.9), and the velocity clamped to zero if
 $\kappa_{\text{int}}\le0$ or $\mu_{\text{int}}<10^{-20}$ Pa·s
-(`darcy_velocity.jl:369–410`). The orientation of the gradient ensures the correct
+(`darcy_velocity.jl`). The orientation of the gradient ensures the correct
 outflow direction at each face: at the top a higher interior pressure
 ($P_{\text{int}}>P_{\text{bc}}$) yields $v_g>0$ (outflow in $+z$); at the bottom
 the same drives $v_g<0$ (outflow in $-z$).
@@ -10784,7 +10123,7 @@ conservation law.
 ### 12.7.1 Structure and tag keying
 
 All boundaries are bundled into a single type-stable container
-(`boundary_conditions.jl:674–677`):
+(`boundary_conditions.jl`):
 
 ```julia
 struct BoundaryConditionSet{TT<:NamedTuple, MT<:NamedTuple}
@@ -10802,7 +10141,7 @@ statically.
 
 ### 12.7.2 Constructor, defaults, and validation
 
-The keyword constructor (`boundary_conditions.jl:702–722`) merges the
+The keyword constructor (`boundary_conditions.jl`) merges the
 user-supplied partial NamedTuples with the 1D defaults
 
 $$
@@ -10814,7 +10153,7 @@ $$
 so a caller may specify only the slots it cares about. After merging it
 **validates** that every thermal payload is an `AbstractThermalBC` and every mass
 payload is an `AbstractMassBC`, throwing an `ArgumentError` if a BC was placed in
-the wrong slot (`boundary_conditions.jl:712–720`). The default — adiabatic and
+the wrong slot. The default — adiabatic and
 impermeable on both faces — is the inert closure: a column with no defined BCs
 neither gains energy nor loses mass.
 
@@ -10829,7 +10168,7 @@ Access is through `Val{tag}` dispatch:
 
 At a call site such as `get_thermal_bc(bc_set, Val(:top))`, the `Val(:top)`
 resolves at compile time to a direct NamedTuple field read with zero overhead
-(`boundary_conditions.jl:732–741`). The RHS assembly uses these accessors so that
+(`boundary_conditions.jl`). The RHS assembly uses these accessors so that
 each boundary's BC type is known statically and the per-type flux law is inlined.
 The tag$\to$id bridge `tag_to_boundary_id` (§12.1.3) connects the user-facing
 symbol API to the integer-keyed `Mesh1D.boundary_faces` / `boundary_states`
@@ -10838,11 +10177,10 @@ dictionaries.
 ### 12.7.4 Constructor parameter validation
 
 Individual BC constructors optionally validate their physical parameters at build
-time (`validate_bc_params`, `boundary_conditions.jl:28–61`): $h\ge0$, $T>0$ K,
+time (`validate_bc_params`, `boundary_conditions.jl`): $h\ge0$, $T>0$ K,
 $\varepsilon\in[0,1]$, $F\in[0,1]$, $\alpha\in[0,1]$, $h_m\ge0$, $P>0$.
 Function-valued parameters cannot be checked at construction and are skipped
-(`_get_scalar_value` returns `nothing` for functions and property functions;
-`boundary_conditions.jl:70–73`).
+(`_get_scalar_value` returns `nothing` for functions and property functions).
 
 ---
 
@@ -10867,9 +10205,9 @@ The single problem-level entry point is `apply_initial_conditions!(problem)`,
 which performs the cell-state write above **and** populates the dry-solid
 denominator of §12.8.3 (the populator reads the freshly written cell states,
 so the two steps are ordered). `solve()` and the exported composition helper
-`initialize_state(problem; …)` both call it before packing `u0`; the
-mesh-level utility overloads `apply_initial_conditions!(mesh, material, …)`
-write only cell states and deliberately do **not** touch
+`initialize_state(problem; …) -> (def, ws, u0)` both call it before packing
+`u0`; the mesh-level utility `apply_initial_conditions!(mesh, material; T, ξ)`
+writes only uniform cell states and deliberately does **not** touch
 `m_dry_solid_initial`. Composing the pure-residual layer by hand without the
 problem-level IC step packs the mesh constructor's placeholder state instead
 of the problem's initial conditions (§15.2) — a resolution-independent error
@@ -10878,7 +10216,7 @@ with a perfectly plausible-looking solution.
 ### 12.8.2 Auto-defaults
 
 If the user supplies no initial conditions, the `PyrolysisProblem` constructor
-synthesizes them (`pyrolysis_problem.jl:106`, `114–134`):
+synthesizes them (`pyrolysis_problem.jl`):
 
 - $T_{\text{initial}}(z)=300$ K uniformly;
 - $\xi_{1,\text{initial}}(z)=\rho_1(300\,\text{K})$ if the first component is a
@@ -10888,8 +10226,8 @@ synthesizes them (`pyrolysis_problem.jl:106`, `114–134`):
 This "first solid at reference density, everything else zero" default models a
 fresh, uniform virgin slab at room temperature — the standard cone/TGA starting
 point. The uniform-IC variant `apply_initial_conditions!(mesh, material; T, ξ)`
-follows the same rule when $\xi=\texttt{nothing}$
-(`initial_conditions.jl`). Profile helpers (`step_profile`,
+follows the same rule when $\xi=\texttt{nothing}$, with the first solid's density
+evaluated at the given $T$ rather than at 300 K (`initial_conditions.jl`). Profile helpers (`step_profile`,
 `linear_profile`, `gaussian_profile`, `tanh_profile`) are provided for non-uniform
 seeds (e.g. a pre-heated layer).
 
@@ -10911,116 +10249,11 @@ gases) at the initial state. This is computed once and stored on the mutable mes
 as `Float64`; under AD the $\chi$ numerator is Dual-typed but this denominator
 stays `Float64` (see §15, §17).
 
-### 12.8.4 Verification
-
-`verify_initial_conditions` checks that every $T_i>0$ and finite, every
-$\xi_{j,i}\ge0$ and finite, and that the total concentration $\sum_j\xi_{j,i}>0$
-in each cell (`initial_conditions.jl`), catching an empty or negative seed before
-the solve begins.
-
 ---
 
-## 12.9 Surface transpiration (optional; off by default)
+## 12.9 Boundary-flux diagnostics
 
-> **Do not confuse this with the blowing correction.** This section is the
-> *enthalpy-side* transpiration term (rejected in production, §7.6). The
-> *momentum-side* effect of the same gas efflux — suppression of the convective
-> coefficient, $h \to h\,\chi$ — is the `blowing` model of each `ConvectiveBC`
-> documented in §12.3.3; it is independent of this term and composes with the
-> default $S_{\text{conv}}$-only convention.
-
-### 12.9.1 The transpiration term and its derivative
-
-The surface energy balance of §12.2 can optionally include the sensible enthalpy
-carried out of the slab by escaping gas (the "blowing" or transpiration term):
-
-$$
-q_{\text{BC}}(T_s) = k_{\text{eff}}\,\frac{T_s-T_{\text{cell}}}{\Delta z_{1/2}}
-   \;+\; \sum_g \dot m_g\,\Delta h_g(T_s, T_\infty),
-$$
-
-where $\dot m_g$ is the per-component outward gas mass flux at the surface
-(positive when leaving) and
-
-$$
-\Delta h_g(T_s,T_\infty) = \int_{T_\infty}^{T_s} c_{p,g}(\tau)\,d\tau
-$$
-
-is the sensible enthalpy difference, computed by the midpoint rule in
-`delta_enthalpy` (the same quadrature used by the volumetric generation sink
-$S_{\text{gen}}$, §7.5). The analytic Newton derivative of the transpiration term,
-used in $f'(T_s)$, is
-
-$$
-\frac{dq_{\text{transpire}}}{dT_s} = \sum_{g:\ \text{is\_gas}} \dot m_g\,c_{p,g}(T_s)
-\qquad (\dot m_g>0,\ \text{outflow}).
-$$
-
-This is the derivative of the *true* integral, which differs from the exact
-derivative of the midpoint-rule residual by $O\bigl((T_s-T_\infty)\,c_{p,g}'\bigr)$;
-the two agree to first order, so Newton still converges to the residual's root
-(unbiased $T_s$, marginally sub-quadratic rate)
-(`boundary_temperature.jl:125–132`).
-
-### 12.9.2 Inflow/outflow upwinding
-
-The transpiration term is **upwinded** on the sign of $\dot m_g$
-(`boundary_temperature.jl:233–263`):
-
-- **Outflow** ($\dot m_g>0$): the donor is the surface at $T_s$; the term carries
-  $\dot m_g\,\Delta h_g(T_s,T_\infty)$ with derivative $\dot m_g\,c_{p,g}(T_s)$.
-- **Inflow** ($\dot m_g\le0$): the donor is the ambient at $T_\infty=T_{\text{ref}}$;
-  the surface enthalpy flux is $\dot m_g\,\Delta h_g(T_{\text{ref}},T_{\text{ref}})=0$
-  with zero derivative. Entering gas is heated to $T_s$ *volumetrically* (by
-  $S_{\text{conv}}$) once inside, not at the face.
-
-Upwinding to the donor temperature is what prevents an unphysical artifact in
-which inflow enthalpy would spuriously heat or cool the surface. The outward flux
-$\dot m_g$ itself is extracted from the gas-flux matrix with the boundary
-orientation: $\dot m_g = +J_{g,f}$ at the top, $\dot m_g=-J_{g,f}$ at the bottom
-(so that "outward" is positive at both faces) (`finite_volume.jl`). Note
-this requires the gas fluxes to be computed *before* the thermal BC solve — hence
-Step 3 (gas transport) precedes Step 4 (thermal BCs) in the RHS sequence (§7.8).
-
-### 12.9.3 Mutual exclusivity with $S_{\text{conv}}$ — and why it is forbidden
-
-The transpiration term is **mutually exclusive** with the volumetric gas-advection
-source $S_{\text{conv}}=-\sum_g c_{p,g}(T_i)\,\bar J_{g,i}\,(\partial T/\partial
-z)_i$, which is always active in the default `:standard` energy form (§7.4). The
-algebraic identity (with constant $c_p$)
-
-$$
-\int \bigl(S_{\text{conv}} + S_{\text{gen}}\bigr)\,dz
-= -\sum_g \dot m_g\,\Delta h_g(T_s, T_{\text{ref}})
-$$
-
-shows that the volumetric sources already account for the gas-enthalpy transport:
-$S_{\text{conv}}$ alone integrates to $-\sum_g\dot m_g\Delta h_g + \int
-S_{\text{gen}}$, i.e. it carries *almost all* of the surface outflow enthalpy.
-Adding the surface transpiration term on top would apply the *full* outflow a
-second time, double-counting the advective enthalpy and producing a spurious sink
-of order $5$–$10$ kW·m⁻² at typical pyrolysis rates.
-
-For this reason `use_transpiration_bc = true` is **rejected at problem
-construction** in `to_problem_def` (`adapter.jl`), and the unsupported
-combination is guarded by a regression test
-(`test/discretization/test_transpiration_energy_balance.jl`). In the default
-configuration the caller zeroes $J_{\text{boundary,outward}}$
-(`finite_volume.jl`), so the transpiration term vanishes and the surface
-balance reduces to $q_{\text{BC}}(T_s)=q_{\text{cond}}$. The supported way to
-*move toward* a conservative formulation is the `:with_generation_sink` energy
-form (§7.5), which adds $S_{\text{gen}}$; only if a future solver disables
-$S_{\text{conv}}$ would the surface transpiration term become consistent (see §16,
-Conservation Diagnostics, for the exact telescoping ledger). The supported convention
-is S_conv-only; parameter sets calibrated against solvers that additionally apply a
-surface transpiration term embed a $\sim$5–10 kW·m⁻² spurious sink and should be
-re-validated when imported (§18).
-
----
-
-## 12.10 Boundary-flux diagnostics
-
-### 12.10.1 Flux decomposition
+### 12.9.1 Flux decomposition
 
 For auditing and post-processing, `compute_boundary_heat_fluxes(bc, T_s, t,
 ε_eff, radiation_model[, face])` decomposes the boundary flux into named
@@ -11041,14 +10274,16 @@ For `ConvectiveBC` and `RadiativeBC`, the loss components are reported with the
 *opposite* sign to the into-domain convention (so a hot surface re-radiating shows
 a positive `reradiation`). Per component, `net` matches
 `evaluate_bc_flux_and_derivative` — the Newton-applied flux — for every
-radiation model, so the ledger identity
-$\texttt{net} = q_{\text{cond}} + q_{\text{transp}}$ holds at convergence
-(§12.10.2, §16.7). For combined BCs the components **and** `net` are summed over
+radiation model, `DirichletThermalBC` excepted (its decomposition is all zero; for a
+bare Dirichlet BC the saved extras report the solved $q_{\text{conducted}}$ as the
+net flux), so the ledger identity
+$\texttt{net} = q_{\text{cond}}$ holds at convergence
+(§12.9.2, §16.6). For combined BCs the components **and** `net` are summed over
 children; `net` is never recomputed from the components. Consequences of the
 model dispatch:
 
 - `NO_RADIATION` / `SURFACE_ABSORPTION`: a `RadiativeFluxBC` contributes
-  `absorbed = net = α·q_ext` (α the explicit BC absorptivity or ε_eff) — the
+  `absorbed = net = α·q_ext` (α the explicit BC absorptivity or a_eff) — the
   flux is applied at the face.
 - `BEER_LAMBERT` / P1: a `RadiativeFluxBC` contributes zero `absorbed` and zero
   `net` — the radiation enters volumetrically (§8.3) and is reported separately
@@ -11056,7 +10291,7 @@ model dispatch:
   (1-e^{-\tau_{\text{tot}}})$, the exact telescoped sum of the Beer–Lambert
   deposit on the saved state.
 
-### 12.10.2 Energy-balance check
+### 12.9.2 Energy-balance check
 
 `check_boundary_energy_balance(mesh)` returns, per boundary, the relative
 imbalance $|q_{\text{applied}}-q_{\text{conducted}}|/|q_{\text{applied}}|$ (the
@@ -11070,7 +10305,7 @@ bottom (id 2) boundaries (`boundary_temperature.jl`).
 
 ---
 
-## 12.11 Worked example: the cone-calorimeter top boundary
+## 12.10 Worked example: the cone-calorimeter top boundary
 
 Assembling the canonical top boundary makes the pieces concrete. A 50 kW·m⁻² cone
 with surface re-radiation and natural convection to a 300 K ambient, on a
@@ -11117,7 +10352,7 @@ energy equation as a volumetric Beer–Lambert source $q'''=\alpha I$ (§8).
 
 ---
 
-## 12.12 Comparison to ThermaKin2Ds, Gpyro, and FDS
+## 12.11 Comparison to ThermaKin2Ds, Gpyro, and FDS
 
 The three reference solvers express the same surface physics in their own
 notation; the subsections below map their symbols to ours on first use and
@@ -11125,7 +10360,7 @@ contrast the modeling choices. (ThermaKin/Gpyro publish $h>0=$ exothermic; our
 internal convention is $h>0=$ endothermic with $Q_{\text{rxn}}=-\sum h_r r_r$, but
 this sign issue is confined to the volumetric reaction heat, not the surface BCs.)
 
-### 12.12.1 ThermaKin2Ds
+### 12.11.1 ThermaKin2Ds
 
 ThermaKin2Ds applies piecewise external/flame boundary conditions and supports an
 external radiant source with surface re-radiation. The exposed-face energy
@@ -11152,10 +10387,10 @@ and the surface re-radiation depend on the *true* surface temperature — is
 realized by ThermaKin through its Crank–Nicolson surface node and by Pyrolysis.jl
 through the explicit Newton surface-balance solve of §12.2. ThermaKin carries gas
 enthalpy via a convective term $c_g(J_g\cdot\partial T/\partial x)$ (its Eq. 17),
-which is precisely our $S_{\text{conv}}$ and the reason transpiration is omitted by
-default (§12.9.3).
+which is precisely our $S_{\text{conv}}$ and the reason the surface balance carries
+no gas-enthalpy term (§7.4.3).
 
-### 12.12.2 Gpyro
+### 12.11.2 Gpyro
 
 Gpyro (Lautenberger & Fernandez-Pello) writes the exposed-surface balance as a
 radiative–convective balance with an impermeable back face by default. In Gpyro
@@ -11179,7 +10414,7 @@ Gpyro's permeability $K$ mapping to our $\kappa$. Gpyro's default impermeable ba
 face corresponds to our default `ImpermeableBC` + `NeumannPressureBC()` (zero
 gradient).
 
-### 12.12.3 FDS
+### 12.11.3 FDS
 
 The FDS solid-phase model imposes the 1D surface boundary condition
 
@@ -11204,19 +10439,9 @@ in-depth absorbed fraction volumetrically rather than at the face.
 
 ---
 
-## 12.13 Limitations and open issues
+## 12.12 Limitations and open issues
 
-1. **Asymmetric ambients with a permeable back face.** The volumetric
-   generation-sink reference $T_{\text{ref}}$ is resolved as a *single* scalar (top
-   ambient, else bottom, else $T_{\text{REF}}$) and applied to every cell
-   (`finite_volume.jl:601–620`). If the top and bottom ambients differ **and** the
-   back face passes gas, the `:with_generation_sink` energy ledger fails to close
-   at the bottom by exactly $\sum_g \dot m_{g,\text{bottom}}\,c_{p,g}
-   (T_{\infty,\text{top}}-T_{\infty,\text{bottom}})$. This is harmless for the usual
-   impermeable back face (the bottom gas flux vanishes) and for equal ambients;
-   supporting it would require a per-cell datum rather than a scalar.
-
-2. **Temperature-dependent emissivity derivative.** For a `RadiativeBC` whose
+1. **Temperature-dependent emissivity derivative.** For a `RadiativeBC` whose
    own `ε` is a function of $T_s$, the radiative Newton derivative omits the
    $F\,(d\varepsilon/dT)\,\sigma\,(T_\infty^4-T_s^4)$ term (§12.2.4). The
    converged $T_s$ is unbiased, but convergence can become sub-quadratic for
@@ -11225,33 +10450,29 @@ in-depth absorbed fraction volumetrically rather than at the face.
    is evaluated at the *cell* temperature and is a constant of the surface
    Newton iteration, so that derivative is exact.
 
-3. **Transpiration BC integration.** The surface transpiration term is implemented
-   and tested but is opt-in and currently *forbidden* in production because it
-   double-counts with $S_{\text{conv}}$ (§12.9.3). A consistent conservative-form
-   path would require disabling $S_{\text{conv}}$ when transpiration is on; that
-   combination is not yet supported by the solver.
-
-4. **Dirichlet thermal BC via penalty.** `DirichletThermalBC` uses a large
+2. **Dirichlet thermal BC via penalty.** `DirichletThermalBC` uses a large
    conductance $h_{\text{large}}=10^8$ in the Newton solve and a special-cased
    direct flux in the RHS (§12.3.6). A genuine algebraic constraint (DAE) would be
    cleaner and would remove the residual conditioning sensitivity of the penalty.
 
-5. **View-factor meaning in 1D.** The `RadiativeBC` view factor $F$ is a scalar
+3. **View-factor meaning in 1D.** The `RadiativeBC` view factor $F$ is a scalar
    surrogate for a 3D geometric quantity; in a strictly 1D model it is best read as
    a tuning factor for partial enclosure rather than a rigorously computed exchange
    factor.
 
-6. **Mass-transfer coefficient estimation.** The film coefficient $h_m$ for
+4. **Mass-transfer coefficient estimation.** The film coefficient $h_m$ for
    `ConvectiveMassBC` / `DiffusiveMassBC` is supplied by the user, typically via
    the heat–mass analogy $h_m\approx h_{\text{conv}}/(\rho_{\text{air}}
    c_{p,\text{air}})$; there is no built-in correlation, so its accuracy depends on
    the user's estimate of $h_{\text{conv}}$ and the flow regime.
 
-7. **Pressure-BC integration maturity.** The three pressure BCs are defined and
-   wired into `apply_pressure_bc_to_darcy_velocity!`, but their interaction with the
-   full Darcy–Fick velocity solve and the structured Jacobian is still maturing
-   relative to the thermal and diffusive-mass paths; in Eulerian/Fickian mode they
-   are inert.
+5. **Pressure-BC scope.** The three pressure BCs act only under Darcy–Fick
+   transport, i.e. when a condensed component is permeable (`has_darcy_flow`); on a
+   Fickian material they are accepted and contribute nothing. Their venting is
+   outflow-only: the ambient ghost carries none of the tracked gas species, so an
+   exterior pressure above the interior pressure draws no gas into the slab
+   (§9.5.3). The residual, the Jacobian and the saved-output diagnostics evaluate
+   the one kernel `boundary_darcy_velocity` (§12.5).
 
 
 ---
@@ -11277,12 +10498,12 @@ n_{\text{nodes}} = n_{\text{faces}} = n + 1, \qquad n \equiv n_{\text{cells}}.
 $$
 
 - A **node** (`Node1D`) is a mesh vertex at position `z_i`. Node 1 sits at `z = 0` (bottom, `boundary_id = 2`), node `n+1` sits at `z = L` (top, `boundary_id = 1`); the rest are interior (`boundary_id = 0`). In ALE mode the node positions become part of the ODE state (§13.10).
-- A **cell** (`Cell1D`) is the finite volume. Cell `i` spans the two adjacent nodes `(i, i+1)` and is bounded by the two faces `(i, i+1)`. Cells carry the unknowns through their `CellState{NC}` (`T`, the `NTuple{NC}` of `ξ_j`, and a diagnostic `volume`). Cells are immutable in connectivity; refinement/coarsening rebuilds the mesh (§14, Adaptive Mesh Refinement).
+- A **cell** (`Cell1D`) is the finite volume. Cell `i` spans the two adjacent nodes `(i, i+1)` and is bounded by the two faces `(i, i+1)`. Cells carry the unknowns through their `CellState{NC}` (`T`, the `NTuple{NC}` of `ξ_j`, and a diagnostic `volume`). Cells are immutable in connectivity; depletion parking (§14.3) changes only the live cell count `n_active_cells`, never the arrays.
 - A **face** (`Face1D`) is, in 1D, a single point co-located with a node. Face `f` carries its `cell_ids = (left, right)` with `0` marking a domain boundary: the bottom face (id 1, at `z = 0`) has `cell_ids = (0, 1)`; the top face (id `n+1`, at `z = L`) has `cell_ids = (n, 0)`; interior face `i` has `cell_ids = (i−1, i)`.
 
 "Left" always denotes the lower-`z` (toward substrate) side of a face and "Right" the higher-`z` (toward surface) side. Cell indices increase from bottom to top, so node `i` is the left endpoint of cell `i` and the right endpoint of cell `i−1`; face `i` co-locates with node `i`.
 
-> **Implementation note.** The data structures are defined in `Node1D` (src/Geometry/nodes.jl), `Cell1D`/`CellState` (src/Geometry/cells.jl), `Face1D` (src/Geometry/faces.jl), and the container `Mesh1D{NC}` (src/Geometry/mesh.jl). The immutable connectivity view `MeshTopology` and the mutable per-step `MeshGeometry` are kept separate (src/Geometry/topology.jl, src/Geometry/mesh_geometry.jl) so that the same connectivity supports many geometry snapshots — this is what makes pure (mesh-non-mutating) residual and Jacobian evaluation possible.
+> **Implementation note.** The data structures are defined in `Node1D` (src/Geometry/nodes.jl), `Cell1D`/`CellState` (src/Geometry/cells.jl), `Face1D` (src/Geometry/faces.jl), and the container `Mesh1D{NC}` (src/Geometry/mesh.jl). The connectivity view `MeshTopology` and the per-step `MeshGeometry` (src/Geometry/topology.jl, src/Geometry/mesh_geometry.jl) are placeholders for a multi-dimensional extension: the 1D residual reads the `Mesh1D` connectivity and the state-derived geometry held in the typed `StateCache` (§13.10.2), which is what makes pure (mesh-non-mutating) residual and Jacobian evaluation possible.
 
 ### 13.1.2 Boundary identifier convention
 
@@ -11296,7 +10517,7 @@ with the inverse `boundary_id_to_tag` (src/Geometry/topology.jl). The boundary-f
 
 ### 13.1.3 What a "cell-centered" scheme means for accuracy
 
-Because unknowns live at cell centers but fluxes are needed at faces, every flux requires an *interpolation/reconstruction* from cell values to faces. For diffusion this is a face-property average plus a two-point gradient (§13.6, §13.7); for advection it is an upwind or limited reconstruction (§13.4, §13.5). On a uniform mesh the central two-point gradient at a face is second-order; the cell-centered gradient (§13.6) is second-order in the interior and degrades to first-order one-sided at boundaries. The harmonic-mean face conductivity (§13.7) preserves flux continuity exactly across material interfaces, which is the physically correct behavior for a layered/heterogeneous medium and the main reason the cell-centered scheme is preferred over a vertex-centered one here.
+Because unknowns live at cell centers but fluxes are needed at faces, every flux requires an *interpolation/reconstruction* from cell values to faces. For diffusion this is a face-property average plus a two-point gradient (§13.7); for advection it is an upwind or limited reconstruction (§13.4, §13.5). On a uniform mesh the central two-point gradient at a face is second-order; the cell-centered gradient (§13.6) is second-order in the interior and degrades to first-order one-sided at boundaries. The harmonic-mean face conductivity (§13.7) preserves flux continuity exactly across material interfaces, which is the physically correct behavior for a layered/heterogeneous medium and the main reason the cell-centered scheme is preferred over a vertex-centered one here.
 
 ---
 
@@ -11314,7 +10535,7 @@ $$
 
 The absolute value guards against transiently inverted nodes during ALE motion; the cross-sectional area `A` is the **current** column area (it equals `A_0` unless a lateral-shrinkage law is active — see §10, Volume Change). All faces in 1D carry the same area `A_f = A`.
 
-> **Implementation note.** `update_geometry!` (src/Geometry/geometric_quantities.jl) writes `cell_centers[i]`, `cell_volumes[i] = abs(z_right − z_left) * A`, and `face_areas[f] = A`. The mesh-resident path is used between integrator steps; the state-vector path `compute_geometry_from_state!` is used *during* residual/Jacobian assembly (§13.10).
+> **Implementation note.** `update_geometry!` (src/Geometry/geometric_quantities.jl) writes the mesh-resident `cell_centers[i]`, `cell_volumes[i] = abs(z_right − z_left) * A`, and `face_areas[f] = A`; it is used between integrator steps. During residual/Jacobian assembly the same quantities are rebuilt from the state by `update_state_geometry!` (src/Problem/state_cache.jl; §13.10).
 
 ### 13.2.2 Interior face distance
 
@@ -11326,15 +10547,15 @@ $$
 
 This is the denominator of every two-point gradient in §13.7 and is the correct choice for second-order accuracy on non-uniform meshes (using cell width instead would introduce a zeroth-order multiplicative bias).
 
-### 13.2.3 Ghost-cell boundary distance
+### 13.2.3 Boundary distances
 
-At a boundary face the "other side" cell is absent. The code supplies a reflected ghost cell whose center sits at the mirror position `z^c_{\text{ghost}} = 2 z_f − z^c_{\text{adj}}`, so the effective boundary-face distance is
+At a boundary face the "other side" cell is absent. Every boundary flux is formed over the **center-to-face** distance of the adjacent cell,
 
 $$
-d_f^{\text{bnd}} = 2\,|z_f - z^c_{\text{adj}}|.
+d_f^{\text{bnd}} = |z_f - z^c_{\text{adj}}| = \tfrac12\,\frac{V_{\text{adj}}}{A},
 $$
 
-The factor of 2 encodes a symmetric (zero-gradient / reflective) extrapolation across the domain edge, turning a Dirichlet value at the face into an equivalent Neumann stencil. This is implemented in `face_distance` and `compute_face_distances_from_state!` (src/Geometry/geometric_quantities.jl), with `left_id == 0` for the bottom face and `right_id == 0` for the top.
+the one-sided gradient from the surface to the first cell center: the surface energy balance (§12.2.1), the film-law mass BCs (§12.4), and the pressure BCs (§12.5) all use it. The interior conductive pass zeroes the boundary faces (§7.1.3), so no other boundary distance enters the diffusive fluxes.
 
 ### 13.2.4 The ALE advection boundary distance
 
@@ -11344,9 +10565,9 @@ $$
 d^{\text{bnd}}_{\text{upwind}} = \frac{V_i}{A} = \Delta z_i,
 $$
 
-i.e. the **full cell width**. This is precisely `face_distance` (§13.2.3) evaluated at a boundary: the center-to-mirror-ghost spacing, twice the center-to-face distance — the same footing as the interior center-to-center distance. At a boundary the value is in any case inert: the zero-gradient ghost makes the first-order gradient identically zero in that direction, so no residual or Jacobian entry depends on it (§11.6.3).
+i.e. the **full cell width**: the spacing from the cell center to a mirror ghost cell reflected across the boundary face, twice the center-to-face distance of §13.2.3 — the same footing as the interior center-to-center distance. At a boundary the value is in any case inert: the zero-gradient ghost makes the first-order gradient identically zero in that direction, so no residual or Jacobian entry depends on it (§11.6.3).
 
-> **Implementation note.** The ALE state-vector geometry (`GeometryCache`, src/Geometry/geometric_quantities.jl) caches `volumes`, `centers`, `face_positions`, and `face_distances`; the boundary entries of `face_distances` use the same factor-2 ghost-cell form of §13.2.3.
+> **Implementation note.** The ALE state-vector geometry lives in the typed `StateCache` (`volume`, `cell_centers`, `face_positions`, `A_face`, `A_section`), rebuilt from the node positions by `update_state_geometry!` at every residual evaluation (§13.10.2). Face distances are not stored; each kernel forms the center-to-center or center-to-face distance it needs from `cell_centers` and `face_positions`.
 
 ---
 
@@ -11391,7 +10612,7 @@ so the integral of the divergence equals the net boundary flux exactly — the d
 The cell-wise temperature derivative assembled at the end of `compute_rhs!` is
 
 $$
-\frac{dT_i}{dt} = \frac{1}{\rho c_{p,\text{eff},i}}\Bigl[\,-(\nabla\!\cdot\!\mathbf q)_i + S_{\text{conv},i} + S_{\text{gen},i} + Q_{\text{rad},i} + Q_{\text{rxn},i}\,\Bigr],
+\frac{dT_i}{dt} = \frac{1}{\rho c_{p,\text{eff},i}}\Bigl[\,-(\nabla\!\cdot\!\mathbf q)_i + S_{\text{conv},i} + Q_{\text{rad},i} + Q_{\text{rxn},i}\,\Bigr],
 $$
 
 and the species derivative (per cell, per component) is
@@ -11404,13 +10625,13 @@ S_{j,\text{rxn},i}, & \text{component } j \text{ is solid/liquid}.
 \end{cases}
 $$
 
-The leading `1/ρc_{p,\text{eff}}` uses the mixture volumetric heat capacity (every component; see §7, Heat Conduction & Energy Assembly, and §13.7.5). The gas/solid dispatch is exactly the `is_gas`-branch in `apply_species_residual_unrolled!` (src/Materials/materials.jl): gas → `-div_J + dξ_rxn`, solid/liquid → `dξ_rxn`. The full eight-step assembly order is given in §7.8; this chapter is concerned only with the spatial operators that produce `div_q`, `div_J`, and the face fluxes feeding them.
+The leading `1/ρc_{p,\text{eff}}` uses the mixture volumetric heat capacity (every component; see §7, Heat Conduction & Energy Assembly, and §13.7.5). The gas/solid dispatch is exactly the `is_gas`-branch in `apply_species_residual_unrolled!` (src/Materials/materials.jl): gas → `-div_J + dξ_rxn`, solid/liquid → `dξ_rxn`. The full eight-step assembly order is given in §7.6; this chapter is concerned only with the spatial operators that produce `div_q`, `div_J`, and the face fluxes feeding them.
 
 ---
 
 ## 13.4 Flux Limiters (TVD Schemes)
 
-Advective transport with a centered reconstruction is second-order but oscillatory near steep fronts; a pure upwind reconstruction is monotone but only first-order and excessively diffusive. Total-Variation-Diminishing (TVD) flux limiters blend the two: they recover second order in smooth regions and degrade gracefully to first order near extrema, provably not increasing the total variation `Σ|φ_{i+1}−φ_i|`. Pyrolysis.jl uses TVD limiting in the ALE advection (§13.8) and in second-order conservative remapping (§11, the ALE Framework).
+Advective transport with a centered reconstruction is second-order but oscillatory near steep fronts; a pure upwind reconstruction is monotone but only first-order and excessively diffusive. Total-Variation-Diminishing (TVD) flux limiters blend the two: they recover second order in smooth regions and degrade gracefully to first order near extrema, provably not increasing the total variation `Σ|φ_{i+1}−φ_i|`. Pyrolysis.jl uses TVD limiting only in the mesh-relative temperature advection of the ALE verification hook (§13.8).
 
 ### 13.4.1 The limiter enumeration
 
@@ -11424,7 +10645,7 @@ A small `@enum Limiter` selects the scheme (src/Discretization/flux_limiters.jl)
 | `NONE` | `0` | First-order upwind (no limiting) |
 | `CENTRAL` | `1` | Second-order central (no limiting) |
 
-The dispatcher `apply_limiter(r, limiter)` returns the corresponding `ψ(r)`, defaulting to `minmod` for any unrecognized value.
+The dispatcher `apply_limiter(r, limiter)` returns the corresponding `ψ(r)`.
 
 ### 13.4.2 Limiter functions and the TVD region
 
@@ -11455,10 +10676,7 @@ distance-correct blend $\beta = d_0/(d_0+d_1)$ and runs only under the
 There is no limited *face-value* reconstruction in production: the Eulerian
 gas-advection face value is first-order upwind on the Darcy velocity
 (`gas_flux_darcy_fick`, §9; a TVD upgrade is a documented accuracy-debt item),
-and conduction/diffusion use the exact two-point face gradients of §13.7. The
-exported `face_value_*` helpers of §13.6.3 (including the TVD-limited
-`face_value_limited`, a fixed $\tfrac12$ blend valid on uniform meshes) are
-uncalled building blocks.
+and conduction/diffusion use the exact two-point face gradients of §13.7.
 
 ---
 
@@ -11466,7 +10684,7 @@ uncalled building blocks.
 
 ### 13.6.1 Cell-centered gradient on non-uniform meshes
 
-Several volumetric source terms (notably the gas-advection source `S_conv` of §7.4) and the error/refinement indicators (§14) require a cell-centered gradient. The interior formula combines the two one-sided center-to-center slopes with **opposite-distance weights** (`opposite_distance_gradient`, src/Geometry/geometric_quantities.jl):
+The gas-advection source `S_conv` of §7.4 and the error indicators and $r$-refinement monitors of §14 require a cell-centered gradient. The interior formula combines the two one-sided center-to-center slopes with **opposite-distance weights** (`opposite_distance_gradient`, src/Geometry/geometric_quantities.jl):
 
 $$
 \nabla\varphi_i = \frac{d_R\,s_L + d_L\,s_R}{d_L+d_R},
@@ -11490,20 +10708,7 @@ $$
 \end{cases}
 $$
 
-> **Implementation note.** `compute_gradients!` and the temperature-specialized `compute_temperature_gradients!` (src/Discretization/gradient_reconstruction.jl) implement these branches exactly, reading `state.cell_centers` so that the gradients carry AD sensitivities through the geometry. The interior `opposite_distance_gradient` reappears in the `S_conv` temperature-gradient computation (src/Physics/convection.jl) — which however upgrades the boundary cells to the surface-slope blend of §7.4.2 (the thermal BC supplies a solved $T_s$ there; a generic field has no boundary value, so the one-sided fallback above remains correct for `compute_gradients!`) — and in the AMR gradient indicators (src/Adaptivity/error_indicators.jl, r_refinement.jl).
-
-### 13.6.3 Face-value interpolation schemes
-
-For completeness the discretization module exposes a family of face-value building blocks (src/Discretization/gradient_reconstruction.jl); none are called by the production fluxes:
-
-- **Central:** `face_value_central(φ_L, φ_R) = ½(φ_L + φ_R)` — second order, unlimited.
-- **First-order upwind:** `face_value_upwind(φ_L, φ_R, v) = (v ≥ 0 ? φ_L : φ_R)`.
-- **Distance-weighted:** `face_value_weighted(φ_L, φ_R, w_L) = w_L φ_L + (1−w_L) φ_R`, with `w_L = d_{f,R}/d_{LR}`.
-- **Second-order via gradient:** `face_value_second_order` returns `φ_L + ∇φ_L d_{Lf}` for `v ≥ 0` and `φ_R − ∇φ_R d_{Rf}` for `v < 0` (MUSCL-style reconstruction to the face from the upwind cell center).
-- **TVD-limited:** `face_value_limited(φ_LL, φ_L, φ_R, limiter) = φ_L + ½ψ(r)(φ_R − φ_L)` with `r = (φ_L − φ_LL)/(φ_R − φ_L)` (`compute_slope_ratio`) — a uniform-mesh ½ blend; exported but not called by any production flux.
-- **Face gradient:** `face_gradient(φ_L, φ_R, d_{LR}) = (φ_R − φ_L)/d_{LR}`, with boundary faces zeroed in `compute_face_gradients!`.
-
-These are building blocks; the conduction and gas-diffusion fluxes (§13.7) do not call them directly but use the equivalent closed-form face expressions.
+> **Implementation note.** `compute_gradient_1d(φ, mesh, i)` (src/Adaptivity/error_indicators.jl) implements these branches on the mesh-resident cell centers for the error indicators and the $r$-refinement monitors (src/Adaptivity/error_indicators.jl, r_refinement.jl). The interior `opposite_distance_gradient` also serves the `S_conv` temperature gradient (src/Physics/convection.jl), which reads the state's `cell_centers` so the gradient carries AD sensitivities through the geometry and upgrades the boundary cells to the surface-slope blend of §7.4.2 (the thermal BC supplies a solved $T_s$ there; a generic field has no boundary value, so the one-sided fallback above is the right one for `compute_gradient_1d`).
 
 ---
 
@@ -11522,7 +10727,7 @@ $$
 
 The harmonic mean is the **resistance-in-series** average: across an interface the thermal resistances `d_L/k_L` and `d_R/k_R` add, and continuity of heat flux then fixes `k_f` as above. On a uniform mesh `d_L = d_R` and this collapses to the standard harmonic mean `2k_Lk_R/(k_L+k_R)`; on stretched meshes the distance weighting improves near-boundary flux accuracy by roughly 1–5%. The minus sign is Fourier's law: `T_R > T_L` gives `q_f < 0` (heat flows toward `−z`, down the gradient).
 
-> **Implementation note.** `conductive_flux(k_L, k_R, T_L, T_R, d_L, d_R)` computes `k_face = harmonic_mean_weighted(...)` then `-k_face*(T_R−T_L)/(d_L+d_R)`; the precomputed-face variant is `conductive_flux(k_face, T_L, T_R, d_LR) = -k_face*(T_R−T_L)/d_LR` (src/Physics/heat_conduction.jl). The assembly `compute_conductive_fluxes!` loops all faces using the precomputed `cache.k_face[f]` and `d_LR = |z_R^c − z_L^c|`, and **explicitly zeros boundary faces** (`left_id == 0 || right_id == 0 → q_cond[f] = 0`). The zero is then overwritten by the surface-energy-balance Newton solve (§12); zeroing first prevents double-counting (the interior operator must not see a boundary flux that the BC solver will also supply).
+> **Implementation note.** `conductive_flux(k_face, T_L, T_R, d_LR) = -k_face*(T_R−T_L)/d_LR` (src/Physics/heat_conduction.jl) consumes the face conductivity `update_properties!` pre-computes with `harmonic_mean_weighted`. The assembly `compute_conductive_fluxes!` loops all faces using the precomputed `cache.k_face[f]` and `d_LR = |z_R^c − z_L^c|`, and **explicitly zeros boundary faces** (`left_id == 0 || right_id == 0 → q_cond[f] = 0`). The zero is then overwritten by the surface-energy-balance Newton solve (§12); zeroing first prevents double-counting (the interior operator must not see a boundary flux that the BC solver will also supply).
 
 ### 13.7.2 Gas-diffusive (volume-fraction-gradient) flux
 
@@ -11571,21 +10776,21 @@ $$
 
 the **distance-weighted harmonic mean of the cell mobilities** $\kappa/\mu$, with `mob_f = 0` exactly when either side's mobility is below $10^{-30}$ (an impermeable side is an infinite series resistance) and `μ > 10^{-20}` guards per cell. The ideal-gas pressure closure `P = (Σ_g ξ_j R_g T/M_j)/φ` (porosity floor `10^{-12}`) and the pressure gradient are derived in §9; here they enter only as the velocity driving the advective face flux. All gas species share the same `v_g` (advection carries every species equally) and the same `λ_face` (§9.2).
 
-> **Implementation note.** `gas_flux_darcy_fick(v_g, ξ_L, ξ_R, φ_L, φ_R, λ_face, T_L, T_R, d_LR)` (src/Physics/gas_transport.jl) computes `J_diff` exactly as above, sets `ξ_upwind = v_g ≥ 0 ? ξ_L : ξ_R`, and returns `J_adv + J_diff` with `J_adv = v_g·ξ_upwind/φ_face`. The face velocity and mobility come from `update_darcy_properties!` (src/Discretization/finite_volume.jl); the Darcy RHS path is `compute_rhs_darcy_fick!`, which differs from the Fickian path in computing pressure/velocity first, calling the Darcy–Fick flux instead of the diffusion-only flux, and writing the boundary-face advective venting flux from the pressure BCs (§9.5.3).
+> **Implementation note.** `gas_flux_darcy_fick(v_g, ξ_L, ξ_R, φ_L, φ_R, λ_face, T_L, T_R, d_LR)` (src/Physics/gas_transport.jl) computes `J_diff` exactly as above, sets `ξ_upwind = v_g ≥ 0 ? ξ_L : ξ_R`, and returns `J_adv + J_diff` with `J_adv = v_g·ξ_upwind/φ_face`. The face velocity and mobility come from `update_darcy_properties!` (src/Discretization/finite_volume.jl). `compute_rhs!` takes this path when the property cache carries a Darcy sub-cache (`nothing` ⇔ Fickian): it refreshes pressure and velocity first, calls the Darcy–Fick flux instead of the diffusion-only flux, and writes the boundary-face advective venting flux from the pressure BCs (§9.5.3).
 
 ### 13.7.4 Solid/liquid components carry no transport flux
 
 Solid and liquid components are mesh-bound (Lagrangian): they are not transported by diffusion or Darcy flow. Their face fluxes are identically zero, so `divergence_species_1d!` produces zero for them and the species residual reduces to reactions only (§13.3.4). This is what locks solid mass-thickness `ρ_s·Δz` to the mesh and makes the ALE motion (§13.8) the mechanism by which solids are advected. The gas fluxes of §13.7.2–§13.7.3 are defined relative to that skeleton, so under ALE the gas rides the mesh too and the same divergence is the whole of its transport (§11.1.2).
 
-### 13.7.5 The energy-storage convention (Formulation A)
+### 13.7.5 The energy-storage convention
 
-The conductive divergence feeds the energy equation with the mixture heat capacity `ρc_{p,\text{eff}} = Σ_j ξ_j c_{p,j}(T)` in the denominator — every component, gas included, stores sensible heat. The enthalpy carried by the gas flux relative to the skeleton is the volumetric advection source `S_conv` (always on in `:standard` energy form) and, optionally, `S_gen` (in `:with_generation_sink`). This is the ThermaKin Eq. 17 convention. The discretization layer is agnostic to this choice — it simply assembles `div_q`, `S_conv`, `S_gen`, `Q_rad`, `Q_rxn` and divides by `prop_cache.ρcp[i]`. See §7.3–§7.6 for the full derivation, and §13.3.4 for the assembled formula.
+The conductive divergence feeds the energy equation with the mixture heat capacity `ρc_{p,\text{eff}} = Σ_j ξ_j c_{p,j}(T)` in the denominator — every component, gas included, stores sensible heat. The enthalpy carried by the gas flux relative to the skeleton is the volumetric advection source `S_conv`, always on. This is the ThermaKin Eq. 17 convention. The discretization layer simply assembles `div_q`, `S_conv`, `Q_rad`, `Q_rxn` and divides by `prop_cache.ρcp[i]`. See §7.3–§7.4 for the full derivation, and §13.3.4 for the assembled formula.
 
 ---
 
 ## 13.8 ALE Flux Discretization (Recap)
 
-This section summarizes how the moving mesh modifies the spatial operators; the full ALE theory (mesh-velocity construction, GCL, remapping) is in §11, The ALE Framework.
+This section summarizes how the moving mesh modifies the spatial operators; the full ALE theory (mesh-velocity construction, GCL) is in §11, The ALE Framework.
 
 ### 13.8.1 The ALE advection correction
 
@@ -11595,7 +10800,7 @@ $$
 \frac{\partial f}{\partial t}\bigg|_{\chi} = \frac{\partial f}{\partial t}\bigg|_{x} + w\,\frac{\partial f}{\partial z},
 $$
 
-so the moving-mesh residual equals the fixed-mesh (Eulerian) residual plus a mesh-motion advection term `w·∇f`. In the discretization this correction is computed cell-by-cell and **added** to the assembled Eulerian RHS:
+so a field whose capacity is carried by material moving at velocity $v$ picks up the advection term $(w - v)\cdot\nabla f$ in the mesh frame. Every component rides the skeleton and the mesh moves with it (§11.1.2, §11.2.2), so in production $w = v$ and no advection term is assembled. The term is computed only under the `w_override` verification hook, with $w$ replaced by the relative velocity $w_{\text{rel}} = w_{\text{applied}} - w_{\text{physical}}$, cell by cell, and **added** to the assembled Eulerian RHS:
 
 $$
 \frac{dT_i}{dt}\bigg|_{\text{ALE}} = \frac{dT_i}{dt}\bigg|_{\text{Euler}} + w_{\text{cell},i}\,\Bigl(\frac{\partial T}{\partial z}\Bigr)_i,
@@ -11709,13 +10914,13 @@ z_i^c = \tfrac12\,(u_{z_{\text{off}}+i} + u_{z_{\text{off}}+i+1}), \quad
 z_f = u_{z_{\text{off}}+f},
 $$
 
-with face distances assembled afterward (interior: center-to-center; boundary: factor-2 ghost form of §13.2.3). Because `A` and the `u`-derived positions carry the live scalar type, the entire geometry — and every flux and divergence built on it — is differentiable end-to-end.
+with face distances formed by each kernel from these centers and positions (§13.2). Because `A` and the `u`-derived positions carry the live scalar type, the entire geometry — and every flux and divergence built on it — is differentiable end-to-end.
 
-> **Implementation note.** `compute_geometry_from_state!`, `compute_face_distances_from_state!`, and the unified `update_geometry_cache!` populate a preallocated `GeometryCache` (src/Geometry/geometric_quantities.jl), called once per RHS evaluation in ALE mode. Between *accepted* integrator steps, `update_mesh_from_state!` (src/Problem/state_layout.jl) mirrors the state back into `mesh.nodes[i].z` for AMR, depletion checks, and post-processing. The `StateCache` (src/Problem/state_cache.jl) holds `T`, `ξ`, `z`, `χ`, the geometry quantities `volume`/`A_face`/`A_section`, and `cell_centers`, all parameterized on the scalar type `Tu`.
+> **Implementation note.** `update_state_geometry!(cache, mesh, ::ALE)` (src/Problem/state_cache.jl) recomputes `face_positions`, `A_face`, `cell_centers`, and `volume` from `cache.z` and `cache.A_section[]` once per RHS evaluation in ALE mode (the Eulerian method is a no-op: that geometry is mirrored once at workspace construction). Between *accepted* integrator steps, `update_mesh_from_state!` (src/Problem/state_layout.jl) mirrors the state back into `mesh.nodes[i].z` for the depletion checks and post-processing. The `StateCache` holds `T`, `ξ`, `z`, `χ`, the geometry quantities `volume`/`A_face`/`A_section`, `cell_centers`, and `face_positions`, all parameterized on the scalar type `Tu`.
 
-### 13.10.3 RHS cache and resizing
+### 13.10.3 RHS cache
 
-The face fluxes, sources, and divergences are stored in a preallocated `RHSCache{Tu}` (src/Discretization/finite_volume.jl) carrying `q_cond`, `q_total`, `S_conv`, `S_gen`, `J_gas` (`NC × n_faces`), `Q_rxn`, `Q_rad`, `dξ_rxn` (`NC × n_cells`), the reaction workspaces `rates`/`heats`/`species_src`, and the divergences `div_q`/`div_J`. The type parameter `Tu` is `Float64` for ordinary evaluation and `ForwardDiff.Dual` for AD-based Jacobian/sensitivity passes, so no reallocation occurs when switching modes. After an AMR resize the cache is resized in lockstep via `resize_rhs_cache!`, and the geometry cache via `resize_geometry_cache!` (§14).
+The face fluxes, sources, and divergences are stored in a preallocated `RHSCache{Tu}` (src/Discretization/finite_volume.jl) carrying `q_cond`, `q_total`, `S_conv`, `J_gas` (`NC × n_faces`), `Q_rxn`, `Q_rad`, `dξ_rxn` (`NC × n_cells`), the reaction workspaces `rates`/`heats`/`species_src`, and the divergences `div_q`/`div_J`. The type parameter `Tu` is `Float64` for ordinary evaluation and `ForwardDiff.Dual` for AD-based Jacobian/sensitivity passes, so no reallocation occurs when switching modes. The cache keeps its size for the whole solve: depletion parking (§14.3) leaves ghost slots in place and the kernels loop over the live cells only.
 
 ---
 
@@ -11727,9 +10932,9 @@ We map the reference codes' notation onto the unified nomenclature of §2 on fir
 
 Gpyro is a 1D (optionally pseudo-2D) generalized condensed-phase pyrolysis solver using a **Patankar-style finite-volume** discretization (control volumes about cell-centered nodes). Mapping its symbols to ours: Gpyro's pre-exponential `Z → A_i`, permeability `K → κ`, kinematic viscosity `ν` (in `ṁ'' = −(K/ν)(∂P/∂z − gρ_g)`), conversion `α_conv`, and the overbarred mixture density `ρ̄`.
 
-- **Conservation form vs. non-conservative.** Gpyro writes integral control-volume balances of `ρ̄Δz`, `ρ̄Y_iΔz`, gas mass, and energy on volumes that deform with the solid. Pyrolysis.jl uses the same cell-centered FVM divergence operator (§13.3) on the ALE mesh, with every component riding the mesh, but solves the **non-conservative (Formulation A)** temperature equation, storing every component in `ρc_p` and carrying the gas-flux enthalpy via `S_conv` (§13.7.5). Both telescope to the same boundary-flux balance (§13.3.3).
+- **Conservation form vs. non-conservative.** Gpyro writes integral control-volume balances of `ρ̄Δz`, `ρ̄Y_iΔz`, gas mass, and energy on volumes that deform with the solid. Pyrolysis.jl uses the same cell-centered FVM divergence operator (§13.3) on the ALE mesh, with every component riding the mesh, but solves the **non-conservative** temperature equation, storing every component in `ρc_p` and carrying the gas-flux enthalpy via `S_conv` (§13.7.5). Both telescope to the same boundary-flux balance (§13.3.3).
 - **Interface interpolation.** Patankar's hallmark is the **harmonic interface conductivity** for diffusion coefficients, justified by flux continuity across a control-volume face — identical in spirit to the harmonic-mean `k_f`, `λ_f`, `κ_f` of §13.7.1–§13.7.3. Pyrolysis.jl additionally distance-weights the harmonic mean for non-uniform meshes.
-- **Convection scheme selection.** Patankar/Gpyro selects the face scheme by the cell **Péclet number** (central below ≈2, upwind/power-law above), a built-in switching. Pyrolysis.jl does not auto-switch on Péclet: diffusion is always the volume-fraction-gradient flux and gas advection is first-order upwind (Darcy–Fick) or TVD-limited (ALE). Choosing resolution to keep the cell Péclet number moderate is left to the user (see §18.7).
+- **Convection scheme selection.** Patankar/Gpyro selects the face scheme by the cell **Péclet number** (central below ≈2, upwind/power-law above), a built-in switching. Pyrolysis.jl does not auto-switch on Péclet: diffusion is always the volume-fraction-gradient flux and gas advection is first-order upwind (Darcy–Fick; under ALE the gas rides the mesh and has no mesh-motion advection, §13.8.3). Choosing resolution to keep the cell Péclet number moderate is left to the user (see §18.7).
 - **Linear solver.** Gpyro is fully implicit (backward Euler) with Patankar linearization solved by **TDMA (Thomas algorithm)** for the tridiagonal system. Pyrolysis.jl delegates time integration to stiff OrdinaryDiffEq integrators with a structured/sparse Jacobian (§15); a TDMA appears internally only in the P1 radiation solve (§8.7).
 - **Pressure/Darcy.** Gpyro's Darcian gas flux `ṁ'' = −(K/ν)(∂P/∂z − gρ_g)` includes buoyancy; Pyrolysis.jl's `v_g = −(κ/μ)∇P` (§13.7.3) omits the gravity term (1D through-thickness, gravity negligible) and uses dynamic viscosity `μ` rather than kinematic `ν`.
 
@@ -11738,7 +10943,7 @@ Gpyro is a 1D (optionally pseudo-2D) generalized condensed-phase pyrolysis solve
 ThermaKin is a 1D (with 2D extensions) finite-difference pyrolysis solver. Mapping its symbols: stoichiometric coefficient `θ_i^j → ν_{i,j}` (overload A2; ThermaKin's `θ` is stoichiometry, ours is strain rate), and its published heat-of-reaction sign is `h > 0 = exothermic` (overload H1; internally we use `h > 0` endothermic with `Q_rxn = −Σh_r r_r`).
 
 - **Gas transport.** Pyrolysis.jl's volume-fraction-gradient flux `J = −(λ/T)∂(ξT)/∂x` (§13.7.2) is taken directly from ThermaKin's Section 1.2 gas-transport formulation `J = −ρ_g λ ∂(ξ_g/ρ_g)/∂x`. For a rigid non-swelling matrix (`γ = 0`) ThermaKin recovers a Boyle's-law Darcy form; Pyrolysis.jl provides the explicit Darcy–Fick path (§13.7.3) for that regime.
-- **Convective energy term.** ThermaKin's Eq. 17 carries gas sensible enthalpy as `c_g (J_g·∂T/∂x)`, which is exactly the `S_conv` source of §13.7.5 (the default S_conv-only convention), and sums every component in the storage term — both as here.
+- **Convective energy term.** ThermaKin's Eq. 17 carries gas sensible enthalpy as `c_g (J_g·∂T/∂x)`, which is exactly the `S_conv` source of §13.7.5 (the S_conv-only convention), and sums every component in the storage term — both as here.
 - **Time discretization.** ThermaKin uses Crank–Nicolson in the primary (through-thickness, `x`) direction and explicit updates in the transverse `(y, z)` directions; the spatial operators are second-order finite differences on a structured grid. Pyrolysis.jl is finite-**volume** (flux-based, conservative-divergence) rather than finite-difference, and offloads temporal integration to adaptive stiff solvers (§15).
 - **Moving mesh.** ThermaKin performs dynamic mesh adjustment around a single reference point as the material deforms; Pyrolysis.jl recasts the same deformation through the ALE framework (§11) with cumulative mesh velocity built from per-cell dilation, and (optionally) a separate lateral-shrinkage `χ` channel (§10).
 
@@ -11750,15 +10955,13 @@ The shared lineage (harmonic interface averaging, S_conv gas-enthalpy convention
 
 The following discretization-specific issues are open (drawn from the source annotations and the verification against the implementation):
 
-1. **ALE advection limiter is not exposed through `solve`.** `VANLEER` is the default limiter in `compute_ale_advection_term!` (the mesh-relative temperature advection, override-only). The limiter is selectable only at the workspace level (`build_workspace(...; ale_limiter = MINMOD)`); there is no `solve`-level keyword to switch it (minmod/superbee/none), which would aid verification studies.
+1. **ALE advection limiter is fixed.** `VANLEER` is the default `limiter` keyword of `compute_ale_advection_term!` (the mesh-relative temperature advection, override-only), and the residual calls it with that default; neither the workspace nor `solve` exposes another choice (minmod/superbee/none), which would aid verification studies.
 
-2. **First-order Darcy–Fick advection only.** The pressure-driven advective face flux uses first-order upwinding (§13.7.3); no TVD/MUSCL option exists for Darcy advection (the TVD machinery is wired only into the ALE advection and the conservative remapping). Sharp pressure-driven composition fronts are therefore smeared at first order unless the mesh is refined.
+2. **First-order Darcy–Fick advection only.** The pressure-driven advective face flux uses first-order upwinding (§13.7.3); no TVD/MUSCL option exists for Darcy advection (the TVD machinery is wired only into the verification-hook ALE temperature advection). Sharp pressure-driven composition fronts are therefore smeared at first order unless the mesh is refined.
 
-3. **`T_ref` for the volumetric generation sink under asymmetric ambients.** When `energy_form = :with_generation_sink` and the two boundaries have different ambient temperatures with a permeable back face, the single-scalar `T_ref` (resolved from one boundary) breaks exact energy closure at the opposite boundary by `Σ_g ṁ_g c_{p,g}(T_{∞,\text{top}} − T_{∞,\text{bottom}})` (§7.5). This is harmless for the typical impermeable back face but would require a per-cell datum to fully resolve.
+3. **Multi-dimensional generalization.** All geometry, the divergence operator, the GCL, and the face structures are specialized to 1D (one face per node, scalar face areas, all faces sharing `A`). The `MeshTopology{D,...}` and `MeshGeometry{D}` types are parameterized by dimension `D` but are placeholders the 1D residual does not read; 2D/3D would require vector node positions, per-face normals and variable areas, and a full divergence-theorem GCL.
 
-4. **Multi-dimensional generalization.** All geometry, the divergence operator, the GCL, and the face structures are specialized to 1D (one face per node, scalar face areas, all faces sharing `A`). The `MeshTopology{D,...}` and `MeshGeometry{D}` types are parameterized by dimension `D` but only `D = 1` is implemented; 2D/3D would require vector node positions, per-face normals and variable areas, and a full divergence-theorem GCL.
-
-For the temporal integration and Jacobian that consume the operators of this chapter, see §15 (Temporal Integration & Structured Jacobian); for adaptive refinement that resizes the mesh and these caches, see §14 (Adaptive Mesh Refinement); for the conservation audits that exploit the telescoping divergence of §13.3.3, see §16 (Conservation Diagnostics).
+For the temporal integration and Jacobian that consume the operators of this chapter, see §15 (Temporal Integration & Structured Jacobian); for depletion parking and the refinement building blocks, see §14 (Adaptive Mesh Refinement and Surface Depletion); for the conservation audits that exploit the telescoping divergence of §13.3.3, see §16 (Conservation Diagnostics).
 
 
 ---
@@ -11774,13 +10977,12 @@ removes the $\rho c_p\!\to\!0$ singularity of a depleting surface cell, the
 experimental $h$-refinement/$h$-coarsening (cell split/merge) topology operators,
 the mesh-quality metrics that keep the discretization well-conditioned, the
 active-cell bookkeeping that all AMR consumers must respect, and the way the
-depletion callback resizes the entire workspace/state cascade mid-solve. Every
-discrete rule, threshold, guard, and sign convention below is grounded in the
-implementing function so that the mathematics is traceable to the code; where the
-code makes an approximation, a guard, or a choice that differs from the idealized
-form (and there are several, including a temperature-interpolation term that
-vanishes identically and a "GCL-volume" name that does not apply the GCL flux
-formula), we say so and trust the code.
+depletion callback parks a burned-out cell without changing the size of the
+state. Every discrete rule, threshold, guard, and sign convention below is grounded
+in the implementing function so that the mathematics is traceable to the code;
+where the code makes an approximation, a guard, or a choice that differs from the
+idealized form (including a temperature-interpolation term that vanishes
+identically), we say so and trust the code.
 
 Conventions used in this chapter (binding, from §2, Nomenclature):
 
@@ -11802,16 +11004,17 @@ Conventions used in this chapter (binding, from §2, Nomenclature):
   porosity of §5. The porosity does not appear in this chapter.
 
 The subsystem splits along a maturity line. The **core** `Adaptivity` module
-(`src/Adaptivity/`) holds the error indicators, $r$-refinement, the
-energy-conserving merge and mesh-compaction routines, the cell/neighbor finders,
-the mesh-quality metrics, and the invariant checker — everything the production
-surface-depletion path needs. The **experimental** $h$-AMR cluster
-(`src/Experimental/`) holds cell splitting (`refine_cell!`), sibling coarsening
-(`coarsen_cells!`), the `AMRController` orchestrator, and the combined `hr_adapt!`
-driver. The production solver uses *only* the core surface-depletion merge; the
-$h$-AMR cluster is not wired into `solve` and is exported separately to avoid
-namespace pollution (`src/Experimental/Experimental.jl`). This chapter covers
-both, flagging the experimental status throughout.
+(`src/Adaptivity/`) holds the depleted-cell park (`park_cell!`) with its
+energy-conserving temperature merge and neighbor finders — the only adaptivity
+`solve` uses — and building blocks that `solve` does not call: the error
+indicators, $r$-refinement, the mesh-quality metrics, and the invariant checker.
+The **experimental** $h$-AMR cluster (`src/Experimental/`) holds cell splitting
+(`refine_cell!`), sibling coarsening (`coarsen_cells!`), the `AMRController`
+orchestrator, and the combined `hr_adapt!` driver. It is not wired into `solve`,
+and a mesh it refines cannot be passed to `solve`: refinement leaves inactive
+parent cells among the active ones, and the solver's kernels assume the active
+cells come first (`src/Experimental/Experimental.jl`). This chapter covers both,
+flagging the status of each throughout.
 
 ---
 
@@ -11821,7 +11024,7 @@ An *error indicator* $\eta_i\ge 0$ assigns to each active cell a scalar estimate
 of the local discretization error, used to decide where to refine (large $\eta$)
 or coarsen (small $\eta$). Pyrolysis.jl implements four physically motivated
 indicators plus a composite, all subtypes of the abstract type
-`AbstractErrorIndicator` (declared in `src/Materials/Materials.jl:57`, so that the
+`AbstractErrorIndicator` (declared in `src/Materials/Materials.jl`, so that the
 type is visible to both the `Adaptivity` and `Experimental` modules). All
 indicator math lives in `src/Adaptivity/error_indicators.jl`.
 
@@ -11847,7 +11050,7 @@ Taylor expansion: a fixed jump across a cell produces a fixed indicator regardle
 of how the cell is sized, so the indicator flags *resolution relative to the
 feature*, not absolute slope.
 
-The gradient itself (`compute_gradient_1d`, lines 197–237) is the
+The gradient itself (`compute_gradient_1d`) is the
 opposite-distance-weighted mean of the two one-sided slopes
 (`opposite_distance_gradient`, §13.6.1) — second order on non-uniform
 meshes — and degrades gracefully at boundaries:
@@ -11865,10 +11068,9 @@ $$
 Here $L,R$ index the cells immediately below/above cell $i$, found through the
 cell's left/right faces, $z^c$ are cell-center positions, and
 $d_L = z^c_i - z^c_L$, $d_R = z^c_R - z^c_i$ are the center-to-center
-distances. The boundary cases
-read the field at the *boundary cell itself* in place of an absent neighbor (a
-zero-gradient ghost convention), so a boundary cell never produces a spurious
-gradient from a missing value.
+distances. A boundary cell takes the one-sided difference toward its only
+neighbor, so it never reads a missing value, and a zero center-to-center distance
+returns a zero gradient.
 
 ### 14.1.2 Curvature indicator
 
@@ -11879,7 +11081,7 @@ $$
 \eta_i^{\mathrm{curv}} = w\, h_i^2 \,\bigl|\nabla^2\phi\bigr|_i .
 $$
 
-The discrete second derivative (`compute_curvature_1d`, lines 276–304) uses the
+The discrete second derivative (`compute_curvature_1d`) uses the
 three-point **non-uniform mesh** stencil:
 
 $$
@@ -11936,16 +11138,14 @@ depleted cell.
 This indicator is special in that it **requires** the per-cell, per-species
 reaction rate matrix `rates`, passed as a keyword:
 `compute_indicator(ind, mesh, T, ξ; rates = r)` with `r` sized like ξ for the
-*current* mesh. Calling it without rates throws an `ArgumentError` (it
-formerly returned silent zeros — a doubly inert indicator, since no call site
-ever supplied rates), and a `rates` matrix whose column count does not match
+*current* mesh. Calling it without rates throws an `ArgumentError`, and a `rates` matrix whose column count does not match
 the mesh throws `DimensionMismatch`. Because `adapt_mesh!` recomputes
 indicators *after* topology changes — when any precomputed rates are stale —
 this indicator cannot run inside the controller cycle and is standalone-only;
 the default controller uses a gradient + curvature composite instead.
 Supplying live rates inside the time-stepping loop would mean recomputing the
 Arrhenius source at the indicator-evaluation point (see §6, Reaction
-Kinetics) — this coupling gap is an open issue (§14.8).
+Kinetics) — this coupling gap is an open issue (§14.10).
 
 > **Implementation note.** `compute_indicator(::ReactionRateIndicator, mesh, T, ξ;
 > rates=nothing)` in `src/Adaptivity/error_indicators.jl`.
@@ -11971,7 +11171,7 @@ Because $\eta^{\mathrm{iface}}$ is bounded and smooth, it composes cleanly with 
 solution-driven indicators.
 
 > **Implementation note.** `compute_indicator(::InterfaceProximityIndicator, …)`
-> in `src/Adaptivity/error_indicators.jl` lines 363–385. The struct carries
+> in `src/Adaptivity/error_indicators.jl`. The struct carries
 > `interface_position`, `h_target`, and `weight`; no derivative is computed.
 
 ### 14.1.5 Composite indicator
@@ -12002,10 +11202,9 @@ normalization, so they tilt the within-indicator shape, while the relative
 scale across indicators is set by the normalization.
 
 > **Implementation note.** `compute_indicator(::CompositeIndicator, …)` in
-> `src/Adaptivity/error_indicators.jl` lines 391–435 dispatches on the
+> `src/Adaptivity/error_indicators.jl` dispatches on the
 > `combination::Symbol` field (`:max`, `:l2`, `:sum`) and errors on any other
-> value. A convenience overload `compute_indicator(ind, mesh)` (lines 467–474)
-> pulls $T$ and $\xi$ from the mesh cell states via `extract_fields` and forwards
+> value. A convenience overload `compute_indicator(ind, mesh)` pulls $T$ and $\xi$ from the mesh cell states via `extract_fields` and forwards
 > to the field-taking method; this dense extraction happens on every call and is
 > not cached.
 
@@ -12026,8 +11225,9 @@ raw index range. The indicators honor this; downstream marking routines
 $r$-refinement ("relocation refinement") moves the interior nodes of a *fixed
 topology* mesh to concentrate resolution where it is needed, without changing the
 number of cells. Unlike $h$-refinement it adds no degrees of freedom — it is a
-pure remeshing of the existing cells — and so it composes with the ALE state
-vector without resizing it. The governing principle is **equidistribution** of a
+pure remeshing of the existing cells. `solve` does not call it: the ALE mesh moves
+with the solid (§11.1.2), and node relocation decoupled from the solid is not
+representable there (§11.9 item 5). The governing principle is **equidistribution** of a
 user-chosen *monitor function* $\omega(z)>0$. All $r$-refinement code is in
 `src/Adaptivity/r_refinement.jl`.
 
@@ -12072,8 +11272,8 @@ $\int\sqrt{1+\alpha\,\phi_z^2}\,dz$ is (for $\alpha=1$) the arc length of the
 solution curve, so equidistributing $\omega^{\mathrm{grad}}$ places nodes at equal
 arc-length intervals along the solution — naturally clustering them on steep
 fronts. The gradient is the same distance-weighted center difference used by the
-indicators (`compute_cell_gradient`, lines 189–213), with one-sided forms at
-boundaries.
+indicators (`compute_gradient_1d`, `src/Adaptivity/error_indicators.jl`), with
+one-sided forms at boundaries.
 
 **Interface monitor.** A Gaussian bump concentrates nodes near a prescribed
 interface $z_{\mathrm{int}}$ irrespective of the solution:
@@ -12092,8 +11292,8 @@ interface-monitor width $\sigma_{\mathrm{mon}}$ of §2.
 `:sum`, or `:product`. The product rule is multiplicative reinforcement (both
 monitors must be large); the max rule is the conservative union.
 
-> **Implementation note.** `evaluate_monitor` (`src/Adaptivity/r_refinement.jl`
-> lines 95–169) dispatches on `GradientMonitor`, `InterfaceMonitor`, and
+> **Implementation note.** `evaluate_monitor` (`src/Adaptivity/r_refinement.jl`)
+> dispatches on `GradientMonitor`, `InterfaceMonitor`, and
 > `CompositeMonitor`; monitors are subtypes of the abstract `MonitorFunction`.
 > Like the indicators, monitor evaluation skips inactive cells. Note that monitor
 > functions are problem-dependent and carry arbitrary units; the user is
@@ -12102,7 +11302,7 @@ monitors must be large); the max rule is the conservative union.
 
 ### 14.2.3 Computing target node positions
 
-`compute_target_positions(mesh, ω)` (lines 231–299) inverts the discrete
+`compute_target_positions(mesh, ω)` inverts the discrete
 equidistribution relation by piecewise-linear interpolation of the cumulative
 monitor integral. The algorithm:
 
@@ -12132,15 +11332,12 @@ $$
 The routine returns the empty vector if there are no interior nodes or if
 $\Omega_{\mathrm{total}}\le 0$ (which then disables relocation for that step).
 
-A subtlety worth recording: the code computes a `target_per_segment =
-Ω_total/M` quantity but does not use it for placement; the actual targets use the
-$\tfrac{n}{N+1}\Omega_{\mathrm{total}}$ form above (lines 257 vs. 281). The
-inversion is therefore *node-count* based, not *cell-count* based, which is the
-correct choice for placing the $N$ interior nodes.
+The inversion is *node-count* based ($\tfrac{n}{N+1}\Omega_{\mathrm{total}}$), not
+*cell-count* based, which is the correct choice for placing the $N$ interior nodes.
 
 ### 14.2.4 Relaxed relocation with quality constraints
 
-`relocate_nodes!` (lines 319–409) drives the interior nodes toward their targets
+`relocate_nodes!` drives the interior nodes toward their targets
 by damped fixed-point iteration. Per iteration it:
 
 1. Evaluates the monitor and computes target positions.
@@ -12183,19 +11380,19 @@ positions are physical domain limits and are fixed by construction.
 
 A critical caveat: `relocate_nodes!` relocates nodes but does **not remap the
 solution onto the moved mesh**. It reads the cell states once at entry
-(`extract_state_arrays`) to evaluate the monitor and then moves nodes; the cell
-*state* (the $T$ and $\xi$ stored per cell) is left attached to its (now-resized)
-cell. In a conservative AMR cycle this must be followed by a conservative remap of
-$T,\xi$ from the old to the new node layout (see §11.7, the ALE conservative
-remapping routine `remap_solution!`). The standalone
-`relocate_nodes!` is therefore a *geometry* operation; conservation of the
-transported fields is the caller's responsibility.
+(`extract_fields`) to evaluate the monitor and then moves nodes; the cell
+*state* (the $T$ and $\xi$ stored per cell) is left attached to its resized
+cell, so a cell's mass $\xi_j V_i$ changes with its volume. The package has no
+conservative remap; `relocate_nodes!` is a *geometry* operation, conservation of
+the transported fields is the caller's responsibility, and `solve` never calls
+it.
 
 ---
 
 ## 14.3 Depletion handling: parked cells (the production path)
 
-The single AMR capability wired into `solve` is **depletion handling**. As
+The single AMR capability wired into `solve` is **depletion handling**, enabled by
+`solve(…; handle_depletion = true)` (default `false`). As
 pyrolysis consumes the solid, an ALE cell (§11) thins toward zero thickness; on a
 fixed mesh a cell empties instead. A vanishing or emptied cell is numerically
 catastrophic for two reasons. First, its matrix heat capacity
@@ -12209,7 +11406,7 @@ carry no usable digits, so the integrator halves $\Delta t$ until the cell's own
 time scale is resolved. No Jacobian accuracy and no regularisation of the
 properties changes this; the cell must leave the nonlinear system.
 
-Depletion handling **parks** the cell: it merges the cell's mass and condensed
+Depletion handling **parks** the cell: it merges the cell's mass and sensible
 enthalpy into a neighbour, then moves the freed state slot above the live
 surface as an inert ghost. The state vector, the mesh arrays, the
 `StateLayout`, the sparsity pattern and the Jacobian caches keep their size for
@@ -12319,8 +11516,8 @@ mesh with depletion is the porous-residue model (a char that keeps its
 volume, burning top down); a material that regresses belongs on the ALE
 mesh.
 
-> **Implementation note.** `is_cell_thin`, `get_cell_thickness`,
-> `find_thin_cells`, `depletion_candidate` and `interior_void_cell` in
+> **Implementation note.** `is_cell_thin`, `find_thin_cells`,
+> `depletion_candidate` and `interior_void_cell` in
 > `src/Solver/callbacks.jl`; `matrix_volume_fraction` in
 > `src/Properties/mixture_rules.jl`. The callback *condition* fires whenever a
 > candidate or (fixed mesh) an interior void exists; the *affect* terminates
@@ -12346,10 +11543,10 @@ Temperature is **intensive**, and a naive volume-weighted average of $T$ does
 *not* conserve internal energy when the two cells have different heat capacities —
 the very situation in depletion, where a hot, dense solid cell is merged with a
 cool, mostly-converted (low-capacity) one. Pyrolysis.jl therefore conserves the
-**condensed-phase sensible enthalpy**
+**sensible enthalpy** of every component
 
 $$
-H(T) \;=\; \sum_{j\,\notin\,\mathrm{gas}} m_j \int_{T_{\mathrm{ref}}}^{T}
+H(T) \;=\; \sum_{j=1}^{N_C} m_j \int_{T_{\mathrm{ref}}}^{T}
 c_{p,j}(T')\,\mathrm{d}T',
 \qquad m_j = V\,\xi_j ,
 $$
@@ -12379,8 +11576,8 @@ empty) the energy balance is degenerate and the routine falls back to the
 volume-weighted average.
 
 The accuracy stakes: merging a $1\,$m$^3$ condensed-rich cell at $800\,$K with
-condensed $\rho c_p = 2000\,$kJ m$^{-3}$K$^{-1}$ and a $1\,$m$^3$
-mostly-converted cell at $400\,$K with condensed
+$\rho c_p = 2000\,$kJ m$^{-3}$K$^{-1}$ and a $1\,$m$^3$
+mostly-converted cell at $400\,$K with
 $\rho c_p = 500\,$kJ m$^{-3}$K$^{-1}$ gives, by the wrong volume-weighted rule,
 $T=(800+400)/2 = 600\,$K, whereas conserving the enthalpy (constant
 $c_p$, where the integral form reduces to the familiar
@@ -12393,8 +11590,7 @@ $$
 a $120\,$K (20 % of the temperature difference) error avoided.
 
 > **Implementation note.** `merge_temperatures_conservatively(V_a, state_a, V_b,
-> state_b, material)` in `src/Adaptivity/cell_merge.jl`, with a raw-values
-> variant `merge_temperatures_conservatively_from_values`. The component heat
+> state_b, material)` in `src/Adaptivity/cell_merge.jl`. The component heat
 > capacity is `material.components[j].heat_capacity`, a callable $c_{p,j}(T)$.
 > This is the **single** canonical merge: the park primitive `park_cell!` and
 > the experimental `coarsen_cells!` both call it.
@@ -12426,12 +11622,12 @@ and rewrites the state vector. The sequence:
    face or node reference changes; the freed cell slot `n_live` (the last live
    index) becomes the ghost and the freed node slot lands on the surface. On a
    fixed mesh only the top live cell parks and nothing shifts.
-4. **Boundary flags.** Face `n_live` (the new count) becomes the exposed
+4. **Boundary flags.** Face `n_live + 1` (`n_live` the new count) becomes the exposed
    boundary face, `cell_ids = (n_live, 0)`, `boundary_id = 1`; the previous top
    face becomes an inert ghost face; the matching node flags follow;
    `mesh.boundary_faces[1]` is updated; `n_active_cells` is decremented and
-   `active_cell_mask` cleared for the ghost; the geometry cache is rebuilt and
-   the AMR invariants (§14.6) asserted.
+   `active_cell_mask` cleared for the ghost; the mesh geometry is recomputed
+   (`update_geometry!`) and the AMR invariants (§14.6) asserted.
 5. **State vector.** $T$, $\xi$ and (ALE) $z$ are read back from the mesh for
    every slot — the mesh mirrors the accepted state when the callback runs, so
    live cells shift exactly as the mesh did and the ghost carries the merged
@@ -12441,12 +11637,12 @@ and rewrites the state vector. The sequence:
    **initial dry-solid masses** (captured before step 2 sums them), because
    $\chi_i = m_{\mathrm{released},i}/m_{\mathrm{dry,init},i}$ makes
    $\sum_i \chi_i\,m_{\mathrm{dry,init},i}$ the extensive invariant; the ghost
-   gets $\chi = 0$. The workspace's cached boundary face and cell ids follow the
-   mesh (they are shared with the Jacobian's AD workspace, so one update serves
+   gets $\chi = 0$. The workspace's cached top boundary face id follows the
+   mesh (it is shared with the Jacobian's AD workspace, so one update serves
    both), and `derivative_discontinuity!(integrator, true)` forces a derivative
    recomputation.
 
-Mass, sensible enthalpy, $\chi$-weighted dry mass and live volume are
+Mass, sensible enthalpy, $\chi$-weighted dry mass and (under ALE) live volume are
 conserved to roundoff at every event (`test/adaptivity/test_cell_park.jl`).
 
 ### 14.3.5 The depletion callback
@@ -12489,7 +11685,7 @@ interpolation is unaffected because the state never changes size.
 
 ### 14.3.6 The Jacobian through burnout
 
-Because the state keeps its size, the pluggable Jacobian (§15.6) stays valid
+Because the state keeps its size, the structured Jacobian (§15.6) stays valid
 through every park:
 
 - the sparsity pattern is built once for $n$ slots and is a superset of every
@@ -12508,7 +11704,7 @@ through every park:
 parked states for `Structured(strategy = DirectSolve())`, and the parked
 `ApproxSolve` assembly equals that of the compacted problem on the live block.
 
-The ALE default Jacobian, `Structured(strategy = ApproxSolve())` (§15.10.3),
+The ALE default Jacobian, `Structured(strategy = ApproxSolve())` (§15.10.2),
 stays the default through parking. The `:full` ALE pattern carries the
 prefix-sum couplings of every node to every cell below it, which makes the
 factorized $W$ effectively dense and the sparse direct solve 60–90× more
@@ -12539,14 +11735,15 @@ degenerate gas transport (§5.6) and from the step controller (§15.5.3).
 The $h$-adaptivity cluster changes mesh *topology* by splitting a cell into two
 children ($h$-refinement) or merging two refinement siblings back into their
 parent ($h$-coarsening). It lives in `src/Experimental/` and is **not invoked by
-the production `solve` path**; it is exercised by tests and the experimental
-`AMRController`. Because it changes the number of degrees of freedom, it is
-incompatible with a fixed-length state vector and is not yet integrated with the
-time-stepping loop.
+`solve`**; it is exercised by tests and the experimental `AMRController`. A mesh
+it refines cannot be passed to `solve`: refinement leaves inactive parent cells
+among the active ones, while the solver's kernels assume the active cells are the
+contiguous prefix `1:n_active_cells`; it also changes the number of degrees of
+freedom, which the fixed-length state vector of `solve` cannot follow.
 
 ### 14.4.1 Single-cell refinement
 
-`refine_cell!(mesh, cell_id)` (`src/Experimental/h_refinement.jl` lines 45–214)
+`refine_cell!(mesh, cell_id)` (`src/Experimental/h_refinement.jl`)
 splits a leaf cell $p$ into a left child $a$ and a right child $b$:
 
 1. **New center node.** Place a node at the geometric midpoint
@@ -12606,18 +11803,18 @@ $T\!\cdot\!V$ proxy ($V_a T_a + V_b T_b = V_p T_p$), so `verify_refinement_conse
 reports zero error, but it does not realize the advertised second-order
 reconstruction. With variable heat capacity the constant-$T$ split is also
 energy-conserving in the true $\rho c_p T V$ sense because $\rho c_p$ and $T$ are
-identical in both children. The gradient routine `estimate_gradient` (lines
-221–246) is correct and ready; only the geometric $\Delta z$ argument nullifies it.
+identical in both children. The gradient routine `estimate_gradient` is correct
+and ready; only the geometric $\Delta z$ argument nullifies it.
 
 > **Implementation note.** `refine_cell!` and `estimate_gradient` in
 > `src/Experimental/h_refinement.jl`. The conservation check
-> `verify_refinement_conservation` (lines 407–439) compares parent vs. summed
+> `verify_refinement_conservation` compares parent vs. summed
 > children for mass (per species, against `volume_ref`) and a $T\!\cdot\!V$ energy
 > proxy.
 
 ### 14.4.2 Marking and 2:1 balance
 
-`mark_cells_for_refinement(mesh, η, θ_refine, h_min, max_level)` (lines 269–300)
+`mark_cells_for_refinement(mesh, η, θ_refine, h_min, max_level)`
 flags a cell when **all three** criteria hold:
 
 $$
@@ -12633,7 +11830,7 @@ the second ensures the children will still exceed $h_{\min}$; the third caps the
 refinement depth. The maximum $\eta$ is taken only over active cells, and the
 routine returns empty if $\max\eta\le 0$.
 
-`enforce_2to1_balance!(mesh, marked, max_level)` (lines 312–358) augments the
+`enforce_2to1_balance!(mesh, marked, max_level)` augments the
 marked set so that, after refinement, adjacent cells differ by at most one
 refinement level. It is a **fixed-point iteration**: for each currently-marked
 cell it inspects both neighbors; if a neighbor is coarser
@@ -12646,17 +11843,16 @@ already-coarse cell that becomes unbalanced after a complex refinement pattern i
 not retroactively un-marked), and the fixed-point approach is conservative and can
 over-refine.
 
-`perform_h_refinement!(mesh, marked)` (lines 373–393) refines the marked cells in
+`perform_h_refinement!(mesh, marked)` refines the marked cells in
 decreasing index order (for determinism) and calls `update_geometry!` once at the
 end.
 
 ### 14.4.3 Sibling coarsening
 
-`coarsen_cells!(mesh, a, b; material)` (`src/Experimental/h_coarsening.jl` lines
-114–242) merges two *siblings* (same parent, both leaves) back into their parent.
-Its preconditions distinguish it sharply from the production adjacent-cell merge:
+`coarsen_cells!(mesh, a, b; material)` (`src/Experimental/h_coarsening.jl`) merges two *siblings* (same parent, both leaves) back into their parent.
+Its preconditions distinguish it sharply from the depletion park's adjacent-cell merge:
 it requires a parent–child relationship (`can_coarsen` checks parent $\ne 0$, both
-leaves), whereas the production park (`park_cell!`, §14.3.4) works on any
+leaves), whereas the park (`park_cell!`, §14.3.4) works on any
 adjacent live pair. The merge
 algebra is identical to §14.3.3 — energy-conserving $T$ (or volume-weighted
 without material), volume-weighted $\xi$, summed $m_{\mathrm{dry}}$ — but the
@@ -12668,10 +11864,11 @@ Crucially, `coarsen_cells!` **does not remove the orphaned intermediate node and
 interior face from the arrays** — it only flips the mask. This is the deliberate
 "mark-inactive" strategy (§14.6): removing elements would invalidate indices
 throughout the code, so the experimental $h$-AMR path leaves orphans in place,
-trading memory for index stability. (Contrast the production depletion path, which
-*does* compact, because the state vector must shrink to match.)
+trading memory for index stability. (Contrast the depletion park, which keeps the
+arrays' length and shifts the live values down so the live cells stay a contiguous
+prefix, §14.3.4.)
 
-`mark_cells_for_coarsening(mesh, η, θ_coarsen, h_max)` (lines 264–310) marks a
+`mark_cells_for_coarsening(mesh, η, θ_coarsen, h_max)` marks a
 sibling pair when **both** siblings have low error and the merged cell is not too
 large:
 
@@ -12692,8 +11889,7 @@ pairs (re-checking both are still active) and refreshes geometry.
 indicator, a quality metric, the refine/coarsen thresholds, the size and level
 bounds, and a check cadence. Its defaults are $\theta_{\mathrm{refine}}=0.7$,
 $\theta_{\mathrm{coarsen}}=0.1$, $h_{\min}=10^{-6}\,$m, $h_{\max}=10^{-2}\,$m,
-`max_level=4`, `check_every=10`. `adapt_mesh!(mesh, controller)` (lines 123–178)
-runs the full cycle:
+`max_level=4`, `check_every=10`. `adapt_mesh!(mesh, controller)` runs the full cycle:
 
 1. Compute indicators on the current state.
 2. Mark for refinement, enforce 2:1 balance, perform $h$-refinement.
@@ -12726,8 +11922,9 @@ relocation operates on the final cell count.
 
 Quality metrics guard against discretizations that, while topologically valid, are
 numerically dangerous: extreme size jumps degrade interpolation accuracy and
-matrix conditioning; non-positive volumes signal tangling. All metrics are
-subtypes of `AbstractQualityMetric` (`src/Materials/Materials.jl:59`) and live in
+matrix conditioning; non-positive volumes signal tangling. `solve` does not call
+them; they serve the experimental `AMRController` (§14.4.4) and diagnostics. All
+metrics are subtypes of `AbstractQualityMetric` (`src/Materials/Materials.jl`) and live in
 `src/Adaptivity/mesh_quality.jl`. Each metric supports `check_quality` (a boolean)
 and `quality_violations` (the offending cell indices).
 
@@ -12774,7 +11971,7 @@ $$
 sub-metrics pass; its violation set is the union.
 
 **Enforcement by Laplacian smoothing.** `enforce_quality!(mesh, metric;
-max_iter=10)` (lines 320–381) attempts to repair violations by relaxed Laplacian
+max_iter=10)` attempts to repair violations by relaxed Laplacian
 smoothing of the interior nodes of violating cells:
 
 $$
@@ -12794,21 +11991,19 @@ volumes are positive — a one-call diagnostic of mesh health.
 
 > **Implementation note.** All metric types, `check_quality`/`quality_violations`,
 > `compute_aspect_ratios`/`compute_smoothness`, `enforce_quality!`, and
-> `mesh_quality_summary` in `src/Adaptivity/mesh_quality.jl`. The geometry module
-> provides the closely related `aspect_ratio`, `max_aspect_ratio`,
-> `min_cell_size`, `max_cell_size` (`src/Geometry/geometric_quantities.jl`), all of
-> which also mask out inactive cells.
+> `mesh_quality_summary` in `src/Adaptivity/mesh_quality.jl`; all of them mask out
+> inactive cells.
 
 ---
 
 ## 14.6 AMR bookkeeping and invariants
 
-The AMR data model is split for performance (see §13 and the geometry KB):
+The AMR data model is split for performance (see §13):
 **immutable connectivity** (`Cell1D`, `Face1D` are immutable structs; the topology
 graph does not change during a residual evaluation) and **mutable geometry**
-(positions, volumes, areas, the active mask). Refinement and coarsening happen only
-at discrete event times and rebuild the relevant mesh arrays; between events the
-residual reads a frozen mesh.
+(positions, volumes, areas, the active mask). Topology changes — the park inside
+`solve`, refinement and coarsening outside it — happen only between residual
+evaluations; the residual never mutates the mesh.
 
 The central bookkeeping object is the **active-cell mask** `active_cell_mask::
 BitVector`, with `n_active_cells` its population count. The hard rule — call it the
@@ -12827,9 +12022,8 @@ that all five parallel per-cell arrays — `active_cell_mask`, `cell_states`,
 (empty allowed only for hand-built meshes that never sized it) — have length
 equal to `length(mesh.cells)`, and
 that `n_active_cells == count(active_cell_mask)`. It does not check connectivity
-correctness (that is the compaction routines' assertions on
-$n_{\mathrm{nodes}}=n_{\mathrm{cells}}+1$); it catches the most common drift, a
-counter that disagrees with the mask or a parallel array of the wrong length.
+correctness; it catches the most common drift, a counter that disagrees with the
+mask or a parallel array of the wrong length.
 
 Two distinct slot strategies coexist, by design:
 
@@ -12844,7 +12038,7 @@ their length and the 1-D connectivity never changes. The experimental $h$-AMR
 path leaves orphans (so its arrays grow monotonically across refinement cycles)
 precisely to avoid invalidating indices held elsewhere. A periodic
 full-compaction pass for the
-$h$-AMR path is an open design question (§14.8).
+$h$-AMR path is an open design question (§14.10).
 
 No workspace buffer changes size on a park: the caches are allocated once for
 $n$ slots, and the Jacobian's sparsity pattern is a superset of every live
@@ -12854,8 +12048,9 @@ pattern (§14.3.6).
 
 ## 14.7 Interaction with the solver
 
-The relationship between AMR and the time integrator is mediated entirely by
-callbacks (§15) and the read-only-mesh discipline of the residual (§3, §13). Three
+The relationship between depletion parking and the time integrator is mediated
+entirely by callbacks (§15) and the read-only-mesh discipline of the residual (§3,
+§13); the $h$- and $r$-adaptivity of §14.2 and §14.4 has no such link. Three
 facts complete the picture:
 
 1. **Mesh sync is callback-driven.** The residual and Jacobian assembly treat the
@@ -12866,9 +12061,10 @@ facts complete the picture:
    post-processing all see a consistent mesh. The depletion callback runs *after*
    the step-update callback in the `CallbackSet` (see §15).
 
-2. **Termination guards the singular limit.** Alongside depletion, a
-   `ThicknessTerminationCallback` (a `ContinuousCallback` on
-   $z_{\mathrm{top}}-z_{\mathrm{bottom}} - \mathrm{min\_thickness}$, default
+2. **Termination guards the singular limit.** Alongside depletion, under ALE, the
+   thickness-termination callback (`create_thickness_termination_callback`, a
+   `ContinuousCallback` on the live thickness
+   $z_{n_{\mathrm{live}}+1}-z_1 - \mathrm{min\_thickness}$, default
    $\mathrm{min\_thickness}=10^{-6}\,$m) stops the integration when the whole
    sample has receded to near-zero thickness, before $\rho c_p^{\mathrm{eff}}V$
    becomes singular globally. Depletion handles *per-cell* thinning; termination
@@ -12918,9 +12114,9 @@ receding surface. Mapping their notation to ours on first use:
   swelling/shrinking is applied through a density-ratio rule on the cell sizes. The
   FDS surface-node removal is conceptually identical to Pyrolysis.jl's
   surface-depletion merge, with the difference that Pyrolysis.jl folds the removed
-  cell's energy into its interior neighbor by the explicit
-  $T_{\mathrm{merged}}=E_{\mathrm{total}}/(V_{\mathrm{merged}}\rho c_p|_{\mathrm{merged}})$
-  formula, whereas FDS's regression bookkeeping is tied to its fixed-grid layout.
+  cell's sensible enthalpy into its interior neighbor by the enthalpy-conserving
+  merge of §14.3.3, whereas FDS's regression bookkeeping is tied to its fixed-grid
+  layout.
   Neither FDS nor Gpyro carries an indicator-driven $h$-refinement of the kind in
   Pyrolysis.jl's experimental cluster (§14.4).
 
@@ -12932,11 +12128,9 @@ energy-conserving cell merge with a documented thinness criterion, decoupled fro
 the rest of the physics by the callback architecture.
 
 > Note: the reference comparison here is drawn from the general published
-> descriptions of these codes; the Pyrolysis.jl knowledge base did not include
-> dedicated `ref_thermakin`/`ref_gpyro`/`ref_fds` extracts for the AMR chapter, so
-> the mapping above is at the level of modeling strategy rather than equation-by-
-> equation correspondence. The Pyrolysis.jl side of every statement is grounded in
-> the source as cited throughout this chapter.
+> descriptions of these codes, so the mapping above is at the level of modeling
+> strategy rather than equation-by-equation correspondence. The Pyrolysis.jl side
+> of every statement is grounded in the source as cited throughout this chapter.
 
 ---
 
@@ -12958,7 +12152,7 @@ $$
 $$
 
 **Composite combination**:
-$\eta^{\max}=\max_k\eta_k,\ \eta^{\ell_2}=\sqrt{\textstyle\sum_k\eta_k^2},\ \eta^{\Sigma}=\sum_k\eta_k$.
+$\eta^{\max}=\max_k\hat\eta_k,\ \eta^{\ell_2}=\sqrt{\textstyle\sum_k\hat\eta_k^2},\ \eta^{\Sigma}=\sum_k\hat\eta_k$, with $\hat\eta_k=\eta_k/\max_{\text{active}}\eta_k$.
 
 **Equidistribution** (`src/Adaptivity/r_refinement.jl`):
 
@@ -12981,15 +12175,15 @@ $\Delta z_i < \tau_{\mathrm{dep}}\,\Delta z_{i,\mathrm{init}}$, $\tau_{\mathrm{d
 **Conservative merge** (`src/Adaptivity/cell_merge.jl`):
 
 $$
-\xi_{\mathrm{merged},j} = \frac{V_a\xi_{a,j}+V_b\xi_{b,j}}{V_a+V_b},
+\xi_{\mathrm{merged},j} = \frac{V_a\xi_{a,j}+V_b\xi_{b,j}}{V_{\mathrm{keep}}},
 \qquad
-\sum_{j\notin\mathrm{gas}} m_j\!\int_{T_{\mathrm{ref}}}^{T_{\mathrm{merged}}}\! c_{p,j}\,dT'
+\sum_{j} m_j\!\int_{T_{\mathrm{ref}}}^{T_{\mathrm{merged}}}\! c_{p,j}\,dT'
 = H_a(T_a) + H_b(T_b),
 \qquad
 m_{\mathrm{dry},\mathrm{keep}}\mathrel{+}=m_{\mathrm{dry},\mathrm{remove}},
 $$
 
-with $m_j = V\,\xi_j$ the per-component condensed mass ($T_{\mathrm{merged}}$ by
+with $V_{\mathrm{keep}} = V_a+V_b$ under ALE and $V_b$ on a fixed mesh, $m_j = V\,\xi_j$ the mass of component $j$, the sum running over every component ($T_{\mathrm{merged}}$ by
 bracketed Newton; reduces to the $\rho c_p$-weighted mean for constant $c_p$;
 §14.3.3), and $\chi_{\mathrm{merged}} = (m_a\chi_a+m_b\chi_b)/(m_a+m_b)$ with $m$
 the initial dry-solid mass (§14.3.4).
@@ -13010,15 +12204,14 @@ $h_i\ge 10^{-8}$ (min size).
 
 **AMR invariant** (`src/Adaptivity/Adaptivity.jl`):
 $\mathrm{len}(\text{mask})=\mathrm{len}(\text{states})=\mathrm{len}(V)=\mathrm{len}(\text{centers})=\mathrm{len}(\text{cells})$
-and $\mathrm{n\_active\_cells}=\mathrm{count}(\text{mask})$; after compaction
-$n_{\mathrm{nodes}}=n_{\mathrm{faces}}=n_{\mathrm{cells}}+1$.
+and $\mathrm{n\_active\_cells}=\mathrm{count}(\text{mask})$.
 
 ---
 
 ## 14.10 Limitations and open issues
 
-The AMR subsystem is functional in its production (surface-depletion) form and
-experimental in its full $h$-/$r$-adaptive form. The following are the principal
+The adaptivity subsystem is functional in the depletion-parking form `solve` uses
+and experimental in its full $h$-/$r$-adaptive form, which `solve` does not use. The following are the principal
 open issues, several of which are discrepancies or design questions surfaced by
 the code itself.
 
@@ -13069,7 +12262,7 @@ This chapter describes how the spatially-discretized governing equations of §13
 (Finite-Volume Spatial Discretization) are assembled into a single flat
 ODE/DAE right-hand side, integrated in time by stiff implicit Runge–Kutta
 methods, and linearized through a structured-operator Jacobian. We derive the
-block-major state-vector layout and the four dispatched residual paths; the
+block-major state-vector layout and the two dispatched residual paths; the
 unified `residual!` entry point and the immutable-definition / mutable-workspace
 split that makes it pure and thread-safe; the full ALE residual assembly
 sequence; the link to OrdinaryDiffEq's implicit-RK $W$-matrix; the
@@ -13077,7 +12270,7 @@ three-layer structured-Jacobian architecture (operators → couplings →
 linear-solve strategies); the exact per-operator Jacobian formulas with their
 sign conventions; the O(N) prefix/suffix/rank-1 couplings that represent the
 non-local terms; the linear-solve strategies and iterative solvers; the
-two-pattern sparsity construction with greedy coloring; and the verification
+two-pattern sparsity construction; and the verification
 machinery that anchors every backend to a dense AD reference. Every discrete
 rule is grounded in the implementing function so the mathematics is traceable to
 the code; where the code makes an approximation, a guard, or a sign choice, we
@@ -13156,8 +12349,8 @@ and `chi_range(l)`.
 > **Implementation note.** The layout, accessors, and the
 > `pack_state!`/`update_mesh_from_state!`/`create_state_vector` operations live
 > in `StateLayout`, src/Problem/state_layout.jl. The same packing is mirrored in
-> the Jacobian sparsity module's index macros `_temp_idx`, `_xi_idx`, `_z_idx`,
-> `_chi_idx`, src/Jacobian/sparsity.jl, and in solution extraction,
+> the Jacobian sparsity module's index helpers `_xi_idx` and `_z_idx`,
+> src/Jacobian/sparsity.jl, and in solution extraction,
 > src/Solver/solve.jl. The block order $[T\mid\xi\mid z\mid\chi]$ is binding: any
 > code that reads or writes raw state must respect it.
 >
@@ -13217,21 +12410,19 @@ Accessors extract the type parameters at compile time:
 
 Because the mode is a type parameter, `mesh_mode(def.mode) isa ALE` and friends
 resolve to compile-time constants, and the residual's dispatch chain
-specializes fully — no runtime branching on the mode. The four *combinations
-that actually matter for the residual entry* are the cross product of mesh mode
-(Eulerian/ALE) with transport mode (Fickian/DarcyFick); radiation and $\chi$
-are further dispatched inside those paths. This yields the **four dispatched
-residual paths** referenced in the scope:
-
-1. Eulerian × Fickian, 2. Eulerian × DarcyFick, 3. ALE × Fickian,
-4. ALE × DarcyFick — with `NoChi`/`WithChi` and the radiation model
-specializing each.
+specializes fully — no runtime branching on the mode. The residual entry
+dispatches on the mesh mode only, giving **two residual paths**, Eulerian and
+ALE. Inside each, the transport law follows the property cache (a Darcy sub-cache
+exists only in `DarcyFick` mode, and `compute_rhs!` selects the Darcy–Fick flux
+from it), the $\chi$ block is included iff `WithChi`, and the radiation model
+specializes the source.
 
 > **Implementation note.** `SimulationMode`, the `MeshMode`/`RadiationMode`/
 > `TransportMode`/`ChiMode` abstract hierarchies, and the accessors are in
 > src/Problem/traits.jl. The mode is *derived*, not user-set directly:
-> `to_problem_def(problem; use_ale, radiation_model, energy_form, …)`
-> (src/Problem/adapter.jl) assembles it from the `use_ale` flag, the radiation
+> `to_problem_def(problem; use_ale, radiation_model, radiation_intensity,
+> radiation_kirchhoff)` (src/Problem/adapter.jl) assembles it from the `use_ale`
+> flag, the radiation
 > model, and the material's Darcy/$\chi$ traits (`has_darcy_flow`, the presence
 > of a `lateral_shrinkage_law`). The `RadiationModel` enum value
 > `P1_QUASI_STEADY` is rejected at solve setup (it lives in `Experimental`), so
@@ -13250,19 +12441,19 @@ residual!(du, u, def::ProblemDef, t, ws::Workspace)  ->  nothing
 ```
 
 - `def::ProblemDef` is **immutable** and shareable across threads / sweep
-  workers. It strips the mutable mesh down to its connectivity (`MeshTopology`)
-  and retains only the *unchanging* specification: the material, BC set, initial
-  conditions, time span, the `SimulationMode`, and a NamedTuple of runtime
-  options (`radiation_model`, `energy_form`, `use_transpiration_bc`, …).
+  workers. It carries the mesh connectivity (`MeshTopology`, a placeholder the
+  1D residual does not read) and the *unchanging* specification: the material,
+  the BC set, the `SimulationMode`, and a NamedTuple of runtime options
+  (`radiation_model`, `radiation_intensity`, `radiation_kirchhoff`).
 - `ws::Workspace` is **mutable** and owned by exactly one worker. It holds the
   typed state mirror (`StateCache`), property cache (`PropertyCache`), RHS work
   arrays (`RHSCache`), and (in ALE mode) the ALE work arrays. It also caches the
-  dry-gas component indices and the boundary face/cell IDs.
+  dry-gas component indices and the boundary face IDs.
 - `t` is a plain `Real`; the kernel accepts whatever scalar type $\boldsymbol{u}$
   and $\boldsymbol{du}$ carry — `Float64` for ordinary evaluation, or
   `ForwardDiff.Dual` for AD Jacobian assembly and forward sensitivity (§17).
 
-This split is what makes parameter sweeps (§ User Guide UG-12) and pluggable
+This split is what makes parameter sweeps (§ User Guide UG-12) and the
 AD Jacobians possible without re-allocating problem metadata: every worker shares
 one `def` and owns one `ws`; the AD Jacobian builds a *parallel* `Dual`-typed
 workspace (`build_ad_workspace`) that shares the mesh, layout, and boundary
@@ -13275,45 +12466,23 @@ geometry (cell centers, volumes, face areas, cross-section) live in the typed
 carries `eltype(u)` end-to-end. The mutable mesh is re-synchronized from the
 accepted integrator state *only between steps*, by the `StepUpdateCallback`
 (§15.5). This guarantees that the many residual evaluations inside one implicit
-step (Newton iterations, finite-difference Jacobian coloring) all see a
+step (Newton iterations, Jacobian evaluations) all see a
 consistent geometry, and that AD sensitivities propagate cleanly through
 geometry because the geometry is a function of `cache.z` and `cache.A_section`,
 both `Dual`-typed in the AD pass.
 
 > **Implementation note.** `ProblemDef` and the runtime-option NamedTuple:
-> src/Problem/problem_def.jl. `Workspace`, `build_workspace`, and
-> `build_ad_workspace`: src/Problem/workspace.jl. `StateCache`, `populate!`,
+> src/Problem/problem_def.jl. `Workspace`: src/Problem/workspace.jl;
+> `build_workspace` and `build_ad_workspace`: src/Problem/adapter.jl. `StateCache`, `populate!`,
 > `update_state_geometry!`, `update_cross_section_area!`:
 > src/Problem/state_cache.jl. The user-facing `PyrolysisProblem` and the
 > `to_problem_def` adapter: src/Problem/pyrolysis_problem.jl and
 > src/Problem/adapter.jl. The canonical `(def, ws, u0)` front door is
 > `initialize_state(problem; …)` (same file) — it applies the problem's
 > initial conditions before packing and is the path `solve()` itself takes;
-> `to_problem_def`/`build_workspace`/`create_state_vector` remain public as
+> `to_problem_def`/`build_workspace`/`create_state_vector` are public as
 > the advanced layer (AD workspaces, mid-simulation repacking, warm starts)
 > with the IC step on the caller (§15.1.1).
-
-### 15.2.1 The `energy_form` / transpiration guard
-
-The `to_problem_def` adapter enforces the Formulation-A energy convention of §7
-at construction time. Two options interact:
-
-- `energy_form = :standard` (default): the gas-advection source
-  $S_{\rm conv}=-\sum_g c_{p,g}\,\bar{J}_{g}\,\partial T/\partial z$ is the
-  *only* gas-enthalpy carrier; the gas-generation enthalpy sink $S_{\rm gen}$ is
-  zeroed. This matches FDS/Gpyro/ThermaKin.
-- `energy_form = :with_generation_sink`: adds the cell source
-  $S_{\rm gen,i}=-\sum_g \Delta h_g(T_i,T_{\rm ref})(\nabla\cdot\mathbf{J}_g)_i$,
-  a *partial* datum conversion for $T_{\rm ref}$-referenced heats of reaction
-  (§3.3.2).
-
-The surface transpiration enthalpy term $\sum_g \dot{m}_g\,\Delta h_g(T_s,T_\infty)$
-overlaps $S_{\rm conv}$ exactly by $\int S_{\rm conv}$, so combining both
-double-counts the gas enthalpy and produces a spurious $\sim5\text{–}10\,\mathrm{kW/m^2}$
-surface sink. The adapter therefore **rejects** `use_transpiration_bc=true` at
-construction (and `solve` rejects it in `_validate_solve_kwargs`). The supported
-production path is $S_{\rm conv}$-only; see §7.6 and §16.5 for the energy-ledger
-consequences.
 
 ---
 
@@ -13337,19 +12506,20 @@ so the residual is a pure function of $(\boldsymbol{u},t)$ in four steps:
    into the typed cache (single source of truth).
 2. `Properties.update_properties!` — evaluate all state-dependent properties
    ($k_{\rm eff}$, $\rho c_p^{\rm eff}$, $\lambda$, $\varepsilon$, $\alpha$, and
-   face-averaged $k_{\rm face}$, $\lambda_{\rm face}$; plus the Darcy sub-cache
-   $P,\varphi,\kappa,\mu$ if transport is `DarcyFick`).
-3. `_compute_physics_rhs!` — dispatch on `transport_mode(def.mode)` to either
-   `Discretization.compute_rhs!` (Fickian) or
-   `Discretization.compute_rhs_darcy_fick!` (DarcyFick). Both populate
-   `ws.dT_work[i]`, `ws.dξ_work[j,i]`, and `ws.rhs_cache.dξ_rxn[j,i]`.
+   face-averaged $k_{\rm face}$, $\lambda_{\rm face}$).
+3. `_compute_physics_rhs!` — calls `Discretization.compute_rhs!`, which picks
+   the transport law from the property cache's Darcy sub-cache (`nothing` ⇔
+   Fickian), refreshes that sub-cache ($P,\varphi,\kappa,\mu$ and the Darcy
+   velocity, `update_darcy_properties!`) in its first step under `DarcyFick`, and
+   populates `ws.dT_work[i]`, `ws.dξ_work[j,i]`, and
+   `ws.rhs_cache.dξ_rxn[j,i]`.
 4. Pack $\boldsymbol{du}$: $du[i]=dT_i/dt$, $du[n+(j-1)n+i]=d\xi_{j,i}/dt$.
 
 The discrete updates assembled in step 3 are exactly those derived in §7 and
 §13 (repeated here for completeness):
 
 $$
-\frac{dT_i}{dt} = \frac{1}{\rho c_p^{\rm eff}{}_{,i}}\Big[-(\nabla\cdot\mathbf{q})_i + S_{{\rm conv},i} + S_{{\rm gen},i} + Q_{{\rm rad},i} + Q_{{\rm rxn},i}\Big],
+\frac{dT_i}{dt} = \frac{1}{\rho c_p^{\rm eff}{}_{,i}}\Big[-(\nabla\cdot\mathbf{q})_i + S_{{\rm conv},i} + Q_{{\rm rad},i} + Q_{{\rm rxn},i}\Big],
 $$
 
 $$
@@ -13365,22 +12535,21 @@ $Q_{\rm rxn}<0$); the conduction divergence enters with a leading minus so that
 outflow cools the cell.
 
 > **Implementation note.** Eulerian path: `_residual!(…, ::Eulerian)`,
-> src/Residual/residual.jl. The physics RHS dispatch and the
-> 8-step `compute_rhs!`/`compute_rhs_darcy_fick!` assembly are in
-> src/Discretization/finite_volume.jl (see §7.8 for the strict step ordering).
+> src/Residual/residual.jl. The 8-step `compute_rhs!` assembly is in
+> src/Discretization/finite_volume.jl (see §7.6 for the strict step ordering).
 
 ### 15.3.2 Order dependencies inside the physics RHS
 
-The 8-step `compute_rhs!` sequence (conductive fluxes → reactions → gas
-transport → thermal/mass BCs → radiation → $S_{\rm conv}$ → divergences /
-$S_{\rm gen}$ → final RHS) is *ordered* for correctness, not convenience:
+The 8-step `compute_rhs!` sequence (transport properties and conductive fluxes →
+reactions → gas transport → thermal BCs → radiation → $S_{\rm conv}$ →
+divergences → final RHS) is *ordered* for correctness, not convenience:
 
-- **Reactions before gas BCs.** The boundary-temperature Newton solve (step 4)
-  needs the surface gas mass flux $\dot{m}_g$ (for transpiration when enabled),
-  which requires the interior gas fluxes (step 3), which in turn need
-  `dξ_rxn` populated (step 2).
-- **Gas fluxes before thermal BCs.** Same chain: mass BCs (step 3) must finish
-  before thermal BCs (step 4) so the surface enthalpy term has its $\dot{m}_g$.
+- **Gas fluxes before thermal BCs.** The mass BCs (step 3) must finish before
+  the boundary-temperature Newton solve (step 4), because the blowing model of
+  each convective BC reads the outward gas mass flux $\dot{m}_g$ at the face.
+- **Thermal BCs before $S_{\rm conv}$.** The boundary cells' temperature
+  gradient in $S_{\rm conv}$ (step 6) blends in the boundary-face slope at the
+  solved $T_s$, read from the flux that step 4 wrote.
 - **Reaction rates before mesh velocity (ALE).** The ALE mesh velocity is built
   from the per-cell strain rate $\theta_i$, which is a function of the species
   reaction sources `dξ_rxn`; hence the physics RHS (which fills `dξ_rxn`) runs
@@ -13392,7 +12561,7 @@ $S_{\rm gen}$ → final RHS) is *ordered* for correctness, not convenience:
 
 When `mesh_mode(def.mode) isa ALE`, mesh motion is part of the coupled system,
 and the residual additionally evolves the node positions $z_k$ and (under
-`WithChi`) the pyrolysis-progress $\chi_i$. The assembly is a twelve-step
+`WithChi`) the pyrolysis-progress $\chi_i$. The assembly is the following
 sequence; we present it as the canonical pipeline and give the governing
 equation for each step. Cross-references: the ALE kinematics and GCL are in §11;
 the volume-change / $\chi$ model is in §10.
@@ -13420,8 +12589,8 @@ the volume-change / $\chi$ model is in §10.
 4. **Update properties.** As in the Eulerian path, but now on the moving
    geometry.
 
-5. **Physics RHS.** Same `compute_rhs!`/`compute_rhs_darcy_fick!` as Eulerian;
-   importantly it also fills `ws.rhs_cache.dξ_rxn`, which the ALE steps reuse.
+5. **Physics RHS.** Same `compute_rhs!` as Eulerian; importantly it also fills
+   `ws.rhs_cache.dξ_rxn`, which the ALE steps reuse.
 
 6. **Column-global radial strain and cumulative mesh velocity.** First compute
    $\theta_A$ (the column-global radial channel; $0$ under `NoChi`), then
@@ -13438,8 +12607,8 @@ the volume-change / $\chi$ model is in §10.
    w_{k+1} = w_k + (\theta_i-\theta_A)\,\Delta z_i,\qquad \Delta z_i = \frac{V_i}{A},
    $$
    i.e. $w_k=\sum_{i<k}\theta_{L,i}\,\Delta z_i$ (an exclusive cumulative sum;
-   this is exactly the structure represented by the `PrefixSumCoupling` in the
-   Jacobian, §15.9). The radial channel under `WithChi` is, by the chain rule,
+   this is exactly the structure of the prefix-sum couplings in the Jacobian,
+   §15.9). The radial channel under `WithChi` is, by the chain rule,
    $$
    \theta_A = \frac{1}{A}\frac{dA}{dt} = \frac{\mathrm{law}'(\bar\chi)}{\mathrm{law}(\bar\chi)}\frac{d\bar\chi}{dt},\qquad
    \frac{d\bar\chi}{dt} = \frac{1}{M_{\rm dry}}\sum_i S_{{\rm dry},i}\,V_i,
@@ -13467,12 +12636,12 @@ the volume-change / $\chi$ model is in §10.
    is included — it is carried with the pores it occupies, and its flux
    $J_g$ is relative to the skeleton (§11.2.3).
 
-11. **Pack the $T,\xi,z$ blocks.** $du[i]=dT_i/dt$ (with the ALE correction),
+9. **Pack the $T,\xi,z$ blocks.** $du[i]=dT_i/dt$ (with the ALE correction),
     $du[n+(j-1)n+i]=d\xi_{j,i}/dt$ (with dilation), and
     $du[n(1+N_C)+k]=w_k$ — i.e. $dz_k/dt=w_k$ (Euler-forward node motion
     realized by the integrator).
 
-12. **Pack the $\chi$ block** (`_pack_chi_derivative_dispatched!`, `WithChi`
+10. **Pack the $\chi$ block** (`_pack_chi_derivative_dispatched!`, `WithChi`
     only). The progress variable obeys
     $$
     \frac{d\chi_i}{dt} = \frac{S_{{\rm dry},i}\,V_i}{m_{{\rm dry},i}},\qquad
@@ -13491,7 +12660,7 @@ $$
 \frac{dz_k}{dt}=w_k,
 $$
 $$
-\frac{dT_i}{dt}=\frac{-(\nabla\cdot\mathbf{q})_i+S_{{\rm conv},i}+S_{{\rm gen},i}+Q_{{\rm rad},i}+Q_{{\rm rxn},i}}{\rho c_p^{\rm eff}{}_{,i}}
+\frac{dT_i}{dt}=\frac{-(\nabla\cdot\mathbf{q})_i+S_{{\rm conv},i}+Q_{{\rm rad},i}+Q_{{\rm rxn},i}}{\rho c_p^{\rm eff}{}_{,i}}
 \;\Bigl[\,+ w_{{\rm rel},i}\Big(\frac{\partial T}{\partial z}\Big)_i \text{ under \texttt{w\_override} only; } w_{\rm rel}\equiv 0 \text{ in production}\Bigr],
 $$
 $$
@@ -13505,17 +12674,6 @@ $$
 > `_pack_chi_derivative!` are all in src/Residual/residual.jl. The strain-rate
 > law `volume_change_rate` is in src/Physics/volume_change.jl. The ALE flux
 > kernels are in src/Discretization/ale_fluxes.jl.
-
-### 15.4.1 Conservation-tracker hook and energy forms
-
-The two energy forms (`:standard` vs `:with_generation_sink`) enter at step 5
-inside `compute_rhs!`/`compute_rhs_darcy_fick!` exactly as in the Eulerian path:
-`:with_generation_sink` resolves a single volumetric reference temperature
-$T_{\rm ref}$ from the boundary ambient and adds $S_{\rm gen}$ using the
-midpoint-rule sensible enthalpy $\Delta h_g$, while `:standard` zeroes
-$S_{\rm gen}$. The diagnostics layer (§16) attaches a per-substep accumulator
-that audits the energy ledger; this is a *callback*, not part of the residual,
-so it does not perturb the integration.
 
 ---
 
@@ -13566,17 +12724,17 @@ with and without a lateral shrinkage law) and of V-BO-01:
   $6\times10^{-11}$ for UMFPACK, $2\times10^{-11}$ for KLU and
   $3\times10^{-9}$ for Sparspak, without effect on the Newton iteration.
 
-Sparspak, KLU, UMFPACK and the ILU-Krylov solvers of §15.12 remain drop-in
-alternatives through `linear_solver`.
+Sparspak, KLU, UMFPACK and the ILU-Krylov solvers of §15.12 are interchangeable
+through `linear_solver`.
 
 > **Implementation note.** Integrator resolution: `_resolve_integrator`,
-> src/Solver/solve.jl. A user may pass a constructor (`integrator=Rodas5`) plus
+> src/Solver/solve.jl. A user may pass a constructor (`integrator=Rodas5P`) plus
 > a `linear_solver=`, or a fully-built algorithm. The RHS closure re-samples
 > the incident radiation at every evaluation (`ws.I_radiation = radiation_flux(t)`)
 > whenever the active model consumes it (`SURFACE_ABSORPTION` / `BEER_LAMBERT`)
-> — constant and time-varying fluxes alike (§8.3.4). A one-time sample at
-> $t=0$ additionally seeds the structured-Jacobian cache's
-> `radiation_intensity`.
+> — constant and time-varying fluxes alike (§8.3.4). The Jacobian closure
+> refreshes `ws.I_radiation` at its own $t$ the same way, so a time-varying flux
+> enters the Beer–Lambert Jacobian at the time the Jacobian is evaluated.
 
 **Problem-independent integrator types.** OrdinaryDiffEq compiles its stepper,
 nonlinear solver and factorization for the types of the functions it is handed.
@@ -13618,27 +12776,32 @@ coefficient and $J$ is the residual Jacobian. (Equivalently $W$ may be scaled by
 $\gamma_{\rm RK}\Delta t$ to $W=I-\gamma_{\rm RK}\Delta t\,J$; the scaling is an
 internal detail of the integrator. The factor that matters for our purposes is
 that $W$ is a *diagonal shift of $-J$*, so the diagonal of $J$ adds to the
-$1/(\gamma_{\rm RK}\Delta t)$ scale, which is what makes the structured Jacobian's
-sparse block $\mathsf{A}$ diagonally dominant and the Richardson iteration of
-§15.10 converge in a few steps.) Each Newton step solves $W\,\delta\boldsymbol{u}=-r$
-for the stage residual $r$; the linear solve is delegated to the chosen
-`LinearSolveStrategy` (DirectSolve / StructuredSolve / ApproxSolve /
-MatrixFreeSolve, §15.10) or, for the dense `DenseAD_ForwardDiff` backend, to a
-dense LU.
+$1/(\gamma_{\rm RK}\Delta t)$ scale.) Each Newton step solves
+$W\,\delta\boldsymbol{u}=-r$ for the stage residual $r$ with the sparse
+factorization of §15.5.1; the strategy (`DirectSolve` / `ApproxSolve`, §15.10)
+decides which entries of $J$ are assembled.
 
 The Jacobian $J$ is supplied to the integrator through an `ODEFunction` carrying
-both `jac = jac_fn!` and a `jac_prototype` sparsity pattern (the union of the
-physics and geometry patterns of §15.11):
+both `jac = jac!` and a `jac_prototype` sparsity pattern (the union of the
+physics and geometry patterns of §15.11). `solve` builds the spec for its own
+`(def, ws)`:
 
 ```julia
-jac_fn! = (J, u, p, t) -> compute_jacobian!(J, jac_spec, u, def, t, ws)
-ode_fn  = ODEFunction(rhs!; jac = jac_fn!, jac_prototype = Float64.(S_phys .| S_geom))
+jac_spec = JacobianSpec(backend, def, ws)
+jac! = (J, u, p, t) -> compute_jacobian!(J, jac_spec, u, def, t, ws)
+jac_prototype = Float64.(jac_spec.sparsity_phys .| jac_spec.sparsity_geom)
+ode_fn = ODEFunction{true,FullSpecialize}(ErasedRHS(rhs!);
+    jac = ErasedJacobian{typeof(jac_prototype)}(jac!),
+    jac_prototype = jac_prototype)
 ```
+
+(with the incident flux refreshed at the Jacobian's own $t$ inside `jac!`,
+§15.5.1).
 
 **Warm start.** A prior solution's final state can seed a new solve's initial
 condition (`warm_start=prev_solution`), provided the component count, mesh size,
 ALE mode, and $\chi$ mode all agree (enforced implicitly by a state-vector
-length check). The integrator's `tspan[1]` still defines the start time, so
+length check) and the prior solve parked no cells. The integrator's `tspan[1]` still defines the start time, so
 warm-starting treats the prior final state as fresh initial data — useful for
 continuation studies and for sensitivity sweeps, with the caveat (§17.7) that
 warm-start artifacts can perturb finite-difference sensitivities.
@@ -13657,12 +12820,12 @@ a `CallbackSet`:
 | Order | Callback | Type | Role |
 |---|---|---|---|
 | 1 | `StepUpdateCallback` | discrete (every accepted step) | mirror integrator $\boldsymbol{u}\to$ mutable mesh; sync geometry & cross-section |
-| 2 | `ThicknessTerminationCallback` | continuous (ALE) | terminate when $z_{\rm top}-z_{\rm bot}<$ `min_thickness` |
+| 2 | thickness termination | continuous (ALE) | terminate when the live thickness $z_{n_{\rm live}+1}-z_1<$ `min_thickness` |
 | 3 | `DepletionCallback` | discrete (opt-in) | park cells below their depletion threshold; the state keeps its size |
-| 4 | `NewtonFailureCap` | discrete (every accepted step; Newton integrators) | after a step whose Newton needed retries, hold the proposed step at or below 1.25× that step for 20 steps |
-| 5 | `ProgressCallback` | discrete (every accepted step) | progress bar |
-| 6 | `DiagnosticsCallback` | discrete (every `diagnostics_stride`) | snapshot energy/mass ledgers |
-| 7 | `VerifyJacobianCallback` | discrete (at sample times) | compare active Jacobian vs. dense AD reference |
+| 4 | Newton-failure cap | discrete (every accepted step; Newton integrators) | after a step whose Newton needed retries, hold the proposed step at or below 1.25× that step for 20 steps |
+| 5 | progress bar | discrete (every accepted step) | progress bar |
+| 6 | `DiagnosticsCallback` | discrete (every `diagnostics_stride`) | log a sensible-energy snapshot row (ledger fields NaN; §16.8.3) |
+| 7 | Jacobian verification | discrete (at sample times) | compare active Jacobian vs. dense AD reference |
 | 8 | user callback | — | custom |
 
 Every callback of rows 1–7 keeps its problem-typed work behind a fixed-signature
@@ -13676,28 +12839,29 @@ therefore depends on which callbacks are installed, not on the problem (§15.5.1
 The **`StepUpdateCallback`** is the linchpin of the read-only-mesh design: after
 each accepted step it sets `mesh.cross_section_area = cross_section_area_from_state(…)`
 and calls `update_mesh_from_state!(mesh, u, layout)`, so all between-step
-consumers (AMR, depletion detection, diagnostics, the surface BC solve in
+consumers (depletion detection, diagnostics, the surface BC solve in
 post-processing) see a mesh consistent with the integrator state.
 
 The **`DepletionCallback`** (§14.3) detects cells whose current thickness has
 fallen below `depletion_threshold × Δz_init,i` (default $5\%$ of each cell's
 own initial thickness; on a fixed mesh, the top live cell whose condensed
 concentration has fallen below the same fraction of its initial value), merges
-it into a neighbour with the condensed-enthalpy-conserving temperature merge of
+it into a neighbour with the sensible-enthalpy-conserving temperature merge of
 §14.3.3,
 
 $$
-\sum_{j\notin{\rm gas}} m_j\!\int_{T_{\rm ref}}^{T_{\rm merged}}\! c_{p,j}\,dT'
+\sum_{j} m_j\!\int_{T_{\rm ref}}^{T_{\rm merged}}\! c_{p,j}\,dT'
 = H_a(T_a) + H_b(T_b)
-\ \text{(bracketed Newton; gas heat capacity excluded)},\qquad
+\ \text{(bracketed Newton; every component, gas included)},\qquad
 \xi_{{\rm merged},j} = \frac{V_a\,\xi_{a,j}+V_b\,\xi_{b,j}}{V_{\rm keep}},
 $$
 
 and parks the freed slot above the live surface
-(`derivative_discontinuity!(integrator, true)`). The state keeps its size, so the pluggable `JacobianSpec` stays valid
-and `saveat` interpolation is unaffected (§14.3.5–§14.3.6).
+(`derivative_discontinuity!(integrator, true)`). The state keeps its size, so
+the Jacobian's sparsity pattern and caches stay valid and `saveat`
+interpolation is unaffected (§14.3.5–§14.3.6).
 
-The **`NewtonFailureCap`** is a step cap with a memory of Newton failures. After
+The **Newton-failure cap** (`create_newton_failure_cap_callback`) is a step cap with a memory of Newton failures. After
 every accepted step it reads the integrator's count of failed nonlinear solves.
 When the step just accepted needed retries, the proposed next step is held at or
 below $g\,\Delta t_{\rm acc}$ with $g = 1.25$ (`FAILURE_MEMORY_GROWTH`) for the
@@ -13716,48 +12880,46 @@ algorithm with an `nlsolve` field).
 > **Implementation note.** Callbacks: src/Solver/callbacks.jl
 > (`create_step_update_callback`, `create_thickness_termination_callback`,
 > `create_depletion_callback`, `park!`, `create_newton_failure_cap_callback`)
-> and src/Solver/solve.jl
-> (assembly, diagnostics, verify-Jacobian). The depletion↔pluggable-Jacobian
-> guard is in `_validate_solve_kwargs`, src/Solver/solve.jl.
+> and src/Solver/solve.jl (assembly, diagnostics, verify-Jacobian). The
+> cross-keyword checks are in `_validate_solve_kwargs`, src/Solver/solve.jl.
 
 ---
 
 ## 15.6 Jacobian backends
 
-Pyrolysis.jl exposes exactly two production backend families, unified behind a
-single user-facing handle `JacobianSpec`:
+The production backend is **`Structured{S}`**, parameterized by a
+`LinearSolveStrategy` $S$ (`DirectSolve` or `ApproxSolve`). It assembles the
+Jacobian *operator by operator*, exploiting the block-tridiagonal physics
+structure and representing the non-local terms as O(N) couplings until they are
+written into the sparse matrix. A second backend, **`DenseAD_ForwardDiff`**,
+runs `ForwardDiff` over the *entire* residual vector and returns a dense
+Jacobian. It is correct by construction (it differentiates the same `residual!`
+the integrator uses) but $O(N^2)$ in storage and slow; it is the
+**verification reference** (§15.13), not a solve backend.
 
-1. **`DenseAD_ForwardDiff`** — runs `ForwardDiff` over the *entire* residual
-   vector and returns a dense Jacobian. It is correct by construction (it
-   differentiates the same `residual!` the integrator uses) but $O(N^2)$ in
-   storage and slow; it is the **verification anchor**, not a production
-   backend.
-
-2. **`Structured{S}`** — the production backend, parameterized by a
-   `LinearSolveStrategy` $S$ (DirectSolve / StructuredSolve / ApproxSolve /
-   MatrixFreeSolve). It assembles the Jacobian *operator by operator*, exploiting
-   the block-tridiagonal physics structure and representing the non-local terms
-   as O(N) couplings rather than dense matrix entries.
-
-The auto-default when the user passes no `jacobian` kwarg is
-`Structured(strategy = DirectSolve())` on a fixed mesh — exact assembly plus a
-sparse direct solve — and `Structured(strategy = ApproxSolve())` under ALE,
-which drops the structured couplings (§15.10.3).
+`solve` takes the bare backend: `jacobian = Structured(strategy =
+DirectSolve())` or `Structured(strategy = ApproxSolve())`. With `jacobian =
+nothing` (the default) it picks `DirectSolve` on a fixed mesh — exact assembly
+plus a sparse direct solve — and `ApproxSolve` under ALE, which drops the
+structured couplings (§15.10.2). `solve` builds the spec for its own mesh copy,
+mode, and options; the `jacobian` keyword is typed `Union{Structured,Nothing}`,
+so passing a prebuilt spec or `DenseAD_ForwardDiff()` raises a `TypeError`.
 
 `JacobianSpec` bundles the backend with everything the integrator needs:
 
 ```julia
 struct JacobianSpec{B<:JacobianBackend, S, C}
     backend::B
-    sparsity_phys::S      # SparseMatrixCSC{Bool,Int} or nothing
+    sparsity_phys::S      # SparseMatrixCSC{Bool,Int}, or nothing (dense reference)
     sparsity_geom::S      # geometry (z-column) pattern; nothing for Eulerian
     cache::C              # backend-private workspace (not shareable)
-    colorvec_phys::Vector{Int}   # column coloring for FD/sparse-AD
-    colorvec_geom::Vector{Int}
 end
 ```
 
-A single entry point `compute_jacobian!(J, spec, u, def, t, ws)` dispatches to
+It is built by `JacobianSpec(backend, def, ws)` — the constructor `solve` calls,
+and the one the verifier and other advanced callers use with a `(def, ws)` pair
+from `initialize_state`. A single entry point
+`compute_jacobian!(J, spec, u, def, t, ws)` dispatches to
 `_compute_jacobian!(J, spec.backend, …)`.
 
 > **Implementation note.** Backend contract and `JacobianSpec`:
@@ -13774,65 +12936,63 @@ The structured Jacobian is organized into three orthogonal layers.
 
 ### 15.7.1 Layer 1 — Operators
 
-Each physics block is an `Operator` subtype: a lightweight stateless tag that
-owns *both* its residual contribution (`apply!`) and its Jacobian contribution
-(`contribute_to_jacobian!`, optionally `contribute_to_structured!`,
-`contribute_to_implicit!`). The default `contribute_to_jacobian!` differentiates
-the operator's own `apply!` with `ForwardDiff` over its declared stencil, so an
-operator is *correct by construction*; analytical overrides are performance
-optimizations, not correctness requirements. Each operator also declares:
+Each physics block is an `Operator` subtype: a lightweight stateless tag with two
+methods, its residual contribution `apply!` (a thin wrapper over the residual
+kernel it differentiates) and its Jacobian contribution
+`contribute_to_jacobian!(jac, op, u, t, ws, args...)`, where `ws` is the
+operator's workspace from the backend cache and the remaining arguments are
+operator-specific. There is no default fallback: each operator implements its
+own contribution, as `ForwardDiff` over a stencil-local kernel (the
+`GeometryOperator` differentiates the full residual with respect to the $z$
+block), or as an analytical override (conduction, gas transport, Darcy transport)
+tested against a ForwardDiff reference of the same kernel at `rtol = 1e-12`. Local entries are added into the
+sparse block `jac.A`; non-local blocks are pushed onto `jac.structured` as
+`StructuredCoupling`s. The ALE mesh-velocity operator emits its non-local
+blocks through a separate `contribute_to_structured!`; the $\chi$ operator pushes
+its rank-1 block from its own `contribute_to_jacobian!`.
 
-- `reads(op)` — derived fields it consumes (e.g. `:w_cell`, `:theta_A`),
-- `writes(op)` — derived fields it produces,
-- `stencil(op)` — its cell/face neighborhood (e.g. `(cells = -1:1)` for
-  conduction).
-
-The fixed assembly walk is
+The backend walks the operators in a fixed order:
 
 ```
-1. ReactionSourceOperator
-2. ConductionOperator
-3. GasTransportOperator | DarcyTransportOperator
-4. RadiationOperator
-5. BCThermalOperator
-6. BCMassOperator
-7. BCConvectionOperator                    (boundary-cell S_conv energy row)
-8. (ALE)      ALEMeshVelocityOperator      → contribute_to_structured!
-9. (ALE)      dilation rows                (cell-local, from the provider's ∂θ)
-10.(WithChi)  ChiOperator
-11.(ALE & !ale_reduced) GeometryOperator   (full-residual AD over z-columns)
-12.(WithChi)  ChiOperator                  → contribute_to_structured! (rank-1)
+1. (ALE)      ALEMeshVelocityOperator      apply! + strain-rate (and θ_A) derivatives,
+                                           then contribute_to_structured! (z-row prefix sums, θ_A rank-1)
+2. ReactionSourceOperator
+3. ConductionOperator
+4. GasTransportOperator | DarcyTransportOperator
+5. RadiationOperator
+6. BCThermalOperator
+7. BCMassOperator
+8. BCConvectionOperator                    (boundary-cell S_conv energy row)
+9. (ALE)      dilation rows                (cell-local, from the cached ∂θ)
+10.(ALE & :full) GeometryOperator          (full-residual AD over z-columns)
+11.(WithChi)  ChiOperator                  (cell-local rows; χ-column rank-1)
 ```
 
-This order guarantees that providers run before consumers: properties are
-updated first; the ALE mesh velocity and its strain-rate derivatives are
-computed before the dilation rows read them; and
-the $\chi$ derivatives are available to the column-global rank-1 coupling.
+The order is fixed so that the data each step reads exists: the state cache,
+the ALE geometry, and the properties are refreshed first (mirroring the
+residual), the mesh-velocity workspace and its strain-rate derivatives are filled
+before the dilation rows read them, and the $\chi$ operator reads the
+cross-section derivatives the mesh-velocity workspace holds. The radiation,
+mesh-velocity and $\chi$ operators build their embedded couplings at the global
+row/column offsets of the blocks they fill; `compose_into!` embeds the prefix-sum
+factor vectors at the node rows.
 
-The dependency order is made explicit by the **`ResidualContext`**, which
-topologically sorts operators by their `reads`/`writes` declarations and holds a
-per-step `derived_fields` map. A provider pushes a *bare* `StructuredCoupling`
-primitive into `derived_fields[:w_cell]`; a consumer reads it and `compose_into!`
-wraps it at its own row/column offsets. Operators thus only know their *local*
-math; the framework handles the global embedding.
-
-> **Implementation note.** Operator framework: src/Jacobian/operators/Operator.jl;
-> dependency graph: src/Jacobian/residual_context.jl; per-operator
-> implementations under src/Jacobian/operators/. Per-operator `ForwardDiff` chunk
-> sizes: reaction `1+N_C`; conduction $3(1+N_C)$; gas transport $3(1+N_C)$ (or 5
-> with the limiter window); BC thermal $1+N_C$; BC mass $2+N_C$ (the energy row
-> reads the interior neighbor's $T$); $\chi$ $1+N_C$. The ALE dilation
-> derivatives come from the mesh-velocity provider's strain-rate sweep.
+> **Implementation note.** Operator interface: src/Jacobian/operators/Operator.jl;
+> per-operator implementations under src/Jacobian/operators/; the walk is
+> `_compute_jacobian!` in src/Jacobian/structured_backend.jl. Per-operator
+> `ForwardDiff` chunk sizes: reaction `1+N_C`; conduction $3(1+N_C)$; gas
+> transport $3(1+N_C)$; BC thermal $1+N_C$; BC mass $1+N_C$; BC convection
+> $2(1+N_C)$; $\chi$ $1+N_C$. The ALE dilation derivatives come from the
+> mesh-velocity operator's strain-rate sweep.
 
 ### 15.7.2 Layer 2 — `StructuredJacobian`
 
 The assembled Jacobian is *not* a monolithic sparse matrix. It is
 
 ```julia
-struct StructuredJacobian{Mode}
+struct StructuredJacobian
     A::SparseMatrixCSC{Float64,Int}        # local block: block-tridiag physics + sparse augments
-    structured::Vector{StructuredCoupling} # typed O(N)-apply non-local couplings
-    implicit::Vector{ImplicitTerm}         # IFT-resolved couplings (rarely used)
+    structured::Vector{StructuredCoupling} # non-local couplings in factored form
     smap::FastSparsityMap                  # O(1) sparse-write helper
     n::Int                                 # full state dimension
 end
@@ -13843,21 +13003,21 @@ $\mathsf{A}$ carries everything *local* (block-tridiagonal mass / conduction /
 reaction / transport plus the cell-local self-terms), and the `structured`
 vector carries everything *non-local* (the cumulative ALE mesh velocity, the
 Beer–Lambert optical-depth suffix, the column-global $\theta_A$ and $\chi$
-back-reactions) as operators with O(N) apply methods. A solve never has to
-materialize the dense non-local blocks unless the chosen strategy is
-`DirectSolve`.
+back-reactions) in factored form. The assembly writes them into the sparse
+Jacobian with `densify!` only under the exact `:full` profile.
 
 `FastSparsityMap` is an O(1) sparse-write helper: a dense lookup table
 `indices[row + (col-1)*n_rows] = nz_idx` (zero meaning "not in pattern"). It
 trades quadratic memory ($\sim2.5\,\mathrm{MB}$ at 560 DOFs, $\sim90\,\mathrm{MB}$ at
-3360 DOFs) for O(1) scattered writes via `fast_sparse_write!` /
-`fast_sparse_add!` / `fast_sparse_sub!`.
+3360 DOFs) for O(1) scattered additions via `fast_sparse_add!`.
 
 ### 15.7.3 Layer 3 — `LinearSolveStrategy`
 
-A strategy is the rule for inverting $\mathsf{A}+\sum_j C_j$. It is orthogonal to
-the assembling backend; at solve time the integrator calls
-`ldiv!(out, strategy, jac, b)`. The four strategies are detailed in §15.10.
+A strategy selects which couplings the assembled Jacobian carries; it is
+orthogonal to the assembling backend. `DirectSolve` writes every structured
+coupling into the sparse matrix (the exact Jacobian), and `ApproxSolve` drops
+them (the reduced pattern). The integrator then factors the resulting sparse $W$
+with KLU or UMFPACK (§15.5.1). The two strategies are detailed in §15.10.
 
 ---
 
@@ -13920,9 +13080,12 @@ discrete divergence $\mathrm{div}[i]=(q_R-q_L)A/V_i$ and the residual's
 $-\mathrm{div}[i]/\rho c_p$. In ALE with $\chi$-shrinkage, $A_{\rm left}$ and
 $A_{\rm right}$ can differ slightly (the face areas carry the geometry), so the
 code keeps them distinct rather than factoring out a single $A$. The Jacobian is
-the tridiagonal block from `ForwardDiff` over the 3-cell stencil with chunk size
-$3(1+N_C)$: each of the three cells contributes $(T,\xi_1,\dots,\xi_{N_C})$
-inputs because $k_f$ and $\rho c_p^{\rm eff}$ both depend on composition.
+the tridiagonal block, assembled by a hand-coded analytical override
+(`_contribute_to_jacobian_analytical!`) that is tested against a `ForwardDiff`
+reference over the 3-cell stencil (`_contribute_to_jacobian_ad!`, chunk size
+$3(1+N_C)$) at `rtol = 1e-12`; each of the three cells contributes
+$(T,\xi_1,\dots,\xi_{N_C})$ inputs because $k_f$ and $\rho c_p^{\rm eff}$ both
+depend on composition.
 
 **Boundary-cell self-fill.** At a boundary cell (cell 1 has no left neighbor,
 cell $n$ no right), the missing neighbor's $(T,\xi)$ in the AD stencil is filled
@@ -13945,7 +13108,7 @@ Darcy operator (`DarcyTransportOperator`) additionally carries the
 pressure-driven advection $(\xi_{\rm upwind}/\varphi_{\rm face})\,v_g$: it
 reconstructs the face velocity inside its own stencil closure from the
 cell-local state — $P_i$ from the ideal-gas closure, $\kappa_i$ from the mixing
-rule, $\mu_i$ from Sutherland, the face mobility by the residual's
+rule, $\mu_i$ from the material's viscosity curve, the face mobility by the residual's
 distance-weighted harmonic rule (`_dt_mobility_face`, zero when either side
 $\le10^{-30}$) — so the chain $\partial J/\partial\xi$ and
 $\partial J/\partial T$ through $P$, $\varphi$, $\kappa$, $\mu$ is
@@ -13956,10 +13119,10 @@ harmonic-mean $\lambda_f$ as in the residual. Boundary faces are zeroed here —
 the boundary venting flux is `BCMassOperator`'s row, and the boundary cell's
 whole $S_{\rm conv}$ energy row (whose gradient runs through the surface-Newton
 $T_s$) is `BCConvectionOperator`'s (§15.8.8); the transport operators keep the
-boundary cell's ξ-rows and $S_{\rm gen}$ interior-face slice but contribute no
-boundary-cell $S_{\rm conv}$. The hand-coded
-analytical override is the default and is gated against the local-AD fallback at
-`rtol = 10^{-12}`.
+boundary cell's ξ-rows but contribute no boundary-cell $S_{\rm conv}$. Each
+operator's `contribute_to_jacobian!` is a hand-coded analytical override, gated
+against a ForwardDiff reference of the same kernel (`_contribute_to_jacobian_ad!`)
+at `rtol = 1e-12`.
 
 > **Implementation note.** `GasTransportOperator`,
 > src/Jacobian/operators/gas_transport.jl; `DarcyTransportOperator`,
@@ -13982,16 +13145,14 @@ sweeps populate workspace buffers:
 The cumulative velocity $w_k=\sum_{i<k}\theta_{L,i}\Delta z_i$ has the
 *exclusive prefix-sum* structure: $\partial w_k/\partial x_i=\Delta z_i\,
 \partial\theta_i/\partial x_i$ for $i<k$ (and $0$ for $i\ge k$). The per-cell
-scaling $v[i]=\Delta z_i\,\partial\theta_i/\partial x_i$ is captured as a bare
-`PrefixSumCoupling{Float64}` per source channel ($T$ and each $\xi_j$) and
-consumed by the z rows:
-
-- embedded **at the z-row offsets** as `EmbeddedNodePrefixSumCoupling` blocks —
-  the z-row equations $dz_k/dt = w_k$ are themselves consumers of the
-  cumulative coupling, with $\partial(dz_k/dt)/\partial x_j =
-  \mathbb{1}[j\le k-1]\,v[j]$. The geometry AD pass (§15.11.4) covers z
-  *columns* only and plays no part in these rows; the z-row × $(T,\xi)$ block
-  is owned entirely by these embedded couplings.
+scaling $v[i]=\Delta z_i\,\partial\theta_i/\partial x_i$ is held in a
+`PrefixSumCoupling{Float64}` (a plain carrier of the per-cell factors) per source
+channel ($T$ and each $\xi_j$), which `compose_into!` embeds at the z-row offsets
+as `EmbeddedNodePrefixSumCoupling` blocks. The z-row equations $dz_k/dt = w_k$
+are themselves consumers of the cumulative coupling, with $\partial(dz_k/dt)/\partial x_j =
+\mathbb{1}[j\le k-1]\,v[j]$. The geometry AD pass (§15.11.3) covers z
+*columns* only and plays no part in these rows; the z-row × $(T,\xi)$ block
+is owned entirely by these embedded couplings.
 
 Under `WithChi`, the column-global $\theta_A$ enters every
 $w_k = \sum_{i<k}(\theta_i-\theta_A)\Delta z_i$, so each source channel
@@ -14044,9 +13205,9 @@ cell-local dilation of §15.8.4, and the mesh-relative temperature kernel runs
 only under the `w_override` verification hook, which the structured Jacobian
 does not support (override runs use finite-difference Jacobians). The cumulative
 mesh velocity therefore couples only the z rows, through the prefix-sum blocks
-the mesh-velocity provider embeds itself. The physics block of the sparsity
+the mesh-velocity operator embeds itself. The block-tridiagonal physics
 pattern is identical under the `:full` and `:ale_reduced` profiles; the profiles
-differ only in the geometry block and the structured z-row couplings (§15.11).
+differ in the geometry block and the structured couplings (§15.11.2).
 
 ### 15.8.6 Variable cross-section ($\chi$)
 
@@ -14062,15 +13223,18 @@ Its Jacobian has three parts:
 - **Cell-local $(T,\xi)$**: `ForwardDiff` over $S_{\rm dry}\,V/m_{\rm init}$ gives
   $\partial(d\chi_i/dt)/\partial T_i$ and $\partial(d\chi_i/dt)/\partial\xi_{j,i}$.
 - **$z$-columns (ALE)**: because $V_i=A|z_{i+1}-z_i|$ is linear in the two
-  bounding node positions, the analytical entries are
+  bounding node positions, the entries are
   $\partial(d\chi_i/dt)/\partial z_i=-A\,S_{\rm dry}/m_{\rm init}$ and
-  $\partial(d\chi_i/dt)/\partial z_{i+1}=+A\,S_{\rm dry}/m_{\rm init}$.
+  $\partial(d\chi_i/dt)/\partial z_{i+1}=+A\,S_{\rm dry}/m_{\rm init}$. The
+  `ChiOperator` does not write them: the `GeometryOperator`'s AD pass over the
+  $z$ subvector fills them under `:full` (§15.11.3), and `:ale_reduced` drops them.
 - **$\chi$-columns (rank-1)**: the area $A=A_0\,\mathrm{law}(\bar\chi)$ depends on
   *every* $\chi_j$ through $\bar\chi$, giving a dense column coupling factored as
   an `EmbeddedRank1Coupling` with
-  $u[i]=(S_{{\rm dry},i}/m_{{\rm init},i})\,\text{cumZ}[i]$ and $v[j]=dA/d\chi_j$.
+  $u[i]=S_{{\rm dry},i}\,\Delta z_i/m_{{\rm init},i}$ ($\Delta z_i=V_i/A$) and
+  $v[j]=dA/d\chi_j$, pushed only under `:full`.
 
-> **Implementation note.** `ChiOperator`, `apply_cell!`,
+> **Implementation note.** `ChiOperator`, `apply!`, `_chi_residual_kernel!`,
 > src/Jacobian/operators/chi.jl. Chunk size $1+N_C$. The $\chi$ block is appended
 > after $(T,\xi,z)$; the offset is $\chi_{\rm off}=n(1+N_C)+\delta_{\rm ALE}n_{\rm nodes}$.
 
@@ -14093,25 +13257,27 @@ $$
 
 The energy row $T[i]$ therefore couples to the $\xi$-columns of every cell
 $j\ge i$ — an **upper-triangular** (strictly, a *suffix*) pattern. The diagonal
-$j=i$ term is added analytically by the operator; the strict-suffix $j>i$
+$j=i$ term is added by the operator through a cell-local `ForwardDiff` pass (with
+$I_{\rm in}$ held fixed); the strict-suffix $j>i$
 couplings are captured as an `EmbeddedScaledSuffixSumCoupling`. The split
-($j=i$ analytical, $j>i$ structured) avoids double-counting the diagonal.
+($j=i$ cell-local, $j>i$ structured) avoids double-counting the diagonal.
 
 On the Kirchhoff default path (`radiation_kirchhoff = true`, §8.3.2) the
-injected intensity is $\varepsilon_{\rm eff}(T_n,\xi_{\cdot,n})\,I_{\rm surface}$,
-so every energy row $i<n$ additionally couples to the **surface cell**: the
-suffix vector carries
-$v_n \mathrel{-}= (\partial\varepsilon_{\rm eff}/\partial x_n)/\varepsilon_{\rm eff}$,
-the surface cell's diagonal closure recomputes $\varepsilon_{\rm eff}(T,\xi)$
+injected intensity is $a_{\rm eff}(T_n,\xi_{\cdot,n})\,I_{\rm surface}$ (the
+effective surface absorptivity of §5.8.2, equal to $\varepsilon_{\rm eff}$ unless a
+component sets its own `absorptivity`), so every energy row $i<n$ additionally
+couples to the **surface cell**: the suffix vector carries
+$v_n \mathrel{-}= (\partial a_{\rm eff}/\partial x_n)/a_{\rm eff}$,
+the surface cell's diagonal closure recomputes $a_{\rm eff}(T,\xi)$
 live, and the sparsity pattern gains $T$-row($i$) × $T$-column($n$) slots for
 $i<n$ (`_emit_radiation_pattern!`). With an explicit BC absorptivity the factor
 is folded into $I_{\rm surface}$ upstream and these terms vanish.
 
-One deliberate approximation remains: under ALE the operator fills **T and ξ
-columns only** — the dependence of the deposit on the live geometry
-($\Delta z_i = V_i/A$ from the z block) is omitted from the Jacobian (the
-residual is exact). This degrades only Newton convergence of the implicit
-integrator, never the converged solution (src/Jacobian/operators/radiation.jl).
+Under ALE the operator fills **T and ξ columns only**. The dependence of the
+deposit on the live geometry ($\Delta z_i = V_i/A$ from the z block) lands in the
+z columns, which the `GeometryOperator`'s AD pass over the full residual writes
+under the exact `:full` profile (§15.11.3); the `:ale_reduced` profile drops
+every z column (src/Jacobian/operators/radiation.jl).
 
 > **Implementation note.** `RadiationOperator`,
 > src/Jacobian/operators/radiation.jl. Active only in `BeerLambert` mode;
@@ -14124,26 +13290,19 @@ BC-specified surface flux (convective + radiative + fixed-$T$), obtained from th
 surface-temperature Newton solve $f(T_s)=q_{\rm BC}(T_s)-k_{\rm eff}(T_s-T_{\rm cell})/\Delta z_{1/2}=0$
 (§12.2). Its Jacobian is taken by AD through that Newton solve, producing the
 boundary-cell row's dependence on $(T_{\rm cell},\xi_{\rm cell})$. The outward
-mass flux fed to the Newton solve is **hard-zeroed**, mirroring the residual:
-transpiration is rejected at construction (`to_problem_def` throws on
-`use_transpiration_bc = true`) and the residual zeroes $\dot m_g$ before its
-surface solve, so the operator must differentiate the same balance. Chunk size
-$1+N_C$.
+gas mass flux fed to the Newton solve is rebuilt from the stencil state by the
+shared boundary-face kernel `_bc_boundary_face_fluxes` (film law plus, in Darcy
+mode, the venting flux) — the same flux the residual passes to the blowing models
+— so the $(T_b,\xi_b)$ derivatives of a blowing model's coefficient $h\chi$ ($\chi$
+the blowing factor of §12.3.3, not the pyrolysis progress) are exact
+(§12.3.3). Chunk size $1+N_C$.
 
 `BCMassOperator` owns the species rows of the boundary-face gas flux $F_g$
 (film law plus, in Darcy mode, the pressure-BC advective venting),
-$d\xi_{g,\rm bdy} \mathrel{+}= F_g A_f/V$, and the energy row's boundary-face
-slice of the (opt-in) generation sink,
-
-$$
-\Delta S_{\rm gen} = +\sum_g \Delta h_g(T_{\rm bdy},T_{\rm ref})\,F_g\,A_f/V,
-$$
-
-because the residual's $\nabla\!\cdot\!J_{\rm gas}$ is formed *after*
-`apply_mass_bc_flux!` fills the boundary faces, while the transport operators
-zero those faces. $S_{\rm gen}$ is linear in the face fluxes, so this
-boundary-face slice composes exactly with the transport operators'
-interior-face slice. Everything is cell-local on the boundary cell; chunk
+$d\xi_{g,\rm bdy} \mathrel{+}= F_g A_f/V$, because the residual's
+$\nabla\!\cdot\!J_{\rm gas}$ is formed *after* `apply_mass_bc_flux!` fills the
+boundary faces, while the transport operators zero those faces. Everything is
+cell-local on the boundary cell; its block is $N_C\times(1+N_C)$ and the chunk
 size $1+N_C$. The shared per-component flux kernel is
 `_bc_boundary_face_fluxes` (film law + venting, positive into the domain).
 
@@ -14164,15 +13323,16 @@ whose factors are owned by three different operators — the BC face flux
 implicit chain (thermal-BC Newton). A split assembly would need
 $\bar J \times \partial(\partial T/\partial z)/\partial x$ cross-products
 spanning owners, so the whole row lives here instead: the operator re-runs
-the Dual-aware surface Newton (outward mass flux hard-zeroed, mirroring the
-residual; $s_{\rm face} = \pm(T_s-T_b)/\Delta z_{1/2}$ is algebraically
+the Dual-aware surface Newton (fed the outward flux from the shared
+boundary-face kernel, so each convective member's blowing model is differentiated
+exactly; $s_{\rm face} = \pm(T_s-T_b)/\Delta z_{1/2}$ is algebraically
 identical to the residual's $-q_{\rm total}[f]/k_b$ because the applied flux
 is exactly $\mp k_b(T_s-T_b)/\Delta z_{1/2}$), evaluates both face-flux
 kernels mode-appropriately (Fickian `gas_flux` or Darcy-Fick
 `gas_flux_darcy_fick` for the interior face; `_bc_boundary_face_fluxes` for
 the BC face), and ADs the whole product in one piece. The transport
 operators zero their boundary-cell $S_{\rm conv}$ (keeping the boundary
-cell's ξ-rows and the linear $S_{\rm gen}$ interior slice). Stencil: the
+cell's ξ-rows). Stencil: the
 boundary cell and its interior neighbor's $(T,\xi)$ — inside the physics
 tridiagonal; chunk size $2(1+N_C)$
 (src/Jacobian/operators/bc_convection.jl).
@@ -14181,151 +13341,90 @@ tridiagonal; chunk size $2(1+N_C)$
 
 ## 15.9 Structured couplings
 
-The non-local terms are represented by typed coupling objects, each implementing
-`apply!(y,c,x)` (the action $y\mathrel{+}=Cx$), `apply_inverse!(y,c,x)`,
-`densify!(M,c)` (for `DirectSolve`), and `size(c)`. All applies are O(N).
+The non-local terms are represented by typed coupling objects, subtypes of
+`StructuredCoupling`, each carrying O(N) data — a per-cell factor vector and its
+global row/column offsets — and implementing `densify!(M, c)`, the addition
+$M \mathrel{+}= C$ that the `:full` profile uses to write the block into the
+sparse Jacobian. All three shapes are *embedded*: they know where they sit in
+the full state vector.
 
-### 15.9.1 `PrefixSumCoupling` (exclusive prefix scan)
+### 15.9.1 `EmbeddedNodePrefixSumCoupling` (exclusive prefix sum at the node rows)
 
-Represents $C=L\,\mathrm{diag}(v)$ with $L$ lower-triangular all-ones, so
-
-$$
-(C\,x)[k]=\sum_{i\le k-1}v[i]\,x[i]\qquad(\text{exclusive prefix sum}).
-$$
-
-The apply is a single forward pass accumulating $v[k]x[k]$ *after* writing
-$y[k]$:
-
-```julia
-acc = 0
-for k = 1:N
-    y[k] += acc
-    acc  += v[k]*x[k]
-end
-```
-
-This is the cumulative ALE mesh velocity: $w_k$ depends on all *lower* cells'
-strain rates. The matrix $L\,\mathrm{diag}(v)$ is **singular** — its first row is
-zero and its last column is zero. The inverse (used by `StructuredSolve` when
-composing with $\mathsf{A}$) is a first-difference recursion
-$y[k]=(x[k+1]-x[k])/v[k]$ for $k<N$, with $y[N]=0$ by convention (the
-right-nullspace direction is pinned by the rest of $\mathsf{A}$). It errors if
-any $v[k]=0$.
-
-### 15.9.2 `SuffixSumCoupling` (backward scan)
-
-The mirror image, $C=U\,\mathrm{diag}(v)$ with $U$ strict upper-triangular:
+The cumulative ALE mesh velocity: node $k$'s velocity depends on the strain rates
+of all *lower* cells,
 
 $$
-(C\,x)[k]=\sum_{i\ge k+1}v[i]\,x[i]\qquad(\text{exclusive suffix sum}),
+M[\text{row}_k,\text{col}_j] \mathrel{+}= \mathbb{1}[j\le k-1]\,v[j],
+\qquad v[j]=\Delta z_j\,\frac{\partial\theta_j}{\partial x_j},
 $$
 
-applied by a single backward pass. This is the Beer–Lambert non-local
-absorption: cell $i$'s absorbed flux depends on all cells *above* it ($j>i$),
-i.e. a strict suffix. The matrix is singular (last row zero, first column zero);
-the inverse is the forward first-difference $y[k]=(x[k-1]-x[k])/v[k]$ for
-$k\ge2$, $y[1]=0$.
+i.e. $C=L\,\mathrm{diag}(v)$ with $L$ strictly lower-triangular all-ones
+(exclusive prefix sum). Node 1, the pinned bottom node, gets no entries. The
+per-cell factors arrive in a `PrefixSumCoupling` — a plain carrier of the vector
+$v$, not itself a `StructuredCoupling` — which `compose_into!` embeds at the node
+rows.
 
-### 15.9.3 `Rank1Coupling`
+### 15.9.2 `EmbeddedScaledSuffixSumCoupling` (strict suffix sum)
 
-Represents $C=u\,v^{\mathsf T}$:
+The mirror image, with a per-row scale:
 
 $$
-(C\,x)[i]=u[i]\sum_j v[j]\,x[j],
+M[\text{row}_i,\text{col}_j] \mathrel{+}= \text{row\_scale}[i]\;\mathbb{1}[j\ge i+1]\;v[j],
 $$
 
-an inner product followed by a scaled scatter — O(N) apply. This is the
-column-global $\theta_A$ / $\chi$ back-reaction in `WithChi`: the cross-section
-$A=A_0\,\mathrm{law}(\bar\chi)$ depends on *all* $\chi_j$, so the affected rows
-get a dense column dependence captured as a single outer product. Its inverse is
-not formed elementwise; in a direct solve it is densified, and in
-`StructuredSolve` it is handled via the Richardson loop (a Sherman–Morrison
-formula could in principle be used, but the production path applies it through the
-preconditioned Richardson iteration rather than an explicit rank-1 update).
+i.e. $C=\mathrm{diag}(\text{row\_scale})\,U\,\mathrm{diag}(v)$ with $U$ strictly
+upper-triangular all-ones. This is the Beer–Lambert non-local absorption: cell
+$i$'s absorbed flux depends on all cells *above* it ($j>i$), with
+$\text{row\_scale}[i]=-q_{\rm rad}[i]/\rho c_{p,i}^{\rm eff}$ for the energy row
+(§15.8.7). The diagonal $j=i$ is not part of the coupling; the radiation operator
+adds it into $\mathsf{A}$ through a cell-local `ForwardDiff` pass.
 
-### 15.9.4 Embedded variants
+### 15.9.3 `EmbeddedRank1Coupling`
 
-The bare couplings carry only their local math. The *embedded* variants wrap them
-in a global embedding — row/column offsets plus per-cell scalings — so they can
-be scattered into the full state vector:
+A rank-1 block $C=u\,v^{\mathsf T}$ at given offsets:
 
-- **`EmbeddedNodePrefixSumCoupling`** — a `PrefixSumCoupling` at the node
-  rows, $M[\text{row}_k,\text{col}_j]=\mathbb{1}[j\le k-1]\,v[j]$ — the
-  cumulative mesh velocity entering the z-row equations.
-- **`EmbeddedScaledSuffixSumCoupling`** — the Beer–Lambert suffix at the right
-  row/column offsets.
-- **`EmbeddedRank1Coupling`** — the column-global $\chi$ back-reaction at its
-  offsets; its `apply_inverse!` is intentionally undefined (handled by the
-  solver).
+$$
+M[\text{row}_i,\text{col}_j] \mathrel{+}= u[i]\,v[j].
+$$
 
-The `compose_into!` machinery (called by consumers) is what lifts a provider's
-bare coupling into the appropriate embedded form at the consumer's offsets.
+This is the column-global $\theta_A$ / $\chi$ back-reaction in `WithChi`: the
+cross-section $A=A_0\,\mathrm{law}(\bar\chi)$ depends on *all* $\chi_j$, so the
+affected rows get a dense column dependence captured as a single outer product
+(the $\theta_A$ channels at the z rows, §15.8.4, and the $\chi$-column block of
+the $\chi$ rows, §15.8.6).
 
-> **Implementation note.** All coupling types, their `apply!`/`apply_inverse!`/
-> `densify!`, and the `compose_into!` wrappers are in
-> src/Jacobian/structured_couplings.jl. The rank-deficiency of the prefix/suffix
-> couplings is documented and *load-bearing*: `apply_inverse!` sets the null
-> direction to zero, and the surrounding $\mathsf{A}$ pins it — a subtlety easy to
-> miss when reasoning about exactness.
+> **Implementation note.** `PrefixSumCoupling`, the three embedded coupling types,
+> their `densify!`, and `compose_into!` are in src/Jacobian/structured_couplings.jl.
+> The couplings alias their factor vectors (no copies) and are rebuilt at every
+> Jacobian evaluation; `zero!` empties `jac.structured` at the start of each
+> assembly.
 
 ---
 
 ## 15.10 Linear-solve strategies
 
-A strategy inverts $\mathsf{A}+\sum_j C_j$ for the Newton step. All four operate
-on the same assembled `StructuredJacobian`.
+A strategy decides which couplings the assembled Jacobian carries. Both operate on
+the same assembled `StructuredJacobian`; the integrator then factors the sparse
+$W$ with the factorization of §15.5.1.
 
 ### 15.10.1 `DirectSolve` (anchor)
 
-Materialize $M=\mathsf{A}+\sum_j\mathrm{densify}(C_j)$ and factor it directly
-(KLU/UMFPACK):
+Write every structured coupling into the sparse matrix:
+$J=\mathsf{A}+\sum_j\mathrm{densify}(C_j)$ under the `:full` sparsity profile.
+The linear solve then sees the exact Jacobian. It is the verification anchor and
+the default on a fixed mesh. Under ALE the prefix-sum and geometry blocks couple
+every node to every cell below it, which makes the factorized $W$ effectively
+dense — the reason for the other strategy.
 
-```julia
-M = Matrix(jac.A)
-for c in jac.structured; densify!(M, c); end
-out .= M \ b
-```
+### 15.10.2 `ApproxSolve` (Schur-style, drop couplings)
 
-Exact, robust, the verification anchor, and the default on a fixed mesh. Under
-ALE it pays $O(N^2)$ to densify the non-local couplings, which is why the other
-strategies exist.
-
-### 15.10.2 `StructuredSolve` (preconditioned Richardson)
-
-Solve $(\mathsf{A}+\sum_j C_j)\,y=b$ by Richardson iteration preconditioned with
-$\mathsf{A}^{-1}$, applying each coupling through its fast `apply!`:
-
-$$
-F=\mathrm{lu}(\mathsf{A}),\quad y_0=F\backslash b,\qquad
-\begin{aligned}
-r_k &= b - \mathsf{A}y_k - \textstyle\sum_j C_j y_k,\\
-\text{stop if } \|r_k\|&\le \text{tol}\,(\|b\|+1),\\
-y_{k+1} &= y_k + F\backslash r_k.
-\end{aligned}
-$$
-
-The default tolerance is $10^{-12}$ and the cap is 50 iterations; if it does not
-converge it *throws* rather than returning a stale iterate. Convergence is fast —
-**2–5 iterations to machine precision** — precisely because the implicit-RK $W$
-shift makes $\mathsf{A}$ strongly diagonally dominant: the cumulative-coupling
-entries are small relative to the $1/(\gamma_{\rm RK}\Delta t)$ + conduction +
-reaction diagonal. Cost is $O(n_{\rm iter}\cdot n_{\rm structured})$ apply passes
-plus the reused $\mathsf{A}$ factorization. When `jac.structured` is empty it
-degenerates to the single direct $\mathsf{A}$-solve.
-
-### 15.10.3 `ApproxSolve` (Schur-style, drop couplings)
-
-Solve $\mathsf{A}^{-1}b$ only, dropping every structured coupling:
-
-```julia
-out .= jac.A \ b
-```
-
-Newton then sees a Jacobian that omits the dense ALE $C$ block, while each
-linear solve stays local and cheap. `ApproxSolve` uses the `:ale_reduced`
-sparsity profile and is the **only** strategy carrying the `is_approximate`
-trait, which switches the verifier to *masked* comparison (in-support only)
-since the dropped couplings are *expected* omissions.
+Keep the local block only, $J=\mathsf{A}$, under the `:ale_reduced` sparsity
+profile: every structured coupling is omitted at its producer and the geometry
+block is not assembled. Newton then sees a Jacobian that omits the dense ALE
+block, while each linear solve stays local and cheap. `ApproxSolve` is the
+**only** strategy carrying the `is_approximate` trait, which switches the
+verifier to *masked* comparison (in-support only) since the dropped couplings are
+*expected* omissions.
 
 It is the default under ALE. With $W = I-\gamma\Delta t\,J$ the modified
 Newton iteration that factors the reduced matrix has the error operator
@@ -14369,29 +13468,20 @@ interleaved rounds: 0.057–0.121 of it where the decks run to their end, and
 0.107–0.120 for the stalling decks over an equal budget of 4000 integrator
 iterations), and allocates 20–8000 times less.
 
-### 15.10.4 `MatrixFreeSolve` (GMRES over the operator)
-
-Solve with GMRES over the `StructuredJacobian`'s action
-$x\mapsto \mathsf{A}x+\sum_j C_j x$, never densifying the couplings. Experimental;
-useful for very large $N$ where even forming $\mathsf{A}+C$ is expensive.
-Production callers should prefer `DirectSolve` unless a problem-specific benchmark
-shows the matrix-free path winning.
-
-| Strategy | Inverts | Exact? | Sparsity profile | Verification |
+| Strategy | Jacobian assembled | Exact? | Sparsity profile | Verification |
 |---|---|---|---|---|
 | `DirectSolve` | $\mathsf{A}+\sum C_j$ densified | yes | `:full` | strict |
-| `StructuredSolve` | $\mathsf{A}+\sum C_j$ via Richardson | yes (to tol) | `:full` | strict |
 | `ApproxSolve` | $\mathsf{A}$ only | no | `:ale_reduced` | masked |
-| `MatrixFreeSolve` | $\mathsf{A}+\sum C_j$ via GMRES | yes (to tol) | `:full` | strict |
 
 > **Implementation note.** Strategy types: src/Jacobian/strategies.jl;
-> `sparsity_profile(::Strategy)` maps `DirectSolve`/`StructuredSolve`/
-> `MatrixFreeSolve` → `:full`, `ApproxSolve` → `:ale_reduced`. The four `ldiv!`
-> methods live in src/Jacobian/structured.jl.
+> `sparsity_profile(::Strategy)` maps `DirectSolve` → `:full` and `ApproxSolve` →
+> `:ale_reduced`. The emit step `_emit_jacobian!` (src/Jacobian/structured_backend.jl)
+> copies $\mathsf{A}$ into the integrator's matrix and densifies the couplings only
+> under `:full`.
 
 ---
 
-## 15.11 Sparsity construction and coloring
+## 15.11 Sparsity construction
 
 ### 15.11.1 Two patterns: physics and geometry
 
@@ -14402,7 +13492,7 @@ The ALE geometry coupling motivates a **two-pattern** model:
   $\xi\!\leftrightarrow\!\xi$ at each cell and its neighbors), the Beer–Lambert
   suffix (row $i$ depends on $\xi$-columns $j\ge i$, plus — on the Kirchhoff
   default path — the surface temperature column $T_{\rm col}(n)$ for every row
-  $i<n$, the $\varepsilon_{\rm eff}(T_n,\xi_{\cdot,n})$ transmissivity chain of
+  $i<n$, the $a_{\rm eff}(T_n,\xi_{\cdot,n})$ transmissivity chain of
   §15.8.7), and the $\chi$-row block
   (cell-local plus the dense $\chi$-column). The ALE dilation is cell-local and
   lies inside the block-tridiagonal physics.
@@ -14415,11 +13505,12 @@ The ALE geometry coupling motivates a **two-pattern** model:
   (lower-triangular including the diagonal, the cumulative nature of mesh
   velocity).
 
-Four emitter functions compose these patterns, invoked in order by
-`build_sparsity(layout, mode; profile)`:
+Four emitter functions compose these patterns. `build_sparsity(layout, mode;
+profile)` builds $S_{\rm phys}$ from the first three, in this order, and
+$S_{\rm geom}$ from the fourth:
 
 1. `_emit_physics_pattern!` — block-tridiagonal;
-2. `_emit_geometry_pattern!` — $z$-columns (ALE);
+2. `_emit_radiation_pattern!` — Beer–Lambert suffix (BeerLambert);
 3. `_emit_chi_pattern!` — $\chi$-row and dense $\chi$-column (WithChi);
 4. `_emit_radiation_pattern!` — Beer–Lambert suffix (BeerLambert).
 
@@ -14450,16 +13541,7 @@ pattern couples a cell only to its immediate neighbours.
 `materializes_geometry_block(mode, profile)` (`:full` under ALE) selects the
 default factorization (§15.5.1).
 
-### 15.11.3 Greedy coloring
-
-For finite-difference / sparse-AD Jacobian construction (the integrator's
-`AutoFiniteDiff` path and any colored AD), `matrix_colors` runs a greedy graph
-coloring over a CSR representation of the pattern: columns sharing a color have
-no common nonzero rows and can therefore be perturbed *simultaneously*, so the
-number of RHS evaluations needed equals the number of colors rather than $N$. The
-colorings are stored on the `JacobianSpec` (`colorvec_phys`, `colorvec_geom`).
-
-### 15.11.4 The geometry operator (z-column AD)
+### 15.11.3 The geometry operator (z-column AD)
 
 Because $z$ couples through many indirect paths (mesh velocity, dilation,
 $\chi$-dependent area), the $z$-columns are filled by a *separate* full-residual
@@ -14475,13 +13557,13 @@ dependence on $(T,\xi,\chi)$. Those entries are structured couplings emitted by
 `ALEMeshVelocityOperator` (§15.8.4) — the `EmbeddedNodePrefixSumCoupling`
 prefix-sum blocks and, under `WithChi`, the $\theta_A$ rank-1 channels.
 
-> **Implementation note.** `build_sparsity`, the five emitters, `matrix_colors`:
+> **Implementation note.** `build_sparsity` and the four emitters:
 > src/Jacobian/sparsity.jl. `GeometryOperator`: src/Jacobian/operators/geometry.jl.
 > `FastSparsityMap`: src/Jacobian/fast_sparsity_map.jl.
 
 ---
 
-## 15.12 ILU-preconditioned Krylov solvers and the MKL ipiv caveat
+## 15.12 ILU-preconditioned Krylov solvers
 
 For very large ALE problems where the direct factorization of $W$ dominates, two
 iterative `LinearSolve.jl` factorizations are provided. They operate on the
@@ -14501,16 +13583,15 @@ inexact solves can increase Newton rejections on Arrhenius transients, so the
 iterative path is recommended only when the direct factorization is the
 bottleneck.
 
-**Linear-solver family.** A sparse `jac_prototype` (every `Structured`
-strategy) pairs with a sparse direct default chosen from its pattern
-(`KLUFactorization` or `UMFPACKFactorization`, §15.5.1); the dense
-`DenseAD_ForwardDiff` backend has no prototype and `_resolve_integrator`
-gives it a dense `LUFactorization`, rebuilding an explicitly requested sparse
-factorization into the user's algorithm with a warning.
+**Linear-solver family.** Every `solve` attaches a sparse `jac_prototype`, which
+pairs with a sparse direct default chosen from its pattern (`KLUFactorization` or
+`UMFPACKFactorization`, §15.5.1). An explicit `linear_solver` — one of the
+iterative solvers above, `SparspakFactorization()`, or any other LinearSolve
+backend, such as `MKLPardisoFactorize()` (with `using LinearSolve` and the Pardiso
+/ MKL packages loaded) — always wins.
 
 > **Implementation note.** `ILUGMRESFactorization`, `ILUBiCGSTABFactorization`,
-> and the Krylov integration: src/Solver/ilu_gmres.jl. The MKL ipiv warning:
-> src/Solver/solve.jl (the `MKL_RESIZE_THRESHOLD = 500` block).
+> and the Krylov integration: src/Solver/ilu_gmres.jl.
 
 ---
 
@@ -14552,14 +13633,14 @@ Two comparison modes, selected by the `is_approximate` trait:
   approximate backend legitimately deviate by the dropped coupling magnitude,
   so masked mode is a sanity check, not an exactness gate.
 
-Verification can run as a setup-time check or as a `VerifyJacobianCallback`
+Verification can run as a setup-time check or as a callback (`verify_jacobian = (rtol=, atol=, sample_times=)`)
 firing at chosen `sample_times` during a live solve. The callback *warns* on
 deviation rather than aborting — a single transient outlier should not kill an
 otherwise-good production run; the user reads `max_abs_dev`/`max_rel_dev` to
 judge severity.
 
-Depletion handling (§14.3) keeps the state size and the pluggable Jacobian,
-so `verify_jacobian` runs through park events; the parked states of every
+Depletion handling (§14.3) keeps the state size and the Jacobian's pattern and
+caches, so `verify_jacobian` runs through park events; the parked states of every
 mode are part of the verifier's own matrix
 (`test/jacobian/test_park_jacobian.jl`).
 
@@ -14626,13 +13707,13 @@ Contrasts:
 - **Energy convention.** ThermaKin (Eq. 17) carries gas enthalpy by the
   convective term $c_g(\mathbf{J}_g\cdot\partial T/\partial x)$ — exactly our
   $S_{\rm conv}$ — with every component in the storage term, which is the
-  Formulation-A convention Pyrolysis.jl adopts as canonical. The sign convention
+  energy-equation convention Pyrolysis.jl adopts. The sign convention
   for heat of reaction differs in *publication* ($h>0$ exothermic in
   ThermaKin/Gpyro vs. $h>0$ endothermic internally here), but the volumetric
   source $Q_{\rm rxn}=-\sum h_r r_r$ is consistent once the convention is mapped
   (overload H1).
 - **Mesh.** ThermaKin's dynamic mesh adjustment is the closest analog to our ALE
-  + remapping; both track a receding surface. Pyrolysis.jl's distinction is the
+  with depletion parking; both track a receding surface. Pyrolysis.jl's distinction is the
   *Jacobian-aware* treatment: the moving-mesh kinematics enter the Newton matrix
   through the geometry-AD $z$-columns and the prefix-sum couplings, so the
   implicit step "knows" the mesh is moving.
@@ -14662,7 +13743,7 @@ Collecting the pieces, the production residual writes, for each cell $i$ and
 component $j$:
 
 $$
-\frac{dT_i}{dt}=\frac{1}{\rho c_p^{\rm eff}{}_{,i}}\Big[-(\nabla\cdot\mathbf{q})_i+S_{{\rm conv},i}+S_{{\rm gen},i}+Q_{{\rm rad},i}+Q_{{\rm rxn},i}\Big],
+\frac{dT_i}{dt}=\frac{1}{\rho c_p^{\rm eff}{}_{,i}}\Big[-(\nabla\cdot\mathbf{q})_i+S_{{\rm conv},i}+Q_{{\rm rad},i}+Q_{{\rm rxn},i}\Big],
 $$
 $$
 \frac{d\xi_{j,i}}{dt}=-(\nabla\cdot\mathbf{J}_j)_i+S_{j,{\rm rxn},i}-\underbrace{\xi_{j,i}\theta_i}_{\text{ALE, every component}},
@@ -14677,8 +13758,9 @@ the implicit-RK $W=I/(\gamma_{\rm RK}\Delta t)-J$ and is assembled as the
 structured operator $J=\mathsf{A}+\sum_j C_j$, where $\mathsf{A}$ is the
 block-tridiagonal local block (reaction, conduction, transport, BC, dilation,
 $\chi$-local, $z$-columns) and the $C_j$ are the prefix-sum (mesh velocity),
-suffix-sum (Beer–Lambert), and rank-1 ($\theta_A$/$\chi$) couplings. The linear
-solve $W\delta\boldsymbol{u}=-r$ is performed by the chosen strategy, and the
+suffix-sum (Beer–Lambert), and rank-1 ($\theta_A$/$\chi$) couplings, written into
+the sparse matrix under `DirectSolve` and dropped under `ApproxSolve`. The linear
+solve $W\delta\boldsymbol{u}=-r$ is a sparse factorization of that matrix, and the
 whole construction is verified against the dense AD reference.
 
 ---
@@ -14690,18 +13772,10 @@ whole construction is verified against the dense AD reference.
   profile (i.e. whether the profile is guaranteed to leave exactly zero $z$-rows)
   is asserted by the masked verifier rather than proven; the design intent is
   zero, and verification is the safeguard.
-- **Sherman–Morrison for `Rank1Coupling`.** `StructuredSolve` handles the rank-1
-  $\theta_A$/$\chi$ update through the preconditioned Richardson loop rather than
-  an explicit Sherman–Morrison correction. An explicit rank-1 inverse could in
-  principle accelerate convergence when the rank-1 magnitude is large, but the
-  current path relies on $\mathsf{A}$'s diagonal dominance to converge.
 - **Chunk-size tuning.** Per-operator `ForwardDiff` chunk sizes are hardcoded
   (e.g. $3(1+N_C)$ for conduction). They are the informationally-necessary
   stencil widths, not adaptively tuned for cache behavior; no auto-tuning is
   present.
-- **`ImplicitTerm` path.** The IFT-resolved coupling type exists but the default
-  boundary-Jacobian path is AD-through-Newton; explicit `ImplicitTerm` overrides
-  are not exercised in the production walk.
 - **WithChi × Darcy.** `WithChi` is tested mainly with Fickian transport; the
   interaction of the $\chi$ rank-1 coupling with the full Darcy operator set is
   not exhaustively exercised.
@@ -14714,9 +13788,9 @@ whole construction is verified against the dense AD reference.
 - **Warm-start artifacts.** Reusing a prior final state as fresh initial data can
   perturb finite-difference sensitivities and continuation studies; its effect is
   unquantified (§17.7).
-- **Diagnostics cadence.** Energy/mass ledger snapshots are stride-based (every
-  `diagnostics_stride` steps), not interpolated to output times, so the audited
-  ledger is sampled rather than continuous (§16.8).
+- **Diagnostics cadence.** The diagnostics snapshots are stride-based (every
+  `diagnostics_stride` steps), not interpolated to output times, and record the
+  sensible energy only; the ledger fields are NaN (§16.8.3).
 
 
 ---
@@ -14724,9 +13798,9 @@ whole construction is verified against the dense AD reference.
 # 16. Conservation Diagnostics
 
 This chapter derives the runtime conservation diagnostics that Pyrolysis.jl uses
-to audit its own numerics. We develop a per-component **mass ledger**, a
-**sensible-energy ledger** that closes to integrator tolerance by construction,
-and a **per-reaction mass-flow ledger**. For every accumulator we give the
+to audit its own numerics. We develop a per-component **mass ledger** and a
+**sensible-energy ledger** that closes to integrator tolerance by construction
+for constant composition and volume. For every accumulator we give the
 continuous balance law, its exact discrete counterpart as the code assembles it,
 the precise sign conventions, and the conditions under which the residual is
 expected to vanish. The chapter closes by stating exactly which balance terms
@@ -14753,7 +13827,7 @@ The implementing module is `Diagnostics`
 ## 16.1 Purpose and design philosophy
 
 A pyrolysis solver couples a stiff reaction network, in-depth radiation, gas
-transport, a moving (ALE) mesh, and adaptive refinement, all advanced by an
+transport, a moving (ALE) mesh, and surface-cell depletion, all advanced by an
 implicit time integrator. With this many interacting mechanisms, a silent error
 in flux or source assembly can masquerade as physics. The diagnostics subsystem
 exists to make conservation **observable at runtime** rather than only in offline
@@ -14771,11 +13845,10 @@ The key design subtlety, stated plainly in the source documentation of
 physical model*: because it is built from the terms the RHS actually assembles,
 **it will close even if the RHS itself double-counts a mechanism.** Catching that
 class of error is the job of the independent closure tests (the sealed-column and
-gas-enthalpy verification cases of §18) and of the construction-time guards (the
-$S_\mathrm{conv}$ / transpiration exclusion, §7.6). The per-reaction mass ledger is
-likewise computed independently of the global mass ledger.
+gas-enthalpy verification cases of §18) and of the formulation itself (the surface
+balance carries no gas-enthalpy term alongside $S_\mathrm{conv}$, §7.4.3).
 
-> **Implementation note.** The three trackers and the callback live in module
+> **Implementation note.** The two trackers and the callback live in module
 > `Diagnostics`. They are pure functions of the *current mesh state*
 > (`mesh.cell_states`, `mesh.cell_volumes`, `mesh.active_cell_mask`) plus a small
 > set of mutable accumulators; they never read the raw state vector directly. The
@@ -14806,7 +13879,7 @@ single-reactant stoichiometry conserves mass exactly ($\sum_j \nu_{r,j}=0$, with
 the reactant coefficient $-1$ balancing product yields summing to $1$; see §6.5).
 Therefore the **total** mass changes only through the boundary efflux. For a
 component-by-component statement we keep the reaction term explicit but rely on
-build-time stoichiometric closure (§6.8) to guarantee $\sum_j S_j=0$. Under ALE
+build-time stoichiometric closure (§6.5.3) to guarantee $\sum_j S_j=0$. Under ALE
 every component rides the mesh (§11.1.2), so $J_j$ — the flux relative to the
 skeleton — is the only transport channel on a moving mesh too. With the two
 boundaries (top $z=L$, bottom $z=0$) and the sign convention that $J_j>0$ is
@@ -14824,18 +13897,19 @@ $$
 \frac{d}{dt}\int_\Omega \rho c_p^\mathrm{eff}\,T\,dV
 \;\approx\; \int_{\partial\Omega} q_\mathrm{cond}\,dA
 + \int_\Omega Q_\mathrm{rxn}\,dV
-+ \int_\Omega S_\mathrm{conv}\,dV
-+ \int_\Omega S_\mathrm{gen}\,dV ,
++ \int_\Omega S_\mathrm{conv}\,dV ,
 $$
 
 with $\rho c_p^\mathrm{eff}=\sum_j \xi_j c_{p,j}(T)$ the mixture heat capacity over
 **every** component, gas included (§7.3.2), and $q_\mathrm{cond}$ the *conducted*
-boundary flux. Under the supported convention — no surface transpiration term —
-the conducted flux equals the applied boundary flux, because the gas crosses the
-surface at $T_s$ on both sides (§1.4.3). This is the law the energy ledger
+boundary flux. The surface balance has no gas-enthalpy term, so the conducted
+flux equals the applied boundary flux: the gas crosses the surface at $T_s$ on
+both sides (§1.4.3). The volumetric radiation source $\int_\Omega Q_\mathrm{rad}\,dV$ of
+the temperature equation is left out (it is zero except under `BEER_LAMBERT`;
+§16.11). This is the law the energy ledger
 discretizes. The $\approx$ flags two terms missing from the storage
 time-derivative — the composition-change term and the ALE volume-change term —
-which are the subject of §16.8.
+which are the subject of §16.7.
 
 ---
 
@@ -14989,7 +14063,7 @@ active-cell mask. The product $\rho c_p\cdot T$ uses the **absolute** temperatur
 $T$ (not $T-T_\mathrm{ref}$): the diagnostics measure a sensible-energy *content*
 relative to $0\,\mathrm{K}$, which is acceptable because the ledger only ever uses
 *differences* $E(t)-E(0)$ in which the datum cancels (provided $\rho c_p$ is held
-fixed; see the composition-change caveat in §16.8).
+fixed; see the composition-change caveat in §16.7).
 
 > **Implementation note.** `compute_sensible_energy`,
 > `conservation_checks.jl`, calling `Properties.effective_heat_capacity`.
@@ -15008,23 +14082,19 @@ $$
 E(t) = E(0)
 + \int_0^t \Big[\, q_\mathrm{cond,boundary}\,A
 + Q_\mathrm{rxn}^\mathrm{tot}
-+ S_\mathrm{conv}^\mathrm{tot}
-+ S_\mathrm{gen}^\mathrm{tot} \,\Big]\,d\tau,
++ S_\mathrm{conv}^\mathrm{tot} \,\Big]\,d\tau,
 $$
 
 where each integrand is the *volume-integral of the corresponding RHS field*:
 
 - $q_\mathrm{cond,boundary}$ — net **conducted** boundary heat flux [W·m⁻²],
   positive into the slab. This is the flux the Newton boundary solver drives
-  into the first/last cell (§7.6, §12.2); under the supported convention it
-  equals the applied BC flux.
+  into the first/last cell (§12.2); the surface balance has no gas-enthalpy
+  term, so it equals the applied BC flux.
 - $Q_\mathrm{rxn}^\mathrm{tot}=\sum_i Q_{\mathrm{rxn},i}V_i = \int_\Omega Q_\mathrm{rxn}\,dV$ [W],
   the total reaction heat ($Q_\mathrm{rxn}=-\sum_r h_r r_r$; §6.6).
 - $S_\mathrm{conv}^\mathrm{tot}=\int_\Omega S_\mathrm{conv}\,dV$ [W], the total gas
   advective enthalpy sink; **typically negative** (heat carried out by gas; §7.4).
-- $S_\mathrm{gen}^\mathrm{tot}=\int_\Omega S_\mathrm{gen}\,dV$ [W], the optional
-  generation sink; identically zero unless `energy_form = :with_generation_sink`
-  (§7.5).
 
 ### 16.5.2 Per-substep accumulation
 
@@ -15035,8 +14105,7 @@ $$
 \begin{aligned}
 \texttt{cum\_boundary\_conduction} &\mathrel{+}= q_\mathrm{cond,boundary}\,A\,\Delta t,\\
 \texttt{cum\_reaction\_heat}       &\mathrel{+}= Q_\mathrm{rxn}^\mathrm{tot}\,\Delta t,\\
-\texttt{cum\_advection\_sink}      &\mathrel{+}= S_\mathrm{conv}^\mathrm{tot}\,\Delta t,\\
-\texttt{cum\_generation\_sink}     &\mathrel{+}= S_\mathrm{gen}^\mathrm{tot}\,\Delta t .
+\texttt{cum\_advection\_sink}      &\mathrel{+}= S_\mathrm{conv}^\mathrm{tot}\,\Delta t .
 \end{aligned}
 $$
 
@@ -15047,7 +14116,7 @@ volume-integrals [W], so $\cdot\,\Delta t$ gives joules.
 > **Implementation note.** `update_energy_tracker!`, `conservation_checks.jl`.
 > The accumulators live in `EnergyConservationTracker`: `initial_energy`,
 > `cumulative_boundary_conduction`, `cumulative_reaction_heat`,
-> `cumulative_advection_sink`, `cumulative_generation_sink`, `last_time`.
+> `cumulative_advection_sink`, `last_time`.
 
 ### 16.5.3 The residual
 
@@ -15058,8 +14127,7 @@ $$
 E^\mathrm{exp}(t) = E(0)
 + \texttt{cum\_boundary\_conduction}
 + \texttt{cum\_reaction\_heat}
-+ \texttt{cum\_advection\_sink}
-+ \texttt{cum\_generation\_sink},
++ \texttt{cum\_advection\_sink},
 $$
 
 and the **residual** is the gap between the measured and expected stored energy:
@@ -15077,7 +14145,8 @@ the verdict $r^\mathrm{rel}<\texttt{tol}$, default $\texttt{tol}=10^{-6}$.
 ### 16.5.4 Why it closes — and what it does *not* prove
 
 This residual closes to integrator tolerance *by construction* whenever the
-heat capacity and volume are constant over the trajectory, because both
+heat capacity and volume are constant over the trajectory and no radiation is
+absorbed in depth, because both
 $E(t)$ and its expectation are assembled from the same RHS fields under exactly
 consistent quadrature; the only error is the integrator's local truncation error
 in advancing $T$, which the implicit solver controls to `reltol`. A non-closing
@@ -15086,91 +14155,16 @@ accumulated, a callback firing at the wrong time, a sign error in a source term,
 or a missing factor of $A$ or $V$.
 
 The crucial limitation, repeated from §16.1: the ledger **cannot detect a
-double-count**. If the RHS were (incorrectly) to add both $S_\mathrm{conv}$ and a
-surface transpiration enthalpy term, the accumulator would faithfully record
-both, the expectation would include both, and the residual would still close.
-Catching that class of error is the job of the independent verification cases
-(§18) and of the construction-time mutual-exclusivity guard between
-$S_\mathrm{conv}$ and the transpiration BC (§7.6). It is also subject to the
-composition-change and ALE volume-change omissions of §16.8, which prevent
+double-count**. If the RHS were (incorrectly) to add a surface gas-enthalpy term
+on top of $S_\mathrm{conv}$, the accumulator would faithfully record both, the
+expectation would include both, and the residual would still close. Catching that
+class of error is the job of the independent verification cases (§18). The ledger is also subject to the
+composition-change and ALE volume-change omissions of §16.7, which prevent
 *exact* closure whenever the mixture heat capacity or cell volume vary in time.
 
 ---
 
-## 16.6 Per-reaction mass-flow ledger
-
-The global mass ledger (§16.3) verifies that the *domain* conserves mass. A
-*finer* and *independent* check is that each reaction conserves mass on its own —
-that products generated equal reactant consumed for every reaction. This catches
-stoichiometry errors that the global ledger would miss (because mass consumed by
-one reaction and generated by another can globally cancel).
-
-### 16.6.1 Reaction extent and per-reaction accumulation
-
-For reaction $r$ with cell-uniform volumetric rate $r_r$ [kg·m⁻³·s⁻¹], the mass
-reacted over the active domain in one substep is
-
-$$
-m_{\mathrm{flow},r} = r_r\,V_\mathrm{total}\,\Delta t,
-\qquad V_\mathrm{total}=\sum_{i\in\mathrm{active}} V_i .
-$$
-
-(The tracker takes a single representative or domain-averaged rate per reaction
-and multiplies by the total active volume; for spatially uniform rates this is
-exact, otherwise it is a domain-average estimate — see the open issue in
-§16.6.3.) The accumulators update as
-
-$$
-\begin{aligned}
-\texttt{reaction\_counts}_r &\mathrel{+}= m_{\mathrm{flow},r}
-&&\text{(cumulative reaction extent }\textstyle\int r_r\,dt\,V_\mathrm{total}\text{),}\\
-\texttt{reactant\_consumed}_{j_1(r),\,r} &\mathrel{+}= m_{\mathrm{flow},r}
-&&\text{($j_1$ = first reactant of }r\text{; coefficient }1\text{),}\\
-\texttt{product\_generated}_{j,\,r} &\mathrel{+}= \nu_{r,j}\,m_{\mathrm{flow},r}
-&&\text{for each product }j\text{ of }r .
-\end{aligned}
-$$
-
-The single-reactant convention (§6.5) makes the consumption side unambiguous: the
-first reactant is consumed with implicit coefficient $1$, and each product is
-generated with its explicit yield $\nu_{r,j}\ge0$.
-
-> **Implementation note.** `update_reaction_tracker!`, `conservation_checks.jl`.
-> It recomputes $V_\mathrm{total}$ over the active mask each call, then for each
-> reaction adds `mass_flow` to the first reactant's `reactant_consumed[r1_idx, r]`
-> and `ν * mass_flow` to each product's `product_generated[p_idx, r]`. State in
-> `ReactionMassFlowTracker{NC,NR}`: `reactant_consumed` [NC×NR],
-> `product_generated` [NC×NR], `reaction_counts` [NR], `last_time`.
-
-### 16.6.2 The per-reaction balance check
-
-Each reaction's relative mass error is
-
-$$
-\epsilon_r = \frac{\big|\sum_j \texttt{product\_generated}_{j,r} - \sum_j \texttt{reactant\_consumed}_{j,r}\big|}
-{\sum_j \texttt{reactant\_consumed}_{j,r}},
-$$
-
-with an absolute fallback when the denominator is $\le\texttt{eps()}$. Reaction
-$r$ is balanced iff $\epsilon_r<\texttt{tol}$, default $\texttt{tol}=10^{-10}$.
-Because the yields $\nu_{r,j}$ are validated at build time to sum to exactly $1.0$
-(§6.8), this error should be at roundoff: $\sum_j\nu_{r,j}m_{\mathrm{flow},r}=m_{\mathrm{flow},r}=\sum_j\texttt{reactant\_consumed}$.
-A nonzero $\epsilon_r$ would indicate a stoichiometry table that was not
-normalized — exactly the bug class this independent ledger is meant to surface.
-
-> **Implementation note.** `check_reaction_mass_balance` and
-> `reaction_mass_flow_report`, `conservation_checks.jl`.
-
-### 16.6.3 Scope and current limitation
-
-The per-reaction ledger validates **stoichiometric** mass closure independently
-of the global ledger. It does *not* yet feed reaction-specific heat release into
-the energy ledger, so the energetic stoichiometry (whether the heat sources are
-consistent with the reaction extents) is not independently checked — see §16.8.
-
----
-
-## 16.7 Boundary-flux semantics
+## 16.6 Boundary-flux semantics
 
 The energy ledger accumulates the **conducted flux** $q_\mathrm{cond,boundary}$:
 the heat actually conducted into the first/last interior cell, i.e.
@@ -15180,11 +14174,11 @@ energy equation receives. The surface energy balance the Newton solver enforces
 is (§12.2)
 
 $$
-q_\mathrm{BC,applied}(T_s) = q_\mathrm{cond}(T_s) + q_\mathrm{transp}(T_s),
+q_\mathrm{BC,applied}(T_s) = q_\mathrm{cond}(T_s),
 $$
 
-and under the supported convention the transpiration term is identically zero
-(§1.4.3, §7.6), so the conducted flux *is* the applied flux: the externally
+with no gas-enthalpy term (§1.4.3, §7.4.3), so the conducted flux *is* the
+applied flux: the externally
 driven flux that the boundary condition imposes (for a `RadiativeFluxBC` the
 absorbed incident radiation less the re-radiation and convective exchange; for a
 pure `HeatFluxBC` the prescribed $q(t)$). The solver exposes these as
@@ -15198,7 +14192,7 @@ models) and `extras.back_heat_flux` for the bottom boundary
 
 ---
 
-## 16.8 What the energy ledger does *not* yet accumulate
+## 16.7 What the energy ledger does *not* yet accumulate
 
 The residual of §16.5 closes exactly only under *constant heat capacity and
 constant cell volume*. Pyrolysis violates both: the mixture composition $\xi$
@@ -15235,7 +14229,7 @@ mesh**. Closing it would require per-substep, per-cell accumulation of the
 *incremental* stored energy $\rho c_{p,i}(t)\,\Delta T_i\,V_i(t)$ (which absorbs
 the composition and volume effects into the measured $\Delta(\rho c_p T)$), i.e.
 wiring `record_substep!` into `compute_rhs!` so the tracker sees every cell's
-state at every substep. That plumbing **does not exist in the package today**; the
+state at every substep. That plumbing **does not exist in the package**; the
 verification case V-CPL-06 carries its own per-step ledger with the hand-off and
 dilation terms made explicit and closes the ALE energy budget to $5\times10^{-5}$
 of the boundary input (§18.4).
@@ -15247,18 +14241,17 @@ flux/source assembly.
 
 ---
 
-## 16.9 Callback infrastructure and runtime logging
+## 16.8 Callback infrastructure and runtime logging
 
-### 16.9.1 DiagnosticsState and DiagnosticsRow
+### 16.8.1 DiagnosticsState and DiagnosticsRow
 
-The running state of all three trackers, plus the emitted log, is held in a
+The running state of both trackers, plus the emitted log, is held in a
 single mutable container:
 
 ```julia
-mutable struct DiagnosticsState{NC,NR}
+mutable struct DiagnosticsState{NC}
     mass::MassConservationTracker{NC}
     energy::EnergyConservationTracker
-    reactions::ReactionMassFlowTracker{NC,NR}
     stride::Int
     step_counter::Int
     last_t::Float64
@@ -15282,30 +14275,31 @@ with all-`Float64` fields (`callback.jl`). Using a concrete `NamedTuple` (rather
 than `Dict{Symbol,Any}`) keeps the log type-stable and means adding a new
 diagnostic is a field addition, not a stringly-typed key.
 
-### 16.9.2 record_substep! — the full cumulative path
+### 16.8.2 record_substep! — the full cumulative path
 
 `record_substep!` (`callback.jl`) is the entry point for the *full* cumulative
 ledger. Per call it:
 
-1. computes the substep size $\Delta t = t - \texttt{state.last\_t}$, updates
-   `last_t`, and increments `step_counter`;
+1. computes the substep size $\Delta t = t - \texttt{state.last\_t}$ and updates
+   `last_t`;
 2. **guards** against $\Delta t\le0$ (a callback fired at a duplicate time, e.g.
-   the initial point) by returning early — this prevents zero/negative-width
-   substeps from polluting the accumulators;
-3. calls `update_mass_tracker!` and `update_energy_tracker!` with the substep's
-   conducted boundary flux, the three volume-integrated source totals, the
-   boundary mass-flux matrix, and the area;
+   the initial point) by returning early, before `step_counter` is incremented — a
+   duplicate time neither pollutes the accumulators nor advances the stride;
+3. increments `step_counter` and calls `update_mass_tracker!` and `update_energy_tracker!` with the substep's
+   conducted boundary flux, the two volume-integrated source totals
+   ($Q_\mathrm{rxn}$, $S_\mathrm{conv}$), the boundary mass-flux matrix, and the
+   area;
 4. **only on stride boundaries** (`step_counter % stride == 0`) calls
    `check_energy_conservation` and `check_mass_conservation` against the current
    mesh and pushes a fully populated `DiagnosticsRow` (with real residuals).
 
 This path requires the caller to supply, every substep, the conducted boundary
-flux, the three volume-integrated source totals, the boundary mass-flux matrix,
+flux, the two volume-integrated source totals, the boundary mass-flux matrix,
 and the area — i.e. it must be threaded through the residual assembly. As noted
-in §16.8, that threading is not yet wired, so this path is exercised by tests
+in §16.7, that threading is not yet wired, so this path is exercised by tests
 rather than by `solve()`.
 
-### 16.9.3 snapshot_diagnostics_row — the production path
+### 16.8.3 snapshot_diagnostics_row — the production path
 
 What `solve()` *actually* uses is the **snapshot** path.
 `snapshot_diagnostics_row(t, mesh, material)` (`callback.jl`) computes only the
@@ -15321,7 +14315,7 @@ available in snapshot mode* (they require per-substep accumulation). The snapsho
 path is cheap — one reduction over the mesh — and gives the user the quantity
 that *is* well-defined point-by-point: the energy content.
 
-### 16.9.4 DiagnosticsCallback and solver integration
+### 16.8.4 DiagnosticsCallback and solver integration
 
 `DiagnosticsCallback(record!)` (src/Diagnostics/callback.jl) wraps a user
 closure in a `SciMLBase.DiscreteCallback` whose condition is `true` (fire on
@@ -15339,14 +14333,14 @@ integrator's state with `update_mesh_from_state!(mesh, u, layout)` so
 the trackers read the current cell states, then (ii) pushes a
 `snapshot_diagnostics_row` to a local `Vector{DiagnosticsRow}`. After the solve,
 the rows are appended to `solution.extras.diagnostics_log` (the `extras`
-schema, `_empty_extras` in src/Problem/pyrolysis_problem.jl, reserves
+schema, `_extras` in src/Problem/pyrolysis_problem.jl, reserves
 `diagnostics_log`). Reading `sol.extras.diagnostics_log` therefore yields the
 energy time series, with `NaN` in the cumulative-residual columns under the
 current production wiring.
 
 ---
 
-## 16.10 Comparison to ThermaKin2Ds, Gpyro, and FDS
+## 16.9 Comparison to ThermaKin2Ds, Gpyro, and FDS
 
 The conservation-diagnostics design adds an explicit, runtime ledger audit that
 is not a standard feature of any of the three reference codes.
@@ -15363,32 +14357,28 @@ the closure residual.
 $\bar\rho\,\Delta z$ and $\bar\rho Y_i\,\Delta z$ with a fully-implicit
 backward-Euler/Patankar scheme; conservation is enforced by the discretization
 itself, with closure verified through the solid-density bookkeeping. Pyrolysis.jl
-instead conserves species mass by construction (validated stoichiometry, §6.8)
-and *audits* it with the independent global and per-reaction ledgers. The
-per-reaction ledger has no direct counterpart in the reference codes; it is a
-build-time-plus-runtime guard specific to this code's single-reactant,
-yield-normalized stoichiometry model.
+instead conserves species mass by construction (stoichiometry validated when each
+reaction is built, §6.5.3) and *audits* it with the global mass ledger.
 
 **Reference-point deformation vs. ALE.** ThermaKin handles condensed-phase
 deformation through a single-reference-point density-integral source term, and
 Gpyro through a variable-$\Delta z$ control volume; Pyrolysis.jl uses ALE mesh
 motion (§10, §11). This is why the Pyrolysis.jl ledgers must carry a
 time-dependent area $A(t)$ (trapezoidal average over a substep) and why the
-unaccumulated ALE volume-change term (§16.8) is a closure caveat unique to the
+unaccumulated ALE volume-change term (§16.7) is a closure caveat unique to the
 ALE formulation that the reference codes, with their different deformation
 treatments, do not incur in the same form.
 
 ---
 
-## 16.11 Worked summary of the ledger equations
+## 16.10 Worked summary of the ledger equations
 
 For quick reference, the complete set of accumulated and checked quantities:
 
 | Ledger | Stored quantity | Expected | Residual | Tolerance |
 |---|---|---|---|---|
 | Mass (per comp. $j$) | $m_j=\sum_{i\in\text{act}}\xi_{j,i}V_i$ | $m_{\mathrm{init},j}-m_{\mathrm{efflux},j}$ | $m_j-m_{\mathrm{init},j}+m_{\mathrm{efflux},j}$ | $10^{-10}$ (rel.; abs. if $m_\mathrm{init}\approx0$) |
-| Energy | $E=\sum \rho c_p^\mathrm{eff}T_iV_i$ | $E(0)+\!\int\!(q_\mathrm{cond}A+Q_\mathrm{rxn}+S_\mathrm{conv}+S_\mathrm{gen})$ | $E-E^\mathrm{exp}$ | $10^{-6}$ (rel.) |
-| Reaction (per rxn $r$) | $\sum_j$ generated, $\sum_j$ consumed | generated $=$ consumed | $|\text{gen}-\text{cons}|/\text{cons}$ | $10^{-10}$ (rel.) |
+| Energy | $E=\sum \rho c_p^\mathrm{eff}T_iV_i$ | $E(0)+\!\int\!(q_\mathrm{cond}A+Q_\mathrm{rxn}+S_\mathrm{conv})$ | $E-E^\mathrm{exp}$ | $10^{-6}$ (rel.) |
 
 Sign-convention reminders carried through every row: $J>0$ = inflow (so efflux
 $=-J A\Delta t$); divergence positive = outflow; $Q_\mathrm{rxn}=-\sum_r h_r r_r$
@@ -15396,12 +14386,12 @@ with $h>0$ endothermic; $S_\mathrm{conv}$ typically negative.
 
 ---
 
-## 16.12 Limitations and open issues
+## 16.11 Limitations and open issues
 
 The following are the known gaps in the conservation diagnostics. They are
 caveats on *interpretation*, not correctness bugs in the kernels.
 
-1. **Composition-varying closure (primary limitation).** As derived in §16.8,
+1. **Composition-varying closure (primary limitation).** As derived in §16.7,
    the residual omits the composition-change proxy term
    $\int T\,\partial(\rho c_p^\mathrm{eff})/\partial t\,dV\,dt$ and the ALE
    volume-change term $\int \rho c_p^\mathrm{eff}\,T\,\partial V/\partial t\,dt$.
@@ -15416,36 +14406,29 @@ caveats on *interpretation*, not correctness bugs in the kernels.
    full cumulative ledger is available only by manually threading
    `record_substep!`.
 
-3. **Per-reaction energetic closure.** The per-reaction ledger validates
-   stoichiometric mass closure but does not yet integrate reaction-specific heat
-   release into the energy ledger, so energetic stoichiometry is not
-   independently audited (§16.6.3).
-
-4. **Boundary-flux decomposition.** The energy ledger treats the boundary flux
+3. **Boundary-flux decomposition.** The energy ledger treats the boundary flux
    as a single scalar per boundary. Decomposing it into separate radiation,
    convection, and conduction channels would let each mechanism be audited
    independently — the solver already exposes the *components* in `extras`
    (`surface_heat_flux_absorbed`, `_reradiation`, `_convection`, `_conduction`),
    but the tracker consumes only the aggregate.
 
-5. **Asymmetric ambient temperatures with a permeable back face.** The
-   generation sink uses a single scalar $T_\mathrm{ref}$ resolved from one
-   boundary's ambient. If the two boundaries have different ambients *and* the
-   back face is permeable, the `:with_generation_sink` ledger fails to close at
-   the bottom by $\sum_g \dot m_{g,\mathrm{bottom}}c_{p,g}(T_{\infty,\mathrm{top}}-T_{\infty,\mathrm{bottom}})$.
-   This is harmless for the standard impermeable back face (both terms vanish) but
-   would require a per-cell datum to support in general (see §7.5 caveat).
+4. **No radiation term.** The energy ledger accumulates the conducted boundary
+   flux, $Q_\mathrm{rxn}$, and $S_\mathrm{conv}$ only; a volumetric Beer–Lambert
+   deposit $Q_\mathrm{rad}$ is not among its accumulators, so under `BEER_LAMBERT`
+   the residual also carries the absorbed in-depth radiation.
 
 ---
 
 *Cross-references.* The governing equations these ledgers audit are stated in §3
-(Governing Equations); the energy-source terms $S_\mathrm{conv}$, $S_\mathrm{gen}$,
-the mixture heat capacity, and the $S_\mathrm{conv}$/transpiration mutual
-exclusivity in §7 (Heat Conduction, Convection & Energy Assembly); the
+(Governing Equations); the energy-source term $S_\mathrm{conv}$, the mixture heat
+capacity, and the absence of a surface gas-enthalpy term in §7 (Heat Conduction,
+Convection & Energy Assembly); the
 heat-of-reaction sign and stoichiometric closure in §6 (Reaction Kinetics); the
 surface energy balance and boundary fluxes in §12 (Boundary & Initial
 Conditions); the time-dependent area and volume from §10 (Volume Change) and §11
-(ALE Framework); the active-cell mask from §14 (Adaptive Mesh Refinement); and
+(ALE Framework); the active-cell mask from §14 (Adaptive Mesh Refinement and
+Surface Depletion); and
 the callback/integration machinery from §15 (Temporal Integration). The
 diagnostics are themselves a verification tool used in §18 (Verification &
 Validation).
@@ -15515,8 +14498,10 @@ $\ell(\boldsymbol{\theta})=\tfrac12\lVert\mathbf{y}(\boldsymbol{\theta})-\mathbf
 Gradient-based optimizers (Gauss–Newton, L-BFGS, Levenberg–Marquardt) require
 $\nabla_{\boldsymbol{\theta}}\ell$, which is exactly an adjoint or a
 Jacobian-vector contraction of $S_{kq}$. The shipped inverse-analysis workflow
-(`examples/inverse_analysis/wp_objective.jl`, `wp_forward.jl`) fits White-Pine
-kinetics and properties to multi-flux cone data this way.
+(`examples/inverse_analysis/inverse_white_pine.jl`, with `wp_objective.jl` and
+`wp_forward.jl`) minimizes such a misfit for White-Pine kinetics and properties
+against multi-flux cone data, derivative-free (`Fminbox(NelderMead())`), with a
+`FiniteDiff` Hessian at the optimum for the standard errors.
 
 **(2) Uncertainty quantification (UQ).** Given parameter uncertainties
 (covariances from instrument calibration and per-curve regression), the
@@ -15582,15 +14567,15 @@ $$
 
 evaluated at the supplied base point $\boldsymbol{\theta}$. The signature is
 `forward_sensitivity(base_problem, θ, p_inject; output_fn=identity, solve_kwargs...)`;
-`p_inject` is a positional closure and `output_fn` defaults to identity (return
-the whole solution object, which ForwardDiff then differentiates element-wise).
+`p_inject` is a positional closure and `output_fn` defaults to `identity`, which
+returns the `PyrolysisSolution` itself; `ForwardDiff.jacobian` needs an array, so
+pass an `output_fn` that returns a vector (e.g. `sol -> sol.surface_T`).
 
 > **Implementation note.** Forward-mode sensitivity is implemented in
-> `Pyrolysis.forward_sensitivity`,
-> `ext/PyrolysisSciMLSensitivityExt.jl` (lines 30–48), attached to the stub
-> `forward_sensitivity` declared in `src/sensitivity_stubs.jl`. The stub raises a
-> `MethodError`-style error until `using SciMLSensitivity` (and `Zygote`) loads
-> the extension. ForwardDiff is the only differentiation engine used by the
+> `Pyrolysis.forward_sensitivity`, `ext/PyrolysisSciMLSensitivityExt.jl`, attached
+> to the stub `forward_sensitivity` declared in `src/sensitivity_stubs.jl`. The
+> stub has no methods until `using SciMLSensitivity, Zygote` loads the extension;
+> calling it before raises a `MethodError`. ForwardDiff is the only differentiation engine used by the
 > *forward* path; SciMLSensitivity is a load trigger, not an active component
 > here.
 
@@ -15619,14 +14604,10 @@ dual part or silently coerce to `Float64`. The package satisfies this:
   (connectivity only). Geometry sensitivities therefore propagate (§11, The ALE
   Framework).
 - **Property evaluation.** Property functions are callable on `Real`, hence on
-  duals. The analytical temperature derivatives of §4.5 — e.g. Arrhenius
-  $\mathrm{d}p/\mathrm{d}T = p(T)\,E/(R_g T^2)$ and the unrolled polynomial
-  derivative (`derivative`, `src/Materials/property_functions.jl:283–300`) — are
-  used by the *Jacobian* assembly, but for *forward sensitivity* ForwardDiff
-  differentiates the property's own arithmetic, so even `TableProperty` and
-  `CallableProperty` (which only have finite-difference $\mathrm{d}p/\mathrm{d}T$
-  internally) are differentiated *exactly* with respect to $T$ through their
-  interpolation arithmetic.
+  duals, and carry no derivative methods (§4.5): ForwardDiff differentiates each
+  law's own arithmetic, so even `TableProperty` (slope of the active segment) and
+  `CallableProperty` are differentiated exactly with respect to $T$ and to any
+  parameter inside them.
 - **Boundary-temperature Newton solve.** The surface-temperature solve
   $f(T_s)=0$ (§12.2) detects dual inputs and returns a dual $T_s$; the implicit
   function theorem is realized automatically because Newton's iterate
@@ -15635,11 +14616,10 @@ dual part or silently coerce to `Float64`. The package satisfies this:
 - **Kinetics.** `reaction_rate` is written with
   `one(promote_type(eltype(ξ), typeof(T)))` and `_fast_pow` so that the
   concentration product, tanh gates, and depletion limiter all stay in the
-  promoted dual type (`src/Physics/kinetics.jl:75–111`).
+  promoted dual type (`src/Physics/kinetics.jl`).
 
-The time integrator (`KenCarp4` by default, with
-`autodiff=AutoFiniteDiff()` for its *internal* Newton Jacobian and the
-default sparse factorization for the linear solve) does **not** need to be
+The time integrator (`KenCarp4` by default, with the structured Jacobian of §15
+as its Newton Jacobian and the default sparse factorization for the linear solve) does **not** need to be
 dual-aware: ForwardDiff differentiates the *output of the converged solve*, not
 the integrator's internal Jacobian. OrdinaryDiffEq's `solve` is itself a
 differentiable program, and SciMLSensitivity supplies the dual-compatible
@@ -15725,8 +14705,7 @@ The signature is
 `adjoint_sensitivity(base_problem, θ, p_inject, loss_fn; sensealg=InterpolatingAdjoint(autojacvec=ReverseDiffVJP()), solve_kwargs...)`.
 
 > **Implementation note.** Adjoint sensitivity is
-> `Pyrolysis.adjoint_sensitivity`, `ext/PyrolysisSciMLSensitivityExt.jl`
-> (lines 53–74). The `sensealg` is **forwarded to `solve` as a first-class
+> `Pyrolysis.adjoint_sensitivity`, `ext/PyrolysisSciMLSensitivityExt.jl`. The `sensealg` is **forwarded to `solve` as a first-class
 > keyword** — `solve` accepts `sensealg` precisely so SciMLSensitivity can
 > intercept the ODE solve and augment it with adjoint dynamics without tripping
 > `solve`'s unknown-keyword guard (`src/Solver/solve.jl`). Zygote provides the
@@ -15780,8 +14759,7 @@ The key structural facts:
   transpose of the structured Jacobian of §15. SciMLSensitivity never forms it
   densely; with `autojacvec=ReverseDiffVJP()` it evaluates *vector–Jacobian
   products* $\boldsymbol{\lambda}^{\mathsf T}(\partial\mathbf{f}/\partial\mathbf{u})$
-  by reverse-mode AD of the residual, matching the matrix-free spirit of the
-  `MatrixFreeSolve` strategy.
+  by reverse-mode AD of the residual.
 - The default `InterpolatingAdjoint` stores (and interpolates) the forward
   trajectory so the backward pass can re-evaluate $\mathbf{f}$ and its VJPs at
   the correct states; this trades memory for the avoidance of a backward
@@ -15881,8 +14859,8 @@ Common $\boldsymbol{\theta}$ entries and how `p_inject` injects them:
   $T_s$ — the sensitivity $\partial T_s/\partial h_r<0$.
 - **Densities / conductivities / emissivities** $\rho_j,k_j,\varepsilon_j$.
   These feed the mixture rules of §5 and the boundary energy balance; their
-  derivatives propagate through the effective-property closures (analytical
-  mixing derivatives for PARALLEL/SERIES/WEIGHTED, AD for BRUGGEMAN). A
+  derivatives propagate through the effective-property closures (ForwardDiff
+  through every mixing rule, Bruggeman's Newton solve included; §5.15). A
   bulk-density change also shifts the initial dry-solid mass $m_{\text{dry},i}$
   (and hence $\chi$, §10), so density is a particularly broad-reaching handle.
 - **Boundary-condition parameters** — incident flux level, convective
@@ -15902,8 +14880,14 @@ using Pyrolysis, SciMLSensitivity, Zygote   # loads the extension
 
 function p_inject(prob, θ)
     rxn  = Reaction(:decomp, 1 => 2; A = θ[1], E = θ[2], h = θ[3])
-    mat  = Material(prob.material; reactions = (rxn,))
-    return PyrolysisProblem(prob; material = mat)
+    m    = prob.material
+    mat  = Material(; name = m.name, components = m.components, reactions = (rxn,),
+                    mixing = m.mixing, lateral_shrinkage_law = m.lateral_shrinkage_law,
+                    depletion_limiter = m.depletion_limiter, gas_viscosity = m.gas_viscosity)
+    return PyrolysisProblem(; mesh = deepcopy(prob.mesh), material = mat,
+                            bc_set = prob.bc_set, T_initial = prob.T_initial,
+                            ξ_initial = prob.ξ_initial, tspan = prob.tspan,
+                            dt_initial = prob.dt_initial, output_times = prob.output_times)
 end
 
 output_fn(sol) = sol.surface_T               # vector QoI over saved times
@@ -16037,14 +15021,15 @@ at the gate edges and destroy both the integrator's Newton Jacobian and any AD
 derivative. The code replaces it with the product of tanh ramps
 
 $$
-r \;\mathrel{*}=\; \tfrac12\big(1+\tanh(T-T_{\min})\big)\,
-                   \tfrac12\big(1+\tanh(T_{\max}-T)\big),
+r \;\mathrel{*}=\; \tfrac12\big(1+\tanh((T-T_{\min})/w_{\text{gate}})\big)\,
+                   \tfrac12\big(1+\tanh((T_{\max}-T)/w_{\text{gate}})\big),
 $$
 
-applied only when the bounds are finite/positive (`src/Physics/kinetics.jl:102–108`).
+applied only when the bounds are finite/positive (`src/Physics/kinetics.jl`), with
+the per-reaction gate width $w_{\text{gate}}$ (default 1 K, §6.2.2).
 This is $C^\infty$ in $T$, so all temperature sensitivities of the rate are
-finite. The cost is a $\sim\!10\text{ K}$ leakage of reactivity outside the
-nominal window (the ramp is not unit-step), discussed in §6.2; for sensitivity
+finite. The cost is a leakage of reactivity of about $10\,w_{\text{gate}}$ outside
+the nominal window (the ramp is not unit-step), discussed in §6.2; for sensitivity
 purposes the benefit — globally finite $\partial r/\partial T$ — outweighs it.
 
 **(2) Depletion limiter.** Near zero reactant the bare Arrhenius rate is stiff
@@ -16056,33 +15041,24 @@ $$
 $$
 
 with default threshold $\xi_{\text{thr}}=1.0\ \text{kg·m}^{-3}$
-(`src/Physics/kinetics.jl:89–95`; reactant clamped via $\max(\xi,0)$ first).
+(`src/Physics/kinetics.jl`; reactant clamped via $\max(\xi,0)$ first).
 The rate vanishes at depletion with a bounded $\partial r/\partial\xi$ for
 every reaction order $n \ge 0$, keeping the reaction-rate Jacobian — and hence
 the parameter sensitivities of MLR near burnout — bounded and well-defined.
 The factor is $C^\infty$ in $\xi > 0$ with no threshold branch; the only
 non-smooth point left is the $\max(\xi,0)$ clip exactly at $\xi=0$ (§17.7).
 
-**(3) Midpoint-rule sensible enthalpy.** The sensible-enthalpy increment
-$\Delta h(T_{\text{hi}},T_{\text{lo}})=c_p\!\big(\tfrac{T_{\text{hi}}+T_{\text{lo}}}2\big)(T_{\text{hi}}-T_{\text{lo}})$
-(`src/Materials/components.jl:515–518`) uses a *single* $c_p$ evaluation at the
-midpoint. It is smooth in both temperatures and in any property parameters
-inside $c_p$, and — crucially — AD returns the derivative of *what the midpoint
-rule actually computes*, not of an idealized exact integral. This consistency
-means energy-balance-derived QoIs differentiate cleanly and match the
-single-point cell-centered $c_p$ used elsewhere.
-
-**(4) Smooth flux limiters and lateral-shrinkage derivative.** The TVD limiters
+**(3) Smooth flux limiters and lateral-shrinkage derivative.** The TVD limiters
 (Van Leer is the ALE default) are continuous, and the $\chi$-driven radial
 strain rate uses an *automatic-differentiation* derivative of the
 lateral-shrinkage law,
 $\theta_A=\dfrac{\mathrm{law}'(\bar\chi)}{\mathrm{law}(\bar\chi)}\dfrac{\mathrm{d}\bar\chi}{\mathrm{d}t}$
 with `dlaw_dχ̄ = ForwardDiff.derivative(law, χ̄)` and a guard
-`A_ratio > eps()` (`src/Residual/residual.jl:559–563`). Because $\mathrm{law}'$
+`A_ratio > eps()` (`src/Residual/residual.jl`). Because $\mathrm{law}'$
 is taken by AD, *any differentiable* law contributes correct geometry
 sensitivities — but a non-smooth law breaks this (see §17.7).
 
-**(5) Harmonic-mean face averaging and tanh-based smoothing elsewhere.** The
+**(4) Harmonic-mean face averaging and tanh-based smoothing elsewhere.** The
 distance-weighted harmonic mean used for face $k_f,\lambda_f,\kappa_f$ (§5.12)
 and the smooth (rather than `min`/`max`) constructions in the gates keep the
 discrete operators differentiable. The few genuinely non-smooth operations that
@@ -16091,10 +15067,9 @@ state rewrite at park events — are localized and are exactly the pitfalls
 catalogued next.
 
 > **Implementation note.** The smoothness-critical kernels are
-> `reaction_rate` (`src/Physics/kinetics.jl`), `Δh` /
-> `sensible_enthalpy` (`src/Materials/components.jl`), the limiter library
+> `reaction_rate` (`src/Physics/kinetics.jl`), the limiter library
 > (`src/Discretization/flux_limiters.jl`), and `_compute_theta_A`
-> (`src/Residual/residual.jl`). Each was written with `tanh`/midpoint/AD
+> (`src/Residual/residual.jl`). Each was written with `tanh`/AD
 > derivatives *in place of* the textbook step/cutoff/finite-difference form so
 > that the chain $\boldsymbol{\theta}\mapsto\mathbf{y}$ is differentiable.
 
@@ -16115,14 +15090,13 @@ not see**: the warm-start state was produced at a *different* $\boldsymbol{\thet
 so $\partial\mathbf{u}_0/\partial\theta_q$ is silently set to zero even though
 the true initial condition (had the perturbed problem been integrated from the
 real start) would depend on $\boldsymbol{\theta}$. Differentiating a
-warm-started solve therefore yields a derivative of the *wrong map*. Open
-question 3 in the solver KB flags this explicitly. **Rule:** do not warm-start
+warm-started solve therefore yields a derivative of the *wrong map*. **Rule:** do not warm-start
 solves that are inside `forward_sensitivity`/`adjoint_sensitivity` or a
 sensitivity sweep; integrate each sample from its true initial condition.
 
 ### 17.7.2 Non-smooth lateral-shrinkage laws
 
-The radial strain rate uses $\mathrm{law}'(\bar\chi)$ via AD (§17.6.4). Identity
+The radial strain rate uses $\mathrm{law}'(\bar\chi)$ via AD (§17.6, item 3). Identity
 (`NoChi`) and the smooth linear laws $1\mp k\bar\chi$ are differentiable, but a
 piecewise or table-defined law with kinks makes $\mathrm{law}'$ discontinuous at
 the breakpoints. A sensitivity evaluated *at* a breakpoint is then ill-defined
@@ -16183,7 +15157,7 @@ in pointwise late-time MLR sensitivities near burnout.
 ## 17.8 Comparison to ThermaKin2Ds, Gpyro, and FDS
 
 Pyrolysis.jl's sensitivity capability is structurally different from its
-condensed-phase peers, which historically expose parameter sensitivity only
+condensed-phase peers, which expose parameter sensitivity only
 *externally* (through driver scripts and finite differences) rather than through
 differentiable internals.
 
@@ -16231,18 +15205,15 @@ global indices, all sharing one immutable-problem / mutable-workspace harness.
 
 ## 17.9 Limitations and open issues
 
-Drawing on the open questions recorded in the solver and kinetics knowledge
-bases:
-
 1. **Adjoint sensitivity across park events (open).** A park is a discrete
    rewrite of the state, so the trajectory is only piecewise smooth across
    events and adjoint sensitivity cannot run through a depleting
    (`handle_depletion=true`) horizon that contains one. Reconciling the event
-   with a differentiable solve path is an open design problem (Solver KB Q2).
+   with a differentiable solve path is an open design problem.
 
 2. **Warm-start in sensitivity loops (open).** Whether — and how — reusing a
    prior solution's final state as a fresh initial condition perturbs sensitivity
-   estimates is unquantified (Solver KB Q3). The current guidance is to avoid
+   estimates is unquantified. The current guidance is to avoid
    warm-starting inside differentiated solves (§17.7.1).
 
 3. **No native forward-sensitivity ODE / adjoint.** The wrapper approach
@@ -16250,7 +15221,7 @@ bases:
    machinery rather than a hand-coded sensitivity/adjoint exploiting the
    structured Jacobian and its $\mathcal{O}(N)$ couplings (§15.9). A native
    adjoint that transposes the structured operators directly would be faster and
-   lower-memory; the API surface notes this as a planned future replacement.
+   lower-memory.
 
 4. **Non-smoothness residue.** A handful of guards (`max`/`clamp`, the
    `A_ratio > eps()` switch, hard temperature/
@@ -16328,8 +15299,8 @@ explicitly.
   an incorrect limiter), not a modeling deficiency. Verification can, in
   principle, be made exact: a correctly implemented conservative scheme conserves
   mass to round-off, a correctly assembled Jacobian matches its AD reference to
-  AD precision, and a GCL-compliant mesh update reproduces the swept volume to
-  $10^{-15}$.
+  AD precision, and cell volumes recomputed from the node positions satisfy the
+  geometric conservation law as an identity.
 
 - **Validation** — *Are we solving the right equations?* This is external. It
   compares the code's predictions against measured cone-calorimeter mass-loss
@@ -16352,8 +15323,9 @@ a given run leans on an approximation.
 
 ### 18.1.2 The verification hierarchy in Pyrolysis.jl
 
-Pyrolysis.jl is built so that the cheaper, more fundamental verification layers
-can run *during every production solve*, not only in a dedicated test suite:
+Pyrolysis.jl layers its verification from cheap, fundamental checks to experimental
+validation; of these, the Jacobian comparison can also be armed during a
+production solve (§18.3.4):
 
 1. **Unit-level analytical checks** (§18.2): isolated kernels — conduction,
    single-reaction kinetics, Beer–Lambert attenuation, the GCL, the P1 sign —
@@ -16361,9 +15333,10 @@ can run *during every production solve*, not only in a dedicated test suite:
 2. **Jacobian verification** (§18.3): the production structured Jacobian compared
    against a whole-residual ForwardDiff reference, either as a one-shot call or
    as an in-solve callback.
-3. **Conservation ledgers** (§18.4): mass, energy (dual ledgers), and
-   per-reaction mass-flow trackers that run as `DiscreteCallback`s and flag any
-   drift beyond a per-quantity tolerance.
+3. **Conservation ledgers** (§18.4): the mass and energy trackers of §16, driven
+   by the tests and by the verification cases that carry their own per-step
+   ledgers; in a production solve `diagnostics = true` logs sensible-energy
+   snapshots (§16.8.3).
 4. **Convergence studies** (§18.5): spatial, temporal, and integrator-tolerance
    refinement, confirming that the discretization error shrinks at the designed
    rate.
@@ -16371,8 +15344,117 @@ can run *during every production solve*, not only in a dedicated test suite:
    fir, pressure-treated wood, moisture transport, against measurements and
    reference-code output.
 
-The first three are automated; the latter two are scripted examples shipped in
-`examples/`.
+The first three run in the test suite (the verification suite of §18.1.3 also
+checks convergence orders), while the convergence studies of §18.5 and the validation cases are scripted
+examples shipped in `examples/`.
+
+### 18.1.3 The verification suite: test mode and report mode
+
+The exact-solution and manufactured-solution cases (catalogued below; the MMS
+driver is described in §18.2) form a
+verification suite that runs in two modes from a single case definition. The
+whole suite has to stay cheap enough for `Pkg.test()`, while publishable
+evidence — fine meshes, resolution ladders, figures — is far too expensive for it
+and needs plotting dependencies the test environment should not carry.
+
+- **Test (assert) mode** runs inside `Pkg.test()`. `test/runtests.jl` picks up the
+  `.jl` files directly under `test/verification/` (non-recursively), and
+  `runcases.jl` among them is the suite's entry point: it runs every case at its CI resolution, asserts each quantity of interest (QoI)
+  against a pinned tolerance, runs a short spatial-convergence check where the
+  case defines one, and asserts the wall time (after a discarded warm-up solve)
+  against five times the case's budget. It plots nothing and writes no files.
+  Setting `PYROLYSIS_VERIFICATION_PRINT_QOIS=1` prints every observed QoI and
+  convergence rate, which is how tolerances are re-pinned.
+- **Report mode** runs in the isolated environment `scripts/verification/` (its
+  own `Project.toml` with CairoMakie, so the test manifest stays free of plotting
+  dependencies; the same pattern as `scripts/profile/` and `test/quality/`):
+
+  ```
+  julia --project=scripts/verification scripts/verification/run_reports.jl [--cases=… --outdir=… --chapters=…]
+  ```
+
+  `run_reports.jl` runs each case over its report resolution ladder with its
+  report solver settings and writes the artifact set under
+  `<outdir>/assets/<case id>/`: overlay figures (solver values as markers over
+  densely sampled exact curves), pointwise-error figures that show *where* the
+  discretization struggles, a log–log convergence figure with the fitted observed
+  order and an expected-order reference slope, and CSVs of every curve, the
+  resolution ladder, the QoIs at the finest rung, the ladder QoI errors, and the
+  solver configuration (`report_harness.jl`, with all plotting in `render.jl`).
+  `chapters.jl` then writes one Markdown chapter per case family — problem
+  statement, figures, error and order tables — plus an index dashboard. Report
+  mode does not assert the QoIs (a failed solve still aborts the run): coarse ladder rungs may exceed the pinned tolerances,
+  and the tables record within-tolerance yes/no instead. The default output
+  directory is the committed `docs/guide/verification/`; the documentation build
+  copies it into the published site, and the manual `verification-report`
+  workflow regenerates it and opens a pull request with the diff.
+
+**The shared case definition.** `test/verification/casedefs.jl` declares the
+types both modes consume and depends on nothing from `Test`, so the report runner
+can include it from its isolated environment. Each file in
+`test/verification/cases/` defines a `VerificationCase` with
+
+- identity and provenance: `id`, `title`, physics `tags`, `references`;
+- `build(n_cells) -> PyrolysisProblem`, optional `solve_kwargs`, a `solve_fn`
+  when the case solves through its own path (the MMS cases use the wrapped-RHS
+  `solve_mms`), and `expected_retcode` (`:Success` by default, `:Terminated`
+  when a callback stopping the solve is the answer);
+- `qois(sol) -> Vector{QoIResult}`: each QoI's value, exact value, error, and
+  tolerance, with a `comment` recording the tolerance provenance (tolerances are
+  pinned at about three times the error observed when pinned);
+- `ci::CIConfig`: the CI resolution, the wall-time budget, and an optional
+  `ConvergenceSpec` (resolutions, error functional, expected and minimum observed
+  order);
+- `report::NamedTuple`: the report-mode keys — the resolution ladder
+  `n_cells_ladder`, `curves(sol) -> Vector{ReportCurve}` (plain data:
+  `CurveSeries` samples, each with an optional `exact` callable on the same
+  abscissa from which the pointwise error is derived), `error_norms`,
+  `expected_order`, report `solve_kwargs`, and optional temporal or parameter
+  sweeps. A case with `report = (;)` is skipped in report mode.
+
+The case file's leading comment banner is the problem statement the report
+chapter prints, so the published chapter cannot drift from what the test runs.
+Reference solutions are computed in the run at high precision (series summed to
+machine tolerance, transcendental roots by bisection), never hard-coded; they
+live in the shared library `test/verification/exact/` (series, roots, the MMS
+driver), which carries its own self-tests.
+
+**Case catalogue.** Each case family has one file in `test/verification/cases/`;
+lettered members such as V-HC-02a–d share the family file and its report chapter.
+Most families compare against an exact or manufactured solution; the burnout
+family and V-CPL-06 check budgets and a pinned reference run instead.
+
+| Family | Cases | Reference solution | What it verifies |
+|---|---|---|---|
+| Heat conduction | V-HC-01 – V-HC-05 | Carslaw–Jaeger erfc and eigenfunction series, resistance network, Kirchhoff transform | the convective-BC surface Newton (V-HC-01; Biot sweep V-HC-02), the constant-flux slab to its back-face plateau (V-HC-03), the harmonic-mean face conductivity at a layer jump (V-HC-04), $k(T)$ (V-HC-05) |
+| Kinetics and surface radiation | V-RX-01 – V-RX-04 | Bateman chain, Khawam–Flanagan isothermal integrals, parallel-reaction splits, implicit radiative-cooling law | multi-step coupling, reaction order and the depletion limiter, two-product yields and heat superposition, `RadiativeBC` through the surface Newton |
+| In-depth radiation | V-RAD-01 | Lautenberger eigenfunction series | Beer–Lambert absorption with conduction and a convective face, including the sub-surface temperature peak |
+| Gas transport | V-GT-01, V-GT-02 | Gaussian plane source; steady compressible Darcy $P^2$ profile | the Fickian operator and mass conservation; the pressure closure, Darcy mobility and outflow BC |
+| Coupled physics | V-CPL-01 – V-CPL-06 | Neumann two-phase Stefan solution, Landau ablation wave, exact shrink/swell endpoints, Frank-Kamenetskii slab, 0D TGA curve, discrete gas-enthalpy ledger | a latent-heat front, ALE surface regression, volume change and the lateral-shrinkage law, the reaction–conduction bifurcation, the BC/volume coupling of kinetics, $S_\mathrm{conv}$ (§18.4.3) |
+| Manufactured solutions | V-MMS-01 – V-MMS-04 | the MMS driver of §18.2 | design order of the coupled Eulerian residual in space and time, free-stream preservation under prescribed motion, ALE order under prescribed and reaction-driven motion |
+| Burnout | V-BO-01 – V-BO-05 | exact exponential thickness (V-BO-04); otherwise mass budgets and a pinned reference run | parked-cell depletion through complete burnout on ALE and fixed meshes (§14.3), the transmitted-flux warning, the interior-void stop (`expected_retcode = :Terminated`, V-BO-05) |
+
+Kernel-level analytic checks are in `test/verification/test_analytical.jl`, which
+`Pkg.test()` runs beside the suite: semi-infinite conduction, the Beer–Lambert
+profile and energy split, isothermal and constant-heating-rate kinetics, and the
+mass and energy ledgers. Two conventions matter when a case transcribes
+literature parameters: $h>0$ is endothermic here, the opposite of ThermaKin,
+Gpyro and FDS; and most exact-kinetics cases disable the depletion limiter
+(`DepletionLimiter(enabled = false)`) and open the temperature gates (§18.2.2),
+while V-RX-02d keeps the limiter on as a guard.
+
+**Cross-code overlays.** Where a case has a published analog in another code,
+that code's numerical output is committed under
+`test/verification/reference/<code>/` with a provenance README (FDS and Gpyro runs
+on the same problems; MaCFP-2 PMMA community submissions, which no case reads) and
+read only inside a case's
+report `curves`. A series marked `crosscode = true` is drawn as a muted context
+layer in a separate `_vs_codes` variant of each affected figure, so the base
+figure keeps the solver's own error on its own scale; for exact-solution cases the
+other codes' *errors* against the same exact solution are compared.
+`reference/timings.csv` feeds a wall-time comparison at every ladder rung, and a
+case's ladder includes a rung matched to the reference run's resolution where
+needed.
 
 ---
 
@@ -16386,13 +15468,14 @@ designed order. The verification suite ships a coupled MMS driver
 (`test/verification/exact/mms.jl`: `MMSFields`, a ForwardDiff exact-source
 generator, manufactured-BC builders, and the wrapped-RHS `solve_mms` path)
 exercised by the V-MMS cases in `test/verification/cases/` — coupled Eulerian
-MMS, ALE free-stream/GCL preservation, and ALE MMS under prescribed mesh
-motion via the `Workspace.w_override` hook. Two constraints of that driver
+MMS, ALE free-stream/GCL preservation, ALE MMS under prescribed mesh motion via
+the `Workspace.w_override` hook, and ALE MMS under reaction-driven motion
+(V-MMS-04, `MMSMotion`). Two constraints of that driver
 follow from the formulation: the structured geometry Jacobian assumes
 reaction-driven motion, so `w_override` runs use finite-difference Jacobians;
 and because the scheme is a **solid-Lagrangian ALE** (mesh velocity ≡ solid
 material velocity; no component carries a discrete advection operator —
-§11.1.2, §11.10 item 7), every manufactured species source on a moving mesh
+§11.1.2, §11.9 item 5), every manufactured species source on a moving mesh
 is assembled in the material-following frame, with the prescribed or the
 reaction-driven mesh velocity as its $w$.
 
@@ -16467,7 +15550,7 @@ harmonic (resistance-in-series) face value reproduces the analytic interface
 temperature.
 
 **Implementation note.** Interior conductive fluxes are assembled by
-`compute_conductive_fluxes!` (`src/Physics/heat_conduction.jl:29`), which zeroes
+`compute_conductive_fluxes!` (`src/Physics/heat_conduction.jl`), which zeroes
 boundary faces (the BC solver overwrites them); the divergence
 $(\nabla\!\cdot\mathbf q)_i=(q_{f_R}-q_{f_L})A/V_i$ is `divergence_1d!`
 (`src/Discretization/finite_volume.jl`). The RHS assembles
@@ -16522,16 +15605,16 @@ Two implementation subtleties must be accounted for when this check is made
 - **Mass-concentration basis.** The rate law is evaluated on mass concentration
   $\xi_j$ (kg m$^{-3}$), not mole fraction or normalized conversion:
   $r_i=A_i\exp(-E_i/R_gT)\prod_j\xi_j^{\,n_{i,j}}\tanh(\xi_j/\xi_{\mathrm{th}})$ (Eq. 1 of §6,
-  `reaction_rate`, `src/Physics/kinetics.jl:75`). For a first-order single
+  `reaction_rate`, `src/Physics/kinetics.jl`). For a first-order single
   reactant this is linear in $\xi_1$ and the analytic solution above holds with
   $\xi_1(0)$ the *initial concentration*.
 - **Smooth gates and the depletion limiter perturb the tails.** The hard
   Heaviside gates $H(T-T_\mathrm{min})H(T_\mathrm{max}-T)$ are replaced by tanh
   ramps $\tfrac12(1+\tanh(T-T_\mathrm{min}))\cdot\tfrac12(1+\tanh(T_\mathrm{max}
-  -T))$ (§6.2, `kinetics.jl:102`), which leak $\sim\!10$ K outside the nominal
+  -T))$ (§6.2, `kinetics.jl`), which leak $\sim\!10$ K outside the nominal
   window; and the depletion limiter multiplies the rate by
   $\tanh(\xi_1/\text{threshold})$ (default threshold $1.0$ kg m$^{-3}$, §6.3,
-  `kinetics.jl:89–95`). To compare against the bare-Arrhenius analytic solution one
+  `kinetics.jl`). To compare against the bare-Arrhenius analytic solution one
   must either set $T_\mathrm{min},T_\mathrm{max}$ far outside the active range
   (so the gates read $\approx 1$) and keep $\xi_1$ well above the limiter
   threshold throughout, or disable the limiter via
@@ -16555,7 +15638,7 @@ $$
 
 assembled by `compute_beer_lambert_source!` in a top-to-bottom sweep
 ($i=n\!:\!-1\!:\!1$) so that absorbed flux upstream correctly attenuates the
-intensity reaching downstream cells (`src/Physics/radiation.jl:75–87`). Two exact
+intensity reaching downstream cells (`src/Physics/radiation.jl`). Two exact
 energy-balance identities verify this kernel:
 
 - **Total absorbed flux.** Summing the volumetric source times cell thickness,
@@ -16572,25 +15655,20 @@ energy-balance identities verify this kernel:
   absorptivity is already folded into the intensity), is a telescoping sum that
   is *exact at the discrete level* — independent of cell count — because each
   cell deposits $I_\mathrm{in}(1-e^{-\tau_i})$ and passes
-  $I_\mathrm{in}e^{-\tau_i}$ to the next. The diagnostic
-  `total_absorbed_radiation(q_rad, mesh)` computes
-  $\sum_i q_\mathrm{rad}[i]\,\mathrm{cell\_size}(mesh,i)$
-  (`src/Physics/radiation.jl:155–161`) and must equal this analytic value.
+  $I_\mathrm{in}e^{-\tau_i}$ to the next. The solution reports it as
+  `extras.volumetric_absorption`, and the sum of the deposited source over the
+  cells must equal this analytic value.
 
 - **Transmitted fraction.** The flux escaping the back face is
-  $\alpha_\mathrm{surf}\,I_\mathrm{surface}\,e^{-\tau_\mathrm{total}}$; the
-  diagnostic `transmitted_radiation(I_surface, mesh, cache)` returns
-  $I_\mathrm{surface}\exp(-\tau_\mathrm{total})$ for the intensity it is given,
-  with $\tau_\mathrm{total}=\sum_i\alpha_i\Delta z_i$
-  (`src/Physics/radiation.jl:171–187`) — the $\alpha_\mathrm{surf}$ bookkeeping
-  belongs to the caller (§8.3.2). Conservation requires
+  $\alpha_\mathrm{surf}\,I_\mathrm{surface}\,e^{-\tau_\mathrm{total}}$, reported as
+  `extras.radiation_transmitted` (§8.3.2). Conservation requires
   $\text{absorbed}+\text{transmitted}=\alpha_\mathrm{surf}\,I_\mathrm{surface}$
   to round-off — the remaining $(1-\alpha_\mathrm{surf})\,I_\mathrm{surface}$ is
   reflected at the surface and never enters the medium — which is the strongest
   single check on the Beer–Lambert path.
 
 The transparent-cell guard ($\alpha>10^{-20}$, else $q'''_i=0$,
-`radiation.jl:79`) is verified by the $\alpha\to0$ limit, where $1-e^{-\tau}\to
+`radiation.jl`) is verified by the $\alpha\to0$ limit, where $1-e^{-\tau}\to
 0$ and all flux is transmitted. The opposite limit $\tau_1\gg1$ in the surface
 cell deposits the entire entering flux
 $\alpha_\mathrm{surf}\,I_\mathrm{surface}$ in the top cell — consistent with
@@ -16604,47 +15682,24 @@ The single most decisive ALE verification is the Geometric Conservation Law
 (GCL, §11.5). A moving-mesh scheme that does not reproduce the swept cell volume
 exactly injects *phantom* mass and energy sources proportional to the volume
 error; over hundreds of stiff steps these can swamp the genuine reaction-driven
-mass loss. The continuous 1D GCL is $dV_i/dt = A\,(w_R-w_L)$, and its discrete
-form is
+mass loss. The continuous 1D GCL is $dV_i/dt = A\,(w_R-w_L)$ (plus the
+area-change term $|z_R-z_L|\,dA/dt$ under a lateral shrinkage law). Pyrolysis.jl
+satisfies it *geometrically*: the node positions are state ($dz_i/dt=w_i$) and
+every residual evaluation recomputes $V_i=A(t)\,|z_R-z_L|$ from them, so the
+volume the scheme uses is always the swept one and no separately evolved volume
+can drift (§11.5.2). With the cumulative mesh velocity this gives
+$dV_i/dt=V_i\theta_i$ identically, and with the dilation correction a uniform
+field with no sources and no fluxes stays uniform.
 
-$$
-V_i^\mathrm{new}-V_i^\mathrm{old}
-  = \Delta t\,(w_R-w_L)\,A
-$$
-
-(`src/Physics/gcl.jl`). Pyrolysis.jl enforces this *geometrically*: rather than
-applying the flux formula, `move_mesh!` advances the nodes by
-$z_i^\mathrm{new}=z_i^\mathrm{old}+\Delta t\,w_i$ and recomputes
-$V_i=A\,|z_R-z_L|$ from geometry (`mesh_motion.jl`). Because geometry, computed
-consistently, *inherently* satisfies the GCL, the residual between the geometric
-volume change and the flux prediction is pure round-off,
-
-$$
-\text{rel\_error}
-  = \max_i
-    \frac{\big|\Delta V_i^\mathrm{actual}-\Delta t\,(w_R-w_L)A\big|}{|V_i|}
-  \approx 10^{-15}.
-$$
-
-The verification functions are `gcl_error` (predictive, before motion),
-`gcl_error_post_motion` (after motion, against a pre-motion volume snapshot), and
-the boolean `check_gcl` (default tolerance $10^{-12}$, `gcl.jl:152`). For a
-time-varying cross-section (WithChi mode, §10) the generalized residual adds the
-area-change term,
-
-$$
-\Delta V_i \approx
-  \Delta t\,(w_R-w_L)\,A_\mathrm{new}
-  + (A_\mathrm{new}-A_\mathrm{old})\,L_\mathrm{old},
-\qquad L_\mathrm{old}=V_\mathrm{old}/A_\mathrm{old},
-$$
-
-checked by `gcl_residual` with explicit `A_old`, `A_new` (`gcl.jl:245`). The
-running `GCLTracker` (default tolerance $10^{-10}$, `gcl.jl:296`) accumulates
-$\int|e(t)|\,dt$ and counts per-step violations, so a systematic geometric bias
-shows up even when individual steps look clean. A GCL error that grows above
-$10^{-10}$ is diagnostic of mesh degeneracy or an ill-conditioned cross-section
-law, not of round-off.
+The verification case V-MMS-02 asserts exactly that: a spatially uniform state
+with no reactions and zero-flux boundaries, on a mesh compressed to 70 % of its
+thickness through the `Workspace.w_override` hook with the uniform-stretch
+velocity $w^*(z,t)=(\dot s/s)\,z$, must stay uniform to machine precision. The
+node trajectories $z_i(t)=z_i(0)\,s(t)$ are known exactly, so the top-cell-center
+position doubles as a check on the prescribed-motion path. V-MMS-03 then measures
+the observed order of a smooth manufactured solution under prescribed smooth
+mesh motion. A drift in V-MMS-02 is a moving-mesh transport defect that the
+smooth-field order study could hide inside its truncation error.
 
 ### 18.2.5 P1 sign test
 
@@ -16755,9 +15810,8 @@ backend (§15.6, §15.10):
   support surfaces as a deviation — a *missing-entry* failure. The verifier
   separately reports `max_abs_dev_in_support` (genuine disagreement on a
   claimed entry) and `max_abs_dev_outside_support` (magnitude of reference
-  entries the support omits). Every backend claiming to be exact —
-  `Structured(DirectSolve())`, `Structured(StructuredSolve())`,
-  `Structured(MatrixFreeSolve())` — must pass this regime.
+  entries the support omits). The exact backend, `Structured(DirectSolve())`,
+  must pass this regime.
 
 - **Masked** (approximate backends, `is_approximate == true`): entries outside
   the active backend's support are zeroed in the difference, so only in-support
@@ -16768,9 +15822,8 @@ backend (§15.6, §15.10):
   structured ALE couplings (the cumulative mesh-velocity prefix sum, the z-row
   prefix blocks, the Beer–Lambert suffix, the $\theta_A$ rank-1 back-reaction,
   the geometry $z$-columns) under the `:ale_reduced` sparsity profile. Its
-  in-support values legitimately deviate by the dropped coupling magnitudes
-  (e.g. the limiter-window slots also carry indirect $w$-coupling
-  contributions in the reference), so masked comparison is a sanity check
+  in-support values legitimately deviate by the dropped coupling magnitudes,
+  so masked comparison is a sanity check
   rather than an exactness gate; the dropped couplings are by design (they
   cost accuracy in the Newton step, not in the converged solution).
 
@@ -16808,18 +15861,20 @@ compared against the dense reference on a reacting state.
 
 ## 18.4 Conservation-based verification
 
-The conservation ledgers of §16 are not merely post-mortem diagnostics: armed via
-`solve(problem; diagnostics=true)` they run as `DiscreteCallback`s and provide
-*continuous* self-verification. They divide cleanly into checks that must close
-by construction (so a failure is a bug) and checks that quantify an approximation
-(so a large value is a regime warning, not a bug).
+The conservation ledgers of §16 serve as verification where the tests and the
+verification cases drive them per step (`record_substep!`, or a case's own
+per-step ledger callback); a production `solve(problem; diagnostics=true)` logs
+only sensible-energy snapshots, with the ledger columns NaN (§16.8.3). The checks
+divide cleanly into those that must close by construction (so a failure is a bug)
+and those that quantify an approximation (so a large value is a regime warning,
+not a bug).
 
 ### 18.4.1 Mass ledger
 
 The per-component mass tracker (`MassConservationTracker`,
 `src/Diagnostics/conservation_checks.jl`) maintains
-$m_j(t)=\sum_{i\in\mathrm{active}}\xi_j^{(i)}V_i$ (AMR-masked: only active cells,
-§16.1) and accumulates boundary efflux
+$m_j(t)=\sum_{i\in\mathrm{active}}\xi_j^{(i)}V_i$ (masked: only active cells,
+§16.3.1) and accumulates boundary efflux
 $\Delta m_{\mathrm{out},j}=-(J_{\mathrm{top},j}+J_{\mathrm{bot},j})\,A\,\Delta t$
 with the convention that positive $J$ is *inflow*, so positive flux *reduces*
 efflux. The balance check is
@@ -16837,8 +15892,8 @@ zero or near-zero mass (e.g. char before any reaction), the check switches from
 relative to *absolute* error to avoid division by a vanishing baseline. For ALE
 runs with a time-varying cross-section the area in the efflux term is the
 trapezoidal substep average $A=\tfrac12(A^\mathrm{pre}+A^\mathrm{post})$, which
-keeps the contribution symmetric and consistent with the GCL volume update. A
-mass-balance failure indicates a flux-assembly or callback bug.
+keeps the contribution symmetric and consistent with the geometric volume update.
+A mass-balance failure indicates a flux-assembly or callback bug.
 
 ### 18.4.2 Energy ledger
 
@@ -16853,59 +15908,32 @@ E(t) = E(0)
       q_\mathrm{cond,boundary}\,A
       + Q_\mathrm{rxn}
       + S_\mathrm{conv}
-      + S_\mathrm{gen}
     \Big]\,d\tau .
 $$
 
 The residual $r=E(t)-E(0)-\sum(\text{sources})$ should close to integrator
 tolerance ($\sim10^{-6}$ relative, `check_energy_conservation` default tol
 $10^{-6}$) because it is built from exactly the terms `compute_rhs!` evaluates. A
-failure here is a bookkeeping bug. The one caveat (§16.8, §18.8) is that this
+failure here is a bookkeeping bug. The one caveat (§16.7, §18.8) is that this
 ledger *cannot* close exactly when composition varies in time, because it omits
 the $\int T\,\partial(\rho c_p)/\partial t\,dV\,dt$ heat-capacity-change term of its
-$\rho c_p\,T$ proxy density (§16.8) and the ALE volume-change term; the residual
+$\rho c_p\,T$ proxy density (§16.7) and the ALE volume-change term; the residual
 then carries a small, composition-rate-dependent offset that is a known
 incompleteness of the *audit*, not of the *solver*.
 
 **The boundary flux.** The ledger uses $q_\mathrm{cond,boundary}$ (the conducted
-flux from the surface Newton solve). Under the supported convention — no surface
-transpiration term — it equals the applied boundary flux $q_\mathrm{BC,applied}$
-(the externally driven flux, which may include radiation/convection); the two differ only when a BC sets
-a total flux constraint rather than a temperature. Crucially, the discrete ledger
+flux from the surface Newton solve). The surface balance has no gas-enthalpy
+term, so it equals the applied boundary flux $q_\mathrm{BC,applied}$
+(the externally driven flux, which may include radiation/convection; §16.6).
+Crucially, the discrete ledger
 *audits bookkeeping, not double-counting*: if the RHS itself double-counts a
 mechanism, the discrete ledger will still close, because it is built from the same
-(buggy) terms. Detecting a double-count requires the *independent* physical
-ledger or a dedicated guard — which is exactly what protects the transpiration
-case (§18.4.4).
+(buggy) terms. Detecting a double-count requires an *independent* check — an
+exact solution or a ledger built from outside the RHS (§18.4.3).
 
-### 18.4.3 Per-reaction mass-flow ledger
+### 18.4.3 Independent closure of the gas-enthalpy coupling
 
-`ReactionMassFlowTracker` accumulates, per reaction, the consumed reactant mass
-and generated product mass with $m_\mathrm{flow}=r_i\,V_\mathrm{total}\,\Delta t$,
-and checks
-
-$$
-\text{error}_i =
-  \frac{\big|\sum_j\text{product\_generated}_{j,i}
-             -\sum_j\text{reactant\_consumed}_{j,i}\big|}
-       {\sum_j\text{reactant\_consumed}_{j,i}}
-  < 10^{-10}
-$$
-
-(default tol $10^{-10}$, §16.6). This is a build-time-invariant check at runtime:
-because the stoichiometry validation already enforces $\sum_\mathrm{products}
-\nu_{p,j}=1.0$ at material construction (§6.5, `verify_stoichiometry`,
-`check_material_mass_balance`), the per-reaction error closing to $10^{-10}$
-confirms the species-source assembly applied that stoichiometry correctly. The
-matching build-time check
-$\sum_j S_j=0$ (`validate_species_source_conservation`, rtol $10^{-12}$,
-`src/Physics/kinetics.jl`) verifies the same invariant at the kernel level.
-
-### 18.4.4 Conservation as a guard: the transpiration double-count
-
-The cleanest illustration of conservation-as-verification is the surface
-transpiration guard. The default `:standard` energy form carries gas sensible
-enthalpy entirely through the always-on volumetric advection source
+The gas enthalpy is carried entirely by the always-on volumetric advection source
 
 $$
 S_{\mathrm{conv},i}
@@ -16913,30 +15941,36 @@ S_{\mathrm{conv},i}
       \Big(\frac{\partial T}{\partial z}\Big)_i
 $$
 
-(§7.4, `compute_gas_convective_source!`). The surface transpiration BC
-$\sum_g\dot m_g\,\Delta h_g(T_s,T_\infty)$ applies the *full* surface enthalpy
-outflow at the boundary. Because the algebraic identity (for constant $c_p$)
+(§7.4, `compute_gas_convective_source!`), and the surface balance carries no
+gas-enthalpy term (§7.4.3). A surface term $\sum_g\dot m_g\,\Delta h_g(T_s,T_\infty)$
+added on top of $S_\mathrm{conv}$ would count the advected enthalpy twice, yet
+the energy ledger of §18.4.2, built from the same RHS terms, would record both
+and still close. The coupling is therefore pinned by a ledger built independently
+of the RHS: the verification case V-CPL-06 (a char-layer column whose gas forms in
+a cool band and vents through a hot layer, $h=0$ so only the sensible ledger acts)
+checks
 
-$$
-\int_V (S_\mathrm{conv}+S_\mathrm{gen})\,dV
-  = -\sum_g \dot m_{g,\mathrm{surface}}\,\Delta h_g(T_s,T_\infty)
-$$
+- **V-CPL-06a (Eulerian):** the discrete summation-by-parts identity
+  $\int S_\mathrm{conv}\,dV\,dt = -c_g\big(\int J_\mathrm{top}T_{f,\mathrm{top}}A\,dt
+  - \int\sum_i(\mathrm{gen}_i-\dot\xi_{g,i})\,T_i V_i\,dt\big)$ — the energy
+  $S_\mathrm{conv}$ removes from the field equals the energy the species ledger
+  says the gas picks up between formation and exit — and the physical reheat
+  reference $-c_g\sum\mathrm{gen}\,(T_\mathrm{exit}-T_\mathrm{form})\,V$ to
+  quasi-steady accuracy;
+- **V-CPL-06b (ALE):** the same column with the fuel band collapsing; the ALE
+  energy budget closes with $E=\sum\rho c_p T V$ over every component, and the
+  mesh-relative $T$-advection accumulator is exactly zero (§11.2.2).
 
-shows that $S_\mathrm{conv}$ already accounts for the bulk of that outflow,
-enabling the transpiration BC *on top of* $S_\mathrm{conv}$ double-counts the gas
-enthalpy by exactly $\int S_\mathrm{conv}$. The code refuses the combination at
-construction: `to_problem_def(...; use_transpiration_bc=true)` and
-`solve(...; use_transpiration_bc=true)` both raise an `ArgumentError`
-(verified in `test/discretization/test_transpiration_energy_balance.jl`). The
-test additionally measures the double-count magnitude through an *independent*
-ledger — precisely because the energy ledger, built from the same RHS,
-would *not* catch it. The optional `:with_generation_sink` form adds
-$S_{\mathrm{gen},i}=-\sum_g\Delta h_g(T_i,T_\mathrm{ref})(\nabla\!\cdot\mathbf
-J_g)_i$ using the same midpoint-rule enthalpy quadrature as the transpiration BC,
-so that $S_\mathrm{conv}+S_\mathrm{gen}$ telescopes *exactly* with the surface
-outflow — but that closed-ledger mode is only consistent with transpiration when
-$S_\mathrm{conv}$ is the sole bulk carrier, which is why the production default
-keeps transpiration off and uses $S_\mathrm{conv}$ alone.
+Its ledger runs in a per-accepted-step callback around the pure `residual!` with
+trapezoidal time quadrature (a rectangle rule leaves an $O(\Delta t\,\dot X)$
+residual that is pure quadrature). V-CPL-06a shows that $S_\mathrm{conv}$ alone
+removes the whole gas reheat, so a surface gas-enthalpy term would remove it a
+second time; a mesh-velocity $T$-advection term would appear in V-CPL-06b as a
+sink of about 66 kJ per kg of volatiles. The absence of the surface term is
+asserted directly by `test/boundary_conditions/test_boundary_temperature.jl`
+(testset "Outward gas flux enters only through blowing"): under a prescribed-flux
+BC, the solved surface temperature and conducted flux are identical with and
+without a gas flux across the face.
 
 ---
 
@@ -17035,9 +16069,9 @@ mass-loss rate (MLR), surface temperature, and oxygen-consumption heat-release
 rate (HRR) are recorded. Pyrolysis.jl, being a condensed-phase solver, predicts
 MLR and $T_s$ directly and an HRR *proxy* via the effective heat of combustion
 times the gas-generation rate; the gas-phase flame is not modeled. The shipped
-`examples/06_cone_calorimeter.jl` (PMMA, 50 kW m$^{-2}$, top convection +
-re-radiation, adiabatic impermeable back face, single-step Arrhenius,
-temperature-dependent properties) is the reference workflow; its surface-
+`examples/06_cone_calorimeter.jl` (PMMA, 25 kW m$^{-2}$, top convection +
+re-radiation, back-face re-radiation and convection with an impermeable back,
+single-step Arrhenius, temperature-dependent properties) is the reference workflow; its surface-
 absorption variant `06_cone_calorimeter_surface_absorption.jl` exercises the
 opaque-material radiation path.
 
@@ -17065,7 +16099,8 @@ materially affect quantitative agreement and are themselves verified:
 
 `examples/07_douglas_fir_cone.jl` is the most fully-featured validation case:
 multi-step wood decomposition kinetics, surface-absorption radiation (wood is
-opaque), Darcy–Fick gas transport with species-specific diffusion scaling, ALE
+opaque), Darcy–Fick gas transport (species molar masses enter the pressure
+closure; all gases share one diffusive transfer coefficient, §5.11), ALE
 tracking of the shrinking sample, and the `ApproxSolve` reduced Jacobian for a
 $\sim$8× speedup over the full structured Jacobian. The companion
 `convergence_douglas_fir.jl` (§18.5.1) establishes the mesh resolution at which
@@ -17183,7 +16218,7 @@ one-temperature assumption holds when the gas equilibrates with the pore walls
 within a cell, which is the case for pore-scale heat-transfer lengths far below
 the cell size — every validated regime here (1 atm, pore sizes well below the
 mesh spacing, gas residence times of milliseconds). A run with coarse open pores
-or very fast, hot throughput, where the gas no longer equilibrates with the
+or very fast, hot throughput, where the gas does not equilibrate with the
 walls, is outside the model: there is no two-temperature gas option (§3.9), and
 the prediction should be treated with caution.
 
@@ -17208,13 +16243,14 @@ be insensitive to both within their physically-negligible range. The *depletion
 limiter* threshold (default $1.0$ kg m$^{-3}$, min $0.01$, §6.3) sets where the
 tanh rate-suppression begins; the *surface-depletion* threshold (default 5% of
 each cell's own initial thickness, `depletion_threshold=0.05`, §14.3,
-`src/Solver/solve.jl`) sets when a thinned cell is merged in ALE mode. A sensitivity check varies
+`src/Solver/solve.jl`) sets when a thinned (ALE) or emptied (fixed mesh) cell is
+parked. A sensitivity check varies
 each threshold by an order of magnitude and confirms the QoIs (peak MLR, char
 yield) move by less than the tolerance; a strong dependence means the threshold is
 acting in a physically-active region rather than only suppressing
 numerical stiffness near true depletion, and the value should be lowered. These
 are AD-relevant: the limiter is tanh-smooth (so sensitivities are well-defined,
-§17.6), but the surface-depletion merge is a discrete event (a state-vector resize)
+§17.6), but a park is a discrete rewrite of the state (whose size stays fixed)
 and is *not* differentiable — a caveat for sensitivity studies (§17.7, §18.8.3).
 
 ---
@@ -17224,28 +16260,26 @@ and is *not* differentiable — a caveat for sensitivity studies (§17.7, §18.8
 Honest V&V records the open items. The following are documented incompletenesses
 that affect, or require re-checking of, validated results.
 
-### 18.8.1 Surface-transpiration convention and calibrated examples
+### 18.8.1 Surface gas-enthalpy convention and calibrated examples
 
 The energy balance follows the $S_\mathrm{conv}$-only convention (ThermaKin
-Eq. 17 / FDS): $S_\mathrm{conv}$ carries the escaping-gas enthalpy, the
-surface-transpiration enthalpy term is *off by default*, and `solve` guards
-against combining the two (§18.4.4), which would double-count the sink. A
-double-counting balance (the surface term active alongside $S_\mathrm{conv}$)
-artificially depresses the surface temperature, so parameter sets calibrated
-under it read a *higher* $T_s$ and mass-loss rate when run under the
-$S_\mathrm{conv}$-only balance. The bundled calibrated examples — the
-inverse-analysis cases and the cone runs — carry fitted kinetic and property
-parameters in exactly that state and *need re-validation*: their parameters
-must be re-fit to data under the $S_\mathrm{conv}$-only energy balance. This
-is a validation-state issue, not a verification failure — the guarded balance
-is the physically-consistent one.
+Eq. 17 / FDS): $S_\mathrm{conv}$ carries the escaping-gas enthalpy and the
+surface balance has no gas-enthalpy term (§7.4.3), since a surface term would
+count that enthalpy a second time. A balance that adds a surface term alongside
+$S_\mathrm{conv}$ artificially depresses the surface temperature, so parameter
+sets calibrated in a solver that does so read a *higher* $T_s$ and mass-loss rate
+here (§1.8, item 7). The fitted kinetic and property parameters of the bundled
+calibrated examples — the inverse-analysis cases and the cone runs — *need
+re-validation* against data, together with the flame heat-flux feedback and blowing that a
+recalibration should include (§1.8.1). This is a validation-state issue, not a
+verification failure.
 
 ### 18.8.2 Composition-varying discrete energy residual does not close exactly
 
 The energy ledger (§18.4.2) is missing the
 $\int T\,\partial(\rho c_p)/\partial t\,dV\,dt$ heat-capacity-change term of its
 $\rho c_p\,T$ proxy density (heat capacity changing at constant temperature as
-composition reacts — §16.8) and an ALE volume-change term. As a result it cannot close to integrator tolerance when
+composition reacts — §16.7) and an ALE volume-change term. As a result it cannot close to integrator tolerance when
 composition varies in time; the residual carries a small composition-rate-
 dependent offset. A ledger that closes exactly would require per-substep
 accumulation of $\rho c_p(t_i)\,\Delta T_i\,V(t_i)$ per cell, which is not
@@ -17269,11 +16303,10 @@ the Lennard-Jones parameter estimates for Chapman–Enskog diffusivity
 ($\sigma\approx3.5+0.5\log_{10}(M/0.016)$,
 $\varepsilon/k\approx150+100(M/0.044)$, §5.10) are explicitly flagged unvalidated;
 the lateral-shrinkage laws (§10.5) are empirical rather than first-principles; and
-the single global radiation model and single $T_\mathrm{ref}$ datum (§7.5,
-asymmetric-ambient caveat) are simplifications. Validation cases that depend
+the single global radiation model is a simplification. Validation cases that depend
 sensitively on these closures should report that dependence.
 
-### 18.8.6 Stale-flux and Marshak-coefficient regressions
+### 18.8.5 Stale-flux and Marshak-coefficient regressions
 
 Two silent-failure modes carry standing regression guards. The incident
 radiation flux is re-sampled at *every* RHS evaluation with no constancy
@@ -17306,7 +16339,7 @@ package's own Manifest is not pinned to their dependencies):
 - **JET.jl** — static type-stability and dispatch analysis. Because the hot paths
   rely on `@generated` unrolling over heterogeneous component tuples and on
   end-to-end `Tu`-typed (Float64 or `ForwardDiff.Dual`) caches for AD-cleanliness
-  (§4.8, §7.9), a JET regression that introduces a type instability or a dynamic
+  (§4.6.5, §7.7), a JET regression that introduces a type instability or a dynamic
   dispatch would both slow the solve and threaten the AD/sensitivity paths.
 
 These run via dedicated project environments (`--project=scripts`,
@@ -17324,9 +16357,12 @@ machinery of this chapter has direct test coverage:
   `verify_jacobian_at` over the canonical-configuration × backend matrix;
   per-operator tests (`test/jacobian/test_operator_*.jl`) check each operator's
   Jacobian row against AD.
-- Conservation: `test/discretization/test_transpiration_energy_balance.jl`
-  guards the double-count; the tracker tests exercise the mass/energy/reaction
-  ledgers.
+- Conservation: the tracker tests exercise the mass and energy ledgers, and the
+  verification case V-CPL-06 pins the gas-enthalpy coupling, and
+  `test/boundary_conditions/test_boundary_temperature.jl` asserts that the surface
+  balance carries no gas-enthalpy term (§18.4.3).
+- The verification suite: `test/verification/runcases.jl` runs every case of
+  `test/verification/cases/` in assert mode (§18.1.3).
 - Radiation: `test/radiation/test_p1_sign.jl` (sign), `test_p1_validation.jl`
   (analytic limits), `test/jacobian/test_operator_radiation.jl` (Beer–Lambert
   upper-triangular structure).
@@ -17342,10 +16378,11 @@ choice of integrator, tolerances, Jacobian backend, and linear solver. The
 defaults — `KenCarp4` with `AutoFiniteDiff`, the pattern-chosen factorization
 (`KLUFactorization` or `UMFPACKFactorization`), `abstol=1e-8`/`reltol=1e-6`,
 `Structured(DirectSolve())` (`ApproxSolve` under ALE) — are the reference
-configuration; deviations (e.g. `ApproxSolve` for speed, ILU-GMRES for large ALE)
+configuration; deviations (e.g. `ApproxSolve` on a fixed mesh, `ILUGMRESFactorization`
+for large ALE runs)
 trade a controlled amount of accuracy for performance and should be re-checked
-against the reference configuration with `verify_jacobian` armed and the
-diagnostics ledgers enabled when first adopted on a new problem.
+against the reference configuration with `verify_jacobian` armed when first
+adopted on a new problem.
 
 ---
 
@@ -17359,7 +16396,7 @@ The V&V coverage above has gaps that a user should weigh:
    motion in the MMS cases is either reaction-driven or prescribed via the
    verification-only `w_override` hook; under prescribed (non-material)
    motion the species sources are assembled in the material-following frame
-   and the Jacobian falls back to finite differences (§11.10 item 7). General
+   and the Jacobian falls back to finite differences (§11.9 item 5). General
    ALE (a species advection operator for mesh motion decoupled from the
    solid) remains out of scope.
 
@@ -17375,10 +16412,10 @@ The V&V coverage above has gaps that a user should weigh:
    reaction; the missing heat-capacity-change and volume-change terms must be
    accounted for when interpreting it.
 
-4. **Depletion is outside the audited path** (§18.8.3): it disables the
-   structured Jacobian verification and is non-differentiable, so the most
-   strongly-shrinking cases (deep char, ablation) are the least
-   machinery-verified.
+4. **Depletion is non-differentiable** (§18.8.3): the structured Jacobian and its
+   verifier run through park events (§18.3.5), but sensitivities are valid only
+   between them, so the most strongly-shrinking cases (deep char, ablation) have
+   the narrowest sensitivity horizons.
 
 5. **P1 radiation is Experimental and separately verified** (§18.2.5, §8.12): it
    has its own residual outside the production `solve` path, so its V&V does not
@@ -17386,15 +16423,14 @@ The V&V coverage above has gaps that a user should weigh:
    tests.
 
 6. **Validation is parameter-entangled.** Several cone/inverse cases were
-   calibrated against the data they are compared to, and the transpiration fix
-   (§18.8.1) has invalidated those calibrations. Re-fitting against held-out data
+   calibrated against the data they are compared to, and those calibrations need
+   re-fitting (§18.8.1). Re-fitting against held-out data
    — keeping calibration and validation data disjoint — is the outstanding
    validation task, and is the discipline §18.1.1 requires for a comparison to
    count as validation rather than calibration.
 
 7. **Heuristic closures carry validation debt** (§18.8.4): the LJ diffusivity
-   estimates, the empirical shrinkage laws, and the single-datum $T_\mathrm{ref}$
-   are unvalidated or simplified, and cases that lean on them inherit that
+   estimates and the empirical shrinkage laws are unvalidated or simplified, and cases that lean on them inherit that
    uncertainty.
 
 

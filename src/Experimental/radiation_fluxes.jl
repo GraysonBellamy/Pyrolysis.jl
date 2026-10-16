@@ -1,16 +1,9 @@
 """
-Radiation flux divergence computation for P1 radiation transport.
+The quasi-steady P1 solve for the incident radiation G and the net volumetric
+source it puts into the energy equation.
 
-This module provides the discretization of radiation flux divergence
-for integration with the energy equation, and the quasi-steady solver
-for the G field.
-
-The P1 energy equation coupling:
-	ρcₚ ∂T/∂t = ∇·(k∇T) + ∇·(D_rad∇G) + Q_rxn + ...
-						  ^^^^^^^^^^^^^^
-						  This module computes this term
-
-Reference: P1_Volumetric_Reradiation_Implementation.md Section 3.4
+The quasi-steady G satisfies `∇·(D_rad∇G) = αG − 4σαT⁴`; the energy equation
+gains `S_rad = α(G − 4σT⁴)` (`compute_radiation_flux_divergence!`).
 """
 
 # RadiationBCSet / get_radiation_bc are defined locally in Experimental

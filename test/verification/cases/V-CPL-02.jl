@@ -253,10 +253,7 @@ function _verification_case_vcpl02()
         id = "V-CPL-02",
         title = "Landau ablation: steady surface regression under ALE",
         tags = [:ale, :moving_boundary, :kinetics, :surface_regression, :coupled],
-        references = [
-            "H.G. Landau, Q. Appl. Math. 8:81 (1950)",
-            "Verification Suite Plan 2026-07-06, V-CPL-02",
-        ],
+        references = ["H.G. Landau, Q. Appl. Math. 8:81 (1950)"],
         build = C.build,
         solve_kwargs = (
             use_ale = true,

@@ -70,8 +70,8 @@ end
         mat = _visc_material()
         @test mat.gas_viscosity isa SutherlandProperty
         for T in (300.0, 650.0, 1100.0)
-            # The default path must be bit-for-bit identical to the pre-field
-            # behaviour, or every calibrated case silently moves.
+            # The default path is bit-for-bit the air Sutherland curve, which
+            # every calibrated case relies on.
             @test effective_gas_viscosity(T, mat) == SutherlandProperty()(T)
             @test mixture_gas_viscosity((500.0, 1.0), T, mat) == SutherlandProperty()(T)
         end

@@ -22,9 +22,9 @@ Coordinate Convention:
 - Mesh follows the shrinking material (ALE formulation)
 
 ALE Mesh Motion:
-- Surface regression rate computed from mass flux: dz/dt = -mass_flux / ρ_surface
-- Interior mesh velocities computed using Laplacian smoothing
-- GCL (Geometric Conservation Law) compliant volume updates
+- Node velocities are the cumulative volumetric strain rate from the pinned bottom
+  node upward; the mesh moves with the solid
+- Cell volumes are recomputed from the node positions at every evaluation
 - Simulation terminates when thickness falls below minimum threshold
 
 PMMA Properties (from literature):
@@ -254,9 +254,9 @@ println("This may take a few minutes...\n")
 # Solve using implicit solver with ALE enabled
 # - use_ale=true: enables integrated ALE mesh motion (node positions in state vector)
 # - min_thickness: stops simulation when material becomes too thin
-# - handle_depletion: enables surface cell merging when surface cell becomes too thin
-# - depletion_threshold: cell thickness fraction (0.05 = merge when cell is 5% of initial thickness)
-#   IMPORTANT: This controls WHEN cells are merged. If too low, cells become extremely thin
+# - handle_depletion: parks the surface cell (merging it into its neighbour) when it becomes too thin
+# - depletion_threshold: cell thickness fraction (0.05 = park when cell is 5% of initial thickness)
+#   IMPORTANT: This controls WHEN cells are parked. If too low, cells become extremely thin
 #   and the diffusion timestep (dt ∝ Δx²) becomes very small, causing slow simulation.
 # - dtmin: allows very small timesteps during rapid reaction fronts
 solution = solve(
@@ -268,7 +268,7 @@ solution = solve(
     use_ale = true,                        # Enable ALE mesh motion
     min_thickness = 0.01e-3,               # Stop when thickness < 0.01 mm
     handle_depletion = true,               # Enable surface cell depletion handling
-    depletion_threshold = 0.05,            # Merge cells when thickness < 5% of initial
+    depletion_threshold = 0.05,            # Park cells when thickness < 5% of initial
     min_cells = 1,                         # Keep at least 1 cell
 )
 
@@ -382,60 +382,72 @@ end
 
 println("\nGenerating plots...")
 
-# Load ThermaKin reference data from thermakin_output folder
+# ThermaKin reference outputs for this case (`docs/thermakin_output/`, from a
+# ThermaKin run of `docs/PMMA_cone.cmp` + `docs/PMMA_cone.cnd`). The overlay is
+# skipped when they are absent.
 thermakin_output_dir = joinpath(@__DIR__, "..", "docs", "thermakin_output")
+has_thermakin = isdir(thermakin_output_dir)
+if has_thermakin
 
-# MLR data: time_s, total_mass_loss_rate_kg_s
-thermakin_mlr_data =
-    readdlm(joinpath(thermakin_output_dir, "pmma_cone_mlr.csv"), ',', skipstart = 1)
-thermakin_time = thermakin_mlr_data[:, 1]
-thermakin_mlr = thermakin_mlr_data[:, 2] .* 1000  # Convert kg/(m²·s) to g/(m²·s)
+    # MLR data: time_s, total_mass_loss_rate_kg_s
+    thermakin_mlr_data =
+        readdlm(joinpath(thermakin_output_dir, "pmma_cone_mlr.csv"), ',', skipstart = 1)
+    thermakin_time = thermakin_mlr_data[:, 1]
+    thermakin_mlr = thermakin_mlr_data[:, 2] .* 1000  # Convert kg/(m²·s) to g/(m²·s)
 
-# Front temperature data: time_s, from_back_m, front_temperature_K
-thermakin_temp_data =
-    readdlm(joinpath(thermakin_output_dir, "pmma_cone_front_temp.csv"), ',', skipstart = 1)
-thermakin_tc2 = thermakin_temp_data[:, 3]  # Front (surface) temperature
+    # Front temperature data: time_s, from_back_m, front_temperature_K
+    thermakin_temp_data = readdlm(
+        joinpath(thermakin_output_dir, "pmma_cone_front_temp.csv"),
+        ',',
+        skipstart = 1,
+    )
+    thermakin_tc2 = thermakin_temp_data[:, 3]  # Front (surface) temperature
 
-# Summary data: time_s, mass_kg_m2, thickness_m
-thermakin_summary_data =
-    readdlm(joinpath(thermakin_output_dir, "pmma_cone_summary.csv"), ',', skipstart = 1)
-thermakin_thickness = thermakin_summary_data[:, 3] .* 1000  # Convert m to mm
+    # Summary data: time_s, mass_kg_m2, thickness_m
+    thermakin_summary_data =
+        readdlm(joinpath(thermakin_output_dir, "pmma_cone_summary.csv"), ',', skipstart = 1)
+    thermakin_thickness = thermakin_summary_data[:, 3] .* 1000  # Convert m to mm
 
-# Back temperature - extract from spatial data
-# The parser converts all coordinates to from_back convention:
-#   - from_back = 0 is the back (substrate)
-#   - from_back = thickness is the front (heated surface)
-# Spatial data columns: conc_PMMA_glass_kg_m3, time_s, from_back_m, temperature_K, ...
-# Use efficient single-pass algorithm to find minimum position (back) for each time
-thermakin_spatial_path = joinpath(thermakin_output_dir, "pmma_cone_spatial.csv")
-println("  Loading spatial data (this may take a moment for large files)...")
-thermakin_spatial_data = readdlm(thermakin_spatial_path, ',', skipstart = 1)
-spatial_times = thermakin_spatial_data[:, 2]
-spatial_positions = thermakin_spatial_data[:, 3]  # from_back_m (always from_back convention)
-spatial_temps = thermakin_spatial_data[:, 4]
-println("  Processing $(length(spatial_times)) spatial data points...")
+    # Back temperature - extract from spatial data
+    # The parser converts all coordinates to from_back convention:
+    #   - from_back = 0 is the back (substrate)
+    #   - from_back = thickness is the front (heated surface)
+    # Spatial data columns: conc_PMMA_glass_kg_m3, time_s, from_back_m, temperature_K, ...
+    # Use efficient single-pass algorithm to find minimum position (back) for each time
+    thermakin_spatial_path = joinpath(thermakin_output_dir, "pmma_cone_spatial.csv")
+    println("  Loading spatial data (this may take a moment for large files)...")
+    thermakin_spatial_data = readdlm(thermakin_spatial_path, ',', skipstart = 1)
+    spatial_times = thermakin_spatial_data[:, 2]
+    spatial_positions = thermakin_spatial_data[:, 3]  # from_back_m (always from_back convention)
+    spatial_temps = thermakin_spatial_data[:, 4]
+    println("  Processing $(length(spatial_times)) spatial data points...")
 
-# Build dictionary: time -> (min_from_back, temp_at_min) for back temperature
-back_temp_by_time = Dict{Float64,Tuple{Float64,Float64}}()
-for i in eachindex(spatial_times)
-    t = spatial_times[i]
-    pos = spatial_positions[i]
-    temp = spatial_temps[i]
-    if !haskey(back_temp_by_time, t) || pos < back_temp_by_time[t][1]
-        back_temp_by_time[t] = (pos, temp)
+    # Build dictionary: time -> (min_from_back, temp_at_min) for back temperature
+    back_temp_by_time = Dict{Float64,Tuple{Float64,Float64}}()
+    for i in eachindex(spatial_times)
+        t = spatial_times[i]
+        pos = spatial_positions[i]
+        temp = spatial_temps[i]
+        if !haskey(back_temp_by_time, t) || pos < back_temp_by_time[t][1]
+            back_temp_by_time[t] = (pos, temp)
+        end
     end
-end
 
-# Extract back temperatures for each MLR timestep - O(n)
-thermakin_tc1 = zeros(length(thermakin_time))
-for (i, t) in enumerate(thermakin_time)
-    if haskey(back_temp_by_time, t)
-        thermakin_tc1[i] = back_temp_by_time[t][2]
-    else
-        thermakin_tc1[i] = 300.0
+    # Extract back temperatures for each MLR timestep - O(n)
+    thermakin_tc1 = zeros(length(thermakin_time))
+    for (i, t) in enumerate(thermakin_time)
+        if haskey(back_temp_by_time, t)
+            thermakin_tc1[i] = back_temp_by_time[t][2]
+        else
+            thermakin_tc1[i] = 300.0
+        end
     end
+    println("  Done loading ThermaKin data.")
+else
+    println(
+        "  No ThermaKin reference outputs in $(thermakin_output_dir); plotting Pyrolysis.jl only.",
+    )
 end
-println("  Done loading ThermaKin data.")
 
 # Create figure with 4 subplots
 p1 = plot(
@@ -449,7 +461,7 @@ p1 = plot(
     color = :red,
     label = "Pyrolysis.jl",
 )
-plot!(
+has_thermakin && plot!(
     thermakin_time,
     thermakin_mlr,
     linewidth = 2,
@@ -475,7 +487,7 @@ p2 = plot(
     color = :orange,
     label = "Surface (Pyrolysis.jl)",
 )
-plot!(
+has_thermakin && plot!(
     thermakin_time,
     thermakin_tc2,
     linewidth = 2,
@@ -484,7 +496,7 @@ plot!(
     label = "Surface (ThermaKin)",
 )
 plot!(times, T_back, linewidth = 2, color = :blue, label = "Back (Pyrolysis.jl)")
-plot!(
+has_thermakin && plot!(
     thermakin_time,
     thermakin_tc1,
     linewidth = 2,
@@ -517,7 +529,7 @@ p4 = plot(
     color = :purple,
     label = "Pyrolysis.jl",
 )
-plot!(
+has_thermakin && plot!(
     thermakin_time,
     thermakin_thickness,
     linewidth = 2,
@@ -734,7 +746,9 @@ if idx_600 <= length(times)
     println(
         "  ThermaKin shows HIGHER surface T (+$(round(T_surf_TK - T_surf_PJ, digits=0)) K)",
     )
-    println("  ThermaKin shows LOWER MLR (-$(round(mlr_PJ - mlr_TK, digits=2)) g/(m²·s))")
+    println(
+        "  ThermaKin shows LOWER MLR (-$(round(gen_rate_PJ - mlr_TK, digits=2)) g/(m²·s))",
+    )
     println()
     println("  This is physically consistent:")
     println("  - Higher T → more re-radiation loss → less heat for pyrolysis")
@@ -757,7 +771,7 @@ if idx_600 <= length(times)
 
     # Reaction zone width (if uniform): δ = MLR / r
     δ_TK = mlr_TK/1000 / r_TK * 1000  # mm
-    δ_PJ = mlr_PJ/1000 / r_PJ * 1000  # mm
+    δ_PJ = gen_rate_PJ/1000 / r_PJ * 1000  # mm
 
     println("  Estimated reaction zone width:")
     println("    Pyrolysis.jl: $(round(δ_PJ, digits=2)) mm")

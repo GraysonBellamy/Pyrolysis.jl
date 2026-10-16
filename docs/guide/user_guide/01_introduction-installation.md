@@ -45,11 +45,11 @@ Pyrolysis.jl is intended for the same class of problems as **ThermaKin2Ds**,
 **Gpyro**, and the **FDS** solid-phase pyrolysis model: cone-calorimeter
 simulations, TGA/DSC/MCC idealizations, charring and non-charring solids,
 intumescent coatings, pressure-treated wood, and moisture transport. The energy
-equation uses **Formulation A** (the non-conservative temperature equation of a
-one-temperature porous medium: every component, pore gas included, stores
-sensible heat, and the enthalpy carried by the gas flux relative to the skeleton
-enters through the advection source `S_conv`), which is the ThermaKin convention
-(see Technical Reference §3 and §7).
+equation is the non-conservative temperature equation of a one-temperature porous
+medium: every component, pore gas included, stores sensible heat, and the
+enthalpy carried by the gas flux relative to the skeleton enters through the
+advection source `S_conv`. This is the ThermaKin convention (see Technical
+Reference §3 and §7).
 
 ### What is not modeled
 
@@ -81,9 +81,9 @@ To set expectations up front, the current model does **not** support:
 | Volume change, swelling, intumescence | `swelling_factor` (γ) on components | TR §10 |
 | Lateral shrinkage / variable cross-section | `lateral_shrinkage_law` on the `Material` | TR §10 |
 | Moving mesh (surface recession) | `solve(...; use_ale = true)` | TR §11 |
-| Surface-cell depletion / merging | `solve(...; use_ale = true, handle_depletion = true)` | TR §14 |
-| Adaptive mesh refinement (r-refinement, indicators) | `Pyrolysis.Internal` / submodule access | TR §14 |
-| Conservation diagnostics | `solve(...; diagnostics = true)` | TR §16 |
+| Surface-cell depletion (cell parking) | `solve(...; handle_depletion = true)` | TR §14 |
+| Error indicators, r-refinement, mesh-quality metrics (standalone; not used by `solve`) | `Pyrolysis.Internal` / submodule access | TR §14 |
+| Sensible-energy diagnostics log | `solve(...; diagnostics = true)` | TR §16 |
 | Sensitivity analysis (forward / adjoint) | `forward_sensitivity`, `adjoint_sensitivity` (extension) | TR §17 |
 | Parameter sweeps (parallel) | `parameter_sweep` | UG §12 |
 
@@ -94,18 +94,14 @@ them plainly wherever they appear:
   solve path. The exported radiation models you can pass to `solve` are
   `NO_RADIATION`, `SURFACE_ABSORPTION`, and `BEER_LAMBERT`; requesting
   `P1_QUASI_STEADY` is rejected by `solve` (see Technical Reference §8).
-- The **surface transpiration boundary condition** is incompatible with the
-  default `S_conv` energy convention. The volumetric advection source already
-  carries the gas enthalpy, so enabling transpiration would double-count it.
-  `use_transpiration_bc = true` is rejected at construction; leave it at its
-  default `false` (see Technical Reference §7 and §12).
 - **Depletion handling** (`handle_depletion = true`) parks depleted cells
   without changing the state size, so it works with every Jacobian backend;
   it is a sequence of discrete state rewrites, so parameter sensitivities are
   valid only between park events (Chapter 10, Technical Reference §14, §17).
-- **h-AMR** (cell splitting / coarsening) is quarantined in
-  `Pyrolysis.Experimental`; the supported adaptivity in the core package is
-  r-refinement (node relocation) and depleted-cell parking.
+- **h-refinement / h-coarsening** (cell splitting / coarsening) lives in
+  `Pyrolysis.Experimental`, and its meshes cannot be passed to `solve`. The only
+  mesh adaptation `solve` performs is depleted-cell parking; error indicators,
+  r-refinement, and mesh-quality metrics are standalone building blocks.
 
 ---
 
@@ -302,61 +298,59 @@ Commit both files to version control for any study you want to be reproducible.
 
 ## 1.6 Optional extensions (load-on-demand)
 
-Pyrolysis.jl keeps its core lightweight by declaring several heavy or
-vendor-specific capabilities as **package extensions**. Each extension is wired to
-a *weak dependency* and activates automatically the moment you `using` the
-corresponding package alongside `Pyrolysis` — you never call the extension
-explicitly, you just load its trigger package. The relevant entries from the
-package's `Project.toml` are:
+Pyrolysis.jl keeps its core lightweight by declaring two optional capabilities —
+plotting recipes and SciML sensitivity analysis — as **package extensions**. Each
+extension is wired to *weak dependencies* and activates automatically the moment
+you `using` the corresponding packages alongside `Pyrolysis` — you never call the
+extension explicitly, you just load its trigger packages. The relevant entries
+from the package's `Project.toml` are:
 
 ```toml
+[weakdeps]
+RecipesBase = "3cdcf5f2-1ef4-517c-9805-6587b60abb01"
+SciMLSensitivity = "1ed8b502-d754-442c-8d5d-10ac956f44a1"
+Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
+
 [extensions]
-PyrolysisAMGExt = "AlgebraicMultigrid"
-PyrolysisKLUExt = "KLU"
-PyrolysisPardisoExt = "Pardiso"
 PyrolysisPlotsExt = "RecipesBase"
 PyrolysisSciMLSensitivityExt = ["SciMLSensitivity", "Zygote"]
-PyrolysisSymbolicsExt = "Symbolics"
 ```
 
 The table below summarizes each extension, the package(s) that trigger it, and
-what it adds. None of these is required for a basic solve.
+what it adds. Neither is required for a basic solve.
 
 | Extension | Trigger package(s) | What it provides |
 |---|---|---|
-| `PyrolysisKLUExt` | `KLU` | `Pyrolysis.klu_factorization()` — KLU sparse linear solver |
-| `PyrolysisPardisoExt` | `Pardiso` | `Pyrolysis.pardiso_factorization()` — Intel MKL Pardiso solver |
-| `PyrolysisAMGExt` | `AlgebraicMultigrid` | `Pyrolysis.amg_preconditioner(A)` — AMG preconditioner for Krylov solvers |
 | `PyrolysisPlotsExt` | `Plots` (or `RecipesBase`) | Plot recipes for `PyrolysisSolution` (`plot(sol; kind = …)`) |
 | `PyrolysisSciMLSensitivityExt` | `SciMLSensitivity`, `Zygote` | `forward_sensitivity`, `adjoint_sensitivity` |
-| `PyrolysisSymbolicsExt` | `Symbolics` | `verify_mixing_derivatives` (test/verification only) |
 
 Install the trigger packages you need into the same environment, then load them:
 
 ```julia
 using Pkg
-Pkg.add(["Plots", "KLU", "SciMLSensitivity", "Zygote"])
+Pkg.add(["Plots", "SciMLSensitivity", "Zygote"])
 
 using Pyrolysis
-using Plots           # activates PyrolysisPlotsExt → plot(sol; kind = …)
-using KLU             # activates PyrolysisKLUExt   → klu_factorization()
+using Plots                      # activates PyrolysisPlotsExt → plot(sol; kind = …)
 using SciMLSensitivity, Zygote   # activates PyrolysisSciMLSensitivityExt
 ```
 
+Alternative sparse linear solvers need no extension: any LinearSolve factorization
+(for example `KLUFactorization()`, or `MKLPardisoFactorize()` with Pardiso/MKL
+installed) is passed directly as `linear_solver` after `using LinearSolve` (UG §11.4).
+
 ### Stub behavior when an extension is not loaded
 
-The functions `klu_factorization`, `pardiso_factorization`, `amg_preconditioner`,
-`forward_sensitivity`, `adjoint_sensitivity`, and `verify_mixing_derivatives` are
-exported by `Pyrolysis` as *stubs* with no methods. Calling one before its
-extension is loaded raises a `MethodError` — that is the signal that you need to
-`using` the corresponding trigger package. For example, calling
-`forward_sensitivity(...)` without `SciMLSensitivity` and `Zygote` loaded will
-error; add them and the concrete method appears.
+The functions `forward_sensitivity` and `adjoint_sensitivity` are exported by
+`Pyrolysis` as *stubs* with no methods. Calling one before
+`using SciMLSensitivity, Zygote` raises a `MethodError` — that is the signal that
+you need to load the trigger packages; add them and the concrete methods appear.
+The plotting recipes have no stub: without `Plots` loaded there is no `plot`
+function to call.
 
-The extensions are independent peers — no extension depends on another — so you
-load only the ones a given study requires. Plotting recipes, sensitivity, and
-alternate linear solvers are each covered in detail in their own chapters
-(UG §9, UG §11, UG §13).
+The two extensions are independent — neither depends on the other — so you load
+only the ones a given study requires. Plotting recipes and sensitivity analysis
+are covered in detail in UG §9 and UG §13.
 
 ---
 
@@ -393,9 +387,8 @@ transport, the boundary solve, and the integrator are all working together.
 The script below is a complete, runnable simulation: a 1 cm slab of PMMA-like
 material, modeled as one solid that decomposes into one gas, heated from the top
 by a constant 50 kW/m² flux, insulated at the bottom, integrated for 60 seconds.
-Every function, type, and keyword used here is part of the public API and runs
-against the real package (this exact pattern was verified end-to-end while writing
-this chapter; it returns `retcode = :Success`).
+Every function, type, and keyword used here is part of the public API, and the
+script runs as written, returning `retcode = :Success`.
 
 ```julia
 using Pyrolysis
@@ -404,7 +397,7 @@ using Pyrolysis
 pmma = Material(
     name = :PMMA,
     components = (
-        SolidComponent(:virgin, ρ = 1190, c = 1420, k = 0.21, ε = 0.86),
+        SolidComponent(:virgin, ρ = 1190, c = 1420, k = 0.21, ε = 0.86, λ = 1e-6),
         GaseousComponent(:MMA,  M = 0.100, c = 1500, k = 0.02, λ = 1e-5),
     ),
     reactions = (
@@ -481,9 +474,8 @@ A few notes on what each step does and what is defaulted:
 - **`solve(problem; …)`** returns a `PyrolysisSolution`. Key defaults are
   `integrator = nothing` (→ `KenCarp4`, a stiff SDIRK method),
   `abstol = 1e-8`, `reltol = 1e-6`, `use_ale = false` (fixed Eulerian mesh),
-  `radiation_model = NO_RADIATION`, `energy_form = :standard`,
-  `diagnostics = false`, `validate = true`, `progress = true`,
-  `handle_depletion = false`, and `use_transpiration_bc = false`. Setting
+  `radiation_model = NO_RADIATION`, `diagnostics = false`, `validate = true`,
+  `progress = true`, and `handle_depletion = false`. Setting
   `progress = false` (as above) suppresses the progress bar, which is convenient in
   scripts and tests. The full option set is documented in UG §8.
 
@@ -526,7 +518,6 @@ using Plots
 plot(solution)                       # default: surface temperature trace
 plot(solution; kind = :mlr)          # mass-loss rate vs time
 plot(solution; kind = :heatmap)      # T(z, t) heatmap
-plot(solution; kind = :residual)     # energy-conservation residual
 ```
 
 ---
@@ -537,7 +528,7 @@ plot(solution; kind = :residual)     # energy-conservation residual
 stable, user-facing API. Broadly, the top-level exports cover:
 
 - **Materials:** `Material`, `SolidComponent`, `GaseousComponent`,
-  `LiquidComponent`, `Reaction`, `ReactionSet`, the mixing rules
+  `LiquidComponent`, `Reaction`, `DepletionLimiter`, the mixing rules
   (`PARALLEL`, `SERIES`, `WEIGHTED`, `BRUGGEMAN`, `CARMAN_KOZENY`), `MixingSpec`,
   `MaterialMixing`, and the phase predicates (`is_solid`, `is_gas`, `is_liquid`,
   `phase`, `molar_mass`).
@@ -552,16 +543,14 @@ stable, user-facing API. Broadly, the top-level exports cover:
 - **Radiation models:** `RadiationModel`, `NO_RADIATION`, `SURFACE_ABSORPTION`,
   `BEER_LAMBERT` (the `P1_QUASI_STEADY` value is exported from
   `Pyrolysis.Experimental`).
-- **Geometry:** `create_uniform_mesh`, `create_stretched_mesh`.
+- **Geometry:** `create_uniform_mesh`, `create_stretched_mesh`,
+  `create_mesh_from_nodes`.
 - **Problem and solve:** `PyrolysisProblem`, `PyrolysisSolution`, `solve`,
   `parameter_sweep`.
-- **Jacobian configuration:** `JacobianSpec`, `Structured`, the linear-solve
-  strategies (`DirectSolve`, `StructuredSolve`, `ApproxSolve`, `MatrixFreeSolve`),
-  `DenseAD_ForwardDiff` (a verification reference), `verify_jacobian_at`, and more
-  (UG §11).
-- **Extension stubs:** `klu_factorization`, `pardiso_factorization`,
-  `amg_preconditioner`, `forward_sensitivity`, `adjoint_sensitivity`,
-  `verify_mixing_derivatives`.
+- **Jacobian configuration:** `Structured` and its two linear-solve strategies
+  (`DirectSolve`, `ApproxSolve`), `JacobianSpec`, `DenseAD_ForwardDiff` (a
+  verification reference), `verify_jacobian_at`, and more (UG §11).
+- **Extension stubs:** `forward_sensitivity`, `adjoint_sensitivity`.
 
 Anything not exported at the top level remains reachable in one of two ways:
 
@@ -576,8 +565,9 @@ Pyrolysis.Properties.effective_conductivity
 
 The submodules are: `Materials`, `BoundaryConditions`, `Geometry`, `Properties`,
 `Physics`, `Adaptivity`, `Discretization`, `Problem`, `Residual`, `Jacobian`,
-`Diagnostics`, and `Solver`. The `Experimental` namespace (P1 radiation, h-AMR) is
-*not* part of `Internal` and is accessed only as `Pyrolysis.Experimental.X`.
+`Diagnostics`, and `Solver`. The `Experimental` namespace (P1 radiation,
+h-refinement/coarsening) is *not* part of `Internal` and is accessed only as
+`Pyrolysis.Experimental.X`.
 
 A couple of practical notes you will encounter later in the guide:
 
@@ -593,8 +583,7 @@ A couple of practical notes you will encounter later in the guide:
 
 > **Caveat — API stability.** Top-level `using Pyrolysis` exports are stable.
 > Submodule / `Internal` symbols can move between minor releases. Everything in
-> `Pyrolysis.Experimental` is explicitly unstable and will be restructured or
-> migrated to dedicated extensions in later phases.
+> `Pyrolysis.Experimental` is explicitly unstable.
 
 ---
 
@@ -626,6 +615,7 @@ Pkg.instantiate()            # first time only: resolve the example dependencies
 include("examples/06_cone_calorimeter.jl")
 ```
 
-The `examples/README.md` is the authoritative catalogue of what each script
-covers. With the install verified and the minimal example running, you are ready
-for UG §2, which builds a full cone-calorimeter simulation step by step.
+The **Examples** page of the documentation site (source `docs/src/examples.md`)
+is the authoritative catalogue of what each script covers. With the install
+verified and the minimal example running, you are ready for UG §2, which builds a
+full cone-calorimeter simulation step by step.

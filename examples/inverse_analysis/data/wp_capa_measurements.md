@@ -104,8 +104,8 @@ observed; an exponential-saturation form was tested and degenerated to the
 linear limit.
 
 ### Fixed dilatometry component densities
-The inverse-analysis component densities now come directly from dilatometry,
-using the scaled density column as fixed model input:
+The inverse-analysis component densities come from dilatometry (the scaled
+density column below); `wp_properties.jl` holds the values the model uses:
 
 | component | T_peak (°C) | Y_peak | ρ_raw exp (kg/m³) | ρ_scaled (kg/m³) |
 |---|---:|---:|---:|---:|
@@ -116,9 +116,7 @@ using the scaled density column as fixed model input:
 | int4 | 476 | 0.16 | 142 | 90 |
 | char | 812 | 0.15 | 146 | 95 |
 
-The previous q-based intermediate-density curve was removed from the executable
-path; density sensitivity now means rerunning with an intentionally edited
-component table, not sweeping `q` or `rho_char`.
+Density sensitivity means rerunning with an edited component table.
 
 ### Pre-test sample geometry
 A_0 = 3.795 × 10⁻³ m² (overall mean), or per-flux from the table above.
@@ -138,8 +136,6 @@ A_0 = 3.795 × 10⁻³ m² (overall mean), or per-flux from the table above.
 
 ## 9. Cross-references
 
-- Calibration code: [`examples/inverse_analysis/wp_properties.jl`](../examples/inverse_analysis/wp_properties.jl)
-- Forward driver: [`examples/inverse_analysis/wp_forward.jl`](../examples/inverse_analysis/wp_forward.jl)
-- Validation driver: [`examples/inverse_analysis/validate_thickness.jl`](../examples/inverse_analysis/validate_thickness.jl)
-- Geometry plan: [`docs/variable_cross_section_plan.md`](variable_cross_section_plan.md)
-- Phased rollout: [`docs/variable_cross_section_implementation_phases.md`](variable_cross_section_implementation_phases.md)
+- Calibration code: [`examples/inverse_analysis/wp_properties.jl`](../wp_properties.jl)
+- Forward driver: [`examples/inverse_analysis/wp_forward.jl`](../wp_forward.jl)
+- Validation driver: [`examples/inverse_analysis/validate_thickness.jl`](../validate_thickness.jl)

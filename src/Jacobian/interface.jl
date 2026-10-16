@@ -28,7 +28,7 @@ requires an optional dep.
 
 Abstract supertype of every Jacobian-assembly strategy. The production
 subtype is `Structured{S<:LinearSolveStrategy}`; `DenseAD_ForwardDiff`
-is preserved as the verifier reference path.
+is the verifier reference path.
 
 Concrete subtypes should be lightweight bitstypes whenever possible — heavy
 state belongs in the cache field of [`JacobianSpec`](@ref), not on the tag.
@@ -76,8 +76,10 @@ is_approximate(::JacobianBackend) = false
 """
 	JacobianSpec{B<:JacobianBackend, S, C}
 
-The single user-facing handle for Jacobian configuration. Carried as a
-keyword argument to `solve(...)`.
+A backend bundled with the sparsity patterns and caches it assembles into,
+built for one `(ProblemDef, Workspace)` pair. `solve` builds its own from its
+`jacobian` backend; build one directly for [`compute_jacobian!`](@ref) or
+[`verify_jacobian_at`](@ref).
 
 # Type parameters
 - `B`: backend tag (concrete subtype of [`JacobianBackend`](@ref))

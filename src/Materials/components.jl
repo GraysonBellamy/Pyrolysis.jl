@@ -503,8 +503,8 @@ Create a liquid component with simplified interface.
 The default γ = 0 makes a liquid **volumeless** under the universal swelling
 semantics: it contributes no strain to θ, no volume to the bulk density, and
 no weight in conductivity/emissivity mixing — ThermaKin's `L SWELLING: 0`
-behavior for moisture bound in cell walls (this makes the historical
-pseudo-density hack ρ ≈ 1e6 redundant, though harmless). Set γ = 1 for a
+behavior for moisture bound in cell walls (no pseudo-density such as
+ρ ≈ 1e6 is needed). Set γ = 1 for a
 liquid that physically occupies bulk volume (e.g. a melt layer).
 
 # Note on gas_transfer_coeff (λ)
@@ -565,8 +565,7 @@ component, given the user-supplied kwargs. Rules:
 2. If `ρ_intrinsic` is given → wrap via `to_property`.
 3. If `φ` is given → require `raw_ρ::Real` (porosity-from-bulk only well-defined
    for constant bulk density) and return `ConstantProperty(ρ / (1 − φ))`.
-4. Else → fall back to the bulk density itself (no porosity, the historical
-   default that keeps every existing example unchanged).
+4. Else → fall back to the bulk density itself (no pore volume).
 """
 @inline function _resolve_intrinsic_density(
     bulk_ρ::AbstractPropertyFunction,

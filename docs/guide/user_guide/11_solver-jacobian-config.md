@@ -2,35 +2,35 @@
 
 This chapter is the reference for tuning *how* Pyrolysis.jl solves a problem,
 as opposed to *what* problem it solves (Chapters 3–7) or *how to read the
-result* (Chapter 9). It covers choosing a Jacobian backend and linear-solve
-strategy by problem size and simulation mode, configuring the integrator's
-linear solver (sparse-direct or ILU-preconditioned Krylov), loading the optional
-vendor and sensitivity extensions, debugging Jacobian correctness with
-`verify_jacobian_at`, and dropping down to the pure-residual layer
-(`ProblemDef` / `Workspace` / `residual!`) when you need to build a custom
-solver loop. The mathematics behind the structured Jacobian and the implicit-RK
-`W` matrix is derived in Technical Reference §15; this chapter is about the
-knobs.
+result* (Chapter 9). It covers choosing the structured Jacobian's linear-solve
+strategy by simulation mode, configuring the integrator's linear solver
+(sparse-direct or ILU-preconditioned Krylov, including any LinearSolve
+factorization passed directly), loading the sensitivity extension, debugging
+Jacobian correctness with `verify_jacobian_at`, and dropping down to the
+pure-residual layer (`ProblemDef` / `Workspace` / `residual!`) when you need to
+build a custom solver loop. The mathematics behind the structured Jacobian and
+the implicit-RK `W` matrix is derived in Technical Reference §15; this chapter is
+about the knobs.
 
 Two distinct linear systems appear in a stiff implicit solve, and Pyrolysis.jl
 lets you configure each one separately. Keeping them straight is the key to this
 chapter:
 
-1. **The Jacobian backend** (`jacobian = ...` keyword) decides *how the matrix*
-   `J = ∂(du/dt)/∂u` *is assembled* — by structured operator assembly (the
-   default: `solve` auto-builds `Structured(strategy = DirectSolve())` on a
-   fixed mesh and `Structured(strategy = ApproxSolve())` under ALE when
-   `jacobian = nothing`),
-   or by dense automatic differentiation (verification only).
+1. **The Jacobian strategy** (`jacobian = ...` keyword) decides *how the matrix*
+   `J = ∂(du/dt)/∂u` *is assembled*. `solve` always assembles it by structured
+   operator assembly; with `jacobian = nothing` it uses
+   `Structured(strategy = DirectSolve())` on a fixed mesh and
+   `Structured(strategy = ApproxSolve())` under ALE. A dense
+   automatic-differentiation backend exists only as a verification reference.
 2. **The integrator's linear solver** (`linear_solver = ...` keyword) decides
    *how the implicit-stage system* `W x = b`, with `W = I/(γ_RK Δt) − J`, *is
    solved* once `J` exists — by sparse-direct factorization (KLU, UMFPACK,
-   Sparspak, Pardiso) or by a preconditioned Krylov iteration (ILU-GMRES, ILU-BiCGSTAB).
+   Sparspak, or any other LinearSolve factorization such as MKL Pardiso) or by a
+   preconditioned Krylov iteration (ILU-GMRES, ILU-BiCGSTAB).
 
-You can mix and match: a pluggable structured Jacobian with a sparse-direct
-linear solver, an integrator-built finite-difference Jacobian with KLU, and so
-on. The defaults (auto-built structured Jacobian; KLU or UMFPACK chosen from its pattern) work well for
-the typical 1D cone-calorimeter problem and you can ignore this chapter until a
+You can pair either strategy with any of these linear solvers. The defaults
+(structured Jacobian; KLU or UMFPACK chosen from its pattern) work well for the
+typical 1D cone-calorimeter problem and you can ignore this chapter until a
 solve is too slow or you need sensitivities.
 
 ---
@@ -46,33 +46,33 @@ following happens (see `src/Solver/solve.jl`):
   of Arrhenius pyrolysis. `solve` always supplies the Jacobian, so the
   `AutoFiniteDiff()` setting never builds `J`; it only affects methods that also
   differentiate the residual in time (the Rosenbrock `∂f/∂t`).
-- The Jacobian defaults to the **structured analytical backend**: with
+- The Jacobian is the **structured analytical backend**: with
   `jacobian = nothing` (the default), `solve` constructs
   `Structured(strategy = DirectSolve())` internally on a fixed mesh and
-  `Structured(strategy = ApproxSolve())` under ALE (§10.8, §11.3.3), and hands
-  the integrator a sparse Jacobian plus its sparsity prototype.
+  `Structured(strategy = ApproxSolve())` under ALE (§10.8, §11.3.2), builds its
+  spec for the run's own mesh copy and mode, and hands the integrator a sparse
+  Jacobian plus its sparsity prototype.
 - The linear solver follows the Jacobian's sparsity pattern:
   `UMFPACKFactorization()` for the ALE geometry block that `DirectSolve`
   materializes under ALE, `KLUFactorization()` for every other sparse
-  Jacobian (§11.4.1).
+  Jacobian (§11.4.1). An explicit `linear_solver` always wins.
 
-In short: by default, **Layer 1 is the structured analytical Jacobian**
-(`Structured(strategy = DirectSolve())`, built for you) and **Layer 2 is
-KLU or UMFPACK**, chosen from that Jacobian's pattern. The `jacobian` keyword is for *overriding* the strategy
-(`ApproxSolve`, `StructuredSolve`, `MatrixFreeSolve`) or supplying a custom
-spec — not for switching the structured machinery on.
+In short: **Layer 1 is the structured analytical Jacobian**, built for you, and
+by default **Layer 2 is KLU or UMFPACK**, chosen from that Jacobian's pattern.
+The `jacobian` keyword only overrides the strategy; the structured machinery is
+always on.
 
 ```julia
 using Pyrolysis
 
-# The default solve: auto-built structured Jacobian + KLU/UMFPACK linear solve.
+# The default solve: structured Jacobian + KLU/UMFPACK linear solve.
 sol = solve(problem)
 ```
 
 > Defaults at a glance: `integrator = nothing` → `KenCarp4`,
 > `linear_solver = nothing` → `KLUFactorization()` (`UMFPACKFactorization()`
 > for the exact ALE Jacobian),
-> `jacobian = nothing` → auto-built `Structured(strategy = DirectSolve())`
+> `jacobian = nothing` → `Structured(strategy = DirectSolve())`
 > (`ApproxSolve` under ALE),
 > `abstol = 1e-8`, `reltol = 1e-6`.
 
@@ -80,123 +80,96 @@ sol = solve(problem)
 
 ## 11.2 Choosing a Jacobian backend
 
-A **Jacobian backend** is supplied as a `JacobianSpec` to the `jacobian`
-keyword of `solve`. Construct it from a backend tag plus your problem:
+A **Jacobian backend** is passed bare to the `jacobian` keyword of `solve`;
+`solve` builds the `JacobianSpec` for its own mesh copy, mode and options:
 
 ```julia
-spec = JacobianSpec(Structured(strategy = DirectSolve()), problem)
-sol  = solve(problem; jacobian = spec)
+sol = solve(problem; jacobian = Structured(strategy = DirectSolve()))
 ```
 
-There are two production-relevant backend tags, both exported at top level:
+There are two backend tags, both exported at top level:
 
 | Backend tag | Purpose | Use in production? |
 |---|---|---|
-| `Structured(strategy = ...)` | Operator-based structured assembly (fast, exact or approximate per strategy) | Yes |
+| `Structured(strategy = ...)` | Operator-based structured assembly (fast, exact or approximate per strategy) | Yes — the only backend `solve` accepts |
 | `DenseAD_ForwardDiff()` | Whole-residual ForwardDiff; dense Jacobian | No — verification reference only |
 
 `Structured` is parameterized by a **linear-solve strategy** (§11.3) that
-determines how the assembled structured Jacobian is inverted. The default,
-selected when you pass `jacobian = nothing`, is `Structured(strategy =
-DirectSolve())`.
+determines which couplings the assembled Jacobian keeps. The default, selected
+when you pass `jacobian = nothing`, is `Structured(strategy = DirectSolve())` on
+a fixed mesh and `Structured(strategy = ApproxSolve())` under ALE.
 
 `DenseAD_ForwardDiff()` runs ForwardDiff over the entire residual vector and
 returns a dense matrix. It is correct by construction but slow; its only role is
 as the reference against which the structured backend is verified (see §11.7).
-Do not use it for production solves.
+The `jacobian` keyword accepts only a `Structured` backend (or `nothing`):
+passing `DenseAD_ForwardDiff()` or a prebuilt `JacobianSpec` raises a
+`TypeError`.
 
 ### 11.2.1 The `JacobianSpec` constructor
 
-`JacobianSpec` has two forms (`src/Jacobian/interface.jl`):
+A `JacobianSpec` holds a backend together with the sparsity patterns and caches
+it assembles into; its fields are `backend`, `sparsity_phys`, `sparsity_geom`
+(the z columns: the ALE geometry block under `DirectSolve`, only the node-row
+diagonal under `ApproxSolve`, an empty sparse matrix on a fixed mesh, and
+`nothing` only for `DenseAD_ForwardDiff`) and `cache`. It is built from an already-built `(ProblemDef, Workspace)` pair
+(`src/Jacobian/interface.jl`):
 
 ```julia
-# From a PyrolysisProblem (the common form). Pass use_ale = true for ALE.
-JacobianSpec(backend, problem; use_ale = false, radiation_model = nothing,
-             radiation_intensity = 0.0, energy_form = :standard,
-             use_transpiration_bc = false, min_thickness = 1e-6)
-
-# From an already-built (ProblemDef, Workspace) pair (low-level form).
 JacobianSpec(backend, def, ws)
 ```
 
-Important: a `JacobianSpec` builds its sparsity pattern and AD workspaces once,
-at construction time, and it bakes in the simulation mode. **If your solve uses
-ALE, you must tell the spec by passing `use_ale = true`** — otherwise the
-sparsity pattern omits the geometry (z-column) block and the Jacobian will be
-wrong:
-
-```julia
-# WRONG for an ALE solve — the spec is built for the Eulerian mode.
-spec = JacobianSpec(Structured(strategy = ApproxSolve()), problem)
-solve(problem; jacobian = spec, use_ale = true)   # mode mismatch
-
-# RIGHT — the spec's mode matches the solve.
-spec = JacobianSpec(Structured(strategy = ApproxSolve()), problem; use_ale = true)
-solve(problem; jacobian = spec, use_ale = true)
-```
-
-If a problem also uses radiation, pass the matching `radiation_model` (e.g.
-`radiation_model = BEER_LAMBERT`) so the spec includes the Beer–Lambert
-non-local sparsity. Similarly, pass `energy_form = :with_generation_sink` if you
-solve with that energy form. For most users the simplest correct approach is to
-let `solve` build the spec for you — see §11.2.3.
+`solve` calls this for you. You need it yourself only when you drive
+`compute_jacobian!` or `verify_jacobian_at` outside `solve` (§11.7, §11.8). The
+spec builds its sparsity pattern and AD workspaces once, at construction time,
+so **do not** construct it inside a hot loop.
 
 ### 11.2.2 Building the spec for the right mode
 
-A `JacobianSpec` is built for one state layout. `JacobianSpec(backend,
-problem)` defaults to the Eulerian layout with no radiation; an ALE solve or a
-Beer–Lambert solve needs the same `use_ale` / `radiation_model` keywords the
-solve uses, and `solve` refuses a spec whose state length disagrees with the
-problem's:
+A `JacobianSpec` bakes in the simulation mode of its `def`: the ALE geometry
+(z-column) block, the Beer–Lambert non-local sparsity and the χ block are present
+only when the mode has them. Build the `(def, ws)` pair with
+`initialize_state`, passing the same mode keywords the solve would use:
 
 ```julia
-spec = JacobianSpec(Structured(strategy = ApproxSolve()), problem;
-                    use_ale = true, radiation_model = BEER_LAMBERT)
-solve(problem; use_ale = true, radiation_model = BEER_LAMBERT, jacobian = spec)
-```
-
-The simpler form is to pass the bare backend and let `solve` build the spec
-for its own mode:
-
-```julia
-solve(problem; use_ale = true, jacobian = Structured(strategy = ApproxSolve()))
+def, ws, u0 = initialize_state(problem; use_ale = true,
+                               radiation_model = BEER_LAMBERT)
+spec = JacobianSpec(Structured(strategy = ApproxSolve()), def, ws)
 ```
 
 ### 11.2.3 Letting `solve` pick the backend
 
-For routine work, the cleanest pattern is to pass `jacobian = nothing` (the
-default) and let `solve` construct the default structured Jacobian for you, *or* to
-opt into a non-default backend explicitly only when you need it. The auto-default when
-`jacobian` is left at its default is `Structured(strategy = DirectSolve())` on a
-fixed mesh and `Structured(strategy = ApproxSolve())` under ALE, constructed
-internally with the correct mode flags — you do not have to thread
-`use_ale` / `radiation_model` through `JacobianSpec` yourself. Supply your own
-spec only when you want another strategy (`DirectSolve` under ALE,
-`StructuredSolve`, `MatrixFreeSolve`) or a custom reference for verification.
+For routine work, leave `jacobian = nothing` (the default) and let `solve`
+construct the default structured Jacobian, or pass a bare
+`Structured(strategy = ...)` only when you want the other strategy — usually
+`DirectSolve` under ALE, to check a configuration against the exact Jacobian:
+
+```julia
+solve(problem; use_ale = true, jacobian = Structured(strategy = DirectSolve()))
+```
+
+Either way the spec is constructed internally with the correct mode flags, so
+you never thread `use_ale` / `radiation_model` through a spec yourself.
 
 ---
 
 ## 11.3 Linear-solve strategies for the structured Jacobian
 
 The `strategy` argument to `Structured(...)` is a `LinearSolveStrategy`. It
-governs how the structured Jacobian — a sparse local block `A` plus a list of
-fast-apply non-local couplings (prefix-sum, suffix-sum, rank-1) — is inverted
-inside the Newton step. All four strategies are top-level exports.
+governs which part of the structured Jacobian — a sparse local block `A` plus a
+list of non-local couplings (prefix-sum, suffix-sum, rank-1) — reaches the
+linear solver inside the Newton step. Both strategies are top-level exports.
 
 | Strategy | What it does | Exact? | Best for |
 |---|---|---|---|
 | `DirectSolve()` | Densify the structured couplings into `A`, factor the full sparse matrix (KLU/UMFPACK) | Exact | Fixed-mesh default; the verification anchor |
-| `StructuredSolve()` | Sparse-LU on `A` + preconditioned Richardson over the couplings (2–5 iters) | Exact | Large problems where dense assembly is costly but exactness is required |
 | `ApproxSolve()` | Drop the structured couplings; solve `A⁻¹ b` only (Schur-style approximation) | Approximate | ALE default |
-| `MatrixFreeSolve()` | GMRES over the operator action without densifying | Exact (iterative) | Research / very large `N`; benchmark before relying on it |
 
-Construct any of these as a parameterless instance:
+Construct either as a parameterless instance:
 
 ```julia
-JacobianSpec(Structured(strategy = DirectSolve()),     problem)               # fixed-mesh default
-JacobianSpec(Structured(strategy = StructuredSolve()), problem; use_ale = true)
-JacobianSpec(Structured(strategy = ApproxSolve()),     problem; use_ale = true) # ALE default
-JacobianSpec(Structured(strategy = MatrixFreeSolve()), problem; use_ale = true)
+solve(problem; jacobian = Structured(strategy = DirectSolve()))                  # fixed-mesh default
+solve(problem; use_ale = true, jacobian = Structured(strategy = ApproxSolve()))  # ALE default
 ```
 
 ### 11.3.1 `DirectSolve` — the fixed-mesh default and the anchor
@@ -208,70 +181,42 @@ block is factored by UMFPACK (§11.4.1). It is also the backend you should
 verify against first when proving a configuration is correct.
 
 ```julia
-spec = JacobianSpec(Structured(strategy = DirectSolve()), problem)
-sol  = solve(problem; jacobian = spec)
+sol = solve(problem; use_ale = true, jacobian = Structured(strategy = DirectSolve()))
 ```
 
-### 11.3.2 `StructuredSolve` — exact, cheaper assembly at scale
-
-`StructuredSolve` keeps the solve exact but avoids densifying the non-local
-ALE/radiation couplings. It factors only the sparse local block `A`, then runs a
-preconditioned Richardson iteration that applies each coupling through its O(N)
-`apply!` method:
-
-```
-F = lu(A); y = F \ b
-repeat:  r = b − A·y − Σⱼ Cⱼ·y;  Δy = F \ r;  y ← y + Δy   (2–5 iterations)
-```
-
-Convergence is fast (2–5 iterations to machine precision) when the coupling
-magnitudes are small relative to `A`'s diagonal — which is the usual ALE regime.
-Choose `StructuredSolve` when an ALE mesh is large enough that the dense
-assembly of `DirectSolve` dominates, but you still need an exact Newton step.
-
-### 11.3.3 `ApproxSolve` — the ALE default
+### 11.3.2 `ApproxSolve` — the ALE default
 
 `ApproxSolve` drops the structured couplings entirely and solves `A⁻¹ b`. The
 Newton step is then a Schur-style approximation: it omits the dense ALE
 mesh-velocity coupling block, but each linear solve and the assembly itself are
-far cheaper (the assembly profile drops to `:ale_reduced`, skipping the
-cumulative ALE widening, the geometry AD pass, the Beer–Lambert suffix, and the
-χ-column rank-1 term). The modified Newton iteration it drives still contracts
-strongly, so ALE solves take the same steps as with the exact Jacobian and
-follow the same trajectory; `solve` uses it under ALE when `jacobian = nothing`
-(Technical Reference §15.10.3 has the measurements).
+far cheaper (the assembly profile drops to `:ale_reduced`, which writes no
+z columns: it skips the cumulative ALE widening, the geometry AD pass, the
+Beer–Lambert z columns and suffix, and the χ-column rank-1 term). The modified
+Newton iteration it drives still contracts strongly, so ALE solves take the same
+steps as with the exact Jacobian and follow the same trajectory; `solve` uses it
+under ALE when `jacobian = nothing` (Technical Reference §15.10.2 has the
+measurements).
 
 ```julia
 # ALE cone problem — the default is already the reduced Jacobian:
 sol = solve(problem; use_ale = true)
 # or explicitly:
-spec = JacobianSpec(Structured(strategy = ApproxSolve()), problem; use_ale = true)
-sol  = solve(problem; jacobian = spec, use_ale = true)
+sol = solve(problem; use_ale = true, jacobian = Structured(strategy = ApproxSolve()))
 ```
 
-`ApproxSolve` is the **only** strategy that deliberately omits known-nonzero
-entries; it carries the `is_approximate` trait, which switches
-`verify_jacobian_at` (§11.7) into masked-comparison mode so the dropped entries
-are reported informationally rather than counted as failures.
+`ApproxSolve` is the strategy that deliberately omits known-nonzero entries; it
+carries the `is_approximate` trait, which switches `verify_jacobian_at` (§11.7)
+into masked-comparison mode so the dropped entries are reported informationally
+rather than counted as failures.
 
-### 11.3.4 `MatrixFreeSolve` — research / very large N
+### 11.3.3 A sizing rule of thumb
 
-`MatrixFreeSolve` runs GMRES over the structured-Jacobian operator action
-without ever forming `A + C`. It is exact in the limit of GMRES convergence and
-useful when even materializing the coupled operator is expensive. It is marked
-experimental in the source; benchmark a specific problem before using it in
-production, and prefer `DirectSolve`/`StructuredSolve` unless the matrix-free
-path measurably wins.
-
-### 11.3.5 A sizing rule of thumb
-
-- Eulerian (fixed mesh), any size, no depletion → `jacobian = nothing`
-  (default) is fine; it already gives you
-  `Structured(strategy = DirectSolve())`.
-- ALE, small/medium mesh → `DirectSolve`.
-- ALE, large mesh, exactness required → `StructuredSolve`.
-- ALE, large mesh, speed over exactness → `ApproxSolve`.
-- Depletion tracking → no pluggable Jacobian (`jacobian = nothing`).
+- Fixed mesh, any size → `jacobian = nothing` (default) is fine; it already
+  gives you `Structured(strategy = DirectSolve())`.
+- ALE, any size → `jacobian = nothing` gives `ApproxSolve`; pass
+  `Structured(strategy = DirectSolve())` to check a configuration against the
+  exact Jacobian.
+- Depletion handling → either strategy; the defaults above apply unchanged.
 
 ---
 
@@ -291,14 +236,13 @@ sparsity pattern:
 |---|---|
 | `DirectSolve` under ALE (the exact ALE Jacobian, with its dense geometry block) | `UMFPACKFactorization()` |
 | Every other `Structured` Jacobian: `ApproxSolve` (the ALE default) and `DirectSolve` on an Eulerian mesh | `KLUFactorization()` |
-| A dense backend (`DenseAD_ForwardDiff`) | `LUFactorization()` |
 
 On 100-cell PMMA and charring-wood cone decks and on the V-BO-01 burnout case,
 KLU runs 2.6–4.4× faster end to end than Sparspak on the local patterns, with
 step counts equal to within 1%, and UMFPACK runs the exact ALE Jacobian
 1.5–1.9× faster than Sparspak (Technical Reference §15.5.1). The Eulerian
 `BEER_LAMBERT` pattern of `DirectSolve` stays on KLU: it is the fastest there,
-and UMFPACK's threshold pivoting returned inaccurate solves on it. Every
+and UMFPACK's threshold pivoting can return inaccurate solves on it. Every
 backend stays selectable by pairing it with a *constructor* integrator:
 
 ```julia
@@ -316,12 +260,18 @@ sol = solve(problem; linear_solver = SparspakFactorization())   # pure-Julia spa
 > Passing both a fully constructed `integrator` and a separate `linear_solver`
 > raises an error.
 
-A note on dense Jacobian backends: `DenseAD_ForwardDiff` has no sparse
-`jac_prototype`, so no sparse factorization can run. `solve` then defaults
-the linear solver to a dense `LUFactorization()` — and if you explicitly
-request a sparse factorization it warns and rebuilds your algorithm with
-`LUFactorization` instead. Every `Structured` Jacobian, including the
-`ApproxSolve` ALE default, carries the sparse prototype.
+Every `Structured` Jacobian, including the `ApproxSolve` ALE default, carries a
+sparse prototype, and an explicit `linear_solver` always replaces the
+pattern-based default. Any LinearSolve factorization is passed directly; no
+Pyrolysis extension is involved. For Intel MKL Pardiso, for example, install and
+load Pardiso.jl (which provides MKL) and pass LinearSolve's factorization:
+
+```julia
+using LinearSolve: MKLPardisoFactorize
+using Pardiso
+
+sol = solve(problem; linear_solver = MKLPardisoFactorize())
+```
 
 ### 11.4.2 ILU-preconditioned GMRES
 
@@ -339,7 +289,7 @@ alg = KenCarp4(linsolve = ILUGMRESFactorization(τ = 0.1))
 
 sol = solve(problem;
     integrator = alg,
-    jacobian   = JacobianSpec(Structured(strategy = DirectSolve()), problem; use_ale = true),
+    jacobian   = Structured(strategy = DirectSolve()),
     use_ale    = true)
 ```
 
@@ -368,7 +318,7 @@ parameter), which can be faster for some matrix structures:
 # ILUBiCGSTABFactorization(; τ = 0.1, rtol = 1e-8)
 alg = KenCarp4(linsolve = ILUBiCGSTABFactorization(τ = 0.1, rtol = 1e-8))
 sol = solve(problem; integrator = alg,
-    jacobian = JacobianSpec(Structured(strategy = DirectSolve()), problem; use_ale = true),
+    jacobian = Structured(strategy = DirectSolve()),
     use_ale  = true)
 ```
 
@@ -381,10 +331,7 @@ sol = solve(problem; integrator = alg,
 
 Depletion handling keeps the state size, so the sparse factorization keeps
 its pattern through every park event and nothing about the linear solver
-changes with `handle_depletion`. The dense LU is used only with the dense
-`DenseAD_ForwardDiff` backend, which attaches no sparse prototype; an explicitly
-requested sparse factorization is then rebuilt to `LUFactorization` inside the
-user's algorithm, with a warning.
+changes with `handle_depletion`.
 
 ---
 
@@ -425,74 +372,25 @@ affect physical accuracy.
 ## 11.6 Loading and using extensions
 
 Optional functionality is delivered through Julia's package-extension system
-(Julia 1.9+). The hooks (`klu_factorization`, `pardiso_factorization`,
-`amg_preconditioner`, `forward_sensitivity`, `adjoint_sensitivity`,
-`verify_mixing_derivatives`) are **exported stubs** in core Pyrolysis.jl. Each
-stub errors with a load hint until you `using` the corresponding optional
-package, at which point the extension attaches a concrete method. No extension
-depends on another; all are independent peers.
+(Julia 1.9+). Two extensions ship, independent of each other:
 
 | Extension | Trigger (`using ...`) | Attaches | Optional dep(s) |
 |---|---|---|---|
-| `PyrolysisKLUExt` | `KLU` | `klu_factorization()` | `KLU` |
-| `PyrolysisPardisoExt` | `Pardiso` | `pardiso_factorization()` | `Pardiso` |
-| `PyrolysisAMGExt` | `AlgebraicMultigrid` | `amg_preconditioner(A)` | `AlgebraicMultigrid` |
 | `PyrolysisSciMLSensitivityExt` | `SciMLSensitivity, Zygote` | `forward_sensitivity`, `adjoint_sensitivity` | `SciMLSensitivity`, `Zygote` |
-| `PyrolysisSymbolicsExt` | `Symbolics` | `verify_mixing_derivatives` | `Symbolics` |
 | `PyrolysisPlotsExt` | `RecipesBase`/`Plots` | `plot(sol; kind = ...)` recipes | `RecipesBase` |
 
-### 11.6.1 Linear-solver extensions: KLU, Pardiso, AMG
+`forward_sensitivity` and `adjoint_sensitivity` are **exported stubs** in core
+Pyrolysis.jl: calling one before `using SciMLSensitivity, Zygote` raises a
+`MethodError`, and loading the two packages attaches the concrete methods. The
+plotting recipes need no stub; they attach to `Plots.plot` once `Plots` is
+loaded (Chapter 9).
 
-These three extensions each expose a vendor solver under a stable
-Pyrolysis-level name so the benchmark harness and out-of-tree code can request
-it without core Pyrolysis taking a hard dependency.
+Linear solvers need no extension. `LinearSolve` is a hard dependency, so a
+factorization such as `KLUFactorization()` (already the default) or
+`MKLPardisoFactorize()` (with Pardiso/MKL installed) is passed directly as
+`linear_solver` or inside a built integrator (§11.4.1).
 
-```julia
-using Pyrolysis
-using KLU                              # triggers PyrolysisKLUExt
-
-ls  = Pyrolysis.klu_factorization()    # -> LinearSolve.KLUFactorization()
-sol = solve(problem; linear_solver = ls)
-```
-
-```julia
-using Pyrolysis
-using Pardiso                          # triggers PyrolysisPardisoExt
-
-# Returns LinearSolve.MKLPardisoFactorize(); for users with an Intel MKL license.
-ls  = Pyrolysis.pardiso_factorization()
-sol = solve(problem; integrator = KenCarp4(linsolve = ls))
-```
-
-```julia
-using Pyrolysis
-using AlgebraicMultigrid               # triggers PyrolysisAMGExt
-using SparseArrays, LinearAlgebra
-
-# Smoothed-aggregation AMG preconditioner for a sparse matrix A, for use as a
-# preconditioner inside a Krylov linsolve.
-A    = sprand(100, 100, 0.05) + 100I   # illustrative sparse matrix
-prec = Pyrolysis.amg_preconditioner(A)
-```
-
-Note that `KLUFactorization` is already reachable as
-`LinearSolve.KLUFactorization` (LinearSolve is a hard dependency); the KLU
-extension simply confirms KLU itself is loaded and exposes it under the stable
-name `Pyrolysis.klu_factorization`. The AMG preconditioner is meant for the
-preconditioner slot of a Krylov solver, not as a `linear_solver` on its own.
-
-**Stub behavior without the trigger.** If you call any of these before loading
-the optional package, you get a `MethodError` pointing at the unloaded
-extension:
-
-```julia
-using Pyrolysis
-Pyrolysis.klu_factorization()   # MethodError — `using KLU` not yet loaded
-```
-
-The fix is always the same: add the corresponding `using` line.
-
-### 11.6.2 Sensitivity extension
+### 11.6.1 Sensitivity extension
 
 `forward_sensitivity` and `adjoint_sensitivity` are stubs until you load
 `SciMLSensitivity` and `Zygote`, which activate `PyrolysisSciMLSensitivityExt`.
@@ -513,14 +411,14 @@ using SciMLSensitivity, Zygote          # triggers PyrolysisSciMLSensitivityExt
 function p_inject(base, θ)
     mat = make_material(θ)
     return PyrolysisProblem(base.mesh, mat, base.bc_set, base.tspan;
-                            T_initial = base.T_initial,
+                            T_initial = base.T_initial, ξ_initial = base.ξ_initial,
                             output_times = base.output_times)
 end
 
 # Forward mode (ForwardDiff) — small parameter counts:
 θ = [1e13, 2.0e5]
 output, ∂out_∂θ = forward_sensitivity(base_problem, θ, p_inject;
-                                      output_fn = sol -> maximum(sol.surface_T))
+                                      output_fn = sol -> [maximum(sol.surface_T)])   # ForwardDiff needs a vector output
 
 # Adjoint mode (Zygote + SciMLSensitivity) — large parameter counts, scalar loss:
 loss, grad = adjoint_sensitivity(base_problem, θ, p_inject, sol -> sum(sol.surface_T);
@@ -531,26 +429,11 @@ This chapter only covers the *loading* mechanics; the full sensitivity workflow
 (forward vs. adjoint choice, inverse analysis, Sobol global sensitivity) is the
 subject of Chapter 13, and the theory is in Technical Reference §17.
 
-### 11.6.3 Symbolics verification extension (test-only)
-
-`verify_mixing_derivatives` is a test-only stub activated by `using Symbolics`.
-It compares the package's analytical mixing-rule derivatives against
-Symbolics-derived ground truth. Production code never calls it; it exists to
-catch drift bugs in the mixing-rule Jacobian terms.
-
-```julia
-using Pyrolysis
-using Symbolics                         # triggers PyrolysisSymbolicsExt
-
-# Returns a per-rule max relative error (NaN for BRUGGEMAN, which has no closed form).
-report = verify_mixing_derivatives(material; rtol = 1e-8, T_test = 600.0)
-```
-
 ---
 
 ## 11.7 Debugging Jacobian correctness with `verify_jacobian_at`
 
-When a custom or approximate Jacobian configuration produces suspicious Newton
+When a Jacobian configuration produces suspicious Newton
 behavior (excessive rejections, divergence, or wrong steady state), compare it
 against the dense ForwardDiff reference at a state point. There are two ways: a
 one-shot call, and an in-solve callback.
@@ -586,11 +469,10 @@ report.max_abs_dev_outside_support # reference magnitude the backend's support o
 ```
 
 Comparison mode is chosen automatically by the backend's `is_approximate`
-trait (§11.3.3):
+trait (§11.3.2):
 
-- **Strict / support-complete** (exact backends, e.g. `DirectSolve`,
-  `StructuredSolve`): every entry of the dense reference is compared against the
-  active backend; a non-zero reference entry that the backend's support omits
+- **Strict / support-complete** (the exact `DirectSolve`): every entry of the
+  dense reference is compared against the active backend; a non-zero reference entry that the backend's support omits
   surfaces as a deviation, and its magnitude appears in
   `max_abs_dev_outside_support`. The strict criterion is per-entry with a
   row-magnitude floor, so a missing coupling in a small-magnitude row cannot
@@ -613,17 +495,15 @@ against the dense reference each time the integrator crosses one of the listed
 times and **warns** (does not abort) on a mismatch:
 
 ```julia
-spec = JacobianSpec(Structured(strategy = StructuredSolve()), problem; use_ale = true)
-sol  = solve(problem;
-    jacobian        = spec,
+sol = solve(problem;
+    jacobian        = Structured(strategy = DirectSolve()),
     use_ale         = true,
     verify_jacobian = (rtol = 1e-6, atol = 1e-10, sample_times = [0.0, 1.0, 10.0]))
 ```
 
-The callback only runs when a pluggable `jacobian` is supplied (there is nothing
-to verify against the integrator's own finite-difference Jacobian). It warns
-rather than throws so a single transient outlier does not abort an otherwise
-healthy production run.
+The callback verifies whichever strategy the solve runs, the default included,
+and works with depletion handling. It warns rather than throws so a single
+transient outlier does not abort an otherwise healthy production run.
 
 ---
 
@@ -634,7 +514,7 @@ the time integration yourself, build a non-standard solver, or feed the residual
 to external tooling. The three pieces are all top-level exports:
 
 - `ProblemDef` — an **immutable** frozen problem definition (material, mesh
-  topology, BCs, initial conditions, simulation-mode traits, options). Safe to
+  topology, BCs, simulation-mode traits, options). Safe to
   share across threads and sweep workers.
 - `Workspace` — a **mutable** bundle of per-step caches, work arrays, and the
   geometry-from-state machinery. Allocate **one per worker**.
@@ -649,12 +529,12 @@ the initial state (the same sequence `solve()` runs internally):
 ```julia
 using Pyrolysis
 import OrdinaryDiffEq                                  # from your environment
+using OrdinaryDiffEqSDIRK: KenCarp4                    # SDIRK methods (add OrdinaryDiffEqSDIRK)
 
 # 1. ICs → immutable def → mutable workspace → packed u0 [T, ξ, z (ALE), χ (WithChi)].
 def, ws, u0 = initialize_state(problem;
     use_ale         = false,
-    radiation_model = NO_RADIATION,
-    energy_form     = :standard)
+    radiation_model = NO_RADIATION)
 
 # 2. Wrap residual! in the (du, u, p, t) shape OrdinaryDiffEq expects.
 #    Note the residual! argument order is (du, u, def, t, ws).
@@ -662,11 +542,11 @@ rhs!(du, u, p, t) = residual!(du, u, def, t, ws)
 
 # 3. Hand-roll your own integration.
 prob = OrdinaryDiffEq.ODEProblem(rhs!, u0, problem.tspan)
-raw  = OrdinaryDiffEq.solve(prob, OrdinaryDiffEq.KenCarp4(autodiff = OrdinaryDiffEq.AutoFiniteDiff()))
+raw  = OrdinaryDiffEq.solve(prob, KenCarp4(autodiff = OrdinaryDiffEq.AutoFiniteDiff()))
 ```
 
 The underlying primitives `to_problem_def`, `build_workspace`, and
-`create_state_vector` remain public as the advanced layer (AD workspaces via
+`create_state_vector` are public as the advanced layer (AD workspaces via
 `build_ad_workspace`, mid-simulation repacking via `pack_state!`, warm
 starts). If you compose them by hand, the IC contract is on you:
 `create_state_vector` packs the mesh **as-is**, so call
@@ -689,25 +569,26 @@ get_thickness_from_state(u, layout)        # current sample thickness
 block_view(u, layout, ...)                 # a view of one block
 
 # For variable-cross-section runs:
-column_chi_bar_from_state(u, layout, material)        # column-average χ̄
+column_chi_bar_from_state(u, layout, mesh)            # column-average χ̄
 cross_section_area_from_state(mesh, material, u, layout)
 ```
 
 You can also attach a structured Jacobian to your hand-rolled loop. Build a spec
-from the same `(def, ws)` pair and call `compute_jacobian!`:
+from the same `(def, ws)` pair and call `compute_jacobian!` on a sparse matrix
+with the spec's pattern:
 
 ```julia
 spec = JacobianSpec(Structured(strategy = DirectSolve()), def, ws)
-J    = zeros(state_length(layout), state_length(layout))
+J    = Float64.(spec.sparsity_phys .| spec.sparsity_geom)   # the sparse pattern the backend fills
 compute_jacobian!(J, spec, u0, def, 0.0, ws)
 ```
 
 When driving the solver yourself, remember the contract that `solve` normally
 enforces for you: **the residual and Jacobian assembly are mesh-read-only**. The
 mutable mesh state is only meant to be synchronized to the integrator's `u`
-between accepted steps (this is what the built-in `StepUpdateCallback` does
+between accepted steps (this is what the built-in step-update callback does
 inside `solve`). If your custom loop relies on the mesh geometry being current
-for post-processing or AMR, you must call
+for post-processing, you must call
 `update_mesh_from_state!(mesh, u, layout)` between steps yourself.
 
 ---
@@ -732,8 +613,9 @@ Use this when you need an internal building block — a mixing function, a flux
 kernel, a cache type — that is not on the curated top-level list. Caveat:
 symbols reached through `Internal` are **not** part of the stable public API and
 may move or change between minor releases; prefer top-level exports in
-production code. (The `Experimental` namespace — P1 radiation, h-AMR — is *not*
-included in `Internal`; reach it explicitly as `Pyrolysis.Experimental.X`.)
+production code. (The `Experimental` namespace — P1 radiation,
+h-refinement/coarsening — is *not* included in `Internal`; reach it explicitly as
+`Pyrolysis.Experimental.X`.)
 
 ### 11.9.2 Importing the simulation-mode trait subtypes
 
@@ -773,38 +655,32 @@ axes map to the four residual paths, and Technical Reference §15.1).
 # (a) Default, simplest correct solve — Eulerian, no depletion.
 sol = solve(problem)
 
-# (b) Explicit exact structured Jacobian (Eulerian).
-spec = JacobianSpec(Structured(strategy = DirectSolve()), problem)
-sol  = solve(problem; jacobian = spec)
+# (b) Explicit exact structured Jacobian (Eulerian; the same as the default).
+sol = solve(problem; jacobian = Structured(strategy = DirectSolve()))
 
 # (c) ALE — the default reduced Jacobian; opt into the exact one.
-sol  = solve(problem; use_ale = true)
-spec = JacobianSpec(Structured(strategy = DirectSolve()), problem; use_ale = true)
-sol  = solve(problem; jacobian = spec, use_ale = true)
+sol = solve(problem; use_ale = true)
+sol = solve(problem; use_ale = true, jacobian = Structured(strategy = DirectSolve()))
 
-# (d) Large ALE, exact but cheap assembly via Richardson.
-spec = JacobianSpec(Structured(strategy = StructuredSolve()), problem; use_ale = true)
-sol  = solve(problem; jacobian = spec, use_ale = true)
-
-# (e) ILU-GMRES linear solve for a large W matrix.
+# (d) ILU-GMRES linear solve for a large W matrix.
 sol = solve(problem;
     integrator = KenCarp4(linsolve = ILUGMRESFactorization(τ = 0.1)),
-    jacobian   = JacobianSpec(Structured(strategy = DirectSolve()), problem; use_ale = true),
+    jacobian   = Structured(strategy = DirectSolve()),
     use_ale    = true)
 
-# (f) Depletion under ALE (the default Jacobian runs through the parks).
+# (e) Depletion under ALE (the default Jacobian runs through the parks).
 sol = solve(problem;
     use_ale          = true,
     handle_depletion = true)
 
-# (g) Vendor solver via extension.
-using KLU
-sol = solve(problem; linear_solver = Pyrolysis.klu_factorization())
+# (f) Another LinearSolve factorization, passed directly.
+using LinearSolve: SparspakFactorization
+sol = solve(problem; linear_solver = SparspakFactorization())
 
-# (h) Verify a custom backend against the dense reference during a solve.
-spec = JacobianSpec(Structured(strategy = StructuredSolve()), problem; use_ale = true)
-sol  = solve(problem; jacobian = spec, use_ale = true,
-             verify_jacobian = (rtol = 1e-6, atol = 1e-10, sample_times = [0.0, 5.0]))
+# (g) Verify the exact ALE Jacobian against the dense reference during a solve.
+sol = solve(problem; use_ale = true,
+            jacobian = Structured(strategy = DirectSolve()),
+            verify_jacobian = (rtol = 1e-6, atol = 1e-10, sample_times = [0.0, 5.0]))
 ```
 
 ---
@@ -814,8 +690,8 @@ sol  = solve(problem; jacobian = spec, use_ale = true,
 - Structured-Jacobian architecture, the implicit-RK `W = I/(γ_RK Δt) − J`
   matrix, per-operator Jacobian formulas, and the prefix/suffix/rank-1
   couplings: **Technical Reference §15**.
-- Surface-depletion handling and the depletion ↔ pluggable-Jacobian
-  incompatibility: **Chapter 10** and **Technical Reference §14.7**.
+- Surface-depletion handling and its Jacobian defaults: **Chapter 10** and
+  **Technical Reference §14.3**.
 - Building a problem and selecting simulation modes: **Chapter 7**.
 - The `solve` keyword reference and post-processing: **Chapter 8** and
   **Chapter 9**.

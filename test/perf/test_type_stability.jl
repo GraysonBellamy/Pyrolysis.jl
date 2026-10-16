@@ -1,5 +1,5 @@
 """
-CI invariant — type stability via JET.jl.
+Performance invariant — type stability via JET.jl.
 
 Loaded only by `runtests.jl` when JET is available; the conditional
 include avoids the parse-time `@test_call` binding when JET is missing.

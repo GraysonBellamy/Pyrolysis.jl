@@ -29,7 +29,7 @@ and [`BCMassOperator`](@ref) owns only the species rows.
 # Kernels
 
 - Boundary-face flux: [`_bc_boundary_face_fluxes`](@ref) (shared with
-  `BCMassOperator`) — film law plus pressure-BC venting when
+  `BCMassOperator`, `BCThermalOperator` and the solution extraction) — film law plus pressure-BC venting when
   `darcy_active`, oriented to +z with `σ = ∓1`.
 - Interior-face flux: mode-appropriate — Fickian [`gas_flux`](@ref) with
   the distance-weighted harmonic `λ_face`, or Darcy-Fick
@@ -52,8 +52,9 @@ This file relies on sibling-operator imports (all operator files share
 the `Pyrolysis.Jacobian` module): `gas_flux`/`harmonic_mean_weighted`
 (gas_transport.jl), `gas_flux_darcy_fick`/`porosity`/`ideal_gas_pressure`/
 `effective_permeability`/`mixture_gas_viscosity`/`_dt_mobility_face`
-(darcy_transport.jl), `_bc_boundary_face_fluxes`/`get_mass_bc`
-(bc_mass.jl), and the thermal-BC Newton plumbing (bc_thermal.jl).
+(darcy_transport.jl), `get_mass_bc` (bc_mass.jl), `_bc_boundary_face_fluxes`
+(Discretization/boundary_fluxes.jl, imported in bc_mass.jl), and the thermal-BC
+Newton plumbing (bc_thermal.jl).
 """
 
 """

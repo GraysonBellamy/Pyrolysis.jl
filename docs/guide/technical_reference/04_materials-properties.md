@@ -64,8 +64,9 @@ for printing, logging, and comparison; it is *not* consulted in hot paths.
 
 ### 4.1.2 The three component types
 
-**`SolidComponent`** is the matrix-forming condensed phase. It carries six
-property-function fields and three scalar (`Float64`) fields:
+**`SolidComponent`** is the matrix-forming condensed phase. It carries seven
+property-function fields, an optional constant surface absorptivity, and two
+scalar (`Float64`) fields:
 
 ```julia
 struct SolidComponent{Pρ,Pc,Pk,Pλ,Pκ,Pε,Pa,Pρi} <: AbstractComponent
@@ -151,10 +152,11 @@ return exactly `0.0`, which is the algebraically correct value for the matrix
 mixing rules (a gas contributes nothing to permeability or to the solid
 skeleton).
 
-> **Implementation note.** Accessors `get_density`, `get_intrinsic_density`,
-> `get_heat_capacity`, `get_conductivity`, `get_gas_transfer`,
-> `get_permeability`, `has_permeability`, `is_solid/is_liquid/is_gas`, `phase`,
-> `molar_mass`, all in `src/Materials/components.jl`.
+> **Implementation note.** Accessors `get_intrinsic_density`, `get_permeability`,
+> `has_permeability`, `get_emissivity`, `get_absorptivity`,
+> `is_solid/is_liquid/is_gas`, `phase`, `molar_mass`, all in
+> `src/Materials/components.jl`. Kernels read the remaining property fields
+> (`density`, `heat_capacity`, …) directly.
 
 ### 4.1.4 Bulk versus intrinsic (skeletal) density
 
@@ -178,9 +180,8 @@ between two densities (overload note A7 of Chapter 2):
   Field `intrinsic_density`.
 
 When a component is constructed without an explicit intrinsic density, the field
-defaults to the bulk density, $\rho_{i,j}=\rho_j$, which recovers the legacy
-"pure phase has no internal pores" assumption — every example that predates the
-intrinsic-density feature behaves unchanged. The resolution logic enforces that a
+defaults to the bulk density, $\rho_{i,j}=\rho_j$: the pure phase is assumed to
+have no internal pores. The resolution logic enforces that a
 caller pass *either* `ρ_intrinsic` *or* a pure-phase porosity $\phi$ (from which
 $\rho_{i,j}=\rho_j/(1-\phi)$ is computed, requiring a constant bulk $\rho_j$),
 never both:
@@ -225,7 +226,7 @@ canonical gas) carries no weight in the matrix radiative surface.
 > the *same* $\gamma$ weight feeds three mixing rules with volume-fraction
 > semantics — the strain kernel, the mixture density, and the $k/\varepsilon$
 > matrix volume fractions — and a weight above 1 corrupts all three (volume
-> fractions no longer sum consistently). Expansion beyond the reactant's
+> fractions would not sum consistently). Expansion beyond the reactant's
 > volume is already expressible the physical way: give the product a **low
 > bulk density** ($V_f/V_0 = \sum_j y_j\gamma_j\rho_A/\rho_j$ — the V-CPL-03
 > P1 verification permutation demonstrates ×2 growth), with $\gamma \in
@@ -247,7 +248,7 @@ consumed downstream:
 |---|---|---|---|---|
 | `density` | $\rho_j$ | kg·m⁻³ | all | mixing rules, $\rho$ (§4.2.2), volume change (Ch. 10) |
 | `intrinsic_density` | $\rho_{i,j}$ | kg·m⁻³ | S, L | porosity $\phi$ (§4.2.3, Eq. 4.2) |
-| `heat_capacity` | $c_{p,j}(T)$ | J·kg⁻¹·K⁻¹ | all | $\rho c_p^\mathrm{eff}$, $\Delta h$, advection source (Ch. 5, 7) |
+| `heat_capacity` | $c_{p,j}(T)$ | J·kg⁻¹·K⁻¹ | all | $\rho c_p^\mathrm{eff}$, advection source, park-merge enthalpy (Ch. 5, 7, 14) |
 | `thermal_conductivity` | $k_j(T)$ | W·m⁻¹·K⁻¹ | all | $k_\mathrm{eff}$ (Ch. 5), Fourier flux (Ch. 7) |
 | `gas_transfer_coeff` | $\lambda_j(T)$ | m²·s⁻¹ | all | $\lambda_\mathrm{eff}$ (Ch. 5), gas diffusion (Ch. 9) |
 | `permeability` | $\kappa_j(T)$ | m² | S, L | $\kappa_\mathrm{eff}$ (Ch. 5), Darcy velocity (Ch. 9) |
@@ -260,8 +261,10 @@ consumed downstream:
 Note that $\alpha_j$ is a **mass-basis** absorption coefficient [m²·kg⁻¹]; it is
 multiplied by concentration to give the volumetric (extinction) absorption
 coefficient $\alpha_\mathrm{eff}=\sum_j\xi_j\alpha_j$ [m⁻¹] used in Beer–Lambert
-and P1 radiation (Chapter 8). Even a solid carries a nonzero $\lambda_j$ default
-in practice (e.g. $2\times10^{-5}$ m²·s⁻¹): although solids do not themselves
+and P1 radiation (Chapter 8). A solid usually carries a nonzero $\lambda_j$
+in practice (e.g. $2\times10^{-5}$ m²·s⁻¹; the `SolidComponent` default is 0, and
+`validate_problem` warns when a gas-producing Fickian material leaves it there,
+§5.6): although solids do not themselves
 diffuse, their $\lambda_j$ contributes to the *mixture* gas-transfer coefficient
 through the volume-weighted mixing rule, matching the ThermaKin convention.
 
@@ -320,15 +323,14 @@ $$
 A gas does not enter $\phi$ because it occupies the void that the solid frame
 leaves; adding gas mass does not displace skeletal material. Porosity feeds (i)
 the ideal-gas pressure closure $P=N(\xi,T)/\phi$ (Chapter 9) and (ii) the
-Carman–Kozeny permeability closure (Chapter 5, §5.7). A *second*, volume-fraction
-porosity $\phi=\sum_{j\in G} v_j$ also exists in the codebase
-(`_porosity_sum`/`_porosity_sum_gen`) but the **intrinsic-density form Eq. (4.2)
-is canonical** and is what `porosity` and `update_properties!` actually use
+Carman–Kozeny permeability closure (Chapter 5, §5.7). The all-phase gas volume
+fraction $\sum_{j\in G} v_j$ is a different quantity; the **intrinsic-density form
+Eq. (4.2) is canonical** and is what `porosity` computes and `update_darcy_properties!` uses
 (overload note A8 of Chapter 2).
 
 > **Implementation note.** Canonical porosity: `porosity` →
 > `_porosity_void_frac`, in `src/Properties/mixture_rules.jl` (derivatives are
-> taken by forward-mode AD through `porosity` itself; §5.3.3). In
+> taken by forward-mode AD through `porosity` itself; §5.3.2). In
 > `_porosity_void_frac` a component
 > contributes $\xi_j/\rho_{i,j}$ only when `is_solid(c) || is_liquid(c)` *and*
 > $\rho_{i,j}>0$. Full development is in Chapter 5.
@@ -385,7 +387,7 @@ Two modeling points deserve emphasis:
 
 A *property function* is a callable object $p$ such that $p(T)$ (or, for
 state-dependent properties, $p(T,\xi)$) returns the property value at the given
-state. All seven concrete types subtype `AbstractPropertyFunction` and implement
+state. All eight concrete types subtype `AbstractPropertyFunction` and implement
 both the `(p)(T)` and `(p)(T, ξ)` call signatures (the latter ignoring $\xi$ for
 all but `StateDependentProperty`). This uniformity lets a single component field
 hold any property law, and lets the kinetics evaluator pass $\xi$ to a heat-of-
@@ -400,8 +402,10 @@ derivative, so nothing changes for any physical state; outside it the law sees
 the nearest bracket end. A Newton trial state with a nonphysical (even
 negative) temperature therefore produces a failed Newton step, not a
 `DomainError` out of a fractional power or a fitted polynomial's far
-extrapolation. The analytic derivatives (§4.5) are zero outside the bracket so
-they agree with automatic differentiation of the clamped law everywhere.
+extrapolation. No derivative is hand-coded: the Jacobian and sensitivity passes
+evaluate each law on `ForwardDiff.Dual` arguments (§4.5), so the derivatives
+quoted below are what automatic differentiation of the law returns — and, through
+the clamp, zero outside the bracket.
 
 The component constructors sample every law on the bracket at 1 K steps and
 reject a component whose bulk or intrinsic density, heat capacity or thermal
@@ -422,7 +426,7 @@ p(T) = \texttt{value}, \qquad \frac{\mathrm{d}p}{\mathrm{d}T}=0.
 $$
 
 The workhorse for properties given a single number. It has a *fast path* in the
-parameter-evaluation interface (§4.8) that bypasses the dynamic-dispatch hop.
+parameter-evaluation interface (§4.7) that bypasses the dynamic-dispatch hop.
 
 ### 4.4.2 `LinearProperty`
 
@@ -440,16 +444,14 @@ p(T) = \sum_{m=0}^{N-1} c_m\, T^{m} = c_0 + c_1 T + c_2 T^2 + \cdots,
 $$
 
 evaluated with `evalpoly` (Horner's scheme) for numerical stability and to avoid
-recomputing powers. The analytical derivative is computed by an unrolled loop
-(no allocation, no `evalpoly` of a derived coefficient tuple):
+recomputing powers. Forward-mode AD through Horner's scheme returns the exact
+derivative
 
 $$
 \frac{\mathrm{d}p}{\mathrm{d}T} = \sum_{m=1}^{N-1} m\,c_m\,T^{m-1}
 = c_1 + 2c_2 T + 3c_3 T^2 + \cdots .
 \tag{4.6}
 $$
-
-For $N=1$ (a degenerate constant polynomial) the derivative returns `0.0`.
 
 ### 4.4.4 `ArrheniusProperty`
 
@@ -462,12 +464,8 @@ $$
 
 Fields `A` (pre-exponential), `E` (activation energy [J·mol⁻¹]), and `T_ref` (a
 reference temperature, defaulting to $T_\mathrm{ref}=298.15$ K, carried for
-normalization purposes but not used in the value itself). The closed-form
-derivative in Eq. (4.7) is obtained by differentiating
-$A\exp(-E/(R_gT))$: $\frac{\mathrm{d}}{\mathrm{d}T}[-E/(R_gT)] = E/(R_gT^2)$, hence
-$p'(T)=p(T)\cdot E/(R_gT^2)$. This is the *only* property type with a nonzero
-closed-form $T$-derivative beyond the polynomial/linear forms, and it shares its
-functional form with the reaction-rate constant (§4.5, Chapter 6).
+normalization purposes but not used in the value itself). The law shares its
+functional form with the reaction-rate constant (§4.5.3, Chapter 6).
 
 ### 4.4.5 `TableProperty`
 
@@ -487,17 +485,16 @@ v_N & T_q \ge T_N.
 $$
 
 The interval search is **linear for $N\le 8$** (fewer comparisons than a binary
-search on small tables) and **binary for $N>8$** (logarithmic). The derivative is
-a *central finite difference* with a fixed step $\delta T = 0.1$ K,
-$\mathrm{d}p/\mathrm{d}T \approx [p(T_q+\delta T) - p(T_q-\delta T)]/(2\delta T)$.
-On a smooth segment this recovers the segment slope exactly; near a knot it blends
-the two adjacent slopes.
+search on small tables) and **binary for $N>8$** (logarithmic). Under AD the
+derivative is the slope of the segment containing $T_q$ (the right-hand segment at
+a knot) and zero in the flat extrapolation; it jumps at every knot.
 
 ### 4.4.6 `CallableProperty`
 
 Wraps an arbitrary callable $f(T)$. Its value is $p(T)=f(\tilde T)$ on the
-clamped argument of the property bracket; its derivative is the same central
-finite difference with $\delta T = 0.1$ K. This is the type produced by
+clamped argument of the property bracket; its derivative is whatever AD
+propagates through $f$, so $f$ must accept `ForwardDiff.Dual` arguments (no
+`Float64` annotations or conversions inside). This is the type produced by
 `to_property(f)` for a function `f` and is how the ideal-gas density default
 (Eq. 4.5) is stored.
 
@@ -514,18 +511,17 @@ $$
 `SutherlandProperty()` is the canonical **air** triple
 ($\mu_{\text{ref}}=1.716\times10^{-5}$ Pa·s, $T_{\text{ref}}=273.15$ K,
 $S=110.4$ K) and is the default `Material.gas_viscosity` (§5.9), so a material
-that says nothing about its pore gas behaves exactly as the package did before
-that field existed. Its derivative is **analytic**,
+that says nothing about its pore gas uses air. Its derivative, as AD returns it, is
 
 $$
 \frac{\mathrm{d}p}{\mathrm{d}T} = p(T)\left(\frac{3}{2T} - \frac{1}{T+S}\right),
 $$
 
-which agrees with `ForwardDiff` to machine precision (gated in
+(the AD-cleanliness of the type is tested in
 `test/materials/test_gas_viscosity_property.jl`).
 
-The type evaluates the bare correlation and does **not** clamp $T$; the
-low-temperature floor and the positivity floor are applied once, centrally, in
+Like every property law it evaluates on the clamped argument $\tilde T$ of the
+property bracket. The positivity floor `MU_FLOOR` is applied once, centrally, in
 `effective_gas_viscosity(T, material)` (§5.9), so that every curve a material may
 carry is protected rather than just this one.
 
@@ -545,10 +541,9 @@ concentration tuple. The kinetics evaluator always passes $\xi$ to the heat
 property (§4.5, Chapter 6), so a `StateDependentProperty` heat is evaluated with
 the live composition.
 
-Its $T$-derivative is a central finite difference at fixed $\xi$,
-$\partial p/\partial T \approx [p(T+\delta T,\xi)-p(T-\delta T,\xi)]/(2\delta T)$
-with $\delta T = 0.1$ K. Its concentration derivative (§4.5.2) uses an *adaptive*
-step.
+Its derivatives in $T$ and in each $\xi_j$ are propagated by AD through $f$
+(§4.5), so $f$ must accept a `Dual` temperature and a tuple of `Dual`
+concentrations.
 
 ### 4.4.9 `to_property` conversions
 
@@ -563,7 +558,7 @@ or bare values:
 | a `Tuple{Real,Real}` $(a,b)$ | `LinearProperty(a, b)` |
 | a `Function` | `CallableProperty(f)` |
 
-> **Implementation note.** All property types, their value/derivative methods,
+> **Implementation note.** All property types, their call methods,
 > `linear_interpolate`, and `to_property` are in
 > `src/Materials/property_functions.jl`.
 
@@ -576,147 +571,75 @@ $\partial(\text{RHS})/\partial u$. Because effective properties depend on $T$ an
 $\xi$, and the RHS depends on effective properties, the per-component derivatives
 $\mathrm{d}p_j/\mathrm{d}T$ and $\partial p_j/\partial \xi_k$ propagate through the
 chain rule into the structured Jacobian (Chapter 5, §5.15 for the mixing-rule
-chain; Chapter 15 for assembly). Two derivative families are provided.
+chain; Chapter 15 for assembly). The property types carry no derivative methods.
+Each Jacobian operator either runs ForwardDiff over a stencil-local kernel that
+evaluates the property laws on `Dual` arguments, or implements an analytical
+override tested against a ForwardDiff reference (Chapter 15). Either way the
+property derivative is the derivative of the law as written.
 
 ### 4.5.1 Temperature derivative $\mathrm{d}p/\mathrm{d}T$
 
-The `derivative(p, T)` method dispatches on the property type:
+What forward-mode AD returns for each type, inside the property bracket:
 
-| Type | $\mathrm{d}p/\mathrm{d}T$ | Method |
-|---|---|---|
-| `ConstantProperty` | $0$ | analytic |
-| `LinearProperty` | $b$ | analytic |
-| `PolynomialProperty` | $\sum_{m\ge 1} m c_m T^{m-1}$ | analytic, unrolled (Eq. 4.6) |
-| `ArrheniusProperty` | $p(T)\,E/(R_g T^2)$ | analytic (Eq. 4.7) |
-| `TableProperty` | central FD, $\delta T=0.1$ K | numerical |
-| `CallableProperty` | central FD, $\delta T=0.1$ K | numerical |
-| `SutherlandProperty` | $p(T)\,(3/(2T) - 1/(T+S))$ | analytic |
-| `StateDependentProperty` | central FD in $T$, $\delta T=0.1$ K | numerical |
+| Type | $\mathrm{d}p/\mathrm{d}T$ |
+|---|---|
+| `ConstantProperty` | $0$ |
+| `LinearProperty` | $b$ |
+| `PolynomialProperty` | $\sum_{m\ge 1} m c_m T^{m-1}$ (Eq. 4.6) |
+| `ArrheniusProperty` | $p(T)\,E/(R_g T^2)$ (Eq. 4.7) |
+| `TableProperty` | slope of the active segment; $0$ in the flat extrapolation |
+| `CallableProperty` | $f'(T)$, as propagated through `f` |
+| `SutherlandProperty` | $p(T)\,(3/(2T) - 1/(T+S))$ |
+| `StateDependentProperty` | $\partial f/\partial T$ at fixed $\xi$ |
 
-The analytic derivatives are exact to machine precision; the finite-difference
-derivatives carry an $O(\delta T^2)$ truncation error from the central scheme,
-which at $\delta T=0.1$ K is negligible for the smooth thermophysical laws this
-machinery serves. (The Jacobian itself may also be obtained by forward-mode
-automatic differentiation, in which case these hand-coded derivatives are not the
-source of truth; see §4.6 and Chapter 15. The hand-coded forms exist for the
-*structured* Jacobian backend, which assembles per-operator contributions
-analytically for speed.)
+These values are exact derivatives of the evaluated law, with no truncation
+error. A `TableProperty` has a discontinuous derivative at every knot, which the
+Newton iteration sees as a kink; a smooth law (polynomial, Arrhenius, Sutherland)
+avoids it.
 
 ### 4.5.2 Concentration derivative $\partial p/\partial \xi_j$
 
-For every property type *except* `StateDependentProperty`, the value does not
-depend on $\xi$, so $\partial p/\partial \xi_j = 0$ exactly. For a
-`StateDependentProperty` the derivative is an adaptive central finite difference,
+For every property type *except* `StateDependentProperty`, the two-argument call
+`p(T, ξ)` ignores $\xi$, so $\partial p/\partial \xi_j = 0$ exactly. For a
+`StateDependentProperty` the derivative is $\partial f/\partial \xi_j$, propagated by
+AD through `f(T, ξ)` with the concentration tuple carrying `Dual` entries. The
+kinetics evaluator passes the live $\xi$ to every heat-of-reaction property, so a
+moisture-dependent heat of sorption contributes its composition derivative to the
+reaction-source block of the Jacobian.
 
-$$
-\frac{\partial p}{\partial \xi_j} \approx
-\frac{p(T,\xi^{+}) - p(T,\xi^{-})}{2\,\delta\xi_j},
-\qquad
-\delta\xi_j = \max\!\bigl(|\xi_j|\cdot10^{-4},\;10^{-6}\bigr),
-\tag{4.9}
-$$
-
-where $\xi^{\pm}$ are the concentration tuple with the $j$-th entry perturbed by
-$\pm\delta\xi_j$ (using `Base.setindex` on the immutable tuple to avoid heap
-allocation). The adaptive step is *relative* for non-small concentrations (the
-$10^{-4}$ factor gives good FD accuracy) and switches to an *absolute floor*
-$10^{-6}$ for vanishing $\xi_j$ to avoid catastrophic cancellation. At a boundary
-where $\xi_j - \delta\xi_j < 0$ (which would push the concentration negative,
-potentially out of the physical domain of $f$) the scheme falls back to a
-**forward difference** $[p(T,\xi^{+})-p(T,\xi)]/\delta\xi_j$ to keep the
-evaluation in the non-negative region; in the central branch the negative
-perturbation is non-negative by construction.
-
-> **Implementation note.** `derivative(p, T)` and
-> `derivative_ξ(p, T, ξ, j)` in `src/Materials/property_functions.jl`. The default
-> `derivative_ξ(::AbstractPropertyFunction, …) = 0.0` covers all $T$-only
-> property types; only the `StateDependentProperty` method computes Eq. (4.9).
+> **Implementation note.** The call methods `(p)(T)` and `(p)(T, ξ)` are in
+> `src/Materials/property_functions.jl`; the per-cell reaction-source Jacobian that
+> differentiates the heats is `ReactionSourceOperator`
+> (`src/Jacobian/operators/reaction_source.jl`).
 
 ### 4.5.3 The reaction-rate connection
 
 The Arrhenius derivative (Eq. 4.7) is identical in form to the
 temperature-derivative of the reaction-rate constant
-$k(T)=A\exp(-E/(R_g T))$, since $\mathrm{d}k/\mathrm{d}T = k\,E/(R_g T^2)$. This is
-why the reaction-rate Jacobian energy block (Chapter 15) reuses the same
-expression. The full reaction-rate derivative including the depletion limiter and
+$k(T)=A\exp(-E/(R_g T))$, since $\mathrm{d}k/\mathrm{d}T = k\,E/(R_g T^2)$; the
+reaction-source Jacobian obtains it by ForwardDiff over the per-cell kernel
+(Chapter 15). The full reaction-rate derivative including the depletion limiter and
 temperature gates is developed in Chapter 6.
 
 ---
 
-## 4.6 The sensible-enthalpy difference (midpoint rule)
+## 4.6 Material assembly
 
-Several energy terms — the surface transpiration enthalpy (Chapter 12), the
-gas-generation enthalpy sink $S_\mathrm{gen}$ (Chapter 7), and the energy ledgers
-(Chapter 16) — require the **sensible-enthalpy difference** of a single component
-between two temperatures, $\Delta h = \int_{T_\mathrm{lo}}^{T_\mathrm{hi}}
-c_p(\tau)\,\mathrm{d}\tau$. Pyrolysis.jl evaluates this with the **midpoint rule**:
-
-$$
-\Delta h(T_\mathrm{hi}, T_\mathrm{lo})
-= c_p\!\left(\frac{T_\mathrm{hi}+T_\mathrm{lo}}{2}\right)\,
-  \bigl(T_\mathrm{hi}-T_\mathrm{lo}\bigr).
-\tag{4.10}
-$$
-
-### 4.6.1 Why the midpoint rule
-
-Three reasons justify Eq. (4.10) over alternatives such as trapezoidal,
-endpoint, or analytic integration of a polynomial $c_p$:
-
-1. **Second-order accuracy with a single evaluation.** The midpoint rule has
-   truncation error $\tfrac{1}{24}c_p''(T_m)\,(\Delta T)^3$, i.e. it is exact for
-   $c_p$ linear in $T$ and $O(\Delta T^2)$ for general $c_p$ — the same order as
-   the trapezoidal rule but with **one** $c_p$ call instead of two. In a residual
-   evaluated tens of thousands of times this halves the cost.
-
-2. **Consistency with the cell-centered $c_p$.** The volumetric gas-advection
-   source uses a *single* cell-centered evaluation $c_{p,g}(T_i)$ (Chapter 7,
-   $S_\mathrm{conv} = -\sum_g c_{p,g}(T_i)\bar J_g (\partial T/\partial z)$).
-   Using the midpoint rule for $\Delta h$ keeps the surface-transpiration BC at
-   the *same discretization order* as the bulk gas-energy transport, so the two
-   do not introduce inconsistent enthalpy accounting at the surface.
-
-3. **AD-cleanliness.** Eq. (4.10) is a smooth composition of $c_p(\cdot)$ and
-   multiplication, so both $T_\mathrm{hi}$ and $T_\mathrm{lo}$ may be
-   `ForwardDiff.Dual`. ForwardDiff returns the derivative of *the midpoint-rule
-   expression actually evaluated*, namely
-
-   $$
-   \frac{\partial(\Delta h)}{\partial T_\mathrm{hi}}
-   = c_p(T_m) + \tfrac{1}{2}(T_\mathrm{hi}-T_\mathrm{lo})\,c_p'(T_m),
-   \quad T_m=\tfrac{T_\mathrm{hi}+T_\mathrm{lo}}{2},
-   $$
-
-   which differs from the *true* integral derivative $c_p(T_\mathrm{hi})$ at
-   $O(\Delta T)$ but is **exactly consistent** with the value the function
-   returns. This consistency (value and derivative come from the same quadrature)
-   is precisely what makes the Newton surface-energy solve and the sensitivity
-   machinery well-behaved; an inconsistent value/derivative pair would corrupt
-   the Newton convergence.
-
-> **Implementation note.** `delta_enthalpy(comp, T_hi, T_lo)`,
-> `src/Materials/components.jl`, which computes
-> `comp.heat_capacity((T_hi+T_lo)*0.5) * (T_hi - T_lo)`. It dispatches on any
-> `AbstractComponent` (uses only the `heat_capacity` field).
-
----
-
-## 4.7 Material assembly
-
-### 4.7.1 The `Material` type
+### 4.6.1 The `Material` type
 
 A `Material` is the static, fully type-specialized aggregate that every physics
 kernel reads. It is **immutable** and **heterogeneously typed** so the compiler
 can specialize every loop over its components and reactions:
 
 ```julia
-struct Material{NC,NR,C<:Tuple,RT<:Tuple,LSL} <: AbstractMaterial
+struct Material{NC,NR,C<:Tuple,RT<:Tuple,LSL,Pμ} <: AbstractMaterial
     name::Symbol
     components::C          # heterogeneous component tuple
     reactions::RT          # heterogeneous reaction tuple
     mixing::NamedTuple{(:k,:λ,:κ),Tuple{MixingSpec,MixingSpec,MixingSpec}}
     lateral_shrinkage_law::LSL   # A(t)/A₀ = law(χ̄), or nothing
     depletion_limiter::DepletionLimiter   # tanh(ξ/threshold) rate roll-off (§6.3)
+    gas_viscosity::Pμ      # pore-gas μ(T), default SutherlandProperty() (§5.9)
 end
 ```
 
@@ -734,6 +657,10 @@ The type parameters carry compile-time information:
   `material.lateral_shrinkage_law` specialize statically rather than dispatch
   through a `Union{Function,Nothing}` (Chapter 10). The inner constructor
   enforces `LSL === Nothing || LSL <: Function`.
+- `Pμ` — the type of the pore-gas viscosity property function, parameterized for
+  the same reason so `material.gas_viscosity(T)` stays monomorphic. The inner
+  constructor probes the curve at 200–1800 K and rejects one that is not positive
+  and finite there (§5.9).
 
 The `mixing` field bundles three `MixingSpec`s — one each for thermal
 conductivity ($k$), gas transfer ($\lambda$), and permeability ($\kappa$) — in a
@@ -761,10 +688,9 @@ reaction-rate evaluation (§6.3).
 
 > **Implementation note.** `Material`, its inner/outer constructors,
 > `_construct_material`, `MixingRule`, `MixingSpec`, `MaterialMixing`, in
-> `src/Materials/materials.jl`. Counts via `n_components`, `n_reactions`,
-> `n_solids`, `n_liquids`, `n_gases`.
+> `src/Materials/materials.jl`. Counts via `n_components`, `n_reactions`.
 
-### 4.7.2 `PendingReaction` and symbolic resolution
+### 4.6.2 `PendingReaction` and symbolic resolution
 
 Reactions may be written against component **symbols** rather than integer
 indices, which is far less error-prone for the user:
@@ -792,7 +718,7 @@ Numeric reactions (built against integer indices directly) bypass resolution.
 > `resolve_reaction`, and `_resolve_reactions` (called from the `Material`
 > constructor) in `src/Materials/reactions.jl` and `src/Materials/materials.jl`.
 
-### 4.7.3 The single-reactant mass-balance convention
+### 4.6.3 The single-reactant mass-balance convention
 
 The `Reaction` type is n-ary in both reactants and products in principle, but the
 current model **supports only single-reactant reactions** ($N_\mathrm{in}=1$). The
@@ -816,26 +742,10 @@ Passing `validate_mass=false` disables only the sum check (not recommended);
 the non-negativity and order checks always run.
 
 > **Implementation note.** `_validate_stoichiometry`, `verify_stoichiometry`
-> (tol $10^{-10}$, returns `false` + `@warn` on failure), `mass_balance_error`,
-> and `check_material_mass_balance` in `src/Materials/reactions.jl`.
+> (tol $10^{-10}$, returns `false` + `@warn` on failure), and `mass_balance_error`
+> in `src/Materials/reactions.jl`.
 
-### 4.7.4 `validate_material`
-
-After assembly, `validate_material(m)` performs whole-material consistency checks:
-
-1. at least one component exists ($N_C\ge 1$, else `error`);
-2. every reactant and product index in every reaction lies in $1\!:\!N_C$ (else
-   `error`);
-3. every reaction is mass-balanced (else `@warn` via `verify_stoichiometry`).
-
-It returns `true` on success. This is a *build-time* invariant: by the time the
-residual runs, indices are guaranteed valid and stoichiometry is (warned-)
-balanced.
-
-> **Implementation note.** `validate_material(m::Material)`,
-> `src/Materials/materials.jl`.
-
-### 4.7.5 Dry-pyrolysis-gas identification
+### 4.6.4 Dry-pyrolysis-gas identification
 
 For variable-cross-section (lateral shrinkage, Chapter 10) the pyrolysis-progress
 state $\chi$ counts only **dry** pyrolysis gas — water vapor is excluded because
@@ -858,21 +768,28 @@ pyrolyzate regardless of its actual chemistry.
 > `src/Materials/materials.jl`. The result is a statically known tuple of indices,
 > constant-folded by the compiler.
 
-### 4.7.6 Type-stable iteration over heterogeneous tuples
+### 4.6.5 Type-stable iteration over heterogeneous tuples
 
 The defining performance pattern of the Materials subsystem is the use of
 `@generated` functions and recursive tuple decomposition to **unroll** every
 loop over the (heterogeneous) component and reaction tuples at compile time. A
 naive `for c in material.components` over a heterogeneous tuple would box each
-element and allocate; instead, e.g.,
+element and allocate; instead, e.g., the mixture heat capacity is
 
 ```julia
-@generated function foreach_component(f::F, material::Material{NC}) where {F,NC}
-    return Expr(:block, [:(f(material, Val{$j}())) for j in 1:NC]...)
+@generated function _sum_heat_capacity(ξ, T, comps::Tuple, ::Val{NC}) where {NC}
+    expr = quote
+        result = zero(_prop_type(ξ, T))
+    end
+    for i = 1:NC
+        push!(expr.args, :(result += ξ[$i] * comps[$i].heat_capacity(T)))
+    end
+    push!(expr.args, :(return result))
+    return expr
 end
 ```
 
-emits $N_C$ statically dispatched calls with no runtime loop. The same idiom
+which emits $N_C$ statically dispatched terms with no runtime loop. The same idiom
 appears in `evaluate_reactions!`, the species-source and gas-flux kernels, the
 mixing-rule sums (Chapter 5), and the porosity sums. The net effect is that the
 entire property-evaluation loop in `update_properties!` is **allocation-free**
@@ -882,7 +799,7 @@ dictionary lookups in hot paths.
 
 ---
 
-## 4.8 Time- and temperature-parameter evaluation
+## 4.7 Time- and temperature-parameter evaluation
 
 Several kernels accept "flexible" parameters that may be a constant, a function
 of time, or a property function — for example a boundary heat flux $q(t)$, a
@@ -931,12 +848,12 @@ per cell per step.
 
 ---
 
-## 4.9 Comparison to ThermaKin2Ds, Gpyro, and FDS
+## 4.8 Comparison to ThermaKin2Ds, Gpyro, and FDS
 
 Pyrolysis.jl's material model is a deliberate synthesis of the three reference
 condensed-phase pyrolysis codes. We map their notation to ours on first use.
 
-### 4.9.1 Component / species representation
+### 4.8.1 Component / species representation
 
 **ThermaKin2Ds** represents a material as a set of *components* with mass
 concentrations as the primary state — the convention Pyrolysis.jl adopts wholesale
@@ -964,7 +881,7 @@ coefficient $\kappa_s$ maps to our volumetric $\alpha$ (overload note A5). FDS's
 material density-ratio swell/shrink rule corresponds to our $\gamma_j$-weighted
 volume change (Chapter 10).
 
-### 4.9.2 Heat capacity and the gas-storage convention
+### 4.8.2 Heat capacity and the gas-storage convention
 
 ThermaKin's energy equation (its Eq. 17) sums the volumetric heat capacity
 over **all** components, gas included:
@@ -973,21 +890,21 @@ uses the same sum in the temperature-storage term (Chapter 3):
 
 $$
 \rho c_p^\mathrm{eff} = \sum_{j=1}^{N_C} \xi_j\, c_{p,j}(T),
-\tag{4.11}
+\tag{4.9}
 $$
 
 because the pore gas shares the matrix temperature and its concentration is an
 integrated state, so its sensible storage is available at no cost (Chapter 5,
 §5.4 and Chapter 7). Gpyro's default thermal-equilibrium form drops the gas
 term (restored by its `FULL_QSG` option) and FDS has no in-depth gas; both are
-approximations of (4.11) that Pyrolysis.jl does not make. The gas *flux*
+approximations of (4.9) that Pyrolysis.jl does not make. The gas *flux*
 relative to the skeleton enters the energy equation only through the advective
 source $S_\mathrm{conv}$.
 
 > **Implementation note.** `effective_heat_capacity` → `_sum_heat_capacity`
 > (every component, no phase branch), `src/Properties/effective_properties.jl`.
 
-### 4.9.3 Reaction kinetics representation
+### 4.8.3 Reaction kinetics representation
 
 ThermaKin supports bimolecular rates $\propto \xi_{\text{COMP1}}\xi_{\text{COMP2}}$;
 Gpyro uses an nth-order-in-conversion rate with optional O₂ sensitivity
@@ -1000,7 +917,7 @@ representation of heats of reaction as property functions — including the
 state-dependent moisture-sorption heat via `StateDependentProperty` — generalizes
 all three codes' scalar heats. The full kinetic comparison is in Chapter 6.
 
-### 4.9.4 Property functions and temperature dependence
+### 4.8.4 Property functions and temperature dependence
 
 ThermaKin and Gpyro both permit temperature-dependent properties (tabulated or
 power-law). Pyrolysis.jl's property-function abstraction subsumes both: a Gpyro
@@ -1012,7 +929,7 @@ sorption) without a special-case code path.
 
 ---
 
-## 4.10 Limitations and open issues
+## 4.9 Limitations and open issues
 
 The following are documented limitations of the constitutive layer; several are
 revisited where the relevant physics is developed.
@@ -1023,42 +940,35 @@ revisited where the relevant physics is developed.
    extending the reactant tuple to 3-ary `(idx, order, mass_stoich)` and a
    revised mass-balance convention (Chapter 6).
 
-2. **Two coexisting porosity definitions.** The intrinsic-density form (Eq. 4.2)
-   is canonical and is what the pressure and permeability closures use, but a
-   volume-fraction porosity also exists in the code. They differ for materials
-   with internal pore structure; the choice is not user-selectable.
-
-3. **Intrinsic-density fallback may be unphysical.** When $\rho_{i,j}$ is not
+2. **Intrinsic-density fallback may be unphysical.** When $\rho_{i,j}$ is not
    supplied it defaults to the bulk $\rho_j$, asserting the pure phase has no
    internal pores. For genuinely microporous solids this under-predicts porosity
    and over-predicts the matrix volume.
 
-4. **Name-based dry-gas identification.** Water vapor is excluded from the
+3. **Name-based dry-gas identification.** Water vapor is excluded from the
    pyrolysis-progress source by a substring match on the component name
    (`_is_water_vapor_name`). A water species named outside the recognized tokens
    would be (incorrectly) counted as dry pyrolyzate, and a non-water species named
    with a water token would be (incorrectly) excluded.
 
-5. **Finite-difference derivatives for table/callable/state-dependent properties.**
-   `TableProperty`, `CallableProperty`, and the $T$- and $\xi$-derivatives of
-   `StateDependentProperty` use fixed-step ($\delta T=0.1$ K) or adaptive-step
-   (Eq. 4.9) finite differences. These carry truncation/round-off error and can
-   degrade the structured-Jacobian accuracy relative to the analytic property
-   types. (The AD-based Jacobian backend avoids this by differentiating the
-   actual evaluation.)
+4. **Kinked and AD-dependent property laws.** A `TableProperty` is differentiated
+   segment by segment, so its derivative jumps at every knot and the Newton
+   iteration sees a kink there. `CallableProperty` and `StateDependentProperty`
+   are differentiated by propagating `ForwardDiff.Dual` numbers through the user's
+   function, which must therefore be generic in its argument types (§4.5).
 
-6. **Heterogeneous-tuple compilation cost.** Preserving the exact component and
+5. **Heterogeneous-tuple compilation cost.** Preserving the exact component and
    reaction tuple types yields allocation-free, type-stable hot paths, but at the
    cost of recompiling the residual for each distinct material *shape*. Materials
    that differ only in numerical parameters share a compiled type; materials that
    differ in the *types* of their property functions do not.
 
-7. **No temperature-dependent pre-exponential or pressure-dependent kinetics.**
+6. **No temperature-dependent pre-exponential or pressure-dependent kinetics.**
    The Arrhenius property and `Reaction` carry constant $A$ and $E$ (no Kissinger/
    Ozawa $T$-dependent activation energy, no distributed-activation-energy
    tooling, no explicit pressure dependence). See Chapter 6.
 
-8. **Heat-of-reaction sign mapping to reference codes.** Internally $h>0$ is
+7. **Heat-of-reaction sign mapping to reference codes.** Internally $h>0$ is
    endothermic ($Q_\mathrm{rxn}=-\sum_r h_r r_r$), whereas ThermaKin/Gpyro publish
    $h>0$ as exothermic. Users porting parameters from those codes must flip the
    sign (Chapter 2, overload note H1; Chapter 6).

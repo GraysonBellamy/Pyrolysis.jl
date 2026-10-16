@@ -1,5 +1,5 @@
 """
-The `BCMassOperator` — the boundary-condition mass contribution extracted from the residual.
+The `BCMassOperator` — the boundary-condition mass contribution to the residual.
 
 Owns the species rows of the boundary-face gas mass flux. The transport
 operators ([`GasTransportOperator`](@ref) / [`DarcyTransportOperator`](@ref))

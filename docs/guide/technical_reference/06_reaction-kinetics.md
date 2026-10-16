@@ -44,7 +44,7 @@ Here
   generally with units that make $r_i$ come out in kg·m⁻³·s⁻¹ — see §6.4),
 - $E_i$ is the activation energy (J·mol⁻¹),
 - $R_g = 8.31446261815324$ J·mol⁻¹·K⁻¹ is the universal gas constant
-  (`R_GAS`, src/Materials/constants.jl:8),
+  (`R_GAS`, src/Materials/constants.jl),
 - $n_{i,j}$ is the reaction order of reaction $i$ with respect to reactant $j$
   ($n_{i,j} \ge 0$, enforced at construction),
 - $\tanh(\xi_j/\xi_{\mathrm{th}})$ is the smooth **depletion rate factor**
@@ -57,14 +57,14 @@ $\prod_j \xi_j^{n_{i,j}}\tanh(\xi_j/\xi_{\mathrm{th}})$ is exact and is exploite
 directly by the code:
 
 ```julia
-k = rxn.A * exp(-rxn.E / (R_GAS * T))     # kinetics.jl:60
+k = rxn.A * exp(-rxn.E / (R_GAS * T))
 ```
 
 The rate constant carries the classical Arrhenius physical interpretation: $A_i$
 is the collision/attempt frequency (modulated by an entropic steric factor), and
 $\exp(-E_i/R_g T)$ is the Boltzmann fraction of molecular configurations that
 surmount the activation barrier $E_i$. Both $A_i$ and $E_i$ are stored as plain
-`Float64` scalars on the `Reaction` struct (src/Materials/reactions.jl:61–62), so
+`Float64` scalars on the `Reaction` struct (src/Materials/reactions.jl), so
 they are temperature-independent constants — see §6.10 for the consequences.
 
 **Mass-concentration (not molar) basis.** The composition dependence in (6.1) is
@@ -86,7 +86,7 @@ condensed-phase pyrolysis literature (ThermaKin, Gpyro, FDS all do the same — 
 The finite-volume discretisation (§13, Finite-Volume Discretization) collocates
 all state at cell centres. Within `compute_rhs!` the reaction model is evaluated
 once per cell from the cell-centred state $(T, \xi_1,\dots,\xi_{N_C})$
-(src/Discretization/finite_volume.jl:279–296):
+(src/Discretization/finite_volume.jl):
 
 ```julia
 T = state.T[i]
@@ -102,14 +102,14 @@ all spatial coupling enters through transport (conduction §7, gas diffusion/Dar
 each control volume behaves, kinetically, like an isolated TGA sample, identical
 to the Gpyro and FDS interpretation (§6.9).
 
-The single-reaction kernel is `reaction_rate` (src/Physics/kinetics.jl:75–111). It
+The single-reaction kernel is `reaction_rate` (src/Physics/kinetics.jl). It
 is fully scalar-type-generic (`<:Real` arguments), so `ForwardDiff.Dual` numbers
 propagate cleanly through it for Jacobian and sensitivity work (§15, §17).
 
 > **Implementation note.** Single-reaction rate: `reaction_rate`,
-> src/Physics/kinetics.jl:75. All-reaction evaluation: `evaluate_reactions!`
+> src/Physics/kinetics.jl. All-reaction evaluation: `evaluate_reactions!`
 > dispatching to the `@generated` kernel `_evaluate_reactions_gen!`,
-> src/Physics/kinetics.jl:109–142.
+> src/Physics/kinetics.jl.
 
 ---
 
@@ -220,8 +220,8 @@ either narrow the gate or offset $T_{\min}$ to recentre the ramp.
 As a reactant is consumed, $\xi_j \to 0$. For a first-order reaction ($n_{i,j}=1$)
 the bare rate $r_i = k_i(T)\,\xi_j$ approaches zero linearly, which is benign. But
 the **Jacobian entry** $\partial r_i/\partial \xi_j = k_i(T)$ does not vanish: at
-high temperature $k_i(T)$ can be enormous ($A_i$ ranges over $10^8$–$10^{20}$ s⁻¹,
-src/Materials/constants.jl:28). A control volume holding a numerically tiny,
+high temperature $k_i(T)$ can be enormous ($A_i$ ranges over $10^8$–$10^{20}$ s⁻¹
+in typical fits). A control volume holding a numerically tiny,
 possibly slightly-negative-from-roundoff residue of reactant therefore presents
 the implicit solver with a stiff, fast-relaxing mode whose eigenvalue is
 $-k_i(T)$ even though essentially no mass remains to react. This manifests as
@@ -257,14 +257,14 @@ if limiter.enabled
 end
 ```
 
-(src/Physics/kinetics.jl:89–95). The `max(ξ, 0)` clip guarantees a non-negative
+(src/Physics/kinetics.jl). The `max(ξ, 0)` clip guarantees a non-negative
 base for the power even if the integrator transiently produces $\xi_j < 0$, and
 it pins the depletion factor at $\tanh 0 = 0$ there — an overshooting cell
 consumes nothing. `_depletion_factor` short-circuits to `one(ξ)` above
 $20\,\xi_{\mathrm{th}}$, which is **bit-identical** to evaluating the `tanh`
 (Float64 `tanh(x)` rounds to exactly `1.0` for $x \gtrsim 19.1$), so the common
 path — bulk concentrations orders of magnitude above the threshold — pays no
-transcendental (src/Physics/kinetics.jl:68–73).
+transcendental (src/Physics/kinetics.jl).
 
 Applying the factor to the rate rather than substituting an effective
 concentration into the power-law base matters for low orders: a base-applied
@@ -358,7 +358,7 @@ $$
 
 Each reactant is stored as an `(component_index, reaction_order)` pair in the
 `reactants::NTuple{NRin, Tuple{Int,Float64}}` field
-(src/Materials/reactions.jl:59), so the order $n_{i,j}$ is a **`Float64`** and may
+(src/Materials/reactions.jl), so the order $n_{i,j}$ is a **`Float64`** and may
 be non-integer (e.g. $n=0.5$, $n=1.5$, common in TGA fits and in nucleation/
 diffusion reaction models). Orders must satisfy $n_{i,j} \ge 0$ — negative
 orders are rejected at construction (§6.3.3). The tuple is iterated with the
@@ -371,7 +371,7 @@ most common orders:
 @inline _fast_pow(x::Real, n::Real) = n == 1 ? x : (n == 0 ? one(x) : x^n)
 ```
 
-(src/Physics/kinetics.jl:66). For $n=1$ it returns $x$ directly (no `pow` call);
+(src/Physics/kinetics.jl). For $n=1$ it returns $x$ directly (no `pow` call);
 for $n=0$ it returns `one(x)` — a zero-order reactant contributes no
 concentration dependence to the power law, but its depletion factor
 $\tanh(\xi/\xi_{\mathrm{th}})$ still gates the rate to zero as it runs out
@@ -384,7 +384,7 @@ initialised at the promoted scalar type so Duals carry through:
 conc_factor = one(promote_type(eltype(ξ), typeof(T)))
 ```
 
-(src/Physics/kinetics.jl:89).
+(src/Physics/kinetics.jl).
 
 **Units of the pre-exponential.** Dimensional consistency of (6.1) forces
 
@@ -396,7 +396,7 @@ $$
 
 For a first-order single reactant ($\sum_j n_{i,j}=1$) this reduces to s⁻¹; for a
 second-order/bimolecular case it becomes m³·kg⁻¹·s⁻¹. The struct docstring records
-this convention ("[s⁻¹] or [m³/(kg·s)]", src/Materials/reactions.jl:37) but the
+this convention ("[s⁻¹] or [m³/(kg·s)]", src/Materials/reactions.jl) but the
 code does **not** check it — the user is responsible for supplying $A_i$ in units
 consistent with the chosen orders.
 
@@ -440,11 +440,11 @@ yields. The kernel that applies one reaction to the source vector is:
 end
 ```
 
-(src/Physics/kinetics.jl:182–191). The `NRin == 1` guard **errors at runtime** if
+(src/Physics/kinetics.jl). The `NRin == 1` guard **errors at runtime** if
 a multi-reactant reaction is ever applied — multi-reactant support would require
 extending the reactant tuple to a 3-ary `(idx, order, mass_stoich)` form so that a
 mass stoichiometry (not just a rate order) could be attached to each reactant
-(src/Materials/reactions.jl:43–49). Note the asymmetry baked into the model: a
+(src/Materials/reactions.jl). Note the asymmetry baked into the model: a
 reactant carries a rate **order** $n_{i,j}$ (how its concentration scales the
 rate) but its **mass** stoichiometry is fixed at $1$; a product carries a mass
 **yield** but no rate order (products never appear in $\Phi_i$).
@@ -510,7 +510,7 @@ validation utilities of §6.8 exist purely as diagnostics.
 
 The species source $S_j$ is the same expression for every phase; the phase
 distinction lives in the *conservation equation* into which $S_j$ is inserted, not
-in the kinetics. At final RHS assembly (src/Discretization/finite_volume.jl:403)
+in the kinetics. At final RHS assembly (src/Discretization/finite_volume.jl)
 the code calls `apply_species_residual_unrolled!`, which assembles
 
 $$
@@ -530,9 +530,9 @@ run-time branching. The full energy/species RHS assembly sequence is documented 
 §7, Heat Conduction, Convection & Energy Assembly.
 
 > **Implementation note.** Species source: `species_source_terms!` and the
-> `@generated` kernel `_species_source_terms_gen!`, src/Physics/kinetics.jl:159–242;
-> per-reaction application `_apply_reaction_source!`, src/Physics/kinetics.jl:182.
-> Build-time balance: `_validate_stoichiometry`, src/Materials/reactions.jl:90.
+> `@generated` kernel `_species_source_terms_gen!`, src/Physics/kinetics.jl;
+> per-reaction application `_apply_reaction_source!` (same file).
+> Build-time balance: `_validate_stoichiometry`, src/Materials/reactions.jl.
 
 ---
 
@@ -560,7 +560,7 @@ $$
 end
 ```
 
-(src/Physics/kinetics.jl:257–264). The single minus sign is the entire content of
+(src/Physics/kinetics.jl). The single minus sign is the entire content of
 the sign convention, and it is worth stating precisely because it is the most
 error-prone point in the whole model.
 
@@ -582,7 +582,7 @@ material:
 - **Exothermic** ($h_i < 0$, $r_i > 0$): $Q_{\mathrm{rxn}} = -h_i r_i > 0$ — the
   cell is heated, as char oxidation should.
 
-The source comment states this explicitly (src/Physics/kinetics.jl:251–255). In
+The source comment states this explicitly (src/Physics/kinetics.jl). In
 the energy equation $Q_{\mathrm{rxn}}$ enters additively on the right-hand side
 together with the conduction divergence, gas-advection source, and radiation
 source, and the whole is divided by the mixture volumetric heat capacity
@@ -590,12 +590,12 @@ $\rho c_p^{\mathrm{eff}}$ (every component; see §3, §5, §7):
 
 $$
 \frac{dT_{\mathrm{cell}}}{dt} =
-\frac{-\,(\nabla\!\cdot\! q_{\mathrm{cond}}) + S_{\mathrm{conv}} + S_{\mathrm{gen}}
+\frac{-\,(\nabla\!\cdot\! q_{\mathrm{cond}}) + S_{\mathrm{conv}}
 + Q_{\mathrm{rad}} + Q_{\mathrm{rxn}}}{\rho c_p^{\mathrm{eff}}}
 \tag{6.9}
 $$
 
-(src/Discretization/finite_volume.jl:393–400).
+(`compute_rhs!`, Step 8, src/Discretization/finite_volume.jl).
 
 **Units check.** $[h_i] = $ J·kg⁻¹ (per kg of first reactant) and $[r_i] = $
 kg·m⁻³·s⁻¹, so $[h_i r_i] = $ J·m⁻³·s⁻¹ $=$ W·m⁻³, the volumetric power density
@@ -606,7 +606,7 @@ $r_i$, and $h_i$ is the enthalpy per unit of that mass.
 ### 6.6.2 Temperature- and state-dependent heat
 
 $h_i$ is not restricted to a constant. The `heat::Ph` field is typed by any
-`AbstractPropertyFunction` (src/Materials/reactions.jl:63), and in
+`AbstractPropertyFunction` (src/Materials/reactions.jl), and in
 `evaluate_reactions!` the heat is evaluated with **both** $T$ and the full
 concentration tuple $\boldsymbol{\xi}$:
 
@@ -614,8 +614,8 @@ concentration tuple $\boldsymbol{\xi}$:
 heats[$i] = rxn.heat(T, ξ)   # Pass ξ for state-dependent heats
 ```
 
-(src/Physics/kinetics.jl:136). The two-argument call dispatches as follows
-(src/Materials/property_functions.jl:188–197):
+(src/Physics/kinetics.jl). The two-argument call dispatches as follows
+(src/Materials/property_functions.jl):
 
 - `ConstantProperty(h)` $\to h$ (the `(T,ξ)` method ignores both arguments);
 - `LinearProperty(a,b)` $\to a + bT$ (affine in temperature, $\xi$ ignored);
@@ -624,7 +624,7 @@ heats[$i] = rxn.heat(T, ξ)   # Pass ξ for state-dependent heats
   actually consumes $\boldsymbol{\xi}$.
 
 A constant heat is created by passing a number, an affine heat by passing a
-`(a,b)` tuple, through `to_property` (src/Materials/property_functions.jl:387–390):
+`(a,b)` tuple, through `to_property` (src/Materials/property_functions.jl):
 
 ```julia
 Reaction(:decomp, 1 => 2; A=8.5e12, E=188e3, h=870e3)          # ConstantProperty
@@ -645,26 +645,22 @@ h_{\mathrm{sorp}}(T,\boldsymbol{\xi}) =
 \qquad MC = 100\,\frac{\xi_{\mathrm{moist}}}{\sum_{k}\xi_k},
 $$
 
-encoded as a closure over the moisture index (src/Materials/property_functions.jl:
-158–162). Because the closure is passed $\boldsymbol{\xi}$ at evaluation, the
+encoded as a closure over the moisture index (src/Materials/property_functions.jl).
+Because the closure is passed $\boldsymbol{\xi}$ at evaluation, the
 sorption heat self-consistently rises as the wood dries — a behaviour impossible
 to represent with a temperature-only property. Calling a `StateDependentProperty`
-with only $T$ raises an error (src/Materials/property_functions.jl:199–203),
+with only $T$ raises an error (src/Materials/property_functions.jl),
 guaranteeing the state argument is never silently dropped.
 
-The midpoint-rule sensible-enthalpy helper $\Delta h(T_{\mathrm{hi}},T_{\mathrm{lo}})
-= c_p(\tfrac{T_{\mathrm{hi}}+T_{\mathrm{lo}}}{2})(T_{\mathrm{hi}}-T_{\mathrm{lo}})$
-(src/Materials/components.jl:515–518) is used for transpiration/gas-generation
-enthalpy bookkeeping (§7, §12), **not** for the reaction heat itself. Whether
-the reaction heat is "separate from" the sensible-enthalpy transport of the
-released gases is precisely the **datum question** of §6.6.3 — the partition
+Whether the reaction heat is "separate from" the sensible-enthalpy transport of
+the released gases is precisely the **datum question** of §6.6.3 — the partition
 between "chemical" and "sensible" enthalpy depends on the temperature at which
 $h_i$ is referenced.
 
 > **Implementation note.** Heat source: `reaction_heat_source`,
-> src/Physics/kinetics.jl:257. Heat evaluation with state:
-> `_evaluate_reactions_gen!`, src/Physics/kinetics.jl:136. Property dispatch:
-> src/Materials/property_functions.jl:188–197.
+> src/Physics/kinetics.jl. Heat evaluation with state:
+> `_evaluate_reactions_gen!` (same file). Property dispatch:
+> src/Materials/property_functions.jl.
 
 ### 6.6.3 The enthalpy datum: heats at reaction temperature vs the $T_{\text{ref}}$ datum
 
@@ -676,24 +672,25 @@ A heat of reaction is only defined relative to a **datum**: $h_i$ may be quoted
 - **at the fixed ambient datum** $T_{\text{ref}} = 298.15$ K —
   $h_i = \sum_j \nu_{ji}\,h_j(T_{\text{ref}})$, the formation-enthalpy style.
 
-The distinction is immaterial for the default `:standard` energy form: with
-heats at the local reaction temperature, subtracting the species equations
-from the total-enthalpy balance gives the **exact** temperature equation
+The energy equation (§3.3) uses the first. With heats at the local reaction
+temperature, subtracting the species equations from the total-enthalpy balance
+gives the **exact** temperature equation
 $\rho c_p\,\partial_t T = -\nabla\cdot q + S_{\text{conv}} + Q_{\text{rad}} +
-Q_{\text{rxn}}$ — no generation-sink term exists, because the gas products'
-sensible enthalpy $\Delta h_g(T, T_{\text{ref}})$ is already *inside*
-$h_i(T)$. The default form is therefore the consistent one for DSC-style
-heats (its only approximation is the dropped gas heat storage, ≈0.2%).
+Q_{\text{rxn}}$ — no further term exists, because the gas products' sensible
+enthalpy $\Delta h_g(T, T_{\text{ref}}) = \int_{T_{\text{ref}}}^{T} c_{p,g}\,\mathrm{d}T'$ is already *inside* $h_i(T)$.
 
-The distinction is **load-bearing** for `energy_form = :with_generation_sink`
-(§7.5): the sink $S_{\text{gen}} = -\sum_g \Delta h_g(T,T_{\text{ref}})\,
-\dot m_g'''$ is exactly the conversion term between the two datums, so it is
-consistent **only with $T_{\text{ref}}$-datum heats**. Enabling it with
-DSC-style heats subtracts the gas sensible enthalpy a *second* time —
-$\Delta h_g(900\,\text{K}, 298.15\,\text{K}) = 0.66$–$1.20$ MJ·kg⁻¹ for
-$c_{p,g} = 1.1$–$2.0$ kJ·kg⁻¹·K⁻¹, comparable to or larger than typical
-wood/polymer pyrolysis endotherms (0.1–0.9 MJ·kg⁻¹). `to_problem_def` emits a
-one-time warning when the sink is selected (src/Problem/adapter.jl).
+A heat quoted at the $T_{\text{ref}}$ datum is converted by Kirchhoff's law,
+$h_i(T) = h_i(T_{\text{ref}}) + \sum_j \nu_{ji}\,\Delta h_j(T, T_{\text{ref}})$,
+with the sum running over the reactant ($\nu = -1$) and the products; the
+converted heat can be supplied as a temperature-dependent heat property (§6.6.2).
+The conversion is the integral of the heat-capacity change across the reaction,
+$\int_{T_{\text{ref}}}^{T}\bigl(\sum_p y_{i,p}c_{p,p} - c_{p,\text{reactant}}\bigr)\,\mathrm{d}T'$.
+The gas products' share alone, $\Delta h_g(900\,\text{K}, 298.15\,\text{K}) =
+0.66$–$1.20$ MJ·kg⁻¹ for $c_{p,g} = 1.1$–$2.0$ kJ·kg⁻¹·K⁻¹, is largely offset by
+the reactant's, but a heat-capacity change of 0.5 kJ·kg⁻¹·K⁻¹ still shifts the heat
+by 0.3 MJ·kg⁻¹ at 900 K, comparable to typical wood/polymer pyrolysis endotherms
+(0.1–0.9 MJ·kg⁻¹). A $T_{\text{ref}}$-datum heat used unconverted mis-states the
+reaction endotherm by that integral.
 
 ---
 
@@ -701,51 +698,46 @@ one-time warning when the sink is selected (src/Problem/adapter.jl).
 
 The reaction model sits in the innermost loop of every residual and Jacobian
 evaluation, so it is engineered to allocate nothing and to specialise completely
-on the (compile-time-known) reaction and component counts $N_R$ and $N_C$. Three
-`@generated` kernels achieve this.
+on the (compile-time-known) reaction and component counts $N_R$ and $N_C$. Two
+`@generated` kernels and one inline reduction achieve this.
 
 **Rate and heat evaluation.** `evaluate_reactions!` forwards to
-`_evaluate_reactions_gen!` (src/Physics/kinetics.jl:122–142), which the compiler
+`_evaluate_reactions_gen!` (src/Physics/kinetics.jl), which the compiler
 expands into a flat block — one explicit `rates[i] = reaction_rate(...)` and
 `heats[i] = rxn.heat(T, ξ)` statement per reaction — with no run-time loop over
 the heterogeneous `reactions` tuple. Heterogeneity (each `Reaction` may have a
 different `NRin`, `NRout`, and heat property type) is therefore handled by static
 dispatch with no `Union` boxing and no allocation.
 
-**Species sources.** `species_source_terms!` zeroes the output and calls
-`_species_source_terms_gen!` (src/Physics/kinetics.jl:201–242), again unrolled to
-one `_apply_reaction_source!` per reaction. A second method accepts a plain `Int`
-for `NC` and routes to the same `@generated` kernel
-(src/Physics/kinetics.jl:213–222), which is the form called from `compute_rhs!`.
-There is also a tuple-returning variant (src/Physics/kinetics.jl:159–175) that
-builds the source in a stack-allocated `MVector` for local use.
+**Species sources.** `species_source_terms!(sources, rates, material)` zeroes the
+output and calls `_species_source_terms_gen!`, again unrolled to one
+`_apply_reaction_source!` per reaction. It is the single method, called from
+`compute_rhs!` and from the Jacobian operators that need the reaction sources.
 
 **Heat sum.** `reaction_heat_source` is a single `@inline` reduction over the
-pre-filled `rates`/`heats` vectors (src/Physics/kinetics.jl:257–264), promoting the
+pre-filled `rates`/`heats` vectors (src/Physics/kinetics.jl), promoting the
 accumulator type so Duals carry through.
 
 All three use the promoted scalar type so that, in a Dual-typed (AD) pass, the
 caches hold Duals and derivatives propagate end-to-end. The per-cell scratch
 (`rates`, `heats`, `dξ_rxn`, `Q_rxn`) lives in the RHS cache and is sized by
-$N_R$, $N_C$, and the cell count (src/Physics/source_terms.jl:59–95;
-src/Discretization/finite_volume.jl:123–154), so the hot loop reuses storage
+$N_R$, $N_C$, and the cell count (`RHSCache`,
+src/Discretization/finite_volume.jl), so the hot loop reuses storage
 across cells and time steps.
 
-> **Implementation note.** Generated kernels: `_evaluate_reactions_gen!`
-> (src/Physics/kinetics.jl:146), `_species_source_terms_gen!`
-> (src/Physics/kinetics.jl:249). Compile-time constants $N_C, N_R$ are the
+> **Implementation note.** Generated kernels: `_evaluate_reactions_gen!` and
+> `_species_source_terms_gen!` (src/Physics/kinetics.jl). Compile-time constants $N_C, N_R$ are the
 > `Material{NC,NR}` type parameters (src/Materials/materials.jl).
 
 ---
 
 ## 6.8 Validation Utilities
 
-The kinetics module ships several diagnostics. They are not in the production hot
-path; they exist to catch stoichiometry errors during model development.
+Stoichiometry errors are caught when a reaction is built (§6.5.3); two small
+diagnostics check a reaction afterwards.
 
-**`verify_stoichiometry(rxn; tol=1e-10)`** (src/Materials/reactions.jl:518–525)
-computes the mass-balance error of a single reaction via `mass_balance_error`
-(src/Materials/reactions.jl:503–511):
+**`verify_stoichiometry(rxn; tol=1e-10)`** computes the mass-balance error of a
+single reaction via `mass_balance_error`:
 
 $$
 \varepsilon_{\mathrm{mb}}(i) = \Bigl|\,1 - \textstyle\sum_p y_{i,p}\,\Bigr|.
@@ -754,41 +746,19 @@ $$
 For a single-reactant reaction it compares the implicit unit reactant mass against
 the product-yield sum; for $N_{\mathrm{in}} > 1$ it returns `NaN` (unsupported).
 The function warns and returns `false` if $\varepsilon_{\mathrm{mb}} > $ `tol`.
+`validate_problem`, which `solve` calls unless `validate = false`, checks that the
+material has at least one component and that every reactant and product index
+lies in $1..N_C$ (numeric reactions are not index-checked when the `Material` is
+built); with `strict = true` it also runs `verify_stoichiometry` over every
+reaction of the material.
 
-**`check_material_mass_balance(reactions; tol=1e-10)`**
-(src/Materials/reactions.jl:547–557) iterates `verify_stoichiometry` over a
-material's reaction tuple, returning `true` only if all balance.
+Symbolic reactions are resolved to integer indices by `resolve_reaction` against
+the component name→index map when the `Material` is built, so a reaction that
+names a non-existent component errors with a clear message before any solve.
 
-**`validate_material(m)`** (src/Materials/materials.jl:437–457) is called as part
-of material assembly: it checks $N_C \ge 1$, that every reactant/product index lies
-in $1..N_C$, and that each reaction passes `verify_stoichiometry` (warning on
-failure). Symbolic reactions are resolved to integer indices first by
-`resolve_reaction` against the component name→index map
-(src/Materials/reactions.jl:351–395), so a reaction that names a non-existent
-component errors with a clear message before any solve.
-
-**`validate_species_source_conservation(sources; rtol=1e-12)`**
-(src/Physics/kinetics.jl:296–304) audits a computed source vector at run time:
-
-$$
-\Bigl|\textstyle\sum_j S_j\Bigr| \le \mathrm{rtol}\cdot \max_j |S_j|,
-\qquad \max_j|S_j| \ \text{floored at}\ 1,
-$$
-
-with default $\mathrm{rtol} = 10^{-12}$ — a very tight relative tolerance
-appropriate because the sum is mathematically zero by construction (§6.5.3) and
-should fail only on a genuine bug. The checked wrapper
-`species_source_terms_checked!` (src/Physics/kinetics.jl:337–360) computes the
-sources, runs the audit, and either warns or (with `throw_on_error=true`) errors.
-For production runs the unchecked `species_source_terms!` is used directly; the
-audit's cost (one sum, one max) is negligible but pointless once a material is
-known-good.
-
-> **Implementation note.** `verify_stoichiometry`/`mass_balance_error`/
-> `check_material_mass_balance`: src/Materials/reactions.jl:503–557.
-> `validate_species_source_conservation`/`species_source_terms_checked!`:
-> src/Physics/kinetics.jl:296–360. Material-level validation:
-> `validate_material`, src/Materials/materials.jl:437.
+> **Implementation note.** `verify_stoichiometry`, `mass_balance_error`,
+> `resolve_reaction`: src/Materials/reactions.jl. `validate_problem`:
+> src/Problem/problem_validation.jl.
 
 ---
 
@@ -898,8 +868,8 @@ thus Gpyro's per-reactant-consumed heat (the $\Delta H_{\mathrm{sol}} =
 specify a heat "per kg of reactant consumed" — precisely our per-first-reactant
 basis (§6.6.1). Gpyro additionally separates sensible-enthalpy transport into the
 $\sum(\dot\omega_f - \dot\omega_d)h_i$ term of its gas energy equation; in
-Pyrolysis.jl that bookkeeping is the gas-advection / generation source machinery of
-§7, kept strictly separate from the chemical $h_i$.
+Pyrolysis.jl that bookkeeping is the gas-advection source $S_{\text{conv}}$ of
+§7 together with the reaction-temperature datum of $h_i$ (§6.6.3).
 
 ### 6.9.3 FDS
 
@@ -977,14 +947,14 @@ The kinetics model is deliberately the simplest one that covers the target
 applications (cone calorimetry, TGA/DSC/MCC idealisation, charring/non-charring/
 intumescent solids, moisture). Its boundaries, with the source-of-truth guards:
 
-1. **Single reactant only.** `_apply_reaction_source!` errors for $N_{\mathrm{in}}
-   > 1$ (src/Physics/kinetics.jl:183–185), and `mass_balance_error` returns `NaN`
-   for multi-reactant reactions (src/Materials/reactions.jl:504). True bimolecular
+1. **Single reactant only.** `_apply_reaction_source!` (src/Physics/kinetics.jl)
+   errors for $N_{\mathrm{in}} > 1$, and `mass_balance_error` returns `NaN`
+   for multi-reactant reactions (src/Materials/reactions.jl). True bimolecular
    chemistry (ThermaKin's COMP1·COMP2, char oxidation consuming a gaseous O₂
    reactant) is not representable. Extending it requires a 3-ary reactant tuple
    `(idx, order, mass_stoich)` so a mass stoichiometry can be attached to each
    reactant; the outer struct shape already anticipates this
-   (src/Materials/reactions.jl:43–49). Multi-step schemes are instead built as
+   (src/Materials/reactions.jl). Multi-step schemes are instead built as
    **sequences** of single-reactant reactions.
 
 2. **No oxygen or pressure dependence.** The rate (6.1) depends only on $T$ and
@@ -995,7 +965,7 @@ intumescent solids, moisture). Its boundaries, with the source-of-truth guards:
    transport/permeability block (§9), never the rate constant.
 
 3. **Constant pre-exponential and activation energy.** $A_i$ and $E_i$ are scalar
-   `Float64` fields (src/Materials/reactions.jl:61–62). There is no
+   `Float64` fields (src/Materials/reactions.jl). There is no
    temperature-dependent $A(T)$, no explicit $T^{n_t}$ power (FDS's fourth factor),
    no kinetic compensation rule $A(E)=A_0 e^{\beta E}$, and no isokinetic shift. A
    temperature-dependent rate constant would require wrapping the entire constant
@@ -1015,8 +985,7 @@ intumescent solids, moisture). Its boundaries, with the source-of-truth guards:
    be lowered (at some cost in stiffness) or the limiter disabled for
    validation.
 
-These limitations are consistent across the kinetics and materials knowledge
-bases; where a richer model is required (bimolecular oxidation, oxygen-sensitive
+These limitations are consistent across the kinetics and materials chapters; where a richer model is required (bimolecular oxidation, oxygen-sensitive
 char burnout, DAEM), the present architecture's chief virtue is that the
 allocation-free, AD-clean, compile-time-specialised kernels of §6.7 provide a
 clean foundation onto which the additional factors can be grafted without

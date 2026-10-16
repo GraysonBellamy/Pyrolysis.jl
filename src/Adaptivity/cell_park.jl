@@ -4,7 +4,7 @@ Parking a depleted cell.
 The mesh arrays keep their length for the whole solve. Live cells occupy
 `1:mesh.n_active_cells`, live nodes and faces `1:mesh.n_active_cells+1`; the
 slots above are ghosts that no kernel reads. Parking a cell merges its mass
-and condensed enthalpy into a neighbour and moves the freed slot into the
+and sensible enthalpy into a neighbour and moves the freed slot into the
 ghost range, so the live range stays contiguous and face
 `mesh.n_active_cells + 1` is always the exposed (top) boundary face.
 
@@ -51,7 +51,8 @@ slot into the ghost range. Returns the new live-cell count.
 Conservation: the component masses `V·ξⱼ` of both cells are summed into the
 keeper (`ξ_keep = (V_p ξ_p + V_k ξ_k) / V_keep`, with `V_keep = V_p + V_k`
 under ALE and the unchanged `V_k` on a fixed mesh), the temperature solves the
-condensed-enthalpy balance (`merge_temperatures_conservatively`), and
+sensible-enthalpy balance over every component
+(`merge_temperatures_conservatively`), and
 `mesh.m_dry_solid_initial` is summed into the keeper. The ghost slot carries
 the merged temperature, zero concentrations and — under ALE — zero volume.
 
@@ -62,7 +63,8 @@ only the top live cell may be parked; nothing shifts.
 
 The exposed boundary moves to face `n_live + 1` (`Face1D`/`Node1D` boundary
 flags and `mesh.boundary_faces[1]`), `mesh.n_active_cells` and
-`mesh.active_cell_mask` are updated, and the geometry cache is rebuilt.
+`mesh.active_cell_mask` are updated, and the cell volumes and centres are
+recomputed (`update_geometry!`).
 """
 function park_cell!(
     mesh::Mesh1D{NC},

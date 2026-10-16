@@ -1,12 +1,12 @@
 """
-Donor-side and limiter regression tests for the ALE advection scheme.
+Donor-side and limiter tests for the ALE advection scheme.
 
 The ALE correction is ADDED to the Eulerian RHS: dT/dτ = RHS + w·∂T/∂z, i.e.
 in standard form dT/dτ + c·∂T/∂z = RHS with apparent transport velocity
 c = −w. The donor (upwind) side must therefore follow the sign of −w:
 w > 0 → donor on the right (forward difference), w < 0 → donor on the left
-(backward difference). Selecting the donor on the sign of w (the historical
-defect) is anti-diffusive for both signs — stable-looking on smooth fields
+(backward difference). Selecting the donor on the sign of w instead is
+anti-diffusive for both signs — stable-looking on smooth fields
 but exponentially unstable on step profiles, which is why the translation
 tests below use a step.
 

@@ -7,8 +7,8 @@ Holds the foundational layer — the abstract
 type hierarchy, physical constants, temperature-dependent property functions,
 the component/material/reaction type system, and the radiation-model enum
 (`RadiationModel`, kept here for trait dispatch). The concrete boundary-condition
-types were split out into the `BoundaryConditions` module, which depends on this
-one for the abstract BC supertypes and property functions.
+types live in the `BoundaryConditions` module, which depends on this one for the
+abstract BC supertypes and property functions.
 
 This module provides:
 - Physical constants (R_GAS, STEFAN_BOLTZMANN, etc.)

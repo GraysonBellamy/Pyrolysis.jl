@@ -2,16 +2,15 @@
 # V-MMS-04 — induced-motion ALE manufactured solution (reaction-driven mesh)
 # =============================================================================
 #
-# The Tier-3 completion case: V-MMS-02/03 verify GCL + moving-mesh transport
+# V-MMS-02/03 verify GCL + moving-mesh transport
 # under PRESCRIBED motion (`w_override`) and deliberately bypass the θ
 # prefix-sum mesh velocity, the dilation correction −ξθ with θ ≠ 0, and the
 # structured geometry Jacobian. Here the kinetics are manufactured so the
 # rates are analytic on the manufactured fields and the motion is genuinely
 # REACTION-DRIVEN — no `w_override` — closing the kinetics→θ→w→geometry
 # chain and making both `DirectSolve` AND `ApproxSolve` valid backends. The
-# fixed-resolution ApproxSolve solve whose exact-error QoI sits next to
-# DirectSolve's is cross-cutting requirement 3 of the suite plan (quantify
-# ApproxSolve against a known-exact answer).
+# fixed-resolution ApproxSolve solve, whose exact-error QoI sits next to
+# DirectSolve's, quantifies ApproxSolve against a known-exact answer.
 #
 # ## Manufactured design (see exact/mms.jl, "Induced mesh motion")
 #
@@ -151,7 +150,7 @@ function _verification_case_vmms04()
                 "ξ_solid (z-varying, material frame)",
                 1,
                 600.0,
-                2.0e-6,  # 3× observed: 6.6e-7 (n=32, 2026-07-07)
+                2.0e-6,  # 3× observed: 6.6e-7 (n=32)
                 "solid rides the reaction-driven mesh: prefix-sum w + dilation −ξθ + material-frame source",
             ),
             (
@@ -188,12 +187,12 @@ function _verification_case_vmms04()
                 value = pos_err,
                 exact = z_exact,
                 error = pos_err,
-                tol = 5.0e-5,  # 3× observed: 1.6e-5 of the exact recession (n=32, 2026-07-07)
+                tol = 5.0e-5,  # 3× observed: 1.6e-5 of the exact recession (n=32)
                 comment = "|z_top − z*_top| / (L − z*_top); recession ≈ $(round(rec*1e3, sigdigits=3)) mm",
             ),
         )
 
-        # Cross-cutting requirement 3: ApproxSolve error against the SAME
+        # ApproxSolve error against the SAME
         # exact answer, side by side with DirectSolve's. Same resolution as
         # the CI run; the reduced (`:ale_reduced`) Jacobian profile changes
         # only Newton convergence, not the converged solution, so the exact
@@ -223,7 +222,7 @@ function _verification_case_vmms04()
                     name = "relative L∞ ξ_solid error (ApproxSolve), t=$(t_end) s",
                     value = err_s,
                     error = err_s,
-                    tol = 2.0e-6,  # 3× observed: 6.6e-7 (n=32, 2026-07-07) — matches DirectSolve
+                    tol = 2.0e-6,  # 3× observed: 6.6e-7 (n=32) — matches DirectSolve
                     comment = "requirement 3: ApproxSolve vs known-exact answer",
                 ),
             )
@@ -242,8 +241,9 @@ function _verification_case_vmms04()
         return out
     end
 
-    # Convergence on the solid channel — the field that exercises the new
-    # machinery (kinetics→geometry chain + material-frame source).
+    # Convergence on the solid channel — the field that exercises the
+    # induced-motion machinery (kinetics→geometry chain + material-frame
+    # source).
     function l2_xi_s_final(sol)
         m = length(sol.t)
         t = sol.t[m]
@@ -256,7 +256,8 @@ function _verification_case_vmms04()
         title = "Induced-motion ALE manufactured solution (reaction-driven mesh)",
         tags = [:mms, :ale, :kinetics, :order_verification, :approx_jacobian],
         references = [
-            "docs/Verification_Suite_Plan_2026-07-06.md Tier 3 + cross-cutting requirement 3",
+            "Roache, Verification and Validation in Computational Science (MMS methodology)",
+            "docs/guide/technical_reference/18_verification-validation.md §18.2 (MMS driver, ALE cases)",
         ],
         build = build,
         solve_kwargs = (abstol = 1e-10, reltol = 1e-8),
@@ -266,7 +267,7 @@ function _verification_case_vmms04()
             n_cells = 32,
             budget_s = 60.0,
             convergence = ConvergenceSpec(
-                # observed rates 2.003, 2.007 (n = 16→32→64, 2026-07-07; L2 ξ_s errors
+                # observed rates 2.003, 2.007 (n = 16→32→64; L2 ξ_s errors
                 # 7.6e-4 → 1.9e-4 → 4.7e-5)
                 n_cells = [16, 32, 64],
                 error_fn = l2_xi_s_final,

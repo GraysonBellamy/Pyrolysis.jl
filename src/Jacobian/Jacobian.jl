@@ -5,16 +5,16 @@ Operator-based Jacobian assembly and solve strategies.
 
 This module provides:
 - [`JacobianBackend`](@ref) — abstract supertype of every assembly strategy
-- [`JacobianSpec`](@ref) — the single user-facing handle, carried as a
-  keyword argument to `solve(...)`
+- [`JacobianSpec`](@ref) — a backend's sparsity patterns and cache, built by
+  `solve` for its own `(def, ws)` from the `jacobian = backend` keyword
 - [`compute_jacobian!`](@ref) — the dispatcher every backend hooks into via
   `_compute_jacobian!`
 - [`FastSparsityMap`](@ref) — O(1) sparse-write helper, used by every
   backend that writes into a `SparseMatrixCSC` directly
 
 The single production backend is `Structured` (`src/Jacobian/structured_backend.jl`);
-`DenseAD_ForwardDiff` (`dense_ad_reference.jl`) is preserved exclusively
-as the reference path used by `verify_jacobian_at`. Sparsity construction
+`DenseAD_ForwardDiff` (`dense_ad_reference.jl`) is the reference path used by
+`verify_jacobian_at`. Sparsity construction
 (`build_sparsity` and the four `_emit_*_pattern!` helpers) lives in
 `sparsity.jl`; verification (`verify_jacobian_at`) in `verify.jl`.
 """
@@ -38,11 +38,8 @@ include("fast_sparsity_map.jl")
 include("sparsity.jl")
 
 # ============================================================================
-# Layered architecture — Layer 1 / 2 / 3.
-#
-# These files provide the operator interface, structured-Jacobian operator,
-# structured-coupling types, and linear-solve strategies that the Jacobian
-# path is built on.
+# The operator interface, the structured Jacobian, its coupling types and the
+# assembly strategies, then the operators and the `Structured` backend.
 # ============================================================================
 include("strategies.jl")
 include("structured_couplings.jl")
@@ -86,12 +83,11 @@ export build_sparsity
 # can construct a reference spec.
 export DenseAD_ForwardDiff
 
-# Rebuilt-architecture backend and its strategies — the production path.
+# The production backend and its strategies.
 export Structured
 export LinearSolveStrategy, DirectSolve, ApproxSolve
 
-# Operator interface (Layer 1) — visible so tests / downstream phases can
-# define their own operators.
+# Operator interface — visible so tests can drive individual operators.
 export Operator
 export ReactionSourceOperator, build_reaction_source_workspace
 export ConductionOperator, build_conduction_workspace

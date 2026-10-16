@@ -7,12 +7,12 @@ using Pyrolysis.Jacobian:
 include(joinpath(@__DIR__, "..", "perf", "perf_helpers.jl"))
 
 # ---------------------------------------------------------------------------
-# Helpers for fix-specific Jacobian regression tests.
+# Helpers for targeted Jacobian chain-rule tests.
 #
-# These mutate the state vector to drive the system into regimes where the
-# fix in question changes the structured Jacobian — verify_jacobian_at then
-# checks that the `Structured` backend agrees with `DenseAD_ForwardDiff`
-# (the verifier reference) there.
+# These mutate the state vector to drive the system into regimes where a
+# specific chain-rule term of the structured Jacobian is non-trivial —
+# verify_jacobian_at then checks that the `Structured` backend agrees with
+# `DenseAD_ForwardDiff` (the verifier reference) there.
 # ---------------------------------------------------------------------------
 
 # Pack (T, ξ_1, ξ_2, ...) into u given the standard layout:
@@ -100,8 +100,8 @@ function _set_gas_rich_state!(u, n_cells)
     return u
 end
 
-@testset "Jacobian regression fixes" begin
-    @testset "Structured excludes gas from rho-cp derivatives" begin
+@testset "Jacobian chain-rule terms" begin
+    @testset "Structured matches DenseAD at the baseline Eulerian state" begin
         def, ws, u, _ = build_baseline_eulerian()
         ref_spec = JacobianSpec(DenseAD_ForwardDiff(), def, ws)
         spec = JacobianSpec(Structured(strategy = DirectSolve()), def, ws)
@@ -119,13 +119,11 @@ end
     end
 
     # -----------------------------------------------------------------------
-    # Fix 1: T_min / T_max tanh-window derivative
+    # T_min / T_max tanh-window derivative
     #
     # The Arrhenius rate is multiplied by 0.5(1+tanh(T-T_min)) and
-    # 0.5(1+tanh(T_max-T)). Evaluating the analytical Jacobian within the
-    # windows but close to either edge (sech² is non-trivial only there)
-    # fails without the chain-rule additions in
-    # `evaluate_reaction_derivatives!`.
+    # 0.5(1+tanh(T_max-T)). The window's sech² slope is non-trivial only
+    # close to either edge, so the structured Jacobian is checked there.
     # -----------------------------------------------------------------------
     @testset "Structured includes T_min/T_max tanh-window derivative" begin
         # Lower-edge case: T = 750, T_min = 749 → tanh(1) regime, ~24% correction.
@@ -194,10 +192,10 @@ end
     end
 
     # -----------------------------------------------------------------------
-    # Fix 2: Sutherland viscosity path in Darcy ∂v_gas/∂T
+    # Sutherland viscosity path in Darcy ∂v_gas/∂T
     #
-    # Without the µ(T) chain-rule term, ∂v_gas/∂T misses ~60% of its
-    # magnitude at T ≈ 1000 K. Drive the wood-like Darcy problem to a
+    # The µ(T) chain-rule term carries ~60% of the magnitude of ∂v_gas/∂T
+    # at T ≈ 1000 K. Drive the wood-like Darcy problem to a
     # high-T, non-zero-gas state so the pressure gradient (and hence the
     # viscosity contribution) is non-trivial.
     # -----------------------------------------------------------------------
@@ -244,11 +242,11 @@ end
     end
 
     # -----------------------------------------------------------------------
-    # Fix 3: Eulerian dS_dξ scratch slice consistency ([:,:,1] → [:,:,i])
+    # Eulerian dS_dξ per-cell scratch slices
     #
     # Spot-check at a non-default state where reaction rates differ
     # between cells. With a uniform u, every cell's slot would be written
-    # identically and the slice-index bug would be invisible — so impose a
+    # identically and a wrong slice index would be invisible — so impose a
     # linear T gradient across the column and a non-zero gas concentration.
     # -----------------------------------------------------------------------
     @testset "Structured Eulerian dS_dξ uses per-cell scratch slice" begin
@@ -282,17 +280,14 @@ end
     end
 
     # -----------------------------------------------------------------------
-    # Fix 6: apply_limiter type-stable for Real (was Float64-only)
+    # apply_limiter accepts Real (Dual) arguments
     #
     # At default state ws.w_work ≈ 0 and gradients are zero, so the
-    # `_limited_gradient` early-return on `abs(grad_1) < 1e-20` skips the
-    # `apply_limiter` call. AD then never hits the type wall. With a
-    # non-uniform T ramp + non-zero shrinkage rate, AD propagates Duals
-    # through `apply_limiter`, which previously errored
-    # (MethodError: apply_limiter(::Dual, ::Limiter)).
-    #
-    # This test fails to even compute the AD reference Jacobian without
-    # the fix, so passing here is a regression guard.
+    # `_limited_gradient` early return on a flat far-side slope skips the
+    # `apply_limiter` call. With a non-uniform T ramp + non-zero shrinkage
+    # rate, AD propagates Duals through `apply_limiter`; a Float64-only
+    # method would throw MethodError: apply_limiter(::Dual, ::Limiter), so
+    # computing the AD reference Jacobian at all is the check.
     # -----------------------------------------------------------------------
     @testset "apply_limiter accepts Dual (AD-through-ALE-residual)" begin
         def, ws, u, _ = build_ale_no_radiation()
@@ -308,8 +303,8 @@ end
             u[off_v+i] = 800.0
             u[off_g+i] = 1.5
         end
-        # Just computing the AD reference (which runs the residual on
-        # Dual numbers) was the failure mode.
+        # Computing the AD reference runs the residual on Dual numbers
+        # through `apply_limiter`.
         ref_spec = JacobianSpec(DenseAD_ForwardDiff(), def, ws)
         J_ref = zeros(Float64, length(u), length(u))
         @test_nowarn Pyrolysis.Jacobian.compute_jacobian!(J_ref, ref_spec, u, def, 0.0, ws)

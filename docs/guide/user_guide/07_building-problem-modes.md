@@ -78,7 +78,8 @@ problem = PyrolysisProblem(
 ```
 
 > The component count passed to the mesh (`Val(2)`) **must** equal the number of
-> components in the material. The validator (§7.9) checks this.
+> components in the material. The validator (§7.9) checks that `ξ_initial` has
+> one closure per material component.
 
 ### 7.1.2 Initial conditions
 
@@ -106,7 +107,8 @@ problem = PyrolysisProblem(
 )
 ```
 
-Several spatial-profile helpers are exported for non-uniform initial states:
+Several spatial-profile helpers are exported by the `Problem` submodule (import them
+with `import Pyrolysis.Problem: linear_profile`, §5.10.3) for non-uniform initial states:
 `step_profile`, `linear_profile`, `gaussian_profile`, and `tanh_profile`. For
 example, a warm front pre-heated near the top surface (`z = L`):
 
@@ -209,7 +211,7 @@ recession matters for the surface temperature and mass-loss rate. For a TGA-like
 or thin-film case where geometry change is negligible, Eulerian is cheaper and
 simpler.
 
-ALE adds work arrays, mesh-velocity integration, advection corrections, and a
+ALE adds work arrays, mesh-velocity integration, the dilation correction, and a
 geometric-conservation-law-exact volume update; the geometry is recomputed from
 the node positions at every residual evaluation. Bottom node 1 is pinned
 (`w_1 = 0`): the substrate is immobile and the material moves as it shrinks or
@@ -436,57 +438,48 @@ law, and §11 for how `θ_A` couples into ALE mesh motion.
 
 ---
 
-## 7.7 Energy form (`energy_form`) and the transpiration caveat
+## 7.7 The energy equation
 
-Separate from the four trait axes, a runtime option selects the bulk energy
-formulation. It is passed as the `energy_form` keyword to `solve`:
+The energy equation is the same in every mode; the four trait axes change how its
+terms are computed, not which terms appear:
 
-| Value | Meaning |
-|---|---|
-| `:standard` (default) | Formulation A. The volumetric gas-advection source `S_conv = −Σ_g c_{p,g} J_g ∂T/∂z` is active; the gas-generation enthalpy-divergence term is dropped. This is the ThermaKin convention, exact for heats of reaction quoted at the reaction temperature. |
-| `:with_generation_sink` | Adds the gas-generation enthalpy sink `S_gen = −Σ_g Δh_g(T_i,T_ref)(∇·J_g)_i` as an extra cell source — a *partial* move toward conservative form. **Requires T_ref-datum reaction heats** (see warning below). |
-
-```julia
-sol = solve(problem)                                   # :standard (default)
-sol = solve(problem; energy_form = :with_generation_sink)
+```
+ρc_p ∂T/∂t = −∇·q + S_conv + Q_rad + Q_rxn
 ```
 
-`energy_form` is a runtime field, not a trait — it adds one additive term and is
-cheaper to branch on at run time than to compile as a separate method. Any value
-other than these two raises an `ArgumentError` at problem construction.
+Here `ρc_p` sums every component, pore gas included; `−∇·q` is conduction;
+`S_conv = −Σ_g c_{p,g} J_g ∂T/∂z` carries the sensible enthalpy of the gas flux
+relative to the skeleton; `Q_rad` is the volumetric radiation source
+(`BEER_LAMBERT` only); and `Q_rxn = −Σ_r h_r r_r` is the reaction heat. This is
+the ThermaKin convention (Technical Reference §3 and §7).
 
-> **Warning — `:with_generation_sink` is datum-dependent.** The sink is
-> consistent only when every reaction heat `h` is referenced to the
-> `T_ref ≈ 298.15 K` ambient datum (formation-enthalpy style). If your heats
-> are DSC-style values quoted at the reaction temperature — the usual meaning
-> of calibrated heats, including anything ported from ThermaKin or Gpyro —
-> the gas products' sensible enthalpy is already inside `h`, and enabling the
-> sink subtracts it a **second** time (≈0.7–1.2 MJ per kg of volatiles at
-> 900 K, comparable to the heat of pyrolysis itself). In that case
-> `:standard` is the exact form; leave the default alone. A one-time warning
-> is emitted when the sink is selected (Technical Reference §6.6.3, §7.5.4).
+**Reaction heats are DSC-style.** A heat `h` measured by DSC, or calibrated in
+ThermaKin or Gpyro, is quoted at the reaction temperature, so it already contains
+the gas products' sensible enthalpy at that temperature. The energy equation
+therefore has no separate gas-generation enthalpy term. Such a term,
+`−Σ_g Δh_g(T, T_ref)(∇·J_g)`, belongs only with heats referenced to the
+`T_ref ≈ 298.15 K` ambient datum (formation-enthalpy style); with DSC-style heats
+it would subtract the gas products' sensible enthalpy a second time (≈0.7–1.2 MJ
+per kg of volatiles at 900 K, comparable to the heat of pyrolysis itself). If
+your heats are referenced to the ambient datum, convert them to the reaction
+temperature before use (Technical Reference §6).
 
-### 7.7.1 Do not enable the surface transpiration BC with the default convention
+### 7.7.1 No surface gas-enthalpy term
 
-There is a fourth `solve` keyword, `use_transpiration_bc` (default `false`),
-which would fold a surface transpiration enthalpy term `Σ_g ṁ_g Δh_g(T_s, T_∞)`
-into the boundary energy balance. **It is rejected at problem construction**:
-setting `use_transpiration_bc = true` throws an `ArgumentError`. The reason is a
-double-count. The volumetric advection source `S_conv` is *always* active (in
-both energy forms); the surface transpiration term overlaps it by exactly
-`∫S_conv`, producing a spurious sink of order 5–10 kW/m² that under-predicts
-surface temperature and mass-loss rate. The supported convention is `S_conv` only
-(`use_transpiration_bc = false`) with a plain convective + radiative boundary
-condition. The transpiration path is retained for closed-ledger experiments only
-and must never be combined with the volumetric source. See Technical Reference
-§7.6 and §16.4 for the energy-balance accounting.
+The boundary energy balance contains no gas-enthalpy term: the applied BC flux
+equals the conducted flux (§5.4). A surface term `Σ_g ṁ_g Δh_g(T_s, T_∞)` would
+overlap the always-active volumetric source by exactly `∫S_conv`, a spurious sink
+of order 5–10 kW/m² that under-predicts surface temperature and mass-loss rate.
+Use a plain convective + radiative boundary condition; the escaping gas
+influences the boundary only through the blowing model of a `ConvectiveBC`
+(§5.2.3). See Technical Reference §7 and §16 for the energy-balance accounting.
 
 ---
 
 ## 7.8 How modes map to the residual paths
 
-The four trait axes plus the energy form fully determine the discrete RHS the
-solver integrates. The two mesh-motion paths are the primary fork:
+The four trait axes fully determine the discrete RHS the solver integrates. The
+two mesh-motion paths are the primary fork:
 
 - **Eulerian path** — geometry is constant. The residual populates the typed
   state cache, updates properties, computes the physics RHS (dispatched on
@@ -504,7 +497,7 @@ Radiation, transport, and cross-section are handled by compile-time dispatch
 *within* those two paths. The net effect is a small, type-stable set of
 specialized residuals selected entirely by the mode bundle — you do not choose a
 "path" directly; you choose the axes and the path follows. See Technical Reference
-§15.1–§15.3 for the dispatch and the full ALE assembly sequence.
+§15.1–§15.4 for the dispatch and the full ALE assembly sequence.
 
 ---
 
@@ -513,8 +506,8 @@ specialized residuals selected entirely by the mode bundle — you do not choose
 Before solving, run the validator to catch structural mistakes early:
 
 ```julia
-validate_problem(problem)                 # throws on any error, returns true if OK
-validate_problem(problem; strict = true)  # adds expensive checks (see below)
+Pyrolysis.Problem.validate_problem(problem)                 # throws on any error, returns true if OK
+Pyrolysis.Problem.validate_problem(problem; strict = true)  # adds expensive checks (see below)
 ```
 
 `solve` calls `validate_problem(problem; strict = false)` automatically unless you
@@ -523,19 +516,24 @@ pass `validate = false`. The default checks are:
 - the mesh has cells, nodes, faces, cell states, and initialized geometry;
 - the material has at least one component, and every reaction references valid
   component indices;
-- the mesh has the expected top (id 1) and bottom (id 2) boundaries;
+- the mesh has the expected top (id 1) and bottom (id 2) boundaries, and a
+  per-species `ξ_inf` tuple on a `ConvectiveMassBC` has one entry per component;
 - the time span is valid (`t_start < t_end`, `t_start ≥ 0`, positive `dt_initial`
   no larger than the span);
-- the number of initial concentration closures equals the component count.
+- the number of initial concentration closures equals the component count;
+- a Darcy–Fick material does not start with (near-)zero porosity in a cell whose
+  effective permeability is nonzero (§7.5.1).
+
+It also warns, without failing, when a gas-producing Fickian material has a
+condensed component with gas-transfer coefficient `λ = 0` (gas transport then
+vanishes wherever the gas fraction vanishes; give such components a small `λ`,
+e.g. `1e-6`). Errors are collected and thrown together in one message.
 
 `strict = true` additionally verifies reaction stoichiometric mass balance
 (product yields summing to 1.0), that the initial-condition closures are callable
 at `z = 0`, and that all cell volumes are positive.
 
-Two convenience helpers exist: `is_valid_problem(problem)` returns a `Bool`
-without throwing, and `check_consistency(problem)` returns a NamedTuple
-`(valid, messages)` describing component-count mismatches between mesh, material,
-and initial conditions.
+`Pyrolysis.Problem.is_valid_problem(problem)` returns a `Bool` without throwing.
 
 ---
 
@@ -544,13 +542,13 @@ and initial conditions.
 The table below is a quick recipe lookup. "auto" means the axis is inferred from
 the material, not set on `solve`.
 
-| Scenario | `use_ale` | `radiation_model` | transport (auto) | cross-section (auto) | `energy_form` |
-|---|---|---|---|---|---|
-| TGA / DSC-like (thin, no recession) | `false` | `NO_RADIATION` | Fickian (`κ = 0`) | NoChi (no law) | `:standard` |
-| Cone calorimeter, opaque char | `true` | `SURFACE_ABSORPTION` | Fickian or Darcy | NoChi or WithChi | `:standard` |
-| Cone calorimeter, semi-transparent polymer | `true` | `BEER_LAMBERT` (set `α`) | Fickian | NoChi | `:standard` |
-| Intumescent coating (swelling) | `true` | `SURFACE_ABSORPTION` | Darcy (`κ > 0`) | WithChi (swell law) | `:standard` |
-| Pressure-driven char / pressure-treated wood | `true` | `SURFACE_ABSORPTION` | Darcy (`κ > 0`) | NoChi or WithChi | `:standard` |
+| Scenario | `use_ale` | `radiation_model` | transport (auto) | cross-section (auto) |
+|---|---|---|---|---|
+| TGA / DSC-like (thin, no recession) | `false` | `NO_RADIATION` | Fickian (`κ = 0`) | NoChi (no law) |
+| Cone calorimeter, opaque char | `true` | `SURFACE_ABSORPTION` | Fickian or Darcy | NoChi or WithChi |
+| Cone calorimeter, semi-transparent polymer | `true` | `BEER_LAMBERT` (set `α`) | Fickian | NoChi |
+| Intumescent coating (swelling) | `true` | `SURFACE_ABSORPTION` | Darcy (`κ > 0`) | WithChi (swell law) |
+| Pressure-driven char / pressure-treated wood | `true` | `SURFACE_ABSORPTION` | Darcy (`κ > 0`) | NoChi or WithChi |
 
 ### 7.10.1 Worked example: TGA-like, minimal mode
 
@@ -573,7 +571,7 @@ bc_set = BoundaryConditionSet(
 problem = PyrolysisProblem(mesh = mesh, material = pmma, bc_set = bc_set,
                            tspan = (0.0, 600.0))
 
-sol = solve(problem)        # Eulerian, NoRadiation, Fickian, NoChi, :standard
+sol = solve(problem)        # Eulerian, NoRadiation, Fickian, NoChi
 ```
 
 ### 7.10.2 Worked example: cone calorimeter, opaque, recession + Darcy
@@ -615,7 +613,7 @@ problem = PyrolysisProblem(mesh = mesh, material = wood, bc_set = bc_set,
 sol = solve(problem;
             use_ale         = true,                 # recession
             radiation_model = SURFACE_ABSORPTION)   # opaque: deposit flux at surface
-# transport = DarcyFick (auto, from κ); cross-section = NoChi (no law); energy_form = :standard
+# transport = DarcyFick (auto, from κ); cross-section = NoChi (no law)
 ```
 
 For a production Darcy run, also initialize the pore gas with a background air
@@ -632,15 +630,15 @@ automatically — no change to the `solve` call is required.
 - A `PyrolysisProblem` bundles mesh, material, `bc_set`, initial conditions, and
   `tspan`/`output_times`. Component counts must agree across mesh, material, and
   initial conditions.
-- The active physics is the **simulation mode**: four trait axes plus the
-  `energy_form` option.
+- The active physics is the **simulation mode**: four trait axes.
   - *Mesh motion* (`use_ale`, default `false`) and *radiation*
     (`radiation_model`, default `NO_RADIATION`) are chosen at solve time.
   - *Gas transport* (Fickian vs. Darcy–Fick) and *cross-section* (NoChi vs.
     WithChi) are inferred automatically from the material — from component
     permeability `κ` and from `lateral_shrinkage_law`, respectively.
-- `energy_form = :standard` (default) is the canonical convention; the surface
-  transpiration BC is forbidden because it double-counts `S_conv`.
+- There is one energy equation, with gas enthalpy carried by `S_conv` and
+  DSC-style reaction heats; the boundary balance has no surface gas-enthalpy
+  term, which would double-count `S_conv`.
 - `validate_problem` (run automatically by `solve` unless `validate = false`)
   catches structural errors before integration.
 

@@ -1,6 +1,5 @@
 """
-The `Structured` backend — Layer-2 entry point for the rebuilt
-Jacobian architecture.
+The `Structured` backend: operator-by-operator Jacobian assembly.
 
 `Structured(strategy = DirectSolve())` produces a `JacobianSpec`
 backed by:
@@ -70,8 +69,8 @@ import ..Problem as PyProblem
 	Structured{S<:LinearSolveStrategy} <: JacobianBackend
 
 Backend that assembles a [`StructuredJacobian`](@ref) by walking an
-operator list. The strategy parameter `S` is propagated through
-`is_approximate` and consumed by the `ldiv!` chosen at solve time.
+operator list. The strategy parameter `S` fixes the assembly profile
+(`sparsity_profile`) and is reported by `is_approximate`.
 
 # Constructor
 `Structured(; strategy = DirectSolve())` — the standard form. The
@@ -92,6 +91,10 @@ is_approximate(::Structured{ApproxSolve}) = true
 # Cache types
 # ============================================================================
 
+# Every field is concretely typed (note `DefT`/`JacT` for the parametric
+# `ProblemDef`/`StructuredJacobian`): an abstractly-typed field here turns
+# every operator call in `_compute_jacobian!` into a dynamic dispatch that
+# boxes all of its arguments (about 5 KiB per Jacobian evaluation).
 """
 	StructuredOpsCache
 
@@ -127,11 +130,6 @@ per-operator AD cost.
   structured-coupling emission and the geometry AD pass.
 - `jac::StructuredJacobian`.
 """
-# Every field is concretely typed (note `DefT`/`JacT` for the parametric
-# `ProblemDef`/`StructuredJacobian`): an abstractly-typed field here turns
-# every operator call in `_compute_jacobian!` into a dynamic dispatch that
-# boxes all of its arguments — measured at ~5 KiB per Jacobian evaluation
-# before `jac` was parameterized.
 struct StructuredOpsCache{
     Mat,
     BCS,
@@ -157,7 +155,6 @@ struct StructuredOpsCache{
     layout::LayoutT
     mesh::MeshT
     radiation_model::RadiationModel
-    radiation_intensity::Float64
     radiation_kirchhoff::Bool
     is_ale::Bool
     assembly_profile::Symbol
@@ -223,7 +220,6 @@ function _build_ops_cache(
     is_with_chi = chi_mode(def.mode) isa PyProblem.WithChi
     rad = get_option(def, :radiation_model, NO_RADIATION)
     is_beer_lambert = rad == BEER_LAMBERT
-    radiation_intensity = Float64(get_option(def, :radiation_intensity, 0.0))
     radiation_kirchhoff = get_option(def, :radiation_kirchhoff, true)
     is_reduced = assembly_profile === :ale_reduced
 
@@ -279,7 +275,6 @@ function _build_ops_cache(
         layout,
         mesh,
         rad,
-        radiation_intensity,
         radiation_kirchhoff,
         is_ale,
         assembly_profile,
@@ -455,7 +450,7 @@ function _compute_jacobian!(
             cache.mesh,
             ws.prop_cache,
             cache.material,
-            cache.radiation_intensity,
+            ws.I_radiation,
             cache.radiation_model,
             cache.radiation_kirchhoff,
         )
@@ -477,7 +472,7 @@ function _compute_jacobian!(
             ws.prop_cache,
             cache.material,
             cache.layout,
-            cache.radiation_intensity,
+            ws.I_radiation,
             cache.radiation_model,
             cache.radiation_kirchhoff;
             assembly_profile = cache.assembly_profile,
@@ -565,6 +560,9 @@ function _compute_jacobian!(
     #    against the z subvector. Writes directly into `cache.jac.A` since
     #    the sparsity pattern includes the geometry columns.
     if cache.geom_cache !== nothing
+        # The AD workspace carries its own copy of the incident flux: it takes
+        # the value the caller set on `ws` for this `t`.
+        cache.geom_cache.ws_ad.I_radiation = ws.I_radiation
         contribute_to_jacobian!(cache.jac, GeometryOperator(), u, t, cache.geom_cache, def)
     end
 

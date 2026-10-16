@@ -5,8 +5,7 @@ Forward-mode automatic differentiation of the canonical `residual!` against
 the entire state vector, written into a dense `Matrix{Float64}`.
 
 This is the **`verify_jacobian` reference** — every other backend's output is
-compared against `DenseAD_ForwardDiff` at canonical sample points (Step
-B12/B13). It carries no sparsity assumption and no hand-coded math, so a
+compared against `DenseAD_ForwardDiff` at canonical sample points. It carries no sparsity assumption and no hand-coded math, so a
 discrepancy between this and any other backend is unambiguously a bug in
 the other backend.
 
@@ -102,6 +101,9 @@ function _compute_jacobian!(
     t,
     ws,
 )
+    # The Dual-typed workspace carries its own copy of the incident flux: it
+    # takes the value the caller set on `ws` for this `t`.
+    cache.ws_ad.I_radiation = ws.I_radiation
     # The closure dispatches `residual!` on the Dual-typed workspace so leaf
     # kernels see Duals end-to-end. `let` captures concrete bindings.
     f! = let def = def, ws_ad = cache.ws_ad, t = t

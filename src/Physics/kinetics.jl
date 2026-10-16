@@ -10,6 +10,17 @@ Reaction kinetics.
 # path never uses it — `evaluate_reactions!` reads `material.depletion_limiter`.
 const DEFAULT_DEPLETION_LIMITER = DepletionLimiter()
 
+# PERFORMANCE: Fast power function for common reaction orders (0, 1).
+# Scalar-type-generic so AD passes carry Duals through.
+@inline _fast_pow(x::Real, n::Real) = n == 1 ? x : (n == 0 ? one(x) : x^n)
+
+# tanh(x) rounds to exactly 1.0 in Float64 for x ≳ 19.1, so skipping the call
+# above 20·threshold is bit-identical to evaluating it. PERFORMANCE: bulk
+# concentrations sit orders of magnitude above the default 1 kg/m³ threshold,
+# so the common path pays no transcendental.
+@inline _depletion_factor(ξ::Real, threshold::Float64) =
+    ξ < 20.0 * threshold ? tanh(ξ / threshold) : one(ξ)
+
 """
 	reaction_rate(rxn::Reaction, ξ::NTuple{NC,Float64}, T::Float64;
 				  limiter=DEFAULT_DEPLETION_LIMITER) -> Float64
@@ -33,18 +44,6 @@ mirrored `T_max` form. The default width is 1.0 K; smaller widths approach the
 hard step (all Jacobian couplings differentiate through this function with
 ForwardDiff, so the width needs no derivative threading).
 """
-
-# PERFORMANCE: Fast power function for common reaction orders (0, 1).
-# Scalar-type-generic so AD passes carry Duals through.
-@inline _fast_pow(x::Real, n::Real) = n == 1 ? x : (n == 0 ? one(x) : x^n)
-
-# tanh(x) rounds to exactly 1.0 in Float64 for x ≳ 19.1, so skipping the call
-# above 20·threshold is bit-identical to evaluating it. PERFORMANCE: bulk
-# concentrations sit orders of magnitude above the default 1 kg/m³ threshold,
-# so the common path pays no transcendental.
-@inline _depletion_factor(ξ::Real, threshold::Float64) =
-    ξ < 20.0 * threshold ? tanh(ξ / threshold) : one(ξ)
-
 function reaction_rate(
     rxn::Reaction{NRin},
     ξ::NTuple{NC,<:Real},
@@ -70,10 +69,10 @@ function reaction_rate(
 
     r = k * conc_factor
 
-    # Smooth replacement for H(T - T_min) * H(T_max - T).
-    # Hard step previously here broke Newton/AD smoothness; a tanh ramp of
-    # width rxn.gate_width [K] keeps the bounds effective (≈1 inside, ≈0
-    # outside) while remaining differentiable.
+    # Smooth replacement for H(T - T_min) * H(T_max - T): a hard step would
+    # break Newton/AD smoothness, so a tanh ramp of width rxn.gate_width [K]
+    # keeps the bounds effective (≈1 inside, ≈0 outside) while remaining
+    # differentiable.
     if isfinite(rxn.T_min) && rxn.T_min > 0.0
         r *= 0.5 * (1 + tanh((T - rxn.T_min) / rxn.gate_width))
     end

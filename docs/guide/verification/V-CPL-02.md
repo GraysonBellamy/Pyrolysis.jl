@@ -5,7 +5,6 @@
 **References:**
 
 - H.G. Landau, Q. Appl. Math. 8:81 (1950)
-- Verification Suite Plan 2026-07-06, V-CPL-02
 
 ## Problem statement
 

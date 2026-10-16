@@ -5,7 +5,7 @@ reference for that object: the concrete fields it always carries, the typed `ext
 NamedTuple of opt-in diagnostics, the accessor functions for pulling out profiles and
 interpolating at arbitrary times, and the `Plots.jl` recipes shipped with the package.
 It closes with practical post-processing recipes — computing surface temperature and
-mass-loss rate, reading the conservation ledger, handling moving (ALE) meshes, and
+mass-loss rate, reading the diagnostics log, handling moving (ALE) meshes, and
 preparing curves for comparison against cone-calorimeter or TGA data. The numerics that
 produce these quantities are derived in the Technical Reference (energy assembly in
 Technical Reference §7, the boundary-temperature solve in §12, conservation diagnostics
@@ -53,14 +53,13 @@ snapshot across all of them.
 
 | Field | Type | Shape | Meaning / units |
 |---|---|---|---|
-| `problem` | `PyrolysisProblem` | scalar | The original problem (mesh, material, BCs) |
+| `problem` | `PyrolysisProblem` | scalar | The copy of the problem the run integrated; its mesh holds the final geometry |
 | `t` | `Vector{Float64}` | `(n_steps,)` | Saved solution times [s] |
 | `T` | `Matrix{Float64}` | `(n_cells, n_steps)` | Cell-center temperatures [K] |
 | `ξ` | `Array{Float64,3}` | `(NC, n_cells, n_steps)` | Mass concentrations `ξ_j` [kg·m⁻³] |
 | `z` | `Matrix{Float64}` | `(n_nodes, n_steps)` | Node positions [m]; `0×0` in Eulerian mode |
 | `surface_T` | `Vector{Float64}` | `(n_steps,)` | Top surface temperature `T_s` [K] |
 | `mass_loss_rate` | `Vector{Float64}` | `(n_steps,)` | MLR per current area (top + permeable-bottom) [kg·m⁻²·s⁻¹] |
-| `energy_residual` | `Vector{Float64}` | `(n_steps,)` | Energy-conservation residual; zeros if tracker off |
 | `retcode` | `Symbol` | scalar | ODE-solver return code |
 | `solve_time` | `Float64` | scalar | Wall-clock solve time [s] |
 | `raw_solution` | `Any` | — | Raw `DifferentialEquations.jl` solution (interpolation source) |
@@ -90,9 +89,9 @@ A few points worth internalizing:
   thickness-termination callback fired because the sample fully depleted),
   `:MaxIters`, `:DtLessThanMin`.
 
-- **`energy_residual`** is all zeros unless a conservation tracker wrote into it. It is the
-  series the `:residual` plot recipe consumes (§9.6). For the richer per-snapshot ledger,
-  enable `diagnostics=true` and read `extras.diagnostics_log` (§9.8).
+- **Parked cells read `NaN`.** With `handle_depletion = true`, a parked cell's slot in `T`,
+  `ξ` and (ALE) `z` reads `NaN` from the time it parks; `extras.live_cells` gives the live
+  count (§9.7, Chapter 10).
 
 ### Direct field access vs. accessors
 
@@ -143,21 +142,24 @@ quantities live.
 | `gas_generation_rate` | kg·m⁻²·s⁻¹ | Volumetric gas production integrated over the column, gauge-normalized |
 | `back_temperature` | K | Back-face (bottom) surface temperature at `z=0` |
 | `total_mass` | kg·m⁻² | Total domain mass per initial cross-section area |
-| `thickness_history` | m | Sample thickness `z[end]-z[1]`; constant in Eulerian mode |
+| `thickness_history` | m | Live sample thickness `z[n_live+1]-z[1]`; constant in Eulerian mode unless cells park |
 | `surface_mass_flux` | kg·m⁻²·s⁻¹ | Per-species summed **top-face** mass flux (excludes any bottom venting; cf. `mass_loss_rate`) |
-| `surface_heat_flux_net` | W·m⁻² | Heat flux the boundary balance applies at the top face (`net = conduction + transpiration`); under `BEER_LAMBERT` it excludes the incident radiation, which is reported in `volumetric_absorption` |
+| `surface_heat_flux_net` | W·m⁻² | Heat flux the boundary balance applies at the top face (equal to the conducted flux at convergence); under `BEER_LAMBERT` it excludes the incident radiation, which is reported in `volumetric_absorption` |
 | `surface_heat_flux_absorbed` | W·m⁻² | Absorbed incident (radiative) flux |
 | `surface_heat_flux_reradiation` | W·m⁻² | Re-radiation loss `εσ(T_∞⁴−T_s⁴)` |
 | `surface_heat_flux_convection` | W·m⁻² | Convective exchange `h_conv(T_∞−T_s)` |
 | `surface_heat_flux_conduction` | W·m⁻² | Heat conducted into the slab at the surface |
-| `surface_heat_flux_transpiration` | W·m⁻² | Enthalpy carried by escaping gas (zero with default S_conv) |
+| `surface_blowing_ratio`, `surface_pooling_factor`, `surface_face_fraction`, `surface_face_buoyancy` | – | Blowing-model state of the top `ConvectiveBC` (§5.2.3) |
 | `volumetric_absorption` | W·m⁻² | Beer–Lambert in-depth absorbed flux `α_surf·q_ext·(1−e^{−τ_tot})`; zero unless `radiation_model = BEER_LAMBERT` |
+| `radiation_transmitted` | W·m⁻² | Beer–Lambert flux leaving through the back face `α_surf·q_ext·e^{−τ_tot}`; zero unless `radiation_model = BEER_LAMBERT` |
 | `surface_emissivity` | – | Composition-weighted `ε_eff` at the surface |
 | `surface_conductivity` | W·m⁻¹·K⁻¹ | Effective surface conductivity `k_eff` |
 | `back_heat_flux` | W·m⁻² | Heat flux at the back face |
 | `MLR_gauge` | kg·m⁻²·s⁻¹ | MLR normalized to initial area `A_0` (cone gauge convention) |
 | `cross_section_area_history` | m² | Cross-section `A(t)` history (varies only in WithChi mode) |
-| `diagnostics_log` | — | `Vector{DiagnosticsRow}`; empty unless `diagnostics=true` (§9.8) |
+| `live_cells` | – | Live-cell count at each saved time (falls as cells park) |
+| `park_times` | s | Times of the park events (empty without depletion handling); not indexed by saved time |
+| `diagnostics_log` | — | `Vector{Any}` of `DiagnosticsRow`s; empty unless `diagnostics=true` (§9.8) |
 
 ```julia
 gen_rate  = solution.extras.gas_generation_rate    # kg/(m²·s)
@@ -255,12 +257,12 @@ extractors:
   positions (ALE layouts only).
 
 To rebuild a whole profile, loop over the cells. The `layout` comes from a freshly built
-workspace:
+workspace, set up with the same `use_ale` as the solve (the ALE layout carries the node
+positions after the concentrations):
 
 ```julia
-def     = to_problem_def(solution.problem)
-ws      = build_workspace(solution.problem, def)
-layout  = ws.layout
+def     = to_problem_def(solution.problem; use_ale = true)   # the solve's `use_ale`
+layout  = build_workspace(solution.problem, def).layout
 n_cells = layout.n_cells
 
 T_cells = [get_temperature(u_t, layout, i) for i in 1:n_cells]      # cell temperatures [K]
@@ -349,7 +351,7 @@ State this assumption plainly in any comparison; the proxy is only as good as `�
 The `PyrolysisPlotsExt` extension attaches a `Plots.jl` recipe for `PyrolysisSolution`. It
 loads automatically when both `Pyrolysis` and `Plots` (or `RecipesBase`) are present in your
 environment — no explicit `using PyrolysisPlotsExt`. The recipe interprets a `kind` keyword
-to route to one of four plot types; the default is the surface-temperature trace.
+to route to one of three plot types; the default is the surface-temperature trace.
 
 ```julia
 using Pyrolysis, Plots
@@ -359,7 +361,6 @@ solution = solve(problem)
 plot(solution)                      # default: surface temperature vs time
 plot(solution; kind = :surface_T)   # surface temperature vs time (explicit)
 plot(solution; kind = :mlr)         # mass-loss rate vs time
-plot(solution; kind = :residual)    # energy-conservation residual vs time
 plot(solution; kind = :heatmap)     # temperature field T(z, t) as a heatmap
 ```
 
@@ -367,19 +368,16 @@ plot(solution; kind = :heatmap)     # temperature field T(z, t) as a heatmap
 |---|---|---|---|
 | `:surface_T` (default) | `t` [s] | surface T [K] | `sol.t`, `sol.surface_T` |
 | `:mlr` | `t` [s] | MLR [kg·m⁻²·s⁻¹] | `sol.t`, `sol.mass_loss_rate` |
-| `:residual` | `t` [s] | energy residual [W·m⁻²] | `sol.t`, `sol.energy_residual` |
 | `:heatmap` | `t` [s] | cell index (depth) | `sol.t`, `axes(sol.T,1)`, `sol.T` |
 
 Any unrecognized `kind` raises an `ArgumentError` listing the valid options.
 
 Notes that follow from the recipe implementation:
 
-- The recipes consume only the fixed core schema (`t`, `T`, `surface_T`, `mass_loss_rate`,
-  `energy_residual`), so they work regardless of which `extras` you enabled.
+- The recipes consume only the fixed core schema (`t`, `T`, `surface_T`, `mass_loss_rate`),
+  so they work regardless of which `extras` you enabled.
 - `:mlr` plots `mass_loss_rate` (per current area). For the cone-gauge curve, plot
   `extras.MLR_gauge` yourself (see §9.5).
-- `:residual` plots `energy_residual`, which is zeros unless a conservation tracker filled
-  it; a flat line at zero simply means the tracker was off.
 - `:heatmap` uses **cell index** on the y axis, not physical depth. For a depth-resolved
   heatmap with metric units, build it yourself from `get_cell_positions` (Eulerian) or
   `solution.z` (ALE).
@@ -420,14 +418,14 @@ To plot a species field instead, swap `solution.T[:, i]` for `solution.ξ[k, :, 
 When you solve with `use_ale=true`, node positions become part of the state and the mesh
 recedes/expands in time (Technical Reference §11). This changes how you read profiles:
 
-- **`solution.z`** is now `(n_nodes, n_steps)` — node positions in metres at each saved
+- **`solution.z`** is `(n_nodes, n_steps)` — node positions in metres at each saved
   time. `n_nodes = n_cells + 1`.
 - **`solution.extras.thickness_history`** is the sample thickness `z[end] − z[1]` at each
-  time (it shrinks as the surface recedes). In Eulerian mode this is a constant equal to the
-  domain length.
-- If surface-cell **depletion** is enabled (`handle_depletion=true`, which requires
-  `use_ale=true`), the cell count drops over the run. The output arrays are pre-allocated at
-  the *maximum* cell count and rows for cells that no longer exist are filled with `NaN`.
+  time (it shrinks as the surface recedes). In Eulerian mode it is the domain length, less
+  any parked cells.
+- If surface-cell **depletion** is enabled (`handle_depletion=true`), the live cell count
+  drops over the run. The output arrays keep the full cell count and rows for parked cells
+  are filled with `NaN`.
   Always filter `NaN` before plotting or reducing a moving-mesh profile.
 - **`solution.extras.cross_section_area_history`** carries `A(t)` if you used a
   lateral-shrinkage law (WithChi mode); otherwise it stays at `A_0`.
@@ -476,14 +474,14 @@ callback fires when thickness drops below `min_thickness`), so `solution.retcode
 
 ## 9.8 Reading the conservation diagnostics
 
-Pass `diagnostics=true` to `solve` to log snapshots of the conservation ledger. The solver
-records a `DiagnosticsRow` every `diagnostics_stride` accepted steps (default 10) into
+Pass `diagnostics=true` to `solve` to log sensible-energy snapshots. The solver records a
+`DiagnosticsRow` every `diagnostics_stride` accepted steps (default 10) into
 `solution.extras.diagnostics_log` (Technical Reference §16).
 
 ```julia
 solution = solve(problem; diagnostics = true, diagnostics_stride = 10)
 
-log = solution.extras.diagnostics_log    # Vector{DiagnosticsRow}; empty if diagnostics=false
+log = solution.extras.diagnostics_log    # DiagnosticsRow entries; empty if diagnostics=false
 ```
 
 Each row is a typed `NamedTuple` with these fields:
@@ -493,16 +491,16 @@ Each row is a typed `NamedTuple` with these fields:
 | `t` | s | Simulation time of the snapshot |
 | `E_sensible` | J | Sensible energy `Σ ρc_p^eff T V` (every component) |
 | `energy_residual` | J | Energy-ledger residual |
-| `energy_relative` | – | `energy_residual` relative to `|E_sensible(0)|` |
+| `energy_relative` | – | `energy_residual` relative to `\|E_sensible(0)\|` |
 | `mass_max_relative_error` | – | Max relative mass-conservation error over components |
 
-**Important caveat about snapshot mode.** With `diagnostics=true`, `solve` uses the
-*snapshot* recorder, which evaluates only the instantaneous energy. In a snapshot row, the
-cumulative-ledger fields — `energy_residual`, `energy_relative`, `mass_max_relative_error`
-— are filled with `NaN`, because the cumulative source integrals are not accumulated in
-this path. The fields you can trust from `solve(...; diagnostics=true)` are `t` and
-`E_sensible`. The full cumulative residuals require wiring `record_substep!` into the
-residual layer, which is beyond the standard `solve` interface.
+**Snapshot rows carry no ledger.** With `diagnostics=true`, `solve` records snapshot rows,
+which evaluate only the instantaneous energy. In a snapshot row the cumulative-ledger
+fields — `energy_residual`, `energy_relative`, `mass_max_relative_error` — are `NaN`,
+because `solve` does not accumulate the source integrals. The fields you can use from
+`solve(...; diagnostics=true)` are `t` and `E_sensible`. Only `record_substep!`, driven
+step by step through a `DiagnosticsState`, fills the cumulative fields; that is outside
+the `solve` interface.
 
 Reading the energy history (Technical Reference §16):
 
@@ -518,14 +516,11 @@ If you want a true running energy balance with non-`NaN` residuals, the lower-le
 `using Pyrolysis.Internal`; that path is for advanced auditing and is described in the
 Technical Reference §16.
 
-A reminder tied to the energy convention (Technical Reference §7, §16): the default
-`energy_form = :standard` carries the enthalpy of the gas flux through the advection
-source `S_conv` and **excludes** a separate gas-generation sink. The surface transpiration BC is
-mutually exclusive with that convention — `solve` rejects `use_transpiration_bc=true` to
-avoid double-counting — so under default settings
-`extras.surface_heat_flux_transpiration` is zero. If you switch to
-`energy_form = :with_generation_sink`, the conservative-form sink is added back; the
-diagnostics ledger reflects whichever form you chose.
+A reminder tied to the energy convention (§7.7; Technical Reference §7, §16): the energy
+equation carries the enthalpy of the gas flux through the advection source `S_conv`, with
+DSC-style reaction heats and no separate gas-generation term, and the boundary balance has
+no surface gas-enthalpy term. An energy ledger therefore books the gas enthalpy through
+`S_conv` alone.
 
 ---
 
@@ -623,11 +618,10 @@ get_back_face_temperature(solution.problem.mesh)  # final-state bottom face T [K
 # Plotting recipes (need `using Plots`):
 plot(solution)                  # :surface_T (default)
 plot(solution; kind = :mlr)     # mass-loss rate
-plot(solution; kind = :residual)# energy residual
 plot(solution; kind = :heatmap) # T(z,t) by cell index
 ```
 
 See the Technical Reference for the physics behind these outputs: energy assembly and the
 `S_conv` convention (§7), the boundary-temperature Newton solve that produces `surface_T`
-(§12), ALE node motion behind `z` and `thickness_history` (§10, §11), and the dual energy
-ledgers behind the diagnostics rows (§16).
+(§12), ALE node motion behind `z` and `thickness_history` (§10, §11), and the energy
+ledger behind the diagnostics rows (§16).

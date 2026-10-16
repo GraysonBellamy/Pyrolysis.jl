@@ -6,7 +6,6 @@ Run via:
 julia --project=. test/perf/runtests.jl
 ```
 
-The CI workflow (`.github/workflows/perf.yml`) invokes this on every PR.
 Tests follow a layered budget approach.
 """
 

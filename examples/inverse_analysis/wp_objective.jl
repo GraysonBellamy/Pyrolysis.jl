@@ -852,10 +852,7 @@ function residual_vector(
         jacobian_strategy = jacobian_strategy,
     )
     sol === nothing && return nothing
-    # `PyrolysisSolution.retcode` is typed `::Symbol` (set to `:Success` by the
-    # solver), so a bare Symbol comparison is correct. The old fallback to
-    # `ReturnCode.Success` referenced an unimported name — dead on success and a
-    # latent UndefVarError on any non-Success solution.
+    # `PyrolysisSolution.retcode` is a `Symbol` (`:Success` on success).
     sol.retcode == :Success || return nothing
     any(!isfinite, sol.extras.back_temperature) && return nothing
 
@@ -970,7 +967,7 @@ function loss(
         @assert length(T_back_std) == length(t_exp) == length(n_reps)
         std_q = T_back_std[mask]
         @assert length(r) == length(std_q)
-        # Between-replicate population std with floor; matches PLAN.md.
+        # Between-replicate population std with a floor.
         σ = max.(std_q, sigma_floor)
         data_contrib += w[k] * mean((r ./ σ) .^ 2)
     end

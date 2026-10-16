@@ -140,8 +140,7 @@ Newton's cooling law `q_BC = h·(T_∞ − T_s)`. Fields:
 The flux is positive (heating) when `T_∞ > T_s` and negative (cooling) when the
 surface is hotter than the surroundings — the usual re-radiation/convection loss
 direction during pyrolysis. Its temperature derivative `dq_BC/dT_s = −h` makes
-the Newton solve converge quickly. The `T_inf` here is also the value used to
-resolve the ambient temperature for the surface balance (§5.8).
+the Newton solve converge quickly.
 
 **Blowing.** Strong outgassing thickens the boundary layer and suppresses
 convective exchange, and a gas denser than the free stream can pool on the
@@ -192,8 +191,8 @@ records the applied ratio and, for the pooling model, `ψ`, the face fraction
 and the face buoyancy in `extras.surface_blowing_ratio`,
 `surface_pooling_factor`, `surface_face_fraction` and
 `surface_face_buoyancy`. The shipped examples were calibrated with the bare
-coefficient (and without flame feedback — the two partially cancel; see the
-physics roadmap before recalibrating).
+coefficient (and without flame feedback — the two partially cancel; see Technical
+Reference §1.8.1 before recalibrating).
 
 ### 5.2.4 `RadiativeBC` — surface re-radiation
 
@@ -262,7 +261,7 @@ Fields:
   temperature automatically. You can override with a constant or `α(t)`.
 
 **Its behavior depends on the `radiation_model` keyword passed to `solve()`**
-(see §5.5 and Technical Reference §8):
+(see §7.4 and Technical Reference §8):
 
 | `radiation_model` (in `solve`) | What `RadiativeFluxBC` does |
 |---|---|
@@ -294,8 +293,7 @@ top_thermal =
 The combined flux is the sum of the component fluxes,
 `q_BC = Σ_i q_BC,i(T_s, t)`, and the derivative is summed likewise — assembled
 by a generated function for type stability. You can chain any number of thermal
-BCs. The ambient temperature for the surface balance is taken from the first
-component that carries one (preferring `ConvectiveBC`/`RadiativeBC`, see §5.8).
+BCs. Each term keeps its own `T_inf` (§5.8).
 
 A canonical cone-calorimeter top face:
 
@@ -418,8 +416,7 @@ research/validation studies.
 
 Thermal BCs are not applied as a raw flux in the cell; instead the solver finds
 the **surface (face) temperature** `T_s` that makes the boundary energy balance
-close, then conducts the resulting flux into the adjacent cell. With the default
-convention (transpiration off), the balance is
+close, then conducts the resulting flux into the adjacent cell. The balance is
 
 ```
 q_BC(T_s) = k_eff · (T_s − T_cell) / Δz_{1/2}
@@ -442,13 +439,14 @@ knowing because it explains a few user-visible behaviors:
   correctly through `T_s`.
 - The converged surface temperature is available afterwards as
   `solution.surface_T`, and the flux decomposition (absorbed, re-radiation,
-  convection, conducted) is available in `solution.extras` when diagnostics are
-  enabled.
+  convection, conducted) is reported in `solution.extras` (§9.3).
 
-The **surface transpiration enthalpy** term `Σ_g ṁ_g Δh_g(T_s, T_∞)` is an
-optional addition to this balance, controlled by `use_transpiration_bc`. It is
-**off by default and rejected by `solve()` when set to `true`** — see the
-warning in §5.12.
+The balance has **no surface gas-enthalpy term**. The enthalpy carried by the
+escaping gas is already in the energy equation as the volumetric advection
+source `S_conv = −Σ_g c_{p,g} J_g ∂T/∂z`; a surface term
+`Σ_g ṁ_g Δh_g(T_s, T_∞)` would overlap it by exactly `∫S_conv` and count that
+enthalpy a second time. The outward gas flux enters the boundary only
+through the blowing model of a `ConvectiveBC` (§5.2.3).
 
 ---
 
@@ -562,20 +560,13 @@ true)`.
 
 ## 5.8 Choosing ambient temperatures
 
-Several thermal BCs carry an ambient temperature `T_∞`: `ConvectiveBC` and
-`RadiativeBC` each have their own `T_inf`. This `T_∞` is used both in the BC's own
-flux and as the **reference temperature for the surface energy balance**. The
-resolution rules (see Technical Reference §12.3.8) are:
-
-- `ConvectiveBC` and `RadiativeBC` use their own `T_inf`.
-- BCs without an ambient (`HeatFluxBC`, `AdiabaticBC`, `RadiativeFluxBC`,
-  `DirichletThermalBC`) carry none, and the resolver falls back to the package
-  default `T_REF = 298.15 K`.
-- For a `CombinedThermalBC`, the first child that carries an ambient wins — so a
-  combined top BC with a `RadiativeBC(T_inf = 330)` and a `ConvectiveBC(T_inf = 330)`
-  resolves the surface ambient to 330 K. (Resolution keys on whether a BC *has* an
-  ambient, not on its value: setting `T_inf = 298.15` exactly is honored, never
-  mistaken for "defaulted".)
+Two thermal BCs carry an ambient temperature `T_∞`: `ConvectiveBC` and
+`RadiativeBC` each have their own `T_inf`, which enters only that BC's own flux.
+BCs without an ambient (`HeatFluxBC`, `AdiabaticBC`, `RadiativeFluxBC`,
+`DirichletThermalBC`) carry none. In a `CombinedThermalBC` each term keeps its
+own `T_inf`: a top BC of `RadiativeBC(T_inf = 330)` plus
+`ConvectiveBC(T_inf = 300)` re-radiates to 330 K and convects to 300 K. The
+surface energy balance (§5.4) has no ambient reference temperature of its own.
 
 Practical guidance: set `T_inf` consistently on the loss terms (`RadiativeBC`,
 `ConvectiveBC`) to the experimental surroundings temperature. In a cone
@@ -793,16 +784,14 @@ bc_set = BoundaryConditionSet(
 
 ## 5.12 Caveats and pitfalls
 
-- **Surface transpiration is forbidden in the production path.** `solve()`
-  rejects `use_transpiration_bc = true` with an `ArgumentError`. The reason
-  (Technical Reference §7.6, §12.3): the volumetric gas-advection source
-  `S_conv = −Σ_g c_{p,g} J_g ∂T/∂z` is *always* active and already carries gas
-  enthalpy; adding the surface transpiration term `Σ_g ṁ_g Δh_g(T_s, T_∞)`
-  double-counts it, producing a spurious ~5–10 kW/m² sink that under-predicts
-  surface temperature and mass-loss rate. The supported convention (matching
-  ThermaKin, Gpyro, and FDS) is `S_conv` only, i.e. `use_transpiration_bc =
-  false` (the default). Gas mass transport still works either way — the
-  transpiration term affects only the *energy* balance.
+- **The escaping gas carries no surface enthalpy term.** The volumetric
+  gas-advection source `S_conv = −Σ_g c_{p,g} J_g ∂T/∂z` is *always* active and
+  already carries the gas enthalpy (Technical Reference §7.4.3, §12.2); a surface
+  term `Σ_g ṁ_g Δh_g(T_s, T_∞)` on top of it would double-count that enthalpy, a
+  spurious ~5–10 kW/m² sink that under-predicts surface temperature and
+  mass-loss rate. The `S_conv`-only convention matches ThermaKin, Gpyro, and FDS.
+  Parameter sets calibrated with a code that adds a surface gas-enthalpy term
+  may need re-calibration.
 
 - **`radiation_model` defaults to `NO_RADIATION`.** A `RadiativeFluxBC` only does
   something if you pass an appropriate `radiation_model` to `solve()`. With the

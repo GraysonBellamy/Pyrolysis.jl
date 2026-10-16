@@ -1,5 +1,5 @@
 """
-The `DarcyTransportOperator` — the Darcy-Fick gas-transport contribution extracted from the residual.
+The `DarcyTransportOperator` — the Darcy-Fick gas-transport contribution to the residual.
 
 Mirrors [`GasTransportOperator`](@ref) but with the face flux formed from the
 combined advective-diffusive Darcy-Fick rule. Per cell:
@@ -22,15 +22,10 @@ AD closure from cell-local `(P, κ, μ)`:
 - `mob_face` = distance-weighted harmonic mean of `κ/μ`,
 - `v_g_face = -mob_face · (P_R − P_L)/d_LR`.
 
-Species-mass scaling is **deferred** to a later refinement.
-
 # Stencil
 
-3-cell tridiagonal: `(cells = -1:1,)`. Pressure is cell-local on `(T, ξ)`,
-so the chain rule through `:gas_pressure` stays inside the existing 3-cell
-support. `reads = (:gas_pressure,)` is declared as forward-compat metadata —
-no operator currently registers as the provider, so the AD-default
-`contribute_to_jacobian!` falls through to local stencil AD.
+3-cell tridiagonal. Pressure is cell-local on `(T, ξ)`, so the chain rule
+through the gas pressure stays inside the 3-cell support.
 
 # Boundary handling
 
@@ -44,8 +39,7 @@ to [`BCMassOperator`](@ref).
 # Sharp-feature smoothness
 
 - Upwind switch `v_g >= 0 ? ξ_L : ξ_R`: non-smooth at `v_g = 0`.
-  ForwardDiff returns the right-derivative; documented and accepted (mirrors
-  the vanleer kink in ALE advection).
+  ForwardDiff returns the right-derivative; documented and accepted.
 - Mobility's `μ > 1e-20` and `mob > 1e-30` guards: one-sided derivative
   across the threshold; thresholds are well below physical floors so this
   never triggers in practice.
@@ -77,7 +71,7 @@ struct DarcyTransportOperator <: Operator end
 	DarcyTransportADWorkspace{NC, CFG}
 
 Workspace for `DarcyTransportOperator.contribute_to_jacobian!`. Carries the
-AD-default's stencil-AD plumbing (`x_buf`, `f_buf`, `J_local`, `cfg`) plus
+ForwardDiff reference's stencil-AD plumbing (`x_buf`, `f_buf`, `J_local`, `cfg`) plus
 the analytical override's per-cell scratch arrays (`dS_dξ_L_buf`, `_C_buf`,
 `_R_buf`) for the T-row's ξ-derivative accumulators. The scratch arrays
 replace per-face `ntuple(j -> ..., Val(NC))` closures that would heap-allocate.
@@ -437,8 +431,8 @@ end
 # Analytical override (DarcyTransport)
 #
 # Same Jacobian as the AD path below but with property derivatives extracted
-# from one Dual-mode pass per cell (input dim = NC+1) — replacing the AD
-# default's 3·(NC+1)-dim Dual chunk over the whole `apply_cell!`. Face fluxes
+# from one Dual-mode pass per cell (input dim = NC+1) — instead of the
+# ForwardDiff reference's 3·(NC+1)-dim Dual chunk over the whole `apply_cell!`. Face fluxes
 # follow the Darcy-Fick formula `J = v_g · ξ_upwind − λ_face · (ξ_R T_R − ξ_L T_L) /
 # (T_face · d)`. The chain rule has three composed paths:
 #   • λ-path:  λ_face is harmonic_mean(λ_L_cell, λ_R_cell) of cell-local λ.
@@ -558,13 +552,12 @@ end
 #
 # INVARIANT: μ is a function of T alone, so `dμ/dξ == 0` and the mobility path's
 # ξ-partials below come only from κ. `mixture_gas_viscosity` ignores ξ by design
-# (see its docstring). If that ever changes — the Wilke/option-B direction — this
+# (see its docstring). If that ever changes (e.g. a Wilke mixture rule), this
 # helper must also return `dμ_dξ::NTuple{NC}` and EVERY `dvg_dξ_*_j` expression
 # below must gain a `− mob_*_cell * dμ_*_dξ[j]` term inside its `dmf` factor.
 # Missing that leaves the Jacobian silently stale: the rtol = 1e-12
 # analytical-vs-AD gate cannot see it while every Darcy fixture carries a single
-# gas component, since a one-species mixture rule is the identity. See
-# `docs/Gas_Viscosity_Recommendation_2026-09-21.md` §1.
+# gas component, since a one-species mixture rule is the identity.
 @inline function _dt_viscosity_with_dT(T::Float64, material)
     μ = effective_gas_viscosity(T, material)
     dμ_dT = ForwardDiff.derivative(t -> effective_gas_viscosity(t, material), T)
@@ -580,7 +573,7 @@ end
 # `adv_coef = v_g/φ_face` is the advective direct partial w.r.t. the upwind ξ
 # (added by the caller on the upwind side), `dJ/dφ_*` carries the ξ/φ_face²
 # chain (zero when the floor binds — matching ForwardDiff through `max`), and
-# `upwind_is_left = v_g >= 0` (matches the AD-default's right-derivative
+# `upwind_is_left = v_g >= 0` (matches the ForwardDiff reference's right-derivative
 # branch at v_g = 0).
 @inline function _dt_J_face_partials(
     λ_face::Float64,
@@ -639,7 +632,7 @@ Analytical override of `contribute_to_jacobian!` for
 per-face Darcy-Fick flux chain rule plus the `S_conv/ρcp` and `div(J)`
 divergences by hand.
 
-Equivalence with the AD-default `_contribute_to_jacobian_ad!` is gated at
+Equivalence with the ForwardDiff reference `_contribute_to_jacobian_ad!` is gated at
 rtol = 1e-12 in `test/jacobian/test_operator_darcy_transport_analytical.jl`.
 """
 function _contribute_to_jacobian_analytical!(
@@ -1127,15 +1120,16 @@ function contribute_to_jacobian!(
 end
 
 # ============================================================================
-# AD-default path — preserved as `_contribute_to_jacobian_ad!` for the
-# rtol=1e-12 equivalence reference.
+# ForwardDiff path `_contribute_to_jacobian_ad!`: the rtol=1e-12 equivalence
+# reference for the analytical override.
 # ============================================================================
 
 """
-	contribute_to_jacobian!(jac, op::DarcyTransportOperator,
-	                        u, t, ws, state, mesh, material, layout) -> nothing
+	_contribute_to_jacobian_ad!(jac, op::DarcyTransportOperator,
+	                            u, t, ws, state, mesh, material, layout) -> nothing
 
-Per-cell AD path. Each cell `i`:
+Per-cell ForwardDiff path, the equivalence reference for the analytical
+override. For each cell `i`:
 
 1. Pack the 3-cell `(T, ξ)` stencil into `ws.x_buf`.
 2. Run `ForwardDiff.jacobian!` over `apply_cell!` to produce a

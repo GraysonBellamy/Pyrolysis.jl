@@ -27,8 +27,7 @@ end
     J0 = (0.0, 0.0)
 
     # max_iter = 1 cannot converge the cubic radiation balance from a cold
-    # guess: pre-fix this fell through with zero diagnostics (the `converged`
-    # flag had one write and no reads).
+    # guess: the solve must warn and record it in the `converged` flag.
     state =
         @test_logs (:warn, r"did not converge") match_mode = :any solve_boundary_temperature(
             800.0,
@@ -138,7 +137,7 @@ end
     n = 6
     for i = 1:n
         u[i] = 600.0
-        u[n+i] = 400.0   # solid — pre-fix the film law wrote h_eff·ξ_solid ≈ O(10) into J
+        u[n+i] = 400.0   # solid — the film law must not write h_eff·ξ_solid ≈ O(10) into J
         u[2n+i] = 2.0    # gas
     end
     residual!(similar(u), u, def, 0.0, ws)
@@ -152,7 +151,7 @@ end
 # ConvectiveMassBC ξ_inf is species-resolvable
 # ============================================================================
 @testset "per-species ambient concentrations" begin
-    # Scalar broadcasts (legacy behavior), tuple resolves per species,
+    # Scalar broadcasts to every species, tuple resolves per species,
     # function resolves in time.
     bc_scalar = ConvectiveMassBC(h_m = 0.05, ξ_inf = 0.3)
     @test ambient_concentration(bc_scalar, 0.0, 1) == 0.3
@@ -181,9 +180,9 @@ end
     bad = PyrolysisProblem(mesh = mesh, material = mat, bc_set = bad_bc, tspan = (0.0, 1.0))
     @test_throws Exception validate_problem(bad)
 
-    # Physical regression: ambient gas (species 2 only) flows INTO a column
-    # that starts gas-free — the failing regime the scalar ξ_inf blocked
-    # (a scalar would have injected "ambient solid" through the same film law).
+    # Physical check: ambient gas (species 2 only) flows INTO a column that
+    # starts gas-free — a regime a scalar ξ_inf cannot express (a scalar
+    # would inject "ambient solid" through the same film law).
     mesh2 = create_uniform_mesh(0.01, 6, Val(2))
     bc2 = BoundaryConditionSet(
         thermal = (top = HeatFluxBC(0.0), bottom = AdiabaticBC()),
@@ -208,31 +207,14 @@ end
 end
 
 # ============================================================================
-# Mesh-motion BC dead API is gone
-# ============================================================================
-@testset "mesh BC types deleted" begin
-    for sym in (
-        :FixedMeshBC,
-        :FreeSurfaceBC,
-        :PrescribedVelocityBC,
-        :SlidingBC,
-        :AbstractMeshBC,
-        :mesh_bc_velocity,
-    )
-        @test !isdefined(Pyrolysis, sym)
-        @test !isdefined(Pyrolysis.BoundaryConditions, sym)
-    end
-end
-
-# ============================================================================
 # mass_loss_rate counts the bottom film flux — ∫MLR dt must close against
 # the domain mass for a permeable back face
 # ============================================================================
 @testset "MLR includes bottom venting" begin
     mat = _minors_material()
     mesh = create_uniform_mesh(0.01, 6, Val(2))
-    # Vent the initial gas inventory through BOTH faces; pre-fix MLR counted
-    # only the top face and ∫MLR dt under-reported the mass loss ~2×.
+    # Vent the initial gas inventory through BOTH faces; an MLR that counted
+    # only the top face would under-report the mass loss ~2×.
     bc = BoundaryConditionSet(
         thermal = (top = HeatFluxBC(0.0), bottom = AdiabaticBC()),
         mass = (top = DiffusiveMassBC(0.05), bottom = DiffusiveMassBC(0.05)),
@@ -256,7 +238,7 @@ end
     m_lost = sol.extras.total_mass[1] - sol.extras.total_mass[end]
     @test m_lost > 0
     ∫mlr = sum(0.5 * (mlr[i] + mlr[i+1]) * (t[i+1] - t[i]) for i = 1:(length(t)-1))
-    # Pre-fix: ∫MLR dt ≈ m_lost/2 (top face only, symmetric venting) — well
+    # Top face only would give ∫MLR dt ≈ m_lost/2 (symmetric venting) — well
     # below the 0.8·m_lost floor. The upper bound allows the trapezoidal
     # quadrature's overshoot on the convex early decay.
     @test 0.8 * m_lost < ∫mlr < 1.3 * m_lost
@@ -333,16 +315,17 @@ end
         output_times = [0.0, 0.5, 1.0],
     )
 
-    # sin(2π·0) = sin(2π·1) = 0: the deleted two-point t=0/t=1 detection saw
-    # equal samples and froze the volumetric deposit at I(0) = q₀ — i.e. the
-    # varying run was numerically identical to the constant-q₀ run.
+    # sin(2π·0) = sin(2π·1) = 0: a time-dependence check that samples only
+    # t = 0 and t = 1 sees equal values and would freeze the volumetric
+    # deposit at I(0) = q₀, making the varying run identical to the
+    # constant-q₀ run.
     sol_var = solve(prob_of(t -> q0 * (1 + sin(2π * t))); radiation_model = BEER_LAMBERT)
     sol_const = solve(prob_of(q0); radiation_model = BEER_LAMBERT)
     @test sol_var.retcode == :Success && sol_const.retcode == :Success
 
     # By t = 0.5 the varying flux has deposited ∫₀^½ q₀ sin(2πt) dt = q₀/π
     # extra energy: the surface must be measurably hotter than the constant
-    # run. Pre-fix the two trajectories were identical.
+    # run.
     i_mid = findfirst(≈(0.5), sol_var.t)
     @test sol_var.surface_T[i_mid] > sol_const.surface_T[i_mid] + 1.0
 end
