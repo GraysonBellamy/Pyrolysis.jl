@@ -24,10 +24,9 @@ using Pyrolysis.Problem: StateCache
 using Pyrolysis.Discretization: BEER_LAMBERT
 using Pyrolysis.Solver: get_cell_positions
 using Pyrolysis.Properties: PropertyCache, update_properties!
-using Pyrolysis.Physics:
-    compute_radiation_source!, total_absorbed_radiation, transmitted_radiation
+using Pyrolysis.Physics: compute_radiation_source!
 using Pyrolysis.Materials: R_GAS
-using Pyrolysis.Geometry: CellState
+using Pyrolysis.Geometry: CellState, cell_size
 using Statistics: mean
 
 # Abramowitz-Stegun 7.1.26 approximation; avoids a test-only dependency.
@@ -234,13 +233,13 @@ end
 
         # Set up property cache
         prop_cache = PropertyCache(n_cells, n_cells + 1)
-        update_properties!(prop_cache, StateCache(mesh, mat), mesh, mat)
+        update_properties!(prop_cache, StateCache(mesh), mesh, mat)
 
         # Compute radiation source
         q_rad = zeros(n_cells)
         compute_radiation_source!(
             q_rad,
-            StateCache(mesh, mat),
+            StateCache(mesh),
             mesh,
             prop_cache,
             I_surface,
@@ -302,12 +301,12 @@ end
         mesh = create_uniform_mesh(L, n_cells, Val(1); T_initial = 300.0, ξ_initial = (ρ,))
 
         prop_cache = PropertyCache(n_cells, n_cells + 1)
-        update_properties!(prop_cache, StateCache(mesh, mat), mesh, mat)
+        update_properties!(prop_cache, StateCache(mesh), mesh, mat)
 
         q_rad = zeros(n_cells)
         compute_radiation_source!(
             q_rad,
-            StateCache(mesh, mat),
+            StateCache(mesh),
             mesh,
             prop_cache,
             I_surface,
@@ -316,7 +315,7 @@ end
         )
 
         # Compute total absorbed energy
-        Q_absorbed = total_absorbed_radiation(q_rad, mesh)
+        Q_absorbed = sum(q_rad[i] * cell_size(mesh, i) for i = 1:n_cells)
 
         # Analytical total absorbed
         α_eff = ρ * absorption_coeff
@@ -326,8 +325,9 @@ end
         rel_error = abs(Q_absorbed - Q_analytical) / Q_analytical
         @test rel_error < 0.05
 
-        # Verify transmitted radiation
-        I_transmitted = transmitted_radiation(I_surface, mesh, prop_cache)
+        # Verify transmitted radiation: I_surface·exp(−τ_total)
+        τ_total = sum(prop_cache.α[i] * cell_size(mesh, i) for i = 1:n_cells)
+        I_transmitted = I_surface * exp(-τ_total)
         I_transmitted_analytical = I_surface * exp(-α_eff * L)
 
         @test abs(I_transmitted - I_transmitted_analytical) / I_surface < 0.01
@@ -1421,195 +1421,6 @@ end
 end
 
 # ============================================================================
-# Test: Steady Darcy Flow Verification
-# ============================================================================
-#
-# Verify Darcy velocity computation against analytical solution.
-#
-# For 1D steady Darcy flow with constant permeability and viscosity:
-#   v = -κ/μ × (P_out - P_in) / L
-#
-# This test verifies the core Darcy velocity calculation without the
-# full ODE solver, as a unit-level physics verification.
-#
-@testset "Steady Darcy Flow" begin
-    using Pyrolysis.Physics: ideal_gas_pressure, effective_gas_viscosity
-    using Pyrolysis.Discretization:
-        compute_darcy_velocity!, PropertyCache, update_properties!
-
-    # Material: solid matrix + gas that can flow
-    solid = SolidComponent(:solid, ρ = 1000.0, c = 1000.0, k = 0.5)
-    gas = GaseousComponent(:gas, M = 0.029, c = 1000.0, k = 0.025, λ = 1e-5)  # Air-like
-
-    mat = Material(name = :DarcyTest, components = (solid, gas), reactions = ())
-
-    @testset "Analytical Velocity Match" begin
-        # Setup: 1D mesh with known pressure gradient
-        L = 0.01  # 10 mm
-        n_cells = 20
-        mesh = create_uniform_mesh(
-            L,
-            n_cells,
-            Val(2);
-            T_initial = 400.0,
-            ξ_initial = (800.0, 1.0),
-        )  # Solid + small gas concentration
-
-        Pyrolysis.Geometry.update_geometry!(mesh)
-
-        # Constant permeability model for analytical comparison
-        κ_const = 1e-12  # m²
-
-        # Set up linear pressure field: P(z) = P_low + (P_high - P_low) × z/L
-        # P_low at z=0 (bottom), P_high at z=L (top)
-        P_low = 101325.0    # 1 atm at bottom
-        P_high = 201325.0   # 2 atm at top (100 kPa gradient)
-
-        # Create pressure array with linear variation
-        P = zeros(n_cells)
-        for i = 1:n_cells
-            z_center = mesh.cell_centers[i]
-            P[i] = P_low + (P_high - P_low) * z_center / L
-        end
-
-        # Permeability field (constant)
-        κ = fill(κ_const, n_cells)
-
-        # Compute Darcy velocity
-        n_faces = length(mesh.faces)
-        v_gas = zeros(n_faces)
-        compute_darcy_velocity!(v_gas, StateCache(mesh, mat), mesh, P, κ)
-
-        # Analytical solution: v = -κ/μ × dP/dz
-        # dP/dz = (P_high - P_low) / L
-        T_ref = 400.0
-        μ_ref = effective_gas_viscosity(T_ref)
-        dP_dz = (P_high - P_low) / L  # Positive (pressure increases with z)
-        v_analytical = -κ_const / μ_ref * dP_dz  # Negative (flow toward low pressure)
-
-        # Check interior faces (exclude boundaries)
-        for f = 2:(n_faces-1)
-            @test v_gas[f] ≈ v_analytical rtol = 0.05
-        end
-    end
-
-    @testset "Zero Pressure Gradient" begin
-        # Uniform pressure should give zero velocity
-        L = 0.01
-        n_cells = 10
-        mesh = create_uniform_mesh(
-            L,
-            n_cells,
-            Val(2);
-            T_initial = 400.0,
-            ξ_initial = (800.0, 1.0),
-        )
-
-        Pyrolysis.Geometry.update_geometry!(mesh)
-
-        κ_const = 1e-12
-
-        # Uniform pressure
-        P_uniform = 150000.0
-        P = fill(P_uniform, n_cells)
-        κ = fill(κ_const, n_cells)
-
-        n_faces = length(mesh.faces)
-        v_gas = zeros(n_faces)
-        compute_darcy_velocity!(v_gas, StateCache(mesh, mat), mesh, P, κ)
-
-        # All interior velocities should be zero
-        for f = 2:(n_faces-1)
-            @test abs(v_gas[f]) < 1e-15
-        end
-    end
-
-    @testset "Flow Direction" begin
-        # Flow should be from high to low pressure
-        L = 0.01
-        n_cells = 10
-        mesh = create_uniform_mesh(
-            L,
-            n_cells,
-            Val(2);
-            T_initial = 400.0,
-            ξ_initial = (800.0, 1.0),
-        )
-
-        Pyrolysis.Geometry.update_geometry!(mesh)
-
-        κ_const = 1e-12
-        κ = fill(κ_const, n_cells)
-        P = zeros(n_cells)
-
-        # Case 1: Higher pressure at top (z=L) -> flow toward bottom (negative v)
-        for i = 1:n_cells
-            z = mesh.cell_centers[i]
-            P[i] = 100000.0 + 50000.0 * z / L  # Increases with z
-        end
-
-        n_faces = length(mesh.faces)
-        v_gas = zeros(n_faces)
-        compute_darcy_velocity!(v_gas, StateCache(mesh, mat), mesh, P, κ)
-
-        # Interior face velocity should be negative (toward lower pressure at z=0)
-        mid_face = n_faces ÷ 2
-        @test v_gas[mid_face] < 0
-
-        # Case 2: Higher pressure at bottom (z=0) -> flow toward top (positive v)
-        for i = 1:n_cells
-            z = mesh.cell_centers[i]
-            P[i] = 150000.0 - 50000.0 * z / L  # Decreases with z
-        end
-
-        compute_darcy_velocity!(v_gas, StateCache(mesh, mat), mesh, P, κ)
-
-        # Interior face velocity should be positive (toward lower pressure at z=L)
-        @test v_gas[mid_face] > 0
-    end
-
-    @testset "Permeability Scaling" begin
-        # Velocity should scale linearly with permeability
-        L = 0.01
-        n_cells = 10
-        mesh = create_uniform_mesh(
-            L,
-            n_cells,
-            Val(2);
-            T_initial = 400.0,
-            ξ_initial = (800.0, 1.0),
-        )
-
-        Pyrolysis.Geometry.update_geometry!(mesh)
-
-        # Linear pressure gradient
-        P = zeros(n_cells)
-        for i = 1:n_cells
-            z = mesh.cell_centers[i]
-            P[i] = 100000.0 + 100000.0 * z / L
-        end
-
-        n_faces = length(mesh.faces)
-
-        # Test with κ₁
-        κ₁ = 1e-12
-        κ = fill(κ₁, n_cells)
-        v_gas_1 = zeros(n_faces)
-        compute_darcy_velocity!(v_gas_1, StateCache(mesh, mat), mesh, P, κ)
-
-        # Test with κ₂ = 2×κ₁
-        κ₂ = 2e-12
-        κ = fill(κ₂, n_cells)
-        v_gas_2 = zeros(n_faces)
-        compute_darcy_velocity!(v_gas_2, StateCache(mesh, mat), mesh, P, κ)
-
-        # Velocity should scale by factor of 2
-        mid_face = n_faces ÷ 2
-        @test v_gas_2[mid_face] / v_gas_1[mid_face] ≈ 2.0 rtol = 1e-10
-    end
-end
-
-# ============================================================================
 # Test: Darcy-Fick Gas Transport Conservation
 # ============================================================================
 #
@@ -1617,7 +1428,7 @@ end
 #
 @testset "Darcy-Fick Mass Conservation" begin
     using Pyrolysis.Discretization:
-        compute_rhs_darcy_fick!, PropertyCache, RHSCache, update_properties!
+        compute_rhs!, PropertyCache, RHSCache, update_properties!
 
     # Material with gas generation from solid
     solid = SolidComponent(:solid, ρ = 1000.0, c = 1500.0, k = 0.3)
@@ -1652,7 +1463,7 @@ end
 
         # Property cache
         prop_cache = PropertyCache(mesh)
-        update_properties!(prop_cache, StateCache(mesh, material), mesh, material)
+        update_properties!(prop_cache, StateCache(mesh), mesh, material)
 
         # RHS cache
         rhs_cache = RHSCache(mesh, material)
@@ -1682,10 +1493,10 @@ end
         dξ = zeros(2, n_cells)
         t = 0.0
 
-        compute_rhs_darcy_fick!(
+        compute_rhs!(
             dT,
             dξ,
-            StateCache(mesh, material),
+            StateCache(mesh),
             mesh,
             prop_cache,
             rhs_cache,

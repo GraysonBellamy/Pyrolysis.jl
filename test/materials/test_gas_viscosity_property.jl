@@ -2,15 +2,9 @@
 Material-supplied gas viscosity: the `SutherlandProperty` type and the
 `Material.gas_viscosity` field.
 
-- `SutherlandProperty()` carries the canonical air triple and reproduces the
-  bare `effective_gas_viscosity(T)` correlation over the physical range — the
-  lockstep gate that keeps the struct and the free function from drifting
-  apart.
-- `derivative(::SutherlandProperty, T)` is analytic and must agree with
-  `ForwardDiff.derivative`, because the Darcy Jacobian's mobility chain rule
-  differentiates the material's curve.
-- `Material` defaults to air, so every material written before the field
-  existed is unchanged.
+- `SutherlandProperty()` carries the canonical air triple and evaluates
+  Sutherland's law over the physical range.
+- `Material` defaults to air.
 - `effective_gas_viscosity(T, material)` clamps `T` from below and floors `μ`
   from above zero: `μ` appears only as the denominator of the Darcy mobility
   `κ/μ`, so a user curve that goes non-positive outside its fit range must not
@@ -27,9 +21,7 @@ using Pyrolysis.Materials:
     Reaction,
     SutherlandProperty,
     PolynomialProperty,
-    ConstantProperty,
-    derivative,
-    derivative_ξ
+    ConstantProperty
 using Pyrolysis.Properties:
     effective_gas_viscosity, mixture_gas_viscosity, T_GAS_PROPERTY_FLOOR, MU_FLOOR
 using Pyrolysis.Properties: porosity
@@ -54,10 +46,11 @@ end
 @testset "Material gas viscosity" begin
 
     # ========================================================================
-    @testset "SutherlandProperty reproduces the bare correlation" begin
+    @testset "SutherlandProperty is Sutherland's law" begin
         p = SutherlandProperty()
-        for T in (100.0, 273.15, 300.0, 500.0, 800.0, 1200.0, 2000.0)
-            @test p(T) == effective_gas_viscosity(T)
+        for T in (273.15, 300.0, 500.0, 800.0, 1200.0, 2000.0)
+            @test p(T) ≈ 1.716e-5 * (T / 273.15)^1.5 * (273.15 + 110.4) / (T + 110.4) rtol =
+                1e-14
         end
         # Documented anchor values.
         @test p(273.15) ≈ 1.716e-5 rtol = 1e-10
@@ -65,22 +58,10 @@ end
     end
 
     # ========================================================================
-    @testset "analytic derivative matches ForwardDiff" begin
-        for p in (SutherlandProperty(), SutherlandProperty(2.0e-5, 350.0, 120.0))
-            for T in (150.0, 300.0, 650.0, 1400.0)
-                @test derivative(p, T) ≈ ForwardDiff.derivative(p, T) rtol = 1e-12
-            end
-        end
-    end
-
-    # ========================================================================
     @testset "property-function contract" begin
         p = SutherlandProperty()
         ξ = (500.0, 1.0)
         @test p(650.0, ξ) == p(650.0)               # 2-arg form
-        @test derivative(p, 650.0, ξ) == derivative(p, 650.0)
-        @test derivative_ξ(p, 650.0, ξ, 1) == 0.0   # T-only property
-        @test derivative_ξ(p, 650.0, ξ, 2) == 0.0
         @test p(ForwardDiff.Dual(650.0, 1.0)) isa ForwardDiff.Dual  # AD-clean
     end
 
@@ -91,8 +72,8 @@ end
         for T in (300.0, 650.0, 1100.0)
             # The default path must be bit-for-bit identical to the pre-field
             # behaviour, or every calibrated case silently moves.
-            @test effective_gas_viscosity(T, mat) == effective_gas_viscosity(T)
-            @test mixture_gas_viscosity((500.0, 1.0), T, mat) == effective_gas_viscosity(T)
+            @test effective_gas_viscosity(T, mat) == SutherlandProperty()(T)
+            @test mixture_gas_viscosity((500.0, 1.0), T, mat) == SutherlandProperty()(T)
         end
     end
 
@@ -101,7 +82,7 @@ end
         mat = _visc_material(gas_viscosity = ConstantProperty(3.0e-5))
         for T in (300.0, 900.0)
             @test effective_gas_viscosity(T, mat) == 3.0e-5
-            @test effective_gas_viscosity(T, mat) != effective_gas_viscosity(T)
+            @test effective_gas_viscosity(T, mat) != SutherlandProperty()(T)
         end
 
         # A bare Function and a Real both go through `to_property`.
@@ -131,7 +112,7 @@ end
         @test effective_gas_viscosity(1000.0, mat) ≈ 3.2307444332042786e-5 rtol = 1e-3
         # Below air at every pyrolysis-relevant temperature (the physical point).
         for T in (300.0, 500.0, 700.0, 1000.0)
-            @test effective_gas_viscosity(T, mat) < effective_gas_viscosity(T)
+            @test effective_gas_viscosity(T, mat) < SutherlandProperty()(T)
         end
     end
 

@@ -154,14 +154,14 @@ end
 end
 
 """
-	species_source_terms!(sources::Vector{Float64}, rates::Vector{Float64},
-						 material::Material)
+	species_source_terms!(sources, rates, material)
 
-Compute species source terms from reaction rates.
+Compute species source terms from reaction rates into `sources`:
 
 dξⱼ/dt = Σᵢ νᵢⱼ rᵢ
 
-where νᵢⱼ is positive for products, negative for reactants.
+where νᵢⱼ is positive for products, negative for reactants. The reaction
+loop is unrolled at compile time (allocation-free).
 
 # Arguments
 - `sources`: Output vector of species source terms [kg/(m³·s)]
@@ -169,21 +169,13 @@ where νᵢⱼ is positive for products, negative for reactants.
 - `material`: Material definition
 """
 function species_source_terms!(
-    sources::NTuple{NC,<:Real},
+    sources::AbstractVector,
     rates::AbstractVector,
-    material,
-) where {NC}
-    # Initialize sources to zero
-    src = zeros(MVector{NC,eltype(rates)})
-
-    NR = n_reactions(material)
-    @inbounds for i = 1:NR
-        rxn = material.reactions[i]
-        r = rates[i]
-        _apply_reaction_source!(src, rxn, r)
-    end
-
-    return NTuple{NC,eltype(rates)}(src)
+    material::Material{NC,NR},
+) where {NC,NR}
+    fill!(sources, zero(eltype(sources)))
+    _species_source_terms_gen!(sources, rates, material.reactions, Val(NR))
+    return nothing
 end
 
 # Per-reaction source application. Convention: per unit reaction extent the
@@ -199,37 +191,6 @@ end
     @inbounds for (idx, ν) in rxn.products
         src[idx] += ν * r
     end
-    return nothing
-end
-
-"""
-	species_source_terms!(sources::Vector{Float64}, rates::Vector{Float64},
-						 material::Material, NC::Int)
-
-In-place version that modifies a pre-allocated vector.
-Uses @generated for allocation-free iteration over reactions.
-"""
-# Primary version that uses @generated for allocation-free iteration
-function species_source_terms!(
-    sources::AbstractVector,
-    rates::AbstractVector,
-    material::Material{NC,NR},
-    ::Val{NC},
-) where {NC,NR}
-    fill!(sources, zero(eltype(sources)))
-    _species_source_terms_gen!(sources, rates, material.reactions, Val(NR))
-    return nothing
-end
-
-# Overload accepting Int instead of Val{NC} - calls the same @generated implementation
-function species_source_terms!(
-    sources::AbstractVector,
-    rates::AbstractVector,
-    material::Material{NC,NR},
-    NC_int::Int,
-) where {NC,NR}
-    fill!(sources, zero(eltype(sources)))
-    _species_source_terms_gen!(sources, rates, material.reactions, Val(NR))
     return nothing
 end
 

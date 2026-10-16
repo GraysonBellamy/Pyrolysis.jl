@@ -26,30 +26,23 @@ compute_jacobian!
 ```@docs
 LinearSolveStrategy
 DirectSolve
-StructuredSolve
 ApproxSolve
-MatrixFreeSolve
 is_approximate
 ```
 
-## Verification and benchmarking
+## Verification
 
 ```@docs
 verify_jacobian_at
-benchmark_jacobian_backends
 ```
 
 ## Operator architecture
 
 ```@docs
 Operator
-ResidualContext
 StructuredJacobian
 StructuredCoupling
 PrefixSumCoupling
-SuffixSumCoupling
-Rank1Coupling
 EmbeddedScaledSuffixSumCoupling
 EmbeddedRank1Coupling
-ImplicitTerm
 ```

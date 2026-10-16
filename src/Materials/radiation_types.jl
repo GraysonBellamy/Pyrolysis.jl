@@ -91,47 +91,6 @@ end
 # ============================================================================
 
 """
-	requires_absorption_coefficients(model::RadiationModel) -> Bool
-
-Returns true if the radiation model uses component absorption coefficients (α).
-
-SURFACE_ABSORPTION does not use α values - radiation is deposited directly in
-the surface cell. BEER_LAMBERT and P1_QUASI_STEADY require α to compute
-optical depth and radiation diffusion coefficient.
-
-# Example
-```julia
-if requires_absorption_coefficients(radiation_model)
-	# Validate that material has α values set
-end
-```
-"""
-requires_absorption_coefficients(model::RadiationModel) =
-    model == BEER_LAMBERT || model == P1_QUASI_STEADY
-
-"""
-	has_nonlocal_jacobian_coupling(model::RadiationModel) -> Bool
-
-Returns true if the radiation model creates non-local (non-tridiagonal) Jacobian coupling.
-
-BEER_LAMBERT creates non-local coupling because the radiation intensity at cell i
-depends on the optical depth through all cells from i to the surface. This results
-in an upper triangular sparsity pattern in the Jacobian.
-
-All other models maintain tridiagonal structure.
-
-# Example
-```julia
-if has_nonlocal_jacobian_coupling(radiation_model)
-	# Use upper triangular sparsity pattern
-else
-	# Use tridiagonal sparsity pattern
-end
-```
-"""
-has_nonlocal_jacobian_coupling(model::RadiationModel) = model == BEER_LAMBERT
-
-"""
 	requires_radiation_cache(model::RadiationModel) -> Bool
 
 Returns true if the radiation model requires a RadiationCache for P1 solver state.

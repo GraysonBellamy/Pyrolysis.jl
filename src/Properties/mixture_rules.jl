@@ -6,22 +6,6 @@ recursive dispatch to avoid allocations from indexing heterogeneous tuples
 with runtime indices. Each component access uses a compile-time constant index.
 """
 
-"""
-	mass_fractions(ξ::NTuple{NC,Float64}) -> NTuple{NC,Float64}
-
-Compute mass fractions from mass concentrations.
-
-Yⱼ = ξⱼ / Σξⱼ
-"""
-@inline function mass_fractions(ξ::NTuple{NC,<:Real}) where {NC}
-    ρ_total = sum(ξ)
-    if ρ_total < 1e-20
-        return _zero_ntuple(_prop_type(ξ), Val(NC))
-    end
-    inv_ρ = 1.0 / ρ_total
-    return _scale_ntuple(ξ, inv_ρ, Val(NC))
-end
-
 # Promoted working scalar type for property evaluation with a (possibly
 # heterogeneous) tuple input and a temperature-like scalar. The analytical
 # Jacobian operators feed `ForwardDiff.Dual`s through these helpers; computing
@@ -31,151 +15,7 @@ end
 @inline _prop_type(x::Tuple) = promote_type(map(typeof, x)...)
 @inline _prop_type(x::Tuple, T) = promote_type(typeof(T), map(typeof, x)...)
 
-# Helper functions for allocation-free ntuple operations
-# Explicit specializations for common NC values to avoid ntuple() allocations
 @inline _zero_ntuple(::Type{W}, ::Val{N}) where {W,N} = ntuple(_ -> zero(W), Val(N))
-@inline _zero_ntuple(::Val{1}) = (0.0,)
-@inline _zero_ntuple(::Val{2}) = (0.0, 0.0)
-@inline _zero_ntuple(::Val{3}) = (0.0, 0.0, 0.0)
-@inline _zero_ntuple(::Val{4}) = (0.0, 0.0, 0.0, 0.0)
-@inline _zero_ntuple(::Val{5}) = (0.0, 0.0, 0.0, 0.0, 0.0)
-@inline _zero_ntuple(::Val{6}) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-@inline _zero_ntuple(::Val{7}) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-@inline _zero_ntuple(::Val{8}) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-@inline _zero_ntuple(::Val{9}) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-@inline _zero_ntuple(::Val{10}) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-@inline _zero_ntuple(::Val{11}) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-@inline _zero_ntuple(::Val{12}) =
-    (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-@inline _zero_ntuple(::Val{13}) =
-    (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-@inline _zero_ntuple(::Val{14}) =
-    (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-@inline _zero_ntuple(::Val{15}) =
-    (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-@inline _zero_ntuple(::Val{16}) =
-    (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-@inline _zero_ntuple(::Val{N}) where {N} = ntuple(_ -> 0.0, Val(N))
-
-@inline _scale_ntuple(x::NTuple{1,<:Real}, s::Real, ::Val{1}) = (x[1]*s,)
-@inline _scale_ntuple(x::NTuple{2,<:Real}, s::Real, ::Val{2}) = (x[1]*s, x[2]*s)
-@inline _scale_ntuple(x::NTuple{3,<:Real}, s::Real, ::Val{3}) = (x[1]*s, x[2]*s, x[3]*s)
-@inline _scale_ntuple(x::NTuple{4,<:Real}, s::Real, ::Val{4}) =
-    (x[1]*s, x[2]*s, x[3]*s, x[4]*s)
-@inline _scale_ntuple(x::NTuple{5,<:Real}, s::Real, ::Val{5}) =
-    (x[1]*s, x[2]*s, x[3]*s, x[4]*s, x[5]*s)
-@inline _scale_ntuple(x::NTuple{6,<:Real}, s::Real, ::Val{6}) =
-    (x[1]*s, x[2]*s, x[3]*s, x[4]*s, x[5]*s, x[6]*s)
-@inline _scale_ntuple(x::NTuple{7,<:Real}, s::Real, ::Val{7}) =
-    (x[1]*s, x[2]*s, x[3]*s, x[4]*s, x[5]*s, x[6]*s, x[7]*s)
-@inline _scale_ntuple(x::NTuple{8,<:Real}, s::Real, ::Val{8}) =
-    (x[1]*s, x[2]*s, x[3]*s, x[4]*s, x[5]*s, x[6]*s, x[7]*s, x[8]*s)
-@inline _scale_ntuple(x::NTuple{9,<:Real}, s::Real, ::Val{9}) =
-    (x[1]*s, x[2]*s, x[3]*s, x[4]*s, x[5]*s, x[6]*s, x[7]*s, x[8]*s, x[9]*s)
-@inline _scale_ntuple(x::NTuple{10,<:Real}, s::Real, ::Val{10}) =
-    (x[1]*s, x[2]*s, x[3]*s, x[4]*s, x[5]*s, x[6]*s, x[7]*s, x[8]*s, x[9]*s, x[10]*s)
-@inline _scale_ntuple(x::NTuple{11,<:Real}, s::Real, ::Val{11}) = (
-    x[1]*s,
-    x[2]*s,
-    x[3]*s,
-    x[4]*s,
-    x[5]*s,
-    x[6]*s,
-    x[7]*s,
-    x[8]*s,
-    x[9]*s,
-    x[10]*s,
-    x[11]*s,
-)
-@inline _scale_ntuple(x::NTuple{12,<:Real}, s::Real, ::Val{12}) = (
-    x[1]*s,
-    x[2]*s,
-    x[3]*s,
-    x[4]*s,
-    x[5]*s,
-    x[6]*s,
-    x[7]*s,
-    x[8]*s,
-    x[9]*s,
-    x[10]*s,
-    x[11]*s,
-    x[12]*s,
-)
-@inline _scale_ntuple(x::NTuple{13,<:Real}, s::Real, ::Val{13}) = (
-    x[1]*s,
-    x[2]*s,
-    x[3]*s,
-    x[4]*s,
-    x[5]*s,
-    x[6]*s,
-    x[7]*s,
-    x[8]*s,
-    x[9]*s,
-    x[10]*s,
-    x[11]*s,
-    x[12]*s,
-    x[13]*s,
-)
-@inline _scale_ntuple(x::NTuple{14,<:Real}, s::Real, ::Val{14}) = (
-    x[1]*s,
-    x[2]*s,
-    x[3]*s,
-    x[4]*s,
-    x[5]*s,
-    x[6]*s,
-    x[7]*s,
-    x[8]*s,
-    x[9]*s,
-    x[10]*s,
-    x[11]*s,
-    x[12]*s,
-    x[13]*s,
-    x[14]*s,
-)
-@inline _scale_ntuple(x::NTuple{15,<:Real}, s::Real, ::Val{15}) = (
-    x[1]*s,
-    x[2]*s,
-    x[3]*s,
-    x[4]*s,
-    x[5]*s,
-    x[6]*s,
-    x[7]*s,
-    x[8]*s,
-    x[9]*s,
-    x[10]*s,
-    x[11]*s,
-    x[12]*s,
-    x[13]*s,
-    x[14]*s,
-    x[15]*s,
-)
-@inline _scale_ntuple(x::NTuple{16,<:Real}, s::Real, ::Val{16}) = (
-    x[1]*s,
-    x[2]*s,
-    x[3]*s,
-    x[4]*s,
-    x[5]*s,
-    x[6]*s,
-    x[7]*s,
-    x[8]*s,
-    x[9]*s,
-    x[10]*s,
-    x[11]*s,
-    x[12]*s,
-    x[13]*s,
-    x[14]*s,
-    x[15]*s,
-    x[16]*s,
-)
-@inline _scale_ntuple(x::NTuple{N,<:Real}, s::Real, ::Val{N}) where {N} =
-    ntuple(j -> x[j]*s, Val(N))
-
-"""
-	total_density(ξ::NTuple{NC,Float64}) -> Float64
-
-Compute total density (sum of mass concentrations).
-"""
-@inline total_density(ξ::NTuple{NC,<:Real}) where {NC} = sum(ξ)
 
 # ============================================================================
 # Recursive helpers for heterogeneous tuple iteration
@@ -285,52 +125,6 @@ Uses dispatch-based unrolling to avoid allocation from heterogeneous tuple index
 
     inv_v_total = 1.0 / v_total
     return _vol_fracs(ξ, T, inv_v_total, comps, Val(NC))
-end
-
-"""
-	volume_fraction_derivatives(ξ, T, material) -> ∂vⱼ/∂ξᵢ
-
-Compute analytical derivatives of volume fractions for Jacobian assembly.
-
-For volume fraction vⱼ = (ξⱼ/ρⱼ) / V_total where V_total = Σₖ(ξₖ/ρₖ):
-
-∂vⱼ/∂ξᵢ = δᵢⱼ/(ρⱼ × V_total) - vⱼ/(ρᵢ × V_total)
-
-Returns an NC×NC matrix where element [j,i] = ∂vⱼ/∂ξᵢ
-"""
-@inline function volume_fraction_derivatives(
-    ξ::NTuple{NC,<:Real},
-    T::Real,
-    material,
-) where {NC}
-    comps = material.components
-    v_total = _sum_specific_vol(ξ, T, comps, Val(NC))
-
-    if v_total < 1e-20
-        # Return zeros if no volume
-        return ntuple(_ -> ntuple(_ -> 0.0, Val(NC)), Val(NC))
-    end
-
-    # Get current volume fractions
-    v = volume_fractions(ξ, T, material)
-
-    # Get component densities
-    ρ = ntuple(i -> comps[i].density(T), Val(NC))
-
-    # Compute derivatives: ∂vⱼ/∂ξᵢ stored as [j, i]
-    # Returns tuple of tuples: outer index j (component whose v is differentiated),
-    # inner index i (concentration being perturbed)
-    return ntuple(Val(NC)) do j
-        ntuple(Val(NC)) do i
-            # Kronecker delta term
-            δ_term = (i == j) ? 1.0 / (ρ[j] * v_total) : 0.0
-
-            # Common term
-            common_term = v[j] / (ρ[i] * v_total)
-
-            δ_term - common_term
-        end
-    end
 end
 
 # ============================================================================
@@ -537,7 +331,7 @@ allocating intermediate NTuple.
 """
 @inline function mixture_density(ξ::NTuple{NC,<:Real}, T::Real, material) where {NC}
     W = _prop_type(ξ, T)
-    ρ_total = total_density(ξ)
+    ρ_total = sum(ξ)
     if ρ_total < 1e-20
         return zero(W)
     end
@@ -557,78 +351,6 @@ end
 # ============================================================================
 # Porosity
 # ============================================================================
-
-@inline function _porosity_sum(v, comps::Tuple{C}, ::Val{1}) where {C}
-    return is_gas(comps[1]) ? v[1] : zero(_prop_type(v))
-end
-
-@inline function _porosity_sum(v, comps::Tuple{C1,C2}, ::Val{2}) where {C1,C2}
-    φ = zero(_prop_type(v))
-    if is_gas(comps[1])
-
-        φ += v[1]
-    end
-    if is_gas(comps[2])
-
-        φ += v[2]
-    end
-    return φ
-end
-
-@inline function _porosity_sum(v, comps::Tuple{C1,C2,C3}, ::Val{3}) where {C1,C2,C3}
-    φ = zero(_prop_type(v))
-    if is_gas(comps[1])
-
-        φ += v[1]
-    end
-    if is_gas(comps[2])
-
-        φ += v[2]
-    end
-    if is_gas(comps[3])
-
-        φ += v[3]
-    end
-    return φ
-end
-
-# Explicit unrolled version for 4 components (common case)
-@inline function _porosity_sum(v, comps::Tuple{C1,C2,C3,C4}, ::Val{4}) where {C1,C2,C3,C4}
-    φ = zero(_prop_type(v))
-    if is_gas(comps[1])
-        φ += v[1]
-    end
-    if is_gas(comps[2])
-        φ += v[2]
-    end
-    if is_gas(comps[3])
-        φ += v[3]
-    end
-    if is_gas(comps[4])
-        φ += v[4]
-    end
-    return φ
-end
-
-# Generic fallback using generated function for NC > 4
-@inline function _porosity_sum(v, comps::Tuple, ::Val{NC}) where {NC}
-    return _porosity_sum_gen(v, comps)
-end
-
-@generated function _porosity_sum_gen(v::NTuple{NC,<:Real}, comps::Tuple) where {NC}
-    expr = quote
-        φ = zero(_prop_type(v))
-    end
-    for i = 1:NC
-        push!(expr.args, quote
-            if is_gas(comps[$i])
-                φ += v[$i]
-            end
-        end)
-    end
-    push!(expr.args, :(return φ))
-    return expr
-end
 
 """
 	porosity(ξ::NTuple{NC,Float64}, T::Float64, material::Material) -> Float64

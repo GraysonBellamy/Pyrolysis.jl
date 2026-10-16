@@ -504,8 +504,6 @@ _solve_bt(T_cell, k, Δz, bc, t, ε; kwargs...) =
                 a_eff = a_eff,
             )
             @test q6 ≈ q_c
-            q4, _ = evaluate_bc_flux_and_derivative(bc + rad, T_s, t, ε_eff; a_eff = a_eff)
-            @test q4 ≈ q_c
 
             # Volumetric models still contribute zero at the face.
             q_vol, _ = evaluate_bc_flux_and_derivative(

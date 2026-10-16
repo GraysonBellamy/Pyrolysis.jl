@@ -44,34 +44,6 @@ function update_geometry!(mesh::Mesh1D)
 end
 
 """
-	cell_volume(mesh::Mesh1D, i::Int) -> Float64
-
-Get the volume of the i-th cell.
-"""
-@inline cell_volume(mesh::Mesh1D, i::Int) = mesh.cell_volumes[i]
-
-"""
-	face_area(mesh::Mesh1D, f::Int) -> Float64
-
-Get the area of the f-th face (cross-sectional area in 1D).
-"""
-@inline face_area(mesh::Mesh1D, f::Int) = mesh.face_areas[f]
-
-"""
-	cell_center(mesh::Mesh1D, i::Int) -> Float64
-
-Get the center position of the i-th cell.
-"""
-@inline cell_center(mesh::Mesh1D, i::Int) = mesh.cell_centers[i]
-
-"""
-	face_position(mesh::Mesh1D, f::Int) -> Float64
-
-Get the position of the f-th face.
-"""
-@inline face_position(mesh::Mesh1D, f::Int) = mesh.face_positions[f]
-
-"""
 	cell_size(mesh::Mesh1D, i::Int) -> Float64
 
 Get the size (length) of the i-th cell.
@@ -84,21 +56,6 @@ Get the size (length) of the i-th cell.
 end
 
 """
-	total_volume(mesh::Mesh1D) -> Float64
-
-Compute the total volume of the domain.
-"""
-function total_volume(mesh::Mesh1D)
-    vol = 0.0
-    @inbounds for i = 1:length(mesh.cell_volumes)
-        if mesh.active_cell_mask[i]
-            vol += mesh.cell_volumes[i]
-        end
-    end
-    return vol
-end
-
-"""
 	domain_bounds(mesh::Mesh1D) -> Tuple{Float64,Float64}
 
 Get the domain bounds (z_min, z_max).
@@ -107,84 +64,6 @@ function domain_bounds(mesh::Mesh1D)
     z_min = minimum(n.z for n in mesh.nodes)
     z_max = maximum(n.z for n in mesh.nodes)
     return (z_min, z_max)
-end
-
-# ============================================================================
-# Geometry Cache for ALE ODE Evaluation
-# ============================================================================
-
-"""
-	GeometryCache
-
-Pre-allocated arrays for geometry computation during ALE ODE evaluation.
-
-This struct holds work arrays that are updated from the node positions in the
-state vector at each ODE RHS evaluation. Using pre-allocated arrays avoids
-allocations during the time-critical RHS computation.
-
-# Fields
-- `volumes::Vector{Float64}`: Cell volumes (length n_cells)
-- `centers::Vector{Float64}`: Cell center positions (length n_cells)
-- `face_positions::Vector{Float64}`: Face positions (length n_faces)
-- `face_distances::Vector{Float64}`: Distances between cell centers across faces (length n_faces)
-
-# Usage
-```julia
-cache = GeometryCache(n_cells, n_faces)
-# Populate cache.volumes, cache.centers, etc. from the current state.
-```
-"""
-struct GeometryCache
-    volumes::Vector{Float64}
-    centers::Vector{Float64}
-    face_positions::Vector{Float64}
-    face_distances::Vector{Float64}
-end
-
-"""
-	GeometryCache(n_cells::Int, n_faces::Int)
-
-Create a GeometryCache with pre-allocated arrays.
-"""
-function GeometryCache(n_cells::Int, n_faces::Int)
-    GeometryCache(
-        Vector{Float64}(undef, n_cells),
-        Vector{Float64}(undef, n_cells),
-        Vector{Float64}(undef, n_faces),
-        Vector{Float64}(undef, n_faces),
-    )
-end
-
-"""
-	GeometryCache(mesh::Mesh1D)
-
-Create a GeometryCache sized for the given mesh.
-"""
-GeometryCache(mesh::Mesh1D) = GeometryCache(length(mesh.cells), length(mesh.faces))
-
-"""
-	resize_geometry_cache!(cache::GeometryCache, n_cells::Int, n_faces::Int)
-
-Resize a GeometryCache for a new mesh size.
-
-This function is used during adaptive mesh operations (h-refinement, h-coarsening,
-surface cell depletion) when the number of cells/faces changes.
-
-# Arguments
-- `cache::GeometryCache`: Cache to resize
-- `n_cells::Int`: New number of cells
-- `n_faces::Int`: New number of faces (typically n_cells + 1 for 1D)
-
-# Notes
-Arrays are resized in-place. Previous values are lost and should be
-recomputed after calling this function.
-"""
-function resize_geometry_cache!(cache::GeometryCache, n_cells::Int, n_faces::Int)
-    resize!(cache.volumes, n_cells)
-    resize!(cache.centers, n_cells)
-    resize!(cache.face_positions, n_faces)
-    resize!(cache.face_distances, n_faces)
-    return nothing
 end
 
 # ============================================================================

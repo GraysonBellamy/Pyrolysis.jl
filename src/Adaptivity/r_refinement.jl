@@ -12,7 +12,7 @@ For a monitor function ω(z), we want:
 This concentrates cells where ω is large.
 """
 
-using ..Geometry: Mesh1D, Node1D, cell_size, cell_center, update_geometry!, n_cells, n_nodes
+using ..Geometry: Mesh1D, Node1D, cell_size, update_geometry!, n_cells, n_nodes
 using ..Geometry: domain_bounds
 
 # Nodes referenced by at least one active cell. h-coarsening leaves orphaned
@@ -121,7 +121,7 @@ function evaluate_monitor(
         end
 
         # Compute gradient
-        grad = compute_cell_gradient(φ, mesh, i)
+        grad = compute_gradient_1d(φ, mesh, i)
         ω[i] = sqrt(1.0 + mon.α * grad^2)
     end
 
@@ -179,37 +179,6 @@ function evaluate_monitor(
     return ω
 end
 
-"""
-	compute_cell_gradient(φ::Vector{Float64}, mesh::Mesh1D, i::Int) -> Float64
-
-Compute gradient of field φ at cell i.
-"""
-function compute_cell_gradient(φ::AbstractVector{Float64}, mesh::Mesh1D, i::Int)
-    cell = mesh.cells[i]
-    left_face = mesh.faces[cell.face_ids[1]]
-    right_face = mesh.faces[cell.face_ids[2]]
-
-    left_id = left_face.cell_ids[1]
-    right_id = right_face.cell_ids[2]
-
-    if left_id == 0 && right_id == 0
-        return 0.0
-    elseif left_id == 0
-        dz = mesh.cell_centers[right_id] - mesh.cell_centers[i]
-        return abs(dz) > 0 ? (φ[right_id] - φ[i]) / dz : 0.0
-    elseif right_id == 0
-        dz = mesh.cell_centers[i] - mesh.cell_centers[left_id]
-        return abs(dz) > 0 ? (φ[i] - φ[left_id]) / dz : 0.0
-    else
-        # Opposite-distance-weighted slopes: second order on nonuniform
-        # meshes
-        d_L = mesh.cell_centers[i] - mesh.cell_centers[left_id]
-        d_R = mesh.cell_centers[right_id] - mesh.cell_centers[i]
-        return (abs(d_L) > 0 && abs(d_R) > 0) ?
-               opposite_distance_gradient(φ[left_id], φ[i], φ[right_id], d_L, d_R) : 0.0
-    end
-end
-
 # ============================================================================
 # Equidistribution Algorithm
 # ============================================================================
@@ -249,10 +218,6 @@ function compute_target_positions(mesh::Mesh1D, ω::Vector{Float64})
     if Ω_total ≤ 0
         return Float64[]
     end
-
-    # Target: each segment should have equal Ω_total / N contribution
-    n_segments = length(active_cells)
-    target_per_segment = Ω_total / n_segments
 
     # Compute target positions by equidistribution
     # For each interior node n, find z such that ∫₀^z ω dz = (n/N) * Ω_total
@@ -324,7 +289,7 @@ function relocate_nodes!(
 ) where {NC}
 
     # Extract current state for monitor evaluation
-    T, ξ = extract_state_arrays(mesh)
+    T, ξ = extract_fields(mesh)
 
     z_min, z_max = domain_bounds(mesh)
     L = z_max - z_min
@@ -404,25 +369,4 @@ function relocate_nodes!(
     end
 
     return max_iter
-end
-
-"""
-	extract_state_arrays(mesh::Mesh1D{NC}) -> (T, ξ)
-
-Extract temperature and concentration arrays from mesh.
-"""
-function extract_state_arrays(mesh::Mesh1D{NC}) where {NC}
-    n = n_cells(mesh)
-    T = zeros(n)
-    ξ = zeros(NC, n)
-
-    @inbounds for i = 1:n
-        state = mesh.cell_states[i]
-        T[i] = state.T
-        for j = 1:NC
-            ξ[j, i] = state.ξ[j]
-        end
-    end
-
-    return T, ξ
 end

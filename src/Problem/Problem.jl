@@ -12,17 +12,15 @@ module Problem
 
 using ..Materials
 using ..BoundaryConditions
-using ..Materials: n_reactions, SOLID
+using ..Materials: n_reactions
 using ..BoundaryConditions: ImpermeableBC
 import ..Materials: n_components  # Import to extend
 using ..Geometry
-using ..Geometry: BoundaryState
 using ..Properties
 using ..Physics
-using ..Adaptivity
 using ..Discretization
 using ForwardDiff
-import ..Materials: verify_stoichiometry, mass_balance_error, RadiationModel
+import ..Materials: verify_stoichiometry, mass_balance_error
 
 # Include subfiles
 include("pyrolysis_problem.jl")
@@ -51,10 +49,9 @@ export n_timesteps, succeeded
 # Initial conditions
 export apply_initial_conditions!
 export step_profile, linear_profile, gaussian_profile, tanh_profile
-export verify_initial_conditions
 
 # Validation
-export validate_problem, is_valid_problem, check_consistency
+export validate_problem, is_valid_problem
 
 # Pure-residual + Workspace surface.
 #
@@ -75,11 +72,7 @@ export StateLayout,
     state_length, temperature_range, concentration_range, z_range, chi_range, block_view
 export pack_state!, update_mesh_from_state!, create_state_vector
 export StateCache,
-    populate!,
-    resize_state_cache!,
-    mirror_eulerian_geometry!,
-    update_cross_section_area!,
-    update_state_geometry!
+    populate!, mirror_eulerian_geometry!, update_cross_section_area!, update_state_geometry!
 export get_temperature,
     get_concentration,
     get_node_position,
@@ -87,8 +80,8 @@ export get_temperature,
     get_chi,
     get_thickness_from_state,
     compute_volumes_from_state
-export ProblemDef, InitialConditions, get_option
-export Workspace, update_radiation!, resize_workspace!
+export ProblemDef, get_option
+export Workspace, update_radiation!
 export initialize_state
 export to_problem_def, build_workspace, build_ad_workspace
 

@@ -28,10 +28,7 @@ using Pyrolysis.Discretization:
     divergence_species_1d!, update_darcy_properties!, apply_pressure_bc_to_darcy_velocity!
 using Pyrolysis.Problem: populate!, build_ad_workspace
 using Pyrolysis.Jacobian:
-    DarcyTransportOperator,
-    build_darcy_transport_workspace,
-    StructuredJacobian,
-    build_residual_context
+    DarcyTransportOperator, build_darcy_transport_workspace, StructuredJacobian
 
 include(joinpath(@__DIR__, "..", "perf", "perf_helpers.jl"))
 
@@ -50,7 +47,7 @@ function _set_state_ramp_darcy!(u, n_cells, T_lo, T_hi, ξ_vals)
 end
 
 # Reference Darcy-Fick contribution: matches the *interior-flux-only* slice
-# of `compute_rhs_darcy_fick!`. Generic on state's scalar eltype.
+# of `compute_rhs!` under Darcy–Fick transport. Generic on state's scalar eltype.
 function _reference_darcy_transport(
     state,
     mesh,
@@ -203,13 +200,6 @@ end
 
 @testset "DarcyTransportOperator" begin
 
-    @testset "interface declarations" begin
-        op = DarcyTransportOperator()
-        @test Pyrolysis.Jacobian.reads(op) == (:gas_pressure,)
-        @test Pyrolysis.Jacobian.writes(op) == ()
-        @test Pyrolysis.Jacobian.stencil(op) == (cells = -1:1,)
-    end
-
     def, ws, u, _ = build_baseline_eulerian_darcy()
     n = ws.layout.n_cells
     NC = n_components(ws.layout)
@@ -311,11 +301,10 @@ end
         end
         A = sparse(I, J_idx, V, n_total, n_total)
         fill!(A.nzval, 0.0)
-        jac = StructuredJacobian(:eulerian, A)
+        jac = StructuredJacobian(A)
 
         op = DarcyTransportOperator()
         ws_ad = build_darcy_transport_workspace(material)
-        ctx = build_residual_context([op])
 
         populate!(ws.state_cache, u, ws.layout)
         Pyrolysis.Problem.update_state_geometry!(
@@ -328,7 +317,6 @@ end
             jac,
             op,
             u,
-            ctx,
             0.0,
             ws_ad,
             ws.state_cache,

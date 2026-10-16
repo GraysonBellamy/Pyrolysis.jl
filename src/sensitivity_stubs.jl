@@ -1,14 +1,11 @@
 """
 Sensitivity-analysis entry points (stubs).
 
-These functions are method-stubs that error out by default. The
-`PyrolysisSciMLSensitivityExt` extension (loaded automatically when
-`SciMLSensitivity` is in the user's environment) attaches concrete
-methods that wire the `PyrolysisProblem` into forward / adjoint
-sensitivity workflows.
-
-Calling without the matching `using SciMLSensitivity` raises a clear
-`ErrorException` telling the user which package to load.
+These functions have no methods in core Pyrolysis. The
+`PyrolysisSciMLSensitivityExt` extension (loaded when `SciMLSensitivity` and
+`Zygote` are both loaded) attaches the methods that wire the
+`PyrolysisProblem` into forward / adjoint sensitivity workflows. Calling one
+without `using SciMLSensitivity, Zygote` raises a `MethodError`.
 """
 
 """

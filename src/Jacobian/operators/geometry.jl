@@ -36,17 +36,11 @@ Stateless tag. Per-problem cache lives on the backend's `geom_cache` field
 (a [`GeometryADCache`](@ref)) and is built once at `JacobianSpec`
 construction.
 
-Note: this operator's stencil is global (z-column → all rows) by virtue of
-running the full residual under AD; the conventional `(cells = …,)`
-declaration doesn't apply. The default `stencil(::Operator) = (cells = 0:0,)`
-fallback is left in place — sparsity for the z-columns is built directly
-in `build_sparsity` from the geometry block's structural pattern, not from
-this operator's `stencil` declaration.
+Its reach is global (each z column touches every row), because it runs the
+full residual under AD; `build_sparsity` builds the z-column pattern from the
+geometry block's structure.
 """
 struct GeometryOperator <: Operator end
-
-reads(::GeometryOperator) = ()
-writes(::GeometryOperator) = ()
 
 # ============================================================================
 # Cache
@@ -153,7 +147,7 @@ end
 # ============================================================================
 
 """
-	contribute_to_jacobian!(jac, ::GeometryOperator, u, ctx, t,
+	contribute_to_jacobian!(jac, ::GeometryOperator, u, t,
 	                        cache::GeometryADCache, def::ProblemDef) -> nothing
 
 Operator-pattern entry point used by the `Structured` backend. Thin wrapper
@@ -165,7 +159,6 @@ function contribute_to_jacobian!(
     jac::StructuredJacobian,
     ::GeometryOperator,
     u::AbstractVector,
-    ctx::ResidualContext,
     t::Real,
     cache::GeometryADCache,
     def::ProblemDef,

@@ -21,16 +21,12 @@ This module provides:
 """
 module Materials
 
-using StaticArrays
-
 # ============================================================================
 # Abstract Type Hierarchy (must be defined BEFORE includes)
 # ============================================================================
 
 # Property functions
 abstract type AbstractPropertyFunction end
-abstract type AbstractThermalProperty <: AbstractPropertyFunction end
-abstract type AbstractTransportProperty <: AbstractPropertyFunction end
 
 # Material system
 abstract type AbstractComponent end
@@ -47,14 +43,9 @@ abstract type AbstractMesh{DIM} end
 abstract type AbstractBoundaryCondition end
 abstract type AbstractThermalBC <: AbstractBoundaryCondition end
 abstract type AbstractMassBC <: AbstractBoundaryCondition end
-abstract type AbstractRadiationBC <: AbstractBoundaryCondition end
-
-# ALE (defined here, implemented in ALE module)
-abstract type AbstractRemappingMethod end
 
 # Adaptivity (defined here, implemented in Adaptivity module)
 abstract type AbstractErrorIndicator end
-abstract type AbstractRefinementCriterion end
 abstract type AbstractQualityMetric end
 
 # Problem and solution
@@ -80,13 +71,12 @@ include("blowing_models.jl")
 export R_GAS, STEFAN_BOLTZMANN, T_REF, P_REF, RHO_CP_FLOOR, T_PROPERTY_MIN, T_PROPERTY_MAX
 
 # Abstract types
-export AbstractPropertyFunction, AbstractThermalProperty, AbstractTransportProperty
+export AbstractPropertyFunction
 export AbstractComponent, AbstractReaction, AbstractMaterial
 export AbstractNode, AbstractCell, AbstractFace, AbstractMesh
 export AbstractBoundaryCondition, AbstractThermalBC, AbstractMassBC
 export AbstractRadiationBC
-export AbstractRemappingMethod
-export AbstractErrorIndicator, AbstractRefinementCriterion, AbstractQualityMetric
+export AbstractErrorIndicator, AbstractQualityMetric
 export AbstractPyrolysisProblem, AbstractPyrolysisSolution
 
 # Property functions
@@ -94,7 +84,6 @@ export ConstantProperty, LinearProperty, PolynomialProperty
 export ArrheniusProperty, TableProperty, CallableProperty
 export SutherlandProperty  # Sutherland gas-viscosity correlation (Material.gas_viscosity default)
 export StateDependentProperty  # For state-dependent heats of reaction
-export derivative, derivative_ξ  # Temperature and concentration derivatives of property functions
 export evaluate_param, evaluate_param_T  # Unified parameter evaluation (defined in property_functions.jl)
 export property_temperature  # Argument clamp shared by every temperature-dependent law
 
@@ -103,7 +92,7 @@ export Phase, SOLID, LIQUID, GAS
 export SolidComponent, GaseousComponent, LiquidComponent
 export phase, molar_mass, is_gas, is_solid, is_liquid  # Type-dispatch accessors
 export get_permeability, has_permeability  # Permeability accessors for components
-export get_density, get_intrinsic_density  # Bulk vs. skeletal density accessors
+export get_intrinsic_density  # Skeletal density accessor
 export get_emissivity, get_absorptivity, surface_absorptivity  # Radiative surface accessors
 
 # Blowing models (evaluated in Discretization/blowing.jl)
@@ -113,16 +102,14 @@ export GasSpecies, NITROGEN, nasa7_heat_capacity, eucken_viscosity, fuller_diffu
 export gas_property_temperature
 
 # Reactions
-export Reaction, ReactionSet
+export Reaction
 export DepletionLimiter
 
 # Materials
 export Material, MixingRule, PARALLEL, SERIES, WEIGHTED, BRUGGEMAN, CARMAN_KOZENY
 export MixingSpec, MaterialMixing
-export n_components, n_reactions, n_solids, n_gases
-export is_gas_phase, is_solid_phase, get_swelling_factor, get_component_density
-export foreach_component,
-    foreach_gas_component, gas_component_indices, dry_pyrolysis_gas_indices
+export n_components, n_reactions
+export dry_pyrolysis_gas_indices
 export compute_gas_fluxes_unrolled!, compute_gas_fluxes_darcy_fick_unrolled!
 export set_boundary_advective_flux_unrolled!
 export apply_species_residual_unrolled!
@@ -132,8 +119,7 @@ export has_darcy_flow
 
 # Radiation model enum + predicates (trait dispatch; kept in the foundation)
 export RadiationModel, NO_RADIATION, SURFACE_ABSORPTION, BEER_LAMBERT, P1_QUASI_STEADY
-export requires_absorption_coefficients,
-    has_nonlocal_jacobian_coupling, requires_radiation_cache
+export requires_radiation_cache
 export has_absorption_coefficients
 
 end # module Materials

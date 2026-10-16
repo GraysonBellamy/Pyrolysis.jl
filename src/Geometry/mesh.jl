@@ -182,9 +182,6 @@ function Mesh1D{NC}() where {NC}
     )
 end
 
-# Convenience constructor from Val{NC}
-Mesh1D(::Val{NC}) where {NC} = Mesh1D{NC}()
-
 # ============================================================================
 # Mesh Accessors
 # ============================================================================
@@ -209,17 +206,3 @@ Get the total number of cells in the mesh (including inactive).
 Get the number of faces in the mesh.
 """
 @inline n_faces(mesh::Mesh1D) = length(mesh.faces)
-
-"""
-	domain_length(mesh::Mesh1D)
-
-Get the domain length (thickness) for a 1D mesh.
-"""
-function domain_length(mesh::Mesh1D)
-    if isempty(mesh.nodes)
-        return 0.0
-    end
-    z_min = minimum(n.z for n in mesh.nodes)
-    z_max = maximum(n.z for n in mesh.nodes)
-    return z_max - z_min
-end

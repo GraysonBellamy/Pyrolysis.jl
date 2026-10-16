@@ -150,8 +150,6 @@ end
     @testset "sparsity_profile trait" begin
         @test sparsity_profile(DirectSolve()) === :full
         @test sparsity_profile(ApproxSolve()) === :ale_reduced
-        @test sparsity_profile(StructuredSolve()) === :full
-        @test sparsity_profile(MatrixFreeSolve()) === :full
     end
 end
 

@@ -24,7 +24,6 @@ first — `create_state_vector` packs the mesh as-is (see
 """
 
 using ..Geometry: Mesh1D, MeshTopology, MeshGeometry, mesh_topology, mesh_geometry
-using ..Geometry: GeometryCache
 using ..Materials:
     NO_RADIATION,
     SURFACE_ABSORPTION,
@@ -35,7 +34,7 @@ using ..Materials:
     n_reactions
 using ..Materials: dry_pyrolysis_gas_indices
 using ..Properties: PropertyCache
-using ..Discretization: RHSCache, Limiter, VANLEER
+using ..Discretization: RHSCache
 
 # Internal: derive a SimulationMode from a problem and the runtime switches
 # `to_problem_def` accepts. Inlined into `to_problem_def`; not part of the
@@ -79,8 +78,8 @@ end
 	                radiation_kirchhoff=true) -> ProblemDef
 
 Lift a user-facing `PyrolysisProblem` into the immutable `ProblemDef`.
-The returned object shares the underlying material/BC/initial-condition
-*data* with the input but no longer carries any mutable mesh state.
+The returned object shares the underlying material/BC data with the input
+but no longer carries any mutable mesh state.
 
 `radiation_kirchhoff` records the surface-transmissivity convention for the
 Beer–Lambert injection: `true` (the default) means `radiation_intensity` is
@@ -111,50 +110,35 @@ function to_problem_def(
 )
     mode = _simulation_mode_from(problem, use_ale, radiation_model)
     topology = mesh_topology(problem.mesh)
-    initial = InitialConditions{Any,Any}(problem.T_initial, problem.ξ_initial)
     options = (
         radiation_model = radiation_model,
         radiation_intensity = Float64(radiation_intensity),
         radiation_kirchhoff = radiation_kirchhoff,
-        dt_initial = problem.dt_initial,
-        output_times = problem.output_times,
     )
     return ProblemDef(
         material = problem.material,
         topology = topology,
         bcs = problem.bc_set,
-        initial = initial,
-        tspan = problem.tspan,
         mode = mode,
         options = options,
     )
 end
 
 """
-	build_workspace(problem::PyrolysisProblem, def::ProblemDef;
-	                  min_thickness=1e-6,
-	                  ale_limiter=VANLEER, scalar_eltype::Type=Float64) -> Workspace
+	build_workspace(problem::PyrolysisProblem, def::ProblemDef) -> Workspace
 
-Build a `Workspace` that owns every per-step cache and work array used
-by the unified residual. Each cache is sized to the current mesh and
-component count.
-
-`scalar_eltype` is the live state's eltype (`Tu` parameter) — `Float64`
-for the canonical workspace `solve()` allocates; `ForwardDiff.Dual{...}`
-for the AD workspace allocated lazily by an AD Jacobian backend.
+Build the Float64 `Workspace` that owns every per-step cache and work array
+used by the unified residual. Each cache is sized to the current mesh and
+component count. AD Jacobian backends allocate a Dual-typed twin with
+[`build_ad_workspace`](@ref).
 
 The `mesh` carried by the workspace is the same mutable `Mesh1D`
 referenced by `problem`. The mesh is **read-only** during residual /
 Jacobian assembly; live state lives in `ws.state_cache` and is written
 back to the mesh only between accepted timesteps via `StepUpdateCallback`.
 """
-function build_workspace(
-    problem::PyrolysisProblem,
-    def::ProblemDef;
-    min_thickness::Real = 1e-6,
-    ale_limiter::Limiter = VANLEER,
-    scalar_eltype::Type{Tu} = Float64,
-) where {Tu}
+function build_workspace(problem::PyrolysisProblem, def::ProblemDef)
+    Tu = Float64
     mode = def.mode
     NC = n_components(problem.material)
     NR = n_reactions(problem.material)
@@ -186,7 +170,6 @@ function build_workspace(
     # ------------------------------------------------------------------
     # Mode-conditional caches — Nothing concrete typed (no Union)
     # ------------------------------------------------------------------
-    geom_cache = mesh_mode(mode) isa ALE ? GeometryCache(n_cells, n_faces) : nothing
     rad_cache = nothing  # P1 lives in Pyrolysis.Experimental
 
     # ------------------------------------------------------------------
@@ -204,19 +187,13 @@ function build_workspace(
         w_physical = zeros(Tu, n_nodes)
         θ_work = zeros(Tu, n_cells)
         ale_advection = zeros(Tu, n_cells)
-        rates_work = zeros(Tu, NR)
-        heats_work = zeros(Tu, NR)
         dξ_dt_work = zeros(Tu, NC)
-        S_conv_work = zeros(Tu, n_cells)
     else
         w_work = Tu[]
         w_physical = Tu[]
         θ_work = Tu[]
         ale_advection = Tu[]
-        rates_work = zeros(Tu, NR)
-        heats_work = zeros(Tu, NR)
         dξ_dt_work = zeros(Tu, NC)
-        S_conv_work = Tu[]
     end
 
     # ------------------------------------------------------------------
@@ -226,16 +203,8 @@ function build_workspace(
     # so we evaluate once at construction and cache the resulting NTuple.
     # ------------------------------------------------------------------
     dry_gas_indices = dry_pyrolysis_gas_indices(problem.material)
-    top_face_ids, top_cell_ids = _boundary_face_cells(mesh, 1)
-    bottom_face_ids, bottom_cell_ids = _boundary_face_cells(mesh, 2)
-
-    # ------------------------------------------------------------------
-    # Boundary states — tag-keyed view of the mesh's per-id Dict.
-    # ------------------------------------------------------------------
-    bs_dict = mesh.boundary_states
-    bs_top = get(bs_dict, 1, BoundaryState())
-    bs_bottom = get(bs_dict, 2, BoundaryState())
-    bs_named = (top = bs_top, bottom = bs_bottom)
+    top_face_ids = _boundary_face_ids(mesh, 1)
+    bottom_face_ids = _boundary_face_ids(mesh, 2)
 
     # ------------------------------------------------------------------
     # Initial radiation intensity from the problem options.
@@ -249,9 +218,7 @@ function build_workspace(
         typeof(mesh),
         typeof(geom),
         typeof(layout),
-        typeof(geom_cache),
         typeof(rad_cache),
-        typeof(bs_named),
         typeof(state_cache),
         typeof(dry_gas_indices),
         typeof(prop_cache.darcy),
@@ -262,7 +229,6 @@ function build_workspace(
         state_cache,
         prop_cache,
         rhs_cache,
-        geom_cache,
         rad_cache,
         dT_work,
         dξ_work,
@@ -270,26 +236,17 @@ function build_workspace(
         w_physical,
         θ_work,
         ale_advection,
-        rates_work,
-        heats_work,
         dξ_dt_work,
-        S_conv_work,
         dry_gas_indices,
         top_face_ids,
         bottom_face_ids,
-        top_cell_ids,
-        bottom_cell_ids,
         I_radiation,
-        ale_limiter,
-        Float64(min_thickness),
-        bs_named,
         nothing,  # w_override — verification hook, off by default
     )
 end
 
 """
 	initialize_state(problem::PyrolysisProblem;
-	                 min_thickness=1e-6,
 	                 use_ale=false,
 	                 radiation_model=NO_RADIATION,
 	                 radiation_intensity=0.0,
@@ -303,8 +260,7 @@ Canonical setup path from a `PyrolysisProblem` to a ready-to-integrate
    progress denominator used under a `lateral_shrinkage_law`).
 2. [`to_problem_def`](@ref) — lift to the immutable `ProblemDef` (all
    keyword switches forwarded).
-3. [`build_workspace`](@ref) — allocate every residual/Jacobian cache
-   (`min_thickness` forwarded).
+3. [`build_workspace`](@ref) — allocate every residual/Jacobian cache.
 4. [`create_state_vector`](@ref) — pack the freshly initialized mesh into
    `u0`.
 
@@ -330,7 +286,6 @@ initial conditions (and `m_dry_solid_initial` stays zero, degenerating the
 """
 function initialize_state(
     problem::PyrolysisProblem;
-    min_thickness::Real = 1e-6,
     use_ale::Bool = false,
     radiation_model = NO_RADIATION,
     radiation_intensity::Real = 0.0,
@@ -344,7 +299,7 @@ function initialize_state(
         radiation_intensity = radiation_intensity,
         radiation_kirchhoff = radiation_kirchhoff,
     )
-    ws = build_workspace(problem, def; min_thickness = min_thickness)
+    ws = build_workspace(problem, def)
     u0 = create_state_vector(ws.layout, ws.mesh)
     return def, ws, u0
 end
@@ -389,7 +344,6 @@ function build_ad_workspace(
     prop_cache = PropertyCache{Tu}(n_cells, n_faces; with_darcy = with_darcy)
     rhs_cache = RHSCache{Tu}(n_cells, n_faces, NC, NR)
 
-    geom_cache = ws.geom_cache
     rad_cache = ws.rad_cache
 
     dT_work = zeros(Tu, n_cells)
@@ -400,19 +354,13 @@ function build_ad_workspace(
         w_physical = zeros(Tu, n_nodes)
         θ_work = zeros(Tu, n_cells)
         ale_advection = zeros(Tu, n_cells)
-        rates_work = zeros(Tu, NR)
-        heats_work = zeros(Tu, NR)
         dξ_dt_work = zeros(Tu, NC)
-        S_conv_work = zeros(Tu, n_cells)
     else
         w_work = Tu[]
         w_physical = Tu[]
         θ_work = Tu[]
         ale_advection = Tu[]
-        rates_work = zeros(Tu, NR)
-        heats_work = zeros(Tu, NR)
         dξ_dt_work = zeros(Tu, NC)
-        S_conv_work = Tu[]
     end
 
     return Workspace{
@@ -422,9 +370,7 @@ function build_ad_workspace(
         typeof(mesh),
         typeof(geom),
         typeof(layout),
-        typeof(geom_cache),
         typeof(rad_cache),
-        typeof(ws.boundary_states),
         typeof(state_cache),
         typeof(ws.dry_gas_indices),
         typeof(prop_cache.darcy),
@@ -435,7 +381,6 @@ function build_ad_workspace(
         state_cache,
         prop_cache,
         rhs_cache,
-        geom_cache,
         rad_cache,
         dT_work,
         dξ_work,
@@ -443,21 +388,13 @@ function build_ad_workspace(
         w_physical,
         θ_work,
         ale_advection,
-        rates_work,
-        heats_work,
         dξ_dt_work,
-        S_conv_work,
         ws.dry_gas_indices,
         # Shared with the canonical workspace: a park event moves the exposed
         # boundary face, and both workspaces must see the new face id.
         ws.top_face_ids,
         ws.bottom_face_ids,
-        ws.top_cell_ids,
-        ws.bottom_cell_ids,
         ws.I_radiation,
-        ws.ale_limiter,
-        ws.min_thickness,
-        ws.boundary_states,
         ws.w_override,
     )
 end

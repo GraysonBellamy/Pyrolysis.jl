@@ -33,10 +33,9 @@ Mutable container threaded through the callback. Holds:
 Built once at the start of `solve()` and lives on the `Workspace` (or as a
 free-standing object passed via `cb_kwargs`).
 """
-mutable struct DiagnosticsState{NC,NR}
+mutable struct DiagnosticsState{NC}
     mass::MassConservationTracker{NC}
     energy::EnergyConservationTracker
-    reactions::ReactionMassFlowTracker{NC,NR}
     stride::Int
     step_counter::Int
     last_t::Float64
@@ -52,12 +51,9 @@ mesh state (this becomes `t=0` baseline).
 function DiagnosticsState(mesh::Geometry.Mesh1D{NC}, material; stride::Int = 10) where {NC}
     mass_tracker = MassConservationTracker(mesh, material)
     energy_tracker = EnergyConservationTracker(mesh, material)
-    reaction_tracker = ReactionMassFlowTracker(material)
-    NR = length(material.reactions)
-    return DiagnosticsState{NC,NR}(
+    return DiagnosticsState{NC}(
         mass_tracker,
         energy_tracker,
-        reaction_tracker,
         stride,
         0,
         0.0,
@@ -76,7 +72,7 @@ to the log if `step_counter % stride == 0`.
 Substep size `dt = t − state.last_t` is computed automatically.
 """
 function record_substep!(
-    state::DiagnosticsState{NC,NR},
+    state::DiagnosticsState{NC},
     mesh::Geometry.Mesh1D{NC},
     material;
     q_cond_boundary::Float64,
@@ -85,7 +81,7 @@ function record_substep!(
     J_boundary::Matrix{Float64},
     A::Float64,
     t::Float64,
-) where {NC,NR}
+) where {NC}
 
     dt = t - state.last_t
     state.last_t = t

@@ -14,8 +14,6 @@ using Pyrolysis.Materials: Material
 using Pyrolysis.Jacobian:
     StructuredJacobian,
     GasTransportOperator,
-    ResidualContext,
-    build_residual_context,
     GasTransportADWorkspace,
     build_gas_transport_workspace,
     build_sparsity
@@ -41,11 +39,9 @@ function _assemble_gas(def, ws, u, t, path::Symbol)
         copy(S_union.rowval),
         zeros(Float64, length(S_union.nzval)),
     )
-    mode_tag = mesh_mode(def.mode) isa Pyrolysis.Problem.ALE ? :ale : :eulerian
-    jac = StructuredJacobian(mode_tag, A)
+    jac = StructuredJacobian(A)
 
     gw = build_gas_transport_workspace(def.material)
-    ctx = build_residual_context([GasTransportOperator()])
 
     populate!(ws.state_cache, u, ws.layout)
     if mesh_mode(def.mode) isa Pyrolysis.Problem.ALE
@@ -65,7 +61,6 @@ function _assemble_gas(def, ws, u, t, path::Symbol)
             jac,
             GasTransportOperator(),
             u,
-            ctx,
             Float64(t),
             gw,
             ws.state_cache,
@@ -78,7 +73,6 @@ function _assemble_gas(def, ws, u, t, path::Symbol)
             jac,
             GasTransportOperator(),
             u,
-            ctx,
             Float64(t),
             gw,
             ws.state_cache,

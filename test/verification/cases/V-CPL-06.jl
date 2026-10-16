@@ -204,7 +204,7 @@ function _vcpl06_ledger_solve(problem; use_ale::Bool, t_win = 120.0)
         prob,
         KenCarp4(
             autodiff = AutoFiniteDiff(),
-            linsolve = Pyrolysis.Solver.LUFactorization(),
+            linsolve = Pyrolysis.Solver.LinearSolve.LUFactorization(),
         );
         abstol = 1e-8,
         reltol = 1e-6,

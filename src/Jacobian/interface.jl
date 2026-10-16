@@ -2,13 +2,14 @@
 The unified Jacobian interface.
 
 Every Jacobian backend dispatches through `_compute_jacobian!`. Users never
-call `_compute_jacobian!` directly — they construct a `JacobianSpec` and pass
-it to `solve(..., jacobian = spec)`, which routes through `compute_jacobian!`.
+call `_compute_jacobian!` directly: `solve(..., jacobian = backend)` builds the
+`JacobianSpec` for its own `(def, ws)` and routes through `compute_jacobian!`.
 
 Adding a new backend is a three-step contract:
 
   1. Define `struct MyBackend <: JacobianBackend end`
-  2. Define `_build_jacobian_spec(::MyBackend, problem; kwargs...) -> JacobianSpec`
+  2. Define `_build_jacobian_spec(::MyBackend, def::ProblemDef, ws::Workspace;
+                                  kwargs...) -> JacobianSpec`
   3. Define `_compute_jacobian!(J, ::MyBackend, cache, sparsity_phys, sparsity_geom,
                                 u, def, t, ws)`
 
@@ -95,48 +96,17 @@ keyword argument to `solve(...)`.
 - `sparsity_geom`: geometry-block (z-column) sparsity. ALE only; `nothing`
   otherwise.
 - `cache`: backend-private workspace
-- `colorvec_phys`: column coloring of `sparsity_phys` (for FD/sparse-AD).
-                   `Int[]` when not applicable.
-- `colorvec_geom`: column coloring of `sparsity_geom`.
-                   `Int[]` when not applicable.
 """
 struct JacobianSpec{B<:JacobianBackend,S,C}
     backend::B
     sparsity_phys::S
     sparsity_geom::S
     cache::C
-    colorvec_phys::Vector{Int}
-    colorvec_geom::Vector{Int}
 end
 
 # ============================================================================
 # Dispatcher (the only public entry point besides the constructor)
 # ============================================================================
-
-"""
-	state_length(spec::JacobianSpec) -> Int
-
-Length of the state vector the spec was built for. Backends specialize
-[`_cache_state_length`](@ref) on their cache type; the sparse backends can
-also be read from the pattern. `solve()` compares this against `length(u0)`
-so a spec built for the wrong mesh mode fails at entry rather than inside
-the first linear solve.
-"""
-function Problem.state_length(spec::JacobianSpec)
-    spec.sparsity_phys === nothing || return size(spec.sparsity_phys, 1)
-    return _cache_state_length(spec.cache)
-end
-
-"""
-	_cache_state_length(cache) -> Int
-
-Backend hook: the state length recorded in a backend cache. Backends
-without a sparsity pattern must specialize this on their cache type.
-"""
-_cache_state_length(cache) = error(
-    "Jacobian.jl: no `_cache_state_length` method for cache type " *
-    "$(typeof(cache)); the backend must record the state length it was built for.",
-)
 
 """
 	compute_jacobian!(J, spec::JacobianSpec, u, def, t, ws)
@@ -194,53 +164,24 @@ end
 # ============================================================================
 
 """
-	_build_jacobian_spec(backend::JacobianBackend, problem; kwargs...) -> JacobianSpec
-
-Backend-private constructor hook. Each backend implements this to build the
-sparsity patterns, column colorings, and cache appropriate for its assembly
-strategy. Default fallback raises a clean error mirroring
-[`_compute_jacobian!`](@ref).
-"""
-function _build_jacobian_spec(backend::JacobianBackend, problem; kwargs...)
-    error(
-        "Jacobian.jl: no `_build_jacobian_spec` method for backend " *
-        "$(typeof(backend)). The backend is either part of an unloaded " *
-        "package extension, or no implementation has shipped for this backend.",
-    )
-end
-
-"""
-	JacobianSpec(backend::JacobianBackend, problem; kwargs...)
 	JacobianSpec(backend::JacobianBackend, def::ProblemDef, ws::Workspace; kwargs...)
 
-Two-form user-facing constructor. Both delegate to
-[`_build_jacobian_spec`](@ref); each backend is responsible for building
-its sparsity patterns and cache once, at construction time. **Do not call
-inside the integrator hot path** — construction may build sparsity patterns
-and run a warm-up Jacobian solve.
-
-Use the form that matches what's already in scope:
-
-- `JacobianSpec(backend, problem)` accepts a [`PyrolysisProblem`](@ref) and
-  builds the canonical `(def, ws)` pair internally. This is the form most
-  user code reaches for.
-- `JacobianSpec(backend, def, ws)` accepts an already-built `(ProblemDef,
-  Workspace)` pair. The solver and tests use this form because they
-  already have the pair on hand. Each backend ultimately specializes on
-  `_build_jacobian_spec(::B, ::ProblemDef, ::Workspace; ...)`.
+Build the spec for an already-built `(ProblemDef, Workspace)` pair by
+delegating to [`_build_jacobian_spec`](@ref); each backend builds its
+sparsity patterns and cache once, at construction time. **Do not call inside
+the integrator hot path.** The spec binds `ws` (and its mesh), so it is valid
+only for residual and Jacobian evaluations on that workspace; `solve` builds
+its own.
 """
-JacobianSpec(backend::JacobianBackend, problem; kwargs...) =
-    _build_jacobian_spec(backend, problem; kwargs...)
-
 JacobianSpec(backend::JacobianBackend, def::ProblemDef, ws::Workspace; kwargs...) =
     _build_jacobian_spec(backend, def, ws; kwargs...)
 
 """
 	_build_jacobian_spec(backend::JacobianBackend, def::ProblemDef, ws::Workspace; kwargs...)
 
-Three-argument backend hook. Mirrors the two-argument form but receives the
-already-built `(def, ws)` pair directly — no `PyrolysisProblem` extraction.
-Default fallback raises a clean error.
+Backend-private constructor hook. Each backend implements this to build the
+sparsity patterns and cache appropriate for its assembly strategy. The
+default fallback raises a clean error.
 """
 function _build_jacobian_spec(
     backend::JacobianBackend,
@@ -254,38 +195,4 @@ function _build_jacobian_spec(
         "backend is either part of an unloaded package extension, or no " *
         "implementation has shipped for this backend.",
     )
-end
-
-# ============================================================================
-# Generic (PyrolysisProblem)-form constructor
-# ============================================================================
-#
-# Bridges from the user-facing `JacobianSpec(backend, problem)` shape to
-# each backend's `(def, ws)` implementation. The mode/radiation kwargs
-# duplicate what `solve()` passes — they default to Eulerian / no-radiation
-# so the most common case "Eulerian PMMA-style problem" needs no extra
-# arguments. ALE callers must pass `use_ale = true`.
-#
-# For routine production work, prefer `solve(...; jacobian = nothing)` so
-# the auto-default machinery picks the right backend for the active mode
-# without requiring callers to thread mode flags through twice.
-
-function _build_jacobian_spec(
-    backend::JacobianBackend,
-    problem::Problem.PyrolysisProblem;
-    use_ale::Bool = false,
-    radiation_model = nothing,
-    radiation_intensity::Real = 0.0,
-    min_thickness::Real = 1e-6,
-    kwargs...,
-)
-    rm = radiation_model === nothing ? NO_RADIATION : radiation_model
-    def = Problem.to_problem_def(
-        problem;
-        use_ale = use_ale,
-        radiation_model = rm,
-        radiation_intensity = Float64(radiation_intensity),
-    )
-    ws = Problem.build_workspace(problem, def; min_thickness = min_thickness)
-    return _build_jacobian_spec(backend, def, ws; kwargs...)
 end

@@ -82,7 +82,7 @@ end
         φ = porosity(ξ, T, mat)              # = 0.5 for this fixture
         @test φ ≈ 0.5 rtol = 1e-12
         P_int = ideal_gas_pressure(ξ, T, φ, mat)
-        μ = effective_gas_viscosity(T)
+        μ = SutherlandProperty()(T)
         κ_eff = effective_permeability(ξ, T, mat)
         Δz = 0.01 / n
         d = Δz / 2

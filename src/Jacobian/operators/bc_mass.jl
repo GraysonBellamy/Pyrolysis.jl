@@ -7,7 +7,7 @@ zero their boundary faces; this operator supplies what they drop on those
 rows. The boundary cell's **`S_conv` energy row is NOT owned here** — its
 gradient runs through the surface-Newton `T_s` and multiplies the full
 face-averaged `J̄_g`, so the whole row has a single owner,
-[`BCConvectionOperator`](@ref) (which reuses this file's
+[`BCConvectionOperator`](@ref) (which reuses the
 [`_bc_boundary_face_fluxes`](@ref) kernel for the boundary-face flux).
 
 Species rows (per gas component `g`, at the boundary cell):
@@ -32,18 +32,10 @@ Cell-local on the boundary cell: the mass-BC closure and the venting chain
 """
 
 using ForwardDiff
-using ..Materials: Material, is_gas
+using ..Materials: Material
 using ..BoundaryConditions: BoundaryConditionSet
 using ..BoundaryConditions: get_mass_bc
-using ..Properties:
-    effective_gas_transfer,
-    mixture_density,
-    porosity,
-    effective_permeability,
-    effective_gas_viscosity,
-    mixture_gas_viscosity
-using ..Physics: ideal_gas_pressure
-using ..Discretization: mass_bc_flux, boundary_darcy_velocity
+using ..Discretization: _bc_boundary_face_fluxes
 
 """
 	BCMassOperator <: Operator
@@ -51,10 +43,6 @@ using ..Discretization: mass_bc_flux, boundary_darcy_velocity
 Stateless tag.
 """
 struct BCMassOperator <: Operator end
-
-reads(::BCMassOperator) = ()
-writes(::BCMassOperator) = ()
-stencil(::BCMassOperator) = (cells = 0:0,)
 
 """
 	BCMassADWorkspace{NC, CFG}
@@ -79,71 +67,6 @@ function build_bc_mass_workspace(::Material{NC}) where {NC}
     cfg =
         ForwardDiff.JacobianConfig(nothing, f_buf, x_buf, ForwardDiff.Chunk{stencil_dim}())
     return BCMassADWorkspace{NC,typeof(cfg)}(x_buf, f_buf, J_local, cfg)
-end
-
-"""
-	_bc_boundary_face_fluxes(T_cell, ξ_cell, mass_bc, material,
-	                         d_to_face, t, ::Val{tag}, darcy_active)
-	    -> NTuple{NC}
-
-Per-component boundary-face gas mass flux per area, **positive into the
-domain**: the diffusive film law plus (when `darcy_active`) the pressure-BC
-advective venting that mirrors the boundary-face branch of
-`compute_gas_fluxes_darcy_fick!`. Non-gas components are zero. Shared by
-[`BCMassOperator`](@ref) (species rows) and
-[`BCConvectionOperator`](@ref) (the `J̄_g` face average of the boundary
-cell's S_conv energy row); generic over Dual scalar types.
-"""
-function _bc_boundary_face_fluxes(
-    T_cell::Real,
-    ξ_cell::NTuple{NC,Tu},
-    mass_bc,
-    material::Material{NC},
-    d_to_face::Real,
-    t::Real,
-    ::Val{tag},
-    darcy_active::Bool,
-) where {NC,Tu,tag}
-
-    λ_eff = effective_gas_transfer(ξ_cell, T_cell, material)
-    ρ_eff = mixture_density(ξ_cell, T_cell, material)
-    λρ = λ_eff * ρ_eff
-
-    Tv = promote_type(typeof(T_cell), Tu)
-    F = ntuple(Val(NC)) do j
-        if is_gas(material.components[j])
-            Tv(mass_bc_flux(mass_bc, ξ_cell[j], λρ, ρ_eff, d_to_face, t, j))
-        else
-            zero(Tv)
-        end
-    end
-
-    if darcy_active
-        # Advective venting: outward Darcy speed advecting the intrinsic
-        # density ξ/φ out of the boundary cell (inflow advects only the
-        # zero-concentration ambient, hence the one-sided clamp).
-        φ = porosity(ξ_cell, T_cell, material)
-        P_int = ideal_gas_pressure(ξ_cell, T_cell, φ, material)
-        κ_int = effective_permeability(ξ_cell, T_cell, material)
-        μ_int = mixture_gas_viscosity(ξ_cell, T_cell, material)
-        v_z = boundary_darcy_velocity(mass_bc, P_int, κ_int, μ_int, d_to_face, Val(tag))
-        v_out = tag === :top ? v_z : -v_z
-        if v_out > 0
-            coef = v_out / max(φ, 1e-12)
-            # Return a fresh tuple instead of rebinding `F` — a self-referential
-            # rebind would box the variable (type-unstable, and inference can't
-            # prove the boxed read defined).
-            return ntuple(Val(NC)) do j
-                if is_gas(material.components[j])
-                    F[j] - coef * ξ_cell[j]
-                else
-                    F[j]
-                end
-            end
-        end
-    end
-
-    return F
 end
 
 # Generic per-cell contribution: species rows in `out[j]`. `tag` is the
@@ -284,7 +207,7 @@ end
 end
 
 """
-	contribute_to_jacobian!(jac, op::BCMassOperator, u, ctx, t, ws, state, mesh,
+	contribute_to_jacobian!(jac, op::BCMassOperator, u, t, ws, state, mesh,
 	                        material, layout, bc_set, darcy_active) -> nothing
 
 Per-boundary AD path. Each boundary face writes an `NC × (1 + NC)` block of
@@ -296,7 +219,6 @@ function contribute_to_jacobian!(
     jac::StructuredJacobian,
     ::BCMassOperator,
     u::AbstractVector,
-    ctx::ResidualContext,
     t::Real,
     ws::BCMassADWorkspace{NC},
     state,

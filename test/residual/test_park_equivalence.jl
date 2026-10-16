@@ -150,7 +150,6 @@ function _equivalence(name, parks)
     for p in parks
         park!(u, layout, ws.mesh, material, cb, p, 0.0)
         ws.top_face_ids[1] = ws.mesh.boundary_faces[1][1]
-        ws.top_cell_ids[1] = ws.mesh.n_active_cells
     end
     n_live = ws.mesh.n_active_cells
     n = layout.n_cells

@@ -114,7 +114,7 @@ end
             # Setup caches
             n_faces = n_cells + 1
             prop_cache = PropertyCache(n_cells, n_faces)
-            update_properties!(prop_cache, StateCache(mesh, material), mesh, material)
+            update_properties!(prop_cache, StateCache(mesh), mesh, material)
 
             rad_cache = RadiationCache(n_cells)
             update_radiation_properties!(rad_cache, mesh, prop_cache)
@@ -124,7 +124,7 @@ end
             @test τ > 50  # Very optically thick
 
             # Initialize G from equilibrium
-            initialize_g_from_temperature!(rad_cache, mesh, prop_cache)
+            initialize_g_from_temperature!(rad_cache, mesh)
 
             # At initialization, G should be 4σT⁴ (blackbody, NO emissivity factor)
             # In the standard P1 approximation, volumetric equilibrium is ALWAYS blackbody.
@@ -155,10 +155,10 @@ end
 
             # Setup
             prop_cache = PropertyCache(n_cells, n_cells + 1)
-            update_properties!(prop_cache, StateCache(mesh, material), mesh, material)
+            update_properties!(prop_cache, StateCache(mesh), mesh, material)
             rad_cache = RadiationCache(n_cells)
             update_radiation_properties!(rad_cache, mesh, prop_cache)
-            initialize_g_from_temperature!(rad_cache, mesh, prop_cache)
+            initialize_g_from_temperature!(rad_cache, mesh)
 
             # G in hot region should be ~16x G in cold region (T⁴ ratio = (800/400)⁴ = 16)
             G_cold_avg = mean([rad_cache.G[i] for i = 1:div(n_cells, 2)])
@@ -185,7 +185,7 @@ end
             )
 
             prop_cache = PropertyCache(n_cells, n_cells + 1)
-            update_properties!(prop_cache, StateCache(mesh, material), mesh, material)
+            update_properties!(prop_cache, StateCache(mesh), mesh, material)
             rad_cache = RadiationCache(n_cells)
             update_radiation_properties!(rad_cache, mesh, prop_cache)
 
@@ -196,7 +196,7 @@ end
             )
 
             # Solve radiation field
-            initialize_g_from_temperature!(rad_cache, mesh, prop_cache)
+            initialize_g_from_temperature!(rad_cache, mesh)
             solve_quasi_steady_radiation!(rad_cache, mesh, prop_cache, radiation_bcs, 0.0)
             compute_radiation_flux_divergence!(rad_cache, mesh, prop_cache)
 
@@ -225,7 +225,7 @@ end
             mesh = create_test_mesh_with_temperature(n_cells, 1, L, z -> 400.0, 200.0)
 
             prop_cache = PropertyCache(n_cells, n_cells + 1)
-            update_properties!(prop_cache, StateCache(mesh, material), mesh, material)
+            update_properties!(prop_cache, StateCache(mesh), mesh, material)
             rad_cache = RadiationCache(n_cells)
             update_radiation_properties!(rad_cache, mesh, prop_cache)
 
@@ -235,7 +235,7 @@ end
                 bottom = ReflectiveRadiationBC(),
             )
 
-            initialize_g_from_temperature!(rad_cache, mesh, prop_cache)
+            initialize_g_from_temperature!(rad_cache, mesh)
             solve_quasi_steady_radiation!(rad_cache, mesh, prop_cache, radiation_bcs, 0.0)
             compute_radiation_flux_divergence!(rad_cache, mesh, prop_cache)
 
@@ -261,7 +261,7 @@ end
             )
 
             prop_cache = PropertyCache(n_cells, n_cells + 1)
-            update_properties!(prop_cache, StateCache(mesh, material), mesh, material)
+            update_properties!(prop_cache, StateCache(mesh), mesh, material)
             rad_cache = RadiationCache(n_cells)
             update_radiation_properties!(rad_cache, mesh, prop_cache)
 
@@ -271,7 +271,7 @@ end
                 bottom = ReflectiveRadiationBC(),
             )
 
-            initialize_g_from_temperature!(rad_cache, mesh, prop_cache)
+            initialize_g_from_temperature!(rad_cache, mesh)
             solve_quasi_steady_radiation!(rad_cache, mesh, prop_cache, radiation_bcs, 0.0)
             compute_radiation_flux_divergence!(rad_cache, mesh, prop_cache)
 
@@ -307,13 +307,13 @@ end
             material = create_optically_thick_material()  # ε=0.9, α_vol=5000
             mesh = create_test_mesh_with_temperature(n_cells, 1, L, z -> T0, 500.0)
             prop_cache = PropertyCache(n_cells, n_cells + 1)
-            update_properties!(prop_cache, StateCache(mesh, material), mesh, material)
+            update_properties!(prop_cache, StateCache(mesh), mesh, material)
             @test prop_cache.α[1] ≈ α_vol
 
             flux_into_top = map((0.0, I_ext)) do I
                 rad_cache = RadiationCache(n_cells)
                 update_radiation_properties!(rad_cache, mesh, prop_cache)
-                initialize_g_from_temperature!(rad_cache, mesh, prop_cache)
+                initialize_g_from_temperature!(rad_cache, mesh)
                 bcs = RadiationBCSet(
                     top = MarshakRadiationBC(
                         I_external = I,
@@ -358,7 +358,7 @@ end
             )
 
             prop_cache = PropertyCache(n_cells, n_cells + 1)
-            update_properties!(prop_cache, StateCache(mesh, material), mesh, material)
+            update_properties!(prop_cache, StateCache(mesh), mesh, material)
             rad_cache = RadiationCache(n_cells)
             update_radiation_properties!(rad_cache, mesh, prop_cache)
 
@@ -368,7 +368,7 @@ end
                 bottom = ReflectiveRadiationBC(),
             )
 
-            initialize_g_from_temperature!(rad_cache, mesh, prop_cache)
+            initialize_g_from_temperature!(rad_cache, mesh)
             solve_quasi_steady_radiation!(rad_cache, mesh, prop_cache, radiation_bcs, 0.0)
 
             # In closed reflective system, total G should be conserved
@@ -387,7 +387,7 @@ end
                 n_cells = 20
                 mesh = create_test_mesh_with_temperature(n_cells, 1, L, z -> 600.0, 500.0)
                 prop_cache = PropertyCache(n_cells, n_cells + 1)
-                update_properties!(prop_cache, StateCache(mesh, material), mesh, material)
+                update_properties!(prop_cache, StateCache(mesh), mesh, material)
 
                 τ = optical_thickness(mesh, prop_cache)
 
@@ -405,7 +405,7 @@ end
             L = 0.01
             mesh = create_test_mesh_with_temperature(n_cells, 1, L, z -> 600.0, 500.0)
             prop_cache = PropertyCache(n_cells, n_cells + 1)
-            update_properties!(prop_cache, StateCache(mesh, material), mesh, material)
+            update_properties!(prop_cache, StateCache(mesh), mesh, material)
 
             # Check a specific cell
             τ_cell = optical_thickness_cell(mesh, prop_cache, 5)
@@ -425,7 +425,7 @@ end
             prop_thick = PropertyCache(n_cells, n_cells + 1)
             update_properties!(
                 prop_thick,
-                StateCache(mesh_thick, material_thick),
+                StateCache(mesh_thick),
                 mesh_thick,
                 material_thick,
             )
@@ -438,12 +438,7 @@ end
             mesh_thin =
                 create_test_mesh_with_temperature(n_cells, 1, 0.001, z -> 600.0, 200.0)
             prop_thin = PropertyCache(n_cells, n_cells + 1)
-            update_properties!(
-                prop_thin,
-                StateCache(mesh_thin, material_char),
-                mesh_thin,
-                material_char,
-            )
+            update_properties!(prop_thin, StateCache(mesh_thin), mesh_thin, material_char)
 
             result_thin = check_p1_validity(mesh_thin, prop_thin; warn = false)
             # τ = 200 * 3.0 * 0.001 = 0.6 < 1
@@ -458,7 +453,7 @@ end
             L = 0.008
             mesh = create_test_mesh_with_temperature(n_cells, 1, L, z -> 500.0, 200.0)
             prop_cache = PropertyCache(n_cells, n_cells + 1)
-            update_properties!(prop_cache, StateCache(mesh, material), mesh, material)
+            update_properties!(prop_cache, StateCache(mesh), mesh, material)
             rad_cache = RadiationCache(n_cells)
             update_radiation_properties!(rad_cache, mesh, prop_cache)
 
@@ -468,7 +463,7 @@ end
                 bottom = ReflectiveRadiationBC(),
             )
 
-            initialize_g_from_temperature!(rad_cache, mesh, prop_cache)
+            initialize_g_from_temperature!(rad_cache, mesh)
             solve_quasi_steady_radiation!(rad_cache, mesh, prop_cache, radiation_bcs, 0.0)
 
             # Gradient at boundaries should be zero for reflective BC
@@ -488,7 +483,7 @@ end
             L = 0.01
             mesh = create_test_mesh_with_temperature(n_cells, 1, L, z -> 600.0, 200.0)
             prop_cache = PropertyCache(n_cells, n_cells + 1)
-            update_properties!(prop_cache, StateCache(mesh, material), mesh, material)
+            update_properties!(prop_cache, StateCache(mesh), mesh, material)
             rad_cache = RadiationCache(n_cells)
             update_radiation_properties!(rad_cache, mesh, prop_cache)
 
@@ -498,7 +493,7 @@ end
                 bottom = ReflectiveRadiationBC(),
             )
 
-            initialize_g_from_temperature!(rad_cache, mesh, prop_cache)
+            initialize_g_from_temperature!(rad_cache, mesh)
             solve_quasi_steady_radiation!(rad_cache, mesh, prop_cache, radiation_bcs, 0.0)
 
             # Surface should lose heat (G at surface lower than equilibrium)
@@ -513,7 +508,7 @@ end
             L = 0.008
             mesh = create_test_mesh_with_temperature(n_cells, 1, L, z -> 500.0, 200.0)
             prop_cache = PropertyCache(n_cells, n_cells + 1)
-            update_properties!(prop_cache, StateCache(mesh, material), mesh, material)
+            update_properties!(prop_cache, StateCache(mesh), mesh, material)
             rad_cache = RadiationCache(n_cells)
             update_radiation_properties!(rad_cache, mesh, prop_cache)
 
@@ -524,7 +519,7 @@ end
                 bottom = ReflectiveRadiationBC(),
             )
 
-            initialize_g_from_temperature!(rad_cache, mesh, prop_cache)
+            initialize_g_from_temperature!(rad_cache, mesh)
             solve_quasi_steady_radiation!(rad_cache, mesh, prop_cache, radiation_bcs, 0.0)
 
             # Check that G field is valid
@@ -553,7 +548,7 @@ end
             for (name, T_func) in profiles
                 mesh = create_test_mesh_with_temperature(n_cells, 1, L, T_func, 200.0)
                 prop_cache = PropertyCache(n_cells, n_cells + 1)
-                update_properties!(prop_cache, StateCache(mesh, material), mesh, material)
+                update_properties!(prop_cache, StateCache(mesh), mesh, material)
                 rad_cache = RadiationCache(n_cells)
                 update_radiation_properties!(rad_cache, mesh, prop_cache)
 
@@ -562,7 +557,7 @@ end
                     bottom = ReflectiveRadiationBC(),
                 )
 
-                initialize_g_from_temperature!(rad_cache, mesh, prop_cache)
+                initialize_g_from_temperature!(rad_cache, mesh)
                 solve_quasi_steady_radiation!(
                     rad_cache,
                     mesh,
@@ -615,12 +610,12 @@ end
 
             # Setup property cache
             prop_cache = PropertyCache(n_cells, n_cells + 1)
-            update_properties!(prop_cache, StateCache(mesh, material), mesh, material)
+            update_properties!(prop_cache, StateCache(mesh), mesh, material)
 
             # Setup radiation
             rad_cache = RadiationCache(n_cells)
             update_radiation_properties!(rad_cache, mesh, prop_cache)
-            initialize_g_from_temperature!(rad_cache, mesh, prop_cache)
+            initialize_g_from_temperature!(rad_cache, mesh)
 
             radiation_bcs = RadiationBCSet(
                 top = MarshakRadiationBC(I_external = 50e3, emissivity = 0.9),

@@ -35,8 +35,6 @@ using Pyrolysis.Jacobian:
     ReactionSourceOperator,
     build_reaction_source_workspace,
     StructuredJacobian,
-    ResidualContext,
-    build_residual_context,
     contribute_to_jacobian!,
     FastSparsityMap
 
@@ -75,7 +73,7 @@ function _reference_reaction_contribution(state, material::Material{NC,NR}) wher
         Q_rxn = reaction_heat_source(rates, heats)
         ρcp = effective_heat_capacity(ξ, T, material)
         dT_ref[i] = Q_rxn / ρcp
-        species_source_terms!(src, rates, material, NC)
+        species_source_terms!(src, rates, material)
         for j = 1:NC
             dξ_ref[j, i] = src[j]
         end
@@ -108,7 +106,7 @@ function _reference_dense_jacobian(u, layout, material::Material{NC,NR}) where {
             Q_rxn = reaction_heat_source(rates, heats)
             ρcp = effective_heat_capacity(ξ, T, material)
             out[1] = Q_rxn / ρcp
-            species_source_terms!(src, rates, material, NC)
+            species_source_terms!(src, rates, material)
             for j = 1:NC
                 out[1+j] = src[j]
             end
@@ -143,19 +141,6 @@ end
     NC = n_components(ws.layout)
     material = def.material
     NR = n_reactions(material)
-
-    @testset "interface declarations" begin
-        op = ReactionSourceOperator()
-        @test Pyrolysis.Jacobian.reads(op) == ()
-        @test Pyrolysis.Jacobian.writes(op) == ()
-        @test Pyrolysis.Jacobian.stencil(op) == (cells = 0:0,)
-    end
-
-    @testset "ResidualContext: solo operator topo-sorts to length 1" begin
-        ctx = build_residual_context([ReactionSourceOperator()])
-        @test length(ctx.order) == 1
-        @test ctx.order[1] isa ReactionSourceOperator
-    end
 
     @testset "apply! matches per-cell residual slice — hot+gas state" begin
         _set_state!(u, n, 1200.0, (400.0, 8.0))
@@ -222,13 +207,12 @@ end
         end
         A = sparse(I, J, V, n_total, n_total)
         fill!(A.nzval, 0.0)
-        jac = StructuredJacobian(:eulerian, A)
+        jac = StructuredJacobian(A)
 
         op = ReactionSourceOperator()
         ws_ad = build_reaction_source_workspace(material)
-        ctx = build_residual_context([op])
 
-        contribute_to_jacobian!(jac, op, u, ctx, 0.0, ws_ad, material, ws.layout, ws.mesh)
+        contribute_to_jacobian!(jac, op, u, 0.0, ws_ad, material, ws.layout, ws.mesh)
 
         # Compare against the DenseAD reference.
         J_ref = _reference_dense_jacobian(u, ws.layout, material)

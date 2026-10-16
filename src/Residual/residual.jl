@@ -13,8 +13,8 @@ chain is:
 			::Eulerian → Eulerian path
 			::ALE      → ALE path
 
-Inside each path, transport is dispatched via `transport_mode(def.mode)`
-(`Fickian` vs `DarcyFick`) and the χ block is included iff
+Inside each path, the gas transport law follows the property cache (a Darcy
+sub-cache exists only in `DarcyFick` mode) and the χ block is included iff
 `chi_mode(def.mode) isa WithChi`.
 
 P1 radiation has its own residual in `Pyrolysis.Experimental.RadiationP1`
@@ -59,7 +59,7 @@ function _residual!(du, u, def::ProblemDef, t, ws::Workspace, ::Eulerian)
     # 2) Update material properties at current state
     Properties.update_properties!(ws.prop_cache, ws.state_cache, mesh, material)
 
-    # 3) Physics RHS — dispatch on transport
+    # 3) Physics RHS
     _compute_physics_rhs!(
         ws,
         mesh,
@@ -68,7 +68,6 @@ function _residual!(du, u, def::ProblemDef, t, ws::Workspace, ::Eulerian)
         t,
         radiation_model,
         radiation_kirchhoff,
-        transport_mode(def.mode),
     )
 
     # 4) Pack the live rows; parked ghost rows are identically zero.
@@ -139,7 +138,6 @@ function _residual!(du, u, def::ProblemDef, t, ws::Workspace, ::ALE)
         t,
         radiation_model,
         radiation_kirchhoff,
-        transport_mode(def.mode),
     )
 
     # 5) Mesh velocity. θ_A_global picks up the column-global radial channel
@@ -158,13 +156,9 @@ function _residual!(du, u, def::ProblemDef, t, ws::Workspace, ::ALE)
         ws.w_work,
         ws.state_cache,
         mesh,
-        ws.prop_cache,
         material,
-        t,
+        ws.rhs_cache.dξ_rxn;
         θ_out = ws.θ_work,
-        precomputed_dξ_rxn = ws.rhs_cache.dξ_rxn,
-        rates = ws.rates_work,
-        heats = ws.heats_work,
         dξ_dt = ws.dξ_dt_work,
         θ_A = θ_A_global,
     )
@@ -195,8 +189,7 @@ function _residual!(du, u, def::ProblemDef, t, ws::Workspace, ::ALE)
             ws.ale_advection,
             ws.state_cache,
             mesh,
-            ws.w_physical;
-            limiter = ws.ale_limiter,
+            ws.w_physical,
         )
         _apply_ale_T_advection!(ws.dT_work, ws.ale_advection, mesh)
     end
@@ -231,9 +224,11 @@ function _residual!(du, u, def::ProblemDef, t, ws::Workspace, ::ALE)
 end
 
 # ============================================================================
-# Transport-mode dispatch
+# Physics RHS
 # ============================================================================
 
+# The transport law (Fickian or Darcy–Fick) follows the property cache's Darcy
+# sub-cache, which `build_workspace` sizes from the simulation mode.
 @inline function _compute_physics_rhs!(
     ws,
     mesh,
@@ -242,37 +237,8 @@ end
     t,
     radiation_model,
     radiation_kirchhoff::Bool,
-    ::Fickian,
 )
     Discretization.compute_rhs!(
-        ws.dT_work,
-        ws.dξ_work,
-        ws.state_cache,
-        mesh,
-        ws.prop_cache,
-        ws.rhs_cache,
-        material,
-        bc_set,
-        t,
-        ws.top_face_ids,
-        ws.bottom_face_ids;
-        I_radiation = ws.I_radiation,
-        radiation_model = radiation_model,
-        radiation_kirchhoff = radiation_kirchhoff,
-    )
-end
-
-@inline function _compute_physics_rhs!(
-    ws,
-    mesh,
-    material,
-    bc_set,
-    t,
-    radiation_model,
-    radiation_kirchhoff::Bool,
-    ::DarcyFick,
-)
-    Discretization.compute_rhs_darcy_fick!(
         ws.dT_work,
         ws.dξ_work,
         ws.state_cache,
@@ -349,10 +315,13 @@ end
 end
 
 """
-	_compute_ale_mesh_velocity!(w, state, mesh, prop_cache, material, t; ...)
+	_compute_ale_mesh_velocity!(w, state, mesh, material, dξ_rxn;
+	                            θ_out = nothing, dξ_dt = nothing, θ_A = 0.0)
 
 Cumulative mesh velocity from per-cell volume change of every cell from
-the bottom node up. With the default identity lateral-shrinkage law,
+the bottom node up, given the per-cell reaction species sources `dξ_rxn`
+(`NC × n_cells`). `θ_out` receives the per-cell strain rate; `dξ_dt` is a
+length-`NC` scratch vector. With the default identity lateral-shrinkage law,
 the column-global radial channel `θ_A ≡ 0` and behavior reduces to the
 constant-cross-section formulation. State (T, ξ, geometry) is read from
 the typed `state::StateCache`.
@@ -361,26 +330,14 @@ function _compute_ale_mesh_velocity!(
     w::AbstractVector,
     state,
     mesh,
-    prop_cache,
     material::Material,
-    t::Real;
+    dξ_rxn::AbstractMatrix;
     θ_out::Union{Nothing,AbstractVector} = nothing,
-    precomputed_dξ_rxn::Union{Nothing,AbstractMatrix} = nothing,
-    rates::Union{Nothing,AbstractVector} = nothing,
-    heats::Union{Nothing,AbstractVector} = nothing,
     dξ_dt::Union{Nothing,AbstractVector} = nothing,
     θ_A::Real = 0.0,
 )
     NC = n_components(material)
-    NR = n_reactions(material)
     n_cells = mesh.n_active_cells
-
-    use_precomputed = precomputed_dξ_rxn !== nothing
-    if !use_precomputed
-        Tu = eltype(state.T)
-        rates === nothing && (rates = zeros(Tu, NR))
-        heats === nothing && (heats = zeros(Tu, NR))
-    end
     dξ_dt === nothing && (dξ_dt = zeros(eltype(state.T), NC))
 
     w[1] = zero(eltype(w))
@@ -390,16 +347,8 @@ function _compute_ale_mesh_velocity!(
         T_cell = state.T[cell_idx]
         Δz_cell = state.volume[cell_idx] / state.A_section[]
 
-        if use_precomputed
-            for j = 1:NC
-                dξ_dt[j] = precomputed_dξ_rxn[j, cell_idx]
-            end
-        else
-            ξ_cell = ntuple(j -> state.ξ[j, cell_idx], Val(NC))
-            fill!(rates, zero(eltype(rates)))
-            fill!(heats, zero(eltype(heats)))
-            Physics.evaluate_reactions!(rates, heats, ξ_cell, T_cell, material)
-            Physics.species_source_terms!(dξ_dt, rates, material, NC)
+        for j = 1:NC
+            dξ_dt[j] = dξ_rxn[j, cell_idx]
         end
 
         θ_cell = Physics.volume_change_rate(dξ_dt, T_cell, material)
@@ -536,13 +485,12 @@ is the live-cell sum.
     state,
     χ̄::Real,
     M::Real,
-    dξ_rxn::Union{Nothing,AbstractMatrix},
+    dξ_rxn::AbstractMatrix,
     l::StateLayout,
     idx_dry,
 )
     law = material.lateral_shrinkage_law
     law === nothing && return zero(typeof(χ̄))
-    dξ_rxn === nothing && return zero(typeof(χ̄))
     M <= eps() && return zero(typeof(χ̄))
 
     n = l.n_cells

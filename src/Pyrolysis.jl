@@ -131,7 +131,7 @@ include("Internal.jl")
 # Materials
 export Material, SolidComponent, GaseousComponent, LiquidComponent
 export phase, molar_mass, is_gas, is_solid, is_liquid
-export Reaction, ReactionSet, DepletionLimiter
+export Reaction, DepletionLimiter
 export MixingRule, PARALLEL, SERIES, WEIGHTED, BRUGGEMAN, CARMAN_KOZENY
 export MixingSpec, MaterialMixing
 
@@ -187,57 +187,15 @@ export MeshTopology, MeshGeometry
 # `using Pyrolysis` exposes them without forcing users to reach into
 # `Pyrolysis.Jacobian`.
 export JacobianBackend, JacobianSpec, compute_jacobian!
-export Structured,
-    LinearSolveStrategy, DirectSolve, StructuredSolve, ApproxSolve, MatrixFreeSolve
+export Structured, LinearSolveStrategy, DirectSolve, ApproxSolve
 export DenseAD_ForwardDiff   # verifier reference only
-export benchmark_jacobian_backends, verify_jacobian_at, is_approximate
+export verify_jacobian_at, is_approximate
 export Operator,
-    ResidualContext,
     StructuredJacobian,
     StructuredCoupling,
     PrefixSumCoupling,
-    Rank1Coupling,
-    SuffixSumCoupling,
     EmbeddedScaledSuffixSumCoupling,
-    EmbeddedRank1Coupling,
-    ImplicitTerm
-
-# Linear-solver extensions (PyrolysisKLUExt, etc.) attach concrete
-# factorizations to these stubs. Calling without the matching `using ...`
-# errors via `MethodError`, prompting the user to load the dep.
-
-"""
-	klu_factorization()
-
-KLU sparse-direct factorization for the integrator's linear solves, suitable
-as the `linear_solver` keyword of `solve`. The concrete method is attached by
-the `PyrolysisKLUExt` extension: load `KLU` first (`using KLU`); calling the
-stub without it raises a `MethodError`.
-"""
-function klu_factorization end
-
-"""
-	pardiso_factorization()
-
-MKL Pardiso sparse-direct factorization for the integrator's linear solves,
-suitable as the `linear_solver` keyword of `solve`. The concrete method is
-attached by the `PyrolysisPardisoExt` extension: load `Pardiso` first
-(`using Pardiso`); calling the stub without it raises a `MethodError`.
-"""
-function pardiso_factorization end
-
-"""
-	amg_preconditioner(A)
-
-Algebraic-multigrid preconditioner built from the sparse matrix `A`, for use
-with the ILU/Krylov iterative linear solvers. The concrete method is attached
-by the `PyrolysisAMGExt` extension: load `AlgebraicMultigrid` first
-(`using AlgebraicMultigrid`); calling the stub without it raises a
-`MethodError`.
-"""
-function amg_preconditioner end
-
-export klu_factorization, pardiso_factorization, amg_preconditioner
+    EmbeddedRank1Coupling
 
 # ============================================================================
 # Sensitivity-analysis entry points — concrete methods are attached by
@@ -247,15 +205,6 @@ export klu_factorization, pardiso_factorization, amg_preconditioner
 include("sensitivity_stubs.jl")
 
 export forward_sensitivity, adjoint_sensitivity
-
-# ============================================================================
-# Symbolic-verification entry points (test-only) — concrete methods attached
-# by `ext/PyrolysisSymbolicsExt.jl`.
-# ============================================================================
-
-include("symbolics_stubs.jl")
-
-export verify_mixing_derivatives
 
 # ============================================================================
 # Precompile workload — warms up the canonical Material × SimulationMode

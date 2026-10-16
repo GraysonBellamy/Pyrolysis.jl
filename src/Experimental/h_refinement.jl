@@ -14,7 +14,7 @@ For uniform splitting with linear interpolation:
 """
 
 using ..Geometry: Mesh1D, Node1D, Cell1D, Face1D, CellState
-using ..Geometry: cell_size, cell_center, update_geometry!, n_cells
+using ..Geometry: cell_size, update_geometry!, n_cells
 
 # ============================================================================
 # Single Cell Refinement

@@ -61,7 +61,7 @@ using Pyrolysis.Experimental:
         mesh = make_mesh(T0)
 
         prop_cache = PropertyCache(mesh)
-        update_properties!(prop_cache, StateCache(mesh, material), mesh, material)
+        update_properties!(prop_cache, StateCache(mesh), mesh, material)
         rad_cache = RadiationCache(mesh)
 
         # Set G to correspond to a 1000K radiation field
@@ -91,7 +91,7 @@ using Pyrolysis.Experimental:
         mesh = make_mesh(T0)
 
         prop_cache = PropertyCache(mesh)
-        update_properties!(prop_cache, StateCache(mesh, material), mesh, material)
+        update_properties!(prop_cache, StateCache(mesh), mesh, material)
         rad_cache = RadiationCache(mesh)
 
         # Set G to correspond to a 300K radiation field (weak)
@@ -112,7 +112,7 @@ using Pyrolysis.Experimental:
         mesh = make_mesh(T0)
 
         prop_cache = PropertyCache(mesh)
-        update_properties!(prop_cache, StateCache(mesh, material), mesh, material)
+        update_properties!(prop_cache, StateCache(mesh), mesh, material)
         rad_cache = RadiationCache(mesh)
 
         # G = 4σT⁴ at every cell (equilibrium)

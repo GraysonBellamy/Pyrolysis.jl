@@ -15,22 +15,17 @@ Four gates:
 3. **`I_in` cell-edge buffer.** The workspace-aware apply!
    (`apply!(ws::BeerLambertWorkspace, op, …)`) populates
    `ws.q_rad` plus the upstream-cell incident-intensity buffer
-   `ws.I_in`. This buffer is what the framework wiring multiplies
-   the bare `SuffixSumCoupling` chain rule by (the per-row `−q_rad[i]`
-   scaling). On the Kirchhoff path `I_in[n] = ε_eff·I_surface` — the
+   `ws.I_in`. This buffer scales the suffix-sum chain rule (the per-row
+   `−q_rad[i]` row scale of the `EmbeddedScaledSuffixSumCoupling`). On the Kirchhoff path `I_in[n] = ε_eff·I_surface` — the
    flux that actually crosses the surface.
 
 4. **Kirchhoff scaling.** The Kirchhoff path scales the
    whole profile by the surface cell's live ε_eff relative to the
    explicit-α (bare) path.
 
-The bare `SuffixSumCoupling` builder is exercised in
-`test_structured_couplings.jl` against a dense reference; its semantic
-correctness for Beer-Lambert (the `j > i` non-local optical-depth
-chain rule) is composed by the framework's `compose_into!` wiring and
-tested there. The full structured-vs-DenseAD
-agreement of the Kirchhoff ε_eff chain is in
-`test_kirchhoff_eps_eff_jacobian.jl`.
+The suffix-sum coupling's `densify!` is checked against a dense reference
+in `test_structured_couplings.jl`. The full structured-vs-DenseAD agreement
+of the Kirchhoff ε_eff chain is in `test_kirchhoff_eps_eff_jacobian.jl`.
 """
 
 using Test

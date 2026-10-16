@@ -17,8 +17,7 @@ in-depth radiation absorption, and pressure-driven gas transport (Darcy–Fick).
 - Operator-based `Structured` Jacobian with selectable solve strategies,
   a dense AD verifier, and pluggable linear solvers
 - Runtime mass- and energy-conservation diagnostics
-- Pluggable extensions for Plots recipes, SciML sensitivities, and
-  symbolic-derivative verification
+- Pluggable extensions for Plots recipes and SciML sensitivities
 
 ## Installation
 

@@ -15,14 +15,13 @@ using ..Problem:
     get_chi,
     state_length,
     z_offset,
-    chi_offset,
     chi_range,
     update_mesh_from_state!,
     mesh_mode,
     ALE
 using ..Residual: cross_section_area_from_state
 using ..Geometry: Mesh1D
-using ..Materials: n_components, SOLID, is_gas
+using ..Materials: n_components, is_gas
 using ..Properties: MIXING_BLEND_LO, matrix_volume_fraction
 
 # ============================================================================
@@ -62,16 +61,6 @@ function is_cell_thin(
     z = get_node_positions(u, layout)
     current_thickness = z[cell_idx+1] - z[cell_idx]
     return current_thickness < threshold * initial_thickness
-end
-
-"""
-	get_cell_thickness(u::AbstractVector, layout::StateLayout, cell_idx::Int) -> Float64
-
-Get the current thickness of a specific cell from the state vector.
-"""
-function get_cell_thickness(u::AbstractVector, layout::StateLayout, cell_idx::Int)
-    z = get_node_positions(u, layout)
-    return z[cell_idx+1] - z[cell_idx]
 end
 
 """
@@ -473,10 +462,9 @@ function create_depletion_callback(
             i_park == 0 && return NO_PARK
             n_live = park!(u, layout, mesh, material, cb_state, i_park, t)
             # The exposed boundary moved down one face; the workspace's
-            # pre-cached boundary ids (shared with the Jacobian's AD workspace)
-            # follow the mesh.
+            # pre-cached boundary face id (shared with the Jacobian's AD
+            # workspace) follows the mesh.
             ws.top_face_ids[1] = mesh.boundary_faces[1][1]
-            ws.top_cell_ids[1] = n_live
             @info "Parked cell $i_park at t=$(round(t, digits=4)) s; $(n_live) live cells"
             return CELL_PARKED
         end,

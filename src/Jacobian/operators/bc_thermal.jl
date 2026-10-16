@@ -65,7 +65,7 @@ using ..Properties:
     effective_heat_capacity,
     effective_emissivity,
     effective_absorptivity
-using ..Discretization: solve_boundary_temperature!
+using ..Discretization: solve_boundary_temperature!, _bc_boundary_face_fluxes
 
 """
 	BCThermalOperator <: Operator
@@ -73,10 +73,6 @@ using ..Discretization: solve_boundary_temperature!
 Stateless tag.
 """
 struct BCThermalOperator <: Operator end
-
-reads(::BCThermalOperator) = ()
-writes(::BCThermalOperator) = (:T_s,)
-stencil(::BCThermalOperator) = (cells = 0:0,)
 
 """
 	BCThermalADWorkspace{NC, CFG}
@@ -292,7 +288,7 @@ end
 end
 
 """
-	contribute_to_jacobian!(jac, op::BCThermalOperator, u, ctx, t, ws, state, mesh,
+	contribute_to_jacobian!(jac, op::BCThermalOperator, u, t, ws, state, mesh,
 	                        material, layout, bc_set, radiation_model,
 	                        darcy_active = false) -> nothing
 
@@ -307,7 +303,6 @@ function contribute_to_jacobian!(
     jac::StructuredJacobian,
     ::BCThermalOperator,
     u::AbstractVector,
-    ctx::ResidualContext,
     t::Real,
     ws::BCThermalADWorkspace{NC},
     state,

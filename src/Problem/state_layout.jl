@@ -96,7 +96,6 @@ end
 
 @inline z_offset(l::StateLayout) = isempty(z_range(l)) ? 0 : first(z_range(l)) - 1
 @inline chi_offset(l::StateLayout) = isempty(chi_range(l)) ? 0 : first(chi_range(l)) - 1
-@inline concentration_offset(l::StateLayout) = l.n_cells
 
 # ============================================================================
 # Compile-time block accessors via Val{:T} / Val{:ξ} / Val{:z} / Val{:χ}
@@ -285,14 +284,12 @@ Returns 0 for Eulerian layouts.
     return z_top - z_bottom
 end
 
-@inline node_positions_view(u::AbstractVector, l::StateLayout) = @view u[z_range(l)]
-
 """
 	get_node_positions(u, layout) -> view
 
 View of node positions for ALE layouts.
 """
-@inline get_node_positions(u::AbstractVector, l::StateLayout) = node_positions_view(u, l)
+@inline get_node_positions(u::AbstractVector, l::StateLayout) = @view u[z_range(l)]
 
 """
 	compute_volumes_from_state(u, layout, A) -> Vector{Float64}

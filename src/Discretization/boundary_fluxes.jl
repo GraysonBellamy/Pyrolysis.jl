@@ -12,228 +12,7 @@ using ..Materials:
     RadiationModel, NO_RADIATION, SURFACE_ABSORPTION, BEER_LAMBERT, P1_QUASI_STEADY
 
 # ============================================================================
-# Thermal Boundary Condition Flux Evaluation
-# ============================================================================
-
-"""
-	thermal_bc_flux(bc::AbstractThermalBC, T_surface, t) -> Float64
-
-Evaluate the heat flux from a thermal boundary condition.
-
-# Arguments
-- `bc`: The thermal boundary condition
-- `T_surface`: Surface temperature [K]
-- `t`: Current time [s]
-
-# Returns
-Heat flux [W/m²], positive into the domain.
-"""
-function thermal_bc_flux end
-
-# ============================================================================
-# Standard thermal_bc_flux with effective emissivity parameter
-# ============================================================================
-# All thermal BC flux functions accept an ε_eff parameter — the effective
-# surface emissivity computed from material properties — and the
-# radiation-model-aware overloads additionally take the keyword
-# `a_eff = ε_eff`, the effective surface absorptivity for incident radiation
-# (read only by a `RadiativeFluxBC` without an explicit `absorptivity`).
-# BCs that don't need them simply ignore the parameters.
-
-# Adiabatic: zero flux
-@inline thermal_bc_flux(::AdiabaticBC, T_surface, t, ε_eff) = 0.0
-
-# Heat flux: prescribed value (constant or time-dependent)
-@inline thermal_bc_flux(bc::HeatFluxBC{<:Real}, T_surface, t, ε_eff) = Float64(bc.flux)
-@inline thermal_bc_flux(bc::HeatFluxBC{<:Function}, T_surface, t, ε_eff) = bc.flux(t)
-
-# Convective: q" = h(T∞ - T_surface)
-@inline function thermal_bc_flux(bc::ConvectiveBC, T_surface, t, ε_eff)
-    h = evaluate_param(bc.h, t)
-    T_inf = evaluate_param(bc.T_inf, t)
-    return h * (T_inf - T_surface)
-end
-
-# Radiative: q" = F × ε × σ × (T∞⁴ - T_surface⁴)
-# If bc.ε is nothing, use ε_eff from material properties; otherwise use specified value
-@inline function thermal_bc_flux(bc::RadiativeBC, T_surface, t, ε_eff)
-    # Use effective emissivity if not specified, otherwise use provided value
-    ε = if bc.ε === nothing
-        ε_eff
-    else
-        evaluate_param_T(bc.ε, T_surface)
-    end
-    T_inf = evaluate_param(bc.T_inf, t)
-    F = evaluate_param(bc.F, t)  # View factor (default 1.0)
-    return F * ε * STEFAN_BOLTZMANN * (T_inf^4 - T_surface^4)
-end
-
-# RadiativeFluxBC: External radiation source
-# Behavior depends on radiation_model passed to solve():
-# - NO_RADIATION/SURFACE_ABSORPTION: absorbed flux returned as boundary flux
-#   This ensures the boundary temperature solve correctly accounts for radiation heating.
-# - BEER_LAMBERT/P1: handled volumetrically, return 0 here
-# If bc.absorptivity is nothing, use a_eff — the material's mixture surface
-# absorptivity, equal to ε_eff (Kirchhoff) unless a component sets its own.
-# NOTE: radiation_model is REQUIRED - no default behavior
-@inline function thermal_bc_flux(
-    bc::RadiativeFluxBC,
-    T_surface,
-    t,
-    ε_eff,
-    radiation_model::RadiationModel;
-    a_eff = ε_eff,
-)
-    if radiation_model == BEER_LAMBERT || radiation_model == P1_QUASI_STEADY
-        # In-depth absorption handled by volumetric radiation solver
-        # Don't add surface flux to avoid double-counting
-        return 0.0
-    else
-        # NO_RADIATION or SURFACE_ABSORPTION: radiation absorbed at boundary
-        # For SURFACE_ABSORPTION, this ensures physically correct T_surface
-        # (surface hotter than cell when net heating)
-        flux = bc.flux isa Function ? bc.flux(t) : Float64(bc.flux)
-        α = if bc.absorptivity === nothing
-            a_eff
-        else
-            bc.absorptivity isa Function ? bc.absorptivity(t) : Float64(bc.absorptivity)
-        end
-        return flux * α  # Absorbed radiation at surface
-    end
-end
-
-# Dirichlet: a prescribed-temperature BC has no closed-form flux at this call
-# signature (the applied flux is the conducted flux k_eff·(T_bc − T_cell)/Δz_half,
-# which needs the cell state). NaN remains the deliberate "not expressible
-# here" sentinel — but every DIAGNOSTIC path now bypasses it: standalone
-# Dirichlet dispatches to the dedicated `compute_boundary_heat_fluxes`
-# method below, and the saved-solution extraction substitutes the solved
-# `q_conducted` for `net`.
-@inline thermal_bc_flux(::DirichletThermalBC, T_surface, t, ε_eff) = NaN
-@inline thermal_bc_flux(
-    ::DirichletThermalBC,
-    T_surface,
-    t,
-    ε_eff,
-    ::RadiationModel;
-    a_eff = ε_eff,
-) = NaN
-
-# Combined: sum of all component fluxes using generated function for type stability
-# NOTE: radiation_model is REQUIRED for CombinedThermalBC since it may contain RadiativeFluxBC
-@generated function thermal_bc_flux(
-    bc::CombinedThermalBC{BCs},
-    T_surface,
-    t,
-    ε_eff,
-    radiation_model::RadiationModel;
-    a_eff = ε_eff,
-) where {BCs<:Tuple}
-    N = length(BCs.parameters)
-    exprs = [
-        :(thermal_bc_flux(bc.bcs[$i], T_surface, t, ε_eff, radiation_model; a_eff = a_eff)) for i = 1:N
-    ]
-    return :(+($(exprs...)))
-end
-
-# Fallback for BCs that don't care about radiation_model / a_eff (just ignore them)
-@inline thermal_bc_flux(
-    ::AdiabaticBC,
-    T_surface,
-    t,
-    ε_eff,
-    ::RadiationModel;
-    a_eff = ε_eff,
-) = 0.0
-@inline thermal_bc_flux(
-    bc::HeatFluxBC{<:Real},
-    T_surface,
-    t,
-    ε_eff,
-    ::RadiationModel;
-    a_eff = ε_eff,
-) = Float64(bc.flux)
-@inline thermal_bc_flux(
-    bc::HeatFluxBC{<:Function},
-    T_surface,
-    t,
-    ε_eff,
-    ::RadiationModel;
-    a_eff = ε_eff,
-) = bc.flux(t)
-@inline thermal_bc_flux(
-    bc::ConvectiveBC,
-    T_surface,
-    t,
-    ε_eff,
-    ::RadiationModel;
-    a_eff = ε_eff,
-) = thermal_bc_flux(bc, T_surface, t, ε_eff)
-# RadiativeBC under P1 contributes zero: emission/ambient exchange is carried
-# volumetrically (4σαT⁴ + Marshak BC on G) — see boundary_temperature.jl.
-# Emission always uses ε_eff, never a_eff.
-@inline function thermal_bc_flux(
-    bc::RadiativeBC,
-    T_surface,
-    t,
-    ε_eff,
-    radiation_model::RadiationModel;
-    a_eff = ε_eff,
-)
-    radiation_model == P1_QUASI_STEADY && return 0.0
-    return thermal_bc_flux(bc, T_surface, t, ε_eff)
-end
-
-# ============================================================================
 # Mass Boundary Condition Flux Evaluation
-# ============================================================================
-
-"""
-	mass_bc_flux(bc::AbstractMassBC, ξ_surface, t, j::Integer) -> Float64
-
-Evaluate the mass flux from a mass boundary condition.
-
-# Arguments
-- `bc`: The mass boundary condition
-- `ξ_surface`: Surface mass concentration [kg/m³]
-- `t`: Current time [s]
-- `j`: Component index of the gas species this flux applies to. Lets
-  per-species ambients (`ConvectiveMassBC` with an `NTuple` ξ_inf) resolve
-  the right ambient concentration.
-
-# Returns
-Mass flux [kg/(m²·s)], positive into the domain.
-"""
-function mass_bc_flux end
-
-# Impermeable: zero flux
-@inline mass_bc_flux(::ImpermeableBC, ξ_surface, t, j::Integer) = 0.0
-
-# Prescribed mass flux
-@inline mass_bc_flux(bc::MassFluxBC{<:Real}, ξ_surface, t, j::Integer) = Float64(bc.flux)
-@inline mass_bc_flux(bc::MassFluxBC{<:Function}, ξ_surface, t, j::Integer) = bc.flux(t)
-
-# Convective mass transfer: J = h_m(ξ∞ - ξ_surface)
-@inline function mass_bc_flux(bc::ConvectiveMassBC, ξ_surface, t, j::Integer)
-    h_m = evaluate_param(bc.h_m, t)
-    ξ_inf = ambient_concentration(bc, t, j)
-    return h_m * (ξ_inf - ξ_surface)
-end
-
-# Combined: sum of all component fluxes using generated function for type stability
-@generated function mass_bc_flux(
-    bc::CombinedMassBC{BCs},
-    ξ_surface,
-    t,
-    j::Integer,
-) where {BCs<:Tuple}
-    N = length(BCs.parameters)
-    exprs = [:(mass_bc_flux(bc.bcs[$i], ξ_surface, t, j)) for i = 1:N]
-    return :(+($(exprs...)))
-end
-
-# ============================================================================
-# Mass BC Flux with Diffusion Parameters (λρ, ρ, d)
 # ============================================================================
 # These overloads are used when the discretization provides the combined transport 
 # coefficient λρ (= λ × ρ), density ρ, and distance d from cell center to boundary.
@@ -363,15 +142,78 @@ end
 
 using ..BoundaryConditions: DirichletPressureBC, NeumannPressureBC, ConvectivePressureBC
 
-# Simple signature (no diffusion parameters)
-@inline mass_bc_flux(::DirichletPressureBC, ξ_surface, t, j::Integer) = 0.0
-@inline mass_bc_flux(::NeumannPressureBC, ξ_surface, t, j::Integer) = 0.0
-@inline mass_bc_flux(::ConvectivePressureBC, ξ_surface, t, j::Integer) = 0.0
-
-# Full signature with diffusion parameters (λρ, ρ, d)
 @inline mass_bc_flux(::DirichletPressureBC, ξ_surface, λρ, ρ, d, t, j::Integer) = 0.0
 @inline mass_bc_flux(::NeumannPressureBC, ξ_surface, λρ, ρ, d, t, j::Integer) = 0.0
 @inline mass_bc_flux(::ConvectivePressureBC, ξ_surface, λρ, ρ, d, t, j::Integer) = 0.0
+
+# ============================================================================
+# Boundary-face gas mass flux (film law + Darcy venting)
+# ============================================================================
+
+"""
+	_bc_boundary_face_fluxes(T_cell, ξ_cell, mass_bc, material,
+	                         d_to_face, t, ::Val{tag}, darcy_active)
+	    -> NTuple{NC}
+
+Per-component boundary-face gas mass flux per area, **positive into the
+domain**: the diffusive film law plus (when `darcy_active`) the pressure-BC
+advective venting that mirrors the boundary-face branch of
+`compute_gas_fluxes_darcy_fick!`. Non-gas components are zero. Generic over
+Dual scalar types. Shared by the Jacobian's boundary operators
+(`BCMassOperator`, `BCConvectionOperator`, `BCThermalOperator`) and the
+solution extraction, so all of them see the flux the residual applies.
+"""
+function _bc_boundary_face_fluxes(
+    T_cell::Real,
+    ξ_cell::NTuple{NC,Tu},
+    mass_bc,
+    material::Material{NC},
+    d_to_face::Real,
+    t::Real,
+    ::Val{tag},
+    darcy_active::Bool,
+) where {NC,Tu,tag}
+
+    λ_eff = effective_gas_transfer(ξ_cell, T_cell, material)
+    ρ_eff = mixture_density(ξ_cell, T_cell, material)
+    λρ = λ_eff * ρ_eff
+
+    Tv = promote_type(typeof(T_cell), Tu)
+    F = ntuple(Val(NC)) do j
+        if is_gas(material.components[j])
+            Tv(mass_bc_flux(mass_bc, ξ_cell[j], λρ, ρ_eff, d_to_face, t, j))
+        else
+            zero(Tv)
+        end
+    end
+
+    if darcy_active
+        # Advective venting: outward Darcy speed advecting the intrinsic
+        # density ξ/φ out of the boundary cell (inflow advects only the
+        # zero-concentration ambient, hence the one-sided clamp).
+        φ = porosity(ξ_cell, T_cell, material)
+        P_int = ideal_gas_pressure(ξ_cell, T_cell, φ, material)
+        κ_int = effective_permeability(ξ_cell, T_cell, material)
+        μ_int = mixture_gas_viscosity(ξ_cell, T_cell, material)
+        v_z = boundary_darcy_velocity(mass_bc, P_int, κ_int, μ_int, d_to_face, Val(tag))
+        v_out = tag === :top ? v_z : -v_z
+        if v_out > 0
+            coef = v_out / max(φ, 1e-12)
+            # Return a fresh tuple instead of rebinding `F` — a self-referential
+            # rebind would box the variable (type-unstable, and inference can't
+            # prove the boxed read defined).
+            return ntuple(Val(NC)) do j
+                if is_gas(material.components[j])
+                    F[j] - coef * ξ_cell[j]
+                else
+                    F[j]
+                end
+            end
+        end
+    end
+
+    return F
+end
 
 # ============================================================================
 # Boundary Flux Decomposition for Diagnostics
@@ -514,7 +356,7 @@ function compute_boundary_heat_fluxes(
     ::RadiationModel;
     a_eff::Float64 = ε_eff,
 )
-    q = thermal_bc_flux(bc, T_surface, t, ε_eff)
+    q, _ = evaluate_bc_flux_and_derivative(bc, T_surface, t, ε_eff)
     return (absorbed = 0.0, reradiation = 0.0, convection = 0.0, prescribed = q, net = q)
 end
 
@@ -526,7 +368,7 @@ function compute_boundary_heat_fluxes(
     ::RadiationModel;
     a_eff::Float64 = ε_eff,
 )
-    q = thermal_bc_flux(bc, T_surface, t, ε_eff)
+    q, _ = evaluate_bc_flux_and_derivative(bc, T_surface, t, ε_eff)
     q_loss = -q
     return (
         absorbed = 0.0,
@@ -547,7 +389,7 @@ function compute_boundary_heat_fluxes(
 )
     # Under P1 the boundary balance applies zero for this BC (emission and
     # ambient exchange are volumetric) — `net` must match the applied flux.
-    q = thermal_bc_flux(bc, T_surface, t, ε_eff, radiation_model)
+    q, _ = evaluate_bc_flux_and_derivative(bc, T_surface, t, ε_eff, radiation_model)
     q_loss = -q
     return (
         absorbed = 0.0,
@@ -590,7 +432,7 @@ function compute_boundary_heat_fluxes(
     a_eff::Float64 = ε_eff,
 )
     # Fallback for other BC types
-    q_total = thermal_bc_flux(bc, T_surface, t, ε_eff)
+    q_total, _ = evaluate_bc_flux_and_derivative(bc, T_surface, t, ε_eff)
     return (
         absorbed = 0.0,
         reradiation = 0.0,
@@ -711,14 +553,4 @@ function compute_surface_mass_flux(
     # mass_bc_flux returns negative for gas escaping (flux into domain convention)
     # We want positive = gas leaving
     return -mass_bc_flux(bc, ξ_surface, λρ, ρ, d, t, j)
-end
-
-# Simple overload without diffusion parameters
-function compute_surface_mass_flux(
-    bc::AbstractMassBC,
-    ξ_surface::Float64,
-    t::Float64,
-    j::Integer,
-)
-    return -mass_bc_flux(bc, ξ_surface, t, j)
 end

@@ -558,59 +558,6 @@ end
 end
 
 # ============================================================================
-# ReactionSet Type
-# ============================================================================
-
-"""
-	ReactionSet{NR, RT <: Tuple}
-
-A collection of reactions for a material. The reactions tuple type `RT` is
-preserved exactly so heterogeneous reactions (different `NRin`/`NRout`/`Ph`)
-can coexist without `Union` allocations in the consumer's iteration.
-
-# Type Parameters
-- `NR`: Number of reactions
-- `RT`: Concrete tuple type holding the reactions
-
-# Fields
-- `reactions::RT`: Tuple of reactions
-"""
-struct ReactionSet{NR,RT<:Tuple} <: AbstractReaction
-    reactions::RT
-    function ReactionSet{NR,RT}(reactions::RT) where {NR,RT<:Tuple}
-        length(reactions) == NR || throw(ArgumentError("Reaction count mismatch"))
-        new{NR,RT}(reactions)
-    end
-end
-
-# Outer constructor: derive NR from the tuple length
-function ReactionSet(reactions::RT) where {RT<:Tuple}
-    NR = length(reactions)
-    ReactionSet{NR,RT}(reactions)
-end
-
-# Convenience constructor from varargs
-ReactionSet(rxns::Reaction...) = ReactionSet(rxns)
-
-# ============================================================================
-# Accessor Functions
-# ============================================================================
-
-"""
-	n_reactions(rs::ReactionSet{NR}) where NR
-
-Get the number of reactions in a reaction set.
-"""
-n_reactions(::ReactionSet{NR}) where {NR} = NR
-
-"""
-	get_reaction(rs::ReactionSet, i::Int)
-
-Get the i-th reaction from a reaction set.
-"""
-@inline get_reaction(rs::ReactionSet, i::Int) = rs.reactions[i]
-
-# ============================================================================
 # Stoichiometry Helpers
 # ============================================================================
 
@@ -645,36 +592,4 @@ function verify_stoichiometry(rxn::Reaction; tol::Real = 1e-10)
         return false
     end
     return true
-end
-
-"""
-	check_material_mass_balance(reactions::Tuple; tol=1e-10) -> Bool
-
-Verify all reactions in a material conserve mass.
-
-Returns `true` if all reactions are mass-balanced within tolerance.
-Prints warnings for any imbalanced reactions.
-
-# Arguments
-- `reactions`: Tuple of reactions (from Material.reactions)
-- `tol`: Absolute tolerance for mass balance error
-
-# Example
-```julia
-material = Material(...)
-if !check_material_mass_balance(material.reactions)
-    @warn "Material has reactions with mass balance issues"
-end
-```
-"""
-function check_material_mass_balance(reactions::Tuple; tol::Real = 1e-10)
-    all_balanced = true
-
-    for (i, rxn) in enumerate(reactions)
-        if !verify_stoichiometry(rxn; tol = tol)
-            all_balanced = false
-        end
-    end
-
-    return all_balanced
 end

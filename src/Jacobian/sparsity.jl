@@ -46,26 +46,12 @@ using ..Problem:
 # Index helpers — single source of truth for the column/row arithmetic
 # ============================================================================
 
-@inline _temp_idx(::StateLayout, i::Int) = i
-
 @inline _xi_idx(layout::StateLayout, j::Int, i::Int) =
     layout.n_cells + (j - 1) * layout.n_cells + i
 
-@inline function _z_offset(layout::StateLayout)
-    NC = n_components(layout)
-    return layout.n_cells * (1 + NC)
-end
-
-@inline _z_idx(layout::StateLayout, n::Int) = _z_offset(layout) + n
-
-@inline function _chi_offset(layout::StateLayout, mode::SimulationMode)
-    off = _z_offset(layout)
-    mesh_mode(mode) isa ALE && (off += layout.n_nodes)
-    return off
-end
-
-@inline _chi_idx(layout::StateLayout, mode::SimulationMode, i::Int) =
-    _chi_offset(layout, mode) + i
+# Node rows/columns exist only under ALE, where `z_offset` is the end of the
+# ξ block.
+@inline _z_idx(layout::StateLayout, n::Int) = z_offset(layout) + n
 
 # ============================================================================
 # Emitter 1: physics block-tridiagonal couplings
@@ -259,7 +245,7 @@ function _emit_chi_pattern!(
 
     n = layout.n_cells
     NC = n_components(layout)
-    chi_off = _chi_offset(layout, mode)
+    chi_off = chi_offset(layout)
     is_full = profile === :full
 
     # χ-row dependencies for each cell (WithChi is ALE-only):
@@ -511,81 +497,8 @@ function structural_zero_diagonal(
         append!(rows, _z_idx(layout, 1):_z_idx(layout, layout.n_nodes))
     end
     if chi_mode(mode) isa WithChi
-        chi_off = _chi_offset(layout, mode)
+        chi_off = chi_offset(layout)
         append!(rows, (chi_off+1):(chi_off+layout.n_cells))
     end
     return rows
-end
-
-# ============================================================================
-# Greedy column coloring
-# ============================================================================
-
-"""
-	matrix_colors(sparsity::SparseMatrixCSC) -> Vector{Int}
-
-Greedy column coloring for finite-difference / sparse-AD Jacobian assembly.
-Columns sharing a color have no common non-zero rows, so they can be
-perturbed simultaneously by a single residual evaluation.
-
-Uses an O(nnz) algorithm: builds a CSR representation from the CSC sparsity
-to efficiently find the columns that share a row with each new column,
-then assigns the minimum-available color.
-
-Lives in the Jacobian module so every backend shares one coloring
-implementation.
-"""
-function matrix_colors(sparsity::SparseMatrixCSC)
-    n = size(sparsity, 2)
-    m = size(sparsity, 1)
-
-    row_ptr = zeros(Int, m + 1)
-    @inbounds for idx = 1:length(sparsity.rowval)
-        row_ptr[sparsity.rowval[idx]+1] += 1
-    end
-    row_ptr[1] = 1
-    @inbounds for i = 1:m
-        row_ptr[i+1] += row_ptr[i]
-    end
-
-    col_indices = Vector{Int}(undef, length(sparsity.rowval))
-    row_count = zeros(Int, m)
-    @inbounds for j = 1:n
-        for idx = sparsity.colptr[j]:(sparsity.colptr[j+1]-1)
-            row = sparsity.rowval[idx]
-            pos = row_ptr[row] + row_count[row]
-            col_indices[pos] = j
-            row_count[row] += 1
-        end
-    end
-
-    colors = zeros(Int, n)
-    max_colors = 64
-    forbidden = falses(max_colors)
-    for j = 1:n
-        fill!(forbidden, false)
-        @inbounds for idx = sparsity.colptr[j]:(sparsity.colptr[j+1]-1)
-            row = sparsity.rowval[idx]
-            for k = row_ptr[row]:(row_ptr[row+1]-1)
-                other_col = col_indices[k]
-                if other_col < j
-                    c = colors[other_col]
-                    if c > 0
-                        if c > length(forbidden)
-                            old_len = length(forbidden)
-                            resize!(forbidden, 2 * c)
-                            forbidden[(old_len+1):end] .= false
-                        end
-                        forbidden[c] = true
-                    end
-                end
-            end
-        end
-        color = 1
-        while color <= length(forbidden) && forbidden[color]
-            color += 1
-        end
-        colors[j] = color
-    end
-    return colors
 end

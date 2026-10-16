@@ -200,8 +200,6 @@ diagnostics.
   empty `0×0` matrix in Eulerian mode
 - `surface_T::Vector{Float64}`: Surface temperature at each saved time [K]
 - `mass_loss_rate::Vector{Float64}`: Surface MLR per current area `A(t)` [kg/(m²·s)]
-- `energy_residual::Vector{Float64}`: Energy-conservation residual; zeros when
-  the conservation tracker is disabled
 - `retcode::Symbol`: Return code from ODE solver
 - `solve_time::Float64`: Wall-clock solve time [s]
 - `raw_solution`: Raw DifferentialEquations.jl solution object (interpolation source)
@@ -234,7 +232,6 @@ mutable struct PyrolysisSolution{P<:AbstractPyrolysisProblem,ExtraT<:NamedTuple}
     z::Matrix{Float64}
     surface_T::Vector{Float64}
     mass_loss_rate::Vector{Float64}
-    energy_residual::Vector{Float64}
     retcode::Symbol
     solve_time::Float64
     # Raw integrator solution; left untyped so reassignment from `nothing`
@@ -245,41 +242,44 @@ mutable struct PyrolysisSolution{P<:AbstractPyrolysisProblem,ExtraT<:NamedTuple}
 end
 
 """
-	_empty_extras() -> NamedTuple
+	_extras(n, diagnostics_log) -> NamedTuple
 
-Build the canonical `extras` NamedTuple of empty mutable vectors. This pins
-the extras schema for the fixed-shape mutable struct and lets the diagnostics
-callback and extraction code both write through `sol.extras.x` without
-re-typing the parent solution.
+The canonical `extras` NamedTuple: every numeric field sized for `n` saved
+times, plus the `diagnostics_log` rows. The one constructor behind both the
+empty container (`_empty_extras`) and the post-solve allocation
+(`_allocate_extras!`), so the fixed-shape schema the diagnostics callback and
+the extraction code write through cannot drift between them.
 """
-function _empty_extras()
+function _extras(n::Int, diagnostics_log::Vector{Any})
     return (
-        gas_generation_rate = Float64[],
-        back_temperature = Float64[],
-        total_mass = Float64[],
-        thickness_history = Float64[],
-        surface_mass_flux = Float64[],
-        surface_heat_flux_net = Float64[],
-        surface_heat_flux_absorbed = Float64[],
-        surface_heat_flux_reradiation = Float64[],
-        surface_heat_flux_convection = Float64[],
-        surface_heat_flux_conduction = Float64[],
-        surface_blowing_ratio = Float64[],
-        surface_pooling_factor = Float64[],
-        surface_face_fraction = Float64[],
-        surface_face_buoyancy = Float64[],
-        volumetric_absorption = Float64[],
-        radiation_transmitted = Float64[],
-        surface_emissivity = Float64[],
-        surface_conductivity = Float64[],
-        back_heat_flux = Float64[],
-        MLR_gauge = Float64[],
-        cross_section_area_history = Float64[],
-        live_cells = Int[],
+        gas_generation_rate = zeros(n),
+        back_temperature = zeros(n),
+        total_mass = zeros(n),
+        thickness_history = zeros(n),
+        surface_mass_flux = zeros(n),
+        surface_heat_flux_net = zeros(n),
+        surface_heat_flux_absorbed = zeros(n),
+        surface_heat_flux_reradiation = zeros(n),
+        surface_heat_flux_convection = zeros(n),
+        surface_heat_flux_conduction = zeros(n),
+        surface_blowing_ratio = ones(n),
+        surface_pooling_factor = ones(n),
+        surface_face_fraction = zeros(n),
+        surface_face_buoyancy = ones(n),
+        volumetric_absorption = zeros(n),
+        radiation_transmitted = zeros(n),
+        surface_emissivity = zeros(n),
+        surface_conductivity = zeros(n),
+        back_heat_flux = zeros(n),
+        MLR_gauge = zeros(n),
+        cross_section_area_history = zeros(n),
+        live_cells = zeros(Int, n),
         park_times = Float64[],
-        diagnostics_log = Any[],
+        diagnostics_log = diagnostics_log,
     )
 end
+
+_empty_extras() = _extras(0, Any[])
 
 """
 	PyrolysisSolution(problem)
@@ -297,7 +297,6 @@ function PyrolysisSolution(problem::PyrolysisProblem)
         Matrix{Float64}(undef, 0, 0),         # z
         Float64[],                            # surface_T
         Float64[],                            # mass_loss_rate
-        Float64[],                            # energy_residual
         :Default,                             # retcode
         0.0,                                  # solve_time
         nothing,                              # raw_solution
@@ -308,39 +307,12 @@ end
 """
 	_allocate_extras!(sol::PyrolysisSolution, n_times::Int) -> sol
 
-Replace `sol.extras` with `n_times`-sized zero vectors for every numeric
-extras field, preserving any `diagnostics_log` rows the callback may have
-already pushed. Type-stable: the resulting NamedTuple matches the schema
-pinned at construction by `_empty_extras`.
+Replace `sol.extras` with `n_times`-sized vectors for every numeric extras
+field, preserving any `diagnostics_log` rows the callback may have already
+pushed.
 """
 function _allocate_extras!(sol::PyrolysisSolution, n_times::Int)
-    prev_log = sol.extras.diagnostics_log
-    sol.extras = (
-        gas_generation_rate = zeros(n_times),
-        back_temperature = zeros(n_times),
-        total_mass = zeros(n_times),
-        thickness_history = zeros(n_times),
-        surface_mass_flux = zeros(n_times),
-        surface_heat_flux_net = zeros(n_times),
-        surface_heat_flux_absorbed = zeros(n_times),
-        surface_heat_flux_reradiation = zeros(n_times),
-        surface_heat_flux_convection = zeros(n_times),
-        surface_heat_flux_conduction = zeros(n_times),
-        surface_blowing_ratio = ones(n_times),
-        surface_pooling_factor = ones(n_times),
-        surface_face_fraction = zeros(n_times),
-        surface_face_buoyancy = ones(n_times),
-        volumetric_absorption = zeros(n_times),
-        radiation_transmitted = zeros(n_times),
-        surface_emissivity = zeros(n_times),
-        surface_conductivity = zeros(n_times),
-        back_heat_flux = zeros(n_times),
-        MLR_gauge = zeros(n_times),
-        cross_section_area_history = zeros(n_times),
-        live_cells = zeros(Int, n_times),
-        park_times = Float64[],
-        diagnostics_log = prev_log,
-    )
+    sol.extras = _extras(n_times, sol.extras.diagnostics_log)
     return sol
 end
 

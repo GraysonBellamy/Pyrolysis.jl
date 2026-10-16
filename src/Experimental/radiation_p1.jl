@@ -305,24 +305,6 @@ end
     return nothing
 end
 
-@inline function _apply_bc_for_boundary!(
-    rad_cache::RadiationCache,
-    mesh,
-    prop_cache::PropertyCache,
-    radiation_bcs::RadiationBCSet,
-    ::Val{B},
-    t,
-) where {B}
-    face_ids_or_nothing = get(mesh.boundary_faces, B, nothing)
-    face_ids_or_nothing === nothing && return nothing
-    faces = face_ids_or_nothing::Vector{Int}
-    isempty(faces) && return nothing
-
-    bc = get_radiation_bc(radiation_bcs, Val(B))
-    _apply_bc!(rad_cache, mesh, prop_cache, bc, faces, t)
-    return nothing
-end
-
 # Dispatch helpers for RadiationBCSet (method-based, no isa chain)
 @inline function _apply_bc!(
     rad_cache::RadiationCache,
@@ -359,24 +341,6 @@ end
     _apply_dirichlet_bc!(rad_cache, faces)
     return nothing
 end
-
-function _apply_bc!(
-    rad_cache::RadiationCache,
-    mesh,
-    prop_cache::PropertyCache,
-    bc::AbstractRadiationBC,
-    faces::Vector{Int},
-    t,
-)
-    _apply_generic_bc!(rad_cache, mesh, prop_cache, bc, faces, t)
-    return nothing
-end
-
-# Helper to extract real value from Dual or Float64 for cache storage
-# This is needed because RadiationCache uses Float64 arrays but may be called
-# with Dual numbers during autodiff for time derivatives
-@inline _value(x::Real) = ForwardDiff.value(x)
-@inline _value(x::Float64) = x
 
 # ============================================================================
 # Marshak BC kernels — canonical coefficient / driving-field helpers
@@ -466,12 +430,10 @@ end
         # inside the radiation solve).
         c_eff = _marshak_effective_coefficient(bc, T_cell, D_cell, δ)
         flux_into = c_eff * (_marshak_driving_field(bc, t) - G_cell)
-        # Extract value for storage in Float64 cache (needed for autodiff with Dual numbers)
-        flux_value = _value(flux_into)
         if right_id == 0
-            rad_cache.q_rad[f] = -flux_value
+            rad_cache.q_rad[f] = -flux_into
         else
-            rad_cache.q_rad[f] = flux_value
+            rad_cache.q_rad[f] = flux_into
         end
     end
     return nothing
@@ -490,35 +452,6 @@ end
     # For now, set to zero as placeholder
     @inbounds for f in faces
         rad_cache.q_rad[f] = 0.0
-    end
-    return nothing
-end
-
-# Fallback for any other AbstractRadiationBC (may allocate but handles extensibility)
-function _apply_generic_bc!(
-    rad_cache::RadiationCache,
-    mesh,
-    prop_cache::PropertyCache,
-    bc::AbstractRadiationBC,
-    faces::Vector{Int},
-    t,
-)
-    @inbounds for f in faces
-        face = mesh.faces[f]
-        left_id, right_id = face.cell_ids
-        cell_id = left_id == 0 ? right_id : left_id
-
-        T_surf = mesh.cell_states[cell_id].T
-        G_surf = rad_cache.G[cell_id]
-        α_surf = rad_cache.α[cell_id] > 0 ? rad_cache.α[cell_id] : prop_cache.α[cell_id]
-        ε_surf = prop_cache.ε[cell_id]
-
-        flux_into = radiation_bc_flux(bc, G_surf, T_surf, α_surf, ε_surf, t)
-        if right_id == 0
-            rad_cache.q_rad[f] = -flux_into
-        else
-            rad_cache.q_rad[f] = flux_into
-        end
     end
     return nothing
 end

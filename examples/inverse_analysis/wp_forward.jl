@@ -605,14 +605,13 @@ Initial moisture concentration is read from `scenario.c0_moisture` (kg/m³).
 For older Scenario tuples lacking that field, the slot defaults to 0.
 `kinetics_set` selects `:constant`, `:kirchhoff_123`, or `:kirchhoff_all`.
 
-`jacobian_strategy` overrides the Jacobian linear-solve strategy. `nothing`
-(default) keeps the package default `Structured(strategy = DirectSolve())`.
-Pass `ApproxSolve()` to opt into the `:ale_reduced` sparsity profile — it
-drops the cumulative ALE mesh-velocity widening and the dense z-column
-geometry block, paying ~14% of the prototype nnz and ~1% of the per-step
-solve cost on MaCFP-shape problems. Newton absorbs the approximation by
-taking a few extra iterations; for inverse analysis where the same problem
-shape is solved hundreds of times this is a clear win.
+`jacobian_strategy` overrides the Jacobian strategy. `nothing` (default)
+keeps solve's ALE default, `ApproxSolve()`: the `:ale_reduced` sparsity
+profile drops the cumulative ALE mesh-velocity widening and the dense
+z-column geometry block, paying ~14% of the prototype nnz and ~1% of the
+per-step solve cost on MaCFP-shape problems, while Newton absorbs the
+approximation with a few extra iterations. Pass `DirectSolve()` for the
+exact Jacobian.
 
 `blowing` is the blowing model every `ConvectiveBC` of the surface BC set
 carries, `CouetteFilm()` by default: the film coefficient is rescaled by the
@@ -698,20 +697,11 @@ function build_and_solve(
     )
 
     try
-        # Build a JacobianSpec only when the caller asked for a non-default
-        # strategy. With `jacobian = nothing`, `solve` picks
-        # `Structured(strategy = DirectSolve())` itself; passing the spec
-        # explicitly is required to switch to `ApproxSolve` (the
-        # :ale_reduced profile).
-        jac_spec =
+        # `jacobian = nothing` keeps solve's ALE default,
+        # `Structured(strategy = ApproxSolve())`.
+        jac_backend =
             jacobian_strategy === nothing ? nothing :
-            JacobianSpec(
-                Structured(strategy = jacobian_strategy),
-                problem;
-                use_ale = true,
-                radiation_model = SURFACE_ABSORPTION,
-                min_thickness = 0.5e-3,
-            )
+            Structured(strategy = jacobian_strategy)
 
         solver_kwargs = (
             abstol = 1e-7,
@@ -727,7 +717,7 @@ function build_and_solve(
             radiation_model = SURFACE_ABSORPTION,
             min_thickness = 0.5e-3,
             handle_depletion = false,
-            jacobian = jac_spec,
+            jacobian = jac_backend,
             integrator = KenCarp4(linsolve = SparspakFactorization()),
         )
         if log_level === nothing

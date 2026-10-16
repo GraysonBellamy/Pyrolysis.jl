@@ -64,7 +64,7 @@ using Pyrolysis.Jacobian: JacobianSpec, DenseAD_ForwardDiff, Structured
     spec = JacobianSpec(Structured(), def, ws)
 
     J_ref = zeros(length(u), length(u))
-    J_str = Pyrolysis.Jacobian._alloc_active_target(spec, length(u))
+    J_str = Pyrolysis.Jacobian._alloc_target(spec, length(u))
     Pyrolysis.Jacobian.compute_jacobian!(J_ref, ref_spec, u, def, 0.0, ws)
     Pyrolysis.Jacobian.compute_jacobian!(J_str, spec, u, def, 0.0, ws)
 

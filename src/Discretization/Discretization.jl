@@ -6,7 +6,6 @@ Spatial discretization (finite volume) for the Pyrolysis.jl package.
 This module provides:
 - Finite volume operators (divergence, RHS assembly)
 - Flux limiters (minmod, vanleer, superbee)
-- Gradient reconstruction
 - ALE flux computation for moving meshes
 - Boundary flux implementation
 - **Boundary temperature solve** for correct surface temperature in cell-centered FVM
@@ -38,7 +37,6 @@ module Discretization
 
 using ..Materials
 using ..BoundaryConditions
-using ..Materials: GAS
 using ..BoundaryConditions: DirichletThermalBC
 using ..Geometry
 using ..Properties
@@ -53,14 +51,13 @@ include("boundary_temperature.jl")  # Boundary temperature solve for correct sur
 include("darcy_velocity.jl")
 include("finite_volume.jl")
 include("flux_limiters.jl")
-include("gradient_reconstruction.jl")
 include("ale_fluxes.jl")
 
 # Exports - Finite Volume
 export divergence_1d!, divergence_species_1d!
 export compute_rhs!
-export RHSCache, resize_rhs_cache!
-export update_darcy_properties!, compute_rhs_darcy_fick!
+export RHSCache
+export update_darcy_properties!
 # Type-stable BC application functions
 export apply_thermal_bc_flux!, apply_mass_bc_flux!
 
@@ -69,24 +66,15 @@ export Limiter, MINMOD, VANLEER, SUPERBEE, NONE, CENTRAL
 export minmod, vanleer, superbee
 export apply_limiter
 
-# Exports - Gradient Reconstruction
-export compute_gradients!, compute_temperature_gradients!
-export face_value_central, face_value_upwind, face_value_weighted
-export face_value_limited, face_value_second_order
-export face_gradient, compute_face_gradients!
-
 # Exports - ALE mesh-relative temperature advection
 export compute_ale_advection_term!
 
 # Exports - Darcy Velocity
-export darcy_velocity_face, compute_darcy_velocity!
-export compute_darcy_mobility!, velocity_from_mobility!
-export DarcyVelocityJacobianCoeffs, compute_darcy_velocity_jacobian!
 export apply_pressure_bc_to_darcy_velocity!  # Pressure BC application
 export boundary_darcy_velocity  # Shared boundary-face Darcy velocity kernel
 
 # Exports - Boundary Fluxes
-export thermal_bc_flux, mass_bc_flux
+export mass_bc_flux
 export compute_boundary_heat_fluxes, compute_surface_mass_flux  # Diagnostic decomposition
 
 # Exports - Boundary Temperature Solve

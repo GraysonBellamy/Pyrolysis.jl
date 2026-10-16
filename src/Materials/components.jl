@@ -599,13 +599,6 @@ end
 # ============================================================================
 
 """
-	get_density(comp::AbstractComponent, T::Real)
-
-Get component bulk density at temperature T.
-"""
-@inline get_density(comp::AbstractComponent, T::Real) = comp.density(T)
-
-"""
 	get_intrinsic_density(comp::AbstractComponent, T::Real) -> Real
 
 Skeletal/intrinsic density at temperature T — the density of the cell-wall

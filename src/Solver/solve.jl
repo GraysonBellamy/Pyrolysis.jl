@@ -8,46 +8,28 @@ using ..Problem:
     validate_problem,
     initialize_state,
     StateLayout,
-    state_length,
     get_temperature,
     get_concentration,
-    get_node_position,
     get_node_positions,
     compute_volumes_from_state,
-    get_thickness_from_state,
-    z_offset,
-    chi_range,
     _allocate_extras!
 using ..Residual: residual!, cross_section_area_from_state
-using ..Geometry: cell_center
-using ..Physics: evaluate_reactions!, ideal_gas_pressure
 using ..Properties:
-    RadiationCache,
     effective_emissivity,
     effective_absorptivity,
     effective_absorption,
-    effective_conductivity,
-    effective_gas_transfer,
-    effective_permeability,
-    effective_gas_viscosity,
-    mixture_gas_viscosity,
-    porosity
+    effective_conductivity
 using ..Discretization:
-    compute_boundary_heat_fluxes,
-    compute_surface_mass_flux,
-    solve_boundary_temperature,
-    boundary_darcy_velocity
-using ..Materials: AbstractThermalBC, AbstractRadiationBC, GAS, has_darcy_flow
+    compute_boundary_heat_fluxes, solve_boundary_temperature, _bc_boundary_face_fluxes
+using ..Materials: has_darcy_flow
 using ..BoundaryConditions:
     get_radiative_flux_bc,
     extract_radiative_flux_from_bcs,
     has_radiative_flux_bc,
-    RadiativeBC,
-    CombinedThermalBC,
     DirichletThermalBC,
     get_thermal_bc,
     get_mass_bc
-using LinearSolve: LinearSolve, LUFactorization, KLUFactorization, UMFPACKFactorization  # dense LU for dense backends; KLU / UMFPACK are the sparse defaults
+using LinearSolve: KLUFactorization, UMFPACKFactorization  # the sparse defaults
 using SparseArrays: nnz  # For logging sparse Jacobian info
 
 import CommonSolve: solve  # Extend CommonSolve.solve for our problem type
@@ -61,14 +43,11 @@ import CommonSolve: solve  # Extend CommonSolve.solve for our problem type
 # BCs read it, so the boundary-temperature solve here reproduces what the
 # integrator saw during the run.
 
-# Per-species outward gas mass flux at a boundary face [kg/(m²·s)],
-# evaluated the same way the live mass BC application does: diffusive film
-# law plus, in Darcy-Fick mode, the pressure-BC advective venting
-# v_out·ξ/φ (same `boundary_darcy_velocity` kernel as the RHS; outflow only —
-# inflow advects the zero-concentration ambient). `tag` is the boundary
-# orientation: at the bottom the outward normal is −z, so outflow is v_z < 0
-# (the bottom face vents too when a permeable mass BC is configured there;
-# "positive = leaving the slab" at both boundaries).
+# Per-species outward gas mass flux at a boundary face [kg/(m²·s)], positive
+# leaving the slab at either boundary (`tag` is the boundary orientation): the
+# boundary-face kernel the live mass BC and the Jacobian share (film law plus,
+# in Darcy-Fick mode, the pressure-BC venting), with its into-the-domain sign
+# flipped. `0.0 - F` keeps a zero flux at +0.0.
 @inline function _surface_gas_flux(
     material::Material{NC},
     ξ_face::NTuple{NC,Float64},
@@ -77,35 +56,19 @@ import CommonSolve: solve  # Extend CommonSolve.solve for our problem type
     d_half::Float64,
     t::Float64,
     darcy_active::Bool,
-    ::Val{tag} = Val(:top),
-) where {NC,tag}
-    ρ = sum(ξ_face)
-    λρ = effective_gas_transfer(ξ_face, T_face, material) * ρ
-    # Single assignment (no conditional reassignment) so the `ntuple` closure
-    # below captures a non-boxed value — avoids a JET possible-undef report.
-    v_out_over_φ = if darcy_active
-        φ = porosity(ξ_face, T_face, material)
-        P_int = ideal_gas_pressure(ξ_face, T_face, φ, material)
-        κ_int = effective_permeability(ξ_face, T_face, material)
-        μ_int = mixture_gas_viscosity(ξ_face, T_face, material)
-        v_z = boundary_darcy_velocity(mass_bc, P_int, κ_int, μ_int, d_half, Val(tag))
-        v_out = tag === :top ? v_z : -v_z
-        v_out > 0.0 ? v_out / max(φ, 1e-12) : 0.0
-    else
-        0.0
-    end
-    ntuple(Val(NC)) do k
-        comp = material.components[k]
-        # Film/prescribed boundary fluxes can supply an absent species. Match
-        # the applied gas operator for zero and small negative trial/output
-        # concentrations as well; suppressing them hid ambient AIR inflow.
-        if is_gas(comp)
-            compute_surface_mass_flux(mass_bc, ξ_face[k], λρ, ρ, d_half, t, k) +
-            v_out_over_φ * ξ_face[k]
-        else
-            0.0
-        end
-    end
+    tag::Val = Val(:top),
+) where {NC}
+    F = _bc_boundary_face_fluxes(
+        T_face,
+        ξ_face,
+        mass_bc,
+        material,
+        d_half,
+        t,
+        tag,
+        darcy_active,
+    )
+    return map(F_k -> 0.0 - F_k, F)
 end
 
 # ============================================================================
@@ -120,7 +83,6 @@ Validate radiation model selection and warn about ignored parameters.
 Issues warnings when:
 - SURFACE_ABSORPTION is used with components that have α values (will be ignored)
 - BEER_LAMBERT is used without any α values (no absorption will occur)
-- P1_QUASI_STEADY is requested on the core solver path (use Experimental)
 """
 function _validate_radiation_model(model::RadiationModel, material)
     # Warn if SURFACE_ABSORPTION is used with non-zero absorption coefficients
@@ -155,14 +117,6 @@ function _validate_radiation_model(model::RadiationModel, material)
         end
     end
 
-    # P1 lives outside the core unified residual.
-    if model == P1_QUASI_STEADY
-        @warn """
-          P1_QUASI_STEADY is experimental and is not wired into the core unified
-          solve path. Use Pyrolysis.Experimental.RadiationP1 primitives directly.
-          """ maxlog = 1
-    end
-
     return nothing
 end
 
@@ -183,8 +137,7 @@ function _reject_unknown_kwargs(extra_kwargs)
 end
 
 """
-	_validate_solve_kwargs(; extra_kwargs, jacobian, handle_depletion,
-	                          radiation_model,
+	_validate_solve_kwargs(; extra_kwargs, radiation_model,
 	                          min_thickness, depletion_threshold, min_cells,
 	                          diagnostics_stride, verify_jacobian)
 
@@ -194,8 +147,6 @@ can be evaluated from kwargs alone (no context).
 """
 function _validate_solve_kwargs(;
     extra_kwargs,
-    jacobian,
-    handle_depletion,
     radiation_model,
     min_thickness,
     depletion_threshold,
@@ -271,10 +222,8 @@ end
 # strategies follow the same trajectory, through surface cells that collapse
 # without parking too (Technical Reference §15.10.3).
 
-function _default_jacobian_spec(def, ws, use_ale::Bool)
-    strategy = use_ale ? ApproxSolve() : DirectSolve()
-    return JacobianSpec(Structured(strategy = strategy), def, ws)
-end
+_default_jacobian_backend(use_ale::Bool) =
+    Structured(strategy = use_ale ? ApproxSolve() : DirectSolve())
 
 # ============================================================================
 # verify_jacobian DiscreteCallback
@@ -342,79 +291,33 @@ end
 # Linear solver / integrator selection
 # ============================================================================
 
-_is_sparse_linsolve(ls) = ls isa LinearSolve.AbstractSparseFactorization
-
 """
-	_resolve_integrator(; integrator, linear_solver, needs_dense_linsolve=false,
-	                    geometry_block=false)
+	_resolve_integrator(; integrator, linear_solver, geometry_block=false)
 
-Resolve the user's integrator / linear-solver request against the Jacobian
-path. `needs_dense_linsolve = true` means no sparse `jac_prototype` will be
-attached to the `ODEFunction` (a dense Jacobian backend such as
-`DenseAD_ForwardDiff`), where a sparse factorization cannot run.
+Resolve the user's integrator / linear-solver request against the sparse
+Jacobian prototype every `solve` attaches.
 
-The default linear solver follows the Jacobian pattern: `LUFactorization` for
-a dense Jacobian, `UMFPACKFactorization` when the sparse pattern holds the ALE
-geometry block (`geometry_block`, see [`materializes_geometry_block`](@ref)),
-and `KLUFactorization` for every other sparse pattern. UMFPACK's supernodal
-factorization is the fastest on the dense geometry block. KLU refactors a
-fixed pattern in place without allocating and is the fastest everywhere else,
-including the Beer–Lambert suffix `DirectSolve` materializes on an Eulerian
-mesh, where UMFPACK's threshold pivoting can return an inaccurate solve. The
-rule depends on the mode and profile, not on the mesh size, so a
-configuration uses the same factorization at every resolution.
-
-The user's integrator choice is always preserved: an incompatible sparse
-factorization is swapped for `LUFactorization` **within** the user's
-algorithm (constructor re-call, or a rebuild of a fully constructed
-algorithm keeping its type and `autodiff`), with a warning — never by
-silently substituting a different integrator.
+The default linear solver follows the Jacobian pattern: `UMFPACKFactorization`
+when the pattern holds the ALE geometry block (`geometry_block`, see
+[`materializes_geometry_block`](@ref)), and `KLUFactorization` for every other
+pattern. UMFPACK's supernodal factorization is the fastest on the dense
+geometry block. KLU refactors a fixed pattern in place without allocating and
+is the fastest everywhere else, including the Beer–Lambert suffix
+`DirectSolve` materializes on an Eulerian mesh, where UMFPACK's threshold
+pivoting can return an inaccurate solve. The rule depends on the mode and
+profile, not on the mesh size, so a configuration uses the same factorization
+at every resolution.
 """
-function _resolve_integrator(;
-    integrator,
-    linear_solver,
-    needs_dense_linsolve::Bool = false,
-    geometry_block::Bool = false,
-)
-    default_ls = if needs_dense_linsolve
-        LUFactorization()
-    elseif geometry_block
-        UMFPACKFactorization()
-    else
-        KLUFactorization()
-    end
+function _resolve_integrator(; integrator, linear_solver, geometry_block::Bool = false)
+    default_ls = geometry_block ? UMFPACKFactorization() : KLUFactorization()
     ls = linear_solver === nothing ? default_ls : linear_solver
-    if needs_dense_linsolve && _is_sparse_linsolve(ls)
-        @warn "linear_solver = $(typeof(ls)) requires a sparse Jacobian " *
-              "prototype, but this solve has none (jacobian = nothing / " *
-              "depletion colored-FD path, or a dense Jacobian backend). " *
-              "Using LUFactorization instead."
-        ls = LUFactorization()
-    end
-
     if integrator === nothing
         return KenCarp4(autodiff = AutoFiniteDiff(), linsolve = ls)
     elseif integrator isa Type || integrator isa Function
         return integrator(autodiff = AutoFiniteDiff(), linsolve = ls)
     elseif linear_solver === nothing
         # Fully constructed algorithm.
-        alg = integrator
-        if needs_dense_linsolve &&
-           hasproperty(alg, :linsolve) &&
-           _is_sparse_linsolve(alg.linsolve)
-            alg_ctor = Base.typename(typeof(alg)).wrapper
-            @warn "integrator = $(alg_ctor)(linsolve = $(typeof(alg.linsolve))) " *
-                  "requires a sparse Jacobian prototype, but this solve has " *
-                  "none. Rebuilding $(alg_ctor) with LUFactorization — the " *
-                  "algorithm type and autodiff are preserved; any other " *
-                  "custom algorithm options are reset to their defaults."
-            return if hasproperty(alg, :autodiff)
-                alg_ctor(autodiff = alg.autodiff, linsolve = LUFactorization())
-            else
-                alg_ctor(linsolve = LUFactorization())
-            end
-        end
-        return alg
+        return integrator
     else
         error(
             "solve(): `linear_solver` can only be paired with `integrator` " *
@@ -447,16 +350,13 @@ Solve a pyrolysis problem using DifferentialEquations.jl.
   `nothing` chooses `KenCarp4` with the default `linear_solver`.
 - `linear_solver=nothing`: LinearSolve backend. `nothing` chooses by the
   Jacobian pattern (see "Linear Solver"): `UMFPACKFactorization()` for the
-  exact ALE Jacobian, `KLUFactorization()` for every other sparse Jacobian,
-  `LUFactorization()` for a dense Jacobian backend. Pair with `integrator`
-  only when `integrator` is a constructor.
-- `jacobian=nothing`: Jacobian handle. `nothing` picks
+  exact ALE Jacobian, `KLUFactorization()` for every other Jacobian. Pair
+  with `integrator` only when `integrator` is a constructor.
+- `jacobian=nothing`: Jacobian backend. `nothing` picks
   `Structured(strategy = DirectSolve())` on a fixed mesh and
-  `Structured(strategy = ApproxSolve())` under ALE. A bare backend such as
-  `Structured(strategy = ApproxSolve())` builds the spec for this solve's own
-  mesh mode and options; a prebuilt `JacobianSpec` is used as given and must
-  have been built for the same mode (`solve` rejects a spec whose state
-  length differs from the problem's, naming `use_ale`).
+  `Structured(strategy = ApproxSolve())` under ALE. A `Structured` backend
+  such as `Structured(strategy = DirectSolve())` overrides the default; the
+  spec is built for this solve's own mesh copy, mode and options.
 - `verify_jacobian=nothing`: NamedTuple `(rtol=, atol=, sample_times=)`
   installs a `DiscreteCallback` that compares the active backend against
   a `DenseAD_ForwardDiff` reference at the listed sample times. Reports
@@ -489,17 +389,14 @@ Solve a pyrolysis problem using DifferentialEquations.jl.
 
 # Jacobian backend
 
-Pass `jacobian = backend` (the spec is built for this solve's mode) or
-`jacobian = JacobianSpec(backend, problem; use_ale = …, radiation_model = …)`
-to override the auto-default. The production backend is `Structured`;
-behavior is selected by its strategy:
+Pass `jacobian = backend` to override the auto-default; the spec is built for
+this solve's mode. The backend is `Structured`; behavior is selected by its
+strategy:
 
 | Spec                                                   | When to use                              |
 |--------------------------------------------------------|------------------------------------------|
 | `Structured(strategy = DirectSolve())`                 | Fixed-mesh default; exact assembly + sparse direct |
-| `Structured(strategy = StructuredSolve())`             | Apply structured couplings without densify |
 | `Structured(strategy = ApproxSolve())`                 | ALE default; drops the structured couplings (reduced pattern) |
-| `DenseAD_ForwardDiff()` (verifier reference only)      | Internal use — reference for `verify_jacobian` |
 
 # Returns
 A `PyrolysisSolution` containing:
@@ -610,11 +507,10 @@ function solve(
     integrator = nothing,
 
     # Pluggable Jacobian + verification:
-    # `jacobian` is the single Jacobian handle: `nothing` → the mode's default
-    # (`DirectSolve` on a fixed mesh, `ApproxSolve` under ALE); a bare backend
-    # is built for this solve's (def, ws); a prebuilt spec is size-checked
-    # against u0.
-    jacobian::Union{JacobianSpec,JacobianBackend,Nothing} = nothing,
+    # `jacobian`: `nothing` → the mode's default (`DirectSolve` on a fixed
+    # mesh, `ApproxSolve` under ALE); a `Structured` backend overrides it.
+    # Either way the spec is built for this solve's (def, ws).
+    jacobian::Union{Structured,Nothing} = nothing,
     # `verify_jacobian` installs a `DiscreteCallback` comparing the active
     # backend against a `DenseAD_ForwardDiff` reference at the listed
     # sample times. NamedTuple `(rtol=, atol=, sample_times=)` or `nothing`.
@@ -655,8 +551,6 @@ function solve(
 )
     _validate_solve_kwargs(;
         extra_kwargs = extra_kwargs,
-        jacobian = jacobian,
-        handle_depletion = handle_depletion,
         radiation_model = radiation_model,
         min_thickness = min_thickness,
         depletion_threshold = depletion_threshold,
@@ -739,7 +633,6 @@ function solve(
     # shared with the exported `initialize_state`).
     def, ws, u0 = initialize_state(
         problem;
-        min_thickness = min_thickness,
         use_ale = use_ale,
         radiation_model = radiation_model,
         radiation_intensity = I_radiation,
@@ -767,63 +660,27 @@ function solve(
             end
         end
 
-    # Build the ODE problem from the Jacobian spec: the auto-default, a spec
-    # built here from a bare backend, or the user's prebuilt spec.
-    local jac_spec::JacobianSpec = if jacobian === nothing
-        _default_jacobian_spec(def, ws, use_ale)
-    elseif jacobian isa JacobianBackend
-        JacobianSpec(jacobian, def, ws)
-    else
-        jacobian
-    end
-    if state_length(jac_spec) != length(u0)
-        error(
-            "solve(): the `jacobian` spec was built for a state vector of length " *
-            "$(state_length(jac_spec)) but this solve integrates $(length(u0)) " *
-            "unknowns (use_ale = $(use_ale), radiation_model = $(radiation_model)). " *
-            "`JacobianSpec(backend, problem)` defaults to the Eulerian layout; pass " *
-            "the same `use_ale`/`radiation_model` keywords it was solved with, or " *
-            "pass the bare backend `jacobian = $(typeof(jac_spec.backend))(…)` and " *
-            "let `solve` build the spec.",
-        )
-    end
-
-    # Build the ODEFunction from the active spec. Backends with sparsity
-    # provide a `jac_prototype` for sparse LU factorization; the verifier-only
-    # `DenseAD_ForwardDiff` does not.
+    # Build the Jacobian spec for this solve's own (def, ws).
+    backend = jacobian === nothing ? _default_jacobian_backend(use_ale) : jacobian
+    jac_spec = JacobianSpec(backend, def, ws)
     jac! = let s = jac_spec, def = def, ws = ws
         (J, u, p, t) -> compute_jacobian!(J, s, u, def, t, ws)
     end
 
-    jac_prototype = if jac_spec.sparsity_phys !== nothing
-        # Build the union of physics + geometry sparsity as the allocation
-        # template. Both are `SparseMatrixCSC{Bool,Int}`; the Float64 working
-        # matrix is materialized by OrdinaryDiffEq.
-        S_geom = jac_spec.sparsity_geom
-        S_union =
-            S_geom === nothing ? jac_spec.sparsity_phys : (jac_spec.sparsity_phys .| S_geom)
-        Float64.(S_union)
-    else
-        nothing
-    end
+    # The union of physics + geometry sparsity is the allocation template.
+    # Both are `SparseMatrixCSC{Bool,Int}`; the Float64 working matrix is
+    # materialized by OrdinaryDiffEq.
+    S_geom = jac_spec.sparsity_geom
+    S_union =
+        S_geom === nothing ? jac_spec.sparsity_phys : (jac_spec.sparsity_phys .| S_geom)
+    jac_prototype = Float64.(S_union)
 
-    # The Jacobian path fixes the linear-solver family: a dense backend wants
-    # a dense LU, a sparse prototype a sparse factorization suited to its
-    # pattern (UMFPACK when it holds the ALE geometry block, KLU otherwise).
-    # Resolve the integrator only now so the default linsolve matches the
-    # path, and an incompatible explicit choice is rebuilt inside the
-    # *user's* algorithm (with a warning) instead of being silently replaced
-    # by a hard-coded KenCarp4.
-    needs_dense_linsolve = jac_prototype === nothing
+    # The pattern fixes the default factorization (UMFPACK when it holds the
+    # ALE geometry block, KLU otherwise), so the integrator is resolved only
+    # now.
     geometry_block =
-        jac_spec.backend isa Structured &&
         materializes_geometry_block(def.mode, sparsity_profile(jac_spec.backend.strategy))
-    solver_alg = _resolve_integrator(;
-        integrator,
-        linear_solver,
-        needs_dense_linsolve,
-        geometry_block,
-    )
+    solver_alg = _resolve_integrator(; integrator, linear_solver, geometry_block)
 
     # The right-hand side and the Jacobian reach the integrator behind
     # problem-independent types (`ErasedRHS`, `ErasedJacobian`), as do the
@@ -832,33 +689,23 @@ function solve(
     # `FullSpecialize`: under the default `AutoSpecialize` the integrator stores its
     # callbacks type-erased, and inference then compiles the stepper for a second,
     # callback-free integrator type as well, which doubles its compile time.
-    ode_fn_with_jac = if jac_prototype !== nothing
-        OrdinaryDiffEq.ODEFunction{true,FullSpecialize}(
-            ErasedRHS(rhs!);
-            jac = ErasedJacobian{typeof(jac_prototype)}(jac!),
-            jac_prototype = jac_prototype,
-        )
-    else
-        OrdinaryDiffEq.ODEFunction{true,FullSpecialize}(
-            ErasedRHS(rhs!);
-            jac = ErasedJacobian{Matrix{Float64}}(jac!),
-        )
-    end
+    ode_fn_with_jac = OrdinaryDiffEq.ODEFunction{true,FullSpecialize}(
+        ErasedRHS(rhs!);
+        jac = ErasedJacobian{typeof(jac_prototype)}(jac!),
+        jac_prototype = jac_prototype,
+    )
     ode_problem = ODEProblem(ode_fn_with_jac, u0, tspan)
 
-    if jac_prototype !== nothing
-        linsolve_note =
-            hasproperty(solver_alg, :linsolve) ?
-            " and `$(nameof(typeof(solver_alg.linsolve)))`" : ""
-        @info "Using `$(typeof(jac_spec.backend))` Jacobian " *
-              "with sparse storage ($(nnz(jac_prototype)) non-zeros)$(linsolve_note)"
-        if hasproperty(solver_alg, :linsolve) &&
-           solver_alg.linsolve isa ILUGMRESFactorization
-            @warn "Using ILU-GMRES iterative solver (τ=$(solver_alg.linsolve.τ)). " *
-                  "Its inexact linear solves can add Newton failures and rejected " *
-                  "steps on strongly Arrhenius transients; the default direct " *
-                  "factorization solves each Newton system exactly." maxlog = 1
-        end
+    linsolve_note =
+        hasproperty(solver_alg, :linsolve) ?
+        " and `$(nameof(typeof(solver_alg.linsolve)))`" : ""
+    @info "Using `$(typeof(jac_spec.backend))` Jacobian " *
+          "with sparse storage ($(nnz(jac_prototype)) non-zeros)$(linsolve_note)"
+    if hasproperty(solver_alg, :linsolve) && solver_alg.linsolve isa ILUGMRESFactorization
+        @warn "Using ILU-GMRES iterative solver (τ=$(solver_alg.linsolve.τ)). " *
+              "Its inexact linear solves can add Newton failures and rejected " *
+              "steps on strongly Arrhenius transients; the default direct " *
+              "factorization solves each Newton system exactly." maxlog = 1
     end
 
     # Build solver options. The tolerances, step bounds and output times enter
@@ -1136,36 +983,6 @@ end
 @inline _zero_radiation_flux(_t) = 0.0
 
 """
-	_extract_radiative_params(bc::AbstractThermalBC) -> Tuple{Any, Any}
-
-Extract emissivity and T_ambient from a (possibly combined) thermal BC.
-Returns (emissivity, T_ambient) with defaults (0.9, 300.0) if not found.
-"""
-_extract_radiative_params(bc::AbstractThermalBC) = (0.9, 300.0)
-
-function _extract_radiative_params(bc::RadiativeBC)
-    return (bc.ε, bc.T_inf)
-end
-
-function _extract_radiative_params(bc::CombinedThermalBC)
-    for inner_bc in bc.bcs
-        if inner_bc isa RadiativeBC
-            return (inner_bc.ε, inner_bc.T_inf)
-        end
-    end
-    # Recursively check for nested combined BCs
-    for inner_bc in bc.bcs
-        if inner_bc isa CombinedThermalBC
-            result = _extract_radiative_params(inner_bc)
-            if result[1] != 0.9 || result[2] != 300.0
-                return result
-            end
-        end
-    end
-    return (0.9, 300.0)
-end
-
-"""
 	extract_solution!(solution::PyrolysisSolution, raw_solution, problem; radiation_model)
 
 Extract results from raw ODE solution into PyrolysisSolution structure.
@@ -1200,7 +1017,6 @@ function extract_solution!(
     solution.z = Matrix{Float64}(undef, 0, 0)             # Eulerian: no node positions
     solution.surface_T = zeros(n_times)
     solution.mass_loss_rate = zeros(n_times)
-    solution.energy_residual = zeros(n_times)
     _allocate_extras!(solution, n_times)
     depletion === nothing || append!(solution.extras.park_times, depletion.park_times)
 
@@ -1341,7 +1157,6 @@ function extract_solution!(
         # Surface cell properties (top boundary, z=L, boundary_id=1)
         # Note: ξ_top, k_top, ε_top already computed above for boundary temperature solve
         T_surface_solved = state_top.T_surface
-        ξ_surface = ξ_top
 
         # Store effective properties
         solution.extras.surface_emissivity[i] = ε_top
@@ -1404,7 +1219,6 @@ function extract_solution!(
 
         # Back face heat flux (boundary_id=2, z=0) - use solved boundary temperature
         T_back_solved = state_bottom.T_surface
-        ξ_back = ξ_bottom
         back_fluxes = compute_boundary_heat_fluxes(
             thermal_bc_bottom,
             T_back_solved,
@@ -1526,7 +1340,6 @@ function extract_solution_ale!(
     solution.z = fill(NaN, n_nodes, n_times)
     solution.surface_T = zeros(n_times)
     solution.mass_loss_rate = zeros(n_times)
-    solution.energy_residual = zeros(n_times)
     _allocate_extras!(solution, n_times)
 
     # Pre-allocate work arrays for reaction rate computation
@@ -1666,7 +1479,6 @@ function extract_solution_ale!(
 
         # Surface cell properties - reuse variables from boundary temperature solve
         T_surface_solved = state_top.T_surface
-        ξ_surface = ξ_top
 
         # Store effective properties
         solution.extras.surface_emissivity[out_idx] = ε_top
@@ -1728,7 +1540,6 @@ function extract_solution_ale!(
 
         # Back face heat flux (boundary_id=2, z=0) - use solved boundary temperature
         T_back_solved = state_bottom.T_surface
-        ξ_back = ξ_bottom
         back_fluxes = compute_boundary_heat_fluxes(
             thermal_bc_bottom,
             T_back_solved,
