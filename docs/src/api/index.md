@@ -16,7 +16,7 @@ cheat-sheet.
 | Page | Covers |
 |:---|:---|
 | [Materials](materials.md) | `Material`, components, phases, mixing rules |
-| [Property functions](properties.md) | The seven property-function types |
+| [Property functions](properties.md) | The eight property-function types |
 | [Reactions](reactions.md) | `Reaction`, depletion limiting |
 | [Boundary conditions](boundary_conditions.md) | Thermal, mass, and pressure BCs; `BoundaryConditionSet` |
 | [Radiation](radiation.md) | `RadiationModel` selection |

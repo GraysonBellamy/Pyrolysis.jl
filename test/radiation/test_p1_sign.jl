@@ -1,5 +1,5 @@
 """
-Integration test for the P1 radiation sign convention fix.
+Integration test for the P1 radiation sign convention.
 
 Verifies that the non-ALE P1 radiation path correctly heats material when
 G > 4σT⁴ (net absorption) and cools when G < 4σT⁴ (net emission).
@@ -78,7 +78,7 @@ using Pyrolysis.Experimental:
         end
 
         # Verify: with S_rad > 0, the contribution to dT should be positive
-        # dT_P1 = S_rad / ρcₚ > 0  (this is what the fix ensures)
+        # dT_P1 = S_rad / ρcₚ > 0
         for i = 1:n_cells
             ρcp = prop_cache.ρcp[i]
             dT_P1 = rad_cache.S_rad[i] / ρcp

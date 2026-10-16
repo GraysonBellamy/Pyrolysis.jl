@@ -3,7 +3,7 @@ Blowing models against their reference values.
 
 The property-ratio and pooling forms were fitted to resolved simulations of
 the CAPA chamber and are implemented independently in the Python calculator
-`blowing_factor.py` of the oxidative_pyrolysis repository (SOLVER_AUDIT O9).
+`blowing_factor.py` of the oxidative_pyrolysis repository.
 The reference numbers below come from that calculator with the same gas data
 (NASA-7 heat capacities, CFD-case conductivity and viscosity polynomials,
 Fuller diffusion volumes). The one deliberate difference is the mean free-

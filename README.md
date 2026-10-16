@@ -16,7 +16,7 @@ transport (Darcy–Fick).
 - In-depth radiation absorption via Beer–Lambert (or surface absorption)
 - Material volume changes — shrinkage, swelling, intumescence
 - ALE mesh motion with surface regression and internal interface tracking
-- Adaptive mesh refinement (h- and r-adaptivity)
+- Surface burnout by depleted-cell parking
 - Operator-based `Structured` Jacobian with selectable solve strategies,
   a dense AD verifier, and pluggable linear solvers
 - Pluggable extensions for Plots recipes and SciML sensitivities

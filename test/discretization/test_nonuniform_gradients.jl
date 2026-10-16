@@ -1,18 +1,18 @@
 """
-Regression tests for nonuniform-mesh gradients: cell-centered gradients and
-the limited reconstruction were first-order on exactly the nonuniform/AMR
-meshes the package targets.
+Tests for nonuniform-mesh gradients: cell-centered gradients and the
+limited reconstruction must stay second-order on the nonuniform/AMR meshes
+the package targets.
 
 - The wide stencil (φ_{i+1} − φ_{i−1})/(d_L + d_R) and the unweighted mean of
-  one-sided slopes both carry an O(|d_R − d_L|·φ″) error. The fix is
-  opposite-distance weighting (`opposite_distance_gradient`), which is exact
-  on quadratics for any spacing — that is the discriminating test here
-  (linear fields cannot distinguish the schemes).
-- `_limited_gradient`'s blend constant ½ was the uniform-mesh value; the
-  distance-correct blend is β = d₀/(d₀+d₁).
+  one-sided slopes both carry an O(|d_R − d_L|·φ″) error. Opposite-distance
+  weighting (`opposite_distance_gradient`) is exact on quadratics for any
+  spacing — that is the discriminating test here (linear fields cannot
+  distinguish the schemes).
+- `_limited_gradient` blends with the distance-correct β = d₀/(d₀+d₁); the
+  constant ½ is only the uniform-mesh value.
 - The structured-Jacobian transport operators mirror the residual's S_conv
   dTdx stencil; a strict per-entry structured-vs-DenseAD comparison on a
-  *stretched* mesh (n = 8 — small n is where global normalization used to
+  *stretched* mesh (n = 8 — small n is where a global normalization would
   hide defects) gates the mirror.
 """
 
@@ -43,7 +43,8 @@ _dquad(z) = 5.0e4 + 4.0e6 * z
             @test c_L * φ_L + c_C * φ_C + c_R * φ_R ≈ g rtol = 1e-12
             @test abs(c_L + c_C + c_R) < 1e-12 / d_L
 
-            # the pre-fix forms are NOT exact off uniform spacing
+            # the wide stencil and the unweighted mean are NOT exact off
+            # uniform spacing
             if d_L != d_R
                 wide = (φ_R - φ_L) / (d_L + d_R)
                 halfmean = ((φ_C - φ_L) / d_L + (φ_R - φ_C) / d_R) / 2
@@ -107,9 +108,9 @@ _dquad(z) = 5.0e4 + 4.0e6 * z
 
         # Boundary cells: the surface-pseudo-neighbor blend interpolates the
         # exact face slope (at z_c ± Δz_half/2) and the interior slope (at
-        # z_c ∓ d_nb/2) back to z_c — exact on quadratics. The pre-fix
-        # interior-one-sided gradient is provably NOT (first-order error
-        # ∝ curvature on this stretched mesh).
+        # z_c ∓ d_nb/2) back to z_c — exact on quadratics. The interior
+        # one-sided gradient is provably NOT (first-order error ∝ curvature
+        # on this stretched mesh).
         for (i, nb) in ((1, 2), (n, n - 1))
             exact = -cp_g * J * _dquad(mesh.cell_centers[i])
             @test S_conv[i] ≈ exact rtol = 1e-10
@@ -133,7 +134,7 @@ _dquad(z) = 5.0e4 + 4.0e6 * z
     @testset "_limited_gradient distance-correct blend (β = d₀/(d₀+d₁))" begin
         # Donor-side quadratic reconstruction with CENTRAL (ψ ≡ 1): the
         # distance-correct blend is exact on quadratics for any (d₀, d₁);
-        # the old fixed-½ blend missed by c·(d₁−d₀)/2... ≠ 0.
+        # a fixed-½ blend misses by c·(d₁−d₀)/2... ≠ 0.
         c2 = 2.0e6
         f(z) = 300.0 + 5.0e4 * z + c2 * z^2
         df(z) = 5.0e4 + 2 * c2 * z
@@ -149,14 +150,14 @@ _dquad(z) = 5.0e4 + 4.0e6 * z
             g_r = _limited_gradient(T_i, T_up_r, T_upup_r, d0, d1, true, CENTRAL, false)
             @test g_r ≈ df(0.0) rtol = 1e-12
 
-            # the old ½ blend is provably NOT exact here
+            # a fixed-½ blend is provably NOT exact here
             grad_1 = (T_i - T_up) / d0
             grad_0 = (T_up - T_upup) / d1
-            old = grad_1 + 0.5 * (grad_1 - grad_0)
-            d0 == d1 || @test !isapprox(old, df(0.0); rtol = 1e-6)
+            half_blend = grad_1 + 0.5 * (grad_1 - grad_0)
+            d0 == d1 || @test !isapprox(half_blend, df(0.0); rtol = 1e-6)
         end
 
-        # uniform spacing: β = ½ — identical to the historical scheme
+        # uniform spacing: β = ½ — the plain fixed-½ blend
         d = 2e-4
         T_i, T_up, T_upup = f(0.0), f(-d), f(-2d)
         g_u = _limited_gradient(T_i, T_up, T_upup, d, d, true, CENTRAL, true)
@@ -181,8 +182,8 @@ end
 # Jacobian mirror: structured vs DenseAD on a STRETCHED mesh at small n.
 # The transport operators hand-mirror the residual's S_conv dTdx stencil
 # (apply_cell! AD path + analytical override coefficients); on a uniform mesh
-# the new weights collapse to the old ½, so only a stretched mesh exercises
-# the mirror.
+# the distance weights collapse to ½, so only a stretched mesh exercises the
+# mirror.
 # ----------------------------------------------------------------------------
 
 function _build_stretched_problem(; darcy::Bool, use_ale::Bool = false)

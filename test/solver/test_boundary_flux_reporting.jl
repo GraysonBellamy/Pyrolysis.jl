@@ -1,20 +1,13 @@
 """
-Regression tests for boundary heat-flux reporting.
+Tests for boundary heat-flux reporting.
 
-Pre-fix, `surface_heat_flux_net` contradicted the applied flux
-regime-dependently: a standalone `RadiativeFluxBC` reported net = 0 under
-SURFACE_ABSORPTION although the Newton balance applied α·q_ext, while
-`CombinedThermalBC` discarded children's nets and recomputed
-net = absorbed − rerad − conv + prescribed — re-including α·q_ext that the
-BEER_LAMBERT dispatch routes through the volume (~24–45 kW/m² over-report
-in cone configurations).
-
-Post-fix convention: per-BC `net` is the flux the surface energy balance
-actually applies at the face (it matches `evaluate_bc_flux_and_derivative`
-for every model), `CombinedThermalBC` sums children's nets, and the
-Beer–Lambert volumetric deposit is reported separately as
-`extras.volumetric_absorption`. The ledger identity `net = q_conduction`
-(at the solved T_s) therefore holds in every radiation regime.
+Convention: per-BC `net` is the flux the surface energy balance applies at
+the face — it matches `evaluate_bc_flux_and_derivative` for every radiation
+model. `CombinedThermalBC` sums its children's nets, and the Beer–Lambert
+volumetric deposit is reported separately as `extras.volumetric_absorption`
+(the face itself absorbs nothing under BEER_LAMBERT). The ledger identity
+`net = q_conduction` (at the solved T_s) therefore holds in every radiation
+regime.
 """
 
 using Test
@@ -119,16 +112,16 @@ end
         @test hf.net ≈ q_applied atol = 1e-9
     end
 
-    # Worst pre-fix cases, pinned explicitly:
-    # (a) standalone RadiativeFluxBC under SURFACE_ABSORPTION reported 0
-    #     although the Newton applied ε_eff·q_ext.
+    # The two most regime-sensitive cases, pinned explicitly:
+    # (a) standalone RadiativeFluxBC under SURFACE_ABSORPTION reports the
+    #     ε_eff·q_ext the Newton applies.
     hf = compute_boundary_heat_fluxes(standalone, T_s, t, ε_eff, SURFACE_ABSORPTION)
     @test hf.net ≈ ε_eff * 50e3
     @test hf.absorbed ≈ ε_eff * 50e3
 
-    # (b) combined under BEER_LAMBERT over-reported by α·q_ext: net must
-    #     carry only the rerad + convection the face actually applies, and
-    #     the face absorbs nothing (the deposit is volumetric).
+    # (b) combined under BEER_LAMBERT: net carries only the rerad +
+    #     convection the face actually applies, not α·q_ext, and the face
+    #     absorbs nothing (the deposit is volumetric).
     hf_bl = compute_boundary_heat_fluxes(combined, T_s, t, ε_eff, BEER_LAMBERT)
     σ = 5.670374419e-8
     q_rerad = ε_eff * σ * (300.0^4 - T_s^4)

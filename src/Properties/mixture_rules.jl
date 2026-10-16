@@ -132,9 +132,9 @@ end
 # One universal γ semantics: every component contributes
 # v_j = γ_j·ξ_j/ρ_j of bulk volume — the same weighting used by the dilation
 # rate θ (Physics/volume_change.jl) and the mixture density below. For
-# canonical materials (γ = 0 gas, γ = 1 condensed) this reproduces the old
-# binary include/exclude exactly; a partial-γ component now contributes the
-# same volume fraction here as it does to θ and ρ_bulk.
+# canonical materials (γ = 0 gas, γ = 1 condensed) this is a binary
+# include/exclude; a partial-γ component contributes the same volume fraction
+# here as it does to θ and ρ_bulk.
 # ============================================================================
 
 # Sum of swelling-weighted specific volumes Σ γ_j·ξ_j/ρ_j
@@ -364,8 +364,8 @@ solid/liquid skeletal frame. With component **intrinsic** (skeletal) densities
 The intrinsic density is the density of the cell-wall material itself,
 ignoring pore volume — distinct from the bulk density used for thermal mixing
 rules. When a component was constructed without an explicit `ρ_intrinsic` /
-`φ` kwarg, `get_intrinsic_density` falls back to the bulk density, which
-recovers the legacy "no-pores" definition.
+`φ` kwarg, `get_intrinsic_density` falls back to the bulk density, so the
+component contributes no pore volume.
 
 The result enters the gas-pressure formula `P = N(ξ,T)/φ`. Derivatives are
 taken by ForwardDiff through this function (the live structured Jacobian

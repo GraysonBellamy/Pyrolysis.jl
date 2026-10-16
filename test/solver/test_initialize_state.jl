@@ -3,12 +3,12 @@ Unit tests for `initialize_state` — the canonical PyrolysisProblem →
 (ProblemDef, Workspace, u0) setup path (ICs → `to_problem_def` →
 `build_workspace` → `create_state_vector`).
 
-Guards the IC-bypass trap that motivated it: `create_state_vector` packs the
-mesh as-is, so a hand-rolled composition that skips
-`apply_initial_conditions!(problem)` silently integrates from the mesh
-constructor's placeholder state, and under a `lateral_shrinkage_law` leaves
-`m_dry_solid_initial = 0` (degenerate χ̄) — a resolution-independent error
-that still reports `retcode == :Success` (2026-07-06 audit finding).
+`create_state_vector` packs the mesh as-is, so a hand-rolled composition
+that skips `apply_initial_conditions!(problem)` silently integrates from the
+mesh constructor's placeholder state, and under a `lateral_shrinkage_law`
+leaves `m_dry_solid_initial = 0` (degenerate χ̄) — a resolution-independent
+error that still reports `retcode == :Success`. These tests check that
+`initialize_state` applies the problem's ICs before packing.
 """
 
 using Test
@@ -93,13 +93,5 @@ using Pyrolysis.Problem: chi_range, mesh_mode, get_option
             @test mesh.m_dry_solid_initial[i] ≈ ξ_solid * mesh.cell_volumes[i]
         end
         @test !isempty(chi_range(ws.layout))
-    end
-
-    @testset "deleted two-arg apply_initial_conditions! stays deleted" begin
-        problem = _init_state_problem()
-        @test_throws MethodError Pyrolysis.Problem.apply_initial_conditions!(
-            problem.mesh,
-            problem,
-        )
     end
 end

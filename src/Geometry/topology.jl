@@ -3,12 +3,12 @@ MeshTopology — immutable connectivity.
 
 A `MeshTopology{D, NC}` carries everything that does **not** change once the
 mesh is built: nodes, cells, faces, boundary tags, and dimensional metadata.
-Mutable per-step state (current node positions, cell volumes, face areas,
-mesh velocities) lives in [`MeshGeometry`](@ref) inside the `Workspace`.
+Its mutable counterpart is [`MeshGeometry`](@ref).
 
-This split is the structural prerequisite for the unified variant surface
-and the Jacobian backends (geometry derivatives need a clean
-distinction between "what changes" and "what doesn't").
+The pair is the dimension-parameterised mesh description for a
+multi-dimensional extension. `ProblemDef` carries a `MeshTopology`, but the
+1D residual and Jacobian read connectivity from `Mesh1D` and geometry from the
+`StateCache`; neither reads this type.
 
 # Type Parameters
 - `D`: Spatial dimension (1 today; 2/3 are the design target)

@@ -45,9 +45,9 @@ import CommonSolve: solve  # Extend CommonSolve.solve for our problem type
 
 # Per-species outward gas mass flux at a boundary face [kg/(m²·s)], positive
 # leaving the slab at either boundary (`tag` is the boundary orientation): the
-# boundary-face kernel the live mass BC and the Jacobian share (film law plus,
-# in Darcy-Fick mode, the pressure-BC venting), with its into-the-domain sign
-# flipped. `0.0 - F` keeps a zero flux at +0.0.
+# Jacobian's boundary-face kernel (film law plus, in Darcy-Fick mode, the
+# pressure-BC venting, mirroring the residual's mass BC), with its
+# into-the-domain sign flipped. `0.0 - F` keeps a zero flux at +0.0.
 @inline function _surface_gas_flux(
     material::Material{NC},
     ξ_face::NTuple{NC,Float64},
@@ -220,7 +220,7 @@ end
 # effectively dense. The reduced pattern drops those couplings and keeps W
 # local; the modified Newton iteration it drives still contracts, and the two
 # strategies follow the same trajectory, through surface cells that collapse
-# without parking too (Technical Reference §15.10.3).
+# without parking too (Technical Reference §15.10.2).
 
 _default_jacobian_backend(use_ale::Bool) =
     Structured(strategy = use_ale ? ApproxSolve() : DirectSolve())
@@ -422,7 +422,7 @@ once its condensed concentration has fallen below the same fraction of its
 initial value. A fixed-mesh solve stops with a warning (retcode `:Terminated`)
 when a cell below the top live cell becomes a void: the material has gasified
 from within, the model carries no heat across the void, and a regressing
-material belongs on the ALE mesh. A park merges the cell's mass and condensed enthalpy into its
+material belongs on the ALE mesh. A park merges the cell's mass and sensible enthalpy into its
 neighbour and moves the freed state slot above the live surface as an inert
 ghost: the state vector, mesh arrays and Jacobian keep their size, every
 kernel runs over the live range `1:mesh.n_active_cells`, and the boundary
@@ -535,7 +535,8 @@ function solve(
     min_cells::Int = 2,
     # Radiation model selection
     radiation_model::RadiationModel = NO_RADIATION,
-    # First-class runtime conservation diagnostics.
+    # Diagnostics log: a sensible-energy snapshot every `diagnostics_stride`
+    # accepted steps, in `extras.diagnostics_log`.
     diagnostics::Bool = false,
     diagnostics_stride::Int = 10,
 
@@ -584,14 +585,10 @@ function solve(
     radiation_flux = _get_radiation_flux_function(problem)
 
     # Decide how the external radiation flux feeds the ODE.
-    # - P1_QUASI_STEADY: handled via Marshak BC, no I_radiation here.
-    # - NO_RADIATION:    no flux at all.
-    # - SURFACE_ABSORPTION / BEER_LAMBERT: the flux is re-sampled at EVERY RHS
-    #   evaluation (the old two-point t=0/t=1 equality
-    #   detection silently froze any flux that merely *happened* to agree at
-    #   those instants — e.g. q₀(1+sin 2πt) or a post-1 s ramp — at I(0) for
-    #   the volumetric deposit). One user-function call per RHS is negligible
-    #   against the residual; constant fluxes lose nothing.
+    # - NO_RADIATION: no flux at all.
+    # - SURFACE_ABSORPTION / BEER_LAMBERT: the flux is re-sampled at every RHS
+    #   evaluation, so any time dependence reaches the volumetric deposit. One
+    #   user-function call per RHS is negligible against the residual.
     uses_radiation =
         radiation_model == SURFACE_ABSORPTION || radiation_model == BEER_LAMBERT
     I_radiation = uses_radiation ? radiation_flux(0.0) : 0.0
@@ -676,8 +673,8 @@ function solve(
     jac_prototype = Float64.(S_union)
 
     # The pattern fixes the default factorization (UMFPACK when it holds the
-    # ALE geometry block, KLU otherwise), so the integrator is resolved only
-    # now.
+    # ALE geometry block, KLU otherwise), so the integrator is resolved after
+    # the spec is built.
     geometry_block =
         materializes_geometry_block(def.mode, sparsity_profile(jac_spec.backend.strategy))
     solver_alg = _resolve_integrator(; integrator, linear_solver, geometry_block)
@@ -787,8 +784,8 @@ function solve(
     push!(callbacks_list, progress_cb)
 
     # Add diagnostics callback if requested. Snapshot mode — records the
-    # sensible energy at stride boundaries; the cumulative ledger fields
-    # are filled by the unified residual layer.
+    # sensible energy at stride boundaries; the cumulative ledger fields of the
+    # row stay NaN.
     diagnostics_log = nothing
     if diagnostics
         diagnostics_log = DiagnosticsRow[]
@@ -806,8 +803,8 @@ function solve(
                 (u, t) -> begin
                     stride_count[] += 1
                     if stride_count[] % stride == 0
-                        # Sync mesh state from the integrator's u so the trackers
-                        # read the current cell states.
+                        # Sync mesh state from the integrator's u so the snapshot
+                        # reads the current cell states.
                         update_mesh_from_state!(mesh, u, layout)
                         push!(log, snapshot_diagnostics_row(t, mesh, material))
                     end
@@ -962,15 +959,12 @@ default path (the live surface-cell ε_eff is applied at injection by
 absorptivity already folded in (see `extract_radiative_flux_from_bcs`).
 When no `RadiativeFluxBC` is present, returns `t -> 0.0` (no radiative heating).
 
-Note: The radiation_model passed to solve() determines how the flux is used:
+The radiation_model passed to solve() determines how the flux is used:
 - SURFACE_ABSORPTION: flux enters via the surface energy balance (boundary Newton)
 - BEER_LAMBERT: flux used for volumetric Beer-Lambert absorption (I_radiation)
-- P1_QUASI_STEADY: experimental; not routed through core solve
 """
 function _get_radiation_flux_function(problem::PyrolysisProblem)
     if has_radiative_flux_bc(problem.bc_set, Val(:top))
-        # Return a function that computes absorbed flux
-        # This is used by BEER_LAMBERT and P1 models for volumetric absorption
         return function (t)
             I, _ = extract_radiative_flux_from_bcs(problem.bc_set, Val(:top), t)
             return I

@@ -91,7 +91,7 @@ function _verification_case_vcpl04()
                 value = Tc,
                 exact = Tc_ref,
                 error = err_c,
-                tol = 2.5e-3,  # 3× observed: 7.4e-4 (n=40, 2026-07-06)
+                tol = 2.5e-3,  # 3× observed: 7.4e-4 (n=40)
                 comment = "δ = $(δ_main) ≈ 0.5 δ_c, E/RT₀ = 40, relative to the rise",
             ),
         )
@@ -107,7 +107,7 @@ function _verification_case_vcpl04()
                 value = θ_c_num,
                 exact = θm_fk,
                 error = err_fk,
-                tol = 6e-3,  # 3× observed: 1.7e-3 (n=40, 2026-07-06); FK truncation itself is only ~0.17% here
+                tol = 6e-3,  # 3× observed: 1.7e-3 (n=40); FK truncation itself is only ~0.17% here
                 comment = "quantifies the FK-limit error at finite E/RT₀",
             ),
         )
@@ -126,7 +126,7 @@ function _verification_case_vcpl04()
                 name = "steady profile L∞ vs shooting (relative to center rise)",
                 value = err_prof,
                 error = err_prof,
-                tol = 2.5e-3,  # 3× observed: 7.4e-4 (n=40, 2026-07-06)
+                tol = 2.5e-3,  # 3× observed: 7.4e-4 (n=40)
                 comment = "includes the symmetry check",
             ),
         )
@@ -160,7 +160,7 @@ function _verification_case_vcpl04()
                 value = θ_sub,
                 exact = θ_sub_ref,
                 error = abs(θ_sub - θ_sub_ref) / θ_sub_ref,
-                tol = 3e-2,  # 3× observed: 9.9e-3 (n=40, 2026-07-06); FK reference
+                tol = 3e-2,  # 3× observed: 9.9e-3 (n=40); FK reference
                 comment = "bounded, near the FK lower branch (θ ≈ $(round(θ_sub_ref, digits=3)))",
             ),
         )

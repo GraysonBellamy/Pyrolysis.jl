@@ -17,8 +17,8 @@ point `θ` for `base_problem`. `p_inject(base_problem, θ) -> problem'`
 materialises the perturbed problem; `output_fn(sol) -> y` reduces a
 solution to the quantity of interest.
 
-Backed by `SciMLSensitivity.ForwardDiffSensitivity` — load
-`SciMLSensitivity` to enable.
+Backed by `ForwardDiff.jacobian` over the whole solve — load
+`SciMLSensitivity, Zygote` to enable.
 """
 function forward_sensitivity end
 

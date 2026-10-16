@@ -151,7 +151,7 @@ function _verification_case_vmms04()
                 "ξ_solid (z-varying, material frame)",
                 1,
                 600.0,
-                2.0e-6,  # 3× observed: 6.6e-7 (n=32, 2026-07-07)
+                2.0e-6,  # 3× observed: 6.6e-7 (n=32)
                 "solid rides the reaction-driven mesh: prefix-sum w + dilation −ξθ + material-frame source",
             ),
             (
@@ -188,7 +188,7 @@ function _verification_case_vmms04()
                 value = pos_err,
                 exact = z_exact,
                 error = pos_err,
-                tol = 5.0e-5,  # 3× observed: 1.6e-5 of the exact recession (n=32, 2026-07-07)
+                tol = 5.0e-5,  # 3× observed: 1.6e-5 of the exact recession (n=32)
                 comment = "|z_top − z*_top| / (L − z*_top); recession ≈ $(round(rec*1e3, sigdigits=3)) mm",
             ),
         )
@@ -223,7 +223,7 @@ function _verification_case_vmms04()
                     name = "relative L∞ ξ_solid error (ApproxSolve), t=$(t_end) s",
                     value = err_s,
                     error = err_s,
-                    tol = 2.0e-6,  # 3× observed: 6.6e-7 (n=32, 2026-07-07) — matches DirectSolve
+                    tol = 2.0e-6,  # 3× observed: 6.6e-7 (n=32) — matches DirectSolve
                     comment = "requirement 3: ApproxSolve vs known-exact answer",
                 ),
             )
@@ -242,8 +242,9 @@ function _verification_case_vmms04()
         return out
     end
 
-    # Convergence on the solid channel — the field that exercises the new
-    # machinery (kinetics→geometry chain + material-frame source).
+    # Convergence on the solid channel — the field that exercises the
+    # induced-motion machinery (kinetics→geometry chain + material-frame
+    # source).
     function l2_xi_s_final(sol)
         m = length(sol.t)
         t = sol.t[m]
@@ -266,7 +267,7 @@ function _verification_case_vmms04()
             n_cells = 32,
             budget_s = 60.0,
             convergence = ConvergenceSpec(
-                # observed rates 2.003, 2.007 (n = 16→32→64, 2026-07-07; L2 ξ_s errors
+                # observed rates 2.003, 2.007 (n = 16→32→64; L2 ξ_s errors
                 # 7.6e-4 → 1.9e-4 → 4.7e-5)
                 n_cells = [16, 32, 64],
                 error_fn = l2_xi_s_final,

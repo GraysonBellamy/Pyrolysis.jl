@@ -1,6 +1,6 @@
 """
-Jacobian-mirror regression test for the Kirchhoff ε_eff scaling of the
-Beer–Lambert injection.
+Jacobian-mirror test for the Kirchhoff ε_eff scaling of the Beer–Lambert
+injection.
 
 The residual scales the Beer–Lambert injection by the live surface
 cell's ε_eff(T_n, ξ_·,n) on the Kirchhoff default path. That makes every
@@ -10,7 +10,7 @@ intensity — two Jacobian channels the structured backend must carry:
 - T_row(i) × T_col(n), i < n: `∂a_eff/∂T_n` (active when component
   densities are T-dependent and component emissivities differ, or when a
   Kirchhoff component's emissivity is itself a function of temperature).
-  These slots did not exist in the sparsity pattern pre-fix.
+  The sparsity pattern carries these slots.
 - T_row(i) × ξ_col(j, n): the `∂a_eff/∂ξ_{j,n}` chain folded into the
   existing suffix couplings as `v[n] -= (∂a_eff/∂x_n)/a_eff`.
 
@@ -20,8 +20,8 @@ The surface transmissivity is the mixture surface absorptivity
 when a component overrides it.
 
 Verified structured-vs-DenseAD with the strict per-entry criterion at
-small n (the regime where the legacy global normalization hid missing
-blocks), for the Kirchhoff, T-dependent-ε, component-absorptivity, and
+small n (the regime where a single global normalization would hide
+missing blocks), for the Kirchhoff, T-dependent-ε, component-absorptivity, and
 explicit-absorptivity conventions, on Eulerian and ALE meshes; the
 T-dependent-ε surface column is additionally checked against central
 finite differences of the residual.
@@ -157,8 +157,8 @@ end
     if get(kwargs, :explicit_α, nothing) === nothing
         # Kirchhoff path: the ∂ε_eff/∂T_n surface column must be load-bearing
         # in the reference (T-dependent density + differing component ε) and
-        # reproduced per entry by the structured backend. Pre-fix these slots
-        # did not exist in the sparsity pattern at all.
+        # reproduced per entry by the structured backend, so the sparsity
+        # pattern must carry these slots.
         col_T = J_r[1:(n-1), n]
         @test maximum(abs, col_T) > 0
         @test maximum(abs, J_s[1:(n-1), n] .- col_T) <=

@@ -1,6 +1,6 @@
 # ============================================================================
 # Blowing models: how outgassing through a face changes its convective
-# coefficient. The model is a field of `ConvectiveBC` (default `CouetteFilm()`),
+# coefficient. The model is a field of `ConvectiveBC` (default `NoBlowing()`),
 # so the physics is declared where the surface is. Evaluation lives in
 # `Discretization/blowing.jl`; this file holds the types, their constants and
 # the gas-property data they need.
@@ -202,8 +202,8 @@ const NITROGEN = GasSpecies(
 """
 	NoBlowing()
 
-The coefficient is left alone whatever the outflow (`χ = 1`). Lets one
-convective surface opt out while the solve applies the correction elsewhere.
+The coefficient is left alone whatever the outflow (`χ = 1`). The
+`ConvectiveBC` default.
 """
 struct NoBlowing <: AbstractBlowingModel end
 
@@ -215,7 +215,7 @@ Film law with a fitted constant: `h = h₀ φ/(e^φ − 1)`,
 conductance of the gases leaving the face. `λ = 0.5` is the Couette film of
 the classical theory (`φ = B = ṁ″ c_p,g/h₀`); a smaller `λ`, fitted to a
 resolved flow for one gas, weakens the reduction at a given outflow and holds
-only for that gas. The package default.
+only for that gas.
 """
 struct CouetteFilm <: AbstractBlowingModel
     λ::Float64

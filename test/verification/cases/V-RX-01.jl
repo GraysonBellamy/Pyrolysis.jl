@@ -73,7 +73,7 @@ function _verification_case_vrx01()
                     name = "max relative ξ_$(species) error",
                     value = err,
                     error = err,
-                    tol = 1e-8,  # 3× observed max: 2.8e-9 (ξ_B; abstol=1e-12, 2026-07-06)
+                    tol = 1e-8,  # 3× observed max: 2.8e-9 (ξ_B; abstol=1e-12)
                     comment = "Bateman solution, k₁=0.389, k₂=0.262 (FDS/Gpyro values)",
                 ),
             )
@@ -85,7 +85,7 @@ function _verification_case_vrx01()
                 name = "total-mass conservation (closed chain)",
                 value = mass_err,
                 error = mass_err,
-                tol = 1e-13,  # observed 2.3e-15 (2026-07-06)
+                tol = 1e-13,  # observed 2.3e-15
                 comment = "Σξ must equal ξ₀; unit yields",
             ),
         )
@@ -98,7 +98,7 @@ function _verification_case_vrx01()
                 name = "isothermality drift",
                 value = T_err,
                 error = T_err,
-                tol = 1e-12,  # observed 5.7e-14 (2026-07-06)
+                tol = 1e-12,  # observed 5.7e-14
                 comment = "h = 0 both reactions; Dirichlet-pinned single cell",
             ),
         )

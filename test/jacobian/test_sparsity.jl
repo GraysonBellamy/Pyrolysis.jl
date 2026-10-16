@@ -263,7 +263,7 @@ end
 # `:ale_reduced` producer-side gating: assert specific sparsity entries are
 # dropped that are populated only by `jac.structured` contributions which
 # `_emit_jacobian!` itself drops under `:ale_reduced`. Mirrors the
-# operator-side gates added in [`docs/jacobian_approxsolve_fix_plan.md`].
+# operator-side gates.
 # ---------------------------------------------------------------------------
 @testset ":ale_reduced specific-entry gating" begin
     @testset "ALE × WithChi × DarcyFick × SurfaceAbsorption" begin

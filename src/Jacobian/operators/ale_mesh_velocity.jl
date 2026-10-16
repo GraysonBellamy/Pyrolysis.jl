@@ -6,7 +6,7 @@ Provides the ALE cumulative mesh-velocity field
 the per-cell strain rate `θ`, and the column-global `θ_A` (zero in NoChi
 mode), together with their cell-local derivatives.
 
-The operator's `apply!` populates these fields by wrapping the existing
+The operator's `apply!` populates these fields by calling the residual's
 Dual-aware physics functions ([`_compute_ale_mesh_velocity!`](@ref) and
 [`_compute_theta_A`](@ref)) — no math is duplicated.
 
@@ -38,6 +38,10 @@ dilation `−ξⱼθᵢ` from this operator's cached strain-rate derivatives.
 """
 struct ALEMeshVelocityOperator <: Operator end
 
+# Tag for the strain-rate stack-Dual sweep — keeps these duals from
+# colliding with any outer AD that may be in flight.
+struct _ALEStrainTag end
+
 """
 	ALEMeshVelocityWorkspace{Tu, NC, NR}
 
@@ -65,10 +69,6 @@ structured-coupling builders consume.
   functions.
 - internal scratch (`rates`, `heats`, `dξ_dt`) for the apply!.
 """
-# Tag for the strain-rate stack-Dual sweep — keeps these duals from
-# colliding with any outer AD that may be in flight.
-struct _ALEStrainTag end
-
 mutable struct ALEMeshVelocityWorkspace{Tu,NC,NR,D}
     w_node::Vector{Float64}
     theta::Vector{Float64}
@@ -236,16 +236,10 @@ end
 
 Populate `ws.dθ_dT` and `ws.dθ_dξ` for the live cells from the current
 `state` using cell-local ForwardDiff over `θ_cell(T, ξ) = γ ⨁ S(T, ξ) / ρ(T)`;
-parked ghost slots are zero. The
-existing analytical kernel
-[`Pyrolysis.Jacobian.compute_strain_rate_derivatives!`](@ref) computes
-the same quantity by hand-rolled chain rule; using AD here keeps the
-operator drift-free and keeps the analytical kernel reachable as a
-perf override.
+parked ghost slots are zero.
 
 The closure is type-stable on the `Real` superparameter so ForwardDiff
-Duals propagate cleanly. Per-cell cost is O(NC + 1) — same scaling as
-the existing analytical kernel.
+Duals propagate cleanly. Per-cell cost is O(NC + 1).
 """
 function compute_strain_rate_derivatives!(
     ws::ALEMeshVelocityWorkspace{Tu,NC,NR},

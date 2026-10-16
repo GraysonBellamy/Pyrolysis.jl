@@ -60,12 +60,6 @@ export validate_problem, is_valid_problem
 # short generic names (`ALE`, `Fickian`) into `using Pyrolysis`. Reach for
 # trait structs as `Pyrolysis.Problem.ALE()`, `Pyrolysis.Problem.BeerLambert()`,
 # etc., or import them explicitly: `using Pyrolysis.Problem: ALE, BeerLambert`.
-#
-# `MeshTopology`/`MeshGeometry` builders and the integer-vs-tag boundary
-# translators (`mesh_topology`, `mesh_geometry`, `sync_geometry_from_mesh!`,
-# `tag_to_boundary_id`, `boundary_id_to_tag`) are intentionally not
-# exported — field access on the topology/geometry structs is the
-# canonical user-facing read path.
 export SimulationMode, MeshMode, RadiationMode, TransportMode, ChiMode
 export mesh_mode, radiation_mode, transport_mode, chi_mode
 export StateLayout,

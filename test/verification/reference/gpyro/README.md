@@ -166,12 +166,19 @@ the 20 early adaptive-dt reductions at the apparent-cp spike (expected).
 
 ### vbo01 — V-BO-01 (MaCFP PMMA gasification, 50 kW/m²)
 
-`vbo01_gpyro_v2_pmma.csv` is the **Gpyro V2** (SoftwareX release, GPL-3
-GPYRO-V2 repository) run made here on the authors' MaCFP PMMA deck
-(`docs/gpyro_v2_comparison/reference/pmma/PMMA.data`: 5.9 mm PMMA on 12 mm
-Kaowool, 50 kW/m², power-law k(T) and c(T) fits), copied verbatim from
-`docs/gpyro_v2_comparison/reference/pmma/gpyro_v2_pmma_localrun.csv`. Gpyro V2
-was built with the docker recipe in `docs/gpyro_v2_comparison/README.md`. The
+`vbo01_gpyro_v2_pmma.csv` is the **Gpyro V2** (SoftwareX release, GPL-3,
+<https://github.com/Gedeben/GPYRO-V2>) run made here on the authors' MaCFP
+PMMA deck (`PMMA.data` in that repository: 5.9 mm PMMA on 12 mm Kaowool,
+50 kW/m², power-law k(T) and c(T) fits), unmodified. Gpyro V2 was built from
+that repository without a system gfortran:
+
+```
+docker run --rm --user $(id -u):$(id -g) -e HOME=/tmp -e GPYRO_FCOMPL_GNU=gfortran \
+  -v $PWD:/gp -w /gp/build/linux gcc:14 \
+  bash -c "mkdir -p gpyro && cd gpyro && make -j8 -f ../../Makefile_gpyro gnu_linux"
+```
+
+and run from the deck's directory with `OMP_NUM_THREADS=1 gpyro PMMA.data`. The
 first header row names the columns; column 2 (`001_MLR`) is the mass loss rate
 in **g m⁻² s⁻¹**, column 6 the remaining thickness in m, columns 3–5 the
 temperatures (°C) at the surface, 12 mm and 17.9 mm. Feeds the V-BO-01 MLR

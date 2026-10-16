@@ -30,8 +30,6 @@ The solved surface temperature is stored in `mesh.boundary_states` and used for:
 - Correct flux computation in the RHS
 - Accurate surface temperature output
 - Energy balance diagnostics
-
-See `docs/boundary_temperature_enhancement.md` for detailed physics and implementation.
 """
 module Discretization
 

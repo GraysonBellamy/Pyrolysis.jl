@@ -1,9 +1,8 @@
 using Test
 using Pyrolysis
 
-# Regression: `stretch_from` names the boundary that gets the FINEST cells.
-# The pre-fix code inverted this (default :top put the coarsest cells at the
-# heated surface).
+# `stretch_from` names the boundary that gets the FINEST cells (default :top
+# puts the finest cells at the heated surface).
 
 _node_positions(mesh) = [node.z for node in mesh.nodes]
 _cell_widths(mesh) = diff(_node_positions(mesh))

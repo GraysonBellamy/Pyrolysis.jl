@@ -16,5 +16,6 @@ PolynomialProperty
 ArrheniusProperty
 TableProperty
 CallableProperty
+SutherlandProperty
 StateDependentProperty
 ```

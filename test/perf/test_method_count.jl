@@ -1,5 +1,5 @@
 """
-CI invariant — method-count regression budget.
+Performance invariant — method-count regression budget.
 
 Trait combinatorial explosion is the highest-impact pitfall here: each new
 orthogonal type parameter on `residual!` multiplies the method table. All

@@ -3,9 +3,9 @@
 
 Concrete boundary-condition types for the Pyrolysis.jl package.
 
-Promoted out of the former `Core` module. Holds the thermal / mass / pressure /
-mesh-motion boundary-condition types, the type-stable `BoundaryConditionSet`
-container, and the ambient-temperature evaluation helper. The concrete
+Holds the thermal / mass / pressure boundary-condition types, the type-stable
+`BoundaryConditionSet` container, and the per-species ambient-concentration
+helper. The concrete
 radiation-BC types (Marshak / Reflective / Dirichlet) are P1-only and live in
 `Pyrolysis.Experimental`.
 
@@ -15,7 +15,6 @@ hierarchy, the component accessors, and physical constants.
 """
 module BoundaryConditions
 
-using StaticArrays
 using ..Materials
 
 include("boundary_conditions.jl")

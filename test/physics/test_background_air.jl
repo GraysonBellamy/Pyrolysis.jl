@@ -80,7 +80,8 @@ end
         # Uniform condensed composition + uniform air at 1 atm: the cell
         # pressure field is flat, so the interior Darcy driving force is zero
         # and the boundary face sees no pressure jump against a 101325 Pa
-        # Dirichlet value. (The vacuum start had ΔP ≈ 1 atm at every face.)
+        # Dirichlet value. (A vacuum start would have ΔP ≈ 1 atm at every
+        # face.)
         ξ_air = background_gas_concentration(mat, :AIR, ξ_condensed, T0)
         n = 8
         mesh = create_uniform_mesh(
@@ -116,8 +117,8 @@ end
     end
 
     @testset "no-pore-space degeneracy is visible, not silent" begin
-        # A material whose solids carry no ρ_intrinsic runs the legacy
-        # "no-pores" model: φ = 0 at full bulk density, so the helper returns
+        # A material whose solids carry no ρ_intrinsic runs the "no-pores"
+        # model: φ = 0 at full bulk density, so the helper returns
         # exactly 0 — there is no pore volume to hold air. This documents why
         # the DarcyFick examples must set ρ_intrinsic.
         virgin0 = SolidComponent(:virgin, ρ = 500.0, c = 2000.0, k = 0.15, κ = 1e-15)

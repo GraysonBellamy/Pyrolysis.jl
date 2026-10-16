@@ -5,8 +5,7 @@ Forward-mode automatic differentiation of the canonical `residual!` against
 the entire state vector, written into a dense `Matrix{Float64}`.
 
 This is the **`verify_jacobian` reference** — every other backend's output is
-compared against `DenseAD_ForwardDiff` at canonical sample points (Step
-B12/B13). It carries no sparsity assumption and no hand-coded math, so a
+compared against `DenseAD_ForwardDiff` at canonical sample points. It carries no sparsity assumption and no hand-coded math, so a
 discrepancy between this and any other backend is unambiguously a bug in
 the other backend.
 

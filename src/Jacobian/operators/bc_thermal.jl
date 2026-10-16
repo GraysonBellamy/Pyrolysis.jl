@@ -1,5 +1,5 @@
 """
-The `BCThermalOperator` — the boundary-condition thermal contribution extracted from the residual.
+The `BCThermalOperator` — the boundary-condition thermal contribution to the residual.
 
 Boundary-face thermal flux contribution to `dT[boundary_cell]`. For non-
 Dirichlet BCs the surface temperature `T_s` is the solution of the surface
@@ -9,7 +9,7 @@ energy balance:
 q_BC(T_s) = k_eff·(T_s − T_cell)/Δz_half
 ```
 
-The existing `solve_boundary_temperature!` is **already Dual-aware** (see
+`solve_boundary_temperature!` is **Dual-aware** (see
 [`boundary_temperature.jl`](../Discretization/boundary_temperature.jl)),
 so the AD path through Newton is just "call the solver with Dual inputs and
 ride the derivative through `q_conducted`."
@@ -27,11 +27,10 @@ The residual's surface Newton applies every `ConvectiveBC`'s blowing model
 (`bc.blowing`, see `blowing_state`) to the boundary mass flux
 (`J_gas[:, f]`). This operator rebuilds that flux from the stencil state via
 the shared [`_bc_boundary_face_fluxes`](@ref) kernel (film law + Darcy
-venting when `darcy_active`, the same kernel the residual's mass-BC pass
-applies) and feeds it to the Newton, so the `∂(h·χ)/∂(T_b, ξ_b)` chain lands
+venting when `darcy_active`, mirroring the residual's mass-BC pass) and feeds it to the Newton, so the `∂(h·χ)/∂(T_b, ξ_b)` chain lands
 exactly. Under ALE the face distance `d_to_face` is a Float64 constant in the
-closure, consistent with this operator's frozen-geometry convention (the
-omitted z-channel degrades only Newton convergence, never the residual).
+closure; the z columns of these rows come from the
+[`GeometryOperator`](@ref)'s AD pass under the `:full` profile.
 
 # Sign convention
 
@@ -45,12 +44,6 @@ q_conducted = k_eff · (T_s − T_cell) / Δz_half
 with `T_s` from the Newton solve (or `T_bc` for Dirichlet). The signs cancel
 out the orientation handling that `_apply_thermal_bc_static!` does on
 `q_total[f]` — see derivation in the test reference.
-
-# Notes
-
-- An optional analytical IFT override is deferred.
-- `writes = (:T_s,)` is forward-compat metadata; no operator currently
-  reads `:T_s`.
 """
 
 using ForwardDiff
@@ -128,7 +121,7 @@ function _bc_thermal_contribution(
     a_eff = effective_absorptivity(ξ_cell, T_cell, material)
 
     # Blowing reads the boundary mass flux: rebuild it from the stencil
-    # state with the same kernel the residual's mass-BC pass applies.
+    # state with the kernel that mirrors the residual's mass-BC pass.
     # `_bc_boundary_face_fluxes` returns F positive INTO the domain, so the
     # outward flux is −F at either face.
     F = _bc_boundary_face_fluxes(

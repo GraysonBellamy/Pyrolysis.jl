@@ -123,8 +123,7 @@ A complete material definition with components, reactions, mixing rules, and gas
 - `gas_viscosity::Pμ`: Dynamic viscosity μ(T) of the pore gas [Pa·s]. Accepts
   anything `to_property` understands — a number, a `(p0, p1)` tuple, a
   `Function`, or a property function. Defaults to
-  [`SutherlandProperty`](@ref)`()` (air), which is exactly what the Darcy path
-  used before this field existed, so existing materials are unchanged.
+  [`SutherlandProperty`](@ref)`()` (air).
 
 # Pore-gas viscosity
 μ enters the model *only* as the Darcy mobility κ/μ, so an error in μ is
@@ -205,8 +204,7 @@ struct Material{NC,NR,C<:Tuple,RT<:Tuple,LSL,Pμ} <: AbstractMaterial
     # Dynamic viscosity of the pore gas, μ(T) [Pa·s]. Enters the model only as
     # the Darcy mobility κ/μ, so it is a single material-level curve rather
     # than a per-component property: it describes the gas mixture this material
-    # actually produces. Defaults to `SutherlandProperty()` (air), which is what
-    # the package hard-coded before this field existed.
+    # actually produces. Defaults to `SutherlandProperty()` (air).
     gas_viscosity::Pμ
 
     # Inner constructor with validation

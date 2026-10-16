@@ -109,14 +109,11 @@ end
 	_emit_geometry_pattern!(I, J, layout, mode)
 
 Emit indices for ALE-only geometry couplings:
-- physics → z: cell `i` reads nodes `1..min(n_nodes, i+3)`. The lower bound
-  is `1` because ALE advection's `w_cell[i] = ½(w_node[n_left]+w_node[n_right])`
-  with `w_node[k] = Σⱼ<k θⱼ Δzⱼ` gives an exact dependence on every upstream
-  `z[1..i+1]`. The upper bound `i+3` covers the TVD-limited gradient's read
-  of `cell_centers[i+2] = ½(z[i+2]+z[i+3])` when the donor-donor cell is
-  `i+2` (the w_cell > 0 branch — the donor side follows c = -w); the
-  symmetric `cell_centers[i-2]` read on the w_cell < 0 branch is subsumed
-  by the lower bound `1`.
+- physics → z: cell `i` is given nodes `1..min(n_nodes, i+3)`. The residual
+  rows read `z[i-1..i+2]` (the cell volume and the face distances to the
+  neighbouring cell centres); the TVD-limited temperature advection of the
+  verification `w_override` hook reads `cell_centers[i±2]`, i.e.
+  `z[i-2..i+3]`. The emitted band is a superset of both.
 - z → physics: lower triangular. Node `n` velocity sums strain rates over
   cells `1..n-1`.
 - z → z: lower triangular (including diagonal). `wₖ = Σᵢ₌₁ᵏ⁻¹ θᵢ Δzᵢ` and
@@ -125,7 +122,7 @@ Emit indices for ALE-only geometry couplings:
 **WithChi widening.** When `chi_mode(mode) isa WithChi`, the column-global
 `θ_A = law'(χ̄)·(dχ̄/dt)/law(χ̄)` enters every `w_node[k] = Σᵢ<k(θ_pyr,i − θ_A)·Δzᵢ`.
 Since `dχ̄/dt = (1/M)·Σⱼ S_dry,j·V_j` with `V_j = A_j·Δz_j` depends on every
-`z_m`, every `w_node[k]` (and hence every `w_cell[i]`) acquires a non-trivial
+`z_m`, every `w_node[k]` acquires a non-trivial
 derivative w.r.t. every `z_m`. The same holds for the physics → χ → χ̄ → θ_A
 column-global path. Net effect: physics → z, z → physics, and z → z all
 become **full bands** rather than the bounded/triangular shapes above.
@@ -369,8 +366,28 @@ end
 # Orchestrator
 # ============================================================================
 
+# Lazy sparsity: the (S_phys, S_geom) pattern depends only on
+# `layout` (n_cells, n_nodes, NC), `mode` (a singleton type), and the
+# assembly profile. We memoize on a structural fingerprint so repeat
+# `solve()` invocations on the same problem skip the rebuild entirely.
+# Concurrent solves share the cache, so every
+# access holds `_SPARSITY_CACHE_LOCK`; callers only read the cached patterns.
+const _SPARSITY_CACHE = Dict{
+    Tuple{DataType,Int,Int,Int,Symbol},
+    Tuple{SparseMatrixCSC{Bool,Int},SparseMatrixCSC{Bool,Int}},
+}()
+const _SPARSITY_CACHE_LOCK = ReentrantLock()
+
+@inline function _sparsity_key(
+    layout::StateLayout{NC},
+    mode::SimulationMode,
+    profile::Symbol,
+) where {NC}
+    return (typeof(mode), NC, layout.n_cells, layout.n_nodes, profile)
+end
+
 """
-	build_sparsity(layout::StateLayout, mode::SimulationMode)
+	build_sparsity(layout::StateLayout, mode::SimulationMode; profile = :full)
 	    -> (S_phys, S_geom)
 
 Compose the emitters into two patterns:
@@ -392,27 +409,6 @@ size (no nnz). The shared `SparseMatrixCSC{Bool,Int}` type is required by
 `S_phys ∪ S_geom` recovers the full Jacobian sparsity for any
 `(layout, mode)`.
 """
-# Lazy sparsity: the (S_phys, S_geom) pattern depends only on
-# `layout` (n_cells, n_nodes, NC), `mode` (a singleton type), and the
-# assembly profile. We memoize on a structural fingerprint so repeat
-# `solve()` invocations on the same problem skip the rebuild entirely;
-# AMR resizes the workspace (changing the fingerprint), so cache
-# invalidation is automatic. Concurrent solves share the cache, so every
-# access holds `_SPARSITY_CACHE_LOCK`; callers only read the cached patterns.
-const _SPARSITY_CACHE = Dict{
-    Tuple{DataType,Int,Int,Int,Symbol},
-    Tuple{SparseMatrixCSC{Bool,Int},SparseMatrixCSC{Bool,Int}},
-}()
-const _SPARSITY_CACHE_LOCK = ReentrantLock()
-
-@inline function _sparsity_key(
-    layout::StateLayout{NC},
-    mode::SimulationMode,
-    profile::Symbol,
-) where {NC}
-    return (typeof(mode), NC, layout.n_cells, layout.n_nodes, profile)
-end
-
 function build_sparsity(layout::StateLayout, mode::SimulationMode; profile::Symbol = :full)
     profile === :full ||
         profile === :ale_reduced ||
@@ -430,7 +426,7 @@ end
 function _build_sparsity_impl(layout::StateLayout, mode::SimulationMode, profile::Symbol)
     n_total = state_length(layout)
 
-    # S_phys: physics + radiation + chi + ALE advection widening
+    # S_phys: physics + radiation + chi
     I_phys = Int[]
     J_phys = Int[]
     _emit_physics_pattern!(I_phys, J_phys, layout, mode)

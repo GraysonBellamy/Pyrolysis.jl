@@ -17,9 +17,9 @@ operator skips both `apply!` and the Jacobian writes.
 - Cell-local in `(T_i, ξ_·,i)`: captured by ForwardDiff over
   `(T, ξ_·) ↦ S_dry(T, ξ_·) · V_i / m_init,i` with `V_i` and `m_init,i`
   fixed Float64 closures.
-- z-column (ALE only): `∂(dχᵢ/dt)/∂z_i = -A · S_dry,i / m_init,i`,
-  `∂(dχᵢ/dt)/∂z_{i+1} = +A · S_dry,i / m_init,i`. Written analytically
-  since the dependence is just `V_i = A · (z_{i+1} - z_i)`.
+- z columns: `V_i = A · (z_{i+1} - z_i)` makes `dχᵢ/dt` depend on `z_i` and
+  `z_{i+1}`; the [`GeometryOperator`](@ref)'s AD pass over the z subvector
+  writes those entries (exact `:full` profile only).
 - χ-column rank-1: `∂(dχᵢ/dt)/∂χⱼ = (S_dry,i · L_i / m_init,i) · ∂A/∂χⱼ`,
   factored as `u[i] · v[j]`. Pushed onto `jac.structured` as an
   [`EmbeddedRank1Coupling`](@ref) at `(χ_off, χ_off, n_global)`.
@@ -159,8 +159,8 @@ Populate the χ-row block of `jac.A` plus push the χ-row × χ-col rank-1
 onto `jac.structured`.
 
 Cell-local AD captures `∂(dχᵢ/dt)/∂{T_i, ξ_·,i}` in one ForwardDiff pass
-per cell (chunk = 1 + NC). For ALE meshes, the z-column entries
-`∂(dχᵢ/dt)/∂z_i = ∓A · S_dry,i / m_init,i` are written analytically.
+per cell (chunk = 1 + NC). The z-column entries belong to the
+[`GeometryOperator`](@ref).
 """
 function contribute_to_jacobian!(
     jac::StructuredJacobian,

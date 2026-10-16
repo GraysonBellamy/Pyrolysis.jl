@@ -45,7 +45,7 @@ New Features Demonstrated:
 - Physically-based gas transfer coefficients (λ ~ 1e-5 to 1e-4 m²/s)
 - Darcy-Fick gas transport (diffusion + pressure-driven flow)
 - Temperature-dependent permeability evolution (virgin wood → porous char)
-- Species-specific molar masses for transport scaling
+- Species molar masses in the ideal-gas pore pressure (Darcy)
 - ALE mesh motion with analytical Jacobian for performance
 """
 
@@ -1689,6 +1689,6 @@ println("  ✓ Darcy-Fick gas transport (diffusion + pressure-driven flow)")
 println(
     "  ✓ Temperature-dependent permeability (virgin: $(κ_virgin) m², char: $(κ_char) m²)",
 )
-println("  ✓ Species-specific molar masses for transport scaling")
+println("  ✓ Species molar masses in the ideal-gas pore pressure (Darcy)")
 println("  ✓ ALE mesh motion with analytical Jacobian")
 println("  ✓ Solver-computed boundary fluxes (MLR, heat flux decomposition)")

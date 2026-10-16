@@ -1,15 +1,7 @@
 """
-Diagnostics callback infrastructure.
-
-Builds a `DiscreteCallback` that fires every
-`stride` accepted timesteps (and at the final time) to:
-
-1. Update the running mass / energy / reaction trackers with this substep's
-   contributions, and
-2. Emit a typed `NamedTuple` row to `log::Vector{NamedTuple}` capturing the
-   energy and mass ledger residuals at this point in the simulation.
-
-The log is connected to `PyrolysisSolution.extras`.
+Diagnostics callback infrastructure: the typed log row, the ledger state
+advanced by [`record_substep!`](@ref), the snapshot row `solve` logs, and the
+`DiscreteCallback` builder.
 """
 
 using SciMLBase: DiscreteCallback, derivative_discontinuity!
@@ -25,13 +17,10 @@ const DiagnosticsRow = NamedTuple{
 """
     DiagnosticsState
 
-Mutable container threaded through the callback. Holds:
-- the running trackers,
-- a row log written every `stride` accepted steps,
-- the last time at which the callback ran (for substep dt computation).
-
-Built once at the start of `solve()` and lives on the `Workspace` (or as a
-free-standing object passed via `cb_kwargs`).
+Ledger state advanced by [`record_substep!`](@ref). Holds:
+- the running mass and energy trackers,
+- a row log written every `stride` recorded steps,
+- the time of the last recorded step (for the substep `dt`).
 """
 mutable struct DiagnosticsState{NC}
     mass::MassConservationTracker{NC}
@@ -92,7 +81,7 @@ function record_substep!(
 
     state.step_counter += 1
 
-    # Update the mass, energy, and reaction trackers.
+    # Update the mass and energy trackers.
     update_mass_tracker!(state.mass, J_boundary, A, dt)
     update_energy_tracker!(
         state.energy;
@@ -122,11 +111,9 @@ end
 """
     snapshot_diagnostics_row(t, mesh, material) -> DiagnosticsRow
 
-Cumulative-free snapshot at a single point: the sensible energy. The ledger
-fields (cumulative residual, mass error) are filled with `NaN` to mark them
-as not-yet-computed. This is what the snapshot-mode callback writes; the
-cumulative form requires per-substep accumulation that the unified residual
-layer wires through `record_substep!`.
+Snapshot at a single point: the sensible energy. The ledger fields
+(cumulative residual, mass error) are `NaN`; only [`record_substep!`](@ref)
+fills them. This is the row `solve` logs.
 """
 function snapshot_diagnostics_row(t::Float64, mesh::Geometry.Mesh1D, material)
     return DiagnosticsRow((
@@ -146,10 +133,7 @@ Construct a `DiscreteCallback` that fires every accepted step and runs
 `t::Float64`. It only observes the state, so it clears the
 derivative-discontinuity flag. Call sites supply a `record!`
 closure that has access to the live workspace and pushes a row to the
-log when appropriate. This module ships [`snapshot_diagnostics_row`](@ref)
-as the simplest builder; a full ledger callback that calls
-[`record_substep!`](@ref) requires per-substep accumulators that the unified
-residual layer threads through.
+log when appropriate; `solve` pushes [`snapshot_diagnostics_row`](@ref)s.
 
 `record!` is held behind a fixed-signature `FunctionWrapper`, so the
 callback's type does not depend on the closure's and the integrator it joins

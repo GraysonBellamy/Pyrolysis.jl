@@ -5,9 +5,9 @@ A `ProblemDef` carries the *unchanging* contract of a pyrolysis problem:
 material, topology, boundary conditions, simulation mode and runtime options.
 Every mutable cache lives in [`Workspace`](@ref) instead.
 
-This split is what makes the residual a pure function of `(du, u, def, t, ws)`
-and unlocks parameter sweeps, sensitivity analysis, and pluggable Jacobian
-backends in later phases.
+This split makes the residual a pure function of `(du, u, def, t, ws)`, so
+parameter sweeps, sensitivity analysis and the Jacobian backends share one
+problem definition.
 
 Field access is direct: read `def.material`, `def.topology`, `def.bcs`,
 `def.mode`, `def.options`. The single helper is

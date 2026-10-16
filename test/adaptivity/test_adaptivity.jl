@@ -16,9 +16,7 @@ using Statistics
 using Pyrolysis
 using Pyrolysis.Geometry
 using Pyrolysis.Adaptivity
-# h-AMR moved to Experimental — import only the h-AMR names selectively so the
-# shared runtests Main namespace doesn't pick up Experimental's P1 `state_length`
-# (which would shadow the top-level Pyrolysis.state_length used by later files).
+# h-AMR lives in Experimental; import only the names these tests use.
 using Pyrolysis.Experimental:
     AMRController,
     adapt_mesh!,
@@ -116,9 +114,7 @@ end
                 CellState{2}(400.0, ξ, mesh.cell_volumes[i], mesh.cell_volumes[i])
         end
 
-        # An Int tracks that component's ξ row — previously any non-:T symbol
-        # (and even an Int, unreachable behind a ::Symbol field) silently
-        # tracked ξ[1,:]
+        # An Int tracks that component's ξ row
         η2 = compute_indicator(GradientIndicator(2), mesh)
         η1 = compute_indicator(GradientIndicator(1), mesh)
         @test maximum(η2) > 0.0
@@ -171,7 +167,7 @@ end
 
         indicator = ReactionRateIndicator(1.0)
 
-        # Rates are required — the silent all-zeros fallback is gone
+        # Rates are required — there is no silent all-zeros fallback
         @test_throws ArgumentError compute_indicator(indicator, mesh)
 
         # With rates on the current mesh: η_i = h_i · max_j |r_j|/max(ξ_j, ε)

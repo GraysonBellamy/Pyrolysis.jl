@@ -3,9 +3,8 @@
 
 Asserts that `JacobianSpec(Structured(), …)` produces a Jacobian that
 agrees with `DenseAD_ForwardDiff` under the **support-complete strict
-check** at every canonical config × off-default state. This is the
-gate that prevents the rebuilt architecture from landing as a path
-with hidden missing entries.
+check** at every canonical config × off-default state, so the backend
+cannot carry hidden missing entries.
 
 The backend walks the per-discretization operator list and must agree with
 the whole-residual `DenseAD_ForwardDiff` verifier on every canonical
@@ -179,18 +178,18 @@ const _PROBES = (
     end
 
     # ---------------------------------------------------------------------
-    # `:ale_reduced` producer-side gating regression coverage. Each round-
-    # trip checks that under `Structured{ApproxSolve}`:
+    # `:ale_reduced` producer-side gating. Each round-trip checks that
+    # under `Structured{ApproxSolve}`:
     #   1. Both `DirectSolve` and `ApproxSolve` JacobianSpecs build cleanly.
     #   2. The masked-compare verifier passes — i.e. for every entry that
     #      `ApproxSolve` emits a sparsity slot for, the value matches
-    #      `DenseAD_ForwardDiff`. The pre-fix correctness leak (`(χ_row,
-    #      z_col)` slots emitted but no operator wrote them under
-    #      `:ale_reduced`) would surface here as a masked-compare failure.
+    #      `DenseAD_ForwardDiff`. A `(χ_row, z_col)` slot that is emitted
+    #      but written by no operator under `:ale_reduced` surfaces here as
+    #      a masked-compare failure.
     # ---------------------------------------------------------------------
     @testset "ApproxSolve verifier round-trip — ALE WithChi" begin
         # Small (5-cell) ALE WithChi configuration; exercises the
-        # ApproxSolve verifier round-trip regression.
+        # ApproxSolve verifier round-trip.
         solid = SolidComponent(
             :wood,
             ρ = 500.0,
@@ -220,9 +219,9 @@ const _PROBES = (
         )
         _set_state!(u, ws.layout.n_cells, 1000.0, (400.0, 0.0))
         # Non-degenerate χ block: with χ (or the m_dry_solid_initial
-        # denominator) left at zero this fixture sat at the χ̄ = 0 identity
-        # point and the round-trip never exercised the shrinkage coupling
-        # (2026-07-06 audit finding, fixed by the initialize_state migration).
+        # denominator) left at zero this fixture would sit at the χ̄ = 0
+        # identity point and the round-trip would never exercise the
+        # shrinkage coupling.
         for (k, idx) in enumerate(Pyrolysis.Problem.chi_range(ws.layout))
             u[idx] = 0.2 + 0.05 * k
         end

@@ -72,8 +72,8 @@ end
 Dynamic viscosity [Pa·s] of the pore gas mixture at composition `ξ` and
 temperature `T`.
 
-The model carries **one viscosity curve per material**, so this currently
-ignores `ξ` and returns [`effective_gas_viscosity(T, material)`](@ref). That is
+The model carries **one viscosity curve per material**, so this ignores
+`ξ` and returns [`effective_gas_viscosity(T, material)`](@ref). That is
 a modelling choice, not a stub: μ is supplied as a blend correlation for the gas
 mixture the material is expected to produce (§5.9 of the Technical Reference),
 which averages over the pore gas shifting from background air to volatiles as
@@ -836,10 +836,8 @@ The constant 180 is the Kozeny constant for a packed bed of spheres. As φ → 0
 (fully solid) κ → 0 (impermeable). As φ → 1 the packed-bed closure loses
 validity and diverges; κ is **capped at the physical free-flow scale ℓ²**
 (an open channel of width ℓ has κ ~ ℓ²/32 — ℓ² is a generous upper bound).
-The cap binds for φ ≳ 0.93 (where 180(1−φ)² < φ³), replacing the old
-1e-30 denominator floor that only bound at φ = 1.0 exactly and produced
-κ = ℓ²·1e30. A tiny denominator guard remains solely to avoid Inf/NaN at
-φ = 1.0 before `min` resolves.
+The cap binds for φ ≳ 0.93 (where 180(1−φ)² < φ³). The 1e-30 denominator
+guard only keeps φ = 1.0 finite (κ = ℓ²·1e30) before `min` caps it.
 
 AD-clean: pure arithmetic, `φ` may be a `Dual`; `min` gives the consistent
 (zero) dκ/dφ on the capped branch, so the ForwardDiff-extracted Jacobian

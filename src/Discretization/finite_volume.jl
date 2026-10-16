@@ -24,7 +24,7 @@ using ..Physics:
 # ============================================================================
 
 """
-	divergence_1d!(div::Vector{Float64}, fluxes::Vector{Float64}, mesh::Mesh1D)
+	divergence_1d!(div, fluxes, state, mesh)
 
 Compute the divergence of a face-centered flux field.
 
@@ -32,13 +32,14 @@ For cell i with faces f_left and f_right:
 	div[i] = (1/V_i) * (F[f_right] - F[f_left]) * A
 
 Sign convention:
-- Positive flux = flow in +z direction (from left to right / top to bottom)
+- Positive flux = flow in +z direction (left to right, bottom toward top)
 - For a cell, right face flux is outflow (+), left face flux is inflow (-)
 
 # Arguments
 - `div`: Output vector of divergence values [units of flux / length]
 - `fluxes`: Face-centered flux values [flux units]
-- `mesh`: 1D mesh with geometry
+- `state`: State cache supplying the live cell volumes and face areas
+- `mesh`: 1D mesh (connectivity)
 """
 function divergence_1d!(div::AbstractVector, fluxes::AbstractVector, state, mesh)
     n_cells_val = mesh.n_active_cells
@@ -57,14 +58,15 @@ function divergence_1d!(div::AbstractVector, fluxes::AbstractVector, state, mesh
 end
 
 """
-	divergence_species_1d!(div::Matrix{Float64}, J::Matrix{Float64}, mesh::Mesh1D)
+	divergence_species_1d!(div, J, state, mesh)
 
 Compute divergence for species fluxes (multiple components).
 
 # Arguments  
 - `div`: Output matrix [NC × n_cells] of divergence values
 - `J`: Face-centered species fluxes [NC × n_faces]
-- `mesh`: 1D mesh
+- `state`: State cache supplying the live cell volumes and face areas
+- `mesh`: 1D mesh (connectivity)
 """
 function divergence_species_1d!(div::AbstractMatrix, J::AbstractMatrix, state, mesh)
     NC = size(div, 1)
@@ -543,10 +545,9 @@ surface energy balance:
                 q[f] = -q_bc
             end
 
-            # Keep the diagnostic boundary state current (the bypass
-            # previously skipped this, so surface-T diagnostics held
-            # 300 K constructor placeholders for Dirichlet runs). Float64
-            # storage, mirroring solve_boundary_temperature!.
+            # Keep the diagnostic boundary state current: the Dirichlet
+            # bypass skips the surface Newton, which would otherwise write
+            # it. Float64 storage, mirroring solve_boundary_temperature!.
             bstate = mesh.boundary_states[boundary_id]
             bstate.T_surface = ForwardDiff.value(T_bc)
             bstate.q_applied = ForwardDiff.value(q_bc)
@@ -610,10 +611,9 @@ Apply mass boundary conditions using static dispatch (type-stable).
 
 Only **gas** components receive a boundary flux: mass BCs model gas exchange
 with the ambient (film law / venting), and a condensed phase cannot cross the
-boundary. Writing the film law for solids (as an earlier revision did) put a
-phantom O(100) kg/(m²·s) "solid boundary flux" into `J` that every production
-consumer had to mask out — filtering at write time keeps `J`
-physically meaningful for every reader, including diagnostics.
+boundary. Solid rows of `J` stay zero at the boundary faces; the film law
+evaluated on a solid concentration would be a phantom O(100) kg/(m²·s) flux
+that every reader, diagnostics included, would have to mask out.
 
 # Arguments
 - `J`: Species flux matrix [NC × n_faces] (modified in-place)
@@ -749,7 +749,7 @@ end
 # ============================================================================
 
 """
-	update_darcy_properties!(cache::PropertyCache, mesh::Mesh1D{NC},
+	update_darcy_properties!(cache::PropertyCache, state, mesh,
 							  material::Material{NC},
 							  bc_set::BoundaryConditionSet,
 							  top_face_ids::Vector{Int},
@@ -767,7 +767,8 @@ component permeabilities, similar to thermal conductivity.
 
 # Arguments
 - `cache`: PropertyCache (modified in place)
-- `mesh`: Mesh with current cell states
+- `state`: State cache (live T, ξ and geometry)
+- `mesh`: Mesh (connectivity)
 - `material`: Material definition with component κ values and `mixing.κ` spec
 - `bc_set`: Type-stable BoundaryConditionSet containing mass BCs
 - `top_face_ids`: Pre-cached face IDs at top boundary (boundary_id=1)

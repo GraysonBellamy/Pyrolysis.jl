@@ -69,14 +69,11 @@ at state `(u, t)` and report the maximum absolute and relative deviations.
   is a sanity check, not an exactness gate. A diagonal slot the profile stores
   but never writes (`structural_zero_diagonal`) counts as outside the
   support. Used by
-  `Structured(strategy = ApproxSolve())` and any future backend tagged
-  approximate.
+  `Structured(strategy = ApproxSolve())`.
 
-The reference backend is built fresh each call (lazy AD workspace
-allocation on first hit, reused across calls within the same Julia
-session via `JacobianSpec` construction-time caching). For repeated
-verification, build the reference spec once and pass it via the
-`reference_spec` keyword (low-level form, see below).
+Without `reference_spec` the reference spec is built on every call. For
+repeated verification, build it once and pass it via the `reference_spec`
+keyword (low-level form, see below).
 
 # Returned NamedTuple
 - `passed::Bool` — strict: every entry within its per-entry tolerance;

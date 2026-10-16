@@ -73,7 +73,7 @@ function _verification_case_vrad01()
                     name = "L∞ T-profile error, t=$(t) s",
                     value = err,
                     error = err,
-                    tol = 0.25,  # 3× observed max: 0.080 K at t=180 s (n=100, 2026-07-06)
+                    tol = 0.25,  # 3× observed max: 0.080 K at t=180 s (n=100)
                     comment = "observed 0.044/0.057/0.065/0.080 K at t=30/60/90/180 s",
                 ),
             )
@@ -88,7 +88,7 @@ function _verification_case_vrad01()
                     value = Ts_num,
                     exact = Ts_exact,
                     error = abs(Ts_num - Ts_exact),
-                    tol = 0.25,  # 3× observed max: 0.080 K at t=30 s (n=100, 2026-07-06)
+                    tol = 0.25,  # 3× observed max: 0.080 K at t=30 s (n=100)
                     comment = "convective-only surface balance under BEER_LAMBERT",
                 ),
             )
@@ -111,7 +111,7 @@ function _verification_case_vrad01()
                 value = Tn[i_peak],
                 exact = T_fine[i_ex],
                 error = abs(Tn[i_peak] - T_fine[i_ex]),
-                tol = 0.05,  # 3× observed 0.012 K (n=100, 2026-07-06)
+                tol = 0.05,  # 3× observed 0.012 K (n=100)
                 comment = "the coupled-physics marker no uncoupled test checks",
             ),
         )
@@ -165,7 +165,7 @@ function _verification_case_vrad01()
             n_cells = 100,
             budget_s = 20.0,
             convergence = ConvergenceSpec(
-                # observed rates 1.996, 1.998 (2026-07-06)
+                # observed rates 1.996, 1.998
                 n_cells = [50, 100, 200],
                 error_fn = l2_error_t90,
                 expected_order = 2.0,

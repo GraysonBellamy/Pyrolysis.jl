@@ -12,7 +12,7 @@ meshing framework.
 - In-depth radiation absorption (Beer-Lambert)
 - Material volume changes (shrinkage, swelling, intumescence)
 - Surface regression and internal interface motion
-- Adaptive mesh refinement (h- and r-adaptivity)
+- Surface burnout by depleted-cell parking
 
 # Quick Start
 ```julia
@@ -61,11 +61,11 @@ using OrdinaryDiffEq
 # Submodule includes
 # ============================================================================
 
-# Foundational types and constants (was Core; no dependencies on other submodules)
+# Foundational types and constants (no dependencies on other submodules)
 include("Materials/Materials.jl")
 using .Materials
 
-# Boundary-condition types (promoted out of Core; depends only on Materials)
+# Boundary-condition types (depends only on Materials)
 include("BoundaryConditions/BoundaryConditions.jl")
 using .BoundaryConditions
 
@@ -81,10 +81,7 @@ using .Properties
 include("Physics/Physics.jl")
 using .Physics
 
-# ALE mesh motion / GCL / remapping was folded into Physics during the reorg
-# (the former `ALE` submodule no longer exists; its kernels live in Physics).
-
-# Adaptive mesh refinement
+# Mesh adaptation (depleted-cell parking; refinement building blocks)
 include("Adaptivity/Adaptivity.jl")
 using .Adaptivity
 

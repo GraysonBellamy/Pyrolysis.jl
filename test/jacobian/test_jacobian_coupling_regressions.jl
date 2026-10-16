@@ -1,22 +1,20 @@
 """
-Regression tests for three fixed Jacobian coupling defects:
+Tests for three Jacobian couplings that a loose verifier lets slip:
 
 - **Strict-verifier normalization** — `verify_jacobian_at`'s strict mode
-  used a *global* max-|J_ref| normalization, so a wholly missing
-  small-magnitude block (the ALE z-rows, ~10 orders below the Arrhenius
-  ξ-rows) passed at large n and failed at small n: pass/fail depended on
-  problem size, not correctness. The strict criterion is now per-entry
-  with a row-magnitude floor. The unit test below drives
-  `_strict_per_entry_compare` directly with a synthetic matrix that the
-  legacy global criterion provably accepted.
+  compares per entry with a row-magnitude floor. A *global* max-|J_ref|
+  normalization would let a wholly missing small-magnitude block (the ALE
+  z-rows, ~10 orders below the Arrhenius ξ-rows) pass at large n and fail
+  at small n: pass/fail would depend on problem size, not correctness. The
+  unit test below drives `_strict_per_entry_compare` directly with a
+  synthetic matrix that a global criterion accepts.
 
-- **z-row × (T, ξ) block** — the structured backend omitted this block
-  entirely (dz_k/dt = w_node[k] depends on every upstream cell's strain
-  rate via the prefix sum; the geometry AD block covers z *columns*
-  only). Verified here at 6 cells — exactly the scale where the pre-fix
-  strict verifier failed — by per-entry agreement of the z-row block
-  against DenseAD. The WithChi probe additionally covers the
-  θ_A → (T, ξ) back-reaction in every w_k.
+- **z-row × (T, ξ) block** — dz_k/dt = w_node[k] depends on every upstream
+  cell's strain rate via the prefix sum, so the structured backend must
+  carry this block (the geometry AD block covers z *columns* only).
+  Verified here at 6 cells, where a missing block cannot hide, by
+  per-entry agreement of the z-row block against DenseAD. The WithChi
+  probe additionally covers the θ_A → (T, ξ) back-reaction in every w_k.
 
 - **Boundary mass flux on the energy row** — the transport operators
   zero their boundary faces but the residual's S_conv includes the
@@ -134,8 +132,8 @@ end
     ]
 
     # Case 1: the small row's entries are entirely MISSING from the active
-    # matrix — the missing-z-row shape. The legacy global criterion accepted
-    # this (3e-2 / 1e6 = 3e-8 ≤ rtol 1e-6); per-entry must reject it.
+    # matrix — the missing-z-row shape. A global criterion accepts this
+    # (3e-2 / 1e6 = 3e-8 ≤ rtol 1e-6); per-entry must reject it.
     J_missing = copy(J_ref)
     J_missing[2, 1] = 0.0
     J_missing[2, 2] = 0.0
@@ -184,9 +182,9 @@ end
     @test report.passed
 
     # Explicit block check, independent of the verifier: the z-row × (T, ξ)
-    # block must be non-trivially populated and agree with DenseAD per entry.
-    # (Pre-fix the structured block was identically zero while DenseAD had
-    # the exact lower-triangular prefix-sum shape, up to ~4.5e-2.)
+    # block must be non-trivially populated and agree with DenseAD per entry
+    # (DenseAD has the exact lower-triangular prefix-sum shape, up to
+    # ~4.5e-2).
     zr = z_range(ws.layout)
     J_s = Matrix(report.J_active)
     J_r = report.J_ref
@@ -211,8 +209,7 @@ end
         u[idx] = 0.3 + 0.05 * k
     end
 
-    # Guard the m_dry_solid_initial = 0 fixture trap (2026-07-06 audit,
-    # fixed by the initialize_state migration): with an unpopulated χ
+    # Guard the m_dry_solid_initial = 0 fixture trap: with an unpopulated χ
     # denominator, χ̄ degenerates to 0, the θ_A block is zero in BOTH compared
     # Jacobians, and this testset's named target goes un-exercised while the
     # z-row assertion passes via the ordinary prefix sum alone.
@@ -251,7 +248,7 @@ end
         "Fickian, permeable both boundaries",
         (darcy = false, mass_bottom = DiffusiveMassBC()),
     ),
-    # Deferred Minor 5: nonlinear surface balance — the blended boundary
+    # Nonlinear surface balance — the blended boundary
     # gradient's ∂T_s chain (through h and εσT_s⁴) is load-bearing in the
     # boundary cell's S_conv row.
     (
@@ -281,9 +278,9 @@ end
     @test report.mode == :strict
     @test report.passed
 
-    # Explicit slot check at the worst pre-fix entry: top-cell T-row ×
-    # top-cell gas-ξ column (pre-fix: structured −4.05 vs DenseAD/FD −0.170,
-    # 24× off). Per-entry agreement against the row scale.
+    # Explicit slot check at the most sensitive entry: top-cell T-row ×
+    # top-cell gas-ξ column (DenseAD/FD ≈ −0.170). Per-entry agreement
+    # against the row scale.
     J_s = Matrix(report.J_active)
     J_r = report.J_ref
     row_scale = maximum(abs, J_r[n, :])

@@ -65,7 +65,7 @@ _f_exact(B) = B / (exp(B) - 1)
     # ========================================================================
     @testset "blowing_factor: values and limits" begin
         @test blowing_factor(0.0) === 1.0
-        # Audit-verified arithmetic: B = 4 → h/h₀ = 0.0746…
+        # Hand-checked arithmetic: B = 4 → h/h₀ = 0.0746…
         @test blowing_factor(4.0) ≈ _f_exact(4.0) rtol = 1e-13
         @test blowing_factor(4.0) ≈ 0.0746 atol = 1e-4
         @test blowing_factor(1.0) ≈ 1 / (ℯ - 1) rtol = 1e-13

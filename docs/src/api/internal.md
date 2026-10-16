@@ -5,7 +5,7 @@ CurrentModule = Pyrolysis
 # Internals
 
 `Pyrolysis.Internal` is an umbrella module that re-exports the public surface
-of every submodule for advanced users:
+of every submodule except `Experimental` for advanced users:
 
 ```julia
 using Pyrolysis

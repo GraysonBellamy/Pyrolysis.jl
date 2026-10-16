@@ -15,9 +15,7 @@ where:
 - ε is emissivity [-]
 - σ is Stefan-Boltzmann constant
 
-Reference: 
-- P1_Volumetric_Reradiation_Implementation.md
-- Modest, M.F., Radiative Heat Transfer, 3rd Ed., 2013, Chapter 15
+Reference: Modest, M.F., Radiative Heat Transfer, 3rd Ed., 2013, Chapter 15
 """
 
 # ============================================================================
@@ -448,8 +446,7 @@ end
 end
 
 @inline function _apply_dirichlet_bc!(rad_cache::RadiationCache, faces::Vector{Int})
-    # Dirichlet BC: flux determined by interior gradient (handled in discretization)
-    # For now, set to zero as placeholder
+    # Dirichlet G BC: the boundary flux is not modelled and is set to zero.
     @inbounds for f in faces
         rad_cache.q_rad[f] = 0.0
     end
@@ -730,6 +727,5 @@ end
 
 # P1 validity is a property of the DOMAIN optical thickness τ = ∫α dz — the
 # `check_p1_validity(mesh, prop_cache)` method above is the only validity
-# check. A per-cell τ_i ≥ 1 criterion is mesh-dependent (refining the mesh
-# shrinks every τ_i and degrades the verdict with no change in physics) and
-# was removed.
+# check. A per-cell τ_i ≥ 1 criterion would be mesh-dependent (refining the
+# mesh shrinks every τ_i and degrades the verdict with no change in physics).

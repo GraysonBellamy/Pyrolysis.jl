@@ -14,35 +14,7 @@ boundary-face kernel `boundary_darcy_velocity`.
 using ..BoundaryConditions: DirichletPressureBC, NeumannPressureBC, ConvectivePressureBC
 using ..Materials: AbstractMassBC
 using ..BoundaryConditions: ImpermeableBC
-using ..BoundaryConditions: BoundaryConditionSet, get_mass_bc
-
-"""
-	apply_pressure_bc_to_darcy_velocity!(v_gas::Vector{Float64},
-										 state,
-										 mesh::Mesh1D{NC},
-										 P::Vector{Float64},
-										 κ::Vector{Float64},
-										 μ::Vector{Float64},
-										 bc_set::BoundaryConditionSet,
-										 top_face_ids::Vector{Int},
-										 bottom_face_ids::Vector{Int}) where NC
-
-Apply pressure boundary conditions using type-stable BoundaryConditionSet.
-
-This is the preferred signature for maximum type stability and zero allocations.
-Uses pre-cached face IDs computed once at problem setup.
-
-`μ` is the per-cell pore-gas viscosity the caller already computed
-(`darcy.μ`), not a value re-derived here: the boundary vent and the interior
-faces must see the same viscosity, and with a material-supplied μ(T) curve
-re-evaluating it would be both a second evaluation and a second chance to
-disagree.
-
-# Arguments
-"""
-
-
-using ..BoundaryConditions: CombinedMassBC
+using ..BoundaryConditions: BoundaryConditionSet, get_mass_bc, CombinedMassBC
 
 """
 	boundary_darcy_velocity(bc, P_int, κ_int, μ_int, d, ::Val{tag}) -> v_z
@@ -164,6 +136,20 @@ function _apply_pressure_bc_faces!(
     return nothing
 end
 
+"""
+	apply_pressure_bc_to_darcy_velocity!(v_gas, state, mesh, P, κ, μ, bc_set,
+										 top_face_ids, bottom_face_ids)
+
+Write the boundary-face Darcy velocities into `v_gas` from the pressure BCs
+of `bc_set` (via [`boundary_darcy_velocity`](@ref)), over the face IDs cached
+at problem setup. Type-stable and allocation-free.
+
+`μ` is the per-cell pore-gas viscosity the caller already computed
+(`darcy.μ`), not a value re-derived here: the boundary vent and the interior
+faces must see the same viscosity, and with a material-supplied μ(T) curve
+re-evaluating it would be both a second evaluation and a second chance to
+disagree.
+"""
 function apply_pressure_bc_to_darcy_velocity!(
     v_gas::AbstractVector,
     state,

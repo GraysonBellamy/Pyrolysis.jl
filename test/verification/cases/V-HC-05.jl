@@ -60,7 +60,7 @@ function _verification_case_vhc05()
                 name = "L∞ Kirchhoff-profile error (z(T) map, /L)",
                 value = err,
                 error = err,
-                tol = 1.2e-4,  # 3× observed 3.9e-5 (n=80, 2026-07-06)
+                tol = 1.2e-4,  # 3× observed 3.9e-5 (n=80)
                 comment = "implicit profile compared invert-free; n=80 uniform",
             ),
         )
@@ -78,7 +78,7 @@ function _verification_case_vhc05()
                 value = q_num,
                 exact = q_exact,
                 error = abs(q_num - q_exact) / q_exact,
-                tol = 6e-5,  # 3× observed 1.8e-5 (2026-07-06)
+                tol = 6e-5,  # 3× observed 1.8e-5
                 comment = "q = (k₀/L)[ΔT + βΔ(T²)/2] = $(round(q_exact, digits = 1)) W/m²",
             ),
         )
@@ -90,7 +90,7 @@ function _verification_case_vhc05()
                 name = "steadiness (last half-interval drift)",
                 value = steadiness,
                 error = steadiness,
-                tol = 1e-6,  # observed 4.7e-8 K (2026-07-06)
+                tol = 1e-6,  # observed 4.7e-8 K
                 comment = "t_end = 10·L²/α_min",
             ),
         )
@@ -115,7 +115,7 @@ function _verification_case_vhc05()
             n_cells = 80,
             budget_s = 20.0,
             convergence = ConvergenceSpec(
-                # observed rates 1.965, 1.982 (2026-07-06)
+                # observed rates 1.965, 1.982
                 n_cells = [40, 80, 160],
                 error_fn = profile_error,
                 expected_order = 2.0,

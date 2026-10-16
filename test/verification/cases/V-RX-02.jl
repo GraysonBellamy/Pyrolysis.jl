@@ -116,7 +116,7 @@ function _vrx02_exact_case(
                 name = "total-mass conservation",
                 value = mass_err,
                 error = mass_err,
-                tol = 1e-13,  # observed ≤ 1.1e-15 across sub-cases (2026-07-06)
+                tol = 1e-13,  # observed ≤ 1.1e-15 across sub-cases
                 comment = "A→B closed system",
             ),
         )
@@ -171,7 +171,7 @@ push!(
             k_conc = k,
             ξ0 = ξ0,
             ts = [2.0, 6.0, 10.0, 14.0, 18.0],  # ≤ 0.9·t_b (see header)
-            tol_xi = 1e-12,  # observed 2.8e-16 (2026-07-06); n=0 is exactly linear
+            tol_xi = 1e-12,  # observed 2.8e-16; n=0 is exactly linear
             comment = "linear decay; compared only to 0.9·t_b, limiter off",
         )
     end,
@@ -192,7 +192,7 @@ push!(
             k_conc = k,
             ξ0 = ξ0,
             ts = [5.0, 10.0, 20.0, 50.0, 100.0],
-            tol_xi = 5e-8,  # 3× observed 1.7e-8 (abstol=1e-12, 2026-07-06)
+            tol_xi = 5e-8,  # 3× observed 1.7e-8 (abstol=1e-12)
             comment = "ξ = ξ₀/(1+ξ₀kt); k in m³/(kg·s)",
         )
     end,
@@ -225,7 +225,7 @@ push!(
             ξ0 = ξ0,
             T_iso = T_iso,
             ts = ts,
-            tol_xi = 1e-9,  # 3× observed 2.8e-10 (2026-07-06)
+            tol_xi = 1e-9,  # 3× observed 2.8e-10
             comment = "m^(1/3) linear in t; k_pub=$(round(k_pub, sigdigits=4)) 1/s at 450 K; " *
                       "exercises live Arrhenius (E ≠ 0) at pinned T",
             # FDS 6.11.0 overlay (reference/fds/custom/): the span-matched
@@ -291,7 +291,7 @@ push!(
                     value = ξ_min,
                     exact = 0.0,
                     error = max(0.0, -ξ_min),
-                    tol = 1e-9,  # observed 8.2e-13 undershoot (2026-07-06)
+                    tol = 1e-9,  # observed 8.2e-13 undershoot
                     comment = "the depletion limiter's job for n = 0 kinetics",
                 ),
                 QoIResult(

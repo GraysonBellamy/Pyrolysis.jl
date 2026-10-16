@@ -1,26 +1,21 @@
 """
-CI invariant — bounded-allocation Jacobian assembly (Structured/DirectSolve).
+Performance invariant — bounded-allocation Jacobian assembly (Structured/DirectSolve).
 
-The structured-Jacobian hot path was de-allocated in 2026-06 (typed zeros in
-the Properties helpers, mutable AD workspaces, `Val(NC)` closure captures,
-concretely-typed `StructuredOpsCache` fields, stack-Dual ALE strain-rate
-sweep): baseline_eulerian went from 167.5 KiB/eval at 18% GC to ~5 KiB/eval
-at <1% GC, and the ALE configs from ~3 MiB/eval to ~100-280 KiB/eval.
-A second pass removed the remaining per-eval churn (heterogeneous
-component-tuple indexing in the ALE dilation block, copy-on-construct
-structured couplings — they now alias workspace buffers refilled each
-assembly, per-cell `ForwardDiff.gradient` in the Beer-Lambert α pass →
-stack-Dual sweep, runtime-`NC` `ntuple`s in the advection kernels, and
-per-boundary BC closures union-typed by branch-merged BC lookups →
-function barriers): ~1.2 KiB/eval Eulerian, ~4 KiB/eval ALE configs.
+The structured-Jacobian hot path keeps per-eval allocation out of the
+assembly: typed zeros in the Properties helpers, mutable AD workspaces,
+`Val(NC)` closure captures, concretely-typed `StructuredOpsCache` fields,
+stack-Dual sweeps for the ALE strain rate and the Beer-Lambert α pass,
+structured couplings that alias workspace buffers refilled each assembly,
+compile-time `NC` tuples in the advection kernels, and function barriers
+around the per-boundary BC closures.
 
-The Eulerian configs now measure 0 B/eval; the ALE budgets are NOT zero
+The Eulerian configs measure 0 B/eval; the ALE budgets are NOT zero
 because each assembly pushes freshly-boxed coupling structs onto
 `jac.structured` (the array payloads alias workspace buffers, but the
 immutable struct wrappers are heap-allocated per push) — ~2.1 KiB/eval.
 
-The point of the gate is to catch *regressions to per-cell allocation* —
-those show up as tens-to-hundreds of KiB, far above these budgets.
+The point of the gate is to catch *per-cell allocation* — that shows up
+as tens-to-hundreds of KiB, far above these budgets.
 """
 
 using Test

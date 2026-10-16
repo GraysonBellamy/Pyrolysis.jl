@@ -237,8 +237,8 @@ The block layout is dictated by `layout`:
 - z:  `u[n*(1+NC) + i]` for `i ∈ 1:n_nodes` (ALE only)
 - χ:  trailing block of length `n` (WithChi only)
 
-This is the new replacement for `unpack_state!`'s mesh write — the cache
-is the single source of truth during residual assembly.
+The cache, not the mesh, is the single source of truth during residual
+assembly.
 """
 @inline function populate!(
     cache::StateCache{NC,Tu,Mode},

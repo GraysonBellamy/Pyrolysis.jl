@@ -4,8 +4,6 @@ Radiation model types and enumerations.
 This file defines the fundamental types for volumetric radiation transport
 using the P1 approximation. These types are used throughout the radiation
 implementation.
-
-Reference: P1_Volumetric_Reradiation_Implementation.md Section 4.2
 """
 
 # ============================================================================

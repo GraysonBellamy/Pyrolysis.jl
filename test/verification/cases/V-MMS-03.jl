@@ -104,10 +104,10 @@ function _verification_case_vmms03()
         fields;
         use_ale = true,
         w_override = w_star,
-        # Dense FD accepted for offline report runs too (deferred decision,
-        # 2026-07-06 audit): do NOT hand a physics+geometry union prototype to
-        # colored FD without first proving the pattern covers the override's
-        # ∂(dz/dt)/∂z coupling — silent-drop hazard.
+        # Dense FD for offline report runs too: do NOT hand a
+        # physics+geometry union prototype to colored FD without first
+        # proving the pattern covers the override's ∂(dz/dt)/∂z coupling —
+        # silent-drop hazard.
         jacobian = :fd,
         kwargs...,
     )
@@ -120,7 +120,7 @@ function _verification_case_vmms03()
                 name = "L∞ T error on moving mesh, t=$(t_end) s",
                 value = mms_Linf_T(sol, fields),
                 error = mms_Linf_T(sol, fields),
-                tol = 0.25,  # 3× observed: 0.069 K (n=32, 2026-07-06)
+                tol = 0.25,  # 3× observed: 0.069 K (n=32)
                 comment = "manufactured T* on 30%-compressed mesh",
             ),
         )
@@ -129,7 +129,7 @@ function _verification_case_vmms03()
                 "ξ_solid (mesh-bound)",
                 1,
                 600.0,
-                1e-10,  # observed 7.3e-12 (n=32, 2026-07-06): exact to integrator tol
+                1e-10,  # observed 7.3e-12 (n=32): exact to integrator tol
                 "uniform solid: verifies the mesh-bound (no-advection) species path + source injection",
             ),
             (
@@ -173,7 +173,7 @@ function _verification_case_vmms03()
             n_cells = 32,
             budget_s = 60.0,
             convergence = ConvergenceSpec(
-                # observed rates 2.24, 2.18 (2026-07-06) — the anticipated
+                # observed rates 2.24, 2.18 — the anticipated
                 # limiter clipping at the sin extremum did not depress the
                 # global L2 order
                 n_cells = [16, 32, 64],

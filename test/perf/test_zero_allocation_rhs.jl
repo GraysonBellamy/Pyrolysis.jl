@@ -1,5 +1,5 @@
 """
-CI invariant — zero-allocation RHS.
+Performance invariant — zero-allocation RHS.
 
 Baseline + the three additional `SimulationMode` configurations
 (`{ALE, NoRadiation, Fickian, NoChi}`,

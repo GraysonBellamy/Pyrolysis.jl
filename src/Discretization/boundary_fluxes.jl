@@ -36,6 +36,7 @@ Evaluate mass flux with diffusion parameters available.
 # Returns
 Mass flux [kg/(m²·s)], positive into the domain (negative = gas leaving).
 """
+function mass_bc_flux end
 
 # Default fallback: ignore λρ, ρ, d for non-diffusive BCs
 @inline mass_bc_flux(bc::ImpermeableBC, ξ_surface, λρ, ρ, d, t, j::Integer) = 0.0
@@ -77,18 +78,14 @@ Returns NEGATIVE flux for gas leaving the surface (consistent with the general
 mass_bc_flux convention of "positive into domain"). When ξ_surface > 0 and gas
 is diffusing out, the flux into the domain is negative.
 
-This differs from `_compute_surface_flux()` in Physics/gas_transport.jl, which
-returns POSITIVE values for gas escaping (used for ALE regression calculation).
-
-The calling code in `_apply_mass_bc_to_flux!` (finite_volume.jl) handles the
-face orientation by negating at the top boundary: J[f] = -J_bc. This results
-in positive flux in the +z direction when gas escapes at the top surface,
-which is correct for the divergence calculation.
+`apply_mass_bc_flux!` (finite_volume.jl) orients it to the face by negating
+at the top boundary: J[f] = -J_bc. This gives a positive flux in the +z
+direction when gas escapes at the top surface, as the divergence expects.
 
 Summary of sign conventions:
-- mass_bc_flux():           Negative = gas escaping (flux-into-domain convention)
-- _compute_surface_flux():  Positive = gas escaping (ALE regression convention)
-- J[face] in finite volume: Positive = flux in +z direction
+- mass_bc_flux():               Negative = gas escaping (flux-into-domain convention)
+- compute_surface_mass_flux():  Positive = gas escaping
+- J[face] in finite volume:     Positive = flux in +z direction
 """
 @inline function mass_bc_flux(bc::DiffusiveMassBC, ξ_surface, λρ, ρ, d, t, j::Integer)
     h_m = evaluate_param(bc.h_m, t)
@@ -411,9 +408,7 @@ function compute_boundary_heat_fluxes(
     # Prescribed temperature: the applied flux is whatever conduction demands
     # (k_eff·(T_bc − T_cell)/Δz_half), not computable from (T_surface, t)
     # alone. The decomposition is all-zero here; the saved-solution extraction
-    # reports the solved q_conducted as the net applied flux (previously the
-    # AbstractThermalBC fallback returned NaN and poisoned
-    # every extras.surface_heat_flux_* field for Dirichlet runs).
+    # reports the solved q_conducted as the net applied flux.
     return (
         absorbed = 0.0,
         reradiation = 0.0,

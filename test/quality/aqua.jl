@@ -3,7 +3,7 @@
 # Run standalone:  julia --project=test/quality test/quality/aqua.jl
 #
 # Policy: a high-signal subset gates the build (the script exits non-zero on a
-# regression). Now gating: deps/weakdeps compat, undefined exports, method
+# regression). Gating: deps/weakdeps compat, undefined exports, method
 # ambiguities, and unbound type parameters (regression gate — see ALLOWED_UNBOUND).
 using Aqua
 using Pyrolysis
@@ -33,7 +33,7 @@ const ALLOWED_UNBOUND = Set([
 ])
 
 # ---------------------------------------------------------------------------------
-# Gating checks — currently clean. A failure here fails CI (throws on testset finish).
+# Gating checks. A failure here fails CI (throws on testset finish).
 # ---------------------------------------------------------------------------------
 @testset "Aqua — gating checks" begin
     # Dependencies declared but unused, or used but undeclared.

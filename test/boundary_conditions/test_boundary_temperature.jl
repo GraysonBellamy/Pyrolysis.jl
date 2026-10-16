@@ -4,8 +4,6 @@ Boundary Temperature Solver Tests
 Tests for the boundary temperature solve functionality that ensures energy balance
 at boundaries in cell-centered finite volume discretization.
 
-Reference: docs/boundary_temperature_enhancement.md
-
 Tests cover:
 1. Unit tests for solve_boundary_temperature() with each BC type
 2. Helper function tests (get_surface_temperature, etc.)
@@ -322,8 +320,6 @@ _solve_bt(T_cell, k, Δz, bc, t, ε; kwargs...) =
         # radiation models (SURFACE_ABSORPTION, BEER_LAMBERT, P1_QUASI_STEADY)
         # because radiation is handled via compute_radiation_source!, not as
         # a boundary flux.
-        #
-        # Reference: docs/boundary_temperature_enhancement.md
 
         T_s = 500.0
         t = 0.0

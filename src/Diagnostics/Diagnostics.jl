@@ -1,22 +1,20 @@
 """
     Diagnostics
 
-First-class runtime conservation diagnostics for the Pyrolysis.jl
-energy formulation.
-
-Two trackers + a callback:
+Conservation diagnostics.
 
 - [`MassConservationTracker`](@ref) — per-component mass ledger.
 - [`EnergyConservationTracker`](@ref) — sensible-energy ledger of the
   temperature equation (`E = Σ ρcp·T·V` over every component), balanced
   against the terms the discretized RHS assembles.
-- [`DiagnosticsCallback`](@ref) — `DiscreteCallback` builder that fires every
-  `stride` steps and at the final time, accumulating the substep contributions
-  into the trackers and emitting a row to a `Vector{NamedTuple}` log.
-
-The callback is the visibility mechanism that makes the energy and mass
-bookkeeping auditable on every solve. The log is connected to
-`PyrolysisSolution.extras`.
+- [`DiagnosticsState`](@ref) and [`record_substep!`](@ref) — advance both
+  ledgers by one step's boundary fluxes and volumetric sources and log a row
+  every `stride` steps. The test suite drives them step by step to check
+  conservation; `solve` does not.
+- [`DiagnosticsCallback`](@ref) — `DiscreteCallback` builder that runs a
+  `record!(u, t)` closure on every accepted step. `solve` uses it to log
+  [`snapshot_diagnostics_row`](@ref)s (the sensible energy at the step) when
+  diagnostics are requested.
 """
 module Diagnostics
 

@@ -66,7 +66,7 @@ push!(
                     name = "max mean-T error vs implicit exact",
                     value = err,
                     error = err,
-                    tol = 0.012,  # 3× observed 3.9e-3 K (n=4, 2026-07-06)
+                    tol = 0.012,  # 3× observed 3.9e-3 K (n=4)
                     comment = "lumped T⁴ cooling; thin-limit bias ~7e-5 relative in flux",
                 ),
             )
@@ -177,7 +177,7 @@ push!(
                     value = Ts_num,
                     exact = Ts_exact,
                     error = abs(Ts_num - Ts_exact),
-                    tol = 1e-6,  # observed 3.2e-9 K (2026-07-06): Newton residual is exact
+                    tol = 1e-6,  # observed 3.2e-9 K: Newton residual is exact
                     comment = "surface-Newton residual check; Ts_exact ≈ " *
                               "$(round(Ts_exact, digits = 2)) K",
                 ),
@@ -185,14 +185,14 @@ push!(
                     name = "steadiness (last half-interval drift)",
                     value = steadiness,
                     error = steadiness,
-                    tol = 1e-3,  # observed 1.1e-4 K (2026-07-06): integrator save noise, not transient
+                    tol = 1e-3,  # observed 1.1e-4 K: integrator save noise, not transient
                     comment = "t_end ≈ 36 thermal time constants",
                 ),
                 QoIResult(
                     name = "steady uniformity (adiabatic back)",
                     value = uniformity,
                     error = uniformity,
-                    tol = 1e-7,  # observed 7.6e-10 K (2026-07-06)
+                    tol = 1e-7,  # observed 7.6e-10 K
                     comment = "zero steady flux ⇒ uniform slab at Ts",
                 ),
             ]

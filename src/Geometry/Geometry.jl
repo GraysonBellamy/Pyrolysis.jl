@@ -22,9 +22,10 @@ include("faces.jl")
 include("mesh.jl")
 include("mesh_generation.jl")
 include("geometric_quantities.jl")
-# Pure topology / geometry split: Mesh1D carries mutable per-step state, while
-# MeshTopology holds the immutable connectivity and MeshGeometry holds the
-# mutable z/V/A buffers consumed by the residual / Jacobian.
+# Mesh1D carries the 1D mesh the solver uses. MeshTopology (immutable
+# connectivity) and MeshGeometry (mutable z/V/A buffers) are the
+# dimension-parameterised description for a multi-dimensional extension;
+# the 1D residual and Jacobian do not read them.
 include("topology.jl")
 include("mesh_geometry.jl")
 
@@ -44,13 +45,11 @@ export Face1D
 # Mesh types
 export Mesh1D
 
-# `MeshTopology` (immutable connectivity view) and `MeshGeometry` (mutable
-# z/V/A buffers) are the user-facing types for the pure-residual layer.
-# Builders / boundary-id translators (`mesh_topology`, `mesh_geometry`,
-# `sync_geometry_from_mesh!`, `tag_to_boundary_id`, `boundary_id_to_tag`)
-# are deliberately internal — field access on the structs is the
-# canonical read path; the two exported accessors below dereference
-# `Ref`-wrapped scalars and aren't pure field reads.
+# `MeshTopology` (immutable connectivity) and `MeshGeometry` (mutable z/V/A
+# buffers). Builders / boundary-id translators (`mesh_topology`,
+# `mesh_geometry`, `sync_geometry_from_mesh!`, `tag_to_boundary_id`,
+# `boundary_id_to_tag`) are internal; the two exported accessors below
+# dereference `Ref`-wrapped scalars.
 export MeshTopology, MeshGeometry
 export resize_geometry!, cross_section_area, mesh_time
 

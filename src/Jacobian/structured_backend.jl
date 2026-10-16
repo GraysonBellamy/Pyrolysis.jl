@@ -1,6 +1,5 @@
 """
-The `Structured` backend — Layer-2 entry point for the rebuilt
-Jacobian architecture.
+The `Structured` backend: operator-by-operator Jacobian assembly.
 
 `Structured(strategy = DirectSolve())` produces a `JacobianSpec`
 backed by:
@@ -70,8 +69,8 @@ import ..Problem as PyProblem
 	Structured{S<:LinearSolveStrategy} <: JacobianBackend
 
 Backend that assembles a [`StructuredJacobian`](@ref) by walking an
-operator list. The strategy parameter `S` is propagated through
-`is_approximate` and consumed by the `ldiv!` chosen at solve time.
+operator list. The strategy parameter `S` fixes the assembly profile
+(`sparsity_profile`) and is reported by `is_approximate`.
 
 # Constructor
 `Structured(; strategy = DirectSolve())` — the standard form. The
@@ -92,6 +91,10 @@ is_approximate(::Structured{ApproxSolve}) = true
 # Cache types
 # ============================================================================
 
+# Every field is concretely typed (note `DefT`/`JacT` for the parametric
+# `ProblemDef`/`StructuredJacobian`): an abstractly-typed field here turns
+# every operator call in `_compute_jacobian!` into a dynamic dispatch that
+# boxes all of its arguments (about 5 KiB per Jacobian evaluation).
 """
 	StructuredOpsCache
 
@@ -127,11 +130,6 @@ per-operator AD cost.
   structured-coupling emission and the geometry AD pass.
 - `jac::StructuredJacobian`.
 """
-# Every field is concretely typed (note `DefT`/`JacT` for the parametric
-# `ProblemDef`/`StructuredJacobian`): an abstractly-typed field here turns
-# every operator call in `_compute_jacobian!` into a dynamic dispatch that
-# boxes all of its arguments — measured at ~5 KiB per Jacobian evaluation
-# before `jac` was parameterized.
 struct StructuredOpsCache{
     Mat,
     BCS,

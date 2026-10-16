@@ -1,5 +1,5 @@
 """
-verify_jacobian CI matrix — `Structured` backend × every canonical
+verify_jacobian matrix — `Structured` backend × every canonical
 configuration × every strategy, all compared against
 `DenseAD_ForwardDiff` (verifier reference) at `t = 0` on the structural
 support of the active backend's sparsity pattern.
@@ -49,7 +49,7 @@ const _CONFIGS = (
     ),
 )
 
-@testset "verify_jacobian CI matrix" begin
+@testset "verify_jacobian matrix" begin
     for cfg in _CONFIGS
         def, ws, u, _ = cfg.builder()
 

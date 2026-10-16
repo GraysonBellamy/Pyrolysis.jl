@@ -1,4 +1,4 @@
-# test_radiation_p1_validation.jl
+# test_p1_validation.jl
 # Validation tests for P1 volumetric radiation model
 # Tests against analytical solutions, physics verification, conservation checks
 
@@ -13,8 +13,7 @@ using Pyrolysis.Experimental:
 using Pyrolysis.Geometry: CellState
 using Pyrolysis.Properties  # For update_properties!
 using Pyrolysis.Discretization  # For core finite-volume helpers
-# P1 kernels now live in Experimental (selective imports to avoid leaking
-# Experimental's P1 `state_length` into the shared Main namespace).
+# P1 kernels live in Experimental.
 using Pyrolysis.Experimental:
     optical_thickness,
     optical_thickness_cell,
@@ -295,8 +294,8 @@ end
             # response superposes linearly). Continuum P1 with the Marshak
             # closure absorbs
             #     q_abs/I_ext = 4c/(1 + √3·c),  c = ε/(2(2−ε))
-            # of the incident flux: 0.9577 at ε = 0.9. The pre-fix weight-1
-            # injection gave 1/(1 + √3·c) = 0.585 — barely over half.
+            # of the incident flux: 0.9577 at ε = 0.9. A weight-1 injection
+            # would give 1/(1 + √3·c) = 0.585 — barely over half.
             ε = 0.9
             α_vol = 500.0 * 20.0   # ξ·α_mass = 10000 m⁻¹ → decay length 58 µm
             L = 0.005              # τ = 50: effectively semi-infinite
@@ -339,7 +338,7 @@ end
             absorbed_fraction = (flux_into_top[2] - flux_into_top[1]) / I_ext
             expected = 4.0 * c / (1.0 + sqrt(3.0) * c)
             @test absorbed_fraction ≈ expected rtol = 0.02
-            # And nowhere near the old weight-1 value
+            # And nowhere near the weight-1 value
             @test absorbed_fraction > 0.9
         end
 

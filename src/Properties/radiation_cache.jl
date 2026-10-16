@@ -4,8 +4,6 @@ Radiation property caching for P1 radiation transport.
 Pre-allocated storage for radiation-specific properties to avoid allocations
 in inner loops. The RadiationCache complements the main PropertyCache by
 storing the radiation intensity field G and derived quantities.
-
-Reference: P1_Volumetric_Reradiation_Implementation.md Section 4.2
 """
 
 # ============================================================================

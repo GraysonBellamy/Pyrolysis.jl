@@ -253,7 +253,7 @@ function _verification_case_vcpl06a()
                 value = a.S_conv,
                 exact = S_exact,
                 error = err_sbp,
-                tol = 1e-6,  # observed ~1e-9 at n = 40..320 (2026-07-07)
+                tol = 1e-6,  # observed ~1e-9 at n = 40..320
                 comment = "energy S_conv removes ≡ energy the discrete gas " *
                           "ledger says the gas picks up",
             ),
@@ -262,7 +262,7 @@ function _verification_case_vcpl06a()
                 value = a.S_conv,
                 exact = reheat_ref,
                 error = err_reheat,
-                tol = 2.4e-4,  # 3× observed: 7.8e-5 (n=80, 2026-07-07; stable
+                tol = 2.4e-4,  # 3× observed: 7.8e-5 (n=80; stable
                 # across the n = 40..320 ladder)
                 comment = "quasi-steady physical reference",
             ),
@@ -271,7 +271,7 @@ function _verification_case_vcpl06a()
                 value = a.m_out,
                 exact = a.m_gen,
                 error = err_mass,
-                tol = 2.5e-4,  # 3× observed: 7.5e-5 (n=80, 2026-07-07): holdup drift
+                tol = 2.5e-4,  # 3× observed: 7.5e-5 (n=80): holdup drift
                 comment = "quasi-steady window guard",
             ),
         ]
@@ -326,7 +326,7 @@ function _verification_case_vcpl06b()
                 value = defect_K,
                 exact = 0.0,
                 error = abs(defect_K),
-                tol = 0.1,  # ~4× observed: 0.026 K (n=80, 2026-07-07) on a
+                tol = 0.1,  # ~4× observed: 0.026 K (n=80) on a
                 # 330 K pickup — the T_s boundary-blend secondary (tech-ref
                 # §12.3.2), shrinking with n
                 comment = "c_g·0.03 K-scale closure on a 330 K pickup; a " *
@@ -337,7 +337,7 @@ function _verification_case_vcpl06b()
                 value = sol.ΔE,
                 exact = pred,
                 error = err_ledger,
-                tol = 1.5e-4,  # 3× observed: 4.7e-5 of ∫q_bnd (n=80, 2026-07-07,
+                tol = 1.5e-4,  # 3× observed: 4.7e-5 of ∫q_bnd (n=80,
                 # trapezoidal ledger; a rectangle rule leaves a ~30%
                 # pure-quadrature residual on this transient window)
                 comment = "q_bnd + Q_rxn + S_conv + hand-off + gas hand-off + " *

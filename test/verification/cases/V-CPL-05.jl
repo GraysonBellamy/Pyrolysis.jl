@@ -103,7 +103,7 @@ function _verification_case_vcpl05()
                 name = "thin-limit deviation from 0D TGA (L = $(L_ladder[end]*1e3) mm)",
                 value = errs[end],
                 error = errs[end],
-                tol = 3e-3,  # 3× observed: 1.0e-3 (n=16, 2026-07-06)
+                tol = 3e-3,  # 3× observed: 1.0e-3 (n=16)
                 comment = "max-over-t of |⟨ξ⟩ − ξ_0D|/ξ₀; lag ΔT ≈ β(L/2)²/2α ≈ 0.12 K",
             ),
         )
@@ -118,7 +118,7 @@ function _verification_case_vcpl05()
                     value = r,
                     exact = 2.0,
                     error = abs(r - 2.0),
-                    tol = 0.1,  # observed rates 2.021, 2.006 (2026-07-06)
+                    tol = 0.1,  # observed rates 2.021, 2.006
                     comment = "errors $(round.(errs, sigdigits = 3)) at L = $(L_ladder)",
                 ),
             )

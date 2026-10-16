@@ -1,5 +1,5 @@
 """
-The `GasTransportOperator` — the Fickian gas-transport contribution extracted from the residual.
+The `GasTransportOperator` — the Fickian gas-transport contribution to the residual.
 
 Represents the Fickian gas-transport contribution to the residual:
 
@@ -21,7 +21,7 @@ S_conv** — the whole boundary-cell S_conv energy row (interior + BC face flux
 The boundary-face flux contributions to `dξ_gas` are the
 [`BCMassOperator`](@ref)'s responsibility.
 
-# Math correspondence with the existing residual
+# Correspondence with the residual
 
 `compute_rhs!` computes `J_gas` via `compute_gas_fluxes!`, overwrites the
 boundary entries via `apply_mass_bc_flux!`, then takes the species
@@ -30,11 +30,10 @@ face-averaged J_gas. `GasTransportOperator.apply!` reproduces the *interior-
 only* slice (boundary faces zeroed) plus, at interior cells, the
 `S_conv / ρcp_eff` energy contribution. Together with `BCMassOperator` and
 `BCConvectionOperator`, the three cover the same residual contribution as
-the existing path.
+`compute_rhs!`.
 
 # Simplifications
 
-- No species-mass scaling (`use_species_scaling = false`).
 - Interior face fluxes only (boundary handled by the BC operators).
 """
 
@@ -54,7 +53,7 @@ struct GasTransportOperator <: Operator end
 	GasTransportADWorkspace{NC, CFG}
 
 Workspace for `GasTransportOperator.contribute_to_jacobian!`. Carries
-the AD-default's stencil-AD plumbing (`x_buf`, `f_buf`, `J_local`,
+the ForwardDiff reference's stencil-AD plumbing (`x_buf`, `f_buf`, `J_local`,
 `cfg`) and the analytical override's per-cell scratch arrays for the
 T-row's ξ-derivative accumulators (`dS_dξ_L_buf`, `_C_buf`, `_R_buf`).
 The scratch arrays replace per-face `ntuple(j -> ..., Val(NC))`
@@ -375,8 +374,8 @@ end
 # Analytical override (GasTransport)
 #
 # Same Jacobian as the AD path below but with property derivatives extracted
-# from one Dual-mode pass per cell (input dim = NC+1) — replacing the AD
-# default's 3·(NC+1)-dim Dual chunk over the whole `apply_cell!`. The face
+# from one Dual-mode pass per cell (input dim = NC+1) — instead of the
+# ForwardDiff reference's 3·(NC+1)-dim Dual chunk over the whole `apply_cell!`. The face
 # fluxes' chain rule is hand-derived: the direct (T, ξ) terms come from the
 # closed-form `gas_flux` formula, and the indirect path through
 # `λ_face = harmonic_mean(λ_L, λ_C, …)` composes cell-`λ` derivatives via
@@ -515,7 +514,7 @@ Analytical override of `contribute_to_jacobian!` for
 `(λ_C, ρcp, cp_g, all derivs)` once and assembles the per-face flux
 chain rule plus the `S_conv/ρcp` and `div(J)` divergences by hand.
 
-Equivalence with the AD-default `_contribute_to_jacobian_ad!` is gated
+Equivalence with the ForwardDiff reference `_contribute_to_jacobian_ad!` is gated
 at rtol = 1e-12 in
 `test/jacobian/test_operator_gas_transport_analytical.jl`.
 """
@@ -618,7 +617,7 @@ function _contribute_to_jacobian_analytical!(
         # face, accumulate the T-row pieces, and immediately scatter the
         # ξ-row pieces into A.
 
-        # Closure factory replaced by inline branches to keep the code
+        # Inline branches, not a closure factory, keep the code
         # stack-allocated.
 
         # === Left face (between iL and i, when has_left) ===
@@ -652,7 +651,7 @@ function _contribute_to_jacobian_analytical!(
                 dJ_dT_C_full = dJ_dTR + dJ_dλ * dλf_dλC * dλ_C_dT
                 # Note: T_R doesn't enter J_left; ξ_R doesn't enter J_left.
 
-                # === ξ-row scatter for component g (the AD-default writes
+                # === ξ-row scatter for component g (the ForwardDiff reference writes
                 # `out[1+g] = -(J_R·A_R - J_L·A_L)/V_C`; here we add the
                 # left-face contribution: `+J_L · A_L / V_C`).
                 row_g = n_cells + (g - 1) * n_cells + i
@@ -852,15 +851,16 @@ function contribute_to_jacobian!(
 end
 
 # ============================================================================
-# AD-default path — preserved as `_contribute_to_jacobian_ad!` for the
-# rtol=1e-12 equivalence reference.
+# ForwardDiff path `_contribute_to_jacobian_ad!`: the rtol=1e-12 equivalence
+# reference for the analytical override.
 # ============================================================================
 
 """
-	contribute_to_jacobian!(jac, op::GasTransportOperator,
-	                        u, t, ws, state, mesh, material, layout) -> nothing
+	_contribute_to_jacobian_ad!(jac, op::GasTransportOperator,
+	                            u, t, ws, state, mesh, material, layout) -> nothing
 
-Per-cell AD path. Each cell `i`:
+Per-cell ForwardDiff path, the equivalence reference for the analytical
+override. For each cell `i`:
 
 1. Pack the 3-cell `(T, ξ)` stencil into `ws.x_buf`.
 2. Run `ForwardDiff.jacobian!` over `apply_cell!` to produce a

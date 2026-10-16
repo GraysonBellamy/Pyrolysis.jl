@@ -53,12 +53,12 @@ using Pyrolysis.Discretization
 
     # ========================================================================
     @testset "Ideal Gas Pressure" begin
-        # Pressure now uses P = N/φ where N = Σ ξⱼ R T / Mⱼ over gas components
+        # Pressure is P = N/φ where N = Σ ξⱼ R T / Mⱼ over gas components
         # and φ is the porosity (gas volume fraction).
 
         # ====================================================================
         @testset "Single gas component" begin
-            # Pure gas → φ = 1, so P = ξ_gas R T / M (matches old formula)
+            # Pure gas → φ = 1, so P = ξ_gas R T / M
             ξ_gas = 1.0     # kg/m³
             T = 400.0       # K
             M = 0.044       # kg/mol (CO2)
@@ -135,11 +135,9 @@ using Pyrolysis.Discretization
 
     # ========================================================================
     @testset "Pressure Derivatives (ForwardDiff)" begin
-        # The analytic `porosity_derivatives` / `pressure_derivatives` family was
-        # deleted (dead API; it ignored the porosity clamp and blew up as
-        # N/φ_safe² at the 1e-12 floor). The live Jacobian path differentiates
-        # `porosity` ∘ `ideal_gas_pressure` with ForwardDiff — verify it against
-        # finite differences, and verify it stays finite AT the clamp.
+        # The Jacobian path differentiates `porosity` ∘ `ideal_gas_pressure`
+        # with ForwardDiff — verify it against finite differences, and verify
+        # it stays finite AT the clamp.
         @testset "AD derivatives match finite difference" begin
             ξ = (500.0, 1.0)
             T = 400.0
@@ -160,10 +158,10 @@ using Pyrolysis.Discretization
         end
 
         @testset "AD stays finite at the porosity clamp" begin
-            # Over-packed solid: φ clamps to 0 → P = N/max(φ, 1e-12). The old
-            # analytic path formed N/φ_safe² ≈ 1e24·N here; the live AD path
-            # must return finite values and finite (clamp-consistent, zero
-            # through the φ channel) derivatives.
+            # Over-packed solid: φ clamps to 0 → P = N/max(φ, 1e-12). An
+            # analytic N/φ_safe² term would be ≈ 1e24·N here; the AD path must
+            # return finite values and finite (clamp-consistent, zero through
+            # the φ channel) derivatives.
             ξ = (2000.0, 1.0)   # 2000/1000 = 2 > 1 → φ clamped to 0
             T = 400.0
             φ = porosity(ξ, T, two_comp)
@@ -255,8 +253,8 @@ using Pyrolysis.Discretization
             )
 
             # Uniform solid κ₀ with 30% gas: both bounds must equal κ₀ on the
-            # solid basis. (The old all-phase basis gave κ_series = 1.43e-13 >
-            # κ₀ > κ_parallel = 7e-14 — the "lower bound" above the upper.)
+            # solid basis. (An all-phase basis would give κ_series = 1.43e-13
+            # > κ₀ > κ_parallel = 7e-14 — the "lower bound" above the upper.)
             @test effective_permeability(ξ, T, mk(PARALLEL)) ≈ 1e-13 rtol = 1e-12
             @test effective_permeability(ξ, T, mk(SERIES)) ≈ 1e-13 rtol = 1e-12
 
@@ -274,9 +272,7 @@ using Pyrolysis.Discretization
             # Default-κ virgin (impermeable) + char + gas: the series bound is
             # EXACTLY zero (gas cannot cross a series-stacked impermeable
             # layer); parallel is the solid-basis volume-weighted mean; the
-            # default WEIGHTED β = 0.5 is their average. (The old code gave
-            # κ_series = 5e-12 — five times char's own κ through a
-            # 71%-impermeable matrix.)
+            # default WEIGHTED β = 0.5 is their average.
             @test effective_permeability(ξ, T, mk2(SERIES)) == 0.0
             @test effective_permeability(ξ, T, mk2(PARALLEL)) ≈ (0.2 / 0.7) * 1e-12 rtol =
                 1e-12
@@ -367,8 +363,8 @@ using Pyrolysis.Discretization
             μ = SutherlandProperty()(273.15)
             @test μ ≈ 1.716e-5 rtol = 1e-10
 
-            # Air at 300 K: 1.846e-5 Pa·s (the old default 1.81e-5 was the
-            # ≈292.5 K value, a −2% bias on every Darcy velocity)
+            # Air at 300 K: 1.846e-5 Pa·s (1.81e-5 is the ≈292.5 K value, a
+            # −2% bias on every Darcy velocity at 300 K)
             μ_300 = SutherlandProperty()(300.0)
             @test μ_300 ≈ 1.846e-5 rtol = 1e-3
         end
@@ -387,8 +383,8 @@ using Pyrolysis.Discretization
         # ====================================================================
         @testset "Sutherland's law verification" begin
             # Verify against known values for air. The 1% tolerance is tight
-            # enough to reject the previous constants (μ_ref = 1.81e-5 @ 300 K,
-            # S = 110.0), which deviate ≈2.2% at these points.
+            # enough to reject the constants μ_ref = 1.81e-5 @ 300 K,
+            # S = 110.0, which deviate ≈2.2% at these points.
             # At 400K, air viscosity ≈ 2.29e-5 Pa·s
             μ_400 = SutherlandProperty()(400.0)
             @test μ_400 ≈ 2.29e-5 rtol = 0.01
@@ -422,14 +418,13 @@ using Pyrolysis.Discretization
             # Jacobian is the ANALYTICAL override in
             # `Jacobian/operators/darcy_transport.jl`, whose mobility chain rule
             # assumes dμ/dξ == 0 and takes the ξ-path through κ only. If a
-            # composition-dependent rule (Wilke, option B) lands here, this
+            # composition-dependent rule (e.g. Wilke) is used here, this
             # assert is the thing that must fail loudly: the rtol = 1e-12
             # analytical-vs-AD gate cannot catch the missing dμ/dξ terms while
             # every Darcy fixture carries a single gas component, because a
             # one-species mixture rule is the identity. When you intend to break
             # this, also add the `− mob·dμ_dξ[j]` terms to every `dvg_dξ_*_j`
-            # expression in that override and land a multi-gas fixture first.
-            # See docs/Gas_Viscosity_Recommendation_2026-09-21.md §1 and §3.
+            # expression in that override and add a multi-gas fixture first.
             for ξ_alt in ((500.0, 0.0), (500.0, 50.0), (10.0, 1.0), (0.0, 1.0))
                 @test mixture_gas_viscosity(ξ_alt, T, two_comp) == μ_mix
             end
@@ -438,14 +433,15 @@ using Pyrolysis.Discretization
         # ====================================================================
         @testset "Nonphysical trial-state hardening (T floor)" begin
             # Diverging Newton trial states can present nonphysical (even
-            # negative) temperatures; T^1.5 must not throw a DomainError —
-            # it killed an entire ApproxSolve ALE solve near burnout
-            # (2026-06-11). The kernels clamp at T_GAS_PROPERTY_FLOOR.
+            # negative) temperatures; T^1.5 must not throw a DomainError,
+            # which would abort the whole solve (e.g. an ApproxSolve ALE run
+            # near burnout). Sutherland evaluates on the property bracket
+            # (T_PROPERTY_MIN); Chapman–Enskog clamps at T_GAS_PROPERTY_FLOOR.
             μ_neg = SutherlandProperty()(-43.0)
             @test isfinite(μ_neg) && μ_neg > 0.0
             # The floor binds: any T below it gives the floor's value.
             @test μ_neg == SutherlandProperty()(0.0)
-            # The floor never binds on physical states (≥ ~200 K).
+            # The clamp does not bind on physical states.
             @test SutherlandProperty()(300.0) ≈ 1.846e-5 rtol = 1e-3
 
             D_neg = chapman_enskog_diffusivity(-43.0, 0.06)
@@ -629,7 +625,7 @@ using Pyrolysis.Discretization
             J_neg = gas_flux_darcy_fick(-v_g, ξ_L, ξ_R, φ_L, φ_R, λ_face, T_L, T_R, d_LR)
             @test J_neg ≈ -v_g * ξ_R / 0.3 rtol = 1e-12
 
-            # φ = 0.5 doubles the advective flux relative to the old ξ·v form
+            # φ = 0.5 doubles the advective flux relative to the bare ξ·v
             J_half = gas_flux_darcy_fick(v_g, ξ_L, ξ_R, 0.5, 0.5, λ_face, T_L, T_R, d_LR)
             @test J_half ≈ 2.0 * v_g * ξ_L rtol = 1e-12
         end
@@ -1449,7 +1445,7 @@ end  # Pressure Boundary Conditions tests
 
     @testset "BRUGGEMAN rejected for gas transfer" begin
         # BRUGGEMAN is not a physically valid closure for gas-transfer
-        # coefficients (or for permeability). It's now rejected at evaluation time.
+        # coefficients (or for permeability). It is rejected at evaluation time.
         brugg_gas_mat = Material(
             name = :brugg_gas_test,
             components = (
@@ -1482,7 +1478,7 @@ end  # Pressure Boundary Conditions tests
         # the analytical root is k_eff = k_c·(3p − 1)/2 for p ≥ 1/3, else 0.
 
         # Confirming case: v = (0.5, 0.5), k = (1, 0) → 0.25.
-        # The pre-fix code skipped the insulating phase and returned 1.0.
+        # Skipping the insulating phase would return 1.0.
         @test bruggeman_effective_property((0.5, 0.5), (1.0, 0.0)) ≈ 0.25 atol = 1e-8
 
         # General above-threshold point: p = 0.6, k_c = 2 → 2(0.8)/2 = 0.8
@@ -1576,8 +1572,8 @@ end  # Bruggeman tests
         # φ = 1 − 100/1500 ≈ 0.933: CK ratio φ³/(180(1−φ)²) ≈ 1.02 > 1 → capped.
         κ_high = effective_permeability((100.0, 0.05), T, ck_mat)
         @test κ_high == ℓ^2
-        # Pure-gas cell (φ = 1 exactly): the old floor produced κ = ℓ²·1e30;
-        # the cap keeps it at ℓ², and the AD derivative is finite (zero on the
+        # Pure-gas cell (φ = 1 exactly): the CK ratio diverges (κ = ℓ²·1e30
+        # behind a (1−φ)² floor); the cap keeps it at ℓ², and the AD derivative is finite (zero on the
         # capped branch — consistent with the residual's min()).
         κ_pure = effective_permeability((0.0, 0.05), T, ck_mat)
         @test κ_pure == ℓ^2

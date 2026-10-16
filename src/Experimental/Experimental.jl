@@ -1,9 +1,9 @@
 """
 	Pyrolysis.Experimental
 
-Namespace for experimental or unstable code paths. The names below remain
-functional and are accessible as `Pyrolysis.Experimental.X`, but they are
-deliberately removed from the top-level public API. These interfaces may
+Namespace for experimental or unstable code paths. The names below are
+accessible as `Pyrolysis.Experimental.X` and are not exported at the top
+level. These interfaces may
 change between releases; prefer the stable top-level exports when possible.
 
 Contents:

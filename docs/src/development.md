@@ -24,8 +24,8 @@ Pkg.test("Pyrolysis")
 
 `test/runtests.jl` discovers the domain test directories automatically.
 Performance invariants (allocation, type-stability, and method-count checks)
-live under `test/perf/` and run as subprocesses; they are also exercised by
-the `perf.yml` CI workflow on Julia 1.10 and the latest 1.x.
+live under `test/perf/` and run as subprocesses. No CI workflow runs the test
+suite; run it locally before merging.
 
 ## Quality tooling
 

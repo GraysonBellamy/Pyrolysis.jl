@@ -1,11 +1,12 @@
-# Depletion-limiter regression tests.
+# Depletion-limiter tests.
 #
-# - The old base-applied limiter `ξ_eff = ξ < ξ_th ? ξ·tanh(ξ/ξ_th) : ξ` had
-#   a 23.84% value jump at ξ = ξ_th. The limiter is now a smooth
-#   multiplicative rate factor tanh(ξ/ξ_th) with no threshold branch.
-# - A base-applied limiter cannot gate order-0 reactants (ξ_eff^0 ≡ 1), so
-#   the rate stayed k(T) at ξ ≤ 0 and drove ξ negative without bound, and
-#   orders 0 < n < 0.5 kept a singular ∂r/∂ξ at depletion.
+# - The limiter is a smooth multiplicative rate factor tanh(ξ/ξ_th) with no
+#   threshold branch. A base-applied limiter
+#   `ξ_eff = ξ < ξ_th ? ξ·tanh(ξ/ξ_th) : ξ` would jump 23.84% in value at
+#   ξ = ξ_th.
+# - A base-applied limiter cannot gate order-0 reactants (ξ_eff^0 ≡ 1): the
+#   rate would stay k(T) at ξ ≤ 0 and drive ξ negative without bound, and
+#   orders 0 < n < 0.5 would keep a singular ∂r/∂ξ at depletion.
 
 using Test
 using ForwardDiff
@@ -30,7 +31,7 @@ using Pyrolysis.Physics: reaction_rate, DepletionLimiter
     rate03(ξ) = reaction_rate(rxn03, (ξ, zero(ξ)), T_kin)
 
     @testset "continuous and smooth across the threshold" begin
-        # Old code jumped by factor tanh(1) ≈ 0.762 crossing ξ_th.
+        # A base-applied limiter jumps by factor tanh(1) ≈ 0.762 crossing ξ_th.
         ε = 1e-9
         @test rate1(ξ_th * (1 + ε)) ≈ rate1(ξ_th * (1 - ε)) rtol = 1e-6
         d_lo = ForwardDiff.derivative(rate1, ξ_th * (1 - ε))
@@ -54,7 +55,8 @@ using Pyrolysis.Physics: reaction_rate, DepletionLimiter
     end
 
     @testset "zero-order reactions stop at depletion" begin
-        # Old code: rate stayed k(T) at ξ = 0 and beyond (unbounded negative ξ).
+        # Without the multiplicative gate the rate stays k(T) at ξ = 0 and
+        # beyond (unbounded negative ξ).
         @test rate0(0.0) == 0.0
         @test rate0(-1.0) == 0.0  # integrator overshoot consumes nothing
         # Near depletion the rate decays as k·ξ/ξ_th (exponential burnout,
@@ -69,7 +71,7 @@ using Pyrolysis.Physics: reaction_rate, DepletionLimiter
     end
 
     @testset "bounded ∂r/∂ξ at depletion for n < 0.5" begin
-        # Old base-applied limiter gave ∂r/∂ξ ~ ξ^(2n−1) → ∞ for n < 0.5.
+        # A base-applied limiter gives ∂r/∂ξ ~ ξ^(2n−1) → ∞ for n < 0.5.
         # The multiplicative form gives r ~ k·ξ^(n+1)/ξ_th, so the derivative
         # vanishes at depletion instead of diverging.
         d4 = ForwardDiff.derivative(rate03, 1e-4)
@@ -84,7 +86,7 @@ using Pyrolysis.Physics: reaction_rate, DepletionLimiter
 
     @testset "temperature gate width" begin
         # Gate factor is 0.5·(1 + tanh((T − T_min)/gate_width)); default width
-        # 1.0 K reproduces the historical bare-tanh ramp bit-for-bit.
+        # 1.0 K is the bare tanh(T − T_min) ramp bit-for-bit.
         T_min = 600.0
         rxn_default =
             Reaction(:gate_default, 1 => 2, A = 1e10, E = 150e3, h = 5e5, T_min = T_min)

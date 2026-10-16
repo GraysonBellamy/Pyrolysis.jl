@@ -25,11 +25,15 @@ cache.
               Kernels only read connectivity (cell IDs, face IDs,
               neighbor lookups, boundary tags) off the mesh; live state
               and state-derived geometry live in `state_cache`.
-- `GeomT`:    `MeshGeometry` view
+- `GeomT`:    `MeshGeometry` (built from the mesh at construction, not updated
+              afterwards; not read by the 1D residual)
 - `LayoutT`:  `StateLayout` descriptor
 - `RadCacheT`:  `Properties.RadiationCache` for P1; `Nothing` otherwise
 - `StateCacheT`: `StateCache{NC, Tu, Mode}` — typed mirror of the live
                  state populated at every residual entry
+- `DryIdxT`:  `NTuple` of the dry-pyrolysis-gas component indices
+- `DarcyT`:   the `PropertyCache`'s Darcy sub-cache type (`Nothing` for
+              Fickian transport)
 """
 mutable struct Workspace{
     NC,
@@ -97,7 +101,7 @@ mutable struct Workspace{
     # (free-stream preservation, prescribed smooth motion). The caller is
     # responsible for keeping the bottom node pinned (w(z_bottom, t) = 0).
     # NOTE: the structured geometry Jacobian assumes reaction-driven motion —
-    # solve with colored-FD Jacobians when overriding.
+    # use a finite-difference Jacobian when overriding (as the MMS driver does).
     w_override::Union{Nothing,Function}
 end
 

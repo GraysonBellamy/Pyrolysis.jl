@@ -1,11 +1,11 @@
 """
-Regression tests for boundary Darcy venting and the impermeable-interface
-mobility rule.
+Tests for boundary Darcy venting and the impermeable-interface mobility
+rule.
 
 - The pressure-BC boundary Darcy velocity enters the species equations as
   an advective venting flux J = v_b·ξ_int/φ_int (outflow-upwinded against a
-  zero-concentration ambient). The failing regime before the fix: venting was
-  independent of permeability and ∇P (film law only).
+  zero-concentration ambient), so venting depends on permeability and ∇P
+  rather than on the film law alone.
 - The venting flux carries the 1/φ intrinsic-density factor.
 - A char(κ>0)/virgin(κ=0) front has exactly zero face mobility — no flow
   leaks into the impermeable side.
@@ -65,7 +65,7 @@ end
             rate[κ] = du[2n+n]   # gas ξ tendency in the surface cell
         end
         # Gas leaves the surface cell, faster with higher κ — the defining
-        # regression: before the fix the rate was the κ-independent film law.
+        # check: the film law alone would make the rate κ-independent.
         @test rate[1e-12] < 0
         @test abs(rate[1e-12]) > 10 * abs(rate[1e-14])
         @test abs(rate[1e-11]) > 5 * abs(rate[1e-12])
@@ -192,7 +192,7 @@ end
     darcy = ws.prop_cache.darcy
 
     # Face 3 separates cell 2 (virgin, κ=0) from cell 3 (char, κ>0): the
-    # one-sided fallback used to assign the char side's full mobility here.
+    # face mobility is zero, not the char side's full mobility.
     front_face = 3
     @test ws.mesh.faces[front_face].cell_ids == (2, 3)
     @test darcy.v_gas[front_face] == 0.0

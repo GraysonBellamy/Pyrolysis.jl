@@ -3,17 +3,17 @@ Guards around the conservative merge and the depletion callback.
 
 - The depletion callback's *condition* keeps firing at `n_live ≤ min_cells`
   (the affect! terminates there).
-- The energy-conserving temperature merge conserves the condensed-phase
-  sensible enthalpy Σ m_j ∫c_p dT — exact for temperature-dependent c_p,
-  and gas heat capacity is excluded.
-- Inverted (tangled) cells are detected from signed widths; the abs()-based
-  cached volumes can never see them, and `find_thin_cells` refuses to park
-  an inverted cell.
+- The energy-conserving temperature merge conserves the sensible enthalpy
+  Σ m_j ∫c_p dT of every component, gas included — exact for
+  temperature-dependent c_p.
+- `find_thin_cells` refuses to park an inverted (tangled) cell, detected
+  from the signed node spacing (the abs()-based cached volumes cannot see
+  it).
 """
 
 using Test
 using Pyrolysis
-using Pyrolysis.Geometry: CellState, update_geometry!
+using Pyrolysis.Geometry: CellState
 using Pyrolysis.Adaptivity: merge_temperatures_conservatively
 using Pyrolysis.Solver: find_thin_cells, create_depletion_callback, DepletionCallbackState
 using Pyrolysis.Problem: z_offset, get_node_positions
@@ -48,8 +48,8 @@ include(joinpath(@__DIR__, "..", "helpers.jl"))
     @test merge_temperatures_conservatively(1.0, a_gas, 1.0, b_gas, mat_const) ≈ T_gas
 
     # (c) Linear c_p(T) = a + bT: the conserved functional is
-    #     h(T) = a(T−T₀) + b/2(T²−T₀²); pre-fix the product form c_p(T)·T
-    #     carried the b-term with coefficient 1 instead of ½.
+    #     h(T) = a(T−T₀) + b/2(T²−T₀²); the product form c_p(T)·T would
+    #     carry the b-term with coefficient 1 instead of ½.
     cp_a, cp_b = 500.0, 2.0
     mat_lin = Material(
         name = :lin_cp,
@@ -72,41 +72,26 @@ include(joinpath(@__DIR__, "..", "helpers.jl"))
     T_exact = (-cp_a + sqrt(cp_a^2 + 2 * cp_b * rhs)) / cp_b
     @test T_lin ≈ T_exact atol = 1e-6
 
-    # The pre-fix product-form answer is measurably different (a few K) —
-    # pin that the new result does NOT reproduce it.
+    # The product-form answer is measurably different (a few K) — pin that
+    # the merge does NOT reproduce it.
     ρcp(T) = ξ_s * (cp_a + cp_b * T)
-    E_old = ρcp(T_a) * T_a + ρcp(T_b) * T_b
-    T_est = E_old / (ρcp(T_a) + ρcp(T_b))
-    T_old = E_old / (2 * ξ_s * (cp_a + cp_b * T_est))
-    @test abs(T_old - T_exact) > 1.0      # the old bias is > 1 K here
-    @test abs(T_lin - T_old) > 1.0
+    E_prod = ρcp(T_a) * T_a + ρcp(T_b) * T_b
+    T_est = E_prod / (ρcp(T_a) + ρcp(T_b))
+    T_prod = E_prod / (2 * ξ_s * (cp_a + cp_b * T_est))
+    @test abs(T_prod - T_exact) > 1.0      # the product-form bias is > 1 K here
+    @test abs(T_lin - T_prod) > 1.0
 
-    # (d) Both cells essentially pure gas: condensed balance is degenerate —
+    # (d) Both cells empty: the energy balance is degenerate —
     #     volume-weighted fallback.
-    a3 = CellState{2}(800.0, (0.0, 10.0), 1.0)
-    b3 = CellState{2}(400.0, (0.0, 10.0), 3.0)
+    a3 = CellState{2}(800.0, (0.0, 0.0), 1.0)
+    b3 = CellState{2}(400.0, (0.0, 0.0), 3.0)
     @test merge_temperatures_conservatively(1.0, a3, 3.0, b3, mat_const) ≈
           (1.0 * 800.0 + 3.0 * 400.0) / 4.0
 end
 
 # ============================================================================
-# Signed-width tangling detection
+# Tangled-cell detection
 # ============================================================================
-@testset "inverted cells are detected (signed widths)" begin
-    mesh = create_uniform_mesh(0.01, 4, Val(2))
-    signed_widths(m) =
-        [m.nodes[c.node_ids[2]].z - m.nodes[c.node_ids[1]].z for c in m.cells]
-    @test all(>(0.0), signed_widths(mesh))
-
-    # Push node 3 past node 4: cell 3 inverts. The cached volumes pass
-    # through abs(), so only the signed width sees the inversion.
-    z4 = mesh.nodes[4].z
-    mesh.nodes[3].z = z4 + 5e-4
-    update_geometry!(mesh)
-    @test all(>(0.0), mesh.cell_volumes)   # the abs() blind spot, by design
-    @test signed_widths(mesh)[3] < 0.0
-end
-
 @testset "find_thin_cells refuses inverted cells" begin
     problem = fixture_problem(n_cells = 4)
     def, ws, u, _ = fixture_state(problem; use_ale = true)

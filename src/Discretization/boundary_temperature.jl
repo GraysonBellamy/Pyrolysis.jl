@@ -548,9 +548,9 @@ end
     ε_eff::Real;
     a_eff::Real = ε_eff,
 )
-    # This BC represents incident radiation - absorptivity doesn't depend on T_s
-    # If radiation is handled volumetrically, flux should be 0 here
-    # For now, we return the absorbed flux (consistent with NO_RADIATION mode)
+    # Incident radiation absorbed at the surface; the absorptivity does not
+    # depend on T_s. This model-unaware form always absorbs at the surface; the
+    # radiation-model-aware method below returns zero for volumetric models.
     flux = evaluate_param(bc.flux, t)
     α = if bc.absorptivity === nothing
         a_eff
@@ -607,7 +607,7 @@ end
 
     # Use a very large heat transfer coefficient to enforce T_s ≈ T_bc
     # But not so large that it causes numerical issues
-    h_large = 1e8  # W/(m²·K) - reduced from 1e10 for stability
+    h_large = 1e8  # W/(m²·K); larger values hurt the Newton conditioning
     q = h_large * (T_bc - T_s)
     dq_dT = -h_large
 

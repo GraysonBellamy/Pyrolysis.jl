@@ -65,7 +65,7 @@ function _verification_case_vhc01()
                     name = "L∞ T-profile error, t=$(t) s",
                     value = err,
                     error = err,
-                    tol = 0.75,  # 3× observed max: 0.24 K at t=30 s (n=100, 2026-07-06)
+                    tol = 0.75,  # 3× observed max: 0.24 K at t=30 s (n=100)
                     comment = "observed 0.24/0.21/0.18/0.14 K at t=30/60/90/180 s",
                 ),
             )
@@ -80,7 +80,7 @@ function _verification_case_vhc01()
                     value = Ts_num,
                     exact = Ts_exact,
                     error = abs(Ts_num - Ts_exact),
-                    tol = 1.5,  # 3× observed max: 0.50 K at t=30 s (n=100, 2026-07-06)
+                    tol = 1.5,  # 3× observed max: 0.50 K at t=30 s (n=100)
                     comment = "surface Newton solve vs exact θ_s = 1 − erfcx(h√(αt)/k); " *
                               "observed 0.50/0.26/0.16/0.06 K at t=30/60/90/180 s",
                 ),
@@ -125,7 +125,7 @@ function _verification_case_vhc01()
             n_cells = 100,
             budget_s = 20.0,
             convergence = ConvergenceSpec(
-                # observed rates 1.991, 1.998 (2026-07-06)
+                # observed rates 1.991, 1.998
                 n_cells = [40, 80, 160],
                 error_fn = l2_error_t60,
                 expected_order = 2.0,

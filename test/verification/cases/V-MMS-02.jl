@@ -86,7 +86,7 @@ function _verification_case_vmms02()
                 value = T_drift,
                 exact = 0.0,
                 error = T_drift,
-                tol = 1e-10,  # observed exactly 0.0 (n=20, 2026-07-06)
+                tol = 1e-10,  # observed exactly 0.0 (n=20)
                 comment = "uniform field must survive 30% mesh compression",
             ),
         )
@@ -99,7 +99,7 @@ function _verification_case_vmms02()
                     value = drift,
                     exact = 0.0,
                     error = drift,
-                    tol = 1e-12,  # observed 0.0 (solid) / 1.5e-16 (gas) at n=20, 2026-07-06
+                    tol = 1e-12,  # observed 0.0 (solid) / 1.5e-16 (gas) at n=20
                     comment = "ALE advection + dilation must vanish for a uniform state",
                 ),
             )
@@ -116,7 +116,7 @@ function _verification_case_vmms02()
                 value = sol.z[n, end],
                 exact = z_top_exact,
                 error = z_err,
-                tol = 1.5e-6,  # 3× observed: 4.0e-7 rel. (n=20, reltol=1e-8, 2026-07-06)
+                tol = 1.5e-6,  # 3× observed: 4.0e-7 rel. (n=20, reltol=1e-8)
                 comment = "node ODE ż = (ṡ/s)z integrated at solver tolerance",
             ),
         )

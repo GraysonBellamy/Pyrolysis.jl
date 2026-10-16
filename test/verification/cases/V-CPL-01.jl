@@ -299,7 +299,7 @@ function _verification_case_vcpl01()
         L,
         t_end,
         sol;
-        # 3× observed: 0.014/0.027/0.038/0.134 K (n=150, 2026-07-06)
+        # 3× observed: 0.014/0.027/0.038/0.134 K (n=150)
         tols_hist = (0.05, 0.1, 0.12, 0.4),
         tol_front = 0.03,   # 3× observed max 0.98%
         tol_slope = 0.03,   # 3× observed 0.95%
@@ -400,7 +400,7 @@ function _verification_case_vcpl01b()
         L,
         t_end,
         sol;
-        # 3× observed: 0.17/0.35/0.61/1.23 K (n=150, 2026-07-06)
+        # 3× observed: 0.17/0.35/0.61/1.23 K (n=150)
         tols_hist = (0.55, 1.1, 1.9, 3.8),
         tol_front = 0.045,  # 3× observed max 1.4% (gate-ramp shift dominates)
         tol_slope = 0.035,  # 3× observed 1.2%
