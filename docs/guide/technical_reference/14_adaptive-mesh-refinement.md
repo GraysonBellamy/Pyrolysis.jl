@@ -1106,8 +1106,8 @@ facts complete the picture:
 3. **Depletion keeps the Jacobian.** A park rewrites the state in place and
    leaves its size unchanged (§14.3.6), so the structured Jacobian, its sparse
    linear solver and `verify_jacobian` all run through burnout. A park event is
-   nonetheless a discrete rewrite of the state: parameter sensitivities (§17)
-   are smooth between events and only piecewise smooth across them.
+   nonetheless a discrete rewrite of the state: outputs are smooth in the
+   parameters between events and only piecewise smooth across them (§17.7.3).
 
 ---
 
@@ -1270,15 +1270,16 @@ the code itself.
 
 4. **Sensitivities across park events.** A park is a discrete rewrite of the
    state, so trajectories are only piecewise smooth in the parameters across an
-   event (§17.7.3); adjoint sensitivity through a park event is unsupported.
+   event (§17.7.3), and a finite difference whose perturbed solves park at
+   different times measures the jump.
 
 5. **$r$-refinement defaults are untuned, and relocation does not remap.**
    The convergence tolerance ($10^{-3}$) and relaxation ($0.5$) defaults have not
    been validated on realistic steep-front pyrolysis problems, and
    `relocate_nodes!` moves nodes without conservatively remapping $T,\xi$ onto the
    new layout — that remap is the caller's responsibility (§14.2.4). A non-smooth
-   relocation or a missing remap would also break the AD-cleanliness on which
-   forward sensitivity relies (§17).
+   relocation or a missing remap would also make outputs non-smooth in the
+   parameters (§17).
 
 6. **2:1 balance is one-sided and Laplacian smoothing is fragile.** Balance is
    enforced only on newly marked cells and may leave residual imbalances for

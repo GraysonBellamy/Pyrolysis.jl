@@ -255,8 +255,8 @@ unique.
 
 The solver is written to carry whatever scalar type its inputs carry. It promotes
 to the widest type among $(T_{\text{cell}}, k_{\text{eff}}, \Delta z_{1/2},
-t, \varepsilon_{\text{eff}}, a_{\text{eff}}, \dot m_g)$; under sensitivity analysis (§17, Sensitivity
-Analysis) this is a `ForwardDiff.Dual`. The Newton *convergence test* uses
+t, \varepsilon_{\text{eff}}, a_{\text{eff}}, \dot m_g)$; in the AD passes of the
+Jacobian (§15) this is a `ForwardDiff.Dual`. The Newton *convergence test* uses
 `ForwardDiff.value(f)` (the primal residual), so the iteration count is identical
 with or without AD, while the returned tuple $(T_s,\,q_{\text{applied}},\,
 q_{\text{conducted}})$ is fully Dual-typed and carries sensitivities into the
@@ -1050,7 +1050,7 @@ $$
 summing only the solid components (the `is_solid` predicate — not liquids, not
 gases) at the initial state. This is computed once and stored on the mutable mesh
 as `Float64`; under AD the $\chi$ numerator is Dual-typed but this denominator
-stays `Float64` (see §15, §17).
+stays `Float64` (see §15).
 
 ---
 

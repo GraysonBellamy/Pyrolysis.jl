@@ -193,7 +193,7 @@ residual!(du, u, def::ProblemDef, t, ws::Workspace)  ->  nothing
   dry-gas component indices and the boundary face IDs.
 - `t` is a plain `Real`; the kernel accepts whatever scalar type $\boldsymbol{u}$
   and $\boldsymbol{du}$ carry — `Float64` for ordinary evaluation, or
-  `ForwardDiff.Dual` for AD Jacobian assembly and forward sensitivity (§17).
+  `ForwardDiff.Dual` for AD Jacobian assembly.
 
 This split is what makes parameter sweeps (§ User Guide UG-12) and the
 AD Jacobians possible without re-allocating problem metadata: every worker shares
@@ -1521,9 +1521,9 @@ whole construction is verified against the dense AD reference.
 - **WithChi × Darcy.** `WithChi` is tested mainly with Fickian transport; the
   interaction of the $\chi$ rank-1 coupling with the full Darcy operator set is
   not exhaustively exercised.
-- **Adjoint sensitivity across park events.** A park is a discrete rewrite of
-  the state (§14.3.4); adjoint sensitivity through such an event is
-  unsupported, and forward sensitivities are valid only between events.
+- **Sensitivities across park events.** A park is a discrete rewrite of
+  the state (§14.3.4); finite-difference sensitivities are valid only between
+  events.
 - **ILU drop tolerance.** The default $\tau=0.1$ for the ILU-Krylov solvers has
   not been swept for optimality across pyrolysis regimes; inexact solves can
   raise Newton rejections on Arrhenius transients.

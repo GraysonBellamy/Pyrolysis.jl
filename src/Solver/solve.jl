@@ -363,9 +363,6 @@ Solve a pyrolysis problem using DifferentialEquations.jl.
   via `@warn`; does not throw.
 - `abstol=1e-8`: Absolute tolerance
 - `reltol=1e-6`: Relative tolerance
-- `sensealg=nothing`: Optional SciMLSensitivity sense algorithm forwarded to
-  `OrdinaryDiffEq.solve`. This is primarily used by
-  `PyrolysisSciMLSensitivityExt`.
 - `maxiters=1000000`: Maximum iterations
 - `dtmin=1e-12`: Minimum timestep
 - `dtmax=Inf`: Maximum timestep
@@ -519,7 +516,6 @@ function solve(
 
     abstol::Real = 1e-8,
     reltol::Real = 1e-6,
-    sensealg = nothing,
     maxiters::Int = 1000000,
     dtmin::Real = 1e-12,
     dtmax::Real = Inf,
@@ -728,9 +724,6 @@ function solve(
         :dt => problem.dt_initial,
         :progress => false,  # Disable OrdinaryDiffEq's progress, we use our own
     )
-    if sensealg !== nothing
-        solve_kwargs[:sensealg] = sensealg
-    end
 
     solve_kwargs[:saveat] = saveat isa Number ? Float64(saveat) : collect(Float64, saveat)
 

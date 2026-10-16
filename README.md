@@ -84,7 +84,6 @@ advanced users. Highlights:
 | Radiation | `RadiationModel`, `NO_RADIATION`, `SURFACE_ABSORPTION`, `BEER_LAMBERT` |
 | Geometry | `create_uniform_mesh`, `create_stretched_mesh` |
 | Problem & solve | `PyrolysisProblem`, `PyrolysisSolution`, `solve`, `parameter_sweep` |
-| Sensitivities | `forward_sensitivity`, `adjoint_sensitivity` (load `SciMLSensitivity`) |
 | Jacobian backends | `JacobianBackend`, `JacobianSpec`, `Structured`, `LinearSolveStrategy`, `DirectSolve`, `ApproxSolve`, `compute_jacobian!` |
 
 ## Package extensions
@@ -95,7 +94,6 @@ present in the user's environment:
 | Extension | Trigger | Provides |
 |-----------|---------|----------|
 | `PyrolysisPlotsExt` | `using RecipesBase` (or `Plots`) | Plot recipes for `PyrolysisSolution` |
-| `PyrolysisSciMLSensitivityExt` | `using SciMLSensitivity, Zygote` | Forward / adjoint sensitivity |
 
 ## Parameter sweeps
 

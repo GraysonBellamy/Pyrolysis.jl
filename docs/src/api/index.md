@@ -25,7 +25,6 @@ cheat-sheet.
 | [Solving](solve.md) | `solve` and `parameter_sweep` |
 | [Residual layer](residual.md) | `ProblemDef`/`Workspace`, `residual!`, state accessors |
 | [Jacobian](jacobian.md) | Backends, linear-solve strategies, verification |
-| [Sensitivity](sensitivity.md) | Forward/adjoint sensitivity entry points |
 | [Diagnostics](diagnostics.md) | Conservation trackers and reports |
 | [Adaptivity](adaptivity.md) | Error indicators, monitors, mesh operations |
 | [Experimental](experimental.md) | P1 radiation, h-AMR |

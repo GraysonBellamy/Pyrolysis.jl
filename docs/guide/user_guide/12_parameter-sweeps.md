@@ -729,21 +729,13 @@ Run this one in parallel for the 12 points by `addprocs`-ing first and defining
 A parameter sweep gives you a **discrete map** of output-vs-input: you sample the
 input space and read off outputs. When you instead need the **derivative** of an
 output with respect to inputs — for gradient-based calibration, uncertainty
-propagation, or optimization — use the sensitivity entry points covered in
-Chapter 13:
-
-- `forward_sensitivity(base_problem, θ, p_inject; output_fn)` — ForwardDiff
-  Jacobian of an output with respect to a small parameter vector `θ`.
-- `adjoint_sensitivity(base_problem, θ, p_inject, loss_fn; sensealg)` — Zygote
-  gradient of a scalar loss for large parameter counts / inverse problems.
-
-These require loading the `PyrolysisSciMLSensitivityExt` extension
-(`using SciMLSensitivity, Zygote`); without it the exported names are stubs with
-no methods, and calling one raises a `MethodError`. The `p_inject` closure plays exactly the
-role `modify` plays here — it rebuilds a fresh problem from a parameter vector —
-so a `modify` you write for a sweep is usually one rename away from a `p_inject`
-you can hand to `forward_sensitivity` (the only difference is the parameter shape:
-`p_inject` takes a numeric vector `θ`, `modify` takes an arbitrary grid point).
+propagation, or optimization — take finite differences of the same solves
+(Chapter 13). The `p_inject` closure that Chapter 13 perturbs plays exactly the
+role `modify` plays here: it rebuilds a fresh problem from a parameter vector.
+A `modify` you write for a sweep is usually one rename away from a `p_inject`;
+the only difference is the parameter shape (`p_inject` takes a numeric vector
+`θ`, `modify` takes an arbitrary grid point). A sweep over the perturbed
+parameter vectors runs the finite-difference solves in parallel (§13.5).
 
 The sweep harness is also the substrate for **global / variance-based (Sobol)**
 sensitivity: you sample the parameter space (the grid), run the sweep, and feed
@@ -769,4 +761,4 @@ the input/output table into a Sobol estimator. See the
 | Define closures on workers | `@everywhere` for `modify`/`extract` and their helpers |
 | Warm start | sequential only; `NC` / mesh / ALE / χ mode must match; prior `raw_solution` required; no park events in the prior solve (see §12.6) |
 | Cross-grid MLR (ALE) | compare `sol.extras.MLR_gauge`, not `sol.mass_loss_rate` |
-| Gradients instead of maps | Chapter 13 (`forward_sensitivity` / `adjoint_sensitivity`) |
+| Gradients instead of maps | Chapter 13 (finite differences of `solve`) |

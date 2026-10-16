@@ -5,7 +5,7 @@ as opposed to *what* problem it solves (Chapters 3–7) or *how to read the
 result* (Chapter 9). It covers choosing the structured Jacobian's linear-solve
 strategy by simulation mode, configuring the integrator's linear solver
 (sparse-direct or ILU-preconditioned Krylov, including any LinearSolve
-factorization passed directly), loading the sensitivity extension, debugging
+factorization passed directly), loading the plotting extension, debugging
 Jacobian correctness with `verify_jacobian_at`, and dropping down to the
 pure-residual layer (`ProblemDef` / `Workspace` / `residual!`) when you need to
 build a custom solver loop. The mathematics behind the structured Jacobian and
@@ -372,62 +372,21 @@ affect physical accuracy.
 ## 11.6 Loading and using extensions
 
 Optional functionality is delivered through Julia's package-extension system
-(Julia 1.9+). Two extensions ship, independent of each other:
+(Julia 1.9+). One extension ships:
 
 | Extension | Trigger (`using ...`) | Attaches | Optional dep(s) |
 |---|---|---|---|
-| `PyrolysisSciMLSensitivityExt` | `SciMLSensitivity, Zygote` | `forward_sensitivity`, `adjoint_sensitivity` | `SciMLSensitivity`, `Zygote` |
 | `PyrolysisPlotsExt` | `RecipesBase`/`Plots` | `plot(sol; kind = ...)` recipes | `RecipesBase` |
 
-`forward_sensitivity` and `adjoint_sensitivity` are **exported stubs** in core
-Pyrolysis.jl: calling one before `using SciMLSensitivity, Zygote` raises a
-`MethodError`, and loading the two packages attaches the concrete methods. The
-plotting recipes need no stub; they attach to `Plots.plot` once `Plots` is
-loaded (Chapter 9).
+The plotting recipes attach to `Plots.plot` once `Plots` is loaded (Chapter 9).
 
 Linear solvers need no extension. `LinearSolve` is a hard dependency, so a
 factorization such as `KLUFactorization()` (already the default) or
 `MKLPardisoFactorize()` (with Pardiso/MKL installed) is passed directly as
 `linear_solver` or inside a built integrator (§11.4.1).
 
-### 11.6.1 Sensitivity extension
-
-`forward_sensitivity` and `adjoint_sensitivity` are stubs until you load
-`SciMLSensitivity` and `Zygote`, which activate `PyrolysisSciMLSensitivityExt`.
-Both take a `p_inject` closure that builds a fresh problem from a parameter
-vector `θ` (it must not mutate the base problem). The closure rebuilds the
-problem from the base problem's mesh and BCs with a material that carries the
-injected parameters; the exact way you parameterize the material is up to you
-(Chapter 13 develops realistic `p_inject` closures in full):
-
-```julia
-using Pyrolysis
-using SciMLSensitivity, Zygote          # triggers PyrolysisSciMLSensitivityExt
-
-# p_inject(base, θ) -> fresh PyrolysisProblem with θ injected.
-# `make_material(θ)` is your own function that builds a Material from the
-# parameter vector (e.g. setting reaction A, E). The fresh problem reuses the
-# base problem's mesh, BCs, time span, and initial conditions.
-function p_inject(base, θ)
-    mat = make_material(θ)
-    return PyrolysisProblem(base.mesh, mat, base.bc_set, base.tspan;
-                            T_initial = base.T_initial, ξ_initial = base.ξ_initial,
-                            output_times = base.output_times)
-end
-
-# Forward mode (ForwardDiff) — small parameter counts:
-θ = [1e13, 2.0e5]
-output, ∂out_∂θ = forward_sensitivity(base_problem, θ, p_inject;
-                                      output_fn = sol -> [maximum(sol.surface_T)])   # ForwardDiff needs a vector output
-
-# Adjoint mode (Zygote + SciMLSensitivity) — large parameter counts, scalar loss:
-loss, grad = adjoint_sensitivity(base_problem, θ, p_inject, sol -> sum(sol.surface_T);
-                                 sensealg = InterpolatingAdjoint(autojacvec = ReverseDiffVJP()))
-```
-
-This chapter only covers the *loading* mechanics; the full sensitivity workflow
-(forward vs. adjoint choice, inverse analysis, Sobol global sensitivity) is the
-subject of Chapter 13, and the theory is in Technical Reference §17.
+Sensitivity analysis needs no extension: Chapter 13 takes finite differences of
+ordinary `solve` calls, and Technical Reference §17 covers the theory.
 
 ---
 
@@ -695,6 +654,6 @@ sol = solve(problem; use_ale = true,
 - Building a problem and selecting simulation modes: **Chapter 7**.
 - The `solve` keyword reference and post-processing: **Chapter 8** and
   **Chapter 9**.
-- Sensitivity workflows that build on the sensitivity extension: **Chapter 13**
-  and **Technical Reference §17**.
+- Sensitivity workflows (finite differences, Sobol): **Chapter 13** and
+  **Technical Reference §17**.
 - The complete API and default-value tables: **Chapter 16**.

@@ -106,7 +106,7 @@ $$
 
 where `F_{f_L}`, `F_{f_R}` are the face fluxes at the left and right faces of cell `i`, `A` is the (common) face area, and `V_i` is the cell volume. Because positive flux is `+z` transport, the right-face flux is outflow `(+)` and the left-face flux is inflow `(−)`; a positive divergence therefore means **net efflux from the cell**, which in the energy equation enters with a leading minus sign so that net efflux cools the cell.
 
-> **Implementation note.** `divergence_1d!` (src/Discretization/finite_volume.jl) reads `V_i = state.volume[i]` and `A = state.A_face[f_left]` and computes `(fluxes[f_right] − fluxes[f_left]) * A / V_i`. Both `V_i` and `A` carry the live scalar type, so in ALE/variable-cross-section mode the divergence is differentiable through the geometry (essential for the Jacobian and for the sensitivities of §17).
+> **Implementation note.** `divergence_1d!` (src/Discretization/finite_volume.jl) reads `V_i = state.volume[i]` and `A = state.A_face[f_left]` and computes `(fluxes[f_right] − fluxes[f_left]) * A / V_i`. Both `V_i` and `A` carry the live scalar type, so in ALE/variable-cross-section mode the divergence is differentiable through the geometry (essential for the Jacobian, §15).
 
 ### 13.3.2 Multi-component (species) divergence
 
@@ -178,7 +178,7 @@ $$
 \psi_{\text{superbee}}(r) = \max\bigl(0,\min(2r,1),\min(r,2)\bigr).
 $$
 
-All three satisfy `ψ(r) = 0` for `r ≤ 0` (extremum → first-order upwind), `ψ(1) = 1` (smooth → second order), and lie within Sweby's TVD region `0 ≤ ψ(r) ≤ min(2r, 2)`. Minmod hugs the lower edge of the region (maximal dissipation, maximal robustness); superbee hugs the upper edge (minimal dissipation, mild steepening/compression that can clip smooth extrema); van Leer is the smooth symmetric interior choice — it is the analytic harmonic mean of `r` and `1`, is differentiable for `r ≠ 0` (which matters for the AD-based Jacobian and sensitivities of §15/§17), and is the reason it is the package default.
+All three satisfy `ψ(r) = 0` for `r ≤ 0` (extremum → first-order upwind), `ψ(1) = 1` (smooth → second order), and lie within Sweby's TVD region `0 ≤ ψ(r) ≤ min(2r, 2)`. Minmod hugs the lower edge of the region (maximal dissipation, maximal robustness); superbee hugs the upper edge (minimal dissipation, mild steepening/compression that can clip smooth extrema); van Leer is the smooth symmetric interior choice — it is the analytic harmonic mean of `r` and `1`, is differentiable for `r ≠ 0` (which matters for the AD-based Jacobian of §15), and is the reason it is the package default.
 
 > **Implementation note.** `minmod`, `vanleer`, `superbee`, `no_limiter`, `central_limiter`, and the `apply_limiter` dispatcher are all `@inline` scalar functions (src/Discretization/flux_limiters.jl). The hard `max`/`min` in minmod/superbee make those two non-differentiable at the kink points; van Leer is preferred when smooth derivatives are required end-to-end.
 
@@ -441,7 +441,7 @@ with face distances formed by each kernel from these centers and positions (§13
 
 ### 13.10.3 RHS cache
 
-The face fluxes, sources, and divergences are stored in a preallocated `RHSCache{Tu}` (src/Discretization/finite_volume.jl) carrying `q_cond`, `q_total`, `S_conv`, `J_gas` (`NC × n_faces`), `Q_rxn`, `Q_rad`, `dξ_rxn` (`NC × n_cells`), the reaction workspaces `rates`/`heats`/`species_src`, and the divergences `div_q`/`div_J`. The type parameter `Tu` is `Float64` for ordinary evaluation and `ForwardDiff.Dual` for AD-based Jacobian/sensitivity passes, so no reallocation occurs when switching modes. The cache keeps its size for the whole solve: depletion parking (§14.3) leaves ghost slots in place and the kernels loop over the live cells only.
+The face fluxes, sources, and divergences are stored in a preallocated `RHSCache{Tu}` (src/Discretization/finite_volume.jl) carrying `q_cond`, `q_total`, `S_conv`, `J_gas` (`NC × n_faces`), `Q_rxn`, `Q_rad`, `dξ_rxn` (`NC × n_cells`), the reaction workspaces `rates`/`heats`/`species_src`, and the divergences `div_q`/`div_J`. The type parameter `Tu` is `Float64` for ordinary evaluation and `ForwardDiff.Dual` for AD-based Jacobian passes, so no reallocation occurs when switching modes. The cache keeps its size for the whole solve: depletion parking (§14.3) leaves ghost slots in place and the kernels loop over the live cells only.
 
 ---
 

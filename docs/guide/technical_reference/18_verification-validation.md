@@ -992,9 +992,9 @@ each threshold by an order of magnitude and confirms the QoIs (peak MLR, char
 yield) move by less than the tolerance; a strong dependence means the threshold is
 acting in a physically-active region rather than only suppressing
 numerical stiffness near true depletion, and the value should be lowered. These
-are AD-relevant: the limiter is tanh-smooth (so sensitivities are well-defined,
-§17.6), but a park is a discrete rewrite of the state (whose size stays fixed)
-and is *not* differentiable — a caveat for sensitivity studies (§17.7, §18.8.3).
+matter for sensitivities: the limiter is tanh-smooth (§17.6), but a park is a
+discrete rewrite of the state (whose size stays fixed) and is *not*
+differentiable — a caveat for sensitivity studies (§17.7, §18.8.3).
 
 ---
 
@@ -1035,9 +1035,9 @@ reaction should be interpreted against this known offset, not as a bug.
 
 Depletion handling is a sequence of discrete state rewrites (§14.3.4, §17.7).
 The Jacobian and the verifier run through them (§18.3.5), but smooth
-sensitivity analysis does not: forward sensitivities are valid only between
-park events and adjoint sensitivity through an event is unsupported. Runs that
-need smooth sensitivities must stay on horizons without park events.
+sensitivity analysis does not: finite-difference sensitivities are valid only
+between park events. Runs that need smooth sensitivities must stay on horizons
+without park events.
 
 ### 18.8.4 Heuristic and unvalidated closures
 

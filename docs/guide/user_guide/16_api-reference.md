@@ -76,15 +76,7 @@ the kind of names it owns. Everything a submodule exports is reachable as
 | `Solver` | `solve`, `parameter_sweep`, callbacks, ILU solvers, `get_profile`/`get_cell_positions`/`interpolate_solution` |
 | `Experimental` | P1 radiation (`P1_QUASI_STEADY`, Marshak/Reflective/Dirichlet radiation BCs, the P1 residual), h-refinement/coarsening (`AMRController`; its meshes cannot be passed to `solve`) — **unstable**, not in `Internal` |
 
-### 16.1.2 Extension stubs
-
-Two functions are *stubs* in core Pyrolysis that gain concrete
-methods only when optional dependencies are loaded. Calling a stub without its
-extension raises a `MethodError`.
-
-| Stub(s) | Triggered by | Provides |
-|---|---|---|
-| `forward_sensitivity`, `adjoint_sensitivity` | `using SciMLSensitivity, Zygote` | local forward/adjoint sensitivities (§16.10) |
+### 16.1.2 Extensions
 
 Linear solvers need no extension: pass any LinearSolve factorization (for
 example `KLUFactorization()` or `MKLPardisoFactorize()`) directly (§16.8).
@@ -735,7 +727,6 @@ solve(problem::PyrolysisProblem; kwargs...) -> PyrolysisSolution
 | `verify_jacobian` | `NamedTuple` / `nothing` | `nothing` | `(rtol=…, atol=…, sample_times=[…])` to compare backend vs. `DenseAD_ForwardDiff` |
 | `abstol` | `Real` | `1e-8` | absolute ODE tolerance |
 | `reltol` | `Real` | `1e-6` | relative ODE tolerance |
-| `sensealg` | any | `nothing` | forwarded to the ODE solve (used by sensitivity ext) |
 | `maxiters` | `Int` | `1000000` | max integration steps |
 | `dtmin` | `Real` | `1e-12` | minimum timestep [s] |
 | `dtmax` | `Real` | `Inf` | maximum timestep [s] |
@@ -941,54 +932,37 @@ results = parameter_sweep(problem, grid; modify = modify, extract = extract)
 
 ---
 
-## 16.10 Sensitivity analysis (extension)
+## 16.10 Sensitivity analysis
 
-See Chapter 13 and Technical Reference §17. `forward_sensitivity` and
-`adjoint_sensitivity` are top-level exported **stubs** — they gain methods only
-under `using SciMLSensitivity, Zygote` (which loads `PyrolysisSciMLSensitivityExt`).
-
-```julia
-forward_sensitivity(base_problem, θ::AbstractVector, p_inject::Function;
-                    output_fn::Function = identity, solve_kwargs...)
-    -> (output, ∂output_∂θ)
-
-adjoint_sensitivity(base_problem, θ::AbstractVector, p_inject::Function, loss_fn::Function;
-                    sensealg = InterpolatingAdjoint(autojacvec = ReverseDiffVJP()),
-                    solve_kwargs...)
-    -> (loss, grad)
-```
-
-| Argument | Meaning |
-|---|---|
-| `base_problem` | the unperturbed `PyrolysisProblem` |
-| `θ` | parameter vector to differentiate with respect to |
-| `p_inject` | `(base_problem, θ) -> problem'` — injects `θ` into a fresh problem |
-| `output_fn` | `solution -> y` reducing a solution to the output(s) (forward; default `identity`) |
-| `loss_fn` | `solution -> scalar` loss (adjoint) |
-| `sensealg` | reverse-mode algorithm (adjoint; default `InterpolatingAdjoint(…)`) |
-
-Forward mode (ForwardDiff) suits small `θ`; adjoint mode (Zygote +
-SciMLSensitivity) suits large `θ` / scalar loss (inverse problems). `p_inject` is
-the same pattern as `modify` in §16.9 — rebuild the perturbed problem from
-`θ`. Sensitivities are reliable thanks to the AD-clean design (tanh gates,
-smooth limiters); avoid warm starts and depletion parking when differentiating
-(non-smooth).
+See Chapter 13 and Technical Reference §17. There is no sensitivity API:
+parameter derivatives are central differences of `solve` calls on problems that
+a closure `p_inject(base, θ)` rebuilds from a parameter vector — the same
+pattern as `modify` in §16.9. The solve path is `Float64` throughout, so
+`ForwardDiff.Dual` parameters fail at construction and there is no automatic
+differentiation through `solve`.
 
 ```julia
-using Pyrolysis, SciMLSensitivity, Zygote
+using Pyrolysis, FiniteDiff
 
-θ0 = [8.5e12, 188e3]   # A, E
+θ0 = [log10(8.5e12), 188e3]   # log10(A), E
 p_inject = (prob, θ) -> begin
-    rxn = Reaction(:decomp, 1 => 2; A = θ[1], E = θ[2], h = 870e3)
+    rxn = Reaction(:decomp, 1 => 2; A = 10.0^θ[1], E = θ[2], h = 870e3)
     mat = Material(name = :PMMA, components = prob.material.components,
                    reactions = (rxn,), mixing = prob.material.mixing)
     PyrolysisProblem(mesh = prob.mesh, material = mat, bc_set = prob.bc_set,
                      tspan = prob.tspan, output_times = prob.output_times)
 end
+y(θ) = [solve(p_inject(problem, θ); progress = false).extras.total_mass[end]]
 
-out, J = forward_sensitivity(problem, θ0, p_inject;
-                             output_fn = sol -> [maximum(sol.surface_T)])
+J = FiniteDiff.finite_difference_jacobian(y, θ0, Val(:central); relstep = 1e-2)
 ```
+
+| Choice | Guidance |
+|---|---|
+| `relstep` | `1e-3` to `1e-2`; check by halving (§13.4) |
+| outputs | integrated (mass, time averages) over pointwise values (§13.4) |
+| parallel | `parameter_sweep` over the perturbed vectors (§13.5) |
+| avoid | `warm_start`, `handle_depletion = true` (both non-smooth in `θ`) |
 
 ---
 
@@ -1207,7 +1181,6 @@ noted TR chapter.
 | `create_uniform_mesh`, `create_stretched_mesh`, `create_mesh_from_nodes` | top level |
 | `PyrolysisProblem`, `PyrolysisSolution`, `solve`, `parameter_sweep` | top level |
 | `JacobianSpec`, `Structured`, `DirectSolve`/`ApproxSolve`, `verify_jacobian_at` | top level |
-| `forward_sensitivity`, `adjoint_sensitivity` | top level (stubs; need `SciMLSensitivity, Zygote`) |
 | `KLUFactorization`, `UMFPACKFactorization`, `SparspakFactorization`, `MKLPardisoFactorize` | `LinearSolve` (`using LinearSolve: …`; Pardiso/MKL for the last) |
 | `ProblemDef`, `Workspace`, `residual!`, `StateLayout`, `initialize_state`, `to_problem_def`, `build_workspace` | top level |
 | `get_profile`, `get_cell_positions`, `interpolate_solution` | `Pyrolysis.Solver` / `Pyrolysis.Internal` |

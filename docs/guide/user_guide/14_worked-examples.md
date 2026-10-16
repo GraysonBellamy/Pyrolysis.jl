@@ -864,24 +864,16 @@ matrix), and fit-vs-experiment plots.
 
 ### Gradient-based alternative
 
-This example uses a derivative-free optimizer on top of bare `solve` calls. If
-you prefer gradient-based optimization, Pyrolysis.jl exposes
-`forward_sensitivity` and `adjoint_sensitivity` (extension-attached; load
-`SciMLSensitivity` and `Zygote`). They follow the same wrap-the-solve pattern via
-a `p_inject` closure that builds a perturbed problem from `θ`:
+This example uses a derivative-free optimizer on top of bare `solve` calls. A
+gradient-based optimizer can use a central-difference gradient of the same loss,
+at `2p` solves per gradient for `p` parameters (Chapter 13, §13.7):
 
 ```julia
-using Pyrolysis, SciMLSensitivity, Zygote
+using FiniteDiff, Optim
 
-p_inject = (base, θ) -> rebuild_problem_with(base, θ)   # your problem builder
-
-# Forward mode (small parameter counts): ForwardDiff Jacobian of an output_fn
-output, ∂out_∂θ = forward_sensitivity(base_problem, θ, p_inject;
-                                      output_fn = sol -> sol.surface_T[end])
-
-# Adjoint mode (large parameter counts, scalar loss): Zygote gradient
-loss, grad = adjoint_sensitivity(base_problem, θ, p_inject,
-                                 sol -> sum(abs2, sol.extras.back_temperature .- data))
+g!(G, θ) = FiniteDiff.finite_difference_gradient!(G, loss_fn, θ, Val(:central);
+                                                  relstep = 1e-2)
+res = optimize(loss_fn, g!, lower, upper, θ0, Fminbox(LBFGS()))
 ```
 
 > Caveat: warm starts, non-smooth lateral-shrinkage laws, and depletion
