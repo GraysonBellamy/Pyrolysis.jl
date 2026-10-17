@@ -954,15 +954,14 @@ p_inject = (prob, θ) -> begin
 end
 y(θ) = [solve(p_inject(problem, θ); progress = false).extras.total_mass[end]]
 
-J = FiniteDiff.finite_difference_jacobian(y, θ0, Val(:central); relstep = 1e-2)
+J = FiniteDiff.finite_difference_jacobian(y, θ0, Val(:central); relstep = 1e-4)
 ```
 
 | Choice | Guidance |
 |---|---|
-| `relstep` | `1e-3` to `1e-2`; check by halving (§13.4) |
-| outputs | integrated (mass, time averages) over pointwise values (§13.4) |
+| `relstep` | `1e-4`; check with steps ten times larger and smaller (§13.4) |
 | parallel | `parameter_sweep` over the perturbed vectors (§13.5) |
-| avoid | `warm_start`, `handle_depletion = true` (both non-smooth in `θ`) |
+| avoid | `warm_start`, `handle_depletion = true`, condensed components at `λ = 0` (all non-smooth in `θ`, §13.9) |
 
 ---
 

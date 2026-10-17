@@ -79,8 +79,9 @@ using Pyrolysis
 function p_inject(base, θ)
     A, E, h = 10.0^θ[1], θ[2], θ[3]
 
-    virgin = SolidComponent(:virgin; ρ = 1190.0, c = 1500.0, k = 0.20)
-    char   = SolidComponent(:char;   ρ = 200.0,  c = 1200.0, k = 0.10)
+    # λ > 0 on the condensed components keeps gas transport non-degenerate (§13.9)
+    virgin = SolidComponent(:virgin; ρ = 1190.0, c = 1500.0, k = 0.20, λ = 1e-6)
+    char   = SolidComponent(:char;   ρ = 200.0,  c = 1200.0, k = 0.10, λ = 1e-6)
     gas    = GaseousComponent(:gas;   M = 0.100, c = 1500.0, k = 0.02, λ = 1e-5)
 
     rxn = Reaction(:decomp, 1 => (2, 3);
@@ -186,7 +187,7 @@ qoi(sol) = [sol.extras.total_mass[end],                     # mass left [kg]
 y(θ) = qoi(solve(p_inject(base, θ); progress = false, solve_opts...))
 
 y0 = y(θ0)
-J  = FiniteDiff.finite_difference_jacobian(y, θ0, Val(:central); relstep = 1e-2)
+J  = FiniteDiff.finite_difference_jacobian(y, θ0, Val(:central); relstep = 1e-4)
 # J[i, k] = ∂y_i/∂θ_k; column 1 is per decade of A
 ```
 
@@ -197,9 +198,9 @@ J  = FiniteDiff.finite_difference_jacobian(y, θ0, Val(:central); relstep = 1e-2
 - For a scalar output use
   `FiniteDiff.finite_difference_gradient(f, θ, Val(:central); relstep)`.
 - The step for entry `k` is `max(relstep * abs(θ_k), absstep)`, and `absstep`
-  defaults to `relstep`. `FiniteDiff`'s default `relstep` (about `6e-6` for
-  central differences) is far too small for a solve; §13.4 explains how to pick
-  one.
+  defaults to `relstep`. Pass `relstep` explicitly rather than relying on
+  `FiniteDiff`'s default (about `6e-6` for central differences); §13.4 explains
+  how to pick it.
 - The cost is `2p` perturbed solves for `p = length(θ)`, plus the base solve.
   They are independent, so they parallelize (§13.5).
 
@@ -212,40 +213,32 @@ Pass every option that changes the solution — `radiation_model`, `use_ale`,
 ## 13.4 Choosing the step
 
 A finite difference balances two errors: truncation error, which grows as `h²`
-for central differences, and the solver's own noise `ε` in `y`, which
-contributes `ε/h`. The textbook rule picks `h` from the integrator tolerance,
-but the noise in a Pyrolysis.jl output is not set by `reltol` alone. Adaptive
-step-size and Newton decisions change discretely with `θ`, and around abrupt
-events — a reaction front reaching the surface cell, a cell burning out — a
-trajectory can carry short-lived errors far above the tolerance whose timing
-shifts from one `θ` to the next. A finite difference across such a point
-measures that error, not the derivative.
+for central differences, and the noise `ε` the time integration leaves in `y`,
+which contributes about `ε/h`. On a well-posed problem the noise is small and
+changes smoothly with `θ` — a small enough perturbation leaves the integrator's
+step sequence unchanged — so the estimate settles over a wide range of steps.
+On the §13.2 problem at `reltol = 1e-7`, the derivatives differ from those at
+`relstep = 1e-4` by:
 
-So measure the noise and choose the step from it:
+| Output | `relstep = 1e-2` | `1e-3` | `1e-5` to `1e-7` |
+|---|---|---|---|
+| peak surface temperature | 6 % | 0.06 % | ≤ 0.01 % |
+| `T_s` at `t = 150 s` | 29 % | 0.4 % | ≤ 0.004 % |
+| mean surface temperature | 0.2 % | 0.002 % | ≤ 0.0003 % |
+| final mass, `total_mass[end]` | 0.06 % | 0.0006 % | ≤ 0.00002 % |
 
-1. **Measure.** Solve at a few `θ` very close together (relative offsets of
-   `1e-6` to `1e-4` in one entry) and look at how far each output scatters about
-   a straight line. That scatter is `ε`.
-2. **Size the step** so the output change `|∂y/∂θ_k| · h_k` is at least ~100 `ε`.
-   In practice `relstep` lands between `1e-3` and `1e-2`.
-3. **Check** by repeating with `h/2` (or `2h`). If the two estimates disagree by
-   more than you can accept, that output is too noisy for a pointwise derivative
-   at this `θ`.
+The large steps are truncation error, worst for values at one time, which move
+with the reaction front. So:
 
-On the §13.2 problem at `reltol = 1e-7`, the derivative estimates behave very
-differently from one output to the next:
-
-| Output | Noise `ε` | Change in the derivative when the step changes |
-|---|---|---|
-| final mass, `total_mass[end]` | ~1e-4 kg | ≤ 2 % (`relstep` 1e-2 vs 5e-3) |
-| mean surface temperature | — | ≤ 4 % (`relstep` 1e-2 vs 5e-3) |
-| peak surface temperature | — | up to 28 % (`relstep` 1e-2 vs 1e-3) |
-| `T_s` at `t = 150 s` | 0.03–0.05 K | the sign changes |
-
-Prefer **integrated outputs** — masses, time averages, sums over the saved
-trajectory — to values at one time or at a peak: integration averages the
-transient errors out. Tightening `reltol` does not help here: the noise of the
-pointwise outputs was the same at `reltol = 1e-7` and `1e-9`.
+1. **Start from `relstep = 1e-4`.**
+2. **Check** by repeating with a step ten times larger and ten times smaller. If
+   the estimates agree, keep them. If they scatter, the output is not smooth in
+   `θ` at this point; look for one of the causes in §13.9.
+3. **Do not ignore validation warnings.** A configuration `solve` warns about is
+   often non-smooth in `θ` as well. The §13.2 material with its solids left at
+   the default `λ = 0` (§13.9) needs 38 failed Newton iterations per solve, a
+   `1e-6` relative change in `A` moves `T_s` by 0.35 K, and its derivatives
+   change sign from one step to the next; with `λ = 1e-6` all of that is gone.
 
 ---
 
@@ -256,7 +249,7 @@ list of parameter vectors with `p_inject` as its `modify` and distributes them
 over `Distributed` workers when any are present:
 
 ```julia
-h   = max.(1e-2 .* abs.(θ0), 1e-2)                           # FiniteDiff's step, relstep 1e-2
+h   = max.(1e-4 .* abs.(θ0), 1e-4)                           # FiniteDiff's step, relstep 1e-4
 pts = [θ0 .+ s .* h[k] .* (eachindex(θ0) .== k) for k in eachindex(θ0) for s in (1, -1)]
 ys  = parameter_sweep(base, pts; modify = p_inject, extract = qoi, solve_opts...)
 J   = reduce(hcat, [(ys[2k-1] .- ys[2k]) ./ (2h[k]) for k in eachindex(θ0)])
@@ -296,7 +289,7 @@ TGA, DSC, MCC, or cone-calorimeter measurements. The pattern is:
 The shipped fitting workflow, `examples/inverse_analysis/inverse_white_pine.jl`,
 is derivative-free: `Optim.jl`'s `Fminbox(NelderMead())` on the loss, with a
 `FiniteDiff` Hessian at the optimum for the standard errors (§14.7). It is robust
-to the noise of §13.4 and is the recommended starting point.
+to the non-smooth responses of §13.9 and is the recommended starting point.
 
 A gradient-based alternative hands `Optim` a central-difference gradient:
 
@@ -307,17 +300,15 @@ T_data = load_my_surface_temperature()   # Vector{Float64} at output_times, your
 loss(θ) = sum(abs2, solve(p_inject(base, θ); progress = false,
                           solve_opts...).surface_T .- T_data)
 g!(G, θ) = FiniteDiff.finite_difference_gradient!(G, loss, θ, Val(:central);
-                                                  relstep = 1e-2)
+                                                  relstep = 1e-4)
 
 θ0  = [13.0, 1.88e5, 8.70e5]             # [log10(A), E, h]
 res = optimize(loss, g!, θ0, LBFGS())
 θ_fit = Optim.minimizer(res)
 ```
 
-The loss sums over the whole curve, so it is an integrated output in the sense of
-§13.4. Gradient methods still stall when the step-to-step noise of the loss is
-comparable to its decrease along the search direction; switch to `NelderMead()`
-if the line search keeps failing.
+Gradient methods stall when the loss is not smooth in `θ` (§13.9); switch to
+`NelderMead()` if the line search keeps failing.
 
 > **Scale your parameters.** Optimize `log10(A)` rather than `A`, and
 > non-dimensionalize the rest if their magnitudes differ widely, so the optimizer
@@ -417,9 +408,14 @@ The package uses smooth constructions where it can (tanh temperature gates and
 depletion limiter, smooth flux limiters — Technical Reference §17.6), but several
 configurations still spoil a derivative:
 
-- **Solver noise.** Finite differences of pointwise outputs can be dominated by
-  transient integration errors that tolerances do not remove (§13.4). Measure
-  the noise, prefer integrated outputs, and check the step.
+- **Degenerate gas transport.** Condensed components default to `λ = 0`. Under
+  Fickian gas transport, gas then cannot enter a cell that holds none: the gas
+  field ends in a sharp front that advances only when integration noise seeds
+  the next cell. The implicit Newton fails repeatedly on that front, the
+  trajectory carries errors far above the tolerance whose timing changes from
+  one `θ` to the next, and finite differences of it are meaningless (§13.4).
+  `solve` warns in this configuration; give the condensed components a small
+  `λ` (e.g. `1e-6`), as §13.2 does.
 
 - **Warm start.** Reusing a prior solution as the initial state
   (`warm_start = previous_solution`) makes the result depend on history that
@@ -457,8 +453,9 @@ configurations still spoil a derivative:
 | Perturbed solves in parallel | `parameter_sweep(base, pts; modify = p_inject, extract)` (§13.5) |
 | Global/Sobol | sample → `pmap`/`parameter_sweep` → PCE or SRRC (see examples) |
 
-**Defaults to remember.** Start from `relstep` between `1e-3` and `1e-2` and
-check it by halving (§13.4); pass `log10(A)`, not `A`. For sensitivity-safe
+**Defaults to remember.** Start from `relstep = 1e-4` and check it with steps
+ten times larger and smaller (§13.4); pass `log10(A)`, not `A`; heed `solve`'s
+validation warnings (§13.9). For sensitivity-safe
 solves: keep `warm_start = nothing`, `handle_depletion = false`, and the same
 `solve` options for every perturbed solve.
 
