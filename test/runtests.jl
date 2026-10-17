@@ -32,6 +32,19 @@ end
 
 _jl_files(dir) = sort(filter(f -> endswith(f, ".jl"), readdir(joinpath(@__DIR__, dir))))
 
+# Test files under `dir` and its subdirectories, as paths relative to this
+# directory; `gates/` holds measurement scripts, not tests.
+function _jl_files_recursive(dir)
+    out = String[]
+    for (root, dirs, files) in walkdir(joinpath(@__DIR__, dir))
+        filter!(d -> d != "gates", dirs)
+        for f in sort(files)
+            endswith(f, ".jl") && push!(out, relpath(joinpath(root, f), @__DIR__))
+        end
+    end
+    return sort(out)
+end
+
 @testset "Pyrolysis.jl" begin
     # Domain suites — shared namespace; shared fixtures come from helpers.jl
     # (idempotent under repeated include via its own load guard).
@@ -56,6 +69,11 @@ _jl_files(dir) = sort(filter(f -> endswith(f, ".jl"), readdir(joinpath(@__DIR__,
     # Jacobian suites — one module each.
     for f in _jl_files("jacobian")
         _include_isolated(joinpath("jacobian", f))
+    end
+
+    # Finite-volume core suites — one module each.
+    for f in _jl_files_recursive("newcore")
+        _include_isolated(f)
     end
 
     # Performance invariants are process-state sensitive, especially the

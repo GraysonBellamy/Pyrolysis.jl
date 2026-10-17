@@ -81,6 +81,11 @@ using .Properties
 include("Physics/Physics.jl")
 using .Physics
 
+# Finite-volume core: face-based meshes and the state with its mapping.
+# Reached by module path (`Pyrolysis.Meshes`, …); none of them is re-exported.
+include("Meshes/Meshes.jl")
+include("States/States.jl")
+
 # Mesh adaptation (depleted-cell parking; refinement building blocks)
 include("Adaptivity/Adaptivity.jl")
 using .Adaptivity
