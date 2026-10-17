@@ -79,7 +79,11 @@ end
     include(joinpath(@__DIR__, "exact", "selftests.jl"))
 
     # invokelatest: the case closures are defined during load (world-age).
-    for case in load_verification_cases()
-        Base.invokelatest(run_case_ci, case)
+    cases = load_verification_cases()
+    skipped = [c.id for c in cases if !runs_on_core(c)]
+    isempty(skipped) ||
+        @info "Verification cases not run on the $(VERIFICATION_CORE) core" skipped
+    for case in cases
+        runs_on_core(case) && Base.invokelatest(run_case_ci, case)
     end
 end

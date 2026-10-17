@@ -102,6 +102,11 @@ using .Discretization
 include("Problem/Problem.jl")
 using .Problem
 
+# Finite-volume core: its solution type and its time integration of a
+# `PyrolysisProblem`.
+include("Outputs/Outputs.jl")
+include("Integration/Integration.jl")
+
 # Unified pure residual! (loaded after Problem; traits stay in Problem to avoid
 # an upstream/downstream cycle).
 include("Residual/Residual.jl")

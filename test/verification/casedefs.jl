@@ -148,9 +148,29 @@ if !isdefined(@__MODULE__, :VerificationCase)
         report::NamedTuple = (;)
     end
 
+    """
+    The core the suite solves on: `PYROLYSIS_CORE=new` routes the cases of
+    `NEW_CORE_CASES` (by id prefix) through the finite-volume core
+    (`Pyrolysis.Integration.solve`), in the energy state named by
+    `PYROLYSIS_ENERGY_STATE` (`temperature`, the default, or `enthalpy`);
+    every other case is skipped there.
+    """
+    const VERIFICATION_CORE = get(ENV, "PYROLYSIS_CORE", "old")
+    const VERIFICATION_ENERGY_STATE =
+        Symbol(get(ENV, "PYROLYSIS_ENERGY_STATE", "temperature"))
+    const NEW_CORE_CASES = ("V-RX-01", "V-RX-02", "V-RX-03")
+
+    runs_on_core(case::VerificationCase) =
+        VERIFICATION_CORE != "new" || any(p -> startswith(case.id, p), NEW_CORE_CASES)
+
     @inline _case_solve(case::VerificationCase, problem; kwargs...) =
-        case.solve_fn === nothing ? solve(problem; progress = false, kwargs...) :
-        case.solve_fn(problem; kwargs...)
+        case.solve_fn !== nothing ? case.solve_fn(problem; kwargs...) :
+        VERIFICATION_CORE == "new" ?
+        Pyrolysis.Integration.solve(
+            problem;
+            energy_state = VERIFICATION_ENERGY_STATE,
+            kwargs...,
+        ) : solve(problem; progress = false, kwargs...)
 
     observed_orders(errors, hs) =
         [log(errors[i-1] / errors[i]) / log(hs[i-1] / hs[i]) for i = 2:length(errors)]

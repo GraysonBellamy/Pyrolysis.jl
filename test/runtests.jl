@@ -45,30 +45,40 @@ function _jl_files_recursive(dir)
     return sort(out)
 end
 
+# `PYROLYSIS_CORE=new` routes the verification suite through the
+# finite-volume core (see verification/casedefs.jl) and runs only that core's
+# tests and the suite.
+const _NEW_CORE = get(ENV, "PYROLYSIS_CORE", "old") == "new"
+
 @testset "Pyrolysis.jl" begin
     # Domain suites — shared namespace; shared fixtures come from helpers.jl
     # (idempotent under repeated include via its own load guard).
-    for dir in [
-        "boundary_conditions",
-        "discretization",
-        "solver",
-        "verification",
-        "ale",
-        "adaptivity",
-        "radiation",
-        "geometry",
-        "materials",
-        "physics",
-        "residual",
-    ]
+    domains =
+        _NEW_CORE ? ["verification"] :
+        [
+            "boundary_conditions",
+            "discretization",
+            "solver",
+            "verification",
+            "ale",
+            "adaptivity",
+            "radiation",
+            "geometry",
+            "materials",
+            "physics",
+            "residual",
+        ]
+    for dir in domains
         for f in _jl_files(dir)
             include(joinpath(@__DIR__, dir, f))
         end
     end
 
     # Jacobian suites — one module each.
-    for f in _jl_files("jacobian")
-        _include_isolated(joinpath("jacobian", f))
+    if !_NEW_CORE
+        for f in _jl_files("jacobian")
+            _include_isolated(joinpath("jacobian", f))
+        end
     end
 
     # Finite-volume core suites — one module each.
@@ -79,7 +89,9 @@ end
     # Performance invariants are process-state sensitive, especially the
     # allocation probes. Run the perf driver in a fresh Julia process so
     # `Pkg.test()` exercises the same hermetic path as the CI perf job.
-    @testset "performance invariants (isolated)" begin
-        @test _run_isolated_test_script("perf/runtests.jl")
+    if !_NEW_CORE
+        @testset "performance invariants (isolated)" begin
+            @test _run_isolated_test_script("perf/runtests.jl")
+        end
     end
 end
