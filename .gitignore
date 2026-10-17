@@ -54,3 +54,6 @@ scripts/burnout/
 docs/Performance_Audit.md
 docs/performance_audit/
 scripts/performance_audit/
+!docs/Mesh_Framework_Design_2026-10-17.md
+!scripts/mesh_phase0/results/
+scripts/mesh_phase0/results/*.log
