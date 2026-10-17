@@ -135,38 +135,34 @@ $$
 $$
 
 If $\epsilon$ were a smooth function of $\theta$ the noise term would be a
-derivative too, and small. It is not: the adaptive step sequence, Newton
-iteration counts and Jacobian reuse decisions change discretely as $\theta$
-moves, so $\epsilon(\theta)$ is piecewise smooth with jumps, and for any step
-the noise term is bounded only by $\lvert\epsilon\rvert_{\max}/h$. Balancing the
-two terms gives the classical optimum
+derivative too, and small. In general it is only piecewise smooth: the adaptive
+step sequence, Newton iteration counts and Jacobian reuse decisions change
+discretely as $\theta$ moves. A perturbation small enough to change none of
+those decisions leaves $\epsilon$ smooth; one that changes a decision makes the
+noise term of order $\lvert\epsilon\rvert/h$. Balancing that bound against
+truncation gives the classical optimum
 $h^\ast\sim\big(3\lvert\epsilon\rvert/\lvert y'''\rvert\big)^{1/3}$.
 
-The textbook assumption $\lvert\epsilon\rvert\sim\texttt{reltol}\cdot\lvert y\rvert$
-does not hold for every output. On the charring-slab example of User Guide §13.2
-(40 cells, 50 kW m⁻²), the semi-discrete right-hand side is exactly affine in
-$A$ at a fixed state (deviation $10^{-14}$, round-off), and $T_s$ at 20 s is
-smooth in $A$ to $10^{-13}$ K. Later outputs are not: a relative change of
-$10^{-6}$ in $A$ moves $T_s$ by a 0.1–0.4 K transient from $t\approx 90$ s — a
-relative error of $2$–$5\times10^{-4}$ at `reltol = 1e-7` — when the surface cell's
-reactant concentration falls into the depletion-limiter range
-($\xi\sim 0.1\ \text{kg m}^{-3}$). Its timing and sign change from one $\theta$
-to the next; the scatter of $T_s(150\ \text{s})$ about a smooth fit is
-0.03–0.05 K at both `reltol = 1e-7` and `1e-9`, and does not shrink with a
-step cap `dtmax = 0.1` s either. The final mass, an integral over the whole
-trajectory, scatters by $\sim 10^{-4}$ kg on a 10 kg column.
+On the charring-slab example of User Guide §13.2 (40 cells, 50 kW m⁻²,
+`reltol = 1e-7`) the estimates are stable over several decades of step: the
+derivatives of the peak and 150-s surface temperatures, the mean surface
+temperature and the final mass at $\eta=10^{-5}$–$10^{-7}$ agree with those at
+$\eta=10^{-4}$ to $10^{-4}$ relative or better. Truncation error appears at
+larger steps — up to 0.4 % at $\eta=10^{-3}$ and 29 % at $\eta=10^{-2}$, largest
+for the 150-s temperature, which moves with the reaction front — and the error
+against a tight reference falls with the tolerance, from $4\times10^{-3}$ K at
+`reltol = 1e-5` to $2\times10^{-5}$ K at `1e-9`.
 
-The practical rule follows from the bound rather than from the tolerance:
-measure $\lvert\epsilon\rvert$ for each output (solve at a few $\theta$ within a
-relative $10^{-6}$–$10^{-4}$ of each other and take the scatter about a line),
-choose $h$ so that $\lvert y'\rvert h\gtrsim 100\,\lvert\epsilon\rvert$, and
-confirm by halving $h$. On the example, $\eta=10^{-2}$ against $\eta=5\times10^{-3}$
-reproduced the final-mass derivatives to 2 % and the mean-surface-temperature
-derivatives to 4 %; the peak-temperature derivatives moved by up to 28 %
-between $\eta=10^{-3}$ and $10^{-2}$, and the derivative of $T_s(150\ \text{s})$
-changed sign. **Integrated outputs** — masses, time averages, misfits summed
-over the saved trajectory — average the transient errors out and are the ones to
-differentiate.
+The same example with the condensed components at their default $\lambda=0$
+behaves very differently (§17.7.7): 38 failed Newton iterations per solve
+instead of none, a 0.35 K change in $T_s$ from a $10^{-6}$ relative change in
+$A$, an error against the reference that stays at 0.2–0.4 K for every `reltol`
+from $10^{-5}$ to $10^{-9}$, and derivatives that change sign from one step to
+the next.
+
+The practical rule: start from $\eta=10^{-4}$, confirm with $10\eta$ and
+$\eta/10$, and treat disagreement as a sign that $y$ is not smooth in
+$\boldsymbol{\theta}$ at this point (§17.7).
 
 ### 17.2.3 The state sensitivity being approximated
 
@@ -363,7 +359,7 @@ end
 
 y(θ) = [solve(p_inject(base_problem, θ); progress = false).extras.total_mass[end]]
 
-S = FiniteDiff.finite_difference_jacobian(y, θ0, Val(:central); relstep = 1e-2)
+S = FiniteDiff.finite_difference_jacobian(y, θ0, Val(:central); relstep = 1e-4)
 # S[k, q] = ∂y_k/∂θ_q
 ```
 
@@ -487,9 +483,8 @@ its $h^2$ rate only where $\mathbf{y}$ is smooth on $[\theta-h,\theta+h]$. Sever
 modeling choices in Pyrolysis.jl make the semi-discrete residual smooth — they are
 precisely the smooth replacements for the classical non-smooth pyrolysis
 closures, and the same smoothness keeps the structured Jacobian (§15) exact. Each
-is verified against the source below. They make the *residual* smooth; they do
-not make the integrated trajectory smooth in $\boldsymbol{\theta}$ below the
-level of the integration error (§17.2.2).
+is verified against the source below. They make the *residual* smooth; a
+configuration that `solve` warns about can still put a kink in it (§17.7.7).
 
 **(1) Smooth temperature gates.** The hard Heaviside window
 $H(T-T_{\min})H(T_{\max}-T)$ would make $\partial r/\partial T$ a delta function
@@ -613,12 +608,13 @@ the degeneracy.
 ### 17.7.5 Solver noise in finite differences
 
 A finite difference measures the integration error along with the derivative
-(§17.2.2). A step $h$ whose output change is comparable to that error yields
-garbage; a step too large incurs truncation error. The error is not bounded by
-`abstol`/`reltol` for every output — pointwise and peak values can carry
-transient errors far above the tolerance that tightening it does not remove — so
-size $h$ from the measured scatter of each output, prefer integrated outputs, and
-confirm by halving $h$.
+(§17.2.2). On a well-posed problem that error changes smoothly with
+$\boldsymbol{\theta}$ for perturbations that leave the step sequence unchanged,
+and the estimate is stable over several decades of step; a step too large incurs
+truncation error, largest for pointwise outputs. Confirm a step by repeating
+with $10h$ and $h/10$. Disagreement means the output is not smooth in
+$\boldsymbol{\theta}$ there, most often because of one of the discrete features
+of §17.7.1–§17.7.3 or the degenerate gas transport of §17.7.7.
 
 ### 17.7.6 Non-differentiable guards in the kinetics and clamps
 
@@ -629,6 +625,25 @@ and these are inactive, but a sensitivity evaluated exactly *at* a clamp boundar
 (e.g. a fully depleted reactant, $\xi=0$) inherits a one-sided or zero
 derivative. This is rarely an issue for QoIs integrated over time but can surface
 in pointwise late-time MLR sensitivities near burnout.
+
+### 17.7.7 Degenerate gas transport
+
+Condensed components default to a gas-transfer coefficient $\lambda=0$. Under
+Fickian gas transport the cell coefficient is then $\sum_{j\in\text{gas}} v_j\lambda_j$,
+proportional to the cell's gas volume fraction (§9.2), and the face coefficient — a harmonic
+mean, set to zero when either side is below $10^{-20}$ — vanishes on every face
+into a cell that holds no gas. The gas field ends in a sharp front. The cell
+ahead of the front gains gas only once its concentration is positive, and its
+concentration sits at the integration noise, below `abstol`, crossing zero.
+Once seeded, its gas grows at a rate of order $10^{2}\ \text{s}^{-1}$ on the
+User Guide example, so the right-hand side has a kink of large slope at that
+crossing. The implicit Newton fails repeatedly on it (the integrator's steps fall
+to a few milliseconds), and the time at which each cell fills — and with it the
+whole trajectory — depends on the noise. Finite differences of such a trajectory
+measure the noise, not a derivative (§17.2.2). `solve` warns in this
+configuration (`warn_degenerate_gas_transport`); a small $\lambda$ on the
+condensed components (e.g. $10^{-6}\ \text{m}^2\,\text{s}^{-1}$) removes the
+front.
 
 ---
 
@@ -686,40 +701,31 @@ harness. Its AD is confined to the state Jacobian (§15).
    lifted into the ODE parameter vector — and then a native integration of
    (17.1) or (17.2)–(17.3) on the structured Jacobian of §15.
 
-2. **Transient integration errors above the tolerance (open).** On the example
-   of §17.2.2, pointwise outputs carry a jitter of 0.03–0.05 K in $T_s$ that
-   neither tighter tolerances nor a step cap reduces, and 0.1–0.4 K transients
-   appear around the time the surface cell's reactant enters the
-   depletion-limiter range. Their source in the time integration (error
-   estimation, Newton termination, or step-size control) is not identified.
-   They bound the accuracy of every pointwise finite-difference sensitivity and
-   of tolerance-convergence studies of pointwise outputs.
-
-3. **Sensitivities across park events (open).** A park is a discrete rewrite of
+2. **Sensitivities across park events (open).** A park is a discrete rewrite of
    the state, so trajectories are only piecewise smooth across events and
    finite differences are valid only on horizons without one
    (`handle_depletion=true` runs that park). No sensitivity jump condition for
    the event is formulated.
 
-4. **Warm-start in sensitivity loops (open).** Whether — and how — reusing a
+3. **Warm-start in sensitivity loops (open).** Whether — and how — reusing a
    prior solution's final state as a fresh initial condition perturbs sensitivity
    estimates is unquantified. The current guidance is to avoid
    warm-starting inside sensitivity evaluations (§17.7.1).
 
-5. **Non-smoothness residue.** A handful of guards (`max`/`clamp`, the
+4. **Non-smoothness residue.** A handful of guards (`max`/`clamp`, the
    `A_ratio > eps()` switch, hard temperature/
    porosity clamps) remain non-differentiable at their boundaries (§17.7.2,
    §17.7.6). They are inactive in the interior of normal operation but can
    contaminate sensitivities evaluated exactly on the boundary; a fully smooth
    reformulation of these guards is not yet in place.
 
-6. **Parameter handles are unregistered.** Because injection is by user closure
+5. **Parameter handles are unregistered.** Because injection is by user closure
    (`p_inject`/`modify`), there is no enforced catalogue of "supported"
    parameters or automatic check that the injected field actually reaches the
    residual; responsibility for a clean, non-mutating, $C^1$ injection rests with
    the user (§17.4.1).
 
-7. **Global-sensitivity tooling lives in examples, not the core.** Sobol/PCE is
+6. **Global-sensitivity tooling lives in examples, not the core.** Sobol/PCE is
    implemented in `examples/sensitivity_analysis/`, not as a packaged function;
    the design and degree-selection choices (PCE order, BCa bootstrap,
    group-correlation handling) are reference recipes rather than a stable API.

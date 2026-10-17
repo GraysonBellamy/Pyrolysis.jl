@@ -872,7 +872,7 @@ at `2p` solves per gradient for `p` parameters (Chapter 13, §13.7):
 using FiniteDiff, Optim
 
 g!(G, θ) = FiniteDiff.finite_difference_gradient!(G, loss_fn, θ, Val(:central);
-                                                  relstep = 1e-2)
+                                                  relstep = 1e-4)
 res = optimize(loss_fn, g!, lower, upper, θ0, Fminbox(LBFGS()))
 ```
 
