@@ -907,3 +907,24 @@ This reduces to the standard harmonic mean 2ab/(a+b) when d_L = d_R.
     end
     return (d_a + d_b) / (d_a / a + d_b / b)
 end
+
+# Guard of the smooth face mean [property units]: far below any physical
+# conductivity or transfer coefficient.
+const FACE_MEAN_GUARD = 1e-20
+
+"""
+	guarded_harmonic_mean(a, b, d_a, d_b)
+
+Distance-weighted harmonic mean in the product form
+
+	φ_face = (d_a + d_b) a b / (d_a b + d_b a + η (d_a + d_b)),   η = FACE_MEAN_GUARD
+
+smooth in every argument for non-negative values and positive distances. It
+equals [`harmonic_mean_weighted`](@ref) to a relative `η / φ`, and it goes to
+zero continuously, with a finite derivative, as either value vanishes instead
+of being cut off below a threshold.
+"""
+@inline function guarded_harmonic_mean(a::Real, b::Real, d_a::Real, d_b::Real)
+    d = d_a + d_b
+    return d * a * b / (d_a * b + d_b * a + FACE_MEAN_GUARD * d)
+end
