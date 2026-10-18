@@ -47,7 +47,10 @@ The solution of the finite-volume core at the saved times:
   without that tag); `radiation_transmitted`, the intensity leaving through
   the last face of the in-depth beam, and `volumetric_absorption`, the
   intensity the cells absorbed, both per unit exposed area [W/m²] (zero
-  without in-depth radiation)
+  without in-depth radiation); `thickness_history`, the distance between
+  the end nodes [m]; `cross_section_area_history`, the cross-section measure
+  (the area of a planar column) [m²]; `total_mass`, the summed component
+  masses per unit initial area of the `:top` faces [kg/m²]
 - `retcode`: the integrator's return code
 - `solve_time`: wall time of the solve [s]
 - `statistics`: the [`SolverStatistics`](@ref)
@@ -70,6 +73,9 @@ struct CoreSolution{P}
         surface_blowing_ratio::Vector{Float64},
         radiation_transmitted::Vector{Float64},
         volumetric_absorption::Vector{Float64},
+        thickness_history::Vector{Float64},
+        cross_section_area_history::Vector{Float64},
+        total_mass::Vector{Float64},
     }
     retcode::Symbol
     solve_time::Float64
@@ -112,10 +118,18 @@ function CoreSolution(
     boundary_blowing_ratio = Dict(tag => zeros(nt) for tag in tags)
     transmitted = zeros(nt)
     absorbed = zeros(nt)
+    thickness = zeros(nt)
+    area = zeros(nt)
+    total_mass = zeros(nt)
     thermal = find_kernel(ThermalBoundaryKernel, def.kernels)
     beam = find_kernel(BeerLambertKernel, def.kernels)
     ds, c = buffers(ws, def, Float64)
     du = zeros(state_length(layout))
+    ref = def.setup.reference
+    g0 = MeshGeometry{Float64}(topo)
+    geometry!(g0, ref.positions, ref.cross_section, topo)
+    top = haskey(topo.boundary_tags, :top) ? boundary_faces(topo, :top) : Int[]
+    exposed_area = isempty(top) ? NaN : sum(g0.face_area[f] for f in top)
     for (k, u) in enumerate(states)
         residual!(du, u, def, t[k], ws)
         @views T[:, k] .= ds.T
@@ -125,6 +139,9 @@ function CoreSolution(
         for i = 1:n
             centers[i, k] = ds.geometry.cell_center[i][1]
         end
+        thickness[k] = ds.x[end] - ds.x[1]
+        area[k] = ds.A[]
+        total_mass[k] = sum(ds.m) / exposed_area
         for tag in tags
             faces = boundary_faces(topo, tag)
             A = sum(ds.geometry.face_area[f] for f in faces)
@@ -168,6 +185,9 @@ function CoreSolution(
             surface_blowing_ratio,
             radiation_transmitted = transmitted,
             volumetric_absorption = absorbed,
+            thickness_history = thickness,
+            cross_section_area_history = area,
+            total_mass,
         ),
         retcode,
         solve_time,

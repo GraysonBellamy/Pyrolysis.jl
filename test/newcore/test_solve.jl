@@ -123,7 +123,16 @@ end
         @test problem.mesh.cell_states[1].T == sentinel
     end
     @test_throws ArgumentError Integration.solve(_reacting_cell(); bogus = 1)
-    @test_throws ArgumentError Integration.solve(_reacting_cell(); use_ale = true)
+    @test_throws ArgumentError Integration.solve(
+        _reacting_cell();
+        use_ale = true,
+        w_override = (x, t) -> 0.0,
+    )
+    @test_throws ArgumentError Integration.solve(
+        _reacting_cell();
+        use_ale = true,
+        min_thickness = 0.0,
+    )
     @test_throws ArgumentError Integration.solve(_reacting_cell(); energy_state = :entropy)
 end
 

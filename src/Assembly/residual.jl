@@ -6,7 +6,8 @@
 	residual!(du, u, def::CoreDefinition, t, ws::CoreWorkspace) -> nothing
 
 The right-hand side of the core's mass-matrix system `M du/dt = f(u, t)`: the
-state mapping, the kernels in assembler order, the external sources, then the
+state mapping, the kernels in assembler order, the mesh closure (strain rates
+from the reaction sources, velocity rows), the external sources, then the
 row assembly. A pure function of `(u, t)` given `def`; `ws` holds buffers
 only. Dual-number states evaluate in their own buffers.
 """
@@ -27,8 +28,9 @@ function _residual!(du, u, def::CoreDefinition, t, ds::DerivedState, c::Contribu
     derive!(ds, u, def.layout, setup)
     reset!(c)
     _kernels!(c, def.kernels, ds, setup.topology, setup.material, t)
+    closure_rows!(c, def.closure, ds, setup.topology, setup.material, t)
     add_sources!(c, def.sources, ds, setup, t)
-    assemble_rows!(du, u, c, ds, def.layout, setup, def.sources, t)
+    assemble_rows!(du, u, c, ds, def.layout, setup, def.closure, def.sources, t)
     return nothing
 end
 
@@ -72,7 +74,7 @@ end
 # ============================================================================
 
 """
-	assemble_rows!(du, u, c, ds, layout, setup, sources, t)
+	assemble_rows!(du, u, c, ds, layout, setup, closure, sources, t)
 
 Write the row derivatives from the kernel contributions: the only writer of
 `du`. Every face flux is scattered as `∓F_f A_f` into its owner and neighbour;
@@ -85,7 +87,12 @@ with `Eᵢ` the energy sources plus the face energy fluxes and `Ṁᵢⱼ` the
 face-flux part of the mass rate. An external temperature-rate source `S_T`
 adds `S_T` to the temperature row and `(Σⱼ mᵢⱼ c_p,ⱼ) S_T` to the inventory row.
 The face-intensity rows take the residuals of their algebraic equations.
-Rows the layout marks dead are identity rows.
+
+On a moving mesh the position rows are `dxₙ/dt = wₙ` and the velocity rows
+take the closure's residuals; under a variable cross section the history
+rows take their sources and face fluxes, and the area and lateral-rate rows
+the residuals of [`lateral_rows`](@ref) at the column sums of the history
+pair and its rates. Rows the layout marks dead are identity rows.
 """
 function assemble_rows!(
     du::AbstractVector,
@@ -94,6 +101,7 @@ function assemble_rows!(
     ds::DerivedState{NC},
     layout::StateLayout{NC},
     setup::StateSetup,
+    closure,
     sources,
     t,
 ) where {NC}
@@ -132,7 +140,54 @@ function assemble_rows!(
             du[intensity_index(layout, f)] = c.r_intensity[f]
         end
     end
+    if is_moving(layout)
+        @inbounds for nd = 1:n_nodes(layout)
+            du[position_index(layout, nd)] = ds.w[nd]
+            du[velocity_index(layout, nd)] = c.r_velocity[nd]
+        end
+    end
+    if has_chi(layout)
+        _history_rows!(du, c, ds, layout, topo)
+        _lateral_rows!(du, ds, layout, closure.lateral)
+    end
     _dead_rows!(du, u, layout)
+    return nothing
+end
+
+# The history rows: each cell's source plus the scattered face fluxes.
+function _history_rows!(du, c::Contributions, ds, layout::StateLayout, topo)
+    g = ds.geometry
+    @inbounds for i = 1:n_cells(layout), k = 1:2
+        du[history_index(layout, i, k)] = c.S_carried[k, i]
+    end
+    @inbounds for f = 1:n_faces(topo)
+        o, nb = topo.faces[f].cells
+        A = g.face_area[f]
+        for k = 1:2
+            F = c.F_carried[k, f] * A
+            du[history_index(layout, o, k)] -= F
+            nb == 0 || (du[history_index(layout, nb, k)] += F)
+        end
+    end
+    return nothing
+end
+
+# The area and lateral-rate rows at the column sums of the live cells'
+# history pair and its rates.
+function _lateral_rows!(du, ds, layout::StateLayout, lat::LateralShrinkage)
+    T = eltype(du)
+    ΣG, ΣM, ΣĠ, ΣṀ = zero(T), zero(T), zero(T), zero(T)
+    @inbounds for i = 1:n_cells(layout)
+        kG, kM = history_index(layout, i, 1), history_index(layout, i, 2)
+        layout.mask[kG] || continue
+        ΣG += ds.G[i]
+        ΣM += ds.M[i]
+        ΣĠ += du[kG]
+        ΣṀ += du[kM]
+    end
+    r = lateral_rows(lat, SVector(ΣG, ΣM, ΣĠ, ΣṀ, ds.θ_A[], ds.A[]))
+    du[area_index(layout)] = r[1]
+    du[lateral_rate_index(layout)] = r[2]
     return nothing
 end
 

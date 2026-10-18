@@ -25,11 +25,13 @@ include("conduction.jl")
 include("gas_transport.jl")
 include("radiation.jl")
 include("thermal_boundary.jl")
+include("relative_flux.jl")
 
 export Kernel, Contributions, reset!, contribute!, find_kernel
 export ReactionKernel, ConductionKernel, normal_conductivity
 export GasTransportKernel, outward_darcy_velocity, MOBILITY_GUARD
 export BeerLambertKernel, incident_intensity, sweep_intensities!, transmitted_face
 export BoundaryPatch, ThermalBoundaryKernel, boundary_energy_flux
+export RelativeFluxKernel, van_albada
 
 end # module Kernels

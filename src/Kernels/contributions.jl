@@ -32,6 +32,11 @@ What the kernels return, with the derived state's element type `T`:
   temperature of its energy balance
 - `r_intensity`: the residual of the algebraic row of every face intensity
   (`n_faces`) [W/m²]
+- `r_velocity`: the residual of the algebraic row of every node velocity
+  (`n_nodes`), written by the mesh closure
+- `F_carried`: flux of the conversion-history pair `G`, `M` per unit face area
+  along the face normal (`2 × n_faces`) [kg/(m²·s)]
+- `S_carried`: cell source of the history pair (`2 × n_cells`) [kg/s]
 
 `rates`, `heats` and `species` are per-cell scratch of the reaction kernel.
 """
@@ -44,17 +49,26 @@ struct Contributions{NC,T}
     M_flux::Matrix{T}
     T_face::Vector{T}
     r_intensity::Vector{T}
+    r_velocity::Vector{T}
+    F_carried::Matrix{T}
+    S_carried::Matrix{T}
     rates::Vector{T}
     heats::Vector{T}
     species::Vector{T}
 end
 
 """
-	Contributions{T}(NC, NR, n_cells, n_faces)
+	Contributions{T}(NC, NR, n_cells, n_faces, n_nodes)
 
 Zero-filled contribution buffers.
 """
-function Contributions{T}(NC::Int, NR::Int, n_cells::Int, n_faces::Int) where {T}
+function Contributions{T}(
+    NC::Int,
+    NR::Int,
+    n_cells::Int,
+    n_faces::Int,
+    n_nodes::Int,
+) where {T}
     return Contributions{NC,T}(
         zeros(T, NC, n_faces),
         zeros(T, n_faces),
@@ -64,6 +78,9 @@ function Contributions{T}(NC::Int, NR::Int, n_cells::Int, n_faces::Int) where {T
         zeros(T, NC, n_cells),
         zeros(T, n_faces),
         zeros(T, n_faces),
+        zeros(T, n_nodes),
+        zeros(T, 2, n_faces),
+        zeros(T, 2, n_cells),
         zeros(T, NR),
         zeros(T, NR),
         zeros(T, NC),
@@ -82,6 +99,9 @@ function reset!(c::Contributions)
     fill!(c.S_energy, zero(eltype(c.S_energy)))
     fill!(c.θ, zero(eltype(c.θ)))
     fill!(c.r_intensity, zero(eltype(c.r_intensity)))
+    fill!(c.r_velocity, zero(eltype(c.r_velocity)))
+    fill!(c.F_carried, zero(eltype(c.F_carried)))
+    fill!(c.S_carried, zero(eltype(c.S_carried)))
     return c
 end
 

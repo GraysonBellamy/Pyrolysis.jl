@@ -10,19 +10,23 @@ module ColoredJacobian
 
 using SparseArrays
 using ForwardDiff
+using StaticArrays: SVector
 using ADTypes: AutoForwardDiff, AutoSparse, KnownJacobianSparsityDetector
 using DifferentiationInterface: DifferentiationInterface, Constant, prepare_jacobian
 using SparseMatrixColorings: GreedyColoringAlgorithm, column_groups, sparsity_pattern
 using ..Meshes
 using ..States
+using ..Kernels: find_kernel, RelativeFluxKernel
+using ..Closures: BalanceRowClosure, lateral_rows
 using ..Assembly
 
 include("pattern.jl")
 include("oracle.jl")
 include("colored.jl")
 
-export jacobian_pattern
+export jacobian_pattern, dense_rows
 export dense_jacobian, missing_entries, compare_entries
-export ResidualFunction, ColoredJacobianCache, jac_prototype, jacobian!, same_structure
+export ResidualFunction, LateralRows, ColoredJacobianCache, jac_prototype, jacobian!
+export same_structure
 
 end # module ColoredJacobian

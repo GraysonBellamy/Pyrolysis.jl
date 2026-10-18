@@ -121,7 +121,11 @@ automatic differentiation):
 - `V`, `V_eval`: signed geometric cell volumes and their smooth floor
 - `cp_sum`: the smoothly floored heat-capacity sum `Σⱼ mⱼ cⱼ(T_trial)` [J/K]
 - `h`: component sensible enthalpies at the cell temperature (`NC × n`)
-- `x`, `A`: node positions and the cross-section measure
+- `x`, `w`, `A`: node positions, node velocities (moving mesh) and the
+  cross-section measure
+- `θ_A`: the lateral strain rate of the cross section [1/s] (variable cross
+  section; zero otherwise)
+- `G`, `M`: the conversion-history pair per cell [kg] (variable cross section)
 - `geometry`: the mesh metrics at `x`
 - `k`: cell thermal conductivities, smoothly floored at `CONDUCTIVITY_FLOOR`
 - `ε`, `a`: cell surface emissivities and absorptivities (the mixing-weighted
@@ -146,7 +150,11 @@ struct DerivedState{NC,T,G<:MeshGeometry}
     cp_sum::Vector{T}
     h::Matrix{T}
     x::Vector{T}
+    w::Vector{T}
     A::Base.RefValue{T}
+    θ_A::Base.RefValue{T}
+    G::Vector{T}
+    M::Vector{T}
     geometry::G
     k::Vector{T}
     ε::Vector{T}
@@ -190,7 +198,11 @@ function DerivedState{T}(
         zeros(T, n),
         zeros(T, NC, n),
         x,
+        zeros(T, nn),
         A,
+        Ref{T}(zero(T)),
+        zeros(T, n),
+        zeros(T, n),
         geometry,
         zeros(T, n),
         zeros(T, n),
@@ -211,7 +223,9 @@ end
 Map the state vector `u` to the derived state: the only reader of `u`.
 
 Order: the geometry from the node positions (a fixed mesh keeps its
-precomputed geometry), the face intensities, the masses and their
+precomputed geometry), with the node velocities, and under a variable cross
+section the area, its lateral rate and the history pair; the face
+intensities; the masses and their
 concentrations, the cell temperatures (the stored temperature, or the
 inversion of the enthalpy inventory), their trial clamp, the heat-capacity
 sum, the sensible enthalpies, the cell properties with the absorption
@@ -232,9 +246,15 @@ function derive!(
     if is_moving(layout)
         @inbounds for nd = 1:n_nodes(layout)
             ds.x[nd] = u[position_index(layout, nd)]
+            ds.w[nd] = u[velocity_index(layout, nd)]
         end
         if has_chi(layout)
             ds.A[] = u[area_index(layout)]
+            ds.θ_A[] = u[lateral_rate_index(layout)]
+            @inbounds for i = 1:n
+                ds.G[i] = u[history_index(layout, i, 1)]
+                ds.M[i] = u[history_index(layout, i, 2)]
+            end
         end
         geometry!(ds.geometry, ds.x, ds.A[], topo)
     end

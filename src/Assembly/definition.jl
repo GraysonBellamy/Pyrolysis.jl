@@ -33,12 +33,14 @@ end
 The immutable definition the residual is a pure function of, together with
 the state vector, the time and the workspace: the state layout, the state
 setup (topology, material, reference data, caloric extension), the kernels
-in assembler order, and the external sources.
+in assembler order, the mesh closure (`nothing` on a fixed mesh), and the
+external sources.
 """
-struct CoreDefinition{L<:StateLayout,S<:StateSetup,K<:Tuple,Src}
+struct CoreDefinition{L<:StateLayout,S<:StateSetup,K<:Tuple,Cl,Src}
     layout::L
     setup::S
     kernels::K
+    closure::Cl
     sources::Src
 end
 
@@ -74,6 +76,7 @@ function CoreWorkspace(def::CoreDefinition, T0::AbstractVector{<:Real})
         _n_reactions(def),
         n_cells(layout),
         n_faces(def.setup.topology),
+        n_nodes(layout),
     )
     return CoreWorkspace(ds, c, IdDict{DataType,Any}(), T_warm)
 end
@@ -95,6 +98,7 @@ function buffers(ws::CoreWorkspace, def::CoreDefinition, ::Type{T}) where {T}
         _n_reactions(def),
         n_cells(layout),
         n_faces(def.setup.topology),
+        n_nodes(layout),
     )
     ws.dual[T] = (ds, c)
     return (ds, c)

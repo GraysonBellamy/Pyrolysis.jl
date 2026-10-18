@@ -126,7 +126,7 @@ end
     kernel = only(k for k in cp.def.kernels if k isa ReactionKernel)
     @test kernel.limiter == OneSidedLimiter(threshold = 2.0)
     ds = cp.ws.derived
-    c = Contributions{Float64}(3, 2, 6, 7)
+    c = Contributions{Float64}(3, 2, 6, 7, 7)
     reset!(c)
     Pyrolysis.States.derive!(ds, cp.u0, cp.def.layout, cp.def.setup)
     contribute!(c, kernel, ds, cp.def.setup.topology, mat, 0.0)

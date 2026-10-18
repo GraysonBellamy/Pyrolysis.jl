@@ -56,7 +56,7 @@ end
 
 """
 	abstol_vector(layout, setup, m0, T0; reltol, abstol, threshold,
-	              intensity_scale = 1.0) -> Vector{Float64}
+	              intensity_scale = 1.0, time_scale = 1.0) -> Vector{Float64}
 
 Absolute tolerance per row. Mass rows `reltol · threshold · mˢᵢ(0)`, with
 `mˢᵢ(0)` the cell's total initial condensed mass (never a per-species
@@ -65,6 +65,13 @@ enthalpy rows `threshold · mˢᵢ(0) · c_p,ref · abstol`, so a cell at the
 deactivation threshold resolves its temperature to `abstol` as the
 temperature form does; face-intensity rows `reltol · intensity_scale`, the
 scale being the largest incident intensity [W/m²].
+
+On a moving mesh: node positions `reltol · threshold · hₙ`, with `hₙ` the
+thinnest initial cell beside node `n`, so a position error moves a cell's
+concentrations by the relative amount its mass tolerance allows; node
+velocities that over `time_scale` [s], the first step; the history pair the
+mass tolerance of its cell; the cross-section measure `reltol · A₀`; and its
+lateral rate the velocity tolerance spread over the initial thickness.
 """
 function abstol_vector(
     layout::StateLayout{NC},
@@ -75,6 +82,7 @@ function abstol_vector(
     abstol::Float64,
     threshold::Float64,
     intensity_scale::Float64 = 1.0,
+    time_scale::Float64 = 1.0,
 ) where {NC}
     tol = fill(abstol, state_length(layout))
     if has_intensities(layout)
@@ -83,9 +91,29 @@ function abstol_vector(
         end
     end
     ref = setup.reference
+    if is_moving(layout)
+        x = ref.positions
+        nn = n_nodes(layout)
+        w_min = Inf
+        for nd = 1:nn
+            h = min(nd > 1 ? x[nd] - x[nd-1] : Inf, nd < nn ? x[nd+1] - x[nd] : Inf)
+            tol[position_index(layout, nd)] = reltol * threshold * h
+            tol[velocity_index(layout, nd)] = reltol * threshold * h / time_scale
+            w_min = min(w_min, tol[velocity_index(layout, nd)])
+        end
+        if has_chi(layout)
+            tol[area_index(layout)] = reltol * ref.cross_section
+            tol[lateral_rate_index(layout)] = w_min / (x[end] - x[1])
+        end
+    end
     for i = 1:n_cells(layout)
         for j = 1:NC
             tol[mass_index(layout, i, j)] = ref.solid_mass[i] * reltol * threshold
+        end
+        if has_chi(layout)
+            for k = 1:2
+                tol[history_index(layout, i, k)] = ref.solid_mass[i] * reltol * threshold
+            end
         end
         tol[energy_index(layout, i)] = _energy_tolerance(
             energy_state(layout),

@@ -12,7 +12,9 @@ using LinearAlgebra
 using SparseArrays
 using FunctionWrappers: FunctionWrapper
 using SciMLBase: NullParameters, NoInit, FullSpecialize, derivative_discontinuity!
+using SciMLBase: terminate!
 using OrdinaryDiffEq: OrdinaryDiffEq, ODEFunction, ODEProblem, DiscreteCallback, CallbackSet
+using OrdinaryDiffEq: ContinuousCallback
 using OrdinaryDiffEqSDIRK: KenCarp4
 using LinearSolve: KLUFactorization
 using ADTypes: AutoFiniteDiff
@@ -21,6 +23,7 @@ using ..BoundaryConditions: ImpermeableBC
 using ..Meshes
 using ..States
 using ..Kernels
+using ..Closures
 using ..Assembly
 using ..ColoredJacobian
 using ..Outputs
@@ -33,6 +36,6 @@ include("solve.jl")
 
 export ErasedRHS, ErasedJacobian
 export IntegratorPolicy, default_policy, apply_observer_flag!
-export CoreProblem, setup, inadmissible, solve
+export CoreProblem, setup, consistent_state!, inadmissible, solve, integrate
 
 end # module Integration
