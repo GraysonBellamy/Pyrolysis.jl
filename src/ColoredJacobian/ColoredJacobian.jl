@@ -14,6 +14,8 @@ using StaticArrays: SVector
 using ADTypes: AutoForwardDiff, AutoSparse, KnownJacobianSparsityDetector
 using DifferentiationInterface: DifferentiationInterface, Constant, prepare_jacobian
 using SparseMatrixColorings: GreedyColoringAlgorithm, column_groups, sparsity_pattern
+using SparseMatrixColorings: NaturalOrder, LargestFirst, SmallestLast, IncidenceDegree
+using SparseMatrixColorings: ColoringProblem, coloring, ncolors
 using ..Meshes
 using ..States
 using ..Kernels: find_kernel, RelativeFluxKernel
@@ -27,6 +29,7 @@ include("colored.jl")
 export jacobian_pattern, dense_rows
 export dense_jacobian, missing_entries, compare_entries
 export ResidualFunction, LateralRows, ColoredJacobianCache, jac_prototype, jacobian!
+export color_count
 export same_structure
 
 end # module ColoredJacobian

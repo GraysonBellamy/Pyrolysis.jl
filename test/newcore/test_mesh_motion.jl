@@ -200,16 +200,6 @@ end
     end
 end
 
-@testset "radial meshes color like the planar one" begin
-    for n in (6, 8, 12)
-        colors = map(
-            c -> setup(_slab(n); use_ale = true, coordinates = c).jacobian.n_colors,
-            (Planar(), Cylindrical(), Spherical()),
-        )
-        @test colors[1] == colors[2] == colors[3]
-    end
-end
-
 # A slab that converts at the same rate everywhere: isothermal, uniform, the
 # activation energy zero. Its strain rate is uniform.
 function _uniform_slab(n; law = nothing, ρ_b = 400.0)

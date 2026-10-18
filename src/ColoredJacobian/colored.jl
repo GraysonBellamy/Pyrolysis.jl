@@ -55,13 +55,56 @@ function LateralRows(def::CoreDefinition, pattern::SparseMatrixCSC{Bool,Int})
 end
 
 """
+	COLORING_ORDERS
+
+The vertex orders the greedy column coloring tries, keeping the one with the
+fewest colors. On a moving mesh the natural order takes one color more than
+the largest row degree, the lower bound; smallest-last and incidence-degree
+orders reach it on every configuration of the test suite.
+"""
+const COLORING_ORDERS = (NaturalOrder(), LargestFirst(), SmallestLast(), IncidenceDegree())
+
+"""
+	MAX_CHUNK
+
+The widest batch of colors one dual-number residual carries. The colors are
+split into the fewest batches of at most this width, of equal width, so up
+to `MAX_CHUNK` colors cost one pass.
+"""
+const MAX_CHUNK = 24
+
+# The batch width for `K` colors.
+_chunk_width(K::Int) = cld(K, cld(K, MAX_CHUNK))
+
+# The pattern the coloring sees: the dense rows reduced to their diagonal.
+function _colored_pattern(pattern::SparseMatrixCSC{Bool,Int}, dense::Vector{Int})
+    colored = copy(pattern)
+    for r in dense, c in findall(colored[r, :])
+        c == r || (colored[r, c] = false)
+    end
+    return dropzeros!(colored)
+end
+
+_color_count(colored::SparseMatrixCSC{Bool,Int}) =
+    ncolors(coloring(colored, ColoringProblem(), GreedyColoringAlgorithm(COLORING_ORDERS)))
+
+"""
+	color_count(def) -> Int
+
+The number of colors of the residual's Jacobian outside its dense rows.
+"""
+color_count(def::CoreDefinition) =
+    _color_count(_colored_pattern(jacobian_pattern(def), dense_rows(def.layout)))
+
+"""
 	ColoredJacobianCache(def, ws, u, t)
 
 The residual's Jacobian by column-colored forward-mode automatic
 differentiation on the connectivity pattern of [`jacobian_pattern`](@ref):
-SparseMatrixColorings partitions the columns (greedy, natural order), and
-DifferentiationInterface evaluates one dual-number residual per batch of
-colors and decompresses into a `SparseMatrixCSC`. Preparation happens once
+SparseMatrixColorings partitions the columns greedily in the best of
+[`COLORING_ORDERS`](@ref), and DifferentiationInterface evaluates one
+dual-number residual per batch of at most [`MAX_CHUNK`](@ref) colors and
+decompresses into a `SparseMatrixCSC`. Preparation happens once
 per problem structure; `jacobian!` then reuses it at any state and time.
 
 The [`dense_rows`](@ref) of a variable cross section are colored by their
@@ -94,16 +137,12 @@ function ColoredJacobianCache(
 )
     pattern = jacobian_pattern(def)
     dense = dense_rows(def.layout)
-    colored = copy(pattern)
-    for r in dense, c in findall(colored[r, :])
-        c == r || (colored[r, c] = false)
-    end
-    dropzeros!(colored)
+    colored = _colored_pattern(pattern, dense)
     f! = ResidualFunction(def, ws)
     backend = AutoSparse(
-        AutoForwardDiff();
+        AutoForwardDiff(; chunksize = _chunk_width(_color_count(colored)));
         sparsity_detector = KnownJacobianSparsityDetector(colored),
-        coloring_algorithm = GreedyColoringAlgorithm(),
+        coloring_algorithm = GreedyColoringAlgorithm(COLORING_ORDERS),
     )
     du = zeros(length(u))
     x = Vector{Float64}(u)

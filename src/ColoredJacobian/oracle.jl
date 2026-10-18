@@ -7,11 +7,20 @@
 
 The residual's Jacobian at `(u, t)` by dense forward-mode automatic
 differentiation: the reference every structured Jacobian is checked against.
+Every column is differentiated, without the pattern or the coloring, in
+batches of the colored Jacobian's width, so both evaluate the residual at one
+dual-number type at every mesh size.
 """
 function dense_jacobian(def::CoreDefinition, ws::CoreWorkspace, u::AbstractVector, t)
-    f!(du, x) = residual!(du, x, def, t, ws)
+    backend = AutoForwardDiff(; chunksize = _chunk_width(color_count(def)))
     du = zeros(length(u))
-    return ForwardDiff.jacobian(f!, du, Vector{Float64}(u))
+    return DifferentiationInterface.jacobian(
+        ResidualFunction(def, ws),
+        du,
+        backend,
+        Vector{Float64}(u),
+        Constant(Float64(t)),
+    )
 end
 
 """
