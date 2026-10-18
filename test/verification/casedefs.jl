@@ -162,6 +162,8 @@ if !isdefined(@__MODULE__, :VerificationCase)
         "V-RX-01",
         "V-RX-02",
         "V-RX-03",
+        "V-RX-04",
+        "V-CPL-04",
         "V-HC-01",
         "V-HC-02",
         "V-HC-03",
@@ -172,14 +174,24 @@ if !isdefined(@__MODULE__, :VerificationCase)
     runs_on_core(case::VerificationCase) =
         VERIFICATION_CORE != "new" || any(p -> startswith(case.id, p), NEW_CORE_CASES)
 
-    @inline _case_solve(case::VerificationCase, problem; kwargs...) =
-        case.solve_fn !== nothing ? case.solve_fn(problem; kwargs...) :
+    """
+    Solve `problem` on the core the suite runs on: `solve(problem; progress =
+    false, kwargs...)` on the old core, `Pyrolysis.Integration.solve` in the
+    energy state of `PYROLYSIS_ENERGY_STATE` on the new one. Every solve a case
+    makes, its sub-solves inside `qois` and report `curves` included, goes
+    through this, so all of a case's quantities come from one core.
+    """
+    core_solve(problem; kwargs...) =
         VERIFICATION_CORE == "new" ?
         Pyrolysis.Integration.solve(
             problem;
             energy_state = VERIFICATION_ENERGY_STATE,
             kwargs...,
         ) : solve(problem; progress = false, kwargs...)
+
+    @inline _case_solve(case::VerificationCase, problem; kwargs...) =
+        case.solve_fn !== nothing ? case.solve_fn(problem; kwargs...) :
+        core_solve(problem; kwargs...)
 
     """
     Cell-center positions of a solved case [m], on either core.

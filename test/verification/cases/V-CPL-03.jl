@@ -148,11 +148,10 @@ end
 
 function _vcpl03_solve(perm; n_cells = 8, n_outputs = 3)
     r = _vcpl03_problem(perm; n_cells = n_cells, n_outputs = n_outputs)
-    sol = solve(
+    sol = core_solve(
         r.problem;
         use_ale = true,
         min_thickness = 1e-5,
-        progress = false,
         abstol = 1e-10,
         reltol = 1e-8,
     )
