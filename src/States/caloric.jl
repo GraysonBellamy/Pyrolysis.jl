@@ -195,6 +195,14 @@ Heat capacity of every component at temperature `T`.
 """
 @inline component_heat_capacities(laws::CaloricLaws, T) = map(c -> c(T), laws.c)
 
+# `init + a₁ b₁ + a₂ b₂ + …`, added from left to right. The per-component
+# tuples of the laws mix constants and functions of the temperature, so under
+# automatic differentiation their elements differ in type, and indexing them in
+# a loop would box every element.
+@inline sum_products(init, a::Tuple, b::Tuple) =
+    sum_products(init + first(a) * first(b), Base.tail(a), Base.tail(b))
+@inline sum_products(init, ::Tuple{}, ::Tuple{}) = init
+
 # Smallest heat capacity of a law on the property bracket, sampled at the
 # 1 K spacing the component constructors validate the law on. Outside the
 # bracket the law is constant, so this bounds it on the whole real line up to
@@ -314,11 +322,8 @@ least the cell's floor.
 ) where {NC}
     c = component_enthalpy_slopes(laws, T)
     δ = ext.δ[i]
-    C = regularization(ext, m, i)
-    for j = 1:NC
-        C += positive_part(m[j], δ) * c[j]
-    end
-    return C
+    p = ntuple(j -> positive_part(m[j], δ), Val(NC))
+    return sum_products(regularization(ext, m, i), p, c)
 end
 
 @inline _primal(x) = x

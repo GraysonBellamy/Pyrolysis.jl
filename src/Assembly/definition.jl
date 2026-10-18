@@ -81,6 +81,14 @@ function CoreWorkspace(def::CoreDefinition, T0::AbstractVector{<:Real})
     return CoreWorkspace(ds, c, IdDict{DataType,Any}(), T_warm)
 end
 
+# The concrete type of the buffers with element type `T`: the table is untyped
+# and the contributions take their component count at run time, so both
+# branches of `buffers` assert it.
+_buffer_type(
+    ::CoreDefinition{<:StateLayout{NC},<:StateSetup{<:MeshTopology{D}}},
+    ::Type{T},
+) where {NC,D,T} = Tuple{DerivedState{NC,T,MeshGeometry{D,T}},Contributions{NC,T}}
+
 """
 	buffers(ws, def, T) -> (derived, contributions)
 
@@ -90,7 +98,7 @@ The derived state and contributions with element type `T`.
     (ws.derived, ws.contributions)
 function buffers(ws::CoreWorkspace, def::CoreDefinition, ::Type{T}) where {T}
     b = get(ws.dual, T, nothing)
-    b === nothing || return b::Tuple{DerivedState,Contributions}
+    b === nothing || return b::_buffer_type(def, T)
     layout = def.layout
     ds = DerivedState{T}(layout, def.setup, ws.T_warm)
     c = Contributions{T}(
@@ -101,5 +109,5 @@ function buffers(ws::CoreWorkspace, def::CoreDefinition, ::Type{T}) where {T}
         n_nodes(layout),
     )
     ws.dual[T] = (ds, c)
-    return (ds, c)
+    return (ds, c)::_buffer_type(def, T)
 end

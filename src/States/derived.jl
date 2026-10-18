@@ -283,11 +283,8 @@ function derive!(
     @inbounds for i = 1:n
         Tt = trial_temperature(ds.T[i])
         ds.T_trial[i] = Tt
-        c = component_heat_capacities(setup.laws, Tt)
-        C = zero(T)
-        for j = 1:NC
-            C += ds.m[j, i] * c[j]
-        end
+        m = ntuple(j -> ds.m[j, i], Val(NC))
+        C = sum_products(zero(T), m, component_heat_capacities(setup.laws, Tt))
         ds.cp_sum[i] = smooth_floor(C, ref.capacity_floor[i])
         h = component_enthalpies(setup.laws, ds.T[i])
         for j = 1:NC
