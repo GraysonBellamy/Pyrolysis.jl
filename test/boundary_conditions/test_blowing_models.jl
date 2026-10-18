@@ -26,9 +26,13 @@ using ForwardDiff
 using Pyrolysis
 using Pyrolysis.Materials
 using Pyrolysis.BoundaryConditions
-using Pyrolysis.Discretization:
-    BlowingFace, blowing_state, blowing_ratio, blowing_factor, solve_boundary_temperature!
-using Pyrolysis.Geometry: BoundaryState
+using Pyrolysis.BoundaryConditions:
+    BlowingFace,
+    blowing_state,
+    blowing_ratio,
+    blowing_factor,
+    solve_boundary_temperature!,
+    BoundaryState
 
 # ----------------------------------------------------------------------------
 # Gas data of the calculator (blowing_gases.json): NASA-7 cp/R low set,
@@ -544,7 +548,7 @@ const REFERENCE = (
             T_inf,
         )
         @test s_same.φ ≈ s_lump.φ rtol = 1e-12
-        cp_m, k_m = Pyrolysis.Discretization._leaving_mixture(
+        cp_m, k_m = Pyrolysis.BoundaryConditions._leaving_mixture(
             nothing,
             BlowingFace((0.0, 5e-3, 3e-3), T_s, mat2),
         )

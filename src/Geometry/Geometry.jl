@@ -53,9 +53,6 @@ export Mesh1D
 export MeshTopology, MeshGeometry
 export resize_geometry!, cross_section_area, mesh_time
 
-# Boundary state (for surface temperature solve)
-export BoundaryState
-
 # Mesh accessors
 export n_nodes, n_cells, n_faces
 

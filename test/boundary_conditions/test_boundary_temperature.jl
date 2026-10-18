@@ -20,15 +20,14 @@ using Pyrolysis.Discretization
 
 # Import specific functions for testing
 using Pyrolysis.Discretization:
-    solve_boundary_temperature,
-    BoundaryState,
     get_surface_temperature,
     get_back_face_temperature,
     check_boundary_energy_balance,
-    update_boundary_state!,
-    evaluate_bc_flux_and_derivative
+    update_boundary_state!
+using Pyrolysis.BoundaryConditions:
+    solve_boundary_temperature, BoundaryState, evaluate_bc_flux_and_derivative
 using Pyrolysis.Materials: GaseousComponent, SolidComponent, Material, Reaction
-using Pyrolysis.Discretization: compute_boundary_heat_fluxes
+using Pyrolysis.BoundaryConditions: compute_boundary_heat_fluxes
 using Pyrolysis.Properties: effective_emissivity, effective_absorptivity
 
 # Test helper: a tiny inert single-solid material (no gas component). Tests
@@ -496,7 +495,7 @@ _solve_bt(T_cell, k, Δz, bc, t, ε; kwargs...) =
                 t,
                 ε_eff,
                 NO_RADIATION,
-                Pyrolysis.Discretization.BlowingFace((0.0, 0.0), T_s, mat_face);
+                Pyrolysis.BoundaryConditions.BlowingFace((0.0, 0.0), T_s, mat_face);
                 a_eff = a_eff,
             )
             @test q6 ≈ q_c
@@ -529,7 +528,7 @@ _solve_bt(T_cell, k, Δz, bc, t, ε; kwargs...) =
             # Manually set boundary states for testing
             T_top = 800.0
             T_bottom = 350.0
-            mesh.boundary_states[1] = Pyrolysis.Geometry.BoundaryState(
+            mesh.boundary_states[1] = Pyrolysis.BoundaryConditions.BoundaryState(
                 T_top,
                 50000.0,
                 50000.0,
@@ -539,7 +538,7 @@ _solve_bt(T_cell, k, Δz, bc, t, ε; kwargs...) =
                 true,
                 3,
             )
-            mesh.boundary_states[2] = Pyrolysis.Geometry.BoundaryState(
+            mesh.boundary_states[2] = Pyrolysis.BoundaryConditions.BoundaryState(
                 T_bottom,
                 0.0,
                 0.0,
@@ -561,7 +560,7 @@ _solve_bt(T_cell, k, Δz, bc, t, ε; kwargs...) =
             mesh_test = create_uniform_mesh(L, n_cells, Val(2))
 
             # Set up a well-balanced boundary state
-            mesh_test.boundary_states[1] = Pyrolysis.Geometry.BoundaryState(
+            mesh_test.boundary_states[1] = Pyrolysis.BoundaryConditions.BoundaryState(
                 600.0,    # T_surface
                 10000.0,  # q_applied
                 10000.0,  # q_conducted (matching!)
@@ -571,7 +570,7 @@ _solve_bt(T_cell, k, Δz, bc, t, ε; kwargs...) =
                 true,     # converged
                 3,        # iterations
             )
-            mesh_test.boundary_states[2] = Pyrolysis.Geometry.BoundaryState(
+            mesh_test.boundary_states[2] = Pyrolysis.BoundaryConditions.BoundaryState(
                 350.0,
                 0.0,
                 0.0,
@@ -588,7 +587,7 @@ _solve_bt(T_cell, k, Δz, bc, t, ε; kwargs...) =
             @test balance_results[2] < 1e-10
 
             # Now test with imbalance
-            mesh_test.boundary_states[1] = Pyrolysis.Geometry.BoundaryState(
+            mesh_test.boundary_states[1] = Pyrolysis.BoundaryConditions.BoundaryState(
                 600.0,    # T_surface
                 10000.0,  # q_applied
                 8000.0,   # q_conducted (20% error!)
@@ -865,7 +864,7 @@ end  # main testset
         t,
         ε_eff,
         SURFACE_ABSORPTION,
-        Pyrolysis.Discretization.BlowingFace((0.0, 0.0, 0.0), T_s, mat);
+        Pyrolysis.BoundaryConditions.BlowingFace((0.0, 0.0, 0.0), T_s, mat);
         a_eff = a_eff,
     )
     @test hf_face.net ≈ hf.net
@@ -875,7 +874,7 @@ end
 # BoundaryState, and stores only a finite iterate: a poisoned state cannot leak
 # into a later solve.
 @testset "surface Newton ignores the stored state" begin
-    solve! = Pyrolysis.Discretization.solve_boundary_temperature!
+    solve! = Pyrolysis.BoundaryConditions.solve_boundary_temperature!
     bc =
         HeatFluxBC(50e3) +
         RadiativeBC(T_inf = 300.0) +

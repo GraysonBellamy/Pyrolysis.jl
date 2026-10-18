@@ -29,8 +29,8 @@ using ForwardDiff
 using Pyrolysis
 using Pyrolysis.Materials
 using Pyrolysis.BoundaryConditions
-using Pyrolysis.Geometry: BoundaryState
-using Pyrolysis.Discretization:
+using Pyrolysis.BoundaryConditions:
+    BoundaryState,
     blowing_factor,
     BlowingFace,
     blowing_state,
@@ -38,8 +38,8 @@ using Pyrolysis.Discretization:
     solve_boundary_temperature,
     solve_boundary_temperature!,
     evaluate_bc_flux_and_derivative,
-    compute_boundary_heat_fluxes
-using Pyrolysis.Discretization: _blowing_conductance
+    compute_boundary_heat_fluxes,
+    _blowing_conductance
 using Pyrolysis.Materials: SURFACE_ABSORPTION, NO_RADIATION
 using Pyrolysis.Jacobian: verify_jacobian_at, JacobianSpec, DenseAD_ForwardDiff, Structured
 

@@ -19,8 +19,8 @@ using ..Properties:
     effective_absorptivity,
     effective_absorption,
     effective_conductivity
-using ..Discretization:
-    compute_boundary_heat_fluxes, solve_boundary_temperature, _bc_boundary_face_fluxes
+using ..Discretization: _bc_boundary_face_fluxes
+using ..BoundaryConditions: compute_boundary_heat_fluxes, solve_boundary_temperature
 using ..Materials: has_darcy_flow
 using ..BoundaryConditions:
     get_radiative_flux_bc,

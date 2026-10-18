@@ -65,17 +65,17 @@ using OrdinaryDiffEq
 include("Materials/Materials.jl")
 using .Materials
 
-# Boundary-condition types (depends only on Materials)
+# Material property evaluation (depends only on Materials)
+include("Properties/Properties.jl")
+using .Properties
+
+# Boundary-condition types and their face-local evaluation (Materials, Properties)
 include("BoundaryConditions/BoundaryConditions.jl")
 using .BoundaryConditions
 
 # Geometry and mesh infrastructure
 include("Geometry/Geometry.jl")
 using .Geometry
-
-# Material property evaluation
-include("Properties/Properties.jl")
-using .Properties
 
 # Physical models
 include("Physics/Physics.jl")

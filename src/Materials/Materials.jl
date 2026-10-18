@@ -95,7 +95,7 @@ export get_permeability, has_permeability  # Permeability accessors for componen
 export get_intrinsic_density  # Skeletal density accessor
 export get_emissivity, get_absorptivity, surface_absorptivity  # Radiative surface accessors
 
-# Blowing models (evaluated in Discretization/blowing.jl)
+# Blowing models (evaluated in BoundaryConditions/blowing.jl)
 export AbstractBlowingModel,
     NoBlowing, CouetteFilm, PropertyRatioFilm, PoolingFilm, FunctionBlowing
 export GasSpecies, NITROGEN, nasa7_heat_capacity, eucken_viscosity, fuller_diffusivity

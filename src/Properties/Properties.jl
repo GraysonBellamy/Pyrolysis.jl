@@ -11,8 +11,6 @@ This module provides:
 module Properties
 
 using ..Materials
-using ..BoundaryConditions
-using ..Geometry
 
 # Include subfiles
 include("mixture_rules.jl")
