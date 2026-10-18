@@ -37,9 +37,17 @@ The solution of the finite-volume core at the saved times:
   that tag) [K]
 - `boundary_mass_flux`: per boundary tag, the outward mass flux of every
   component summed, area-weighted over its faces [kg/(m²·s)]
+- `boundary_blowing_ratio`: per boundary tag, the area-weighted ratio
+  `h/h₀` its convective condition applied at the solved face temperature (1
+  without outflow, without a blowing model, or on a face its condition fixes
+  in closed form)
 - `extras`: the series under the names of `PyrolysisSolution.extras`:
   `surface_mass_flux`, the outward mass flux of the `:top` faces
-  [kg/(m²·s)] (`NaN` without that tag)
+  [kg/(m²·s)], and `surface_blowing_ratio`, their blowing ratio (`NaN`
+  without that tag); `radiation_transmitted`, the intensity leaving through
+  the last face of the in-depth beam, and `volumetric_absorption`, the
+  intensity the cells absorbed, both per unit exposed area [W/m²] (zero
+  without in-depth radiation)
 - `retcode`: the integrator's return code
 - `solve_time`: wall time of the solve [s]
 - `statistics`: the [`SolverStatistics`](@ref)
@@ -56,7 +64,13 @@ struct CoreSolution{P}
     boundary_T::Dict{Symbol,Vector{Float64}}
     surface_T::Vector{Float64}
     boundary_mass_flux::Dict{Symbol,Vector{Float64}}
-    extras::@NamedTuple{surface_mass_flux::Vector{Float64}}
+    boundary_blowing_ratio::Dict{Symbol,Vector{Float64}}
+    extras::@NamedTuple{
+        surface_mass_flux::Vector{Float64},
+        surface_blowing_ratio::Vector{Float64},
+        radiation_transmitted::Vector{Float64},
+        volumetric_absorption::Vector{Float64},
+    }
     retcode::Symbol
     solve_time::Float64
     statistics::SolverStatistics
@@ -95,6 +109,11 @@ function CoreSolution(
     tags = boundary_tags(topo)
     boundary_T = Dict(tag => zeros(nt) for tag in tags)
     boundary_mass_flux = Dict(tag => zeros(nt) for tag in tags)
+    boundary_blowing_ratio = Dict(tag => zeros(nt) for tag in tags)
+    transmitted = zeros(nt)
+    absorbed = zeros(nt)
+    thermal = find_kernel(ThermalBoundaryKernel, def.kernels)
+    beam = find_kernel(BeerLambertKernel, def.kernels)
     ds, c = buffers(ws, def, Float64)
     du = zeros(state_length(layout))
     for (k, u) in enumerate(states)
@@ -113,11 +132,25 @@ function CoreSolution(
                 sum(c.T_face[f] * ds.geometry.face_area[f] for f in faces) / A
             boundary_mass_flux[tag][k] =
                 sum(sum(view(c.F_mass, :, f)) * ds.geometry.face_area[f] for f in faces) / A
+            boundary_blowing_ratio[tag][k] =
+                sum(
+                    thermal.states[f].blowing_ratio * ds.geometry.face_area[f] for
+                    f in faces
+                ) / A
+        end
+        if beam !== nothing
+            e, b = beam.exposed, transmitted_face(beam)
+            A_e = ds.geometry.face_area[e]
+            transmitted[k] = ds.I[b] * ds.geometry.face_area[b] / A_e
+            absorbed[k] = ds.I[e] - transmitted[k]
         end
     end
     surface_T = haskey(boundary_T, :top) ? copy(boundary_T[:top]) : fill(NaN, nt)
     surface_mass_flux =
         haskey(boundary_mass_flux, :top) ? copy(boundary_mass_flux[:top]) : fill(NaN, nt)
+    surface_blowing_ratio =
+        haskey(boundary_blowing_ratio, :top) ? copy(boundary_blowing_ratio[:top]) :
+        fill(NaN, nt)
     return CoreSolution(
         problem,
         Vector{Float64}(t),
@@ -129,7 +162,13 @@ function CoreSolution(
         boundary_T,
         surface_T,
         boundary_mass_flux,
-        (; surface_mass_flux),
+        boundary_blowing_ratio,
+        (;
+            surface_mass_flux,
+            surface_blowing_ratio,
+            radiation_transmitted = transmitted,
+            volumetric_absorption = absorbed,
+        ),
         retcode,
         solve_time,
         statistics,

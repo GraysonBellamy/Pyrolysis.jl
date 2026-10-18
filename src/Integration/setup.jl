@@ -44,8 +44,9 @@ _own_problem(p::PyrolysisProblem) = PyrolysisProblem(
 function _require_supported(problem::PyrolysisProblem, use_ale::Bool, radiation_model)
     material = problem.material
     use_ale && throw(ArgumentError("the finite-volume core does not move the mesh yet"))
-    radiation_model === NO_RADIATION ||
-        throw(ArgumentError("the finite-volume core does not model in-depth radiation yet"))
+    radiation_model in (NO_RADIATION, SURFACE_ABSORPTION, BEER_LAMBERT) || throw(
+        ArgumentError("the finite-volume core has no $(radiation_model) radiation model"),
+    )
     material.lateral_shrinkage_law === nothing ||
         throw(ArgumentError("the finite-volume core has no variable cross section yet"))
     return nothing
@@ -69,20 +70,49 @@ function _gas_transport(problem::PyrolysisProblem)
 end
 
 # The kernels in assembler order: reactions, gas transport (whose boundary
-# mass fluxes the surface balance reads), conduction, the thermal boundary.
-function _kernels(problem, topo, g0, laws, gas::GasTransport)
+# mass fluxes the surface balance reads), in-depth radiation, conduction, the
+# thermal boundary.
+function _kernels(problem, topo, g0, laws, gas::GasTransport, radiation_model)
     material = problem.material
     reactions = n_reactions(material) > 0 ? (ReactionKernel(material),) : ()
     transport =
         gas isa NoGasTransport ? () :
         (GasTransportKernel(gas, topo, g0, problem.bc_set, material, laws),)
+    radiation =
+        radiation_model === BEER_LAMBERT ? (BeerLambertKernel(topo, g0, problem.bc_set),) :
+        ()
     boundary = ThermalBoundaryKernel(
         topo,
         g0,
         problem.bc_set;
+        radiation_model,
         laws = gas isa NoGasTransport ? nothing : laws,
     )
-    return (reactions..., transport..., ConductionKernel(topo, g0), boundary)
+    return (reactions..., transport..., radiation..., ConductionKernel(topo, g0), boundary)
+end
+
+# The largest incident intensity over the solve window [W/m²], at least 1: the
+# scale of the face-intensity tolerances.
+function _intensity_scale(kernels::Tuple, ds, tspan)
+    kernel = find_kernel(BeerLambertKernel, kernels)
+    kernel === nothing && return 1.0
+    times = range(Float64(tspan[1]), Float64(tspan[2]); length = 101)
+    return max(1.0, maximum(t -> abs(incident_intensity(kernel, ds, t)), times))
+end
+
+# The face intensities of `u` that satisfy their algebraic rows at time `t`:
+# the consistent values the integrator starts from.
+function _consistent_intensities!(u, def::CoreDefinition, ws::CoreWorkspace, t)
+    layout = def.layout
+    kernel = find_kernel(BeerLambertKernel, def.kernels)
+    kernel === nothing && return u
+    ds = ws.derived
+    derive!(ds, u, layout, def.setup)
+    sweep_intensities!(ds.I, kernel, ds, def.setup.topology, t)
+    for f in eachindex(ds.I)
+        u[intensity_index(layout, f)] = ds.I[f]
+    end
+    return u
 end
 
 """
@@ -94,7 +124,13 @@ Set up `problem` on the finite-volume core: apply its initial conditions to its
 own copy of the mesh, build the 1D mesh from the node positions and the
 cross-section area, the initial inventories `mᵢⱼ = ξⱼ(zᵢ) Vᵢ`, the energy
 state from `T(zᵢ)`, the gas transport the material and the mass conditions
-need, the kernels, the tolerance vector and the colored Jacobian.
+need, the kernels, the face intensities consistent with the incident flux
+under `BEER_LAMBERT`, the tolerance vector and the colored Jacobian.
+
+`radiation_model` is `NO_RADIATION` or `SURFACE_ABSORPTION` (the incident
+flux enters the surface balance at the exposed cell's absorptivity, or the
+condition's own) or `BEER_LAMBERT` (it is absorbed in depth, through the
+face intensities of [`BeerLambertKernel`](@ref)).
 
 `threshold` is the deactivation mass fraction `ε_m`, which also scales the
 mass tolerances; `sources` is the external-source hook.
@@ -146,9 +182,15 @@ function setup(
         CaloricExtension(laws, reference.mass_scale, reference.capacity_floor) : nothing
     gas = _gas_transport(problem)
     state_setup = StateSetup(topo, material, laws, reference, caloric, gas)
-    layout = StateLayout(NC, n, energy; moving = use_ale)
+    layout = StateLayout(
+        NC,
+        n,
+        energy;
+        moving = use_ale,
+        intensities = radiation_model === BEER_LAMBERT,
+    )
 
-    kernels = _kernels(problem, topo, g0, laws, gas)
+    kernels = _kernels(problem, topo, g0, laws, gas, radiation_model)
     def = CoreDefinition(layout, state_setup, kernels, sources)
     ws = CoreWorkspace(def, T0)
 
@@ -160,6 +202,8 @@ function setup(
         end
         u0[energy_index(layout, i)] = energy_state_value(energy, state_setup, T0[i], mi, i)
     end
+    t0 = problem.tspan[1]
+    _consistent_intensities!(u0, def, ws, t0)
     tol = abstol_vector(
         layout,
         state_setup,
@@ -168,7 +212,8 @@ function setup(
         reltol = Float64(reltol),
         abstol = Float64(abstol),
         threshold = Float64(threshold),
+        intensity_scale = _intensity_scale(kernels, ws.derived, problem.tspan),
     )
-    cj = ColoredJacobianCache(def, ws, u0, problem.tspan[1])
+    cj = ColoredJacobianCache(def, ws, u0, t0)
     return CoreProblem(problem, def, ws, u0, tol, cj, T0, m0)
 end

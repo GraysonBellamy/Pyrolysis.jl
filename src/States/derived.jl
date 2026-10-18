@@ -126,6 +126,8 @@ automatic differentiation):
 - `k`: cell thermal conductivities, smoothly floored at `CONDUCTIVITY_FLOOR`
 - `ε`, `a`: cell surface emissivities and absorptivities (the mixing-weighted
   sums, which stay in `[0, 1]`)
+- `I`, `α`: face intensities [W/m²] as stored, and cell absorption
+  coefficients at the positive-part concentrations [1/m] (in-depth radiation)
 - `λ`: cell gas-transfer coefficients [m²/s] (gas transport)
 - `φ`, `P`, `mob`: the smoothly floored porosity, the ideal-gas pressure [Pa]
   and the Darcy mobility `κ/μ` with a smoothly floored viscosity [m²/(Pa·s)]
@@ -149,6 +151,8 @@ struct DerivedState{NC,T,G<:MeshGeometry}
     k::Vector{T}
     ε::Vector{T}
     a::Vector{T}
+    I::Vector{T}
+    α::Vector{T}
     λ::Vector{T}
     φ::Vector{T}
     P::Vector{T}
@@ -191,6 +195,8 @@ function DerivedState{T}(
         zeros(T, n),
         zeros(T, n),
         zeros(T, n),
+        zeros(T, n_faces(topo)),
+        zeros(T, n),
         zeros(T, n),
         zeros(T, n),
         zeros(T, n),
@@ -205,10 +211,11 @@ end
 Map the state vector `u` to the derived state: the only reader of `u`.
 
 Order: the geometry from the node positions (a fixed mesh keeps its
-precomputed geometry), the masses and their concentrations, the cell
-temperatures (the stored temperature, or the inversion of the enthalpy
-inventory), their trial clamp, the heat-capacity sum, the sensible
-enthalpies, the cell properties, and the pore-gas properties the gas
+precomputed geometry), the face intensities, the masses and their
+concentrations, the cell temperatures (the stored temperature, or the
+inversion of the enthalpy inventory), their trial clamp, the heat-capacity
+sum, the sensible enthalpies, the cell properties with the absorption
+coefficients under in-depth radiation, and the pore-gas properties the gas
 transport model needs.
 """
 function derive!(
@@ -230,6 +237,11 @@ function derive!(
             ds.A[] = u[area_index(layout)]
         end
         geometry!(ds.geometry, ds.x, ds.A[], topo)
+    end
+    if has_intensities(layout)
+        @inbounds for f in eachindex(ds.I)
+            ds.I[f] = u[intensity_index(layout, f)]
+        end
     end
 
     @inbounds for i = 1:n
@@ -266,6 +278,7 @@ function derive!(
         ds.ε[i] = mixture_emissivity(ξ⁺, Tt, material)
         ds.a[i] = mixture_absorptivity(ξ⁺, Tt, material)
         _gas_properties!(ds, i, ξ⁺, Tt, material, setup.gas)
+        has_intensities(layout) && (ds.α[i] = effective_absorption(ξ⁺, material))
     end
     return ds
 end

@@ -30,6 +30,8 @@ What the kernels return, with the derived state's element type `T`:
   (`NC × n_cells`) [kg/s], filled by the assembler
 - `T_face`: face temperatures (`n_faces`) [K]: on a boundary face the surface
   temperature of its energy balance
+- `r_intensity`: the residual of the algebraic row of every face intensity
+  (`n_faces`) [W/m²]
 
 `rates`, `heats` and `species` are per-cell scratch of the reaction kernel.
 """
@@ -41,6 +43,7 @@ struct Contributions{NC,T}
     θ::Vector{T}
     M_flux::Matrix{T}
     T_face::Vector{T}
+    r_intensity::Vector{T}
     rates::Vector{T}
     heats::Vector{T}
     species::Vector{T}
@@ -60,6 +63,7 @@ function Contributions{T}(NC::Int, NR::Int, n_cells::Int, n_faces::Int) where {T
         zeros(T, n_cells),
         zeros(T, NC, n_cells),
         zeros(T, n_faces),
+        zeros(T, n_faces),
         zeros(T, NR),
         zeros(T, NR),
         zeros(T, NC),
@@ -77,6 +81,7 @@ function reset!(c::Contributions)
     fill!(c.S_mass, zero(eltype(c.S_mass)))
     fill!(c.S_energy, zero(eltype(c.S_energy)))
     fill!(c.θ, zero(eltype(c.θ)))
+    fill!(c.r_intensity, zero(eltype(c.r_intensity)))
     return c
 end
 
@@ -86,3 +91,13 @@ end
 Add `kernel`'s fluxes and sources at the derived state `ds` and time `t` to `c`.
 """
 function contribute! end
+
+"""
+	find_kernel(K, kernels::Tuple) -> Union{K,Nothing}
+
+The first kernel of type `K` in `kernels`, or `nothing`; resolved at compile
+time from the tuple's type.
+"""
+@inline find_kernel(::Type{K}, ::Tuple{}) where {K} = nothing
+@inline find_kernel(::Type{K}, kernels::Tuple) where {K} =
+    first(kernels) isa K ? first(kernels) : find_kernel(K, Base.tail(kernels))

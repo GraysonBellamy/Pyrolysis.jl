@@ -84,6 +84,7 @@ the mass rows take their reaction and face-flux parts; the energy row is
 with `Eᵢ` the energy sources plus the face energy fluxes and `Ṁᵢⱼ` the
 face-flux part of the mass rate. An external temperature-rate source `S_T`
 adds `S_T` to the temperature row and `(Σⱼ mᵢⱼ c_p,ⱼ) S_T` to the inventory row.
+The face-intensity rows take the residuals of their algebraic equations.
 Rows the layout marks dead are identity rows.
 """
 function assemble_rows!(
@@ -125,6 +126,11 @@ function assemble_rows!(
         E = du[energy_index(layout, i)]
         S_T = _energy_source(sources, ds, i, t)
         du[energy_index(layout, i)] = _energy_row(energy_state(layout), E, S_T, c, ds, i)
+    end
+    if has_intensities(layout)
+        @inbounds for f = 1:n_faces(topo)
+            du[intensity_index(layout, f)] = c.r_intensity[f]
+        end
     end
     _dead_rows!(du, u, layout)
     return nothing

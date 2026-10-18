@@ -168,6 +168,7 @@ if !isdefined(@__MODULE__, :VerificationCase)
         "V-GT-01",
         "V-GT-02",
         "V-MMS-01",
+        "V-RAD-01",
         "V-HC-01",
         "V-HC-02",
         "V-HC-03",

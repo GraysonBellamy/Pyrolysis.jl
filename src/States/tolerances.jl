@@ -55,14 +55,16 @@ function CellReference(
 end
 
 """
-	abstol_vector(layout, setup, m0, T0; reltol, abstol, threshold) -> Vector{Float64}
+	abstol_vector(layout, setup, m0, T0; reltol, abstol, threshold,
+	              intensity_scale = 1.0) -> Vector{Float64}
 
 Absolute tolerance per row. Mass rows `reltol · threshold · mˢᵢ(0)`, with
 `mˢᵢ(0)` the cell's total initial condensed mass (never a per-species
 inventory, which is zero for a product); temperature rows `abstol` [K];
 enthalpy rows `threshold · mˢᵢ(0) · c_p,ref · abstol`, so a cell at the
 deactivation threshold resolves its temperature to `abstol` as the
-temperature form does.
+temperature form does; face-intensity rows `reltol · intensity_scale`, the
+scale being the largest incident intensity [W/m²].
 """
 function abstol_vector(
     layout::StateLayout{NC},
@@ -72,8 +74,14 @@ function abstol_vector(
     reltol::Float64,
     abstol::Float64,
     threshold::Float64,
+    intensity_scale::Float64 = 1.0,
 ) where {NC}
     tol = fill(abstol, state_length(layout))
+    if has_intensities(layout)
+        for f = 1:n_nodes(layout)
+            tol[intensity_index(layout, f)] = reltol * intensity_scale
+        end
+    end
     ref = setup.reference
     for i = 1:n_cells(layout)
         for j = 1:NC

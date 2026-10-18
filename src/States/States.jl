@@ -22,7 +22,7 @@ using ..Materials:
     ConstantProperty, LinearProperty, PolynomialProperty, TableProperty, T_REF
 using ..Properties: effective_conductivity, mixture_emissivity, mixture_absorptivity
 using ..Properties: effective_gas_transfer, effective_permeability, skeletal_volume_fraction
-using ..Properties: MU_FLOOR
+using ..Properties: MU_FLOOR, effective_absorption
 using ..Physics: ideal_gas_pressure
 using ..Meshes
 import ..Materials: n_components
