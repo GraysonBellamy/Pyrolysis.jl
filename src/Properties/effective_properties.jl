@@ -933,18 +933,26 @@ end
 const FACE_MEAN_GUARD = 1e-20
 
 """
-	guarded_harmonic_mean(a, b, d_a, d_b)
+	guarded_harmonic_mean(a, b, d_a, d_b, η = FACE_MEAN_GUARD)
 
 Distance-weighted harmonic mean in the product form
 
-	φ_face = (d_a + d_b) a b / (d_a b + d_b a + η (d_a + d_b)),   η = FACE_MEAN_GUARD
+	φ_face = (d_a + d_b) a b / (d_a b + d_b a + η (d_a + d_b))
 
 smooth in every argument for non-negative values and positive distances. It
 equals [`harmonic_mean_weighted`](@ref) to a relative `η / φ`, and it goes to
 zero continuously, with a finite derivative, as either value vanishes instead
-of being cut off below a threshold.
+of being cut off below a threshold. The guard `η` carries the property's units
+and must lie far below its physical values: the default suits conductivities
+and gas-transfer coefficients, a Darcy mobility needs a smaller one.
 """
-@inline function guarded_harmonic_mean(a::Real, b::Real, d_a::Real, d_b::Real)
+@inline function guarded_harmonic_mean(
+    a::Real,
+    b::Real,
+    d_a::Real,
+    d_b::Real,
+    η::Real = FACE_MEAN_GUARD,
+)
     d = d_a + d_b
-    return d * a * b / (d_a * b + d_b * a + FACE_MEAN_GUARD * d)
+    return d * a * b / (d_a * b + d_b * a + η * d)
 end

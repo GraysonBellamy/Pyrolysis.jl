@@ -20,6 +20,7 @@ include("radiation_cache.jl")
 
 # Exports
 export mixture_density, volume_fractions, solid_volume_fractions, porosity
+export skeletal_volume_fraction
 export effective_heat_capacity, effective_conductivity
 export effective_emissivity, effective_absorptivity, effective_absorption
 export mixture_emissivity, mixture_absorptivity
