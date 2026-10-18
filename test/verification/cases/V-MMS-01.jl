@@ -109,7 +109,13 @@ function _verification_case_vmms01()
         )
     end
 
-    solve_fn(problem; kwargs...) = solve_mms(problem, fields; kwargs...)
+    solve_fn(problem; kwargs...) = solve_mms(
+        problem,
+        fields;
+        core = Symbol(VERIFICATION_CORE),
+        energy_state = VERIFICATION_ENERGY_STATE,
+        kwargs...,
+    )
 
     function qois(sol)
         out = QoIResult[]
