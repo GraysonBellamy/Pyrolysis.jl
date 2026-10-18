@@ -130,7 +130,7 @@ function setup(
     layout = StateLayout(NC, n, energy; moving = use_ale)
 
     kernels = (
-        (n_reactions(material) > 0 ? (ReactionKernel(),) : ())...,
+        (n_reactions(material) > 0 ? (ReactionKernel(material),) : ())...,
         ConductionKernel(topo, g0),
         ThermalBoundaryKernel(topo, g0, problem.bc_set),
     )
