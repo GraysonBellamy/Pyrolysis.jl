@@ -73,6 +73,8 @@ function _verification_case_vmms02()
         use_ale = true,
         w_override = w_star,
         jacobian = :fd,
+        core = Symbol(VERIFICATION_CORE),
+        energy_state = VERIFICATION_ENERGY_STATE,
         kwargs...,
     )
 

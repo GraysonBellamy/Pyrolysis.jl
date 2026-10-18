@@ -108,6 +108,8 @@ function _verification_case_vmms03()
         # proving the pattern covers the override's ∂(dz/dt)/∂z coupling —
         # silent-drop hazard.
         jacobian = :fd,
+        core = Symbol(VERIFICATION_CORE),
+        energy_state = VERIFICATION_ENERGY_STATE,
         kwargs...,
     )
 
