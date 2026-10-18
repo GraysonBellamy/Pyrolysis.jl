@@ -20,7 +20,7 @@ using ForwardDiff
 using ..Materials
 using ..Materials:
     ConstantProperty, LinearProperty, PolynomialProperty, TableProperty, T_REF
-using ..Properties: effective_conductivity
+using ..Properties: effective_conductivity, mixture_emissivity, mixture_absorptivity
 using ..Meshes
 import ..Materials: n_components
 import ..Meshes: n_cells, n_nodes

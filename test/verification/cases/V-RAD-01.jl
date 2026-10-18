@@ -63,7 +63,7 @@ function _verification_case_vrad01()
 
     function qois(sol)
         out = QoIResult[]
-        z = get_cell_positions(sol)
+        z = cell_positions(sol)
         for (j, t) in enumerate(times)
             Tn = @view sol.T[:, j+1]
             err = maximum(abs(Tn[i] - ex.T_exact(δ - z[i], t)) for i in eachindex(z))
@@ -142,7 +142,7 @@ function _verification_case_vrad01()
     end
 
     function l2_error_t90(sol)
-        z = get_cell_positions(sol)
+        z = cell_positions(sol)
         Tn = @view sol.T[:, 4]
         Δz = δ / length(z)
         return sqrt(
@@ -184,7 +184,7 @@ function _verification_case_vrad01()
             qoi_curves = (:T_profiles, :surface_T_history, :peak_trajectory),
             solve_kwargs = (abstol = 1e-12, reltol = 1e-10, radiation_model = BEER_LAMBERT),
             curves = sol -> begin
-                z = get_cell_positions(sol)
+                z = cell_positions(sol)
                 xs_fine = range(0.0, δ, length = 2001)
                 peak_depth_exact(t) =
                     xs_fine[argmax([ex.T_exact(x, t) for x in xs_fine])]
@@ -270,7 +270,7 @@ function _verification_case_vrad01()
                 ]
             end,
             error_norms = sol -> begin
-                z = get_cell_positions(sol)
+                z = cell_positions(sol)
                 e = [sol.T[i, 4] - ex.T_exact(δ - z[i], 90.0) for i in eachindex(z)]
                 (L2 = sqrt(sum(abs2, e) / length(e)), Linf = maximum(abs, e))
             end,

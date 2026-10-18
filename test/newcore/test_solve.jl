@@ -126,3 +126,29 @@ end
     @test_throws ArgumentError Integration.solve(_reacting_cell(); use_ale = true)
     @test_throws ArgumentError Integration.solve(_reacting_cell(); energy_state = :entropy)
 end
+
+@testset "outputs: face temperatures from the boundary balances" begin
+    solid = SolidComponent(:s, ρ = 800.0, c = 1200.0, k = 0.4)
+    mat = Material(name = :heated, components = (solid,), reactions = ())
+    L, n, q = 0.01, 10, 2e4
+    problem = PyrolysisProblem(
+        mesh = create_uniform_mesh(L, n, Val(1)),
+        material = mat,
+        bc_set = BoundaryConditionSet(
+            thermal = (top = HeatFluxBC(q), bottom = AdiabaticBC()),
+        ),
+        T_initial = z -> 300.0,
+        ξ_initial = [z -> 800.0],
+        tspan = (0.0, 20.0),
+        output_times = [0.0, 10.0, 20.0],
+    )
+    sol = Integration.solve(problem; abstol = 1e-10, reltol = 1e-8)
+    @test sol.retcode === :Success
+    # Prescribed flux: T_s = T_cell + q d / k with d the half cell; adiabatic:
+    # the face temperature is the cell temperature.
+    @test sol.surface_T ≈ sol.T[end, :] .+ q * (L / n / 2) / 0.4 rtol = 1e-12
+    @test sol.boundary_T[:bottom] == sol.T[1, :]
+    @test sol.surface_T == sol.boundary_T[:top]
+    @test Pyrolysis.Outputs.cell_positions(sol) ≈
+          collect(range(L / 2n, L - L / 2n, length = n))
+end

@@ -76,6 +76,8 @@ automatic differentiation):
 - `x`, `A`: node positions and the cross-section measure
 - `geometry`: the mesh metrics at `x`
 - `k`: cell thermal conductivities
+- `ε`, `a`: cell surface emissivities and absorptivities (the mixing-weighted
+  sums, which stay in `[0, 1]`)
 - `T_warm`: the latest temperatures of the plain (non-dual) mapping, the
   starting point of the inventory inversion
 """
@@ -93,6 +95,8 @@ struct DerivedState{NC,T,G<:MeshGeometry}
     A::Base.RefValue{T}
     geometry::G
     k::Vector{T}
+    ε::Vector{T}
+    a::Vector{T}
     T_warm::Vector{Float64}
 end
 
@@ -128,6 +132,8 @@ function DerivedState{T}(
         x,
         A,
         geometry,
+        zeros(T, n),
+        zeros(T, n),
         zeros(T, n),
         T_warm,
     )
@@ -196,6 +202,8 @@ function derive!(
         end
         ξ⁺ = ntuple(j -> ds.ξ⁺[j, i], Val(NC))
         ds.k[i] = effective_conductivity(ξ⁺, Tt, material)
+        ds.ε[i] = mixture_emissivity(ξ⁺, Tt, material)
+        ds.a[i] = mixture_absorptivity(ξ⁺, Tt, material)
     end
     return ds
 end

@@ -50,7 +50,7 @@ function _verification_case_vhc05()
 
     function qois(sol)
         out = QoIResult[]
-        z = get_cell_positions(sol)
+        z = cell_positions(sol)
         Tn = @view sol.T[:, end]
 
         err = maximum(abs(z_of_T(Tn[i]) - z[i]) for i in eachindex(z)) / L
@@ -98,7 +98,7 @@ function _verification_case_vhc05()
     end
 
     function profile_error(sol)
-        z = get_cell_positions(sol)
+        z = cell_positions(sol)
         Tn = @view sol.T[:, end]
         return maximum(abs(z_of_T(Tn[i]) - z[i]) for i in eachindex(z)) / L
     end
@@ -130,7 +130,7 @@ function _verification_case_vhc05()
             qoi_curves = (:T_profile_steady, :flux_history),
             solve_kwargs = (abstol = 1e-12, reltol = 1e-10),
             curves = sol -> begin
-                z = get_cell_positions(sol)
+                z = cell_positions(sol)
                 n = length(z)
                 i1, i2 = n ÷ 2, n ÷ 2 + 1
                 # invert the implicit Kirchhoff profile z(T) for the overlay
@@ -172,7 +172,7 @@ function _verification_case_vhc05()
                 ]
             end,
             error_norms = sol -> begin
-                z = get_cell_positions(sol)
+                z = cell_positions(sol)
                 e = [z_of_T(sol.T[i, end]) - z[i] for i in eachindex(z)]
                 (L2 = sqrt(sum(abs2, e) / length(e)) / L, Linf = maximum(abs, e) / L)
             end,

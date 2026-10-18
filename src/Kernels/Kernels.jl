@@ -13,6 +13,7 @@ module Kernels
 using StaticArrays
 using ..Materials
 using ..BoundaryConditions
+using ..BoundaryConditions: BoundaryState, solve_boundary_temperature!
 using ..Properties: guarded_harmonic_mean
 using ..Physics: evaluate_reactions!, species_source_terms!, reaction_heat_source
 using ..Meshes

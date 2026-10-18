@@ -21,7 +21,7 @@
 function _vbo05_report_curves(sol)
     id = "V-BO-05"
     k = length(sol.t)
-    z_mm = get_cell_positions(sol) .* 1e3
+    z_mm = cell_positions(sol) .* 1e3
     t_k = round(sol.t[k], digits = 1)
     profile(name, title, ylabel, label, y) = ReportCurve(
         name = name,

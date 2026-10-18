@@ -45,7 +45,7 @@
 # (cold wall on top), T interpolated at fixed depth, and the T_m-isotherm
 # front position (linear interpolation on the bracketing cells).
 function _vcpl01_frame(sol, L, T_m)
-    z = get_cell_positions(sol)
+    z = cell_positions(sol)
     x = L .- z
     ord = sortperm(x)
     xs = x[ord]

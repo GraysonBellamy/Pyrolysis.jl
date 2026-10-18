@@ -64,7 +64,7 @@ function _vhc04_case(label::String; k1::Float64, k2::Float64, z_i::Float64, n_ci
 
     function qois(sol)
         out = QoIResult[]
-        z = get_cell_positions(sol)
+        z = cell_positions(sol)
         n = length(z)
         Δz = L / n
         Tn = @view sol.T[:, end]
@@ -159,7 +159,7 @@ function _vhc04_case(label::String; k1::Float64, k2::Float64, z_i::Float64, n_ci
             profile_times = [t_end],
             qoi_curves = (:T_profile_steady,),
             curves = sol -> begin
-                z = get_cell_positions(sol)
+                z = cell_positions(sol)
                 [
                     ReportCurve(
                         name = :T_profile_steady,

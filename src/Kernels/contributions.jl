@@ -28,6 +28,8 @@ What the kernels return, with the derived state's element type `T`:
 - `θ`: cell strain rate (`n_cells`) [1/s]
 - `M_flux`: the face-flux part of every mass rate, `−Σ_f σ_if F_f A_f`
   (`NC × n_cells`) [kg/s], filled by the assembler
+- `T_face`: face temperatures (`n_faces`) [K]: on a boundary face the surface
+  temperature of its energy balance
 
 `rates`, `heats` and `species` are per-cell scratch of the reaction kernel.
 """
@@ -38,6 +40,7 @@ struct Contributions{NC,T}
     S_energy::Vector{T}
     θ::Vector{T}
     M_flux::Matrix{T}
+    T_face::Vector{T}
     rates::Vector{T}
     heats::Vector{T}
     species::Vector{T}
@@ -56,6 +59,7 @@ function Contributions{T}(NC::Int, NR::Int, n_cells::Int, n_faces::Int) where {T
         zeros(T, n_cells),
         zeros(T, n_cells),
         zeros(T, NC, n_cells),
+        zeros(T, n_faces),
         zeros(T, NR),
         zeros(T, NR),
         zeros(T, NC),

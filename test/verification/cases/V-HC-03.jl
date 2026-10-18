@@ -42,7 +42,7 @@ function _verification_case_vhc03()
 
     function qois(sol)
         out = QoIResult[]
-        z = get_cell_positions(sol)
+        z = cell_positions(sol)
         n = length(z)
         for (j, Fo) in enumerate(Fos)
             Tn = @view sol.T[:, j+1]
@@ -97,7 +97,7 @@ function _verification_case_vhc03()
 
     # L2 profile error at Fo = 0.1 (output index 2), the most transient state.
     function l2_error_fo01(sol)
-        z = get_cell_positions(sol)
+        z = cell_positions(sol)
         Tn = @view sol.T[:, 2]
         Δz = L / length(z)
         return sqrt(sum((Tn[i] - T_exact(z[i] / L, 0.1))^2 * Δz for i in eachindex(z)) / L)
@@ -130,7 +130,7 @@ function _verification_case_vhc03()
             qoi_curves = (:T_profiles, :front_back_dT_history, :mean_T_history),
             solve_kwargs = (abstol = 1e-12, reltol = 1e-10),
             curves = sol -> begin
-                z = get_cell_positions(sol)
+                z = cell_positions(sol)
                 n = length(z)
                 Fo_of_t(t) = α * t / L^2
                 # Gpyro 0.8200 overlay (reference/gpyro/): our vhc03 deck —
@@ -222,7 +222,7 @@ function _verification_case_vhc03()
                 ]
             end,
             error_norms = sol -> begin
-                z = get_cell_positions(sol)
+                z = cell_positions(sol)
                 e = [sol.T[i, 2] - T_exact(z[i] / L, 0.1) for i in eachindex(z)]
                 (L2 = sqrt(sum(abs2, e) / length(e)), Linf = maximum(abs, e))
             end,

@@ -158,7 +158,16 @@ if !isdefined(@__MODULE__, :VerificationCase)
     const VERIFICATION_CORE = get(ENV, "PYROLYSIS_CORE", "old")
     const VERIFICATION_ENERGY_STATE =
         Symbol(get(ENV, "PYROLYSIS_ENERGY_STATE", "temperature"))
-    const NEW_CORE_CASES = ("V-RX-01", "V-RX-02", "V-RX-03")
+    const NEW_CORE_CASES = (
+        "V-RX-01",
+        "V-RX-02",
+        "V-RX-03",
+        "V-HC-01",
+        "V-HC-02",
+        "V-HC-03",
+        "V-HC-04",
+        "V-HC-05",
+    )
 
     runs_on_core(case::VerificationCase) =
         VERIFICATION_CORE != "new" || any(p -> startswith(case.id, p), NEW_CORE_CASES)
@@ -171,6 +180,13 @@ if !isdefined(@__MODULE__, :VerificationCase)
             energy_state = VERIFICATION_ENERGY_STATE,
             kwargs...,
         ) : solve(problem; progress = false, kwargs...)
+
+    """
+    Cell-center positions of a solved case [m], on either core.
+    """
+    cell_positions(sol::PyrolysisSolution) = get_cell_positions(sol)
+    cell_positions(sol::Pyrolysis.Outputs.CoreSolution) =
+        Pyrolysis.Outputs.cell_positions(sol)
 
     observed_orders(errors, hs) =
         [log(errors[i-1] / errors[i]) / log(hs[i-1] / hs[i]) for i = 2:length(errors)]

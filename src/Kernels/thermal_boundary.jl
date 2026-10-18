@@ -14,18 +14,28 @@ struct BoundaryPatch{BC}
 end
 
 """
-	ThermalBoundaryKernel{P<:Tuple} <: Kernel
+	ThermalBoundaryKernel{P<:Tuple,R} <: Kernel
 
 The energy flux through every boundary face, one [`BoundaryPatch`](@ref) per
-boundary tag. The flux is written along the outward face normal.
+boundary tag, written along the outward face normal, and the face temperature.
+
+A prescribed temperature or heat flux, or an adiabatic face, gives the flux in
+closed form. Every other condition goes through the surface energy balance
+`q_bc(T_s) = k (T_s − T_cell) / d` of the face, solved by the Newton iteration
+of `BoundaryConditions.solve_boundary_temperature!` started from the clamped
+cell temperature; the outward gas mass flux of the face feeds the blowing
+models of its convective members, and the cell's emissivity and absorptivity
+its radiative members. `states` holds the per-face diagnostics of the balance.
 """
-struct ThermalBoundaryKernel{P<:Tuple} <: Kernel
+struct ThermalBoundaryKernel{P<:Tuple,R} <: Kernel
     patches::P
     d_floor::Vector{Float64}
+    states::Vector{BoundaryState}
+    radiation_model::R
 end
 
 """
-	ThermalBoundaryKernel(topology, geometry, bc_set)
+	ThermalBoundaryKernel(topology, geometry, bc_set; radiation_model = NO_RADIATION)
 
 One patch per boundary tag of the mesh, holding the thermal condition the
 boundary-condition set assigns to that tag.
@@ -33,7 +43,8 @@ boundary-condition set assigns to that tag.
 function ThermalBoundaryKernel(
     topo::MeshTopology,
     g::MeshGeometry,
-    bc_set::BoundaryConditionSet,
+    bc_set::BoundaryConditionSet;
+    radiation_model::RadiationModel = NO_RADIATION,
 )
     tags = boundary_tags(topo)
     for tag in keys(bc_set.thermal)
@@ -52,7 +63,8 @@ function ThermalBoundaryKernel(
         o = topo.faces[f].cells[1]
         d[f] = DISTANCE_FLOOR_FRACTION * center_to_face_distance(g, topo, f, o)
     end
-    return ThermalBoundaryKernel(patches, d)
+    states = [BoundaryState() for _ = 1:n_faces(topo)]
+    return ThermalBoundaryKernel(patches, d, states, radiation_model)
 end
 
 function contribute!(
@@ -63,33 +75,103 @@ function contribute!(
     material,
     t,
 )
-    _patches!(c, kernel.patches, kernel, ds, topo, t)
+    _patches!(c, kernel.patches, kernel, ds, topo, material, t)
     return c
 end
 
 # Peel the patch tuple so each patch's condition is a concrete type.
-@inline _patches!(c, ::Tuple{}, kernel, ds, topo, t) = nothing
-@inline function _patches!(c, patches::Tuple, kernel, ds, topo, t)
+@inline _patches!(c, ::Tuple{}, kernel, ds, topo, material, t) = nothing
+@inline function _patches!(c, patches::Tuple, kernel, ds, topo, material, t)
     p = first(patches)
     @inbounds for f in p.faces
-        c.F_energy[f] += boundary_energy_flux(p.bc, f, kernel, ds, topo, t)
+        q, T_s = boundary_energy_flux(p.bc, f, kernel, c, ds, topo, material, t)
+        c.F_energy[f] += q
+        c.T_face[f] = T_s
     end
-    return _patches!(c, Base.tail(patches), kernel, ds, topo, t)
+    return _patches!(c, Base.tail(patches), kernel, ds, topo, material, t)
+end
+
+# The boundary cell of face `f` and its smoothly floored center-to-face distance.
+@inline function _boundary_cell(kernel, ds, topo, f)
+    i = topo.faces[f].cells[1]
+    d = smooth_floor(center_to_face_distance(ds.geometry, topo, f, i), kernel.d_floor[f])
+    return i, d
 end
 
 """
-	boundary_energy_flux(bc, f, kernel, ds, topology, t)
+	boundary_energy_flux(bc, f, kernel, c, ds, topology, material, t) -> (q, T_s)
 
 Outward energy flux per unit area [W/m²] through boundary face `f` under the
-thermal condition `bc`.
+thermal condition `bc`, and the face temperature [K].
 """
-@inline boundary_energy_flux(::AdiabaticBC, f, kernel, ds, topo, t) = zero(eltype(ds.T))
+@inline function boundary_energy_flux(
+    ::AdiabaticBC,
+    f,
+    kernel,
+    c::Contributions,
+    ds,
+    topo,
+    material,
+    t,
+)
+    i, _ = _boundary_cell(kernel, ds, topo, f)
+    return zero(eltype(ds.T)), ds.T[i]
+end
 
-@inline boundary_energy_flux(bc::HeatFluxBC, f, kernel, ds, topo, t) =
-    -evaluate_param(bc.flux, t) + zero(eltype(ds.T))
+@inline function boundary_energy_flux(
+    bc::HeatFluxBC,
+    f,
+    kernel,
+    c::Contributions,
+    ds,
+    topo,
+    material,
+    t,
+)
+    i, d = _boundary_cell(kernel, ds, topo, f)
+    q_in = evaluate_param(bc.flux, t) + zero(eltype(ds.T))
+    return -q_in, ds.T[i] + q_in * d / ds.k[i]
+end
 
-@inline function boundary_energy_flux(bc::DirichletThermalBC, f, kernel, ds, topo, t)
-    i = topo.faces[f].cells[1]
-    d = smooth_floor(center_to_face_distance(ds.geometry, topo, f, i), kernel.d_floor[f])
-    return ds.k[i] * (ds.T[i] - evaluate_param(bc.T, t)) / d
+@inline function boundary_energy_flux(
+    bc::DirichletThermalBC,
+    f,
+    kernel,
+    c::Contributions,
+    ds,
+    topo,
+    material,
+    t,
+)
+    i, d = _boundary_cell(kernel, ds, topo, f)
+    T_bc = evaluate_param(bc.T, t) + zero(eltype(ds.T))
+    return ds.k[i] * (ds.T[i] - T_bc) / d, T_bc
+end
+
+@inline function boundary_energy_flux(
+    bc::AbstractThermalBC,
+    f,
+    kernel,
+    c::Contributions{NC},
+    ds,
+    topo,
+    material,
+    t,
+) where {NC}
+    i, d = _boundary_cell(kernel, ds, topo, f)
+    J_out = ntuple(j -> c.F_mass[j, f], Val(NC))
+    r = solve_boundary_temperature!(
+        kernel.states[f],
+        ds.T[i],
+        ds.k[i],
+        d,
+        bc,
+        material,
+        J_out,
+        t,
+        ds.ε[i];
+        a_eff = ds.a[i],
+        radiation_model = kernel.radiation_model,
+    )
+    return -r.q_conducted, r.T_s
 end

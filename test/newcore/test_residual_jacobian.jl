@@ -59,13 +59,28 @@ function _states(cp)
     return (; u0, hot, perturbed, zero_state, negative)
 end
 
-@testset "residual and colored Jacobian: $(energy) form, $(n) cells" for energy in (
+# Boundary sets: closed forms, and the surface balance solved per face.
+const _boundary_sets = (
+    closed = (top = HeatFluxBC(3e4), bottom = DirichletThermalBC(400.0)),
+    convective = (top = ConvectiveBC(h = 25.0, T_inf = 900.0), bottom = AdiabaticBC()),
+    combined = (
+        top = HeatFluxBC(3e4) +
+              ConvectiveBC(h = 10.0, T_inf = 300.0) +
+              RadiativeBC(T_inf = 300.0),
+        bottom = ConvectiveBC(h = 5.0, T_inf = 350.0) + RadiativeBC(ε = 0.8, T_inf = 300.0),
+    ),
+)
+
+@testset "residual and colored Jacobian: $(energy) form, $(n) cells, $(name) faces" for energy in
+                                                                                        (
         :temperature,
         :enthalpy,
     ),
-    n in (6, 8)
+    n in (6, 8),
+    name in keys(_boundary_sets)
 
-    cp = setup(_slab(n); energy_state = energy)
+    bcs = _boundary_sets[name]
+    cp = setup(_slab(n; top = bcs.top, bottom = bcs.bottom); energy_state = energy)
     def, ws, cj = cp.def, cp.ws, cp.jacobian
     layout = def.layout
     NC = n_components(layout)
@@ -82,8 +97,8 @@ end
     @test (@allocated residual!(du, cp.u0, def, 0.0, ws)) == 0
 
     J = jac_prototype(cj)
-    for (name, u) in pairs(_states(cp))
-        @testset "$name" begin
+    for (state, u) in pairs(_states(cp))
+        @testset "$state" begin
             residual!(du, u, def, 1.0, ws)
             @test all(isfinite, du)
             Jd = dense_jacobian(def, ws, u, 1.0)
