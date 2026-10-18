@@ -34,6 +34,8 @@ const _SOLVE_KEYWORDS = (
     :reltol,
     :threshold,
     :maxiters,
+    :dt,
+    :adaptive,
     :dtmin,
     :dtmax,
     :saveat,
@@ -50,9 +52,10 @@ const _SOLVE_KEYWORDS = (
 
 """
 	solve(problem::PyrolysisProblem; energy_state = :temperature, abstol = 1e-8,
-	      reltol = 1e-6, threshold = 1e-2, maxiters = 1_000_000, dtmin = 1e-12,
-	      dtmax = Inf, saveat = problem.output_times, callback = nothing,
-	      validate = true, linear_solver = nothing, integrator_policy = nothing,
+	      reltol = 1e-6, threshold = 1e-2, maxiters = 1_000_000,
+	      dt = problem.dt_initial, adaptive = true, dtmin = 1e-12, dtmax = Inf,
+	      saveat = problem.output_times, callback = nothing, validate = true,
+	      linear_solver = nothing, integrator_policy = nothing,
 	      sources = NoSources()) -> CoreSolution
 
 Solve `problem` on the finite-volume core.
@@ -61,7 +64,8 @@ The integrator is handed the mass-matrix system with the colored Jacobian, the
 per-row absolute tolerances (`abstol` is the temperature tolerance [K]; the mass
 and enthalpy rows take theirs from the cell's initial condensed mass and
 `threshold`), no initialization of its own, and the admissibility check as its
-domain test. `integrator_policy` defaults to [`default_policy`](@ref) with
+domain test. `dt` is the first step, and with `adaptive = false` the fixed
+step. `integrator_policy` defaults to [`default_policy`](@ref) with
 `linear_solver` (KLU unless given); a per-step observer applies the policy's
 flag rule. `progress` is accepted for the keyword set of the other solver and
 draws nothing; `jacobian` is accepted and ignored, the colored Jacobian being the
@@ -81,6 +85,8 @@ function _solve(
     reltol::Real = 1e-6,
     threshold::Real = 1e-2,
     maxiters::Int = 1_000_000,
+    dt::Real = problem.dt_initial,
+    adaptive::Bool = true,
     dtmin::Real = 1e-12,
     dtmax::Real = Inf,
     saveat = problem.output_times,
@@ -158,7 +164,8 @@ function _solve(
         maxiters,
         dtmin = Float64(dtmin),
         dtmax = Float64(dtmax),
-        dt = cp.problem.dt_initial,
+        dt = Float64(dt),
+        adaptive,
         saveat = saveat isa Number ? Float64(saveat) : collect(Float64, saveat),
         callback = callbacks,
         isoutofdomain = out_of_domain,

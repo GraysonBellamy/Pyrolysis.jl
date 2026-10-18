@@ -48,24 +48,41 @@ function _require_supported(problem::PyrolysisProblem, use_ale::Bool, radiation_
         throw(ArgumentError("the finite-volume core does not model in-depth radiation yet"))
     material.lateral_shrinkage_law === nothing ||
         throw(ArgumentError("the finite-volume core has no variable cross section yet"))
-    has_darcy_flow(material) &&
-        throw(ArgumentError("the finite-volume core has no Darcy transport yet"))
-    for comp in material.components
-        λ = comp.gas_transfer_coeff
-        all(T -> λ(T) == 0, (T_PROPERTY_MIN, 300.0, 1000.0, T_PROPERTY_MAX)) || throw(
-            ArgumentError(
-                "the finite-volume core has no gas transport yet (component :$(comp.name) has λ ≠ 0)",
-            ),
-        )
-    end
-    for (tag, bc) in pairs(problem.bc_set.mass)
-        bc isa ImpermeableBC || throw(
-            ArgumentError(
-                "the finite-volume core has no mass boundary flux yet (tag :$tag)",
-            ),
-        )
-    end
     return nothing
+end
+
+# Whether a gas-transfer coefficient is zero across the property bracket.
+_vanishes(λ) = all(T -> λ(T) == 0, (T_PROPERTY_MIN, 300.0, 1000.0, T_PROPERTY_MAX))
+
+# The gas transport a problem needs: none without a gas component, Darcy–Fick
+# when a condensed component is permeable, Fickian when gas can move at all
+# (some component carries a gas-transfer coefficient, or a boundary condition
+# passes mass), none otherwise.
+function _gas_transport(problem::PyrolysisProblem)
+    material = problem.material
+    any(is_gas, material.components) || return NoGasTransport()
+    has_darcy_flow(material) && return DarcyFickTransport()
+    moves =
+        any(c -> !_vanishes(c.gas_transfer_coeff), material.components) ||
+        any(bc -> !(bc isa ImpermeableBC), values(problem.bc_set.mass))
+    return moves ? FickTransport() : NoGasTransport()
+end
+
+# The kernels in assembler order: reactions, gas transport (whose boundary
+# mass fluxes the surface balance reads), conduction, the thermal boundary.
+function _kernels(problem, topo, g0, laws, gas::GasTransport)
+    material = problem.material
+    reactions = n_reactions(material) > 0 ? (ReactionKernel(material),) : ()
+    transport =
+        gas isa NoGasTransport ? () :
+        (GasTransportKernel(gas, topo, g0, problem.bc_set, material, laws),)
+    boundary = ThermalBoundaryKernel(
+        topo,
+        g0,
+        problem.bc_set;
+        laws = gas isa NoGasTransport ? nothing : laws,
+    )
+    return (reactions..., transport..., ConductionKernel(topo, g0), boundary)
 end
 
 """
@@ -76,7 +93,8 @@ end
 Set up `problem` on the finite-volume core: apply its initial conditions to its
 own copy of the mesh, build the 1D mesh from the node positions and the
 cross-section area, the initial inventories `mᵢⱼ = ξⱼ(zᵢ) Vᵢ`, the energy
-state from `T(zᵢ)`, the kernels, the tolerance vector and the colored Jacobian.
+state from `T(zᵢ)`, the gas transport the material and the mass conditions
+need, the kernels, the tolerance vector and the colored Jacobian.
 
 `threshold` is the deactivation mass fraction `ε_m`, which also scales the
 mass tolerances; `sources` is the external-source hook.
@@ -126,14 +144,11 @@ function setup(
     caloric =
         energy isa EnthalpyState ?
         CaloricExtension(laws, reference.mass_scale, reference.capacity_floor) : nothing
-    state_setup = StateSetup(topo, material, laws, reference, caloric)
+    gas = _gas_transport(problem)
+    state_setup = StateSetup(topo, material, laws, reference, caloric, gas)
     layout = StateLayout(NC, n, energy; moving = use_ale)
 
-    kernels = (
-        (n_reactions(material) > 0 ? (ReactionKernel(material),) : ())...,
-        ConductionKernel(topo, g0),
-        ThermalBoundaryKernel(topo, g0, problem.bc_set),
-    )
+    kernels = _kernels(problem, topo, g0, laws, gas)
     def = CoreDefinition(layout, state_setup, kernels, sources)
     ws = CoreWorkspace(def, T0)
 

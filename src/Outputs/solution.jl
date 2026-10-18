@@ -35,6 +35,11 @@ The solution of the finite-volume core at the saved times:
   its faces at every saved time [K]
 - `surface_T`: the surface temperature of the `:top` faces (`NaN` without
   that tag) [K]
+- `boundary_mass_flux`: per boundary tag, the outward mass flux of every
+  component summed, area-weighted over its faces [kg/(m²·s)]
+- `extras`: the series under the names of `PyrolysisSolution.extras`:
+  `surface_mass_flux`, the outward mass flux of the `:top` faces
+  [kg/(m²·s)] (`NaN` without that tag)
 - `retcode`: the integrator's return code
 - `solve_time`: wall time of the solve [s]
 - `statistics`: the [`SolverStatistics`](@ref)
@@ -50,6 +55,8 @@ struct CoreSolution{P}
     cell_centers::Matrix{Float64}
     boundary_T::Dict{Symbol,Vector{Float64}}
     surface_T::Vector{Float64}
+    boundary_mass_flux::Dict{Symbol,Vector{Float64}}
+    extras::@NamedTuple{surface_mass_flux::Vector{Float64}}
     retcode::Symbol
     solve_time::Float64
     statistics::SolverStatistics
@@ -61,7 +68,8 @@ end
 
 Reconstruct the fields from the saved state vectors `states`: one residual
 evaluation per saved state fills the derived state and the kernel
-contributions (the face temperatures among them) in the plain buffers of `ws`.
+contributions (the face temperatures and mass fluxes among them) in the plain
+buffers of `ws`.
 """
 function CoreSolution(
     problem,
@@ -86,6 +94,7 @@ function CoreSolution(
     centers = zeros(n, nt)
     tags = boundary_tags(topo)
     boundary_T = Dict(tag => zeros(nt) for tag in tags)
+    boundary_mass_flux = Dict(tag => zeros(nt) for tag in tags)
     ds, c = buffers(ws, def, Float64)
     du = zeros(state_length(layout))
     for (k, u) in enumerate(states)
@@ -102,9 +111,13 @@ function CoreSolution(
             A = sum(ds.geometry.face_area[f] for f in faces)
             boundary_T[tag][k] =
                 sum(c.T_face[f] * ds.geometry.face_area[f] for f in faces) / A
+            boundary_mass_flux[tag][k] =
+                sum(sum(view(c.F_mass, :, f)) * ds.geometry.face_area[f] for f in faces) / A
         end
     end
     surface_T = haskey(boundary_T, :top) ? copy(boundary_T[:top]) : fill(NaN, nt)
+    surface_mass_flux =
+        haskey(boundary_mass_flux, :top) ? copy(boundary_mass_flux[:top]) : fill(NaN, nt)
     return CoreSolution(
         problem,
         Vector{Float64}(t),
@@ -115,6 +128,8 @@ function CoreSolution(
         centers,
         boundary_T,
         surface_T,
+        boundary_mass_flux,
+        (; surface_mass_flux),
         retcode,
         solve_time,
         statistics,

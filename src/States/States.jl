@@ -21,6 +21,9 @@ using ..Materials
 using ..Materials:
     ConstantProperty, LinearProperty, PolynomialProperty, TableProperty, T_REF
 using ..Properties: effective_conductivity, mixture_emissivity, mixture_absorptivity
+using ..Properties: effective_gas_transfer, effective_permeability, skeletal_volume_fraction
+using ..Properties: MU_FLOOR
+using ..Physics: ideal_gas_pressure
 using ..Meshes
 import ..Materials: n_components
 import ..Meshes: n_cells, n_nodes
@@ -43,6 +46,7 @@ export sensible_enthalpy, enthalpy_slope, enthalpy_law, TabulatedEnthalpy, Calor
 export component_enthalpies, component_enthalpy_slopes, component_heat_capacities
 export CaloricExtension, regularization, extended_energy, extended_capacity
 export invert_caloric
+export GasTransport, NoGasTransport, FickTransport, DarcyFickTransport
 export CellReference, StateSetup, DerivedState, derive!, energy_state_value
 export abstol_vector
 export CarriedField, CONVERSION_HISTORY, material_axes, physical_tensor

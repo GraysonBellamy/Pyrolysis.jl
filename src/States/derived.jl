@@ -28,6 +28,48 @@ struct CellReference
 end
 
 # ============================================================================
+# Gas transport model
+# ============================================================================
+
+"""
+	GasTransport
+
+Which pore-gas properties the state mapping evaluates for gas transport.
+"""
+abstract type GasTransport end
+
+"""
+	NoGasTransport <: GasTransport
+
+No gas moves: no pore-gas property is evaluated.
+"""
+struct NoGasTransport <: GasTransport end
+
+"""
+	FickTransport <: GasTransport
+
+Diffusive transport `J = −(λ/T) ∂(ξT)/∂n`: the cell gas-transfer coefficients.
+"""
+struct FickTransport <: GasTransport end
+
+"""
+	DarcyFickTransport <: GasTransport
+
+Diffusive and pressure-driven transport: the gas-transfer coefficients, the
+porosity, the ideal-gas pressure and the Darcy mobility `κ/μ`.
+"""
+struct DarcyFickTransport <: GasTransport end
+
+# Smooth floor on the porosity the pressure divides by, the Darcy closure's
+# floor on the gas volume fraction.
+const POROSITY_FLOOR = 1e-12
+
+# Smooth floor on the cell conductivity [W/(m·K)], far below any material's:
+# a trial state with no mass left has none, and the face temperatures of the
+# boundary conditions divide by it.
+const CONDUCTIVITY_FLOOR = 1e-6
+
+# ============================================================================
 # State setup
 # ============================================================================
 
@@ -35,25 +77,31 @@ end
 	StateSetup
 
 Everything the state mapping reads besides the state vector: the mesh
-topology, the material, its caloric laws, the per-cell reference data and,
-for the inventory form, the caloric extension (`nothing` for the temperature
-form).
+topology, the material, its caloric laws, the per-cell reference data, for
+the inventory form the caloric extension (`nothing` for the temperature
+form), and the [`GasTransport`](@ref) model.
 """
-struct StateSetup{TopT<:MeshTopology,Mat<:Material,LawT<:CaloricLaws,CalT}
+struct StateSetup{TopT<:MeshTopology,Mat<:Material,LawT<:CaloricLaws,CalT,G<:GasTransport}
     topology::TopT
     material::Mat
     laws::LawT
     reference::CellReference
     caloric::CalT
+    gas::G
 end
 
 """
-	StateSetup(topology, material, reference, caloric)
+	StateSetup(topology, material, reference, caloric; gas = NoGasTransport())
 
 The setup with the material's caloric laws built.
 """
-StateSetup(topo::MeshTopology, material::Material, reference::CellReference, caloric) =
-    StateSetup(topo, material, CaloricLaws(material), reference, caloric)
+StateSetup(
+    topo::MeshTopology,
+    material::Material,
+    reference::CellReference,
+    caloric;
+    gas::GasTransport = NoGasTransport(),
+) = StateSetup(topo, material, CaloricLaws(material), reference, caloric, gas)
 
 # ============================================================================
 # Derived state
@@ -75,9 +123,13 @@ automatic differentiation):
 - `h`: component sensible enthalpies at the cell temperature (`NC × n`)
 - `x`, `A`: node positions and the cross-section measure
 - `geometry`: the mesh metrics at `x`
-- `k`: cell thermal conductivities
+- `k`: cell thermal conductivities, smoothly floored at `CONDUCTIVITY_FLOOR`
 - `ε`, `a`: cell surface emissivities and absorptivities (the mixing-weighted
   sums, which stay in `[0, 1]`)
+- `λ`: cell gas-transfer coefficients [m²/s] (gas transport)
+- `φ`, `P`, `mob`: the smoothly floored porosity, the ideal-gas pressure [Pa]
+  and the Darcy mobility `κ/μ` with a smoothly floored viscosity [m²/(Pa·s)]
+  (Darcy–Fick transport)
 - `T_warm`: the latest temperatures of the plain (non-dual) mapping, the
   starting point of the inventory inversion
 """
@@ -97,6 +149,10 @@ struct DerivedState{NC,T,G<:MeshGeometry}
     k::Vector{T}
     ε::Vector{T}
     a::Vector{T}
+    λ::Vector{T}
+    φ::Vector{T}
+    P::Vector{T}
+    mob::Vector{T}
     T_warm::Vector{Float64}
 end
 
@@ -135,6 +191,10 @@ function DerivedState{T}(
         zeros(T, n),
         zeros(T, n),
         zeros(T, n),
+        zeros(T, n),
+        zeros(T, n),
+        zeros(T, n),
+        zeros(T, n),
         T_warm,
     )
 end
@@ -148,7 +208,8 @@ Order: the geometry from the node positions (a fixed mesh keeps its
 precomputed geometry), the masses and their concentrations, the cell
 temperatures (the stored temperature, or the inversion of the enthalpy
 inventory), their trial clamp, the heat-capacity sum, the sensible
-enthalpies, and the cell properties.
+enthalpies, the cell properties, and the pore-gas properties the gas
+transport model needs.
 """
 function derive!(
     ds::DerivedState{NC,T},
@@ -201,11 +262,31 @@ function derive!(
             ds.h[j, i] = h[j]
         end
         ξ⁺ = ntuple(j -> ds.ξ⁺[j, i], Val(NC))
-        ds.k[i] = effective_conductivity(ξ⁺, Tt, material)
+        ds.k[i] = smooth_floor(effective_conductivity(ξ⁺, Tt, material), CONDUCTIVITY_FLOOR)
         ds.ε[i] = mixture_emissivity(ξ⁺, Tt, material)
         ds.a[i] = mixture_absorptivity(ξ⁺, Tt, material)
+        _gas_properties!(ds, i, ξ⁺, Tt, material, setup.gas)
     end
     return ds
+end
+
+# Pore-gas properties of cell `i` at the positive-part concentrations and the
+# trial temperature.
+@inline _gas_properties!(ds, i, ξ⁺, Tt, material, ::NoGasTransport) = nothing
+
+@inline function _gas_properties!(ds, i, ξ⁺, Tt, material, ::FickTransport)
+    ds.λ[i] = effective_gas_transfer(ξ⁺, Tt, material)
+    return nothing
+end
+
+@inline function _gas_properties!(ds, i, ξ⁺, Tt, material, ::DarcyFickTransport)
+    ds.λ[i] = effective_gas_transfer(ξ⁺, Tt, material)
+    φ = smooth_floor(1 - skeletal_volume_fraction(ξ⁺, Tt, material), POROSITY_FLOOR)
+    ds.φ[i] = φ
+    ds.P[i] = ideal_gas_pressure(ξ⁺, Tt, φ, material)
+    μ = smooth_floor(material.gas_viscosity(Tt), MU_FLOOR)
+    ds.mob[i] = effective_permeability(ξ⁺, Tt, material) / μ
+    return nothing
 end
 
 @inline function _temperatures!(

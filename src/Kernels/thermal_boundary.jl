@@ -14,7 +14,7 @@ struct BoundaryPatch{BC}
 end
 
 """
-	ThermalBoundaryKernel{P<:Tuple,R} <: Kernel
+	ThermalBoundaryKernel{P<:Tuple,R,L} <: Kernel
 
 The energy flux through every boundary face, one [`BoundaryPatch`](@ref) per
 boundary tag, written along the outward face normal, and the face temperature.
@@ -26,25 +26,34 @@ of `BoundaryConditions.solve_boundary_temperature!` started from the clamped
 cell temperature; the outward gas mass flux of the face feeds the blowing
 models of its convective members, and the cell's emissivity and absorptivity
 its radiative members. `states` holds the per-face diagnostics of the balance.
+
+With gas transport (`laws` the caloric laws, `nothing` without), the face's
+energy flux also carries the sensible enthalpy `Σⱼ Jⱼ hⱼ(T_s)` of its outward
+mass fluxes at the face temperature: gas leaves at the surface temperature,
+and the surface balance itself keeps no gas-enthalpy term.
 """
-struct ThermalBoundaryKernel{P<:Tuple,R} <: Kernel
+struct ThermalBoundaryKernel{P<:Tuple,R,L} <: Kernel
     patches::P
     d_floor::Vector{Float64}
     states::Vector{BoundaryState}
     radiation_model::R
+    laws::L
 end
 
 """
-	ThermalBoundaryKernel(topology, geometry, bc_set; radiation_model = NO_RADIATION)
+	ThermalBoundaryKernel(topology, geometry, bc_set; radiation_model = NO_RADIATION,
+	                      laws = nothing)
 
 One patch per boundary tag of the mesh, holding the thermal condition the
-boundary-condition set assigns to that tag.
+boundary-condition set assigns to that tag; `laws` are the caloric laws when
+gas crosses the boundary faces.
 """
 function ThermalBoundaryKernel(
     topo::MeshTopology,
     g::MeshGeometry,
     bc_set::BoundaryConditionSet;
     radiation_model::RadiationModel = NO_RADIATION,
+    laws::Union{Nothing,CaloricLaws} = nothing,
 )
     tags = boundary_tags(topo)
     for tag in keys(bc_set.thermal)
@@ -64,7 +73,7 @@ function ThermalBoundaryKernel(
         d[f] = DISTANCE_FLOOR_FRACTION * center_to_face_distance(g, topo, f, o)
     end
     states = [BoundaryState() for _ = 1:n_faces(topo)]
-    return ThermalBoundaryKernel(patches, d, states, radiation_model)
+    return ThermalBoundaryKernel(patches, d, states, radiation_model, laws)
 end
 
 function contribute!(
@@ -85,10 +94,26 @@ end
     p = first(patches)
     @inbounds for f in p.faces
         q, T_s = boundary_energy_flux(p.bc, f, kernel, c, ds, topo, material, t)
-        c.F_energy[f] += q
+        c.F_energy[f] += q + _carried_enthalpy(kernel.laws, c, f, T_s)
         c.T_face[f] = T_s
     end
     return _patches!(c, Base.tail(patches), kernel, ds, topo, material, t)
+end
+
+# Sensible enthalpy carried by the outward mass fluxes of face `f` at `T_s`.
+@inline _carried_enthalpy(::Nothing, c, f, T_s) = zero(T_s)
+@inline function _carried_enthalpy(
+    laws::CaloricLaws,
+    c::Contributions{NC},
+    f,
+    T_s,
+) where {NC}
+    h = component_enthalpies(laws, T_s)
+    q = zero(promote_type(eltype(c.F_mass), typeof(T_s)))
+    @inbounds for j = 1:NC
+        q += c.F_mass[j, f] * h[j]
+    end
+    return q
 end
 
 # The boundary cell of face `f` and its smoothly floored center-to-face distance.

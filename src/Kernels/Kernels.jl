@@ -14,18 +14,20 @@ using StaticArrays
 using ..Materials
 using ..BoundaryConditions
 using ..BoundaryConditions: BoundaryState, solve_boundary_temperature!
-using ..Properties: guarded_harmonic_mean
-using ..Physics: evaluate_reactions!, species_source_terms!, reaction_heat_source
+using ..Properties: guarded_harmonic_mean, mixture_density
+using ..Physics: evaluate_reactions!, species_source_terms!, reaction_heat_source, gas_flux
 using ..Meshes
 using ..States
 
 include("contributions.jl")
 include("reactions.jl")
 include("conduction.jl")
+include("gas_transport.jl")
 include("thermal_boundary.jl")
 
 export Kernel, Contributions, reset!, contribute!
 export ReactionKernel, ConductionKernel, normal_conductivity
+export GasTransportKernel, outward_darcy_velocity, MOBILITY_GUARD
 export BoundaryPatch, ThermalBoundaryKernel, boundary_energy_flux
 
 end # module Kernels
