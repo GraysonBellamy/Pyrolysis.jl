@@ -655,6 +655,26 @@ end
 end
 
 """
+	mixture_emissivity(ξ::NTuple{NC,Real}, T::Real, material) -> Real
+	mixture_absorptivity(ξ::NTuple{NC,Real}, T::Real, material) -> Real
+
+The mixing-weighted emissivity `Σⱼ vⱼ εⱼ(T)` and absorptivity `Σⱼ vⱼ aⱼ` of
+[`effective_emissivity`](@ref) and [`effective_absorptivity`](@ref) without
+their clamp to `[0, 1]`. The weights are a convex combination and every
+component value lies in `[0, 1]`, so the sums stay in `[0, 1]` to round-off;
+these forms keep the derivative of the sum where the clamped forms have a kink.
+"""
+@inline function mixture_emissivity(ξ::NTuple{NC,<:Real}, T::Real, material) where {NC}
+    v = mixing_volume_fractions(ξ, T, material)
+    return _sum_emissivity(v, T, material.components, Val(NC))
+end
+
+@inline function mixture_absorptivity(ξ::NTuple{NC,<:Real}, T::Real, material) where {NC}
+    v = mixing_volume_fractions(ξ, T, material)
+    return _sum_absorptivity(v, T, material.components, Val(NC))
+end
+
+"""
 	effective_absorption(ξ::NTuple{NC,Float64}, material::Material) -> Float64
 
 Compute effective absorption coefficient [m⁻¹].

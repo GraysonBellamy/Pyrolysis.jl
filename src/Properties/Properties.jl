@@ -22,6 +22,7 @@ include("radiation_cache.jl")
 export mixture_density, volume_fractions, solid_volume_fractions, porosity
 export effective_heat_capacity, effective_conductivity
 export effective_emissivity, effective_absorptivity, effective_absorption
+export mixture_emissivity, mixture_absorptivity
 export effective_gas_transfer
 export effective_permeability  # Component-based permeability
 export harmonic_mean_weighted, guarded_harmonic_mean
