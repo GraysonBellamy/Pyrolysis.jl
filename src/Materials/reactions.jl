@@ -10,6 +10,15 @@ stoichiometry, Arrhenius parameters, and heat of reaction.
 # ============================================================================
 
 """
+	AbstractDepletionLimiter
+
+How a reaction rate vanishes as a reactant depletes. Each `Material` carries
+one; [`DepletionLimiter`](@ref) and [`OneSidedLimiter`](@ref) are the two
+kinds.
+"""
+abstract type AbstractDepletionLimiter end
+
+"""
 Depletion limiter settings for reaction rate computation.
 
 The depletion limiter removes the numerical stiffness of near-zero reactant
@@ -50,10 +59,66 @@ removes the only depletion guard: order n = 0 reactions then consume reactant
 at full rate through ξ = 0 (unbounded negative ξ), and orders 0 < n < 1 have a
 singular ∂r/∂ξ as ξ → 0.
 """
-Base.@kwdef struct DepletionLimiter
+Base.@kwdef struct DepletionLimiter <: AbstractDepletionLimiter
     threshold::Float64 = 1.0    # kg/m³ - rate roll-off scale
     enabled::Bool = true        # Can disable for testing/validation
 end
+
+"""
+	OneSidedLimiter(; threshold = 1.0, join = 1.0, base_scale = 1e-8, enabled = true)
+
+Depletion limiter that is exactly zero at and below zero concentration and C¹
+through it, for every reaction order.
+
+Per reactant the rate is multiplied by `g(ξ/threshold)`: the cubic onset
+`(s − 2y) t³ + (3y − s) t²`, `t = x/join`, `y = tanh(join)`,
+`s = join·sech²(join)`, which has zero value and slope at `x = 0` and matches
+`tanh` and its slope at `x = join`, and `tanh(x)` above. The reaction-order
+power is evaluated on the finite base `base_scale · softplus(ξ / base_scale)`,
+which equals `ξ` to within `base_scale` and is finite for every real `ξ`. Above
+`join · threshold` the rate equals the [`DepletionLimiter`](@ref) rate with the
+same `threshold` to round-off, so calibrated kinetics are unchanged outside the
+onset interval.
+
+With `enabled = false` the factor is one and only the finite base remains: an
+absent reactant then reacts at the rate of a `base_scale` concentration, and
+the solver's admissibility check is the guard.
+
+# Fields
+- `threshold::Float64`: concentration scale of the roll-off [kg/m³]
+- `join::Float64`: where the onset joins `tanh`, in units of `threshold`
+- `base_scale::Float64`: scale of the finite power base [kg/m³]
+- `enabled::Bool`: apply the factor
+"""
+struct OneSidedLimiter <: AbstractDepletionLimiter
+    threshold::Float64
+    join::Float64
+    base_scale::Float64
+    enabled::Bool
+    function OneSidedLimiter(threshold::Real, join::Real, base_scale::Real, enabled::Bool)
+        threshold > 0 || throw(ArgumentError("OneSidedLimiter: threshold must be positive"))
+        join > 0 || throw(ArgumentError("OneSidedLimiter: join must be positive"))
+        base_scale > 0 ||
+            throw(ArgumentError("OneSidedLimiter: base_scale must be positive"))
+        return new(Float64(threshold), Float64(join), Float64(base_scale), enabled)
+    end
+end
+
+OneSidedLimiter(;
+    threshold::Real = 1.0,
+    join::Real = 1.0,
+    base_scale::Real = 1e-8,
+    enabled::Bool = true,
+) = OneSidedLimiter(threshold, join, base_scale, enabled)
+
+"""
+	OneSidedLimiter(l::AbstractDepletionLimiter) -> OneSidedLimiter
+
+The one-sided limiter with the threshold and the enabled flag of `l`.
+"""
+OneSidedLimiter(l::OneSidedLimiter) = l
+OneSidedLimiter(l::DepletionLimiter) =
+    OneSidedLimiter(; threshold = l.threshold, enabled = l.enabled)
 
 # ============================================================================
 # Reaction Type

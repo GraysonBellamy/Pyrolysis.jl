@@ -29,7 +29,7 @@ include("pressure.jl")
 
 # Exports
 export reaction_rate, evaluate_reactions!, species_source_terms!, reaction_heat_source
-export DepletionLimiter
+export DepletionLimiter, OneSidedLimiter, one_sided_factor
 export conductive_flux, compute_conductive_fluxes!
 export compute_radiation_source!, compute_beer_lambert_source!
 export gas_flux, compute_gas_fluxes!
