@@ -323,6 +323,8 @@ end
         @test all(isfinite, ForwardDiff.jacobian(y -> lateral_rows(lat, y), x))
     end
     @test_throws ArgumentError LateralShrinkage(mat, 2.0, 0.0)
+    no_law = Material(name = :m, components = (a, g), reactions = ())
+    @test_throws ArgumentError LateralShrinkage(no_law, 2.0, 3.0)
 end
 
 @testset "solve: the swelling column's thickness follows its conversion" begin

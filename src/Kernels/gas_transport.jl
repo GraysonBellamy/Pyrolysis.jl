@@ -26,8 +26,8 @@ temperature, the same mass flux the mass rows carry.
 
 Boundary faces, one [`BoundaryPatch`](@ref) of mass conditions per tag, each
 applied on the face that bounds the live cells on its side (`Meshes.live_face`): the
-film flux of the condition (`BoundaryConditions.mass_bc_flux`, oriented
-outward) and, under Darcy–Fick transport, the outflow the pressure condition
+film flux of the condition (`BoundaryConditions.mass_bc_flux`, which returns
+the flux into the domain and is negated here) and, under Darcy–Fick transport, the outflow the pressure condition
 drives at the outward Darcy velocity of [`outward_darcy_velocity`](@ref)
 against an ambient that carries none of the tracked gases. The enthalpy those
 fluxes carry leaves at the face temperature, which the thermal boundary
@@ -180,14 +180,16 @@ under the mass condition `bc`, from the pressure `P` [Pa] and the mobility
 - `DirichletPressureBC`: the one-sided gradient, `v = m (P − P_bc) / d`;
 - `NeumannPressureBC`: `∂P∂n` is the pressure gradient along the outward
   normal, `v = −m ∂P∂n`;
-- `ConvectivePressureBC`: the film law `v = h_P (P − P_ext)` where the cell is
-  permeable, zero where it is not;
+- `ConvectivePressureBC`: the film law `v = h_P (P − P_ext)` times the gate
+  `m/(m + MOBILITY_GUARD)`, one on a permeable cell (exactly, in floating
+  point, for any physical mobility) and zero on an impermeable one, and
+  smooth between;
 - every other condition drives none; a `CombinedMassBC` sums its members.
 """
 @inline outward_darcy_velocity(bc::DirichletPressureBC, P, mob, d) = mob * (P - bc.P) / d
 @inline outward_darcy_velocity(bc::NeumannPressureBC, P, mob, d) = -mob * bc.∂P∂n + zero(P)
 @inline outward_darcy_velocity(bc::ConvectivePressureBC, P, mob, d) =
-    mob > 0 ? bc.h_P * (P - bc.P_ext) : zero(P * mob)
+    bc.h_P * (P - bc.P_ext) * (mob / (mob + MOBILITY_GUARD))
 @inline outward_darcy_velocity(::AbstractMassBC, P, mob, d) = zero(P * mob / d)
 @inline outward_darcy_velocity(bc::CombinedMassBC, P, mob, d) =
     _sum_velocity(bc.bcs, P, mob, d)

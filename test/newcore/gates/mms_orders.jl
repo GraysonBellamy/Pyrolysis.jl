@@ -17,7 +17,6 @@
 # Writes test/newcore/gates/measurements/mms_orders.md.
 
 using Pyrolysis
-using Dates
 
 const OUT = joinpath(@__DIR__, "measurements")
 mkpath(OUT)
@@ -86,8 +85,9 @@ function temporal(m, case)
     )
 end
 
+include(joinpath(@__DIR__, "stamp.jl"))
 load_start = Sys.loadavg()
-started = now()
+started = time()
 runs = [("old", "temperature"), ("new", "temperature"), ("new", "enthalpy")]
 spatial_rows, qoi_rows, temporal_rows = [], [], []
 for (core, energy) in runs
@@ -117,7 +117,7 @@ open(joinpath(OUT, "mms_orders.md"), "w") do io
     println(io, "# Gate item 3: the manufactured-solution orders\n")
     println(
         io,
-        "Produced by `test/newcore/gates/mms_orders.jl`. Julia $(VERSION), ",
+        "Produced by `test/newcore/gates/mms_orders.jl` at $(COMMIT_STAMP). Julia $(VERSION), ",
         "$(Threads.nthreads()) thread, $(Sys.CPU_THREADS) logical CPUs; load average ",
         "$(round.(load_start; digits = 1)) at the start and $(round.(load_end; digits = 1)) ",
         "at the end. Each core on its default integrator.\n",
@@ -152,5 +152,5 @@ open(joinpath(OUT, "mms_orders.md"), "w") do io
     end
 end
 println(
-    "wrote $(OUT); load $(load_start) -> $(load_end); $(round(now() - started, Second))",
+    "wrote $(OUT); load $(load_start) -> $(load_end); $(round(Int, time() - started)) s",
 )

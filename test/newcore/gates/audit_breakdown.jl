@@ -23,7 +23,6 @@ const _HARNESS =
     normpath(joinpath(@__DIR__, "..", "..", "..", "scripts", "mesh_phase0", "baselines"))
 include(joinpath(_HARNESS, "jacobian_common.jl"))
 
-using Dates
 using LinearSolve: LinearSolve, KLUFactorization, LinearProblem
 using SparseArrays: SparseMatrixCSC
 using LinearAlgebra: I
@@ -189,8 +188,9 @@ function deck_rows(kind, n, solid_λ)
     return rows
 end
 
+include(joinpath(@__DIR__, "stamp.jl"))
 load_start = Sys.loadavg()
-started = now()
+started = time()
 rows = []
 for (kind, n, solid_λ) in DECKS
     append!(rows, deck_rows(kind, n, solid_λ))
@@ -203,7 +203,7 @@ open(joinpath(OUT, "audit_breakdown.md"), "w") do io
     println(io, "# Gate item 2: where the time goes at matched accuracy\n")
     println(
         io,
-        "Produced by `test/newcore/gates/audit_breakdown.jl`. Julia $(VERSION), ",
+        "Produced by `test/newcore/gates/audit_breakdown.jl` at $(COMMIT_STAMP). Julia $(VERSION), ",
         "$(Threads.nthreads()) thread, $(Sys.CPU_THREADS) logical CPUs; load average ",
         "$(round.(load_start; digits = 1)) at the start and $(round.(load_end; digits = 1)) ",
         "at the end. Each run at the cheapest tolerance of its ladder whose error is at ",
@@ -241,5 +241,5 @@ open(joinpath(OUT, "audit_breakdown.md"), "w") do io
     end
 end
 println(
-    "wrote $(OUT); load $(load_start) -> $(load_end); $(round(now() - started, Second))",
+    "wrote $(OUT); load $(load_start) -> $(load_end); $(round(Int, time() - started)) s",
 )

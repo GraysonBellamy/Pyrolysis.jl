@@ -70,7 +70,7 @@ end
         for x in (1.0, 1.5, 2.0, 20.0, 1e3) .* threshold, T in (300.0, 700.0, 1500.0)
             r_tanh = reaction_rate(_rxn(order), (x, 0.0), T; limiter = tanh_limiter)
             r_one = reaction_rate(_rxn(order), (x, 0.0), T; limiter = one_sided)
-            @test r_one ≈ r_tanh rtol = 1e-14
+            @test r_one == r_tanh
         end
     end
     # Disabled limiters agree away from zero; the finite base is the only difference.

@@ -61,7 +61,7 @@ const MAX_CONSTRAINT_REJECTIONS = 50
 	DomainCheck(cp::CoreProblem; max_consecutive = MAX_CONSTRAINT_REJECTIONS)
 
 The integrator's `isoutofdomain` test. A proposed state is rejected, and the
-step halved, when
+step shrunk by the controller's minimum factor, when
 
 - it is [`inadmissible`](@ref);
 - under Darcy–Fick transport a live cell's porosity
@@ -119,6 +119,7 @@ function (check::DomainCheck)(u, p, t)
     ds, c = check.ws.derived, check.ws.contributions
     _porosity_out(check, ds, check.def.setup.gas) && return _reject!(check.monitor)
     r = constraint_residual(check, ds, c, t)
+    isfinite(r) || return _reject!(check.monitor)
     m = check.monitor
     m.last = r
     if r > 1

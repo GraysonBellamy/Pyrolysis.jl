@@ -164,6 +164,8 @@ end
         layout = def.layout
         J = jac_prototype(cj)
         jacobian!(J, cj, cp.u0, 1.0)
+        # Per entry, with the row's largest Jacobian entry as its floor.
+        row_floor = vec(maximum(abs, J; dims = 2))
         for (k, h) in ((energy_index(layout, 7), 1e-3), (mass_index(layout, 7, 1), 1e-6))
             up, down = copy(cp.u0), copy(cp.u0)
             up[k] += h
@@ -173,10 +175,26 @@ end
             residual!(r_down, down, def, 1.0, ws)
             fd = (r_up .- r_down) ./ 2h
             col = Vector(J[:, k])
-            @test maximum(abs, col .- fd) <= 1e-6 * maximum(abs, col)
+            @test all(abs.(col .- fd) .<= 1e-6 .* max.(abs.(fd), row_floor))
         end
         e = intensity_index(layout, 8)
         m = mass_index(layout, 7, 1)
         name === :kirchhoff ? (@test J[e, m] != 0) : (@test J[e, m] == 0)
+    end
+end
+
+# On a cylinder or a sphere the intensity rows attenuate the intensity while
+# the cell sources read the face areas, so a transparent cell would absorb
+# `I (A_up − A_down)`: setup refuses the combination.
+@testset "Beer–Lambert is refused off planar coordinates" begin
+    problem = _translucent_slab(6; top = _radiation_tops.kirchhoff)
+    for coordinates in (Cylindrical(), Spherical())
+        @test_throws ArgumentError setup(
+            problem;
+            radiation_model = BEER_LAMBERT,
+            coordinates,
+        )
+        cp = setup(problem; radiation_model = SURFACE_ABSORPTION, coordinates)
+        @test !has_intensities(cp.def.layout)
     end
 end

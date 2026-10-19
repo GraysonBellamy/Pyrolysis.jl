@@ -152,7 +152,7 @@ end
 
 # The new core's solve with the step recorder, which reads the live cells'
 # temperatures through the layout and the state mapping. The old core's
-# depletion keywords have no counterpart there (plan C9).
+# depletion keywords have no counterpart there.
 function _vbo_core_solve(
     problem,
     dt_min,
@@ -255,6 +255,8 @@ function _vbo_common_qois(
     peak_ref = VBO_PEAK_REF,
     surface_warnings = true,
     peak_comment = "g m⁻² s⁻¹, gas generation rate",
+    ledger_tol = 1e-3,
+    ledger_comment = "total-mass drop vs ∫ ṁ″ dt over the run",
 )
     out = QoIResult[]
     push!(
@@ -297,8 +299,8 @@ function _vbo_common_qois(
             value = m.ledger,
             exact = 0.0,
             error = m.ledger,
-            tol = 1e-3,
-            comment = "total-mass drop vs ∫ ṁ″ dt over the run",
+            tol = ledger_tol,
+            comment = ledger_comment,
         ),
     )
     if surface_warnings

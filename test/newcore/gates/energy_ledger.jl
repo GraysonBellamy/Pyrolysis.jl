@@ -34,7 +34,6 @@ ENV["PYROLYSIS_CORE"] = "old"
 ENV["PYROLYSIS_ENERGY_STATE"] = "temperature"
 include(joinpath(@__DIR__, "..", "..", "verification", "casedefs.jl"))
 
-using Dates
 using ForwardDiff
 using LinearAlgebra: I
 using OrdinaryDiffEq: OrdinaryDiffEq, ODEFunction, ODEProblem, DiscreteCallback, Rodas5P
@@ -170,8 +169,9 @@ function ledger_defect(cp, dt, t_end)
     return sol.retcode, defect, maximum(abs(v[n+1]) for v in sol.u)
 end
 
+include(joinpath(@__DIR__, "stamp.jl"))
 load_start = Sys.loadavg()
-started = now()
+started = time()
 case = only(filter(c -> c.id == "V-CPL-06b", load_verification_cases()))
 closures = []
 for use_ale in (false, true)
@@ -213,7 +213,7 @@ open(joinpath(OUT, "energy_ledger.md"), "w") do io
     println(io, "# Gate item 7: the energy balance against the ledger\n")
     println(
         io,
-        "Produced by `test/newcore/gates/energy_ledger.jl`. Julia $(VERSION), ",
+        "Produced by `test/newcore/gates/energy_ledger.jl` at $(COMMIT_STAMP). Julia $(VERSION), ",
         "$(Threads.nthreads()) thread, $(Sys.CPU_THREADS) logical CPUs; load average ",
         "$(round.(load_start; digits = 1)) at the start and $(round.(load_end; digits = 1)) ",
         "at the end. V-CPL-06's char-layer column.\n",
@@ -250,5 +250,5 @@ open(joinpath(OUT, "energy_ledger.md"), "w") do io
     end
 end
 println(
-    "wrote $(OUT); load $(load_start) -> $(load_end); $(round(now() - started, Second))",
+    "wrote $(OUT); load $(load_start) -> $(load_end); $(round(Int, time() - started)) s",
 )

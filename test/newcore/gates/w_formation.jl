@@ -1,4 +1,4 @@
-# The iteration matrix on a moving mesh (plan C31), behind gate item 2.
+# The iteration matrix on a moving mesh, behind gate item 2.
 #
 # OrdinaryDiffEq forms the iteration matrix `W = J − M/(γ dt)` with
 # `jacobian2W!`. With a mass matrix that is a multiple of the identity it
@@ -30,7 +30,6 @@ const _HARNESS =
     normpath(joinpath(@__DIR__, "..", "..", "..", "scripts", "mesh_phase0", "baselines"))
 include(joinpath(_HARNESS, "jacobian_common.jl"))
 
-using Dates
 using SparseArrays: SparseMatrixCSC, nnz
 using LinearAlgebra: Diagonal
 using OrdinaryDiffEq: DiscreteCallback
@@ -95,8 +94,9 @@ function timings(kind, n, solid_λ, reltol)
     return (; new = best(new), old = best(old), T = new().T)
 end
 
+include(joinpath(@__DIR__, "stamp.jl"))
 load_start = Sys.loadavg()
-started = now()
+started = time()
 probe = structure()
 println(probe)
 before = Dict(d => timings(d...) for d in DECKS)
@@ -125,7 +125,7 @@ open(joinpath(OUT, "w_formation.md"), "w") do io
     println(io, "# The iteration matrix on a moving mesh\n")
     println(
         io,
-        "Produced by `test/newcore/gates/w_formation.jl`. Julia $(VERSION), ",
+        "Produced by `test/newcore/gates/w_formation.jl` at $(COMMIT_STAMP). Julia $(VERSION), ",
         "$(Threads.nthreads()) thread, $(Sys.CPU_THREADS) logical CPUs; load average ",
         "$(round.(load_start; digits = 1)) at the start and $(round.(load_end; digits = 1)) ",
         "at the end.\n",
@@ -164,5 +164,5 @@ open(joinpath(OUT, "w_formation.md"), "w") do io
     end
 end
 println(
-    "wrote $(OUT); load $(load_start) -> $(load_end); $(round(now() - started, Second))",
+    "wrote $(OUT); load $(load_start) -> $(load_end); $(round(Int, time() - started)) s",
 )

@@ -76,7 +76,7 @@ function _problem(NC, n; law = nothing, reacting = true)
     )
 end
 
-# The new core's color count against design §3.7's Phase 0 formula,
+# The new core's color count against the design's formula (§3.7),
 # `3NC + 9 + 2·bl + 7·χ` with `c = 0` and `5NC + 13 + 2·bl + 11·χ` with the
 # reconstruction of the relative fluxes. That model is a moving mesh whose
 # cell rows read their two node velocities; at `c = 0` the cell rows of this
@@ -166,9 +166,9 @@ function _bandwidth(pattern, layout)
     return w
 end
 
+# In-depth radiation is planar only: setup refuses it on a cylinder or a sphere.
 @testset "radial meshes: the planar pattern, bandwidth and colors" begin
-    for options in
-        ((;), (use_ale = true,), (use_ale = true, radiation_model = BEER_LAMBERT))
+    for options in ((;), (use_ale = true,))
         widths = Int[]
         for n in (6, 8, 12, 25)
             cps = map(

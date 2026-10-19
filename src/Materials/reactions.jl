@@ -80,7 +80,8 @@ which equals `ξ` to within `base_scale` and is finite for every real `ξ`. Abov
 same `threshold` to round-off, so calibrated kinetics are unchanged outside the
 onset interval.
 
-With `enabled = false` the factor is one and only the finite base remains: an
+With `enabled = false` the factor is one and only the finite base remains (an
+order-zero reaction then runs at its full rate at any concentration): an
 absent reactant then reacts at the rate of a `base_scale` concentration, and
 the solver's admissibility check is the guard.
 

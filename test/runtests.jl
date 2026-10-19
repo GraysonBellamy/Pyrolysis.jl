@@ -70,6 +70,9 @@ const _NEW_CORE = get(ENV, "PYROLYSIS_CORE", "old") == "new"
         ]
     for dir in domains
         for f in _jl_files(dir)
+            # The analytical tests solve on the old core, which the new-core
+            # runs leave to the old-core run.
+            _NEW_CORE && f == "test_analytical.jl" && continue
             include(joinpath(@__DIR__, dir, f))
         end
     end
@@ -81,9 +84,12 @@ const _NEW_CORE = get(ENV, "PYROLYSIS_CORE", "old") == "new"
         end
     end
 
-    # Finite-volume core suites — one module each.
-    for f in _jl_files_recursive("newcore")
-        _include_isolated(f)
+    # Finite-volume core suites — one module each. They run both energy forms
+    # themselves, so the enthalpy-form run of the verification suite skips them.
+    if !(_NEW_CORE && get(ENV, "PYROLYSIS_ENERGY_STATE", "temperature") == "enthalpy")
+        for f in _jl_files_recursive("newcore")
+            _include_isolated(f)
+        end
     end
 
     # Performance invariants are process-state sensitive, especially the

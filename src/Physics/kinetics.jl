@@ -7,7 +7,8 @@ Reaction kinetics.
 # for the kinetics-facing API.
 
 # Immutable default for the standalone `reaction_rate` entry point. The solver
-# path never uses it — `evaluate_reactions!` reads `material.depletion_limiter`.
+# paths never use it: `evaluate_reactions!` reads `material.depletion_limiter`
+# unless a caller passes its own limiter.
 const DEFAULT_DEPLETION_LIMITER = DepletionLimiter()
 
 # PERFORMANCE: Fast power function for common reaction orders (0, 1).

@@ -3,7 +3,7 @@
 
 Face-based mesh description of the finite-volume core.
 
-Faces carry an area, a unit normal, their two cells and a boundary tag; cells
+Faces carry their node, their two cells and a boundary tag; cells
 carry a volume, their faces and their nodes; nodes carry positions, which are
 the geometric state. Every metric is computed from the node positions by
 [`geometry!`](@ref), the only writer of a [`MeshGeometry`](@ref), so the metric

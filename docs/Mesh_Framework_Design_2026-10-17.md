@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-17 · **Status:** design, nothing applied · **Scope:** the mesh, state and Jacobian architecture the package commits to before extending beyond 1D
 
-Companions: `reports/Pyrolysis mesh motion alternatives.md` (the literature survey this builds on, with its four research notes), `MultiD_Extension_Assessment_2026-09-26.md` (what is 1D by construction), `Performance_Improvement_Plan_2026-09-26.md` (the Jacobian nonlocality measurements), `Gpyro_V2_Comparison_2026-09-26.md` (the burnout deficit). `file:line` pointers refer to `main` at 17bc477.
+Companions: `reports/Pyrolysis mesh motion alternatives.md` (the literature survey this builds on, with its four research notes), `MultiD_Extension_Assessment_2026-09-26.md` (what is 1D by construction; local), `Performance_Improvement_Plan_2026-09-26.md` (the Jacobian nonlocality measurements; local), `Gpyro_V2_Comparison_2026-09-26.md` (the burnout deficit; local). A document marked local is a working document kept outside the repository. `file:line` pointers refer to `main` at 17bc477.
 
 ---
 
@@ -51,9 +51,9 @@ The survey covered the fire codes (FDS, ThermaKin, Gpyro, OpenFOAM), sixty years
 - **The Julia sparse-AD pipeline is production-ready for the passes, not for the pattern.** SparseMatrixColorings for coloring and DifferentiationInterface over ForwardDiff for the colored passes are installed, and the preparation cost is paid once per problem structure. Global sparsity tracing is not used: a global tracer carries no value, so it cannot evaluate the surface Newton's termination test (`src/Discretization/boundary_temperature.jl:215`) or the upwind switches in `Discretization` (17 value-dependent branches), and rewriting every kernel with `ifelse` and fixed iteration counts for the tracer's sake would shape the code around a tool. On a structured mesh the pattern is a function of connectivity alone, so it is built by hand and verified at small size to contain the dense-AD pattern. The project already keeps the residual dual-clean and lets duals pass through the surface Newton (`boundary_temperature.jl:170-330`).
 - **Multi-D swelling closures in current codes are mechanics solves.** PATO's pyromechanics module (Lahouze et al. 2025) combines elastic, thermal-expansion and pyrolysis strains in a volume-averaged porous solid, incrementally, validated on shrinking wood cylinders. Ogrin et al. restrict intumescent expansion to the direction normal to the substrate on a fixed reference mesh. ThermaKin2Ds reaches 2D by deforming column by column with spatially non-uniform swelling (Swann et al. 2019). The column mode and the elastic eigenstrain closure are the two forms in use. They are different models. With an isotropic eigenstrain `θ/3·I` the volumetric strain rate equals `θ` only where the stress trace vanishes or the Poisson ratio is 1/2, so under a non-uniform `θ` the elastic closure lets the cell volume depart from the free density law and `ξ = m/V` becomes an outcome of mechanics; that is PATO's model, and it is physically right where swelling is constrained. For anisotropic materials (wood) the prescribed strain-rate tensor is not compatible in general, so no velocity field realizes it exactly and a mechanics closure is the only general one. The volume-constrained potential form is the isotropic volumetric case that reproduces the 1D core. §3.4 keeps both behind one interface.
 
-### 1.3 Corrections to the earlier agent summary
+### 1.3 Corrections to the earlier summary
 
-The pasted summary agreed with the survey in substance. Three statements need correction:
+The earlier summary agreed with the survey in substance. Three statements need correction:
 
 - "Deactivated cells … smooth in parameters." Deactivation is a threshold event. What buys smoothness is the correction making events rare or absent.
 - "Per-cell masses plus cell volumes." Volumes are functions of node positions in every dimension, radial 1D included, so the nodes are the state everywhere and locality comes from the algebraic velocity rows.
@@ -306,7 +306,7 @@ Geometry → state → kernels (conduction first, then reactions, then gas trans
 
 ## 8. References
 
-Internal: `reports/Pyrolysis mesh motion alternatives.md` and `research_notes/Pyrolysis mesh motion alternatives/` (ablation codes, fire codes and intumescence, fixed-grid methods, moving-mesh numerics); `docs/MultiD_Extension_Assessment_2026-09-26.md`; `docs/Performance_Improvement_Plan_2026-09-26.md` §2, §3, §5; `docs/Gpyro_V2_Comparison_2026-09-26.md`; `docs/Technical_Reference_Guide.md` §11, §14, §15; verification cases V-BO-01 to V-BO-05, V-CPL-01 to V-CPL-06; `docs/refs/ThermaKin/ThermaKin2Ds Reference v2.md` §3; `docs/refs/Gpyro/gpyro_technical_reference.md` §4.1, §6.4.
+Internal: `reports/Pyrolysis mesh motion alternatives.md` and `research_notes/Pyrolysis mesh motion alternatives/` (ablation codes, fire codes and intumescence, fixed-grid methods, moving-mesh numerics); `docs/MultiD_Extension_Assessment_2026-09-26.md` (local); `docs/Performance_Improvement_Plan_2026-09-26.md` §2, §3, §5 (local); `docs/Gpyro_V2_Comparison_2026-09-26.md` (local); `docs/Technical_Reference_Guide.md` §11, §14, §15; verification cases V-BO-01 to V-BO-05, V-CPL-01 to V-CPL-06; `docs/refs/ThermaKin/ThermaKin2Ds Reference v2.md` §3 (local); `docs/refs/Gpyro/gpyro_technical_reference.md` §4.1, §6.4 (local).
 
 Literature:
 

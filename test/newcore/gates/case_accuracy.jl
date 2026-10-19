@@ -4,22 +4,25 @@
 # temperature error against the requested tolerance.
 #
 # Each case is solved as the suite solves it (its builder at the CI
-# resolution, its solve keywords and its solve function), then again with
-# both tolerances divided by 100, the reference. The achieved error is the
-# largest temperature difference over the saved times and the cells live in
-# both solves; under deactivation only the saved times at which both solves
-# have the same live cells count (between two solves' event times a cell is
-# merged in one and not in the other), and a case saved at every step (no
-# output times) compares its final state. It is reported as a multiple of the
-# requested relative tolerance times the reference's largest temperature, and
-# is within its budget at ten times that or less (the budget of the leftover-2
-# table). A reference that does not complete at a hundredth of the tolerances
-# is taken at a tenth. Under deactivation a temperature just after an event
-# follows the event's time, so those cases report the event-time shift too:
-# the largest difference of the event times over the median interval between
-# the reference's events, as a multiple of reltol, within budget at ten or
-# less; their budget is judged on it. The constraint residual is the main
-# solve's `statistics.largest_constraint_residual`; one or below passes.
+# resolution, its solve keywords and its solve function), then again with both
+# tolerances divided by 100, the reference. The achieved error is the largest
+# temperature difference over the saved times and the cells live in both
+# solves; under deactivation only the saved times at which both solves have
+# the same live cells count (between two solves' event times a cell is merged
+# in one and not in the other), and a case saved at every step (no output
+# times) compares its final state. When one solve stops before the other (a
+# reference that does not complete), the saved times both reached are
+# compared, and the last of them is reported. It is reported as a multiple of
+# the requested relative tolerance times the reference's largest temperature,
+# and is within its budget at ten times that or less (the budget of the
+# leftover-2 table). A reference that does not complete at a hundredth of the
+# tolerances is taken at a tenth. Under deactivation a temperature just after
+# an event follows the event's time, so those cases report the event-time
+# shift too: the largest difference of the event times over the median
+# interval between the reference's events, as a multiple of reltol, within
+# budget at ten or less; their budget is judged on it. The constraint residual
+# is the main solve's `statistics.largest_constraint_residual`; one or below
+# passes.
 #
 # Run from the repository root:
 #   julia --project=test --startup-file=no --threads=1 test/newcore/gates/case_accuracy.jl
@@ -27,7 +30,6 @@
 
 ENV["PYROLYSIS_CORE"] = "new"
 using Pyrolysis
-using Dates
 using Statistics: median
 
 const OUT = joinpath(@__DIR__, "measurements")
@@ -57,28 +59,43 @@ _live(sol) =
     hasproperty(sol, :extras) && hasproperty(sol.extras, :live_cells) ?
     sol.extras.live_cells : fill(0, length(sol.t))
 
-# The largest temperature difference over the compared saved times and the
-# cells live in both solves, the largest reference temperature, and the
-# number of saved times compared.
-function temperature_error(sol, ref)
-    if size(sol.T) == size(ref.T)
-        times = findall(sol.t .== ref.t .&& _live(sol) .== _live(ref))
-    elseif sol.t[end] == ref.t[end] && size(sol.T, 1) == size(ref.T, 1)
-        times = [0]
-    else
-        return NaN, NaN, 0
+# The pairs of saved-time indices `(j, k)` with `sol.t[j] == ref.t[k]` and the
+# same live cells in both solves.
+function _common_times(sol, ref)
+    live_s, live_r = _live(sol), _live(ref)
+    index = Dict(t => k for (k, t) in enumerate(ref.t))
+    pairs = Tuple{Int,Int}[]
+    for (j, t) in enumerate(sol.t)
+        k = get(index, t, 0)
+        k > 0 && live_s[j] == live_r[k] && push!(pairs, (j, k))
     end
+    return pairs
+end
+
+# The largest temperature difference over the compared saved times and the
+# cells live in both solves, the largest reference temperature, the number of
+# saved times compared (zero for the final state) and the last time compared.
+function temperature_error(sol, ref)
+    size(sol.T, 1) == size(ref.T, 1) || return NaN, NaN, 0, NaN
+    if size(sol.T) == size(ref.T)
+        pairs = [(k, k) for k in findall(sol.t .== ref.t .&& _live(sol) .== _live(ref))]
+    elseif sol.t[end] == ref.t[end]
+        pairs = [(length(sol.t), length(ref.t))]
+    else
+        pairs = filter(p -> sol.t[p[1]] > first(sol.t), _common_times(sol, ref))
+    end
+    isempty(pairs) && return NaN, NaN, 0, NaN
     err, scale = 0.0, 0.0
-    for k in times
-        a = k == 0 ? view(sol.T, :, size(sol.T, 2)) : view(sol.T, :, k)
-        b = k == 0 ? view(ref.T, :, size(ref.T, 2)) : view(ref.T, :, k)
+    for (j, k) in pairs
+        a, b = view(sol.T, :, j), view(ref.T, :, k)
         for i in eachindex(a, b)
             (isfinite(a[i]) && isfinite(b[i])) || continue
             err = max(err, abs(a[i] - b[i]))
             scale = max(scale, abs(b[i]))
         end
     end
-    return err, scale, times == [0] ? 0 : length(times)
+    final = size(sol.T) != size(ref.T) && sol.t[end] == ref.t[end]
+    return err, scale, final ? 0 : length(pairs), sol.t[last(pairs)[1]]
 end
 
 # The largest shift of the event times over the median interval between the
@@ -117,7 +134,7 @@ function survey(m, case, energy)
         tightened = factor
         ref.retcode == case.expected_retcode && break
     end
-    err, scale, compared = temperature_error(sol, ref)
+    err, scale, compared, compared_to = temperature_error(sol, ref)
     ratio = err / (reltol * scale)
     shift = event_shift(sol, ref) / reltol
     judged = isnan(shift) ? ratio : shift
@@ -133,6 +150,7 @@ function survey(m, case, energy)
         error = err,
         scale,
         compared,
+        compared_to,
         ratio,
         event_shift = shift,
         within_budget = sol.retcode == case.expected_retcode && judged <= BUDGET,
@@ -143,8 +161,9 @@ function survey(m, case, energy)
     )
 end
 
+include(joinpath(@__DIR__, "stamp.jl"))
 load_start = Sys.loadavg()
-started = now()
+started = time()
 rows = []
 for energy in ("temperature", "enthalpy")
     m, cases = load_cases(energy)
@@ -175,7 +194,7 @@ open(joinpath(OUT, "case_accuracy.md"), "w") do io
     println(io, "# Gate items 6 and 8: constraint residuals and achieved error\n")
     println(
         io,
-        "Produced by `test/newcore/gates/case_accuracy.jl`. Julia $(VERSION), ",
+        "Produced by `test/newcore/gates/case_accuracy.jl` at $(COMMIT_STAMP). Julia $(VERSION), ",
         "$(Threads.nthreads()) thread, $(Sys.CPU_THREADS) logical CPUs; load average ",
         "$(round.(load_start; digits = 1)) at the start and $(round.(load_end; digits = 1)) ",
         "at the end. Every case of `NEW_CORE_CASES` at its CI resolution and solve ",
@@ -184,7 +203,9 @@ open(joinpath(OUT, "case_accuracy.md"), "w") do io
         "case at both tolerances divided by $(Int(TIGHTEN[1])), or by $(Int(TIGHTEN[2])) ",
         "where that does not complete (tightened) (under deactivation the saved ",
         "times with the same live cells in both; a case saved at every step its final ",
-        "state; compared: the saved times compared, zero for the final state); ratio: that error over ",
+        "state; when one solve stops before the other, the saved times both reached; ",
+        "compared: the saved times compared, zero for the final state; to: the last time ",
+        "compared [s]); ratio: that error over ",
         "reltol times the reference's largest temperature, within budget at ",
         "$(Int(BUDGET)) or less; event shift: under deactivation the largest event-time ",
         "difference over the reference's median event interval, over reltol, on which ",
@@ -194,14 +215,14 @@ open(joinpath(OUT, "case_accuracy.md"), "w") do io
     )
     println(
         io,
-        "| case | form | retcode | reltol | tightened | error [K] | compared | ratio | event shift | within budget | constraint | steps | wall [s] |",
+        "| case | form | retcode | reltol | tightened | error [K] | compared | to [s] | ratio | event shift | within budget | constraint | steps | wall [s] |",
     )
-    println(io, "|" * repeat("---|", 13))
+    println(io, "|" * repeat("---|", 14))
     for r in rows
         println(
             io,
             "| $(r.case) | $(r.energy) | $(r.retcode) | $(r.reltol) | $(Int(r.tightened)) | ",
-            "$(_g(r.error)) | $(r.compared) | $(_g(r.ratio)) | $(_g(r.event_shift)) | $(r.within_budget) | $(_g(r.constraint)) | ",
+            "$(_g(r.error)) | $(r.compared) | $(_g(r.compared_to)) | $(_g(r.ratio)) | $(_g(r.event_shift)) | $(r.within_budget) | $(_g(r.constraint)) | ",
             "$(r.steps isa AbstractFloat && isnan(r.steps) ? "" : r.steps) | $(_g(r.wall)) |",
         )
     end
@@ -214,5 +235,5 @@ open(joinpath(OUT, "case_accuracy.md"), "w") do io
     )
 end
 println(
-    "wrote $(OUT); load $(load_start) -> $(load_end); $(round(now() - started, Second))",
+    "wrote $(OUT); load $(load_start) -> $(load_end); $(round(Int, time() - started)) s",
 )

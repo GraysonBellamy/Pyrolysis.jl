@@ -45,13 +45,17 @@ and enthalpy rows take theirs from the cell's initial condensed mass and
 domain test (admissibility, porosity and the constraint residuals of the
 algebraic rows). `dt` is the first step, and with `adaptive = false` the fixed
 step. `integrator_policy` defaults to [`default_policy`](@ref) with
-`linear_solver` (KLU unless given). A per-step observer records the largest
-constraint residual of the accepted states, ends the solve with
-`ReturnCode.Failure` when the domain test gave up, caps the step after a
-nonlinear failure ([`FAILURE_MEMORY_GROWTH`](@ref)) and applies the policy's
-flag rule. `progress` is accepted for the keyword set of the other solver and
-draws nothing; `jacobian` is accepted and ignored, the colored Jacobian being the
-only one.
+`linear_solver` ([`default_linear_solver`](@ref) unless given). A per-step
+observer records the largest constraint residual of the accepted states, ends
+the solve with `ReturnCode.Failure` when the domain test gave up, caps the step
+after a nonlinear failure of a Newton-based policy
+([`FAILURE_MEMORY_GROWTH`](@ref); a Rosenbrock method has none) and applies the
+policy's flag rule. A discrete `callback`, or each discrete callback of a
+`CallbackSet`, is a read-only observer: the policy's flag rule follows its
+`affect!`, so it leaves the trajectory unchanged under every policy; a
+continuous callback's event raises the flag as any event does. `progress` is
+accepted for the keyword set of the other solver and draws nothing; `jacobian`
+is accepted and ignored, the colored Jacobian being the only one.
 
 `use_ale`, `w_override`, `coordinates` and `deactivation` are those of
 [`setup`](@ref). On a moving mesh the solve ends with return code
@@ -60,7 +64,8 @@ only one.
 step is deactivated at its end in one event ([`deactivate!`](@ref)); the
 solve ends with `:Terminated` when the last cell goes or a cell below the
 threshold lies inward of a live one, and with `:Failure` when an event leaves
-the state inadmissible.
+the state inadmissible or no consistent node velocities. The state a solve
+ends on is always saved, whether or not `saveat` names its time.
 """
 function solve(problem::PyrolysisProblem; kwargs...)
     for k in keys(kwargs)
@@ -134,12 +139,16 @@ end
 	          dt = cp.problem.dt_initial, adaptive = true, dtmin = 1e-12,
 	          dtmax = Inf, saveat = cp.problem.output_times, callback = nothing,
 	          min_thickness = 1e-6, linear_solver = nothing,
-	          integrator_policy = nothing, started = time()) -> CoreSolution
+	          integrator_policy = nothing,
+	          max_constraint_rejections = MAX_CONSTRAINT_REJECTIONS,
+	          started = time()) -> CoreSolution
 
 Integrate a set-up problem from the state `u0`, whose algebraic rows must be
 consistent ([`consistent_state!`](@ref)), with the tolerances it was set up
-with. The keywords are those of [`solve`](@ref); `started` is the time the
-reported solve time counts from.
+with. The keywords are those of [`solve`](@ref); `max_constraint_rejections`
+bounds the domain test's run of consecutive constraint rejections
+([`DomainCheck`](@ref)), and `started` is the time the reported solve time
+counts from.
 """
 function integrate(
     cp::CoreProblem;
@@ -154,6 +163,7 @@ function integrate(
     min_thickness::Real = 1e-6,
     linear_solver = nothing,
     integrator_policy = nothing,
+    max_constraint_rejections::Int = MAX_CONSTRAINT_REJECTIONS,
     started::Float64 = time(),
 )
     min_thickness > 0 ||
@@ -164,8 +174,9 @@ function integrate(
     cells === nothing || reset_cells!(cells, layout)
     policy =
         integrator_policy === nothing ?
-        default_policy(linear_solver === nothing ? KLUFactorization() : linear_solver) :
-        integrator_policy
+        default_policy(
+            linear_solver === nothing ? default_linear_solver(layout) : linear_solver,
+        ) : integrator_policy
 
     rhs! = let def = def, ws = ws
         (du, u, p, t) -> residual!(du, u, def, t, ws)
@@ -192,7 +203,7 @@ function integrate(
 
     # The domain test and every callback reach the problem through
     # fixed-signature wrappers, so the integrator's type does not depend on it.
-    check = DomainCheck(cp)
+    check = DomainCheck(cp; max_consecutive = max_constraint_rejections)
     out_of_domain = _DomainWrapper(check)
     monitor = check.monitor
     cap = NewtonCap()
@@ -205,7 +216,7 @@ function integrate(
     events = _deactivation_callback(cp, check, policy)
     callbacks =
         callback === nothing ? CallbackSet(observer, events..., thin...) :
-        CallbackSet(observer, events..., thin..., callback)
+        CallbackSet(observer, events..., thin..., _observing(callback, policy))
 
     raw = OrdinaryDiffEq.solve(
         ode,
@@ -221,6 +232,7 @@ function integrate(
         callback = callbacks,
         isoutofdomain = out_of_domain,
         initializealg = NoInit(),
+        save_end = true,
     )
     elapsed = time() - started
     s = raw.stats
@@ -286,6 +298,31 @@ function _observe!(integrator, m::ConstraintMonitor, cap::NewtonCap, policy)
     return nothing
 end
 
+# A user callback as a read-only observer. The integrator raises the
+# derivative-discontinuity flag before each discrete callback's `affect!` and
+# folds every callback's own verdict whatever their order, so the policy's
+# flag rule runs inside the user's `affect!`, after it.
+_observing(callback, policy) = callback
+_observing(callback::CallbackSet, policy) = CallbackSet(
+    callback.continuous_callbacks...,
+    map(c -> _observing(c, policy), callback.discrete_callbacks)...,
+)
+function _observing(callback::DiscreteCallback, policy)
+    affect! = callback.affect!
+    return DiscreteCallback(
+        callback.condition,
+        integrator -> begin
+            affect!(integrator)
+            apply_observer_flag!(integrator, policy)
+            return nothing
+        end;
+        initialize = callback.initialize,
+        finalize = callback.finalize,
+        save_positions = Tuple(callback.save_positions),
+        initializealg = callback.initializealg,
+    )
+end
+
 """
 	cap_step!(integrator, cap::NewtonCap)
 
@@ -336,7 +373,8 @@ end
 # The deactivation event: at the end of every step on which a live cell fell
 # below the threshold, every such cell in one pass, then the consistent sweep
 # of the algebraic rows, the admissibility of the result, and the policy's
-# restart step.
+# restart step. A sweep that leaves a velocity row above round-off or an
+# inadmissible result ends the solve with `ReturnCode.Failure`.
 function _deactivation_callback(cp::CoreProblem, check::DomainCheck, policy)
     cells = cp.deactivation
     cells === nothing && return ()
@@ -344,12 +382,14 @@ function _deactivation_callback(cp::CoreProblem, check::DomainCheck, policy)
     layout = def.layout
     has_event = FunctionWrapper{Bool,Tuple{_StateVector}}(u -> any_below(cells, layout, u))
     # Deactivates in place and returns `:transferred`, `:burned_out`,
-    # `:interior` or, when the result is not admissible, `:inadmissible`.
+    # `:interior`, `:inconsistent` when the sweep leaves a velocity row above
+    # round-off, or `:inadmissible` when the result is not admissible.
     deactivate = FunctionWrapper{Symbol,Tuple{_StateVector,Float64}}(
         (u, t) -> begin
             status = deactivate!(u, cells, def, t)
             status === :transferred || return status
-            consistent_state!(u, def, ws, t)
+            _consistent_intensities!(u, def, ws, t)
+            _consistent_motion!(u, def, ws, t) === nothing || return :inconsistent
             inadmissible(u, layout, check.abstol) && return :inadmissible
             _porosity_out(check, _derived(check, u, t), def.setup.gas) &&
                 return :inadmissible
@@ -361,6 +401,9 @@ function _deactivation_callback(cp::CoreProblem, check::DomainCheck, policy)
         status = deactivate(integrator.u, integrator.t)
         if status === :inadmissible
             @warn "solve(): the state after deactivating cell(s) at t = $(integrator.t) is inadmissible"
+            terminate!(integrator, ReturnCode.Failure)
+        elseif status === :inconsistent
+            @warn "solve(): no consistent node velocities after deactivating cell(s) at t = $(integrator.t)"
             terminate!(integrator, ReturnCode.Failure)
         elseif status !== :transferred
             terminate!(integrator)

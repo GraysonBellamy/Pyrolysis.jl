@@ -11,7 +11,7 @@ using OrdinaryDiffEq: ODEProblem, DiscreteCallback, CallbackSet, init, step!
 using OrdinaryDiffEq: derivative_discontinuity!
 using Pyrolysis.Solver: KenCarp4
 using OrdinaryDiffEq.SciMLBase: get_proposed_dt
-using LinearSolve: KLUFactorization
+using LinearSolve: KLUFactorization, UMFPACKFactorization
 
 # A decomposing slab whose char is lighter than the virgin solid (the mesh
 # moves), porous with intrinsic densities, permeable when `κ > 0`, and
@@ -59,6 +59,14 @@ function _slab(n; κ = 0.0, radiating = false)
         ξ_initial = [z -> 1100.0 * (1 - 30z), z -> 300.0 * 30z, z -> 0.5],
         tspan = (0.0, 10.0),
     )
+end
+
+@testset "a policy names a known restart and flag rule" begin
+    alg = OrdinaryDiffEq.Rodas5P()
+    @test IntegratorPolicy(alg, :forced_dt, :keep, 1e-6).restart === :forced_dt
+    @test_throws ArgumentError IntegratorPolicy(alg, :immediate, :keep, 1e-6)
+    @test_throws ArgumentError IntegratorPolicy(alg, :solver_chosen, :raise, 1e-6)
+    @test_throws ArgumentError rodas5p_policy(KLUFactorization(); restart = :immediate)
 end
 
 @testset "domain check: admissibility, porosity and constraint residuals" begin
@@ -353,4 +361,95 @@ end
     integrator_rich, solution_rich = _solve_types(_rich_deck(); rich...)
     @test integrator_plain === integrator_rich
     @test solution_plain === solution_rich
+end
+
+@testset "a read-only user callback leaves every policy's trajectory unchanged" begin
+    problem = _uniform_slab(12)
+    probe = DiscreteCallback(
+        (u, t, integrator) -> true,
+        integrator -> nothing;
+        save_positions = (false, false),
+    )
+    for policy in (
+        rodas5p_policy(KLUFactorization()),
+        kencarp4_policy(KLUFactorization()),
+        fbdf_policy(KLUFactorization()),
+    )
+        kwargs = (
+            use_ale = true,
+            integrator_policy = policy,
+            saveat = Float64[],
+            abstol = 1e-8,
+            reltol = 1e-6,
+        )
+        plain = Integration.solve(problem; kwargs...)
+        @test plain.retcode === :Success
+        for callback in (probe, CallbackSet(probe))
+            probed = Integration.solve(problem; kwargs..., callback)
+            @test probed.raw_solution.t == plain.raw_solution.t
+            @test probed.raw_solution.u == plain.raw_solution.u
+            @test probed.statistics.accepted == plain.statistics.accepted
+            @test probed.statistics.rhs_evaluations == plain.statistics.rhs_evaluations
+        end
+    end
+end
+
+@testset "repeated solves are bit-identical under each linear solver" begin
+    problem = _uniform_slab(12)
+    for linear_solver in (StructuredKLU(), KLUFactorization(), UMFPACKFactorization())
+        sols = [
+            Integration.solve(
+                problem;
+                use_ale = true,
+                linear_solver,
+                saveat = Float64[],
+                abstol = 1e-8,
+                reltol = 1e-6,
+            ) for _ = 1:2
+        ]
+        @test sols[1].retcode === :Success
+        @test sols[2].raw_solution.t == sols[1].raw_solution.t
+        @test sols[2].raw_solution.u == sols[1].raw_solution.u
+        @test sols[2].statistics.accepted == sols[1].statistics.accepted
+    end
+end
+
+# The KLU factorization in Rosenbrock's linear cache, which is a new object
+# exactly when KLU analyses afresh.
+_klu(cacheval) = cacheval
+_klu(cacheval::Integration.StructuredKLUCache) = cacheval.inner.cacheval
+
+@testset "the structured KLU analyses once on a moving mesh" begin
+    problem = _slab(12)
+    @test default_linear_solver(setup(problem; use_ale = true).def.layout) isa StructuredKLU
+    @test default_linear_solver(setup(problem).def.layout) isa KLUFactorization
+    function analysed(linear_solver)
+        factorizations = UInt[]
+        probe = DiscreteCallback(
+            (u, t, integrator) -> true,
+            integrator -> push!(
+                factorizations,
+                objectid(_klu(integrator.cache.linsolve.cacheval)),
+            );
+            save_positions = (false, false),
+        )
+        sol = Integration.solve(
+            problem;
+            use_ale = true,
+            linear_solver,
+            callback = probe,
+            saveat = Float64[],
+            abstol = 1e-8,
+            reltol = 1e-6,
+        )
+        return sol, length(unique(factorizations))
+    end
+    structured, n_structured = analysed(nothing)
+    plain, n_plain = analysed(KLUFactorization())
+    @test structured.retcode === :Success
+    @test n_structured == 1
+    @test n_plain > 1
+    @test structured.statistics.accepted == plain.statistics.accepted
+    @test structured.statistics.rejected == plain.statistics.rejected
+    @test maximum(abs, structured.T .- plain.T) <= 1e-9
 end

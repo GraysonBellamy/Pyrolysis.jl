@@ -9,7 +9,8 @@ using Pyrolysis.States: StateLayout, state_length
 using Pyrolysis.Assembly
 using Pyrolysis.Assembly: residual!
 using Pyrolysis.ColoredJacobian
-using Pyrolysis.Integration: setup
+using Pyrolysis.Deactivation
+using Pyrolysis.Integration: setup, consistent_state!, CoreProblem
 
 # ============================================================================
 # Materials and columns
@@ -377,6 +378,158 @@ end
 end
 
 # ============================================================================
+# Radial meshes and a prescribed mesh velocity
+# ============================================================================
+
+# Two solids of equal density at rest with a smooth front between them; a
+# prescribed mesh velocity slides the mesh over them, so the relative fluxes
+# carry every inventory across the faces. Such a material must not react.
+function _sliding(n)
+    a = SolidComponent(:a, ρ = 1000.0, c = 1000.0, k = 0.5)
+    b = SolidComponent(:b, ρ = 1000.0, c = 3000.0, k = 0.5)
+    mat = Material(name = :sliding, components = (a, b), reactions = ())
+    front(z) = (1 + tanh((z - 0.005) / 0.001)) / 2
+    return PyrolysisProblem(
+        mesh = create_uniform_mesh(0.01, n, Val(2)),
+        material = mat,
+        bc_set = BoundaryConditionSet(
+            thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
+        ),
+        T_initial = z -> 600.0 + 2e4 * z,
+        ξ_initial = [z -> 1000.0 * (1 - front(z)), z -> 1000.0 * front(z)],
+        tspan = (0.0, 10.0),
+    )
+end
+
+# The end nodes stay; the middle slides up by a fortieth of the thickness.
+const _slide = (x, t) -> 2.5e-4 * sinpi(x / 0.01) * (1 + 0.1t)
+
+const _radial_configurations = (
+    darcy_fixed = (
+        problem = () -> _column(_wood(), 6; top = HeatFluxBC(50e3)),
+        options = (;),
+        wood = true,
+    ),
+    darcy_moving = (
+        problem = () -> _column(_wood(), 6; top = HeatFluxBC(50e3)),
+        options = (use_ale = true,),
+        wood = true,
+    ),
+    prescribed_velocity = (
+        problem = () -> _sliding(6),
+        options = (use_ale = true, w_override = _slide),
+        wood = false,
+    ),
+)
+
+@testset "radial $(nameof(typeof(coords))), $(name): $(energy) form" for coords in (
+        Cylindrical(),
+        Spherical(),
+    ),
+    name in keys(_radial_configurations),
+    energy in (:temperature, :enthalpy)
+
+    config = _radial_configurations[name]
+    cp = setup(
+        config.problem();
+        energy_state = energy,
+        coordinates = coords,
+        config.options...,
+    )
+    @test cp.def.setup.topology.coordinates === coords
+    config.wood && @test cp.def.setup.gas isa DarcyFickTransport
+    for (state, u) in pairs(_states(cp, config.wood))
+        @testset "$state" begin
+            _contained(cp, u)
+        end
+    end
+end
+
+@testset "cells are not deactivated under a prescribed mesh velocity" begin
+    @test setup(_sliding(4); use_ale = true, w_override = _slide) isa CoreProblem
+    @test_throws ArgumentError setup(
+        _sliding(4);
+        use_ale = true,
+        w_override = _slide,
+        deactivation = true,
+    )
+end
+
+# ============================================================================
+# After a deactivation
+# ============================================================================
+
+# The ablating solid of `test/newcore/test_deactivation.jl`, absorbing in
+# depth: it decomposes to a gas that takes no volume, so a cell thins with its
+# condensed mass.
+function _ablator(n; L = 3e-3, q = 2.8e6, t_end = 0.8)
+    ρ, c, k = 1000.0, 1000.0, 1.0
+    R, E, Tp, T0 = 8.314462618, 1.0e5, 700.0, 300.0
+    v = 2.0e-3
+    A = v^2 * E * (Tp - T0) * exp(E / (R * Tp)) / (k / (ρ * c) * R * Tp^2)
+    solid = SolidComponent(:solid, ρ = ρ, c = c, k = k, λ = 1e-6, α = 50.0)
+    gas = GaseousComponent(:gas, M = 0.05, c = c, k = 0.02, λ = 1e-4)
+    mat = Material(
+        name = :ablator,
+        components = (solid, gas),
+        reactions = (Reaction(:ablate, 1 => 2; A = A, E = E, h = 1.0e6),),
+    )
+    return PyrolysisProblem(
+        mesh = create_uniform_mesh(L, n, Val(2)),
+        material = mat,
+        bc_set = BoundaryConditionSet(
+            thermal = (top = RadiativeFluxBC(flux = q), bottom = AdiabaticBC()),
+            mass = (
+                top = ConvectiveMassBC(h_m = 10.0, ξ_inf = 0.0),
+                bottom = ImpermeableBC(),
+            ),
+        ),
+        T_initial = z -> T0 + 1e5 * z,
+        ξ_initial = [z -> ρ, z -> 0.0],
+        tspan = (0.0, t_end),
+    )
+end
+
+# The exposed cell below the threshold, deactivated by the event's own
+# transfer: the pattern still contains the Jacobian, whose exposed face is
+# now the receiver's far face.
+@testset "after deactivate! with in-depth radiation: $(energy) form" for energy in (
+    :temperature,
+    :enthalpy,
+)
+    cp = setup(
+        _ablator(6);
+        energy_state = energy,
+        use_ale = true,
+        radiation_model = BEER_LAMBERT,
+        deactivation = true,
+    )
+    def, layout, cells = cp.def, cp.def.layout, cp.deactivation
+    u = copy(cp.u0)
+    m0 = cells.reference[6]
+    u[mass_index(layout, 6, 2)] += (1 - 0.5 * cells.threshold) * m0
+    u[mass_index(layout, 6, 1)] = 0.5 * cells.threshold * m0
+    consistent_state!(u, def, cp.ws, 0.0)
+    @test deactivate!(u, cells, def, 0.3) === :transferred
+    @test top_live_cell(layout) == 5
+    consistent_state!(u, def, cp.ws, 0.3)
+    for (state, v) in
+        (("after the event", u), ("perturbed", u .* (1 .+ 0.1 .* sin.(1:length(u)))))
+        @testset "$state" begin
+            Jd = _contained(cp, v; t = 0.3)
+            # The beam enters through the receiver's far face (node 6): the
+            # face beneath reads it, and no row reads the dead node's.
+            @test Jd[intensity_index(layout, 5), intensity_index(layout, 6)] != 0
+            @test all(
+                iszero,
+                Jd[1:end .!= intensity_index(layout, 7), intensity_index(layout, 7)],
+            )
+        end
+    end
+    fill!(layout.mask, true)
+end
+
+# ============================================================================
 # Boundary mass fluxes on the energy row
 # ============================================================================
 
@@ -518,8 +671,8 @@ end
         @test all(isfinite, g)
         @test guarded(a, b, d_a, d_b) >= 0
     end
-    # Continuous across the scale of the guard, where the old face mean cut
-    # off: no jump between just below and just above it.
+    # Continuous across the scale of the guard: no jump between just below
+    # and just above it.
     below, above =
         guarded(η * (1 - 1e-9), 0.2, d_a, d_b), guarded(η * (1 + 1e-9), 0.2, d_a, d_b)
     @test abs(above - below) <= 1e-8 * above

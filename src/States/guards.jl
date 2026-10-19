@@ -4,8 +4,8 @@
 #
 # Newton iterates leave the physical domain before any step can be rejected,
 # so every quantity the residual evaluates is finite with a finite derivative
-# at any real state. Each guard below is C¹, is exactly the identity on the
-# physical states the tolerances can distinguish, and replaces a hard clamp.
+# at any real state. Each guard below is C¹ and is exactly the identity on
+# the physical states the tolerances can distinguish.
 # The admissibility check reads the unguarded quantities.
 
 """

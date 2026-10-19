@@ -15,9 +15,9 @@ using SciMLBase: NullParameters, NoInit, FullSpecialize, derivative_discontinuit
 using SciMLBase: terminate!
 using OrdinaryDiffEq: OrdinaryDiffEq, ODEFunction, ODEProblem, DiscreteCallback, CallbackSet
 using OrdinaryDiffEq: ContinuousCallback, Rodas5P, FBDF, ReturnCode, set_proposed_dt!
-using SciMLBase: get_proposed_dt
+using SciMLBase: SciMLBase, get_proposed_dt
 using OrdinaryDiffEqSDIRK: KenCarp4
-using LinearSolve: KLUFactorization
+using LinearSolve: LinearSolve, KLUFactorization
 using ADTypes: AutoFiniteDiff
 using ..Materials
 using ..Properties: skeletal_volume_fraction
@@ -34,12 +34,14 @@ using ..Problem: PyrolysisProblem, apply_initial_conditions!, validate_problem
 
 include("erased.jl")
 include("policy.jl")
+include("linear_solve.jl")
 include("setup.jl")
 include("checks.jl")
 include("solve.jl")
 
 export ErasedRHS, ErasedJacobian
 export IntegratorPolicy, default_policy, apply_observer_flag!, DT_AFTER_EVENT
+export StructuredKLU, default_linear_solver
 export kencarp4_policy, rodas5p_policy, fbdf_policy
 export DomainCheck, ConstraintMonitor, constraint_residual, MAX_CONSTRAINT_REJECTIONS
 export FAILURE_MEMORY_GROWTH, FAILURE_MEMORY_STEPS, NewtonCap, cap_step!

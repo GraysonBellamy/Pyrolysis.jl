@@ -391,8 +391,19 @@ function _invert_primal(ext, laws, H::Float64, m, i, T_start, maxiters)
         else
             lo = T
         end
-        # A bracket collapsed to adjacent floating-point numbers holds the root.
-        hi - lo <= 4eps(max(abs(lo), abs(hi))) && return T, its
+        if hi - lo <= 4eps(max(abs(lo), abs(hi)))
+            # A collapsed bracket holds the root unless the slope bound behind
+            # its endpoint was optimistic; then the root lies beyond the
+            # endpoint, and the bracket is widened away from the datum.
+            abs(r) <= 1e-8 * max(abs(H), C * abs(T - T_REF), C) && return T, its
+            if endpoint > T_REF
+                hi = T_REF + 2 * (hi - T_REF)
+            else
+                lo = T_REF + 2 * (lo - T_REF)
+            end
+            T = lo + (hi - lo) / 2
+            continue
+        end
         candidate = T - r / C
         margin = 0.05 * (hi - lo)
         T = lo + margin < candidate < hi - margin ? candidate : lo + (hi - lo) / 2

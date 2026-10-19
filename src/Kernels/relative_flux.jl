@@ -7,8 +7,9 @@
 
 The smooth van Albada slope of two one-sided gradients `a` (upwind) and `b`
 (downwind): `(a (b² + ε) + b (a² + ε)) / (a² + b² + 2ε)`. It equals `a` when
-`a = b`, nearly vanishes when they differ in sign, is zero on a uniform field
-and is C^∞ for `ε > 0`.
+`a = b`, is zero on a uniform field and at `a = −b`, stays below
+`0.21 max(|a|, |b|)` in magnitude when they differ in sign, and is C^∞ for
+`ε > 0`.
 """
 @inline van_albada(a, b, ε) = (a * (b * b + ε) + b * (a * a + ε)) / (a * a + b * b + 2ε)
 
