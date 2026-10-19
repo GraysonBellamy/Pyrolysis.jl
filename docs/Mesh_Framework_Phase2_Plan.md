@@ -475,14 +475,14 @@ As plan §9.3: one theme per commit; replaced rules deleted; no dates or histori
 
 ## 12. Implementation status
 
-Branch `mesh-framework-phase2`, draft pull request against `mesh-framework-phase1`. M0: this plan and the prototype (§9.2). The departures from this plan, when implementation starts, continue the series at D53; the conflicts at C57.
+Branch `mesh-framework-phase2`, draft pull request #14 against `mesh-framework-phase1`. M0: this plan, the prototype (§9.2) and the owner's answers (§13, every question as recommended). Implementation starts with M1 (§7); its departures continue the series at D53, its conflicts at C57, and this section records each milestone's commits and gate evidence as plan §12.1 did.
 
 
 ---
 
 ## 13. Owner's questions
 
-Each with a recommendation and what the answer changes. Questions 1, 2, 4 and the V-BO-04 part of 8 are needed before M1 starts (§7.1); the rest by the milestone named.
+Each with a recommendation and what the answer changes. Questions 1, 2, 4 and the V-BO-04 part of 8 are needed before M1 starts (§7.1); the rest by the milestone named. **Owner: every question decided as recommended** (the interior policy by the block-and-band rule with the slot-shifting merge as the fallback only; the band an absolute fraction of 0.1; `τ` the layer's equidistribution time set by the ladder; thresholds as `setup` keywords with the optional material field; event location on if item 7 passes; the wall-time ratio decided on item 8's table; the solver-chosen restart kept; the V-BO-04, V-BO-05, V-BO-03 and surface-Newton re-pins approved and the 30-cell V-BO-01 row decided after the tail diagnostic; the Douglas fir comparison at the cutover; the accuracy-per-tolerance investigation closed; the temperature form; the switch decided on R25's decomposition; the design errata at the design's next revision; radial Beer–Lambert deferred to Phase 4a; the Péclet weighting not in Phase 2).
 
 1. **The interior policy on a moving mesh.** The block-and-band rule plus the correction is the primary path; the slot-shifting interior merge (C54, the old core's rule) is either insurance built now or the fallback built only if the correction fails its gate. *Recommendation:* the fallback only; the prototype carries V-BO-01, 03's deck and 04 without it, and it is a cross-cutting contract (every per-slot constant shifts) worth one and a half weeks. *Changes:* built now, M2 grows by one and a half weeks and the fallback of item 11 is already in hand; later, the schedule risk of §7.4 stays.
 2. **The band.** An absolute near-threshold mass fraction `ε_band` (default 0.1) or a multiple of `ε_m`. *Recommendation:* absolute, 0.1, set by the ladder (a multiple took cells at 29 % of their mass at `ε_m = 3e-2`, A.4; three thresholds leave cells behind at 60 cells, A.3). *Changes:* the parameter's name and default in `setup` and in the design errata (§7.2).
