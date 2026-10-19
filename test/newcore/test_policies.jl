@@ -10,7 +10,7 @@ import OrdinaryDiffEq
 using OrdinaryDiffEq: ODEProblem, DiscreteCallback, CallbackSet, init, step!
 using OrdinaryDiffEq: derivative_discontinuity!
 using Pyrolysis.Solver: KenCarp4
-using SciMLBase: get_proposed_dt
+using OrdinaryDiffEq.SciMLBase: get_proposed_dt
 using LinearSolve: KLUFactorization
 
 # A decomposing slab whose char is lighter than the virgin solid (the mesh
