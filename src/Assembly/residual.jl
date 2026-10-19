@@ -9,7 +9,10 @@ The right-hand side of the core's mass-matrix system `M du/dt = f(u, t)`: the
 state mapping, the kernels in assembler order, the mesh closure (strain rates
 from the reaction sources, velocity rows), the external sources, then the
 row assembly. A pure function of `(u, t)` given `def`; `ws` holds buffers
-only. Dual-number states evaluate in their own buffers.
+only. Dual-number states evaluate in their own buffers, chosen by the state's
+element type, so `t` must be a plain number: a forward-mode derivative in
+time alone (a dual `t` with a `Float64` state) is not supported, and every
+integrator policy takes its time derivative by finite differences.
 """
 function residual!(
     du::AbstractVector,
