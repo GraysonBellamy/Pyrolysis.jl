@@ -84,8 +84,9 @@ function _verification_case_vbo02()
                 value = Float64(st.naccept),
                 exact = 0.0,
                 error = Float64(st.naccept),
-                tol = 2000.0,
-                comment = "budget at the CI resolution (60 PMMA cells); observed 1572, about 26 per park interval",
+                tol = VERIFICATION_CORE == "old" ? 2000.0 :
+                      VERIFICATION_ENERGY_STATE === :enthalpy ? 4000.0 : 3000.0,
+                comment = "budget at the CI resolution (60 PMMA cells); observed 1572 on the old core, about 26 per park interval, and on the new one 2354 (temperature form) and 3163 (enthalpy form)",
             ),
         )
         return out

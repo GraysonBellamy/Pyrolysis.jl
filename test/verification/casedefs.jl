@@ -163,6 +163,8 @@ if !isdefined(@__MODULE__, :VerificationCase)
         "V-RX-02",
         "V-RX-03",
         "V-RX-04",
+        "V-BO-02",
+        "V-CPL-01",
         "V-CPL-02",
         "V-CPL-03",
         "V-CPL-04",
@@ -170,6 +172,8 @@ if !isdefined(@__MODULE__, :VerificationCase)
         "V-GT-01",
         "V-GT-02",
         "V-MMS-01",
+        "V-MMS-02",
+        "V-MMS-03",
         "V-MMS-04",
         "V-RAD-01",
         "V-HC-01",
@@ -192,12 +196,14 @@ if !isdefined(@__MODULE__, :VerificationCase)
     `handle_depletion` is the new core's `deactivation`. The old core's
     `depletion_threshold`, a fraction of a cell's thickness, has no exact
     counterpart on the new core, whose threshold is the mass fraction
-    `threshold` (plan C9), and is passed to the old core only.
+    `threshold` (plan C9), and is passed to the old core only, as is its
+    `min_cells` (the new core deactivates down to the last cell).
     """
     core_solve(
         problem;
         handle_depletion::Bool = false,
         depletion_threshold = 0.05,
+        min_cells::Int = 2,
         kwargs...,
     ) =
         VERIFICATION_CORE == "new" ?
@@ -207,7 +213,14 @@ if !isdefined(@__MODULE__, :VerificationCase)
             deactivation = handle_depletion,
             kwargs...,
         ) :
-        solve(problem; progress = false, handle_depletion, depletion_threshold, kwargs...)
+        solve(
+            problem;
+            progress = false,
+            handle_depletion,
+            depletion_threshold,
+            min_cells,
+            kwargs...,
+        )
 
     @inline _case_solve(case::VerificationCase, problem; kwargs...) =
         case.solve_fn !== nothing ? case.solve_fn(problem; kwargs...) :

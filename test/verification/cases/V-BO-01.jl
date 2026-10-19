@@ -134,32 +134,70 @@ const VBO_VOID_WARNINGS = Dict{String,Int}()
 const VBO_STEP_STATS =
     Dict{String,@NamedTuple{dt_min::Float64,T_max::Float64,t_last::Float64}}()
 
+# The step recorder: the smallest accepted step, the largest temperature and
+# the time of the last accepted step (a stop between output times is not
+# saved), with the temperatures of a state read by `temperatures(u)`.
+function _vbo_recorder(temperatures, dt_min, T_max, t_last)
+    return DiscreteCallback(
+        (u, t, integ) -> true,
+        integ -> begin
+            dt_min[] = min(dt_min[], integ.t - integ.tprev)
+            T_max[] = max(T_max[], temperatures(integ.u))
+            t_last[] = integ.t
+            SciMLBase.derivative_discontinuity!(integ, false)
+        end;
+        save_positions = (false, false),
+    )
+end
+
+# The new core's solve with the step recorder, which reads the live cells'
+# temperatures through the layout and the state mapping. The old core's
+# depletion keywords have no counterpart there (plan C9).
+function _vbo_core_solve(
+    problem,
+    dt_min,
+    T_max,
+    t_last;
+    handle_depletion = false,
+    depletion_threshold = nothing,
+    min_cells = nothing,
+    min_thickness = 1e-6,
+    kwargs...,
+)
+    cp = Pyrolysis.Integration.setup(
+        problem;
+        energy_state = VERIFICATION_ENERGY_STATE,
+        deactivation = handle_depletion,
+        kwargs...,
+    )
+    layout, setup, ds = cp.def.layout, cp.def.setup, cp.ws.derived
+    live_max(u) = begin
+        Pyrolysis.States.derive!(ds, u, layout, setup)
+        maximum(ds.T[i] for i in eachindex(ds.T) if ds.active[i])
+    end
+    recorder = _vbo_recorder(live_max, dt_min, T_max, t_last)
+    return Pyrolysis.Integration.integrate(cp; callback = recorder, min_thickness)
+end
+
 function _vbo_solve_fn(id::String)
     return (problem; kwargs...) -> begin
         surf = _VBOWarnCounter(Logging.current_logger(), r"^Surface", Ref(0))
         tr = _VBOWarnCounter(surf, r"transmitted through the back face", Ref(0))
         void = _VBOWarnCounter(tr, r"gasified from within", Ref(0))
-        # Smallest accepted step, largest temperature and time of the last
-        # accepted step (a stop between output times is not saved). The
-        # maximum runs over every temperature slot: a ghost keeps the
-        # temperature it was parked with, which lies between two live-cell
-        # temperatures.
+        # On the old core the maximum runs over every temperature slot: a
+        # ghost keeps the temperature it was parked with, which lies between
+        # two live-cell temperatures.
         n = length(problem.mesh.cells)
         dt_min = Ref(Inf)
         T_max = Ref(-Inf)
         t_last = Ref(NaN)
-        recorder = DiscreteCallback(
-            (u, t, integ) -> true,
-            integ -> begin
-                dt_min[] = min(dt_min[], integ.t - integ.tprev)
-                T_max[] = max(T_max[], maximum(view(integ.u, 1:n)))
-                t_last[] = integ.t
-                SciMLBase.derivative_discontinuity!(integ, false)
-            end;
-            save_positions = (false, false),
-        )
         sol = Logging.with_logger(void) do
-            solve(problem; progress = false, callback = recorder, kwargs...)
+            if VERIFICATION_CORE == "new"
+                _vbo_core_solve(problem, dt_min, T_max, t_last; kwargs...)
+            else
+                recorder = _vbo_recorder(u -> maximum(view(u, 1:n)), dt_min, T_max, t_last)
+                solve(problem; progress = false, callback = recorder, kwargs...)
+            end
         end
         VBO_SURFACE_WARNINGS[id] = surf.count[]
         VBO_TRANSMITTED_WARNINGS[id] = tr.count[]

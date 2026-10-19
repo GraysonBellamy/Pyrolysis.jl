@@ -344,7 +344,8 @@ plus state trajectories; `PyrolysisSolution`'s extras don't apply to the
 wrapped-RHS path).
 
 Fields: `t` (n_times), `T` (n_cells × n_times), `ξ` (NC × n_cells × n_times),
-`z` (n_cells × n_times cell centers — constant columns for Eulerian).
+`z` (n_cells × n_times cell centers — constant columns for Eulerian), and
+`statistics`, the new core's `SolverStatistics` (`nothing` on the old core).
 """
 struct MMSSolution
     retcode::Symbol
@@ -352,6 +353,7 @@ struct MMSSolution
     T::Matrix{Float64}
     ξ::Array{Float64,3}
     z::Matrix{Float64}
+    statistics::Any
 end
 
 """
@@ -553,7 +555,7 @@ function solve_mms(
     retcode =
         OrdinaryDiffEq.SciMLBase.successful_retcode(ode_sol) ? :Success :
         Symbol(ode_sol.retcode)
-    return MMSSolution(retcode, collect(ode_sol.t), T, ξ, z)
+    return MMSSolution(retcode, collect(ode_sol.t), T, ξ, z, nothing)
 end
 
 # The finite-volume core's MMS solve: the manufactured sources through the
@@ -590,7 +592,7 @@ function _solve_mms_new(
         sources = Pyrolysis.Assembly.VolumetricSources(mass, energy),
         step_kwargs...,
     )
-    return MMSSolution(sol.retcode, sol.t, sol.T, sol.ξ, sol.cell_centers)
+    return MMSSolution(sol.retcode, sol.t, sol.T, sol.ξ, sol.cell_centers, sol.statistics)
 end
 
 # ----------------------------------------------------------------------------
