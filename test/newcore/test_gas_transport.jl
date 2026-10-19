@@ -7,7 +7,7 @@ using Pyrolysis.Discretization: boundary_darcy_velocity
 using Pyrolysis.Meshes
 using Pyrolysis.States
 using Pyrolysis.States: StateLayout, state_length
-using Pyrolysis.Kernels: GasTransportKernel, outward_darcy_velocity
+using Pyrolysis.Kernels: GasTransportKernel, outward_darcy_velocity, MOBILITY_GUARD
 using Pyrolysis.Assembly
 using Pyrolysis.Assembly: residual!
 using Pyrolysis.ColoredJacobian
@@ -243,6 +243,12 @@ end
         @test outward_darcy_velocity(bc, P, mob, d) ≈ v_top rtol = 1e-14 atol = 1e-300
         @test outward_darcy_velocity(bc, P, mob, d) ≈ -v_bottom rtol = 1e-14 atol = 1e-300
     end
-    # An impermeable cell cannot vent through a film condition.
-    @test outward_darcy_velocity(ConvectivePressureBC(1e-6, 1e5), 2e5, 0.0, d) == 0
+    # An impermeable cell cannot vent through a film condition; the gate is
+    # smooth in the mobility and exactly one at a physical mobility.
+    film = ConvectivePressureBC(1e-6, 1e5)
+    @test outward_darcy_velocity(film, 2e5, 0.0, d) == 0
+    @test outward_darcy_velocity(film, 2e5, 2e-7, d) == 1e-6 * (2e5 - 1e5)
+    @test outward_darcy_velocity(film, 2e5, MOBILITY_GUARD, d) ≈ 0.05 rtol = 1e-14
+    @test ForwardDiff.derivative(m -> outward_darcy_velocity(film, 2e5, m, d), 0.0) ≈
+          0.1 / MOBILITY_GUARD rtol = 1e-14
 end
