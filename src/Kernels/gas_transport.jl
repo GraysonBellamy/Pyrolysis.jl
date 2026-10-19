@@ -13,7 +13,7 @@ const MOBILITY_GUARD = 1e-30
 The mass flux of every gas component through every face, per unit area along
 the face normal, and the sensible enthalpy it carries.
 
-Interior faces: the volume-fraction-gradient flux
+Interior faces between live cells: the volume-fraction-gradient flux
 `J = −(λ_f/T̄) (ξ_nb T_nb − ξ_o T_o) / d` (`Physics.gas_flux`) at the trial
 temperatures, with `λ_f` the guarded distance-weighted harmonic mean of the
 cell gas-transfer coefficients and `d` the center distance; under Darcy–Fick
@@ -24,7 +24,8 @@ smoothly floored cell porosities, and `ξ_up` upwind of `v`. The energy flux
 of the face gains `Σⱼ Jⱼ hⱼ(T_f)` with `T_f` the distance-weighted face
 temperature, the same mass flux the mass rows carry.
 
-Boundary faces, one [`BoundaryPatch`](@ref) of mass conditions per tag: the
+Boundary faces, one [`BoundaryPatch`](@ref) of mass conditions per tag, each
+applied on the face that bounds the live cells on its side (`Meshes.live_face`): the
 film flux of the condition (`BoundaryConditions.mass_bc_flux`, oriented
 outward) and, under Darcy–Fick transport, the outflow the pressure condition
 drives at the outward Darcy velocity of [`outward_darcy_velocity`](@ref)
@@ -88,7 +89,7 @@ function contribute!(
     gas = kernel.gas
     @inbounds for f = 1:n_faces(topo)
         o, nb = topo.faces[f].cells
-        nb == 0 && continue
+        (nb == 0 || !(ds.active[o] && ds.active[nb])) && continue
         floor = kernel.d_floor[f]
         d_o = smooth_floor(center_to_face_distance(g, topo, f, o), floor)
         d_n = smooth_floor(center_to_face_distance(g, topo, f, nb), floor)
@@ -128,7 +129,9 @@ end
 @inline _mass_patches!(c, ::Tuple{}, kernel, ds, topo, material, t) = nothing
 @inline function _mass_patches!(c, patches::Tuple, kernel, ds, topo, material, t)
     p = first(patches)
-    @inbounds for f in p.faces
+    @inbounds for f0 in p.faces
+        f = live_face(topo, ds.active, f0)
+        f == 0 && continue
         _boundary_mass_flux!(c, p.bc, f, kernel, ds, topo, material, t)
     end
     return _mass_patches!(c, Base.tail(patches), kernel, ds, topo, material, t)

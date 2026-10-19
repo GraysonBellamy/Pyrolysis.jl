@@ -23,9 +23,9 @@ include("generators.jl")
 include("geometry.jl")
 
 export CoordinateSystem, Planar, Cylindrical, Spherical
-export geometric_dimension, face_area, shell_volume
+export geometric_dimension, face_area, shell_volume, outer_position
 export Face, Cell, MeshTopology, Mesh
-export n_cells, n_faces, n_nodes, boundary_faces, boundary_tags, is_fixed
+export n_cells, n_faces, n_nodes, boundary_faces, boundary_tags, is_fixed, live_face
 export line_mesh
 export MeshGeometry, geometry!, cell_distance, center_to_face_distance
 

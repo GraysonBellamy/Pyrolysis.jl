@@ -51,6 +51,17 @@ Negative when the faces are inverted; the state mapping floors it.
 @inline shell_volume(::Cylindrical, r0, r1, A) = π * (r1^2 - r0^2) * A
 @inline shell_volume(::Spherical, r0, r1, A) = A * (r1^3 - r0^3) / 3
 
+"""
+	outer_position(coordinates, r₋, V, A)
+
+The position `r₊` of the face that encloses the volume `V` above the face at
+`r₋` for the cross-section measure `A`: the inverse of
+[`shell_volume`](@ref) in its upper face.
+"""
+@inline outer_position(::Planar, r0, V, A) = r0 + V / A
+@inline outer_position(::Cylindrical, r0, V, A) = sqrt(r0^2 + V / (π * A))
+@inline outer_position(::Spherical, r0, V, A) = cbrt(r0^3 + 3V / A)
+
 # The cross-section measure a mesh gets when the caller names none: unit area,
 # unit axial length, the full sphere.
 default_cross_section(::Planar) = 1.0
@@ -137,6 +148,28 @@ end
 Whether every node is pinned, so the geometry never changes.
 """
 is_fixed(t::MeshTopology) = length(t.pinned) == t.n_nodes
+
+"""
+	live_face(topology, active, f) -> Int
+
+The face that bounds the live cells on the side of boundary face `f`: `f`
+while its owner is live; otherwise, across a block of dead cells each the
+neighbour of the next face inward, the first face whose owner is live. Zero
+when no live cell remains on that side, or when the dead block is not ordered
+owner inward of neighbour (the faces' normals would then point into the live
+cells). `active` flags the live cells.
+"""
+@inline function live_face(topo::MeshTopology{1}, active::AbstractVector{Bool}, f::Int)
+    o = topo.faces[f].cells[1]
+    @inbounds while !active[o]
+        cf = topo.cells[o].faces
+        g = cf[1] == f ? cf[2] : cf[1]
+        owner, nb = topo.faces[g].cells
+        (nb == o && owner != 0) || return 0
+        f, o = g, owner
+    end
+    return f
+end
 
 """
 	Mesh{D,TopT}

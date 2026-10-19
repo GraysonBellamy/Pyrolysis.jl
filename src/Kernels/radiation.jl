@@ -23,8 +23,13 @@ attenuated beam; the flux leaving the last face is transmitted. Each row
 reads one cell and its two faces, so the Jacobian stays banded where the
 eliminated recurrence would couple every cell to every cell above it.
 
-`up` and `down` hold the upstream and downstream face of every cell,
-`d_floor` the floors of their center-to-face distances.
+After cells are deactivated from the exposed side, the beam enters the first
+live cell of `order` through its upstream face ([`exposed_face`](@ref)); the
+faces upstream of it carry no rows.
+
+`up` and `down` hold the upstream and downstream face of every cell, `order`
+the cells from the exposed face into the depth, `d_floor` the floors of their
+center-to-face distances.
 """
 struct BeerLambertKernel{R<:RadiativeFluxBC} <: Kernel
     source::R
@@ -89,18 +94,39 @@ function BeerLambertKernel(
     return BeerLambertKernel(source, exposed, up, down, order, d)
 end
 
+# The position in `order` of the first live cell, zero when none is live.
+@inline function _first_live(kernel::BeerLambertKernel, ds)
+    @inbounds for s in eachindex(kernel.order)
+        ds.active[kernel.order[s]] && return s
+    end
+    return 0
+end
+
+"""
+	exposed_face(kernel, ds) -> Int
+
+The face the beam enters through: the upstream face of the first live cell
+from the exposed boundary (the boundary face itself while no cell is dead),
+zero when no cell is live.
+"""
+@inline function exposed_face(kernel::BeerLambertKernel, ds)
+    s = _first_live(kernel, ds)
+    return s == 0 ? 0 : kernel.up[kernel.order[s]]
+end
+
 """
 	incident_intensity(kernel, ds, t)
 
 The intensity entering through the exposed face [W/m²]: the incident flux,
-times the condition's explicit absorptivity or else the exposed cell's
-effective absorptivity.
+times the condition's explicit absorptivity or else the effective
+absorptivity of the first live cell.
 """
 @inline function incident_intensity(kernel::BeerLambertKernel, ds, t)
     src = kernel.source
     q = evaluate_param(src.flux, t) + zero(eltype(ds.a))
+    s = max(_first_live(kernel, ds), 1)
     a =
-        src.absorptivity === nothing ? ds.a[first(kernel.order)] :
+        src.absorptivity === nothing ? ds.a[kernel.order[s]] :
         evaluate_param(src.absorptivity, t) + zero(eltype(ds.a))
     return a * q
 end
@@ -128,9 +154,12 @@ function contribute!(
     t,
 )
     g = ds.geometry
-    e = kernel.exposed
+    s = _first_live(kernel, ds)
+    s == 0 && return c
+    e = kernel.up[kernel.order[s]]
     c.r_intensity[e] = ds.I[e] - incident_intensity(kernel, ds, t)
-    @inbounds for i in kernel.order
+    @inbounds for k = s:length(kernel.order)
+        i = kernel.order[k]
         up, down = kernel.up[i], kernel.down[i]
         I_up, I_down = ds.I[up], ds.I[down]
         c.r_intensity[down] = I_down - I_up * exp(-_optical_thickness(kernel, ds, topo, i))
@@ -144,7 +173,8 @@ end
 
 The face intensities that satisfy every intensity row at the derived state
 `ds`: the incident intensity at the exposed face, attenuated cell by cell
-into the depth. The consistent initial values of the algebraic rows.
+into the depth, and zero on the faces upstream of the first live cell. The
+consistent values of the algebraic rows.
 """
 function sweep_intensities!(
     I::AbstractVector,
@@ -153,8 +183,14 @@ function sweep_intensities!(
     topo::MeshTopology{1},
     t,
 )
-    I[kernel.exposed] = incident_intensity(kernel, ds, t)
-    for i in kernel.order
+    s = _first_live(kernel, ds)
+    for k = 1:(s==0 ? length(kernel.order) : s-1)
+        I[kernel.up[kernel.order[k]]] = 0
+    end
+    s == 0 && return I
+    I[kernel.up[kernel.order[s]]] = incident_intensity(kernel, ds, t)
+    for k = s:length(kernel.order)
+        i = kernel.order[k]
         I[kernel.down[i]] = I[kernel.up[i]] * exp(-_optical_thickness(kernel, ds, topo, i))
     end
     return I

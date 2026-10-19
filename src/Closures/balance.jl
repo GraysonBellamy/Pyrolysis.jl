@@ -160,7 +160,8 @@ end
 The node velocities that satisfy every velocity row at the derived state
 `ds`, given the strain rates in `c.θ` (from [`closure_rows!`](@ref)) and the
 lateral rate in `ds.θ_A`: one sweep of the bidiagonal balance rows from the
-pinned node, or the prescribed velocity at every node.
+pinned node, zero on the row node of a dead cell, or the prescribed velocity
+at every node.
 """
 function consistent_velocities!(
     w::AbstractVector,
@@ -180,6 +181,10 @@ function _consistent_velocities!(w, cl::BalanceRowClosure, ::Nothing, c, ds, top
     w[cl.pinned] = 0
     for k in cl.order
         row = cl.row_node[k]
+        if !ds.active[k]
+            w[row] = 0
+            continue
+        end
         nodes = topo.cells[k].nodes
         other = nodes[1] == row ? nodes[2] : nodes[1]
         rate = (c.θ[k] - θ_A) * ds.V_eval[k] - _coefficient(g, topo, k, other) * w[other]

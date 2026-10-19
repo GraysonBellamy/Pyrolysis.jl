@@ -82,13 +82,15 @@ include("Physics/Physics.jl")
 using .Physics
 
 # Finite-volume core: face-based meshes, the state and its mapping, the
-# physics kernels, the mesh closure, the residual and its colored Jacobian.
+# physics kernels, the mesh closure, the residual, cell deactivation and the
+# colored Jacobian.
 # Reached by module path (`Pyrolysis.Meshes`, …); none of them is re-exported.
 include("Meshes/Meshes.jl")
 include("States/States.jl")
 include("Kernels/Kernels.jl")
 include("Closures/Closures.jl")
 include("Assembly/Assembly.jl")
+include("Deactivation/Deactivation.jl")
 include("ColoredJacobian/ColoredJacobian.jl")
 
 # Mesh adaptation (depleted-cell parking; refinement building blocks)

@@ -9,7 +9,7 @@ const DISTANCE_FLOOR_FRACTION = 1e-8
 """
 	ConductionKernel <: Kernel
 
-Fourier conduction across the interior faces: the two-point flux
+Fourier conduction across the interior faces between live cells: the two-point flux
 `q_f = −(n·K_f·n) (T_nb − T_o) / d` along the face normal, with `d` the
 distance between the cell centers and `K_f` the conductivity tensor of the
 face, built from the distance-weighted harmonic mean of the cell values with
@@ -50,7 +50,7 @@ function contribute!(
     g = ds.geometry
     @inbounds for f = 1:n_faces(topo)
         o, nb = topo.faces[f].cells
-        nb == 0 && continue
+        (nb == 0 || !(ds.active[o] && ds.active[nb])) && continue
         floor = kernel.d_floor[f]
         d_o = smooth_floor(center_to_face_distance(g, topo, f, o), floor)
         d_n = smooth_floor(center_to_face_distance(g, topo, f, nb), floor)

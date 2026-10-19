@@ -18,6 +18,9 @@ end
 
 The energy flux through every boundary face, one [`BoundaryPatch`](@ref) per
 boundary tag, written along the outward face normal, and the face temperature.
+A patch applies on the face that bounds the live cells on its side
+(`Meshes.live_face`): after cells beyond it are deactivated, the face of the
+outermost live cell.
 
 A prescribed temperature or heat flux, or an adiabatic face, gives the flux in
 closed form. Every other condition goes through the surface energy balance
@@ -92,7 +95,9 @@ end
 @inline _patches!(c, ::Tuple{}, kernel, ds, topo, material, t) = nothing
 @inline function _patches!(c, patches::Tuple, kernel, ds, topo, material, t)
     p = first(patches)
-    @inbounds for f in p.faces
+    @inbounds for f0 in p.faces
+        f = live_face(topo, ds.active, f0)
+        f == 0 && continue
         q, T_s = boundary_energy_flux(p.bc, f, kernel, c, ds, topo, material, t)
         c.F_energy[f] += q + _carried_enthalpy(kernel.laws, c, f, T_s)
         c.T_face[f] = T_s

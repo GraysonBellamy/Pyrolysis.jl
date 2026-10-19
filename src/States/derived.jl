@@ -136,6 +136,8 @@ automatic differentiation):
 - `φ`, `P`, `mob`: the smoothly floored porosity, the ideal-gas pressure [Pa]
   and the Darcy mobility `κ/μ` with a smoothly floored viscosity [m²/(Pa·s)]
   (Darcy–Fick transport)
+- `active`: the live cells, those whose rows the layout's mask keeps; the
+  kernels skip every face and patch beyond them
 - `T_warm`: the latest temperatures of the plain (non-dual) mapping, the
   starting point of the inventory inversion
 """
@@ -165,6 +167,7 @@ struct DerivedState{NC,T,G<:MeshGeometry}
     φ::Vector{T}
     P::Vector{T}
     mob::Vector{T}
+    active::BitVector
     T_warm::Vector{Float64}
 end
 
@@ -213,6 +216,7 @@ function DerivedState{T}(
         zeros(T, n),
         zeros(T, n),
         zeros(T, n),
+        trues(n),
         T_warm,
     )
 end
@@ -222,7 +226,8 @@ end
 
 Map the state vector `u` to the derived state: the only reader of `u`.
 
-Order: the geometry from the node positions (a fixed mesh keeps its
+Order: the live cells from the layout's mask; the geometry from the node
+positions (a fixed mesh keeps its
 precomputed geometry), with the node velocities, and under a variable cross
 section the area, its lateral rate and the history pair; the face
 intensities; the masses and their
@@ -243,6 +248,9 @@ function derive!(
     material = setup.material
     n = n_cells(layout)
 
+    @inbounds for i = 1:n
+        ds.active[i] = layout.mask[energy_index(layout, i)]
+    end
     if is_moving(layout)
         @inbounds for nd = 1:n_nodes(layout)
             ds.x[nd] = u[position_index(layout, nd)]
