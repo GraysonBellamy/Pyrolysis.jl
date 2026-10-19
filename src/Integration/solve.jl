@@ -49,9 +49,12 @@ step. `integrator_policy` defaults to [`default_policy`](@ref) with
 constraint residual of the accepted states, ends the solve with
 `ReturnCode.Failure` when the domain test gave up, caps the step after a
 nonlinear failure ([`FAILURE_MEMORY_GROWTH`](@ref)) and applies the policy's
-flag rule. `progress` is accepted for the keyword set of the other solver and
-draws nothing; `jacobian` is accepted and ignored, the colored Jacobian being the
-only one.
+flag rule. A discrete `callback`, or each discrete callback of a
+`CallbackSet`, is a read-only observer: the policy's flag rule follows its
+`affect!`, so it leaves the trajectory unchanged under every policy; a
+continuous callback's event raises the flag as any event does. `progress` is
+accepted for the keyword set of the other solver and draws nothing;
+`jacobian` is accepted and ignored, the colored Jacobian being the only one.
 
 `use_ale`, `w_override`, `coordinates` and `deactivation` are those of
 [`setup`](@ref). On a moving mesh the solve ends with return code
@@ -206,7 +209,7 @@ function integrate(
     events = _deactivation_callback(cp, check, policy)
     callbacks =
         callback === nothing ? CallbackSet(observer, events..., thin...) :
-        CallbackSet(observer, events..., thin..., callback)
+        CallbackSet(observer, events..., thin..., _observing(callback, policy))
 
     raw = OrdinaryDiffEq.solve(
         ode,
@@ -286,6 +289,31 @@ function _observe!(integrator, m::ConstraintMonitor, cap::NewtonCap, policy)
     cap_step!(integrator, cap)
     apply_observer_flag!(integrator, policy)
     return nothing
+end
+
+# A user callback as a read-only observer. The integrator raises the
+# derivative-discontinuity flag before each discrete callback's `affect!` and
+# folds every callback's own verdict whatever their order, so the policy's
+# flag rule runs inside the user's `affect!`, after it.
+_observing(callback, policy) = callback
+_observing(callback::CallbackSet, policy) = CallbackSet(
+    callback.continuous_callbacks...,
+    map(c -> _observing(c, policy), callback.discrete_callbacks)...,
+)
+function _observing(callback::DiscreteCallback, policy)
+    affect! = callback.affect!
+    return DiscreteCallback(
+        callback.condition,
+        integrator -> begin
+            affect!(integrator)
+            apply_observer_flag!(integrator, policy)
+            return nothing
+        end;
+        initialize = callback.initialize,
+        finalize = callback.finalize,
+        save_positions = Tuple(callback.save_positions),
+        initializealg = callback.initializealg,
+    )
 end
 
 """

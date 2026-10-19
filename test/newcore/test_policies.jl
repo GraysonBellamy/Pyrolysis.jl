@@ -354,3 +354,34 @@ end
     @test integrator_plain === integrator_rich
     @test solution_plain === solution_rich
 end
+
+@testset "a read-only user callback leaves every policy's trajectory unchanged" begin
+    problem = _uniform_slab(12)
+    probe = DiscreteCallback(
+        (u, t, integrator) -> true,
+        integrator -> nothing;
+        save_positions = (false, false),
+    )
+    for policy in (
+        rodas5p_policy(KLUFactorization()),
+        kencarp4_policy(KLUFactorization()),
+        fbdf_policy(KLUFactorization()),
+    )
+        kwargs = (
+            use_ale = true,
+            integrator_policy = policy,
+            saveat = Float64[],
+            abstol = 1e-8,
+            reltol = 1e-6,
+        )
+        plain = Integration.solve(problem; kwargs...)
+        @test plain.retcode === :Success
+        for callback in (probe, CallbackSet(probe))
+            probed = Integration.solve(problem; kwargs..., callback)
+            @test probed.raw_solution.t == plain.raw_solution.t
+            @test probed.raw_solution.u == plain.raw_solution.u
+            @test probed.statistics.accepted == plain.statistics.accepted
+            @test probed.statistics.rhs_evaluations == plain.statistics.rhs_evaluations
+        end
+    end
+end
