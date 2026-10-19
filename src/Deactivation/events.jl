@@ -120,10 +120,12 @@ end
 """
 	below_threshold(d, layout, u, i) -> Bool
 
-Whether live cell `i` holds less than `ε_m` of its initial condensed mass.
+Whether live cell `i` holds less than `ε_m` of its initial condensed mass. A
+cell that started with none never deactivates.
 """
 @inline below_threshold(d::CellDeactivation, layout::StateLayout, u, i::Int) =
     layout.mask[energy_index(layout, i)] &&
+    d.reference[i] > 0 &&
     condensed_mass(d, layout, u, i) < d.threshold * d.reference[i]
 
 """

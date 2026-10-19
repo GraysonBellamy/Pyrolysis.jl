@@ -8,8 +8,9 @@
 Constants fixed at setup, per cell unless stated:
 
 - `volume`: initial volume `Vᵢ(0)` [m³]
-- `solid_mass`: initial condensed (solid and liquid) mass `mˢᵢ(0)` [kg], the
-  scale of the cell's mass tolerances and of the deactivation threshold
+- `solid_mass`: the scale `mˢᵢ(0)` [kg] of the cell's mass tolerances: its
+  initial condensed (solid and liquid) mass, or for a cell that starts with
+  none its total initial mass, or 1 kg/m³ times its volume
 - `mass_scale`: the positive-part scale `δᵢ` [kg] of the caloric extension and
   of the property evaluation
 - `volume_floor`: smooth floor [m³] on the volume used for `m/V`
