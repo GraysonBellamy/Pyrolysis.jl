@@ -166,9 +166,9 @@ function _bandwidth(pattern, layout)
     return w
 end
 
+# In-depth radiation is planar only: setup refuses it on a cylinder or a sphere.
 @testset "radial meshes: the planar pattern, bandwidth and colors" begin
-    for options in
-        ((;), (use_ale = true,), (use_ale = true, radiation_model = BEER_LAMBERT))
+    for options in ((;), (use_ale = true,))
         widths = Int[]
         for n in (6, 8, 12, 25)
             cps = map(
