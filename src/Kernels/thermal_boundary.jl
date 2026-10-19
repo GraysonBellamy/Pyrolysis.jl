@@ -215,7 +215,7 @@ end
     J_out = ntuple(j -> c.F_mass[j, f], Val(NC))
     r = solve_boundary_temperature!(
         kernel.states[f],
-        ds.T[i],
+        ds.T_trial[i],
         ds.k[i],
         d,
         bc,
