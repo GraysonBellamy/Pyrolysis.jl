@@ -154,10 +154,11 @@ end
 # The node velocities, and under a variable cross section the area and its
 # lateral rate, that satisfy their algebraic rows at time `t`: one kernel pass
 # for the strain rates and history rates, the lateral rows from the column
-# sums, a second pass at the consistent lateral rate, then the sweep.
+# sums, a second pass at the consistent lateral rate, then the sweep. Returns
+# `nothing`, or the residual and scale of a velocity row left above round-off.
 function _consistent_motion!(u, def::CoreDefinition, ws::CoreWorkspace, t)
     cl = def.closure
-    cl === nothing && return u
+    cl === nothing && return nothing
     layout = def.layout
     du = similar(u)
     residual!(du, u, def, t, ws)
@@ -185,11 +186,9 @@ function _consistent_motion!(u, def::CoreDefinition, ws::CoreWorkspace, t)
     for nd = 1:n_nodes(layout)
         r = abs(du[velocity_index(layout, nd)])
         scale = sum(abs, c.θ .* ds.V_eval) + sum(abs, g.face_area .* w) + abs(w[nd])
-        r <= 1e-10 * scale || error(
-            "the consistent node velocities leave a velocity row at $r (scale $scale)",
-        )
+        r <= 1e-10 * scale || return (r, scale)
     end
-    return u
+    return nothing
 end
 
 """
@@ -203,7 +202,10 @@ state; a velocity row left above round-off is an error.
 """
 function consistent_state!(u::AbstractVector, def::CoreDefinition, ws::CoreWorkspace, t)
     _consistent_intensities!(u, def, ws, t)
-    _consistent_motion!(u, def, ws, t)
+    left = _consistent_motion!(u, def, ws, t)
+    left === nothing || error(
+        "the consistent node velocities leave a velocity row at $(left[1]) (scale $(left[2]))",
+    )
     return u
 end
 

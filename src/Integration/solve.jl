@@ -64,8 +64,8 @@ is accepted and ignored, the colored Jacobian being the only one.
 step is deactivated at its end in one event ([`deactivate!`](@ref)); the
 solve ends with `:Terminated` when the last cell goes or a cell below the
 threshold lies inward of a live one, and with `:Failure` when an event leaves
-the state inadmissible. The state a solve ends on is always saved, whether or
-not `saveat` names its time.
+the state inadmissible or no consistent node velocities. The state a solve
+ends on is always saved, whether or not `saveat` names its time.
 """
 function solve(problem::PyrolysisProblem; kwargs...)
     for k in keys(kwargs)
@@ -368,7 +368,8 @@ end
 # The deactivation event: at the end of every step on which a live cell fell
 # below the threshold, every such cell in one pass, then the consistent sweep
 # of the algebraic rows, the admissibility of the result, and the policy's
-# restart step.
+# restart step. A sweep that leaves a velocity row above round-off or an
+# inadmissible result ends the solve with `ReturnCode.Failure`.
 function _deactivation_callback(cp::CoreProblem, check::DomainCheck, policy)
     cells = cp.deactivation
     cells === nothing && return ()
@@ -376,12 +377,14 @@ function _deactivation_callback(cp::CoreProblem, check::DomainCheck, policy)
     layout = def.layout
     has_event = FunctionWrapper{Bool,Tuple{_StateVector}}(u -> any_below(cells, layout, u))
     # Deactivates in place and returns `:transferred`, `:burned_out`,
-    # `:interior` or, when the result is not admissible, `:inadmissible`.
+    # `:interior`, `:inconsistent` when the sweep leaves a velocity row above
+    # round-off, or `:inadmissible` when the result is not admissible.
     deactivate = FunctionWrapper{Symbol,Tuple{_StateVector,Float64}}(
         (u, t) -> begin
             status = deactivate!(u, cells, def, t)
             status === :transferred || return status
-            consistent_state!(u, def, ws, t)
+            _consistent_intensities!(u, def, ws, t)
+            _consistent_motion!(u, def, ws, t) === nothing || return :inconsistent
             inadmissible(u, layout, check.abstol) && return :inadmissible
             _porosity_out(check, _derived(check, u, t), def.setup.gas) &&
                 return :inadmissible
@@ -393,6 +396,9 @@ function _deactivation_callback(cp::CoreProblem, check::DomainCheck, policy)
         status = deactivate(integrator.u, integrator.t)
         if status === :inadmissible
             @warn "solve(): the state after deactivating cell(s) at t = $(integrator.t) is inadmissible"
+            terminate!(integrator, ReturnCode.Failure)
+        elseif status === :inconsistent
+            @warn "solve(): no consistent node velocities after deactivating cell(s) at t = $(integrator.t)"
             terminate!(integrator, ReturnCode.Failure)
         elseif status !== :transferred
             terminate!(integrator)
