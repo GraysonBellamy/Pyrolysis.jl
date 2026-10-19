@@ -1,14 +1,15 @@
 # The prototype's experiments, by name (Appendix A of the Phase 2 plan):
 #   julia --project=test --startup-file=no --threads=1 scripts/mesh_phase2_prototype/run.jl <experiment>
-# with <experiment> one of check, sweep, band, repeat, ladder, order, continuous.
+# with <experiment> one of check, sweep, band, repeat, ladder, order, continuous, scaling.
 # Each run is a fresh session; the overrides of common.jl stay in it.
 
 include(joinpath(@__DIR__, "common.jl"))
 const EXPERIMENT = isempty(ARGS) ? "check" : ARGS[1]
 
 if EXPERIMENT == "check"
-    # containment of the widened pattern with every node activated (r_hi = 2, r_lo = 1.5 → a = 1 at t = 0)
-    cp2, prob = build_vbo(4; τ = 1.0, r_hi = 2.0, r_lo = 1.5)
+    # containment of the widened pattern with every node partially activated (r_hi = 1.5 > 1 > r_lo = 0.5,
+    # so the activation and its derivatives are exercised) and the monitor's mass term on
+    cp2, prob = build_vbo(4; τ = 1.0, r_hi = 1.5, r_lo = 0.5, β = 1.0)
     println(
         "cells = ",
         St.n_cells(cp2.def.layout),
@@ -306,4 +307,17 @@ if EXPERIMENT == "continuous"
         "[discrete vs continuous at 1e-8] max |Δt_event| = %.4f s\n",
         maximum(abs.(a .- b))
     )
+end
+
+if EXPERIMENT == "scaling"
+    # the N² scaling of the relaxation: τ scaled by (60/N)² should give the 60-cell behaviour at 30 and 120 cells
+    BLOCK[] = true
+    BAND[] = 10.0
+    const BL = (; radiation_model = BEER_LAMBERT)
+    for (n, τ) in ((120, 0.05), (30, 0.8), (120, 0.1))
+        r = Base.invokelatest(run_vbo, n; τ, case_kw = BL)
+        Base.invokelatest(report, "V-BO-01 BL n=$(n) tau=$(τ) band=10 (N² scaling)", r)
+        Base.invokelatest(vbo_qois, r.sol)
+        flush(stdout)
+    end
 end

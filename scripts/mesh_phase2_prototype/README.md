@@ -23,8 +23,10 @@ colored Jacobian against the dense one), `sweep` (the response time `τ` on
 V-BO-01 with the plain block rule), `band` (the near-threshold band and `τ` at
 30, 60 and 120 PMMA cells), `repeat` (three solves of one problem), `ladder`
 (grids, thresholds, the monitor's mass term, the activation, the energy form),
-`order` (the band runs in another order) and `continuous` (event location by a
-continuous callback on V-BO-02, which also overrides the deactivation callback).
+`order` (the band runs in another order), `continuous` (event location by a
+continuous callback on V-BO-02, which also overrides the deactivation callback)
+and `scaling` (the response time scaled by the square of the cell count across
+the grid ladder).
 
 `baselines.jl` holds the measurements that override nothing and may share a
 session:
