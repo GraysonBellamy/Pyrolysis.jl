@@ -353,7 +353,7 @@ function _temperatures!(
         m = ntuple(j -> ds.m[j, i], Val(NC))
         Ti, _ = invert_caloric(ext, laws, u[energy_index(layout, i)], m, i, ds.T_warm[i])
         ds.T[i] = Ti
-        T === Float64 && (ds.T_warm[i] = Ti)
+        T === Float64 && isfinite(Ti) && (ds.T_warm[i] = Ti)
     end
     return nothing
 end

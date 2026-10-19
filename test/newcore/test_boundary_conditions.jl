@@ -44,13 +44,12 @@ _bc_problem(bc; n = 6, tspan = (0.0, 1.0), α = 0.0, kwargs...) = PyrolysisProbl
         residual!(du_fresh, u, fresh.def, 0.0, fresh.ws)
         @test all(isfinite, du_fresh)
         du = zeros(length(u))
-        # A NaN inventory is refused by the inversion (`invert_caloric`), so
-        # the inventory form is driven with a wild finite one only.
-        wilds = energy === :temperature ? (-9.1e40, NaN) : (-9.1e40,)
-        for wild in wilds
+        for wild in (-9.1e40, NaN)
             u_wild = copy(u)
             u_wild[energy_index(layout, 6)] = wild
-            residual!(similar(u), u_wild, cp.def, 0.0, cp.ws)
+            du_wild = similar(u)
+            residual!(du_wild, u_wild, cp.def, 0.0, cp.ws)
+            isnan(wild) && @test any(isnan, du_wild)
             residual!(du, u, cp.def, 0.0, cp.ws)
             @test all(isfinite, du)
             @test isapprox(du, du_fresh; rtol = 1e-12)

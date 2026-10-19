@@ -238,6 +238,10 @@ at least `Cᵢ`, so it has exactly one root for every real `H`. It agrees with
 the physical caloric relation on every state in which each species is absent
 or holds at least `δᵢ` and the guaranteed capacity is at least `2 Cᵢ`.
 
+A component whose heat capacity is zero (a gas that carries no heat) adds
+nothing to the guaranteed capacity, and the switch keeps the slope at least
+`Cᵢ`; a negative heat capacity is refused.
+
 Fields: `δ` and `floor` per cell, `c_min` per component (half the sampled
 minimum of its heat-capacity law).
 """
@@ -256,10 +260,8 @@ function CaloricExtension(
     all(>(0), δ) || throw(ArgumentError("the positive-part scales must be positive"))
     all(>(0), floor) || throw(ArgumentError("the capacity floors must be positive"))
     c_min = ntuple(j -> 0.5 * _minimum_heat_capacity(laws.c[j]), Val(NC))
-    all(>(0), c_min) || throw(
-        ArgumentError(
-            "the inventory form needs every component's heat capacity to be positive",
-        ),
+    all(>=(0), c_min) || throw(
+        ArgumentError("the caloric relation needs every heat capacity to be non-negative"),
     )
     return CaloricExtension{NC}(δ, floor, c_min)
 end
@@ -340,7 +342,9 @@ the cell). The bracket follows from `E(T_REF) = 0` and a slope of at least the
 guaranteed capacity; a Newton step that does not contract the bracket is
 replaced by bisection. Dual-number inventories are differentiated through the
 defining relation: the primal root is corrected by one Newton step per nesting
-level, which carries the implicit-function derivatives exactly.
+level, which carries the implicit-function derivatives exactly. A non-finite
+inventory has temperature `NaN`, so the residual of a trial state carrying one
+is `NaN` and the integrator rejects the step, as in the temperature form.
 """
 function invert_caloric(
     ext::CaloricExtension,
@@ -366,8 +370,7 @@ function invert_caloric(
 end
 
 function _invert_primal(ext, laws, H::Float64, m, i, T_start, maxiters)
-    isfinite(H) && all(isfinite, m) ||
-        throw(ArgumentError("non-finite inventory in cell $i: H = $H, m = $m"))
+    isfinite(H) && all(isfinite, m) || return NaN, 0
     Cmin = _guaranteed_capacity(ext, m, i) + regularization(ext, m, i)
     H == 0 && return T_REF, 0
     endpoint = T_REF + H / Cmin
