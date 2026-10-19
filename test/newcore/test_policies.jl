@@ -11,7 +11,7 @@ using OrdinaryDiffEq: ODEProblem, DiscreteCallback, CallbackSet, init, step!
 using OrdinaryDiffEq: derivative_discontinuity!
 using Pyrolysis.Solver: KenCarp4
 using OrdinaryDiffEq.SciMLBase: get_proposed_dt
-using LinearSolve: KLUFactorization
+using LinearSolve: KLUFactorization, UMFPACKFactorization
 
 # A decomposing slab whose char is lighter than the virgin solid (the mesh
 # moves), porous with intrinsic densities, permeable when `κ > 0`, and
@@ -383,5 +383,25 @@ end
             @test probed.statistics.accepted == plain.statistics.accepted
             @test probed.statistics.rhs_evaluations == plain.statistics.rhs_evaluations
         end
+    end
+end
+
+@testset "repeated solves are bit-identical under KLU and UMFPACK" begin
+    problem = _uniform_slab(12)
+    for linear_solver in (KLUFactorization(), UMFPACKFactorization())
+        sols = [
+            Integration.solve(
+                problem;
+                use_ale = true,
+                linear_solver,
+                saveat = Float64[],
+                abstol = 1e-8,
+                reltol = 1e-6,
+            ) for _ = 1:2
+        ]
+        @test sols[1].retcode === :Success
+        @test sols[2].raw_solution.t == sols[1].raw_solution.t
+        @test sols[2].raw_solution.u == sols[1].raw_solution.u
+        @test sols[2].statistics.accepted == sols[1].statistics.accepted
     end
 end
