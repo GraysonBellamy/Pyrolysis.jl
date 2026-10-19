@@ -386,9 +386,9 @@ end
     end
 end
 
-@testset "repeated solves are bit-identical under KLU and UMFPACK" begin
+@testset "repeated solves are bit-identical under each linear solver" begin
     problem = _uniform_slab(12)
-    for linear_solver in (KLUFactorization(), UMFPACKFactorization())
+    for linear_solver in (StructuredKLU(), KLUFactorization(), UMFPACKFactorization())
         sols = [
             Integration.solve(
                 problem;
@@ -404,4 +404,44 @@ end
         @test sols[2].raw_solution.u == sols[1].raw_solution.u
         @test sols[2].statistics.accepted == sols[1].statistics.accepted
     end
+end
+
+# The KLU factorization in Rosenbrock's linear cache, which is a new object
+# exactly when KLU analyses afresh.
+_klu(cacheval) = cacheval
+_klu(cacheval::Integration.StructuredKLUCache) = cacheval.inner.cacheval
+
+@testset "the structured KLU analyses once on a moving mesh" begin
+    problem = _slab(12)
+    @test default_linear_solver(setup(problem; use_ale = true).def.layout) isa StructuredKLU
+    @test default_linear_solver(setup(problem).def.layout) isa KLUFactorization
+    function analysed(linear_solver)
+        factorizations = UInt[]
+        probe = DiscreteCallback(
+            (u, t, integrator) -> true,
+            integrator -> push!(
+                factorizations,
+                objectid(_klu(integrator.cache.linsolve.cacheval)),
+            );
+            save_positions = (false, false),
+        )
+        sol = Integration.solve(
+            problem;
+            use_ale = true,
+            linear_solver,
+            callback = probe,
+            saveat = Float64[],
+            abstol = 1e-8,
+            reltol = 1e-6,
+        )
+        return sol, length(unique(factorizations))
+    end
+    structured, n_structured = analysed(nothing)
+    plain, n_plain = analysed(KLUFactorization())
+    @test structured.retcode === :Success
+    @test n_structured == 1
+    @test n_plain > 1
+    @test structured.statistics.accepted == plain.statistics.accepted
+    @test structured.statistics.rejected == plain.statistics.rejected
+    @test maximum(abs, structured.T .- plain.T) <= 1e-9
 end

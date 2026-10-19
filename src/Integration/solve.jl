@@ -45,17 +45,17 @@ and enthalpy rows take theirs from the cell's initial condensed mass and
 domain test (admissibility, porosity and the constraint residuals of the
 algebraic rows). `dt` is the first step, and with `adaptive = false` the fixed
 step. `integrator_policy` defaults to [`default_policy`](@ref) with
-`linear_solver` (KLU unless given). A per-step observer records the largest
-constraint residual of the accepted states, ends the solve with
-`ReturnCode.Failure` when the domain test gave up, caps the step after a
-nonlinear failure of a Newton-based policy ([`FAILURE_MEMORY_GROWTH`](@ref);
-a Rosenbrock method has none) and applies the policy's flag rule. A discrete
-`callback`, or each discrete callback of a `CallbackSet`, is a read-only
-observer: the policy's flag rule follows its `affect!`, so it leaves the
-trajectory unchanged under every policy; a continuous callback's event raises
-the flag as any event does. `progress` is accepted for the keyword set of the
-other solver and draws nothing; `jacobian` is accepted and ignored, the
-colored Jacobian being the only one.
+`linear_solver` ([`default_linear_solver`](@ref) unless given). A per-step
+observer records the largest constraint residual of the accepted states, ends
+the solve with `ReturnCode.Failure` when the domain test gave up, caps the step
+after a nonlinear failure of a Newton-based policy
+([`FAILURE_MEMORY_GROWTH`](@ref); a Rosenbrock method has none) and applies the
+policy's flag rule. A discrete `callback`, or each discrete callback of a
+`CallbackSet`, is a read-only observer: the policy's flag rule follows its
+`affect!`, so it leaves the trajectory unchanged under every policy; a
+continuous callback's event raises the flag as any event does. `progress` is
+accepted for the keyword set of the other solver and draws nothing; `jacobian`
+is accepted and ignored, the colored Jacobian being the only one.
 
 `use_ale`, `w_override`, `coordinates` and `deactivation` are those of
 [`setup`](@ref). On a moving mesh the solve ends with return code
@@ -169,8 +169,9 @@ function integrate(
     cells === nothing || reset_cells!(cells, layout)
     policy =
         integrator_policy === nothing ?
-        default_policy(linear_solver === nothing ? KLUFactorization() : linear_solver) :
-        integrator_policy
+        default_policy(
+            linear_solver === nothing ? default_linear_solver(layout) : linear_solver,
+        ) : integrator_policy
 
     rhs! = let def = def, ws = ws
         (du, u, p, t) -> residual!(du, u, def, t, ws)
