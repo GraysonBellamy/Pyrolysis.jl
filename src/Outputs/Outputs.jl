@@ -10,8 +10,10 @@ module Outputs
 using ..Meshes
 using ..States
 using ..States: state_length
+using ..Materials: is_gas
 using ..Kernels
 using ..Assembly
+using ..Deactivation
 
 include("solution.jl")
 

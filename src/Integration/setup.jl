@@ -8,9 +8,10 @@
 A `PyrolysisProblem` set up on the finite-volume core: the problem (with its
 own copy of the mesh), the definition and workspace the residual reads, the
 initial state, the relative tolerance and the absolute-tolerance vector, the
-colored Jacobian, and the initial temperatures and masses.
+colored Jacobian, the initial temperatures and masses, and the
+[`CellDeactivation`](@ref) state (`nothing` when cells are not deactivated).
 """
-struct CoreProblem{P,D<:CoreDefinition,W<:CoreWorkspace,J<:ColoredJacobianCache}
+struct CoreProblem{P,D<:CoreDefinition,W<:CoreWorkspace,J<:ColoredJacobianCache,X}
     problem::P
     def::D
     ws::W
@@ -20,6 +21,7 @@ struct CoreProblem{P,D<:CoreDefinition,W<:CoreWorkspace,J<:ColoredJacobianCache}
     jacobian::J
     T0::Vector{Float64}
     m0::Matrix{Float64}
+    deactivation::X
 end
 
 _energy_state(s::Symbol) =
@@ -48,6 +50,7 @@ function _require_supported(
     radiation_model,
     w_override,
     coordinates::CoordinateSystem,
+    deactivation::Bool,
 )
     material = problem.material
     radiation_model in (NO_RADIATION, SURFACE_ABSORPTION, BEER_LAMBERT) || throw(
@@ -70,6 +73,9 @@ function _require_supported(
                 "a prescribed mesh velocity moves the mesh over a solid at rest, so the " *
                 "material must not react (it has $(n_reactions(material)) reactions)",
             ),
+        )
+        deactivation && throw(
+            ArgumentError("cells are not deactivated under a prescribed mesh velocity"),
         )
     end
     return nothing
@@ -104,9 +110,10 @@ function _kernels(
     gas::GasTransport,
     radiation_model,
     relative::Tuple,
+    switch,
 )
     material = problem.material
-    reactions = n_reactions(material) > 0 ? (ReactionKernel(material),) : ()
+    reactions = n_reactions(material) > 0 ? (ReactionKernel(material; switch),) : ()
     transport =
         gas isa NoGasTransport ? () :
         (GasTransportKernel(gas, topo, g0, problem.bc_set, material, laws),)
@@ -214,7 +221,8 @@ end
 	setup(problem; energy_state = :temperature, reltol = 1e-6, abstol = 1e-8,
 	      threshold = 1e-2, use_ale = false, radiation_model = NO_RADIATION,
 	      coordinates = Planar(), w_override = nothing,
-	      time_scale = problem.dt_initial, sources = NoSources()) -> CoreProblem
+	      time_scale = problem.dt_initial, sources = NoSources(),
+	      deactivation = false) -> CoreProblem
 
 Set up `problem` on the finite-volume core: apply its initial conditions to its
 own copy of the mesh, build the 1D mesh from the node positions and the
@@ -241,8 +249,12 @@ radii of a cylinder (unit axial length) or a sphere (`Cylindrical()`,
 `Spherical()`); planar meshes take the problem's cross-section area.
 `time_scale` [s] scales the velocity tolerances (the first step).
 
-`threshold` is the deactivation mass fraction `ε_m`, which also scales the
-mass tolerances; `sources` is the external-source hook.
+`deactivation` deactivates, during the solve, every cell whose condensed mass
+falls below the fraction `threshold` (`ε_m`) of its initial condensed mass
+([`CellDeactivation`](@ref), [`ConservativeTransfer`](@ref)), from the
+exposed `:top` side; the reactions of a cell then switch off smoothly below a
+few times `ε_m` ([`ReactivitySwitch`](@ref)). `threshold` also scales the mass
+tolerances; `sources` is the external-source hook.
 """
 function setup(
     problem::PyrolysisProblem;
@@ -256,8 +268,16 @@ function setup(
     w_override = nothing,
     time_scale::Real = problem.dt_initial,
     sources = NoSources(),
+    deactivation::Bool = false,
 )
-    _require_supported(problem, use_ale, radiation_model, w_override, coordinates)
+    _require_supported(
+        problem,
+        use_ale,
+        radiation_model,
+        w_override,
+        coordinates,
+        deactivation,
+    )
     problem = _own_problem(problem)
     apply_initial_conditions!(problem)
     material = problem.material
@@ -329,7 +349,22 @@ function setup(
                 history_scale = Float64(reltol * threshold),
             ),
         )
-    kernels = _kernels(problem, topo, g0, laws, gas, radiation_model, relative)
+    cells =
+        deactivation ?
+        CellDeactivation(
+            ConservativeTransfer(),
+            threshold,
+            copy(reference.solid_mass),
+            map(c -> !is_gas(c), material.components),
+            something(
+                caloric,
+                CaloricExtension(laws, reference.mass_scale, reference.capacity_floor),
+            ),
+        ) : nothing
+    switch =
+        cells === nothing ? nothing :
+        ReactivitySwitch(cells.threshold, cells.reference, cells.solid)
+    kernels = _kernels(problem, topo, g0, laws, gas, radiation_model, relative, switch)
     def = CoreDefinition(layout, state_setup, kernels, closure, sources)
     ws = CoreWorkspace(def, T0)
 
@@ -362,5 +397,5 @@ function setup(
         time_scale = Float64(time_scale),
     )
     cj = ColoredJacobianCache(def, ws, u0, t0)
-    return CoreProblem(problem, def, ws, u0, Float64(reltol), tol, cj, T0, m0)
+    return CoreProblem(problem, def, ws, u0, Float64(reltol), tol, cj, T0, m0, cells)
 end

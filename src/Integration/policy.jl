@@ -36,17 +36,64 @@ struct IntegratorPolicy{Alg}
 end
 
 """
-	default_policy(linear_solver)
+	DT_AFTER_EVENT
+
+The restart step [s] a `:forced_dt` policy proposes after an event that
+modifies the state.
+"""
+const DT_AFTER_EVENT = 1e-6
+
+"""
+	kencarp4_policy(linear_solver)
 
 `KenCarp4` with the raw (unsmoothed) error estimate, the observer flag kept and
-the solver-chosen restart.
+the solver-chosen restart. The Jacobian is the colored one; the time
+derivative of the right-hand side, where the method needs it, is a finite
+difference.
 """
-default_policy(linsolve) = IntegratorPolicy(
+kencarp4_policy(linsolve) = IntegratorPolicy(
     KenCarp4(autodiff = AutoFiniteDiff(), linsolve = linsolve, smooth_est = false),
     :solver_chosen,
     :keep,
-    1e-6,
+    DT_AFTER_EVENT,
 )
+
+"""
+	rodas5p_policy(linear_solver; restart = :solver_chosen)
+
+`Rodas5P`, a Rosenbrock method that evaluates the exact colored Jacobian at
+every step and the time derivative of the right-hand side by finite
+differences, with either restart. It rebuilds its Jacobian every step, so the
+observer flag changes nothing; the policy clears it.
+"""
+rodas5p_policy(linsolve; restart::Symbol = :solver_chosen) = IntegratorPolicy(
+    Rodas5P(autodiff = AutoFiniteDiff(), linsolve = linsolve),
+    restart,
+    :clear,
+    DT_AFTER_EVENT,
+)
+
+"""
+	fbdf_policy(linear_solver)
+
+`FBDF`, the variable-order backward-differentiation method, with the observer
+flag cleared (with it raised the method restarts at order one on every step)
+and a forced small restart step after an event, where it restarts at order
+one.
+"""
+fbdf_policy(linsolve) = IntegratorPolicy(
+    FBDF(autodiff = AutoFiniteDiff(), linsolve = linsolve),
+    :forced_dt,
+    :clear,
+    DT_AFTER_EVENT,
+)
+
+"""
+	default_policy(linear_solver)
+
+The Phase 1 default, [`kencarp4_policy`](@ref).
+"""
+default_policy(linsolve) = kencarp4_policy(linsolve)
 
 """
 	apply_observer_flag!(integrator, policy)

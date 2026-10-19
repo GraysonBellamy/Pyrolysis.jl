@@ -107,8 +107,18 @@ end
     )
     ws = CoreWorkspace(control, cp.T0)
     cj = ColoredJacobianCache(control, ws, cp.u0, 0.0)
-    cpc =
-        CoreProblem(cp.problem, control, ws, cp.u0, cp.reltol, cp.abstol, cj, cp.T0, cp.m0)
+    cpc = CoreProblem(
+        cp.problem,
+        control,
+        ws,
+        cp.u0,
+        cp.reltol,
+        cp.abstol,
+        cj,
+        cp.T0,
+        cp.m0,
+        cp.deactivation,
+    )
     solc = integrate(cpc; saveat = Float64[])
     @test solc.retcode === :Success
     @test maximum(abs, solc.T .- 800.0) > 100

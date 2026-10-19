@@ -1,36 +1,4 @@
 # ============================================================================
-# Admissibility
-# ============================================================================
-
-"""
-	inadmissible(u, layout, abstol) -> Bool
-
-Whether the state `u` lies outside the physical domain: a component mass more
-negative than its absolute tolerance, or on a moving mesh a cell whose nodes
-have crossed (a non-positive volume) or a non-positive cross-section area.
-Read from the raw state, never through a guard. The integrator rejects such a
-step and halves it.
-"""
-function inadmissible(
-    u::AbstractVector,
-    layout::StateLayout{NC},
-    abstol::Vector{Float64},
-) where {NC}
-    @inbounds for i = 1:n_cells(layout)
-        layout.mask[energy_index(layout, i)] || continue
-        for j = 1:NC
-            k = mass_index(layout, i, j)
-            u[k] < -abstol[k] && return true
-        end
-        if is_moving(layout)
-            u[position_index(layout, i+1)] <= u[position_index(layout, i)] && return true
-        end
-    end
-    has_chi(layout) && u[area_index(layout)] <= 0 && return true
-    return false
-end
-
-# ============================================================================
 # Solve
 # ============================================================================
 
@@ -57,6 +25,7 @@ const _SOLVE_KEYWORDS = (
     :linear_solver,
     :integrator_policy,
     :sources,
+    :deactivation,
 )
 
 """
@@ -65,24 +34,33 @@ const _SOLVE_KEYWORDS = (
 	      dt = problem.dt_initial, adaptive = true, dtmin = 1e-12, dtmax = Inf,
 	      saveat = problem.output_times, callback = nothing, validate = true,
 	      linear_solver = nothing, integrator_policy = nothing,
-	      sources = NoSources()) -> CoreSolution
+	      sources = NoSources(), deactivation = false) -> CoreSolution
 
 Solve `problem` on the finite-volume core.
 
 The integrator is handed the mass-matrix system with the colored Jacobian, the
 per-row absolute tolerances (`abstol` is the temperature tolerance [K]; the mass
 and enthalpy rows take theirs from the cell's initial condensed mass and
-`threshold`), no initialization of its own, and the admissibility check as its
-domain test. `dt` is the first step, and with `adaptive = false` the fixed
+`threshold`), no initialization of its own, and [`DomainCheck`](@ref) as its
+domain test (admissibility, porosity and the constraint residuals of the
+algebraic rows). `dt` is the first step, and with `adaptive = false` the fixed
 step. `integrator_policy` defaults to [`default_policy`](@ref) with
-`linear_solver` (KLU unless given); a per-step observer applies the policy's
+`linear_solver` (KLU unless given). A per-step observer records the largest
+constraint residual of the accepted states, ends the solve with
+`ReturnCode.Failure` when the domain test gave up, caps the step after a
+nonlinear failure ([`FAILURE_MEMORY_GROWTH`](@ref)) and applies the policy's
 flag rule. `progress` is accepted for the keyword set of the other solver and
 draws nothing; `jacobian` is accepted and ignored, the colored Jacobian being the
 only one.
 
-`use_ale`, `w_override` and `coordinates` are those of [`setup`](@ref). On a
-moving mesh the solve ends with return code `:Terminated` when the thickness
-falls below `min_thickness` [m] (default 1e-6).
+`use_ale`, `w_override`, `coordinates` and `deactivation` are those of
+[`setup`](@ref). On a moving mesh the solve ends with return code
+`:Terminated` when the thickness falls below `min_thickness` [m] (default
+1e-6). With `deactivation`, every cell that falls below the threshold during a
+step is deactivated at its end in one event ([`deactivate!`](@ref)); the
+solve ends with `:Terminated` when the last cell goes or a cell below the
+threshold lies inward of a live one, and with `:Failure` when an event leaves
+the state inadmissible.
 """
 function solve(problem::PyrolysisProblem; kwargs...)
     for k in keys(kwargs)
@@ -115,6 +93,7 @@ function _solve(
     linear_solver = nothing,
     integrator_policy = nothing,
     sources = NoSources(),
+    deactivation::Bool = false,
 )
     jacobian === nothing ||
         @warn "solve(): `jacobian` is ignored by the finite-volume core" maxlog = 1
@@ -132,6 +111,7 @@ function _solve(
         w_override,
         time_scale = dt,
         sources,
+        deactivation,
     )
     return integrate(
         cp;
@@ -180,6 +160,8 @@ function integrate(
         throw(ArgumentError("min_thickness must be positive, got $min_thickness"))
     def, ws, cj = cp.def, cp.ws, cp.jacobian
     layout = def.layout
+    cells = cp.deactivation
+    cells === nothing || reset_cells!(cells, layout)
     policy =
         integrator_policy === nothing ?
         default_policy(linear_solver === nothing ? KLUFactorization() : linear_solver) :
@@ -208,24 +190,27 @@ function integrate(
     )
     ode = ODEProblem(f, Vector{Float64}(u0), cp.problem.tspan)
 
-    tol = cp.abstol
-    out_of_domain = let layout = layout, tol = tol
-        (u, p, t) -> inadmissible(u, layout, tol)
-    end
+    # The domain test and every callback reach the problem through
+    # fixed-signature wrappers, so the integrator's type does not depend on it.
+    check = DomainCheck(cp)
+    out_of_domain = _DomainWrapper(check)
+    monitor = check.monitor
+    cap = NewtonCap()
     observer = DiscreteCallback(
         (u, t, integrator) -> true,
-        integrator -> apply_observer_flag!(integrator, policy);
+        integrator -> _observe!(integrator, monitor, cap, policy);
         save_positions = (false, false),
     )
     thin = _thickness_termination(layout, Float64(min_thickness))
+    events = _deactivation_callback(cp, check, policy)
     callbacks =
-        callback === nothing ? CallbackSet(observer, thin...) :
-        CallbackSet(observer, thin..., callback)
+        callback === nothing ? CallbackSet(observer, events..., thin...) :
+        CallbackSet(observer, events..., thin..., callback)
 
     raw = OrdinaryDiffEq.solve(
         ode,
         policy.alg;
-        abstol = tol,
+        abstol = cp.abstol,
         reltol = cp.reltol,
         maxiters,
         dtmin = Float64(dtmin),
@@ -246,6 +231,8 @@ function integrate(
         jacobians = s.njacs,
         linear_solves = s.nsolve,
         nonlinear_failures = s.nnonlinconvfail,
+        domain_rejections = check.monitor.rejections,
+        largest_constraint_residual = check.monitor.largest,
     )
     return CoreSolution(
         cp.problem,
@@ -256,19 +243,137 @@ function integrate(
         Symbol(raw.retcode),
         elapsed,
         stats,
-        raw,
+        raw;
+        deactivation = cells,
     )
 end
 
-# The solve's end when a moving mesh thins below `min_thickness`.
+"""
+	FAILURE_MEMORY_GROWTH, FAILURE_MEMORY_STEPS
+
+After an accepted step whose nonlinear solves needed retries, the proposed
+step stays at or below `FAILURE_MEMORY_GROWTH` times that step for the next
+`FAILURE_MEMORY_STEPS` accepted steps.
+"""
+const FAILURE_MEMORY_GROWTH = 1.25
+const FAILURE_MEMORY_STEPS = 20
+
+# The Newton-failure step cap: failures seen so far, accepted steps the cap
+# still holds, and the cap.
+mutable struct NewtonCap
+    failures::Int
+    hold::Int
+    cap::Float64
+end
+
+NewtonCap() = NewtonCap(0, 0, Inf)
+
+const _DomainWrapper = FunctionWrapper{Bool,Tuple{_StateVector,NullParameters,Float64}}
+
+# The per-step observer: the largest constraint residual of the accepted
+# states, the end of the solve once the domain test gave up, the step cap
+# after a Newton failure, then the policy's flag rule. The domain test runs
+# on adaptive steps only, so a fixed-step solve records no residual.
+function _observe!(integrator, m::ConstraintMonitor, cap::NewtonCap, policy)
+    m.largest = max(m.largest, m.last)
+    if m.failed
+        @warn "solve(): $(m.message)"
+        terminate!(integrator, ReturnCode.Failure)
+        return nothing
+    end
+    cap_step!(integrator, cap)
+    apply_observer_flag!(integrator, policy)
+    return nothing
+end
+
+"""
+	cap_step!(integrator, cap::NewtonCap)
+
+The Newton-failure step cap, applied after an accepted step: when the step's
+nonlinear solves needed retries, the proposed step is held at or below
+[`FAILURE_MEMORY_GROWTH`](@ref) times that step for the next
+[`FAILURE_MEMORY_STEPS`](@ref) accepted steps, then released.
+"""
+function cap_step!(integrator, cap::NewtonCap)
+    failures = integrator.stats.nnonlinconvfail
+    if failures > cap.failures
+        cap.failures = failures
+        cap.cap = FAILURE_MEMORY_GROWTH * (integrator.t - integrator.tprev)
+        cap.hold = FAILURE_MEMORY_STEPS
+    elseif cap.hold > 0
+        cap.hold -= 1
+        cap.hold == 0 && (cap.cap = Inf)
+    end
+    get_proposed_dt(integrator) > cap.cap && set_proposed_dt!(integrator, cap.cap)
+    return nothing
+end
+
+# The solve's end when a moving mesh thins below `min_thickness`: the distance
+# from the first node to the outermost live one.
 function _thickness_termination(layout::StateLayout, min_thickness::Float64)
     is_moving(layout) || return ()
-    bottom, top = position_index(layout, 1), position_index(layout, n_nodes(layout))
+    bottom = position_index(layout, 1)
+    thickness = FunctionWrapper{Float64,Tuple{_StateVector}}(
+        u -> u[position_index(layout, _top_live_node(layout))] - u[bottom],
+    )
     return (
         ContinuousCallback(
-            (u, t, integrator) -> u[top] - u[bottom] - min_thickness,
+            (u, t, integrator) -> thickness(u) - min_thickness,
             terminate!;
             save_positions = (false, false),
         ),
     )
+end
+
+# The outermost node whose rows are live.
+function _top_live_node(layout::StateLayout)
+    for nd = n_nodes(layout):-1:1
+        layout.mask[position_index(layout, nd)] && return nd
+    end
+    return 1
+end
+
+# The deactivation event: at the end of every step on which a live cell fell
+# below the threshold, every such cell in one pass, then the consistent sweep
+# of the algebraic rows, the admissibility of the result, and the policy's
+# restart step.
+function _deactivation_callback(cp::CoreProblem, check::DomainCheck, policy)
+    cells = cp.deactivation
+    cells === nothing && return ()
+    def, ws = cp.def, cp.ws
+    layout = def.layout
+    has_event = FunctionWrapper{Bool,Tuple{_StateVector}}(u -> any_below(cells, layout, u))
+    # Deactivates in place and returns `:transferred`, `:burned_out`,
+    # `:interior` or, when the result is not admissible, `:inadmissible`.
+    deactivate = FunctionWrapper{Symbol,Tuple{_StateVector,Float64}}(
+        (u, t) -> begin
+            status = deactivate!(u, cells, def, t)
+            status === :transferred || return status
+            consistent_state!(u, def, ws, t)
+            inadmissible(u, layout, check.abstol) && return :inadmissible
+            _porosity_out(check, _derived(check, u, t), def.setup.gas) &&
+                return :inadmissible
+            return status
+        end,
+    )
+    condition = (u, t, integrator) -> has_event(u)
+    function affect!(integrator)
+        status = deactivate(integrator.u, integrator.t)
+        if status === :inadmissible
+            @warn "solve(): the state after deactivating cell(s) at t = $(integrator.t) is inadmissible"
+            terminate!(integrator, ReturnCode.Failure)
+        elseif status !== :transferred
+            terminate!(integrator)
+        elseif policy.restart === :forced_dt
+            set_proposed_dt!(integrator, policy.restart_dt)
+        end
+        return nothing
+    end
+    return (DiscreteCallback(condition, affect!; save_positions = (false, false)),)
+end
+
+# The derived state at `u`, from one residual evaluation into the check's buffer.
+function _derived(check::DomainCheck, u, t)
+    residual!(check.du, u, check.def, t, check.ws)
+    return check.ws.derived
 end
