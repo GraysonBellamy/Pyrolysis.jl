@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-17 · **Status:** design, nothing applied · **Scope:** the mesh, state and Jacobian architecture the package commits to before extending beyond 1D
 
-Companions: `reports/Pyrolysis mesh motion alternatives.md` (the literature survey this builds on, with its four research notes), `MultiD_Extension_Assessment_2026-09-26.md` (what is 1D by construction), `Performance_Improvement_Plan_2026-09-26.md` (the Jacobian nonlocality measurements), `Gpyro_V2_Comparison_2026-09-26.md` (the burnout deficit). `file:line` pointers refer to `main` at 17bc477.
+Companions: `reports/Pyrolysis mesh motion alternatives.md` (the literature survey this builds on, with its four research notes), `MultiD_Extension_Assessment_2026-09-26.md` (what is 1D by construction; local), `Performance_Improvement_Plan_2026-09-26.md` (the Jacobian nonlocality measurements; local), `Gpyro_V2_Comparison_2026-09-26.md` (the burnout deficit; local). A document marked local is a working document kept outside the repository. `file:line` pointers refer to `main` at 17bc477.
 
 ---
 
@@ -306,7 +306,7 @@ Geometry → state → kernels (conduction first, then reactions, then gas trans
 
 ## 8. References
 
-Internal: `reports/Pyrolysis mesh motion alternatives.md` and `research_notes/Pyrolysis mesh motion alternatives/` (ablation codes, fire codes and intumescence, fixed-grid methods, moving-mesh numerics); `docs/MultiD_Extension_Assessment_2026-09-26.md`; `docs/Performance_Improvement_Plan_2026-09-26.md` §2, §3, §5; `docs/Gpyro_V2_Comparison_2026-09-26.md`; `docs/Technical_Reference_Guide.md` §11, §14, §15; verification cases V-BO-01 to V-BO-05, V-CPL-01 to V-CPL-06; `docs/refs/ThermaKin/ThermaKin2Ds Reference v2.md` §3; `docs/refs/Gpyro/gpyro_technical_reference.md` §4.1, §6.4.
+Internal: `reports/Pyrolysis mesh motion alternatives.md` and `research_notes/Pyrolysis mesh motion alternatives/` (ablation codes, fire codes and intumescence, fixed-grid methods, moving-mesh numerics); `docs/MultiD_Extension_Assessment_2026-09-26.md` (local); `docs/Performance_Improvement_Plan_2026-09-26.md` §2, §3, §5 (local); `docs/Gpyro_V2_Comparison_2026-09-26.md` (local); `docs/Technical_Reference_Guide.md` §11, §14, §15; verification cases V-BO-01 to V-BO-05, V-CPL-01 to V-CPL-06; `docs/refs/ThermaKin/ThermaKin2Ds Reference v2.md` §3 (local); `docs/refs/Gpyro/gpyro_technical_reference.md` §4.1, §6.4 (local).
 
 Literature:
 
