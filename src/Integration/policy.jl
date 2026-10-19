@@ -91,9 +91,10 @@ fbdf_policy(linsolve) = IntegratorPolicy(
 """
 	default_policy(linear_solver)
 
-The Phase 1 default, [`kencarp4_policy`](@ref).
+The default integrator: [`rodas5p_policy`](@ref) with the solver-chosen
+restart.
 """
-default_policy(linsolve) = kencarp4_policy(linsolve)
+default_policy(linsolve) = rodas5p_policy(linsolve)
 
 """
 	apply_observer_flag!(integrator, policy)
