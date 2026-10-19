@@ -56,6 +56,11 @@ function _require_supported(
     radiation_model in (NO_RADIATION, SURFACE_ABSORPTION, BEER_LAMBERT) || throw(
         ArgumentError("the finite-volume core has no $(radiation_model) radiation model"),
     )
+    if radiation_model === BEER_LAMBERT && !(coordinates isa Planar)
+        # The intensity rows attenuate the intensity and the cell sources read
+        # the face areas, which agree only where the areas are equal.
+        throw(ArgumentError("in-depth radiation needs planar coordinates"))
+    end
     if material.lateral_shrinkage_law !== nothing
         use_ale || throw(
             ArgumentError(

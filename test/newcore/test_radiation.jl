@@ -180,3 +180,19 @@ end
         name === :kirchhoff ? (@test J[e, m] != 0) : (@test J[e, m] == 0)
     end
 end
+
+# On a cylinder or a sphere the intensity rows attenuate the intensity while
+# the cell sources read the face areas, so a transparent cell would absorb
+# `I (A_up − A_down)`: setup refuses the combination.
+@testset "Beer–Lambert is refused off planar coordinates" begin
+    problem = _translucent_slab(6; top = _radiation_tops.kirchhoff)
+    for coordinates in (Cylindrical(), Spherical())
+        @test_throws ArgumentError setup(
+            problem;
+            radiation_model = BEER_LAMBERT,
+            coordinates,
+        )
+        cp = setup(problem; radiation_model = SURFACE_ABSORPTION, coordinates)
+        @test !has_intensities(cp.def.layout)
+    end
+end
