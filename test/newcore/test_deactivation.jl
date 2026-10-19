@@ -92,17 +92,21 @@ end
     masses, H = _total_masses(u, layout), _total_enthalpy(cp, u)
     x_top = moving ? u[position_index(layout, 7)] : NaN
     @test any_below(cells, layout, u)
+    gas = u[mass_index(layout, 6, 2)]
     @test deactivate!(u, cells, def, 0.3) === :transferred
     @test top_live_cell(layout) == 5
-    @test _total_masses(u, layout) ≈ masses rtol = 1e-14
-    @test _total_enthalpy(cp, u) ≈ H rtol = 1e-12
+    e = only(cells.events)
+    # A fixed mesh vents the dead cell's gas to the event.
+    @test e.lost_mass == (moving ? [0.0, 0.0] : [0.0, gas])
+    @test _total_masses(u, layout) .+ e.lost_mass ≈ masses rtol = 1e-14
+    @test _total_enthalpy(cp, u) + e.lost_enthalpy ≈ H rtol = 1e-12
+    @test (e.lost_enthalpy > 0) == !moving
+    @test abs(e.regularization) <= 1e-12 * abs(H)
     @test all(u[mass_index(layout, 6, j)] == 0 for j = 1:2)
     @test !any(layout.mask[cell_rows(layout, 6)])
     @test all(layout.mask[cell_rows(layout, 5)])
-    e = only(cells.events)
     @test (e.t, e.cell, e.receiver) == (0.3, 6, 5)
     @test e.created_volume == 0
-    @test abs(e.regularization) <= 1e-12 * abs(H)
     if moving
         # The receiver's far face is the dead cell's far face; both of the dead
         # cell's nodes are there.
@@ -197,10 +201,11 @@ end
 end
 
 # Two unit cells of a planar column (unit area) and the pore-preserving merge
-# of design §3.5: component A's intrinsic density falls with temperature
-# (ρ_A = 300/T), B's is one, and the heat capacities are equal (large enough
-# that the cells sit far above the heat-capacity floor).
-function _merge_pair(state_a, state_b)
+# of design §3.5, or on a fixed mesh the transfer: component A's intrinsic
+# density falls with temperature (ρ_A = 300/T), B's is one, and the heat
+# capacities are equal (large enough that the cells sit far above the
+# heat-capacity floor).
+function _merge_pair(state_a, state_b; use_ale = true)
     c = 1e6
     a = SolidComponent(:A, ρ = 1.0, c = c, k = 1.0, ρ_intrinsic = T -> 300 / T)
     b = SolidComponent(:B, ρ = 1.0, c = c, k = 1.0, ρ_intrinsic = 1.0, κ = 1e-12)
@@ -216,7 +221,7 @@ function _merge_pair(state_a, state_b)
         ξ_initial = [z -> 0.5, z -> 0.4, z -> 1e-4],
         tspan = (0.0, 1.0),
     )
-    cp = setup(problem; use_ale = true, deactivation = true)
+    cp = setup(problem; use_ale, deactivation = true)
     layout = cp.def.layout
     u = copy(cp.u0)
     for (i, s) in ((1, state_a), (2, state_b))
@@ -236,14 +241,16 @@ function _merge_pair(state_a, state_b)
     )
     ds = cp.ws.derived
     derive!(ds, u, layout, cp.def.setup)
-    V = u[position_index(layout, 2)] - u[position_index(layout, 1)]
+    V = use_ale ? u[position_index(layout, 2)] - u[position_index(layout, 1)] : 1.0
+    e = only(cp.deactivation.events)
     return (;
         m = [u[mass_index(layout, 1, j)] for j = 1:3],
         T = ds.T[1],
         V,
         P = ds.P[1],
         φ = ds.φ[1],
-        created = only(cp.deactivation.events).created_volume,
+        created = e.created_volume,
+        lost = e.lost_mass,
     )
 end
 
@@ -278,6 +285,24 @@ end
         @test r.T ≈ 300 + 0.951 * 200 / 1.951 atol = 1e-10
         @test r.V - (1 / (300 / r.T) + 0.95) ≈ 0.05 atol = 1e-12
         @test isfinite(r.P) && r.P > 0
+    end
+    @testset "on a fixed mesh the receiver keeps its volume and none of the dead cell's gas" begin
+        receiver = (m = [0.3, 0.3, 1e-4], T = 400.0)
+        r0 = _merge_pair(receiver, (m = [0.0, 0.0, 0.0], T = 400.0); use_ale = false)
+        r = _merge_pair(receiver, (m = [0.003, 0.003, 2e-4], T = 500.0); use_ale = false)
+        @test r.lost == [0.0, 0.0, 2e-4]
+        @test r.m == [0.3 + 0.003, 0.3 + 0.003, 1e-4]
+        @test r.created == 0
+        # Equal heat capacities: the merged temperature is the mass-weighted
+        # mean of what the receiver takes.
+        @test r.T ≈ (0.6001 * 400 + 0.006 * 500) / 0.6061 atol = 1e-10
+        φ = 1 - (r.m[1] / (300 / r.T) + r.m[2])
+        @test r.φ ≈ φ rtol = 1e-10
+        @test r.P ≈ (1e-4 / 0.028) * 8.314462618 * r.T / φ rtol = 1e-10
+        # Without the vent the receiver would hold three times its gas; with
+        # it the pressure moves only with the condensed volume and the
+        # temperature.
+        @test r.P < 1.05 * r0.P
     end
 end
 

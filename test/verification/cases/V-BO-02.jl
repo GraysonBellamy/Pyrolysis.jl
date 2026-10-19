@@ -29,6 +29,10 @@ function _verification_case_vbo02()
             peak_ref = VBO02_PEAK_REF,
             peak_tol = 0.25,
             peak_comment = "g m⁻² s⁻¹; surface absorption on a fixed mesh, a different problem from the in-depth reference (informational)",
+            ledger_tol = VERIFICATION_CORE == "old" ? 1e-3 : 3e-3,
+            ledger_comment = VERIFICATION_CORE == "old" ?
+                             "total-mass drop vs ∫ ṁ″ dt over the run" :
+                             "total-mass drop vs ∫ ṁ″ dt over the run; the trapezoid on the 0.5 s outputs misses the gas transient after each park, so this is the time error at reltol 1e-6 (observed 1.5e-3 and 8.5e-4 in the two energy forms, 4e-5 at reltol 1e-8)",
         )
         st = sol.raw_solution.stats
         rec = VBO_STEP_STATS[id]
@@ -86,7 +90,7 @@ function _verification_case_vbo02()
                 error = Float64(st.naccept),
                 tol = VERIFICATION_CORE == "old" ? 2000.0 :
                       VERIFICATION_ENERGY_STATE === :enthalpy ? 4000.0 : 3000.0,
-                comment = "budget at the CI resolution (60 PMMA cells); observed 1572 on the old core, about 26 per park interval, and on the new one 2354 (temperature form) and 3163 (enthalpy form)",
+                comment = "budget at the CI resolution (60 PMMA cells); observed 1572 on the old core, about 26 per park interval, and on the new one 1706 (temperature form) and 2456 (enthalpy form)",
             ),
         )
         return out

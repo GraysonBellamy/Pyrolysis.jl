@@ -24,7 +24,9 @@ moving-boundary collapse), and the merge never destroys pore space: the
 merged volume is the larger of the summed volumes and the merged skeletal
 volume plus the summed pre-merge pore volumes, the difference written to the
 event as created volume. On a fixed mesh the receiver keeps its volume and
-takes the inventories only.
+takes the condensed inventories only: its pores could hold the dead cell's gas
+only at a higher pressure, so that gas is vented, its masses and sensible
+enthalpy written to the event as lost.
 """
 struct ConservativeTransfer <: DeactivationPolicy end
 
@@ -250,14 +252,19 @@ function _transfer!(
     laws = setup.laws
     energy = energy_state(layout)
     m_d, m_r = _masses(u, layout, dead), _masses(u, layout, r)
-    m = map(+, m_r, m_d)
     T_d = _temperature(energy, u, d, laws, layout, dead, m_d)
     T_r = _temperature(energy, u, d, laws, layout, r, m_r)
     E =
         _energy(energy, u, d, laws, layout, dead, m_d, T_d) +
         _energy(energy, u, d, laws, layout, r, m_r, T_r)
-    # The merged temperature carries the summed sensible enthalpy.
-    H = _sensible_enthalpy(laws, T_r, m_r) + _sensible_enthalpy(laws, T_d, m_d)
+    vented =
+        is_moving(layout) ? ntuple(j -> 0.0, Val(NC)) :
+        ntuple(j -> d.solid[j] ? 0.0 : m_d[j], Val(NC))
+    m = ntuple(j -> m_r[j] + (m_d[j] - vented[j]), Val(NC))
+    # The merged temperature carries the summed sensible enthalpy of what the
+    # receiver takes.
+    H_vented = _sensible_enthalpy(laws, T_d, vented)
+    H = _sensible_enthalpy(laws, T_r, m_r) + (_sensible_enthalpy(laws, T_d, m_d) - H_vented)
     T_m = first(invert_caloric(d.caloric, laws, H, m, r, T_r))
     inner, shared, far = _nodes(setup.topology, r, dead)
     created =
@@ -277,7 +284,19 @@ function _transfer!(
         end
     end
     rows = _mask!(layout, dead, far)
-    push!(d.events, DeactivationEvent(t, dead, r, rows, created, zeros(NC), 0.0, E - E_m))
+    push!(
+        d.events,
+        DeactivationEvent(
+            t,
+            dead,
+            r,
+            rows,
+            created,
+            collect(Float64, vented),
+            H_vented,
+            E - E_m - H_vented,
+        ),
+    )
     return nothing
 end
 
