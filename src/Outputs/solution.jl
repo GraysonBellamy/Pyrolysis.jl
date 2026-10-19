@@ -191,6 +191,7 @@ _face_mass_fluxes(c::Contributions{NC}, f) where {NC} = ntuple(j -> c.F_mass[j, 
 function _face_heat_fluxes(thermal, tag, faces, c, ds, topo, material, t)
     bc = boundary_condition(thermal, tag)
     net, absorbed, reradiation, convection, conduction = 0.0, 0.0, 0.0, 0.0, 0.0
+    A_total = sum(ds.geometry.face_area[f] for f in faces)
     A = 0.0
     for f in faces
         i = topo.faces[f].cells[1]
@@ -206,7 +207,7 @@ function _face_heat_fluxes(thermal, tag, faces, c, ds, topo, material, t)
             a_eff = ds.a[i],
         )
         q_cond = conducted_flux(thermal, c, ds, topo, f)
-        a = ds.geometry.face_area[f]
+        a = A_total > 0 ? ds.geometry.face_area[f] : 1.0
         net += (bc isa DirichletThermalBC ? q_cond : q.net) * a
         absorbed += q.absorbed * a
         reradiation += q.reradiation * a
@@ -311,17 +312,17 @@ function CoreSolution(
                 boundary_blowing_ratio[tag][k] = NaN
                 continue
             end
+            # Area weights, or plain means on faces of zero area (a radial
+            # mesh starting at the centre).
             A = sum(ds.geometry.face_area[f] for f in faces)
-            boundary_T[tag][k] =
-                sum(c.T_face[f] * ds.geometry.face_area[f] for f in faces) / A
+            wt(f) = A > 0 ? ds.geometry.face_area[f] / A : 1 / length(faces)
+            boundary_T[tag][k] = sum(c.T_face[f] * wt(f) for f in faces)
             out = sum(sum(view(c.F_mass, :, f)) * ds.geometry.face_area[f] for f in faces)
             outflow += out
-            boundary_mass_flux[tag][k] = out / A
+            boundary_mass_flux[tag][k] =
+                sum(sum(view(c.F_mass, :, f)) * wt(f) for f in faces)
             boundary_blowing_ratio[tag][k] =
-                sum(
-                    thermal.states[f].blowing_ratio * ds.geometry.face_area[f] for
-                    f in faces
-                ) / A
+                sum(thermal.states[f].blowing_ratio * wt(f) for f in faces)
         end
         top_faces = has_top ? _live_faces(topo, ds.active, :top) : Int[]
         if isempty(top_faces)
