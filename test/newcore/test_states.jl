@@ -2,11 +2,12 @@ using Test
 using ForwardDiff
 using LinearAlgebra
 using Pyrolysis
-using Pyrolysis.Materials: T_REF, T_PROPERTY_MIN, T_PROPERTY_MAX
+using Pyrolysis.Materials: T_REF, T_PROPERTY_MIN, T_PROPERTY_MAX, BEER_LAMBERT
 using Pyrolysis.Meshes
 using Pyrolysis.States
 using Pyrolysis.Meshes: MeshGeometry
 using Pyrolysis.States: StateLayout, state_length
+using Pyrolysis.Integration: setup
 
 @testset "state layout: interleaved blocks and row kinds" begin
     for (moving, intensities, chi) in (
@@ -352,4 +353,137 @@ end
     @test material_axes(fill(3.0, 1, 1), fill(1.0, 1, 1)) == fill(1.0, 1, 1)
     @test [f.name for f in CONVERSION_HISTORY] == [:G, :M]
     @test_throws ArgumentError CarriedField(:x, :mesh, false, :none)
+end
+
+@testset "the caloric extension refuses a non-positive scale, floor or heat capacity" begin
+    laws = CaloricLaws(_caloric_material())
+    @test CaloricExtension(laws, [1e-8], [1e-3]) isa CaloricExtension
+    @test_throws ArgumentError CaloricExtension(laws, [0.0], [1e-3])
+    @test_throws ArgumentError CaloricExtension(laws, [1e-8], [-1e-3])
+    # A heat capacity that turns negative inside the property bracket, which a
+    # component already refuses: laws built directly.
+    c = (LinearProperty(1000.0, -1.0),)
+    h = map(Pyrolysis.States.enthalpy_law, c)
+    negative = CaloricLaws{1,typeof(h),typeof(c)}(h, c)
+    @test_throws ArgumentError CaloricExtension(negative, [1e-8], [1e-3])
+end
+
+# A slab that thins (the char is lighter), absorbs in depth and shrinks
+# laterally, on a stretched mesh: every row kind of the tolerance vector.
+function _thinning_slab(; law = χ -> 1 - 0.3χ)
+    virgin =
+        SolidComponent(:virgin, ρ = 1100.0, c = (900.0, 1.5), k = 0.2, ε = 0.8, α = 1.5)
+    char = SolidComponent(:char, ρ = 300.0, c = 1100.0, k = 0.1, ε = 0.95, α = 20.0)
+    gas = GaseousComponent(:gas, M = 0.03, c = 1100.0, k = 0.03, λ = 1e-5)
+    mat = Material(
+        name = :thinning,
+        components = (virgin, char, gas),
+        reactions = (
+            Reaction(:pyro, 1 => (2, 3); A = 5e9, E = 1.4e5, h = 8e5, yields = (0.3, 0.7)),
+        ),
+        lateral_shrinkage_law = law,
+    )
+    return PyrolysisProblem(
+        mesh = create_stretched_mesh(0.01, 6, Val(3), 1.2),
+        material = mat,
+        bc_set = BoundaryConditionSet(
+            thermal = (
+                top = RadiativeFluxBC(
+                    flux = t -> 3e4 * (1 + 0.5 * sin(t)),
+                    absorptivity = 0.9,
+                ),
+                bottom = AdiabaticBC(),
+            ),
+        ),
+        T_initial = z -> 400.0 + 1e4 * z,
+        ξ_initial = [z -> 1100.0 * (1 - 20z), z -> 300.0 * 20z, z -> 0.2],
+        tspan = (0.0, 10.0),
+    )
+end
+
+@testset "absolute tolerances of every row kind: $(energy) form" for energy in (
+    :temperature,
+    :enthalpy,
+)
+    reltol, abstol, threshold, dt = 1e-5, 1e-7, 2e-2, 1e-3
+    cp = setup(
+        _thinning_slab();
+        energy_state = energy,
+        use_ale = true,
+        radiation_model = BEER_LAMBERT,
+        reltol,
+        abstol,
+        threshold,
+        time_scale = dt,
+    )
+    layout, ref = cp.def.layout, cp.def.setup.reference
+    @test is_moving(layout) && has_chi(layout) && has_intensities(layout)
+    tol = cp.abstol
+    n = n_cells(layout)
+    x = ref.positions
+    m0 = cp.m0
+    # Cell rows: the masses and the history pair at the mass tolerance of the
+    # cell's initial condensed mass; the energy row at the temperature
+    # tolerance or, in the enthalpy form, at the enthalpy of that tolerance
+    # over the threshold's share of the condensed mass.
+    for i = 1:n
+        condensed = m0[1, i] + m0[2, i]
+        @test ref.solid_mass[i] ≈ condensed rtol = 1e-14
+        mass_tol = reltol * threshold * condensed
+        for j = 1:3
+            @test tol[mass_index(layout, i, j)] ≈ mass_tol rtol = 1e-14
+        end
+        for k = 1:2
+            @test tol[history_index(layout, i, k)] ≈ mass_tol rtol = 1e-14
+        end
+        T = cp.T0[i]
+        c_ref = (m0[1, i] * (900.0 + 1.5T) + (m0[2, i] + m0[3, i]) * 1100.0) / sum(m0[:, i])
+        expected = energy === :temperature ? abstol : threshold * condensed * c_ref * abstol
+        @test tol[energy_index(layout, i)] ≈ expected rtol = 1e-12
+    end
+    # Node rows: positions at the mass tolerance's share of the thinner
+    # neighbouring cell, velocities that over the first step, the face
+    # intensities at the relative tolerance of the largest incident intensity.
+    I_scale = maximum(t -> 0.9 * 3e4 * (1 + 0.5 * sin(t)), range(0.0, 10.0; length = 101))
+    w_tol = Float64[]
+    for nd = 1:(n+1)
+        h = min(nd > 1 ? x[nd] - x[nd-1] : Inf, nd <= n ? x[nd+1] - x[nd] : Inf)
+        @test tol[position_index(layout, nd)] ≈ reltol * threshold * h rtol = 1e-14
+        @test tol[velocity_index(layout, nd)] ≈ reltol * threshold * h / dt rtol = 1e-14
+        @test tol[intensity_index(layout, nd)] ≈ reltol * I_scale rtol = 1e-14
+        push!(w_tol, reltol * threshold * h / dt)
+    end
+    # On the stretched mesh a node's two cells differ, so the rule picks one.
+    @test maximum(diff(x)) > 1.5 * minimum(diff(x))
+    # The cross section at the relative tolerance of its initial measure, its
+    # lateral rate at the smallest velocity tolerance over the thickness.
+    @test tol[area_index(layout)] ≈ reltol * ref.cross_section rtol = 1e-14
+    @test tol[lateral_rate_index(layout)] ≈ minimum(w_tol) / (x[end] - x[1]) rtol = 1e-14
+    @test length(tol) == state_length(layout)
+end
+
+@testset "derived volumes on a moving mesh are the shells between the nodes: $(nameof(typeof(coords)))" for coords in
+                                                                                                            (
+    Planar(),
+    Cylindrical(),
+    Spherical(),
+)
+    cp = setup(_thinning_slab(law = nothing); use_ale = true, coordinates = coords)
+    layout, s = cp.def.layout, cp.def.setup
+    topo = s.topology
+    @test topo.coordinates isa typeof(coords)
+    n = n_cells(layout)
+    u = copy(cp.u0)
+    # Move the nodes off their initial places, keeping their order.
+    for nd = 2:(n+1)
+        u[position_index(layout, nd)] *= 1 + 0.05 * sin(nd)
+    end
+    x = [u[position_index(layout, nd)] for nd = 1:(n+1)]
+    @test issorted(x) && x != s.reference.positions
+    ds = cp.ws.derived
+    derive!(ds, u, layout, s)
+    @test ds.x == x
+    for i = 1:n
+        @test ds.V[i] ≈ shell_volume(coords, x[i], x[i+1], topo.cross_section) rtol = 1e-14
+    end
 end
