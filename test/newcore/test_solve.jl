@@ -160,4 +160,70 @@ end
     @test sol.surface_T == sol.boundary_T[:top]
     @test Pyrolysis.Outputs.cell_positions(sol) ≈
           collect(range(L / 2n, L - L / 2n, length = n))
+    # The prescribed flux is what the surface applies and conducts.
+    @test sol.extras.surface_heat_flux_net == fill(q, 3)
+    @test sol.extras.surface_heat_flux_conduction ≈ fill(q, 3) rtol = 1e-12
+    @test sol.extras.back_temperature == sol.boundary_T[:bottom]
+    @test sol.extras.back_heat_flux == zeros(3)
+    @test sol.mass_loss_rate == zeros(3)
+    @test sol.extras.live_cells == fill(n, 3)
+    @test isempty(sol.extras.park_times)
+end
+
+@testset "outputs: the surface-flux decomposition and the mass-loss rate" begin
+    solid = SolidComponent(:s, ρ = 800.0, c = 1200.0, k = 0.4, ε = 0.9, α = 2.0, λ = 1e-6)
+    gas = GaseousComponent(:g, M = 0.03, c = 1000.0, k = 0.02, λ = 1e-5)
+    rxn = Reaction(:gasify, 1 => 2; A = 1e8, E = 1.2e5, h = 1e5)
+    mat = Material(name = :charring, components = (solid, gas), reactions = (rxn,))
+    h_back, T_back_inf = 5.0, 300.0
+    problem = PyrolysisProblem(
+        mesh = create_uniform_mesh(0.01, 12, Val(2)),
+        material = mat,
+        bc_set = BoundaryConditionSet(
+            thermal = (
+                top = RadiativeFluxBC(flux = 4e4) +
+                      RadiativeBC(T_inf = 300.0) +
+                      ConvectiveBC(h = 10.0, T_inf = 300.0),
+                bottom = ConvectiveBC(h = h_back, T_inf = T_back_inf),
+            ),
+            mass = (top = DiffusiveMassBC(0.05), bottom = ImpermeableBC()),
+        ),
+        T_initial = z -> 500.0,
+        ξ_initial = [z -> 800.0, z -> 0.0],
+        tspan = (0.0, 60.0),
+        output_times = collect(0.0:10.0:60.0),
+    )
+    for radiation_model in (SURFACE_ABSORPTION, Pyrolysis.Discretization.BEER_LAMBERT)
+        sol = Integration.solve(problem; radiation_model, abstol = 1e-8, reltol = 1e-6)
+        @test sol.retcode === :Success
+        x = sol.extras
+        # The decomposition sums to the applied flux, which the surface balance
+        # conducts into the cell.
+        @test x.surface_heat_flux_net ≈
+              x.surface_heat_flux_absorbed .- x.surface_heat_flux_reradiation .-
+              x.surface_heat_flux_convection rtol = 1e-12
+        @test x.surface_heat_flux_net ≈ x.surface_heat_flux_conduction rtol = 1e-8
+        @test all(>(0), x.surface_heat_flux_reradiation[2:end])
+        @test all(>(0), x.surface_heat_flux_convection[2:end])
+        if radiation_model === SURFACE_ABSORPTION
+            @test x.surface_heat_flux_absorbed ≈ 4e4 .* x.surface_emissivity rtol = 1e-12
+            @test all(iszero, x.volumetric_absorption)
+        else
+            # The incident flux enters in depth, not through the face.
+            @test all(iszero, x.surface_heat_flux_absorbed)
+            @test all(>(0), x.volumetric_absorption)
+        end
+        @test x.back_temperature == sol.boundary_T[:bottom]
+        @test x.back_heat_flux ≈ h_back .* (T_back_inf .- x.back_temperature) rtol = 1e-12
+        # Gas leaves through the top face only.
+        @test sol.mass_loss_rate ≈
+              sol.boundary_mass_flux[:top] .+ sol.boundary_mass_flux[:bottom] rtol = 1e-12
+        @test x.surface_mass_flux == sol.boundary_mass_flux[:top]
+        @test sol.mass_loss_rate[end] > 0
+        @test x.MLR_gauge == sol.mass_loss_rate
+        @test all(0 .< x.surface_emissivity .<= 1)
+        @test all(>(0), x.surface_conductivity)
+        @test x.live_cells == fill(12, length(sol.t))
+        @test isempty(x.park_times)
+    end
 end

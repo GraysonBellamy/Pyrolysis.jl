@@ -369,4 +369,9 @@ end
     m = sol.extras.total_mass
     @test all(diff(m) .<= 1e-12 * m[1])
     @test all(>(0), sol.extras.gas_generation_rate[2:end])
+    # The old schema's event record: one park time per deactivated cell, and
+    # the live cells at every saved time.
+    @test sol.extras.park_times == [e.t for e in sol.events]
+    @test sol.extras.live_cells == [30 - count(e -> e.t < t, sol.events) for t in sol.t]
+    @test sol.extras.live_cells[end] == last_live
 end

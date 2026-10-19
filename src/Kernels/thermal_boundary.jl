@@ -129,6 +129,29 @@ end
 end
 
 """
+	boundary_condition(kernel::ThermalBoundaryKernel, tag) -> AbstractThermalBC
+
+The thermal condition the kernel applies on the faces of boundary tag `tag`.
+"""
+function boundary_condition(kernel::ThermalBoundaryKernel, tag::Symbol)
+    for p in kernel.patches
+        p.tag === tag && return p.bc
+    end
+    throw(ArgumentError("the thermal boundary kernel has no patch for the tag :$tag"))
+end
+
+"""
+	conducted_flux(kernel::ThermalBoundaryKernel, c, ds, topology, f) -> Real
+
+The heat flux [W/m²] conducted from boundary face `f` into its cell,
+`k (T_s − T_cell) / d`, at the face temperature of the contributions `c`.
+"""
+function conducted_flux(kernel::ThermalBoundaryKernel, c::Contributions, ds, topo, f)
+    i, d = _boundary_cell(kernel, ds, topo, f)
+    return ds.k[i] * (c.T_face[f] - ds.T[i]) / d
+end
+
+"""
 	boundary_energy_flux(bc, f, kernel, c, ds, topology, material, t) -> (q, T_s)
 
 Outward energy flux per unit area [W/m²] through boundary face `f` under the

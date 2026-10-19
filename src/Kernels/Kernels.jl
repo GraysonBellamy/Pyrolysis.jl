@@ -33,7 +33,8 @@ export ConductionKernel, normal_conductivity
 export GasTransportKernel, outward_darcy_velocity, MOBILITY_GUARD
 export BeerLambertKernel, incident_intensity, sweep_intensities!, transmitted_face
 export exposed_face
-export BoundaryPatch, ThermalBoundaryKernel, boundary_energy_flux
+export BoundaryPatch, ThermalBoundaryKernel, boundary_energy_flux, boundary_condition
+export conducted_flux
 export RelativeFluxKernel, van_albada
 
 end # module Kernels
