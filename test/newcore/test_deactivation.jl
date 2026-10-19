@@ -13,7 +13,7 @@ using Pyrolysis.Deactivation
 using Pyrolysis.Deactivation: ConservativeTransfer
 using Pyrolysis.ColoredJacobian
 using Pyrolysis.Integration
-using Pyrolysis.Integration: setup, consistent_state!
+using Pyrolysis.Integration: setup, consistent_state!, integrate
 
 # An ablating solid: it decomposes to a gas that takes no volume, so a cell's
 # thickness falls with its condensed mass, as in V-CPL-02. `radiating` makes
@@ -484,4 +484,24 @@ end
     u[mass_index(cp.def.layout, 2, 1)] = NaN
     @test Integration._consistent_motion!(u, cp.def, cp.ws, 0.0) isa Tuple
     @test_throws ErrorException consistent_state!(u, cp.def, cp.ws, 0.0)
+end
+
+@testset "the domain test rejects proposals through a solve and gives up on a run of constraint rejections" begin
+    options = (use_ale = true, radiation_model = BEER_LAMBERT, deactivation = true)
+    sol = integrate(setup(_ablator(8; radiating = true); options...); saveat = Float64[])
+    @test sol.retcode === :Success
+    @test sol.statistics.domain_rejections > 0
+    @test sol.statistics.largest_constraint_residual <= 1
+    # At tight tolerances a constraint residual stays above its tolerance on
+    # two consecutive proposals; with a bound of one the domain test gives up.
+    cp = setup(_ablator(8; radiating = true); options..., reltol = 1e-10, abstol = 1e-12)
+    sol =
+        @test_logs (:warn, r"constraint residual stayed above") match_mode = :any integrate(
+            cp;
+            saveat = Float64[],
+            max_constraint_rejections = 1,
+        )
+    @test sol.retcode === :Failure
+    @test sol.t[end] < 0.8
+    @test sol.statistics.domain_rejections > 0
 end

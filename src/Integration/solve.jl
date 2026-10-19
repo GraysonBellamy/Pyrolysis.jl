@@ -139,12 +139,16 @@ end
 	          dt = cp.problem.dt_initial, adaptive = true, dtmin = 1e-12,
 	          dtmax = Inf, saveat = cp.problem.output_times, callback = nothing,
 	          min_thickness = 1e-6, linear_solver = nothing,
-	          integrator_policy = nothing, started = time()) -> CoreSolution
+	          integrator_policy = nothing,
+	          max_constraint_rejections = MAX_CONSTRAINT_REJECTIONS,
+	          started = time()) -> CoreSolution
 
 Integrate a set-up problem from the state `u0`, whose algebraic rows must be
 consistent ([`consistent_state!`](@ref)), with the tolerances it was set up
-with. The keywords are those of [`solve`](@ref); `started` is the time the
-reported solve time counts from.
+with. The keywords are those of [`solve`](@ref); `max_constraint_rejections`
+bounds the domain test's run of consecutive constraint rejections
+([`DomainCheck`](@ref)), and `started` is the time the reported solve time
+counts from.
 """
 function integrate(
     cp::CoreProblem;
@@ -159,6 +163,7 @@ function integrate(
     min_thickness::Real = 1e-6,
     linear_solver = nothing,
     integrator_policy = nothing,
+    max_constraint_rejections::Int = MAX_CONSTRAINT_REJECTIONS,
     started::Float64 = time(),
 )
     min_thickness > 0 ||
@@ -198,7 +203,7 @@ function integrate(
 
     # The domain test and every callback reach the problem through
     # fixed-signature wrappers, so the integrator's type does not depend on it.
-    check = DomainCheck(cp)
+    check = DomainCheck(cp; max_consecutive = max_constraint_rejections)
     out_of_domain = _DomainWrapper(check)
     monitor = check.monitor
     cap = NewtonCap()
