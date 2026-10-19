@@ -163,6 +163,7 @@ if !isdefined(@__MODULE__, :VerificationCase)
         "V-RX-02",
         "V-RX-03",
         "V-RX-04",
+        "V-CPL-02",
         "V-CPL-03",
         "V-CPL-04",
         "V-CPL-05",
@@ -187,14 +188,26 @@ if !isdefined(@__MODULE__, :VerificationCase)
     energy state of `PYROLYSIS_ENERGY_STATE` on the new one. Every solve a case
     makes, its sub-solves inside `qois` and report `curves` included, goes
     through this, so all of a case's quantities come from one core.
+
+    `handle_depletion` is the new core's `deactivation`. The old core's
+    `depletion_threshold`, a fraction of a cell's thickness, has no exact
+    counterpart on the new core, whose threshold is the mass fraction
+    `threshold` (plan C9), and is passed to the old core only.
     """
-    core_solve(problem; kwargs...) =
+    core_solve(
+        problem;
+        handle_depletion::Bool = false,
+        depletion_threshold = 0.05,
+        kwargs...,
+    ) =
         VERIFICATION_CORE == "new" ?
         Pyrolysis.Integration.solve(
             problem;
             energy_state = VERIFICATION_ENERGY_STATE,
+            deactivation = handle_depletion,
             kwargs...,
-        ) : solve(problem; progress = false, kwargs...)
+        ) :
+        solve(problem; progress = false, handle_depletion, depletion_threshold, kwargs...)
 
     @inline _case_solve(case::VerificationCase, problem; kwargs...) =
         case.solve_fn !== nothing ? case.solve_fn(problem; kwargs...) :
