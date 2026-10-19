@@ -81,9 +81,12 @@ const _NEW_CORE = get(ENV, "PYROLYSIS_CORE", "old") == "new"
         end
     end
 
-    # Finite-volume core suites — one module each.
-    for f in _jl_files_recursive("newcore")
-        _include_isolated(f)
+    # Finite-volume core suites — one module each. They run both energy forms
+    # themselves, so the enthalpy-form run of the verification suite skips them.
+    if !(_NEW_CORE && get(ENV, "PYROLYSIS_ENERGY_STATE", "temperature") == "enthalpy")
+        for f in _jl_files_recursive("newcore")
+            _include_isolated(f)
+        end
     end
 
     # Performance invariants are process-state sensitive, especially the
