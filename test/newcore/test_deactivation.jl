@@ -369,9 +369,45 @@ end
     m = sol.extras.total_mass
     @test all(diff(m) .<= 1e-12 * m[1])
     @test all(>(0), sol.extras.gas_generation_rate[2:end])
-    # The old schema's event record: one park time per deactivated cell, and
-    # the live cells at every saved time.
+    # One park time per deactivated cell, and the live cells at every saved
+    # time (a state saved at an event's time is the one after the event).
     @test sol.extras.park_times == [e.t for e in sol.events]
-    @test sol.extras.live_cells == [30 - count(e -> e.t < t, sol.events) for t in sol.t]
+    @test sol.extras.live_cells == [30 - count(e -> e.t <= t, sol.events) for t in sol.t]
     @test sol.extras.live_cells[end] == last_live
+end
+
+@testset "a terminated solve saves its last state, and a state saved at an event's time is the one after it" begin
+    for moving in (true, false)
+        problem = _ablator(4; L = 1e-3, t_end = 20.0)
+        sol = Integration.solve(
+            problem;
+            use_ale = moving,
+            deactivation = true,
+            saveat = [0.0, 20.0],
+            abstol = 1e-7,
+            reltol = 1e-5,
+        )
+        @test sol.retcode === :Terminated
+        @test sol.outcome === :burned_out
+        @test length(sol.events) == 4
+        @test sol.t[end] == sol.extras.park_times[end]
+        @test length(sol.t) == 2
+        @test all(isnan, sol.T[:, end])
+        @test sol.extras.live_cells[end] == 0
+        # A state saved exactly at an event's time carries the post-event mask.
+        t_event = sol.events[1].t
+        sol2 = Integration.solve(
+            problem;
+            use_ale = moving,
+            deactivation = true,
+            saveat = [0.0, t_event, 20.0],
+            abstol = 1e-7,
+            reltol = 1e-5,
+        )
+        k = findfirst(==(t_event), sol2.t)
+        @test k !== nothing
+        @test sol2.extras.live_cells[k] == 3
+        @test isnan(sol2.T[4, k])
+        @test all(isfinite, sol2.T[1:3, k])
+    end
 end

@@ -60,7 +60,8 @@ only one.
 step is deactivated at its end in one event ([`deactivate!`](@ref)); the
 solve ends with `:Terminated` when the last cell goes or a cell below the
 threshold lies inward of a live one, and with `:Failure` when an event leaves
-the state inadmissible.
+the state inadmissible. The state a solve ends on is always saved, whether or
+not `saveat` names its time.
 """
 function solve(problem::PyrolysisProblem; kwargs...)
     for k in keys(kwargs)
@@ -221,6 +222,7 @@ function integrate(
         callback = callbacks,
         isoutofdomain = out_of_domain,
         initializealg = NoInit(),
+        save_end = true,
     )
     elapsed = time() - started
     s = raw.stats

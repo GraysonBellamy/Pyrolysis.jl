@@ -183,14 +183,15 @@ end
 """
 	replay_events!(d, layout, t) -> d
 
-The mask of a state saved at `t`: every event of `d` before `t` applied,
-starting from every row live. A state saved at an event's own time is the one
-the step ended with, before the event.
+The mask of a state saved at `t`: every event of `d` at or before `t`
+applied, starting from every row live. The integrator applies an event before
+it saves the state of the step that triggered it, so a state saved at an
+event's own time is the one after the event.
 """
 function replay_events!(d::CellDeactivation, layout::StateLayout, t::Real)
     fill!(layout.mask, true)
     for e in d.events
-        e.t < t || break
+        e.t <= t || break
         layout.mask[e.rows] .= false
     end
     return d
