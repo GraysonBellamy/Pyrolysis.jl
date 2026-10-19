@@ -26,8 +26,8 @@ temperature, the same mass flux the mass rows carry.
 
 Boundary faces, one [`BoundaryPatch`](@ref) of mass conditions per tag, each
 applied on the face that bounds the live cells on its side (`Meshes.live_face`): the
-film flux of the condition (`BoundaryConditions.mass_bc_flux`, oriented
-outward) and, under Darcy–Fick transport, the outflow the pressure condition
+film flux of the condition (`BoundaryConditions.mass_bc_flux`, which returns
+the flux into the domain and is negated here) and, under Darcy–Fick transport, the outflow the pressure condition
 drives at the outward Darcy velocity of [`outward_darcy_velocity`](@ref)
 against an ambient that carries none of the tracked gases. The enthalpy those
 fluxes carry leaves at the face temperature, which the thermal boundary

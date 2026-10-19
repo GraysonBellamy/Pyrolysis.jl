@@ -76,7 +76,7 @@ function _problem(NC, n; law = nothing, reacting = true)
     )
 end
 
-# The new core's color count against design §3.7's Phase 0 formula,
+# The new core's color count against the design's formula (§3.7),
 # `3NC + 9 + 2·bl + 7·χ` with `c = 0` and `5NC + 13 + 2·bl + 11·χ` with the
 # reconstruction of the relative fluxes. That model is a moving mesh whose
 # cell rows read their two node velocities; at `c = 0` the cell rows of this

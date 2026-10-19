@@ -196,7 +196,7 @@ if !isdefined(@__MODULE__, :VerificationCase)
     `handle_depletion` is the new core's `deactivation`. The old core's
     `depletion_threshold`, a fraction of a cell's thickness, has no exact
     counterpart on the new core, whose threshold is the mass fraction
-    `threshold` (plan C9), and is passed to the old core only, as is its
+    `threshold`, and is passed to the old core only, as is its
     `min_cells` (the new core deactivates down to the last cell).
     """
     core_solve(

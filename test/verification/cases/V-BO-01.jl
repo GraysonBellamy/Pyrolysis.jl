@@ -152,7 +152,7 @@ end
 
 # The new core's solve with the step recorder, which reads the live cells'
 # temperatures through the layout and the state mapping. The old core's
-# depletion keywords have no counterpart there (plan C9).
+# depletion keywords have no counterpart there.
 function _vbo_core_solve(
     problem,
     dt_min,

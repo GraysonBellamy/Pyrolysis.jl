@@ -1,4 +1,4 @@
-# The iteration matrix on a moving mesh (plan C31), behind gate item 2.
+# The iteration matrix on a moving mesh, behind gate item 2.
 #
 # OrdinaryDiffEq forms the iteration matrix `W = J − M/(γ dt)` with
 # `jacobian2W!`. With a mass matrix that is a multiple of the identity it

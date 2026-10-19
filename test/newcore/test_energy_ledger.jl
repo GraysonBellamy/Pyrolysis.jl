@@ -134,8 +134,8 @@ end
         carried[f] = sum(c.F_mass[:, f] .* component_enthalpies(laws, T_f))
         conducted[f] = c.F_energy[f] - carried[f]
     end
-    # The carried term is what the old core's S_conv approximated; it is not
-    # small here, so a double count or an omission would show.
+    # The carried term is not small here, so a double count or an omission
+    # would show.
     @test maximum(abs, carried) > 1e-3 * maximum(abs, conducted)
 
     for i = 1:n_cells(layout)

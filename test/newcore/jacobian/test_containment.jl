@@ -518,8 +518,8 @@ end
         @test all(isfinite, g)
         @test guarded(a, b, d_a, d_b) >= 0
     end
-    # Continuous across the scale of the guard, where the old face mean cut
-    # off: no jump between just below and just above it.
+    # Continuous across the scale of the guard: no jump between just below
+    # and just above it.
     below, above =
         guarded(η * (1 - 1e-9), 0.2, d_a, d_b), guarded(η * (1 + 1e-9), 0.2, d_a, d_b)
     @test abs(above - below) <= 1e-8 * above
