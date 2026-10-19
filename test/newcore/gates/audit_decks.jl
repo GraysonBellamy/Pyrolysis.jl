@@ -40,7 +40,6 @@ const _HARNESS =
     normpath(joinpath(@__DIR__, "..", "..", "..", "scripts", "mesh_phase0", "baselines"))
 include(joinpath(_HARNESS, "jacobian_common.jl"))
 
-using Dates
 
 const OUT = joinpath(@__DIR__, "measurements")
 mkpath(OUT)
@@ -188,8 +187,9 @@ end
 at_default(rows, deck, run) =
     only(filter(r -> r.deck == deck && r.run == run && r.reltol == DEFAULT_RELTOL, rows))
 
+include(joinpath(@__DIR__, "stamp.jl"))
 load_start = Sys.loadavg()
-started = now()
+started = time()
 rows = []
 for (kind, n, solid_λ) in DECKS
     append!(rows, deck_rows(kind, n, solid_λ))
@@ -245,7 +245,7 @@ open(joinpath(OUT, "audit_decks.md"), "w") do io
     println(io, "# Gate item 2: the audit decks at matched accuracy\n")
     println(
         io,
-        "Produced by `test/newcore/gates/audit_decks.jl`. Julia $(VERSION), ",
+        "Produced by `test/newcore/gates/audit_decks.jl` at $(COMMIT_STAMP). Julia $(VERSION), ",
         "$(Threads.nthreads()) thread, $(Sys.CPU_THREADS) logical CPUs; load average ",
         "$(round.(load_start; digits = 1)) at the start and $(round.(load_end; digits = 1)) ",
         "at the end. Each core's default integrator; error: the largest temperature ",
@@ -297,5 +297,5 @@ open(joinpath(OUT, "audit_decks.md"), "w") do io
     end
 end
 println(
-    "wrote $(OUT); load $(load_start) -> $(load_end); $(round(now() - started, Second))",
+    "wrote $(OUT); load $(load_start) -> $(load_end); $(round(Int, time() - started)) s",
 )

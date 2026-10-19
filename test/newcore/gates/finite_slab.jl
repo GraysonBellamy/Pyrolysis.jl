@@ -37,7 +37,6 @@ const _HARNESS =
     normpath(joinpath(@__DIR__, "..", "..", "..", "scripts", "mesh_phase0", "baselines"))
 include(joinpath(_HARNESS, "common.jl"))
 
-using Dates
 using Pyrolysis.Integration: kencarp4_policy, rodas5p_policy, fbdf_policy
 import Pyrolysis.Outputs
 
@@ -99,8 +98,9 @@ function new_core_runs(case, policy, reltol, abstol)
     return sol, median(times)
 end
 
+include(joinpath(@__DIR__, "stamp.jl"))
 load_start = Sys.loadavg()
-started = now()
+started = time()
 cases =
     Dict(c.id => c for c in load_verification_cases() if c.id in ("V-HC-03", "V-HC-02c"))
 rows = []
@@ -222,7 +222,7 @@ open(joinpath(OUT, "finite_slab.md"), "w") do io
     println(io, "# Leftover 3: the finite-slab gate\n")
     println(
         io,
-        "Produced by `test/newcore/gates/finite_slab.jl`. Julia $(VERSION), ",
+        "Produced by `test/newcore/gates/finite_slab.jl` at $(COMMIT_STAMP). Julia $(VERSION), ",
         "$(Threads.nthreads()) thread, $(Sys.CPU_THREADS) logical CPUs; load average ",
         "$(round.(load_start; digits = 1)) at the start and $(round.(load_end; digits = 1)) ",
         "at the end. $(N_CELLS) cells; warm medians of $(REPEATS) solves; L2 and L∞ the ",
@@ -247,5 +247,5 @@ open(joinpath(OUT, "finite_slab.md"), "w") do io
     end
 end
 println(
-    "wrote $(OUT); load $(load_start) -> $(load_end); $(round(now() - started, Second))",
+    "wrote $(OUT); load $(load_start) -> $(load_end); $(round(Int, time() - started)) s",
 )

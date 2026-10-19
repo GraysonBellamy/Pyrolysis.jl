@@ -28,7 +28,6 @@ const _HARNESS =
     normpath(joinpath(@__DIR__, "..", "..", "..", "scripts", "mesh_phase0", "baselines"))
 include(joinpath(_HARNESS, "jacobian_common.jl"))
 
-using Dates
 using ForwardDiff
 using ForwardDiff: Dual, Partials
 using Pyrolysis.States: n_cells, n_components, mass_index, energy_index, energy_state
@@ -151,8 +150,9 @@ end
 _us(t) = round(t * 1e6; digits = 1)
 _r(x; d = 2) = round(x; digits = d)
 
+include(joinpath(@__DIR__, "stamp.jl"))
 load_start = Sys.loadavg()
-started = now()
+started = time()
 rows = []
 for deck in DECKS, n in SIZES
     old = _old_core(deck, n)
@@ -206,7 +206,7 @@ open(joinpath(OUT, "leftover1_jacobian_cost.md"), "w") do io
     println(io, "# Leftover 1: one colored Jacobian against one structured assembly\n")
     println(
         io,
-        "Produced by `test/newcore/gates/leftover1_jacobian_cost.jl`. Julia $(VERSION), ",
+        "Produced by `test/newcore/gates/leftover1_jacobian_cost.jl` at $(COMMIT_STAMP). Julia $(VERSION), ",
         "$(Threads.nthreads()) thread, $(Sys.CPU_THREADS) logical CPUs ($(Sys.cpu_info()[1].model)); ",
         "load average $(round.(load_start; digits = 1)) at the start and ",
         "$(round.(load_end; digits = 1)) at the end. Warm medians of $(REPEATS) samples ",
@@ -231,5 +231,5 @@ open(joinpath(OUT, "leftover1_jacobian_cost.md"), "w") do io
     end
 end
 println(
-    "wrote $(OUT); load $(load_start) -> $(load_end); $(round(now() - started, Second))",
+    "wrote $(OUT); load $(load_start) -> $(load_end); $(round(Int, time() - started)) s",
 )

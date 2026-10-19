@@ -35,7 +35,6 @@ const _HARNESS =
 include(joinpath(_HARNESS, "jacobian_common.jl"))
 include(joinpath(@__DIR__, "..", "..", "verification", "casedefs.jl"))
 
-using Dates
 using LinearSolve: KLUFactorization
 using Pyrolysis.Integration: kencarp4_policy, rodas5p_policy, fbdf_policy
 
@@ -202,8 +201,9 @@ function event_rows(case)
     return rows
 end
 
+include(joinpath(@__DIR__, "stamp.jl"))
 load_start = Sys.loadavg()
-started = now()
+started = time()
 rows = []
 for (kind, n) in DECKS
     for r in deck_rows(kind, n)
@@ -234,7 +234,7 @@ open(joinpath(OUT, "leftover2_integrators.md"), "w") do io
     println(io, "# Leftover 2: the integrator candidates on the finite-volume core\n")
     println(
         io,
-        "Produced by `test/newcore/gates/leftover2_integrators.jl`. Julia $(VERSION), ",
+        "Produced by `test/newcore/gates/leftover2_integrators.jl` at $(COMMIT_STAMP). Julia $(VERSION), ",
         "$(Threads.nthreads()) thread, $(Sys.CPU_THREADS) logical CPUs; load average ",
         "$(round.(load_start; digits = 1)) at the start and $(round.(load_end; digits = 1)) ",
         "at the end. Error: the largest final-time temperature difference against ",
@@ -259,5 +259,5 @@ open(joinpath(OUT, "leftover2_integrators.md"), "w") do io
     end
 end
 println(
-    "wrote $(OUT); load $(load_start) -> $(load_end); $(round(now() - started, Second))",
+    "wrote $(OUT); load $(load_start) -> $(load_end); $(round(Int, time() - started)) s",
 )

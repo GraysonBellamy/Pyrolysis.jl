@@ -27,7 +27,6 @@
 
 ENV["PYROLYSIS_CORE"] = "new"
 using Pyrolysis
-using Dates
 using Statistics: median
 
 const OUT = joinpath(@__DIR__, "measurements")
@@ -143,8 +142,9 @@ function survey(m, case, energy)
     )
 end
 
+include(joinpath(@__DIR__, "stamp.jl"))
 load_start = Sys.loadavg()
-started = now()
+started = time()
 rows = []
 for energy in ("temperature", "enthalpy")
     m, cases = load_cases(energy)
@@ -175,7 +175,7 @@ open(joinpath(OUT, "case_accuracy.md"), "w") do io
     println(io, "# Gate items 6 and 8: constraint residuals and achieved error\n")
     println(
         io,
-        "Produced by `test/newcore/gates/case_accuracy.jl`. Julia $(VERSION), ",
+        "Produced by `test/newcore/gates/case_accuracy.jl` at $(COMMIT_STAMP). Julia $(VERSION), ",
         "$(Threads.nthreads()) thread, $(Sys.CPU_THREADS) logical CPUs; load average ",
         "$(round.(load_start; digits = 1)) at the start and $(round.(load_end; digits = 1)) ",
         "at the end. Every case of `NEW_CORE_CASES` at its CI resolution and solve ",
@@ -214,5 +214,5 @@ open(joinpath(OUT, "case_accuracy.md"), "w") do io
     )
 end
 println(
-    "wrote $(OUT); load $(load_start) -> $(load_end); $(round(now() - started, Second))",
+    "wrote $(OUT); load $(load_start) -> $(load_end); $(round(Int, time() - started)) s",
 )
