@@ -2,7 +2,7 @@ using Test
 using ForwardDiff
 using SparseArrays
 using Pyrolysis
-using Pyrolysis.Materials: BEER_LAMBERT
+using Pyrolysis.Materials: BEER_LAMBERT, T_REF
 using Pyrolysis.Meshes
 using Pyrolysis.States
 using Pyrolysis.States: StateLayout, state_length
@@ -102,6 +102,7 @@ end
     e = only(cells.events)
     @test (e.t, e.cell, e.receiver) == (0.3, 6, 5)
     @test e.created_volume == 0
+    @test abs(e.regularization) <= 1e-12 * abs(H)
     if moving
         # The receiver's far face is the dead cell's far face; both of the dead
         # cell's nodes are there.
@@ -154,6 +155,45 @@ end
     @test e.receiver == 0
     @test e.lost_mass ≈ m
     @test e.lost_enthalpy > 0
+end
+
+# The extended energy of the live cells, in either energy form.
+function _live_energy(cp, u)
+    layout, s, ext = cp.def.layout, cp.def.setup, cp.deactivation.caloric
+    ds = cp.ws.derived
+    derive!(ds, u, layout, s)
+    return sum(1:top_live_cell(layout)) do i
+        m = ntuple(j -> u[mass_index(layout, i, j)], n_components(layout))
+        energy_state(layout) isa EnthalpyState ? u[energy_index(layout, i)] :
+        extended_energy(ext, s.laws, ds.T[i], m, i)
+    end
+end
+
+@testset "a transfer writes the regularization the receiver does not hold: $(energy) form, $(moving ? "moving" : "fixed") mesh" for energy in
+                                                                                                                                    (
+        :temperature,
+        :enthalpy,
+    ),
+    moving in (true, false)
+
+    cp = setup(_ablator(6); energy_state = energy, use_ale = moving, deactivation = true)
+    def, layout, cells = cp.def, cp.def.layout, cp.deactivation
+    # The dead cell's solid at a tenth of the threshold and no gas: its
+    # guaranteed capacity is the floor, half of where the switch begins.
+    u = _deplete!(copy(cp.u0), cp, 6, 0.1 * cells.threshold)
+    u[mass_index(layout, 6, 2)] = 0
+    consistent_state!(u, def, cp.ws, 0.0)
+    m6 = ntuple(j -> u[mass_index(layout, 6, j)], 2)
+    κ = regularization(cells.caloric, m6, 6)
+    @test κ > 0
+    E = _live_energy(cp, u)
+    T6 = cp.ws.derived.T[6]
+    @test deactivate!(u, cells, def, 0.3) === :transferred
+    e = only(cells.events)
+    # The receiver is far above the floor before and after: the event holds
+    # the dead cell's regularization.
+    @test e.regularization ≈ κ * (T6 - T_REF) rtol = 1e-9
+    @test _live_energy(cp, u) + e.lost_enthalpy + e.regularization ≈ E rtol = 1e-12
 end
 
 # Two unit cells of a planar column (unit area) and the pore-preserving merge

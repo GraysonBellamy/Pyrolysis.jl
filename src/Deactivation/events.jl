@@ -14,15 +14,17 @@ abstract type DeactivationPolicy end
 
 The dead cell's inventories (masses, sensible enthalpy, history pair) go to
 the live cell inward of it, the receiver, whose temperature follows from the
-summed sensible enthalpy of both; the energy state is set from it (the
-caloric extension's regularization, which only a cell far below the
-heat-capacity floor carries, is not transferred). On a moving mesh the receiver also absorbs the dead cell's
-volume: its far face moves to the dead cell's far face, where both of the dead
-cell's nodes then coincide (the moving-boundary collapse), and the merge never
-destroys pore space: the merged volume is the larger of the summed volumes
-and the merged skeletal volume plus the summed pre-merge pore volumes, the
-difference written to the event as created volume. On a fixed mesh the
-receiver keeps its volume and takes the inventories only.
+summed sensible enthalpy of both; the energy state is set from it. The caloric
+extension's regularization, which only a cell far below the heat-capacity
+floor carries, is not transferred: what both cells held of it beyond the
+receiver's after the transfer is written to the event. On a moving mesh the
+receiver also absorbs the dead cell's volume: its far face moves to the dead
+cell's far face, where both of the dead cell's nodes then coincide (the
+moving-boundary collapse), and the merge never destroys pore space: the
+merged volume is the larger of the summed volumes and the merged skeletal
+volume plus the summed pre-merge pore volumes, the difference written to the
+event as created volume. On a fixed mesh the receiver keeps its volume and
+takes the inventories only.
 """
 struct ConservativeTransfer <: DeactivationPolicy end
 
@@ -31,7 +33,10 @@ struct ConservativeTransfer <: DeactivationPolicy end
 
 One deactivation: its time, the dead cell, the receiver (zero when none was
 left, the dead cell's inventories then lost), the rows masked, the volume the
-merge created [m³], and the masses [kg] and sensible enthalpy [J] lost.
+merge created [m³], the masses [kg] and sensible enthalpy [J] lost, and the
+caloric regularization [J] the cells held that the receiver does not (the
+extended energies of both cells before the event less the receiver's after it
+and the enthalpy lost).
 """
 struct DeactivationEvent
     t::Float64
@@ -41,6 +46,7 @@ struct DeactivationEvent
     created_volume::Float64
     lost_mass::Vector{Float64}
     lost_enthalpy::Float64
+    regularization::Float64
 end
 
 """
@@ -216,6 +222,11 @@ end
 # Sensible enthalpy of the masses `m` at `T` [J].
 _sensible_enthalpy(laws, T, m) = sum(map(*, m, component_enthalpies(laws, T)))
 
+# The extended energy of cell `i` (the inventory itself in the enthalpy form).
+@inline _energy(::EnthalpyState, u, d, laws, layout, i, m, T) = u[energy_index(layout, i)]
+@inline _energy(::TemperatureState, u, d, laws, layout, i, m, T) =
+    extended_energy(d.caloric, laws, T, m, i)
+
 # The receiver's and the dead cell's nodes: the receiver's inward node, the
 # node they share and the dead cell's far node.
 function _nodes(topo::MeshTopology{1}, r::Int, dead::Int)
@@ -242,6 +253,9 @@ function _transfer!(
     m = map(+, m_r, m_d)
     T_d = _temperature(energy, u, d, laws, layout, dead, m_d)
     T_r = _temperature(energy, u, d, laws, layout, r, m_r)
+    E =
+        _energy(energy, u, d, laws, layout, dead, m_d, T_d) +
+        _energy(energy, u, d, laws, layout, r, m_r, T_r)
     # The merged temperature carries the summed sensible enthalpy.
     H = _sensible_enthalpy(laws, T_r, m_r) + _sensible_enthalpy(laws, T_d, m_d)
     T_m = first(invert_caloric(d.caloric, laws, H, m, r, T_r))
@@ -253,8 +267,8 @@ function _transfer!(
         u[mass_index(layout, r, j)] = m[j]
         u[mass_index(layout, dead, j)] = 0
     end
-    u[energy_index(layout, r)] =
-        energy isa EnthalpyState ? extended_energy(d.caloric, laws, T_m, m, r) : T_m
+    E_m = extended_energy(d.caloric, laws, T_m, m, r)
+    u[energy_index(layout, r)] = energy isa EnthalpyState ? E_m : T_m
     u[energy_index(layout, dead)] = energy isa EnthalpyState ? 0.0 : T_m
     if has_chi(layout)
         for k = 1:2
@@ -263,7 +277,7 @@ function _transfer!(
         end
     end
     rows = _mask!(layout, dead, far)
-    push!(d.events, DeactivationEvent(t, dead, r, rows, created, zeros(NC), 0.0))
+    push!(d.events, DeactivationEvent(t, dead, r, rows, created, zeros(NC), 0.0, E - E_m))
     return nothing
 end
 
@@ -305,6 +319,7 @@ function _lose!(
     m = _masses(u, layout, i)
     T = _temperature(energy, u, d, laws, layout, i, m)
     H = _sensible_enthalpy(laws, T, m)
+    E = _energy(energy, u, d, laws, layout, i, m, T)
     for j = 1:NC
         u[mass_index(layout, i, j)] = 0
     end
@@ -315,7 +330,7 @@ function _lose!(
         end
     end
     rows = _mask!(layout, i, maximum(setup.topology.cells[i].nodes))
-    push!(d.events, DeactivationEvent(t, i, 0, rows, 0.0, collect(m), H))
+    push!(d.events, DeactivationEvent(t, i, 0, rows, 0.0, collect(m), H, E - H))
     return nothing
 end
 
