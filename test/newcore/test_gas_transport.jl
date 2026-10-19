@@ -4,6 +4,7 @@ using SparseArrays
 using Pyrolysis
 using Pyrolysis.Materials: DepletionLimiter
 using Pyrolysis.Discretization: boundary_darcy_velocity
+using Pyrolysis.Properties: harmonic_mean_weighted
 using Pyrolysis.Meshes
 using Pyrolysis.States
 using Pyrolysis.States: StateLayout, state_length
@@ -251,4 +252,49 @@ end
     @test outward_darcy_velocity(film, 2e5, MOBILITY_GUARD, d) ≈ 0.05 rtol = 1e-14
     @test ForwardDiff.derivative(m -> outward_darcy_velocity(film, 2e5, m, d), 0.0) ≈
           0.1 / MOBILITY_GUARD rtol = 1e-14
+end
+
+@testset "gas transport: an interior face carries the old core's Fick flux, and gas leaving through :bottom leaves the bottom cell" begin
+    thermal = _gas_configurations.fick_diffusive.thermal
+    open = setup(
+        _gas_slab(
+            2;
+            darcy = false,
+            thermal,
+            mass = (top = DiffusiveMassBC(0.02), bottom = DiffusiveMassBC(Inf)),
+        ),
+    )
+    closed = setup(
+        _gas_slab(
+            2;
+            darcy = false,
+            thermal,
+            mass = (top = DiffusiveMassBC(0.02), bottom = ImpermeableBC()),
+        ),
+    )
+    layout = open.def.layout
+    du_open, du_closed = zeros(length(open.u0)), zeros(length(closed.u0))
+    residual!(du_open, open.u0, open.def, 0.0, open.ws)
+    residual!(du_closed, closed.u0, closed.def, 0.0, closed.ws)
+    ds, c = open.ws.derived, open.ws.contributions
+    g, topo = ds.geometry, open.def.setup.topology
+    d1 = center_to_face_distance(g, topo, 2, 1)
+    d2 = center_to_face_distance(g, topo, 2, 2)
+    λ_f = harmonic_mean_weighted(ds.λ[1], ds.λ[2], d1, d2)
+    for j in (3, 4)
+        F = Pyrolysis.Physics.gas_flux(
+            λ_f,
+            ds.ξ[j, 1],
+            ds.ξ[j, 2],
+            ds.T_trial[1],
+            ds.T_trial[2],
+            d1 + d2,
+        )
+        @test c.F_mass[j, 2] ≈ F rtol = 1e-14
+        # Gas leaves through :bottom along its outward normal, and the bottom
+        # cell's gas row loses exactly that.
+        @test c.F_mass[j, 1] > 0
+        k = mass_index(layout, 1, j)
+        @test du_open[k] - du_closed[k] ≈ -g.face_area[1] * c.F_mass[j, 1] rtol = 1e-10
+    end
 end
