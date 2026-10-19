@@ -196,7 +196,7 @@ end
 @testset "energy ledger over a solve: $(darcy ? "Darcy" : "Fick")" for darcy in
                                                                        (false, true)
     t_end = 10.0
-    steps = darcy ? (0.05, 0.025, 0.0125) : (0.1, 0.05, 0.025)
+    steps = darcy ? (0.05, 0.025, 0.0125, 0.00625) : (0.1, 0.05, 0.025, 0.0125)
     tols = (reltol = _LEDGER_RELTOL, abstol = _LEDGER_RELTOL)
     retcode, defect, scale = _ledger_defect(
         setup(_column(10; darcy); energy_state = :enthalpy, tols...),
@@ -217,9 +217,14 @@ end
         @test retcode == OrdinaryDiffEq.ReturnCode.Success
         push!(defects, defect)
     end
-    orders = log2.(defects[1:2] ./ defects[2:3])
+    orders = log2.(defects[1:(end-1)] ./ defects[2:end])
     @info "temperature-form ledger defect ($(darcy ? "Darcy" : "Fick"))" defects orders
     @test all(>(0), defects)
     @test issorted(defects; rev = true)
+    # Pre-asymptotic: the order rises with each halving toward the
+    # integrator's fourth (observed 2.1, 2.5, 3.2 under Fick transport and
+    # 2.7, 3.3, 4.3 under Darcy–Fick).
+    @test issorted(orders)
     @test all(>=(2), orders)
+    @test orders[end] >= 2.9
 end
