@@ -1,0 +1,13 @@
+deck,run,retcode,steps,time
+eulerian 25,old core,Success,292,0.039704827
+eulerian 25,"new core, temperature form",Success,239,0.022694566
+eulerian 25,"new core, enthalpy form",Success,272,0.058927948
+eulerian 100,old core,Success,941,0.405316526
+eulerian 100,"new core, temperature form",Success,989,0.336211795
+eulerian 100,"new core, enthalpy form",Success,1037,0.85007091
+ale 25,old core,Success,196,0.031146789
+ale 25,"new core, temperature form",Success,254,0.054276409
+ale 25,"new core, enthalpy form",Success,261,0.089614286
+ale 100,old core,Success,1660,0.774702946
+ale 100,"new core, temperature form",Success,1118,0.871560914
+ale 100,"new core, enthalpy form",Success,837,1.131523667

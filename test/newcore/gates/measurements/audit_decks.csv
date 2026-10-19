@@ -1,0 +1,163 @@
+deck,run,reltol,retcode,error,spread,steps,time
+"eulerian 25, solid λ 1.0e-6",old core,0.0001,Success,0.00032932761325810134,1.3774297258350998e-9,23,NaN
+"eulerian 25, solid λ 1.0e-6",old core,3.0e-5,Success,0.00015853209845317906,1.3774297258350998e-9,28,NaN
+"eulerian 25, solid λ 1.0e-6",old core,1.0e-5,Success,3.4179647059318086e-5,1.3774297258350998e-9,34,NaN
+"eulerian 25, solid λ 1.0e-6",old core,3.0e-6,Success,6.432812733692117e-5,1.3774297258350998e-9,42,NaN
+"eulerian 25, solid λ 1.0e-6",old core,1.0e-6,Success,9.901409953272378e-6,1.3774297258350998e-9,52,0.009259815
+"eulerian 25, solid λ 1.0e-6",old core,3.0e-7,Success,1.7930807075572375e-5,1.3774297258350998e-9,64,NaN
+"eulerian 25, solid λ 1.0e-6",old core,1.0e-7,Success,3.7686452287744032e-6,1.3774297258350998e-9,80,NaN
+"eulerian 25, solid λ 1.0e-6",old core,3.0e-8,Success,9.992681953008287e-7,1.3774297258350998e-9,103,NaN
+"eulerian 25, solid λ 1.0e-6",old core,1.0e-8,Success,9.734332024891046e-7,1.3774297258350998e-9,128,NaN
+"eulerian 25, solid λ 1.0e-6","new core, temperature form",0.0001,Success,0.0010826255247593508,1.929265636135824e-10,25,NaN
+"eulerian 25, solid λ 1.0e-6","new core, temperature form",3.0e-5,Success,0.0012141169580672795,1.929265636135824e-10,29,NaN
+"eulerian 25, solid λ 1.0e-6","new core, temperature form",1.0e-5,Success,0.00020504387214259623,1.929265636135824e-10,33,NaN
+"eulerian 25, solid λ 1.0e-6","new core, temperature form",3.0e-6,Success,0.00019388743908166362,1.929265636135824e-10,40,NaN
+"eulerian 25, solid λ 1.0e-6","new core, temperature form",1.0e-6,Success,5.092087201319373e-5,1.929265636135824e-10,48,0.006658648
+"eulerian 25, solid λ 1.0e-6","new core, temperature form",3.0e-7,Success,1.7216526430274826e-5,1.929265636135824e-10,64,NaN
+"eulerian 25, solid λ 1.0e-6","new core, temperature form",1.0e-7,Success,2.9526574962801533e-6,1.929265636135824e-10,84,0.010951213
+"eulerian 25, solid λ 1.0e-6","new core, temperature form",3.0e-8,Success,7.195826583483722e-7,1.929265636135824e-10,113,0.014012633
+"eulerian 25, solid λ 1.0e-6","new core, temperature form",1.0e-8,Success,7.428790240737726e-7,1.929265636135824e-10,153,NaN
+"eulerian 25, solid λ 1.0e-6","new core, enthalpy form",0.0001,Success,0.001832881356449434,9.674749890109524e-11,33,NaN
+"eulerian 25, solid λ 1.0e-6","new core, enthalpy form",3.0e-5,Success,0.00037343401345424354,9.674749890109524e-11,38,NaN
+"eulerian 25, solid λ 1.0e-6","new core, enthalpy form",1.0e-5,Success,0.0007627778189771561,9.674749890109524e-11,44,NaN
+"eulerian 25, solid λ 1.0e-6","new core, enthalpy form",3.0e-6,Success,0.0002298731254768427,9.674749890109524e-11,54,NaN
+"eulerian 25, solid λ 1.0e-6","new core, enthalpy form",1.0e-6,Success,9.167660164166591e-5,9.674749890109524e-11,66,0.028663538
+"eulerian 25, solid λ 1.0e-6","new core, enthalpy form",3.0e-7,Success,1.7712498220134876e-5,9.674749890109524e-11,84,NaN
+"eulerian 25, solid λ 1.0e-6","new core, enthalpy form",1.0e-7,Success,3.6890763794872328e-6,9.674749890109524e-11,114,0.042897818
+"eulerian 25, solid λ 1.0e-6","new core, enthalpy form",3.0e-8,Success,1.3742173905484378e-6,9.674749890109524e-11,164,0.062912877
+"eulerian 25, solid λ 1.0e-6","new core, enthalpy form",1.0e-8,Success,2.1906055280851433e-7,9.674749890109524e-11,229,NaN
+"eulerian 100, solid λ 1.0e-6",old core,0.0001,Success,0.00020380950866183412,5.424340088211466e-9,27,NaN
+"eulerian 100, solid λ 1.0e-6",old core,3.0e-5,Success,0.00010695449475406349,5.424340088211466e-9,32,NaN
+"eulerian 100, solid λ 1.0e-6",old core,1.0e-5,Success,3.5157899219484534e-5,5.424340088211466e-9,38,NaN
+"eulerian 100, solid λ 1.0e-6",old core,3.0e-6,Success,1.3994275605000439e-5,5.424340088211466e-9,47,NaN
+"eulerian 100, solid λ 1.0e-6",old core,1.0e-6,Success,1.3723417396249715e-5,5.424340088211466e-9,56,0.040593211
+"eulerian 100, solid λ 1.0e-6",old core,3.0e-7,Success,8.358366699212638e-6,5.424340088211466e-9,69,NaN
+"eulerian 100, solid λ 1.0e-6",old core,1.0e-7,Success,2.002686869673198e-6,5.424340088211466e-9,85,NaN
+"eulerian 100, solid λ 1.0e-6",old core,3.0e-8,Success,1.6569927083764924e-6,5.424340088211466e-9,106,NaN
+"eulerian 100, solid λ 1.0e-6",old core,1.0e-8,Success,5.799686277896399e-7,5.424340088211466e-9,133,NaN
+"eulerian 100, solid λ 1.0e-6","new core, temperature form",0.0001,Success,0.011458478864938115,1.820012585085351e-9,31,NaN
+"eulerian 100, solid λ 1.0e-6","new core, temperature form",3.0e-5,Success,0.00142163157761388,1.820012585085351e-9,36,NaN
+"eulerian 100, solid λ 1.0e-6","new core, temperature form",1.0e-5,Success,0.0007191013118017509,1.820012585085351e-9,42,NaN
+"eulerian 100, solid λ 1.0e-6","new core, temperature form",3.0e-6,Success,0.0003045757025574858,1.820012585085351e-9,49,NaN
+"eulerian 100, solid λ 1.0e-6","new core, temperature form",1.0e-6,Success,0.00029665738577477896,1.820012585085351e-9,58,0.035880119
+"eulerian 100, solid λ 1.0e-6","new core, temperature form",3.0e-7,Success,2.8284866743888415e-5,1.820012585085351e-9,75,NaN
+"eulerian 100, solid λ 1.0e-6","new core, temperature form",1.0e-7,Success,9.772519888429088e-6,1.820012585085351e-9,98,0.058378223
+"eulerian 100, solid λ 1.0e-6","new core, temperature form",3.0e-8,Success,3.213047648387146e-6,1.820012585085351e-9,129,0.074631362
+"eulerian 100, solid λ 1.0e-6","new core, temperature form",1.0e-8,Success,1.079102503354079e-6,1.820012585085351e-9,165,NaN
+"eulerian 100, solid λ 1.0e-6","new core, enthalpy form",0.0001,Success,0.006648654368746065,3.559534889063798e-10,42,NaN
+"eulerian 100, solid λ 1.0e-6","new core, enthalpy form",3.0e-5,Success,0.0018436516036217654,3.559534889063798e-10,49,NaN
+"eulerian 100, solid λ 1.0e-6","new core, enthalpy form",1.0e-5,Success,0.0008075522649733102,3.559534889063798e-10,57,NaN
+"eulerian 100, solid λ 1.0e-6","new core, enthalpy form",3.0e-6,Success,0.00034379230191916577,3.559534889063798e-10,70,NaN
+"eulerian 100, solid λ 1.0e-6","new core, enthalpy form",1.0e-6,Success,6.122253660123533e-5,3.559534889063798e-10,85,0.133241679
+"eulerian 100, solid λ 1.0e-6","new core, enthalpy form",3.0e-7,Success,1.3931112789578037e-5,3.559534889063798e-10,113,NaN
+"eulerian 100, solid λ 1.0e-6","new core, enthalpy form",1.0e-7,Success,7.3565032607803005e-6,3.559534889063798e-10,168,0.257040013
+"eulerian 100, solid λ 1.0e-6","new core, enthalpy form",3.0e-8,Success,1.606465502845822e-6,3.559534889063798e-10,291,0.452205195
+"eulerian 100, solid λ 1.0e-6","new core, enthalpy form",1.0e-8,Success,2.481648493812827e-6,3.559534889063798e-10,492,NaN
+"ale 25, solid λ 1.0e-6",old core,0.0001,Success,0.0005525996359665442,1.222815626533702e-9,23,NaN
+"ale 25, solid λ 1.0e-6",old core,3.0e-5,Success,0.00023584982420743472,1.222815626533702e-9,27,NaN
+"ale 25, solid λ 1.0e-6",old core,1.0e-5,Success,9.824238247801986e-5,1.222815626533702e-9,33,NaN
+"ale 25, solid λ 1.0e-6",old core,3.0e-6,Success,5.353312189981807e-5,1.222815626533702e-9,41,NaN
+"ale 25, solid λ 1.0e-6",old core,1.0e-6,Success,2.3101348233467434e-5,1.222815626533702e-9,51,0.013943071
+"ale 25, solid λ 1.0e-6",old core,3.0e-7,Success,4.913414841212216e-6,1.222815626533702e-9,63,NaN
+"ale 25, solid λ 1.0e-6",old core,1.0e-7,Success,2.463582859490998e-6,1.222815626533702e-9,78,NaN
+"ale 25, solid λ 1.0e-6",old core,3.0e-8,Success,8.288473054562928e-7,1.222815626533702e-9,99,NaN
+"ale 25, solid λ 1.0e-6",old core,1.0e-8,Success,3.2550190098845633e-7,1.222815626533702e-9,124,NaN
+"ale 25, solid λ 1.0e-6","new core, temperature form",0.0001,Success,0.0026952148657528596,8.86757334228605e-11,25,NaN
+"ale 25, solid λ 1.0e-6","new core, temperature form",3.0e-5,Success,0.00046354644075563556,8.86757334228605e-11,29,NaN
+"ale 25, solid λ 1.0e-6","new core, temperature form",1.0e-5,Success,0.0007031357171172203,8.86757334228605e-11,33,NaN
+"ale 25, solid λ 1.0e-6","new core, temperature form",3.0e-6,Success,0.00012388835796173225,8.86757334228605e-11,39,NaN
+"ale 25, solid λ 1.0e-6","new core, temperature form",1.0e-6,Success,6.824794752446905e-5,8.86757334228605e-11,46,0.019800666
+"ale 25, solid λ 1.0e-6","new core, temperature form",3.0e-7,Success,2.7597596499617794e-5,8.86757334228605e-11,59,NaN
+"ale 25, solid λ 1.0e-6","new core, temperature form",1.0e-7,Success,3.0872104161971947e-6,8.86757334228605e-11,79,0.029163158
+"ale 25, solid λ 1.0e-6","new core, temperature form",3.0e-8,Success,5.262683089313214e-7,8.86757334228605e-11,108,0.040215367
+"ale 25, solid λ 1.0e-6","new core, temperature form",1.0e-8,Success,2.0087315988348564e-7,8.86757334228605e-11,141,NaN
+"ale 25, solid λ 1.0e-6","new core, enthalpy form",0.0001,Success,0.0005419258817482842,3.005879989359528e-10,32,NaN
+"ale 25, solid λ 1.0e-6","new core, enthalpy form",3.0e-5,Success,0.001542487214578614,3.005879989359528e-10,36,NaN
+"ale 25, solid λ 1.0e-6","new core, enthalpy form",1.0e-5,Success,0.0004193699460302014,3.005879989359528e-10,42,NaN
+"ale 25, solid λ 1.0e-6","new core, enthalpy form",3.0e-6,Success,3.51037865584658e-5,3.005879989359528e-10,52,NaN
+"ale 25, solid λ 1.0e-6","new core, enthalpy form",1.0e-6,Success,0.00012445763945834187,3.005879989359528e-10,63,0.039322091
+"ale 25, solid λ 1.0e-6","new core, enthalpy form",3.0e-7,Success,6.906742669343657e-6,3.005879989359528e-10,80,0.046975252
+"ale 25, solid λ 1.0e-6","new core, enthalpy form",1.0e-7,Success,4.0559013996244175e-6,3.005879989359528e-10,107,0.061693607
+"ale 25, solid λ 1.0e-6","new core, enthalpy form",3.0e-8,Success,3.721577286341926e-7,3.005879989359528e-10,151,NaN
+"ale 25, solid λ 1.0e-6","new core, enthalpy form",1.0e-8,Success,3.73284706256527e-7,3.005879989359528e-10,213,NaN
+"ale 100, solid λ 1.0e-6",old core,0.0001,Success,0.0006083562052481284,3.1407125788973644e-9,28,NaN
+"ale 100, solid λ 1.0e-6",old core,3.0e-5,Success,0.00019898996924894163,3.1407125788973644e-9,32,NaN
+"ale 100, solid λ 1.0e-6",old core,1.0e-5,Success,0.00010566696266778308,3.1407125788973644e-9,37,NaN
+"ale 100, solid λ 1.0e-6",old core,3.0e-6,Success,3.087018501446437e-5,3.1407125788973644e-9,46,NaN
+"ale 100, solid λ 1.0e-6",old core,1.0e-6,Success,1.034815022649127e-5,3.1407125788973644e-9,54,0.044770945
+"ale 100, solid λ 1.0e-6",old core,3.0e-7,Success,7.30861268039007e-6,3.1407125788973644e-9,67,NaN
+"ale 100, solid λ 1.0e-6",old core,1.0e-7,Success,4.4326218358037295e-6,3.1407125788973644e-9,81,NaN
+"ale 100, solid λ 1.0e-6",old core,3.0e-8,Success,9.10128619580064e-7,3.1407125788973644e-9,104,NaN
+"ale 100, solid λ 1.0e-6",old core,1.0e-8,Success,5.612517952613416e-7,3.1407125788973644e-9,129,NaN
+"ale 100, solid λ 1.0e-6","new core, temperature form",0.0001,Success,0.015898935084578625,3.89945853385143e-11,30,NaN
+"ale 100, solid λ 1.0e-6","new core, temperature form",3.0e-5,Success,0.0014435960600849285,3.89945853385143e-11,34,NaN
+"ale 100, solid λ 1.0e-6","new core, temperature form",1.0e-5,Success,0.0010896217523850282,3.89945853385143e-11,39,NaN
+"ale 100, solid λ 1.0e-6","new core, temperature form",3.0e-6,Success,0.00016407678742780263,3.89945853385143e-11,47,NaN
+"ale 100, solid λ 1.0e-6","new core, temperature form",1.0e-6,Success,9.656504687427514e-5,3.89945853385143e-11,54,0.075871689
+"ale 100, solid λ 1.0e-6","new core, temperature form",3.0e-7,Success,1.1770370633712446e-5,3.89945853385143e-11,70,NaN
+"ale 100, solid λ 1.0e-6","new core, temperature form",1.0e-7,Success,6.539148444062448e-6,3.89945853385143e-11,90,0.124280654
+"ale 100, solid λ 1.0e-6","new core, temperature form",3.0e-8,Success,5.448008550956729e-7,3.89945853385143e-11,117,0.160196511
+"ale 100, solid λ 1.0e-6","new core, temperature form",1.0e-8,Success,3.4503329970902996e-7,3.89945853385143e-11,153,NaN
+"ale 100, solid λ 1.0e-6","new core, enthalpy form",0.0001,Success,0.04460402629717919,1.9838353182421997e-10,40,NaN
+"ale 100, solid λ 1.0e-6","new core, enthalpy form",3.0e-5,Success,0.002564166841352744,1.9838353182421997e-10,47,NaN
+"ale 100, solid λ 1.0e-6","new core, enthalpy form",1.0e-5,Success,0.0014591291916303817,1.9838353182421997e-10,54,NaN
+"ale 100, solid λ 1.0e-6","new core, enthalpy form",3.0e-6,Success,0.000444532219944449,1.9838353182421997e-10,66,NaN
+"ale 100, solid λ 1.0e-6","new core, enthalpy form",1.0e-6,Success,0.00016164903354365379,1.9838353182421997e-10,80,0.140991824
+"ale 100, solid λ 1.0e-6","new core, enthalpy form",3.0e-7,Success,4.594644508415513e-5,1.9838353182421997e-10,105,NaN
+"ale 100, solid λ 1.0e-6","new core, enthalpy form",1.0e-7,Success,4.759145554089628e-6,1.9838353182421997e-10,151,0.264177525
+"ale 100, solid λ 1.0e-6","new core, enthalpy form",3.0e-8,Success,2.8980155093449866e-6,1.9838353182421997e-10,252,0.445389806
+"ale 100, solid λ 1.0e-6","new core, enthalpy form",1.0e-8,Success,3.785403350775596e-7,1.9838353182421997e-10,427,NaN
+ale_darcy 25,old core,0.0001,Success,0.00027841276175877283,3.0313117349578533e-8,79,NaN
+ale_darcy 25,old core,3.0e-5,Success,0.0001308024353647852,3.0313117349578533e-8,59,NaN
+ale_darcy 25,old core,1.0e-5,Success,0.00013183174371533823,3.0313117349578533e-8,63,NaN
+ale_darcy 25,old core,3.0e-6,Success,0.00015406330646783317,3.0313117349578533e-8,69,NaN
+ale_darcy 25,old core,1.0e-6,Success,0.00012553698707051808,3.0313117349578533e-8,75,0.01921997
+ale_darcy 25,old core,3.0e-7,Success,3.7446863302648126e-5,3.0313117349578533e-8,90,NaN
+ale_darcy 25,old core,1.0e-7,Success,3.095661315910547e-5,3.0313117349578533e-8,107,NaN
+ale_darcy 25,old core,3.0e-8,Success,5.3089660582372744e-5,3.0313117349578533e-8,122,NaN
+ale_darcy 25,old core,1.0e-8,Success,6.221056082722498e-6,3.0313117349578533e-8,166,NaN
+ale_darcy 25,"new core, temperature form",0.0001,Success,0.007734364893622114,1.7473666957812384e-10,45,NaN
+ale_darcy 25,"new core, temperature form",3.0e-5,Success,0.0018137469752446123,1.7473666957812384e-10,54,NaN
+ale_darcy 25,"new core, temperature form",1.0e-5,Success,0.0006845676130069478,1.7473666957812384e-10,62,NaN
+ale_darcy 25,"new core, temperature form",3.0e-6,Success,0.0005298888487459408,1.7473666957812384e-10,76,NaN
+ale_darcy 25,"new core, temperature form",1.0e-6,Success,6.771489825041499e-5,1.7473666957812384e-10,100,0.036705612
+ale_darcy 25,"new core, temperature form",3.0e-7,Success,5.532422756004962e-5,1.7473666957812384e-10,135,0.043937718
+ale_darcy 25,"new core, temperature form",1.0e-7,Success,9.74794602370821e-6,1.7473666957812384e-10,186,NaN
+ale_darcy 25,"new core, temperature form",3.0e-8,Success,1.7311060673819156e-6,1.7473666957812384e-10,259,NaN
+ale_darcy 25,"new core, temperature form",1.0e-8,Success,5.769715016867849e-7,1.7473666957812384e-10,353,NaN
+ale_darcy 25,"new core, enthalpy form",0.0001,Success,0.013700586867230413,4.650928531191312e-10,50,NaN
+ale_darcy 25,"new core, enthalpy form",3.0e-5,Success,0.0017722688246522011,4.650928531191312e-10,61,NaN
+ale_darcy 25,"new core, enthalpy form",1.0e-5,Success,0.0011014936129640773,4.650928531191312e-10,75,NaN
+ale_darcy 25,"new core, enthalpy form",3.0e-6,Success,0.00015722640137028066,4.650928531191312e-10,102,NaN
+ale_darcy 25,"new core, enthalpy form",1.0e-6,Success,7.554398678166763e-5,4.650928531191312e-10,128,0.055220333
+ale_darcy 25,"new core, enthalpy form",3.0e-7,Success,9.346458796244406e-6,4.650928531191312e-10,180,0.077925158
+ale_darcy 25,"new core, enthalpy form",1.0e-7,Success,3.849597874250321e-6,4.650928531191312e-10,240,NaN
+ale_darcy 25,"new core, enthalpy form",3.0e-8,Success,1.1924522596018505e-6,4.650928531191312e-10,337,NaN
+ale_darcy 25,"new core, enthalpy form",1.0e-8,Success,3.2496450330654625e-7,4.650928531191312e-10,479,NaN
+ale_darcy 100,old core,0.0001,Success,0.00021991809785504302,2.997114734171191e-8,589,NaN
+ale_darcy 100,old core,3.0e-5,Success,0.0002869325593337635,2.997114734171191e-8,180,NaN
+ale_darcy 100,old core,1.0e-5,Success,0.00012376246445455763,2.997114734171191e-8,90,NaN
+ale_darcy 100,old core,3.0e-6,Success,0.00016225923047841206,2.997114734171191e-8,74,NaN
+ale_darcy 100,old core,1.0e-6,Success,5.96363101976749e-5,2.997114734171191e-8,80,0.077534142
+ale_darcy 100,old core,3.0e-7,Success,0.00025500691026536515,2.997114734171191e-8,92,NaN
+ale_darcy 100,old core,1.0e-7,Success,8.630683487353963e-5,2.997114734171191e-8,98,NaN
+ale_darcy 100,old core,3.0e-8,Success,4.3782690795524104e-5,2.997114734171191e-8,126,NaN
+ale_darcy 100,old core,1.0e-8,Success,9.517615467302676e-6,2.997114734171191e-8,169,NaN
+ale_darcy 100,"new core, temperature form",0.0001,Success,0.011609592948047975,3.752802513190545e-10,48,NaN
+ale_darcy 100,"new core, temperature form",3.0e-5,Success,0.001919917591749254,3.752802513190545e-10,56,NaN
+ale_darcy 100,"new core, temperature form",1.0e-5,Success,0.0017464863892655558,3.752802513190545e-10,66,NaN
+ale_darcy 100,"new core, temperature form",3.0e-6,Success,0.000224862396635217,3.752802513190545e-10,80,NaN
+ale_darcy 100,"new core, temperature form",1.0e-6,Success,0.00023239970983013336,3.752802513190545e-10,102,0.129625719
+ale_darcy 100,"new core, temperature form",3.0e-7,Success,1.4437833328884153e-5,3.752802513190545e-10,140,0.179524912
+ale_darcy 100,"new core, temperature form",1.0e-7,Success,5.479096103044867e-6,3.752802513190545e-10,188,0.241122083
+ale_darcy 100,"new core, temperature form",3.0e-8,Success,4.674079150390753e-6,3.752802513190545e-10,260,NaN
+ale_darcy 100,"new core, temperature form",1.0e-8,Success,4.60998080598074e-7,3.752802513190545e-10,350,NaN
+ale_darcy 100,"new core, enthalpy form",0.0001,Success,0.010085051300848136,2.7046098693972453e-10,55,NaN
+ale_darcy 100,"new core, enthalpy form",3.0e-5,Success,0.0030493964588913514,2.7046098693972453e-10,65,NaN
+ale_darcy 100,"new core, enthalpy form",1.0e-5,Success,0.0022223595384502914,2.7046098693972453e-10,78,NaN
+ale_darcy 100,"new core, enthalpy form",3.0e-6,Success,0.0009112250077123463,2.7046098693972453e-10,96,NaN
+ale_darcy 100,"new core, enthalpy form",1.0e-6,Success,7.196924570962437e-5,2.7046098693972453e-10,126,0.21841492
+ale_darcy 100,"new core, enthalpy form",3.0e-7,Success,2.780721331419045e-5,2.7046098693972453e-10,170,0.291227468
+ale_darcy 100,"new core, enthalpy form",1.0e-7,Success,5.8011912642541574e-6,2.7046098693972453e-10,251,0.428719584
+ale_darcy 100,"new core, enthalpy form",3.0e-8,Success,1.7990026890402078e-6,2.7046098693972453e-10,405,NaN
+ale_darcy 100,"new core, enthalpy form",1.0e-8,Success,8.483402780257165e-7,2.7046098693972453e-10,643,NaN
