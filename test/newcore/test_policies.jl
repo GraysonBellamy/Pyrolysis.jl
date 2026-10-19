@@ -61,6 +61,14 @@ function _slab(n; κ = 0.0, radiating = false)
     )
 end
 
+@testset "a policy names a known restart and flag rule" begin
+    alg = OrdinaryDiffEq.Rodas5P()
+    @test IntegratorPolicy(alg, :forced_dt, :keep, 1e-6).restart === :forced_dt
+    @test_throws ArgumentError IntegratorPolicy(alg, :immediate, :keep, 1e-6)
+    @test_throws ArgumentError IntegratorPolicy(alg, :solver_chosen, :raise, 1e-6)
+    @test_throws ArgumentError rodas5p_policy(KLUFactorization(); restart = :immediate)
+end
+
 @testset "domain check: admissibility, porosity and constraint residuals" begin
     cp = setup(
         _slab(6; κ = 1e-12, radiating = true);

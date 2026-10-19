@@ -14,11 +14,21 @@ using Pyrolysis.Deactivation: ConservativeTransfer
 using Pyrolysis.ColoredJacobian
 using Pyrolysis.Integration
 using Pyrolysis.Integration: setup, consistent_state!, integrate
+using Pyrolysis.Integration: fbdf_policy, rodas5p_policy, kencarp4_policy
+using OrdinaryDiffEq: DiscreteCallback
+using LinearSolve: KLUFactorization, UMFPACKFactorization
 
 # An ablating solid: it decomposes to a gas that takes no volume, so a cell's
 # thickness falls with its condensed mass, as in V-CPL-02. `radiating` makes
 # the solid absorb in depth.
-function _ablator(n; L = 3e-3, q = 2.8e6, t_end = 0.8, radiating = false)
+function _ablator(
+    n;
+    L = 3e-3,
+    q = 2.8e6,
+    t_end = 0.8,
+    radiating = false,
+    from_bottom = false,
+)
     ρ, c, k = 1000.0, 1000.0, 1.0
     R, E, Tp, T0 = 8.314462618, 1.0e5, 700.0, 300.0
     v = 2.0e-3
@@ -31,18 +41,21 @@ function _ablator(n; L = 3e-3, q = 2.8e6, t_end = 0.8, radiating = false)
         components = (solid, gas),
         reactions = (Reaction(:ablate, 1 => 2; A = A, E = E, h = 1.0e6),),
     )
-    top = radiating ? RadiativeFluxBC(flux = q) : HeatFluxBC(q)
+    heated = radiating ? RadiativeFluxBC(flux = q) : HeatFluxBC(q)
+    thermal =
+        from_bottom ? (top = AdiabaticBC(), bottom = heated) :
+        (top = heated, bottom = AdiabaticBC())
     return PyrolysisProblem(
         mesh = create_uniform_mesh(L, n, Val(2)),
         material = mat,
         bc_set = BoundaryConditionSet(
-            thermal = (top = top, bottom = AdiabaticBC()),
+            thermal = thermal,
             mass = (
                 top = ConvectiveMassBC(h_m = 10.0, ξ_inf = 0.0),
                 bottom = ImpermeableBC(),
             ),
         ),
-        T_initial = z -> T0 + 1e5 * z,
+        T_initial = from_bottom ? (z -> T0 + 1e5 * (L - z)) : (z -> T0 + 1e5 * z),
         ξ_initial = [z -> ρ, z -> 0.0],
         tspan = (0.0, t_end),
         output_times = collect(0.0:0.05:t_end),
@@ -118,6 +131,11 @@ end
     du = zeros(length(u))
     residual!(du, u, def, 0.3, cp.ws)
     @test all(isfinite, du)
+    if moving
+        ds, c = cp.ws.derived, cp.ws.contributions
+        scale = sum(abs, c.θ .* ds.V_eval) + sum(abs, ds.geometry.face_area .* ds.w)
+        @test all(abs(du[velocity_index(layout, nd)]) <= 1e-10 * scale for nd = 1:7)
+    end
     # The thermal condition of :top now acts on the receiver's far face.
     @test live_face(def.setup.topology, cp.ws.derived.active, 7) == 6
     Jd = dense_jacobian(def, cp.ws, u, 0.3)
@@ -397,6 +415,16 @@ end
     residual!(du_s, cp.u0, cp.def, 0.0, cp.ws)
     residual!(du_p, plain.u0, plain.def, 0.0, plain.ws)
     @test du_s == du_p
+    # At the threshold the cell reacts at 20/27 of the plain kernel's rates.
+    u = copy(cp.u0)
+    u[mass_index(cp.def.layout, 2, 1)] = cells.threshold * m0
+    residual!(du_s, u, cp.def, 0.0, cp.ws)
+    residual!(du_p, u, plain.def, 0.0, plain.ws)
+    S_s, S_p = cp.ws.contributions.S_mass, plain.ws.contributions.S_mass
+    @test S_p[1, 2] < 0
+    @test S_s[1, 2] / S_p[1, 2] ≈ 20 / 27 rtol = 1e-12
+    @test S_s[2, 2] / S_p[2, 2] ≈ 20 / 27 rtol = 1e-12
+    @test S_s[1, 1] == S_p[1, 1]
 end
 
 @testset "a solve through deactivations: $(energy) form, $(moving ? "moving" : "fixed") mesh" for energy in
@@ -477,6 +505,28 @@ end
     end
 end
 
+@testset "the consistent sweep after a transfer leaves the velocity and intensity rows at round-off" begin
+    q = 2.8e6
+    cp = setup(
+        _ablator(6; q, radiating = true);
+        use_ale = true,
+        radiation_model = BEER_LAMBERT,
+        deactivation = true,
+    )
+    def, layout, cells = cp.def, cp.def.layout, cp.deactivation
+    u = _deplete!(copy(cp.u0), cp, 6, 0.5 * cells.threshold)
+    consistent_state!(u, def, cp.ws, 0.0)
+    @test deactivate!(u, cells, def, 0.2) === :transferred
+    consistent_state!(u, def, cp.ws, 0.2)
+    du = zeros(length(u))
+    residual!(du, u, def, 0.2, cp.ws)
+    ds, c = cp.ws.derived, cp.ws.contributions
+    scale = sum(abs, c.θ .* ds.V_eval) + sum(abs, ds.geometry.face_area .* ds.w)
+    @test all(abs(du[velocity_index(layout, nd)]) <= 1e-10 * scale for nd = 1:6)
+    @test all(abs(du[intensity_index(layout, f)]) <= 1e-12 * q for f = 1:6)
+    @test !layout.mask[intensity_index(layout, 7)]
+end
+
 @testset "the consistent sweep reports a velocity row it cannot satisfy" begin
     cp = setup(_ablator(4); use_ale = true)
     u = copy(cp.u0)
@@ -504,4 +554,60 @@ end
     @test sol.retcode === :Failure
     @test sol.t[end] < 0.8
     @test sol.statistics.domain_rejections > 0
+end
+
+@testset "the restart after an event: $(name)" for (name, policy) in (
+    ("FBDF", fbdf_policy(KLUFactorization())),
+    ("Rodas5P, forced restart", rodas5p_policy(KLUFactorization(); restart = :forced_dt)),
+    ("KenCarp4", kencarp4_policy(KLUFactorization())),
+)
+    steps = Tuple{Float64,Float64}[]
+    probe = DiscreteCallback(
+        (u, t, integrator) -> true,
+        integrator -> push!(steps, (integrator.tprev, integrator.t));
+        save_positions = (false, false),
+    )
+    sol = Integration.solve(
+        _ablator(30);
+        use_ale = true,
+        deactivation = true,
+        abstol = 1e-7,
+        reltol = 1e-5,
+        integrator_policy = policy,
+        callback = probe,
+    )
+    @test sol.retcode === :Success
+    @test length(sol.events) >= 5
+    @test [e.cell for e in sol.events] == 30:-1:(31-length(sol.events))
+    if policy.restart === :forced_dt
+        # The step after each event is the restart step.
+        after = [steps[findfirst(s -> s[1] == e.t, steps)] for e in sol.events]
+        @test all(s -> s[2] - s[1] ≈ DT_AFTER_EVENT, after)
+    end
+end
+
+@testset "a void under a live cell ends the solve" begin
+    for moving in (true, false)
+        sol = Integration.solve(
+            _ablator(6; from_bottom = true, t_end = 5.0);
+            use_ale = moving,
+            deactivation = true,
+            abstol = 1e-7,
+            reltol = 1e-5,
+        )
+        @test sol.retcode === :Terminated
+        @test sol.outcome === :interior
+        @test isempty(sol.events)
+        @test sol.t[end] < 5.0
+    end
+end
+
+@testset "deactivation under UMFPACK" begin
+    options = (use_ale = true, deactivation = true, abstol = 1e-7, reltol = 1e-5)
+    klu = Integration.solve(_ablator(30); options...)
+    umfpack =
+        Integration.solve(_ablator(30); options..., linear_solver = UMFPACKFactorization())
+    @test umfpack.retcode === :Success
+    @test [e.cell for e in umfpack.events] == [e.cell for e in klu.events]
+    @test [e.t for e in umfpack.events] ≈ [e.t for e in klu.events] rtol = 1e-6
 end
