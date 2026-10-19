@@ -14,13 +14,14 @@
 - Linear solve (C32): `StructuredKLU`, keeping KLU's analysis across a solve, is the default on a layout with algebraic rows (D46).
 - Fixed-mesh transfer (C34): the dead cell's gas is vented to the event's ledger (D47); V-BO-02's ledger quantity on the new core is held to 3e-3 (C39).
 - V-MMS-03's face temperature (C33): the upwind-biased reconstruction stays.
+- Item 2 and the choices of plan §10 (C40): item 2 is accepted as a recorded exception and Phase 1 closes at this gate; the energy state is the temperature, lifting stays, no analytical fast paths.
 
 ## Summary
 
 | item | what | result |
 |---|---|---|
 | 1 | verification cases within their tolerances | passes for every case of §6.2; the six cases of C7 and C29 lie outside its scope |
-| 2 | audit decks within 1.5× of the old core at matched accuracy | with the structure-keeping linear solve, temperature form 0.99 to 1.88× over two runs (Eulerian 1.16 to 1.45, ale_darcy 0.99 to 1.38, ale 25 1.48 and 1.51, ale 100 1.39 and 1.88), against 1.9 to 2.8× on the moving-mesh and Darcy decks before; **fails** on ale 100 and sits at the threshold on ale 25 |
+| 2 | audit decks within 1.5× of the old core at matched accuracy | with the structure-keeping linear solve, temperature form 0.99 to 1.88× over two runs (Eulerian 1.16 to 1.45, ale_darcy 0.99 to 1.38, ale 25 1.48 and 1.51, ale 100 1.39 and 1.88), against 1.9 to 2.8× on the moving-mesh and Darcy decks before; **fails** on ale 100 and sits at the threshold on ale 25; accepted by the owner as a recorded exception (C40) |
 | 3 | MMS orders and the V-MMS-01 temporal sweep | passes; V-MMS-03's temperature converges below second order on the new core (1.6 to 1.7), its species at second order (C33) |
 | 4 | radial bandwidth and colors equal to planar | passes |
 | 5 | the suite with `H` as the state | passes |
@@ -28,7 +29,7 @@
 | 7 | temperature-form energy balance no worse than the old core's, at the integrator's order; inventory form exact | passes |
 | 8 | achieved error against requested tolerance on every case | 60 of 66 solves within budget; the deactivating cases' event times follow the step, not the tolerance; V-CPL-05 within budget over the times its reference reaches |
 | 9 | V-HC-03 and V-HC-02c at 320 cells with the chosen integrator | passes (at the spatial floor) |
-| 10 | leftovers 1 and 2 recorded | recorded; the affordability decision is open (item 2) |
+| 10 | leftovers 1 and 2 recorded | recorded; affordability decided: colored AD alone, no analytical fast paths (C40) |
 
 The full three-way `Pkg.test()` (session counts; no log is committed), each in a detached worktree of the commit: the old core 11,639/11,639 (83 min, at `8788d48`), `PYROLYSIS_CORE=new` 8,212/8,212 in the temperature form (58 min) and 8,212/8,212 in the enthalpy form (59 min, both at `6c0346a`). At `8788d48` the two new-core runs stopped at `test/newcore/test_policies.jl`, which imported SciMLBase, a package the test environment does not carry (the development sessions do); `6c0346a` imports it through OrdinaryDiffEq and changes nothing else, and test_policies passes 113/113 in the test environment. The three-way run on `phase1-review`'s final code is recorded in the review document's §6.
 
@@ -134,7 +135,7 @@ Leftover 1 (`measurements/leftover1_jacobian_cost.md`, M7) and leftover 2 (`meas
 
 ## The provisional choices of plan §10
 
-These are the owner's; the measurements and a recommendation:
+The owner's rulings (plan C28, C40), with the measurements behind them:
 
 - **Energy state.** Temperature, as the default. The inventory form passes everything the temperature form does, but at 2 to 12× its steps on the V-HC cases and 2.9 to 6.3× the old core's time at matched accuracy on the audit decks (the temperature form 1.2 to 2.8×). Its advantage, the exact ledger, shows only with the integrator's own quadrature, where the temperature form's defect converges at fourth order (item 7); with the trapezoidal ledger the two forms close alike (5.9e-7 and 1.0e-6 Eulerian, 3.1e-6 and 4.3e-6 moving). The inventory form stays the alternative, as the relative-flux work of Phase 2 plans.
 - **Integrator.** Decided: `Rodas5P`, solver-chosen restart.
@@ -146,7 +147,7 @@ These are the owner's; the measurements and a recommendation:
 
 ## What the gate leaves open
 
-- Item 2 on ale 100 (1.88×) and ale 25 (at the threshold), and the affordability decision with it; the next lever is the integrator's accuracy per tolerance.
+- Item 2's exception on ale 100 (1.88×) and ale 25 (at the threshold), accepted (C40); the next lever, the integrator's accuracy per tolerance, is Phase 2's.
 - C29: interior crossings, the V-BO ladder.
 - V-MMS-03's temperature order on the relative-flux path (C33; the upwind-biased face temperature kept for Phase 1).
 - Radial Beer–Lambert's physics (C37; refused until a radial case needs it).
