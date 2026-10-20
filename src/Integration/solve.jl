@@ -41,7 +41,7 @@ const _SOLVE_KEYWORDS = (
 	      linear_solver = nothing, integrator_policy = nothing,
 	      sources = NoSources(), deactivation = false, band = nothing,
 	      correction = NoCorrection(), lagrangian = Int[],
-	      switch_width = SWITCH_WIDTH, located_events = false) -> CoreSolution
+	      switch_width = SWITCH_WIDTH, located_events = true) -> CoreSolution
 
 Solve `problem` on the finite-volume core.
 
@@ -67,14 +67,14 @@ is accepted and ignored, the colored Jacobian being the only one.
 `use_ale`, `w_override`, `correction`, `lagrangian`, `coordinates`,
 `deactivation`, `band` and `switch_width` are those of [`setup`](@ref). On a moving mesh the solve ends with return code
 `:Terminated` when the thickness falls below `min_thickness` [m] (default
-1e-6). With `deactivation`, the cells that fall below the threshold during a step
-are deactivated at its end in one event ([`deactivate!`](@ref)). With
-`located_events` as well, the event is located inside the step at the first
-time a live cell's condensed mass reaches its threshold (the first root of
-[`threshold_margin`](@ref)) and applied at the interpolated state there, every
-cell within `reltol` of its threshold going with the crossing one
-(`deactivate!`'s `slack`); the end-of-step test stays as the safety net for a
-crossing the location does not see. The
+1e-6). With `deactivation`, cells are deactivated in events
+([`deactivate!`](@ref)): with `located_events` an event is located inside the
+step at the first time a live cell's condensed mass reaches its threshold (the
+first root of [`threshold_margin`](@ref)) and applied at the interpolated state
+there, every cell within `reltol` of its threshold going with the crossing one
+(`deactivate!`'s `slack`); at the end of every step the cells below the
+threshold go in one event, the only events without `located_events` and with
+it the safety net for a crossing the location does not see. The
 solve ends with `:Terminated` when the last cell goes or a cell below the
 threshold lies inward of a live one, and with `:Failure` when an event leaves
 the state inadmissible or no consistent node velocities. The state a solve
@@ -116,7 +116,7 @@ function _solve(
     correction::Correction = NoCorrection(),
     lagrangian::AbstractVector{<:Integer} = Int[],
     switch_width::Real = SWITCH_WIDTH,
-    located_events::Bool = false,
+    located_events::Bool = true,
 )
     jacobian === nothing ||
         @warn "solve(): `jacobian` is ignored by the finite-volume core" maxlog = 1
@@ -162,7 +162,7 @@ end
 	          dt = cp.problem.dt_initial, adaptive = true, dtmin = 1e-12,
 	          dtmax = Inf, saveat = cp.problem.output_times, callback = nothing,
 	          min_thickness = 1e-6, linear_solver = nothing,
-	          integrator_policy = nothing, located_events = false,
+	          integrator_policy = nothing, located_events = true,
 	          max_constraint_rejections = MAX_CONSTRAINT_REJECTIONS,
 	          started = time()) -> CoreSolution
 
@@ -186,7 +186,7 @@ function integrate(
     min_thickness::Real = 1e-6,
     linear_solver = nothing,
     integrator_policy = nothing,
-    located_events::Bool = false,
+    located_events::Bool = true,
     max_constraint_rejections::Int = MAX_CONSTRAINT_REJECTIONS,
     started::Float64 = time(),
 )

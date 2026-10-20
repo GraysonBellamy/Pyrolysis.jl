@@ -155,8 +155,8 @@ function _verification_case_vbo04()
             ),
         ]
         invocations = length(unique(e.invocation for e in sol.events))
-        # The exact time the identical cells cross ε_m; the event follows it
-        # at the end of the step that crossed.
+        # The exact time the identical cells cross ε_m; the event is located
+        # on it.
         k = S.r / S.ρ_s
         y₁ = Pyrolysis.Kernels.SWITCH_WIDTH * 1e-2
         F(x) = -1 / (6x^2) - 2 / (9x) + (4 / 27) * log(x / (3 - 2x))
@@ -173,12 +173,12 @@ function _verification_case_vbo04()
                 comment = "$(n_parks) events in $(invocations) invocation(s), outcome $(sol.outcome)",
             ),
             QoIResult(
-                name = "the event follows the exact crossing of ε_m",
+                name = "the event is located at the exact crossing of ε_m",
                 value = t_e,
                 exact = t_cross,
                 error = abs(t_e - t_cross) / t_cross,
-                tol = 1e-2,  # observed 6.0e-3 (the step that crosses)
-                comment = "relative delay of the event behind the exact crossing time (ε_m = 1e-2)",
+                tol = 1e-6,  # observed 5.2e-8 (temperature form), 2.3e-8 (enthalpy form)
+                comment = "relative distance of the event from the exact crossing time (ε_m = 1e-2)",
             ),
         ]
     end
