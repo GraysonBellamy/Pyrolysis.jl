@@ -5,9 +5,10 @@
 """
 	SWITCH_WIDTH
 
-The reactivity switch is one above `SWITCH_WIDTH` times the deactivation
-threshold of a cell's remaining condensed mass fraction. A wider switch slows
-the outermost cell so much that the cell inward of it depletes first.
+The default width of the reactivity switch: it is one above `SWITCH_WIDTH`
+times the deactivation threshold of a cell's remaining condensed mass
+fraction. A wider switch slows the outermost cell so much that the cell
+inward of it depletes first.
 """
 const SWITCH_WIDTH = 1.5
 
@@ -16,12 +17,12 @@ const SWITCH_WIDTH = 1.5
 
 The smooth switch-off of a cell's reactions as its condensed mass approaches
 the deactivation threshold: the rates are multiplied by
-`s = x² (3 − 2x)` with `x = mˢ / (SWITCH_WIDTH · ε_m · mˢ_ref)`, clamped to
-`[0, 1]`, so `s` is one above `SWITCH_WIDTH · ε_m`, `C¹`, about three quarters at
-the threshold (which the cell therefore still reaches) and zero at no
-condensed mass. On a moving mesh a cell's thickness falls with its mass and its
-concentrations do not, so the concentration limiter alone never slows a
-vanishing cell.
+`s = x² (3 − 2x)` with `x = mˢ / (width · ε_m · mˢ_ref)`, clamped to `[0, 1]`,
+so `s` is one above `width · ε_m`, `C¹`, about three quarters at the threshold
+at the default width [`SWITCH_WIDTH`](@ref) (which the cell therefore still
+reaches) and zero at no condensed mass. On a moving mesh a cell's thickness
+falls with its mass and its concentrations do not, so the concentration
+limiter alone never slows a vanishing cell.
 
 `reference` holds the cells' initial condensed masses, `solid` flags the
 condensed components.
@@ -30,7 +31,17 @@ struct ReactivitySwitch{NC}
     threshold::Float64
     reference::Vector{Float64}
     solid::NTuple{NC,Bool}
+    width::Float64
 end
+
+"""
+	ReactivitySwitch(threshold, reference, solid; width = SWITCH_WIDTH)
+
+The switch of the cells whose initial condensed masses are `reference`; it
+is one above `width` times the threshold.
+"""
+ReactivitySwitch(threshold, reference, solid; width::Real = SWITCH_WIDTH) =
+    ReactivitySwitch(Float64(threshold), reference, solid, Float64(width))
 
 """
 	reactivity(switch, ds, i)
@@ -44,7 +55,7 @@ The factor the rates of cell `i` are multiplied by.
     @inbounds for j = 1:NC
         sw.solid[j] && (ms += ds.m[j, i])
     end
-    x = ms / (SWITCH_WIDTH * sw.threshold * ref)
+    x = ms / (sw.width * sw.threshold * ref)
     x >= 1 && return one(x)
     x <= 0 && return zero(x)
     return x * x * (3 - 2x)
