@@ -164,6 +164,7 @@ if !isdefined(@__MODULE__, :VerificationCase)
         "V-RX-03",
         "V-RX-04",
         "V-BO-02",
+        "V-BO-04",
         "V-CPL-01",
         "V-CPL-02",
         "V-CPL-03",
