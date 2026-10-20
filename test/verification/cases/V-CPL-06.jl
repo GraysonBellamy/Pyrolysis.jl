@@ -85,8 +85,16 @@ end
 
 # Wrapped-RHS solve with a per-accepted-step energy/mass ledger. Returns a
 # NamedTuple consumed by the qois closures (retcode + window integrals).
-function _vcpl06_ledger_solve(problem; use_ale::Bool, t_win = 120.0)
-    c_gas = _VCPL06_CGAS
+# `gas` is the gas component's index; the gas and every condensed component
+# carry the constant heat capacities `c_gas` and `c_solid`.
+function _vcpl06_ledger_solve(
+    problem;
+    use_ale::Bool,
+    t_win = 120.0,
+    gas::Int = 3,
+    c_gas = _VCPL06_CGAS,
+    c_solid = 1000.0,
+)
     mat = problem.material
     apply_initial_conditions!(problem)
     def = to_problem_def(problem; use_ale = use_ale)
@@ -94,8 +102,7 @@ function _vcpl06_ledger_solve(problem; use_ale::Bool, t_win = 120.0)
     u0 = create_state_vector(ws.layout, ws.mesh)
     n = ws.layout.n_cells
     NC = Pyrolysis.Materials.n_components(mat)
-    gidx = 3
-    c_solid = 1000.0
+    gidx = gas
 
     rhs! = (du, u, p, t) -> residual!(du, u, def, t, ws)
 

@@ -1,14 +1,20 @@
-# Gate item 7 of the Phase 1 plan (§7.3): the energy balance of the
-# temperature form against the old core's ledger closure on the same decks at
-# the same tolerance, its convergence under refinement, and the inventory
-# form's exactness.
+# Gate item 7 of the Phase 1 plan (§7.3) and item 3 of the Phase 2 plan: the
+# energy balance of the temperature form against the old core's ledger closure
+# on the same decks at the same tolerance, its convergence under refinement,
+# and the inventory form's exactness.
 #
 # The decks are V-CPL-06's char-layer column (80 cells, 240 s, the window
 # from 120 s on), Eulerian and on a moving mesh: a reactive band gasifies and
 # the gas picks up about 330 K on its way out through the top, so a gas
-# enthalpy defect shows.
+# enthalpy defect shows; and V-BO-04's burning column (40 cells, moving mesh)
+# over the window before the first deactivation event on either core (0 to
+# 290 s; the old core parks its first cells at 299.6 s, the new core
+# deactivates the column at 465 s), solved without deactivation. V-BO-04 is
+# adiabatic, so its closures are over the change of the total enthalpy over
+# the window, each core's own.
 #
-# 1. Closure at the case's tolerance (abstol 1e-8, reltol 1e-6). The old core's
+# 1. Closure at the case's tolerance (abstol 1e-8, reltol 1e-6 on V-CPL-06,
+#    abstol 1e-9, reltol 1e-7 on V-BO-04). The old core's
 #    is V-CPL-06b's budget, ΔE against the trapezoidal integral of its terms
 #    over the accepted steps of the window, over the integrated boundary heat
 #    (the Eulerian column has no dilation terms). The new core's is the same
@@ -24,7 +30,11 @@
 #    three steps in the temperature form (the observed orders) and at the
 #    coarsest in the inventory form (round-off). 20 cells, the default
 #    integrator, a dense automatic-differentiation Jacobian of the augmented
-#    system.
+#    system. V-BO-04 runs at 0.1, 0.05 and 0.025 s steps (at 0.2 s and above
+#    the gas venting at the start of the burn drives a gas mass negative,
+#    which a fixed step cannot reject); its column stays at its initial
+#    temperature, so its enthalpy is linear in the masses and the defect is
+#    round-off in both forms.
 #
 # Run from the repository root:
 #   julia --project=test --startup-file=no --threads=1 test/newcore/gates/energy_ledger.jl
@@ -51,6 +61,11 @@ const T_WINDOW = 120.0
 const TOL = (abstol = 1e-8, reltol = 1e-6)
 const REFINEMENT_CELLS = 20
 const STEPS = (2.0, 1.0, 0.5)
+const VBO04_CELLS = 40
+const VBO04_WINDOW = 290.0
+const VBO04_TOL = (abstol = 1e-9, reltol = 1e-7)
+const VBO04_STEPS = (0.1, 0.05, 0.025)
+const ROUND_OFF = 1e-12
 
 # The total-enthalpy rate the inventories imply: what enters through the
 # boundary faces (the condition's heat flux and the enthalpy the boundary mass
@@ -93,17 +108,17 @@ function total_enthalpy(::States.TemperatureState, def, ws, u)
     return sum(ds.m[j, i] * ds.h[j, i] for j in axes(ds.m, 1), i in axes(ds.m, 2))
 end
 
-# The new core's closure over the window: ΔH against the trapezoidal ledger,
-# over the integrated boundary heat.
-function new_core_closure(problem; use_ale, energy_state)
-    cp = Integration.setup(problem; use_ale, energy_state, TOL...)
+# The new core's terms over the window from `t_win`: ΔH, its defect against
+# the trapezoidal ledger, and the integrated boundary heat.
+function new_core_closure(problem; use_ale, energy_state, t_win = T_WINDOW, tol = TOL)
+    cp = Integration.setup(problem; use_ale, energy_state, tol...)
     def, ws = cp.def, cp.ws
     du = zeros(length(cp.u0))
     acc, prev = zeros(2), zeros(2)
     E1, E2, last_t, started = Ref(NaN), Ref(NaN), Ref(0.0), Ref(false)
     function ledger!(integ)
         t = integ.t
-        t >= T_WINDOW || return nothing
+        t >= t_win || return nothing
         Assembly.residual!(du, integ.u, def, t, ws)
         ds, c = Assembly.buffers(ws, def, Float64)
         cur = (ledger_rate(def, c, ds), boundary_heat(def, c, ds))
@@ -123,19 +138,27 @@ function new_core_closure(problem; use_ale, energy_state)
     wall = @elapsed sol = Integration.integrate(cp; callback)
     return (;
         retcode = sol.retcode,
-        closure = abs(E2[] - E1[] - acc[1]) / abs(acc[2]),
+        defect = E2[] - E1[] - acc[1],
+        ΔE = E2[] - E1[],
         boundary = acc[2],
         steps = sol.statistics.accepted,
         wall,
     )
 end
 
-# The old core's closure: V-CPL-06b's budget on the same column.
-function old_core_closure(problem; use_ale)
-    wall = @elapsed r = _vcpl06_ledger_solve(problem; use_ale)
+# The old core's terms: V-CPL-06b's budget on the same deck (`ledger` its
+# window and the deck's gas index and heat capacities).
+function old_core_closure(problem; use_ale, ledger...)
+    wall = @elapsed r = _vcpl06_ledger_solve(problem; use_ale, ledger...)
     a = r.acc
     pred = a.q_bnd + a.Q_rxn + a.S_conv + a.handoffE + r.c_gas * a.xidotT + a.ale_T + a.dil
-    return (; retcode = r.retcode, closure = abs(r.ΔE - pred) / abs(a.q_bnd), wall)
+    return (;
+        retcode = r.retcode,
+        defect = r.ΔE - pred,
+        ΔE = r.ΔE,
+        boundary = a.q_bnd,
+        wall,
+    )
 end
 
 # The largest defect of Σ H − E over a fixed-step solve with the ledger
@@ -177,17 +200,68 @@ closures = []
 for use_ale in (false, true)
     deck = use_ale ? "moving" : "Eulerian"
     old = Base.invokelatest(old_core_closure, case.build(N_CELLS); use_ale)
-    push!(closures, (; deck, run = "old core", old...))
+    push!(
+        closures,
+        (;
+            deck,
+            run = "old core",
+            old.retcode,
+            closure = abs(old.defect) / abs(old.boundary),
+            old.wall,
+        ),
+    )
     println(closures[end])
     for energy_state in (:temperature, :enthalpy)
         r = new_core_closure(case.build(N_CELLS); use_ale, energy_state)
         push!(
             closures,
-            (; deck, run = "new core, $(energy_state) form", r.retcode, r.closure, r.wall),
+            (;
+                deck,
+                run = "new core, $(energy_state) form",
+                r.retcode,
+                closure = abs(r.defect) / abs(r.boundary),
+                r.wall,
+            ),
         )
         println(closures[end], " steps=", r.steps)
         flush(stdout)
     end
+end
+
+# V-BO-04 over the window before its first event, each core's closure over
+# its own enthalpy change (the old core's E = Σ ρc_p T V, the new core's the
+# sensible enthalpy of its laws).
+vbo04_problem(n) = Base.invokelatest(_vbo04_setup, n; t_end = VBO04_WINDOW).problem
+vbo04 = []
+old = Base.invokelatest(
+    old_core_closure,
+    vbo04_problem(VBO04_CELLS);
+    use_ale = true,
+    t_win = 0.0,
+    gas = 2,
+    c_gas = 1000.0,
+    c_solid = 1000.0,
+)
+push!(vbo04, (; run = "old core", old.retcode, closure = abs(old.defect) / abs(old.ΔE)))
+println(vbo04[end])
+for energy_state in (:temperature, :enthalpy)
+    r = new_core_closure(
+        vbo04_problem(VBO04_CELLS);
+        use_ale = true,
+        energy_state,
+        t_win = 0.0,
+        tol = VBO04_TOL,
+    )
+    push!(
+        vbo04,
+        (;
+            run = "new core, $(energy_state) form",
+            r.retcode,
+            closure = abs(r.defect) / abs(r.ΔE),
+        ),
+    )
+    println(vbo04[end], " steps=", r.steps)
+    flush(stdout)
 end
 
 refinement = []
@@ -206,17 +280,37 @@ for use_ale in (false, true)
         end
     end
 end
+vbo04_refinement = []
+for energy_state in (:temperature, :enthalpy)
+    steps = energy_state === :temperature ? VBO04_STEPS : VBO04_STEPS[1:1]
+    for dt in steps
+        cp = Integration.setup(
+            vbo04_problem(REFINEMENT_CELLS);
+            use_ale = true,
+            energy_state,
+            VBO04_TOL...,
+        )
+        retcode, defect, scale = ledger_defect(cp, dt, VBO04_WINDOW)
+        push!(
+            vbo04_refinement,
+            (; deck = "V-BO-04", energy_state, dt, retcode, defect, scale),
+        )
+        println(vbo04_refinement[end])
+        flush(stdout)
+    end
+end
 load_end = Sys.loadavg()
 
 _g(x; d = 3) = x isa AbstractFloat ? string(round(x; sigdigits = d)) : string(x)
 open(joinpath(OUT, "energy_ledger.md"), "w") do io
-    println(io, "# Gate item 7: the energy balance against the ledger\n")
+    println(io, "# The energy balance against the ledger\n")
     println(
         io,
         "Produced by `test/newcore/gates/energy_ledger.jl` at $(COMMIT_STAMP). Julia $(VERSION), ",
         "$(Threads.nthreads()) thread, $(Sys.CPU_THREADS) logical CPUs; load average ",
         "$(round.(load_start; digits = 1)) at the start and $(round.(load_end; digits = 1)) ",
-        "at the end. V-CPL-06's char-layer column.\n",
+        "at the end. Phase 1's gate item 7 on V-CPL-06's char-layer column, and Phase 2's item 3 ",
+        "on V-BO-04's burning column before its first event.\n",
     )
     println(
         io,
@@ -246,6 +340,42 @@ open(joinpath(OUT, "energy_ledger.md"), "w") do io
             io,
             "| $(r.deck) | $(r.energy_state) | $(r.dt) | $(r.retcode) | $(_g(r.defect)) | ",
             "$(_g(r.scale)) | $(order) |",
+        )
+    end
+    println(
+        io,
+        "\n## V-BO-04 before its first event\n\n$(VBO04_CELLS) cells on a moving mesh, abstol ",
+        "$(VBO04_TOL.abstol), reltol $(VBO04_TOL.reltol) (the case's), 0 to $(VBO04_WINDOW) s ",
+        "without deactivation; |ΔE − ∫ ledger| over |ΔE|, each core's own, trapezoidal over the ",
+        "accepted steps (the old core's budget is V-CPL-06b's).\n",
+    )
+    println(io, "| run | retcode | closure |")
+    println(io, "|---|---|---|")
+    for r in vbo04
+        println(io, "| $(r.run) | $(r.retcode) | $(_g(r.closure)) |")
+    end
+    println(
+        io,
+        "\n$(REFINEMENT_CELLS) cells, 0 to $(VBO04_WINDOW) s at fixed steps; the largest ",
+        "|Σ H − H₀ − E| over the solve [J] against the largest |E|, and their ratio. The column ",
+        "stays at its initial temperature, so its enthalpy is linear in the masses in both forms ",
+        "and the ledger an invariant the integrator keeps to round-off; an order is given only ",
+        "between defects above $(ROUND_OFF) of the scale.\n",
+    )
+    println(io, "| form | dt [s] | retcode | defect [J] | scale [J] | ratio | order |")
+    println(io, "|---|---|---|---|---|---|---|")
+    for (k, r) in enumerate(vbo04_refinement)
+        p = k > 1 ? vbo04_refinement[k-1] : nothing
+        resolved(x) = x.defect > ROUND_OFF * x.scale
+        order =
+            p !== nothing &&
+            p.energy_state == r.energy_state &&
+            resolved(p) &&
+            resolved(r) ? _g(log2(p.defect / r.defect)) : ""
+        println(
+            io,
+            "| $(r.energy_state) | $(r.dt) | $(r.retcode) | $(_g(r.defect)) | ",
+            "$(_g(r.scale)) | $(_g(r.defect / r.scale)) | $(order) |",
         )
     end
 end

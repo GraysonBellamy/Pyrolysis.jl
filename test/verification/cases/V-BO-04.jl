@@ -27,7 +27,8 @@
 # which integrates in closed form (`_vbo04_decay`), and after the event the
 # survivor's own decay from the merged thickness.
 
-function _vbo04_setup(n_cells::Int)
+# `t_end` defaults to three cascades on the old core (40 → 20 → 10 → 5 cells).
+function _vbo04_setup(n_cells::Int; t_end = 480.0)
     ρ_s, c, k = 1000.0, 1000.0, 0.2
     T0 = 600.0
     L0 = 10e-3
@@ -35,7 +36,6 @@ function _vbo04_setup(n_cells::Int)
     E = 5.0e4
     R = 8.314462618
     A = r * exp(E / (R * T0))
-    t_end = 480.0                                # three cascades (40 → 20 → 10 → 5 cells)
     solid = SolidComponent(:solid, ρ = ρ_s, c = c, k = k, λ = 1e-6)  # non-degenerate gas transport
     gas = GaseousComponent(:gas, M = 0.03, c = 1000.0, k = 0.02, λ = 1e-5)
     rxn = Reaction(:burn, 1 => 2; A = A, E = E, h = 0.0, n = 0.0)
