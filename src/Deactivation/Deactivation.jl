@@ -3,7 +3,8 @@
 
 The terminal event of a cell of the finite-volume core: a cell whose condensed
 mass falls below a fraction `ε_m` of its reference condensed mass is
-deactivated, its inventories go to the live cell inward of it (on a fixed
+deactivated, on a moving mesh together with the cells near the threshold
+outward of it, its inventories go to the live cell inward of it (on a fixed
 mesh its gas is vented to the event instead), its rows are masked (identity
 rows of the Newton matrix), and the boundary conditions move to the face of
 the outermost live cell. The state length and the Jacobian's

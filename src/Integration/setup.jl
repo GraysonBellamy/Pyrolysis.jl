@@ -229,7 +229,7 @@ end
 	      threshold = 1e-2, use_ale = false, radiation_model = NO_RADIATION,
 	      coordinates = Planar(), w_override = nothing,
 	      time_scale = problem.dt_initial, sources = NoSources(),
-	      deactivation = false) -> CoreProblem
+	      deactivation = false, band = threshold) -> CoreProblem
 
 Set up `problem` on the finite-volume core: apply its initial conditions to its
 own copy of the mesh, build the 1D mesh from the node positions and the
@@ -259,9 +259,13 @@ radii of a cylinder (unit axial length) or a sphere (`Cylindrical()`,
 `deactivation` deactivates, during the solve, every cell whose condensed mass
 falls below the fraction `threshold` (`ε_m`) of its initial condensed mass
 ([`CellDeactivation`](@ref), [`ConservativeTransfer`](@ref)), from the
-exposed `:top` side; the reactions of a cell then switch off smoothly below a
-few times `ε_m` ([`ReactivitySwitch`](@ref)). `threshold` also scales the mass
-tolerances; `sources` is the external-source hook.
+exposed `:top` side, on a moving mesh together with the run of cells outward
+of it whose condensed mass is below the fraction `band` (`ε_band`, in
+`[threshold, 1)`; at its default only the cells below the threshold) of
+theirs ([`deactivate!`](@ref)); the reactions of a cell then switch off
+smoothly below a few times `ε_m` ([`ReactivitySwitch`](@ref)).
+`threshold` also scales the mass tolerances; `sources` is the external-source
+hook.
 """
 function setup(
     problem::PyrolysisProblem;
@@ -276,6 +280,7 @@ function setup(
     time_scale::Real = problem.dt_initial,
     sources = NoSources(),
     deactivation::Bool = false,
+    band::Real = threshold,
 )
     _require_supported(
         problem,
@@ -365,6 +370,7 @@ function setup(
         CellDeactivation(
             ConservativeTransfer(),
             threshold,
+            band,
             condensed0,
             map(c -> !is_gas(c), material.components),
             something(

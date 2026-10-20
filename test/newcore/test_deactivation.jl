@@ -118,7 +118,8 @@ end
     @test all(u[mass_index(layout, 6, j)] == 0 for j = 1:2)
     @test !any(layout.mask[cell_rows(layout, 6)])
     @test all(layout.mask[cell_rows(layout, 5)])
-    @test (e.t, e.cell, e.receiver) == (0.3, 6, 5)
+    @test (e.t, e.invocation, e.cell, e.receiver) == (0.3, 1, 6, 5)
+    @test e.fraction ≈ 0.5 * cells.threshold rtol = 1e-14
     @test e.created_volume == 0
     if moving
         # The receiver's far face is the dead cell's far face; both of the dead
@@ -144,41 +145,6 @@ end
     @test compare_entries(Matrix(J), Jd; rtol = 1e-12).passed
 end
 
-@testset "every cell below the threshold goes in one pass, from the exposed side" begin
-    cp = setup(_ablator(8); use_ale = true, deactivation = true)
-    def, layout, cells = cp.def, cp.def.layout, cp.deactivation
-    u = copy(cp.u0)
-    for i = 6:8
-        _deplete!(u, cp, i, 0.2 * cells.threshold)
-    end
-    masses = _total_masses(u, layout)
-    @test deactivate!(u, cells, def, 1.0) === :transferred
-    @test [e.cell for e in cells.events] == [8, 7, 6]
-    @test [e.receiver for e in cells.events] == [7, 6, 5]
-    @test top_live_cell(layout) == 5
-    @test _total_masses(u, layout) ≈ masses rtol = 1e-14
-    # The receiver keeps its own reference: with 0.6 % of three cells' solid
-    # added it stays live.
-    @test !below_threshold(cells, layout, u, 5)
-
-    # A cell below the threshold inward of a live one is not handled.
-    reset_cells!(cells, layout)
-    u = _deplete!(copy(cp.u0), cp, 4, 0.2 * cells.threshold)
-    @test deactivate!(u, cells, def, 1.0) === :interior
-    @test cells.outcome[] === :interior
-    @test isempty(cells.events)
-
-    # The last cell goes with no receiver: its inventories are lost.
-    one_cell = setup(_ablator(1); use_ale = true, deactivation = true)
-    u = _deplete!(copy(one_cell.u0), one_cell, 1, 0.5 * one_cell.deactivation.threshold)
-    m = [u[mass_index(one_cell.def.layout, 1, j)] for j = 1:2]
-    @test deactivate!(u, one_cell.deactivation, one_cell.def, 2.0) === :burned_out
-    e = only(one_cell.deactivation.events)
-    @test e.receiver == 0
-    @test e.lost_mass ≈ m
-    @test e.lost_enthalpy > 0
-end
-
 # The extended energy of the live cells, in either energy form.
 function _live_energy(cp, u)
     layout, s, ext = cp.def.layout, cp.def.setup, cp.deactivation.caloric
@@ -189,6 +155,175 @@ function _live_energy(cp, u)
         energy_state(layout) isa EnthalpyState ? u[energy_index(layout, i)] :
         extended_energy(ext, s.laws, ds.T[i], m, i)
     end
+end
+
+# The live extended energy plus what the events wrote as lost or regularized.
+_ledger(cp, u, events) =
+    _live_energy(cp, u) +
+    sum(e.lost_enthalpy + e.regularization for e in events; init = 0.0)
+
+@testset "a run below the threshold merges into the cell beneath it in one invocation: $(energy) form" for energy in
+                                                                                                           (
+    :temperature,
+    :enthalpy,
+)
+    cp = setup(_ablator(8); energy_state = energy, use_ale = true, deactivation = true)
+    def, layout, cells = cp.def, cp.def.layout, cp.deactivation
+    u = copy(cp.u0)
+    for i = 6:8
+        _deplete!(u, cp, i, 0.2 * cells.threshold)
+    end
+    consistent_state!(u, def, cp.ws, 0.0)
+    masses, E = _total_masses(u, layout), _live_energy(cp, u)
+    x_top = u[position_index(layout, 9)]
+    @test deactivate!(u, cells, def, 1.0) === :transferred
+    @test [e.cell for e in cells.events] == [8, 7, 6]
+    @test all(e.receiver == 5 && e.invocation == 1 && e.t == 1.0 for e in cells.events)
+    @test all(e.fraction ≈ 0.2 * cells.threshold for e in cells.events)
+    @test top_live_cell(layout) == 5
+    @test _total_masses(u, layout) ≈ masses rtol = 1e-14
+    @test _ledger(cp, u, cells.events) ≈ E rtol = 1e-12
+    # The merge's created volume and regularization are written to its first
+    # event; the receiver's far face is the run's far face, where every node
+    # of the run now sits.
+    @test all(e.created_volume == 0 && e.regularization == 0 for e in cells.events[2:end])
+    V0 = def.setup.topology.cross_section * 3e-3
+    @test abs(cells.events[1].created_volume) <= 1e-12 * V0
+    @test u[position_index(layout, 6)] ≈ x_top rtol = 1e-12
+    @test all(u[position_index(layout, nd)] == u[position_index(layout, 6)] for nd = 7:9)
+    @test all(u[velocity_index(layout, nd)] == 0 for nd = 7:9)
+    @test !any(
+        layout.mask[vcat(collect(cell_rows(layout, 6)), collect(node_rows(layout, 7)))],
+    )
+    # The receiver keeps its own reference: with 0.6 % of three cells' solid
+    # added it stays live, and the state is admissible and consistent.
+    @test !below_threshold(cells, layout, u, 5)
+    consistent_state!(u, def, cp.ws, 1.0)
+    @test !inadmissible(u, layout, cp.abstol)
+    du = zeros(length(u))
+    residual!(du, u, def, 1.0, cp.ws)
+    @test all(isfinite, du)
+    Jd = dense_jacobian(def, cp.ws, u, 1.0)
+    @test isempty(missing_entries(Jd, cp.jacobian.pattern))
+
+    # A second pass is the solve's next invocation.
+    _deplete!(u, cp, 5, 0.5 * cells.threshold)
+    @test deactivate!(u, cells, def, 2.0) === :transferred
+    @test last(cells.events).invocation == 2
+    @test (last(cells.events).cell, last(cells.events).receiver) == (5, 4)
+
+    # A cell below the threshold inward of a live one is not handled.
+    reset_cells!(cells, layout)
+    u = _deplete!(copy(cp.u0), cp, 4, 0.2 * cells.threshold)
+    @test deactivate!(u, cells, def, 1.0) === :interior
+    @test cells.outcome[] === :interior
+    @test isempty(cells.events)
+end
+
+@testset "a column below the band leaves its innermost cell as the survivor: $(energy) form" for energy in
+                                                                                                 (
+    :temperature,
+    :enthalpy,
+)
+    cp = setup(_ablator(8); energy_state = energy, use_ale = true, deactivation = true)
+    def, layout, cells = cp.def, cp.def.layout, cp.deactivation
+    u = copy(cp.u0)
+    for i = 1:8
+        _deplete!(u, cp, i, (0.4 + 0.1 * isodd(i)) * cells.threshold)
+    end
+    consistent_state!(u, def, cp.ws, 0.0)
+    masses, E = _total_masses(u, layout), _live_energy(cp, u)
+    x_top = u[position_index(layout, 9)]
+    @test deactivate!(u, cells, def, 1.0) === :transferred
+    @test [e.cell for e in cells.events] == 8:-1:2
+    @test all(e.receiver == 1 && e.invocation == 1 for e in cells.events)
+    @test top_live_cell(layout) == 1
+    # The survivor holds the column's inventories: 3.6 of its own threshold.
+    @test condensed_mass(cells, layout, u, 1) ≈ 3.6 * cells.threshold * cells.reference[1] rtol =
+        1e-12
+    @test [u[mass_index(layout, 1, j)] for j = 1:2] ≈ masses rtol = 1e-14
+    @test _ledger(cp, u, cells.events) ≈ E rtol = 1e-12
+    @test u[position_index(layout, 2)] ≈ x_top rtol = 1e-12
+
+    # A survivor still below the threshold is the last cell, and goes.
+    reset_cells!(cells, layout)
+    u = copy(cp.u0)
+    for i = 1:8
+        _deplete!(u, cp, i, 0.1 * cells.threshold)
+    end
+    masses = _total_masses(u, layout)
+    @test deactivate!(u, cells, def, 1.0) === :burned_out
+    @test cells.outcome[] === :burned_out
+    @test [e.cell => e.receiver for e in cells.events] == [((8:-1:2) .=> 1)..., 1 => 0]
+    @test all(e.invocation == 1 for e in cells.events)
+    @test last(cells.events).lost_mass ≈ masses rtol = 1e-14
+    @test top_live_cell(layout) == 0
+
+    # The last cell goes with no receiver: its inventories are lost.
+    one_cell = setup(_ablator(1); use_ale = true, deactivation = true)
+    u = _deplete!(copy(one_cell.u0), one_cell, 1, 0.5 * one_cell.deactivation.threshold)
+    m = [u[mass_index(one_cell.def.layout, 1, j)] for j = 1:2]
+    @test deactivate!(u, one_cell.deactivation, one_cell.def, 2.0) === :burned_out
+    e = only(one_cell.deactivation.events)
+    @test (e.receiver, e.invocation) == (0, 1)
+    @test e.lost_mass ≈ m
+    @test e.lost_enthalpy > 0
+end
+
+@testset "the near-threshold band" begin
+    # Absolute condensed fractions, outermost first: below ε_m, inside the
+    # band twice, above it.
+    fractions(ε_m) = (8 => 0.9ε_m, 7 => 0.015, 6 => 0.05, 5 => 0.2)
+    for ε_m in (1e-2, 3e-3)
+        cp = setup(
+            _ablator(8);
+            use_ale = true,
+            deactivation = true,
+            threshold = ε_m,
+            band = 0.1,
+        )
+        u = copy(cp.u0)
+        for (i, f) in fractions(ε_m)
+            _deplete!(u, cp, i, f)
+        end
+        @test deactivate!(u, cp.deactivation, cp.def, 1.0) === :transferred
+        events = cp.deactivation.events
+        @test [e.cell for e in events] == [8, 7, 6]
+        @test all(e.receiver == 5 for e in events)
+        @test [e.fraction for e in events] ≈ [0.9ε_m, 0.015, 0.05] rtol = 1e-12
+    end
+    # At its default the band is the threshold: the run is the cells below it.
+    cp = setup(_ablator(8); use_ale = true, deactivation = true)
+    @test cp.deactivation.band == cp.deactivation.threshold
+    u = copy(cp.u0)
+    for (i, f) in fractions(1e-2)
+        _deplete!(u, cp, i, f)
+    end
+    @test deactivate!(u, cp.deactivation, cp.def, 1.0) === :transferred
+    @test [e.cell => e.receiver for e in cp.deactivation.events] == [8 => 7]
+    # A run in the band without a cell below the threshold stays.
+    cp = setup(_ablator(8); use_ale = true, deactivation = true, band = 0.1)
+    u = copy(cp.u0)
+    for i = 6:8
+        _deplete!(u, cp, i, 0.05)
+    end
+    @test !any_below(cp.deactivation, cp.def.layout, u)
+    @test deactivate!(u, cp.deactivation, cp.def, 1.0) === :transferred
+    @test isempty(cp.deactivation.events)
+    # A fixed mesh keeps the outermost-cell rule: the receiver rises above the
+    # threshold and the pass stops.
+    cp = setup(_ablator(8); deactivation = true, band = 0.1)
+    u = copy(cp.u0)
+    for (i, f) in fractions(1e-2)
+        _deplete!(u, cp, i, f)
+    end
+    @test deactivate!(u, cp.deactivation, cp.def, 1.0) === :transferred
+    @test [e.cell => e.receiver for e in cp.deactivation.events] == [8 => 7]
+    @test top_live_cell(cp.def.layout) == 7
+    # The band lies in [threshold, 1).
+    @test_throws ArgumentError setup(_ablator(4); deactivation = true, band = 5e-3)
+    @test_throws ArgumentError setup(_ablator(4); deactivation = true, band = 1.0)
+    @test setup(_ablator(4); band = 5e-3).deactivation === nothing
 end
 
 @testset "a transfer writes the regularization the receiver does not hold: $(energy) form, $(moving ? "moving" : "fixed") mesh" for energy in
@@ -248,14 +383,15 @@ function _merge_pair(state_a, state_b; use_ale = true)
         end
         u[energy_index(layout, i)] = s.T
     end
-    Pyrolysis.Deactivation._transfer!(
+    Pyrolysis.Deactivation._merge!(
         u,
         cp.deactivation,
         ConservativeTransfer(),
         cp.def,
-        2,
         1,
+        2:2,
         0.0,
+        1,
     )
     ds = cp.ws.derived
     derive!(ds, u, layout, cp.def.setup)
@@ -447,7 +583,8 @@ end
     cells = [e.cell for e in sol.events]
     @test length(cells) >= 5
     @test cells == 30:-1:(31-length(cells))
-    @test all(e.receiver == e.cell - 1 for e in sol.events)
+    @test all(e.receiver < e.cell for e in sol.events)
+    @test [e.invocation for e in sol.events] == cumsum([1; diff([e.t for e in sol.events]) .> 0])
     @test sol.statistics.largest_constraint_residual <= 1
     last_live = 30 - length(cells)
     @test all(isnan, sol.T[(last_live+1):end, end])

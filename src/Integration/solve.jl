@@ -26,6 +26,7 @@ const _SOLVE_KEYWORDS = (
     :integrator_policy,
     :sources,
     :deactivation,
+    :band,
 )
 
 """
@@ -34,7 +35,7 @@ const _SOLVE_KEYWORDS = (
 	      dt = problem.dt_initial, adaptive = true, dtmin = 1e-12, dtmax = Inf,
 	      saveat = problem.output_times, callback = nothing, validate = true,
 	      linear_solver = nothing, integrator_policy = nothing,
-	      sources = NoSources(), deactivation = false) -> CoreSolution
+	      sources = NoSources(), deactivation = false, band = threshold) -> CoreSolution
 
 Solve `problem` on the finite-volume core.
 
@@ -57,11 +58,11 @@ continuous callback's event raises the flag as any event does. `progress` is
 accepted for the keyword set of the other solver and draws nothing; `jacobian`
 is accepted and ignored, the colored Jacobian being the only one.
 
-`use_ale`, `w_override`, `coordinates` and `deactivation` are those of
+`use_ale`, `w_override`, `coordinates`, `deactivation` and `band` are those of
 [`setup`](@ref). On a moving mesh the solve ends with return code
 `:Terminated` when the thickness falls below `min_thickness` [m] (default
-1e-6). With `deactivation`, every cell that falls below the threshold during a
-step is deactivated at its end in one event ([`deactivate!`](@ref)); the
+1e-6). With `deactivation`, the cells that fall below the threshold during a step
+are deactivated at its end in one event ([`deactivate!`](@ref)); the
 solve ends with `:Terminated` when the last cell goes or a cell below the
 threshold lies inward of a live one, and with `:Failure` when an event leaves
 the state inadmissible or no consistent node velocities. The state a solve
@@ -99,6 +100,7 @@ function _solve(
     integrator_policy = nothing,
     sources = NoSources(),
     deactivation::Bool = false,
+    band::Real = threshold,
 )
     jacobian === nothing ||
         @warn "solve(): `jacobian` is ignored by the finite-volume core" maxlog = 1
@@ -117,6 +119,7 @@ function _solve(
         time_scale = dt,
         sources,
         deactivation,
+        band,
     )
     return integrate(
         cp;
@@ -371,7 +374,7 @@ function _top_live_node(layout::StateLayout)
 end
 
 # The deactivation event: at the end of every step on which a live cell fell
-# below the threshold, every such cell in one pass, then the consistent sweep
+# below the threshold, one pass of `deactivate!`, then the consistent sweep
 # of the algebraic rows, the admissibility of the result, and the policy's
 # restart step. A sweep that leaves a velocity row above round-off or an
 # inadmissible result ends the solve with `ReturnCode.Failure`.
