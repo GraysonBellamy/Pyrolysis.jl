@@ -30,6 +30,7 @@ const _SOLVE_KEYWORDS = (
     :correction,
     :lagrangian,
     :switch_width,
+    :located_events,
 )
 
 """
@@ -40,7 +41,7 @@ const _SOLVE_KEYWORDS = (
 	      linear_solver = nothing, integrator_policy = nothing,
 	      sources = NoSources(), deactivation = false, band = nothing,
 	      correction = NoCorrection(), lagrangian = Int[],
-	      switch_width = SWITCH_WIDTH) -> CoreSolution
+	      switch_width = SWITCH_WIDTH, located_events = false) -> CoreSolution
 
 Solve `problem` on the finite-volume core.
 
@@ -67,7 +68,13 @@ is accepted and ignored, the colored Jacobian being the only one.
 `deactivation`, `band` and `switch_width` are those of [`setup`](@ref). On a moving mesh the solve ends with return code
 `:Terminated` when the thickness falls below `min_thickness` [m] (default
 1e-6). With `deactivation`, the cells that fall below the threshold during a step
-are deactivated at its end in one event ([`deactivate!`](@ref)); the
+are deactivated at its end in one event ([`deactivate!`](@ref)). With
+`located_events` as well, the event is located inside the step at the first
+time a live cell's condensed mass reaches its threshold (the first root of
+[`threshold_margin`](@ref)) and applied at the interpolated state there, every
+cell within `reltol` of its threshold going with the crossing one
+(`deactivate!`'s `slack`); the end-of-step test stays as the safety net for a
+crossing the location does not see. The
 solve ends with `:Terminated` when the last cell goes or a cell below the
 threshold lies inward of a live one, and with `:Failure` when an event leaves
 the state inadmissible or no consistent node velocities. The state a solve
@@ -109,6 +116,7 @@ function _solve(
     correction::Correction = NoCorrection(),
     lagrangian::AbstractVector{<:Integer} = Int[],
     switch_width::Real = SWITCH_WIDTH,
+    located_events::Bool = false,
 )
     jacobian === nothing ||
         @warn "solve(): `jacobian` is ignored by the finite-volume core" maxlog = 1
@@ -144,6 +152,7 @@ function _solve(
         min_thickness,
         linear_solver,
         integrator_policy,
+        located_events,
         started,
     )
 end
@@ -153,7 +162,7 @@ end
 	          dt = cp.problem.dt_initial, adaptive = true, dtmin = 1e-12,
 	          dtmax = Inf, saveat = cp.problem.output_times, callback = nothing,
 	          min_thickness = 1e-6, linear_solver = nothing,
-	          integrator_policy = nothing,
+	          integrator_policy = nothing, located_events = false,
 	          max_constraint_rejections = MAX_CONSTRAINT_REJECTIONS,
 	          started = time()) -> CoreSolution
 
@@ -177,6 +186,7 @@ function integrate(
     min_thickness::Real = 1e-6,
     linear_solver = nothing,
     integrator_policy = nothing,
+    located_events::Bool = false,
     max_constraint_rejections::Int = MAX_CONSTRAINT_REJECTIONS,
     started::Float64 = time(),
 )
@@ -227,7 +237,7 @@ function integrate(
         save_positions = (false, false),
     )
     thin = _thickness_termination(layout, Float64(min_thickness))
-    events = _deactivation_callback(cp, check, policy)
+    events = _deactivation_callback(cp, check, policy, located_events)
     callbacks =
         callback === nothing ? CallbackSet(observer, events..., thin...) :
         CallbackSet(observer, events..., thin..., _observing(callback, policy))
@@ -387,22 +397,28 @@ function _top_live_node(layout::StateLayout)
 end
 
 # The deactivation event: at the end of every step on which a live cell fell
-# below the threshold, one pass of `deactivate!`, then the consistent sweep
-# of the algebraic rows, the admissibility of the result, and the policy's
-# restart step. A sweep that leaves a velocity row above round-off or an
-# inadmissible result ends the solve with `ReturnCode.Failure`.
-function _deactivation_callback(cp::CoreProblem, check::DomainCheck, policy)
+# below the threshold, or, when `located`, at the first root of the smallest
+# threshold margin inside the step (the end-of-step event then the safety
+# net), one pass of `deactivate!` (at a root with the threshold widened by the
+# relative tolerance, the mass rows' error scale there), then the consistent
+# sweep of the algebraic rows, the admissibility of the result, and the policy's restart step. A
+# sweep that leaves a velocity row above round-off or an inadmissible result
+# ends the solve with `ReturnCode.Failure`. The margin crosses downward only,
+# and a cell under a correction can dip below its threshold and recover, so
+# location fires at the first crossing.
+function _deactivation_callback(cp::CoreProblem, check::DomainCheck, policy, located::Bool)
     cells = cp.deactivation
     cells === nothing && return ()
     def, ws = cp.def, cp.ws
     layout = def.layout
     has_event = FunctionWrapper{Bool,Tuple{_StateVector}}(u -> any_below(cells, layout, u))
-    # Deactivates in place and returns `:transferred`, `:burned_out`,
-    # `:interior`, `:inconsistent` when the sweep leaves a velocity row above
-    # round-off, or `:inadmissible` when the result is not admissible.
-    deactivate = FunctionWrapper{Symbol,Tuple{_StateVector,Float64}}(
-        (u, t) -> begin
-            status = deactivate!(u, cells, def, t)
+    # Deactivates in place with the threshold widened by `slack` and returns
+    # `:transferred`, `:burned_out`, `:interior`, `:inconsistent` when the
+    # sweep leaves a velocity row above round-off, or `:inadmissible` when the
+    # result is not admissible.
+    deactivate = FunctionWrapper{Symbol,Tuple{_StateVector,Float64,Float64}}(
+        (u, t, slack) -> begin
+            status = deactivate!(u, cells, def, t; slack)
             status === :transferred || return status
             _consistent_intensities!(u, def, ws, t)
             _consistent_motion!(u, def, ws, t) === nothing || return :inconsistent
@@ -412,9 +428,8 @@ function _deactivation_callback(cp::CoreProblem, check::DomainCheck, policy)
             return status
         end,
     )
-    condition = (u, t, integrator) -> has_event(u)
-    function affect!(integrator)
-        status = deactivate(integrator.u, integrator.t)
+    function affect!(integrator, slack::Float64)
+        status = deactivate(integrator.u, integrator.t, slack)
         if status === :inadmissible
             @warn "solve(): the state after deactivating cell(s) at t = $(integrator.t) is inadmissible"
             terminate!(integrator, ReturnCode.Failure)
@@ -431,7 +446,26 @@ function _deactivation_callback(cp::CoreProblem, check::DomainCheck, policy)
         end
         return nothing
     end
-    return (DiscreteCallback(condition, affect!; save_positions = (false, false)),)
+    safety_net = DiscreteCallback(
+        (u, t, integrator) -> has_event(u),
+        integrator -> affect!(integrator, 0.0);
+        save_positions = (false, false),
+    )
+    located || return (safety_net,)
+    margin = FunctionWrapper{Float64,Tuple{_StateVector}}(
+        u -> threshold_margin(cells, layout, u),
+    )
+    reltol = cp.reltol
+    return (
+        ContinuousCallback(
+            (u, t, integrator) -> margin(u),
+            nothing;
+            affect_neg! = integrator -> affect!(integrator, reltol),
+            rootfind = SciMLBase.RightRootFind,
+            save_positions = (false, false),
+        ),
+        safety_net,
+    )
 end
 
 # The derived state at `u`, from one residual evaluation into the check's buffer.

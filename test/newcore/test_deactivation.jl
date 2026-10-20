@@ -732,6 +732,203 @@ end
     end
 end
 
+# Two isothermal cells: the outer one holds a hundredth of the inner one's
+# mass, of a solid that decomposes 2 % faster, so it crosses its threshold
+# just before the inner one and its merge barely delays the inner crossing.
+function _staggered_pair()
+    ρ, c, R, E = 1000.0, 1000.0, 8.314462618, 1.0e5
+    A = 40 * exp(E / (R * 700))
+    fast = SolidComponent(:fast, ρ = ρ, c = c, k = 1.0, λ = 1e-6)
+    slow = SolidComponent(:slow, ρ = ρ, c = c, k = 1.0, λ = 1e-6)
+    gas = GaseousComponent(:gas, M = 0.05, c = c, k = 0.02, λ = 1e-4)
+    mat = Material(
+        name = :pair,
+        components = (fast, slow, gas),
+        reactions = (
+            Reaction(:fast, 1 => 3; A = 1.02 * A, E = E, h = 0.0),
+            Reaction(:slow, 2 => 3; A = A, E = E, h = 0.0),
+        ),
+        depletion_limiter = DepletionLimiter(threshold = 1e-3),
+    )
+    L = 2e-3
+    return PyrolysisProblem(
+        mesh = create_uniform_mesh(L, 2, Val(3)),
+        material = mat,
+        bc_set = BoundaryConditionSet(
+            thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
+            mass = (
+                top = ConvectiveMassBC(h_m = 10.0, ξ_inf = 0.0),
+                bottom = ImpermeableBC(),
+            ),
+        ),
+        T_initial = z -> 700.0,
+        ξ_initial = [z -> z > L / 2 ? ρ / 100 : 0.0, z -> z > L / 2 ? 0.0 : ρ, z -> 0.0],
+        tspan = (0.0, 0.5),
+        output_times = collect(0.0:0.05:0.5),
+    )
+end
+
+@testset "a located event's time converges with the tolerance: $(moving ? "moving" : "fixed") mesh" for moving in
+                                                                                                        (
+    true,
+    false,
+)
+    problem = _ablator(2; L = 2e-4, t_end = 0.3)
+    events(located, reltol) = Integration.solve(
+        problem;
+        use_ale = moving,
+        deactivation = true,
+        abstol = 1e-2 * reltol,
+        reltol,
+        located_events = located,
+    ).events
+    reference = first(events(true, 1e-9)).t
+    shift(located, reltol) = abs(first(events(located, reltol)).t - reference)
+    located = [shift(true, reltol) for reltol in (1e-5, 1e-6, 1e-7)]
+    @test all(diff(located) .< 0)
+    @test located[1] < shift(false, 1e-5) / 10
+    # The located cell goes at its threshold, the end-of-step event below it.
+    @test all(e -> isapprox(e.fraction, 1e-2; rtol = 1e-12), events(true, 1e-5))
+    @test all(e -> e.fraction < 0.999e-2, events(false, 1e-5))
+end
+
+@testset "location and the end-of-step test deactivate the same cells: $(moving ? "moving" : "fixed") mesh" for moving in
+                                                                                                                (
+    true,
+    false,
+)
+    options = (use_ale = moving, deactivation = true, abstol = 1e-7, reltol = 1e-5)
+    discrete = Integration.solve(_ablator(30); options..., located_events = false)
+    located = Integration.solve(_ablator(30); options..., located_events = true)
+    @test located.retcode === discrete.retcode === :Success
+    @test length(located.events) >= 15
+    @test [e.cell for e in located.events] == [e.cell for e in discrete.events]
+    @test [e.invocation for e in located.events] == [e.invocation for e in discrete.events]
+    # Every invocation came from a located root: its crossing cell at the threshold.
+    for k in unique(e.invocation for e in located.events)
+        fractions = [e.fraction for e in located.events if e.invocation == k]
+        @test minimum(fractions) ≈ 1e-2 rtol = 1e-12
+    end
+    @test all(e -> e.t > 0, located.events)
+end
+
+@testset "the end-of-step safety net takes a crossing location cannot see: $(moving ? "moving" : "fixed") mesh" for moving in
+                                                                                                                    (
+    true,
+    false,
+)
+    cp = setup(
+        _ablator(4);
+        use_ale = moving,
+        deactivation = true,
+        abstol = 1e-7,
+        reltol = 1e-5,
+    )
+    cells, layout = cp.deactivation, cp.def.layout
+    # The outer cell starts exactly at its threshold, where a located root
+    # would leave it: its margin is zero and never crosses zero downward.
+    u0 = _deplete!(copy(cp.u0), cp, 4, cells.threshold)
+    consistent_state!(u0, cp.def, cp.ws, 0.0)
+    @test threshold_margin(cells, layout, u0) == 0.0
+    @test !any_below(cells, layout, u0)
+    @test below_threshold(cells, layout, u0, 4; slack = 1e-5)
+    @test !below_threshold(cells, layout, u0, 3; slack = 1e-5)
+    ends = Float64[]
+    probe = DiscreteCallback(
+        (u, t, integrator) -> true,
+        integrator -> push!(ends, integrator.t);
+        save_positions = (false, false),
+    )
+    sol = integrate(cp; u0, located_events = true, callback = probe)
+    @test sol.retcode === :Success
+    @test first(sol.events).cell == 4
+    @test first(sol.events).t == first(ends)
+    @test first(sol.events).fraction < cells.threshold
+end
+
+@testset "two crossings in one step are located at their own roots" begin
+    ends = Tuple{Float64,Float64}[]
+    probe = DiscreteCallback(
+        (u, t, integrator) -> true,
+        integrator -> push!(ends, (integrator.tprev, integrator.t));
+        save_positions = (false, false),
+    )
+    options = (deactivation = true, abstol = 1e-7, reltol = 1e-5)
+    discrete = Integration.solve(
+        _staggered_pair();
+        options...,
+        located_events = false,
+        callback = probe,
+    )
+    located = Integration.solve(_staggered_pair(); options..., located_events = true)
+    # The end-of-step test takes both cells at the end of one step.
+    @test discrete.outcome === :burned_out
+    @test [e.cell for e in discrete.events] == [2, 1]
+    @test [e.invocation for e in discrete.events] == [1, 1]
+    step = ends[findfirst(s -> s[2] == first(discrete.events).t, ends)]
+    # Location takes each at its own root inside that step.
+    @test located.outcome === :burned_out
+    @test [e.cell for e in located.events] == [2, 1]
+    @test [e.invocation for e in located.events] == [1, 2]
+    t1, t2 = (e.t for e in located.events)
+    @test step[1] < t1 < t2 < step[2]
+    @test all(e -> isapprox(e.fraction, 1e-2; rtol = 1e-12), located.events)
+end
+
+@testset "a located event leaves an admissible state with the velocity and intensity rows at round-off" begin
+    q = 2.8e6
+    cp = setup(
+        _ablator(8; q, radiating = true);
+        use_ale = true,
+        radiation_model = BEER_LAMBERT,
+        deactivation = true,
+        abstol = 1e-7,
+        reltol = 1e-5,
+    )
+    def, layout, cells = cp.def, cp.def.layout, cp.deactivation
+    du = zeros(length(cp.u0))
+    seen = Ref(0)
+    results = NamedTuple[]
+    # Runs at the end of the step a located event cut short, on the state the
+    # event and its sweep left.
+    probe = DiscreteCallback(
+        (u, t, integrator) -> length(cells.events) > seen[],
+        integrator -> begin
+            seen[] = length(cells.events)
+            u, t = integrator.u, integrator.t
+            residual!(du, u, def, t, cp.ws)
+            ds, c = cp.ws.derived, cp.ws.contributions
+            scale =
+                sum(abs, c.θ .* ds.V_eval) + sum(abs, ds.geometry.face_area .* ds.w)
+            velocity = [
+                abs(du[velocity_index(layout, nd)]) / scale for
+                nd = 1:n_nodes(layout) if layout.mask[velocity_index(layout, nd)]
+            ]
+            intensity = [
+                abs(du[intensity_index(layout, f)]) / q for
+                f = 1:(n_cells(layout)+1) if layout.mask[intensity_index(layout, f)]
+            ]
+            push!(
+                results,
+                (;
+                    t,
+                    admissible = !inadmissible(u, layout, cp.abstol),
+                    velocity = maximum(velocity),
+                    intensity = maximum(intensity),
+                ),
+            )
+        end;
+        save_positions = (false, false),
+    )
+    sol = integrate(cp; located_events = true, callback = probe)
+    @test sol.retcode === :Success
+    @test length(results) == length(unique(e.invocation for e in sol.events)) >= 3
+    @test [r.t for r in results] == unique(e.t for e in sol.events)
+    @test all(r -> r.admissible, results)
+    @test all(r -> r.velocity <= 1e-10, results)
+    @test all(r -> r.intensity <= 1e-12, results)
+end
+
 @testset "a void under a live cell ends the solve" begin
     for moving in (true, false)
         sol = Integration.solve(

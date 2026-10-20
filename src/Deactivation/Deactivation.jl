@@ -21,7 +21,8 @@ using ..Assembly
 include("events.jl")
 
 export DeactivationPolicy, ConservativeTransfer, DeactivationEvent, CellDeactivation
-export condensed_mass, below_threshold, top_live_cell, any_below, deactivate!, reset_cells!
+export condensed_mass, below_threshold, top_live_cell, any_below, threshold_margin
+export deactivate!, reset_cells!
 export replay_events!
 
 end # module Deactivation

@@ -143,27 +143,63 @@ The condensed (solid and liquid) mass of cell `i` in the state `u` [kg].
     return m
 end
 
-"""
-	below_threshold(d, layout, u, i) -> Bool
-
-Whether live cell `i` holds less than `ε_m` of its initial condensed mass. A
-cell that started with none never deactivates.
-"""
-@inline below_threshold(d::CellDeactivation, layout::StateLayout, u, i::Int) =
-    layout.mask[energy_index(layout, i)] &&
-    d.reference[i] > 0 &&
-    condensed_mass(d, layout, u, i) < d.threshold * d.reference[i]
+# Whether live cell `i` holds less than `1 + slack` times the fraction `f` of
+# its initial condensed mass.
+@inline function _below(d::CellDeactivation, layout::StateLayout, u, i::Int, f, slack)
+    (layout.mask[energy_index(layout, i)] && d.reference[i] > 0) || return false
+    return condensed_mass(d, layout, u, i) < f * d.reference[i] * (1 + slack)
+end
 
 """
-	any_below(d, layout, u) -> Bool
+	below_threshold(d, layout, u, i; slack = 0) -> Bool
 
-Whether any live cell is below the threshold: the event's condition.
+Whether live cell `i` holds less than `ε_m` of its initial condensed mass,
+or, with a positive `slack`, less than `(1 + slack) ε_m` of it. A cell that
+started with none never deactivates.
 """
-function any_below(d::CellDeactivation, layout::StateLayout, u::AbstractVector)
+@inline below_threshold(
+    d::CellDeactivation,
+    layout::StateLayout,
+    u,
+    i::Int;
+    slack::Float64 = 0.0,
+) = _below(d, layout, u, i, d.threshold, slack)
+
+"""
+	any_below(d, layout, u; slack = 0) -> Bool
+
+Whether any live cell is below the threshold ([`below_threshold`](@ref)): the
+end-of-step event's condition.
+"""
+function any_below(
+    d::CellDeactivation,
+    layout::StateLayout,
+    u::AbstractVector;
+    slack::Float64 = 0.0,
+)
     for i = 1:n_cells(layout)
-        below_threshold(d, layout, u, i) && return true
+        below_threshold(d, layout, u, i; slack) && return true
     end
     return false
+end
+
+"""
+	threshold_margin(d, layout, u) -> Float64
+
+The smallest margin of a live cell's condensed mass `m` over its threshold
+`ε_m m_ref`, `(m − ε_m m_ref)/(ε_m m_ref)`; `Inf` when no live cell started
+with a condensed mass. The margin is zero exactly when the cell holds exactly
+its threshold and negative exactly when it is below it. Its first root in a
+step is the located event's time.
+"""
+function threshold_margin(d::CellDeactivation, layout::StateLayout, u::AbstractVector)
+    margin = Inf
+    for i = 1:n_cells(layout)
+        (layout.mask[energy_index(layout, i)] && d.reference[i] > 0) || continue
+        limit = d.threshold * d.reference[i]
+        margin = min(margin, (condensed_mass(d, layout, u, i) - limit) / limit)
+    end
+    return margin
 end
 
 """
@@ -179,23 +215,18 @@ function top_live_cell(layout::StateLayout)
     return 0
 end
 
-# Whether live cell `i` holds less than `ε_band` of its initial condensed mass.
-@inline _in_band(d::CellDeactivation, layout::StateLayout, u, i::Int) =
-    layout.mask[energy_index(layout, i)] &&
-    d.reference[i] > 0 &&
-    condensed_mass(d, layout, u, i) < d.band * d.reference[i]
-
-# The inward end of the run of cells from `top` inward that are in the band.
-function _run_start(d::CellDeactivation, layout::StateLayout, u, top::Int)
+# The inward end of the run of cells from `top` inward that hold less than
+# `1 + slack` times `ε_band` of their initial condensed mass.
+function _run_start(d::CellDeactivation, layout::StateLayout, u, top::Int, slack::Float64)
     lo = top
-    while lo >= 1 && _in_band(d, layout, u, lo)
+    while lo >= 1 && _below(d, layout, u, lo, d.band, slack)
         lo -= 1
     end
     return lo + 1
 end
 
 """
-	deactivate!(u, d, def, t) -> Symbol
+	deactivate!(u, d, def, t; slack = 0) -> Symbol
 
 Deactivate, in one pass, the cells below the threshold at the exposed side.
 On a moving mesh the run of live cells from the outermost one inward whose
@@ -207,18 +238,29 @@ mesh the outermost live cell goes while it is below `ε_m`, each merge
 re-testing the receiver with the dead cell's condensed inventories added.
 The last live cell, once below `ε_m`, goes with no receiver, its inventories
 written to the event as lost. The events of one call share their invocation.
+A positive `slack` widens both tests to `1 + slack` times `ε_m` and
+`ε_band`: an event located at a root passes the solve's relative tolerance,
+so that the crossing cell, which holds exactly its threshold there, goes, and
+with it every cell within the tolerance of its threshold, whose crossing the
+solve does not resolve from the located one.
 
 Returns `:transferred`, `:burned_out` when the last live cell went, or
 `:interior` when a cell below the threshold remains inward of a live one.
 """
-function deactivate!(u::AbstractVector, d::CellDeactivation, def::CoreDefinition, t::Real)
+function deactivate!(
+    u::AbstractVector,
+    d::CellDeactivation,
+    def::CoreDefinition,
+    t::Real;
+    slack::Float64 = 0.0,
+)
     layout = def.layout
     invocation = isempty(d.events) ? 1 : last(d.events).invocation + 1
     while true
         top = top_live_cell(layout)
         top == 0 && break
-        lo = is_moving(layout) ? _run_start(d, layout, u, top) : top
-        any(i -> below_threshold(d, layout, u, i), lo:top) || break
+        lo = is_moving(layout) ? _run_start(d, layout, u, top, slack) : top
+        any(i -> below_threshold(d, layout, u, i; slack), lo:top) || break
         if top == 1
             _lose!(u, d, def, top, Float64(t), invocation)
             d.outcome[] = :burned_out
@@ -227,7 +269,7 @@ function deactivate!(u::AbstractVector, d::CellDeactivation, def::CoreDefinition
         r = max(lo - 1, 1)
         _merge!(u, d, d.policy, def, r, (r+1):top, Float64(t), invocation)
     end
-    if any_below(d, layout, u)
+    if any_below(d, layout, u; slack)
         d.outcome[] = :interior
         return :interior
     end
