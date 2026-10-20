@@ -148,7 +148,7 @@ function main()
     reference = Dict{String,String}()
     if isfile(REFERENCE)
         for line in readlines(REFERENCE)[2:end]
-            deck, dig = split(line, ",")
+            deck, dig = rsplit(line, ","; limit = 2)
             reference[strip(deck, '"')] = dig
         end
     end
