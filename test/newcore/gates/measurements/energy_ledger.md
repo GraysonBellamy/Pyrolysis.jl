@@ -1,6 +1,6 @@
 # The energy balance against the ledger
 
-Produced by `test/newcore/gates/energy_ledger.jl` at commit 675b4f0. Julia 1.13.0, 1 thread, 22 logical CPUs; load average [15.2, 15.8, 16.2] at the start and [16.8, 17.0, 16.7] at the end. Phase 1's gate item 7 on V-CPL-06's char-layer column, and Phase 2's item 3 on V-BO-04's burning column before its first event.
+Produced by `test/newcore/gates/energy_ledger.jl` at commit 7ceaf74. Julia 1.13.0, 1 thread, 22 logical CPUs; load average [18.2, 17.1, 17.8] at the start and [17.3, 17.4, 17.6] at the end. Phase 1's gate item 7 on V-CPL-06's char-layer column, and Phase 2's item 3 on V-BO-04's burning column before and across its event.
 
 ## Closure at the case's tolerance
 
@@ -48,3 +48,14 @@ Produced by `test/newcore/gates/energy_ledger.jl` at commit 675b4f0. Julia 1.13.
 | temperature | 0.05 | Success | 2.85e-7 | 2.85e6 | 9.97e-14 |  |
 | temperature | 0.025 | Success | 7.77e-7 | 2.85e6 | 2.72e-13 |  |
 | enthalpy | 0.1 | Success | 2.33e-8 | 2.85e6 | 8.16e-15 |  |
+
+## V-BO-04 across its event
+
+The case's run, 40 cells on a moving mesh with deactivation, abstol 1.0e-9, reltol 1.0e-7, event location off and on. Inventories over the live cells (the extended energy, the inventory itself in the enthalpy form, and the mass), the boundary terms at the live boundary faces, the sources over the live cells, trapezoidal over the accepted steps with a node where the smallest threshold margin is 1.0e-8; each invocation's lost enthalpy and regularization and its lost masses leave the inventories at the event. Closure: |Δ − ∫ ledger + lost| over |Δ|, energy and mass. Event: the first invocation's time [s]; lost energy, regularization: the events' sums over |ΔE|; created volume: the events' sum [m³]. The old core's budget does not park cells; its closure before the event is the table above.
+
+| form | location | retcode | outcome | invocations | events | event [s] | energy closure | mass closure | lost energy | regularization | created volume | steps |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| temperature | off | Success | running | 1 | 39 | 473.0847 | 0.00661 | 0.00661 | 1.22e-18 | 1.22e-18 | 0.0 | 325 |
+| temperature | on | Success | running | 1 | 39 | 465.4896 | 1.58e-5 | 1.58e-5 | 1.22e-18 | 1.22e-18 | 0.0 | 325 |
+| enthalpy | off | Success | running | 1 | 39 | 471.6878 | 0.00555 | 0.00555 | 2.43e-18 | 2.43e-18 | 2.71e-20 | 328 |
+| enthalpy | on | Success | running | 1 | 39 | 465.4896 | 1.46e-5 | 1.46e-5 | 3.65e-18 | 3.65e-18 | 5.42e-20 | 328 |
