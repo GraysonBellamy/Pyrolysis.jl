@@ -1,66 +1,134 @@
-# Gate item 8 at M2: the burnout path against the old core
+# Gate item 8 at M4: the burnout path against the old core
 
-Produced by `test/newcore/gates/burnout_timing.jl` at commit 3efdc60 with uncommitted changes. Julia 1.13.0, 1 thread, 22 logical CPUs; load average [2.2, 1.6, 1.7] at the start and [2.4, 2.0, 1.8] at the end. 60 PMMA cells; V-BO-01 on the finite-volume core with the prototype's correction (τ 0.2 s per cell, band 10 ε_m). Window RMS and largest: the RMS and the largest of the temperature differences [K] over the cells at the saved times before the first event of any solve of the deck, against the same core at reltol 1.0e-9; the new core is matched on the RMS. Run error: the largest difference over the whole run at the saved times with the same live cells; shift: the largest event-time difference over the reference's median interval; MLR: the L1 error of the mass loss rate history over the reference's integral. Warm medians of 3 solves, of 9 for the old default (a solve slower than 15 times the old default is timed once and its configuration not taken to tighter tolerances); ratio: over the old core's default.
+Produced by `test/newcore/gates/burnout_timing.jl` at commit 675b4f0. Julia 1.13.0, 1 thread, 22 logical CPUs; load average [15.5, 15.7, 16.2] at the start and [15.7, 15.7, 15.7] at the end. The finite-volume core's default integrator (`Rodas5P`, heuristic restart); V-BO-01 and V-BO-03 with the equidistribution correction at its defaults. Window RMS and largest: the RMS and the largest of the differences over the saved times before the first event of any solve of the deck, against the same core at reltol 1.0e-9: of the temperatures over the cells [K] on V-BO-01 and V-BO-03, of the thickness relative to the reference's on V-BO-04; the new core is matched on the RMS. Run error: the largest difference over the whole run at the saved times with the same live cells; shift: the largest event-time difference over the reference's median interval; MLR: the L1 error of the mass loss rate history over the reference's integral. Warm medians of 3 solves, of 9 for the old default (a solve slower than 15 times the old default is timed once and its core not taken to tighter tolerances); ratio: over the old core's time at the case's tolerance.
 
-## V-BO-02
+## Matched accuracy
 
-Window: the saved times before 62.4 s. Reference spread (reltol 1.0e-10 against 1.0e-9, window RMS): old 0.000638 K, new 1.01e-6 K. Target: the old core's window RMS at reltol 1.0e-6, 0.015 K.
+| deck | cells | window before [s] | spread old, new | target | old default [s] | new matched reltol | window RMS | window largest | new [s] | ratio | equal-tolerance ratio |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| V-BO-01 | 30 | 168.1 | 0.000384, 9.83e-7 | 0.00993 | 0.72 | 1.0e-5 | 0.00877 | 0.647 | 0.837 | 1.16 | 1.72 |
+| V-BO-01 | 60 | 167.8 | 0.000323, 1.29e-6 | 0.00866 | 1.76 | 1.0e-5 | 0.00591 | 0.453 | 2.84 | 1.62 | 2.28 |
+| V-BO-01 | 120 | 167.3 | 0.000547, 4.47e-7 | 0.0087 | 5.74 | 3.0e-6 | 0.00499 | 0.218 | 13.1 | 2.28 | 2.74 |
+| V-BO-03 | 30 | 168.6 | 0.000363, 1.37e-6 | 0.00993 | 0.549 | 1.0e-5 | 0.00876 | 0.647 | 0.795 | 1.45 | 2.14 |
+| V-BO-03 | 60 | 167.9 | 0.000341, 9.28e-7 | 0.00866 | 1.36 | 1.0e-5 | 0.00591 | 0.453 | 2.68 | 1.97 | 2.85 |
+| V-BO-03 | 120 | 167.2 | 0.000499, 1.07e-6 | 0.00871 | 4.79 | 3.0e-6 | 0.00499 | 0.218 | 13.1 | 2.74 | 3.33 |
+| V-BO-04 | 30 | 300.0 | 2.61e-11, 6.26e-14 | 5.85e-9 | 0.0568 | 1.0e-5 | 2.07e-10 | 1.03e-9 | 0.0333 | 0.586 | 1.38 |
+| V-BO-04 | 60 | 299.7 | 2.82e-11, 2.7e-14 | 6.65e-9 | 0.116 | 1.0e-5 | 2.37e-10 | 1.22e-9 | 0.0647 | 0.557 | 1.32 |
+| V-BO-04 | 120 | 299.9 | 3.03e-11, 2.7e-14 | 7.28e-9 | 0.239 | 1.0e-5 | 2.48e-10 | 1.08e-9 | 0.148 | 0.621 | 1.44 |
 
-| run | reltol | retcode | window RMS [K] | window largest [K] | run error [K] | shift | MLR | peak | t_bo [s] | ledger | warm [s] | ratio | steps | rejected | RHS | Jacobians | nonlinear failures |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| old core default (KenCarp4) | 1.0e-5 | Success | 0.0221 | 0.438 | 50.3 | 0.266 | 0.0141 | 24.539 | 452.0 | 0.00126 | 0.827 | 0.839 | 1276 | 0 | 32497 | 293 | 47 |
-| old core default (KenCarp4) | 3.0e-6 | Success | 0.0161 | 0.418 | 46.9 | 0.239 | 0.013 | 24.55 | 452.0 | 0.000217 | 0.924 | 0.937 | 1434 | 0 | 36411 | 329 | 57 |
-| old core default (KenCarp4) | 1.0e-6 | Success | 0.015 | 0.375 | 30.4 | 0.185 | 0.0101 | 24.623 | 452.0 | 2.3e-5 | 0.986 | 1.0 | 1572 | 0 | 38574 | 341 | 56 |
-| old core default (KenCarp4) | 3.0e-7 | Success | 0.0109 | 0.375 | 44.1 | 0.21 | 0.0118 | 24.519 | 452.0 | 2.13e-5 | 1.12 | 1.14 | 1761 | 11 | 41739 | 345 | 11 |
-| old core default (KenCarp4) | 1.0e-7 | Success | 0.00561 | 0.199 | 39.7 | 0.223 | 0.0111 | 24.512 | 452.0 | 0.000105 | 1.28 | 1.3 | 2029 | 44 | 48530 | 357 | 4 |
-| Rodas5P (default) | 1.0e-5 | Success | 0.0101 | 0.531 | 44.7 | 0.244 | 0.0157 | 23.621 | 466.0 | 2.39e-5 | 0.615 | 0.624 | 1360 | 129 | 13392 | 1360 | 0 |
-| Rodas5P (default) | 3.0e-6 | Success | 0.00622 | 0.206 | 26.8 | 0.154 | 0.0101 | 23.709 | 465.5 | 5.76e-5 | 0.74 | 0.751 | 1636 | 177 | 16260 | 1636 | 0 |
-| Rodas5P (default) | 1.0e-6 | Success | 0.00245 | 0.065 | 28.0 | 0.141 | 0.00992 | 23.71 | 465.5 | 4.05e-5 | 0.929 | 0.942 | 2014 | 350 | 21046 | 2014 | 0 |
-| Rodas5P (default) | 3.0e-7 | Success | 0.000264 | 0.0145 | 18.2 | 0.102 | 0.00727 | 23.721 | 465.5 | 0.00011 | 1.3 | 1.32 | 2671 | 815 | 30679 | 2671 | 0 |
-| Rodas5P (default) | 1.0e-7 | Success | 7.09e-5 | 0.00441 | 14.2 | 0.0501 | 0.00303 | 23.708 | 465.0 | 0.000115 | 2.09 | 2.12 | 3797 | 2261 | 52381 | 3797 | 0 |
+## The ladders
 
-Matched accuracy (the loosest ladder tolerance at or below the target):
+| deck | cells | core | reltol | retcode | window RMS | window largest | run error | shift | MLR | peak | t_bo [s] | ledger | warm [s] | ratio | steps | rejected | RHS | Jacobians | nonlinear failures |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| V-BO-01 | 30 | old | 1.0e-5 | Success | 0.0118 | 0.384 | 3.07 | 1.05 | 0.000982 | 32.254 | 364.0 | 0.0013 | 0.634 | 0.881 | 563 | 0 | 13787 | 136 | 23 |
+| V-BO-01 | 30 | old | 3.0e-6 | Success | 0.0135 | 0.287 | 15.5 | 0.706 | 0.0021 | 32.254 | 364.0 | 0.000208 | 0.666 | 0.925 | 591 | 0 | 14527 | 140 | 11 |
+| V-BO-01 | 30 | old | 1.0e-6 | Success | 0.00993 | 0.242 | 14.5 | 0.879 | 0.00213 | 32.254 | 364.0 | 0.000618 | 0.72 | 1.0 | 648 | 1 | 15881 | 141 | 6 |
+| V-BO-01 | 30 | old | 3.0e-7 | Success | 0.00627 | 0.27 | 14.8 | 0.564 | 0.00202 | 32.254 | 364.0 | 0.000799 | 0.848 | 1.18 | 751 | 21 | 18868 | 144 | 4 |
+| V-BO-01 | 30 | old | 1.0e-7 | Success | 0.00467 | 0.25 | 14.6 | 0.564 | 0.00233 | 32.253 | 364.0 | 0.000484 | 0.987 | 1.37 | 868 | 48 | 22415 | 144 | 4 |
+| V-BO-01 | 30 | new | 1.0e-5 | Success | 0.00877 | 0.647 | 10.1 |  | 0.000196 | 35.424 | 363.0 | 0.000187 | 0.837 | 1.16 | 459 | 134 | 5205 | 459 | 0 |
+| V-BO-01 | 30 | new | 3.0e-6 | Success | 0.00363 | 0.105 | 16.6 |  | 0.00142 | 35.975 | 363.0 | 0.00013 | 1.03 | 1.43 | 559 | 148 | 6217 | 559 | 0 |
+| V-BO-01 | 30 | new | 1.0e-6 | Success | 0.0028 | 0.0938 | 10.3 |  | 0.00121 | 35.419 | 363.0 | 7.05e-5 | 1.24 | 1.72 | 687 | 221 | 7953 | 687 | 0 |
+| V-BO-01 | 30 | new | 3.0e-7 | Success | 0.000733 | 0.0188 | 7.13 |  | 0.00106 | 34.936 | 363.0 | 0.000204 | 1.64 | 2.28 | 918 | 318 | 10808 | 918 | 0 |
+| V-BO-01 | 30 | new | 1.0e-7 | Success | 0.000102 | 0.00534 | 7.96 |  | 0.000154 | 35.52 | 363.0 | 0.000167 | 2.09 | 2.9 | 1154 | 414 | 13700 | 1154 | 0 |
+| V-BO-01 | 60 | old | 1.0e-5 | Success | 0.0104 | 0.247 | 0.547 | 0.539 | 0.000271 | 32.392 | 363.5 | 0.00353 | 2.82 | 1.61 | 1304 | 0 | 31398 | 232 | 120 |
+| V-BO-01 | 60 | old | 3.0e-6 | Success | 0.0112 | 0.271 | 1.65 | 0.589 | 0.000343 | 32.392 | 363.5 | 0.00106 | 1.86 | 1.06 | 890 | 0 | 20802 | 185 | 37 |
+| V-BO-01 | 60 | old | 1.0e-6 | Success | 0.00866 | 0.263 | 0.807 | 1.08 | 0.000296 | 32.392 | 363.5 | 0.000478 | 1.76 | 1.0 | 853 | 3 | 19076 | 164 | 8 |
+| V-BO-01 | 60 | old | 3.0e-7 | Success | 0.00648 | 0.206 | 1.79 | 1.06 | 6.47e-5 | 32.392 | 363.5 | 2.96e-5 | 1.97 | 1.12 | 979 | 10 | 21951 | 151 | 5 |
+| V-BO-01 | 60 | old | 1.0e-7 | Success | 0.00602 | 0.247 | 1.95 | 0.644 | 3.18e-5 | 32.392 | 363.5 | 0.000124 | 2.31 | 1.32 | 1141 | 38 | 26199 | 158 | 5 |
+| V-BO-01 | 60 | new | 1.0e-5 | Success | 0.00591 | 0.453 | 4.68 |  | 0.000411 | 32.391 | 363.5 | 1.0e-5 | 2.84 | 1.62 | 771 | 180 | 8382 | 772 | 0 |
+| V-BO-01 | 60 | new | 3.0e-6 | Success | 0.00285 | 0.177 | 3.21 |  | 0.000361 | 32.391 | 363.5 | 4.93e-5 | 3.33 | 1.9 | 917 | 212 | 9951 | 917 | 0 |
+| V-BO-01 | 60 | new | 1.0e-6 | Success | 0.0033 | 0.0912 | 5.02 |  | 0.000425 | 32.391 | 363.5 | 8.14e-7 | 4.0 | 2.28 | 1126 | 225 | 11936 | 1126 | 0 |
+| V-BO-01 | 60 | new | 3.0e-7 | Success | 0.000499 | 0.0225 | 4.78 |  | 0.000397 | 32.391 | 363.5 | 6.18e-6 | 5.74 | 3.27 | 1575 | 566 | 18705 | 1575 | 0 |
+| V-BO-01 | 60 | new | 1.0e-7 | Success | 0.000117 | 0.00886 | 3.93 |  | 0.000371 | 32.391 | 363.5 | 2.79e-5 | 7.28 | 4.14 | 1991 | 789 | 24233 | 1991 | 0 |
+| V-BO-01 | 120 | old | 1.0e-5 | Success | 0.00868 | 0.286 | 1.21 | 1.46 | 0.000191 | 32.469 | 363.5 | 0.00203 | 15.7 | 2.73 | 4106 | 0 | 87192 | 636 | 618 |
+| V-BO-01 | 120 | old | 3.0e-6 | Success | 0.00813 | 0.253 | 0.285 | 2.21 | 3.22e-5 | 32.469 | 363.5 | 0.000521 | 8.29 | 1.44 | 2036 | 0 | 44465 | 367 | 187 |
+| V-BO-01 | 120 | old | 1.0e-6 | Success | 0.0087 | 0.323 | 0.323 | 2.07 | 1.81e-5 | 32.469 | 363.5 | 0.00168 | 5.74 | 1.0 | 1461 | 0 | 30682 | 272 | 62 |
+| V-BO-01 | 120 | old | 3.0e-7 | Success | 0.00685 | 0.229 | 0.685 | 6.11 | 8.14e-5 | 32.469 | 363.5 | 0.000494 | 5.28 | 0.92 | 1406 | 0 | 27927 | 230 | 14 |
+| V-BO-01 | 120 | old | 1.0e-7 | Success | 0.00403 | 0.183 | 0.714 | 6.58 | 7.16e-5 | 32.469 | 363.5 | 1.23e-5 | 5.82 | 1.01 | 1539 | 17 | 31289 | 211 | 3 |
+| V-BO-01 | 120 | new | 1.0e-5 | Success | 0.0217 | 0.583 | 9.06 |  | 0.00064 | 32.469 | 363.5 | 4.27e-5 | 10.2 | 1.77 | 1364 | 170 | 13664 | 1390 | 0 |
+| V-BO-01 | 120 | new | 3.0e-6 | Success | 0.00499 | 0.218 | 3.22 |  | 0.000359 | 32.469 | 363.5 | 6.3e-5 | 13.1 | 2.28 | 1745 | 430 | 19163 | 1761 | 0 |
+| V-BO-01 | 120 | new | 1.0e-6 | Success | 0.00213 | 0.205 | 4.18 |  | 0.000391 | 32.469 | 363.5 | 3.25e-5 | 15.7 | 2.74 | 2120 | 489 | 23006 | 2132 | 0 |
+| V-BO-01 | 120 | new | 3.0e-7 | Success | 0.0014 | 0.0698 | 4.77 |  | 0.000117 | 32.469 | 363.5 | 3.39e-5 | 19.4 | 3.39 | 2648 | 593 | 28595 | 2665 | 0 |
+| V-BO-01 | 120 | new | 1.0e-7 | Success | 0.000202 | 0.0235 | 6.28 |  | 0.000134 | 32.469 | 363.5 | 3.04e-5 | 27.8 | 4.84 | 3661 | 1292 | 43290 | 3664 | 0 |
+| V-BO-03 | 30 | old | 1.0e-5 | Success | 0.0118 | 0.384 | 0.384 | 0.242 | 3.05e-5 | 30.4 |  | 0.00179 | 0.5 | 0.911 | 461 | 0 | 10617 | 106 | 15 |
+| V-BO-03 | 30 | old | 3.0e-6 | Success | 0.0135 | 0.286 | 0.286 | 0.382 | 5.6e-5 | 30.4 |  | 0.000411 | 0.493 | 0.898 | 453 | 0 | 10540 | 97 | 3 |
+| V-BO-03 | 30 | old | 1.0e-6 | Success | 0.00993 | 0.245 | 0.245 | 0.327 | 3.75e-5 | 30.4 |  | 6.3e-5 | 0.549 | 1.0 | 515 | 1 | 11877 | 97 | 2 |
+| V-BO-03 | 30 | old | 3.0e-7 | Success | 0.00629 | 0.27 | 0.27 | 0.226 | 1.8e-5 | 30.4 |  | 3.31e-5 | 0.661 | 1.21 | 603 | 21 | 14444 | 99 | 2 |
+| V-BO-03 | 30 | old | 1.0e-7 | Success | 0.00471 | 0.25 | 0.25 | 0.193 | 2.08e-5 | 30.4 |  | 6.37e-6 | 0.797 | 1.45 | 730 | 48 | 17863 | 100 | 4 |
+| V-BO-03 | 30 | new | 1.0e-5 | Success | 0.00876 | 0.647 | 0.647 |  | 1.79e-5 | 30.394 |  | 4.21e-8 | 0.795 | 1.45 | 409 | 122 | 4657 | 409 | 0 |
+| V-BO-03 | 30 | new | 3.0e-6 | Success | 0.00362 | 0.105 | 0.105 |  | 2.43e-5 | 30.394 |  | 2.49e-8 | 0.937 | 1.71 | 494 | 130 | 5486 | 494 | 0 |
+| V-BO-03 | 30 | new | 1.0e-6 | Success | 0.00279 | 0.0938 | 0.0938 |  | 2.03e-5 | 30.394 |  | 3.63e-8 | 1.17 | 2.14 | 621 | 211 | 7277 | 621 | 0 |
+| V-BO-03 | 30 | new | 3.0e-7 | Success | 0.000733 | 0.0188 | 0.0188 |  | 6.38e-6 | 30.394 |  | 6.2e-9 | 1.56 | 2.84 | 829 | 304 | 9893 | 829 | 0 |
+| V-BO-03 | 30 | new | 1.0e-7 | Success | 0.0001 | 0.00534 | 0.00534 |  | 7.43e-7 | 30.394 |  | 1.2e-8 | 1.97 | 3.59 | 1066 | 398 | 12778 | 1066 | 0 |
+| V-BO-03 | 60 | old | 1.0e-5 | Success | 0.0105 | 0.247 | 0.247 | 0.476 | 1.67e-5 | 30.387 |  | 0.000408 | 2.4 | 1.76 | 1184 | 0 | 27940 | 191 | 105 |
+| V-BO-03 | 60 | old | 3.0e-6 | Success | 0.0112 | 0.271 | 0.271 | 0.695 | 3.75e-5 | 30.387 |  | 0.00135 | 1.39 | 1.02 | 710 | 0 | 15245 | 138 | 28 |
+| V-BO-03 | 60 | old | 1.0e-6 | Success | 0.00866 | 0.263 | 0.263 | 0.443 | 9.5e-6 | 30.387 |  | 0.000233 | 1.36 | 1.0 | 681 | 3 | 14538 | 126 | 2 |
+| V-BO-03 | 60 | old | 3.0e-7 | Success | 0.00648 | 0.206 | 0.206 | 0.551 | 7.39e-6 | 30.387 |  | 5.25e-5 | 1.53 | 1.12 | 760 | 10 | 16241 | 112 | 1 |
+| V-BO-03 | 60 | old | 1.0e-7 | Success | 0.00608 | 0.247 | 0.247 | 0.331 | 1.24e-5 | 30.387 |  | 3.31e-5 | 1.8 | 1.32 | 913 | 34 | 20325 | 113 | 1 |
+| V-BO-03 | 60 | new | 1.0e-5 | Success | 0.00591 | 0.453 | 0.453 |  | 1.99e-5 | 30.385 |  | 3.99e-8 | 2.68 | 1.97 | 708 | 165 | 7693 | 709 | 0 |
+| V-BO-03 | 60 | new | 3.0e-6 | Success | 0.00285 | 0.177 | 0.177 |  | 1.1e-5 | 30.385 |  | 1.34e-8 | 3.3 | 2.43 | 889 | 208 | 9665 | 889 | 0 |
+| V-BO-03 | 60 | new | 1.0e-6 | Success | 0.0033 | 0.0912 | 0.0912 |  | 2.6e-5 | 30.385 |  | 1.31e-8 | 3.89 | 2.85 | 1064 | 213 | 11280 | 1064 | 0 |
+| V-BO-03 | 60 | new | 3.0e-7 | Success | 0.000731 | 0.0337 | 0.0337 |  | 5.58e-6 | 30.385 |  | 1.75e-8 | 5.68 | 4.17 | 1504 | 554 | 17968 | 1504 | 0 |
+| V-BO-03 | 60 | new | 1.0e-7 | Success | 8.91e-5 | 0.0061 | 0.0061 |  | 7.02e-7 | 30.385 |  | 1.05e-8 | 7.21 | 5.3 | 1925 | 758 | 23389 | 1925 | 0 |
+| V-BO-03 | 120 | old | 1.0e-5 | Success | 0.00868 | 0.286 | 0.469 | 5.11 | 2.31e-5 | 30.383 |  | 0.00582 | 13.8 | 2.89 | 3613 | 0 | 76798 | 581 | 549 |
+| V-BO-03 | 120 | old | 3.0e-6 | Success | 0.0081 | 0.253 | 0.253 | 1.51 | 2.05e-5 | 30.383 |  | 0.000959 | 7.19 | 1.5 | 1858 | 0 | 39861 | 312 | 188 |
+| V-BO-03 | 120 | old | 1.0e-6 | Success | 0.00871 | 0.323 | 0.323 | 0.601 | 1.34e-5 | 30.383 |  | 0.00287 | 4.79 | 1.0 | 1259 | 0 | 25452 | 227 | 62 |
+| V-BO-03 | 120 | old | 3.0e-7 | Success | 0.00689 | 0.229 | 0.229 | 1.32 | 2.44e-5 | 30.383 |  | 0.000804 | 3.97 | 0.829 | 1112 | 0 | 20912 | 180 | 11 |
+| V-BO-03 | 120 | old | 1.0e-7 | Success | 0.00406 | 0.183 | 0.468 | 5.59 | 1.21e-5 | 30.383 |  | 9.46e-5 | 4.66 | 0.972 | 1267 | 17 | 24331 | 160 | 0 |
+| V-BO-03 | 120 | new | 1.0e-5 | Success | 0.0217 | 0.583 | 0.583 |  | 0.000176 | 30.383 |  | 9.33e-9 | 10.2 | 2.13 | 1358 | 173 | 13635 | 1387 | 0 |
+| V-BO-03 | 120 | new | 3.0e-6 | Success | 0.00499 | 0.218 | 0.218 |  | 2.34e-5 | 30.383 |  | 1.98e-8 | 13.1 | 2.74 | 1713 | 419 | 18785 | 1729 | 0 |
+| V-BO-03 | 120 | new | 1.0e-6 | Success | 0.00212 | 0.205 | 0.205 |  | 6.64e-6 | 30.383 |  | 1.14e-8 | 16.0 | 3.33 | 2110 | 501 | 23012 | 2124 | 0 |
+| V-BO-03 | 120 | new | 3.0e-7 | Success | 0.00134 | 0.0698 | 0.0698 |  | 1.11e-5 | 30.383 |  | 8.88e-9 | 19.5 | 4.07 | 2590 | 567 | 27859 | 2603 | 0 |
+| V-BO-03 | 120 | new | 1.0e-7 | Success | 0.000275 | 0.0302 | 0.0302 |  | 1.95e-6 | 30.383 |  | 5.27e-9 | 27.6 | 5.76 | 3647 | 1321 | 43391 | 3647 | 0 |
+| V-BO-04 | 30 | old | 1.0e-5 | Success | 5.22e-7 | 2.48e-6 | 2.48e-6 | 1.26e7 | 1.27e-7 |  |  |  | 0.0281 | 0.496 | 154 | 0 | 2939 | 37 | 2 |
+| V-BO-04 | 30 | old | 3.0e-6 | Success | 2.61e-7 | 1.48e-6 | 2.12e-6 | 1.15e7 | 5.33e-8 |  |  |  | 0.0303 | 0.534 | 163 | 0 | 3333 | 35 | 0 |
+| V-BO-04 | 30 | old | 1.0e-6 | Success | 8.26e-8 | 4.47e-7 | 1.19e-6 | 3.87e6 | 1.85e-8 |  |  |  | 0.0346 | 0.61 | 188 | 0 | 3975 | 36 | 1 |
+| V-BO-04 | 30 | old | 3.0e-7 | Success | 2.03e-8 | 1.19e-7 | 8.52e-7 | 4.37e6 | 6.9e-9 |  |  |  | 0.0418 | 0.736 | 235 | 0 | 4867 | 43 | 0 |
+| V-BO-04 | 30 | old | 1.0e-7 | Success | 5.85e-9 | 2.62e-8 | 1.59e-7 | 2.17e6 | 1.65e-9 |  |  |  | 0.0568 | 1.0 | 304 | 0 | 6631 | 67 | 9 |
+| V-BO-04 | 30 | new | 1.0e-5 | Success | 2.07e-10 | 1.03e-9 | 0.0364 |  | 0.000285 |  |  |  | 0.0333 | 0.586 | 123 | 4 | 1141 | 123 | 0 |
+| V-BO-04 | 30 | new | 3.0e-6 | Success | 8.19e-11 | 3.41e-10 | 0.00926 |  | 6.32e-5 |  |  |  | 0.0404 | 0.712 | 156 | 2 | 1422 | 156 | 0 |
+| V-BO-04 | 30 | new | 1.0e-6 | Success | 3.51e-11 | 1.61e-10 | 0.01 |  | 6.38e-5 |  |  |  | 0.049 | 0.864 | 194 | 1 | 1756 | 194 | 0 |
+| V-BO-04 | 30 | new | 3.0e-7 | Success | 1.06e-11 | 5.44e-11 | 0.00341 |  | 3.48e-6 |  |  |  | 0.0624 | 1.1 | 256 | 4 | 2338 | 256 | 0 |
+| V-BO-04 | 30 | new | 1.0e-7 | Success | 6.98e-12 | 4.11e-11 | 0.00956 |  | 6.34e-5 |  |  |  | 0.0784 | 1.38 | 326 | 5 | 2976 | 326 | 0 |
+| V-BO-04 | 60 | old | 1.0e-5 | Success | 5.09e-7 | 2.41e-6 | 2.41e-6 | 5.52e6 | 1.13e-7 |  |  |  | 0.0553 | 0.476 | 170 | 0 | 3251 | 41 | 3 |
+| V-BO-04 | 60 | old | 3.0e-6 | Success | 3.17e-7 | 1.6e-6 | 1.6e-6 | 2.83e6 | 5.39e-8 |  |  |  | 0.0628 | 0.54 | 189 | 0 | 3753 | 40 | 1 |
+| V-BO-04 | 60 | old | 1.0e-6 | Success | 9.37e-8 | 5.46e-7 | 1.32e-6 | 1.06e7 | 1.95e-8 |  |  |  | 0.072 | 0.619 | 212 | 0 | 4338 | 40 | 1 |
+| V-BO-04 | 60 | old | 3.0e-7 | Success | 2.45e-8 | 1.39e-7 | 6.46e-7 | 1.08e7 | 8.6e-9 |  |  |  | 0.0839 | 0.722 | 244 | 0 | 5091 | 46 | 0 |
+| V-BO-04 | 60 | old | 1.0e-7 | Success | 6.65e-9 | 4.12e-8 | 2.28e-7 | 1.0e7 | 1.93e-9 |  |  |  | 0.116 | 1.0 | 349 | 0 | 7492 | 63 | 11 |
+| V-BO-04 | 60 | new | 1.0e-5 | Success | 2.37e-10 | 1.22e-9 | 0.0284 |  | 0.000232 |  |  |  | 0.0647 | 0.557 | 123 | 0 | 1109 | 123 | 0 |
+| V-BO-04 | 60 | new | 3.0e-6 | Success | 8.75e-11 | 4.44e-10 | 0.00423 |  | 4.34e-6 |  |  |  | 0.0816 | 0.702 | 158 | 5 | 1464 | 158 | 0 |
+| V-BO-04 | 60 | new | 1.0e-6 | Success | 3.64e-11 | 1.66e-10 | 0.00495 |  | 5.06e-6 |  |  |  | 0.0981 | 0.844 | 198 | 5 | 1824 | 198 | 0 |
+| V-BO-04 | 60 | new | 3.0e-7 | Success | 1.83e-11 | 7.42e-11 | 0.000366 |  | 5.5e-5 |  |  |  | 0.122 | 1.05 | 253 | 1 | 2287 | 253 | 0 |
+| V-BO-04 | 60 | new | 1.0e-7 | Success | 7.91e-12 | 5.01e-11 | 0.000496 |  | 5.51e-5 |  |  |  | 0.153 | 1.32 | 324 | 2 | 2934 | 324 | 0 |
+| V-BO-04 | 120 | old | 1.0e-5 | Success | 3.16e-7 | 1.46e-6 | 1.46e-6 | 9.1e6 | 9.19e-8 |  |  |  | 0.124 | 0.52 | 222 | 0 | 3832 | 45 | 4 |
+| V-BO-04 | 120 | old | 3.0e-6 | Success | 3.11e-7 | 1.75e-6 | 1.83e-6 | 7.5e6 | 5.53e-8 |  |  |  | 0.137 | 0.574 | 237 | 0 | 4218 | 45 | 2 |
+| V-BO-04 | 120 | old | 1.0e-6 | Success | 9.08e-8 | 4.78e-7 | 5.01e-7 | 1.34e7 | 2.41e-8 |  |  |  | 0.156 | 0.655 | 259 | 0 | 4894 | 45 | 1 |
+| V-BO-04 | 120 | old | 3.0e-7 | Success | 2.57e-8 | 1.54e-7 | 6.55e-7 | 1.23e7 | 7.74e-9 |  |  |  | 0.184 | 0.773 | 291 | 0 | 5864 | 47 | 1 |
+| V-BO-04 | 120 | old | 1.0e-7 | Success | 7.28e-9 | 3.87e-8 | 3.18e-7 | 2.39e6 | 1.97e-9 |  |  |  | 0.239 | 1.0 | 375 | 0 | 7815 | 66 | 8 |
+| V-BO-04 | 120 | new | 1.0e-5 | Success | 2.48e-10 | 1.08e-9 | 0.0373 |  | 0.000336 |  |  |  | 0.148 | 0.621 | 124 | 4 | 1150 | 124 | 0 |
+| V-BO-04 | 120 | new | 3.0e-6 | Success | 1.0e-10 | 4.37e-10 | 0.0124 |  | 0.000119 |  |  |  | 0.177 | 0.741 | 156 | 2 | 1422 | 156 | 0 |
+| V-BO-04 | 120 | new | 1.0e-6 | Success | 4.31e-11 | 1.85e-10 | 0.00682 |  | 6.12e-5 |  |  |  | 0.219 | 0.919 | 197 | 4 | 1807 | 197 | 0 |
+| V-BO-04 | 120 | new | 3.0e-7 | Success | 1.25e-11 | 7.13e-11 | 0.0136 |  | 0.000173 |  |  |  | 0.277 | 1.16 | 252 | 2 | 2286 | 252 | 0 |
+| V-BO-04 | 120 | new | 1.0e-7 | Success | 5.07e-12 | 2.89e-11 | 0.00652 |  | 6.09e-5 |  |  |  | 0.345 | 1.44 | 321 | 5 | 2931 | 321 | 0 |
 
-| run | reltol | window RMS [K] | window largest [K] | warm [s] | ratio |
-|---|---|---|---|---|---|
-| old core default (KenCarp4) | 1.0e-6 | 0.015 | 0.375 | 0.986 | 1.0 |
-| Rodas5P (default) | 1.0e-5 | 0.0101 | 0.531 | 0.615 | 0.624 |
+## Where the time goes: V-BO-01 at 60 cells
 
-Where the time goes at the matched tolerance (shares of the profiler's samples) and unit costs at 200.0 s [µs]:
+Shares of the profiler's samples at the old default and at the new core's matched tolerance, and unit costs at 200.0 s [µs]:
 
-| run | reltol | jacobian | domain | events | factorization | linsolve | rhs | wform | observers | integrator | RHS | Jacobian | states | nnz(J) |
+| core | reltol | jacobian | domain | events | factorization | linsolve | rhs | wform | observers | integrator | RHS | Jacobian | states | nnz(J) |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| old core default (KenCarp4) | 1.0e-6 | 0.053 | 0.0 | 0.0016 | 0.079 | 0.3 | 0.46 | 0.024 | 0.0042 | 0.081 | 13.3 | 118.0 | 728 | 8704 |
-| Rodas5P (default) | 1.0e-5 | 0.32 | 0.029 | 0.0031 | 0.091 | 0.11 | 0.34 | 0.045 | 0.0 | 0.066 | 13.5 | 147.0 | 728 | 8704 |
+| old | 1.0e-6 | 0.057 | 0.0 | 0.011 | 0.063 | 0.22 | 0.5 | 0.027 | 0.0076 | 0.12 | 53.7 | 479.0 | 911 | 8887 |
+| new | 1.0e-5 | 0.43 | 0.022 | 0.00048 | 0.076 | 0.057 | 0.2 | 0.12 | 0.0 | 0.089 | 55.3 | 1720.0 | 1277 | 25000 |
 
-## V-BO-01
+## The inactive correction
 
-Window: the saved times before 167.8 s. Reference spread (reltol 1.0e-10 against 1.0e-9, window RMS): old 0.000323 K, new 1.35e-6 K. Target: the old core's window RMS at reltol 1.0e-6, 0.00866 K.
+The finite-volume core without a correction and with an equidistribution correction at its defaults installed, at the same tolerance; the old core beside. Largest |c|: the largest correction velocity over the saved times [m/s] (zero: never active); difference: the largest temperature difference between the two new-core solves [K].
 
-| run | reltol | retcode | window RMS [K] | window largest [K] | run error [K] | shift | MLR | peak | t_bo [s] | ledger | warm [s] | ratio | steps | rejected | RHS | Jacobians | nonlinear failures |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| old core default (KenCarp4) | 1.0e-5 | Success | 0.0104 | 0.247 | 0.547 | 0.539 | 0.000271 | 32.392 | 363.5 | 0.00353 | 0.898 | 1.61 | 1304 | 0 | 31398 | 232 | 120 |
-| old core default (KenCarp4) | 3.0e-6 | Success | 0.0112 | 0.271 | 1.65 | 0.589 | 0.000343 | 32.392 | 363.5 | 0.00106 | 0.604 | 1.08 | 890 | 0 | 20802 | 185 | 37 |
-| old core default (KenCarp4) | 1.0e-6 | Success | 0.00866 | 0.263 | 0.807 | 1.08 | 0.000296 | 32.392 | 363.5 | 0.000478 | 0.559 | 1.0 | 853 | 3 | 19076 | 164 | 8 |
-| old core default (KenCarp4) | 3.0e-7 | Success | 0.00648 | 0.206 | 1.79 | 1.06 | 6.47e-5 | 32.392 | 363.5 | 2.96e-5 | 0.633 | 1.13 | 979 | 10 | 21951 | 151 | 5 |
-| old core default (KenCarp4) | 1.0e-7 | Success | 0.00602 | 0.247 | 1.95 | 0.644 | 3.18e-5 | 32.392 | 363.5 | 0.000124 | 0.75 | 1.34 | 1141 | 38 | 26199 | 158 | 5 |
-| Rodas5P (default) | 1.0e-5 | Success | 0.00591 | 0.453 | 7.57 |  | 0.000477 | 32.391 | 363.5 | 4.53e-5 | 0.915 | 1.64 | 766 | 179 | 8329 | 767 | 0 |
-| Rodas5P (default) | 3.0e-6 | Success | 0.00285 | 0.177 | 13.2 |  | 0.000557 | 32.391 | 363.5 | 7.83e-5 | 1.09 | 1.95 | 930 | 219 | 10125 | 931 | 0 |
-| Rodas5P (default) | 1.0e-6 | Success | 0.0033 | 0.0912 | 11.1 |  | 0.000527 | 32.391 | 363.5 | 7.41e-5 | 1.28 | 2.29 | 1115 | 226 | 11845 | 1115 | 0 |
-| Rodas5P (default) | 3.0e-7 | Success | 0.000499 | 0.0225 | 4.64 |  | 0.000403 | 32.391 | 363.5 | 1.18e-5 | 1.87 | 3.35 | 1581 | 564 | 18743 | 1581 | 0 |
-| Rodas5P (default) | 1.0e-7 | Success | 0.000117 | 0.00886 | 5.55 |  | 6.07e-5 | 32.391 | 363.5 | 4.28e-5 | 2.4 | 4.29 | 2017 | 799 | 24547 | 2017 | 0 |
-
-Matched accuracy (the loosest ladder tolerance at or below the target):
-
-| run | reltol | window RMS [K] | window largest [K] | warm [s] | ratio |
-|---|---|---|---|---|---|
-| old core default (KenCarp4) | 1.0e-6 | 0.00866 | 0.263 | 0.559 | 1.0 |
-| Rodas5P (default) | 1.0e-5 | 0.00591 | 0.453 | 0.915 | 1.64 |
-
-Where the time goes at the matched tolerance (shares of the profiler's samples) and unit costs at 200.0 s [µs]:
-
-| run | reltol | jacobian | domain | events | factorization | linsolve | rhs | wform | observers | integrator | RHS | Jacobian | states | nnz(J) |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| old core default (KenCarp4) | 1.0e-6 | 0.055 | 0.0 | 0.0016 | 0.071 | 0.29 | 0.45 | 0.025 | 0.0059 | 0.1 | 15.1 | 157.0 | 911 | 8887 |
-| Rodas5P (default) | 1.0e-5 | 0.39 | 0.024 | 0.0 | 0.092 | 0.068 | 0.22 | 0.075 | 0.00022 | 0.12 | 22.7 | 470.0 | 1277 | 27904 |
-
+| deck | reltol | old [s] (steps) | new [s] (steps) | with the correction [s] (steps) | correction / none | with the correction / old | largest |c| | difference |
+|---|---|---|---|---|---|---|---|---|
+| ale 25 | 1.0e-6 | 0.0127 (51) | 0.0116 (46) | 0.014 (46) | 1.21 | 1.11 | 0.0 | 0.0 |
+| ale 100 | 1.0e-6 | 0.0406 (54) | 0.0583 (54) | 0.0995 (71) | 1.71 | 2.45 | 1.88e-6 | 0.484 |
+| ale_darcy 25 | 1.0e-6 | 0.0301 (75) | 0.0295 (100) | 0.0532 (156) | 1.8 | 1.77 | 1.39e-5 | 5.15 |
+| ale_darcy 100 | 1.0e-6 | 0.098 (80) | 0.112 (102) | 0.586 (430) | 5.24 | 5.98 | 1.56e-5 | 4.58 |
+| V-CPL-02 | 1.0e-5 | 1.23 (1037) | 1.94 (2049) | 2.21 (1122) | 1.14 | 1.8 | 0.000569 | 15.8 |
+| V-CPL-03 | 1.0e-8 | 0.00692 (85) | 0.00589 (88) | 0.00706 (88) | 1.2 | 1.02 | 0.0 | 0.0 |
