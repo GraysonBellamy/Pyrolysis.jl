@@ -281,9 +281,15 @@ function _vbo_solve_fn(id::String; corrected::Bool = false)
     end
 end
 
+# The peak and its time are the main peak's: over the saved times before the
+# solve's last deactivation event, whose merge (or park) releases the layer's
+# residue in a burst the gate judges by refinement instead.
 function _vbo_measures(sol)
     mlr = sol.extras.gas_generation_rate .* 1000           # g m⁻² s⁻¹
-    ipk = argmax(mlr)
+    parks = sol.extras.park_times
+    before =
+        isempty(parks) ? length(sol.t) : something(findlast(<(maximum(parks)), sol.t), 1)
+    ipk = argmax(view(mlr, 1:before))
     th = sol.extras.thickness_history
     i_bo = findfirst(<(VBO_L_KW + 0.02e-3), th)
     t_bo = i_bo === nothing ? NaN : sol.t[i_bo]

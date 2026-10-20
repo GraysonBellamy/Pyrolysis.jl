@@ -19,10 +19,8 @@
 # below ε_m, the cells the band took and its largest merged mass fraction
 # (item 1: at most one invocation per layer, the largest fraction at most
 # 5 ε_m); every QoI of the case in assert mode against its fixed references,
-# with the old core at the same resolution beside (item 2); for V-BO-01 and
-# 03 the largest difference of the mass loss rate from the old core's at the
-# saved times from the old core's peak on, over that peak (item 2's curve
-# criterion, at most 3 %); events, invocations and inadmissible results
+# with the old core at the same resolution beside (item 2; its burst criteria
+# are `burnout_burst.jl`'s); events, invocations and inadmissible results
 # (item 4); the largest scaled constraint residual of the accepted states
 # under C52's scale and under Phase 1's, which omits the sweep of the node
 # corrections, and the accepted states Phase 1's would have rejected beside
@@ -71,7 +69,6 @@ const OUT = joinpath(@__DIR__, "measurements")
 mkpath(OUT)
 const FORMS = (:temperature, :enthalpy)
 const REPEATS = 3
-const CURVE_TOL = 0.03
 const TAU = Cl.EQUIDISTRIBUTION_TIME
 const SWITCH = Ke.SWITCH_WIDTH
 const CASES = Dict(
@@ -317,22 +314,6 @@ end
 # The measures
 # ----------------------------------------------------------------------------
 
-# The largest difference of the mass loss rate from the old core's at the
-# saved times from the old core's peak on, over that peak, and its time.
-function curve_error(sol, old)
-    a = sol.extras.gas_generation_rate
-    b = old.extras.gas_generation_rate
-    ipk = argmax(b)
-    index = Dict(t => k for (k, t) in enumerate(sol.t))
-    d, t = 0.0, NaN
-    for k = ipk:length(old.t)
-        j = get(index, old.t[k], 0)
-        j == 0 && continue
-        abs(a[j] - b[k]) > d && ((d, t) = (abs(a[j] - b[k]), old.t[k]))
-    end
-    return (; error = d / b[ipk], t)
-end
-
 # R25's decomposition at the layer's invocation (the first).
 function tail_terms(cp, sol, tail, old)
     def, ws = cp.def, cp.ws
@@ -434,8 +415,6 @@ function measure(row, form, old)
         qois,
         failing,
         measures = m,
-        curve = row.case == "V-BO-04" ? (; error = NaN, t = NaN) :
-                curve_error(sol, old.sol),
         inadmissible = r.inadmissible,
         min_h = p.min_h,
         min_ratio = p.min_ratio,
@@ -515,7 +494,7 @@ open(joinpath(OUT, "burnout_ladder.csv"), "w") do io
     println(
         io,
         "case,cells,form,eps_m,tau,switch,corrected,retcode,outcome,t_last,invocations,events,",
-        "largest_fraction,item1,qois_failing,peak,t_peak,t_bo,mass_loss,ledger,curve,curve_t,",
+        "largest_fraction,item1,qois_failing,peak,t_peak,t_bo,mass_loss,ledger,",
         "inadmissible,min_h,min_ratio,item10,c52,phase1,phase1_above,domain,steps,rejected,wall,old_wall",
     )
     for r in results
@@ -541,8 +520,6 @@ open(joinpath(OUT, "burnout_ladder.csv"), "w") do io
             m === nothing ? NaN : m.t_bo,
             m === nothing ? NaN : m.mass_loss,
             m === nothing ? NaN : m.ledger,
-            r.curve.error,
-            r.curve.t,
             r.inadmissible,
             r.min_h,
             r.min_ratio,
@@ -579,16 +556,13 @@ open(joinpath(OUT, "burnout_ladder.md"), "w") do io
         "Invocations: per invocation its cells (below ε_m, taken by the band; the largest merged ",
         "mass fraction). Item 1 passes with at most one invocation per layer and the largest ",
         "fraction at most 5 ε_m. QoIs: the case's own, in assert mode against its fixed references; ",
-        "the failing ones are named. Curve: the largest difference of the mass loss rate from the ",
-        "old core's at the saved times from the old core's peak on, over that peak (at most ",
-        "$(Int(100CURVE_TOL)) %), and the time of that difference [s]. Inadmissible: results of a ",
-        "deactivation the solve refused.\n",
+        "the failing ones are named. Inadmissible: results of a deactivation the solve refused.\n",
     )
     println(
         io,
-        "| case | cells | form | ε_m | τ (τ_p) | switch | corrected | retcode, outcome, end [s] | invocations | item 1 | QoIs | failing | peak, t_peak, t_bo (old core) | curve | events | inadmissible |",
+        "| case | cells | form | ε_m | τ (τ_p) | switch | corrected | retcode, outcome, end [s] | invocations | item 1 | QoIs | failing | peak, t_peak, t_bo (old core) | events | inadmissible |",
     )
-    println(io, "|" * repeat("---|", 16))
+    println(io, "|" * repeat("---|", 15))
     for r in results
         m = r.measures
         o = old_runs[(r.case, r.n)].measures
@@ -601,7 +575,7 @@ open(joinpath(OUT, "burnout_ladder.md"), "w") do io
             io,
             "| $(_run(r)) | $(r.retcode), $(r.outcome), $(_g(r.t_last; d = 4)) | $(_invocations(r)) | ",
             "$(r.item1) | $(passed)/$(length(r.qois)) | $(join(r.failing, "; ")) | $(pk) | ",
-            "$(_g(100 * r.curve.error)) % ($(_g(r.curve.t; d = 4))) | $(r.events) | $(r.inadmissible) |",
+            "$(r.events) | $(r.inadmissible) |",
         )
     end
     println(io, "\n## Cells, residuals and cost (items 6 and 10)\n")
@@ -672,27 +646,10 @@ open(joinpath(OUT, "burnout_ladder.md"), "w") do io
         )
     end
     println(io, "\n## The old core\n")
-    println(
-        io,
-        "Curve against the next resolution: the curve criterion of the old core at these cells ",
-        "against the old core at twice as many, and its time [s].\n",
-    )
-    println(
-        io,
-        "| case | cells | retcode | parks | wall [s] | curve against the next resolution |",
-    )
-    println(io, "|---|---|---|---|---|---|")
+    println(io, "| case | cells | retcode | parks | wall [s] |")
+    println(io, "|---|---|---|---|---|")
     for ((id, n), o) in sort(collect(old_runs); by = first)
-        finer = get(old_runs, (id, 2n), nothing)
-        c =
-            finer === nothing || id == "V-BO-04" ? "" :
-            let x = curve_error(o.sol, finer.sol)
-                "$(_g(100 * x.error)) % ($(_g(x.t; d = 4)))"
-            end
-        println(
-            io,
-            "| $(id) | $(n) | $(o.sol.retcode) | $(o.parks) | $(_g(o.wall)) | $(c) |",
-        )
+        println(io, "| $(id) | $(n) | $(o.sol.retcode) | $(o.parks) | $(_g(o.wall)) |")
     end
 end
 println(
