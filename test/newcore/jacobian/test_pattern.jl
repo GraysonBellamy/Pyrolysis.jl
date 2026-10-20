@@ -6,6 +6,7 @@ using Pyrolysis.Meshes
 using Pyrolysis.States
 using Pyrolysis.States: StateLayout, state_length
 using Pyrolysis.Kernels: RelativeFluxKernel, find_kernel
+using Pyrolysis.Closures: EquidistributionCorrection, PrescribedCorrection
 using Pyrolysis.ColoredJacobian
 using Pyrolysis.Integration: setup
 
@@ -81,12 +82,15 @@ end
 # reconstruction of the relative fluxes. That model is a moving mesh whose
 # cell rows read their two node velocities; at `c = 0` the cell rows of this
 # core read none (the velocities enter the position rows only), two colors
-# fewer, and a fixed mesh has no node block (four positions and the two
+# fewer, as under the equidistribution correction, whose node corrections
+# read positions and masses only and whose balance rows reach no further
+# than the cell rows; only a prescribed velocity, the correction itself,
+# reaches them. A fixed mesh has no node block (four positions and the two
 # velocities), six fewer.
 _phase0(NC, bl, χ, reconstruction) =
     reconstruction ? 5NC + 13 + 2bl + 11χ : 3NC + 9 + 2bl + 7χ
-_expected(NC, moving, bl, χ, reconstruction) =
-    _phase0(NC, bl, χ, reconstruction) - (!moving ? 6 : reconstruction ? 0 : 2)
+_expected(NC, moving, bl, χ, reconstruction, prescribed) =
+    _phase0(NC, bl, χ, reconstruction) - (!moving ? 6 : prescribed ? 0 : 2)
 
 const _color_cases = (
     fixed = (options = (;), law = nothing, reacting = true),
@@ -117,6 +121,29 @@ const _color_cases = (
         law = χ -> 1 - 0.3χ,
         reacting = false,
     ),
+    equidistribution = (
+        options = (use_ale = true, correction = EquidistributionCorrection()),
+        law = nothing,
+        reacting = true,
+    ),
+    equidistribution_beer_lambert = (
+        options = (
+            use_ale = true,
+            radiation_model = BEER_LAMBERT,
+            correction = EquidistributionCorrection(),
+        ),
+        law = nothing,
+        reacting = true,
+    ),
+    equidistribution_monitor_cross_section = (
+        options = (
+            use_ale = true,
+            radiation_model = BEER_LAMBERT,
+            correction = EquidistributionCorrection(monitor = (1.0, 1.0)),
+        ),
+        law = χ -> 1 - 0.3χ,
+        reacting = true,
+    ),
 )
 
 # The largest number of stored entries in a row: the lower bound of any
@@ -131,6 +158,8 @@ _largest_row(S) = maximum(diff(sparse(transpose(S)).colptr))
         cj = cp.jacobian
         layout = cp.def.layout
         reconstruction = find_kernel(RelativeFluxKernel, cp.def.kernels) !== nothing
+        prescribed =
+            cp.def.closure !== nothing && cp.def.closure.correction isa PrescribedCorrection
         @test all(cj.pattern[r, r] for r in axes(cj.pattern, 1))
         # The coloring is optimal: it reaches the largest row of the colored
         # pattern.
@@ -141,6 +170,7 @@ _largest_row(S) = maximum(diff(sparse(transpose(S)).colptr))
             has_intensities(layout),
             has_chi(layout),
             reconstruction,
+            prescribed,
         )
         push!(counts, cj.n_colors)
     end

@@ -27,6 +27,8 @@ const _SOLVE_KEYWORDS = (
     :sources,
     :deactivation,
     :band,
+    :correction,
+    :lagrangian,
 )
 
 """
@@ -35,7 +37,8 @@ const _SOLVE_KEYWORDS = (
 	      dt = problem.dt_initial, adaptive = true, dtmin = 1e-12, dtmax = Inf,
 	      saveat = problem.output_times, callback = nothing, validate = true,
 	      linear_solver = nothing, integrator_policy = nothing,
-	      sources = NoSources(), deactivation = false, band = threshold) -> CoreSolution
+	      sources = NoSources(), deactivation = false, band = nothing,
+	      correction = NoCorrection(), lagrangian = Int[]) -> CoreSolution
 
 Solve `problem` on the finite-volume core.
 
@@ -58,8 +61,8 @@ continuous callback's event raises the flag as any event does. `progress` is
 accepted for the keyword set of the other solver and draws nothing; `jacobian`
 is accepted and ignored, the colored Jacobian being the only one.
 
-`use_ale`, `w_override`, `coordinates`, `deactivation` and `band` are those of
-[`setup`](@ref). On a moving mesh the solve ends with return code
+`use_ale`, `w_override`, `correction`, `lagrangian`, `coordinates`,
+`deactivation` and `band` are those of [`setup`](@ref). On a moving mesh the solve ends with return code
 `:Terminated` when the thickness falls below `min_thickness` [m] (default
 1e-6). With `deactivation`, the cells that fall below the threshold during a step
 are deactivated at its end in one event ([`deactivate!`](@ref)); the
@@ -100,7 +103,9 @@ function _solve(
     integrator_policy = nothing,
     sources = NoSources(),
     deactivation::Bool = false,
-    band::Real = threshold,
+    band::Union{Nothing,Real} = nothing,
+    correction::Correction = NoCorrection(),
+    lagrangian::AbstractVector{<:Integer} = Int[],
 )
     jacobian === nothing ||
         @warn "solve(): `jacobian` is ignored by the finite-volume core" maxlog = 1
@@ -120,6 +125,8 @@ function _solve(
         sources,
         deactivation,
         band,
+        correction,
+        lagrangian,
     )
     return integrate(
         cp;

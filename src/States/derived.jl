@@ -16,6 +16,8 @@ Constants fixed at setup, per cell unless stated:
 - `volume_floor`: smooth floor [m³] on the volume used for `m/V`
 - `capacity_floor`: smooth floor [J/K] on the cell's heat-capacity sum
 - `positions`: reference node positions [m], the geometry of a fixed mesh
+- `thickness`: initial thickness `hᵢ(0)` [m], the distance between the
+  cell's two nodes
 - `cross_section`: the cross-section measure `A₀` of the mesh
 """
 struct CellReference
@@ -25,6 +27,7 @@ struct CellReference
     volume_floor::Vector{Float64}
     capacity_floor::Vector{Float64}
     positions::Vector{Float64}
+    thickness::Vector{Float64}
     cross_section::Float64
 end
 
@@ -124,6 +127,8 @@ automatic differentiation):
 - `h`: component sensible enthalpies at the cell temperature (`NC × n`)
 - `x`, `w`, `A`: node positions, node velocities (moving mesh) and the
   cross-section measure
+- `c`: the node corrections `c = w − vₛ`, the mesh velocity relative to the
+  solid's (zero without a correction), filled by `Closures.correction!`
 - `θ_A`: the lateral strain rate of the cross section [1/s] (variable cross
   section; zero otherwise)
 - `G`, `M`: the conversion-history pair per cell [kg] (variable cross section)
@@ -154,6 +159,7 @@ struct DerivedState{NC,T,G<:MeshGeometry}
     h::Matrix{T}
     x::Vector{T}
     w::Vector{T}
+    c::Vector{T}
     A::Base.RefValue{T}
     θ_A::Base.RefValue{T}
     G::Vector{T}
@@ -202,6 +208,7 @@ function DerivedState{T}(
         zeros(T, n),
         zeros(T, NC, n),
         x,
+        zeros(T, nn),
         zeros(T, nn),
         A,
         Ref{T}(zero(T)),

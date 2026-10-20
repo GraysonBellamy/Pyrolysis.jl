@@ -20,8 +20,8 @@ end
 The per-cell reference data of a mesh whose cells hold the initial component
 masses `m0` (`NC × n`): initial volumes, the initial condensed mass, the
 positive-part scale `δᵢ = reltol · threshold · mˢᵢ(0)` (the cell's mass
-absolute tolerance), the volume floor and the heat-capacity floor
-`RHO_CP_FLOOR · Vᵢ(0)`.
+absolute tolerance), the volume floor, the heat-capacity floor
+`RHO_CP_FLOOR · Vᵢ(0)` and the initial thicknesses.
 """
 function CellReference(
     mesh::Mesh{1},
@@ -50,6 +50,7 @@ function CellReference(
         VOLUME_FLOOR_FRACTION .* V0,
         RHO_CP_FLOOR .* V0,
         x,
+        [x[topo.cells[i].nodes[2]] - x[topo.cells[i].nodes[1]] for i = 1:n],
         topo.cross_section,
     )
 end

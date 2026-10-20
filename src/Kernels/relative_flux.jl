@@ -19,7 +19,8 @@ The smooth van Albada slope of two one-sided gradients `a` (upwind) and `b`
 The inventories a moving mesh carries across its faces when the mesh velocity
 `w` differs from the solid velocity `vₛ`. Through each face, along its normal,
 every component moves with the solid at the relative velocity
-`u = (vₛ − w)·n`, its mass flux `Fⱼ = u ξⱼ,f`; the conversion-history pair
+`u = (vₛ − w)·n = −c·n`, with `c` the node correction of the derived state
+(`ds.c`), its mass flux `Fⱼ = u ξⱼ,f`; the conversion-history pair
 moves at the solid mass flux times its per-solid-mass values; and the energy
 flux gains `Σⱼ Fⱼ hⱼ(T_f)`, the sensible enthalpy of the same mass fluxes at
 the face temperature `T_f` reconstructed from the same cells, so an
@@ -34,10 +35,9 @@ whichever way the mesh crosses it, so its flux has no switch. The face state
 of an interior face changes side with the sign of `u`; the flux `u ξ_f` is
 continuous there, with a kink.
 
-The solid is at rest (`vₛ = 0`): the kernel runs under a prescribed mesh
-velocity, on a material whose reactions do not change its volume. It runs
-after the thermal boundary kernel, so the surface balance and its blowing
-models see the gas-transport fluxes alone.
+A face whose relative velocity is exactly zero carries nothing and is
+skipped. The kernel runs after the thermal boundary kernel, so the surface
+balance and its blowing models see the gas-transport fluxes alone.
 
 `solid` flags the components that carry the history pair; `ε` holds, per
 cell, the slope scales of the concentrations, the temperature and the
@@ -177,7 +177,8 @@ function contribute!(
 ) where {L,NC}
     g = ds.geometry
     @inbounds for f = 1:n_faces(topo)
-        u = -ds.w[topo.faces[f].nodes[1]] * g.face_normal[f][1]
+        u = -ds.c[topo.faces[f].nodes[1]] * g.face_normal[f][1]
+        iszero(u) && continue
         s = _stencil(kernel, g, topo, f, u)
         U = s[1]
         T_f = _face_value(i -> ds.T[i], s..., kernel.ε[2, U])

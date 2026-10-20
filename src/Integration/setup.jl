@@ -48,7 +48,7 @@ function _require_supported(
     problem::PyrolysisProblem,
     use_ale::Bool,
     radiation_model,
-    w_override,
+    correction::Correction,
     coordinates::CoordinateSystem,
     deactivation::Bool,
 )
@@ -71,7 +71,7 @@ function _require_supported(
         coordinates isa Planar ||
             throw(ArgumentError("a lateral shrinkage law needs planar coordinates"))
     end
-    if w_override !== nothing
+    if correction isa PrescribedCorrection
         use_ale || throw(ArgumentError("a prescribed mesh velocity needs use_ale = true"))
         n_reactions(material) == 0 || throw(
             ArgumentError(
@@ -82,9 +82,53 @@ function _require_supported(
         deactivation && throw(
             ArgumentError("cells are not deactivated under a prescribed mesh velocity"),
         )
+    elseif !(correction isa NoCorrection)
+        use_ale || throw(
+            ArgumentError(
+                "a correction moves the mesh relative to the solid, which needs " *
+                "use_ale = true",
+            ),
+        )
     end
     return nothing
 end
+
+# The interior nodes between two cells that start with different condensed
+# components: the layer interfaces an equidistribution correction must not
+# move across.
+function _composition_interfaces(
+    m0::AbstractMatrix{Float64},
+    material::Material{NC},
+) where {NC}
+    present(i) = [m0[j, i] > 0 && !is_gas(material.components[j]) for j = 1:NC]
+    return [nd for nd = 2:size(m0, 2) if present(nd - 1) != present(nd)]
+end
+
+# An equidistribution correction needs every layer interface among the
+# Lagrangian nodes, or it mixes the layers' compositions.
+function _require_layers(::Correction, m0, material, lagrangian) end
+function _require_layers(::EquidistributionCorrection, m0, material, lagrangian)
+    loose = setdiff(_composition_interfaces(m0, material), lagrangian)
+    isempty(loose) || throw(
+        ArgumentError(
+            "the cells beside node(s) $(loose) start with different condensed " *
+            "components: give the layer interfaces as `lagrangian` nodes, so the " *
+            "correction does not move the mesh across them",
+        ),
+    )
+    return nothing
+end
+
+"""
+	CORRECTION_BAND
+
+The default near-threshold band `ε_band` of a solve with an
+[`EquidistributionCorrection`](@ref): cells next to the exposed side whose
+condensed mass is below this fraction of their reference go with a cell that
+crosses the threshold, so a layer that the correction carries to burnout
+together leaves in one invocation.
+"""
+const CORRECTION_BAND = 0.1
 
 # Whether a gas-transfer coefficient is zero across the property bracket.
 _vanishes(λ) = all(T -> λ(T) == 0, (T_PROPERTY_MIN, 300.0, 1000.0, T_PROPERTY_MAX))
@@ -105,8 +149,8 @@ end
 
 # The kernels in assembler order: reactions, gas transport (whose boundary
 # mass fluxes the surface balance reads), in-depth radiation, conduction, the
-# thermal boundary, and under a prescribed mesh velocity the inventory fluxes
-# relative to the mesh.
+# thermal boundary, and under a correction the inventory fluxes relative to
+# the mesh.
 function _kernels(
     problem,
     topo,
@@ -185,7 +229,11 @@ function _consistent_motion!(u, def::CoreDefinition, ws::CoreWorkspace, t)
     g = ds.geometry
     for nd = 1:n_nodes(layout)
         r = abs(du[velocity_index(layout, nd)])
-        scale = sum(abs, c.θ .* ds.V_eval) + sum(abs, g.face_area .* w) + abs(w[nd])
+        scale =
+            sum(abs, c.θ .* ds.V_eval) +
+            sum(abs, g.face_area .* w) +
+            sum(abs, g.face_area .* ds.c) +
+            abs(w[nd])
         r <= 1e-10 * scale || return (r, scale)
     end
     return nothing
@@ -228,8 +276,9 @@ end
 	setup(problem; energy_state = :temperature, reltol = 1e-6, abstol = 1e-8,
 	      threshold = 1e-2, use_ale = false, radiation_model = NO_RADIATION,
 	      coordinates = Planar(), w_override = nothing,
+	      correction = NoCorrection(), lagrangian = Int[],
 	      time_scale = problem.dt_initial, sources = NoSources(),
-	      deactivation = false, band = threshold) -> CoreProblem
+	      deactivation = false, band = nothing) -> CoreProblem
 
 Set up `problem` on the finite-volume core: apply its initial conditions to its
 own copy of the mesh, build the 1D mesh from the node positions and the
@@ -248,10 +297,19 @@ other node follows the cells' reaction strain rates through the balance rows
 of [`BalanceRowClosure`](@ref), with the node velocities consistent at the
 start; a material with a lateral shrinkage law then also carries the
 conversion-history pair and its cross section's area and lateral rate.
-`w_override`, a function `w(x, t)`, prescribes the velocity of every node
-instead, moving the mesh over a solid at rest (verification; the material
-must not react), and the inventories cross the faces relative to the mesh
-([`RelativeFluxKernel`](@ref)). `coordinates` reads the node positions as
+`correction` moves the mesh relative to the solid
+([`EquidistributionCorrection`](@ref); the default [`NoCorrection`](@ref)
+keeps it with the solid), the balance rows then holding the solid velocity
+`w − c`, and the inventories cross the faces at the relative velocity `−c`
+([`RelativeFluxKernel`](@ref)). `lagrangian` lists the mesh nodes that
+always move with the solid, the layer interfaces; under an
+equidistribution correction every interior node between cells that start
+with different condensed components must be among them. `w_override`, a
+function `w(x, t)`, prescribes the velocity of every node instead
+([`PrescribedCorrection`](@ref)), moving the mesh over a solid at rest
+(verification; the material must not react, and no other correction is
+given), the inventories crossing the faces at `−w`. `coordinates` reads the
+node positions as
 radii of a cylinder (unit axial length) or a sphere (`Cylindrical()`,
 `Spherical()`); planar meshes take the problem's cross-section area.
 `time_scale` [s] scales the velocity tolerances (the first step).
@@ -261,9 +319,11 @@ falls below the fraction `threshold` (`ε_m`) of its initial condensed mass
 ([`CellDeactivation`](@ref), [`ConservativeTransfer`](@ref)), from the
 exposed `:top` side, on a moving mesh together with the run of cells outward
 of it whose condensed mass is below the fraction `band` (`ε_band`, in
-`[threshold, 1)`; at its default only the cells below the threshold) of
-theirs ([`deactivate!`](@ref)); the reactions of a cell then switch off
-smoothly below a few times `ε_m` ([`ReactivitySwitch`](@ref)).
+`[threshold, 1)`; by default the larger of the threshold and
+[`CORRECTION_BAND`](@ref) under an equidistribution correction, otherwise
+the threshold, so that only the cells below it go) of theirs
+([`deactivate!`](@ref)); the reactions of a cell then switch off smoothly
+below a few times `ε_m` ([`ReactivitySwitch`](@ref)).
 `threshold` also scales the mass tolerances; `sources` is the external-source
 hook.
 """
@@ -277,18 +337,31 @@ function setup(
     radiation_model = NO_RADIATION,
     coordinates::CoordinateSystem = Planar(),
     w_override = nothing,
+    correction::Correction = NoCorrection(),
+    lagrangian::AbstractVector{<:Integer} = Int[],
     time_scale::Real = problem.dt_initial,
     sources = NoSources(),
     deactivation::Bool = false,
-    band::Real = threshold,
+    band::Union{Nothing,Real} = nothing,
 )
+    if w_override !== nothing
+        correction isa NoCorrection || throw(
+            ArgumentError("w_override prescribes the mesh velocity: give no correction"),
+        )
+        correction = PrescribedCorrection(w_override)
+    end
     _require_supported(
         problem,
         use_ale,
         radiation_model,
-        w_override,
+        correction,
         coordinates,
         deactivation,
+    )
+    band = something(
+        band,
+        correction isa EquidistributionCorrection ? max(threshold, CORRECTION_BAND) :
+        threshold,
     )
     problem = _own_problem(problem)
     apply_initial_conditions!(problem)
@@ -305,7 +378,16 @@ function setup(
             bottom = :bottom,
             top = :top,
             fixed = !use_ale,
-        ) : line_mesh(x; coordinates, bottom = :bottom, top = :top, fixed = !use_ale)
+            lagrangian,
+        ) :
+        line_mesh(
+            x;
+            coordinates,
+            bottom = :bottom,
+            top = :top,
+            fixed = !use_ale,
+            lagrangian,
+        )
     topo = mesh.topology
     n = n_cells(topo)
     g0 = MeshGeometry{Float64}(topo)
@@ -313,6 +395,7 @@ function setup(
 
     T0 = [Float64(old.cell_states[i].T) for i = 1:n]
     m0 = [Float64(old.cell_states[i].ξ[j]) * g0.cell_volume[i] for j = 1:NC, i = 1:n]
+    _require_layers(correction, m0, material, topo.lagrangian)
 
     reference = CellReference(
         mesh,
@@ -347,12 +430,18 @@ function setup(
         i = 1:n
     ]
     lateral = chi ? LateralShrinkage(material, topo.cross_section, sum(M0)) : nothing
-    closure = use_ale ? BalanceRowClosure(topo; override = w_override, lateral) : nothing
+    closure =
+        use_ale ?
+        BalanceRowClosure(
+            topo;
+            correction = bind_correction(correction, topo, reference, m0, material),
+            lateral,
+        ) : nothing
     closure === nothing ||
         rank_check(closure, topo, g0) ||
         throw(ArgumentError("the balance rows do not determine the node velocities"))
     relative =
-        w_override === nothing ? () :
+        correction isa NoCorrection ? () :
         (
             RelativeFluxKernel(
                 topo,

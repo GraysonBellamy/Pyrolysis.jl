@@ -46,5 +46,6 @@ export kencarp4_policy, rodas5p_policy, fbdf_policy
 export DomainCheck, ConstraintMonitor, constraint_residual, MAX_CONSTRAINT_REJECTIONS
 export FAILURE_MEMORY_GROWTH, FAILURE_MEMORY_STEPS, NewtonCap, cap_step!
 export CoreProblem, setup, consistent_state!, inadmissible, solve, integrate
+export CORRECTION_BAND
 
 end # module Integration

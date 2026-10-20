@@ -7,16 +7,19 @@
 	jacobian_pattern(layout, topology; closure = nothing, reconstruction = false)
 
 The structural pattern of the residual's Jacobian on a 1D mesh, from the
-connectivity alone; the definition supplies the closure and whether inventory
-fluxes relative to the mesh (`RelativeFluxKernel`) are present.
+connectivity alone; the definition supplies the closure, with its
+correction, and whether inventory fluxes relative to the mesh
+(`RelativeFluxKernel`) are present.
 
 - A cell row reaches the unknowns of cells `i − 1 … i + 1` and, on a moving
   mesh, the positions of nodes `i − 1 … i + 2` (conduction reads the
   neighbouring cell centers, the concentrations the neighbours' volumes);
   with relative fluxes, whose face states are reconstructed from two cells
-  upwind, cells `i − 2 … i + 2`, the positions of nodes `i − 2 … i + 3` and
-  the velocities of its own two nodes. It reads the intensities of its two
-  faces and, under a variable cross section, the area.
+  upwind, cells `i − 2 … i + 2` and the positions of nodes `i − 2 … i + 3`,
+  which hold everything the corrections of its two nodes read, and under a
+  prescribed mesh velocity the velocities of those nodes. It reads the
+  intensities of its two faces and, under a variable cross section, the
+  area.
 - A face-intensity row reaches the intensities of nodes `f − 1 … f + 1`, the
   unknowns of the cells on either side of its face (the attenuation of the
   cell it leaves, the absorptivity of the exposed cell), on a moving mesh the
@@ -24,7 +27,10 @@ fluxes relative to the mesh (`RelativeFluxKernel`) are present.
 - A node-position row reaches its node's velocity. A velocity row reaches
   its node's velocity and position; a balance row also the velocities and
   positions of its cell's other node, the masses and energy of its cell
-  (through the strain rate), the area and the lateral rate.
+  (through the strain rate), the area and the lateral rate, and under a
+  [`LayerCorrection`](@ref) what the corrections of its cell's two nodes
+  read: the positions of nodes `k − 1 … k + 2` and, when the monitor reads
+  the masses, the masses of cells `k − 1 … k + 1`.
 - Under a variable cross section the area row reaches every cell's history
   pair and the area, and the lateral-rate row everything the history rows
   reach, the history pair, the area and the lateral rate: the two dense rows
@@ -52,6 +58,7 @@ function jacobian_pattern(
     N = n_cells(layout)
     L = state_length(layout)
     moving, bl, chi = is_moving(layout), has_intensities(layout), has_chi(layout)
+    correction = closure === nothing ? NoCorrection() : closure.correction
     reach = reconstruction ? 2 : 1
     rows = Int[]
     cols = Int[]
@@ -66,7 +73,7 @@ function jacobian_pattern(
                 for nd = max(1, i-reach):min(N+1, i+1+reach)
                     add!(r, position_index(layout, nd))
                 end
-                if reconstruction
+                if reconstruction && correction isa PrescribedCorrection
                     add!(r, velocity_index(layout, i))
                     add!(r, velocity_index(layout, i + 1))
                 end
@@ -107,6 +114,7 @@ function jacobian_pattern(
                 add!(r, mass_index(layout, k, j))
             end
             add!(r, energy_index(layout, k))
+            _correction_reach!(add!, r, layout, correction, k)
             if chi
                 add!(r, area_index(layout))
                 add!(r, lateral_rate_index(layout))
@@ -136,12 +144,27 @@ function jacobian_pattern(
     return sparse(rows, cols, trues(length(rows)), L, L, |)
 end
 
+# What the balance row `r` of cell `k` reads through the corrections of the
+# cell's two nodes.
+_correction_reach!(add!, r, layout::StateLayout, correction, k) = nothing
+function _correction_reach!(add!, r, layout::StateLayout, corr::LayerCorrection, k::Int)
+    N = n_cells(layout)
+    for nd = max(1, k-1):min(N+1, k+2)
+        add!(r, position_index(layout, nd))
+    end
+    iszero(corr.β) && return nothing
+    for i = max(1, k-1):min(N, k+1), j = 1:n_components(layout)
+        add!(r, mass_index(layout, i, j))
+    end
+    return nothing
+end
+
 # The cell whose balance each node's velocity row carries (zero for the pinned
 # node, and for every node under a prescribed velocity).
 _balance_cells(::Nothing, N) = zeros(Int, N + 1)
 function _balance_cells(cl::BalanceRowClosure, N)
     out = zeros(Int, N + 1)
-    cl.override === nothing || return out
+    cl.correction isa PrescribedCorrection && return out
     for k = 1:N
         out[cl.row_node[k]] = k
     end

@@ -92,7 +92,7 @@ function DomainCheck(cp; max_consecutive::Int = MAX_CONSTRAINT_REJECTIONS)
     layout = def.layout
     balance = zeros(Int, n_nodes(layout))
     cl = def.closure
-    if cl isa BalanceRowClosure && cl.override === nothing
+    if cl isa BalanceRowClosure && !(cl.correction isa PrescribedCorrection)
         for k in cl.order
             balance[cl.row_node[k]] = k
         end
@@ -175,8 +175,9 @@ The largest scaled residual `|r| / (rtol · S + a)` over the live algebraic
 rows, at the derived state `ds` and contributions `c` of the residual just
 evaluated into `check.du`:
 
-- a balance row of cell `k`: `S = |θₖ| Vₖ + |θ_A| Vₖ + Σ_f A_f |w_f|`, `a` the
-  velocity tolerance of its node times its face area;
+- a balance row of cell `k`: `S = |θₖ| Vₖ + |θ_A| Vₖ + Σ_f A_f |w_f| + Σ_f A_f |c_f|`,
+  the last the sweep of the node corrections, `a` the velocity tolerance of
+  its node times its face area;
 - the pinned node's row and a prescribed-velocity row: `S = |wₙ|`, `a` the
   node's velocity tolerance;
 - a face-intensity row: `S` the incident-intensity scale, `a` its tolerance;
@@ -203,6 +204,9 @@ function constraint_residual(check::DomainCheck, ds, c, t)
                 S = (abs(c.θ[k]) + abs(ds.θ_A[])) * ds.V_eval[k]
                 for f in topo.cells[k].faces
                     S += g.face_area[f] * abs(ds.w[topo.faces[f].nodes[1]])
+                end
+                for f in topo.cells[k].faces
+                    S += g.face_area[f] * abs(ds.c[topo.faces[f].nodes[1]])
                 end
                 # The face at node `nd` (face `f` sits at node `f` in 1D).
                 a = tol[row] * g.face_area[nd]

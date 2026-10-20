@@ -20,6 +20,7 @@ using ..Meshes
 using ..States
 using ..Kernels: find_kernel, RelativeFluxKernel
 using ..Closures: BalanceRowClosure, lateral_rows
+using ..Closures: NoCorrection, PrescribedCorrection, LayerCorrection
 using ..Assembly
 
 include("pattern.jl")

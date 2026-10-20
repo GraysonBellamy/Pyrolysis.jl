@@ -5,6 +5,7 @@ using Pyrolysis.States
 using Pyrolysis.Assembly
 using Pyrolysis.Assembly: residual!
 using Pyrolysis.ColoredJacobian
+using Pyrolysis.Closures: EquidistributionCorrection
 using Pyrolysis.Integration: setup
 
 # The colored Jacobian evaluates the residual at one dual-number type in
@@ -43,15 +44,18 @@ function _wood(; α = 1000.0, κ = 1e-14, law = nothing)
     )
 end
 
-_column(mat; top) = PyrolysisProblem(
-    mesh = create_uniform_mesh(0.01, N_CELLS, Val(2)),
+_column(mat; top, stretch = nothing) = PyrolysisProblem(
+    mesh = stretch === nothing ? create_uniform_mesh(0.01, N_CELLS, Val(2)) :
+           create_stretched_mesh(0.01, N_CELLS, Val(2), stretch),
     material = mat,
     bc_set = BoundaryConditionSet(thermal = (top = top, bottom = AdiabaticBC())),
     tspan = (0.0, 100.0),
 )
 
 # The configurations of `test/perf/perf_helpers.jl`, a variable cross section,
-# and inventory fluxes relative to a prescribed mesh velocity. The wood's
+# inventory fluxes relative to a prescribed mesh velocity, and the
+# equidistribution correction active at every node of a stretched mesh with
+# its monitor's mass term. The wood's
 # heat capacity depends on the temperature, so the per-component tuples mix
 # constants and functions of it under automatic differentiation.
 const _incident = RadiativeFluxBC(flux = 50e3)
@@ -87,6 +91,16 @@ const _configurations = (
         ),
         options = (use_ale = true, w_override = (x, t) -> -1e-3 * x),
     ),
+    equidistribution = (
+        problem = () -> _column(_pmma(); top = HeatFluxBC(50e3), stretch = 1.01),
+        options = (
+            use_ale = true,
+            correction = EquidistributionCorrection(
+                activation = (2.0, 0.5),
+                monitor = (1.0, 1.0),
+            ),
+        ),
+    ),
 )
 
 # Allocations of one residual and one colored Jacobian after warm-up, measured
@@ -111,6 +125,9 @@ end
     r, j = _allocations(cp)
     @test r == 0
     @test j <= JACOBIAN_BUDGET
+    # The measured state moves the mesh relative to the solid at every
+    # interior node.
+    name === :equidistribution && @test count(!iszero, cp.ws.derived.c) == N_CELLS - 1
 end
 
 @testset "one residual method" begin

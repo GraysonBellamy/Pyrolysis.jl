@@ -6,9 +6,9 @@
 	residual!(du, u, def::CoreDefinition, t, ws::CoreWorkspace) -> nothing
 
 The right-hand side of the core's mass-matrix system `M du/dt = f(u, t)`: the
-state mapping, the kernels in assembler order, the mesh closure (strain rates
-from the reaction sources, velocity rows), the external sources, then the
-row assembly. A pure function of `(u, t)` given `def`; `ws` holds buffers
+state mapping, the node corrections of the mesh closure, the kernels in
+assembler order, the mesh closure (strain rates from the reaction sources,
+velocity rows), the external sources, then the row assembly. A pure function of `(u, t)` given `def`; `ws` holds buffers
 only. Dual-number states evaluate in their own buffers, chosen by the state's
 element type, so `t` must be a plain number: a forward-mode derivative in
 time alone (a dual `t` with a `Float64` state) is not supported, and every
@@ -29,6 +29,7 @@ end
 function _residual!(du, u, def::CoreDefinition, t, ds::DerivedState, c::Contributions)
     setup = def.setup
     derive!(ds, u, def.layout, setup)
+    correction!(ds, def.closure, setup)
     reset!(c)
     _kernels!(c, def.kernels, ds, setup.topology, setup.material, t)
     closure_rows!(c, def.closure, ds, setup.topology, setup.material, t)

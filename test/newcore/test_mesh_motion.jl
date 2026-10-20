@@ -261,7 +261,11 @@ end
     @test rank_check(cl, topo, g)
     @test cl.row_node == collect(2:6)
     @test cl.order == collect(1:5)
-    @test rank_check(BalanceRowClosure(topo; override = (x, t) -> x), topo, g)
+    @test rank_check(
+        BalanceRowClosure(topo; correction = PrescribedCorrection((x, t) -> x)),
+        topo,
+        g,
+    )
     @test_throws ArgumentError BalanceRowClosure(
         line_mesh([0.0, 1.0]; fixed = true).topology,
     )
