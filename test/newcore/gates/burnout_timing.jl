@@ -16,15 +16,18 @@
 # threshold, so an event's time is set by that step, which the tolerance hardly
 # moves, and the temperatures after an event follow its time: over the whole
 # run the achieved error of either core does not fall with the tolerance. The
-# error is therefore the largest temperature difference over the cells and the
-# saved times before the first event of any solve of the deck (the window),
-# each core against its own solve at reltol 1e-9 (abstol a hundredth of
-# reltol throughout); the reference spread is that reference against one at
-# reltol 1e-10. A new-core configuration's matched tolerance is the loosest of
-# the ladder whose window error is at or below the old core's at its default
-# (reltol 1e-6), and its ratio is its warm time there over the old default's
-# (warm medians of three solves; a configuration slower than fifteen times the
-# old default is timed once and not taken to tighter tolerances).
+# error is therefore measured over the cells and the saved times before the
+# first event of any solve of the deck (the window), each core against its own
+# solve at reltol 1e-9 (abstol a hundredth of reltol throughout), as the RMS
+# of the temperature differences; the largest difference is reported beside
+# it, but one sample of it sits at the old core's error floor, which does not
+# fall with the tolerance. The reference spread is that reference against one
+# at reltol 1e-10. The new core's matched tolerance is the loosest of the
+# ladder whose window RMS is at or below the old core's at its default (reltol
+# 1e-6), and its ratio is its warm time there over the old default's (warm
+# medians of three solves, of nine for the old default, whose time varies the
+# most; a configuration slower than fifteen times the old default is timed
+# once and not taken to tighter tolerances).
 # Beside it: the error over the whole run at the saved times with the same live
 # cells, the largest event-time shift over the reference's median interval
 # (both as `case_accuracy.jl` measures them), the L1 error of the mass loss
@@ -36,8 +39,10 @@
 # or structured), the domain test, the deactivation events, the factorization,
 # the linear solves, the right-hand side, the formation of the iteration
 # matrix, the per-step observers; what is left is the integrator's own work.
-# Unit costs at the final state of a solve that ends at 200 s: one right-hand side, one Jacobian,
-# one KLU refactorization of `J − M/(0.1 s)` with a solve, and one solve.
+# Unit costs at the final state of a solve that ends at 200 s: one right-hand
+# side and one Jacobian, with the state count and the Jacobian's stored
+# entries. A factorization's cost depends on the structure the solve has
+# learned (the new core's `StructuredKLU`), so it is read from the shares.
 #
 # Run from the repository root when the machine is least loaded:
 #   julia --project=test --startup-file=no --threads=1 test/newcore/gates/burnout_timing.jl
@@ -50,13 +55,12 @@ include(joinpath(@__DIR__, "stamp.jl"))
 
 using Logging
 using Profile
-using LinearSolve: LinearSolve, LinearProblem, KLUFactorization
-using Pyrolysis.Integration: KenCarp4, AutoFiniteDiff
 
 const OUT = joinpath(@__DIR__, "measurements")
 mkpath(OUT)
 const N_PMMA = 60
 const REPEATS = 3
+const OLD_DEFAULT_REPEATS = 9
 const DEFAULT_RELTOL = 1e-6
 const LADDER = (1e-5, 3e-6, 1e-6, 3e-7, 1e-7)
 const REFERENCE = 1e-9
@@ -65,21 +69,8 @@ const UNIT_TIME = 200.0
 const SLOW = 15.0
 _tol(reltol) = (reltol = reltol, abstol = reltol / 100)
 
-# The integrator configurations of the finite-volume core: the default and the
-# Newton-based candidates with the restart of the old core after an event.
-const CONFIGURATIONS = (
-    ("Rodas5P (default)", ls -> Ig.default_policy(ls)),
-    ("KenCarp4 raw (kencarp4_policy)", ls -> Ig.kencarp4_policy(ls)),
-    (
-        "KenCarp4 smoothed, forced restart, flag cleared",
-        ls -> Ig.IntegratorPolicy(
-            KenCarp4(autodiff = AutoFiniteDiff(), linsolve = ls),
-            :forced_dt,
-            :clear,
-            Ig.DT_AFTER_EVENT,
-        ),
-    ),
-)
+# The finite-volume core's default integrator (`Rodas5P`, heuristic restart).
+const CONFIGURATIONS = (("Rodas5P (default)", ls -> Ig.default_policy(ls)),)
 
 # ----------------------------------------------------------------------------
 # The decks
@@ -153,20 +144,26 @@ _event_times(sol) =
     hasproperty(sol, :events) ? [e.t for e in sol.events] : collect(sol.extras.park_times)
 _live(sol) = sol.extras.live_cells
 
-# The largest temperature difference over the cells at the saved times before `t1`.
-function window_error(sol, ref, t1)
+# The RMS and the largest of the temperature differences over the cells at the
+# saved times before `t1`.
+function window_errors(sol, ref, t1)
     index = Dict(t => k for (k, t) in enumerate(ref.t))
-    err = 0.0
+    largest = 0.0
+    squares = 0.0
+    samples = 0
     for (j, t) in enumerate(sol.t)
         t < t1 || continue
         k = get(index, t, 0)
         k == 0 && continue
         for i in axes(sol.T, 1)
             a, b = sol.T[i, j], ref.T[i, k]
-            (isfinite(a) && isfinite(b)) && (err = max(err, abs(a - b)))
+            (isfinite(a) && isfinite(b)) || continue
+            largest = max(largest, abs(a - b))
+            squares += (a - b)^2
+            samples += 1
         end
     end
-    return err
+    return (rms = sqrt(squares / max(samples, 1)), largest)
 end
 
 # The largest temperature difference at the saved times with the same live cells.
@@ -234,8 +231,13 @@ function _part(frame)
     occursin("Integration/checks.jl", file) && return :domain
     (occursin("/src/Deactivation/", file) || occursin("/src/Adaptivity/", file)) &&
         return :events
-    (occursin("refactor", f) || occursin("klu_l_factor", f) || f in ("klu!", "lu!")) &&
-        return :factorization
+    (
+        occursin("refactor", f) ||
+        occursin("klu_l_factor", f) ||
+        occursin("klu_l_analyze", f) ||
+        occursin("klu_l_rgrowth", f) ||
+        f in ("klu!", "lu!", "_load!", "_grow!", "_walk", "_union_matrix!")
+    ) && return :factorization
     (occursin("klu_l_solve", f) || f == "ldiv!") && return :linsolve
     any(d -> occursin(d, file), _RHS_DIRS) && return :rhs
     f in ("jacobian2W!", "calc_W!", "calc_rosenbrock_differentiation!") && return :wform
@@ -278,19 +280,9 @@ end
 
 unit_time(f; samples = 101) = (f(); median([@elapsed(f()) for _ = 1:samples]))
 
-function _klu_costs(J, M)
-    W = SparseMatrixCSC(J - M / 0.1)
-    b = rand(size(W, 1))
-    cache = LinearSolve.init(LinearProblem(W, b), KLUFactorization())
-    LinearSolve.solve!(cache)
-    factor = unit_time(() -> (cache.A = W; LinearSolve.solve!(cache)))
-    solve_alone = unit_time(() -> (cache.b = b; LinearSolve.solve!(cache)))
-    return factor, solve_alone, nnz(W)
-end
-
-# One right-hand side, Jacobian, refactorization with a solve and solve of the
-# integrator's functions at the final state of a solve that ends at `UNIT_TIME`
-# (the cells deactivated by then are those of its layout).
+# One right-hand side and one Jacobian of the integrator's functions at the
+# final state of a solve that ends at `UNIT_TIME` (the cells deactivated by
+# then are those of its layout).
 function unit_costs(sol)
     raw = sol.raw_solution
     f = raw.prob.f
@@ -299,23 +291,21 @@ function unit_costs(sol)
     J = copy(f.jac_prototype)
     rhs = unit_time(() -> f(du, u, raw.prob.p, t))
     jac = unit_time(() -> f.jac(J, u, raw.prob.p, t))
-    M = f.mass_matrix isa UniformScaling ? sparse(1.0I, size(J)...) : sparse(f.mass_matrix)
-    factor, solve_alone, nz = _klu_costs(J, M)
-    return (; rhs, jac, factor, solve_alone, states = length(u), nnz = nz)
+    return (; rhs, jac, states = length(u), nnz = nnz(J))
 end
 
 # ----------------------------------------------------------------------------
 # The measurements
 # ----------------------------------------------------------------------------
 
-# The warm median of `REPEATS` solves after one warm-up; a warm-up slower than
+# The warm median of `repeats` solves after one warm-up; a warm-up slower than
 # `cap` [s] is not repeated and its own time is reported.
-function timed(f; cap = Inf)
+function timed(f; cap = Inf, repeats = REPEATS)
     sol = f()
     first = @elapsed sol = f()
     first > cap && return sol, first
     times = [first]
-    for _ = 2:REPEATS
+    for _ = 2:repeats
         GC.gc()
         push!(times, @elapsed sol = f())
     end
@@ -348,7 +338,8 @@ function deck_rows(deck)
     new_spread = new_solve(core_problem(deck, SPREAD), CONFIGURATIONS[1][2])
     runs = Any[]
     for reltol in LADDER
-        sol, wall = timed(() -> old_solve(deck, reltol))
+        repeats = reltol == DEFAULT_RELTOL ? OLD_DEFAULT_REPEATS : REPEATS
+        sol, wall = timed(() -> old_solve(deck, reltol); repeats)
         push!(
             runs,
             (;
@@ -377,14 +368,15 @@ function deck_rows(deck)
     solves = vcat([r.sol for r in runs], [old_ref, old_spread, new_ref, new_spread])
     t1 = minimum(s -> minimum(_event_times(s); init = Inf), solves)
     spread = (
-        old = window_error(old_spread, old_ref, t1),
-        new = window_error(new_spread, new_ref, t1),
+        old = window_errors(old_spread, old_ref, t1).rms,
+        new = window_errors(new_spread, new_ref, t1).rms,
     )
     old_default = only(filter(r -> r.core == "old" && r.reltol == DEFAULT_RELTOL, runs))
-    target = window_error(old_default.sol, old_ref, t1)
+    target = window_errors(old_default.sol, old_ref, t1).rms
     rows = Any[]
     for r in runs
         m = Base.invokelatest(_vbo_measures, r.sol)
+        w = window_errors(r.sol, r.ref, t1)
         push!(
             rows,
             (;
@@ -393,7 +385,8 @@ function deck_rows(deck)
                 run = r.run,
                 reltol = r.reltol,
                 retcode = string(r.sol.retcode),
-                window_error = window_error(r.sol, r.ref, t1),
+                window_rms = w.rms,
+                window_largest = w.largest,
                 run_error = run_error(r.sol, r.ref),
                 event_shift = event_shift(r.sol, r.ref),
                 mlr_error = mlr_error(r.sol, r.ref),
@@ -409,7 +402,7 @@ function deck_rows(deck)
     matched = Any[only(filter(r -> r.core == "old" && r.reltol == DEFAULT_RELTOL, rows))]
     for name in first.(CONFIGURATIONS)
         candidates = filter(
-            r -> r.run == name && r.window_error <= target && r.retcode == "Success",
+            r -> r.run == name && r.window_rms <= target && r.retcode == "Success",
             rows,
         )
         isempty(candidates) &&
@@ -470,33 +463,34 @@ open(joinpath(OUT, "burnout_timing.md"), "w") do io
         "$(Threads.nthreads()) thread, $(Sys.CPU_THREADS) logical CPUs; load average ",
         "$(round.(load_start; digits = 1)) at the start and $(round.(load_end; digits = 1)) at the end. ",
         "$(N_PMMA) PMMA cells; V-BO-01 on the finite-volume core with the prototype's correction ",
-        "(τ 0.2 s per cell, band 10 ε_m). Window error: the largest temperature difference [K] over ",
-        "the cells at the saved times before the first event of any solve of the deck, against the ",
-        "same core at reltol $(REFERENCE); run error: over the whole run at the saved times with the ",
+        "(τ 0.2 s per cell, band 10 ε_m). Window RMS and largest: the RMS and the largest of the ",
+        "temperature differences [K] over the cells at the saved times before the first event of any ",
+        "solve of the deck, against the same core at reltol $(REFERENCE); the new core is matched on ",
+        "the RMS. Run error: the largest difference over the whole run at the saved times with the ",
         "same live cells; shift: the largest event-time difference over the reference's median ",
         "interval; MLR: the L1 error of the mass loss rate history over the reference's integral. ",
-        "Warm medians of $(REPEATS) solves (a solve slower than $(Int(SLOW)) times the old default ",
-        "is timed once and its configuration not taken to tighter tolerances); ratio: over the ",
-        "old core's default.\n",
+        "Warm medians of $(REPEATS) solves, of $(OLD_DEFAULT_REPEATS) for the old default (a solve ",
+        "slower than $(Int(SLOW)) times the old default is timed once and its configuration not ",
+        "taken to tighter tolerances); ratio: over the old core's default.\n",
     )
     for res in results
         println(io, "## $(res.deck)\n")
         println(
             io,
             "Window: the saved times before $(round(res.t1, digits = 1)) s. Reference spread ",
-            "(reltol $(SPREAD) against $(REFERENCE)): old $(_g(res.spread.old)) K, new ",
-            "$(_g(res.spread.new)) K. Target: the old core's window error at reltol ",
+            "(reltol $(SPREAD) against $(REFERENCE), window RMS): old $(_g(res.spread.old)) K, new ",
+            "$(_g(res.spread.new)) K. Target: the old core's window RMS at reltol ",
             "$(DEFAULT_RELTOL), $(_g(res.target)) K.\n",
         )
         println(
             io,
-            "| run | reltol | retcode | window error [K] | run error [K] | shift | MLR | peak | t_bo [s] | ledger | warm [s] | ratio | steps | rejected | RHS | Jacobians | nonlinear failures |",
+            "| run | reltol | retcode | window RMS [K] | window largest [K] | run error [K] | shift | MLR | peak | t_bo [s] | ledger | warm [s] | ratio | steps | rejected | RHS | Jacobians | nonlinear failures |",
         )
-        println(io, "|" * repeat("---|", 17))
+        println(io, "|" * repeat("---|", 18))
         for r in res.rows
             println(
                 io,
-                "| $(r.run) | $(r.reltol) | $(r.retcode) | $(_g(r.window_error)) | $(_g(r.run_error)) | ",
+                "| $(r.run) | $(r.reltol) | $(r.retcode) | $(_g(r.window_rms)) | $(_g(r.window_largest)) | $(_g(r.run_error)) | ",
                 "$(_g(r.event_shift)) | $(_g(r.mlr_error)) | $(_g(r.peak; d = 5)) | $(_g(r.t_bo; d = 4)) | ",
                 "$(_g(r.ledger)) | $(_g(r.wall)) | $(_g(r.ratio)) | $(r.steps) | $(r.rejected) | $(r.rhs) | ",
                 "$(r.jacobians) | $(r.nonlinear_failures) |",
@@ -506,13 +500,16 @@ open(joinpath(OUT, "burnout_timing.md"), "w") do io
             io,
             "\nMatched accuracy (the loosest ladder tolerance at or below the target):\n",
         )
-        println(io, "| run | reltol | window error [K] | warm [s] | ratio |")
-        println(io, "|---|---|---|---|---|")
+        println(
+            io,
+            "| run | reltol | window RMS [K] | window largest [K] | warm [s] | ratio |",
+        )
+        println(io, "|---|---|---|---|---|---|")
         for m in res.matched
-            isnan(m.reltol) ? println(io, "| $(m.run) | none on the ladder | | | |") :
+            isnan(m.reltol) ? println(io, "| $(m.run) | none on the ladder | | | | |") :
             println(
                 io,
-                "| $(m.run) | $(m.reltol) | $(_g(m.window_error)) | $(_g(m.wall)) | $(_g(m.ratio)) |",
+                "| $(m.run) | $(m.reltol) | $(_g(m.window_rms)) | $(_g(m.window_largest)) | $(_g(m.wall)) | $(_g(m.ratio)) |",
             )
         end
         println(
@@ -523,16 +520,16 @@ open(joinpath(OUT, "burnout_timing.md"), "w") do io
             io,
             "| run | reltol | " *
             join(string.(PARTS), " | ") *
-            " | RHS | Jacobian | refactor + solve | solve | states | nnz(W) |",
+            " | RHS | Jacobian | states | nnz(J) |",
         )
-        println(io, "|" * repeat("---|", 2 + length(PARTS) + 6))
+        println(io, "|" * repeat("---|", 2 + length(PARTS) + 4))
         for a in res.anatomy
             u = a.unit
             println(
                 io,
                 "| $(a.run) | $(a.reltol) | " *
                 join((_g(a.shares[p]; d = 2) for p in PARTS), " | ") *
-                " | $(_g(1e6u.rhs)) | $(_g(1e6u.jac)) | $(_g(1e6u.factor)) | $(_g(1e6u.solve_alone)) | $(u.states) | $(u.nnz) |",
+                " | $(_g(1e6u.rhs)) | $(_g(1e6u.jac)) | $(u.states) | $(u.nnz) |",
             )
         end
         println(io)
