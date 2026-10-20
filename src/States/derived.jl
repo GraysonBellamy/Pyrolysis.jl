@@ -293,14 +293,15 @@ function derive!(
         Tt = trial_temperature(ds.T[i])
         ds.T_trial[i] = Tt
         m = ntuple(j -> ds.m[j, i], Val(NC))
-        C = sum_products(zero(T), m, component_heat_capacities(setup.laws, Tt))
+        C = heat_capacity_sum(zero(T), setup.laws, m, Tt)
         ds.cp_sum[i] = smooth_floor(C, ref.capacity_floor[i])
         h = component_enthalpies(setup.laws, ds.T[i])
         for j = 1:NC
             ds.h[j, i] = h[j]
         end
         ξ⁺ = ntuple(j -> ds.ξ⁺[j, i], Val(NC))
-        ds.k[i] = smooth_floor(effective_conductivity(ξ⁺, Tt, material), CONDUCTIVITY_FLOOR)
+        k = effective_conductivity(ξ⁺, Tt, material; skip_absent = Val(true))
+        ds.k[i] = smooth_floor(k, CONDUCTIVITY_FLOOR)
         ds.ε[i] = mixture_emissivity(ξ⁺, Tt, material)
         ds.a[i] = mixture_absorptivity(ξ⁺, Tt, material)
         _gas_properties!(ds, i, ξ⁺, Tt, material, setup.gas)

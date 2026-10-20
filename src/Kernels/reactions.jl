@@ -59,8 +59,10 @@ at the local temperature, times the cell's [`reactivity`](@ref).
 
 The rates carry a [`OneSidedLimiter`](@ref), so an absent or negative trial
 concentration is never consumed whatever the reaction order, and every rate is
-finite with a finite derivative at any real state. `switch` is a
-[`ReactivitySwitch`](@ref) when cells can be deactivated, `nothing` otherwise.
+finite with a finite derivative at any real state; a cell in which every
+reaction lacks a reactant contributes nothing and is not evaluated. `switch`
+is a [`ReactivitySwitch`](@ref) when cells can be deactivated, `nothing`
+otherwise.
 """
 struct ReactionKernel{S} <: Kernel
     limiter::OneSidedLimiter
@@ -77,6 +79,14 @@ own limiter.
 ReactionKernel(material::Material; switch = nothing) =
     ReactionKernel(OneSidedLimiter(material.depletion_limiter), switch)
 
+# Whether every reaction has a reactant at or below zero in `ξ`: under an
+# enabled one-sided limiter its rate and every derivative of it are then
+# exactly zero.
+@inline _all_quenched(ξ, reactions::Tuple) =
+    _quenched(first(reactions), ξ) && _all_quenched(ξ, Base.tail(reactions))
+@inline _all_quenched(ξ, ::Tuple{}) = true
+@inline _quenched(rxn, ξ) = any(r -> ξ[first(r)] <= 0, rxn.reactants)
+
 function contribute!(
     c::Contributions{NC},
     kernel::ReactionKernel,
@@ -87,6 +97,7 @@ function contribute!(
 ) where {NC}
     @inbounds for i = 1:n_cells(topo)
         ξ = ntuple(j -> ds.ξ[j, i], Val(NC))
+        kernel.limiter.enabled && _all_quenched(ξ, material.reactions) && continue
         T = ds.T_trial[i]
         V = ds.V_eval[i]
         evaluate_reactions!(c.rates, c.heats, ξ, T, material, kernel.limiter)

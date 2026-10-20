@@ -165,6 +165,25 @@ _caloric_material() = Material(
     reactions = (),
 )
 
+@testset "the heat-capacity sum skips the absent components" begin
+    laws = CaloricLaws(_caloric_material())
+    sum_products = Pyrolysis.States.sum_products
+    heat_capacity_sum = Pyrolysis.States.heat_capacity_sum
+    for T in (250.0, T_REF, 812.5),
+        m in ((1.0, 0.0, 2.0), (0.0, 0.0, 0.0), (-0.5, 3.0, 0.0))
+
+        c = component_heat_capacities(laws, T)
+        @test heat_capacity_sum(0.0, laws, m, T) === sum_products(0.0, m, c)
+        # A dual mass with a zero value and nonzero partials is not absent.
+        d = ntuple(j -> ForwardDiff.Dual(m[j], ntuple(k -> float(j == k), 3)...), 3)
+        Td = ForwardDiff.Dual(T, 0.0, 0.0, 0.0)
+        cd = component_heat_capacities(laws, Td)
+        @test heat_capacity_sum(zero(Td), laws, d, Td) === sum_products(zero(Td), d, cd)
+        @test ForwardDiff.partials(heat_capacity_sum(zero(Td), laws, d, Td)) ==
+              ForwardDiff.Partials(c)
+    end
+end
+
 @testset "component enthalpies of the flagged components" begin
     laws = CaloricLaws(_caloric_material())
     flags = (false, true, true)

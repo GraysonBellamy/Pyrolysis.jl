@@ -143,6 +143,58 @@ end
     end
 end
 
+@testset "reaction kernel: a cell where every reaction lacks a reactant contributes exact zeros" begin
+    virgin = SolidComponent(:virgin, ρ = 1100.0, c = 1500.0, k = 0.2)
+    char = SolidComponent(:char, ρ = 300.0, c = 1000.0, k = 0.1)
+    gas = GaseousComponent(:gas, M = 0.03, c = 1100.0, k = 0.03, λ = 0.0)
+    reactions = (
+        Reaction(:pyro, 1 => (2, 3); A = 5e9, E = 1.4e5, h = 8e5, yields = (0.3, 0.7)),
+        Reaction(:ox, 2 => 3; A = 1e3, E = 8e4, h = -2e6, n = 0.5),
+    )
+    mat = Material(name = :slab, components = (virgin, char, gas), reactions = reactions)
+    quenched = Pyrolysis.Kernels._all_quenched
+    @test quenched((0.0, 0.0, 1.0), reactions)
+    @test quenched((-1e-9, 0.0, 1.0), reactions)
+    @test !quenched((0.0, 1e-12, 1.0), reactions)
+    @test !quenched((1.0, 0.0, 1.0), reactions)
+    @test quenched((1.0, 0.0), ())
+    # Cells 1 and 2 hold neither reactant, cell 3 only char, the rest virgin.
+    problem = PyrolysisProblem(
+        mesh = create_uniform_mesh(0.01, 6, Val(3)),
+        material = mat,
+        bc_set = BoundaryConditionSet(
+            thermal = (top = HeatFluxBC(1e4), bottom = AdiabaticBC()),
+        ),
+        T_initial = z -> 700.0,
+        ξ_initial = [z -> z > 0.005 ? 1100.0 : 0.0, z -> z < 0.004 ? 0.0 : 5.0, z -> 0.5],
+        tspan = (0.0, 1.0),
+    )
+    cp = setup(problem)
+    kernel = only(k for k in cp.def.kernels if k isa ReactionKernel)
+    ds = cp.ws.derived
+    Pyrolysis.States.derive!(ds, cp.u0, cp.def.layout, cp.def.setup)
+    c = Contributions{Float64}(3, 2, 6, 7, 7)
+    reset!(c)
+    contribute!(c, kernel, ds, cp.def.setup.topology, mat, 0.0)
+    rates, heats = zeros(2), zeros(2)
+    for i = 1:6
+        ξ = ntuple(j -> ds.ξ[j, i], 3)
+        evaluate_reactions!(rates, heats, ξ, ds.T_trial[i], mat, kernel.limiter)
+        ω = (-rates[1], 0.3rates[1] - rates[2], 0.7rates[1] + rates[2])
+        if quenched(ξ, reactions)
+            @test all(iszero, rates)
+            @test all(j -> c.S_mass[j, i] === 0.0, 1:3)
+            @test c.S_energy[i] === 0.0
+        else
+            @test any(!iszero, rates)
+            for j = 1:3
+                @test c.S_mass[j, i] ≈ ω[j] * ds.V_eval[i] rtol = 1e-14
+            end
+        end
+    end
+    @test count(i -> quenched(ntuple(j -> ds.ξ[j, i], 3), reactions), 1:6) == 2
+end
+
 @testset "trial temperature is safe in representative kernels" begin
     gas = GaseousComponent(:gas, M = 0.03, c = 1100.0, k = 0.03, λ = 1e-5)
     solid = SolidComponent(:solid, ρ = 500.0, c = (900.0, 1.5), k = (0.2, 2e-4))

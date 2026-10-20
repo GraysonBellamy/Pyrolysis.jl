@@ -216,6 +216,20 @@ Heat capacity of every component at temperature `T`.
     sum_products(init + first(a) * first(b), Base.tail(a), Base.tail(b))
 @inline sum_products(init, ::Tuple{}, ::Tuple{}) = init
 
+# `init + m₁ c₁(T) + m₂ c₂(T) + …`, added from left to right, without
+# evaluating the heat capacity of a component whose mass is exactly zero: its
+# term adds an exact zero for every finite heat capacity, and `iszero` of a
+# dual number reads its partials too, so the derivative is kept.
+@inline heat_capacity_sum(init, laws::CaloricLaws, m::Tuple, T) =
+    _heat_capacity_sum(init, m, laws.c, T)
+@inline _heat_capacity_sum(acc, m::Tuple, c::Tuple, T) = _heat_capacity_sum(
+    iszero(first(m)) ? acc : acc + first(m) * first(c)(T),
+    Base.tail(m),
+    Base.tail(c),
+    T,
+)
+@inline _heat_capacity_sum(acc, ::Tuple{}, ::Tuple{}, T) = acc
+
 # Smallest heat capacity of a law on the property bracket, sampled at the
 # 1 K spacing the component constructors validate the law on. Outside the
 # bracket the law is constant, so this bounds it on the whole real line up to
