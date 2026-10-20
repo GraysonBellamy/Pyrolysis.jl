@@ -38,6 +38,7 @@ const VBO_MASS_LOSS_EXACT =
 function _vbo_material(;
     substrate_alpha = 8.0e6 / VBO_RHO_KW,
     pmma_alpha = 2870.0 / VBO_RHO_PMMA,
+    A = 1.35e11,
 )
     k_pmma = CallableProperty(T -> T <= 394.0 ? 0.16 : 0.2156 * (T / 300.0)^-0.745)
     c_pmma = CallableProperty(
@@ -63,7 +64,7 @@ function _vbo_material(;
         α = substrate_alpha,
     )
     gas = GaseousComponent(:MMA, M = 0.044, c = 0.0, k = 0.02, λ = 2e-2)
-    rx = Reaction(:pmma_gasification, 1 => 3; A = 1.35e11, E = 164e3, h = 8.7e5, n = 1.0)
+    rx = Reaction(:pmma_gasification, 1 => 3; A, E = 164e3, h = 8.7e5, n = 1.0)
     return Material(
         name = :PMMA_MaCFP,
         components = (pmma, kw, gas),
@@ -73,14 +74,18 @@ function _vbo_material(;
 end
 
 # `n_pmma` cells across the PMMA layer; the Kaowool takes the same pitch.
-# Surface-absorption runs pass zero absorption coefficients (unused there).
+# Surface-absorption runs pass zero absorption coefficients (unused there);
+# the gradient gate perturbs the absorption coefficient, the incident flux
+# and the pre-exponential factor `A`.
 function _vbo_problem(
     n_pmma::Int;
     substrate_alpha = 8.0e6 / VBO_RHO_KW,
     pmma_alpha = 2870.0 / VBO_RHO_PMMA,
+    flux = 50e3,
+    A = 1.35e11,
     t_end = 500.0,
 )
-    mat = _vbo_material(; substrate_alpha, pmma_alpha)
+    mat = _vbo_material(; substrate_alpha, pmma_alpha, A)
     dz = VBO_L_PMMA / n_pmma
     n_kw = round(Int, VBO_L_KW / dz)
     n = n_pmma + n_kw
@@ -95,7 +100,7 @@ function _vbo_problem(
     ξ0 =
         [z -> (z > z_if ? VBO_RHO_PMMA : 0.0), z -> (z > z_if ? 0.0 : VBO_RHO_KW), z -> 0.0]
     top =
-        RadiativeFluxBC(flux = 50e3, absorptivity = 0.96) +
+        RadiativeFluxBC(; flux, absorptivity = 0.96) +
         RadiativeBC(ε = 0.96, T_inf = VBO_T_INF) +
         ConvectiveBC(h = 8.2, T_inf = VBO_T_INF)
     bottom = RadiativeBC(ε = 1.0, T_inf = VBO_T_INF)
