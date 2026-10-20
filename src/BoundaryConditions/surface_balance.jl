@@ -119,6 +119,11 @@ when the final iterate is not finite.
 - `a_eff::Float64 = ε_eff` (keyword): Effective surface absorptivity for
   incident radiation, consumed by a `RadiativeFluxBC` with
   `absorptivity = nothing`. The default reproduces Kirchhoff's law.
+- `trial = nothing` (keyword): a smooth clamp `T -> T_c` of a temperature into
+  the property bracket. With it the condition is evaluated at `trial(T_s)`
+  rather than at the iterate `T_s`, which is then never clamped: the balance
+  has a root for any cell temperature, and the solve neither clamps nor warns
+  (see below).
 
 # Blowing
 
@@ -138,7 +143,11 @@ pinned at the clamp also warns, because the balance then has no root in the
 bracket and (in AD passes) the clamp reconstruction has zeroed the Dual
 partials of `T_s` (the mathematically correct — but silent — clamp
 derivative). The `state.converged` / `state.iterations` diagnostics record
-the outcome either way.
+the outcome either way. With `trial`, the condition is read at the trial
+clamp of the iterate, every iterate is left as Newton computes it, and
+neither warning is issued: a cell temperature or a root outside the bracket
+is a trial state the integrator's error control rejects, and the derivatives
+stay finite there.
 """
 @inline function solve_boundary_temperature!(
     state::BoundaryState,
@@ -154,6 +163,7 @@ the outcome either way.
     radiation_model::RadiationModel = SURFACE_ABSORPTION,
     tol::Float64 = 1e-10,
     max_iter::Int = 50,
+    trial = nothing,
 ) where {NC}
     # Newton iterates carry whatever scalar type the inputs do (Float64 in
     # the canonical RHS, ForwardDiff.Dual under AD). Storage on `state` stays
@@ -182,18 +192,22 @@ the outcome either way.
     for i = 1:max_iter
         iter = i
 
-        # The face at the current iterate: every convective member applies its
-        # blowing model to it (`NoBlowing` returns the exact uncorrected flux).
-        face = BlowingFace(J_outward, T_s, material)
+        # The face at the current iterate, or at its trial clamp: every
+        # convective member applies its blowing model to it (`NoBlowing`
+        # returns the exact uncorrected flux).
+        T_eval = _evaluated(trial, T_s)
+        face = BlowingFace(J_outward, T_eval, material)
         q_bc, dq_bc_dT = evaluate_bc_flux_and_derivative(
             bc,
-            T_s,
+            T_eval,
             t,
             ε_eff,
             radiation_model,
             face;
             a_eff = a_eff,
         )
+        trial === nothing ||
+            (dq_bc_dT *= ForwardDiff.derivative(trial, ForwardDiff.value(T_s)))
 
         q_cond = k_eff * (T_s - T_cell) / Δz_half
         dq_cond_dT = k_eff / Δz_half
@@ -224,7 +238,7 @@ the outcome either way.
         ΔT = -f / df
         T_s = T_s + ΔT
         T_s_val = ForwardDiff.value(T_s)
-        if T_s_val < T_PROPERTY_MIN || T_s_val > T_PROPERTY_MAX
+        if trial === nothing && (T_s_val < T_PROPERTY_MIN || T_s_val > T_PROPERTY_MAX)
             # Reconstructing through Tu(...) zeroes any accumulated Dual
             # partials. Self-healing: the next un-clamped Newton step rebuilds
             # them from (T_cell, f, df) — unless the LAST iterate is clamped,
@@ -237,7 +251,7 @@ the outcome either way.
     # below proceeds at the unconverged T_s either way (the integrator's own
     # error control will reject the step if the resulting RHS is bad), but the
     # user must be able to see it happening.
-    if !converged
+    if !converged && trial === nothing
         @warn "Surface-temperature Newton did not converge; using the last \
                iterate for the boundary flux" T_surface = ForwardDiff.value(T_s) T_cell =
             ForwardDiff.value(T_cell) iterations = iter residual_W_m2 = f_val tol_W_m2 =
@@ -250,7 +264,7 @@ the outcome either way.
     # mathematically correct clamp derivative, but the silent kink is worth a
     # warning).
     T_s_pinned = ForwardDiff.value(T_s)
-    if T_s_pinned == T_PROPERTY_MIN || T_s_pinned == T_PROPERTY_MAX
+    if trial === nothing && (T_s_pinned == T_PROPERTY_MIN || T_s_pinned == T_PROPERTY_MAX)
         @warn "Surface temperature pinned at the physical clamp; the energy \
                balance has no root in [$(T_PROPERTY_MIN), $(T_PROPERTY_MAX)] K \
                (AD sensitivities of T_s are zero at the clamp)" T_surface = T_s_pinned T_cell =
@@ -258,10 +272,11 @@ the outcome either way.
     end
 
     # Final flux evaluation (typed) — these are what the caller will read.
-    face_final = BlowingFace(J_outward, T_s, material)
+    T_eval = _evaluated(trial, T_s)
+    face_final = BlowingFace(J_outward, T_eval, material)
     q_bc_final, _ = evaluate_bc_flux_and_derivative(
         bc,
-        T_s,
+        T_eval,
         t,
         ε_eff,
         radiation_model,
@@ -286,6 +301,10 @@ the outcome either way.
 
     return (T_s = T_s, q_applied = q_bc_final, q_conducted = q_cond_final)
 end
+
+# The temperature the condition is evaluated at: the iterate, or its trial clamp.
+@inline _evaluated(::Nothing, T) = T
+@inline _evaluated(trial, T) = trial(T)
 
 # ============================================================================
 # BC Flux and Derivative Evaluation

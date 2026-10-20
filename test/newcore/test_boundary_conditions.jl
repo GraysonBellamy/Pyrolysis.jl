@@ -1,6 +1,10 @@
 using Test
+using Logging
+using ForwardDiff
 using Pyrolysis
 using Pyrolysis.Materials: BEER_LAMBERT, SURFACE_ABSORPTION, NO_RADIATION
+using Pyrolysis.Materials: STEFAN_BOLTZMANN, T_PROPERTY_MAX
+using Pyrolysis.BoundaryConditions: BoundaryState, solve_boundary_temperature!
 using Pyrolysis.States
 using Pyrolysis.Assembly: residual!, buffers
 using Pyrolysis.Integration
@@ -54,6 +58,76 @@ _bc_problem(bc; n = 6, tspan = (0.0, 1.0), α = 0.0, kwargs...) = PyrolysisProbl
             @test all(isfinite, du)
             @test isapprox(du, du_fresh; rtol = 1e-12)
         end
+    end
+end
+
+@testset "the surface balance reads the trial clamp: no clamp, no warning, finite derivatives" begin
+    material = _bc_material()
+    k, d = 0.15, 1e-3
+    # The face temperature from the cell temperature `T_cell`, with or
+    # without the trial clamp.
+    function face(bc, T_cell; trial, J = (0.0, 0.0))
+        state = BoundaryState(300.0, 0.0, 0.0, 300.0, k, d, false, 0)
+        return solve_boundary_temperature!(
+            state,
+            T_cell,
+            k,
+            d,
+            bc,
+            material,
+            J,
+            0.0,
+            0.9;
+            trial,
+        )
+    end
+    # An incident flux the hottest admissible surface cannot reradiate: the
+    # balance has no root in the property bracket.
+    hot = RadiativeFluxBC(flux = 1e7) + RadiativeBC(T_inf = 300.0)
+    q_max = 0.9 * 1e7 - 0.9 * STEFAN_BOLTZMANN * (T_PROPERTY_MAX^4 - 300.0^4)
+    r = @test_logs min_level = Logging.Warn face(hot, 2500.0; trial = trial_temperature)
+    @test r.T_s ≈ 2500 + q_max * d / k rtol = 1e-10
+    @test r.q_conducted ≈ q_max rtol = 1e-10
+    # Beyond the bracket the condition is constant, so the face follows the
+    # cell one for one.
+    @test ForwardDiff.derivative(T -> face(hot, T; trial = trial_temperature).T_s, 2500.0) ≈
+          1 rtol = 1e-12
+    # The hard clamp pins the face at the bracket's end with zero derivative,
+    # and warns.
+    @test_logs (:warn, r"pinned at the physical clamp") match_mode = :any begin
+        @test face(hot, 2500.0; trial = nothing).T_s == T_PROPERTY_MAX
+        @test ForwardDiff.derivative(T -> face(hot, T; trial = nothing).T_s, 2500.0) == 0
+    end
+    # A NaN cell temperature: a NaN face, no warning.
+    r = @test_logs min_level = Logging.Warn face(hot, NaN; trial = trial_temperature)
+    @test isnan(r.T_s)
+    # On a physical state the two agree bit for bit, derivatives included.
+    mild =
+        RadiativeFluxBC(flux = 5e4) +
+        RadiativeBC(T_inf = 300.0) +
+        ConvectiveBC(h = 10.0, T_inf = 300.0)
+    for T_cell in (350.0, 600.0, 900.0), J in ((0.0, 0.0), (0.0, 2e-3))
+        a = face(mild, T_cell; trial = trial_temperature, J)
+        b = face(mild, T_cell; trial = nothing, J)
+        @test (a.T_s, a.q_applied, a.q_conducted) === (b.T_s, b.q_applied, b.q_conducted)
+        @test ForwardDiff.derivative(
+            T -> face(mild, T; trial = trial_temperature, J).T_s,
+            T_cell,
+        ) === ForwardDiff.derivative(T -> face(mild, T; trial = nothing, J).T_s, T_cell)
+    end
+    # Through the residual: a trial state far outside the bracket neither
+    # clamps nor warns.
+    bc = BoundaryConditionSet(
+        thermal = (top = hot, bottom = AdiabaticBC()),
+        mass = (top = DiffusiveMassBC(0.05), bottom = ImpermeableBC()),
+    )
+    cp = setup(_bc_problem(bc))
+    for wild in (1e5, -1e5, NaN)
+        u = copy(cp.u0)
+        u[energy_index(cp.def.layout, 6)] = wild
+        du = similar(u)
+        @test_logs min_level = Logging.Warn residual!(du, u, cp.def, 0.0, cp.ws)
+        @test isnan(wild) || all(isfinite, du)
     end
 end
 

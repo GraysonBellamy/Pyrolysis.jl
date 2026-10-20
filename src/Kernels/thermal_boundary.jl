@@ -25,10 +25,13 @@ outermost live cell.
 A prescribed temperature or heat flux, or an adiabatic face, gives the flux in
 closed form. Every other condition goes through the surface energy balance
 `q_bc(T_s) = k (T_s − T_cell) / d` of the face, solved by the Newton iteration
-of `BoundaryConditions.solve_boundary_temperature!` started from the clamped
-cell temperature; the outward gas mass flux of the face feeds the blowing
-models of its convective members, and the cell's emissivity and absorptivity
-its radiative members. `states` holds the per-face diagnostics of the balance.
+of `BoundaryConditions.solve_boundary_temperature!` started from the cell's
+trial temperature, with the condition evaluated at the trial temperature of
+the iterate ([`trial_temperature`](@ref)), so the balance has a root at any
+trial state and its solve never clamps; the outward gas mass flux of the face
+feeds the blowing models of its convective members, and the cell's emissivity
+and absorptivity its radiative members. `states` holds the per-face
+diagnostics of the balance.
 
 With gas transport (`laws` the caloric laws, `nothing` without), the face's
 energy flux also carries the sensible enthalpy `Σⱼ Jⱼ hⱼ(T_s)` of its outward
@@ -225,6 +228,7 @@ end
         ds.ε[i];
         a_eff = ds.a[i],
         radiation_model = kernel.radiation_model,
+        trial = trial_temperature,
     )
     return -r.q_conducted, r.T_s
 end
