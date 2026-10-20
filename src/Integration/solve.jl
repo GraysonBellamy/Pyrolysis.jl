@@ -412,6 +412,9 @@ function _deactivation_callback(cp::CoreProblem, check::DomainCheck, policy)
             terminate!(integrator)
         elseif policy.restart === :forced_dt
             set_proposed_dt!(integrator, policy.restart_dt)
+        elseif policy.restart === :heuristic
+            auto_dt_reset!(integrator)
+            set_proposed_dt!(integrator, integrator.dt)
         end
         return nothing
     end

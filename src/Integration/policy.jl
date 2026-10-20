@@ -9,7 +9,8 @@ An integrator together with the two policies that are part of its contract:
 
 - `restart`: the step size after an event that modifies the state —
   `:solver_chosen` keeps the integrator's own proposal, `:forced_dt` proposes
-  `restart_dt`;
+  `restart_dt`, `:heuristic` proposes the integrator's initial-step estimate
+  at the state the event left (two right-hand sides);
 - `observer_flag`: what a per-step observer does with the integrator's
   derivative-discontinuity flag, which the callback machinery raises before
   every callback — `:keep` leaves it raised (the integrator re-evaluates the
@@ -27,8 +28,8 @@ struct IntegratorPolicy{Alg}
         observer_flag::Symbol,
         restart_dt::Real,
     ) where {Alg}
-        restart in (:solver_chosen, :forced_dt) ||
-            throw(ArgumentError("restart must be :solver_chosen or :forced_dt"))
+        restart in (:solver_chosen, :forced_dt, :heuristic) ||
+            throw(ArgumentError("restart must be :solver_chosen, :forced_dt or :heuristic"))
         observer_flag in (:keep, :clear) ||
             throw(ArgumentError("observer_flag must be :keep or :clear"))
         return new{Alg}(alg, restart, observer_flag, Float64(restart_dt))
@@ -59,14 +60,16 @@ kencarp4_policy(linsolve) = IntegratorPolicy(
 )
 
 """
-	rodas5p_policy(linear_solver; restart = :solver_chosen)
+	rodas5p_policy(linear_solver; restart = :heuristic)
 
 `Rodas5P`, a Rosenbrock method that evaluates the exact colored Jacobian at
 every step and the time derivative of the right-hand side by finite
-differences, with either restart. It rebuilds its Jacobian every step, so the
-observer flag changes nothing; the policy clears it.
+differences, with any restart. The heuristic restart rejects fewer steps after
+an event than keeping the step and keeps the mass ledger closer than either
+other kind. It rebuilds its Jacobian every step, so the observer flag changes
+nothing; the policy clears it.
 """
-rodas5p_policy(linsolve; restart::Symbol = :solver_chosen) = IntegratorPolicy(
+rodas5p_policy(linsolve; restart::Symbol = :heuristic) = IntegratorPolicy(
     Rodas5P(autodiff = AutoFiniteDiff(), linsolve = linsolve),
     restart,
     :clear,
@@ -91,8 +94,7 @@ fbdf_policy(linsolve) = IntegratorPolicy(
 """
 	default_policy(linear_solver)
 
-The default integrator: [`rodas5p_policy`](@ref) with the solver-chosen
-restart.
+The default integrator: [`rodas5p_policy`](@ref) with the heuristic restart.
 """
 default_policy(linsolve) = rodas5p_policy(linsolve)
 

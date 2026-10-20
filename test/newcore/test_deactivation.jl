@@ -675,7 +675,14 @@ end
 
 @testset "the domain test rejects proposals through a solve and gives up on a run of constraint rejections" begin
     options = (use_ale = true, radiation_model = BEER_LAMBERT, deactivation = true)
-    sol = integrate(setup(_ablator(8; radiating = true); options...); saveat = Float64[])
+    # The solver-chosen restart keeps the step through an event, so the domain
+    # test sees the proposals that follow one; the heuristic restart avoids them.
+    policy = rodas5p_policy(KLUFactorization(); restart = :solver_chosen)
+    sol = integrate(
+        setup(_ablator(8; radiating = true); options...);
+        saveat = Float64[],
+        integrator_policy = policy,
+    )
     @test sol.retcode === :Success
     @test sol.statistics.domain_rejections > 0
     @test sol.statistics.largest_constraint_residual <= 1
@@ -687,6 +694,7 @@ end
             cp;
             saveat = Float64[],
             max_constraint_rejections = 1,
+            integrator_policy = policy,
         )
     @test sol.retcode === :Failure
     @test sol.t[end] < 0.8
@@ -696,6 +704,7 @@ end
 @testset "the restart after an event: $(name)" for (name, policy) in (
     ("FBDF", fbdf_policy(KLUFactorization())),
     ("Rodas5P, forced restart", rodas5p_policy(KLUFactorization(); restart = :forced_dt)),
+    ("Rodas5P, heuristic restart", rodas5p_policy(KLUFactorization())),
     ("KenCarp4", kencarp4_policy(KLUFactorization())),
 )
     steps = Tuple{Float64,Float64}[]

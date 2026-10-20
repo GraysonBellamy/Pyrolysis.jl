@@ -15,7 +15,7 @@ using SciMLBase: NullParameters, NoInit, FullSpecialize, derivative_discontinuit
 using SciMLBase: terminate!
 using OrdinaryDiffEq: OrdinaryDiffEq, ODEFunction, ODEProblem, DiscreteCallback, CallbackSet
 using OrdinaryDiffEq: ContinuousCallback, Rodas5P, FBDF, ReturnCode, set_proposed_dt!
-using SciMLBase: SciMLBase, get_proposed_dt
+using SciMLBase: SciMLBase, get_proposed_dt, auto_dt_reset!
 using OrdinaryDiffEqSDIRK: KenCarp4
 using LinearSolve: LinearSolve, KLUFactorization
 using ADTypes: AutoFiniteDiff

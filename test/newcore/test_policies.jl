@@ -64,6 +64,9 @@ end
 @testset "a policy names a known restart and flag rule" begin
     alg = OrdinaryDiffEq.Rodas5P()
     @test IntegratorPolicy(alg, :forced_dt, :keep, 1e-6).restart === :forced_dt
+    @test IntegratorPolicy(alg, :heuristic, :clear, 1e-6).restart === :heuristic
+    @test rodas5p_policy(KLUFactorization()).restart === :heuristic
+    @test default_policy(KLUFactorization()).restart === :heuristic
     @test_throws ArgumentError IntegratorPolicy(alg, :immediate, :keep, 1e-6)
     @test_throws ArgumentError IntegratorPolicy(alg, :solver_chosen, :raise, 1e-6)
     @test_throws ArgumentError rodas5p_policy(KLUFactorization(); restart = :immediate)
@@ -212,11 +215,15 @@ end
             "Rodas5P, forced restart",
             rodas5p_policy(KLUFactorization(); restart = :forced_dt),
         ),
+        (
+            "Rodas5P, solver-chosen restart",
+            rodas5p_policy(KLUFactorization(); restart = :solver_chosen),
+        ),
         ("FBDF", fbdf_policy(KLUFactorization())),
     ),
     energy in (:temperature, :enthalpy)
 
-    @test policy.restart in (:solver_chosen, :forced_dt)
+    @test policy.restart in (:solver_chosen, :forced_dt, :heuristic)
     sol = Integration.solve(
         _uniform_slab(6);
         energy_state = energy,
