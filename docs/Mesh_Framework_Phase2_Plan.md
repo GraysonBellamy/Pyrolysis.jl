@@ -4,7 +4,7 @@
 
 **Conventions.** `file:line` refers to `bb2860b`. "§3.x" without a document name is a section of the design document; "plan §x" is the Phase 1 plan; "gate §x" its gate document (`docs/Mesh_Framework_Phase1_Gate.md`). D1 to D52 and C1 to C40 are the Phase 1 plan's departures and conflicts; this plan's conflicts continue the series from C41, and its implementation record will continue the departures from D53. Case ids (V-BO-01, …) are the verification cases under `test/verification/cases/`. "The prototype" is `scripts/mesh_phase2_prototype/` (§9.2).
 
-**Contents.** 1 What was verified · 2 Module layout · 3 Data structures and contracts · 4 Kernel-by-kernel plan · 5 Solver plan · 6 Test and verification plan · 7 Milestones, gates, estimates · 8 Risk register · 9 Branch and process · 10 Decisions carried as gated choices · 11 Summary · 12 Implementation status · 13 Owner's questions · Appendix A Measurements · Appendix B What the reviews changed
+**Contents.** 1 What was verified · 2 Module layout · 3 Data structures and contracts · 4 Kernel-by-kernel plan · 5 Solver plan · 6 Test and verification plan · 7 Milestones, gates, estimates · 8 Risk register · 9 Branch and process · 10 Decisions carried as gated choices · 11 Summary · 12 Implementation status · 13 Owner's questions · 14 Implementing the decision review · Appendix A Measurements · Appendix B What the reviews changed · Appendix C The decision review's measurements
 
 ---
 
@@ -380,11 +380,14 @@ Single developer; the old core untouched (except C55 and C36, fingerprint-checke
 | M3 The correction | `Correction` types, `correction!`, `ds.c`, `CellReference.thickness`, the sweep in the balance rows and the consistent sweep, the Lagrangian nodes, `RelativeFluxKernel` on `ds.c`, the pattern (C43), C52, `setup` keywords, outputs | §6.1 items 1 to 5, 11, 14 to 16; V-MMS-02/03/04 and `test_relative_flux.jl` unchanged under `PrescribedCorrection`; V-BO-01 at 60 cells ends in one invocation with every QoI within its tolerance (the prototype's A.3 run, not within round-off of it: C52 changes the rejected steps) | 2 weeks |
 | M4 The ladder | V-BO-01 and V-BO-03 routed; the matrix of §7.3 item 1 at the first thresholds; the end-of-layer tail diagnostic (R25); both energy forms; `burnout_ladder.jl`, `burnout_timing.jl`, the `energy_ledger.jl` extension; `min_cell_thickness`; a tuning allowance of half a week for `τ`, the band and the activation | §7.3 items 1 to 3, 6, 8, 10 on V-BO-01/03/04; the decision point of §7.4 | 2 to 2.5 weeks |
 | M5 Events | Event location behind `located_events` (prototyped, A.5), the restart-policy measurement on V-BO-01 | §6.1 items 9, 10; §7.3 item 7; the defaults of questions 5 and 7 chosen | 0.5 week |
-| M6 The gate's checks | V-BO-06/07/08 (a graded mesh with its old-core reference, a new two-solid material, a thin layer); `burnout_gradients.jl` (nine runs); the Douglas fir identity and timing; V-BO-05 re-pinned from a ladder; the rest of item 1's matrix | §7.3 items 1, 4, 5, 9 complete | 2 to 2.5 weeks |
+| M6a The decision review's changes (§14.3) | The plan records (W2); `burnout_gradients.jl` (W3) and the burst measured per step (W4), each checked on `768944e`; the reactivity switch deleted (W1); the correction installed by the rule (W5) | §14.4's M6a row | 2.5 weeks |
+| M6b The gate's cases | V-BO-05 re-pinned from a ladder and routed; V-BO-06/07/08 (a graded mesh with its old-core reference, a new two-solid material, a thin layer); V-BO-03's ladder rows past 500 s | Each case's QoIs in both forms; §6.2's acceptance | 1.5 to 2 weeks |
+| MF The `FBDF` switch (§14.3) | On an OrdinaryDiffEqBDF release containing the upstream fix: the compat floor, `FBDF` as the default policy, the gas rows at scale (c), V-MMS-02/03 under `rodas5p_policy`, the re-pins of §14.6 | §14.3's MF list | 1 to 1.5 weeks |
+| M6c The measurement pass | Every gate table once, on the final defaults (§14.4) | §7.3 items 1 to 10 | 1 week |
 | M7 Gate document | `docs/Mesh_Framework_Phase2_Gate.md`, §12 of this plan, the three-way `Pkg.test()` in detached worktrees | The Phase 2 gate (§7.3) | 1 week |
 | Review | The adversarial review of the phase and its followups, as Phase 1 experienced it (D38 to D52, C32 to C39, a re-measured gate) | The review's findings closed or owned | 1 to 2 weeks |
 
-Total: 11.5 to 14.5 weeks (the design said 4 to 6); 13 to 16 if the fallback of §7.4 is built. Phase 1's record is an aggregate (about twelve and a half of thirteen to fourteen weeks, plus an unbudgeted review); its per-milestone actuals were never recorded, so these rows are estimates against the deliverable count (about 25 code-level items in §2.2 and §4, 17 tests, four new gate scripts, three new cases, four re-pins), not against measured velocity.
+Total: 11.5 to 14.5 weeks as first planned (the design said 4 to 6), 13 to 16 if the fallback of §7.4 is built. The decision review (§14.4) raises it to 13.5 to 17.5 weeks without MF and 14.5 to 19 with it. Phase 1's record is an aggregate (about twelve and a half of thirteen to fourteen weeks, plus an unbudgeted review); its per-milestone actuals were never recorded, so these rows are estimates against the deliverable count (about 25 code-level items in §2.2 and §4, 17 tests, four new gate scripts, three new cases, four re-pins), not against measured velocity.
 
 ### 7.1 What the owner decides before M1
 
@@ -395,23 +398,24 @@ Total: 11.5 to 14.5 weeks (the design said 4 to 6); 13 to 16 if the fallback of 
 
 ### 7.2 Design errata to apply at the design's next revision
 
-§3.3: the activation is per node, the smooth "or" of its two cells' switches (C44); §3.5: the cascade is the block-and-band rule, the band an absolute mass fraction (C42); §3.7: the color count with the correction active includes the velocity rows' reach (C43) and the `c = 0` count is `3NC + 7 + 2·bl + 7·χ` (C25); §3.5 and §6 Phase 2: "one event per layer" counts callback invocations (C53). No design content changes beyond these; the owner applies them.
+§3.3: the activation is per node, the smooth "or" of its two cells' switches (C44); §3.5: the cascade is the block-and-band rule, the band an absolute mass fraction (C42); §3.7: the color count with the correction active includes the velocity rows' reach (C43) and the `c = 0` count is `3NC + 7 + 2·bl + 7·χ` (C25); §3.5 and §6 Phase 2: "one event per layer" counts callback invocations (C53); §3.5: the bullet "Reaction rates are multiplied by a smooth function…" and the "smooth reactivity switch-off" of its Phase 2 text go, since the switch is deleted (§14, W1). No design content changes beyond these; the owner applies them.
 
 ### 7.3 The Phase 2 gate, as written in the design, made measurable
 
 Every item is measured and reported in `docs/Mesh_Framework_Phase2_Gate.md` with its script and table.
 
-1. **One event per layer or fewer across the ladder.** `burnout_ladder.jl`, table `measurements/burnout_ladder.md`: V-BO-01 at 30, 60 and 120 PMMA cells × `ε_m ∈ {3e-3, 1e-2, 3e-2}` at the default `τ` and `ε_band`, plus `τ ∈ {0.1, 0.2, 1}` at 60 cells and `ε_m = 1e-2`; V-BO-07 with `β ∈ {0, 1}` (the monitor's mass term acts only where the density varies, so the "two monitor settings" are carried by the heterogeneous layer; on V-BO-01 the prototype's `β = 1` was a `τ/2` duplicate, A.4); V-BO-06 and V-BO-08 at their CI resolutions and the three thresholds; V-BO-04 with and without the correction. Per run the table records the invocations, and per invocation the cells below `ε_m` and the cells the band took with the largest merged mass fraction. Pass: one invocation per layer in every run, with the largest merged fraction at most 5 `ε_m` (so the band, fixed before the ladder, cannot be widened to force the count; the prototype's 3.6 % at 60 cells passes, its 10 % at 120 cells fails). The prototype already fails this strict criterion on three rows (A.3, A.4): 120 cells (two invocations, the band saturated at 10 %), `ε_m = 3e-2` (two) and `τ = 1` (two); the 120-cell and `τ_p = 1` rows are the `N²` scaling of §3.2 (a constant layer time `τ` across the ladder is the lever, A.10), the `3e-2` row the absolute band's 3.3 `ε_m` there, which 3 `ε_m` failed at 60 cells and any run left at two invocations is an owner exception recorded per run, not a pass. Every run of the matrix is also judged on all of its case's QoIs (item 2).
-2. **Peak MLR and its timing.** `burnout_ladder.jl` runs every V-BO case of the matrix in the suite's assert mode against the cases' own fixed references (V-BO-01: peak 32.39 within 3 %, its time 335.0 s within 3 %, the burnout time 363.5 s within 1 %, the mass loss within 0.3 points, the final thickness, the ledger, the surface-Newton count), and reports the old core at the same resolution in the same session beside each run. Pass: every run of the matrix passes its case, the 30-cell row included unless the owner excludes it (question 8); the prototype fails it at 30 cells (peak +13.7 %, `t_peak` +8.4 %) and at `τ = 0.1` (`t_peak` 361.5 s, +7.9 %), which the tail diagnostic of M4 (R25) must resolve. Because the merge burst can sit below the main peak, the item adds a curve criterion the case already carries (`:mlr_history`): the largest difference from the old core's MLR after `t_peak` at most 3 % of the peak.
+1. **One event per layer or fewer across the ladder.** `burnout_ladder.jl`, table `measurements/burnout_ladder.md`: V-BO-01 at 30, 60 and 120 PMMA cells × `ε_m ∈ {3e-3, 1e-2, 3e-2}` at the default `τ` and `ε_band`, plus `τ ∈ {0.1, 0.2, 1}` at 60 cells and `ε_m = 1e-2`; V-BO-07 with `β ∈ {0, 1}` (the monitor's mass term acts only where the density varies, so the "two monitor settings" are carried by the heterogeneous layer; on V-BO-01 the prototype's `β = 1` was a `τ/2` duplicate, A.4); V-BO-06 and V-BO-08 at their CI resolutions and the three thresholds; V-BO-04 with the correction the installation rule gives it and with `NoCorrection()`; V-BO-03 run past 500 s until its layer's invocation (§12.4 item 6). Per run the table records the invocations, and per invocation the cells below `ε_m` and the cells the band took with the largest merged mass fraction. Pass: one invocation per layer in every run, with the largest merged fraction at most 5 `ε_m` (so the band, fixed before the ladder, cannot be widened to force the count; the prototype's 3.6 % at 60 cells passes, its 10 % at 120 cells fails). The prototype already fails this strict criterion on three rows (A.3, A.4): 120 cells (two invocations, the band saturated at 10 %), `ε_m = 3e-2` (two) and `τ = 1` (two); the 120-cell and `τ_p = 1` rows are the `N²` scaling of §3.2 (a constant layer time `τ` across the ladder is the lever, A.10), the `3e-2` row the absolute band's 3.3 `ε_m` there, which 3 `ε_m` failed at 60 cells and any run left at two invocations is an owner exception recorded per run, not a pass. Every run of the matrix is also judged on all of its case's QoIs (item 2). Measured at M4 with the end-of-step event and the reactivity switch; re-read on the final defaults at M6c (§14.4), the merged-fraction clause watched (R46).
+2. **Peak MLR, its timing, and the burst.** `burnout_ladder.jl` runs every V-BO case of the matrix in the suite's assert mode against the cases' own fixed references (V-BO-01: peak 32.39 within 3 %, its time 335.0 s within 3 %, the burnout time 363.5 s within 1 %, the mass loss within 0.3 points, the final thickness, the ledger, the surface-Newton count), and reports the old core at the same resolution in the same session beside each run. The peak and its time are read on the main peak: over the saved times before the solve's last deactivation event (the new core's last invocation, the old core's last park), or over the whole run when there is none (C86). Pass: every run of the matrix passes its case, the 30-cell row included. The burst after the layer's last event is judged by refinement on both cores rather than by a curve against the old core: V-BO-01 at 30, 60, 120 and 240 PMMA cells, `ε_m` of 1e-2 and 3e-3, in both forms, with the gas-generation rate recorded at every accepted step and every post-event state and `t_pk` the old core's 240-cell main-peak time. (a) The largest per-step excess of the N-cell rate over the 2N-cell rate after `t_pk` falls at least 1.5× per grid doubling and is no larger than the old core's at the same N; (b) the L1 of successive grids over [`t_pk`, `t_end`] falls at least 1.5× per doubling, and the new core's L1 against its own 240-cell run is within 1.5× of the old core's at each N; (c) the L1 against the old core's 240-cell run falls with refinement. The same measures are reported, not asserted, on V-BO-03 (extended), V-BO-06 and V-BO-07 and at `ε_m = 3e-2`; a run there whose per-step excess stops falling, or exceeds the old core's, goes to the owner. The decision review's standing: every criterion passes, with and without location (Appendix C.5).
 3. **Ledgers closed.** The mass ledger of every V-BO run at its case's tolerance in the temperature form (V-BO-01: 1e-3, the prototype 7e-5 to 2.5e-4; V-BO-02: C39's 3e-3 unless question 7 changes the restart); the energy ledger (`energy_ledger.jl` extended to V-BO-04 at 40 cells, whose event is one and exactly timed, over the event-free window before it and, with located events, across it, the event's vented gas, lost inventory, regularization and created volume entering both closures as the event records them, the sum over live cells only) no larger than the old core's closure on the same deck and converging at the integrator's order under fixed-step refinement on the event-free window; exact in the enthalpy form.
 4. **Admissibility at every event.** The deactivation callback asserts it (Phase 1); `burnout_ladder.jl` counts events, invocations and admissibility failures (zero) over the matrix.
-5. **Charring decks identical to Phase 1.** `burnout_identity.jl`, run first at M0 on `bb2860b` to record the Phase 1 digests (as `oldcore_fingerprint.jl` holds 17bc477's): the hash of `(T, m, x, t)` of V-CPL-02/02b, V-CPL-03, V-CPL-06's char-layer column, V-RX-02d (a residue former), V-HC-05, V-RAD-01 and the Douglas fir deck (60 s) with `NoCorrection` equals that digest; with the correction present every output agrees to 1e-10 relative on the same accepted-step sequence (a changed step sequence is reported, with the temperature difference, as Phase 1's 7e-6 K on ale_darcy 25 was), the largest activation over the run is exactly zero and each deck's smallest `h/h₀` is recorded (C56).
+5. **Charring decks identical to Phase 1, split by installation.** `burnout_identity.jl`, its reference recorded at M0 on `bb2860b` and re-recorded where §14.6 lists: the hash of `(T, m, x, t)` of V-CPL-02/02b, V-CPL-03, V-CPL-06's char-layer column, V-RX-02d (a residue former), V-HC-05, V-RAD-01 and the Douglas fir deck (60 s, deactivation off). (A) A deck on which the installation rule does not install the correction (a fixed mesh, no deactivation, or no layer that can vanish: V-CPL-03, V-CPL-06a, V-HC-05, V-RAD-01, V-RX-02d and the Douglas fir deck) equals its reference digest; the same deck with `EquidistributionCorrection()` given explicitly agrees to 1e-10 relative in every output on the same accepted-step sequence (a changed sequence is reported with the temperature difference, as Phase 1's 7e-6 K on ale_darcy 25 was), its correction velocity exactly zero and each deck's smallest `h/h₀` recorded (C56). (B) A deck on which the rule installs it (V-CPL-02 and V-CPL-02b; among the routed cases also V-BO-04) passes its QoIs in both forms, its digest at the package defaults is the reference, and the largest activation, the active nodes and the steps against `NoCorrection()` are recorded; V-BO-04's correction is exactly zero, its column being uniform.
 6. **Constraint residuals and the domain test.** `burnout_ladder.jl` records per run the largest accepted scaled residual under both the Phase 1 scale and C52's, and the domain rejections before and after C52 on the same commit (the domain test rejects above one, so "at or below one" cannot fail and is not the criterion; the prototype's 0.69 and 52 of 1,337 proposals are the Phase 1-scale numbers).
 7. **Event timing.** `case_accuracy.jl` on V-BO-01, 02, 04 and V-CPL-02/02b with location off and on: the achieved temperature error over the cells live in both solves, and the event-time shift between the tolerance and the tolerance divided by 100 as a fraction of the median event interval. Phase 1's budget (the shift at most ten times `reltol`) is unreachable by three orders of magnitude (A.5: 0.133 off, 0.022 on), so the criterion is restated and the script's budget changed: pass when the located shift is at most 0.05 of the median interval and at least three times smaller than the discrete one on every deactivating case (A.5 passes both on V-BO-02); the default follows (question 5).
-8. **Wall time no worse than the old core's burnout runs.** `burnout_timing.jl`, table `measurements/burnout_timing.md`: V-BO-01, 03 and 04 at 30, 60 and 120 cells, both cores in one process with the same statistic (median of three), at matched accuracy with an error measure defined for decks with events: the temperature error over the saved times and cells live in both solves plus the event-time shift (the `case_accuracy.jl` measure), each core against its own reference at reltol 1e-9 (a reltol 1e-11 reference of a 60-event solve is not shown to complete; the script checks that the reference it uses does); and, for the cost of a correction present but inactive (the design's "checked on the PMMA cone cases"), the audit decks (`ale`, `ale_darcy` at 25 and 100 cells) and V-CPL-02/03 with the correction object installed, against Phase 1's numbers. Pass: the same order as the old core, that is a ratio at most 1.5 on every deck at matched accuracy; 1.5 to 2 is the owner's call; above 2 is the bad sign of §5.7. Standing before M2, from the tables: the prototype is 3.5 to 6× at equal tolerance (A.3, A.4: 2.76 to 3.5 s against 0.58 to 0.80 s at 60 cells, 9.3 against 2.1 s at 120, 1.46 against 0.25 s at 30) and matched accuracy raises the ratio (Phase 1 item 2: `Rodas5P` needs reltol 1e-7 to 3e-7 to match the old core's error); M2's levers (§5.7) must bring it within the pass before M3 is built, and the item is re-measured on the finished correction at M4.
-9. **Smooth finite-difference gradients.** `burnout_gradients.jl`, table `measurements/burnout_gradients.md`, the Phase 0 item 1 protocol on the new core with the correction (nine runs, the PMMA absorption coefficient perturbed by up to ±0.8 %, central differences at four steps). Phase 0 already found the integrated quantity smooth through 60 parks (spread 0.025) and the event-timed ones not (`t_peak` interpolated 0.11, `t_bo` interpolated 0.20); the clause's target is the event-timed quantities. Pass: `peak_mlr` (interpolated), `t_peak` (interpolated), `t_bo` (interpolated) and the invocation time each with a spread below 0.1 across the four steps, and the invocation count the same for every perturbation; a count that changes fails the item, with the design's bracketed differencing as the documented consequence.
+8. **Wall time no worse than the old core's burnout runs.** `burnout_timing.jl`, table `measurements/burnout_timing.md`: V-BO-01, 03 and 04 at 30, 60 and 120 cells, both cores in one process, on the final defaults with location on and on a quiet machine, matched on the window RMS before the first event (D58, C70), each core against its own reference at reltol 1e-9, the old default timed over nine solves (D64); and the cost of the correction where the installation rule installs it (V-CPL-02/02b, `ale` and `ale_darcy` at 25 and 100 cells with deactivation on), against the same deck with `NoCorrection()` and against the old core (a deck on which the rule does not install it is bit-identical, item 5, and costs nothing). Pass: the same order as the old core, that is a ratio at most 1.5 on every deck at matched accuracy; 1.5 to 2 is the owner's call; above 2 is the bad sign of §5.7. Standing: M2's acceptance at about 1.5× under `Rodas5P` (§12.4) and M4's tables at a load of 15 to 16, which do not decide the item; the decision review's `FBDF` with an in-process fix of the upstream bug at 0.56× (modeled) and 0.88× (wall) on V-BO-01 (Appendix C.1), to be re-measured on the release. If MF has landed, R40's levers (ii) to (v) leave the phase gate; if not, R40 stands as the owner accepted it at M2.
+9. **Smooth finite-difference gradients.** `burnout_gradients.jl` (W3), table `measurements/burnout_gradients.md`: the Phase 0 item 1 protocol on the new core at the package defaults, V-BO-01 with the PMMA absorption coefficient perturbed at 60 and 120 cells and the incident flux and the pre-exponential factor at 60, nine perturbations each (`ε ∈ {0, ±1, ±2, ±4, ±8}·1e-3`), central differences at four steps, the old core in the same process. Phase 0 found the integrated quantity smooth through 60 parks (spread 0.025) and the event-timed ones not (`t_peak` interpolated 0.11, `t_bo` interpolated 0.20); the clause's target is the event-timed quantities. Pass: `peak_mlr` (interpolated), `t_peak` (interpolated), `t_bo` (interpolated) and the invocation time each with a spread below 0.1 across the four steps, and the invocation count the same for every perturbation; a count that changes fails the item, with the design's bracketed differencing as the documented consequence. The safety-net fallbacks (an invocation whose smallest merged fraction is below `ε_m(1 − 1e-4)`) are reported. The decision review passed it on `7ceaf74` with location on (Appendix C.2); the gate's reading is M6c's, under `FBDF` if MF has landed. Smooth event times are a property the correction delivers, not the reason it is the primary burnout path (§10); no current fit consumes these gradients.
 10. **Minimum cell thickness.** `burnout_ladder.jl` records the smallest live cell per run; pass when it is at least `0.5 ε_m h₀` on every run (the prototype: 1.03 µm against `ε_m h₀ = 0.98` µm at 60 cells, 2.0/1.97 at 30, 0.49/0.49 at 120, 0.31/0.29 at `ε_m = 3e-3`) and no run ends in `DtLessThanMin`.
 11. **The fallback.** If items 1 or 2 fail on V-BO-01 at the defaults after M4's tuning, or item 8 fails and the owner grants no exception, the core ships with `c = 0`, the block-and-band rule and the slot-shifting interior merge (C54): that departs from the design's "nothing else changes", because at `c = 0` the new core cannot finish V-BO-01 or V-BO-03 without an interior policy (A.1). The fallback's own acceptance: V-BO-01 to V-BO-05 pass their cases on the new core at `c = 0` (one invocation per cell on V-BO-01 and 03, as the old core's parks), the ledgers and admissibility of items 3 and 4, item 8's timing with the old core's one-cell events as the comparison. The cutover case is then argued on the exact Jacobian, one-invocation cascades and multi-D readiness alone (design §6).
+12. **Phase 1's items 2 and 9 under `FBDF`** (only if MF lands). Phase 1's item 2 (`audit_decks.jl`: the audit decks within 1.5× of the old core at matched accuracy, C40's exception) is re-measured under the new default; within 1.5× closes the exception. Phase 1's item 9 (`finite_slab.jl`: V-HC-02c and V-HC-03 at 320 cells, D37's bound) is read at matched tolerance, consistently with item 8: the default passes when some rung of the ladder (reltol 1e-6 down to 1e-8) meets D37's bound and, at the loosest such rung, its modeled cost is at most 1.5× the old default's at reltol 1e-6. The decision review's `FBDF` meets the bound at 3e-7 (5.961e-4 against 5.992e-4) with 279 right-hand sides and one Jacobian, against `Rodas5P`'s 549 and 61 at 1e-6, and misses it at 1e-6 (6.715e-4), as C28 found.
 
 ### 7.4 The decision points at M2 and M4
 
@@ -431,7 +435,7 @@ Carried from design §5 and plan §8 (R20 to R22 are Phase 2's) and extended wit
 | R20 | Event ordering under a parameter perturbation makes finite-difference gradients non-smooth | M6, item 9 | With one invocation per layer there is one event time to differentiate; measured by the Phase 0 protocol; the bracketed differencing of design §5 if it persists |
 | R21 | `ε_m` small enough for one event per layer is too small for the Newton | M4 | Measured: 3e-3 gives one invocation and 0.31 µm cells with no stall (A.4); `Rodas5P` has no Newton; the domain test and the step counts are the gate quantities |
 | R22 | The correction fails to carry a layer, or needs problem-dependent tuning (Furzeland) | M4, §7.4 | The prototype carries V-BO-01 at `τ = 0.2` with a band of 10 `ε_m` in one invocation at 60 cells for `ε_m` of 3e-3 and 1e-2, in two at 120 cells and at 3e-2 (A.3, A.4); the absolute band is unmeasured at the other thresholds; V-BO-06/07/08 test the tuning; the fallback is item 11 |
-| R25 | **An end-of-layer MLR spike.** After the band merge the last per cent of the layer gasifies in a burst: at 30 PMMA cells the peak reads 36.7 against the old core's 32.25 at that resolution (+14 %), and at 60 cells with `τ_p = 0.1` the peak moves to the merge time (A.4); at 60 and 120 cells with `τ_p = 0.2` there is no spike. The mechanism from the rule as written: with first-order kinetics the merge changes the total rate `Σ m_i k(T_i) s_i` only through the switch and the temperature, and it changes both: the merged residue was throttled (`s` 0.74 to 1 inside the band) and the substrate receiver's switch is one, releasing up to 1.35×; the thin film transmits most of the incident flux into a receiver that absorbs it in a fraction of a micrometre, so the merged temperature is above the film's, and 5 K is +27 % in the rate at 650 K; the 30-cell receiver has twice the heat capacity and pulls the merged temperature further toward the substrate's, which is why it spikes more than `τ_p = 0.1` at 60 cells despite the tighter throttling there. The peak QoI is a point sample of a 2 to 3 s burst on a 0.5 s output grid | M4, item 2 | The tail diagnostic of M4: at the last pre-merge step record per cell `m_i`, `T_i`, `s_i`, at the post-event state the residue and `T_m`, decompose `Σ m_i k(T_i) s_i → m_res k(T̄) s̄ → m_res k(T_m)`, compare the burst's integrated mass with the merged residue, and repeat with the switch off (a surviving spike is the temperature part). Merging into the lowest layer cell as the survivor removes only the switch part and trades a second invocation against item 1; the structural options are C51's. The owner decides the switch (question 12) and the 30-cell re-pin (question 8) on that table |
+| R25 | **An end-of-layer MLR spike.** After the band merge the last per cent of the layer gasifies in a burst: at 30 PMMA cells the peak reads 36.7 against the old core's 32.25 at that resolution (+14 %), and at 60 cells with `τ_p = 0.1` the peak moves to the merge time (A.4); at 60 and 120 cells with `τ_p = 0.2` there is no spike. The mechanism from the rule as written: with first-order kinetics the merge changes the total rate `Σ m_i k(T_i) s_i` only through the switch and the temperature, and it changes both: the merged residue was throttled (`s` 0.74 to 1 inside the band) and the substrate receiver's switch is one, releasing up to 1.35×; the thin film transmits most of the incident flux into a receiver that absorbs it in a fraction of a micrometre, so the merged temperature is above the film's, and 5 K is +27 % in the rate at 650 K; the 30-cell receiver has twice the heat capacity and pulls the merged temperature further toward the substrate's, which is why it spikes more than `τ_p = 0.1` at 60 cells despite the tighter throttling there. The peak QoI is a point sample of a 2 to 3 s burst on a 0.5 s output grid | M4, item 2 | The tail diagnostic of M4: at the last pre-merge step record per cell `m_i`, `T_i`, `s_i`, at the post-event state the residue and `T_m`, decompose `Σ m_i k(T_i) s_i → m_res k(T̄) s̄ → m_res k(T_m)`, compare the burst's integrated mass with the merged residue, and repeat with the switch off (a surviving spike is the temperature part). Merging into the lowest layer cell as the survivor removes only the switch part and trades a second invocation against item 1; the structural options are C51's. The owner decides the switch (question 12) and the 30-cell re-pin (question 8) on that table *Closed by the decision review:* the burst is the merged temperature, not the switch (C76); the old core bursts too and both converge at about first order; item 2 judges it by refinement on both cores and reads the peak on the main peak, and the switch is deleted (§14) |
 | R26 | Wall time 3.5 to 6× the old core's at equal tolerance, more at matched accuracy (C49, item 8); the owner's rule is the same order or better | M2, item 8 | The levers of §5.7 in their measured order, the integrator diagnosis first; a stop at M2's gate above 2× (§7.4) |
 | R27 | `τ` is a time and the burnout time scale varies by material and flux (Furzeland) | M4, M6 | The `N²` form makes `τ` the layer's equidistribution time, mesh-independent (A.10); the ladder's `τ` row; V-BO-07 and V-BO-08 measure `T_sync` against the layer's life; a `setup` keyword |
 | R28 | The band semantics: a multiple of `ε_m` takes cells at 29 % of their mass when `ε_m = 3e-2` (A.4) | M3 | The band is an absolute mass fraction (§4.3) |
@@ -446,7 +450,13 @@ Carried from design §5 and plan §8 (R20 to R22 are Phase 2's) and extended wit
 | R37 | A re-pinned QoI hides a regression | M3, M4, M6 | Every re-pin lists the old value, the new value and the reason (C45, C46, R25), and is the owner's |
 | R38 | The located event is applied at an interpolated state of the method's order | M5 | The safety net; the admissibility check; item 7 measures the error against the tolerance with location on |
 | R39 | Two prototype runs in one session once showed no events where a clean session shows two invocations (A.3's note) | M1 | The runs were discarded; the package tests of §6.1 item 16 (repeated solves bit-identical with events) guard the package implementation |
-| R40 | The burnout path stays at about 1.5× the old core at matched accuracy (V-BO-01) because `Rodas5P` builds an exact Jacobian every step | Phase gate | The owner accepted M2 at about 1.5×; the levers of §12.4 are carried, a reusing integrator and `Wfact` first, and item 8 is re-measured on the package's correction |
+| R40 | The burnout path stays at about 1.5× the old core at matched accuracy (V-BO-01) because `Rodas5P` builds an exact Jacobian every step | Phase gate | The owner accepted M2 at about 1.5×. Lever (i), a reusing integrator, is `FBDF` once the upstream fix is released (MF, §14): with an in-process fix it ran V-BO-01 at 0.56× modeled and 0.88× wall (Appendix C.1), and if item 8 passes under it the levers (ii) to (v) leave the phase gate. Without a release, R40 stands as accepted |
+| R41 | The `N²` gain on a long single-material layer with deactivation on: `ale_darcy` at 100 cells takes 1,623 steps against 470 for the band alone (`Rodas5P`) | W5, MF, item 8 | Measured at W5 and under `FBDF`. If it persists, the lever is the gain on long layers, which costs V-BO-01 its single invocation if weakened uniformly; the owner's decision |
+| R42 | No OrdinaryDiffEqBDF release contains the upstream fix by M6b's end | MF | Question 17: M6c waits at most a week, then Phase 2 closes on `Rodas5P` and MF follows the release |
+| R43 | The released fix chooses `dt` and the order after a domain rejection differently from the review's in-process fix, and `FBDF`'s advantage shrinks | MF, item 8 | W6's pre-release measurement on #4662's merge commit, and on #4695's if it merges |
+| R44 | `FBDF`'s error is not monotone in the tolerance, so an unmeasured deck can show a gap: V-BO-03, the 120- and 240-cell rungs, the enthalpy form, or item 9's smoothness under a variable-order method | MF, M6c | MF's runs before the default is committed; a deck that fails stops the milestone for the owner |
+| R45 | The dependency update moves OrdinaryDiffEqCore and with it the old core's `KenCarp4` bits | MF | C88; §14.6 row 12 |
+| R46 | Without the reactivity switch, item 1's merged-fraction clause keeps less margin: 4.08 % at 60 cells and 4.25 % at 240, against 5 `ε_m` | W1, M6c | Recorded per run. A run above 5 `ε_m` is an item 1 finding, and the band is not widened |
 
 ---
 
@@ -470,18 +480,19 @@ As plan §9.3: one theme per commit; replaced rules deleted; no dates or histori
 
 | Decision | Phase 2 default | Alternative | Decided by | When |
 |---|---|---|---|---|
-| The correction | `EquidistributionCorrection` with the layer time `τ` of §3.2, `α = 1`, `β = 0`, activation 0.3/0.1, `ε_band = 0.1`, selected per solve by the `correction` keyword (the burnout cases pass it; `setup`'s default is `NoCorrection`, since a correction object present but inactive still widens the pattern to 30 colors, C43, C56) | `c = 0` plus the block-and-band rule and the slot-shifting interior merge (item 11); or the correction as `setup`'s default, decided at the cutover | §7.3 items 1, 2 and 8 on the matrix | M4 (§7.4), M6 |
+| The correction | `EquidistributionCorrection` with the layer time `τ` of §3.2, `α = 1`, `β = 0`, activation 0.3/0.1, `ε_band = 0.1`, installed by `setup` when the mesh moves, deactivation is on and a layer can vanish (C87), with the composition interfaces Lagrangian (C85) and zero gain on a layer that cannot vanish; `NoCorrection` otherwise. It is the primary burnout path because without it a sub-surface cell crosses the threshold first wherever the reaction zone spans more than one cell, and the solve ends `:interior` (Appendix C.2); smooth event times come second, and no current fit consumes the gradients | `c = 0` plus the block-and-band rule and the slot-shifting interior merge (item 11) | §7.3 items 1, 2, 5 and 8 on the matrix; the decision review (§14) | M4 (§7.4), M6a |
 | `τ` (layer time, `N²` form) | set by the ladder at constant `τ` (the prototype's 720 s at 60 cells) | the prototype's per-cell form | the `τ` row of item 1, A.10 and R25's tail diagnostic | M4 |
 | The band | 0.1 (absolute) | 0.03 to 0.3 | item 1's merged-band fractions | M4 |
 | `ε_m` | 1e-2 | 3e-3, 3e-2 | item 1 across thresholds; the Phase 1 V-CPL-02 numbers | M4 |
 | The monitor's mass term `β` (normalized) | 0 | 1 | V-BO-07 (mixed composition, the only deck where it acts) | M6 |
-| The reactivity switch | on, 1.5 `ε_m` (C27) | off | item 2 and the tail diagnostic | M4 |
-| Event location | off | on | item 7 | M5 |
+| The reactivity switch | deleted (§14, W1): it saved no step on any deck and cost accuracy (Appendix C.4) | — | the decision review | M6a |
+| Event location | on (D78) | off | item 7 | M5 |
 | Restart after an event | solver-chosen | forced `DT_AFTER_EVENT` | item 7's ledger quantities against the 30 % cost (A.6) | M5 |
 | The face temperature of the relative energy flux | upwind-biased (C33) | centred | only if a burnout QoI's convergence needs it | M4 |
 | Energy state for `c ≠ 0` | temperature | enthalpy | item 3 | M4 |
 | The wall-time clause | the same order as the old core: ratio ≤ 1.5 at matched accuracy | 1.5 to 2 the owner's call; above 2 the phase stops | item 8 at M2 and M4 | M2, M4 |
-| The burnout path's integrator | `Rodas5P` with the exact Jacobian every step | a Newton-based integrator with Jacobian reuse once its behaviour on the new residual is understood, or a Rosenbrock-W method with a reuse policy | M2's diagnosis and the cost breakdown of §5.7 | M2 |
+| The integrator | `Rodas5P` with the exact Jacobian every step until an OrdinaryDiffEqBDF release contains the fix of the domain-rejection bug (SciML/OrdinaryDiffEq.jl#4687; #4662, #4695); then `FBDF`, flag cleared, heuristic restart, for every deck, with `rodas5p_policy` kept for V-MMS-02/03 | `Rodas5P` kept if no release comes (question 17) | the decision review (Appendix C.1); MF's runs on the release | MF |
+| The gas rows' absolute tolerance | `reltol · ε_m · mˢᵢ(0)`, the solid's scale (C69) until MF; then `reltol · ρ_g(T₀ᵢ, 1 atm) · V₀ᵢ`, the gas of a fully porous cell at ambient (C89) | — | the decision review (Appendix C.1) | MF |
 
 ---
 
@@ -493,15 +504,15 @@ As plan §9.3: one theme per commit; replaced rules deleted; no dates or histori
 
 **What it costs.** Eleven and a half to fourteen and a half weeks of one developer, the review and a performance milestone included (the design said 4 to 6); thirteen to sixteen if the correction fails its gate and the slot-shifting merge is built; seventeen new tests, three new cases, four new gate scripts and two extended; no change to the old core beyond the clamp keyword (default unchanged) and an optional material field.
 
-**What its gate proves.** One invocation per layer across grids, thresholds and monitor settings, with a graded grid, a heterogeneous layer and a localized layer among the checks; the peak and its timing against the old core; closed ledgers; admissibility at every event; the charring decks and the Douglas fir deck bit-identical without a correction; constraint residuals and domain rejections; event times tied to the tolerance; wall time at matched accuracy against the old core, reported with its spread; smooth gradients through the one event; the minimum cell size.
+**What its gate proves.** One invocation per layer across grids, thresholds and monitor settings, with a graded grid, a heterogeneous layer and a localized layer among the checks; the peak and its timing against the old core; closed ledgers; admissibility at every event; the charring decks and the Douglas fir deck bit-identical without a correction; constraint residuals and domain rejections; event times tied to the tolerance; wall time at matched accuracy against the old core, reported with its spread; smooth event-timed finite differences through the one event, a property the correction delivers rather than its reason (§10); the minimum cell size.
 
-**What remains open after it.** The burnout path's last factor of about 1.5× against the old core, which M2 left with the owner's acceptance and the levers of §12.4 carried to the phase gate (R40); the interior merge on a moving mesh at `c = 0` (built only as the fallback); the design's items for later phases (radial Beer–Lambert, P1, the variable cross section's fate, multi-D deactivation by element death); the cutover's end-to-end comparison on the real wood decks, for which the Douglas fir deck now runs on the new core.
+**What remains open after it.** The burnout path's last factor of about 1.5× against the old core, which M2 left with the owner's acceptance and which `FBDF` closes on the decks measured once the upstream fix of its domain-rejection bug is released (R40, MF in §14); without the release the levers of §12.4 stay carried; the interior merge on a moving mesh at `c = 0` (built only as the fallback); the design's items for later phases (radial Beer–Lambert, P1, the variable cross section's fate, multi-D deactivation by element death); the cutover's end-to-end comparison on the real wood decks, for which the Douglas fir deck now runs on the new core.
 
 ---
 
 ## 12. Implementation status
 
-Branch `mesh-framework-phase2`, draft pull request #14 against `mesh-framework-phase1`. M0 to M5 are done, M4 closed on the owner's decisions of §12.4. Departures continue the series at D53, conflicts at C57; this section records each milestone's commits and gate evidence as plan §12.1 did.
+Branch `mesh-framework-phase2`, draft pull request #14 against `mesh-framework-phase1`. M0 to M5 are done, M4 closed on the owner's decisions of §12.4. The decision review's implementation (§14) restructures M6 into M6a to M6c, with MF on the upstream release. Departures continue the series at D53, conflicts at C57; this section records each milestone's commits and gate evidence as plan §12.1 did.
 
 ### 12.1 Milestones
 
@@ -532,7 +543,7 @@ Branch `mesh-framework-phase2`, draft pull request #14 against `mesh-framework-p
 - **D66. Before a cell thins below `r_hi` the correction adds exact zeros.** The activation is zero at and above `r_hi h₀` without evaluating its logarithm (the smoothstep's value there), a node whose activation is zero gets `c = 0` with zero partials, and the relative-flux kernel skips a face whose relative velocity is exactly zero (the prototype's skip, D59). Until the first activation the residual is therefore the `NoCorrection` residual; only the pattern and its factorization differ (C71's resolution). The skip applies under a prescribed velocity too (the end nodes of the prescribed decks, where `w = 0`), and changes no digest there.
 - **D67. Under the equidistribution correction the cell rows do not read the node velocities.** The relative-flux kernel reads `ds.c`, which reads positions and masses there; only under a prescribed velocity is `c` the node velocity, so the cell rows' two velocity entries are kept for `PrescribedCorrection` only. The count is `5NC + 11 + 2·bl + 11·χ`, two below the formula of design §3.7 that C43 and C66 measured on the prototype (which kept the entries): 28 on V-BO-01 against its 30, the coloring optimal (the largest row) at 6 to 25 cells, and the same with and without the monitor's mass term. The balance rows' reach of §3.6 (the positions of nodes `k − 1 … k + 2`, the masses of cells `k − 1 … k + 1` only with the mass term, no energy) lies inside the cell rows' and adds no color.
 - **D68. The outputs.** `CoreSolution.correction_velocity` (nodes × saved times, zero without a correction, `0 × 0` on a fixed mesh, `NaN` beyond the outermost live node), `extras.min_cell_thickness` (the thinnest live cell at each saved time), `SolverStatistics.invocations` (the deactivation invocations, zero without events), and a dead cell's concentrations `NaN` (its masses stay zero). The smallest cell between saved times, which §7.3 item 10 bounds, is not a statistic: M4's `burnout_ladder.jl` records it at every step, as the prototype's recorder did.
-- **D69. The material's residual-thickness fraction is not added (D57, question 4).** Its reader would be the activation's default thresholds, and the rule from a residual fraction `f` to `(r_hi, r_lo)` is in neither this plan nor the answers. Proposed: `r_hi = min(0.3, f/2)`, `r_lo = r_hi/3`, so that a layer which keeps `f` of its thickness never activates. With the thresholds a keyword of the correction (D65) a deck can set them now, and no old-core code changes in M3. *Owner:* the rule, or the field dropped.
+- **D69. The material's residual-thickness fraction is not added (D57, question 4).** Its reader would be the activation's default thresholds, and the rule from a residual fraction `f` to `(r_hi, r_lo)` is in neither this plan nor the answers. Proposed: `r_hi = min(0.3, f/2)`, `r_lo = r_hi/3`, so that a layer which keeps `f` of its thickness never activates. With the thresholds a keyword of the correction (D65) a deck can set them now, and no old-core code changes in M3. *Owner:* the field is dropped (§14): keeping the correction off cells that cannot vanish is the installation rule's job (C87), and the rule proposed here gives `r_hi = 0` on a non-charring layer, which turns the correction off where it is needed (Appendix C.3).
 - **D70. The prototype runs on the closure's correction field until M4.** Its velocity-row and consistent-sweep overrides dispatch on `NoCorrection` and its pattern override reads `cl.correction` (three signatures; nothing else changed). §9.2 deletes `common.jl` and `run.jl` when M3 lands, but `burnout_timing.jl` still includes `common.jl`, and M4 switches it to the package's correction, so both files go at M4.
 - **D71. Item 6 is measured on one trajectory.** §7.3 item 6 asks for the domain rejections before and after C52 on the same commit; C52's scale is unconditional, and a second scale in the package would be a legacy mode. `burnout_ladder.jl` evaluates the residual at every accepted state, before the deactivation event of its step, and records the largest scaled residual under C52's scale (checked against `Integration.constraint_residual` at every state: equal to the last bit) and under Phase 1's, which omits the sweep of the node corrections, with the number of accepted states Phase 1's scale would have rejected; the domain test's rejections are C52's. An accepted state above one under Phase 1's scale is a step C52 kept that Phase 1 would have refused; none is one, so C52 removed no rejection on any run, as C67 found on the prototype.
 - **D72. The surface QoI counts accepted states.** The re-pin of question 8 asks for "a count of clamped trial iterates". On a trial state the clamp is D55's purpose and a count of it would count Rosenbrock stages; the case's recorder instead evaluates the residual at every accepted state and counts the live boundary faces whose surface balance did not converge or ended where the trial clamp departs from the identity. No package counter is added. The QoI replaces the warning count on V-BO-02 as well, where it was also trivially zero on the new core.
@@ -540,7 +551,7 @@ Branch `mesh-framework-phase2`, draft pull request #14 against `mesh-framework-p
 - **D74. `burnout_timing.jl` on the package's correction.** V-BO-01, 03 and 04 at 30, 60 and 120 cells, each case's tolerance its old default (reltol 1e-7 on V-BO-04); V-BO-04 stays at its initial temperature, so it is matched on the window RMS of its thickness relative to the reference's; the cost anatomy on V-BO-01 at 60 cells only. The inactive correction: the moving audit decks and V-CPL-02/03 without a correction and with an `EquidistributionCorrection()` installed, at equal tolerance, the old core beside. The prototype's `common.jl` and `run.jl` are deleted (D70).
 - **D75. V-BO-04's energy ledger is closed over each core's own enthalpy change.** The deck is adiabatic, so the integrated boundary heat that normalizes V-CPL-06's closures is zero; the old core's budget is V-CPL-06b's (its ledger solve takes the gas index and the heat capacities), over 0 to 290 s without deactivation. The fixed-step refinement uses steps of 0.1, 0.05 and 0.025 s: at 0.2 s and above the gas venting at the start of the burn drives the gas masses near the top negative, which a fixed step cannot reject, and the solve diverges.
 - **D76. A located event widens the threshold by the relative tolerance (C81).** §3.5 passes the located cell to `deactivate!`, non-strict at the root. `deactivate!` takes a `slack` instead, which widens its threshold and band tests to `1 + slack` times `ε_m` and `ε_band`; the end-of-step event passes zero (the strict test, bit-identical), a located event the solve's `reltol`. At the root the crossing cell holds exactly its threshold and goes, and with it every cell within the relative tolerance of its own: the mass rows' absolute tolerance is `reltol · ε_m · mˢᵢ(0)`, so these are the cells whose crossing the solve does not resolve from the located one. The margin is `(m − ε_m m_ref)/(ε_m m_ref)` (`threshold_margin`) rather than `m/(ε_m m_ref) − 1`, so that its sign is exactly the threshold test's; the callback needs no crossing cell.
-- **D77. Item 7 measures invocation times, and a single invocation against the saved times.** V-BO-01 and V-BO-04 deactivate in one invocation of 60 and 39 events at one time, so the median interval between events is undefined. `case_accuracy.jl` compares the invocations' times, and a case with a single invocation divides its shift by the median interval between the reference's saved times (0.5 s on V-BO-01, 2 s on V-BO-04), where its quantities are read; the end-of-step shift is then 0.22 and 0.41 of it on V-BO-01 (temperature and enthalpy forms) and 0.13 and 0.16 on V-BO-04, the located shift 6.0e-3 and 5.8e-6, and 1.2e-5 and 5.2e-6. The criterion is otherwise §7.3 item 7's, and the Phase 1 budget of ten times reltol is gone from the script.
+- **D77. Item 7 measures invocation times, and a single invocation against the saved times.** V-BO-01 and V-BO-04 deactivate in one invocation of 60 and 39 events at one time, so the median interval between events is undefined. `case_accuracy.jl` compares the invocations' times, and a case with a single invocation divides its shift by the median interval between the reference's saved times (0.5 s on V-BO-01, 2 s on V-BO-04), where its quantities are read; the end-of-step shift is then 0.22 and 0.41 of it on V-BO-01 (temperature and enthalpy forms) and 0.13 and 0.16 on V-BO-04, the located shift 6.0e-3 and 5.8e-6, and 1.2e-5 and 5.2e-6. The criterion is otherwise §7.3 item 7's, and the Phase 1 budget of ten times reltol is gone from the script. *Owner:* kept (§14.8, question 22).
 - **D78. Location by default, and V-BO-04's event QoI re-pinned.** Item 7 passes on every deactivating case, so by question 5 `located_events` defaults to true; `located_events = false` leaves the end-of-step event alone. Decks without deactivation build no event callback and do not move. V-BO-04's QoI on the event's delay behind the exact crossing (C57) was 1e-2, observed 6.0e-3, the event following the step that crossed; the located event falls on the crossing to 5.2e-8 (temperature form) and 2.3e-8 (enthalpy form) of its time, so the QoI becomes the event located at the crossing, at 1e-6. The new digests (temperature form, then enthalpy): V-BO-01 `7ddba4f8a126a5da` and `6d52c6ea828d4542`, V-BO-02 `c34a74b6f1ac867e` and `bc673700292dd5ab`, V-BO-04 `44b093ae593006c1` and `a988f495364702ee`, V-CPL-02 `b40f4e3e962f0964` and `2aefdccc711e5d68`, V-CPL-02b `49f04b6bd696c46d` and `5fa83bbb82e204e0`. The ladder and timing tables of M4 were measured with the end-of-step event; M6 re-measures them.
 - **D79. V-BO-04's ledger across its event.** The inventories are summed over the live cells (the extended energy, the inventory itself in the enthalpy form, and the mass; a dead cell's temperature is NaN), the boundary terms are taken at the live boundary faces (`live_face`), each invocation's lost enthalpy, regularization and lost masses leave the inventories at the event, and the created volume, which enters neither closure, is reported. The trapezoid needs the integrand just before the event, which the step that ends there cannot give (C83), so a continuous probe located where the smallest margin is 1e-8 adds that node. The old core's budget does not park cells, so its closure before its first park, 7.1e-5, is the comparison of item 3.
 - **D80. The heuristic restart is kept (question 7).** On V-BO-01 at 60 cells with the correction (the case's tolerances), with location off and on: the solver-chosen restart 1,118 and 1,119 accepted steps with 244 rejections, the heuristic and the forced `DT_AFTER_EVENT` restarts 1,126 and 1,127 with 225 and 224, every QoI passing for all six, the mass ledger 8.1e-7 off and 7.2e-5 on for all three (the event falls at 358.71 s or 358.40 s between the 0.5 s saved times the ledger's trapezoid reads); in the enthalpy form 1,581 to 1,589 steps, ledger 4.6e-5 and 7.3e-5. The layer goes in one invocation and only the Kaowool remains after it, so the restart moves nothing a QoI reads, and D61's default stands. Scratch measurement; wall times at a load of 15 to 20 do not separate the policies.
@@ -570,11 +581,11 @@ Branch `mesh-framework-phase2`, draft pull request #14 against `mesh-framework-p
 - **C77. Item 2's curve criterion measures the burnout instant, which neither core resolves to 3 %.** Over the saved times from the old core's peak on, every V-BO-01 run differs from the old core at its resolution by 7.2 to 39.5 % of the peak, always between 359.0 and 365.0 s, and the old core differs from itself at twice the cells by 18.4 % (30 against 60) and 6.8 % (60 against 120), at 365.0 s; V-BO-03, which does not burn out by its end, meets it (0.025 to 0.12 %). Ending the window earlier (scratch `curve_window.jl`, temperature form, `ε_m = 1e-2`): up to the old core's burnout time the new core differs by 19.9, 13.2 and 8.1 % at 30, 60 and 120 cells, at 359.0 to 360.0 s, the layer's invocation (the old core against itself 8.5, 1.8 and 1.8 %); up to 5 s before it, by 0.56, 0.56 and 1.20 % (the old core against itself 2.4, 1.6 and 0.7 %). Before the merge the two cores' rates agree as closely as the old core agrees with its own refinement; the difference is the last 5 s, where the new core gasifies the layer's last 2 % in one burst after its invocation and the old core in sixty parks. *Proposed:* restate the criterion over the saved times from the old core's peak to 5 s before its burnout time (pass at 3 %), and judge the burst by item 2's peak and its time, which see it whenever it exceeds the main peak (C76). *Owner.*
 - **C78. At `ε_m = 3e-2` the layer deactivates in two invocations.** With the band at 0.1 (3.3 `ε_m`) the first cell crosses the threshold at 309 to 312 s, before the main peak, while most of the layer is still above 10 % of its mass: the first invocation takes 17, 35 and 69 of 30, 60 and 120 cells (the largest merged fraction 9.0 to 9.95 %, the band's limit, within 5 `ε_m`), into a PMMA receiver at the film's temperature (no temperature part, `Rc/R0` 1.04), and the second takes the rest at about 359 s. Every other QoI passes at 60 and 120 cells; at 30 cells the second invocation's burst fails the peak and `t_peak` (38.66 at 360.5 s). The prototype's two invocations at 3e-2 (A.4) were the same row with a band of 10 `ε_m`. `τ = 3600` s also ends in two (34 cells at 302 s, 26 at the end), the layer under-relaxed as in A.10. Item 1 forbids widening the band on the ladder, and a shorter `τ` synchronizes harder at the cost of `C76`'s switch release. *Owner:* §7.4, §12.4.
 - **C79. In the enthalpy form a solve depends on evaluations outside the integrator.** `derive!` starts each cell's caloric inversion from `T_warm`, the temperatures of the latest plain evaluation, which the workspace shares (Phase 1's warm start), and the inversion stops within its round-off of the root, so an evaluation the integrator did not make, a step recorder's, moves the later inversions and the trajectory at round-off. V-BO-01, 02 and 03 at 60 cells through the case's solve, whose recorder evaluates every accepted state, against the same solves without it: 1,571, 2,794 and 1,576 steps against 1,589, 2,822 and 1,544, every QoI passing either way at the same values to their printed digits (V-BO-01's peak 32.391, ledger 2.2e-5); the temperature form, whose temperature is a state, gives equal digests. M3's enthalpy counts came through a recorder as well. Consequences: a bit-identity check in the enthalpy form compares solves with the same evaluations, and the ladder's enthalpy wall times are of plain solves that part from the instrumented ones at round-off. *Resolution taken:* none; the inversion's result is its root to round-off. *Owner:* whether the inversion should start from a guess the state alone determines (the bracket's linear estimate), at the cost of its iterations, so that the enthalpy form, too, is a function of the state.
-- **C80. The correction is active on decks items 5 and 8 take to leave it inactive.** Installed at its defaults (`burnout_timing.md`, reltol 1e-6 on the audit decks, the case's on V-CPL-02/03), it stays at exactly zero on `ale` at 25 cells and on V-CPL-03, whose solves are then identical to those without it at 1.21 and 1.20× the time (the wider pattern), but activates on `ale` at 100 cells (largest correction velocity 1.9e-6 m/s, the temperatures moved by up to 0.48 K, 71 steps against 54), on `ale_darcy` at 25 and 100 cells (1.4e-5 and 1.6e-5 m/s, 5.2 and 4.6 K, 156 steps against 100 and 430 against 102, the last 5.2× the time) and on V-CPL-02 (5.7e-4 m/s, 15.8 K, 1,122 steps against 2,049, 1.14× the time). Each of these decks gasifies its surface cells entirely (the PMMA and the audit wood leave no residue; Landau's ablation removes the cell), so its surface cells thin below `r_hi = 0.3` of their initial thickness and the correction, one layer over the whole slab, equidistributes them as designed. Item 8's "present but inactive" cost is therefore measured where it is inactive, and item 5's expectation that the largest activation stays exactly zero holds for V-CPL-03 and not for V-CPL-02 (V-CPL-02b, V-CPL-06's column, V-RX-02d, V-HC-05, V-RAD-01 and the Douglas fir deck are M6's). The default correction of `setup` is `NoCorrection` (§10), so no case changes. *Owner:* whether item 5 runs the vanishing decks with the correction and expects its activation, and the thresholds from a material's residual fraction (D69), which would keep the correction off a char former's cells.
+- **C80. The correction is active on decks items 5 and 8 take to leave it inactive.** Installed at its defaults (`burnout_timing.md`, reltol 1e-6 on the audit decks, the case's on V-CPL-02/03), it stays at exactly zero on `ale` at 25 cells and on V-CPL-03, whose solves are then identical to those without it at 1.21 and 1.20× the time (the wider pattern), but activates on `ale` at 100 cells (largest correction velocity 1.9e-6 m/s, the temperatures moved by up to 0.48 K, 71 steps against 54), on `ale_darcy` at 25 and 100 cells (1.4e-5 and 1.6e-5 m/s, 5.2 and 4.6 K, 156 steps against 100 and 430 against 102, the last 5.2× the time) and on V-CPL-02 (5.7e-4 m/s, 15.8 K, 1,122 steps against 2,049, 1.14× the time). Each of these decks gasifies its surface cells entirely (the PMMA and the audit wood leave no residue; Landau's ablation removes the cell), so its surface cells thin below `r_hi = 0.3` of their initial thickness and the correction, one layer over the whole slab, equidistributes them as designed. Item 8's "present but inactive" cost is therefore measured where it is inactive, and item 5's expectation that the largest activation stays exactly zero holds for V-CPL-03 and not for V-CPL-02 (V-CPL-02b, V-CPL-06's column, V-RX-02d, V-HC-05, V-RAD-01 and the Douglas fir deck are M6's). The default correction of `setup` is `NoCorrection` (§10), so no case changes. *Owner:* whether item 5 runs the vanishing decks with the correction and expects its activation, and the thresholds from a material's residual fraction (D69), which would keep the correction off a char former's cells. *Owner (§14):* the temperature differences above compare cells by index after the mesh has moved and are not errors; against references at four times the cells the correction is neutral or better (Appendix C.3). Item 5 splits by installation (§7.3): the rule installs the correction on the vanishing decks with deactivation, where its activation is recorded, and D69 is dropped.
 - **C81. Passing only the located cell ends V-BO-04 `:interior`.** V-BO-04 runs without a correction, so its band is `ε_m`. Its forty identical cells cross within round-off of one another; the margin's root falls on whichever crosses first, an interior cell, while the cells outward of it sit about 1e-15 above their thresholds, so the run from the exposed side is empty and the crossing cell lies inward of live cells: the solve ended `:interior` at 465.49 s with no event. The end-of-step event never meets this, since by a step's end every cell is below. *Resolution taken:* D76.
 - **C82. Location cannot see a margin that is already zero.** DiffEqBase fires `affect_neg!` only when the condition's previous sign is positive, so a cell whose margin is exactly zero at the start of a step, as a root non-strictly at the threshold would leave it, is never located (the prototype lost 21 of 60 events that way without its safety net, A.5). D76's slack takes the crossing cell at every root, and the end-of-step event takes a cell that starts a step at its threshold; `test_deactivation.jl` starts a solve so.
 - **C83. After a located event the step's interpolant is gone.** `change_t_via_interpolation!` moves the step's end to the root and its `dt` with it before the event modifies the state, so neither the post-event state nor the interpolant gives the integrand just before the event. A ledger that integrates over accepted steps takes that node itself (D79).
-- **C84. Two of item 5's identity decks deactivate.** V-CPL-02 and 02b move with location on by default (D78); with `located_events = false` they reproduce the reference digests (`5e0df61c6838c7e5`, `79a0ab788c4427ee`), and the other six decks build no event callback. *Resolution taken:* none; `burnout_identity.jl` keeps its reference. *Owner:* whether item 5 re-records those two digests at the package defaults (D62's precedent, the end-of-step digests kept here as the link to Phase 1), or the identity script solves them with location off.
+- **C84. Two of item 5's identity decks deactivate.** V-CPL-02 and 02b move with location on by default (D78); with `located_events = false` they reproduce the reference digests (`5e0df61c6838c7e5`, `79a0ab788c4427ee`), and the other six decks build no event callback. *Resolution taken:* none; `burnout_identity.jl` keeps its reference. *Owner:* whether item 5 re-records those two digests at the package defaults (D62's precedent, the end-of-step digests kept here as the link to Phase 1), or the identity script solves them with location off. *Owner:* re-recorded at the package defaults when W1 deletes the switch (§14.8, question 21).
 
 ### 12.4 Next
 
@@ -587,15 +598,19 @@ M2 is closed: with the owner's decisions below in place (D61 to D64), V-BO-01 ru
 **M4's measurements are taken** (§12.1). V-BO-01 ends in one invocation at `ε_m` of 3e-3 and 1e-2 at 60 and 120 cells with every QoI of item 2 in both forms, and in two at 3e-2 (C78), so §7.4's condition fails on the 3e-2 row alone, and the phase waits for the owner's decision there. The decisions, with recommendations:
 
 1. **§7.4 and the 3e-2 row (C78).** *Recommendation:* M5 to M7 proceed, the 3e-2 row recorded as an owner exception of item 1 (two invocations; every other QoI passes at 60 and 120 cells). The default threshold and 3e-3 pass, and tuning within M4's allowance has no candidate: item 1 forbids widening the band on the ladder, a shorter `τ` deepens the switch's release (C76: 360 s fails `t_peak`), and moving the activation acts on every row. The fallback (item 11) would replace a path that passes at the default with one built on the unverified merge of C54. *Changes:* with "the fallback", C54's merge (about one and a half weeks) before M5. *Owner:* as recommended; the 3e-2 row is an owner exception of item 1.
-2. **The reactivity switch (question 12, C76).** *Recommendation:* keep it. The burst is the merged temperature, not the switch (its release ×1.03 to 1.07 at the default `τ`); without it no QoI of the ladder changes its verdict and V-BO-01 at 60 cells takes the same 1,126 steps; and V-CPL-02/02b are pinned with it (C27). *Changes:* with "drop it", `switch_width = 0` under an equidistribution correction and C27's V-CPL-02 numbers re-run. *Owner:* as recommended; the switch stays.
-3. **The 30-cell row (question 8, C76).** *Recommendation:* an owner exception on the peak and its time at 30 cells for `ε_m` of 1e-2 and 3e-2, the mechanism named: the merged residue takes the substrate cell's temperature in proportion to that cell's share of the merged heat capacity, which halves with the cell. The main peak itself is right at 30 cells (32.248 at 333.0 s at 3e-3, the old core's 32.254 at 333.0 s). *Changes:* with "merge into the layer", a layer's last invocation merges into its innermost cell, which removes the burst and adds a second invocation per layer to item 1. *Owner:* as recommended; the peak and its time at 30 cells for `ε_m` of 1e-2 and 3e-2 are an owner exception.
-4. **The curve criterion (C77).** *Recommendation:* restate it over the saved times from the old core's peak to 5 s before its burnout time, at 3 % (0.56 to 1.20 % measured at `ε_m = 1e-2`), the burst judged by item 2's peak and its time. *Changes:* §7.3 item 2 and `burnout_ladder.jl`'s curve measure. *Owner:* as recommended.
+2. **The reactivity switch (question 12, C76).** *Recommendation:* keep it. The burst is the merged temperature, not the switch (its release ×1.03 to 1.07 at the default `τ`); without it no QoI of the ladder changes its verdict and V-BO-01 at 60 cells takes the same 1,126 steps; and V-CPL-02/02b are pinned with it (C27). *Changes:* with "drop it", `switch_width = 0` under an equidistribution correction and C27's V-CPL-02 numbers re-run. *Owner:* as recommended; the switch stays. *Superseded by the decision review (§14):* the switch is deleted (W1).
+3. **The 30-cell row (question 8, C76).** *Recommendation:* an owner exception on the peak and its time at 30 cells for `ε_m` of 1e-2 and 3e-2, the mechanism named: the merged residue takes the substrate cell's temperature in proportion to that cell's share of the merged heat capacity, which halves with the cell. The main peak itself is right at 30 cells (32.248 at 333.0 s at 3e-3, the old core's 32.254 at 333.0 s). *Changes:* with "merge into the layer", a layer's last invocation merges into its innermost cell, which removes the burst and adds a second invocation per layer to item 1. *Owner:* as recommended; the peak and its time at 30 cells for `ε_m` of 1e-2 and 3e-2 are an owner exception. *Superseded by the decision review (§14):* the exception is withdrawn; the peak is read on the main peak (C86) and the burst is judged by item 2's refinement criteria (W4).
+4. **The curve criterion (C77).** *Recommendation:* restate it over the saved times from the old core's peak to 5 s before its burnout time, at 3 % (0.56 to 1.20 % measured at `ε_m = 1e-2`), the burst judged by item 2's peak and its time. *Changes:* §7.3 item 2 and `burnout_ladder.jl`'s curve measure. *Owner:* as recommended. *Superseded by the decision review (§14):* the curve criterion is deleted, and the burst is judged by item 2's refinement criteria on both cores (W4).
 5. **Item 8.** *Recommendation:* re-run `burnout_timing.jl` on a quiet machine before deciding it. Measured at a load of 15 to 16 it reads V-BO-01 at 1.16 to 2.28× and V-BO-03 at 1.45 to 2.74× the old core at matched accuracy, V-BO-04 at 0.56 to 0.62×, and two runs at that load differ by up to 0.9 in a ratio at 30 and 60 cells; at 120 cells the target, the old core's window RMS at reltol 1e-6, is no smaller than at 1e-5 (0.0087 K at both, C70's floor) and the new core reaches it at 3e-6 (0.022 K at 1e-5), and V-BO-03, whose layer stays activated to its end (C75), costs more than V-BO-01. Above 1.5× on a quiet machine, R40's levers come first. *Changes:* whether R40's levers move from the phase gate to before M5. *Owner:* M5 proceeds; `burnout_timing.jl` is re-run on a quiet machine by M6's item 8, and R40's levers come first only if it reads above 1.5×.
 6. **For M6:** whether V-BO-03 runs long enough for item 1 to see its layer's invocation (C75); whether the caloric inversion should start from a guess the state alone determines (C79); V-CPL-02 under the correction (C80), which item 5 asks to stay inactive. *Owner:* V-BO-03's ladder rows run past 500 s until its layer's invocation, the case and its pinned QoIs unchanged; the warm start is kept (C79); item 5 splits by activation, asserting bit-identity and an activation of exactly zero where the correction stays inactive, and on the vanishing decks recording the activation and asserting that their QoIs pass.
 
 **M5 is done** (§12.1): event location behind `located_events`, on by default since item 7 passes on every deactivating case (D78); the located crossing widens the threshold by the relative tolerance (D76, C81); V-BO-04's ledger closes across its event (D79); the heuristic restart stays (D80). The owner's questions from M5: item 5's identity decks that deactivate (C84), and D77's interval for a single invocation.
 
-**M6, the gate's checks** (§7), is next: V-BO-06, 07 and 08, V-BO-05 re-pinned and routed, the rest of item 1's matrix (V-BO-03's ladder rows past 500 s, §12.4 item 6), `burnout_gradients.jl`, item 5 with the owner's split of C80, the Douglas fir identity and timing, and item 8 on a quiet machine; the ladder and timing tables are re-measured with location on.
+**The decision review restructures M6** (§14). The owner accepted its six recommendations, and §14 plans their implementation. M6 becomes M6a (the review's changes), M6b (the gate's cases) and M6c (one measurement pass on the final defaults), with the `FBDF` switch (MF) between M6b and M6c once an OrdinaryDiffEqBDF release contains the upstream fix. *Owner:* §14 approved, questions 16 to 24 as recommended; M6a is under way. The old M6's items are all in it:
+- V-BO-05, 06, 07 and 08, and V-BO-03's rows past 500 s, in M6b;
+- `burnout_gradients.jl` in M6a (W3);
+- item 5's split, in M6a (W5) and M6c;
+- the Douglas fir identity and timing, and item 8 on a quiet machine, in M6c.
 
 The owner's questions from M3: the rule from a residual-thickness fraction to the activation's thresholds, or the field dropped (D69); whether to limit the relative fluxes' slope beside a boundary cell (C73; no run of M4's ladder ended in `DtLessThanMin`, so it did not show on the burnout decks); whether the kernel should take its upwind side from the value alone (C74).
 
@@ -615,7 +630,7 @@ Each with a recommendation and what the answer changes. Questions 1, 2, 4 and th
 1. **The interior policy on a moving mesh.** The block-and-band rule plus the correction is the primary path; the slot-shifting interior merge (C54, the old core's rule) is either insurance built now or the fallback built only if the correction fails its gate. *Recommendation:* the fallback only; the prototype carries V-BO-01, 03's deck and 04 without it, and it is a cross-cutting contract (every per-slot constant shifts) worth one and a half weeks. *Changes:* built now, M3 grows by one and a half weeks and the fallback of item 11 is already in hand; later, the schedule risk of §7.4 stays.
 2. **The band.** An absolute near-threshold mass fraction `ε_band` (default 0.1) or a multiple of `ε_m`. *Recommendation:* absolute, 0.1, set by the ladder (a multiple took cells at 29 % of their mass at `ε_m = 3e-2`, A.4; three thresholds leave cells behind at 60 cells, A.3). *Changes:* the parameter's name and default in `setup` and in the design errata (§7.2).
 3. **`τ`.** The layer's equidistribution time with the `N²` factor in the formula (§3.2), or the prototype's per-cell form. *Recommendation:* the layer time, a `setup` keyword whose default the ladder sets at constant `τ` across 30, 60 and 120 cells (the prototype's one-invocation run is `τ = 720` s at 60 cells, `T_sync` 73 s), with the heuristic that `T_sync = τ/π²` is at most a tenth of the layer's remaining life after full activation; the per-cell form makes `τ` mesh-dependent and is what produced the ladder's rows. *Changes:* R27 reduces to one physical ratio, `T_sync` against the layer's life, measured on V-BO-07 and V-BO-08.
-4. **Thresholds as material parameters** (design question 9). `setup` keywords with package defaults plus an optional `Material` residual-thickness fraction (additive to the old core, fingerprint-checked), or package constants. *Recommendation:* the keywords and the optional field, since a char former that keeps 20 % of its thickness must not activate and only the material knows that. *Changes:* with the field, M1 edits Materials and runs the fingerprint and the old core's `Pkg.test()`; without it, charring decks rely on the activation never reaching 30 % (true of the current decks) and a new material could activate wrongly.
+4. **Thresholds as material parameters** (design question 9). `setup` keywords with package defaults plus an optional `Material` residual-thickness fraction (additive to the old core, fingerprint-checked), or package constants. *Recommendation:* the keywords and the optional field, since a char former that keeps 20 % of its thickness must not activate and only the material knows that. *Changes:* with the field, M1 edits Materials and runs the fingerprint and the old core's `Pkg.test()`; without it, charring decks rely on the activation never reaching 30 % (true of the current decks) and a new material could activate wrongly. *Owner (§14):* the optional material field is dropped (D69); the thresholds stay keywords of the correction (D65).
 5. **Event location by default.** On (2 to 4 % of the solve; the event time tied to the tolerance, A.5) or off. *Recommendation:* on, if §7.3 item 7 passes with it; the discrete predicate stays as the safety net either way. *Changes:* the default of `located_events` and whether item 7's budget is met by the deactivating cases.
 6. **The wall-time clause.** As written (no worse than the old core) or an exception for Phase 2. *Owner's decision:* the burnout path must run within the same order as the old core or faster; a path that cannot is a bad sign for the architecture. Written into the plan as milestone M2 (§5.7, §7): the integrator diagnosis and the Jacobian levers first, measured at matched accuracy with a cost breakdown, a pass at 1.5×, the owner's call between 1.5 and 2×, and a stop above 2× for the owner's decision on the phase and the cutover. *Changes:* M2 precedes the correction's build; the estimate grows by two to three weeks; the rest of the phase depends on M2's gate.
 7. **The restart after an event** on deactivating solves. Solver-chosen (the default; V-BO-02's ledger quantity 1.5e-3 against C39's 3e-3) or forced `DT_AFTER_EVENT` (30 % more time, ledger 7.6e-5, A.6). *Recommendation:* keep solver-chosen and C39's tolerance; measure both on V-BO-01 with the correction at M5, and switch only if a QoI needs it. *Changes:* V-BO-02's ledger tolerance (back to 1e-3 under the forced restart) and the step budgets.
@@ -623,10 +638,354 @@ Each with a recommendation and what the answer changes. Questions 1, 2, 4 and th
 9. **The Douglas fir deck.** The both-cores comparison in Phase 2 or in Phase 3. *Recommendation:* Phase 2 runs it as the "charring deck identical" check (bit-identical with `NoCorrection`) and records both cores' times (A.8: 1.9× at equal tolerance, 49 colors); the matched-accuracy comparison on the real wood decks is the cutover's end-to-end table (design §6 Phase 3 item 6). *Changes:* whether M6 carries a matched-accuracy run of a 600 s deck (about a day of measurement) or Phase 3 does.
 10. **The accuracy-per-tolerance investigation** carried from gate item 2. Close it with A.7 and A.9 (no candidate meets the old core's error within 1.5× of its time on the moving-mesh deck; the tolerance weights are not a lever; `Rodas5Pe` is the closest on the Darcy and Eulerian decks), or spend more. *Recommendation:* close it and carry the exception to Phase 3, where the cutover decision weighs it. *Changes:* a week of M5 if the owner wants the Rosenbrock error estimators studied further.
 11. **The energy form for `c ≠ 0`.** Temperature (the gate's default) or the inventory form the design named for this work. *Recommendation:* temperature; the prototype's enthalpy run reproduces every QoI at 3 to 4× the time (A.4), and the ledgers close in both. *Changes:* which form the V-BO cases run in by default; the ladder runs both regardless.
-12. **The reactivity switch** (C27). Keep at 1.5 `ε_m`, drop it under an `EquidistributionCorrection`, or trigger the band at its onset. *Recommendation:* decide on R25's decomposition measurement at M4; the hypothesis is that the switch is the release part of the end-of-layer spike and is no longer needed once the band deactivates cells at or above `ε_m`. *Changes:* a `setup` keyword either way; with the switch off C27's V-CPL-02 numbers are re-run.
+12. **The reactivity switch** (C27). Keep at 1.5 `ε_m`, drop it under an `EquidistributionCorrection`, or trigger the band at its onset. *Recommendation:* decide on R25's decomposition measurement at M4; the hypothesis is that the switch is the release part of the end-of-layer spike and is no longer needed once the band deactivates cells at or above `ε_m`. *Changes:* a `setup` keyword either way; with the switch off C27's V-CPL-02 numbers are re-run. *Owner (§14):* deleted.
 13. **The design errata of §7.2.** Apply them to the design document in M0 (a design revision commit) or at the design's next revision. *Recommendation:* at the next revision, listed here, since the owner owns the design text.
 14. **Radial Beer–Lambert** (C37, carried open). *Recommendation:* deferred to Phase 4a, where the first radial case needs it; no burnout case is radial and `setup` refuses the combination (D45). *Changes:* nothing in Phase 2.
 15. **The Péclet weighting of the Darcy upwind** (C21). *Recommendation:* not in Phase 2: the default integrator has no Newton to fail at the kink, and no Phase 2 deck reverses its flow. *Changes:* a week of M6 if the owner wants it measured on the audit decks now.
+
+The questions raised by the decision review are §14.8's, numbered from 16.
+
+---
+
+## 14. Implementing the decision review
+
+The owner accepted the six recommendations of the decision review (`docs/Mesh_Framework_Decision_Review_2026-10-20.md`, with its evidence in `docs/refs/mesh_decision_review_2026-10-20/`; both are local and gitignored, and question 20 asks whether their tables join this plan as an appendix). The review measured `a5ffd9b`, and gate item 9 also `7ceaf74` with event location. The default path of `768944e` is `7ceaf74` with location on, since `0c2b887` changed only the default and V-BO-04's event QoI. *Owner:* approved, with questions 16 to 24 decided as recommended. W2 (§14.3) moved the restated gate items into §7.3, the decisions into §10 and the risks into §8, and the implementation is recorded in §12 from D81, with conflicts continuing after this section's at C90.
+
+### 14.1 What was accepted, and where it lands
+
+| Review item | Accepted | Workstream (§14.3) |
+|---|---|---|
+| 3. Integrator and gas tolerance | `FBDF` (flag cleared, heuristic restart) as the single default policy, with the gas mass rows at `reltol·ρ_g·V₀` (C69's `s = 1`). This happens only on a registered OrdinaryDiffEqBDF release that contains the upstream fix. Our in-process patch never ships, and every `FBDF` number is re-measured on the release with location on. | W6, MF |
+| 1. The correction | Kept as the primary burnout path for any deck whose layer can vanish. It is justified by robustness against interior crossings first and smooth event times second, with no claim of a current gradient consumer. | W2 |
+| 6. Activation and installation | The activation rule R0 is kept. The correction is installed automatically when the mesh moves, deactivation is on and a layer can vanish; a layer that cannot vanish gets zero gain. D69 is dropped, gate item 5 splits by installation, and C80's reading is corrected. | W5, W2 |
+| 4. The reactivity switch | Deleted, with V-BO-04 re-pinned to the plain law and the V-CPL-02/02b digests re-recorded. | W1 |
+| 5. The end-of-layer burst | M4 decisions 3 and 4 are replaced: the peak QoI is read on the main peak, and the burst is judged per step by refinement on both cores. The substrate receiver is kept. | W4 |
+| 2. Colored AD | Unchanged in 1D. Element-local Jacobians are decided at the start of the multi-D phase, and new kernels are written as pure local functions where that costs nothing. | W8 (deferred) |
+
+### 14.2 Conflicts found while planning
+
+**C85. Automatic installation needs the layer interfaces.** `setup` refuses an equidistribution correction on a deck whose interior node between two compositions is not a Lagrangian node (R32; `_require_layers`, `src/Integration/setup.jl:108-120`), and §3.9 left a composition rule to the cutover. With the correction installed by default, V-BO-01 solved without `lagrangian` would then be refused where it runs today. *Proposed:* where the rule installs the correction and `lagrangian` is not given, the composition interfaces (`_composition_interfaces`, `setup.jl:98-104`) become the Lagrangian nodes. An explicit list is still checked by `_require_layers`.
+
+**C86. "The main peak, before the layer's end" needs an operational definition.** The review's analysis read the main peak as the largest rate before 350 s, a constant of V-BO-01. *Proposed:* `_vbo_measures` (`test/verification/cases/V-BO-01.jl:279-300`) reads `peak` and `t_peak` over the saved times before the solve's last deactivation event, which is the new core's last invocation or the old core's last park, and over the whole run when there is none. The same definition holds on both cores and on every V-BO deck. At 30 cells it gives about 32.25 near 333 s on the new core (32.247 at 332.8 s per step), against the old core's 32.254 at 333.0 s.
+
+**C87. "A layer can vanish": one path or every path.** The review reads it as "its condensed components have a reaction path that leaves no condensed product". With competing reactions (wood to tar, and wood to char and gas), one all-gas path exists, but the char branch leaves residue whenever its rate is positive, which an Arrhenius rate always is. Read as "a path", the rule would install the correction on char formers, which is what D69 wanted to prevent. *Proposed:*
+- A condensed component vanishes when at least one reaction consumes it and every reaction that consumes it has only vanishing condensed products. This is a least fixpoint, so a cycle, an inert component or a terminal residue does not vanish.
+- A layer vanishes when every condensed component present in its cells at `t = 0` vanishes.
+- On every current deck the two readings agree: PMMA, the audit wood and the Landau solid vanish; Kaowool, V-RX-02d's residue and V-CPL-03's material do not.
+
+**C88. The compat floor and the old core's fingerprint.**
+- Pyrolysis reaches `FBDF` through the `OrdinaryDiffEq` umbrella (`src/Integration/Integration.jl:17`) and lists no OrdinaryDiffEqBDF dependency, so there is nothing to put a floor on. A dependency that the code never loads would also fail Aqua's stale-dependency check.
+- The OrdinaryDiffEqBDF release that carries the fix may require a newer OrdinaryDiffEqCore. OrdinaryDiffEqCore also drives the old core's `KenCarp4`, so its bits may move, while §2.1 holds the old core's fingerprint to 17bc477's digests.
+- *Proposed:* `Integration` imports `FBDF` from OrdinaryDiffEqBDF, which becomes a direct dependency with its floor. The manifests move OrdinaryDiffEqBDF alone where the resolver allows. If OrdinaryDiffEqCore moves too, the fingerprint is re-recorded with that reason after the old core's full `Pkg.test()` passes, and the re-pin is the owner's (§14.6, row 12).
+
+**C89. Gas scale (c): the review's wording against its measurement.** The review's prose calls (c) "the gas at 1 atm in its initial pore volume". The scale it measured is `reltol · P_REF · M_j / (R_GAS · T₀ᵢ) · V₀ᵢ`, with `V₀ᵢ` the cell's whole initial volume: C69's "fully porous cell" (the review's `item3_integrator/common.jl`). *Proposed:* implement what was measured, the cell's initial volume. Only that scale has evidence behind it.
+
+### 14.3 Workstreams, order and dependencies
+
+```
+W2 records ──┐
+W3 gradients (ported, checked on 768944e) ──┤
+W4 burst (ported, checked on 768944e) ──────┼──> W1 switch ──> W5 installation ──> M6b cases ──> [MF] ──> M6c measurement ──> M7
+W6 upstream: track; pre-release measurement on #4662's merge commit ───────────> release ──> MF
+W8 element-local: deferred to the multi-D phase
+```
+
+**Why this order.**
+- **W3 and W4 come before W1.** Their scripts are ports of the review's (gitignored) analysis, and `768944e` runs exactly the code the review measured with location on. Each port is therefore accepted when it reproduces the review's tables on `768944e`, before W1 changes the trajectories.
+- **W1 comes before W5.** Each re-record of V-CPL-02/02b is then verified against one change at a time. The re-record is a `--record` run, so the second one costs little.
+- **W5 comes before M6b.** The installation rule decides which cases activate, so V-BO-06/07/08 are written against it.
+- **MF comes before M6c when the release exists by M6b's end.** The measurement pass then runs once, on `FBDF`; otherwise question 17 applies.
+- **W6's pre-release measurement can run at any time.** It is machine time in a scratch environment, and running it during M6a informs question 17 early.
+
+**W2. Record the accepted decisions (plan only; first; one commit).**
+- **§7.3:** items 1, 2, 5, 8 and 9 are restated, and item 12 is added (§14.5).
+- **§10's rows:**
+  - the correction: installed by the rule;
+  - the reactivity switch: deleted;
+  - event location: on (D78);
+  - the burnout path's integrator: `FBDF` on a released fix, `Rodas5P` until then;
+  - a new row for the gas rows' tolerance.
+- **§11:** the gradient sentence becomes item 1's justification. Every current fit is derivative-free with `handle_depletion = false` (the white-pine inverse uses Nelder–Mead, the CAPA inverse uses BOBYQA or differential evolution, the sensitivities are Sobol/PCE), so item 9 is a gate property, not a consumer's requirement.
+- **The correction's justification** is recorded with its evidence. Without the correction:
+  - a 10 mm PMMA slab with in-depth absorption ends `:interior` at 25 to 200 cells;
+  - under surface absorption it does so at 200 cells;
+  - the Landau decks do so at four times their CI resolution;
+  - the audit decks do so once deactivation is on.
+
+  A sub-surface cell depletes first whenever the reaction zone spans more than one cell.
+- **C80:** a new C-entry corrects its reading. C80's 0.5 to 16 K differences compared cells by index after the mesh had moved. Against references at four times the cells the correction is neutral or better:
+
+  | deck | T RMS without → with the correction |
+  |---|---|
+  | `ale` 100 | equal to three digits |
+  | `ale_darcy` 25 | 1.85 → 1.69 K |
+  | `ale_darcy` 100 | 0.125 → 0.115 K |
+  | V-CPL-02 at CI | 0.81 → 0.60 K, at 0.78× the time |
+- **Owner records:**
+  - D69 is marked *Owner:* dropped, and question 4's optional material field is withdrawn;
+  - §12.4's M4 decisions 2, 3 and 4 are marked superseded by the review;
+  - C84 and D77 are answered (questions 21 and 22).
+- **The risk register:** R25 closes on item 2's restatement, R40 is restated, and R41 to R46 are added.
+- **Design errata (§7.2):** design §3.5's switch bullet and its line 259 are added.
+- **Appendix C**, if question 20 says so.
+- **Estimate:** half a day, one more with Appendix C.
+
+**W3. `burnout_gradients.jl` (gate item 9).**
+- **Source:** ported from the review's `item9_located/fdgrad_m5.jl`. The scratch worktree paths go, and the cases load through `burnout_identity.jl`'s `load_cases` pattern.
+- **Solve:** V-BO-01 through the case's own solve at the package defaults, so location comes from the default rather than from a keyword.
+- **Configurations:** the PMMA absorption coefficient at 60 and 120 cells; the incident flux and the pre-exponential factor at 60.
+- **Protocol:** nine perturbations, ε ∈ {0, ±1, ±2, ±4, ±8}·1e-3, with central differences at h ∈ {1, 2, 4, 8}·1e-3.
+- **Measures:**
+  - the spread, σ and h10 of `peak` and `t_peak` (interpolated), `t_bo` and the invocation time;
+  - the invocation count;
+  - the safety-net fallbacks, counted as invocations whose smallest merged fraction is below `ε_m(1 − 1e-4)`;
+  - the old core in the same process;
+  - the review's whole-curve and back-temperature misfits, reported and not gating.
+- **Builder keywords:** the review copied V-BO-01's builder to perturb the flux and the pre-exponential factor. Instead, `_vbo_problem` gains `pmma_alpha`, `flux` and `A` keywords whose defaults are today's values, so the case's digests do not move (asserted).
+- **Files:**
+  - `test/newcore/gates/burnout_gradients.jl` (new);
+  - `test/verification/cases/V-BO-01.jl` (the builder's keywords);
+  - `measurements/burnout_gradients.{md,csv}`, stamped with the commit.
+- **Proof:** on `768944e` the script reproduces the review's located table to its printed digits. Examples: the absorption coefficient at 60 cells gives `t_bo` spread 0.031 and invocation-time spread 0.086, with 1,127 steps at ε = 0, and 0 of 36 runs fall back. Item 9 is then re-read on the final defaults in M6c.
+- **Estimate:** a day and a half, about an hour of it machine time.
+
+**W4. The burst measured per step (gate item 2; M4 decisions 3 and 4 replaced).**
+
+1. **The recorder.** It records the gas-generation rate at every accepted step and at every post-event state, on both cores.
+   - **New core:** in `_vbo_core_solve`'s recorder, which already evaluates the residual at every accepted state (D72).
+   - **The rule for located events** (the review's M5 follow-up): a located event moves its step's end back to the root, so that step's end state is never accepted. The reader therefore commits the interpolated pre-root state of a moved step, and the post-event state after it.
+   - **Old core:** from stored states through `Solver.extract_solution_ale!`, with a `DepletionCallbackState` built from the solve's park times. A post-park state is evaluated at `t + 1e-9` s, as the review did.
+2. **The peak QoI by C86.** It is read on both cores, in the case itself.
+3. **`burnout_ladder.jl`.**
+   - `curve_error` (`:322-334`) is deleted. It is the curve criterion that M4 decision 4 cut at 5 s before burnout, and that cut was never implemented.
+   - The ladder gains a 240-cell rung on V-BO-01, on both cores.
+   - It evaluates the three burst criteria of §7.3 item 2 at `ε_m` of 1e-2 and 3e-3, in both forms (the review ran the temperature form only, and C79's recorder perturbation is round-off).
+   - It reports 3e-2, which stays an owner exception at two invocations.
+4. **The port.** It ports the review's `analyze5.py` and `extra5.py`: exact integrals of the piecewise-linear per-step series with their jumps at events, and the per-step excess against the 2N series interpolated between its steps.
+   - **Checked on `768944e`** against the review's located rows:
+
+     | family | per-step excess of N over 2N | L1 of successive grids over [330, 400] s |
+     |---|---|---|
+     | new core, 1e-2 | 3.56, 1.52, 0.72 | 22.88, 10.75, 5.28 |
+     | old core | 31.92, 7.73, 3.18 | 25.78, 9.73, 4.60 |
+
+   - **The window.** The criteria read [t_pk, t_end], with t_pk the old core's 240-cell main-peak time, one window for every comparison. The rate is zero on both cores after 400 s, so this equals the review's [t_peak, 400].
+- **Files:**
+  - `test/verification/cases/V-BO-01.jl` (the recorder and `_vbo_measures`);
+  - `test/newcore/gates/burnout_ladder.jl`;
+  - `measurements/burnout_ladder.{md,csv}`.
+- **Proof:** the port reproduces the review's tables. `NEW_CORE_CASES` passes in each form, the 60-cell peak being the main peak at every resolution from 60 up. The V-BO cases pass on the old core, 39 of 39, its peak being its main peak.
+- **Re-pins:** §14.6, rows 4 and 5.
+- **Estimate:** three days.
+
+**W1. Delete the reactivity switch.** The sites:
+
+| file | what changes |
+|---|---|
+| `src/Kernels/reactions.jl` | `SWITCH_WIDTH`, `ReactivitySwitch`, `reactivity` and `ReactionKernel`'s `switch` field, keyword and type parameter go; `contribute!` multiplies by `V` |
+| `src/Kernels/Kernels.jl:31` | the three exports |
+| `src/Integration/setup.jl` | `_kernels`'s `switch` (`:162`, `:165`); the docstring (`:282`, `:326-328`); the keyword, check and construction (`:348`, `:356-357`, `:475-483`) |
+| `src/Integration/solve.jl` | `:32` (`_SOLVE_KEYWORDS`), `:44`, `:68`, `:118`, `:141` |
+| `src/Deactivation/events.jl:70` | a clause of the comment |
+| `test/newcore/test_deactivation.jl` | the import and the testset "the reactivity switch" (`:522-560`) |
+| `test/newcore/test_correction.jl` | the import, the comment and three assertions (`:283`, `:290-294`) |
+| `test/verification/cases/V-BO-04.jl` | the switched law (`:24-25`, `:61`, `:80`, `:86`, `:119`, `:161`) becomes the plain law |
+| `test/newcore/gates/burnout_ladder.jl` | the switch column, the switch-off rows and R25's release step (`:4`, `:13-14`, `:76`, `:84-101`, `:245`, `:346-347`, `:573`, `:589`) |
+| `test/newcore/gates/energy_ledger.jl:12` | a comment |
+| `measurements/burnout_identity_reference.csv` | V-CPL-02 and V-CPL-02b re-recorded at the package defaults, answering C84 (question 21) |
+
+- **The check that the deletion changes nothing else.** With `switch_width = 0` today's kernel multiplies by one, which is exact for values and partials, so the defaults after W1 must reproduce `768944e` at `switch_width = 0` bit for bit. The digests of V-BO-01, 02 and 04 and V-CPL-02/02b, in both forms, are taken on `768944e` first.
+- **Expected counts** (the review's located runs without the switch):
+
+  | deck | accepted steps (rejected) |
+  |---|---|
+  | V-BO-01, 30 / 60 / 120 cells | 686 (220) / 1,127 (225) / 2,118 (493) |
+  | V-BO-02, temperature form | 1,977 (285) |
+  | V-BO-02, enthalpy form | 2,797 (552) |
+- **Tests:**
+  - every `test/newcore` file, less the deleted assertions;
+  - `jacobian/test_containment.jl`, which the review did not run with the switch inert;
+  - the color count in `test_pattern.jl` (unchanged: the switch read the cell's own block);
+  - `test_allocations.jl`;
+  - `NEW_CORE_CASES` in each form;
+  - the V-BO cases on the old core;
+  - `burnout_identity.jl`: six decks equal, two re-recorded; the review found the Douglas fir digest unchanged;
+  - `oldcore_fingerprint.jl`, which should be unchanged since no old-core code moves;
+  - format, Aqua and JET, since the exports change.
+- **To watch:** item 1's merged-fraction clause (at most 5 `ε_m`) keeps less margin without the switch. The review measured 3.64 → 4.08 % at 60 cells and 4.25 % at 240.
+- **Re-pins:** §14.6, rows 1 to 3 and 6.
+- **Estimate:** two days.
+
+**W5. Install the correction automatically (if question 19 says Phase 2).**
+- **`setup`'s default** (`src/Integration/setup.jl:342`).
+  - `correction` defaults to `nothing`, which the installation rule resolves:
+    - `EquidistributionCorrection()` when `use_ale`, deactivation is on, there is no `w_override` and some layer vanishes (C87);
+    - `NoCorrection()` otherwise.
+  - Explicit corrections are taken as given.
+  - The band default (`:366-370`) follows the resolved correction.
+- **Lagrangian nodes:** set by C85.
+- **The predicate** lives beside `bind_correction` in `src/Closures/correction.jl`. It reads `Reaction.reactants` and `products` (`src/Materials/reactions.jl:180-183`) and `is_gas`, and edits no old-core code.
+- **`bind_correction`** (`correction.jl:127-168`) gives zero gain to a layer that cannot vanish, also under an explicit correction. Its nodes then have `c ≡ 0` with zero partials, and D66's skip removes its faces from the relative-flux kernel.
+- **The V-BO helper:** `_vbo_solve_fn`'s `corrected` flag and its explicit correction and `lagrangian` go (`V-BO-01.jl:243-260`, `V-BO-03.jl:79`), since the rule installs the same correction.
+- **V-BO-01 and V-BO-03 stay bit-identical,** asserted by digest. Their Kaowool layer's gain becomes zero, but it never activates, and above `r_hi` the correction already gives exact zeros with zero partials (D66).
+- **Tests** in `test_correction.jl`:
+  - **The predicate:** PMMA vanishes; an inert component does not; a char former does not; competing reactions to gas and to char do not; a two-step chain to gas vanishes; a cycle does not; a moist wood layer does not.
+  - **The installation matrix:** a fixed mesh, no deactivation, `w_override` or no vanishing layer gives `NoCorrection`. A moving mesh with deactivation and a vanishing layer gives the correction, with the composition interfaces Lagrangian.
+  - **A zero-gain layer:** under `activation = (1.5, 0.5)`, so every node is partially active, its `c` and its Jacobian entries are exactly zero.
+  - **Containment** is unchanged, since the pattern does not change.
+- **The cases:**
+  - V-CPL-02 and V-CPL-02b get the correction and change trajectory. Their QoIs were measured by the review in the temperature form at CI, under `Rodas5P` with the switch and without location: 6 of 6 at 1,122 steps (energy balance 1.80e-3 of 2.1e-3), and 2 of 2 at 636 steps (1.74e-3 of 2e-3). W5 runs both forms on the current defaults and re-records the two digests.
+  - V-BO-04 gets the correction, with `c ≡ 0` on its uniform column and the same steps (M4's ladder).
+  - Every other routed case is a fixed mesh or has no deactivation, so the rule does not install the correction there; those cases are bit-identical.
+- **The gates:**
+  - `burnout_identity.jl` splits as item 5 (§7.3).
+  - `burnout_ladder.jl`'s V-BO-04 row without the correction passes `NoCorrection()`.
+  - `burnout_timing.jl`'s present-but-inactive rows become the rule's rows (item 8).
+  - R41's deck, `ale_darcy` at 100 cells with deactivation, is measured under `Rodas5P`: 1,623 steps against 470 for the band alone in the review.
+- **Estimate:** four days.
+
+**W6. Upstream: track the fix, then raise the floor.** Nothing is filed. The bug is SciML/OrdinaryDiffEq.jl#4687, open. PR #4662 is merged and adds the `t != ts[1]` guard to `reinitFBDF!`'s history shift, which alone fixes the review's reproducer (`docs/refs/mesh_decision_review_2026-10-20/mwe/`). PR #4695 is open and adds a `domain_reject_controller!` that `handle_step_rejection!` calls on a domain rejection. The latest registered OrdinaryDiffEqBDF, 2.4.13, predates #4662. Any comment upstream is the owner's (question 16).
+
+1. **Watch for the release.** The target is a registered OrdinaryDiffEqBDF later than 2.4.13 that contains #4662 or #4695. The test: `mwe/fbdf_isout.jl`, unpatched in a scratch environment on that release, finishes `FBDF` after its one domain rejection.
+2. **The pre-release measurement** (recommended; question 17).
+   - **Setup:** a scratch environment with OrdinaryDiffEqBDF at #4662's merge commit. It is never committed to a manifest and no method is overridden.
+   - **Runs:** the review's `FBDF` configurations with location on: V-BO-01 at 60 cells, V-BO-02 and the audit decks, against `Rodas5P` in the same environment.
+   - **Why:** #4662 keeps `dt *= qmin` and the order that `choose_order!` picked for the discarded step, while our patch restored the order and took the reject controller's `dt`. #4695 differs from both (R43).
+   - **If #4695 merges:** the same runs on its commit.
+   - **Cost:** about a day of machine time.
+3. **On the release** (MF's first commit):
+   - **The floor:** C88's direct dependency with its floor, and the manifests updated (root, `test/`, `scripts/verification/` and the other environments of the dependency-update record).
+   - **A regression test in `test_policies.jl`:** the reproducer's single domain rejection under the package's `FBDF` policy ends `Success`. It is the reproducer committed where it guards the floor, not an override.
+
+**MF. The `FBDF` switch (on the release).**
+- **`src/Integration/policy.jl`:**
+  - `fbdf_policy(linsolve; restart = :heuristic)`, which today is forced (`:87-92`);
+  - `default_policy(linsolve) = fbdf_policy(linsolve)` (`:99`);
+  - `rodas5p_policy` stays a named policy, for V-MMS-02/03 if question 18 goes as recommended and for `test_deactivation.jl:680`'s domain-rejection fixture.
+- **Documentation:** the docstrings at `solve.jl:54` and `:59` ("a Rosenbrock method has none").
+- **`src/States/tolerances.jl:110-113`:** a gas component's mass rows at `reltol · P_REF · M_j / (R_GAS · T₀ᵢ) · V₀ᵢ` (C89); the condensed rows and `CellReference`'s deactivation scale (`:41-45`) are unchanged. The test: in `test_states.jl`, a gas row's tolerance equals the formula on a two-component deck.
+- **Cases:**
+  - V-MMS-02/03 by question 18, through `solve_mms`'s new-core path (`test/verification/exact/mms.jl:564-583`), which passes no policy today.
+  - V-BO-02's step budget (`V-BO-02.jl:87-93`) is re-pinned; its Newton-failure bound (`:76-80`) and smallest-step bound (`:65-69`) are measured and re-pinned only if `FBDF` breaks them.
+- **The finite slab:** `test/newcore/gates/finite_slab.jl` reads Phase 1's item 9 at matched tolerance (`:196-204`, §7.3 item 12).
+- **Labels and text:** `finite_slab.jl:170`, `audit_breakdown.jl:139` and `burnout_timing.jl:570`.
+- **Tests:**
+  - `test_policies.jl:70` (the default's restart) changes.
+  - `test_policies.jl:473-519`'s union test reads `Rosenbrock`'s `integrator.cache.linsolve` (`:482`). It gains an accessor that also finds the linear solver's cache through `FBDF`'s nonlinear solver.
+  - The type-invariance tests (`:350-372`) and the repeat tests (`:405-423`) run on the new default.
+  - `leftover2_integrators.jl` is re-run for the record: its `FBDF` rows stopped in Phase 1 (leftover 2).
+- **Re-recorded:** every digest, meaning the identity reference's eight decks and the case digests the plan records.
+- **Before the default is committed,** the review's unrun list runs on the release with location on: V-BO-01 at 30, 120 and 240 cells, V-BO-03, the enthalpy form, `NEW_CORE_CASES` in each form and every `test/newcore` file. A deck on which `FBDF` fails a QoI that `Rodas5P` passes stops the milestone for the owner (R44).
+- **Estimate:** one to one and a half weeks. The quiet-machine timing is M6c's.
+
+**W8. Element-local Jacobians: deferred** to the start of the multi-D phase. Until then, new kernels are pure local functions of a fixed input tuple where that costs nothing; M6 adds none. If MF cannot happen (question 17), the review's fallback is the owner's call at that point: a bit-identical refactor of one to one and a half weeks, with kernels as local functions declaring their stencils, tested against `jacobian_pattern`.
+
+### 14.4 How M6 and M7 change
+
+M6's row in §7 (two to two and a half weeks) becomes three sub-milestones, with MF between M6b and M6c when the release exists. M7 is unchanged.
+
+| Milestone | Builds | Gate to pass before the next | Estimate |
+|---|---|---|---|
+| M6a The review's changes | W2; W3 and W4, each checked on `768944e`; W1; W5 if question 19 says Phase 2 | W3 and W4 reproduce the review's located tables on `768944e`. W1's defaults equal `768944e` at `switch_width = 0`, bit for bit, on V-BO-01, 02 and 04 and V-CPL-02/02b in both forms, with V-BO-04 re-pinned. W5's predicate, matrix and zero-gain tests pass, V-BO-01/03 are bit-identical, and V-CPL-02/02b pass their QoIs in both forms. Then: every `test/newcore` file, `NEW_CORE_CASES` in each form, the V-BO cases on the old core, `burnout_identity.jl` per item 5, the fingerprint, format, Aqua and JET | 1.5 weeks; 2.5 with W5 |
+| M6b The gate's cases | The rest of the old M6: V-BO-05 re-pinned from a ladder and routed (C45); V-BO-06, 07 and 08 (§6.2); V-BO-03's ladder rows past 500 s (§12.4 item 6) | Each case's QoIs in both forms; §6.2's acceptance | 1.5 to 2 weeks |
+| MF The `FBDF` switch | W6 step 3 and MF, on an OrdinaryDiffEqBDF release containing #4662 or #4695 | The list above; question 18's V-MMS-02/03 policy applied | 1 to 1.5 weeks |
+| M6c The measurement pass | On the final defaults, every table taken once: `burnout_ladder.jl` (items 1, 2, 4, 6, 10), `case_accuracy.jl` (7), `energy_ledger.jl` (3), `burnout_gradients.jl` (9), `burnout_identity.jl` (5) with the Douglas fir deck, `burnout_timing.jl` on a quiet machine (8), and, if MF landed, `audit_decks.jl` and `finite_slab.jl` (Phase 1's items 2 and 9) | §7.3 items 1 to 12 | 1 week, including one quiet-machine session |
+| M7 Gate document | Unchanged | The Phase 2 gate | 1 week |
+
+The remaining work grows from three to three and a half weeks (M6 and M7) to five to six and a half without MF, or six to eight with it. The phase total moves from 11.5–14.5 weeks to 13.5–17.5 without MF and 14.5–19 with it.
+
+What the extra covers:
+- W1, W4 and W5;
+- MF;
+- the 240-cell rung on both cores;
+- a measurement pass taken once on the final defaults instead of spread over M6.
+
+### 14.5 The gate items that change
+
+W2 applied these to §7.3:
+- **Item 1:** the switch rows go; V-BO-04 runs with the rule's correction and with `NoCorrection()`; V-BO-03 runs past 500 s.
+- **Item 2:** the peak is read on the main peak (C86), and the burst is judged by refinement on both cores. This replaces M4 decisions 3 and 4.
+- **Item 5:** split by installation.
+- **Item 8:** measured on the final defaults; the cost is taken where the rule installs the correction; R40's levers leave the gate if MF lands.
+- **Item 9:** the review's pass is recorded, the gate's reading is M6c's, and smooth event times are framed as a property the correction delivers, not its reason.
+- **Item 12 (new):** Phase 1's items 2 and 9 under `FBDF`, with the finite slab read at matched tolerance.
+
+Items 3, 4, 6, 7 and 10 keep their criteria and are re-read on the final defaults at M6c; item 7 keeps D77's normalization.
+
+### 14.6 Re-pins (R37)
+
+| # | QoI or pin | Old | New | Reason | When |
+|---|---|---|---|---|---|
+| 1 | V-BO-04 thickness | The switched law (C57), at 1e-4; observed 2.4e-7 (temperature form) and 1.2e-7 (enthalpy form) | The plain law `L₀ exp(−r t/ρ_s)` through the event, at 1e-6; the review observed 1.3e-9 and 1.5e-9 (temperature form) and 1.2e-9 and 9.3e-10 (enthalpy form), before and after the event | The switch is deleted. The plain law is C46's statement. A tolerance of 1e-4 would hide five orders of regression | W1 |
+| 2 | V-BO-04 event | Located at the switched crossing, 465.490 s, at 1e-6 (D78) | Located at the plain crossing `ln(1/ε_m) ρ_s/r` = 460.517 s, at 1e-6; observed −3.1e-10 and −1.8e-10 | The same | W1 |
+| 3 | V-CPL-02/02b QoIs | Energy balance (temperature and enthalpy forms): V-CPL-02 1.962e-3 and 1.958e-3; V-CPL-02b 1.783e-3 and 1.785e-3 | 1.942e-3 and 1.951e-3 (of 2.1e-3); 1.788e-3 and 1.791e-3 (of 2.0e-3). Consistency in the temperature form 5.5e-5 (of 2.1e-3) and 1.44e-4 (of 1.7e-3). The tolerances are unchanged | Values only; every verdict holds (the review, located) | W1; again at W5 and MF |
+| 4 | V-BO-01 `peak` and `t_peak` | The largest saved rate over the run; at 30 cells, 35.42 at 359.5 s fails (M4's exception) | The largest saved rate before the solve's last deactivation event (C86); at 30 cells about 32.25 at 333.0 s. The references (32.39 and 335.0 s, both at 3 %) are unchanged | M4 decision 3 is replaced. The burst is judged by row 5 | W4 |
+| 5 | Item 2's curve criterion | At most 3 % of the peak from the old core's peak to the end. It failed every run (C77), and M4 decision 4's 5 s cut was never implemented | Deleted, replaced by the burst criteria (a) to (c) of §7.3 item 2 | M4 decision 4 is replaced | W4 |
+| 6 | Identity digests of V-CPL-02/02b | `5e0df61c6838c7e5` and `79a0ab788c4427ee`, end-of-step events with the switch | Re-recorded at the package defaults | W1, then W5, then MF; answers C84 | W1, W5, MF |
+| 7 | V-CPL-02/02b under the rule | Solved without a correction | Solved with the installed correction. The review at CI: 6 of 6 QoIs at 1,122 steps (balance 1.80e-3) and 2 of 2 at 636 (1.74e-3). The tolerances are unchanged | Item 6 is accepted | W5 |
+| 8 | V-BO-02 step budget | At most 3,000 (temperature form) and 4,000 (enthalpy form) accepted steps | ⌈1.3 × the count measured on the release⌉, rounded up to the next thousand. The patched `FBDF` took 5,519 (heuristic restart, temperature form), which would give 8,000 | `FBDF` takes more, cheaper steps (0.24× the old core's modeled cost) | MF |
+| 9 | V-MMS-02/03 exactness pins | V-MMS-02: T 1e-10, ξ_solid 1e-12, ξ_gas 1e-12. V-MMS-03: ξ_solid 1e-10 | Unchanged under `rodas5p_policy` (recommended). Or 10× the drift measured on the release; the patched `FBDF` measured 2.2e-9, 3.9e-10 and 5.9e-8, and 5.4e-10 | Question 18 | MF |
+| 10 | Phase 1's finite slab | D37's bound at the same tolerance | D37's bound at matched tolerance (§7.3 item 12) | `FBDF` misses at 1e-6 (6.715e-4 against 5.992e-4) and passes at 3e-7 at a lower cost | MF |
+| 11 | Identity reference | Eight decks under `Rodas5P` | Re-recorded under `FBDF` | The default integrator changes | MF |
+| 12 | Old-core fingerprint (conditional) | 17bc477's nine digests | Re-recorded only if the release moves OrdinaryDiffEqCore, after the old core's full `Pkg.test()` | A dependency change, not a code change (C88) | MF |
+| 13 | `test_policies.jl:70` | Asserts that the default restart is heuristic under `Rodas5P` | Asserts the `FBDF` default | The default changes | MF |
+
+### 14.7 Risks added
+
+R41 to R46, in §8.
+
+### 14.8 Owner's questions from the decision review
+
+Each comes with a recommendation and what the answer changes. *Owner:* every question decided as recommended.
+
+16. **Commenting on #4687.** #4687 already carries the exact diagnosis, #4662 is merged and #4695 is open, so our deck's numbers add little for the maintainers.
+    - *Recommendation:* no comment now. Two later occasions could justify one, each needing your go-ahead on a text you review (with no AI attribution):
+      - to ask whether a patch release containing #4662 is planned, if none has appeared by M6b's end;
+      - to give a concrete case for #4695, if W6's pre-release measurement shows that #4662's guard alone leaves a failure, or a cost, that #4695 would fix.
+    - *Changes:* possibly an earlier release; nothing in the plan.
+17. **No release by the time MF comes up (end of M6b).**
+    - *The options:*
+      - (a) close Phase 2 on `Rodas5P`: M6c measures on it, item 8 stands as accepted at M2 with R40 carried, and MF becomes the first milestone after the release, before the cutover, re-running items 5, 8 and 9 and the suite;
+      - (b) hold M6c for the release;
+      - (c) depend on an unregistered commit, which a registered package cannot offer its users;
+      - (d) a method override, which is forbidden.
+    - *Recommendation:* hold M6c for at most one week (OrdinaryDiffEqBDF's patch releases are frequent and #4662 is merged), then (a). Run W6's pre-release measurement during M6a either way, so the decision is made on numbers taken with location on. If MF slips past Phase 2, decide W8's refactor fallback then, not now.
+    - *Changes:* when MF and M6c run, whether the measurement pass runs twice, and whether R40's levers stay at the phase gate.
+18. **V-MMS-02/03 under `FBDF`.**
+    - *Recommendation:* the two cases request `rodas5p_policy`. They test the discretization's exactness (the discrete GCL, `m = ξV(x)`), which only a linearly-implicit method keeps to round-off (D35, C24). Re-pinning them at the Newton tolerance would turn a discretization check into an integrator check. The default policy's moving-mesh behaviour stays covered by V-MMS-04, the V-BO cases and the V-CPL cases.
+    - *Changes:* with a re-pin, row 9 of §14.6 takes 10× the drift measured on the release, and the two cases run the default path.
+19. **When the installation rule lands.**
+    - *Recommendation:* Phase 2, in M6a after W1.
+      - It decides which cases activate, so the new cases and the measurement pass should see it.
+      - Landing it at the cutover would make the gate certify a default that users will not get, and re-run items 5 and 8 there.
+      - It costs four days, and its accuracy evidence exists (review item 6).
+    - *Changes:* with "the cutover", M6a shrinks by four days. V-BO-06/07/08 pass the correction explicitly, as V-BO-01 does today. `setup`'s default stays `NoCorrection` with M4 decision 6's split of item 5, and C85 and C87 move to the cutover.
+20. **The evidence as an appendix.**
+    - *Recommendation:* yes. An Appendix C holds the review's tables that §14 relies on:
+      - item 3's cost and gate tables;
+      - item 9's located table;
+      - item 6's accuracy rows and its `ale_darcy` rows;
+      - item 4's V-CPL and V-BO-04 rows;
+      - item 5's burst tables.
+
+      The appendix is stamped with `a5ffd9b` and `7ceaf74` and says that the review's scripts stay local. The reproducer is committed as MF's regression test, and W3 and W4 commit the gate scripts that re-measure the rest.
+    - *Changes:* W2 grows by a day. Without the appendix, §14 cites a local document.
+21. **C84 (item 5's decks that deactivate).**
+    - *Recommendation:* re-record V-CPL-02/02b at the package defaults in W1, which changes them anyway. Do not add a location-off solve to the identity script: that would keep an end-of-step path alive in the gate for no reader. Under W5 the two decks are item 5's class B in any case.
+    - *Changes:* with "location off", `burnout_identity.jl` passes `located_events = false` for the two decks, and their Phase 1 digests stay the link.
+22. **D77 (a single invocation's shift against the saved interval).**
+    - *Recommendation:* keep it. The located shifts are 5.2e-6 to 6.0e-3 of the reference's median saved interval, far inside item 7's 0.05. Normalizing by the layer's life instead changes no verdict.
+    - *Changes:* with another interval, `case_accuracy.jl`'s normalization and item 7's text.
+23. **The vanishing predicate (C87).**
+    - *Recommendation:* the "every consuming reaction" fixpoint. It keeps the correction off char formers, which was D69's purpose, and it equals the review's reading on every current deck.
+    - *Changes:* with "a path", a char former with a competing all-gas branch gets the correction.
+24. **The re-pins of §14.6 and conflicts C85, C86, C88 and C89.**
+    - *Recommendation:* approve them as proposed. In particular:
+      - V-BO-04's thickness tolerance tightens from 1e-4 to 1e-6;
+      - V-BO-02's budget follows the 1.3× rule;
+      - the finite slab is read at matched tolerance with item 8's 1.5×;
+      - the old-core fingerprint is re-recorded only for a dependency change.
+    - *Changes:* the values the gate asserts.
 
 ---
 
@@ -779,3 +1138,157 @@ Five reviews were asked for (feasibility against the code, the numerics of the c
 
 **The gate's measurability.** Nineteen findings, most major, applied: item 1's band criterion was tautological and gameable (the band is now fixed before the ladder, the largest merged fraction bounded at 5 `ε_m`, cells below `ε_m` and cells taken by the band recorded per invocation, and the rows the prototype already fails at the strict criterion listed: 120 cells, `ε_m = 3e-2`, `τ = 1`); the monitor's two settings are carried by V-BO-07, since `β = 1` on V-BO-01 is a `τ/2` duplicate that fails the timing QoI; item 2 judges every run in the case's assert mode against its fixed references (the 30-cell row included unless the owner excludes it) and adds an MLR-curve criterion for the merge burst; item 3 holds V-BO-02 at C39's 3e-3 and names V-BO-04, the window and the event terms for the energy ledger; item 5 records the Phase 1 digests at M0 on `bb2860b`, defines the 1e-10 check on the same step sequence, records the largest activation and smallest thickness ratio, and names the charring decks; item 6 reports both scales and the rejections before and after C52; item 7's budget, unreachable by three orders of magnitude, is restated (located shift at most 0.05 of the median interval and at least three times smaller than the discrete one); item 8 quotes 3.5 to 6× at equal tolerance, states that matched accuracy raises the ratio and that no lever reaches 2×, defines the error measure for decks with events, requires both cores in one process, and times the audit decks with an inactive correction; item 9 passes on the event-timed quantities and the invocation count; item 10 bounds the smallest cell at `0.5 ε_m h₀`; item 11 states the fallback's acceptance and its departure from the design's "nothing else changes"; the three new cases received builder changes, data and references; C53 records the band's reach per invocation; the surface-Newton warning QoI is re-pinned (question 8); §7.4 judges at 60 and 120 cells; C49's "246 of 1,091", §1.5's single walls, the mass-loss reference, the 3.75× of A.6 and the 0.052 K of A.8 were corrected.
 
+## Appendix C. The decision review's measurements
+
+These are the measurements of the decision review (§14) that this plan relies on (question 20). They were taken on `a5ffd9b`, and gate item 9 also on `7ceaf74` with event location, at a load of 16 to 25 on the 22 logical CPUs.
+- **Evidence:** counts and modeled costs (counts × unit costs measured in the same process) are load-independent. Wall times are interleaved in one process and never compared across processes.
+- **What stays local:** the review's scripts and raw tables, in `docs/refs/mesh_decision_review_2026-10-20/` (gitignored).
+- **What re-measures them in the repository:** W3's and W4's gate scripts re-measure C.2 and C.5, and MF's runs re-measure C.1 on the release.
+
+### C.1 The integrator and the gas tolerance (`a5ffd9b`, location off)
+
+**The bug.** `FBDF`'s stops since Phase 0 trace to OrdinaryDiffEqCore 4.18.0 (also 4.19.0 and `master`), with OrdinaryDiffEqBDF 2.4.11:
+1. `handle_step_rejection!` answers a domain-test rejection with `dt *= qmin` only and skips the algorithm's reject controller.
+2. `FBDF`'s consecutive-failure count therefore stays zero.
+3. `reinitFBDF!` shifts the history a second time at the same `t`, leaving `ts[1] == ts[2]`.
+4. The Lagrange predictor is NaN, and every Newton iteration diverges down to `dtmin`.
+
+Each of the 16 failing `FBDF` solves had exactly one domain rejection, and no successful one had any. A smooth two-equation linear ODE with one rejection reproduces it without Pyrolysis.
+
+**Upstream.** The bug is reported as SciML/OrdinaryDiffEq.jl#4687. #4662 (merged, unreleased) guards the shift with `t != ts[1]`, which alone fixes the reproducer. #4695 (open) adds a `domain_reject_controller!`.
+
+**The measurements.** The `FBDF` figures below were taken with an in-process fix that restores the order of the discarded step and runs `FBDF`'s reject controller. That fix never ships. Matched accuracy is the window RMS before the first event, each core against its own reltol-1e-9 reference, with the old default's error as the target.
+
+| Deck | `Rodas5P`, scale (a): modeled / wall | `FBDF`, scale (a): modeled / wall | `FBDF`, scale (c): modeled / wall |
+|---|---|---|---|
+| V-BO-01, 60 cells, corrected | 1.12 / 1.61 (772 Jacobians) | 0.55 / 0.88 (109 Jacobians, 770 factorizations) | 0.56 / 0.88 |
+| V-BO-02 | 0.33 / 0.57 | 0.25 / 0.44 (heuristic restart 0.24 / 0.42) | 0.25 / 0.45 |
+| Douglas fir, 60 s | 0.86 / 0.90 | 0.68 / 0.65 | 0.48 / 0.59 |
+| Douglas fir, 600 s | 0.58 | no rung matches down to 1e-7 | 0.41 / not timed |
+| `ale`, `ale_darcy`, `eulerian` at 100 cells | 0.94 to 1.17 / 1.40 to 1.73 | 0.43 to 0.73 / 0.67 to 1.06 | 0.42 to 0.73 / 0.64 to 1.05 |
+
+- **QoIs:** on V-BO-01 they are identical under both integrators (peak 32.391, `t_peak` 335.0 s, `t_bo` 363.5 s).
+- **Error:** `FBDF` matches at reltol 1e-5 with a smaller window maximum (0.18 K against 0.45 K).
+- **Cost model:** it under-predicts the new core's wall time by 20 to 35 %.
+
+**The gas scales:**
+- **Scale (b):** C60's `ε_m · ρ_g · V₀` costs `FBDF` 40 to 80 % more steps and `Rodas5P` 2.3× on V-BO-02.
+- **Scale (c):** `reltol · ρ_g(T₀, 1 atm) · V₀` with `V₀` the cell's initial volume.
+  - Under `FBDF` it is within ±2 % of (a) on four decks and 10 % worse on `ale_darcy`.
+  - It is the only scale with which `FBDF` matches Douglas fir over 600 s.
+  - Under `Rodas5P` it costs 14 to 20 % on the audit decks.
+- **`KenCarp4`:** no variant is competitive.
+
+| Check, with the fixed `FBDF` as the default | Result |
+|---|---|
+| V-CPL-02, V-CPL-02b, V-BO-01, V-BO-04 | Every QoI passes |
+| V-BO-02 | 9 of 10 QoIs pass. It fails its step budget: 6,229 accepted steps with the forced restart and 5,519 with the heuristic restart, against the pinned 3,000 at reltol 1e-6 |
+| Finite slab, V-HC-03 | Passes |
+| Finite slab, V-HC-02c | Fails D37 at the same tolerance, 1e-6 (6.715e-4 against 5.992e-4). Passes at 3e-7 (5.961e-4) with 194 steps, 279 right-hand sides and one Jacobian, against `Rodas5P`'s 61, 549 and 61 at 1e-6 |
+| V-MMS-02 | Misses its pins at reltol 1e-8 (T 2.2e-9 against 1e-10, ξ_solid 3.9e-10 against 1e-12, ξ_gas 5.9e-8 against 1e-12), and still misses them at reltol 1e-10 |
+| V-MMS-03 | Misses at 1e-8 (ξ_solid 5.4e-10 against 1e-10) and passes at reltol 1e-10 |
+
+Not run: V-BO-01 at 30 and 120 cells, V-BO-03, the enthalpy form, the whole suite, and item 8 on a quiet machine.
+
+### C.2 The correction and its event times (`7ceaf74`, location on, temperature form)
+
+Item 9's protocol is the same as §7.3's. Spreads below 0.1 pass. In every configuration the invocation count was 1 in all nine runs, and the safety-net fallbacks were 0 of 9.
+
+| QoI | Absorption coefficient, 60 cells | Flux, 60 | Pre-exponential factor, 60 | Absorption coefficient, 120 |
+|---|---|---|---|---|
+| `peak` (interpolated) | 7.6e-4 | 7.8e-5 | 1.1e-3 | 6.1e-4 |
+| `t_peak` (interpolated) | 0.024 | 2.8e-3 | 0.014 | 0.021 |
+| `t_bo` (interpolated); without location; old core | 0.031; 0.74; 0.20 | 2.5e-3; 0.019; 8.9e-3 | 0.019; 0.24; 0.035 | 0.056; 0.48; 6.1 |
+| Invocation time; without location; old core's first park | 0.086; 10; 5.6 | 9.7e-4; 0.31; 1.9 | 6.2e-3; 26; 110 | 0.077; 680; 1.4 |
+
+**Against the old core in the same process,** the residual noise σ of `t_bo` is 1.8 to 34× smaller, that of the event time 800 to 3,200× smaller, and that of the back-temperature misfit 4 to 57× smaller. Location costs one step (1,127 against 1,126), and with location off the trajectory equals `a5ffd9b` bit for bit.
+
+**Interior crossings without the correction.** A sub-surface cell depletes first whenever the reaction zone spans more than one cell. Without the correction, these decks end `:interior`:
+- a 10 mm PMMA slab with in-depth absorption, at 25 to 200 cells;
+- the same slab under surface absorption, at 200 cells;
+- V-CPL-02 at 640 cells and V-CPL-02b at 400, four times their CI resolution;
+- `ale` at 100 cells, and `ale_darcy` at 25 and 100, once deactivation is on;
+- V-BO-01 and V-BO-03 at 242 to 245 s, at every resolution.
+
+**The cost.** From activation to where the uncorrected V-BO-01 stops (92 to 242 s), the corrected run takes 406 steps against 99.
+
+**Consumers.** None: the white-pine and CAPA inverses and the sensitivity studies are derivative-free and run with `handle_depletion = false`.
+
+### C.3 Activation and installation (`a5ffd9b`, `Rodas5P`)
+
+**Accuracy** against references at four times the cells (reltol 1e-9; the Landau references corrected), as the largest and RMS temperature errors:
+
+| Deck | Without the correction: steps, T max / RMS [K] | With it: steps, T max / RMS [K] |
+|---|---|---|
+| `ale` 100 (80 s) | 54, 0.0802 / 0.0170 | 71, 0.0802 / 0.0170 |
+| `ale_darcy` 25 (80 s) | 100, 4.96 / 1.85 | 156, 4.96 / 1.69 |
+| `ale_darcy` 100 (80 s) | 102, 0.431 / 0.125 | 430, 0.431 / 0.115 |
+| V-CPL-02, 160 cells | 2,049, 7.77 / 0.812 | 1,122, 5.49 / 0.595 (0.78× the time) |
+| V-CPL-02b, 100 cells | 1,192, 10.7 / 1.31 | 636, 9.55 / 1.12 |
+
+**C80's reading.** Its 0.5 to 16 K differences compared cells by index after the mesh moved, so they are not errors.
+
+**Why `ale_darcy` at 100 cells costs 4.2× the steps** (installed without deactivation, which the rule excludes):
+- the whole slab is one layer;
+- the median step falls to about `τ/N²`;
+- τ × 10 brings it back to 132 steps.
+
+With deactivation on (300 s) the correction takes 1,623 steps against 470 for the band alone (R41).
+
+**The rules:**
+- **R0, the current rule,** is the only rule that passes every case QoI on V-BO-01 at 60 and 120 cells (8 of 8) and V-CPL-02b at CI.
+- **Interior thinning** passes 7 of 8 at 0.42 to 0.53× the cost, but takes 2 to 3 invocations per layer.
+- **The band alone** fails V-BO-01 at 60 and 120 cells (`:interior` at 337 to 363 s) and V-CPL-02b's balance.
+- **D69 as proposed** gives `r_hi = 0` on a non-charring layer, which turns the correction off.
+
+### C.4 The reactivity switch (`7ceaf74`, location on; the switch at 1.5 `ε_m` against none)
+
+| Case, form | Steps (rejected), with / without | Energy balance (tolerance) | Consistency (tolerance) | Gas-generation swing | T_s swing |
+|---|---|---|---|---|---|
+| V-CPL-02, temperature | 2,094 (2) / 2,092 (2) | 1.962e-3 / 1.942e-3 (2.1e-3) | 1.45e-4 / 5.5e-5 (2.1e-3) | 0.59 / 0.38 % | 0.87 / 0.88 K |
+| V-CPL-02, enthalpy | 2,101 (5) / 2,101 (3) | 1.958e-3 / 1.951e-3 | 1.43e-4 / 6.0e-5 | 0.59 / 0.38 % | 0.89 / 0.89 K |
+| V-CPL-02b, temperature | 1,221 (2) / 1,222 (2) | 1.783e-3 / 1.788e-3 (2.0e-3) | 5.52e-4 / 1.44e-4 (1.7e-3) | 0.58 / 0.071 % | 0.81 / 0.38 K |
+| V-CPL-02b, enthalpy | 1,291 (0) / 1,266 (0) | 1.785e-3 / 1.791e-3 | 5.55e-4 / 1.46e-4 | 0.58 / 0.071 % | 0.82 / 0.39 K |
+
+**V-BO-02.** Every QoI passes both ways. It takes 2,035 (363) against 1,977 (285) steps in the temperature form, and 2,846 (638) against 2,797 (552) in the enthalpy form.
+
+**V-BO-04** (40 cells; 39 events in one invocation into one survivor):
+- Without the switch, the event falls at the plain crossing 460.517 s: −3.1e-10 (temperature form) and −1.8e-10 (enthalpy form) of it.
+- The thickness follows `L₀ exp(−r t/ρ_s)` to 1.3e-9 and 1.5e-9, and to 1.2e-9 and 9.3e-10, before and after the event.
+- With the switch, the plain law misses by 4.7e-2.
+
+**V-BO-01** (30 to 240 cells, `ε_m = 1e-2`) is within three steps either way.
+
+**The stress decks.** These were built to make the approach to `ε_m` stiff: orders 0, 0.5 and 1; fixed, moving and corrected meshes; `ε_m` 1e-2 and 1e-3.
+- No run takes fewer steps with the switch.
+- On fixed meshes at order 0 the switch costs 7 to 13 % more steps and shrinks the steps before each event to a quarter of the median.
+
+### C.5 The end-of-layer burst (`7ceaf74`, location on, temperature form)
+
+The figures are V-BO-01's gas-generation rate per accepted step and post-event state, in g m⁻² s⁻¹ (excess) and g/m² (L1).
+
+| Family | Largest per-step excess of N over 2N (30→60, 60→120, 120→240); ratio per doubling | L1 of successive grids over [330, 400] s; ratio | New core's L1 against its own 240 over [t_peak, 400], relative to the old core's | L1 against the old core's 240 at 30, 60, 120, 240 |
+|---|---|---|---|---|
+| New core, 1e-2 | 3.56, 1.52, 0.72; 2.34×, 2.11× | 22.88, 10.75, 5.28; 2.13×, 2.04× | 1.04, 1.16, 1.16 | 40.5, 19.5, 9.95, 5.74 |
+| New core, 3e-3 | 20.81, 5.58, 2.39; 3.73×, 2.33× | 23.63, 12.27, 6.22; 1.93×, 1.97× | 1.02, 1.28, 1.37 | 37.4, 18.5, 8.30, 3.26 |
+| New core, 1e-2, no switch | 3.16, 1.36, 0.64; 2.32×, 2.13× | 22.75, 10.62, 5.20; 2.14×, 2.04× | | |
+| Old core | 31.92, 7.73, 3.18; 4.13×, 2.43× | 25.78, 9.73, 4.60; 2.65×, 2.11× | 1 | 35.8, 13.3, 4.42, 0 |
+
+**The old core bursts too.** Its last park into the Kaowool at 30 cells reaches 50.7 for 0.13 s, against the new core's 35.9 lasting about 1 s. The new core fails the 0.5 s sampled peak at 30 cells only because its burst covers two saved points. Before the layer's end, over 300 to 350 s, the two cores' successive-grid errors are equal (6.10, 2.88, 1.44 against 6.21, 2.90, 1.44).
+
+**The innermost-cell receiver** moves the burst to a second invocation, and at 1e-2 it is worse.
+
+### C.6 Colored AD (V-BO-01 at 300 s, Douglas fir at 20 s)
+
+**One colored Jacobian** splits as follows:
+- `derive!`: 33 to 45 %;
+- seeding, extraction and decompression: 16 to 22 %;
+- the kernels: the rest.
+
+**The projected element-local cost** is 0.51× the colored cost on V-BO-01 and 0.40× on Douglas fir, almost all of it `derive!` at its per-cell width. A real element-local conduction kernel was exact but no faster.
+
+**In multi-D:**
+- colors reach 24 to 180 at three components and 90 to 665 at fourteen;
+- the projected element-local speed-ups are 2.3 to 6×.
+
+**Under `FBDF`,** V-BO-01 takes 109 Jacobians instead of 772, so the Jacobian is about 10 to 15 % of the solve.
