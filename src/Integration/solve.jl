@@ -178,7 +178,7 @@ function integrate(
     policy =
         integrator_policy === nothing ?
         default_policy(
-            linear_solver === nothing ? default_linear_solver(layout) : linear_solver,
+            linear_solver === nothing ? default_linear_solver() : linear_solver,
         ) : integrator_policy
 
     rhs! = let def = def, ws = ws

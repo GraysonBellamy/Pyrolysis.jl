@@ -5,9 +5,9 @@
 # of examples/07_douglas_fir_cone.jl over its first 60 s joins them.
 #
 # With `--record` the digests become the reference
-# (measurements/burnout_identity_reference.csv, taken before any Phase 2 code
-# landed); without it every digest is compared with the reference and the
-# table says which decks are bit-identical.
+# (measurements/burnout_identity_reference.csv; plan §12 records the tree it
+# was taken on); without it every digest is compared with the reference and
+# the table says which decks are bit-identical.
 #
 # Run from the repository root:
 #   julia --project=test --startup-file=no --threads=1 test/newcore/gates/burnout_identity.jl [--record]

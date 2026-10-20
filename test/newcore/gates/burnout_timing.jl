@@ -141,7 +141,7 @@ function core_problem(deck, reltol; problem = deck_problem(deck))
 end
 
 function new_solve(cp, configuration)
-    policy = configuration(Ig.default_linear_solver(cp.def.layout))
+    policy = configuration(Ig.default_linear_solver())
     return Ig.integrate(cp; integrator_policy = policy, min_thickness = 1e-3)
 end
 

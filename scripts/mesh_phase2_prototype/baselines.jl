@@ -112,7 +112,7 @@ if NAME == "vbo02_restart"
             reltol = 1e-6,
             time_scale = 1e-3,
         )
-        pol = Ig.rodas5p_policy(Ig.default_linear_solver(cp.def.layout); restart)
+        pol = Ig.rodas5p_policy(Ig.default_linear_solver(); restart)
         sol = Ig.integrate(cp; integrator_policy = pol)
         t = minimum([
             (@elapsed sol = Ig.integrate(cp; integrator_policy = pol)) for _ = 1:3
@@ -144,7 +144,7 @@ if NAME == "vbo02_restart"
         reltol = 1e-6,
         time_scale = 1e-3,
     )
-    pol = Ig.kencarp4_policy(Ig.default_linear_solver(cp.def.layout))
+    pol = Ig.kencarp4_policy(Ig.default_linear_solver())
     sol = Ig.integrate(cp; integrator_policy = pol)
     t = minimum([(@elapsed sol = Ig.integrate(cp; integrator_policy = pol)) for _ = 1:2])
     st = sol.statistics
@@ -306,7 +306,7 @@ if NAME == "integrators"
             abstol = reltol / 100,
             time_scale = 1e-3,
         )
-        ls = Ig.default_linear_solver(cp.def.layout)
+        ls = Ig.default_linear_solver()
         pol = Ig.IntegratorPolicy(alg(ls), policy_restart, flag, 1e-6)
         return Ig.integrate(cp; integrator_policy = pol)
     end

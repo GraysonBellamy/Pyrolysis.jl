@@ -11,7 +11,8 @@ using OrdinaryDiffEq: ODEProblem, DiscreteCallback, CallbackSet, init, step!
 using OrdinaryDiffEq: derivative_discontinuity!
 using Pyrolysis.Solver: KenCarp4
 using OrdinaryDiffEq.SciMLBase: get_proposed_dt
-using LinearSolve: KLUFactorization, UMFPACKFactorization
+using LinearSolve: LinearSolve, KLUFactorization, UMFPACKFactorization
+using SparseArrays
 
 # A decomposing slab whose char is lighter than the virgin solid (the mesh
 # moves), porous with intrinsic densities, permeable when `κ > 0`, and
@@ -421,41 +422,87 @@ end
     end
 end
 
-# The KLU factorization in Rosenbrock's linear cache, which is a new object
-# exactly when KLU analyses afresh.
+@testset "the structured KLU factors the union of W's nonzeros" begin
+    # A prototype with a full diagonal and two off-diagonal entries per column.
+    n = 6
+    rows = Int[]
+    cols = Int[]
+    for j = 1:n, i in (j - 1, j, j + 1)
+        1 <= i <= n && (push!(rows, i); push!(cols, j))
+    end
+    prototype = sparse(rows, cols, ones(length(rows)), n, n)
+    tridiagonal(lower, upper) = sparse(
+        vcat(1:n, 2:n, 1:(n-1)),
+        vcat(1:n, 1:(n-1), 2:n),
+        vcat(fill(4.0, n), lower, upper),
+        n,
+        n,
+    )
+    b = collect(1.0:n)
+    cache = LinearSolve.init(LinearSolve.LinearProblem(copy(prototype), b), StructuredKLU())
+    c = cache.cacheval
+    @test c isa Integration.StructuredKLUCache
+    @test nnz(c.union) == n
+    # The first W grows the union by its nonzeros; a stored zero stays out.
+    W1 = tridiagonal(fill(-1.0, n - 1), vcat(0.0, fill(-1.0, n - 2)))
+    cache.A = W1
+    @test LinearSolve.solve!(cache).u ≈ Matrix(W1) \ b
+    @test c.growths == 1
+    @test nnz(c.union) == nnz(dropzeros(W1))
+    # A W within the union refactors without growing it.
+    W2 = tridiagonal(fill(-0.5, n - 1), vcat(0.0, fill(-2.0, n - 2)))
+    cache.A = W2
+    @test LinearSolve.solve!(cache).u ≈ Matrix(W2) \ b
+    @test c.growths == 1
+    # A nonzero outside the union grows it once more, to the prototype here.
+    W3 = tridiagonal(fill(-1.0, n - 1), fill(-1.0, n - 1))
+    cache.A = W3
+    @test LinearSolve.solve!(cache).u ≈ Matrix(W3) \ b
+    @test c.growths == 2
+    @test nnz(c.union) == nnz(prototype)
+    # An entry outside the prototype is an error.
+    cache.A = sparse([1, n], [n, 1], [1.0, 1.0], n, n) + W3
+    @test_throws ErrorException LinearSolve.solve!(cache)
+end
+
+# The KLU factorization in Rosenbrock's linear cache, a new object exactly
+# when KLU analyses afresh.
 _klu(cacheval) = cacheval
 _klu(cacheval::Integration.StructuredKLUCache) = cacheval.inner.cacheval
 
-@testset "the structured KLU analyses once on a moving mesh" begin
+@testset "one KLU analysis per growth of the union, use_ale = $ale" for ale in (true, false)
     problem = _slab(12)
-    @test default_linear_solver(setup(problem; use_ale = true).def.layout) isa StructuredKLU
-    @test default_linear_solver(setup(problem).def.layout) isa KLUFactorization
-    function analysed(linear_solver)
+    @test default_linear_solver() isa StructuredKLU
+    function factored(linear_solver)
         factorizations = UInt[]
+        last = Ref{Any}(nothing)
         probe = DiscreteCallback(
             (u, t, integrator) -> true,
-            integrator -> push!(
-                factorizations,
-                objectid(_klu(integrator.cache.linsolve.cacheval)),
-            );
+            integrator -> begin
+                local cacheval = integrator.cache.linsolve.cacheval
+                push!(factorizations, objectid(_klu(cacheval)))
+                last[] = cacheval
+            end;
             save_positions = (false, false),
         )
         sol = Integration.solve(
             problem;
-            use_ale = true,
+            use_ale = ale,
             linear_solver,
             callback = probe,
             saveat = Float64[],
             abstol = 1e-8,
             reltol = 1e-6,
         )
-        return sol, length(unique(factorizations))
+        return sol, length(unique(factorizations)), last[]
     end
-    structured, n_structured = analysed(nothing)
-    plain, n_plain = analysed(KLUFactorization())
+    structured, n_structured, c = factored(nothing)
+    plain, _, _ = factored(KLUFactorization())
     @test structured.retcode === :Success
-    @test n_structured == 1
-    @test n_plain > 1
+    @test c isa Integration.StructuredKLUCache
+    @test 1 <= n_structured <= c.growths
+    @test count(c.in_union) == nnz(c.union) < nnz(c.prototype)
+    @test all(j -> j in rowvals(c.union)[nzrange(c.union, j)], 1:size(c.union, 2))
     @test structured.statistics.accepted == plain.statistics.accepted
     @test structured.statistics.rejected == plain.statistics.rejected
     @test maximum(abs, structured.T .- plain.T) <= 1e-9
