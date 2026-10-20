@@ -185,6 +185,15 @@ Sensible enthalpy of every component at temperature `T`.
     map(h -> sensible_enthalpy(h, T), laws.h)
 
 """
+	component_enthalpies(laws, T, flags) -> NTuple{NC}
+
+Sensible enthalpy at temperature `T` of each component `flags` marks, and zero
+for the others.
+"""
+@inline component_enthalpies(laws::CaloricLaws, T, flags::Tuple) =
+    map((h, flag) -> flag ? sensible_enthalpy(h, T) : zero(T), laws.h, flags)
+
+"""
 	component_enthalpy_slopes(laws, T) -> NTuple{NC}
 
 `dhⱼ/dT` of every component's enthalpy law at temperature `T`.

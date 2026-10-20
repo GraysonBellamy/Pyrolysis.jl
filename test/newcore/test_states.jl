@@ -165,6 +165,25 @@ _caloric_material() = Material(
     reactions = (),
 )
 
+@testset "component enthalpies of the flagged components" begin
+    laws = CaloricLaws(_caloric_material())
+    flags = (false, true, true)
+    for T in (250.0, T_REF, 812.5, 1777.77)
+        h = component_enthalpies(laws, T)
+        @test component_enthalpies(laws, T, flags) === (0.0, h[2], h[3])
+        d = ForwardDiff.Dual(T, 1.0)
+        @test component_enthalpies(laws, d, flags) isa NTuple{3,typeof(d)}
+        for j = 2:3
+            @test ForwardDiff.derivative(
+                t -> component_enthalpies(laws, t, flags)[j],
+                T,
+            ) === ForwardDiff.derivative(t -> component_enthalpies(laws, t)[j], T)
+        end
+        @test ForwardDiff.derivative(t -> component_enthalpies(laws, t, flags)[1], T) ===
+              0.0
+    end
+end
+
 # Independent 256-bit bisection on the extended relation itself.
 function _oracle(ext, laws, H, m, i)
     setprecision(256) do

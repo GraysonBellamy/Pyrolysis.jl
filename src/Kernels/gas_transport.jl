@@ -97,7 +97,7 @@ function contribute!(
         λ_f = guarded_harmonic_mean(ds.λ[o], ds.λ[nb], d_o, d_n)
         T_o, T_n = ds.T_trial[o], ds.T_trial[nb]
         v, φ_f = _darcy_face(kernel.model, ds, o, nb, d_o, d_n)
-        h = component_enthalpies(kernel.laws, (d_n * ds.T[o] + d_o * ds.T[nb]) / d)
+        h = component_enthalpies(kernel.laws, (d_n * ds.T[o] + d_o * ds.T[nb]) / d, gas)
         q = zero(eltype(c.F_energy))
         for j = 1:NC
             gas[j] || continue
