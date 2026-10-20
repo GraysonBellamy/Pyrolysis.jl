@@ -13,12 +13,18 @@
 # match the reference peak mass loss rate, its time and the burnout time,
 # close the mass ledger, and converge the surface temperature at every
 # evaluation, within a wall-time budget at 0.098 mm cells.
+#
+# On the finite-volume core the mesh moves by the equidistribution correction,
+# the PMMA–Kaowool interface a Lagrangian node, so the PMMA cells thin
+# together and the layer deactivates in one invocation into the Kaowool cell
+# beneath; the surface QoI there counts accepted states whose surface balance
+# did not converge or sits on the trial clamp, since that Newton never warns.
 
 # The deck, the warning counters and the step recorder below are shared by
 # V-BO-02, V-BO-03 and V-BO-05 (their files load after this one).
 
 using Logging
-using OrdinaryDiffEq: DiscreteCallback, SciMLBase
+using OrdinaryDiffEq: CallbackSet, DiscreteCallback, SciMLBase
 
 const VBO_L_PMMA = 0.0059
 const VBO_L_KW = 0.012
@@ -126,42 +132,81 @@ function Logging.handle_message(l::_VBOWarnCounter, level, message, args...; kwa
     return Logging.handle_message(l.inner, level, message, args...; kwargs...)
 end
 
-# Warning counters and step statistics of the most recent solve of each case
+# What the step recorder saw over the accepted steps of a solve: the smallest
+# step, the largest live-cell temperature, the time of the last step (a stop
+# between output times is not saved), on the new core the accepted states
+# whose surface energy balance did not converge or sits on the trial clamp of
+# the property bracket, and the deactivation threshold (`NaN` on the old core,
+# whose surface Newton warns instead).
+mutable struct _VBORecord
+    dt_min::Float64
+    T_max::Float64
+    t_last::Float64
+    clamped::Int
+    threshold::Float64
+end
+_VBORecord() = _VBORecord(Inf, -Inf, NaN, 0, NaN)
+
+# Warning counters and step records of the most recent solve of each case
 # (the QoI closures read them after `solve_fn` returns).
 const VBO_SURFACE_WARNINGS = Dict{String,Int}()
 const VBO_TRANSMITTED_WARNINGS = Dict{String,Int}()
 const VBO_VOID_WARNINGS = Dict{String,Int}()
-const VBO_STEP_STATS =
-    Dict{String,@NamedTuple{dt_min::Float64,T_max::Float64,t_last::Float64}}()
+const VBO_STEP_STATS = Dict{String,_VBORecord}()
 
-# The step recorder: the smallest accepted step, the largest temperature and
-# the time of the last accepted step (a stop between output times is not
-# saved), with the temperatures of a state read by `temperatures(u)`.
-function _vbo_recorder(temperatures, dt_min, T_max, t_last)
+# The step recorder: after every accepted step, the step and its time, then
+# `observe!(u, t)` on the accepted state.
+function _vbo_recorder(observe!, rec::_VBORecord)
     return DiscreteCallback(
         (u, t, integ) -> true,
         integ -> begin
-            dt_min[] = min(dt_min[], integ.t - integ.tprev)
-            T_max[] = max(T_max[], temperatures(integ.u))
-            t_last[] = integ.t
+            rec.dt_min = min(rec.dt_min, integ.t - integ.tprev)
+            observe!(integ.u, integ.t)
+            rec.t_last = integ.t
             SciMLBase.derivative_discontinuity!(integ, false)
         end;
         save_positions = (false, false),
     )
 end
 
-# The new core's solve with the step recorder, which reads the live cells'
-# temperatures through the layout and the state mapping. The old core's
-# depletion keywords have no counterpart there.
+# The live boundary faces of the thermal kernel whose surface energy balance,
+# at the last residual evaluation, did not converge or ended where the trial
+# clamp departs from the identity. The new core's surface Newton evaluates the
+# condition at the clamped iterate and never warns: on a trial state the clamp
+# is its purpose, on an accepted state it would be a failure.
+function _vbo_clamped(thermal, ds, topo)
+    n = 0
+    for p in thermal.patches, f0 in p.faces
+        f = Pyrolysis.Meshes.live_face(topo, ds.active, f0)
+        f == 0 && continue
+        s = thermal.states[f]
+        clamped = Pyrolysis.States.trial_temperature(s.T_surface) != s.T_surface
+        (s.converged && !clamped) || (n += 1)
+    end
+    return n
+end
+
+# The PMMA–Kaowool interface node of a V-BO deck, from the back face: the
+# Kaowool takes the cells of its thickness at the mesh's uniform pitch.
+function _vbo_interface_node(problem)
+    nodes = problem.mesh.nodes
+    dz = (nodes[end].z - nodes[1].z) / length(problem.mesh.cells)
+    return round(Int, VBO_L_KW / dz) + 1
+end
+
+# The new core's solve with the step recorder, which evaluates the residual
+# at every accepted state and reads the live cells' temperatures and the
+# surface balances. The old core's depletion keywords have no counterpart
+# there. `instrument(cp)` returns a further callback of the set-up problem
+# for the gate scripts (`nothing` for none).
 function _vbo_core_solve(
     problem,
-    dt_min,
-    T_max,
-    t_last;
+    rec::_VBORecord;
     handle_depletion = false,
     depletion_threshold = nothing,
     min_cells = nothing,
     min_thickness = 1e-6,
+    instrument = cp -> nothing,
     kwargs...,
 )
     cp = Pyrolysis.Integration.setup(
@@ -170,16 +215,29 @@ function _vbo_core_solve(
         deactivation = handle_depletion,
         kwargs...,
     )
-    layout, setup, ds = cp.def.layout, cp.def.setup, cp.ws.derived
-    live_max(u) = begin
-        Pyrolysis.States.derive!(ds, u, layout, setup)
-        maximum(ds.T[i] for i in eachindex(ds.T) if ds.active[i])
+    def, ws = cp.def, cp.ws
+    topo = def.setup.topology
+    thermal =
+        Pyrolysis.Kernels.find_kernel(Pyrolysis.Kernels.ThermalBoundaryKernel, def.kernels)
+    du = similar(cp.u0)
+    observe!(u, t) = begin
+        Pyrolysis.Assembly.residual!(du, u, def, t, ws)
+        ds, _ = Pyrolysis.Assembly.buffers(ws, def, Float64)
+        rec.T_max =
+            max(rec.T_max, maximum(ds.T[i] for i in eachindex(ds.T) if ds.active[i]))
+        rec.clamped += _vbo_clamped(thermal, ds, topo)
     end
-    recorder = _vbo_recorder(live_max, dt_min, T_max, t_last)
-    return Pyrolysis.Integration.integrate(cp; callback = recorder, min_thickness)
+    cp.deactivation === nothing || (rec.threshold = cp.deactivation.threshold)
+    extra = instrument(cp)
+    recorder = _vbo_recorder(observe!, rec)
+    callback = extra === nothing ? recorder : CallbackSet(recorder, extra)
+    return Pyrolysis.Integration.integrate(cp; callback, min_thickness)
 end
 
-function _vbo_solve_fn(id::String)
+# The case's solve. On the new core a `corrected` case moves its mesh by the
+# equidistribution correction, with the layer interface Lagrangian (given
+# keywords take precedence).
+function _vbo_solve_fn(id::String; corrected::Bool = false)
     return (problem; kwargs...) -> begin
         surf = _VBOWarnCounter(Logging.current_logger(), r"^Surface", Ref(0))
         tr = _VBOWarnCounter(surf, r"transmitted through the back face", Ref(0))
@@ -188,21 +246,29 @@ function _vbo_solve_fn(id::String)
         # ghost keeps the temperature it was parked with, which lies between
         # two live-cell temperatures.
         n = length(problem.mesh.cells)
-        dt_min = Ref(Inf)
-        T_max = Ref(-Inf)
-        t_last = Ref(NaN)
+        rec = _VBORecord()
         sol = Logging.with_logger(void) do
             if VERIFICATION_CORE == "new"
-                _vbo_core_solve(problem, dt_min, T_max, t_last; kwargs...)
+                kw =
+                    corrected ?
+                    (;
+                        correction = Pyrolysis.Closures.EquidistributionCorrection(),
+                        lagrangian = [_vbo_interface_node(problem)],
+                        kwargs...,
+                    ) : kwargs
+                _vbo_core_solve(problem, rec; kw...)
             else
-                recorder = _vbo_recorder(u -> maximum(view(u, 1:n)), dt_min, T_max, t_last)
+                recorder = _vbo_recorder(
+                    (u, t) -> (rec.T_max = max(rec.T_max, maximum(view(u, 1:n)))),
+                    rec,
+                )
                 solve(problem; progress = false, callback = recorder, kwargs...)
             end
         end
         VBO_SURFACE_WARNINGS[id] = surf.count[]
         VBO_TRANSMITTED_WARNINGS[id] = tr.count[]
         VBO_VOID_WARNINGS[id] = void.count[]
-        VBO_STEP_STATS[id] = (; dt_min = dt_min[], T_max = T_max[], t_last = t_last[])
+        VBO_STEP_STATS[id] = rec
         return sol
     end
 end
@@ -303,21 +369,54 @@ function _vbo_common_qois(
             comment = ledger_comment,
         ),
     )
-    if surface_warnings
-        n_warn = get(VBO_SURFACE_WARNINGS, id, -1)
-        push!(
-            out,
-            QoIResult(
-                name = "surface-Newton warnings",
-                value = Float64(n_warn),
-                exact = 0.0,
-                error = Float64(n_warn),
-                tol = 0.5,
-                comment = "boundary temperature solve converged at every evaluation",
-            ),
+    surface_warnings && push!(out, _vbo_surface_qoi(id))
+    return out
+end
+
+# The surface energy balance's QoI: on the old core no warning from its
+# Newton (converged, never pinned at the clamp) at any evaluation; on the new
+# core, whose Newton clamps its trial iterates smoothly and never warns, no
+# accepted state whose balance did not converge or sits on the clamp.
+function _vbo_surface_qoi(id)
+    if VERIFICATION_CORE == "new"
+        n = get(() -> _VBORecord(-1.0, -1.0, NaN, -1, NaN), VBO_STEP_STATS, id).clamped
+        return QoIResult(
+            name = "clamped surface balances on accepted states",
+            value = Float64(n),
+            exact = 0.0,
+            error = Float64(abs(n)),
+            tol = 0.5,
+            comment = "boundary temperature solve converged inside the property bracket at every accepted step",
         )
     end
-    return out
+    n_warn = get(VBO_SURFACE_WARNINGS, id, -1)
+    return QoIResult(
+        name = "surface-Newton warnings",
+        value = Float64(n_warn),
+        exact = 0.0,
+        error = Float64(n_warn),
+        tol = 0.5,
+        comment = "boundary temperature solve converged at every evaluation",
+    )
+end
+
+# The deactivation invocations of a solve, each with its cells below the
+# threshold `ε_m`, the cells the band took and its largest merged fraction.
+function _vbo_invocations(sol, ε_m)
+    return [
+        begin
+            es = filter(e -> e.invocation == k, sol.events)
+            below = count(e -> e.fraction < ε_m, es)
+            (;
+                invocation = k,
+                t = first(es).t,
+                cells = length(es),
+                below,
+                band = length(es) - below,
+                largest = maximum(e.fraction for e in es),
+            )
+        end for k in unique(e.invocation for e in sol.events)
+    ]
 end
 
 function _verification_case_vbo01()
@@ -347,6 +446,23 @@ function _verification_case_vbo01()
                 comment = "s",
             ),
         )
+        VERIFICATION_CORE == "new" || return out
+        # The correction carries the layer to one deactivation, and the band
+        # merges no cell that still holds more than 5 ε_m of its mass.
+        ε_m = VBO_STEP_STATS[id].threshold
+        inv = _vbo_invocations(sol, ε_m)
+        largest = maximum(v.largest for v in inv; init = 0.0)
+        push!(
+            out,
+            QoIResult(
+                name = "one invocation for the PMMA layer",
+                value = Float64(length(inv)),
+                exact = 1.0,
+                error = abs(length(inv) - 1.0) + (largest <= 5ε_m ? 0.0 : 1.0),
+                tol = 0.5,
+                comment = "$(sum(v.cells for v in inv; init = 0)) cells; largest merged fraction $(round(largest; sigdigits = 3)) against 5 ε_m = $(5ε_m)",
+            ),
+        )
         return out
     end
 
@@ -359,7 +475,7 @@ function _verification_case_vbo01()
             "Gpyro V2 PMMA deck property fits",
         ],
         build = n -> _vbo_problem(n),
-        solve_fn = _vbo_solve_fn(id),
+        solve_fn = _vbo_solve_fn(id; corrected = true),
         solve_kwargs = (
             use_ale = true,
             handle_depletion = true,

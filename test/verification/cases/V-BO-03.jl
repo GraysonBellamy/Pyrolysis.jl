@@ -8,38 +8,44 @@
 # that leaves the slab rises toward one as the PMMA thins. The run must
 # complete, report the flux that leaves through the back face
 # (solution.extras.radiation_transmitted) and warn about it once, with the
-# surface temperature converged at every evaluation.
+# surface temperature converged at every evaluation. On the finite-volume
+# core, which moves the mesh by the equidistribution correction as V-BO-01
+# does and issues no warning, the series itself must show more than 1 % of
+# the entering flux leaving, the old core's warning predicate.
 
 function _verification_case_vbo03()
     id = "V-BO-03"
     function qois(sol)
         m = _vbo_measures(sol)
-        out = QoIResult[]
-        n_warn = get(VBO_SURFACE_WARNINGS, id, -1)
-        push!(
-            out,
-            QoIResult(
-                name = "surface-Newton warnings",
-                value = Float64(n_warn),
-                exact = 0.0,
-                error = Float64(n_warn),
-                tol = 0.5,
-                comment = "boundary temperature solve converged at every evaluation",
-            ),
-        )
-        n_tr = get(VBO_TRANSMITTED_WARNINGS, id, -1)
-        push!(
-            out,
-            QoIResult(
-                name = "transmitted-flux warning fired",
-                value = Float64(n_tr),
-                exact = 1.0,
-                error = abs(n_tr - 1.0),
-                tol = 0.5,
-                comment = "radiation leaving through the transparent back face is reported",
-            ),
-        )
+        out = QoIResult[_vbo_surface_qoi(id)]
         tr = sol.extras.radiation_transmitted
+        if VERIFICATION_CORE == "new"
+            leaving = maximum(tr) / maximum(tr .+ sol.extras.volumetric_absorption)
+            push!(
+                out,
+                QoIResult(
+                    name = "transmitted flux reported (series peak above 1 % of the entering flux)",
+                    value = leaving,
+                    exact = 1.0,
+                    error = leaving > 0.01 ? 0.0 : 1.0,
+                    tol = 0.5,
+                    comment = "largest share of the entering flux that leaves through the transparent back face",
+                ),
+            )
+        else
+            n_tr = get(VBO_TRANSMITTED_WARNINGS, id, -1)
+            push!(
+                out,
+                QoIResult(
+                    name = "transmitted-flux warning fired",
+                    value = Float64(n_tr),
+                    exact = 1.0,
+                    error = abs(n_tr - 1.0),
+                    tol = 0.5,
+                    comment = "radiation leaving through the transparent back face is reported",
+                ),
+            )
+        end
         push!(
             out,
             QoIResult(
@@ -70,7 +76,7 @@ function _verification_case_vbo03()
         tags = [:ale, :burnout, :depletion, :beer_lambert],
         references = ["MaCFP-2 PMMA gasification case (NIST), 50 kW/m²"],
         build = n -> _vbo_problem(n; substrate_alpha = 0.0),
-        solve_fn = _vbo_solve_fn(id),
+        solve_fn = _vbo_solve_fn(id; corrected = true),
         solve_kwargs = (
             use_ale = true,
             handle_depletion = true,
