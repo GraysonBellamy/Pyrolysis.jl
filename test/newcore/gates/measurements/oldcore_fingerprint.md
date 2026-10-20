@@ -1,6 +1,6 @@
 # The old core's bit-level fingerprint
 
-Produced by `test/newcore/gates/oldcore_fingerprint.jl` at commit 3efdc60 with uncommitted changes. Julia 1.13.0. The hash of 3072 reaction rates and heats through `Physics.evaluate_reactions!` (orders 0, 0.5, 1, 2; depletion thresholds 1e-3, 0.1 and 10 kg/m³, the limiter on and off; 16 solid concentrations from −1 to 1e3 kg/m³ at 300, 450, 700 and 1200 K) and `hash((T, ξ, t))` of eight old-core solves at their CI resolutions, against the same digests on 17bc477, the tree before the finite-volume core's old-core edits (Julia 1.13.0).
+Produced by `test/newcore/gates/oldcore_fingerprint.jl` at commit c94faf6. Julia 1.13.0. The hash of 3072 reaction rates and heats through `Physics.evaluate_reactions!` (orders 0, 0.5, 1, 2; depletion thresholds 1e-3, 0.1 and 10 kg/m³, the limiter on and off; 16 solid concentrations from −1 to 1e3 kg/m³ at 300, 450, 700 and 1200 K) and `hash((T, ξ, t))` of eight old-core solves at their CI resolutions, against the same digests on 17bc477, the tree before the finite-volume core's old-core edits (Julia 1.13.0).
 
 | item | 17bc477 | this tree | equal | solve |
 |---|---|---|---|---|
