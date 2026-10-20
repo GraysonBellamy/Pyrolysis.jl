@@ -97,7 +97,7 @@ end
     # The velocity rows read the node corrections the relative-flux kernel
     # stored for this residual evaluation; a problem without that kernel
     # evaluates them here.
-    @inline function _velocity_rows!(c, cl::BalanceRowClosure, ::Nothing, ds, topo, t)
+    @inline function _velocity_rows!(c, cl::BalanceRowClosure, ::NoCorrection, ds, topo, t)
         nodes = get(NODE_C, ds, nothing)
         nodes === nothing ? _correction_rows!(c, cl, ds, topo, nothing) :
         _correction_rows!(c, cl, ds, topo, nodes::Vector{eltype(ds.x)})
@@ -123,7 +123,15 @@ end
         end
         return nothing
     end
-    function _consistent_velocities!(w, cl::BalanceRowClosure, ::Nothing, c, ds, topo, t)
+    function _consistent_velocities!(
+        w,
+        cl::BalanceRowClosure,
+        ::NoCorrection,
+        c,
+        ds,
+        topo,
+        t,
+    )
         g = ds.geometry
         θ_A = ds.θ_A[]
         w[cl.pinned] = 0
@@ -200,7 +208,7 @@ end
     Main.Pyrolysis.Closures.CORR.on || return P
     cl = def.closure
     cl isa BalanceRowClosure || return P
-    cl.override === nothing || return P
+    cl.correction isa NoCorrection || return P
     layout = def.layout
     N = n_cells(layout)
     rows = Int[]
