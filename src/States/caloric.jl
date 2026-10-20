@@ -79,6 +79,8 @@ five-point Gauss–Legendre quadrature on each interval, and the law at the
 knots. Between knots the enthalpy is the cubic Hermite interpolant of these
 values and slopes; outside the bracket it continues linearly, as the clamped
 law does. [`enthalpy_slope`](@ref) is the interpolant's exact derivative.
+Both are `NaN` at a `NaN` temperature, so a wild trial state gives a `NaN`
+residual rather than an error.
 """
 struct TabulatedEnthalpy
     h::Vector{Float64}
@@ -113,6 +115,7 @@ end
     lo, hi = T_PROPERTY_MIN, T_PROPERTY_MAX
     T <= lo && return t.h[1] + t.c[1] * (T - lo)
     T >= hi && return t.h[end] + t.c[end] * (T - hi)
+    isnan(T) && return T * NaN
     k = min(floor(Int, _primal(T) - lo) + 1, length(t.h) - 1)
     s = T - (lo + (k - 1))
     s2 = s * s
@@ -137,6 +140,7 @@ integrals, the derivative of the Hermite interpolant for a
     lo, hi = T_PROPERTY_MIN, T_PROPERTY_MAX
     T <= lo && return t.c[1] + zero(T)
     T >= hi && return t.c[end] + zero(T)
+    isnan(T) && return T * NaN
     k = min(floor(Int, _primal(T) - lo) + 1, length(t.h) - 1)
     s = T - (lo + (k - 1))
     s2 = s * s

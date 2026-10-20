@@ -146,6 +146,11 @@ end
         end
         # Continuous slope at a knot.
         @test enthalpy_slope(h, 800.0 - 1e-9) ≈ enthalpy_slope(h, 800.0 + 1e-9) rtol = 1e-7
+        # A NaN trial temperature gives NaN, value and derivative, not an error.
+        @test isnan(sensible_enthalpy(h, NaN))
+        @test isnan(enthalpy_slope(h, NaN))
+        @test isnan(ForwardDiff.derivative(t -> sensible_enthalpy(h, t), NaN))
+        @test isnan(ForwardDiff.derivative(t -> enthalpy_slope(h, t), NaN))
     end
 end
 

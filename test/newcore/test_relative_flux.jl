@@ -14,12 +14,12 @@ using Pyrolysis.Integration: setup, integrate, consistent_state!, CoreProblem
 
 const _L = 0.01
 
-# Two solids of equal density and different heat capacity, a smooth front
-# between them, adiabatic and impermeable faces; with `law` the material
-# carries a lateral shrinkage law (and so the history pair).
-function _composition(n; T0 = 800.0, law = nothing)
+# Two solids of equal density and different heat capacity (`c_b` the second
+# one's), a smooth front between them, adiabatic and impermeable faces; with
+# `law` the material carries a lateral shrinkage law (and so the history pair).
+function _composition(n; T0 = 800.0, law = nothing, c_b = 3000.0)
     a = SolidComponent(:a, ρ = 1000.0, c = 1000.0, k = 0.5)
-    b = SolidComponent(:b, ρ = 1000.0, c = 3000.0, k = 0.5)
+    b = SolidComponent(:b, ρ = 1000.0, c = c_b, k = 0.5)
     mat = Material(
         name = :composition,
         components = (a, b),
@@ -71,6 +71,29 @@ function Pyrolysis.Kernels.contribute!(
     contribute!(scratch, k.kernel, ds, topo, material, t)
     c.F_energy .-= scratch.F_energy
     return c
+end
+
+@testset "a NaN trial temperature gives a NaN residual through a tabulated enthalpy: $(energy) form" for energy in
+                                                                                                         (
+    :temperature,
+    :enthalpy,
+)
+    # The second solid's heat capacity has no closed-form integral, so its
+    # enthalpy, the relative fluxes' face enthalpies among them, is tabulated.
+    c_b = CallableProperty(T -> 3000.0 + 0.2T * sin(T / 300))
+    cp = setup(
+        _composition(8; c_b);
+        energy_state = energy,
+        use_ale = true,
+        w_override = _slide,
+    )
+    @test find_kernel(RelativeFluxKernel, cp.def.kernels) !== nothing
+    @test cp.def.setup.laws.h[2] isa TabulatedEnthalpy
+    u = copy(cp.u0)
+    u[energy_index(cp.def.layout, 4)] = NaN
+    du = zeros(length(u))
+    residual!(du, u, cp.def, 0.0, cp.ws)
+    @test any(isnan, du)
 end
 
 @testset "isothermal advection: $(energy) form" for energy in (:temperature, :enthalpy)
