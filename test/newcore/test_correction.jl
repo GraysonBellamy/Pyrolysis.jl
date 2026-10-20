@@ -580,6 +580,42 @@ end
 end
 
 # ============================================================================
+# §6.1 item 14: outputs
+# ============================================================================
+
+@testset "outputs: the correction velocity, the thinnest cell and the invocations" begin
+    sol = Integration.solve(_ablator(12); _ablation...)
+    @test sol.retcode in (:Success, :Terminated)
+    @test !isempty(sol.events)
+    @test sol.statistics.invocations == last(sol.events).invocation >= 1
+    @test all(e -> 1 <= e.invocation <= sol.statistics.invocations, sol.events)
+    @test size(sol.correction_velocity) == size(sol.z)
+    @test any(x -> isfinite(x) && x != 0, sol.correction_velocity)
+    n = size(sol.T, 1)
+    for k in eachindex(sol.t)
+        live = findall(isfinite, view(sol.T, :, k))
+        @test live == 1:length(live)
+        top = length(live) + 1
+        # Nodes beyond the outermost live one, and dead cells, read NaN.
+        @test all(isnan, sol.correction_velocity[(top+1):end, k])
+        @test all(isfinite, sol.correction_velocity[1:top, k])
+        @test sol.correction_velocity[1, k] == 0
+        @test sol.correction_velocity[top, k] == 0
+        @test all(isnan, sol.ξ[:, (top):n, k])
+        @test all(iszero, sol.m[:, (top):n, k])
+        @test sol.extras.min_cell_thickness[k] == minimum(diff(sol.z[1:top, k]))
+    end
+    # Without a correction the series is zero on a moving mesh and absent on
+    # a fixed one.
+    plain = Integration.solve(_ablator(6; t_end = 0.1); use_ale = true)
+    @test all(iszero, plain.correction_velocity)
+    @test plain.statistics.invocations == 0
+    fixed = Integration.solve(_ablator(6; t_end = 0.1))
+    @test size(fixed.correction_velocity) == (0, 0)
+    @test fixed.extras.min_cell_thickness ≈ fill(3e-3 / 6, length(fixed.t)) rtol = 1e-12
+end
+
+# ============================================================================
 # §6.1 item 16: determinism
 # ============================================================================
 

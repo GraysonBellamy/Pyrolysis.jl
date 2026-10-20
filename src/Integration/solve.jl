@@ -255,6 +255,8 @@ function integrate(
         nonlinear_failures = s.nnonlinconvfail,
         domain_rejections = check.monitor.rejections,
         largest_constraint_residual = check.monitor.largest,
+        invocations = cells === nothing || isempty(cells.events) ? 0 :
+                      last(cells.events).invocation,
     )
     return CoreSolution(
         cp.problem,

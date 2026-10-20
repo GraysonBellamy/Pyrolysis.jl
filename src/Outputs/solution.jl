@@ -7,8 +7,9 @@
 
 Counters of a solve: accepted and rejected steps, right-hand-side
 evaluations, Jacobian evaluations, linear solves, nonlinear-solver failures,
-the steps the domain test rejected, and the largest scaled constraint residual
-of the accepted states (one or below passes; zero for a fixed-step solve).
+the steps the domain test rejected, the largest scaled constraint residual
+of the accepted states (one or below passes; zero for a fixed-step solve),
+and the deactivation callback's invocations that deactivated cells.
 """
 Base.@kwdef struct SolverStatistics
     accepted::Int
@@ -19,6 +20,7 @@ Base.@kwdef struct SolverStatistics
     nonlinear_failures::Int
     domain_rejections::Int
     largest_constraint_residual::Float64
+    invocations::Int
 end
 
 """
@@ -37,6 +39,7 @@ area of the faces they name unless noted.
   `:top` faces [kg/m²]
 - `thickness_history`: the distance from the first node to the outermost live
   one [m]
+- `min_cell_thickness`: the thickness of the thinnest live cell [m]
 - `surface_mass_flux`: the outward mass flux of the `:top` faces [kg/(m²·s)]
 - `surface_heat_flux_net`: the heat flux the `:top` condition applies at the
   face, positive into the domain (under a prescribed temperature, the
@@ -71,6 +74,7 @@ const CoreExtras = @NamedTuple{
     back_temperature::Vector{Float64},
     total_mass::Vector{Float64},
     thickness_history::Vector{Float64},
+    min_cell_thickness::Vector{Float64},
     surface_mass_flux::Vector{Float64},
     surface_heat_flux_net::Vector{Float64},
     surface_heat_flux_absorbed::Vector{Float64},
@@ -100,10 +104,16 @@ The solution of the finite-volume core at the saved times:
 - `problem`: the problem that was solved
 - `t`: saved times [s]
 - `T`: cell temperatures, `n_cells × n_times` [K], `NaN` in a deactivated cell
-- `ξ`: concentrations, `NC × n_cells × n_times` [kg/m³]
-- `m`: component masses per cell, `NC × n_cells × n_times` [kg]
+- `ξ`: concentrations, `NC × n_cells × n_times` [kg/m³], `NaN` in a
+  deactivated cell
+- `m`: component masses per cell, `NC × n_cells × n_times` [kg], zero in a
+  deactivated cell
 - `z`: node positions, `n_nodes × n_times` [m] on a moving mesh, `0 × 0` on a
   fixed one; `NaN` beyond the outermost live node
+- `correction_velocity`: the node corrections `c = w − vₛ`, the mesh velocity
+  relative to the solid's, `n_nodes × n_times` [m/s] on a moving mesh (zero
+  without a correction), `0 × 0` on a fixed one; `NaN` beyond the outermost
+  live node
 - `cell_centers`: cell-center positions, `n_cells × n_times` [m], `NaN` in a
   deactivated cell
 - `boundary_T`: per boundary tag, the area-weighted surface temperature of
@@ -135,6 +145,7 @@ struct CoreSolution{P}
     ξ::Array{Float64,3}
     m::Array{Float64,3}
     z::Matrix{Float64}
+    correction_velocity::Matrix{Float64}
     cell_centers::Matrix{Float64}
     boundary_T::Dict{Symbol,Vector{Float64}}
     surface_T::Vector{Float64}
@@ -153,6 +164,7 @@ end
 # The extras of `nt` saved times: every series zero except the blowing
 # diagnostics, which start at their no-outflow values.
 _extras(nt::Int) = CoreExtras((
+    zeros(nt),
     zeros(nt),
     zeros(nt),
     zeros(nt),
@@ -257,6 +269,7 @@ function CoreSolution(
     ξ = zeros(NC, n, nt)
     m = zeros(NC, n, nt)
     z = is_moving(layout) ? zeros(n_nodes(layout), nt) : zeros(0, 0)
+    correction = is_moving(layout) ? zeros(n_nodes(layout), nt) : zeros(0, 0)
     centers = zeros(n, nt)
     tags = boundary_tags(topo)
     boundary_T = Dict(tag => zeros(nt) for tag in tags)
@@ -282,23 +295,30 @@ function CoreSolution(
         @views T[:, k] .= ds.T
         @views ξ[:, :, k] .= ds.ξ
         @views m[:, :, k] .= ds.m
+        thinnest = Inf
         for i = 1:n
             centers[i, k] = ds.geometry.cell_center[i][1]
             if !ds.active[i]
                 T[i, k] = NaN
                 centers[i, k] = NaN
+                @views ξ[:, i, k] .= NaN
             end
             ds.active[i] || continue
+            nodes = topo.cells[i].nodes
+            thinnest = min(thinnest, abs(ds.x[nodes[2]] - ds.x[nodes[1]]))
             for j = 1:NC
                 gas[j] && (x.gas_generation_rate[k] += c.S_mass[j, i])
             end
         end
         x.gas_generation_rate[k] /= exposed_area
+        x.min_cell_thickness[k] = isfinite(thinnest) ? thinnest : NaN
         x.live_cells[k] = count(ds.active)
         top_node = has_top ? live_face(topo, ds.active, only(top)) : n_nodes(layout)
         if is_moving(layout)
             @views z[:, k] .= ds.x
             @views z[(top_node+1):end, k] .= NaN
+            @views correction[:, k] .= ds.c
+            @views correction[(top_node+1):end, k] .= NaN
         end
         x.thickness_history[k] = ds.x[max(top_node, 1)] - ds.x[1]
         x.cross_section_area_history[k] = ds.A[]
@@ -402,6 +422,7 @@ function CoreSolution(
         ξ,
         m,
         z,
+        correction,
         centers,
         boundary_T,
         surface_T,
