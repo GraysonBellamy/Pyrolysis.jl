@@ -44,7 +44,6 @@ if EXPERIMENT == "check"
 end
 
 if EXPERIMENT == "sweep"
-    BLOCK[] = true
     const BL = (; radiation_model = BEER_LAMBERT)
     for (tag, kw) in (
         ("c=0, block rule", (; on = false, case_kw = BL)),
@@ -60,7 +59,6 @@ if EXPERIMENT == "sweep"
 end
 
 if EXPERIMENT == "band"
-    BLOCK[] = true
     const BL = (; radiation_model = BEER_LAMBERT)
     for (κ, τ, n) in (
         (3.0, 0.2, 60),
@@ -71,8 +69,7 @@ if EXPERIMENT == "band"
         (3.0, 0.2, 120),
         (3.0, 1.0, 120),
     )
-        BAND[] = κ
-        r = Base.invokelatest(run_vbo, n; τ, case_kw = BL)
+        r = Base.invokelatest(run_vbo, n; τ, κ, case_kw = BL)
         Base.invokelatest(report, "V-BO-01 BL n=$(n) tau=$(τ) band=$(κ)", r)
         Base.invokelatest(vbo_qois, r.sol)
         flush(stdout)
@@ -80,11 +77,9 @@ if EXPERIMENT == "band"
 end
 
 if EXPERIMENT == "repeat"
-    BLOCK[] = true
     const BL = (; radiation_model = BEER_LAMBERT)
     for (κ, τ, n, nrep) in ((10.0, 1.0, 60, 3), (10.0, 0.2, 60, 3))
-        BAND[] = κ
-        r = Base.invokelatest(run_vbo, n; τ, case_kw = BL, nrep)
+        r = Base.invokelatest(run_vbo, n; τ, κ, case_kw = BL, nrep)
         Base.invokelatest(report, "V-BO-01 BL n=$(n) tau=$(τ) band=$(κ) nrep=$(nrep)", r)
         Base.invokelatest(vbo_qois, r.sol)
         flush(stdout)
@@ -92,7 +87,6 @@ if EXPERIMENT == "repeat"
 end
 
 if EXPERIMENT == "ladder"
-    BLOCK[] = true
     const BL = (; radiation_model = BEER_LAMBERT)
     for (tag, κ, n, kw) in (
         ("tau=0.2 band=10", 10.0, 120, (; τ = 0.2)),
@@ -118,8 +112,7 @@ if EXPERIMENT == "ladder"
             ),
         ),
     )
-        BAND[] = κ
-        ckw = haskey(kw, :case_kw) ? kw : merge(kw, (; case_kw = BL))
+        ckw = merge(haskey(kw, :case_kw) ? kw : merge(kw, (; case_kw = BL)), (; κ))
         r = try
             Base.invokelatest(run_vbo, n; ckw...)
         catch err
@@ -137,11 +130,9 @@ if EXPERIMENT == "ladder"
 end
 
 if EXPERIMENT == "order"
-    BLOCK[] = true
     const BL = (; radiation_model = BEER_LAMBERT)
     for (κ, τ) in ((3.0, 0.2), (3.0, 1.0), (10.0, 1.0))
-        BAND[] = κ
-        r = Base.invokelatest(run_vbo, 60; τ, case_kw = BL, nrep = 2)
+        r = Base.invokelatest(run_vbo, 60; τ, κ, case_kw = BL, nrep = 2)
         Base.invokelatest(report, "order check: V-BO-01 BL n=60 tau=$(τ) band=$(κ)", r)
         flush(stdout)
     end
@@ -152,7 +143,6 @@ if EXPERIMENT == "continuous"
         @eval Pyrolysis.Integration const CONT = Ref(false)
     const CONT = Pyrolysis.Integration.CONT
     CORR.on = false
-    BLOCK[] = true
     @eval Pyrolysis.Integration function _deactivation_callback(
         cp::CoreProblem,
         check::DomainCheck,
@@ -311,11 +301,9 @@ end
 
 if EXPERIMENT == "scaling"
     # the N² scaling of the relaxation: τ scaled by (60/N)² should give the 60-cell behaviour at 30 and 120 cells
-    BLOCK[] = true
-    BAND[] = 10.0
     const BL = (; radiation_model = BEER_LAMBERT)
     for (n, τ) in ((120, 0.05), (30, 0.8), (120, 0.1))
-        r = Base.invokelatest(run_vbo, n; τ, case_kw = BL)
+        r = Base.invokelatest(run_vbo, n; τ, κ = 10.0, case_kw = BL)
         Base.invokelatest(report, "V-BO-01 BL n=$(n) tau=$(τ) band=10 (N² scaling)", r)
         Base.invokelatest(vbo_qois, r.sol)
         flush(stdout)

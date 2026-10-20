@@ -64,11 +64,46 @@ if !isdefined(Pyrolysis.Closures, :CORR)
             a = CORR.mode === :or ? 1 - (1 - ab) * (1 - aa) : ab * aa
             return a * (_monitor(ds, ia) * ha - _monitor(ds, ib) * hb) / CORR.τ
         end
+        # The node corrections of one residual evaluation, per derived-state
+        # buffer, with each cell's activation evaluated once.
+        const NODE_C = IdDict{Any,Any}()
+        const CELL_A = IdDict{Any,Any}()
+        function corr_nodes!(ds, topo)
+            T = eltype(ds.x)
+            N = n_cells(topo)
+            c = get!(() -> zeros(T, N + 1), NODE_C, ds)::Vector{T}
+            a = get!(() -> zeros(T, N), CELL_A, ds)::Vector{T}
+            fill!(c, zero(T))
+            CORR.on || return c
+            @inbounds for i = 1:N
+                a[i] = _act(ds.x[i+1] - ds.x[i], CORR.h0[i])
+            end
+            @inbounds for nd = 2:N
+                nd in CORR.lagrangian && continue
+                ib, ia = nd - 1, nd
+                (ds.active[ib] && ds.active[ia]) || continue
+                act = CORR.mode === :or ? 1 - (1 - a[ib]) * (1 - a[ia]) : a[ib] * a[ia]
+                iszero(act) && continue
+                hb = ds.x[nd] - ds.x[nd-1]
+                ha = ds.x[nd+1] - ds.x[nd]
+                c[nd] = act * (_monitor(ds, ia) * ha - _monitor(ds, ib) * hb) / CORR.τ
+            end
+            return c
+        end
     end
 end
 
 @eval Pyrolysis.Closures begin
+    # The velocity rows read the node corrections the relative-flux kernel
+    # stored for this residual evaluation; a problem without that kernel
+    # evaluates them here.
     @inline function _velocity_rows!(c, cl::BalanceRowClosure, ::Nothing, ds, topo, t)
+        nodes = get(NODE_C, ds, nothing)
+        nodes === nothing ? _correction_rows!(c, cl, ds, topo, nothing) :
+        _correction_rows!(c, cl, ds, topo, nodes::Vector{eltype(ds.x)})
+        return nothing
+    end
+    function _correction_rows!(c, cl, ds, topo, nodes)
         g = ds.geometry
         θ_A = ds.θ_A[]
         c.r_velocity[cl.pinned] = ds.w[cl.pinned]
@@ -76,11 +111,12 @@ end
             s = zero(eltype(c.r_velocity))
             for f in topo.cells[k].faces
                 σ = topo.faces[f].cells[1] == k ? 1 : -1
+                nd = topo.faces[f].nodes[1]
                 s +=
                     σ *
                     g.face_area[f] *
                     g.face_normal[f][1] *
-                    corr_c(ds, topo, topo.faces[f].nodes[1])
+                    (nodes === nothing ? corr_c(ds, topo, nd) : nodes[nd])
             end
             c.r_velocity[cl.row_node[k]] =
                 _sweep_rate(g, topo, k, ds.w) - (c.θ[k] - θ_A) * ds.V_eval[k] - s
@@ -126,10 +162,10 @@ end
     t,
 ) where {L,NC}
     g = ds.geometry
+    nodes = Main.Pyrolysis.Closures.corr_nodes!(ds, topo)
     @inbounds for f = 1:n_faces(topo)
-        u =
-            -Main.Pyrolysis.Closures.corr_c(ds, topo, topo.faces[f].nodes[1]) *
-            g.face_normal[f][1]
+        u = -nodes[topo.faces[f].nodes[1]] * g.face_normal[f][1]
+        iszero(u) && continue
         s = _stencil(kernel, g, topo, f, u)
         U = s[1]
         T_f = _face_value(i -> ds.T[i], s..., kernel.ε[2, U])
@@ -185,75 +221,9 @@ end
     )
 end
 
-# Block deactivation: the contiguous run of below-threshold cells ending at the
-# top live cell merges, cell by cell, into the first live cell beneath it (or
-# into the lowest cell of the column, which survives).
-isdefined(Pyrolysis.Deactivation, :BLOCK) ||
-    @eval Pyrolysis.Deactivation const BLOCK = Ref(true)
-isdefined(Pyrolysis.Deactivation, :BAND) ||
-    @eval Pyrolysis.Deactivation const BAND = Ref(1.0)
-isdefined(Pyrolysis.Deactivation, :BAND_LOG) ||
-    @eval Pyrolysis.Deactivation const BAND_LOG = Tuple{Float64,Int,Float64}[]
-@eval Pyrolysis.Deactivation function deactivate!(
-    u::AbstractVector,
-    d::CellDeactivation,
-    def::CoreDefinition,
-    t::Real,
-)
-    layout = def.layout
-    if !BLOCK[]
-        while true
-            top = top_live_cell(layout)
-            (top == 0 || !below_threshold(d, layout, u, top)) && break
-            if top == 1
-                _lose!(u, d, def, top, Float64(t))
-                d.outcome[] = :burned_out
-                return :burned_out
-            end
-            _transfer!(u, d, d.policy, def, top, top - 1, Float64(t))
-        end
-        if any_below(d, layout, u)
-            d.outcome[] = :interior
-            return :interior
-        end
-        return :transferred
-    end
-    top = top_live_cell(layout)
-    # the near-threshold band: the run from the top of cells below BAND·ε_m
-    inband(i) =
-        layout.mask[energy_index(layout, i)] &&
-        d.reference[i] > 0 &&
-        condensed_mass(d, layout, u, i) < BAND[] * d.threshold * d.reference[i]
-    lo = top
-    while lo >= 1 && inband(lo)
-        lo -= 1
-    end
-    lo += 1
-    if lo <= top && any(i -> below_threshold(d, layout, u, i), lo:top)
-        fr = maximum(condensed_mass(d, layout, u, i) / d.reference[i] for i = lo:top)
-        push!(BAND_LOG, (Float64(t), top - lo + 1, fr))
-        if lo == 1 && top == 1
-            _lose!(u, d, def, 1, Float64(t))
-            d.outcome[] = :burned_out
-            return :burned_out
-        end
-        for i = top:-1:max(lo, 2)
-            _transfer!(u, d, d.policy, def, i, i - 1, Float64(t))
-        end
-    end
-    if any_below(d, layout, u)
-        d.outcome[] = :interior
-        return :interior
-    end
-    return :transferred
-end
-
 include(joinpath(REPO, "test", "verification", "casedefs.jl"))
 const CASES = load_verification_cases()
 const CORR = Pyrolysis.Closures.CORR
-const BLOCK = Pyrolysis.Deactivation.BLOCK
-const BAND = Pyrolysis.Deactivation.BAND
-const BAND_LOG = Pyrolysis.Deactivation.BAND_LOG
 
 function build_vbo(
     n_pmma;
@@ -267,6 +237,7 @@ function build_vbo(
     reltol = 1e-6,
     abstol = 1e-8,
     threshold = 1e-2,
+    κ = 1.0,
     builder = nothing,
     case_kw = (;),
 )
@@ -279,6 +250,7 @@ function build_vbo(
         abstol,
         reltol,
         threshold,
+        band = κ * threshold,
         time_scale = 1e-3,
         case_kw...,
     )
@@ -372,7 +344,6 @@ function run_vbo(n_pmma; min_thickness = 1e-3, nrep = 2, kw...)
     for r = 1:nrep
         hmin[] = Inf
         dtmin[] = Inf
-        empty!(BAND_LOG)
         t = @elapsed sol = Ig.integrate(
             cp2;
             callback = recorder(cp2, hmin, dtmin, cmax),
@@ -380,7 +351,7 @@ function run_vbo(n_pmma; min_thickness = 1e-3, nrep = 2, kw...)
         )
         push!(times, t)
         println(
-            "      solve $(r): retcode=$(sol.retcode) outcome=$(sol.outcome) events=$(length(sol.events)) invocations=$(length(unique(e.t for e in sol.events))) t_end=$(round(sol.t[end], digits=2)) hmin=$(hmin[])",
+            "      solve $(r): retcode=$(sol.retcode) outcome=$(sol.outcome) events=$(length(sol.events)) invocations=$(length(unique(e.invocation for e in sol.events))) t_end=$(round(sol.t[end], digits=2)) hmin=$(hmin[])",
         )
     end
     return (;
@@ -421,24 +392,21 @@ function report(tag, r)
     if !isempty(ev)
         strs = ["($(round(e.t, digits=2)), $(e.cell)→$(e.receiver))" for e in ev]
         println(
-            "    invocations (distinct event times) = ",
-            length(unique(e.t for e in ev)),
+            "    invocations = ",
+            length(unique(e.invocation for e in ev)),
             "; events: ",
             join(first(strs, 12), " "),
             " … ",
             join(last(strs, 12), " "),
         )
     end
-    isempty(BAND_LOG) || println(
-        "    band merges (t, cells, largest mass fraction): ",
-        join(
-            [
-                "($(round(b[1], digits=2)), $(b[2]), $(round(b[3], sigdigits=3)))" for
-                b in BAND_LOG
-            ],
-            " ",
-        ),
-    )
+    if !isempty(ev)
+        merges = map(unique(e.invocation for e in ev)) do k
+            es = filter(e -> e.invocation == k, ev)
+            "($(round(es[1].t, digits=2)), $(length(es)), $(round(maximum(e.fraction for e in es), sigdigits=3)))"
+        end
+        println("    invocations (t, cells, largest mass fraction): ", join(merges, " "))
+    end
     layout = r.cp.def.layout
     u = sol.raw_solution.u[end]
     d = r.cp.deactivation

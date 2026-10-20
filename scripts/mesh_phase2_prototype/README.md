@@ -5,14 +5,19 @@ here is package code, and nothing here is run by `Pkg.test()`.
 
 `common.jl` prototypes the correction `c = w − v_s` of the mesh-framework design
 on the finite-volume core by evaluating replacement methods into the package's
-modules: the per-node correction with its activation and monitor, the sweep term
+modules: the per-node correction with its activation and monitor (evaluated once
+per residual evaluation, by the relative-flux kernel, as the plan's `ds.c`; a
+face whose relative velocity is exactly zero is skipped), the sweep term
 in the balance rows and the consistent sweep (`Closures`), the relative-flux
 kernel at the relative velocity `−c` (`Kernels`), the Jacobian pattern widened
-for the velocity rows (`ColoredJacobian`), and the block-and-band deactivation
-rule (`Deactivation`). It also builds a `CoreProblem` with the relative-flux
-kernel installed on a reacting material, which `Integration.setup` refuses. The
-overrides persist in the Julia session: run each experiment in its own process,
-and never in a session that runs the package's tests.
+for the velocity rows (`ColoredJacobian`). It also builds a `CoreProblem` with
+the relative-flux kernel installed on a reacting material, which
+`Integration.setup` refuses. Cells deactivate by the package's block-and-band
+rule, the band given to `build_vbo` as a multiple `κ` of the threshold. The
+tables of the plan's Appendix A were taken on `bb2860b`, before the package had
+that rule, with the prototype's own version of it, which merged a run cell by
+cell. The overrides persist in the Julia session: run each experiment in its
+own process, and never in a session that runs the package's tests.
 
 ```sh
 julia --project=test --startup-file=no --threads=1 scripts/mesh_phase2_prototype/run.jl <experiment>
