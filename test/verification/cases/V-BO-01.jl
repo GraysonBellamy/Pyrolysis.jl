@@ -198,7 +198,8 @@ end
 # at every accepted state and reads the live cells' temperatures and the
 # surface balances. The old core's depletion keywords have no counterpart
 # there. `instrument(cp)` returns a further callback of the set-up problem
-# for the gate scripts (`nothing` for none).
+# for the gate scripts (`nothing` for none); `min_thickness` and, when given,
+# `located_events` go to the integration, the rest to the setup.
 function _vbo_core_solve(
     problem,
     rec::_VBORecord;
@@ -206,6 +207,7 @@ function _vbo_core_solve(
     depletion_threshold = nothing,
     min_cells = nothing,
     min_thickness = 1e-6,
+    located_events = nothing,
     instrument = cp -> nothing,
     kwargs...,
 )
@@ -231,7 +233,8 @@ function _vbo_core_solve(
     extra = instrument(cp)
     recorder = _vbo_recorder(observe!, rec)
     callback = extra === nothing ? recorder : CallbackSet(recorder, extra)
-    return Pyrolysis.Integration.integrate(cp; callback, min_thickness)
+    located = located_events === nothing ? (;) : (; located_events)
+    return Pyrolysis.Integration.integrate(cp; callback, min_thickness, located...)
 end
 
 # The case's solve. On the new core a `corrected` case moves its mesh by the

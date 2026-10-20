@@ -9,8 +9,8 @@
 # enthalpy defect shows; and V-BO-04's burning column (40 cells, moving mesh)
 # over the window before the first deactivation event on either core (0 to
 # 290 s; the old core parks its first cells at 299.6 s, the new core
-# deactivates the column at 465 s), solved without deactivation. V-BO-04 is
-# adiabatic, so its closures are over the change of the total enthalpy over
+# deactivates the column at 465 s), solved without deactivation, and across
+# that event (3). V-BO-04 is adiabatic, so its closures are over the change of the total enthalpy over
 # the window, each core's own.
 #
 # 1. Closure at the case's tolerance (abstol 1e-8, reltol 1e-6 on V-CPL-06,
@@ -35,6 +35,16 @@
 #    which a fixed step cannot reject); its column stays at its initial
 #    temperature, so its enthalpy is linear in the masses and the defect is
 #    round-off in both forms.
+# 3. V-BO-04 across its event: the case's run with deactivation, 40 cells, at
+#    its tolerance, with event location off and on. The inventory is the live
+#    cells' extended energy (the inventories in the inventory form), the
+#    boundary terms are taken at the live boundary faces and the sources over
+#    the live cells; each invocation's lost enthalpy and regularization leave
+#    the inventory at the event, its lost masses the mass inventory. A probe
+#    located where the smallest threshold margin is `PRE_EVENT` gives the
+#    ledger its last node before each event; the steps after it to the event
+#    are what location shortens. The old core's budget does not park cells, so
+#    its closure before the event is the comparison.
 #
 # Run from the repository root:
 #   julia --project=test --startup-file=no --threads=1 test/newcore/gates/energy_ledger.jl
@@ -47,6 +57,8 @@ include(joinpath(@__DIR__, "..", "..", "verification", "casedefs.jl"))
 using ForwardDiff
 using LinearAlgebra: I
 using OrdinaryDiffEq: OrdinaryDiffEq, ODEFunction, ODEProblem, DiscreteCallback, Rodas5P
+using OrdinaryDiffEq: ContinuousCallback, CallbackSet
+using Pyrolysis.Deactivation: threshold_margin
 # The new core's names are qualified: V-CPL-06's ledger, included into this
 # module, calls the old core's `residual!`.
 const Meshes = Pyrolysis.Meshes
@@ -66,6 +78,7 @@ const VBO04_WINDOW = 290.0
 const VBO04_TOL = (abstol = 1e-9, reltol = 1e-7)
 const VBO04_STEPS = (0.1, 0.05, 0.025)
 const ROUND_OFF = 1e-12
+const PRE_EVENT = 1e-8
 
 # The total-enthalpy rate the inventories imply: what enters through the
 # boundary faces (the condition's heat flux and the enthalpy the boundary mass
@@ -143,6 +156,115 @@ function new_core_closure(problem; use_ale, energy_state, t_win = T_WINDOW, tol 
         boundary = acc[2],
         steps = sol.statistics.accepted,
         wall,
+    )
+end
+
+# The inventory rates of the live region: the energy rate of `ledger_rate`
+# and the mass rate, with the boundary terms at the live boundary faces and
+# the sources over the live cells.
+function live_rates(def, c, ds)
+    topo = def.setup.topology
+    g = ds.geometry
+    L, M = 0.0, 0.0
+    for f0 = 1:Meshes.n_faces(topo)
+        topo.faces[f0].cells[2] == 0 || continue
+        f = Meshes.live_face(topo, ds.active, f0)
+        f == 0 && continue
+        L -= c.F_energy[f] * g.face_area[f]
+        M -= sum(c.F_mass[j, f] for j in axes(c.F_mass, 1)) * g.face_area[f]
+    end
+    for i = 1:Meshes.n_cells(topo)
+        ds.active[i] || continue
+        L += c.S_energy[i]
+        for j in axes(c.S_mass, 1)
+            L += c.S_mass[j, i] * ds.h[j, i]
+        end
+    end
+    return L, M
+end
+
+# The live cells' extended energy [J] and mass [kg] in the state `u`, from
+# its derived state `ds`.
+function live_inventories(def, cells, ds, u)
+    layout, laws = def.layout, def.setup.laws
+    E, m = 0.0, 0.0
+    for i = 1:Meshes.n_cells(layout)
+        ds.active[i] || continue
+        masses = ntuple(j -> u[States.mass_index(layout, i, j)], size(ds.m, 1))
+        E +=
+            States.energy_state(layout) isa States.EnthalpyState ?
+            u[States.energy_index(layout, i)] :
+            States.extended_energy(cells.caloric, laws, ds.T[i], masses, i)
+        m += sum(masses)
+    end
+    return E, m
+end
+
+# The new core's closures across the events of a deactivating solve: the
+# energy and mass defects against the trapezoidal ledger with the events'
+# terms, the inventory changes, and the events' terms.
+function new_core_event_closure(problem; energy_state, located, tol = VBO04_TOL)
+    cp = Integration.setup(
+        problem;
+        use_ale = true,
+        energy_state,
+        deactivation = true,
+        tol...,
+    )
+    def, ws, cells = cp.def, cp.ws, cp.deactivation
+    du = zeros(length(cp.u0))
+    acc, prev = zeros(2), zeros(2)
+    first_node, last_node, last_t, started = zeros(2), zeros(2), Ref(0.0), Ref(false)
+    function node!(integ)
+        t = integ.t
+        Assembly.residual!(du, integ.u, def, t, ws)
+        ds, c = Assembly.buffers(ws, def, Float64)
+        cur = live_rates(def, c, ds)
+        inventories = live_inventories(def, cells, ds, integ.u)
+        if started[]
+            acc .+= 0.5 .* (prev .+ cur) .* (t - last_t[])
+        else
+            first_node .= inventories
+            started[] = true
+        end
+        last_node .= inventories
+        last_t[] = t
+        prev .= cur
+        OrdinaryDiffEq.SciMLBase.derivative_discontinuity!(integ, false)
+        return nothing
+    end
+    margin(u) = threshold_margin(cells, def.layout, u)
+    pre_event = ContinuousCallback(
+        (u, t, integ) -> margin(u) - PRE_EVENT,
+        nothing;
+        affect_neg! = node!,
+        save_positions = (false, false),
+    )
+    step = DiscreteCallback((u, t, integ) -> true, node!; save_positions = (false, false))
+    sol = Integration.integrate(
+        cp;
+        callback = CallbackSet(pre_event, step),
+        located_events = located,
+        min_thickness = 1e-6,
+    )
+    events = sol.events
+    lost_energy = sum(e.lost_enthalpy + e.regularization for e in events; init = 0.0)
+    lost_mass = sum(sum(e.lost_mass) for e in events; init = 0.0)
+    ΔE, Δm = last_node .- first_node
+    return (;
+        retcode = sol.retcode,
+        outcome = sol.outcome,
+        invocations = sol.statistics.invocations,
+        events = length(events),
+        t_event = isempty(events) ? NaN : first(events).t,
+        energy_defect = ΔE - acc[1] + lost_energy,
+        mass_defect = Δm - acc[2] + lost_mass,
+        ΔE,
+        Δm,
+        lost_energy,
+        regularization = sum(e.regularization for e in events; init = 0.0),
+        created_volume = sum(e.created_volume for e in events; init = 0.0),
+        steps = sol.statistics.accepted,
     )
 end
 
@@ -264,6 +386,28 @@ for energy_state in (:temperature, :enthalpy)
     flush(stdout)
 end
 
+# V-BO-04 across its event, with event location off and on.
+vbo04_event = []
+for energy_state in (:temperature, :enthalpy), located in (false, true)
+    r = new_core_event_closure(
+        Base.invokelatest(_vbo04_setup, VBO04_CELLS).problem;
+        energy_state,
+        located,
+    )
+    push!(
+        vbo04_event,
+        (;
+            energy_state,
+            location = located ? "on" : "off",
+            r...,
+            energy_closure = abs(r.energy_defect) / abs(r.ΔE),
+            mass_closure = abs(r.mass_defect) / abs(r.Δm),
+        ),
+    )
+    println(vbo04_event[end])
+    flush(stdout)
+end
+
 refinement = []
 for use_ale in (false, true)
     deck = use_ale ? "moving" : "Eulerian"
@@ -310,7 +454,7 @@ open(joinpath(OUT, "energy_ledger.md"), "w") do io
         "$(Threads.nthreads()) thread, $(Sys.CPU_THREADS) logical CPUs; load average ",
         "$(round.(load_start; digits = 1)) at the start and $(round.(load_end; digits = 1)) ",
         "at the end. Phase 1's gate item 7 on V-CPL-06's char-layer column, and Phase 2's item 3 ",
-        "on V-BO-04's burning column before its first event.\n",
+        "on V-BO-04's burning column before and across its event.\n",
     )
     println(
         io,
@@ -376,6 +520,34 @@ open(joinpath(OUT, "energy_ledger.md"), "w") do io
             io,
             "| $(r.energy_state) | $(r.dt) | $(r.retcode) | $(_g(r.defect)) | ",
             "$(_g(r.scale)) | $(_g(r.defect / r.scale)) | $(order) |",
+        )
+    end
+    println(
+        io,
+        "\n## V-BO-04 across its event\n\nThe case's run, $(VBO04_CELLS) cells on a moving ",
+        "mesh with deactivation, abstol $(VBO04_TOL.abstol), reltol $(VBO04_TOL.reltol), ",
+        "event location off and on. Inventories over the live cells (the extended energy, ",
+        "the inventory itself in the enthalpy form, and the mass), the boundary terms at the ",
+        "live boundary faces, the sources over the live cells, trapezoidal over the accepted ",
+        "steps with a node where the smallest threshold margin is $(PRE_EVENT); each ",
+        "invocation's lost enthalpy and regularization and its lost masses leave the ",
+        "inventories at the event. Closure: |Δ − ∫ ledger + lost| over |Δ|, energy and mass. ",
+        "Event: the first invocation's time [s]; lost energy, regularization: the events' ",
+        "sums over |ΔE|; created volume: the events' sum [m³]. The old core's budget does ",
+        "not park cells; its closure before the event is the table above.\n",
+    )
+    println(
+        io,
+        "| form | location | retcode | outcome | invocations | events | event [s] | energy closure | mass closure | lost energy | regularization | created volume | steps |",
+    )
+    println(io, "|" * repeat("---|", 13))
+    for r in vbo04_event
+        println(
+            io,
+            "| $(r.energy_state) | $(r.location) | $(r.retcode) | $(r.outcome) | $(r.invocations) | ",
+            "$(r.events) | $(_g(r.t_event; d = 7)) | $(_g(r.energy_closure)) | $(_g(r.mass_closure)) | ",
+            "$(_g(abs(r.lost_energy) / abs(r.ΔE))) | $(_g(abs(r.regularization) / abs(r.ΔE))) | ",
+            "$(_g(r.created_volume)) | $(r.steps) |",
         )
     end
 end
