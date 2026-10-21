@@ -8,8 +8,11 @@
 The right-hand side of the core's mass-matrix system `M du/dt = f(u, t)`: the
 state mapping, the node corrections of the mesh closure, the kernels in
 assembler order, the mesh closure (strain rates from the reaction sources,
-velocity rows), the external sources, then the row assembly. A pure function of `(u, t)` given `def`; `ws` holds buffers
-only. Dual-number states evaluate in their own buffers, chosen by the state's
+velocity rows), the external sources, then the row assembly. In the
+temperature form a pure function of `(u, t)` given `def`, `ws` holding buffers
+only; in the inventory form the caloric inversion starts from the
+temperatures of the workspace's latest plain evaluation, so the result also
+depends on the evaluation history, at the inversion's round-off. Dual-number states evaluate in their own buffers, chosen by the state's
 element type, so `t` must be a plain number: a forward-mode derivative in
 time alone (a dual `t` with a `Float64` state) is not supported, and every
 integrator policy takes its time derivative by finite differences.

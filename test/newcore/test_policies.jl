@@ -6,6 +6,7 @@ using Pyrolysis.Integration
 using Pyrolysis.Integration: setup, kencarp4_policy, rodas5p_policy, fbdf_policy
 using Pyrolysis.Integration: DomainCheck, NewtonCap, cap_step!, FAILURE_MEMORY_GROWTH
 using Pyrolysis.Integration: FAILURE_MEMORY_STEPS
+using Pyrolysis.Assembly: residual!
 import OrdinaryDiffEq
 using OrdinaryDiffEq: ODEProblem, DiscreteCallback, CallbackSet, init, step!
 using OrdinaryDiffEq: derivative_discontinuity!
@@ -419,6 +420,68 @@ end
         @test sols[2].raw_solution.t == sols[1].raw_solution.t
         @test sols[2].raw_solution.u == sols[1].raw_solution.u
         @test sols[2].statistics.accepted == sols[1].statistics.accepted
+    end
+end
+
+# An ablating solid heated at the top, its heat capacity rising with the
+# temperature so that the caloric inversion is nonlinear: its cells thin and
+# deactivate.
+function _ablating(n)
+    ρ, c, k = 1000.0, 1000.0, 1.0
+    R, E, Tp, T0 = 8.314462618, 1.0e5, 700.0, 300.0
+    v = 2.0e-3
+    A = v^2 * E * (Tp - T0) * exp(E / (R * Tp)) / (k / (ρ * c) * R * Tp^2)
+    mat = Material(
+        name = :ablator,
+        components = (
+            SolidComponent(
+                :solid,
+                ρ = ρ,
+                c = PolynomialProperty((700.0, 0.8, -1e-4)),
+                k = k,
+                λ = 1e-6,
+            ),
+            GaseousComponent(:gas, M = 0.05, c = c, k = 0.02, λ = 1e-4),
+        ),
+        reactions = (Reaction(:ablate, 1 => 2; A = A, E = E, h = 1.0e6),),
+    )
+    return PyrolysisProblem(
+        mesh = create_uniform_mesh(3e-3, n, Val(2)),
+        material = mat,
+        bc_set = BoundaryConditionSet(
+            thermal = (top = HeatFluxBC(2.8e6), bottom = AdiabaticBC()),
+            mass = (
+                top = ConvectiveMassBC(h_m = 10.0, ξ_inf = 0.0),
+                bottom = ImpermeableBC(),
+            ),
+        ),
+        T_initial = z -> T0 + 1e5 * z,
+        ξ_initial = [z -> ρ, z -> 0.0],
+        tspan = (0.0, 0.8),
+    )
+end
+
+@testset "every integration starts the caloric inversion from the set-up temperatures" begin
+    problem = _ablating(30)
+    kw = (energy_state = :enthalpy, use_ale = true, deactivation = true)
+    cp = setup(problem; kw...)
+    @test cp.ws.T_warm == cp.T0
+    once = integrate(cp; saveat = Float64[])
+    @test !isempty(once.events)
+    # An evaluation outside the integrator, at enthalpies 1 % above the initial
+    # ones, moves the inversion's starting point.
+    layout = cp.def.layout
+    v = copy(cp.u0)
+    for i in eachindex(cp.T0)
+        v[energy_index(layout, i)] *= 1.01
+    end
+    residual!(similar(v), v, cp.def, 0.0, cp.ws)
+    @test cp.ws.T_warm != cp.T0
+    again = integrate(cp; saveat = Float64[])
+    fresh = integrate(setup(problem; kw...); saveat = Float64[])
+    for sol in (again, fresh)
+        @test sol.raw_solution.t == once.raw_solution.t
+        @test sol.raw_solution.u == once.raw_solution.u
     end
 end
 

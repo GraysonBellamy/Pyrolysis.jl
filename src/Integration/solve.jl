@@ -170,7 +170,9 @@ consistent ([`consistent_state!`](@ref)), with the tolerances it was set up
 with. The keywords are those of [`solve`](@ref); `max_constraint_rejections`
 bounds the domain test's run of consecutive constraint rejections
 ([`DomainCheck`](@ref)), and `started` is the time the reported solve time
-counts from.
+counts from. Every call starts with every cell live and, in the inventory
+form, the caloric inversion from the set-up temperatures, so repeated
+integrations of one problem are bit-identical.
 """
 function integrate(
     cp::CoreProblem;
@@ -195,6 +197,7 @@ function integrate(
     layout = def.layout
     cells = cp.deactivation
     cells === nothing || reset_cells!(cells, layout)
+    copyto!(ws.T_warm, cp.T0)
     policy =
         integrator_policy === nothing ?
         default_policy(
