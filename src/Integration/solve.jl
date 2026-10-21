@@ -29,7 +29,6 @@ const _SOLVE_KEYWORDS = (
     :band,
     :correction,
     :lagrangian,
-    :switch_width,
     :located_events,
 )
 
@@ -41,7 +40,7 @@ const _SOLVE_KEYWORDS = (
 	      linear_solver = nothing, integrator_policy = nothing,
 	      sources = NoSources(), deactivation = false, band = nothing,
 	      correction = NoCorrection(), lagrangian = Int[],
-	      switch_width = SWITCH_WIDTH, located_events = true) -> CoreSolution
+	      located_events = true) -> CoreSolution
 
 Solve `problem` on the finite-volume core.
 
@@ -65,7 +64,7 @@ accepted for the keyword set of the other solver and draws nothing; `jacobian`
 is accepted and ignored, the colored Jacobian being the only one.
 
 `use_ale`, `w_override`, `correction`, `lagrangian`, `coordinates`,
-`deactivation`, `band` and `switch_width` are those of [`setup`](@ref). On a moving mesh the solve ends with return code
+`deactivation` and `band` are those of [`setup`](@ref). On a moving mesh the solve ends with return code
 `:Terminated` when the thickness falls below `min_thickness` [m] (default
 1e-6). With `deactivation`, cells are deactivated in events
 ([`deactivate!`](@ref)): with `located_events` an event is located inside the
@@ -115,7 +114,6 @@ function _solve(
     band::Union{Nothing,Real} = nothing,
     correction::Correction = NoCorrection(),
     lagrangian::AbstractVector{<:Integer} = Int[],
-    switch_width::Real = SWITCH_WIDTH,
     located_events::Bool = true,
 )
     jacobian === nothing ||
@@ -138,7 +136,6 @@ function _solve(
         band,
         correction,
         lagrangian,
-        switch_width,
     )
     return integrate(
         cp;

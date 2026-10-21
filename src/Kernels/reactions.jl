@@ -3,92 +3,30 @@
 # ============================================================================
 
 """
-	SWITCH_WIDTH
-
-The default width of the reactivity switch: it is one above `SWITCH_WIDTH`
-times the deactivation threshold of a cell's remaining condensed mass
-fraction. A wider switch slows the outermost cell so much that the cell
-inward of it depletes first.
-"""
-const SWITCH_WIDTH = 1.5
-
-"""
-	ReactivitySwitch{NC}
-
-The smooth switch-off of a cell's reactions as its condensed mass approaches
-the deactivation threshold: the rates are multiplied by
-`s = x² (3 − 2x)` with `x = mˢ / (width · ε_m · mˢ_ref)`, clamped to `[0, 1]`,
-so `s` is one above `width · ε_m`, `C¹`, about three quarters at the threshold
-at the default width [`SWITCH_WIDTH`](@ref) (which the cell therefore still
-reaches) and zero at no condensed mass. On a moving mesh a cell's thickness
-falls with its mass and its concentrations do not, so the concentration
-limiter alone never slows a vanishing cell.
-
-`reference` holds the cells' initial condensed masses, `solid` flags the
-condensed components.
-"""
-struct ReactivitySwitch{NC}
-    threshold::Float64
-    reference::Vector{Float64}
-    solid::NTuple{NC,Bool}
-    width::Float64
-end
-
-"""
-	ReactivitySwitch(threshold, reference, solid; width = SWITCH_WIDTH)
-
-The switch of the cells whose initial condensed masses are `reference`; it
-is one above `width` times the threshold.
-"""
-ReactivitySwitch(threshold, reference, solid; width::Real = SWITCH_WIDTH) =
-    ReactivitySwitch(Float64(threshold), reference, solid, Float64(width))
-
-"""
-	reactivity(switch, ds, i)
-
-The factor the rates of cell `i` are multiplied by.
-"""
-@inline function reactivity(sw::ReactivitySwitch{NC}, ds::DerivedState{NC}, i) where {NC}
-    ref = sw.reference[i]
-    ref > 0 || return one(eltype(ds.m))
-    ms = zero(eltype(ds.m))
-    @inbounds for j = 1:NC
-        sw.solid[j] && (ms += ds.m[j, i])
-    end
-    x = ms / (sw.width * sw.threshold * ref)
-    x >= 1 && return one(x)
-    x <= 0 && return zero(x)
-    return x * x * (3 - 2x)
-end
-
-"""
-	ReactionKernel{S} <: Kernel
+	ReactionKernel <: Kernel
 
 Arrhenius kinetics evaluated at the trial temperature: per cell the reaction
 mass sources `ωᵢⱼ Vᵢ` and the reaction heat `Q_rxn(Tᵢ) Vᵢ`, with the heats quoted
-at the local temperature, times the cell's [`reactivity`](@ref).
+at the local temperature.
 
 The rates carry a [`OneSidedLimiter`](@ref), so an absent or negative trial
 concentration is never consumed whatever the reaction order, and every rate is
 finite with a finite derivative at any real state; a cell in which every
-reaction lacks a reactant contributes nothing and is not evaluated. `switch`
-is a [`ReactivitySwitch`](@ref) when cells can be deactivated, `nothing`
-otherwise.
+reaction lacks a reactant contributes nothing and is not evaluated.
 """
-struct ReactionKernel{S} <: Kernel
+struct ReactionKernel <: Kernel
     limiter::OneSidedLimiter
-    switch::S
 end
 
 """
-	ReactionKernel(material; switch = nothing)
+	ReactionKernel(material)
 
 The reaction kernel with the one-sided limiter of the material's threshold and
 enabled flag; above the limiter's join its rates equal those of the material's
 own limiter.
 """
-ReactionKernel(material::Material; switch = nothing) =
-    ReactionKernel(OneSidedLimiter(material.depletion_limiter), switch)
+ReactionKernel(material::Material) =
+    ReactionKernel(OneSidedLimiter(material.depletion_limiter))
 
 # Whether every reaction has a reactant at or below zero in `ξ`: under an
 # enabled one-sided limiter its rate and every derivative of it are then
@@ -113,11 +51,10 @@ function contribute!(
         V = ds.V_eval[i]
         evaluate_reactions!(c.rates, c.heats, ξ, T, material, kernel.limiter)
         species_source_terms!(c.species, c.rates, material)
-        sV = kernel.switch === nothing ? V : reactivity(kernel.switch, ds, i) * V
         for j = 1:NC
-            c.S_mass[j, i] += c.species[j] * sV
+            c.S_mass[j, i] += c.species[j] * V
         end
-        c.S_energy[i] += reaction_heat_source(c.rates, c.heats) * sV
+        c.S_energy[i] += reaction_heat_source(c.rates, c.heats) * V
     end
     return c
 end

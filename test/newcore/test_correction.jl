@@ -6,7 +6,7 @@ using Pyrolysis
 using Pyrolysis.Materials: DepletionLimiter, BEER_LAMBERT
 using Pyrolysis.Meshes
 using Pyrolysis.States
-using Pyrolysis.Kernels: RelativeFluxKernel, ReactionKernel, SWITCH_WIDTH, find_kernel
+using Pyrolysis.Kernels: RelativeFluxKernel, find_kernel
 using Pyrolysis.Closures
 using Pyrolysis.Assembly: residual!
 using Pyrolysis.ColoredJacobian
@@ -280,18 +280,13 @@ end
     @test_throws ArgumentError EquidistributionCorrection(monitor = (1.0, -1.0))
 
     # The band defaults to CORRECTION_BAND under the correction, to the
-    # threshold without; a zero switch width removes the switch.
+    # threshold without.
     kw = (use_ale = true, deactivation = true, lagrangian = [4])
     @test setup(p; kw..., correction = EquidistributionCorrection()).deactivation.band ==
           CORRECTION_BAND
     @test setup(p; kw...).deactivation.band == 1e-2
     @test setup(p; kw..., threshold = 0.2, correction = EquidistributionCorrection()).deactivation.band ==
           0.2
-    @test find_kernel(ReactionKernel, setup(p; kw...).def.kernels).switch.width ==
-          SWITCH_WIDTH
-    @test find_kernel(ReactionKernel, setup(p; kw..., switch_width = 0).def.kernels).switch ===
-          nothing
-    @test_throws ArgumentError setup(p; kw..., switch_width = -1.0)
 end
 
 # ============================================================================

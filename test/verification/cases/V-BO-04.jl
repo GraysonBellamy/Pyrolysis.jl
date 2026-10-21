@@ -21,11 +21,9 @@
 # initial mass and every cell is in the near-threshold band when the first
 # crosses it, so the whole column merges into the innermost cell in one
 # invocation; that survivor holds the column's mass, about 40 ε_m of its own
-# initial mass, and burns on at the exact rate past t_end. The reactivity
-# switch, s(x) = x²(3 − 2x) with x = y/(1.5 ε_m) and y = m/m₀ = L/L₀, slows
-# every cell below 1.5 ε_m, so the exact law there is dy/dt = −(r/ρ_s) s y,
-# which integrates in closed form (`_vbo04_decay`), and after the event the
-# survivor's own decay from the merged thickness.
+# initial mass, at ρ_s and burns on at the exact rate past t_end, so the
+# exact law holds through the event. The event is located at the exact
+# crossing, t = ln(1/ε_m) ρ_s/r.
 
 # `t_end` defaults to three cascades on the old core (40 → 20 → 10 → 5 cells).
 function _vbo04_setup(n_cells::Int; t_end = 480.0)
@@ -57,39 +55,8 @@ function _vbo04_setup(n_cells::Int; t_end = 480.0)
     return (; problem, ρ_s, T0, L0, r, t_end)
 end
 
-# The fraction `y` at `t` of a mass decaying at `k s(y/y₁) y` from `y0` at
-# `t0`, `y₁` the top of the reactivity switch: exponential above `y₁`, and
-# below it `t − t_s = (F(x_s) − F(x))/k` with `x = y/y₁` and
-# `F(x) = −1/(6x²) − 2/(9x) + (4/27) ln(x/(3 − 2x))`, the primitive of
-# `1/(x³(3 − 2x))`, inverted by bisection.
-function _vbo04_decay(t, y0, t0, k, y₁)
-    F(x) = -1 / (6x^2) - 2 / (9x) + (4 / 27) * log(x / (3 - 2x))
-    t_s = y0 > y₁ ? t0 + log(y0 / y₁) / k : t0
-    t <= t_s && return y0 * exp(-k * (t - t0))
-    x_s = min(y0 / y₁, 1.0)
-    target = F(x_s) - k * (t - t_s)
-    lo, hi = 0.0, x_s
-    for _ = 1:200
-        mid = (lo + hi) / 2
-        (mid > 0 && F(mid) >= target) ? (hi = mid) : (lo = mid)
-    end
-    return y₁ * (lo + hi) / 2
-end
-
-# The exact thickness of the solved column: on the old core the plain
-# exponential, on the new one the switched decay of the identical cells up to
-# the event at `t_e` and the survivor's own decay after it, the survivor
-# holding the `n` cells' mass in units of one cell's initial mass.
-function _vbo04_exact(sol, S, n)
-    k = S.r / S.ρ_s
-    VERIFICATION_CORE == "new" || return t -> S.L0 * exp(-k * t)
-    y₁ = Pyrolysis.Kernels.SWITCH_WIDTH * 1e-2
-    t_e = isempty(sol.events) ? Inf : first(sol.events).t
-    y_e = _vbo04_decay(t_e, 1.0, 0.0, k, y₁)
-    return t ->
-        t < t_e ? S.L0 * _vbo04_decay(t, 1.0, 0.0, k, y₁) :
-        S.L0 / n * _vbo04_decay(t, n * y_e, t_e, k, y₁)
-end
+# The exact thickness of the solved column.
+_vbo04_exact(S) = t -> S.L0 * exp(-S.r / S.ρ_s * t)
 
 function _verification_case_vbo04()
     n_default = 40
@@ -98,7 +65,7 @@ function _verification_case_vbo04()
     end
     function qois(sol)
         S = _vbo04_setup(n_default)
-        L_exact = _vbo04_exact(sol, S, n_default)
+        L_exact = _vbo04_exact(S)
         th = sol.extras.thickness_history
         err_L = maximum(
             abs(th[i] - L_exact(sol.t[i])) / L_exact(sol.t[i]) for i in eachindex(sol.t)
@@ -116,12 +83,13 @@ function _verification_case_vbo04()
         live_end = sol.extras.live_cells[end]
         thickness = QoIResult(
             name = VERIFICATION_CORE == "new" ?
-                   "thickness follows the switched exact law through the event" :
+                   "thickness follows L₀ exp(−r t/ρ) through the event" :
                    "thickness follows L₀ exp(−r t/ρ) through the park cascades",
             value = th[end],
             exact = L_exact(sol.t[end]),
             error = err_L,
-            tol = 1e-4,
+            # observed 1.5e-9 (temperature form), 1.2e-9 (enthalpy form)
+            tol = VERIFICATION_CORE == "new" ? 1e-6 : 1e-4,
             comment = "max relative error over all output times",
         )
         common = [
@@ -157,10 +125,7 @@ function _verification_case_vbo04()
         invocations = length(unique(e.invocation for e in sol.events))
         # The exact time the identical cells cross ε_m; the event is located
         # on it.
-        k = S.r / S.ρ_s
-        y₁ = Pyrolysis.Kernels.SWITCH_WIDTH * 1e-2
-        F(x) = -1 / (6x^2) - 2 / (9x) + (4 / 27) * log(x / (3 - 2x))
-        t_cross = log(1 / y₁) / k + (F(1.0) - F(1e-2 / y₁)) / k
+        t_cross = log(1 / 1e-2) * S.ρ_s / S.r
         t_e = isempty(sol.events) ? Inf : first(sol.events).t
         return [
             common...,
@@ -177,7 +142,7 @@ function _verification_case_vbo04()
                 value = t_e,
                 exact = t_cross,
                 error = abs(t_e - t_cross) / t_cross,
-                tol = 1e-6,  # observed 5.2e-8 (temperature form), 2.3e-8 (enthalpy form)
+                tol = 1e-6,  # observed 3.1e-10 (temperature form), 1.8e-10 (enthalpy form)
                 comment = "relative distance of the event from the exact crossing time (ε_m = 1e-2)",
             ),
         ]
@@ -215,7 +180,7 @@ function _verification_case_vbo04()
                                 label = "live thickness",
                                 x = sol.t,
                                 y = sol.extras.thickness_history,
-                                exact = _vbo04_exact(sol, S, n_default),
+                                exact = _vbo04_exact(S),
                             ),
                         ],
                     ),

@@ -159,10 +159,9 @@ function _kernels(
     gas::GasTransport,
     radiation_model,
     relative::Tuple,
-    switch,
 )
     material = problem.material
-    reactions = n_reactions(material) > 0 ? (ReactionKernel(material; switch),) : ()
+    reactions = n_reactions(material) > 0 ? (ReactionKernel(material),) : ()
     transport =
         gas isa NoGasTransport ? () :
         (GasTransportKernel(gas, topo, g0, problem.bc_set, material, laws),)
@@ -278,8 +277,7 @@ end
 	      coordinates = Planar(), w_override = nothing,
 	      correction = NoCorrection(), lagrangian = Int[],
 	      time_scale = problem.dt_initial, sources = NoSources(),
-	      deactivation = false, band = nothing,
-	      switch_width = SWITCH_WIDTH) -> CoreProblem
+	      deactivation = false, band = nothing) -> CoreProblem
 
 Set up `problem` on the finite-volume core: apply its initial conditions to its
 own copy of the mesh, build the 1D mesh from the node positions and the
@@ -323,9 +321,7 @@ of it whose condensed mass is below the fraction `band` (`ε_band`, in
 `[threshold, 1)`; by default the larger of the threshold and
 [`CORRECTION_BAND`](@ref) under an equidistribution correction, otherwise
 the threshold, so that only the cells below it go) of theirs
-([`deactivate!`](@ref)); the reactions of a cell then switch off smoothly
-below `switch_width` times `ε_m` ([`ReactivitySwitch`](@ref); zero for no
-switch).
+([`deactivate!`](@ref)).
 `threshold` also scales the mass tolerances; `sources` is the external-source
 hook.
 """
@@ -345,7 +341,6 @@ function setup(
     sources = NoSources(),
     deactivation::Bool = false,
     band::Union{Nothing,Real} = nothing,
-    switch_width::Real = SWITCH_WIDTH,
 )
     if w_override !== nothing
         correction isa NoCorrection || throw(
@@ -353,8 +348,6 @@ function setup(
         )
         correction = PrescribedCorrection(w_override)
     end
-    switch_width >= 0 ||
-        throw(ArgumentError("switch_width must not be negative, got $switch_width"))
     _require_supported(
         problem,
         use_ale,
@@ -472,15 +465,7 @@ function setup(
                 CaloricExtension(laws, reference.mass_scale, reference.capacity_floor),
             ),
         ) : nothing
-    switch =
-        cells === nothing || iszero(switch_width) ? nothing :
-        ReactivitySwitch(
-            cells.threshold,
-            cells.reference,
-            cells.solid;
-            width = switch_width,
-        )
-    kernels = _kernels(problem, topo, g0, laws, gas, radiation_model, relative, switch)
+    kernels = _kernels(problem, topo, g0, laws, gas, radiation_model, relative)
     def = CoreDefinition(layout, state_setup, kernels, closure, sources)
     ws = CoreWorkspace(def, T0)
 

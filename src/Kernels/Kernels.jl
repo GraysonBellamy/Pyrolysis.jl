@@ -28,7 +28,7 @@ include("thermal_boundary.jl")
 include("relative_flux.jl")
 
 export Kernel, Contributions, reset!, contribute!, find_kernel
-export ReactionKernel, ReactivitySwitch, reactivity, SWITCH_WIDTH
+export ReactionKernel
 export ConductionKernel, normal_conductivity
 export GasTransportKernel, outward_darcy_velocity, MOBILITY_GUARD
 export BeerLambertKernel, incident_intensity, sweep_intensities!, transmitted_face

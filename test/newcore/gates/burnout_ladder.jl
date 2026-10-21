@@ -1,7 +1,6 @@
 # Gate items 1, 2, 4, 6 and 10 of the Phase 2 plan (§7.3) and R25's tail
 # diagnostic, as M4 measures them: the burnout cases on the finite-volume core
-# with the equidistribution correction, across grids, thresholds, `τ` and the
-# reactivity switch.
+# with the equidistribution correction, across grids, thresholds and `τ`.
 #
 # The matrix, every run in both energy forms, the band at its default (0.1):
 #
@@ -10,8 +9,6 @@
 #   V-BO-01 at 60 cells and ε_m = 1e-2 with τ = 360 and 3600 s (τ is the
 #   layer's equidistribution time; the prototype's per-cell τ_p = τ/N² is
 #   0.1, 0.2 and 1 s at 60 cells for τ = 360, 720 and 3600 s);
-#   V-BO-01 at 30, 60 and 120 cells, ε_m = 1e-2, without the reactivity switch
-#   (`switch_width = 0`);
 #   V-BO-03 at 30, 60 and 120 cells at the defaults;
 #   V-BO-04 at its 40 cells without and with the correction.
 #
@@ -38,12 +35,11 @@
 # step before any discrete callback runs, and never crosses zero.
 #
 # R25's tail diagnostic, for every V-BO-01 run: at the state that ends the
-# step of the layer's invocation, before the merge, the PMMA mass `mᵢ`, the
-# temperature `Tᵢ` and the switch `sᵢ` of the merged cells and the receiver;
-# after it the residue and the merged temperature `T_m`; the rate
-# `Σ mᵢ k(Tᵢ) sᵢ → m_res k(T̄) s̄ → m_res k(T̄) → m_res k(T_m) s_m`, `T̄` and
-# `s̄` the mass-weighted means (lumping, the switch's release, the merged
-# temperature); the mass gasified from the event to the end of the run
+# step of the layer's invocation, before the merge, the PMMA mass `mᵢ` and
+# the temperature `Tᵢ` of the merged cells and the receiver; after it the
+# residue and the merged temperature `T_m`; the rate
+# `Σ mᵢ k(Tᵢ) → m_res k(T̄) → m_res k(T_m)`, `T̄` the mass-weighted mean
+# (lumping, the merged temperature); the mass gasified from the event to the end of the run
 # against the residue; the largest mass loss rate after the event.
 #
 # Run from the repository root:
@@ -70,7 +66,6 @@ mkpath(OUT)
 const FORMS = (:temperature, :enthalpy)
 const REPEATS = 3
 const TAU = Cl.EQUIDISTRIBUTION_TIME
-const SWITCH = Ke.SWITCH_WIDTH
 const CASES = Dict(
     c.id => c for c in Base.invokelatest(load_verification_cases) if
     c.id in ("V-BO-01", "V-BO-03", "V-BO-04")
@@ -78,24 +73,17 @@ const CASES = Dict(
 
 const ROWS = [
     [
-        (; case = "V-BO-01", n, ε_m, τ = TAU, switch = SWITCH, corrected = true) for
-        n in (30, 60, 120) for ε_m in (3e-3, 1e-2, 3e-2)
+        (; case = "V-BO-01", n, ε_m, τ = TAU, corrected = true) for n in (30, 60, 120)
+        for ε_m in (3e-3, 1e-2, 3e-2)
     ]
     [
-        (; case = "V-BO-01", n = 60, ε_m = 1e-2, τ, switch = SWITCH, corrected = true)
-        for τ in (360.0, 3600.0)
+        (; case = "V-BO-01", n = 60, ε_m = 1e-2, τ, corrected = true) for
+        τ in (360.0, 3600.0)
     ]
+    [(; case = "V-BO-03", n, ε_m = 1e-2, τ = TAU, corrected = true) for n in (30, 60, 120)]
     [
-        (; case = "V-BO-01", n, ε_m = 1e-2, τ = TAU, switch = 0.0, corrected = true) for
-        n in (30, 60, 120)
-    ]
-    [
-        (; case = "V-BO-03", n, ε_m = 1e-2, τ = TAU, switch = SWITCH, corrected = true)
-        for n in (30, 60, 120)
-    ]
-    [
-        (; case = "V-BO-04", n = 40, ε_m = 1e-2, τ = TAU, switch = SWITCH, corrected)
-        for corrected in (false, true)
+        (; case = "V-BO-04", n = 40, ε_m = 1e-2, τ = TAU, corrected) for
+        corrected in (false, true)
     ]
 ]
 
@@ -239,7 +227,7 @@ function run_keywords(row, form, problem)
             lagrangian = row.case == "V-BO-04" ? Int[] :
                          [Base.invokelatest(_vbo_interface_node, problem)],
         ) : (;)
-    return (; energy_state = form, threshold = row.ε_m, switch_width = row.switch, corr...)
+    return (; energy_state = form, threshold = row.ε_m, corr...)
 end
 
 # The case's keywords in the new core's names.
@@ -323,27 +311,20 @@ function tail_terms(cp, sol, tail, old)
     cells = vcat([e.cell for e in events], receiver)
     rx = only(setup.material.reactions)
     k(T) = rx.A * exp(-rx.E / (Pyrolysis.Materials.R_GAS * T))
-    reaction = Ke.find_kernel(Ke.ReactionKernel, def.kernels)
-    sw = reaction.switch
-    s_of(ds, i) = sw === nothing ? 1.0 : Ke.reactivity(sw, ds, i)
     area = setup.reference.cross_section
     ds = ws.derived
     St.derive!(ds, tail.pre, layout, setup)
     m = [ds.m[1, i] for i in cells]
     T = [ds.T[i] for i in cells]
-    s = [s_of(ds, i) for i in cells]
     T_receiver = ds.T[receiver]
     m_res = sum(m)
     T̄ = sum(m .* T) / m_res
-    s̄ = sum(m .* s) / m_res
-    R0 = sum(m .* k.(T) .* s)
-    Ra = m_res * k(T̄) * s̄
-    Rb = m_res * k(T̄)
+    R0 = sum(m .* k.(T))
+    Ra = m_res * k(T̄)
     St.derive!(ds, tail.post, layout, setup)
     T_m = ds.T[receiver]
     m_post = ds.m[1, receiver]
-    s_m = s_of(ds, receiver)
-    Rc = m_post * k(T_m) * s_m
+    Rc = m_post * k(T_m)
     # The mass gasified from the event on: the trapezoid from the rate just
     # after the merge to the first saved time after the event, then over the
     # saved times; the residue, which nothing else adds to.
@@ -366,14 +347,11 @@ function tail_terms(cp, sol, tail, old)
         m_res = 1000 * m_res / area,
         m_post = 1000 * m_post / area,
         T̄,
-        s̄,
         T_receiver,
         T_m,
         weight = (T_m - T̄) / (T_receiver - T̄),
-        s_m,
         R0 = g * R0,
         Ra = g * Ra,
-        Rb = g * Rb,
         Rc = g * Rc,
         burst = 1000 * burst,
         after = 1000 * after,
@@ -461,7 +439,7 @@ for form in FORMS, row in ROWS
     res = measure(row, form, old_runs[(row.case, row.n)])
     push!(results, res)
     println(
-        "$(row.case) n=$(row.n) ε_m=$(row.ε_m) τ=$(row.τ) switch=$(row.switch) ",
+        "$(row.case) n=$(row.n) ε_m=$(row.ε_m) τ=$(row.τ) ",
         "corrected=$(row.corrected) $(form): $(res.retcode) $(res.outcome) ",
         "invocations=$(length(res.invocations)) item1=$(res.item1) ",
         "failing=$(res.failing) item10=$(res.item10) wall=$(round(res.wall, digits = 3)) s",
@@ -487,13 +465,13 @@ _invocations(r) =
         "; ",
     )
 _run(r) =
-    "$(r.case) | $(r.n) | $(r.form) | $(r.ε_m) | $(_tau(r)) | $(r.switch) | " *
+    "$(r.case) | $(r.n) | $(r.form) | $(r.ε_m) | $(_tau(r)) | " *
     (r.corrected ? "yes" : "no")
 
 open(joinpath(OUT, "burnout_ladder.csv"), "w") do io
     println(
         io,
-        "case,cells,form,eps_m,tau,switch,corrected,retcode,outcome,t_last,invocations,events,",
+        "case,cells,form,eps_m,tau,corrected,retcode,outcome,t_last,invocations,events,",
         "largest_fraction,item1,qois_failing,peak,t_peak,t_bo,mass_loss,ledger,",
         "inadmissible,min_h,min_ratio,item10,c52,phase1,phase1_above,domain,steps,rejected,wall,old_wall",
     )
@@ -505,7 +483,6 @@ open(joinpath(OUT, "burnout_ladder.csv"), "w") do io
             r.form,
             r.ε_m,
             r.τ,
-            r.switch,
             r.corrected,
             r.retcode,
             r.outcome,
@@ -546,9 +523,9 @@ open(joinpath(OUT, "burnout_ladder.md"), "w") do io
         "$(round.(load_start; digits = 1)) at the start and $(round.(load_end; digits = 1)) at the end. ",
         "The finite-volume core with the equidistribution correction (band $(Ig.CORRECTION_BAND), ",
         "activation 0.3/0.1, `β = 0`), the PMMA–Kaowool interface Lagrangian; τ [s] is the layer's ",
-        "equidistribution time, with the prototype's per-cell `τ_p = τ/N²` [s] in parentheses; ",
-        "switch: the reactivity switch's width in ε_m (0: none). The old core runs each case at the ",
-        "same resolution with its own keywords (its threshold is a thickness fraction).\n",
+        "equidistribution time, with the prototype's per-cell `τ_p = τ/N²` [s] in parentheses. ",
+        "The old core runs each case at the same resolution with its own keywords (its threshold ",
+        "is a thickness fraction).\n",
     )
     println(io, "## Outcomes and QoIs (items 1, 2 and 4)\n")
     println(
@@ -560,9 +537,9 @@ open(joinpath(OUT, "burnout_ladder.md"), "w") do io
     )
     println(
         io,
-        "| case | cells | form | ε_m | τ (τ_p) | switch | corrected | retcode, outcome, end [s] | invocations | item 1 | QoIs | failing | peak, t_peak, t_bo (old core) | events | inadmissible |",
+        "| case | cells | form | ε_m | τ (τ_p) | corrected | retcode, outcome, end [s] | invocations | item 1 | QoIs | failing | peak, t_peak, t_bo (old core) | events | inadmissible |",
     )
-    println(io, "|" * repeat("---|", 15))
+    println(io, "|" * repeat("---|", 14))
     for r in results
         m = r.measures
         o = old_runs[(r.case, r.n)].measures
@@ -595,9 +572,9 @@ open(joinpath(OUT, "burnout_ladder.md"), "w") do io
     )
     println(
         io,
-        "| case | cells | form | ε_m | τ (τ_p) | switch | corrected | smallest cell [m] | ratio / ε_m | item 10 | C52 | Phase 1 | Phase 1 > 1 | domain | steps (rejected) | wall (old core) | same |",
+        "| case | cells | form | ε_m | τ (τ_p) | corrected | smallest cell [m] | ratio / ε_m | item 10 | C52 | Phase 1 | Phase 1 > 1 | domain | steps (rejected) | wall (old core) | same |",
     )
-    println(io, "|" * repeat("---|", 17))
+    println(io, "|" * repeat("---|", 16))
     for r in results
         println(
             io,
@@ -617,31 +594,28 @@ open(joinpath(OUT, "burnout_ladder.md"), "w") do io
         io,
         "At the state that ends the step of the layer's invocation, before the merge, and after ",
         "it: the cells merged, the residue `m_res` [g/m²] (after the merge, in the receiver), the ",
-        "mass-weighted temperature `T̄` and switch `s̄` of the merged PMMA [K], the receiver's ",
-        "temperature before the merge and the merged temperature `T_m` [K] with its switch, and the ",
-        "receiver's weight in it, `(T_m − T̄)/(T_receiver − T̄)`; the ",
-        "PMMA gasification rate [g m⁻² s⁻¹] `R0 = Σ mᵢ k(Tᵢ) sᵢ` before the merge, `Ra = m_res k(T̄) s̄` ",
-        "lumped, `Rb = m_res k(T̄)` with the switch released and `Rc = m_res k(T_m) s_m` after the ",
-        "merge; the mass gasified from the event to the end of the run [g/m²] (from `Rc` at the ",
+        "mass-weighted temperature `T̄` of the merged PMMA [K], the receiver's temperature before ",
+        "the merge and the merged temperature `T_m` [K], and the receiver's weight in it, ",
+        "`(T_m − T̄)/(T_receiver − T̄)`; the PMMA gasification rate [g m⁻² s⁻¹] `R0 = Σ mᵢ k(Tᵢ)` ",
+        "before the merge, `Ra = m_res k(T̄)` lumped and `Rc = m_res k(T_m)` after the merge; the ",
+        "mass gasified from the event to the end of the run [g/m²] (from `Rc` at the ",
         "event to the first saved time after it, then the saved times); the largest mass loss rate at those saved times and its time, the old core's ",
         "largest over the ten saved times from the event's.\n",
     )
     println(
         io,
-        "| cells | form | ε_m | τ (τ_p) | switch | event [s] | merged | m_res (after) | T̄ | s̄ | T receiver | T_m (s_m) | weight | R0 | Ra | Rb | Rc | Rb/Ra | Rc/Rb | Rc/R0 | gasified after | largest after (t) | old core |",
+        "| cells | form | ε_m | τ (τ_p) | event [s] | merged | m_res (after) | T̄ | T receiver | T_m | weight | R0 | Ra | Rc | Rc/Ra | Rc/R0 | gasified after | largest after (t) | old core |",
     )
-    println(io, "|" * repeat("---|", 23))
+    println(io, "|" * repeat("---|", 19))
     for r in results
         r.tail === nothing && continue
         x = r.tail
         println(
             io,
-            "| $(r.n) | $(r.form) | $(r.ε_m) | $(_tau(r)) | $(r.switch) | $(_g(x.t; d = 5)) | ",
-            "$(x.cells) | $(_g(x.m_res)) ($(_g(x.m_post))) | $(_g(x.T̄; d = 5)) | $(_g(x.s̄)) | ",
-            "$(_g(x.T_receiver; d = 5)) | $(_g(x.T_m; d = 5)) ($(_g(x.s_m))) | $(_g(x.weight)) | ",
-            "$(_g(x.R0)) | ",
-            "$(_g(x.Ra)) | $(_g(x.Rb)) | $(_g(x.Rc)) | $(_g(x.Rb / x.Ra)) | $(_g(x.Rc / x.Rb)) | ",
-            "$(_g(x.Rc / x.R0)) | $(_g(x.burst)) | $(_g(x.after; d = 4)) ($(_g(x.t_after; d = 4))) | ",
+            "| $(r.n) | $(r.form) | $(r.ε_m) | $(_tau(r)) | $(_g(x.t; d = 5)) | ",
+            "$(x.cells) | $(_g(x.m_res)) ($(_g(x.m_post))) | $(_g(x.T̄; d = 5)) | ",
+            "$(_g(x.T_receiver; d = 5)) | $(_g(x.T_m; d = 5)) | $(_g(x.weight)) | $(_g(x.R0)) | ",
+            "$(_g(x.Ra)) | $(_g(x.Rc)) | $(_g(x.Rc / x.Ra)) | $(_g(x.Rc / x.R0)) | $(_g(x.burst)) | $(_g(x.after; d = 4)) ($(_g(x.t_after; d = 4))) | ",
             "$(_g(x.old_after; d = 4)) |",
         )
     end

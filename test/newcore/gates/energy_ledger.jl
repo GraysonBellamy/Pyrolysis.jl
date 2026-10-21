@@ -9,7 +9,7 @@
 # enthalpy defect shows; and V-BO-04's burning column (40 cells, moving mesh)
 # over the window before the first deactivation event on either core (0 to
 # 290 s; the old core parks its first cells at 299.6 s, the new core
-# deactivates the column at 465 s), solved without deactivation, and across
+# deactivates the column at 460.5 s), solved without deactivation, and across
 # that event (3). V-BO-04 is adiabatic, so its closures are over the change of the total enthalpy over
 # the window, each core's own.
 #

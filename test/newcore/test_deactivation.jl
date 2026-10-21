@@ -1,12 +1,10 @@
 using Test
-using ForwardDiff
 using SparseArrays
 using Pyrolysis
 using Pyrolysis.Materials: BEER_LAMBERT, T_REF
 using Pyrolysis.Meshes
 using Pyrolysis.States
 using Pyrolysis.States: StateLayout, state_length
-using Pyrolysis.Kernels: ReactivitySwitch, reactivity, SWITCH_WIDTH
 using Pyrolysis.Assembly
 using Pyrolysis.Assembly: residual!, buffers
 using Pyrolysis.Deactivation
@@ -519,50 +517,6 @@ end
     fill!(layout.mask, true)
 end
 
-@testset "the reactivity switch" begin
-    cp = setup(_ablator(4); use_ale = true, deactivation = true)
-    cells = cp.deactivation
-    sw = ReactivitySwitch(cells.threshold, cells.reference, cells.solid)
-    ds = buffers(cp.ws, cp.def, Float64)[1]
-    derive!(ds, cp.u0, cp.def.layout, cp.def.setup)
-    m0 = cells.reference[2]
-    s(f) = (ds.m[1, 2] = f * m0; reactivity(sw, ds, 2))
-    edge = SWITCH_WIDTH * cells.threshold
-    @test s(1.0) === 1.0
-    @test s(edge) === 1.0
-    @test s(cells.threshold) ≈ 20 / 27 rtol = 1e-12
-    @test s(0.0) == 0
-    @test s(-1.0) == 0
-    # C¹: zero slope at both ends of the band, finite everywhere.
-    D = ForwardDiff.Dual{Nothing}
-    slope(f) = (
-        ds2 = buffers(cp.ws, cp.def, D{Float64,1})[1];
-        ds2.m[1, 2] = D(f * m0, m0);
-        ds2.m[2, 2] = D(0.0, 0.0);
-        ForwardDiff.partials(reactivity(sw, ds2, 2), 1)
-    )
-    @test abs(slope(edge * (1 - 1e-9))) < 1e-6
-    @test abs(slope(1e-12)) < 1e-6
-    @test all(isfinite, slope.(range(-0.1, 2edge; length = 50)))
-    # Without deactivation the kernel has no switch; above the band the rates
-    # are those of the plain kernel.
-    plain = setup(_ablator(4); use_ale = true)
-    du_s, du_p = zeros(length(cp.u0)), zeros(length(plain.u0))
-    residual!(du_s, cp.u0, cp.def, 0.0, cp.ws)
-    residual!(du_p, plain.u0, plain.def, 0.0, plain.ws)
-    @test du_s == du_p
-    # At the threshold the cell reacts at 20/27 of the plain kernel's rates.
-    u = copy(cp.u0)
-    u[mass_index(cp.def.layout, 2, 1)] = cells.threshold * m0
-    residual!(du_s, u, cp.def, 0.0, cp.ws)
-    residual!(du_p, u, plain.def, 0.0, plain.ws)
-    S_s, S_p = cp.ws.contributions.S_mass, plain.ws.contributions.S_mass
-    @test S_p[1, 2] < 0
-    @test S_s[1, 2] / S_p[1, 2] ≈ 20 / 27 rtol = 1e-12
-    @test S_s[2, 2] / S_p[2, 2] ≈ 20 / 27 rtol = 1e-12
-    @test S_s[1, 1] == S_p[1, 1]
-end
-
 @testset "a solve through deactivations: $(energy) form, $(moving ? "moving" : "fixed") mesh" for energy in
                                                                                                   (
         :temperature,
@@ -774,6 +728,9 @@ end
     false,
 )
     problem = _ablator(2; L = 2e-4, t_end = 0.3)
+    # The cells' threshold thickness, ε_m h₀, is 1 µm: below it the solve ends
+    # by deactivation, not at the default `min_thickness`, whose root would
+    # leave the last cell at its threshold to round-off.
     events(located, reltol) = Integration.solve(
         problem;
         use_ale = moving,
@@ -781,6 +738,7 @@ end
         abstol = 1e-2 * reltol,
         reltol,
         located_events = located,
+        min_thickness = 1e-8,
     ).events
     reference = first(events(true, 1e-9)).t
     shift(located, reltol) = abs(first(events(located, reltol)).t - reference)

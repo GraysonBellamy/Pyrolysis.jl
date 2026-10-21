@@ -66,10 +66,9 @@ The deactivation state of a solve: the policy, the threshold `ε_m`, the
 near-threshold band `ε_band` (a fraction of a cell's reference, read on a
 moving mesh only, see [`deactivate!`](@ref)), the cells' initial condensed
 masses (`reference`; a receiver keeps its own, so a merged cell deactivates
-once its whole merged inventory is below `ε_m` of what it started with; the
-reaction kernel's switch reads the same masses), the condensed component
-flags, the caloric extension merged temperatures are found with, the events
-so far, and the outcome: `:running`; `:burned_out` once the last live cell
+once its whole merged inventory is below `ε_m` of what it started with), the
+condensed component flags, the caloric extension merged temperatures are
+found with, the events so far, and the outcome: `:running`; `:burned_out` once the last live cell
 went; `:interior` when a cell below the threshold lies inward of a live one
 that [`deactivate!`](@ref) leaves, which the policies here do not handle.
 """
