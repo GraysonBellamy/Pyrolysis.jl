@@ -261,15 +261,15 @@ function deck(row)
     return Base.invokelatest(_vbo_problem, row.n; substrate_alpha = 0.0, t_end = row.t_end)
 end
 
-# The case's measures; the variant decks read their substrate's thickness
-# from the run, as their QoIs do.
+# The case's measures, the mass ledger the case's recorder's; the variant
+# decks read their substrate's thickness from the run, as their QoIs do.
 function measures(case, sol)
     case == "V-BO-04" && return nothing
     case in ("V-BO-06", "V-BO-07", "V-BO-08") ||
-        return Base.invokelatest(_vbo_measures, sol)
+        return Base.invokelatest(_vbo_measures, sol; id = case)
     l_layer = case == "V-BO-08" ? VBO08_L_PMMA : VBO_L_PMMA
     l_kw = first(sol.extras.thickness_history) - l_layer
-    return Base.invokelatest(_vbo_measures, sol; l_kw)
+    return Base.invokelatest(_vbo_measures, sol; l_kw, id = case)
 end
 
 # V-BO-08's substrate: the temperatures of the cells that start without PMMA

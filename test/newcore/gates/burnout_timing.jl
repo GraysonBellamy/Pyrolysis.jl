@@ -34,7 +34,8 @@
 # invocation (both as `case_accuracy.jl` measures them; the shift is
 # `event_shift.jl`'s, shared with it), the L1 error of the mass loss
 # rate history relative to the reference's integral, and the case's peak mass
-# loss rate, burnout time and mass ledger.
+# loss rate and burnout time (its mass ledger is the ladder's: the case's
+# recorder would add to the timed solves' cost).
 #
 # Where the time goes, on V-BO-01 at 60 cells: the sampling profiler over two
 # warm solves at the matched tolerance, each sample given to the first of: the
@@ -425,7 +426,7 @@ _counts(sol) =
 
 _measures(d, sol) =
     d.name in ("V-BO-01", "V-BO-03") ? Base.invokelatest(_vbo_measures, sol) :
-    (; peak = NaN, t_bo = NaN, ledger = NaN)
+    (; peak = NaN, t_bo = NaN)
 
 # ----------------------------------------------------------------------------
 # The cost split at the first activation
@@ -547,7 +548,6 @@ function deck_rows(d)
                 mlr_error = mlr_error(r.sol, r.ref),
                 peak = m.peak,
                 t_bo = m.t_bo,
-                ledger = m.ledger,
                 wall = r.wall,
                 ratio = r.wall / old_default.wall,
                 _counts(r.sol)...,
@@ -716,16 +716,16 @@ open(joinpath(OUT, "burnout_timing.md"), "w") do io
     println(io, "The burnout decks, then the decks of the installed correction.\n")
     println(
         io,
-        "| deck | cells | core | reltol | retcode | window RMS | window largest | run error | shift | MLR | peak | t_bo [s] | ledger | warm [s] | ratio | steps | rejected | RHS | Jacobians | nonlinear failures |",
+        "| deck | cells | core | reltol | retcode | window RMS | window largest | run error | shift | MLR | peak | t_bo [s] | warm [s] | ratio | steps | rejected | RHS | Jacobians | nonlinear failures |",
     )
-    println(io, "|" * repeat("---|", 20))
+    println(io, "|" * repeat("---|", 19))
     for res in vcat(results, installed), r in res.rows
         println(
             io,
             "| $(r.deck) | $(r.cells) | $(r.core) | $(r.reltol) | $(r.retcode) | ",
             "$(_g(r.window_rms)) | $(_g(r.window_largest)) | $(_g(r.run_error)) | ",
             "$(_g(r.event_shift)) | $(_g(r.mlr_error)) | $(_g(r.peak; d = 5)) | ",
-            "$(_g(r.t_bo; d = 4)) | $(_g(r.ledger)) | $(_g(r.wall)) | $(_g(r.ratio)) | ",
+            "$(_g(r.t_bo; d = 4)) | $(_g(r.wall)) | $(_g(r.ratio)) | ",
             "$(r.steps) | $(r.rejected) | $(r.rhs) | $(r.jacobians) | $(r.nonlinear_failures) |",
         )
     end

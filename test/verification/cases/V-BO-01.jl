@@ -25,7 +25,7 @@
 # this one).
 
 using Logging
-using OrdinaryDiffEq: CallbackSet, DiscreteCallback, SciMLBase
+using OrdinaryDiffEq: CallbackSet, ContinuousCallback, DiscreteCallback, SciMLBase
 
 const VBO_L_PMMA = 0.0059
 const VBO_L_KW = 0.012
@@ -178,16 +178,18 @@ end
 # step, the largest live-cell temperature, the time of the last step (a stop
 # between output times is not saved), on the new core the accepted states
 # whose surface energy balance did not converge or sits on the trial clamp of
-# the property bracket, and the deactivation threshold (`NaN` on the old core,
-# whose surface Newton warns instead).
+# the property bracket, the deactivation threshold and the mass ledger (`NaN`
+# on the old core, whose surface Newton warns instead and whose ledger is
+# taken on the saved times).
 mutable struct _VBORecord
     dt_min::Float64
     T_max::Float64
     t_last::Float64
     clamped::Int
     threshold::Float64
+    ledger::Float64
 end
-_VBORecord() = _VBORecord(Inf, -Inf, NaN, 0, NaN)
+_VBORecord() = _VBORecord(Inf, -Inf, NaN, 0, NaN, NaN)
 
 # Warning counters and step records of the most recent solve of each case
 # (the QoI closures read them after `solve_fn` returns).
@@ -196,14 +198,14 @@ const VBO_TRANSMITTED_WARNINGS = Dict{String,Int}()
 const VBO_VOID_WARNINGS = Dict{String,Int}()
 const VBO_STEP_STATS = Dict{String,_VBORecord}()
 
-# The step recorder: after every accepted step, the step and its time, then
-# `observe!(u, t)` on the accepted state.
+# The step recorder: after every accepted step and its events, the step and
+# its time, then `observe!(integ)`.
 function _vbo_recorder(observe!, rec::_VBORecord)
     return DiscreteCallback(
         (u, t, integ) -> true,
         integ -> begin
             rec.dt_min = min(rec.dt_min, integ.t - integ.tprev)
-            observe!(integ.u, integ.t)
+            observe!(integ)
             rec.t_last = integ.t
             SciMLBase.derivative_discontinuity!(integ, false)
         end;
@@ -228,12 +230,102 @@ function _vbo_clamped(thermal, ds, topo)
     return n
 end
 
+# The mass leaving through the live boundary faces at the residual's last
+# evaluation, per unit reference cross section, as `mass_loss_rate` sums it.
+function _vbo_outflow(ds, c, topo, A0)
+    out = 0.0
+    for tag in Pyrolysis.Meshes.boundary_tags(topo),
+        f0 in Pyrolysis.Meshes.boundary_faces(topo, tag)
+
+        f = Pyrolysis.Meshes.live_face(topo, ds.active, f0)
+        f == 0 || (out += sum(view(c.F_mass, :, f)) * ds.geometry.face_area[f])
+    end
+    return out / A0
+end
+
+# The new core's mass ledger over the accepted steps: the outflow integrated
+# over each step by three-point Gauss–Legendre on the step's interpolant,
+# against the drop of the live cells' masses less the masses deactivation
+# vented. A continuous callback whose condition never crosses zero reads each
+# step before its events: the integral over the step and, when the threshold
+# margin crosses inside it, over the step up to the first crossing, where a
+# located event ends it. `commit!(integ)`, run after the step's events, adds
+# the integral of the step as it ended; a step it cannot account for leaves
+# the integral `NaN`.
+mutable struct _VBOLedger
+    outflow::Float64
+    t_done::Float64
+    on::Bool
+    t::Float64
+    tprev::Float64
+    step::Float64
+    crossing::Bool
+    to_crossing::Float64
+end
+
+const _VBO_GAUSS = ((-sqrt(3 / 5), 5 / 9), (0.0, 8 / 9), (sqrt(3 / 5), 5 / 9))
+
+function _vbo_ledger(cp)
+    def, ws = cp.def, cp.ws
+    topo, A0 = def.setup.topology, def.setup.reference.cross_section
+    du = similar(cp.u0)
+    rate(u, t) = begin
+        Pyrolysis.Assembly.residual!(du, u, def, t, ws)
+        _vbo_outflow(Pyrolysis.Assembly.buffers(ws, def, Float64)..., topo, A0)
+    end
+    integral(integ, a, b) = begin
+        s = 0.0
+        for (x, w) in _VBO_GAUSS
+            τ = (a + b) / 2 + (b - a) / 2 * x
+            s += w * rate(integ(τ), τ)
+        end
+        (b - a) / 2 * s
+    end
+    cells, layout = cp.deactivation, def.layout
+    margin(u) = Pyrolysis.Deactivation.threshold_margin(cells, layout, u)
+    L = _VBOLedger(0.0, cp.problem.tspan[1], false, NaN, NaN, NaN, false, NaN)
+    reader = ContinuousCallback(
+        (u, t, integ) -> begin
+            if t == integ.t > integ.tprev && !(L.on && integ.tprev == L.tprev)
+                L.on, L.t, L.tprev = true, t, integ.tprev
+                L.step = integral(integ, integ.tprev, t)
+                L.crossing =
+                    cells !== nothing && margin(u) <= 0 && margin(integ.uprev) > 0
+                if L.crossing
+                    a, b = integ.tprev, t
+                    for _ = 1:60
+                        mid = (a + b) / 2
+                        margin(integ(mid)) > 0 ? (a = mid) : (b = mid)
+                    end
+                    L.to_crossing = integral(integ, integ.tprev, b)
+                end
+            end
+            return 1.0
+        end,
+        integ -> nothing;
+        save_positions = (false, false),
+        interp_points = 0,
+    )
+    commit!(integ) = begin
+        if L.on && integ.tprev == L.t_done && integ.t == L.t
+            L.outflow += L.step
+        elseif L.on && integ.tprev == L.t_done && integ.t < L.t && L.crossing
+            L.outflow += L.to_crossing
+        else
+            L.outflow = NaN
+        end
+        L.t_done, L.on = integ.t, false
+    end
+    return L, reader, commit!
+end
+
 # The new core's solve with the step recorder, which evaluates the residual
 # at every accepted state and reads the live cells' temperatures and the
-# surface balances. The old core's depletion keywords have no counterpart
-# there. `instrument(cp)` returns a further callback of the set-up problem
-# for the gate scripts (`nothing` for none); `min_thickness` and, when given,
-# `located_events` go to the integration, the rest to the setup.
+# surface balances, and the mass ledger. The old core's depletion keywords
+# have no counterpart there. `instrument(cp)` returns a further callback of
+# the set-up problem for the gate scripts (`nothing` for none);
+# `min_thickness` and, when given, `located_events` go to the integration,
+# the rest to the setup.
 function _vbo_core_solve(
     problem,
     rec::_VBORecord;
@@ -256,19 +348,33 @@ function _vbo_core_solve(
     thermal =
         Pyrolysis.Kernels.find_kernel(Pyrolysis.Kernels.ThermalBoundaryKernel, def.kernels)
     du = similar(cp.u0)
-    observe!(u, t) = begin
+    live_mass(u, t) = begin
         Pyrolysis.Assembly.residual!(du, u, def, t, ws)
+        sum(Pyrolysis.Assembly.buffers(ws, def, Float64)[1].m)
+    end
+    m_first = live_mass(cp.u0, cp.problem.tspan[1])
+    m_last = m_first
+    ledger, reader, commit! = _vbo_ledger(cp)
+    observe!(integ) = begin
+        commit!(integ)
+        Pyrolysis.Assembly.residual!(du, integ.u, def, integ.t, ws)
         ds, _ = Pyrolysis.Assembly.buffers(ws, def, Float64)
         rec.T_max =
             max(rec.T_max, maximum(ds.T[i] for i in eachindex(ds.T) if ds.active[i]))
         rec.clamped += _vbo_clamped(thermal, ds, topo)
+        m_last = sum(ds.m)
     end
     cp.deactivation === nothing || (rec.threshold = cp.deactivation.threshold)
     extra = instrument(cp)
-    recorder = _vbo_recorder(observe!, rec)
+    recorder = CallbackSet(reader, _vbo_recorder(observe!, rec))
     callback = extra === nothing ? recorder : CallbackSet(recorder, extra)
     located = located_events === nothing ? (;) : (; located_events)
-    return Pyrolysis.Integration.integrate(cp; callback, min_thickness, located...)
+    sol = Pyrolysis.Integration.integrate(cp; callback, min_thickness, located...)
+    A0 = def.setup.reference.cross_section
+    vented = sum((sum(e.lost_mass) for e in sol.events); init = 0.0)
+    drop = (m_first - m_last) / A0
+    rec.ledger = abs(drop - (ledger.outflow + vented / A0)) / drop
+    return sol
 end
 
 # The case's solve. On the new core a moving mesh with deactivation gets the
@@ -289,7 +395,7 @@ function _vbo_solve_fn(id::String)
                 _vbo_core_solve(problem, rec; kwargs...)
             else
                 recorder = _vbo_recorder(
-                    (u, t) -> (rec.T_max = max(rec.T_max, maximum(view(u, 1:n)))),
+                    integ -> (rec.T_max = max(rec.T_max, maximum(view(integ.u, 1:n)))),
                     rec,
                 )
                 solve(problem; progress = false, callback = recorder, kwargs...)
@@ -307,8 +413,10 @@ end
 # solve's last deactivation event, whose merge (or park) releases the layer's
 # residue in a burst the gate judges by refinement instead.
 # `l_kw` is the substrate's thickness, the live thickness once the layer has
-# burned out.
-function _vbo_measures(sol; l_kw = VBO_L_KW)
+# burned out. The mass ledger of a finite-volume solution is its case's
+# recorder's (`id`; `NaN` without one); the old core's is the total-mass drop
+# against the trapezoid of ṁ″ on the saved times.
+function _vbo_measures(sol; l_kw = VBO_L_KW, id = nothing)
     mlr = sol.extras.gas_generation_rate .* 1000           # g m⁻² s⁻¹
     parks = sol.extras.park_times
     before =
@@ -319,10 +427,15 @@ function _vbo_measures(sol; l_kw = VBO_L_KW)
     t_bo = i_bo === nothing ? NaN : sol.t[i_bo]
     m = sol.extras.total_mass
     mass_loss = 100 * (1 - m[end] / m[1])
-    # Mass ledger: total-mass drop vs ∫ ṁ″ dt (trapezoid on output times).
-    ṁ = sol.mass_loss_rate
-    gen = sum(0.5 * (ṁ[j] + ṁ[j+1]) * (sol.t[j+1] - sol.t[j]) for j = 1:(length(sol.t)-1))
-    ledger = abs((m[1] - m[end]) - gen) / (m[1] - m[end])
+    ledger = if sol isa Pyrolysis.Outputs.CoreSolution
+        id === nothing ? NaN : VBO_STEP_STATS[id].ledger
+    else
+        ṁ = sol.mass_loss_rate
+        gen = sum(
+            0.5 * (ṁ[j] + ṁ[j+1]) * (sol.t[j+1] - sol.t[j]) for j = 1:(length(sol.t)-1)
+        )
+        abs((m[1] - m[end]) - gen) / (m[1] - m[end])
+    end
     return (;
         mlr,
         peak = mlr[ipk],
@@ -358,7 +471,16 @@ const VBO_PEAK_REF = 32.39      # g m⁻² s⁻¹
 const VBO_T_PEAK_REF = 335.0    # s
 const VBO_T_BO_REF = 363.5      # s (live thickness < 12.02 mm)
 
+# The mass ledger's comment on each core.
+const VBO_LEDGER_COMMENT =
+    VERIFICATION_CORE == "old" ?
+    "total-mass drop vs ∫ ṁ″ dt over the run, the trapezoid on the saved times" :
+    "total-mass drop vs ∫ ṁ″ dt over the accepted steps (three-point Gauss–Legendre per step) and the mass deactivation vented"
+
 # The QoIs of every burnout case; `peak_tol = nothing` leaves the peak out.
+# The finite-volume core's ledger closes to the integrator's tolerance: on
+# the moving-mesh cases at their CI resolution at most 5.2e-7 in the
+# temperature form and 3.2e-6 in the enthalpy form (V-BO-08's).
 function _vbo_common_qois(
     m;
     id,
@@ -367,8 +489,8 @@ function _vbo_common_qois(
     peak_ref = VBO_PEAK_REF,
     surface_warnings = true,
     peak_comment = "g m⁻² s⁻¹, gas generation rate",
-    ledger_tol = 1e-3,
-    ledger_comment = "total-mass drop vs ∫ ṁ″ dt over the run",
+    ledger_tol = VERIFICATION_CORE == "old" ? 1e-3 : 3e-5,
+    ledger_comment = VBO_LEDGER_COMMENT,
 )
     out = QoIResult[]
     push!(
@@ -425,7 +547,7 @@ end
 # accepted state whose balance did not converge or sits on the clamp.
 function _vbo_surface_qoi(id)
     if VERIFICATION_CORE == "new"
-        n = get(() -> _VBORecord(-1.0, -1.0, NaN, -1, NaN), VBO_STEP_STATS, id).clamped
+        n = get(() -> _VBORecord(-1.0, -1.0, NaN, -1, NaN, NaN), VBO_STEP_STATS, id).clamped
         return QoIResult(
             name = "clamped surface balances on accepted states",
             value = Float64(n),
@@ -546,7 +668,7 @@ const VBO_SOLVE_KWARGS = (
 function _verification_case_vbo01()
     id = "V-BO-01"
     function qois(sol)
-        m = _vbo_measures(sol)
+        m = _vbo_measures(sol; id)
         out = _vbo_common_qois(m; id, peak_tol = 0.03)
         append!(out, _vbo_timing_qois(m))
         VERIFICATION_CORE == "new" && push!(out, _vbo_invocation_qoi(sol, id))

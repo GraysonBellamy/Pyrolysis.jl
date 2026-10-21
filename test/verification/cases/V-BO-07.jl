@@ -82,7 +82,7 @@ function _verification_case_vbo07()
     n_default = 60
     function qois(sol)
         l_kw = first(sol.extras.thickness_history) - VBO_L_PMMA
-        m = _vbo_measures(sol; l_kw)
+        m = _vbo_measures(sol; l_kw, id)
         # The whole layer leaves: the run ends at the Kaowool's mass.
         exact = 100 * (1 - VBO_RHO_KW * l_kw / first(sol.extras.total_mass))
         out = _vbo_common_qois(
