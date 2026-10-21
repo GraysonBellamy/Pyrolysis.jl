@@ -38,7 +38,12 @@
 #
 # The recorders read each accepted state before the deactivation event of its
 # step: a continuous callback's condition sees the state at the end of the
-# step before any discrete callback runs, and never crosses zero.
+# step before any discrete callback runs, and never crosses zero. On a step
+# whose event is located they read the step's end before the event is
+# located, a state after the event's time that the trajectory does not pass
+# through: the thinnest cell there is thinner than at the event (item 10's
+# reading is conservative), and the residuals are those of a proposal the
+# domain test accepted rather than of a state on the trajectory (item 6).
 #
 # R25's tail diagnostic, for every V-BO-01 run: at the state that ends the
 # step of the layer's invocation, before the merge, the PMMA mass `mᵢ` and
@@ -722,7 +727,11 @@ open(joinpath(OUT, "burnout_ladder.md"), "w") do io
         io,
         "Smallest cell: the thinnest live cell at the end of any step, before its deactivation ",
         "event [m], and the smallest ratio of a live cell to its initial thickness over ε_m ",
-        "(item 10: at least 0.5, and no `DtLessThanMin`). C52 and Phase 1: the largest scaled ",
+        "(item 10: at least 0.5, and no `DtLessThanMin`). On a step whose event is located, the ",
+        "step's end is read before the event is located, a state after the event's time that the ",
+        "trajectory does not pass through: the thinnest cell there is thinner than at the event ",
+        "(item 10's reading is conservative), and the residuals are those of a proposal the domain ",
+        "test accepted rather than of a state on the trajectory. C52 and Phase 1: the largest scaled ",
         "constraint residual of the accepted states under C52's scale and under Phase 1's, which ",
         "omits the sweep of the node corrections; Phase 1 > 1: the accepted states Phase 1's scale ",
         "would have rejected. Domain: the domain test's rejections (C52's scale, admissibility ",
