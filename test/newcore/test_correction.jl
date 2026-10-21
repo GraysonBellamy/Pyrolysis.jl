@@ -330,6 +330,14 @@ end
         Reaction(:s, 2 => 1; A = 1.0, E = 0.0, h = 0.0),
     )
     @test vanishing(_network(cycle...)) == (false, false, false)
+    # A self-yield: the reactant's own share is not a product, and a reaction
+    # that returns all of it consumes nothing.
+    self = Reaction(:r, 1 => (1, 3); A = 1.0, E = 0.0, h = 0.0, yields = (0.4, 0.6))
+    @test vanishing(_network(self)) == (true, false, false)
+    residue = Reaction(:r, 1 => (1, 2); A = 1.0, E = 0.0, h = 0.0, yields = (0.4, 0.6))
+    @test vanishing(_network(residue)) == (false, false, false)
+    @test vanishing(_network(Reaction(:r, 1 => 1; A = 1.0, E = 0.0, h = 0.0))) ==
+          (false, false, false)
     # A layer vanishes when it holds condensed mass and every condensed
     # component present vanishes.
     m0 = [1.0 1.0 0.0; 0.0 1.0 0.0; 0.0 0.0 0.0]

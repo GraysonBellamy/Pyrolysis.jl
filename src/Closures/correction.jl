@@ -128,11 +128,14 @@ Whether each condensed component of `material` gasifies completely: some
 reaction consumes it, and every reaction that does yields no condensed
 component that does not itself gasify completely. The least such set, so an
 inert component, a residue that no reaction consumes and the components of a
-cycle do not vanish; a gas component reads `false`.
+cycle do not vanish; a gas component reads `false`. A reaction that yields
+part of its own reactant back is read by the rest of its products, and one
+that yields the whole of it back consumes nothing.
 """
 function vanishing(material::Material{NC}) where {NC}
     condensed = ntuple(j -> !is_gas(material.components[j]), Val(NC))
-    consumes(rxn, j) = any(r -> first(r) == j, rxn.reactants)
+    returned(rxn, j) = sum((last(p) for p in rxn.products if first(p) == j); init = 0.0)
+    consumes(rxn, j) = any(r -> first(r) == j, rxn.reactants) && returned(rxn, j) < 1
     v = fill(false, NC)
     changed = true
     while changed
@@ -141,7 +144,8 @@ function vanishing(material::Material{NC}) where {NC}
             (condensed[j] && !v[j]) || continue
             consumers = [rxn for rxn in material.reactions if consumes(rxn, j)]
             isempty(consumers) && continue
-            gasified = p -> !condensed[first(p)] || iszero(last(p)) || v[first(p)]
+            gasified =
+                p -> first(p) == j || !condensed[first(p)] || iszero(last(p)) || v[first(p)]
             all(rxn -> all(gasified, rxn.products), consumers) || continue
             v[j] = true
             changed = true
