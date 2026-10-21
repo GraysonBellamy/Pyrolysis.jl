@@ -11,6 +11,7 @@ using Pyrolysis.Assembly: residual!
 using Pyrolysis.ColoredJacobian
 using Pyrolysis.Integration
 using Pyrolysis.Integration: setup, integrate, consistent_state!, CoreProblem
+using Pyrolysis.Closures: EquidistributionCorrection
 
 const _L = 0.01
 
@@ -168,6 +169,142 @@ end
     @test sol.t[end] == 10.0
     @test minimum(sol.ξ) > 0
     @test sum(sol.m[:, :, end]) ≈ sum(sol.m[:, :, 1]) rtol = 1e-12
+end
+
+@testset "an inventory's face state lies in [0, 2p] and is zero for an empty cell" begin
+    # Cells 1, 2, 3 at unit spacing (X, U, D), the face half a cell from U.
+    reconstruction(q) = Kernels._face_value(i -> q[i], 2, 3, 1, 0.5, 1.0, 1.0, 1e-12)
+    state(q) = Kernels._inventory_face_value(i -> q[i], 2, 3, 1, 0.5, 1.0, 1.0, 1e-12, 1e-6)
+    # Between full cells, the steeper gradient behind the empty cell gives
+    # the reconstruction a positive slope; the face sends nothing.
+    @test reconstruction((2.0, 0.0, 1.0)) > 0
+    @test state((2.0, 0.0, 1.0)) == 0
+    @test state((1.0, -1e-9, 3.0)) == 0
+    for q in ((2.0, 1e-3, 1.0), (0.0, 0.5, 10.0), (10.0, 0.5, 0.0), (1.0, 2.0, 3.0))
+        @test 0 <= state(q) <= 2q[2]
+    end
+    # A small increment against the inventory keeps the reconstruction.
+    @test state((999.0, 1000.0, 1001.0)) ≈ reconstruction((999.0, 1000.0, 1001.0)) rtol =
+        1e-9
+end
+
+# Four inert cells of two solids, the first one's concentrations 2, 0, 1 and
+# 1 kg/m³: the second cell holds none of it between cells that do.
+function _interior_gap()
+    a = SolidComponent(:a; ρ = 1000.0, c = 1000.0, k = 0.5)
+    b = SolidComponent(:b; ρ = 1000.0, c = 1000.0, k = 0.5)
+    q(z) = z < 0.25 ? 2.0 : z < 0.5 ? 0.0 : 1.0
+    return PyrolysisProblem(
+        mesh = create_uniform_mesh(1.0, 4, Val(2)),
+        material = Material(name = :interior_gap, components = (a, b), reactions = ()),
+        bc_set = BoundaryConditionSet(
+            thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
+        ),
+        T_initial = z -> 600.0,
+        ξ_initial = [q, z -> 1000.0 - q(z)],
+        tspan = (0.0, 0.02),
+        dt_initial = 1e-4,
+        output_times = [0.0, 0.02],
+    )
+end
+
+# The middle node moves at −0.01 m/s and the others stay, so the mesh crosses
+# the empty cell's face toward the cell beyond it.
+const _gap_motion = (x, t) -> -0.64 * x * (x - 0.25) * (x - 0.75) * (x - 1.0)
+
+@testset "an empty interior cell is not drained: $(energy) form" for energy in (
+    :temperature,
+    :enthalpy,
+)
+    cp = setup(
+        _interior_gap();
+        energy_state = energy,
+        use_ale = true,
+        w_override = _gap_motion,
+    )
+    du = similar(cp.u0)
+    residual!(du, cp.u0, cp.def, 0.0, cp.ws)
+    k = mass_index(cp.def.layout, 2, 1)
+    @test cp.u0[k] == 0
+    @test du[k] == 0
+    sol = integrate(cp)
+    @test sol.retcode === :Success
+    @test sol.t[end] == 0.02
+    @test minimum(sol.m) >= 0
+    @test sum(sol.m[:, :, end]) ≈ sum(sol.m[:, :, 1]) rtol = 1e-12
+end
+
+@testset "an empty cell is not drained under the equidistribution correction" begin
+    s = SolidComponent(:solid; ρ = 1000.0, c = 1000.0, k = 0.5)
+    g = GaseousComponent(:gas; M = 0.032, c = 1000.0, k = 0.03, λ = 0.0)
+    q(z) = z < 0.05 ? 2.0 : z < 0.1 ? 0.0 : 1.0
+    problem = PyrolysisProblem(
+        mesh = create_uniform_mesh(0.2, 4, Val(2)),
+        material = Material(name = :gap_correction, components = (s, g), reactions = ()),
+        bc_set = BoundaryConditionSet(
+            thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
+            mass = (top = ImpermeableBC(), bottom = ImpermeableBC()),
+        ),
+        T_initial = z -> 600.0,
+        ξ_initial = [z -> 1000.0, q],
+        tspan = (0.0, 0.2),
+        dt_initial = 1e-4,
+        output_times = [0.0, 0.2],
+    )
+    cp = setup(
+        problem;
+        use_ale = true,
+        correction = EquidistributionCorrection(layers = :all),
+    )
+    # The third cell compressed to a fifth of its thickness, which activates
+    # the correction at its nodes: the mesh crosses the empty second cell's
+    # outer face into it.
+    layout = cp.def.layout
+    u = copy(cp.u0)
+    x = [0.0, 0.05, 0.1, 0.11, 0.2]
+    for (nd, xn) in enumerate(x)
+        u[position_index(layout, nd)] = xn
+    end
+    for i = 1:4
+        V = x[i+1] - x[i]
+        u[mass_index(layout, i, 1)] = 1000.0 * V
+        u[mass_index(layout, i, 2)] = (2.0, 0.0, 1.0, 1.0)[i] * V
+    end
+    consistent_state!(u, cp.def, cp.ws, 0.0)
+    du = similar(u)
+    residual!(du, u, cp.def, 0.0, cp.ws)
+    @test cp.ws.derived.c[3] < 0
+    k = mass_index(layout, 2, 2)
+    @test u[k] == 0
+    @test du[k] == 0
+    sol = integrate(cp; u0 = u)
+    @test sol.retcode === :Success
+    @test sol.t[end] == 0.2
+    @test minimum(sol.m) >= 0
+end
+
+# The front at rest under the slide: each cell holds the front's integral over
+# its own nodes at every time, so the cell masses have an exact reference.
+@testset "the relative fluxes converge at second order on a front at rest" begin
+    w = _L / 10
+    I(z) = 1000.0 * (z / 2 + (w / 2) * log(cosh((z - _L / 2) / w)))
+    errors = map((32, 64, 128)) do n
+        cp = setup(
+            _composition(n);
+            use_ale = true,
+            w_override = _slide,
+            abstol = 1e-12,
+            reltol = 1e-10,
+        )
+        sol = integrate(cp; saveat = Float64[])
+        @test sol.retcode === :Success
+        z = sol.z[:, end]
+        b = [I(z[i+1]) - I(z[i]) for i = 1:n]
+        a = 1000.0 .* diff(z) .- b
+        return (sum(abs, sol.m[1, :, end] .- a) + sum(abs, sol.m[2, :, end] .- b)) /
+               (2000.0 * _L)
+    end
+    @test all(>(1.6), log2.(errors[1:(end-1)] ./ errors[2:end]))
 end
 
 # One solid at rest at a uniform concentration, compressed by a prescribed

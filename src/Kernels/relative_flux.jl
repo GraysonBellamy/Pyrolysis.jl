@@ -40,6 +40,17 @@ continuous there, with a kink. The side follows the value of `u` alone, so
 at `u = 0` every derivative pass takes the derivative of the `u ≥ 0` side,
 whatever its seeds.
 
+A concentration's face state is bounded by the upwind cell's inventory: with
+`p` the cell's concentration, smoothly floored at zero below its
+concentration tolerance `η` ([`positive_part`](@ref)), the reconstruction's
+increment `δ` over the cell value becomes `δ p / √(p² + δ² + η²)`. The face
+state lies in `[0, 2p]`, differs from the reconstruction by `O(δ³/p²)` where
+`|δ| ≪ p`, and is exactly zero for an empty cell, so no face draws a
+component out of a cell that holds none of it, whatever the slopes around
+it: the inventories' semi-discrete equations keep them nonnegative. The
+temperature and the history values are not inventories and keep the
+reconstruction.
+
 A face whose relative velocity is exactly zero carries nothing and is
 skipped. The kernel runs after the thermal boundary kernel, so the surface
 balance and its blowing models see the gas-transport fluxes alone.
@@ -47,7 +58,8 @@ balance and its blowing models see the gas-transport fluxes alone.
 `solid` flags the components that carry the history pair; `ε` holds, per
 cell, the slope scales of the concentrations, the temperature and the
 per-solid-mass history values (each the square of a tolerance over the
-reference cell thickness); `far` and `beyond` give, per face and side, the
+reference cell thickness); `η` the concentration tolerance of each cell;
+`far` and `beyond` give, per face and side, the
 cell beyond the face's cell on that side and the face between them (zero
 where there is none); `d_floor` the floors of the center-to-face distances
 of each face's owner and neighbour.
@@ -57,6 +69,7 @@ struct RelativeFluxKernel{L<:CaloricLaws,NC} <: Kernel
     solid::NTuple{NC,Bool}
     history::Bool
     ε::Matrix{Float64}
+    η::Vector{Float64}
     far::Matrix{Int}
     beyond::Matrix{Int}
     d_floor::Matrix{Float64}
@@ -85,12 +98,13 @@ function RelativeFluxKernel(
     n = n_cells(topo)
     nf = n_faces(topo)
     ε = zeros(3, n)
+    η = reference.mass_scale ./ reference.volume
     for i = 1:n
         f1, f2 = topo.cells[i].faces
         h =
             center_to_face_distance(g, topo, f1, i) +
             center_to_face_distance(g, topo, f2, i)
-        ε[1, i] = (reference.mass_scale[i] / reference.volume[i] / h)^2
+        ε[1, i] = (η[i] / h)^2
         ε[2, i] = (temperature_scale / h)^2
         ε[3, i] = (history_scale / h)^2
     end
@@ -114,6 +128,7 @@ function RelativeFluxKernel(
         map(is_solid, material.components),
         history,
         ε,
+        η,
         far,
         beyond,
         d,
@@ -166,6 +181,16 @@ end
     return qU + d_f * van_albada(a, b, ε)
 end
 
+# The face value of a concentration `q(i)`: the face value's increment over
+# the upwind cell's value, scaled by the cell's inventory `p` against the
+# concentration tolerance η, so the state lies in [0, 2p].
+@inline function _inventory_face_value(q::F, U, D, X, d_f, d_UD, d_XU, ε, η) where {F}
+    qU = q(U)
+    δ = _face_value(q, U, D, X, d_f, d_UD, d_XU, ε) - qU
+    p = positive_part(qU, η)
+    return p + δ * p / sqrt(p * p + δ * δ + η * η)
+end
+
 # Solid mass of cell `i`, smoothly floored at its mass scale, the carrier of
 # the per-solid-mass history values.
 @inline function _solid_mass(kernel::RelativeFluxKernel{L,NC}, ds, i) where {L,NC}
@@ -195,7 +220,8 @@ function contribute!(
         q = zero(eltype(c.F_energy))
         F_solid = zero(q)
         for j = 1:NC
-            F = u * _face_value(i -> ds.ξ[j, i], s..., kernel.ε[1, U])
+            ξ_f = _inventory_face_value(i -> ds.ξ[j, i], s..., kernel.ε[1, U], kernel.η[U])
+            F = u * ξ_f
             c.F_mass[j, f] += F
             q += F * h[j]
             kernel.solid[j] && (F_solid += F)
