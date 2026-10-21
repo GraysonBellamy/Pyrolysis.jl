@@ -39,7 +39,7 @@ const _SOLVE_KEYWORDS = (
 	      saveat = problem.output_times, callback = nothing, validate = true,
 	      linear_solver = nothing, integrator_policy = nothing,
 	      sources = NoSources(), deactivation = false, band = nothing,
-	      correction = NoCorrection(), lagrangian = Int[],
+	      correction = nothing, lagrangian = nothing,
 	      located_events = true) -> CoreSolution
 
 Solve `problem` on the finite-volume core.
@@ -112,8 +112,8 @@ function _solve(
     sources = NoSources(),
     deactivation::Bool = false,
     band::Union{Nothing,Real} = nothing,
-    correction::Correction = NoCorrection(),
-    lagrangian::AbstractVector{<:Integer} = Int[],
+    correction::Union{Nothing,Correction} = nothing,
+    lagrangian::Union{Nothing,AbstractVector{<:Integer}} = nothing,
     located_events::Bool = true,
 )
     jacobian === nothing ||

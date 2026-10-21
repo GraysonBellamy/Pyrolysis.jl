@@ -27,6 +27,7 @@ include("lateral.jl")
 export Closure, BalanceRowClosure, closure_rows!, consistent_velocities!, rank_check
 export Correction, NoCorrection, PrescribedCorrection, EquidistributionCorrection
 export LayerCorrection, EQUIDISTRIBUTION_TIME, bind_correction, activation, correction!
+export vanishing, vanishes
 export LateralShrinkage, LATERAL_CLAMP_WIDTH, chi_bar, lateral_rows, consistent_lateral
 
 end # module Closures

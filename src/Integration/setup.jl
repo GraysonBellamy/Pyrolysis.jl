@@ -94,14 +94,32 @@ function _require_supported(
 end
 
 # The interior nodes between two cells that start with different condensed
-# components: the layer interfaces an equidistribution correction must not
-# move across.
+# components (`amounts`, `NC × n`, their initial masses or concentrations):
+# the layer interfaces an equidistribution correction must not move across.
 function _composition_interfaces(
-    m0::AbstractMatrix{Float64},
+    amounts::AbstractMatrix{Float64},
     material::Material{NC},
 ) where {NC}
-    present(i) = [m0[j, i] > 0 && !is_gas(material.components[j]) for j = 1:NC]
-    return [nd for nd = 2:size(m0, 2) if present(nd - 1) != present(nd)]
+    present(i) = [amounts[j, i] > 0 && !is_gas(material.components[j]) for j = 1:NC]
+    return [nd for nd = 2:size(amounts, 2) if present(nd - 1) != present(nd)]
+end
+
+# The correction of a solve that names none: the equidistribution correction
+# where the mesh moves, cells are deactivated and some layer can vanish
+# ([`vanishes`](@ref)), so that its cells thin together and leave in one
+# event; no correction otherwise. `ξ0` holds the cells' initial
+# concentrations (`NC × n`).
+function _installed_correction(
+    material::Material{NC},
+    ξ0::AbstractMatrix{Float64},
+    use_ale::Bool,
+    deactivation::Bool,
+) where {NC}
+    (use_ale && deactivation) || return NoCorrection()
+    v = vanishing(material)
+    condensed = ntuple(j -> !is_gas(material.components[j]), Val(NC))
+    any(i -> vanishes(v, ξ0, i:i, condensed), axes(ξ0, 2)) || return NoCorrection()
+    return EquidistributionCorrection()
 end
 
 # An equidistribution correction needs every layer interface among the
@@ -275,7 +293,7 @@ end
 	setup(problem; energy_state = :temperature, reltol = 1e-6, abstol = 1e-8,
 	      threshold = 1e-2, use_ale = false, radiation_model = NO_RADIATION,
 	      coordinates = Planar(), w_override = nothing,
-	      correction = NoCorrection(), lagrangian = Int[],
+	      correction = nothing, lagrangian = nothing,
 	      time_scale = problem.dt_initial, sources = NoSources(),
 	      deactivation = false, band = nothing) -> CoreProblem
 
@@ -297,14 +315,19 @@ of [`BalanceRowClosure`](@ref), with the node velocities consistent at the
 start; a material with a lateral shrinkage law then also carries the
 conversion-history pair and its cross section's area and lateral rate.
 `correction` moves the mesh relative to the solid
-([`EquidistributionCorrection`](@ref); the default [`NoCorrection`](@ref)
-keeps it with the solid), the balance rows then holding the solid velocity
-`w − c`, and the inventories cross the faces at the relative velocity `−c`
-([`RelativeFluxKernel`](@ref)). `lagrangian` lists the mesh nodes that
-always move with the solid, the layer interfaces; under an
+([`EquidistributionCorrection`](@ref); [`NoCorrection`](@ref) keeps it with
+the solid), the balance rows then holding the solid velocity `w − c`, and the
+inventories cross the faces at the relative velocity `−c`
+([`RelativeFluxKernel`](@ref)). By default a solve gets the equidistribution
+correction when the mesh moves, cells are deactivated and some layer can
+vanish (its condensed components gasify completely, [`vanishing`](@ref)), and
+no correction otherwise; a layer that cannot vanish keeps its mesh with the
+solid under any equidistribution correction. `lagrangian` lists the mesh
+nodes that always move with the solid, the layer interfaces; under an
 equidistribution correction every interior node between cells that start
-with different condensed components must be among them. `w_override`, a
-function `w(x, t)`, prescribes the velocity of every node instead
+with different condensed components must be among them, and by default they
+are those nodes. `w_override`, a function `w(x, t)`, prescribes the velocity
+of every node instead
 ([`PrescribedCorrection`](@ref)), moving the mesh over a solid at rest
 (verification; the material must not react, and no other correction is
 given), the inventories crossing the faces at `−w`. `coordinates` reads the
@@ -335,19 +358,32 @@ function setup(
     radiation_model = NO_RADIATION,
     coordinates::CoordinateSystem = Planar(),
     w_override = nothing,
-    correction::Correction = NoCorrection(),
-    lagrangian::AbstractVector{<:Integer} = Int[],
+    correction::Union{Nothing,Correction} = nothing,
+    lagrangian::Union{Nothing,AbstractVector{<:Integer}} = nothing,
     time_scale::Real = problem.dt_initial,
     sources = NoSources(),
     deactivation::Bool = false,
     band::Union{Nothing,Real} = nothing,
 )
     if w_override !== nothing
-        correction isa NoCorrection || throw(
+        (correction === nothing || correction isa NoCorrection) || throw(
             ArgumentError("w_override prescribes the mesh velocity: give no correction"),
         )
         correction = PrescribedCorrection(w_override)
     end
+    problem = _own_problem(problem)
+    apply_initial_conditions!(problem)
+    material = problem.material
+    NC = n_components(material)
+    old = problem.mesh
+    ξ0 = [Float64(s.ξ[j]) for j = 1:NC, s in old.cell_states]
+    correction =
+        something(correction, _installed_correction(material, ξ0, use_ale, deactivation))
+    lagrangian = something(
+        lagrangian,
+        correction isa EquidistributionCorrection ?
+        _composition_interfaces(ξ0, material) : Int[],
+    )
     _require_supported(
         problem,
         use_ale,
@@ -361,11 +397,6 @@ function setup(
         correction isa EquidistributionCorrection ? max(threshold, CORRECTION_BAND) :
         threshold,
     )
-    problem = _own_problem(problem)
-    apply_initial_conditions!(problem)
-    material = problem.material
-    NC = n_components(material)
-    old = problem.mesh
 
     x = [node.z for node in old.nodes]
     mesh =

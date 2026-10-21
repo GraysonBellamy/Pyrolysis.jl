@@ -226,7 +226,7 @@ function run_keywords(row, form, problem)
             correction = Cl.EquidistributionCorrection(τ = row.τ),
             lagrangian = row.case == "V-BO-04" ? Int[] :
                          [Base.invokelatest(_vbo_interface_node, problem)],
-        ) : (;)
+        ) : (; correction = Cl.NoCorrection())
     return (; energy_state = form, threshold = row.ε_m, corr...)
 end
 

@@ -242,10 +242,10 @@ function _vbo_core_solve(
     return Pyrolysis.Integration.integrate(cp; callback, min_thickness, located...)
 end
 
-# The case's solve. On the new core a `corrected` case moves its mesh by the
-# equidistribution correction, with the layer interface Lagrangian (given
-# keywords take precedence).
-function _vbo_solve_fn(id::String; corrected::Bool = false)
+# The case's solve. On the new core a moving mesh with deactivation gets the
+# equidistribution correction, the layer interface Lagrangian, by `setup`'s
+# installation rule.
+function _vbo_solve_fn(id::String)
     return (problem; kwargs...) -> begin
         surf = _VBOWarnCounter(Logging.current_logger(), r"^Surface", Ref(0))
         tr = _VBOWarnCounter(surf, r"transmitted through the back face", Ref(0))
@@ -257,14 +257,7 @@ function _vbo_solve_fn(id::String; corrected::Bool = false)
         rec = _VBORecord()
         sol = Logging.with_logger(void) do
             if VERIFICATION_CORE == "new"
-                kw =
-                    corrected ?
-                    (;
-                        correction = Pyrolysis.Closures.EquidistributionCorrection(),
-                        lagrangian = [_vbo_interface_node(problem)],
-                        kwargs...,
-                    ) : kwargs
-                _vbo_core_solve(problem, rec; kw...)
+                _vbo_core_solve(problem, rec; kwargs...)
             else
                 recorder = _vbo_recorder(
                     (u, t) -> (rec.T_max = max(rec.T_max, maximum(view(u, 1:n)))),
@@ -489,7 +482,7 @@ function _verification_case_vbo01()
             "Gpyro V2 PMMA deck property fits",
         ],
         build = n -> _vbo_problem(n),
-        solve_fn = _vbo_solve_fn(id; corrected = true),
+        solve_fn = _vbo_solve_fn(id),
         solve_kwargs = (
             use_ale = true,
             handle_depletion = true,

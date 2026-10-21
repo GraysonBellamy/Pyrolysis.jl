@@ -4,10 +4,11 @@
 #
 # The burnout decks, both cores in this process: V-BO-01, V-BO-03 and V-BO-04
 # at 30, 60 and 120 cells (PMMA cells on the first two). The finite-volume
-# core solves each as the suite routes it: V-BO-01 and V-BO-03 with the
-# equidistribution correction at its defaults, the PMMA–Kaowool interface
-# Lagrangian; V-BO-04 without a correction. The old core solves each with the
-# case's keywords.
+# core solves each as the suite routes it, with the correction `setup`'s
+# installation rule gives it: the equidistribution correction at its
+# defaults, the PMMA–Kaowool interface Lagrangian, and on V-BO-04's uniform
+# column a correction that stays exactly zero. The old core solves each with
+# the case's keywords.
 #
 # Accuracy. A cell deactivates at the end of the step on which it crosses the
 # threshold, so an event's time is set by that step, which the tolerance hardly
@@ -128,18 +129,11 @@ end
 function core_problem(deck, n, reltol; problem = deck_problem(deck, n))
     kw = CASES[deck].solve_kwargs
     rad = haskey(kw, :radiation_model) ? (; radiation_model = kw.radiation_model) : (;)
-    corr =
-        deck == "V-BO-04" ? (;) :
-        (;
-            correction = Cl.EquidistributionCorrection(),
-            lagrangian = [Base.invokelatest(_vbo_interface_node, problem)],
-        )
     return Ig.setup(
         problem;
         use_ale = kw.use_ale,
         deactivation = kw.handle_depletion,
         rad...,
-        corr...,
         _tol(reltol)...,
     )
 end

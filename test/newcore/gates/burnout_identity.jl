@@ -4,6 +4,16 @@
 # the digest of `(T, m, z, t)` of its solution recorded; the Douglas fir deck
 # of examples/07_douglas_fir_cone.jl over its first 60 s joins them.
 #
+# The decks split by the correction's installation rule. (A) A deck the rule
+# leaves without a correction (a fixed mesh, no deactivation, or no layer that
+# can vanish) must equal its reference; on a moving mesh it is solved again
+# with an equidistribution correction given explicitly, which must leave every
+# temperature and mass within 1e-10 of the first solve's, relative to the
+# field's largest, on the same accepted steps, with the correction exactly
+# zero. (B) A deck the rule installs the correction on records its digest at
+# the package defaults as the reference, beside its steps without the
+# correction and the largest correction velocity.
+#
 # With `--record` the digests become the reference
 # (measurements/burnout_identity_reference.csv; plan §12 records the tree it
 # was taken on); without it every digest is compared with the reference and
@@ -95,36 +105,91 @@ function douglas_fir_problem()
     )
 end
 
+# Whether the installation rule gives the deck solved with the case keywords
+# `kw` an equidistribution correction.
+function installed(problem, kw)
+    use_ale = get(kw, :use_ale, false)
+    deactivation = get(kw, :handle_depletion, get(kw, :deactivation, false))
+    use_ale || return false
+    cp = Base.invokelatest(Pyrolysis.Integration.setup, problem; use_ale, deactivation)
+    return cp.def.closure.correction isa Pyrolysis.Closures.LayerCorrection
+end
+
+# The largest difference of two solutions' temperatures and masses, each
+# relative to that field's largest value.
+function difference(a, b)
+    size(a.T) == size(b.T) || return Inf
+    d = 0.0
+    for (x, y) in ((a.T, b.T), (a.m, b.m))
+        keep = [k for k in eachindex(x) if isfinite(x[k]) && isfinite(y[k])]
+        d = max(d, maximum(abs, x[keep] .- y[keep]; init = 0.0) / maximum(abs, y[keep]))
+    end
+    return d
+end
+
+largest_c(sol) = maximum(abs, filter(isfinite, sol.correction_velocity); init = 0.0)
+
 function main()
     m, cases = load_cases()
     rows = []
+    record(deck, problem, sol, moving, rule, solve) = begin
+        r = (;
+            deck,
+            cells = length(problem.mesh.cells),
+            digest = digest(sol),
+            steps = sol.statistics.accepted,
+            retcode = sol.retcode,
+            moving,
+            installed = rule,
+            check = if rule
+                plain = solve(Pyrolysis.Closures.NoCorrection())
+                (; steps = plain.statistics.accepted, largest = largest_c(sol))
+            elseif moving
+                explicit = solve(Pyrolysis.Closures.EquidistributionCorrection())
+                (;
+                    same = explicit.statistics.accepted == sol.statistics.accepted &&
+                           explicit.statistics.rejected == sol.statistics.rejected,
+                    difference = difference(explicit, sol),
+                    largest = largest_c(explicit),
+                )
+            else
+                nothing
+            end,
+        )
+        push!(rows, r)
+        println(r)
+        flush(stdout)
+    end
     for id in DECKS
         case = only(filter(c -> c.id == id, cases))
         problem = Base.invokelatest(case.build, case.ci.n_cells)
-        sol = if Base.invokelatest(m.runs_on_core, case)
-            Base.invokelatest(m._case_solve, case, problem; case.solve_kwargs...)
-        else
+        solve(extra...) =
+            Base.invokelatest(m.runs_on_core, case) ?
+            Base.invokelatest(
+                m._case_solve,
+                case,
+                problem;
+                case.solve_kwargs...,
+                extra...,
+            ) :
             Base.invokelatest(
                 Pyrolysis.Integration.solve,
                 problem;
                 _core_keywords(case.solve_kwargs)...,
+                extra...,
             )
-        end
-        push!(
-            rows,
-            (;
-                deck = id,
-                cells = length(problem.mesh.cells),
-                digest = digest(sol),
-                steps = sol.statistics.accepted,
-                retcode = sol.retcode,
-            ),
+        kw = _core_keywords(case.solve_kwargs)
+        record(
+            id,
+            problem,
+            solve(),
+            get(kw, :use_ale, false),
+            installed(problem, kw),
+            c -> solve(:correction => c),
         )
-        println(rows[end])
-        flush(stdout)
     end
     df = douglas_fir_problem()
-    sol = Base.invokelatest(
+    df_solve(extra...) = Base.invokelatest(
         Pyrolysis.Integration.solve,
         df;
         use_ale = true,
@@ -132,18 +197,16 @@ function main()
         abstol = 1e-9,
         reltol = 1e-7,
         dtmin = 1e-14,
+        extra...,
     )
-    push!(
-        rows,
-        (;
-            deck = "Douglas fir, 60 s",
-            cells = length(df.mesh.cells),
-            digest = digest(sol),
-            steps = sol.statistics.accepted,
-            retcode = sol.retcode,
-        ),
+    record(
+        "Douglas fir, 60 s",
+        df,
+        df_solve(),
+        true,
+        installed(df, (; use_ale = true)),
+        c -> df_solve(:correction => c),
     )
-    println(rows[end])
 
     reference = Dict{String,String}()
     if isfile(REFERENCE)
@@ -160,34 +223,32 @@ function main()
             end
         end
     end
+    _g(x) = string(round(x; sigdigits = 3))
     open(joinpath(OUT, "burnout_identity.md"), "w") do io
         println(io, "# Burnout identity: the decks the correction must not change\n")
         println(
             io,
-            "Generated by `test/newcore/gates/burnout_identity.jl` at $(COMMIT_STAMP), finite-volume core, temperature form, each deck at its CI resolution with its solve keywords; the digest is `hash((T, m, z, t))` of the solution. The reference digests are `burnout_identity_reference.csv`$(RECORD ? ", recorded by this run" : "").\n",
+            "Generated by `test/newcore/gates/burnout_identity.jl` at $(COMMIT_STAMP), finite-volume core, temperature form, each deck at its CI resolution with its solve keywords; the digest is `hash((T, m, z, t))` of the solution. The reference digests are `burnout_identity_reference.csv`$(RECORD ? ", recorded by this run" : ""). Class A: the installation rule leaves the deck without a correction; on a moving mesh the deck solved again with an equidistribution correction given explicitly must take the same steps, stay within 1e-10 (relative) and keep the correction at zero. Class B: the rule installs the correction; its steps without it and the largest correction velocity are recorded.\n",
         )
-        println(io, "| deck | cells | steps | retcode | digest | equal to the reference |")
-        println(io, "|---|---|---|---|---|---|")
+        println(
+            io,
+            "| deck | cells | steps | retcode | class | digest | equal to the reference | explicit correction (A) or without the correction (B) |",
+        )
+        println(io, "|---|---|---|---|---|---|---|---|")
         for r in rows
             ref = get(reference, r.deck, "")
             eq =
                 RECORD ? "recorded" :
                 (isempty(ref) ? "no reference" : (ref == r.digest ? "yes" : "**no**"))
+            class = r.installed ? "B" : (r.moving ? "A" : "A (fixed mesh)")
+            check =
+                r.check === nothing ? "" :
+                r.installed ?
+                "$(r.check.steps) steps without; largest |c| $(_g(r.check.largest)) m/s" :
+                "same steps: $(r.check.same); difference $(_g(r.check.difference)); largest |c| $(_g(r.check.largest))"
             println(
                 io,
-                "| ",
-                r.deck,
-                " | ",
-                r.cells,
-                " | ",
-                r.steps,
-                " | ",
-                r.retcode,
-                " | `",
-                r.digest,
-                "` | ",
-                eq,
-                " |",
+                "| $(r.deck) | $(r.cells) | $(r.steps) | $(r.retcode) | $(class) | `$(r.digest)` | $(eq) | $(check) |",
             )
         end
     end

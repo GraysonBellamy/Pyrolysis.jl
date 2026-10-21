@@ -42,7 +42,7 @@ const EQUIDISTRIBUTION_TIME = 720.0
 
 """
 	EquidistributionCorrection(; τ = EQUIDISTRIBUTION_TIME, activation = (0.3, 0.1),
-	                           monitor = (1.0, 0.0)) <: Correction
+	                           monitor = (1.0, 0.0), layers = :vanishing) <: Correction
 
 The relaxed equidistribution of a vanishing layer's cells. At an interior
 node `n` of a layer of `N` cells, between cell `n − 1` (inward) and cell `n`,
@@ -65,8 +65,11 @@ so `α` and `β` set its shape and not the relaxation time; with `β = 0`,
 A layer is bounded by the pinned node, the mesh's Lagrangian nodes (the layer
 interfaces) and the end nodes; `c = 0` at each of them, at every node beside
 a dead cell (the outermost live node among them) and wherever both cells keep
-at least `r_hi` of their initial thickness. `setup` binds the correction to
-the mesh ([`bind_correction`](@ref)).
+at least `r_hi` of their initial thickness. With `layers = :vanishing` only
+the layers that can vanish move ([`vanishes`](@ref)) and the others keep their
+mesh with the solid; `:all` moves every layer, for decks that exercise the
+correction on layers that cannot vanish. `setup` binds the correction to the
+mesh ([`bind_correction`](@ref)).
 """
 struct EquidistributionCorrection <: Correction
     τ::Float64
@@ -74,12 +77,14 @@ struct EquidistributionCorrection <: Correction
     r_lo::Float64
     α::Float64
     β::Float64
+    layers::Symbol
 end
 
 function EquidistributionCorrection(;
     τ::Real = EQUIDISTRIBUTION_TIME,
     activation::Tuple{Real,Real} = (0.3, 0.1),
     monitor::Tuple{Real,Real} = (1.0, 0.0),
+    layers::Symbol = :vanishing,
 )
     r_hi, r_lo = activation
     α, β = monitor
@@ -91,7 +96,9 @@ function EquidistributionCorrection(;
     )
     (α > 0 && β >= 0) ||
         throw(ArgumentError("the monitor needs α > 0 and β ≥ 0, got (α, β) = $monitor"))
-    return EquidistributionCorrection(τ, r_hi, r_lo, α, β)
+    layers in (:vanishing, :all) ||
+        throw(ArgumentError("layers must be :vanishing or :all, got $(repr(layers))"))
+    return EquidistributionCorrection(τ, r_hi, r_lo, α, β, layers)
 end
 
 """
@@ -115,12 +122,55 @@ struct LayerCorrection{NC} <: Correction
 end
 
 """
+	vanishing(material) -> NTuple{NC,Bool}
+
+Whether each condensed component of `material` gasifies completely: some
+reaction consumes it, and every reaction that does yields no condensed
+component that does not itself gasify completely. The least such set, so an
+inert component, a residue that no reaction consumes and the components of a
+cycle do not vanish; a gas component reads `false`.
+"""
+function vanishing(material::Material{NC}) where {NC}
+    condensed = ntuple(j -> !is_gas(material.components[j]), Val(NC))
+    consumes(rxn, j) = any(r -> first(r) == j, rxn.reactants)
+    v = fill(false, NC)
+    changed = true
+    while changed
+        changed = false
+        for j = 1:NC
+            (condensed[j] && !v[j]) || continue
+            consumers = [rxn for rxn in material.reactions if consumes(rxn, j)]
+            isempty(consumers) && continue
+            gasified = p -> !condensed[first(p)] || iszero(last(p)) || v[first(p)]
+            all(rxn -> all(gasified, rxn.products), consumers) || continue
+            v[j] = true
+            changed = true
+        end
+    end
+    return ntuple(j -> v[j], Val(NC))
+end
+
+"""
+	vanishes(vanishing, m0, cells, condensed) -> Bool
+
+Whether the cells `cells`, with initial masses `m0` (`NC × n`), can vanish:
+they hold condensed mass (`condensed` flags the condensed components), and
+every condensed component present in any of them vanishes (`vanishing`,
+[`vanishing`](@ref)'s flags).
+"""
+function vanishes(v::NTuple{NC,Bool}, m0::AbstractMatrix, cells, condensed) where {NC}
+    present(j) = condensed[j] && any(i -> m0[j, i] > 0, cells)
+    return any(present, 1:NC) && all(j -> !present(j) || v[j], 1:NC)
+end
+
+"""
 	bind_correction(correction, topology, reference, m0, material) -> Correction
 
 The correction a solve evaluates: an [`EquidistributionCorrection`](@ref)
 bound, as a [`LayerCorrection`](@ref), to the layers of the line mesh
-`topology` and to its initial masses `m0` (`NC × n`); any other correction as
-given.
+`topology` and to its initial masses `m0` (`NC × n`), with `layers =
+:vanishing` a layer that cannot vanish ([`vanishes`](@ref)) with zero gain;
+any other correction as given.
 """
 bind_correction(corr::Correction, topo, reference, m0, material) = corr
 
@@ -147,11 +197,13 @@ function bind_correction(
     ρ_ref = maximum(ρ0)
     β = ρ_ref > 0 ? corr.β / ρ_ref : 0.0
     bounds = sort!(unique([1; nn; topo.pinned; topo.lagrangian]))
+    v = vanishing(material)
     gain = zeros(nn)
     scale = zeros(n)
     for (lo, hi) in zip(bounds[1:(end-1)], bounds[2:end])
         N = hi - lo
-        gain[(lo+1):(hi-1)] .= N^2 / corr.τ
+        moves = corr.layers === :all || vanishes(v, m0, lo:(hi-1), condensed)
+        moves && (gain[(lo+1):(hi-1)] .= N^2 / corr.τ)
         M̄ = sum(corr.α + β * ρ0[i] for i = lo:(hi-1)) / N
         scale[lo:(hi-1)] .= 1 / M̄
     end

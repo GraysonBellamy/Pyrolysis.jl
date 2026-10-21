@@ -248,16 +248,21 @@ end
     @test corr isa LayerCorrection
     @test find_kernel(RelativeFluxKernel, cp.def.kernels) !== nothing
     @test cp.def.setup.topology.lagrangian == [4]
-    # The substrate (cells 1 to 3) and the layer (cells 4 to 7).
-    @test corr.gain == [0, 9 / τ, 9 / τ, 0, 16 / τ, 16 / τ, 16 / τ, 0]
+    # The substrate (cells 1 to 3), which cannot vanish, and the layer (cells
+    # 4 to 7).
+    @test corr.gain == [0, 0, 0, 0, 16 / τ, 16 / τ, 16 / τ, 0]
     @test corr.monitor_scale == ones(7)
     @test cp.def.setup.reference.thickness ≈ diff(cp.def.setup.reference.positions)
 
-    # The interface between the two compositions must be Lagrangian.
+    # The interface between the two compositions must be Lagrangian: by default
+    # it is, and a list without it is refused.
+    @test setup(p; use_ale = true, correction = EquidistributionCorrection()).def.setup.topology.lagrangian ==
+          [4]
     @test_throws ArgumentError setup(
         p;
         use_ale = true,
         correction = EquidistributionCorrection(),
+        lagrangian = Int[],
     )
     # Without a correction nothing crosses the faces.
     plain = setup(p; use_ale = true)
@@ -284,7 +289,7 @@ end
     kw = (use_ale = true, deactivation = true, lagrangian = [4])
     @test setup(p; kw..., correction = EquidistributionCorrection()).deactivation.band ==
           CORRECTION_BAND
-    @test setup(p; kw...).deactivation.band == 1e-2
+    @test setup(p; kw..., correction = NoCorrection()).deactivation.band == 1e-2
     @test setup(p; kw..., threshold = 0.2, correction = EquidistributionCorrection()).deactivation.band ==
           0.2
 end
@@ -293,12 +298,82 @@ end
 # §6.1 item 1: the zeros, the sign and the activation's smoothness
 # ============================================================================
 
+# The components of a material with `reactions` among condensed `a`, `b` and
+# the gas `g`.
+function _network(reactions...)
+    a = SolidComponent(:a, ρ = 1000.0, c = 1000.0, k = 0.5)
+    b = SolidComponent(:b, ρ = 500.0, c = 1000.0, k = 0.5)
+    g = GaseousComponent(:g, M = 0.03, c = 1000.0, k = 0.03, λ = 1e-4)
+    return Material(name = :network, components = (a, b, g), reactions = reactions)
+end
+
+@testset "a solve gets the correction where the mesh moves, cells go and a layer can vanish" begin
+    # Which condensed components gasify completely.
+    @test vanishing(_network(Reaction(:r, 1 => 3; A = 1.0, E = 0.0, h = 0.0))) ==
+          (true, false, false)
+    char = Reaction(:r, 1 => (2, 3); A = 1.0, E = 0.0, h = 0.0, yields = (0.3, 0.7))
+    @test vanishing(_network(char)) == (false, false, false)
+    chain = (char, Reaction(:s, 2 => 3; A = 1.0, E = 0.0, h = 0.0))
+    @test vanishing(_network(chain...)) == (true, true, false)
+    # Competing paths: the char branch leaves residue whatever the other does.
+    competing = (Reaction(:r, 1 => 3; A = 1.0, E = 0.0, h = 0.0), char)
+    @test vanishing(_network(competing...)) == (false, false, false)
+    cycle = (
+        Reaction(:r, 1 => 2; A = 1.0, E = 0.0, h = 0.0),
+        Reaction(:s, 2 => 1; A = 1.0, E = 0.0, h = 0.0),
+    )
+    @test vanishing(_network(cycle...)) == (false, false, false)
+    # A layer vanishes when it holds condensed mass and every condensed
+    # component present vanishes.
+    m0 = [1.0 1.0 0.0; 0.0 1.0 0.0; 0.0 0.0 0.0]
+    v, condensed = (true, false, false), (true, true, false)
+    @test vanishes(v, m0, 1:1, condensed)
+    @test !vanishes(v, m0, 1:2, condensed)
+    @test !vanishes(v, m0, 3:3, condensed)
+
+    # The installation: the two-layer deck's top layer vanishes.
+    p = _two_layer(4, 3)
+    cp = setup(p; use_ale = true, deactivation = true)
+    @test cp.def.closure.correction isa LayerCorrection
+    @test cp.def.setup.topology.lagrangian == [4]
+    @test cp.def.closure.correction.gain[1:4] == zeros(4)
+    @test cp.deactivation.band == CORRECTION_BAND
+    # None on a fixed mesh, without deactivation, or without a vanishing layer.
+    @test setup(p; deactivation = true).def.closure === nothing
+    @test setup(p; use_ale = true).def.closure.correction isa NoCorrection
+    @test setup(_uniform_slab(6); use_ale = true, deactivation = true).def.closure.correction isa
+          NoCorrection
+    # A layer that cannot vanish keeps its mesh with the solid at any state, its
+    # cells activated or not.
+    corr = setup(
+        p;
+        use_ale = true,
+        deactivation = true,
+        correction = EquidistributionCorrection(activation = (1.5, 0.5)),
+    )
+    @test setup(
+        p;
+        use_ale = true,
+        deactivation = true,
+        correction = EquidistributionCorrection(layers = :all),
+    ).def.closure.correction.gain[2:3] == fill(9 / EQUIDISTRIBUTION_TIME, 2)
+    @test_throws ArgumentError EquidistributionCorrection(layers = :none)
+    for h in (
+        [1.0, 0.8, 1.3, 0.6, 0.4, 0.5, 0.45] .* 1e-3,
+        [0.2, 1.5, 0.9, 0.5, 0.3, 0.6, 0.4] .* 1e-3,
+    )
+        c = _corrections(corr, _with_thicknesses(corr, h))
+        @test all(iszero, c[1:4])
+        @test any(!iszero, c[5:7])
+    end
+end
+
 @testset "the correction is zero at the bounding nodes and moves a node into the thicker cell" begin
     τ = 10.0
     cp = setup(
         _inert(6; ratio = 1.0);
         use_ale = true,
-        correction = EquidistributionCorrection(; τ),
+        correction = EquidistributionCorrection(; τ, layers = :all),
         lagrangian = [4],
     )
     layout = cp.def.layout
@@ -325,7 +400,11 @@ end
 end
 
 @testset "the activation is C¹ in ln h, one at and below zero thickness" begin
-    cp = setup(_inert(3); use_ale = true, correction = EquidistributionCorrection())
+    cp = setup(
+        _inert(3);
+        use_ale = true,
+        correction = EquidistributionCorrection(layers = :all),
+    )
     corr = cp.def.closure.correction
     h0 = 2e-4
     a(s) = activation(corr, h0 * exp(s), h0)
@@ -364,7 +443,11 @@ end
     cp = setup(
         _inert(3);
         use_ale = true,
-        correction = EquidistributionCorrection(; τ, activation = (100.0, 50.0)),
+        correction = EquidistributionCorrection(;
+            τ,
+            activation = (100.0, 50.0),
+            layers = :all,
+        ),
         abstol = 1e-12,
         reltol = 1e-10,
     )
@@ -396,7 +479,11 @@ end
             _uniform_slab(7);
             use_ale = true,
             coordinates = coords,
-            correction = EquidistributionCorrection(τ = 1.0, activation = (2.0, 0.5)),
+            correction = EquidistributionCorrection(
+                τ = 1.0,
+                activation = (2.0, 0.5),
+                layers = :all,
+            ),
         )
         layout = cp.def.layout
         u = cp.u0
@@ -465,7 +552,7 @@ end
     :temperature,
     :enthalpy,
 )
-    corr = EquidistributionCorrection(τ = 40.0, activation = (2.0, 0.5))
+    corr = EquidistributionCorrection(τ = 40.0, activation = (2.0, 0.5), layers = :all)
     kw = (energy_state = energy, use_ale = true, correction = corr)
     cp = setup(_composition(20); kw..., abstol = 1e-10, reltol = 1e-8)
     sol = integrate(cp; saveat = Float64[])
@@ -498,8 +585,12 @@ end
 # partials, and ForwardDiff resolves that tie by the partials, so the colored
 # and the dense Jacobian take the kink's derivative along different seeds.
 # The states move every interior node by up to 5 %, which breaks every tie.
-const _active =
-    EquidistributionCorrection(τ = 50.0, activation = (1.5, 0.5), monitor = (1.0, 1.0))
+const _active = EquidistributionCorrection(
+    τ = 50.0,
+    activation = (1.5, 0.5),
+    monitor = (1.0, 1.0),
+    layers = :all,
+)
 const _correction_configurations = (
     two_layer = (problem = n -> _two_layer(n - 3, 3), lagrangian = [4]),
     zero_order = (problem = _zero_order, lagrangian = Int[]),

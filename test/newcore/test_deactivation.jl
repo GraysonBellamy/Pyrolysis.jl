@@ -9,6 +9,7 @@ using Pyrolysis.Assembly
 using Pyrolysis.Assembly: residual!, buffers
 using Pyrolysis.Deactivation
 using Pyrolysis.Deactivation: ConservativeTransfer
+using Pyrolysis.Closures: NoCorrection
 using Pyrolysis.ColoredJacobian
 using Pyrolysis.Integration
 using Pyrolysis.Integration: setup, consistent_state!, integrate
@@ -290,8 +291,10 @@ end
         @test all(e.receiver == 5 for e in events)
         @test [e.fraction for e in events] ≈ [0.9ε_m, 0.015, 0.05] rtol = 1e-12
     end
-    # At its default the band is the threshold: the run is the cells below it.
-    cp = setup(_ablator(8); use_ale = true, deactivation = true)
+    # Without a correction the band defaults to the threshold: the run is the
+    # cells below it.
+    cp =
+        setup(_ablator(8); use_ale = true, deactivation = true, correction = NoCorrection())
     @test cp.deactivation.band == cp.deactivation.threshold
     u = copy(cp.u0)
     for (i, f) in fractions(1e-2)

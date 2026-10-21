@@ -76,7 +76,7 @@ function _verification_case_vbo03()
         tags = [:ale, :burnout, :depletion, :beer_lambert],
         references = ["MaCFP-2 PMMA gasification case (NIST), 50 kW/m²"],
         build = n -> _vbo_problem(n; substrate_alpha = 0.0),
-        solve_fn = _vbo_solve_fn(id; corrected = true),
+        solve_fn = _vbo_solve_fn(id),
         solve_kwargs = (
             use_ale = true,
             handle_depletion = true,
