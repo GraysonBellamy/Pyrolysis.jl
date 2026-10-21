@@ -29,7 +29,7 @@ isothermal composition profile advected across the mesh stays isothermal.
 Face states are second-order upwind reconstructions: the upwind cell's value
 plus its smooth [`van_albada`](@ref) slope times its distance to the face,
 the slope built from the gradient from the cell beyond it and the gradient
-toward the downwind cell (the downwind gradient alone where no cell lies
+toward the downwind cell (the downwind gradient alone where no live cell lies
 beyond). A boundary face takes the one-sided linear extrapolation of its cell
 whichever way the mesh crosses it, so its flux has no switch. The face state
 of an interior face changes side with the sign of `u`; the flux `u ξ_f` is
@@ -129,15 +129,17 @@ end
 
 # The cells and distances of a face state: the upwind cell `U`, the downwind
 # cell `D` (zero on a boundary face), the cell `X` whose gradient into `U`
-# sets the slope (zero where there is none), `d_f` from `U` to the face,
-# `d_UD` and `d_XU`. On a boundary face `X` is the boundary cell's inner
-# neighbour and the state is its one-sided extrapolation.
-@inline function _stencil(kernel::RelativeFluxKernel, g, topo, f, u)
+# sets the slope (zero where there is none or where it is dead, `active` being
+# the live cells), `d_f` from `U` to the face, `d_UD` and `d_XU`. On a
+# boundary face `X` is the boundary cell's inner neighbour and the state is
+# its one-sided extrapolation.
+@inline function _stencil(kernel::RelativeFluxKernel, g, topo, f, u, active)
     o, nb = topo.faces[f].cells
     side = nb == 0 || u >= 0 ? 1 : 2
     U = side == 1 ? o : nb
     D = nb == 0 ? 0 : (side == 1 ? nb : o)
     X = kernel.far[side, f]
+    X = X != 0 && !active[X] ? 0 : X
     d_f = _side_distance(kernel, g, topo, f, side)
     d_UD = D == 0 ? zero(d_f) : _across(kernel, g, topo, f)
     d_XU = X == 0 ? zero(d_f) : _across(kernel, g, topo, kernel.beyond[side, f])
@@ -179,7 +181,7 @@ function contribute!(
     @inbounds for f = 1:n_faces(topo)
         u = -ds.c[topo.faces[f].nodes[1]] * g.face_normal[f][1]
         iszero(u) && continue
-        s = _stencil(kernel, g, topo, f, u)
+        s = _stencil(kernel, g, topo, f, u, ds.active)
         U = s[1]
         T_f = _face_value(i -> ds.T[i], s..., kernel.ε[2, U])
         h = component_enthalpies(kernel.laws, T_f)

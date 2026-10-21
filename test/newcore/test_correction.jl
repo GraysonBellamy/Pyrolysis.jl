@@ -671,6 +671,70 @@ end
 end
 
 # ============================================================================
+# The relative fluxes after a merge
+# ============================================================================
+
+# After a merge into the receiver `r` the node `r` lies between two live cells
+# of a layer with gain, and with cell `r` thicker than cell `r − 1` its
+# correction is positive, so the face at node `r` takes its upwind state from
+# cell `r`, beyond which lies the dead cell `r + 1`.
+@testset "the relative fluxes after a merge read no dead cell: $(energy) form" for energy in
+                                                                                   (
+    :temperature,
+    :enthalpy,
+)
+    cp = setup(_ablator(6); energy_state = energy, _ablation...)
+    layout = cp.def.layout
+    h0 = cp.def.setup.reference.thickness
+    u = _with_thicknesses(cp, h0 .* [1, 1, 1, 0.2, 0.25, 0.02])
+    m_ref = cp.u0[mass_index(layout, 6, 1)]
+    u[mass_index(layout, 6, 1)] = 0.005 * m_ref
+    @test deactivate!(u, cp.deactivation, cp.def, 0.0) === :transferred
+    @test top_live_cell(layout) == 5
+    @test u[position_index(layout, 6)] - u[position_index(layout, 5)] ≈ 0.27 * h0[5]
+    # Node 5, between two live cells below the activation's upper bound, has a
+    # positive correction.
+    @test _corrections(cp, u)[5] > 0
+
+    live = findall(layout.mask)
+    du = similar(u)
+    residual!(du, u, cp.def, 0.0, cp.ws)
+    reference = du[live]
+    T6 = cp.ws.derived.T[6]
+    masses(v) = ntuple(j -> v[mass_index(layout, 6, j)], n_components(layout))
+    perturbations = (
+        [
+            mass_index(layout, 6, j) =>
+                v -> (v[mass_index(layout, 6, j)] = 1e-3 * m_ref) for
+            j = 1:n_components(layout)
+        ]...,
+        energy_index(layout, 6) =>
+            v -> (
+                v[energy_index(layout, 6)] = energy_state_value(
+                    energy_state(layout),
+                    cp.def.setup,
+                    T6 + 50.0,
+                    masses(v),
+                    6,
+                )
+            ),
+        position_index(layout, 7) => v -> (v[position_index(layout, 7)] += 0.1 * h0[6]),
+    )
+    for (row, perturb!) in perturbations
+        @test !layout.mask[row]
+        v = copy(u)
+        perturb!(v)
+        @test v[row] != u[row]
+        residual!(du, v, cp.def, 0.0, cp.ws)
+        @test du[live] == reference
+    end
+    Jd = _contained(cp, u)
+    @test all(iszero, Jd[live, findall(.!layout.mask)])
+    reset_cells!(cp.deactivation, layout)
+    @test all(layout.mask)
+end
+
+# ============================================================================
 # §6.1 item 14: outputs
 # ============================================================================
 
