@@ -1,6 +1,6 @@
 # The energy balance against the ledger
 
-Produced by `test/newcore/gates/energy_ledger.jl` at commit 5f08134. Julia 1.13.0, 1 thread, 22 logical CPUs; load average [24.1, 20.6, 18.4] at the start and [32.8, 27.3, 22.5] at the end. Phase 1's gate item 7 on V-CPL-06's char-layer column, and Phase 2's item 3 on V-BO-04's burning column before and across its event.
+Produced by `test/newcore/gates/energy_ledger.jl` at commit 6bb9f18 (tree 44e66df). Julia 1.13.0, 1 thread, 22 logical CPUs; load average [17.2, 19.1, 18.5] at the start and [18.7, 19.2, 18.9] at the end. Phase 1's gate item 7 on V-CPL-06's char-layer column, and Phase 2's item 3 on V-BO-04's burning column before and across its event.
 
 ## Closure at the case's tolerance
 
@@ -32,13 +32,13 @@ Produced by `test/newcore/gates/energy_ledger.jl` at commit 5f08134. Julia 1.13.
 
 ## V-BO-04 before its first event
 
-40 cells on a moving mesh, abstol 1.0e-9, reltol 1.0e-7 (the case's), 0 to 290.0 s without deactivation; |ΔE − ∫ ledger| over |ΔE|, each core's own, trapezoidal over the accepted steps (the old core's budget is V-CPL-06b's).
+40 cells on a moving mesh, abstol 1.0e-9, reltol 1.0e-7 (the case's), 0 to 290.0 s without deactivation; |ΔE − ∫ ledger| over |ΔE|, each core's own, trapezoidal over the accepted steps (the old core's budget is V-CPL-06b's). Item 3: the new core's closure no larger than the old core's, per form. Across the event the old core has no located event, so the table of that section is reported without a verdict.
 
-| run | retcode | closure |
-|---|---|---|
-| old core | Success | 7.1e-5 |
-| new core, temperature form | Success | 3.65e-6 |
-| new core, enthalpy form | Success | 3.98e-6 |
+| run | retcode | closure | item 3 |
+|---|---|---|---|
+| old core | Success | 7.1e-5 |  |
+| new core, temperature form | Success | 3.65e-6 | pass |
+| new core, enthalpy form | Success | 3.98e-6 | pass |
 
 20 cells, 0 to 290.0 s at fixed steps; the largest |Σ H − H₀ − E| over the solve [J] against the largest |E|, and their ratio. The column stays at its initial temperature, so its enthalpy is linear in the masses in both forms and the ledger an invariant the integrator keeps to round-off; an order is given only between defects above 1.0e-12 of the scale.
 
