@@ -26,7 +26,8 @@
 # ratio is its warm time there over the old default's (warm medians of three
 # solves, of nine for the old default, whose time varies the most; a solve
 # slower than fifteen times the old default is timed once and its core not
-# taken to tighter tolerances).
+# taken to tighter tolerances). Item 8's verdict on that ratio: pass at 1.5
+# or below, the owner's call above 1.5 and up to 2, a stop above 2 (§7.4).
 # Beside it: the error over the whole run at the saved times with the same live
 # cells, the largest invocation-time shift over the reference's median
 # interval between invocations, or between its saved times for a single
@@ -98,6 +99,9 @@ const SLOW = 15.0
 const CELLS = (30, 60, 120)
 const ANATOMY = ("V-BO-01", 60)
 _tol(reltol) = (reltol = reltol, abstol = reltol / 100)
+
+# Item 8 on a ratio at matched accuracy.
+item8_verdict(ratio) = ratio <= 1.5 ? "pass" : ratio <= 2 ? "owner" : "stop"
 
 const CASES = Dict(
     c.id => c for c in Base.invokelatest(load_verification_cases) if
@@ -572,14 +576,15 @@ open(joinpath(OUT, "burnout_timing.md"), "w") do io
         "history over the reference's integral. Warm medians of $(REPEATS) solves, of ",
         "$(OLD_DEFAULT_REPEATS) for the old default (a solve slower than $(Int(SLOW)) times the old ",
         "default is timed once and its core not taken to tighter tolerances); ratio: over the old ",
-        "core's time at the case's tolerance.\n",
+        "core's time at the case's tolerance; item 8: pass at a matched ratio of 1.5 or below, the ",
+        "owner's call above 1.5 and up to 2, stop above 2.\n",
     )
     println(io, "## Matched accuracy\n")
     println(
         io,
-        "| deck | cells | window before [s] | spread old, new | target | old default [s] | new matched reltol | window RMS | window largest | new [s] | ratio | equal-tolerance ratio |",
+        "| deck | cells | window before [s] | spread old, new | target | old default [s] | new matched reltol | window RMS | window largest | new [s] | ratio | item 8 | equal-tolerance ratio |",
     )
-    println(io, "|" * repeat("---|", 12))
+    println(io, "|" * repeat("---|", 13))
     for res in results
         m = res.matched
         k = findfirst(r -> r.core == "new" && r.reltol == res.default, res.rows)
@@ -588,9 +593,9 @@ open(joinpath(OUT, "burnout_timing.md"), "w") do io
             io,
             "| $(res.deck) | $(res.cells) | $(_g(res.t1; d = 4)) | $(_g(res.spread.old)), ",
             "$(_g(res.spread.new)) | $(_g(res.target)) | $(_g(res.old_row.wall)) | ",
-            m === nothing ? "none on the ladder | | | | | " :
+            m === nothing ? "none on the ladder | | | | | unmatched | " :
             "$(m.reltol) | $(_g(m.window_rms)) | $(_g(m.window_largest)) | $(_g(m.wall)) | " *
-            "$(_g(m.ratio)) | ",
+            "$(_g(m.ratio)) | $(item8_verdict(m.ratio)) | ",
             "$(_g(eq)) |",
         )
     end
