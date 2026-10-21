@@ -38,7 +38,7 @@
 
 ENV["PYROLYSIS_CORE"] = "new"
 using Pyrolysis
-using Statistics: median
+include(joinpath(@__DIR__, "event_shift.jl"))
 
 const OUT = joinpath(@__DIR__, "measurements")
 mkpath(OUT)
@@ -107,23 +107,6 @@ function temperature_error(sol, ref)
     end
     final = size(sol.T) != size(ref.T) && sol.t[end] == ref.t[end]
     return err, scale, final ? 0 : length(pairs), sol.t[last(pairs)[1]]
-end
-
-# The time of each deactivation invocation (every cell one invocation takes
-# goes at its time).
-invocation_times(sol) = [
-    first(e.t for e in sol.events if e.invocation == k) for
-    k in unique(e.invocation for e in sol.events)
-]
-
-# The largest shift of the invocation times [s] and the median interval
-# between the reference's invocations, or, with a single invocation, between
-# its saved times [s] (NaN without events or with different counts).
-function event_shift(sol, ref)
-    hasproperty(sol, :events) || return NaN, NaN
-    a, b = invocation_times(sol), invocation_times(ref)
-    (isempty(b) || length(a) != length(b)) && return NaN, NaN
-    return maximum(abs, a .- b), median(diff(length(b) > 1 ? b : ref.t))
 end
 
 _statistic(sol, name) =

@@ -28,8 +28,10 @@
 # slower than fifteen times the old default is timed once and its core not
 # taken to tighter tolerances).
 # Beside it: the error over the whole run at the saved times with the same live
-# cells, the largest event-time shift over the reference's median interval
-# (both as `case_accuracy.jl` measures them), the L1 error of the mass loss
+# cells, the largest invocation-time shift over the reference's median
+# interval between invocations, or between its saved times for a single
+# invocation (both as `case_accuracy.jl` measures them; the shift is
+# `event_shift.jl`'s, shared with it), the L1 error of the mass loss
 # rate history relative to the reference's integral, and the case's peak mass
 # loss rate, burnout time and mass ledger.
 #
@@ -74,6 +76,7 @@ include(
     ),
 )
 include(joinpath(@__DIR__, "stamp.jl"))
+include(joinpath(@__DIR__, "event_shift.jl"))
 
 using Logging
 using Profile
@@ -200,13 +203,6 @@ function run_error(sol, ref, f)
         end
     end
     return err
-end
-
-function event_shift(sol, ref)
-    a, b = _event_times(sol), _event_times(ref)
-    (isempty(b) || length(a) != length(b)) && return NaN
-    gaps = filter(>(0), diff(unique(b)))
-    return isempty(gaps) ? NaN : maximum(abs, a .- b) / median(gaps)
 end
 
 function mlr_error(sol, ref)
@@ -391,6 +387,7 @@ function deck_rows(deck, n)
     for r in runs
         m = _measures(deck, r.sol)
         w = window_errors(r.sol, r.ref, t1, f)
+        shift, interval = event_shift(r.sol, r.ref)
         push!(
             rows,
             (;
@@ -402,7 +399,7 @@ function deck_rows(deck, n)
                 window_rms = w.rms,
                 window_largest = w.largest,
                 run_error = run_error(r.sol, r.ref, f),
-                event_shift = event_shift(r.sol, r.ref),
+                event_shift = shift / interval,
                 mlr_error = mlr_error(r.sol, r.ref),
                 peak = m.peak,
                 t_bo = m.t_bo,
@@ -569,8 +566,9 @@ open(joinpath(OUT, "burnout_timing.md"), "w") do io
         "solve of the deck, against the same core at reltol $(REFERENCE): of the temperatures over ",
         "the cells [K] on V-BO-01 and V-BO-03, of the thickness relative to the reference's on ",
         "V-BO-04; the new core is matched on the RMS. Run error: the largest difference over the ",
-        "whole run at the saved times with the same live cells; shift: the largest event-time ",
-        "difference over the reference's median interval; MLR: the L1 error of the mass loss rate ",
+        "whole run at the saved times with the same live cells; shift: the largest invocation-time ",
+        "difference over the reference's median interval between invocations (between its saved ",
+        "times for a single invocation); MLR: the L1 error of the mass loss rate ",
         "history over the reference's integral. Warm medians of $(REPEATS) solves, of ",
         "$(OLD_DEFAULT_REPEATS) for the old default (a solve slower than $(Int(SLOW)) times the old ",
         "default is timed once and its core not taken to tighter tolerances); ratio: over the old ",
