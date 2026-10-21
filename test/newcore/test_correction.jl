@@ -597,9 +597,10 @@ end
 # activation's derivatives enter, and the monitor's mass term on. The upwind
 # side of the relative fluxes switches where a node's correction is zero; at
 # an active node with equal M̃h on both sides it is exactly zero with nonzero
-# partials, and ForwardDiff resolves that tie by the partials, so the colored
-# and the dense Jacobian take the kink's derivative along different seeds.
-# The states move every interior node by up to 5 %, which breaks every tie.
+# partials, a tie the kernel resolves by the value alone, so the colored and
+# the dense Jacobian take the same side (`tied`: the deck's own nodes, the
+# two-layer deck's uniform cells). The other states move every interior node
+# by up to 5 %.
 const _active = EquidistributionCorrection(
     τ = 50.0,
     activation = (1.5, 0.5),
@@ -649,21 +650,23 @@ end
         u0[position_index(layout, nd)] *= 1 + 0.05 * sin(nd)
     end
     L = length(u0)
+    heat(u0) = begin
+        u = copy(u0)
+        for i = 1:n_cells(layout)
+            u[energy_index(layout, i)] = energy_state_value(
+                energy_state(layout),
+                cp.def.setup,
+                700.0 + 10i,
+                ntuple(j -> u[mass_index(layout, i, j)], n_components(layout)),
+                i,
+            )
+        end
+        u
+    end
     states = (
         skewed = u0,
-        heated = begin
-            u = copy(u0)
-            for i = 1:n_cells(layout)
-                u[energy_index(layout, i)] = energy_state_value(
-                    energy_state(layout),
-                    cp.def.setup,
-                    700.0 + 10i,
-                    ntuple(j -> u[mass_index(layout, i, j)], n_components(layout)),
-                    i,
-                )
-            end
-            u
-        end,
+        heated = heat(u0),
+        tied = heat(cp.u0),
         perturbed = u0 .* (1 .+ 0.2 .* sin.(1:L)),
         zero_state = zeros(L),
         negative = -abs.(u0),

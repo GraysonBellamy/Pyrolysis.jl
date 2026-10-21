@@ -33,7 +33,9 @@ toward the downwind cell (the downwind gradient alone where no live cell lies
 beyond). A boundary face takes the one-sided linear extrapolation of its cell
 whichever way the mesh crosses it, so its flux has no switch. The face state
 of an interior face changes side with the sign of `u`; the flux `u ξ_f` is
-continuous there, with a kink.
+continuous there, with a kink. The side follows the value of `u` alone, so
+at `u = 0` every derivative pass takes the derivative of the `u ≥ 0` side,
+whatever its seeds.
 
 A face whose relative velocity is exactly zero carries nothing and is
 skipped. The kernel runs after the thermal boundary kernel, so the surface
@@ -132,10 +134,11 @@ end
 # sets the slope (zero where there is none or where it is dead, `active` being
 # the live cells), `d_f` from `U` to the face, `d_UD` and `d_XU`. On a
 # boundary face `X` is the boundary cell's inner neighbour and the state is
-# its one-sided extrapolation.
+# its one-sided extrapolation. The side is read from the value of `u`: a dual
+# number of zero value compares by its partials, which differ between seeds.
 @inline function _stencil(kernel::RelativeFluxKernel, g, topo, f, u, active)
     o, nb = topo.faces[f].cells
-    side = nb == 0 || u >= 0 ? 1 : 2
+    side = nb == 0 || value(u) >= 0 ? 1 : 2
     U = side == 1 ? o : nb
     D = nb == 0 ? 0 : (side == 1 ? nb : o)
     X = kernel.far[side, f]

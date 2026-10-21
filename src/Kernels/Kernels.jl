@@ -11,6 +11,7 @@ assembler scatters `±F_f A_f` into the two cells of each face.
 module Kernels
 
 using StaticArrays
+using ForwardDiff: value
 using ..Materials
 using ..BoundaryConditions
 using ..BoundaryConditions: BoundaryState, solve_boundary_temperature!
