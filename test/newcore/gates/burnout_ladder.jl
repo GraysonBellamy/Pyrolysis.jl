@@ -20,8 +20,8 @@
 #
 # Per run: the outcome; the deactivation invocations, each with its cells
 # below ε_m, the cells the band took and its largest merged mass fraction
-# (item 1: at most one invocation per layer, the largest fraction at most
-# 5 ε_m); every QoI of the case in assert mode against its fixed references,
+# (item 1: exactly one invocation per layer, the largest fraction at most
+# 5 ε_m; a run with no invocation fails); every QoI of the case in assert mode against its fixed references,
 # with the old core at the same resolution beside (item 2; its burst criteria
 # are `burnout_burst.jl`'s); events, invocations and inadmissible results
 # (item 4); the largest scaled constraint residual of the accepted states
@@ -49,8 +49,11 @@
 # against the residue; the largest mass loss rate after the event.
 #
 # Run from the repository root:
-#   julia --project=test --startup-file=no --threads=1 test/newcore/gates/burnout_ladder.jl
-# Writes test/newcore/gates/measurements/burnout_ladder.{csv,md}.
+#   julia --project=test --startup-file=no --threads=1 test/newcore/gates/burnout_ladder.jl [--item1]
+# Writes test/newcore/gates/measurements/burnout_ladder.{csv,md}. With
+# `--item1` nothing is solved: the item 1 verdicts are recomputed from the
+# table's csv, which holds every quantity the criterion reads, and written
+# into its item 1 column and the matching rows of the md.
 
 ENV["PYROLYSIS_CORE"] = "new"
 ENV["PYROLYSIS_ENERGY_STATE"] = "temperature"
@@ -404,6 +407,19 @@ end
 # The runs
 # ----------------------------------------------------------------------------
 
+# Item 1: exactly one invocation per layer, the largest merged fraction of
+# any of them at most 5 ε_m.
+item1_verdict(invocations, largest, ε_m; layers = 1) =
+    invocations == layers && largest <= 5 * ε_m ? "pass" : "fail"
+
+# The tables' cells, shared by the runs and the item 1 recompute.
+_g(x; d = 3) =
+    x isa AbstractFloat ? (isnan(x) ? "" : string(round(x; sigdigits = d))) : string(x)
+_tau(r) = "$(Int(r.τ)) ($(_g(r.τ / r.n^2)))"
+_run(r) =
+    "$(r.case) | $(r.n) | $(r.form) | $(r.ε_m) | $(_tau(r)) | " *
+    (r.corrected ? "β = $(_g(r.monitor[2]))" : "none")
+
 function measure(row, form, old)
     case = CASES[row.case]
     r = instrumented_solve(row, form)
@@ -412,9 +428,7 @@ function measure(row, form, old)
     plain, wall = timed(() -> plain_solve(row, form))
     st = sol.statistics
     inv = Base.invokelatest(_vbo_invocations, sol, row.ε_m)
-    layers = 1
-    item1 =
-        length(inv) <= layers && all(v -> v.largest <= 5 * row.ε_m, inv) ? "pass" : "fail"
+    item1 = item1_verdict(length(inv), maximum(v.largest for v in inv; init = 0.0), row.ε_m)
     failing = [q.name for q in qois if !(q.error < q.tol)]
     h0 = minimum(r.cp.def.setup.reference.thickness)
     tail =
@@ -456,6 +470,85 @@ function measure(row, form, old)
         substrate = row.case == "V-BO-08" ?
                     (; substrate_history(sol)..., p.times, p.first_active) : nothing,
     )
+end
+
+# A line of the csv split into its fields' ranges, a quoted field whole.
+function _csv_ranges(line)
+    ranges, start, quoted = UnitRange{Int}[], 1, false
+    for (i, c) in pairs(line)
+        if c == '"'
+            quoted = !quoted
+        elseif c == ',' && !quoted
+            push!(ranges, start:prevind(line, i))
+            start = i + 1
+        end
+    end
+    push!(ranges, start:lastindex(line))
+    return ranges
+end
+
+_replace_range(line, r, new) =
+    line[firstindex(line):prevind(line, first(r))] * new * line[nextind(line, last(r)):end]
+
+# Recompute item 1 from the csv and write it into the csv's item 1 column and
+# the item 1 cells of the md's outcome table, matched on the run's columns.
+function recompute_item1()
+    csv, md = joinpath(OUT, "burnout_ladder.csv"), joinpath(OUT, "burnout_ladder.md")
+    lines = readlines(csv)
+    header = split(lines[1], ",")
+    col(name) = findfirst(==(name), header)
+    verdicts = Dict{String,String}()
+    for k = 2:length(lines)
+        ranges = _csv_ranges(lines[k])
+        field(name) = lines[k][ranges[col(name)]]
+        num(name) = parse(Float64, field(name))
+        verdict = item1_verdict(
+            parse(Int, field("invocations")),
+            num("largest_fraction"),
+            num("eps_m"),
+        )
+        lines[k] = _replace_range(lines[k], ranges[col("item1")], verdict)
+        row = (;
+            case = field("case"),
+            n = parse(Int, field("cells")),
+            form = field("form"),
+            ε_m = num("eps_m"),
+            τ = num("tau"),
+            corrected = field("corrected") == "true",
+            monitor = (1.0, num("beta")),
+        )
+        verdicts[_run(row)] = verdict
+    end
+    open(io -> foreach(l -> println(io, l), lines), csv, "w")
+    text = readlines(md)
+    first_row = findfirst(startswith("| V-BO-"), text)
+    last_row = findnext(!startswith("| "), text, first_row) - 1
+    for k = first_row:last_row
+        cells = split(text[k], " | ")
+        key = join(cells[1:6], " | ")[3:end]
+        cells[9] = verdicts[key]
+        text[k] = join(cells, " | ")
+    end
+    stamp = findfirst(startswith("Produced by"), text)
+    text[stamp] = replace(
+        text[stamp],
+        r"(at commit [^.]*)\." => SubstitutionString(
+            "\\1; item 1 recomputed from this table's csv at $(COMMIT_STAMP).",
+        );
+        count = 1,
+    )
+    text .= replace.(
+        text,
+        "with at most one invocation per layer" => "with exactly one invocation per layer",
+    )
+    open(io -> foreach(l -> println(io, l), text), md, "w")
+    return nothing
+end
+
+if "--item1" in ARGS
+    recompute_item1()
+    println("recomputed item 1 in $(OUT)")
+    exit()
 end
 
 load_start = Sys.loadavg()
@@ -525,9 +618,6 @@ end
 # The tables
 # ----------------------------------------------------------------------------
 
-_g(x; d = 3) =
-    x isa AbstractFloat ? (isnan(x) ? "" : string(round(x; sigdigits = d))) : string(x)
-_tau(r) = "$(Int(r.τ)) ($(_g(r.τ / r.n^2)))"
 _invocations(r) =
     isempty(r.invocations) ? "0" :
     join(
@@ -537,9 +627,6 @@ _invocations(r) =
         ),
         "; ",
     )
-_run(r) =
-    "$(r.case) | $(r.n) | $(r.form) | $(r.ε_m) | $(_tau(r)) | " *
-    (r.corrected ? "β = $(_g(r.monitor[2]))" : "none")
 
 open(joinpath(OUT, "burnout_ladder.csv"), "w") do io
     println(
@@ -606,7 +693,7 @@ open(joinpath(OUT, "burnout_ladder.md"), "w") do io
     println(
         io,
         "Invocations: per invocation its cells (below ε_m, taken by the band; the largest merged ",
-        "mass fraction). Item 1 passes with at most one invocation per layer and the largest ",
+        "mass fraction). Item 1 passes with exactly one invocation per layer and the largest ",
         "fraction at most 5 ε_m. QoIs: the case's own, in assert mode against its fixed references; ",
         "the failing ones are named. Inadmissible: results of a deactivation the solve refused.\n",
     )
