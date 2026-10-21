@@ -1,10 +1,12 @@
-# Gate item 2's burst criteria (Phase 2 plan §7.3): the end-of-layer burst of
-# V-BO-01 judged by refinement on both cores, from the gas-generation rate at
-# every accepted step and every post-event state.
+# Gate item 2's burst criteria (Phase 2 plan §7.3): the end-of-layer burst
+# judged by refinement on both cores, from the gas-generation rate at every
+# accepted step and every post-event state.
 #
 # Runs: the finite-volume core through the case's solve at 30, 60, 120 and
-# 240 PMMA cells, ε_m ∈ {1e-2, 3e-3, 3e-2}, in both energy forms; the old core
-# at the same cells with the case's keywords. The criteria, over the window
+# 240 PMMA cells, in both energy forms, and the old core at the same cells
+# with the case's keywords. V-BO-01 at ε_m ∈ {1e-2, 3e-3, 3e-2}; V-BO-03 run
+# to `VBO03_T_EXTENDED`, past its layer's invocation, V-BO-06 and V-BO-07 at
+# the default threshold, reported. The criteria, per deck over the window
 # [t_pk, t_end] with t_pk the old core's 240-cell peak time (its peak QoI's):
 #
 #   (a) the largest per-step excess of the N-cell rate over the 2N-cell rate
@@ -15,8 +17,8 @@
 #       core's at each N;
 #   (c) the L1 against the old core's 240-cell run falls with refinement.
 #
-# They gate the finite-volume core at ε_m of 1e-2 and 3e-3 in both forms;
-# 3e-2, whose layer takes two invocations, is reported. A series is
+# They gate V-BO-01 at ε_m of 1e-2 and 3e-3 in both forms; its 3e-2, whose
+# layer takes two invocations, and the other decks are reported. A series is
 # piecewise linear between its points, with a jump at every event (the state
 # before the event and the state after it at the same time), and the
 # integrals are exact for it. A located event moves the end of its step back
@@ -41,11 +43,24 @@ const As = Pyrolysis.Assembly
 const De = Pyrolysis.Deactivation
 
 const OUT = joinpath(@__DIR__, "measurements")
-const CASE =
-    only(filter(c -> c.id == "V-BO-01", Base.invokelatest(load_verification_cases)))
+const CASES = Dict(
+    c.id => c for c in Base.invokelatest(load_verification_cases) if
+    c.id in ("V-BO-01", "V-BO-03", "V-BO-06", "V-BO-07")
+)
 const CELLS = (30, 60, 120, 240)
-const THRESHOLDS = (1e-2, 3e-3, 3e-2)
 const GATED = (1e-2, 3e-3)
+# Each deck: its case, its builder at `n` PMMA cells and its thresholds.
+const DECKS = [
+    (; id = "V-BO-01", build = CASES["V-BO-01"].build, thresholds = (1e-2, 3e-3, 3e-2)),
+    (;
+        id = "V-BO-03",
+        build = n -> _vbo_problem(n; substrate_alpha = 0.0, t_end = VBO03_T_EXTENDED),
+        thresholds = (1e-2,),
+    ),
+    (; id = "V-BO-06", build = CASES["V-BO-06"].build, thresholds = (1e-2,)),
+    (; id = "V-BO-07", build = CASES["V-BO-07"].build, thresholds = (1e-2,)),
+]
+gated(id, ε_m) = id == "V-BO-01" && ε_m in GATED
 const FORMS = (:temperature, :enthalpy)
 const FALL = 1.5
 const SELF = 1.5
@@ -158,14 +173,15 @@ function recorder(cp, s::Series)
     return CallbackSet(reader, commit)
 end
 
-function new_run(n, ε_m, form)
-    problem = Base.invokelatest(CASE.build, n)
+function new_run(deck, n, ε_m, form)
+    case = CASES[deck.id]
+    problem = Base.invokelatest(deck.build, n)
     s = Series()
     sol = Logging.with_logger(Logging.NullLogger()) do
         Base.invokelatest(
-            CASE.solve_fn,
+            case.solve_fn,
             problem;
-            CASE.solve_kwargs...,
+            case.solve_kwargs...,
             energy_state = form,
             threshold = ε_m,
             instrument = cp -> recorder(cp, s),
@@ -173,6 +189,7 @@ function new_run(n, ε_m, form)
     end
     inv = Base.invokelatest(_vbo_invocations, sol, ε_m)
     return (;
+        id = deck.id,
         core = :new,
         n,
         ε_m,
@@ -190,8 +207,9 @@ end
 # The old core: the states that end its steps and those its steps start from
 # when a park changed them, passed afterwards through its own extraction
 # (a post-park state at its park's time plus 1e-9 s, so the park counts).
-function old_run(n)
-    problem = Base.invokelatest(CASE.build, n)
+function old_run(deck, n)
+    case = CASES[deck.id]
+    problem = Base.invokelatest(deck.build, n)
     ts, us, kinds = Float64[], Vector{Float64}[], Int8[]
     last_u, last_t = Ref(Float64[]), Ref(NaN)
     reader = ContinuousCallback(
@@ -214,18 +232,18 @@ function old_run(n)
         interp_points = 0,
     )
     sol = Logging.with_logger(Logging.NullLogger()) do
-        solve(problem; progress = false, callback = reader, CASE.solve_kwargs...)
+        solve(problem; progress = false, callback = reader, case.solve_kwargs...)
     end
     _, ws, _ = Logging.with_logger(Logging.NullLogger()) do
         Pyrolysis.initialize_state(
-            Base.invokelatest(CASE.build, n);
+            Base.invokelatest(deck.build, n);
             use_ale = true,
             radiation_model = BEER_LAMBERT,
         )
     end
     pt = copy(sol.extras.park_times)
     dep = Pyrolysis.Solver.DepletionCallbackState(ws.layout, 0, Float64[], pt, Int[])
-    ex = Pyrolysis.Problem.PyrolysisSolution(Base.invokelatest(CASE.build, n))
+    ex = Pyrolysis.Problem.PyrolysisSolution(Base.invokelatest(deck.build, n))
     raw = (;
         t = [k == 1 ? t + 1e-9 : t for (t, k) in zip(ts, kinds)],
         u = us,
@@ -243,6 +261,7 @@ function old_run(n)
     end
     st = sol.raw_solution.stats
     return (;
+        id = deck.id,
         core = :old,
         n,
         ε_m = NaN,
@@ -366,31 +385,38 @@ end
 function main()
     load_start = Sys.loadavg()
     started = time()
-    old = Any[]
-    for n in CELLS
-        push!(old, old_run(n))
-        r = old[end]
-        println("old n=$(n): $(r.retcode) steps=$(r.steps) parks=$(r.invocations)")
-        flush(stdout)
-    end
+    old = Dict{Any,Any}()
     new = Dict{Any,Any}()
-    for form in FORMS, ε_m in THRESHOLDS, n in CELLS
-        r = new_run(n, ε_m, form)
-        new[(form, ε_m, n)] = r
-        println(
-            "new $(form) ε_m=$(ε_m) n=$(n): $(r.retcode) steps=$(r.steps) invocations=$(r.invocations)",
-        )
-        flush(stdout)
+    windows = Dict{String,Any}()
+    families = Any[]
+    for deck in DECKS
+        for n in CELLS
+            r = old_run(deck, n)
+            old[(deck.id, n)] = r
+            println(
+                "$(deck.id) old n=$(n): $(r.retcode) steps=$(r.steps) parks=$(r.invocations)",
+            )
+            flush(stdout)
+        end
+        for form in FORMS, ε_m in deck.thresholds, n in CELLS
+            r = new_run(deck, n, ε_m, form)
+            new[(deck.id, form, ε_m, n)] = r
+            println(
+                "$(deck.id) new $(form) ε_m=$(ε_m) n=$(n): $(r.retcode) steps=$(r.steps) invocations=$(r.invocations)",
+            )
+            flush(stdout)
+        end
+        olds = [old[(deck.id, n)] for n in CELLS]
+        t_pk = olds[end].t_peak
+        t_end = Base.invokelatest(deck.build, first(CELLS)).tspan[2]
+        windows[deck.id] = (t_pk, t_end)
+        for form in FORMS, ε_m in deck.thresholds
+            m = family([new[(deck.id, form, ε_m, n)] for n in CELLS], olds, t_pk, t_end)
+            push!(families, (; id = deck.id, form, ε_m, gated = gated(deck.id, ε_m), m...))
+        end
     end
     load_end = Sys.loadavg()
-    t_pk = old[end].t_peak
-    t_end = Base.invokelatest(CASE.build, first(CELLS)).tspan[2]
-    families = Any[]
-    for form in FORMS, ε_m in THRESHOLDS
-        m = family([new[(form, ε_m, n)] for n in CELLS], old, t_pk, t_end)
-        push!(families, (; form, ε_m, gated = ε_m in GATED, m...))
-    end
-    write_tables(old, new, families, t_pk, t_end, load_start, load_end)
+    write_tables(old, new, families, windows, load_start, load_end)
     gate = all(f -> f.pass, filter(f -> f.gated, families))
     println(
         "wrote $(OUT); the burst criteria ",
@@ -406,19 +432,29 @@ _g(x; d = 3) =
 _list(x; scale = 1000) = join(_g.(scale .* x), ", ")
 _yes(b) = b ? "pass" : "**fail**"
 
-function write_tables(old, new, families, t_pk, t_end, load_start, load_end)
+function write_tables(old, new, families, windows, load_start, load_end)
     mkpath(OUT)
+    runs = [
+        r for deck in DECKS for r in vcat(
+            [old[(deck.id, n)] for n in CELLS],
+            [
+                new[(deck.id, form, ε_m, n)] for form in FORMS for
+                ε_m in deck.thresholds for n in CELLS
+            ],
+        )
+    ]
     open(joinpath(OUT, "burnout_burst.csv"), "w") do io
         println(
             io,
-            "core,form,eps_m,cells,retcode,steps,rejected,invocations,largest_before_last_event,t_largest,peak,t_peak,last_event",
+            "case,core,form,eps_m,cells,retcode,steps,rejected,invocations,largest_before_last_event,t_largest,peak,t_peak,last_event",
         )
-        for r in vcat(old, [new[k] for k in sort(collect(keys(new)); by = string)])
+        for r in runs
             pk, tp = main_peak(r)
             println(
                 io,
                 join(
                     (
+                        r.id,
                         r.core,
                         r.form,
                         r.ε_m,
@@ -444,15 +480,23 @@ function write_tables(old, new, families, t_pk, t_end, load_start, load_end)
             io,
             "Produced by `test/newcore/gates/burnout_burst.jl` at $(COMMIT_STAMP). Julia $(VERSION), ",
             "$(Threads.nthreads()) thread; load average $(round.(load_start; digits = 1)) at the start ",
-            "and $(round.(load_end; digits = 1)) at the end. V-BO-01, the finite-volume core through ",
+            "and $(round.(load_end; digits = 1)) at the end. The finite-volume core through ",
             "the case's solve and the old core with the case's keywords, the gas-generation rate at every ",
-            "accepted step and post-event state [g m⁻² s⁻¹]; window [$(_g(t_pk; d = 5)), $(_g(t_end; d = 4))] s ",
-            "from the old core's 240-cell peak time. (a) The largest per-step excess of N cells over 2N ",
+            "accepted step and post-event state [g m⁻² s⁻¹]; each deck's window from the old core's ",
+            "240-cell peak time to its end (",
+            join(
+                (
+                    "$(id) [$(_g(w[1]; d = 5)), $(_g(w[2]; d = 5))] s" for
+                    (id, w) in sort(collect(windows))
+                ),
+                ", ",
+            ),
+            "; V-BO-03 is run to $(_g(VBO03_T_EXTENDED; d = 5)) s). (a) The largest per-step excess of N cells over 2N ",
             "after the window's start, falling at least $(FALL)× per doubling and no larger than the old ",
             "core's; (b) the L1 of successive grids [g/m²], falling at least $(FALL)× per doubling, and ",
             "the L1 against the family's 240-cell run within $(SELF)× of the old core's; (c) the L1 ",
-            "against the old core's 240-cell run falling with refinement. Gated: ε_m of ",
-            "$(join(GATED, " and ")) in both forms.\n",
+            "against the old core's 240-cell run falling with refinement. Gated: V-BO-01 at ε_m of ",
+            "$(join(GATED, " and ")) in both forms; the rest is reported.\n",
         )
         println(io, "## The criteria\n")
         println(
@@ -465,16 +509,18 @@ function write_tables(old, new, families, t_pk, t_end, load_start, load_end)
             "| family | (a) excess of N over 2N; ratios | (a) | (b) successive L1; ratios | (b) self-L1 over the old core's | (b) | (c) L1 against the old core's 240 | (c) | gated |",
         )
         println(io, "|---|---|---|---|---|---|---|---|---|")
-        f = first(families)
-        println(
-            io,
-            "| old core | $(_list(f.exc_old)); $(_list(ratios(f.exc_old); scale = 1)) | | ",
-            "$(_list(f.succ_old)); $(_list(ratios(f.succ_old); scale = 1)) | | | | | |",
-        )
+        for deck in DECKS
+            f = first(filter(f -> f.id == deck.id, families))
+            println(
+                io,
+                "| $(deck.id), old core | $(_list(f.exc_old)); $(_list(ratios(f.exc_old); scale = 1)) | | ",
+                "$(_list(f.succ_old)); $(_list(ratios(f.succ_old); scale = 1)) | | | | | |",
+            )
+        end
         for f in families
             println(
                 io,
-                "| $(f.form), ε_m = $(f.ε_m) | $(_list(f.exc)); $(_list(ratios(f.exc); scale = 1)) | $(_yes(f.a)) | ",
+                "| $(f.id), $(f.form), ε_m = $(f.ε_m) | $(_list(f.exc)); $(_list(ratios(f.exc); scale = 1)) | $(_yes(f.a)) | ",
                 "$(_list(f.succ)); $(_list(ratios(f.succ); scale = 1)) | $(_list(f.self ./ f.self_old; scale = 1)) | ",
                 "$(_yes(f.b)) | $(_list(f.cross)) | $(_yes(f.c)) | $(f.gated ? "yes" : "reported") |",
             )
@@ -482,17 +528,14 @@ function write_tables(old, new, families, t_pk, t_end, load_start, load_end)
         println(io, "\n## The runs\n")
         println(
             io,
-            "| core | form | ε_m | cells | retcode | steps (rejected) | invocations or parks | largest per-step rate before the last event (t) | peak QoI (t) | last event [s] |",
+            "| case | core | form | ε_m | cells | retcode | steps (rejected) | invocations or parks | largest per-step rate before the last event (t) | peak QoI (t) | last event [s] |",
         )
-        println(io, "|---|---|---|---|---|---|---|---|---|---|")
-        for r in vcat(
-            old,
-            [new[(form, ε_m, n)] for form in FORMS for ε_m in THRESHOLDS for n in CELLS],
-        )
+        println(io, "|---|---|---|---|---|---|---|---|---|---|---|")
+        for r in runs
             pk, tp = main_peak(r)
             println(
                 io,
-                "| $(r.core) | $(r.form) | $(r.ε_m) | $(r.n) | $(r.retcode) | $(r.steps) ($(r.rejected)) | ",
+                "| $(r.id) | $(r.core) | $(r.form) | $(r.ε_m) | $(r.n) | $(r.retcode) | $(r.steps) ($(r.rejected)) | ",
                 "$(r.invocations) | $(_g(1000pk; d = 5)) ($(_g(tp; d = 5))) | $(_g(r.peak; d = 5)) ($(_g(r.t_peak; d = 5))) | ",
                 "$(_g(r.last_event; d = 6)) |",
             )

@@ -13,6 +13,10 @@
 # does and issues no warning, the series itself must show more than 1 % of
 # the entering flux leaving, the old core's warning predicate.
 
+# The end the gate scripts run V-BO-03's deck to, past its layer's invocation
+# (about 3,023 s on the finite-volume core, where the film decays slowly).
+const VBO03_T_EXTENDED = 3100.0
+
 function _verification_case_vbo03()
     id = "V-BO-03"
     function qois(sol)

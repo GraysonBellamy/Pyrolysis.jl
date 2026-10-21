@@ -11,7 +11,7 @@
 #   layer's equidistribution time; the prototype's per-cell τ_p = τ/N² is
 #   0.1, 0.2 and 1 s at 60 cells for τ = 360, 720 and 3600 s);
 #   V-BO-03 at 30, 60 and 120 cells at the defaults, run past the case's
-#   500 s to `VBO03_T_END`, after its layer's invocation;
+#   500 s to `VBO03_T_EXTENDED`, after its layer's invocation;
 #   V-BO-04 at its 40 cells without and with the correction;
 #   V-BO-06 (the graded mesh) at 60 cells and V-BO-08 (the thin layer) at
 #   its 10 cells, each × the three thresholds; V-BO-08 at ε_m = 1e-2 also
@@ -77,8 +77,6 @@ const CASES = Dict(
     c.id in ("V-BO-01", "V-BO-03", "V-BO-04", "V-BO-06", "V-BO-07", "V-BO-08")
 )
 const THRESHOLDS = (3e-3, 1e-2, 3e-2)
-# V-BO-03's layer deactivates at about 3,023 s (the case ends at 500 s).
-const VBO03_T_END = 3100.0
 
 # A run of the matrix: the case at `n` cells and threshold `ε_m`, with the
 # equidistribution correction at `τ` and `monitor = (α, β)` or without it, to
@@ -96,7 +94,7 @@ run_row(
 const ROWS = [
     [run_row("V-BO-01", n; ε_m) for n in (30, 60, 120) for ε_m in THRESHOLDS]
     [run_row("V-BO-01", 60; τ) for τ in (360.0, 3600.0)]
-    [run_row("V-BO-03", n; t_end = VBO03_T_END) for n in (30, 60, 120)]
+    [run_row("V-BO-03", n; t_end = VBO03_T_EXTENDED) for n in (30, 60, 120)]
     [run_row("V-BO-04", 40; corrected) for corrected in (false, true)]
     [run_row("V-BO-06", 60; ε_m) for ε_m in THRESHOLDS]
     [run_row("V-BO-07", 60; monitor) for monitor in ((1.0, 0.0), (1.0, 1.0))]
