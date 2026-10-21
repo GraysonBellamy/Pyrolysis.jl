@@ -48,14 +48,31 @@
 # The installed correction: the decks on which the installation rule installs
 # it, the moving-mesh audit decks of Phase 1's gate item 2 with deactivation on
 # (`ale` with the solid's gas-transfer coefficient at 1e-6 m²/s to 400 s and
-# `ale_darcy` to 300 s, at 25 and 100 cells, reltol 1e-6, the old core's
-# depletion keywords at their defaults) and V-CPL-02 and V-CPL-02b at their CI
-# resolutions and tolerances. The finite-volume core with the rule's
-# correction against the same deck with `NoCorrection()`, beside the old core:
-# warm medians of three, the steps, the outcome and end time (without the
-# correction a layer can end `:interior`), and the largest correction velocity
-# over the saved times. A deck on which the rule installs nothing is
-# bit-identical (item 5) and costs nothing.
+# `ale_darcy` to 300 s, at 25 and 100 cells, default reltol 1e-6, the old
+# core's depletion keywords at their defaults) and V-CPL-02 and V-CPL-02b at
+# their CI resolutions and tolerances, measured as the burnout decks are: each
+# core's ladder against its own reference, the window before the first event
+# of any solve of the deck (the whole run where no solve has one), the new
+# core matched on the window RMS. Beside it, the rule's solve at the default
+# tolerance against the same deck with `NoCorrection()` (warm medians of
+# three, the steps, the outcome and end time: without the correction a layer
+# can end `:interior`) and the largest correction velocity over the saved
+# times. A deck on which the rule installs nothing is bit-identical (item 5)
+# and costs nothing.
+#
+# The cost split at the first activation, per matched row whose correction
+# activates (the installed decks, V-BO-01 and V-BO-03): before `t_a`, the first
+# saved time of the new core's matched solve with a nonzero correction
+# velocity, the correction is exactly zero and the new core solves the
+# problem without it on the wider pattern, so the ratio there is the
+# integrator's and the per-step cost's; after it the gain `N²/τ` acts. Each
+# core's accepted steps before and after `t_a` and its share of the time
+# before it come from a read-only step recorder in a separate solve, the share
+# applied to the timed median so the recorder's own cost stays out of the
+# ratio; the gain's share of the new core's time is
+# `(T_new,after − r_before · T_old,after) / T_new`. One diagnostic row,
+# reported and not gated: `ale_darcy` at 100 cells with the layer time scaled
+# by 16, whose per-node gain equals `ale_darcy` 25's at the default.
 #
 # Run from the repository root when the machine is least loaded:
 #   julia --project=test --startup-file=no --threads=1 test/newcore/gates/burnout_timing.jl
@@ -80,6 +97,7 @@ include(joinpath(@__DIR__, "stamp.jl"))
 include(joinpath(@__DIR__, "event_shift.jl"))
 
 using Logging
+using OrdinaryDiffEq: DiscreteCallback
 using Profile
 using SparseArrays: nnz
 using Statistics: median
@@ -122,33 +140,88 @@ deck_problem(deck, n; t_end = nothing) =
         t_end = something(t_end, 500.0),
     )
 
-# The case's tolerance: the old default.
-default_reltol(deck) = CASES[deck].solve_kwargs.reltol
-# The window's field: the cells' temperatures, or V-BO-04's thickness.
-field(deck) = deck == "V-BO-04" ? :thickness : :T
-
-function old_solve(deck, n, reltol; problem = deck_problem(deck, n))
-    kw = CASES[deck].solve_kwargs
-    return Logging.with_logger(Logging.NullLogger()) do
-        solve(problem; progress = false, kw..., _tol(reltol)...)
-    end
-end
-
-# The set-up problem of a deck on the finite-volume core, as the suite routes it.
-function core_problem(deck, n, reltol; problem = deck_problem(deck, n))
+# A deck of the tables: its name and cells, the problem, the old core's
+# keywords and `setup`'s, the default relative tolerance (the old default),
+# the window's field (`:T`, the cells' temperatures, or `:thickness`, the
+# thickness relative to the reference's), `min_thickness`, and the problem
+# ending at a given time for the unit costs (`nothing` where none are taken).
+function vbo_deck(deck, n)
     kw = CASES[deck].solve_kwargs
     rad = haskey(kw, :radiation_model) ? (; radiation_model = kw.radiation_model) : (;)
-    return Ig.setup(
-        problem;
-        use_ale = kw.use_ale,
-        deactivation = kw.handle_depletion,
-        rad...,
-        _tol(reltol)...,
+    return (;
+        name = deck,
+        cells = n,
+        problem = deck_problem(deck, n),
+        old = kw,
+        new = (; use_ale = kw.use_ale, deactivation = kw.handle_depletion, rad...),
+        default = kw.reltol,
+        field = deck == "V-BO-04" ? :thickness : :T,
+        min_thickness = kw.min_thickness,
+        until = t_end -> deck_problem(deck, n; t_end),
     )
 end
 
-new_solve(deck, cp) =
-    Ig.integrate(cp; min_thickness = CASES[deck].solve_kwargs.min_thickness)
+# The decks on which the installation rule installs the correction.
+function installed_decks()
+    decks = Any[]
+    for (kind, n, λ, t_end) in (
+        (:ale, 25, 1e-6, 400.0),
+        (:ale, 100, 1e-6, 400.0),
+        (:ale_darcy, 25, nothing, 300.0),
+        (:ale_darcy, 100, nothing, 300.0),
+    )
+        problem, kw =
+            problem_for(kind, n; solid_λ = λ, t_end, outputs = round(Int, t_end) + 1)
+        common = (; use_ale = kw.use_ale, radiation_model = kw.radiation_model)
+        push!(
+            decks,
+            (;
+                name = string(kind),
+                cells = n,
+                problem,
+                old = (; common..., handle_depletion = true),
+                new = (; common..., deactivation = true),
+                default = 1e-6,
+                field = :T,
+                min_thickness = 1e-6,
+                until = nothing,
+            ),
+        )
+    end
+    for id in ("V-CPL-02", "V-CPL-02b")
+        case = CASES[id]
+        kw = case.solve_kwargs
+        push!(
+            decks,
+            (;
+                name = id,
+                cells = case.ci.n_cells,
+                problem = Base.invokelatest(case.build, case.ci.n_cells),
+                old = kw,
+                new = (;
+                    use_ale = kw.use_ale,
+                    deactivation = get(kw, :handle_depletion, false),
+                ),
+                default = kw.reltol,
+                field = :T,
+                min_thickness = kw.min_thickness,
+                until = nothing,
+            ),
+        )
+    end
+    return decks
+end
+
+old_solve(d, reltol; problem = d.problem, kw...) =
+    Logging.with_logger(Logging.NullLogger()) do
+        solve(problem; progress = false, d.old..., _tol(reltol)..., kw...)
+    end
+
+# The set-up problem of a deck on the finite-volume core, as the suite routes it.
+core_problem(d, reltol; problem = d.problem, kw...) =
+    Ig.setup(problem; d.new..., _tol(reltol)..., kw...)
+
+new_solve(d, cp; kw...) = Ig.integrate(cp; min_thickness = d.min_thickness, kw...)
 
 # ----------------------------------------------------------------------------
 # Error measures
@@ -214,7 +287,8 @@ function mlr_error(sol, ref)
     n = min(length(a), length(b))
     t = sol.t[1:n]
     trap(f) = sum(0.5 * (f(j) + f(j + 1)) * (t[j+1] - t[j]) for j = 1:(n-1))
-    return trap(j -> abs(a[j] - b[j])) / trap(j -> abs(b[j]))
+    scale = trap(j -> abs(b[j]))
+    return scale > 0 ? trap(j -> abs(a[j] - b[j])) / scale : NaN
 end
 
 # ----------------------------------------------------------------------------
@@ -349,32 +423,97 @@ _counts(sol) =
         nonlinear_failures = sol.raw_solution.stats.nnonlinconvfail,
     )
 
-_measures(deck, sol) =
-    deck == "V-BO-04" ? (; peak = NaN, t_bo = NaN, ledger = NaN) :
-    Base.invokelatest(_vbo_measures, sol)
+_measures(d, sol) =
+    d.name in ("V-BO-01", "V-BO-03") ? Base.invokelatest(_vbo_measures, sol) :
+    (; peak = NaN, t_bo = NaN, ledger = NaN)
 
-function deck_rows(deck, n)
-    println("[$deck $n] references")
+# ----------------------------------------------------------------------------
+# The cost split at the first activation
+# ----------------------------------------------------------------------------
+
+# The first saved time with a nonzero correction velocity (NaN if none).
+function first_activation(sol)
+    c = sol.correction_velocity
+    j = findfirst(j -> any(x -> isfinite(x) && !iszero(x), view(c, :, j)), axes(c, 2))
+    return j === nothing ? NaN : sol.t[j]
+end
+
+# A read-only step recorder: the time and the wall clock at every accepted
+# step, read by a condition that never fires.
+function step_recorder()
+    t, clock = Float64[], Float64[]
+    callback = DiscreteCallback(
+        (u, s, integrator) -> (push!(t, s); push!(clock, time()); false),
+        integrator -> nothing;
+        save_positions = (false, false),
+    )
+    return callback, t, clock
+end
+
+# The share of a solve's wall time up to `t_a` and its accepted steps before
+# and after it, from the recorder in `run(callback)`, the second of two solves
+# so that the first's compilation stays out.
+function split_at(run, t_a)
+    share, steps = NaN, (0, 0)
+    for _ = 1:2
+        callback, t, clock = step_recorder()
+        start = time()
+        run(callback)
+        stop = time()
+        k = count(<=(t_a), t)
+        share = k == 0 ? 0.0 : (clock[k] - start) / (stop - start)
+        steps = (k, length(t) - k)
+    end
+    return (; share, steps)
+end
+
+# The cost split of a matched solve at `t_a`: each core's time before and
+# after it (the recorder's shares applied to the timed medians), the ratios
+# before and after, and the gain's share of the new core's time, its time
+# after `t_a` beyond the old core's at the ratio before.
+function cost_split(d, matched, old_default, t_a)
+    new = split_at(callback -> new_solve(d, matched.cp; callback), t_a)
+    old = split_at(callback -> old_solve(d, d.default; callback), t_a)
+    new_before, new_after = new.share * matched.wall, (1 - new.share) * matched.wall
+    old_before, old_after = old.share * old_default.wall, (1 - old.share) * old_default.wall
+    r_before = new_before / old_before
+    return (;
+        t_a,
+        new_steps = new.steps,
+        old_steps = old.steps,
+        new_share = new.share,
+        old_share = old.share,
+        r_before,
+        r_after = new_after / old_after,
+        gain = (new_after - r_before * old_after) / matched.wall,
+    )
+end
+
+# ----------------------------------------------------------------------------
+# The decks' rows
+# ----------------------------------------------------------------------------
+
+function deck_rows(d)
+    println("[$(d.name) $(d.cells)] references")
     flush(stdout)
-    f = field(deck)
-    default = default_reltol(deck)
-    old_ref = old_solve(deck, n, REFERENCE)
-    old_spread = old_solve(deck, n, SPREAD)
-    new_ref = new_solve(deck, core_problem(deck, n, REFERENCE))
-    new_spread = new_solve(deck, core_problem(deck, n, SPREAD))
+    f = d.field
+    old_ref = old_solve(d, REFERENCE)
+    old_spread = old_solve(d, SPREAD)
+    new_ref = new_solve(d, core_problem(d, REFERENCE))
+    new_spread = new_solve(d, core_problem(d, SPREAD))
     runs = Any[]
     for reltol in LADDER
-        repeats = reltol == default ? OLD_DEFAULT_REPEATS : REPEATS
-        sol, wall = timed(() -> old_solve(deck, n, reltol); repeats)
-        push!(runs, (; core = "old", reltol, sol, wall, ref = old_ref))
+        repeats = reltol == d.default ? OLD_DEFAULT_REPEATS : REPEATS
+        sol, wall = timed(() -> old_solve(d, reltol); repeats)
+        push!(runs, (; core = "old", reltol, sol, wall, ref = old_ref, cp = nothing))
     end
     # A core slower than `SLOW` times the old default is not taken to tighter
     # tolerances.
-    cap = SLOW * only(r.wall for r in runs if r.reltol == default)
+    cap = SLOW * only(r.wall for r in runs if r.reltol == d.default)
     for reltol in LADDER
-        cp = core_problem(deck, n, reltol)
-        sol, wall = timed(() -> new_solve(deck, cp); cap)
-        push!(runs, (; core = "new", reltol, sol, wall, ref = new_ref))
+        cp = core_problem(d, reltol)
+        sol, wall = timed(() -> new_solve(d, cp); cap)
+        push!(runs, (; core = "new", reltol, sol, wall, ref = new_ref, cp))
         println("    new $(reltol): $(sol.retcode) $(round(wall, digits = 3)) s")
         flush(stdout)
         wall > cap && break
@@ -385,21 +524,22 @@ function deck_rows(deck, n)
         old = window_errors(old_spread, old_ref, t1, f).rms,
         new = window_errors(new_spread, new_ref, t1, f).rms,
     )
-    old_default = only(filter(r -> r.core == "old" && r.reltol == default, runs))
+    old_default = only(filter(r -> r.core == "old" && r.reltol == d.default, runs))
     target = window_errors(old_default.sol, old_ref, t1, f).rms
     rows = Any[]
     for r in runs
-        m = _measures(deck, r.sol)
+        m = _measures(d, r.sol)
         w = window_errors(r.sol, r.ref, t1, f)
         shift, interval = event_shift(r.sol, r.ref)
         push!(
             rows,
             (;
-                deck,
-                cells = n,
+                deck = d.name,
+                cells = d.cells,
                 core = r.core,
                 reltol = r.reltol,
                 retcode = string(r.sol.retcode),
+                t_last = r.sol.t[end],
                 window_rms = w.rms,
                 window_largest = w.largest,
                 run_error = run_error(r.sol, r.ref, f),
@@ -419,30 +559,49 @@ function deck_rows(deck, n)
         rows,
     )
     matched = isempty(candidates) ? nothing : argmax(r -> r.reltol, candidates)
-    old_row = only(filter(r -> r.core == "old" && r.reltol == default, rows))
+    old_row = only(filter(r -> r.core == "old" && r.reltol == d.default, rows))
+    matched_run =
+        matched === nothing ? nothing :
+        only(filter(r -> r.core == "new" && r.reltol == matched.reltol, runs))
     anatomy_rows = Any[]
-    if (deck, n) == ANATOMY && matched !== nothing
-        for (core, reltol) in (("old", default), ("new", matched.reltol))
+    if (d.name, d.cells) == ANATOMY && matched !== nothing
+        for (core, reltol) in (("old", d.default), ("new", matched.reltol))
             run =
-                core == "old" ? () -> old_solve(deck, n, reltol) :
-                let cp = core_problem(deck, n, reltol)
+                core == "old" ? () -> old_solve(d, reltol) :
+                let cp = core_problem(d, reltol)
 
-                    () -> new_solve(deck, cp)
+                    () -> new_solve(d, cp)
                 end
             shares = anatomy(run)
-            short = deck_problem(deck, n; t_end = UNIT_TIME)
+            short = d.until(UNIT_TIME)
             unit_sol =
-                core == "old" ? old_solve(deck, n, reltol; problem = short) :
-                new_solve(deck, core_problem(deck, n, reltol; problem = short))
+                core == "old" ? old_solve(d, reltol; problem = short) :
+                new_solve(d, core_problem(d, reltol; problem = short))
             push!(anatomy_rows, (; core, reltol, shares, unit = unit_costs(unit_sol)))
             println("    anatomy $(core) $(reltol) done")
             flush(stdout)
         end
     end
+    t_a = matched_run === nothing ? NaN : first_activation(matched_run.sol)
+    split = isfinite(t_a) ? cost_split(d, matched_run, old_default, t_a) : nothing
+    # The rule's solve at the default tolerance, for the installed table.
+    k = findfirst(r -> r.core == "new" && r.reltol == d.default, runs)
+    rule =
+        k === nothing ? nothing :
+        let sol = runs[k].sol, c = filter(isfinite, sol.correction_velocity)
+            (;
+                runs[k].wall,
+                steps = sol.statistics.accepted,
+                sol.outcome,
+                t_last = sol.t[end],
+                sol.statistics.invocations,
+                largest = isempty(c) ? 0.0 : maximum(abs, c),
+            )
+        end
     return (;
-        deck,
-        cells = n,
-        default,
+        deck = d.name,
+        cells = d.cells,
+        d.default,
         t1,
         spread,
         target,
@@ -450,104 +609,58 @@ function deck_rows(deck, n)
         old_row,
         matched,
         anatomy = anatomy_rows,
+        t_a,
+        split,
+        rule,
     )
 end
 
-# The correction where the installation rule installs it.
-function installed_rows()
-    decks = Any[]
-    for (kind, n, λ, t_end) in (
-        (:ale, 25, 1e-6, 400.0),
-        (:ale, 100, 1e-6, 400.0),
-        (:ale_darcy, 25, nothing, 300.0),
-        (:ale_darcy, 100, nothing, 300.0),
+# The same deck with `NoCorrection()` at the default tolerance.
+function without_correction(d)
+    cp = core_problem(d, d.default; correction = Cl.NoCorrection())
+    sol, wall = timed(() -> new_solve(d, cp))
+    return (; wall, steps = sol.statistics.accepted, sol.outcome, t_last = sol.t[end])
+end
+
+# R41's diagnostic: `ale_darcy` at 100 cells with the layer time scaled by
+# (100/25)², so its per-node gain `N²/τ` equals `ale_darcy` 25's at the
+# default.
+function equal_gain_row(decks)
+    d = only(filter(x -> x.name == "ale_darcy" && x.cells == 100, decks))
+    τ = (100 / 25)^2 * Cl.EQUIDISTRIBUTION_TIME
+    cp = core_problem(d, d.default; correction = Cl.EquidistributionCorrection(; τ))
+    sol, wall = timed(() -> new_solve(d, cp))
+    return (;
+        deck = d.name,
+        cells = d.cells,
+        τ,
+        wall,
+        steps = sol.statistics.accepted,
+        sol.outcome,
+        t_last = sol.t[end],
+        sol.statistics.invocations,
     )
-        problem, kw =
-            problem_for(kind, n; solid_λ = λ, t_end, outputs = round(Int, t_end) + 1)
-        common = (; use_ale = kw.use_ale, radiation_model = kw.radiation_model)
-        push!(
-            decks,
-            (;
-                name = "$(kind) $(n)",
-                problem,
-                old = (; common..., handle_depletion = true),
-                new = (; common..., deactivation = true),
-                tol = _tol(1e-6),
-                min_thickness = 1e-6,
-            ),
-        )
-    end
-    for id in ("V-CPL-02", "V-CPL-02b")
-        case = CASES[id]
-        kw = case.solve_kwargs
-        old = (; (k => v for (k, v) in pairs(kw) if !(k in (:abstol, :reltol)))...)
-        new = (; use_ale = kw.use_ale, deactivation = get(kw, :handle_depletion, false))
-        push!(
-            decks,
-            (;
-                name = id,
-                problem = Base.invokelatest(case.build, case.ci.n_cells),
-                old,
-                new,
-                tol = (abstol = kw.abstol, reltol = kw.reltol),
-                min_thickness = kw.min_thickness,
-            ),
-        )
-    end
-    rows = Any[]
-    for d in decks
-        old_sol, old_wall = timed(() -> Logging.with_logger(Logging.NullLogger()) do
-            solve(d.problem; progress = false, d.old..., d.tol...)
-        end)
-        results = Any[]
-        for correction in (nothing, Cl.NoCorrection())
-            cp = Ig.setup(d.problem; d.new..., correction, d.tol...)
-            installed = cp.def.closure.correction isa Cl.LayerCorrection
-            sol, wall = timed(() -> Ig.integrate(cp; min_thickness = d.min_thickness))
-            c = filter(isfinite, sol.correction_velocity)
-            push!(
-                results,
-                (;
-                    installed,
-                    wall,
-                    largest = isempty(c) ? 0.0 : maximum(abs, c),
-                    steps = sol.statistics.accepted,
-                    outcome = sol.outcome,
-                    t_last = sol.t[end],
-                    invocations = sol.statistics.invocations,
-                ),
-            )
-        end
-        rule, plain = results
-        rule.installed || error("the rule installs no correction on $(d.name)")
-        push!(
-            rows,
-            (;
-                deck = d.name,
-                reltol = d.tol.reltol,
-                old_wall,
-                old_steps = _counts(old_sol).steps,
-                old_t_last = old_sol.t[end],
-                rule,
-                plain,
-            ),
-        )
-        println("    installed $(d.name): $(rows[end])")
-        flush(stdout)
-    end
-    return rows
 end
 
 load_start = Sys.loadavg()
 started = time()
-results = [deck_rows(deck, n) for deck in ("V-BO-01", "V-BO-03", "V-BO-04") for n in CELLS]
-installed = installed_rows()
+results = [
+    deck_rows(vbo_deck(deck, n)) for deck in ("V-BO-01", "V-BO-03", "V-BO-04") for
+    n in CELLS
+]
+decks = installed_decks()
+installed = map(decks) do d
+    core_problem(d, d.default).def.closure.correction isa Cl.LayerCorrection ||
+        error("the rule installs no correction on $(d.name) $(d.cells)")
+    return (; deck_rows(d)..., none = without_correction(d))
+end
+equal_gain = equal_gain_row(decks)
 load_end = Sys.loadavg()
 
 open(joinpath(OUT, "burnout_timing.csv"), "w") do io
     cols = keys(first(results[1].rows))
     println(io, join(cols, ","))
-    for res in results, r in res.rows
+    for res in vcat(results, installed), r in res.rows
         println(
             io,
             join((v isa AbstractString ? "\"$v\"" : string(v) for v in values(r)), ","),
@@ -564,12 +677,12 @@ open(joinpath(OUT, "burnout_timing.md"), "w") do io
         "Produced by `test/newcore/gates/burnout_timing.jl` at $(COMMIT_STAMP). Julia $(VERSION), ",
         "$(Threads.nthreads()) thread, $(Sys.CPU_THREADS) logical CPUs; load average ",
         "$(round.(load_start; digits = 1)) at the start and $(round.(load_end; digits = 1)) at the end. ",
-        "The finite-volume core's default integrator (`Rodas5P`, heuristic restart); V-BO-01 and ",
-        "V-BO-03 with the equidistribution correction at its defaults. Window RMS and largest: the ",
+        "The finite-volume core's default integrator (`Rodas5P`, heuristic restart); every deck ",
+        "with the correction the installation rule gives it. Window RMS and largest: the ",
         "RMS and the largest of the differences over the saved times before the first event of any ",
-        "solve of the deck, against the same core at reltol $(REFERENCE): of the temperatures over ",
-        "the cells [K] on V-BO-01 and V-BO-03, of the thickness relative to the reference's on ",
-        "V-BO-04; the new core is matched on the RMS. Run error: the largest difference over the ",
+        "solve of the deck (the whole run where none has one), against the same core at reltol ",
+        "$(REFERENCE): of the thickness relative to the reference's on V-BO-04, of the temperatures ",
+        "over the cells [K] on the other decks; the new core is matched on the RMS. Run error: the largest difference over the ",
         "whole run at the saved times with the same live cells; shift: the largest invocation-time ",
         "difference over the reference's median interval between invocations (between its saved ",
         "times for a single invocation); MLR: the L1 error of the mass loss rate ",
@@ -600,12 +713,13 @@ open(joinpath(OUT, "burnout_timing.md"), "w") do io
         )
     end
     println(io, "\n## The ladders\n")
+    println(io, "The burnout decks, then the decks of the installed correction.\n")
     println(
         io,
         "| deck | cells | core | reltol | retcode | window RMS | window largest | run error | shift | MLR | peak | t_bo [s] | ledger | warm [s] | ratio | steps | rejected | RHS | Jacobians | nonlinear failures |",
     )
     println(io, "|" * repeat("---|", 20))
-    for res in results, r in res.rows
+    for res in vcat(results, installed), r in res.rows
         println(
             io,
             "| $(r.deck) | $(r.cells) | $(r.core) | $(r.reltol) | $(r.retcode) | ",
@@ -643,27 +757,86 @@ open(joinpath(OUT, "burnout_timing.md"), "w") do io
     println(io, "\n## The installed correction\n")
     println(
         io,
-        "The decks on which the installation rule installs the correction: the finite-volume core ",
-        "with it (the rule) and with `NoCorrection()`, at the same tolerance, the old core beside. ",
-        "Each solve's warm time [s], accepted steps, and outcome and end time [s]; largest |c|: the ",
-        "largest correction velocity over the saved times [m/s]; ratio: the rule's time over the ",
-        "old core's (the item's measure) and over the solve without the correction.\n",
+        "The decks on which the installation rule installs the correction, measured as the ",
+        "burnout decks are (window before [s]: the first event of any solve of the deck, `Inf` ",
+        "where none has one; target: the old default's window RMS [K]). Beside the matched ",
+        "ratio and its verdict: the equal-tolerance ratio; the rule's solve at the default ",
+        "tolerance and the same deck with `NoCorrection()`, each with its warm time [s], ",
+        "accepted steps, outcome and end time [s] (and the rule's invocations); largest |c|: the ",
+        "rule's largest correction velocity over the saved times [m/s].\n",
     )
     println(
         io,
-        "| deck | reltol | old [s] (steps; end) | rule [s] (steps; outcome, end; invocations) | none [s] (steps; outcome, end) | rule / old | rule / none | largest |c| |",
+        "| deck | cells | default reltol | window before [s] | target | old default [s] (steps; end) | new matched reltol | window RMS | new [s] | ratio | item 8 | equal-tolerance ratio | rule [s] (steps; outcome, end; invocations) | none [s] (steps; outcome, end) | largest |c| |",
     )
-    println(io, "|" * repeat("---|", 8))
-    for r in installed
-        a, b = r.rule, r.plain
+    println(io, "|" * repeat("---|", 15))
+    for res in installed
+        m, o, a, b = res.matched, res.old_row, res.rule, res.none
+        k = findfirst(r -> r.core == "new" && r.reltol == res.default, res.rows)
+        eq = k === nothing ? NaN : res.rows[k].ratio
         println(
             io,
-            "| $(r.deck) | $(r.reltol) | $(_g(r.old_wall)) ($(r.old_steps); $(_g(r.old_t_last; d = 4))) | ",
+            "| $(res.deck) | $(res.cells) | $(res.default) | $(_g(res.t1; d = 4)) | $(_g(res.target)) | ",
+            "$(_g(o.wall)) ($(o.steps); $(_g(o.t_last; d = 4))) | ",
+            m === nothing ? "none on the ladder | | | | unmatched | " :
+            "$(m.reltol) | $(_g(m.window_rms)) | $(_g(m.wall)) | $(_g(m.ratio)) | " *
+            "$(item8_verdict(m.ratio)) | ",
+            "$(_g(eq)) | ",
+            a === nothing ? " | " :
             "$(_g(a.wall)) ($(a.steps); $(a.outcome), $(_g(a.t_last; d = 4)); $(a.invocations)) | ",
             "$(_g(b.wall)) ($(b.steps); $(b.outcome), $(_g(b.t_last; d = 4))) | ",
-            "$(_g(a.wall / r.old_wall)) | $(_g(a.wall / b.wall)) | $(_g(a.largest)) |",
+            a === nothing ? " |" : "$(_g(a.largest)) |",
         )
     end
+    println(io, "\n## The cost split at the first activation\n")
+    println(
+        io,
+        "Per matched row whose correction activates: t_a, the first saved time of the new core's ",
+        "matched solve with a nonzero correction velocity [s]; each core's accepted steps before ",
+        "and after it and its share of the solve's time before it, from a read-only step ",
+        "recorder in a separate solve (the second of two), applied to the timed medians above; ",
+        "the ratio of the new core's time to the old default's before and after t_a; gain: ",
+        "`(T_new,after − r_before · T_old,after) / T_new`, the share of the new core's time ",
+        "beyond the old core's after t_a at the ratio before it. Before t_a the correction is ",
+        "exactly zero, so the ratio there is the integrator's and the per-step cost's (R40); ",
+        "after it the gain `N²/τ` acts (R41).\n",
+    )
+    println(
+        io,
+        "| deck | cells | new matched reltol | t_a [s] | old steps before, after | new steps before, after | old share before | new share before | ratio before | ratio after | matched ratio | gain |",
+    )
+    println(io, "|" * repeat("---|", 12))
+    for res in vcat(results, installed)
+        x = res.split
+        x === nothing && continue
+        println(
+            io,
+            "| $(res.deck) | $(res.cells) | $(res.matched.reltol) | $(_g(x.t_a; d = 4)) | ",
+            "$(x.old_steps[1]), $(x.old_steps[2]) | $(x.new_steps[1]), $(x.new_steps[2]) | ",
+            "$(_g(x.old_share)) | $(_g(x.new_share)) | $(_g(x.r_before)) | $(_g(x.r_after)) | ",
+            "$(_g(res.matched.ratio)) | $(_g(x.gain)) |",
+        )
+    end
+    unsplit = [
+        "$(res.deck) $(res.cells)" for
+        res in vcat(results, installed) if res.split === nothing
+    ]
+    isempty(unsplit) || println(
+        io,
+        "\nWithout a split (no matched rung, or no activation in the matched solve): ",
+        join(unsplit, ", "),
+        ".",
+    )
+    e = equal_gain
+    println(io, "\n## Equal gain (R41, reported)\n")
+    println(
+        io,
+        "`$(e.deck)` at $(e.cells) cells with the layer time τ = $(_g(e.τ; d = 4)) s, whose ",
+        "per-node gain `N²/τ` equals `$(e.deck)` 25's at the default, at the default tolerance: ",
+        "$(_g(e.wall)) s, $(e.steps) steps, $(e.outcome) at $(_g(e.t_last; d = 4)) s, ",
+        "$(e.invocations) invocations. Whether R41's steps are the `N²` itself reads against the ",
+        "rule's rows of `$(e.deck)` 25 and 100 above.",
+    )
 end
 println(
     "wrote $(OUT); load $(load_start) -> $(load_end); $(round(Int, time() - started)) s",
