@@ -76,7 +76,9 @@ threshold go in one event, the only events without `located_events` and with
 it the safety net for a crossing the location does not see. The
 solve ends with `:Terminated` when the last cell goes or a cell below the
 threshold lies inward of a live one, and with `:Failure` when an event leaves
-the state inadmissible or no consistent node velocities. The state a solve
+the state inadmissible (a merge's receiver held to its own mass tolerances,
+as the domain test holds every later proposal) or no consistent node
+velocities. The state a solve
 ends on is always saved, whether or not `saveat` names its time.
 """
 function solve(problem::PyrolysisProblem; kwargs...)
@@ -398,7 +400,9 @@ end
 # threshold margin inside the step (the end-of-step event then the safety
 # net), one pass of `deactivate!` (at a root with the threshold widened by the
 # relative tolerance, the mass rows' error scale there), then the consistent
-# sweep of the algebraic rows, the admissibility of the result, and the policy's restart step. A
+# sweep of the algebraic rows, the admissibility of the result (a merge's
+# receiver against its own mass tolerances, those the domain test applies to
+# the proposals after the event), and the policy's restart step. A
 # sweep that leaves a velocity row above round-off or an inadmissible result
 # ends the solve with `ReturnCode.Failure`. The margin crosses downward only,
 # and a cell under a correction can dip below its threshold and recover, so

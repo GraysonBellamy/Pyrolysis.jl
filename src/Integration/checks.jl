@@ -9,6 +9,12 @@ Whether the state `u` lies outside the physical domain: a live component mass
 more negative than its absolute tolerance, or on a moving mesh a live cell
 whose nodes have crossed (a non-positive volume) or a non-positive
 cross-section area. Read from the raw state, never through a guard.
+
+Each live cell is held to its own tolerances, a merge's receiver included:
+it holds the merged cells' masses against its own `abstol`, which is what the
+domain test holds every later proposal to ([`DomainCheck`](@ref)), so a state
+after an event that this test accepts is one the integrator can continue
+from.
 """
 function inadmissible(
     u::AbstractVector,

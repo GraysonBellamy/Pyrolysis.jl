@@ -219,6 +219,32 @@ _ledger(cp, u, events) =
     @test isempty(cells.events)
 end
 
+# The post-event test holds a merge's receiver to its own mass tolerance, the
+# one the domain test holds every later proposal to: three equal cells each
+# within their tolerance can merge into a receiver beyond it.
+@testset "a merge's receiver is held to its own mass tolerance" begin
+    cp = setup(_ablator(8); use_ale = true, deactivation = true)
+    def, layout, cells = cp.def, cp.def.layout, cp.deactivation
+    gas(i) = mass_index(layout, i, 2)
+    @test all(i -> cp.abstol[gas(i)] ≈ cp.abstol[gas(6)], 7:8)
+    for (k, expected) in ((0.6, true), (0.3, false))
+        reset_cells!(cells, layout)
+        u = copy(cp.u0)
+        for i = 7:8
+            u[mass_index(layout, i, 1)] = 0.2 * cells.threshold * cells.reference[i]
+        end
+        for i = 6:8
+            u[gas(i)] = -k * cp.abstol[gas(i)]
+        end
+        @test !inadmissible(u, layout, cp.abstol)
+        @test deactivate!(u, cells, def, 1.0) === :transferred
+        @test top_live_cell(layout) == 6
+        @test u[gas(6)] ≈ -3k * cp.abstol[gas(6)]
+        @test inadmissible(u, layout, cp.abstol) == expected
+    end
+    @test DomainCheck(cp).abstol === cp.abstol
+end
+
 @testset "a column below the band leaves its innermost cell as the survivor: $(energy) form" for energy in
                                                                                                  (
     :temperature,
