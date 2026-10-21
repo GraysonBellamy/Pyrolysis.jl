@@ -1,10 +1,10 @@
 # Gate items 1, 2, 4, 6 and 10: the burnout ladder
 
-Produced by `test/newcore/gates/burnout_ladder.jl` at commit 5f08134. Julia 1.13.0, 1 thread, 22 logical CPUs; load average [24.0, 20.7, 18.4] at the start and [18.7, 18.9, 19.8] at the end. The finite-volume core with the equidistribution correction (band 0.1, activation 0.3/0.1, the monitor's mass term `β` per row), the layer interfaces Lagrangian; τ [s] is the layer's equidistribution time, with the prototype's per-cell `τ_p = τ/N²` [s] in parentheses. The old core runs each case at the same resolution with its own keywords (its threshold is a thickness fraction).
+Produced by `test/newcore/gates/burnout_ladder.jl` at commit 5f08134; item 1 recomputed from this table's csv at commit c36760a (tree 3307204). Julia 1.13.0, 1 thread, 22 logical CPUs; load average [24.0, 20.7, 18.4] at the start and [18.7, 18.9, 19.8] at the end. The finite-volume core with the equidistribution correction (band 0.1, activation 0.3/0.1, the monitor's mass term `β` per row), the layer interfaces Lagrangian; τ [s] is the layer's equidistribution time, with the prototype's per-cell `τ_p = τ/N²` [s] in parentheses. The old core runs each case at the same resolution with its own keywords (its threshold is a thickness fraction).
 
 ## Outcomes and QoIs (items 1, 2 and 4)
 
-Invocations: per invocation its cells (below ε_m, taken by the band; the largest merged mass fraction). Item 1 passes with at most one invocation per layer and the largest fraction at most 5 ε_m. QoIs: the case's own, in assert mode against its fixed references; the failing ones are named. Inadmissible: results of a deactivation the solve refused.
+Invocations: per invocation its cells (below ε_m, taken by the band; the largest merged mass fraction). Item 1 passes with exactly one invocation per layer and the largest fraction at most 5 ε_m. QoIs: the case's own, in assert mode against its fixed references; the failing ones are named. Inadmissible: results of a deactivation the solve refused.
 
 | case | cells | form | ε_m | τ (τ_p) | correction | retcode, outcome, end [s] | invocations | item 1 | QoIs | failing | peak, t_peak, t_bo (old core) | events | inadmissible |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -31,8 +31,8 @@ Invocations: per invocation its cells (below ε_m, taken by the band; the larges
 | V-BO-07 | 60 | temperature | 0.01 | 720 (0.2) | β = 1.0 | Success, running, 500.0 | 60 (1 below, 59 band; 6.07 %) | fail | 8/8 |  | 30.542, 287.5, 324.0 (30.542, 287.5, 325.0) | 60 | 0 |
 | V-BO-08 | 10 | temperature | 0.003 | 720 (7.2) | β = 0.0 | Success, running, 150.0 | 10 (1 below, 9 band; 1.48 %) | pass | 6/6 |  | 29.712, 47.2, 69.3 (29.712, 47.2, 69.0) | 10 | 0 |
 | V-BO-08 | 10 | temperature | 0.01 | 720 (7.2) | β = 0.0 | Success, running, 150.0 | 10 (1 below, 9 band; 4.53 %) | pass | 6/6 |  | 29.712, 47.2, 69.2 (29.712, 47.2, 69.0) | 10 | 0 |
-| V-BO-08 | 10 | temperature | 0.03 | 720 (7.2) | β = 0.0 | Terminated, interior, 67.04 | 0 | pass | 3/6 | complete burnout: live thickness at t_end is the substrate; mass loss of the gasified PMMA layer; one invocation for the PMMA layer | 29.712, 47.2,  (29.712, 47.2, 69.0) | 0 | 0 |
-| V-BO-08 | 10 | temperature | 0.01 | 720 (7.2) | none | Terminated, interior, 68.86 | 0 | pass | 3/6 | complete burnout: live thickness at t_end is the substrate; mass loss of the gasified PMMA layer; one invocation for the PMMA layer | 29.712, 47.2,  (29.712, 47.2, 69.0) | 0 | 0 |
+| V-BO-08 | 10 | temperature | 0.03 | 720 (7.2) | β = 0.0 | Terminated, interior, 67.04 | 0 | fail | 3/6 | complete burnout: live thickness at t_end is the substrate; mass loss of the gasified PMMA layer; one invocation for the PMMA layer | 29.712, 47.2,  (29.712, 47.2, 69.0) | 0 | 0 |
+| V-BO-08 | 10 | temperature | 0.01 | 720 (7.2) | none | Terminated, interior, 68.86 | 0 | fail | 3/6 | complete burnout: live thickness at t_end is the substrate; mass loss of the gasified PMMA layer; one invocation for the PMMA layer | 29.712, 47.2,  (29.712, 47.2, 69.0) | 0 | 0 |
 | V-BO-01 | 30 | enthalpy | 0.003 | 720 (0.8) | β = 0.0 | Success, running, 500.0 | 30 (1 below, 29 band; 0.613 %) | pass | 8/8 |  | 32.248, 333.0, 364.0 (32.254, 333.0, 364.0) | 30 | 0 |
 | V-BO-01 | 30 | enthalpy | 0.01 | 720 (0.8) | β = 0.0 | Success, running, 500.0 | 30 (1 below, 29 band; 3.84 %) | pass | 8/8 |  | 32.248, 333.0, 363.0 (32.254, 333.0, 364.0) | 30 | 0 |
 | V-BO-01 | 30 | enthalpy | 0.03 | 720 (0.8) | β = 0.0 | Success, running, 500.0 | 17 (1 below, 16 band; 9.71 %); 13 (1 below, 12 band; 4.48 %) | fail | 7/8 | one invocation for the PMMA layer | 32.254, 333.0, 363.0 (32.254, 333.0, 364.0) | 30 | 0 |
@@ -56,8 +56,8 @@ Invocations: per invocation its cells (below ε_m, taken by the band; the larges
 | V-BO-07 | 60 | enthalpy | 0.01 | 720 (0.2) | β = 1.0 | Success, running, 500.0 | 60 (1 below, 59 band; 6.07 %) | fail | 8/8 |  | 30.542, 287.5, 324.0 (30.542, 287.5, 325.0) | 60 | 0 |
 | V-BO-08 | 10 | enthalpy | 0.003 | 720 (7.2) | β = 0.0 | Success, running, 150.0 | 10 (1 below, 9 band; 1.48 %) | pass | 6/6 |  | 29.712, 47.2, 69.3 (29.712, 47.2, 69.0) | 10 | 0 |
 | V-BO-08 | 10 | enthalpy | 0.01 | 720 (7.2) | β = 0.0 | Success, running, 150.0 | 10 (1 below, 9 band; 4.53 %) | pass | 6/6 |  | 29.712, 47.2, 69.2 (29.712, 47.2, 69.0) | 10 | 0 |
-| V-BO-08 | 10 | enthalpy | 0.03 | 720 (7.2) | β = 0.0 | Terminated, interior, 67.04 | 0 | pass | 3/6 | complete burnout: live thickness at t_end is the substrate; mass loss of the gasified PMMA layer; one invocation for the PMMA layer | 29.712, 47.2,  (29.712, 47.2, 69.0) | 0 | 0 |
-| V-BO-08 | 10 | enthalpy | 0.01 | 720 (7.2) | none | Terminated, interior, 68.86 | 0 | pass | 3/6 | complete burnout: live thickness at t_end is the substrate; mass loss of the gasified PMMA layer; one invocation for the PMMA layer | 29.712, 47.2,  (29.712, 47.2, 69.0) | 0 | 0 |
+| V-BO-08 | 10 | enthalpy | 0.03 | 720 (7.2) | β = 0.0 | Terminated, interior, 67.04 | 0 | fail | 3/6 | complete burnout: live thickness at t_end is the substrate; mass loss of the gasified PMMA layer; one invocation for the PMMA layer | 29.712, 47.2,  (29.712, 47.2, 69.0) | 0 | 0 |
+| V-BO-08 | 10 | enthalpy | 0.01 | 720 (7.2) | none | Terminated, interior, 68.86 | 0 | fail | 3/6 | complete burnout: live thickness at t_end is the substrate; mass loss of the gasified PMMA layer; one invocation for the PMMA layer | 29.712, 47.2,  (29.712, 47.2, 69.0) | 0 | 0 |
 
 ## Cells, residuals and cost (items 6 and 10)
 
