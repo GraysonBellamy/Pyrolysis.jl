@@ -86,6 +86,7 @@ export SutherlandProperty  # Sutherland gas-viscosity correlation (Material.gas_
 export StateDependentProperty  # For state-dependent heats of reaction
 export evaluate_param, evaluate_param_T  # Unified parameter evaluation (defined in property_functions.jl)
 export property_temperature  # Argument clamp shared by every temperature-dependent law
+export identically_zero  # Structural zero test of a property law
 
 # Components
 export Phase, SOLID, LIQUID, GAS

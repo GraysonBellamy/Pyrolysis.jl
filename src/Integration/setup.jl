@@ -154,9 +154,6 @@ _moves(closure) =
     closure.correction isa LayerCorrection &&
     any(!iszero, closure.correction.gain)
 
-# Whether a gas-transfer coefficient is zero across the property bracket.
-_vanishes(λ) = all(T -> λ(T) == 0, (T_PROPERTY_MIN, 300.0, 1000.0, T_PROPERTY_MAX))
-
 # The gas transport a problem needs: none without a gas component, Darcy–Fick
 # when a condensed component is permeable, Fickian when gas can move at all
 # (some component carries a gas-transfer coefficient, or a boundary condition
@@ -166,7 +163,7 @@ function _gas_transport(problem::PyrolysisProblem)
     any(is_gas, material.components) || return NoGasTransport()
     has_darcy_flow(material) && return DarcyFickTransport()
     moves =
-        any(c -> !_vanishes(c.gas_transfer_coeff), material.components) ||
+        any(c -> !identically_zero(c.gas_transfer_coeff), material.components) ||
         any(bc -> !(bc isa ImpermeableBC), values(problem.bc_set.mass))
     return moves ? FickTransport() : NoGasTransport()
 end

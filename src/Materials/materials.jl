@@ -393,23 +393,14 @@ n_reactions(::Material{NC,NR}) where {NC,NR} = NR
 
 Check if material uses Darcy-Fick gas transport.
 
-Returns true if any solid/liquid component has non-zero permeability (κ > 0).
+Returns true if the permeability law of any solid/liquid component is not
+[`identically_zero`](@ref).
 
 The component-based approach: define κ on each solid component,
 and the effective permeability will be computed via mixing rules.
 """
-function has_darcy_flow(m::Material)
-    # Check component-based permeability
-    for comp in m.components
-        if has_permeability(comp)
-            # Check if κ > 0 at a reference temperature
-            if get_permeability(comp, 500.0) > 0.0
-                return true
-            end
-        end
-    end
-    return false
-end
+has_darcy_flow(m::Material) =
+    any(c -> has_permeability(c) && !identically_zero(c.permeability), m.components)
 
 """
 	component_index(m::Material, name::Symbol)

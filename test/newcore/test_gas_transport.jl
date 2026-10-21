@@ -361,3 +361,37 @@ end
         @test ForwardDiff.partials(F)[1] == s * 0.25 / 0.5
     end
 end
+
+# Two sealed isothermal cells at 600 K with unequal gas concentrations, the gas
+# carrying the transfer law `λ`.
+function _sealed_pair(λ)
+    solid = SolidComponent(:solid; ρ = 600.0, c = 1000.0, k = 0.1)
+    gas = GaseousComponent(:gas; M = 0.032, c = 1000.0, k = 0.03, λ)
+    return PyrolysisProblem(
+        mesh = create_uniform_mesh(1.0, 2, Val(2)),
+        material = Material(name = :sealed_pair, components = (solid, gas), reactions = ()),
+        bc_set = BoundaryConditionSet(
+            thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
+            mass = (top = ImpermeableBC(), bottom = ImpermeableBC()),
+        ),
+        T_initial = z -> 600.0,
+        ξ_initial = [z -> 600.0, z -> z < 0.5 ? 1.0 : 2.0],
+        tspan = (0.0, 1.0),
+    )
+end
+
+@testset "gas transport: a transfer law zero at sampled temperatures still transports" begin
+    rates = map((
+        TableProperty((200.0, 300.0, 600.0, 1000.0, 3000.0), (0.0, 0.0, 1e-5, 0.0, 0.0)),
+        1e-5,
+    )) do λ
+        cp = setup(_sealed_pair(λ))
+        @test cp.def.setup.gas isa FickTransport
+        du = zeros(length(cp.u0))
+        residual!(du, cp.u0, cp.def, 0.0, cp.ws)
+        [du[mass_index(cp.def.layout, i, 2)] for i = 1:2]
+    end
+    @test rates[1] ≈ rates[2] rtol = 1e-12
+    @test rates[1][1] > 0
+    @test setup(_sealed_pair(0.0)).def.setup.gas isa NoGasTransport
+end

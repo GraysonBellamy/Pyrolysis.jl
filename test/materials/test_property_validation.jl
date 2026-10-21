@@ -8,7 +8,8 @@ opt-out; inside the bracket the clamp is the identity with derivative 1.
 using Test
 using ForwardDiff
 using Pyrolysis
-using Pyrolysis.Materials: T_PROPERTY_MIN, T_PROPERTY_MAX, property_temperature
+using Pyrolysis.Materials:
+    T_PROPERTY_MIN, T_PROPERTY_MAX, property_temperature, identically_zero
 
 @testset "property-law bracket" begin
     @testset "argument clamp is the identity inside the bracket" begin
@@ -120,4 +121,20 @@ using Pyrolysis.Materials: T_PROPERTY_MIN, T_PROPERTY_MAX, property_temperature
         h = StateDependentProperty((T, ξ) -> ξ[1] > 0 ? 1.0 : -1.0)
         @test SolidComponent(:s, ρ = 1000.0, c = 1000.0, k = 0.2, ε = h) isa SolidComponent
     end
+end
+
+@testset "a law vanishes by its structure, never by samples" begin
+    @test identically_zero(ConstantProperty(0.0))
+    @test !identically_zero(ConstantProperty(1e-5))
+    @test identically_zero(LinearProperty(0.0, 0.0))
+    @test !identically_zero(LinearProperty(0.0, 1e-8))
+    @test identically_zero(PolynomialProperty((0.0, 0.0, 0.0)))
+    @test !identically_zero(PolynomialProperty((0.0, 0.0, 1e-12)))
+    @test identically_zero(ArrheniusProperty(0.0, 5e4, 300.0))
+    @test identically_zero(TableProperty((300.0, 600.0), (0.0, 0.0)))
+    # Zero at 200, 300, 1000 and 3000 K and positive between them.
+    @test !identically_zero(
+        TableProperty((200.0, 300.0, 600.0, 1000.0, 3000.0), (0.0, 0.0, 1e-5, 0.0, 0.0)),
+    )
+    @test !identically_zero(CallableProperty(T -> 0.0))
 end
