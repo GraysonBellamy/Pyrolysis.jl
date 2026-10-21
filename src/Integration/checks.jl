@@ -3,12 +3,15 @@
 # ============================================================================
 
 """
-	inadmissible(u, layout, abstol) -> Bool
+	inadmissible(u, layout, setup, abstol) -> Bool
 
 Whether the state `u` lies outside the physical domain: a live component mass
-more negative than its absolute tolerance, or on a moving mesh a live cell
-whose nodes have crossed (a non-positive volume) or a non-positive
-cross-section area. Read from the raw state, never through a guard.
+more negative than its absolute tolerance, a live cell at or below absolute
+zero ([`below_absolute_zero`](@ref)), or on a moving mesh a live cell whose
+nodes have crossed (a non-positive volume) or a non-positive cross-section
+area. Read from the raw state, never through a guard: the trial temperatures
+keep a state outside the domain evaluable, and this test keeps it from being
+accepted.
 
 Each live cell is held to its own tolerances, a merge's receiver included:
 it holds the merged cells' masses against its own `abstol`, which is what the
@@ -19,6 +22,7 @@ from.
 function inadmissible(
     u::AbstractVector,
     layout::StateLayout{NC},
+    setup,
     abstol::Vector{Float64},
 ) where {NC}
     @inbounds for i = 1:n_cells(layout)
@@ -32,7 +36,26 @@ function inadmissible(
         end
     end
     has_chi(layout) && u[area_index(layout)] <= 0 && return true
-    return false
+    return below_absolute_zero(u, layout, setup) != 0
+end
+
+"""
+	below_absolute_zero(u, layout, setup) -> Int
+
+The first live cell of the state `u` whose temperature is at or below
+absolute zero, or zero when there is none: its energy state at or below that
+of zero kelvin at its masses, the relation the caloric inversion inverts
+([`energy_state_value`](@ref)), read from the raw state without inverting it.
+"""
+function below_absolute_zero(u::AbstractVector, layout::StateLayout{NC}, setup) where {NC}
+    energy = energy_state(layout)
+    @inbounds for i = 1:n_cells(layout)
+        k = energy_index(layout, i)
+        layout.mask[k] || continue
+        m = ntuple(j -> u[mass_index(layout, i, j)], Val(NC))
+        u[k] <= energy_state_value(energy, setup, 0.0, m, i) && return i
+    end
+    return 0
 end
 
 """
@@ -41,19 +64,23 @@ end
 What the domain test saw: the largest scaled constraint residual of the last
 proposed state (`last`) and of every accepted one (`largest`), the steps it
 rejected on admissibility or on a constraint (`rejections`), the current run
-of consecutive constraint rejections, and, once that run exceeded its bound,
-the diagnostic the step observer ends the solve with.
+of consecutive constraint rejections, the live cell at or below absolute zero
+in the last proposal if it was rejected for one (`cold`, zero otherwise) and
+its time, and, once the solve cannot go on, the diagnostic the step observer
+ends it with.
 """
 mutable struct ConstraintMonitor
     last::Float64
     largest::Float64
     rejections::Int
     consecutive::Int
+    cold::Int
+    cold_t::Float64
     failed::Bool
     message::String
 end
 
-ConstraintMonitor() = ConstraintMonitor(0.0, 0.0, 0, 0, false, "")
+ConstraintMonitor() = ConstraintMonitor(0.0, 0.0, 0, 0, 0, NaN, false, "")
 
 """
 	MAX_CONSTRAINT_REJECTIONS
@@ -69,7 +96,9 @@ const MAX_CONSTRAINT_REJECTIONS = 50
 The integrator's `isoutofdomain` test. A proposed state is rejected, and the
 step shrunk by the controller's minimum factor, when
 
-- it is [`inadmissible`](@ref);
+- it is [`inadmissible`](@ref), a live cell at or below absolute zero
+  included (recorded in the monitor, so a solve that cannot pass it says
+  so);
 - under Darcy–Fick transport a live cell's porosity
   `1 − Σⱼ mⱼ/(ρⱼ(T) V)`, read from the raw masses and volume, leaves `[0, 1]`
   by more than the skeletal volume of its mass tolerances;
@@ -119,14 +148,19 @@ function DomainCheck(cp; max_consecutive::Int = MAX_CONSTRAINT_REJECTIONS)
 end
 
 function (check::DomainCheck)(u, p, t)
-    layout = check.def.layout
-    inadmissible(u, layout, check.abstol) && return _reject!(check.monitor)
+    layout, setup = check.def.layout, check.def.setup
+    m = check.monitor
+    if inadmissible(u, layout, setup, check.abstol)
+        m.cold = below_absolute_zero(u, layout, setup)
+        m.cold_t = t
+        return _reject!(m)
+    end
+    m.cold = 0
     residual!(check.du, u, check.def, t, check.ws)
     ds, c = check.ws.derived, check.ws.contributions
-    _porosity_out(check, ds, check.def.setup.gas) && return _reject!(check.monitor)
+    _porosity_out(check, ds, setup.gas) && return _reject!(m)
     r = constraint_residual(check, ds, c, t)
-    isfinite(r) || return _reject!(check.monitor)
-    m = check.monitor
+    isfinite(r) || return _reject!(m)
     m.last = r
     if r > 1
         m.consecutive += 1

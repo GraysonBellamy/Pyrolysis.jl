@@ -114,6 +114,69 @@ end
     @test occursin("consecutive", m.message)
 end
 
+# A 1 mm inert slab losing 500 kW/m² through its top: its sensible energy is
+# gone at 0.6 s, and no physical state lies beyond.
+function _cooling_slab()
+    solid = SolidComponent(:solid; ρ = 1000.0, c = 1000.0, k = 1.0)
+    return PyrolysisProblem(
+        mesh = create_uniform_mesh(0.001, 1, Val(1)),
+        material = Material(name = :cooling, components = (solid,), reactions = ()),
+        bc_set = BoundaryConditionSet(
+            thermal = (top = HeatFluxBC(-5e5), bottom = AdiabaticBC()),
+        ),
+        T_initial = z -> 300.0,
+        ξ_initial = [z -> 1000.0],
+        tspan = (0.0, 1.0),
+        dt_initial = 0.01,
+        output_times = [0.0, 0.5, 1.0],
+    )
+end
+
+@testset "a cell at or below absolute zero is inadmissible: $(energy) form" for energy in (
+    :temperature,
+    :enthalpy,
+)
+    cp = setup(_cooling_slab(); energy_state = energy)
+    def, layout = cp.def, cp.def.layout
+    m = (cp.u0[mass_index(layout, 1, 1)],)
+    function at(T)
+        u = copy(cp.u0)
+        u[energy_index(layout, 1)] =
+            energy_state_value(energy_state(layout), def.setup, T, m, 1)
+        return u
+    end
+    @test below_absolute_zero(at(1.0), layout, def.setup) == 0
+    @test below_absolute_zero(at(0.0), layout, def.setup) == 1
+    @test inadmissible(at(-10.0), layout, def.setup, cp.abstol)
+    # The raw-state test agrees with the inversion, which the trial
+    # temperature keeps evaluable.
+    du = zeros(length(cp.u0))
+    residual!(du, at(-10.0), def, 0.0, cp.ws)
+    @test cp.ws.derived.T[1] ≈ -10.0 rtol = 1e-10
+    @test all(isfinite, du)
+    check = DomainCheck(cp)
+    @test check(at(-10.0), nothing, 0.0)
+    @test check.monitor.cold == 1
+    @test !check(cp.u0, nothing, 0.0)
+    @test check.monitor.cold == 0
+    @test_throws ArgumentError integrate(cp; u0 = at(-10.0))
+
+    # Adaptive steps stop where the energy runs out, and say why.
+    sol = @test_logs (:warn, r"absolute zero") match_mode = :any integrate(cp)
+    @test sol.retcode !== :Success
+    @test 0.55 < sol.t[end] <= 0.6 + 1e-9
+    @test minimum(sol.T) > 0
+    # A fixed step, which the domain test never sees, ends the solve at the
+    # first accepted state below zero.
+    sol = @test_logs (:warn, r"absolute zero") match_mode = :any integrate(
+        cp;
+        adaptive = false,
+        dt = 0.07,
+    )
+    @test sol.retcode === :Failure
+    @test sol.t[end] ≈ 0.63
+end
+
 # Stiff scalar relaxation towards 1: after the transient the controller grows
 # the step by the largest factor it allows. The first right-hand side past
 # `t_fail` returns NaN, which fails that stage's Newton once.

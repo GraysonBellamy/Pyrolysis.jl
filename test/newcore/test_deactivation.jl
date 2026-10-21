@@ -198,7 +198,7 @@ _ledger(cp, u, events) =
     # added it stays live, and the state is admissible and consistent.
     @test !below_threshold(cells, layout, u, 5)
     consistent_state!(u, def, cp.ws, 1.0)
-    @test !inadmissible(u, layout, cp.abstol)
+    @test !inadmissible(u, layout, def.setup, cp.abstol)
     du = zeros(length(u))
     residual!(du, u, def, 1.0, cp.ws)
     @test all(isfinite, du)
@@ -236,11 +236,11 @@ end
         for i = 6:8
             u[gas(i)] = -k * cp.abstol[gas(i)]
         end
-        @test !inadmissible(u, layout, cp.abstol)
+        @test !inadmissible(u, layout, def.setup, cp.abstol)
         @test deactivate!(u, cells, def, 1.0) === :transferred
         @test top_live_cell(layout) == 6
         @test u[gas(6)] ≈ -3k * cp.abstol[gas(6)]
-        @test inadmissible(u, layout, cp.abstol) == expected
+        @test inadmissible(u, layout, def.setup, cp.abstol) == expected
     end
     @test DomainCheck(cp).abstol === cp.abstol
 end
@@ -813,8 +813,11 @@ end
     )
     cells, layout = cp.deactivation, cp.def.layout
     # The outer cell starts exactly at its threshold, where a located root
-    # would leave it: its margin is zero and never crosses zero downward.
+    # would leave it: its margin is zero and never crosses zero downward. The
+    # depleted solid has left the cell: vented at once through the film, its
+    # gas would carry the cell's sensible energy below absolute zero.
     u0 = _deplete!(copy(cp.u0), cp, 4, cells.threshold)
+    u0[mass_index(layout, 4, 2)] = cp.u0[mass_index(layout, 4, 2)]
     consistent_state!(u0, cp.def, cp.ws, 0.0)
     @test threshold_margin(cells, layout, u0) == 0.0
     @test !any_below(cells, layout, u0)
@@ -899,7 +902,7 @@ end
                 results,
                 (;
                     t,
-                    admissible = !inadmissible(u, layout, cp.abstol),
+                    admissible = !inadmissible(u, layout, def.setup, cp.abstol),
                     velocity = maximum(velocity),
                     intensity = maximum(intensity),
                 ),

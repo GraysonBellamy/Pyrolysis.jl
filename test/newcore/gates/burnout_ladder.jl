@@ -186,7 +186,7 @@ function probe_step!(p::Probe, check, h0, u, t)
         p.min_h = min(p.min_h, h)
         p.min_ratio = min(p.min_ratio, h / h0[i])
     end
-    if !Ig.inadmissible(u, layout, check.abstol)
+    if !Ig.inadmissible(u, layout, check.def.setup, check.abstol)
         As.residual!(check.du, u, check.def, t, check.ws)
         ds, c = As.buffers(check.ws, check.def, Float64)
         package = Ig.constraint_residual(check, ds, c, t)

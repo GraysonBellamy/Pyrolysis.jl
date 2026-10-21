@@ -45,7 +45,8 @@ export StructuredKLU, default_linear_solver
 export kencarp4_policy, rodas5p_policy, fbdf_policy
 export DomainCheck, ConstraintMonitor, constraint_residual, MAX_CONSTRAINT_REJECTIONS
 export FAILURE_MEMORY_GROWTH, FAILURE_MEMORY_STEPS, NewtonCap, cap_step!
-export CoreProblem, setup, consistent_state!, inadmissible, solve, integrate
+export CoreProblem,
+    setup, consistent_state!, inadmissible, below_absolute_zero, solve, integrate
 export CORRECTION_BAND
 
 end # module Integration

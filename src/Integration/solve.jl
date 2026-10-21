@@ -173,7 +173,10 @@ consistent ([`consistent_state!`](@ref)), with the tolerances it was set up
 with. The keywords are those of [`solve`](@ref); `max_constraint_rejections`
 bounds the domain test's run of consecutive constraint rejections
 ([`DomainCheck`](@ref)), and `started` is the time the reported solve time
-counts from. Every call starts with every cell live and, in the inventory
+counts from. An [`inadmissible`](@ref) `u0` is refused; a fixed-step solve,
+which the domain test never sees, ends with `ReturnCode.Failure` at the
+first accepted state that is inadmissible. A solve that fails ends on the
+last state it accepted. Every call starts with every cell live and, in the inventory
 form, the caloric inversion from the set-up temperatures, so repeated
 integrations of one problem are bit-identical.
 """
@@ -198,6 +201,12 @@ function integrate(
         throw(ArgumentError("min_thickness must be positive, got $min_thickness"))
     def, ws, cj = cp.def, cp.ws, cp.jacobian
     layout = def.layout
+    inadmissible(u0, layout, def.setup, cp.abstol) && throw(
+        ArgumentError(
+            "the initial state is inadmissible: a live component mass below its " *
+            "tolerance, a live cell at or below absolute zero, or crossed nodes",
+        ),
+    )
     cells = cp.deactivation
     cells === nothing || reset_cells!(cells, layout)
     copyto!(ws.T_warm, cp.T0)
@@ -236,16 +245,26 @@ function integrate(
     out_of_domain = _DomainWrapper(check)
     monitor = check.monitor
     cap = NewtonCap()
+    violation = _ViolationWrapper(let layout = layout, setup = def.setup, abstol = cp.abstol
+        u -> _violation(u, layout, setup, abstol)
+    end)
     observer = DiscreteCallback(
         (u, t, integrator) -> true,
-        integrator -> _observe!(integrator, monitor, cap, policy);
+        integrator -> _observe!(integrator, monitor, cap, policy, violation);
+        save_positions = (false, false),
+    )
+    # The last accepted state, after every callback of its step.
+    accepted = AcceptedState(copy(ode.u0), Float64(cp.problem.tspan[1]))
+    recorder = DiscreteCallback(
+        (u, t, integrator) -> true,
+        integrator -> _record!(integrator, accepted, policy);
         save_positions = (false, false),
     )
     thin = _thickness_termination(layout, Float64(min_thickness))
     events = _deactivation_callback(cp, check, policy, located_events)
     callbacks =
-        callback === nothing ? CallbackSet(observer, events..., thin...) :
-        CallbackSet(observer, events..., thin..., _observing(callback, policy))
+        callback === nothing ? CallbackSet(observer, events..., thin..., recorder) :
+        CallbackSet(observer, events..., thin..., _observing(callback, policy), recorder)
 
     raw = OrdinaryDiffEq.solve(
         ode,
@@ -263,6 +282,13 @@ function integrate(
         initializealg = NoInit(),
         save_end = true,
     )
+    monitor.cold == 0 ||
+        @warn "solve(): stopped at t = $(raw.t[end]): the last proposed state, at t = $(monitor.cold_t), takes cell $(monitor.cold) to or below absolute zero"
+    # A solve its controller stopped saves its last proposal, which it
+    # rejected, at the last accepted time: report the accepted state there.
+    SciMLBase.successful_retcode(raw.retcode) ||
+        raw.t[end] != accepted.t ||
+        copyto!(raw.u[end], accepted.u)
     elapsed = time() - started
     s = raw.stats
     stats = SolverStatistics(
@@ -312,13 +338,47 @@ end
 NewtonCap() = NewtonCap(0, 0, Inf)
 
 const _DomainWrapper = FunctionWrapper{Bool,Tuple{_StateVector,NullParameters,Float64}}
+const _ViolationWrapper = FunctionWrapper{Int,Tuple{_StateVector}}
+
+# The last state the integrator accepted and its time, recorded by a
+# read-only observer after every other callback of the step.
+mutable struct AcceptedState
+    u::Vector{Float64}
+    t::Float64
+end
+
+function _record!(integrator, accepted::AcceptedState, policy)
+    copyto!(accepted.u, integrator.u)
+    accepted.t = integrator.t
+    apply_observer_flag!(integrator, policy)
+    return nothing
+end
+
+# Zero for an admissible state; otherwise the first live cell at or below
+# absolute zero, or -1 when the state is inadmissible otherwise.
+function _violation(u, layout, setup, abstol)
+    inadmissible(u, layout, setup, abstol) || return 0
+    cold = below_absolute_zero(u, layout, setup)
+    return cold == 0 ? -1 : cold
+end
 
 # The per-step observer: the largest constraint residual of the accepted
-# states, the end of the solve once the domain test gave up, the step cap
-# after a Newton failure, then the policy's flag rule. The domain test runs
-# on adaptive steps only, so a fixed-step solve records no residual.
-function _observe!(integrator, m::ConstraintMonitor, cap::NewtonCap, policy)
+# states, the end of the solve once the domain test gave up or a fixed step
+# left the physical domain, the step cap after a Newton failure, then the
+# policy's flag rule. The domain test runs on adaptive steps only, so a
+# fixed-step solve records no residual and its accepted states are held to
+# admissibility here.
+function _observe!(integrator, m::ConstraintMonitor, cap::NewtonCap, policy, violation)
     m.largest = max(m.largest, m.last)
+    if !integrator.opts.adaptive
+        v = violation(integrator.u)
+        if v != 0
+            m.failed = true
+            m.message =
+                "the fixed step accepted at t = $(integrator.t) is inadmissible" *
+                (v > 0 ? ": cell $v is at or below absolute zero" : "")
+        end
+    end
     if m.failed
         @warn "solve(): $(m.message)"
         terminate!(integrator, ReturnCode.Failure)
@@ -431,7 +491,7 @@ function _deactivation_callback(cp::CoreProblem, check::DomainCheck, policy, loc
             status === :transferred || return status
             _consistent_intensities!(u, def, ws, t)
             _consistent_motion!(u, def, ws, t) === nothing || return :inconsistent
-            inadmissible(u, layout, check.abstol) && return :inadmissible
+            inadmissible(u, layout, def.setup, check.abstol) && return :inadmissible
             _porosity_out(check, _derived(check, u, t), def.setup.gas) &&
                 return :inadmissible
             return status
