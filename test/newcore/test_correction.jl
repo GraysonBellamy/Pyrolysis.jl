@@ -37,16 +37,14 @@ end
 
 # Two solids of equal density and different heat capacity, a smooth front
 # between them (or both uniform), adiabatic and impermeable faces, on a mesh
-# whose cells grow by `ratio` toward the back. Each solid holds a quarter of
-# the mass or more everywhere: the relative fluxes' face state beside a
-# boundary cell is the linear interpolation toward its neighbour, which
-# drains a cell holding almost none of a component under a steep front.
+# whose cells grow by `ratio` toward the back. Away from the front each cell
+# holds almost none of one solid.
 function _composition(n; uniform = false, T0 = 800.0, ratio = 1.1)
     L = 0.01
     a = SolidComponent(:a, ρ = 1000.0, c = 1000.0, k = 0.5)
     b = SolidComponent(:b, ρ = 1000.0, c = 3000.0, k = 0.5)
     mat = Material(name = :composition, components = (a, b), reactions = ())
-    front(z) = uniform ? 0.5 : 0.5 + 0.25 * tanh((z - L / 2) / (L / 10))
+    front(z) = uniform ? 0.5 : (1 + tanh((z - L / 2) / (L / 10))) / 2
     return PyrolysisProblem(
         mesh = create_stretched_mesh(L, n, Val(2), ratio),
         material = mat,

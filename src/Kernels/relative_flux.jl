@@ -29,9 +29,12 @@ isothermal composition profile advected across the mesh stays isothermal.
 Face states are second-order upwind reconstructions: the upwind cell's value
 plus its smooth [`van_albada`](@ref) slope times its distance to the face,
 the slope built from the gradient from the cell beyond it and the gradient
-toward the downwind cell (the downwind gradient alone where no live cell lies
-beyond). A boundary face takes the one-sided linear extrapolation of its cell
-whichever way the mesh crosses it, so its flux has no switch. The face state
+toward the downwind cell, the gradient from beyond taken as zero where no
+live cell lies there: beside a resolved gradient the face state is then the
+upwind cell's own value, so a boundary cell holding almost none of a
+component is not drained. A boundary face takes the one-sided linear
+extrapolation of its cell whichever way the mesh crosses it, so its flux has
+no switch. The face state
 of an interior face changes side with the sign of `u`; the flux `u ξ_f` is
 continuous there, with a kink. The side follows the value of `u` alone, so
 at `u = 0` every derivative pass takes the derivative of the `u ≥ 0` side,
@@ -149,7 +152,8 @@ end
     return U, D, X, d_f, d_UD, d_XU
 end
 
-# The face value of a cell quantity `q(i)` on the stencil, with slope scale ε.
+# The face value of a cell quantity `q(i)` on the stencil, with slope scale ε;
+# with no cell beyond the upwind cell the gradient from beyond is zero.
 @inline function _face_value(q::F, U, D, X, d_f, d_UD, d_XU, ε) where {F}
     qU = q(U)
     if D == 0
@@ -157,7 +161,7 @@ end
         return qU + d_f * (qU - q(X)) / d_XU
     end
     b = (q(D) - qU) / d_UD
-    X == 0 && return qU + d_f * b
+    X == 0 && return qU + d_f * van_albada(zero(b), b, ε)
     a = (qU - q(X)) / d_XU
     return qU + d_f * van_albada(a, b, ε)
 end

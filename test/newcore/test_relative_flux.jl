@@ -147,6 +147,29 @@ end
     @test maximum(abs, solc.T .- 800.0) > 100
 end
 
+# At 8 cells the top cell starts with 0.158 kg/m³ of the first solid beside
+# the front's steep side, and the mesh crosses it inward: its face state
+# toward the second cell has no cell beyond it.
+@testset "a boundary cell beside a steep front is not drained: $(energy) form" for energy in
+                                                                                   (
+    :temperature,
+    :enthalpy,
+)
+    cp = setup(
+        _composition(8);
+        energy_state = energy,
+        use_ale = true,
+        w_override = _slide,
+        abstol = 1e-10,
+        reltol = 1e-8,
+    )
+    sol = integrate(cp; saveat = Float64[])
+    @test sol.retcode === :Success
+    @test sol.t[end] == 10.0
+    @test minimum(sol.ξ) > 0
+    @test sum(sol.m[:, :, end]) ≈ sum(sol.m[:, :, 1]) rtol = 1e-12
+end
+
 # One solid at rest at a uniform concentration, compressed by a prescribed
 # uniform stretch of the mesh.
 function _uniform(n)
