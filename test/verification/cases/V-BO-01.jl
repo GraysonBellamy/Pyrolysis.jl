@@ -89,8 +89,9 @@ function _vbo_nodes(n_pmma, l_pmma, r)
     return [[k * h for k = 0:n_kw]; n_kw * h .+ pmma], n_kw
 end
 
-# The deck's conditions on `mesh` with `material` and initial concentrations `ξ0`.
-function _vbo_deck(mesh, material, ξ0; flux = 50e3, t_end = 500.0)
+# The deck's conditions on `mesh` with `material` and initial concentrations
+# `ξ0`, saved every `save_every` seconds.
+function _vbo_deck(mesh, material, ξ0; flux = 50e3, t_end = 500.0, save_every = 0.5)
     top =
         RadiativeFluxBC(; flux, absorptivity = 0.96) +
         RadiativeBC(ε = 0.96, T_inf = VBO_T_INF) +
@@ -108,7 +109,7 @@ function _vbo_deck(mesh, material, ξ0; flux = 50e3, t_end = 500.0)
         ξ_initial = ξ0,
         tspan = (0.0, t_end),
         dt_initial = 1e-3,
-        output_times = collect(0.0:0.5:t_end),
+        output_times = collect(0.0:save_every:t_end),
     )
 end
 
@@ -124,6 +125,7 @@ function _vbo_problem(
     flux = 50e3,
     A = 1.35e11,
     t_end = 500.0,
+    save_every = 0.5,
     l_pmma = VBO_L_PMMA,
     grading = 1.0,
 )
@@ -152,7 +154,7 @@ function _vbo_problem(
     end
     ξ0 =
         [z -> (z > z_if ? VBO_RHO_PMMA : 0.0), z -> (z > z_if ? 0.0 : VBO_RHO_KW), z -> 0.0]
-    return _vbo_deck(mesh, mat, ξ0; flux, t_end)
+    return _vbo_deck(mesh, mat, ξ0; flux, t_end, save_every)
 end
 
 # Counts warnings whose message matches `pattern` while forwarding everything
@@ -471,40 +473,46 @@ function _vbo_invocations(sol, ε_m)
     ]
 end
 
-# The time of the peak and the burnout time against V-BO-01's references.
-_vbo_timing_qois(m) = [
+# The time of the peak and the burnout time against their references,
+# V-BO-01's by default.
+_vbo_timing_qois(m; t_peak_ref = VBO_T_PEAK_REF, t_bo_ref = VBO_T_BO_REF) = [
     QoIResult(
         name = "time of peak MLR",
         value = m.t_peak,
-        exact = VBO_T_PEAK_REF,
-        error = abs(m.t_peak - VBO_T_PEAK_REF) / VBO_T_PEAK_REF,
+        exact = t_peak_ref,
+        error = abs(m.t_peak - t_peak_ref) / t_peak_ref,
         tol = 0.03,
         comment = "s",
     ),
     QoIResult(
         name = "burnout time (live thickness < $(round(1e3 * m.l_kw + 0.02; digits = 2)) mm)",
         value = m.t_bo,
-        exact = VBO_T_BO_REF,
-        error = abs(m.t_bo - VBO_T_BO_REF) / VBO_T_BO_REF,
+        exact = t_bo_ref,
+        error = abs(m.t_bo - t_bo_ref) / t_bo_ref,
         tol = 0.01,
         comment = "s",
     ),
 ]
 
 # On the finite-volume core the correction carries the layer to one
-# deactivation, and the band merges no cell that still holds more than 5 ε_m
-# of its mass.
-function _vbo_invocation_qoi(sol, id)
+# deactivation, and the band merges no cell that still holds more than
+# `merged_limit` ε_m of its mass (`nothing` reports the largest merged
+# fraction without bounding it).
+function _vbo_invocation_qoi(sol, id; merged_limit = 5)
     ε_m = VBO_STEP_STATS[id].threshold
     inv = _vbo_invocations(sol, ε_m)
     largest = maximum(v.largest for v in inv; init = 0.0)
+    within = merged_limit === nothing || largest <= merged_limit * ε_m
+    bound =
+        merged_limit === nothing ? "" :
+        " against $(merged_limit) ε_m = $(merged_limit * ε_m)"
     return QoIResult(
         name = "one invocation for the PMMA layer",
         value = Float64(length(inv)),
         exact = 1.0,
-        error = abs(length(inv) - 1.0) + (largest <= 5ε_m ? 0.0 : 1.0),
+        error = abs(length(inv) - 1.0) + (within ? 0.0 : 1.0),
         tol = 0.5,
-        comment = "$(sum(v.cells for v in inv; init = 0)) cells; largest merged fraction $(round(largest; sigdigits = 3)) against 5 ε_m = $(5ε_m)",
+        comment = "$(sum(v.cells for v in inv; init = 0)) cells; largest merged fraction $(round(largest; sigdigits = 3))$(bound)",
     )
 end
 
