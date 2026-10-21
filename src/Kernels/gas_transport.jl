@@ -22,14 +22,17 @@ with the superficial velocity `v = −m_f (P_nb − P_o) / d` from the guarded f
 mean `m_f` of the cell mobilities, the face porosity `φ_f` the mean of the
 smoothly floored cell porosities, and `ξ_up` upwind of `v`. The energy flux
 of the face gains `Σⱼ Jⱼ hⱼ(T_f)` with `T_f` the distance-weighted face
-temperature, the same mass flux the mass rows carry.
+temperature, the same mass flux the mass rows carry. The upwind side follows
+the value of `v` alone, so at `v = 0` every derivative pass takes the
+derivative of the `v ≥ 0` side, whatever its seeds.
 
 Boundary faces, one [`BoundaryPatch`](@ref) of mass conditions per tag, each
 applied on the face that bounds the live cells on its side (`Meshes.live_face`): the
 film flux of the condition (`BoundaryConditions.mass_bc_flux`, which returns
 the flux into the domain and is negated here) and, under Darcy–Fick transport, the outflow the pressure condition
 drives at the outward Darcy velocity of [`outward_darcy_velocity`](@ref)
-against an ambient that carries none of the tracked gases. The enthalpy those
+against an ambient that carries none of the tracked gases, outflow read from
+the velocity's value alone. The enthalpy those
 fluxes carry leaves at the face temperature, which the thermal boundary
 kernel adds once the surface balance has fixed it.
 
@@ -121,9 +124,11 @@ end
     return v, (ds.φ[o] + ds.φ[nb]) / 2
 end
 
-# First-order upwind advection of the intrinsic gas density ξ/φ.
+# First-order upwind advection of the intrinsic gas density ξ/φ. The side is
+# read from the value of `v`: a dual number of zero value compares by its
+# partials, which differ between seeds.
 @inline _advective_flux(::Nothing, ::Nothing, ξ_o, ξ_n) = zero(ξ_o)
-@inline _advective_flux(v, φ_f, ξ_o, ξ_n) = v * (v >= 0 ? ξ_o : ξ_n) / φ_f
+@inline _advective_flux(v, φ_f, ξ_o, ξ_n) = v * (value(v) >= 0 ? ξ_o : ξ_n) / φ_f
 
 # Peel the patch tuple so each patch's condition is a concrete type.
 @inline _mass_patches!(c, ::Tuple{}, kernel, ds, topo, material, t) = nothing
@@ -163,11 +168,12 @@ end
 end
 
 # Outflow per unit intrinsic gas density, v_out/φ, that the pressure condition
-# drives through the face; inflow carries none of the tracked gases.
+# drives through the face; inflow carries none of the tracked gases. Outflow
+# is read from the value of `v`, as the interior upwind side is.
 @inline _vent_rate(::FickTransport, bc, ds, i, d) = zero(eltype(ds.T))
 @inline function _vent_rate(::DarcyFickTransport, bc, ds, i, d)
     v = outward_darcy_velocity(bc, ds.P[i], ds.mob[i], d)
-    return v > 0 ? v / ds.φ[i] : zero(v)
+    return value(v) >= 0 ? v / ds.φ[i] : zero(v)
 end
 
 """

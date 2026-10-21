@@ -298,3 +298,66 @@ end
         @test du_open[k] - du_closed[k] ≈ -g.face_area[1] * c.F_mass[j, 1] rtol = 1e-10
     end
 end
+
+# A permeable solid with two gases of one molar mass in alternating
+# proportions: the pressure is uniform to the bit, so every interior face
+# carries `v = 0` between unequal upwind states. With `outlet` the top vents
+# against exactly the cells' pressure, so its outward velocity is zero too.
+function _pressure_tie(n; outlet::Bool, energy)
+    solid = SolidComponent(
+        :solid;
+        ρ = 600.0,
+        ρ_intrinsic = 1200.0,
+        c = 1000.0,
+        k = 0.1,
+        κ = 1e-12,
+        λ = 1e-5,
+    )
+    a = GaseousComponent(:a; M = 0.032, c = 1000.0, k = 0.03, λ = 1e-5)
+    b = GaseousComponent(:b; M = 0.032, c = 1000.0, k = 0.03, λ = 1e-5)
+    mat = Material(name = :pressure_tie, components = (solid, a, b), reactions = ())
+    y(z) = isodd(clamp(floor(Int, z * n) + 1, 1, n)) ? 0.25 : 0.75
+    problem(top) = PyrolysisProblem(
+        mesh = create_uniform_mesh(1.0, n, Val(3)),
+        material = mat,
+        bc_set = BoundaryConditionSet(
+            thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
+            mass = (top = top, bottom = ImpermeableBC()),
+        ),
+        T_initial = z -> 600.0,
+        ξ_initial = [z -> 600.0, y, z -> 1 - y(z)],
+        tspan = (0.0, 1.0),
+    )
+    cp = setup(problem(ImpermeableBC()); energy_state = energy)
+    du = zeros(length(cp.u0))
+    residual!(du, cp.u0, cp.def, 0.0, cp.ws)
+    P = cp.ws.derived.P
+    outlet || return cp, P
+    return setup(problem(DirichletPressureBC(first(P))); energy_state = energy), P
+end
+
+@testset "gas transport: at zero Darcy velocity every seed takes the v ≥ 0 side ($energy form, $n cells, outlet $outlet)" for energy in
+                                                                                                                              (
+        :temperature,
+        :enthalpy,
+    ),
+    n in (4, 8),
+    outlet in (false, true)
+
+    cp, P = _pressure_tie(n; outlet, energy)
+    @test maximum(P) == minimum(P)
+    def, ws, cj = cp.def, cp.ws, cp.jacobian
+    @test def.setup.gas isa DarcyFickTransport
+    Jd = dense_jacobian(def, ws, cp.u0, 0.0)
+    J = jac_prototype(cj)
+    jacobian!(J, cj, cp.u0, 0.0)
+    @test compare_entries(Matrix(J), Jd; rtol = 1e-12).passed
+end
+
+@testset "gas transport: the upwind side at v = 0 does not depend on the seed's sign" begin
+    for s in (1.0, -1.0)
+        F = Pyrolysis.Kernels._advective_flux(ForwardDiff.Dual(0.0, s), 0.5, 0.25, 0.75)
+        @test ForwardDiff.value(F) == 0
+        @test ForwardDiff.partials(F)[1] == s * 0.25 / 0.5
+    end
+end
