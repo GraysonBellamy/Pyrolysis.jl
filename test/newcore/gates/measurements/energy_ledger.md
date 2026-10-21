@@ -1,6 +1,6 @@
 # The energy balance against the ledger
 
-Produced by `test/newcore/gates/energy_ledger.jl` at commit 7ceaf74. Julia 1.13.0, 1 thread, 22 logical CPUs; load average [18.2, 17.1, 17.8] at the start and [17.3, 17.4, 17.6] at the end. Phase 1's gate item 7 on V-CPL-06's char-layer column, and Phase 2's item 3 on V-BO-04's burning column before and across its event.
+Produced by `test/newcore/gates/energy_ledger.jl` at commit 5f08134. Julia 1.13.0, 1 thread, 22 logical CPUs; load average [24.1, 20.6, 18.4] at the start and [32.8, 27.3, 22.5] at the end. Phase 1's gate item 7 on V-CPL-06's char-layer column, and Phase 2's item 3 on V-BO-04's burning column before and across its event.
 
 ## Closure at the case's tolerance
 
@@ -55,7 +55,7 @@ The case's run, 40 cells on a moving mesh with deactivation, abstol 1.0e-9, relt
 
 | form | location | retcode | outcome | invocations | events | event [s] | energy closure | mass closure | lost energy | regularization | created volume | steps |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| temperature | off | Success | running | 1 | 39 | 473.0847 | 0.00661 | 0.00661 | 1.22e-18 | 1.22e-18 | 0.0 | 325 |
-| temperature | on | Success | running | 1 | 39 | 465.4896 | 1.58e-5 | 1.58e-5 | 1.22e-18 | 1.22e-18 | 0.0 | 325 |
-| enthalpy | off | Success | running | 1 | 39 | 471.6878 | 0.00555 | 0.00555 | 2.43e-18 | 2.43e-18 | 2.71e-20 | 328 |
-| enthalpy | on | Success | running | 1 | 39 | 465.4896 | 1.46e-5 | 1.46e-5 | 3.65e-18 | 3.65e-18 | 5.42e-20 | 328 |
+| temperature | off | Success | running | 1 | 39 | 471.2377 | 0.0117 | 0.0117 | 1.22e-18 | 1.22e-18 | 5.42e-20 | 321 |
+| temperature | on | Success | running | 1 | 39 | 460.517 | 1.85e-5 | 1.85e-5 | 0.0 | 0.0 | 0.0 | 323 |
+| enthalpy | off | Success | running | 1 | 39 | 470.5966 | 0.0111 | 0.0111 | 0.0 | 0.0 | 0.0 | 321 |
+| enthalpy | on | Success | running | 1 | 39 | 460.517 | 1.78e-5 | 1.78e-5 | 1.22e-18 | 1.22e-18 | 0.0 | 323 |
