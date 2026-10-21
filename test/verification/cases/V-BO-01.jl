@@ -20,8 +20,9 @@
 # beneath; the surface QoI there counts accepted states whose surface balance
 # did not converge or sits on the trial clamp, since that Newton never warns.
 
-# The deck, the warning counters and the step recorder below are shared by
-# V-BO-02, V-BO-03 and V-BO-05 (their files load after this one).
+# The deck, the warning counters, the step recorder and the QoIs below are
+# shared by V-BO-02, V-BO-03 and V-BO-05 to V-BO-08 (their files load after
+# this one).
 
 using Logging
 using OrdinaryDiffEq: CallbackSet, DiscreteCallback, SciMLBase
@@ -35,70 +36,61 @@ const VBO_RHO_KW = 256.0
 const VBO_MASS_LOSS_EXACT =
     100 * VBO_RHO_PMMA * VBO_L_PMMA / (VBO_RHO_PMMA * VBO_L_PMMA + VBO_RHO_KW * VBO_L_KW)
 
-function _vbo_material(;
-    substrate_alpha = 8.0e6 / VBO_RHO_KW,
-    pmma_alpha = 2870.0 / VBO_RHO_PMMA,
-    A = 1.35e11,
-)
+# The PMMA of the deck (the Gpyro V2 fits) under `name` and density `ρ`, the
+# Kaowool substrate and the MMA gas.
+function _vbo_pmma(; name = :PMMA, ρ = VBO_RHO_PMMA, pmma_alpha = 2870.0 / VBO_RHO_PMMA)
     k_pmma = CallableProperty(T -> T <= 394.0 ? 0.16 : 0.2156 * (T / 300.0)^-0.745)
     c_pmma = CallableProperty(
         T ->
             T <= 394.0 ? 1127.0793 * (T / 300.0)^1.9283 : 1768.9067 * (T / 300.0)^0.5552,
     )
-    pmma = SolidComponent(
-        :PMMA,
-        ρ = VBO_RHO_PMMA,
+    return SolidComponent(
+        name,
+        ρ = ρ,
         c = c_pmma,
         k = k_pmma,
         ε = 0.96,
         α = pmma_alpha,
         λ = 2e-5,
     )
-    kw = SolidComponent(
-        :KAOWOOL,
-        ρ = VBO_RHO_KW,
-        c = 1100.0,
-        k = 0.058,
-        ε = 1.0,
-        λ = 2e-5,
-        α = substrate_alpha,
-    )
-    gas = GaseousComponent(:MMA, M = 0.044, c = 0.0, k = 0.02, λ = 2e-2)
+end
+_vbo_kaowool(substrate_alpha) = SolidComponent(
+    :KAOWOOL,
+    ρ = VBO_RHO_KW,
+    c = 1100.0,
+    k = 0.058,
+    ε = 1.0,
+    λ = 2e-5,
+    α = substrate_alpha,
+)
+_vbo_gas() = GaseousComponent(:MMA, M = 0.044, c = 0.0, k = 0.02, λ = 2e-2)
+
+function _vbo_material(;
+    substrate_alpha = 8.0e6 / VBO_RHO_KW,
+    pmma_alpha = 2870.0 / VBO_RHO_PMMA,
+    A = 1.35e11,
+)
     rx = Reaction(:pmma_gasification, 1 => 3; A, E = 164e3, h = 8.7e5, n = 1.0)
     return Material(
         name = :PMMA_MaCFP,
-        components = (pmma, kw, gas),
+        components = (_vbo_pmma(; pmma_alpha), _vbo_kaowool(substrate_alpha), _vbo_gas()),
         reactions = (rx,),
         mixing = MaterialMixing(k = PARALLEL, λ = PARALLEL),
     )
 end
 
-# `n_pmma` cells across the PMMA layer; the Kaowool takes the same pitch.
-# Surface-absorption runs pass zero absorption coefficients (unused there);
-# the gradient gate perturbs the absorption coefficient, the incident flux
-# and the pre-exponential factor `A`.
-function _vbo_problem(
-    n_pmma::Int;
-    substrate_alpha = 8.0e6 / VBO_RHO_KW,
-    pmma_alpha = 2870.0 / VBO_RHO_PMMA,
-    flux = 50e3,
-    A = 1.35e11,
-    t_end = 500.0,
-)
-    mat = _vbo_material(; substrate_alpha, pmma_alpha, A)
-    dz = VBO_L_PMMA / n_pmma
-    n_kw = round(Int, VBO_L_KW / dz)
-    n = n_pmma + n_kw
-    mesh = create_uniform_mesh(
-        n * dz,
-        n,
-        Val(3);
-        T_initial = VBO_T0,
-        ξ_initial = (VBO_RHO_PMMA, 0.0, 0.0),
-    )
-    z_if = n_kw * dz
-    ξ0 =
-        [z -> (z > z_if ? VBO_RHO_PMMA : 0.0), z -> (z > z_if ? 0.0 : VBO_RHO_KW), z -> 0.0]
+# The node positions of `n_pmma` PMMA cells across `l_pmma` on the Kaowool,
+# each PMMA cell `1/r` of the one beneath it, the Kaowool at the pitch of the
+# PMMA cell beside it, with the Kaowool's cell count.
+function _vbo_nodes(n_pmma, l_pmma, r)
+    h = l_pmma * (1 - 1 / r) / (1 - r^(-n_pmma))
+    n_kw = round(Int, VBO_L_KW / h)
+    pmma = cumsum([h * r^(1 - k) for k = 1:n_pmma])
+    return [[k * h for k = 0:n_kw]; n_kw * h .+ pmma], n_kw
+end
+
+# The deck's conditions on `mesh` with `material` and initial concentrations `ξ0`.
+function _vbo_deck(mesh, material, ξ0; flux = 50e3, t_end = 500.0)
     top =
         RadiativeFluxBC(; flux, absorptivity = 0.96) +
         RadiativeBC(ε = 0.96, T_inf = VBO_T_INF) +
@@ -110,7 +102,7 @@ function _vbo_problem(
     )
     return PyrolysisProblem(
         mesh = mesh,
-        material = mat,
+        material = material,
         bc_set = bcs,
         T_initial = z -> VBO_T0,
         ξ_initial = ξ0,
@@ -118,6 +110,49 @@ function _vbo_problem(
         dt_initial = 1e-3,
         output_times = collect(0.0:0.5:t_end),
     )
+end
+
+# `n_pmma` cells across the PMMA layer of thickness `l_pmma`, uniform or graded
+# toward the surface by `grading` (`_vbo_nodes`); the Kaowool takes the pitch
+# of the PMMA beside it. Surface-absorption runs pass zero absorption
+# coefficients (unused there); the gradient gate perturbs the absorption
+# coefficient, the incident flux and the pre-exponential factor `A`.
+function _vbo_problem(
+    n_pmma::Int;
+    substrate_alpha = 8.0e6 / VBO_RHO_KW,
+    pmma_alpha = 2870.0 / VBO_RHO_PMMA,
+    flux = 50e3,
+    A = 1.35e11,
+    t_end = 500.0,
+    l_pmma = VBO_L_PMMA,
+    grading = 1.0,
+)
+    mat = _vbo_material(; substrate_alpha, pmma_alpha, A)
+    if grading == 1
+        dz = l_pmma / n_pmma
+        n_kw = round(Int, VBO_L_KW / dz)
+        n = n_pmma + n_kw
+        mesh = create_uniform_mesh(
+            n * dz,
+            n,
+            Val(3);
+            T_initial = VBO_T0,
+            ξ_initial = (VBO_RHO_PMMA, 0.0, 0.0),
+        )
+        z_if = n_kw * dz
+    else
+        nodes, n_kw = _vbo_nodes(n_pmma, l_pmma, grading)
+        mesh = create_mesh_from_nodes(
+            nodes,
+            Val(3);
+            T_initial = VBO_T0,
+            ξ_initial = (VBO_RHO_PMMA, 0.0, 0.0),
+        )
+        z_if = nodes[n_kw+1]
+    end
+    ξ0 =
+        [z -> (z > z_if ? VBO_RHO_PMMA : 0.0), z -> (z > z_if ? 0.0 : VBO_RHO_KW), z -> 0.0]
+    return _vbo_deck(mesh, mat, ξ0; flux, t_end)
 end
 
 # Counts warnings whose message matches `pattern` while forwarding everything
@@ -277,14 +312,16 @@ end
 # The peak and its time are the main peak's: over the saved times before the
 # solve's last deactivation event, whose merge (or park) releases the layer's
 # residue in a burst the gate judges by refinement instead.
-function _vbo_measures(sol)
+# `l_kw` is the substrate's thickness, the live thickness once the layer has
+# burned out.
+function _vbo_measures(sol; l_kw = VBO_L_KW)
     mlr = sol.extras.gas_generation_rate .* 1000           # g m⁻² s⁻¹
     parks = sol.extras.park_times
     before =
         isempty(parks) ? length(sol.t) : something(findlast(<(maximum(parks)), sol.t), 1)
     ipk = argmax(view(mlr, 1:before))
     th = sol.extras.thickness_history
-    i_bo = findfirst(<(VBO_L_KW + 0.02e-3), th)
+    i_bo = findfirst(<(l_kw + 0.02e-3), th)
     t_bo = i_bo === nothing ? NaN : sol.t[i_bo]
     m = sol.extras.total_mass
     mass_loss = 100 * (1 - m[end] / m[1])
@@ -300,8 +337,14 @@ function _vbo_measures(sol)
         mass_loss,
         ledger,
         L_end = th[end],
+        l_kw,
     )
 end
+
+# The mass loss of a deck whose layer of thickness `l_pmma` gasifies
+# completely off the substrate of thickness `l_kw` [percent].
+_vbo_mass_loss_exact(l_pmma, l_kw) =
+    100 * VBO_RHO_PMMA * l_pmma / (VBO_RHO_PMMA * l_pmma + VBO_RHO_KW * l_kw)
 
 # Maximum live-cell temperature at each output time (ghost slots read NaN).
 _vbo_max_live_T(sol) =
@@ -321,10 +364,12 @@ const VBO_PEAK_REF = 32.39      # g m⁻² s⁻¹
 const VBO_T_PEAK_REF = 335.0    # s
 const VBO_T_BO_REF = 363.5      # s (live thickness < 12.02 mm)
 
+# The QoIs of every burnout case; `peak_tol = nothing` leaves the peak out.
 function _vbo_common_qois(
     m;
     id,
-    peak_tol,
+    peak_tol = nothing,
+    mass_loss_exact = VBO_MASS_LOSS_EXACT,
     peak_ref = VBO_PEAK_REF,
     surface_warnings = true,
     peak_comment = "g m⁻² s⁻¹, gas generation rate",
@@ -337,10 +382,10 @@ function _vbo_common_qois(
         QoIResult(
             name = "complete burnout: live thickness at t_end is the substrate",
             value = m.L_end,
-            exact = VBO_L_KW,
-            error = abs(m.L_end - VBO_L_KW),
+            exact = m.l_kw,
+            error = abs(m.L_end - m.l_kw),
             tol = 1e-5,
-            comment = "every PMMA cell parked; 12.00 ± 0.01 mm",
+            comment = "every PMMA cell parked; $(round(1e3 * m.l_kw; digits = 2)) ± 0.01 mm",
         ),
     )
     push!(
@@ -348,13 +393,13 @@ function _vbo_common_qois(
         QoIResult(
             name = "mass loss of the gasified PMMA layer",
             value = m.mass_loss,
-            exact = VBO_MASS_LOSS_EXACT,
-            error = abs(m.mass_loss - VBO_MASS_LOSS_EXACT),
+            exact = mass_loss_exact,
+            error = abs(m.mass_loss - mass_loss_exact),
             tol = 0.3,
-            comment = "percent of the initial mass; exact = ρ_PMMA L_PMMA / m₀",
+            comment = "percent of the initial mass; exact = the layer's initial mass / m₀",
         ),
     )
-    push!(
+    peak_tol === nothing || push!(
         out,
         QoIResult(
             name = "peak MLR",
@@ -426,50 +471,85 @@ function _vbo_invocations(sol, ε_m)
     ]
 end
 
+# The time of the peak and the burnout time against V-BO-01's references.
+_vbo_timing_qois(m) = [
+    QoIResult(
+        name = "time of peak MLR",
+        value = m.t_peak,
+        exact = VBO_T_PEAK_REF,
+        error = abs(m.t_peak - VBO_T_PEAK_REF) / VBO_T_PEAK_REF,
+        tol = 0.03,
+        comment = "s",
+    ),
+    QoIResult(
+        name = "burnout time (live thickness < $(round(1e3 * m.l_kw + 0.02; digits = 2)) mm)",
+        value = m.t_bo,
+        exact = VBO_T_BO_REF,
+        error = abs(m.t_bo - VBO_T_BO_REF) / VBO_T_BO_REF,
+        tol = 0.01,
+        comment = "s",
+    ),
+]
+
+# On the finite-volume core the correction carries the layer to one
+# deactivation, and the band merges no cell that still holds more than 5 ε_m
+# of its mass.
+function _vbo_invocation_qoi(sol, id)
+    ε_m = VBO_STEP_STATS[id].threshold
+    inv = _vbo_invocations(sol, ε_m)
+    largest = maximum(v.largest for v in inv; init = 0.0)
+    return QoIResult(
+        name = "one invocation for the PMMA layer",
+        value = Float64(length(inv)),
+        exact = 1.0,
+        error = abs(length(inv) - 1.0) + (largest <= 5ε_m ? 0.0 : 1.0),
+        tol = 0.5,
+        comment = "$(sum(v.cells for v in inv; init = 0)) cells; largest merged fraction $(round(largest; sigdigits = 3)) against 5 ε_m = $(5ε_m)",
+    )
+end
+
+# The report figures of a burnout case: its gas generation rate and live
+# thickness through the run.
+_vbo_history_curves(id, sol) = [
+    _vbo_history_curve(
+        id,
+        :mlr_history,
+        "PMMA gasification rate through burnout",
+        "MLR (g m⁻² s⁻¹)",
+        "gas generation rate",
+        sol.t,
+        sol.extras.gas_generation_rate .* 1000,
+    ),
+    _vbo_history_curve(
+        id,
+        :thickness_history,
+        "live thickness",
+        "thickness (m)",
+        "live thickness",
+        sol.t,
+        sol.extras.thickness_history,
+    ),
+]
+
+# V-BO-01's solve keywords, shared by the burnout cases that vary its deck.
+const VBO_SOLVE_KWARGS = (
+    use_ale = true,
+    handle_depletion = true,
+    depletion_threshold = 0.05,
+    min_cells = 2,
+    min_thickness = 1e-3,
+    radiation_model = BEER_LAMBERT,
+    abstol = 1e-8,
+    reltol = 1e-6,
+)
+
 function _verification_case_vbo01()
     id = "V-BO-01"
     function qois(sol)
         m = _vbo_measures(sol)
         out = _vbo_common_qois(m; id, peak_tol = 0.03)
-        push!(
-            out,
-            QoIResult(
-                name = "time of peak MLR",
-                value = m.t_peak,
-                exact = VBO_T_PEAK_REF,
-                error = abs(m.t_peak - VBO_T_PEAK_REF) / VBO_T_PEAK_REF,
-                tol = 0.03,
-                comment = "s",
-            ),
-        )
-        push!(
-            out,
-            QoIResult(
-                name = "burnout time (live thickness < 12.02 mm)",
-                value = m.t_bo,
-                exact = VBO_T_BO_REF,
-                error = abs(m.t_bo - VBO_T_BO_REF) / VBO_T_BO_REF,
-                tol = 0.01,
-                comment = "s",
-            ),
-        )
-        VERIFICATION_CORE == "new" || return out
-        # The correction carries the layer to one deactivation, and the band
-        # merges no cell that still holds more than 5 ε_m of its mass.
-        ε_m = VBO_STEP_STATS[id].threshold
-        inv = _vbo_invocations(sol, ε_m)
-        largest = maximum(v.largest for v in inv; init = 0.0)
-        push!(
-            out,
-            QoIResult(
-                name = "one invocation for the PMMA layer",
-                value = Float64(length(inv)),
-                exact = 1.0,
-                error = abs(length(inv) - 1.0) + (largest <= 5ε_m ? 0.0 : 1.0),
-                tol = 0.5,
-                comment = "$(sum(v.cells for v in inv; init = 0)) cells; largest merged fraction $(round(largest; sigdigits = 3)) against 5 ε_m = $(5ε_m)",
-            ),
-        )
+        append!(out, _vbo_timing_qois(m))
+        VERIFICATION_CORE == "new" && push!(out, _vbo_invocation_qoi(sol, id))
         return out
     end
 
@@ -483,16 +563,7 @@ function _verification_case_vbo01()
         ],
         build = n -> _vbo_problem(n),
         solve_fn = _vbo_solve_fn(id),
-        solve_kwargs = (
-            use_ale = true,
-            handle_depletion = true,
-            depletion_threshold = 0.05,
-            min_cells = 2,
-            min_thickness = 1e-3,
-            radiation_model = BEER_LAMBERT,
-            abstol = 1e-8,
-            reltol = 1e-6,
-        ),
+        solve_kwargs = VBO_SOLVE_KWARGS,
         qois = qois,
         ci = CIConfig(n_cells = 60, budget_s = 20.0),
         report = (
