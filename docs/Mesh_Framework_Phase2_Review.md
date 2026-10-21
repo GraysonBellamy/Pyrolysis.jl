@@ -138,7 +138,7 @@ The gate document (G-1's mapping, G-2, G-4, S-1, S-2, item 4's section, the re-m
 
 ## 6. What was not implemented, and why
 
-- **The owner's decisions** (followup plan §7.1): nothing in the followup presumed an answer. Answered after it (§8): C91, C93, C94, C96, V-BO-06 at 3e-2, C92, the design errata (R-3) and the prototype directory (R-1). Still open: item 8 under §7.4, V-BO-01 at `τ = 3600` s, C73 and C74 (K-2), the ledger QoI (X-2), the per-layer `τ` and MF.
+- **The owner's decisions** (followup plan §7.1): nothing in the followup presumed an answer. Answered after it (§8): C91, C93, C94, C96, V-BO-06 at 3e-2, C92, the design errata (R-3) and the prototype directory (R-1). Still open: item 8 under §7.4, V-BO-01 at `τ = 3600` s, C73 and C74 (K-2), the ledger QoI (X-2), the per-layer `τ` and MF. Answered at the gate and implemented after it (§8, plan D102 to D104, C98): C73, C74, X-2, the `τ = 3600` s row and the per-layer `τ`; item 8 and MF remain.
 - **S-2's probe at the located state:** not taken (followup plan §2.4): it needs an observer hook in `integrate` and a ladder re-run, to tighten a reading that is already conservative.
 - **I-1's refusal and I-3's summed tolerance:** the alternatives of followup plan §1.2 and §1.3, not taken for the reasons given there (D91, D92).
 - **The class B identity reference for D90:** not re-recorded, since D90 leaves V-CPL-02/02b bit-identical (C97); the re-record adds V-BO-04 alone.
@@ -185,5 +185,10 @@ The phase's decisions (followup plan §7.1), answered once the followup was done
 | The design errata (R-3) | at the design's next revision | plan §12.4 |
 | The prototype directory (R-1) | deleted | `6173e40`, plan §9.2 |
 | Item 8 under §7.4 | open: the machine stays committed to other runs for a day or two, so the quiet-machine table follows before the merge | gate §8 |
-| V-BO-01 at `τ = 3600` s (item 1) | open; recommended: an owner exception, the layer under-relaxed at five times the default `τ` | gate's decisions |
-| C73 and C74, the ledger QoI (X-2), the per-layer `τ`, MF | open | plan §12.4 |
+| V-BO-01 at `τ = 3600` s (item 1) | an owner exception of item 1, the layer under-relaxed; two invocations already at twice the default `τ` | gate §1, plan C98 |
+| C73: the relative fluxes' slope beside a boundary cell | limited against a zero gradient | `26f9ed0`, plan D103 |
+| C74: the upwind side at an exact tie | from the value alone | `011a267`, plan D102 |
+| X-2: the mass-ledger QoI | integrated over the accepted steps on the finite-volume core; tolerances 3e-5 and, on V-BO-02, 3e-4 | `4e5d412`, plan D104 |
+| The per-layer `τ` (R27) | cutover design work, scheduled with MF | plan C98, §12.4 |
+| The gate tables after these changes | re-measured once, after the fixes of an independent review of `0bf5e62` land (identity and MMS orders re-measured now) | plan §12.4 |
+| MF | open: no OrdinaryDiffEqBDF release after 2.4.13 | gate's integrator |
