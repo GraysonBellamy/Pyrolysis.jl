@@ -140,13 +140,19 @@ end
 """
 	CORRECTION_BAND
 
-The default near-threshold band `ε_band` of a solve with an
-[`EquidistributionCorrection`](@ref): cells next to the exposed side whose
-condensed mass is below this fraction of their reference go with a cell that
-crosses the threshold, so a layer that the correction carries to burnout
-together leaves in one invocation.
+The default near-threshold band `ε_band` of a solve whose bound
+[`EquidistributionCorrection`](@ref) moves some layer: cells next to the
+exposed side whose condensed mass is below this fraction of their reference
+go with a cell that crosses the threshold, so a layer that the correction
+carries to burnout together leaves in one invocation.
 """
 const CORRECTION_BAND = 0.1
+
+# Whether the bound correction of `closure` moves some layer.
+_moves(closure) =
+    closure !== nothing &&
+    closure.correction isa LayerCorrection &&
+    any(!iszero, closure.correction.gain)
 
 # Whether a gas-transfer coefficient is zero across the property bracket.
 _vanishes(λ) = all(T -> λ(T) == 0, (T_PROPERTY_MIN, 300.0, 1000.0, T_PROPERTY_MAX))
@@ -342,8 +348,9 @@ falls below the fraction `threshold` (`ε_m`) of its initial condensed mass
 exposed `:top` side, on a moving mesh together with the run of cells outward
 of it whose condensed mass is below the fraction `band` (`ε_band`, in
 `[threshold, 1)`; by default the larger of the threshold and
-[`CORRECTION_BAND`](@ref) under an equidistribution correction, otherwise
-the threshold, so that only the cells below it go) of theirs
+[`CORRECTION_BAND`](@ref) when the bound equidistribution correction moves
+some layer, otherwise the threshold, so that only the cells below it go) of
+theirs
 ([`deactivate!`](@ref)).
 `threshold` also scales the mass tolerances; `sources` is the external-source
 hook.
@@ -392,12 +399,6 @@ function setup(
         coordinates,
         deactivation,
     )
-    band = something(
-        band,
-        correction isa EquidistributionCorrection ? max(threshold, CORRECTION_BAND) :
-        threshold,
-    )
-
     x = [node.z for node in old.nodes]
     mesh =
         coordinates isa Planar ?
@@ -483,6 +484,7 @@ function setup(
                 history_scale = Float64(reltol * threshold),
             ),
         )
+    band = something(band, _moves(closure) ? max(threshold, CORRECTION_BAND) : threshold)
     cells =
         deactivation ?
         CellDeactivation(

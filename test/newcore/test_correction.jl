@@ -284,14 +284,21 @@ end
     @test_throws ArgumentError EquidistributionCorrection(monitor = (0.0, 1.0))
     @test_throws ArgumentError EquidistributionCorrection(monitor = (1.0, -1.0))
 
-    # The band defaults to CORRECTION_BAND under the correction, to the
-    # threshold without.
+    # The band defaults to CORRECTION_BAND when the bound correction moves some
+    # layer, to the threshold otherwise.
     kw = (use_ale = true, deactivation = true, lagrangian = [4])
     @test setup(p; kw..., correction = EquidistributionCorrection()).deactivation.band ==
           CORRECTION_BAND
     @test setup(p; kw..., correction = NoCorrection()).deactivation.band == 1e-2
     @test setup(p; kw..., threshold = 0.2, correction = EquidistributionCorrection()).deactivation.band ==
           0.2
+    # An inert deck has no layer that can vanish: the correction moves nothing
+    # unless it moves every layer.
+    kw = (use_ale = true, deactivation = true)
+    @test setup(_inert(6); kw..., correction = EquidistributionCorrection()).deactivation.band ==
+          1e-2
+    @test setup(_inert(6); kw..., correction = EquidistributionCorrection(layers = :all)).deactivation.band ==
+          CORRECTION_BAND
 end
 
 # ============================================================================
