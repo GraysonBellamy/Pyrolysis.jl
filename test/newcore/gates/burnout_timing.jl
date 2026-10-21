@@ -1,6 +1,6 @@
-# Gate item 8 of the Phase 2 plan (§7.3), as M4 measures it: the wall time
-# of the burnout path against the old core's at matched accuracy, and the cost
-# of a correction present but inactive.
+# Gate item 8 of the Phase 2 plan (§7.3): the wall time of the burnout path
+# against the old core's at matched accuracy, and the cost of the correction
+# where the installation rule installs it.
 #
 # The burnout decks, both cores in this process: V-BO-01, V-BO-03 and V-BO-04
 # at 30, 60 and 120 cells (PMMA cells on the first two). The finite-volume
@@ -42,15 +42,17 @@
 # 200 s: one right-hand side and one Jacobian, with the state count and the
 # Jacobian's stored entries.
 #
-# The inactive correction: the moving-mesh audit decks of Phase 1's gate item 2
-# (`ale` with the solid's gas-transfer coefficient at 1e-6 m²/s and
-# `ale_darcy`, at 25 and 100 cells) and V-CPL-02 and V-CPL-03 at their CI
-# resolutions, on the finite-volume core without a correction and with an
-# equidistribution correction at its defaults installed, at the case's
-# tolerances (the audit decks at the old default, reltol 1e-6), beside the old
-# core at the same tolerances: warm medians of three, the steps, and the
-# largest correction velocity over the saved times (zero when the correction
-# never activated).
+# The installed correction: the decks on which the installation rule installs
+# it, the moving-mesh audit decks of Phase 1's gate item 2 with deactivation on
+# (`ale` with the solid's gas-transfer coefficient at 1e-6 m²/s to 400 s and
+# `ale_darcy` to 300 s, at 25 and 100 cells, reltol 1e-6, the old core's
+# depletion keywords at their defaults) and V-CPL-02 and V-CPL-02b at their CI
+# resolutions and tolerances. The finite-volume core with the rule's
+# correction against the same deck with `NoCorrection()`, beside the old core:
+# warm medians of three, the steps, the outcome and end time (without the
+# correction a layer can end `:interior`), and the largest correction velocity
+# over the saved times. A deck on which the rule installs nothing is
+# bit-identical (item 5) and costs nothing.
 #
 # Run from the repository root when the machine is least loaded:
 #   julia --project=test --startup-file=no --threads=1 test/newcore/gates/burnout_timing.jl
@@ -96,7 +98,7 @@ _tol(reltol) = (reltol = reltol, abstol = reltol / 100)
 
 const CASES = Dict(
     c.id => c for c in Base.invokelatest(load_verification_cases) if
-    c.id in ("V-BO-01", "V-BO-03", "V-BO-04", "V-CPL-02", "V-CPL-03")
+    c.id in ("V-BO-01", "V-BO-03", "V-BO-04", "V-CPL-02", "V-CPL-02b")
 )
 
 # ----------------------------------------------------------------------------
@@ -450,29 +452,31 @@ function deck_rows(deck, n)
     )
 end
 
-# The inactive correction on the decks without burnout.
-function inactive_rows()
+# The correction where the installation rule installs it.
+function installed_rows()
     decks = Any[]
-    for (kind, n, λ) in (
-        (:ale, 25, 1e-6),
-        (:ale, 100, 1e-6),
-        (:ale_darcy, 25, nothing),
-        (:ale_darcy, 100, nothing),
+    for (kind, n, λ, t_end) in (
+        (:ale, 25, 1e-6, 400.0),
+        (:ale, 100, 1e-6, 400.0),
+        (:ale_darcy, 25, nothing, 300.0),
+        (:ale_darcy, 100, nothing, 300.0),
     )
-        problem, kw = problem_for(kind, n; solid_λ = λ)
+        problem, kw =
+            problem_for(kind, n; solid_λ = λ, t_end, outputs = round(Int, t_end) + 1)
+        common = (; use_ale = kw.use_ale, radiation_model = kw.radiation_model)
         push!(
             decks,
             (;
                 name = "$(kind) $(n)",
                 problem,
-                old = (; use_ale = kw.use_ale, radiation_model = kw.radiation_model),
-                new = (; use_ale = kw.use_ale, radiation_model = kw.radiation_model),
+                old = (; common..., handle_depletion = true),
+                new = (; common..., deactivation = true),
                 tol = _tol(1e-6),
                 min_thickness = 1e-6,
             ),
         )
     end
-    for id in ("V-CPL-02", "V-CPL-03")
+    for id in ("V-CPL-02", "V-CPL-02b")
         case = CASES[id]
         kw = case.solve_kwargs
         old = (; (k => v for (k, v) in pairs(kw) if !(k in (:abstol, :reltol)))...)
@@ -495,21 +499,26 @@ function inactive_rows()
             solve(d.problem; progress = false, d.old..., d.tol...)
         end)
         results = Any[]
-        for correction in (Cl.NoCorrection(), Cl.EquidistributionCorrection())
+        for correction in (nothing, Cl.NoCorrection())
             cp = Ig.setup(d.problem; d.new..., correction, d.tol...)
+            installed = cp.def.closure.correction isa Cl.LayerCorrection
             sol, wall = timed(() -> Ig.integrate(cp; min_thickness = d.min_thickness))
             c = filter(isfinite, sol.correction_velocity)
             push!(
                 results,
                 (;
-                    sol,
+                    installed,
                     wall,
                     largest = isempty(c) ? 0.0 : maximum(abs, c),
                     steps = sol.statistics.accepted,
+                    outcome = sol.outcome,
+                    t_last = sol.t[end],
+                    invocations = sol.statistics.invocations,
                 ),
             )
         end
-        plain, corrected = results
+        rule, plain = results
+        rule.installed || error("the rule installs no correction on $(d.name)")
         push!(
             rows,
             (;
@@ -517,19 +526,12 @@ function inactive_rows()
                 reltol = d.tol.reltol,
                 old_wall,
                 old_steps = _counts(old_sol).steps,
-                plain_wall = plain.wall,
-                plain_steps = plain.steps,
-                corrected_wall = corrected.wall,
-                corrected_steps = corrected.steps,
-                largest = corrected.largest,
-                difference = maximum(
-                    abs,
-                    filter(isfinite, corrected.sol.T .- plain.sol.T);
-                    init = 0.0,
-                ),
+                old_t_last = old_sol.t[end],
+                rule,
+                plain,
             ),
         )
-        println("    inactive $(d.name): $(rows[end])")
+        println("    installed $(d.name): $(rows[end])")
         flush(stdout)
     end
     return rows
@@ -538,7 +540,7 @@ end
 load_start = Sys.loadavg()
 started = time()
 results = [deck_rows(deck, n) for deck in ("V-BO-01", "V-BO-03", "V-BO-04") for n in CELLS]
-inactive = inactive_rows()
+installed = installed_rows()
 load_end = Sys.loadavg()
 
 open(joinpath(OUT, "burnout_timing.csv"), "w") do io
@@ -555,7 +557,7 @@ end
 _g(x; d = 3) =
     x isa AbstractFloat ? (isnan(x) ? "" : string(round(x; sigdigits = d))) : string(x)
 open(joinpath(OUT, "burnout_timing.md"), "w") do io
-    println(io, "# Gate item 8 at M4: the burnout path against the old core\n")
+    println(io, "# Gate item 8: the burnout path against the old core\n")
     println(
         io,
         "Produced by `test/newcore/gates/burnout_timing.jl` at $(COMMIT_STAMP). Julia $(VERSION), ",
@@ -635,26 +637,28 @@ open(joinpath(OUT, "burnout_timing.md"), "w") do io
             )
         end
     end
-    println(io, "\n## The inactive correction\n")
+    println(io, "\n## The installed correction\n")
     println(
         io,
-        "The finite-volume core without a correction and with an equidistribution correction at ",
-        "its defaults installed, at the same tolerance; the old core beside. Largest |c|: the ",
-        "largest correction velocity over the saved times [m/s] (zero: never active); ",
-        "difference: the largest temperature difference between the two new-core solves [K].\n",
+        "The decks on which the installation rule installs the correction: the finite-volume core ",
+        "with it (the rule) and with `NoCorrection()`, at the same tolerance, the old core beside. ",
+        "Each solve's warm time [s], accepted steps, and outcome and end time [s]; largest |c|: the ",
+        "largest correction velocity over the saved times [m/s]; ratio: the rule's time over the ",
+        "old core's (the item's measure) and over the solve without the correction.\n",
     )
     println(
         io,
-        "| deck | reltol | old [s] (steps) | new [s] (steps) | with the correction [s] (steps) | correction / none | with the correction / old | largest |c| | difference |",
+        "| deck | reltol | old [s] (steps; end) | rule [s] (steps; outcome, end; invocations) | none [s] (steps; outcome, end) | rule / old | rule / none | largest |c| |",
     )
-    println(io, "|" * repeat("---|", 9))
-    for r in inactive
+    println(io, "|" * repeat("---|", 8))
+    for r in installed
+        a, b = r.rule, r.plain
         println(
             io,
-            "| $(r.deck) | $(r.reltol) | $(_g(r.old_wall)) ($(r.old_steps)) | ",
-            "$(_g(r.plain_wall)) ($(r.plain_steps)) | $(_g(r.corrected_wall)) ",
-            "($(r.corrected_steps)) | $(_g(r.corrected_wall / r.plain_wall)) | ",
-            "$(_g(r.corrected_wall / r.old_wall)) | $(_g(r.largest)) | $(_g(r.difference)) |",
+            "| $(r.deck) | $(r.reltol) | $(_g(r.old_wall)) ($(r.old_steps); $(_g(r.old_t_last; d = 4))) | ",
+            "$(_g(a.wall)) ($(a.steps); $(a.outcome), $(_g(a.t_last; d = 4)); $(a.invocations)) | ",
+            "$(_g(b.wall)) ($(b.steps); $(b.outcome), $(_g(b.t_last; d = 4))) | ",
+            "$(_g(a.wall / r.old_wall)) | $(_g(a.wall / b.wall)) | $(_g(a.largest)) |",
         )
     end
 end
