@@ -352,7 +352,8 @@ end
 
 # V-BO-04 over the window before its first event, each core's closure over
 # its own enthalpy change (the old core's E = Σ ρc_p T V, the new core's the
-# sensible enthalpy of its laws).
+# sensible enthalpy of its laws). Item 3 passes per form when the new core's
+# closure is no larger than the old core's.
 vbo04_problem(n) = Base.invokelatest(_vbo04_setup, n; t_end = VBO04_WINDOW).problem
 vbo04 = []
 old = Base.invokelatest(
@@ -364,7 +365,10 @@ old = Base.invokelatest(
     c_gas = 1000.0,
     c_solid = 1000.0,
 )
-push!(vbo04, (; run = "old core", old.retcode, closure = abs(old.defect) / abs(old.ΔE)))
+push!(
+    vbo04,
+    (; run = "old core", old.retcode, closure = abs(old.defect) / abs(old.ΔE), item3 = ""),
+)
 println(vbo04[end])
 for energy_state in (:temperature, :enthalpy)
     r = new_core_closure(
@@ -374,12 +378,14 @@ for energy_state in (:temperature, :enthalpy)
         t_win = 0.0,
         tol = VBO04_TOL,
     )
+    closure = abs(r.defect) / abs(r.ΔE)
     push!(
         vbo04,
         (;
             run = "new core, $(energy_state) form",
             r.retcode,
-            closure = abs(r.defect) / abs(r.ΔE),
+            closure,
+            item3 = closure <= first(vbo04).closure ? "pass" : "fail",
         ),
     )
     println(vbo04[end], " steps=", r.steps)
@@ -491,12 +497,14 @@ open(joinpath(OUT, "energy_ledger.md"), "w") do io
         "\n## V-BO-04 before its first event\n\n$(VBO04_CELLS) cells on a moving mesh, abstol ",
         "$(VBO04_TOL.abstol), reltol $(VBO04_TOL.reltol) (the case's), 0 to $(VBO04_WINDOW) s ",
         "without deactivation; |ΔE − ∫ ledger| over |ΔE|, each core's own, trapezoidal over the ",
-        "accepted steps (the old core's budget is V-CPL-06b's).\n",
+        "accepted steps (the old core's budget is V-CPL-06b's). Item 3: the new core's closure no ",
+        "larger than the old core's, per form. Across the event the old core has no located event, ",
+        "so the table of that section is reported without a verdict.\n",
     )
-    println(io, "| run | retcode | closure |")
-    println(io, "|---|---|---|")
+    println(io, "| run | retcode | closure | item 3 |")
+    println(io, "|---|---|---|---|")
     for r in vbo04
-        println(io, "| $(r.run) | $(r.retcode) | $(_g(r.closure)) |")
+        println(io, "| $(r.run) | $(r.retcode) | $(_g(r.closure)) | $(r.item3) |")
     end
     println(
         io,
