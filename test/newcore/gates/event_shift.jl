@@ -6,13 +6,15 @@
 
 using Statistics: median
 
-# The time of each deactivation invocation [s].
+# The time of each deactivation invocation [s]; none for a solution that
+# records no events (a verification case's own solver).
 function invocation_times(sol)
     hasproperty(sol, :events) && return [
         first(e.t for e in sol.events if e.invocation == k) for
         k in unique(e.invocation for e in sol.events)
     ]
-    return unique(sol.extras.park_times)
+    hasproperty(sol, :extras) && return unique(sol.extras.park_times)
+    return Float64[]
 end
 
 # The largest shift of the invocation times [s] and the median interval
