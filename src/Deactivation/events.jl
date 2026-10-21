@@ -232,7 +232,10 @@ On a moving mesh the run of live cells from the outermost one inward whose
 condensed mass is below `ε_band` of their reference goes, when it holds a
 cell below `ε_m`, in one merge into the live cell beneath it
 ([`ConservativeTransfer`](@ref)); a run that reaches the innermost cell
-leaves that cell, holding the run's inventories, as the survivor. On a fixed
+leaves that cell, holding the run's inventories, as the survivor. After a
+merge the receiver, holding the run's inventories against its own reference,
+is tested in turn, and when it starts a run below the band with a cell below
+`ε_m` that run merges on in the same invocation. On a fixed
 mesh the outermost live cell goes while it is below `ε_m`, each merge
 re-testing the receiver with the dead cell's condensed inventories added.
 The last live cell, once below `ε_m`, goes with no receiver, its inventories
@@ -240,8 +243,8 @@ written to the event as lost. The events of one call share their invocation.
 A positive `slack` widens both tests to `1 + slack` times `ε_m` and
 `ε_band`: an event located at a root passes the solve's relative tolerance,
 so that the crossing cell, which holds exactly its threshold there, goes, and
-with it every cell within the tolerance of its threshold, whose crossing the
-solve does not resolve from the located one.
+with it the cells of its run within the tolerance of their thresholds, whose
+crossing the solve does not resolve from the located one.
 
 Returns `:transferred`, `:burned_out` when the last live cell went, or
 `:interior` when a cell below the threshold remains inward of a live one.

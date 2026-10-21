@@ -70,8 +70,11 @@ is accepted and ignored, the colored Jacobian being the only one.
 ([`deactivate!`](@ref)): with `located_events` an event is located inside the
 step at the first time a live cell's condensed mass reaches its threshold (the
 first root of [`threshold_margin`](@ref)) and applied at the interpolated state
-there, every cell within `reltol` of its threshold going with the crossing one
-(`deactivate!`'s `slack`); at the end of every step the cells below the
+there, the threshold and the band widened by `reltol` (`deactivate!`'s
+`slack`): the cells that go are the contiguous run from the exposed side that
+the widened tests take, which holds the crossing cell, and a cell within
+`reltol` of its threshold inward of a cell above the band stays; at the end
+of every step the cells below the
 threshold go in one event, the only events without `located_events` and with
 it the safety net for a crossing the location does not see. The
 solve ends with `:Terminated` when the last cell goes or a cell below the
@@ -407,9 +410,11 @@ end
 # receiver against its own mass tolerances, those the domain test applies to
 # the proposals after the event), and the policy's restart step. A
 # sweep that leaves a velocity row above round-off or an inadmissible result
-# ends the solve with `ReturnCode.Failure`. The margin crosses downward only,
-# and a cell under a correction can dip below its threshold and recover, so
-# location fires at the first crossing.
+# ends the solve with `ReturnCode.Failure`. The margin is tested for downward
+# crossings, and location takes a cell at its first crossing, so a cell under
+# a correction that would have recovered by the step's end goes there; only
+# the end-of-step net, which sees the step's end alone, misses a dip and
+# recovery inside one step.
 function _deactivation_callback(cp::CoreProblem, check::DomainCheck, policy, located::Bool)
     cells = cp.deactivation
     cells === nothing && return ()
