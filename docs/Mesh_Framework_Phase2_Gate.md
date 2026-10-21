@@ -16,7 +16,7 @@
 - The sparse factorization learns the union of `W`'s nonzeros (D62).
 - Item 8 matches on the window RMS (C70); the burnout path was accepted at M2 at about 1.5× (R40).
 - The peak QoI reads the main peak (C86), and the burst is judged by refinement on both cores (§14, W4).
-- V-BO-01 at `ε_m = 3e-2` (two invocations) is an owner exception of item 1 (M4 decision 1).
+- Owner exceptions of item 1, each with its mechanism named: V-BO-01 at `ε_m = 3e-2` (M4 decision 1) and V-BO-06 at 3e-2 (two invocations), V-BO-07 (C91) and V-BO-08 at 3e-2 (C94). Item 9 is read with the noise named (C93), the old core's ledger on V-BO-06 is bounded at 5e-3 (C92), and item 5(B)'s V-BO-04 clause reads zero to round-off (C96).
 - The caloric inversion keeps its warm start within a solve (C79); every integration restarts it from the set-up temperatures (D94).
 - The band defaults to `CORRECTION_BAND` where the bound correction moves some layer, to the threshold otherwise (D91).
 
@@ -24,15 +24,15 @@
 
 | item | what | result |
 |---|---|---|
-| 1 | one invocation per layer, the largest merged fraction at most 5 `ε_m` | passes on every V-BO-01, 03, 04, 06 and 08 run at `ε_m` of 3e-3 and 1e-2 and at `τ = 360` s; V-BO-01 at 3e-2 is the owner's exception; **fails** on V-BO-06 at 3e-2 (two invocations), V-BO-01 at `τ = 3600` s (two, C78), V-BO-07 (5.82 and 6.07 %, C91) and V-BO-08 at 3e-2 (`:interior`, C94): owner's decisions; the table's column reads these rows itself (D96) |
-| 2 | the cases' QoIs on every run; the burst by refinement | every run passes its case except the two-invocation rows (their invocation QoI) and V-BO-08's `:interior` rows; the burst criteria pass on every gated family in both forms; reported: V-BO-07's per-step excess stops falling at 240 cells (C91) |
+| 1 | one invocation per layer, the largest merged fraction at most 5 `ε_m` | passes on every V-BO-01, 03, 04, 06 and 08 run at `ε_m` of 3e-3 and 1e-2 and at `τ = 360` s; owner's exceptions, the mechanism named: V-BO-01 and V-BO-06 at 3e-2 (two invocations, C78), V-BO-07 (5.82 and 6.07 %, C91) and V-BO-08 at 3e-2 (`:interior`, C94); **fails** on V-BO-01 at `τ = 3600` s (two invocations, C78): owner's decision; the table's column reads every one of these rows itself (D96) |
+| 2 | the cases' QoIs on every run; the burst by refinement | every run passes its case except the two-invocation rows (their invocation QoI) and V-BO-08's `:interior` rows; the burst criteria pass on every gated family in both forms; reported: V-BO-07's per-step excess stops falling at 240 cells, within C91's owner exception |
 | 3 | ledgers | passes: every V-BO run's mass ledger at its case's tolerance; V-BO-04's energy ledger 3.65e-6 and 3.98e-6 before its event (old core 7.1e-5; the verdict per form, D99), 1.85e-5 and 1.78e-5 across it |
 | 4 | admissibility at every event | passes: no inadmissible result on 50 runs |
-| 5 | charring decks identical, split by installation | passes: every deck equals its reference, re-recorded on the followup's code to add V-BO-04 (D99; D90 leaves V-CPL-02/02b unchanged, C97); class A unchanged under an explicit correction; the thinnest cells and the activation recorded; V-BO-04's correction is round-off (6.75e-18 m/s), not exactly zero (C96): owner's decision |
+| 5 | charring decks identical, split by installation | passes: every deck equals its reference, re-recorded on the followup's code to add V-BO-04 (D99; D90 leaves V-CPL-02/02b unchanged, C97); class A unchanged under an explicit correction; the thinnest cells and the activation recorded; V-BO-04's correction zero to round-off (6.75e-18 m/s), the clause as the owner restated it (C96) |
 | 6 | constraint residuals and the domain test | passes: the largest accepted scaled residual 0.993 under C52's scale and 0.994 under Phase 1's, none above one |
 | 7 | event timing | passes on every deactivating case with events (16 of 20 rows; V-BO-03 and V-BO-05 have none) |
 | 8 | wall time against the old core | measured on a loaded machine, recorded and not decided: at matched accuracy V-BO-01 1.00, 1.85 and 2.11× and V-BO-03 1.57, 1.88 and 2.09× at 30, 60 and 120 cells, V-BO-04 0.97 to 1.09×; the installed correction 0.80 to 1.32× on V-CPL-02/02b and `ale` 25, 2.4 to 4.6× on `ale` 100 and `ale_darcy` (R41) at equal tolerance; owner's decision after the followup's quiet-machine run (D101), pending: the machine was not quiet during the followup |
-| 9 | smooth finite-difference gradients | the flux and the pre-exponential factor pass; **fails** on the absorption coefficient at 60 and 120 cells (the invocation time's spread 0.143 and 0.128); at reltol 1e-7 every configuration passes, the spreads 0.0039 and 0.0079 (D100, C93): owner's decision |
+| 9 | smooth finite-difference gradients | passes with the noise named (C93): the flux and the pre-exponential factor pass at the case's tolerance; the absorption coefficient's invocation-time spread there (0.143 and 0.128 at 60 and 120 cells) is step noise, and at reltol 1e-7 every configuration passes, the spreads 0.0039 and 0.0079 (D100) |
 | 10 | minimum cell thickness | passes: the thinnest live cell at least 0.865 `ε_m h₀`, no `DtLessThanMin` |
 | 11 | the fallback | not triggered: items 1 and 2 pass on V-BO-01 at the defaults |
 | 12 | Phase 1's items 2 and 9 under `FBDF` | does not apply (MF has not landed) |
@@ -53,15 +53,15 @@ Table: `measurements/burnout_ladder.md` (script `burnout_ladder.jl`), 25 configu
 | V-BO-03, to 3,100 s | 30, 60, 120 | 1e-2 | 1 (1.0 %) | pass |
 | V-BO-04, with and without the correction | 40 | 1e-2 | 1, of 39 cells (1.0 %) | pass |
 | V-BO-06 | 60 | 3e-3, 1e-2 | 1 (0.57, 1.6 %) | pass |
-| V-BO-06 | 60 | 3e-2 | 2 (9.8 %, then 6.8 %) | fail |
-| V-BO-07, `β = 0` and `β = 1` | 60 | 1e-2 | 1 (5.82, 6.07 %) | fail (C91) |
+| V-BO-06 | 60 | 3e-2 | 2 (9.8 %, then 6.8 %) | owner's exception |
+| V-BO-07, `β = 0` and `β = 1` | 60 | 1e-2 | 1 (5.82, 6.07 %) | owner's exception (C91) |
 | V-BO-08 | 10 | 3e-3, 1e-2 | 1 (1.48, 4.53 %) | pass |
-| V-BO-08 | 10 | 3e-2 | 0: `:interior` at 67.04 s | fail (C94) |
+| V-BO-08 | 10 | 3e-2 | 0: `:interior` at 67.04 s | owner's exception (C94) |
 | V-BO-08 without the correction | 10 | 1e-2 | 0: `:interior` at 68.86 s | fail; not a run of the matrix (the reference of the substrate comparison, §6.2) |
 
-- **The 3e-2 rows.** At that threshold the band (0.1) is 3.3 `ε_m`, so the first cell crosses before the main peak while most of the layer holds more than the band; the first invocation takes the cells within the band and the second the rest (C78). V-BO-06 behaves as V-BO-01 there. The owner's exception names V-BO-01's row; V-BO-06's is the same mechanism on the graded mesh.
+- **The 3e-2 rows.** At that threshold the band (0.1) is 3.3 `ε_m`, so the first cell crosses before the main peak while most of the layer holds more than the band; the first invocation takes the cells within the band and the second the rest (C78). V-BO-06 behaves as V-BO-01 there. The owner's exception covers V-BO-01's row and V-BO-06's, the same mechanism on the graded mesh.
 - **V-BO-07 (C91).** The burn runs down from the surface. The upper cells lose their PMMA first and keep the slow second solid, while the nearly pure PMMA beneath burns last and fast, so when the first cell crosses `ε_m` the others still hold up to 5.8 % (`β = 0`) or 6.1 % (`β = 1`) of their mass. Neither `τ` (90 to 720 s) nor the monitor's mass term brings it within the clause. With the second solid at PMMA's kinetics, so that only the density varies, the layer goes at 2.92 % and 2.37 %, within it.
-- **V-BO-08 at 3e-2 (C94).** The 1 mm layer's activated life (its first cell below `r_hi` at about 55 s, the layer gone at 69 s) is short against the correction's synchronization time `τ/π²` = 73 s, so at the largest threshold a cell beneath the surface reaches it first. It fails item 1 and its case's QoIs. At the default threshold V-BO-08 passes, at 4.53 % against 5 % (R46's margin).
+- **V-BO-08 at 3e-2 (C94).** The 1 mm layer's activated life (its first cell below `r_hi` at about 55 s, the layer gone at 69 s) is short against the correction's synchronization time `τ/π²` = 73 s, so at the largest threshold a cell beneath the surface reaches it first. It fails item 1 and its case's QoIs, an owner exception. At the default threshold V-BO-08 passes, at 4.53 % against 5 % (R46's margin).
 - **The item 1 column.** M6c's column passed at most one invocation per layer, so the two V-BO-08 rows with no invocation read "pass" there; the column is recomputed from the table's csv with exactly one invocation per layer (D96), and those four rows (both forms) now read "fail" in the table itself.
 - **V-BO-03's invocation** comes at 3,022.46 to 3,023.0 s across 30 to 240 cells, both forms within 3 ms (`measurements/burnout_burst.md`).
 
@@ -101,7 +101,7 @@ On V-BO-01 the new core's excess is smaller than the old core's at every resolut
 
 Tables: `measurements/burnout_ladder.md` (every V-BO run's mass ledger, a QoI of its case) and `measurements/energy_ledger.md` (`energy_ledger.jl`, on `6bb9f18`).
 
-Every V-BO run's mass ledger is within its case's tolerance (1e-3, V-BO-02's 3e-3 on the new core, V-BO-06's 5e-3 on the old core, C92). V-BO-04's energy ledger:
+Every V-BO run's mass ledger is within its case's tolerance (1e-3, V-BO-02's 3e-3 on the new core, V-BO-06's 5e-3 on the old core, C92, confirmed by the owner). V-BO-04's energy ledger:
 
 | | temperature form | enthalpy form | old core |
 |---|---|---|---|
@@ -122,7 +122,7 @@ Table: `measurements/burnout_identity.md` (`burnout_identity.jl`), on `6bb9f18`,
 
 On the followup's code every deck of M6c's reference equals its digest, so the reference is re-recorded only to add V-BO-04, a class B deck (D99); D90 does not reach V-CPL-02 or V-CPL-02b, whose digests stay (C97). Class A (the rule installs nothing): V-CPL-03, V-CPL-06a, V-HC-05, V-RAD-01, V-RX-02d and the Douglas fir deck over 60 s. Solved again with an explicit `EquidistributionCorrection()`, V-CPL-03 and the Douglas fir deck take the same steps, within 0.0 and 2.0e-14 relative, with the correction exactly zero; their thinnest live cells over both solves are 1.0 (V-CPL-03's cells only swell) and 0.709 of their initial thickness (C56). Class B (the rule installs the correction): V-CPL-02 and V-CPL-02b, 1,134 and 638 steps against 2,092 and 1,222 without it, the largest correction velocity 5.7e-4 and 3.4e-4 m/s, the largest node activation 1.0 with at most four nodes active at once (at 1.05 and 0.75 s), the thinnest live cells 0.0102 and 0.0105 of their initial thickness; V-BO-04, 322 steps with and without the correction, every one of its 39 interior nodes active at once from 122 s.
 
-V-BO-04's correction is not exactly zero, as the item states, but round-off: its largest correction velocity is 6.75e-18 m/s, 6.8e-14 of the surface's regression speed, and the solve keeps the 322 accepted steps of the uncorrected one with its temperatures within 1.8e-12 K, its digest differing (C96). The uniform column thins every cell alike, so the correction's difference of neighbouring thicknesses is the round-off of the node positions. Item 5 passes on every other clause; this one is the owner's (C96).
+V-BO-04's correction is not exactly zero, as the item stated, but round-off: its largest correction velocity is 6.75e-18 m/s, 6.8e-14 of the surface's regression speed, and the solve keeps the 322 accepted steps of the uncorrected one with its temperatures within 1.8e-12 K, its digest differing (C96). The uniform column thins every cell alike, so the correction's difference of neighbouring thicknesses is the round-off of the node positions. The owner restated the clause as zero to round-off (C96), and item 5 passes.
 
 ## 6 and 10. Residuals, the domain test and the thinnest cell
 
@@ -204,7 +204,7 @@ The same four configurations at reltol 1e-7 (abstol scaled with it), on the fini
 | pre-exponential factor, 60 cells | 0.00041 | 0.034 | 1,992 | pass |
 | absorption coefficient, 120 cells | 0.0079 (2.2e-5 s, 7.7e-5) | 0.018 | 3,662 | pass |
 
-Every run ends in one invocation and none falls back. Item 9 fails on two configurations at the case's tolerance and passes on all four at reltol 1e-7 (C93's scratch numbers, now a committed table); the owner decides between reading it with the noise named, restating it on h10, or reading it at reltol 1e-7.
+Every run ends in one invocation and none falls back. Item 9 fails on two configurations at the case's tolerance and passes on all four at reltol 1e-7 (C93's scratch numbers, now a committed table). The owner's answer (C93): item 9 passes with the noise named; a user who differences the invocation time at a relative step below 2e-3 sets reltol 1e-7.
 
 ## 11 and 12
 
@@ -219,16 +219,12 @@ Item 11, the fallback, is conditioned on items 1 or 2 failing on V-BO-01 at the 
 
 `NEW_CORE_CASES` passes 543 of 543 in each form, and the V-BO cases pass 63 of 63 on the old core.
 
-## Open questions for the owner
+## The owner's decisions
 
-- **C91:** V-BO-07 fails item 1's merged-fraction clause and item 2's reported burst measure on its graded kinetics. Recommended: an owner exception with the mechanism named.
-- **C92:** the old core's ledger on V-BO-06 is bounded at 5e-3. Confirm.
-- **C93:** item 9's invocation time under the absorption coefficient is noise-limited at the case's tolerance. Recommended: pass, with the noise named and reltol 1e-7 for users who difference the invocation time; the 1e-7 numbers are now a committed table (§9, D100).
-- **C94:** V-BO-08 at 3e-2 ends `:interior`. Recommended: an owner exception for Phase 2, with a layer-scaled `τ` (R27) as cutover design work.
-- **V-BO-06 at 3e-2:** two invocations, the same mechanism as V-BO-01's excepted 3e-2 row. Recommended: extend that exception to it.
-- **Item 8:** re-run `burnout_timing.jl` on a quiet machine with the followup's protocol (D101: the installed decks matched on the window RMS, each matched row's cost split at the first activation into the integrator's part, R40's, and the gain's, R41's), then decide under §7.4: continue with R40 and R41 carried, or stop. V-BO-01 and V-BO-03 read 1.85 to 2.11× at 60 and 120 cells here, and the installed correction 2.4 to 4.6× on three audit decks at equal tolerance (R41). The quiet-machine table follows as one table commit and one gate commit before the followup's merge (the followup plan's question 10).
-- **C96:** V-BO-04's correction is round-off (6.75e-18 m/s, 6.8e-14 of the surface speed, on the same steps as without it), not exactly zero as item 5(B) states. Recommended: restate the clause as zero to round-off.
-- **Carried from M3:** C73 (the boundary slope of the relative fluxes) and C74 (the upwind side at an exact tie).
+- **Answered:** C91 (V-BO-07, items 1 and 2), C94 (V-BO-08 at 3e-2) and V-BO-06 at 3e-2 are owner exceptions of item 1, each with its mechanism named; C92 (the old core's ledger on V-BO-06 bounded at 5e-3) is confirmed; C93: item 9 passes with the noise named, reltol 1e-7 for a user who differences the invocation time; C96: item 5(B)'s clause reads zero to round-off.
+- **Item 8, open:** re-run `burnout_timing.jl` on a quiet machine with the followup's protocol (D101: the installed decks matched on the window RMS, each matched row's cost split at the first activation into the integrator's part, R40's, and the gain's, R41's), then decide under §7.4: continue with R40 and R41 carried, or stop. V-BO-01 and V-BO-03 read 1.85 to 2.11× at 60 and 120 cells here, and the installed correction 2.4 to 4.6× on three audit decks at equal tolerance (R41). The machine is committed to other runs for at least a day or two; the quiet-machine table follows as one table commit and one gate commit before the followup's merge (the followup plan's question 10).
+- **V-BO-01 at `τ = 3600` s, open:** item 1's `τ` row at five times the default leaves the layer under-relaxed, and it goes in two invocations (C78; A.10); the default `τ` and `τ = 360` s pass. Recommended: an owner exception with that mechanism named.
+- **Carried from M3, open:** C73 (the boundary slope of the relative fluxes) and C74 (the upwind side at an exact tie).
 
 ## Carried beyond Phase 2
 

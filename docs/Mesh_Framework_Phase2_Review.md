@@ -32,9 +32,9 @@ Severity: `blocker` none; `major` a real defect, an unsupported gate claim or a 
 | G-4 | minor | gate document | "The same steps the review measured (1,620 on `ale_darcy` 100)": the review measured 1,623, 1,620 is this pass's; "1 of 39 cells" is one invocation of 39 cells; V-BO-03 "(enthalpy alike)" where its (c) column differs (0.591 and 0.237 against 0.727 and 0.488, both passing); "3,022.5 to 3,023.0 s" cited to the ladder, taken from the burst table; item 7 "every deactivating case" against the script's "with events" (16 of 20 rows); item 4 has no section of its own. | fixed (gate) |
 | C-1 | minor | `src/Closures/correction.jl:133-151` | `vanishing` reads a self-yield reaction `A → αA + (1 − α) G` and a reversible chain as non-vanishing (conservative: no correction, where the layer does gasify), and counts a reaction that can never run (`A = 0`) as a consumer (the correction installed on a residue it never moves: harmless, the activation stays zero). | fixed (D93, `9902314`) + test |
 | TS-1 | minor | `test/newcore/test_deactivation.jl` ("masked rows are identity rows"), `test_correction.jl` | No test evaluates the residual or the Jacobian on a post-merge state with the correction active at the node inward of the outermost live node; every masked-row state keeps its cells above `r_hi`. K-1 is the gap. | fixed (with K-1, `46059c2`) |
-| R-1 | minor | `scripts/mesh_phase2_prototype/` | `baselines.jl` and `cases.jl` remain under §9.2's "until their measurements have gate scripts of their own": `vbo_old`, `vbo_new`, `vbo_ladder_old`, `vbo01_qois_old` and `df_cores` now have (`burnout_ladder.jl`, `burnout_identity.jl`, `burnout_timing.jl`), `vbo02_restart` is D80's measurement and a test, `integrators` and `tolweights` have none. | owner (open) |
+| R-1 | minor | `scripts/mesh_phase2_prototype/` | `baselines.jl` and `cases.jl` remain under §9.2's "until their measurements have gate scripts of their own": `vbo_old`, `vbo_new`, `vbo_ladder_old`, `vbo01_qois_old` and `df_cores` now have (`burnout_ladder.jl`, `burnout_identity.jl`, `burnout_timing.jl`), `vbo02_restart` is D80's measurement and a test, `integrators` and `tolweights` have none. | owner: the directory deleted (`6173e40`) |
 | K-2 | owner | C73, C74 | Carried from M3: the unlimited slope beside a boundary cell (not positivity-preserving; a test deck drained a cell to `DtLessThanMin`) and the upwind side at an exact tie (taken from the dual's partials, so the colored and dense passes can differ on a tie). Neither showed on the ladder. | owner (open) |
-| R-3 | owner | design §3.3, §3.5, §3.7, §6 | The errata of plan §7.2 are not applied: the design still multiplies the rates by the switch (line 139) and lists the "smooth reactivity switch-off" in Phase 2 (line 259). | owner (open) |
+| R-3 | owner | design §3.3, §3.5, §3.7, §6 | The errata of plan §7.2 are not applied: the design still multiplies the rates by the switch (line 139) and lists the "smooth reactivity switch-off" in Phase 2 (line 259). | owner: at the design's next revision |
 | D-1 | note | `src/Deactivation/events.jl:258-270` | `deactivate!`'s loop re-tests the receiver after a moving-mesh merge, so a receiver that is itself below the band and the threshold after absorbing the run merges on in the same invocation; §3.4 and the docstring describe one merge. Reachable only when the run's whole inventory is below `ε_m` of the receiver's reference. | fixed (D95, `6bb9f18`) |
 | D-2 | note | `src/Deactivation/events.jl:359-375`, `src/Integration/solve.jl:423-424` | On a fixed mesh under Darcy–Fick a receiver with little pore space takes the dead cells' condensed mass into its unchanged volume, and `_porosity_out` then ends the solve `:Failure` rather than refusing the merge. D47's design; a hard failure where a rule could stand. | none |
 | C-2 | note | `src/Closures/correction.jl:230-236` | `activation`'s docstring says the smoothstep's argument is clamped to `[0, 1]`; the code clamps above only. Below `r_hi` the argument is negative only through the smooth floor's excess (of order 1e-10 at most), where `x²(3 − 2x)` is 1e-20. | none |
@@ -138,7 +138,7 @@ The gate document (G-1's mapping, G-2, G-4, S-1, S-2, item 4's section, the re-m
 
 ## 6. What was not implemented, and why
 
-- **The owner's decisions** (followup plan §7.1): item 8 under §7.4, C91, C92, C93, C94, V-BO-06 at 3e-2, C73 and C74 (K-2), the design errata (R-3), the prototype directory (R-1), the ledger QoI (X-2), the per-layer `τ` and MF. Nothing in the followup presumes an answer.
+- **The owner's decisions** (followup plan §7.1): nothing in the followup presumed an answer. Answered after it (§8): C91, C93, C94, C96, V-BO-06 at 3e-2, C92, the design errata (R-3) and the prototype directory (R-1). Still open: item 8 under §7.4, V-BO-01 at `τ = 3600` s, C73 and C74 (K-2), the ledger QoI (X-2), the per-layer `τ` and MF.
 - **S-2's probe at the located state:** not taken (followup plan §2.4): it needs an observer hook in `integrate` and a ladder re-run, to tighten a reading that is already conservative.
 - **I-1's refusal and I-3's summed tolerance:** the alternatives of followup plan §1.2 and §1.3, not taken for the reasons given there (D91, D92).
 - **The class B identity reference for D90:** not re-recorded, since D90 leaves V-CPL-02/02b bit-identical (C97); the re-record adds V-BO-04 alone.
@@ -172,4 +172,18 @@ Against M7 (13,598, 10,004 and 543 at `5f08134`), the old-core and temperature-f
 | 9. X-1: the split at the first activation and the equal-gain row | as recommended | D101 |
 | 10. The pull request and item 8 | as recommended: the machine was not quiet, so the pull request carries item 8 pending | §6 |
 
-The phase's decisions of followup plan §7.1 stay open: item 8 under §7.4, C91, C92, C93, C94, V-BO-06 at 3e-2, C73 and C74, the design errata (R-3), the prototype directory (R-1), the ledger QoI (X-2), the per-layer `τ` and MF; the followup adds C96 (V-BO-04's correction at round-off).
+The phase's decisions (followup plan §7.1), answered once the followup was done:
+
+| Decision | Answer | Where |
+|---|---|---|
+| C91: V-BO-07's merged fraction | an owner exception of items 1 and 2, the mechanism named | gate §1, plan C91 |
+| C92: the old core's ledger on V-BO-06 bounded at 5e-3 | confirmed | gate §3, plan C92 |
+| C93: item 9's noise | passes with the noise named; reltol 1e-7 for a user who differences the invocation time | gate §9, plan C93 |
+| C94: V-BO-08 at 3e-2 | an owner exception of item 1; the layer-scaled `τ` stays cutover design work | gate §1, plan C94 |
+| V-BO-06 at 3e-2 | an owner exception of item 1, as V-BO-01's 3e-2 row | gate §1 |
+| C96: V-BO-04's correction at round-off | item 5(B) reads zero to round-off | gate §5, plan §7.3, C96 |
+| The design errata (R-3) | at the design's next revision | plan §12.4 |
+| The prototype directory (R-1) | deleted | `6173e40`, plan §9.2 |
+| Item 8 under §7.4 | open: the machine stays committed to other runs for a day or two, so the quiet-machine table follows before the merge | gate §8 |
+| V-BO-01 at `τ = 3600` s (item 1) | open; recommended: an owner exception, the layer under-relaxed at five times the default `τ` | gate's decisions |
+| C73 and C74, the ledger QoI (X-2), the per-layer `τ`, MF | open | plan §12.4 |
