@@ -228,14 +228,6 @@ function _vbo_clamped(thermal, ds, topo)
     return n
 end
 
-# The PMMA–Kaowool interface node of a V-BO deck, from the back face: the
-# Kaowool takes the cells of its thickness at the mesh's uniform pitch.
-function _vbo_interface_node(problem)
-    nodes = problem.mesh.nodes
-    dz = (nodes[end].z - nodes[1].z) / length(problem.mesh.cells)
-    return round(Int, VBO_L_KW / dz) + 1
-end
-
 # The new core's solve with the step recorder, which evaluates the residual
 # at every accepted state and reads the live cells' temperatures and the
 # surface balances. The old core's depletion keywords have no counterpart

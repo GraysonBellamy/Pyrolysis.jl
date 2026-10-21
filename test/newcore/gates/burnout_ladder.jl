@@ -1,16 +1,22 @@
 # Gate items 1, 2, 4, 6 and 10 of the Phase 2 plan (§7.3) and R25's tail
-# diagnostic, as M4 measures them: the burnout cases on the finite-volume core
-# with the equidistribution correction, across grids, thresholds and `τ`.
+# diagnostic: the burnout cases on the finite-volume core with the
+# equidistribution correction, across grids, thresholds, `τ` and the monitor.
 #
-# The matrix, every run in both energy forms, the band at its default (0.1):
+# The matrix, every run in both energy forms, the band at its default (0.1),
+# the monitor without its mass term (β = 0) unless stated:
 #
 #   V-BO-01 at 30, 60 and 120 PMMA cells × ε_m ∈ {3e-3, 1e-2, 3e-2}, the
 #   default τ;
 #   V-BO-01 at 60 cells and ε_m = 1e-2 with τ = 360 and 3600 s (τ is the
 #   layer's equidistribution time; the prototype's per-cell τ_p = τ/N² is
 #   0.1, 0.2 and 1 s at 60 cells for τ = 360, 720 and 3600 s);
-#   V-BO-03 at 30, 60 and 120 cells at the defaults;
-#   V-BO-04 at its 40 cells without and with the correction.
+#   V-BO-03 at 30, 60 and 120 cells at the defaults, run past the case's
+#   500 s to `VBO03_T_END`, after its layer's invocation;
+#   V-BO-04 at its 40 cells without and with the correction;
+#   V-BO-06 (the graded mesh) at 60 cells and V-BO-08 (the thin layer) at
+#   its 10 cells, each × the three thresholds; V-BO-08 at ε_m = 1e-2 also
+#   without the correction, for its substrate before the first activation;
+#   V-BO-07 (the mixed layer) at 60 cells with β = 0 and β = 1.
 #
 # Per run: the outcome; the deactivation invocations, each with its cells
 # below ε_m, the cells the band took and its largest merged mass fraction
@@ -68,23 +74,34 @@ const REPEATS = 3
 const TAU = Cl.EQUIDISTRIBUTION_TIME
 const CASES = Dict(
     c.id => c for c in Base.invokelatest(load_verification_cases) if
-    c.id in ("V-BO-01", "V-BO-03", "V-BO-04")
+    c.id in ("V-BO-01", "V-BO-03", "V-BO-04", "V-BO-06", "V-BO-07", "V-BO-08")
 )
+const THRESHOLDS = (3e-3, 1e-2, 3e-2)
+# V-BO-03's layer deactivates at about 3,023 s (the case ends at 500 s).
+const VBO03_T_END = 3100.0
+
+# A run of the matrix: the case at `n` cells and threshold `ε_m`, with the
+# equidistribution correction at `τ` and `monitor = (α, β)` or without it, to
+# the case's end or to `t_end`.
+run_row(
+    case,
+    n;
+    ε_m = 1e-2,
+    τ = TAU,
+    corrected = true,
+    monitor = (1.0, 0.0),
+    t_end = nothing,
+) = (; case, n, ε_m, τ, corrected, monitor, t_end)
 
 const ROWS = [
-    [
-        (; case = "V-BO-01", n, ε_m, τ = TAU, corrected = true) for n in (30, 60, 120)
-        for ε_m in (3e-3, 1e-2, 3e-2)
-    ]
-    [
-        (; case = "V-BO-01", n = 60, ε_m = 1e-2, τ, corrected = true) for
-        τ in (360.0, 3600.0)
-    ]
-    [(; case = "V-BO-03", n, ε_m = 1e-2, τ = TAU, corrected = true) for n in (30, 60, 120)]
-    [
-        (; case = "V-BO-04", n = 40, ε_m = 1e-2, τ = TAU, corrected) for
-        corrected in (false, true)
-    ]
+    [run_row("V-BO-01", n; ε_m) for n in (30, 60, 120) for ε_m in THRESHOLDS]
+    [run_row("V-BO-01", 60; τ) for τ in (360.0, 3600.0)]
+    [run_row("V-BO-03", n; t_end = VBO03_T_END) for n in (30, 60, 120)]
+    [run_row("V-BO-04", 40; corrected) for corrected in (false, true)]
+    [run_row("V-BO-06", 60; ε_m) for ε_m in THRESHOLDS]
+    [run_row("V-BO-07", 60; monitor) for monitor in ((1.0, 0.0), (1.0, 1.0))]
+    [run_row("V-BO-08", VBO08_N_PMMA; ε_m) for ε_m in THRESHOLDS]
+    [run_row("V-BO-08", VBO08_N_PMMA; corrected = false)]
 ]
 
 # ----------------------------------------------------------------------------
@@ -100,12 +117,14 @@ mutable struct Probe
     phase1_above::Int
     mismatch::Float64
     steps::Int
+    times::Vector{Float64}
+    first_active::Float64
     stash::Vector{Float64}
     stash_t::Float64
     events::Int
     tails::Vector{Any}
 end
-Probe(n) = Probe(Inf, Inf, 0.0, 0.0, 0, 0.0, 0, zeros(n), NaN, 0, Any[])
+Probe(n) = Probe(Inf, Inf, 0.0, 0.0, 0, 0.0, 0, Float64[], NaN, zeros(n), NaN, 0, Any[])
 
 # The largest scaled residual of the algebraic rows at the derived state `ds`
 # and contributions `c` of the residual in `check.du`, as
@@ -171,8 +190,10 @@ function probe_step!(p::Probe, check, h0, u, t)
         p.c52 = max(p.c52, c52)
         p.phase1 = max(p.phase1, phase1)
         phase1 > 1 && (p.phase1_above += 1)
+        isnan(p.first_active) && any(!iszero, ds.c) && (p.first_active = t)
     end
     p.steps += 1
+    push!(p.times, t)
     copyto!(p.stash, u)
     p.stash_t = t
     return nothing
@@ -218,16 +239,38 @@ end
 # The solves
 # ----------------------------------------------------------------------------
 
-# The new core's keywords of a run beside the case's own.
-function run_keywords(row, form, problem)
-    corr =
-        row.corrected ?
-        (;
-            correction = Cl.EquidistributionCorrection(τ = row.τ),
-            lagrangian = row.case == "V-BO-04" ? Int[] :
-                         [Base.invokelatest(_vbo_interface_node, problem)],
-        ) : (; correction = Cl.NoCorrection())
-    return (; energy_state = form, threshold = row.ε_m, corr...)
+# The new core's keywords of a run beside the case's own. `setup` takes the
+# layer interfaces as the Lagrangian nodes.
+function run_keywords(row, form)
+    correction =
+        row.corrected ? Cl.EquidistributionCorrection(τ = row.τ, monitor = row.monitor) :
+        Cl.NoCorrection()
+    return (; energy_state = form, threshold = row.ε_m, correction)
+end
+
+# The deck of a run: the case's own, or V-BO-03's run on to `t_end`.
+function deck(row)
+    row.t_end === nothing && return Base.invokelatest(CASES[row.case].build, row.n)
+    row.case == "V-BO-03" || error("only V-BO-03 runs past its case's end")
+    return Base.invokelatest(_vbo_problem, row.n; substrate_alpha = 0.0, t_end = row.t_end)
+end
+
+# The case's measures; the variant decks read their substrate's thickness
+# from the run, as their QoIs do.
+function measures(case, sol)
+    case == "V-BO-04" && return nothing
+    case in ("V-BO-06", "V-BO-07", "V-BO-08") ||
+        return Base.invokelatest(_vbo_measures, sol)
+    l_layer = case == "V-BO-08" ? VBO08_L_PMMA : VBO_L_PMMA
+    l_kw = first(sol.extras.thickness_history) - l_layer
+    return Base.invokelatest(_vbo_measures, sol; l_kw)
+end
+
+# V-BO-08's substrate: the temperatures of the cells that start without PMMA
+# at the saved times.
+function substrate_history(sol)
+    kw = findall(iszero, view(sol.ξ, 1, :, 1))
+    return (; t = sol.t, T = sol.T[kw, :])
 end
 
 # The case's keywords in the new core's names.
@@ -247,8 +290,8 @@ end
 # one, so its QoIs read what its recorder saw.
 function instrumented_solve(row, form)
     case = CASES[row.case]
-    problem = Base.invokelatest(case.build, row.n)
-    kw = run_keywords(row, form, problem)
+    problem = deck(row)
+    kw = run_keywords(row, form)
     probe = Ref{Probe}()
     hook = cp -> (probe[] = Probe(length(cp.u0)); instrument(cp, probe[]))
     counter = _VBOWarnCounter(Logging.current_logger(), r"inadmissible", Ref(0))
@@ -278,13 +321,12 @@ end
 # The same solve without recorders, for its wall time.
 function plain_solve(row, form)
     case = CASES[row.case]
-    problem = Base.invokelatest(case.build, row.n)
-    cp = Ig.setup(problem; core_keywords(case)..., run_keywords(row, form, problem)...)
+    cp = Ig.setup(deck(row); core_keywords(case)..., run_keywords(row, form)...)
     return Ig.integrate(cp; min_thickness = case.solve_kwargs.min_thickness)
 end
 
-old_solve(case, n) = Logging.with_logger(Logging.NullLogger()) do
-    solve(Base.invokelatest(case.build, n); progress = false, case.solve_kwargs...)
+old_solve(row) = Logging.with_logger(Logging.NullLogger()) do
+    solve(deck(row); progress = false, CASES[row.case].solve_kwargs...)
 end
 
 # The warm median of `REPEATS` solves after one warm-up.
@@ -380,7 +422,7 @@ function measure(row, form, old)
     tail =
         row.case == "V-BO-01" && !isempty(p.tails) ?
         tail_terms(r.cp, sol, p.tails[1], old.sol) : nothing
-    m = row.case == "V-BO-04" ? nothing : Base.invokelatest(_vbo_measures, sol)
+    m = measures(row.case, sol)
     return (;
         row...,
         form,
@@ -413,6 +455,8 @@ function measure(row, form, old)
         wall,
         old_wall = old.wall,
         tail,
+        substrate = row.case == "V-BO-08" ?
+                    (; substrate_history(sol)..., p.times, p.first_active) : nothing,
     )
 end
 
@@ -422,12 +466,11 @@ old_runs = Dict{Tuple{String,Int},Any}()
 for row in ROWS
     key = (row.case, row.n)
     haskey(old_runs, key) && continue
-    case = CASES[row.case]
-    sol, wall = timed(() -> old_solve(case, row.n))
+    sol, wall = timed(() -> old_solve(row))
     old_runs[key] = (;
         sol,
         wall,
-        measures = row.case == "V-BO-04" ? nothing : Base.invokelatest(_vbo_measures, sol),
+        measures = measures(row.case, sol),
         parks = length(sol.extras.park_times),
     )
     println("old core $(key): $(sol.retcode) $(round(wall, digits = 3)) s")
@@ -440,13 +483,45 @@ for form in FORMS, row in ROWS
     push!(results, res)
     println(
         "$(row.case) n=$(row.n) ε_m=$(row.ε_m) τ=$(row.τ) ",
-        "corrected=$(row.corrected) $(form): $(res.retcode) $(res.outcome) ",
+        "corrected=$(row.corrected) β=$(row.monitor[2]) $(form): $(res.retcode) $(res.outcome) ",
         "invocations=$(length(res.invocations)) item1=$(res.item1) ",
         "failing=$(res.failing) item10=$(res.item10) wall=$(round(res.wall, digits = 3)) s",
     )
     flush(stdout)
 end
 load_end = Sys.loadavg()
+
+# V-BO-08's substrate before the first activation (§6.2): the corrected run at
+# ε_m = 1e-2 against the run without the correction, at the saved times up to
+# the end of the last accepted step before the first whose state has an active
+# node (the step that crosses the activation moves every saved time its
+# interpolant spans).
+substrate_comparison = map(FORMS) do form
+    pick(corrected) = only(
+        r for r in results if r.case == "V-BO-08" &&
+            r.form == form &&
+            r.corrected == corrected &&
+            r.ε_m == 1e-2
+    )
+    a, b = pick(true).substrate, pick(false).substrate
+    t_inert = maximum(filter(<(a.first_active), a.times); init = 0.0)
+    k = min(something(findlast(<=(t_inert), a.t), 1), length(b.t))
+    d = maximum(abs, view(a.T, :, 1:k) .- view(b.T, :, 1:k))
+    # The accepted steps up to the last compared saved time, and the first
+    # at which the two solves part.
+    ta, tb = filter(<=(a.t[k]), a.times), filter(<=(a.t[k]), b.times)
+    parted = findfirst(j -> ta[j] != tb[j], 1:min(length(ta), length(tb)))
+    (;
+        form,
+        t_active = a.first_active,
+        t_inert,
+        k,
+        abs = d,
+        rel = d / maximum(view(a.T, :, 1:k)),
+        steps = (length(ta), length(tb)),
+        parted = parted === nothing ? NaN : ta[parted],
+    )
+end
 
 # ----------------------------------------------------------------------------
 # The tables
@@ -466,12 +541,12 @@ _invocations(r) =
     )
 _run(r) =
     "$(r.case) | $(r.n) | $(r.form) | $(r.ε_m) | $(_tau(r)) | " *
-    (r.corrected ? "yes" : "no")
+    (r.corrected ? "β = $(_g(r.monitor[2]))" : "none")
 
 open(joinpath(OUT, "burnout_ladder.csv"), "w") do io
     println(
         io,
-        "case,cells,form,eps_m,tau,corrected,retcode,outcome,t_last,invocations,events,",
+        "case,cells,form,eps_m,tau,corrected,beta,retcode,outcome,t_last,invocations,events,",
         "largest_fraction,item1,qois_failing,peak,t_peak,t_bo,mass_loss,ledger,",
         "inadmissible,min_h,min_ratio,item10,c52,phase1,phase1_above,domain,steps,rejected,wall,old_wall",
     )
@@ -484,6 +559,7 @@ open(joinpath(OUT, "burnout_ladder.csv"), "w") do io
             r.ε_m,
             r.τ,
             r.corrected,
+            r.monitor[2],
             r.retcode,
             r.outcome,
             r.t_last,
@@ -515,14 +591,15 @@ open(joinpath(OUT, "burnout_ladder.csv"), "w") do io
 end
 
 open(joinpath(OUT, "burnout_ladder.md"), "w") do io
-    println(io, "# Gate items 1, 2, 4, 6 and 10 at M4: the burnout ladder\n")
+    println(io, "# Gate items 1, 2, 4, 6 and 10: the burnout ladder\n")
     println(
         io,
         "Produced by `test/newcore/gates/burnout_ladder.jl` at $(COMMIT_STAMP). Julia $(VERSION), ",
         "$(Threads.nthreads()) thread, $(Sys.CPU_THREADS) logical CPUs; load average ",
         "$(round.(load_start; digits = 1)) at the start and $(round.(load_end; digits = 1)) at the end. ",
         "The finite-volume core with the equidistribution correction (band $(Ig.CORRECTION_BAND), ",
-        "activation 0.3/0.1, `β = 0`), the PMMA–Kaowool interface Lagrangian; τ [s] is the layer's ",
+        "activation 0.3/0.1, the monitor's mass term `β` per row), the layer interfaces Lagrangian; ",
+        "τ [s] is the layer's ",
         "equidistribution time, with the prototype's per-cell `τ_p = τ/N²` [s] in parentheses. ",
         "The old core runs each case at the same resolution with its own keywords (its threshold ",
         "is a thickness fraction).\n",
@@ -537,7 +614,7 @@ open(joinpath(OUT, "burnout_ladder.md"), "w") do io
     )
     println(
         io,
-        "| case | cells | form | ε_m | τ (τ_p) | corrected | retcode, outcome, end [s] | invocations | item 1 | QoIs | failing | peak, t_peak, t_bo (old core) | events | inadmissible |",
+        "| case | cells | form | ε_m | τ (τ_p) | correction | retcode, outcome, end [s] | invocations | item 1 | QoIs | failing | peak, t_peak, t_bo (old core) | events | inadmissible |",
     )
     println(io, "|" * repeat("---|", 14))
     for r in results
@@ -572,7 +649,7 @@ open(joinpath(OUT, "burnout_ladder.md"), "w") do io
     )
     println(
         io,
-        "| case | cells | form | ε_m | τ (τ_p) | corrected | smallest cell [m] | ratio / ε_m | item 10 | C52 | Phase 1 | Phase 1 > 1 | domain | steps (rejected) | wall (old core) | same |",
+        "| case | cells | form | ε_m | τ (τ_p) | correction | smallest cell [m] | ratio / ε_m | item 10 | C52 | Phase 1 | Phase 1 > 1 | domain | steps (rejected) | wall (old core) | same |",
     )
     println(io, "|" * repeat("---|", 16))
     for r in results
@@ -617,6 +694,34 @@ open(joinpath(OUT, "burnout_ladder.md"), "w") do io
             "$(_g(x.T_receiver; d = 5)) | $(_g(x.T_m; d = 5)) | $(_g(x.weight)) | $(_g(x.R0)) | ",
             "$(_g(x.Ra)) | $(_g(x.Rc)) | $(_g(x.Rc / x.Ra)) | $(_g(x.Rc / x.R0)) | $(_g(x.burst)) | $(_g(x.after; d = 4)) ($(_g(x.t_after; d = 4))) | ",
             "$(_g(x.old_after; d = 4)) |",
+        )
+    end
+    println(io, "\n## V-BO-08: the substrate before the first activation\n")
+    println(
+        io,
+        "The temperatures of the cells that start without PMMA at the saved times up to the end ",
+        "of the last accepted step before the first whose state has an active node (the step ",
+        "that crosses the activation moves the saved times its interpolant spans): the ",
+        "corrected run at ε_m = 1e-2 ",
+        "against the run without the correction, the largest difference and that over the ",
+        "largest temperature (§6.2: at most 1e-10 on the same accepted steps); the accepted ",
+        "steps of the two solves up to the last saved time compared, and the time of the first ",
+        "step at which they part (a changed sequence is reported with the difference, as item 5 ",
+        "does). The run without the correction is this comparison's reference only: its layer ",
+        "ends `:interior`, and it is not a run of items 1 and 2.\n",
+    )
+    println(
+        io,
+        "| form | first active step [s] | compared to [s] | saved times | largest difference [K] | relative | steps (without) | parted at [s] | verdict |",
+    )
+    println(io, "|---|---|---|---|---|---|---|---|---|")
+    for x in substrate_comparison
+        verdict = !isnan(x.parted) ? "steps differ" : x.rel <= 1e-10 ? "pass" : "fail"
+        println(
+            io,
+            "| $(x.form) | $(_g(x.t_active; d = 5)) | $(_g(x.t_inert; d = 5)) | $(x.k) | ",
+            "$(_g(x.abs)) | $(_g(x.rel)) | ",
+            "$(x.steps[1]) ($(x.steps[2])) | $(_g(x.parted; d = 5)) | $(verdict) |",
         )
     end
     println(io, "\n## The old core\n")
