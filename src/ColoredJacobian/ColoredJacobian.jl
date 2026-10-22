@@ -18,7 +18,7 @@ using SparseMatrixColorings: NaturalOrder, LargestFirst, SmallestLast, Incidence
 using SparseMatrixColorings: ColoringProblem, coloring, ncolors
 using ..Meshes
 using ..States
-using ..Kernels: find_kernel, RelativeFluxKernel
+using ..Kernels: find_kernel, RelativeFluxKernel, ConductionKernel
 using ..Closures: BalanceRowClosure, lateral_rows
 using ..Closures: NoCorrection, PrescribedCorrection, LayerCorrection
 using ..Assembly
