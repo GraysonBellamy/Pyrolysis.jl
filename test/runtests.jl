@@ -33,11 +33,12 @@ end
 _jl_files(dir) = sort(filter(f -> endswith(f, ".jl"), readdir(joinpath(@__DIR__, dir))))
 
 # Test files under `dir` and its subdirectories, as paths relative to this
-# directory; `gates/` holds measurement scripts, not tests.
+# directory; `gates/` holds measurement scripts, not tests, and `quality/` runs
+# in a process of its own.
 function _jl_files_recursive(dir)
     out = String[]
     for (root, dirs, files) in walkdir(joinpath(@__DIR__, dir))
-        filter!(d -> d != "gates", dirs)
+        filter!(d -> !(d in ("gates", "quality")), dirs)
         for f in sort(files)
             endswith(f, ".jl") && push!(out, relpath(joinpath(root, f), @__DIR__))
         end
@@ -63,7 +64,8 @@ _GROUP in ("all", "newcore", "domains", _NEWCORE_GROUPS...) || error(
 const _RUN_DOMAINS = _GROUP in ("all", "domains")
 
 # The finite-volume core suites' groups, of similar runtime on the CI runner:
-# the Jacobian and multi-D suites, the burnout path's suites, and the rest.
+# the Jacobian, multi-D and type-analysis suites, the burnout path's suites,
+# and the rest.
 const _NEWCORE_BURNOUT = joinpath.(
     "newcore",
     (
@@ -75,7 +77,7 @@ const _NEWCORE_BURNOUT = joinpath.(
     ),
 )
 function _newcore_group(f)
-    any(d -> startswith(f, joinpath("newcore", d)), ("jacobian", "multid")) &&
+    any(d -> startswith(f, joinpath("newcore", d)), ("jacobian", "multid", "quality")) &&
         return "newcore-jacobian"
     return f in _NEWCORE_BURNOUT ? "newcore-burnout" : "newcore-other"
 end
@@ -132,6 +134,15 @@ end
     if !(_NEW_CORE && get(ENV, "PYROLYSIS_ENERGY_STATE", "temperature") == "enthalpy")
         for f in filter(_run_newcore, _jl_files_recursive("newcore"))
             _timed(() -> _include_isolated(f), f)
+        end
+        # The type analysis of the core's entry points, in a fresh process.
+        quality = joinpath("newcore", "quality", "runtests.jl")
+        if _run_newcore(quality)
+            @testset "finite-volume core type analysis (isolated)" begin
+                _timed(quality) do
+                    @test _run_isolated_test_script(quality)
+                end
+            end
         end
     end
 
