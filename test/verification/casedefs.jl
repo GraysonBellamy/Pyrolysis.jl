@@ -11,9 +11,9 @@ z = L top/exposed surface; exact solutions use depth x = L − z.
 """
 
 using Pyrolysis
-using Pyrolysis.Solver: get_cell_positions
+using Pyrolysis.Outputs: get_cell_positions
 using Pyrolysis.Materials: DepletionLimiter, STEFAN_BOLTZMANN
-using Pyrolysis.Discretization: BEER_LAMBERT
+using Pyrolysis.Materials: BEER_LAMBERT
 using Pyrolysis.Problem: step_profile
 using Pyrolysis.Physics: ideal_gas_pressure, background_gas_concentration
 using Pyrolysis.Properties: porosity, effective_gas_viscosity

@@ -11,7 +11,7 @@ using Pyrolysis.Kernels: GasTransportKernel
 using Pyrolysis.Integration: setup
 using OrdinaryDiffEq: ODEFunction, ODEProblem
 import OrdinaryDiffEq
-using Pyrolysis.Solver: KenCarp4
+using OrdinaryDiffEqSDIRK: KenCarp4
 
 # The char-layer column of V-CPL-06 with a reaction heat: a reactive band low
 # in a hot, gas-permeable matrix gasifies, and the gas diffuses up through the

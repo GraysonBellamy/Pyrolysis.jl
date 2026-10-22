@@ -11,7 +11,7 @@ using Pyrolysis.ColoredJacobian
 using Pyrolysis.Integration
 using OrdinaryDiffEq: ODEFunction, ODEProblem
 import OrdinaryDiffEq
-using Pyrolysis.Solver: KenCarp4
+using OrdinaryDiffEqSDIRK: KenCarp4
 
 # Two closed cells exchanging heat by conduction, with a temperature-dependent
 # heat capacity: summed enthalpy is a linear invariant.
@@ -192,7 +192,7 @@ end
         tspan = (0.0, 60.0),
         output_times = collect(0.0:10.0:60.0),
     )
-    for radiation_model in (SURFACE_ABSORPTION, Pyrolysis.Discretization.BEER_LAMBERT)
+    for radiation_model in (SURFACE_ABSORPTION, BEER_LAMBERT)
         sol = Integration.solve(problem; radiation_model, abstol = 1e-8, reltol = 1e-6)
         @test sol.retcode === :Success
         x = sol.extras

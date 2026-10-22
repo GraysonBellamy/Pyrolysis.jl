@@ -10,7 +10,7 @@ using Pyrolysis.Assembly: residual!
 import OrdinaryDiffEq
 using OrdinaryDiffEq: ODEProblem, DiscreteCallback, CallbackSet, init, step!
 using OrdinaryDiffEq: derivative_discontinuity!
-using Pyrolysis.Solver: KenCarp4
+using OrdinaryDiffEqSDIRK: KenCarp4
 using OrdinaryDiffEq.SciMLBase: get_proposed_dt
 using LinearSolve: LinearSolve, KLUFactorization, UMFPACKFactorization
 using SparseArrays

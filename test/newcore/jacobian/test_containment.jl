@@ -685,5 +685,5 @@ end
     @test abs(above - below) <= 1e-8 * above
     # Far above the guard it is the harmonic mean.
     @test guarded(0.15, 0.45, d_a, d_b) ≈
-          Pyrolysis.Properties.harmonic_mean_weighted(0.15, 0.45, d_a, d_b) rtol = 1e-14
+          (d_a + d_b) / (d_a / 0.15 + d_b / 0.45) rtol = 1e-14
 end
