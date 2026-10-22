@@ -1,18 +1,18 @@
 # Gate item 9: smooth finite-difference gradients through burnout
 
-Produced by `test/newcore/gates/burnout_gradients.jl` at commit 6bb9f18 (tree 44e66df). Julia 1.13.0, 1 thread; load average [18.7, 19.2, 18.9] at the start and [19.0, 18.8, 18.9] at the end. V-BO-01 (temperature form), the finite-volume core through the case's solve at the package defaults, the old core with the case's keywords; each configuration at the case's tolerance (reltol 1.0e-6) on both cores, then at reltol 1.0e-7 (abstol scaled with it) on the finite-volume core alone. Each parameter perturbed by ε ∈ {0, ±1, ±2, ±4, ±8}·1e-3; D(h) = (Q(h) − Q(−h))/(2h) at h ∈ {1, 2, 4, 8}·1e-3. Spread: (max − min)/|mean| of the four differences (smooth below 0.1, moderate below 1); σ: the RMS residual of a quadratic in ε over the nine runs; h10 = 10σ/|slope|. Item 9 passes when the interpolated peak, its time, the interpolated burnout time and the invocation time are smooth on the finite-volume core and the invocation count is the same in every run. Misfits: mean squares against the Gpyro V2 MLR [(g m⁻² s⁻¹)²] and back temperature [K²], reported only.
+Produced by `test/newcore/gates/burnout_gradients.jl` at commit f54a6fb (tree b544f02). Julia 1.13.0, 1 thread; load average [19.0, 18.9, 18.8] at the start and [19.2, 18.9, 18.8] at the end. V-BO-01 (temperature form), the finite-volume core through the case's solve at the package defaults, the old core with the case's keywords; each configuration at the case's tolerance (reltol 1.0e-6) on both cores, then at reltol 1.0e-7 (abstol scaled with it) on the finite-volume core alone. Each parameter perturbed by ε ∈ {0, ±1, ±2, ±4, ±8}·1e-3; D(h) = (Q(h) − Q(−h))/(2h) at h ∈ {1, 2, 4, 8}·1e-3. Spread: (max − min)/|mean| of the four differences (smooth below 0.1, moderate below 1); σ: the RMS residual of a quadratic in ε over the nine runs; h10 = 10σ/|slope|. Item 9 passes when the interpolated peak, its time, the interpolated burnout time and the invocation time are smooth on the finite-volume core and the invocation count is the same in every run. Misfits: mean squares against the Gpyro V2 MLR [(g m⁻² s⁻¹)²] and back temperature [K²], reported only.
 
 ## PMMA absorption coefficient, 60 PMMA cells, the case's tolerance
 
-**finite-volume core.** Every run Success; invocations [1], safety-net fallbacks 0 of 9; 1127 steps at ε = 0 (1104 to 1160).
+**finite-volume core.** Every run Success; invocations [1], safety-net fallbacks 0 of 9; 1125 steps at ε = 0 (1114 to 1154).
 
 | quantity | Q(0) | D(1e-3) | D(2e-3) | D(4e-3) | D(8e-3) | spread | class | σ | h10 |
 |---|---|---|---|---|---|---|---|---|---|
-| peak_interp | 32.3909 | -2.48 | -2.49 | -2.48 | -2.49 | 0.000761 | smooth | 3.44e-6 | 1.39e-5 |
-| t_peak_interp | 334.846 | 33.6 | 33.2 | 33.8 | 34.1 | 0.0243 | smooth | 0.00105 | 0.00031 |
+| peak_interp | 32.3909 | -2.48 | -2.49 | -2.48 | -2.49 | 0.000751 | smooth | 3.42e-6 | 1.38e-5 |
+| t_peak_interp | 334.846 | 33.6 | 33.2 | 33.8 | 34.0 | 0.0243 | smooth | 0.00105 | 0.00031 |
 | t_bo_interp | 362.976 | 18.6 | 18.4 | 19.1 | 19.2 | 0.0409 | smooth | 0.001 | 0.000525 |
-| invocation time | 357.915 | 2.98 | 2.57 | 2.97 | 2.96 | 0.143 | moderate | 0.000554 | 0.00188 |
-| misfit_mlr | 19.4302 | -24.8 | -24.5 | -25.7 | -29.0 | 0.174 | moderate | 0.00865 | 0.00307 |
+| invocation time | 357.915 | 2.98 | 2.57 | 2.97 | 2.96 | 0.145 | moderate | 0.000553 | 0.00188 |
+| misfit_mlr | 19.4302 | -24.8 | -24.5 | -25.7 | -29.0 | 0.174 | moderate | 0.00864 | 0.00307 |
 | misfit_Tback | 7263.28 | 1400.0 | 1380.0 | 1400.0 | 1400.0 | 0.0132 | smooth | 0.0257 | 0.000184 |
 
 **old core.** Every run Success; parks [60]; 853 steps at ε = 0 (829 to 880).
@@ -30,15 +30,15 @@ Item 9 on this configuration: **fail**.
 
 ## incident flux, 60 PMMA cells, the case's tolerance
 
-**finite-volume core.** Every run Success; invocations [1], safety-net fallbacks 0 of 9; 1127 steps at ε = 0 (1107 to 1154).
+**finite-volume core.** Every run Success; invocations [1], safety-net fallbacks 0 of 9; 1125 steps at ε = 0 (1103 to 1145).
 
 | quantity | Q(0) | D(1e-3) | D(2e-3) | D(4e-3) | D(8e-3) | spread | class | σ | h10 |
 |---|---|---|---|---|---|---|---|---|---|
-| peak_interp | 32.3909 | 42.6 | 42.6 | 42.6 | 42.6 | 7.77e-5 | smooth | 3.81e-6 | 8.94e-7 |
-| t_peak_interp | 334.846 | -399.0 | -398.0 | -398.0 | -398.0 | 0.00283 | smooth | 0.000961 | 2.41e-5 |
-| t_bo_interp | 362.976 | -457.0 | -457.0 | -456.0 | -457.0 | 0.000951 | smooth | 0.00129 | 2.82e-5 |
-| invocation time | 357.915 | -469.0 | -469.0 | -469.0 | -469.0 | 0.000968 | smooth | 0.000571 | 1.22e-5 |
-| misfit_mlr | 19.4302 | 902.0 | 956.0 | 948.0 | 927.0 | 0.0588 | smooth | 0.0974 | 0.00104 |
+| peak_interp | 32.3909 | 42.6 | 42.6 | 42.6 | 42.6 | 7.8e-5 | smooth | 3.78e-6 | 8.87e-7 |
+| t_peak_interp | 334.846 | -399.0 | -398.0 | -398.0 | -398.0 | 0.00285 | smooth | 0.000963 | 2.42e-5 |
+| t_bo_interp | 362.976 | -457.0 | -457.0 | -456.0 | -457.0 | 0.000954 | smooth | 0.00129 | 2.82e-5 |
+| invocation time | 357.915 | -469.0 | -469.0 | -469.0 | -469.0 | 0.000967 | smooth | 0.00057 | 1.22e-5 |
+| misfit_mlr | 19.4302 | 902.0 | 956.0 | 948.0 | 927.0 | 0.0588 | smooth | 0.0974 | 0.00105 |
 | misfit_Tback | 7263.28 | -16600.0 | -16600.0 | -16600.0 | -16600.0 | 0.00101 | smooth | 0.0183 | 1.1e-5 |
 
 **old core.** Every run Success; parks [60]; 853 steps at ε = 0 (819 to 888).
@@ -56,16 +56,16 @@ Item 9 on this configuration: **pass**.
 
 ## pre-exponential factor, 60 PMMA cells, the case's tolerance
 
-**finite-volume core.** Every run Success; invocations [1], safety-net fallbacks 0 of 9; 1127 steps at ε = 0 (1092 to 1127).
+**finite-volume core.** Every run Success; invocations [1], safety-net fallbacks 0 of 9; 1125 steps at ε = 0 (1091 to 1126).
 
 | quantity | Q(0) | D(1e-3) | D(2e-3) | D(4e-3) | D(8e-3) | spread | class | σ | h10 |
 |---|---|---|---|---|---|---|---|---|---|
-| peak_interp | 32.3909 | 1.79 | 1.79 | 1.79 | 1.79 | 0.00105 | smooth | 2.77e-6 | 1.55e-5 |
-| t_peak_interp | 334.846 | -24.2 | -24.1 | -24.3 | -24.4 | 0.0139 | smooth | 0.000584 | 0.000239 |
-| t_bo_interp | 362.976 | -26.6 | -27.0 | -27.4 | -27.4 | 0.03 | smooth | 0.00114 | 0.000416 |
-| invocation time | 357.915 | -28.7 | -28.5 | -28.7 | -28.6 | 0.00614 | smooth | 0.000247 | 8.64e-5 |
-| misfit_mlr | 19.4302 | 32.1 | 32.1 | 33.1 | 42.2 | 0.29 | moderate | 0.0226 | 0.00565 |
-| misfit_Tback | 7263.28 | -651.0 | -642.0 | -651.0 | -647.0 | 0.0138 | smooth | 0.0111 | 0.000172 |
+| peak_interp | 32.3909 | 1.79 | 1.79 | 1.79 | 1.79 | 0.00104 | smooth | 2.8e-6 | 1.56e-5 |
+| t_peak_interp | 334.846 | -24.3 | -24.1 | -24.3 | -24.4 | 0.0138 | smooth | 0.000584 | 0.000239 |
+| t_bo_interp | 362.976 | -26.6 | -27.0 | -27.4 | -27.4 | 0.0301 | smooth | 0.00114 | 0.000416 |
+| invocation time | 357.915 | -28.7 | -28.5 | -28.7 | -28.6 | 0.00615 | smooth | 0.000249 | 8.69e-5 |
+| misfit_mlr | 19.4302 | 32.1 | 32.1 | 33.1 | 42.2 | 0.29 | moderate | 0.0226 | 0.00566 |
+| misfit_Tback | 7263.28 | -651.0 | -642.0 | -651.0 | -647.0 | 0.0133 | smooth | 0.0109 | 0.000169 |
 
 **old core.** Every run Success; parks [60]; 853 steps at ε = 0 (830 to 873).
 
@@ -82,15 +82,15 @@ Item 9 on this configuration: **pass**.
 
 ## PMMA absorption coefficient, 120 PMMA cells, the case's tolerance
 
-**finite-volume core.** Every run Success; invocations [1], safety-net fallbacks 0 of 9; 2118 steps at ε = 0 (2085 to 2128).
+**finite-volume core.** Every run Success; invocations [1], safety-net fallbacks 0 of 9; 2083 steps at ε = 0 (2081 to 2157).
 
 | quantity | Q(0) | D(1e-3) | D(2e-3) | D(4e-3) | D(8e-3) | spread | class | σ | h10 |
 |---|---|---|---|---|---|---|---|---|---|
-| peak_interp | 32.4691 | -2.54 | -2.53 | -2.53 | -2.53 | 0.000612 | smooth | 3.32e-6 | 1.31e-5 |
-| t_peak_interp | 335.625 | 34.8 | 34.6 | 34.3 | 34.1 | 0.0208 | smooth | 0.000899 | 0.000263 |
-| t_bo_interp | 363.008 | 20.6 | 20.2 | 19.9 | 19.9 | 0.0371 | smooth | 0.000953 | 0.000478 |
-| invocation time | 357.711 | 3.31 | 3.08 | 2.92 | 2.96 | 0.128 | moderate | 0.00037 | 0.00125 |
-| misfit_mlr | 19.4212 | -38.8 | -38.8 | -38.3 | -38.6 | 0.0146 | smooth | 0.00167 | 0.000432 |
+| peak_interp | 32.4691 | -2.53 | -2.53 | -2.53 | -2.53 | 0.000613 | smooth | 3.32e-6 | 1.31e-5 |
+| t_peak_interp | 335.625 | 34.8 | 34.6 | 34.3 | 34.1 | 0.021 | smooth | 0.000901 | 0.000264 |
+| t_bo_interp | 363.008 | 20.6 | 20.2 | 19.9 | 19.9 | 0.037 | smooth | 0.000953 | 0.000478 |
+| invocation time | 357.711 | 3.31 | 3.08 | 2.92 | 2.96 | 0.128 | moderate | 0.000371 | 0.00125 |
+| misfit_mlr | 19.4212 | -38.9 | -38.8 | -38.3 | -38.6 | 0.0148 | smooth | 0.00166 | 0.000432 |
 | misfit_Tback | 7351.37 | 1380.0 | 1370.0 | 1360.0 | 1360.0 | 0.0153 | smooth | 0.0171 | 0.000126 |
 
 **old core.** Every run Success; parks [120]; 1461 steps at ε = 0 (1431 to 1534).
@@ -108,61 +108,61 @@ Item 9 on this configuration: **fail**.
 
 ## PMMA absorption coefficient, 60 PMMA cells, reltol 1.0e-7
 
-**finite-volume core.** Every run Success; invocations [1], safety-net fallbacks 0 of 9; 1992 steps at ε = 0 (1992 to 2028).
+**finite-volume core.** Every run Success; invocations [1], safety-net fallbacks 0 of 9; 2004 steps at ε = 0 (1994 to 2032).
 
 | quantity | Q(0) | D(1e-3) | D(2e-3) | D(4e-3) | D(8e-3) | spread | class | σ | h10 |
 |---|---|---|---|---|---|---|---|---|---|
-| peak_interp | 32.3909 | -2.49 | -2.49 | -2.48 | -2.49 | 0.000569 | smooth | 3.03e-6 | 1.22e-5 |
-| t_peak_interp | 334.843 | 33.7 | 33.7 | 33.9 | 34.1 | 0.0128 | smooth | 0.000679 | 0.000199 |
-| t_bo_interp | 362.973 | 18.6 | 18.8 | 19.1 | 19.2 | 0.033 | smooth | 0.00073 | 0.00038 |
-| invocation time | 357.912 | 3.02 | 3.02 | 3.01 | 3.01 | 0.00388 | smooth | 2.84e-5 | 9.42e-5 |
+| peak_interp | 32.3909 | -2.49 | -2.49 | -2.48 | -2.49 | 0.000569 | smooth | 3.02e-6 | 1.21e-5 |
+| t_peak_interp | 334.843 | 33.7 | 33.7 | 33.9 | 34.1 | 0.0128 | smooth | 0.000678 | 0.000199 |
+| t_bo_interp | 362.973 | 18.6 | 18.8 | 19.1 | 19.2 | 0.033 | smooth | 0.000728 | 0.00038 |
+| invocation time | 357.912 | 3.02 | 3.02 | 3.01 | 3.01 | 0.00396 | smooth | 2.84e-5 | 9.43e-5 |
 | misfit_mlr | 19.4335 | -24.9 | -25.0 | -25.7 | -29.0 | 0.157 | moderate | 0.00815 | 0.0029 |
-| misfit_Tback | 7263.15 | 1400.0 | 1400.0 | 1400.0 | 1400.0 | 0.00044 | smooth | 0.00125 | 8.93e-6 |
+| misfit_Tback | 7263.15 | 1400.0 | 1400.0 | 1400.0 | 1400.0 | 0.00046 | smooth | 0.00126 | 8.97e-6 |
 
 Item 9 on this configuration: **pass**.
 
 ## incident flux, 60 PMMA cells, reltol 1.0e-7
 
-**finite-volume core.** Every run Success; invocations [1], safety-net fallbacks 0 of 9; 1992 steps at ε = 0 (1985 to 2028).
+**finite-volume core.** Every run Success; invocations [1], safety-net fallbacks 0 of 9; 2004 steps at ε = 0 (1978 to 2022).
 
 | quantity | Q(0) | D(1e-3) | D(2e-3) | D(4e-3) | D(8e-3) | spread | class | σ | h10 |
 |---|---|---|---|---|---|---|---|---|---|
-| peak_interp | 32.3909 | 42.6 | 42.6 | 42.6 | 42.6 | 8.38e-5 | smooth | 4.28e-6 | 1.0e-6 |
-| t_peak_interp | 334.843 | -399.0 | -398.0 | -398.0 | -398.0 | 0.00333 | smooth | 0.000922 | 2.32e-5 |
-| t_bo_interp | 362.973 | -457.0 | -457.0 | -456.0 | -457.0 | 0.00164 | smooth | 0.00147 | 3.22e-5 |
-| invocation time | 357.912 | -469.0 | -469.0 | -469.0 | -469.0 | 0.000174 | smooth | 0.000107 | 2.28e-6 |
-| misfit_mlr | 19.4335 | 902.0 | 957.0 | 949.0 | 927.0 | 0.0585 | smooth | 0.0966 | 0.00104 |
-| misfit_Tback | 7263.15 | -16600.0 | -16600.0 | -16600.0 | -16600.0 | 0.000199 | smooth | 0.00715 | 4.3e-6 |
+| peak_interp | 32.3909 | 42.6 | 42.6 | 42.6 | 42.6 | 8.53e-5 | smooth | 4.26e-6 | 1.0e-6 |
+| t_peak_interp | 334.843 | -399.0 | -398.0 | -398.0 | -398.0 | 0.00337 | smooth | 0.000929 | 2.33e-5 |
+| t_bo_interp | 362.973 | -457.0 | -457.0 | -456.0 | -457.0 | 0.00168 | smooth | 0.00148 | 3.23e-5 |
+| invocation time | 357.912 | -469.0 | -469.0 | -469.0 | -469.0 | 0.000145 | smooth | 0.000106 | 2.26e-6 |
+| misfit_mlr | 19.4335 | 902.0 | 957.0 | 949.0 | 927.0 | 0.0585 | smooth | 0.0965 | 0.00104 |
+| misfit_Tback | 7263.15 | -16600.0 | -16600.0 | -16600.0 | -16600.0 | 0.0002 | smooth | 0.00715 | 4.3e-6 |
 
 Item 9 on this configuration: **pass**.
 
 ## pre-exponential factor, 60 PMMA cells, reltol 1.0e-7
 
-**finite-volume core.** Every run Success; invocations [1], safety-net fallbacks 0 of 9; 1992 steps at ε = 0 (1990 to 2031).
+**finite-volume core.** Every run Success; invocations [1], safety-net fallbacks 0 of 9; 2004 steps at ε = 0 (1989 to 2026).
 
 | quantity | Q(0) | D(1e-3) | D(2e-3) | D(4e-3) | D(8e-3) | spread | class | σ | h10 |
 |---|---|---|---|---|---|---|---|---|---|
-| peak_interp | 32.3909 | 1.79 | 1.79 | 1.79 | 1.79 | 0.000784 | smooth | 2.85e-6 | 1.59e-5 |
-| t_peak_interp | 334.843 | -24.2 | -24.2 | -24.2 | -24.4 | 0.01 | smooth | 0.000565 | 0.000232 |
+| peak_interp | 32.3909 | 1.79 | 1.79 | 1.79 | 1.79 | 0.00078 | smooth | 2.84e-6 | 1.58e-5 |
+| t_peak_interp | 334.843 | -24.2 | -24.2 | -24.2 | -24.4 | 0.0102 | smooth | 0.000566 | 0.000232 |
 | t_bo_interp | 362.973 | -26.4 | -27.0 | -27.3 | -27.3 | 0.0341 | smooth | 0.00102 | 0.000373 |
-| invocation time | 357.912 | -28.6 | -28.6 | -28.6 | -28.6 | 0.000411 | smooth | 2.08e-5 | 7.26e-6 |
+| invocation time | 357.912 | -28.6 | -28.6 | -28.6 | -28.6 | 0.000429 | smooth | 2.5e-5 | 8.73e-6 |
 | misfit_mlr | 19.4335 | 32.1 | 32.3 | 32.7 | 42.0 | 0.285 | moderate | 0.0227 | 0.00571 |
-| misfit_Tback | 7263.15 | -648.0 | -647.0 | -647.0 | -647.0 | 0.00122 | smooth | 0.000971 | 1.5e-5 |
+| misfit_Tback | 7263.15 | -648.0 | -647.0 | -647.0 | -647.0 | 0.00141 | smooth | 0.00121 | 1.88e-5 |
 
 Item 9 on this configuration: **pass**.
 
 ## PMMA absorption coefficient, 120 PMMA cells, reltol 1.0e-7
 
-**finite-volume core.** Every run Success; invocations [1], safety-net fallbacks 0 of 9; 3662 steps at ε = 0 (3662 to 3754).
+**finite-volume core.** Every run Success; invocations [1], safety-net fallbacks 0 of 9; 3650 steps at ε = 0 (3650 to 3772).
 
 | quantity | Q(0) | D(1e-3) | D(2e-3) | D(4e-3) | D(8e-3) | spread | class | σ | h10 |
 |---|---|---|---|---|---|---|---|---|---|
-| peak_interp | 32.4691 | -2.54 | -2.54 | -2.53 | -2.53 | 0.000572 | smooth | 3.04e-6 | 1.2e-5 |
-| t_peak_interp | 335.624 | 34.4 | 34.4 | 34.3 | 34.0 | 0.011 | smooth | 0.000768 | 0.000225 |
-| t_bo_interp | 363.007 | 20.2 | 20.0 | 19.9 | 19.8 | 0.0177 | smooth | 0.000711 | 0.000358 |
-| invocation time | 357.71 | 2.9 | 2.92 | 2.91 | 2.91 | 0.0079 | smooth | 2.22e-5 | 7.66e-5 |
-| misfit_mlr | 19.4218 | -38.0 | -38.4 | -38.2 | -38.4 | 0.0114 | smooth | 0.00153 | 0.000398 |
-| misfit_Tback | 7351.34 | 1360.0 | 1360.0 | 1360.0 | 1360.0 | 0.000906 | smooth | 0.0011 | 8.13e-6 |
+| peak_interp | 32.4691 | -2.54 | -2.54 | -2.53 | -2.53 | 0.000573 | smooth | 3.04e-6 | 1.2e-5 |
+| t_peak_interp | 335.624 | 34.4 | 34.4 | 34.3 | 34.0 | 0.011 | smooth | 0.000767 | 0.000225 |
+| t_bo_interp | 363.007 | 20.2 | 20.0 | 19.9 | 19.8 | 0.0174 | smooth | 0.000708 | 0.000357 |
+| invocation time | 357.71 | 2.89 | 2.92 | 2.9 | 2.9 | 0.0101 | smooth | 2.58e-5 | 8.87e-5 |
+| misfit_mlr | 19.4218 | -38.0 | -38.4 | -38.2 | -38.4 | 0.0117 | smooth | 0.00152 | 0.000397 |
+| misfit_Tback | 7351.34 | 1360.0 | 1360.0 | 1360.0 | 1360.0 | 0.00125 | smooth | 0.00134 | 9.9e-6 |
 
 Item 9 on this configuration: **pass**.
 
