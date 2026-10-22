@@ -50,10 +50,20 @@ end
 # tests and the suite.
 const _NEW_CORE = get(ENV, "PYROLYSIS_CORE", "old") == "new"
 
+# `PYROLYSIS_TEST_GROUP` runs one part of a run, so CI can run the parts side
+# by side: `newcore` the finite-volume core suites, `domains` everything else;
+# `all`, the default, both.
+const _GROUP = get(ENV, "PYROLYSIS_TEST_GROUP", "all")
+_GROUP in ("all", "newcore", "domains") ||
+    error("PYROLYSIS_TEST_GROUP must be all, newcore or domains, not $(_GROUP)")
+const _RUN_DOMAINS = _GROUP != "newcore"
+const _RUN_NEWCORE = _GROUP != "domains"
+
 @testset "Pyrolysis.jl" begin
     # Domain suites — shared namespace; shared fixtures come from helpers.jl
     # (idempotent under repeated include via its own load guard).
     domains =
+        !_RUN_DOMAINS ? String[] :
         _NEW_CORE ? ["verification"] :
         [
             "boundary_conditions",
@@ -78,7 +88,7 @@ const _NEW_CORE = get(ENV, "PYROLYSIS_CORE", "old") == "new"
     end
 
     # Jacobian suites — one module each.
-    if !_NEW_CORE
+    if !_NEW_CORE && _RUN_DOMAINS
         for f in _jl_files("jacobian")
             _include_isolated(joinpath("jacobian", f))
         end
@@ -86,7 +96,8 @@ const _NEW_CORE = get(ENV, "PYROLYSIS_CORE", "old") == "new"
 
     # Finite-volume core suites — one module each. They run both energy forms
     # themselves, so the enthalpy-form run of the verification suite skips them.
-    if !(_NEW_CORE && get(ENV, "PYROLYSIS_ENERGY_STATE", "temperature") == "enthalpy")
+    if _RUN_NEWCORE &&
+       !(_NEW_CORE && get(ENV, "PYROLYSIS_ENERGY_STATE", "temperature") == "enthalpy")
         for f in _jl_files_recursive("newcore")
             _include_isolated(f)
         end
@@ -95,7 +106,7 @@ const _NEW_CORE = get(ENV, "PYROLYSIS_CORE", "old") == "new"
     # Performance invariants are process-state sensitive, especially the
     # allocation probes. Run the perf driver in a fresh Julia process so
     # `Pkg.test()` exercises the same hermetic path as the CI perf job.
-    if !_NEW_CORE
+    if !_NEW_CORE && _RUN_DOMAINS
         @testset "performance invariants (isolated)" begin
             @test _run_isolated_test_script("perf/runtests.jl")
         end
