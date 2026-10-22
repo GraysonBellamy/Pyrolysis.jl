@@ -1,0 +1,49 @@
+# The numerical gate on pull requests to main and to the mesh-framework stack's
+# branches: the finite-volume core's suites and the verification cases it runs,
+# at their CI resolutions in the temperature form, without the convergence
+# spot checks (PYROLYSIS_TEST_FAST). The two parts run side by side as
+# separate jobs.
+name: Tests
+
+on:
+  pull_request:
+    branches: [main, "mesh-framework-*", "phase*-review"]
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Finite-volume core suites
+            group: newcore
+          - name: Verification cases
+            group: domains
+    env:
+      PYROLYSIS_CORE: new
+      PYROLYSIS_TEST_FAST: "1"
+      PYROLYSIS_TEST_GROUP: ${{ matrix.group }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1.13"
+      - uses: julia-actions/cache@v2
+      - name: Record the environment
+        run: |
+          echo "commit $(git rev-parse HEAD) (tree $(git rev-parse 'HEAD^{tree}'))"
+          echo "pull request head ${{ github.event.pull_request.head.sha || 'none' }}"
+          sha256sum Manifest.toml test/Manifest.toml
+          julia -e 'using InteractiveUtils; versioninfo()'
+      - name: Instantiate
+        run: julia --project=. -e 'using Pkg; Pkg.instantiate()'
+      - name: Run the tests
+        run: julia --color=yes --project=. -e 'using Pkg; Pkg.test()'
