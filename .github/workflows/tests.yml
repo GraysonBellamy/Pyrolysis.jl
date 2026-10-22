@@ -1,12 +1,12 @@
 # The numerical gate. Two matrices:
 #
-# fast, on pull requests to main and to the mesh-framework stack's branches
-# (and by dispatch): every suite at its CI resolution in the temperature form,
-# without the convergence spot checks (PYROLYSIS_TEST_FAST), in five jobs side
-# by side: the finite-volume core suites in their three groups
-# (test/runtests.jl), the verification cases on the finite-volume core, and the
-# old core's suites with the verification cases on the old core. The package
-# is built without its precompile workloads, which solve on the old core.
+# fast, on pull requests to main and by dispatch: every suite at its CI
+# resolution in the temperature form, without the convergence spot checks
+# (PYROLYSIS_TEST_FAST), in five jobs side by side: the finite-volume core
+# suites in their three groups (test/runtests.jl), the verification cases on
+# the finite-volume core, and the old core's suites with the verification
+# cases on the old core. The package is built without its precompile
+# workloads, which solve on the old core.
 #
 # full, weekly and by dispatch with `matrix: full`: `Pkg.test()` as a user runs
 # it (every suite, the verification cases on the old core, the spot checks),
@@ -18,7 +18,7 @@ name: Tests
 
 on:
   pull_request:
-    branches: [main, "mesh-framework-*", "phase*-review", "cutover-m*"]
+    branches: [main]
   workflow_dispatch:
     inputs:
       matrix:
