@@ -51,13 +51,43 @@ end
 const _NEW_CORE = get(ENV, "PYROLYSIS_CORE", "old") == "new"
 
 # `PYROLYSIS_TEST_GROUP` runs one part of a run, so CI can run the parts side
-# by side: `newcore` the finite-volume core suites, `domains` everything else;
-# `all`, the default, both.
+# by side: `newcore` the finite-volume core suites, or one of their three
+# groups (`newcore-jacobian`, `newcore-burnout`, `newcore-other`); `domains`
+# everything else; `all`, the default, both.
 const _GROUP = get(ENV, "PYROLYSIS_TEST_GROUP", "all")
-_GROUP in ("all", "newcore", "domains") ||
-    error("PYROLYSIS_TEST_GROUP must be all, newcore or domains, not $(_GROUP)")
-const _RUN_DOMAINS = _GROUP != "newcore"
-const _RUN_NEWCORE = _GROUP != "domains"
+const _NEWCORE_GROUPS = ("newcore-jacobian", "newcore-burnout", "newcore-other")
+_GROUP in ("all", "newcore", "domains", _NEWCORE_GROUPS...) || error(
+    "PYROLYSIS_TEST_GROUP must be all, newcore, $(join(_NEWCORE_GROUPS, ", ")) " *
+    "or domains, not $(_GROUP)",
+)
+const _RUN_DOMAINS = _GROUP in ("all", "domains")
+
+# The finite-volume core suites' groups, of similar runtime on the CI runner:
+# the Jacobian and multi-D suites, the burnout path's suites, and the rest.
+const _NEWCORE_BURNOUT = joinpath.(
+    "newcore",
+    (
+        "test_correction.jl",
+        "test_deactivation.jl",
+        "test_mesh_motion.jl",
+        "test_policies.jl",
+        "test_relative_flux.jl",
+    ),
+)
+function _newcore_group(f)
+    any(d -> startswith(f, joinpath("newcore", d)), ("jacobian", "multid")) &&
+        return "newcore-jacobian"
+    return f in _NEWCORE_BURNOUT ? "newcore-burnout" : "newcore-other"
+end
+_run_newcore(f) = _GROUP in ("all", "newcore") || _GROUP == _newcore_group(f)
+
+# Each file's wall time, so a CI partition can be balanced from a run's log.
+function _timed(run, label)
+    t = @elapsed run()
+    println("test file ", label, ": ", round(t; digits = 1), " s")
+    flush(stdout)
+    return nothing
+end
 
 @testset "Pyrolysis.jl" begin
     # Domain suites — shared namespace; shared fixtures come from helpers.jl
@@ -83,23 +113,25 @@ const _RUN_NEWCORE = _GROUP != "domains"
             # The analytical tests solve on the old core, which the new-core
             # runs leave to the old-core run.
             _NEW_CORE && f == "test_analytical.jl" && continue
-            include(joinpath(@__DIR__, dir, f))
+            _timed(() -> include(joinpath(@__DIR__, dir, f)), joinpath(dir, f))
         end
     end
 
     # Jacobian suites — one module each.
     if !_NEW_CORE && _RUN_DOMAINS
         for f in _jl_files("jacobian")
-            _include_isolated(joinpath("jacobian", f))
+            _timed(
+                () -> _include_isolated(joinpath("jacobian", f)),
+                joinpath("jacobian", f),
+            )
         end
     end
 
     # Finite-volume core suites — one module each. They run both energy forms
     # themselves, so the enthalpy-form run of the verification suite skips them.
-    if _RUN_NEWCORE &&
-       !(_NEW_CORE && get(ENV, "PYROLYSIS_ENERGY_STATE", "temperature") == "enthalpy")
-        for f in _jl_files_recursive("newcore")
-            _include_isolated(f)
+    if !(_NEW_CORE && get(ENV, "PYROLYSIS_ENERGY_STATE", "temperature") == "enthalpy")
+        for f in filter(_run_newcore, _jl_files_recursive("newcore"))
+            _timed(() -> _include_isolated(f), f)
         end
     end
 
@@ -108,7 +140,9 @@ const _RUN_NEWCORE = _GROUP != "domains"
     # `Pkg.test()` exercises the same hermetic path as the CI perf job.
     if !_NEW_CORE && _RUN_DOMAINS
         @testset "performance invariants (isolated)" begin
-            @test _run_isolated_test_script("perf/runtests.jl")
+            _timed("perf/runtests.jl") do
+                @test _run_isolated_test_script("perf/runtests.jl")
+            end
         end
     end
 end
