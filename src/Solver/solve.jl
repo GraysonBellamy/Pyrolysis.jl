@@ -1243,7 +1243,14 @@ function extract_solution!(
             cell_vol = mesh.cell_volumes[j]
 
             # Evaluate reaction rates at this cell
-            Physics.evaluate_reactions!(rates, heats, ξ, T, material)
+            Physics.evaluate_reactions!(
+                rates,
+                heats,
+                ξ,
+                T,
+                material,
+                TanhLimiter(material.depletion_limiter),
+            )
 
             # Sum gas production from each reaction
             for r_idx = 1:NR
@@ -1562,7 +1569,14 @@ function extract_solution_ale!(
             cell_vol = volumes[j]
 
             # Evaluate reaction rates at this cell
-            Physics.evaluate_reactions!(rates, heats, ξ, T, material)
+            Physics.evaluate_reactions!(
+                rates,
+                heats,
+                ξ,
+                T,
+                material,
+                TanhLimiter(material.depletion_limiter),
+            )
 
             # Sum gas production from each reaction
             for r_idx = 1:NR

@@ -44,7 +44,7 @@ function rate_fingerprint()
             name = :fp,
             components = (solid, gas),
             reactions = (Reaction(:r, 1 => 2; A = 1e8, E = 1e5, h = 1e5, n = n),),
-            depletion_limiter = DepletionLimiter(; threshold, enabled),
+            depletion_limiter = Pyrolysis.Materials.TanhLimiter(; threshold, enabled),
         )
         rates, heats = zeros(1), zeros(1)
         for ξ in (

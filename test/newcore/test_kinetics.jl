@@ -2,7 +2,7 @@ using Test
 using ForwardDiff
 using Pyrolysis
 using Pyrolysis.Materials: R_GAS, STEFAN_BOLTZMANN, T_PROPERTY_MIN, T_PROPERTY_MAX
-using Pyrolysis.Materials: DepletionLimiter, OneSidedLimiter
+using Pyrolysis.Materials: DepletionLimiter, TanhLimiter
 using Pyrolysis.Physics: reaction_rate, one_sided_factor, evaluate_reactions!
 using Pyrolysis.Physics: ideal_gas_pressure
 using Pyrolysis.Properties: effective_gas_viscosity, effective_conductivity
@@ -12,7 +12,7 @@ using Pyrolysis.Integration
 using Pyrolysis.Integration: setup
 
 _rxn(order) = Reaction(:r, 1 => 2; A = 1.0, E = 1000 * R_GAS, h = 0.0, n = order)
-_rate(x, order, T; limiter = OneSidedLimiter()) =
+_rate(x, order, T; limiter = DepletionLimiter()) =
     reaction_rate(_rxn(order), (x, zero(x)), trial_temperature(T); limiter = limiter)
 
 # Trial concentrations off the physical domain, including the window
@@ -20,7 +20,7 @@ _rate(x, order, T; limiter = OneSidedLimiter()) =
 # its slope does.
 const _trial_concentrations = (-1e6, -1.0, -7.3e-6, -1e-9, 0.0, 1e-12, 1e-9, 1.0)
 
-@testset "one-sided limiter: finite rates and derivatives at absent reactants" begin
+@testset "depletion limiter: finite rates and derivatives at absent reactants" begin
     for order in (0.0, 0.3, 0.5, 1.0, 2.0), x in _trial_concentrations
         f(y) = _rate(y, order, 700.0)
         @test isfinite(f(x))
@@ -28,7 +28,7 @@ const _trial_concentrations = (-1e6, -1.0, -7.3e-6, -1e-9, 0.0, 1e-12, 1e-9, 1.0
         x <= 0 && @test f(x) == 0
         x <= 0 && @test ForwardDiff.derivative(f, x) == 0
         # Disabled: the finite base alone, finite at every real concentration.
-        g(y) = _rate(y, order, 700.0; limiter = OneSidedLimiter(enabled = false))
+        g(y) = _rate(y, order, 700.0; limiter = DepletionLimiter(enabled = false))
         @test isfinite(g(x)) && g(x) >= 0
         @test isfinite(ForwardDiff.derivative(g, x))
     end
@@ -38,10 +38,10 @@ const _trial_concentrations = (-1e6, -1.0, -7.3e-6, -1e-9, 0.0, 1e-12, 1e-9, 1.0
         @test isfinite(ForwardDiff.derivative(t -> _rate(x, 1.0, t), T))
     end
     # Negative control: a positive base alone consumes an absent reactant.
-    @test _rate(0.0, 0.0, 700.0; limiter = OneSidedLimiter(enabled = false)) > 0
+    @test _rate(0.0, 0.0, 700.0; limiter = DepletionLimiter(enabled = false)) > 0
 end
 
-@testset "one-sided limiter: C¹ onset joined onto tanh" begin
+@testset "depletion limiter: C¹ onset joined onto tanh" begin
     for join in (0.5, 1.0, 2.0)
         @test one_sided_factor(0.0, join) == 0
         @test ForwardDiff.derivative(x -> one_sided_factor(x, join), 0.0) == 0
@@ -65,8 +65,8 @@ end
 
 @testset "calibration guard: rates above the join equal the tanh limiter" begin
     for order in (0.0, 0.3, 0.5, 1.0, 2.0), threshold in (0.1, 1.0, 5.0)
-        tanh_limiter = DepletionLimiter(threshold = threshold)
-        one_sided = OneSidedLimiter(threshold = threshold)
+        tanh_limiter = TanhLimiter(threshold = threshold)
+        one_sided = DepletionLimiter(threshold = threshold)
         for x in (1.0, 1.5, 2.0, 20.0, 1e3) .* threshold, T in (300.0, 700.0, 1500.0)
             r_tanh = reaction_rate(_rxn(order), (x, 0.0), T; limiter = tanh_limiter)
             r_one = reaction_rate(_rxn(order), (x, 0.0), T; limiter = one_sided)
@@ -79,27 +79,25 @@ end
             _rxn(order),
             (x, 0.0),
             700.0;
-            limiter = DepletionLimiter(enabled = false),
+            limiter = TanhLimiter(enabled = false),
         )
         r_one = reaction_rate(
             _rxn(order),
             (x, 0.0),
             700.0;
-            limiter = OneSidedLimiter(enabled = false),
+            limiter = DepletionLimiter(enabled = false),
         )
         @test r_one ≈ r_tanh rtol = 1e-12
     end
-    @test OneSidedLimiter(DepletionLimiter(threshold = 0.3, enabled = false)) ==
-          OneSidedLimiter(threshold = 0.3, enabled = false)
-    @test OneSidedLimiter(OneSidedLimiter(join = 2.0)) == OneSidedLimiter(join = 2.0)
-    @test_throws ArgumentError OneSidedLimiter(threshold = 0.0)
-    @test_throws ArgumentError OneSidedLimiter(join = -1.0)
-    @test_throws ArgumentError OneSidedLimiter(base_scale = 0.0)
+    @test TanhLimiter(DepletionLimiter(threshold = 0.3, enabled = false)) ==
+          TanhLimiter(threshold = 0.3, enabled = false)
+    @test_throws ArgumentError DepletionLimiter(threshold = 0.0)
+    @test_throws ArgumentError DepletionLimiter(join = -1.0)
+    @test_throws ArgumentError DepletionLimiter(base_scale = 0.0)
 end
 
-# A decomposing slab whose reactant sits above the join everywhere: the
-# kernel's sources equal those of the material's own tanh limiter.
-@testset "reaction kernel: sources above the join equal the material's limiter" begin
+# A decomposing slab: the kernel's sources are the material's rates and heats.
+@testset "reaction kernel: sources equal the material's rates" begin
     virgin = SolidComponent(:virgin, ρ = 1100.0, c = 1500.0, k = 0.2)
     char = SolidComponent(:char, ρ = 300.0, c = 1000.0, k = 0.1)
     gas = GaseousComponent(:gas, M = 0.03, c = 1100.0, k = 0.03, λ = 0.0)
@@ -124,7 +122,7 @@ end
     )
     cp = setup(problem)
     kernel = only(k for k in cp.def.kernels if k isa ReactionKernel)
-    @test kernel.limiter == OneSidedLimiter(threshold = 2.0)
+    @test kernel.limiter == DepletionLimiter(threshold = 2.0)
     ds = cp.ws.derived
     c = Contributions{Float64}(3, 2, 6, 7, 7)
     reset!(c)

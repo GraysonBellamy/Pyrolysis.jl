@@ -1,4 +1,4 @@
-# Depletion-limiter tests.
+# Tanh-limiter tests.
 #
 # - The limiter is a smooth multiplicative rate factor tanh(ξ/ξ_th) with no
 #   threshold branch. A base-applied limiter
@@ -11,12 +11,13 @@
 using Test
 using ForwardDiff
 using Pyrolysis
-using Pyrolysis.Physics: reaction_rate, DepletionLimiter
+using Pyrolysis.Physics: reaction_rate, TanhLimiter
 
-@testset "depletion limiter" begin
+@testset "tanh limiter" begin
     T_kin = 700.0
-    ξ_th = 1.0  # DepletionLimiter default threshold
-    no_limiter = DepletionLimiter(enabled = false)
+    ξ_th = 1.0  # TanhLimiter default threshold
+    limiter = TanhLimiter()
+    no_limiter = TanhLimiter(enabled = false)
 
     rxn1 = Reaction(:first_order, 1 => 2, A = 1e10, E = 150e3, h = 5e5)
     rxn0 = Reaction(:zero_order, 1 => 2, A = 1e10, E = 150e3, h = 5e5, n = 0.0)
@@ -26,9 +27,9 @@ using Pyrolysis.Physics: reaction_rate, DepletionLimiter
     k = reaction_rate(rxn1, (1.0, 0.0), T_kin; limiter = no_limiter)
     @test k > 0
 
-    rate1(ξ) = reaction_rate(rxn1, (ξ, zero(ξ)), T_kin)
-    rate0(ξ) = reaction_rate(rxn0, (ξ, zero(ξ)), T_kin)
-    rate03(ξ) = reaction_rate(rxn03, (ξ, zero(ξ)), T_kin)
+    rate1(ξ) = reaction_rate(rxn1, (ξ, zero(ξ)), T_kin; limiter)
+    rate0(ξ) = reaction_rate(rxn0, (ξ, zero(ξ)), T_kin; limiter)
+    rate03(ξ) = reaction_rate(rxn03, (ξ, zero(ξ)), T_kin; limiter)
 
     @testset "continuous and smooth across the threshold" begin
         # A base-applied limiter jumps by factor tanh(1) ≈ 0.762 crossing ξ_th.

@@ -104,7 +104,7 @@ export gas_property_temperature
 
 # Reactions
 export Reaction
-export AbstractDepletionLimiter, DepletionLimiter, OneSidedLimiter
+export AbstractDepletionLimiter, DepletionLimiter, TanhLimiter
 
 # Materials
 export Material, MixingRule, PARALLEL, SERIES, WEIGHTED, BRUGGEMAN, CARMAN_KOZENY

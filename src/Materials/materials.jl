@@ -199,7 +199,7 @@ struct Material{NC,NR,C<:Tuple,RT<:Tuple,LSL,Pμ,DL<:AbstractDepletionLimiter} <
     lateral_shrinkage_law::LSL
 
     # Depletion limiter applied to every reaction-rate evaluation for this
-    # material (see DepletionLimiter, OneSidedLimiter). DL is the concrete
+    # material (see DepletionLimiter). DL is the concrete
     # limiter type, so rate evaluation specializes on it.
     depletion_limiter::DL
 
@@ -286,8 +286,8 @@ Create a material with keyword arguments.
 - `lateral_shrinkage_law`: optional A(t)/A_0 = law(χ̄). `nothing` ⇒ identity.
 - `depletion_limiter`: the [`AbstractDepletionLimiter`](@ref) applied to every
   reaction-rate evaluation for this material. Default: a
-  [`DepletionLimiter`](@ref) (smooth `tanh(ξ/threshold)` roll-off near reactant
-  depletion) with `threshold = 1.0` kg/m³, enabled.
+  [`DepletionLimiter`](@ref) (a roll-off near reactant depletion that is zero
+  at and below zero concentration) with `threshold = 1.0` kg/m³, enabled.
 
 # Example
 ```julia

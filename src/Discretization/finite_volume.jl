@@ -248,7 +248,14 @@ function compute_rhs!(
         ξ = ntuple(j -> state.ξ[j, i], Val(NC))
 
         # Evaluate reaction rates and heats
-        evaluate_reactions!(rhs_cache.rates, rhs_cache.heats, ξ, T, material)
+        evaluate_reactions!(
+            rhs_cache.rates,
+            rhs_cache.heats,
+            ξ,
+            T,
+            material,
+            TanhLimiter(material.depletion_limiter),
+        )
 
         # Compute reaction heat source
         rhs_cache.Q_rxn[i] = reaction_heat_source(rhs_cache.rates, rhs_cache.heats)

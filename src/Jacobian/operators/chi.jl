@@ -31,6 +31,7 @@ operator skips both `apply!` and the Jacobian writes.
 
 using ForwardDiff
 using ..Materials: Material, n_components, n_reactions, dry_pyrolysis_gas_indices
+using ..Materials: TanhLimiter
 using ..Physics: evaluate_reactions!, species_source_terms!
 
 """
@@ -113,7 +114,14 @@ function apply!(
         ξ_i = ntuple(j -> state.ξ[j, i], Val(NC))
         fill!(rates, 0.0)
         fill!(heats, 0.0)
-        evaluate_reactions!(rates, heats, ξ_i, T_i, material)
+        evaluate_reactions!(
+            rates,
+            heats,
+            ξ_i,
+            T_i,
+            material,
+            TanhLimiter(material.depletion_limiter),
+        )
         species_source_terms!(dξ, rates, material)
         S_dry = 0.0
         for j in idx_dry
@@ -140,7 +148,14 @@ function _chi_residual_kernel!(
     ξ = ntuple(j -> x[1+j], Val(NC))
     fill!(rates, zero(eltype(rates)))
     fill!(heats, zero(eltype(heats)))
-    evaluate_reactions!(rates, heats, ξ, T, material)
+    evaluate_reactions!(
+        rates,
+        heats,
+        ξ,
+        T,
+        material,
+        TanhLimiter(material.depletion_limiter),
+    )
     species_source_terms!(dξ_dt, rates, material)
     S_dry = zero(eltype(rates))
     for j in idx_dry
@@ -273,7 +288,14 @@ function _eval_S_dry(
     rates = zeros(Float64, NR)
     heats = zeros(Float64, NR)
     dξ = zeros(Float64, NC)
-    evaluate_reactions!(rates, heats, ξ, T, material)
+    evaluate_reactions!(
+        rates,
+        heats,
+        ξ,
+        T,
+        material,
+        TanhLimiter(material.depletion_limiter),
+    )
     species_source_terms!(dξ, rates, material)
     S = 0.0
     @inbounds for j in idx_dry

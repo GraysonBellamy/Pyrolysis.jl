@@ -23,9 +23,9 @@ const DEFAULT_DEPLETION_LIMITER = DepletionLimiter()
     ξ < 20.0 * threshold ? tanh(ξ / threshold) : one(ξ)
 
 # The concentration factor of one reactant, multiplied onto `conc`. The tanh
-# limiter powers the clamped concentration; the one-sided limiter powers the
+# limiter powers the clamped concentration; the depletion limiter powers the
 # finite base and multiplies by its onset, which is zero at and below zero.
-@inline function _reactant_factor(conc, limiter::DepletionLimiter, ξ::Real, order::Real)
+@inline function _reactant_factor(conc, limiter::TanhLimiter, ξ::Real, order::Real)
     ξ_raw = max(ξ, zero(ξ))
     conc *= _fast_pow(ξ_raw, order)
     if limiter.enabled
@@ -34,7 +34,7 @@ const DEFAULT_DEPLETION_LIMITER = DepletionLimiter()
     return conc
 end
 
-@inline function _reactant_factor(conc, limiter::OneSidedLimiter, ξ::Real, order::Real)
+@inline function _reactant_factor(conc, limiter::DepletionLimiter, ξ::Real, order::Real)
     if limiter.enabled
         # The onset and its slope vanish at and below zero, so the rate and
         # every derivative of it are exactly zero there.
@@ -64,7 +64,7 @@ end
 """
 	one_sided_factor(x, join) -> Real
 
-The onset of [`OneSidedLimiter`](@ref): zero at and below zero, the cubic
+The onset of [`DepletionLimiter`](@ref): zero at and below zero, the cubic
 `(s − 2y) t³ + (3y − s) t²` (`t = x/join`, `y = tanh(join)`,
 `s = join·sech²(join)`) up to `join`, and `tanh(x)` above. C¹ everywhere.
 """
@@ -88,12 +88,11 @@ r = A * exp(-E/RT) * ∏ᵢ ξᵢ^nᵢ * ∏ᵢ tanh(ξᵢ/ξ_th) * H(T - T_min)
 # Depletion Protection
 Each reactant contributes a rate factor set by the limiter
 (`ξ_th = limiter.threshold`, default 1.0 kg/m³). A [`DepletionLimiter`](@ref)
-multiplies the power of the clamped concentration by `tanh(ξ/ξ_th)`: the rate
-recovers the bare Arrhenius law for ξ ≫ ξ_th and vanishes with bounded ∂r/∂ξ
-as ξ → 0 for every reaction order n ≥ 0. A [`OneSidedLimiter`](@ref) powers a
-finite base and multiplies by a C¹ onset that is exactly zero at and below
-ξ = 0 and equals `tanh(ξ/ξ_th)` above `join · ξ_th`, so its rates match the
-tanh limiter's there.
+powers a finite base and multiplies by a C¹ onset that is exactly zero at and
+below ξ = 0 and equals `tanh(ξ/ξ_th)` above `join · ξ_th`: the rate recovers
+the bare Arrhenius law for ξ ≫ ξ_th. A [`TanhLimiter`](@ref) multiplies the
+power of the clamped concentration by `tanh(ξ/ξ_th)`, so its rates match the
+depletion limiter's above the join.
 
 Pass a limiter via the `limiter` keyword to override per-call.
 
@@ -159,7 +158,7 @@ This function is designed to be allocation-free using @generated for compile-tim
 Rates are evaluated with `limiter`, by default the material's own
 (`material.depletion_limiter`, settable via the `Material` constructor's
 `depletion_limiter` keyword); see [`DepletionLimiter`](@ref) and
-[`OneSidedLimiter`](@ref).
+[`TanhLimiter`](@ref).
 
 # State-Dependent Heats
 Heats of reaction can depend on temperature only (standard) or on both

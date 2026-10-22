@@ -9,24 +9,21 @@ Arrhenius kinetics evaluated at the trial temperature: per cell the reaction
 mass sources `ωᵢⱼ Vᵢ` and the reaction heat `Q_rxn(Tᵢ) Vᵢ`, with the heats quoted
 at the local temperature.
 
-The rates carry a [`OneSidedLimiter`](@ref), so an absent or negative trial
+The rates carry the material's [`DepletionLimiter`](@ref), so an absent or negative trial
 concentration is never consumed whatever the reaction order, and every rate is
 finite with a finite derivative at any real state; a cell in which every
 reaction lacks a reactant contributes nothing and is not evaluated.
 """
 struct ReactionKernel <: Kernel
-    limiter::OneSidedLimiter
+    limiter::DepletionLimiter
 end
 
 """
 	ReactionKernel(material)
 
-The reaction kernel with the one-sided limiter of the material's threshold and
-enabled flag; above the limiter's join its rates equal those of the material's
-own limiter.
+The reaction kernel with the material's depletion limiter.
 """
-ReactionKernel(material::Material) =
-    ReactionKernel(OneSidedLimiter(material.depletion_limiter))
+ReactionKernel(material::Material) = ReactionKernel(material.depletion_limiter)
 
 # Whether every reaction has a reactant at or below zero in `ξ`: under an
 # enabled one-sided limiter its rate and every derivative of it are then
