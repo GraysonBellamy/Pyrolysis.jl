@@ -457,6 +457,36 @@ Total 38.5 days: **seven to eight and a half weeks**, against the provisional fo
 
 **Status.** M1 is closed: its build complete, its gate read with C118's reading, the probe half of the decision confirmed.
 
+### 13.3 M2
+
+**Branch.** `cutover-m2-consumer-surface`, from `cutover-m1-multid-probe` at `d196e62`; its pull request targets `cutover-m1-multid-probe` until #17 merges, then `mesh-framework-phase3` (D111). M2 starts before question 1 is answered, by the owner's choice.
+
+**W1's items as tasks** (enumerated at M2's start, as M1's were; days are a developer's working days).
+
+| Task | Builds | Its test | Days |
+|---|---|---|---|
+| 1 | `create_uniform_mesh(L, n; cross_section, coordinates)`, `create_stretched_mesh(L, n, stretch; stretch_from, …)` and `create_mesh_from_nodes(z; …)` on `Meshes`, returning `Mesh{1}` with the old constructors' node arithmetic; `Meshes` owns the three names and `Geometry` adds its `Val(NC)` methods to them (D121) | §5.3 item 1: positions equal to the old constructors' bit for bit, the volume formulas in three coordinate systems, the cross-section measure, the argument checks | 1.5 |
+| 2 | `initial_fields(problem, mesh) -> (T0, ξ0)` at the cell centres, a scalar `z` on a line and an `SVector` on more dimensions (D117) | §5.3 item 2: the step, linear, Gaussian and tanh profiles equal to the old `apply_initial_conditions!`'s cell values, recorded as fixtures | 0.5 |
+| 3 | `setup` on `Mesh{D}` only, one method for every `D` (the 1D-only physics refused on `D ≥ 2` by name); the coordinate system and the cross section read from the mesh, `setup`'s and `solve`'s `coordinates` keyword deleted; the pinned and Lagrangian nodes set from `use_ale` and `lagrangian`; `_own_problem` deleted, since `setup` no longer writes into the mesh | the 1D suite and the identity digests unchanged | 1.5 |
+| 4 | `validate_problem` and the problem's `show` on the new mesh | §5.3 item 8: today's refusals on the new mesh | 0.5 |
+| 5 | The routed mesh constructor in `casedefs.jl` beside `core_solve`; the case builders through it; the `test/newcore` fixtures on the new constructors, the radial options moved onto the meshes; the identity gate's Douglas fir deck on the native mesh | `NEW_CORE_CASES` in both forms | 1.5 |
+| 6a | The accessors of §3.2 on the new solution, each name owned by the module that survives the deletion (D121); `get_cell_positions(sol; at)`, `get_profile(sol, field, i)` with dead cells `NaN`; the `min_thickness` stop's outcome `:min_thickness` (question 22); `succeeded` and `completed`; `show` | — | 1 |
+| 6b | `sol(t)` and `interpolate_solution(sol, t)`: the fields reconstructed from the integrator's interpolant with the mask of the last event at or before `t`, refused inside the step that ends at an event | — | 1.5 |
+| 6c | §5.3 item 3 on a moving deactivating deck | as stated | 1 |
+| 7 | The progress observer: a read-only `DiscreteCallback` drawing with ProgressMeter under the policy's flag rule; `progress` draws again (C38's "accepted and ignored" ends for it) | §5.3 item 4: bit-identical with and without, under every policy, with and without events | 0.5 |
+| 8 | `parameter_sweep` over `Integration.solve`, serial and by `pmap` | §5.3 item 5: serial and two workers | 1 |
+| 9 | The plots recipes on the new solution | §5.3 item 6: the recipes' data tuples | 0.5 |
+| 10 | The limiter rename (C110): the one-sided limiter takes the name `DepletionLimiter`, the tanh limiter becomes the old core's own type, read through `evaluate_reactions!`'s default; `setup`'s conversion deleted | the old-core fingerprint bit-identical; the identity digests unchanged | 1 |
+| 11a | `ConservationRecorder` and `conservation_audit` (C108, question 23): the recorder bound to the set-up problem inside `integrate`, with its own workspace so the trajectory is untouched, integrating the mass outflow and the enthalpy ledger rate over each accepted step by three-point Gauss–Legendre on the step's interpolant (to the crossing of a located event); the audit closing mass and enthalpy against the live inventories and the events' lost and vented inventories, by the trapezoid on the saved series without a recorder | — | 2 |
+| 11b | §5.3 item 14 | as stated | 1 |
+| 12 | The new core's property calls audited for the hard-clamped variants of C2 and moved to the smooth ones | the identity digests unchanged | 1 |
+| 13 | The examples' decks through `setup` and a short integration on the native mesh, in a scratch run (not committed) | every deck sets up | 1 |
+| G | The gate: the `test/newcore` files, `NEW_CORE_CASES` in both forms, the identity digests, the old-core fingerprint, format, Aqua and JET; this record | — | 2 |
+
+Total 19.5 days: **about four weeks**, against the 2.5 of §6. The growth is the accessors' specification (6a to 6c, 3.5 days: `sol(t)` across events is new code, not a port), the per-step recorder (11a and 11b, 3 days, question 23) and the routed fixtures (5).
+
+**C121. §5.3 item 7 in M2's gate.** §6's M2 row lists §5.3 items 1 to 8 and 14; W1's gate lists 1 to 6 and 8. Item 7 tests the precompile workloads on the new core, which W6 writes in the deletion commit: until then `src/precompile.jl` holds the old core's workloads, and carrying both sets doubles the precompile time (R50). *Resolution (proposed):* item 7 is M7's, with the workloads it tests; M2's gate is W1's.
+
 ---
 
 ## Appendix A. Inventories
