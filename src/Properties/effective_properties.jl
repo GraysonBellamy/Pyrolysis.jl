@@ -869,6 +869,26 @@ permeability increases, allowing easier gas escape.
 end
 
 """
+	effective_permeability(ξ, T, material, φ) -> κ [m²]
+
+[`effective_permeability`](@ref) with the porosity `φ` given: the
+Carman–Kozeny rule reads it in place of the porosity clamped into `[0, 1]`, so
+a caller that floors the unclamped pore fraction smoothly gets a permeability
+smooth in the state; the per-component mixes do not read it.
+"""
+@inline function effective_permeability(
+    ξ::NTuple{NC,<:Real},
+    T::Real,
+    material,
+    φ::Real,
+) where {NC}
+    material.mixing.κ.rule == CARMAN_KOZENY &&
+        return _carman_kozeny_permeability(φ, material.mixing.κ.ℓ)
+    v = solid_volume_fractions(ξ, T, material)
+    return _permeability_from_v(v, T, material)
+end
+
+"""
 	_carman_kozeny_permeability(φ, ℓ) -> κ [m²]
 
 Kozeny–Carman permeability from porosity `φ` and characteristic particle/pore

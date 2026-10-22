@@ -395,3 +395,41 @@ end
     @test rates[1][1] > 0
     @test setup(_sealed_pair(0.0)).def.setup.gas isa NoGasTransport
 end
+
+# The Carman–Kozeny permeability reads the state mapping's smoothly floored
+# porosity, so a trial state whose skeleton overfills its cell keeps the
+# positive mobility of the floor, joined C¹ to the physical states, where the
+# porosity clamped into [0, 1] would cut it to zero at a kink.
+@testset "Carman–Kozeny permeability at the smooth porosity" begin
+    ℓ = 1e-4
+    solid =
+        SolidComponent(:s, ρ = 500.0, c = 1500.0, k = 0.2, λ = 1e-5, ρ_intrinsic = 1000.0)
+    gas = GaseousComponent(:gas, M = 0.03, c = 1100.0, k = 0.05, λ = 1e-5)
+    mat = Material(;
+        name = :ck,
+        components = (solid, gas),
+        reactions = (),
+        mixing = MaterialMixing(κ = MixingSpec(CARMAN_KOZENY; length_scale = ℓ)),
+    )
+    T = 400.0
+    for ξ in ((500.0, 0.1), (900.0, 0.1))
+        φ = 1 - ξ[1] / 1000.0
+        @test Pyrolysis.Properties.effective_permeability(ξ, T, mat, φ) ==
+              Pyrolysis.Properties.effective_permeability(ξ, T, mat)
+    end
+    # Overfilled: the clamped porosity is zero, the floored one is not.
+    @test Pyrolysis.Properties.effective_permeability((1100.0, 0.1), T, mat) == 0
+    κ(s) = Pyrolysis.Properties.effective_permeability(
+        (s, oftype(s, 0.1)),
+        T,
+        mat,
+        Pyrolysis.States.smooth_floor(1 - s / 1000.0, 1e-12),
+    )
+    @test κ(1100.0) > 0
+    @test κ(1100.0) == κ(1000.0 * (1 + 1e-9))
+    @test ForwardDiff.derivative(κ, 1100.0) == 0
+    # Inside the floor's band the permeability still falls with the solid.
+    band = 1000.0 * (1 - 1.5e-12)
+    @test ForwardDiff.derivative(κ, band) < 0
+    @test isfinite(ForwardDiff.derivative(κ, band))
+end

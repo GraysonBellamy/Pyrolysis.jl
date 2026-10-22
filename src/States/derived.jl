@@ -364,7 +364,7 @@ end
     ds.φ[i] = φ
     ds.P[i] = ideal_gas_pressure(ξ⁺, Tt, φ, material)
     μ = smooth_floor(material.gas_viscosity(Tt), MU_FLOOR)
-    ds.mob[i] = effective_permeability(ξ⁺, Tt, material) / μ
+    ds.mob[i] = effective_permeability(ξ⁺, Tt, material, φ) / μ
     return nothing
 end
 
