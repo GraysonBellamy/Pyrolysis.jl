@@ -153,6 +153,7 @@ end
     )
     sol = Integration.solve(problem; abstol = 1e-10, reltol = 1e-8)
     @test sol.retcode === :Success
+    @test sol.solve_time > 0
     # Prescribed flux: T_s = T_cell + q d / k with d the half cell; adiabatic:
     # the face temperature is the cell temperature.
     @test sol.surface_T ≈ sol.T[end, :] .+ q * (L / n / 2) / 0.4 rtol = 1e-12
@@ -165,6 +166,8 @@ end
     @test sol.extras.back_temperature == sol.boundary_T[:bottom]
     @test sol.extras.back_heat_flux == zeros(3)
     @test sol.mass_loss_rate == zeros(3)
+    # The inert column's mass per unit area, ρ L, at every saved time.
+    @test sol.extras.total_mass ≈ fill(800.0 * L, 3) rtol = 1e-12
     @test sol.extras.live_cells == fill(n, 3)
     @test isempty(sol.extras.park_times)
 end
@@ -208,9 +211,11 @@ end
             @test x.surface_heat_flux_absorbed ≈ 4e4 .* x.surface_emissivity rtol = 1e-12
             @test all(iszero, x.volumetric_absorption)
         else
-            # The incident flux enters in depth, not through the face.
+            # The incident flux enters in depth, not through the face, at most
+            # its absorbed share.
             @test all(iszero, x.surface_heat_flux_absorbed)
             @test all(>(0), x.volumetric_absorption)
+            @test all(x.volumetric_absorption .<= x.surface_emissivity .* 4e4 .+ 1e-9)
         end
         @test x.back_temperature == sol.boundary_T[:bottom]
         @test x.back_heat_flux ≈ h_back .* (T_back_inf .- x.back_temperature) rtol = 1e-12
@@ -224,5 +229,111 @@ end
         @test all(>(0), x.surface_conductivity)
         @test x.live_cells == fill(12, length(sol.t))
         @test isempty(x.park_times)
+    end
+end
+
+# A solid that absorbs less than it emits (a = 0.6, ε = 0.95), absorbing in
+# depth and thin enough to pass about a fifth of the beam; its gas takes no
+# volume, so the cells' absorptivity is the solid's at every state, while on a
+# moving mesh its decomposition thins the column.
+@testset "outputs: the in-depth deposit and the transmitted beam sum to the absorbed share: use_ale = $use_ale" for use_ale in
+                                                                                                                    (
+    false,
+    true,
+)
+    a, q = 0.6, 5e4
+    virgin = SolidComponent(
+        :virgin,
+        ρ = 600.0,
+        c = 1500.0,
+        k = 0.15,
+        ε = 0.95,
+        absorptivity = a,
+        α = 0.5,
+        λ = 1e-5,
+    )
+    gas = GaseousComponent(:pyrgas, M = 0.06, c = 1800.0, k = 0.03, λ = 5e-5)
+    rxn = Reaction(:pyro, 1 => 2, A = 1e8, E = 7e4, h = -300e3)
+    problem = PyrolysisProblem(
+        mesh = create_uniform_mesh(0.005, 8),
+        material = Material(name = :wood, components = (virgin, gas), reactions = (rxn,)),
+        bc_set = BoundaryConditionSet(
+            thermal = (
+                top = RadiativeFluxBC(flux = q) +
+                      RadiativeBC(T_inf = 300.0) +
+                      ConvectiveBC(h = 10.0, T_inf = 300.0),
+                bottom = AdiabaticBC(),
+            ),
+            mass = (top = DiffusiveMassBC(), bottom = ImpermeableBC()),
+        ),
+        ξ_initial = [z -> 600.0, z -> 0.0],
+        tspan = (0.0, 10.0),
+        output_times = collect(0.0:2.0:10.0),
+    )
+    sol = Integration.solve(problem; radiation_model = BEER_LAMBERT, use_ale)
+    @test sol.retcode === :Success
+    x = sol.extras
+    @test all(≈(0.95), x.surface_emissivity)
+    @test all(iszero, x.surface_heat_flux_absorbed)
+    @test all(>(0), x.volumetric_absorption)
+    @test all(x.volumetric_absorption .<= a * q + 1e-9)
+    @test all(>(0.1 * a * q), x.radiation_transmitted)
+    @test x.volumetric_absorption .+ x.radiation_transmitted ≈ fill(a * q, length(sol.t)) rtol =
+        1e-12
+    use_ale && @test x.thickness_history[end] < 0.995 * x.thickness_history[1]
+    @test x.surface_heat_flux_net ≈ x.surface_heat_flux_conduction rtol = 1e-8
+end
+
+# An ablating solid heated at the top: on a moving mesh its cells thin and
+# deactivate from the top down.
+function _ablating_column(n)
+    ρ, c, k = 1000.0, 1000.0, 1.0
+    R, E, Tp, T0 = 8.314462618, 1.0e5, 700.0, 300.0
+    v = 2.0e-3
+    A = v^2 * E * (Tp - T0) * exp(E / (R * Tp)) / (k / (ρ * c) * R * Tp^2)
+    mat = Material(
+        name = :ablator,
+        components = (
+            SolidComponent(:solid, ρ = ρ, c = c, k = k, λ = 1e-6),
+            GaseousComponent(:gas, M = 0.05, c = c, k = 0.02, λ = 1e-4),
+        ),
+        reactions = (Reaction(:ablate, 1 => 2; A = A, E = E, h = 1.0e6),),
+    )
+    return PyrolysisProblem(
+        mesh = create_uniform_mesh(3e-3, n),
+        material = mat,
+        bc_set = BoundaryConditionSet(
+            thermal = (top = HeatFluxBC(2.8e6), bottom = AdiabaticBC()),
+            mass = (
+                top = ConvectiveMassBC(h_m = 10.0, ξ_inf = 0.0),
+                bottom = ImpermeableBC(),
+            ),
+        ),
+        T_initial = z -> T0 + 1e5 * z,
+        ξ_initial = [z -> ρ, z -> 0.0],
+        tspan = (0.0, 0.8),
+        output_times = collect(0.0:0.1:0.8),
+    )
+end
+
+@testset "solve leaves the caller's mesh unchanged on a moving, deactivating deck" begin
+    problem = _ablating_column(12)
+    before = deepcopy(problem.mesh)
+    sol = Integration.solve(
+        problem;
+        use_ale = true,
+        deactivation = true,
+        abstol = 1e-7,
+        reltol = 1e-5,
+    )
+    @test sol.retcode === :Success
+    # The solve moved its nodes and deactivated cells.
+    @test !isempty(sol.events)
+    @test sol.extras.thickness_history[end] < 0.9 * 3e-3
+    # The positions, and every topology array the solve's own topology shares.
+    @test isequal(problem.mesh.positions, before.positions)
+    topology, topology0 = problem.mesh.topology, before.topology
+    for name in fieldnames(typeof(topology))
+        @test isequal(getfield(topology, name), getfield(topology0, name))
     end
 end

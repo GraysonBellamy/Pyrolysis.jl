@@ -158,6 +158,11 @@ end
     @test thin.retcode === :Terminated && thin.outcome === :min_thickness
     @test succeeded(thin) && !completed(thin)
     @test thin.extras.thickness_history[end] ≈ 2e-3 rtol = 1e-3
+    # Cells went before the stop, so the thickness it ends on is the live
+    # span, up to the outermost live node.
+    live = thin.extras.live_cells[end]
+    @test !isempty(thin.events) && live < 6
+    @test thin.extras.thickness_history[end] == thin.z[live+1, end] - thin.z[1, end]
 
     void = Integration.solve(
         _ablator(6; from_bottom = true, t_end = 5.0);

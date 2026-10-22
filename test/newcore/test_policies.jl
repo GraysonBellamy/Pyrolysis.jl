@@ -200,6 +200,8 @@ _cap_callback(cap) = DiscreteCallback(
 
 @testset "Newton-failure step cap" begin
     g, M = FAILURE_MEMORY_GROWTH, FAILURE_MEMORY_STEPS
+    @test g == 1.25
+    @test M == 20
     integ = init(
         _relaxation_problem(t_fail = 0.2),
         KenCarp4();
@@ -486,6 +488,33 @@ end
     end
 end
 
+# In-depth radiation adds the intensity rows, and on a fixed mesh a mass
+# matrix: a solver configuration of its own on each mesh.
+@testset "repeated solves with in-depth radiation are bit-identical under each linear solver: use_ale = $ale" for ale in
+                                                                                                                  (
+    false,
+    true,
+)
+    problem = _slab(12; radiating = true)
+    for linear_solver in (StructuredKLU(), KLUFactorization(), UMFPACKFactorization())
+        sols = [
+            Integration.solve(
+                problem;
+                use_ale = ale,
+                radiation_model = BEER_LAMBERT,
+                linear_solver,
+                saveat = Float64[],
+                abstol = 1e-8,
+                reltol = 1e-6,
+            ) for _ = 1:2
+        ]
+        @test sols[1].retcode === :Success
+        @test sols[2].raw_solution.t == sols[1].raw_solution.t
+        @test sols[2].raw_solution.u == sols[1].raw_solution.u
+        @test sols[2].statistics.accepted == sols[1].statistics.accepted
+    end
+end
+
 # An ablating solid heated at the top, its heat capacity rising with the
 # temperature so that the caloric inversion is nonlinear: its cells thin and
 # deactivate.
@@ -623,9 +652,17 @@ _klu(cacheval::Integration.StructuredKLUCache) = cacheval.inner.cacheval
         return sol, length(unique(factorizations)), last[]
     end
     structured, n_structured, c = factored(nothing)
-    plain, _, _ = factored(KLUFactorization())
+    plain, _, c_plain = factored(KLUFactorization())
+    umfpack, _, c_umfpack = factored(UMFPACKFactorization())
     @test structured.retcode === :Success
+    @test structured.raw_solution.alg.linsolve isa StructuredKLU
     @test c isa Integration.StructuredKLUCache
+    # An explicit linear solver is the one the integrator factors with.
+    @test plain.raw_solution.alg.linsolve isa KLUFactorization
+    @test !(c_plain isa Integration.StructuredKLUCache)
+    @test umfpack.retcode === :Success
+    @test umfpack.raw_solution.alg.linsolve isa UMFPACKFactorization
+    @test c_umfpack isa SparseArrays.UMFPACK.UmfpackLU
     @test 1 <= n_structured <= c.growths
     @test count(c.in_union) == nnz(c.union) < nnz(c.prototype)
     @test all(j -> j in rowvals(c.union)[nzrange(c.union, j)], 1:size(c.union, 2))

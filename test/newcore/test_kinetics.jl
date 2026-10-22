@@ -293,3 +293,63 @@ end
     @test issorted(sol.ξ[1, 1, :]; rev = true)
     @test maximum(abs.(sol.ξ[1, 1, :] .+ sol.ξ[2, 1, :] .- 1000.0)) < 1e-9
 end
+
+# A thin cell between faces whose temperature rises at the constant rate β, as
+# in a thermogravimetric run: first-order kinetics, no reaction heat.
+const _TGA = (A = 1e13, E = 180e3, T0 = 300.0, T_end = 800.0, ξ0 = 1000.0)
+
+function _tga(β, n_out)
+    a = SolidComponent(:A, ρ = _TGA.ξ0, c = 1500.0, k = 0.2)
+    b = SolidComponent(:B, ρ = _TGA.ξ0, c = 1500.0, k = 0.2)
+    rxn = Reaction(:pyrolysis, 1 => 2; A = _TGA.A, E = _TGA.E, h = 0.0)
+    ramp = t -> _TGA.T0 + β * t
+    t_end = (_TGA.T_end - _TGA.T0) / β
+    return PyrolysisProblem(
+        mesh = create_uniform_mesh(1e-4, 1),
+        material = Material(name = :tga, components = (a, b), reactions = (rxn,)),
+        bc_set = BoundaryConditionSet(
+            thermal = (top = DirichletThermalBC(ramp), bottom = DirichletThermalBC(ramp)),
+        ),
+        T_initial = z -> _TGA.T0,
+        ξ_initial = [z -> _TGA.ξ0, z -> 0.0],
+        tspan = (0.0, t_end),
+        output_times = collect(range(0.0, t_end; length = n_out)),
+    )
+end
+
+# The temperature at the middle of the saved interval of the largest
+# mass-loss rate.
+function _tga_peak(β, n_out)
+    sol = Integration.solve(_tga(β, n_out); abstol = 1e-10, reltol = 1e-8)
+    @test sol.retcode === :Success
+    t = sol.t
+    rate = [-(sol.ξ[1, 1, k+1] - sol.ξ[1, 1, k]) / (t[k+1] - t[k]) for k = 1:(length(t)-1)]
+    k = argmax(rate)
+    return _TGA.T0 + β * (t[k] + t[k+1]) / 2
+end
+
+# The exact peak of first-order kinetics under a constant heating rate,
+# βE/(R T_p²) = A exp(−E/(R T_p)), by Newton's method on its logarithm.
+function _peak_temperature(β)
+    A, E = _TGA.A, _TGA.E
+    T = E / (R_GAS * log(A * E / (β * R_GAS)))
+    for _ = 1:50
+        f = log(β / T^2) - log(A * R_GAS / E) + E / (R_GAS * T)
+        T -= f / (-2 / T - E / (R_GAS * T^2))
+    end
+    return T
+end
+
+@testset "constant heating rate: the mass-loss rate peaks at the first-order peak temperature" begin
+    β = 10 / 60
+    @test abs(_tga_peak(β, 500) - _peak_temperature(β)) < 2.0
+end
+
+@testset "constant heating rates: the Kissinger slope recovers the activation energy" begin
+    βs = [5.0, 10.0, 20.0, 40.0] ./ 60
+    T_p = [_tga_peak(β, 300) for β in βs]
+    x, y = 1 ./ T_p, log.(βs ./ T_p .^ 2)
+    x̄, ȳ = sum(x) / length(x), sum(y) / length(y)
+    slope = sum((x .- x̄) .* (y .- ȳ)) / sum((x .- x̄) .^ 2)
+    @test abs(-slope * R_GAS - _TGA.E) / _TGA.E < 0.05
+end
