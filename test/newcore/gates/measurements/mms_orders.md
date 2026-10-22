@@ -1,6 +1,6 @@
 # Gate item 3: the manufactured-solution orders
 
-Produced by `test/newcore/gates/mms_orders.jl` at commit 4e5d412 (tree 3ff76a1). Julia 1.13.0, 1 thread, 22 logical CPUs; load average [16.2, 15.8, 16.1] at the start and [19.3, 18.6, 17.5] at the end. Each core on its default integrator.
+Produced by `test/newcore/gates/mms_orders.jl` at commit f54a6fb (tree b544f02). Julia 1.13.0, 1 thread, 22 logical CPUs; load average [19.7, 19.0, 18.9] at the start and [19.3, 19.3, 19.2] at the end. Each core on its default integrator.
 
 ## Spatial orders (each case's convergence check)
 
@@ -51,12 +51,12 @@ Produced by `test/newcore/gates/mms_orders.jl` at commit 4e5d412 (tree 3ff76a1).
 | V-MMS-01 | new core, temperature form | Success | relative L∞ ξ_A error, t=20.0 s | 7.51e-5 | 0.0002 | true |
 | V-MMS-01 | new core, temperature form | Success | relative L∞ ξ_B error, t=20.0 s | 2.41e-5 | 0.0001 | true |
 | V-MMS-01 | new core, temperature form | Success | relative L∞ ξ_gas error, t=20.0 s | 0.0111 | 0.03 | true |
-| V-MMS-02 | new core, temperature form | Success | free-stream T drift (all cells, all snapshots) | 2.27e-13 | 1.0e-10 | true |
+| V-MMS-02 | new core, temperature form | Success | free-stream T drift (all cells, all snapshots) | 3.41e-13 | 1.0e-10 | true |
 | V-MMS-02 | new core, temperature form | Success | free-stream ξ_solid relative drift | 1.84e-14 | 1.0e-12 | true |
-| V-MMS-02 | new core, temperature form | Success | free-stream ξ_gas relative drift | 3.64e-14 | 1.0e-12 | true |
+| V-MMS-02 | new core, temperature form | Success | free-stream ξ_gas relative drift | 2.92e-14 | 1.0e-12 | true |
 | V-MMS-02 | new core, temperature form | Success | top cell-center trajectory vs z₀·s(t_end) | 7.32e-9 | 1.5e-6 | true |
 | V-MMS-03 | new core, temperature form | Success | L∞ T error on moving mesh, t=10.0 s | 0.00909 | 0.25 | true |
-| V-MMS-03 | new core, temperature form | Success | relative L∞ ξ_solid (mesh-bound) error, t=10.0 s | 5.34e-12 | 1.0e-10 | true |
+| V-MMS-03 | new core, temperature form | Success | relative L∞ ξ_solid (mesh-bound) error, t=10.0 s | 5.32e-12 | 1.0e-10 | true |
 | V-MMS-03 | new core, temperature form | Success | relative L∞ ξ_gas error, t=10.0 s | 0.00168 | 0.006 | true |
 | V-MMS-04 | new core, temperature form | Success | L∞ T error (DirectSolve), t=20.0 s | 2.07e-5 | 6.0e-5 | true |
 | V-MMS-04 | new core, temperature form | Success | relative L∞ ξ_solid (z-varying, material frame) error, t=20.0 s | 6.59e-7 | 2.0e-6 | true |
@@ -68,11 +68,11 @@ Produced by `test/newcore/gates/mms_orders.jl` at commit 4e5d412 (tree 3ff76a1).
 | V-MMS-01 | new core, enthalpy form | Success | relative L∞ ξ_B error, t=20.0 s | 2.41e-5 | 0.0001 | true |
 | V-MMS-01 | new core, enthalpy form | Success | relative L∞ ξ_gas error, t=20.0 s | 0.0111 | 0.03 | true |
 | V-MMS-02 | new core, enthalpy form | Success | free-stream T drift (all cells, all snapshots) | 7.39e-13 | 1.0e-10 | true |
-| V-MMS-02 | new core, enthalpy form | Success | free-stream ξ_solid relative drift | 2.52e-14 | 1.0e-12 | true |
-| V-MMS-02 | new core, enthalpy form | Success | free-stream ξ_gas relative drift | 4.96e-14 | 1.0e-12 | true |
+| V-MMS-02 | new core, enthalpy form | Success | free-stream ξ_solid relative drift | 2.5e-14 | 1.0e-12 | true |
+| V-MMS-02 | new core, enthalpy form | Success | free-stream ξ_gas relative drift | 5.0e-14 | 1.0e-12 | true |
 | V-MMS-02 | new core, enthalpy form | Success | top cell-center trajectory vs z₀·s(t_end) | 6.33e-9 | 1.5e-6 | true |
 | V-MMS-03 | new core, enthalpy form | Success | L∞ T error on moving mesh, t=10.0 s | 0.00908 | 0.25 | true |
-| V-MMS-03 | new core, enthalpy form | Success | relative L∞ ξ_solid (mesh-bound) error, t=10.0 s | 3.81e-12 | 1.0e-10 | true |
+| V-MMS-03 | new core, enthalpy form | Success | relative L∞ ξ_solid (mesh-bound) error, t=10.0 s | 3.8e-12 | 1.0e-10 | true |
 | V-MMS-03 | new core, enthalpy form | Success | relative L∞ ξ_gas error, t=10.0 s | 0.00168 | 0.006 | true |
 | V-MMS-04 | new core, enthalpy form | Success | L∞ T error (DirectSolve), t=20.0 s | 2.07e-5 | 6.0e-5 | true |
 | V-MMS-04 | new core, enthalpy form | Success | relative L∞ ξ_solid (z-varying, material frame) error, t=20.0 s | 6.59e-7 | 2.0e-6 | true |
