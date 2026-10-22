@@ -229,6 +229,36 @@ if !isdefined(@__MODULE__, :VerificationCase)
             kwargs...,
         )
 
+    """
+    Build a case's mesh for the core the suite runs on: `f(args...; kwargs...)`
+    with `f` one of the mesh constructors and `args` holding the old core's
+    component count `Val(NC)`. On the new core the count is dropped,
+    `cross_section_area` is the mesh's `cross_section`, and the old mesh's
+    initial states (`T_initial`, `ξ_initial`, which the old solve overwrites
+    from the problem) are not given.
+    """
+    function core_mesh(
+        f,
+        args...;
+        cross_section_area = nothing,
+        T_initial = nothing,
+        ξ_initial = nothing,
+        kwargs...,
+    )
+        if VERIFICATION_CORE == "new"
+            area =
+                cross_section_area === nothing ? (;) :
+                (; cross_section = cross_section_area)
+            return f(filter(a -> !(a isa Val), args)...; area..., kwargs...)
+        end
+        given = (; cross_section_area, T_initial, ξ_initial)
+        return f(
+            args...;
+            (k => v for (k, v) in pairs(given) if v !== nothing)...,
+            kwargs...,
+        )
+    end
+
     @inline _case_solve(case::VerificationCase, problem; kwargs...) =
         case.solve_fn !== nothing ? case.solve_fn(problem; kwargs...) :
         core_solve(problem; kwargs...)

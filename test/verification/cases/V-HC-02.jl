@@ -30,7 +30,14 @@ function _vhc02_case(label::String, Bi::Float64; with_convergence::Bool)
     function build(n_cells)
         solid = SolidComponent(:solid, ρ = ρ, c = c, k = k)
         mat = Material(name = :VHC02, components = (solid,), reactions = ())
-        mesh = create_uniform_mesh(L, n_cells, Val(1); T_initial = T_i, ξ_initial = (ρ,))
+        mesh = core_mesh(
+            create_uniform_mesh,
+            L,
+            n_cells,
+            Val(1);
+            T_initial = T_i,
+            ξ_initial = (ρ,),
+        )
         bc_set = BoundaryConditionSet(
             thermal = (top = ConvectiveBC(h = h, T_inf = T_inf), bottom = AdiabaticBC()),
         )

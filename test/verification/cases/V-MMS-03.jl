@@ -69,7 +69,8 @@ function _verification_case_vmms03()
 
     function build(n_cells)
         mat = make_material()
-        mesh = create_uniform_mesh(
+        mesh = core_mesh(
+            create_uniform_mesh,
             L,
             n_cells,
             Val(2);

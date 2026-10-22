@@ -23,7 +23,7 @@ using LinearSolve: UMFPACKFactorization
 function _inert(n; L = 0.007, ratio = 2.0, t_end = 3.0)
     a = SolidComponent(:a, ρ = 1000.0, c = 1000.0, k = 0.5)
     return PyrolysisProblem(
-        mesh = create_stretched_mesh(L, n, Val(1), ratio),
+        mesh = create_stretched_mesh(L, n, ratio),
         material = Material(name = :inert, components = (a,), reactions = ()),
         bc_set = BoundaryConditionSet(
             thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
@@ -46,7 +46,7 @@ function _composition(n; uniform = false, T0 = 800.0, ratio = 1.1)
     mat = Material(name = :composition, components = (a, b), reactions = ())
     front(z) = uniform ? 0.5 : (1 + tanh((z - L / 2) / (L / 10))) / 2
     return PyrolysisProblem(
-        mesh = create_stretched_mesh(L, n, Val(2), ratio),
+        mesh = create_stretched_mesh(L, n, ratio),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
@@ -58,7 +58,7 @@ function _composition(n; uniform = false, T0 = 800.0, ratio = 1.1)
 end
 
 # A uniform reaction at a uniform temperature: a uniform strain rate.
-function _uniform_slab(n)
+function _uniform_slab(n; coordinates = Planar())
     a = SolidComponent(:a, ρ = 1000.0, c = 1000.0, k = 0.5)
     b = SolidComponent(:b, ρ = 400.0, c = 1000.0, k = 0.5)
     g = GaseousComponent(:g, M = 0.03, c = 1000.0, k = 0.03, λ = 0.0)
@@ -71,7 +71,7 @@ function _uniform_slab(n)
         depletion_limiter = DepletionLimiter(enabled = false),
     )
     return PyrolysisProblem(
-        mesh = create_stretched_mesh(0.02, n, Val(3), 1.1),
+        mesh = create_stretched_mesh(0.02, n, 1.1; coordinates),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = DirichletThermalBC(400.0), bottom = DirichletThermalBC(400.0)),
@@ -100,7 +100,7 @@ function _two_layer(n_top, n_bottom; t_end = 100.0)
         range(L_bottom, L_bottom + L_top, length = n_top + 1)[2:end],
     )
     return PyrolysisProblem(
-        mesh = create_mesh_from_nodes(z, Val(3)),
+        mesh = create_mesh_from_nodes(z),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (
@@ -132,7 +132,7 @@ function _zero_order(n; t_end = 480.0)
         reactions = (Reaction(:burn, 1 => 2; A = A, E = E, h = 0.0, n = 0.0),),
     )
     return PyrolysisProblem(
-        mesh = create_stretched_mesh(10e-3, n, Val(2), 1.05),
+        mesh = create_stretched_mesh(10e-3, n, 1.05),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
@@ -166,7 +166,7 @@ function _mixed(n)
     )
     f(z) = 0.1 + 0.4 * z / L
     return PyrolysisProblem(
-        mesh = create_stretched_mesh(L, n, Val(3), 1.1),
+        mesh = create_stretched_mesh(L, n, 1.1),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = HeatFluxBC(5e4), bottom = AdiabaticBC()),
@@ -192,7 +192,7 @@ function _ablator(n; L = 3e-3, q = 2.8e6, t_end = 0.8)
         reactions = (Reaction(:ablate, 1 => 2; A = A, E = E, h = 1.0e6),),
     )
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(L, n, Val(2)),
+        mesh = create_uniform_mesh(L, n),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = HeatFluxBC(q), bottom = AdiabaticBC()),
@@ -489,9 +489,8 @@ end
 @testset "w − c is the solid velocity: θ x, θ r/2, θ r/3 with c ≠ 0" begin
     for (coords, d) in ((Planar(), 1), (Cylindrical(), 2), (Spherical(), 3))
         cp = setup(
-            _uniform_slab(7);
+            _uniform_slab(7; coordinates = coords);
             use_ale = true,
-            coordinates = coords,
             correction = EquidistributionCorrection(
                 τ = 1.0,
                 activation = (2.0, 0.5),

@@ -27,6 +27,7 @@ function _slab(
     λ = 0.0,
     κ = 0.0,
     mass = nothing,
+    coordinates = Planar(),
 )
     virgin = SolidComponent(
         :virgin,
@@ -64,7 +65,7 @@ function _slab(
         mass === nothing ? BoundaryConditionSet(thermal = (top = top, bottom = bottom)) :
         BoundaryConditionSet(thermal = (top = top, bottom = bottom), mass = mass)
     return PyrolysisProblem(
-        mesh = create_stretched_mesh(0.01, n, Val(3), 1.15),
+        mesh = create_stretched_mesh(0.01, n, 1.15; coordinates),
         material = mat,
         bc_set = bcs,
         T_initial = z -> 500.0 + 4e4 * z,
@@ -85,8 +86,8 @@ const _configurations = (
         ),
         options = (;),
     ),
-    cylinder = (problem = _slab, options = (coordinates = Cylindrical(),)),
-    sphere = (problem = _slab, options = (coordinates = Spherical(),)),
+    cylinder = (problem = n -> _slab(n; coordinates = Cylindrical()), options = (;)),
+    sphere = (problem = n -> _slab(n; coordinates = Spherical()), options = (;)),
     chi = (problem = n -> _slab(n; law = χ -> 1 - 0.4χ), options = (;)),
     beer_lambert = (
         problem = n -> _slab(
@@ -202,7 +203,7 @@ end
 
 # A slab that converts at the same rate everywhere: isothermal, uniform, the
 # activation energy zero. Its strain rate is uniform.
-function _uniform_slab(n; law = nothing, ρ_b = 400.0)
+function _uniform_slab(n; law = nothing, ρ_b = 400.0, coordinates = Planar())
     a = SolidComponent(:a, ρ = 1000.0, c = 1000.0, k = 0.5)
     b = SolidComponent(:b, ρ = ρ_b, c = 1000.0, k = 0.5)
     g = GaseousComponent(:g, M = 0.03, c = 1000.0, k = 0.03, λ = 0.0)
@@ -216,7 +217,7 @@ function _uniform_slab(n; law = nothing, ρ_b = 400.0)
         lateral_shrinkage_law = law,
     )
     return PyrolysisProblem(
-        mesh = create_stretched_mesh(0.02, n, Val(3), 1.1),
+        mesh = create_stretched_mesh(0.02, n, 1.1; coordinates),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = DirichletThermalBC(400.0), bottom = DirichletThermalBC(400.0)),
@@ -229,7 +230,7 @@ end
 
 @testset "balance rows: a uniform strain rate gives θ x, θ r/2, θ r/3" begin
     for (coords, d) in ((Planar(), 1), (Cylindrical(), 2), (Spherical(), 3))
-        cp = setup(_uniform_slab(7); use_ale = true, coordinates = coords)
+        cp = setup(_uniform_slab(7; coordinates = coords); use_ale = true)
         layout = cp.def.layout
         θ = cp.ws.contributions.θ
         @test all(≈(θ[1]; rtol = 1e-13), θ)
@@ -281,9 +282,8 @@ end
     @test_throws ArgumentError setup(reacting; w_override = (x, t) -> 0.0)
     @test_throws ArgumentError setup(_uniform_slab(4; law = χ -> 1 - 0.5χ))
     @test_throws ArgumentError setup(
-        _uniform_slab(4; law = χ -> 1 - 0.5χ);
+        _uniform_slab(4; law = χ -> 1 - 0.5χ, coordinates = Cylindrical());
         use_ale = true,
-        coordinates = Cylindrical(),
     )
     @test_throws ArgumentError setup(
         _uniform_slab(4; law = χ -> 0.9 - 0.5χ);

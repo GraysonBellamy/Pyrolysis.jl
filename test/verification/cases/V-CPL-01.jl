@@ -266,9 +266,17 @@ function _verification_case_vcpl01()
         # dies at t = 0). No convergence fit runs on this case, so the mixed
         # mesh family is harmless.
         mesh = if n_cells >= 600
-            create_uniform_mesh(L, n_cells, Val(1); T_initial = p.T0, ξ_initial = (p.ρ,))
+            core_mesh(
+                create_uniform_mesh,
+                L,
+                n_cells,
+                Val(1);
+                T_initial = p.T0,
+                ξ_initial = (p.ρ,),
+            )
         else
-            create_stretched_mesh(
+            core_mesh(
+                create_stretched_mesh,
                 L,
                 n_cells,
                 Val(1),
@@ -367,9 +375,17 @@ function _verification_case_vcpl01b()
         )
         # Same matched-resolution rule as route A (uniform grid for n ≥ 600).
         mesh = if n_cells >= 600
-            create_uniform_mesh(L, n_cells, Val(2); T_initial = p.T0, ξ_initial = (p.ρ, 0.0))
+            core_mesh(
+                create_uniform_mesh,
+                L,
+                n_cells,
+                Val(2);
+                T_initial = p.T0,
+                ξ_initial = (p.ρ, 0.0),
+            )
         else
-            create_stretched_mesh(
+            core_mesh(
+                create_stretched_mesh,
                 L,
                 n_cells,
                 Val(2),

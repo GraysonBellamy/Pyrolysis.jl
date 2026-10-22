@@ -46,8 +46,14 @@ function _vcpl04_problem(δ; n_cells, t_end, n_outputs = 11)
     rxn =
         Reaction(:fk_source, 1 => 1; A = A_r, E = E, h = h_rxn, n = 0.0, T_max = T0 + 100.0)
     mat = Material(name = :VCPL04, components = (comp,), reactions = (rxn,))
-    mesh =
-        create_uniform_mesh(2 * L_half, n_cells, Val(1); T_initial = T0, ξ_initial = (ρξ,))
+    mesh = core_mesh(
+        create_uniform_mesh,
+        2 * L_half,
+        n_cells,
+        Val(1);
+        T_initial = T0,
+        ξ_initial = (ρξ,),
+    )
     bc_set = BoundaryConditionSet(
         thermal = (top = DirichletThermalBC(T0), bottom = DirichletThermalBC(T0)),
     )

@@ -19,7 +19,7 @@ function _bc_material(; α::Real = 0.0)
 end
 
 _bc_problem(bc; n = 6, tspan = (0.0, 1.0), α = 0.0, kwargs...) = PyrolysisProblem(;
-    mesh = create_uniform_mesh(0.01, n, Val(2)),
+    mesh = create_uniform_mesh(0.01, n),
     material = _bc_material(; α),
     bc_set = bc,
     tspan = tspan,
@@ -241,7 +241,7 @@ end
     )
     q0 = 30e3
     prob(flux) = PyrolysisProblem(
-        mesh = create_uniform_mesh(0.005, 8, Val(2)),
+        mesh = create_uniform_mesh(0.005, 8),
         material = _bc_material(α = 500.0),
         bc_set = bc_of(flux),
         tspan = (0.0, 1.0),
@@ -276,7 +276,7 @@ end
             mass = (top = DiffusiveMassBC(0.01), bottom = ImpermeableBC()),
         )
         problem = PyrolysisProblem(
-            mesh = create_uniform_mesh(0.005, 8, Val(2)),
+            mesh = create_uniform_mesh(0.005, 8),
             material = mat,
             bc_set = bc,
             T_initial = z -> 600.0,

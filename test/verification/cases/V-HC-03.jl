@@ -26,7 +26,14 @@ function _verification_case_vhc03()
     function build(n_cells)
         solid = SolidComponent(:solid, ρ = ρ, c = c, k = k)
         mat = Material(name = :VHC03, components = (solid,), reactions = ())
-        mesh = create_uniform_mesh(L, n_cells, Val(1); T_initial = T0, ξ_initial = (ρ,))
+        mesh = core_mesh(
+            create_uniform_mesh,
+            L,
+            n_cells,
+            Val(1);
+            T_initial = T0,
+            ξ_initial = (ρ,),
+        )
         bc_set =
             BoundaryConditionSet(thermal = (top = HeatFluxBC(q), bottom = AdiabaticBC()))
         return PyrolysisProblem(

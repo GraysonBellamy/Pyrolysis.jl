@@ -111,7 +111,7 @@ end
         depletion_limiter = DepletionLimiter(threshold = 2.0),
     )
     problem = PyrolysisProblem(
-        mesh = create_uniform_mesh(0.01, 6, Val(3)),
+        mesh = create_uniform_mesh(0.01, 6),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = HeatFluxBC(1e4), bottom = AdiabaticBC()),
@@ -158,7 +158,7 @@ end
     @test quenched((1.0, 0.0), ())
     # Cells 1 and 2 hold neither reactant, cell 3 only char, the rest virgin.
     problem = PyrolysisProblem(
-        mesh = create_uniform_mesh(0.01, 6, Val(3)),
+        mesh = create_uniform_mesh(0.01, 6),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = HeatFluxBC(1e4), bottom = AdiabaticBC()),
@@ -235,7 +235,7 @@ function _absent_reactant(order)
     )
     mat = Material(name = :absent, components = comps, reactions = rxns)
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(1e-3, 1, Val(4)),
+        mesh = create_uniform_mesh(1e-3, 1),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = DirichletThermalBC(700.0), bottom = DirichletThermalBC(700.0)),
@@ -276,7 +276,7 @@ end
         reactions = (Reaction(:d, 1 => 2; A = 10.0, E = 0.0, h = 0.0, n = order),),
     )
     problem = PyrolysisProblem(
-        mesh = create_uniform_mesh(1e-3, 1, Val(2)),
+        mesh = create_uniform_mesh(1e-3, 1),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = DirichletThermalBC(500.0), bottom = DirichletThermalBC(500.0)),

@@ -91,7 +91,8 @@ function _verification_case_vmms04()
     z_top(t) = ztop_sol(t)
 
     function build(n_cells)
-        mesh = create_uniform_mesh(
+        mesh = core_mesh(
+            create_uniform_mesh,
             L,
             n_cells,
             Val(2);

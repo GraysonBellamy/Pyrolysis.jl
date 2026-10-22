@@ -19,7 +19,7 @@ function _two_cells()
     c = LinearProperty(400.0, 2.0)
     solid = SolidComponent(:s, ρ = 1000.0, c = c, k = 50.0)
     mat = Material(name = :pair, components = (solid,), reactions = ())
-    mesh = create_uniform_mesh(0.02, 2, Val(1))
+    mesh = create_uniform_mesh(0.02, 2)
     return PyrolysisProblem(
         mesh = mesh,
         material = mat,
@@ -87,7 +87,7 @@ function _reacting_cell()
         reactions = (Reaction(:r, 1 => 2; A = 0.5, E = 0.0, h = 0.0),),
         depletion_limiter = DepletionLimiter(enabled = false),
     )
-    mesh = create_uniform_mesh(1e-3, 1, Val(2))
+    mesh = create_uniform_mesh(1e-3, 1)
     bcs = BoundaryConditionSet(
         thermal = (top = DirichletThermalBC(400.0), bottom = DirichletThermalBC(400.0)),
     )
@@ -105,7 +105,7 @@ end
 @testset "solve: kinetics through the adapter, both energy forms" begin
     for energy in (:temperature, :enthalpy)
         problem = _reacting_cell()
-        sentinel = problem.mesh.cell_states[1].T = 123.0
+        positions = copy(problem.mesh.positions)
         sol = Integration.solve(
             problem;
             energy_state = energy,
@@ -120,7 +120,7 @@ end
         @test maximum(abs.(sol.T .- 400.0)) < 1e-9
         @test sol.statistics.accepted > 0
         # The caller's problem is not touched.
-        @test problem.mesh.cell_states[1].T == sentinel
+        @test problem.mesh.positions == positions
     end
     @test_throws ArgumentError Integration.solve(_reacting_cell(); bogus = 1)
     @test_throws ArgumentError Integration.solve(
@@ -141,7 +141,7 @@ end
     mat = Material(name = :heated, components = (solid,), reactions = ())
     L, n, q = 0.01, 10, 2e4
     problem = PyrolysisProblem(
-        mesh = create_uniform_mesh(L, n, Val(1)),
+        mesh = create_uniform_mesh(L, n),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = HeatFluxBC(q), bottom = AdiabaticBC()),
@@ -177,7 +177,7 @@ end
     mat = Material(name = :charring, components = (solid, gas), reactions = (rxn,))
     h_back, T_back_inf = 5.0, 300.0
     problem = PyrolysisProblem(
-        mesh = create_uniform_mesh(0.01, 12, Val(2)),
+        mesh = create_uniform_mesh(0.01, 12),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (

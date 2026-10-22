@@ -57,7 +57,8 @@ function _vcpl06_problem(n_cells; t_end = 240.0)
     gas = GaseousComponent(:gas, M = 0.05, c = c_gas, k = 0.02, λ = 1e-4)
     rxn = Reaction(:gasify, 2 => 3; A = 9.3e3, E = 8.0e4, h = 0.0)
     mat = Material(name = :VCPL06, components = (matrixc, fuel, gas), reactions = (rxn,))
-    mesh = create_uniform_mesh(
+    mesh = core_mesh(
+        create_uniform_mesh,
         L,
         n_cells,
         Val(3);

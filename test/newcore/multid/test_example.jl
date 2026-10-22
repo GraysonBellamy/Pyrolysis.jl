@@ -278,7 +278,7 @@ end
     @test maximum(abs, c.r_multiplier) <= 1e-12 * maximum(abs, c.θ .* ds.V_eval)
 
     line = PyrolysisProblem(
-        mesh = create_uniform_mesh(0.01, 3, Val(3)),
+        mesh = create_uniform_mesh(0.01, 3),
         material = _wood(),
         bc_set = BoundaryConditionSet(
             thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),

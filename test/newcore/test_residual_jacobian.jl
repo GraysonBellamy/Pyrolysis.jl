@@ -31,7 +31,7 @@ function _slab(n; top = HeatFluxBC(3e4), bottom = DirichletThermalBC(400.0))
         ),
         depletion_limiter = DepletionLimiter(threshold = 1.0),
     )
-    mesh = create_stretched_mesh(0.01, n, Val(3), 1.15)
+    mesh = create_stretched_mesh(0.01, n, 1.15)
     bcs = BoundaryConditionSet(thermal = (top = top, bottom = bottom))
     return PyrolysisProblem(
         mesh = mesh,

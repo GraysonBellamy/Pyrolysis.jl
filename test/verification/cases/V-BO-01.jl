@@ -134,7 +134,8 @@ function _vbo_problem(
         dz = l_pmma / n_pmma
         n_kw = round(Int, VBO_L_KW / dz)
         n = n_pmma + n_kw
-        mesh = create_uniform_mesh(
+        mesh = core_mesh(
+            create_uniform_mesh,
             n * dz,
             n,
             Val(3);
@@ -144,7 +145,8 @@ function _vbo_problem(
         z_if = n_kw * dz
     else
         nodes, n_kw = _vbo_nodes(n_pmma, l_pmma, grading)
-        mesh = create_mesh_from_nodes(
+        mesh = core_mesh(
+            create_mesh_from_nodes,
             nodes,
             Val(3);
             T_initial = VBO_T0,
@@ -385,15 +387,15 @@ function _vbo_solve_fn(id::String)
         surf = _VBOWarnCounter(Logging.current_logger(), r"^Surface", Ref(0))
         tr = _VBOWarnCounter(surf, r"transmitted through the back face", Ref(0))
         void = _VBOWarnCounter(tr, r"gasified from within", Ref(0))
-        # On the old core the maximum runs over every temperature slot: a
-        # ghost keeps the temperature it was parked with, which lies between
-        # two live-cell temperatures.
-        n = length(problem.mesh.cells)
         rec = _VBORecord()
         sol = Logging.with_logger(void) do
             if VERIFICATION_CORE == "new"
                 _vbo_core_solve(problem, rec; kwargs...)
             else
+                # On the old core the maximum runs over every temperature
+                # slot: a ghost keeps the temperature it was parked with, which
+                # lies between two live-cell temperatures.
+                n = length(problem.mesh.cells)
                 recorder = _vbo_recorder(
                     integ -> (rec.T_max = max(rec.T_max, maximum(view(integ.u, 1:n)))),
                     rec,

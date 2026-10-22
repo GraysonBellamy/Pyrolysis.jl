@@ -54,7 +54,7 @@ function _column(n; darcy::Bool)
         darcy ?
         background_gas_concentration(mat, 3, (400.0, band(z), 0.0), T0(z); P = P0(z)) : 0.05
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(L, n, Val(3)),
+        mesh = create_uniform_mesh(L, n),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (

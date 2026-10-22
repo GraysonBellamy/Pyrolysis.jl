@@ -36,7 +36,7 @@ _ξ = (z -> 450.0 - 1e4 * z, z -> 15.0 + 1e3 * z, z -> 0.5)
 # faces adiabatic (and, the gas not moving, impermeable).
 function _columns(n; energy)
     line = PyrolysisProblem(
-        mesh = create_stretched_mesh(0.01, n, Val(3), 1.1),
+        mesh = create_stretched_mesh(0.01, n, 1.1),
         material = _wood(),
         bc_set = BoundaryConditionSet(thermal = (top = _top(), bottom = AdiabaticBC())),
         T_initial = _T,

@@ -47,7 +47,7 @@ end
 
 # A 1 cm column of `n` uniform cells, adiabatic at the back.
 _column(mat, n; top, bottom = AdiabaticBC(), mass = nothing) = PyrolysisProblem(
-    mesh = create_uniform_mesh(0.01, n, Val(length(mat.components))),
+    mesh = create_uniform_mesh(0.01, n),
     material = mat,
     bc_set = mass === nothing ?
              BoundaryConditionSet(thermal = (top = top, bottom = bottom)) :
@@ -390,7 +390,7 @@ function _sliding(n)
     mat = Material(name = :sliding, components = (a, b), reactions = ())
     front(z) = (1 + tanh((z - 0.005) / 0.001)) / 2
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(0.01, n, Val(2)),
+        mesh = create_uniform_mesh(0.01, n),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
@@ -422,6 +422,18 @@ const _radial_configurations = (
     ),
 )
 
+# The problem with its mesh's node positions read as radii in `coordinates`.
+_on(p, coordinates) = PyrolysisProblem(
+    create_mesh_from_nodes(first.(p.mesh.positions); coordinates),
+    p.material,
+    p.bc_set,
+    p.T_initial,
+    p.ξ_initial,
+    p.tspan,
+    p.dt_initial,
+    p.output_times,
+)
+
 @testset "radial $(nameof(typeof(coords))), $(name): $(energy) form" for coords in (
         Cylindrical(),
         Spherical(),
@@ -430,12 +442,7 @@ const _radial_configurations = (
     energy in (:temperature, :enthalpy)
 
     config = _radial_configurations[name]
-    cp = setup(
-        config.problem();
-        energy_state = energy,
-        coordinates = coords,
-        config.options...,
-    )
+    cp = setup(_on(config.problem(), coords); energy_state = energy, config.options...)
     @test cp.def.setup.topology.coordinates === coords
     config.wood && @test cp.def.setup.gas isa DarcyFickTransport
     for (state, u) in pairs(_states(cp, config.wood))
@@ -475,7 +482,7 @@ function _ablator(n; L = 3e-3, q = 2.8e6, t_end = 0.8)
         reactions = (Reaction(:ablate, 1 => 2; A = A, E = E, h = 1.0e6),),
     )
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(L, n, Val(2)),
+        mesh = create_uniform_mesh(L, n),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = RadiativeFluxBC(flux = q), bottom = AdiabaticBC()),

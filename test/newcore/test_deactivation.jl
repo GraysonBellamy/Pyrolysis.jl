@@ -45,7 +45,7 @@ function _ablator(
         from_bottom ? (top = AdiabaticBC(), bottom = heated) :
         (top = heated, bottom = AdiabaticBC())
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(L, n, Val(2)),
+        mesh = create_uniform_mesh(L, n),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = thermal,
@@ -392,7 +392,7 @@ function _merge_pair(state_a, state_b; use_ale = true)
     g = GaseousComponent(:G, M = 0.028, c = c, k = 0.03, λ = 1e-5)
     mat = Material(name = :pair, components = (a, b, g), reactions = ())
     problem = PyrolysisProblem(
-        mesh = create_uniform_mesh(2.0, 2, Val(3)),
+        mesh = create_uniform_mesh(2.0, 2),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
@@ -735,7 +735,7 @@ function _staggered_pair()
     )
     L = 2e-3
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(L, 2, Val(3)),
+        mesh = create_uniform_mesh(L, 2),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),

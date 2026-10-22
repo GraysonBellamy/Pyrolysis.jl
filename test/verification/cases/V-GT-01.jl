@@ -40,7 +40,8 @@ function _verification_case_vgt01()
         solid = SolidComponent(:solid, ρ = 1000.0, c = 1000.0, k = 0.5, λ = d)
         gas = GaseousComponent(:gas, M = 0.028, c = 1000.0, k = 0.03, λ = d)
         mat = Material(name = :VGT01, components = (solid, gas), reactions = ())
-        mesh = create_uniform_mesh(
+        mesh = core_mesh(
+            create_uniform_mesh,
             L,
             n_cells,
             Val(2);

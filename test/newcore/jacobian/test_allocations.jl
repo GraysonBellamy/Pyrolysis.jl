@@ -45,8 +45,8 @@ function _wood(; α = 1000.0, κ = 1e-14, law = nothing)
 end
 
 _column(mat; top, stretch = nothing) = PyrolysisProblem(
-    mesh = stretch === nothing ? create_uniform_mesh(0.01, N_CELLS, Val(2)) :
-           create_stretched_mesh(0.01, N_CELLS, Val(2), stretch),
+    mesh = stretch === nothing ? create_uniform_mesh(0.01, N_CELLS) :
+           create_stretched_mesh(0.01, N_CELLS, stretch),
     material = mat,
     bc_set = BoundaryConditionSet(thermal = (top = top, bottom = AdiabaticBC())),
     tspan = (0.0, 100.0),

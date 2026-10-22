@@ -130,7 +130,14 @@ function _vcpl03_problem(perm; n_cells = 8, n_outputs = 3)
         lateral_shrinkage_law = chi_law,
     )
     ξinit_t = ntuple(i -> i == 1 ? ρ_A : 0.0, nc)
-    mesh = create_uniform_mesh(L, n_cells, Val(nc); T_initial = T_iso, ξ_initial = ξinit_t)
+    mesh = core_mesh(
+        create_uniform_mesh,
+        L,
+        n_cells,
+        Val(nc);
+        T_initial = T_iso,
+        ξ_initial = ξinit_t,
+    )
     bc_set = BoundaryConditionSet(
         thermal = (top = DirichletThermalBC(T_iso), bottom = DirichletThermalBC(T_iso)),
     )

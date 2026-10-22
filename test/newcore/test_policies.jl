@@ -51,7 +51,7 @@ function _slab(n; κ = 0.0, radiating = false)
     )
     top = radiating ? RadiativeFluxBC(flux = 3e4) : HeatFluxBC(3e4)
     return PyrolysisProblem(
-        mesh = create_stretched_mesh(0.01, n, Val(3), 1.15),
+        mesh = create_stretched_mesh(0.01, n, 1.15),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = top, bottom = DirichletThermalBC(500.0)),
@@ -119,7 +119,7 @@ end
 function _cooling_slab()
     solid = SolidComponent(:solid; ρ = 1000.0, c = 1000.0, k = 1.0)
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(0.001, 1, Val(1)),
+        mesh = create_uniform_mesh(0.001, 1),
         material = Material(name = :cooling, components = (solid,), reactions = ()),
         bc_set = BoundaryConditionSet(
             thermal = (top = HeatFluxBC(-5e5), bottom = AdiabaticBC()),
@@ -262,7 +262,7 @@ function _uniform_slab(n)
         depletion_limiter = DepletionLimiter(enabled = false),
     )
     return PyrolysisProblem(
-        mesh = create_stretched_mesh(0.02, n, Val(3), 1.1),
+        mesh = create_stretched_mesh(0.02, n, 1.1),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = DirichletThermalBC(400.0), bottom = DirichletThermalBC(400.0)),
@@ -320,7 +320,7 @@ function _plain_deck()
         reactions = (Reaction(:cure, 1 => 2, A = 1e12, E = 1.6e5, h = 300e3),),
     )
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(5e-3, 8, Val(2)),
+        mesh = create_uniform_mesh(5e-3, 8),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (
@@ -376,7 +376,7 @@ function _rich_deck()
         ),
     )
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(0.01, 8, Val(3)),
+        mesh = create_uniform_mesh(0.01, 8),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (
@@ -509,7 +509,7 @@ function _ablating(n)
         reactions = (Reaction(:ablate, 1 => 2; A = A, E = E, h = 1.0e6),),
     )
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(3e-3, n, Val(2)),
+        mesh = create_uniform_mesh(3e-3, n),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = HeatFluxBC(2.8e6), bottom = AdiabaticBC()),

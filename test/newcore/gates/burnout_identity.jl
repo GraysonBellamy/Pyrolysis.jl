@@ -79,8 +79,9 @@ end
 
 digest(sol) = string(hash((sol.T, sol.m, sol.z, sol.t)); base = 16)
 
-# The Douglas fir deck: the material, mesh and boundary conditions of the
-# example, without its printing, plotting and solve.
+# The Douglas fir deck: the material and boundary conditions of the example,
+# without its printing, plotting and solve, on the native mesh of its
+# thickness and cell count.
 function douglas_fir_problem()
     lines = readlines(
         joinpath(@__DIR__, "..", "..", "..", "examples", "07_douglas_fir_cone.jl"),
@@ -109,7 +110,7 @@ function douglas_fir_problem()
     return Core.eval(
         m,
         :(PyrolysisProblem(
-            mesh = mesh,
+            mesh = create_uniform_mesh(sample_thickness, n_cells),
             material = douglas_fir,
             bc_set = bc_set,
             T_initial = T_initial_func,
@@ -192,7 +193,7 @@ function main()
             moving ? solve(Pyrolysis.Closures.EquidistributionCorrection()) : nothing
         r = (;
             deck,
-            cells = length(problem.mesh.cells),
+            cells = size(sol.T, 1),
             digest = digest(sol),
             steps = sol.statistics.accepted,
             retcode = sol.retcode,

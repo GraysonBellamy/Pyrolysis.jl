@@ -63,7 +63,8 @@ function _verification_case_vgt02()
             depletion_limiter = DepletionLimiter(enabled = false),
         )
         ξ_g0 = background_gas_concentration(mat, 2, (1000.0, 0.0), T_iso; P = P∞)
-        mesh = create_uniform_mesh(
+        mesh = core_mesh(
+            create_uniform_mesh,
             L,
             n_cells,
             Val(2);

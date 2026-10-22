@@ -5,8 +5,8 @@
 """
 	CoreProblem
 
-A `PyrolysisProblem` set up on the finite-volume core: the problem (with its
-own copy of the mesh), the definition and workspace the residual reads, the
+A `PyrolysisProblem` set up on the finite-volume core: the problem, the
+definition and workspace the residual reads, the
 initial state, the relative tolerance and the absolute-tolerance vector, the
 colored Jacobian, the initial temperatures and masses, and the
 [`CellDeactivation`](@ref) state (`nothing` when cells are not deactivated).
@@ -29,33 +29,52 @@ _energy_state(s::Symbol) =
     s === :enthalpy ? EnthalpyState() :
     throw(ArgumentError("energy_state must be :temperature or :enthalpy, got :$s"))
 
-# A copy of the problem with its own mesh, so applying the initial conditions
-# never touches the caller's problem.
-_own_problem(p::PyrolysisProblem) = PyrolysisProblem(
-    deepcopy(p.mesh),
-    p.material,
-    p.bc_set,
-    p.T_initial,
-    p.ξ_initial,
-    p.tspan,
-    p.dt_initial,
-    p.output_times,
-)
-
-# The physics this core implements. A problem that needs anything else is
-# refused rather than solved without it.
+# The physics this core implements on the problem's mesh. A problem that needs
+# anything else is refused rather than solved without it.
 function _require_supported(
-    problem::PyrolysisProblem,
+    problem::PyrolysisProblem{<:Mesh{D}},
     use_ale::Bool,
     radiation_model,
     correction::Correction,
-    coordinates::CoordinateSystem,
-    deactivation::Bool,
-)
+    deactivation::Bool;
+    closure::Symbol,
+    slip,
+    tensor,
+    history::Bool,
+    deformation::Bool,
+) where {D}
     material = problem.material
+    coordinates = problem.mesh.topology.coordinates
     radiation_model in (NO_RADIATION, SURFACE_ABSORPTION, BEER_LAMBERT) || throw(
         ArgumentError("the finite-volume core has no $(radiation_model) radiation model"),
     )
+    if D == 1
+        closure === :balance ||
+            throw(ArgumentError("a line's mesh moves by its balance rows: give no closure"))
+        for (name, given) in (
+            :slip => !isempty(slip),
+            :tensor => tensor !== nothing,
+            :history => history,
+            :deformation => deformation,
+        )
+            given &&
+                throw(ArgumentError("`$name` applies to meshes of two or three dimensions"))
+        end
+    else
+        closure in (:potential, :balance) ||
+            throw(ArgumentError("closure must be :potential or :balance, got :$closure"))
+        line = (
+            "in-depth radiation" => radiation_model === BEER_LAMBERT,
+            "gas transport" => !(_gas_transport(problem) isa NoGasTransport),
+            "the variable cross section" => material.lateral_shrinkage_law !== nothing,
+            "deactivation" => deactivation,
+            "the equidistribution correction" =>
+                !(correction isa Union{NoCorrection,PrescribedCorrection}),
+        )
+        for (what, needed) in line
+            needed && throw(ArgumentError("$what is a line's: the mesh has $D dimensions"))
+        end
+    end
     if radiation_model === BEER_LAMBERT && !(coordinates isa Planar)
         # The intensity rows attenuate the intensity and the cell sources read
         # the face areas, which agree only where the areas are equal.
@@ -91,6 +110,33 @@ function _require_supported(
         )
     end
     return nothing
+end
+
+# The mesh's topology with the nodes a solve moves: without `use_ale` every
+# node pinned; with it the mesh's own pinned nodes, which must leave some
+# free. `lagrangian` joins the mesh's Lagrangian nodes.
+function _motion(
+    topo::MeshTopology{D,C,FT,CT},
+    use_ale::Bool,
+    lagrangian::AbstractVector{<:Integer},
+) where {D,C,FT,CT}
+    nn = n_nodes(topo)
+    use_ale &&
+        is_fixed(topo) &&
+        throw(ArgumentError("use_ale = true needs a mesh whose nodes are not all pinned"))
+    lag = sort!(unique!(vcat(topo.lagrangian, Int.(lagrangian))))
+    all(n -> 1 <= n <= nn, lag) ||
+        throw(ArgumentError("lagrangian node ids must lie in 1:$nn"))
+    return MeshTopology{D,C,FT,CT}(
+        topo.coordinates,
+        topo.faces,
+        topo.cells,
+        nn,
+        topo.boundary_tags,
+        use_ale ? topo.pinned : collect(1:nn),
+        lag,
+        topo.cross_section,
+    )
 end
 
 # The interior nodes between two cells that start with different condensed
@@ -171,7 +217,8 @@ end
 # The kernels in assembler order: reactions, gas transport (whose boundary
 # mass fluxes the surface balance reads), in-depth radiation, conduction, the
 # thermal boundary, and under a correction the inventory fluxes relative to
-# the mesh.
+# the mesh. `tensors` holds every cell's dimensionless conductivity tensor on
+# more than one dimension, `nothing` on a line.
 function _kernels(
     problem,
     topo,
@@ -180,6 +227,7 @@ function _kernels(
     gas::GasTransport,
     radiation_model,
     relative::Tuple,
+    tensors,
 )
     material = problem.material
     reactions = n_reactions(material) > 0 ? (ReactionKernel(material),) : ()
@@ -195,12 +243,13 @@ function _kernels(
         problem.bc_set;
         radiation_model,
         laws = gas isa NoGasTransport ? nothing : laws,
+        tensor = tensors,
     )
     return (
         reactions...,
         transport...,
         radiation...,
-        ConductionKernel(topo, g0),
+        ConductionKernel(topo, g0; tensor = tensors),
         boundary,
         relative...,
     )
@@ -344,49 +393,50 @@ end
 """
 	setup(problem; energy_state = :temperature, reltol = 1e-6, abstol = 1e-8,
 	      threshold = 1e-2, use_ale = false, radiation_model = NO_RADIATION,
-	      coordinates = Planar(), w_override = nothing,
-	      correction = nothing, lagrangian = nothing,
-	      time_scale = problem.dt_initial, sources = NoSources(),
-	      deactivation = false, band = nothing) -> CoreProblem
+	      w_override = nothing, correction = nothing, lagrangian = nothing,
+	      deactivation = false, band = nothing, closure = nothing, slip = (),
+	      tensor = nothing, history = false, deformation = false,
+	      time_scale = problem.dt_initial, sources = NoSources()) -> CoreProblem
 
-Set up `problem` on the finite-volume core: apply its initial conditions to its
-own copy of the mesh, build the 1D mesh from the node positions and the
-cross-section area, the initial inventories `mᵢⱼ = ξⱼ(zᵢ) Vᵢ`, the energy
-state from `T(zᵢ)`, the gas transport the material and the mass conditions
-need, the kernels, the face intensities consistent with the incident flux
-under `BEER_LAMBERT`, the tolerance vector and the colored Jacobian.
+Set up `problem`, whose mesh is a `Mesh{D}` ([`create_uniform_mesh`](@ref)
+and its siblings on a line, [`box_mesh`](@ref) and [`cell_mesh`](@ref) in two
+and three dimensions), on the finite-volume core: the initial inventories
+`mᵢⱼ = ξⱼ(xᵢ) Vᵢ` and the energy state from `T(xᵢ)` at the cell centres `xᵢ`
+([`initial_fields`](@ref)), the gas transport the material and the mass
+conditions need, the kernels, the face intensities consistent with the
+incident flux under `BEER_LAMBERT`, the tolerance vector and the colored
+Jacobian. The coordinate system and the cross-section measure are the mesh's;
+the thermal and mass conditions are keyed by its boundary tags.
 
 `radiation_model` is `NO_RADIATION` or `SURFACE_ABSORPTION` (the incident
 flux enters the surface balance at the exposed cell's absorptivity, or the
 condition's own) or `BEER_LAMBERT` (it is absorbed in depth, through the
 face intensities of [`BeerLambertKernel`](@ref)).
 
-`use_ale` moves the mesh with the solid: the back node is pinned and every
-other node follows the cells' reaction strain rates through the balance rows
-of [`BalanceRowClosure`](@ref), with the node velocities consistent at the
-start; a material with a lateral shrinkage law then also carries the
-conversion-history pair and its cross section's area and lateral rate.
-`correction` moves the mesh relative to the solid
-([`EquidistributionCorrection`](@ref); [`NoCorrection`](@ref) keeps it with
-the solid), the balance rows then holding the solid velocity `w − c`, and the
-inventories cross the faces at the relative velocity `−c`
+`use_ale` moves the mesh with the solid: the mesh's pinned nodes (on a line
+the back node) stay at rest and every other node follows the cells' reaction
+strain rates through the mesh closure, with its unknowns consistent at the
+start; without it every node is pinned. On a line the closure is the
+balance rows of [`BalanceRowClosure`](@ref), and a material with a lateral
+shrinkage law also carries the conversion-history pair and its cross
+section's area and lateral rate. `correction` moves a line's mesh relative
+to the solid ([`EquidistributionCorrection`](@ref); [`NoCorrection`](@ref)
+keeps it with the solid), the balance rows then holding the solid velocity
+`w − c`, and the inventories cross the faces at the relative velocity `−c`
 ([`RelativeFluxKernel`](@ref)). By default a solve gets the equidistribution
 correction when the mesh moves, cells are deactivated and some layer can
 vanish (its condensed components gasify completely, [`vanishing`](@ref)), and
 no correction otherwise; a layer that cannot vanish keeps its mesh with the
 solid under any equidistribution correction. `lagrangian` lists the mesh
-nodes that always move with the solid, the layer interfaces; under an
-equidistribution correction every interior node between cells that start
-with different condensed components must be among them, and by default they
-are those nodes. `w_override`, a function `w(x, t)`, prescribes the velocity
-of every node instead
-([`PrescribedCorrection`](@ref)), moving the mesh over a solid at rest
-(verification; the material must not react, and no other correction is
-given), the inventories crossing the faces at `−w`. `coordinates` reads the
-node positions as
-radii of a cylinder (unit axial length) or a sphere (`Cylindrical()`,
-`Spherical()`); planar meshes take the problem's cross-section area.
-`time_scale` [s] scales the velocity tolerances (the first step).
+nodes that always move with the solid, the layer interfaces, beside the
+mesh's own; under an equidistribution correction every interior node between
+cells that start with different condensed components must be among them, and
+by default they are those nodes. `w_override`, a function `w(x, t)` (`x` a
+scalar on a line, an `SVector` otherwise), prescribes the velocity of every
+node instead ([`PrescribedCorrection`](@ref)), moving the mesh over a solid
+at rest (verification; the material must not react, and no other correction
+is given), the inventories crossing the faces at `−w`. `time_scale` [s]
+scales the velocity tolerances (the first step).
 
 `deactivation` deactivates, during the solve, every cell whose condensed mass
 falls below the fraction `threshold` (`ε_m`) of its initial condensed mass
@@ -400,81 +450,83 @@ theirs
 ([`deactivate!`](@ref)).
 `threshold` also scales the mass tolerances; `sources` is the external-source
 hook.
+
+On a mesh of quadrilaterals or hexahedra the closure is `:potential` (the
+default), one multiplier per cell with the node velocities of minimum
+lumped-volume norm that satisfy every cell's volume balance
+([`PotentialClosure`](@ref)), the pinned nodes at rest and on each `tag => k`
+of `slip` the component `k` zero; or `:balance`, the balance rows of a single
+column of cells. `tensor` is each cell's dimensionless conductivity tensor,
+an `SMatrix{D,D}` for every cell or a function of the centroid returning one
+(the identity by default): the conductivity is `k` times it. `history`
+carries the conversion-history pair (`G = 0`, `M` the cell's initial solid
+mass) and `deformation` the deformation gradient (the identity at the
+start) on a moving mesh. Gas transport, in-depth radiation, the variable
+cross section, the equidistribution correction and deactivation are a
+line's, and `closure`, `slip`, `tensor`, `history` and `deformation` are the
+other meshes': a problem that names one where it does not apply is refused.
 """
 function setup(
-    problem::PyrolysisProblem;
+    problem::PyrolysisProblem{<:Mesh{D}};
     energy_state::Symbol = :temperature,
     reltol::Real = 1e-6,
     abstol::Real = 1e-8,
     threshold::Real = 1e-2,
     use_ale::Bool = false,
     radiation_model = NO_RADIATION,
-    coordinates::CoordinateSystem = Planar(),
     w_override = nothing,
     correction::Union{Nothing,Correction} = nothing,
     lagrangian::Union{Nothing,AbstractVector{<:Integer}} = nothing,
-    time_scale::Real = problem.dt_initial,
-    sources = NoSources(),
     deactivation::Bool = false,
     band::Union{Nothing,Real} = nothing,
-)
+    closure::Union{Nothing,Symbol} = nothing,
+    slip = (),
+    tensor = nothing,
+    history::Bool = false,
+    deformation::Bool = false,
+    time_scale::Real = problem.dt_initial,
+    sources = NoSources(),
+) where {D}
     if w_override !== nothing
         (correction === nothing || correction isa NoCorrection) || throw(
             ArgumentError("w_override prescribes the mesh velocity: give no correction"),
         )
         correction = PrescribedCorrection(w_override)
     end
-    problem = _own_problem(problem)
-    apply_initial_conditions!(problem)
     material = problem.material
     NC = n_components(material)
-    old = problem.mesh
-    ξ0 = [Float64(s.ξ[j]) for j = 1:NC, s in old.cell_states]
+    mesh = problem.mesh
+    T0, ξ0 = initial_fields(problem, mesh)
     correction =
         something(correction, _installed_correction(material, ξ0, use_ale, deactivation))
-    lagrangian = something(
-        lagrangian,
-        correction isa EquidistributionCorrection ?
-        _composition_interfaces(ξ0, material) : Int[],
-    )
+    closure = something(closure, D == 1 ? :balance : :potential)
     _require_supported(
         problem,
         use_ale,
         radiation_model,
         correction,
-        coordinates,
-        deactivation,
+        deactivation;
+        closure,
+        slip,
+        tensor,
+        history,
+        deformation,
     )
-    x = [node.z for node in old.nodes]
-    mesh =
-        coordinates isa Planar ?
-        line_mesh(
-            x;
-            cross_section = old.cross_section_area_initial,
-            bottom = :bottom,
-            top = :top,
-            fixed = !use_ale,
-            lagrangian,
-        ) :
-        line_mesh(
-            x;
-            coordinates,
-            bottom = :bottom,
-            top = :top,
-            fixed = !use_ale,
-            lagrangian,
-        )
-    topo = mesh.topology
+    lagrangian = something(
+        lagrangian,
+        correction isa EquidistributionCorrection ?
+        _composition_interfaces(ξ0, material) : Int[],
+    )
+    topo = _motion(mesh.topology, use_ale, lagrangian)
     n = n_cells(topo)
+    x = reduce(vcat, mesh.positions)
     g0 = MeshGeometry{Float64}(topo)
     geometry!(g0, x, topo.cross_section, topo)
-
-    T0 = [Float64(old.cell_states[i].T) for i = 1:n]
-    m0 = [Float64(old.cell_states[i].ξ[j]) * g0.cell_volume[i] for j = 1:NC, i = 1:n]
+    m0 = [ξ0[j, i] * g0.cell_volume[i] for j = 1:NC, i = 1:n]
     _require_layers(correction, m0, material, topo.lagrangian)
 
     reference = CellReference(
-        mesh,
+        Mesh(topo, mesh.positions),
         m0,
         material;
         reltol = Float64(reltol),
@@ -488,13 +540,18 @@ function setup(
     gas = _gas_transport(problem)
     state_setup = StateSetup(topo, material, laws, reference, caloric, gas)
     chi = material.lateral_shrinkage_law !== nothing
+    history = history || chi
+    potential = use_ale && closure === :potential && !(correction isa PrescribedCorrection)
     layout = StateLayout(
         NC,
-        n,
+        topo,
         energy;
         moving = use_ale,
         intensities = radiation_model === BEER_LAMBERT,
         chi,
+        history,
+        deformation,
+        unknowns = potential ? :multipliers : :velocities,
     )
 
     M0 = [
@@ -506,16 +563,17 @@ function setup(
         i = 1:n
     ]
     lateral = chi ? LateralShrinkage(material, topo.cross_section, sum(M0)) : nothing
-    closure =
-        use_ale ?
+    cl =
+        !use_ale ? nothing :
+        potential ? PotentialClosure(topo; slip) :
         BalanceRowClosure(
             topo;
             correction = bind_correction(correction, topo, reference, m0, material),
             lateral,
-        ) : nothing
-    closure === nothing ||
-        rank_check(closure, topo, g0) ||
-        throw(ArgumentError("the balance rows do not determine the node velocities"))
+        )
+    cl === nothing ||
+        rank_check(cl, topo, g0) ||
+        throw(ArgumentError("the closure's rows do not determine the mesh's motion"))
     relative =
         correction isa NoCorrection ? () :
         (
@@ -525,12 +583,12 @@ function setup(
                 material,
                 laws,
                 reference;
-                history = chi,
+                history,
                 temperature_scale = Float64(abstol),
                 history_scale = Float64(reltol * threshold),
             ),
         )
-    band = something(band, _moves(closure) ? max(threshold, CORRECTION_BAND) : threshold)
+    band = something(band, _moves(cl) ? max(threshold, CORRECTION_BAND) : threshold)
     cells =
         deactivation ?
         CellDeactivation(
@@ -544,8 +602,9 @@ function setup(
                 CaloricExtension(laws, reference.mass_scale, reference.capacity_floor),
             ),
         ) : nothing
-    kernels = _kernels(problem, topo, g0, laws, gas, radiation_model, relative)
-    def = CoreDefinition(layout, state_setup, kernels, closure, sources)
+    tensors = D == 1 ? nothing : _tensors(tensor, g0, n, Val(D))
+    kernels = _kernels(problem, topo, g0, laws, gas, radiation_model, relative, tensors)
+    def = CoreDefinition(layout, state_setup, kernels, cl, sources)
     ws = CoreWorkspace(def, T0)
 
     u0 = zeros(state_length(layout))
@@ -555,11 +614,16 @@ function setup(
             u0[mass_index(layout, i, j)] = mi[j]
         end
         u0[energy_index(layout, i)] = energy_state_value(energy, state_setup, T0[i], mi, i)
-        chi && (u0[history_index(layout, i, 2)] = M0[i])
+        history && (u0[history_index(layout, i, 2)] = M0[i])
+        if deformation
+            for a = 1:D
+                u0[deformation_index(layout, i, a, a)] = 1.0
+            end
+        end
     end
     if use_ale
-        for nd = 1:n_nodes(layout)
-            u0[position_index(layout, nd)] = x[nd]
+        for nd = 1:n_nodes(topo), k = 1:D
+            u0[position_index(layout, nd, k)] = x[D*(nd-1)+k]
         end
         chi && (u0[area_index(layout)] = topo.cross_section)
     end
@@ -578,202 +642,6 @@ function setup(
     )
     cj = ColoredJacobianCache(def, ws, u0, t0)
     return CoreProblem(problem, def, ws, u0, Float64(reltol), tol, cj, T0, m0, cells)
-end
-
-# ============================================================================
-# Meshes of more than one dimension
-# ============================================================================
-
-"""
-	setup(problem::PyrolysisProblem{<:Mesh{D}}; energy_state = :temperature,
-	      reltol = 1e-6, abstol = 1e-8, threshold = 1e-2,
-	      radiation_model = NO_RADIATION, use_ale = false, closure = :potential,
-	      slip = (), w_override = nothing, tensor = nothing, history = false,
-	      deformation = false, time_scale = problem.dt_initial,
-	      sources = NoSources()) -> CoreProblem    (D = 2, 3)
-
-Set up a problem whose mesh is a mesh of quadrilaterals or hexahedra
-([`box_mesh`](@ref), [`cell_mesh`](@ref)): the initial inventories
-`mᵢⱼ = ξⱼ(xᵢ) Vᵢ` and the energy state from `T(xᵢ)` at the cell centroids
-`xᵢ` (the problem's initial-condition functions take an `SVector{D}`),
-the reaction, conduction and thermal-boundary kernels, the tolerance vector
-and the colored Jacobian. The thermal conditions are keyed by the mesh's
-boundary tags.
-
-`tensor` is each cell's dimensionless conductivity tensor, an
-`SMatrix{D,D}` for every cell or a function of the centroid returning one
-(the identity by default): the conductivity is `k` times it.
-
-`use_ale` moves the mesh with the solid. The closure is `:potential`, one
-multiplier per cell with the node velocities of minimum lumped-volume norm
-that satisfy every cell's volume balance ([`PotentialClosure`](@ref)), the
-pinned nodes at rest and on each `tag => k` of `slip` the component `k`
-zero; or `:balance`, the balance rows of a single column of cells
-([`BalanceRowClosure`](@ref)). `w_override`, a function
-`w(x::SVector, t) -> SVector`, prescribes every node's velocity instead,
-moving the mesh over a solid at rest (the material must not react), the
-inventories crossing the faces at `−w` ([`RelativeFluxKernel`](@ref)).
-
-`history` carries the conversion-history pair (`G = 0`, `M` the cell's
-initial solid mass) and `deformation` the deformation gradient (the
-identity at the start) on a moving mesh.
-
-Gas transport, in-depth radiation, the variable cross section, the
-equidistribution correction and deactivation are a line's: a problem that
-needs one is refused.
-"""
-function setup(
-    problem::PyrolysisProblem{<:Mesh{D}};
-    energy_state::Symbol = :temperature,
-    reltol::Real = 1e-6,
-    abstol::Real = 1e-8,
-    threshold::Real = 1e-2,
-    radiation_model = NO_RADIATION,
-    use_ale::Bool = false,
-    closure::Symbol = :potential,
-    slip = (),
-    w_override = nothing,
-    tensor = nothing,
-    history::Bool = false,
-    deformation::Bool = false,
-    time_scale::Real = problem.dt_initial,
-    sources = NoSources(),
-) where {D}
-    D in (2, 3) || throw(ArgumentError("a line's mesh is set up from a `Mesh1D`"))
-    material = problem.material
-    NC = n_components(material)
-    radiation_model in (NO_RADIATION, SURFACE_ABSORPTION) ||
-        throw(ArgumentError("in-depth radiation is a line's: the mesh has $D dimensions"))
-    _gas_transport(problem) isa NoGasTransport ||
-        throw(ArgumentError("gas transport is a line's: the mesh has $D dimensions"))
-    material.lateral_shrinkage_law === nothing || throw(
-        ArgumentError("the variable cross section is a line's: the mesh has $D dimensions"),
-    )
-    closure in (:potential, :balance) ||
-        throw(ArgumentError("closure must be :potential or :balance, got :$closure"))
-    w_override === nothing ||
-        use_ale ||
-        throw(ArgumentError("a prescribed mesh velocity needs use_ale = true"))
-    if w_override !== nothing && n_reactions(material) > 0
-        throw(
-            ArgumentError(
-                "a prescribed mesh velocity moves the mesh over a solid at rest, so the " *
-                "material must not react (it has $(n_reactions(material)) reactions)",
-            ),
-        )
-    end
-    mesh = problem.mesh
-    topo = mesh.topology
-    is_fixed(topo) == !use_ale || throw(
-        ArgumentError(
-            use_ale ? "use_ale = true needs a mesh whose nodes are not all pinned" :
-            "a fixed solve needs a mesh with every node pinned (`fixed = true`)",
-        ),
-    )
-    n = n_cells(topo)
-    x = reduce(vcat, mesh.positions)
-    g0 = MeshGeometry{Float64}(topo)
-    geometry!(g0, x, topo.cross_section, topo)
-    T0 = [Float64(problem.T_initial(g0.cell_center[i])) for i = 1:n]
-    m0 = [
-        Float64(problem.ξ_initial[j](g0.cell_center[i])) * g0.cell_volume[i] for
-        j = 1:NC, i = 1:n
-    ]
-
-    reference = CellReference(
-        mesh,
-        m0,
-        material;
-        reltol = Float64(reltol),
-        threshold = Float64(threshold),
-    )
-    energy = _energy_state(energy_state)
-    laws = CaloricLaws(material)
-    caloric =
-        energy isa EnthalpyState ?
-        CaloricExtension(laws, reference.mass_scale, reference.capacity_floor) : nothing
-    state_setup = StateSetup(topo, material, laws, reference, caloric, NoGasTransport())
-    potential = use_ale && w_override === nothing && closure === :potential
-    layout = StateLayout(
-        NC,
-        topo,
-        energy;
-        moving = use_ale,
-        history,
-        deformation,
-        unknowns = potential ? :multipliers : :velocities,
-    )
-    cl =
-        !use_ale ? nothing :
-        w_override !== nothing ?
-        BalanceRowClosure(topo; correction = PrescribedCorrection(w_override)) :
-        potential ? PotentialClosure(topo; slip) : BalanceRowClosure(topo)
-    cl === nothing ||
-        rank_check(cl, topo, g0) ||
-        throw(ArgumentError("the closure's rows do not determine the mesh's motion"))
-    A = _tensors(tensor, g0, n, Val(D))
-    reactions = n_reactions(material) > 0 ? (ReactionKernel(material),) : ()
-    relative =
-        w_override === nothing ? () :
-        (
-            RelativeFluxKernel(
-                topo,
-                g0,
-                material,
-                laws,
-                reference;
-                history,
-                temperature_scale = Float64(abstol),
-                history_scale = Float64(reltol * threshold),
-            ),
-        )
-    kernels = (
-        reactions...,
-        ConductionKernel(topo, g0; tensor = A),
-        ThermalBoundaryKernel(topo, g0, problem.bc_set; radiation_model, tensor = A),
-        relative...,
-    )
-    def = CoreDefinition(layout, state_setup, kernels, cl, sources)
-    ws = CoreWorkspace(def, T0)
-
-    u0 = zeros(state_length(layout))
-    for i = 1:n
-        mi = ntuple(j -> m0[j, i], NC)
-        for j = 1:NC
-            u0[mass_index(layout, i, j)] = mi[j]
-        end
-        u0[energy_index(layout, i)] = energy_state_value(energy, state_setup, T0[i], mi, i)
-        history && (
-            u0[history_index(layout, i, 2)] = sum(
-                m0[j, i] for j = 1:NC if is_solid(material.components[j]);
-                init = 0.0,
-            )
-        )
-        if deformation
-            for a = 1:D
-                u0[deformation_index(layout, i, a, a)] = 1.0
-            end
-        end
-    end
-    if use_ale
-        for nd = 1:n_nodes(topo), k = 1:D
-            u0[position_index(layout, nd, k)] = x[D*(nd-1)+k]
-        end
-    end
-    t0 = problem.tspan[1]
-    consistent_state!(u0, def, ws, t0)
-    tol = abstol_vector(
-        layout,
-        state_setup,
-        m0,
-        T0;
-        reltol = Float64(reltol),
-        abstol = Float64(abstol),
-        threshold = Float64(threshold),
-        time_scale = Float64(time_scale),
-    )
-    cj = ColoredJacobianCache(def, ws, u0, t0)
-    return CoreProblem(problem, def, ws, u0, Float64(reltol), tol, cj, T0, m0, nothing)
 end
 
 # Every cell's dimensionless conductivity tensor.

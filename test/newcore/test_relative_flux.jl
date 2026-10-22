@@ -29,7 +29,7 @@ function _composition(n; T0 = 800.0, law = nothing, c_b = 3000.0)
     )
     front(z) = (1 + tanh((z - _L / 2) / (_L / 10))) / 2
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(_L, n, Val(2)),
+        mesh = create_uniform_mesh(_L, n),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
@@ -195,7 +195,7 @@ function _interior_gap()
     b = SolidComponent(:b; ρ = 1000.0, c = 1000.0, k = 0.5)
     q(z) = z < 0.25 ? 2.0 : z < 0.5 ? 0.0 : 1.0
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(1.0, 4, Val(2)),
+        mesh = create_uniform_mesh(1.0, 4),
         material = Material(name = :interior_gap, components = (a, b), reactions = ()),
         bc_set = BoundaryConditionSet(
             thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
@@ -239,7 +239,7 @@ end
     g = GaseousComponent(:gas; M = 0.032, c = 1000.0, k = 0.03, λ = 0.0)
     q(z) = z < 0.05 ? 2.0 : z < 0.1 ? 0.0 : 1.0
     problem = PyrolysisProblem(
-        mesh = create_uniform_mesh(0.2, 4, Val(2)),
+        mesh = create_uniform_mesh(0.2, 4),
         material = Material(name = :gap_correction, components = (s, g), reactions = ()),
         bc_set = BoundaryConditionSet(
             thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
@@ -309,10 +309,10 @@ end
 
 # One solid at rest at a uniform concentration, compressed by a prescribed
 # uniform stretch of the mesh.
-function _uniform(n)
+function _uniform(n; coordinates = Planar())
     s = SolidComponent(:s, ρ = 800.0, c = 1000.0, k = 0.3)
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(_L, n, Val(1)),
+        mesh = create_uniform_mesh(_L, n; coordinates),
         material = Material(name = :uniform, components = (s,), reactions = ()),
         bc_set = BoundaryConditionSet(
             thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
@@ -328,11 +328,10 @@ const _compress = (x, t) -> (-0.15 * (2π / 20) * sin(2π * t / 20) / _stretch(t
 
 function _free_stream_error(coords, dt; energy = :temperature)
     sol = Integration.solve(
-        _uniform(12);
+        _uniform(12; coordinates = coords);
         energy_state = energy,
         use_ale = true,
         w_override = _compress,
-        coordinates = coords,
         dt,
         adaptive = false,
         abstol = 1e-12,

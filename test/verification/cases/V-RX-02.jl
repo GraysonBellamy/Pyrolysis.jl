@@ -42,7 +42,8 @@ function _vrx02_build(;
             reactions = (rxn,),
             depletion_limiter = DepletionLimiter(enabled = limiter_enabled),
         )
-        mesh = create_uniform_mesh(
+        mesh = core_mesh(
+            create_uniform_mesh,
             1e-3,
             n_cells,
             Val(2);

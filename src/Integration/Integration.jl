@@ -31,7 +31,7 @@ using ..Assembly
 using ..Deactivation
 using ..ColoredJacobian
 using ..Outputs
-using ..Problem: PyrolysisProblem, apply_initial_conditions!, validate_problem
+using ..Problem: PyrolysisProblem, initial_fields, validate_problem
 
 include("erased.jl")
 include("policy.jl")

@@ -38,7 +38,14 @@ function _vbo04_setup(n_cells::Int; t_end = 480.0)
     gas = GaseousComponent(:gas, M = 0.03, c = 1000.0, k = 0.02, λ = 1e-5)
     rxn = Reaction(:burn, 1 => 2; A = A, E = E, h = 0.0, n = 0.0)
     mat = Material(name = :VBO04, components = (solid, gas), reactions = (rxn,))
-    mesh = create_uniform_mesh(L0, n_cells, Val(2); T_initial = T0, ξ_initial = (ρ_s, 0.0))
+    mesh = core_mesh(
+        create_uniform_mesh,
+        L0,
+        n_cells,
+        Val(2);
+        T_initial = T0,
+        ξ_initial = (ρ_s, 0.0),
+    )
     bcs = BoundaryConditionSet(
         thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
         mass = (top = ConvectiveMassBC(h_m = 1.0, ξ_inf = 0.0), bottom = ImpermeableBC()),

@@ -38,7 +38,8 @@ function _verification_case_vrx01()
             reactions = (r1, r2),
             depletion_limiter = DepletionLimiter(enabled = false),
         )
-        mesh = create_uniform_mesh(
+        mesh = core_mesh(
+            create_uniform_mesh,
             L,
             n_cells,
             Val(3);

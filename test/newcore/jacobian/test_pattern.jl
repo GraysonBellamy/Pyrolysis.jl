@@ -59,11 +59,11 @@ function _material(NC; law = nothing, reacting = true)
     return Material(; name = :colors, components, reactions, lateral_shrinkage_law = law)
 end
 
-function _problem(NC, n; law = nothing, reacting = true)
+function _problem(NC, n; law = nothing, reacting = true, coordinates = Planar())
     mat = _material(NC; law, reacting)
     L = 0.01
     return PyrolysisProblem(
-        mesh = create_stretched_mesh(L, n, Val(NC), 1.05),
+        mesh = create_stretched_mesh(L, n, 1.05; coordinates),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (
@@ -202,7 +202,7 @@ end
         widths = Int[]
         for n in (6, 8, 12, 25)
             cps = map(
-                c -> setup(_problem(3, n); coordinates = c, options...),
+                c -> setup(_problem(3, n; coordinates = c); options...),
                 (Planar(), Cylindrical(), Spherical()),
             )
             patterns = map(cp -> cp.jacobian.pattern, cps)

@@ -17,7 +17,14 @@ using Pyrolysis.Integration: setup
 # a component absorptivity different from its emissivity, mass absorption
 # coefficients that change as the virgin solid turns to char, and a
 # time-dependent incident flux.
-function _translucent_slab(n; top, gas_λ = 0.0, bottom = AdiabaticBC(), reacting = true)
+function _translucent_slab(
+    n;
+    top,
+    gas_λ = 0.0,
+    bottom = AdiabaticBC(),
+    reacting = true,
+    coordinates = Planar(),
+)
     virgin = SolidComponent(
         :virgin,
         ρ = 1100.0,
@@ -39,7 +46,7 @@ function _translucent_slab(n; top, gas_λ = 0.0, bottom = AdiabaticBC(), reactin
         depletion_limiter = DepletionLimiter(threshold = 1.0),
     )
     return PyrolysisProblem(
-        mesh = create_stretched_mesh(0.01, n, Val(3), 1.15),
+        mesh = create_stretched_mesh(0.01, n, 1.15; coordinates),
         material = mat,
         bc_set = BoundaryConditionSet(thermal = (top = top, bottom = bottom)),
         T_initial = z -> 400.0 + 4e4 * z,
@@ -187,14 +194,10 @@ end
 # the cell sources read the face areas, so a transparent cell would absorb
 # `I (A_up − A_down)`: setup refuses the combination.
 @testset "Beer–Lambert is refused off planar coordinates" begin
-    problem = _translucent_slab(6; top = _radiation_tops.kirchhoff)
     for coordinates in (Cylindrical(), Spherical())
-        @test_throws ArgumentError setup(
-            problem;
-            radiation_model = BEER_LAMBERT,
-            coordinates,
-        )
-        cp = setup(problem; radiation_model = SURFACE_ABSORPTION, coordinates)
+        problem = _translucent_slab(6; top = _radiation_tops.kirchhoff, coordinates)
+        @test_throws ArgumentError setup(problem; radiation_model = BEER_LAMBERT)
+        cp = setup(problem; radiation_model = SURFACE_ABSORPTION)
         @test !has_intensities(cp.def.layout)
     end
 end

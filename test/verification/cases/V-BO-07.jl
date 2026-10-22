@@ -60,7 +60,8 @@ function _vbo07_problem(n_pmma::Int; t_end = 500.0)
     dz = VBO_L_PMMA / n_pmma
     n_kw = round(Int, VBO_L_KW / dz)
     n = n_pmma + n_kw
-    mesh = create_uniform_mesh(
+    mesh = core_mesh(
+        create_uniform_mesh,
         n * dz,
         n,
         Val(4);

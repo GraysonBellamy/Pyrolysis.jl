@@ -413,7 +413,7 @@ end
 
 # A slab that thins (the char is lighter), absorbs in depth and shrinks
 # laterally, on a stretched mesh: every row kind of the tolerance vector.
-function _thinning_slab(; law = χ -> 1 - 0.3χ)
+function _thinning_slab(; law = χ -> 1 - 0.3χ, coordinates = Planar())
     virgin =
         SolidComponent(:virgin, ρ = 1100.0, c = (900.0, 1.5), k = 0.2, ε = 0.8, α = 1.5)
     char = SolidComponent(:char, ρ = 300.0, c = 1100.0, k = 0.1, ε = 0.95, α = 20.0)
@@ -427,7 +427,7 @@ function _thinning_slab(; law = χ -> 1 - 0.3χ)
         lateral_shrinkage_law = law,
     )
     return PyrolysisProblem(
-        mesh = create_stretched_mesh(0.01, 6, Val(3), 1.2),
+        mesh = create_stretched_mesh(0.01, 6, 1.2; coordinates),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (
@@ -511,7 +511,7 @@ end
     Cylindrical(),
     Spherical(),
 )
-    cp = setup(_thinning_slab(law = nothing); use_ale = true, coordinates = coords)
+    cp = setup(_thinning_slab(law = nothing, coordinates = coords); use_ale = true)
     layout, s = cp.def.layout, cp.def.setup
     topo = s.topology
     @test topo.coordinates isa typeof(coords)

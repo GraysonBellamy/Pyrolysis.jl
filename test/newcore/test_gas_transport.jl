@@ -56,7 +56,7 @@ function _gas_slab(n; darcy::Bool, thermal, mass)
     )
     L = 0.01
     return PyrolysisProblem(
-        mesh = create_stretched_mesh(L, n, Val(4), 1.15),
+        mesh = create_stretched_mesh(L, n, 1.15),
         material = mat,
         bc_set = BoundaryConditionSet(thermal = thermal, mass = mass),
         T_initial = z -> 500.0 + 3e4 * z,
@@ -198,7 +198,7 @@ end
     air = GaseousComponent(:air, M = 0.029, c = 1006.0, k = 0.026, λ = 2e-5)
     mat = Material(name = :iso, components = (virgin, gas, air), reactions = ())
     problem = PyrolysisProblem(
-        mesh = create_stretched_mesh(0.01, 9, Val(3), 1.2),
+        mesh = create_stretched_mesh(0.01, 9, 1.2),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
@@ -318,7 +318,7 @@ function _pressure_tie(n; outlet::Bool, energy)
     mat = Material(name = :pressure_tie, components = (solid, a, b), reactions = ())
     y(z) = isodd(clamp(floor(Int, z * n) + 1, 1, n)) ? 0.25 : 0.75
     problem(top) = PyrolysisProblem(
-        mesh = create_uniform_mesh(1.0, n, Val(3)),
+        mesh = create_uniform_mesh(1.0, n),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
@@ -368,7 +368,7 @@ function _sealed_pair(λ)
     solid = SolidComponent(:solid; ρ = 600.0, c = 1000.0, k = 0.1)
     gas = GaseousComponent(:gas; M = 0.032, c = 1000.0, k = 0.03, λ)
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(1.0, 2, Val(2)),
+        mesh = create_uniform_mesh(1.0, 2),
         material = Material(name = :sealed_pair, components = (solid, gas), reactions = ()),
         bc_set = BoundaryConditionSet(
             thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),

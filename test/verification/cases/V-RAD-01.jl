@@ -42,7 +42,14 @@ function _verification_case_vrad01()
     function build(n_cells)
         solid = SolidComponent(:solid, ρ = ρ, c = c, k = k, α = κ / ρ)
         mat = Material(name = :VRAD01, components = (solid,), reactions = ())
-        mesh = create_uniform_mesh(δ, n_cells, Val(1); T_initial = T0, ξ_initial = (ρ,))
+        mesh = core_mesh(
+            create_uniform_mesh,
+            δ,
+            n_cells,
+            Val(1);
+            T_initial = T0,
+            ξ_initial = (ρ,),
+        )
         bc_set = BoundaryConditionSet(
             thermal = (
                 top = RadiativeFluxBC(flux = q0, absorptivity = 1.0) +

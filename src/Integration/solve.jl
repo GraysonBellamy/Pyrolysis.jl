@@ -18,7 +18,6 @@ const _SOLVE_KEYWORDS = (
     :validate,
     :use_ale,
     :w_override,
-    :coordinates,
     :min_thickness,
     :radiation_model,
     :jacobian,
@@ -63,8 +62,8 @@ continuous callback's event raises the flag as any event does. `progress` is
 accepted for the keyword set of the other solver and draws nothing; `jacobian`
 is accepted and ignored, the colored Jacobian being the only one.
 
-`use_ale`, `w_override`, `correction`, `lagrangian`, `coordinates`,
-`deactivation` and `band` are those of [`setup`](@ref). On a moving mesh the solve ends with return code
+`use_ale`, `w_override`, `correction`, `lagrangian`, `deactivation` and
+`band` are those of [`setup`](@ref). On a moving mesh the solve ends with return code
 `:Terminated` when the thickness falls below `min_thickness` [m] (default
 1e-6). With `deactivation`, cells are deactivated in events
 ([`deactivate!`](@ref)): with `located_events` an event is located inside the
@@ -84,7 +83,7 @@ as the domain test holds every later proposal) or no consistent node
 velocities. The state a solve
 ends on is always saved, whether or not `saveat` names its time.
 """
-function solve(problem::PyrolysisProblem; kwargs...)
+function solve(problem::PyrolysisProblem{<:Mesh}; kwargs...)
     for k in keys(kwargs)
         k in _SOLVE_KEYWORDS || throw(ArgumentError("solve(): unknown keyword `$k`"))
     end
@@ -92,7 +91,7 @@ function solve(problem::PyrolysisProblem; kwargs...)
 end
 
 function _solve(
-    problem::PyrolysisProblem;
+    problem::PyrolysisProblem{<:Mesh};
     energy_state::Symbol = :temperature,
     abstol::Real = 1e-8,
     reltol::Real = 1e-6,
@@ -108,7 +107,6 @@ function _solve(
     validate::Bool = true,
     use_ale::Bool = false,
     w_override = nothing,
-    coordinates::CoordinateSystem = Planar(),
     min_thickness::Real = 1e-6,
     radiation_model = NO_RADIATION,
     jacobian = nothing,
@@ -133,7 +131,6 @@ function _solve(
         threshold,
         use_ale,
         radiation_model,
-        coordinates,
         w_override,
         time_scale = dt,
         sources,
