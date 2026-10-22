@@ -64,8 +64,8 @@ is accepted and ignored, the colored Jacobian being the only one.
 
 `use_ale`, `w_override`, `correction`, `lagrangian`, `deactivation` and
 `band` are those of [`setup`](@ref). On a moving mesh the solve ends with return code
-`:Terminated` when the thickness falls below `min_thickness` [m] (default
-1e-6). With `deactivation`, cells are deactivated in events
+`:Terminated` and outcome `:min_thickness` when the thickness falls below
+`min_thickness` [m] (default 1e-6). With `deactivation`, cells are deactivated in events
 ([`deactivate!`](@ref)): with `located_events` an event is located inside the
 step at the first time a live cell's condensed mass reaches its threshold (the
 first root of [`threshold_margin`](@ref)) and applied at the interpolated state
@@ -257,7 +257,8 @@ function integrate(
         integrator -> _record!(integrator, accepted, policy);
         save_positions = (false, false),
     )
-    thin = _thickness_termination(layout, Float64(min_thickness))
+    outcome = Ref(:running)
+    thin = _thickness_termination(layout, Float64(min_thickness), outcome)
     events = _deactivation_callback(cp, check, policy, located_events)
     callbacks =
         callback === nothing ? CallbackSet(observer, events..., thin..., recorder) :
@@ -311,6 +312,7 @@ function integrate(
         stats,
         raw;
         deactivation = cells,
+        outcome = outcome[],
     )
 end
 
@@ -433,9 +435,14 @@ function cap_step!(integrator, cap::NewtonCap)
     return nothing
 end
 
-# The solve's end when a moving mesh thins below `min_thickness`: the distance
-# from the first node to the outermost live one.
-function _thickness_termination(layout::StateLayout, min_thickness::Float64)
+# The solve's end when a moving mesh thins below `min_thickness`, with the
+# outcome `:min_thickness`: the distance from the first node to the outermost
+# live one.
+function _thickness_termination(
+    layout::StateLayout,
+    min_thickness::Float64,
+    outcome::Base.RefValue{Symbol},
+)
     is_moving(layout) || return ()
     bottom = position_index(layout, 1)
     thickness = FunctionWrapper{Float64,Tuple{_StateVector}}(
@@ -444,7 +451,10 @@ function _thickness_termination(layout::StateLayout, min_thickness::Float64)
     return (
         ContinuousCallback(
             (u, t, integrator) -> thickness(u) - min_thickness,
-            terminate!;
+            integrator -> begin
+                outcome[] = :min_thickness
+                terminate!(integrator)
+            end;
             save_positions = (false, false),
         ),
     )

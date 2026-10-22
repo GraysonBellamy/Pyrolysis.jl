@@ -65,8 +65,7 @@ function exact_profile(case_id::String)
     error("no exact profile for $case_id")
 end
 
-_positions(sol) =
-    sol isa Outputs.CoreSolution ? Outputs.cell_positions(sol) : get_cell_positions(sol)
+_positions(sol) = get_cell_positions(sol)
 
 # RMS and maximum profile error at every output time after t = 0.
 function profile_errors(sol, T_exact)

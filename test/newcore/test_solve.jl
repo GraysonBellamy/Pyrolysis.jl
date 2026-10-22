@@ -158,8 +158,7 @@ end
     @test sol.surface_T ≈ sol.T[end, :] .+ q * (L / n / 2) / 0.4 rtol = 1e-12
     @test sol.boundary_T[:bottom] == sol.T[1, :]
     @test sol.surface_T == sol.boundary_T[:top]
-    @test Pyrolysis.Outputs.cell_positions(sol) ≈
-          collect(range(L / 2n, L - L / 2n, length = n))
+    @test get_cell_positions(sol) ≈ collect(range(L / 2n, L - L / 2n, length = n))
     # The prescribed flux is what the surface applies and conducts.
     @test sol.extras.surface_heat_flux_net == fill(q, 3)
     @test sol.extras.surface_heat_flux_conduction ≈ fill(q, 3) rtol = 1e-12

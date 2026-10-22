@@ -131,14 +131,16 @@ The solution of the finite-volume core at the saved times:
   in closed form)
 - `extras`: the [`CoreExtras`](@ref) series
 - `events`: the [`DeactivationEvent`](@ref)s of the solve, in order
-- `outcome`: `:running` unless the deactivation ended the solve
-  (`:burned_out`, `:interior`)
+- `outcome`: `:running` unless the deactivation or the thickness stop ended
+  the solve (`:burned_out`, `:interior`, `:inconsistent`, `:min_thickness`)
 - `retcode`: the integrator's return code
 - `solve_time`: wall time of the solve [s]
 - `statistics`: the [`SolverStatistics`](@ref)
 - `raw_solution`: the integrator's solution
+- `definition`: the core's definition of the solve, through which `sol(t)`
+  reconstructs the fields
 """
-struct CoreSolution{P}
+struct CoreSolution{P,D<:CoreDefinition}
     problem::P
     t::Vector{Float64}
     T::Matrix{Float64}
@@ -159,6 +161,7 @@ struct CoreSolution{P}
     solve_time::Float64
     statistics::SolverStatistics
     raw_solution::Any
+    definition::D
 end
 
 # The extras of `nt` saved times: every series zero except the blowing
@@ -238,14 +241,15 @@ end
 
 """
 	CoreSolution(problem, t, states, def, ws, retcode, solve_time, statistics, raw;
-	             deactivation = nothing)
+	             deactivation = nothing, outcome = :running)
 
 Reconstruct the fields from the saved state vectors `states`: one residual
 evaluation per saved state, under the mask and reference masses its time had
 (the events of the [`CellDeactivation`](@ref) `deactivation` before it), fills
 the derived state and the kernel contributions (the face temperatures and
 mass fluxes among them) in the plain buffers of `ws`. The mask and the
-references are left as after the last event.
+references are left as after the last event. The outcome is the
+deactivation's once it ended the solve, else `outcome`.
 """
 function CoreSolution(
     problem,
@@ -258,6 +262,7 @@ function CoreSolution(
     statistics::SolverStatistics,
     raw;
     deactivation::Union{Nothing,CellDeactivation} = nothing,
+    outcome::Symbol = :running,
 )
     layout = def.layout
     topo = def.setup.topology
@@ -431,17 +436,12 @@ function CoreSolution(
         boundary_blowing_ratio,
         x,
         deactivation === nothing ? DeactivationEvent[] : copy(deactivation.events),
-        deactivation === nothing ? :running : deactivation.outcome[],
+        deactivation === nothing || deactivation.outcome[] === :running ? outcome :
+        deactivation.outcome[],
         retcode,
         solve_time,
         statistics,
         raw,
+        def,
     )
 end
-
-"""
-	cell_positions(sol::CoreSolution) -> Vector{Float64}
-
-The cell-center positions at the last saved time [m].
-"""
-cell_positions(sol::CoreSolution) = sol.cell_centers[:, end]

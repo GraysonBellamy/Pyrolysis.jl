@@ -264,11 +264,10 @@ if !isdefined(@__MODULE__, :VerificationCase)
         core_solve(problem; kwargs...)
 
     """
-    Cell-center positions of a solved case [m], on either core.
+    Cell-center positions of a solved case [m], on either core: the old
+    solution's initial ones, the new solution's at its last saved time.
     """
-    cell_positions(sol::PyrolysisSolution) = get_cell_positions(sol)
-    cell_positions(sol::Pyrolysis.Outputs.CoreSolution) =
-        Pyrolysis.Outputs.cell_positions(sol)
+    cell_positions(sol) = get_cell_positions(sol)
 
     observed_orders(errors, hs) =
         [log(errors[i-1] / errors[i]) / log(hs[i-1] / hs[i]) for i = 2:length(errors)]

@@ -34,6 +34,8 @@ using ..Jacobian:
     sparsity_profile,
     materializes_geometry_block
 using ..Problem
+# The accessors are the finite-volume core's; the old solution adds its methods.
+import ..Outputs: get_profile, get_cell_positions, interpolate_solution
 using ..Diagnostics: DiagnosticsRow, DiagnosticsCallback, snapshot_diagnostics_row
 using OrdinaryDiffEq
 using OrdinaryDiffEq: CallbackSet
