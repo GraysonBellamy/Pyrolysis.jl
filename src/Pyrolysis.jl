@@ -73,6 +73,10 @@ using .Properties
 include("BoundaryConditions/BoundaryConditions.jl")
 using .BoundaryConditions
 
+# The finite-volume mesh, which owns the mesh constructors
+include("Meshes/Meshes.jl")
+using .Meshes: Planar, Cylindrical, Spherical
+
 # Geometry and mesh infrastructure
 include("Geometry/Geometry.jl")
 using .Geometry
@@ -85,7 +89,6 @@ using .Physics
 # physics kernels, the mesh closure, the residual, cell deactivation and the
 # colored Jacobian.
 # Reached by module path (`Pyrolysis.Meshes`, …); none of them is re-exported.
-include("Meshes/Meshes.jl")
 include("States/States.jl")
 include("Kernels/Kernels.jl")
 include("Closures/Closures.jl")
@@ -177,6 +180,7 @@ export RadiationModel, NO_RADIATION, SURFACE_ABSORPTION, BEER_LAMBERT
 
 # Geometry
 export create_uniform_mesh, create_stretched_mesh, create_mesh_from_nodes
+export Planar, Cylindrical, Spherical
 
 # Problem & solve
 export PyrolysisProblem, PyrolysisSolution

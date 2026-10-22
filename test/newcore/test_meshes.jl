@@ -128,3 +128,83 @@ end
     geometry!(g, x, 1.0, topo)
     @test J[:, end] ≈ [g.cell_volume; g.face_area]
 end
+
+_nodes(mesh) = [p[1] for p in mesh.positions]
+
+function _volumes(mesh)
+    topo = mesh.topology
+    g = MeshGeometry{Float64}(topo)
+    geometry!(g, _nodes(mesh), topo.cross_section, topo)
+    return g.cell_volume
+end
+
+@testset "uniform meshes: the nodes, the tags and the volumes" begin
+    for (L, n) in ((0.01, 100), (0.023, 7), (1.0, 3)), coords in _coords
+        mesh = create_uniform_mesh(L, n; coordinates = coords)
+        topo = mesh.topology
+        @test mesh isa Mesh{1}
+        @test topo.coordinates === coords
+        @test _nodes(mesh) == [(i - 1) * (L / n) for i = 1:(n+1)]
+        @test boundary_tags(topo) == [:bottom, :top]
+        @test boundary_faces(topo, :top) == [n + 1]
+        @test topo.pinned == [1] && isempty(topo.lagrangian)
+        A = coords isa Spherical ? 4π : 1.0
+        @test topo.cross_section == A
+        z = _nodes(mesh)
+        exact = [shell_volume(coords, z[i], z[i+1], A) for i = 1:n]
+        @test _volumes(mesh) == exact
+    end
+    @test create_uniform_mesh(0.01, 4; cross_section = 2.5).topology.cross_section == 2.5
+    @test _volumes(create_uniform_mesh(0.01, 4; cross_section = 2.5)) ≈
+          fill(2.5 * 0.0025, 4)
+    sphere = create_uniform_mesh(0.01, 4; coordinates = Spherical(), cross_section = π)
+    @test sphere.topology.cross_section == Float64(π)
+    @test_throws ArgumentError create_uniform_mesh(0.01, 0)
+    @test_throws ArgumentError create_uniform_mesh(-0.01, 4)
+    @test_throws ArgumentError create_uniform_mesh(0.01, 4; cross_section = 0.0)
+    @test_throws ArgumentError create_uniform_mesh(0.01, 4; cross_section = Inf)
+end
+
+@testset "stretched meshes: the ratio, the refined side and the ends" begin
+    for (L, n, r) in ((0.01, 50, 1.1), (0.02, 9, 1.2), (3.0, 4, 2.0))
+        top = _nodes(create_stretched_mesh(L, n, r))
+        bottom = _nodes(create_stretched_mesh(L, n, r; stretch_from = :bottom))
+        @test top[1] == 0 && top[end] == L
+        @test bottom[1] == 0 && bottom[end] == L
+        # Each cell is `r` times its neighbour on the refined side.
+        h_top, h_bottom = diff(top), diff(bottom)
+        @test all(h_top[i] / h_top[i+1] ≈ r for i = 1:(n-1))
+        @test all(h_bottom[i+1] / h_bottom[i] ≈ r for i = 1:(n-1))
+        @test h_top[end] ≈ L * (r - 1) / (r^n - 1)
+        @test h_bottom ≈ reverse(h_top)
+    end
+    # A unit ratio is the uniform range, reflected for the refined top.
+    uniform = collect(range(0.0, 0.01; length = 7))
+    @test _nodes(create_stretched_mesh(0.01, 6, 1.0; stretch_from = :bottom)) == uniform
+    @test _nodes(create_stretched_mesh(0.01, 6, 1.0)) == 0.01 .- reverse(uniform)
+    @test _nodes(create_stretched_mesh(0.01, 6, 1.0 + 1e-12)) == 0.01 .- reverse(uniform)
+    for coords in _coords
+        mesh = create_stretched_mesh(0.02, 5, 1.3; coordinates = coords)
+        @test mesh.topology.coordinates === coords
+        z, A = _nodes(mesh), mesh.topology.cross_section
+        @test _volumes(mesh) == [shell_volume(coords, z[i], z[i+1], A) for i = 1:5]
+    end
+    @test_throws ArgumentError create_stretched_mesh(0.01, 6, 0.9)
+    @test_throws ArgumentError create_stretched_mesh(0.01, 6, 1.1; stretch_from = :side)
+end
+
+@testset "meshes from node lists" begin
+    z = [0.0, 0.001, 0.0025, 0.004, 0.01]
+    for coords in _coords
+        mesh = create_mesh_from_nodes(z; coordinates = coords)
+        @test _nodes(mesh) == z
+        @test mesh.topology.coordinates === coords
+    end
+    @test _nodes(create_mesh_from_nodes([0, 1, 3])) == [0.0, 1.0, 3.0]
+    @test create_mesh_from_nodes(z; cross_section = 0.3).topology.cross_section == 0.3
+    @test_throws ArgumentError create_mesh_from_nodes([0.001, 0.002])
+    @test_throws ArgumentError create_mesh_from_nodes([0.0])
+    @test_throws ArgumentError create_mesh_from_nodes(Float64[])
+    @test_throws ArgumentError create_mesh_from_nodes([0.0, 0.002, 0.001])
+    @test_throws ArgumentError create_mesh_from_nodes([0.0, NaN])
+end

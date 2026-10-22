@@ -11,8 +11,9 @@ element type follows the positions and automatic differentiation passes through
 the geometry.
 
 The 1D generators build planar, cylindrical and spherical meshes from node
-positions over one topology; the coordinate system decides how face areas and
-cell volumes follow from the positions. Planar meshes of quadrilaterals and
+positions over one topology, uniform, stretched or from a node list; the
+coordinate system decides how face areas and cell volumes follow from the
+positions. Planar meshes of quadrilaterals and
 hexahedra are built from their cells' node lists, the faces found by matching
 node sets.
 """
@@ -30,6 +31,7 @@ export geometric_dimension, face_area, shell_volume, outer_position
 export Face, Cell, MeshTopology, Mesh
 export n_cells, n_faces, n_nodes, boundary_faces, boundary_tags, is_fixed, live_face
 export line_mesh, cell_mesh, box_mesh
+export create_uniform_mesh, create_stretched_mesh, create_mesh_from_nodes
 export MeshGeometry, geometry!, cell_distance, center_to_face_distance
 export cell_volume_quadrature
 

@@ -14,6 +14,8 @@ module Geometry
 using ..Materials
 using ..BoundaryConditions
 using StaticArrays
+# The constructors are the finite-volume mesh's; `Mesh1D` adds its methods.
+import ..Meshes: create_uniform_mesh, create_stretched_mesh, create_mesh_from_nodes
 
 # Include all subfiles
 include("nodes.jl")
