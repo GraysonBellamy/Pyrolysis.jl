@@ -236,3 +236,78 @@ function contribute!(
     end
     return c
 end
+
+"""
+	RelativeFluxKernel(topology::MeshTopology{D}, geometry, material, laws, reference;
+	                   history, temperature_scale, history_scale)    (D ≥ 2)
+
+The relative fluxes of a mesh of more than one dimension, first-order upwind:
+through each face every inventory moves at the solid's velocity relative to
+the face, `u A_f = −Σ_q s_{q,f} · c_q` with `c` the node corrections and `s`
+the face's sweep vectors, carrying the upwind cell's concentrations, their
+enthalpy at its temperature and its per-solid-mass history values; a boundary
+face carries its own cell's whichever way the mesh crosses it. A
+concentration's face state is the upwind cell's positive part at its
+concentration tolerance, so no face draws a component out of a cell that
+holds none of it. The slope scales do not enter.
+"""
+function RelativeFluxKernel(
+    topo::MeshTopology,
+    g::MeshGeometry,
+    material::Material,
+    laws::CaloricLaws,
+    reference::CellReference;
+    history::Bool,
+    temperature_scale::Float64,
+    history_scale::Float64,
+)
+    return RelativeFluxKernel(
+        laws,
+        map(is_solid, material.components),
+        history,
+        zeros(3, 0),
+        reference.mass_scale ./ reference.volume,
+        zeros(Int, 2, 0),
+        zeros(Int, 2, 0),
+        zeros(2, 0),
+        copy(reference.mass_scale),
+    )
+end
+
+function contribute!(
+    c::Contributions{NC},
+    kernel::RelativeFluxKernel{L,NC},
+    ds::DerivedState{NC},
+    topo::MeshTopology{D},
+    material,
+    t,
+) where {L,NC,D}
+    g = ds.geometry
+    @inbounds for f = 1:n_faces(topo)
+        nodes = topo.faces[f].nodes
+        sweep = zero(eltype(c.F_energy))
+        for q in eachindex(nodes)
+            cq = SVector{D}(ntuple(k -> ds.c[D*(nodes[q]-1)+k], Val(D)))
+            sweep += dot(g.face_sweep[q, f], cq)
+        end
+        iszero(sweep) && continue
+        u = -sweep / g.face_area[f]
+        o, nb = topo.faces[f].cells
+        U = nb == 0 || value(u) >= 0 ? o : nb
+        h = component_enthalpies(kernel.laws, ds.T[U])
+        q = zero(eltype(c.F_energy))
+        F_solid = zero(q)
+        for j = 1:NC
+            F = u * positive_part(ds.ξ[j, U], kernel.η[U])
+            c.F_mass[j, f] += F
+            q += F * h[j]
+            kernel.solid[j] && (F_solid += F)
+        end
+        c.F_energy[f] += q
+        kernel.history || continue
+        m = _solid_mass(kernel, ds, U)
+        c.F_carried[1, f] += F_solid * ds.G[U] / m
+        c.F_carried[2, f] += F_solid * ds.M[U] / m
+    end
+    return c
+end

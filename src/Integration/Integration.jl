@@ -10,6 +10,7 @@ module Integration
 
 using LinearAlgebra
 using SparseArrays
+using StaticArrays: SMatrix
 using FunctionWrappers: FunctionWrapper
 using SciMLBase: NullParameters, NoInit, FullSpecialize, derivative_discontinuity!
 using SciMLBase: terminate!

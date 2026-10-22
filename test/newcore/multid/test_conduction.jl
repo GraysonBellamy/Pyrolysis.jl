@@ -197,3 +197,80 @@ end
         1:n_faces(topo),
     )
 end
+
+# ============================================================================
+# A steady manufactured solution
+# ============================================================================
+
+using SparseArrays
+using Pyrolysis.Assembly: residual!, VolumetricSources
+using Pyrolysis.ColoredJacobian: jacobian!, jac_prototype
+using Pyrolysis.Integration: setup
+
+# T = 300 + 100 sin(πx) sin(πy) on the unit square, held at 300 K on every
+# face, under the conductivity k A, A = R diag(4, 1) Rᵀ rotated by 30°: the
+# source −∇·(kA∇T) / (ρc), evaluated at the cell centroids, makes it steady.
+# ρc is well above the heat-capacity floor.
+const _ρ, _c, _k = 1000.0, 1000.0, 1000.0
+const _K = _tensor(π / 6)
+_exact(x) = 300.0 + 100.0 * sin(π * x[1]) * sin(π * x[2])
+function _source(x, t)
+    s1, s2 = sin(π * x[1]), sin(π * x[2])
+    c1, c2 = cos(π * x[1]), cos(π * x[2])
+    div = 100π^2 * (-(_K[1, 1] + _K[2, 2]) * s1 * s2 + 2 * _K[1, 2] * c1 * c2)
+    return -_k * div / (_ρ * _c)
+end
+# A smooth distortion that keeps the square's outline.
+_square(x::SVector{2}) = SVector(
+    x[1] + 0.04sin(π * x[1]) * sin(2π * x[2]),
+    x[2] + 0.04sin(π * x[2]) * sin(2π * x[1]),
+)
+
+function _poisson_error(n)
+    s = SolidComponent(:s, ρ = _ρ, c = _c, k = _k)
+    held = DirichletThermalBC(300.0)
+    problem = PyrolysisProblem(
+        mesh = box_mesh(
+            range(0.0, 1.0; length = n + 1),
+            range(0.0, 1.0; length = n + 1);
+            transform = _square,
+            fixed = true,
+        ),
+        material = Material(name = :conductor, components = (s,), reactions = ()),
+        bc_set = BoundaryConditionSet(
+            thermal = (left = held, right = held, bottom = held, top = held),
+        ),
+        T_initial = x -> 300.0,
+        ξ_initial = [x -> _ρ],
+        tspan = (0.0, 1.0),
+    )
+    cp = setup(problem; tensor = _K, sources = VolumetricSources(nothing, _source))
+    layout = cp.def.layout
+    rows = [energy_index(layout, i) for i = 1:n_cells(layout)]
+    u = copy(cp.u0)
+    du = zeros(length(u))
+    J = jac_prototype(cp.jacobian)
+    for _ = 1:2
+        residual!(du, u, cp.def, 0.0, cp.ws)
+        jacobian!(J, cp.jacobian, u, 0.0)
+        u[rows] .-= J[rows, rows] \ du[rows]
+    end
+    residual!(du, u, cp.def, 0.0, cp.ws)
+    @test maximum(abs, du[rows]) <= 1e-8 * maximum(abs, _source(SVector(0.5, 0.5), 0.0))
+    g = cp.ws.derived.geometry
+    e = [u[rows[i]] - _exact(g.cell_center[i]) for i = 1:n_cells(layout)]
+    return sqrt(sum(e .^ 2 .* g.cell_volume) / sum(g.cell_volume)), maximum(abs, e)
+end
+
+@testset "a steady manufactured solution with a rotated tensor on a distorted mesh: second order" begin
+    errors = [_poisson_error(n) for n in (8, 16, 32, 64)]
+    l2 = first.(errors)
+    linf = last.(errors)
+    orders = log2.(l2[1:(end-1)] ./ l2[2:end])
+    @info "steady manufactured solution at 8, 16, 32 and 64 cells a side" l2 =
+        join(l2, ", ") linf = join(linf, ", ") orders = join(orders, ", ")
+    @test all(>=(1.9), orders)
+    # The largest error is one-sided at the coarsest pair and second order once
+    # the mesh resolves the distortion.
+    @test log2(linf[end-1] / linf[end]) >= 1.9
+end
