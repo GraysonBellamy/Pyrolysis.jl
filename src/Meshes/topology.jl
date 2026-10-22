@@ -171,6 +171,10 @@ cells). `active` flags the live cells.
     return f
 end
 
+# In more dimensions a boundary face bounds the live cells while its owner is live.
+@inline live_face(topo::MeshTopology, active::AbstractVector{Bool}, f::Int) =
+    active[topo.faces[f].cells[1]] ? f : 0
+
 """
 	Mesh{D,TopT}
 
