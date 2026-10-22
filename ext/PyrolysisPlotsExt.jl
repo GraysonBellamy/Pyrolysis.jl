@@ -1,11 +1,9 @@
 """
-PyrolysisPlotsExt — Plots.jl recipes for `PyrolysisSolution`.
+PyrolysisPlotsExt — Plots.jl recipes for the solutions of `Pyrolysis`.
 
 Loaded automatically when both `Pyrolysis` and `Plots` (or `RecipesBase`)
-are available in the user's environment. Consumes the fixed core schema
-of `PyrolysisSolution` (`t`, `T`, `ξ`, `z`, `surface_T`, `mass_loss_rate`)
-so the recipes work regardless of which optional diagnostics extras were
-turned on.
+are available in the user's environment. Consumes the fields every solution
+has (`t`, `T`, `surface_T`, `mass_loss_rate`).
 
 # Usage
 
@@ -22,11 +20,12 @@ plot(sol; kind = :surface_T)# surface-temperature trace (explicit)
 module PyrolysisPlotsExt
 
 using Pyrolysis: PyrolysisSolution
+using Pyrolysis.Outputs: CoreSolution
 using RecipesBase: @recipe, @series
 
 # Default `plot(sol)` is the surface-temperature trace — inexpensive and
 # gives a quick at-a-glance view of the solve.
-@recipe function f(sol::PyrolysisSolution; kind = :surface_T)
+@recipe function f(sol::Union{PyrolysisSolution,CoreSolution}; kind = :surface_T)
     if kind === :surface_T
         seriestype --> :line
         xguide --> "time [s]"
