@@ -4,8 +4,9 @@
 Time integration of the finite-volume core: the adapter from a
 `PyrolysisProblem`, the mass-matrix `ODEFunction` with the colored Jacobian
 behind problem-independent function types, the integrator together with its
-restart and per-step-flag policies, the admissibility check, `solve`, and its
-read-only observers (the progress bar and the conservation recorder).
+restart and per-step-flag policies, the admissibility check, `solve`, its
+read-only observers (the progress bar and the conservation recorder), and
+parameter sweeps.
 """
 module Integration
 
@@ -22,6 +23,7 @@ using OrdinaryDiffEqSDIRK: KenCarp4
 using LinearSolve: LinearSolve, KLUFactorization
 using ADTypes: AutoFiniteDiff
 using ProgressMeter: ProgressMeter, Progress
+using Distributed: pmap, nworkers
 using ..Materials
 using ..Properties: skeletal_volume_fraction
 using ..BoundaryConditions: ImpermeableBC
@@ -43,6 +45,7 @@ include("setup.jl")
 include("checks.jl")
 include("observers.jl")
 include("solve.jl")
+include("parameter_sweep.jl")
 
 export ErasedRHS, ErasedJacobian
 export IntegratorPolicy, default_policy, apply_observer_flag!, DT_AFTER_EVENT
@@ -52,6 +55,7 @@ export DomainCheck, ConstraintMonitor, constraint_residual, MAX_CONSTRAINT_REJEC
 export FAILURE_MEMORY_GROWTH, FAILURE_MEMORY_STEPS, NewtonCap, cap_step!
 export CoreProblem,
     setup, consistent_state!, inadmissible, below_absolute_zero, solve, integrate
+export parameter_sweep
 export CORRECTION_BAND
 
 end # module Integration
