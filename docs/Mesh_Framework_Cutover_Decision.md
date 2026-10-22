@@ -2,7 +2,7 @@
 
 **Scope.** The evidence pack of the Phase 3 plan (`docs/Mesh_Framework_Phase3_Plan.md` §2): what the owner reads to decide whether the finite-volume core replaces the old core. It is assembled at M0 on branch `mesh-framework-phase3`, stacked on `phase2-review` at `3bf19f2`, from the Phase 1 and Phase 2 gates (`docs/Mesh_Framework_Phase1_Gate.md`, `docs/Mesh_Framework_Phase2_Gate.md`), their measurement tables under `test/newcore/gates/measurements/`, the decision review of 2026-10-20 and the independent review of 2026-10-21 (both local, under `docs/`), extended with the multi-D probe's result after M1, and kept as the record of the decision. Every number names its table; nothing is measured here that a gate script did not write, except where a section says so.
 
-**Status.** Sections 1 to 5 are complete. Section 6 (item 8 on a quiet machine) waits for the machine, by the owner's answer. Section 7 holds the owner's M0 answers; question 1, the cutover itself, waits for item 8. Section 8 records the minimal numerical workflow. Section 9 is written after M1. Section 10 is the decision.
+**Status.** Sections 1 to 5 are complete. Section 6 (item 8 on a quiet machine) waits for the machine, by the owner's answer. Section 7 holds the owner's M0 answers; question 1, the cutover itself, waits for item 8. Section 8 records the minimal numerical workflow. Section 9 holds the multi-D probe's result (M1); its reading of one criterion (C118) and the decision's confirmation on it are the owner's. Section 10 is the decision.
 
 ---
 
@@ -21,7 +21,7 @@ The design argues the migration on its own terms (design §6, Phase 2: "the exac
 | Exact mass conservation | masses are the states: V-CPL-03's total mass to 1.6e-15 against the old core's 6.6e-7; every burnout run's mass ledger over the accepted steps at most 3.1e-6 against a tolerance of 3e-5 | Phase 1 plan §12 (M6), Phase 2 item 3 |
 | A tighter energy balance | the temperature form's closure 15 to 38× smaller than the old core's on V-CPL-06's column; the inventory form's exact to round-off with the integrator's quadrature | Phase 1 item 7, `energy_ledger.md` |
 | A trial-state contract | no hard clamp in the residual; inadmissible proposals rejected by the domain test; the independent review's four defects fixed with regression tests (D105 to D108) | Phase 2 gate, decisions |
-| Dimension-general interfaces | `Face{D,K}`, `Cell{D,F,K}`, `MeshTopology{D}`, `Mesh{D}`, `MeshGeometry{D,T}` are general; the layout, the kernels, the closure and the pattern are 1D by construction (plan §1.2, row 5). Not evidence until M1's probe | §9 |
+| Dimension-general interfaces | M1's probe: the layout, the geometry, conduction with its cross-diffusion part, the potential closure as algebraic rows and the pattern built from the connectivity work on quadrilaterals and hexahedra through `setup`, `residual!` and the colored Jacobian, with every 1D index, pattern and identity digest unchanged | §9 |
 
 ## 2. What it costs
 
@@ -41,7 +41,7 @@ The design argues the migration on its own terms (design §6, Phase 2: "the exac
 | 1 | the four defects have regression tests; the cases pass in both forms | done: `test_relative_flux.jl` (face state in [0, 2p]; an empty cell not drained), `test_policies.jl` (at or below absolute zero inadmissible), `test_gas_transport.jl` (`_pressure_tie`; `NoGasTransport` structural), `test_correction.jl` (`tied` containment); 543 of 543 in each form on `f54a6fb` | plan §7 item 12(1) |
 | 2 | a stated burnout accuracy envelope under joint refinement | open | W9, M5; plan §7 item 12(2) |
 | 3 | item 8 on suitable hardware with cost breakdowns | open: the machine has not been quiet | §6 here; W5 at M6 |
-| 4 | moving 2D and 3D demonstrations before deletion | open | W4, M1; plan §7 item 6; §9 here |
+| 4 | moving 2D and 3D demonstrations before deletion | built at M1 as the production-path probe; the nine criteria measured, one reading (C118) the owner's | W4, M1; plan §7 item 6; §9 here |
 | 5 | a qualified parameter-to-objective derivative, or finite differences stated as the route | open | W10, M5; plan §7 item 12(5) |
 | 6 | an automated numerical test gate in CI | started: §8 | W7; plan §7 item 10 |
 
@@ -96,7 +96,25 @@ On the runner, the first run (#16, run 39789492297, on `a1bb27d`, the dependency
 
 ## 9. The multi-D probe
 
-Written at M1's gate: the nine criteria of plan §7 item 6, each with its result, and whether the decision is confirmed.
+M1 (plan §13.2) built the probe on branch `cutover-m1-multid-probe`: quadrilateral and hexahedral meshes and their metrics, a layout by blocks for any dimension, conduction with its cross-diffusion part, the potential closure with one multiplier per cell, a single column's balance rows, `setup` on a mesh of more than one dimension, a connectivity-built Jacobian pattern, first-order relative fluxes, carried fields and element death. The tests are under `test/newcore/multid/`. The nine criteria of plan §7 item 6:
+
+| # | criterion | result | test |
+|---|---|---|---|
+| 1 | the geometry invariants to round-off on quadrilaterals and hexahedra | `Σ_f A_f n_f = 0` per cell to 1e-15; the volume against `∫ det J` to 1e-13; `∂V/∂x` by AD equal to the sweep operator to 1e-14; on sheared, smoothly distorted and bent-face hexahedral meshes | `test_meshes.jl` |
+| 2 | the 1D layout's indices unchanged | every index of every flag combination equal to the old closed form; the 1D pattern equal entry for entry on 90 configurations | `test_layout.jl`; plan §13.2 D112 |
+| 3 | rotated-tensor fluxes to round-off; the steady skewed-mesh solution at second order | linear fields under `diag(4, 1)` rotated 30° and 90° (2D) and `diag(4, 1, 2)` rotated (3D): interior and boundary fluxes to 1e-13 of the flux scale, gradients to 1e-12, on sheared and distorted quadrilaterals and on sheared and bent-face hexahedra; the two-point part alone misses more than 10 %. The steady manufactured solution with the 30° tensor and held faces on a distorted square: L2 orders 1.93, 1.97 and 1.99 at 8 to 64 cells a side | `test_conduction.jl` |
+| 4 | the closure's multipliers as algebraic rows with no global solve in the residual; the balance to 1e-12 at the accepted states; uniform motion to round-off; its 1D form equal to the balance rows | rows and velocities local (the global system solved only for the consistent state); two unit squares rise at `(1, 1, 1)`, unweighted `(2/3, 4/3, 2/3)`; uniform motion on a 2D block and a 2×2×2 block to 1e-12; the 1D form to 1e-12 in three coordinate systems. The balance holds to 1e-12 of `θV` at the consistent state and, at the accepted states, to the integrator's local error, as the line's rows do (C118: 8.8e-6 to 2.5e-10 over `dt` 0.1 to 0.0125, the line 2.9e-6 to 2.4e-10) | `test_closure.jl`, `test_example.jl` |
+| 5 | the 2D example's consistent state, residual and colored Jacobian contained in dense AD at physical and trial states; the color count recorded | contained per entry (1e-12) at the start, a mixed reacting profile, a hot state, a perturbation of every unknown and negative masses and temperatures, both energy forms, moving (potential closure, rotated tensor) and fixed; largest row 100 moving and 52 fixed, constant from 10×8 cells, greedy colors 107 to 117 and 59 to 64 (C119) | `test_example.jl` |
+| 6 | the moving-geometry free stream at the integrator's order; the carried field's mean conserved | under a uniform stretch over the solid at rest: 1.8e-7, 6.9e-9 and 2.1e-10 at `dt` 0.8, 0.4, 0.2 s (orders 4.7, 5.0), the temperature within 1e-10; the history pair's sums, the mass and their ratio to 1e-13 under an interior motion; the deformation-gradient row equal to `L F` under `v = L x` on a skewed cell, 2D and 3D | `test_motion.jl` |
+| 7 | element death with the shared-node case: live cells admissible, the rank check on the changed boundary, the pattern unchanged, containment after | a corner cell, then the edge cell sharing two of its nodes, on a distorted 3×3 mesh: the live rows equal those of the mesh built without the dead cells, the new faces under the exposed surface balance, to 1e-12, both forms; the rank check passes; the pattern unchanged; contained after each death | `test_element_death.jl` |
+| 8 | residual-level N×1 equivalence to round-off at the containment states | an 8-cell stretched column as rectangles one cell wide under the column's balance rows: every mass, energy, position and velocity row equal to the line's to 1e-12 of its row kind's scale at the start, a mixed profile, a hot state, a perturbation and negative states, both forms | `test_column.jl` |
+| 9 | the 3D claims limited to the hexahedral geometry, the rotated fluxes and the block's uniform motion | as rows 1, 3 and 4 | — |
+
+The 1D core is unchanged by the probe: the identity digests of the eight decks and the Douglas fir deck at 60 s equal their references bit for bit (`burnout_identity.jl`, run on the probe's tree), the 1D pattern equals the old builder's on 90 configurations, `NEW_CORE_CASES` passes 521 of 521 in each energy form, and every `test/newcore` file outside the probe's passes (9,696 tests, containment's 2,046 among them).
+
+**Findings for the decision.** (1) The layout and the assembly did not have to change in a way that moves the 1D core's numbers: the stop condition of §5 is not met. (2) Criterion 4's "1e-12 at the accepted states" is an integrator property the 1D core shares, not a closure property (C118, owner to confirm the reading). (3) Multi-D Jacobians are wider than the design estimated, about 100 entries per row against 40 (C119), a Phase 4b cost input. (4) The multi-D geometry has no trial-state guard on collapsed faces (C120), Phase 4b's. (5) Element death leaves the dead cells' inventories off the ledger; the documented loss and its budgets are Phase 4's.
+
+**Whether the decision is confirmed:** the owner's, with item 8 (§6).
 
 ## 10. The decision
 
