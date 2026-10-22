@@ -244,7 +244,7 @@ end
 # node velocities.
 function _velocity_pattern!(
     add!,
-    layout,
+    layout::StateLayout,
     topo::MeshTopology{1},
     closure,
     correction,
@@ -277,7 +277,7 @@ end
 
 function _velocity_pattern!(
     add!,
-    layout,
+    layout::StateLayout,
     topo::MeshTopology{D},
     closure,
     correction,

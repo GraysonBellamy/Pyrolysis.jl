@@ -163,7 +163,9 @@ end
         xs = p[1] * dN[1, 1] + p[2] * dN[2, 1] + p[3] * dN[3, 1] + p[4] * dN[4, 1]
         xt = p[1] * dN[1, 2] + p[2] * dN[2, 2] + p[3] * dN[3, 2] + p[4] * dN[4, 2]
         S = cross(xs, xt) / 4
-        s = ntuple(q -> s[q] + N[q] * S, Val(4))
+        s = let s = s
+            ntuple(q -> s[q] + N[q] * S, Val(4))
+        end
     end
     return s
 end

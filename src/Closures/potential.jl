@@ -143,7 +143,12 @@ end
 The residuals `c.r_multiplier` of the cells' balances at the node velocities
 `ds.w` and the strain rates `c.θ`.
 """
-function multiplier_rows!(c::Contributions, cl::PotentialClosure, ds::DerivedState, topo)
+function multiplier_rows!(
+    c::Contributions,
+    cl::PotentialClosure,
+    ds::DerivedState,
+    topo::MeshTopology,
+)
     g = ds.geometry
     θ_A = ds.θ_A[]
     @inbounds for i = 1:n_cells(topo)
