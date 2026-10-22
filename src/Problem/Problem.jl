@@ -16,6 +16,8 @@ using ..Materials: n_reactions
 using ..BoundaryConditions: ImpermeableBC
 import ..Materials: n_components  # Import to extend
 using ..Geometry
+# Qualified: Geometry exports names of its own mesh that Meshes shares.
+import ..Meshes
 using ..Properties
 using ..Physics
 using ..Discretization
@@ -47,7 +49,7 @@ export get_times, get_temperatures, get_concentrations, get_gas_generation_rate
 export n_timesteps, succeeded
 
 # Initial conditions
-export apply_initial_conditions!
+export apply_initial_conditions!, initial_fields
 export step_profile, linear_profile, gaussian_profile, tanh_profile
 
 # Validation

@@ -418,9 +418,13 @@ end
 # Display
 # ============================================================================
 
+# The number of cells of a problem's mesh.
+_n_cells(mesh::Meshes.Mesh) = Meshes.n_cells(mesh.topology)
+_n_cells(mesh::Mesh1D) = length(mesh.cells)
+
 function Base.show(io::IO, prob::PyrolysisProblem)
     t_start, t_end = prob.tspan
-    n_cells = length(prob.mesh.cells)
+    n_cells = _n_cells(prob.mesh)
     NC = n_components(prob.material)
     print(
         io,
@@ -430,7 +434,7 @@ end
 
 function Base.show(io::IO, ::MIME"text/plain", prob::PyrolysisProblem)
     t_start, t_end = prob.tspan
-    n_cells = length(prob.mesh.cells)
+    n_cells = _n_cells(prob.mesh)
     NC = n_components(prob.material)
     NR = n_reactions(prob.material)
 
