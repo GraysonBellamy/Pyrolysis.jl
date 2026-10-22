@@ -33,10 +33,15 @@ What the kernels return, with the derived state's element type `T`:
 - `r_intensity`: the residual of the algebraic row of every face intensity
   (`n_faces`) [W/m²]
 - `r_velocity`: the residual of the algebraic row of every node velocity
-  (`n_nodes`), written by the mesh closure
+  component (`D · n_nodes`, the components of every node in turn), written
+  by the mesh closure
+- `r_multiplier`: the residual of the algebraic row of every cell's closure
+  multiplier (`n_cells`), written by the mesh closure
 - `F_carried`: flux of the conversion-history pair `G`, `M` per unit face area
   along the face normal (`2 × n_faces`) [kg/(m²·s)]
 - `S_carried`: cell source of the history pair (`2 × n_cells`) [kg/s]
+- `gradient`: the cell temperature gradients of the conduction kernel
+  (`D × n_cells`) [K/m], which the thermal boundary kernel reads (`D ≥ 2`)
 
 `rates`, `heats` and `species` are per-cell scratch of the reaction kernel.
 """
@@ -50,17 +55,19 @@ struct Contributions{NC,T}
     T_face::Vector{T}
     r_intensity::Vector{T}
     r_velocity::Vector{T}
+    r_multiplier::Vector{T}
     F_carried::Matrix{T}
     S_carried::Matrix{T}
+    gradient::Matrix{T}
     rates::Vector{T}
     heats::Vector{T}
     species::Vector{T}
 end
 
 """
-	Contributions{T}(NC, NR, n_cells, n_faces, n_nodes)
+	Contributions{T}(NC, NR, n_cells, n_faces, n_nodes, D = 1)
 
-Zero-filled contribution buffers.
+Zero-filled contribution buffers for a `D`-dimensional mesh.
 """
 function Contributions{T}(
     NC::Int,
@@ -68,6 +75,7 @@ function Contributions{T}(
     n_cells::Int,
     n_faces::Int,
     n_nodes::Int,
+    D::Int = 1,
 ) where {T}
     return Contributions{NC,T}(
         zeros(T, NC, n_faces),
@@ -78,9 +86,11 @@ function Contributions{T}(
         zeros(T, NC, n_cells),
         zeros(T, n_faces),
         zeros(T, n_faces),
-        zeros(T, n_nodes),
+        zeros(T, D * n_nodes),
+        zeros(T, n_cells),
         zeros(T, 2, n_faces),
         zeros(T, 2, n_cells),
+        zeros(T, D, n_cells),
         zeros(T, NR),
         zeros(T, NR),
         zeros(T, NC),
@@ -100,6 +110,7 @@ function reset!(c::Contributions)
     fill!(c.θ, zero(eltype(c.θ)))
     fill!(c.r_intensity, zero(eltype(c.r_intensity)))
     fill!(c.r_velocity, zero(eltype(c.r_velocity)))
+    fill!(c.r_multiplier, zero(eltype(c.r_multiplier)))
     fill!(c.F_carried, zero(eltype(c.F_carried)))
     fill!(c.S_carried, zero(eltype(c.S_carried)))
     return c

@@ -21,10 +21,10 @@ The per-cell reference data of a mesh whose cells hold the initial component
 masses `m0` (`NC × n`): initial volumes, the initial condensed mass, the
 positive-part scale `δᵢ = reltol · threshold · mˢᵢ(0)` (the cell's mass
 absolute tolerance), the volume floor, the heat-capacity floor
-`RHO_CP_FLOOR · Vᵢ(0)` and the initial thicknesses.
+`RHO_CP_FLOOR · Vᵢ(0)` and the initial sizes.
 """
 function CellReference(
-    mesh::Mesh{1},
+    mesh::Mesh,
     m0::AbstractMatrix{Float64},
     material::Material{NC};
     reltol::Float64,
@@ -33,7 +33,7 @@ function CellReference(
     topo = mesh.topology
     n = n_cells(topo)
     size(m0) == (NC, n) || throw(DimensionMismatch("m0 must be $NC × $n"))
-    x = [p[1] for p in mesh.positions]
+    x = reduce(vcat, mesh.positions)
     g = MeshGeometry{Float64}(topo)
     geometry!(g, x, topo.cross_section, topo)
     V0 = copy(g.cell_volume)
@@ -50,10 +50,16 @@ function CellReference(
         VOLUME_FLOOR_FRACTION .* V0,
         RHO_CP_FLOOR .* V0,
         x,
-        [x[topo.cells[i].nodes[2]] - x[topo.cells[i].nodes[1]] for i = 1:n],
+        _sizes(topo, x, V0),
         topo.cross_section,
     )
 end
+
+# The initial size of every cell: on a line the distance between its nodes,
+# in more dimensions its volume's D-th root.
+_sizes(topo::MeshTopology{1}, x, V0) =
+    [x[topo.cells[i].nodes[2]] - x[topo.cells[i].nodes[1]] for i = 1:n_cells(topo)]
+_sizes(topo::MeshTopology{D}, x, V0) where {D} = V0 .^ (1 / D)
 
 """
 	abstol_vector(layout, setup, m0, T0; reltol, abstol, threshold,
@@ -68,11 +74,14 @@ temperature form does; face-intensity rows `reltol · intensity_scale`, the
 scale being the largest incident intensity [W/m²].
 
 On a moving mesh: node positions `reltol · threshold · hₙ`, with `hₙ` the
-thinnest initial cell beside node `n`, so a position error moves a cell's
-concentrations by the relative amount its mass tolerance allows; node
-velocities that over `time_scale` [s], the first step; the history pair the
-mass tolerance of its cell; the cross-section measure `reltol · A₀`; and its
-lateral rate the velocity tolerance spread over the initial thickness.
+smallest initial size of the cells around node `n`, so a position error moves
+a cell's concentrations by the relative amount its mass tolerance allows;
+node velocities that over `time_scale` [s], the first step; the closure's
+multipliers, a velocity times a length, the velocity tolerance of a node
+times the cell's size, `reltol · threshold · hᵢ² / time_scale`; the history
+pair the mass tolerance of its cell; the deformation gradient `reltol`; the
+cross-section measure `reltol · A₀`; and its lateral rate the velocity
+tolerance spread over the initial thickness.
 """
 function abstol_vector(
     layout::StateLayout{NC},
@@ -94,13 +103,24 @@ function abstol_vector(
     ref = setup.reference
     if is_moving(layout)
         x = ref.positions
-        nn = n_nodes(layout)
+        D = dimension(layout)
+        h = fill(Inf, n_nodes(layout))
+        for i = 1:n_cells(layout), nd in setup.topology.cells[i].nodes
+            h[nd] = min(h[nd], ref.thickness[i])
+        end
         w_min = Inf
-        for nd = 1:nn
-            h = min(nd > 1 ? x[nd] - x[nd-1] : Inf, nd < nn ? x[nd+1] - x[nd] : Inf)
-            tol[position_index(layout, nd)] = reltol * threshold * h
-            tol[velocity_index(layout, nd)] = reltol * threshold * h / time_scale
-            w_min = min(w_min, tol[velocity_index(layout, nd)])
+        for nd = 1:n_nodes(layout), k = 1:D
+            tol[position_index(layout, nd, k)] = reltol * threshold * h[nd]
+            w_tol = reltol * threshold * h[nd] / time_scale
+            closure_unknowns(layout) === :velocities &&
+                (tol[velocity_index(layout, nd, k)] = w_tol)
+            w_min = min(w_min, w_tol)
+        end
+        if closure_unknowns(layout) === :multipliers
+            for i = 1:n_cells(layout)
+                tol[multiplier_index(layout, i)] =
+                    reltol * threshold * ref.thickness[i]^2 / time_scale
+            end
         end
         if has_chi(layout)
             tol[area_index(layout)] = reltol * ref.cross_section
@@ -111,9 +131,15 @@ function abstol_vector(
         for j = 1:NC
             tol[mass_index(layout, i, j)] = ref.solid_mass[i] * reltol * threshold
         end
-        if has_chi(layout)
+        if has_history(layout)
             for k = 1:2
                 tol[history_index(layout, i, k)] = ref.solid_mass[i] * reltol * threshold
+            end
+        end
+        if has_deformation(layout)
+            D = dimension(layout)
+            for b = 1:D, a = 1:D
+                tol[deformation_index(layout, i, a, b)] = reltol
             end
         end
         tol[energy_index(layout, i)] = _energy_tolerance(

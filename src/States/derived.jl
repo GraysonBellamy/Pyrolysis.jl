@@ -15,9 +15,10 @@ Constants fixed at setup, per cell unless stated:
   of the property evaluation
 - `volume_floor`: smooth floor [m³] on the volume used for `m/V`
 - `capacity_floor`: smooth floor [J/K] on the cell's heat-capacity sum
-- `positions`: reference node positions [m], the geometry of a fixed mesh
-- `thickness`: initial thickness `hᵢ(0)` [m], the distance between the
-  cell's two nodes
+- `positions`: reference node positions [m], the geometry of a fixed mesh,
+  the `D` coordinates of every node in turn
+- `thickness`: initial size `hᵢ(0)` [m]: on a line the distance between the
+  cell's two nodes, in more dimensions `Vᵢ(0)^(1/D)`
 - `cross_section`: the cross-section measure `A₀` of the mesh
 """
 struct CellReference
@@ -126,12 +127,17 @@ automatic differentiation):
 - `cp_sum`: the smoothly floored heat-capacity sum `Σⱼ mⱼ cⱼ(T_trial)` [J/K]
 - `h`: component sensible enthalpies at the cell temperature (`NC × n`)
 - `x`, `w`, `A`: node positions, node velocities (moving mesh) and the
-  cross-section measure
+  cross-section measure; positions and velocities hold the `D` components of
+  every node in turn
+- `multiplier`: the closure's multipliers per cell (moving mesh,
+  multipliers), from which the closure fills the node velocities
 - `c`: the node corrections `c = w − vₛ`, the mesh velocity relative to the
   solid's (zero without a correction), filled by `Closures.correction!`
 - `θ_A`: the lateral strain rate of the cross section [1/s] (variable cross
   section; zero otherwise)
-- `G`, `M`: the conversion-history pair per cell [kg] (variable cross section)
+- `G`, `M`: the conversion-history pair per cell [kg] (history pair)
+- `F`: the deformation gradient per cell, column by column (`D² × n`,
+  deformation gradient)
 - `geometry`: the mesh metrics at `x`
 - `k`: cell thermal conductivities, smoothly floored at `CONDUCTIVITY_FLOOR`
 - `ε`, `a`: cell surface emissivities and absorptivities (the mixing-weighted
@@ -159,11 +165,13 @@ struct DerivedState{NC,T,G<:MeshGeometry}
     h::Matrix{T}
     x::Vector{T}
     w::Vector{T}
+    multiplier::Vector{T}
     c::Vector{T}
     A::Base.RefValue{T}
     θ_A::Base.RefValue{T}
     G::Vector{T}
     M::Vector{T}
+    F::Matrix{T}
     geometry::G
     k::Vector{T}
     ε::Vector{T}
@@ -191,7 +199,7 @@ function DerivedState{T}(
 ) where {T,NC}
     topo = setup.topology
     n = n_cells(layout)
-    nn = n_nodes(layout)
+    nn = dimension(layout) * n_nodes(layout)
     ref = setup.reference
     geometry = MeshGeometry{T}(topo)
     x = T.(ref.positions)
@@ -209,11 +217,13 @@ function DerivedState{T}(
         zeros(T, NC, n),
         x,
         zeros(T, nn),
+        zeros(T, n),
         zeros(T, nn),
         A,
         Ref{T}(zero(T)),
         zeros(T, n),
         zeros(T, n),
+        zeros(T, dimension(layout)^2, n),
         geometry,
         zeros(T, n),
         zeros(T, n),
@@ -235,15 +245,14 @@ end
 Map the state vector `u` to the derived state: the only reader of `u`.
 
 Order: the live cells from the layout's mask; the geometry from the node
-positions (a fixed mesh keeps its
-precomputed geometry), with the node velocities, and under a variable cross
-section the area, its lateral rate and the history pair; the face
-intensities; the masses and their
-concentrations, the cell temperatures (the stored temperature, or the
-inversion of the enthalpy inventory), their trial clamp, the heat-capacity
-sum, the sensible enthalpies, the cell properties with the absorption
-coefficients under in-depth radiation, and the pore-gas properties the gas
-transport model needs.
+positions (a fixed mesh keeps its precomputed geometry), with the node
+velocities or the closure's multipliers, and under a variable cross section
+the area and its lateral rate; the carried fields; the face intensities; the
+masses and their concentrations, the cell temperatures (the stored
+temperature, or the inversion of the enthalpy inventory), their trial clamp,
+the heat-capacity sum, the sensible enthalpies, the cell properties with the
+absorption coefficients under in-depth radiation, and the pore-gas properties
+the gas transport model needs.
 """
 function derive!(
     ds::DerivedState{NC,T},
@@ -260,19 +269,24 @@ function derive!(
         ds.active[i] = layout.mask[energy_index(layout, i)]
     end
     if is_moving(layout)
-        @inbounds for nd = 1:n_nodes(layout)
-            ds.x[nd] = u[position_index(layout, nd)]
-            ds.w[nd] = u[velocity_index(layout, nd)]
-        end
+        _motion!(ds, u, layout)
         if has_chi(layout)
             ds.A[] = u[area_index(layout)]
             ds.θ_A[] = u[lateral_rate_index(layout)]
-            @inbounds for i = 1:n
-                ds.G[i] = u[history_index(layout, i, 1)]
-                ds.M[i] = u[history_index(layout, i, 2)]
-            end
         end
         geometry!(ds.geometry, ds.x, ds.A[], topo)
+    end
+    if has_history(layout)
+        @inbounds for i = 1:n
+            ds.G[i] = u[history_index(layout, i, 1)]
+            ds.M[i] = u[history_index(layout, i, 2)]
+        end
+    end
+    if has_deformation(layout)
+        D = dimension(layout)
+        @inbounds for i = 1:n, b = 1:D, a = 1:D
+            ds.F[D*(b-1)+a, i] = u[deformation_index(layout, i, a, b)]
+        end
     end
     if has_intensities(layout)
         @inbounds for f in eachindex(ds.I)
@@ -315,6 +329,24 @@ function derive!(
         has_intensities(layout) && (ds.α[i] = effective_absorption(ξ⁺, material))
     end
     return ds
+end
+
+# The node positions and the closure's unknowns of a moving mesh.
+@inline function _motion!(ds, u, layout::StateLayout)
+    D = dimension(layout)
+    @inbounds for nd = 1:n_nodes(layout), k = 1:D
+        ds.x[D*(nd-1)+k] = u[position_index(layout, nd, k)]
+    end
+    if closure_unknowns(layout) === :velocities
+        @inbounds for nd = 1:n_nodes(layout), k = 1:D
+            ds.w[D*(nd-1)+k] = u[velocity_index(layout, nd, k)]
+        end
+    else
+        @inbounds for i = 1:n_cells(layout)
+            ds.multiplier[i] = u[multiplier_index(layout, i)]
+        end
+    end
+    return nothing
 end
 
 # Pore-gas properties of cell `i` at the positive-part concentrations and the

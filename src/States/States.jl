@@ -38,8 +38,11 @@ include("fields.jl")
 export smooth_clamp, trial_temperature, positive_part, smooth_floor
 export EnergyState, TemperatureState, EnthalpyState
 export StateLayout, state_length, energy_state, is_moving, has_intensities, has_chi
+export dimension, closure_unknowns, block_order
+export carried_fields, has_history, has_deformation, deformation_index
 export n_components, node_width, cell_width, cell_rows, node_rows
 export mass_index, energy_index, history_index, position_index, velocity_index
+export multiplier_index
 export intensity_index, area_index, lateral_rate_index
 export is_differential, mass_matrix
 export sensible_enthalpy, enthalpy_slope, enthalpy_law, TabulatedEnthalpy, CaloricLaws

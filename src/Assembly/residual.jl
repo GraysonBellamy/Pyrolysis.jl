@@ -63,7 +63,7 @@ function add_sources!(c::Contributions{NC}, s::VolumetricSources, ds, setup, t) 
     s.mass === nothing && return nothing
     g = ds.geometry
     @inbounds for i in axes(c.S_mass, 2)
-        S = s.mass(g.cell_center[i][1], t)
+        S = s.mass(_point(g.cell_center[i]), t)
         for j = 1:NC
             c.S_mass[j, i] += S[j] * ds.V_eval[i]
         end
@@ -74,7 +74,12 @@ end
 # The external temperature-rate source of cell `i` [K/s].
 @inline _energy_source(::NoSources, ds, i, t) = zero(eltype(ds.T))
 @inline _energy_source(s::VolumetricSources, ds, i, t) =
-    s.energy === nothing ? zero(eltype(ds.T)) : s.energy(ds.geometry.cell_center[i][1], t)
+    s.energy === nothing ? zero(eltype(ds.T)) :
+    s.energy(_point(ds.geometry.cell_center[i]), t)
+
+# A cell center as the sources take it: a scalar on a line.
+@inline _point(x::SVector{1}) = x[1]
+@inline _point(x::SVector) = x
 
 # ============================================================================
 # Row assembly
@@ -96,10 +101,14 @@ adds `S_T` to the temperature row and `(Σⱼ mᵢⱼ c_p,ⱼ) S_T` to the inven
 The face-intensity rows take the residuals of their algebraic equations.
 
 On a moving mesh the position rows are `dxₙ/dt = wₙ` and the velocity rows
-take the closure's residuals; under a variable cross section the history
-rows take their sources and face fluxes, and the area and lateral-rate rows
+take the closure's residuals; the history rows take their sources and face
+fluxes, and under a variable cross section the area and lateral-rate rows
 the residuals of [`lateral_rows`](@ref) at the column sums of the history
-pair and its rates. Rows the layout marks dead are identity rows.
+pair and its rates; the deformation-gradient rows are
+`dFᵢ/dt = (∇vₛ)ᵢ Fᵢ`, with `(∇vₛ)ᵢ = (1/Vᵢ) Σ_f σ_f Σ_q (w − c)_q ⊗ s_{q,f}`
+the cell mean of the solid velocity's gradient over the faces' sweep
+vectors, exact for a linear velocity field. Rows the layout marks dead are
+identity rows.
 """
 function assemble_rows!(
     du::AbstractVector,
@@ -148,16 +157,29 @@ function assemble_rows!(
         end
     end
     if is_moving(layout)
-        @inbounds for nd = 1:n_nodes(layout)
-            du[position_index(layout, nd)] = ds.w[nd]
-            du[velocity_index(layout, nd)] = c.r_velocity[nd]
+        _motion_rows!(du, c, ds, layout)
+    end
+    has_history(layout) && _history_rows!(du, c, ds, layout, topo)
+    has_chi(layout) && _lateral_rows!(du, ds, layout, closure.lateral)
+    has_deformation(layout) && _deformation_rows!(du, ds, layout, topo)
+    _dead_rows!(du, u, layout)
+    return nothing
+end
+
+# The position rows `dxₙ/dt = wₙ` and the closure's rows: the residuals of the
+# node velocities, or of the cells' multipliers.
+function _motion_rows!(du, c::Contributions, ds, layout::StateLayout)
+    D = dimension(layout)
+    velocities = closure_unknowns(layout) === :velocities
+    @inbounds for nd = 1:n_nodes(layout), k = 1:D
+        du[position_index(layout, nd, k)] = ds.w[D*(nd-1)+k]
+        velocities && (du[velocity_index(layout, nd, k)] = c.r_velocity[D*(nd-1)+k])
+    end
+    if !velocities
+        @inbounds for i = 1:n_cells(layout)
+            du[multiplier_index(layout, i)] = c.r_multiplier[i]
         end
     end
-    if has_chi(layout)
-        _history_rows!(du, c, ds, layout, topo)
-        _lateral_rows!(du, ds, layout, closure.lateral)
-    end
-    _dead_rows!(du, u, layout)
     return nothing
 end
 
@@ -174,6 +196,36 @@ function _history_rows!(du, c::Contributions, ds, layout::StateLayout, topo)
             F = c.F_carried[k, f] * A
             du[history_index(layout, o, k)] -= F
             nb == 0 || (du[history_index(layout, nb, k)] += F)
+        end
+    end
+    return nothing
+end
+
+# The deformation-gradient rows: each cell's mean solid velocity gradient,
+# ∫ ∇vₛ dV = ∮ vₛ ⊗ n dA over its faces, times its deformation gradient.
+function _deformation_rows!(
+    du,
+    ds::DerivedState{NC,T,<:MeshGeometry{D}},
+    layout::StateLayout,
+    topo,
+) where {NC,T,D}
+    g = ds.geometry
+    @inbounds for i = 1:n_cells(layout)
+        L = zero(SMatrix{D,D,T})
+        for f in topo.cells[i].faces
+            σ = topo.faces[f].cells[1] == i ? 1 : -1
+            nodes = topo.faces[f].nodes
+            for q in eachindex(nodes)
+                v = SVector{D,T}(
+                    ntuple(k -> ds.w[D*(nodes[q]-1)+k] - ds.c[D*(nodes[q]-1)+k], Val(D)),
+                )
+                L += σ * (v * g.face_sweep[q, f]')
+            end
+        end
+        F = SMatrix{D,D,T}(ntuple(e -> ds.F[e, i], Val(D * D)))
+        Ḟ = (L / ds.V_eval[i]) * F
+        for b = 1:D, a = 1:D
+            du[deformation_index(layout, i, a, b)] = Ḟ[a, b]
         end
     end
     return nothing

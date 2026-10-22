@@ -398,7 +398,7 @@ function _merge!(
             u[mass_index(layout, i, j)] = 0
         end
         u[energy_index(layout, i)] = energy isa EnthalpyState ? 0.0 : T_m
-        if has_chi(layout)
+        if has_history(layout)
             for h = 1:2
                 u[history_index(layout, r, h)] += u[history_index(layout, i, h)]
                 u[history_index(layout, i, h)] = 0
@@ -461,7 +461,7 @@ function _lose!(
         u[mass_index(layout, i, j)] = 0
     end
     energy isa EnthalpyState && (u[energy_index(layout, i)] = 0)
-    if has_chi(layout)
+    if has_history(layout)
         for k = 1:2
             u[history_index(layout, i, k)] = 0
         end

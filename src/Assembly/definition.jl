@@ -20,7 +20,8 @@ of position and time so the Jacobian stays exact:
 - `energy(z, t)`: the temperature-rate source [K/s], added to the energy row as
   `S_T` in the temperature form and as `(Σⱼ mⱼ c_p,ⱼ) S_T` in the inventory form.
 
-Either may be `nothing`. Positions are the cell centers.
+Either may be `nothing`. Positions are the cell centers: the coordinate `z`
+on a line, an `SVector{D}` in more dimensions.
 """
 struct VolumetricSources{FM,FE}
     mass::FM
@@ -77,6 +78,7 @@ function CoreWorkspace(def::CoreDefinition, T0::AbstractVector{<:Real})
         n_cells(layout),
         n_faces(def.setup.topology),
         n_nodes(layout),
+        dimension(layout),
     )
     return CoreWorkspace(ds, c, IdDict{DataType,Any}(), T_warm)
 end
@@ -107,6 +109,7 @@ function buffers(ws::CoreWorkspace, def::CoreDefinition, ::Type{T}) where {T}
         n_cells(layout),
         n_faces(def.setup.topology),
         n_nodes(layout),
+        dimension(layout),
     )
     ws.dual[T] = (ds, c)
     return (ds, c)::_buffer_type(def, T)
