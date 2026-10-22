@@ -1,6 +1,6 @@
 # Mesh framework: the Phase 2 gate
 
-**Scope.** The Phase 2 gate of the mesh-framework design (`docs/Mesh_Framework_Design_2026-10-17.md` §6, Phase 2; `docs/Mesh_Framework_Phase2_Plan.md` §7.3, items 1 to 12 as the decision review restated them, §14.5), measured on branch `mesh-framework-phase2` at `78ce699` (the M6c measurement pass, plan §14.4) and corrected by the followup of its review (`docs/Mesh_Framework_Phase2_Review.md`, on branch `phase2-review`). M6c's tables are stamped `5f08134`, the hash of `78ce699` as prepared before signing, whose tree `543bbb8` they measured; `git diff 78ce699..8166e77` touches documents and tables only, so they describe the reviewed code (C95). The followup re-measured the tables its fixes and scripts reach on `6bb9f18` (tree `44e66df`), its last code commit, and `case_accuracy.md` on `08de603`, which adds only a guard to the shared event-shift script (D97), and stamped them with the commit and its tree (D98); `burnout_ladder.md`'s item 1 column was recomputed from its csv without solving (D96), and `burnout_burst.md` keeps M6c's stamp, read through the mapping. Each item gives what was measured, the numbers, and whether it passes, and names its table; the tables are under `test/newcore/gates/measurements/`, and the plan's §12 holds the implementation record (D53 to D104, C57 to C99). The owner's decisions at the gate changed the relative fluxes and the burnout cases' mass ledger after these tables (D102 to D104, on `4e5d412`): `burnout_identity.md` is re-measured there and `mms_orders.md` on `0bf5e62` (its code), and by the owner's decision every other table is re-measured once after the fixes of an independent review of `0bf5e62` land (plan §12.4), which change every deck the correction acts on. Where an item reads a table not re-measured, its numbers are `6bb9f18`'s.
+**Scope.** The Phase 2 gate of the mesh-framework design (`docs/Mesh_Framework_Design_2026-10-17.md` §6, Phase 2; `docs/Mesh_Framework_Phase2_Plan.md` §7.3, items 1 to 12 as the decision review restated them, §14.5), measured on branch `mesh-framework-phase2` at `78ce699` (the M6c measurement pass, plan §14.4) and corrected by the followup of its review (`docs/Mesh_Framework_Phase2_Review.md`, on branch `phase2-review`). M6c's tables are stamped `5f08134`, the hash of `78ce699` as prepared before signing, whose tree `543bbb8` they measured; `git diff 78ce699..8166e77` touches documents and tables only, so they describe the reviewed code (C95). The followup re-measured the tables its fixes and scripts reach on `6bb9f18` (tree `44e66df`), its last code commit, and `case_accuracy.md` on `08de603`, which adds only a guard to the shared event-shift script (D97), and stamped them with the commit and its tree (D98); `burnout_ladder.md`'s item 1 column was recomputed from its csv without solving (D96), and `burnout_burst.md` keeps M6c's stamp, read through the mapping. Each item gives what was measured, the numbers, and whether it passes, and names its table; the tables are under `test/newcore/gates/measurements/`, and the plan's §12 holds the implementation record (D53 to D108, C57 to C99). The owner's decisions at the gate (D102 to D104) and the fixes of an independent review of `0bf5e62` (D105 to D108) changed the relative fluxes, the Darcy upwind choice, the admissible states and the burnout cases' mass ledger after the followup's tables; by the owner's decision every table but item 8's is re-measured once on the last of them, `f54a6fb` (tree `b544f02`), and the items below read those tables.
 
 **The integrator.** No registered OrdinaryDiffEqBDF release contains the upstream fix of the domain-rejection bug (SciML/OrdinaryDiffEq.jl#4687: #4662 merged and unreleased, #4695 open; the latest release is 2.4.13). By the owner's instruction Phase 2 closes on `Rodas5P` (plan §14.8, question 17's option (a)). Every table is taken on `Rodas5P` with the heuristic restart and event location on, item 12 does not apply, and MF, the `FBDF` switch, is the first milestone after the release, before the cutover, re-running items 5, 8 and 9 and the suite (§14.3).
 
@@ -21,25 +21,26 @@
 - The band defaults to `CORRECTION_BAND` where the bound correction moves some layer, to the threshold otherwise (D91).
 - The relative fluxes take their upwind side from the value alone (C74, D102) and their slope beside a boundary cell against a zero gradient (C73, D103).
 - The burnout cases' mass ledger on the finite-volume core integrates the outflow over the accepted steps, at 3e-5 on the moving-mesh cases and 3e-4 on V-BO-02 (X-2, D104).
+- The independent review's fixes: the Darcy upwind and vent sides from the value alone (C99, D105), a property law vanishes only by its structure (D106), a state at or below absolute zero is inadmissible and fixed steps are held to admissibility (D107), and the relative fluxes' face states are bounded by the upwind inventory (D108).
 
 ## Summary
 
 | item | what | result |
 |---|---|---|
-| 1 | one invocation per layer, the largest merged fraction at most 5 `ε_m` | passes on every V-BO-01, 03, 04, 06 and 08 run at `ε_m` of 3e-3 and 1e-2 and at `τ = 360` s; owner's exceptions, the mechanism named: V-BO-01 and V-BO-06 at 3e-2 (two invocations, C78), V-BO-07 (5.82 and 6.07 %, C91), V-BO-08 at 3e-2 (`:interior`, C94) and V-BO-01 at `τ = 3600` s (two invocations, the layer under-relaxed, C98); the table's column reads every one of these rows itself (D96) |
-| 2 | the cases' QoIs on every run; the burst by refinement | every run passes its case except the two-invocation rows (their invocation QoI) and V-BO-08's `:interior` rows; the burst criteria pass on every gated family in both forms; reported: V-BO-07's per-step excess stops falling at 240 cells, within C91's owner exception |
-| 3 | ledgers | passes: every V-BO run's mass ledger at its case's tolerance (on `4e5d412` the ledger over the accepted steps, D104, within 3e-5 on every moving-mesh run of the ladder that ran); V-BO-04's energy ledger 3.65e-6 and 3.98e-6 before its event (old core 7.1e-5; the verdict per form, D99), 1.85e-5 and 1.78e-5 across it |
+| 1 | one invocation per layer, the largest merged fraction at most 5 `ε_m` | passes on every V-BO-01, 03, 04, 06 and 08 run at `ε_m` of 3e-3 and 1e-2 and at `τ = 360` s; owner's exceptions, the mechanism named: V-BO-01 and V-BO-06 at 3e-2 (two invocations, C78), V-BO-07 (5.82 and 6.06 %, C91), V-BO-08 at 3e-2 (`:interior`, C94) and V-BO-01 at `τ = 3600` s (two invocations, the layer under-relaxed, C98); the table's column reads every one of these rows itself (D96) |
+| 2 | the cases' QoIs on every run; the burst by refinement | every run passes its case except the two-invocation rows (their invocation QoI) and V-BO-08's `:interior` rows; the burst criteria pass on every gated family in both forms; reported: V-BO-07's per-step excess falls to 0.68 at 240 cells, below the old core's, but by less than 1.5× per doubling (C91) |
+| 3 | ledgers | passes: every V-BO run's mass ledger at its case's tolerance (the ledger over the accepted steps, D104: at most 3.1e-6 on the runs that reach their end, against 3e-5); V-BO-04's energy ledger 3.65e-6 and 3.98e-6 before its event (old core 7.1e-5; the verdict per form, D99), 1.85e-5 and 1.78e-5 across it |
 | 4 | admissibility at every event | passes: no inadmissible result on 50 runs |
-| 5 | charring decks identical, split by installation | passes: every deck equals its reference, re-recorded on the followup's code to add V-BO-04 (D99; D90 leaves V-CPL-02/02b unchanged, C97) and on `4e5d412` for V-BO-04 alone (D102, D103); class A unchanged under an explicit correction; the thinnest cells and the activation recorded; V-BO-04's correction zero to round-off (5.78e-18 m/s), the clause as the owner restated it (C96) |
-| 6 | constraint residuals and the domain test | passes: the largest accepted scaled residual 0.993 under C52's scale and 0.994 under Phase 1's, none above one |
+| 5 | charring decks identical, split by installation | passes: every deck equals its reference, re-recorded on `f54a6fb` for V-CPL-02, V-CPL-02b and V-BO-04 (D108) and the Douglas fir deck (D105), each on its previous steps; class A unchanged under an explicit correction; the thinnest cells and the activation recorded; V-BO-04's correction zero to round-off (9.4e-18 m/s), the clause as the owner restated it (C96) |
+| 6 | constraint residuals and the domain test | passes: the largest accepted scaled residual 0.998 under C52's scale, none above one; under Phase 1's scale one accepted state reads 1.03 |
 | 7 | event timing | passes on every deactivating case with events (16 of 20 rows; V-BO-03 and V-BO-05 have none) |
 | 8 | wall time against the old core | measured on a loaded machine, recorded and not decided: at matched accuracy V-BO-01 1.00, 1.85 and 2.11× and V-BO-03 1.57, 1.88 and 2.09× at 30, 60 and 120 cells, V-BO-04 0.97 to 1.09×; the installed correction 0.80 to 1.32× on V-CPL-02/02b and `ale` 25, 2.4 to 4.6× on `ale` 100 and `ale_darcy` (R41) at equal tolerance; owner's decision after the followup's quiet-machine run (D101), pending: the machine was not quiet during the followup |
-| 9 | smooth finite-difference gradients | passes with the noise named (C93): the flux and the pre-exponential factor pass at the case's tolerance; the absorption coefficient's invocation-time spread there (0.143 and 0.128 at 60 and 120 cells) is step noise, and at reltol 1e-7 every configuration passes, the spreads 0.0039 and 0.0079 (D100) |
-| 10 | minimum cell thickness | passes: the thinnest live cell at least 0.865 `ε_m h₀`, no `DtLessThanMin` |
+| 9 | smooth finite-difference gradients | passes with the noise named (C93): the flux and the pre-exponential factor pass at the case's tolerance; the absorption coefficient's invocation-time spread there (0.145 and 0.128 at 60 and 120 cells) is step noise, and at reltol 1e-7 every configuration passes, the spreads 0.0040 and 0.0101 (D100) |
+| 10 | minimum cell thickness | passes: the thinnest live cell at least 0.858 `ε_m h₀`, no `DtLessThanMin` |
 | 11 | the fallback | not triggered: items 1 and 2 pass on V-BO-01 at the defaults |
 | 12 | Phase 1's items 2 and 9 under `FBDF` | does not apply (MF has not landed) |
 
-The full three-way `Pkg.test()` (session counts; no log is committed) on the followup's last commit that changes source or tests, `6bb9f18`, each in a detached worktree, the three started one at a time after the previous one's precompile and run side by side with the followup's measurements at loads of 16 to 19: the old core 13,668 of 13,668 (106 min of tests, 109 min wall), `PYROLYSIS_CORE=new` 10,074 of 10,074 in the temperature form (79 min of tests, 82 min wall: the verification suite and every `test/newcore` file) and 543 of 543 in the enthalpy form (19 min of tests, 23 min wall: the verification suite; `runtests.jl` runs the `test/newcore` files in the temperature form only). M7's counts at `5f08134` were 13,598, 10,004 and 543; the first two grow by the followup's 70 tests (`test_correction.jl` 51, `test_deactivation.jl` 12, `test_policies.jl` 7).
+The full three-way `Pkg.test()` (session counts; no log is committed) on `f54a6fb`, the last commit that changes source or tests, each in a detached worktree, the three run side by side with the re-measurement at loads of 18 to 21: the old core 13,843 of 13,843 (104 min of tests, 107 min wall), `PYROLYSIS_CORE=new` 10,239 of 10,239 in the temperature form (77 min of tests, 83 min wall: the verification suite and every `test/newcore` file) and 543 of 543 in the enthalpy form (21 min of tests, 25 min wall: the verification suite; `runtests.jl` runs the `test/newcore` files in the temperature form only). The followup's counts at `6bb9f18` were 13,668, 10,074 and 543; the first two grow by the tests of D102 to D108, 165 in the `test/newcore` files, which both runs include, and 10 in the property validation (D106), which only the old-core run includes.
 
 ## 1. One invocation per layer
 
@@ -56,7 +57,7 @@ Table: `measurements/burnout_ladder.md` (script `burnout_ladder.jl`), 25 configu
 | V-BO-04, with and without the correction | 40 | 1e-2 | 1, of 39 cells (1.0 %) | pass |
 | V-BO-06 | 60 | 3e-3, 1e-2 | 1 (0.57, 1.6 %) | pass |
 | V-BO-06 | 60 | 3e-2 | 2 (9.8 %, then 6.8 %) | owner's exception |
-| V-BO-07, `β = 0` and `β = 1` | 60 | 1e-2 | 1 (5.82, 6.07 %) | owner's exception (C91) |
+| V-BO-07, `β = 0` and `β = 1` | 60 | 1e-2 | 1 (5.82, 6.06 %) | owner's exception (C91) |
 | V-BO-08 | 10 | 3e-3, 1e-2 | 1 (1.48, 4.53 %) | pass |
 | V-BO-08 | 10 | 3e-2 | 0: `:interior` at 67.04 s | owner's exception (C94) |
 | V-BO-08 without the correction | 10 | 1e-2 | 0: `:interior` at 68.86 s | fail; not a run of the matrix (the reference of the substrate comparison, §6.2) |
@@ -80,31 +81,32 @@ Tables: `measurements/burnout_ladder.md` (QoIs per run) and `measurements/burnou
 | 60 | 32.391, 335.0, 363.0 (32.392, 335.0, 363.5) |
 | 120 | 32.469, 335.5, 363.5 (32.469, 335.5, 363.5) |
 
-V-BO-06 reads 32.288 at 334.0 s and 364.0 s (the old core 32.292, 334.0, 364.0), V-BO-07 30.542 at 287.5 s and 324.0 s against its references 30.64, 288.0 and 325.0 (D87), and V-BO-08 29.712 at 47.2 s.
+V-BO-06 reads 32.288 at 334.0 s and 364.0 s (the old core 32.292, 334.0, 364.0), V-BO-07 30.542 at 287.5 s and 324.0 s against its references 30.64, 288.0 and 325.0 (D87), and V-BO-08 29.712 at 47.0 s (its saves now 0.5 s apart, D104).
 
 **The burst by refinement.** The gas-generation rate at every accepted step and post-event state, at 30, 60, 120 and 240 PMMA cells on both cores, from each deck's old-core 240-cell peak time to its end.
 
 | family | (a) per-step excess of N over 2N [g m⁻² s⁻¹] | (b) successive L1 [g/m²] | (c) L1 against the old core's 240 | verdict |
 |---|---|---|---|---|
 | V-BO-01, old core | 31.9, 7.73, 3.18 | 25.0, 9.34, 4.40 | | |
-| V-BO-01, temperature, 1e-2 | 3.16, 1.36, 0.642 | 22.0, 10.2, 5.0 | 39.7, 19.4, 10.0, 5.93 | pass (gated) |
-| V-BO-01, temperature, 3e-3 | 19.1, 5.14, 2.19 | 22.7, 11.7, 5.86 | 36.7, 18.4, 8.21, 3.21 | pass (gated) |
+| V-BO-01, temperature, 1e-2 | 3.16, 1.36, 0.642 | 22.0, 10.2, 5.0 | 39.7, 19.4, 10.0, 5.92 | pass (gated) |
+| V-BO-01, temperature, 3e-3 | 19.1, 5.14, 2.19 | 22.7, 11.7, 5.85 | 36.7, 18.4, 8.21, 3.21 | pass (gated) |
 | V-BO-01, enthalpy, 1e-2 | 3.17, 1.35, 0.636 | 22.0, 10.2, 5.01 | 39.8, 19.4, 10.0, 5.92 | pass (gated) |
 | V-BO-01, enthalpy, 3e-3 | 18.7, 4.98, 2.10 | 22.7, 11.6, 5.81 | 36.8, 18.4, 8.33, 3.23 | pass (gated) |
-| V-BO-01, temperature (enthalpy alike), 3e-2 | 4.59, 1.80, 0.909 | 21.8, 9.95, 5.21 | 38.5, 18.4, 8.9, 4.71 | pass (reported) |
-| V-BO-03 extended, temperature | 0.0069, 0.0021, 0.00055 | 8.68, 2.29, 0.739 | 11.1, 2.6, 0.727, 0.488 | pass (reported) |
-| V-BO-03 extended, enthalpy | 0.0068, 0.0021, 0.00055 | 8.68, 2.26, 0.574 | 11.4, 2.75, 0.591, 0.237 | pass (reported) |
-| V-BO-06, temperature (enthalpy alike) | 25.6, 5.23, 2.08 | 45.0, 20.9, 9.91 | 64.1, 29.9, 14.5, 7.85 | pass (reported) |
-| V-BO-07, temperature | 1.61, 0.799, 1.99 | 23.5, 11.8, 6.11 | 54.4, 31.6, 20.9, 16.3 | (a) fails (reported, C91) |
-| V-BO-07, enthalpy | 1.60, 0.797, 1.18 | 23.5, 11.8, 6.10 | 54.4, 31.6, 20.9, 16.3 | (a) fails (reported, C91) |
+| V-BO-01, temperature (enthalpy alike), 3e-2 | 4.59, 1.80, 0.908 | 21.8, 9.95, 5.21 | 38.5, 18.4, 8.9, 4.71 | pass (reported) |
+| V-BO-03 extended, temperature | 0.0080, 0.0019, 0.00050 | 8.74, 2.21, 0.768 | 11.1, 2.6, 0.727, 0.49 | pass (reported) |
+| V-BO-03 extended, enthalpy | 0.0060, 0.0018, 0.00055 | 8.67, 2.27, 0.648 | 11.4, 2.75, 0.591, 0.233 | pass (reported) |
+| V-BO-06, temperature (enthalpy alike) | 25.6, 5.23, 2.08 | 45.1, 20.9, 9.91 | 64.1, 29.9, 14.5, 7.85 | pass (reported) |
+| V-BO-07, old core | 12.0, 3.67, 0.896 | 21.0, 9.05, 5.16 | | |
+| V-BO-07, temperature | 1.64, 0.809, 0.680 | 23.6, 11.8, 6.15 | 54.3, 31.5, 20.9, 16.3 | (a) fails on its rate (reported, C91) |
+| V-BO-07, enthalpy | 1.62, 1.41, 0.666 | 23.6, 11.8, 6.14 | 54.4, 31.6, 20.9, 16.3 | (a) fails on its rate (reported, C91) |
 
-On V-BO-01 the new core's excess is smaller than the old core's at every resolution (5 to 10× at 1e-2, 1.45 to 1.7× at 3e-3), and each family's L1 against its own 240-cell run is within 1.33× of the old core's. V-BO-07's excess stops falling at 120 → 240 cells and exceeds the old core's there (1.99 against 0.90): the merge lumps the slow solid's residue (C91). By item 2's text that run goes to the owner.
+On V-BO-01 the new core's excess is smaller than the old core's at every resolution (5 to 10× at 1e-2, 1.45 to 1.7× at 3e-3), and each family's L1 against its own 240-cell run is within 1.33× of the old core's. V-BO-07's excess now falls with refinement to 0.68 and 0.67 at 120 → 240 cells, below the old core's 0.90 there (the followup's table rose to 1.99 and 1.18), but by 1.19 and 1.15 per doubling against (a)'s 1.5: the merge still lumps the slow solid's residue (C91). By item 2's text that run goes to the owner.
 
 ## 3. Ledgers
 
-Tables: `measurements/burnout_ladder.md` (every V-BO run's mass ledger, a QoI of its case) and `measurements/energy_ledger.md` (`energy_ledger.jl`, on `6bb9f18`).
+Tables: `measurements/burnout_ladder.md` (every V-BO run's mass ledger, a QoI of its case) and `measurements/energy_ledger.md` (`energy_ledger.jl`).
 
-Every V-BO run's mass ledger is within its case's tolerance (1e-3, V-BO-02's 3e-3 on the new core, V-BO-06's 5e-3 on the old core, C92, confirmed by the owner). On `4e5d412` the finite-volume core's ledger integrates the outflow over the accepted steps by three-point Gauss–Legendre and adds the mass deactivation vented, so it reads the integrator's conservation instead of the save grid (D104): at the CI resolutions 5.7e-8 to 3.2e-6 on the moving-mesh cases in both forms and 6.2e-5 on V-BO-02, against tolerances of 3e-5 and 3e-4; the 45 ladder runs that ran on that code before the re-measurement was deferred pass it; the old core keeps the trapezoid on the saved times and its tolerances. V-BO-04's energy ledger:
+Every V-BO run's mass ledger is within its case's tolerance (1e-3, V-BO-02's 3e-3 on the new core, V-BO-06's 5e-3 on the old core, C92, confirmed by the owner). The finite-volume core's ledger integrates the outflow over the accepted steps by three-point Gauss–Legendre and adds the mass deactivation vented, so it reads the integrator's conservation instead of the save grid (D104): at the CI resolutions 5.7e-8 to 3.2e-6 on the moving-mesh cases in both forms and 6.2e-5 on V-BO-02, against tolerances of 3e-5 and 3e-4; on `f54a6fb` every ladder run reads at most 3.1e-6 where it reaches its end (5.4e-6 on V-BO-08's `:interior` row). The old core keeps the trapezoid on the saved times and its tolerances. V-BO-04's energy ledger:
 
 | | temperature form | enthalpy form | old core |
 |---|---|---|---|
@@ -113,7 +115,7 @@ Every V-BO run's mass ledger is within its case's tolerance (1e-3, V-BO-02's 3e-
 | across the event, location off | 1.17e-2 | 1.11e-2 | |
 | fixed-step defect over the scale (dt 0.1 to 0.025 s) | 4.2e-15 to 2.7e-13 | 8.2e-15 | |
 
-The column stays at its initial temperature, so its fixed-step defect is round-off and shows no order (D75); V-CPL-06's Eulerian and moving columns converge at fourth order in the temperature form and are exact in the enthalpy form. The table, re-measured on `6bb9f18` with every number as at M6c, gives the verdict on the window before the event per form (D99): the new core's closure is no larger than the old core's in both. Across the event the old core has no located event, so that row is reported without one. Item 3 passes.
+The column stays at its initial temperature, so its fixed-step defect is round-off and shows no order (D75); V-CPL-06's Eulerian and moving columns converge at fourth order in the temperature form and are exact in the enthalpy form. The table, re-measured on `f54a6fb` with every ledger as at M6c (the event terms move at round-off), gives the verdict on the window before the event per form (D99): the new core's closure is no larger than the old core's in both. Across the event the old core has no located event, so that row is reported without one. Item 3 passes.
 
 ## 4. Admissibility at every event
 
@@ -121,38 +123,38 @@ Table: `measurements/burnout_ladder.md`. No run's deactivation was refused as in
 
 ## 5. The charring decks, split by installation
 
-Table: `measurements/burnout_identity.md` (`burnout_identity.jl`), on `4e5d412`, and its reference `burnout_identity_reference.csv`, re-recorded there for V-BO-04 alone: compared before the re-record, the other eight decks are bit-identical and V-BO-04 takes the same 322 steps with its largest correction 5.78e-18 m/s (D102, D103). The rest of this section reads the followup's table, on `6bb9f18`, which the table on `4e5d412` reproduces but for V-BO-04's digest and largest correction.
+Table: `measurements/burnout_identity.md` (`burnout_identity.jl`), on `f54a6fb`, and its reference `burnout_identity_reference.csv`, re-recorded there: compared before the re-record, V-CPL-03, V-CPL-06a, V-HC-05, V-RAD-01 and V-RX-02d are bit-identical, V-CPL-02, V-CPL-02b and V-BO-04 change with the face states bounded by the upwind inventory (D108) on their 1,134, 638 and 322 steps, and the Douglas fir deck with the Darcy upwind side taken from the value (D105) on its 313 steps at the same times (its temperatures within 9.5e-12 K). V-BO-04's digest changed once before, on `4e5d412` (D102, D103).
 
 On the followup's code every deck of M6c's reference equals its digest, so the reference is re-recorded only to add V-BO-04, a class B deck (D99); D90 does not reach V-CPL-02 or V-CPL-02b, whose digests stay (C97). Class A (the rule installs nothing): V-CPL-03, V-CPL-06a, V-HC-05, V-RAD-01, V-RX-02d and the Douglas fir deck over 60 s. Solved again with an explicit `EquidistributionCorrection()`, V-CPL-03 and the Douglas fir deck take the same steps, within 0.0 and 2.0e-14 relative, with the correction exactly zero; their thinnest live cells over both solves are 1.0 (V-CPL-03's cells only swell) and 0.709 of their initial thickness (C56). Class B (the rule installs the correction): V-CPL-02 and V-CPL-02b, 1,134 and 638 steps against 2,092 and 1,222 without it, the largest correction velocity 5.7e-4 and 3.4e-4 m/s, the largest node activation 1.0 with at most four nodes active at once (at 1.05 and 0.75 s), the thinnest live cells 0.0102 and 0.0105 of their initial thickness; V-BO-04, 322 steps with and without the correction, every one of its 39 interior nodes active at once from 122 s.
 
-V-BO-04's correction is not exactly zero, as the item stated, but round-off: its largest correction velocity is 6.75e-18 m/s (5.78e-18 on `4e5d412`), 6.8e-14 of the surface's regression speed, and the solve keeps the 322 accepted steps of the uncorrected one with its temperatures within 1.8e-12 K, its digest differing (C96). The uniform column thins every cell alike, so the correction's difference of neighbouring thicknesses is the round-off of the node positions. The owner restated the clause as zero to round-off (C96), and item 5 passes.
+V-BO-04's correction is not exactly zero, as the item stated, but round-off: its largest correction velocity is 6.75e-18 m/s (9.4e-18 on `f54a6fb`), 6.8e-14 of the surface's regression speed, and the solve keeps the 322 accepted steps of the uncorrected one with its temperatures within 1.8e-12 K, its digest differing (C96). The uniform column thins every cell alike, so the correction's difference of neighbouring thicknesses is the round-off of the node positions. The owner restated the clause as zero to round-off (C96), and item 5 passes.
 
 ## 6 and 10. Residuals, the domain test and the thinnest cell
 
 Table: `measurements/burnout_ladder.md`.
 
-The largest scaled constraint residual of the accepted states is 0.993 under C52's scale on any run (V-BO-01, 60 cells, temperature form, `ε_m = 3e-3`; column `c52` of `burnout_ladder.csv`) and 0.994 under Phase 1's (column `phase1`), and no accepted state lies above one under Phase 1's scale, so C52 removed no rejection: item 6 is D71's measure on one trajectory (plan §7.3). The domain test rejects 0 to 174 proposals per run. The thinnest live cell at the end of any step, before its event, is at least 0.865 `ε_m h₀` on every run (V-BO-07: 1.7 and 1.95), and no run ends in `DtLessThanMin`. Items 6 and 10 pass.
+The largest scaled constraint residual of the accepted states is 0.998 under C52's scale on any run (V-BO-03, 120 cells, temperature form; column `c52` of `burnout_ladder.csv`). Under Phase 1's scale (column `phase1`) one accepted state lies above one, at 1.03 (V-BO-01, 120 cells, temperature form, `ε_m = 3e-3`, 0.97 under C52's scale), so C52's scale admitted one state Phase 1's would have rejected; item 6 is D71's measure on one trajectory (plan §7.3). The domain test rejects 0 to 178 proposals per run. The thinnest live cell at the end of any step, before its event, is at least 0.858 `ε_m h₀` on every run (V-BO-07: 1.7 and 1.9), and no run ends in `DtLessThanMin`. Items 6 and 10 pass.
 
-The probe reads each step's end before the step's event is located, so on a located step it reads a state after the event's time that the trajectory does not pass through: the thinnest cell there is thinner than at the event, so item 10's reading is conservative, and the residual is that of a proposal the domain test accepted rather than of a state on the trajectory; item 6's 0.993 is such a reading where its step was located.
+The probe reads each step's end before the step's event is located, so on a located step it reads a state after the event's time that the trajectory does not pass through: the thinnest cell there is thinner than at the event, so item 10's reading is conservative, and the residual is that of a proposal the domain test accepted rather than of a state on the trajectory; the largest readings of item 6 are such readings where their steps were located.
 
 ## 7. Event timing
 
-Table: `measurements/case_accuracy.md` (`case_accuracy.jl`, on `08de603`).
+Table: `measurements/case_accuracy.md` (`case_accuracy.jl`).
 
 Every case of `NEW_CORE_CASES` in both forms, the deactivating ones with location off and on. The located invocation-time shift, over the reference's median interval between invocations (or its saved interval for a single invocation):
 
 | case | temperature form | enthalpy form | gain (off over on) |
 |---|---|---|---|
-| V-BO-01 | 6.0e-3 | 1.0e-5 | 76, 51,800 |
-| V-BO-02 | 3.2e-4 | 1.1e-5 | 378, 7,930 |
-| V-BO-04 | 2.7e-8 | 2.9e-7 | 4.9e7, 6.5e5 |
-| V-BO-06 | 5.3e-3 | 5.3e-5 | 99, 10,700 |
-| V-BO-07 | 3.3e-3 | 1.5e-5 | 8.0, 22,800 |
-| V-BO-08 | 3.1e-4 | 5.7e-4 | 3,600, 2,280 |
-| V-CPL-02 | 1.8e-4 | 1.8e-5 | 173, 1,700 |
-| V-CPL-02b | 5.1e-5 | 2.7e-5 | 670, 1,170 |
+| V-BO-01 | 6.0e-3 | 3.4e-6 | 137, 164,000 |
+| V-BO-02 | 3.2e-4 | 1.0e-5 | 378, 9,120 |
+| V-BO-04 | 2.7e-8 | 2.1e-7 | 4.9e7, 8.3e5 |
+| V-BO-06 | 5.3e-3 | 5.5e-5 | 40, 1,180 |
+| V-BO-07 | 3.3e-3 | 3.5e-5 | 69, 2,310 |
+| V-BO-08 | 6.2e-5 | 1.2e-4 | 3,600, 10 |
+| V-CPL-02 | 1.8e-4 | 1.8e-5 | 167, 1,800 |
+| V-CPL-02b | 5.1e-5 | 2.7e-5 | 643, 1,170 |
 
-Every one is within 0.05 and at least three times smaller than without location, so item 7 passes on every deactivating case that has an event (16 of 20 rows). The four rows of V-BO-03 (no invocation by its 500 s end, C75) and V-BO-05 (its `:interior` stop comes before any event) have no event to time and lie outside the criterion. The largest constraint residual over every case is 0.999 (V-CPL-02). Re-measured on `08de603`, all 100 rows of the table equal M6c's in every column but the wall time. Item 7 passes.
+Every one is within 0.05 and at least three times smaller than without location, so item 7 passes on every deactivating case that has an event (16 of 20 rows). The four rows of V-BO-03 (no invocation by its 500 s end, C75) and V-BO-05 (its `:interior` stop comes before any event) have no event to time and lie outside the criterion. The largest constraint residual over every case is 0.999 (V-CPL-02). On `f54a6fb` 92 of the 100 solves are within their error budget and 100 of 100 hold every accepted constraint residual at or below one, the same rows as M6c's. Item 7 passes.
 
 ## 8. Wall time
 
@@ -185,15 +187,15 @@ The load (17.5 to 21, fourteen OpenFOAM processes and the gate's own runs) matte
 
 ## 9. Smooth gradients
 
-Table: `measurements/burnout_gradients.md` (`burnout_gradients.jl`, on `6bb9f18`; its rows at the case's tolerance are M6c's to every digit).
+Table: `measurements/burnout_gradients.md` (`burnout_gradients.jl`).
 
 V-BO-01 through the case's solve, nine perturbations per configuration and central differences at four steps, both cores in one process. On the finite-volume core every run ends in one invocation, none falls back, and the peak, its time and the burnout time are smooth on every configuration (spreads at most 0.041).
 
 | configuration | invocation time: spread (σ, h10) | item 9 |
 |---|---|---|
-| absorption coefficient, 60 cells | 0.143 (5.5e-4 s, 1.9e-3) | fail |
+| absorption coefficient, 60 cells | 0.145 (5.5e-4 s, 1.9e-3) | fail |
 | incident flux, 60 cells | 0.00097 | pass |
-| pre-exponential factor, 60 cells | 0.0061 | pass |
+| pre-exponential factor, 60 cells | 0.0062 | pass |
 | absorption coefficient, 120 cells | 0.128 (3.7e-4 s, 1.3e-3) | fail |
 
 The invocation time is the least sensitive quantity under the absorption coefficient (about 3 s per unit `ln α`), so the step noise is 10 to 20 % of a central difference at h = 1e-3 and 2e-3. The old core's first park is erratic on every configuration (spreads 1.4 to 109).
@@ -202,10 +204,10 @@ The same four configurations at reltol 1e-7 (abstol scaled with it), on the fini
 
 | configuration | invocation time: spread (σ, h10) | peak, `t_peak`, `t_bo`: largest spread | steps at ε = 0 | item 9 |
 |---|---|---|---|---|
-| absorption coefficient, 60 cells | 0.0039 (2.8e-5 s, 9.4e-5) | 0.033 | 1,992 | pass |
-| incident flux, 60 cells | 0.00017 | 0.0033 | 1,992 | pass |
-| pre-exponential factor, 60 cells | 0.00041 | 0.034 | 1,992 | pass |
-| absorption coefficient, 120 cells | 0.0079 (2.2e-5 s, 7.7e-5) | 0.018 | 3,662 | pass |
+| absorption coefficient, 60 cells | 0.0040 (2.8e-5 s, 9.4e-5) | 0.033 | 2,004 | pass |
+| incident flux, 60 cells | 0.00015 | 0.0034 | 2,004 | pass |
+| pre-exponential factor, 60 cells | 0.00043 | 0.034 | 2,004 | pass |
+| absorption coefficient, 120 cells | 0.0101 (2.6e-5 s, 8.9e-5) | 0.017 | 3,650 | pass |
 
 Every run ends in one invocation and none falls back. Item 9 fails on two configurations at the case's tolerance and passes on all four at reltol 1e-7 (C93's scratch numbers, now a committed table). The owner's answer (C93): item 9 passes with the noise named; a user who differences the invocation time at a relative step below 2e-3 sets reltol 1e-7.
 
@@ -226,7 +228,7 @@ Item 11, the fallback, is conditioned on items 1 or 2 failing on V-BO-01 at the 
 
 - **Answered:** C91 (V-BO-07, items 1 and 2), C94 (V-BO-08 at 3e-2) and V-BO-06 at 3e-2 are owner exceptions of item 1, each with its mechanism named; C92 (the old core's ledger on V-BO-06 bounded at 5e-3) is confirmed; C93: item 9 passes with the noise named, reltol 1e-7 for a user who differences the invocation time; C96: item 5(B)'s clause reads zero to round-off.
 - **Answered at the gate:** C74, the upwind side from the value alone (D102); C73, the slope beside a boundary cell against a zero gradient (D103); X-2, the mass ledger over the accepted steps (D104); V-BO-01 at `τ = 3600` s, an owner exception of item 1 with the mechanism named (C98); the layer-scaled `τ`, cutover design work with MF (C98).
-- **The tables, open:** re-measured once after the fixes of an independent review of `0bf5e62` land on this branch (plan §12.4), item 8's with them if the machine is quiet.
+- **The tables:** re-measured once on `f54a6fb`, after the fixes of an independent review of `0bf5e62` (D105 to D108), as the owner decided; item 8's waits for a quiet machine.
 - **Item 8, open:** re-run `burnout_timing.jl` on a quiet machine with the followup's protocol (D101: the installed decks matched on the window RMS, each matched row's cost split at the first activation into the integrator's part, R40's, and the gain's, R41's), then decide under §7.4: continue with R40 and R41 carried, or stop. V-BO-01 and V-BO-03 read 1.85 to 2.11× at 60 and 120 cells here, and the installed correction 2.4 to 4.6× on three audit decks at equal tolerance (R41). The machine is committed to other runs for at least a day or two; the quiet-machine table follows as one table commit and one gate commit before the followup's merge (the followup plan's question 10).
 
 ## Carried beyond Phase 2

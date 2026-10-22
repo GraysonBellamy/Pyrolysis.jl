@@ -190,5 +190,6 @@ The phase's decisions (followup plan §7.1), answered once the followup was done
 | C74: the upwind side at an exact tie | from the value alone | `011a267`, plan D102 |
 | X-2: the mass-ledger QoI | integrated over the accepted steps on the finite-volume core; tolerances 3e-5 and, on V-BO-02, 3e-4 | `4e5d412`, plan D104 |
 | The per-layer `τ` (R27) | cutover design work, scheduled with MF | plan C98, §12.4 |
-| The gate tables after these changes | re-measured once, after the fixes of an independent review of `0bf5e62` land (identity and MMS orders re-measured now) | plan §12.4 |
+| The gate tables after these changes | re-measured once on `f54a6fb`, after the fixes of an independent review of `0bf5e62` (D105 to D108); item 8's waits for a quiet machine | plan D109, §12.4 |
+| The layer-scaled `τ` with those fixes | kept at the cutover | plan §12.4 |
 | MF | open: no OrdinaryDiffEqBDF release after 2.4.13 | gate's integrator |
