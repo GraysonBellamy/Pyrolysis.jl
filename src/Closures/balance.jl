@@ -15,8 +15,8 @@ abstract type Closure end
 """
 	BalanceRowClosure{C,X} <: Closure
 
-The node velocities of a 1D mesh from the discrete volume balance of every
-cell. The pinned node is at rest, `0 = w_p`; cell `k`'s balance sits on the
+The node velocities of a line, or of a single column of cells, from the
+discrete volume balance of every cell. The pinned node is at rest, `0 = w_p`; cell `k`'s balance sits on the
 velocity row of its node farther from the pinned node,
 
 	0 = Σ_f A_f ((w − c)·n)_f − (θ_k − θ_A) V_k,
@@ -39,13 +39,22 @@ row is `0 = w_n − w(x_n, t)` instead: a prescribed mesh velocity, for
 verification, under which the mesh moves over a solid at rest. `lateral` is
 the variable cross section's [`LateralShrinkage`](@ref), or `nothing`.
 
-`row_node[k]` is the node whose velocity row carries cell `k`'s balance and
-`order` the cells from the pinned node outward.
+On a mesh of more than one dimension the closure holds a single column of
+cells along the last axis in column mode: the lateral velocity components are
+zero, the pinned nodes are at rest, cell `k`'s balance sits on the axial
+velocity of one node of the face it adds to the column, and the face's other
+nodes move with that node (`0 = w_n − w_leader`, the pairs in `ties`), so
+the column's levels stay level and the rows are the 1D rows.
+
+`pinned` lists the nodes at rest, `row_node[k]` the node whose velocity row
+carries cell `k`'s balance and `order` the cells from the pinned nodes
+outward.
 """
 struct BalanceRowClosure{C<:Correction,X} <: Closure
-    pinned::Int
+    pinned::Vector{Int}
     row_node::Vector{Int}
     order::Vector{Int}
+    ties::Vector{Tuple{Int,Int}}
     correction::C
     lateral::X
 end
@@ -91,7 +100,66 @@ function BalanceRowClosure(
     end
     length(order) == n ||
         throw(ArgumentError("the sweep from the pinned node does not reach every cell"))
-    return BalanceRowClosure(p, row_node, order, correction, lateral)
+    return BalanceRowClosure([p], row_node, order, Tuple{Int,Int}[], correction, lateral)
+end
+
+"""
+	BalanceRowClosure(topology::MeshTopology{D}; correction = NoCorrection())    (D ≥ 2)
+
+The balance-row closure of a single column of cells along the last axis,
+swept from the pinned nodes: each cell must share a whole face with the
+nodes already reached, and adds the nodes of the opposite face. The
+correction is [`NoCorrection`](@ref), or a [`PrescribedCorrection`](@ref),
+`w(x::SVector, t) -> SVector`, which prescribes every node's velocity on any
+mesh.
+"""
+function BalanceRowClosure(
+    topo::MeshTopology{D};
+    correction::Correction = NoCorrection(),
+    lateral = nothing,
+) where {D}
+    is_fixed(topo) && throw(ArgumentError("a fixed mesh has no node velocities to close"))
+    correction isa Union{NoCorrection,PrescribedCorrection} || throw(
+        ArgumentError("a column of more than one dimension takes no layer correction"),
+    )
+    lateral === nothing ||
+        throw(ArgumentError("the variable cross section is a line's model"))
+    n = n_cells(topo)
+    correction isa PrescribedCorrection && return BalanceRowClosure(
+        sort(topo.pinned),
+        zeros(Int, n),
+        Int[],
+        Tuple{Int,Int}[],
+        correction,
+        lateral,
+    )
+    isempty(topo.pinned) && throw(ArgumentError("the column needs pinned nodes"))
+    K = length(topo.cells[1].nodes)
+    reached = falses(n_nodes(topo))
+    reached[topo.pinned] .= true
+    visited = falses(n)
+    row_node = zeros(Int, n)
+    order = Int[]
+    ties = Tuple{Int,Int}[]
+    while length(order) < n
+        next = [
+            i for i = 1:n if
+            !visited[i] && count(nd -> reached[nd], topo.cells[i].nodes) == K ÷ 2
+        ]
+        length(next) == 1 || throw(
+            ArgumentError(
+                "the balance rows on more than one dimension need a single column of cells",
+            ),
+        )
+        i = only(next)
+        new = [nd for nd in topo.cells[i].nodes if !reached[nd]]
+        visited[i] = true
+        reached[new] .= true
+        row_node[i] = new[1]
+        append!(ties, ((nd, new[1]) for nd in new[2:end]))
+        push!(order, i)
+    end
+    return BalanceRowClosure(sort(topo.pinned), row_node, order, ties, correction, lateral)
 end
 
 # The sweep coefficient σ A_f n_f of node `nd` in the balance of cell `k`: the
@@ -140,6 +208,48 @@ under a [`LayerCorrection`](@ref).
 @inline correction!(ds, cl::BalanceRowClosure, setup) =
     _correction!(ds.c, cl.correction, ds, setup.reference)
 
+# The velocity component `k` of node `nd` in a flat vector of `D` components per node.
+@inline _component(w, ::Val{D}, nd::Int, k::Int) where {D} = w[D*(nd-1)+k]
+@inline _node_vector(w, ::Val{D}, nd::Int) where {D} =
+    SVector{D}(ntuple(k -> w[D*(nd-1)+k], Val(D)))
+
+# Σ_f σ Σ_q s_{q,f} · w_q over the faces of cell `k` of a mesh of more than one
+# dimension: the rate of change of its volume.
+@inline function _sweep_rate(g::MeshGeometry, topo::MeshTopology{D}, k::Int, w) where {D}
+    s = zero(promote_type(eltype(eltype(g.face_sweep)), eltype(w)))
+    for f in topo.cells[k].faces
+        σ = topo.faces[f].cells[1] == k ? 1 : -1
+        nodes = topo.faces[f].nodes
+        for q in eachindex(nodes)
+            s += σ * dot(g.face_sweep[q, f], _node_vector(w, Val(D), nodes[q]))
+        end
+    end
+    return s
+end
+
+# The coefficient of node `nd`'s component `axis` in the balance of cell `k`.
+@inline function _coefficient(
+    g::MeshGeometry{D},
+    topo::MeshTopology{D},
+    k::Int,
+    nd::Int,
+    axis::Int,
+) where {D}
+    a = zero(eltype(g.face_area))
+    for f in topo.cells[k].faces
+        σ = topo.faces[f].cells[1] == k ? 1 : -1
+        nodes = topo.faces[f].nodes
+        for q in eachindex(nodes)
+            nodes[q] == nd && (a += σ * g.face_sweep[q, f][axis])
+        end
+    end
+    return a
+end
+
+# The nodes cell `k` adds to the column: its row node and the nodes tied to it.
+_new_nodes(cl::BalanceRowClosure, k::Int) =
+    [cl.row_node[k]; [nd for (nd, leader) in cl.ties if leader == cl.row_node[k]]]
+
 """
 	closure_rows!(c, closure, ds, topology, material, t)
 
@@ -155,7 +265,7 @@ function closure_rows!(
     c::Contributions{NC},
     cl::BalanceRowClosure,
     ds::DerivedState{NC},
-    topo::MeshTopology{1},
+    topo::MeshTopology,
     material::Material{NC},
     t,
 ) where {NC}
@@ -169,10 +279,19 @@ function closure_rows!(
     return nothing
 end
 
-@inline function _velocity_rows!(c, cl::BalanceRowClosure, ::NoCorrection, ds, topo, t)
+@inline function _velocity_rows!(
+    c,
+    cl::BalanceRowClosure,
+    ::NoCorrection,
+    ds,
+    topo::MeshTopology{1},
+    t,
+)
     g = ds.geometry
     θ_A = ds.θ_A[]
-    c.r_velocity[cl.pinned] = ds.w[cl.pinned]
+    for p in cl.pinned
+        c.r_velocity[p] = ds.w[p]
+    end
     @inbounds for k in cl.order
         c.r_velocity[cl.row_node[k]] =
             _sweep_rate(g, topo, k, ds.w) - (c.θ[k] - θ_A) * ds.V_eval[k]
@@ -183,7 +302,9 @@ end
 @inline function _velocity_rows!(c, cl::BalanceRowClosure, ::LayerCorrection, ds, topo, t)
     g = ds.geometry
     θ_A = ds.θ_A[]
-    c.r_velocity[cl.pinned] = ds.w[cl.pinned]
+    for p in cl.pinned
+        c.r_velocity[p] = ds.w[p]
+    end
     @inbounds for k in cl.order
         c.r_velocity[cl.row_node[k]] =
             _solid_sweep_rate(g, topo, k, ds.w, ds.c) - (c.θ[k] - θ_A) * ds.V_eval[k]
@@ -196,11 +317,56 @@ end
     cl::BalanceRowClosure,
     corr::PrescribedCorrection,
     ds,
-    topo,
+    topo::MeshTopology{1},
     t,
 )
     @inbounds for nd in eachindex(ds.w)
         c.r_velocity[nd] = ds.w[nd] - corr.w(ds.x[nd], t)
+    end
+    return nothing
+end
+
+# A column of more than one dimension: the lateral components and the pinned
+# nodes at rest, the ties, and the balances on the column axis.
+function _velocity_rows!(
+    c,
+    cl::BalanceRowClosure,
+    ::NoCorrection,
+    ds,
+    topo::MeshTopology{D},
+    t,
+) where {D}
+    g = ds.geometry
+    θ_A = ds.θ_A[]
+    @inbounds for nd = 1:n_nodes(topo), k = 1:(D-1)
+        c.r_velocity[D*(nd-1)+k] = ds.w[D*(nd-1)+k]
+    end
+    @inbounds for p in cl.pinned
+        c.r_velocity[D*p] = ds.w[D*p]
+    end
+    @inbounds for (nd, leader) in cl.ties
+        c.r_velocity[D*nd] = ds.w[D*nd] - ds.w[D*leader]
+    end
+    @inbounds for k in cl.order
+        c.r_velocity[D*cl.row_node[k]] =
+            _sweep_rate(g, topo, k, ds.w) - (c.θ[k] - θ_A) * ds.V_eval[k]
+    end
+    return nothing
+end
+
+function _velocity_rows!(
+    c,
+    cl::BalanceRowClosure,
+    corr::PrescribedCorrection,
+    ds,
+    topo::MeshTopology{D},
+    t,
+) where {D}
+    @inbounds for nd = 1:n_nodes(topo)
+        w = corr.w(_node_vector(ds.x, Val(D), nd), t)
+        for k = 1:D
+            c.r_velocity[D*(nd-1)+k] = ds.w[D*(nd-1)+k] - w[k]
+        end
     end
     return nothing
 end
@@ -220,17 +386,25 @@ function consistent_velocities!(
     cl::BalanceRowClosure,
     c::Contributions,
     ds::DerivedState,
-    topo::MeshTopology{1},
+    topo::MeshTopology,
     t,
 )
     _consistent_velocities!(w, cl, cl.correction, c, ds, topo, t)
     return w
 end
 
-function _consistent_velocities!(w, cl::BalanceRowClosure, ::NoCorrection, c, ds, topo, t)
+function _consistent_velocities!(
+    w,
+    cl::BalanceRowClosure,
+    ::NoCorrection,
+    c,
+    ds,
+    topo::MeshTopology{1},
+    t,
+)
     g = ds.geometry
     θ_A = ds.θ_A[]
-    w[cl.pinned] = 0
+    w[cl.pinned] .= 0
     for k in cl.order
         row = cl.row_node[k]
         if !ds.active[k]
@@ -256,7 +430,7 @@ function _consistent_velocities!(
 )
     g = ds.geometry
     θ_A = ds.θ_A[]
-    w[cl.pinned] = 0
+    w[cl.pinned] .= 0
     for k in cl.order
         row = cl.row_node[k]
         if !ds.active[k]
@@ -279,11 +453,60 @@ function _consistent_velocities!(
     corr::PrescribedCorrection,
     c,
     ds,
-    topo,
+    topo::MeshTopology{1},
     t,
 )
     for nd in eachindex(w)
         w[nd] = corr.w(ds.x[nd], t)
+    end
+    return w
+end
+
+function _consistent_velocities!(
+    w,
+    cl::BalanceRowClosure,
+    corr::PrescribedCorrection,
+    c,
+    ds,
+    topo::MeshTopology{D},
+    t,
+) where {D}
+    for nd = 1:n_nodes(topo)
+        v = corr.w(_node_vector(ds.x, Val(D), nd), t)
+        for k = 1:D
+            w[D*(nd-1)+k] = v[k]
+        end
+    end
+    return w
+end
+
+# A column of more than one dimension: the lateral components and the pinned
+# nodes at rest; each cell's balance then fixes the common axial velocity of
+# the nodes it adds, from those already reached.
+function _consistent_velocities!(
+    w,
+    cl::BalanceRowClosure,
+    ::NoCorrection,
+    c,
+    ds,
+    topo::MeshTopology{D},
+    t,
+) where {D}
+    g = ds.geometry
+    θ_A = ds.θ_A[]
+    fill!(w, 0)
+    for k in cl.order
+        new = _new_nodes(cl, k)
+        ds.active[k] || continue
+        known = zero(eltype(w))
+        for nd in topo.cells[k].nodes
+            nd in new || (known += _coefficient(g, topo, k, nd, D) * w[D*nd])
+        end
+        lead = sum(nd -> _coefficient(g, topo, k, nd, D), new)
+        v = ((c.θ[k] - θ_A) * ds.V_eval[k] - known) / lead
+        for nd in new
+            w[D*nd] = v
+        end
     end
     return w
 end
@@ -298,4 +521,12 @@ Whether the velocity rows determine every node velocity at the metrics
 function rank_check(cl::BalanceRowClosure, topo::MeshTopology{1}, g::MeshGeometry)
     cl.correction isa PrescribedCorrection && return true
     return all(k -> _coefficient(g, topo, k, cl.row_node[k]) != 0, cl.order)
+end
+
+function rank_check(cl::BalanceRowClosure, topo::MeshTopology{D}, g::MeshGeometry) where {D}
+    cl.correction isa PrescribedCorrection && return true
+    return all(
+        k -> sum(nd -> _coefficient(g, topo, k, nd, D), _new_nodes(cl, k)) != 0,
+        cl.order,
+    )
 end
