@@ -68,6 +68,10 @@ area of the faces they name unless noted.
 - `live_cells`: the number of live cells
 - `park_times`: the time of every deactivation, one entry per deactivated
   cell, in order [s]
+- `live_mass`, `live_energy`: the live cells' mass [kg] and energy [J]
+  ([`live_inventories`](@ref))
+- `mass_outflow`, `energy_rate`: the live region's mass outflow [kg/s] and
+  enthalpy rate [W] ([`ledger_rates`](@ref))
 """
 const CoreExtras = @NamedTuple{
     gas_generation_rate::Vector{Float64},
@@ -94,6 +98,10 @@ const CoreExtras = @NamedTuple{
     cross_section_area_history::Vector{Float64},
     live_cells::Vector{Int},
     park_times::Vector{Float64},
+    live_mass::Vector{Float64},
+    live_energy::Vector{Float64},
+    mass_outflow::Vector{Float64},
+    energy_rate::Vector{Float64},
 }
 
 """
@@ -191,6 +199,10 @@ _extras(nt::Int) = CoreExtras((
     zeros(nt),
     zeros(Int, nt),
     Float64[],
+    zeros(nt),
+    zeros(nt),
+    zeros(nt),
+    zeros(nt),
 ))
 
 # The live faces of boundary tag `tag`.
@@ -294,9 +306,12 @@ function CoreSolution(
     has_bottom = haskey(topo.boundary_tags, :bottom)
     top = has_top ? boundary_faces(topo, :top) : Int[]
     exposed_area = has_top ? sum(g0.face_area[f] for f in top) : NaN
+    ext = _extension(def)
     for (k, u) in enumerate(states)
         deactivation === nothing || replay_events!(deactivation, layout, t[k])
         residual!(du, u, def, t[k], ws)
+        x.energy_rate[k], x.mass_outflow[k] = ledger_rates(def, c, ds)
+        x.live_energy[k], x.live_mass[k] = live_inventories(def, ext, ds, u)
         @views T[:, k] .= ds.T
         @views ξ[:, :, k] .= ds.ξ
         @views m[:, :, k] .= ds.m

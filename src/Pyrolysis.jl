@@ -111,7 +111,7 @@ using .Problem
 # Finite-volume core: its solution type and its time integration of a
 # `PyrolysisProblem`.
 include("Outputs/Outputs.jl")
-using .Outputs: completed
+using .Outputs: completed, ConservationRecorder, conservation_audit
 include("Integration/Integration.jl")
 
 # Unified pure residual! (loaded after Problem; traits stay in Problem to avoid
@@ -188,10 +188,11 @@ export PyrolysisProblem, PyrolysisSolution
 export solve
 export parameter_sweep
 
-# The solutions' accessors
+# The solutions' accessors and the conservation audit
 export get_times, get_temperatures, get_concentrations, get_gas_generation_rate
 export n_timesteps, succeeded, completed
 export get_profile, get_cell_positions, interpolate_solution
+export ConservationRecorder, conservation_audit
 
 # Pure residual + Workspace surface.
 export SimulationMode

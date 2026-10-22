@@ -2,6 +2,8 @@ using Test
 using Pyrolysis
 using Pyrolysis.Outputs
 using Pyrolysis.Integration
+using Pyrolysis.Integration: rodas5p_policy, fbdf_policy, kencarp4_policy, default_policy
+using Pyrolysis.Integration: default_linear_solver
 using OrdinaryDiffEq: DiscreteCallback, terminate!
 
 # An ablating solid, as in the deactivation tests: it decomposes to a gas that
@@ -173,4 +175,31 @@ end
     failed = Integration.solve(_ablator(6; t_end = 0.1); maxiters = 3, _TOL...)
     @test failed.retcode !== :Success && failed.retcode !== :Terminated
     @test !succeeded(failed) && !completed(failed)
+end
+
+_digest(sol) = hash((sol.T, sol.m, sol.z, sol.t, [e.t for e in sol.events], sol.statistics))
+
+@testset "the progress bar is inert: $(name)" for (name, policy) in (
+    ("default", default_policy(default_linear_solver())),
+    ("Rodas5P", rodas5p_policy(default_linear_solver())),
+    ("FBDF", fbdf_policy(default_linear_solver())),
+    ("KenCarp4", kencarp4_policy(default_linear_solver())),
+)
+    for (problem, options) in (
+        (_ablator(8; t_end = 0.1), (;)),
+        (_ablator(8; t_end = 0.4), (use_ale = true, deactivation = true)),
+    )
+        quiet = Integration.solve(problem; integrator_policy = policy, options..., _TOL...)
+        drawn = redirect_stderr(devnull) do
+            Integration.solve(
+                problem;
+                integrator_policy = policy,
+                progress = true,
+                options...,
+                _TOL...,
+            )
+        end
+        @test _digest(drawn) == _digest(quiet)
+        @test drawn.retcode === quiet.retcode
+    end
 end

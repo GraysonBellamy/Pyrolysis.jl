@@ -58,9 +58,10 @@ after a nonlinear failure of a Newton-based policy
 policy's flag rule. A discrete `callback`, or each discrete callback of a
 `CallbackSet`, is a read-only observer: the policy's flag rule follows its
 `affect!`, so it leaves the trajectory unchanged under every policy; a
-continuous callback's event raises the flag as any event does. `progress` is
-accepted for the keyword set of the other solver and draws nothing; `jacobian`
-is accepted and ignored, the colored Jacobian being the only one.
+continuous callback's event raises the flag as any event does. `callback` may
+also be a [`ConservationRecorder`](@ref), or a tuple of recorders and
+callbacks. `progress` draws a progress bar, a read-only observer as well;
+`jacobian` is accepted and ignored, the colored Jacobian being the only one.
 
 `use_ale`, `w_override`, `correction`, `lagrangian`, `deactivation` and
 `band` are those of [`setup`](@ref). On a moving mesh the solve ends with return code
@@ -152,6 +153,7 @@ function _solve(
         linear_solver,
         integrator_policy,
         located_events,
+        progress,
         started,
     )
 end
@@ -161,7 +163,7 @@ end
 	          dt = cp.problem.dt_initial, adaptive = true, dtmin = 1e-12,
 	          dtmax = Inf, saveat = cp.problem.output_times, callback = nothing,
 	          min_thickness = 1e-6, linear_solver = nothing,
-	          integrator_policy = nothing, located_events = true,
+	          integrator_policy = nothing, located_events = true, progress = false,
 	          max_constraint_rejections = MAX_CONSTRAINT_REJECTIONS,
 	          started = time()) -> CoreSolution
 
@@ -191,6 +193,7 @@ function integrate(
     linear_solver = nothing,
     integrator_policy = nothing,
     located_events::Bool = true,
+    progress::Bool = false,
     max_constraint_rejections::Int = MAX_CONSTRAINT_REJECTIONS,
     started::Float64 = time(),
 )
@@ -250,19 +253,26 @@ function integrate(
         integrator -> _observe!(integrator, monitor, cap, policy, violation);
         save_positions = (false, false),
     )
-    # The last accepted state, after every callback of its step.
-    accepted = AcceptedState(copy(ode.u0), Float64(cp.problem.tspan[1]))
-    recorder = DiscreteCallback(
-        (u, t, integrator) -> true,
-        integrator -> _record!(integrator, accepted, policy);
-        save_positions = (false, false),
-    )
     outcome = Ref(:running)
     thin = _thickness_termination(layout, Float64(min_thickness), outcome)
     events = _deactivation_callback(cp, check, policy, located_events)
-    callbacks =
-        callback === nothing ? CallbackSet(observer, events..., thin..., recorder) :
-        CallbackSet(observer, events..., thin..., _observing(callback, policy), recorder)
+    recs, callback = _split_recorders(callback)
+    bound =
+        [_BoundRecorder(r, cp, _crossings(cp, located_events, min_thickness)) for r in recs]
+    # The last accepted state, after every callback of its step; then the
+    # conservation recorders' commits.
+    accepted = AcceptedState(copy(ode.u0), Float64(cp.problem.tspan[1]))
+    recorder = DiscreteCallback(
+        (u, t, integrator) -> true,
+        integrator -> _record!(integrator, accepted, policy, bound);
+        save_positions = (false, false),
+    )
+    observers = (
+        map(_reader, bound)...,
+        (progress ? (_progress_observer(policy, cp.problem.tspan),) : ())...,
+        (callback === nothing ? () : (_observing(callback, policy),))...,
+    )
+    callbacks = CallbackSet(observer, events..., thin..., observers..., recorder)
 
     raw = OrdinaryDiffEq.solve(
         ode,
@@ -346,11 +356,36 @@ mutable struct AcceptedState
     t::Float64
 end
 
-function _record!(integrator, accepted::AcceptedState, policy)
+function _record!(integrator, accepted::AcceptedState, policy, bound)
     copyto!(accepted.u, integrator.u)
     accepted.t = integrator.t
+    for b in bound
+        _commit_step!(b, integrator)
+    end
     apply_observer_flag!(integrator, policy)
     return nothing
+end
+
+# The conditions of the events that can end a step before its end: the
+# located deactivation's threshold margin and the thickness stop's margin.
+function _crossings(cp::CoreProblem, located::Bool, min_thickness::Real)
+    layout = cp.def.layout
+    cells = cp.deactivation
+    out = _ScalarWrapper[]
+    cells !== nothing &&
+        located &&
+        push!(out, _ScalarWrapper(u -> threshold_margin(cells, layout, u)))
+    if is_moving(layout)
+        bottom = position_index(layout, 1)
+        h = Float64(min_thickness)
+        push!(
+            out,
+            _ScalarWrapper(
+                u -> u[position_index(layout, _top_live_node(layout))] - u[bottom] - h,
+            ),
+        )
+    end
+    return out
 end
 
 # Zero for an admissible state; otherwise the first live cell at or below
