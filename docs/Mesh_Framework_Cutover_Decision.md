@@ -2,7 +2,7 @@
 
 **Scope.** The evidence pack of the Phase 3 plan (`docs/Mesh_Framework_Phase3_Plan.md` §2): what the owner reads to decide whether the finite-volume core replaces the old core. It is assembled at M0 on branch `mesh-framework-phase3`, stacked on `phase2-review` at `3bf19f2`, from the Phase 1 and Phase 2 gates (`docs/Mesh_Framework_Phase1_Gate.md`, `docs/Mesh_Framework_Phase2_Gate.md`), their measurement tables under `test/newcore/gates/measurements/`, the decision review of 2026-10-20 and the independent review of 2026-10-21 (both local, under `docs/`), extended with the multi-D probe's result after M1, and kept as the record of the decision. Every number names its table; nothing is measured here that a gate script did not write, except where a section says so.
 
-**Status.** Sections 1 to 5 are complete. Section 6 (item 8 on a quiet machine) waits for the machine, by the owner's answer. Section 7 holds the owner's M0 answers; question 1, the cutover itself, waits for item 8. Section 8 records the minimal numerical workflow. Section 9 holds the multi-D probe's result (M1); its reading of one criterion (C118) and the decision's confirmation on it are the owner's. Section 10 is the decision.
+**Status.** Sections 1 to 5 are complete. Section 6 (item 8 on a quiet machine) waits for the machine, by the owner's answer. Section 7 holds the owner's answers; question 1, the cutover itself, waits for item 8. Section 8 records the minimal numerical workflow. Section 9 holds the multi-D probe's result (M1), on which the owner confirmed the decision's probe half; question 1 waits for item 8. Section 10 is the decision.
 
 ---
 
@@ -69,9 +69,9 @@ julia --project=test --startup-file=no test/newcore/gates/burnout_timing.jl
 
 The table is Phase 2's, so it lands on `phase2-review` (#15): `test/newcore/gates/measurements/burnout_timing.md` in one commit, the Phase 2 gate's item 8 in a second; `mesh-framework-phase3` is then rebased onto it and the reading entered here. M0 changes no source, so the measurement is the same on either branch.
 
-## 7. The owner's answers at M0
+## 7. The owner's answers
 
-The questions of plan §12 that W2's ports depend on, with the plan's recommendation and the owner's answer.
+The questions of plan §12 that W2's ports depend on, answered at M0, and those answered at M1's close, with the plan's recommendation and the owner's answer.
 
 | # | question | recommendation | answer |
 |---|---|---|---|
@@ -85,6 +85,9 @@ The questions of plan §12 that W2's ports depend on, with the plan's recommenda
 | 18 | the removed keywords | `warm_start`, `verify_jacobian`, `diagnostics`, `min_cells`, `jacobian`, `integrator`, `extra_kwargs` removed without replacement | as recommended |
 | 20 | the dependency removals | `Sparspak`, `IncompleteLU`, `Krylov`, `CommonSolve`, `RecursiveFactorization`, `FiniteDiff` removed by `Pkg.rm` | as recommended |
 | 21 | the burnout path's hard gate (W9) | accuracy under joint refinement; the invocation count reported | as recommended |
+| 22 | `succeeded` (C115), asked before M2 | true for `:Success` and the complete-burnout and `min_thickness` terminations; `completed` the strict test | as recommended, at M1's close, the `min_thickness` stop given its own outcome |
+| 23 | the conservation audit's scope (C108) | the per-step recorder and the audit | as recommended, at M1's close |
+| C118 | the probe's balance criterion at the accepted states | 1e-12 at the consistent state; the integrator's order at the accepted states, within five times the line's rows | as recommended, at M1's close |
 
 ## 8. The minimal numerical workflow
 
@@ -112,9 +115,9 @@ M1 (plan §13.2) built the probe on branch `cutover-m1-multid-probe`: quadrilate
 
 The 1D core is unchanged by the probe: the identity digests of the eight decks and the Douglas fir deck at 60 s equal their references bit for bit (`burnout_identity.jl`, run on the probe's tree), the 1D pattern equals the old builder's on 90 configurations, `NEW_CORE_CASES` passes 521 of 521 in each energy form, and every `test/newcore` file outside the probe's passes (9,696 tests, containment's 2,046 among them).
 
-**Findings for the decision.** (1) The layout and the assembly did not have to change in a way that moves the 1D core's numbers: the stop condition of §5 is not met. (2) Criterion 4's "1e-12 at the accepted states" is an integrator property the 1D core shares, not a closure property (C118, owner to confirm the reading). (3) Multi-D Jacobians are wider than the design estimated, about 100 entries per row against 40 (C119), a Phase 4b cost input. (4) The multi-D geometry has no trial-state guard on collapsed faces (C120), Phase 4b's. (5) Element death leaves the dead cells' inventories off the ledger; the documented loss and its budgets are Phase 4's.
+**Findings for the decision.** (1) The layout and the assembly did not have to change in a way that moves the 1D core's numbers: the stop condition of §5 is not met. (2) Criterion 4's "1e-12 at the accepted states" is an integrator property the 1D core shares, not a closure property; the owner took C118's reading (1e-12 at the consistent state, the integrator's order at the accepted states). (3) Multi-D Jacobians are wider than the design estimated, about 100 entries per row against 40 (C119), a Phase 4b cost input. (4) The multi-D geometry has no trial-state guard on collapsed faces (C120), Phase 4b's. (5) Element death leaves the dead cells' inventories off the ledger; the documented loss and its budgets are Phase 4's.
 
-**Whether the decision is confirmed:** the owner's, with item 8 (§6).
+**Whether the decision is confirmed:** on the probe, yes (the owner, at M1's close): no stop condition of §5 is met. Question 1 waits for item 8 (§6); M2 starts before it.
 
 ## 10. The decision
 
