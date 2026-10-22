@@ -11,6 +11,7 @@ assembler scatters `±F_f A_f` into the two cells of each face.
 module Kernels
 
 using StaticArrays
+using LinearAlgebra: I, dot, det, tr, issymmetric, isposdef
 using ForwardDiff: value
 using ..Materials
 using ..BoundaryConditions
@@ -30,7 +31,7 @@ include("relative_flux.jl")
 
 export Kernel, Contributions, reset!, contribute!, find_kernel
 export ReactionKernel
-export ConductionKernel, normal_conductivity
+export ConductionKernel, normal_conductivity, cell_gradient
 export GasTransportKernel, outward_darcy_velocity, MOBILITY_GUARD
 export BeerLambertKernel, incident_intensity, sweep_intensities!, transmitted_face
 export exposed_face
