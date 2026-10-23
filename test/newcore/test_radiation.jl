@@ -13,6 +13,25 @@ using Pyrolysis.ColoredJacobian
 using Pyrolysis.Integration
 using Pyrolysis.Integration: setup
 
+# The surface radiative properties of the slab's solids. With
+# `component_absorptivity` the virgin solid's emissivity depends on
+# temperature but it sets its own absorptivity, and the char absorbs at its
+# emissivity: the exposed cell's absorptivity follows its composition alone.
+# With `absorptivity_of_temperature` the virgin solid absorbs at its
+# temperature-dependent emissivity (Kirchhoff's law) and its density depends
+# on temperature, while the char sets its own absorptivity: the exposed cell's
+# absorptivity also depends on its temperature.
+const _absorbers = (
+    component_absorptivity = (
+        virgin = (ρ = 1100.0, ε = (0.8, 5e-5), absorptivity = 0.7),
+        char = (ε = 0.95,),
+    ),
+    absorptivity_of_temperature = (
+        virgin = (ρ = T -> 1100.0 - 0.05 * (T - 300.0), ε = (0.95, -1.5e-4)),
+        char = (ε = 0.85, absorptivity = 0.6),
+    ),
+)
+
 # A semi-transparent decomposing slab: temperature-dependent emissivities,
 # a component absorptivity different from its emissivity, mass absorption
 # coefficients that change as the virgin solid turns to char, and a
@@ -24,17 +43,23 @@ function _translucent_slab(
     bottom = AdiabaticBC(),
     reacting = true,
     coordinates = Planar(),
+    absorber = :component_absorptivity,
 )
     virgin = SolidComponent(
-        :virgin,
-        ρ = 1100.0,
+        :virgin;
         c = (900.0, 1.5),
         k = (0.2, 2e-4),
-        ε = (0.8, 5e-5),
-        absorptivity = 0.7,
         α = 1.5,
+        _absorbers[absorber].virgin...,
     )
-    char = SolidComponent(:char, ρ = 300.0, c = 1100.0, k = 0.1, ε = 0.95, α = 20.0)
+    char = SolidComponent(
+        :char;
+        ρ = 300.0,
+        c = 1100.0,
+        k = 0.1,
+        α = 20.0,
+        _absorbers[absorber].char...,
+    )
     gas = GaseousComponent(:gas, M = 0.03, c = 1100.0, k = 0.03, λ = gas_λ)
     mat = Material(
         name = :translucent,
@@ -77,16 +102,18 @@ function _states(cp)
     return (; u0, hot, perturbed, zero_state = zeros(length(u0)), negative = -abs.(u0))
 end
 
-@testset "Beer–Lambert: $(energy) form, $(n) cells, $(name), gas λ = $(λ)" for energy in (
+@testset "Beer–Lambert: $(energy) form, $(n) cells, $(name), $(absorber), gas λ = $(λ)" for energy in
+                                                                                            (
         :temperature,
         :enthalpy,
     ),
     n in (6, 8),
     name in keys(_radiation_tops),
+    absorber in keys(_absorbers),
     λ in (0.0, 1e-5)
 
     cp = setup(
-        _translucent_slab(n; top = _radiation_tops[name], gas_λ = λ);
+        _translucent_slab(n; top = _radiation_tops[name], gas_λ = λ, absorber);
         energy_state = energy,
         radiation_model = BEER_LAMBERT,
     )
@@ -160,11 +187,14 @@ end
 # differences of the residual, an oracle independent of automatic
 # differentiation. The exposed cell's absorptivity follows its composition,
 # so under Kirchhoff's law the mass column reaches the exposed face's
-# intensity row, and under an explicit absorptivity it does not.
+# intensity row, and under an explicit absorptivity it does not. The
+# temperature column reaches that row only when the cell's absorptivity
+# depends on its temperature and the condition sets no absorptivity of its
+# own.
 @testset "Beer–Lambert: exposed-cell columns against central differences" begin
-    for name in keys(_radiation_tops)
+    for absorber in keys(_absorbers), name in keys(_radiation_tops)
         cp = setup(
-            _translucent_slab(7; top = _radiation_tops[name]);
+            _translucent_slab(7; top = _radiation_tops[name], absorber);
             radiation_model = BEER_LAMBERT,
         )
         def, ws, cj = cp.def, cp.ws, cp.jacobian
@@ -187,6 +217,58 @@ end
         e = intensity_index(layout, 8)
         m = mass_index(layout, 7, 1)
         name === :kirchhoff ? (@test J[e, m] != 0) : (@test J[e, m] == 0)
+        c = energy_index(layout, 7)
+        if name === :kirchhoff && absorber === :absorptivity_of_temperature
+            @test J[e, c] != 0
+        else
+            @test abs(J[e, c]) <= 1e-12 * maximum(abs, J[e, :])
+        end
+    end
+end
+
+# On a moving mesh the exposed cell's absorptivity, its temperature
+# dependence included, reaches the exposed face's intensity row as on a fixed
+# mesh, and the pattern contains the Jacobian with the position columns.
+@testset "Beer–Lambert on a moving mesh: $(energy) form, $(name), absorptivity of temperature" for energy in
+                                                                                                   (
+        :temperature,
+        :enthalpy,
+    ),
+    name in keys(_radiation_tops)
+
+    cp = setup(
+        _translucent_slab(
+            6;
+            top = _radiation_tops[name],
+            absorber = :absorptivity_of_temperature,
+        );
+        energy_state = energy,
+        use_ale = true,
+        radiation_model = BEER_LAMBERT,
+    )
+    def, ws, cj = cp.def, cp.ws, cp.jacobian
+    layout = def.layout
+    @test is_moving(layout) && has_intensities(layout)
+    du = zeros(length(cp.u0))
+    J = jac_prototype(cj)
+    for (state, u) in pairs(_states(cp))
+        @testset "$state" begin
+            residual!(du, u, def, 1.0, ws)
+            @test all(isfinite, du)
+            Jd = dense_jacobian(def, ws, u, 1.0)
+            @test all(isfinite, Jd)
+            @test isempty(missing_entries(Jd, cj.pattern))
+            jacobian!(J, cj, u, 1.0)
+            @test compare_entries(Matrix(J), Jd; rtol = 1e-12).passed
+            if state === :u0
+                e, c = intensity_index(layout, 7), energy_index(layout, 6)
+                if name === :kirchhoff
+                    @test Jd[e, c] != 0
+                else
+                    @test abs(Jd[e, c]) <= 1e-12 * maximum(abs, Jd[e, :])
+                end
+            end
+        end
     end
 end
 

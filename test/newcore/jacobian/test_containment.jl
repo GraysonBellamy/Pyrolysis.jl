@@ -7,7 +7,7 @@ using Pyrolysis.Meshes
 using Pyrolysis.States
 using Pyrolysis.States: StateLayout, state_length
 using Pyrolysis.Assembly
-using Pyrolysis.Assembly: residual!
+using Pyrolysis.Assembly: residual!, buffers
 using Pyrolysis.ColoredJacobian
 using Pyrolysis.Deactivation
 using Pyrolysis.Integration: setup, consistent_state!, CoreProblem
@@ -120,13 +120,14 @@ end
 
 # The states of the perf configurations and of `test/jacobian/test_regressions.jl`
 # (uniform hot, hot and gas-heavy, partially decomposed), the perf suite's
-# mixed reacting profile, and three trial states.
+# mixed reacting profile, and three trial states. On the wood, also a
+# skeleton packed beyond the solid's volume with gas present.
 function _states(cp, wood::Bool)
     n = n_cells(cp.def.layout)
     u0 = cp.u0
     solid = wood ? 500.0 : 1190.0
     uniform(T, ξ) = _cell_state(cp, i -> T, i -> ξ)
-    return (;
+    states = (;
         u0,
         mixed = _cell_state(
             cp,
@@ -140,6 +141,7 @@ function _states(cp, wood::Bool)
         zero_state = zeros(length(u0)),
         negative = -abs.(u0),
     )
+    return wood ? (; states..., overfilled = uniform(800.0, (550.0, 1.0))) : states
 end
 
 # The pattern contains the dense Jacobian's nonzeros and the colored Jacobian
@@ -182,6 +184,72 @@ end
                 @test Jd[v, energy_index(layout, n)] != 0
                 @test Jd[v, mass_index(layout, n, 1)] != 0
             end
+            if state === :mixed && is_moving(layout)
+                # Under the ramps every node's position reaches the cells' own
+                # rows through their volumes and distances, so the containment
+                # check covers the position columns.
+                rows = vcat(
+                    [energy_index(layout, i) for i = 1:n],
+                    [mass_index(layout, i, j) for i = 1:n for j = 1:n_components(layout)],
+                )
+                @test all(
+                    nd -> any(!iszero, Jd[rows, position_index(layout, nd)]),
+                    1:n_nodes(layout),
+                )
+            end
+            if state === :overfilled && cp.def.setup.gas isa DarcyFickTransport
+                # The porosity sits on its floor while gas is present, so the
+                # pore pressure is the gas's N/φ at the floor: large, finite.
+                residual!(zeros(length(u)), u, cp.def, 1.0, cp.ws)
+                ds, _ = buffers(cp.ws, cp.def, Float64)
+                @test all(==(Pyrolysis.States.POROSITY_FLOOR), ds.φ)
+                @test all(isfinite, ds.P)
+                @test minimum(ds.P) > 1e12
+            end
+        end
+    end
+end
+
+# Central differences of the residual over every column, the step following
+# each unknown's magnitude: temperatures, enthalpies, masses and node
+# positions differ by orders of magnitude.
+function _central_difference_jacobian(cp, u; t = 1.0)
+    J = zeros(length(u), length(u))
+    du_p, du_m, v = similar(u), similar(u), copy(u)
+    for j in eachindex(u)
+        h = max(1e-7 * abs(u[j]), 1e-9)
+        v[j] = u[j] + h
+        residual!(du_p, v, cp.def, t, cp.ws)
+        v[j] = u[j] - h
+        residual!(du_m, v, cp.def, t, cp.ws)
+        v[j] = u[j]
+        J[:, j] .= (du_p .- du_m) ./ 2h
+    end
+    return J
+end
+
+# The dense Jacobian, the reference of every containment check, against an
+# oracle independent of automatic differentiation, per entry with the row's
+# largest entry as its floor. At `u0` the gas masses are zero, the joint of
+# their positive part, which is narrower than the step: the enthalpy form's
+# energy rows read the gas mass there through its caloric inversion, so the
+# differences straddle the joint and that state is left to the temperature
+# form.
+@testset "the dense Jacobian equals central differences: $(name), $(energy) form" for name in
+                                                                                      (
+        :baseline_eulerian,
+        :ale_no_radiation,
+    ),
+    energy in (:temperature, :enthalpy)
+
+    config = _perf_configurations[name]
+    cp = setup(config.problem(8); energy_state = energy, config.options...)
+    states = _states(cp, config.wood)
+    for state in (energy === :temperature ? (:u0, :mixed) : (:mixed,))
+        @testset "$state" begin
+            u = states[state]
+            Jd = dense_jacobian(cp.def, cp.ws, u, 1.0)
+            @test compare_entries(Jd, _central_difference_jacobian(cp, u); rtol = 1e-6).passed
         end
     end
 end
@@ -614,22 +682,34 @@ end
 # The surface balance under surface absorption: ε(T) and an absorptivity
 # ============================================================================
 
-@testset "surface absorption with ε(T) and a component absorptivity: $(energy) form" for energy in
-                                                                                         (
-    :temperature,
-    :enthalpy,
+# The solids' surface radiative properties; the virgin solid's emissivity
+# depends on temperature. With `component_absorptivity` it sets its own
+# absorptivity and the char absorbs at its emissivity. With
+# `absorptivity_of_temperature` it absorbs at its emissivity (Kirchhoff's
+# law), so the absorbed flux also depends on the cell's temperature, and the
+# char sets its own absorptivity.
+const _surface_radiators = (
+    component_absorptivity = (
+        virgin = (ε = (0.8, 5e-5), absorptivity = 0.7),
+        char = (ε = 0.95,),
+    ),
+    absorptivity_of_temperature = (
+        virgin = (ε = (0.95, -1.5e-4),),
+        char = (ε = 0.85, absorptivity = 0.6),
+    ),
 )
+
+function _surface_absorber(radiators)
     virgin = SolidComponent(
-        :virgin,
+        :virgin;
         ρ = 1100.0,
         c = (900.0, 1.5),
         k = (0.2, 2e-4),
-        ε = (0.8, 5e-5),
-        absorptivity = 0.7,
+        radiators.virgin...,
     )
-    char = SolidComponent(:char, ρ = 300.0, c = 1100.0, k = 0.1, ε = 0.95)
+    char = SolidComponent(:char; ρ = 300.0, c = 1100.0, k = 0.1, radiators.char...)
     gas = GaseousComponent(:gas, M = 0.03, c = 1100.0, k = 0.03, λ = 0.0)
-    mat = Material(
+    return Material(
         name = :surface,
         components = (virgin, char, gas),
         reactions = (
@@ -637,10 +717,35 @@ end
         ),
         depletion_limiter = DepletionLimiter(threshold = 1.0),
     )
-    top = _incident + RadiativeBC(T_inf = 300.0) + ConvectiveBC(h = 10.0, T_inf = 300.0)
+end
+
+const _surface_top =
+    _incident + RadiativeBC(T_inf = 300.0) + ConvectiveBC(h = 10.0, T_inf = 300.0)
+
+# The central difference of the residual's row `row` in column `col`.
+function _central_difference(cp, u, row, col; t = 1.0)
+    du = zeros(length(u))
+    h = 1e-6 * max(abs(u[col]), 1.0)
+    up, um = copy(u), copy(u)
+    up[col] += h
+    um[col] -= h
+    residual!(du, up, cp.def, t, cp.ws)
+    rp = du[row]
+    residual!(du, um, cp.def, t, cp.ws)
+    return (rp - du[row]) / 2h
+end
+
+@testset "surface absorption with ε(T) and an absorptivity: $(radiators), $(mesh) mesh, $(energy) form" for radiators in
+                                                                                                            keys(
+        _surface_radiators,
+    ),
+    mesh in (:fixed, :moving),
+    energy in (:temperature, :enthalpy)
+
     cp = setup(
-        _column(mat, 6; top);
+        _column(_surface_absorber(_surface_radiators[radiators]), 6; top = _surface_top);
         energy_state = energy,
+        use_ale = mesh === :moving,
         radiation_model = SURFACE_ABSORPTION,
     )
     layout = cp.def.layout
@@ -648,20 +753,56 @@ end
     u = _cell_state(cp, i -> 600.0 + 40i, i -> (800.0 - 50i, 50.0 + 20i, 0.4))
     Jd = _contained(cp, u)
     # The exposed cell's energy row against central differences in its own
-    # energy and mass columns: the surface temperature's implicit derivative.
-    du = zeros(length(u))
-    row = energy_index(layout, n)
-    for col in (energy_index(layout, n), mass_index(layout, n, 1), mass_index(layout, n, 2))
-        h = 1e-6 * max(abs(u[col]), 1.0)
-        up, um = copy(u), copy(u)
-        up[col] += h
-        um[col] -= h
-        residual!(du, up, cp.def, 1.0, cp.ws)
-        rp = du[row]
-        residual!(du, um, cp.def, 1.0, cp.ws)
-        rm = du[row]
-        @test Jd[row, col] ≈ (rp - rm) / 2h rtol = 1e-5
+    # energy and mass columns: the surface temperature's implicit derivative;
+    # and the conduction neighbour's row in the exposed cell's energy column.
+    exposed = energy_index(layout, n)
+    for (row, col) in (
+        (exposed, exposed),
+        (exposed, mass_index(layout, n, 1)),
+        (exposed, mass_index(layout, n, 2)),
+        (energy_index(layout, n - 1), exposed),
+    )
+        @test Jd[row, col] ≈ _central_difference(cp, u, row, col) rtol = 1e-5
     end
+end
+
+# The emission and absorption slopes of the Kirchhoff ε(T) solid are
+# load-bearing, on either mesh: with its emissivity frozen at the exposed
+# cell's value the residual is the same (only the exposed cell's emissivity
+# enters), but the exposed energy row's diagonal misses the central
+# difference. The state is cooler than above, so the reaction's heat does not
+# swamp the slopes there.
+@testset "surface absorption: the ε(T) slope is load-bearing in the exposed energy row: $(mesh) mesh, $(energy) form" for mesh in
+                                                                                                                          (
+        :fixed,
+        :moving,
+    ),
+    energy in (:temperature, :enthalpy)
+
+    radiators = _surface_radiators.absorptivity_of_temperature
+    T(i) = 400.0 + 40i
+    options = (
+        energy_state = energy,
+        use_ale = mesh === :moving,
+        radiation_model = SURFACE_ABSORPTION,
+    )
+    live = setup(_column(_surface_absorber(radiators), 6; top = _surface_top); options...)
+    n = n_cells(live.def.layout)
+    frozen_radiators = (virgin = (ε = 0.95 - 1.5e-4 * T(n),), char = radiators.char)
+    frozen = setup(
+        _column(_surface_absorber(frozen_radiators), 6; top = _surface_top);
+        options...,
+    )
+    u = _cell_state(live, T, i -> (800.0 - 50i, 50.0 + 20i, 0.4))
+    du, du_frozen = zeros(length(u)), zeros(length(u))
+    residual!(du, u, live.def, 1.0, live.ws)
+    residual!(du_frozen, u, frozen.def, 1.0, frozen.ws)
+    @test du ≈ du_frozen rtol = 1e-12
+    row = energy_index(live.def.layout, n)
+    cd = _central_difference(live, u, row, row)
+    @test abs(dense_jacobian(live.def, live.ws, u, 1.0)[row, row] - cd) <= 1e-5 * abs(cd)
+    @test abs(dense_jacobian(frozen.def, frozen.ws, u, 1.0)[row, row] - cd) >
+          20 * 1e-5 * abs(cd)
 end
 
 # ============================================================================
@@ -684,6 +825,15 @@ end
         guarded(η * (1 - 1e-9), 0.2, d_a, d_b), guarded(η * (1 + 1e-9), 0.2, d_a, d_b)
     @test abs(above - below) <= 1e-8 * above
     # Far above the guard it is the harmonic mean.
-    @test guarded(0.15, 0.45, d_a, d_b) ≈
-          (d_a + d_b) / (d_a / 0.15 + d_b / 0.45) rtol = 1e-14
+    harmonic = (d_a + d_b) / (d_a / 0.15 + d_b / 0.45)
+    @test guarded(0.15, 0.45, d_a, d_b) ≈ harmonic rtol = 1e-14
+    # At equal distances, 2ab/(a + b): the smaller value dominates.
+    d = 0.5e-3
+    @test guarded(1e-6, 1e-4, d, d) ≈ 2e-10 / (1e-6 + 1e-4) rtol = 1e-10
+    @test 1.9e-6 < guarded(1e-6, 1e-4, d, d) < 2e-6
+    # A side that does not conduct blocks the face.
+    for b in (η, 0.45)
+        @test guarded(0.0, b, d_a, d_b) == 0
+        @test guarded(b, 0.0, d_a, d_b) == 0
+    end
 end

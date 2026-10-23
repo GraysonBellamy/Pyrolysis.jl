@@ -18,7 +18,13 @@ const _L = 0.01
 # Two solids of equal density and different heat capacity (`c_b` the second
 # one's), a smooth front between them, adiabatic and impermeable faces; with
 # `law` the material carries a lateral shrinkage law (and so the history pair).
-function _composition(n; T0 = 800.0, law = nothing, c_b = 3000.0)
+function _composition(
+    n;
+    T0 = 800.0,
+    law = nothing,
+    c_b = 3000.0,
+    mesh = create_uniform_mesh(_L, n),
+)
     a = SolidComponent(:a, ρ = 1000.0, c = 1000.0, k = 0.5)
     b = SolidComponent(:b, ρ = 1000.0, c = c_b, k = 0.5)
     mat = Material(
@@ -29,7 +35,7 @@ function _composition(n; T0 = 800.0, law = nothing, c_b = 3000.0)
     )
     front(z) = (1 + tanh((z - _L / 2) / (_L / 10))) / 2
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(_L, n),
+        mesh = mesh,
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
@@ -285,26 +291,42 @@ end
 
 # The front at rest under the slide: each cell holds the front's integral over
 # its own nodes at every time, so the cell masses have an exact reference.
-@testset "the relative fluxes converge at second order on a front at rest" begin
+# Returns their error at the end, relative to the column's mass.
+function _front_at_rest_error(n; mesh = create_uniform_mesh(_L, n))
     w = _L / 10
     I(z) = 1000.0 * (z / 2 + (w / 2) * log(cosh((z - _L / 2) / w)))
-    errors = map((32, 64, 128)) do n
-        cp = setup(
-            _composition(n);
-            use_ale = true,
-            w_override = _slide,
-            abstol = 1e-12,
-            reltol = 1e-10,
-        )
-        sol = integrate(cp; saveat = Float64[])
-        @test sol.retcode === :Success
-        z = sol.z[:, end]
-        b = [I(z[i+1]) - I(z[i]) for i = 1:n]
-        a = 1000.0 .* diff(z) .- b
-        return (sum(abs, sol.m[1, :, end] .- a) + sum(abs, sol.m[2, :, end] .- b)) /
-               (2000.0 * _L)
-    end
+    cp = setup(
+        _composition(n; mesh);
+        use_ale = true,
+        w_override = _slide,
+        abstol = 1e-12,
+        reltol = 1e-10,
+    )
+    sol = integrate(cp; saveat = Float64[])
+    @test sol.retcode === :Success
+    z = sol.z[:, end]
+    b = [I(z[i+1]) - I(z[i]) for i = 1:n]
+    a = 1000.0 .* diff(z) .- b
+    return (sum(abs, sol.m[1, :, end] .- a) + sum(abs, sol.m[2, :, end] .- b)) /
+           (2000.0 * _L)
+end
+
+@testset "the relative fluxes converge at second order on a front at rest" begin
+    errors = map(_front_at_rest_error, (32, 64, 128))
     @test all(>(1.6), log2.(errors[1:(end-1)] ./ errors[2:end]))
+end
+
+# Cells alternating h and 2h: a non-uniformity that does not vanish under
+# refinement, where a face reconstruction that took the cell widths for the
+# center distances would leave an error of zeroth order.
+function _alternating(n)
+    h = 2_L / 3n
+    return create_mesh_from_nodes(cumsum([0.0; [isodd(i) ? h : 2h for i = 1:n]]))
+end
+
+@testset "the relative fluxes converge on a front at rest over alternating cell sizes" begin
+    errors = map(n -> _front_at_rest_error(n; mesh = _alternating(n)), (32, 64, 128))
+    @test all(>(1.5), log2.(errors[1:(end-1)] ./ errors[2:end]))
 end
 
 # One solid at rest at a uniform concentration, compressed by a prescribed

@@ -7,7 +7,7 @@ using Pyrolysis.Meshes
 using Pyrolysis.Meshes: MeshGeometry
 using Pyrolysis.States
 using Pyrolysis.States: StateLayout, state_length
-using Pyrolysis.Kernels: Contributions
+using Pyrolysis.Kernels: Contributions, ThermalBoundaryKernel, find_kernel
 using Pyrolysis.Closures
 using Pyrolysis.Assembly
 using Pyrolysis.Assembly: residual!, buffers
@@ -107,6 +107,21 @@ const _configurations = (
         ),
         options = (;),
     ),
+    pooling = (
+        problem = n -> _slab(
+            n;
+            λ = 3e-5,
+            top = HeatFluxBC(3e4) +
+                  ConvectiveBC(
+                      h = 15.0,
+                      T_inf = 300.0,
+                      blowing = PoolingFilm(NITROGEN; diffusion_volume = (gas = 60.0,)),
+                  ) +
+                  RadiativeBC(T_inf = 300.0),
+            mass = (top = DiffusiveMassBC(0.02), bottom = ImpermeableBC()),
+        ),
+        options = (;),
+    ),
     darcy = (
         problem = n -> _slab(
             n;
@@ -155,6 +170,8 @@ end
     def, ws, cj = cp.def, cp.ws, cp.jacobian
     layout = def.layout
     @test is_moving(layout)
+    # Only a lateral law adds the history, area and lateral-rate states.
+    @test has_chi(layout) == (name in (:chi, :darcy))
     @test same_structure(jac_prototype(cj), cj.pattern)
     @test all(cj.pattern[r, r] for r in axes(cj.pattern, 1))
 
@@ -181,6 +198,13 @@ end
             end
             residual!(du, u, def, 1.0, ws)
             @test all(isfinite, du)
+            if name === :pooling && state in (:u0, :hot, :perturbed)
+                # Gas leaves a face hotter than the free stream, so the
+                # pooling factor comes from its root solve.
+                thermal = find_kernel(ThermalBoundaryKernel, def.kernels)
+                top = only(boundary_faces(def.setup.topology, :top))
+                @test thermal.states[top].pooling_factor < 1
+            end
             Jd = dense_jacobian(def, ws, u, 1.0)
             @test all(isfinite, Jd)
             @test isempty(missing_entries(Jd, cj.pattern))
@@ -329,6 +353,36 @@ end
     @test_throws ArgumentError LateralShrinkage(mat, 2.0, 0.0)
     no_law = Material(name = :m, components = (a, g), reactions = ())
     @test_throws ArgumentError LateralShrinkage(no_law, 2.0, 3.0)
+end
+
+# An inert column: nothing changes its volume, so on a moving mesh the nodes
+# stay put and the solve is the fixed mesh's.
+@testset "solve: an inert column on a moving mesh stays put and matches the fixed mesh" begin
+    solid = SolidComponent(:solid, ρ = 1000.0, c = 1000.0, k = 0.5, ε = 0.9)
+    problem = PyrolysisProblem(
+        mesh = create_uniform_mesh(0.02, 40),
+        material = Material(name = :inert, components = (solid,), reactions = ()),
+        bc_set = BoundaryConditionSet(
+            thermal = (top = DirichletThermalBC(500.0), bottom = AdiabaticBC()),
+        ),
+        T_initial = z -> 300.0,
+        ξ_initial = [z -> 1000.0],
+        tspan = (0.0, 50.0),
+    )
+    for energy in (:temperature, :enthalpy)
+        kw = (energy_state = energy, abstol = 1e-10, reltol = 1e-8)
+        fixed = Integration.solve(problem; kw...)
+        moving = Integration.solve(problem; use_ale = true, kw...)
+        @test fixed.retcode === :Success
+        @test moving.retcode === :Success
+        @test moving.t == fixed.t
+        # The heat has reached into the column.
+        @test fixed.T[1, end] - fixed.T[1, 1] > 1
+        @test maximum(abs, moving.T .- fixed.T) < 1e-4
+        @test maximum(abs, moving.surface_T .- fixed.surface_T) < 1e-3
+        @test maximum(abs, moving.z .- moving.z[:, 1]) <= 1e-12 * 0.02
+        @test all(≈(0.02; rtol = 1e-12), moving.extras.thickness_history)
+    end
 end
 
 @testset "solve: the swelling column's thickness follows its conversion" begin
