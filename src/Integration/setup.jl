@@ -394,7 +394,8 @@ end
 	setup(problem; energy_state = :temperature, reltol = 1e-6, abstol = 1e-8,
 	      threshold = 1e-2, use_ale = false, radiation_model = NO_RADIATION,
 	      w_override = nothing, correction = nothing, lagrangian = nothing,
-	      deactivation = false, band = nothing, closure = nothing, slip = (),
+	      deactivation = false, band = nothing, receiver = :beneath,
+	      closure = nothing, slip = (),
 	      tensor = nothing, history = false, deformation = false,
 	      time_scale = problem.dt_initial, sources = NoSources()) -> CoreProblem
 
@@ -447,7 +448,10 @@ of it whose condensed mass is below the fraction `band` (`ε_band`, in
 [`CORRECTION_BAND`](@ref) when the bound equidistribution correction moves
 some layer, otherwise the threshold, so that only the cells below it go) of
 theirs
-([`deactivate!`](@ref)).
+([`deactivate!`](@ref)). A run that reaches its layer's innermost cell merges
+into the cell beneath it with `receiver = :beneath`, and with `:innermost`
+into that innermost cell, which goes once its merged inventory is below the
+threshold of its own reference.
 `threshold` also scales the mass tolerances; `sources` is the external-source
 hook.
 
@@ -479,6 +483,7 @@ function setup(
     lagrangian::Union{Nothing,AbstractVector{<:Integer}} = nothing,
     deactivation::Bool = false,
     band::Union{Nothing,Real} = nothing,
+    receiver::Symbol = :beneath,
     closure::Union{Nothing,Symbol} = nothing,
     slip = (),
     tensor = nothing,
@@ -600,7 +605,8 @@ function setup(
             something(
                 caloric,
                 CaloricExtension(laws, reference.mass_scale, reference.capacity_floor),
-            ),
+            );
+            receiver,
         ) : nothing
     tensors = D == 1 ? nothing : _tensors(tensor, g0, n, Val(D))
     kernels = _kernels(problem, topo, g0, laws, gas, radiation_model, relative, tensors)

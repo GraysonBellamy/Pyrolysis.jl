@@ -64,11 +64,13 @@ end
 
 The deactivation state of a solve: the policy, the threshold `ε_m`, the
 near-threshold band `ε_band` (a fraction of a cell's reference, read on a
-moving mesh only, see [`deactivate!`](@ref)), the cells' initial condensed
-masses (`reference`; a receiver keeps its own, so a merged cell deactivates
-once its whole merged inventory is below `ε_m` of what it started with), the
-condensed component flags, the caloric extension merged temperatures are
-found with, the events so far, and the outcome: `:running`; `:burned_out` once the last live cell
+moving mesh only, see [`deactivate!`](@ref)), the receiver of a run that
+reaches its layer's innermost cell (`:beneath` or `:innermost`, read on a
+moving mesh only), the cells' initial condensed masses (`reference`; a
+receiver keeps its own, so a merged cell deactivates once its whole merged
+inventory is below `ε_m` of what it started with), the condensed component
+flags, the caloric extension merged temperatures are found with, the events
+so far, and the outcome: `:running`; `:burned_out` once the last live cell
 went; `:interior` when a cell below the threshold lies inward of a live one
 that [`deactivate!`](@ref) leaves, which the policies here do not handle.
 """
@@ -76,6 +78,7 @@ struct CellDeactivation{P<:DeactivationPolicy,NC,E<:CaloricExtension{NC}}
     policy::P
     threshold::Float64
     band::Float64
+    receiver::Symbol
     reference::Vector{Float64}
     solid::NTuple{NC,Bool}
     caloric::E
@@ -84,10 +87,11 @@ struct CellDeactivation{P<:DeactivationPolicy,NC,E<:CaloricExtension{NC}}
 end
 
 """
-	CellDeactivation(policy, threshold, band, reference, solid, caloric)
+	CellDeactivation(policy, threshold, band, reference, solid, caloric;
+	                 receiver = :beneath)
 
 The deactivation state before a solve, `reference` the initial condensed
-masses; `threshold ≤ band < 1`.
+masses; `threshold ≤ band < 1`; `receiver` is `:beneath` or `:innermost`.
 """
 function CellDeactivation(
     policy::DeactivationPolicy,
@@ -95,15 +99,19 @@ function CellDeactivation(
     band::Real,
     reference::Vector{Float64},
     solid::NTuple{NC,Bool},
-    caloric::CaloricExtension{NC},
+    caloric::CaloricExtension{NC};
+    receiver::Symbol = :beneath,
 ) where {NC}
     threshold <= band < 1 || throw(
         ArgumentError("the band must lie in [threshold, 1) = [$threshold, 1), got $band"),
     )
+    receiver in (:beneath, :innermost) ||
+        throw(ArgumentError("the receiver must be :beneath or :innermost, got :$receiver"))
     return CellDeactivation(
         policy,
         Float64(threshold),
         Float64(band),
+        receiver,
         reference,
         solid,
         caloric,
@@ -232,7 +240,11 @@ On a moving mesh the run of live cells from the outermost one inward whose
 condensed mass is below `ε_band` of their reference goes, when it holds a
 cell below `ε_m`, in one merge into the live cell beneath it
 ([`ConservativeTransfer`](@ref)); a run that reaches the innermost cell
-leaves that cell, holding the run's inventories, as the survivor. After a
+leaves that cell, holding the run's inventories, as the survivor. With the
+`:innermost` receiver a run of more than one cell that reaches its layer's
+innermost cell (the cell whose inward node is the first node or a Lagrangian
+node) leaves that cell as the survivor in the same way, instead of merging
+into the next layer's outermost cell. After a
 merge the receiver, holding the run's inventories against its own reference,
 is tested in turn, and when it starts a run below the band with a cell below
 `ε_m` that run merges on in the same invocation. On a fixed
@@ -268,7 +280,7 @@ function deactivate!(
             d.outcome[] = :burned_out
             return :burned_out
         end
-        r = max(lo - 1, 1)
+        r = _receiver(d, def.setup.topology, lo, top)
         _merge!(u, d, d.policy, def, r, (r+1):top, Float64(t), invocation)
     end
     if any_below(d, layout, u; slack)
@@ -276,6 +288,17 @@ function deactivate!(
         return :interior
     end
     return :transferred
+end
+
+# The receiver of the run `lo:top`: the cell beneath it, or, under the
+# innermost receiver, the run's own innermost cell when that is its layer's
+# innermost cell and the run holds more than it.
+function _receiver(d::CellDeactivation, topo::MeshTopology{1}, lo::Int, top::Int)
+    if d.receiver === :innermost && lo < top
+        inward = minimum(topo.cells[lo].nodes)
+        (inward == 1 || inward in topo.lagrangian) && return lo
+    end
+    return max(lo - 1, 1)
 end
 
 """

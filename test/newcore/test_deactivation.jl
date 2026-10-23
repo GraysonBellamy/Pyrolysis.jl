@@ -95,13 +95,49 @@ function _total_enthalpy(cp, u)
 end
 
 # The state with cell `i`'s solid at the fraction `f` of its initial mass and
-# its products in the gas.
+# its products in the gas, the last component.
 function _deplete!(u, cp, i, f)
     layout = cp.def.layout
     m0 = cp.deactivation.reference[i]
-    u[mass_index(layout, i, 2)] += (1 - f) * m0
+    u[mass_index(layout, i, n_components(layout))] += (1 - f) * m0
     u[mass_index(layout, i, 1)] = f * m0
     return u
+end
+
+# The ablating solid of `_ablator` in `n_top` cells on an inert substrate of
+# `n_bottom` cells, the layer interface at node `n_bottom + 1`.
+function _on_substrate(n_top, n_bottom; L_top = 2e-3, L_bottom = 1e-3)
+    ρ, ρ_sub = 1000.0, 250.0
+    solid = SolidComponent(:solid; ρ = ρ, c = 1000.0, k = 1.0, λ = 1e-6)
+    sub = SolidComponent(:sub; ρ = ρ_sub, c = 1100.0, k = 0.06, λ = 1e-6)
+    gas = GaseousComponent(:gas, M = 0.05, c = 1000.0, k = 0.02, λ = 1e-4)
+    mat = Material(
+        name = :on_substrate,
+        components = (solid, sub, gas),
+        reactions = (Reaction(:ablate, 1 => 3; A = 1e11, E = 1.6e5, h = 1.0e6),),
+    )
+    z = vcat(
+        range(0.0, L_bottom, length = n_bottom + 1),
+        range(L_bottom, L_bottom + L_top, length = n_top + 1)[2:end],
+    )
+    return PyrolysisProblem(
+        mesh = create_mesh_from_nodes(z),
+        material = mat,
+        bc_set = BoundaryConditionSet(
+            thermal = (top = HeatFluxBC(5e4), bottom = AdiabaticBC()),
+            mass = (
+                top = ConvectiveMassBC(h_m = 10.0, ξ_inf = 0.0),
+                bottom = ImpermeableBC(),
+            ),
+        ),
+        T_initial = z -> 600.0,
+        ξ_initial = [
+            z -> z > L_bottom ? ρ : 0.0,
+            z -> z > L_bottom ? 0.0 : ρ_sub,
+            z -> 0.0,
+        ],
+        tspan = (0.0, 1.0),
+    )
 end
 
 @testset "a transfer conserves the inventories and the receiver absorbs the volume: $(energy) form, $(moving ? "moving" : "fixed") mesh" for energy in
@@ -418,6 +454,84 @@ end
     @test_throws ArgumentError setup(_ablator(4); deactivation = true, band = 5e-3)
     @test_throws ArgumentError setup(_ablator(4); deactivation = true, band = 1.0)
     @test setup(_ablator(4); band = 5e-3).deactivation === nothing
+end
+
+@testset "the innermost receiver keeps its layer's innermost cell: $(energy) form" for energy in
+                                                                                       (
+    :temperature,
+    :enthalpy,
+)
+    # Cells 1 to 3 the substrate, 4 to 9 the layer; every layer cell below
+    # the threshold.
+    problem = _on_substrate(6, 3)
+    kw = (; energy_state = energy, use_ale = true, deactivation = true)
+    depleted(cp) = begin
+        u = copy(cp.u0)
+        for i = 4:9
+            _deplete!(u, cp, i, (0.4 + 0.1 * isodd(i)) * cp.deactivation.threshold)
+        end
+        consistent_state!(u, cp.def, cp.ws, 0.0)
+        u
+    end
+    beneath, innermost = setup(problem; kw...), setup(problem; kw..., receiver = :innermost)
+    @test (beneath.deactivation.receiver, innermost.deactivation.receiver) ===
+          (:beneath, :innermost)
+    @test 4 in innermost.def.setup.topology.lagrangian
+    x_top = depleted(beneath)[position_index(beneath.def.layout, 10)]
+    for (cp, r) in ((beneath, 3), (innermost, 4))
+        def, layout, cells = cp.def, cp.def.layout, cp.deactivation
+        u = depleted(cp)
+        masses, E = _total_masses(u, layout), _live_energy(cp, u)
+        x_inward = [u[position_index(layout, nd)] for nd = 1:r]
+        substrate = [u[mass_index(layout, i, 2)] for i = 1:3]
+        @test deactivate!(u, cells, def, 1.0) === :transferred
+        @test [e.cell for e in cells.events] == 9:-1:(r+1)
+        @test all(e.receiver == r && e.invocation == 1 for e in cells.events)
+        @test top_live_cell(layout) == r
+        # The inventories and the volume, as the default receiver keeps them:
+        # the receiver's far face is the layer's top, its inward node and
+        # every node beneath it stay put.
+        @test _total_masses(u, layout) ≈ masses rtol = 1e-14
+        @test _ledger(cp, u, cells.events) ≈ E rtol = 1e-12
+        @test u[position_index(layout, r + 1)] ≈ x_top rtol = 1e-12
+        @test [u[position_index(layout, nd)] for nd = 1:r] == x_inward
+        @test sum(u[mass_index(layout, i, 2)] for i = 1:3) ≈ sum(substrate) rtol = 1e-14
+        # The merged cell is admissible and consistent.
+        consistent_state!(u, def, cp.ws, 1.0)
+        @test !inadmissible(u, layout, def.setup, cp.abstol)
+        du = zeros(length(u))
+        residual!(du, u, def, 1.0, cp.ws)
+        @test all(isfinite, du)
+        Jd = dense_jacobian(def, cp.ws, u, 1.0)
+        @test isempty(missing_entries(Jd, cp.jacobian.pattern))
+        J = jacobian!(jac_prototype(cp.jacobian), cp.jacobian, u, 1.0)
+        @test compare_entries(Matrix(J), Jd; rtol = 1e-12).passed
+        r == 4 || continue
+        # The survivor holds the layer's residue, 2.7 of its own threshold,
+        # and goes into the substrate once that is below the threshold.
+        f = condensed_mass(cells, layout, u, 4) / cells.reference[4]
+        @test f ≈ 2.7 * cells.threshold rtol = 1e-12
+        @test !below_threshold(cells, layout, u, 4)
+        _deplete!(u, cp, 4, 0.5 * cells.threshold)
+        @test deactivate!(u, cells, def, 2.0) === :transferred
+        e = last(cells.events)
+        @test (e.cell, e.receiver, e.invocation) == (4, 3, 2)
+        @test top_live_cell(layout) == 3
+        fill!(layout.mask, true)
+    end
+    fill!(beneath.def.layout.mask, true)
+
+    # A run that stops short of its layer's innermost cell goes to the cell
+    # beneath it under either receiver.
+    reset_cells!(innermost.deactivation, innermost.def.layout)
+    u = copy(innermost.u0)
+    for (i, f) in (9 => 0.5e-2, 8 => 0.05, 7 => 0.08, 6 => 0.4)
+        _deplete!(u, innermost, i, f)
+    end
+    @test deactivate!(u, innermost.deactivation, innermost.def, 1.0) === :transferred
+    @test [e.cell => e.receiver for e in innermost.deactivation.events] == [9 => 6, 8 => 6, 7 => 6]
+    fill!(innermost.def.layout.mask, true)
+    @test_throws ArgumentError setup(problem; kw..., receiver = :outermost)
 end
 
 # Cells whose sizes span a ratio of 27, above 1/ε_m = 20: against one
