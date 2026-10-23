@@ -29,8 +29,8 @@ using OrdinaryDiffEq
 # OrdinaryDiffEq v7 split the integrators into sublibraries; the umbrella package
 # only re-exports the default solver set, so `KenCarp4` must be pulled from
 # `OrdinaryDiffEqSDIRK` explicitly (see src/Solver/solve.jl docstring). Without
-# this the `KenCarp4(...)` call in `build_and_solve` throws an UndefVarError that
-# the surrounding try/catch silently turns into a failed solve.
+# this the `KenCarp4(...)` call in `solve_keywords` throws an UndefVarError that
+# `build_and_solve`'s try/catch silently turns into a failed solve.
 using OrdinaryDiffEqSDIRK: KenCarp4
 using LinearSolve
 using Sparspak
@@ -574,7 +574,7 @@ end
 # ============================================================================
 
 # Dry-baseline initial concentration tuple — 14 components. Slot 8 (moisture)
-# is overridden per scenario from `scenario.c0_moisture` inside `build_and_solve`.
+# is overridden per scenario from `scenario.c0_moisture` inside `build_problem`.
 const WP_XI0_DRY = (
     WP_C0_VIRGIN,           # 1. virgin (mass_frac × ρ_virgin)
     0.0,
@@ -593,23 +593,16 @@ const WP_XI0_DRY = (
 )
 
 """
-	build_and_solve(θ, scenario; stage=1, n_output=601, verbose=false, kinetics_set=:constant, jacobian_strategy=nothing)
+	build_problem(θ, scenario; stage=1, n_output=601, kinetics_set=:constant,
+	              blowing=CouetteFilm(), use_emission_split=true,
+	              kinetics_dE=ntuple(_ -> 0.0, 5)) -> PyrolysisProblem
 
-Build a white pine pyrolysis problem with conductivities determined by θ at the
-given parameter stage, run it for `scenario.t_final` seconds, and return the
-solution. Returns `nothing` if the solve fails (allowing the caller to apply a
-penalty in the loss function).
+The white pine pyrolysis problem with conductivities determined by θ at the
+given parameter stage, over `scenario.t_final` seconds with `n_output` saved
+times.
 
 Initial moisture concentration is read from `scenario.c0_moisture` (kg/m³).
 `kinetics_set` selects `:constant`, `:kirchhoff_123`, or `:kirchhoff_all`.
-
-`jacobian_strategy` overrides the Jacobian strategy. `nothing` (default)
-keeps solve's ALE default, `ApproxSolve()`: the `:ale_reduced` sparsity
-profile drops the cumulative ALE mesh-velocity widening and the dense
-z-column geometry block, paying ~14% of the prototype nnz and ~1% of the
-per-step solve cost on MaCFP-shape problems, while Newton absorbs the
-approximation with a few extra iterations. Pass `DirectSolve()` for the
-exact Jacobian.
 
 `blowing` is the blowing model every `ConvectiveBC` of the surface BC set
 carries, `CouetteFilm()` by default: the film coefficient is rescaled by the
@@ -619,18 +612,15 @@ the residual and the Jacobian see the same physics. NOTE: changing the model
 changes the forward model, so conductivities fit with another one are no
 longer optimal — re-run the calibration.
 """
-function build_and_solve(
+function build_problem(
     θ::AbstractVector,
     scenario;
     stage::Int = 1,
     n_output::Int = 601,
-    verbose::Bool = false,
-    log_level::Union{Nothing,Logging.LogLevel} = nothing,
     kinetics_set::Symbol = :constant,
     blowing::AbstractBlowingModel = CouetteFilm(),
     use_emission_split::Bool = true,
     kinetics_dE = ntuple(_ -> 0.0, 5),
-    jacobian_strategy::Union{Nothing,LinearSolveStrategy} = nothing,
 )
 
     use_var_cs = get(scenario, :use_variable_cross_section, true)
@@ -683,7 +673,7 @@ function build_and_solve(
         cross_section_area = get(scenario, :A_0, WP_A0),
     )
 
-    problem = PyrolysisProblem(
+    return PyrolysisProblem(
         mesh = mesh,
         material = material,
         bc_set = bc_set,
@@ -693,31 +683,80 @@ function build_and_solve(
         dt_initial = 1e-3,
         output_times = collect(range(0.0, scenario.t_final, length = n_output)),
     )
+end
 
+"""
+	solve_keywords(; verbose=false, jacobian_strategy=nothing) -> NamedTuple
+
+The keywords of the forward solve.
+
+`jacobian_strategy` overrides the Jacobian strategy. `nothing` (default)
+keeps solve's ALE default, `ApproxSolve()`: the `:ale_reduced` sparsity
+profile drops the cumulative ALE mesh-velocity widening and the dense
+z-column geometry block, paying ~14% of the prototype nnz and ~1% of the
+per-step solve cost on MaCFP-shape problems, while Newton absorbs the
+approximation with a few extra iterations. Pass `DirectSolve()` for the
+exact Jacobian.
+"""
+function solve_keywords(;
+    verbose::Bool = false,
+    jacobian_strategy::Union{Nothing,LinearSolveStrategy} = nothing,
+)
+    # `jacobian = nothing` keeps solve's ALE default,
+    # `Structured(strategy = ApproxSolve())`.
+    jac_backend =
+        jacobian_strategy === nothing ? nothing : Structured(strategy = jacobian_strategy)
+    return (
+        abstol = 1e-7,
+        reltol = 1e-7,
+        # Cap dt and total step count so high-flux stiffness fails fast
+        # instead of grinding for hours at microscopic dt. dtmax ~ saveat
+        # interval; maxiters chosen with healthy naccept ~3k headroom.
+        dtmin = 1e-8,
+        dtmax = 2.0,
+        maxiters = 200_000,
+        progress = verbose,
+        use_ale = true,
+        radiation_model = SURFACE_ABSORPTION,
+        min_thickness = 0.5e-3,
+        handle_depletion = false,
+        jacobian = jac_backend,
+        integrator = KenCarp4(linsolve = SparspakFactorization()),
+    )
+end
+
+"""
+	build_and_solve(θ, scenario; stage=1, n_output=601, verbose=false, kinetics_set=:constant, jacobian_strategy=nothing)
+
+Solve [`build_problem`](@ref)'s problem with [`solve_keywords`](@ref) and
+return the solution, or `nothing` if the solve fails (allowing the caller to
+apply a penalty in the loss function). The remaining keywords are theirs.
+"""
+function build_and_solve(
+    θ::AbstractVector,
+    scenario;
+    stage::Int = 1,
+    n_output::Int = 601,
+    verbose::Bool = false,
+    log_level::Union{Nothing,Logging.LogLevel} = nothing,
+    kinetics_set::Symbol = :constant,
+    blowing::AbstractBlowingModel = CouetteFilm(),
+    use_emission_split::Bool = true,
+    kinetics_dE = ntuple(_ -> 0.0, 5),
+    jacobian_strategy::Union{Nothing,LinearSolveStrategy} = nothing,
+)
+    problem = build_problem(
+        θ,
+        scenario;
+        stage,
+        n_output,
+        kinetics_set,
+        blowing,
+        use_emission_split,
+        kinetics_dE,
+    )
     try
-        # `jacobian = nothing` keeps solve's ALE default,
-        # `Structured(strategy = ApproxSolve())`.
-        jac_backend =
-            jacobian_strategy === nothing ? nothing :
-            Structured(strategy = jacobian_strategy)
-
-        solver_kwargs = (
-            abstol = 1e-7,
-            reltol = 1e-7,
-            # Cap dt and total step count so high-flux stiffness fails fast
-            # instead of grinding for hours at microscopic dt. dtmax ~ saveat
-            # interval; maxiters chosen with healthy naccept ~3k headroom.
-            dtmin = 1e-8,
-            dtmax = 2.0,
-            maxiters = 200_000,
-            progress = verbose,
-            use_ale = true,
-            radiation_model = SURFACE_ABSORPTION,
-            min_thickness = 0.5e-3,
-            handle_depletion = false,
-            jacobian = jac_backend,
-            integrator = KenCarp4(linsolve = SparspakFactorization()),
-        )
+        solver_kwargs = solve_keywords(; verbose, jacobian_strategy)
         if log_level === nothing
             solution = solve(problem; solver_kwargs...)
         else
