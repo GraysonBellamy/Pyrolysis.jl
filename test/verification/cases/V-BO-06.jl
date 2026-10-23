@@ -9,7 +9,7 @@
 # one mesh. The Kaowool takes the interface cell's pitch. The burnout quantities do not depend on the mesh, so
 # V-BO-01's references and tolerances hold. On the finite-volume core the
 # equidistribution correction starts from cells of unequal thickness, and the
-# layer must still deactivate in one invocation. The old core's ledger is
+# invocations that deactivate the layer are reported. The old core's ledger is
 # bounded at 5e-3: its first parks, of the thin surface cells, overstate the
 # outflow by 0.4 % of the mass lost whatever the output interval (0.08 % on
 # V-BO-01's uniform mesh), where the finite-volume core closes it to 1e-7.

@@ -370,7 +370,7 @@ function ladder_run(c, rule, n; ε_m = 1e-2, reltol = 1e-6, form = :temperature)
     corr = bound[].def.closure.correction
     inv = Base.invokelatest(_vbo_invocations, sol, ε_m)
     qois = c.qois === nothing ? [] : Base.invokelatest(c.qois, sol)
-    counted = filter(q -> !startswith(q.name, "one invocation"), qois)
+    counted = filter(q -> !startswith(q.name, "deactivation invocations"), qois)
     failing = [q.name for q in counted if !(q.error < q.tol)]
     t_inv = isempty(inv) ? NaN : first(inv).t
     τ_layer = isempty(corr.time) ? NaN : first(corr.time)

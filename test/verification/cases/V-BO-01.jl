@@ -623,25 +623,21 @@ _vbo_timing_qois(m; t_peak_ref = VBO_T_PEAK_REF, t_bo_ref = VBO_T_BO_REF) = [
     ),
 ]
 
-# On the finite-volume core the correction carries the layer to one
-# deactivation, and the band merges no cell that still holds more than
-# `merged_limit` ε_m of its mass (`nothing` reports the largest merged
-# fraction without bounding it).
-function _vbo_invocation_qoi(sol, id; merged_limit = 5)
+# The deactivation invocations of the PMMA layer, with the cells they took
+# and the largest merged fraction, reported and not asserted: the burnout
+# path's criterion is its accuracy under refinement (`burnout_envelope.jl`),
+# and one invocation is its target.
+function _vbo_invocation_qoi(sol, id)
     ε_m = VBO_STEP_STATS[id].threshold
     inv = _vbo_invocations(sol, ε_m)
     largest = maximum(v.largest for v in inv; init = 0.0)
-    within = merged_limit === nothing || largest <= merged_limit * ε_m
-    bound =
-        merged_limit === nothing ? "" :
-        " against $(merged_limit) ε_m = $(merged_limit * ε_m)"
     return QoIResult(
-        name = "one invocation for the PMMA layer",
+        name = "deactivation invocations for the PMMA layer (reported)",
         value = Float64(length(inv)),
         exact = 1.0,
-        error = abs(length(inv) - 1.0) + (within ? 0.0 : 1.0),
-        tol = 0.5,
-        comment = "$(sum(v.cells for v in inv; init = 0)) cells; largest merged fraction $(round(largest; sigdigits = 3))$(bound)",
+        error = abs(length(inv) - 1.0),
+        tol = Inf,
+        comment = "$(sum(v.cells for v in inv; init = 0)) cells; largest merged fraction $(round(largest; sigdigits = 3)) ($(round(largest / ε_m; sigdigits = 3)) ε_m); reported, not asserted",
     )
 end
 

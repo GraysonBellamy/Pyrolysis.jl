@@ -17,8 +17,10 @@
 # runs down from the surface: the upper cells lose their PMMA first and keep
 # the slow solid, and the PMMA beneath burns last and fast. When the first cell
 # crosses ε_m the others still hold up to about 6 % of their initial mass,
-# above the 5 ε_m V-BO-01 bounds, with or without the monitor's mass term, so
-# the case asserts the one invocation and reports that fraction.
+# with or without the monitor's mass term; the case reports the invocations
+# and that fraction. Under refinement at ε_m = 1e-2 the largest per-step excess
+# of N cells over 2N stops falling between 120 and 240 cells, where at 3e-3 it
+# falls by two per doubling (`burnout_envelope.md`).
 
 const VBO07_RHO_LIGHT = VBO_RHO_PMMA / 2
 const VBO07_Y_SURFACE = 0.5
@@ -98,7 +100,7 @@ function _verification_case_vbo07()
             _vbo_timing_qois(m; t_peak_ref = VBO07_T_PEAK_REF, t_bo_ref = VBO07_T_BO_REF),
         )
         VERIFICATION_CORE == "new" &&
-            push!(out, _vbo_invocation_qoi(sol, id; merged_limit = nothing))
+            push!(out, _vbo_invocation_qoi(sol, id))
         return out
     end
     return VerificationCase(

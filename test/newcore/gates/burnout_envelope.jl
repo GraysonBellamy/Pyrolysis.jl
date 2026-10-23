@@ -149,7 +149,7 @@ function integral(f::Piecewise, lo, hi)
     return total
 end
 
-_isinvocation(q) = startswith(q.name, "one invocation")
+_isinvocation(q) = startswith(q.name, "deactivation invocations")
 
 function envelope_run(key)
     name, n, ε_m, band, reltol, act, form, receiver = key
