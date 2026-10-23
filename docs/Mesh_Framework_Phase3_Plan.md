@@ -663,6 +663,60 @@ The hard criterion passes on every physical configuration under every rule, the 
 
 **The gate under the default.** Every V-BO case and V-CPL-02/02b passes in both energy forms. The class B identity digests (V-CPL-02, V-CPL-02b, V-BO-04) change and are re-recorded; V-BO-04's correction stays at round-off (4e-17 m/s). The six class A digests are unchanged. The `test/newcore` files touched by the default pass: correction 784, layer time 150, deactivation 1,453, mesh motion 1,431, relative flux 452, policies 281, pattern 319, allocations 35, conservation 104, outputs 85, solve 107, energy ledger 244, boundary conditions 99. Format, JET (no reports Pyrolysis owns) and Aqua (9 gating checks) pass.
 
+### 13.6 M5
+
+**Branch.** `mesh-framework` (D128), from `e7fe5bc`. CI on M4's push (#20): Documentation and Quality green; Tests running at M5's start. Every table of M5 is taken on M4's default, `EquidistributionCorrection()` with `τ = ActivationTime()`.
+
+**The owner's answers at M5's start.** C135: the restricted deck joins W9's decks at `s = 1` (its surface QoI left out, C134); the rescaled pairs stay W3's test. C133's lead: the activation thresholds join W9 as a variable, the default `(0.3, 0.1)` and one earlier level, `(0.7, 0.3)`, on the core matrix; the comparators stay at the default.
+
+**W9 and W10 as tasks** (days are a developer's working days; §6 budgets two weeks).
+
+| Task | Builds | Its test | Days |
+|---|---|---|---|
+| 1 | The receiver option (D141): `setup`'s `receiver = :beneath` (the default) or `:innermost`, held by `CellDeactivation` and read by `deactivate!` on a moving mesh | — | 0.5 |
+| 2 | §5.3 item 15: the innermost receiver conserves the inventories and the volume as the default does, leaves the merged cell admissible and deactivates it in a later invocation, and leaves a run that stops short of its layer's innermost cell to the cell beneath; the threshold-only removal under the correction takes exactly the cells below `ε_m` at each invocation, in a pass and through a solve, and reports `:interior` where it ends there | `test_deactivation.jl` | 1 |
+| 3 | `burnout_envelope.jl` (§5.4), from `tau_ladder.jl`'s machinery: D140's matrix; per run the case's QoIs, the accepted-step peak over the run and the main peak (C140), the integrated tail after the main peak, the mass ledger, the invocations and the largest merged fraction, `τ`; per family (a), (b), the peak's convergence and the hard criterion; the comparators beside the rows they compare with; the envelope table; stamped (D98) | — | 2 |
+| 4 | The envelope measured in a detached worktree of its signed commit, three processes by deck | — | 1 |
+| 5 | The reading: the envelope, the restricted deck (C135), the activation level (C138), the comparators, V-BO-07's standing exception (C91) | — | 1 |
+| 6 | The V-BO cases (§5.2, C139): every accuracy QoI asserted at the CI resolution, the invocation count reported; any re-pin the envelope asks for; `NEW_CORE_CASES` in both forms | the suite | 1 |
+| 7 | §5.3 item 16: the convergence rule of W10 in `gates/fd_convergence.jl` (D144) and its test on a synthetic objective | `test_fd_convergence.jl` | 1 |
+| 8 | `fd_gradient_qualification.jl` (§5.4), from `burnout_gradients.jl` (D143) | — | 1 |
+| 9 | The qualification measured and read: the converged derivatives, the smallest usable step per tolerance | — | 1 |
+| 10 | The guides' drafts (D145): UG 10's envelope with the numerical parameters apart from the material ones; UG 13 and TRG 17's finite-difference statement with W10's numbers | — | 1 |
+| G | Format, Aqua, JET; the touched test files; `NEW_CORE_CASES` in both forms; this record | — | 1.5 |
+
+Total 12 days: **two and a half weeks**, half a week over §6's two. The owner's two additions (the restricted deck and the activation level) cost machine time more than days: they take the matrix from four decks at one activation to five at two.
+
+**D140. W9's run matrix, counted.** Decks V-BO-01, V-BO-06, V-BO-07, V-BO-08 and the restricted deck at `s = 1` (`tau_ladder.jl`'s `restricted_problem`); cells 30, 60, 120 and 240 (V-BO-08: 10, 20, 40 and 80); the five `(ε_m, band)` pairs of C137; reltol 1e-6 and 1e-7; the two activations.
+
+| part | decks | cells | `(ε_m, band)` | reltol | activation | form | runs |
+|---|---|---|---|---|---|---|---|
+| core | 5 | 4 | 5 | 2 | 2 | temperature | 400 |
+| the energy forms | 5 | the CI one | 5 | 2 | 2 | enthalpy | 100 |
+| threshold-only removal | 5 | 4 | `(3e-3, 3e-3)`, `(1e-2, 1e-2)` | 2 | the default | temperature | 80 |
+| innermost receiver | V-BO-07 | 4 | 5 | 2 | the default | temperature | 40 |
+| innermost receiver | V-BO-01 | 30 | 5 | 2 | the default | temperature | 10 |
+
+630 runs and 130 refinement families (100 core, 20 threshold-only, 10 innermost). From M4's wall times at a load of 16 to 19 (a family at four resolutions is about 120 s for V-BO-01 at reltol 1e-6 and 1.8 times that at 1e-7, the 240-cell run three quarters of it), the matrix is about five hours in one process, two in three. It fits; no reduction is proposed. The innermost receiver on V-BO-01 at 30 cells is one resolution, so it forms no family: its rows are read beside the default receiver's same rows (D142).
+
+**D141. The receiver option.** `setup(problem; deactivation = true, receiver = :innermost)` (`:beneath` the default; any other value refused) is held by `CellDeactivation` beside the band and read by `deactivate!` on a moving mesh: a run that reaches its layer's innermost cell (the cell whose inward node is the first node or a Lagrangian node) and holds more than that one cell merges into that cell, which keeps its own reference and deactivates when its merged inventory is below `ε_m` of it, in a later invocation or, if it is already below, in the same one into the cell beneath; any other run goes to the cell beneath it, as by default. It is `setup`'s keyword, not `solve`'s (as `closure` and `tensor` are): a comparator of W9, documented with the deactivation rule.
+
+**C137. At `ε_m = 1e-2` the band's `10 ε_m` is its 0.1.** W9's three bands, `3 ε_m`, `10 ε_m` and 0.1, are two at 1e-2. *Resolution:* five pairs, `(3e-3, 9e-3)`, `(3e-3, 3e-2)`, `(3e-3, 0.1)`, `(1e-2, 3e-2)` and `(1e-2, 0.1)`; the threshold-only removal adds `band = ε_m` at each threshold.
+
+**C138. Under B the activation also sets when the layer's time is estimated.** `estimate_layer_times!` reads the layer at its first activation, which `r_hi` defines: at `(0.7, 0.3)` the estimate is taken earlier, on a thicker layer, so `τ = λ h/|ḣ|` is longer than at the default, and `λ = 1.8` was fixed at `r_hi = 0.3` (D136). C133's activation table was taken under the fixed time. *Resolution:* the level runs under the default `ActivationTime()`, every M5 table being on the default, and the rows report `τ`; if the level were ever promoted, `λ` would be re-fixed for it as D136 fixed it, a decision of its own.
+
+**C139. "The V-BO cases assert the hard criterion at their CI resolution" (§5.2).** At one resolution only the hard criterion's per-run part exists, every QoI within its tolerance; (a), (b) and the peak's convergence need the family. *Resolution:* the cases assert every accuracy QoI at the CI resolution and report the invocation count beside them, not asserted; the refinement parts are the gate's (`burnout_envelope.md`) and the report mode's ladder.
+
+**C140. W9's accepted-step peak is the largest per-step rate over the run; M4's script read the main peak.** `tau_ladder.jl`'s hard criterion takes the largest per-step rate before the solve's last event, as the peak QoI does on the saved times; W9 defines the peak over the run, which includes the burst after the last invocation. *Resolution:* the envelope gates the peak over the run, as W9 writes it, and reports the main peak beside it; where they differ the burst exceeds the main peak, which (a) reads as well.
+
+**D142. The innermost receiver on V-BO-01 at 30 cells** is read row by row against the default receiver's runs at the same `(ε_m, band)` and reltol: the QoIs, both peaks, the tail, the invocations and the largest merged fraction.
+
+**D143. W10's configuration.** V-BO-01 at its CI resolution (60 cells), the temperature form, the case's solve and keywords, abstol scaled with reltol as in `burnout_gradients.jl`; the absorption coefficient, the incident flux and the pre-exponential factor each perturbed by `ε ∈ {0, ±1, ±2, ±4, ±8}·1e-3` relative at reltol 1e-6, 1e-7 and 1e-8: 81 runs. The steps are relative for the three, so every difference is `dJ/d ln p`; the flux's is also reported per W/m², since W10 names it without the logarithm and the convergence check does not depend on the scale.
+
+**D144. W10's convergence rule as tested code.** `test/newcore/gates/fd_convergence.jl` holds the rule as pure functions (no solve): at each tolerance the central differences at the four steps, the agreement of the three largest within 5 % of one another, the converged value and its Richardson estimate from the two smallest agreeing steps, the smallest usable step (the smallest whose difference is within 5 % of the converged value), and across tolerances the 1e-7 and 1e-8 values within 5 % at each agreeing step. The gate and `test/newcore/test_fd_convergence.jl` include it; the test checks it on a synthetic objective with a known derivative, a truncation error and a noise of known size, where the smallest usable step is known.
+
+**D145. Where the guides' drafts go.** The guides are rewritten at M7 (W6 commit 2, A.3), where UG 10 becomes "Burnout and the correction". M5 drafts the envelope statement and the finite-difference statement at the end of this record, from the tables; M7 moves them into UG 10, UG 13 and TRG 17.
+
 ---
 
 ## Appendix A. Inventories
