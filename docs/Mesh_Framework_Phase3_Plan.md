@@ -760,6 +760,82 @@ Reltol 1e-6 and 1e-7 give the same verdict on every family but one (V-BO-07's in
 
 **Status.** M5's tasks 1 to 10 are done and G's checks pass: `test_deactivation.jl` 1,543, `test_fd_convergence.jl` 49, `test_policies.jl` 281, `test_outputs.jl` 85, `test_solve.jl` 107, `test_layer_time.jl` 150, `test_correction.jl` 784; `NEW_CORE_CASES` in both forms, 521 of 521 each (`PYROLYSIS_TEST_FAST=1`); format on the touched files; Aqua (9 gating checks) and JET (no reports Pyrolysis owns). *Owner:* (a) the default threshold: keep `ε_m` = 1e-2 with the mixed layer named outside the envelope and 3e-3 advised for layers of several solids (recommended), or move the default to 3e-3, which puts every deck inside at 1 to 12 % more accepted steps at the CI resolutions and moves every digest, since the threshold also scales the mass tolerances; (b) the innermost receiver: delete it (recommended: no deck needs it inside the envelope), or keep it as a `setup` option; (c) the earlier activation stays a lead, not a default (recommended). Open from earlier: question 13 and C130, C127, C134's flag (M3).
 
+### 13.7 M6
+
+**Branch.** `mesh-framework` (D128), from `1f53d1e`. CI on M5's last push (#20): Quality green; Tests and Documentation running at M6's start. MF does not run: OrdinaryDiffEqBDF 2.4.13 is still the latest release, and the fix (`8d8191bc`) is ahead of it.
+
+**The owner's answers at M6's start.** (a) The default threshold stays `ε_m = 1e-2`: the mixed layer is named outside the envelope and 3e-3 is advised for layers of several solids, as the envelope statement is drafted. (b) The innermost receiver is deleted (D146). (c) The earlier activation stays a lead. C127's clamped porosity: its callers on the finite-volume path move before the comparison measures (D147). Still open from M3: question 13 and C130, C127's `effective_heat_capacity` and `effective_emissivity`, C134's flag.
+
+**W5 and item 13 as tasks** (a developer's working days; §6 budgets one week).
+
+| Task | Builds | Its test | Days |
+|---|---|---|---|
+| 1 | D146: the receiver option deleted, with its tests and the envelope script's innermost rows | `test_deactivation.jl` | 0.5 |
+| 2 | D147: the porosity callers on the unclamped pore fraction | `test_problem.jl` (both), `test_background_air.jl`, `test_energy_ledger.jl`, `test_gas_transport.jl`; the identity digests | 0.5 |
+| 3 | The rows (D148), each built once per core (C144) | the smoke run | 1 |
+| 4 | The accuracy part (C117, D149, D151): the references, the new core's ladder, the matched rung, the common whole-run quantities and their budgets, each core's closure (C145) | the smoke run | 1.5 |
+| 5 | The timing part (D150): the warm medians and the counters, both cores in one pinned process | the smoke run | 0.5 |
+| 6 | The memory mode: each core in its own process, the same warm-up, the peak resident set and the measured solve's allocated bytes | the smoke run | 0.5 |
+| 7 | The white-pine objective on each core (C109, D152) | the old core's value equals `loss`'s data term | 0.5 |
+| 8 | The parts and their merge (stamps checked), the tables (`measurements/cutover_comparison.{csv,md}`), the verification chapter's section (C101) | — | 1 |
+| 9 | `deletion_identity.jl` (§5.4, item 13; D153): record and compare modes | a second record equal to the first | 1 |
+| 10 | The smoke run on the loaded machine, a reduced matrix; the estimate below re-stated from it | — | 0.5 |
+| 11 | The measurement in a detached worktree of its signed commit: the accuracy and memory parts and the identity record at any load, the timing part in the quiet window | — | 0.5 |
+| 12 | The reading; the table into the verification chapter | — | 1 |
+| G | Format, Aqua, JET; the touched test files; `NEW_CORE_CASES` in both forms; this record | — | 1 |
+
+Total 10 days: two weeks, one over §6's.
+
+**D146. The innermost receiver is deleted.** `setup`'s `receiver`, `CellDeactivation`'s field and `_receiver` go; `deactivate!` merges every run into the cell beneath it. §5.3 item 15's innermost half goes with it. Its default half stays in `test_deactivation.jl`, as the merge of a run through its layer's innermost cell into the substrate (the inventories, the volume, admissibility and containment in both energy forms): 1,499 tests, the 1,543 less the survivor's 44. `burnout_envelope.jl` loses its innermost families, their section and the receiver column; `measurements/burnout_envelope.md` stays the record at its stamp (`4a35494`), which carries them.
+
+**D147. The porosity callers read the unclamped pore fraction.** `background_gas_concentration` takes `max(1 − skeletal_volume_fraction, 0)`; `validate_darcy_initial_porosity` takes `1 − skeletal_volume_fraction` and passes it to the four-argument `effective_permeability`. Inside `[0, 1]` the value is the clamped one bit for bit (the two sums are the same loop), so no digest moves: the nine identity digests equal their references, the Douglas fir deck's background air included. Outside it the verdicts are unchanged: a negative fraction gives a non-positive Carman–Kozeny permeability, which the validation does not flag, as it did not flag the clamped zero. The clamped `porosity` and the three-argument `effective_permeability` are now reached only by the old core and go with it at M7; `porosity` is exported and documented (UG §3, TRG §5), so M7's guide rewrite names `skeletal_volume_fraction` there.
+
+**C144. The scripts W5 builds from no longer drive the finite-volume core.** `audit_decks.jl` builds its decks on `problem_for`'s `Mesh1D` and `burnout_timing.jl` on the cases routed to the new core, and each hands one problem to both cores. Since M2, `setup` takes the native mesh only, and the old `solve` takes `Mesh1D` only (it has no conversion). The V-BO cases' solve function, `core_mesh` and `core_solve` also branch on `VERIFICATION_CORE`, a constant read when `casedefs.jl` loads. *Resolution:* the comparison builds every deck once per core. The audit decks and the examples' decks come from one description with each core's mesh constructor (the same nodes, cross section and initial-field functions). The V-BO cases come from `casedefs.jl` loaded into two modules, one routed to each core, so each core's case QoIs and step records are its own. The two scripts stay their tables' records until M7 (C113).
+
+**C145. The old core has no per-step ledger.** W5 asks for each core's own conservation closure, and the old core's trackers are reachable only through its `diagnostics` path. *Resolution:* as the V-BO cases define it. The new core's mass and energy closures come from `ConservationRecorder` over the accepted steps through `conservation_audit` (on the V-BO rows, the case's per-step ledger). The old core's is the total-mass drop against the trapezoid of ṁ″ on the saved times (the cases' old-core tolerance 1e-3). Each core's closure is read against its own budget, not against the other's.
+
+**D148. The rows.** 18 in all:
+- the six audit decks: `problem_for`'s, solid λ 1e-6 on the two PMMA decks as in Phase 1's item 2, 80 s, with 81 outputs so that the whole-run quantities have a series;
+- V-BO-01 to V-BO-08 at their CI resolutions, with their solve keywords;
+- the Douglas fir deck over 600 s, with the example's keywords and 1 s outputs;
+- the white-pine forward at the stage-2 θ of `plot_stage2_theta.jl` (the fit recorded in `results/best.json`, rounded) on its two fit scenarios, 30 and 50 kW (UMD, 160 cells); `build_and_solve` is split into `build_problem` and the solve, so that the gate takes the problem without solving it;
+- the PMMA cone of `06_cone_calorimeter.jl` (72 cells, 1,600 s, deactivation on).
+
+The old core runs each deck as its example or case runs it (the white pine with `KenCarp4` and Sparspak, the others on their defaults). The new core runs its defaults with the shared keywords (tolerances, `min_thickness`, `dtmax`, `dtmin`, the radiation model), and `deactivation` stands for `handle_depletion`. Only the temperature form is compared: it is the default that ships, the enthalpy form's cost is Phase 1's item 2 record, and its accuracy is the suite's.
+
+**D149. The accuracy part per row.** Each core gets a reference at reltol 1e-9 and a spread at 1e-10, with abstol at the deck's own ratio to reltol. The old core is solved at the deck's tolerance (its default), the new core on the ladder 1e-5, 3e-6, 1e-6, 3e-7, 1e-7, 3e-8 and 1e-8. The window is the saved times before the first event of any solve of the row (the whole run when no solve has one). Its RMS covers the temperatures over the cells, and on V-BO-04 the thickness relative to the reference's, as in `burnout_timing.jl`. Matched means the loosest rung at or below the old default's window RMS; a row with no such rung is unmatched. The common quantities compare the old default with the new matched solve:
+- the temperature at the old core's cell centres at each saved time, interpolated linearly between the new core's live cell centres, over the old core's live cells inside the new core's live region (RMS and largest);
+- the mass loss [points];
+- the burnout time, where both burn out;
+- the peak ṁ″ and its time, where the peak is interior on both;
+- the tail, ∫ṁ″ from the main peak to the end;
+- each core's closure (C145).
+
+The budgets are C117's.
+
+**D150. The parts split by what the load can change.** The accuracy part's trajectories are deterministic in a fixed binary and manifest. The memory mode's allocated bytes and peak resident set are each process's own. So both, and the identity record, run as parallel processes at any load. The timing part runs alone, in one process pinned to one performance core (`taskset -c 1`, its hyperthread sibling idle), at a one-minute load below 2, and reads the matched rungs from the accuracy part's file. Each timed configuration gets a warm-up, then nine solves for the old default (C70) and three for each of the new core's matched and default rungs. A configuration whose warm-up exceeds 15 s gets three solves, so the white pine stays inside the window. Every part is stamped and the merge refuses parts of different stamps, as in `burnout_envelope.jl`. Item 13's recheck numbers are taken in the timing process (D153).
+
+**D151. The verdicts.** A row with no event on either core (the audit decks, the Douglas fir deck, the white pine) gets a verdict on every common quantity against its budget. A row with events (the V-BO cases and the PMMA cone) gets verdicts on the window and on the temperatures before the first event. After its events, a quantity has a common reference only where the case measures it against its own reference value and both cores pass that QoI; it then gets a verdict on the two cores' difference against W5's budget. Every other quantity after the events (the tail, the temperatures, the PMMA cone's burnout) is reported without a verdict, marked "no common reference after the events" (C117, Phase 2 item 2). A performance row is read only where every verdict of its accuracy part passes.
+
+**D152. The white-pine objective.** This is the data term of `loss`: the σ-normalized mean square of the back-face temperature over t > 1 s, the replicates' spread floored at 0.5 K, the two scenarios weighted equally. It is evaluated at θ on each core's default solve. The prior term depends on θ only, so it is left out. The old core's value is checked against `loss(θ, dataset; stage = 2, log_trace = false)`. Reported: each core's objective, their difference, and the back-face temperature's largest and RMS difference over the data times (C109).
+
+**D153. The identity record** (`deletion_identity.jl`):
+- the nine decks of `burnout_identity.jl` (eight cases at their CI resolutions and the Douglas fir deck over 60 s), each in both energy forms: the digests of the saved temperatures, masses, positions and times, and of the event records (every field of every event, vectors by value); the outcome and the return code as text; the accepted and rejected steps;
+- the containment suite's reference Jacobians: `test_containment.jl` run in a module whose `dense_jacobian` and `jacobian!` record a digest of every Jacobian they return, in call order and with the count, while the suite's own tests run as usual.
+
+With `--record` the record is written to `measurements/deletion_identity_reference.csv`; without it, each digest is compared. Beside it are item 13's recheck numbers, taken in the timing process (D150): the new core's warm time (the median and spread of five solves) and allocated bytes for V-BO-01 at 60 cells, `ale` at 100 cells and the Douglas fir deck over 60 s.
+
+**The runs, counted.** Two rows' costs are estimates, the white pine's and the PMMA cone's (no measurement on this tree); the smoke run measures them, and the estimate is re-stated before the quiet window.
+
+| part | load | runs | estimate |
+|---|---|---|---|
+| accuracy | any, four processes | 18 rows: the old core's reference, spread and default (3), the new core's reference, spread and seven rungs (9): 216 solves | about an hour in one process, 25 minutes in four (the white pine's two scenarios set it) |
+| timing | below 2, one pinned process | per row a warm-up and up to nine old-core solves, a warm-up and three new-core solves at each of two rungs: up to 324 solves; item 13's recheck (3 configurations × 6): 18 | about 35 minutes, the white pine about half of it at an estimated 30 s per old-core forward |
+| memory | any, isolated processes | 18 rows × 2 cores: 36 processes of 2 solves | 36 processes of about a minute each, 10 minutes in four |
+| identity | any | 9 decks × 2 forms: 18 solves; one run of the containment suite | about 10 minutes |
+
+The quiet window is therefore about 35 minutes of measurement, on a worktree precompiled beforehand.
+
 ---
 
 ## Appendix A. Inventories
