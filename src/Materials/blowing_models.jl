@@ -298,7 +298,11 @@ binary diffusivity of each gas component into the free stream
 package's Chapman–Enskog estimate from its molar mass. Lumped `volatiles` use
 their own `D`, else their diffusion volume, else the same estimate.
 """
-struct PoolingFilm{G<:GasSpecies,V<:Union{Nothing,GasSpecies},N} <: AbstractBlowingModel
+struct PoolingFilm{
+    G<:GasSpecies,
+    V<:Union{Nothing,GasSpecies},
+    D<:NamedTuple{<:Any,<:Tuple{Vararg{Float64}}},
+} <: AbstractBlowingModel
     free_stream::G
     volatiles::V
     n_Γ::Float64
@@ -306,7 +310,7 @@ struct PoolingFilm{G<:GasSpecies,V<:Union{Nothing,GasSpecies},N} <: AbstractBlow
     ψ0::Float64
     Λc::Float64
     Λw::Float64
-    diffusion_volume::NamedTuple{N,<:Tuple{Vararg{Float64}}}
+    diffusion_volume::D
 end
 
 function PoolingFilm(

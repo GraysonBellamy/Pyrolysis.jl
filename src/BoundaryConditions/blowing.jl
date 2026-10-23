@@ -292,14 +292,25 @@ const _GL5_W = (
     return s / 2
 end
 
+# The Fuller diffusion volume of component `name`, NaN without an entry: a
+# search over the names, since a field read by a runtime name boxes its value.
+@inline function _diffusion_volume(V::NamedTuple{names}, name::Symbol) where {names}
+    vals = values(V)
+    v = NaN
+    for i in eachindex(names)
+        names[i] === name && (v = vals[i])
+    end
+    return v
+end
+
 # Binary diffusivity of a gas component into the free stream [m²/s].
 @inline function _component_diffusivity(m::PoolingFilm, name::Symbol, M, T)
-    V = m.diffusion_volume
-    if haskey(V, name) && !isnan(m.free_stream.diffusion_volume)
+    V_a = _diffusion_volume(m.diffusion_volume, name)
+    if !isnan(V_a) && !isnan(m.free_stream.diffusion_volume)
         return fuller_diffusivity(
             T,
             M,
-            getproperty(V, name),
+            V_a,
             m.free_stream.molar_mass,
             m.free_stream.diffusion_volume,
         )
