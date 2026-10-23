@@ -35,7 +35,7 @@ export Correction, NoCorrection, PrescribedCorrection, EquidistributionCorrectio
 export LayerCorrection, EQUIDISTRIBUTION_TIME, bind_correction, activation, correction!
 export ActivationTime, ACTIVATION_TIME_FACTOR, estimates_layer_times, reset_layer_times!
 export layer_time_margin, estimate_layer_times!
-export vanishing, vanishes
+export residues, vanishes
 export LateralShrinkage, LATERAL_CLAMP_WIDTH, chi_bar, lateral_rows, consistent_lateral
 
 end # module Closures

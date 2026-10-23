@@ -151,20 +151,22 @@ function _composition_interfaces(
 end
 
 # The correction of a solve that names none: the equidistribution correction
-# where the mesh moves, cells are deactivated and some layer can vanish
-# ([`vanishes`](@ref)), so that its cells thin together and leave in one
-# event; no correction otherwise. `ξ0` holds the cells' initial
-# concentrations (`NC × n`).
+# where the mesh moves, cells are deactivated and deactivation at `threshold`
+# can remove some cell ([`vanishes`](@ref)), so that a layer's cells thin
+# together and leave in one event; no correction otherwise. `ξ0` holds the
+# cells' initial concentrations (`NC × n`).
 function _installed_correction(
     material::Material{NC},
     ξ0::AbstractMatrix{Float64},
     use_ale::Bool,
     deactivation::Bool,
+    threshold::Real,
 ) where {NC}
     (use_ale && deactivation) || return NoCorrection()
-    v = vanishing(material)
+    r = residues(material)
     condensed = ntuple(j -> !is_gas(material.components[j]), Val(NC))
-    any(i -> vanishes(v, ξ0, i:i, condensed), axes(ξ0, 2)) || return NoCorrection()
+    any(i -> vanishes(r, ξ0, i:i, condensed, threshold), axes(ξ0, 2)) ||
+        return NoCorrection()
     return EquidistributionCorrection()
 end
 
@@ -424,10 +426,11 @@ to the solid ([`EquidistributionCorrection`](@ref); [`NoCorrection`](@ref)
 keeps it with the solid), the balance rows then holding the solid velocity
 `w − c`, and the inventories cross the faces at the relative velocity `−c`
 ([`RelativeFluxKernel`](@ref)). By default a solve gets the equidistribution
-correction when the mesh moves, cells are deactivated and some layer can
-vanish (its condensed components gasify completely, [`vanishing`](@ref)), and
-no correction otherwise; a layer that cannot vanish keeps its mesh with the
-solid under any equidistribution correction. `lagrangian` lists the mesh
+correction when the mesh moves, cells are deactivated and deactivation can
+remove some cell (its components, converted completely, leave less condensed
+mass than `threshold` of it, [`residues`](@ref)), and no correction
+otherwise; a layer deactivation cannot remove keeps its mesh with the solid
+under any equidistribution correction. `lagrangian` lists the mesh
 nodes that always move with the solid, the layer interfaces, beside the
 mesh's own; under an equidistribution correction every interior node between
 cells that start with different condensed components must be among them, and
@@ -497,8 +500,10 @@ function setup(
     NC = n_components(material)
     mesh = problem.mesh
     T0, ξ0 = initial_fields(problem, mesh)
-    correction =
-        something(correction, _installed_correction(material, ξ0, use_ale, deactivation))
+    correction = something(
+        correction,
+        _installed_correction(material, ξ0, use_ale, deactivation, threshold),
+    )
     closure = something(closure, D == 1 ? :balance : :potential)
     _require_supported(
         problem,
@@ -568,7 +573,14 @@ function setup(
         potential ? PotentialClosure(topo; slip) :
         BalanceRowClosure(
             topo;
-            correction = bind_correction(correction, topo, reference, m0, material),
+            correction = bind_correction(
+                correction,
+                topo,
+                reference,
+                m0,
+                material,
+                threshold,
+            ),
             lateral,
         )
     cl === nothing ||

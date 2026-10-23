@@ -118,9 +118,9 @@ A layer is bounded by the pinned node, the mesh's Lagrangian nodes (the layer
 interfaces) and the end nodes; `c = 0` at each of them, at every node beside
 a dead cell (the outermost live node among them) and wherever both cells keep
 at least `r_hi` of their initial thickness. With `layers = :vanishing` only
-the layers that can vanish move ([`vanishes`](@ref)) and the others keep their
-mesh with the solid; `:all` moves every layer, for decks that exercise the
-correction on layers that cannot vanish. `setup` binds the correction to the
+the layers deactivation can remove move ([`vanishes`](@ref)) and the others
+keep their mesh with the solid; `:all` moves every layer, for decks that
+exercise the correction on layers that cannot vanish. `setup` binds the correction to the
 mesh ([`bind_correction`](@ref)).
 """
 struct EquidistributionCorrection{T<:Union{Float64,ActivationTime}} <: Correction
@@ -193,61 +193,82 @@ struct LayerCorrection{NC} <: Correction
 end
 
 """
-	vanishing(material) -> NTuple{NC,Bool}
+	residues(material) -> NTuple{NC,Float64}
 
-Whether each condensed component of `material` gasifies completely: some
-reaction consumes it, and every reaction that does yields no condensed
-component that does not itself gasify completely. The least such set, so an
-inert component, a residue that no reaction consumes and the components of a
-cycle do not vanish; a gas component reads `false`. A reaction that yields
-part of its own reactant back is read by the rest of its products, and one
-that yields the whole of it back consumes nothing.
+The condensed mass each condensed component of `material` leaves, as a
+fraction of its own, once the reactions have converted it completely: the
+condensed yields of a reaction that consumes it, each weighted by that
+product's own residue, the largest over the reactions that consume it (they
+compete, so the least gasifying one bounds what is left). Zero for a
+component every consuming reaction gasifies; one for an inert component, a
+residue no reaction consumes and the components of a cycle that yields
+condensed mass only. A reaction that yields part of its own reactant back is
+read by the rest of its products, renormalized; one that yields the whole of
+it back consumes nothing. A gas component reads zero.
 """
-function vanishing(material::Material{NC}) where {NC}
+function residues(material::Material{NC}) where {NC}
     condensed = ntuple(j -> !is_gas(material.components[j]), Val(NC))
     returned(rxn, j) = sum((last(p) for p in rxn.products if first(p) == j); init = 0.0)
     consumes(rxn, j) = any(r -> first(r) == j, rxn.reactants) && returned(rxn, j) < 1
-    v = fill(false, NC)
-    changed = true
-    while changed
-        changed = false
+    left(rxn, j, r) =
+        sum((last(p) * r[first(p)] for p in rxn.products if first(p) != j); init = 0.0) /
+        (1 - returned(rxn, j))
+    r = [condensed[j] ? 1.0 : 0.0 for j = 1:NC]
+    consumers = [[rxn for rxn in material.reactions if consumes(rxn, j)] for j = 1:NC]
+    # From one, the residues fall to the greatest fixed point: exactly along a
+    # chain, geometrically around a cycle that loses mass to the gas.
+    for _ = 1:RESIDUE_PASSES
+        change = 0.0
         for j = 1:NC
-            (condensed[j] && !v[j]) || continue
-            consumers = [rxn for rxn in material.reactions if consumes(rxn, j)]
-            isempty(consumers) && continue
-            gasified =
-                p -> first(p) == j || !condensed[first(p)] || iszero(last(p)) || v[first(p)]
-            all(rxn -> all(gasified, rxn.products), consumers) || continue
-            v[j] = true
-            changed = true
+            (condensed[j] && !isempty(consumers[j])) || continue
+            x = min(r[j], maximum(rxn -> left(rxn, j, r), consumers[j]))
+            change = max(change, r[j] - x)
+            r[j] = x
         end
+        change <= eps() && break
     end
-    return ntuple(j -> v[j], Val(NC))
+    return ntuple(j -> r[j], Val(NC))
+end
+
+# The passes `residues` takes at most.
+const RESIDUE_PASSES = 10_000
+
+"""
+	vanishes(residues, m0, cells, condensed, threshold) -> Bool
+
+Whether deactivation can remove the cells `cells`, with initial masses `m0`
+(`NC × n`): some of them hold condensed mass (`condensed` flags the condensed
+components), and each that does keeps less than the fraction `threshold` of
+it once its components are converted completely ([`residues`](@ref)).
+"""
+function vanishes(
+    r::NTuple{NC,Float64},
+    m0::AbstractMatrix,
+    cells,
+    condensed,
+    threshold,
+) where {NC}
+    held = false
+    for i in cells
+        total = sum((m0[j, i] for j = 1:NC if condensed[j]); init = 0.0)
+        total > 0 || continue
+        held = true
+        kept = sum((r[j] * m0[j, i] for j = 1:NC if condensed[j]); init = 0.0)
+        kept < threshold * total || return false
+    end
+    return held
 end
 
 """
-	vanishes(vanishing, m0, cells, condensed) -> Bool
-
-Whether the cells `cells`, with initial masses `m0` (`NC × n`), can vanish:
-they hold condensed mass (`condensed` flags the condensed components), and
-every condensed component present in any of them vanishes (`vanishing`,
-[`vanishing`](@ref)'s flags).
-"""
-function vanishes(v::NTuple{NC,Bool}, m0::AbstractMatrix, cells, condensed) where {NC}
-    present(j) = condensed[j] && any(i -> m0[j, i] > 0, cells)
-    return any(present, 1:NC) && all(j -> !present(j) || v[j], 1:NC)
-end
-
-"""
-	bind_correction(correction, topology, reference, m0, material) -> Correction
+	bind_correction(correction, topology, reference, m0, material, threshold) -> Correction
 
 The correction a solve evaluates: an [`EquidistributionCorrection`](@ref)
 bound, as a [`LayerCorrection`](@ref), to the layers of the line mesh
 `topology` and to its initial masses `m0` (`NC × n`), with `layers =
-:vanishing` a layer that cannot vanish ([`vanishes`](@ref)) with zero gain;
-any other correction as given.
+:vanishing` a layer that deactivation at `threshold` cannot remove
+([`vanishes`](@ref)) with zero gain; any other correction as given.
 """
-bind_correction(corr::Correction, topo, reference, m0, material) = corr
+bind_correction(corr::Correction, topo, reference, m0, material, threshold) = corr
 
 function bind_correction(
     corr::EquidistributionCorrection,
@@ -255,6 +276,7 @@ function bind_correction(
     reference::CellReference,
     m0::AbstractMatrix{Float64},
     material::Material{NC},
+    threshold::Real,
 ) where {NC}
     n = n_cells(topo)
     nn = n_nodes(topo)
@@ -272,13 +294,13 @@ function bind_correction(
     ρ_ref = maximum(ρ0)
     β = ρ_ref > 0 ? corr.β / ρ_ref : 0.0
     bounds = sort!(unique([1; nn; topo.pinned; topo.lagrangian]))
-    v = vanishing(material)
+    v = residues(material)
     gain = zeros(nn)
     scale = zeros(n)
     layers = Tuple{Int,Int}[]
     for (lo, hi) in zip(bounds[1:(end-1)], bounds[2:end])
         N = hi - lo
-        moves = corr.layers === :all || vanishes(v, m0, lo:(hi-1), condensed)
+        moves = corr.layers === :all || vanishes(v, m0, lo:(hi-1), condensed, threshold)
         moves && push!(layers, (lo, hi))
         M̄ = sum(corr.α + β * ρ0[i] for i = lo:(hi-1)) / N
         scale[lo:(hi-1)] .= 1 / M̄

@@ -313,36 +313,47 @@ function _network(reactions...)
 end
 
 @testset "a solve gets the correction where the mesh moves, cells go and a layer can vanish" begin
-    # Which condensed components gasify completely.
-    @test vanishing(_network(Reaction(:r, 1 => 3; A = 1.0, E = 0.0, h = 0.0))) ==
-          (true, false, false)
+    # The condensed mass each component leaves once converted completely.
+    @test residues(_network(Reaction(:r, 1 => 3; A = 1.0, E = 0.0, h = 0.0))) ==
+          (0.0, 1.0, 0.0)
     char = Reaction(:r, 1 => (2, 3); A = 1.0, E = 0.0, h = 0.0, yields = (0.3, 0.7))
-    @test vanishing(_network(char)) == (false, false, false)
+    @test residues(_network(char)) == (0.3, 1.0, 0.0)
     chain = (char, Reaction(:s, 2 => 3; A = 1.0, E = 0.0, h = 0.0))
-    @test vanishing(_network(chain...)) == (true, true, false)
-    # Competing paths: the char branch leaves residue whatever the other does.
+    @test residues(_network(chain...)) == (0.0, 0.0, 0.0)
+    # Competing paths: the char branch bounds the residue whatever the other
+    # does.
     competing = (Reaction(:r, 1 => 3; A = 1.0, E = 0.0, h = 0.0), char)
-    @test vanishing(_network(competing...)) == (false, false, false)
+    @test residues(_network(competing...)) == (0.3, 1.0, 0.0)
     cycle = (
         Reaction(:r, 1 => 2; A = 1.0, E = 0.0, h = 0.0),
         Reaction(:s, 2 => 1; A = 1.0, E = 0.0, h = 0.0),
     )
-    @test vanishing(_network(cycle...)) == (false, false, false)
+    @test residues(_network(cycle...)) == (1.0, 1.0, 0.0)
+    # A cycle that loses half of each pass to the gas leaves nothing.
+    leaky = (
+        Reaction(:r, 1 => (2, 3); A = 1.0, E = 0.0, h = 0.0, yields = (0.5, 0.5)),
+        Reaction(:s, 2 => (1, 3); A = 1.0, E = 0.0, h = 0.0, yields = (0.5, 0.5)),
+    )
+    @test all(<=(eps()), residues(_network(leaky...))[1:2])
     # A self-yield: the reactant's own share is not a product, and a reaction
     # that returns all of it consumes nothing.
     self = Reaction(:r, 1 => (1, 3); A = 1.0, E = 0.0, h = 0.0, yields = (0.4, 0.6))
-    @test vanishing(_network(self)) == (true, false, false)
+    @test residues(_network(self)) == (0.0, 1.0, 0.0)
     residue = Reaction(:r, 1 => (1, 2); A = 1.0, E = 0.0, h = 0.0, yields = (0.4, 0.6))
-    @test vanishing(_network(residue)) == (false, false, false)
-    @test vanishing(_network(Reaction(:r, 1 => 1; A = 1.0, E = 0.0, h = 0.0))) ==
-          (false, false, false)
-    # A layer vanishes when it holds condensed mass and every condensed
-    # component present vanishes.
+    @test residues(_network(residue)) == (1.0, 1.0, 0.0)
+    @test residues(_network(Reaction(:r, 1 => 1; A = 1.0, E = 0.0, h = 0.0))) ==
+          (1.0, 1.0, 0.0)
+    # Deactivation can remove cells that hold condensed mass and each keep
+    # less than the threshold of it once converted.
     m0 = [1.0 1.0 0.0; 0.0 1.0 0.0; 0.0 0.0 0.0]
-    v, condensed = (true, false, false), (true, true, false)
-    @test vanishes(v, m0, 1:1, condensed)
-    @test !vanishes(v, m0, 1:2, condensed)
-    @test !vanishes(v, m0, 3:3, condensed)
+    r, condensed = (0.0, 1.0, 0.0), (true, true, false)
+    @test vanishes(r, m0, 1:1, condensed, 1e-2)
+    @test !vanishes(r, m0, 1:2, condensed, 1e-2)
+    @test !vanishes(r, m0, 3:3, condensed, 1e-2)
+    # A char residue below the threshold vanishes; one above it does not.
+    trace = (0.002, 1.0, 0.0)
+    @test vanishes(trace, m0, 1:1, condensed, 1e-2)
+    @test !vanishes(trace, m0, 1:1, condensed, 1e-3)
 
     # The installation: the two-layer deck's top layer vanishes.
     p = _two_layer(4, 3)
@@ -356,6 +367,35 @@ end
     @test setup(p; use_ale = true).def.closure.correction isa NoCorrection
     @test setup(_uniform_slab(6); use_ale = true, deactivation = true).def.closure.correction isa
           NoCorrection
+    # A layer whose char residue is below the threshold: deactivation removes
+    # its cells, so it gets the correction, and keeps its mesh with the solid
+    # under a threshold below the residue.
+    trace_char = _network(
+        Reaction(:r, 1 => (2, 3); A = 1.0, E = 0.0, h = 0.0, yields = (0.002, 0.998)),
+    )
+    slab = _uniform_slab(6)
+    trace_slab = PyrolysisProblem(
+        mesh = slab.mesh,
+        material = trace_char,
+        bc_set = slab.bc_set,
+        T_initial = slab.T_initial,
+        ξ_initial = slab.ξ_initial,
+        tspan = slab.tspan,
+    )
+    installed = setup(trace_slab; use_ale = true, deactivation = true)
+    @test installed.def.closure.correction isa LayerCorrection
+    @test any(!iszero, installed.def.closure.correction.gain)
+    @test installed.deactivation.band == CORRECTION_BAND
+    @test setup(trace_slab; use_ale = true, deactivation = true, threshold = 1e-3).def.closure.correction isa
+          NoCorrection
+    kept = setup(
+        trace_slab;
+        use_ale = true,
+        deactivation = true,
+        threshold = 1e-3,
+        correction = EquidistributionCorrection(),
+    )
+    @test all(iszero, kept.def.closure.correction.gain)
     # A layer that cannot vanish keeps its mesh with the solid at any state, its
     # cells activated or not.
     corr = setup(
