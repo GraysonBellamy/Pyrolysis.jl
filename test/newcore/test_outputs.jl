@@ -4,6 +4,7 @@ using Pyrolysis.Outputs
 using Pyrolysis.Integration
 using Pyrolysis.Integration: rodas5p_policy, fbdf_policy, kencarp4_policy, default_policy
 using Pyrolysis.Integration: default_linear_solver
+using Pyrolysis.Closures: EquidistributionCorrection, EQUIDISTRIBUTION_TIME
 using OrdinaryDiffEq: DiscreteCallback, terminate!
 
 # An ablating solid, as in the deactivation tests: it decomposes to a gas that
@@ -149,10 +150,13 @@ end
     @test burned.retcode === :Terminated && burned.outcome === :burned_out
     @test succeeded(burned) && !completed(burned)
 
+    # One fixed layer time, so the surface cells go one at a time before the
+    # stop rather than thinning together.
     thin = Integration.solve(
         _ablator(6; t_end = 5.0);
         use_ale = true,
         min_thickness = 2e-3,
+        correction = EquidistributionCorrection(τ = EQUIDISTRIBUTION_TIME),
         options...,
     )
     @test thin.retcode === :Terminated && thin.outcome === :min_thickness

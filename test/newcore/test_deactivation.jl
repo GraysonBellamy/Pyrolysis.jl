@@ -9,7 +9,7 @@ using Pyrolysis.Assembly
 using Pyrolysis.Assembly: residual!, buffers
 using Pyrolysis.Deactivation
 using Pyrolysis.Deactivation: ConservativeTransfer
-using Pyrolysis.Closures: NoCorrection
+using Pyrolysis.Closures: NoCorrection, EquidistributionCorrection, EQUIDISTRIBUTION_TIME
 using Pyrolysis.ColoredJacobian
 using Pyrolysis.Integration
 using Pyrolysis.Integration: setup, consistent_state!, integrate
@@ -476,10 +476,13 @@ end
     @test [e.cell => e.receiver for e in cells.events] == [6 => 5]
     fill!(layout.mask, true)
     if moving
+        # One fixed layer time: the surface cells go one at a time and the
+        # solve ends before the gas-only cell is exposed.
         sol = Integration.solve(
             problem;
             use_ale = true,
             deactivation = true,
+            correction = EquidistributionCorrection(τ = EQUIDISTRIBUTION_TIME),
             abstol = 1e-7,
             reltol = 1e-5,
         )
@@ -887,9 +890,11 @@ end
         )
         k = findfirst(==(t_event), sol2.t)
         @test k !== nothing
-        @test sol2.extras.live_cells[k] == 3
-        @test isnan(sol2.T[4, k])
-        @test all(isfinite, sol2.T[1:3, k])
+        live = 4 - count(e -> e.t <= t_event, sol2.events)
+        @test 0 < live < 4
+        @test sol2.extras.live_cells[k] == live
+        @test all(isnan, sol2.T[(live+1):4, k])
+        @test all(isfinite, sol2.T[1:live, k])
     end
 end
 

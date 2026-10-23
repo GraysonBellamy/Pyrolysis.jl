@@ -34,9 +34,10 @@ end
 """
 	EQUIDISTRIBUTION_TIME
 
-The default equidistribution time `τ` [s] of a layer: with it the 5.9 mm
-PMMA layer of V-BO-01 at 50 kW/m² ends in one deactivation at 30, 60 and 120
-cells across it.
+The fallback equidistribution time `τ` [s] of [`ActivationTime`](@ref), for
+a layer whose thinning gives no estimate: with it the 5.9 mm PMMA layer of
+V-BO-01 at 50 kW/m² ends in one deactivation at 30, 60 and 120 cells across
+it.
 """
 const EQUIDISTRIBUTION_TIME = 720.0
 
@@ -90,7 +91,7 @@ struct ActivationTime
 end
 
 """
-	EquidistributionCorrection(; τ = EQUIDISTRIBUTION_TIME, activation = (0.3, 0.1),
+	EquidistributionCorrection(; τ = ActivationTime(), activation = (0.3, 0.1),
 	                           monitor = (1.0, 0.0), layers = :vanishing) <: Correction
 
 The relaxed equidistribution of a vanishing layer's cells. At an interior
@@ -100,9 +101,9 @@ node `n` of a layer of `N` cells, between cell `n − 1` (inward) and cell `n`,
 
 which moves the node into the thicker (or heavier) cell, so `M̃ h` relaxes
 toward a common value over the layer in about `τ/π²` whatever `N`: `τ` [s] is
-the layer's equidistribution time, one value for every layer, or an
-[`ActivationTime`](@ref) that sets each layer's at its first activation. The
-activation `aₙ = 1 − (1 − aₙ₋₁)(1 − aₙ)`
+the layer's equidistribution time, by default set for each layer at its first
+activation from its thinning ([`ActivationTime`](@ref)), or one value for
+every layer. The activation `aₙ = 1 − (1 − aₙ₋₁)(1 − aₙ)`
 is the smooth "or" of the two cells' switches
 `aᵢ = S((ln r_hi − ln(hᵢ/hᵢ(0))) / (ln r_hi − ln r_lo))`, `S(x) = x²(3 − 2x)`
 clamped to `[0, 1]`, with `activation = (r_hi, r_lo)`: zero while a cell keeps
@@ -132,7 +133,7 @@ struct EquidistributionCorrection{T<:Union{Float64,ActivationTime}} <: Correctio
 end
 
 function EquidistributionCorrection(;
-    τ::Union{Real,ActivationTime} = EQUIDISTRIBUTION_TIME,
+    τ::Union{Real,ActivationTime} = ActivationTime(),
     activation::Tuple{Real,Real} = (0.3, 0.1),
     monitor::Tuple{Real,Real} = (1.0, 0.0),
     layers::Symbol = :vanishing,

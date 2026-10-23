@@ -598,31 +598,51 @@ function _layer_correction(def::CoreDefinition)
     return estimates_layer_times(corr) ? corr : nothing
 end
 
-# The layer times' event: at the first root of the smallest activation margin
-# of the layers still waiting for their equidistribution time, each such
-# layer that has crossed takes its time ([`estimate_layer_times!`](@ref), the
-# margin widened by the relative tolerance as the located deactivation's
-# threshold is). The state is not modified and the layer's correction is
-# zero up to its activation, so the event changes the right-hand side only
-# where the activation has just begun; the integrator re-evaluates its
-# derivative there and the policy's flag rule applies as for an observer.
+# The layer times' event, on every moving mesh: at the first root of the
+# smallest activation margin of the layers still waiting for their
+# equidistribution time, each such layer that has crossed takes its time
+# ([`estimate_layer_times!`](@ref), the margin widened by the relative
+# tolerance as the located deactivation's threshold is). Without such a layer
+# the margin is infinite and the event never fires; the callback's types are
+# the same either way, so the integrator's type does not depend on the
+# correction. The state is not modified and the layer's correction is zero up
+# to its activation, so the event changes the right-hand side only where the
+# activation has just begun; the integrator re-evaluates its derivative there
+# and the policy's flag rule applies as for an observer.
 function _layer_time_callback(cp::CoreProblem, policy)
-    corr = _layer_correction(cp.def)
-    corr === nothing && return ()
     layout = cp.def.layout
-    reference = cp.def.setup.reference
-    t0, t1 = cp.problem.tspan
-    horizon = Float64(t1 - t0)
-    reltol = cp.reltol
-    margin = FunctionWrapper{Float64,Tuple{_StateVector}}(
-        u -> layer_time_margin(corr, layout, reference, u),
-    )
-    estimate = FunctionWrapper{Nothing,Tuple{_StateVector,Float64}}(
-        (u, t) -> begin
-            estimate_layer_times!(corr, layout, reference, u, t, horizon; slack = reltol)
-            return nothing
-        end,
-    )
+    is_moving(layout) || return ()
+    corr = _layer_correction(cp.def)
+    margin, estimate = if corr === nothing
+        (
+            FunctionWrapper{Float64,Tuple{_StateVector}}(u -> Inf),
+            FunctionWrapper{Nothing,Tuple{_StateVector,Float64}}((u, t) -> nothing),
+        )
+    else
+        reference = cp.def.setup.reference
+        t0, t1 = cp.problem.tspan
+        horizon = Float64(t1 - t0)
+        reltol = cp.reltol
+        (
+            FunctionWrapper{Float64,Tuple{_StateVector}}(
+                u -> layer_time_margin(corr, layout, reference, u),
+            ),
+            FunctionWrapper{Nothing,Tuple{_StateVector,Float64}}(
+                (u, t) -> begin
+                    estimate_layer_times!(
+                        corr,
+                        layout,
+                        reference,
+                        u,
+                        t,
+                        horizon;
+                        slack = reltol,
+                    )
+                    return nothing
+                end,
+            ),
+        )
+    end
     return (
         ContinuousCallback(
             (u, t, integrator) -> margin(u),
