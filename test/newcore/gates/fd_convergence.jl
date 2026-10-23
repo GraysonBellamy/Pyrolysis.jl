@@ -1,5 +1,5 @@
 # W10's convergence check of a central-difference derivative (Phase 3 plan
-# §4 W10, D144), as pure functions of an objective's values: the gate
+# §4 W10, D144, C141), as pure functions of an objective's values: the gate
 # `fd_gradient_qualification.jl` reads its verdict from them and
 # `test/newcore/test_fd_convergence.jl` tests them on a synthetic objective.
 #
@@ -7,24 +7,30 @@
 # difference at the step h is D(h) = (J(h) − J(−h))/(2h), an estimate of
 # dJ/d ln p. Truncation makes D(h) = D + c h² + …, so it settles as h falls,
 # and the solve's error ϵ adds about ϵ/h, so it departs again below some
-# step. At one tolerance:
+# step. Richardson's extrapolant of two steps h and rh,
+# R = (r² D(h) − D(rh))/(r² − 1) ((4 D(h) − D(2h))/3 on doubling steps),
+# removes the h² term. At one tolerance:
 #
-#   - the agreeing steps: the three largest when their differences lie within
-#     `AGREE` of one another (the spread (max − min)/min|D| at most `AGREE`, one
-#     sign), extended down through each smaller step whose difference keeps
-#     the spread there; none when the three largest disagree;
-#   - the converged value: Richardson's (r² D(h) − D(rh))/(r² − 1) from the
-#     two smallest agreeing steps h and rh ((4 D(h) − D(2h))/3 on doubling
-#     steps), its error estimate |D(h) − D(rh)|/(r² − 1);
-#   - the smallest usable step against a reference value: the smallest step
-#     whose difference lies within `AGREE` of the reference.
+#   - the converged window: of the windows of three consecutive steps whose
+#     two extrapolants (of the smaller pair and of the larger) lie within
+#     `AGREE` of each other (the spread (max − min)/min |R| at most `AGREE`, one
+#     sign), the one where they agree best; none when no window agrees;
+#   - the converged value: the extrapolant of the window's smaller pair, its
+#     error estimate the difference of the window's two extrapolants;
+#   - the usable steps against a reference value: those whose difference lies
+#     within `AGREE` of the reference, a step too large for its truncation or
+#     too small for the solve's error falling outside.
 #
-# Across two tolerances: at each of the three largest steps, which define the
-# converged value, the looser tolerance's difference within `AGREE` of the
-# tighter's (a smaller step may be noisier at the looser tolerance; its
-# smallest usable step records that). A derivative is qualified when the
-# three largest steps agree at the tightest tolerance and the two tightest
-# tolerances agree.
+# Across two tolerances: at each step of the tighter tolerance's window, the
+# looser tolerance's difference within `AGREE` of the tighter's. A
+# derivative is qualified when the tightest tolerance has a converged window
+# and the two tightest tolerances agree on it.
+#
+# The literal reading, reported beside: the three largest steps' differences
+# within `AGREE` of one another, the set extended down through each smaller
+# step that keeps that spread, its value the extrapolant of the two smallest
+# steps of the set, and the tolerances compared at the three largest steps.
+# It presumes the truncation at the largest step is within `AGREE`.
 
 const AGREE = 0.05
 
@@ -38,18 +44,30 @@ function spread(d)
     return (maximum(d) - minimum(d)) / minimum(abs, d)
 end
 
+# Richardson's extrapolant of the differences at steps `h[k]` and `h[k+1]`.
+function extrapolant(D, h, k)
+    r2 = (h[k+1] / h[k])^2
+    return (r2 * D[k] - D[k+1]) / (r2 - 1)
+end
+
 """
     convergence(J, steps) -> NamedTuple
 
-At one tolerance: the differences `D` at `steps` (ascending), the agreeing
-steps, the converged value and its error estimate (`NaN` when the three
-largest disagree).
+At one tolerance: the differences `D` at `steps` (ascending), the
+extrapolants of successive pairs, the converged window, the converged value
+and its error estimate (`NaN` without a window), and the literal reading's
+agreeing steps and value.
 """
 function convergence(J, steps)
     h = sort(collect(steps))
     D = [central(J, x) for x in h]
     n = length(h)
     n >= 3 || throw(ArgumentError("the check needs at least three steps"))
+    R = [extrapolant(D, h, k) for k = 1:(n-1)]
+    spreads = [spread(R[k:(k+1)]) for k = 1:(n-2)]
+    best = argmin(spreads)
+    window = spreads[best] <= AGREE ? h[best:(best+2)] : Float64[]
+    value, error = isempty(window) ? (NaN, NaN) : (R[best], abs(R[best] - R[best+1]))
     agree = spread(D[(n-2):n]) <= AGREE ? collect((n-2):n) : Int[]
     if !isempty(agree)
         k = n - 3
@@ -58,62 +76,76 @@ function convergence(J, steps)
             k -= 1
         end
     end
-    isempty(agree) &&
-        return (; steps = h, D, agreeing = Float64[], value = NaN, error = NaN)
-    i = agree[1]
-    a, b, r2 = D[i], D[i+1], (h[i+1] / h[i])^2
     return (;
         steps = h,
         D,
+        extrapolants = R,
+        window,
+        value,
+        error,
         agreeing = h[agree],
-        value = (r2 * a - b) / (r2 - 1),
-        error = abs(a - b) / (r2 - 1),
+        literal_value = isempty(agree) ? NaN : extrapolant(D, h, agree[1]),
     )
 end
 
 """
-    smallest_usable(c, reference) -> Float64
+    usable_steps(c, reference) -> Vector{Float64}
 
-The smallest step of the check `c` whose difference lies within `AGREE` of
-`reference`; `NaN` when none does.
+The steps of the check `c` whose difference lies within `AGREE` of
+`reference`; none when the reference is not finite.
 """
-function smallest_usable(c, reference)
-    isfinite(reference) || return NaN
-    k = findfirst(d -> abs(d - reference) <= AGREE * abs(reference), c.D)
-    return k === nothing ? NaN : c.steps[k]
-end
+usable_steps(c, reference) =
+    isfinite(reference) ?
+    [
+        c.steps[k] for
+        k in eachindex(c.D) if abs(c.D[k] - reference) <= AGREE * abs(reference)
+    ] : Float64[]
 
 """
-    tolerances_agree(loose, tight) -> Bool
+    tolerances_agree(loose, tight, steps) -> Bool
 
-Whether, at each of the three largest steps, the looser tolerance's
-difference lies within `AGREE` of the tighter's.
+Whether, at each of `steps`, the looser tolerance's difference lies within
+`AGREE` of the tighter's; false for no steps.
 """
-function tolerances_agree(loose, tight)
+function tolerances_agree(loose, tight, steps)
     loose.steps == tight.steps || throw(ArgumentError("the checks use different steps"))
-    n = length(tight.steps)
-    return all(abs(loose.D[k] - tight.D[k]) <= AGREE * abs(tight.D[k]) for k = (n-2):n)
+    isempty(steps) && return false
+    return all(steps) do x
+        k = findfirst(==(x), tight.steps)
+        abs(loose.D[k] - tight.D[k]) <= AGREE * abs(tight.D[k])
+    end
 end
 
 """
     qualification(checks) -> NamedTuple
 
 The verdict over the checks of one derivative at each tolerance, loosest
-first: the three largest steps agreeing at the tightest tolerance and the
-two tightest tolerances agreeing; the tightest's converged value; and per
-tolerance the smallest usable step against it.
+first: a converged window at the tightest tolerance and the two tightest
+tolerances agreeing on it; the tightest's converged value, its error and its
+window; per tolerance the usable steps against that value; and the literal
+reading's verdict and value.
 """
 function qualification(checks)
     tight = checks[end]
-    agrees = !isempty(tight.agreeing)
-    across = length(checks) >= 2 && tolerances_agree(checks[end-1], tight)
-    value = tight.value
+    loose = length(checks) >= 2 ? checks[end-1] : nothing
+    converges = !isempty(tight.window)
+    across = loose !== nothing && tolerances_agree(loose, tight, tight.window)
+    literal_agrees = !isempty(tight.agreeing)
+    literal_across =
+        loose !== nothing && tolerances_agree(loose, tight, tight.steps[(end-2):end])
     return (;
-        pass = agrees && across,
-        agrees,
+        pass = converges && across,
+        converges,
         across,
-        value,
+        value = tight.value,
         error = tight.error,
-        usable = [smallest_usable(c, value) for c in checks],
+        window = tight.window,
+        usable = [usable_steps(c, tight.value) for c in checks],
+        literal = (;
+            pass = literal_agrees && literal_across,
+            agrees = literal_agrees,
+            across = literal_across,
+            value = tight.literal_value,
+        ),
     )
 end

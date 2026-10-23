@@ -14,12 +14,14 @@
 # differences D(h) = (J(h) − J(−h))/(2h) at h ∈ {1, 2, 4, 8}·1e-3 estimate
 # dJ/d ln p; the flux's is also given per W/m².
 #
-# The verdict per parameter is `fd_convergence.jl`'s: the three largest steps'
-# differences within 5 % of one another at reltol 1e-8 and, at each of them,
-# the reltol 1e-7 and 1e-8 differences within 5 %; the converged value is
-# Richardson's from the two smallest agreeing steps at 1e-8, and the smallest
-# usable step at each tolerance is the smallest whose difference lies within
-# 5 % of it. The runs' invocation counts and steps are reported beside.
+# The verdict per parameter is `fd_convergence.jl`'s (C141): at reltol 1e-8
+# a window of three consecutive steps whose two Richardson extrapolants lie
+# within 5 % of each other, the converged value the extrapolant of its smaller
+# pair, and at each of its steps the reltol 1e-7 and 1e-8 differences within
+# 5 %; the usable steps at each tolerance are those whose difference lies
+# within 5 % of the converged value. The literal reading (the three largest
+# steps' differences within 5 % of one another) is reported beside, and the
+# runs' invocation counts and steps.
 #
 # Run from the repository root:
 #   julia --project=test --startup-file=no --threads=1 test/newcore/gates/fd_gradient_qualification.jl
@@ -145,6 +147,8 @@ _g(x; d = 4) =
     string(x)
 _yes(b) = b ? "pass" : "**fail**"
 _step(h) = isnan(h) ? "none" : "$(round(Int, 1000h))e-3"
+_steps(hs) = isempty(hs) ? "none" : join(_step.(hs), ", ")
+const UNIT = Dict(:pmma_alpha => "m²/kg", :flux => "W/m²", :A => "s⁻¹")
 
 function write_qualification(rows, results, load_start, load_end, elapsed)
     mkpath(OUT)
@@ -189,48 +193,57 @@ function write_qualification(rows, results, load_start, load_end, elapsed)
         println(io, "## The verdict\n")
         println(
             io,
-            "Per parameter: the three largest steps within $(Int(100AGREE)) % of one another at reltol ",
-            "$(RELTOLS[end]); the reltol $(RELTOLS[end-1]) and $(RELTOLS[end]) differences within ",
-            "$(Int(100AGREE)) % at each of them; the converged dJ/d ln p and its Richardson error; the ",
-            "smallest usable step at each tolerance (its difference within $(Int(100AGREE)) % of the ",
-            "converged value).\n",
+            "Per parameter, at reltol $(RELTOLS[end]): the converged window (three consecutive steps ",
+            "whose two Richardson extrapolants lie within $(Int(100AGREE)) % of each other), the ",
+            "converged dJ/d ln p (the extrapolant of the window's smaller pair), its error (the ",
+            "difference of the two extrapolants) and per unit of the parameter; the reltol ",
+            "$(RELTOLS[end-1]) and $(RELTOLS[end]) differences within $(Int(100AGREE)) % at each ",
+            "step of the window; the usable steps at each tolerance (the difference within ",
+            "$(Int(100AGREE)) % of the converged value); the verdict; and the literal reading (the three ",
+            "largest steps within $(Int(100AGREE)) % of one another, and its value).\n",
         )
         println(
             io,
-            "| parameter | J(0) | dJ/d ln p | Richardson error | per unit | three largest agree | tolerances agree | smallest usable step: ",
-            join(("reltol $(r)" for r in RELTOLS), ", "),
-            " | qualified |",
+            "| parameter | J(0) | window | dJ/d ln p | error | per unit | tolerances agree | ",
+            join(("usable at reltol $(r)" for r in RELTOLS), " | "),
+            " | qualified | literal reading |",
         )
-        println(io, "|---|---|---|---|---|---|---|---|---|")
+        println(
+            io,
+            "|---|---|---|---|---|---|---|",
+            repeat("---|", length(RELTOLS)),
+            "---|---|",
+        )
         for p in PARAMS
             q = results[p].q
             J0 = only(
                 r.J for r in rows if r.param == p && r.reltol == RELTOLS[end] && r.ε == 0
             )
-            unit =
-                p === :flux ? "$(_g(q.value / P0[p])) per W/m²" :
-                p === :pmma_alpha ? "$(_g(q.value / P0[p])) per m²/kg" : ""
+            literal =
+                "$(_yes(q.literal.pass))$(q.literal.agrees ? "" : " (the three largest disagree)")" *
+                (isnan(q.literal.value) ? "" : ", $(_g(q.literal.value; d = 5))")
             println(
                 io,
-                "| $(LABEL[p]) | $(_g(J0; d = 6)) | $(_g(q.value; d = 5)) | $(_g(q.error; d = 2)) | ",
-                "$(unit) | $(_yes(q.agrees)) | $(_yes(q.across)) | ",
-                "$(join(_step.(q.usable), ", ")) | $(_yes(q.pass)) |",
+                "| $(LABEL[p]) | $(_g(J0; d = 6)) | $(_steps(q.window)) | $(_g(q.value; d = 5)) | ",
+                "$(_g(q.error; d = 2)) | $(_g(q.value / P0[p])) per $(UNIT[p]) | $(_yes(q.across)) | ",
+                "$(join(_steps.(q.usable), " | ")) | $(_yes(q.pass)) | $(literal) |",
             )
         end
         println(io, "\n## The differences\n")
         println(
             io,
-            "D(h) at each step and tolerance, the spread of the three largest ((max − min)/min |D|), the ",
-            "agreeing steps and the tolerance's own converged value; the runs' invocations and their ",
-            "accepted steps at ε = 0.\n",
+            "D(h) at each step and tolerance; the Richardson extrapolants of successive pairs; the ",
+            "tolerance's own window and converged value; the spread of the three largest differences ",
+            "((max − min)/min |D|, the literal reading's); the runs' invocations and their accepted ",
+            "steps at ε = 0.\n",
         )
         println(
             io,
             "| parameter | reltol | ",
             join(("D($(_step(h)))" for h in STEPS), " | "),
-            " | spread of the three largest | agreeing steps | converged | invocations | steps at ε = 0 |",
+            " | extrapolants | window | converged | spread of the three largest | invocations | steps at ε = 0 |",
         )
-        println(io, "|---|---|", repeat("---|", length(STEPS)), "---|---|---|---|---|")
+        println(io, "|---|---|", repeat("---|", length(STEPS)), "---|---|---|---|---|---|")
         for p in PARAMS, (k, reltol) in enumerate(RELTOLS)
             c = results[p].checks[k]
             rs = [r for r in rows if r.param == p && r.reltol == reltol]
@@ -239,8 +252,9 @@ function write_qualification(rows, results, load_start, load_end, elapsed)
             println(
                 io,
                 "| $(LABEL[p]) | $(reltol) | $(join(_g.(c.D; d = 5), " | ")) | ",
-                "$(_g(spread(c.D[end-2:end]); d = 2)) | $(join(_step.(c.agreeing), ", ")) | ",
-                "$(_g(c.value; d = 5)) | $(join(inv, ", ")) | $(steps) |",
+                "$(join(_g.(c.extrapolants; d = 5), ", ")) | $(_steps(c.window)) | ",
+                "$(_g(c.value; d = 5)) | $(_g(spread(c.D[end-2:end]); d = 2)) | $(join(inv, ", ")) | ",
+                "$(steps) |",
             )
         end
         println(io, "\n## The runs\n")
