@@ -327,6 +327,7 @@ function envelope_main(args)
             (;
                 runs,
                 families,
+                stamp = COMMIT_STAMP,
                 load = (load_start, Sys.loadavg()),
                 elapsed = time() - started,
             ),
@@ -336,6 +337,9 @@ function envelope_main(args)
     end
     if length(args) == 2 && args[1] == "merge"
         parts = [deserialize(joinpath(args[2], "part$(k).jls")) for k in eachindex(PARTS)]
+        all(p -> p.stamp == COMMIT_STAMP, parts) || error(
+            "the parts were measured at $(unique(p.stamp for p in parts)), not at $(COMMIT_STAMP)",
+        )
         write_envelope(
             merge((p.runs for p in parts)...),
             vcat((p.families for p in parts)...),
@@ -361,11 +365,30 @@ end
 _act(a) = "$(a[1])/$(a[2])"
 _pair(ε_m, band) = band == ε_m ? "$(ε_m), threshold only" : "$(ε_m), band $(band)"
 _cells(f) = DECK_CELLS[f.deck]
+# The QoIs by short names.
+const _SHORT = (
+    "complete burnout" => "burnout",
+    "mass loss" => "mass loss",
+    "burnout time" => "burnout time",
+    "peak MLR" => "peak MLR",
+    "time of peak" => "peak time",
+    "mass ledger" => "ledger",
+    "clamped surface" => "surface",
+)
+function _short(name)
+    k = findfirst(x -> startswith(name, first(x)), _SHORT)
+    return k === nothing ? name : last(_SHORT[k])
+end
+# What fails over the four resolutions: the criterion's parts and the QoIs.
+function _failing(f)
+    h = f.all4
+    parts = [x for (x, ok) in (("(a)", h.a), ("(b)", h.b), ("peak", h.peak)) if !ok]
+    return join(vcat(parts, unique(_short.(f.failing))), ", ")
+end
 _verdict(f) =
     (
         f.from == _cells(f)[1] ? "pass" :
-        f.from == _cells(f)[2] ? "from $(f.from)" :
-        "**fail**" * (isempty(f.failing) ? "" : " ($(join(f.failing, "; ")))")
+        f.from == _cells(f)[2] ? "from $(f.from)" : "**fail**: $(_failing(f))"
     ) * _ended(f)
 _ended(f) = any(==(:interior), f.outcomes) ? ", `:interior`" : ""
 _invs(f) = join(("$(i)" for i in f.invocations), "/")
@@ -501,7 +524,9 @@ function write_envelope(runs, families, load_start, load_end, elapsed)
                 nothing,
             )
             r === nothing && continue
-            verdict = r.qoi_pass ? "QoIs pass" : "**fail** ($(join(r.qois_failing, "; ")))"
+            verdict =
+                r.qoi_pass ? "QoIs pass" :
+                "**fail**: $(join(unique(_short.(r.qois_failing)), ", "))"
             println(
                 io,
                 "| V-BO-01, 30 cells | $(_pair(ε, b)) | $(reltol) | $(rec) | $(verdict) | ",
@@ -527,7 +552,9 @@ function write_envelope(runs, families, load_start, load_end, elapsed)
             entry(form) = begin
                 r = runs[(name, ci, ε, b, reltol, act, form, :beneath)]
                 q = "$(r.qois_total - length(r.qois_failing))/$(r.qois_total)"
-                fail = isempty(r.qois_failing) ? "" : " ($(join(r.qois_failing, "; ")))"
+                fail =
+                    isempty(r.qois_failing) ? "" :
+                    " ($(join(unique(_short.(r.qois_failing)), ", ")))"
                 "$(q)$(fail), $(length(r.invocations)), $(_g(r.peak; d = 5))"
             end
             println(
@@ -582,7 +609,7 @@ function write_envelope(runs, families, load_start, load_end, elapsed)
                 "| $(r.deck) | $(r.n) | $(r.ε_m) | $(r.band) | $(r.reltol) | $(_act(r.activation)) | ",
                 "$(r.form) | $(r.receiver) | $(_g(r.τ; d = 4)) ($(_g(r.set_at; d = 5))) | ",
                 "$(r.retcode), $(r.outcome), $(_g(r.t_end; d = 5)) | $(_inv(r)) | ",
-                "$(r.qois_total - length(r.qois_failing))/$(r.qois_total) | $(join(r.qois_failing, "; ")) | ",
+                "$(r.qois_total - length(r.qois_failing))/$(r.qois_total) | $(join(unique(_short.(r.qois_failing)), ", ")) | ",
                 "$(_g(r.ledger)) | $(_g(r.peak; d = 5)) ($(_g(r.t_peak; d = 5))) | ",
                 "$(_g(r.main; d = 5)) ($(_g(r.t_main; d = 5))) | $(_g(r.tail; d = 4)) | ",
                 "$(r.steps) ($(r.rejected)) | $(_g(r.wall)) |",
