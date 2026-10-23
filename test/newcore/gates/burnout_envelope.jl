@@ -15,12 +15,11 @@
 #
 # The runs: the core matrix, every deck, resolution, pair, tolerance and
 # activation in the temperature form; the same at each deck's CI resolution
-# in the enthalpy form; two comparators at the default activation in the
+# in the enthalpy form; a comparator at the default activation in the
 # temperature form: the threshold-only removal (band = ε_m under the
-# correction, at both thresholds, every deck and resolution) and the
-# innermost receiver (`receiver = :innermost`, V-BO-07 at every resolution and
-# V-BO-01 at 30 cells, every pair). A case deck solves through the case's own
-# solve and its QoIs are the case's; the restricted deck's are the burnout,
+# correction, at both thresholds, every deck and resolution). A case deck
+# solves through the case's own solve and its QoIs are the case's; the
+# restricted deck's are the burnout,
 # mass-loss and ledger QoIs, which need no reference (its adiabatic back
 # reports no converged balance, so the surface QoI is left out). The
 # invocation QoI is reported apart from the others.
@@ -96,20 +95,15 @@ const DECKS = Dict(name => deck(name) for name in DECK_NAMES)
 # The matrix
 # ----------------------------------------------------------------------------
 
-# A run's key: (deck, cells, ε_m, band, reltol, activation, form, receiver).
+# A run's key: (deck, cells, ε_m, band, reltol, activation, form).
 # A family's: the key without the cells.
 family_keys(name) = begin
     keys = Any[]
     for (ε_m, band) in PAIRS, reltol in RELTOLS, act in ACTIVATIONS
-        push!(keys, (name, ε_m, band, reltol, act, :temperature, :beneath))
+        push!(keys, (name, ε_m, band, reltol, act, :temperature))
     end
     for ε_m in THRESHOLDS, reltol in RELTOLS
-        push!(keys, (name, ε_m, ε_m, reltol, DEFAULT_ACTIVATION, :temperature, :beneath))
-    end
-    if name == "V-BO-07"
-        for (ε_m, band) in PAIRS, reltol in RELTOLS
-            push!(keys, (name, ε_m, band, reltol, DEFAULT_ACTIVATION, :temperature, :innermost))
-        end
+        push!(keys, (name, ε_m, ε_m, reltol, DEFAULT_ACTIVATION, :temperature))
     end
     keys
 end
@@ -121,15 +115,7 @@ function run_keys(name)
     end
     ci = DECKS[name].ci
     for (ε_m, band) in PAIRS, reltol in RELTOLS, act in ACTIVATIONS
-        push!(keys, (name, ci, ε_m, band, reltol, act, :enthalpy, :beneath))
-    end
-    if name == "V-BO-01"
-        for (ε_m, band) in PAIRS, reltol in RELTOLS
-            push!(
-                keys,
-                (name, 30, ε_m, band, reltol, DEFAULT_ACTIVATION, :temperature, :innermost),
-            )
-        end
+        push!(keys, (name, ci, ε_m, band, reltol, act, :enthalpy))
     end
     return keys
 end
@@ -152,7 +138,7 @@ end
 _isinvocation(q) = startswith(q.name, "deactivation invocations")
 
 function envelope_run(key)
-    name, n, ε_m, band, reltol, act, form, receiver = key
+    name, n, ε_m, band, reltol, act, form = key
     d = DECKS[name]
     problem = Base.invokelatest(d.build, n)
     series = Series()
@@ -171,7 +157,6 @@ function envelope_run(key)
             threshold = ε_m,
             band,
             reltol,
-            receiver,
             correction = Cl.EquidistributionCorrection(; activation = act),
             instrument,
         )
@@ -193,7 +178,6 @@ function envelope_run(key)
         reltol,
         activation = act,
         form,
-        receiver,
         τ = isempty(corr.time) ? NaN : first(corr.time),
         set_at = isempty(corr.set_at) ? NaN : first(corr.set_at),
         retcode = sol.retcode,
@@ -280,7 +264,6 @@ function envelope_family(fkey, runs)
         band = fkey[3],
         reltol = fkey[4],
         activation = fkey[5],
-        receiver = fkey[7],
         threshold_only = fkey[3] == fkey[2],
         all4,
         fine3,
@@ -409,7 +392,7 @@ function write_envelope(runs, families, load_start, load_end, elapsed)
     open(joinpath(OUT, "burnout_envelope.csv"), "w") do io
         println(
             io,
-            "deck,cells,eps_m,band,reltol,r_hi,r_lo,form,receiver,tau,set_at,retcode,outcome,t_end,",
+            "deck,cells,eps_m,band,reltol,r_hi,r_lo,form,tau,set_at,retcode,outcome,t_end,",
             "invocations,cells_merged,largest_fraction,qois_passing,qois_total,failing,ledger,",
             "peak,t_peak,main_peak,t_main,tail,steps,rejected,wall",
         )
@@ -427,7 +410,6 @@ function write_envelope(runs, families, load_start, load_end, elapsed)
                         r.activation[1],
                         r.activation[2],
                         r.form,
-                        r.receiver,
                         r.τ,
                         r.set_at,
                         r.retcode,
@@ -470,7 +452,7 @@ function write_envelope(runs, families, load_start, load_end, elapsed)
         println(
             io,
             "The hard criterion per family (a deck, threshold, band, tolerance and activation at its four ",
-            "resolutions, the default receiver): pass over every resolution, \"from N\" over the finest ",
+            "resolutions): pass over every resolution, \"from N\" over the finest ",
             "three, or fail with the failing QoIs named; the invocations at each resolution in brackets. ",
             "Every QoI within tolerance; (a) the largest per-step excess of N over 2N and (b) the successive ",
             "L1, each falling at least $(FALL)× per doubling; the accepted-step peak converging.\n",
@@ -483,56 +465,14 @@ function write_envelope(runs, families, load_start, load_end, elapsed)
             " |",
         )
         println(io, "|---|---|---|", repeat("---|", length(cols)))
-        index = Dict(
-            (f.deck, f.ε_m, f.band, f.reltol, f.activation, f.receiver) => f for
-            f in families
-        )
+        index = Dict((f.deck, f.ε_m, f.band, f.reltol, f.activation) => f for f in families)
         for name in DECK_NAMES, act in ACTIVATIONS, reltol in RELTOLS
             any(f -> f.deck == name, families) || continue
             cells = map(cols) do (ε, b)
-                f = get(index, (name, ε, b, reltol, act, :beneath), nothing)
+                f = get(index, (name, ε, b, reltol, act), nothing)
                 f === nothing ? "" : "$(_verdict(f)) [$(_invs(f))]"
             end
             println(io, "| $(name) | $(_act(act)) | $(reltol) | $(join(cells, " | ")) |")
-        end
-        println(io, "\n## The innermost receiver\n")
-        println(
-            io,
-            "V-BO-07's families under each receiver, and V-BO-01's 30-cell runs (D142), at the default ",
-            "activation: the verdict, the invocations, the largest merged fraction [%], the accepted-step ",
-            "and main peaks [g m⁻² s⁻¹] and the tail [g/m²] (at the finest resolution for a family).\n",
-        )
-        println(
-            io,
-            "| deck | ε_m, band | reltol | receiver | verdict | invocations | largest | peak | main | tail |",
-        )
-        println(io, "|---|---|---|---|---|---|---|---|---|---|")
-        for (ε, b) in PAIRS, reltol in RELTOLS, rec in (:beneath, :innermost)
-            f = get(index, ("V-BO-07", ε, b, reltol, DEFAULT_ACTIVATION, rec), nothing)
-            f === nothing && continue
-            println(
-                io,
-                "| V-BO-07 | $(_pair(ε, b)) | $(reltol) | $(rec) | $(_verdict(f)) | $(_invs(f)) | ",
-                "$(join(_g.(100 .* f.largest), ", ")) | $(_g(f.all4.peaks[end]; d = 5)) | ",
-                "$(_g(f.mains[end]; d = 5)) | $(_g(f.tails[end]; d = 4)) |",
-            )
-        end
-        for (ε, b) in PAIRS, reltol in RELTOLS, rec in (:beneath, :innermost)
-            r = get(
-                runs,
-                ("V-BO-01", 30, ε, b, reltol, DEFAULT_ACTIVATION, :temperature, rec),
-                nothing,
-            )
-            r === nothing && continue
-            verdict =
-                r.qoi_pass ? "QoIs pass" :
-                "**fail**: $(join(unique(_short.(r.qois_failing)), ", "))"
-            println(
-                io,
-                "| V-BO-01, 30 cells | $(_pair(ε, b)) | $(reltol) | $(rec) | $(verdict) | ",
-                "$(length(r.invocations)) | $(_g(100r.largest)) | $(_g(r.peak; d = 5)) | ",
-                "$(_g(r.main; d = 5)) | $(_g(r.tail; d = 4)) |",
-            )
         end
         println(io, "\n## The energy forms at the CI resolution\n")
         println(
@@ -548,9 +488,9 @@ function write_envelope(runs, families, load_start, load_end, elapsed)
         println(io, "|---|---|---|---|---|---|")
         for name in DECK_NAMES, (ε, b) in PAIRS, reltol in RELTOLS, act in ACTIVATIONS
             ci = DECKS[name].ci
-            haskey(runs, (name, ci, ε, b, reltol, act, :enthalpy, :beneath)) || continue
+            haskey(runs, (name, ci, ε, b, reltol, act, :enthalpy)) || continue
             entry(form) = begin
-                r = runs[(name, ci, ε, b, reltol, act, form, :beneath)]
+                r = runs[(name, ci, ε, b, reltol, act, form)]
                 q = "$(r.qois_total - length(r.qois_failing))/$(r.qois_total)"
                 fail =
                     isempty(r.qois_failing) ? "" :
@@ -572,15 +512,15 @@ function write_envelope(runs, families, load_start, load_end, elapsed)
         )
         println(
             io,
-            "| deck | ε_m, band | reltol | activation | receiver | (a); ratios | (b); ratios | peaks | tails | largest | (a) | (b) | peak | QoIs | verdict |",
+            "| deck | ε_m, band | reltol | activation | (a); ratios | (b); ratios | peaks | tails | largest | (a) | (b) | peak | QoIs | verdict |",
         )
-        println(io, "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+        println(io, "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
         for f in families
             h = f.all4
             println(
                 io,
                 "| $(f.deck) | $(_pair(f.ε_m, f.band)) | $(f.reltol) | $(_act(f.activation)) | ",
-                "$(f.receiver) | $(_list(h.exc; scale = 1)); $(_list(ratios(h.exc); scale = 1)) | ",
+                "$(_list(h.exc; scale = 1)); $(_list(ratios(h.exc); scale = 1)) | ",
                 "$(_list(h.succ; scale = 1)); $(_list(ratios(h.succ); scale = 1)) | ",
                 "$(join(_g.(h.peaks; d = 5), ", ")) | $(join(_g.(f.tails; d = 4), ", ")) | ",
                 "$(join(_g.(100 .* f.largest), ", ")) | $(_yes(h.a)) | $(_yes(h.b)) | ",
@@ -596,18 +536,18 @@ function write_envelope(runs, families, load_start, load_end, elapsed)
         )
         println(
             io,
-            "| deck | cells | ε_m | band | reltol | activation | form | receiver | τ (set at) | retcode, outcome, end | invocations | QoIs | failing | ledger | peak (t) | main (t) | tail | steps (rejected) | wall [s] |",
+            "| deck | cells | ε_m | band | reltol | activation | form | τ (set at) | retcode, outcome, end | invocations | QoIs | failing | ledger | peak (t) | main (t) | tail | steps (rejected) | wall [s] |",
         )
         println(
             io,
-            "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
+            "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
         )
         for k in order
             r = runs[k]
             println(
                 io,
                 "| $(r.deck) | $(r.n) | $(r.ε_m) | $(r.band) | $(r.reltol) | $(_act(r.activation)) | ",
-                "$(r.form) | $(r.receiver) | $(_g(r.τ; d = 4)) ($(_g(r.set_at; d = 5))) | ",
+                "$(r.form) | $(_g(r.τ; d = 4)) ($(_g(r.set_at; d = 5))) | ",
                 "$(r.retcode), $(r.outcome), $(_g(r.t_end; d = 5)) | $(_inv(r)) | ",
                 "$(r.qois_total - length(r.qois_failing))/$(r.qois_total) | $(join(unique(_short.(r.qois_failing)), ", ")) | ",
                 "$(_g(r.ledger)) | $(_g(r.peak; d = 5)) ($(_g(r.t_peak; d = 5))) | ",

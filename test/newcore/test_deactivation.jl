@@ -457,82 +457,52 @@ end
     @test setup(_ablator(4); band = 5e-3).deactivation === nothing
 end
 
-@testset "the innermost receiver keeps its layer's innermost cell: $(energy) form" for energy in
-                                                                                       (
+@testset "a run through its layer's innermost cell merges into the cell beneath: $(energy) form" for energy in
+                                                                                                     (
     :temperature,
     :enthalpy,
 )
     # Cells 1 to 3 the substrate, 4 to 9 the layer; every layer cell below
     # the threshold.
-    problem = _on_substrate(6, 3)
-    kw = (; energy_state = energy, use_ale = true, deactivation = true)
-    depleted(cp) = begin
-        u = copy(cp.u0)
-        for i = 4:9
-            _deplete!(u, cp, i, (0.4 + 0.1 * isodd(i)) * cp.deactivation.threshold)
-        end
-        consistent_state!(u, cp.def, cp.ws, 0.0)
-        u
+    cp = setup(
+        _on_substrate(6, 3);
+        energy_state = energy,
+        use_ale = true,
+        deactivation = true,
+    )
+    @test 4 in cp.def.setup.topology.lagrangian
+    def, layout, cells = cp.def, cp.def.layout, cp.deactivation
+    u = copy(cp.u0)
+    for i = 4:9
+        _deplete!(u, cp, i, (0.4 + 0.1 * isodd(i)) * cells.threshold)
     end
-    beneath, innermost = setup(problem; kw...), setup(problem; kw..., receiver = :innermost)
-    @test (beneath.deactivation.receiver, innermost.deactivation.receiver) ===
-          (:beneath, :innermost)
-    @test 4 in innermost.def.setup.topology.lagrangian
-    x_top = depleted(beneath)[position_index(beneath.def.layout, 10)]
-    for (cp, r) in ((beneath, 3), (innermost, 4))
-        def, layout, cells = cp.def, cp.def.layout, cp.deactivation
-        u = depleted(cp)
-        masses, E = _total_masses(u, layout), _live_energy(cp, u)
-        x_inward = [u[position_index(layout, nd)] for nd = 1:r]
-        substrate = [u[mass_index(layout, i, 2)] for i = 1:3]
-        @test deactivate!(u, cells, def, 1.0) === :transferred
-        @test [e.cell for e in cells.events] == 9:-1:(r+1)
-        @test all(e.receiver == r && e.invocation == 1 for e in cells.events)
-        @test top_live_cell(layout) == r
-        # The inventories and the volume, as the default receiver keeps them:
-        # the receiver's far face is the layer's top, its inward node and
-        # every node beneath it stay put.
-        @test _total_masses(u, layout) ≈ masses rtol = 1e-14
-        @test _ledger(cp, u, cells.events) ≈ E rtol = 1e-12
-        @test u[position_index(layout, r + 1)] ≈ x_top rtol = 1e-12
-        @test [u[position_index(layout, nd)] for nd = 1:r] == x_inward
-        @test sum(u[mass_index(layout, i, 2)] for i = 1:3) ≈ sum(substrate) rtol = 1e-14
-        # The merged cell is admissible and consistent.
-        consistent_state!(u, def, cp.ws, 1.0)
-        @test !inadmissible(u, layout, def.setup, cp.abstol)
-        du = zeros(length(u))
-        residual!(du, u, def, 1.0, cp.ws)
-        @test all(isfinite, du)
-        Jd = dense_jacobian(def, cp.ws, u, 1.0)
-        @test isempty(missing_entries(Jd, cp.jacobian.pattern))
-        J = jacobian!(jac_prototype(cp.jacobian), cp.jacobian, u, 1.0)
-        @test compare_entries(Matrix(J), Jd; rtol = 1e-12).passed
-        r == 4 || continue
-        # The survivor holds the layer's residue, 2.7 of its own threshold,
-        # and goes into the substrate once that is below the threshold.
-        f = condensed_mass(cells, layout, u, 4) / cells.reference[4]
-        @test f ≈ 2.7 * cells.threshold rtol = 1e-12
-        @test !below_threshold(cells, layout, u, 4)
-        _deplete!(u, cp, 4, 0.5 * cells.threshold)
-        @test deactivate!(u, cells, def, 2.0) === :transferred
-        e = last(cells.events)
-        @test (e.cell, e.receiver, e.invocation) == (4, 3, 2)
-        @test top_live_cell(layout) == 3
-        fill!(layout.mask, true)
-    end
-    fill!(beneath.def.layout.mask, true)
-
-    # A run that stops short of its layer's innermost cell goes to the cell
-    # beneath it under either receiver.
-    reset_cells!(innermost.deactivation, innermost.def.layout)
-    u = copy(innermost.u0)
-    for (i, f) in (9 => 0.5e-2, 8 => 0.05, 7 => 0.08, 6 => 0.4)
-        _deplete!(u, innermost, i, f)
-    end
-    @test deactivate!(u, innermost.deactivation, innermost.def, 1.0) === :transferred
-    @test [e.cell => e.receiver for e in innermost.deactivation.events] == [9 => 6, 8 => 6, 7 => 6]
-    fill!(innermost.def.layout.mask, true)
-    @test_throws ArgumentError setup(problem; kw..., receiver = :outermost)
+    consistent_state!(u, def, cp.ws, 0.0)
+    x_top = u[position_index(layout, 10)]
+    masses, E = _total_masses(u, layout), _live_energy(cp, u)
+    x_inward = [u[position_index(layout, nd)] for nd = 1:3]
+    substrate = [u[mass_index(layout, i, 2)] for i = 1:3]
+    @test deactivate!(u, cells, def, 1.0) === :transferred
+    @test [e.cell for e in cells.events] == 9:-1:4
+    @test all(e.receiver == 3 && e.invocation == 1 for e in cells.events)
+    @test top_live_cell(layout) == 3
+    # The inventories and the volume: the receiver's far face is the layer's
+    # top, its inward node and every node beneath it stay put.
+    @test _total_masses(u, layout) ≈ masses rtol = 1e-14
+    @test _ledger(cp, u, cells.events) ≈ E rtol = 1e-12
+    @test u[position_index(layout, 4)] ≈ x_top rtol = 1e-12
+    @test [u[position_index(layout, nd)] for nd = 1:3] == x_inward
+    @test sum(u[mass_index(layout, i, 2)] for i = 1:3) ≈ sum(substrate) rtol = 1e-14
+    # The merged cell is admissible and consistent.
+    consistent_state!(u, def, cp.ws, 1.0)
+    @test !inadmissible(u, layout, def.setup, cp.abstol)
+    du = zeros(length(u))
+    residual!(du, u, def, 1.0, cp.ws)
+    @test all(isfinite, du)
+    Jd = dense_jacobian(def, cp.ws, u, 1.0)
+    @test isempty(missing_entries(Jd, cp.jacobian.pattern))
+    J = jacobian!(jac_prototype(cp.jacobian), cp.jacobian, u, 1.0)
+    @test compare_entries(Matrix(J), Jd; rtol = 1e-12).passed
+    fill!(layout.mask, true)
 end
 
 @testset "the threshold-only removal takes the cells below the threshold" begin
