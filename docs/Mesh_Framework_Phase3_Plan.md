@@ -579,6 +579,80 @@ Total 16.25 days: **about three weeks**, against the two of §6. The growth is t
 
 **Status.** M3 is built and its gate passed but for the fast partition's cold-cache budget (C130). Owner questions: question 13's verdict and C130's sixth job; C127 (the clamped `porosity`'s three callers, and `effective_heat_capacity` and `effective_emissivity`: delete or keep public); the ledger's open points (the interior-void warning, the fixed-mesh Beer–Lambert integrator pair, the `jacobian` keyword, the method count's process, the donor-upwind bound, the semantic changes counted as covered, the surface balance's `converged` flag, which an adiabatic face leaves `false` after a solve); two observations of the solve group outside its configurations (a fully converted top cell on a fixed mesh drops its absorptivity to about 2e-5; the same fast-kinetics deck on a moving mesh without deactivation stops with `DtLessThanMin` near 2e5 K).
 
+### 13.5 M4
+
+**Branch.** `mesh-framework` (D128), from `21f4c17`. M4 starts with the M3 owner questions open; none of them touches the correction.
+
+**W3's items as tasks** (days are a developer's working days; the time box of §6 is three weeks).
+
+| Task | Builds | Its test | Days |
+|---|---|---|---|
+| 1 | Candidate B: `EquidistributionCorrection(τ = ActivationTime())`, the bound correction's per-layer times and estimate stages, the activation margin and the estimate with its degenerate cases, the located event in `integrate` with its reset at every call and its crossing for the conservation recorders | — | 2 |
+| 2 | `λ` fixed before the ladder from V-BO-01's calibrated layer time | — | 0.5 |
+| 3 | §5.3 item 13: the restricted deck and its rescaled pairs (the core with `τ` scaled by hand, then candidate B unscaled); the per-layer times on a two-layer deck; the degenerate cases, each guard passing the rescaled deck; containment with two layers of different `τ`; the event's shift against the tolerance; admissibility after it; repeated solves bit-identical | `test_layer_time.jl` | 2.5 |
+| 4 | `tau_ladder.jl` (§5.4): the configurations of W3 under the constant `τ`, candidate A and candidate B, and the qualification runs; per run the invocations, the largest merged fraction, the activated life, `T_sync`, the steps, the case's QoIs and the burst measures | — | 3 |
+| 5 | The ladder measured | — | 2 |
+| 6 | The acceptance reading of §7 item 11; promotion or the fallback | — | 1 |
+| 7 | Promotion (the default, the V-BO cases' text, the identity digests and the references re-recorded once) or the fallback (candidate B deleted, the per-layer keyword and its support statement) | the suite | 2 |
+| G | Format, Aqua, JET; the touched test files; `NEW_CORE_CASES` in both forms; this record | — | 2 |
+
+Total 15 days: **three weeks**, the time box.
+
+**D135. Candidate B as built.** `EquidistributionCorrection(τ = ActivationTime(; λ, fallback, floor))`: the bound correction (`LayerCorrection`) keeps per moving layer its bounding nodes, its time, when that time was set and the stage of its estimate. Each layer starts at `fallback` (`EQUIDISTRIBUTION_TIME`). `layer_time_margin`, the smallest `hᵢ/(r hᵢ(0)) − 1` over the live cells of the layers still waiting (`r = r_hi`, or `r_lo` for a layer waiting for its second threshold), is the condition of a located event in `integrate` (`RightRootFind`, the margin widened by the relative tolerance as the deactivation's is). There `estimate_layer_times!` reads the layer's thickness `h` and thinning rate `ḣ` from the node positions and velocities, sets `τ = λ h/|ḣ|` and the layer's gain `N²/τ`, and marks the layer set. The rate floor is `floor` times the layer's initial thickness over the solve's horizon: at or below it the layer keeps `fallback` and is estimated once more at `r_lo`; a thickening layer keeps `fallback`; a layer is estimated once. The event changes no state, and it lands where every activation of the layer and its slope are zero (`S(0) = S′(0) = 0`), so the right-hand side does not jump and the policy's observer flag rule applies to it, as to a read-only observer. `integrate` resets every layer before the first activation, so repeated integrations are bit-identical. The conservation recorders' crossings and V-BO-01's ledger recorder end a step at the event's crossing, as they do at the located deactivation; without the latter the ledger of a step the event cut read `NaN`.
+
+**D136. `λ = 1.8`, fixed before the ladder.** V-BO-01's estimate at its first activation, `h/|ḣ|`, is 402, 405 and 406 s at 30, 60 and 120 cells (activation at 92.2 to 93.4 s, the layer at 5.32 to 5.34 mm thinning at 13.2 µm/s; first invocation at 358 s, so an activated life of 265 s). `λ = 720/405` gives the calibrated time; rounded to 1.8, V-BO-01 at 60 cells gets 729 s (one invocation, 4.21 % against 4.08 %, 1,116 steps against 1,125). `T_sync = τ/π²` is then 0.18 of the estimated life. V-BO-08's 1 mm layer is at 0.32 mm when its first cell activates (it thins almost uniformly before any cell does), `h/|ḣ|` = 13.3 s against an activated life of 13.6 s, so it gets 24 s: at `ε_m = 3e-2`, one invocation at 4.12 % where the fixed time ends `:interior` (C94); at 1e-2, 1.35 % against 4.53 %, in 223 steps against 213.
+
+**D137. The rescaled identity holds to the tolerance, not bit for bit.** With `s` a power of two every scaled input is exact, yet the `s = 2` and `s = 1/2` runs part from `s = 1` at round-off before any event (6e-14 K at 17 s on the 12-cell restricted deck), and the step-size controller carries the difference on (234 against 236 accepted steps). §5.3 item 13's "equal in dimensionless time to the tolerance" is therefore read against the solve's own error: within five times the difference between reltol 1e-6 and 1e-7 at `s = 1`. On the test deck that error is 0.011 K, 3.5e-10 m and 1.2e-5 s in the event times. The pairs sit at 0.004 to 0.025 K, 1e-14 to 2e-11 m and 1e-12 to 1.4e-8 s, whether `τ` is scaled by hand or under candidate B unscaled; B's times agree to 2e-7. One unscaled time departs by 1.7 to 1.9 K and 0.10 to 0.13 s.
+
+**C131. "V-BO-01's deck at 25 and 50 kW/m²".** V-BO-01 is the 50 kW/m² deck. *Resolution:* the heating rows are 25 and 100 kW/m², a factor of two either side, as the kinetics rows (`A/2`, `2A`) and the rescaled pairs (`s = 1/2`, 2) are.
+
+**C132. The restricted deck's losses.** W3 restricts the deck to no re-radiation and an adiabatic back. With V-BO-01's convective coefficient of 8.2 W/(m²·K) as its only loss, the bare Kaowool heats after the layer is gone toward 6,000 K (48 kW/m² absorbed), past the property bracket's 3,000 K, and the surface QoI fails on the accepted states on the trial clamp. *Resolution:* the ladder's restricted deck takes 30 W/(m²·K) at the top, the re-radiation of a surface near 650 K linearized (equilibrium about 1,900 K); the coefficient scales with `s` as every rate does. The test deck of `test_layer_time.jl` ends before its substrate gets that hot and keeps 10 W/(m²·K).
+
+**C133. The time a layer needs depends on how localized its thinning becomes after activation, which the rate at activation does not see.** Scratch runs at 60 cells, ε_m = 1e-2:
+
+| deck | fixed 720 s | B: τ (set at) | B | one invocation needs τ ≤ |
+|---|---|---|---|---|
+| V-BO-01, 25 kW/m² | 1 (1.64 %), 1,130 steps | 1,449 s (370 s) | 1 (1.11 %), 940 steps | — |
+| V-BO-01, 100 kW/m² | **2** | 321 s (28 s) | **2** | 180 s (1 at 180, 90, 45; 2 at 360) |
+| restricted, `s = 1` | **2** | 605 s (60 s) | **2** | 180 s (as above) |
+| V-BO-01, flux × 1.5 at 150 s | **2** | 729 s (92 s) | **2** | 180 s (1 at 360 but at 6.6 %) |
+| V-BO-01, `A/2`, `2A`, flux × 0.5 at 150 s | 1 | 694 to 767 s | 1 | — |
+| the long layer (100 cells) | 1, 1,776 steps | 338 s (35 s) | 1, 2,157 steps | — |
+
+At activation the estimate over the activated life is 1.4 to 1.6 on V-BO-01, the 100 kW/m² deck and the restricted deck alike. A localization measure of the thinning, the mean flux the correction must carry across the layer over the layer's rate (`Σₖ |Σ_{i≥k} (ḣᵢ − ḣ̄)| / (N |ḣ_L|)`), is 0.38 to 0.42 on all three. The hot decks need a third of V-BO-01's time relative to that estimate: their thinning concentrates at the surface later in the layer's life. A quasi-steady reading of the correction explains the direction. A sink at the surface, carried across the layer at the gain `N²/τ`, leaves a relative thickness spread of about `τ/(2L)`, `L` the layer's thickness over its thinning rate; a sink spread over the layer leaves far less. One `λ` calibrated on V-BO-01 therefore cannot hold the single invocation on the hot decks; `λ` near 0.5 would, at the cost of more steps everywhere. The ladder reports B at `λ = 0.5` beside the candidates for that reason. Under question 21 the invocation count is a reported target, so whether these decks fail is the hard criterion's to say (W9's accuracy under refinement).
+
+The measure also shows where the lag sits. Through the layer's life the cells' thicknesses relative to their own initial ones spread over 0.6 to 0.97: the cells still above `r_hi` are outside the correction, and on the hot decks the deep cells lag furthest. The activation thresholds are therefore a lever beside `τ`. Scratch runs at 60 cells with the fixed time:
+
+| activation (`r_hi`, `r_lo`) | V-BO-01 | restricted, `s = 1` | 100 kW/m², fixed or B |
+|---|---|---|---|
+| (0.3, 0.1), the default | 1 (4.08 %), 1,125 steps | in the ladder | 2 |
+| (0.5, 0.2) | 1 (2.0 %), 1,110 | 1 (4.0 %), 1,151 | 2 |
+| (0.7, 0.3) | 1 (1.41 %), 990 | 1 (2.5 %), 1,028 | 2 |
+| (0.9, 0.3) | 1 (1.43 %), 719 | 1 (2.0 %), 752 | 2 |
+
+Earlier activation keeps V-BO-01's single invocation at a third of its merged fraction and cuts its steps by up to 36 %. The 100 kW/m² deck keeps its two invocations at every activation tried; only a time at or below 180 s gives it one. The activation thresholds are W9's to measure (M5), with their accuracy under refinement; they are recorded here as a lead, not taken.
+
+**C134. The surface QoI on a deck with an adiabatic face.** The burnout cases' surface QoI counts the accepted states on which any thermal face's balance did not converge or sits on the trial clamp. An adiabatic face reports its balance as not converged (the open point of M3's ledger), so the restricted deck, whose back is adiabatic, failed that QoI at every resolution under every rule in the ladder's first run. *Resolution:* the ladder leaves the surface QoI out on the restricted deck, its reason in the script; the flag itself stays M3's owner question.
+
+**The ladder** (`measurements/tau_ladder.md`, 268 runs at a load of 16 to 19, in a detached worktree of the tree the record names). §7 item 11, per rule:
+
+| rule | item 1 where the fixed time holds it (15 case rows) | V-BO-08 at 3e-2 | rescaled pairs | W9's hard criterion | flux steps | long layer, 100 cells |
+|---|---|---|---|---|---|---|
+| fixed | pass | `:interior` | fail (two invocations at `s = 1` and 2, one at 1/2) | every family but the restricted deck at `s = 1/2`, (a) 1.24 | pass | 1,776 steps |
+| A | pass | pass (`τ` = 120 s) | fail (as fixed) | as fixed | pass | 2,884 |
+| B | pass | pass (`τ` = 24 s, 4.12 %) | pass (temperatures within 0.03 to 0.09 K against the solve's own 0.17 to 0.39 K) | every family but the restricted deck's three, (a) 0.21 | pass | 2,157 |
+| B(0.5) | fail (V-BO-06 at 5.02 and 5.04 % against 5 %, 2.25 % at 3e-3 against 1.5 %) | pass | pass | every family but the restricted deck's three, (a) 1.25 | pass | 2,635 |
+
+Accepted steps at the CI resolution against the fixed time's: B 0.99 (V-BO-01), 1.02 (06), 1.17 (07), 1.05 (08), 0.83 (25 kW/m²), 1.22 (100 kW/m²), 0.98 to 1.02 (the kinetics and flux-step decks), 1.21 (the long layer); B(0.5) 1.11 to 1.65.
+
+The hard criterion passes on every physical configuration under every rule, the hot decks included: the 100 kW/m² deck and the flux stepped to one and a half times take two invocations under the fixed time and under B, and their accuracy converges under refinement all the same ((a) 5.1 to 5.5, (b) 1.9 to 2.0, the main peak converging). Under question 21 their invocation count is a reported target, so C133 is a cost of the count, not of accuracy.
+
+**C135. The restricted deck's criterion (a) under B.** The restricted deck sits where the layer goes in one or two invocations. Under B its 30-cell run takes one (8.88 %) and its 60- and 120-cell runs two, so the largest per-step excess of N over 2N grows from 4.65 to 22.6 g m⁻² s⁻¹ and (a) reads 0.21. The fixed time takes two at every resolution and passes (a) at `s = 1` and 2. At `s = 1/2`, where the unscaled time is in effect twice the layer's, it takes one at 60 cells and fails (a) at 1.24. With three resolutions one ratio decides, and the invocation count switching between resolutions is what (a) reads. *Resolution (proposed):* the restricted deck is the identity's deck; its family's (a) goes to M5's envelope, where W9 reads it at 30 to 240 cells beside the comparators, and is not read as a failure of B here. Owner question.
+
+**The reading.** B passes §7 item 11 on every part but the restricted family's (a) (C135). It is never worse than the fixed time on item 1 or the hard criterion on a physical deck. It takes V-BO-08 at 3e-2 from `:interior` to one invocation (C94) and is scale-aware where the fixed time and A are not. Its cost is within 0.83 to 1.22 of the fixed time's (1.21 on the long layer, so it is no lever on R41). A is the fixed time on every deck of V-BO-01's thickness and is not scale-aware; it is not promoted. B(0.5) holds one invocation on every deck of the ladder but fails item 1 on V-BO-06, where it equalizes thickness across a graded mesh, and costs 1.1 to 1.65 times the fixed time; it is not promoted.
+
+**Status.** M4's build and ladder are done; the promotion is the owner's. *Owner:* (a) promote B (recommended): the default becomes `EquidistributionCorrection(τ = ActivationTime())`, every V-BO digest and the class B identity digests are re-recorded once, the cases' text and the guide's burnout parameters follow, and C135 goes to M5; or (b) the fallback: B deleted, `τ` accepting one value per layer, with a support statement from this ladder; or (c) B promoted at another `λ` (B(0.5)'s rows bound that choice). Questions also open: C135's reading, C134's flag (M3's), and whether earlier activation (C133's table) joins W9's study.
+
 ---
 
 ## Appendix A. Inventories
