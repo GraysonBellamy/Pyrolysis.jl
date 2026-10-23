@@ -19,7 +19,10 @@ using LinearSolve: KLUFactorization, UMFPACKFactorization
 
 # An ablating solid: it decomposes to a gas that takes no volume, so a cell's
 # thickness falls with its condensed mass, as in V-CPL-02. `radiating` makes
-# the solid absorb in depth.
+# the solid absorb in depth; `porous` gives it pores (φ = 0.2) and a
+# permeability, so its gas flows by Darcy's law; `law` is a lateral shrinkage
+# law. `top` replaces the heated condition, `mass_top` the film on the top
+# face, `mesh` the uniform mesh and `ξ_initial` the solid column.
 function _ablator(
     n;
     L = 3e-3,
@@ -27,35 +30,47 @@ function _ablator(
     t_end = 0.8,
     radiating = false,
     from_bottom = false,
+    porous = false,
+    law = nothing,
+    top = nothing,
+    mass_top = ConvectiveMassBC(h_m = 10.0, ξ_inf = 0.0),
+    mesh = nothing,
+    ξ_initial = nothing,
 )
     ρ, c, k = 1000.0, 1000.0, 1.0
     R, E, Tp, T0 = 8.314462618, 1.0e5, 700.0, 300.0
     v = 2.0e-3
     A = v^2 * E * (Tp - T0) * exp(E / (R * Tp)) / (k / (ρ * c) * R * Tp^2)
-    solid =
-        SolidComponent(:solid, ρ = ρ, c = c, k = k, λ = 1e-6, α = radiating ? 50.0 : 0.0)
+    pores = porous ? (ρ_intrinsic = 1.25ρ, κ = 1e-12) : (;)
+    solid = SolidComponent(
+        :solid;
+        ρ = ρ,
+        c = c,
+        k = k,
+        λ = 1e-6,
+        α = radiating ? 50.0 : 0.0,
+        pores...,
+    )
     gas = GaseousComponent(:gas, M = 0.05, c = c, k = 0.02, λ = 1e-4)
     mat = Material(
         name = :ablator,
         components = (solid, gas),
         reactions = (Reaction(:ablate, 1 => 2; A = A, E = E, h = 1.0e6),),
+        lateral_shrinkage_law = law,
     )
-    heated = radiating ? RadiativeFluxBC(flux = q) : HeatFluxBC(q)
+    heated = something(top, radiating ? RadiativeFluxBC(flux = q) : HeatFluxBC(q))
     thermal =
         from_bottom ? (top = AdiabaticBC(), bottom = heated) :
         (top = heated, bottom = AdiabaticBC())
     return PyrolysisProblem(
-        mesh = create_uniform_mesh(L, n),
+        mesh = something(mesh, create_uniform_mesh(L, n)),
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = thermal,
-            mass = (
-                top = ConvectiveMassBC(h_m = 10.0, ξ_inf = 0.0),
-                bottom = ImpermeableBC(),
-            ),
+            mass = (top = mass_top, bottom = ImpermeableBC()),
         ),
         T_initial = from_bottom ? (z -> T0 + 1e5 * (L - z)) : (z -> T0 + 1e5 * z),
-        ξ_initial = [z -> ρ, z -> 0.0],
+        ξ_initial = something(ξ_initial, [z -> ρ, z -> 0.0]),
         tspan = (0.0, t_end),
         output_times = collect(0.0:0.05:t_end),
     )
@@ -103,6 +118,7 @@ end
     consistent_state!(u, def, cp.ws, 0.0)
     masses, H = _total_masses(u, layout), _total_enthalpy(cp, u)
     x_top = moving ? u[position_index(layout, 7)] : NaN
+    x_inward = moving ? [u[position_index(layout, nd)] for nd = 1:5] : Float64[]
     @test any_below(cells, layout, u)
     gas = u[mass_index(layout, 6, 2)]
     @test deactivate!(u, cells, def, 0.3) === :transferred
@@ -126,6 +142,8 @@ end
         @test u[position_index(layout, 6)] ≈ x_top rtol = 1e-14
         @test u[position_index(layout, 7)] == u[position_index(layout, 6)]
         @test !any(layout.mask[node_rows(layout, 7)])
+        # The receiver's inward node and every node beneath it stay put.
+        @test [u[position_index(layout, nd)] for nd = 1:5] == x_inward
     end
     consistent_state!(u, def, cp.ws, 0.3)
     du = zeros(length(u))
@@ -175,6 +193,7 @@ _ledger(cp, u, events) =
     consistent_state!(u, def, cp.ws, 0.0)
     masses, E = _total_masses(u, layout), _live_energy(cp, u)
     x_top = u[position_index(layout, 9)]
+    x_inward = [u[position_index(layout, nd)] for nd = 1:5]
     @test deactivate!(u, cells, def, 1.0) === :transferred
     @test [e.cell for e in cells.events] == [8, 7, 6]
     @test all(e.receiver == 5 && e.invocation == 1 && e.t == 1.0 for e in cells.events)
@@ -191,6 +210,8 @@ _ledger(cp, u, events) =
     @test u[position_index(layout, 6)] ≈ x_top rtol = 1e-12
     @test all(u[position_index(layout, nd)] == u[position_index(layout, 6)] for nd = 7:9)
     @test all(u[velocity_index(layout, nd)] == 0 for nd = 7:9)
+    # The receiver's inward node and every node beneath it stay put.
+    @test [u[position_index(layout, nd)] for nd = 1:5] == x_inward
     @test !any(
         layout.mask[vcat(collect(cell_rows(layout, 6)), collect(node_rows(layout, 7)))],
     )
@@ -217,6 +238,52 @@ _ledger(cp, u, events) =
     @test deactivate!(u, cells, def, 1.0) === :interior
     @test cells.outcome[] === :interior
     @test isempty(cells.events)
+end
+
+@testset "a merge carries the history pair to the receiver and keeps the cross section: $(energy) form" for energy in
+                                                                                                            (
+    :temperature,
+    :enthalpy,
+)
+    cp = setup(
+        _ablator(6; law = χ -> 1 - 0.3χ);
+        energy_state = energy,
+        use_ale = true,
+        deactivation = true,
+    )
+    def, layout, cells = cp.def, cp.def.layout, cp.deactivation
+    @test has_chi(layout)
+    G(u, i) = u[history_index(layout, i, 1)]
+    M(u, i) = u[history_index(layout, i, 2)]
+    # A conversion that differs from cell to cell: dropping a cell's pair
+    # would move the column's conversion, and with it the area.
+    u = copy(cp.u0)
+    for i = 1:6
+        u[history_index(layout, i, 1)] = (0.1 + 0.05i) * M(u, i)
+    end
+    _deplete!(u, cp, 6, 0.5 * cells.threshold)
+    consistent_state!(u, def, cp.ws, 0.0)
+    ΣG, ΣM = sum(G(u, i) for i = 1:6), sum(M(u, i) for i = 1:6)
+    pair = (G(u, 5) + G(u, 6), M(u, 5) + M(u, 6))
+    A = u[area_index(layout)]
+    @test A < 0.95 * def.setup.topology.cross_section
+    @test deactivate!(u, cells, def, 0.3) === :transferred
+    @test sum(G(u, i) for i = 1:6) ≈ ΣG rtol = 1e-14
+    @test sum(M(u, i) for i = 1:6) ≈ ΣM rtol = 1e-14
+    @test (G(u, 5), M(u, 5)) == pair
+    @test G(u, 6) == 0 && M(u, 6) == 0
+    # The column's conversion, and so the area, are those before the event.
+    consistent_state!(u, def, cp.ws, 0.3)
+    @test u[area_index(layout)] ≈ A rtol = 1e-12
+    du = zeros(length(u))
+    residual!(du, u, def, 0.3, cp.ws)
+    @test abs(du[area_index(layout)]) <= 1e-12 * A
+    @test abs(du[lateral_rate_index(layout)]) <= 1e-12 * abs(u[lateral_rate_index(layout)])
+    Jd = dense_jacobian(def, cp.ws, u, 0.3)
+    @test isempty(missing_entries(Jd, cp.jacobian.pattern))
+    J = jacobian!(jac_prototype(cp.jacobian), cp.jacobian, u, 0.3)
+    @test compare_entries(Matrix(J), Jd; rtol = 1e-12).passed
+    fill!(layout.mask, true)
 end
 
 # The post-event test holds a merge's receiver to its own mass tolerance, the
@@ -353,6 +420,75 @@ end
     @test setup(_ablator(4); band = 5e-3).deactivation === nothing
 end
 
+# Cells whose sizes span a ratio of 27, above 1/ε_m = 20: against one
+# reference for the column, the cells at the fine end would start below the
+# threshold, or a cell at the coarse end would never reach it.
+@testset "each cell is held to its own initial condensed mass: $(moving ? "moving" : "fixed") mesh" for moving in
+                                                                                                        (
+    true,
+    false,
+)
+    for stretch_from in (:top, :bottom)
+        mesh = create_stretched_mesh(3e-3, 12, 1.35; stretch_from)
+        cp = setup(
+            _ablator(12; mesh);
+            use_ale = moving,
+            deactivation = true,
+            threshold = 0.05,
+        )
+        cells, layout = cp.deactivation, cp.def.layout
+        @test cells.reference == [condensed_mass(cells, layout, cp.u0, i) for i = 1:12]
+        @test maximum(cells.reference) / minimum(cells.reference) > 1 / cells.threshold
+        @test !any_below(cells, layout, cp.u0)
+        stretch_from === :top || continue
+        # The coarse bottom cell, at 4 % of its own initial mass, holds more
+        # than the threshold of the fine top cell's.
+        below(u) = [i for i = 1:12 if below_threshold(cells, layout, u, i)]
+        @test below(_deplete!(copy(cp.u0), cp, 1, 0.04)) == [1]
+        @test isempty(below(_deplete!(copy(cp.u0), cp, 1, 0.06)))
+    end
+end
+
+# A cell that starts with gas only, between two solid ones: with no condensed
+# mass to lose it never deactivates, also with a trace below zero.
+@testset "a cell that started with no condensed mass is never tested: $(moving ? "moving" : "fixed") mesh" for moving in
+                                                                                                               (
+    true,
+    false,
+)
+    gap(z) = 1e-3 < z < 1.5e-3
+    problem = _ablator(6; ξ_initial = [z -> gap(z) ? 0.0 : 1000.0, z -> gap(z) ? 1.0 : 0.0])
+    cp = setup(problem; use_ale = moving, deactivation = true)
+    def, layout, cells = cp.def, cp.def.layout, cp.deactivation
+    ε_m = cells.threshold
+    @test cells.reference[3] == 0
+    @test all(>(0), cells.reference[[1, 2, 4, 5, 6]])
+    u = copy(cp.u0)
+    k = mass_index(layout, 3, 1)
+    u[k] = -0.5 * cp.abstol[k]
+    @test !below_threshold(cells, layout, u, 3)
+    @test !any_below(cells, layout, u)
+    @test threshold_margin(cells, layout, u) ≈ (1 - ε_m) / ε_m rtol = 1e-12
+    _deplete!(u, cp, 6, 0.5ε_m)
+    @test threshold_margin(cells, layout, u) ≈ -0.5 rtol = 1e-12
+    @test deactivate!(u, cells, def, 0.3) === :transferred
+    @test cells.outcome[] === :running
+    @test [e.cell => e.receiver for e in cells.events] == [6 => 5]
+    fill!(layout.mask, true)
+    if moving
+        sol = Integration.solve(
+            problem;
+            use_ale = true,
+            deactivation = true,
+            abstol = 1e-7,
+            reltol = 1e-5,
+        )
+        @test sol.retcode === :Success
+        @test sol.outcome === :running
+        @test !isempty(sol.events) && all(e -> e.cell > 3, sol.events)
+    end
+end
+
 @testset "a transfer writes the regularization the receiver does not hold: $(energy) form, $(moving ? "moving" : "fixed") mesh" for energy in
                                                                                                                                     (
         :temperature,
@@ -381,16 +517,20 @@ end
 end
 
 # Two unit cells of a planar column (unit area) and the pore-preserving merge
-# of design §3.5, or on a fixed mesh the transfer: component A's intrinsic
-# density falls with temperature (ρ_A = 300/T), B's is one, and the heat
-# capacities are equal (large enough that the cells sit far above the
-# heat-capacity floor).
-function _merge_pair(state_a, state_b; use_ale = true)
-    c = 1e6
-    a = SolidComponent(:A, ρ = 1.0, c = c, k = 1.0, ρ_intrinsic = T -> 300 / T)
-    b = SolidComponent(:B, ρ = 1.0, c = c, k = 1.0, ρ_intrinsic = 1.0, κ = 1e-12)
-    g = GaseousComponent(:G, M = 0.028, c = c, k = 0.03, λ = 1e-5)
-    mat = Material(name = :pair, components = (a, b, g), reactions = ())
+# of design §3.5, or on a fixed mesh the transfer: by default component A's
+# intrinsic density falls with temperature (ρ_A = 300/T), B's is one, and the
+# heat capacities are equal (large enough that the cells sit far above the
+# heat-capacity floor). `components` replaces the material's components and
+# `ξ` their initial concentrations.
+function _merge_pair(
+    state_a,
+    state_b;
+    use_ale = true,
+    components = _pair_components(),
+    ξ = (0.5, 0.4, 1e-4),
+)
+    NC = length(components)
+    mat = Material(name = :pair, components = components, reactions = ())
     problem = PyrolysisProblem(
         mesh = create_uniform_mesh(2.0, 2),
         material = mat,
@@ -398,14 +538,14 @@ function _merge_pair(state_a, state_b; use_ale = true)
             thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
         ),
         T_initial = z -> 400.0,
-        ξ_initial = [z -> 0.5, z -> 0.4, z -> 1e-4],
+        ξ_initial = [z -> x for x in ξ],
         tspan = (0.0, 1.0),
     )
     cp = setup(problem; use_ale, deactivation = true)
     layout = cp.def.layout
     u = copy(cp.u0)
     for (i, s) in ((1, state_a), (2, state_b))
-        for j = 1:3
+        for j = 1:NC
             u[mass_index(layout, i, j)] = s.m[j]
         end
         u[energy_index(layout, i)] = s.T
@@ -425,14 +565,23 @@ function _merge_pair(state_a, state_b; use_ale = true)
     V = use_ale ? u[position_index(layout, 2)] - u[position_index(layout, 1)] : 1.0
     e = only(cp.deactivation.events)
     return (;
-        m = [u[mass_index(layout, 1, j)] for j = 1:3],
+        m = [u[mass_index(layout, 1, j)] for j = 1:NC],
         T = ds.T[1],
         V,
         P = ds.P[1],
         φ = ds.φ[1],
         created = e.created_volume,
         lost = e.lost_mass,
+        laws = cp.def.setup.laws,
     )
+end
+
+function _pair_components()
+    c = 1e6
+    a = SolidComponent(:A, ρ = 1.0, c = c, k = 1.0, ρ_intrinsic = T -> 300 / T)
+    b = SolidComponent(:B, ρ = 1.0, c = c, k = 1.0, ρ_intrinsic = 1.0, κ = 1e-12)
+    g = GaseousComponent(:G, M = 0.028, c = c, k = 0.03, λ = 1e-5)
+    return (a, b, g)
 end
 
 @testset "a merge never destroys pore space" begin
@@ -487,55 +636,174 @@ end
     end
 end
 
-@testset "masked rows are identity rows and the live block is the compacted problem's: $(name), $(energy) form" for name in
-                                                                                                                    (
-        :fixed,
-        :moving,
-        :beer_lambert,
-    ),
-    energy in (:temperature, :enthalpy)
+# Σⱼ mⱼ hⱼ(T) of a cell `s` under the enthalpy laws `laws`.
+_sensible(laws, s) = sum(s.m[j] * sensible_enthalpy(laws.h[j], s.T) for j in eachindex(s.m))
 
-    options =
-        name === :fixed ? (;) :
-        name === :moving ? (use_ale = true,) :
-        (use_ale = true, radiation_model = BEER_LAMBERT)
-    radiating = name === :beer_lambert
+@testset "a merge conserves the sensible enthalpy of every component" begin
+    @testset "unequal heat capacities: each component weighted by its own" begin
+        # The gas at five times the solid's heat capacity: the merged
+        # temperature is 677.2 K, the mass-weighted mean 669.0 K.
+        components = (
+            SolidComponent(:s, ρ = 1000.0, c = 1000.0, k = 1.0),
+            GaseousComponent(:g, M = 0.028, c = 5000.0, k = 0.03, λ = 1e-5),
+        )
+        a, b = (m = [600.0, 20.0], T = 800.0), (m = [300.0, 2.0], T = 400.0)
+        r = _merge_pair(a, b; components, ξ = (500.0, 1.0))
+        C(s) = s.m[1] * 1000.0 + s.m[2] * 5000.0
+        @test r.m == a.m .+ b.m
+        @test r.T ≈ (C(a) * a.T + C(b) * b.T) / (C(a) + C(b)) atol = 1e-10
+        H = _sensible(r.laws, a) + _sensible(r.laws, b)
+        @test _sensible(r.laws, r) ≈ H rtol = 1e-12
+    end
+    @testset "a linear heat capacity: the enthalpy's root, not the product form" begin
+        # c = a + bT: equal masses merge at the root of
+        # a T + b T²/2 = (h(T_a) + h(T_b))/2, the datum cancelling.
+        ca, cb = 500.0, 2.0
+        components = (
+            SolidComponent(:s, ρ = 1000.0, c = LinearProperty(ca, cb), k = 1.0),
+            GaseousComponent(:g, M = 0.028, c = 1000.0, k = 0.03, λ = 1e-5),
+        )
+        a, b = (m = [600.0, 0.0], T = 800.0), (m = [600.0, 0.0], T = 400.0)
+        r = _merge_pair(a, b; components, ξ = (500.0, 1.0))
+        h(T) = ca * T + cb * T^2 / 2
+        rhs = (h(a.T) + h(b.T)) / 2
+        T_exact = (-ca + sqrt(ca^2 + 2cb * rhs)) / cb
+        @test r.T ≈ T_exact atol = 1e-6
+        H = _sensible(r.laws, a) + _sensible(r.laws, b)
+        @test _sensible(r.laws, r) ≈ H rtol = 1e-12
+        # The product form c(T)·T, whose b-term carries the coefficient one
+        # instead of a half, is off by more than a kelvin.
+        C(T) = 600.0 * (ca + cb * T)
+        E = C(a.T) * a.T + C(b.T) * b.T
+        T_prod = E / (2 * 600.0 * (ca + cb * E / (C(a.T) + C(b.T))))
+        @test abs(T_prod - T_exact) > 1
+    end
+end
+
+# The masked-rows configurations: the ablator's options and the setup's. The
+# Darcy columns vent through a pressure condition, one under the full surface
+# balance with the beam absorbed in depth; the lateral column carries the
+# history pair and the cross-section rows, which follow the last node.
+const _surface_balance_top =
+    RadiativeFluxBC(flux = 2.8e6) +
+    ConvectiveBC(h = 10.0, T_inf = 300.0) +
+    RadiativeBC(T_inf = 300.0)
+const _masked_configurations = (
+    fixed = (ablator = (;), options = (;)),
+    moving = (ablator = (;), options = (use_ale = true,)),
+    beer_lambert = (
+        ablator = (radiating = true,),
+        options = (use_ale = true, radiation_model = BEER_LAMBERT),
+    ),
+    darcy = (
+        ablator = (porous = true, mass_top = DirichletPressureBC(101325.0)),
+        options = (;),
+    ),
+    darcy_surface_balance = (
+        ablator = (
+            porous = true,
+            radiating = true,
+            top = _surface_balance_top,
+            mass_top = DirichletPressureBC(101325.0),
+        ),
+        options = (use_ale = true, radiation_model = BEER_LAMBERT),
+    ),
+    lateral = (
+        ablator = (law = χ -> 1 - 0.2χ, mass_top = DiffusiveMassBC(0.01)),
+        options = (use_ale = true,),
+    ),
+)
+
+# The row of the full layout that holds each row of the compacted one: the
+# blocks of the live cells and nodes, then the cross-section rows.
+function _compact_rows(full::StateLayout, compact::StateLayout)
+    rows = zeros(Int, state_length(compact))
+    for i = 1:n_cells(compact)
+        rows[cell_rows(compact, i)] = cell_rows(full, i)
+    end
+    for nd = 1:n_nodes(compact)
+        rows[node_rows(compact, nd)] = node_rows(full, nd)
+    end
+    if has_chi(compact)
+        rows[area_index(compact)] = area_index(full)
+        rows[lateral_rate_index(compact)] = lateral_rate_index(full)
+    end
+    return rows
+end
+
+@testset "masked rows are identity rows and the live block is the compacted problem's: $(name), $(energy) form, $(n_dead == 1 ? "one dead cell" : "two dead cells")" for name in
+                                                                                                                                                                         keys(
+        _masked_configurations,
+    ),
+    energy in (:temperature, :enthalpy),
+    n_dead in (1, 2)
+
+    config = _masked_configurations[name]
+    n_live = 6 - n_dead
     full = setup(
-        _ablator(6; radiating);
+        _ablator(6; config.ablator...);
         energy_state = energy,
         deactivation = true,
-        options...,
+        config.options...,
     )
     compact = setup(
-        _ablator(5; L = 2.5e-3, radiating);
+        _ablator(n_live; L = 5e-4 * n_live, config.ablator...);
         energy_state = energy,
         deactivation = true,
-        options...,
+        config.options...,
     )
     layout = full.def.layout
-    Lc = length(compact.u0)
+    name in (:darcy, :darcy_surface_balance) &&
+        @test full.def.setup.gas isa DarcyFickTransport
+    rows = _compact_rows(layout, compact.def.layout)
+    others = setdiff(1:length(full.u0), rows)
     u = zeros(length(full.u0))
-    u[1:Lc] .= compact.u0
-    if is_moving(layout)
-        u[position_index(layout, 7)] = u[position_index(layout, 6)]
+    u[rows] .= compact.u0
+    # Gas in every live cell, so that no gas-transport or mass-condition term
+    # is zero; a conversion history that differs from cell to cell.
+    for i = 1:n_live
+        u[mass_index(layout, i, 2)] = 1e-3 * i * u[mass_index(layout, i, 1)]
     end
-    dead = vcat(collect(cell_rows(layout, 6)), collect(node_rows(layout, 7)))
-    layout.mask[dead] .= false
-    for (state_name, v, vc) in (
-        ("set up", u, compact.u0),
-        ("perturbed", u .* (1 .+ 0.1 .* sin.(1:length(u))), nothing),
+    if has_chi(layout)
+        for i = 1:n_live
+            u[history_index(layout, i, 1)] = (0.3 + 0.05i) * u[history_index(layout, i, 2)]
+        end
+    end
+    if is_moving(layout)
+        for nd = (n_live+2):7
+            u[position_index(layout, nd)] = u[position_index(layout, n_live + 1)]
+        end
+    end
+    dead = vcat(
+        [collect(cell_rows(layout, i)) for i = (n_live+1):6]...,
+        [collect(node_rows(layout, nd)) for nd = (n_live+2):7]...,
     )
+    layout.mask[dead] .= false
+    # A dead algebraic row holds a value no live row may read.
+    for r in dead
+        layout.differential[r] || (u[r] = 0.5)
+    end
+    for (state_name, v) in
+        (("set up", u), ("perturbed", u .* (1 .+ 0.1 .* sin.(1:length(u)))))
         @testset "$state_name" begin
-            vc = vc === nothing ? v[1:Lc] : vc
+            vc = v[rows]
+            duf, duc = zeros(length(v)), zeros(length(vc))
+            residual!(duf, v, full.def, 0.2, full.ws)
+            residual!(duc, vc, compact.def, 0.2, compact.ws)
             Jf = dense_jacobian(full.def, full.ws, v, 0.2)
             Jc = dense_jacobian(compact.def, compact.ws, vc, 0.2)
-            @test compare_entries(Jf[1:Lc, 1:Lc], Jc; rtol = 1e-11).passed
-            @test all(iszero, Jf[1:Lc, (Lc+1):end])
+            # Each live row's residual against the magnitude of its terms.
+            scale = abs.(Jc) * abs.(vc) .+ abs.(duc)
+            @test all(abs.(duf[rows] .- duc) .<= 1e-11 .* scale)
+            @test compare_entries(Jf[rows, rows], Jc; rtol = 1e-11).passed
+            @test all(iszero, Jf[rows, others])
             for r in dead
                 row = Jf[r, :]
                 if layout.differential[r]
+                    @test duf[r] == 0
                     @test all(iszero, row)
                 else
+                    @test duf[r] == v[r]
                     @test row[r] == 1 && count(!iszero, row) == 1
                 end
             end
@@ -684,12 +952,9 @@ end
     @test sol.statistics.domain_rejections > 0
 end
 
-@testset "the restart after an event: $(name)" for (name, policy) in (
-    ("FBDF", fbdf_policy(KLUFactorization())),
-    ("Rodas5P, forced restart", rodas5p_policy(KLUFactorization(); restart = :forced_dt)),
-    ("Rodas5P, heuristic restart", rodas5p_policy(KLUFactorization())),
-    ("KenCarp4", kencarp4_policy(KLUFactorization())),
-)
+# A solve of the 30-cell ablator through its deactivations under `policy`,
+# and the (start, end) of every step it took.
+function _stepped_solve(policy)
     steps = Tuple{Float64,Float64}[]
     probe = DiscreteCallback(
         (u, t, integrator) -> true,
@@ -705,14 +970,42 @@ end
         integrator_policy = policy,
         callback = probe,
     )
+    return sol, steps
+end
+
+# The step that starts at time `t`.
+_step_from(steps, t) = steps[findfirst(s -> s[1] == t, steps)]
+
+@testset "the restart after an event: $(name)" for (name, policy) in (
+    ("FBDF", fbdf_policy(KLUFactorization())),
+    ("Rodas5P, forced restart", rodas5p_policy(KLUFactorization(); restart = :forced_dt)),
+    ("Rodas5P, heuristic restart", rodas5p_policy(KLUFactorization())),
+    ("KenCarp4", kencarp4_policy(KLUFactorization())),
+)
+    sol, steps = _stepped_solve(policy)
     @test sol.retcode === :Success
     @test length(sol.events) >= 5
     @test [e.cell for e in sol.events] == 30:-1:(31-length(sol.events))
     if policy.restart === :forced_dt
         # The step after each event is the restart step.
-        after = [steps[findfirst(s -> s[1] == e.t, steps)] for e in sol.events]
+        after = [_step_from(steps, e.t) for e in sol.events]
         @test all(s -> s[2] - s[1] ≈ DT_AFTER_EVENT, after)
     end
+end
+
+# The two runs are the same step for step up to the first event, where the
+# heuristic restart proposes its initial-step estimate in place of the step
+# the solver would carry through it.
+@testset "the heuristic restart replaces the step the solver would keep after an event" begin
+    kept, kept_steps =
+        _stepped_solve(rodas5p_policy(KLUFactorization(); restart = :solver_chosen))
+    heuristic, steps = _stepped_solve(rodas5p_policy(KLUFactorization()))
+    @test kept.retcode === heuristic.retcode === :Success
+    t_event = first(heuristic.events).t
+    @test first(kept.events).t == t_event
+    k = findfirst(s -> s[1] == t_event, steps)
+    @test steps[1:(k-1)] == kept_steps[1:(k-1)]
+    @test _step_from(kept_steps, t_event) != steps[k]
 end
 
 # Two isothermal cells: the outer one holds a hundredth of the inner one's
