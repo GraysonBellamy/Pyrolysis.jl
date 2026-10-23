@@ -2,13 +2,12 @@ using Test
 using ForwardDiff
 using SparseArrays
 using Pyrolysis
-using Pyrolysis.Materials: DepletionLimiter
-using Pyrolysis.Discretization: boundary_darcy_velocity
-using Pyrolysis.Properties: harmonic_mean_weighted
+using Pyrolysis.Materials: DepletionLimiter, R_GAS
 using Pyrolysis.Meshes
 using Pyrolysis.States
 using Pyrolysis.States: StateLayout, state_length
 using Pyrolysis.Kernels: GasTransportKernel, outward_darcy_velocity, MOBILITY_GUARD
+using Pyrolysis.Kernels: ThermalBoundaryKernel, find_kernel
 using Pyrolysis.Assembly
 using Pyrolysis.Assembly: residual!
 using Pyrolysis.ColoredJacobian
@@ -71,7 +70,40 @@ function _gas_slab(n; darcy::Bool, thermal, mass)
 end
 
 const _convective_top = ConvectiveBC(h = 15.0, T_inf = 1000.0, blowing = CouetteFilm())
-const _gas_configurations = (
+
+# The other blowing models on a top face hotter than its free stream, with gas
+# leaving through it: a film condition (Fick), or a pressure film gentle
+# enough that the outflow leaves the blowing factor well above zero
+# (Darcy–Fick). The pooling model then solves for its pooling factor.
+const _pooling = PoolingFilm(NITROGEN; diffusion_volume = (gas = 60.0,))
+_blowing_configuration(model; darcy::Bool) = (
+    darcy = darcy,
+    thermal = (
+        top = ConvectiveBC(h = 15.0, T_inf = 300.0, blowing = model) +
+              RadiativeBC(T_inf = 300.0),
+        bottom = AdiabaticBC(),
+    ),
+    mass = (
+        top = darcy ? ConvectivePressureBC(1e-8, 101325.0) : DiffusiveMassBC(0.02),
+        bottom = ImpermeableBC(),
+    ),
+)
+const _blowing_configurations = (
+    fick_couette_film = _blowing_configuration(CouetteFilm(0.31); darcy = false),
+    fick_property_ratio = _blowing_configuration(
+        PropertyRatioFilm(NITROGEN);
+        darcy = false,
+    ),
+    fick_pooling = _blowing_configuration(_pooling; darcy = false),
+    darcy_couette_film = _blowing_configuration(CouetteFilm(0.31); darcy = true),
+    darcy_property_ratio = _blowing_configuration(
+        PropertyRatioFilm(NITROGEN);
+        darcy = true,
+    ),
+    darcy_pooling = _blowing_configuration(_pooling; darcy = true),
+)
+
+const _transport_configurations = (
     fick_diffusive = (
         darcy = false,
         thermal = (
@@ -102,6 +134,7 @@ const _gas_configurations = (
         ),
     ),
 )
+const _gas_configurations = merge(_transport_configurations, _blowing_configurations)
 
 # States on and off the physical manifold.
 function _states(cp)
@@ -154,6 +187,28 @@ end
             cmp = compare_entries(Matrix(J), Jd; rtol = 1e-12)
             @test cmp.passed
         end
+    end
+end
+
+@testset "gas transport: $(name) blows through a face hotter than its free stream" for name in
+                                                                                       keys(
+    _blowing_configurations,
+)
+    cfg = _blowing_configurations[name]
+    cp = setup(_gas_slab(6; darcy = cfg.darcy, thermal = cfg.thermal, mass = cfg.mass))
+    residual!(zeros(length(cp.u0)), cp.u0, cp.def, 0.0, cp.ws)
+    ds, c = buffers(cp.ws, cp.def, Float64)
+    top = only(boundary_faces(cp.def.setup.topology, :top))
+    state = find_kernel(ThermalBoundaryKernel, cp.def.kernels).states[top]
+    # Gas leaves through the face and the blowing factor stays off its limits,
+    # so the model's film law shapes the surface balance.
+    @test all(>(0), c.F_mass[3:4, top])
+    @test c.T_face[top] > 300.0
+    @test 0 < state.blowing_ratio < 1
+    # The pooling factor comes from the root solve, which only runs with
+    # outflow through a face hotter than the free stream.
+    if name in (:fick_pooling, :darcy_pooling)
+        @test state.pooling_factor < 1
     end
 end
 
@@ -227,22 +282,24 @@ end
     end
 end
 
-@testset "outward Darcy velocity equals the tagged kernel along the outward normal" begin
+@testset "outward Darcy velocity of each mass condition in closed form" begin
     mob, d = 2e-7, 3e-4
-    for bc in (
-            DirichletPressureBC(101325.0),
-            NeumannPressureBC(-2e5),
-            ConvectivePressureBC(1e-6, 1e5),
-            DiffusiveMassBC(0.01),
-            DiffusiveMassBC(0.01) + DirichletPressureBC(9e4),
-        ),
-        P in (8e4, 101325.0, 1.4e5)
-
-        κ, μ = mob * 2e-5, 2e-5
-        v_top = boundary_darcy_velocity(bc, P, κ, μ, d, Val(:top))
-        v_bottom = boundary_darcy_velocity(bc, P, κ, μ, d, Val(:bottom))
-        @test outward_darcy_velocity(bc, P, mob, d) ≈ v_top rtol = 1e-14 atol = 1e-300
-        @test outward_darcy_velocity(bc, P, mob, d) ≈ -v_bottom rtol = 1e-14 atol = 1e-300
+    for P in (8e4, 101325.0, 1.4e5)
+        # A prescribed pressure: the one-sided gradient, outward under an
+        # overpressure, and nothing out of an impermeable cell.
+        @test outward_darcy_velocity(DirichletPressureBC(101325.0), P, mob, d) ==
+              mob * (P - 101325.0) / d
+        @test outward_darcy_velocity(DirichletPressureBC(101325.0), P, 0.0, d) == 0
+        # A prescribed gradient along the outward normal: a pressure falling
+        # outward drives outflow, and a zero gradient drives none.
+        @test outward_darcy_velocity(NeumannPressureBC(-2e5), P, mob, d) == mob * 2e5
+        @test outward_darcy_velocity(NeumannPressureBC(2e5), P, mob, d) == -mob * 2e5
+        @test outward_darcy_velocity(NeumannPressureBC(0.0), P, mob, d) == 0
+        # A film condition drives none; a combined condition sums its members.
+        @test outward_darcy_velocity(DiffusiveMassBC(0.01), P, mob, d) == 0
+        combined = DiffusiveMassBC(0.01) + DirichletPressureBC(9e4)
+        @test outward_darcy_velocity(combined, P, mob, d) ==
+              outward_darcy_velocity(DirichletPressureBC(9e4), P, mob, d)
     end
     # An impermeable cell cannot vent through a film condition; the gate is
     # smooth in the mobility and exactly one at a physical mobility.
@@ -254,7 +311,93 @@ end
           0.1 / MOBILITY_GUARD rtol = 1e-14
 end
 
-@testset "gas transport: an interior face carries the old core's Fick flux, and gas leaving through :bottom leaves the bottom cell" begin
+# A uniform, hot char column of porosity one half holding gas well above the
+# ambient pressure, its mass conditions `top` and `bottom`: every interior
+# flux vanishes, so each boundary cell's gas row is its face's outflow alone.
+function _vent_column(κ; top, bottom)
+    mat = Material(
+        name = :vent_column,
+        components = (
+            SolidComponent(:char, ρ = 500.0, c = 1000.0, k = 0.1, κ = κ),
+            GaseousComponent(:gas, M = 0.028, c = 1000.0, k = 0.03, λ = 1e-6),
+        ),
+        reactions = (),
+    )
+    return PyrolysisProblem(
+        mesh = create_uniform_mesh(0.01, 6),
+        material = mat,
+        bc_set = BoundaryConditionSet(
+            thermal = (top = HeatFluxBC(0.0), bottom = AdiabaticBC()),
+            mass = (top = top, bottom = bottom),
+        ),
+        T_initial = z -> 600.0,
+        ξ_initial = [z -> 250.0, z -> 2.0],
+        tspan = (0.0, 1.0),
+    )
+end
+
+@testset "gas transport: a pressure condition vents its cell at v ξ/φ beside the film flux, faster through a more permeable solid" begin
+    film = DiffusiveMassBC(0.05)
+    vent = film + DirichletPressureBC(101325.0)
+    function surface(κ, bc)
+        cp = setup(_vent_column(κ; top = bc, bottom = ImpermeableBC()))
+        du = zeros(length(cp.u0))
+        residual!(du, cp.u0, cp.def, 0.0, cp.ws)
+        ds, c = buffers(cp.ws, cp.def, Float64)
+        topo = cp.def.setup.topology
+        f = only(boundary_faces(topo, :top))
+        n = n_cells(topo)
+        return (; cp, du, ds, c, f, n, d = center_to_face_distance(ds.geometry, topo, f, n))
+    end
+    (; cp, du, ds, c, f, n, d) = surface(1e-12, vent)
+    k = mass_index(cp.def.layout, n, 2)
+    # The skeleton fills half the cell; the pressure and the mobility are the
+    # ideal gas in the pores and κ/μ.
+    @test ds.φ[n] ≈ 0.5 rtol = 1e-12
+    P = 2.0 * R_GAS * 600.0 / (0.028 * 0.5)
+    mob = 1e-12 / cp.def.setup.material.gas_viscosity(600.0)
+    @test ds.P[n] ≈ P rtol = 1e-12
+    @test ds.mob[n] ≈ mob rtol = 1e-12
+    # The overpressure vents along the outward normal at the one-sided
+    # velocity, carrying the intrinsic density ξ/φ = 2ξ, and the film flux
+    # λ h ξ/(λ + h d) adds to it.
+    v = mob * (P - 101325.0) / d
+    @test v > 0
+    ξ, λ = ds.ξ[2, n], ds.λ[n]
+    J_film = λ * 0.05 * ξ / (λ + 0.05 * d)
+    @test c.F_mass[2, f] ≈ 2v * ξ + J_film rtol = 1e-12
+    @test du[k] ≈ -ds.geometry.face_area[f] * c.F_mass[2, f] rtol = 1e-10
+    # Without the pressure condition only the film law acts.
+    @test surface(1e-12, film).c.F_mass[2, f] ≈ J_film rtol = 1e-12
+    # The outflow follows the permeability, which the film law alone does not.
+    rate = Dict(κ => surface(κ, vent).du[k] for κ in (1e-14, 1e-12, 1e-11))
+    @test rate[1e-12] < 0
+    @test abs(rate[1e-12]) > 10 * abs(rate[1e-14])
+    @test abs(rate[1e-11]) > 5 * abs(rate[1e-12])
+end
+
+@testset "gas transport: a pressure condition on :bottom vents the bottom cell along the outward normal" begin
+    sealed = setup(_vent_column(1e-12; top = ImpermeableBC(), bottom = ImpermeableBC()))
+    du_sealed = zeros(length(sealed.u0))
+    residual!(du_sealed, sealed.u0, sealed.def, 0.0, sealed.ws)
+    k = mass_index(sealed.def.layout, 1, 2)
+    # An overpressure against a prescribed pressure, and a pressure falling
+    # outward: both drive gas out through the bottom face.
+    for bc in (DirichletPressureBC(101325.0), NeumannPressureBC(-1e5))
+        cp = setup(_vent_column(1e-12; top = ImpermeableBC(), bottom = bc))
+        du = zeros(length(cp.u0))
+        residual!(du, cp.u0, cp.def, 0.0, cp.ws)
+        ds, c = buffers(cp.ws, cp.def, Float64)
+        f = only(boundary_faces(cp.def.setup.topology, :bottom))
+        d = center_to_face_distance(ds.geometry, cp.def.setup.topology, f, 1)
+        v = outward_darcy_velocity(bc, ds.P[1], ds.mob[1], d)
+        @test v > 0
+        @test c.F_mass[2, f] ≈ v * ds.ξ[2, 1] / ds.φ[1] rtol = 1e-12
+        @test du[k] - du_sealed[k] ≈ -ds.geometry.face_area[f] * c.F_mass[2, f] rtol = 1e-10
+    end
+end
+
+@testset "gas transport: an interior face carries the Fick flux of the harmonic-mean transfer coefficient, and gas leaving through :bottom leaves the bottom cell" begin
     thermal = _gas_configurations.fick_diffusive.thermal
     open = setup(
         _gas_slab(
@@ -280,7 +423,8 @@ end
     g, topo = ds.geometry, open.def.setup.topology
     d1 = center_to_face_distance(g, topo, 2, 1)
     d2 = center_to_face_distance(g, topo, 2, 2)
-    λ_f = harmonic_mean_weighted(ds.λ[1], ds.λ[2], d1, d2)
+    # The transfer coefficients in series over the two half-cells.
+    λ_f = (d1 + d2) / (d1 / ds.λ[1] + d2 / ds.λ[2])
     for j in (3, 4)
         F = Pyrolysis.Physics.gas_flux(
             λ_f,
@@ -360,6 +504,137 @@ end
         @test ForwardDiff.value(F) == 0
         @test ForwardDiff.partials(F)[1] == s * 0.25 / 0.5
     end
+end
+
+# The interior faces of a set-up column after one residual, each gas `j` with
+# the parts of its Darcy–Fick flux in closed form: the Fick flux at the trial
+# temperatures with the transfer coefficients in series, and the upwind
+# advection of the intrinsic density ξ/φ_f at the velocity the mobilities in
+# series drive.
+function _interior_fluxes(cp, gases)
+    residual!(zeros(length(cp.u0)), cp.u0, cp.def, 0.0, cp.ws)
+    ds, c = buffers(cp.ws, cp.def, Float64)
+    topo, g = cp.def.setup.topology, ds.geometry
+    series(a, b, d_a, d_b) =
+        iszero(a) || iszero(b) ? zero(a) : (d_a + d_b) / (d_a / a + d_b / b)
+    faces = []
+    for f = 1:n_faces(topo)
+        o, nb = topo.faces[f].cells
+        nb == 0 && continue
+        d_o = center_to_face_distance(g, topo, f, o)
+        d_n = center_to_face_distance(g, topo, f, nb)
+        d = d_o + d_n
+        λ_f = series(ds.λ[o], ds.λ[nb], d_o, d_n)
+        v = -series(ds.mob[o], ds.mob[nb], d_o, d_n) * (ds.P[nb] - ds.P[o]) / d
+        φ_f = (ds.φ[o] + ds.φ[nb]) / 2
+        for j in gases
+            ξ_o, ξ_n = ds.ξ[j, o], ds.ξ[j, nb]
+            fick =
+                Pyrolysis.Physics.gas_flux(λ_f, ξ_o, ξ_n, ds.T_trial[o], ds.T_trial[nb], d)
+            advection = v * (v >= 0 ? ξ_o : ξ_n) / φ_f
+            push!(faces, (; f, j, o, nb, d, φ_f, v, fick, advection, F = c.F_mass[j, f]))
+        end
+    end
+    return faces, ds, c
+end
+
+@testset "gas transport: an interior Darcy–Fick face carries the Fick flux plus the upwind advection of ξ/φ, and no advection across the char front" begin
+    cfg = _gas_configurations.darcy_venting
+    cp = setup(_gas_slab(8; darcy = true, thermal = cfg.thermal, mass = cfg.mass))
+    faces, ds, c = _interior_fluxes(cp, (3, 4))
+    for r in faces
+        @test abs(r.F - (r.fick + r.advection)) <= 1e-12 * (abs(r.fick) + abs(r.advection))
+    end
+    @test all(iszero, c.F_mass[1:2, :])
+    # Between char-bearing cells both parts act.
+    flowing = filter(r -> ds.mob[r.o] > 0 && ds.mob[r.nb] > 0, faces)
+    @test !isempty(flowing)
+    @test all(r -> r.v != 0 && r.fick != 0 && r.advection != 0, flowing)
+    # The impermeable virgin cell beside the first char-bearing one stops the
+    # Darcy flow through their face: the Fick flux alone, where any mean of
+    # the two mobilities that lets the char side through would carry far more.
+    front = filter(r -> (ds.mob[r.o] == 0) != (ds.mob[r.nb] == 0), faces)
+    @test length(front) == 2
+    for r in front
+        @test r.v == 0
+        @test r.F ≈ r.fick rtol = 1e-12
+        leaky = -(ds.mob[r.o] + ds.mob[r.nb]) / 2 * (ds.P[r.nb] - ds.P[r.o]) / r.d
+        ξ_up = leaky >= 0 ? ds.ξ[r.j, r.o] : ds.ξ[r.j, r.nb]
+        @test abs(leaky * ξ_up / r.φ_f) > 10 * abs(r.fick)
+    end
+    # At a pressure uniform to the bit no face carries a velocity: the Fick
+    # flux alone between unequal gas concentrations.
+    tie, _ = _pressure_tie(8; outlet = false, energy = :temperature)
+    faces, _, _ = _interior_fluxes(tie, (2, 3))
+    @test all(r -> r.v == 0 && r.fick != 0, faces)
+    @test all(r -> isapprox(r.F, r.fick; rtol = 1e-14), faces)
+end
+
+# A sealed, isothermal Darcy–Fick column with a pressure peak in the middle:
+# the gas flows out of the peak both ways and stays in the column.
+function _sealed_column()
+    L = 0.01
+    solid = SolidComponent(
+        :solid,
+        ρ = 1000.0,
+        c = 1500.0,
+        k = 0.3,
+        κ = 1e-11,
+        ρ_intrinsic = 1500.0,
+    )
+    gas = GaseousComponent(:gas, M = 0.044, c = 1000.0, k = 0.025, λ = 1e-5)
+    return PyrolysisProblem(
+        mesh = create_uniform_mesh(L, 20),
+        material = Material(
+            name = :sealed_column,
+            components = (solid, gas),
+            reactions = (),
+        ),
+        bc_set = BoundaryConditionSet(
+            thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
+            mass = (top = ImpermeableBC(), bottom = ImpermeableBC()),
+        ),
+        T_initial = z -> 400.0,
+        ξ_initial = [z -> 800.0, z -> 0.1 + 2.0 * exp(-((z / L - 0.5) / 0.1)^2)],
+        tspan = (0.0, 1.0),
+        output_times = [0.0, 0.5, 1.0],
+    )
+end
+
+@testset "gas transport: a sealed Darcy–Fick column keeps its gas and its solid ($energy form)" for energy in
+                                                                                                    (
+    :temperature,
+    :enthalpy,
+)
+    problem = _sealed_column()
+    cp = setup(problem; energy_state = energy)
+    layout, topo = cp.def.layout, cp.def.setup.topology
+    @test cp.def.setup.gas isa DarcyFickTransport
+    du = zeros(length(cp.u0))
+    residual!(du, cp.u0, cp.def, 0.0, cp.ws)
+    ds, c = buffers(cp.ws, cp.def, Float64)
+    # A permeable solid under a steep pressure gradient: the gas flows.
+    @test all(>(0), ds.mob)
+    @test maximum(ds.P) > 10 * minimum(ds.P)
+    @test maximum(abs, c.F_mass) > 0
+    # The sealed faces carry nothing, the solid does not move, and what the
+    # gas rows lose and gain sums to zero.
+    for tag in (:top, :bottom)
+        @test all(iszero, c.F_mass[:, only(boundary_faces(topo, tag))])
+    end
+    @test all(i -> du[mass_index(layout, i, 1)] == 0, 1:n_cells(layout))
+    rates = [du[mass_index(layout, i, 2)] for i = 1:n_cells(layout)]
+    @test abs(sum(rates)) <= 1e-12 * sum(abs, rates)
+    # Over a solve the gas inventory stays where it started.
+    sol = Pyrolysis.Integration.solve(
+        problem;
+        energy_state = energy,
+        reltol = 1e-8,
+        abstol = 1e-10,
+    )
+    @test sol.retcode === :Success
+    gas = [sum(sol.m[2, :, k]) for k in eachindex(sol.t)]
+    @test maximum(abs, gas .- gas[1]) <= 1e-12 * gas[1]
 end
 
 # Two sealed isothermal cells at 600 K with unequal gas concentrations, the gas

@@ -1,5 +1,6 @@
 using Test
 using Pyrolysis
+using Pyrolysis.Materials: DepletionLimiter
 using Pyrolysis.Outputs
 using Pyrolysis.Outputs: _extension
 using Pyrolysis.Integration
@@ -216,4 +217,81 @@ end
     end
     # The recorder ends where the solve ends, after the last event.
     @test fine.mass.final ≈ sol.extras.live_mass[end] rtol = 1e-12
+end
+
+# A decomposing slab whose char is permeable and whose cross section shrinks
+# with the conversion: the reaction raises the pore pressure, and the gas
+# vents through a pressure condition at the heated top while the face area
+# falls.
+function _shrinking_vent(n)
+    virgin = SolidComponent(
+        :virgin,
+        ρ = 1100.0,
+        c = (900.0, 1.5),
+        k = (0.2, 2e-4),
+        λ = 3e-6,
+        ρ_intrinsic = 1400.0,
+    )
+    char = SolidComponent(
+        :char,
+        ρ = 300.0,
+        c = 700.0,
+        k = 0.1,
+        λ = 3e-5,
+        κ = 1e-11,
+        ρ_intrinsic = 1800.0,
+    )
+    gas = GaseousComponent(:gas, M = 0.03, c = 1100.0, k = 0.03, λ = 3e-5)
+    mat = Material(
+        name = :shrinking_vent,
+        components = (virgin, char, gas),
+        reactions = (
+            Reaction(:pyro, 1 => (2, 3); A = 5e9, E = 1.4e5, h = 8e5, yields = (0.3, 0.7)),
+        ),
+        depletion_limiter = DepletionLimiter(threshold = 1.0),
+        lateral_shrinkage_law = χ -> 1 - 0.3χ,
+    )
+    return PyrolysisProblem(
+        mesh = create_uniform_mesh(0.01, n),
+        material = mat,
+        bc_set = BoundaryConditionSet(
+            thermal = (
+                top = HeatFluxBC(3e4) + ConvectiveBC(h = 15.0, T_inf = 300.0),
+                bottom = AdiabaticBC(),
+            ),
+            mass = (top = DirichletPressureBC(101325.0), bottom = ImpermeableBC()),
+        ),
+        T_initial = z -> 500.0 + 3e4 * z,
+        ξ_initial = [z -> 1100.0 * (1 - 30z), z -> 300.0 * 30z, z -> 0.3],
+        tspan = (0.0, 10.0),
+        output_times = collect(0.0:1.0:10.0),
+    )
+end
+
+@testset "the recorder on a venting column whose cross section shrinks: $(energy) form" for energy in
+                                                                                            (
+    :temperature,
+    :enthalpy,
+)
+    rec = ConservationRecorder()
+    sol = Integration.solve(
+        _shrinking_vent(12);
+        energy_state = energy,
+        use_ale = true,
+        callback = rec,
+        reltol = 1e-8,
+        abstol = 1e-10,
+    )
+    @test sol.retcode === :Success
+    @test rec.steps == sol.statistics.accepted
+    A = sol.extras.cross_section_area_history
+    @test A[end] < 0.99 * A[1]
+    audit = conservation_audit(sol, rec)
+    @test audit.mass.inflow < 0
+    @test abs(audit.mass.relative) <= 1e-7
+    @test abs(audit.energy.relative) <= 1e-6
+    # The outflow is integrated at the face's current area: taken at the
+    # initial one it would be off by a share of the area's fall, far above
+    # the defect.
+    @test abs(audit.mass.inflow) * (1 - A[end] / A[1]) > 1e3 * abs(audit.mass.defect)
 end
