@@ -310,4 +310,4 @@ function main()
     return rows
 end
 
-main()
+abspath(PROGRAM_FILE) == @__FILE__() && main()
