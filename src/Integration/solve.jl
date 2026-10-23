@@ -209,6 +209,8 @@ function integrate(
     )
     cells = cp.deactivation
     cells === nothing || reset_cells!(cells, layout)
+    corr = _layer_correction(def)
+    corr === nothing || reset_layer_times!(corr)
     copyto!(ws.T_warm, cp.T0)
     policy =
         integrator_policy === nothing ?
@@ -256,6 +258,7 @@ function integrate(
     outcome = Ref(:running)
     thin = _thickness_termination(layout, Float64(min_thickness), outcome)
     events = _deactivation_callback(cp, check, policy, located_events)
+    layer_times = _layer_time_callback(cp, policy)
     recs, callback = _split_recorders(callback)
     bound =
         [_BoundRecorder(r, cp, _crossings(cp, located_events, min_thickness)) for r in recs]
@@ -272,7 +275,8 @@ function integrate(
         (progress ? (_progress_observer(policy, cp.problem.tspan),) : ())...,
         (callback === nothing ? () : (_observing(callback, policy),))...,
     )
-    callbacks = CallbackSet(observer, events..., thin..., observers..., recorder)
+    callbacks =
+        CallbackSet(observer, events..., layer_times..., thin..., observers..., recorder)
 
     raw = OrdinaryDiffEq.solve(
         ode,
@@ -367,7 +371,8 @@ function _record!(integrator, accepted::AcceptedState, policy, bound)
 end
 
 # The conditions of the events that can end a step before its end: the
-# located deactivation's threshold margin and the thickness stop's margin.
+# located deactivation's threshold margin, the layer times' activation margin
+# and the thickness stop's margin.
 function _crossings(cp::CoreProblem, located::Bool, min_thickness::Real)
     layout = cp.def.layout
     cells = cp.deactivation
@@ -375,6 +380,11 @@ function _crossings(cp::CoreProblem, located::Bool, min_thickness::Real)
     cells !== nothing &&
         located &&
         push!(out, _ScalarWrapper(u -> threshold_margin(cells, layout, u)))
+    corr = _layer_correction(cp.def)
+    if corr !== nothing
+        reference = cp.def.setup.reference
+        push!(out, _ScalarWrapper(u -> layer_time_margin(corr, layout, reference, u)))
+    end
     if is_moving(layout)
         bottom = position_index(layout, 1)
         h = Float64(min_thickness)
@@ -576,6 +586,55 @@ function _deactivation_callback(cp::CoreProblem, check::DomainCheck, policy, loc
             save_positions = (false, false),
         ),
         safety_net,
+    )
+end
+
+# The bound correction of a definition whose layers' equidistribution times
+# are set during the solve ([`ActivationTime`](@ref)); `nothing` otherwise.
+function _layer_correction(def::CoreDefinition)
+    closure = def.closure
+    closure isa BalanceRowClosure || return nothing
+    corr = closure.correction
+    return estimates_layer_times(corr) ? corr : nothing
+end
+
+# The layer times' event: at the first root of the smallest activation margin
+# of the layers still waiting for their equidistribution time, each such
+# layer that has crossed takes its time ([`estimate_layer_times!`](@ref), the
+# margin widened by the relative tolerance as the located deactivation's
+# threshold is). The state is not modified and the layer's correction is
+# zero up to its activation, so the event changes the right-hand side only
+# where the activation has just begun; the integrator re-evaluates its
+# derivative there and the policy's flag rule applies as for an observer.
+function _layer_time_callback(cp::CoreProblem, policy)
+    corr = _layer_correction(cp.def)
+    corr === nothing && return ()
+    layout = cp.def.layout
+    reference = cp.def.setup.reference
+    t0, t1 = cp.problem.tspan
+    horizon = Float64(t1 - t0)
+    reltol = cp.reltol
+    margin = FunctionWrapper{Float64,Tuple{_StateVector}}(
+        u -> layer_time_margin(corr, layout, reference, u),
+    )
+    estimate = FunctionWrapper{Nothing,Tuple{_StateVector,Float64}}(
+        (u, t) -> begin
+            estimate_layer_times!(corr, layout, reference, u, t, horizon; slack = reltol)
+            return nothing
+        end,
+    )
+    return (
+        ContinuousCallback(
+            (u, t, integrator) -> margin(u),
+            nothing;
+            affect_neg! = integrator -> begin
+                estimate(integrator.u, integrator.t)
+                apply_observer_flag!(integrator, policy)
+                return nothing
+            end,
+            rootfind = SciMLBase.RightRootFind,
+            save_positions = (false, false),
+        ),
     )
 end
 

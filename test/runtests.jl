@@ -71,6 +71,7 @@ const _NEWCORE_BURNOUT = joinpath.(
     (
         "test_correction.jl",
         "test_deactivation.jl",
+        "test_layer_time.jl",
         "test_mesh_motion.jl",
         "test_policies.jl",
         "test_relative_flux.jl",

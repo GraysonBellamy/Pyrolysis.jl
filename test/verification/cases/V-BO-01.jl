@@ -250,10 +250,10 @@ end
 # against the drop of the live cells' masses less the masses deactivation
 # vented. A continuous callback whose condition never crosses zero reads each
 # step before its events: the integral over the step and, when the threshold
-# margin crosses inside it, over the step up to the first crossing, where a
-# located event ends it. `commit!(integ)`, run after the step's events, adds
-# the integral of the step as it ended; a step it cannot account for leaves
-# the integral `NaN`.
+# margin or the layer times' activation margin crosses inside it, over the
+# step up to the first crossing, where a located event ends it.
+# `commit!(integ)`, run after the step's events, adds the integral of the step
+# as it ended; a step it cannot account for leaves the integral `NaN`.
 mutable struct _VBOLedger
     outflow::Float64
     t_done::Float64
@@ -284,23 +284,36 @@ function _vbo_ledger(cp)
         (b - a) / 2 * s
     end
     cells, layout = cp.deactivation, def.layout
-    margin(u) = Pyrolysis.Deactivation.threshold_margin(cells, layout, u)
+    margins = Function[]
+    cells === nothing ||
+        push!(margins, u -> Pyrolysis.Deactivation.threshold_margin(cells, layout, u))
+    corr = hasproperty(def.closure, :correction) ? def.closure.correction : nothing
+    if corr isa Pyrolysis.Closures.LayerCorrection &&
+       Pyrolysis.Closures.estimates_layer_times(corr)
+        reference = def.setup.reference
+        push!(
+            margins,
+            u -> Pyrolysis.Closures.layer_time_margin(corr, layout, reference, u),
+        )
+    end
     L = _VBOLedger(0.0, cp.problem.tspan[1], false, NaN, NaN, NaN, false, NaN)
     reader = ContinuousCallback(
         (u, t, integ) -> begin
             if t == integ.t > integ.tprev && !(L.on && integ.tprev == L.tprev)
                 L.on, L.t, L.tprev = true, t, integ.tprev
                 L.step = integral(integ, integ.tprev, t)
-                L.crossing =
-                    cells !== nothing && margin(u) <= 0 && margin(integ.uprev) > 0
-                if L.crossing
+                cut = Inf
+                for margin in margins
+                    (margin(u) <= 0 && margin(integ.uprev) > 0) || continue
                     a, b = integ.tprev, t
                     for _ = 1:60
                         mid = (a + b) / 2
                         margin(integ(mid)) > 0 ? (a = mid) : (b = mid)
                     end
-                    L.to_crossing = integral(integ, integ.tprev, b)
+                    cut = min(cut, b)
                 end
+                L.crossing = isfinite(cut)
+                L.crossing && (L.to_crossing = integral(integ, integ.tprev, cut))
             end
             return 1.0
         end,

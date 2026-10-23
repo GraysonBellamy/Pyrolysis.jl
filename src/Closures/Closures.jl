@@ -33,6 +33,8 @@ export Closure, BalanceRowClosure, closure_rows!, consistent_velocities!, rank_c
 export PotentialClosure, consistent_multipliers, multiplier_rows!
 export Correction, NoCorrection, PrescribedCorrection, EquidistributionCorrection
 export LayerCorrection, EQUIDISTRIBUTION_TIME, bind_correction, activation, correction!
+export ActivationTime, ACTIVATION_TIME_FACTOR, estimates_layer_times, reset_layer_times!
+export layer_time_margin, estimate_layer_times!
 export vanishing, vanishes
 export LateralShrinkage, LATERAL_CLAMP_WIDTH, chi_bar, lateral_rows, consistent_lateral
 
