@@ -1,41 +1,77 @@
 using Test
 using Pyrolysis
-using Pyrolysis.Problem: chi_range, chi_mode, WithChi
 
-include(joinpath(@__DIR__, "..", "helpers.jl"))
+# A solid→gas material, with a lateral shrinkage law on request, on a uniform
+# 1 cm column under a 10 kW/m² flux with Fickian venting at the top.
+function _cross_section_problem(; lateral::Bool, tspan = (0.0, 0.02))
+    solid = SolidComponent(:solid; ρ = 1000.0, c = 1000.0, k = 0.2, ε = 0.9, γ = 1.0)
+    gas = GaseousComponent(:gas; M = 0.050, c = 1000.0, k = 0.02, λ = 1e-5, γ = 1.0)
+    material = Material(
+        name = :cross_section_test,
+        components = (solid, gas),
+        reactions = (Reaction(:decomp, 1 => 2, A = 1e5, E = 5e4, h = 1e5),),
+        lateral_shrinkage_law = lateral ? (χ -> 1.0 - 0.2 * χ) : nothing,
+    )
+    return PyrolysisProblem(
+        mesh = create_uniform_mesh(0.01, 5),
+        material = material,
+        bc_set = BoundaryConditionSet(
+            thermal = (top = HeatFluxBC(1e4), bottom = AdiabaticBC()),
+            mass = (top = DiffusiveMassBC(0.01), bottom = ImpermeableBC()),
+        ),
+        T_initial = z -> 300.0,
+        ξ_initial = [z -> 1000.0, z -> 0.0],
+        tspan = tspan,
+    )
+end
 
 @testset "Variable Cross Section" begin
-    @testset "WithChi Layout" begin
-        problem = fixture_problem(n_cells = 5, lateral = true)
-        def, ws, u, du = fixture_state(problem; use_ale = true)
+    @testset "a lateral law adds the history pair, the area and the lateral rate" begin
+        problem = _cross_section_problem(lateral = true)
+        cp = Pyrolysis.Integration.setup(problem; use_ale = true)
+        layout = cp.def.layout
+        n = Pyrolysis.States.n_cells(layout)
+        @test n == 5
+        @test Pyrolysis.States.has_chi(layout)
+        # Per cell T, two masses and the history pair; per node position and
+        # velocity; the area and the lateral rate.
+        @test length(cp.u0) == 5 * (1 + 2 + 2) + 6 * 2 + 2
+        area = Pyrolysis.States.area_index(layout)
+        A0 = cp.u0[area]
 
-        @test chi_mode(def.mode) isa WithChi
-        @test length(chi_range(ws.layout)) == ws.layout.n_cells
-        @test length(u) == 5 * (2 + 3) + 1
+        # Each cell has turned half its initial dry solid into dry gas: χ̄ = 0.5,
+        # so the law gives A = (1 − 0.2·0.5) A₀ = 0.9 A₀.
+        u = copy(cp.u0)
+        for i = 1:n
+            M = u[Pyrolysis.States.history_index(layout, i, 2)]
+            @test M > 0
+            u[Pyrolysis.States.history_index(layout, i, 1)] = 0.5 * M
+        end
+        du = similar(u)
+        Pyrolysis.Assembly.residual!(du, u, cp.def, 0.0, cp.ws)
+        @test abs(du[area]) > 0.05 * A0
+        u[area] = 0.9 * A0
+        Pyrolysis.Assembly.residual!(du, u, cp.def, 0.0, cp.ws)
+        @test abs(du[area]) <= 1e-14 * A0
 
-        u[chi_range(ws.layout)] .= 0.5
-        A0 = ws.mesh.cross_section_area_initial
-        A = cross_section_area_from_state(ws.mesh, problem.material, u, ws.layout)
-        @test A ≈ A0 * 0.9
-
-        residual!(du, u, def, 0.0, ws)
+        # The residual is finite, the cross-section rows included.
         @test all(isfinite, du)
-        @test all(isfinite, du[chi_range(ws.layout)])
+        @test isfinite(du[Pyrolysis.States.lateral_rate_index(layout)])
     end
 
-    @testset "NoChi Layout Stays Compact" begin
-        problem = fixture_problem(n_cells = 5, lateral = false)
-        def, ws, u, _ = fixture_state(problem; use_ale = true)
-
-        @test isempty(chi_range(ws.layout))
-        @test length(u) == 5 * 3 + 6
-        @test !(chi_mode(def.mode) isa WithChi)
+    @testset "without a lateral law the moving layout carries no cross-section rows" begin
+        cp = Pyrolysis.Integration.setup(
+            _cross_section_problem(lateral = false);
+            use_ale = true,
+        )
+        @test !Pyrolysis.States.has_chi(cp.def.layout)
+        @test length(cp.u0) == 5 * (1 + 2) + 6 * 2
     end
 
-    # Only the ALE residual evolves χ and the cross-section, so a lateral
-    # shrinkage law on the fixed mesh is rejected wherever the mode is built.
-    @testset "Lateral Law Needs ALE" begin
-        problem = fixture_problem(n_cells = 5, lateral = true)
+    # Only a moving mesh evolves the cross section, so a lateral shrinkage
+    # law on the fixed mesh is refused wherever the problem is set up.
+    @testset "a lateral law needs use_ale = true" begin
+        problem = _cross_section_problem(lateral = true)
         message(f) =
             try
                 f()
@@ -44,27 +80,22 @@ include(joinpath(@__DIR__, "..", "helpers.jl"))
                 err isa ArgumentError ? err.msg : "unexpected $(typeof(err))"
             end
         for f in (
-            () -> initialize_state(problem; use_ale = false),
-            () -> solve(problem; progress = false),
-            () -> solve(problem; progress = false, validate = false),
+            () -> Pyrolysis.Integration.setup(problem; use_ale = false),
+            () -> Pyrolysis.Integration.solve(problem),
+            () -> Pyrolysis.Integration.solve(problem; validate = false),
         )
             msg = message(f)
             @test occursin("lateral_shrinkage_law", msg)
             @test occursin("use_ale = true", msg)
         end
-        @test chi_mode(initialize_state(problem; use_ale = true)[1].mode) isa WithChi
+        @test Pyrolysis.States.has_chi(
+            Pyrolysis.Integration.setup(problem; use_ale = true).def.layout,
+        )
     end
 
-    @testset "Variable Cross Section Solve" begin
-        problem = fixture_problem(n_cells = 5, lateral = true, tspan = (0.0, 0.02))
-        sol = solve(
-            problem;
-            use_ale = true,
-            progress = false,
-            validate = false,
-            # Opt out of Jacobian assembly — integrator falls back to FD.
-            jacobian = nothing,
-        )
+    @testset "a variable-cross-section solve records a finite area history" begin
+        problem = _cross_section_problem(lateral = true)
+        sol = Pyrolysis.Integration.solve(problem; use_ale = true, validate = false)
         @test sol.retcode == :Success
         @test all(isfinite, sol.extras.cross_section_area_history)
     end

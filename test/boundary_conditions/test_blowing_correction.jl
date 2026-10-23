@@ -13,12 +13,9 @@ Newton, and the `CouetteFilm` model end to end.
    `blowing_ratio` diagnostics, off/on ordering, exact no-outflow identity.
 5. AD cleanliness — ForwardDiff derivatives of `T_s` w.r.t. `T_cell` and the
    blowing mass flux match central finite differences.
-6. Structured-backend Jacobian — strict support-complete agreement with
-   `DenseAD_ForwardDiff` with a blowing model on the top face (Fickian and
-   Darcy–Fick, Eulerian and ALE, film and pooling models).
-7. Integration — `solve` with a film model raises the surface temperature
-   under convective cooling, and the saved flux decomposition stays
-   consistent with the boundary ledger.
+6. Integration — the finite-volume core's `solve` with a film model raises
+   the surface temperature under convective cooling, and the saved flux
+   decomposition stays consistent with the boundary ledger.
 
 The property-ratio and pooling models are checked against their reference
 values in `test_blowing_models.jl`.
@@ -35,13 +32,12 @@ using Pyrolysis.BoundaryConditions:
     BlowingFace,
     blowing_state,
     blowing_ratio,
-    solve_boundary_temperature,
     solve_boundary_temperature!,
     evaluate_bc_flux_and_derivative,
     compute_boundary_heat_fluxes,
     _blowing_conductance
 using Pyrolysis.Materials: SURFACE_ABSORPTION, NO_RADIATION
-using Pyrolysis.Jacobian: verify_jacobian_at, JacobianSpec, DenseAD_ForwardDiff, Structured
+using Pyrolysis.States: trial_temperature
 
 # ----------------------------------------------------------------------------
 # Shared fixtures: 2-component solid + gas, constant cp_g so the blowing
@@ -59,6 +55,25 @@ end
 
 # Reference factor straight from the definition (only valid away from 0/∞).
 _f_exact(B) = B / (exp(B) - 1)
+
+# The surface balance at the trial clamp of each iterate, as the residual
+# evaluates it; returns the diagnostic state.
+function _blowing_surface(T_cell, k_eff, Δz_half, bc, mat, J, t, ε)
+    state = BoundaryState()
+    solve_boundary_temperature!(
+        state,
+        T_cell,
+        k_eff,
+        Δz_half,
+        bc,
+        mat,
+        J,
+        t,
+        ε;
+        trial = trial_temperature,
+    )
+    return state
+end
 
 @testset "Blowing correction" begin
 
@@ -127,19 +142,27 @@ _f_exact(B) = B / (exp(B) - 1)
         @test q ≈ h * χ * (T_inf - T_s) rtol = 1e-14
         @test dq ≈ -h * χ rtol = 1e-14
 
-        # Zero outflow reproduces the 5-arg flux exactly.
+        # Zero outflow reproduces the uncorrected flux exactly.
         q0, dq0 = evaluate_bc_flux_and_derivative(conv, T_s, t, ε, NO_RADIATION, face0)
-        q5, dq5 = evaluate_bc_flux_and_derivative(conv, T_s, t, ε, NO_RADIATION)
-        @test q0 === q5
-        @test dq0 === dq5
+        @test q0 === h * (T_inf - T_s)
+        @test dq0 === -h
 
         # The default model leaves the coefficient alone whatever the outflow.
         bare = ConvectiveBC(h = h, T_inf = T_inf)
         @test bare.blowing === NoBlowing()
         @test ConvectiveBC(h, T_inf).blowing === NoBlowing()
         qb, dqb = evaluate_bc_flux_and_derivative(bare, T_s, t, ε, NO_RADIATION, face)
-        @test qb === q5
-        @test dqb === dq5
+        @test qb === q0
+        @test dqb === dq0
+
+        @testset "evaluate_bc_flux_and_derivative(::ConvectiveBC) without a face" begin
+            # Zero outflow and the default model reproduce the 5-arg flux exactly.
+            q5, dq5 = evaluate_bc_flux_and_derivative(conv, T_s, t, ε, NO_RADIATION)
+            @test q0 === q5
+            @test dq0 === dq5
+            @test qb === q5
+            @test dqb === dq5
+        end
 
         # Non-convective BCs ignore the face.
         rad = RadiativeBC(T_inf = T_inf)
@@ -226,7 +249,7 @@ _f_exact(B) = B / (exp(B) - 1)
         J_zero = (0.0, 0.0)
         J_blow = (0.0, J_gas)
 
-        state = solve_boundary_temperature(T_cell, k_eff, Δz_half, bc, mat, J_blow, t, ε)
+        state = _blowing_surface(T_cell, k_eff, Δz_half, bc, mat, J_blow, t, ε)
         @test state.converged
 
         # Constant cp_g → mcp is exactly J·cp, independent of T_s.
@@ -246,24 +269,21 @@ _f_exact(B) = B / (exp(B) - 1)
 
         # Blowing suppresses convective cooling → hotter surface than the
         # bare coefficient under the same outflow.
-        state_off =
-            solve_boundary_temperature(T_cell, k_eff, Δz_half, bc_bare, mat, J_blow, t, ε)
+        state_off = _blowing_surface(T_cell, k_eff, Δz_half, bc_bare, mat, J_blow, t, ε)
         @test state.T_surface > state_off.T_surface
         @test state_off.blowing_mcp ≈ mcp rtol = 1e-12   # the conductance is reported
         @test state_off.blowing_ratio == 1.0             # but not applied
 
         # Zero mass flux with a model is the exact no-blowing state.
-        state_zero =
-            solve_boundary_temperature(T_cell, k_eff, Δz_half, bc, mat, J_zero, t, ε)
-        state_bare0 =
-            solve_boundary_temperature(T_cell, k_eff, Δz_half, bc_bare, mat, J_zero, t, ε)
+        state_zero = _blowing_surface(T_cell, k_eff, Δz_half, bc, mat, J_zero, t, ε)
+        state_bare0 = _blowing_surface(T_cell, k_eff, Δz_half, bc_bare, mat, J_zero, t, ε)
         @test state_zero.T_surface === state_bare0.T_surface
         @test state_zero.q_applied === state_bare0.q_applied
         @test state_zero.blowing_ratio == 1.0
 
         # Net suction (inflow) enhances cooling → colder surface than bare.
         state_suction =
-            solve_boundary_temperature(T_cell, k_eff, Δz_half, bc, mat, (0.0, -J_gas), t, ε)
+            _blowing_surface(T_cell, k_eff, Δz_half, bc, mat, (0.0, -J_gas), t, ε)
         @test state_suction.T_surface < state_off.T_surface
         @test state_suction.blowing_mcp < 0.0
         @test state_suction.blowing_ratio > 1.0
@@ -287,7 +307,8 @@ _f_exact(B) = B / (exp(B) - 1)
                 mat,
                 (zero(J_gas), J_gas),
                 t,
-                ε,
+                ε;
+                trial = trial_temperature,
             )
             return result.T_s
         end
@@ -307,7 +328,8 @@ _f_exact(B) = B / (exp(B) - 1)
     end
 
     # ========================================================================
-    @testset "Structured Jacobian: strict agreement with blowing" begin
+    @testset "Structured Jacobian (verify_jacobian_at): strict agreement with blowing" begin
+        JacobianSpec = Pyrolysis.Jacobian.JacobianSpec
         function _build(; darcy::Bool, use_ale::Bool, model)
             mat = _blowing_material(darcy = darcy)
             mesh = create_uniform_mesh(0.01, 12, Val(2))
@@ -349,9 +371,9 @@ _f_exact(B) = B / (exp(B) - 1)
             ("ALE Fickian, pooling", false, true, pooling),
         )
             def, ws, u = _build(darcy = darcy, use_ale = use_ale, model = model)
-            ref_spec = JacobianSpec(DenseAD_ForwardDiff(), def, ws)
-            spec = JacobianSpec(Structured(), def, ws)
-            report = verify_jacobian_at(
+            ref_spec = JacobianSpec(Pyrolysis.Jacobian.DenseAD_ForwardDiff(), def, ws)
+            spec = JacobianSpec(Pyrolysis.Jacobian.Structured(), def, ws)
+            report = Pyrolysis.Jacobian.verify_jacobian_at(
                 spec,
                 def,
                 ws,
@@ -370,13 +392,7 @@ _f_exact(B) = B / (exp(B) - 1)
     @testset "integration: solve() with blowing" begin
         function _solve(model)
             mat = _blowing_material()
-            mesh = create_uniform_mesh(
-                0.005,
-                8,
-                Val(2);
-                T_initial = 600.0,
-                ξ_initial = (1000.0, 0.0),
-            )
+            mesh = create_uniform_mesh(0.005, 8)
             bcs = BoundaryConditionSet(
                 thermal = (
                     top = HeatFluxBC(50e3) +
@@ -389,9 +405,11 @@ _f_exact(B) = B / (exp(B) - 1)
                 mesh = mesh,
                 material = mat,
                 bc_set = bcs,
+                T_initial = z -> 300.0,
+                ξ_initial = [z -> 1000.0, z -> 0.0],
                 tspan = (0.0, 5.0),
             )
-            return solve(problem; saveat = [0.0, 2.5, 5.0], progress = false)
+            return Pyrolysis.Integration.solve(problem; saveat = [0.0, 2.5, 5.0])
         end
 
         sol_off = _solve(NoBlowing())

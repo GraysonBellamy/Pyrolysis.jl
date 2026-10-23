@@ -5,10 +5,10 @@ Material-supplied gas viscosity: the `SutherlandProperty` type and the
 - `SutherlandProperty()` carries the canonical air triple and evaluates
   Sutherland's law over the physical range.
 - `Material` defaults to air.
-- `effective_gas_viscosity(T, material)` clamps `T` from below and floors `μ`
-  from above zero: `μ` appears only as the denominator of the Darcy mobility
-  `κ/μ`, so a user curve that goes non-positive outside its fit range must not
-  reach the solver.
+- The Darcy mobility reads the curve at the trial temperature and floors it
+  at `MU_FLOOR`: `μ` appears only as the denominator of the mobility `κ/μ`,
+  so a user curve that goes non-positive outside its fit range must not reach
+  the solver.
 """
 
 using Test
@@ -22,11 +22,10 @@ using Pyrolysis.Materials:
     SutherlandProperty,
     PolynomialProperty,
     ConstantProperty
-using Pyrolysis.Properties:
-    effective_gas_viscosity, mixture_gas_viscosity, T_GAS_PROPERTY_FLOOR, MU_FLOOR
-using Pyrolysis.Properties: porosity
+using Pyrolysis.Materials: T_PROPERTY_MIN
+using Pyrolysis.Properties: MU_FLOOR
+using Pyrolysis.Properties: skeletal_volume_fraction, effective_permeability
 using Pyrolysis.Physics: ideal_gas_pressure, background_gas_concentration
-using Pyrolysis.Solver: get_cell_positions
 using Pyrolysis.Materials: DepletionLimiter
 using Pyrolysis.BoundaryConditions:
     BoundaryConditionSet, DirichletThermalBC, DirichletPressureBC, ImpermeableBC
@@ -41,6 +40,31 @@ function _visc_material(; kwargs...)
         reactions = (Reaction(:pyrolysis, 1 => 2, A = 1e10, E = 150e3, h = -300e3),),
         kwargs...,
     )
+end
+
+# The derived state of a Darcy column at a uniform temperature `T`.
+function _visc_derived(mat, T)
+    problem = PyrolysisProblem(
+        mesh = create_uniform_mesh(0.01, 4),
+        material = mat,
+        bc_set = BoundaryConditionSet(
+            thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
+            mass = (top = DirichletPressureBC(101325.0), bottom = ImpermeableBC()),
+        ),
+        ξ_initial = [z -> 450.0, z -> 0.5],
+        tspan = (0.0, 1.0),
+    )
+    cp = Pyrolysis.Integration.setup(problem)
+    layout = cp.def.layout
+    u = copy(cp.u0)
+    for i = 1:4
+        u[Pyrolysis.States.energy_index(layout, i)] = T
+    end
+    du = zeros(length(u))
+    Pyrolysis.Assembly.residual!(du, u, cp.def, 0.0, cp.ws)
+    @assert cp.def.setup.gas isa Pyrolysis.States.DarcyFickTransport
+    ds, _ = Pyrolysis.Assembly.buffers(cp.ws, cp.def, Float64)
+    return ds
 end
 
 @testset "Material gas viscosity" begin
@@ -72,8 +96,7 @@ end
         for T in (300.0, 650.0, 1100.0)
             # The default path is bit-for-bit the air Sutherland curve, which
             # every calibrated case relies on.
-            @test effective_gas_viscosity(T, mat) == SutherlandProperty()(T)
-            @test mixture_gas_viscosity((500.0, 1.0), T, mat) == SutherlandProperty()(T)
+            @test mat.gas_viscosity(T) == SutherlandProperty()(T)
         end
     end
 
@@ -81,15 +104,14 @@ end
     @testset "material curve is actually consulted" begin
         mat = _visc_material(gas_viscosity = ConstantProperty(3.0e-5))
         for T in (300.0, 900.0)
-            @test effective_gas_viscosity(T, mat) == 3.0e-5
-            @test effective_gas_viscosity(T, mat) != SutherlandProperty()(T)
+            @test mat.gas_viscosity(T) == 3.0e-5
+            @test mat.gas_viscosity(T) != SutherlandProperty()(T)
         end
 
         # A bare Function and a Real both go through `to_property`.
-        @test effective_gas_viscosity(400.0, _visc_material(gas_viscosity = 2.5e-5)) ==
-              2.5e-5
+        @test _visc_material(gas_viscosity = 2.5e-5).gas_viscosity(400.0) == 2.5e-5
         mat_f = _visc_material(gas_viscosity = T -> 1.0e-5 + 1.0e-8 * T)
-        @test effective_gas_viscosity(400.0, mat_f) ≈ 1.4e-5 rtol = 1e-12
+        @test mat_f.gas_viscosity(400.0) ≈ 1.4e-5 rtol = 1e-12
     end
 
     # ========================================================================
@@ -108,37 +130,48 @@ end
         # Reproduces the surrogate's reported Cantera blend values. These
         # coefficients are a quartic FIT to those values (max residual ~5e-4
         # over 280-1200 K), so the tolerance is the fit residual, not roundoff.
-        @test effective_gas_viscosity(300.0, mat) ≈ 1.0579843085895027e-5 rtol = 1e-3
-        @test effective_gas_viscosity(1000.0, mat) ≈ 3.2307444332042786e-5 rtol = 1e-3
+        @test mat.gas_viscosity(300.0) ≈ 1.0579843085895027e-5 rtol = 1e-3
+        @test mat.gas_viscosity(1000.0) ≈ 3.2307444332042786e-5 rtol = 1e-3
         # Below air at every pyrolysis-relevant temperature (the physical point).
         for T in (300.0, 500.0, 700.0, 1000.0)
-            @test effective_gas_viscosity(T, mat) < SutherlandProperty()(T)
+            @test mat.gas_viscosity(T) < SutherlandProperty()(T)
         end
     end
 
     # ========================================================================
     @testset "guards: μ only ever divides" begin
-        # Newton trial states can present nonphysical T; the floor keeps the
-        # residual evaluable instead of throwing DomainError on T^1.5.
+        # Newton trial states can present nonphysical T; the curve is read on
+        # the property bracket instead of throwing DomainError on T^1.5.
         mat = _visc_material()
-        @test effective_gas_viscosity(-50.0, mat) ==
-              effective_gas_viscosity(T_GAS_PROPERTY_FLOOR, mat)
-        @test isfinite(effective_gas_viscosity(0.0, mat))
+        @test mat.gas_viscosity(-50.0) == mat.gas_viscosity(T_PROPERTY_MIN)
+        @test isfinite(mat.gas_viscosity(0.0))
 
-        # A user curve that goes non-positive must be floored, not passed
-        # through to `κ/μ` where it would flip the sign of the Darcy velocity.
-        # This one stays positive across the constructor's probe range (≤1800 K)
-        # and only turns negative beyond it — the realistic failure, a fit used
+        # The Darcy mobility is κ_eff/μ with μ floored at MU_FLOOR. A user
+        # curve that goes non-positive must be floored, not passed through to
+        # `κ/μ` where it would flip the sign of the Darcy velocity. This one
+        # stays positive across the constructor's probe range (≤1800 K) and
+        # only turns negative beyond it — the realistic failure, a fit used
         # outside its validity range by a Newton trial state that overshoots.
         neg = _visc_material(gas_viscosity = T -> 1.0e-5 - 4.0e-9 * T)
-        @test effective_gas_viscosity(1000.0, neg) > MU_FLOOR      # still physical
-        @test effective_gas_viscosity(3000.0, neg) == MU_FLOOR     # floored
-        @test effective_gas_viscosity(3000.0, neg) > 0.0
+        for (m, T, μ) in (
+            (mat, 650.0, mat.gas_viscosity(650.0)),
+            (neg, 1000.0, neg.gas_viscosity(1000.0)),   # still physical
+            (neg, 3000.0, MU_FLOOR),                    # floored
+        )
+            ds = _visc_derived(m, T)
+            for i in eachindex(ds.mob)
+                ξ = (ds.ξ⁺[1, i], ds.ξ⁺[2, i])
+                κ = effective_permeability(ξ, T, m, ds.φ[i])
+                @test κ > 0
+                @test ds.mob[i] ≈ κ / μ rtol = 1e-12
+            end
+        end
+        @test neg.gas_viscosity(3000.0) < 0.0
 
         # The floor sits far below any physical gas viscosity, so it never
         # binds on a legitimate state.
         for T in (200.0, 300.0, 650.0, 1500.0)
-            @test effective_gas_viscosity(T, mat) > 1e6 * MU_FLOOR
+            @test mat.gas_viscosity(T) > 1e6 * MU_FLOOR
         end
     end
 
@@ -175,13 +208,7 @@ end
                 gas_viscosity = μ_curve,
             )
             ξ_g0 = background_gas_concentration(mat, 2, (1000.0, 0.0), T_iso; P = P∞)
-            mesh = create_uniform_mesh(
-                L,
-                40,
-                Val(2);
-                T_initial = T_iso,
-                ξ_initial = (1000.0, ξ_g0),
-            )
+            mesh = create_uniform_mesh(L, 40)
             bc = BoundaryConditionSet(
                 thermal = (
                     top = DirichletThermalBC(T_iso),
@@ -198,11 +225,12 @@ end
                 tspan = (0.0, 1.0),
                 output_times = [0.0, 1.0],
             )
-            sol = solve(prob; abstol = 1e-10, reltol = 1e-8, progress = false)
-            z = get_cell_positions(sol)
+            sol = Pyrolysis.Integration.solve(prob; abstol = 1e-10, reltol = 1e-8)
+            @test sol.retcode == :Success
+            z = Pyrolysis.Outputs.get_cell_positions(sol)
             P = map(eachindex(z)) do i
                 ξi = (sol.ξ[1, i, end], sol.ξ[2, i, end])
-                φi = porosity(ξi, T_iso, mat)
+                φi = 1 - skeletal_volume_fraction(ξi, T_iso, mat)
                 ideal_gas_pressure(ξi, T_iso, φi, mat)
             end
             return z, P, mat
@@ -216,7 +244,7 @@ end
 
         # Each solve matches its OWN exact profile (the case's usual accuracy).
         for (z, P, mat) in ((z1, P1, mat1), (z2, P2, mat2))
-            μ = effective_gas_viscosity(T_iso, mat)
+            μ = mat.gas_viscosity(T_iso)
             coeff = μ * R * T_iso * ġ / (κ_perm * M_gas)
             err = maximum(eachindex(z)) do i
                 abs(P[i]^2 - (P∞^2 + coeff * (L^2 - z[i]^2))) / (coeff * L^2)
@@ -239,5 +267,61 @@ end
         @test_throws ArgumentError _visc_material(gas_viscosity = ConstantProperty(-1.0e-5))
         @test_throws ArgumentError _visc_material(gas_viscosity = ConstantProperty(0.0))
         @test_throws ArgumentError _visc_material(gas_viscosity = T -> NaN)
+    end
+end
+
+# The hard-floored viscosity of the material and of the gas mixture.
+@testset "effective_gas_viscosity and mixture_gas_viscosity" begin
+    effective_gas_viscosity = Pyrolysis.Properties.effective_gas_viscosity
+    mixture_gas_viscosity = Pyrolysis.Properties.mixture_gas_viscosity
+
+    @testset "Material defaults to air" begin
+        mat = _visc_material()
+        for T in (300.0, 650.0, 1100.0)
+            @test effective_gas_viscosity(T, mat) == SutherlandProperty()(T)
+            @test mixture_gas_viscosity((500.0, 1.0), T, mat) == SutherlandProperty()(T)
+        end
+    end
+
+    @testset "material curve is actually consulted" begin
+        mat = _visc_material(gas_viscosity = ConstantProperty(3.0e-5))
+        for T in (300.0, 900.0)
+            @test effective_gas_viscosity(T, mat) == 3.0e-5
+            @test effective_gas_viscosity(T, mat) != SutherlandProperty()(T)
+        end
+        @test effective_gas_viscosity(400.0, _visc_material(gas_viscosity = 2.5e-5)) ==
+              2.5e-5
+        mat_f = _visc_material(gas_viscosity = T -> 1.0e-5 + 1.0e-8 * T)
+        @test effective_gas_viscosity(400.0, mat_f) ≈ 1.4e-5 rtol = 1e-12
+    end
+
+    @testset "polynomial curve (the surrogate's native form)" begin
+        coeffs = (
+            -2.590750377731154e-7,
+            3.664256350094585e-8,
+            -6.54432524120188e-14,
+            -6.352113427713809e-15,
+            2.3401486488384493e-18,
+        )
+        mat = _visc_material(gas_viscosity = PolynomialProperty(coeffs))
+        @test effective_gas_viscosity(300.0, mat) ≈ 1.0579843085895027e-5 rtol = 1e-3
+        @test effective_gas_viscosity(1000.0, mat) ≈ 3.2307444332042786e-5 rtol = 1e-3
+        for T in (300.0, 500.0, 700.0, 1000.0)
+            @test effective_gas_viscosity(T, mat) < SutherlandProperty()(T)
+        end
+    end
+
+    @testset "guards: μ only ever divides" begin
+        mat = _visc_material()
+        @test effective_gas_viscosity(-50.0, mat) ==
+              effective_gas_viscosity(Pyrolysis.Properties.T_GAS_PROPERTY_FLOOR, mat)
+        @test isfinite(effective_gas_viscosity(0.0, mat))
+        neg = _visc_material(gas_viscosity = T -> 1.0e-5 - 4.0e-9 * T)
+        @test effective_gas_viscosity(1000.0, neg) > MU_FLOOR      # still physical
+        @test effective_gas_viscosity(3000.0, neg) == MU_FLOOR     # floored
+        @test effective_gas_viscosity(3000.0, neg) > 0.0
+        for T in (200.0, 300.0, 650.0, 1500.0)
+            @test effective_gas_viscosity(T, mat) > 1e6 * MU_FLOOR
+        end
     end
 end

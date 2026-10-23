@@ -14,7 +14,7 @@ helper's EOS round-trip and the equilibrium-hold property (uniform air at
 using Test
 using Pyrolysis
 using Pyrolysis.Physics: ideal_gas_pressure
-using Pyrolysis.Properties: porosity
+using Pyrolysis.Properties: skeletal_volume_fraction
 
 function _air_fixture()
     virgin = SolidComponent(
@@ -61,13 +61,13 @@ end
         @test ξ_air > 0.0
 
         # ξ_air = P·M·φ/(R·T) against hand numbers: φ = 1 − 500/1500 = 2/3
-        φ0 = porosity(ξ_condensed, T0, mat)
+        φ0 = 1 - skeletal_volume_fraction(ξ_condensed, T0, mat)
         @test φ0 ≈ 2 / 3 rtol = 1e-12
         @test ξ_air ≈ 101325.0 * 0.02897 * φ0 / (8.31446261815324 * T0) rtol = 1e-12
 
         # Pressure closure reproduces exactly 1 atm with that concentration
         ξ_full = (500.0, 0.0, 0.0, ξ_air)
-        φ = porosity(ξ_full, T0, mat)
+        φ = 1 - skeletal_volume_fraction(ξ_full, T0, mat)
         @test ideal_gas_pressure(ξ_full, T0, φ, mat) ≈ 101325.0 rtol = 1e-12
 
         # Index form matches name form; custom pressure scales linearly
@@ -84,25 +84,37 @@ end
         # face.)
         ξ_air = background_gas_concentration(mat, :AIR, ξ_condensed, T0)
         n = 8
-        mesh = create_uniform_mesh(
-            0.01,
-            n,
-            Val(4);
-            T_initial = T0,
-            ξ_initial = (500.0, 0.0, 0.0, ξ_air),
+        problem = PyrolysisProblem(
+            mesh = create_uniform_mesh(0.01, n),
+            material = mat,
+            bc_set = BoundaryConditionSet(
+                thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
+                mass = (top = DirichletPressureBC(101325.0), bottom = ImpermeableBC()),
+            ),
+            T_initial = z -> T0,
+            ξ_initial = [z -> 500.0, z -> 0.0, z -> 0.0, z -> ξ_air],
+            tspan = (0.0, 1.0),
         )
+        T, ξ = Pyrolysis.Problem.initial_fields(problem, problem.mesh)
+        z = Pyrolysis.Problem.cell_centers(problem.mesh)
         P = [
-            let ξ_i = mesh.cell_states[i].ξ, T_i = mesh.cell_states[i].T
-                ideal_gas_pressure(ξ_i, T_i, porosity(ξ_i, T_i, mat), mat)
+            let ξ_i = Tuple(ξ[:, i]), T_i = T[i]
+                ideal_gas_pressure(ξ_i, T_i, 1 - skeletal_volume_fraction(ξ_i, T_i, mat), mat)
             end for i = 1:n
         ]
         @test all(p -> isapprox(p, 101325.0; rtol = 1e-12), P)
 
-        ∇P_max = maximum(
-            abs(P[i+1] - P[i]) / (mesh.cell_centers[i+1] - mesh.cell_centers[i]) for
-            i = 1:(n-1)
-        )
+        ∇P_max = maximum(abs(P[i+1] - P[i]) / (z[i+1] - z[i]) for i = 1:(n-1))
         @test ∇P_max < 1e-6
+
+        # The core's own pressure field at the initial state is the same flat
+        # 1 atm.
+        cp = Pyrolysis.Integration.setup(problem)
+        du = zeros(length(cp.u0))
+        Pyrolysis.Assembly.residual!(du, cp.u0, cp.def, 0.0, cp.ws)
+        ds, _ = Pyrolysis.Assembly.buffers(cp.ws, cp.def, Float64)
+        @test cp.def.setup.gas isa Pyrolysis.States.DarcyFickTransport
+        @test all(p -> isapprox(p, 101325.0; rtol = 1e-12), ds.P)
     end
 
     @testset "argument validation" begin

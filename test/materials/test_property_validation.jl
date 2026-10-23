@@ -138,3 +138,32 @@ end
     )
     @test !identically_zero(CallableProperty(T -> 0.0))
 end
+
+# Boundary-condition parameters: a number or a function of time, and of
+# temperature for the emissivity-like ones; a number takes the argument's type.
+@testset "parameter evaluation: numbers, functions and property laws" begin
+    evaluate_param = Pyrolysis.Materials.evaluate_param
+    evaluate_param_T = Pyrolysis.Materials.evaluate_param_T
+    @test evaluate_param(25e3, 0.0) === 25e3
+    @test evaluate_param(300.0, 10.0) == 300.0
+    @test evaluate_param(t -> 100.0 * t, 5.0) == 500.0
+    @test evaluate_param_T(0.9, 500.0) === 0.9
+    @test evaluate_param_T(T -> 0.8 + 1e-4 * T, 500.0) ≈ 0.85
+    @test evaluate_param_T(LinearProperty(0.8, 1e-4), 500.0) ==
+          LinearProperty(0.8, 1e-4)(500.0)
+    @test evaluate_param_T(ConstantProperty(0.7), 500.0) == 0.7
+    # A Dual argument: the number is a constant of it.
+    d = ForwardDiff.Dual(5.0, 1.0)
+    @test evaluate_param(25e3, d) isa ForwardDiff.Dual
+    @test ForwardDiff.partials(evaluate_param(25e3, d))[1] == 0.0
+    @test evaluate_param_T(0.9, d) isa ForwardDiff.Dual
+    @test ForwardDiff.partials(evaluate_param_T(0.9, d))[1] == 0.0
+    @test ForwardDiff.derivative(t -> evaluate_param(t -> 100.0 * t, t), 5.0) == 100.0
+    # Every method infers its result type.
+    @test @inferred(evaluate_param(100.0, 1.0)) isa Float64
+    @test @inferred(evaluate_param(t -> 100.0 * t, 1.0)) isa Float64
+    @test @inferred(evaluate_param_T(0.9, 500.0)) isa Float64
+    @test @inferred(evaluate_param_T(T -> 0.8 + 1e-4 * T, 500.0)) isa Float64
+    @test @inferred(evaluate_param_T(LinearProperty(0.8, 1e-4), 500.0)) isa Float64
+    @test @inferred(evaluate_param_T(ConstantProperty(0.7), 500.0)) isa Float64
+end

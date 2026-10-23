@@ -33,6 +33,7 @@ using Pyrolysis.BoundaryConditions:
     blowing_factor,
     solve_boundary_temperature!,
     BoundaryState
+using Pyrolysis.States: trial_temperature
 
 # ----------------------------------------------------------------------------
 # Gas data of the calculator (blowing_gases.json): NASA-7 cp/R low set,
@@ -441,7 +442,8 @@ const REFERENCE = (
                 mat,
                 (zero(J), J),
                 t,
-                ε,
+                ε;
+                trial = trial_temperature,
             )
             return r.T_s
         end

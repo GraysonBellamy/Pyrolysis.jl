@@ -1,9 +1,11 @@
-# Tanh-limiter tests.
+# Depletion-limiter tests of the shared reaction rate.
 #
-# - The limiter is a smooth multiplicative rate factor tanh(ξ/ξ_th) with no
-#   threshold branch. A base-applied limiter
-#   `ξ_eff = ξ < ξ_th ? ξ·tanh(ξ/ξ_th) : ξ` would jump 23.84% in value at
-#   ξ = ξ_th.
+# - The limiter is a multiplicative rate factor g(ξ/ξ_th) with no threshold
+#   branch: zero at and below zero, the cubic (s − 2y)x³ + (3y − s)x² up to
+#   the join (y = tanh 1, s = sech² 1 for the default join of 1), and tanh(x)
+#   above, so value and slope are continuous everywhere. A base-applied
+#   limiter `ξ_eff = ξ < ξ_th ? ξ·tanh(ξ/ξ_th) : ξ` would jump 23.84% in value
+#   at ξ = ξ_th.
 # - A base-applied limiter cannot gate order-0 reactants (ξ_eff^0 ≡ 1): the
 #   rate would stay k(T) at ξ ≤ 0 and drive ξ negative without bound, and
 #   orders 0 < n < 0.5 would keep a singular ∂r/∂ξ at depletion.
@@ -11,13 +13,21 @@
 using Test
 using ForwardDiff
 using Pyrolysis
-using Pyrolysis.Physics: reaction_rate, TanhLimiter
+using Pyrolysis.Physics: reaction_rate
 
-@testset "tanh limiter" begin
+# The onset of `DepletionLimiter()` (join 1) and its slope, written out.
+const _ONSET_Y = tanh(1.0)
+const _ONSET_S = sech(1.0)^2
+_onset(x) =
+    x <= 0 ? 0.0 :
+    x < 1 ? (_ONSET_S - 2_ONSET_Y) * x^3 + (3_ONSET_Y - _ONSET_S) * x^2 : tanh(x)
+_onset_slope(x) = 3(_ONSET_S - 2_ONSET_Y) * x^2 + 2(3_ONSET_Y - _ONSET_S) * x
+
+@testset "depletion limiter" begin
     T_kin = 700.0
-    ξ_th = 1.0  # TanhLimiter default threshold
-    limiter = TanhLimiter()
-    no_limiter = TanhLimiter(enabled = false)
+    ξ_th = 1.0  # DepletionLimiter default threshold
+    limiter = DepletionLimiter()
+    no_limiter = DepletionLimiter(enabled = false)
 
     rxn1 = Reaction(:first_order, 1 => 2, A = 1e10, E = 150e3, h = 5e5)
     rxn0 = Reaction(:zero_order, 1 => 2, A = 1e10, E = 150e3, h = 5e5, n = 0.0)
@@ -39,16 +49,16 @@ using Pyrolysis.Physics: reaction_rate, TanhLimiter
         d_hi = ForwardDiff.derivative(rate1, ξ_th * (1 + ε))
         @test d_lo ≈ d_hi rtol = 1e-6
 
-        # The n = 1 limited rate is exactly k·ξ·tanh(ξ/ξ_th).
+        # The n = 1 limited rate is k·ξ·g(ξ/ξ_th): the cubic below the join,
+        # k·ξ·tanh(ξ/ξ_th) above it.
         for ξ in (0.1, 0.5, 1.0, 3.0, 10.0)
-            @test rate1(ξ) ≈ k * ξ * tanh(ξ / ξ_th) rtol = 1e-12
+            @test rate1(ξ) ≈ k * ξ * _onset(ξ / ξ_th) rtol = 1e-12
         end
     end
 
     @testset "bare Arrhenius rate recovered far above threshold" begin
         @test rate1(10 * ξ_th) ≈ k * 10 * ξ_th rtol = 1e-8
-        # Saturated fast path (ξ ≥ 20·ξ_th) is bit-identical to the tanh form
-        # and to the unlimited rate.
+        # Saturated onset (ξ ≥ 20·ξ_th) is bit-identical to the unlimited rate.
         ξ_sat = 25 * ξ_th
         @test rate1(ξ_sat) == reaction_rate(rxn1, (ξ_sat, 0.0), T_kin; limiter = no_limiter)
         # AD through the saturated branch: dr/dξ = k exactly.
@@ -60,12 +70,12 @@ using Pyrolysis.Physics: reaction_rate, TanhLimiter
         # beyond (unbounded negative ξ).
         @test rate0(0.0) == 0.0
         @test rate0(-1.0) == 0.0  # integrator overshoot consumes nothing
-        # Near depletion the rate decays as k·ξ/ξ_th (exponential burnout,
-        # no finite-time crossing).
-        @test rate0(1e-3) ≈ k * tanh(1e-3 / ξ_th) rtol = 1e-12
-        # ∂r/∂ξ at depletion (0⁺ — exactly 0 sits on the max(ξ,0) clip kink)
-        # is finite: k/ξ_th.
-        @test ForwardDiff.derivative(rate0, 1e-12) ≈ k / ξ_th rtol = 1e-12
+        # Near depletion the rate decays as k(3y − s)ξ², so the reactant
+        # approaches zero without crossing it.
+        @test rate0(1e-3) ≈ k * _onset(1e-3 / ξ_th) rtol = 1e-12
+        # ∂r/∂ξ just above depletion is finite and vanishes with ξ.
+        @test ForwardDiff.derivative(rate0, 1e-12) ≈ k * _onset_slope(1e-12) / ξ_th rtol =
+            1e-12
         # Unlimited zero-order rate is k regardless of ξ — the hazard the
         # limiter exists to remove.
         @test reaction_rate(rxn0, (0.0, 0.0), T_kin; limiter = no_limiter) ≈ k rtol = 1e-12
@@ -73,16 +83,22 @@ using Pyrolysis.Physics: reaction_rate, TanhLimiter
 
     @testset "bounded ∂r/∂ξ at depletion for n < 0.5" begin
         # A base-applied limiter gives ∂r/∂ξ ~ ξ^(2n−1) → ∞ for n < 0.5.
-        # The multiplicative form gives r ~ k·ξ^(n+1)/ξ_th, so the derivative
-        # vanishes at depletion instead of diverging.
+        # The multiplicative form gives r = k·b(ξ)ⁿ·g(ξ/ξ_th), so the
+        # derivative vanishes at depletion instead of diverging.
         d4 = ForwardDiff.derivative(rate03, 1e-4)
         d8 = ForwardDiff.derivative(rate03, 1e-8)
         d12 = ForwardDiff.derivative(rate03, 1e-12)
         @test all(isfinite, (d4, d8, d12))
         @test d12 < d8 < d4
-        # Sharp small-ξ asymptote: ∂r/∂ξ → k·(n+1)·ξ^n/ξ_th.
-        n = 0.3
-        @test d12 ≈ k * (n + 1) * (1e-12)^n / ξ_th rtol = 1e-9
+        # Small-ξ slope by the chain rule, with the finite base
+        # b(ξ) = ξ + δ·log(1 + e^{−ξ/δ}) of slope 1/(1 + e^{−ξ/δ}), δ = 1e-8.
+        n, δ, ξ = 0.3, limiter.base_scale, 1e-12
+        b = ξ + δ * log1p(exp(-ξ / δ))
+        db = 1 / (1 + exp(-ξ / δ))
+        @test d12 ≈
+              k *
+              (n * b^(n - 1) * db * _onset(ξ / ξ_th) + b^n * _onset_slope(ξ / ξ_th) / ξ_th) rtol =
+            1e-9
     end
 
     @testset "temperature gate width" begin
@@ -224,5 +240,69 @@ using Pyrolysis.Physics: reaction_rate, TanhLimiter
         # n = 0 and fractional orders are valid fits.
         @test rxn0 isa Reaction
         @test rxn03 isa Reaction
+    end
+end
+
+# The rate factor tanh(ξ/ξ_th) on the power of the clamped concentration.
+@testset "TanhLimiter" begin
+    T_kin = 700.0
+    ξ_th = 1.0  # TanhLimiter default threshold
+    limiter = Pyrolysis.Physics.TanhLimiter()
+    no_limiter = Pyrolysis.Physics.TanhLimiter(enabled = false)
+
+    rxn1 = Reaction(:first_order, 1 => 2, A = 1e10, E = 150e3, h = 5e5)
+    rxn0 = Reaction(:zero_order, 1 => 2, A = 1e10, E = 150e3, h = 5e5, n = 0.0)
+    rxn03 = Reaction(:tga_fit, 1 => 2, A = 1e10, E = 150e3, h = 5e5, n = 0.3)
+
+    k = reaction_rate(rxn1, (1.0, 0.0), T_kin; limiter = no_limiter)
+    @test k > 0
+
+    rate1(ξ) = reaction_rate(rxn1, (ξ, zero(ξ)), T_kin; limiter)
+    rate0(ξ) = reaction_rate(rxn0, (ξ, zero(ξ)), T_kin; limiter)
+    rate03(ξ) = reaction_rate(rxn03, (ξ, zero(ξ)), T_kin; limiter)
+
+    @testset "continuous and smooth across the threshold" begin
+        ε = 1e-9
+        @test rate1(ξ_th * (1 + ε)) ≈ rate1(ξ_th * (1 - ε)) rtol = 1e-6
+        d_lo = ForwardDiff.derivative(rate1, ξ_th * (1 - ε))
+        d_hi = ForwardDiff.derivative(rate1, ξ_th * (1 + ε))
+        @test d_lo ≈ d_hi rtol = 1e-6
+
+        # The n = 1 limited rate is exactly k·ξ·tanh(ξ/ξ_th).
+        for ξ in (0.1, 0.5, 1.0, 3.0, 10.0)
+            @test rate1(ξ) ≈ k * ξ * tanh(ξ / ξ_th) rtol = 1e-12
+        end
+    end
+
+    @testset "bare Arrhenius rate recovered far above threshold" begin
+        @test rate1(10 * ξ_th) ≈ k * 10 * ξ_th rtol = 1e-8
+        # Saturated fast path (ξ ≥ 20·ξ_th) is bit-identical to the tanh form
+        # and to the unlimited rate.
+        ξ_sat = 25 * ξ_th
+        @test rate1(ξ_sat) == reaction_rate(rxn1, (ξ_sat, 0.0), T_kin; limiter = no_limiter)
+        @test ForwardDiff.derivative(rate1, ξ_sat) ≈ k rtol = 1e-12
+    end
+
+    @testset "zero-order reactions stop at depletion" begin
+        @test rate0(0.0) == 0.0
+        @test rate0(-1.0) == 0.0
+        # Near depletion the rate decays as k·ξ/ξ_th (exponential burnout,
+        # no finite-time crossing).
+        @test rate0(1e-3) ≈ k * tanh(1e-3 / ξ_th) rtol = 1e-12
+        # ∂r/∂ξ at depletion (0⁺ — exactly 0 sits on the max(ξ,0) clip kink)
+        # is finite: k/ξ_th.
+        @test ForwardDiff.derivative(rate0, 1e-12) ≈ k / ξ_th rtol = 1e-12
+        @test reaction_rate(rxn0, (0.0, 0.0), T_kin; limiter = no_limiter) ≈ k rtol = 1e-12
+    end
+
+    @testset "bounded ∂r/∂ξ at depletion for n < 0.5" begin
+        d4 = ForwardDiff.derivative(rate03, 1e-4)
+        d8 = ForwardDiff.derivative(rate03, 1e-8)
+        d12 = ForwardDiff.derivative(rate03, 1e-12)
+        @test all(isfinite, (d4, d8, d12))
+        @test d12 < d8 < d4
+        # Sharp small-ξ asymptote: ∂r/∂ξ → k·(n+1)·ξ^n/ξ_th.
+        n = 0.3
+        @test d12 ≈ k * (n + 1) * (1e-12)^n / ξ_th rtol = 1e-9
     end
 end
