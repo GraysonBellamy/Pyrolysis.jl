@@ -9,7 +9,8 @@ using Pyrolysis.Assembly
 using Pyrolysis.Assembly: residual!, buffers
 using Pyrolysis.Deactivation
 using Pyrolysis.Deactivation: ConservativeTransfer
-using Pyrolysis.Closures: NoCorrection, EquidistributionCorrection, EQUIDISTRIBUTION_TIME
+using Pyrolysis.Closures:
+    NoCorrection, EquidistributionCorrection, EQUIDISTRIBUTION_TIME, LayerCorrection
 using Pyrolysis.ColoredJacobian
 using Pyrolysis.Integration
 using Pyrolysis.Integration: setup, consistent_state!, integrate
@@ -532,6 +533,67 @@ end
     @test [e.cell => e.receiver for e in innermost.deactivation.events] == [9 => 6, 8 => 6, 7 => 6]
     fill!(innermost.def.layout.mask, true)
     @test_throws ArgumentError setup(problem; kw..., receiver = :outermost)
+end
+
+@testset "the threshold-only removal takes the cells below the threshold" begin
+    ε_m = 1e-2
+    cp = setup(_ablator(8); use_ale = true, deactivation = true, band = ε_m)
+    def, layout, cells = cp.def, cp.def.layout, cp.deactivation
+    @test cells.band == cells.threshold == ε_m
+    @test def.closure.correction isa LayerCorrection
+    @test any(!iszero, def.closure.correction.gain)
+    fractions = (8 => 0.5ε_m, 7 => 0.9ε_m, 6 => 1.5ε_m, 5 => 0.05, 4 => 0.5ε_m)
+    u = copy(cp.u0)
+    for (i, f) in fractions
+        _deplete!(u, cp, i, f)
+    end
+    # Only the cells below the threshold go; the receiver, with their residue
+    # added, stays; the cell below it inward of a live one is not handled.
+    @test deactivate!(u, cells, def, 1.0) === :interior
+    @test cells.outcome[] === :interior
+    @test [e.cell => e.receiver for e in cells.events] == [8 => 6, 7 => 6]
+    @test all(e.fraction < ε_m for e in cells.events)
+    # The band of the correction takes the run through the cell below.
+    banded = setup(_ablator(8); use_ale = true, deactivation = true)
+    @test banded.deactivation.band == 0.1
+    u = copy(banded.u0)
+    for (i, f) in fractions
+        _deplete!(u, banded, i, f)
+    end
+    @test deactivate!(u, banded.deactivation, banded.def, 1.0) === :transferred
+    @test [e.cell for e in banded.deactivation.events] == 8:-1:4
+    fill!(banded.def.layout.mask, true)
+
+    # A later invocation takes the cells below the threshold then.
+    reset_cells!(cells, layout)
+    u = copy(cp.u0)
+    for (i, f) in fractions[1:3]
+        _deplete!(u, cp, i, f)
+    end
+    @test deactivate!(u, cells, def, 1.0) === :transferred
+    _deplete!(u, cp, 6, 0.5ε_m)
+    _deplete!(u, cp, 5, 0.5ε_m)
+    @test deactivate!(u, cells, def, 2.0) === :transferred
+    second = filter(e -> e.invocation == 2, cells.events)
+    @test [e.cell => e.receiver for e in second] == [6 => 4, 5 => 4]
+    @test all(e.fraction < ε_m for e in second)
+    fill!(layout.mask, true)
+
+    # Through a solve: every cell that goes is below the threshold, widened by
+    # the relative tolerance at a located event.
+    reltol = 1e-5
+    sol = Integration.solve(
+        _ablator(30);
+        use_ale = true,
+        deactivation = true,
+        band = ε_m,
+        abstol = 1e-7,
+        reltol,
+    )
+    @test sol.retcode === :Success
+    @test length(sol.events) >= 5
+    @test all(e.fraction < ε_m * (1 + reltol) for e in sol.events)
+    @test [e.cell for e in sol.events] == 30:-1:(31-length(sol.events))
 end
 
 # Cells whose sizes span a ratio of 27, above 1/ε_m = 20: against one
