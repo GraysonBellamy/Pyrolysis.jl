@@ -375,8 +375,9 @@ solid fills the cell exactly, giving φ₀ = 0.
 
 Initial porosity and permeability are evaluated from `T_initial`/`ξ_initial`
 at every cell center — the same points `apply_initial_conditions!` uses.
-Cells whose effective permeability is zero are not flagged (zero mobility
-keeps the pressure field inert there). Returns no errors for Fickian
+The porosity is the unclamped pore fraction `1 − skeletal_volume_fraction`.
+Cells whose effective permeability is not positive are not flagged (zero
+mobility keeps the pressure field inert there). Returns no errors for Fickian
 materials. Bails out silently when the IC functions are not evaluable or
 their count mismatches the material — those problems are reported by the
 dedicated checks.
@@ -401,9 +402,9 @@ function validate_darcy_initial_porosity(problem)
         for (i, z) in enumerate(centers)
             T = Float64(problem.T_initial(z))
             ξ = ntuple(j -> Float64(problem.ξ_initial[j](z)), NC)
-            φ = Properties.porosity(ξ, T, material)
+            φ = 1 - Properties.skeletal_volume_fraction(ξ, T, material)
             φ >= _DARCY_MIN_INITIAL_POROSITY && continue
-            κ = Properties.effective_permeability(ξ, T, material)
+            κ = Properties.effective_permeability(ξ, T, material, φ)
             κ > 0.0 || continue
             n_bad += 1
             if n_bad == 1

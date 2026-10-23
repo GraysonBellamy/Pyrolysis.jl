@@ -72,7 +72,7 @@ Bulk concentration [kg/m³] of gas component `species` whose partial pressure
 equals `P` in the pore space of composition `ξ` at temperature `T` — the
 single-species inverse of [`ideal_gas_pressure`](@ref):
 
-	ξⱼ = P · Mⱼ · φ(ξ, T) / (R · T)
+	ξⱼ = P · Mⱼ · φ / (R · T),  φ = max(1 − skeletal_volume_fraction(ξ, T), 0)
 
 Use this to initialize a background air component at ambient pressure in
 DarcyFick-mode problems: a pore space initialized to vacuum
@@ -80,10 +80,11 @@ DarcyFick-mode problems: a pore space initialized to vacuum
 early product gas *inward* down the absolute-pressure slope, instead of the
 gas being resisted by ~1 atm of pore air.
 
-`species` is a component index or name. Porosity is evaluated from the
-condensed entries of `ξ` (gas entries carry no matrix volume), so passing a
-solids-only initial composition is exact. Partial pressures of coexisting gas
-species add — this function pressurizes `species` alone to `P`.
+`species` is a component index or name. The pore fraction is evaluated from
+the condensed entries of `ξ` (gas entries carry no matrix volume), so passing
+a solids-only initial composition is exact; a skeleton that fills the cell
+leaves no pore space and no gas. Partial pressures of coexisting gas species
+add — this function pressurizes `species` alone to `P`.
 
 # Example
 ```julia
@@ -125,6 +126,6 @@ function background_gas_concentration(
             "background_gas_concentration: component $(c.name) has no molar mass",
         ),
     )
-    φ = porosity(ξ, T, material)
+    φ = max(1 - skeletal_volume_fraction(ξ, T, material), 0.0)
     return P * M * φ / (R_GAS * T)
 end
