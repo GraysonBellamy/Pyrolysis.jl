@@ -99,8 +99,7 @@ function _verification_case_vbo07()
             out,
             _vbo_timing_qois(m; t_peak_ref = VBO07_T_PEAK_REF, t_bo_ref = VBO07_T_BO_REF),
         )
-        VERIFICATION_CORE == "new" &&
-            push!(out, _vbo_invocation_qoi(sol, id))
+        VERIFICATION_CORE == "new" && push!(out, _vbo_invocation_qoi(sol, id))
         return out
     end
     return VerificationCase(
