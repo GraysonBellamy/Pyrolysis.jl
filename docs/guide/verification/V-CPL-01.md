@@ -90,8 +90,9 @@ one compares magnitudes across codes.
 Wall times at every ladder rung against the reference runs.
 Resolutions and simulated spans differ where noted (details in
 `reference/timings.csv`), so cross-code timings are indicative
-rather than a controlled benchmark; rungs at a matched
-resolution are directly comparable.
+rather than a controlled benchmark. FDS timings include
+process startup and output; the reference provenance records
+the measurement protocol.
 
 ![V-CPL-01 solve_time](assets/V-CPL-01/V-CPL-01_solve_time.png)
 
@@ -147,8 +148,9 @@ one compares magnitudes across codes.
 Wall times at every ladder rung against the reference runs.
 Resolutions and simulated spans differ where noted (details in
 `reference/timings.csv`), so cross-code timings are indicative
-rather than a controlled benchmark; rungs at a matched
-resolution are directly comparable.
+rather than a controlled benchmark. FDS timings include
+process startup and output; the reference provenance records
+the measurement protocol.
 
 ![V-CPL-01b solve_time](assets/V-CPL-01b/V-CPL-01b_solve_time.png)
 

@@ -19,7 +19,7 @@ exact/reference solution, markers are the solver. Tolerances are
 pinned at ~3× the observed error at pin time (the provenance column).
 
 Where a case has a published analog in another solver, it carries a
-"Comparison with other codes" section: FDS 6.11.0 and Gpyro 0.8200
+"Comparison with other codes" section: FDS 6.11.1 and Gpyro 0.8200
 were run locally on the same problems (decks and outputs committed
 with provenance in `test/verification/reference/`), and their errors
 against the same exact solutions are overlaid — muted gray, log

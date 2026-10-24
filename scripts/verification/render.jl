@@ -230,8 +230,10 @@ function render_solve_time(
     fig = Figure(size = FIG_SIZE)
     ax = Axis(
         fig[1, 1];
-        title = "$(case_id): solve wall time vs other codes",
-        subtitle = "same machine, spans matched to this case (reference/timings.csv)",
+        title = "$(case_id): wall time vs other codes",
+        subtitle = any(r -> _code_key(r.label) == "FDS", refs) ?
+                   "FDS includes process startup/output; see reference/timings.csv" :
+                   "same machine, spans matched to this case (reference/timings.csv)",
         xlabel = "wall time (s)",
         xscale = log10,
         yticks = (ys, labels),

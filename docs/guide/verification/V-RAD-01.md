@@ -82,8 +82,9 @@ one compares magnitudes across codes.
 Wall times at every ladder rung against the reference runs.
 Resolutions and simulated spans differ where noted (details in
 `reference/timings.csv`), so cross-code timings are indicative
-rather than a controlled benchmark; rungs at a matched
-resolution are directly comparable.
+rather than a controlled benchmark. FDS timings include
+process startup and output; the reference provenance records
+the measurement protocol.
 
 ![V-RAD-01 solve_time](assets/V-RAD-01/V-RAD-01_solve_time.png)
 
@@ -93,11 +94,11 @@ Solution overlays including the other codes' points: [T_profiles_vs_codes](asset
 
 | n_cells | h | wall (s) | L2 | Linf |
 | --- | --- | --- | --- | --- |
-| 25 | 0.04 | 0.003581 | 0.2555 | 0.9054 |
-| 50 | 0.02 | 0.006697 | 0.06456 | 0.248 |
-| 100 | 0.01 | 0.01286 | 0.01618 | 0.06485 |
-| 200 | 0.005 | 0.02564 | 0.004048 | 0.01658 |
-| 400 | 0.0025 | 0.05251 | 0.001012 | 0.004191 |
+| 25 | 0.04 | 0.003642 | 0.2555 | 0.9054 |
+| 50 | 0.02 | 0.006789 | 0.06456 | 0.248 |
+| 100 | 0.01 | 0.01336 | 0.01618 | 0.06485 |
+| 200 | 0.005 | 0.02582 | 0.004048 | 0.01658 |
+| 400 | 0.0025 | 0.05292 | 0.001012 | 0.004191 |
 
 Observed order 1.996 (L2), expected 2.0.
 

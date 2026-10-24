@@ -86,7 +86,7 @@ published constants for normalized m = ξ/ξ₀ convert as A_ours = k_pub·ξ₀
 
 ### Comparison with other codes
 
-The same case was solved with FDS 6.11.0 at 0D particle; decks, outputs, and
+The same case was solved with FDS 6.11.1 at 0D particle; decks, outputs, and
 run provenance are committed under `test/verification/reference/`.
 Each code's error against the same exact solution is drawn below
 on a log scale, muted gray behind this solver's series — the
@@ -98,8 +98,9 @@ one compares magnitudes across codes.
 Wall times at every ladder rung against the reference runs.
 Resolutions and simulated spans differ where noted (details in
 `reference/timings.csv`), so cross-code timings are indicative
-rather than a controlled benchmark; rungs at a matched
-resolution are directly comparable.
+rather than a controlled benchmark. FDS timings include
+process startup and output; the reference provenance records
+the measurement protocol.
 
 ![V-RX-02c solve_time](assets/V-RX-02c/V-RX-02c_solve_time.png)
 

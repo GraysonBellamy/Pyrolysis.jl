@@ -55,7 +55,7 @@ tolerances; the back-face-rise QoI enforces this assumption explicitly.
 
 ### Comparison with other codes
 
-The same case was solved with FDS 6.11.0 at 133 cells (Δx≈0.38 mm) and Gpyro 0.8200 at 500 nodes (Δz=0.1 mm); decks, outputs, and
+The same case was solved with FDS 6.11.1 at 133 cells (Δx≈0.38 mm) and Gpyro 0.8200 at 500 nodes (Δz=0.1 mm); decks, outputs, and
 run provenance are committed under `test/verification/reference/`.
 Each code's error against the same exact solution is drawn below
 on a log scale, muted gray behind this solver's series — the
@@ -69,8 +69,9 @@ one compares magnitudes across codes.
 Wall times at every ladder rung against the reference runs.
 Resolutions and simulated spans differ where noted (details in
 `reference/timings.csv`), so cross-code timings are indicative
-rather than a controlled benchmark; rungs at a matched
-resolution are directly comparable.
+rather than a controlled benchmark. FDS timings include
+process startup and output; the reference provenance records
+the measurement protocol.
 
 ![V-HC-01 solve_time](assets/V-HC-01/V-HC-01_solve_time.png)
 
@@ -80,13 +81,13 @@ Solution overlays including the other codes' points: [T_profiles_vs_codes](asset
 
 | n_cells | h | wall (s) | L2 | Linf |
 | --- | --- | --- | --- | --- |
-| 25 | 0.04 | 0.002099 | 0.7857 | 2.901 |
-| 50 | 0.02 | 0.004722 | 0.2003 | 0.8012 |
-| 100 | 0.01 | 0.00995 | 0.05027 | 0.2059 |
-| 133 | 0.007519 | 0.01354 | 0.02844 | 0.117 |
-| 200 | 0.005 | 0.02253 | 0.01258 | 0.05197 |
-| 400 | 0.0025 | 0.05211 | 0.003146 | 0.01304 |
-| 500 | 0.002 | 0.06535 | 0.002013 | 0.008354 |
+| 25 | 0.04 | 0.0021 | 0.7857 | 2.901 |
+| 50 | 0.02 | 0.004584 | 0.2003 | 0.8012 |
+| 100 | 0.01 | 0.009917 | 0.05027 | 0.2059 |
+| 133 | 0.007519 | 0.01361 | 0.02844 | 0.117 |
+| 200 | 0.005 | 0.02184 | 0.01258 | 0.05197 |
+| 400 | 0.0025 | 0.04863 | 0.003146 | 0.01304 |
+| 500 | 0.002 | 0.06373 | 0.002013 | 0.008354 |
 
 Observed order 1.993 (L2), expected 2.0.
 

@@ -717,6 +717,10 @@
         "stepping_seconds": 0.064,
         "input_sha256": "2b6c9a59cd6eaf5c12cd6e6f1c07d63d4c71759aef3900564d1f7ce29d6f0206"
       }
-    ]
+    ],
+    "hardware": {
+      "cpu_model": "Intel(R) Core(TM) Ultra 7 155H",
+      "architecture": "x86_64"
+    }
   }
 }

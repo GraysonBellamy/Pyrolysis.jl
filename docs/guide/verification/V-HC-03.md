@@ -58,8 +58,9 @@ one compares magnitudes across codes.
 Wall times at every ladder rung against the reference runs.
 Resolutions and simulated spans differ where noted (details in
 `reference/timings.csv`), so cross-code timings are indicative
-rather than a controlled benchmark; rungs at a matched
-resolution are directly comparable.
+rather than a controlled benchmark. FDS timings include
+process startup and output; the reference provenance records
+the measurement protocol.
 
 ![V-HC-03 solve_time](assets/V-HC-03/V-HC-03_solve_time.png)
 
@@ -69,12 +70,12 @@ Solution overlays including the other codes' points: [T_profiles_vs_codes](asset
 
 | n_cells | h | wall (s) | L2 | Linf |
 | --- | --- | --- | --- | --- |
-| 20 | 0.05 | 0.002868 | 0.02373 | 0.0314 |
-| 40 | 0.025 | 0.005245 | 0.005935 | 0.007862 |
-| 80 | 0.0125 | 0.009913 | 0.001484 | 0.001966 |
-| 160 | 0.00625 | 0.02021 | 0.000371 | 0.0004916 |
-| 200 | 0.005 | 0.0258 | 0.0002374 | 0.0003146 |
-| 320 | 0.003125 | 0.04263 | 9.275e-05 | 0.0001229 |
+| 20 | 0.05 | 0.002844 | 0.02373 | 0.0314 |
+| 40 | 0.025 | 0.005356 | 0.005935 | 0.007862 |
+| 80 | 0.0125 | 0.01033 | 0.001484 | 0.001966 |
+| 160 | 0.00625 | 0.02108 | 0.000371 | 0.0004916 |
+| 200 | 0.005 | 0.02694 | 0.0002374 | 0.0003146 |
+| 320 | 0.003125 | 0.04415 | 9.275e-05 | 0.0001229 |
 
 Observed order 2 (L2), expected 2.0.
 
