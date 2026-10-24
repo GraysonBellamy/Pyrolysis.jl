@@ -115,7 +115,7 @@ function _verification_case_vrx01()
             qoi_curves = (:xi_histories,),
             heating = :isothermal,
             curves = sol -> begin
-                # FDS 6.11.0 overlay (reference/fds/custom/): the span-matched
+                # FDS 6.11.1 overlay (reference/fds/custom/): the span-matched
                 # re-run of two_step_solid_reaction (T_END = 20 s = our
                 # window; identical kinetics 0.389/0.262 s⁻¹, E = 0,
                 # isothermal — the same constants as Gpyro §3.4.4). FDS devc
@@ -159,7 +159,7 @@ function _verification_case_vrx01()
                             ],
                             [
                                 CurveSeries(
-                                    label = "FDS 6.11.0 ξ_$(species)",
+                                    label = "FDS 6.11.1 ξ_$(species)",
                                     crosscode = true,
                                     x = t_fds,
                                     y = ξ0 .* fds[1+idx][2:end],

@@ -223,7 +223,7 @@ push!(
             tol_xi = 1e-9,  # 3× observed 2.8e-10
             comment = "m^(1/3) linear in t; k_pub=$(round(k_pub, sigdigits=4)) 1/s at 450 K; " *
                       "exercises live Arrhenius (E ≠ 0) at pinned T",
-            # FDS 6.11.0 overlay (reference/fds/custom/): the span-matched
+            # FDS 6.11.1 overlay (reference/fds/custom/): the span-matched
             # part_baking_soda_450K re-run (T_END = 2.4 s ≈ our window). Its
             # spherical variant follows the same R3 master curve, but FDS's
             # input A = 1.33e13 is a surface-regression convention — its
@@ -246,7 +246,7 @@ push!(
                 keep = findall(t -> 0 < t_scale * t ≤ ts[end], t_fds)
                 [
                     CurveSeries(
-                        label = "FDS 6.11.0 (rate-rescaled)",
+                        label = "FDS 6.11.1 (rate-rescaled)",
                         crosscode = true,
                         x = t_scale .* t_fds[keep],
                         y = ξ0 .* ρ_fds[keep] ./ 2200.0,

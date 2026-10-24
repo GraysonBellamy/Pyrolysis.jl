@@ -141,7 +141,7 @@ function _verification_case_vhc01()
             solve_kwargs = (abstol = 1e-12, reltol = 1e-10),
             curves = sol -> begin
                 x = L .- get_cell_positions(sol)
-                # FDS 6.11.0 overlay (reference/fds/custom/): our deck
+                # FDS 6.11.1 overlay (reference/fds/custom/): our deck
                 # vhc01_semi_infinite.fds solves this exact case via the same
                 # Robin-BC equivalence (pure convection toward T∞_eff = 1550 K,
                 # ε = 0). devc depths from the exposed face; T in °C.
@@ -191,7 +191,7 @@ function _verification_case_vhc01()
                             ],
                             [
                                 CurveSeries(
-                                    label = "FDS 6.11.0, t = $(t) s",
+                                    label = "FDS 6.11.1, t = $(t) s",
                                     crosscode = true,
                                     x = fds_depths,
                                     y = [fds_T[i][fds_row(t)] for i = 1:6],
@@ -225,7 +225,7 @@ function _verification_case_vhc01()
                             ),
                             # devc averages over the 0.2 s output interval
                             CurveSeries(
-                                label = "FDS 6.11.0",
+                                label = "FDS 6.11.1",
                                 crosscode = true,
                                 x = fds[1][2:end] .- 0.1,
                                 y = fds_T[1][2:end],

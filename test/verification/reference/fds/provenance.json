@@ -1,0 +1,722 @@
+{
+  "revision": "FDS-6.11.1-0-gff928db-release",
+  "binary_sha256": "fe2b123dfc759dbebb161cc91912ed60861f3fe2a141602634b53f417f731b1d",
+  "mpi_ranks": 1,
+  "omp_threads": 1,
+  "release_url": "https://github.com/firemodels/fds/releases/tag/FDS-6.11.1",
+  "bundle": "FDS-6.11.1_SMV-6.11.2_lnx.sh",
+  "bundle_sha256": "ba8793b974150fdb778b3db0b69ab8db4e4668d5c52987a317e7f5ed58102ea0",
+  "environment": {
+    "OMP_NUM_THREADS": "1",
+    "I_MPI_FABRICS": "shm",
+    "LD_LIBRARY_PATH": "<bundle>/bin/intelmpi/lib",
+    "FI_PROVIDER_PATH": "<bundle>/bin/intelmpi/prov"
+  },
+  "command": [
+    "<bundle>/bin/fds",
+    "<input>.fds"
+  ],
+  "runs": [
+    {
+      "case": "heat_conduction_a_ext",
+      "input": "custom/heat_conduction_a_ext.fds",
+      "input_sha256": "7389dd8c7ddb5f7aab97d6a8a68258ad501fd01046dd3ce34b756db197f08633",
+      "success": true,
+      "committed_outputs": {
+        "custom/heat_conduction_a_ext_devc.csv": "84e07f9f00fba30ddc08dfd67e4668a35dd07896f87fa3e021f0d099315896a1"
+      }
+    },
+    {
+      "case": "heat_conduction_b_matched",
+      "input": "custom/heat_conduction_b_matched.fds",
+      "input_sha256": "0929021413349097e58e43ec63263c4ba04775e536bd8e4a00eb05f85920746f",
+      "success": true,
+      "committed_outputs": {
+        "custom/heat_conduction_b_matched_devc.csv": "15f19ae1c5cb9ec14c59f2aea5c4761ed1a326e1bce817492c4ca5ef67e096ad"
+      }
+    },
+    {
+      "case": "heat_conduction_c_matched",
+      "input": "custom/heat_conduction_c_matched.fds",
+      "input_sha256": "d4f529faff9823fb7b21c619c849e5008eafc7f42922e8352268010e7f97f82b",
+      "success": true,
+      "committed_outputs": {
+        "custom/heat_conduction_c_matched_devc.csv": "93dbdb1d7115bf15ee00198c5aef90395f4fa18a96e7b0611aa6dd256e758277"
+      }
+    },
+    {
+      "case": "heat_conduction_d_matched",
+      "input": "custom/heat_conduction_d_matched.fds",
+      "input_sha256": "ec0cdf1ba122ea78ba4324d42688f13bd2e776c8164ec539d55b6510afd6c3cc",
+      "success": true,
+      "committed_outputs": {
+        "custom/heat_conduction_d_matched_devc.csv": "ec9737400e2e7b4fd7aea37cd3f448909439a6e2a6c6f25b3d08ae88d3889dd7"
+      }
+    },
+    {
+      "case": "part_baking_soda_450K_matched",
+      "input": "custom/part_baking_soda_450K_matched.fds",
+      "input_sha256": "367db142a9da1d966147192988e94a35cb8a597c108bbc48a67ed3cd62907717",
+      "success": true,
+      "committed_outputs": {
+        "custom/part_baking_soda_450K_matched_devc.csv": "382f2416ac7a835cfb9547abbae33da1c6fc8f6f13968ad37817adbb89251509"
+      }
+    },
+    {
+      "case": "two_step_solid_reaction_matched",
+      "input": "custom/two_step_solid_reaction_matched.fds",
+      "input_sha256": "32b1c527cb4c816d3a783da1113e9cc630d11066244cf89ccecb6095d66d97e9",
+      "success": true,
+      "committed_outputs": {
+        "custom/two_step_solid_reaction_matched_devc.csv": "879940cab8187bec3ce73eeb6fe17dc6727e2e18fc6852eba2ae435be28684d4"
+      }
+    },
+    {
+      "case": "vcpl03_shrink_swell_paths",
+      "input": "custom/vcpl03_shrink_swell_paths.fds",
+      "input_sha256": "164a66899661e380aa3f4de7f4887cc383ebedfd94afa779dd26d7eaddad8948",
+      "success": true,
+      "committed_outputs": {
+        "custom/vcpl03_shrink_swell_paths_devc.csv": "3adc594a3e597534389c336838027da9dd405dd420f3168463ddad5fbdccf9a4"
+      }
+    },
+    {
+      "case": "vhc01_semi_infinite",
+      "input": "custom/vhc01_semi_infinite.fds",
+      "input_sha256": "2b6c9a59cd6eaf5c12cd6e6f1c07d63d4c71759aef3900564d1f7ce29d6f0206",
+      "success": true,
+      "committed_outputs": {
+        "custom/vhc01_semi_infinite_devc.csv": "f9b89372c5d8d619a919b95167707b6e89e00a96c044c6b0a89c406552607f84"
+      }
+    },
+    {
+      "case": "heat_conduction_a",
+      "input": "Examples/Heat_Transfer/heat_conduction_a.fds",
+      "input_sha256": "6d77f1f8cdf962a1cee42de1e9dedb4c44b8861cc70eee351ab8acc64b7eaed4",
+      "success": true,
+      "committed_outputs": {
+        "heat_conduction_a_devc.csv": "71c3c85bea67501f8eca567a5b47c52bacd20ac976daedc1487141d1023532a3"
+      }
+    },
+    {
+      "case": "heat_conduction_b",
+      "input": "Examples/Heat_Transfer/heat_conduction_b.fds",
+      "input_sha256": "04921f3ea0d7db9f7a41fb5070abeb27967bcd9b69b6137be01f020b5c2a080d",
+      "success": true,
+      "committed_outputs": {
+        "heat_conduction_b_devc.csv": "954e4b6e2ebc178edd2689095fbb7013a0478a3eb4c4ea66bc85faae6a29d72c"
+      }
+    },
+    {
+      "case": "heat_conduction_c",
+      "input": "Examples/Heat_Transfer/heat_conduction_c.fds",
+      "input_sha256": "e2484e1f6cb0a644f0147cc1ad85cf8c674270a83cfecf886fba719ac1d01d99",
+      "success": true,
+      "committed_outputs": {
+        "heat_conduction_c_devc.csv": "2fe552787952a112b97ab7539518c6793974579fa35c87fdbd1084ce47fda03c"
+      }
+    },
+    {
+      "case": "heat_conduction_d",
+      "input": "Examples/Heat_Transfer/heat_conduction_d.fds",
+      "input_sha256": "2f33f597a94857a8056d7fa12419aa47337caab1a1d64737cac377ef532e9f69",
+      "success": true,
+      "committed_outputs": {
+        "heat_conduction_d_devc.csv": "1083764f351aca6147da3bf53623522e31a80b0970c4eac282e0a3dbf2311608"
+      }
+    },
+    {
+      "case": "convective_cooling",
+      "input": "Examples/Heat_Transfer/convective_cooling.fds",
+      "input_sha256": "a8b3e5a13129c849e12dbf56a43df10e22c534495a811a030a105f8847a9555a",
+      "success": true,
+      "committed_outputs": {
+        "convective_cooling_devc.csv": "261f35e226e59e6863f0493adda2eea956d00f600763f1413f63c2d727be46d1"
+      }
+    },
+    {
+      "case": "insulated_steel_plate",
+      "input": "Examples/Heat_Transfer/insulated_steel_plate.fds",
+      "input_sha256": "4c7dc4cfb2a9041c7dbbe6d23a3276ce4d5332bb60d08297558b3a00356773f0",
+      "success": true,
+      "committed_outputs": {
+        "insulated_steel_plate_prof_1.csv": "2259519db4b66e373203144c5c1334403c1a0a67c9ca6916f886103694e1efdb"
+      }
+    },
+    {
+      "case": "two_step_solid_reaction",
+      "input": "Examples/Pyrolysis/two_step_solid_reaction.fds",
+      "input_sha256": "e32f10a0c42ecfa77dba43f1f3006152322994c2995c3be3943792d045361564",
+      "success": true,
+      "committed_outputs": {
+        "two_step_solid_reaction_devc.csv": "6a2ca27629fc3fabbc1409f9723ef24be06a6f60c745274322438e93843b55ee"
+      }
+    },
+    {
+      "case": "shrink_swell",
+      "input": "Examples/Pyrolysis/shrink_swell.fds",
+      "input_sha256": "9db776938214d03cdbe5445d2b2954653f38f1a7c97096e052d741e66ee3f542",
+      "success": true,
+      "committed_outputs": {
+        "shrink_swell_devc.csv": "5850abab0916b0e48ea6c6f578bf8d3be8c4e5366da3cfdbfcdbecadf26feb80"
+      }
+    },
+    {
+      "case": "part_baking_soda_420K",
+      "input": "Examples/Pyrolysis/part_baking_soda_420K.fds",
+      "input_sha256": "721896ab4830cf20b2cae4184f7f423339e3415875156bb0b1a1b340219d45bc",
+      "success": true,
+      "committed_outputs": {
+        "part_baking_soda_420K_devc.csv": "0bd9b61b2d5e96e3e88cddb16685f57d8a1a5721e1eecbe41eac56be26c8ff03"
+      }
+    },
+    {
+      "case": "part_baking_soda_450K",
+      "input": "Examples/Pyrolysis/part_baking_soda_450K.fds",
+      "input_sha256": "f904c9fbba1241fff269ffaa2bb930bb7606c72839a7b46a65a7648465a1fafa",
+      "success": true,
+      "committed_outputs": {
+        "part_baking_soda_450K_devc.csv": "21a37f3965e47ddb2444c3c5e346e1095531538bf6a6f55085a7c95df8b0591f"
+      }
+    },
+    {
+      "case": "part_baking_soda_500K",
+      "input": "Examples/Pyrolysis/part_baking_soda_500K.fds",
+      "input_sha256": "c1e3beb7bae05a6ed8a849831468b3a0b9d534900714c2843309bc13a0d43076",
+      "success": true,
+      "committed_outputs": {
+        "part_baking_soda_500K_devc.csv": "4121d06b5e98030adf54ba882790c284f35faf449e4192a33d5fd3dd2f82fb85"
+      }
+    },
+    {
+      "case": "matl_e_cons_1",
+      "input": "Examples/Pyrolysis/matl_e_cons_1.fds",
+      "input_sha256": "9081b65641a90b083520935eb0b3aabdbc9959eaf925df3f8358b8cba0cfec79",
+      "success": true,
+      "committed_outputs": {
+        "matl_e_cons_1_devc.csv": "19cbb5013f31d437a234adc7e3d74ffcbbfaadca1f7662d825be605a41de76eb"
+      }
+    },
+    {
+      "case": "matl_e_cons_2",
+      "input": "Examples/Pyrolysis/matl_e_cons_2.fds",
+      "input_sha256": "f07470f41b64ebd84079ab9986e768c750c93a5a8d2993050944aaca280edb9d",
+      "success": true,
+      "committed_outputs": {
+        "matl_e_cons_2_devc.csv": "a9a9b477bc2f0dd976f2e9290204f54687df199ac956441bdb785ef3a8d81793"
+      }
+    },
+    {
+      "case": "matl_e_cons_3",
+      "input": "Examples/Pyrolysis/matl_e_cons_3.fds",
+      "input_sha256": "9e224e15757386f401c8760208b542bd9f3904a54e2e29f5ba9581f24b9b5071",
+      "success": true,
+      "committed_outputs": {
+        "matl_e_cons_3_devc.csv": "188d267bc46e08d63b9e83a90c2ece11f85e2183fcf2cbe03917a60ad1ec56ef"
+      }
+    },
+    {
+      "case": "matl_e_cons_4",
+      "input": "Examples/Pyrolysis/matl_e_cons_4.fds",
+      "input_sha256": "0a78332650cc5d08fab508b30602060e278a516696e1dfae89514509139908d3",
+      "success": true,
+      "committed_outputs": {
+        "matl_e_cons_4_devc.csv": "81a8237fe1b9d76787c8ae1e6f5ca5a71c41fd8affd42249e3ba982dddd9b6e0"
+      }
+    },
+    {
+      "case": "matl_e_cons_5",
+      "input": "Examples/Pyrolysis/matl_e_cons_5.fds",
+      "input_sha256": "4e576f04f4f9145b2dfee1b35fa0f81b806d242e33310123c3e0751120b422f7",
+      "success": true,
+      "committed_outputs": {
+        "matl_e_cons_5_devc.csv": "4de27c0c80820ed3ee0460ea5dfc892d16d60a812c742aa9b21a06fc98eb9f99"
+      }
+    },
+    {
+      "case": "matl_e_cons_6",
+      "input": "Examples/Pyrolysis/matl_e_cons_6.fds",
+      "input_sha256": "7636d2365bc99dab193e83287455ac98240d22b4851565dddeded9281fdf9ad8",
+      "success": true,
+      "committed_outputs": {
+        "matl_e_cons_6_devc.csv": "4752618a483f7d10f8e49aaf4f5b311168c211499dfd3889aae3fa5cac43153c"
+      }
+    },
+    {
+      "case": "matl_e_cons_7",
+      "input": "Examples/Pyrolysis/matl_e_cons_7.fds",
+      "input_sha256": "92a067a8a0e02af0c633bc84665c8c03ff240ed164cde81950925112b3005777",
+      "success": true,
+      "committed_outputs": {
+        "matl_e_cons_7_devc.csv": "b4968f1cf651a4f4d02ff4f857f67b468f4da235519387ed900c8a1ffaf44aa5"
+      }
+    },
+    {
+      "case": "matl_e_cons_8",
+      "input": "Examples/Pyrolysis/matl_e_cons_8.fds",
+      "input_sha256": "542a64d4eadd1339516f22b90a5ceb3183549d968e2697af10a3dd4386f52810",
+      "success": true,
+      "committed_outputs": {
+        "matl_e_cons_8_devc.csv": "b06bd66e5b6dee735a4573457a316dc1cf9adcd8a247cfb0fb4f4e665f522ba9"
+      }
+    },
+    {
+      "case": "matl_e_cons_9",
+      "input": "Examples/Pyrolysis/matl_e_cons_9.fds",
+      "input_sha256": "61a242b09943ba0ba19872b96763e5e78c4d928477091cf6a408fe355f44be07",
+      "success": true,
+      "committed_outputs": {
+        "matl_e_cons_9_devc.csv": "b06bd66e5b6dee735a4573457a316dc1cf9adcd8a247cfb0fb4f4e665f522ba9"
+      }
+    }
+  ],
+  "timing": {
+    "cpu": 1,
+    "load_before": [
+      1.3740234375,
+      4.93603515625,
+      6.08984375
+    ],
+    "load_after": [
+      1.22998046875,
+      4.6181640625,
+      5.95361328125
+    ],
+    "valid": true,
+    "protocol": "one warm-up followed by five fresh-process measurements per matched deck; published wall_s is median process wall time including MPI startup and output",
+    "runs": [
+      {
+        "case": "heat_conduction_a_ext",
+        "repeat": 0,
+        "warmup": true,
+        "process_seconds": 0.6216426929995578,
+        "fds_elapsed_seconds": 0.353,
+        "stepping_seconds": 0.342,
+        "input_sha256": "7389dd8c7ddb5f7aab97d6a8a68258ad501fd01046dd3ce34b756db197f08633"
+      },
+      {
+        "case": "heat_conduction_a_ext",
+        "repeat": 1,
+        "warmup": false,
+        "process_seconds": 0.6119592499999271,
+        "fds_elapsed_seconds": 0.354,
+        "stepping_seconds": 0.343,
+        "input_sha256": "7389dd8c7ddb5f7aab97d6a8a68258ad501fd01046dd3ce34b756db197f08633"
+      },
+      {
+        "case": "heat_conduction_a_ext",
+        "repeat": 2,
+        "warmup": false,
+        "process_seconds": 0.6248986729997341,
+        "fds_elapsed_seconds": 0.367,
+        "stepping_seconds": 0.357,
+        "input_sha256": "7389dd8c7ddb5f7aab97d6a8a68258ad501fd01046dd3ce34b756db197f08633"
+      },
+      {
+        "case": "heat_conduction_a_ext",
+        "repeat": 3,
+        "warmup": false,
+        "process_seconds": 0.6031550779998724,
+        "fds_elapsed_seconds": 0.344,
+        "stepping_seconds": 0.334,
+        "input_sha256": "7389dd8c7ddb5f7aab97d6a8a68258ad501fd01046dd3ce34b756db197f08633"
+      },
+      {
+        "case": "heat_conduction_a_ext",
+        "repeat": 4,
+        "warmup": false,
+        "process_seconds": 0.6063678339996841,
+        "fds_elapsed_seconds": 0.348,
+        "stepping_seconds": 0.338,
+        "input_sha256": "7389dd8c7ddb5f7aab97d6a8a68258ad501fd01046dd3ce34b756db197f08633"
+      },
+      {
+        "case": "heat_conduction_a_ext",
+        "repeat": 5,
+        "warmup": false,
+        "process_seconds": 0.6022956940005315,
+        "fds_elapsed_seconds": 0.344,
+        "stepping_seconds": 0.334,
+        "input_sha256": "7389dd8c7ddb5f7aab97d6a8a68258ad501fd01046dd3ce34b756db197f08633"
+      },
+      {
+        "case": "heat_conduction_b_matched",
+        "repeat": 0,
+        "warmup": true,
+        "process_seconds": 0.6076131700001497,
+        "fds_elapsed_seconds": 0.349,
+        "stepping_seconds": 0.339,
+        "input_sha256": "0929021413349097e58e43ec63263c4ba04775e536bd8e4a00eb05f85920746f"
+      },
+      {
+        "case": "heat_conduction_b_matched",
+        "repeat": 1,
+        "warmup": false,
+        "process_seconds": 0.604562180999892,
+        "fds_elapsed_seconds": 0.347,
+        "stepping_seconds": 0.336,
+        "input_sha256": "0929021413349097e58e43ec63263c4ba04775e536bd8e4a00eb05f85920746f"
+      },
+      {
+        "case": "heat_conduction_b_matched",
+        "repeat": 2,
+        "warmup": false,
+        "process_seconds": 0.6020084490000954,
+        "fds_elapsed_seconds": 0.343,
+        "stepping_seconds": 0.333,
+        "input_sha256": "0929021413349097e58e43ec63263c4ba04775e536bd8e4a00eb05f85920746f"
+      },
+      {
+        "case": "heat_conduction_b_matched",
+        "repeat": 3,
+        "warmup": false,
+        "process_seconds": 0.6044777699999031,
+        "fds_elapsed_seconds": 0.346,
+        "stepping_seconds": 0.336,
+        "input_sha256": "0929021413349097e58e43ec63263c4ba04775e536bd8e4a00eb05f85920746f"
+      },
+      {
+        "case": "heat_conduction_b_matched",
+        "repeat": 4,
+        "warmup": false,
+        "process_seconds": 0.6011514870006067,
+        "fds_elapsed_seconds": 0.343,
+        "stepping_seconds": 0.333,
+        "input_sha256": "0929021413349097e58e43ec63263c4ba04775e536bd8e4a00eb05f85920746f"
+      },
+      {
+        "case": "heat_conduction_b_matched",
+        "repeat": 5,
+        "warmup": false,
+        "process_seconds": 0.6055600320005396,
+        "fds_elapsed_seconds": 0.348,
+        "stepping_seconds": 0.337,
+        "input_sha256": "0929021413349097e58e43ec63263c4ba04775e536bd8e4a00eb05f85920746f"
+      },
+      {
+        "case": "heat_conduction_c_matched",
+        "repeat": 0,
+        "warmup": true,
+        "process_seconds": 0.6041209109998817,
+        "fds_elapsed_seconds": 0.347,
+        "stepping_seconds": 0.336,
+        "input_sha256": "d4f529faff9823fb7b21c619c849e5008eafc7f42922e8352268010e7f97f82b"
+      },
+      {
+        "case": "heat_conduction_c_matched",
+        "repeat": 1,
+        "warmup": false,
+        "process_seconds": 0.6063239850000173,
+        "fds_elapsed_seconds": 0.349,
+        "stepping_seconds": 0.338,
+        "input_sha256": "d4f529faff9823fb7b21c619c849e5008eafc7f42922e8352268010e7f97f82b"
+      },
+      {
+        "case": "heat_conduction_c_matched",
+        "repeat": 2,
+        "warmup": false,
+        "process_seconds": 0.6183848190003118,
+        "fds_elapsed_seconds": 0.361,
+        "stepping_seconds": 0.35,
+        "input_sha256": "d4f529faff9823fb7b21c619c849e5008eafc7f42922e8352268010e7f97f82b"
+      },
+      {
+        "case": "heat_conduction_c_matched",
+        "repeat": 3,
+        "warmup": false,
+        "process_seconds": 0.6103404420000516,
+        "fds_elapsed_seconds": 0.353,
+        "stepping_seconds": 0.342,
+        "input_sha256": "d4f529faff9823fb7b21c619c849e5008eafc7f42922e8352268010e7f97f82b"
+      },
+      {
+        "case": "heat_conduction_c_matched",
+        "repeat": 4,
+        "warmup": false,
+        "process_seconds": 0.613899637999566,
+        "fds_elapsed_seconds": 0.355,
+        "stepping_seconds": 0.345,
+        "input_sha256": "d4f529faff9823fb7b21c619c849e5008eafc7f42922e8352268010e7f97f82b"
+      },
+      {
+        "case": "heat_conduction_c_matched",
+        "repeat": 5,
+        "warmup": false,
+        "process_seconds": 0.6076177850000022,
+        "fds_elapsed_seconds": 0.349,
+        "stepping_seconds": 0.339,
+        "input_sha256": "d4f529faff9823fb7b21c619c849e5008eafc7f42922e8352268010e7f97f82b"
+      },
+      {
+        "case": "heat_conduction_d_matched",
+        "repeat": 0,
+        "warmup": true,
+        "process_seconds": 0.6044704919995638,
+        "fds_elapsed_seconds": 0.347,
+        "stepping_seconds": 0.336,
+        "input_sha256": "ec0cdf1ba122ea78ba4324d42688f13bd2e776c8164ec539d55b6510afd6c3cc"
+      },
+      {
+        "case": "heat_conduction_d_matched",
+        "repeat": 1,
+        "warmup": false,
+        "process_seconds": 0.6054616080000415,
+        "fds_elapsed_seconds": 0.347,
+        "stepping_seconds": 0.337,
+        "input_sha256": "ec0cdf1ba122ea78ba4324d42688f13bd2e776c8164ec539d55b6510afd6c3cc"
+      },
+      {
+        "case": "heat_conduction_d_matched",
+        "repeat": 2,
+        "warmup": false,
+        "process_seconds": 0.609763677999581,
+        "fds_elapsed_seconds": 0.352,
+        "stepping_seconds": 0.342,
+        "input_sha256": "ec0cdf1ba122ea78ba4324d42688f13bd2e776c8164ec539d55b6510afd6c3cc"
+      },
+      {
+        "case": "heat_conduction_d_matched",
+        "repeat": 3,
+        "warmup": false,
+        "process_seconds": 0.610953125999913,
+        "fds_elapsed_seconds": 0.353,
+        "stepping_seconds": 0.343,
+        "input_sha256": "ec0cdf1ba122ea78ba4324d42688f13bd2e776c8164ec539d55b6510afd6c3cc"
+      },
+      {
+        "case": "heat_conduction_d_matched",
+        "repeat": 4,
+        "warmup": false,
+        "process_seconds": 0.6088466170003812,
+        "fds_elapsed_seconds": 0.352,
+        "stepping_seconds": 0.341,
+        "input_sha256": "ec0cdf1ba122ea78ba4324d42688f13bd2e776c8164ec539d55b6510afd6c3cc"
+      },
+      {
+        "case": "heat_conduction_d_matched",
+        "repeat": 5,
+        "warmup": false,
+        "process_seconds": 0.6092003920002753,
+        "fds_elapsed_seconds": 0.351,
+        "stepping_seconds": 0.341,
+        "input_sha256": "ec0cdf1ba122ea78ba4324d42688f13bd2e776c8164ec539d55b6510afd6c3cc"
+      },
+      {
+        "case": "part_baking_soda_450K_matched",
+        "repeat": 0,
+        "warmup": true,
+        "process_seconds": 0.5072934150002766,
+        "fds_elapsed_seconds": 0.25,
+        "stepping_seconds": 0.235,
+        "input_sha256": "367db142a9da1d966147192988e94a35cb8a597c108bbc48a67ed3cd62907717"
+      },
+      {
+        "case": "part_baking_soda_450K_matched",
+        "repeat": 1,
+        "warmup": false,
+        "process_seconds": 0.5037301679994926,
+        "fds_elapsed_seconds": 0.245,
+        "stepping_seconds": 0.231,
+        "input_sha256": "367db142a9da1d966147192988e94a35cb8a597c108bbc48a67ed3cd62907717"
+      },
+      {
+        "case": "part_baking_soda_450K_matched",
+        "repeat": 2,
+        "warmup": false,
+        "process_seconds": 0.5042248790005033,
+        "fds_elapsed_seconds": 0.247,
+        "stepping_seconds": 0.232,
+        "input_sha256": "367db142a9da1d966147192988e94a35cb8a597c108bbc48a67ed3cd62907717"
+      },
+      {
+        "case": "part_baking_soda_450K_matched",
+        "repeat": 3,
+        "warmup": false,
+        "process_seconds": 0.5023564260000057,
+        "fds_elapsed_seconds": 0.244,
+        "stepping_seconds": 0.23,
+        "input_sha256": "367db142a9da1d966147192988e94a35cb8a597c108bbc48a67ed3cd62907717"
+      },
+      {
+        "case": "part_baking_soda_450K_matched",
+        "repeat": 4,
+        "warmup": false,
+        "process_seconds": 0.5058082590003323,
+        "fds_elapsed_seconds": 0.246,
+        "stepping_seconds": 0.232,
+        "input_sha256": "367db142a9da1d966147192988e94a35cb8a597c108bbc48a67ed3cd62907717"
+      },
+      {
+        "case": "part_baking_soda_450K_matched",
+        "repeat": 5,
+        "warmup": false,
+        "process_seconds": 0.5070724919996792,
+        "fds_elapsed_seconds": 0.249,
+        "stepping_seconds": 0.235,
+        "input_sha256": "367db142a9da1d966147192988e94a35cb8a597c108bbc48a67ed3cd62907717"
+      },
+      {
+        "case": "two_step_solid_reaction_matched",
+        "repeat": 0,
+        "warmup": true,
+        "process_seconds": 0.34194288100025005,
+        "fds_elapsed_seconds": 0.084,
+        "stepping_seconds": 0.075,
+        "input_sha256": "32b1c527cb4c816d3a783da1113e9cc630d11066244cf89ccecb6095d66d97e9"
+      },
+      {
+        "case": "two_step_solid_reaction_matched",
+        "repeat": 1,
+        "warmup": false,
+        "process_seconds": 0.34037978100059263,
+        "fds_elapsed_seconds": 0.083,
+        "stepping_seconds": 0.074,
+        "input_sha256": "32b1c527cb4c816d3a783da1113e9cc630d11066244cf89ccecb6095d66d97e9"
+      },
+      {
+        "case": "two_step_solid_reaction_matched",
+        "repeat": 2,
+        "warmup": false,
+        "process_seconds": 0.34203240100032417,
+        "fds_elapsed_seconds": 0.084,
+        "stepping_seconds": 0.074,
+        "input_sha256": "32b1c527cb4c816d3a783da1113e9cc630d11066244cf89ccecb6095d66d97e9"
+      },
+      {
+        "case": "two_step_solid_reaction_matched",
+        "repeat": 3,
+        "warmup": false,
+        "process_seconds": 0.3455343069999799,
+        "fds_elapsed_seconds": 0.088,
+        "stepping_seconds": 0.077,
+        "input_sha256": "32b1c527cb4c816d3a783da1113e9cc630d11066244cf89ccecb6095d66d97e9"
+      },
+      {
+        "case": "two_step_solid_reaction_matched",
+        "repeat": 4,
+        "warmup": false,
+        "process_seconds": 0.3414361180002743,
+        "fds_elapsed_seconds": 0.084,
+        "stepping_seconds": 0.073,
+        "input_sha256": "32b1c527cb4c816d3a783da1113e9cc630d11066244cf89ccecb6095d66d97e9"
+      },
+      {
+        "case": "two_step_solid_reaction_matched",
+        "repeat": 5,
+        "warmup": false,
+        "process_seconds": 0.3424663240002701,
+        "fds_elapsed_seconds": 0.084,
+        "stepping_seconds": 0.074,
+        "input_sha256": "32b1c527cb4c816d3a783da1113e9cc630d11066244cf89ccecb6095d66d97e9"
+      },
+      {
+        "case": "vcpl03_shrink_swell_paths",
+        "repeat": 0,
+        "warmup": true,
+        "process_seconds": 0.3394919859993024,
+        "fds_elapsed_seconds": 0.081,
+        "stepping_seconds": 0.065,
+        "input_sha256": "164a66899661e380aa3f4de7f4887cc383ebedfd94afa779dd26d7eaddad8948"
+      },
+      {
+        "case": "vcpl03_shrink_swell_paths",
+        "repeat": 1,
+        "warmup": false,
+        "process_seconds": 0.3440695679992132,
+        "fds_elapsed_seconds": 0.087,
+        "stepping_seconds": 0.07,
+        "input_sha256": "164a66899661e380aa3f4de7f4887cc383ebedfd94afa779dd26d7eaddad8948"
+      },
+      {
+        "case": "vcpl03_shrink_swell_paths",
+        "repeat": 2,
+        "warmup": false,
+        "process_seconds": 0.3402021930005503,
+        "fds_elapsed_seconds": 0.082,
+        "stepping_seconds": 0.065,
+        "input_sha256": "164a66899661e380aa3f4de7f4887cc383ebedfd94afa779dd26d7eaddad8948"
+      },
+      {
+        "case": "vcpl03_shrink_swell_paths",
+        "repeat": 3,
+        "warmup": false,
+        "process_seconds": 0.33889351100060594,
+        "fds_elapsed_seconds": 0.081,
+        "stepping_seconds": 0.064,
+        "input_sha256": "164a66899661e380aa3f4de7f4887cc383ebedfd94afa779dd26d7eaddad8948"
+      },
+      {
+        "case": "vcpl03_shrink_swell_paths",
+        "repeat": 4,
+        "warmup": false,
+        "process_seconds": 0.3386034400000426,
+        "fds_elapsed_seconds": 0.08,
+        "stepping_seconds": 0.064,
+        "input_sha256": "164a66899661e380aa3f4de7f4887cc383ebedfd94afa779dd26d7eaddad8948"
+      },
+      {
+        "case": "vcpl03_shrink_swell_paths",
+        "repeat": 5,
+        "warmup": false,
+        "process_seconds": 0.3407902059998378,
+        "fds_elapsed_seconds": 0.084,
+        "stepping_seconds": 0.067,
+        "input_sha256": "164a66899661e380aa3f4de7f4887cc383ebedfd94afa779dd26d7eaddad8948"
+      },
+      {
+        "case": "vhc01_semi_infinite",
+        "repeat": 0,
+        "warmup": true,
+        "process_seconds": 0.3285367380003663,
+        "fds_elapsed_seconds": 0.07,
+        "stepping_seconds": 0.062,
+        "input_sha256": "2b6c9a59cd6eaf5c12cd6e6f1c07d63d4c71759aef3900564d1f7ce29d6f0206"
+      },
+      {
+        "case": "vhc01_semi_infinite",
+        "repeat": 1,
+        "warmup": false,
+        "process_seconds": 0.33382604899998114,
+        "fds_elapsed_seconds": 0.075,
+        "stepping_seconds": 0.066,
+        "input_sha256": "2b6c9a59cd6eaf5c12cd6e6f1c07d63d4c71759aef3900564d1f7ce29d6f0206"
+      },
+      {
+        "case": "vhc01_semi_infinite",
+        "repeat": 2,
+        "warmup": false,
+        "process_seconds": 0.3312298809996719,
+        "fds_elapsed_seconds": 0.074,
+        "stepping_seconds": 0.065,
+        "input_sha256": "2b6c9a59cd6eaf5c12cd6e6f1c07d63d4c71759aef3900564d1f7ce29d6f0206"
+      },
+      {
+        "case": "vhc01_semi_infinite",
+        "repeat": 3,
+        "warmup": false,
+        "process_seconds": 0.33120564199998626,
+        "fds_elapsed_seconds": 0.073,
+        "stepping_seconds": 0.064,
+        "input_sha256": "2b6c9a59cd6eaf5c12cd6e6f1c07d63d4c71759aef3900564d1f7ce29d6f0206"
+      },
+      {
+        "case": "vhc01_semi_infinite",
+        "repeat": 4,
+        "warmup": false,
+        "process_seconds": 0.33132091500010574,
+        "fds_elapsed_seconds": 0.073,
+        "stepping_seconds": 0.065,
+        "input_sha256": "2b6c9a59cd6eaf5c12cd6e6f1c07d63d4c71759aef3900564d1f7ce29d6f0206"
+      },
+      {
+        "case": "vhc01_semi_infinite",
+        "repeat": 5,
+        "warmup": false,
+        "process_seconds": 0.3301892809995479,
+        "fds_elapsed_seconds": 0.073,
+        "stepping_seconds": 0.064,
+        "input_sha256": "2b6c9a59cd6eaf5c12cd6e6f1c07d63d4c71759aef3900564d1f7ce29d6f0206"
+      }
+    ]
+  }
+}

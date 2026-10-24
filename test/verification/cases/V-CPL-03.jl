@@ -318,7 +318,7 @@ function _verification_case_vcpl03()
                         ),
                     )
                 end
-                # FDS 6.11.0 overlay (reference/fds/custom/): the shipped
+                # FDS 6.11.1 overlay (reference/fds/custom/): the shipped
                 # shrink_swell case heats with an Arrhenius transient (only
                 # endpoints comparable), so vcpl03_shrink_swell_paths.fds
                 # reruns FDS isothermally with our P1/P2 densities and
@@ -336,7 +336,7 @@ function _verification_case_vcpl03()
                     push!(
                         series,
                         CurveSeries(
-                            label = "FDS 6.11.0 $(perm)",
+                            label = "FDS 6.11.1 $(perm)",
                             crosscode = true,
                             x = t_fds,
                             y = fds[col][2:end] ./ 0.002,

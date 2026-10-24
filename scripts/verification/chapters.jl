@@ -133,8 +133,9 @@ function _write_member!(io, r::CaseReportResult)
                 Wall times at every ladder rung against the reference runs.
                 Resolutions and simulated spans differ where noted (details in
                 `reference/timings.csv`), so cross-code timings are indicative
-                rather than a controlled benchmark; rungs at a matched
-                resolution are directly comparable.
+                rather than a controlled benchmark. FDS timings include
+                process startup and output; the reference provenance records
+                the measurement protocol.
                 """,
             )
             for (kind, path) in cc_time
@@ -264,7 +265,7 @@ function write_chapters(
         pinned at ~3× the observed error at pin time (the provenance column).
 
         Where a case has a published analog in another solver, it carries a
-        "Comparison with other codes" section: FDS 6.11.0 and Gpyro 0.8200
+        "Comparison with other codes" section: FDS 6.11.1 and Gpyro 0.8200
         were run locally on the same problems (decks and outputs committed
         with provenance in `test/verification/reference/`), and their errors
         against the same exact solutions are overlaid — muted gray, log
