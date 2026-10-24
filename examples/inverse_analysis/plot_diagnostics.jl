@@ -288,6 +288,7 @@ function flux_column(label_prefix, ds, θ; panels)
 end
 
 function diag_main()
+    mkpath(RESULTS_DIR)
     θ = _parse_theta(ARGS)
     length(θ) == 6 || error("Stage-2 θ needs 6 values, got $(length(θ)): $θ")
     fit_labels = OPTS.fit_labels === nothing ? DEFAULT_FIT_LABELS : OPTS.fit_labels

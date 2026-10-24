@@ -50,6 +50,7 @@ function _parse_theta(args)
 end
 
 function plot_main()
+    mkpath(RESULTS_DIR)
     θ = _parse_theta(ARGS)
     length(θ) == 6 || error("Stage-2 θ needs 6 values, got $(length(θ)): $θ")
 
