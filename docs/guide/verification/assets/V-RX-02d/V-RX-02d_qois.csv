@@ -1,3 +1,3 @@
 "qoi","value","exact","error","tol","within_tol","comment"
-"non-negativity through 2× burnout",-8.469713685871738e-13,0.0,8.469713685871738e-13,1.0e-9,true,"the depletion limiter's job for n = 0 kinetics"
-"residual mass within limiter threshold",-8.469713685871738e-13,0.0,8.469713685871738e-13,1.0,true,"tanh(ξ/th) ≈ ξ/th near 0 ⇒ exponential tail; observed ~8e-13"
+"non-negativity through 2× burnout",0.00539209232073932,0.0,0.0,1.0e-9,true,"the depletion limiter's job for n = 0 kinetics"
+"residual mass within limiter threshold",0.00539209232073932,0.0,0.00539209232073932,1.0,true,"tanh(ξ/th) ≈ ξ/th near 0 ⇒ exponential tail; observed ~8e-13"

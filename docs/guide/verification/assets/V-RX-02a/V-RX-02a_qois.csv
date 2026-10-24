@@ -1,3 +1,3 @@
 "qoi","value","exact","error","tol","within_tol","comment"
-"max relative ξ_A error (n=0.0)",1.4210854715202004e-16,NaN,1.4210854715202004e-16,1.0e-12,true,"linear decay; compared only to 0.9·t_b, limiter off"
-"total-mass conservation",2.842170943040401e-16,NaN,2.842170943040401e-16,1.0e-13,true,"A→B closed system"
+"max relative ξ_A error (n=0.0)",7.460698725481052e-15,NaN,7.460698725481052e-15,1.0e-12,true,"linear decay; compared only to 0.9·t_b, limiter off"
+"total-mass conservation",7.105427357601002e-16,NaN,7.105427357601002e-16,1.0e-13,true,"A→B closed system"

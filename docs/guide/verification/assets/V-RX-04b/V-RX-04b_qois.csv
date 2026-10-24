@@ -1,4 +1,4 @@
 "qoi","value","exact","error","tol","within_tol","comment"
-"steady surface temperature vs algebraic root",732.7973467644778,732.7973467682259,3.748141352843959e-9,1.0e-6,true,"surface-Newton residual check; Ts_exact ≈ 732.8 K"
-"steadiness (last half-interval drift)",0.0001074157123639452,NaN,0.0001074157123639452,0.001,true,"t_end ≈ 36 thermal time constants"
-"steady uniformity (adiabatic back)",8.769802661845461e-10,NaN,8.769802661845461e-10,1.0e-7,true,"zero steady flux ⇒ uniform slab at Ts"
+"steady surface temperature vs algebraic root",732.797346767972,732.7973467682259,2.538627086323686e-10,1.0e-6,true,"surface-Newton residual check; Ts_exact ≈ 732.8 K"
+"steadiness (last half-interval drift)",0.00010734332317952067,NaN,0.00010734332317952067,0.001,true,"t_end ≈ 36 thermal time constants"
+"steady uniformity (adiabatic back)",2.467004378559068e-11,NaN,2.467004378559068e-11,1.0e-7,true,"zero steady flux ⇒ uniform slab at Ts"

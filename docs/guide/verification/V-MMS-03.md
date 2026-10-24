@@ -15,40 +15,35 @@ the prescribed uniform-stretch velocity
 
   w*(z, t) = (ṡ/s)·z,   s(t) = 1 − 0.15·(1 − cos(2πt/20)),  z_i(t) = z_i(0)·s(t)
 
-through the `Workspace.w_override` hook. On a grid point moving with w, the
-grid time derivative is ∂tT* + w·∂zT*; the discrete ALE advection term
-supplies the w·∂zT* part, so the same Eulerian manufactured sources —
-evaluated at the LIVE cell centers read from the z-block — make T*, ξ* the
-exact solution on the moving mesh (see exact/mms.jl header, "ALE"). The
-error norms therefore measure exactly the moving-mesh transport truncation:
-ALE advection (van-Leer-limited upwind reconstruction) + lab-frame
-operators on a nonuniform-in-time mesh.
+through the solve's `w_override` hook. The mesh moves over a solid at rest
+and every inventory, T's energy with it, crosses the faces at the
+mesh-relative velocity, so the Eulerian manufactured sources — evaluated at
+the cell centers — make the fields exact on the moving mesh (see
+exact/mms.jl header, "ALE"). The T error norm therefore measures exactly
+the moving-mesh transport truncation: the relative energy flux (upwind-biased
+face temperature) + lab-frame operators on a nonuniform-in-time mesh; the
+gas error measures the diffusive and relative fluxes on the moving mesh.
 
 No reactions: mesh motion is prescribed, not volume-change-driven, so the
 case isolates GCL/advection from kinetics (V-MMS-01 covers those). The
-solid field is spatially UNIFORM but time-varying: condensed phases are
-mesh-bound in this ALE formulation (v_solid = w ⇒ no advection operator,
-see compute_ale_species_advection!), so a z-varying solid target under
-prescribed non-material motion would have no operator to balance its
-w·∂zξ* term (constraint documented in exact/mms.jl). The time variation
-keeps the solid source-injection path active; T and the gas field carry
-the full space–time structure and exercise the moving-mesh advection.
+solid field is spatially UNIFORM but time-varying (uniform keeps the T
+pins focused on the relative energy flux); T and the gas field carry the
+full space–time structure.
 
-Expected order: the limiter's slope reconstruction is formally 2nd order on
-smooth data but clips at extrema (the sin peak crosses the domain), so the
-observed order sits between 1.5 and 2 — recorded at pin time; a drop below
-min_order flags a moving-mesh transport regression.
-
-Jacobian: dense FD (`jacobian = :fd`) — the structured geometry Jacobian
-assumes reaction-driven mesh velocity (see `Workspace.w_override` note).
+Expected order: second. The gas converges at second order and the
+temperature below it on coarse meshes (L2 rates 3.27, 1.70 on the CI
+ladder; 1.63, 1.83, 1.92 from 64 to 512 cells): the upwind-biased face
+temperature of the relative energy flux carries a pre-asymptotic
+third-order error term of the opposite sign to the second-order one. A drop
+below min_order flags a moving-mesh transport regression.
 
 ### Quantities of interest (n = 128)
 
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
-| L∞ T error on moving mesh, t=10.0 s | 0.003857 | — | 0.003857 | 0.25 | yes | manufactured T* on 30%-compressed mesh |
-| relative L∞ ξ_solid (mesh-bound) error, t=10.0 s | 6.204e-12 | — | 6.204e-12 | 1e-10 | yes | uniform solid: verifies the Lagrangian (no-advection) solid path + source injection |
-| relative L∞ ξ_gas error, t=10.0 s | 0.0006197 | — | 0.0006197 | 0.006 | yes | gas is advected relative to the mesh: moving-mesh transport error channel |
+| L∞ T error on moving mesh, t=10.0 s | 0.0006956 | — | 0.0006956 | 0.25 | yes | manufactured T* on 30%-compressed mesh |
+| relative L∞ ξ_solid (uniform) error, t=10.0 s | 4.942e-13 | — | 4.942e-13 | 1e-10 | yes | uniform solid: verifies the relative flux of a uniform field under the moving mesh + source injection |
+| relative L∞ ξ_gas error, t=10.0 s | 0.0001067 | — | 0.0001067 | 0.006 | yes | gas: diffusive + relative flux on the moving mesh |
 
 ![V-MMS-03 T_profiles](assets/V-MMS-03/V-MMS-03_T_profiles.png)
 
@@ -74,18 +69,18 @@ assumes reaction-driven mesh velocity (see `Workspace.w_override` note).
 
 | n_cells | h | wall (s) | L2_T | Linf_T |
 | --- | --- | --- | --- | --- |
-| 16 | 0.0625 | 0.1125 | 0.2321 | 0.3061 |
-| 32 | 0.03125 | 0.6345 | 0.05006 | 0.06913 |
-| 64 | 0.01562 | 1.222 | 0.01107 | 0.01579 |
-| 128 | 0.007812 | 8.375 | 0.002632 | 0.003857 |
+| 16 | 0.0625 | 0.026 | 0.05036 | 0.1138 |
+| 32 | 0.03125 | 0.06975 | 0.004431 | 0.009085 |
+| 64 | 0.01562 | 0.2141 | 0.00145 | 0.002204 |
+| 128 | 0.007812 | 0.345 | 0.0004783 | 0.0006956 |
 
-Observed order 2.156 (L2_T), expected 2.0.
+Observed order 2.177 (L2_T), expected 2.0.
 
 ### Solver configuration
 
 | setting | value |
 | --- | --- |
-| integrator | KenCarp4 (default) |
+| integrator | Rodas5P (default) |
 | abstol | 1.0e-11 |
 | reltol | 1.0e-9 |
 

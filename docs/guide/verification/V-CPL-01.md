@@ -54,15 +54,15 @@ convergence study).
 
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
-| T-history L∞ error at x = 0.5 mm | 0.01396 | — | 0.01396 | 0.05 | yes | vs exact two-phase profile, t ≥ 100.0 s |
-| T-history L∞ error at x = 1.0 mm | 0.02778 | — | 0.02778 | 0.1 | yes | vs exact two-phase profile, t ≥ 100.0 s |
-| T-history L∞ error at x = 1.5 mm | 0.03838 | — | 0.03838 | 0.12 | yes | vs exact two-phase profile, t ≥ 100.0 s |
-| T-history L∞ error at x = 2.0 mm | 0.1338 | — | 0.1338 | 0.4 | yes | vs exact two-phase profile, t ≥ 100.0 s |
-| front position at t = 100.0 s | 0.001691 | 0.001675 | 0.009417 | 0.03 | yes | s(t) = 2λ√(αₛt), λ = 0.23166 |
-| front position at t = 200.0 s | 0.002391 | 0.002369 | 0.009389 | 0.03 | yes | s(t) = 2λ√(αₛt), λ = 0.23166 |
-| front position at t = 300.0 s | 0.002928 | 0.002901 | 0.009282 | 0.03 | yes | s(t) = 2λ√(αₛt), λ = 0.23166 |
-| √t front-growth coefficient | 0.0001691 | 0.0001675 | 0.009312 | 0.03 | yes | fit over t ∈ [100.0, 300.0] s |
-| back-face disturbance (semi-infinite validity) | 8.173e-05 | 0 | 8.173e-05 | 0.01 | yes | L = 4 cm vs penetration ≈ 1.25 cm |
+| T-history L∞ error at x = 0.5 mm | 0.01367 | — | 0.01367 | 0.05 | yes | vs exact two-phase profile, t ≥ 100.0 s |
+| T-history L∞ error at x = 1.0 mm | 0.02718 | — | 0.02718 | 0.1 | yes | vs exact two-phase profile, t ≥ 100.0 s |
+| T-history L∞ error at x = 1.5 mm | 0.03778 | — | 0.03778 | 0.12 | yes | vs exact two-phase profile, t ≥ 100.0 s |
+| T-history L∞ error at x = 2.0 mm | 0.1336 | — | 0.1336 | 0.4 | yes | vs exact two-phase profile, t ≥ 100.0 s |
+| front position at t = 100.0 s | 0.001691 | 0.001675 | 0.009555 | 0.03 | yes | s(t) = 2λ√(αₛt), λ = 0.23166 |
+| front position at t = 200.0 s | 0.002392 | 0.002369 | 0.009535 | 0.03 | yes | s(t) = 2λ√(αₛt), λ = 0.23166 |
+| front position at t = 300.0 s | 0.002929 | 0.002901 | 0.009408 | 0.03 | yes | s(t) = 2λ√(αₛt), λ = 0.23166 |
+| √t front-growth coefficient | 0.0001691 | 0.0001675 | 0.009443 | 0.03 | yes | fit over t ∈ [100.0, 300.0] s |
+| back-face disturbance (semi-infinite validity) | 8.174e-05 | 0 | 8.174e-05 | 0.01 | yes | L = 4 cm vs penetration ≈ 1.25 cm |
 
 ![V-CPL-01 T_histories_at_depths](assets/V-CPL-01/V-CPL-01_T_histories_at_depths.png)
 
@@ -101,7 +101,7 @@ Solution overlays including the other codes' points: [T_histories_at_depths_vs_c
 
 | setting | value |
 | --- | --- |
-| integrator | KenCarp4 (default) |
+| integrator | Rodas5P (default) |
 | abstol | 1.0e-8 |
 | reltol | 1.0e-6 |
 
@@ -112,10 +112,10 @@ Solution overlays including the other codes' points: [T_histories_at_depths_vs_c
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
 | T-history L∞ error at x = 0.5 mm | 0.1725 | — | 0.1725 | 0.55 | yes | vs exact two-phase profile, t ≥ 50.0 s |
-| T-history L∞ error at x = 1.0 mm | 0.3313 | — | 0.3313 | 1.1 | yes | vs exact two-phase profile, t ≥ 50.0 s |
-| T-history L∞ error at x = 1.5 mm | 0.5289 | — | 0.5289 | 1.9 | yes | vs exact two-phase profile, t ≥ 50.0 s |
+| T-history L∞ error at x = 1.0 mm | 0.3312 | — | 0.3312 | 1.1 | yes | vs exact two-phase profile, t ≥ 50.0 s |
+| T-history L∞ error at x = 1.5 mm | 0.529 | — | 0.529 | 1.9 | yes | vs exact two-phase profile, t ≥ 50.0 s |
 | T-history L∞ error at x = 2.0 mm | 1.246 | — | 1.246 | 3.8 | yes | vs exact two-phase profile, t ≥ 50.0 s |
-| front position at t = 50.0 s | 0.001575 | 0.00159 | 0.009104 | 0.045 | yes | s(t) = 2λ√(αₛt), λ = 0.31088 |
+| front position at t = 50.0 s | 0.001575 | 0.00159 | 0.009103 | 0.045 | yes | s(t) = 2λ√(αₛt), λ = 0.31088 |
 | front position at t = 100.0 s | 0.002219 | 0.002248 | 0.01284 | 0.045 | yes | s(t) = 2λ√(αₛt), λ = 0.31088 |
 | front position at t = 150.0 s | 0.002718 | 0.002753 | 0.01291 | 0.045 | yes | s(t) = 2λ√(αₛt), λ = 0.31088 |
 | √t front-growth coefficient | 0.000222 | 0.0002248 | 0.01227 | 0.035 | yes | fit over t ∈ [50.0, 150.0] s |
@@ -158,7 +158,7 @@ Solution overlays including the other codes' points: [T_histories_at_depths_vs_c
 
 | setting | value |
 | --- | --- |
-| integrator | KenCarp4 (default) |
+| integrator | Rodas5P (default) |
 | abstol | 1.0e-8 |
 | reltol | 1.0e-6 |
 

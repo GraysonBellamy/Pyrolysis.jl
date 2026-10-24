@@ -46,7 +46,7 @@
 #   P4 char + gas:       A → 0.3 C(ρ=1000) + 0.7 G  V_f/V₀ = 0.3
 #   P5 mass loss, ΔV=0:  A → 0.5 C(ρ=500)  + 0.5 G  V_f/V₀ = 1
 #   P6 partial γ:        A → B(ρ=1000, γ=0.5)       V_f/V₀ = 1/2
-#   P7 WithChi:          P5 chemistry + lateral law A/A₀ = 1 − 0.5·χ̄
+#   P7 lateral law:      P5 chemistry + lateral law A/A₀ = 1 − 0.5·χ̄
 #        χ̄_f = 0.5 (released dry-mass fraction) ⇒ A_f/A₀ = 0.75 exactly,
 #        L_f/L₀ = (V_f/V₀)/(A_f/A₀) = 4/3.
 #
@@ -271,7 +271,7 @@ function _verification_case_vcpl03()
 
     return VerificationCase(
         id = "V-CPL-03",
-        title = "shrink/swell exact endpoints (6 permutations + WithChi law)",
+        title = "shrink/swell exact endpoints (6 permutations + lateral law)",
         tags = [:ale, :volume_change, :swelling, :chi, :mass_conservation],
         references = [
             "FDS Verification Guide `shrink_swell` (endpoint concept)",

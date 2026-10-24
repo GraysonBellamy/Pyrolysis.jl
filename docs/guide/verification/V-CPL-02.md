@@ -16,8 +16,8 @@ ablation ΔH_p. Exact steady traveling wave (exact/landau.jl):
   v_ss = q″/(ρ[c(T_p − T₀) + ΔH_p]),  T(ζ) = T₀ + (T_p − T₀)e^(−v_ss ζ/α)
 
 Realization: single reaction solid → gas with γ_gas = 0 (volume loss at
-intrinsic density ⇒ surface regression) under ALE with depletion-driven
-cell merging. The kinetics-controlled front approximates the fixed-T_p
+intrinsic density ⇒ surface regression) under ALE with cell
+deactivation. The kinetics-controlled front approximates the fixed-T_p
 ablation limit; (A, E) are chosen on the leading-order Laplace locus
 
   A = v² E (T_p − T₀) e^(E/RT_p) / (α R T_p²)
@@ -74,12 +74,12 @@ insensitivity check of the ablation-temperature locus.
 
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
-| steady energy balance: v vs Landau v_ss(measured T_s) | 0.001948 | 0.00195 | 0.001053 | 0.0021 | yes | traveling-wave identity, exact at any E for c_gas = c_solid |
-| regression consistency: thickness slope vs gas generation | 0.001948 | 0.001948 | 0.0002359 | 0.0021 | yes | γ_gas = 0 ⇒ dL/dt = −ṁ‴_gas/ρ exactly |
-| mass ledger closure over plateau window | 0.7803 | 0.7791 | 0.001598 | 0.0049 | yes | total-mass drop vs ∫ ṁ″ dt; residual = holdup drift |
-| in-depth profile decay rate (surface-attached frame) | 0.001967 | 0.001948 | 0.00965 | 0.027 | yes | ln(T−T₀) slope over ζ/δ ∈ [0.75, 1.7], 12 cells |
-| design-locus regression rate (loose) | 0.001948 | 0.002 | 0.02584 | 0.1 | yes | leading-order Laplace locus only pins T_p to O(RT_p²/E); informational, tightens as E ↑ (see V-CPL-02b) |
-| back-face rise (semi-infinite validity) | 0.0003587 | 0 | 0.0003587 | 0.01 | yes | guards the semi-infinite assumption |
+| steady energy balance: v vs Landau v_ss(measured T_s) | 0.001949 | 0.00195 | 0.000893 | 0.0021 | yes | traveling-wave identity, exact at any E for c_gas = c_solid |
+| regression consistency: thickness slope vs gas generation | 0.001949 | 0.001948 | 0.0004392 | 0.0021 | yes | γ_gas = 0 ⇒ dL/dt = −ṁ‴_gas/ρ exactly |
+| mass ledger closure over plateau window | 0.7804 | 0.7793 | 0.001416 | 0.0049 | yes | total-mass drop vs ∫ ṁ″ dt; residual = holdup drift |
+| in-depth profile decay rate (surface-attached frame) | 0.001973 | 0.001949 | 0.0123 | 0.027 | yes | ln(T−T₀) slope over ζ/δ ∈ [0.75, 1.7], 12 cells |
+| design-locus regression rate (loose) | 0.001949 | 0.002 | 0.02568 | 0.1 | yes | leading-order Laplace locus only pins T_p to O(RT_p²/E); informational, tightens as E ↑ (see V-CPL-02b) |
+| back-face rise (semi-infinite validity) | 0.0003462 | 0 | 0.0003462 | 0.01 | yes | guards the semi-infinite assumption |
 
 ![V-CPL-02 mlr_history](assets/V-CPL-02/V-CPL-02_mlr_history.png)
 
@@ -101,22 +101,21 @@ insensitivity check of the ablation-temperature locus.
 
 | n_cells | h | wall (s) | balance | consistency |
 | --- | --- | --- | --- | --- |
-| 60 | 0.01667 | 0.392 | 0.01111 | 0.00403 |
-| 100 | 0.01 | 0.8772 | 0.01338 | 0.0001482 |
-| 160 | 0.00625 | 1.596 | 0.0007077 | 0.0002239 |
-| 240 | 0.004167 | 3.111 | 0.001053 | 0.0002359 |
+| 60 | 0.01667 | 0.2067 | 0.003945 | 0.001565 |
+| 100 | 0.01 | 0.3328 | 0.0025 | 0.001839 |
+| 160 | 0.00625 | 0.6565 | 0.001867 | 0.0002906 |
+| 240 | 0.004167 | 1.382 | 0.000893 | 0.0004392 |
 
-Observed order 2.169 (balance).
+Observed order 1.016 (balance).
 
 ### Solver configuration
 
 | setting | value |
 | --- | --- |
-| integrator | KenCarp4 (default) |
+| integrator | Rodas5P (default) |
 | use_ale | true |
 | min_thickness | 0.0001 |
-| handle_depletion | true |
-| depletion_threshold | 0.05 |
+| deactivation | true |
 | abstol | 1.0e-7 |
 | reltol | 1.0e-5 |
 

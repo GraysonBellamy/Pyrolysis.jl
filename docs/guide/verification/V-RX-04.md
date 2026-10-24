@@ -35,7 +35,7 @@ implementation's constant.
 
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
-| max mean-T error vs implicit exact | 0.003893 | — | 0.003893 | 0.012 | yes | lumped T⁴ cooling; thin-limit bias ~7e-5 relative in flux |
+| max mean-T error vs implicit exact | 0.004181 | — | 0.004181 | 0.012 | yes | lumped T⁴ cooling; thin-limit bias ~7e-5 relative in flux |
 | internal ΔT (thin-limit validity) | 0.006854 | — | 0.006854 | 0.05 | yes | guards the lumped assumption of the reference solution |
 
 ![V-RX-04a T_history_vs_exact](assets/V-RX-04a/V-RX-04a_T_history_vs_exact.png)
@@ -46,7 +46,7 @@ implementation's constant.
 
 | setting | value |
 | --- | --- |
-| integrator | KenCarp4 (default) |
+| integrator | Rodas5P (default) |
 | abstol | 1.0e-10 |
 | reltol | 1.0e-8 |
 
@@ -56,9 +56,9 @@ implementation's constant.
 
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
-| steady surface temperature vs algebraic root | 732.8 | 732.8 | 3.748e-09 | 1e-06 | yes | surface-Newton residual check; Ts_exact ≈ 732.8 K |
-| steadiness (last half-interval drift) | 0.0001074 | — | 0.0001074 | 0.001 | yes | t_end ≈ 36 thermal time constants |
-| steady uniformity (adiabatic back) | 8.77e-10 | — | 8.77e-10 | 1e-07 | yes | zero steady flux ⇒ uniform slab at Ts |
+| steady surface temperature vs algebraic root | 732.8 | 732.8 | 2.539e-10 | 1e-06 | yes | surface-Newton residual check; Ts_exact ≈ 732.8 K |
+| steadiness (last half-interval drift) | 0.0001073 | — | 0.0001073 | 0.001 | yes | t_end ≈ 36 thermal time constants |
+| steady uniformity (adiabatic back) | 2.467e-11 | — | 2.467e-11 | 1e-07 | yes | zero steady flux ⇒ uniform slab at Ts |
 
 ![V-RX-04b surface_T_history](assets/V-RX-04b/V-RX-04b_surface_T_history.png)
 
@@ -68,7 +68,7 @@ implementation's constant.
 
 | setting | value |
 | --- | --- |
-| integrator | KenCarp4 (default) |
+| integrator | Rodas5P (default) |
 | abstol | 1.0e-10 |
 | reltol | 1.0e-8 |
 

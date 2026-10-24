@@ -1,5 +1,5 @@
 "n_cells","qoi","value","exact","error","tol","within_tol"
-40,"L∞ steady profile vs (quantized) network",1.5404566511278972e-11,NaN,1.5404566511278972e-11,1.0e-8,true
-40,"steady bottom-face flux vs network",909.0909091216872,909.0909090909092,3.385578111192444e-11,1.0e-8,true
-40,"steady top-face flux vs network",909.0909090906052,909.0909090909092,3.343984644743613e-13,1.0e-8,true
-40,"steadiness (last half-interval drift)",8.460006029054057e-10,NaN,8.460006029054057e-10,1.0e-6,true
+40,"L∞ steady profile vs (quantized) network",5.684341886080802e-14,NaN,5.684341886080802e-14,1.0e-8,true
+40,"steady bottom-face flux vs network",909.0909090909918,909.0909090909092,9.079030860448255e-14,1.0e-8,true
+40,"steady top-face flux vs network",909.0909090909008,909.0909090909092,9.254108590539543e-15,1.0e-8,true
+40,"steadiness (last half-interval drift)",1.1368683772161603e-13,NaN,1.1368683772161603e-13,1.0e-6,true

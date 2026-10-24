@@ -14,7 +14,7 @@ constant rates k₁ = 0.389 s⁻¹, k₂ = 0.262 s⁻¹ (published values, so nu
 are cross-checkable against both codes), isothermal, exact Bateman solution
 in exact/kinetics.jl.
 
-Exercises multi-step ReactionSet coupling: intermediate B is produced by
+Exercises multi-step reaction coupling: intermediate B is produced by
 reaction 1 and consumed by reaction 2 SIMULTANEOUSLY (the existing
 isothermal test is single-step).
 
@@ -30,11 +30,11 @@ Setup notes (solver conventions that would corrupt the case):
 
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
-| max relative ξ_A error | 1.256e-09 | — | 1.256e-09 | 1e-08 | yes | Bateman solution, k₁=0.389, k₂=0.262 (FDS/Gpyro values) |
-| max relative ξ_B error | 2.781e-09 | — | 2.781e-09 | 1e-08 | yes | Bateman solution, k₁=0.389, k₂=0.262 (FDS/Gpyro values) |
-| max relative ξ_C error | 1.526e-09 | — | 1.526e-09 | 1e-08 | yes | Bateman solution, k₁=0.389, k₂=0.262 (FDS/Gpyro values) |
-| total-mass conservation (closed chain) | 2.274e-15 | — | 2.274e-15 | 1e-13 | yes | Σξ must equal ξ₀; unit yields |
-| isothermality drift | 5.684e-14 | — | 5.684e-14 | 1e-12 | yes | h = 0 both reactions; Dirichlet-pinned single cell |
+| max relative ξ_A error | 4.773e-13 | — | 4.773e-13 | 1e-08 | yes | Bateman solution, k₁=0.389, k₂=0.262 (FDS/Gpyro values) |
+| max relative ξ_B error | 1.207e-12 | — | 1.207e-12 | 1e-08 | yes | Bateman solution, k₁=0.389, k₂=0.262 (FDS/Gpyro values) |
+| max relative ξ_C error | 7.295e-13 | — | 7.295e-13 | 1e-08 | yes | Bateman solution, k₁=0.389, k₂=0.262 (FDS/Gpyro values) |
+| total-mass conservation (closed chain) | 1.251e-15 | — | 1.251e-15 | 1e-13 | yes | Σξ must equal ξ₀; unit yields |
+| isothermality drift | 0 | — | 0 | 1e-12 | yes | h = 0 both reactions; Dirichlet-pinned single cell |
 
 ![V-RX-01 xi_histories](assets/V-RX-01/V-RX-01_xi_histories.png)
 
@@ -65,7 +65,7 @@ Solution overlays including the other codes' points: [xi_histories_vs_codes](ass
 
 | setting | value |
 | --- | --- |
-| integrator | KenCarp4 (default) |
+| integrator | Rodas5P (default) |
 | abstol | 1.0e-12 |
 | reltol | 1.0e-10 |
 

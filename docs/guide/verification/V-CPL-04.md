@@ -39,10 +39,10 @@ The δ_c bisection itself (turning-point hunt) is report-mode work.
 
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
-| steady center temperature vs full-Arrhenius shooting | 503.5 | 503.5 | 1.843e-05 | 0.0025 | yes | δ = 0.44 ≈ 0.5 δ_c, E/RT₀ = 40, relative to the rise |
+| steady center temperature vs full-Arrhenius shooting | 503.5 | 503.5 | 1.851e-05 | 0.0025 | yes | δ = 0.44 ≈ 0.5 δ_c, E/RT₀ = 40, relative to the rise |
 | steady center rise vs FK closed form (limit check) | 0.2767 | 0.2772 | 0.001877 | 0.006 | yes | quantifies the FK-limit error at finite E/RT₀ |
 | steady profile L∞ vs shooting (relative to center rise) | 3.059e-05 | — | 3.059e-05 | 0.0025 | yes | includes the symmetry check |
-| steady-state reached (last-output drift) | 0.0003826 | 0 | 0.0003826 | 0.001 | yes | t_end = 5 diffusion times |
+| steady-state reached (last-output drift) | 0.0003834 | 0 | 0.0003834 | 0.001 | yes | t_end = 5 diffusion times |
 | near-critical δ = 0.80 δ_c stays on the stable branch | 0.552 | 0.5575 | 0.009852 | 0.03 | yes | bounded, near the FK lower branch (θ ≈ 0.558) |
 | supercritical δ = 1.50 δ_c ignites (thermal runaway) | 104.2 | — | 0 | 0.5 | yes | max rise 104.2 K must exceed 50 K (θ_c ≈ 1.19 ⇒ 14.9 K is the largest stable rise) |
 
@@ -62,18 +62,18 @@ The δ_c bisection itself (turning-point hunt) is report-mode work.
 
 | n_cells | h | wall (s) | norm |
 | --- | --- | --- | --- |
-| 20 | 0.05 | 0.004715 | 0.01094 |
-| 40 | 0.025 | 0.0071 | 0.002556 |
-| 80 | 0.0125 | 0.01172 | 0.0004599 |
-| 160 | 0.00625 | 0.02075 | 6.376e-05 |
+| 20 | 0.05 | 0.001385 | 0.01094 |
+| 40 | 0.025 | 0.002151 | 0.002556 |
+| 80 | 0.0125 | 0.004018 | 0.0004599 |
+| 160 | 0.00625 | 0.007602 | 6.403e-05 |
 
-Observed order 2.474 (norm), expected 2.0.
+Observed order 2.472 (norm), expected 2.0.
 
 ### Solver configuration
 
 | setting | value |
 | --- | --- |
-| integrator | KenCarp4 (default) |
+| integrator | Rodas5P (default) |
 | abstol | 1.0e-10 |
 | reltol | 1.0e-8 |
 

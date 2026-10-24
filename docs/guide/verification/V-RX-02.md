@@ -12,9 +12,10 @@ Khawam & Flanagan (2006) exact isothermal integrations (FDS verifies its
 `part_baking_soda` case against the same forms). Sub-cases:
 
   a) n = 0    — linear decay, exact finite burnout time. Compared only up to
-                0.9·t_b with the depletion limiter DISABLED: the solver
-                clamps ξ ≥ 0 inside ξⁿ, so at ξ = 0 the n = 0 rate stays A
-                and would integrate ξ negative (kinetics.jl `_fast_pow`).
+                0.9·t_b with the depletion limiter DISABLED: the power is
+                taken on the finite base base_scale·softplus(ξ/base_scale),
+                so at ξ = 0 the n = 0 rate stays A and would integrate ξ
+                negative (`DepletionLimiter(enabled = false)`).
   b) n = 2    — ThermaKin's second-order case as single-reactant n = 2:
                 ξ = ξ₀/(1 + ξ₀kt).
   c) n = 2/3  — contracting-sphere R3 model with FDS's NaHCO₃ parameters
@@ -34,8 +35,8 @@ published constants for normalized m = ξ/ξ₀ convert as A_ours = k_pub·ξ₀
 
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
-| max relative ξ_A error (n=0.0) | 1.421e-16 | — | 1.421e-16 | 1e-12 | yes | linear decay; compared only to 0.9·t_b, limiter off |
-| total-mass conservation | 2.842e-16 | — | 2.842e-16 | 1e-13 | yes | A→B closed system |
+| max relative ξ_A error (n=0.0) | 7.461e-15 | — | 7.461e-15 | 1e-12 | yes | linear decay; compared only to 0.9·t_b, limiter off |
+| total-mass conservation | 7.105e-16 | — | 7.105e-16 | 1e-13 | yes | A→B closed system |
 
 ![V-RX-02a xi_histories](assets/V-RX-02a/V-RX-02a_xi_histories.png)
 
@@ -45,7 +46,7 @@ published constants for normalized m = ξ/ξ₀ convert as A_ours = k_pub·ξ₀
 
 | setting | value |
 | --- | --- |
-| integrator | KenCarp4 (default) |
+| integrator | Rodas5P (default) |
 | abstol | 1.0e-12 |
 | reltol | 1.0e-10 |
 
@@ -55,8 +56,8 @@ published constants for normalized m = ξ/ξ₀ convert as A_ours = k_pub·ξ₀
 
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
-| max relative ξ_A error (n=2.0) | 1.72e-08 | — | 1.72e-08 | 5e-08 | yes | ξ = ξ₀/(1+ξ₀kt); k in m³/(kg·s) |
-| total-mass conservation | 1.137e-15 | — | 1.137e-15 | 1e-13 | yes | A→B closed system |
+| max relative ξ_A error (n=2.0) | 2.93e-12 | — | 2.93e-12 | 5e-08 | yes | ξ = ξ₀/(1+ξ₀kt); k in m³/(kg·s) |
+| total-mass conservation | 5.684e-16 | — | 5.684e-16 | 1e-13 | yes | A→B closed system |
 
 ![V-RX-02b xi_histories](assets/V-RX-02b/V-RX-02b_xi_histories.png)
 
@@ -66,7 +67,7 @@ published constants for normalized m = ξ/ξ₀ convert as A_ours = k_pub·ξ₀
 
 | setting | value |
 | --- | --- |
-| integrator | KenCarp4 (default) |
+| integrator | Rodas5P (default) |
 | abstol | 1.0e-12 |
 | reltol | 1.0e-10 |
 
@@ -76,8 +77,8 @@ published constants for normalized m = ξ/ξ₀ convert as A_ours = k_pub·ξ₀
 
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
-| max relative ξ_A error (n=0.6666666666666666) | 2.774e-10 | — | 2.774e-10 | 1e-09 | yes | m^(1/3) linear in t; k_pub=0.3765 1/s at 450 K; exercises live Arrhenius (E ≠ 0) at pinned T |
-| total-mass conservation | 4.547e-16 | — | 4.547e-16 | 1e-13 | yes | A→B closed system |
+| max relative ξ_A error (n=0.6666666666666666) | 2.263e-10 | — | 2.263e-10 | 1e-09 | yes | m^(1/3) linear in t; k_pub=0.3765 1/s at 450 K; exercises live Arrhenius (E ≠ 0) at pinned T |
+| total-mass conservation | 6.821e-16 | — | 6.821e-16 | 1e-13 | yes | A→B closed system |
 
 ![V-RX-02c xi_histories](assets/V-RX-02c/V-RX-02c_xi_histories.png)
 
@@ -108,7 +109,7 @@ Solution overlays including the other codes' points: [xi_histories_vs_codes](ass
 
 | setting | value |
 | --- | --- |
-| integrator | KenCarp4 (default) |
+| integrator | Rodas5P (default) |
 | abstol | 1.0e-12 |
 | reltol | 1.0e-10 |
 
@@ -120,8 +121,8 @@ _limiter roll-off characterization_
 
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
-| non-negativity through 2× burnout | -8.47e-13 | 0 | 8.47e-13 | 1e-09 | yes | the depletion limiter's job for n = 0 kinetics |
-| residual mass within limiter threshold | -8.47e-13 | 0 | 8.47e-13 | 1 | yes | tanh(ξ/th) ≈ ξ/th near 0 ⇒ exponential tail; observed ~8e-13 |
+| non-negativity through 2× burnout | 0.005392 | 0 | 0 | 1e-09 | yes | the depletion limiter's job for n = 0 kinetics |
+| residual mass within limiter threshold | 0.005392 | 0 | 0.005392 | 1 | yes | tanh(ξ/th) ≈ ξ/th near 0 ⇒ exponential tail; observed ~8e-13 |
 
 ![V-RX-02d xi_histories](assets/V-RX-02d/V-RX-02d_xi_histories.png)
 
@@ -131,7 +132,7 @@ _limiter roll-off characterization_
 
 | setting | value |
 | --- | --- |
-| integrator | KenCarp4 (default) |
+| integrator | Rodas5P (default) |
 | abstol | 1.0e-12 |
 | reltol | 1.0e-10 |
 
