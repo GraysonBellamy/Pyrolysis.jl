@@ -126,6 +126,11 @@ function validate_material_for_problem(material)
 
     # Check reactions reference valid components
     for (i, rxn) in enumerate(material.reactions)
+        length(rxn.reactants) == 1 || push!(
+            errors,
+            "Reaction $i ($(rxn.name)) requires exactly one reactant; " *
+            "additional reactant mass stoichiometries are not supported",
+        )
         for (idx, _order) in rxn.reactants
             (idx < 1 || idx > NC) && push!(
                 errors,
@@ -392,7 +397,9 @@ function validate_strict(problem)
             err = mass_balance_error(rxn)
             push!(
                 errors,
-                "Reaction $i ($(rxn.name)) violates mass balance: |residual|=$err",
+                isfinite(err) ?
+                "Reaction $i ($(rxn.name)) violates mass balance: |residual|=$err" :
+                "Reaction $i ($(rxn.name)) has unverifiable mass stoichiometry",
             )
         end
     end

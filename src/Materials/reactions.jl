@@ -605,11 +605,16 @@ end
 """
 	verify_stoichiometry(rxn::Reaction; tol=1e-10)
 
-Verify that reaction stoichiometry satisfies mass balance.
+Verify that reaction stoichiometry satisfies mass balance. Return `false`
+with a warning if the mass balance cannot be verified, including reactions
+without exactly one reactant.
 """
 function verify_stoichiometry(rxn::Reaction; tol::Real = 1e-10)
     err = mass_balance_error(rxn)
-    if err > tol
+    if !isfinite(err)
+        @warn "Reaction $(rxn.name) has unverifiable mass balance; exactly one reactant and finite product mass stoichiometries are required"
+        return false
+    elseif err > tol
         @warn "Reaction $(rxn.name) has mass balance error: $err"
         return false
     end

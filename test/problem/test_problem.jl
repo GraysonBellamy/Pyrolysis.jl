@@ -317,3 +317,43 @@ end
     @test_logs validate_problem(deck(ablating(κ = 1e-14)))
     @test_logs validate_problem(deck(ablating(reactive = false)))
 end
+
+@testset "unsupported stoichiometry cannot pass validation" begin
+    for reactants in ((), ((1, 1.0), (2, 1.0)))
+        rxn = Reaction(
+            :unsupported,
+            reactants,
+            ((2, 1.0),),
+            1.0,
+            0.0,
+            Pyrolysis.Materials.to_property(0.0),
+            0.0,
+            Inf,
+        )
+        @test isnan(Pyrolysis.Materials.mass_balance_error(rxn))
+        @test_logs (:warn, r"unverifiable mass balance") @test !Pyrolysis.Materials.verify_stoichiometry(
+            rxn,
+        )
+        material = Material(
+            name = :unsupported,
+            components = _material().components,
+            reactions = (rxn,),
+        )
+        problem = _problem(create_uniform_mesh(0.01, 2); material)
+        @test_throws r"requires exactly one reactant" validate_problem(problem)
+    end
+    balanced = Reaction(:balanced, 1 => 2; A = 1.0, E = 0.0, h = 0.0)
+    @test Pyrolysis.Materials.verify_stoichiometry(balanced)
+    unbalanced = Reaction(
+        :unbalanced,
+        1 => (1, 2);
+        A = 1.0,
+        E = 0.0,
+        h = 0.0,
+        yields = (0.2, 0.9),
+        validate_mass = false,
+    )
+    @test_logs (:warn, r"mass balance error") @test !Pyrolysis.Materials.verify_stoichiometry(
+        unbalanced,
+    )
+end

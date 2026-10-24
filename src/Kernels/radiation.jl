@@ -40,12 +40,18 @@ struct BeerLambertKernel{R<:RadiativeFluxBC} <: Kernel
     d_floor::Matrix{Float64}
 end
 
+_incident_source_count(::AbstractThermalBC) = 0
+_incident_source_count(::RadiativeFluxBC) = 1
+_incident_source_count(bc::CombinedThermalBC) =
+    sum(_incident_source_count, bc.bcs; init = 0)
+
 """
 	BeerLambertKernel(topology, geometry, bc_set; tag = :top)
 
 The kernel for the radiative flux condition on the boundary tagged `tag`,
 whose single face is the exposed face; the beam then crosses the cells in
-order of their distance from it.
+order of their distance from it. The boundary condition may contain at most
+one `RadiativeFluxBC`; multiple incident sources are rejected.
 """
 function BeerLambertKernel(
     topo::MeshTopology{1},
@@ -62,6 +68,12 @@ function BeerLambertKernel(
             ),
         )
     end
+    _incident_source_count(bc_set.thermal[tag]) <= 1 || throw(
+        ArgumentError(
+            "in-depth radiation supports one RadiativeFluxBC on :$tag; " *
+            "combine sources sharing one absorptivity in a single flux function",
+        ),
+    )
     source = get_radiative_flux_bc(bc_set.thermal[tag])
     source === nothing && (source = RadiativeFluxBC(0.0))
     faces = boundary_faces(topo, tag)

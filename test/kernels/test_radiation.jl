@@ -283,3 +283,31 @@ end
         @test !has_intensities(cp.def.layout)
     end
 end
+
+@testset "Beer–Lambert requires a single incident source" begin
+    first_source = RadiativeFluxBC(5e4; absorptivity = 0.9)
+    second_source = RadiativeFluxBC(2e4; absorptivity = 0.9)
+    for top in (
+        first_source + second_source,
+        CombinedThermalBC((
+            ConvectiveBC(h = 10.0, T_inf = 300.0),
+            CombinedThermalBC((first_source, second_source)),
+        )),
+    )
+        problem = _translucent_slab(6; top, reacting = false)
+        @test_throws r"supports one RadiativeFluxBC" setup(
+            problem;
+            radiation_model = BEER_LAMBERT,
+        )
+        cp = setup(problem; radiation_model = SURFACE_ABSORPTION)
+        @test !has_intensities(cp.def.layout)
+    end
+    problem = _translucent_slab(
+        6;
+        top = RadiativeFluxBC(t -> 5e4 + 2e4; absorptivity = 0.9),
+        reacting = false,
+    )
+    cp = setup(problem; radiation_model = BEER_LAMBERT)
+    kernel = only(k for k in cp.def.kernels if k isa BeerLambertKernel)
+    @test incident_intensity(kernel, first(buffers(cp.ws, cp.def, Float64)), 0.0) ≈ 6.3e4
+end

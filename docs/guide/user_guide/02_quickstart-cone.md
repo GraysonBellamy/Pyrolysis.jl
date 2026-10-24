@@ -541,7 +541,10 @@ Two important caveats:
   reported in `solution.extras.volumetric_absorption` and the power leaving
   through the back face in `solution.extras.radiation_transmitted`; with every
   `α` zero the beam crosses the slab unabsorbed. `BEER_LAMBERT` needs planar
-  coordinates. See Technical Reference §8.
+  coordinates and at most one `RadiativeFluxBC` on the exposed boundary;
+  setup rejects multiple incident flux conditions. Sources sharing one
+  absorptivity can be combined in a single flux function. See Technical
+  Reference §8.
 
 ### 2.6.3 Other solve options worth knowing
 
