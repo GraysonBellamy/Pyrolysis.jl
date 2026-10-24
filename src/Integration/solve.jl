@@ -79,7 +79,8 @@ of every step the cells below the
 threshold go in one event, the only events without `located_events` and with
 it the safety net for a crossing the location does not see. The
 solve ends with `:Terminated` when the last cell goes or a cell below the
-threshold lies inward of a live one, and with `:Failure` when an event leaves
+threshold lies inward of a live one (outcome `:interior`, with a warning
+naming the cell), and with `:Failure` when an event leaves
 the state inadmissible (a merge's receiver held to its own mass tolerances,
 as the domain test holds every later proposal) or no consistent node
 velocities. The state a solve
@@ -552,7 +553,17 @@ function _deactivation_callback(cp::CoreProblem, check::DomainCheck, policy, loc
             return status
         end,
     )
+    # Whether the solve has met an interior void (the located event and the
+    # end-of-step net can both see one), and the cell below its threshold there.
+    void_seen = FunctionWrapper{Bool,Tuple{}}(() -> cells.outcome[] === :interior)
+    void_cell = FunctionWrapper{Int,Tuple{_StateVector,Float64}}(
+        (u, slack) -> something(
+            findfirst(i -> below_threshold(cells, layout, u, i; slack), 1:n_cells(layout)),
+            0,
+        ),
+    )
     function affect!(integrator, slack::Float64)
+        seen = void_seen()
         status = deactivate(integrator.u, integrator.t, slack)
         if status === :inadmissible
             @warn "solve(): the state after deactivating cell(s) at t = $(integrator.t) is inadmissible"
@@ -560,6 +571,10 @@ function _deactivation_callback(cp::CoreProblem, check::DomainCheck, policy, loc
         elseif status === :inconsistent
             @warn "solve(): no consistent node velocities after deactivating cell(s) at t = $(integrator.t)"
             terminate!(integrator, ReturnCode.Failure)
+        elseif status === :interior
+            seen ||
+                @warn "solve(): cell $(void_cell(integrator.u, slack)) is below its threshold inward of a live cell at t = $(integrator.t); the solve ends with outcome :interior"
+            terminate!(integrator)
         elseif status !== :transferred
             terminate!(integrator)
         elseif policy.restart === :forced_dt

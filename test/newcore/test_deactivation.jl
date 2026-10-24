@@ -1356,7 +1356,7 @@ end
 
 @testset "a void under a live cell ends the solve" begin
     for moving in (true, false)
-        sol = Integration.solve(
+        sol = @test_logs (:warn, r"cell 1 is below its threshold.*outcome :interior") Integration.solve(
             _ablator(6; from_bottom = true, t_end = 5.0);
             use_ale = moving,
             deactivation = true,
