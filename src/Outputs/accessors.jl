@@ -82,6 +82,7 @@ component `j`, `:m` (the component masses, `NC × n_cells`) or `:mj`, and `:z`
 `NaN`, and so are the nodes beyond the outermost live one.
 """
 function get_profile(sol::PyrolysisSolution, field::Symbol, i::Integer)
+    checkbounds(sol.t, i)
     field === :T && return sol.T[:, i]
     field === :ξ && return sol.ξ[:, :, i]
     if field === :m
@@ -91,7 +92,10 @@ function get_profile(sol::PyrolysisSolution, field::Symbol, i::Integer)
     end
     if field === :z
         isempty(sol.z) || return sol.z[:, i]
-        return reduce(vcat, sol.problem.mesh.positions)
+        z = reduce(vcat, sol.problem.mesh.positions)
+        live = findlast(isfinite, view(sol.T, :, i))
+        z[(isnothing(live) ? 1 : live+2):end] .= NaN
+        return z
     end
     s = string(field)
     for (prefix, f) in (("ξ", :ξ), ("xi", :ξ), ("m", :m))
@@ -147,14 +151,15 @@ function (sol::PyrolysisSolution)(t::Real)
     end
     u = ts[k] == t ? raw.u[k] : raw(t)
     def = sol.definition
-    layout = def.layout
+    # Replay the mask locally: a query must not change the solution's layout,
+    # including when a property evaluation throws.
+    layout = deepcopy(def.layout)
     topo = def.setup.topology
     warm = [isfinite(x) ? x : T_REF for x in sol.T[:, k]]
     ws = CoreWorkspace(def, warm)
     _mask_at!(layout, sol.events, t)
-    du = zeros(state_length(layout))
-    residual!(du, u, def, t, ws)
     ds, _ = buffers(ws, def, Float64)
+    derive!(ds, u, layout, def.setup)
     n = n_cells(layout)
     T, ξ, m = copy(ds.T), copy(ds.ξ), copy(ds.m)
     centers = [ds.geometry.cell_center[i][1] for i = 1:n]
@@ -172,7 +177,6 @@ function (sol::PyrolysisSolution)(t::Real)
             z[(top+1):end] .= NaN
         end
     end
-    _mask_at!(layout, sol.events, Inf)
     return (; t = Float64(t), T, ξ, m, z, cell_centers = centers)
 end
 

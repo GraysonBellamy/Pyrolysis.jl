@@ -45,9 +45,16 @@ end
 
 const _TOL = (abstol = 1e-7, reltol = 1e-5)
 
-@testset "accessors on a moving deactivating deck" begin
+@testset "accessors on a moving deactivating deck: $form" for form in
+                                                              (:temperature, :enthalpy)
     problem = _ablator(12)
-    sol = Integration.solve(problem; use_ale = true, deactivation = true, _TOL...)
+    sol = Integration.solve(
+        problem;
+        use_ale = true,
+        deactivation = true,
+        energy_state = form,
+        _TOL...,
+    )
     @test sol.retcode === :Success
     @test length(sol.events) >= 3
     nt = length(sol.t)
@@ -84,8 +91,19 @@ const _TOL = (abstol = 1e-7, reltol = 1e-5)
     z = get_profile(sol, :z, nt)
     @test z[1:(live+1)] == sol.z[1:(live+1), nt] && all(isnan, z[(live+2):end])
     @test_throws ArgumentError get_profile(sol, :P, nt)
-    fixed = Integration.solve(_ablator(6; t_end = 0.1); _TOL...)
+    fixed = Integration.solve(_ablator(6; t_end = 0.1); energy_state = form, _TOL...)
     @test get_profile(fixed, :z, 1) == [p[1] for p in fixed.problem.mesh.positions]
+    @test_throws BoundsError get_profile(fixed, :z, 0)
+    @test_throws BoundsError get_profile(fixed, :z, length(fixed.t) + 1)
+
+    fixed_burnout =
+        Integration.solve(_ablator(12); deactivation = true, energy_state = form, _TOL...)
+    live_fixed = fixed_burnout.extras.live_cells[end]
+    @test 0 < live_fixed < 12
+    fixed_z = get_profile(fixed_burnout, :z, lastindex(fixed_burnout.t))
+    @test fixed_z[1:(live_fixed+1)] ==
+          [p[1] for p in fixed_burnout.problem.mesh.positions[1:(live_fixed+1)]]
+    @test all(isnan, fixed_z[(live_fixed+2):end])
 
     # The fields at a time: at a saved time the saved ones; between two saved
     # states no event separates, the reconstruction of the integrator's
@@ -135,6 +153,38 @@ const _TOL = (abstol = 1e-7, reltol = 1e-5)
     @test occursin("Outcome: running", text)
     @test occursin("Invocations: $(sol.statistics.invocations)", text)
     @test occursin("outcome :running", sprint(show, sol))
+end
+
+@testset "interpolation reads fields without evaluating boundary forcing" begin
+    calls = Ref(0)
+    refuse = Ref(false)
+    flux = t -> begin
+        refuse[] && error("boundary forcing is unavailable")
+        calls[] += 1
+        2.8e6
+    end
+    base = _ablator(12)
+    problem = PyrolysisProblem(
+        mesh = base.mesh,
+        material = base.material,
+        bc_set = BoundaryConditionSet(
+            thermal = (top = HeatFluxBC(flux), bottom = AdiabaticBC()),
+            mass = base.bc_set.mass,
+        ),
+        T_initial = base.T_initial,
+        ξ_initial = base.ξ_initial,
+        tspan = base.tspan,
+        output_times = base.output_times,
+    )
+    sol = Integration.solve(problem; use_ale = true, deactivation = true, _TOL...)
+    @test !isempty(sol.events)
+    mask = copy(sol.definition.layout.mask)
+    n_calls = calls[]
+    refuse[] = true
+    fields = sol(first(sol.t))
+    @test isequal(fields.T, sol.T[:, 1])
+    @test calls[] == n_calls
+    @test sol.definition.layout.mask == mask
 end
 
 @testset "succeeded and completed by return code and outcome" begin
