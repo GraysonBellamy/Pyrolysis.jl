@@ -114,6 +114,39 @@ end
     @test occursin("consecutive", m.message)
 end
 
+@testset "domain check: a proposal the error test rejects is left to it" begin
+    cp = setup(_slab(6; radiating = true); use_ale = true, radiation_model = BEER_LAMBERT)
+    layout = cp.def.layout
+    check = DomainCheck(cp)
+    u = copy(cp.u0)
+    u[position_index(layout, 3)] = u[position_index(layout, 2)]
+    ode = ODEProblem((du, x, p, t) -> fill!(du, 0.0), [0.0], (0.0, 1.0))
+    integrator = init(ode, OrdinaryDiffEq.Rodas5P())
+    Integration.bind_error_test!(check, integrator)
+    OrdinaryDiffEq.OrdinaryDiffEqCore.set_EEst!(integrator, 2.0)
+    @test !check(u, nothing, 0.0)
+    @test check.monitor.rejections == 0
+    OrdinaryDiffEq.OrdinaryDiffEqCore.set_EEst!(integrator, 0.5)
+    @test check(u, nothing, 0.0)
+    @test check.monitor.rejections == 1
+end
+
+@testset "the step observer ends the solve once the domain test gave up" begin
+    ode = ODEProblem((du, x, p, t) -> fill!(du, -1.0), [1.0], (0.0, 1.0))
+    integrator = init(ode, OrdinaryDiffEq.Rodas5P())
+    m = Integration.ConstraintMonitor()
+    m.failed = true
+    m.message = "a constraint residual stayed above its tolerance"
+    @test_logs (:warn, r"constraint residual stayed above") Integration._observe!(
+        integrator,
+        m,
+        NewtonCap(),
+        rodas5p_policy(KLUFactorization()),
+        u -> 0,
+    )
+    @test integrator.sol.retcode == OrdinaryDiffEq.ReturnCode.Failure
+end
+
 # A 1 mm inert slab losing 500 kW/m² through its top: its sensible energy is
 # gone at 0.6 s, and no physical state lies beyond.
 function _cooling_slab()

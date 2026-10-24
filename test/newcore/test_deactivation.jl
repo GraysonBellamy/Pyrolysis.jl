@@ -1075,32 +1075,23 @@ end
     @test_throws ErrorException consistent_state!(u, cp.def, cp.ws, 0.0)
 end
 
-@testset "the domain test rejects proposals through a solve and gives up on a run of constraint rejections" begin
-    options = (use_ale = true, radiation_model = BEER_LAMBERT, deactivation = true)
-    # The solver-chosen restart keeps the step through an event, so the domain
-    # test sees the proposals that follow one; the heuristic restart avoids them.
+@testset "the domain test rejects proposals the error test accepts through a solve" begin
+    # The solver-chosen restart keeps the step through an event, and at a
+    # loose tolerance the error test accepts proposals after one that the
+    # domain test rejects.
     policy = rodas5p_policy(KLUFactorization(); restart = :solver_chosen)
-    sol = integrate(
-        setup(_ablator(8; radiating = true); options...);
-        saveat = Float64[],
-        integrator_policy = policy,
+    cp = setup(
+        _ablator(8; radiating = true);
+        use_ale = true,
+        radiation_model = BEER_LAMBERT,
+        deactivation = true,
+        reltol = 1e-2,
+        abstol = 1e-4,
     )
+    sol = integrate(cp; saveat = Float64[], integrator_policy = policy)
     @test sol.retcode === :Success
     @test sol.statistics.domain_rejections > 0
     @test sol.statistics.largest_constraint_residual <= 1
-    # At tight tolerances a constraint residual stays above its tolerance on
-    # two consecutive proposals; with a bound of one the domain test gives up.
-    cp = setup(_ablator(8; radiating = true); options..., reltol = 1e-10, abstol = 1e-12)
-    sol =
-        @test_logs (:warn, r"constraint residual stayed above") match_mode = :any integrate(
-            cp;
-            saveat = Float64[],
-            max_constraint_rejections = 1,
-            integrator_policy = policy,
-        )
-    @test sol.retcode === :Failure
-    @test sol.t[end] < 0.8
-    @test sol.statistics.domain_rejections > 0
 end
 
 # A solve of the 30-cell ablator through its deactivations under `policy`,

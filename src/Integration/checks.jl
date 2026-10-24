@@ -62,12 +62,12 @@ end
 	ConstraintMonitor
 
 What the domain test saw: the largest scaled constraint residual of the last
-proposed state (`last`) and of every accepted one (`largest`), the steps it
-rejected on admissibility or on a constraint (`rejections`), the current run
-of consecutive constraint rejections, the live cell at or below absolute zero
-in the last proposal if it was rejected for one (`cold`, zero otherwise) and
-its time, and, once the solve cannot go on, the diagnostic the step observer
-ends it with.
+proposed state it tested (`last`) and of every accepted one (`largest`), the
+steps it rejected on admissibility or on a constraint (`rejections`), the
+current run of consecutive constraint rejections, the live cell at or below
+absolute zero in the last proposal if it was rejected for one (`cold`, zero
+otherwise) and its time, and, once the solve cannot go on, the diagnostic the
+step observer ends it with.
 """
 mutable struct ConstraintMonitor
     last::Float64
@@ -90,6 +90,9 @@ ends with `ReturnCode.Failure`.
 """
 const MAX_CONSTRAINT_REJECTIONS = 50
 
+# Whether the integrator's error test accepts its current proposal.
+const _ErrorTestWrapper = FunctionWrapper{Bool,Tuple{}}
+
 """
 	DomainCheck(cp::CoreProblem; max_consecutive = MAX_CONSTRAINT_REJECTIONS)
 
@@ -106,9 +109,14 @@ step shrunk by the controller's minimum factor, when
   equation's scale and `a` the absolute tolerance of its unknown in the
   residual's units ([`constraint_residual`](@ref)).
 
-The residual is evaluated once per proposed state. After more than
-`max_consecutive` consecutive constraint rejections the state is accepted and
-the monitor marked failed, and the step observer ends the solve.
+The test reads only the proposals the integrator's error test accepts, once
+bound to the integrator ([`bind_error_test!`](@ref)): the integrator evaluates
+it after the error estimate, and a step it rejects is cut by the controller's
+smallest factor, so a proposal the error test rejects is left to that test
+and its controller's own cut. The residual is evaluated once per tested
+state. After more than `max_consecutive` consecutive constraint rejections
+the state is accepted and the monitor marked failed, and the step observer
+ends the solve.
 """
 struct DomainCheck{D<:CoreDefinition,W<:CoreWorkspace}
     def::D
@@ -120,6 +128,7 @@ struct DomainCheck{D<:CoreDefinition,W<:CoreWorkspace}
     balance_cell::Vector{Int}
     max_consecutive::Int
     monitor::ConstraintMonitor
+    error_test::Base.RefValue{_ErrorTestWrapper}
 end
 
 function DomainCheck(cp; max_consecutive::Int = MAX_CONSTRAINT_REJECTIONS)
@@ -144,10 +153,25 @@ function DomainCheck(cp; max_consecutive::Int = MAX_CONSTRAINT_REJECTIONS)
         balance,
         max_consecutive,
         ConstraintMonitor(),
+        Ref(_ErrorTestWrapper(() -> true)),
     )
 end
 
+"""
+	bind_error_test!(check::DomainCheck, integrator) -> check
+
+Read the error test of `integrator` (`accept_step_controller`) before
+testing a proposal; unbound, every proposal is tested.
+"""
+function bind_error_test!(check::DomainCheck, integrator)
+    check.error_test[] = _ErrorTestWrapper(
+        () -> OrdinaryDiffEqCore.accept_step_controller(integrator, integrator.alg),
+    )
+    return check
+end
+
 function (check::DomainCheck)(u, p, t)
+    check.error_test[]() || return false
     layout, setup = check.def.layout, check.def.setup
     m = check.monitor
     if inadmissible(u, layout, setup, check.abstol)

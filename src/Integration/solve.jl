@@ -48,9 +48,10 @@ per-row absolute tolerances (`abstol` is the temperature tolerance [K]; the mass
 and enthalpy rows take theirs from the cell's initial condensed mass and
 `threshold`), no initialization of its own, and [`DomainCheck`](@ref) as its
 domain test (admissibility, porosity and the constraint residuals of the
-algebraic rows). `dt` is the first step, and with `adaptive = false` the fixed
-step. `integrator_policy` defaults to [`default_policy`](@ref) with
-`linear_solver` ([`default_linear_solver`](@ref) unless given). A per-step
+algebraic rows, on the proposals its error test accepts). `dt` is the first
+step, and with `adaptive = false` the fixed step. `integrator_policy`
+defaults to [`default_policy`](@ref) with `linear_solver`
+([`default_linear_solver`](@ref) unless given). A per-step
 observer records the largest constraint residual of the accepted states, ends
 the solve with `ReturnCode.Failure` when the domain test gave up, caps the step
 after a nonlinear failure of a Newton-based policy
@@ -278,7 +279,7 @@ function integrate(
     callbacks =
         CallbackSet(observer, events..., layer_times..., thin..., observers..., recorder)
 
-    raw = OrdinaryDiffEq.solve(
+    integrator = OrdinaryDiffEq.init(
         ode,
         policy.alg;
         abstol = cp.abstol,
@@ -294,6 +295,8 @@ function integrate(
         initializealg = NoInit(),
         save_end = true,
     )
+    bind_error_test!(check, integrator)
+    raw = OrdinaryDiffEq.solve!(integrator)
     monitor.cold == 0 ||
         @warn "solve(): stopped at t = $(raw.t[end]): the last proposed state, at t = $(monitor.cold_t), takes cell $(monitor.cold) to or below absolute zero"
     # A solve its controller stopped saves its last proposal, which it
