@@ -65,12 +65,12 @@ function main()
         )
         flush(stdout)
     end
-    # The Douglas fir deck, built as the identity record builds it.
+    # The Douglas fir deck and solve keywords of the identity record.
     setup = """
     include("$(escape_string(IDENTITY))")
     problem = douglas_fir_problem()
     """
-    load, solve = _fresh("solve(problem)"; setup)
+    load, solve = _fresh("douglas_fir_solve(problem)"; setup)
     push!(rows, ("Douglas fir deck, 60 s", load, solve))
     println(
         rpad("Douglas fir deck, 60 s", 52),
