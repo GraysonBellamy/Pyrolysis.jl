@@ -30,6 +30,8 @@ using Statistics
 using Printf
 using DelimitedFiles
 
+const SMOKE = get(ENV, "PYROLYSIS_SMOKE", "0") == "1"   # PYROLYSIS_SMOKE=1: a short run that checks the script works
+
 # ============================================================================
 # Output Directory
 # ============================================================================
@@ -402,6 +404,7 @@ function build_and_solve(mc_db::Float64, hos_model::Symbol)
         ),
     )
 
+    t_end = SMOKE ? 10.0 : 600.0   # [s]
     problem = PyrolysisProblem(
         mesh = mesh,
         material = material,
@@ -422,9 +425,9 @@ function build_and_solve(mc_db::Float64, hos_model::Symbol)
             z -> 0.0,
             z -> 0.0,
         ],
-        tspan = (0.0, 600.0),
+        tspan = (0.0, t_end),
         dt_initial = 1e-3,
-        output_times = collect(range(0.0, 600.0, length = 3601)),
+        output_times = collect(range(0.0, t_end, length = SMOKE ? 11 : 3601)),
     )
 
     # --- Solve ---

@@ -62,6 +62,8 @@ using Distributed
 
 println("Running with $(nworkers()) worker(s)")
 
+@everywhere const SMOKE = get(ENV, "PYROLYSIS_SMOKE", "0") == "1"   # PYROLYSIS_SMOKE=1: a short run that checks the script works
+
 @everywhere begin
     using Pyrolysis
     using Pyrolysis: compute_surface_mass_flux, effective_gas_transfer, get_mass_bc
@@ -826,15 +828,16 @@ end
             z -> 0.0,
         ]
 
+        t_end = SMOKE ? 10.0 : 600.0   # [s]
         problem = PyrolysisProblem(
             mesh = mesh,
             material = material,
             bc_set = bc_set,
             T_initial = T_initial_func,
             ξ_initial = ξ_initial_funcs,
-            tspan = (0.0, 600.0),
+            tspan = (0.0, t_end),
             dt_initial = 1e-3,
-            output_times = collect(range(0.0, 600.0, length = 3601)),
+            output_times = collect(range(0.0, t_end, length = SMOKE ? 11 : 3601)),
         )
 
         # --- Solve ---
@@ -1400,6 +1403,18 @@ function main()
     println("  Workers:    $(nworkers())")
     println("  Est. time:  ~$(round(N_SAMPLES * 7.0 / 60 / nworkers(), digits=1)) hours")
     println("="^70 * "\n")
+
+    # PYROLYSIS_SMOKE=1: one forward solve at the nominal parameters, no files written
+    if SMOKE
+        r = extract_qois(build_and_solve(NOMINAL_VALUES))
+        @printf(
+            "Smoke run at the nominal parameters: retcode %s, peak MLR %.4e kg/(m²·s), solve %.1f s\n",
+            r.retcode,
+            r.peak_mlr,
+            r.solve_time
+        )
+        return nothing
+    end
 
     # --- Create output directories ---
     mkpath(RESULTS_DIR)

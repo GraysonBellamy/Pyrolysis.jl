@@ -63,7 +63,28 @@ using FiniteDiff
 using Plots
 using QuasiMonteCarlo
 
+const SMOKE = get(ENV, "PYROLYSIS_SMOKE", "0") == "1"   # PYROLYSIS_SMOKE=1: a short run that checks the script works
+
 include("wp_objective.jl")
+
+"""
+	smoke_dataset(ds; t_final = 20.0)
+
+The dataset entry `ds` over the first `t_final` seconds: the scenario's
+horizon and the experimental series cut to it (the PYROLYSIS_SMOKE=1 run).
+"""
+function smoke_dataset(ds; t_final::Real = 20.0)
+    scenario, t_exp, T_back, T_back_std, n_reps = ds
+    m = t_exp .<= t_final
+    n_reps = n_reps isa AbstractVector ? n_reps[m] : n_reps
+    return (
+        merge(scenario, (t_final = t_final,)),
+        t_exp[m],
+        T_back[m],
+        T_back_std[m],
+        n_reps,
+    )
+end
 
 # ============================================================================
 # CLI parsing
@@ -642,6 +663,8 @@ function main()
     for label in fit_labels_used
         push!(fit_dataset, load_registry_dataset(label))
     end
+    # PYROLYSIS_SMOKE=1: the fit datasets over their first 20 s
+    SMOKE && (fit_dataset = Any[smoke_dataset(ds) for ds in fit_dataset])
 
     val_dataset = []
     for label in val_labels_used
@@ -693,6 +716,12 @@ function main()
             k_prior = k_prior,
             k_prior_weight = OPTS.prior_weight,
         )
+    end
+
+    # PYROLYSIS_SMOKE=1: one objective evaluation at the initial θ, then exit
+    if SMOKE
+        @info "Smoke run: one objective evaluation" loss = loss_fit(cfg.θ_init)
+        return nothing
     end
 
     # --- Optional grid scan (Stage 1 only) ---

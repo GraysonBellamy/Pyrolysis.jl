@@ -11,9 +11,9 @@ through the physics and the code of the main studies in detail.
 
 | Script | What it models |
 |:---|:---|
-| [`06_cone_calorimeter.jl`](https://github.com/GraysonBellamy/Pyrolysis.jl/blob/main/examples/06_cone_calorimeter.jl) | PMMA slab under a 25 kW/m² cone heat flux with Beer–Lambert in-depth absorption, single-step Arrhenius kinetics, and gas release, overlaid on ThermaKin reference outputs when they are present. |
-| [`06_cone_calorimeter_surface_absorption.jl`](https://github.com/GraysonBellamy/Pyrolysis.jl/blob/main/examples/06_cone_calorimeter_surface_absorption.jl) | The same PMMA case with the opaque surface-absorption radiation model, for comparison against the semi-transparent variant. |
-| [`07_douglas_fir_cone.jl`](https://github.com/GraysonBellamy/Pyrolysis.jl/blob/main/examples/07_douglas_fir_cone.jl) | Douglas fir with multi-step kinetics, moisture, Darcy–Fick transport, and ALE mesh motion. |
+| [`06_cone_calorimeter.jl`](https://github.com/GraysonBellamy/Pyrolysis.jl/blob/main/examples/06_cone_calorimeter.jl) | PMMA slab under a 25 kW/m² cone heat flux with the incident radiation absorbed at the surface, single-step Arrhenius kinetics, and gas release, overlaid on ThermaKin reference outputs when they are present. |
+| [`06_cone_calorimeter_surface_absorption.jl`](https://github.com/GraysonBellamy/Pyrolysis.jl/blob/main/examples/06_cone_calorimeter_surface_absorption.jl) | The same PMMA case with the surface-absorption radiation model set explicitly; it absorbs the radiation at the exposed face as the default does. |
+| [`07_douglas_fir_cone.jl`](https://github.com/GraysonBellamy/Pyrolysis.jl/blob/main/examples/07_douglas_fir_cone.jl) | Douglas fir with multi-step kinetics, moisture, Darcy–Fick transport, and a mesh that moves with the solid. |
 | [`08_pressure_treated_wood_cone.jl`](https://github.com/GraysonBellamy/Pyrolysis.jl/blob/main/examples/08_pressure_treated_wood_cone.jl) | Pressure-treated wood with moisture, mapped from a ThermaKin calibration. |
 | [`macfp/macfp_gasification.jl`](https://github.com/GraysonBellamy/Pyrolysis.jl/blob/main/examples/macfp/macfp_gasification.jl) | MaCFP gasification benchmark with parallel solves. |
 
@@ -60,4 +60,7 @@ julia --project=examples examples/06_cone_calorimeter.jl
 
 The examples environment adds Plots and other post-processing dependencies on
 top of the package itself. Scripts that use `Distributed` (the convergence and
-sweep studies) document their worker setup at the top of the file.
+sweep studies) document their worker setup at the top of the file. Every
+simulation script runs a short check of itself with `PYROLYSIS_SMOKE=1`; the
+[examples README](https://github.com/GraysonBellamy/Pyrolysis.jl/blob/main/examples/README.md)
+lists each script's smoke command, its class and the data files it needs.

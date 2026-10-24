@@ -22,6 +22,8 @@ Usage:
 
 using Distributed
 
+@everywhere const SMOKE = get(ENV, "PYROLYSIS_SMOKE", "0") == "1"   # PYROLYSIS_SMOKE=1: a short run that checks the script works
+
 # Load packages on all workers
 @everywhere begin
     using Pyrolysis
@@ -38,7 +40,8 @@ using DelimitedFiles
 # Grid sizes to test (finest first = reference)
 # ============================================================================
 
-const GRID_SIZES = [480, 240, 120, 60, 30, 15]
+# PYROLYSIS_SMOKE=1: the two coarsest grids
+const GRID_SIZES = SMOKE ? [30, 15] : [480, 240, 120, 60, 30, 15]
 const RESULTS_DIR = joinpath(@__DIR__, "convergence_results")
 
 # ============================================================================
@@ -351,15 +354,16 @@ const RESULTS_DIR = joinpath(@__DIR__, "convergence_results")
         z -> 0.0,
     ]
 
+    t_end = SMOKE ? 10.0 : 600.0   # [s]
     problem = PyrolysisProblem(
         mesh = mesh,
         material = material,
         bc_set = bc_set,
         T_initial = T_initial_func,
         ξ_initial = ξ_initial_funcs,
-        tspan = (0.0, 600.0),
+        tspan = (0.0, t_end),
         dt_initial = 1e-3,
-        output_times = collect(range(0.0, 600.0, length = 3601)),
+        output_times = collect(range(0.0, t_end, length = SMOKE ? 11 : 3601)),
     )
 
     # --- Solve ---

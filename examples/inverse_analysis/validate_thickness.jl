@@ -22,6 +22,8 @@ physics rather than as radial-law fitting targets.
 using Printf
 using Pyrolysis.States: history_index
 
+const SMOKE = get(ENV, "PYROLYSIS_SMOKE", "0") == "1"   # PYROLYSIS_SMOKE=1: a short run that checks the script works
+
 include("wp_forward.jl")
 include("wp_objective.jl")
 
@@ -100,6 +102,7 @@ function run_scenario(label::AbstractString, q_ext::Real)
     # matches the population this flux's replicates were drawn from.
     A_0_flux = wp_A0_for_flux(q_ext / 1000)
     scenario = merge(scenario_base, (A_0 = A_0_flux,))
+    SMOKE && (scenario = merge(scenario, (t_final = 20.0,)))   # PYROLYSIS_SMOKE=1: 20 s
     @info "  scenario loaded" label q_ext_kW=q_ext/1000 t_final=scenario.t_final A_0_mm2=scenario.A_0*1e6
     @info "  D_0 from per-flux mean" D0_mm=2*sqrt(scenario.A_0/π)*1000
 

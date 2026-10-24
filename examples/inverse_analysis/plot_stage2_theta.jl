@@ -19,6 +19,11 @@ as the driver); defaults to the registry roles (fit 20/30/40/50/60, val 70).
 # check, so including this does NOT kick off an optimization.
 include("inverse_white_pine.jl")
 
+# PYROLYSIS_SMOKE=1 (`SMOKE` and `smoke_dataset` come from inverse_white_pine.jl):
+# every scenario over its first 20 s, the figure written beside the full run's
+load_dataset(label) =
+    SMOKE ? smoke_dataset(load_registry_dataset(label)) : load_registry_dataset(label)
+
 const STAGE = 2
 
 # Default to UMD-only fluxes (30/50 kW/m² fit, 70 kW/m² validation); the FSRI
@@ -52,17 +57,20 @@ function plot_main()
     val_labels = OPTS.val_labels === nothing ? DEFAULT_VAL_LABELS : OPTS.val_labels
     @info "Re-plotting at supplied Stage-2 θ" θ fit = fit_labels val = val_labels
 
-    fit_dataset = [load_registry_dataset(l) for l in fit_labels]
+    fit_dataset = [load_dataset(l) for l in fit_labels]
     val_dataset = Any[]
     for l in val_labels
         try
-            push!(val_dataset, load_registry_dataset(l))
+            push!(val_dataset, load_dataset(l))
         catch err
             @warn "Validation data not loadable, skipping" label = l exception = err
         end
     end
 
-    outpath = joinpath(RESULTS_DIR, "fit_plots_stage2_manual.png")
+    outpath = joinpath(
+        RESULTS_DIR,
+        SMOKE ? "fit_plots_stage2_manual_smoke.png" : "fit_plots_stage2_manual.png",
+    )
     plot_fits(θ, fit_dataset, val_dataset, STAGE; outpath = outpath)
     @info "Done." outpath
 end

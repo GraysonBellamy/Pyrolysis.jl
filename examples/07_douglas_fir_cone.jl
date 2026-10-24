@@ -22,15 +22,15 @@ Physical Setup:
 - Surface regresses as material decomposes and gas escapes
 
 Surface Absorption Radiation Model:
-- All incident radiation deposited in the surface cell (z=L)
+- All incident radiation absorbed at the exposed face (z=L)
 - Computationally efficient O(1) with tridiagonal Jacobian
 - Appropriate for opaque materials like wood (optical thickness τ >> 1)
 - Absorption coefficients (α) not used - radiation does not penetrate into depth
 - Provides ~5-15× speedup over Beer-Lambert for opaque materials
 
 Coordinate Convention:
-- z = 0: Bottom (substrate/sample holder), boundary_id = 2, fixed
-- z = L(t): Top (exposed surface), boundary_id = 1, moves with material
+- z = 0: Bottom (substrate/sample holder), tag :bottom, fixed
+- z = L(t): Top (exposed surface), tag :top, moves with material
 - Heat enters from top, material shrinks toward bottom
 - Mesh follows the shrinking material (ALE formulation)
 
@@ -474,8 +474,9 @@ douglas_fir = Material(
 sample_thickness = 12.0e-3   # 12 mm typical wood sample
 n_cells = 240             # 240 cells → 0.05 mm resolution
 
-# Time parameters  
-t_final = 600.0             # 10 minutes - typical cone test duration for wood
+# Time parameters
+const SMOKE = get(ENV, "PYROLYSIS_SMOKE", "0") == "1"   # PYROLYSIS_SMOKE=1: a short run that checks the script works
+t_final = SMOKE ? 20.0 : 600.0  # 10 minutes - typical cone test duration for wood
 dt_initial = 1e-3           # initial timestep
 
 # Environmental conditions
@@ -560,7 +561,7 @@ println(
 # Boundary Conditions
 # ============================================================================
 
-# Top surface (boundary_id = 1): exposed surface
+# Top surface (:top): exposed surface
 # - External radiant heat flux with Beer-Lambert in-depth absorption
 # - Re-radiation losses (surface radiates to surroundings)
 # - Convective losses (natural + forced convection)
@@ -582,7 +583,7 @@ top_thermal_bc =
 # h_m = 0.05 m/s matches ThermaKin boundary condition: "DF_gas1 LIN 0.05 0"
 top_mass_bc = DiffusiveMassBC(0.05) + DirichletPressureBC(101325.0)
 
-# Bottom surface (boundary_id = 2): back face
+# Bottom surface (:bottom): back face
 # bottom_thermal_bc = RadiativeBC(T_inf = 300) +                                # Re-radiation losses (uses material ε)
 # 					ConvectiveBC(h = h_conv, T_inf = 300)                     # Convective losses
 bottom_thermal_bc = AdiabaticBC()    # Adiabatic (no heat loss through substrate)
@@ -636,7 +637,7 @@ problem = PyrolysisProblem(
     ξ_initial = ξ_initial_funcs,
     tspan = (0.0, t_final),
     dt_initial = dt_initial,
-    output_times = collect(range(0.0, t_final, length = 3601)),  # Output every 1s
+    output_times = collect(range(0.0, t_final, length = SMOKE ? 21 : 3601)),  # Output every 1s
 )
 
 println("Problem created successfully!")
@@ -660,7 +661,7 @@ println("  - Darcy flow: ENABLED (κ_virgin = $(κ_virgin) m², κ_char = $(κ_c
 # ============================================================================
 
 println("\nSolving with ALE mesh motion, Darcy-Fick transport and surface absorption...")
-println("Surface absorption model deposits all radiation in the surface cell.")
+println("Surface absorption model absorbs all radiation at the exposed face.")
 println("Darcy-Fick combines diffusion (λ-driven) + pressure-driven flow (κ-driven).")
 println("This may take several minutes for wood pyrolysis...\n")
 
@@ -1163,7 +1164,7 @@ for i = 1:n_times
         mass_balance_error[i] = (sum_all_components[i] - bulk_density[i]) / bulk_density[i]
 
         # === Front Surface Diagnostics ===
-        # Front surface is the last cell (z = L, boundary_id = 1)
+        # Front surface is the last cell (z = L, tag :top)
         T_front = T_profile[end]
         ξ_front = ntuple(k -> ξ_profile[k, end], 14)
 

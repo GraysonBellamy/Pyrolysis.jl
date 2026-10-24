@@ -26,6 +26,11 @@ Edit THETA_DEFAULT (or pass --theta=v1,...,v6). Stage-2 ordering:
 
 include("inverse_white_pine.jl")
 
+# PYROLYSIS_SMOKE=1 (`SMOKE` and `smoke_dataset` come from inverse_white_pine.jl):
+# every scenario over its first 20 s, the figure written beside the full run's
+load_dataset(label) =
+    SMOKE ? smoke_dataset(load_registry_dataset(label)) : load_registry_dataset(label)
+
 const STAGE = 2
 
 const THETA_DEFAULT = [
@@ -291,11 +296,11 @@ function diag_main()
 
     datasets = Tuple{String,Any}[]
     for l in fit_labels
-        push!(datasets, ("Fit", load_registry_dataset(l)))
+        push!(datasets, ("Fit", load_dataset(l)))
     end
     for l in val_labels
         try
-            push!(datasets, ("Validation", load_registry_dataset(l)))
+            push!(datasets, ("Validation", load_dataset(l)))
         catch err
             @warn "Validation data not loadable, skipping" label = l exception = err
         end
@@ -323,7 +328,10 @@ function diag_main()
         legend = :best,
         left_margin = 5Plots.mm,
     )
-    outpath = joinpath(RESULTS_DIR, "diagnostics_stage2_manual.png")
+    outpath = joinpath(
+        RESULTS_DIR,
+        SMOKE ? "diagnostics_stage2_manual_smoke.png" : "diagnostics_stage2_manual.png",
+    )
     savefig(fig, outpath)
     @info "Diagnostic plots written" outpath
 end

@@ -31,12 +31,36 @@ DiffusiveMassBC
 CombinedMassBC
 ```
 
-## Pressure (Darcy mode)
+## Blowing
+
+A [`ConvectiveBC`](@ref) reduces its film coefficient by a blowing model when
+gas leaves through its face.
+
+```@docs
+AbstractBlowingModel
+NoBlowing
+CouetteFilm
+PropertyRatioFilm
+PoolingFilm
+FunctionBlowing
+GasSpecies
+NITROGEN
+nasa7_heat_capacity
+eucken_viscosity
+fuller_diffusivity
+BlowingFace
+blowing_state
+blowing_ratio
+blowing_factor
+```
+
+## Pressure (Darcy–Fick transport)
 
 ```@docs
 DirichletPressureBC
 NeumannPressureBC
 ConvectivePressureBC
+Physics.ideal_gas_pressure
 ```
 
 ## Container and helpers

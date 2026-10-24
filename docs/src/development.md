@@ -7,9 +7,9 @@ with the [User Guide](guide/user_guide/01_introduction-installation.md).
 
 | Path | Contents |
 |:---|:---|
-| `src/` | The package, organised into submodules: `Materials`, `BoundaryConditions`, `Geometry`, `Properties`, `Physics`, `Adaptivity`, `Discretization`, `Problem`, `Residual`, `Jacobian`, `Experimental`, `Diagnostics`, `Solver`, plus the `Internal` umbrella. |
+| `src/` | The package, organised into submodules in load order: `Materials`, `Properties`, `BoundaryConditions`, `Physics` (the shared physics layers), `Meshes`, `States`, `Kernels`, `Closures`, `Assembly`, `Deactivation`, `ColoredJacobian` (the discretization), `Problem`, `Outputs`, `Integration`, plus the `Internal` umbrella. |
 | `ext/` | Package extension (Plots recipes). |
-| `test/` | Test suite mirroring the `src/` module layout; `runtests.jl` walks the directories. |
+| `test/` | Test suite mirroring the `src/` module layout (a directory per module, plus `jacobian/`, `multid/`, `type_analysis/` and `code_scan/`), the verification cases (`verification/`), and measurement scripts (`gates/`); `runtests.jl` walks the directories. |
 | `benchmark/` | PkgBenchmark.jl regression suite over the canonical problems. |
 | `examples/` | End-to-end studies with their own project environment. |
 | `docs/` | The two canonical guide monoliths, the split chapters (`docs/guide/`), and the Documenter site (`docs/make.jl`). |
@@ -22,10 +22,15 @@ using Pkg
 Pkg.test("Pyrolysis")
 ```
 
-`test/runtests.jl` discovers the domain test directories automatically.
-Performance invariants (allocation, type-stability, and method-count checks)
-live under `test/perf/` and run as subprocesses. No CI workflow runs the test
-suite; run it locally before merging.
+`test/runtests.jl` runs every `test_*.jl` file under the module directories,
+each in a module of its own, the type analysis in a fresh process, and the
+verification cases (`test/verification/runcases.jl`). The module suites test
+both energy forms themselves; `PYROLYSIS_ENERGY_STATE=enthalpy` runs the
+verification cases in the enthalpy form. `PYROLYSIS_TEST_GROUP` selects one
+part (`jacobian`, `burnout`, `other`, `domains`, or `all`, the default) and
+`PYROLYSIS_TEST_FAST=1` skips the verification cases' convergence spot
+checks; the `tests.yml` workflow runs the parts side by side on every pull
+request to `main`, and the whole suite weekly and on dispatch.
 
 ## Quality tooling
 
@@ -43,7 +48,7 @@ Run `scripts/format.jl` without `--check` to apply formatting.
 ## Benchmarks
 
 `benchmark/benchmarks.jl` defines a PkgBenchmark.jl `SUITE` covering residual
-evaluation, Jacobian assembly, and end-to-end solves on the canonical
+evaluation, the colored Jacobian, and end-to-end solves on the canonical
 configurations (PMMA cone, white pine, charring polymer). See
 [`benchmark/README.md`](https://github.com/GraysonBellamy/Pyrolysis.jl/blob/main/benchmark/README.md)
 for `benchmarkpkg`/`judge` usage.

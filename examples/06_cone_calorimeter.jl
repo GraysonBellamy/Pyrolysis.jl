@@ -16,8 +16,8 @@ Physical Setup:
 - Surface regresses as material decomposes and gas escapes
 
 Coordinate Convention:
-- z = 0: Bottom (substrate/sample holder), boundary_id = 2, fixed
-- z = L(t): Top (exposed surface), boundary_id = 1, moves with material
+- z = 0: Bottom (substrate/sample holder), tag :bottom, fixed
+- z = L(t): Top (exposed surface), tag :top, moves with material
 - Heat enters from top, material shrinks toward bottom
 - Mesh follows the shrinking material (ALE formulation)
 
@@ -42,6 +42,8 @@ PMMA Properties (from literature):
 using Pyrolysis
 using Plots
 using DelimitedFiles
+
+const SMOKE = get(ENV, "PYROLYSIS_SMOKE", "0") == "1"   # PYROLYSIS_SMOKE=1: a short run that checks the script works
 
 # ============================================================================
 # Material Definition: PMMA
@@ -130,7 +132,7 @@ sample_thickness = 5.8e-3    # 5.8 mm typical cone calorimeter sample
 n_cells = 72               # 72 cells → 0.08 mm resolution
 
 # Time parameters  
-t_final = 1600.0            # 10 minutes - typical cone test duration
+t_final = SMOKE ? 20.0 : 1600.0  # 10 minutes - typical cone test duration
 dt_initial = 1e-3          # initial timestep
 
 # Environmental conditions
@@ -162,7 +164,7 @@ println("  - Cell size: $(sample_thickness/n_cells*1000) mm")
 # Boundary Conditions
 # ============================================================================
 
-# Top surface (boundary_id = 1): exposed surface
+# Top surface (:top): exposed surface
 # - External radiant heat flux (25 kW/m²) with in-depth absorption controlled by radiation_model
 # - Re-radiation losses (surface radiates to surroundings)
 # - Convective losses (natural + forced convection)
@@ -171,7 +173,7 @@ println("  - Cell size: $(sample_thickness/n_cells*1000) mm")
 # - RadiativeFluxBC: External radiative source (cone heater)
 #   → Subject to absorptivity (fraction absorbed = α × incident)
 #   → radiation_model=BEER_LAMBERT: absorbed radiation distributed via Beer-Lambert
-#   → radiation_model=SURFACE_ABSORPTION: all absorbed in surface cell
+#   → radiation_model=SURFACE_ABSORPTION (or the default NO_RADIATION): all absorbed at the exposed face
 # - HeatFluxBC: Direct contact heating or fully opaque surface absorption
 #   → NOT subject to absorptivity - full flux applied at surface
 # - RadiativeBC: Re-radiation losses to surroundings (σεT⁴)
@@ -189,7 +191,7 @@ top_thermal_bc =
 # top_mass_bc = DiffusiveMassBC()  # Pure internal diffusion (h_m = Inf) (original)
 top_mass_bc = ConvectiveMassBC(h_m = 0.05, ξ_inf = 0.0)  # ThermaKin match: h_m = 0.05 m/s
 
-# Bottom surface (boundary_id = 2): back face with heat losses
+# Bottom surface (:bottom): back face with heat losses
 # - Re-radiation losses to ambient (back face radiates to surroundings)
 # - Convective losses (natural convection from back face)
 bottom_thermal_bc =
@@ -233,7 +235,7 @@ problem = PyrolysisProblem(
     dt_initial = dt_initial,
     # PERFORMANCE: Reduce output times from 6030 to 601 points (every 1s instead of 0.1s)
     # This significantly reduces interpolation overhead and memory usage
-    output_times = collect(range(0.0, t_final, length = 601)),  # Output every 1s
+    output_times = collect(range(0.0, t_final, length = SMOKE ? 21 : 601)),  # Output every 1s
 )
 
 println("\nProblem created:")

@@ -33,6 +33,8 @@ Usage:
 using Distributed
 using Printf
 
+@everywhere const SMOKE = get(ENV, "PYROLYSIS_SMOKE", "0") == "1"   # PYROLYSIS_SMOKE=1: a short run that checks the script works
+
 println("Running with $(nworkers()) worker(s)")
 
 # Load Printf on all workers before the main @everywhere block so that
@@ -415,6 +417,7 @@ println("Running with $(nworkers()) worker(s)")
             ),
         )
 
+        t_end = SMOKE ? 10.0 : 600.0   # [s]
         problem = PyrolysisProblem(
             mesh = mesh,
             material = material,
@@ -435,9 +438,9 @@ println("Running with $(nworkers()) worker(s)")
                 z -> 0.0,
                 z -> 0.0,
             ],
-            tspan = (0.0, 600.0),
+            tspan = (0.0, t_end),
             dt_initial = 1e-3,
-            output_times = collect(range(0.0, 600.0, length = 3601)),
+            output_times = collect(range(0.0, t_end, length = SMOKE ? 11 : 3601)),
         )
 
         solution = solve(
@@ -804,7 +807,7 @@ end # @everywhere
 
 const RESULTS_DIR = joinpath(@__DIR__, "results")
 
-const RUNS = [
+const ALL_RUNS = [
     LitCompRunSpec("baseline", :baseline, :baseline, 1.0, NaN, :baseline),
     LitCompRunSpec("virgin_cp_harada", :harada, :baseline, 1.0, NaN, :baseline),
     LitCompRunSpec("virgin_cp_dupont", :dupont, :baseline, 1.0, NaN, :baseline),
@@ -823,6 +826,8 @@ const RUNS = [
         :baseline,
     ),  # Rath two-zone (f_P=1.234, f_S=0.638)
 ]
+# PYROLYSIS_SMOKE=1: the baseline and the first variant
+const RUNS = SMOKE ? ALL_RUNS[1:2] : ALL_RUNS
 
 # ============================================================================
 # Main

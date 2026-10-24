@@ -1,9 +1,10 @@
 # Pyrolysis.jl
 
 A Julia package for simulating thermal decomposition (pyrolysis) of materials
-under high heat flux. Pyrolysis.jl uses an Arbitrary Lagrangian–Eulerian (ALE)
-finite-volume discretisation with surface-cell depletion, Arrhenius kinetics,
-in-depth radiation absorption, and pressure-driven gas transport (Darcy–Fick).
+under high heat flux. Pyrolysis.jl uses a finite-volume discretisation on a
+mesh that moves with the solid (Arbitrary Lagrangian–Eulerian), with cell
+deactivation at burnout, Arrhenius kinetics, in-depth radiation absorption,
+and pressure-driven gas transport (Darcy–Fick).
 
 ## Features
 
@@ -12,12 +13,14 @@ in-depth radiation absorption, and pressure-driven gas transport (Darcy–Fick).
 - Gas generation and transport through porous char (Fickian or Darcy–Fick)
 - In-depth radiation absorption via Beer–Lambert (or surface absorption)
 - Material volume changes — shrinkage, swelling, intumescence
-- ALE mesh motion with surface regression and internal interface tracking
-- Surface burnout by depleted-cell parking
-- Operator-based `Structured` Jacobian with selectable solve strategies,
-  a dense AD verifier, and pluggable linear solvers
-- Mass- and energy-conservation ledgers and a runtime sensible-energy log
-- Pluggable extensions for Plots recipes and SciML sensitivities
+- Mesh motion with the solid, surface regression and internal interface
+  tracking; component masses as the states, so mass is conserved exactly
+- Surface burnout by cell deactivation in located events, with an
+  equidistribution mesh correction that lets a layer vanish in one event
+- Colored sparse automatic-differentiation Jacobian on a pattern built from
+  the mesh connectivity, and a stiff Rosenbrock integrator by default
+- A conservation recorder and an audit that closes mass and energy
+- A Plots recipe extension
 
 ## Installation
 
@@ -45,7 +48,7 @@ pmma = Material(
     ),
 )
 
-mesh = create_uniform_mesh(0.01, 100, Val(2))
+mesh = create_uniform_mesh(0.01, 100)
 bcs  = BoundaryConditionSet(
     thermal = (top = HeatFluxBC(50e3), bottom = AdiabaticBC()),
 )
@@ -57,8 +60,7 @@ problem = PyrolysisProblem(
     tspan = (0.0, 100.0),
 )
 
-sol = solve(problem; progress = false, use_ale = true,
-            radiation_model = SURFACE_ABSORPTION)
+sol = solve(problem; use_ale = true, radiation_model = SURFACE_ABSORPTION)
 
 # Plot recipes (load `Plots` first)
 using Plots
@@ -74,13 +76,14 @@ through every line of a run like this one.
 
 - **[User Guide](guide/user_guide/01_introduction-installation.md)** — how to
   *use* the package: defining materials, reactions, boundary conditions, and
-  meshes; building and solving problems; post-processing, adaptivity,
-  parameter sweeps, sensitivity analysis, and troubleshooting.
+  meshes; building and solving problems; post-processing, burnout and the
+  mesh correction, parameter sweeps, sensitivity analysis, and
+  troubleshooting.
 - **[Technical Reference](guide/technical_reference/01_introduction.md)** —
   the *model itself*: governing equations, constitutive closures,
-  discretisation, ALE framework, Jacobian architecture, conservation
-  diagnostics, and verification/validation — with systematic comparisons to
-  ThermaKin2Ds, Gpyro, and the FDS solid-phase model.
+  discretisation, the moving mesh, cell deactivation, time integration and the
+  colored Jacobian, conservation ledgers, and verification/validation — with
+  systematic comparisons to ThermaKin2Ds, Gpyro, and the FDS solid-phase model.
 - **[Examples](examples.md)** — end-to-end studies (cone calorimeter,
   Douglas fir, pressure-treated wood, inverse analysis, sensitivity) shipped
   in the repository.

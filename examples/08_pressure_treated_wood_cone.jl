@@ -22,15 +22,15 @@ Physical Setup:
 - Surface regresses as material decomposes and gas escapes
 
 Surface Absorption Radiation Model:
-- All incident radiation deposited in the surface cell (z=L)
+- All incident radiation absorbed at the exposed face (z=L)
 - Computationally efficient O(1) with tridiagonal Jacobian
 - Appropriate for opaque materials like wood (optical thickness τ >> 1)
 - Absorption coefficients (α) not used - radiation does not penetrate into depth
 - Provides ~5-15× speedup over Beer-Lambert for opaque materials
 
 Coordinate Convention:
-- z = 0: Bottom (substrate/sample holder), boundary_id = 2, fixed
-- z = L(t): Top (exposed surface), boundary_id = 1, moves with material
+- z = 0: Bottom (substrate/sample holder), tag :bottom, fixed
+- z = L(t): Top (exposed surface), tag :top, moves with material
 - Heat enters from top, material shrinks toward bottom
 - Mesh follows the shrinking material (ALE formulation)
 
@@ -40,18 +40,15 @@ PTW Properties (from PTW.cmp):
 - Final char density: 98.28 kg/m³
 - Includes moisture content with evaporation
 - Products: char + various gases + water vapor
-- Temperature-limited reactions: reactions activate above T_limit
 
-ThermaKin Temperature Limits and Piecewise Properties:
+ThermaKin Temperature Limits:
 - ThermaKin uses "TEMP LIMIT: L T_limit" to prevent reactions below T_limit
-- This creates discontinuities in effective properties at reaction onset
-- In our model, we use temperature-dependent reaction rates (Arrhenius) naturally
-- The temperature limits are implemented as piecewise activation thresholds
-- Properties remain continuous but reaction contribution changes at T_limit
+- This script does not apply them: every reaction follows its Arrhenius rate
+  at every temperature, which is negligible below the ThermaKin limits
+  (a `Reaction`'s `T_min` would gate it)
 
 New Features Demonstrated:
 - Surface absorption radiation model (radiation_model=SURFACE_ABSORPTION)
-- Temperature-limited reactions from ThermaKin format
 - Darcy-Fick gas transport (diffusion + pressure-driven flow)
 - Temperature-dependent permeability evolution (virgin wood → porous char)
 - ALE mesh motion
@@ -60,6 +57,8 @@ New Features Demonstrated:
 using Pyrolysis
 using Plots
 using Statistics
+
+const SMOKE = get(ENV, "PYROLYSIS_SMOKE", "0") == "1"   # PYROLYSIS_SMOKE=1: a short run that checks the script works
 
 # ============================================================================
 # Material Definition: Pressure Treated Wood (PTW)
@@ -291,7 +290,7 @@ ptw_material = Material(
     reactions = (
         # Reaction 1: WATER → WATER_VAPOR
         # ARRHENIUS: 15532.2434 43528.868 → A=15532.2434 s⁻¹, E=43528.868 J/mol
-        # HEAT: -2.78E6 J/kg (negative = exothermic in ThermaKin)
+        # HEAT: -2.78E6 J/kg (negative = endothermic in ThermaKin)
         # TEMP LIMIT: L 290 → reaction active above 290 K
         # In our convention: h > 0 for endothermic, so h = +2.78e6
         Reaction(
@@ -330,7 +329,7 @@ ptw_material = Material(
         ),
         # Reaction 4: PTW2 → 0.81744 PTW3 + 0.18256 PTW_gas3
         # ARRHENIUS: 179027.4062 100963.197
-        # HEAT: 1.82E5 J/kg (positive in ThermaKin = endothermic)
+        # HEAT: 1.82E5 J/kg (positive in ThermaKin = exothermic)
         # TEMP LIMIT: L 378
         Reaction(
             :ptw_step3,
@@ -343,7 +342,7 @@ ptw_material = Material(
         ),
         # Reaction 5: PTW3 → 0.76882 Char + 0.23118 PTW_gas4
         # ARRHENIUS: 0.21061 34426.0053
-        # HEAT: 2.02E5 J/kg (positive in ThermaKin = endothermic)
+        # HEAT: 2.02E5 J/kg (positive in ThermaKin = exothermic)
         # TEMP LIMIT: L 378
         Reaction(
             :ptw_step4,
@@ -372,7 +371,7 @@ sample_thickness = 12.0e-3   # 12 mm typical wood sample
 n_cells = 240             # 240 cells → 0.05 mm resolution
 
 # Time parameters
-t_final = 600.0             # 10 minutes - typical cone test duration for wood
+t_final = SMOKE ? 20.0 : 600.0  # 10 minutes - typical cone test duration for wood
 dt_initial = 1e-3           # initial timestep
 
 # Environmental conditions
@@ -439,7 +438,7 @@ println(
 # Boundary Conditions
 # ============================================================================
 
-# Top surface (boundary_id = 1): exposed surface
+# Top surface (:top): exposed surface
 # - External radiant heat flux with surface absorption
 # - Re-radiation losses (surface radiates to surroundings)
 # - Convective losses (natural + forced convection)
@@ -452,7 +451,7 @@ top_thermal_bc =
 # h_m = 0.05 m/s matches ThermaKin typical boundary condition
 top_mass_bc = DiffusiveMassBC(0.05) + DirichletPressureBC(101325.0)
 
-# Bottom surface (boundary_id = 2): back face
+# Bottom surface (:bottom): back face
 bottom_thermal_bc = AdiabaticBC()    # Adiabatic (no heat loss through substrate)
 bottom_mass_bc = ImpermeableBC()   # Impermeable (no gas escape through substrate)
 
@@ -502,7 +501,7 @@ problem = PyrolysisProblem(
     ξ_initial = ξ_initial_funcs,
     tspan = (0.0, t_final),
     dt_initial = dt_initial,
-    output_times = collect(range(0.0, t_final, length = 3601)),  # Output every 1s
+    output_times = collect(range(0.0, t_final, length = SMOKE ? 21 : 3601)),  # Output every 1s
 )
 
 println("Problem created successfully!")
@@ -526,7 +525,7 @@ println("  - Darcy flow: ENABLED (κ_virgin = $(κ_virgin) m², κ_char = $(κ_c
 # ============================================================================
 
 println("\nSolving with ALE mesh motion, Darcy-Fick transport and surface absorption...")
-println("Surface absorption model deposits all radiation in the surface cell.")
+println("Surface absorption model absorbs all radiation at the exposed face.")
 println("Darcy-Fick combines diffusion (λ-driven) + pressure-driven flow (κ-driven).")
 println("This may take several minutes for wood pyrolysis...\n")
 

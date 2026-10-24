@@ -28,6 +28,8 @@ Reference: ThermaKin2Ds equation 1.2 (gas transport)
 using Pyrolysis
 using Printf
 
+const SMOKE = get(ENV, "PYROLYSIS_SMOKE", "0") == "1"   # PYROLYSIS_SMOKE=1: a short run that checks the script works
+
 println("=" ^ 70)
 println("Darcy-Fick Gas Transport Demonstration")
 println("=" ^ 70)
@@ -195,8 +197,8 @@ println("   Bottom: adiabatic, impermeable")
 
 println("\n5. Creating problem...")
 
-tspan = (0.0, 120.0)  # 2 minutes
-output_times = collect(0.0:10.0:120.0)
+tspan = (0.0, SMOKE ? 20.0 : 120.0)  # 2 minutes
+output_times = collect(0.0:(SMOKE ? 5.0 : 10.0):tspan[2])
 
 problem = PyrolysisProblem(
     mesh = mesh,

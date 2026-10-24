@@ -38,6 +38,8 @@ using Plots
 using DelimitedFiles
 using LinearAlgebra: BLAS
 
+const SMOKE = get(ENV, "PYROLYSIS_SMOKE", "0") == "1"   # PYROLYSIS_SMOKE=1: a short run that checks the script works
+
 # Pin BLAS to a single thread so OpenBLAS doesn't spawn its own pool inside
 # each parallel solve (standard practice for `Threads.@spawn`-based workloads).
 BLAS.set_num_threads(1)
@@ -631,9 +633,9 @@ function main()
     for (lbl, q_kW, th_mm, t_final) in CASES
         q_inc = q_kW * 1000.0
         th_m = th_mm / 1000.0
-        @info "  scheduling" case=lbl q_inc_kW=q_kW thickness_mm=th_mm t_final_s=t_final
-        tasks[lbl] =
-            Threads.@spawn build_and_solve_macfp(THETA_STAGE2, q_inc, th_m, t_final)
+        t_end = SMOKE ? 10.0 : t_final   # PYROLYSIS_SMOKE=1: every case over 10 s
+        @info "  scheduling" case=lbl q_inc_kW=q_kW thickness_mm=th_mm t_final_s=t_end
+        tasks[lbl] = Threads.@spawn build_and_solve_macfp(THETA_STAGE2, q_inc, th_m, t_end)
     end
 
     sols = Dict{String,Any}()
