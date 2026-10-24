@@ -283,7 +283,7 @@ end
         material = _bc_material(α = 500.0),
         bc_set = bc_of(flux),
         tspan = (0.0, 1.0),
-        output_times = [0.0, 0.5, 1.0],
+        output_times = [0.0, 0.25, 0.5, 1.0],
     )
     # sin(2π·0) = sin(2π·1) = 0: sampling only the window's ends would freeze
     # the deposit at q₀ and make the two runs identical.
@@ -291,9 +291,12 @@ end
         Integration.solve(prob(t -> q0 * (1 + sin(2π * t))); radiation_model = BEER_LAMBERT)
     con = Integration.solve(prob(q0); radiation_model = BEER_LAMBERT)
     @test var.retcode === :Success && con.retcode === :Success
-    @test var.surface_T[2] > con.surface_T[2] + 1.0
+    @test var.surface_T[3] > con.surface_T[3] + 1.0
     @test all(isfinite, var.extras.volumetric_absorption)
-    @test var.extras.volumetric_absorption[2] > con.extras.volumetric_absorption[2]
+    # At 0.25 s the incident flux is 2q₀; the column absorbs nearly the same
+    # share of it (a frozen flux would give a ratio of one).
+    @test var.extras.volumetric_absorption[2] ≈ 2 * con.extras.volumetric_absorption[2] rtol =
+        1e-4
 end
 
 @testset "blowing lowers the convective loss of an outgassing surface" begin
