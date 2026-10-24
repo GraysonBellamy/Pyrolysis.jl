@@ -5,9 +5,7 @@ Concrete boundary-condition types for the Pyrolysis.jl package.
 
 Holds the thermal / mass / pressure boundary-condition types, the type-stable
 `BoundaryConditionSet` container, and the per-species ambient-concentration
-helper. The concrete
-radiation-BC types (Marshak / Reflective / Dirichlet) are P1-only and live in
-`Pyrolysis.Experimental`.
+helper.
 
 It also holds the face-local, mesh-free evaluation of those conditions: the
 surface energy balance of a boundary face (`solve_boundary_temperature!`) with
@@ -17,7 +15,7 @@ fluxes (`mass_bc_flux`), the heat-flux decomposition for diagnostics, and the
 `BoundaryState` that records a converged balance.
 
 Depends on `Materials` for the abstract BC supertypes (`AbstractThermalBC`,
-`AbstractMassBC`, `AbstractRadiationBC`), the property-function
+`AbstractMassBC`), the property-function
 hierarchy, the component accessors, and physical constants, and on
 `Properties` for the gas diffusivity of the blowing models.
 """
@@ -41,10 +39,8 @@ export ImpermeableBC, MassFluxBC, ConvectiveMassBC, DiffusiveMassBC, CombinedMas
 # Pressure boundary conditions (Darcy flow)
 export DirichletPressureBC, NeumannPressureBC, ConvectivePressureBC
 
-# Mesh-motion boundary conditions
-
 # Radiative-flux helpers
-export get_radiative_flux_bc, extract_radiative_flux_from_bcs, has_radiative_flux_bc
+export get_radiative_flux_bc
 
 # Type-stable boundary-condition container
 export BoundaryConditionSet, get_thermal_bc, get_mass_bc
@@ -54,7 +50,7 @@ export ambient_concentration
 
 # Surface energy balance of a boundary face and its diagnostics
 export BoundaryState
-export solve_boundary_temperature, solve_boundary_temperature!
+export solve_boundary_temperature!
 export evaluate_bc_flux_and_derivative
 export compute_boundary_heat_fluxes, compute_surface_mass_flux
 
@@ -63,9 +59,5 @@ export blowing_factor, BlowingFace, blowing_state, blowing_ratio
 
 # Mass-condition film fluxes
 export mass_bc_flux
-
-# Concrete radiation boundary conditions (Marshak / Reflective / Dirichlet,
-# RadiationBCSet, get_radiation_bc, default_radiation_bcs) live in
-# Pyrolysis.Experimental — they are P1-only.
 
 end # module BoundaryConditions

@@ -10,8 +10,8 @@
 #   ξ(z,t) = M_tot/√(2πσ²(t)) · exp(−(z−z₀)²/(2σ²(t))),  σ²(t) = σ₀² + 2dt
 #
 # Setup notes:
-# - All permeabilities are 0 ⇒ `has_darcy_flow` is false ⇒ the residual takes
-#   the pure-diffusion path (`compute_gas_fluxes!`), whose kernel
+# - All permeabilities are 0 ⇒ `has_darcy_flow` is false ⇒ the gas-transport
+#   kernel takes the Fickian path, whose face flux
 #   −(λ/T)·Δ(ξT)/Δz reduces exactly to Fick's law with diffusivity λ at
 #   uniform T (adiabatic faces + no sources keep T uniform to machine).
 # - λ = d is set on BOTH components: PARALLEL mixing is volume-fraction
@@ -40,14 +40,7 @@ function _verification_case_vgt01()
         solid = SolidComponent(:solid, ρ = 1000.0, c = 1000.0, k = 0.5, λ = d)
         gas = GaseousComponent(:gas, M = 0.028, c = 1000.0, k = 0.03, λ = d)
         mat = Material(name = :VGT01, components = (solid, gas), reactions = ())
-        mesh = core_mesh(
-            create_uniform_mesh,
-            L,
-            n_cells,
-            Val(2);
-            T_initial = T_iso,
-            ξ_initial = (1000.0, 0.0),
-        )
+        mesh = create_uniform_mesh(L, n_cells)
         bc_set =
             BoundaryConditionSet(thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()))
         return PyrolysisProblem(
@@ -63,7 +56,7 @@ function _verification_case_vgt01()
 
     function qois(sol)
         out = QoIResult[]
-        z = cell_positions(sol)
+        z = get_cell_positions(sol)
         Δz = L / length(z)
         for (j, t) in enumerate(ts)
             peak = M_tot / sqrt(2π * σ2(t))
@@ -121,7 +114,7 @@ function _verification_case_vgt01()
     end
 
     function l2_error_t4(sol)
-        z = cell_positions(sol)
+        z = get_cell_positions(sol)
         Δz = L / length(z)
         return sqrt(
             sum((sol.ξ[2, i, 3] - ξ_exact(z[i], 4.0))^2 * Δz for i in eachindex(z)) / L,
@@ -157,7 +150,7 @@ function _verification_case_vgt01()
             profile_times = ts,
             qoi_curves = (:xi_profiles, :variance_history),
             curves = sol -> begin
-                z = cell_positions(sol)
+                z = get_cell_positions(sol)
                 Δz = L / length(z)
                 function var_num(j)
                     m = sum(sol.ξ[2, i, j] for i in eachindex(z)) * Δz
@@ -197,7 +190,7 @@ function _verification_case_vgt01()
                 ]
             end,
             error_norms = sol -> begin
-                z = cell_positions(sol)
+                z = get_cell_positions(sol)
                 peak = M_tot / sqrt(2π * σ2(4.0))
                 e = [sol.ξ[2, i, 3] - ξ_exact(z[i], 4.0) for i in eachindex(z)]
                 (L2 = sqrt(sum(abs2, e) / length(e)) / peak, Linf = maximum(abs, e) / peak)

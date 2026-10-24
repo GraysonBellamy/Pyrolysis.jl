@@ -359,8 +359,8 @@ end
 # MMS driver self-tests (formula-provenance rule applied to the source
 # generator itself): every ForwardDiff-assembled continuous-operator term is
 # checked against an independently hand-derived closed form, then the driver
-# is exercised end-to-end on a heat-only manufactured solution (spatial order
-# ≈ 2, temporal order ≈ 4, analytic-vs-FD Jacobian agreement).
+# is exercised end-to-end on a heat-only manufactured solution (spatial and
+# temporal order).
 @testset "MMS driver (exact/mms.jl)" begin
     @testset "conduction + storage source vs hand derivation" begin
         ρs, cs, ks = 1000.0, 1200.0, 0.4
@@ -411,7 +411,7 @@ end
         end
     end
 
-    @testset "gas flux, S_conv and species source (single gas)" begin
+    @testset "gas flux, S_adv and species source (single gas)" begin
         L = 0.02
         λ = 2.0e-5
         cp_g = 1100.0
@@ -432,7 +432,7 @@ end
         end
         for z in (0.0, 0.006, 0.015, L), t in (0.0, 1.5)
             @test mms_gas_flux(mat, fields, 2, z, t) ≈ J_hand(z, t) rtol = 1e-12
-            @test mms_S_conv(mat, fields, z, t) ≈ -cp_g * J_hand(z, t) * (50.0 / L) rtol =
+            @test mms_S_adv(mat, fields, z, t) ≈ -cp_g * J_hand(z, t) * (50.0 / L) rtol =
                 1e-12
             # Species source: ∂tξ + ∂zJ, with ∂zJ from a central difference of
             # the hand flux (independent of the ForwardDiff evaluation).
@@ -443,7 +443,7 @@ end
         end
     end
 
-    @testset "end-to-end heat-only MMS (order + Jacobian agreement)" begin
+    @testset "end-to-end heat-only MMS (spatial and temporal order)" begin
         ρs, cs, ks = 1000.0, 1200.0, 0.4
         L, τ = 0.02, 5.0
         fields = MMSFields(
@@ -453,7 +453,7 @@ end
         function build(n)
             solid = SolidComponent(:s, ρ = ρs, c = cs, k = ks)
             mat = Material(name = :MMSSelfE2E, components = (solid,), reactions = ())
-            mesh = create_uniform_mesh(L, n, Val(1); T_initial = 300.0, ξ_initial = (ρs,))
+            mesh = create_uniform_mesh(L, n)
             bcs = mms_thermal_bcs(mat, fields, L)
             bc_set = BoundaryConditionSet(thermal = (top = bcs.top, bottom = bcs.bottom))
             return PyrolysisProblem(
@@ -476,14 +476,8 @@ end
         @test errs[2] < errs[1]
         @test order > 1.7
 
-        # Analytic Jacobian and colored-FD must agree (the injected source is
-        # state-independent, so the Structured Jacobian stays exact).
-        sol_an = solve_mms(build(16), fields; jacobian = :analytic)
-        sol_fd = solve_mms(build(16), fields; jacobian = :fd)
-        @test sol_an.retcode == :Success && sol_fd.retcode == :Success
-        @test maximum(abs.(sol_an.T[:, end] - sol_fd.T[:, end])) < 1e-5
-
-        # Temporal order ≈ 4 (KenCarp4): fixed mesh, fixed-dt sweep against a
+        # Temporal order of the default integrator (Rodas5P, observed 4.6;
+        # finer steps reach roundoff): fixed mesh, fixed-dt sweep against a
         # small-dt reference on the SAME mesh so the spatial error cancels.
         ref = solve_mms(build(16), fields; dt = 0.0125)
         e_dt = [

@@ -45,7 +45,7 @@
 # (cold wall on top), T interpolated at fixed depth, and the T_m-isotherm
 # front position (linear interpolation on the bracketing cells).
 function _vcpl01_frame(sol, L, T_m)
-    z = cell_positions(sol)
+    z = get_cell_positions(sol)
     x = L .- z
     ord = sortperm(x)
     xs = x[ord]
@@ -266,25 +266,9 @@ function _verification_case_vcpl01()
         # dies at t = 0). No convergence fit runs on this case, so the mixed
         # mesh family is harmless.
         mesh = if n_cells >= 600
-            core_mesh(
-                create_uniform_mesh,
-                L,
-                n_cells,
-                Val(1);
-                T_initial = p.T0,
-                ξ_initial = (p.ρ,),
-            )
+            create_uniform_mesh(L, n_cells)
         else
-            core_mesh(
-                create_stretched_mesh,
-                L,
-                n_cells,
-                Val(1),
-                1.03;
-                T_initial = p.T0,
-                ξ_initial = (p.ρ,),
-                stretch_from = :top,
-            )
+            create_stretched_mesh(L, n_cells, 1.03; stretch_from = :top)
         end
         bc_set = BoundaryConditionSet(
             thermal = (top = DirichletThermalBC(p.T∞), bottom = AdiabaticBC()),
@@ -375,25 +359,9 @@ function _verification_case_vcpl01b()
         )
         # Same matched-resolution rule as route A (uniform grid for n ≥ 600).
         mesh = if n_cells >= 600
-            core_mesh(
-                create_uniform_mesh,
-                L,
-                n_cells,
-                Val(2);
-                T_initial = p.T0,
-                ξ_initial = (p.ρ, 0.0),
-            )
+            create_uniform_mesh(L, n_cells)
         else
-            core_mesh(
-                create_stretched_mesh,
-                L,
-                n_cells,
-                Val(2),
-                1.03;
-                T_initial = p.T0,
-                ξ_initial = (p.ρ, 0.0),
-                stretch_from = :top,
-            )
+            create_stretched_mesh(L, n_cells, 1.03; stretch_from = :top)
         end
         bc_set = BoundaryConditionSet(
             thermal = (top = DirichletThermalBC(p.T∞), bottom = AdiabaticBC()),

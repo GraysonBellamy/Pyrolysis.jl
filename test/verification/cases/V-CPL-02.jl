@@ -10,8 +10,8 @@
 #   v_ss = q″/(ρ[c(T_p − T₀) + ΔH_p]),  T(ζ) = T₀ + (T_p − T₀)e^(−v_ss ζ/α)
 #
 # Realization: single reaction solid → gas with γ_gas = 0 (volume loss at
-# intrinsic density ⇒ surface regression) under ALE with depletion-driven
-# cell merging. The kinetics-controlled front approximates the fixed-T_p
+# intrinsic density ⇒ surface regression) under ALE with cell
+# deactivation. The kinetics-controlled front approximates the fixed-T_p
 # ablation limit; (A, E) are chosen on the leading-order Laplace locus
 #
 #   A = v² E (T_p − T₀) e^(E/RT_p) / (α R T_p²)
@@ -79,21 +79,14 @@ function _vcpl02_common(; E::Float64, v_target::Float64, n_default::Int)
     function build(n_cells)
         # A small gas-transfer coefficient keeps gas transport alive in the
         # gas-free solid ahead of the front; with none the gas field ends in a
-        # sharp front on which the implicit Newton fails repeatedly.
+        # sharp front on which the integrator rejects step after step.
         solid = SolidComponent(:solid, ρ = ρ, c = c, k = k, λ = 1e-6)
         # c_gas = c_solid: constant-ΔH(T) anchor — the Landau identity is
         # exact for any kinetics (see header).
         gas = GaseousComponent(:gas, M = 0.05, c = c, k = 0.02, λ = 1e-4)
         rxn = Reaction(:ablate, 1 => 2; A = A, E = E, h = ΔH)
         mat = Material(name = :VCPL02, components = (solid, gas), reactions = (rxn,))
-        mesh = core_mesh(
-            create_uniform_mesh,
-            L,
-            n_cells,
-            Val(2);
-            T_initial = T0,
-            ξ_initial = (ρ, 0.0),
-        )
+        mesh = create_uniform_mesh(L, n_cells)
         bc_set = BoundaryConditionSet(
             thermal = (top = HeatFluxBC(q), bottom = AdiabaticBC()),
             mass = (
@@ -113,7 +106,7 @@ function _vcpl02_common(; E::Float64, v_target::Float64, n_default::Int)
     end
 
     # Window means/differences shared by both cases' QoIs. sol.z stores NODE
-    # positions, NaN-padded above the surface after depletion merges.
+    # positions, NaN above the surface once cells deactivate.
     function measures(sol)
         th = sol.extras.thickness_history
         i1 = findfirst(>=(w1), sol.t)
@@ -265,8 +258,7 @@ function _verification_case_vcpl02()
         solve_kwargs = (
             use_ale = true,
             min_thickness = 1e-4,
-            handle_depletion = true,
-            depletion_threshold = 0.05,
+            deactivation = true,
             abstol = 1e-7,
             reltol = 1e-5,
         ),
@@ -415,8 +407,7 @@ function _verification_case_vcpl02b()
         solve_kwargs = (
             use_ale = true,
             min_thickness = 1e-4,
-            handle_depletion = true,
-            depletion_threshold = 0.05,
+            deactivation = true,
             abstol = 1e-7,
             reltol = 1e-5,
         ),

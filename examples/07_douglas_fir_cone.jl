@@ -8,7 +8,8 @@ to track the material as it decomposes:
 - ALE mesh motion for accurate shrinkage modeling
 - Surface absorption radiation model for efficient opaque material simulation
 - Multi-step pyrolysis kinetics with char formation
-- Structured Jacobian (`ApproxSolve`, the ALE default) for fast assembly
+- Sparse Jacobian by colored forward-mode differentiation, with the default
+  integrator (Rodas5P with a sparse KLU solve)
 - Bruggeman mixing rules for effective properties
 - Species-specific transport (light gases diffuse faster)
 
@@ -46,17 +47,12 @@ New Features Demonstrated:
 - Darcy-Fick gas transport (diffusion + pressure-driven flow)
 - Temperature-dependent permeability evolution (virgin wood → porous char)
 - Species molar masses in the ideal-gas pore pressure (Darcy)
-- ALE mesh motion with analytical Jacobian for performance
+- ALE mesh motion
 """
 
 using Pyrolysis
 using Plots
-using LinearSolve
-using Sparspak
-using OrdinaryDiffEq
-using OrdinaryDiffEqSDIRK: KenCarp4   # v7 split: KenCarp4 not re-exported by the umbrella pkg
 using Statistics
-using LinearSolve: SparspakFactorization
 
 # ============================================================================
 # Material Definition: Douglas Fir
@@ -530,27 +526,11 @@ moisture_content_db = 0.06  # 6% moisture content on dry basis
 ξ_air_initial =
     background_gas_concentration(douglas_fir, :AIR, ξ_condensed_initial, T_ambient)
 
+# The initial temperature and concentrations (DF + moisture + pore air, rest
+# zero) come from the problem's T_initial and ξ_initial below.
 mesh = create_uniform_mesh(
     sample_thickness,      # domain length [m]
     n_cells,               # number of cells
-    Val(14);               # number of components (NC)
-    T_initial = T_ambient, # initial temperature
-    ξ_initial = (
-        ρ_DF_initial,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        ρ_moisture_initial,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        ξ_air_initial,
-    ),  # DF + moisture + pore air, rest zero
 )
 
 println("Mesh created:")
@@ -679,18 +659,14 @@ println("  - Darcy flow: ENABLED (κ_virgin = $(κ_virgin) m², κ_char = $(κ_c
 # Solve with ALE Mesh Motion and Surface Absorption
 # ============================================================================
 
-println(
-    "\nSolving with ALE mesh motion, Darcy-Fick transport, surface absorption, and analytical Jacobian...",
-)
+println("\nSolving with ALE mesh motion, Darcy-Fick transport and surface absorption...")
 println("Surface absorption model deposits all radiation in the surface cell.")
 println("Darcy-Fick combines diffusion (λ-driven) + pressure-driven flow (κ-driven).")
 println("This may take several minutes for wood pyrolysis...\n")
 
-# Solve using implicit solver with ALE enabled and surface absorption radiation
-# The reduced Jacobian omits the dense ALE mesh velocity coupling, reducing the
-# Jacobian from 588K to 141K non-zeros and restoring O(N) factorization scaling.
-# Combined with the analytical Jacobian, this gives ~400× speedup over dense FD.
-# The solution is identical to the full Jacobian within solver tolerance.
+# Solve using implicit solver with ALE enabled and surface absorption radiation.
+# The default integrator (Rodas5P with a sparse KLU solve) takes the Jacobian
+# from colored forward-mode differentiation over the mesh sparsity pattern.
 solution = solve(
     problem;
     abstol = 1e-9,
@@ -700,11 +676,6 @@ solution = solve(
     use_ale = true,                        # Enable ALE mesh motion
     radiation_model = SURFACE_ABSORPTION,  # All radiation absorbed at surface (opaque material)
     min_thickness = 0.5e-3,                # Stop when sample is < 0.5 mm
-    handle_depletion = false,              # Disable surface cell depletion (uses ALE instead)
-    # The ALE default Jacobian is Structured(strategy = ApproxSolve()), which
-    # drops the dense ALE mesh-velocity coupling. Pass
-    # `jacobian = Structured(strategy = DirectSolve())` for the exact one.
-    integrator = KenCarp4(linsolve = SparspakFactorization()),
 )
 
 println("Solve() returned at $(time())!")
@@ -830,19 +801,19 @@ for i = 1:n_times
 
         # Accumulate gas production from each reaction
         # Reaction 1: DF → 0.95 DF_int1 + 0.05 DF_gas1
-        mlr_gen_gas1[i] += douglas_fir.reactions[1].stoich[4] * rates[1] * cell_vol
+        mlr_gen_gas1[i] += douglas_fir.reactions[1].products[2][2] * rates[1] * cell_vol
 
         # Reaction 2: DF_int1 → 0.80 DF_int2 + 0.20 DF_gas2
-        mlr_gen_gas2[i] += douglas_fir.reactions[2].stoich[4] * rates[2] * cell_vol
+        mlr_gen_gas2[i] += douglas_fir.reactions[2].products[2][2] * rates[2] * cell_vol
 
         # Reaction 3: DF_int2 → 0.37 DF_int3 + 0.63 DF_gas3
-        mlr_gen_gas3[i] += douglas_fir.reactions[3].stoich[4] * rates[3] * cell_vol
+        mlr_gen_gas3[i] += douglas_fir.reactions[3].products[2][2] * rates[3] * cell_vol
 
         # Reaction 4: DF_int3 → 0.79 DF_int4 + 0.21 DF_gas4
-        mlr_gen_gas4[i] += douglas_fir.reactions[4].stoich[4] * rates[4] * cell_vol
+        mlr_gen_gas4[i] += douglas_fir.reactions[4].products[2][2] * rates[4] * cell_vol
 
         # Reaction 5: DF_int4 → 0.74 Char + 0.26 DF_gas5
-        mlr_gen_gas5[i] += douglas_fir.reactions[5].stoich[4] * rates[5] * cell_vol
+        mlr_gen_gas5[i] += douglas_fir.reactions[5].products[2][2] * rates[5] * cell_vol
 
         # Reaction 6: MOISTURE → WATER_VAPOR (single product reaction)
         mlr_gen_water[i] += 1.0 * rates[6] * cell_vol  # yield = 1.0 for single product
@@ -1628,28 +1599,26 @@ println("Spatial data saved to: $(spatial_csv)")
 # energy balance:
 #     q_applied(T_s) = q_conducted(T_s, T_cell)
 #
-# This is stored in mesh.boundary_states and used for:
+# The solution holds it at every saved time (`solution.surface_T`,
+# `solution.boundary_T`), together with the face heat fluxes it balances
+# (`solution.extras.surface_heat_flux_*`):
 # - Correct boundary flux computation
 # - Accurate surface temperature reporting
 # - Energy balance verification
-
-using Pyrolysis.Discretization:
-    get_surface_temperature, get_back_face_temperature, check_boundary_energy_balance
 
 println("\n" * "="^70)
 println("Boundary Temperature Analysis")
 println("="^70)
 
-# Get final boundary state information. `solve` integrates its own copy of the
-# mesh; `solution.problem.mesh` holds the final state.
-final_mesh = solution.problem.mesh
-T_surface_final = get_surface_temperature(final_mesh)
-T_back_final = get_back_face_temperature(final_mesh)
+# Final boundary temperatures (solved face temperatures)
+T_surface_final = solution.surface_T[end]
+T_back_final = solution.boundary_T[:bottom][end]
 
-# Get cell-center temperatures for comparison
-n_cells_final = length(final_mesh.cell_states)
-T_cell_top = final_mesh.cell_states[n_cells_final].T
-T_cell_bottom = final_mesh.cell_states[1].T
+# Cell-center temperatures of the outermost and innermost live cells
+T_cells_final = solution.T[:, end]
+live_final = findall(isfinite, T_cells_final)
+T_cell_top = T_cells_final[last(live_final)]
+T_cell_bottom = T_cells_final[first(live_final)]
 
 # Compute temperature jumps at boundaries
 ΔT_surface = T_surface_final - T_cell_top
@@ -1666,24 +1635,20 @@ println("  T_back (solved)     = $(round(T_back_final, digits=2)) K")
 println("  T_cell (bottom)     = $(round(T_cell_bottom, digits=2)) K")
 println("  ΔT = T_back - T_cell = $(round(ΔT_back, digits=2)) K")
 
-# Check energy balance at boundaries
-balance_results = check_boundary_energy_balance(final_mesh)
-println("\nEnergy balance at boundaries (should be < 1e-6):")
-for (boundary_id, imbalance) in balance_results
-    boundary_name = boundary_id == 1 ? "Top surface" : "Back surface"
-    status = imbalance < 1e-6 ? "✓" : "✗"
-    println(
-        "  $(boundary_name): relative imbalance = $(round(imbalance, sigdigits=3)) $status",
-    )
-end
+# Check energy balance at the surface: the applied flux against the flux
+# conducted into the surface cell
+q_applied_final = solution.extras.surface_heat_flux_net[end]
+q_conducted_final = solution.extras.surface_heat_flux_conduction[end]
+imbalance = abs(q_applied_final - q_conducted_final) / max(abs(q_applied_final), 1e-12)
+println("\nEnergy balance at the top surface (should be < 1e-6):")
+status = imbalance < 1e-6 ? "✓" : "✗"
+println("  Top surface: relative imbalance = $(round(imbalance, sigdigits=3)) $status")
 
 # Show boundary state details
 println("\nBoundary state details:")
-top_state = final_mesh.boundary_states[1]
 println("  Top surface:")
-println("    q_applied   = $(round(top_state.q_applied/1000, digits=2)) kW/m²")
-println("    q_conducted = $(round(top_state.q_conducted/1000, digits=2)) kW/m²")
-println("    converged   = $(top_state.converged) ($(top_state.iterations) iterations)")
+println("    q_applied   = $(round(q_applied_final/1000, digits=2)) kW/m²")
+println("    q_conducted = $(round(q_conducted_final/1000, digits=2)) kW/m²")
 
 println("\nSimulation complete!")
 println("\nFeatures used in this example:")
@@ -1695,5 +1660,5 @@ println(
     "  ✓ Temperature-dependent permeability (virgin: $(κ_virgin) m², char: $(κ_char) m²)",
 )
 println("  ✓ Species molar masses in the ideal-gas pore pressure (Darcy)")
-println("  ✓ ALE mesh motion with analytical Jacobian")
+println("  ✓ ALE mesh motion")
 println("  ✓ Solver-computed boundary fluxes (MLR, heat flux decomposition)")

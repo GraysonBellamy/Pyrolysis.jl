@@ -10,17 +10,17 @@
 # across one activated region, which is where the equidistribution monitor's
 # mass term acts. Both solids gasify completely, so the run loses exactly the
 # layer's initial mass and ends on the bare Kaowool. The references of the
-# peak, its time and the burnout time are the old core's at 240 PMMA cells
-# (the peak 30.41, 30.54, 30.61 and 30.64 g m⁻² s⁻¹ at 30, 60, 120 and 240).
+# peak, its time and the burnout time are those of a reference run at 240
+# PMMA cells.
 #
-# On the finite-volume core the layer deactivates in one invocation. The burn
+# The layer deactivates in one invocation. The burn
 # runs down from the surface: the upper cells lose their PMMA first and keep
 # the slow solid, and the PMMA beneath burns last and fast. When the first cell
 # crosses ε_m the others still hold up to about 6 % of their initial mass,
 # with or without the monitor's mass term; the case reports the invocations
 # and that fraction. Under refinement at ε_m = 1e-2 the largest per-step excess
 # of N cells over 2N stops falling between 120 and 240 cells, where at 3e-3 it
-# falls by two per doubling (`burnout_envelope.md`).
+# falls by two per doubling (test/gates/burnout_envelope.jl measures it).
 
 const VBO07_RHO_LIGHT = VBO_RHO_PMMA / 2
 const VBO07_Y_SURFACE = 0.5
@@ -62,14 +62,7 @@ function _vbo07_problem(n_pmma::Int; t_end = 500.0)
     dz = VBO_L_PMMA / n_pmma
     n_kw = round(Int, VBO_L_KW / dz)
     n = n_pmma + n_kw
-    mesh = core_mesh(
-        create_uniform_mesh,
-        n * dz,
-        n,
-        Val(4);
-        T_initial = VBO_T0,
-        ξ_initial = (VBO_RHO_PMMA, 0.0, 0.0, 0.0),
-    )
+    mesh = create_uniform_mesh(n * dz, n)
     z_if = n_kw * dz
     ξ0 = [
         z -> z > z_if ? _vbo07_concentrations(_vbo07_fraction(z, z_if))[1] : 0.0,
@@ -99,7 +92,7 @@ function _verification_case_vbo07()
             out,
             _vbo_timing_qois(m; t_peak_ref = VBO07_T_PEAK_REF, t_bo_ref = VBO07_T_BO_REF),
         )
-        VERIFICATION_CORE == "new" && push!(out, _vbo_invocation_qoi(sol, id))
+        push!(out, _vbo_invocation_qoi(sol, id))
         return out
     end
     return VerificationCase(

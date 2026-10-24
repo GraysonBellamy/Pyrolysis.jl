@@ -7,8 +7,8 @@ with runtime indices. Each component access uses a compile-time constant index.
 """
 
 # Promoted working scalar type for property evaluation with a (possibly
-# heterogeneous) tuple input and a temperature-like scalar. The analytical
-# Jacobian operators feed `ForwardDiff.Dual`s through these helpers; computing
+# heterogeneous) tuple input and a temperature-like scalar. The colored
+# Jacobian feeds `ForwardDiff.Dual`s through these helpers; computing
 # accumulator inits and guarded zero branches in this type keeps every helper
 # type-stable. Literal-`0.0` zeros instead produce `Union{Float64, Dual}`
 # locals and returns, which box and allocate on the hot Jacobian path.
@@ -265,8 +265,8 @@ absorption too; with it the void cell degrades to the gas-mixture
 conductivity (heat still conducts through the pore gas). The blend keeps
 ∂k_eff/∂ξ bounded through the transition: the matrix fractions are
 normalised by `φ_m`, so their derivatives grow as `1/φ_m²` and a hard switch
-would hand the Jacobian entries of order `1/φ_m²` in a cell that a fixed
-mesh cannot park.
+would hand the Jacobian entries of order `1/φ_m²` in a cell that stays in
+the system on a fixed mesh.
 """
 @inline function mixing_volume_fractions(ξ::NTuple{NC,<:Real}, T::Real, material) where {NC}
     φ_m = matrix_volume_fraction(ξ, T, material)
@@ -348,67 +348,16 @@ allocating intermediate NTuple.
     return convert(W, 1.0 / v_specific)
 end
 
-# ============================================================================
-# Porosity
-# ============================================================================
-
-"""
-	porosity(ξ::NTuple{NC,Float64}, T::Float64, material::Material) -> Float64
-
-Compute porosity (void fraction): the bulk-volume fraction not occupied by the
-solid/liquid skeletal frame. With component **intrinsic** (skeletal) densities
-ρⱼ_intrinsic:
-
-	φ = clamp(1 - Σⱼ_solid_or_liquid (ξⱼ / ρⱼ_intrinsic), 0.0, 1.0)
-
-The intrinsic density is the density of the cell-wall material itself,
-ignoring pore volume — distinct from the bulk density used for thermal mixing
-rules. When a component was constructed without an explicit `ρ_intrinsic` /
-`φ` kwarg, `get_intrinsic_density` falls back to the bulk density, so the
-component contributes no pore volume.
-
-The result enters the gas-pressure formula `P = N(ξ,T)/φ`. Derivatives are
-taken by ForwardDiff through this function (the live structured Jacobian
-differentiates the clamped expression directly — there is no separate
-analytic-derivative path). The single canonical implementation used by
-production property updates lives here.
-"""
-@inline function porosity(ξ::NTuple{NC,<:Real}, T::Real, material) where {NC}
-    return _porosity_void_frac(ξ, T, material.components, Val(NC))
-end
-
-@generated function _porosity_void_frac(
-    ξ::NTuple{NC,<:Real},
-    T::Real,
-    comps::Tuple,
-    ::Val{NC},
-) where {NC}
-    expr = quote
-        solid_vol = zero(_prop_type(ξ, T))
-    end
-    for i = 1:NC
-        push!(expr.args, quote
-            c = comps[$i]
-            if is_solid(c) || is_liquid(c)
-                ρ_intr = get_intrinsic_density(c, T)
-                if ρ_intr > 0.0
-                    solid_vol += ξ[$i] / ρ_intr
-                end
-            end
-        end)
-    end
-    push!(expr.args, :(return clamp(1.0 - solid_vol, 0.0, 1.0)))
-    return expr
-end
-
 """
 	skeletal_volume_fraction(ξ::NTuple{NC,<:Real}, T::Real, material) -> Real
 
 The bulk-volume fraction occupied by the condensed (solid and liquid)
 skeleton, `Σⱼ ξⱼ / ρⱼ_intrinsic(T)` over the condensed components, without a
-clamp: `1 − skeletal_volume_fraction` is the pore fraction [`porosity`](@ref)
-clamps into `[0, 1]`, so a caller can apply its own smooth floor and read the
-unclamped value for admissibility.
+clamp: `1 − skeletal_volume_fraction` is the pore fraction (porosity), which a
+caller floors smoothly where it divides by it and reads unclamped for
+admissibility. The intrinsic density is that of the cell-wall material itself,
+ignoring pore volume; a component constructed without `ρ_intrinsic` or `φ`
+falls back to its bulk density and contributes no pore volume.
 """
 @inline function skeletal_volume_fraction(
     ξ::NTuple{NC,<:Real},

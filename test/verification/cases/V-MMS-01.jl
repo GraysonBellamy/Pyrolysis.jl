@@ -15,16 +15,15 @@
 #   back into the energy equation, gas produced into the transport field;
 # - Fickian gas transport in the ThermaKin volume-fraction-gradient form
 #   J = −(λ_eff/T)∂z(ξT), with per-component λ so λ_eff is state-dependent;
-# - gas-advection energy source S_conv = −cp_g·J·∂zT;
+# - gas-advection energy source S_adv = −cp_g·J·∂zT;
 # - manufactured Neumann BCs (HeatFluxBC/MassFluxBC callables of t) — the
 #   Dirichlet face reconstruction is first-order and would cap the observed
 #   order (see exact/mms.jl header, design decision 3).
 #
 # The manufactured sources are assembled by nested ForwardDiff through the
-# package's own property/kinetics functions (exact/mms.jl), injected at the
-# state-derivative level so the analytic Structured Jacobian remains exact —
-# this case runs with the DirectSolve Jacobian attached (its agreement with
-# colored FD is asserted in the driver self-tests).
+# package's own property/kinetics functions (exact/mms.jl) and injected at the
+# state-derivative level as functions of (z, t), so the colored Jacobian stays
+# exact.
 #
 # The depletion limiter is left at the material default: the source generator
 # evaluates the identical rate law, and every reactant concentration stays
@@ -85,14 +84,7 @@ function _verification_case_vmms01()
 
     function build(n_cells)
         mat = make_material()
-        mesh = core_mesh(
-            create_uniform_mesh,
-            L,
-            n_cells,
-            Val(3);
-            T_initial = 500.0,
-            ξ_initial = (400.0, 250.0, 1.5),
-        )
+        mesh = create_uniform_mesh(L, n_cells)
         thermal = mms_thermal_bcs(mat, fields, L)
         mass = mms_mass_bcs(mat, fields, L)
         bc_set = BoundaryConditionSet(
@@ -110,13 +102,8 @@ function _verification_case_vmms01()
         )
     end
 
-    solve_fn(problem; kwargs...) = solve_mms(
-        problem,
-        fields;
-        core = Symbol(VERIFICATION_CORE),
-        energy_state = VERIFICATION_ENERGY_STATE,
-        kwargs...,
-    )
+    solve_fn(problem; kwargs...) =
+        solve_mms(problem, fields; energy_state = VERIFICATION_ENERGY_STATE, kwargs...)
 
     function qois(sol)
         out = QoIResult[]

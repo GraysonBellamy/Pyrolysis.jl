@@ -30,14 +30,7 @@ function _vhc02_case(label::String, Bi::Float64; with_convergence::Bool)
     function build(n_cells)
         solid = SolidComponent(:solid, ρ = ρ, c = c, k = k)
         mat = Material(name = :VHC02, components = (solid,), reactions = ())
-        mesh = core_mesh(
-            create_uniform_mesh,
-            L,
-            n_cells,
-            Val(1);
-            T_initial = T_i,
-            ξ_initial = (ρ,),
-        )
+        mesh = create_uniform_mesh(L, n_cells)
         bc_set = BoundaryConditionSet(
             thermal = (top = ConvectiveBC(h = h, T_inf = T_inf), bottom = AdiabaticBC()),
         )
@@ -54,7 +47,7 @@ function _vhc02_case(label::String, Bi::Float64; with_convergence::Bool)
 
     function qois(sol)
         out = QoIResult[]
-        z = cell_positions(sol)
+        z = get_cell_positions(sol)
         for (j, Fo) in enumerate(Fos)
             Tn = @view sol.T[:, j+1]
             err = maximum(abs(Tn[i] - T_exact(z[i] / L, Fo)) for i in eachindex(z))
@@ -88,7 +81,7 @@ function _vhc02_case(label::String, Bi::Float64; with_convergence::Bool)
 
     # L2 profile error at Fo = 0.2 (output index 4).
     function l2_error_fo02(sol)
-        z = cell_positions(sol)
+        z = get_cell_positions(sol)
         Tn = @view sol.T[:, 4]
         Δz = L / length(z)
         return sqrt(sum((Tn[i] - T_exact(z[i] / L, 0.2))^2 * Δz for i in eachindex(z)) / L)
@@ -128,7 +121,7 @@ function _vhc02_case(label::String, Bi::Float64; with_convergence::Bool)
             qoi_curves = (:T_profiles, :surface_T_history, :back_T_history),
             solve_kwargs = (abstol = 1e-12, reltol = 1e-10),
             curves = sol -> begin
-                z = cell_positions(sol)
+                z = get_cell_positions(sol)
                 Fo_of_t(t) = α * t / L^2
                 # FDS 6.11.0 overlay (reference/fds/custom/): the shipped
                 # heat_conduction_{a..d} are the same nondimensional problem —
@@ -223,7 +216,7 @@ function _vhc02_case(label::String, Bi::Float64; with_convergence::Bool)
                 ]
             end,
             error_norms = sol -> begin
-                z = cell_positions(sol)
+                z = get_cell_positions(sol)
                 e = [sol.T[i, 4] - T_exact(z[i] / L, 0.2) for i in eachindex(z)]
                 (L2 = sqrt(sum(abs2, e) / length(e)), Linf = maximum(abs, e))
             end,

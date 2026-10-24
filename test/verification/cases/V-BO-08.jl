@@ -5,8 +5,7 @@
 # The V-BO-01 deck with a PMMA layer of ten cells at V-BO-01's pitch (about
 # 1 mm) on the 12 mm Kaowool. The layer burns out at about 70 s and the
 # substrate heats on beneath the bare surface to 150 s. The run must lose
-# exactly the layer's mass and end on the bare Kaowool. On the finite-volume
-# core the layer
+# exactly the layer's mass and end on the bare Kaowool. The layer
 # deactivates in one invocation and the correction stays where the layer is:
 # the Kaowool, which cannot vanish, keeps its mesh with the solid, so the
 # correction velocity is exactly zero at every Kaowool node at every saved
@@ -26,7 +25,6 @@ function _verification_case_vbo08()
             id,
             mass_loss_exact = _vbo_mass_loss_exact(VBO08_L_PMMA, l_kw),
         )
-        VERIFICATION_CORE == "new" || return out
         push!(out, _vbo_invocation_qoi(sol, id))
         # The substrate's nodes: those at or below its initial top.
         n_kw = count(<=(l_kw * (1 + 1e-9)), view(sol.z, :, 1))

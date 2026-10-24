@@ -54,9 +54,12 @@ scripts/burnout/
 docs/Performance_Audit.md
 docs/performance_audit/
 scripts/performance_audit/
-!docs/Mesh_Framework_Design_2026-10-17.md
-!scripts/mesh_phase0/results/
-scripts/mesh_phase0/results/*.log
+
+# Local records: the mesh design, plans, gate and review documents, the gate
+# scripts' recorded measurements and the prototyping harness
+docs/Mesh_Framework_*.md
+test/gates/measurements/
+scripts/mesh_phase0/
 
 # Local research notes and reports
 reports/

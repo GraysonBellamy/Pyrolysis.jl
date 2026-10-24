@@ -1,0 +1,99 @@
+# Names the package no longer defines, and markers of the planning records that
+# code does not cite. Read by test_removed_names.jl, which this file is excluded
+# from. One entry per line; `#` starts a comment line.
+#
+# [names]: identifiers, matched as whole words (letters, digits, `_` and `!`
+# bound a word), case as written. A line starting `re:` is a regular expression.
+# [markers]: matched anywhere in a line, inside identifiers and paths included,
+# case as written. A line starting `re:` is a regular expression.
+
+[names]
+Mesh1D
+Node1D
+Cell1D
+Face1D
+CellState
+initialize_state
+to_problem_def
+build_workspace
+build_ad_workspace
+ProblemDef
+Workspace
+SimulationMode
+MeshMode
+TransportMode
+ChiMode
+pack_state!
+create_state_vector
+update_mesh_from_state!
+block_view
+get_temperature
+get_concentration
+get_node_position
+Structured
+DirectSolve
+ApproxSolve
+JacobianSpec
+JacobianBackend
+compute_jacobian!
+verify_jacobian_at
+DenseAD_ForwardDiff
+PrefixSumCoupling
+EmbeddedScaledSuffixSumCoupling
+EmbeddedRank1Coupling
+StructuredJacobian
+handle_depletion
+depletion_threshold
+min_cells
+DT_AFTER_PARK
+cell_park
+park_times
+S_conv
+ale_fluxes
+divergence_1d!
+P1_QUASI_STEADY
+RadiationCache
+h_refine
+h_coarsen
+AMRController
+DiagnosticsCallback
+MassConservationTracker
+EnergyConservationTracker
+ilu_gmres
+IncompleteLU
+Sparspak
+PYROLYSIS_CORE
+core_solve
+CoreSolution
+CoreExtras
+OneSidedLimiter
+TanhLimiter
+cell_positions
+effective_heat_capacity
+effective_emissivity
+effective_absorptivity
+effective_gas_viscosity
+re:Pyrolysis\.(Residual|Discretization|Adaptivity|Solver|Jacobian|Geometry|Diagnostics|Experimental)\b
+re:(using|import) \.\.(Residual|Discretization|Adaptivity|Solver|Jacobian|Geometry|Diagnostics|Experimental)\b
+
+[markers]
+newcore
+NEWCORE
+new_core
+NEW_CORE
+oldcore
+old_core
+OLD_CORE
+mesh_phase
+re:phase_?[0-9]
+re:leftover[0-9]
+new core
+New core
+old core
+Old core
+new-core
+old-core
+gate item
+plan §
+re:Phase [0-9]
+re:Leftover [0-9]

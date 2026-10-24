@@ -64,12 +64,7 @@ println("Running with $(nworkers()) worker(s)")
 
 @everywhere begin
     using Pyrolysis
-    using Pyrolysis: compute_surface_mass_flux, effective_gas_transfer
-    using LinearSolve
-    using Sparspak
-    using OrdinaryDiffEq
-    using OrdinaryDiffEqSDIRK: KenCarp4   # v7 split: KenCarp4 not re-exported by the umbrella pkg
-    using LinearSolve: SparspakFactorization
+    using Pyrolysis: compute_surface_mass_flux, effective_gas_transfer, get_mass_bc
 end
 
 using Distributions
@@ -610,6 +605,7 @@ end
                     α = 0.0,
                     λ = λ_wood,
                     κ = κ_virgin,
+                    ρ_intrinsic = 1500.0,  # kg/m³, wood cell-wall (skeletal) density
                 ),
                 # 2. Intermediate 1
                 SolidComponent(
@@ -621,6 +617,7 @@ end
                     α = 0.0,
                     λ = λ_wood * 2.0,
                     κ = κ_virgin * 3.0,
+                    ρ_intrinsic = 1578.0,  # kg/m³, toward char by progress 0.173
                 ),
                 # 3. Intermediate 2
                 SolidComponent(
@@ -632,6 +629,7 @@ end
                     α = 0.0,
                     λ = λ_wood * 5.0,
                     κ = κ_virgin * 10.0,
+                    ρ_intrinsic = 1597.0,  # kg/m³, toward char by progress 0.216
                 ),
                 # 4. Intermediate 3
                 SolidComponent(
@@ -643,6 +641,7 @@ end
                     α = 0.0,
                     λ = λ_char * 0.3,
                     κ = κ_char * 0.01,
+                    ρ_intrinsic = 1763.0,  # kg/m³, toward char by progress 0.585
                 ),
                 # 5. Intermediate 4
                 SolidComponent(
@@ -654,6 +653,7 @@ end
                     α = 0.0,
                     λ = λ_char * 0.7,
                     κ = κ_char * 0.1,
+                    ρ_intrinsic = 1833.0,  # kg/m³, toward char by progress 0.74
                 ),
                 # 6. Char
                 SolidComponent(
@@ -665,6 +665,7 @@ end
                     α = 0.0,
                     λ = λ_char,
                     κ = κ_char,
+                    ρ_intrinsic = 1950.0,  # kg/m³, carbon skeletal density
                 ),
                 # 7. Moisture (liquid, pseudo-density)
                 LiquidComponent(
@@ -793,27 +794,7 @@ end
         ρ_DF_initial = 530.0
         ρ_moisture_initial = moisture_content_db * ρ_DF_initial
 
-        mesh = create_uniform_mesh(
-            sample_thickness,
-            n_cells,
-            Val(13);
-            T_initial = T_ambient,
-            ξ_initial = (
-                ρ_DF_initial,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                ρ_moisture_initial,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-            ),
-        )
+        mesh = create_uniform_mesh(sample_thickness, n_cells)
 
         bc_set = BoundaryConditionSet(
             thermal = (
@@ -866,9 +847,6 @@ end
             use_ale = true,
             radiation_model = SURFACE_ABSORPTION,
             min_thickness = 0.5e-3,
-            handle_depletion = false,
-            # Default Jacobian under ALE is `Structured(strategy = ApproxSolve())`.
-            integrator = KenCarp4(linsolve = SparspakFactorization()),
         )
 
         return solution
@@ -926,22 +904,18 @@ end
 @everywhere """
 	compute_dry_mass_series(sol) -> Vector{Float64}
 
-Compute dry solid mass [kg/m²] at each output time from the concentration profiles.
+Compute dry solid mass [kg/m²] at each output time from the component masses.
 Dry mass = sum of solid components (indices 1:6), excluding moisture and gases.
 """
 @everywhere function compute_dry_mass_series(sol)
     nt = length(sol.t)
-    A = sol.problem.mesh.cross_section_area
+    A = sol.problem.mesh.topology.cross_section
     dry_mass = Vector{Float64}(undef, nt)
     for i = 1:nt
-        ξ = sol.ξ[:, :, i]  # [NC × n_cells]
-        n_cells = size(ξ, 2)
+        # Component masses per cell [kg], zero in a deactivated cell
         m = 0.0
-        for j = 1:n_cells
-            v = sol.problem.mesh.cell_volumes[j]
-            for k in SOLID_COMPONENT_INDICES
-                m += ξ[k, j] * v
-            end
+        for k in SOLID_COMPONENT_INDICES
+            m += sum(@view sol.m[k, :, i])
         end
         dry_mass[i] = m / A
     end
@@ -1071,9 +1045,10 @@ gas components (indices 8-12), excluding water vapor (index 13).
     material = sol.problem.material
     bc_set = sol.problem.bc_set
     mass_bc_top = get_mass_bc(bc_set, Val(:top))
-    n_cells = length(mesh.cells)
+    n_cells = size(sol.T, 1)
 
-    d_surface = mesh.cell_volumes[n_cells] / mesh.cross_section_area / 2
+    # Half the initial thickness of the surface cell
+    d_surface = (mesh.positions[end][1] - mesh.positions[end-1][1]) / 2
 
     for i = 1:nt
         t = sol.t[i]

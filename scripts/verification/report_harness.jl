@@ -336,7 +336,11 @@ function run_case_report(case::VerificationCase, outdir::String)
         ["key", "value"],
         vcat(
             [
-                ("integrator", haskey(skw, :alg) ? string(skw.alg) : "KenCarp4 (default)"),
+                (
+                    "integrator",
+                    haskey(skw, :integrator_policy) ? string(skw.integrator_policy) :
+                    "Rodas5P (default)",
+                ),
                 ("julia", string(VERSION)),
                 ("Pyrolysis", pyro_version),
                 ("n_cells_ladder", join(ns, " ")),

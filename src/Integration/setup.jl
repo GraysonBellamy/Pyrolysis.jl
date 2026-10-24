@@ -5,7 +5,7 @@
 """
 	CoreProblem
 
-A `PyrolysisProblem` set up on the finite-volume core: the problem, the
+A `PyrolysisProblem` set up for integration: the problem, the
 definition and workspace the residual reads, the
 initial state, the relative tolerance and the absolute-tolerance vector, the
 colored Jacobian, the initial temperatures and masses, and the
@@ -45,9 +45,6 @@ function _require_supported(
 ) where {D}
     material = problem.material
     coordinates = problem.mesh.topology.coordinates
-    radiation_model in (NO_RADIATION, SURFACE_ABSORPTION, BEER_LAMBERT) || throw(
-        ArgumentError("the finite-volume core has no $(radiation_model) radiation model"),
-    )
     if D == 1
         closure === :balance ||
             throw(ArgumentError("a line's mesh moves by its balance rows: give no closure"))
@@ -402,7 +399,7 @@ end
 
 Set up `problem`, whose mesh is a `Mesh{D}` ([`create_uniform_mesh`](@ref)
 and its siblings on a line, [`box_mesh`](@ref) and [`cell_mesh`](@ref) in two
-and three dimensions), on the finite-volume core: the initial inventories
+and three dimensions): the initial inventories
 `mᵢⱼ = ξⱼ(xᵢ) Vᵢ` and the energy state from `T(xᵢ)` at the cell centres `xᵢ`
 ([`initial_fields`](@ref)), the gas transport the material and the mass
 conditions need, the kernels, the face intensities consistent with the

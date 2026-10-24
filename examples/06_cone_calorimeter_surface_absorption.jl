@@ -51,6 +51,10 @@ pmma_cp = CallableProperty(
 )
 pmma_k = CallableProperty(T -> T < 378.0 ? 0.15 : (0.34 - 3.9e-4 * min(T, 700.0)))
 
+# Absorption coefficient of the solids [m²/kg]: SURFACE_ABSORPTION deposits the
+# incident radiation in the surface cell and does not read it.
+α_surface_only = 0.0
+
 pmma = Material(
     name = :PMMA_surface_abs,
     components = (
@@ -62,7 +66,7 @@ pmma = Material(
             c = pmma_cp,                   # J/(kg·K) - piecewise temperature-dependent
             k = pmma_k,                    # W/(m·K) - piecewise temperature-dependent
             ε = 0.96,                      # surface emissivity
-            α = 0.0,                        # m²/kg - not used with SURFACE_ABSORPTION model
+            α = α_surface_only,             # m²/kg - not used with SURFACE_ABSORPTION model
         ),
         # Char - solid residue
         SolidComponent(
@@ -71,7 +75,7 @@ pmma = Material(
             c = pmma_cp,                   # J/(kg·K) - same as virgin PMMA
             k = pmma_k,                    # W/(m·K) - same as virgin PMMA
             ε = 0.96,                      # same emissivity as virgin PMMA
-            α = 0.0,                        # m²/kg - not used with SURFACE_ABSORPTION model
+            α = α_surface_only,             # m²/kg - not used with SURFACE_ABSORPTION model
         ),
         # MMA gas - gaseous product
         GaseousComponent(
@@ -120,13 +124,7 @@ h_conv = 7.2                 # W/(m²·K)
 # Mesh Creation
 # ============================================================================
 
-mesh = create_uniform_mesh(
-    sample_thickness,
-    n_cells,
-    Val(3);
-    T_initial = T_ambient,
-    ξ_initial = (1210.0, 0.0, 0.0),
-)
+mesh = create_uniform_mesh(sample_thickness, n_cells)
 
 println("=" ^ 70)
 println("SURFACE-ONLY RADIATION ABSORPTION TEST")
@@ -214,9 +212,7 @@ solution = solve(
     use_ale = true,
     radiation_model = SURFACE_ABSORPTION,  # All radiation deposited in surface cell
     min_thickness = 0.01e-3,
-    handle_depletion = true,
-    depletion_threshold = 0.05,
-    min_cells = 1,
+    deactivation = true,  # Deactivate a surface cell below 1% of its initial condensed mass
 )
 
 println("\nSimulation completed!")

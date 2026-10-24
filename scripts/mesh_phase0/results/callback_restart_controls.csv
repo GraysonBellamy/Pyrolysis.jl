@@ -1,4 +1,0 @@
-mode,retcode,final_time,iteration_budget,accepted,rejected,rhs_calls,jacobians,min_order,max_order,max_error
-clean,Success,1.0,10000,32,4,59,1,1,5,7.472957291865256e-8
-clean_then_dirty,MaxIters,0.0035658569600130648,10000,10000,0,20007,1,1,1,7.728293227593497e-8
-dirty_then_clean,MaxIters,0.0035658569600130648,10000,10000,0,20007,1,1,1,7.728293227593497e-8

@@ -3,7 +3,7 @@ Pointwise gas closures of the shared layer.
 
 - The ideal-gas pressure P = Σⱼ ξⱼRT/(Mⱼφ) over the gas components, at the
   pore fraction φ = 1 − Σ skeletal volumes that the state mapping floors
-  smoothly, and the clamped `porosity` the problem validation reads.
+  smoothly.
 - The permeability mixing rules on the renormalised solid basis, and the
   Carman–Kozeny closure of the pore fraction with its free-flow cap.
 - The Chapman–Enskog binary diffusivity and its Neufeld collision integral.
@@ -16,7 +16,6 @@ using ForwardDiff
 using Pyrolysis
 using Pyrolysis.Materials: R_GAS
 using Pyrolysis.Properties:
-    porosity,
     skeletal_volume_fraction,
     effective_permeability,
     effective_conductivity,
@@ -30,6 +29,11 @@ using Pyrolysis.Properties:
     M_AIR,
     T_GAS_PROPERTY_FLOOR
 using Pyrolysis.Physics: ideal_gas_pressure, gas_flux
+
+# The permeability at the state's pore fraction 1 − Σ skeletal volumes, the
+# porosity the state mapping forms; the per-component mixes do not read it.
+_κ(ξ, T, material) =
+    effective_permeability(ξ, T, material, 1 - skeletal_volume_fraction(ξ, T, material))
 
 @testset "Gas closures" begin
     solid_only = Material(
@@ -89,16 +93,6 @@ using Pyrolysis.Physics: ideal_gas_pressure, gas_flux
             1e-10
     end
 
-    # The clamped pore fraction of the problem validation and of the
-    # three-argument permeability: on a physical state it is the pore fraction.
-    @testset "porosity is the pore fraction on physical states" begin
-        @test porosity((0.0, 1.0), 400.0, two_comp) ≈ 1.0 rtol = 1e-10
-        @test porosity((500.0, 1.0), 400.0, two_comp) ≈ 0.5 rtol = 1e-10
-        ξ = (500.0, 50.0, 0.5)
-        @test porosity(ξ, 500.0, three_comp) ≈ 0.25 rtol = 1e-10
-        @test porosity(ξ, 500.0, three_comp) == pore_fraction(ξ, 500.0, three_comp)
-    end
-
     @testset "pressure: ForwardDiff through the pore fraction equals central differences" begin
         ξ = (500.0, 1.0)
         T = 400.0
@@ -119,7 +113,7 @@ using Pyrolysis.Physics: ideal_gas_pressure, gas_flux
             ),
             reactions = (),
         )
-        @test effective_permeability((1000.0,), 500.0, single) ≈ 1e-12 rtol = 0.01
+        @test _κ((1000.0,), 500.0, single) ≈ 1e-12 rtol = 0.01
 
         mix = Material(
             name = :mix_perm,
@@ -131,12 +125,12 @@ using Pyrolysis.Physics: ideal_gas_pressure, gas_flux
             reactions = (),
             mixing = MaterialMixing(κ = MixingSpec(PARALLEL)),
         )
-        κ_virgin = effective_permeability((1000.0, 0.0, 0.0), 500.0, mix)
-        κ_char = effective_permeability((0.0, 200.0, 0.0), 500.0, mix)
+        κ_virgin = _κ((1000.0, 0.0, 0.0), 500.0, mix)
+        κ_char = _κ((0.0, 200.0, 0.0), 500.0, mix)
         @test κ_virgin ≈ 1e-15 rtol = 0.1
         @test κ_char ≈ 1e-12 rtol = 0.1
         # Half the solid volume each: between the pure values.
-        κ_mix = effective_permeability((500.0, 100.0, 0.0), 500.0, mix)
+        κ_mix = _κ((500.0, 100.0, 0.0), 500.0, mix)
         @test κ_virgin < κ_mix < κ_char
 
         # A gas component carries no permeability of its own.
@@ -148,8 +142,8 @@ using Pyrolysis.Physics: ideal_gas_pressure, gas_flux
             ),
             reactions = (),
         )
-        @test effective_permeability((1000.0, 0.0), 500.0, with_gas) == 1e-12
-        @test effective_permeability((1000.0, 10.0), 500.0, with_gas) > 0
+        @test _κ((1000.0, 0.0), 500.0, with_gas) == 1e-12
+        @test _κ((1000.0, 10.0), 500.0, with_gas) > 0
     end
 
     @testset "permeability mixes on the solid basis; an impermeable phase zeroes the series bound" begin
@@ -167,8 +161,8 @@ using Pyrolysis.Physics: ideal_gas_pressure, gas_flux
             mixing = MaterialMixing(κ = MixingSpec(rule)),
         )
         # A uniform solid κ₀ is κ₀ under both bounds, the gas notwithstanding.
-        @test effective_permeability(ξ, T, uniform(PARALLEL)) ≈ 1e-13 rtol = 1e-12
-        @test effective_permeability(ξ, T, uniform(SERIES)) ≈ 1e-13 rtol = 1e-12
+        @test _κ(ξ, T, uniform(PARALLEL)) ≈ 1e-13 rtol = 1e-12
+        @test _κ(ξ, T, uniform(SERIES)) ≈ 1e-13 rtol = 1e-12
 
         impermeable(rule) = Material(
             name = :c3_impermeable,
@@ -180,22 +174,18 @@ using Pyrolysis.Physics: ideal_gas_pressure, gas_flux
             reactions = (),
             mixing = MaterialMixing(κ = MixingSpec(rule)),
         )
-        @test effective_permeability(ξ, T, impermeable(SERIES)) == 0.0
-        @test effective_permeability(ξ, T, impermeable(PARALLEL)) ≈ (0.2 / 0.7) * 1e-12 rtol =
-            1e-12
-        @test effective_permeability(ξ, T, impermeable(WEIGHTED)) ≈
-              0.5 * (0.2 / 0.7) * 1e-12 rtol = 1e-12
+        @test _κ(ξ, T, impermeable(SERIES)) == 0.0
+        @test _κ(ξ, T, impermeable(PARALLEL)) ≈ (0.2 / 0.7) * 1e-12 rtol = 1e-12
+        @test _κ(ξ, T, impermeable(WEIGHTED)) ≈ 0.5 * (0.2 / 0.7) * 1e-12 rtol = 1e-12
 
         # ForwardDiff through the WEIGHTED rule equals central differences.
         mat = impermeable(WEIGHTED)
-        g = ForwardDiff.gradient(x -> effective_permeability(Tuple(x), T, mat), [ξ...])
+        g = ForwardDiff.gradient(x -> _κ(Tuple(x), T, mat), [ξ...])
         h = 1e-3
         for i = 1:3
             ξp = ntuple(j -> j == i ? ξ[j] + h : ξ[j], 3)
             ξm = ntuple(j -> j == i ? ξ[j] - h : ξ[j], 3)
-            fd =
-                (effective_permeability(ξp, T, mat) - effective_permeability(ξm, T, mat)) /
-                (2h)
+            fd = (_κ(ξp, T, mat) - _κ(ξm, T, mat)) / (2h)
             @test isapprox(g[i], fd; rtol = 1e-5, atol = 1e-30)
         end
     end
@@ -245,13 +235,6 @@ using Pyrolysis.Physics: ideal_gas_pressure, gas_flux
                 @test κ ≥ 0.0
             end
             @test κ_ck((300.0, 0.05), T) > κ_ck((1400.0, 0.05), T)
-        end
-
-        @testset "porosity: the three-argument form reads the clamped pore fraction" begin
-            for ρs in (1400.0, 1000.0, 500.0, 100.0, 0.0)
-                ξ = (ρs, 0.05)
-                @test effective_permeability(ξ, 400.0, ck) == κ_ck(ξ, 400.0)
-            end
         end
 
         # The solver's AD perturbs every component into the same Dual type.

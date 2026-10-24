@@ -145,14 +145,12 @@ h_conv = 7.2              # W/(m²·K)
 # Mesh Creation
 # ============================================================================
 
-# Create uniform mesh with 3 components (virgin PMMA + char + MMA gas)
-# Convention: z=0 is the exposed TOP surface, z=L is the BOTTOM
+# Create uniform mesh; the initial temperature and concentrations (virgin PMMA
+# + char + MMA gas) come from the problem's T_initial and ξ_initial below.
+# Convention: z=0 is the back face, z=L the exposed surface
 mesh = create_uniform_mesh(
     sample_thickness,      # domain length [m]
     n_cells,               # number of cells
-    Val(3);                # number of components (NC): virgin, char, gas
-    T_initial = T_ambient, # initial temperature
-    ξ_initial = (1210.0, 0.0, 0.0),  # initial concentrations: full virgin, no char, no gas
 )
 
 println("Mesh created:")
@@ -254,10 +252,9 @@ println("This may take a few minutes...\n")
 # Solve using implicit solver with ALE enabled
 # - use_ale=true: enables integrated ALE mesh motion (node positions in state vector)
 # - min_thickness: stops simulation when material becomes too thin
-# - handle_depletion: parks the surface cell (merging it into its neighbour) when it becomes too thin
-# - depletion_threshold: cell thickness fraction (0.05 = park when cell is 5% of initial thickness)
-#   IMPORTANT: This controls WHEN cells are parked. If too low, cells become extremely thin
-#   and the diffusion timestep (dt ∝ Δx²) becomes very small, causing slow simulation.
+# - deactivation: removes the surface cell once its condensed mass is below 1% of its
+#   initial mass (the default `threshold`); the mesh correction thins the layer so that
+#   it goes in one event
 # - dtmin: allows very small timesteps during rapid reaction fronts
 solution = solve(
     problem;
@@ -267,9 +264,7 @@ solution = solve(
     progress = true,
     use_ale = true,                        # Enable ALE mesh motion
     min_thickness = 0.01e-3,               # Stop when thickness < 0.01 mm
-    handle_depletion = true,               # Enable surface cell depletion handling
-    depletion_threshold = 0.05,            # Park cells when thickness < 5% of initial
-    min_cells = 1,                         # Keep at least 1 cell
+    deactivation = true,                   # Deactivate burned-out surface cells
 )
 
 println("\nSolution completed!")
@@ -658,7 +653,7 @@ for target_t in [200.0, 400.0, 600.0, 800.0]
 
     # Reaction heat absorption
     h_rxn = 820e3  # J/kg
-    q_rxn = mlr_val * h_rxn
+    q_rxn = gen_rate_val * h_rxn
 
     # Conduction estimate (q_net - q_rxn goes into conduction + storage)
     q_remaining = q_net - q_rxn
@@ -667,7 +662,7 @@ for target_t in [200.0, 400.0, 600.0, 800.0]
     println("State:")
     println("  Surface T: $(round(T_surf, digits=1)) K")
     println("  Back T: $(round(T_back_val, digits=1)) K")
-    println("  MLR: $(round(mlr_val*1000, digits=3)) g/(m²·s)")
+    println("  MLR: $(round(gen_rate_val*1000, digits=3)) g/(m²·s)")
     println("  Thickness: $(round(thick*1000, digits=3)) mm")
     println("  Cells: $n_cells")
 

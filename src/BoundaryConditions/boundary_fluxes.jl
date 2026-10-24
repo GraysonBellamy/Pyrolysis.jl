@@ -8,8 +8,7 @@ This module provides flux evaluation functions for all boundary condition types:
 
 using ..Materials: STEFAN_BOLTZMANN
 using ..Materials: evaluate_param, evaluate_param_T
-using ..Materials:
-    RadiationModel, NO_RADIATION, SURFACE_ABSORPTION, BEER_LAMBERT, P1_QUASI_STEADY
+using ..Materials: RadiationModel, NO_RADIATION, SURFACE_ABSORPTION, BEER_LAMBERT
 
 # ============================================================================
 # Mass Boundary Condition Flux Evaluation
@@ -78,14 +77,14 @@ Returns NEGATIVE flux for gas leaving the surface (consistent with the general
 mass_bc_flux convention of "positive into domain"). When ξ_surface > 0 and gas
 is diffusing out, the flux into the domain is negative.
 
-`apply_mass_bc_flux!` (finite_volume.jl) orients it to the face by negating
-at the top boundary: J[f] = -J_bc. This gives a positive flux in the +z
-direction when gas escapes at the top surface, as the divergence expects.
+The gas-transport kernel (`Kernels.GasTransportKernel`) negates it into the
+face's outward flux, `F[j, f] -= mass_bc_flux(...)`, so a boundary face's
+flux is positive along its outward normal when gas escapes.
 
 Summary of sign conventions:
 - mass_bc_flux():               Negative = gas escaping (flux-into-domain convention)
 - compute_surface_mass_flux():  Positive = gas escaping
-- J[face] in finite volume:     Positive = flux in +z direction
+- boundary face flux:           Positive = outward along the face's normal
 """
 @inline function mass_bc_flux(bc::DiffusiveMassBC, ξ_surface, λρ, ρ, d, t, j::Integer)
     h_m = evaluate_param(bc.h_m, t)
@@ -132,10 +131,9 @@ end
 # Pressure BCs (DirichletPressureBC, NeumannPressureBC, ConvectivePressureBC)
 # contribute no DIFFUSIVE film-law flux, so these methods return 0 and compose
 # with DiffusiveMassBC inside CombinedMassBC. Their advective venting flux
-# enters the species equations through the boundary-face Darcy velocity:
-# `apply_pressure_bc_to_darcy_velocity!` (via `boundary_darcy_velocity`) sets
-# v_b, and `compute_gas_fluxes_darcy_fick!` writes J = v_b·ξ_int/φ_int at the
-# boundary face (outflow-upwinded against a zero-concentration ambient).
+# enters the species equations through the boundary-face Darcy velocity the
+# gas-transport kernel forms (`Kernels.outward_darcy_velocity`), outflow
+# upwinded against an ambient that carries none of the tracked gases.
 
 @inline mass_bc_flux(::DirichletPressureBC, ξ_surface, λρ, ρ, d, t, j::Integer) = 0.0
 @inline mass_bc_flux(::NeumannPressureBC, ξ_surface, λρ, ρ, d, t, j::Integer) = 0.0
@@ -164,8 +162,8 @@ Returns a NamedTuple with:
 
 Convention: `net` is the **applied** face flux — per component it matches
 `evaluate_bc_flux_and_derivative`, so the total satisfies the Newton balance
-`net = q_cond` at convergence. Under `BEER_LAMBERT` (and the
-experimental P1) the incident radiation enters the domain *volumetrically*,
+`net = q_cond` at convergence. Under `BEER_LAMBERT` the incident radiation
+enters the domain *volumetrically*,
 not through the face, so a `RadiativeFluxBC` contributes zero `absorbed` and
 zero `net` here; the volumetric deposit is reported separately as
 `extras.volumetric_absorption`. Under `NO_RADIATION` / `SURFACE_ABSORPTION`
@@ -181,10 +179,10 @@ function compute_boundary_heat_fluxes(
     radiation_model::RadiationModel;
     a_eff::Float64 = ε_eff,
 )
-    if radiation_model == BEER_LAMBERT || radiation_model == P1_QUASI_STEADY
-        # In-depth absorption: the incident radiation enters volumetrically
-        # (compute_radiation_source! / the P1 cache), nothing is absorbed at
-        # the face, and the Newton balance applies zero flux for this BC.
+    if radiation_model == BEER_LAMBERT
+        # In-depth absorption: the incident radiation enters volumetrically,
+        # nothing is absorbed at the face, and the Newton balance applies zero
+        # flux for this BC.
         # The volumetric deposit is reported via extras.volumetric_absorption.
         return (
             absorbed = 0.0,
@@ -211,49 +209,6 @@ function compute_boundary_heat_fluxes(
             net = q_absorbed,
         )
     end
-end
-
-function compute_boundary_heat_fluxes(
-    bc::CombinedThermalBC,
-    T_surface::Float64,
-    t::Float64,
-    ε_eff::Float64,
-    radiation_model::RadiationModel;
-    a_eff::Float64 = ε_eff,
-)
-    # Sum contributions from all component BCs — including each child's `net`,
-    # so the combined `net` stays equal to the flux the surface Newton applies
-    # (recomputing it from the components would re-include radiation that the
-    # model dispatch routes through the volume, e.g. α·q_ext under BEER_LAMBERT).
-    absorbed = 0.0
-    reradiation = 0.0
-    convection = 0.0
-    prescribed = 0.0
-    net = 0.0
-
-    for inner_bc in bc.bcs
-        fluxes = compute_boundary_heat_fluxes(
-            inner_bc,
-            T_surface,
-            t,
-            ε_eff,
-            radiation_model;
-            a_eff = a_eff,
-        )
-        absorbed += fluxes.absorbed
-        reradiation += fluxes.reradiation
-        convection += fluxes.convection
-        prescribed += fluxes.prescribed
-        net += fluxes.net
-    end
-
-    return (
-        absorbed = absorbed,
-        reradiation = reradiation,
-        convection = convection,
-        prescribed = prescribed,
-        net = net,
-    )
 end
 
 # Overloads with radiation_model for BCs that don't care about it
@@ -287,25 +242,6 @@ function compute_boundary_heat_fluxes(
 end
 
 function compute_boundary_heat_fluxes(
-    bc::ConvectiveBC,
-    T_surface::Float64,
-    t::Float64,
-    ε_eff::Float64,
-    ::RadiationModel;
-    a_eff::Float64 = ε_eff,
-)
-    q, _ = evaluate_bc_flux_and_derivative(bc, T_surface, t, ε_eff)
-    q_loss = -q
-    return (
-        absorbed = 0.0,
-        reradiation = 0.0,
-        convection = q_loss,
-        prescribed = 0.0,
-        net = q,
-    )
-end
-
-function compute_boundary_heat_fluxes(
     bc::RadiativeBC,
     T_surface::Float64,
     t::Float64,
@@ -313,9 +249,7 @@ function compute_boundary_heat_fluxes(
     radiation_model::RadiationModel;
     a_eff::Float64 = ε_eff,
 )
-    # Under P1 the boundary balance applies zero for this BC (emission and
-    # ambient exchange are volumetric) — `net` must match the applied flux.
-    q, _ = evaluate_bc_flux_and_derivative(bc, T_surface, t, ε_eff, radiation_model)
+    q, _ = evaluate_bc_flux_and_derivative(bc, T_surface, t, ε_eff)
     q_loss = -q
     return (
         absorbed = 0.0,

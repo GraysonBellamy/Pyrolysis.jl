@@ -1,7 +1,7 @@
 """
 	Kernels
 
-Physics kernels of the finite-volume core. Each kernel reads the derived
+Physics kernels. Each kernel reads the derived
 state, the mesh topology and metrics, the material and its boundary
 conditions, and adds face fluxes and cell sources to a
 [`Contributions`](@ref) buffer; the assembler turns those into row

@@ -9,7 +9,7 @@ required; omitting it underestimates gas pressure at low porosity.
 using ..Materials: R_GAS, GAS, is_gas, molar_mass, component_index
 
 # Floor on porosity used as a divisor — prevents 1/0 if a cell ever ends up
-# fully solid. Matches `_compute_porosity` clamping at 0.0.
+# fully solid.
 const _PHI_FLOOR = 1e-12
 
 # ============================================================================

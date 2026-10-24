@@ -24,9 +24,9 @@ Base.@kwdef struct SolverStatistics
 end
 
 """
-	CoreExtras
+	SolutionExtras
 
-The secondary series of a [`CoreSolution`](@ref), under the names of
+The secondary series of a [`PyrolysisSolution`](@ref), under the names of
 `PyrolysisSolution.extras`, one value per saved time unless noted. Quantities
 of the `:top` (surface) or `:bottom` (back) faces are `NaN` without that tag
 or once no live cell borders it; per-area quantities divide by the current
@@ -66,14 +66,14 @@ area of the faces they name unless noted.
 - `cross_section_area_history`: the cross-section measure (the area of a
   planar column) [m²]
 - `live_cells`: the number of live cells
-- `park_times`: the time of every deactivation, one entry per deactivated
+- `deactivation_times`: the time of every deactivation, one entry per deactivated
   cell, in order [s]
 - `live_mass`, `live_energy`: the live cells' mass [kg] and energy [J]
   ([`live_inventories`](@ref))
 - `mass_outflow`, `energy_rate`: the live region's mass outflow [kg/s] and
   enthalpy rate [W] ([`ledger_rates`](@ref))
 """
-const CoreExtras = @NamedTuple{
+const SolutionExtras = @NamedTuple{
     gas_generation_rate::Vector{Float64},
     back_temperature::Vector{Float64},
     total_mass::Vector{Float64},
@@ -97,7 +97,7 @@ const CoreExtras = @NamedTuple{
     MLR_gauge::Vector{Float64},
     cross_section_area_history::Vector{Float64},
     live_cells::Vector{Int},
-    park_times::Vector{Float64},
+    deactivation_times::Vector{Float64},
     live_mass::Vector{Float64},
     live_energy::Vector{Float64},
     mass_outflow::Vector{Float64},
@@ -105,9 +105,9 @@ const CoreExtras = @NamedTuple{
 }
 
 """
-	CoreSolution{P}
+	PyrolysisSolution{P}
 
-The solution of the finite-volume core at the saved times:
+The solution at the saved times:
 
 - `problem`: the problem that was solved
 - `t`: saved times [s]
@@ -137,10 +137,12 @@ The solution of the finite-volume core at the saved times:
   `h/h₀` its convective condition applied at the solved face temperature (1
   without outflow, without a blowing model, or on a face its condition fixes
   in closed form)
-- `extras`: the [`CoreExtras`](@ref) series
+- `extras`: the [`SolutionExtras`](@ref) series
 - `events`: the [`DeactivationEvent`](@ref)s of the solve, in order
 - `outcome`: `:running` unless the deactivation or the thickness stop ended
-  the solve (`:burned_out`, `:interior`, `:inconsistent`, `:min_thickness`)
+  the solve (`:burned_out`, `:interior`, `:min_thickness`); an event that
+  leaves the state inadmissible or the node velocities inconsistent ends the
+  solve with a warning and `retcode` `:Failure`, the outcome `:running`
 - `retcode`: the integrator's return code
 - `solve_time`: wall time of the solve [s]
 - `statistics`: the [`SolverStatistics`](@ref)
@@ -148,7 +150,7 @@ The solution of the finite-volume core at the saved times:
 - `definition`: the core's definition of the solve, through which `sol(t)`
   reconstructs the fields
 """
-struct CoreSolution{P,D<:CoreDefinition}
+struct PyrolysisSolution{P,D<:CoreDefinition}
     problem::P
     t::Vector{Float64}
     T::Matrix{Float64}
@@ -162,7 +164,7 @@ struct CoreSolution{P,D<:CoreDefinition}
     mass_loss_rate::Vector{Float64}
     boundary_mass_flux::Dict{Symbol,Vector{Float64}}
     boundary_blowing_ratio::Dict{Symbol,Vector{Float64}}
-    extras::CoreExtras
+    extras::SolutionExtras
     events::Vector{DeactivationEvent}
     outcome::Symbol
     retcode::Symbol
@@ -174,7 +176,7 @@ end
 
 # The extras of `nt` saved times: every series zero except the blowing
 # diagnostics, which start at their no-outflow values.
-_extras(nt::Int) = CoreExtras((
+_extras(nt::Int) = SolutionExtras((
     zeros(nt),
     zeros(nt),
     zeros(nt),
@@ -252,7 +254,7 @@ function _face_heat_fluxes(thermal, tag, faces, c, ds, topo, material, t)
 end
 
 """
-	CoreSolution(problem, t, states, def, ws, retcode, solve_time, statistics, raw;
+	PyrolysisSolution(problem, t, states, def, ws, retcode, solve_time, statistics, raw;
 	             deactivation = nothing, outcome = :running)
 
 Reconstruct the fields from the saved state vectors `states`: one residual
@@ -263,7 +265,7 @@ mass fluxes among them) in the plain buffers of `ws`. The mask and the
 references are left as after the last event. The outcome is the
 deactivation's once it ended the solve, else `outcome`.
 """
-function CoreSolution(
+function PyrolysisSolution(
     problem,
     t::AbstractVector{Float64},
     states::AbstractVector,
@@ -279,8 +281,8 @@ function CoreSolution(
     layout = def.layout
     topo = def.setup.topology
     material = def.setup.material
-    NC = n_components(layout)
-    n = n_cells(layout)
+    NC = n_components(layout)::Int
+    n = n_cells(layout)::Int
     nt = length(t)
     T = zeros(n, nt)
     ξ = zeros(NC, n, nt)
@@ -428,14 +430,15 @@ function CoreSolution(
         end
     end
     deactivation === nothing || replay_events!(deactivation, layout, Inf)
-    deactivation === nothing || append!(x.park_times, e.t for e in deactivation.events)
+    deactivation === nothing ||
+        append!(x.deactivation_times, e.t for e in deactivation.events)
     surface_T = haskey(boundary_T, :top) ? copy(boundary_T[:top]) : fill(NaN, nt)
     if haskey(boundary_mass_flux, :top)
         x.surface_mass_flux .= boundary_mass_flux[:top]
     else
         fill!(x.surface_mass_flux, NaN)
     end
-    return CoreSolution(
+    return PyrolysisSolution(
         problem,
         Vector{Float64}(t),
         T,

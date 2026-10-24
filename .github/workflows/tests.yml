@@ -2,18 +2,16 @@
 #
 # fast, on pull requests to main and by dispatch: every suite at its CI
 # resolution in the temperature form, without the convergence spot checks
-# (PYROLYSIS_TEST_FAST), in five jobs side by side: the finite-volume core
-# suites in their three groups (test/runtests.jl), the verification cases on
-# the finite-volume core, and the old core's suites with the verification
-# cases on the old core. The package is built without its precompile
-# workloads, which solve on the old core.
+# (PYROLYSIS_TEST_FAST), in four jobs side by side: the module suites in their
+# three groups (test/runtests.jl) and the verification cases. The package is
+# built without its precompile workloads, whose test runs them in the
+# test process.
 #
 # full, weekly and by dispatch with `matrix: full`: `Pkg.test()` as a user runs
-# it (every suite, the verification cases on the old core, the spot checks),
-# and the verification cases on the finite-volume core in each energy form
-# with their spot checks. The finite-volume core suites do not depend on the
-# routing and run once, in the first job. The package is built with its
-# precompile workloads, as for a user.
+# it (every suite, the verification cases with their spot checks, both energy
+# forms in the module suites), and the verification cases in the enthalpy
+# form with their spot checks. The package is built with its precompile
+# workloads, as for a user.
 name: Tests
 
 on:
@@ -43,23 +41,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: Finite-volume core suites (Jacobian, multi-D)
-            core: new
-            group: newcore-jacobian
-          - name: Finite-volume core suites (burnout)
-            core: new
-            group: newcore-burnout
-          - name: Finite-volume core suites (other)
-            core: new
-            group: newcore-other
+          - name: Module suites (Jacobian, multi-D, type analysis)
+            group: jacobian
+          - name: Module suites (burnout)
+            group: burnout
+          - name: Module suites (other)
+            group: other
           - name: Verification cases
-            core: new
-            group: domains
-          - name: Old core
-            core: old
             group: domains
     env:
-      PYROLYSIS_CORE: ${{ matrix.core }}
       PYROLYSIS_TEST_FAST: "1"
       PYROLYSIS_TEST_GROUP: ${{ matrix.group }}
     steps:
@@ -92,19 +82,12 @@ jobs:
       matrix:
         include:
           - name: Pkg.test()
-            core: old
             energy: temperature
             group: all
-          - name: Verification cases, finite-volume core, temperature form
-            core: new
-            energy: temperature
-            group: domains
-          - name: Verification cases, finite-volume core, enthalpy form
-            core: new
+          - name: Verification cases, enthalpy form
             energy: enthalpy
             group: domains
     env:
-      PYROLYSIS_CORE: ${{ matrix.core }}
       PYROLYSIS_ENERGY_STATE: ${{ matrix.energy }}
       PYROLYSIS_TEST_GROUP: ${{ matrix.group }}
     steps:

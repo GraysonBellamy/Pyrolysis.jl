@@ -245,8 +245,8 @@ end
 # exactly that on extrapolation. Fail at construction, in the spirit of
 # `MixingSpec`'s CARMAN_KOZENY/`length_scale` check, rather than at hour three of
 # a solve. The probe spans the pyrolysis range plus generous margin; the runtime
-# floor in `Properties.effective_gas_viscosity` remains the backstop for Newton
-# trial states that wander outside it.
+# floor `Properties.MU_FLOOR`, which the state mapping applies, remains the
+# backstop for Newton trial states that wander outside it.
 function _validate_gas_viscosity(gas_viscosity, name::Symbol)
     for T in (200.0, 300.0, 500.0, 800.0, 1200.0, 1800.0)
         μ = gas_viscosity(T)
@@ -271,7 +271,8 @@ end
 	Material(; name, components, reactions=(),
 			  mixing = MaterialMixing(),
 			  lateral_shrinkage_law = nothing,
-			  depletion_limiter = DepletionLimiter())
+			  depletion_limiter = DepletionLimiter(),
+			  gas_viscosity = SutherlandProperty())
 
 Create a material with keyword arguments.
 
@@ -288,6 +289,10 @@ Create a material with keyword arguments.
   reaction-rate evaluation for this material. Default: a
   [`DepletionLimiter`](@ref) (a roll-off near reactant depletion that is zero
   at and below zero concentration) with `threshold = 1.0` kg/m³, enabled.
+- `gas_viscosity`: dynamic viscosity μ(T) of the pore gas [Pa·s], a number or
+  a property function of temperature, used only in the Darcy mobility κ/μ.
+  Default: [`SutherlandProperty`](@ref) (air). It must be positive and finite
+  from 200 K to 1800 K.
 
 # Example
 ```julia
@@ -495,156 +500,4 @@ end
     end
     ls = lowercase(s)
     return occursin("water", ls) || ls == "h2o"
-end
-
-# ============================================================================
-# Unrolled Component Loops for Hot Paths
-# ============================================================================
-
-"""
-	compute_gas_fluxes_unrolled!(J, f, ξ_L, ξ_R, λ_face, T_L, T_R, d_LR, material::Material{NC})
-
-Compute gas fluxes for all components at face f, using compile-time unrolling.
-
-Uses the volume fraction gradient formulation where λ_face is the harmonic mean of λ:
-	J = -(λ_face / T_face) × (ξ_R × T_R - ξ_L × T_L) / d_LR
-"""
-@generated function compute_gas_fluxes_unrolled!(
-    J::Matrix,
-    f::Int,
-    ξ_L::NTuple{NC},
-    ξ_R::NTuple{NC},
-    λ_face,
-    T_L,
-    T_R,
-    d_LR,
-    material::Material{NC},
-) where {NC}
-
-    exprs = Expr[]
-    for j = 1:NC
-        push!(
-            exprs,
-            quote
-                @inbounds if is_gas(material.components[$j])
-                    ξ_L_j = ξ_L[$j]
-                    ξ_R_j = ξ_R[$j]
-                    # Volume fraction gradient: J = -(λ/T_face) × Δ(ξT) / d
-                    T_face = 0.5 * (T_L + T_R)
-                    J[$j, f] = -λ_face * (ξ_R_j * T_R - ξ_L_j * T_L) / (T_face * d_LR)
-                end
-            end,
-        )
-    end
-    return Expr(:block, exprs...)
-end
-
-
-"""
-	compute_gas_fluxes_darcy_fick_unrolled!(J::Matrix, f::Int, v_g::Float64,
-		ξ_L::NTuple{NC}, ξ_R::NTuple{NC}, φ_L, φ_R, λ_face, T_L, T_R, d_LR,
-		material::Material{NC})
-
-Compile-time unrolled Darcy-Fick flux computation for type stability.
-
-Computes J = J_adv + J_diff for each gas component:
-- J_adv = v_g × ξ_upwind / φ_face (first-order upwind; ξ is per bulk volume,
-  v_g is superficial, so the advected scalar is the intrinsic density ξ/φ with
-  φ_face = (φ_L + φ_R)/2 floored at 1e-12 like the pressure closure)
-- J_diff = -(λ_face/T_face) × (ξ_R×T_R - ξ_L×T_L) / d_LR (volume fraction gradient)
-"""
-@generated function compute_gas_fluxes_darcy_fick_unrolled!(
-    J::Matrix,
-    f::Int,
-    v_g,
-    ξ_L::NTuple{NC},
-    ξ_R::NTuple{NC},
-    φ_L,
-    φ_R,
-    λ_face,
-    T_L,
-    T_R,
-    d_LR,
-    material::Material{NC},
-) where {NC}
-
-    exprs = Expr[:(inv_φ_face = 1.0 / max(0.5 * (φ_L + φ_R), 1e-12))]
-    for j = 1:NC
-        push!(
-            exprs,
-            quote
-                @inbounds if is_gas(material.components[$j])
-                    ξ_L_j = ξ_L[$j]
-                    ξ_R_j = ξ_R[$j]
-
-                    # Diffusive flux (volume fraction gradient)
-                    T_face = 0.5 * (T_L + T_R)
-                    J_diff = -λ_face * (ξ_R_j * T_R - ξ_L_j * T_L) / (T_face * d_LR)
-
-                    # Advective flux: intrinsic density upwinded (first-order)
-                    ξ_upwind = v_g >= 0.0 ? ξ_L_j : ξ_R_j
-                    J_adv = v_g * ξ_upwind * inv_φ_face
-
-                    # Combined Darcy-Fick flux
-                    J[$j, f] = J_adv + J_diff
-                end
-            end,
-        )
-    end
-    return Expr(:block, exprs...)
-end
-
-"""
-	set_boundary_advective_flux_unrolled!(J::Matrix, f::Int, v_over_φ,
-		ξ_int::NTuple{NC}, material::Material{NC})
-
-Write the boundary-face advective venting flux `J[j, f] = v_over_φ · ξ_int[j]`
-for every gas component (solids untouched). `v_over_φ = v_b/φ_int` is the
-interstitial boundary Darcy velocity; the caller has already applied the
-outflow-only upwind gate (the ambient ghost carries no tracked gas).
-"""
-@generated function set_boundary_advective_flux_unrolled!(
-    J::Matrix,
-    f::Int,
-    v_over_φ,
-    ξ_int::NTuple{NC},
-    material::Material{NC},
-) where {NC}
-    exprs = Expr[]
-    for j = 1:NC
-        push!(exprs, quote
-            @inbounds if is_gas(material.components[$j])
-                J[$j, f] = v_over_φ * ξ_int[$j]
-            end
-        end)
-    end
-    return Expr(:block, exprs...)
-end
-
-
-"""
-	apply_species_residual_unrolled!(dξ::Matrix, i::Int, div_J::Matrix, dξ_rxn::Matrix, material::Material{NC})
-
-Apply species residual: for gases dξ = -div_J + dξ_rxn, for solids dξ = dξ_rxn.
-Uses compile-time unrolling for type stability.
-"""
-@generated function apply_species_residual_unrolled!(
-    dξ::Matrix,
-    i::Int,
-    div_J::Matrix,
-    dξ_rxn::Matrix,
-    material::Material{NC},
-) where {NC}
-
-    exprs = Expr[]
-    for j = 1:NC
-        push!(exprs, quote
-            @inbounds if is_gas(material.components[$j])
-                dξ[$j, i] = -div_J[$j, i] + dξ_rxn[$j, i]
-            else
-                dξ[$j, i] = dξ_rxn[$j, i]
-            end
-        end)
-    end
-    return Expr(:block, exprs...)
 end

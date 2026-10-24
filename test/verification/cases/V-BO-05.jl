@@ -10,25 +10,20 @@
 # across a void, so the flux transmitted through the void column would heat
 # the substrate beneath it far outside the property bracket.
 #
-# The depletion callback stops a fixed-mesh solve when a live cell below the
-# top live cell becomes a void (matrix volume fraction below 1e-4). The run
-# must stop between 330 and 345 s with the interior-void warning, before any
-# park, with the maximum live-cell temperature below 1000 K. The solve ends
-# with retcode Terminated.
-#
-# On the finite-volume core a cell deactivates when its condensed mass falls
-# below ε_m of its initial value, and on a fixed mesh a crossing cell beneath
-# a live cell ends the solve `:interior`, without a warning. That criterion
-# stops the run earlier, at 259.6 s; the stop time's tolerance is three times
-# the CI resolution's distance from the 240-cell time (260.35, 259.79, 259.62
-# and 259.57 s at 30, 60, 120 and 240 cells, both energy forms within 5 ms).
+# A cell deactivates when its condensed mass falls below ε_m of its initial
+# value, and on a fixed mesh a crossing cell beneath a live cell ends the
+# solve with outcome `:interior` and retcode Terminated. The run must stop at
+# 259.6 s, before any deactivation, with the maximum live-cell temperature
+# below 1000 K; the stop time's tolerance is three times the CI resolution's
+# distance from the 240-cell time (260.35, 259.79, 259.62 and 259.57 s at 30,
+# 60, 120 and 240 cells, both energy forms within 5 ms).
 
 # Histories up to the stop, and the PMMA and temperature profiles at the last
 # output before it: the skin at the top, the emptying layer beneath.
 function _vbo05_report_curves(sol)
     id = "V-BO-05"
     k = length(sol.t)
-    z_mm = cell_positions(sol) .* 1e3
+    z_mm = get_cell_positions(sol) .* 1e3
     t_k = round(sol.t[k], digits = 1)
     profile(name, title, ylabel, label, y) = ReportCurve(
         name = name,
@@ -73,9 +68,9 @@ function _vbo05_report_curves(sol)
     ]
 end
 
-# The finite-volume core's QoIs: the stop at the first ε_m crossing beneath a
-# live cell, its outcome, no deactivation before it, and the temperature bound.
-function _vbo05_core_qois(sol, rec)
+# The QoIs: the stop at the first ε_m crossing beneath a live cell, its
+# outcome, no deactivation before it, and the temperature bound.
+function _vbo05_qois(sol, rec)
     t_stop = rec.t_last
     n_events = length(sol.events)
     return [
@@ -115,46 +110,7 @@ end
 
 function _verification_case_vbo05()
     id = "V-BO-05"
-    function qois(sol)
-        rec = VBO_STEP_STATS[id]
-        VERIFICATION_CORE == "new" && return _vbo05_core_qois(sol, rec)
-        t_stop = rec.t_last
-        n_void = get(VBO_VOID_WARNINGS, id, -1)
-        n_park = length(sol.extras.park_times)
-        return [
-            QoIResult(
-                name = "stop time at the first interior void",
-                value = t_stop,
-                exact = 337.5,
-                error = abs(t_stop - 337.5),
-                tol = 7.5,
-                comment = "s; window 330–345 s (observed 337.0): the lowest PMMA cell reaches matrix volume fraction < MIXING_BLEND_LO under the skin",
-            ),
-            QoIResult(
-                name = "interior-void warning",
-                value = Float64(n_void),
-                exact = 1.0,
-                error = abs(n_void - 1.0),
-                tol = 0.5,
-                comment = "the stop names the cause and the ALE mesh",
-            ),
-            QoIResult(
-                name = "park events before the stop",
-                value = Float64(n_park),
-                exact = 0.0,
-                error = Float64(n_park),
-                tol = 0.5,
-                comment = "the surface cell persists as a skin while the layer gasifies from within",
-            ),
-            QoIResult(
-                name = "maximum live-cell temperature up to the stop",
-                value = rec.T_max,
-                error = rec.T_max,
-                tol = 1000.0,
-                comment = "K over every accepted step (observed 912); the solve stops before the void column runs away",
-            ),
-        ]
-    end
+    qois(sol) = _vbo05_qois(sol, VBO_STEP_STATS[id])
     return VerificationCase(
         id = id,
         title = "PMMA-on-Kaowool burnout on a fixed mesh under in-depth absorption stops at the first interior void",
@@ -165,9 +121,7 @@ function _verification_case_vbo05()
         expected_retcode = :Terminated,
         solve_kwargs = (
             use_ale = false,
-            handle_depletion = true,
-            depletion_threshold = 0.05,
-            min_cells = 2,
+            deactivation = true,
             radiation_model = BEER_LAMBERT,
             abstol = 1e-8,
             reltol = 1e-6,

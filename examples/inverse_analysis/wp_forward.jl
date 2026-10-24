@@ -25,17 +25,7 @@ boundary-condition time-series interpolators, sample geometry, duration).
 """
 
 using Pyrolysis
-using OrdinaryDiffEq
-# OrdinaryDiffEq v7 split the integrators into sublibraries; the umbrella package
-# only re-exports the default solver set, so `KenCarp4` must be pulled from
-# `OrdinaryDiffEqSDIRK` explicitly (see src/Solver/solve.jl docstring). Without
-# this the `KenCarp4(...)` call in `solve_keywords` throws an UndefVarError that
-# `build_and_solve`'s try/catch silently turns into a failed solve.
-using OrdinaryDiffEqSDIRK: KenCarp4
-using LinearSolve
-using Sparspak
 using Logging
-using LinearSolve: SparspakFactorization
 
 include("wp_properties.jl")
 
@@ -85,8 +75,8 @@ function Scenario(;
     T_initial::Union{Nothing,Real} = nothing,
     c0_moisture::Real = 0.0,
     # When false, the material is built with `lateral_shrinkage_law = nothing`
-    # and the solver skips the χ-block tracking + dense ∂physics/∂χⱼ Jacobian
-    # coupling — the inverse fit doesn't need post-test thickness/diameter and
+    # and the solver skips the cross-section closure rows and their dense
+    # Jacobian coupling — the inverse fit doesn't need post-test thickness/diameter and
     # pays a real per-evaluation cost for it. The validation driver
     # (validate_thickness.jl) leaves the default on.
     use_variable_cross_section::Bool = true,
@@ -666,11 +656,8 @@ function build_problem(
 
     mesh = create_uniform_mesh(
         scenario.sample_thickness,
-        scenario.n_cells,
-        Val(NC_WP);
-        T_initial = T0,
-        ξ_initial = ξ0,
-        cross_section_area = get(scenario, :A_0, WP_A0),
+        scenario.n_cells;
+        cross_section = get(scenario, :A_0, WP_A0),
     )
 
     return PyrolysisProblem(
@@ -686,26 +673,12 @@ function build_problem(
 end
 
 """
-	solve_keywords(; verbose=false, jacobian_strategy=nothing) -> NamedTuple
+	solve_keywords(; verbose=false) -> NamedTuple
 
-The keywords of the forward solve.
-
-`jacobian_strategy` overrides the Jacobian strategy. `nothing` (default)
-keeps solve's ALE default, `ApproxSolve()`: the `:ale_reduced` sparsity
-profile drops the cumulative ALE mesh-velocity widening and the dense
-z-column geometry block, paying ~14% of the prototype nnz and ~1% of the
-per-step solve cost on MaCFP-shape problems, while Newton absorbs the
-approximation with a few extra iterations. Pass `DirectSolve()` for the
-exact Jacobian.
+The keywords of the forward solve, with the default integrator and linear
+solver.
 """
-function solve_keywords(;
-    verbose::Bool = false,
-    jacobian_strategy::Union{Nothing,LinearSolveStrategy} = nothing,
-)
-    # `jacobian = nothing` keeps solve's ALE default,
-    # `Structured(strategy = ApproxSolve())`.
-    jac_backend =
-        jacobian_strategy === nothing ? nothing : Structured(strategy = jacobian_strategy)
+function solve_keywords(; verbose::Bool = false)
     return (
         abstol = 1e-7,
         reltol = 1e-7,
@@ -719,14 +692,11 @@ function solve_keywords(;
         use_ale = true,
         radiation_model = SURFACE_ABSORPTION,
         min_thickness = 0.5e-3,
-        handle_depletion = false,
-        jacobian = jac_backend,
-        integrator = KenCarp4(linsolve = SparspakFactorization()),
     )
 end
 
 """
-	build_and_solve(θ, scenario; stage=1, n_output=601, verbose=false, kinetics_set=:constant, jacobian_strategy=nothing)
+	build_and_solve(θ, scenario; stage=1, n_output=601, verbose=false, kinetics_set=:constant)
 
 Solve [`build_problem`](@ref)'s problem with [`solve_keywords`](@ref) and
 return the solution, or `nothing` if the solve fails (allowing the caller to
@@ -743,7 +713,6 @@ function build_and_solve(
     blowing::AbstractBlowingModel = CouetteFilm(),
     use_emission_split::Bool = true,
     kinetics_dE = ntuple(_ -> 0.0, 5),
-    jacobian_strategy::Union{Nothing,LinearSolveStrategy} = nothing,
 )
     problem = build_problem(
         θ,
@@ -756,7 +725,7 @@ function build_and_solve(
         kinetics_dE,
     )
     try
-        solver_kwargs = solve_keywords(; verbose, jacobian_strategy)
+        solver_kwargs = solve_keywords(; verbose)
         if log_level === nothing
             solution = solve(problem; solver_kwargs...)
         else

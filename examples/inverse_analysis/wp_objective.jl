@@ -841,16 +841,9 @@ function residual_vector(
     T_back_exp;
     stage::Int = 1,
     t_skip::Real = 1.0,
-    jacobian_strategy::Union{Nothing,LinearSolveStrategy} = nothing,
 )
 
-    sol = build_and_solve(
-        θ,
-        scenario;
-        stage = stage,
-        log_level = Logging.Warn,
-        jacobian_strategy = jacobian_strategy,
-    )
+    sol = build_and_solve(θ, scenario; stage = stage, log_level = Logging.Warn)
     sol === nothing && return nothing
     # `PyrolysisSolution.retcode` is a `Symbol` (`:Success` on success).
     sol.retcode == :Success || return nothing
@@ -915,7 +908,6 @@ function loss(
     # k_prior: vector of tuples (phase, T, k_meas, sigma_k[, source])
     k_prior::Union{Nothing,AbstractVector} = nothing,
     k_prior_weight::Real = 0.5,
-    jacobian_strategy::Union{Nothing,LinearSolveStrategy} = nothing,
 )
 
     tstart = time()
@@ -936,21 +928,13 @@ function loss(
                 ds[3];
                 stage = stage,
                 t_skip = t_skip,
-                jacobian_strategy = jacobian_strategy,
             ) for ds in dataset
         ]
         fetch.(tasks)
     else
         [
-            residual_vector(
-                θ,
-                ds[1],
-                ds[2],
-                ds[3];
-                stage = stage,
-                t_skip = t_skip,
-                jacobian_strategy = jacobian_strategy,
-            ) for ds in dataset
+            residual_vector(θ, ds[1], ds[2], ds[3]; stage = stage, t_skip = t_skip) for
+            ds in dataset
         ]
     end
 
@@ -1210,8 +1194,8 @@ const FSRI_HEAT_FLUX_CAL = 0.98
 # The radial channel is calibrated/validated (validate_thickness.jl) against
 # the experimental conversion χ̄=1−m_f/m_0; its
 # fit residual sits at the ±0.013 D-measurement noise floor (see WP_SR2 block),
-# so `true` is the more physical setting. Cost is per-eval only (χ-block
-# tracking + a denser ∂physics/∂χⱼ Jacobian coupling).
+# so `true` is the more physical setting. Cost is per-eval only (the
+# cross-section closure rows and their dense Jacobian coupling).
 const INVERSE_USE_VARIABLE_CROSS_SECTION = true
 
 # ============================================================================

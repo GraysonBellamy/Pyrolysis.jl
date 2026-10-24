@@ -45,12 +45,7 @@ println("Running with $(nworkers()) worker(s)")
 
 @everywhere begin
     using Pyrolysis
-    using Pyrolysis: compute_surface_mass_flux, effective_gas_transfer
-    using OrdinaryDiffEq
-    using OrdinaryDiffEqSDIRK: KenCarp4   # v7 split: KenCarp4 not re-exported by the umbrella pkg
-    using LinearSolve
-    using Sparspak
-    using LinearSolve: SparspakFactorization
+    using Pyrolysis: compute_surface_mass_flux, effective_gas_transfer, get_mass_bc
     using Printf
 
     # ========================================================================
@@ -114,8 +109,13 @@ println("Running with $(nworkers()) worker(s)")
     # Char cp — Hostikka & Matala (2017): cp ≈ -0.370 + 2.122e-3*T kJ/(kg·K)
     hostikka_char_cp(T) = -370.0 + 2.122 * T
 
-    # Char cp — Edrich (1980): cp = -0.29227 + 4.1387e-3*T - 1.58261e-6*T² kJ/(kg·K)
-    edrich_char_cp(T) = -292.27 + 4.1387 * T - 1.58261e-3 * T^2
+    # Char cp — Edrich (1980): cp = -0.29227 + 4.1387e-3*T - 1.58261e-6*T² kJ/(kg·K),
+    # fit on 473–773 K. Above the quadratic's maximum (T = 4.1387/(2·1.58261e-3)
+    # ≈ 1308 K) it is held at its peak value: unclamped it turns down and goes
+    # negative near 2540 K, which the material's property check refuses.
+    const EDRICH_T_PEAK = 4.1387 / (2 * 1.58261e-3)
+    edrich_char_cp(T) =
+        (Tc = min(T, EDRICH_T_PEAK); -292.27 + 4.1387 * Tc - 1.58261e-3 * Tc^2)
 
     # HoS — Free water only: constant 2442 kJ/kg = 2.442e6 J/kg
     free_water_hos(T, ξ) = 2.442e6
@@ -224,6 +224,7 @@ println("Running with $(nworkers()) worker(s)")
                     α = 0.0,
                     λ = λ_wood,
                     κ = κ_virgin,
+                    ρ_intrinsic = 1500.0,  # kg/m³, wood cell-wall (skeletal) density
                 ),
                 SolidComponent(
                     :DF_int1,
@@ -234,6 +235,7 @@ println("Running with $(nworkers()) worker(s)")
                     α = 0.0,
                     λ = λ_wood * 2.0,
                     κ = κ_virgin * 3.0,
+                    ρ_intrinsic = 1578.0,  # kg/m³, toward char by progress 0.173
                 ),
                 SolidComponent(
                     :DF_int2,
@@ -244,6 +246,7 @@ println("Running with $(nworkers()) worker(s)")
                     α = 0.0,
                     λ = λ_wood * 5.0,
                     κ = κ_virgin * 10.0,
+                    ρ_intrinsic = 1597.0,  # kg/m³, toward char by progress 0.216
                 ),
                 SolidComponent(
                     :DF_int3,
@@ -254,6 +257,7 @@ println("Running with $(nworkers()) worker(s)")
                     α = 0.0,
                     λ = λ_char * 0.3,
                     κ = κ_char * 0.01,
+                    ρ_intrinsic = 1763.0,  # kg/m³, toward char by progress 0.585
                 ),
                 SolidComponent(
                     :DF_int4,
@@ -264,6 +268,7 @@ println("Running with $(nworkers()) worker(s)")
                     α = 0.0,
                     λ = λ_char * 0.7,
                     κ = κ_char * 0.1,
+                    ρ_intrinsic = 1833.0,  # kg/m³, toward char by progress 0.74
                 ),
                 SolidComponent(
                     :Char,
@@ -274,6 +279,7 @@ println("Running with $(nworkers()) worker(s)")
                     α = 0.0,
                     λ = λ_char,
                     κ = κ_char,
+                    ρ_intrinsic = 1950.0,  # kg/m³, carbon skeletal density
                 ),
                 LiquidComponent(
                     :MOISTURE,
@@ -394,27 +400,7 @@ println("Running with $(nworkers()) worker(s)")
         ρ_DF_initial = 530.0
         ρ_moisture_initial = 0.06 * ρ_DF_initial
 
-        mesh = create_uniform_mesh(
-            12.0e-3,
-            240,
-            Val(13);
-            T_initial = T_ambient,
-            ξ_initial = (
-                ρ_DF_initial,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                ρ_moisture_initial,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-            ),
-        )
+        mesh = create_uniform_mesh(12.0e-3, 240)
 
         bc_set = BoundaryConditionSet(
             thermal = (
@@ -463,9 +449,6 @@ println("Running with $(nworkers()) worker(s)")
             use_ale = true,
             radiation_model = SURFACE_ABSORPTION,
             min_thickness = 0.5e-3,
-            handle_depletion = false,
-            # Default Jacobian is `Structured(strategy = DirectSolve())`.
-            integrator = KenCarp4(linsolve = SparspakFactorization()),
         )
 
         return solution
@@ -535,17 +518,13 @@ println("Running with $(nworkers()) worker(s)")
 
     function compute_dry_mass_series(sol)
         nt = length(sol.t)
-        A = sol.problem.mesh.cross_section_area
+        A = sol.problem.mesh.topology.cross_section
         dry_mass = Vector{Float64}(undef, nt)
         for i = 1:nt
-            ξ = sol.ξ[:, :, i]
-            n_cells = size(ξ, 2)
+            # Component masses per cell [kg], zero in a deactivated cell
             m = 0.0
-            for j = 1:n_cells
-                v = sol.problem.mesh.cell_volumes[j]
-                for k in LC_SOLID_COMPONENT_INDICES
-                    m += ξ[k, j] * v
-                end
+            for k in LC_SOLID_COMPONENT_INDICES
+                m += sum(@view sol.m[k, :, i])
             end
             dry_mass[i] = m / A
         end
@@ -617,9 +596,10 @@ println("Running with $(nworkers()) worker(s)")
         material = sol.problem.material
         bc_set = sol.problem.bc_set
         mass_bc_top = get_mass_bc(bc_set, Val(:top))
-        n_cells = length(mesh.cells)
+        n_cells = size(sol.T, 1)
 
-        d_surface = mesh.cell_volumes[n_cells] / mesh.cross_section_area / 2
+        # Half the initial thickness of the surface cell
+        d_surface = (mesh.positions[end][1] - mesh.positions[end-1][1]) / 2
 
         for i = 1:nt
             t = sol.t[i]

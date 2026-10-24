@@ -1,7 +1,7 @@
 """
 	Deactivation
 
-The terminal event of a cell of the finite-volume core: a cell whose condensed
+The terminal event of a cell: a cell whose condensed
 mass falls below a fraction `ε_m` of its reference condensed mass is
 deactivated, on a moving mesh together with the cells near the threshold
 outward of it, its inventories go to the live cell inward of it (on a fixed

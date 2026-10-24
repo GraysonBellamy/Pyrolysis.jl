@@ -1,5 +1,5 @@
 # ============================================================================
-# Problem definition and workspace of the finite-volume core
+# Problem definition and workspace
 # ============================================================================
 
 """

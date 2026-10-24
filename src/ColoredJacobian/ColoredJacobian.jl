@@ -1,8 +1,7 @@
 """
 	ColoredJacobian
 
-The Jacobian of the finite-volume core: a sparsity pattern built from the
-mesh connectivity, column coloring, and colored forward-mode automatic
+The Jacobian: a sparsity pattern built from the mesh connectivity, column coloring, and colored forward-mode automatic
 differentiation of the residual, with dense forward-mode differentiation as
 the reference that the pattern must contain and the values must match.
 """

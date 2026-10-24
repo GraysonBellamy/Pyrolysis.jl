@@ -106,16 +106,3 @@ PERFORMANCE: Uses dispatch-based helpers to avoid allocations from heterogeneous
 @inline function volume_change_rate(dξ::NTuple{NC,<:Real}, T::Real, material) where {NC}
     return _volume_change_rate(dξ, T, material.components, Val(NC))
 end
-
-"""
-	volume_change_rate(dξ, T, material::Material{NC}) -> Real
-
-Vector version for pre-allocated storage.
-"""
-@inline function volume_change_rate(
-    dξ::AbstractVector,
-    T::Real,
-    material::Material{NC},
-) where {NC}
-    return _volume_change_rate(dξ, T, material.components, Val(NC))
-end

@@ -161,8 +161,8 @@ Fluid Flow*), giving μ(300 K) = 1.846e-5 Pa·s. This is the default carried by
 Like every property law, it evaluates at `property_temperature(T)`, the
 temperature clamped to `[T_PROPERTY_MIN, T_PROPERTY_MAX]`, so a diverging
 Newton trial state cannot reach `T^1.5` at a negative temperature. The
-viscosity floor `MU_FLOOR` is applied separately, in
-`Properties.effective_gas_viscosity(T, material)`.
+viscosity floor `MU_FLOOR` is applied separately, where the state mapping
+forms the Darcy mobility.
 
 # Example
 ```julia

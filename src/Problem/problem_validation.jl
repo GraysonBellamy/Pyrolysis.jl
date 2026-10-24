@@ -109,50 +109,6 @@ function validate_mesh(mesh::Meshes.Mesh)
     return errors
 end
 
-function validate_mesh(mesh::Mesh1D)
-    errors = String[]
-
-    # Check mesh has cells
-    if isempty(mesh.cells)
-        push!(errors, "Mesh has no cells")
-    end
-
-    # Check mesh has nodes
-    if isempty(mesh.nodes)
-        push!(errors, "Mesh has no nodes")
-    end
-
-    # Check mesh has faces
-    if isempty(mesh.faces)
-        push!(errors, "Mesh has no faces")
-    end
-
-    # Check cell states exist
-    if isempty(mesh.cell_states)
-        push!(errors, "Mesh has no cell states")
-    elseif length(mesh.cell_states) != length(mesh.cells)
-        push!(
-            errors,
-            "Mesh cell_states count ($(length(mesh.cell_states))) doesn't match cells count ($(length(mesh.cells)))",
-        )
-    end
-
-    # Check geometry cache
-    if isempty(mesh.cell_centers)
-        push!(errors, "Mesh cell_centers not initialized")
-    end
-    if isempty(mesh.cell_volumes)
-        push!(errors, "Mesh cell_volumes not initialized")
-    end
-
-    # Check boundary faces
-    if isempty(mesh.boundary_faces)
-        push!(errors, "Mesh has no boundary face definitions")
-    end
-
-    return errors
-end
-
 """
 	validate_material_for_problem(material) -> Vector{String}
 
@@ -194,9 +150,9 @@ Warn when a gas-producing material with Fickian transport (no permeable
 component) has a condensed component whose gas-transfer coefficient λ is zero.
 The cell coefficient is the volume-fraction mix of the component values, so a
 cell of that component holding no gas has no gas transport at all. The gas
-field then ends in a sharp front, and a Newton iterate that drives the front
+field then ends in a sharp front, and a trial state that drives the front
 cell's gas concentration below zero closes both of its faces and flattens its
-residual: the implicit solve fails repeatedly on the front. A small λ on the
+residual: the integrator rejects step after step on the front. A small λ on the
 condensed components (`SolidComponent(...; λ = 1e-6)`) keeps the transport
 non-degenerate.
 """
@@ -212,8 +168,8 @@ function warn_degenerate_gas_transport(material)
     @warn "Material $(repr(material.name)): the condensed component(s) " *
           "$(join(repr.(names), ", ")) have gas-transfer coefficient λ = 0 under " *
           "Fickian gas transport. Gas transport vanishes where the gas fraction " *
-          "vanishes, the gas field forms a sharp front, and the implicit Newton " *
-          "fails repeatedly on it. Give the condensed components a small λ " *
+          "vanishes, the gas field forms a sharp front, and the integrator " *
+          "rejects step after step on it. Give the condensed components a small λ " *
           "(for example `λ = 1e-6` m²/s)." maxlog = 1
     return nothing
 end
@@ -253,25 +209,6 @@ function _validate_boundaries!(errors, mesh::Meshes.Mesh, bc_set)
         haskey(bc_set.thermal, tag) ||
             push!(errors, "No thermal condition for the mesh's boundary tag :$tag")
     end
-    return errors
-end
-
-function _validate_boundaries!(errors, mesh::Mesh1D, bc_set)
-    # Get all boundary IDs from mesh
-    mesh_boundary_ids = Set(keys(mesh.boundary_faces))
-
-    # Check that we have BCs for the expected boundaries (1=top, 2=bottom)
-    # BoundaryConditionSet always has thermal/mass BCs for both :top and :bottom,
-    # so we just verify the mesh has the expected boundaries
-    expected_boundaries = Set([1, 2])  # Top and bottom
-    missing_boundaries = setdiff(expected_boundaries, mesh_boundary_ids)
-    if !isempty(missing_boundaries)
-        push!(
-            errors,
-            "Mesh missing expected boundaries: $missing_boundaries (expected 1=top, 2=bottom)",
-        )
-    end
-
     return errors
 end
 
@@ -374,7 +311,7 @@ The usual cause is a solid component constructed without `ρ_intrinsic` (or
 solid fills the cell exactly, giving φ₀ = 0.
 
 Initial porosity and permeability are evaluated from `T_initial`/`ξ_initial`
-at every cell center — the same points `apply_initial_conditions!` uses.
+at every cell center, the points `initial_fields` evaluates them at.
 The porosity is the unclamped pore fraction `1 − skeletal_volume_fraction`.
 Cells whose effective permeability is not positive are not flagged (zero
 mobility keeps the pressure field inert there). Returns no errors for Fickian

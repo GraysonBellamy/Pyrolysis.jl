@@ -18,7 +18,6 @@ using Pyrolysis.Properties:
     solid_volume_fractions,
     mixing_volume_fractions,
     effective_conductivity,
-    effective_emissivity,
     mixture_emissivity
 using Pyrolysis.Physics: volume_change_rate
 
@@ -86,7 +85,6 @@ end
     # Healthy cell: unchanged behavior (weights on the matrix).
     ξ_ok = (500.0, 0.0, 1.0)
     @test effective_conductivity(ξ_ok, T, mat) > 0.1
-    @test effective_emissivity(ξ_ok, T, mat) ≈ 0.90
     @test mixture_emissivity(ξ_ok, T, mat) ≈ 0.90
 
     # Fully converted cell (only pore gas left): k_eff degrades to the gas
@@ -97,7 +95,6 @@ end
     @test effective_conductivity(ξ_void, T, mat) ≈ 0.03 rtol = 1e-10
     # ε of a pure default-gas cell is genuinely 0 (transparent gas) — the
     # depletion callback owns this case; documented, not floored.
-    @test effective_emissivity(ξ_void, T, mat) == 0.0
     @test mixture_emissivity(ξ_void, T, mat) == 0.0
 
     # Liquid emissivity defaults realistically (water ≈ 0.96): a γ = 1
@@ -113,7 +110,7 @@ end
         ),
         reactions = (),
     )
-    ε_wet = effective_emissivity((900.0, 100.0, 0.0), 300.0, mat_wet)
+    ε_wet = mixture_emissivity((900.0, 100.0, 0.0), 300.0, mat_wet)
     @test ε_wet > 0.90   # a liquid ε = 0 would give 0.9·0.9 + 0.1·0 = 0.81
     @test mixture_emissivity((900.0, 100.0, 0.0), 300.0, mat_wet) ≈ 0.9 * 0.9 + 0.1 * 0.95 rtol =
         1e-12

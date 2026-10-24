@@ -32,9 +32,10 @@
 #
 # Permutations (ρ_A = 1000, γ_A = 1, isothermal via E = 0, h = 0, everything
 # impermeable). Mass QoIs: EVERY permutation asserts total-mass conservation
-# to integrator tolerance — every component rides the mesh and carries the
-# dilation −ξθ (tech-ref §11.2.3), so the gas held in a collapsing
-# impermeable matrix compresses cell by cell (ξ_g ↑ as V ↓) and leaves only
+# to integrator tolerance — every component's mass is a state that rides the
+# mesh, so its concentration ξ = m/V follows the cell volume (tech-ref
+# §11.3.4): the gas held in a collapsing impermeable matrix compresses cell
+# by cell (ξ_g ↑ as V ↓) and leaves only
 # through the (closed) faces. P4 is the sealed-column anchor for that
 # bookkeeping. Gas-producing permutations additionally assert the SOLID
 # ledger (char endpoint = y_char·m_A0 exactly).
@@ -129,15 +130,7 @@ function _vcpl03_problem(perm; n_cells = 8, n_outputs = 3)
         depletion_limiter = DepletionLimiter(enabled = false),
         lateral_shrinkage_law = chi_law,
     )
-    ξinit_t = ntuple(i -> i == 1 ? ρ_A : 0.0, nc)
-    mesh = core_mesh(
-        create_uniform_mesh,
-        L,
-        n_cells,
-        Val(nc);
-        T_initial = T_iso,
-        ξ_initial = ξinit_t,
-    )
+    mesh = create_uniform_mesh(L, n_cells)
     bc_set = BoundaryConditionSet(
         thermal = (top = DirichletThermalBC(T_iso), bottom = DirichletThermalBC(T_iso)),
     )
@@ -155,7 +148,7 @@ end
 
 function _vcpl03_solve(perm; n_cells = 8, n_outputs = 3)
     r = _vcpl03_problem(perm; n_cells = n_cells, n_outputs = n_outputs)
-    sol = core_solve(
+    sol = suite_solve(
         r.problem;
         use_ale = true,
         min_thickness = 1e-5,

@@ -50,10 +50,7 @@ function plot_main()
 
     fit_labels = OPTS.fit_labels === nothing ? DEFAULT_FIT_LABELS : OPTS.fit_labels
     val_labels = OPTS.val_labels === nothing ? DEFAULT_VAL_LABELS : OPTS.val_labels
-    # ApproxSolve (~14% nnz, the :ale_reduced profile) is the default Jacobian
-    # strategy here; the full DirectSolve path is not used.
-    jac_strat = ApproxSolve()
-    @info "Re-plotting at supplied Stage-2 θ" θ fit = fit_labels val = val_labels jacobian = "ApproxSolve"
+    @info "Re-plotting at supplied Stage-2 θ" θ fit = fit_labels val = val_labels
 
     fit_dataset = [load_registry_dataset(l) for l in fit_labels]
     val_dataset = Any[]
@@ -66,14 +63,7 @@ function plot_main()
     end
 
     outpath = joinpath(RESULTS_DIR, "fit_plots_stage2_manual.png")
-    plot_fits(
-        θ,
-        fit_dataset,
-        val_dataset,
-        STAGE;
-        outpath = outpath,
-        jacobian_strategy = jac_strat,
-    )
+    plot_fits(θ, fit_dataset, val_dataset, STAGE; outpath = outpath)
     @info "Done." outpath
 end
 

@@ -77,24 +77,6 @@ DepletionLimiter(;
     enabled::Bool = true,
 ) = DepletionLimiter(threshold, join, base_scale, enabled)
 
-"""
-	TanhLimiter(; threshold = 1.0, enabled = true)
-	TanhLimiter(l::AbstractDepletionLimiter)
-
-The rate factor `tanh(ξ/threshold)` on the power of the concentration clamped
-at zero, the limiter the solver of `Mesh1D` problems applies: from a
-[`DepletionLimiter`](@ref) it takes the threshold and the enabled flag. Above
-`join · threshold` the two limiters' rates agree to round-off.
-"""
-Base.@kwdef struct TanhLimiter <: AbstractDepletionLimiter
-    threshold::Float64 = 1.0
-    enabled::Bool = true
-end
-
-TanhLimiter(l::TanhLimiter) = l
-TanhLimiter(l::DepletionLimiter) =
-    TanhLimiter(; threshold = l.threshold, enabled = l.enabled)
-
 # ============================================================================
 # Reaction Type
 # ============================================================================

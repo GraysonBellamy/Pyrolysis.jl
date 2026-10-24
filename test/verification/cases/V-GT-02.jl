@@ -15,11 +15,12 @@
 #
 # Setup notes (the four pitfalls the survey flagged):
 # - P is NOT persisted in PyrolysisSolution: reconstructed per cell from
-#   sol.ξ/sol.T via porosity + ideal_gas_pressure with the same material.
+#   sol.ξ/sol.T via the porosity 1 − skeletal_volume_fraction and
+#   ideal_gas_pressure with the same material.
 # - Initial gas is seeded with background_gas_concentration so P(z,0) = P∞
 #   (starting from ξ_gas = 0 would start from vacuum).
 # - μ in the exact profile is the MATERIAL's own viscosity curve,
-#   effective_gas_viscosity(T_iso, mat), not a hand-picked constant — so the
+#   mat.gas_viscosity(T_iso), not a hand-picked constant — so the
 #   case stays exact for whatever `gas_viscosity` the material carries, which
 #   is what lets the ×2-viscosity check in test_darcy.jl exercise that field.
 # - λ = 0 on every component kills the Fickian term: pure Darcy outflow.
@@ -63,14 +64,7 @@ function _verification_case_vgt02()
             depletion_limiter = DepletionLimiter(enabled = false),
         )
         ξ_g0 = background_gas_concentration(mat, 2, (1000.0, 0.0), T_iso; P = P∞)
-        mesh = core_mesh(
-            create_uniform_mesh,
-            L,
-            n_cells,
-            Val(2);
-            T_initial = T_iso,
-            ξ_initial = (1000.0, ξ_g0),
-        )
+        mesh = create_uniform_mesh(L, n_cells)
         bc_set = BoundaryConditionSet(
             thermal = (top = DirichletThermalBC(T_iso), bottom = DirichletThermalBC(T_iso)),
             mass = (top = DirichletPressureBC(P∞), bottom = ImpermeableBC()),
@@ -89,8 +83,8 @@ function _verification_case_vgt02()
     function qois(sol)
         out = QoIResult[]
         mat = sol.problem.material
-        z = cell_positions(sol)
-        μ = effective_gas_viscosity(T_iso, mat)
+        z = get_cell_positions(sol)
+        μ = mat.gas_viscosity(T_iso)
         ΔP²_coeff = μ * R * T_iso * ġ / (κ_perm * M_gas)
         P²_exact(zz) = P∞^2 + ΔP²_coeff * (L^2 - zz^2)
         ΔP²_scale = ΔP²_coeff * L^2  # back-face overpressure² scale
@@ -98,7 +92,7 @@ function _verification_case_vgt02()
         P_num = map(eachindex(z)) do i
             ξi = (sol.ξ[1, i, end], sol.ξ[2, i, end])
             Ti = sol.T[i, end]
-            φi = porosity(ξi, Ti, mat)
+            φi = 1 - skeletal_volume_fraction(ξi, Ti, mat)
             ideal_gas_pressure(ξi, Ti, φi, mat)
         end
 
@@ -161,12 +155,12 @@ function _verification_case_vgt02()
     # L∞ of the P² profile (normalized) for the order check, at t_end.
     function p2_error(sol)
         mat = sol.problem.material
-        z = cell_positions(sol)
-        μ = effective_gas_viscosity(T_iso, mat)
+        z = get_cell_positions(sol)
+        μ = mat.gas_viscosity(T_iso)
         ΔP²_coeff = μ * R * T_iso * ġ / (κ_perm * M_gas)
         maximum(eachindex(z)) do i
             ξi = (sol.ξ[1, i, end], sol.ξ[2, i, end])
-            φi = porosity(ξi, T_iso, mat)
+            φi = 1 - skeletal_volume_fraction(ξi, T_iso, mat)
             P = ideal_gas_pressure(ξi, T_iso, φi, mat)
             abs(P^2 - (P∞^2 + ΔP²_coeff * (L^2 - z[i]^2))) / (ΔP²_coeff * L^2)
         end
@@ -202,12 +196,12 @@ function _verification_case_vgt02()
             qoi_curves = (:P2_profile, :exit_flux_history),
             curves = sol -> begin
                 mat = sol.problem.material
-                z = cell_positions(sol)
-                μ = effective_gas_viscosity(T_iso, mat)
+                z = get_cell_positions(sol)
+                μ = mat.gas_viscosity(T_iso)
                 ΔP²_coeff = μ * R * T_iso * ġ / (κ_perm * M_gas)
                 P_num = map(eachindex(z)) do i
                     ξi = (sol.ξ[1, i, end], sol.ξ[2, i, end])
-                    φi = porosity(ξi, sol.T[i, end], mat)
+                    φi = 1 - skeletal_volume_fraction(ξi, sol.T[i, end], mat)
                     ideal_gas_pressure(ξi, sol.T[i, end], φi, mat)
                 end
                 [
@@ -243,12 +237,12 @@ function _verification_case_vgt02()
             end,
             error_norms = sol -> begin
                 mat = sol.problem.material
-                z = cell_positions(sol)
-                μ = effective_gas_viscosity(T_iso, mat)
+                z = get_cell_positions(sol)
+                μ = mat.gas_viscosity(T_iso)
                 ΔP²_coeff = μ * R * T_iso * ġ / (κ_perm * M_gas)
                 e = map(eachindex(z)) do i
                     ξi = (sol.ξ[1, i, end], sol.ξ[2, i, end])
-                    φi = porosity(ξi, T_iso, mat)
+                    φi = 1 - skeletal_volume_fraction(ξi, T_iso, mat)
                     P = ideal_gas_pressure(ξi, T_iso, φi, mat)
                     (P^2 - (P∞^2 + ΔP²_coeff * (L^2 - z[i]^2))) / (ΔP²_coeff * L^2)
                 end

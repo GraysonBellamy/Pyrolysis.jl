@@ -2,15 +2,12 @@
 # V-MMS-04 — induced-motion ALE manufactured solution (reaction-driven mesh)
 # =============================================================================
 #
-# V-MMS-02/03 verify GCL + moving-mesh transport
-# under PRESCRIBED motion (`w_override`) and deliberately bypass the θ
-# prefix-sum mesh velocity, the dilation correction −ξθ with θ ≠ 0, and the
-# structured geometry Jacobian. Here the kinetics are manufactured so the
+# V-MMS-02/03 verify GCL + moving-mesh transport under PRESCRIBED motion
+# (`w_override`), which moves the mesh over a solid at rest and deliberately
+# bypasses the balance rows' mesh velocity (the integral of θ) and the
+# cell-volume change with θ ≠ 0. Here the kinetics are manufactured so the
 # rates are analytic on the manufactured fields and the motion is genuinely
-# REACTION-DRIVEN — no `w_override` — closing the kinetics→θ→w→geometry
-# chain and making both `DirectSolve` AND `ApproxSolve` valid backends. The
-# fixed-resolution ApproxSolve solve, whose exact-error QoI sits next to
-# DirectSolve's, quantifies ApproxSolve against a known-exact answer.
+# REACTION-DRIVEN — no `w_override` — closing the kinetics→θ→w→geometry chain.
 #
 # ## Manufactured design (see exact/mms.jl, "Induced mesh motion")
 #
@@ -22,8 +19,8 @@
 # target is the kinetics→geometry chain. The solid and the gas are both
 # z-VARYING and both ride the reacting mesh: every species source is
 # assembled in the material frame, S = ∂tξ* + w*·∂zξ* + [∂zJ*]_gas − ω̇* +
-# ξ*·θ*, so the moving-point chain rule and the discrete dilation are built
-# in (`mms_species_source` with `w` from the `MMSMotion` companion).
+# ξ*·θ*, so the moving-point chain rule and the growth of the cell volume are
+# built in (`mms_species_source` with `w` from the `MMSMotion` companion).
 #
 #   θ*(z,t) = −rate*/ρ_s = −k(T*(t))·ξ_s*(z,t)/ρ_s   (volume_change_rate)
 #   w*(z,t) = ∫₀ᶻ θ* dζ = −(k(t)/ρ_s)·[a(t)·z + b(t)·(L/π)(1 − cos(πz/L))]
@@ -40,15 +37,6 @@
 # dz*/dt = w*(z*, t), z*(0) = L — not analytic here, so `build` precomputes it
 # with Vern9 at 1e-14 tolerances (requirement-4 compliant) and the BC closures
 # read the dense interpolant. The bottom node is pinned (w*(0,t) = 0).
-#
-# ## Jacobian caveat (do not claim exactness)
-#
-# With sources evaluated at live cell centers, du += S(z(u), t) has a real
-# ∂S/∂z chain the analytic `Structured(DirectSolve())` Jacobian does not
-# carry (driver design decision 1's ∂S/∂u ≡ 0 holds only on a fixed mesh).
-# Harmless for solution correctness and observed order (inexact Newton
-# matrix), and the DirectSolve-vs-ApproxSolve comparison stays clean because
-# both share the omission.
 
 function _verification_case_vmms04()
     L = 0.01
@@ -91,14 +79,7 @@ function _verification_case_vmms04()
     z_top(t) = ztop_sol(t)
 
     function build(n_cells)
-        mesh = core_mesh(
-            create_uniform_mesh,
-            L,
-            n_cells,
-            Val(2);
-            T_initial = 600.0,
-            ξ_initial = (600.0, 2.0),
-        )
+        mesh = create_uniform_mesh(L, n_cells)
         # Manufactured BC fluxes at the MOVING top face z*_top(t); bottom
         # pinned at 0. The thermal fluxes are identically zero for z-uniform
         # T*, but the closures stay field-derived so the case remains correct
@@ -124,13 +105,11 @@ function _verification_case_vmms04()
         )
     end
 
-    solve_fn(problem; jacobian = :analytic, kwargs...) = solve_mms(
+    solve_fn(problem; kwargs...) = solve_mms(
         problem,
         fields;
         use_ale = true,
         motion = motion,
-        jacobian,
-        core = Symbol(VERIFICATION_CORE),
         energy_state = VERIFICATION_ENERGY_STATE,
         kwargs...,
     )
@@ -145,7 +124,7 @@ function _verification_case_vmms04()
         push!(
             out,
             QoIResult(
-                name = "L∞ T error (DirectSolve), t=$(t_end) s",
+                name = "L∞ T error, t=$(t_end) s",
                 value = mms_Linf_T(sol, fields),
                 error = mms_Linf_T(sol, fields),
                 tol = 6.0e-5,  # 3× observed: 2.0e-5 K (n=32). z-uniform T*, so the
@@ -160,14 +139,14 @@ function _verification_case_vmms04()
                 1,
                 600.0,
                 2.0e-6,  # 3× observed: 6.6e-7 (n=32)
-                "solid rides the reaction-driven mesh: prefix-sum w + dilation −ξθ + material-frame source",
+                "solid rides the reaction-driven mesh: balance-row w + dilation of m/V + material-frame source",
             ),
             (
                 "ξ_gas",
                 2,
                 2.0,
                 7.0e-3,  # 3× observed: 2.3e-3 (n=32), second order (0.0184, 0.0046, 0.00115, 0.00029 at n = 16..128)
-                "gas rides the reacting, compressing mesh: dilation −ξθ + diffusion + material-frame source",
+                "gas rides the reacting, compressing mesh: dilation of m/V + diffusion + material-frame source",
             ),
         )
             err = mms_Linf_xi(sol, fields, idx) / scale
@@ -201,54 +180,6 @@ function _verification_case_vmms04()
             ),
         )
 
-        # ApproxSolve error against the SAME
-        # exact answer, side by side with DirectSolve's. Same resolution as
-        # the CI run; the reduced (`:ale_reduced`) Jacobian profile changes
-        # only Newton convergence, not the converged solution, so the exact
-        # errors must stay within the same pinned band. The finite-volume
-        # core has one Jacobian, so the companion runs on the old core only.
-        VERIFICATION_CORE == "old" || return out
-        sol_approx = solve_mms(
-            build(32),
-            fields;
-            use_ale = true,
-            motion = motion,
-            jacobian = :approx,
-        )
-        if sol_approx.retcode == :Success
-            push!(
-                out,
-                QoIResult(
-                    name = "L∞ T error (ApproxSolve), t=$(t_end) s",
-                    value = mms_Linf_T(sol_approx, fields),
-                    error = mms_Linf_T(sol_approx, fields),
-                    tol = 6.0e-5,  # 3× observed: 2.0e-5 K (n=32) — matches DirectSolve
-                    comment = "requirement 3: ApproxSolve vs known-exact answer",
-                ),
-            )
-            err_s = mms_Linf_xi(sol_approx, fields, 1) / 600.0
-            push!(
-                out,
-                QoIResult(
-                    name = "relative L∞ ξ_solid error (ApproxSolve), t=$(t_end) s",
-                    value = err_s,
-                    error = err_s,
-                    tol = 2.0e-6,  # 3× observed: 6.6e-7 (n=32) — matches DirectSolve
-                    comment = "requirement 3: ApproxSolve vs known-exact answer",
-                ),
-            )
-        else
-            push!(
-                out,
-                QoIResult(
-                    name = "ApproxSolve companion solve retcode",
-                    value = 1.0,
-                    error = 1.0,
-                    tol = 0.5,
-                    comment = "ApproxSolve solve failed: $(sol_approx.retcode)",
-                ),
-            )
-        end
         return out
     end
 
@@ -265,7 +196,7 @@ function _verification_case_vmms04()
     return VerificationCase(
         id = "V-MMS-04",
         title = "Induced-motion ALE manufactured solution (reaction-driven mesh)",
-        tags = [:mms, :ale, :kinetics, :order_verification, :approx_jacobian],
+        tags = [:mms, :ale, :kinetics, :order_verification],
         references = [
             "Roache, Verification and Validation in Computational Science (MMS methodology)",
             "docs/guide/technical_reference/18_verification-validation.md §18.2 (MMS driver, ALE cases)",

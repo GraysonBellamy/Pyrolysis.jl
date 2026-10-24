@@ -4,17 +4,18 @@
 #
 # The V-BO-01 deck on a fixed mesh, with the incident flux absorbed at the
 # surface. A fixed mesh keeps every cell's volume, so a gasifying cell empties
-# instead of thinning, and only the top live cell parks: once its condensed
-# concentration falls below 5 % of its initial value it merges into the cell
-# beneath, which becomes the surface. With the flux absorbed at the surface,
-# the surface cell is the hottest and empties first, so the layer burns top
-# down and no cell below the surface empties before it.
+# instead of thinning, and only the top live cell deactivates: once its
+# condensed mass falls below ε_m (1 %) of its initial value it merges into the
+# cell beneath, which becomes the surface. With the flux absorbed at the
+# surface, the surface cell is the hottest and empties first, so the layer
+# burns top down and no cell below the surface empties before it.
 #
-# The run must park all 60 PMMA cells, lose exactly the mass of the PMMA
-# layer, end on the bare substrate, close the mass ledger, keep the maximum
-# live-cell temperature below 1000 K, and take no step below the post-park
-# reset. The peak mass loss rate is informational: surface absorption is a
-# different problem from the in-depth reference of V-BO-01.
+# The run must deactivate all 60 PMMA cells, lose exactly the mass of the
+# PMMA layer, end on the bare substrate, close the mass ledger, keep the
+# maximum live-cell temperature below 1000 K, and take no step below the
+# restart step after an event. The peak mass loss rate is informational:
+# surface absorption is a different problem from the in-depth reference of
+# V-BO-01.
 
 # Peak of the CI run (0.098 mm cells).
 const VBO02_PEAK_REF = 24.62    # g m⁻² s⁻¹, at 429.5 s
@@ -29,24 +30,23 @@ function _verification_case_vbo02()
             peak_ref = VBO02_PEAK_REF,
             peak_tol = 0.25,
             peak_comment = "g m⁻² s⁻¹; surface absorption on a fixed mesh, a different problem from the in-depth reference (informational)",
-            ledger_tol = VERIFICATION_CORE == "old" ? 1e-3 : 3e-4,
-            ledger_comment = VERIFICATION_CORE == "old" ? VBO_LEDGER_COMMENT :
-                             VBO_LEDGER_COMMENT *
-                             "; each park leaves a gas transient on the fixed mesh, so this is the time error at reltol 1e-6 (observed 6.1e-5 and 6.2e-5 in the two energy forms at 60 cells, 1.2e-4 at 120, 1.9e-8 at reltol 1e-8)",
+            ledger_tol = 3e-4,
+            ledger_comment = VBO_LEDGER_COMMENT *
+                             "; each deactivation leaves a gas transient on the fixed mesh, so this is the time error at reltol 1e-6 (observed 6.1e-5 and 6.2e-5 in the two energy forms at 60 cells, 1.2e-4 at 120, 1.9e-8 at reltol 1e-8)",
         )
         st = sol.raw_solution.stats
         rec = VBO_STEP_STATS[id]
-        n_park = length(sol.extras.park_times)
+        n_events = length(sol.extras.deactivation_times)
         n_pmma = count(>(0.0), view(sol.ξ, 1, :, 1))
         push!(
             out,
             QoIResult(
-                name = "park events",
-                value = Float64(n_park),
+                name = "deactivation events",
+                value = Float64(n_events),
                 exact = Float64(n_pmma),
-                error = abs(n_park - n_pmma),
+                error = abs(n_events - n_pmma),
                 tol = 0.5,
-                comment = "every PMMA cell parks as the top live cell, top down",
+                comment = "every PMMA cell deactivates as the top live cell, top down",
             ),
         )
         push!(
@@ -64,10 +64,10 @@ function _verification_case_vbo02()
             QoIResult(
                 name = "smallest accepted step",
                 value = rec.dt_min,
-                exact = Pyrolysis.Solver.DT_AFTER_PARK,
-                error = max(0.0, 1.0 - rec.dt_min / Pyrolysis.Solver.DT_AFTER_PARK),
+                exact = Pyrolysis.Integration.DT_AFTER_EVENT,
+                error = max(0.0, 1.0 - rec.dt_min / Pyrolysis.Integration.DT_AFTER_EVENT),
                 tol = 1e-3,
-                comment = "s; no step below the post-park reset (observed 1e-6 s)",
+                comment = "s; no step below the restart step after an event, DT_AFTER_EVENT (observed 5.0e-5 s in both energy forms)",
             ),
         )
         push!(
@@ -78,7 +78,7 @@ function _verification_case_vbo02()
                 exact = 0.0,
                 error = Float64(st.nnonlinconvfail),
                 tol = 100.0,
-                comment = "budget at the CI resolution (60 PMMA cells); observed 56, about one per park interval",
+                comment = "budget at the CI resolution (60 PMMA cells); observed 0: the default integrator, Rodas5P, is a Rosenbrock method and solves no nonlinear system",
             ),
         )
         push!(
@@ -88,25 +88,22 @@ function _verification_case_vbo02()
                 value = Float64(st.naccept),
                 exact = 0.0,
                 error = Float64(st.naccept),
-                tol = VERIFICATION_CORE == "old" ? 2000.0 :
-                      VERIFICATION_ENERGY_STATE === :enthalpy ? 4000.0 : 3000.0,
-                comment = "budget at the CI resolution (60 PMMA cells); observed 1572 on the old core, about 26 per park interval, and on the new one 1706 (temperature form) and 2456 (enthalpy form)",
+                tol = VERIFICATION_ENERGY_STATE === :enthalpy ? 4000.0 : 3000.0,
+                comment = "budget at the CI resolution (60 PMMA cells); observed 1978 (temperature form) and 2797 (enthalpy form)",
             ),
         )
         return out
     end
     return VerificationCase(
         id = id,
-        title = "PMMA-on-Kaowool burnout on a fixed mesh under surface absorption (top-cell parking)",
+        title = "PMMA-on-Kaowool burnout on a fixed mesh under surface absorption (top-cell deactivation)",
         tags = [:eulerian, :burnout, :depletion, :surface_absorption, :coupled],
         references = ["MaCFP-2 PMMA gasification case (NIST), 50 kW/m²"],
         build = n -> _vbo_problem(n; substrate_alpha = 0.0, pmma_alpha = 0.0),
         solve_fn = _vbo_solve_fn(id),
         solve_kwargs = (
             use_ale = false,
-            handle_depletion = true,
-            depletion_threshold = 0.05,
-            min_cells = 2,
+            deactivation = true,
             radiation_model = SURFACE_ABSORPTION,
             abstol = 1e-8,
             reltol = 1e-6,

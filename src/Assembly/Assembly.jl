@@ -1,8 +1,7 @@
 """
 	Assembly
 
-The residual of the finite-volume core: the state mapping, the kernels in a
-fixed order, the mesh closure, the external sources and the row assembly, as
+The residual: the state mapping, the kernels in a fixed order, the mesh closure, the external sources and the row assembly, as
 a pure function of `(du, u, def, t, ws)`.
 """
 module Assembly

@@ -131,7 +131,7 @@ first to the last saved state by the trapezoid over the saved states, whose
 error is the saving interval's. `method` names which.
 """
 function conservation_audit(
-    sol::CoreSolution,
+    sol::PyrolysisSolution,
     rec::Union{Nothing,ConservationRecorder} = nothing,
 )
     x = sol.extras

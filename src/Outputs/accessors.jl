@@ -2,44 +2,78 @@
 # Accessors
 # ============================================================================
 
-get_times(sol::CoreSolution) = sol.t
-get_temperatures(sol::CoreSolution) = sol.T
-get_concentrations(sol::CoreSolution) = sol.ξ
-get_gas_generation_rate(sol::CoreSolution) = sol.extras.gas_generation_rate
-n_timesteps(sol::CoreSolution) = length(sol.t)
+"""
+	get_times(sol::PyrolysisSolution) -> Vector{Float64}
+
+The saved times [s].
+"""
+get_times(sol::PyrolysisSolution) = sol.t
 
 """
-	succeeded(sol::CoreSolution) -> Bool
+	get_temperatures(sol::PyrolysisSolution) -> Matrix{Float64}
+
+The cell temperatures at the saved times, `n_cells × n_times` [K], `NaN` in a
+deactivated cell.
+"""
+get_temperatures(sol::PyrolysisSolution) = sol.T
+
+"""
+	get_concentrations(sol::PyrolysisSolution) -> Array{Float64,3}
+
+The concentrations at the saved times, `NC × n_cells × n_times` [kg/m³],
+`NaN` in a deactivated cell.
+"""
+get_concentrations(sol::PyrolysisSolution) = sol.ξ
+
+"""
+	get_gas_generation_rate(sol::PyrolysisSolution) -> Vector{Float64}
+
+The gas the reactions of the live cells produce, per unit initial area of the
+`:top` faces, at the saved times [kg/(m²·s)]: a volumetric production, not
+the mass-loss rate through the surface (`sol.mass_loss_rate`).
+"""
+get_gas_generation_rate(sol::PyrolysisSolution) = sol.extras.gas_generation_rate
+
+"""
+	n_timesteps(sol::PyrolysisSolution) -> Int
+
+The number of saved times.
+"""
+n_timesteps(sol::PyrolysisSolution) = length(sol.t)
+
+"""
+	succeeded(sol::PyrolysisSolution) -> Bool
 
 Whether the solve finished: with return code `:Success`, or `:Terminated`
 by a complete burnout (outcome `:burned_out`) or the `min_thickness` stop
-(outcome `:min_thickness`). An interior void (`:interior`), an inconsistent
-closure (`:inconsistent`) and `:Failure` are not; nor is a termination by a
-callback of the caller's. [`completed`](@ref) is the strict test.
+(outcome `:min_thickness`). An interior void (`:interior`) and `:Failure`
+(among them an event that leaves the state inadmissible or the node
+velocities inconsistent) are not; nor is a termination by a callback of the
+caller's. [`completed`](@ref) is the strict test.
 """
-succeeded(sol::CoreSolution) =
+succeeded(sol::PyrolysisSolution) =
     sol.retcode === :Success ||
     (sol.retcode === :Terminated && sol.outcome in (:burned_out, :min_thickness))
 
 """
-	completed(sol::CoreSolution) -> Bool
+	completed(sol::PyrolysisSolution) -> Bool
 
 Whether the solve reached the end of its time span: return code `:Success`.
 """
-completed(sol::CoreSolution) = sol.retcode === :Success
+completed(sol::PyrolysisSolution) = sol.retcode === :Success
 
 """
-	get_cell_positions(sol::CoreSolution; at = lastindex(sol.t)) -> Vector{Float64}
+	get_cell_positions(sol::PyrolysisSolution; at = lastindex(sol.t)) -> Vector{Float64}
 
 The cell-centre positions at the saved time `sol.t[at]` [m]: `NaN` for a
 deactivated cell, and so for every cell beyond the outermost live node. The
 initial positions are `get_cell_positions(sol; at = 1)`.
 """
-get_cell_positions(sol::CoreSolution; at::Integer = lastindex(sol.t)) =
+get_cell_positions(sol::PyrolysisSolution; at::Integer = lastindex(sol.t)) =
     sol.cell_centers[:, at]
 
 """
-	get_profile(sol::CoreSolution, field, i) -> Array
+	get_profile(sol::PyrolysisSolution, field, i) -> Array
 
 The field `field` at the saved time `sol.t[i]`: `:T` (the cell
 temperatures), `:ξ` (the concentrations, `NC × n_cells`) or `:ξj` for
@@ -47,7 +81,7 @@ component `j`, `:m` (the component masses, `NC × n_cells`) or `:mj`, and `:z`
 (the node positions; on a fixed mesh the mesh's). Deactivated cells are
 `NaN`, and so are the nodes beyond the outermost live one.
 """
-function get_profile(sol::CoreSolution, field::Symbol, i::Integer)
+function get_profile(sol::PyrolysisSolution, field::Symbol, i::Integer)
     field === :T && return sol.T[:, i]
     field === :ξ && return sol.ξ[:, :, i]
     if field === :m
@@ -80,8 +114,8 @@ function _mask_at!(layout, events, t)
 end
 
 """
-	(sol::CoreSolution)(t) -> NamedTuple
-	interpolate_solution(sol::CoreSolution, t) -> NamedTuple
+	(sol::PyrolysisSolution)(t) -> NamedTuple
+	interpolate_solution(sol::PyrolysisSolution, t) -> NamedTuple
 
 The fields at time `t`: `(; t, T, ξ, m, z, cell_centers)` as one saved time
 of the solution holds them, reconstructed from the integrator's interpolant
@@ -90,7 +124,7 @@ last deactivation event at or before `t`. The interpolant between two saved
 states that an event separates is not the trajectory, so a `t` strictly
 inside such an interval is refused.
 """
-function (sol::CoreSolution)(t::Real)
+function (sol::PyrolysisSolution)(t::Real)
     raw = sol.raw_solution
     ts = raw.t
     first(ts) <= t <= last(ts) || throw(
@@ -142,18 +176,24 @@ function (sol::CoreSolution)(t::Real)
     return (; t = Float64(t), T, ξ, m, z, cell_centers = centers)
 end
 
-interpolate_solution(sol::CoreSolution, t::Real) = sol(t)
+"""
+	interpolate_solution(sol::PyrolysisSolution, t) -> NamedTuple
 
-function Base.show(io::IO, sol::CoreSolution)
+The reconstructed fields at `t`, `sol(t)`: see [`PyrolysisSolution`](@ref)'s
+call method for the interpolation and its refusal across an event's step.
+"""
+interpolate_solution(sol::PyrolysisSolution, t::Real) = sol(t)
+
+function Base.show(io::IO, sol::PyrolysisSolution)
     print(
         io,
-        "CoreSolution(:$(sol.retcode), outcome :$(sol.outcome), $(length(sol.t)) saved times, ",
+        "PyrolysisSolution(:$(sol.retcode), outcome :$(sol.outcome), $(length(sol.t)) saved times, ",
         "$(round(sol.solve_time, digits = 3)) s)",
     )
 end
 
-function Base.show(io::IO, ::MIME"text/plain", sol::CoreSolution)
-    println(io, "CoreSolution")
+function Base.show(io::IO, ::MIME"text/plain", sol::PyrolysisSolution)
+    println(io, "PyrolysisSolution")
     println(io, "  Return code: $(sol.retcode)")
     println(io, "  Outcome: $(sol.outcome)")
     println(io, "  Saved times: $(length(sol.t))")

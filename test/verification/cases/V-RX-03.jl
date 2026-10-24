@@ -11,9 +11,9 @@
 #
 # Verifies stoichiometric bookkeeping (two-product yields) and heat-release
 # superposition. E = 0 keeps rates exactly T-independent, so the reaction
-# heats (h₁ endothermic, h₂ exothermic — h > 0 endothermic in THIS code,
-# opposite to Gpyro/ThermaKin/FDS) perturb only the temperature, not the
-# species solution.
+# heats (h₁ endothermic, h₂ exothermic — h > 0 endothermic in THIS code, as
+# in Gpyro and FDS, opposite to ThermaKin) perturb only the temperature, not
+# the species solution.
 #
 # Heat-release superposition target: a single cell pinned by Dirichlet faces
 # satisfies the DISCRETE quasi-steady balance exactly:
@@ -60,14 +60,7 @@ function _verification_case_vrx03()
             reactions = (r1, r2),
             depletion_limiter = DepletionLimiter(enabled = false),
         )
-        mesh = core_mesh(
-            create_uniform_mesh,
-            L,
-            n_cells,
-            Val(4);
-            T_initial = T_iso,
-            ξ_initial = (ξ0, 0.0, 0.0, 0.0),
-        )
+        mesh = create_uniform_mesh(L, n_cells)
         bc_set = BoundaryConditionSet(
             thermal = (top = DirichletThermalBC(T_iso), bottom = DirichletThermalBC(T_iso)),
         )

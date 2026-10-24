@@ -8,7 +8,8 @@ to track the material as it decomposes:
 - ALE mesh motion for accurate shrinkage modeling
 - Surface absorption radiation model for efficient opaque material simulation
 - Multi-step pyrolysis kinetics with char formation
-- Structured Jacobian (`ApproxSolve`, the ALE default) for fast assembly
+- Sparse Jacobian by colored forward-mode differentiation, with the default
+  integrator (Rodas5P with a sparse KLU solve)
 - Bruggeman mixing rules for effective properties
 - Temperature-limited reactions (piecewise activation)
 
@@ -53,17 +54,12 @@ New Features Demonstrated:
 - Temperature-limited reactions from ThermaKin format
 - Darcy-Fick gas transport (diffusion + pressure-driven flow)
 - Temperature-dependent permeability evolution (virgin wood → porous char)
-- ALE mesh motion with analytical Jacobian for performance
+- ALE mesh motion
 """
 
 using Pyrolysis
 using Plots
-using LinearSolve
-using Sparspak
-using OrdinaryDiffEq
-using OrdinaryDiffEqSDIRK: KenCarp4   # v7 split: KenCarp4 not re-exported by the umbrella pkg
 using Statistics
-using LinearSolve: SparspakFactorization
 
 # ============================================================================
 # Material Definition: Pressure Treated Wood (PTW)
@@ -409,25 +405,11 @@ moisture_content_db = 0.10  # 10% moisture content on dry basis
 ξ_air_initial =
     background_gas_concentration(ptw_material, :AIR, ξ_condensed_initial, T_ambient)
 
+# The initial temperature and concentrations (WATER + PTW + pore air, rest
+# zero) come from the problem's T_initial and ξ_initial below.
 mesh = create_uniform_mesh(
     sample_thickness,      # domain length [m]
     n_cells,               # number of cells
-    Val(12);               # number of components (NC)
-    T_initial = T_ambient, # initial temperature
-    ξ_initial = (
-        ρ_water_initial,
-        0.0,
-        ρ_PTW_initial,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        ξ_air_initial,
-    ),  # WATER + PTW + pore air, rest zero
 )
 
 println("Mesh created:")
@@ -543,9 +525,7 @@ println("  - Darcy flow: ENABLED (κ_virgin = $(κ_virgin) m², κ_char = $(κ_c
 # Solve with ALE Mesh Motion and Surface Absorption
 # ============================================================================
 
-println(
-    "\nSolving with ALE mesh motion, Darcy-Fick transport, surface absorption, and analytical Jacobian...",
-)
+println("\nSolving with ALE mesh motion, Darcy-Fick transport and surface absorption...")
 println("Surface absorption model deposits all radiation in the surface cell.")
 println("Darcy-Fick combines diffusion (λ-driven) + pressure-driven flow (κ-driven).")
 println("This may take several minutes for wood pyrolysis...\n")
@@ -560,11 +540,6 @@ solution = solve(
     use_ale = true,                        # Enable ALE mesh motion
     radiation_model = SURFACE_ABSORPTION,  # All radiation absorbed at surface (opaque material)
     min_thickness = 0.5e-3,                # Stop when sample is < 0.5 mm
-    handle_depletion = false,              # Disable surface cell depletion (uses ALE instead)
-    # The ALE default Jacobian is Structured(strategy = ApproxSolve()), which
-    # drops the dense ALE mesh-velocity coupling. Pass
-    # `jacobian = Structured(strategy = DirectSolve())` for the exact one.
-    integrator = KenCarp4(linsolve = SparspakFactorization()),
 )
 
 println("Solve() returned at $(time())!")
@@ -684,16 +659,16 @@ for i = 1:n_times
         mlr_gen_water[i] += 1.0 * rates[1] * cell_vol  # yield = 1.0 for single product
 
         # Reaction 2: PTW → 0.73075 PTW1 + 0.26925 PTW_gas1
-        mlr_gen_gas1[i] += ptw_material.reactions[2].stoich[4] * rates[2] * cell_vol
+        mlr_gen_gas1[i] += ptw_material.reactions[2].products[2][2] * rates[2] * cell_vol
 
         # Reaction 3: PTW1 → 0.4293 PTW2 + 0.5707 PTW_gas2
-        mlr_gen_gas2[i] += ptw_material.reactions[3].stoich[4] * rates[3] * cell_vol
+        mlr_gen_gas2[i] += ptw_material.reactions[3].products[2][2] * rates[3] * cell_vol
 
         # Reaction 4: PTW2 → 0.81744 PTW3 + 0.18256 PTW_gas3
-        mlr_gen_gas3[i] += ptw_material.reactions[4].stoich[4] * rates[4] * cell_vol
+        mlr_gen_gas3[i] += ptw_material.reactions[4].products[2][2] * rates[4] * cell_vol
 
         # Reaction 5: PTW3 → 0.76882 Char + 0.23118 PTW_gas4
-        mlr_gen_gas4[i] += ptw_material.reactions[5].stoich[4] * rates[5] * cell_vol
+        mlr_gen_gas4[i] += ptw_material.reactions[5].products[2][2] * rates[5] * cell_vol
     end
 end
 
@@ -1100,6 +1075,6 @@ println("  ✓ WEIGHTED mixing rule for thermal conductivity (β=0.5, matches Th
 println("  ✓ WEIGHTED mixing rule for gas transfer coefficient (β_λ=0.5)")
 println("  ✓ Darcy-Fick gas transport (diffusion + pressure-driven flow)")
 println("  ✓ Temperature-dependent permeability (κ = $(κ_virgin) m²)")
-println("  ✓ ALE mesh motion with analytical Jacobian")
+println("  ✓ ALE mesh motion")
 println("  ✓ Solver-computed boundary fluxes (MLR, heat flux decomposition)")
 println("  ✓ Piecewise property handling from ThermaKin TEMP LIMIT parameters")

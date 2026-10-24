@@ -8,35 +8,27 @@
 #
 #   w*(z, t) = (ṡ/s)·z,   s(t) = 1 − 0.15·(1 − cos(2πt/20)),  z_i(t) = z_i(0)·s(t)
 #
-# through the `Workspace.w_override` hook. On a grid point moving with w, the
-# grid time derivative is ∂tT* + w·∂zT*. For T the discrete mesh-relative
-# advection kernel supplies the w·∂zT* part (w_physical = 0 without
-# reactions), so the Eulerian manufactured T source — evaluated at the LIVE
-# cell centers read from the z-block — makes T* exact on the moving mesh. The
-# species ride the applied mesh (no advection operator), so their sources are
-# assembled in the material frame with w = the override (see exact/mms.jl
-# header, "ALE"). The T error norm therefore measures exactly the moving-mesh
-# transport truncation: ALE advection (van-Leer-limited upwind
-# reconstruction) + lab-frame operators on a nonuniform-in-time mesh; the gas
-# error measures the diffusive flux and geometry on the moving mesh.
+# through the solve's `w_override` hook. The mesh moves over a solid at rest
+# and every inventory, T's energy with it, crosses the faces at the
+# mesh-relative velocity, so the Eulerian manufactured sources — evaluated at
+# the cell centers — make the fields exact on the moving mesh (see
+# exact/mms.jl header, "ALE"). The T error norm therefore measures exactly
+# the moving-mesh transport truncation: the relative energy flux (upwind-biased
+# face temperature) + lab-frame operators on a nonuniform-in-time mesh; the
+# gas error measures the diffusive and relative fluxes on the moving mesh.
 #
 # No reactions: mesh motion is prescribed, not volume-change-driven, so the
 # case isolates GCL/advection from kinetics (V-MMS-01 covers those). The
-# solid field is spatially UNIFORM but time-varying (the material-frame
-# source would admit a z-varying one; uniform keeps the T pins focused on
-# the advection kernel); T and the gas field carry the full space–time
-# structure.
+# solid field is spatially UNIFORM but time-varying (uniform keeps the T
+# pins focused on the relative energy flux); T and the gas field carry the
+# full space–time structure.
 #
-# Expected order: second. On the finite-volume core the gas converges at
-# second order and the temperature below it on coarse meshes (L2 rates 3.27,
-# 1.70 on the CI ladder; 1.63, 1.83, 1.92 from 64 to 512 cells): the
-# upwind-biased face temperature of the relative energy flux carries a
-# pre-asymptotic third-order error term of the opposite sign to the
-# second-order one. A drop below min_order flags a moving-mesh transport
-# regression.
-#
-# Jacobian: dense FD (`jacobian = :fd`) — the structured geometry Jacobian
-# assumes reaction-driven mesh velocity (see `Workspace.w_override` note).
+# Expected order: second. The gas converges at second order and the
+# temperature below it on coarse meshes (L2 rates 3.27, 1.70 on the CI
+# ladder; 1.63, 1.83, 1.92 from 64 to 512 cells): the upwind-biased face
+# temperature of the relative energy flux carries a pre-asymptotic
+# third-order error term of the opposite sign to the second-order one. A drop
+# below min_order flags a moving-mesh transport regression.
 
 function _verification_case_vmms03()
     L = 0.01
@@ -69,14 +61,7 @@ function _verification_case_vmms03()
 
     function build(n_cells)
         mat = make_material()
-        mesh = core_mesh(
-            create_uniform_mesh,
-            L,
-            n_cells,
-            Val(2);
-            T_initial = 500.0,
-            ξ_initial = (600.0, 1.5),
-        )
+        mesh = create_uniform_mesh(L, n_cells)
         # Manufactured BC fluxes must be evaluated at the MOVING boundary:
         # the top face sits at z_top(t) = L·s(t) (bottom pinned at 0), so the
         # fixed-L helpers do not apply here.
@@ -107,12 +92,6 @@ function _verification_case_vmms03()
         fields;
         use_ale = true,
         w_override = w_star,
-        # Dense FD for offline report runs too: do NOT hand a
-        # physics+geometry union prototype to colored FD without first
-        # proving the pattern covers the override's ∂(dz/dt)/∂z coupling —
-        # silent-drop hazard.
-        jacobian = :fd,
-        core = Symbol(VERIFICATION_CORE),
         energy_state = VERIFICATION_ENERGY_STATE,
         kwargs...,
     )
@@ -131,18 +110,18 @@ function _verification_case_vmms03()
         )
         for (name, idx, scale, tol, comment) in (
             (
-                "ξ_solid (mesh-bound)",
+                "ξ_solid (uniform)",
                 1,
                 600.0,
                 1e-10,  # observed 7.3e-12 (n=32): exact to integrator tol
-                "uniform solid: verifies the mesh-bound (no-advection) species path + source injection",
+                "uniform solid: verifies the relative flux of a uniform field under the moving mesh + source injection",
             ),
             (
                 "ξ_gas",
                 2,
                 1.5,
                 6e-3,  # 3× observed: 1.8e-3 (n=32), second order
-                "gas rides the applied mesh: diffusive flux + geometry on the moving mesh",
+                "gas: diffusive + relative flux on the moving mesh",
             ),
         )
             err = mms_Linf_xi(sol, fields, idx) / scale
@@ -178,8 +157,7 @@ function _verification_case_vmms03()
             n_cells = 32,
             budget_s = 60.0,
             convergence = ConvergenceSpec(
-                # observed rates: 2.24, 2.18 on the old core, 3.27, 1.70 on
-                # the finite-volume core (see the header)
+                # observed rates 3.27, 1.70 (see the header)
                 n_cells = [16, 32, 64],
                 error_fn = l2_T_final,
                 expected_order = 2.0,
@@ -213,7 +191,7 @@ function _verification_case_vmms03()
                     ),
                     ReportCurve(
                         name = :xi_profiles,
-                        title = "V-MMS-03: mesh-bound solid recovery (z-uniform, " *
+                        title = "V-MMS-03: solid recovery (z-uniform, " *
                                 "time-decaying), t = $(t_end) s",
                         xlabel = "z (m)",
                         ylabel = "ξ_s (kg/m³)",

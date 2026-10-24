@@ -154,13 +154,7 @@ T_initial = 300.0    # K
     T_initial,
 )
 
-mesh = create_uniform_mesh(
-    thickness,
-    n_cells,
-    Val(4);
-    T_initial = T_initial,
-    ξ_initial = (ξ_virgin_initial, ξ_char_initial, ξ_gas_initial, ξ_air_initial),
-)
+mesh = create_uniform_mesh(thickness, n_cells)
 
 println("   Thickness: $(thickness*1000) mm")
 println("   Cells: $n_cells")

@@ -15,7 +15,6 @@ USAGE
 	julia -t auto --project=. examples/inverse_analysis/inverse_white_pine.jl --fit=30kW,50kW                       # UMD-only fit (drops all FSRI)
 	julia -t auto --project=. examples/inverse_analysis/inverse_white_pine.jl --fit=20kW,40kW,60kW --val=          # FSRI-only fit, no validation
 	julia -t auto --project=. examples/inverse_analysis/inverse_white_pine.jl --fit=20kW,30kW,40kW,50kW,60kW,70kW   # everything in fit (no val)
-	julia -t auto --project=. examples/inverse_analysis/inverse_white_pine.jl --approx-solve                        # ApproxSolve Jacobian (faster, ~14% nnz)
 
 Spread the heavy work across cores via `-t auto` (or `-t N`); the loss runs
 all fit scenarios in parallel via `Threads.@spawn`.
@@ -79,7 +78,6 @@ function parse_args(args)
     prior_weight = 0.5   # weight on HFM/LFA k(T) prior; clamped to [0, 1]
     fit_labels = nothing   # nothing = use registry defaults
     val_labels = nothing
-    use_approx_solve = false
     for a in args
         if startswith(a, "--stage=")
             stage = parse(Int, split(a, "=")[2])
@@ -105,24 +103,12 @@ function parse_args(args)
             val_labels =
                 isempty(rhs) ? String[] :
                 String[strip(s) for s in split(rhs, ',') if !isempty(strip(s))]
-        elseif a == "--approx-solve"
-            use_approx_solve = true
         elseif a in ("-h", "--help")
             println(@doc("inverse_white_pine.jl"))
             exit(0)
         end
     end
-    (;
-        stage,
-        do_grid,
-        n_starts,
-        max_iter,
-        bootstrap,
-        prior_weight,
-        fit_labels,
-        val_labels,
-        use_approx_solve,
-    )
+    (; stage, do_grid, n_starts, max_iter, bootstrap, prior_weight, fit_labels, val_labels)
 end
 
 const OPTS = parse_args(ARGS)
@@ -380,7 +366,6 @@ function bootstrap_covariance(
     refit_max_iter::Int = 50,
     seed::Int = 42,
     verbose::Bool = true,
-    jacobian_strategy::Union{Nothing,LinearSolveStrategy} = nothing,
 )
 
     p = length(θ_hat)
@@ -393,12 +378,7 @@ function bootstrap_covariance(
     base_traj = []
     base_residuals = []
     for (scenario, t_exp, T_back_exp, T_back_std, n_reps) in dataset
-        sol = build_and_solve(
-            θ_hat,
-            scenario;
-            stage = stage,
-            jacobian_strategy = jacobian_strategy,
-        )
+        sol = build_and_solve(θ_hat, scenario; stage = stage)
         sol === nothing && error("base solve failed at θ_hat — cannot bootstrap")
         mask = t_exp .> t_skip
         t_q = t_exp[mask]
@@ -437,7 +417,6 @@ function bootstrap_covariance(
                         T_back;
                         stage = stage,
                         t_skip = t_skip,
-                        jacobian_strategy = jacobian_strategy,
                     )
                     rv === nothing && return 1e6
                     m = t_exp .> t_skip
@@ -505,24 +484,12 @@ end
 # Output / plotting
 # ============================================================================
 
-function plot_fits(
-    θ_hat,
-    fit_dataset,
-    val_dataset,
-    stage::Int;
-    outpath::AbstractString,
-    jacobian_strategy::Union{Nothing,LinearSolveStrategy} = nothing,
-)
+function plot_fits(θ_hat, fit_dataset, val_dataset, stage::Int; outpath::AbstractString)
     plots = Plots.Plot[]
 
     for (label_prefix, ds) in (("Fit", fit_dataset), ("Validation", val_dataset))
         for (scenario, t_exp, T_back_exp, _, _) in ds
-            sol = build_and_solve(
-                θ_hat,
-                scenario;
-                stage = stage,
-                jacobian_strategy = jacobian_strategy,
-            )
+            sol = build_and_solve(θ_hat, scenario; stage = stage)
 
             # FSRI scenarios also report a partial top-surface temperature.
             # Add a front-surface panel ABOVE the back-surface one so the
@@ -655,10 +622,7 @@ function main()
     run_dir = joinpath(RESULTS_DIR, "run_$(run_stamp)_s$(stage)_pw$(pw_tag)")
     set_run_dir!(run_dir)
 
-    jac_strat = OPTS.use_approx_solve ? ApproxSolve() : nothing
-    @info "Inverse analysis configuration" stage=stage names=cfg.names θ_init=cfg.θ_init bounds=cfg.bounds threads=Threads.nthreads() run_dir=run_dir jacobian=OPTS.use_approx_solve ?
-                                                                                                                                                               "ApproxSolve" :
-                                                                                                                                                               "DirectSolve"
+    @info "Inverse analysis configuration" stage=stage names=cfg.names θ_init=cfg.θ_init bounds=cfg.bounds threads=Threads.nthreads() run_dir=run_dir
 
     # --- Load datasets via registry ---
     # Registry-driven loader: each flux carries its lab tag (UMD vs FSRI gas
@@ -719,12 +683,7 @@ function main()
     if isempty(k_prior) || OPTS.prior_weight == 0.0
         reason = isempty(k_prior) ? "no HFM/LFA priors found" : "--prior-weight=0"
         @info "Running without k_prior ($reason)"
-        loss_fit = make_loss(
-            fit_dataset;
-            stage = stage,
-            verbose = true,
-            jacobian_strategy = jac_strat,
-        )
+        loss_fit = make_loss(fit_dataset; stage = stage, verbose = true)
     else
         @info "Using $(length(k_prior)) combined HFM+LFA k(T) prior points" weight=OPTS.prior_weight
         loss_fit = make_loss(
@@ -733,7 +692,6 @@ function main()
             verbose = true,
             k_prior = k_prior,
             k_prior_weight = OPTS.prior_weight,
-            jacobian_strategy = jac_strat,
         )
     end
 
@@ -775,7 +733,6 @@ function main()
             n_boot = OPTS.bootstrap,
             stage = stage,
             verbose = true,
-            jacobian_strategy = jac_strat,
         )
     else
         @info "Estimating parameter covariance via Hessian (FD central diff)..."
@@ -813,7 +770,6 @@ function main()
         val_dataset,
         stage;
         outpath = joinpath(RUN_DIR[], "fit_plots.png"),
-        jacobian_strategy = jac_strat,
     )
 
     @info "Done."

@@ -14,7 +14,8 @@ const P_REF = 101325.0                   # Pa - standard pressure (1 atm)
 # temperature-dependent property function clamps its argument to this
 # interval before evaluating the user's law, the component constructors
 # check positivity of ρ, c, k (and 0 ≤ ε ≤ 1) on it, and the surface-energy
-# Newton clamps its iterate to it. Together these make every property law
+# Newton evaluates its condition at a smooth clamp of its iterate into it (the
+# iterate itself is never clamped). Together these make every property law
 # total on ℝ: a diverging Newton trial state with a nonphysical temperature
 # is a failed Newton step, not a `DomainError` that kills the solve, and a
 # law that would turn a cell into a perfect insulator (k ≤ 0) is rejected

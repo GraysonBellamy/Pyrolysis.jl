@@ -144,14 +144,7 @@ function build_and_solve_macfp(
         end for j = 1:NC_WP
     ]
 
-    mesh = create_uniform_mesh(
-        thickness_m,
-        N_CELLS,
-        Val(NC_WP);
-        T_initial = T_INITIAL_K,
-        ξ_initial = ξ0,
-        cross_section_area = A_SAMPLE_M2,
-    )
+    mesh = create_uniform_mesh(thickness_m, N_CELLS; cross_section = A_SAMPLE_M2)
 
     problem = PyrolysisProblem(
         mesh = mesh,
@@ -173,9 +166,6 @@ function build_and_solve_macfp(
         use_ale = true,
         radiation_model = SURFACE_ABSORPTION,
         min_thickness = 0.5e-3,
-        handle_depletion = false,
-        # Default Jacobian is `Structured(strategy = DirectSolve())`.
-        integrator = KenCarp4(linsolve = SparspakFactorization()),
     )
 end
 
@@ -659,11 +649,7 @@ function main()
         if sol === nothing
             @warn "  failed" case=lbl wall_s=wall
         else
-            ok = (
-                sol.retcode == :Success ||
-                sol.retcode == ReturnCode.Success ||
-                sol.retcode == :Terminated
-            )
+            ok = (sol.retcode == :Success || sol.retcode == :Terminated)
             @info "  done" case=lbl retcode=sol.retcode wall_s=wall n_times=length(sol.t) ok=ok
             csv_path = joinpath(out_dir, "macfp_$(lbl).csv")
             write_case_csv(csv_path, sol)

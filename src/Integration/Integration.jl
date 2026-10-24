@@ -1,7 +1,7 @@
 """
 	Integration
 
-Time integration of the finite-volume core: the adapter from a
+Time integration: the adapter from a
 `PyrolysisProblem`, the mass-matrix `ODEFunction` with the colored Jacobian
 behind problem-independent function types, the integrator together with its
 restart and per-step-flag policies, the admissibility check, `solve`, its
@@ -20,6 +20,9 @@ using OrdinaryDiffEq: OrdinaryDiffEq, ODEFunction, ODEProblem, DiscreteCallback,
 using OrdinaryDiffEq: ContinuousCallback, Rodas5P, FBDF, ReturnCode, set_proposed_dt!
 using OrdinaryDiffEq: OrdinaryDiffEqCore
 using SciMLBase: SciMLBase, get_proposed_dt, auto_dt_reset!
+# `solve` is a method of the SciML ecosystem's common `solve`, so `using
+# Pyrolysis` beside `using OrdinaryDiffEq` names one function.
+import SciMLBase: solve
 using OrdinaryDiffEqSDIRK: KenCarp4
 using LinearSolve: LinearSolve, KLUFactorization
 using ADTypes: AutoFiniteDiff

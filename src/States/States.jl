@@ -1,8 +1,8 @@
 """
 	States
 
-The state of the finite-volume core and the mapping from it to the quantities
-the kernels read.
+The state of a solve and the mapping from it to the quantities the kernels
+read.
 
 The integrator carries per-cell component masses, an energy state (the cell
 temperature, or the enthalpy inventory behind the same two functions), and on

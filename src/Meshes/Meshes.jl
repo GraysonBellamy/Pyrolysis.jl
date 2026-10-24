@@ -1,7 +1,7 @@
 """
 	Meshes
 
-Face-based mesh description of the finite-volume core.
+Face-based mesh description and the mesh constructors.
 
 Faces carry their nodes, their two cells and a boundary tag; cells
 carry a volume, their faces and their nodes; nodes carry positions, which are

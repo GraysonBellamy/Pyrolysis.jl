@@ -26,12 +26,7 @@ Output:
 
 using Pyrolysis
 using Plots
-using LinearSolve
-using Sparspak
-using OrdinaryDiffEq
-using OrdinaryDiffEqSDIRK: KenCarp4   # v7 split: KenCarp4 not re-exported by the umbrella pkg
 using Statistics
-using LinearSolve: SparspakFactorization
 using Printf
 using DelimitedFiles
 
@@ -214,6 +209,7 @@ function build_and_solve(mc_db::Float64, hos_model::Symbol)
                 α = 0.0,
                 λ = λ_WOOD,
                 κ = κ_VIRGIN,
+                ρ_intrinsic = 1500.0,  # kg/m³, wood cell-wall (skeletal) density
             ),
             SolidComponent(
                 :DF_int1,
@@ -224,6 +220,7 @@ function build_and_solve(mc_db::Float64, hos_model::Symbol)
                 α = 0.0,
                 λ = λ_WOOD * 2.0,
                 κ = κ_VIRGIN * 3.0,
+                ρ_intrinsic = 1578.0,  # kg/m³, toward char by progress 0.173
             ),
             SolidComponent(
                 :DF_int2,
@@ -234,6 +231,7 @@ function build_and_solve(mc_db::Float64, hos_model::Symbol)
                 α = 0.0,
                 λ = λ_WOOD * 5.0,
                 κ = κ_VIRGIN * 10.0,
+                ρ_intrinsic = 1597.0,  # kg/m³, toward char by progress 0.216
             ),
             SolidComponent(
                 :DF_int3,
@@ -244,6 +242,7 @@ function build_and_solve(mc_db::Float64, hos_model::Symbol)
                 α = 0.0,
                 λ = λ_CHAR * 0.3,
                 κ = κ_CHAR * 0.01,
+                ρ_intrinsic = 1763.0,  # kg/m³, toward char by progress 0.585
             ),
             SolidComponent(
                 :DF_int4,
@@ -254,6 +253,7 @@ function build_and_solve(mc_db::Float64, hos_model::Symbol)
                 α = 0.0,
                 λ = λ_CHAR * 0.7,
                 κ = κ_CHAR * 0.1,
+                ρ_intrinsic = 1833.0,  # kg/m³, toward char by progress 0.74
             ),
             SolidComponent(
                 :Char,
@@ -264,6 +264,7 @@ function build_and_solve(mc_db::Float64, hos_model::Symbol)
                 α = 0.0,
                 λ = λ_CHAR,
                 κ = κ_CHAR,
+                ρ_intrinsic = 1950.0,  # kg/m³, carbon skeletal density
             ),
             LiquidComponent(
                 :MOISTURE,
@@ -386,27 +387,7 @@ function build_and_solve(mc_db::Float64, hos_model::Symbol)
     ρ_DF_initial = 530.0
     ρ_moisture_initial = mc_db * ρ_DF_initial
 
-    mesh = create_uniform_mesh(
-        sample_thickness,
-        n_cells,
-        Val(13);
-        T_initial = T_ambient,
-        ξ_initial = (
-            ρ_DF_initial,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            ρ_moisture_initial,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-        ),
-    )
+    mesh = create_uniform_mesh(sample_thickness, n_cells)
 
     bc_set = BoundaryConditionSet(
         thermal = (
@@ -456,9 +437,6 @@ function build_and_solve(mc_db::Float64, hos_model::Symbol)
         use_ale = true,
         radiation_model = SURFACE_ABSORPTION,
         min_thickness = 0.5e-3,
-        handle_depletion = false,
-        # Default Jacobian under ALE is `Structured(strategy = ApproxSolve())`.
-        integrator = KenCarp4(linsolve = SparspakFactorization()),
     )
 
     return solution

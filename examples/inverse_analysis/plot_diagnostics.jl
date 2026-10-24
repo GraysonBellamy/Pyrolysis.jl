@@ -1,8 +1,7 @@
 """
 White Pine — full diagnostic comparison plots at a given Stage-2 θ.
 
-For each flux, forward-solves ONCE (reuse the optimizer's ApproxSolve Jacobian
-with --approx-solve) and plots a column of diagnostics:
+For each flux, forward-solves ONCE and plots a column of diagnostics:
 
     row 1  back-surface T   [°C]   sim vs experiment (UMD CAPA, the fit target)
     row 2  front/surface T  [°C]   sim only (no UMD front-surface measurement;
@@ -19,7 +18,7 @@ USAGE
 -----
   GKSwstype=100 julia -t 4 --project=examples \\
       examples/inverse_analysis/plot_diagnostics.jl \\
-      --fit=30kW,50kW --val=70kW --approx-solve
+      --fit=30kW,50kW --val=70kW
 
 Edit THETA_DEFAULT (or pass --theta=v1,...,v6). Stage-2 ordering:
 [k_virgin, k_int1, k_int2, k_int3, k_int4, k_char].
@@ -135,12 +134,12 @@ const WP_LF_MEAS =
 # ----------------------------------------------------------------------------
 # One diagnostic column (5 stacked panels) for a single flux.
 # ----------------------------------------------------------------------------
-function flux_column(label_prefix, ds, θ; jacobian_strategy, panels)
+function flux_column(label_prefix, ds, θ; panels)
     scenario, t_exp, T_back_exp, T_back_std, _ = ds
     flux = scenario.label
     q_kw = round(scenario.q_ext / 1000, digits = 1)
     head = "$(label_prefix): $(flux) ($(q_kw) kW/m²)"
-    sol = build_and_solve(θ, scenario; stage = STAGE, jacobian_strategy = jacobian_strategy)
+    sol = build_and_solve(θ, scenario; stage = STAGE)
     sol === nothing && @warn "Forward solve returned nothing" flux
 
     # --- row 1: back-surface temperature (± replicate SD band) ---
@@ -286,13 +285,9 @@ end
 function diag_main()
     θ = _parse_theta(ARGS)
     length(θ) == 6 || error("Stage-2 θ needs 6 values, got $(length(θ)): $θ")
-    # ApproxSolve (~14% nnz, the :ale_reduced profile) is the default Jacobian
-    # strategy here; the full DirectSolve path is not used.
-    jac_strat = ApproxSolve()
-
     fit_labels = OPTS.fit_labels === nothing ? DEFAULT_FIT_LABELS : OPTS.fit_labels
     val_labels = OPTS.val_labels === nothing ? DEFAULT_VAL_LABELS : OPTS.val_labels
-    @info "Diagnostic plots at Stage-2 θ" θ fit = fit_labels val = val_labels jacobian = "ApproxSolve"
+    @info "Diagnostic plots at Stage-2 θ" θ fit = fit_labels val = val_labels
 
     datasets = Tuple{String,Any}[]
     for l in fit_labels
@@ -312,7 +307,7 @@ function diag_main()
     column_panels = Vector{Dict{Symbol,Any}}(undef, ncols)
     for (j, (prefix, ds)) in enumerate(datasets)
         panels = Dict{Symbol,Any}()
-        flux_column(prefix, ds, θ; jacobian_strategy = jac_strat, panels = panels)
+        flux_column(prefix, ds, θ; panels = panels)
         column_panels[j] = panels
     end
 

@@ -15,7 +15,7 @@ This module provides:
 - Temperature-dependent property functions
 - Component and material type definitions
 - Reaction type definitions
-- The abstract boundary-condition / radiation-BC supertypes (concretes live in
+- The abstract boundary-condition supertypes (concretes live in
   `BoundaryConditions`)
 - The `RadiationModel` enum + predicates (trait dispatch)
 """
@@ -33,24 +33,13 @@ abstract type AbstractComponent end
 abstract type AbstractReaction end
 abstract type AbstractMaterial end
 
-# Geometry (defined here, implemented in Geometry module)
-abstract type AbstractNode end
-abstract type AbstractCell end
-abstract type AbstractFace end
-abstract type AbstractMesh{DIM} end
-
 # Boundary conditions
 abstract type AbstractBoundaryCondition end
 abstract type AbstractThermalBC <: AbstractBoundaryCondition end
 abstract type AbstractMassBC <: AbstractBoundaryCondition end
 
-# Adaptivity (defined here, implemented in Adaptivity module)
-abstract type AbstractErrorIndicator end
-abstract type AbstractQualityMetric end
-
-# Problem and solution
+# Problem
 abstract type AbstractPyrolysisProblem end
-abstract type AbstractPyrolysisSolution end
 
 # ============================================================================
 # Include all subfiles (AFTER abstract types are defined)
@@ -73,11 +62,8 @@ export R_GAS, STEFAN_BOLTZMANN, T_REF, P_REF, RHO_CP_FLOOR, T_PROPERTY_MIN, T_PR
 # Abstract types
 export AbstractPropertyFunction
 export AbstractComponent, AbstractReaction, AbstractMaterial
-export AbstractNode, AbstractCell, AbstractFace, AbstractMesh
 export AbstractBoundaryCondition, AbstractThermalBC, AbstractMassBC
-export AbstractRadiationBC
-export AbstractErrorIndicator, AbstractQualityMetric
-export AbstractPyrolysisProblem, AbstractPyrolysisSolution
+export AbstractPyrolysisProblem
 
 # Property functions
 export ConstantProperty, LinearProperty, PolynomialProperty
@@ -104,23 +90,18 @@ export gas_property_temperature
 
 # Reactions
 export Reaction
-export AbstractDepletionLimiter, DepletionLimiter, TanhLimiter
+export AbstractDepletionLimiter, DepletionLimiter
 
 # Materials
 export Material, MixingRule, PARALLEL, SERIES, WEIGHTED, BRUGGEMAN, CARMAN_KOZENY
 export MixingSpec, MaterialMixing
 export n_components, n_reactions
 export dry_pyrolysis_gas_indices
-export compute_gas_fluxes_unrolled!, compute_gas_fluxes_darcy_fick_unrolled!
-export set_boundary_advective_flux_unrolled!
-export apply_species_residual_unrolled!
 
 # Gas transport (component-based permeability)
 export has_darcy_flow
 
 # Radiation model enum + predicates (trait dispatch; kept in the foundation)
-export RadiationModel, NO_RADIATION, SURFACE_ABSORPTION, BEER_LAMBERT, P1_QUASI_STEADY
-export requires_radiation_cache
-export has_absorption_coefficients
+export RadiationModel, NO_RADIATION, SURFACE_ABSORPTION, BEER_LAMBERT
 
 end # module Materials

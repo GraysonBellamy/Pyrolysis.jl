@@ -704,15 +704,6 @@ end  # main testset
     @test a_eff ≈ a_line + b_line * ε_eff rtol = 1e-14
     @test mixture_absorptivity(ξ, T_cell, mat_k) === mixture_emissivity(ξ, T_cell, mat_k)
 
-    @testset "effective_absorptivity on the line" begin
-        effective_absorptivity = Pyrolysis.Properties.effective_absorptivity
-        effective_emissivity = Pyrolysis.Properties.effective_emissivity
-        @test effective_emissivity(ξ, T_cell, mat) ≈ ε_eff rtol = 1e-14
-        @test effective_absorptivity(ξ, T_cell, mat) ≈ a_eff rtol = 1e-14
-        @test effective_absorptivity(ξ, T_cell, mat_k) ===
-              effective_emissivity(ξ, T_cell, mat_k)
-    end
-
     q_inc = 50e3
     k_eff, Δz_half, t = 0.12, 2.5e-4, 0.0
     T_inf, h = 300.0, 10.0
@@ -762,19 +753,6 @@ end  # main testset
     @test hf_face.absorbed ≈ a_eff * q_inc
     @test hf_face.net ≈ s_single.q_applied rtol = 1e-12
 
-    @testset "compute_boundary_heat_fluxes(::CombinedThermalBC) without a face" begin
-        hf = compute_boundary_heat_fluxes(
-            single,
-            T_s,
-            t,
-            ε_eff,
-            SURFACE_ABSORPTION;
-            a_eff = a_eff,
-        )
-        @test hf.absorbed ≈ a_eff * q_inc
-        @test hf.net ≈ s_single.q_applied rtol = 1e-12
-        @test hf_face.net ≈ hf.net
-    end
 end
 
 # The surface Newton starts from the cell temperature, never from the stored
@@ -826,22 +804,6 @@ end
     @test poisoned.T_surface == fresh.T_surface
     @test poisoned.converged
 
-    @testset "solve_boundary_temperature! without a trial clamp: a NaN cell warns" begin
-        bad = @test_logs (:warn, r"did not converge") match_mode = :any solve!(
-            poisoned,
-            NaN,
-            k_eff,
-            Δz_half,
-            bc,
-            _BC_TEST_MAT,
-            _BC_ZERO_J,
-            0.0,
-            ε,
-        )
-        @test isnan(bad.T_s)
-        @test poisoned.T_surface == fresh.T_surface
-        @test poisoned.converged
-    end
 end
 
 # An exhausted iteration budget is recorded on the state; the trial-clamped
@@ -911,187 +873,4 @@ end
     # (c) combined under SURFACE_ABSORPTION includes the absorbed flux.
     hf_sa = compute_boundary_heat_fluxes(combined, T_s, t, ε_eff, SURFACE_ABSORPTION, face)
     @test hf_sa.net ≈ ε_eff * 50e3 + q_rerad + q_conv rtol = 1e-12
-end
-
-# The P1 radiation model takes the incident flux in its own solver.
-@testset "P1_QUASI_STEADY: RadiativeFluxBC contributes nothing at the face" begin
-    T_s, t, ε_eff, I_incident = 500.0, 0.0, 0.9, 50e3
-    q, dq = evaluate_bc_flux_and_derivative(
-        RadiativeFluxBC(I_incident),
-        T_s,
-        t,
-        ε_eff,
-        Pyrolysis.Materials.P1_QUASI_STEADY,
-    )
-    @test q ≈ 0.0   # No boundary flux contribution
-    @test dq ≈ 0.0  # No temperature dependence
-    bc_with_α = RadiativeFluxBC(flux = I_incident, absorptivity = 0.7)
-    q_p1, _ = evaluate_bc_flux_and_derivative(
-        bc_with_α,
-        T_s,
-        t,
-        ε_eff,
-        Pyrolysis.Materials.P1_QUASI_STEADY,
-    )
-    @test q_p1 ≈ 0.0
-end
-
-# The face-less forms of the combined condition and of the convective one.
-@testset "evaluate_bc_flux_and_derivative without a face: combined and convective" begin
-    T_s, t, ε_eff, I_incident = 500.0, 0.0, 0.9, 50e3
-    h_conv, T_inf = 10.0, 300.0
-    bc_combined = RadiativeFluxBC(I_incident) + ConvectiveBC(h = h_conv, T_inf = T_inf)
-    q_rad_expected = I_incident * ε_eff
-    q_conv_expected = h_conv * (T_inf - T_s)
-    q_no_rad, dq_no_rad =
-        evaluate_bc_flux_and_derivative(bc_combined, T_s, t, ε_eff, NO_RADIATION)
-    @test q_no_rad ≈ q_rad_expected + q_conv_expected
-    @test dq_no_rad ≈ -h_conv
-    q_surf, dq_surf =
-        evaluate_bc_flux_and_derivative(bc_combined, T_s, t, ε_eff, SURFACE_ABSORPTION)
-    @test q_surf ≈ q_rad_expected + q_conv_expected
-    @test dq_surf ≈ -h_conv
-    q_bl, dq_bl = evaluate_bc_flux_and_derivative(bc_combined, T_s, t, ε_eff, BEER_LAMBERT)
-    @test q_bl ≈ q_conv_expected
-    @test dq_bl ≈ -h_conv
-
-    # a_eff is forwarded to the members, and the face form with no outflow
-    # agrees.
-    a_eff = 0.72
-    bc = RadiativeFluxBC(I_incident)
-    rad = RadiativeBC(T_inf = 300.0)
-    q, _ = evaluate_bc_flux_and_derivative(bc, T_s, t, ε_eff, NO_RADIATION; a_eff = a_eff)
-    q_emit, dq_emit =
-        evaluate_bc_flux_and_derivative(rad, T_s, t, ε_eff, NO_RADIATION; a_eff = a_eff)
-    q_c, dq_c = evaluate_bc_flux_and_derivative(
-        bc + rad,
-        T_s,
-        t,
-        ε_eff,
-        NO_RADIATION;
-        a_eff = a_eff,
-    )
-    @test q_c ≈ q + q_emit
-    @test dq_c ≈ dq_emit
-    mat_face = Material(
-        name = :face,
-        components = (
-            SolidComponent(:s; ρ = 1000.0, c = 1000.0, k = 0.2, ε = 0.9),
-            GaseousComponent(:g; M = 0.03, c = 1000.0, k = 0.03, λ = 1e-5),
-        ),
-        reactions = (),
-    )
-    q6, _ = evaluate_bc_flux_and_derivative(
-        bc + rad,
-        T_s,
-        t,
-        ε_eff,
-        NO_RADIATION,
-        Pyrolysis.BoundaryConditions.BlowingFace((0.0, 0.0), T_s, mat_face);
-        a_eff = a_eff,
-    )
-    @test q6 ≈ q_c
-
-    # The convective condition's own face-less form.
-    q_cv, dq_cv = evaluate_bc_flux_and_derivative(
-        ConvectiveBC(h = 10.0, T_inf = 300.0),
-        T_s,
-        0.0,
-        0.9,
-    )
-    @test q_cv ≈ 10.0 * (300.0 - T_s)
-    @test dq_cv ≈ -10.0
-end
-
-# The mesh-bound accessors of the stored boundary states.
-@testset "Discretization accessors: get_surface_temperature, check_boundary_energy_balance" begin
-    get_surface_temperature = Pyrolysis.Discretization.get_surface_temperature
-    get_back_face_temperature = Pyrolysis.Discretization.get_back_face_temperature
-    check_boundary_energy_balance = Pyrolysis.Discretization.check_boundary_energy_balance
-
-
-    @testset "get_surface_temperature and get_back_face_temperature" begin
-        # Create a mesh with boundary states initialized
-        L = 0.01
-        n_cells = 10
-        mesh = create_uniform_mesh(L, n_cells, Val(2))
-
-        # Manually set boundary states for testing
-        T_top = 800.0
-        T_bottom = 350.0
-        mesh.boundary_states[1] = Pyrolysis.BoundaryConditions.BoundaryState(
-            T_top,
-            50000.0,
-            50000.0,
-            750.0,
-            0.2,
-            50e-6,
-            true,
-            3,
-        )
-        mesh.boundary_states[2] = Pyrolysis.BoundaryConditions.BoundaryState(
-            T_bottom,
-            0.0,
-            0.0,
-            350.0,
-            0.2,
-            50e-6,
-            true,
-            1,
-        )
-
-        @test get_surface_temperature(mesh) ≈ T_top
-        @test get_back_face_temperature(mesh) ≈ T_bottom
-    end
-
-    @testset "check_boundary_energy_balance" begin
-        # Create a mesh with boundary states for testing
-        L = 0.01
-        n_cells = 10
-        mesh_test = create_uniform_mesh(L, n_cells, Val(2))
-
-        # Set up a well-balanced boundary state
-        mesh_test.boundary_states[1] = Pyrolysis.BoundaryConditions.BoundaryState(
-            600.0,    # T_surface
-            10000.0,  # q_applied
-            10000.0,  # q_conducted (matching!)
-            550.0,    # T_cell
-            0.2,      # k_eff
-            50e-6,    # Δz_half
-            true,     # converged
-            3,        # iterations
-        )
-        mesh_test.boundary_states[2] = Pyrolysis.BoundaryConditions.BoundaryState(
-            350.0,
-            0.0,
-            0.0,
-            350.0,
-            0.2,
-            50e-6,
-            true,
-            1,
-        )
-
-        # check_boundary_energy_balance returns Dict{Int, Float64}
-        balance_results = check_boundary_energy_balance(mesh_test)
-        @test balance_results[1] < 1e-10
-        @test balance_results[2] < 1e-10
-
-        # Now test with imbalance
-        mesh_test.boundary_states[1] = Pyrolysis.BoundaryConditions.BoundaryState(
-            600.0,    # T_surface
-            10000.0,  # q_applied
-            8000.0,   # q_conducted (20% error!)
-            550.0,    # T_cell
-            0.2,      # k_eff
-            50e-6,    # Δz_half
-            true,     # converged
-            3,        # iterations
-        )
-
-        balance_results_bad = check_boundary_energy_balance(mesh_test)
-        # 20% imbalance
-        @test balance_results_bad[1] ≈ 0.2 atol=0.01
-    end
-
 end

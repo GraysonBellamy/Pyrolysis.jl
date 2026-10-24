@@ -196,7 +196,7 @@ transfer coefficient of the mixture through volume-weighted mixing rules. Set to
 a non-zero value (e.g., 2e-5 m²/s) to match ThermaKin conventions. With the
 default `λ = 0`, Fickian gas transport vanishes in a cell of this solid that
 holds no gas, and the gas field of a gas-producing material ends in a sharp
-front on which the implicit Newton fails repeatedly; problem validation warns
+front on which the integrator rejects step after step; problem validation warns
 in that configuration (`warn_degenerate_gas_transport`).
 
 # Note on permeability (κ)
@@ -330,7 +330,7 @@ end
 
 function _validate_gas_properties(c::GaseousComponent)
     n = c.name
-    # A gas with c = 0 carries no sensible enthalpy (S_conv vanishes); the
+    # A gas with c = 0 carries no sensible enthalpy (its enthalpy flux vanishes); the
     # matrix heat capacity floor keeps the energy equation
     # well posed, so zero is admissible here where it is not for a solid.
     _validate_property_law(
@@ -711,38 +711,3 @@ liquids (which do not carry a molar-mass field).
 """
 @inline molar_mass(comp::GaseousComponent) = comp.molar_mass
 @inline molar_mass(::AbstractComponent) = 0.0
-
-# ============================================================================
-# Radiation Property Queries
-# ============================================================================
-
-"""
-	has_absorption_coefficients(components::Tuple) -> Bool
-
-Returns true if any solid component has a non-zero absorption coefficient.
-
-This is used to warn users when SURFACE_ABSORPTION radiation model is selected
-but material components have α values set (which will be ignored).
-
-# Arguments
-- `components`: Tuple of Component objects from a Material
-
-# Returns
-- `true` if any component has absorption_coeff > 0
-- `false` otherwise
-
-# Example
-```julia
-if has_absorption_coefficients(material.components)
-	@warn "Absorption coefficients will be ignored with SURFACE_ABSORPTION model"
-end
-```
-"""
-function has_absorption_coefficients(components::Tuple)
-    for comp in components
-        if comp.absorption_coeff > 0.0
-            return true
-        end
-    end
-    return false
-end

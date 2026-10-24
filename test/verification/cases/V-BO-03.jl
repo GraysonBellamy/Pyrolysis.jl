@@ -5,16 +5,14 @@
 # The V-BO-01 deck under ALE with the Kaowool absorption coefficient set to
 # zero. Radiation that passes the PMMA layer crosses the substrate and leaves
 # through the back face without heating it, so the share of the incident flux
-# that leaves the slab rises toward one as the PMMA thins. The run must
-# complete, report the flux that leaves through the back face
-# (solution.extras.radiation_transmitted) and warn about it once, with the
-# surface temperature converged at every evaluation. On the finite-volume
-# core, which moves the mesh by the equidistribution correction as V-BO-01
-# does and issues no warning, the series itself must show more than 1 % of
-# the entering flux leaving, the old core's warning predicate.
+# that leaves the slab rises toward one as the PMMA thins. The mesh moves by
+# the equidistribution correction as in V-BO-01. The run must complete with
+# the surface temperature converged at every accepted step, and the flux that
+# leaves through the back face (solution.extras.radiation_transmitted) must
+# reach more than 1 % of the entering flux.
 
-# The end the gate scripts run V-BO-03's deck to, past its layer's invocation
-# (about 3,023 s on the finite-volume core, where the film decays slowly).
+# The end the burnout measurements run V-BO-03's deck to, past its layer's
+# invocation (about 3,023 s, where the film decays slowly).
 const VBO03_T_EXTENDED = 3100.0
 
 function _verification_case_vbo03()
@@ -23,33 +21,18 @@ function _verification_case_vbo03()
         m = _vbo_measures(sol)
         out = QoIResult[_vbo_surface_qoi(id)]
         tr = sol.extras.radiation_transmitted
-        if VERIFICATION_CORE == "new"
-            leaving = maximum(tr) / maximum(tr .+ sol.extras.volumetric_absorption)
-            push!(
-                out,
-                QoIResult(
-                    name = "transmitted flux reported (series peak above 1 % of the entering flux)",
-                    value = leaving,
-                    exact = 1.0,
-                    error = leaving > 0.01 ? 0.0 : 1.0,
-                    tol = 0.5,
-                    comment = "largest share of the entering flux that leaves through the transparent back face",
-                ),
-            )
-        else
-            n_tr = get(VBO_TRANSMITTED_WARNINGS, id, -1)
-            push!(
-                out,
-                QoIResult(
-                    name = "transmitted-flux warning fired",
-                    value = Float64(n_tr),
-                    exact = 1.0,
-                    error = abs(n_tr - 1.0),
-                    tol = 0.5,
-                    comment = "radiation leaving through the transparent back face is reported",
-                ),
-            )
-        end
+        leaving = maximum(tr) / maximum(tr .+ sol.extras.volumetric_absorption)
+        push!(
+            out,
+            QoIResult(
+                name = "transmitted flux reported (series peak above 1 % of the entering flux)",
+                value = leaving,
+                exact = 1.0,
+                error = leaving > 0.01 ? 0.0 : 1.0,
+                tol = 0.5,
+                comment = "largest share of the entering flux that leaves through the transparent back face",
+            ),
+        )
         push!(
             out,
             QoIResult(
@@ -83,9 +66,7 @@ function _verification_case_vbo03()
         solve_fn = _vbo_solve_fn(id),
         solve_kwargs = (
             use_ale = true,
-            handle_depletion = true,
-            depletion_threshold = 0.05,
-            min_cells = 2,
+            deactivation = true,
             min_thickness = 1e-3,
             radiation_model = BEER_LAMBERT,
             abstol = 1e-8,

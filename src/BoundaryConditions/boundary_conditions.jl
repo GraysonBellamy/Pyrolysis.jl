@@ -259,9 +259,8 @@ which applies flux directly at the surface, `RadiativeFluxBC` accounts for:
 The absorbed flux is: q_absorbed = absorptivity × incident_flux
 
 The distribution of absorbed radiation depends on the `radiation_model` passed to `solve()`:
-- `SURFACE_ABSORPTION`: All absorbed radiation deposited in surface cell (opaque materials)
+- `NO_RADIATION`, `SURFACE_ABSORPTION`: absorbed at the exposed face, through the surface energy balance (opaque materials)
 - `BEER_LAMBERT`: In-depth volumetric absorption via Beer-Lambert law (semi-transparent)
-- `P1_QUASI_STEADY`: P1 radiative transfer with volumetric emission
 
 # Fields
 - `flux::F`: Incident radiative flux [W/m²] (constant or time-dependent)
@@ -711,65 +710,4 @@ function get_radiative_flux_bc(bc::CombinedThermalBC)
         end
     end
     return nothing
-end
-
-# ============================================================================
-# Type-Stable BoundaryConditionSet Signatures
-# ============================================================================
-
-"""
-	extract_radiative_flux_from_bcs(bc_set::BoundaryConditionSet, ::Val{tag}, t::Real) where tag -> Tuple{Float64, Bool}
-
-Extract the incident radiation intensity from thermal BCs using compile-time
-tag dispatch (`Val(:top)`, `Val(:bottom)`, …).
-
-# Returns
-(I, has_explicit_absorptivity) where:
-- `I`: radiation intensity at the surface [W/m²]. When the `RadiativeFluxBC`
-  carries an explicit `absorptivity`, it is evaluated at `t` and already
-  folded in (`I = α(t)·q_ext`); otherwise `I` is the bare incident flux.
-- `has_explicit_absorptivity`: `true` iff the BC supplied an explicit
-  `absorptivity`. When `false` (the Kirchhoff default path), the surface
-  cell's live `a_eff` (`cache.a[end]`, equal to ε_eff unless a component
-  sets `surface_absorptivity`) is applied at injection by
-  `compute_beer_lambert_source!` — consumers must not apply it again.
-"""
-function extract_radiative_flux_from_bcs(
-    bc_set::BoundaryConditionSet,
-    ::Val{tag},
-    t::Real,
-) where {tag}
-    bc = get_thermal_bc(bc_set, Val(tag))
-
-    rad_bc = get_radiative_flux_bc(bc)
-    if rad_bc === nothing
-        return (0.0, false)
-    end
-
-    # Evaluate flux (may be time-dependent)
-    flux = rad_bc.flux isa Function ? rad_bc.flux(t) : Float64(rad_bc.flux)
-
-    if rad_bc.absorptivity !== nothing
-        # Explicit absorptivity: fold it in here; the injection path must not
-        # rescale by ε_eff.
-        α =
-            rad_bc.absorptivity isa Function ? rad_bc.absorptivity(t) :
-            Float64(rad_bc.absorptivity)
-        return (flux * α, true)
-    else
-        # Kirchhoff default: bare incident flux; the live surface-cell a_eff
-        # (= ε_eff unless a component overrides) is applied at injection in
-        # compute_beer_lambert_source!.
-        return (flux, false)
-    end
-end
-
-"""
-	has_radiative_flux_bc(bc_set::BoundaryConditionSet, ::Val{tag}) where tag -> Bool
-
-Check if a boundary has a RadiativeFluxBC using compile-time tag dispatch.
-"""
-function has_radiative_flux_bc(bc_set::BoundaryConditionSet, ::Val{tag}) where {tag}
-    bc = get_thermal_bc(bc_set, Val(tag))
-    return get_radiative_flux_bc(bc) !== nothing
 end

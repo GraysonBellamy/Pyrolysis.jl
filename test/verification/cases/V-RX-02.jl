@@ -6,9 +6,10 @@
 # `part_baking_soda` case against the same forms). Sub-cases:
 #
 #   a) n = 0    — linear decay, exact finite burnout time. Compared only up to
-#                 0.9·t_b with the depletion limiter DISABLED: the solver
-#                 clamps ξ ≥ 0 inside ξⁿ, so at ξ = 0 the n = 0 rate stays A
-#                 and would integrate ξ negative (kinetics.jl `_fast_pow`).
+#                 0.9·t_b with the depletion limiter DISABLED: the power is
+#                 taken on the finite base base_scale·softplus(ξ/base_scale),
+#                 so at ξ = 0 the n = 0 rate stays A and would integrate ξ
+#                 negative (`DepletionLimiter(enabled = false)`).
 #   b) n = 2    — ThermaKin's second-order case as single-reactant n = 2:
 #                 ξ = ξ₀/(1 + ξ₀kt).
 #   c) n = 2/3  — contracting-sphere R3 model with FDS's NaHCO₃ parameters
@@ -42,14 +43,7 @@ function _vrx02_build(;
             reactions = (rxn,),
             depletion_limiter = DepletionLimiter(enabled = limiter_enabled),
         )
-        mesh = core_mesh(
-            create_uniform_mesh,
-            1e-3,
-            n_cells,
-            Val(2);
-            T_initial = T_iso,
-            ξ_initial = (ξ0, 0.0),
-        )
+        mesh = create_uniform_mesh(1e-3, n_cells)
         bc_set = BoundaryConditionSet(
             thermal = (top = DirichletThermalBC(T_iso), bottom = DirichletThermalBC(T_iso)),
         )

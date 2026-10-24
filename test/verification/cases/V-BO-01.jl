@@ -3,28 +3,26 @@
 # =============================================================================
 #
 # A 5.9 mm PMMA slab on 12 mm Kaowool under 50 kW/m² burns out completely:
-# every PMMA cell shrinks to the depletion threshold and is parked, the
-# exposed boundary walks down the stack, and the run ends on the bare
-# substrate. The deck is the MaCFP PMMA gasification case with the Gpyro V2
-# property fits (power-law k(T), c(T) above 394 K — positive on the whole
-# property bracket) and in-depth (Beer–Lambert) absorption.
+# the PMMA cells thin to the deactivation threshold, the layer is deactivated
+# and the run ends on the bare substrate. The deck is the MaCFP PMMA
+# gasification case with the Gpyro V2 property fits (power-law k(T), c(T)
+# above 394 K — positive on the whole property bracket) and in-depth
+# (Beer–Lambert) absorption.
 #
 # The run must burn out completely, lose exactly the mass of the PMMA layer,
 # match the reference peak mass loss rate, its time and the burnout time,
 # close the mass ledger, and converge the surface temperature at every
-# evaluation, within a wall-time budget at 0.098 mm cells.
+# accepted step, within a wall-time budget at 0.098 mm cells.
 #
-# On the finite-volume core the mesh moves by the equidistribution correction,
-# the PMMA–Kaowool interface a Lagrangian node, so the PMMA cells thin
-# together and the layer deactivates in one invocation into the Kaowool cell
-# beneath; the surface QoI there counts accepted states whose surface balance
-# did not converge or sits on the trial clamp, since that Newton never warns.
+# The mesh moves by the equidistribution correction, the PMMA–Kaowool
+# interface a Lagrangian node, so the PMMA cells thin together and the layer
+# deactivates in one invocation into the Kaowool cell beneath. The surface
+# QoI counts accepted states whose surface balance did not converge or sits
+# on the trial clamp, since that Newton never warns.
 
-# The deck, the warning counters, the step recorder and the QoIs below are
-# shared by V-BO-02, V-BO-03 and V-BO-05 to V-BO-08 (their files load after
-# this one).
+# The deck, the step recorder and the QoIs below are shared by V-BO-02,
+# V-BO-03 and V-BO-05 to V-BO-08 (their files load after this one).
 
-using Logging
 using OrdinaryDiffEq: CallbackSet, ContinuousCallback, DiscreteCallback, SciMLBase
 
 const VBO_L_PMMA = 0.0059
@@ -134,24 +132,11 @@ function _vbo_problem(
         dz = l_pmma / n_pmma
         n_kw = round(Int, VBO_L_KW / dz)
         n = n_pmma + n_kw
-        mesh = core_mesh(
-            create_uniform_mesh,
-            n * dz,
-            n,
-            Val(3);
-            T_initial = VBO_T0,
-            ξ_initial = (VBO_RHO_PMMA, 0.0, 0.0),
-        )
+        mesh = create_uniform_mesh(n * dz, n)
         z_if = n_kw * dz
     else
         nodes, n_kw = _vbo_nodes(n_pmma, l_pmma, grading)
-        mesh = core_mesh(
-            create_mesh_from_nodes,
-            nodes,
-            Val(3);
-            T_initial = VBO_T0,
-            ξ_initial = (VBO_RHO_PMMA, 0.0, 0.0),
-        )
+        mesh = create_mesh_from_nodes(nodes)
         z_if = nodes[n_kw+1]
     end
     ξ0 =
@@ -159,30 +144,11 @@ function _vbo_problem(
     return _vbo_deck(mesh, mat, ξ0; flux, t_end, save_every)
 end
 
-# Counts warnings whose message matches `pattern` while forwarding everything
-# to the enclosing logger. The surface-Newton QoIs read the count.
-struct _VBOWarnCounter{L<:Logging.AbstractLogger} <: Logging.AbstractLogger
-    inner::L
-    pattern::Regex
-    count::Base.RefValue{Int}
-end
-Logging.min_enabled_level(l::_VBOWarnCounter) = Logging.min_enabled_level(l.inner)
-Logging.shouldlog(l::_VBOWarnCounter, args...) = Logging.shouldlog(l.inner, args...)
-Logging.catch_exceptions(l::_VBOWarnCounter) = Logging.catch_exceptions(l.inner)
-function Logging.handle_message(l::_VBOWarnCounter, level, message, args...; kwargs...)
-    if level >= Logging.Warn && occursin(l.pattern, string(message))
-        l.count[] += 1
-    end
-    return Logging.handle_message(l.inner, level, message, args...; kwargs...)
-end
-
 # What the step recorder saw over the accepted steps of a solve: the smallest
 # step, the largest live-cell temperature, the time of the last step (a stop
-# between output times is not saved), on the new core the accepted states
-# whose surface energy balance did not converge or sits on the trial clamp of
-# the property bracket, the deactivation threshold and the mass ledger (`NaN`
-# on the old core, whose surface Newton warns instead and whose ledger is
-# taken on the saved times).
+# between output times is not saved), the accepted states whose surface
+# energy balance did not converge or sits on the trial clamp of the property
+# bracket, the deactivation threshold and the mass ledger.
 mutable struct _VBORecord
     dt_min::Float64
     T_max::Float64
@@ -193,11 +159,8 @@ mutable struct _VBORecord
 end
 _VBORecord() = _VBORecord(Inf, -Inf, NaN, 0, NaN, NaN)
 
-# Warning counters and step records of the most recent solve of each case
-# (the QoI closures read them after `solve_fn` returns).
-const VBO_SURFACE_WARNINGS = Dict{String,Int}()
-const VBO_TRANSMITTED_WARNINGS = Dict{String,Int}()
-const VBO_VOID_WARNINGS = Dict{String,Int}()
+# Step records of the most recent solve of each case (the QoI closures read
+# them after `solve_fn` returns).
 const VBO_STEP_STATS = Dict{String,_VBORecord}()
 
 # The step recorder: after every accepted step and its events, the step and
@@ -217,9 +180,9 @@ end
 
 # The live boundary faces of the thermal kernel whose surface energy balance,
 # at the last residual evaluation, did not converge or ended where the trial
-# clamp departs from the identity. The new core's surface Newton evaluates the
-# condition at the clamped iterate and never warns: on a trial state the clamp
-# is its purpose, on an accepted state it would be a failure.
+# clamp departs from the identity. The surface Newton evaluates the condition
+# at the clamped iterate and never warns: on a trial state the clamp is its
+# purpose, on an accepted state it would be a failure.
 function _vbo_clamped(thermal, ds, topo)
     n = 0
     for p in thermal.patches, f0 in p.faces
@@ -245,7 +208,7 @@ function _vbo_outflow(ds, c, topo, A0)
     return out / A0
 end
 
-# The new core's mass ledger over the accepted steps: the outflow integrated
+# The mass ledger over the accepted steps: the outflow integrated
 # over each step by three-point Gauss–Legendre on the step's interpolant,
 # against the drop of the live cells' masses less the masses deactivation
 # vented. A continuous callback whose condition never crosses zero reads each
@@ -334,19 +297,15 @@ function _vbo_ledger(cp)
     return L, reader, commit!
 end
 
-# The new core's solve with the step recorder, which evaluates the residual
-# at every accepted state and reads the live cells' temperatures and the
-# surface balances, and the mass ledger. The old core's depletion keywords
-# have no counterpart there. `instrument(cp)` returns a further callback of
-# the set-up problem for the gate scripts (`nothing` for none);
+# The solve with the step recorder, which evaluates the residual at every
+# accepted state and reads the live cells' temperatures and the surface
+# balances, and the mass ledger. `instrument(cp)` returns a further callback
+# of the set-up problem for an instrumented measurement (`nothing` for none);
 # `min_thickness` and, when given, `located_events` go to the integration,
 # the rest to the setup.
-function _vbo_core_solve(
+function _vbo_recorded_solve(
     problem,
     rec::_VBORecord;
-    handle_depletion = false,
-    depletion_threshold = nothing,
-    min_cells = nothing,
     min_thickness = 1e-6,
     located_events = nothing,
     instrument = cp -> nothing,
@@ -355,7 +314,6 @@ function _vbo_core_solve(
     cp = Pyrolysis.Integration.setup(
         problem;
         energy_state = VERIFICATION_ENERGY_STATE,
-        deactivation = handle_depletion,
         kwargs...,
     )
     def, ws = cp.def, cp.ws
@@ -392,65 +350,36 @@ function _vbo_core_solve(
     return sol
 end
 
-# The case's solve. On the new core a moving mesh with deactivation gets the
-# equidistribution correction, the layer interface Lagrangian, by `setup`'s
-# installation rule.
+# The case's solve. A moving mesh with deactivation gets the equidistribution
+# correction, the layer interface Lagrangian, by `setup`'s installation rule.
 function _vbo_solve_fn(id::String)
     return (problem; kwargs...) -> begin
-        surf = _VBOWarnCounter(Logging.current_logger(), r"^Surface", Ref(0))
-        tr = _VBOWarnCounter(surf, r"transmitted through the back face", Ref(0))
-        void = _VBOWarnCounter(tr, r"gasified from within", Ref(0))
         rec = _VBORecord()
-        sol = Logging.with_logger(void) do
-            if VERIFICATION_CORE == "new"
-                _vbo_core_solve(problem, rec; kwargs...)
-            else
-                # On the old core the maximum runs over every temperature
-                # slot: a ghost keeps the temperature it was parked with, which
-                # lies between two live-cell temperatures.
-                n = length(problem.mesh.cells)
-                recorder = _vbo_recorder(
-                    integ -> (rec.T_max = max(rec.T_max, maximum(view(integ.u, 1:n)))),
-                    rec,
-                )
-                solve(problem; progress = false, callback = recorder, kwargs...)
-            end
-        end
-        VBO_SURFACE_WARNINGS[id] = surf.count[]
-        VBO_TRANSMITTED_WARNINGS[id] = tr.count[]
-        VBO_VOID_WARNINGS[id] = void.count[]
+        sol = _vbo_recorded_solve(problem, rec; kwargs...)
         VBO_STEP_STATS[id] = rec
         return sol
     end
 end
 
 # The peak and its time are the main peak's: over the saved times before the
-# solve's last deactivation event, whose merge (or park) releases the layer's
-# residue in a burst the gate judges by refinement instead.
+# solve's last deactivation event, whose merge releases the layer's residue in
+# a burst judged by refinement instead.
 # `l_kw` is the substrate's thickness, the live thickness once the layer has
-# burned out. The mass ledger of a finite-volume solution is its case's
-# recorder's (`id`; `NaN` without one); the old core's is the total-mass drop
-# against the trapezoid of ṁ″ on the saved times.
+# burned out. The mass ledger is the case's recorder's (`id`; `NaN` without
+# one).
 function _vbo_measures(sol; l_kw = VBO_L_KW, id = nothing)
     mlr = sol.extras.gas_generation_rate .* 1000           # g m⁻² s⁻¹
-    parks = sol.extras.park_times
+    deactivations = sol.extras.deactivation_times
     before =
-        isempty(parks) ? length(sol.t) : something(findlast(<(maximum(parks)), sol.t), 1)
+        isempty(deactivations) ? length(sol.t) :
+        something(findlast(<(maximum(deactivations)), sol.t), 1)
     ipk = argmax(view(mlr, 1:before))
     th = sol.extras.thickness_history
     i_bo = findfirst(<(l_kw + 0.02e-3), th)
     t_bo = i_bo === nothing ? NaN : sol.t[i_bo]
     m = sol.extras.total_mass
     mass_loss = 100 * (1 - m[end] / m[1])
-    ledger = if sol isa Pyrolysis.Outputs.CoreSolution
-        id === nothing ? NaN : VBO_STEP_STATS[id].ledger
-    else
-        ṁ = sol.mass_loss_rate
-        gen = sum(
-            0.5 * (ṁ[j] + ṁ[j+1]) * (sol.t[j+1] - sol.t[j]) for j = 1:(length(sol.t)-1)
-        )
-        abs((m[1] - m[end]) - gen) / (m[1] - m[end])
-    end
+    ledger = id === nothing ? NaN : VBO_STEP_STATS[id].ledger
     return (;
         mlr,
         peak = mlr[ipk],
@@ -468,7 +397,8 @@ end
 _vbo_mass_loss_exact(l_pmma, l_kw) =
     100 * VBO_RHO_PMMA * l_pmma / (VBO_RHO_PMMA * l_pmma + VBO_RHO_KW * l_kw)
 
-# Maximum live-cell temperature at each output time (ghost slots read NaN).
+# Maximum live-cell temperature at each output time (deactivated cells read
+# NaN).
 _vbo_max_live_T(sol) =
     [maximum(x -> isnan(x) ? -Inf : x, view(sol.T, :, k)) for k in eachindex(sol.t)]
 
@@ -486,16 +416,13 @@ const VBO_PEAK_REF = 32.39      # g m⁻² s⁻¹
 const VBO_T_PEAK_REF = 335.0    # s
 const VBO_T_BO_REF = 363.5      # s (live thickness < 12.02 mm)
 
-# The mass ledger's comment on each core.
-const VBO_LEDGER_COMMENT =
-    VERIFICATION_CORE == "old" ?
-    "total-mass drop vs ∫ ṁ″ dt over the run, the trapezoid on the saved times" :
-    "total-mass drop vs ∫ ṁ″ dt over the accepted steps (three-point Gauss–Legendre per step) and the mass deactivation vented"
+# The mass ledger's comment.
+const VBO_LEDGER_COMMENT = "total-mass drop vs ∫ ṁ″ dt over the accepted steps (three-point Gauss–Legendre per step) and the mass deactivation vented"
 
 # The QoIs of every burnout case; `peak_tol = nothing` leaves the peak out.
-# The finite-volume core's ledger closes to the integrator's tolerance: on
-# the moving-mesh cases at their CI resolution at most 5.2e-7 in the
-# temperature form and 3.2e-6 in the enthalpy form (V-BO-08's).
+# The ledger closes to the integrator's tolerance: on the moving-mesh cases
+# at their CI resolution at most 5.2e-7 in the temperature form and 3.2e-6 in
+# the enthalpy form (V-BO-08's).
 function _vbo_common_qois(
     m;
     id,
@@ -504,7 +431,7 @@ function _vbo_common_qois(
     peak_ref = VBO_PEAK_REF,
     surface_warnings = true,
     peak_comment = "g m⁻² s⁻¹, gas generation rate",
-    ledger_tol = VERIFICATION_CORE == "old" ? 1e-3 : 3e-5,
+    ledger_tol = 3e-5,
     ledger_comment = VBO_LEDGER_COMMENT,
 )
     out = QoIResult[]
@@ -516,7 +443,7 @@ function _vbo_common_qois(
             exact = m.l_kw,
             error = abs(m.L_end - m.l_kw),
             tol = 1e-5,
-            comment = "every PMMA cell parked; $(round(1e3 * m.l_kw; digits = 2)) ± 0.01 mm",
+            comment = "every PMMA cell deactivated; $(round(1e3 * m.l_kw; digits = 2)) ± 0.01 mm",
         ),
     )
     push!(
@@ -556,30 +483,18 @@ function _vbo_common_qois(
     return out
 end
 
-# The surface energy balance's QoI: on the old core no warning from its
-# Newton (converged, never pinned at the clamp) at any evaluation; on the new
-# core, whose Newton clamps its trial iterates smoothly and never warns, no
-# accepted state whose balance did not converge or sits on the clamp.
+# The surface energy balance's QoI: the Newton clamps its trial iterates
+# smoothly and never warns, so no accepted state may hold a balance that did
+# not converge or sits on the clamp.
 function _vbo_surface_qoi(id)
-    if VERIFICATION_CORE == "new"
-        n = get(() -> _VBORecord(-1.0, -1.0, NaN, -1, NaN, NaN), VBO_STEP_STATS, id).clamped
-        return QoIResult(
-            name = "clamped surface balances on accepted states",
-            value = Float64(n),
-            exact = 0.0,
-            error = Float64(abs(n)),
-            tol = 0.5,
-            comment = "boundary temperature solve converged inside the property bracket at every accepted step",
-        )
-    end
-    n_warn = get(VBO_SURFACE_WARNINGS, id, -1)
+    n = get(() -> _VBORecord(-1.0, -1.0, NaN, -1, NaN, NaN), VBO_STEP_STATS, id).clamped
     return QoIResult(
-        name = "surface-Newton warnings",
-        value = Float64(n_warn),
+        name = "clamped surface balances on accepted states",
+        value = Float64(n),
         exact = 0.0,
-        error = Float64(n_warn),
+        error = Float64(abs(n)),
         tol = 0.5,
-        comment = "boundary temperature solve converged at every evaluation",
+        comment = "boundary temperature solve converged inside the property bracket at every accepted step",
     )
 end
 
@@ -625,7 +540,7 @@ _vbo_timing_qois(m; t_peak_ref = VBO_T_PEAK_REF, t_bo_ref = VBO_T_BO_REF) = [
 
 # The deactivation invocations of the PMMA layer, with the cells they took
 # and the largest merged fraction, reported and not asserted: the burnout
-# path's criterion is its accuracy under refinement (`burnout_envelope.jl`),
+# path's criterion is its accuracy under refinement (test/gates/burnout_envelope.jl),
 # and one invocation is its target.
 function _vbo_invocation_qoi(sol, id)
     ε_m = VBO_STEP_STATS[id].threshold
@@ -667,9 +582,7 @@ _vbo_history_curves(id, sol) = [
 # V-BO-01's solve keywords, shared by the burnout cases that vary its deck.
 const VBO_SOLVE_KWARGS = (
     use_ale = true,
-    handle_depletion = true,
-    depletion_threshold = 0.05,
-    min_cells = 2,
+    deactivation = true,
     min_thickness = 1e-3,
     radiation_model = BEER_LAMBERT,
     abstol = 1e-8,
@@ -682,13 +595,13 @@ function _verification_case_vbo01()
         m = _vbo_measures(sol; id)
         out = _vbo_common_qois(m; id, peak_tol = 0.03)
         append!(out, _vbo_timing_qois(m))
-        VERIFICATION_CORE == "new" && push!(out, _vbo_invocation_qoi(sol, id))
+        push!(out, _vbo_invocation_qoi(sol, id))
         return out
     end
 
     return VerificationCase(
         id = id,
-        title = "PMMA-on-Kaowool burnout under ALE (parked depletion)",
+        title = "PMMA-on-Kaowool burnout under ALE (layer deactivation)",
         tags = [:ale, :burnout, :depletion, :beer_lambert, :coupled, :performance],
         references = [
             "MaCFP-2 PMMA gasification case (NIST), 50 kW/m²",

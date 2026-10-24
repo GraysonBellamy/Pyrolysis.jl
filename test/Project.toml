@@ -1,5 +1,4 @@
 [deps]
-BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
 Distributed = "8ba89e20-285c-5b6f-9357-94700520ee1b"
 ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
 JET = "c3a54625-cd67-489e-a8e7-0a5a0ff4e31b"
@@ -21,7 +20,6 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 Pyrolysis = {path = ".."}
 
 [compat]
-BenchmarkTools = "1"
 JET = "0.12"
 SpecialFunctions = "2"
 julia = "1.10"

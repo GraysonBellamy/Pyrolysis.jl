@@ -38,14 +38,7 @@ function _verification_case_vrx01()
             reactions = (r1, r2),
             depletion_limiter = DepletionLimiter(enabled = false),
         )
-        mesh = core_mesh(
-            create_uniform_mesh,
-            L,
-            n_cells,
-            Val(3);
-            T_initial = T_iso,
-            ξ_initial = (ξ0, 0.0, 0.0),
-        )
+        mesh = create_uniform_mesh(L, n_cells)
         bc_set = BoundaryConditionSet(
             thermal = (top = DirichletThermalBC(T_iso), bottom = DirichletThermalBC(T_iso)),
         )

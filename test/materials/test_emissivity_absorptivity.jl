@@ -27,7 +27,7 @@ using Pyrolysis.Materials:
     CallableProperty,
     AbstractPropertyFunction
 using Pyrolysis.Properties:
-    effective_emissivity, mixture_emissivity, mixture_absorptivity, mixing_volume_fractions
+    mixture_emissivity, mixture_absorptivity, mixing_volume_fractions
 
 const _EA_GAS = GaseousComponent(:g, M = 0.03, c = 1000.0, k = 0.03, λ = 1e-5)
 
@@ -144,10 +144,8 @@ end
 
     for T in (500.0, 1000.0)
         ε_hand = v[1] * _ε_lin(T) + v[2] * _ε_fun(T)
-        @test effective_emissivity(ξ, T, mat) ≈ ε_hand rtol = 1e-14
         @test mixture_emissivity(ξ, T, mat) ≈ ε_hand rtol = 1e-14
     end
-    @test effective_emissivity(ξ, 500.0, mat) != effective_emissivity(ξ, 1000.0, mat)
     @test mixture_emissivity(ξ, 500.0, mat) != mixture_emissivity(ξ, 1000.0, mat)
 
     # Scalar ε on every component: the constant volume-weighted sum.
@@ -161,21 +159,12 @@ end
         reactions = (),
     )
     ε_old = v[1] * 0.9 + v[2] * 0.85
-    @test effective_emissivity(ξ, 500.0, mat_c) ≈ ε_old rtol = 1e-14
-    @test effective_emissivity(ξ, 1000.0, mat_c) == effective_emissivity(ξ, 500.0, mat_c)
     @test mixture_emissivity(ξ, 500.0, mat_c) ≈ ε_old rtol = 1e-14
     @test mixture_emissivity(ξ, 1000.0, mat_c) == mixture_emissivity(ξ, 500.0, mat_c)
 
     # AD: dε_eff/dT is the weighted component slope (v is T-independent here).
-    dε = ForwardDiff.derivative(T -> effective_emissivity(ξ, T, mat), 700.0)
-    @test dε ≈ v[1] * (-1e-4) + v[2] * 5e-5 rtol = 1e-12
     dε_mix = ForwardDiff.derivative(T -> mixture_emissivity(ξ, T, mat), 700.0)
     @test dε_mix ≈ v[1] * (-1e-4) + v[2] * 5e-5 rtol = 1e-12
-end
-
-@testset "effective_emissivity clamps an unphysical law at 1" begin
-    mat_hot = _ea_material(ε_virgin = 1.3)
-    @test effective_emissivity((300.0, 0.0, 0.0), 500.0, mat_hot) == 1.0
 end
 
 @testset "a_eff: Kirchhoff invariant and per-component override" begin
@@ -258,86 +247,5 @@ end
         ξ, T = _composition(i), _temperature(i)
         @test ds_a.a[i] ≈ mixture_absorptivity(ξ, T, mat_a) rtol = 1e-14
         @test ds_a.ε[i] ≈ mixture_emissivity(ξ, T, mat_a) rtol = 1e-14
-    end
-end
-
-@testset "effective_absorptivity: Kirchhoff invariant and per-component override" begin
-    effective_absorptivity = Pyrolysis.Properties.effective_absorptivity
-    ξ = (300.0, 45.0, 0.5)
-    v = _hand_weights(ξ)
-
-    # No component sets an absorptivity → a_eff is ε_eff, bit-for-bit, for
-    # T-dependent and constant emissivities alike.
-    for mat in (_ea_material(), _ea_material(ε_virgin = 0.9)), T in (400.0, 800.0)
-        @test effective_absorptivity(ξ, T, mat) === effective_emissivity(ξ, T, mat)
-    end
-
-    # One component overrides: its constant replaces ε_j(T) in the same sum.
-    mat_a = _ea_material(a_char = 0.6)
-    for T in (500.0, 1000.0)
-        a_hand = v[1] * _ε_lin(T) + v[2] * 0.6
-        @test effective_absorptivity(ξ, T, mat_a) ≈ a_hand rtol = 1e-14
-        @test effective_absorptivity(ξ, T, mat_a) != effective_emissivity(ξ, T, mat_a)
-        # Emission is untouched by the override.
-        @test effective_emissivity(ξ, T, mat_a) ==
-              effective_emissivity(ξ, T, _ea_material())
-    end
-    # Only the Kirchhoff component contributes a temperature slope.
-    da = ForwardDiff.derivative(T -> effective_absorptivity(ξ, T, mat_a), 700.0)
-    @test da ≈ v[1] * (-1e-4) rtol = 1e-12
-
-    # Both override: a_eff is T-independent.
-    mat_ab = _ea_material(a_virgin = 0.75, a_char = 0.6)
-    @test effective_absorptivity(ξ, 500.0, mat_ab) ≈ v[1] * 0.75 + v[2] * 0.6 rtol = 1e-14
-    @test effective_absorptivity(ξ, 500.0, mat_ab) ==
-          effective_absorptivity(ξ, 1000.0, mat_ab)
-
-    # Depleted cell (gas only): both radiative mixtures are 0.
-    @test effective_emissivity((0.0, 0.0, 1.0), 500.0, mat_a) == 0.0
-    @test effective_absorptivity((0.0, 0.0, 1.0), 500.0, mat_a) == 0.0
-end
-
-@testset "PropertyCache and update_properties! fill ε and a per cell" begin
-    effective_absorptivity = Pyrolysis.Properties.effective_absorptivity
-    function _cache_for(mat)
-        mesh = create_uniform_mesh(0.01, 5, Val(3))
-        bc = BoundaryConditionSet(thermal = (top = HeatFluxBC(0.0), bottom = AdiabaticBC()))
-        problem =
-            PyrolysisProblem(mesh = mesh, material = mat, bc_set = bc, tspan = (0.0, 1.0))
-        def, ws, u = initialize_state(problem; use_ale = false)
-        n = ws.layout.n_cells
-        for i = 1:n
-            u[i] = 400.0 + 100.0 * i
-            u[n+i] = 300.0 - 20.0 * i
-            u[2n+i] = 10.0 * i
-            u[3n+i] = 0.5
-        end
-        Pyrolysis.Problem.populate!(ws.state_cache, u, ws.layout)
-        Pyrolysis.Properties.update_properties!(
-            ws.prop_cache,
-            ws.state_cache,
-            ws.mesh,
-            def.material,
-        )
-        return ws.prop_cache, ws.state_cache, n
-    end
-
-    cache_k, st, n = _cache_for(_ea_material())
-    @test length(cache_k.a) == n
-    @test cache_k.a == cache_k.ε
-    for i = 1:n
-        ξ_i = (st.ξ[1, i], st.ξ[2, i], st.ξ[3, i])
-        @test cache_k.ε[i] ≈ effective_emissivity(ξ_i, st.T[i], _ea_material()) rtol = 1e-14
-    end
-    # ε varies with the cell temperature across the graded state.
-    @test length(unique(round.(cache_k.ε; digits = 6))) == n
-
-    mat_a = _ea_material(a_char = 0.6)
-    cache_a, st_a, _ = _cache_for(mat_a)
-    @test cache_a.a != cache_a.ε
-    for i = 1:n
-        ξ_i = (st_a.ξ[1, i], st_a.ξ[2, i], st_a.ξ[3, i])
-        @test cache_a.a[i] ≈ effective_absorptivity(ξ_i, st_a.T[i], mat_a) rtol = 1e-14
-        @test cache_a.ε[i] ≈ effective_emissivity(ξ_i, st_a.T[i], mat_a) rtol = 1e-14
     end
 end

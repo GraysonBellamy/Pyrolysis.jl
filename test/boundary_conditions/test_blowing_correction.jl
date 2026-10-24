@@ -155,15 +155,6 @@ end
         @test qb === q0
         @test dqb === dq0
 
-        @testset "evaluate_bc_flux_and_derivative(::ConvectiveBC) without a face" begin
-            # Zero outflow and the default model reproduce the 5-arg flux exactly.
-            q5, dq5 = evaluate_bc_flux_and_derivative(conv, T_s, t, ε, NO_RADIATION)
-            @test q0 === q5
-            @test dq0 === dq5
-            @test qb === q5
-            @test dqb === dq5
-        end
-
         # Non-convective BCs ignore the face.
         rad = RadiativeBC(T_inf = T_inf)
         qr, dqr = evaluate_bc_flux_and_derivative(rad, T_s, t, ε, NO_RADIATION, face)
@@ -325,67 +316,6 @@ end
         dJ_fd = (_Ts(600.0, 0.02 + δJ) - _Ts(600.0, 0.02 - δJ)) / (2δJ)
         @test abs(dJ_ad) > 0
         @test dJ_ad ≈ dJ_fd rtol = 1e-5
-    end
-
-    # ========================================================================
-    @testset "Structured Jacobian (verify_jacobian_at): strict agreement with blowing" begin
-        JacobianSpec = Pyrolysis.Jacobian.JacobianSpec
-        function _build(; darcy::Bool, use_ale::Bool, model)
-            mat = _blowing_material(darcy = darcy)
-            mesh = create_uniform_mesh(0.01, 12, Val(2))
-            bcs = BoundaryConditionSet(
-                thermal = (
-                    top = HeatFluxBC(50e3) +
-                          ConvectiveBC(h = 10.0, T_inf = 300.0, blowing = model),
-                    bottom = AdiabaticBC(),
-                ),
-                mass = (top = DiffusiveMassBC(0.01), bottom = ImpermeableBC()),
-            )
-            problem = PyrolysisProblem(
-                mesh = mesh,
-                material = mat,
-                bc_set = bcs,
-                tspan = (0.0, 100.0),
-            )
-            def, ws, u = initialize_state(problem; use_ale = use_ale)
-            n = ws.layout.n_cells
-            # Hot state with free gas so the boundary mass flux (and hence B)
-            # is genuinely nonzero.
-            for i = 1:n
-                u[i] = 1000.0
-                u[n+i] = 400.0          # ξ_solid
-                u[2n+i] = 8.0           # ξ_gas
-            end
-            return def, ws, u
-        end
-
-        pooling = PoolingFilm(NITROGEN; diffusion_volume = (gas = 60.0,))
-        for (name, darcy, use_ale, model) in (
-            ("eulerian Fickian", false, false, CouetteFilm()),
-            ("eulerian Darcy-Fick", true, false, CouetteFilm()),
-            ("ALE Fickian", false, true, CouetteFilm()),
-            ("eulerian Fickian, λ = 0.31", false, false, CouetteFilm(0.31)),
-            ("eulerian Fickian, property ratio", false, false, PropertyRatioFilm(NITROGEN)),
-            ("eulerian Fickian, pooling", false, false, pooling),
-            ("eulerian Darcy-Fick, pooling", true, false, pooling),
-            ("ALE Fickian, pooling", false, true, pooling),
-        )
-            def, ws, u = _build(darcy = darcy, use_ale = use_ale, model = model)
-            ref_spec = JacobianSpec(Pyrolysis.Jacobian.DenseAD_ForwardDiff(), def, ws)
-            spec = JacobianSpec(Pyrolysis.Jacobian.Structured(), def, ws)
-            report = Pyrolysis.Jacobian.verify_jacobian_at(
-                spec,
-                def,
-                ws,
-                u,
-                0.0;
-                reference_spec = ref_spec,
-                rtol = 1e-6,
-                atol = 1e-10,
-            )
-            @test report.mode == :strict
-            @test report.passed
-        end
     end
 
     # ========================================================================

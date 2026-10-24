@@ -8,7 +8,7 @@ avoids the allocations that bare runtime indexing into a heterogeneous
 """
 
 # ============================================================================
-# Gas Viscosity (for Darcy flow)
+# Floors of the gas properties
 # ============================================================================
 
 # Robustness floor for the Chapman-Enskog diffusivity formula (T^{3/2} and a
@@ -29,79 +29,9 @@ const T_GAS_PROPERTY_FLOOR = 100.0  # K
 # fit was made for. `Material`'s constructor rejects a curve that is already
 # unusable across the pyrolysis range; this is the runtime backstop for
 # excursions outside it. 1e-12 Pa·s is seven orders below any real gas, so it
-# never binds on a legitimate state — and like the `μ > 1e-20` / `mob > 1e-30`
-# guards downstream, the `max` is one-sided differentiable where it does.
+# never binds on a legitimate state; the state mapping applies it as a smooth
+# floor.
 const MU_FLOOR = 1e-12  # Pa·s
-
-"""
-	effective_gas_viscosity(T::Real, material) -> Real
-
-Dynamic viscosity [Pa·s] of `material`'s pore gas at temperature `T`, read from
-the material's own `gas_viscosity` curve.
-
-This is the form every Darcy call site uses. A `Material` that says nothing
-carries `SutherlandProperty()` (air).
-
-The material's curve is a property function, so it evaluates on the property
-bracket `[T_PROPERTY_MIN, T_PROPERTY_MAX]` like every other law (a diverging
-Newton trial state cannot reach `T^1.5` at a negative temperature or drive a
-fitted polynomial absurdly far outside its range). One guard is added here
-because μ enters the model *only* as the denominator of the Darcy mobility
-κ/μ: the result is floored at `MU_FLOOR`, so a correlation that goes
-non-positive on extrapolation cannot reverse or blow up the gas velocity.
-
-A `NaN` from the curve **propagates** — `max` does not floor it. That is
-deliberate: the constructor already rejects a curve that is non-finite anywhere
-in the pyrolysis range, so a `NaN` here means the correlation is broken somewhere
-the probe did not reach. Substituting `MU_FLOOR` would turn that into a
-plausible-looking wrong answer, whereas a `NaN` residual makes the solver reject
-the step or fail loudly.
-
-# Example
-```julia
-μ = effective_gas_viscosity(650.0, material)
-```
-"""
-@inline function effective_gas_viscosity(T::Real, material)
-    return max(material.gas_viscosity(T), MU_FLOOR)
-end
-
-"""
-	mixture_gas_viscosity(ξ::NTuple{NC,Float64}, T::Float64, material) -> Float64
-
-Dynamic viscosity [Pa·s] of the pore gas mixture at composition `ξ` and
-temperature `T`.
-
-The model carries **one viscosity curve per material**, so this ignores
-`ξ` and returns [`effective_gas_viscosity(T, material)`](@ref). That is
-a modelling choice, not a stub: μ is supplied as a blend correlation for the gas
-mixture the material is expected to produce (§5.9 of the Technical Reference),
-which averages over the pore gas shifting from background air to volatiles as
-pyrolysis proceeds.
-
-`ξ` is in the signature, and Darcy call sites pass it, so that a
-composition-dependent rule can be introduced by changing this function alone.
-
-!!! warning "Adding composition dependence is not a local change"
-    The production Darcy Jacobian is the **analytical override** in
-    `Jacobian/operators/darcy_transport.jl`, not the AD path, and its mobility
-    chain rule assumes `dμ/dξ == 0`. If this function ever consults `ξ`, that
-    override needs its `dμ/dξ` terms or the Jacobian silently goes stale — and
-    the rtol = 1e-12 equivalence gate cannot catch it while every Darcy test
-    fixture carries a single gas component. `test_gas_viscosity_property.jl`
-    asserts the invariant so the failure is loud.
-
-# Arguments
-- `ξ`: Mass concentrations [kg/m³] (reserved; see above)
-- `T`: Temperature [K]
-- `material`: Material definition, supplying the viscosity curve
-
-# Returns
-- `μ`: Dynamic viscosity [Pa·s]
-"""
-@inline function mixture_gas_viscosity(ξ::NTuple{NC,<:Real}, T::Real, material) where {NC}
-    return effective_gas_viscosity(T, material)
-end
 
 # ============================================================================
 # Chapman-Enskog Diffusivity
@@ -159,7 +89,7 @@ Compute binary diffusion coefficient using Chapman-Enskog kinetic theory.
 
 The Chapman-Enskog expression for binary diffusion of species A in background gas B:
 
-D_AB = (1.8583×10⁻⁷) × T^(3/2) × √(1/M_A + 1/M_B) / (P × σ_AB² × Ω_D)
+D_AB = (5.954×10⁻⁴) × T^(3/2) × √(1/M_A + 1/M_B) / (P × σ_AB² × Ω_D)   [m²/s]
 
 where:
 - T: Temperature [K]
@@ -167,6 +97,9 @@ where:
 - P: Pressure [Pa]
 - σ_AB: Average collision diameter [Å]
 - Ω_D: Diffusion collision integral (function of T*)
+
+(The Bird–Stewart–Lightfoot prefactor 1.8583×10⁻³ for cm²/s, g/mol and atm,
+converted to these units.)
 
 # Arguments
 - `T`: Temperature [K]
@@ -274,52 +207,8 @@ D_CH4 = chapman_enskog_diffusivity(500.0, 0.016, σ=3.758, ε_k=148.6)
 end
 
 # ============================================================================
-# Heat capacity helpers
-# ============================================================================
-
-@generated function _sum_heat_capacity(ξ, T, comps::Tuple, ::Val{NC}) where {NC}
-    expr = quote
-        result = zero(_prop_type(ξ, T))
-    end
-    for i = 1:NC
-        push!(expr.args, :(result += ξ[$i] * comps[$i].heat_capacity(T)))
-    end
-    push!(expr.args, :(return result))
-    return expr
-end
-
-"""
-	effective_heat_capacity(ξ::NTuple{NC,Float64}, T::Float64, material::Material) -> Float64
-
-Volumetric heat capacity of the bulk mixture, the storage coefficient of
-the temperature equation:
-
-```
-ρcₚ = Σⱼ ξⱼ · cₚ,ⱼ(T)        (every component, gas included)
-```
-
-Under local thermal equilibrium the pore gas is at the matrix temperature
-and stores sensible heat like every other phase (ThermaKin Eq. 17). The gas
-is carried with the skeleton, so in ALE the whole ρcₚ rides the mesh and the
-temperature equation has no mesh-motion term; the gas *flux* relative to the
-skeleton enters only through the advective source `S_conv`.
-
-The result is floored at `Materials.RHO_CP_FLOOR` so a cell emptied of every
-component cannot drive the `1/ρcₚ` factor in `dT/dt` to infinity. The floor
-is inside this function so every consumer — residual, property cache, and
-the structured-Jacobian operators that extract `∂ρcₚ/∂(T, ξ)` through Duals
-— sees the identical clamped value and (zero) derivative at the floor.
-"""
-@inline function effective_heat_capacity(ξ::NTuple{NC,<:Real}, T::Real, material) where {NC}
-    return max(_sum_heat_capacity(ξ, T, material.components, Val(NC)), RHO_CP_FLOOR)
-end
-
-# ============================================================================
 # Conductivity helpers
 # ============================================================================
-
-@inline _conductivity_sums(v, T, comps::Tuple, nc::Val) =
-    _conductivity_sums(v, T, comps, nc, Val(false))
 
 # With `skip_absent`, a component whose volume fraction is exactly zero (a
 # dual number's partials included) adds an exact zero to both sums for every
@@ -407,7 +296,6 @@ k_eff = bruggeman_effective_property(v, k)  # ≈ 2.261 (between series = 1.370 
     k::NTuple{NC,<:Real};
     tol::Float64 = 1e-10,
     maxiter::Int = 100,
-    k_init = nothing,
 ) where {NC}
 
     # Working scalar type: keeps every early return and the Newton state in
@@ -420,9 +308,8 @@ k_eff = bruggeman_effective_property(v, k)  # ≈ 2.261 (between series = 1.370 
         return zero(W)
     end
 
-    # Count non-zero volume components and compute parallel bound (used either
-    # as the initial guess or as a fallback for warm-start when k_init looks
-    # unusable).
+    # Count non-zero volume components and compute the parallel bound, the
+    # initial guess.
     k_parallel = zero(W)
     n_active = 0
     for i = 1:NC
@@ -433,11 +320,7 @@ k_eff = bruggeman_effective_property(v, k)  # ≈ 2.261 (between series = 1.370 
     end
     k_parallel /= total_v
 
-    # Bruggeman warm-start. If a positive `k_init` is supplied
-    # (typically the previous step's converged k_eff for this cell), seed
-    # Newton from it — saves 1–2 iterations on smooth time-stepping. Otherwise
-    # fall back to the parallel-mean initial guess.
-    k_eff = (k_init !== nothing && k_init > 1e-20) ? convert(W, k_init) : k_parallel
+    k_eff = k_parallel
 
     # Single component - return its property
     if n_active == 1
@@ -538,26 +421,20 @@ zero; the result is the same for every finite conductivity.
     return _conductivity_from_v(v, T, material; skip_absent)
 end
 
-# Cache-aware variant that takes pre-computed solid volume
-# fractions directly. Used by `update_properties!` to avoid recomputing
-# volume_fractions inside each effective-property call. The tuple type
-# constraint is intentionally loose — AD-derived volume fractions can be a
-# mixed-type tuple (some Float64 zeros, others Dual).
-#
-# The optional `k_init` seeds the Bruggeman Newton iteration
-# from the previous step's converged k_eff for this cell.
+# The effective conductivity from precomputed mixing volume fractions. The
+# tuple type is loose: AD-derived volume fractions can be a mixed-type tuple
+# (some Float64 zeros, others Dual).
 @inline function _conductivity_from_v(
     v::Tuple,
     T::Real,
     material::Material{NC};
-    k_init = nothing,
     skip_absent::Val = Val(false),
 ) where {NC}
     W = _prop_type(v, T)
     mixing = material.mixing.k.rule
     if mixing == BRUGGEMAN
         k_tuple = _conductivity_tuple(T, material.components, Val(NC))
-        return convert(W, bruggeman_effective_property(v, k_tuple; k_init = k_init))
+        return convert(W, bruggeman_effective_property(v, k_tuple))
     end
 
     k_parallel, inv_k_series =
@@ -606,63 +483,6 @@ end
     return expr
 end
 
-"""
-	effective_emissivity(ξ::NTuple{NC,Real}, T::Real, material::Material) -> Real
-
-Compute effective surface emissivity [-].
-
-ε_eff = Σⱼ vⱼ εⱼ(T)
-
-Each component's emissivity is a property function evaluated at the cell
-temperature `T`, so a `ForwardDiff.Dual` `T` returns `dε_eff/dT` (used by the
-surface-emission and Beer-Lambert Jacobians).
-
-Uses `mixing_volume_fractions` — swelling-weighted (matrix) volume fractions
-excluding γ ≈ 0 components. This matches ThermaKin's treatment of conductivity
-and is physically correct: surface emissivity is determined by the matrix
-material at the surface, not by gases trapped within the porous structure.
-For a fully depleted cell it falls back to the actual phase occupancy —
-for default transparent gases that still yields ε_eff = 0;
-`handle_depletion = true` merges such cells away in production.
-
-See [`effective_absorptivity`](@ref) for the incident-radiation counterpart.
-"""
-@inline function effective_emissivity(ξ::NTuple{NC,<:Real}, T::Real, material) where {NC}
-    v = mixing_volume_fractions(ξ, T, material)
-    return _emissivity_from_v(v, T, material)
-end
-
-# Cache-aware variant.
-@inline function _emissivity_from_v(v::Tuple, T::Real, material::Material{NC}) where {NC}
-    ε_eff = _sum_emissivity(v, T, material.components, Val(NC))
-    return clamp(ε_eff, 0.0, 1.0)
-end
-
-"""
-	effective_absorptivity(ξ::NTuple{NC,Real}, T::Real, material::Material) -> Real
-
-Compute the effective surface absorptivity [-] for *incident* radiation.
-
-a_eff = Σⱼ vⱼ aⱼ,   aⱼ = surface_absorptivity(compⱼ) or εⱼ(T) when unset
-
-Same weights and clamp as [`effective_emissivity`](@ref). When no component
-sets a `surface_absorptivity` this is identically `ε_eff` (Kirchhoff's law);
-a component with one set decouples the absorbed heater flux from the
-temperature-dependent emission. Consumers: the `RadiativeFluxBC` Kirchhoff
-default (`absorptivity = nothing`) in the surface energy balance and the
-Beer-Lambert surface transmissivity.
-"""
-@inline function effective_absorptivity(ξ::NTuple{NC,<:Real}, T::Real, material) where {NC}
-    v = mixing_volume_fractions(ξ, T, material)
-    return _absorptivity_from_v(v, T, material)
-end
-
-# Cache-aware variant.
-@inline function _absorptivity_from_v(v::Tuple, T::Real, material::Material{NC}) where {NC}
-    a_eff = _sum_absorptivity(v, T, material.components, Val(NC))
-    return clamp(a_eff, 0.0, 1.0)
-end
-
 # ============================================================================
 # Absorption helpers
 # ============================================================================
@@ -682,11 +502,14 @@ end
 	mixture_emissivity(ξ::NTuple{NC,Real}, T::Real, material) -> Real
 	mixture_absorptivity(ξ::NTuple{NC,Real}, T::Real, material) -> Real
 
-The mixing-weighted emissivity `Σⱼ vⱼ εⱼ(T)` and absorptivity `Σⱼ vⱼ aⱼ` of
-[`effective_emissivity`](@ref) and [`effective_absorptivity`](@ref) without
-their clamp to `[0, 1]`. The weights are a convex combination and every
-component value lies in `[0, 1]`, so the sums stay in `[0, 1]` to round-off;
-these forms keep the derivative of the sum where the clamped forms have a kink.
+The surface emissivity `Σⱼ vⱼ εⱼ(T)` and absorptivity for incident radiation
+`Σⱼ vⱼ aⱼ`, `aⱼ` the component's `surface_absorptivity` or `εⱼ(T)` when unset
+(Kirchhoff's law), weighted by the mixing volume fractions
+(`mixing_volume_fractions`: the matrix at the surface, not the gas in its
+pores). The weights are a convex combination and every component value lies in
+`[0, 1]`, so the sums stay in `[0, 1]` to round-off, with no clamp and so no
+kink in their derivatives. Each component's emissivity is a property function
+of `T`, so a `ForwardDiff.Dual` `T` carries `dε/dT`.
 """
 @inline function mixture_emissivity(ξ::NTuple{NC,<:Real}, T::Real, material) where {NC}
     v = mixing_volume_fractions(ξ, T, material)
@@ -819,7 +642,7 @@ end
 end
 
 """
-	effective_permeability(ξ::NTuple{NC,Float64}, T::Float64, material) -> Float64
+	effective_permeability(ξ::NTuple{NC,Float64}, T::Float64, material, φ) -> Float64
 
 Compute effective permeability [m²] using component mixing rules.
 
@@ -834,12 +657,16 @@ sum to 1, so the Wiener bounds are the matrix's true bounds:
 - SERIES: κ = 1 / Σⱼ (vⱼ / κⱼ) (lower bound; **exactly 0** when any phase
   with vⱼ > 0 is impermeable — gas cannot cross a series-stacked κ = 0 layer)
 - WEIGHTED: κ = β·κ_parallel + (1-β)·κ_series
-- CARMAN_KOZENY: porosity-based closure (see `_carman_kozeny_permeability`)
+- CARMAN_KOZENY: porosity-based closure (see `_carman_kozeny_permeability`) on
+  the porosity `φ` the caller gives, so a caller that floors the pore fraction
+  `1 − skeletal_volume_fraction` smoothly gets a permeability smooth in the
+  state; the per-component mixes do not read it
 
 # Arguments
 - `ξ`: Mass concentrations [kg/m³]
 - `T`: Temperature [K]
 - `material`: Material with components and mixing rules
+- `φ`: Porosity, read by the Carman–Kozeny rule only
 
 # Returns
 Effective permeability [m²]. Returns 0.0 if no components have permeability.
@@ -855,26 +682,6 @@ Typical values:
 
 As pyrolysis progresses and virgin material converts to char, the effective
 permeability increases, allowing easier gas escape.
-"""
-@inline function effective_permeability(ξ::NTuple{NC,<:Real}, T::Real, material) where {NC}
-    # Carman–Kozeny is a porosity-based closure, not a per-component mix, so it
-    # needs the canonical porosity φ(ξ,T) — the same porosity the pressure
-    # formula uses — rather than the bulk-density volume fractions `v`.
-    if material.mixing.κ.rule == CARMAN_KOZENY
-        φ = porosity(ξ, T, material)
-        return _carman_kozeny_permeability(φ, material.mixing.κ.ℓ)
-    end
-    v = solid_volume_fractions(ξ, T, material)
-    return _permeability_from_v(v, T, material)
-end
-
-"""
-	effective_permeability(ξ, T, material, φ) -> κ [m²]
-
-[`effective_permeability`](@ref) with the porosity `φ` given: the
-Carman–Kozeny rule reads it in place of the porosity clamped into `[0, 1]`, so
-a caller that floors the unclamped pore fraction smoothly gets a permeability
-smooth in the state; the per-component mixes do not read it.
 """
 @inline function effective_permeability(
     ξ::NTuple{NC,<:Real},
@@ -928,7 +735,7 @@ end
     elseif mixing == CARMAN_KOZENY
         throw(
             ArgumentError(
-                "CARMAN_KOZENY permeability needs concentrations ξ to evaluate porosity; call effective_permeability(ξ, T, material) rather than _permeability_from_v(v, ...).",
+                "CARMAN_KOZENY permeability needs concentrations ξ to evaluate porosity; call effective_permeability(ξ, T, material, φ) rather than _permeability_from_v(v, ...).",
             ),
         )
     end
@@ -947,31 +754,6 @@ end
     end
 end
 
-"""
-	harmonic_mean_weighted(a::Float64, b::Float64, d_a::Float64, d_b::Float64) -> Float64
-
-Distance-weighted harmonic mean for non-uniform meshes.
-
-For a property φ across a face separating cells L and R with distances d_L and d_R
-from the cell centers to the face, the face value using resistance-in-series is:
-
-	φ_face = (d_L + d_R) / (d_L/φ_L + d_R/φ_R)
-
-This reduces to the standard harmonic mean 2ab/(a+b) when d_L = d_R.
-
-# Arguments
-- `a`: Property value in left cell
-- `b`: Property value in right cell  
-- `d_a`: Distance from left cell center to face
-- `d_b`: Distance from right cell center to face
-"""
-@inline function harmonic_mean_weighted(a::Real, b::Real, d_a::Real, d_b::Real)
-    if a < 1e-20 || b < 1e-20
-        return zero(float(promote_type(typeof(a), typeof(b), typeof(d_a), typeof(d_b))))
-    end
-    return (d_a + d_b) / (d_a / a + d_b / b)
-end
-
 # Guard of the smooth face mean [property units]: far below any physical
 # conductivity or transfer coefficient.
 const FACE_MEAN_GUARD = 1e-20
@@ -984,7 +766,8 @@ Distance-weighted harmonic mean in the product form
 	φ_face = (d_a + d_b) a b / (d_a b + d_b a + η (d_a + d_b))
 
 smooth in every argument for non-negative values and positive distances. It
-equals [`harmonic_mean_weighted`](@ref) to a relative `η / φ`, and it goes to
+equals the resistance-in-series mean `(d_a + d_b)/(d_a/a + d_b/b)` to a
+relative `η / φ`, and it goes to
 zero continuously, with a finite derivative, as either value vanishes instead
 of being cut off below a threshold. The guard `η` carries the property's units
 and must lie far below its physical values: the default suits conductivities

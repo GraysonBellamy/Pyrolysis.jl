@@ -20,7 +20,6 @@ const _SOLVE_KEYWORDS = (
     :w_override,
     :min_thickness,
     :radiation_model,
-    :jacobian,
     :linear_solver,
     :integrator_policy,
     :sources,
@@ -39,9 +38,9 @@ const _SOLVE_KEYWORDS = (
 	      linear_solver = nothing, integrator_policy = nothing,
 	      sources = NoSources(), deactivation = false, band = nothing,
 	      correction = nothing, lagrangian = nothing,
-	      located_events = true) -> CoreSolution
+	      located_events = true, progress = false) -> PyrolysisSolution
 
-Solve `problem` on the finite-volume core.
+Solve `problem`.
 
 The integrator is handed the mass-matrix system with the colored Jacobian, the
 per-row absolute tolerances (`abstol` is the temperature tolerance [K]; the mass
@@ -61,8 +60,7 @@ policy's flag rule. A discrete `callback`, or each discrete callback of a
 `affect!`, so it leaves the trajectory unchanged under every policy; a
 continuous callback's event raises the flag as any event does. `callback` may
 also be a [`ConservationRecorder`](@ref), or a tuple of recorders and
-callbacks. `progress` draws a progress bar, a read-only observer as well;
-`jacobian` is accepted and ignored, the colored Jacobian being the only one.
+callbacks. `progress` draws a progress bar, a read-only observer as well.
 
 `use_ale`, `w_override`, `correction`, `lagrangian`, `deactivation` and
 `band` are those of [`setup`](@ref). On a moving mesh the solve ends with return code
@@ -112,7 +110,6 @@ function _solve(
     w_override = nothing,
     min_thickness::Real = 1e-6,
     radiation_model = NO_RADIATION,
-    jacobian = nothing,
     linear_solver = nothing,
     integrator_policy = nothing,
     sources = NoSources(),
@@ -122,8 +119,6 @@ function _solve(
     lagrangian::Union{Nothing,AbstractVector{<:Integer}} = nothing,
     located_events::Bool = true,
 )
-    jacobian === nothing ||
-        @warn "solve(): `jacobian` is ignored by the finite-volume core" maxlog = 1
     validate && validate_problem(problem; strict = false)
     started = time()
     cp = setup(
@@ -167,7 +162,7 @@ end
 	          min_thickness = 1e-6, linear_solver = nothing,
 	          integrator_policy = nothing, located_events = true, progress = false,
 	          max_constraint_rejections = MAX_CONSTRAINT_REJECTIONS,
-	          started = time()) -> CoreSolution
+	          started = time()) -> PyrolysisSolution
 
 Integrate a set-up problem from the state `u0`, whose algebraic rows must be
 consistent ([`consistent_state!`](@ref)), with the tolerances it was set up
@@ -319,7 +314,7 @@ function integrate(
         invocations = cells === nothing || isempty(cells.events) ? 0 :
                       last(cells.events).invocation,
     )
-    return CoreSolution(
+    return PyrolysisSolution(
         cp.problem,
         raw.t,
         raw.u,
