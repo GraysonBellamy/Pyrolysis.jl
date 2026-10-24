@@ -898,6 +898,20 @@ Every accuracy verdict is as before; V-BO-02's main peak (24.62 against 23.76 g 
 
 **Status.** D157 is landed and measured; on its tree `test_policies.jl` 287, `test_deactivation.jl` 1,495, `test_correction.jl` 792, `test_layer_time.jl` 150, `NEW_CORE_CASES` 521 of 521 in both forms, format, Aqua (9 gating checks) and JET (no reports Pyrolysis owns). *Owner:* V-BO-03 at 1.54 and the white pine at 30 kW at 1.52 (the latter the timing's spread on an unchanged trajectory), and the memory threshold (question 24). Being measured: a screen of the Jacobian-reusing integrators available without a release (`QNDF`, `RadauIIA5`; a first reading on V-BO-01 has `QNDF` at its matched rung in 0.55 times `Rodas5P`'s time with 132 Jacobians against 649) and the verification cases on both cores (`case_comparison.jl`).
 
+**C151. A Jacobian-reusing integrator that runs without a release: the screen.** Every candidate on the comparison's rows with D157, at matched accuracy against the comparison's targets (each candidate's ladder against the new core's reltol 1e-9 solve, the loosest rung meeting the old default's window RMS), timed in one process beside `Rodas5P`'s matched rung and the old default (medians of three; a load of 1 to 3 from other measurements, so the ratios are a screen, not a record):
+
+| deck | `Rodas5P` vs old | `QNDF`: matched reltol, Jacobians (`Rodas5P`'s) | `QNDF` vs `Rodas5P` | `QNDF` vs old | `FBDF` (OrdinaryDiffEqBDF 2.4.11) |
+|---|---|---|---|---|---|
+| V-BO-01 | 1.15 | 1e-5, 132 (649) | 0.56 | 0.65 | `DtLessThanMin` at 457 s |
+| V-BO-03 | 1.43 | 1e-5, 126 (604) | 0.68 | 0.98 | 0.82 |
+| V-BO-06 | 1.45 | 1e-6, 118 (686) | 0.98 | 1.41 | 0.68 |
+| the PMMA cone | 2.21 | 3e-6, 541 (2,362) | 0.75 | 1.67 | `Unstable` at 82 s |
+| Douglas fir, 600 s | 1.40 | 3e-8, 68 (704) | about 0.57 | 0.84 | about 1.0 at 3e-8 |
+
+`QNDF` survives the domain rejections that stop `FBDF` (as the decision review's reproducer showed) and forms five to twenty times fewer Jacobians, but its error per tolerance is larger, so its matched rung is tighter on V-BO-06, the cone and the Douglas fir deck (whose target, the old default's 1.2e-5 K over the whole run, it meets at 3e-8, not by 1e-7). `RadauIIA5` does not run: OrdinaryDiffEqFIRK 2.8.9, the latest release, sizes the absolute tolerance in its cache from the relative one, so a per-row absolute tolerance with a scalar relative one fails at initialization, and its complex linear solve needs a solver other than `StructuredKLU`. `KenCarp4` on V-BO-01 at 1e-5 takes 86,808 steps with 25,274 Newton failures (C60, C61). *Proposed:* `QNDF` as a candidate default, an integrator change and the owner's: it would be qualified as MF would be (the suite in both forms, the comparison, the identity record, the W9 envelope).
+
+**The verification cases on both cores** (`measurements/case_comparison.md`, `e4ac985`, tree `facf693`; `case_comparison.jl`, the finite-volume core in the temperature form, the accuracy parts at any load, the timing alone on CPU 1 at a one-minute load of 1.1 to 1.3, 345 s). Every case of `NEW_CORE_CASES` (40 cases) passes its quantities on both cores but for the old core's informational warnings on V-BO-03 and V-BO-05. On the 32 exact-solution cases the finite-volume core's error is 0.77 times the old core's (the geometric mean over 131 quantities, the median 1.0): equal or smaller on the conduction, radiation and gas-transport cases (V-HC-03 0.65) and equal in every convergence order but V-MMS-03's (the pre-asymptotic temperature of Phase 1's C33), smaller on the kinetics (V-RX-01's species about 4e-4 of the old core's, V-RX-03 0.03) and on V-MMS-02 and 03 (0.02 and 0.31), larger on V-CPL-02 and 02b (1.18 and 1.88), whose steady energy balance reads 89 and 90 % of its tolerance on the finite-volume core (0.00187 against 0.0021, 0.0018 against 0.002) and 54 and 77 % on the old. Its time is 0.91 times the old core's (the geometric mean over the 32 timed cases, 0.38 to 1.82); the slowest ratios are on cases of a millisecond or less (V-RX-02a 1.82, V-RX-04a 1.42) and on V-MMS-01 (1.51), V-GT-02 (1.34) and V-CPL-04 (1.33).
+
 ---
 
 ## Appendix A. Inventories
