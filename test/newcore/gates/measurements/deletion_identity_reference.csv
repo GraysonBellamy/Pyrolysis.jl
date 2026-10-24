@@ -1,10 +1,10 @@
 entry,value
-"V-CPL-02 | temperature | fields",4c3840561e182109
-"V-CPL-02 | temperature | events",a5653eab55e43cd
+"V-CPL-02 | temperature | fields",c8da3c7f0acc30df
+"V-CPL-02 | temperature | events",bd641057efdcbc91
 "V-CPL-02 | temperature | outcome",running
 "V-CPL-02 | temperature | retcode",Success
-"V-CPL-02 | temperature | accepted",1134
-"V-CPL-02 | temperature | rejected",24
+"V-CPL-02 | temperature | accepted",1053
+"V-CPL-02 | temperature | rejected",41
 "V-CPL-02b | temperature | fields",a604d945b173ee12
 "V-CPL-02b | temperature | events",388992a5de194ea8
 "V-CPL-02b | temperature | outcome",running
@@ -53,14 +53,14 @@ entry,value
 "Douglas fir, 60 s | temperature | retcode",Success
 "Douglas fir, 60 s | temperature | accepted",313
 "Douglas fir, 60 s | temperature | rejected",32
-"V-CPL-02 | enthalpy | fields",8a7aa02a6d47f05d
-"V-CPL-02 | enthalpy | events",592c8de51efc43a7
+"V-CPL-02 | enthalpy | fields",812f7289a4938911
+"V-CPL-02 | enthalpy | events",1d6ed45e4319720a
 "V-CPL-02 | enthalpy | outcome",running
 "V-CPL-02 | enthalpy | retcode",Success
-"V-CPL-02 | enthalpy | accepted",1276
-"V-CPL-02 | enthalpy | rejected",40
-"V-CPL-02b | enthalpy | fields",4f9e59234213f708
-"V-CPL-02b | enthalpy | events",b7f2df9080d4dc8a
+"V-CPL-02 | enthalpy | accepted",1127
+"V-CPL-02 | enthalpy | rejected",41
+"V-CPL-02b | enthalpy | fields",5def2a7b0b47c644
+"V-CPL-02b | enthalpy | events",3cc18881cd2184a
 "V-CPL-02b | enthalpy | outcome",running
 "V-CPL-02b | enthalpy | retcode",Success
 "V-CPL-02b | enthalpy | accepted",674
@@ -101,12 +101,12 @@ entry,value
 "V-RX-02d | enthalpy | retcode",Success
 "V-RX-02d | enthalpy | accepted",313
 "V-RX-02d | enthalpy | rejected",32
-"Douglas fir, 60 s | enthalpy | fields",a09f593bcc469e26
+"Douglas fir, 60 s | enthalpy | fields",8f596fc04c74cf2d
 "Douglas fir, 60 s | enthalpy | events",bef3c47a0c6eef47
 "Douglas fir, 60 s | enthalpy | outcome",running
 "Douglas fir, 60 s | enthalpy | retcode",Success
 "Douglas fir, 60 s | enthalpy | accepted",327
-"Douglas fir, 60 s | enthalpy | rejected",22
+"Douglas fir, 60 s | enthalpy | rejected",21
 "containment | count",814
 "containment | 1 | dense",593e9b635bf56e3d
 "containment | 2 | colored",97858db79d10f473

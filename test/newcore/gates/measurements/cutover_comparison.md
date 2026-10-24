@@ -1,6 +1,6 @@
 # The end-to-end comparison of the two cores
 
-Produced by `cutover_comparison.jl` at commit 5b61dba (tree c6d5965). Julia 1.13.0, one thread per process. Accuracy: 4 processes at a one-minute load of 2.6, 2.6, 2.6, 2.6 at their starts. Timing: one process on CPUs `1`, one-minute load 0.6 at the start and 1.3 at the end, 617 s. Memory: one process per core and row. The script's header defines every row, measure and budget.
+Produced by `cutover_comparison.jl` at commit b8950cc (tree aac0390). Julia 1.13.0, one thread per process. Accuracy: 4 processes at a one-minute load of 2.6, 2.6, 2.6, 2.6 at their starts. Timing: one process on CPUs `1`, one-minute load 1.5 at the start and 1.7 at the end, 623 s. Memory: one process per core and row. The script's header defines every row, measure and budget.
 
 ## The rows
 
@@ -8,24 +8,24 @@ Window: the saved times before the first event of any solve of the row [s] (`Inf
 
 | row | cells | reltol | window [s] | target | spreads old, new | matched reltol (on the window alone) | accuracy | old [s] | new matched [s] | ratio | equal-tolerance ratio | verdict |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| eulerian 25, solid λ 1.0e-6 | 25 | 1.0e-6 | Inf | 8.89e-5 | 1.2e-6, 6.65e-9 | 1.0e-5 (1.0e-5) | pass | 0.00372 | 0.00256 | 0.689 | 0.925 | pass |
-| eulerian 100, solid λ 1.0e-6 | 100 | 1.0e-6 | Inf | 8.42e-5 | 1.35e-6, 1.59e-8 | 3.0e-6 (3.0e-6) | pass | 0.013 | 0.0116 | 0.892 | 0.999 | pass |
-| ale 25, solid λ 1.0e-6 | 25 | 1.0e-6 | Inf | 8.49e-5 | 1.36e-6, 6.39e-9 | 1.0e-5 (1.0e-5) | pass | 0.00438 | 0.00449 | 1.02 | 1.25 | pass |
-| ale 100, solid λ 1.0e-6 | 100 | 1.0e-6 | Inf | 7.41e-5 | 1.74e-6, 5.63e-9 | 3.0e-6 (3.0e-6) | pass | 0.0143 | 0.0188 | 1.31 | 1.43 | pass |
-| ale_darcy 25 | 25 | 1.0e-6 | Inf | 7.1e-5 | 1.41e-6, 1.81e-8 | 1.0e-6 (1.0e-6) | pass | 0.0101 | 0.0115 | 1.14 | 1.14 | pass |
-| ale_darcy 100 | 100 | 1.0e-6 | Inf | 6.69e-5 | 1.57e-6, 1.76e-8 | 1.0e-6 (1.0e-6) | pass | 0.0391 | 0.0426 | 1.09 | 1.09 | pass |
-| V-BO-01 | 182 | 1.0e-6 | 167.8 | 0.00866 | 0.000323, 1.39e-6 | 1.0e-5 (1.0e-5) | pass | 0.54 | 0.751 | 1.39 | 1.98 | pass |
-| V-BO-02 | 182 | 1.0e-6 | 62.42 | 0.015 | 0.000638, 1.01e-6 | 1.0e-5 (1.0e-5) | **fail** | 0.935 | 0.588 | 0.628 | 0.916 | not read (accuracy) |
-| V-BO-03 | 182 | 1.0e-6 | 167.9 | 0.00866 | 0.000341, 7.6e-7 | 1.0e-5 (1.0e-5) | pass | 0.416 | 0.716 | 1.72 | 2.49 | owner |
-| V-BO-04 | 40 | 1.0e-7 | 299.8 | 6.44e-9 | 2.9e-11, 3.71e-14 | 1.0e-5 (1.0e-5) | pass | 0.0268 | 0.0261 | 0.975 | 2.07 | pass |
-| V-BO-05 | 182 | 1.0e-6 | 259.8 | 0.00651 | 0.000269, 4.59e-7 | 3.0e-6 (3.0e-6) | pass | 1.01 | 0.203 | 0.2 | 0.216 | pass |
-| V-BO-06 | 132 | 1.0e-6 | 167.6 | 0.0123 | 0.000317, 1.05e-6 | 1.0e-5 (1.0e-5) | pass | 0.392 | 0.611 | 1.56 | 2.15 | owner |
-| V-BO-07 | 182 | 1.0e-6 | 307.8 | 0.00905 | 0.000395, 9.5e-7 | 1.0e-5 (1.0e-5) | pass | 0.771 | 0.783 | 1.02 | 1.58 | pass |
-| V-BO-08 | 132 | 1.0e-6 | 65.26 | 0.00766 | 0.000132, 7.33e-7 | 1.0e-6 (1.0e-5) | pass | 0.159 | 0.153 | 0.962 | 0.962 | pass |
-| Douglas fir, 600 s | 240 | 1.0e-7 | Inf | 1.23e-5 | 1.71e-6, 1.43e-7 | 3.0e-7 (3.0e-7) | pass | 5.38 | 7.53 | 1.4 | 1.86 | pass |
-| white pine, 30kW | 160 | 1.0e-7 | Inf | 0.000187 | 5.68e-5, 2.31e-6 | 1.0e-5 (1.0e-5) | pass | 2.98 | 4.4 | 1.47 | 2.28 | pass |
-| white pine, 50kW | 160 | 1.0e-7 | Inf | 0.000135 | 6.52e-5, 1.85e-6 | 1.0e-5 (1.0e-5) | pass | 3.02 | 3.39 | 1.12 | 2.64 | pass |
-| PMMA cone | 72 | 1.0e-6 | 348.5 | 0.0156 | 0.000314, 0.000585 | 1.0e-5 (1.0e-5) | pass | 0.422 | 1.01 | 2.39 | 3.43 | **over 2** |
+| eulerian 25, solid λ 1.0e-6 | 25 | 1.0e-6 | Inf | 8.89e-5 | 1.2e-6, 6.65e-9 | 1.0e-5 (1.0e-5) | pass | 0.00372 | 0.00264 | 0.71 | 0.911 | pass |
+| eulerian 100, solid λ 1.0e-6 | 100 | 1.0e-6 | Inf | 8.42e-5 | 1.35e-6, 1.59e-8 | 3.0e-6 (3.0e-6) | pass | 0.0133 | 0.0111 | 0.83 | 1.0 | pass |
+| ale 25, solid λ 1.0e-6 | 25 | 1.0e-6 | Inf | 8.49e-5 | 1.36e-6, 6.39e-9 | 1.0e-5 (1.0e-5) | pass | 0.00444 | 0.00437 | 0.984 | 1.21 | pass |
+| ale 100, solid λ 1.0e-6 | 100 | 1.0e-6 | Inf | 7.41e-5 | 1.74e-6, 5.63e-9 | 3.0e-6 (3.0e-6) | pass | 0.0142 | 0.0186 | 1.31 | 1.48 | pass |
+| ale_darcy 25 | 25 | 1.0e-6 | Inf | 7.1e-5 | 1.41e-6, 1.81e-8 | 1.0e-6 (1.0e-6) | pass | 0.0101 | 0.0113 | 1.12 | 1.12 | pass |
+| ale_darcy 100 | 100 | 1.0e-6 | Inf | 6.69e-5 | 1.57e-6, 1.76e-8 | 1.0e-6 (1.0e-6) | pass | 0.0385 | 0.0443 | 1.15 | 1.15 | pass |
+| V-BO-01 | 182 | 1.0e-6 | 167.8 | 0.00866 | 0.000323, 1.39e-6 | 1.0e-5 (1.0e-5) | pass | 0.535 | 0.66 | 1.23 | 1.76 | pass |
+| V-BO-02 | 182 | 1.0e-6 | 62.42 | 0.015 | 0.000638, 1.01e-6 | 1.0e-5 (1.0e-5) | **fail** | 0.934 | 0.575 | 0.616 | 0.905 | not read (accuracy) |
+| V-BO-03 | 182 | 1.0e-6 | 167.9 | 0.00866 | 0.000341, 7.6e-7 | 1.0e-5 (1.0e-5) | pass | 0.408 | 0.627 | 1.54 | 2.22 | owner |
+| V-BO-04 | 40 | 1.0e-7 | 299.8 | 6.44e-9 | 2.9e-11, 3.71e-14 | 1.0e-5 (1.0e-5) | pass | 0.0265 | 0.0261 | 0.983 | 2.09 | pass |
+| V-BO-05 | 182 | 1.0e-6 | 259.8 | 0.00651 | 0.000269, 4.59e-7 | 3.0e-6 (3.0e-6) | pass | 1.01 | 0.2 | 0.197 | 0.214 | pass |
+| V-BO-06 | 132 | 1.0e-6 | 167.6 | 0.0123 | 0.000317, 1.05e-6 | 1.0e-5 (1.0e-5) | pass | 0.388 | 0.546 | 1.41 | 1.99 | pass |
+| V-BO-07 | 182 | 1.0e-6 | 307.8 | 0.00905 | 0.000395, 9.5e-7 | 1.0e-5 (1.0e-5) | pass | 0.765 | 0.707 | 0.924 | 1.48 | pass |
+| V-BO-08 | 132 | 1.0e-6 | 65.26 | 0.00766 | 0.000132, 7.33e-7 | 3.0e-6 (1.0e-5) | pass | 0.156 | 0.132 | 0.848 | 0.965 | pass |
+| Douglas fir, 600 s | 240 | 1.0e-7 | Inf | 1.23e-5 | 1.71e-6, 1.43e-7 | 3.0e-7 (3.0e-7) | pass | 5.4 | 7.59 | 1.41 | 1.87 | pass |
+| white pine, 30kW | 160 | 1.0e-7 | Inf | 0.000187 | 5.68e-5, 2.31e-6 | 1.0e-5 (1.0e-5) | pass | 3.0 | 4.55 | 1.52 | 2.36 | owner |
+| white pine, 50kW | 160 | 1.0e-7 | Inf | 0.000135 | 6.52e-5, 1.85e-6 | 1.0e-5 (1.0e-5) | pass | 3.11 | 3.53 | 1.13 | 2.57 | pass |
+| PMMA cone | 72 | 1.0e-6 | 348.5 | 0.0156 | 0.000314, 0.000799 | 1.0e-5 (1.0e-5) | pass | 0.434 | 0.991 | 2.28 | 3.14 | **over 2** |
 
 ## The common quantities
 
@@ -73,7 +73,7 @@ Between the old default and the finite-volume core's matched solve. Temperatures
 | V-BO-01 | t_peak | 335.0 | 335.0 | 0.0 | 0.03 | pass |
 | V-BO-01 | tail | 883.01 | 885.16 | 0.00244 | 0.1 | no common reference |
 | V-BO-01 | closure_old |  |  | 0.000478 | 0.001 | pass |
-| V-BO-01 | closure_new |  |  | 1.48e-7 | 3.0e-5 | pass |
+| V-BO-01 | closure_new |  |  | 1.59e-7 | 3.0e-5 | pass |
 | V-BO-02 | T_rms_window |  |  | 0.0173 | 1.0 | pass |
 | V-BO-02 | T_max_window |  |  | 0.379 | 5.0 | pass |
 | V-BO-02 | T_rms |  |  | 9.59 | 1.0 | no common reference |
@@ -93,9 +93,9 @@ Between the old default and the finite-volume core's matched solve. Temperatures
 | V-BO-03 | burnout | 421.0 | 421.0 | 0.0 | 0.01 | no common reference |
 | V-BO-03 | peak | 30.387 | 30.385 | 4.43e-5 | 0.03 | no common reference |
 | V-BO-03 | t_peak | 317.0 | 317.0 | 0.0 | 0.03 | no common reference |
-| V-BO-03 | tail | 1367.6 | 1368.0 | 0.00028 | 0.1 | no common reference |
+| V-BO-03 | tail | 1367.6 | 1368.0 | 0.000282 | 0.1 | no common reference |
 | V-BO-03 | closure_old |  |  | 0.000233 |  |  |
-| V-BO-03 | closure_new |  |  | 1.09e-8 |  |  |
+| V-BO-03 | closure_new |  |  | 1.91e-9 |  |  |
 | V-BO-04 | T_rms_window |  |  | 2.85e-13 | 1.0 | pass |
 | V-BO-04 | T_max_window |  |  | 1.48e-12 | 5.0 | pass |
 | V-BO-04 | T_rms |  |  | 3.27e-13 | 1.0 | no common reference |
@@ -118,31 +118,31 @@ Between the old default and the finite-volume core's matched solve. Temperatures
 | V-BO-06 | burnout | 364.0 | 364.0 | 0.0 | 0.01 | pass |
 | V-BO-06 | peak | 32.292 | 32.288 | 0.000132 | 0.03 | pass |
 | V-BO-06 | t_peak | 334.0 | 334.0 | 0.0 | 0.03 | pass |
-| V-BO-06 | tail | 918.54 | 919.82 | 0.00138 | 0.1 | no common reference |
+| V-BO-06 | tail | 918.54 | 919.83 | 0.0014 | 0.1 | no common reference |
 | V-BO-06 | closure_old |  |  | 0.00383 | 0.005 | pass |
-| V-BO-06 | closure_new |  |  | 5.98e-7 | 3.0e-5 | pass |
+| V-BO-06 | closure_new |  |  | 5.24e-7 | 3.0e-5 | pass |
 | V-BO-07 | T_rms_window |  |  | 0.016 | 1.0 | pass |
 | V-BO-07 | T_max_window |  |  | 0.303 | 5.0 | pass |
 | V-BO-07 | T_rms |  |  | 0.853 | 1.0 | no common reference |
 | V-BO-07 | T_max |  |  | 37.0 | 5.0 | no common reference |
 | V-BO-07 | mass_loss | 65.338 | 65.338 | 1.43e-5 | 0.3 | pass |
 | V-BO-07 | burnout | 325.0 | 324.0 | 0.00308 | 0.01 | pass |
-| V-BO-07 | peak | 30.542 | 30.542 | 7.95e-7 | 0.03 | pass |
+| V-BO-07 | peak | 30.542 | 30.542 | 7.91e-7 | 0.03 | pass |
 | V-BO-07 | t_peak | 287.5 | 287.5 | 0.0 | 0.03 | pass |
 | V-BO-07 | tail | 938.75 | 939.05 | 0.00032 | 0.1 | no common reference |
 | V-BO-07 | closure_old |  |  | 3.06e-5 | 0.001 | pass |
-| V-BO-07 | closure_new |  |  | 1.08e-7 | 3.0e-5 | pass |
-| V-BO-08 | T_rms_window |  |  | 0.0104 | 1.0 | pass |
-| V-BO-08 | T_max_window |  |  | 0.344 | 5.0 | pass |
+| V-BO-07 | closure_new |  |  | 1.05e-7 | 3.0e-5 | pass |
+| V-BO-08 | T_rms_window |  |  | 0.00863 | 1.0 | pass |
+| V-BO-08 | T_max_window |  |  | 0.346 | 5.0 | pass |
 | V-BO-08 | T_rms |  |  | 0.562 | 1.0 | no common reference |
 | V-BO-08 | T_max |  |  | 18.3 | 5.0 | no common reference |
 | V-BO-08 | mass_loss | 27.924 | 27.924 | 1.25e-5 | 0.3 | pass |
 | V-BO-08 | burnout | 69.0 | 69.5 | 0.00725 | 0.01 | no common reference |
-| V-BO-08 | peak | 29.712 | 29.712 | 2.67e-6 | 0.03 | no common reference |
+| V-BO-08 | peak | 29.712 | 29.712 | 4.71e-6 | 0.03 | no common reference |
 | V-BO-08 | t_peak | 47.0 | 47.0 | 0.0 | 0.03 | no common reference |
-| V-BO-08 | tail | 634.38 | 634.9 | 0.000816 | 0.1 | no common reference |
+| V-BO-08 | tail | 634.38 | 634.86 | 0.000758 | 0.1 | no common reference |
 | V-BO-08 | closure_old |  |  | 0.000317 | 0.001 | pass |
-| V-BO-08 | closure_new |  |  | 6.17e-6 | 3.0e-5 | pass |
+| V-BO-08 | closure_new |  |  | 1.19e-5 | 3.0e-5 | pass |
 | Douglas fir, 600 s | T_rms |  |  | 0.12 | 1.0 | pass |
 | Douglas fir, 600 s | T_max |  |  | 0.753 | 5.0 | pass |
 | Douglas fir, 600 s | mass_loss | 84.131 | 84.128 | 0.00285 | 0.3 | pass |
@@ -167,17 +167,17 @@ Between the old default and the finite-volume core's matched solve. Temperatures
 | white pine, 50kW | tail | 2335.1 | 2334.6 | 0.00024 | 0.1 | pass |
 | white pine, 50kW | closure_old |  |  | 3.19e-7 |  |  |
 | white pine, 50kW | closure_new |  |  | 1.02e-6 |  |  |
-| PMMA cone | T_rms_window |  |  | 0.0202 | 1.0 | pass |
+| PMMA cone | T_rms_window |  |  | 0.0177 | 1.0 | pass |
 | PMMA cone | T_max_window |  |  | 0.345 | 5.0 | pass |
-| PMMA cone | T_rms |  |  | 0.0477 | 1.0 | no common reference |
+| PMMA cone | T_rms |  |  | 0.0488 | 1.0 | no common reference |
 | PMMA cone | T_max |  |  | 0.345 | 5.0 | no common reference |
-| PMMA cone | mass_loss | 92.671 | 92.694 | 0.0231 | 0.3 | no common reference |
+| PMMA cone | mass_loss | 92.671 | 92.695 | 0.0234 | 0.3 | no common reference |
 | PMMA cone | burnout | 1592.0 | 1592.0 | 0.0 | 0.01 | no common reference |
-| PMMA cone | peak | 5.4843 | 5.4866 | 0.000421 | 0.03 | no common reference |
+| PMMA cone | peak | 5.4843 | 5.4866 | 0.00042 | 0.03 | no common reference |
 | PMMA cone | t_peak | 650.67 | 653.33 | 0.0041 | 0.03 | no common reference |
-| PMMA cone | tail | 4310.5 | 4296.9 | 0.00316 | 0.1 | no common reference |
+| PMMA cone | tail | 4310.5 | 4296.9 | 0.00317 | 0.1 | no common reference |
 | PMMA cone | closure_old |  |  | 3.27e-6 |  |  |
-| PMMA cone | closure_new |  |  | 7.7e-8 |  |  |
+| PMMA cone | closure_new |  |  | 8.27e-8 |  |  |
 
 ## Closures and case QoIs
 
@@ -191,18 +191,18 @@ Each core's own closure (relative): the finite-volume core's mass and energy fro
 | ale 100, solid λ 1.0e-6 | Success, 2.82e-5 |  | running, 4.84e-7, 9.09e-7 |  |
 | ale_darcy 25 | Success, 1.45e-5 |  | running, -1.08e-6, -1.88e-6 |  |
 | ale_darcy 100 | Success, 1.69e-5 |  | running, -1.19e-6, -2.23e-6 |  |
-| V-BO-01 | Success, 0.000478 | 7/7 | running, 1.48e-7,  | 8/8 |
+| V-BO-01 | Success, 0.000478 | 7/7 | running, 1.59e-7,  | 8/8 |
 | V-BO-02 | Success, 2.3e-5 | 10/10 | running, 9.58e-5,  | 10/10 |
-| V-BO-03 | Success, 0.000233 | 3/4 (transmitted-flux warning fired) | running, 1.09e-8,  | 4/4 |
+| V-BO-03 | Success, 0.000233 | 3/4 (transmitted-flux warning fired) | running, 1.91e-9,  | 4/4 |
 | V-BO-04 | Success, 0.00155 | 4/4 | running, 0.00156,  | 5/5 |
 | V-BO-05 | Terminated, 1.62e-5 | 3/4 (interior-void warning) | interior, 3.76e-7,  | 4/4 |
-| V-BO-06 | Success, 0.00383 | 7/7 | running, 5.98e-7,  | 8/8 |
-| V-BO-07 | Success, 3.06e-5 | 7/7 | running, 1.08e-7,  | 8/8 |
-| V-BO-08 | Success, 0.000317 | 4/4 | running, 6.17e-6,  | 6/6 |
+| V-BO-06 | Success, 0.00383 | 7/7 | running, 5.24e-7,  | 8/8 |
+| V-BO-07 | Success, 3.06e-5 | 7/7 | running, 1.05e-7,  | 8/8 |
+| V-BO-08 | Success, 0.000317 | 4/4 | running, 1.19e-5,  | 6/6 |
 | Douglas fir, 600 s | Success, 0.00254 |  | running, 4.43e-8, -5.65e-8 |  |
 | white pine, 30kW | Success, 1.91e-8 |  | running, 5.22e-8, 1.7e-6 |  |
 | white pine, 50kW | Success, 3.19e-7 |  | running, 1.02e-6, -6.89e-6 |  |
-| PMMA cone | Success, 3.27e-6 |  | running, -7.7e-8, -0.000422 |  |
+| PMMA cone | Success, 3.27e-6 |  | running, -8.27e-8, -0.000105 |  |
 
 ## The counters
 
@@ -210,60 +210,60 @@ Of the timed solves: accepted (rejected) steps, right-hand sides, Jacobians, lin
 
 | row | solve | reltol | warm [s] (range, n) | steps (rejected) | RHS | Jacobians | linear solves | nonlinear failures | domain rejections | events, invocations |
 |---|---|---|---|---|---|---|---|---|---|---|
-| eulerian 25, solid λ 1.0e-6 | old default | 1.0e-6 | 0.00372 (0.00355–0.00388, 9) | 52 (3) | 1311 | 10 | 1314 | 0 |  | 0, 0 |
-| eulerian 25, solid λ 1.0e-6 | matched | 1.0e-5 | 0.00256 (0.00255–0.00257, 3) | 33 (0) | 297 | 33 | 264 | 0 | 0 | 0, 0 |
-| eulerian 25, solid λ 1.0e-6 | new default | 1.0e-6 | 0.00344 (0.0034–0.00378, 3) | 48 (1) | 440 | 48 | 392 | 0 | 0 | 0, 0 |
-| eulerian 100, solid λ 1.0e-6 | old default | 1.0e-6 | 0.013 (0.0126–0.0134, 9) | 56 (3) | 1362 | 12 | 1365 | 1 |  | 0, 0 |
-| eulerian 100, solid λ 1.0e-6 | matched | 3.0e-6 | 0.0116 (0.0115–0.0116, 3) | 49 (2) | 457 | 49 | 408 | 0 | 0 | 0, 0 |
-| eulerian 100, solid λ 1.0e-6 | new default | 1.0e-6 | 0.013 (0.0129–0.0132, 3) | 58 (2) | 538 | 58 | 480 | 0 | 0 | 0, 0 |
-| ale 25, solid λ 1.0e-6 | old default | 1.0e-6 | 0.00438 (0.00414–0.00459, 9) | 51 (2) | 1337 | 12 | 1339 | 0 |  | 0, 0 |
-| ale 25, solid λ 1.0e-6 | matched | 1.0e-5 | 0.00449 (0.00445–0.00463, 3) | 33 (2) | 313 | 33 | 280 | 0 | 0 | 0, 0 |
-| ale 25, solid λ 1.0e-6 | new default | 1.0e-6 | 0.00547 (0.00517–0.00552, 3) | 46 (1) | 422 | 46 | 376 | 0 | 0 | 0, 0 |
-| ale 100, solid λ 1.0e-6 | old default | 1.0e-6 | 0.0143 (0.0138–0.0146, 9) | 54 (3) | 1283 | 15 | 1286 | 0 |  | 0, 0 |
-| ale 100, solid λ 1.0e-6 | matched | 3.0e-6 | 0.0188 (0.0185–0.0188, 3) | 47 (1) | 431 | 47 | 384 | 0 | 0 | 0, 0 |
-| ale 100, solid λ 1.0e-6 | new default | 1.0e-6 | 0.0204 (0.0203–0.0211, 3) | 54 (0) | 486 | 54 | 432 | 0 | 0 | 0, 0 |
-| ale_darcy 25 | old default | 1.0e-6 | 0.0101 (0.0097–0.0105, 9) | 75 (2) | 2428 | 49 | 2430 | 2 |  | 0, 0 |
-| ale_darcy 25 | matched | 1.0e-6 | 0.0115 (0.0113–0.0123, 3) | 100 (3) | 924 | 100 | 824 | 0 | 0 | 0, 0 |
-| ale_darcy 25 | new default | 1.0e-6 | 0.0115 (0.0113–0.0123, 3) | 100 (3) | 924 | 100 | 824 | 0 | 0 | 0, 0 |
-| ale_darcy 100 | old default | 1.0e-6 | 0.0391 (0.0379–0.0405, 9) | 80 (2) | 2726 | 51 | 2728 | 2 |  | 0, 0 |
-| ale_darcy 100 | matched | 1.0e-6 | 0.0426 (0.0421–0.0437, 3) | 102 (2) | 934 | 102 | 832 | 0 | 0 | 0, 0 |
-| ale_darcy 100 | new default | 1.0e-6 | 0.0426 (0.0421–0.0437, 3) | 102 (2) | 934 | 102 | 832 | 0 | 0 | 0, 0 |
-| V-BO-01 | old default | 1.0e-6 | 0.54 (0.533–0.545, 9) | 853 (3) | 19076 | 164 | 19079 | 8 |  | 60, 60 |
-| V-BO-01 | matched | 1.0e-5 | 0.751 (0.748–0.766, 3) | 756 (178) | 8230 | 756 | 7472 | 0 | 65 | 60, 1 |
-| V-BO-01 | new default | 1.0e-6 | 1.07 (1.06–1.08, 3) | 1116 (228) | 11870 | 1116 | 10752 | 0 | 56 | 60, 1 |
-| V-BO-02 | old default | 1.0e-6 | 0.935 (0.933–1.0, 9) | 1572 (0) | 38574 | 341 | 38574 | 56 |  | 60, 60 |
-| V-BO-02 | matched | 1.0e-5 | 0.588 (0.575–0.59, 3) | 1355 (96) | 13083 | 1355 | 11608 | 0 | 2 | 60, 60 |
-| V-BO-02 | new default | 1.0e-6 | 0.857 (0.856–0.867, 3) | 1977 (285) | 20193 | 1977 | 18096 | 0 | 1 | 60, 60 |
-| V-BO-03 | old default | 1.0e-6 | 0.416 (0.414–0.431, 9) | 681 (3) | 14538 | 126 | 14541 | 2 |  | 48, 48 |
-| V-BO-03 | matched | 1.0e-5 | 0.716 (0.715–0.716, 3) | 704 (165) | 7656 | 704 | 6952 | 0 | 64 | 0, 0 |
-| V-BO-03 | new default | 1.0e-6 | 1.04 (1.03–1.04, 3) | 1062 (211) | 11246 | 1062 | 10184 | 0 | 59 | 0, 0 |
-| V-BO-04 | old default | 1.0e-7 | 0.0268 (0.0264–0.0276, 9) | 353 (0) | 7309 | 77 | 7309 | 13 |  | 35, 35 |
-| V-BO-04 | matched | 1.0e-5 | 0.0261 (0.026–0.0265, 3) | 124 (0) | 1118 | 124 | 992 | 0 | 0 | 39, 1 |
-| V-BO-04 | new default | 1.0e-7 | 0.0556 (0.0552–0.0559, 3) | 322 (0) | 2900 | 322 | 2576 | 0 | 0 | 39, 1 |
-| V-BO-05 | old default | 1.0e-6 | 1.01 (1.0–1.02, 9) | 169 (9) | 5824 | 86 | 5833 | 8 |  | 0, 0 |
-| V-BO-05 | matched | 3.0e-6 | 0.203 (0.202–0.203, 3) | 294 (185) | 4126 | 294 | 3832 | 0 | 0 | 0, 0 |
-| V-BO-05 | new default | 1.0e-6 | 0.219 (0.218–0.22, 3) | 347 (143) | 4267 | 347 | 3920 | 0 | 0 | 0, 0 |
-| V-BO-06 | old default | 1.0e-6 | 0.392 (0.386–0.396, 9) | 896 (0) | 19556 | 169 | 19556 | 9 |  | 60, 60 |
-| V-BO-06 | matched | 1.0e-5 | 0.611 (0.608–0.614, 3) | 785 (217) | 8803 | 785 | 8016 | 0 | 64 | 60, 1 |
-| V-BO-06 | new default | 1.0e-6 | 0.842 (0.84–0.846, 3) | 1149 (220) | 12103 | 1149 | 10952 | 0 | 53 | 60, 1 |
-| V-BO-07 | old default | 1.0e-6 | 0.771 (0.764–0.779, 9) | 794 (0) | 16962 | 181 | 16962 | 10 |  | 60, 60 |
-| V-BO-07 | matched | 1.0e-5 | 0.783 (0.783–0.788, 3) | 535 (112) | 5714 | 536 | 5176 | 0 | 32 | 60, 1 |
-| V-BO-07 | new default | 1.0e-6 | 1.22 (1.21–1.22, 3) | 850 (228) | 9476 | 850 | 8624 | 0 | 22 | 60, 1 |
-| V-BO-08 | old default | 1.0e-6 | 0.159 (0.157–0.16, 9) | 291 (1) | 7355 | 65 | 7356 | 7 |  | 10, 10 |
-| V-BO-08 | matched | 1.0e-6 | 0.153 (0.152–0.154, 3) | 223 (48) | 2393 | 223 | 2168 | 0 | 1 | 10, 1 |
-| V-BO-08 | new default | 1.0e-6 | 0.153 (0.152–0.154, 3) | 223 (48) | 2393 | 223 | 2168 | 0 | 1 | 10, 1 |
-| Douglas fir, 600 s | old default | 1.0e-7 | 5.38 (5.26–5.38, 3) | 621 (11) | 17502 | 141 | 17513 | 0 |  | 0, 0 |
-| Douglas fir, 600 s | matched | 3.0e-7 | 7.53 (7.5–7.55, 3) | 704 (49) | 6728 | 704 | 6024 | 0 | 0 | 0, 0 |
-| Douglas fir, 600 s | new default | 1.0e-7 | 10.0 (9.97–10.1, 3) | 936 (78) | 9048 | 936 | 8112 | 0 | 0 | 0, 0 |
-| white pine, 30kW | old default | 1.0e-7 | 2.98 (2.94–3.0, 3) | 802 (2) | 16184 | 80 | 16186 | 0 |  | 0, 0 |
-| white pine, 30kW | matched | 1.0e-5 | 4.4 (4.39–4.48, 3) | 744 (0) | 6696 | 744 | 5952 | 0 | 0 | 0, 0 |
-| white pine, 30kW | new default | 1.0e-7 | 6.79 (6.61–6.84, 3) | 1048 (69) | 9984 | 1048 | 8936 | 0 | 0 | 0, 0 |
-| white pine, 50kW | old default | 1.0e-7 | 3.02 (2.98–3.06, 9) | 679 (0) | 14775 | 136 | 14775 | 1 |  | 0, 0 |
-| white pine, 50kW | matched | 1.0e-5 | 3.39 (3.38–3.4, 3) | 528 (2) | 4768 | 528 | 4240 | 0 | 0 | 0, 0 |
-| white pine, 50kW | new default | 1.0e-7 | 7.98 (7.98–8.0, 3) | 1167 (108) | 11367 | 1167 | 10200 | 0 | 0 | 0, 0 |
-| PMMA cone | old default | 1.0e-6 | 0.422 (0.416–0.436, 9) | 2026 (12) | 46103 | 408 | 46115 | 59 |  | 58, 58 |
-| PMMA cone | matched | 1.0e-5 | 1.01 (0.991–1.01, 3) | 2440 (555) | 26405 | 2445 | 23960 | 0 | 269 | 0, 0 |
-| PMMA cone | new default | 1.0e-6 | 1.45 (1.45–1.46, 3) | 3663 (888) | 40082 | 3674 | 36408 | 0 | 281 | 0, 0 |
+| eulerian 25, solid λ 1.0e-6 | old default | 1.0e-6 | 0.00372 (0.00357–0.00396, 9) | 52 (3) | 1311 | 10 | 1314 | 0 |  | 0, 0 |
+| eulerian 25, solid λ 1.0e-6 | matched | 1.0e-5 | 0.00264 (0.00259–0.00272, 3) | 33 (0) | 297 | 33 | 264 | 0 | 0 | 0, 0 |
+| eulerian 25, solid λ 1.0e-6 | new default | 1.0e-6 | 0.00339 (0.00325–0.00375, 3) | 48 (1) | 440 | 48 | 392 | 0 | 0 | 0, 0 |
+| eulerian 100, solid λ 1.0e-6 | old default | 1.0e-6 | 0.0133 (0.0128–0.0137, 9) | 56 (3) | 1362 | 12 | 1365 | 1 |  | 0, 0 |
+| eulerian 100, solid λ 1.0e-6 | matched | 3.0e-6 | 0.0111 (0.011–0.0115, 3) | 49 (2) | 457 | 49 | 408 | 0 | 0 | 0, 0 |
+| eulerian 100, solid λ 1.0e-6 | new default | 1.0e-6 | 0.0133 (0.0132–0.0137, 3) | 58 (2) | 538 | 58 | 480 | 0 | 0 | 0, 0 |
+| ale 25, solid λ 1.0e-6 | old default | 1.0e-6 | 0.00444 (0.00419–0.00607, 9) | 51 (2) | 1337 | 12 | 1339 | 0 |  | 0, 0 |
+| ale 25, solid λ 1.0e-6 | matched | 1.0e-5 | 0.00437 (0.00432–0.00455, 3) | 33 (2) | 313 | 33 | 280 | 0 | 0 | 0, 0 |
+| ale 25, solid λ 1.0e-6 | new default | 1.0e-6 | 0.00536 (0.00511–0.00556, 3) | 46 (1) | 422 | 46 | 376 | 0 | 0 | 0, 0 |
+| ale 100, solid λ 1.0e-6 | old default | 1.0e-6 | 0.0142 (0.0135–0.015, 9) | 54 (3) | 1283 | 15 | 1286 | 0 |  | 0, 0 |
+| ale 100, solid λ 1.0e-6 | matched | 3.0e-6 | 0.0186 (0.0179–0.019, 3) | 47 (1) | 431 | 47 | 384 | 0 | 0 | 0, 0 |
+| ale 100, solid λ 1.0e-6 | new default | 1.0e-6 | 0.021 (0.0209–0.021, 3) | 54 (0) | 486 | 54 | 432 | 0 | 0 | 0, 0 |
+| ale_darcy 25 | old default | 1.0e-6 | 0.0101 (0.00962–0.0104, 9) | 75 (2) | 2428 | 49 | 2430 | 2 |  | 0, 0 |
+| ale_darcy 25 | matched | 1.0e-6 | 0.0113 (0.011–0.0119, 3) | 100 (3) | 924 | 100 | 824 | 0 | 0 | 0, 0 |
+| ale_darcy 25 | new default | 1.0e-6 | 0.0113 (0.011–0.0119, 3) | 100 (3) | 924 | 100 | 824 | 0 | 0 | 0, 0 |
+| ale_darcy 100 | old default | 1.0e-6 | 0.0385 (0.0382–0.0399, 9) | 80 (2) | 2726 | 51 | 2728 | 2 |  | 0, 0 |
+| ale_darcy 100 | matched | 1.0e-6 | 0.0443 (0.0425–0.0465, 3) | 102 (2) | 934 | 102 | 832 | 0 | 0 | 0, 0 |
+| ale_darcy 100 | new default | 1.0e-6 | 0.0443 (0.0425–0.0465, 3) | 102 (2) | 934 | 102 | 832 | 0 | 0 | 0, 0 |
+| V-BO-01 | old default | 1.0e-6 | 0.535 (0.527–0.549, 9) | 853 (3) | 19076 | 164 | 19079 | 8 |  | 60, 60 |
+| V-BO-01 | matched | 1.0e-5 | 0.66 (0.657–0.666, 3) | 647 (200) | 7427 | 649 | 6776 | 0 | 2 | 60, 1 |
+| V-BO-01 | new default | 1.0e-6 | 0.943 (0.937–0.945, 3) | 985 (242) | 10803 | 985 | 9816 | 0 | 0 | 60, 1 |
+| V-BO-02 | old default | 1.0e-6 | 0.934 (0.924–0.953, 9) | 1572 (0) | 38574 | 341 | 38574 | 56 |  | 60, 60 |
+| V-BO-02 | matched | 1.0e-5 | 0.575 (0.572–0.593, 3) | 1355 (99) | 13107 | 1355 | 11632 | 0 | 0 | 60, 60 |
+| V-BO-02 | new default | 1.0e-6 | 0.845 (0.843–0.883, 3) | 1978 (288) | 20226 | 1978 | 18128 | 0 | 0 | 60, 60 |
+| V-BO-03 | old default | 1.0e-6 | 0.408 (0.405–0.418, 9) | 681 (3) | 14538 | 126 | 14541 | 2 |  | 48, 48 |
+| V-BO-03 | matched | 1.0e-5 | 0.627 (0.626–0.629, 3) | 601 (195) | 6972 | 604 | 6368 | 0 | 3 | 0, 0 |
+| V-BO-03 | new default | 1.0e-6 | 0.904 (0.9–0.908, 3) | 928 (231) | 10200 | 928 | 9272 | 0 | 0 | 0, 0 |
+| V-BO-04 | old default | 1.0e-7 | 0.0265 (0.0257–0.0272, 9) | 353 (0) | 7309 | 77 | 7309 | 13 |  | 35, 35 |
+| V-BO-04 | matched | 1.0e-5 | 0.0261 (0.0258–0.0274, 3) | 124 (0) | 1118 | 124 | 992 | 0 | 0 | 39, 1 |
+| V-BO-04 | new default | 1.0e-7 | 0.0555 (0.0552–0.0557, 3) | 322 (0) | 2900 | 322 | 2576 | 0 | 0 | 39, 1 |
+| V-BO-05 | old default | 1.0e-6 | 1.01 (1.0–1.03, 9) | 169 (9) | 5824 | 86 | 5833 | 8 |  | 0, 0 |
+| V-BO-05 | matched | 3.0e-6 | 0.2 (0.199–0.203, 3) | 294 (185) | 4126 | 294 | 3832 | 0 | 0 | 0, 0 |
+| V-BO-05 | new default | 1.0e-6 | 0.217 (0.217–0.225, 3) | 347 (143) | 4267 | 347 | 3920 | 0 | 0 | 0, 0 |
+| V-BO-06 | old default | 1.0e-6 | 0.388 (0.385–0.392, 9) | 896 (0) | 19556 | 169 | 19556 | 9 |  | 60, 60 |
+| V-BO-06 | matched | 1.0e-5 | 0.546 (0.541–0.552, 3) | 684 (234) | 8032 | 686 | 7344 | 0 | 2 | 60, 1 |
+| V-BO-06 | new default | 1.0e-6 | 0.772 (0.772–0.78, 3) | 1040 (236) | 11250 | 1040 | 10208 | 0 | 0 | 60, 1 |
+| V-BO-07 | old default | 1.0e-6 | 0.765 (0.762–0.786, 9) | 794 (0) | 16962 | 181 | 16962 | 10 |  | 60, 60 |
+| V-BO-07 | matched | 1.0e-5 | 0.707 (0.707–0.71, 3) | 466 (132) | 5253 | 467 | 4784 | 0 | 1 | 60, 1 |
+| V-BO-07 | new default | 1.0e-6 | 1.13 (1.13–1.15, 3) | 785 (227) | 8883 | 785 | 8096 | 0 | 0 | 60, 1 |
+| V-BO-08 | old default | 1.0e-6 | 0.156 (0.154–0.158, 9) | 291 (1) | 7355 | 65 | 7356 | 7 |  | 10, 10 |
+| V-BO-08 | matched | 3.0e-6 | 0.132 (0.131–0.132, 3) | 187 (54) | 2117 | 187 | 1928 | 0 | 0 | 10, 1 |
+| V-BO-08 | new default | 1.0e-6 | 0.151 (0.149–0.151, 3) | 221 (51) | 2399 | 221 | 2176 | 0 | 0 | 10, 1 |
+| Douglas fir, 600 s | old default | 1.0e-7 | 5.4 (5.31–5.42, 3) | 621 (11) | 17502 | 141 | 17513 | 0 |  | 0, 0 |
+| Douglas fir, 600 s | matched | 3.0e-7 | 7.59 (7.59–7.61, 3) | 704 (49) | 6728 | 704 | 6024 | 0 | 0 | 0, 0 |
+| Douglas fir, 600 s | new default | 1.0e-7 | 10.1 (10.1–10.1, 3) | 936 (78) | 9048 | 936 | 8112 | 0 | 0 | 0, 0 |
+| white pine, 30kW | old default | 1.0e-7 | 3.0 (2.94–3.01, 3) | 802 (2) | 16184 | 80 | 16186 | 0 |  | 0, 0 |
+| white pine, 30kW | matched | 1.0e-5 | 4.55 (4.53–4.55, 3) | 744 (0) | 6696 | 744 | 5952 | 0 | 0 | 0, 0 |
+| white pine, 30kW | new default | 1.0e-7 | 7.09 (6.86–7.54, 3) | 1048 (69) | 9984 | 1048 | 8936 | 0 | 0 | 0, 0 |
+| white pine, 50kW | old default | 1.0e-7 | 3.11 (3.07–3.16, 9) | 679 (0) | 14775 | 136 | 14775 | 1 |  | 0, 0 |
+| white pine, 50kW | matched | 1.0e-5 | 3.53 (3.45–3.54, 3) | 528 (2) | 4768 | 528 | 4240 | 0 | 0 | 0, 0 |
+| white pine, 50kW | new default | 1.0e-7 | 8.01 (7.98–8.14, 3) | 1167 (108) | 11367 | 1167 | 10200 | 0 | 0 | 0, 0 |
+| PMMA cone | old default | 1.0e-6 | 0.434 (0.425–0.436, 9) | 2026 (12) | 46103 | 408 | 46115 | 59 |  | 58, 58 |
+| PMMA cone | matched | 1.0e-5 | 0.991 (0.981–1.01, 3) | 2351 (621) | 26138 | 2362 | 23776 | 0 | 11 | 0, 0 |
+| PMMA cone | new default | 1.0e-6 | 1.36 (1.36–1.43, 3) | 3312 (898) | 36996 | 3316 | 33680 | 0 | 4 | 0, 0 |
 
 ## Memory
 
@@ -271,24 +271,24 @@ Each core on each row in a process of its own after one warm-up solve, at the ti
 
 | row | old allocated | new allocated | ratio | old peak RSS | new peak RSS | ratio |
 |---|---|---|---|---|---|---|
-| eulerian 25, solid λ 1.0e-6 | 0.911 | 0.864 | 0.949 | 974.0 | 1240.0 | 1.27 |
-| eulerian 100, solid λ 1.0e-6 | 3.77 | 3.45 | 0.914 | 974.0 | 1250.0 | 1.28 |
-| ale 25, solid λ 1.0e-6 | 1.02 | 1.55 | 1.52 | 975.0 | 1250.0 | 1.29 |
-| ale 100, solid λ 1.0e-6 | 4.57 | 6.84 | 1.5 | 976.0 | 1250.0 | 1.28 |
-| ale_darcy 25 | 1.04 | 1.96 | 1.89 | 974.0 | 1270.0 | 1.31 |
-| ale_darcy 100 | 4.62 | 8.46 | 1.83 | 976.0 | 1280.0 | 1.31 |
-| V-BO-01 | 76.2 | 81.1 | 1.06 | 1160.0 | 1320.0 | 1.14 |
-| V-BO-02 | 71.4 | 32.1 | 0.45 | 1140.0 | 1250.0 | 1.1 |
-| V-BO-03 | 77.3 | 78.0 | 1.01 | 1160.0 | 1400.0 | 1.21 |
-| V-BO-04 | 3.29 | 5.42 | 1.65 | 1090.0 | 1320.0 | 1.21 |
-| V-BO-05 | 59.0 | 30.8 | 0.522 | 1160.0 | 1370.0 | 1.18 |
-| V-BO-06 | 51.7 | 61.8 | 1.2 | 1150.0 | 1240.0 | 1.08 |
-| V-BO-07 | 151.0 | 88.4 | 0.586 | 1150.0 | 1250.0 | 1.09 |
-| V-BO-08 | 20.7 | 22.8 | 1.1 | 1140.0 | 1310.0 | 1.16 |
-| Douglas fir, 600 s | 2540.0 | 1320.0 | 0.52 | 1370.0 | 1540.0 | 1.12 |
-| white pine, 30kW | 1990.0 | 316.0 | 0.158 | 1300.0 | 1410.0 | 1.09 |
-| white pine, 50kW | 2140.0 | 368.0 | 0.172 | 1330.0 | 1500.0 | 1.13 |
-| PMMA cone | 23.7 | 47.5 | 2.0 | 1110.0 | 1290.0 | 1.17 |
+| eulerian 25, solid λ 1.0e-6 | 0.907 | 0.866 | 0.955 | 974.0 | 1240.0 | 1.27 |
+| eulerian 100, solid λ 1.0e-6 | 3.77 | 3.45 | 0.914 | 974.0 | 1220.0 | 1.25 |
+| ale 25, solid λ 1.0e-6 | 1.02 | 1.55 | 1.52 | 974.0 | 1220.0 | 1.25 |
+| ale 100, solid λ 1.0e-6 | 4.57 | 6.84 | 1.5 | 975.0 | 1260.0 | 1.3 |
+| ale_darcy 25 | 1.04 | 1.96 | 1.89 | 974.0 | 1230.0 | 1.27 |
+| ale_darcy 100 | 4.62 | 8.46 | 1.83 | 976.0 | 1230.0 | 1.26 |
+| V-BO-01 | 76.2 | 79.0 | 1.04 | 1150.0 | 1240.0 | 1.08 |
+| V-BO-02 | 71.4 | 32.1 | 0.45 | 1140.0 | 1260.0 | 1.1 |
+| V-BO-03 | 77.3 | 76.2 | 0.986 | 1160.0 | 1330.0 | 1.15 |
+| V-BO-04 | 3.29 | 5.42 | 1.65 | 1090.0 | 1260.0 | 1.15 |
+| V-BO-05 | 59.0 | 30.8 | 0.522 | 1160.0 | 1250.0 | 1.08 |
+| V-BO-06 | 51.7 | 60.2 | 1.16 | 1140.0 | 1250.0 | 1.1 |
+| V-BO-07 | 151.0 | 86.9 | 0.575 | 1140.0 | 1250.0 | 1.09 |
+| V-BO-08 | 20.7 | 22.0 | 1.06 | 1160.0 | 1330.0 | 1.15 |
+| Douglas fir, 600 s | 2540.0 | 1320.0 | 0.52 | 1350.0 | 1530.0 | 1.13 |
+| white pine, 30kW | 1990.0 | 316.0 | 0.158 | 1450.0 | 1430.0 | 0.992 |
+| white pine, 50kW | 2140.0 | 368.0 | 0.172 | 1310.0 | 1470.0 | 1.13 |
+| PMMA cone | 23.7 | 47.2 | 1.99 | 1120.0 | 1310.0 | 1.17 |
 
 ## The white-pine objective
 
@@ -308,6 +308,6 @@ The finite-volume core at the deck's tolerance, warm median, range and count, an
 
 | configuration | warm [s] | range [s] | n | allocated [MiB] | steps |
 |---|---|---|---|---|---|
-| V-BO-01 | 1.05 | 1.05–1.05 | 5 | 94.2 | 1116 |
-| ale 100, solid λ 1.0e-6 | 0.0218 | 0.021–0.0221 | 5 | 7.25 | 54 |
-| Douglas fir, 60 s | 3.78 | 3.77–3.81 | 5 | 789.0 | 313 |
+| V-BO-01 | 0.967 | 0.958–0.989 | 5 | 91.0 | 985 |
+| ale 100, solid λ 1.0e-6 | 0.0221 | 0.0213–0.0229 | 5 | 7.25 | 54 |
+| Douglas fir, 60 s | 3.98 | 3.95–4.05 | 5 | 789.0 | 313 |
