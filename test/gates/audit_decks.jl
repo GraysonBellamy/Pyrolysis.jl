@@ -219,99 +219,105 @@ function tolerance_slope(rows)
 end
 
 include(joinpath(@__DIR__, "stamp.jl"))
-load_start = Sys.loadavg()
-started = time()
-rows = []
-for (kind, n, solid_λ) in DECKS
-    append!(rows, deck_rows(kind, n, solid_λ))
-end
-degenerate = []
-for (kind, n) in DEGENERATE_DECKS
-    append!(degenerate, degenerate_rows(kind, n))
-end
-load_end = Sys.loadavg()
+if abspath(PROGRAM_FILE) == @__FILE__()
+    load_start = Sys.loadavg()
+    started = time()
+    rows = []
+    for (kind, n, solid_λ) in DECKS
+        append!(rows, deck_rows(kind, n, solid_λ))
+    end
+    degenerate = []
+    for (kind, n) in DEGENERATE_DECKS
+        append!(degenerate, degenerate_rows(kind, n))
+    end
+    load_end = Sys.loadavg()
 
-summary = []
-for (kind, n, solid_λ) in DECKS, form in FORMS
-    deck = _deck(kind, n, solid_λ)
-    ladder = filter(r -> r.deck == deck && r.form == form, rows)
-    default = only(filter(r -> r.reltol == DEFAULT_RELTOL, ladder))
-    push!(
-        summary,
-        (;
-            deck,
-            form,
-            spread = default.spread,
-            error_at_default = default.error,
-            steps_at_default = default.steps,
-            time_at_default = default.time,
-            slope = tolerance_slope(ladder),
-        ),
-    )
-    println(join(("$k=$v" for (k, v) in pairs(summary[end])), " "))
-end
+    summary = []
+    for (kind, n, solid_λ) in DECKS, form in FORMS
+        deck = _deck(kind, n, solid_λ)
+        ladder = filter(r -> r.deck == deck && r.form == form, rows)
+        default = only(filter(r -> r.reltol == DEFAULT_RELTOL, ladder))
+        push!(
+            summary,
+            (;
+                deck,
+                form,
+                spread = default.spread,
+                error_at_default = default.error,
+                steps_at_default = default.steps,
+                time_at_default = default.time,
+                slope = tolerance_slope(ladder),
+            ),
+        )
+        println(join(("$k=$v" for (k, v) in pairs(summary[end])), " "))
+    end
 
-function csv_out(path, rs)
-    open(path, "w") do io
-        csv_row(io, string.(keys(first(rs)))...)
-        for r in rs
-            csv_row(io, values(r)...)
+    function csv_out(path, rs)
+        open(path, "w") do io
+            csv_row(io, string.(keys(first(rs)))...)
+            for r in rs
+                csv_row(io, values(r)...)
+            end
         end
     end
-end
-csv_out(joinpath(OUT, "audit_decks.csv"), rows)
-csv_out(joinpath(OUT, "audit_decks_summary.csv"), summary)
-csv_out(joinpath(OUT, "audit_decks_degenerate.csv"), degenerate)
+    csv_out(joinpath(OUT, "audit_decks.csv"), rows)
+    csv_out(joinpath(OUT, "audit_decks_summary.csv"), summary)
+    csv_out(joinpath(OUT, "audit_decks_degenerate.csv"), degenerate)
 
-_g(x; d = 3) =
-    x isa AbstractFloat ? (isnan(x) ? "" : string(round(x; sigdigits = d))) : string(x)
-open(joinpath(OUT, "audit_decks.md"), "w") do io
-    println(io, "# The audit decks: accuracy per tolerance\n")
-    println(
-        io,
-        "Produced by `test/gates/audit_decks.jl` at $(COMMIT_STAMP). Julia $(VERSION), ",
-        "$(Threads.nthreads()) thread, $(Sys.CPU_THREADS) logical CPUs; load average ",
-        "$(round.(load_start; digits = 1)) at the start and $(round.(load_end; digits = 1)) ",
-        "at the end. The default integrator; error: the largest temperature difference [K] ",
-        "over the saved times and cells against the same deck and form at reltol ",
-        "$(REFERENCE) (abstol a hundredth of reltol); spread: that reference against one ",
-        "at a tenth of its tolerances. Slope: of log error against log reltol over the rungs ",
-        "whose error is at least $(Int(RESOLVED)) times the spread. Warm medians of ",
-        "$(REPEATS) solves [s].\n",
-    )
-    println(
-        io,
-        "| deck | form | spread [K] | error at reltol $(DEFAULT_RELTOL) [K] | steps | warm [s] | slope |",
-    )
-    println(io, "|" * repeat("---|", 7))
-    for s in summary
+    _g(x; d = 3) =
+        x isa AbstractFloat ? (isnan(x) ? "" : string(round(x; sigdigits = d))) : string(x)
+    open(joinpath(OUT, "audit_decks.md"), "w") do io
+        println(io, "# The audit decks: accuracy per tolerance\n")
         println(
             io,
-            "| $(s.deck) | $(s.form) | $(_g(s.spread)) | $(_g(s.error_at_default)) | ",
-            "$(s.steps_at_default) | $(_g(s.time_at_default)) | $(_g(s.slope)) |",
+            "Produced by `test/gates/audit_decks.jl` at $(COMMIT_STAMP). Julia $(VERSION), ",
+            "$(Threads.nthreads()) thread, $(Sys.CPU_THREADS) logical CPUs; load average ",
+            "$(round.(load_start; digits = 1)) at the start and $(round.(load_end; digits = 1)) ",
+            "at the end. The default integrator; error: the largest temperature difference [K] ",
+            "over the saved times and cells against the same deck and form at reltol ",
+            "$(REFERENCE) (abstol a hundredth of reltol); spread: that reference against one ",
+            "at a tenth of its tolerances. Slope: of log error against log reltol over the rungs ",
+            "whose error is at least $(Int(RESOLVED)) times the spread. Warm medians of ",
+            "$(REPEATS) solves [s].\n",
         )
-    end
-    println(
-        io,
-        "\n## The original PMMA decks (solid λ = 0) at the default tolerances\n\n",
-        "No tolerance converges these decks (see the script's header); warm times only.\n",
-    )
-    println(io, "| deck | form | retcode | steps | warm [s] |")
-    println(io, "|---|---|---|---|---|")
-    for r in degenerate
-        println(io, "| $(r.deck) | $(r.form) | $(r.retcode) | $(r.steps) | $(_g(r.time)) |")
-    end
-    println(io, "\n## Ladders\n")
-    println(io, "| deck | form | reltol | retcode | error [K] | steps | warm [s] |")
-    println(io, "|---|---|---|---|---|---|---|")
-    for r in rows
         println(
             io,
-            "| $(r.deck) | $(r.form) | $(r.reltol) | $(r.retcode) | $(_g(r.error)) | ",
-            "$(r.steps) | $(_g(r.time)) |",
+            "| deck | form | spread [K] | error at reltol $(DEFAULT_RELTOL) [K] | steps | warm [s] | slope |",
         )
+        println(io, "|" * repeat("---|", 7))
+        for s in summary
+            println(
+                io,
+                "| $(s.deck) | $(s.form) | $(_g(s.spread)) | $(_g(s.error_at_default)) | ",
+                "$(s.steps_at_default) | $(_g(s.time_at_default)) | $(_g(s.slope)) |",
+            )
+        end
+        println(
+            io,
+            "\n## The original PMMA decks (solid λ = 0) at the default tolerances\n\n",
+            "No tolerance converges these decks (see the script's header); warm times only.\n",
+        )
+        println(io, "| deck | form | retcode | steps | warm [s] |")
+        println(io, "|---|---|---|---|---|")
+        for r in degenerate
+            println(
+                io,
+                "| $(r.deck) | $(r.form) | $(r.retcode) | $(r.steps) | $(_g(r.time)) |",
+            )
+        end
+        println(io, "\n## Ladders\n")
+        println(io, "| deck | form | reltol | retcode | error [K] | steps | warm [s] |")
+        println(io, "|---|---|---|---|---|---|---|")
+        for r in rows
+            println(
+                io,
+                "| $(r.deck) | $(r.form) | $(r.reltol) | $(r.retcode) | $(_g(r.error)) | ",
+                "$(r.steps) | $(_g(r.time)) |",
+            )
+        end
     end
+    println(
+        "wrote $(OUT); load $(load_start) -> $(load_end); $(round(Int, time() - started)) s",
+    )
+
 end
-println(
-    "wrote $(OUT); load $(load_start) -> $(load_end); $(round(Int, time() - started)) s",
-)
