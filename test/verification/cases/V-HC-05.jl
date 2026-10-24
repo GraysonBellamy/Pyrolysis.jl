@@ -33,7 +33,14 @@ function _verification_case_vhc05()
     function build(n_cells)
         solid = SolidComponent(:solid, ρ = ρ, c = c, k = LinearProperty(k0, k0 * β))
         mat = Material(name = :VHC05, components = (solid,), reactions = ())
-        mesh = create_uniform_mesh(L, n_cells, Val(1); T_initial = T_bot, ξ_initial = (ρ,))
+        mesh = core_mesh(
+            create_uniform_mesh,
+            L,
+            n_cells,
+            Val(1);
+            T_initial = T_bot,
+            ξ_initial = (ρ,),
+        )
         bc_set = BoundaryConditionSet(
             thermal = (top = DirichletThermalBC(T_top), bottom = DirichletThermalBC(T_bot)),
         )
@@ -50,7 +57,7 @@ function _verification_case_vhc05()
 
     function qois(sol)
         out = QoIResult[]
-        z = get_cell_positions(sol)
+        z = cell_positions(sol)
         Tn = @view sol.T[:, end]
 
         err = maximum(abs(z_of_T(Tn[i]) - z[i]) for i in eachindex(z)) / L
@@ -98,7 +105,7 @@ function _verification_case_vhc05()
     end
 
     function profile_error(sol)
-        z = get_cell_positions(sol)
+        z = cell_positions(sol)
         Tn = @view sol.T[:, end]
         return maximum(abs(z_of_T(Tn[i]) - z[i]) for i in eachindex(z)) / L
     end
@@ -130,7 +137,7 @@ function _verification_case_vhc05()
             qoi_curves = (:T_profile_steady, :flux_history),
             solve_kwargs = (abstol = 1e-12, reltol = 1e-10),
             curves = sol -> begin
-                z = get_cell_positions(sol)
+                z = cell_positions(sol)
                 n = length(z)
                 i1, i2 = n ÷ 2, n ÷ 2 + 1
                 # invert the implicit Kirchhoff profile z(T) for the overlay
@@ -172,7 +179,7 @@ function _verification_case_vhc05()
                 ]
             end,
             error_norms = sol -> begin
-                z = get_cell_positions(sol)
+                z = cell_positions(sol)
                 e = [z_of_T(sol.T[i, end]) - z[i] for i in eachindex(z)]
                 (L2 = sqrt(sum(abs2, e) / length(e)) / L, Linf = maximum(abs, e) / L)
             end,

@@ -43,8 +43,14 @@ function _vhc04_case(label::String; k1::Float64, k2::Float64, z_i::Float64, n_ci
         s1 = SolidComponent(:layer1, ρ = ρ, c = c, k = k1)
         s2 = SolidComponent(:layer2, ρ = ρ, c = c, k = k2)
         mat = Material(name = :VHC04, components = (s1, s2), reactions = ())
-        mesh =
-            create_uniform_mesh(L, n_cells, Val(2); T_initial = T_bot, ξ_initial = (ρ, 0.0))
+        mesh = core_mesh(
+            create_uniform_mesh,
+            L,
+            n_cells,
+            Val(2);
+            T_initial = T_bot,
+            ξ_initial = (ρ, 0.0),
+        )
         bc_set = BoundaryConditionSet(
             thermal = (top = DirichletThermalBC(T_top), bottom = DirichletThermalBC(T_bot)),
         )
@@ -64,7 +70,7 @@ function _vhc04_case(label::String; k1::Float64, k2::Float64, z_i::Float64, n_ci
 
     function qois(sol)
         out = QoIResult[]
-        z = get_cell_positions(sol)
+        z = cell_positions(sol)
         n = length(z)
         Δz = L / n
         Tn = @view sol.T[:, end]
@@ -159,7 +165,7 @@ function _vhc04_case(label::String; k1::Float64, k2::Float64, z_i::Float64, n_ci
             profile_times = [t_end],
             qoi_curves = (:T_profile_steady,),
             curves = sol -> begin
-                z = get_cell_positions(sol)
+                z = cell_positions(sol)
                 [
                     ReportCurve(
                         name = :T_profile_steady,

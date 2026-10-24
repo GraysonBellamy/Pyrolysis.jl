@@ -22,6 +22,10 @@ if !isdefined(@__MODULE__, :run_case_ci)
     # convergence rate — the workflow for (re)pinning tolerances at 3× observed.
     _print_qois() = get(ENV, "PYROLYSIS_VERIFICATION_PRINT_QOIS", "0") == "1"
 
+    # Set PYROLYSIS_TEST_FAST=1 to skip the convergence spot checks: each case
+    # is then solved at its CI resolution only (the pull-request workflow).
+    _fast() = get(ENV, "PYROLYSIS_TEST_FAST", "0") == "1"
+
     function run_case_ci(case::VerificationCase)
         @testset "$(case.id) — $(case.title)" begin
             # Warm-up solve, discarded: the wall-time budget measures the case,
@@ -48,7 +52,7 @@ if !isdefined(@__MODULE__, :run_case_ci)
                     end
                 end
                 conv = case.ci.convergence
-                if conv !== nothing
+                if conv !== nothing && !_fast()
                     @testset "spatial convergence (expected order $(conv.expected_order))" begin
                         build = conv.build === nothing ? case.build : conv.build
                         errors = Float64[]
@@ -79,7 +83,11 @@ end
     include(joinpath(@__DIR__, "exact", "selftests.jl"))
 
     # invokelatest: the case closures are defined during load (world-age).
-    for case in load_verification_cases()
-        Base.invokelatest(run_case_ci, case)
+    cases = load_verification_cases()
+    skipped = [c.id for c in cases if !runs_on_core(c)]
+    isempty(skipped) ||
+        @info "Verification cases not run on the $(VERIFICATION_CORE) core" skipped
+    for case in cases
+        runs_on_core(case) && Base.invokelatest(run_case_ci, case)
     end
 end

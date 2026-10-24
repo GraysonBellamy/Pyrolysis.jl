@@ -8,7 +8,7 @@ using Pyrolysis
 using Pyrolysis.Problem: validate_problem
 using Pyrolysis.Residual: residual!
 using Pyrolysis.Materials: SURFACE_ABSORPTION, BEER_LAMBERT, NO_RADIATION
-using Pyrolysis.Discretization: solve_boundary_temperature
+using Pyrolysis.BoundaryConditions: solve_boundary_temperature
 using Pyrolysis.BoundaryConditions: ambient_concentration
 
 function _minors_material(; α::Real = 0.0)

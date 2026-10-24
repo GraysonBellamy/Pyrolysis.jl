@@ -45,8 +45,14 @@ function _vcpl05_problem(L; n_cells, β = 0.5)
         reactions = (rxn,),
         depletion_limiter = DepletionLimiter(enabled = false),
     )
-    mesh =
-        create_uniform_mesh(L, n_cells, Val(2); T_initial = P.T0, ξ_initial = (P.ξ0, 0.0))
+    mesh = core_mesh(
+        create_uniform_mesh,
+        L,
+        n_cells,
+        Val(2);
+        T_initial = P.T0,
+        ξ_initial = (P.ξ0, 0.0),
+    )
     ramp = t -> P.T0 + P.β * t
     bc_set = BoundaryConditionSet(
         thermal = (top = DirichletThermalBC(ramp), bottom = DirichletThermalBC(ramp)),
@@ -87,12 +93,7 @@ function _verification_case_vcpl05()
         out = QoIResult[]
         errs = [ladder_error(sol)]
         for L in L_ladder[2:end]
-            s = solve(
-                _vcpl05_problem(L; n_cells = 16);
-                progress = false,
-                abstol = 1e-10,
-                reltol = 1e-8,
-            )
+            s = core_solve(_vcpl05_problem(L; n_cells = 16); abstol = 1e-10, reltol = 1e-8)
             push!(errs, ladder_error(s))
         end
 
@@ -159,9 +160,8 @@ function _verification_case_vcpl05()
             curves = _ -> begin
                 Ls = [4e-3, 2e-3, 1e-3, 0.5e-3, 0.25e-3]
                 sols = [
-                    solve(
+                    core_solve(
                         _vcpl05_problem(L; n_cells = 16);
-                        progress = false,
                         abstol = 1e-10,
                         reltol = 1e-8,
                     ) for L in Ls

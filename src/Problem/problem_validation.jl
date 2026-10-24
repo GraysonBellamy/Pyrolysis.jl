@@ -95,7 +95,21 @@ end
 
 Validate mesh structure.
 """
-function validate_mesh(mesh)
+function validate_mesh(mesh::Meshes.Mesh)
+    errors = String[]
+    topo = mesh.topology
+    if length(mesh.positions) != Meshes.n_nodes(topo)
+        push!(
+            errors,
+            "Mesh has $(length(mesh.positions)) node positions for $(Meshes.n_nodes(topo)) nodes",
+        )
+    end
+    all(p -> all(isfinite, p), mesh.positions) ||
+        push!(errors, "Mesh node positions are not all finite")
+    return errors
+end
+
+function validate_mesh(mesh::Mesh1D)
     errors = String[]
 
     # Check mesh has cells
@@ -211,10 +225,38 @@ Validate boundary conditions are defined for all mesh boundaries.
 """
 function validate_boundary_conditions(problem)
     errors = String[]
-
-    mesh = problem.mesh
     bc_set = problem.bc_set
+    _validate_boundaries!(errors, problem.mesh, bc_set)
 
+    # Per-species ambient concentrations (ConvectiveMassBC with tuple ξ_inf)
+    # must match the material's component count — the tuple is indexed by
+    # component index at flux evaluation.
+    NC = Materials.n_components(problem.material)
+    for (side, bc) in pairs(bc_set.mass)
+        _validate_xi_inf_length!(errors, bc, NC, side)
+    end
+
+    return errors
+end
+
+# The mesh's boundary tags: `:top` (the exposed surface) and `:bottom` among
+# them, and a thermal condition for each.
+function _validate_boundaries!(errors, mesh::Meshes.Mesh, bc_set)
+    tags = Meshes.boundary_tags(mesh.topology)
+    missing = setdiff([:top, :bottom], tags)
+    isempty(missing) || push!(
+        errors,
+        "Mesh missing expected boundary tags: $(missing) (expected :top, the exposed " *
+        "surface, and :bottom)",
+    )
+    for tag in tags
+        haskey(bc_set.thermal, tag) ||
+            push!(errors, "No thermal condition for the mesh's boundary tag :$tag")
+    end
+    return errors
+end
+
+function _validate_boundaries!(errors, mesh::Mesh1D, bc_set)
     # Get all boundary IDs from mesh
     mesh_boundary_ids = Set(keys(mesh.boundary_faces))
 
@@ -228,17 +270,6 @@ function validate_boundary_conditions(problem)
             errors,
             "Mesh missing expected boundaries: $missing_boundaries (expected 1=top, 2=bottom)",
         )
-    end
-
-    # Note: BoundaryConditionSet is always fully defined with all 4 BCs,
-    # so no need to check for missing BCs like we did with Dicts
-
-    # Per-species ambient concentrations (ConvectiveMassBC with tuple ξ_inf)
-    # must match the material's component count — the tuple is indexed by
-    # component index at flux evaluation.
-    NC = Materials.n_components(problem.material)
-    for (side, bc) in ((:top, bc_set.mass.top), (:bottom, bc_set.mass.bottom))
-        _validate_xi_inf_length!(errors, bc, NC, side)
     end
 
     return errors
@@ -344,8 +375,9 @@ solid fills the cell exactly, giving φ₀ = 0.
 
 Initial porosity and permeability are evaluated from `T_initial`/`ξ_initial`
 at every cell center — the same points `apply_initial_conditions!` uses.
-Cells whose effective permeability is zero are not flagged (zero mobility
-keeps the pressure field inert there). Returns no errors for Fickian
+The porosity is the unclamped pore fraction `1 − skeletal_volume_fraction`.
+Cells whose effective permeability is not positive are not flagged (zero
+mobility keeps the pressure field inert there). Returns no errors for Fickian
 materials. Bails out silently when the IC functions are not evaluable or
 their count mismatches the material — those problems are reported by the
 dedicated checks.
@@ -359,7 +391,7 @@ function validate_darcy_initial_porosity(problem)
     NC = n_components(material)
     length(problem.ξ_initial) == NC || return errors
 
-    centers = problem.mesh.cell_centers
+    centers = cell_centers(problem.mesh)
     isempty(centers) && return errors
 
     n_bad = 0
@@ -370,9 +402,9 @@ function validate_darcy_initial_porosity(problem)
         for (i, z) in enumerate(centers)
             T = Float64(problem.T_initial(z))
             ξ = ntuple(j -> Float64(problem.ξ_initial[j](z)), NC)
-            φ = Properties.porosity(ξ, T, material)
+            φ = 1 - Properties.skeletal_volume_fraction(ξ, T, material)
             φ >= _DARCY_MIN_INITIAL_POROSITY && continue
-            κ = Properties.effective_permeability(ξ, T, material)
+            κ = Properties.effective_permeability(ξ, T, material, φ)
             κ > 0.0 || continue
             n_bad += 1
             if n_bad == 1
@@ -428,24 +460,24 @@ function validate_strict(problem)
         end
     end
 
-    # Test initial condition functions are callable
+    # Test initial condition functions are callable at the first cell centre
+    x_test = first(cell_centers(mesh))
     try
-        z_test = 0.0
-        problem.T_initial(z_test)
+        problem.T_initial(x_test)
     catch e
-        push!(errors, "T_initial function failed at z=0: $e")
+        push!(errors, "T_initial function failed at $x_test: $e")
     end
 
     for (j, ξ_func) in enumerate(problem.ξ_initial)
         try
-            ξ_func(0.0)
+            ξ_func(x_test)
         catch e
-            push!(errors, "ξ_initial[$j] function failed at z=0: $e")
+            push!(errors, "ξ_initial[$j] function failed at $x_test: $e")
         end
     end
 
     # Check cell volumes are positive
-    for (i, vol) in enumerate(mesh.cell_volumes)
+    for (i, vol) in enumerate(cell_volumes(mesh))
         if vol <= 0
             push!(errors, "Cell $i has non-positive volume: $vol")
         end

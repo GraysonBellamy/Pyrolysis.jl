@@ -10,7 +10,7 @@ q_BC(T_s) = k_eff·(T_s − T_cell)/Δz_half
 ```
 
 `solve_boundary_temperature!` is **Dual-aware** (see
-[`boundary_temperature.jl`](../Discretization/boundary_temperature.jl)),
+[`surface_balance.jl`](../BoundaryConditions/surface_balance.jl)),
 so the AD path through Newton is just "call the solver with Dual inputs and
 ride the derivative through `q_conducted`."
 
@@ -52,13 +52,14 @@ using ..Materials: evaluate_param
 using ..Materials: AbstractThermalBC, RadiationModel, SURFACE_ABSORPTION
 using ..BoundaryConditions:
     DirichletThermalBC, BoundaryConditionSet, get_thermal_bc, get_mass_bc
-using ..Geometry: BoundaryState
+using ..BoundaryConditions: BoundaryState
 using ..Properties:
     effective_conductivity,
     effective_heat_capacity,
     effective_emissivity,
     effective_absorptivity
-using ..Discretization: solve_boundary_temperature!, _bc_boundary_face_fluxes
+using ..Discretization: _bc_boundary_face_fluxes
+using ..BoundaryConditions: solve_boundary_temperature!
 
 """
 	BCThermalOperator <: Operator

@@ -91,7 +91,8 @@ function _verification_case_vmms04()
     z_top(t) = ztop_sol(t)
 
     function build(n_cells)
-        mesh = create_uniform_mesh(
+        mesh = core_mesh(
+            create_uniform_mesh,
             L,
             n_cells,
             Val(2);
@@ -123,8 +124,16 @@ function _verification_case_vmms04()
         )
     end
 
-    solve_fn(problem; jacobian = :analytic, kwargs...) =
-        solve_mms(problem, fields; use_ale = true, motion = motion, jacobian, kwargs...)
+    solve_fn(problem; jacobian = :analytic, kwargs...) = solve_mms(
+        problem,
+        fields;
+        use_ale = true,
+        motion = motion,
+        jacobian,
+        core = Symbol(VERIFICATION_CORE),
+        energy_state = VERIFICATION_ENERGY_STATE,
+        kwargs...,
+    )
 
     # Numeric top-node position from the saved cell centers (exact/mms.jl).
     numeric_top_node(sol) = mms_top_node(sol, length(sol.t))
@@ -196,7 +205,9 @@ function _verification_case_vmms04()
         # exact answer, side by side with DirectSolve's. Same resolution as
         # the CI run; the reduced (`:ale_reduced`) Jacobian profile changes
         # only Newton convergence, not the converged solution, so the exact
-        # errors must stay within the same pinned band.
+        # errors must stay within the same pinned band. The finite-volume
+        # core has one Jacobian, so the companion runs on the old core only.
+        VERIFICATION_CORE == "old" || return out
         sol_approx = solve_mms(
             build(32),
             fields;

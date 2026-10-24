@@ -86,6 +86,7 @@ export SutherlandProperty  # Sutherland gas-viscosity correlation (Material.gas_
 export StateDependentProperty  # For state-dependent heats of reaction
 export evaluate_param, evaluate_param_T  # Unified parameter evaluation (defined in property_functions.jl)
 export property_temperature  # Argument clamp shared by every temperature-dependent law
+export identically_zero  # Structural zero test of a property law
 
 # Components
 export Phase, SOLID, LIQUID, GAS
@@ -95,7 +96,7 @@ export get_permeability, has_permeability  # Permeability accessors for componen
 export get_intrinsic_density  # Skeletal density accessor
 export get_emissivity, get_absorptivity, surface_absorptivity  # Radiative surface accessors
 
-# Blowing models (evaluated in Discretization/blowing.jl)
+# Blowing models (evaluated in BoundaryConditions/blowing.jl)
 export AbstractBlowingModel,
     NoBlowing, CouetteFilm, PropertyRatioFilm, PoolingFilm, FunctionBlowing
 export GasSpecies, NITROGEN, nasa7_heat_capacity, eucken_viscosity, fuller_diffusivity
@@ -103,7 +104,7 @@ export gas_property_temperature
 
 # Reactions
 export Reaction
-export DepletionLimiter
+export AbstractDepletionLimiter, DepletionLimiter, TanhLimiter
 
 # Materials
 export Material, MixingRule, PARALLEL, SERIES, WEIGHTED, BRUGGEMAN, CARMAN_KOZENY

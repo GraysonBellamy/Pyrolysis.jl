@@ -1288,16 +1288,14 @@ weakdeps = ["ForwardDiff"]
     PureKLUForwardDiffExt = "ForwardDiff"
 
 [[deps.Pyrolysis]]
-deps = ["ADTypes", "CommonSolve", "Distributed", "FiniteDiff", "ForwardDiff", "FunctionWrappers", "IncompleteLU", "Krylov", "LinearAlgebra", "LinearSolve", "OrdinaryDiffEq", "OrdinaryDiffEqSDIRK", "PrecompileTools", "Printf", "ProgressMeter", "RecursiveFactorization", "SciMLBase", "SparseArrays", "Sparspak", "StaticArrays"]
+deps = ["ADTypes", "CommonSolve", "DifferentiationInterface", "Distributed", "FiniteDiff", "ForwardDiff", "FunctionWrappers", "IncompleteLU", "Krylov", "LinearAlgebra", "LinearSolve", "OrdinaryDiffEq", "OrdinaryDiffEqSDIRK", "PrecompileTools", "Printf", "ProgressMeter", "RecursiveFactorization", "SciMLBase", "SparseArrays", "SparseMatrixColorings", "Sparspak", "StaticArrays"]
 path = ".."
 uuid = "910b54fb-7370-4696-a92c-2242b531a32e"
 version = "0.1.0"
+weakdeps = ["RecipesBase"]
 
     [deps.Pyrolysis.extensions]
     PyrolysisPlotsExt = "RecipesBase"
-
-    [deps.Pyrolysis.weakdeps]
-    RecipesBase = "3cdcf5f2-1ef4-517c-9805-6587b60abb01"
 
 [[deps.REPL]]
 deps = ["Base64", "Dates", "FileWatching", "InteractiveUtils", "JuliaSyntaxHighlighting", "Markdown", "Sockets", "StyledStrings", "Unicode"]

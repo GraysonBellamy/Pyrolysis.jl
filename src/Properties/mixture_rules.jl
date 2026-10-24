@@ -401,6 +401,47 @@ end
     return expr
 end
 
+"""
+	skeletal_volume_fraction(ξ::NTuple{NC,<:Real}, T::Real, material) -> Real
+
+The bulk-volume fraction occupied by the condensed (solid and liquid)
+skeleton, `Σⱼ ξⱼ / ρⱼ_intrinsic(T)` over the condensed components, without a
+clamp: `1 − skeletal_volume_fraction` is the pore fraction [`porosity`](@ref)
+clamps into `[0, 1]`, so a caller can apply its own smooth floor and read the
+unclamped value for admissibility.
+"""
+@inline function skeletal_volume_fraction(
+    ξ::NTuple{NC,<:Real},
+    T::Real,
+    material,
+) where {NC}
+    return _skeletal_volume(ξ, T, material.components, Val(NC))
+end
+
+@generated function _skeletal_volume(
+    ξ::NTuple{NC,<:Real},
+    T::Real,
+    comps::Tuple,
+    ::Val{NC},
+) where {NC}
+    expr = quote
+        solid_vol = zero(_prop_type(ξ, T))
+    end
+    for i = 1:NC
+        push!(expr.args, quote
+            c = comps[$i]
+            if is_solid(c) || is_liquid(c)
+                ρ_intr = get_intrinsic_density(c, T)
+                if ρ_intr > 0.0
+                    solid_vol += ξ[$i] / ρ_intr
+                end
+            end
+        end)
+    end
+    push!(expr.args, :(return solid_vol))
+    return expr
+end
+
 # ============================================================================
 # Generated functions for allocation-free computation with many components
 # These generate fully unrolled code at compile time, avoiding runtime

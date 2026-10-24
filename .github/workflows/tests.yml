@@ -1,0 +1,125 @@
+# The numerical gate. Two matrices:
+#
+# fast, on pull requests to main and by dispatch: every suite at its CI
+# resolution in the temperature form, without the convergence spot checks
+# (PYROLYSIS_TEST_FAST), in five jobs side by side: the finite-volume core
+# suites in their three groups (test/runtests.jl), the verification cases on
+# the finite-volume core, and the old core's suites with the verification
+# cases on the old core. The package is built without its precompile
+# workloads, which solve on the old core.
+#
+# full, weekly and by dispatch with `matrix: full`: `Pkg.test()` as a user runs
+# it (every suite, the verification cases on the old core, the spot checks),
+# and the verification cases on the finite-volume core in each energy form
+# with their spot checks. The finite-volume core suites do not depend on the
+# routing and run once, in the first job. The package is built with its
+# precompile workloads, as for a user.
+name: Tests
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      matrix:
+        description: "fast (the pull-request partition) or full"
+        type: choice
+        options: [fast, full]
+        default: fast
+  schedule:
+    - cron: "0 5 * * 1"
+
+concurrency:
+  group: tests-${{ github.ref }}-${{ github.event_name == 'pull_request' && 'fast' || inputs.matrix || 'full' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  fast:
+    if: github.event_name == 'pull_request' || inputs.matrix == 'fast'
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Finite-volume core suites (Jacobian, multi-D)
+            core: new
+            group: newcore-jacobian
+          - name: Finite-volume core suites (burnout)
+            core: new
+            group: newcore-burnout
+          - name: Finite-volume core suites (other)
+            core: new
+            group: newcore-other
+          - name: Verification cases
+            core: new
+            group: domains
+          - name: Old core
+            core: old
+            group: domains
+    env:
+      PYROLYSIS_CORE: ${{ matrix.core }}
+      PYROLYSIS_TEST_FAST: "1"
+      PYROLYSIS_TEST_GROUP: ${{ matrix.group }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1.13"
+      - uses: julia-actions/cache@v2
+      - name: Build without the precompile workloads
+        run: printf '[Pyrolysis]\nprecompile_workloads = false\n' > LocalPreferences.toml
+      - name: Record the environment
+        run: |
+          echo "commit $(git rev-parse HEAD) (tree $(git rev-parse 'HEAD^{tree}'))"
+          echo "event ${{ github.event_name }}; pull request head ${{ github.event.pull_request.head.sha || 'none' }}"
+          sha256sum Manifest.toml test/Manifest.toml
+          cat LocalPreferences.toml
+          julia -e 'using InteractiveUtils; versioninfo()'
+      - name: Instantiate
+        run: julia --project=. -e 'using Pkg; Pkg.instantiate()'
+      - name: Run the tests
+        run: julia --color=yes --project=. -e 'using Pkg; Pkg.test()'
+
+  full:
+    if: github.event_name == 'schedule' || inputs.matrix == 'full'
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Pkg.test()
+            core: old
+            energy: temperature
+            group: all
+          - name: Verification cases, finite-volume core, temperature form
+            core: new
+            energy: temperature
+            group: domains
+          - name: Verification cases, finite-volume core, enthalpy form
+            core: new
+            energy: enthalpy
+            group: domains
+    env:
+      PYROLYSIS_CORE: ${{ matrix.core }}
+      PYROLYSIS_ENERGY_STATE: ${{ matrix.energy }}
+      PYROLYSIS_TEST_GROUP: ${{ matrix.group }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1.13"
+      - uses: julia-actions/cache@v2
+      - name: Record the environment
+        run: |
+          echo "commit $(git rev-parse HEAD) (tree $(git rev-parse 'HEAD^{tree}'))"
+          echo "event ${{ github.event_name }} on ${{ github.ref }}"
+          sha256sum Manifest.toml test/Manifest.toml
+          julia -e 'using InteractiveUtils; versioninfo()'
+      - name: Instantiate
+        run: julia --project=. -e 'using Pkg; Pkg.instantiate()'
+      - name: Run the tests
+        run: julia --color=yes --project=. -e 'using Pkg; Pkg.test()'

@@ -156,6 +156,52 @@ function tanh_profile(z; z_center::Real, width::Real, value_left::Real, value_ri
 end
 
 # ============================================================================
+# The initial fields at the cell centres
+# ============================================================================
+
+"""
+	initial_fields(problem, mesh::Meshes.Mesh) -> (T0, ξ0)
+
+The problem's initial temperature [K] and concentrations [kg/m³] at the cell
+centres of `mesh` (its reference positions): `T0[i] = T_initial(xᵢ)` and
+`ξ0[j, i] = ξ_initial[j](xᵢ)`. On a line `xᵢ` is the scalar midpoint of the
+cell; on more dimensions the centroid, an `SVector`.
+"""
+function initial_fields(problem::PyrolysisProblem, mesh::Meshes.Mesh)
+    points = cell_centers(mesh)
+    NC = length(problem.ξ_initial)
+    T0 = [Float64(problem.T_initial(x)) for x in points]
+    ξ0 = [Float64(problem.ξ_initial[j](x)) for j = 1:NC, x in points]
+    return T0, ξ0
+end
+
+# The reference geometry of a mesh.
+function _geometry(mesh::Meshes.Mesh)
+    topo = mesh.topology
+    g = Meshes.MeshGeometry{Float64}(topo)
+    Meshes.geometry!(g, reduce(vcat, mesh.positions), topo.cross_section, topo)
+    return g
+end
+
+"""
+	cell_centers(mesh) -> Vector
+
+The points at which the initial conditions are evaluated: the cell centres at
+the reference positions, scalars on a line and `SVector`s on more dimensions.
+"""
+cell_centers(mesh::Meshes.Mesh{1}) = [c[1] for c in _geometry(mesh).cell_center]
+cell_centers(mesh::Meshes.Mesh) = _geometry(mesh).cell_center
+cell_centers(mesh::Mesh1D) = mesh.cell_centers
+
+"""
+	cell_volumes(mesh) -> Vector{Float64}
+
+The cell volumes at the reference positions [m³], signed.
+"""
+cell_volumes(mesh::Meshes.Mesh) = _geometry(mesh).cell_volume
+cell_volumes(mesh::Mesh1D) = mesh.cell_volumes
+
+# ============================================================================
 # Set Initial State from Problem
 # ============================================================================
 

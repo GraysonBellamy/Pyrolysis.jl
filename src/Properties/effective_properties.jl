@@ -318,20 +318,33 @@ end
 # Conductivity helpers
 # ============================================================================
 
-@generated function _conductivity_sums(v, T, comps::Tuple, ::Val{NC}) where {NC}
+@inline _conductivity_sums(v, T, comps::Tuple, nc::Val) =
+    _conductivity_sums(v, T, comps, nc, Val(false))
+
+# With `skip_absent`, a component whose volume fraction is exactly zero (a
+# dual number's partials included) adds an exact zero to both sums for every
+# finite conductivity, so its law is not evaluated.
+@generated function _conductivity_sums(
+    v,
+    T,
+    comps::Tuple,
+    ::Val{NC},
+    ::Val{skip_absent},
+) where {NC,skip_absent}
     expr = quote
         W = _prop_type(v, T)
         k_parallel = zero(W)
         inv_k_series = zero(W)
     end
     for i = 1:NC
-        push!(expr.args, quote
+        term = quote
             k = comps[$i].thermal_conductivity(T)
             k_parallel += v[$i] * k
             if v[$i] > 1e-20 && k > 1e-20
                 inv_k_series += v[$i] / k
             end
-        end)
+        end
+        push!(expr.args, skip_absent ? :(iszero(v[$i]) || $term) : term)
     end
     push!(expr.args, :(return k_parallel, inv_k_series))
     return expr
@@ -510,10 +523,19 @@ fractions, excluding γ ≈ 0 components. This matches ThermaKin behavior: "when
 (ThermaKin2Ds Reference, Equations 8-10). For a fully depleted cell (no
 matrix volume left) it falls back to the actual phase occupancy so k_eff
 degrades to the gas-mixture conductivity instead of 0.
+
+With `skip_absent = Val(true)` the parallel, series and weighted rules do not
+evaluate the conductivity of a component whose volume fraction is exactly
+zero; the result is the same for every finite conductivity.
 """
-@inline function effective_conductivity(ξ::NTuple{NC,<:Real}, T::Real, material) where {NC}
+@inline function effective_conductivity(
+    ξ::NTuple{NC,<:Real},
+    T::Real,
+    material;
+    skip_absent::Val = Val(false),
+) where {NC}
     v = mixing_volume_fractions(ξ, T, material)
-    return _conductivity_from_v(v, T, material)
+    return _conductivity_from_v(v, T, material; skip_absent)
 end
 
 # Cache-aware variant that takes pre-computed solid volume
@@ -529,6 +551,7 @@ end
     T::Real,
     material::Material{NC};
     k_init = nothing,
+    skip_absent::Val = Val(false),
 ) where {NC}
     W = _prop_type(v, T)
     mixing = material.mixing.k.rule
@@ -537,7 +560,8 @@ end
         return convert(W, bruggeman_effective_property(v, k_tuple; k_init = k_init))
     end
 
-    k_parallel, inv_k_series = _conductivity_sums(v, T, material.components, Val(NC))
+    k_parallel, inv_k_series =
+        _conductivity_sums(v, T, material.components, Val(NC), skip_absent)
     k_series = inv_k_series > 1e-20 ? convert(W, 1.0 / inv_k_series) : zero(W)
 
     if mixing == PARALLEL
@@ -652,6 +676,26 @@ end
     end
     push!(expr.args, :(return result))
     return expr
+end
+
+"""
+	mixture_emissivity(ξ::NTuple{NC,Real}, T::Real, material) -> Real
+	mixture_absorptivity(ξ::NTuple{NC,Real}, T::Real, material) -> Real
+
+The mixing-weighted emissivity `Σⱼ vⱼ εⱼ(T)` and absorptivity `Σⱼ vⱼ aⱼ` of
+[`effective_emissivity`](@ref) and [`effective_absorptivity`](@ref) without
+their clamp to `[0, 1]`. The weights are a convex combination and every
+component value lies in `[0, 1]`, so the sums stay in `[0, 1]` to round-off;
+these forms keep the derivative of the sum where the clamped forms have a kink.
+"""
+@inline function mixture_emissivity(ξ::NTuple{NC,<:Real}, T::Real, material) where {NC}
+    v = mixing_volume_fractions(ξ, T, material)
+    return _sum_emissivity(v, T, material.components, Val(NC))
+end
+
+@inline function mixture_absorptivity(ξ::NTuple{NC,<:Real}, T::Real, material) where {NC}
+    v = mixing_volume_fractions(ξ, T, material)
+    return _sum_absorptivity(v, T, material.components, Val(NC))
 end
 
 """
@@ -825,6 +869,26 @@ permeability increases, allowing easier gas escape.
 end
 
 """
+	effective_permeability(ξ, T, material, φ) -> κ [m²]
+
+[`effective_permeability`](@ref) with the porosity `φ` given: the
+Carman–Kozeny rule reads it in place of the porosity clamped into `[0, 1]`, so
+a caller that floors the unclamped pore fraction smoothly gets a permeability
+smooth in the state; the per-component mixes do not read it.
+"""
+@inline function effective_permeability(
+    ξ::NTuple{NC,<:Real},
+    T::Real,
+    material,
+    φ::Real,
+) where {NC}
+    material.mixing.κ.rule == CARMAN_KOZENY &&
+        return _carman_kozeny_permeability(φ, material.mixing.κ.ℓ)
+    v = solid_volume_fractions(ξ, T, material)
+    return _permeability_from_v(v, T, material)
+end
+
+"""
 	_carman_kozeny_permeability(φ, ℓ) -> κ [m²]
 
 Kozeny–Carman permeability from porosity `φ` and characteristic particle/pore
@@ -906,4 +970,33 @@ This reduces to the standard harmonic mean 2ab/(a+b) when d_L = d_R.
         return zero(float(promote_type(typeof(a), typeof(b), typeof(d_a), typeof(d_b))))
     end
     return (d_a + d_b) / (d_a / a + d_b / b)
+end
+
+# Guard of the smooth face mean [property units]: far below any physical
+# conductivity or transfer coefficient.
+const FACE_MEAN_GUARD = 1e-20
+
+"""
+	guarded_harmonic_mean(a, b, d_a, d_b, η = FACE_MEAN_GUARD)
+
+Distance-weighted harmonic mean in the product form
+
+	φ_face = (d_a + d_b) a b / (d_a b + d_b a + η (d_a + d_b))
+
+smooth in every argument for non-negative values and positive distances. It
+equals [`harmonic_mean_weighted`](@ref) to a relative `η / φ`, and it goes to
+zero continuously, with a finite derivative, as either value vanishes instead
+of being cut off below a threshold. The guard `η` carries the property's units
+and must lie far below its physical values: the default suits conductivities
+and gas-transfer coefficients, a Darcy mobility needs a smaller one.
+"""
+@inline function guarded_harmonic_mean(
+    a::Real,
+    b::Real,
+    d_a::Real,
+    d_b::Real,
+    η::Real = FACE_MEAN_GUARD,
+)
+    d = d_a + d_b
+    return d * a * b / (d_a * b + d_b * a + η * d)
 end

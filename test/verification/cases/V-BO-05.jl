@@ -15,13 +15,20 @@
 # must stop between 330 and 345 s with the interior-void warning, before any
 # park, with the maximum live-cell temperature below 1000 K. The solve ends
 # with retcode Terminated.
+#
+# On the finite-volume core a cell deactivates when its condensed mass falls
+# below ε_m of its initial value, and on a fixed mesh a crossing cell beneath
+# a live cell ends the solve `:interior`, without a warning. That criterion
+# stops the run earlier, at 259.6 s; the stop time's tolerance is three times
+# the CI resolution's distance from the 240-cell time (260.35, 259.79, 259.62
+# and 259.57 s at 30, 60, 120 and 240 cells, both energy forms within 5 ms).
 
 # Histories up to the stop, and the PMMA and temperature profiles at the last
 # output before it: the skin at the top, the emptying layer beneath.
 function _vbo05_report_curves(sol)
     id = "V-BO-05"
     k = length(sol.t)
-    z_mm = get_cell_positions(sol) .* 1e3
+    z_mm = cell_positions(sol) .* 1e3
     t_k = round(sol.t[k], digits = 1)
     profile(name, title, ylabel, label, y) = ReportCurve(
         name = name,
@@ -66,10 +73,51 @@ function _vbo05_report_curves(sol)
     ]
 end
 
+# The finite-volume core's QoIs: the stop at the first ε_m crossing beneath a
+# live cell, its outcome, no deactivation before it, and the temperature bound.
+function _vbo05_core_qois(sol, rec)
+    t_stop = rec.t_last
+    n_events = length(sol.events)
+    return [
+        QoIResult(
+            name = "stop time at the first interior crossing of ε_m",
+            value = t_stop,
+            exact = 259.57,
+            error = abs(t_stop - 259.57),
+            tol = 0.7,
+            comment = "s; the 240-cell time (259.79 at 60 cells): a cell under the skin falls below ε_m of its initial condensed mass",
+        ),
+        QoIResult(
+            name = "outcome :interior",
+            value = sol.outcome == :interior ? 1.0 : 0.0,
+            exact = 1.0,
+            error = sol.outcome == :interior ? 0.0 : 1.0,
+            tol = 0.5,
+            comment = "the solve ended with outcome :$(sol.outcome)",
+        ),
+        QoIResult(
+            name = "deactivation events before the stop",
+            value = Float64(n_events),
+            exact = 0.0,
+            error = Float64(n_events),
+            tol = 0.5,
+            comment = "the surface cell persists as a skin while the layer gasifies from within",
+        ),
+        QoIResult(
+            name = "maximum live-cell temperature up to the stop",
+            value = rec.T_max,
+            error = rec.T_max,
+            tol = 1000.0,
+            comment = "K over every accepted step (observed 693)",
+        ),
+    ]
+end
+
 function _verification_case_vbo05()
     id = "V-BO-05"
     function qois(sol)
         rec = VBO_STEP_STATS[id]
+        VERIFICATION_CORE == "new" && return _vbo05_core_qois(sol, rec)
         t_stop = rec.t_last
         n_void = get(VBO_VOID_WARNINGS, id, -1)
         n_park = length(sol.extras.park_times)

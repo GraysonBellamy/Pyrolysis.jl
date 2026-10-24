@@ -33,6 +33,20 @@ function _md_table(io, header::Vector{String}, rows)
 end
 
 """
+The index's section comparing the finite-volume solver with the solver it
+replaced: the stamped measurement `cutover_comparison.md` as written, its
+title replaced by the section's heading and its headings one level down.
+"""
+function _write_comparison!(io, measurement::String)
+    println(io, "\n## The finite-volume solver against the solver it replaced\n")
+    body = [line for line in split(chomp(measurement), '\n') if !startswith(line, "# ")]
+    for line in body[something(findfirst(!isempty, body), 1):end]
+        println(io, startswith(line, "#") ? "#" * line : line)
+    end
+    println(io)
+end
+
+"""
 Leading comment banner of a case file, comment markers stripped, horizontal
 rules and the redundant `V-XX-NN — title` line removed (the chapter supplies
 its own heading).
@@ -304,6 +318,9 @@ function write_chapters(
             ".",
         )
     end
+    comparison =
+        joinpath(ROOT, "test", "newcore", "gates", "measurements", "cutover_comparison.md")
+    isfile(comparison) && _write_comparison!(io, read(comparison, String))
     text = String(take!(io))
     validate_chapter("index.md", text)
     write(joinpath(outdir, "index.md"), text)

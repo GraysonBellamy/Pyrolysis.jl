@@ -18,7 +18,8 @@ using Pyrolysis.Properties:
     solid_volume_fractions,
     mixing_volume_fractions,
     effective_conductivity,
-    effective_emissivity
+    effective_emissivity,
+    mixture_emissivity
 using Pyrolysis.Physics: volume_change_rate
 
 function _gamma_material(; γ_liq = 0.0, ε_liq = nothing)
@@ -86,6 +87,7 @@ end
     ξ_ok = (500.0, 0.0, 1.0)
     @test effective_conductivity(ξ_ok, T, mat) > 0.1
     @test effective_emissivity(ξ_ok, T, mat) ≈ 0.90
+    @test mixture_emissivity(ξ_ok, T, mat) ≈ 0.90
 
     # Fully converted cell (only pore gas left): k_eff degrades to the gas
     # conductivity. A zero k_eff would make the cell a perfect insulator and
@@ -96,6 +98,7 @@ end
     # ε of a pure default-gas cell is genuinely 0 (transparent gas) — the
     # depletion callback owns this case; documented, not floored.
     @test effective_emissivity(ξ_void, T, mat) == 0.0
+    @test mixture_emissivity(ξ_void, T, mat) == 0.0
 
     # Liquid emissivity defaults realistically (water ≈ 0.96): a γ = 1
     # surface liquid must RAISE ε_eff toward water, not drag it to 0.
@@ -112,4 +115,6 @@ end
     )
     ε_wet = effective_emissivity((900.0, 100.0, 0.0), 300.0, mat_wet)
     @test ε_wet > 0.90   # a liquid ε = 0 would give 0.9·0.9 + 0.1·0 = 0.81
+    @test mixture_emissivity((900.0, 100.0, 0.0), 300.0, mat_wet) ≈ 0.9 * 0.9 + 0.1 * 0.95 rtol =
+        1e-12
 end

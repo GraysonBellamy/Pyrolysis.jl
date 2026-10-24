@@ -27,10 +27,13 @@
 # the advection kernel); T and the gas field carry the full space–time
 # structure.
 #
-# Expected order: the limiter's slope reconstruction is formally 2nd order on
-# smooth data but clips at extrema (the sin peak crosses the domain), so the
-# observed order sits between 1.5 and 2 — recorded at pin time; a drop below
-# min_order flags a moving-mesh transport regression.
+# Expected order: second. On the finite-volume core the gas converges at
+# second order and the temperature below it on coarse meshes (L2 rates 3.27,
+# 1.70 on the CI ladder; 1.63, 1.83, 1.92 from 64 to 512 cells): the
+# upwind-biased face temperature of the relative energy flux carries a
+# pre-asymptotic third-order error term of the opposite sign to the
+# second-order one. A drop below min_order flags a moving-mesh transport
+# regression.
 #
 # Jacobian: dense FD (`jacobian = :fd`) — the structured geometry Jacobian
 # assumes reaction-driven mesh velocity (see `Workspace.w_override` note).
@@ -66,7 +69,8 @@ function _verification_case_vmms03()
 
     function build(n_cells)
         mat = make_material()
-        mesh = create_uniform_mesh(
+        mesh = core_mesh(
+            create_uniform_mesh,
             L,
             n_cells,
             Val(2);
@@ -108,6 +112,8 @@ function _verification_case_vmms03()
         # proving the pattern covers the override's ∂(dz/dt)/∂z coupling —
         # silent-drop hazard.
         jacobian = :fd,
+        core = Symbol(VERIFICATION_CORE),
+        energy_state = VERIFICATION_ENERGY_STATE,
         kwargs...,
     )
 
@@ -172,9 +178,8 @@ function _verification_case_vmms03()
             n_cells = 32,
             budget_s = 60.0,
             convergence = ConvergenceSpec(
-                # observed rates 2.24, 2.18 — the anticipated
-                # limiter clipping at the sin extremum did not depress the
-                # global L2 order
+                # observed rates: 2.24, 2.18 on the old core, 3.27, 1.70 on
+                # the finite-volume core (see the header)
                 n_cells = [16, 32, 64],
                 error_fn = l2_T_final,
                 expected_order = 2.0,

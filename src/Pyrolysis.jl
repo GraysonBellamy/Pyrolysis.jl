@@ -65,21 +65,36 @@ using OrdinaryDiffEq
 include("Materials/Materials.jl")
 using .Materials
 
-# Boundary-condition types (depends only on Materials)
+# Material property evaluation (depends only on Materials)
+include("Properties/Properties.jl")
+using .Properties
+
+# Boundary-condition types and their face-local evaluation (Materials, Properties)
 include("BoundaryConditions/BoundaryConditions.jl")
 using .BoundaryConditions
+
+# The finite-volume mesh, which owns the mesh constructors
+include("Meshes/Meshes.jl")
+using .Meshes: Planar, Cylindrical, Spherical
 
 # Geometry and mesh infrastructure
 include("Geometry/Geometry.jl")
 using .Geometry
 
-# Material property evaluation
-include("Properties/Properties.jl")
-using .Properties
-
 # Physical models
 include("Physics/Physics.jl")
 using .Physics
+
+# Finite-volume core: face-based meshes, the state and its mapping, the
+# physics kernels, the mesh closure, the residual, cell deactivation and the
+# colored Jacobian.
+# Reached by module path (`Pyrolysis.Meshes`, …); none of them is re-exported.
+include("States/States.jl")
+include("Kernels/Kernels.jl")
+include("Closures/Closures.jl")
+include("Assembly/Assembly.jl")
+include("Deactivation/Deactivation.jl")
+include("ColoredJacobian/ColoredJacobian.jl")
 
 # Mesh adaptation (depleted-cell parking; refinement building blocks)
 include("Adaptivity/Adaptivity.jl")
@@ -92,6 +107,12 @@ using .Discretization
 # Problem definition and setup (ProblemDef + Workspace + traits).
 include("Problem/Problem.jl")
 using .Problem
+
+# Finite-volume core: its solution type and its time integration of a
+# `PyrolysisProblem`.
+include("Outputs/Outputs.jl")
+using .Outputs: completed, ConservationRecorder, conservation_audit
+include("Integration/Integration.jl")
 
 # Unified pure residual! (loaded after Problem; traits stay in Problem to avoid
 # an upstream/downstream cycle).
@@ -160,11 +181,18 @@ export RadiationModel, NO_RADIATION, SURFACE_ABSORPTION, BEER_LAMBERT
 
 # Geometry
 export create_uniform_mesh, create_stretched_mesh, create_mesh_from_nodes
+export Planar, Cylindrical, Spherical
 
 # Problem & solve
 export PyrolysisProblem, PyrolysisSolution
 export solve
 export parameter_sweep
+
+# The solutions' accessors and the conservation audit
+export get_times, get_temperatures, get_concentrations, get_gas_generation_rate
+export n_timesteps, succeeded, completed
+export get_profile, get_cell_positions, interpolate_solution
+export ConservationRecorder, conservation_audit
 
 # Pure residual + Workspace surface.
 export SimulationMode

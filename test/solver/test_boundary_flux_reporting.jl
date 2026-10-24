@@ -13,8 +13,8 @@ regime.
 using Test
 using Pyrolysis
 using Pyrolysis.Materials: NO_RADIATION, SURFACE_ABSORPTION, BEER_LAMBERT
-using Pyrolysis.Discretization: compute_boundary_heat_fluxes
-import Pyrolysis.Discretization: evaluate_bc_flux_and_derivative
+using Pyrolysis.BoundaryConditions: compute_boundary_heat_fluxes
+import Pyrolysis.BoundaryConditions: evaluate_bc_flux_and_derivative
 
 @testset "surface gas reporting includes absent-species ambient inflow" begin
     mat = Material(

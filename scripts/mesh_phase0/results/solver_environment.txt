@@ -1,0 +1,14 @@
+Julia=1.13.0
+OrdinaryDiffEq=7.8.1
+OrdinaryDiffEqSDIRK=2.9.6
+LinearSolve=5.18.1
+CPU=meteorlake
+Julia_threads=1
+BLAS_threads=1
+physical_error_budget=1e-5
+scaled_constraint_budget=1e-7
+normal_rows=72; masked_negative_controls=3
+time_statistic=median_of_three_warmed_runs; compilation_excluded
+lifted=UMFPACK; bordered=augmented_UMFPACK; dense=LHL
+KenCarp4_raw=smooth_est_false
+Jacobians=analytic_checked_against_dense_AD; production_coloring_not_measured

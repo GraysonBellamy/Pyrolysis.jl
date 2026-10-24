@@ -66,6 +66,13 @@
 # without reactions). Sources are evaluated at the LIVE cell centers read
 # from the z-block.
 #
+# On the finite-volume core (`core = :new`) masses are the states and the
+# mesh carries no dilation term. Under induced motion the mesh is the solid
+# and every inventory rides it, so the sources are the material-frame ones
+# above. Under prescribed motion the mesh moves over a solid at rest and every
+# inventory, T's energy with it, crosses the faces at the mesh-relative
+# velocity, so every source is the Eulerian one.
+#
 # Sign conventions (verified against finite_volume.jl):
 #   q_z = −k∂zT, J positive in +z; "into domain" flux at top = −(flux at L),
 #   at bottom = +(flux at 0). Mass BCs: J[j,f] += σ·flux_into_domain with
@@ -337,7 +344,8 @@ plus state trajectories; `PyrolysisSolution`'s extras don't apply to the
 wrapped-RHS path).
 
 Fields: `t` (n_times), `T` (n_cells × n_times), `ξ` (NC × n_cells × n_times),
-`z` (n_cells × n_times cell centers — constant columns for Eulerian).
+`z` (n_cells × n_times cell centers — constant columns for Eulerian), and
+`statistics`, the new core's `SolverStatistics` (`nothing` on the old core).
 """
 struct MMSSolution
     retcode::Symbol
@@ -345,6 +353,7 @@ struct MMSSolution
     T::Matrix{Float64}
     ξ::Array{Float64,3}
     z::Matrix{Float64}
+    statistics::Any
 end
 
 """
@@ -394,6 +403,16 @@ Keywords:
 - `dt=nothing`: fixed step (sets `adaptive=false`) for temporal-order sweeps.
 - `saveat=nothing`: defaults to `problem.output_times` if non-empty, else the
   final time.
+- `core=:old`: `:new` solves on the finite-volume core
+  (`Pyrolysis.Integration.solve`) in the energy state `energy_state`, the
+  sources entering through its `VolumetricSources` hook: the species sources
+  on the mass rows as `S_ξ V`, the temperature-rate source on the energy row
+  (multiplied by the cell's heat capacity in the inventory form). Both are
+  functions of `(z, t)` at the cell centers, which the colored Jacobian
+  differentiates with the rest of the residual; `jacobian` and `integrator`
+  apply to the old core only. A prescribed `w_override` moves that core's
+  mesh over a solid at rest, every source in the Eulerian form; `motion`
+  takes every source to the material frame.
 """
 function solve_mms(
     problem,
@@ -408,8 +427,39 @@ function solve_mms(
     dt::Union{Nothing,Real} = nothing,
     saveat = nothing,
     maxiters::Int = 10^6,
+    core::Symbol = :old,
+    energy_state::Symbol = :temperature,
 )
     material = problem.material
+    save_times = if saveat !== nothing
+        saveat
+    elseif !isempty(problem.output_times)
+        problem.output_times
+    else
+        [problem.tspan[2]]
+    end
+    if core === :new
+        (w_override !== nothing || motion !== nothing) &&
+            !use_ale &&
+            error("w_override and motion require use_ale = true")
+        w_override !== nothing &&
+            motion !== nothing &&
+            error("w_override (prescribed motion) and motion (induced) are exclusive")
+        return _solve_mms_new(
+            problem,
+            fields;
+            use_ale,
+            w_override,
+            motion,
+            energy_state,
+            abstol,
+            reltol,
+            dt,
+            saveat = save_times,
+            maxiters,
+        )
+    end
+    core === :old || throw(ArgumentError("core must be :old or :new, got :$core"))
     # The problem's callable ICs live on the PyrolysisProblem, not the mesh;
     # initialize_state applies them before packing u0 (same path as solve()).
     def, ws, u0 = initialize_state(problem; use_ale = use_ale)
@@ -477,14 +527,6 @@ function solve_mms(
         error("jacobian must be :analytic, :approx, or :fd, got $(repr(jacobian))")
     end
 
-    save_times = if saveat !== nothing
-        saveat
-    elseif !isempty(problem.output_times)
-        problem.output_times
-    else
-        [tspan[2]]
-    end
-
     step_kwargs = dt === nothing ? (;) : (dt = dt, adaptive = false)
     ode_sol = OrdinaryDiffEq.solve(
         ode_problem,
@@ -513,7 +555,44 @@ function solve_mms(
     retcode =
         OrdinaryDiffEq.SciMLBase.successful_retcode(ode_sol) ? :Success :
         Symbol(ode_sol.retcode)
-    return MMSSolution(retcode, collect(ode_sol.t), T, ξ, z)
+    return MMSSolution(retcode, collect(ode_sol.t), T, ξ, z, nothing)
+end
+
+# The finite-volume core's MMS solve: the manufactured sources through the
+# core's `VolumetricSources` hook, evaluated at the cell centers, in the
+# material frame under induced motion and the Eulerian form otherwise.
+function _solve_mms_new(
+    problem,
+    fields::MMSFields;
+    use_ale,
+    w_override,
+    motion,
+    energy_state,
+    abstol,
+    reltol,
+    dt,
+    saveat,
+    maxiters,
+)
+    material = problem.material
+    NC = n_components(material)
+    w = motion === nothing ? nothing : motion.w
+    mass = (z, t) -> ntuple(j -> mms_species_source(material, fields, j, z, t; w), Val(NC))
+    energy = (z, t) -> mms_energy_source(material, fields, z, t; w)
+    step_kwargs = dt === nothing ? (;) : (dt = dt, adaptive = false)
+    sol = Pyrolysis.Integration.solve(
+        problem;
+        energy_state,
+        use_ale,
+        w_override,
+        abstol,
+        reltol,
+        saveat,
+        maxiters,
+        sources = Pyrolysis.Assembly.VolumetricSources(mass, energy),
+        step_kwargs...,
+    )
+    return MMSSolution(sol.retcode, sol.t, sol.T, sol.ξ, sol.cell_centers, sol.statistics)
 end
 
 # ----------------------------------------------------------------------------

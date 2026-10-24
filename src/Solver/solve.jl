@@ -19,8 +19,8 @@ using ..Properties:
     effective_absorptivity,
     effective_absorption,
     effective_conductivity
-using ..Discretization:
-    compute_boundary_heat_fluxes, solve_boundary_temperature, _bc_boundary_face_fluxes
+using ..Discretization: _bc_boundary_face_fluxes
+using ..BoundaryConditions: compute_boundary_heat_fluxes, solve_boundary_temperature
 using ..Materials: has_darcy_flow
 using ..BoundaryConditions:
     get_radiative_flux_bc,
@@ -1243,7 +1243,14 @@ function extract_solution!(
             cell_vol = mesh.cell_volumes[j]
 
             # Evaluate reaction rates at this cell
-            Physics.evaluate_reactions!(rates, heats, ξ, T, material)
+            Physics.evaluate_reactions!(
+                rates,
+                heats,
+                ξ,
+                T,
+                material,
+                TanhLimiter(material.depletion_limiter),
+            )
 
             # Sum gas production from each reaction
             for r_idx = 1:NR
@@ -1562,7 +1569,14 @@ function extract_solution_ale!(
             cell_vol = volumes[j]
 
             # Evaluate reaction rates at this cell
-            Physics.evaluate_reactions!(rates, heats, ξ, T, material)
+            Physics.evaluate_reactions!(
+                rates,
+                heats,
+                ξ,
+                T,
+                material,
+                TanhLimiter(material.depletion_limiter),
+            )
 
             # Sum gas production from each reaction
             for r_idx = 1:NR

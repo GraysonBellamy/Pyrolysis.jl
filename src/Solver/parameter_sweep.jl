@@ -81,7 +81,7 @@ results = parameter_sweep(problem, grid; modify, extract)
 ```
 """
 function parameter_sweep(
-    problem,
+    problem::PyrolysisProblem{<:Mesh1D},
     grid;
     modify::Function = _default_sweep_modify,
     extract::Function = identity,

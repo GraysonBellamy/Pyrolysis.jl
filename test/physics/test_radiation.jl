@@ -5,26 +5,24 @@ BEER_LAMBERT does not change the absorbed power by 1/ε_eff (≈ 11 % at
 ε = 0.9).
 
 Convention:
-- Kirchhoff path (`apply_kirchhoff_absorptivity = true`, no explicit BC
-  absorptivity): the flux entering the medium is ε_eff·I, with ε_eff the
-  *live* surface cell's effective emissivity — absorption and emission use
-  the same coefficient (detailed balance).
-- Explicit-absorptivity path (`false`): α(t)·I is folded into the intensity
-  upstream (`extract_radiative_flux_from_bcs`) and the kernel does not
-  rescale.
+- Kirchhoff path (no explicit BC absorptivity, no component absorptivity):
+  the flux entering the medium is ε_eff·I, with ε_eff the exposed cell's
+  effective emissivity — absorption and emission use the same coefficient
+  (detailed balance).
+- Explicit-absorptivity path: the condition's α(t) replaces it.
+- The cells attenuate the beam with the volumetric absorption coefficient
+  α_eff = Σ_k ξ_k α_k of their own composition.
 """
 
 using Test
 using Pyrolysis
-using Pyrolysis.Materials: NO_RADIATION, SURFACE_ABSORPTION, BEER_LAMBERT, P1_QUASI_STEADY
-using Pyrolysis.Physics: compute_beer_lambert_source!, compute_radiation_source!
-using Pyrolysis.Properties: effective_emissivity
-using Pyrolysis.BoundaryConditions: extract_radiative_flux_from_bcs
-using Pyrolysis.Problem: populate!
+using Pyrolysis.Materials: BEER_LAMBERT
+using Pyrolysis.Properties: mixture_emissivity, effective_absorption
 
 # Two solids with different ε so ε_eff is composition-dependent; non-zero
-# absorption coefficients so Beer-Lambert is non-trivial.
-function _radiation_fixture()
+# absorption coefficients so Beer–Lambert is non-trivial. No component sets
+# an absorptivity: the surface absorbs at its emissivity.
+function _radiation_material()
     virgin = SolidComponent(
         :virgin,
         ρ = 600.0,
@@ -38,33 +36,115 @@ function _radiation_fixture()
         SolidComponent(:char, ρ = 150.0, c = 1700.0, k = 0.08, ε = 0.85, α = 50.0, λ = 2e-5)
     gas = GaseousComponent(:pyrgas, M = 0.06, c = 1800.0, k = 0.03, λ = 5e-5)
     rxn = Reaction(:pyro, 1 => (2, 3), yields = (0.3, 0.7), A = 1e10, E = 150e3, h = -300e3)
-    mat = Material(name = :wood, components = (virgin, char, gas), reactions = (rxn,))
-    mesh = create_uniform_mesh(0.01, 8, Val(3))
-    bc = BoundaryConditionSet(
-        thermal = (
-            top = RadiativeFluxBC(flux = 50e3) + RadiativeBC(T_inf = 300.0),
-            bottom = AdiabaticBC(),
-        ),
-    )
-    problem =
-        PyrolysisProblem(mesh = mesh, material = mat, bc_set = bc, tspan = (0.0, 100.0))
-    def, ws, u = initialize_state(problem; radiation_model = BEER_LAMBERT)
-    n = ws.layout.n_cells
-    # Graded hot state with mixed composition (ε_eff strictly between the
-    # component values, away from the clamp).
-    for i = 1:n
-        u[i] = 600.0 + 300.0 * (i - 1) / (n - 1)
-        u[n+i] = 350.0
-        u[2n+i] = 120.0
-        u[3n+i] = 4.0
-    end
-    populate!(ws.state_cache, u, ws.layout)
-    Pyrolysis.Properties.update_properties!(ws.prop_cache, ws.state_cache, ws.mesh, mat)
-    return problem, mat, ws
+    return Material(name = :wood, components = (virgin, char, gas), reactions = (rxn,))
 end
 
-@testset "Beer-Lambert surface absorptivity" begin
-    problem, mat, ws = _radiation_fixture()
+# Graded hot state with a graded mixed composition (ε_eff strictly between
+# the component values in every cell), with consistent intensities.
+_radiation_composition(i) = (400.0 - 10.0 * i, 80.0 + 5.0 * i, 4.0)
+
+function _radiation_state(; n = 8)
+    mat = _radiation_material()
+    problem = PyrolysisProblem(
+        mesh = create_uniform_mesh(0.01, n),
+        material = mat,
+        bc_set = BoundaryConditionSet(
+            thermal = (
+                top = RadiativeFluxBC(flux = 50e3) + RadiativeBC(T_inf = 300.0),
+                bottom = AdiabaticBC(),
+            ),
+        ),
+        tspan = (0.0, 100.0),
+    )
+    cp = Pyrolysis.Integration.setup(problem; radiation_model = BEER_LAMBERT)
+    def, ws = cp.def, cp.ws
+    layout = def.layout
+    V = Pyrolysis.Problem.cell_volumes(problem.mesh)
+    u = copy(cp.u0)
+    T = [600.0 + 300.0 * (i - 1) / (n - 1) for i = 1:n]
+    for i = 1:n
+        u[Pyrolysis.States.energy_index(layout, i)] = T[i]
+        for (j, ξ) in enumerate(_radiation_composition(i))
+            u[Pyrolysis.States.mass_index(layout, i, j)] = ξ * V[i]
+        end
+    end
+    Pyrolysis.Integration._consistent_intensities!(u, def, ws, 0.0)
+    du = zeros(length(u))
+    Pyrolysis.Assembly.residual!(du, u, def, 0.0, ws)
+    ds, _ = Pyrolysis.Assembly.buffers(ws, def, Float64)
+    kernel = Pyrolysis.Kernels.find_kernel(Pyrolysis.Kernels.BeerLambertKernel, def.kernels)
+    return (; mat, def, ds, kernel, T, n)
+end
+
+@testset "Beer–Lambert surface absorptivity" begin
+    s = _radiation_state()
+    ds, kernel, mat, n = s.ds, s.kernel, s.mat, s.n
+    i_top = kernel.order[1]
+    @test i_top == n
+
+    @testset "Kirchhoff path: the exposed cell absorbs at the emissivity it emits with" begin
+        # No component absorptivity: the surface absorptivity is the
+        # emissivity itself, between the components' (mixed composition).
+        @test ds.a[i_top] === ds.ε[i_top]
+        @test 0.85 < ds.ε[i_top] < 0.95
+        @test ds.ε[i_top] ≈ mixture_emissivity(_radiation_composition(n), s.T[n], mat) rtol =
+            1e-13
+        # The beam entering the medium carries that absorptivity.
+        @test Pyrolysis.Kernels.incident_intensity(kernel, ds, 0.0) ≈ ds.ε[i_top] * 50e3 rtol =
+            1e-13
+        @test ds.I[kernel.exposed] ≈ ds.ε[i_top] * 50e3 rtol = 1e-13
+    end
+
+    @testset "the absorption coefficient is Σ ξ_k α_k of each cell's composition" begin
+        one_component = Material(
+            name = :one,
+            components = (SolidComponent(:s, ρ = 1000.0, c = 1000.0, k = 0.2, α = 5.0),),
+            reactions = (),
+        )
+        @test effective_absorption((1000.0,), one_component) ≈ 1000.0 * 5.0 rtol = 1e-14
+        # Two solids and a gas without an absorption coefficient.
+        @test effective_absorption((350.0, 120.0, 4.0), mat) ≈ 350.0 * 2.0 + 120.0 * 50.0 rtol =
+            1e-14
+        # The cells' coefficients are those sums at their own concentrations.
+        for i = 1:n
+            ξ = _radiation_composition(i)
+            @test ds.α[i] ≈ ξ[1] * 2.0 + ξ[2] * 50.0 rtol = 1e-13
+        end
+        @test allunique(ds.α)
+    end
+end
+
+# The suffix-sweep source on the Mesh1D fixture, its dispatcher and the
+# radiative-flux extraction.
+@testset "compute_beer_lambert_source!, compute_radiation_source!, extract_radiative_flux_from_bcs" begin
+    function _old_radiation_fixture()
+        mat = _radiation_material()
+        mesh = create_uniform_mesh(0.01, 8, Val(3))
+        bc = BoundaryConditionSet(
+            thermal = (
+                top = RadiativeFluxBC(flux = 50e3) + RadiativeBC(T_inf = 300.0),
+                bottom = AdiabaticBC(),
+            ),
+        )
+        problem =
+            PyrolysisProblem(mesh = mesh, material = mat, bc_set = bc, tspan = (0.0, 100.0))
+        def, ws, u = initialize_state(problem; radiation_model = BEER_LAMBERT)
+        n = ws.layout.n_cells
+        for i = 1:n
+            u[i] = 600.0 + 300.0 * (i - 1) / (n - 1)
+            u[n+i] = 350.0
+            u[2n+i] = 120.0
+            u[3n+i] = 4.0
+        end
+        Pyrolysis.Problem.populate!(ws.state_cache, u, ws.layout)
+        Pyrolysis.Properties.update_properties!(ws.prop_cache, ws.state_cache, ws.mesh, mat)
+        return problem, mat, ws
+    end
+    source! = Pyrolysis.Physics.compute_beer_lambert_source!
+    dispatch! = Pyrolysis.Physics.compute_radiation_source!
+    extract = Pyrolysis.BoundaryConditions.extract_radiative_flux_from_bcs
+
+    problem, mat, ws = _old_radiation_fixture()
     n = ws.layout.n_cells
     A = ws.state_cache.A_section[]
     I0 = 50e3
@@ -75,22 +155,17 @@ end
     @test 0.85 < ε_surf < 0.95   # mixed composition: strictly between components
 
     q_bare = zeros(n)
-    compute_beer_lambert_source!(q_bare, ws.state_cache, ws.mesh, ws.prop_cache, I0, false)
+    source!(q_bare, ws.state_cache, ws.mesh, ws.prop_cache, I0, false)
     q_kirchhoff = zeros(n)
-    compute_beer_lambert_source!(
-        q_kirchhoff,
-        ws.state_cache,
-        ws.mesh,
-        ws.prop_cache,
-        I0,
-        true,
-    )
+    source!(q_kirchhoff, ws.state_cache, ws.mesh, ws.prop_cache, I0, true)
 
     @testset "Kirchhoff path scales by the live surface ε_eff" begin
         @test q_kirchhoff ≈ ε_surf .* q_bare rtol = 1e-13
         # ε_eff matches the property used for surface *emission* (Kirchhoff).
         ξ_surf = ntuple(k -> ws.state_cache.ξ[k, n], 3)
-        @test ε_surf ≈ effective_emissivity(ξ_surf, ws.state_cache.T[n], mat) rtol = 1e-13
+        @test ε_surf ≈
+              Pyrolysis.Properties.effective_emissivity(ξ_surf, ws.state_cache.T[n], mat) rtol =
+            1e-13
     end
 
     @testset "absorbed power: ε_eff·I·(1 − e^{−τ_tot}), conservation exact" begin
@@ -118,33 +193,29 @@ end
                 bottom = AdiabaticBC(),
             ),
         )
-        I, has_α = extract_radiative_flux_from_bcs(bc_explicit, Val(:top), 0.0)
+        I, has_α = extract(bc_explicit, Val(:top), 0.0)
         @test has_α
         @test I ≈ 0.8 * 50e3
         # Kernel with the flag off leaves the (already-scaled) intensity alone.
         q = zeros(n)
-        compute_beer_lambert_source!(q, ws.state_cache, ws.mesh, ws.prop_cache, I, false)
+        source!(q, ws.state_cache, ws.mesh, ws.prop_cache, I, false)
         @test q ≈ (0.8 * 50e3 / I0) .* q_bare rtol = 1e-13
 
         # Kirchhoff default reports no explicit α and returns the bare flux.
-        I_k, has_α_k = extract_radiative_flux_from_bcs(problem.bc_set, Val(:top), 0.0)
+        I_k, has_α_k = extract(problem.bc_set, Val(:top), 0.0)
         @test !has_α_k
         @test I_k ≈ I0
     end
 
     @testset "dispatcher zeroes non-Beer-Lambert models" begin
         q = fill(1.0, n)
-        for model in (NO_RADIATION, SURFACE_ABSORPTION, P1_QUASI_STEADY)
+        for model in (
+            Pyrolysis.Materials.NO_RADIATION,
+            Pyrolysis.Materials.SURFACE_ABSORPTION,
+            Pyrolysis.Materials.P1_QUASI_STEADY,
+        )
             fill!(q, 1.0)
-            compute_radiation_source!(
-                q,
-                ws.state_cache,
-                ws.mesh,
-                ws.prop_cache,
-                I0,
-                model,
-                true,
-            )
+            dispatch!(q, ws.state_cache, ws.mesh, ws.prop_cache, I0, model, true)
             @test all(iszero, q)
         end
     end

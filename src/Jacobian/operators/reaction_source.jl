@@ -23,7 +23,7 @@ the Jacobian assembly only; the residual keeps its own loop over
 """
 
 using ForwardDiff
-using ..Materials: Material, n_components, n_reactions
+using ..Materials: Material, n_components, n_reactions, TanhLimiter
 using ..Properties: effective_heat_capacity
 using ..Physics: evaluate_reactions!, reaction_heat_source, species_source_terms!
 
@@ -132,7 +132,14 @@ function apply_cell!(
 
     fill!(rates, zero(eltype(rates)))
     fill!(heats, zero(eltype(heats)))
-    evaluate_reactions!(rates, heats, ξ, T, material)
+    evaluate_reactions!(
+        rates,
+        heats,
+        ξ,
+        T,
+        material,
+        TanhLimiter(material.depletion_limiter),
+    )
     Q_rxn = reaction_heat_source(rates, heats)
     ρcp = effective_heat_capacity(ξ, T, material)
 

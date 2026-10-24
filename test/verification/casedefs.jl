@@ -11,9 +11,9 @@ z = L top/exposed surface; exact solutions use depth x = L − z.
 """
 
 using Pyrolysis
-using Pyrolysis.Solver: get_cell_positions
+using Pyrolysis.Outputs: get_cell_positions
 using Pyrolysis.Materials: DepletionLimiter, STEFAN_BOLTZMANN
-using Pyrolysis.Discretization: BEER_LAMBERT
+using Pyrolysis.Materials: BEER_LAMBERT
 using Pyrolysis.Problem: step_profile
 using Pyrolysis.Physics: ideal_gas_pressure, background_gas_concentration
 using Pyrolysis.Properties: porosity, effective_gas_viscosity
@@ -148,9 +148,126 @@ if !isdefined(@__MODULE__, :VerificationCase)
         report::NamedTuple = (;)
     end
 
+    """
+    The core the suite solves on: `PYROLYSIS_CORE=new` routes the cases of
+    `NEW_CORE_CASES` (by id prefix) through the finite-volume core
+    (`Pyrolysis.Integration.solve`), in the energy state named by
+    `PYROLYSIS_ENERGY_STATE` (`temperature`, the default, or `enthalpy`);
+    every other case is skipped there.
+    """
+    const VERIFICATION_CORE = get(ENV, "PYROLYSIS_CORE", "old")
+    const VERIFICATION_ENERGY_STATE =
+        Symbol(get(ENV, "PYROLYSIS_ENERGY_STATE", "temperature"))
+    const NEW_CORE_CASES = (
+        "V-RX-01",
+        "V-RX-02",
+        "V-RX-03",
+        "V-RX-04",
+        "V-BO-01",
+        "V-BO-02",
+        "V-BO-03",
+        "V-BO-04",
+        "V-BO-05",
+        "V-BO-06",
+        "V-BO-07",
+        "V-BO-08",
+        "V-CPL-01",
+        "V-CPL-02",
+        "V-CPL-03",
+        "V-CPL-04",
+        "V-CPL-05",
+        "V-GT-01",
+        "V-GT-02",
+        "V-MMS-01",
+        "V-MMS-02",
+        "V-MMS-03",
+        "V-MMS-04",
+        "V-RAD-01",
+        "V-HC-01",
+        "V-HC-02",
+        "V-HC-03",
+        "V-HC-04",
+        "V-HC-05",
+    )
+
+    runs_on_core(case::VerificationCase) =
+        VERIFICATION_CORE != "new" || any(p -> startswith(case.id, p), NEW_CORE_CASES)
+
+    """
+    Solve `problem` on the core the suite runs on: `solve(problem; progress =
+    false, kwargs...)` on the old core, `Pyrolysis.Integration.solve` in the
+    energy state of `PYROLYSIS_ENERGY_STATE` on the new one. Every solve a case
+    makes, its sub-solves inside `qois` and report `curves` included, goes
+    through this, so all of a case's quantities come from one core.
+
+    `handle_depletion` is the new core's `deactivation`. The old core's
+    `depletion_threshold`, a fraction of a cell's thickness, has no exact
+    counterpart on the new core, whose threshold is the mass fraction
+    `threshold`, and is passed to the old core only, as is its
+    `min_cells` (the new core deactivates down to the last cell).
+    """
+    core_solve(
+        problem;
+        handle_depletion::Bool = false,
+        depletion_threshold = 0.05,
+        min_cells::Int = 2,
+        kwargs...,
+    ) =
+        VERIFICATION_CORE == "new" ?
+        Pyrolysis.Integration.solve(
+            problem;
+            energy_state = VERIFICATION_ENERGY_STATE,
+            deactivation = handle_depletion,
+            kwargs...,
+        ) :
+        solve(
+            problem;
+            progress = false,
+            handle_depletion,
+            depletion_threshold,
+            min_cells,
+            kwargs...,
+        )
+
+    """
+    Build a case's mesh for the core the suite runs on: `f(args...; kwargs...)`
+    with `f` one of the mesh constructors and `args` holding the old core's
+    component count `Val(NC)`. On the new core the count is dropped,
+    `cross_section_area` is the mesh's `cross_section`, and the old mesh's
+    initial states (`T_initial`, `ξ_initial`, which the old solve overwrites
+    from the problem) are not given.
+    """
+    function core_mesh(
+        f,
+        args...;
+        cross_section_area = nothing,
+        T_initial = nothing,
+        ξ_initial = nothing,
+        kwargs...,
+    )
+        if VERIFICATION_CORE == "new"
+            area =
+                cross_section_area === nothing ? (;) :
+                (; cross_section = cross_section_area)
+            return f(filter(a -> !(a isa Val), args)...; area..., kwargs...)
+        end
+        given = (; cross_section_area, T_initial, ξ_initial)
+        return f(
+            args...;
+            (k => v for (k, v) in pairs(given) if v !== nothing)...,
+            kwargs...,
+        )
+    end
+
     @inline _case_solve(case::VerificationCase, problem; kwargs...) =
-        case.solve_fn === nothing ? solve(problem; progress = false, kwargs...) :
-        case.solve_fn(problem; kwargs...)
+        case.solve_fn !== nothing ? case.solve_fn(problem; kwargs...) :
+        core_solve(problem; kwargs...)
+
+    """
+    Cell-center positions of a solved case [m], on either core: the old
+    solution's initial ones, the new solution's at its last saved time.
+    """
+    cell_positions(sol) = get_cell_positions(sol)
 
     observed_orders(errors, hs) =
         [log(errors[i-1] / errors[i]) / log(hs[i-1] / hs[i]) for i = 2:length(errors)]

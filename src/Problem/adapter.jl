@@ -93,7 +93,7 @@ The effect of outgassing on convective exchange is a property of each
 feeds every convective member the outward gas mass flux at its face and the
 model returns the coefficient ratio. This modifies the convective
 *coefficient*, not the gas enthalpy accounting, which stays with the
-volumetric source `S_conv`. See `Discretization.blowing_state`.
+volumetric source `S_conv`. See `BoundaryConditions.blowing_state`.
 
 !!! warning "Calibrated examples"
     Enabling blowing alone on a case calibrated *without* it (and without

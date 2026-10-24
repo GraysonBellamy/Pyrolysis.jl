@@ -303,7 +303,7 @@ using Pyrolysis.Geometry: CellState
         expected_internal = lam * xi / d
 
         for rho in (1.0, 1e-20, 1e-30)
-            @test Pyrolysis.Discretization.mass_bc_flux(
+            @test Pyrolysis.BoundaryConditions.mass_bc_flux(
                 DiffusiveMassBC(),
                 xi,
                 lam * rho,
@@ -316,7 +316,7 @@ using Pyrolysis.Geometry: CellState
 
         h_m = 0.01
         expected_resistance = lam * h_m * xi / (lam + h_m * d)
-        @test Pyrolysis.Discretization.mass_bc_flux(
+        @test Pyrolysis.BoundaryConditions.mass_bc_flux(
             DiffusiveMassBC(h_m),
             xi,
             lam * 1e-30,
@@ -325,7 +325,7 @@ using Pyrolysis.Geometry: CellState
             0.0,
             1,
         ) ≈ -expected_resistance
-        @test Pyrolysis.Discretization.mass_bc_flux(
+        @test Pyrolysis.BoundaryConditions.mass_bc_flux(
             DiffusiveMassBC(h_m),
             xi,
             lam * 1e-30,

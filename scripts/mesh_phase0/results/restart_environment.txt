@@ -1,0 +1,27 @@
+Julia=1.13.0; CPU=meteorlake
+OrdinaryDiffEq=7.8.1
+OrdinaryDiffEqSDIRK=2.9.6
+LinearSolve=5.18.1
+ForwardDiff=1.4.6
+SciMLBase=3.56.1
+OrdinaryDiffEqCore=4.18.0; source=/home/gbellamy/.julia/packages/OrdinaryDiffEqCore/8VHiN/src/OrdinaryDiffEqCore.jl
+OrdinaryDiffEqBDF=2.4.11; source=/home/gbellamy/.julia/packages/OrdinaryDiffEqBDF/bKPDS/src/OrdinaryDiffEqBDF.jl
+DiffEqBase=7.21.2; source=/home/gbellamy/.julia/packages/DiffEqBase/wJ4a3/src/DiffEqBase.jl
+Julia_threads=1; BLAS_threads=1
+rows=108; time_statistic=median_of_three_warmed_whole_solves
+GC before each timed solve; within-solve GC included; timing range reported
+production_tolerances=V-BO-02 reltol 1e-6 abstol 1e-8; refinement=100x tighter
+qualification=max_error and both one-sided jump errors <1e-5; scaled_constraint<min(reltol,1e-7)
+AD=greedy structural coloring; one single-direction ForwardDiff RHS pass per color; included in jac!
+rhs_calls=solver statistics excluding dual passes; dual_rhs_passes reported separately
+event_map=q*y+alternating_0.05_fast_mode; q^J=0.6; fast_decay=200; nondimensional time interval [0,1]
+uniform_events=k/(J+1); clustered_events=0.45+0.1*k/(J+1)
+reset_dt=true is a toy sensitivity, not a dimensional reproduction of DT_AFTER_PARK
+observer is inert (tested against none); BDF orders read before jump; event initialization is explicit recurrence plus NoInit
+limits=manufactured equations; prescribed events; no root-location cost, topology/pattern changes or production physics
+bordered retains dense J preparation; sparse augmented factorization is exact but not an optimized matrix-free implementation
+colors are this prototype's counts, not production or multi-D counts; no production solver edits
+errors sampled at all accepted states and both sides of every jump; dense interpolation not gated
+lifted=UMFPACK; bordered=exact augmented UMFPACK with dense J; dense=LHL
+observer comparison removes only exactly identical saved (t,u) pairs; both event limits retained
+callback control independently rerun after correcting duplicate-snapshot assertions; 23 passed; exit 0

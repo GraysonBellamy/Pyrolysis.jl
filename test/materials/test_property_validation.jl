@@ -8,7 +8,8 @@ opt-out; inside the bracket the clamp is the identity with derivative 1.
 using Test
 using ForwardDiff
 using Pyrolysis
-using Pyrolysis.Materials: T_PROPERTY_MIN, T_PROPERTY_MAX, property_temperature
+using Pyrolysis.Materials:
+    T_PROPERTY_MIN, T_PROPERTY_MAX, property_temperature, identically_zero
 
 @testset "property-law bracket" begin
     @testset "argument clamp is the identity inside the bracket" begin
@@ -120,4 +121,49 @@ using Pyrolysis.Materials: T_PROPERTY_MIN, T_PROPERTY_MAX, property_temperature
         h = StateDependentProperty((T, ξ) -> ξ[1] > 0 ? 1.0 : -1.0)
         @test SolidComponent(:s, ρ = 1000.0, c = 1000.0, k = 0.2, ε = h) isa SolidComponent
     end
+end
+
+@testset "a law vanishes by its structure, never by samples" begin
+    @test identically_zero(ConstantProperty(0.0))
+    @test !identically_zero(ConstantProperty(1e-5))
+    @test identically_zero(LinearProperty(0.0, 0.0))
+    @test !identically_zero(LinearProperty(0.0, 1e-8))
+    @test identically_zero(PolynomialProperty((0.0, 0.0, 0.0)))
+    @test !identically_zero(PolynomialProperty((0.0, 0.0, 1e-12)))
+    @test identically_zero(ArrheniusProperty(0.0, 5e4, 300.0))
+    @test identically_zero(TableProperty((300.0, 600.0), (0.0, 0.0)))
+    # Zero at 200, 300, 1000 and 3000 K and positive between them.
+    @test !identically_zero(
+        TableProperty((200.0, 300.0, 600.0, 1000.0, 3000.0), (0.0, 0.0, 1e-5, 0.0, 0.0)),
+    )
+    @test !identically_zero(CallableProperty(T -> 0.0))
+end
+
+# Boundary-condition parameters: a number or a function of time, and of
+# temperature for the emissivity-like ones; a number takes the argument's type.
+@testset "parameter evaluation: numbers, functions and property laws" begin
+    evaluate_param = Pyrolysis.Materials.evaluate_param
+    evaluate_param_T = Pyrolysis.Materials.evaluate_param_T
+    @test evaluate_param(25e3, 0.0) === 25e3
+    @test evaluate_param(300.0, 10.0) == 300.0
+    @test evaluate_param(t -> 100.0 * t, 5.0) == 500.0
+    @test evaluate_param_T(0.9, 500.0) === 0.9
+    @test evaluate_param_T(T -> 0.8 + 1e-4 * T, 500.0) ≈ 0.85
+    @test evaluate_param_T(LinearProperty(0.8, 1e-4), 500.0) ==
+          LinearProperty(0.8, 1e-4)(500.0)
+    @test evaluate_param_T(ConstantProperty(0.7), 500.0) == 0.7
+    # A Dual argument: the number is a constant of it.
+    d = ForwardDiff.Dual(5.0, 1.0)
+    @test evaluate_param(25e3, d) isa ForwardDiff.Dual
+    @test ForwardDiff.partials(evaluate_param(25e3, d))[1] == 0.0
+    @test evaluate_param_T(0.9, d) isa ForwardDiff.Dual
+    @test ForwardDiff.partials(evaluate_param_T(0.9, d))[1] == 0.0
+    @test ForwardDiff.derivative(t -> evaluate_param(t -> 100.0 * t, t), 5.0) == 100.0
+    # Every method infers its result type.
+    @test @inferred(evaluate_param(100.0, 1.0)) isa Float64
+    @test @inferred(evaluate_param(t -> 100.0 * t, 1.0)) isa Float64
+    @test @inferred(evaluate_param_T(0.9, 500.0)) isa Float64
+    @test @inferred(evaluate_param_T(T -> 0.8 + 1e-4 * T, 500.0)) isa Float64
+    @test @inferred(evaluate_param_T(LinearProperty(0.8, 1e-4), 500.0)) isa Float64
+    @test @inferred(evaluate_param_T(ConstantProperty(0.7), 500.0)) isa Float64
 end

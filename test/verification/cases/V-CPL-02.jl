@@ -86,7 +86,14 @@ function _vcpl02_common(; E::Float64, v_target::Float64, n_default::Int)
         gas = GaseousComponent(:gas, M = 0.05, c = c, k = 0.02, λ = 1e-4)
         rxn = Reaction(:ablate, 1 => 2; A = A, E = E, h = ΔH)
         mat = Material(name = :VCPL02, components = (solid, gas), reactions = (rxn,))
-        mesh = create_uniform_mesh(L, n_cells, Val(2); T_initial = T0, ξ_initial = (ρ, 0.0))
+        mesh = core_mesh(
+            create_uniform_mesh,
+            L,
+            n_cells,
+            Val(2);
+            T_initial = T0,
+            ξ_initial = (ρ, 0.0),
+        )
         bc_set = BoundaryConditionSet(
             thermal = (top = HeatFluxBC(q), bottom = AdiabaticBC()),
             mass = (

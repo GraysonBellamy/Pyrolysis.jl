@@ -34,7 +34,8 @@ push!(
         function build(n_cells)
             solid = SolidComponent(:solid, ρ = ρ, c = c, k = k, ε = ε)
             mat = Material(name = :VRX04a, components = (solid,), reactions = ())
-            mesh = create_uniform_mesh(
+            mesh = core_mesh(
+                create_uniform_mesh,
                 L,
                 n_cells,
                 Val(1);
@@ -140,7 +141,8 @@ push!(
         function build(n_cells)
             solid = SolidComponent(:solid, ρ = ρ, c = c, k = k, ε = ε)
             mat = Material(name = :VRX04b, components = (solid,), reactions = ())
-            mesh = create_uniform_mesh(
+            mesh = core_mesh(
+                create_uniform_mesh,
                 L,
                 n_cells,
                 Val(1);

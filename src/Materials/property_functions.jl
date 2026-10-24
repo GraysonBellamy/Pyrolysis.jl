@@ -259,6 +259,22 @@ end
     )
 end
 
+"""
+	identically_zero(p::AbstractPropertyFunction) -> Bool
+
+Whether the law is zero at every temperature, read from its structure rather
+than from samples: a zero constant, zero coefficients, a zero pre-exponential
+factor or reference value, or a table of zeros (linear between its points and
+constant beyond them). A law given by a function is never taken to vanish.
+"""
+identically_zero(p::ConstantProperty) = iszero(p.value)
+identically_zero(p::LinearProperty) = iszero(p.a) && iszero(p.b)
+identically_zero(p::PolynomialProperty) = all(iszero, p.coeffs)
+identically_zero(p::ArrheniusProperty) = iszero(p.A)
+identically_zero(p::TableProperty) = all(iszero, p.values)
+identically_zero(p::SutherlandProperty) = iszero(p.μ_ref)
+identically_zero(::AbstractPropertyFunction) = false
+
 # ============================================================================
 # Helper Functions
 # ============================================================================

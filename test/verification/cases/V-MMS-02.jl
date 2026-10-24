@@ -45,8 +45,14 @@ function _verification_case_vmms02()
 
     function build(n_cells)
         mat = make_material()
-        mesh =
-            create_uniform_mesh(L, n_cells, Val(2); T_initial = T0, ξ_initial = (ξs0, ξg0))
+        mesh = core_mesh(
+            create_uniform_mesh,
+            L,
+            n_cells,
+            Val(2);
+            T_initial = T0,
+            ξ_initial = (ξs0, ξg0),
+        )
         # Uniform fields ⇒ every manufactured flux is identically zero; the
         # BCs still go through the manufactured-flux callables so the whole
         # path is the one V-MMS-03 uses.
@@ -73,6 +79,8 @@ function _verification_case_vmms02()
         use_ale = true,
         w_override = w_star,
         jacobian = :fd,
+        core = Symbol(VERIFICATION_CORE),
+        energy_state = VERIFICATION_ENERGY_STATE,
         kwargs...,
     )
 

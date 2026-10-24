@@ -10,50 +10,90 @@ stoichiometry, Arrhenius parameters, and heat of reaction.
 # ============================================================================
 
 """
-Depletion limiter settings for reaction rate computation.
+	AbstractDepletionLimiter
 
-The depletion limiter removes the numerical stiffness of near-zero reactant
-concentrations by multiplying the reaction rate with a smooth `tanh(ξ/threshold)`
-factor per reactant.
+How a reaction rate vanishes as a reactant depletes. Each `Material` carries
+one, a [`DepletionLimiter`](@ref) by default.
+"""
+abstract type AbstractDepletionLimiter end
+
+"""
+	DepletionLimiter(; threshold = 1.0, join = 1.0, base_scale = 1e-8, enabled = true)
+
+The depletion limiter: each reactant's rate factor is exactly zero at and below
+zero concentration and C¹ through it, for every reaction order, so an absent
+or negative trial concentration is never consumed and every rate has a finite
+derivative at any real state.
+
+Per reactant the rate is multiplied by `g(ξ/threshold)`: the cubic onset
+`(s − 2y) t³ + (3y − s) t²`, `t = x/join`, `y = tanh(join)`,
+`s = join·sech²(join)`, which has zero value and slope at `x = 0` and matches
+`tanh` and its slope at `x = join`, and `tanh(x)` above. The reaction-order
+power is evaluated on the finite base `base_scale · softplus(ξ / base_scale)`,
+which equals `ξ` to within `base_scale` and is finite for every real `ξ`. Far
+above the threshold the factor rounds to one and the bare Arrhenius rate is
+recovered (relative deficit `2e^(-2ξ/threshold)`: below 4 % at
+`2·threshold`, below 5e-9 at `10·threshold`).
+
+With `enabled = false` the factor is one and only the finite base remains (an
+order-zero reaction then runs at its full rate at any concentration): an
+absent reactant then reacts at the rate of a `base_scale` concentration, and
+the solver's admissibility check is the guard.
+
+Lower thresholds keep the kinetics closer to the bare rate law near depletion;
+higher ones damp the stiffness of a vanishing reactant.
 
 # Fields
-- `threshold::Float64`: Concentration scale of the rate roll-off [kg/m³]
-- `enabled::Bool`: If false, no limiting is applied (may cause numerical issues)
-
-# Behavior
-The factor `tanh(ξ/threshold)` is applied to the *rate* (not the power-law
-base) and is C^∞ in ξ — there is no threshold branch, so neither the rate nor
-its derivative jumps anywhere:
-
-- `ξ ≫ threshold`: factor → 1 double-exponentially (relative deficit
-  `2e^(-2ξ/threshold)`: < 4% at `2·threshold`, < 5e-9 at `10·threshold`) — the
-  bare Arrhenius rate is recovered.
-- `ξ → 0`: the rate vanishes ∝ `ξ^(n+1)` with bounded `∂r/∂ξ` for every
-  reaction order n ≥ 0 — including n = 0, where the unlimited rate would stay
-  at k(T) through ξ = 0 and drive the concentration negative without bound.
+- `threshold::Float64`: concentration scale of the roll-off [kg/m³]
+- `join::Float64`: where the onset joins `tanh`, in units of `threshold`
+- `base_scale::Float64`: scale of the finite power base [kg/m³]
+- `enabled::Bool`: apply the factor
 
 # Usage
-Each `Material` carries its own limiter; pass a custom one at construction:
-
 ```julia
 Material(name = ..., components = ..., reactions = ...,
          depletion_limiter = DepletionLimiter(threshold = 0.1))
 ```
-
-The solver's kinetics path (`Pyrolysis.Physics.evaluate_reactions!`) reads
-`material.depletion_limiter` for every rate evaluation.
-
-# Notes
-Lower thresholds are more physically accurate but may cause numerical stiffness.
-For validation studies, temporarily disable with `enabled=false`. Disabling
-removes the only depletion guard: order n = 0 reactions then consume reactant
-at full rate through ξ = 0 (unbounded negative ξ), and orders 0 < n < 1 have a
-singular ∂r/∂ξ as ξ → 0.
 """
-Base.@kwdef struct DepletionLimiter
-    threshold::Float64 = 1.0    # kg/m³ - rate roll-off scale
-    enabled::Bool = true        # Can disable for testing/validation
+struct DepletionLimiter <: AbstractDepletionLimiter
+    threshold::Float64
+    join::Float64
+    base_scale::Float64
+    enabled::Bool
+    function DepletionLimiter(threshold::Real, join::Real, base_scale::Real, enabled::Bool)
+        threshold > 0 ||
+            throw(ArgumentError("DepletionLimiter: threshold must be positive"))
+        join > 0 || throw(ArgumentError("DepletionLimiter: join must be positive"))
+        base_scale > 0 ||
+            throw(ArgumentError("DepletionLimiter: base_scale must be positive"))
+        return new(Float64(threshold), Float64(join), Float64(base_scale), enabled)
+    end
 end
+
+DepletionLimiter(;
+    threshold::Real = 1.0,
+    join::Real = 1.0,
+    base_scale::Real = 1e-8,
+    enabled::Bool = true,
+) = DepletionLimiter(threshold, join, base_scale, enabled)
+
+"""
+	TanhLimiter(; threshold = 1.0, enabled = true)
+	TanhLimiter(l::AbstractDepletionLimiter)
+
+The rate factor `tanh(ξ/threshold)` on the power of the concentration clamped
+at zero, the limiter the solver of `Mesh1D` problems applies: from a
+[`DepletionLimiter`](@ref) it takes the threshold and the enabled flag. Above
+`join · threshold` the two limiters' rates agree to round-off.
+"""
+Base.@kwdef struct TanhLimiter <: AbstractDepletionLimiter
+    threshold::Float64 = 1.0
+    enabled::Bool = true
+end
+
+TanhLimiter(l::TanhLimiter) = l
+TanhLimiter(l::DepletionLimiter) =
+    TanhLimiter(; threshold = l.threshold, enabled = l.enabled)
 
 # ============================================================================
 # Reaction Type
@@ -75,7 +115,7 @@ with their per-product `stoich` from the `products` tuple.
 
 Reaction orders must be `n ≥ 0` (enforced at construction; a negative order
 makes the rate singular at reactant depletion). At runtime each reactant also
-contributes a smooth `tanh(ξ/ξ_th)` depletion factor to the rate, and the hard
+contributes the material's depletion factor to the rate, and the hard
 temperature gates `H(·)` are realized as smooth tanh ramps of width
 `gate_width` [K] (`0.5·(1 + tanh((T − T_min)/gate_width))` and mirrored) — see
 `Pyrolysis.Physics.reaction_rate` and [`DepletionLimiter`](@ref). Smaller

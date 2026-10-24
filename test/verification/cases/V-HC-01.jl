@@ -35,7 +35,14 @@ function _verification_case_vhc01()
     function build(n_cells)
         solid = SolidComponent(:solid, ρ = ρ, c = c, k = k)
         mat = Material(name = :VHC01, components = (solid,), reactions = ())
-        mesh = create_uniform_mesh(L, n_cells, Val(1); T_initial = T0, ξ_initial = (ρ,))
+        mesh = core_mesh(
+            create_uniform_mesh,
+            L,
+            n_cells,
+            Val(1);
+            T_initial = T0,
+            ξ_initial = (ρ,),
+        )
         bc_set = BoundaryConditionSet(
             thermal = (
                 top = HeatFluxBC(q_abs) + ConvectiveBC(h = h, T_inf = T0),
@@ -55,7 +62,7 @@ function _verification_case_vhc01()
 
     function qois(sol)
         out = QoIResult[]
-        z = get_cell_positions(sol)
+        z = cell_positions(sol)
         for (j, t) in enumerate(times)
             Tn = @view sol.T[:, j+1]  # output_times = [0; times]
             err = maximum(abs(Tn[i] - T_exact(L - z[i], t)) for i in eachindex(z))
@@ -103,7 +110,7 @@ function _verification_case_vhc01()
 
     # L2 error of the t = 60 s profile (output index 3) for the order check.
     function l2_error_t60(sol)
-        z = get_cell_positions(sol)
+        z = cell_positions(sol)
         Tn = @view sol.T[:, 3]
         Δz = L / length(z)
         return sqrt(sum((Tn[i] - T_exact(L - z[i], 60.0))^2 * Δz for i in eachindex(z)) / L)
@@ -140,7 +147,7 @@ function _verification_case_vhc01()
             qoi_curves = (:T_profiles, :surface_T_history),
             solve_kwargs = (abstol = 1e-12, reltol = 1e-10),
             curves = sol -> begin
-                x = L .- get_cell_positions(sol)
+                x = L .- cell_positions(sol)
                 # FDS 6.11.0 overlay (reference/fds/custom/): our deck
                 # vhc01_semi_infinite.fds solves this exact case via the same
                 # Robin-BC equivalence (pure convection toward T∞_eff = 1550 K,
@@ -243,7 +250,7 @@ function _verification_case_vhc01()
                 ]
             end,
             error_norms = sol -> begin
-                z = get_cell_positions(sol)
+                z = cell_positions(sol)
                 e = [sol.T[i, 3] - T_exact(L - z[i], 60.0) for i in eachindex(z)]
                 (L2 = sqrt(sum(abs2, e) / length(e)), Linf = maximum(abs, e))
             end,

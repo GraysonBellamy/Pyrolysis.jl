@@ -63,7 +63,8 @@ function _verification_case_vgt02()
             depletion_limiter = DepletionLimiter(enabled = false),
         )
         ξ_g0 = background_gas_concentration(mat, 2, (1000.0, 0.0), T_iso; P = P∞)
-        mesh = create_uniform_mesh(
+        mesh = core_mesh(
+            create_uniform_mesh,
             L,
             n_cells,
             Val(2);
@@ -88,7 +89,7 @@ function _verification_case_vgt02()
     function qois(sol)
         out = QoIResult[]
         mat = sol.problem.material
-        z = get_cell_positions(sol)
+        z = cell_positions(sol)
         μ = effective_gas_viscosity(T_iso, mat)
         ΔP²_coeff = μ * R * T_iso * ġ / (κ_perm * M_gas)
         P²_exact(zz) = P∞^2 + ΔP²_coeff * (L^2 - zz^2)
@@ -160,7 +161,7 @@ function _verification_case_vgt02()
     # L∞ of the P² profile (normalized) for the order check, at t_end.
     function p2_error(sol)
         mat = sol.problem.material
-        z = get_cell_positions(sol)
+        z = cell_positions(sol)
         μ = effective_gas_viscosity(T_iso, mat)
         ΔP²_coeff = μ * R * T_iso * ġ / (κ_perm * M_gas)
         maximum(eachindex(z)) do i
@@ -201,7 +202,7 @@ function _verification_case_vgt02()
             qoi_curves = (:P2_profile, :exit_flux_history),
             curves = sol -> begin
                 mat = sol.problem.material
-                z = get_cell_positions(sol)
+                z = cell_positions(sol)
                 μ = effective_gas_viscosity(T_iso, mat)
                 ΔP²_coeff = μ * R * T_iso * ġ / (κ_perm * M_gas)
                 P_num = map(eachindex(z)) do i
@@ -242,7 +243,7 @@ function _verification_case_vgt02()
             end,
             error_norms = sol -> begin
                 mat = sol.problem.material
-                z = get_cell_positions(sol)
+                z = cell_positions(sol)
                 μ = effective_gas_viscosity(T_iso, mat)
                 ΔP²_coeff = μ * R * T_iso * ġ / (κ_perm * M_gas)
                 e = map(eachindex(z)) do i

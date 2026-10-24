@@ -23,7 +23,7 @@ workspace's [`PrefixSumCoupling`](@ref)s, refilled every assembly.
 """
 
 using ForwardDiff
-using ..Materials: Material
+using ..Materials: Material, TanhLimiter
 using ..Physics: volume_change_rate, evaluate_reactions!, species_source_terms!
 using ..Problem: NoChi, WithChi
 using ..Residual: _compute_ale_mesh_velocity!, _compute_theta_A
@@ -179,7 +179,14 @@ function apply!(
     # of them (parked ghost slots have zero volume).
     @inbounds for i in axes(ws.dξ_rxn, 2)
         ξ_i = ntuple(j -> state.ξ[j, i], Val(NC))
-        evaluate_reactions!(ws.rates, ws.heats, ξ_i, state.T[i], material)
+        evaluate_reactions!(
+            ws.rates,
+            ws.heats,
+            ξ_i,
+            state.T[i],
+            material,
+            TanhLimiter(material.depletion_limiter),
+        )
         species_source_terms!(ws.dξ_dt, ws.rates, material)
         for j = 1:NC
             ws.dξ_rxn[j, i] = ws.dξ_dt[j]
@@ -266,7 +273,14 @@ function compute_strain_rate_derivatives!(
         # so the whole sweep is allocation-free.
         ξ_i = ntuple(j -> state.ξ[j, i], Val(NC))
         T_d, ξ_d = _stack_dual_seed(_ALEStrainTag, state.T[i], ξ_i)
-        evaluate_reactions!(rates_d, heats_d, ξ_d, T_d, material)
+        evaluate_reactions!(
+            rates_d,
+            heats_d,
+            ξ_d,
+            T_d,
+            material,
+            TanhLimiter(material.depletion_limiter),
+        )
         species_source_terms!(dξ_dt_d, rates_d, material)
         θ_d = volume_change_rate(dξ_dt_d, T_d, material)
 
@@ -373,7 +387,14 @@ function compute_theta_A_derivatives!(
                 rates_d = zeros(eltype(x_inner), NR)
                 heats_d = zeros(eltype(x_inner), NR)
                 dξ_dt_d = zeros(eltype(x_inner), NC)
-                evaluate_reactions!(rates_d, heats_d, ξ_d, T_d, material)
+                evaluate_reactions!(
+                    rates_d,
+                    heats_d,
+                    ξ_d,
+                    T_d,
+                    material,
+                    TanhLimiter(material.depletion_limiter),
+                )
                 species_source_terms!(dξ_dt_d, rates_d, material)
                 S_dry = zero(eltype(x_inner))
                 for j in dry_gas_indices

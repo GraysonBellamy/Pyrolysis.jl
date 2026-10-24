@@ -22,13 +22,17 @@ const VBO02_PEAK_REF = 24.62    # g m⁻² s⁻¹, at 429.5 s
 function _verification_case_vbo02()
     id = "V-BO-02"
     function qois(sol)
-        m = _vbo_measures(sol)
+        m = _vbo_measures(sol; id)
         out = _vbo_common_qois(
             m;
             id,
             peak_ref = VBO02_PEAK_REF,
             peak_tol = 0.25,
             peak_comment = "g m⁻² s⁻¹; surface absorption on a fixed mesh, a different problem from the in-depth reference (informational)",
+            ledger_tol = VERIFICATION_CORE == "old" ? 1e-3 : 3e-4,
+            ledger_comment = VERIFICATION_CORE == "old" ? VBO_LEDGER_COMMENT :
+                             VBO_LEDGER_COMMENT *
+                             "; each park leaves a gas transient on the fixed mesh, so this is the time error at reltol 1e-6 (observed 6.1e-5 and 6.2e-5 in the two energy forms at 60 cells, 1.2e-4 at 120, 1.9e-8 at reltol 1e-8)",
         )
         st = sol.raw_solution.stats
         rec = VBO_STEP_STATS[id]
@@ -84,8 +88,9 @@ function _verification_case_vbo02()
                 value = Float64(st.naccept),
                 exact = 0.0,
                 error = Float64(st.naccept),
-                tol = 2000.0,
-                comment = "budget at the CI resolution (60 PMMA cells); observed 1572, about 26 per park interval",
+                tol = VERIFICATION_CORE == "old" ? 2000.0 :
+                      VERIFICATION_ENERGY_STATE === :enthalpy ? 4000.0 : 3000.0,
+                comment = "budget at the CI resolution (60 PMMA cells); observed 1572 on the old core, about 26 per park interval, and on the new one 1706 (temperature form) and 2456 (enthalpy form)",
             ),
         )
         return out

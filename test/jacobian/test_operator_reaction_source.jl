@@ -29,6 +29,7 @@ using Pyrolysis: to_problem_def, build_workspace
 using Pyrolysis.Materials: n_components, n_reactions, Material
 using Pyrolysis.Properties: effective_heat_capacity
 using Pyrolysis.Physics: evaluate_reactions!, reaction_heat_source, species_source_terms!
+using Pyrolysis.Materials: TanhLimiter
 using Pyrolysis.Problem: populate!
 using Pyrolysis.Residual: residual!
 using Pyrolysis.Jacobian:
@@ -69,7 +70,14 @@ function _reference_reaction_contribution(state, material::Material{NC,NR}) wher
         ξ = ntuple(j -> state.ξ[j, i], Val(NC))
         fill!(rates, 0.0)
         fill!(heats, 0.0)
-        evaluate_reactions!(rates, heats, ξ, T, material)
+        evaluate_reactions!(
+            rates,
+            heats,
+            ξ,
+            T,
+            material,
+            TanhLimiter(material.depletion_limiter),
+        )
         Q_rxn = reaction_heat_source(rates, heats)
         ρcp = effective_heat_capacity(ξ, T, material)
         dT_ref[i] = Q_rxn / ρcp
@@ -102,7 +110,14 @@ function _reference_dense_jacobian(u, layout, material::Material{NC,NR}) where {
             src = zeros(eltype(x_inner), NC)
             T = x_inner[1]
             ξ = ntuple(j -> x_inner[1+j], Val(NC))
-            evaluate_reactions!(rates, heats, ξ, T, material)
+            evaluate_reactions!(
+                rates,
+                heats,
+                ξ,
+                T,
+                material,
+                TanhLimiter(material.depletion_limiter),
+            )
             Q_rxn = reaction_heat_source(rates, heats)
             ρcp = effective_heat_capacity(ξ, T, material)
             out[1] = Q_rxn / ρcp

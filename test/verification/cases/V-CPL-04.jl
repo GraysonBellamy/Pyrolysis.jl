@@ -46,8 +46,14 @@ function _vcpl04_problem(δ; n_cells, t_end, n_outputs = 11)
     rxn =
         Reaction(:fk_source, 1 => 1; A = A_r, E = E, h = h_rxn, n = 0.0, T_max = T0 + 100.0)
     mat = Material(name = :VCPL04, components = (comp,), reactions = (rxn,))
-    mesh =
-        create_uniform_mesh(2 * L_half, n_cells, Val(1); T_initial = T0, ξ_initial = (ρξ,))
+    mesh = core_mesh(
+        create_uniform_mesh,
+        2 * L_half,
+        n_cells,
+        Val(1);
+        T_initial = T0,
+        ξ_initial = (ρξ,),
+    )
     bc_set = BoundaryConditionSet(
         thermal = (top = DirichletThermalBC(T0), bottom = DirichletThermalBC(T0)),
     )
@@ -72,7 +78,7 @@ function _verification_case_vcpl04()
     function qois(sol)
         P = _vcpl04_problem(δ_main; n_cells = 2, t_end = t_main) # params only
         out = QoIResult[]
-        z = get_cell_positions(sol)
+        z = cell_positions(sol)
         L_half = P.L_half
 
         # High-precision references
@@ -149,7 +155,7 @@ function _verification_case_vcpl04()
         # bounded near its steady value; supercritical: δ = 1.5 δ_c must run
         # away beyond a 50 K rise (T_max gate caps it at ~100 K).
         r_sub = _vcpl04_problem(0.70; n_cells = 40, t_end = 5000.0)
-        sol_sub = solve(r_sub.problem; progress = false, abstol = 1e-8, reltol = 1e-6)
+        sol_sub = core_solve(r_sub.problem; abstol = 1e-8, reltol = 1e-6)
         rise_sub = maximum(sol_sub.T[:, end]) - P.T0
         θ_sub = rise_sub / P.εT
         θ_sub_ref = fk_theta_max(0.70)
@@ -165,7 +171,7 @@ function _verification_case_vcpl04()
             ),
         )
         r_sup = _vcpl04_problem(1.32; n_cells = 40, t_end = 4000.0)
-        sol_sup = solve(r_sup.problem; progress = false, abstol = 1e-8, reltol = 1e-6)
+        sol_sup = core_solve(r_sup.problem; abstol = 1e-8, reltol = 1e-6)
         rise_sup = maximum(sol_sup.T) - P.T0
         push!(
             out,
@@ -187,7 +193,7 @@ function _verification_case_vcpl04()
     function center_err(sol)
         P = _vcpl04_problem(δ_main; n_cells = 2, t_end = t_main)
         sh = fk_steady_shoot(S0 = P.S0, E = P.E, T0 = P.T0, k = P.k, L = P.L_half)
-        z = get_cell_positions(sol)
+        z = cell_positions(sol)
         jc = argmin(abs.(z .- P.L_half))
         return abs(sol.T[jc, end] - sh.T_at(abs(z[jc] - P.L_half)))
     end
@@ -220,7 +226,7 @@ function _verification_case_vcpl04()
             curves = sol -> begin
                 P = _vcpl04_problem(δ_main; n_cells = 2, t_end = t_main) # params only
                 δc = fk_delta_crit()
-                z = get_cell_positions(sol)
+                z = cell_positions(sol)
                 jc(zv) = argmin(abs.(zv .- P.L_half))
                 shoot(δ) = fk_steady_shoot(
                     S0 = δ * P.k * P.εT / P.L_half^2,
@@ -229,9 +235,8 @@ function _verification_case_vcpl04()
                     k = P.k,
                     L = P.L_half,
                 )
-                fksolve(δ; t_end) = solve(
+                fksolve(δ; t_end) = core_solve(
                     _vcpl04_problem(δ; n_cells = 40, t_end = t_end, n_outputs = 41).problem;
-                    progress = false,
                     abstol = 1e-8,
                     reltol = 1e-6,
                 )
@@ -239,8 +244,8 @@ function _verification_case_vcpl04()
                 # outputs for the history figure.
                 sol_sub = fksolve(0.70; t_end = 5000.0)
                 sol_sup = fksolve(1.32; t_end = 4000.0)
-                z_sub = get_cell_positions(sol_sub)
-                z_sup = get_cell_positions(sol_sup)
+                z_sub = cell_positions(sol_sub)
+                z_sup = cell_positions(sol_sup)
                 sh_main = shoot(δ_main)
                 sh_sub = shoot(0.70)
                 # δ_c bisection stand-in: the turning-point hunt as a swept
