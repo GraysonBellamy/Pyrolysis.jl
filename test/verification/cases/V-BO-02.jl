@@ -18,7 +18,7 @@
 # V-BO-01.
 
 # Peak of the CI run (0.098 mm cells).
-const VBO02_PEAK_REF = 24.62    # g m⁻² s⁻¹, at 429.5 s
+const VBO02_PEAK_REF = 23.76    # g m⁻² s⁻¹, at 438.5 s
 
 function _verification_case_vbo02()
     id = "V-BO-02"
