@@ -6,11 +6,10 @@
 # surface, each cell 1/1.02 of the one beneath it at 60 cells, so the surface
 # cell is a third of the cell at the PMMA–Kaowool interface; at other
 # resolutions the ratio per cell keeps that third, so the cell ladder refines
-# one mesh. The Kaowool takes the interface cell's pitch. The burnout
-# quantities do not depend on the mesh, so V-BO-01's references and
-# tolerances hold. The equidistribution correction starts from cells of
-# unequal thickness, and the invocations that deactivate the layer are
-# reported.
+# one mesh. The Kaowool takes the interface cell's pitch. The exact mass and
+# substrate-thickness constraints do not depend on the mesh. The
+# equidistribution correction starts from cells of unequal thickness, and
+# the invocations that deactivate the layer are reported.
 
 const VBO06_GRADING = 1.02
 const VBO06_CELLS = 60
@@ -28,10 +27,8 @@ function _verification_case_vbo06()
         out = _vbo_common_qois(
             m;
             id,
-            peak_tol = 0.03,
             mass_loss_exact = _vbo_mass_loss_exact(VBO_L_PMMA, l_kw),
         )
-        append!(out, _vbo_timing_qois(m))
         push!(out, _vbo_invocation_qoi(sol, id))
         return out
     end

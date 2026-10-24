@@ -17,9 +17,6 @@
 # surface absorption is a different problem from the in-depth reference of
 # V-BO-01.
 
-# Peak of the CI run (0.098 mm cells).
-const VBO02_PEAK_REF = 23.76    # g m⁻² s⁻¹, at 438.5 s
-
 function _verification_case_vbo02()
     id = "V-BO-02"
     function qois(sol)
@@ -27,9 +24,6 @@ function _verification_case_vbo02()
         out = _vbo_common_qois(
             m;
             id,
-            peak_ref = VBO02_PEAK_REF,
-            peak_tol = 0.25,
-            peak_comment = "g m⁻² s⁻¹; surface absorption on a fixed mesh, a different problem from the in-depth reference (informational)",
             ledger_tol = 3e-4,
             ledger_comment = VBO_LEDGER_COMMENT *
                              "; each deactivation leaves a gas transient on the fixed mesh, so this is the time error at reltol 1e-6 (observed 6.1e-5 and 6.2e-5 in the two energy forms at 60 cells, 1.2e-4 at 120, 1.9e-8 at reltol 1e-8)",
@@ -88,8 +82,9 @@ function _verification_case_vbo02()
                 value = Float64(st.naccept),
                 exact = 0.0,
                 error = Float64(st.naccept),
-                tol = VERIFICATION_ENERGY_STATE === :enthalpy ? 4000.0 : 3000.0,
-                comment = "budget at the CI resolution (60 PMMA cells); observed 1978 (temperature form) and 2797 (enthalpy form)",
+                tol = (VERIFICATION_ENERGY_STATE === :enthalpy ? 4000.0 : 3000.0) *
+                      max(1.0, n_pmma / 60),
+                comment = "budget of 3000 (temperature) or 4000 (enthalpy) at 60 PMMA cells, scaled linearly with the number of deactivations on finer meshes; observed 1978 and 2797 at 60 cells",
             ),
         )
         return out

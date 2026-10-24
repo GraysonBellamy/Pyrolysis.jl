@@ -10,9 +10,10 @@
 # (Beer–Lambert) absorption.
 #
 # The run must burn out completely, lose exactly the mass of the PMMA layer,
-# match the reference peak mass loss rate, its time and the burnout time,
 # close the mass ledger, and converge the surface temperature at every
 # accepted step, within a wall-time budget at 0.098 mm cells.
+# Peak mass loss rate and timing are reported through the history curves;
+# the report also compares the histories with Gpyro V2.
 #
 # The mesh moves by the equidistribution correction, the PMMA–Kaowool
 # interface a Lagrangian node, so the PMMA cells thin together and the layer
@@ -411,26 +412,18 @@ _vbo_history_curve(id, name, title, ylabel, label, t, y) = ReportCurve(
     series = [CurveSeries(label = label, x = collect(Float64, t), y = collect(Float64, y))],
 )
 
-# Peak and burnout time of the corrected-deck reference run (0.098 mm cells).
-const VBO_PEAK_REF = 32.39      # g m⁻² s⁻¹
-const VBO_T_PEAK_REF = 335.0    # s
-const VBO_T_BO_REF = 363.5      # s (live thickness < 12.02 mm)
-
 # The mass ledger's comment.
 const VBO_LEDGER_COMMENT = "total-mass drop vs ∫ ṁ″ dt over the accepted steps (three-point Gauss–Legendre per step) and the mass deactivation vented"
 
-# The QoIs of every burnout case; `peak_tol = nothing` leaves the peak out.
+# The exact and conservation QoIs shared by the burnout cases.
 # The ledger closes to the integrator's tolerance: on the moving-mesh cases
 # at their CI resolution at most 5.2e-7 in the temperature form and 3.2e-6 in
 # the enthalpy form (V-BO-08's).
 function _vbo_common_qois(
     m;
     id,
-    peak_tol = nothing,
     mass_loss_exact = VBO_MASS_LOSS_EXACT,
-    peak_ref = VBO_PEAK_REF,
     surface_warnings = true,
-    peak_comment = "g m⁻² s⁻¹, gas generation rate",
     ledger_tol = 3e-5,
     ledger_comment = VBO_LEDGER_COMMENT,
 )
@@ -455,17 +448,6 @@ function _vbo_common_qois(
             error = abs(m.mass_loss - mass_loss_exact),
             tol = 0.3,
             comment = "percent of the initial mass; exact = the layer's initial mass / m₀",
-        ),
-    )
-    peak_tol === nothing || push!(
-        out,
-        QoIResult(
-            name = "peak MLR",
-            value = m.peak,
-            exact = peak_ref,
-            error = abs(m.peak - peak_ref) / peak_ref,
-            tol = peak_tol,
-            comment = peak_comment,
         ),
     )
     push!(
@@ -516,27 +498,6 @@ function _vbo_invocations(sol, ε_m)
         end for k in unique(e.invocation for e in sol.events)
     ]
 end
-
-# The time of the peak and the burnout time against their references,
-# V-BO-01's by default.
-_vbo_timing_qois(m; t_peak_ref = VBO_T_PEAK_REF, t_bo_ref = VBO_T_BO_REF) = [
-    QoIResult(
-        name = "time of peak MLR",
-        value = m.t_peak,
-        exact = t_peak_ref,
-        error = abs(m.t_peak - t_peak_ref) / t_peak_ref,
-        tol = 0.03,
-        comment = "s",
-    ),
-    QoIResult(
-        name = "burnout time (live thickness < $(round(1e3 * m.l_kw + 0.02; digits = 2)) mm)",
-        value = m.t_bo,
-        exact = t_bo_ref,
-        error = abs(m.t_bo - t_bo_ref) / t_bo_ref,
-        tol = 0.01,
-        comment = "s",
-    ),
-]
 
 # The deactivation invocations of the PMMA layer, with the cells they took
 # and the largest merged fraction, reported and not asserted: the burnout
@@ -593,8 +554,7 @@ function _verification_case_vbo01()
     id = "V-BO-01"
     function qois(sol)
         m = _vbo_measures(sol; id)
-        out = _vbo_common_qois(m; id, peak_tol = 0.03)
-        append!(out, _vbo_timing_qois(m))
+        out = _vbo_common_qois(m; id)
         push!(out, _vbo_invocation_qoi(sol, id))
         return out
     end

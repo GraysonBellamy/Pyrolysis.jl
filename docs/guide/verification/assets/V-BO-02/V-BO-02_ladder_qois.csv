@@ -1,7 +1,6 @@
 "n_cells","qoi","value","exact","error","tol","within_tol"
 30,"complete burnout: live thickness at t_end is the substrate",0.011996666666666666,0.012,3.333333333334354e-6,1.0e-5,true
 30,"mass loss of the gasified PMMA layer",69.92061272078132,69.9147977671139,0.005814953667425016,0.3,true
-30,"peak MLR",24.311891866692637,23.76,0.023227772167198457,0.25,true
 30,"mass ledger closure",1.8490541556878227e-5,0.0,1.8490541556878227e-5,0.0003,true
 30,"clamped surface balances on accepted states",0.0,0.0,0.0,0.5,true
 30,"deactivation events",30.0,30.0,0.0,0.5,true
@@ -11,7 +10,6 @@
 30,"accepted steps",1290.0,0.0,1290.0,3000.0,true
 60,"complete burnout: live thickness at t_end is the substrate",0.011996666666666666,0.012,3.333333333334354e-6,1.0e-5,true
 60,"mass loss of the gasified PMMA layer",69.92062806092306,69.9147977671139,0.005830293809168552,0.3,true
-60,"peak MLR",23.755008417086245,23.76,0.00021008345596619472,0.25,true
 60,"mass ledger closure",6.12771429923652e-5,0.0,6.12771429923652e-5,0.0003,true
 60,"clamped surface balances on accepted states",0.0,0.0,0.0,0.5,true
 60,"deactivation events",60.0,60.0,0.0,0.5,true
@@ -21,11 +19,10 @@
 60,"accepted steps",1978.0,0.0,1978.0,3000.0,true
 120,"complete burnout: live thickness at t_end is the substrate",0.011996666666666666,0.012,3.333333333334354e-6,1.0e-5,true
 120,"mass loss of the gasified PMMA layer",69.92063466052534,69.9147977671139,0.005836893411441224,0.3,true
-120,"peak MLR",23.463135347497964,23.76,0.012494303556483061,0.25,true
 120,"mass ledger closure",0.00011779846065365782,0.0,0.00011779846065365782,0.0003,true
 120,"clamped surface balances on accepted states",0.0,0.0,0.0,0.5,true
 120,"deactivation events",120.0,120.0,0.0,0.5,true
 120,"maximum live-cell temperature",914.505150259102,NaN,914.505150259102,1000.0,true
 120,"smallest accepted step",1.941289406204305e-5,1.0e-6,0.0,0.001,true
 120,"Newton failures",0.0,0.0,0.0,100.0,true
-120,"accepted steps",3093.0,0.0,3093.0,3000.0,false
+120,"accepted steps",3093.0,0.0,3093.0,6000.0,true

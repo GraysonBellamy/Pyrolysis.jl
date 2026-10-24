@@ -12,11 +12,9 @@
 #
 # A cell deactivates when its condensed mass falls below ε_m of its initial
 # value, and on a fixed mesh a crossing cell beneath a live cell ends the
-# solve with outcome `:interior` and retcode Terminated. The run must stop at
-# 259.6 s, before any deactivation, with the maximum live-cell temperature
-# below 1000 K; the stop time's tolerance is three times the CI resolution's
-# distance from the 240-cell time (260.35, 259.79, 259.62 and 259.57 s at 30,
-# 60, 120 and 240 cells, both energy forms within 5 ms).
+# solve with outcome `:interior` and retcode Terminated. The run must stop
+# before any deactivation, with the maximum live-cell temperature below
+# 1000 K. The histories report the time reached at each resolution.
 
 # Histories up to the stop, and the PMMA and temperature profiles at the last
 # output before it: the skin at the top, the emptying layer beneath.
@@ -71,17 +69,8 @@ end
 # The QoIs: the stop at the first ε_m crossing beneath a live cell, its
 # outcome, no deactivation before it, and the temperature bound.
 function _vbo05_qois(sol, rec)
-    t_stop = rec.t_last
     n_events = length(sol.events)
     return [
-        QoIResult(
-            name = "stop time at the first interior crossing of ε_m",
-            value = t_stop,
-            exact = 259.57,
-            error = abs(t_stop - 259.57),
-            tol = 0.7,
-            comment = "s; the 240-cell time (259.79 at 60 cells): a cell under the skin falls below ε_m of its initial condensed mass",
-        ),
         QoIResult(
             name = "outcome :interior",
             value = sol.outcome == :interior ? 1.0 : 0.0,

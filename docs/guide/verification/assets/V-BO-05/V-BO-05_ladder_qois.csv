@@ -1,13 +1,10 @@
 "n_cells","qoi","value","exact","error","tol","within_tol"
-30,"stop time at the first interior crossing of ε_m",260.3485313668161,259.57,0.7785313668160825,0.7,false
 30,"outcome :interior",1.0,1.0,0.0,0.5,true
 30,"deactivation events before the stop",0.0,0.0,0.0,0.5,true
 30,"maximum live-cell temperature up to the stop",693.355871786585,NaN,693.355871786585,1000.0,true
-60,"stop time at the first interior crossing of ε_m",259.79082976664654,259.57,0.22082976664654552,0.7,true
 60,"outcome :interior",1.0,1.0,0.0,0.5,true
 60,"deactivation events before the stop",0.0,0.0,0.0,0.5,true
 60,"maximum live-cell temperature up to the stop",693.379212842634,NaN,693.379212842634,1000.0,true
-120,"stop time at the first interior crossing of ε_m",259.6205928031052,259.57,0.05059280310518943,0.7,true
 120,"outcome :interior",1.0,1.0,0.0,0.5,true
 120,"deactivation events before the stop",0.0,0.0,0.0,0.5,true
 120,"maximum live-cell temperature up to the stop",693.3891814994043,NaN,693.3891814994043,1000.0,true

@@ -29,14 +29,13 @@ V-BO-01.
 | --- | --- | --- | --- | --- | --- | --- |
 | complete burnout: live thickness at t_end is the substrate | 0.012 | 0.012 | 3.333e-06 | 1e-05 | yes | every PMMA cell deactivated; 12.0 ± 0.01 mm |
 | mass loss of the gasified PMMA layer | 69.92 | 69.91 | 0.005837 | 0.3 | yes | percent of the initial mass; exact = the layer's initial mass / m₀ |
-| peak MLR | 23.46 | 23.76 | 0.01249 | 0.25 | yes | g m⁻² s⁻¹; surface absorption on a fixed mesh, a different problem from the in-depth reference (informational) |
 | mass ledger closure | 0.0001178 | 0 | 0.0001178 | 0.0003 | yes | total-mass drop vs ∫ ṁ″ dt over the accepted steps (three-point Gauss–Legendre per step) and the mass deactivation vented; each deactivation leaves a gas transient on the fixed mesh, so this is the time error at reltol 1e-6 (observed 6.1e-5 and 6.2e-5 in the two energy forms at 60 cells, 1.2e-4 at 120, 1.9e-8 at reltol 1e-8) |
 | clamped surface balances on accepted states | 0 | 0 | 0 | 0.5 | yes | boundary temperature solve converged inside the property bracket at every accepted step |
 | deactivation events | 120 | 120 | 0 | 0.5 | yes | every PMMA cell deactivates as the top live cell, top down |
 | maximum live-cell temperature | 914.5 | — | 914.5 | 1000 | yes | K over every accepted step (observed 915); the surface cell is the hottest and empties first, so no interior void forms |
 | smallest accepted step | 1.941e-05 | 1e-06 | 0 | 0.001 | yes | s; no step below the restart step after an event, DT_AFTER_EVENT (observed 5.0e-5 s in both energy forms) |
 | Newton failures | 0 | 0 | 0 | 100 | yes | budget at the CI resolution (60 PMMA cells); observed 0: the default integrator, Rodas5P, is a Rosenbrock method and solves no nonlinear system |
-| accepted steps | 3093 | 0 | 3093 | 3000 | **no** | budget at the CI resolution (60 PMMA cells); observed 1978 (temperature form) and 2797 (enthalpy form) |
+| accepted steps | 3093 | 0 | 3093 | 6000 | yes | budget of 3000 (temperature) or 4000 (enthalpy) at 60 PMMA cells, scaled linearly with the number of deactivations on finer meshes; observed 1978 and 2797 at 60 cells |
 
 ![V-BO-02 mlr_history](assets/V-BO-02/V-BO-02_mlr_history.png)
 

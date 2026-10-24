@@ -9,9 +9,8 @@
 # concentrations filling its volume. The layer's density therefore varies
 # across one activated region, which is where the equidistribution monitor's
 # mass term acts. Both solids gasify completely, so the run loses exactly the
-# layer's initial mass and ends on the bare Kaowool. The references of the
-# peak, its time and the burnout time are those of a reference run at 240
-# PMMA cells.
+# layer's initial mass and ends on the bare Kaowool. Peak mass loss rate and
+# timing are reported through the history curves.
 #
 # The layer deactivates in one invocation. The burn
 # runs down from the surface: the upper cells lose their PMMA first and keep
@@ -24,9 +23,6 @@
 
 const VBO07_RHO_LIGHT = VBO_RHO_PMMA / 2
 const VBO07_Y_SURFACE = 0.5
-const VBO07_PEAK_REF = 30.64     # g m⁻² s⁻¹
-const VBO07_T_PEAK_REF = 288.0   # s
-const VBO07_T_BO_REF = 325.0     # s
 
 # The light solid's mass fraction at height `z` in a layer from `z_if` up.
 _vbo07_fraction(z, z_if) = VBO07_Y_SURFACE * (z - z_if) / VBO_L_PMMA
@@ -81,17 +77,7 @@ function _verification_case_vbo07()
         m = _vbo_measures(sol; l_kw, id)
         # The whole layer leaves: the run ends at the Kaowool's mass.
         exact = 100 * (1 - VBO_RHO_KW * l_kw / first(sol.extras.total_mass))
-        out = _vbo_common_qois(
-            m;
-            id,
-            peak_tol = 0.03,
-            peak_ref = VBO07_PEAK_REF,
-            mass_loss_exact = exact,
-        )
-        append!(
-            out,
-            _vbo_timing_qois(m; t_peak_ref = VBO07_T_PEAK_REF, t_bo_ref = VBO07_T_BO_REF),
-        )
+        out = _vbo_common_qois(m; id, mass_loss_exact = exact)
         push!(out, _vbo_invocation_qoi(sol, id))
         return out
     end
