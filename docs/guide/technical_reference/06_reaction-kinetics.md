@@ -2,21 +2,24 @@
 
 This chapter develops the complete condensed-phase reaction model of Pyrolysis.jl:
 the Arrhenius rate law on a mass-concentration basis, the smooth temperature gates
-and depletion limiter that replace the hard step functions of classical pyrolysis
-codes, the stoichiometric assembly of species sources, and the heat-of-reaction
-energy source with its (deliberately storage-oriented) sign convention. Every
-governing equation, default value, and sign is derived from first principles and
-then matched line-for-line to the implementation in `src/Physics/kinetics.jl` and
-`src/Materials/reactions.jl`. We close with a careful contrast against ThermaKin2Ds,
-Gpyro, and FDS, and a statement of the model's present limitations.
+and the one-sided depletion limiter that stand in for the hard step functions of
+classical pyrolysis codes, the stoichiometric assembly of species sources, and the
+heat-of-reaction energy source with its (deliberately storage-oriented) sign
+convention. Every governing equation, default value, and sign is derived from
+first principles and then matched line-for-line to the implementation in
+`src/Physics/kinetics.jl`, `src/Materials/reactions.jl` and the reaction kernel
+`src/Kernels/reactions.jl`. We close with a careful contrast against ThermaKin2Ds,
+Gpyro, and FDS, and a statement of the model's limitations.
 
 Throughout this chapter the index `i` denotes the **reaction index** and `j` the
 **component (species) index** — the kinetics convention of overload note I1 in
-§2, Nomenclature. The cell index, where it appears in the integration discussion,
-is written explicitly. Mass concentration `ξ_j` (kg·m⁻³) is the primary species
-state variable; stoichiometric coefficients are `ν_{i,j}` (overload note A2); the
-Arrhenius pre-exponential is `A_i` (overload note A3); and the heat of reaction
-`h` uses the storage sign convention `h > 0` endothermic (overload note H1).
+§2, Nomenclature. The cell index, where it appears in the discretization
+discussion, is written explicitly. Mass concentration `ξ_j` (kg·m⁻³) is the
+constitutive species variable (the integrated state of a cell is its mass
+`ξ_j V` of each component, §6.5.4); stoichiometric coefficients are `ν_{i,j}` (overload note
+A2); the Arrhenius pre-exponential is `A_i` (overload note A3); and the heat of
+reaction `h` uses the storage sign convention `h > 0` endothermic (overload note
+H1).
 
 ---
 
@@ -32,13 +35,14 @@ window:
 $$
 r_i(T,\boldsymbol{\xi}) \;=\; A_i \,
 \exp\!\left(-\frac{E_i}{R_g\,T}\right)
-\;\prod_{j\,\in\,\mathrm{reactants}(i)} \xi_j^{\,n_{i,j}}
-\,\tanh\!\bigl(\xi_j/\xi_{\mathrm{th}}\bigr)
-\;\cdot\; H(T - T_{\min,i})\,H(T_{\max,i} - T).
+\;\prod_{j\,\in\,\mathrm{reactants}(i)} b(\xi_j)^{\,n_{i,j}}
+\,g\!\bigl(\xi_j/\xi_{\mathrm{th}}\bigr)
+\;\cdot\; H(T - T_{\min,i})\,H(T_{\max,i} - T),
+\qquad \xi_j > 0,
 \tag{6.1}
 $$
 
-Here
+and $r_i = 0$ when any reactant has $\xi_j \le 0$. Here
 
 - $A_i$ is the pre-exponential factor (s⁻¹ for a first-order reaction; more
   generally with units that make $r_i$ come out in kg·m⁻³·s⁻¹ — see §6.4),
@@ -47,13 +51,14 @@ Here
   (`R_GAS`, src/Materials/constants.jl),
 - $n_{i,j}$ is the reaction order of reaction $i$ with respect to reactant $j$
   ($n_{i,j} \ge 0$, enforced at construction),
-- $\tanh(\xi_j/\xi_{\mathrm{th}})$ is the smooth **depletion rate factor**
-  (§6.3), and
+- $b(\xi_j)$ is the **finite base** of the power, equal to $\xi_j$ to within
+  $10^{-8}$ kg·m⁻³ (§6.3.2, §6.4),
+- $g(\xi_j/\xi_{\mathrm{th}})$ is the one-sided **depletion onset** (§6.3), and
 - $H(\cdot)$ is the Heaviside step, implemented as a **smooth tanh ramp** (§6.2).
 
 The factorisation of $r_i$ into a temperature-only Arrhenius constant
 $k_i(T) \equiv A_i \exp(-E_i/R_g T)$ and a composition-only product
-$\prod_j \xi_j^{n_{i,j}}\tanh(\xi_j/\xi_{\mathrm{th}})$ is exact and is exploited
+$\prod_j b(\xi_j)^{n_{i,j}} g(\xi_j/\xi_{\mathrm{th}})$ is exact and is exploited
 directly by the code:
 
 ```julia
@@ -84,32 +89,52 @@ condensed-phase pyrolysis literature (ThermaKin, Gpyro, FDS all do the same — 
 ### 6.1.2 Discrete (per-cell) form
 
 The finite-volume discretisation (§13, Finite-Volume Discretization) collocates
-all state at cell centres. Within `compute_rhs!` the reaction model is evaluated
-once per cell from the cell-centred state $(T, \xi_1,\dots,\xi_{N_C})$
-(src/Discretization/finite_volume.jl):
+all state at cell centres. The reaction kernel (`ReactionKernel`,
+src/Kernels/reactions.jl) evaluates the reaction model once per cell, from the
+cell's concentrations and trial temperature in the derived state (§5.13):
 
 ```julia
-T = state.T[i]
-ξ = ntuple(j -> state.ξ[j, i], Val(NC))
-evaluate_reactions!(rhs_cache.rates, rhs_cache.heats, ξ, T, material)
+ξ = ntuple(j -> ds.ξ[j, i], Val(NC))
+kernel.limiter.enabled && _all_quenched(ξ, material.reactions) && continue
+T = ds.T_trial[i]
+V = ds.V_eval[i]
+evaluate_reactions!(c.rates, c.heats, ξ, T, material, kernel.limiter)
+species_source_terms!(c.species, c.rates, material)
+for j = 1:NC
+    c.S_mass[j, i] += c.species[j] * V
+end
+c.S_energy[i] += reaction_heat_source(c.rates, c.heats) * V
 ```
 
-so the continuous law (6.1) becomes simply $r_i^{\,\mathrm{cell}} =
-r_i(T_{\mathrm{cell}}, \boldsymbol{\xi}_{\mathrm{cell}})$ — there is **no spatial
-operator inside the reaction term**. Reactions are local (point-wise in space);
-all spatial coupling enters through transport (conduction §7, gas diffusion/Darcy
-§9) and through the ALE mesh motion (§11). This is the cell-as-batch-reactor view:
-each control volume behaves, kinetically, like an isolated TGA sample, identical
-to the Gpyro and FDS interpretation (§6.9).
+The rates read the signed concentrations $\xi_{j} = m_{j}/V_{\text{eval}}$ of the
+cell (not the positive parts the property laws see: the limiter itself makes a
+rate vanish at and below zero, §6.3) and the trial temperature
+$T_{\text{trial}}$, the cell temperature smoothly clamped into the property
+bracket $[200, 3000]$ K, which equals the cell temperature on every physical
+state and keeps $\exp(-E/RT)$ finite, with a finite derivative, at any trial
+temperature. Because the cell masses are the states, the kernel multiplies the
+volumetric sources by the cell volume: the mass sources `S_mass` are in kg·s⁻¹,
+the energy source `S_energy` in W. A cell in which every reaction has a reactant
+at or below zero contributes exact zeros and, with the limiter enabled, is not
+evaluated at all (`_all_quenched`).
 
-The single-reaction kernel is `reaction_rate` (src/Physics/kinetics.jl). It
-is fully scalar-type-generic (`<:Real` arguments), so `ForwardDiff.Dual` numbers
-propagate cleanly through it for the Jacobian (§15).
+The continuous law (6.1) thus becomes simply $r_i^{\,\mathrm{cell}} =
+r_i(T_{\mathrm{trial,cell}}, \boldsymbol{\xi}_{\mathrm{cell}})$ — there is **no
+spatial operator inside the reaction term**. Reactions are local (point-wise in
+space); all spatial coupling enters through transport (conduction §7, gas
+diffusion/Darcy §9) and through the mesh motion (§11). This is the
+cell-as-batch-reactor view: each control volume behaves, kinetically, like an
+isolated TGA sample, identical to the Gpyro and FDS interpretation (§6.9).
+
+The single-reaction function is `reaction_rate` (src/Physics/kinetics.jl). It
+is fully scalar-type-generic (`<:Real` arguments), so the dual numbers of the
+colored Jacobian (§15) propagate cleanly through it.
 
 > **Implementation note.** Single-reaction rate: `reaction_rate`,
 > src/Physics/kinetics.jl. All-reaction evaluation: `evaluate_reactions!`
 > dispatching to the `@generated` kernel `_evaluate_reactions_gen!`,
-> src/Physics/kinetics.jl.
+> src/Physics/kinetics.jl. Per-cell sources: `ReactionKernel`,
+> src/Kernels/reactions.jl.
 
 ---
 
@@ -128,29 +153,32 @@ A hard step is, however, **non-differentiable** at the threshold and has a zero
 derivative everywhere else. Both properties are poison for the implicit machinery
 of Pyrolysis.jl:
 
-1. The stiff time integrators solve nonlinear systems with Newton's method, whose
-   convergence depends on a meaningful Jacobian $\partial r_i/\partial T$. At a
-   hard step the Jacobian is a Dirac delta (numerically: undefined), and away from
-   it the step contributes nothing — Newton sees a flat rate that suddenly jumps.
-2. Automatic differentiation (`ForwardDiff`) of a discontinuous function returns a
-   derivative of zero almost everywhere and is simply wrong at the breakpoint,
-   corrupting the structured Jacobian (§15); a finite-difference sensitivity
-   (§17) across the breakpoint measures the jump instead of a derivative.
+1. The stiff time integrators linearize the residual with its Jacobian: the
+   default `Rodas5P`, a Rosenbrock method, solves one linear system with it per
+   stage, and the `FBDF` and `KenCarp4` policies iterate Newton's method with it
+   (§15.5). Their accuracy and their step acceptance depend on a meaningful
+   $\partial r_i/\partial T$. At a hard step the Jacobian is a Dirac delta
+   (numerically: undefined), and away from it the step contributes nothing — the
+   linearization sees a flat rate that suddenly jumps.
+2. Automatic differentiation of a discontinuous function returns a derivative of
+   zero almost everywhere and is simply wrong at the breakpoint, corrupting the
+   colored Jacobian (§15); a finite-difference sensitivity (§17) across the
+   breakpoint measures the jump instead of a derivative.
 
 ### 6.2.2 The tanh ramp
 
-Pyrolysis.jl replaces each Heaviside by a hyperbolic-tangent ramp. The lower gate
+Pyrolysis.jl realizes each Heaviside as a hyperbolic-tangent ramp. The lower gate
 is applied only when $T_{\min,i}$ is finite and strictly positive; the upper gate
 only when $T_{\max,i}$ is finite:
 
 $$
-g_{\min,i}(T) =
+H_{\min,i}(T) =
 \begin{cases}
 1, & T_{\min,i}\ \text{not finite or}\ \le 0,\\[4pt]
 \tfrac{1}{2}\bigl(1 + \tanh\!\big((T - T_{\min,i})/w_{\text{gate},i}\big)\bigr), & \text{otherwise},
 \end{cases}
 \qquad
-g_{\max,i}(T) =
+H_{\max,i}(T) =
 \begin{cases}
 1, & T_{\max,i}\ \text{not finite},\\[4pt]
 \tfrac{1}{2}\bigl(1 + \tanh\!\big((T_{\max,i} - T)/w_{\text{gate},i}\big)\bigr), & \text{otherwise},
@@ -158,7 +186,7 @@ g_{\max,i}(T) =
 \tag{6.2}
 $$
 
-and the gated rate is $r_i \leftarrow r_i\, g_{\min,i}(T)\, g_{\max,i}(T)$, with
+and the gated rate is $r_i \leftarrow r_i\, H_{\min,i}(T)\, H_{\max,i}(T)$, with
 $w_{\text{gate},i}$ the per-reaction **gate width** (`Reaction(...;
 gate_width)`, default $1.0$ K, validated finite and $>0$). The implementation
 is verbatim:
@@ -199,12 +227,17 @@ than a sharp physical threshold, this leakage is immaterial because the
 Arrhenius factor is itself vanishingly small that far below the reaction's
 effective onset. For a reaction used as a sharp phase-transition switch
 (melting fronts, T-gated latent heat as in V-CPL-01b), narrow the gate
-(`gate_width = 0.1` K makes the smear a tenth of the default) — every
-Jacobian coupling differentiates through `reaction_rate` with ForwardDiff, so
-the width threads through the structured Jacobian automatically, at the cost
-of a stiffer gate-adjacent Jacobian entry. On a driving ΔT of only a few
-kelvin the default 1 K ramp visibly shifts the effective switching point;
-either narrow the gate or offset $T_{\min}$ to recentre the ramp.
+(`gate_width = 0.1` K makes the smear a tenth of the default) — the colored
+Jacobian differentiates `reaction_rate` with dual numbers, so the width threads
+through it automatically, at the cost of stiffer gate-adjacent Jacobian
+entries. On a driving ΔT of only a few kelvin the default 1 K ramp visibly
+shifts the effective switching point; either narrow the gate or offset
+$T_{\min}$ to recentre the ramp. The Stefan verification case V-CPL-01b, which
+represents solidification as a $T_{\max}$-gated reaction, measures the effect:
+at the default 1 K width a 5 K driving temperature difference shifts the
+effective freezing point by about 20 % of the driving force (the front runs
+19 % slow), so the case drives with ±50 K, where the gate is a 1–2 % effect
+(`test/verification/cases/V-CPL-01.jl`).
 
 > **Implementation note.** Temperature gates: `reaction_rate`,
 > src/Physics/kinetics.jl. `gate_width` field, validation, and the default
@@ -222,11 +255,11 @@ the bare rate $r_i = k_i(T)\,\xi_j$ approaches zero linearly, which is benign. B
 the **Jacobian entry** $\partial r_i/\partial \xi_j = k_i(T)$ does not vanish: at
 high temperature $k_i(T)$ can be enormous ($A_i$ ranges over $10^8$–$10^{20}$ s⁻¹
 in typical fits). A control volume holding a numerically tiny,
-possibly slightly-negative-from-roundoff residue of reactant therefore presents
+possibly slightly negative residue of reactant therefore presents
 the implicit solver with a stiff, fast-relaxing mode whose eigenvalue is
 $-k_i(T)$ even though essentially no mass remains to react. This manifests as
-time-step throttling, Newton non-convergence, and — if $\xi_j$ overshoots below
-zero and $n_{i,j}$ is non-integer — complex or `NaN` rates from $\xi_j^{n_{i,j}}$.
+time-step throttling and rejected steps, and — if $\xi_j$ overshoots below zero
+and $n_{i,j}$ is non-integer — complex or `NaN` rates from $\xi_j^{n_{i,j}}$.
 
 Sub-first-order fits make this strictly worse: for $0 < n_{i,j} < 1$ the bare
 $\partial r_i/\partial\xi_j \sim \xi_j^{\,n-1}$ **diverges** at depletion, and for
@@ -234,44 +267,85 @@ a zero-order fit ($n_{i,j}=0$, common in TGA analysis) the bare rate does not
 vanish at all — left unguarded it keeps consuming reactant at $k_i(T)$ straight
 through $\xi_j = 0$ and integrates the concentration negative without bound.
 
-### 6.3.2 The tanh rate factor
+### 6.3.2 The one-sided rate factor
 
-Pyrolysis.jl rolls the rate off smoothly as a reactant depletes. Each reactant
-contributes a multiplicative **depletion factor to the rate** (not to the
-power-law base):
+Pyrolysis.jl rolls the rate off smoothly as a reactant depletes and stops it
+exactly at zero. Each reactant contributes a multiplicative factor to the rate,
+the power of a finite base times a one-sided **onset** applied to the *rate*,
+not to the power-law base:
 
 $$
-r_i \;=\; k_i(T)\prod_{j\,\in\,\mathrm{reactants}(i)}
-\xi_j^{\,n_{i,j}}\;\tanh\!\bigl(\xi_j/\xi_{\mathrm{th}}\bigr),
+r_i \;=\; k_i(T)\prod_{j\,\in\,\mathrm{reactants}(i)} f(\xi_j;\,n_{i,j}),
+\qquad
+f(\xi;\,n) =
+\begin{cases}
+0, & \xi \le 0,\\[2pt]
+b(\xi)^{\,n}\; g\!\bigl(\xi/\xi_{\mathrm{th}}\bigr), & \xi > 0 .
+\end{cases}
 \tag{6.3}
 $$
 
-with a hard floor at zero applied first: $\xi_j \leftarrow \max(\xi_j, 0)$. The
-implementation:
+The **finite base** is a softplus at the scale $\delta_b$ (`base_scale`,
+default $10^{-8}$ kg·m⁻³),
+
+$$
+b(\xi) \;=\; \xi + \delta_b \ln\!\bigl(1 + e^{-\xi/\delta_b}\bigr),
+$$
+
+which exceeds $\xi$ by at most $\delta_b\ln 2 \approx 6.9\times10^{-9}$ kg·m⁻³
+(at $\xi \to 0^+$) and equals $\xi$ exactly once $e^{-\xi/\delta_b}$ rounds
+away; being positive, it keeps fractional powers real. The **onset** is
+
+$$
+g(x) =
+\begin{cases}
+0, & x \le 0,\\[2pt]
+(s - 2y)\,t^3 + (3y - s)\,t^2,\quad t = x/x_J, & 0 < x < x_J,\\[2pt]
+\tanh x, & x_J \le x < 20,\\[2pt]
+1, & x \ge 20,
+\end{cases}
+\qquad y = \tanh x_J,\quad s = x_J\,\mathrm{sech}^2 x_J ,
+\tag{6.3a}
+$$
+
+with the join $x_J$ (`join`, default 1, in units of $\xi_{\mathrm{th}}$). The
+cubic has zero value and zero slope at $x = 0$ and matches $\tanh$ and its slope
+at $x = x_J$, so $g$ is C¹ everywhere (`one_sided_factor`, src/Physics/kinetics.jl);
+at the default join its coefficients are $3y - s = 1.8648$ and
+$s - 2y = -1.1032$. The cut to exactly one at $x = 20$ is bit-identical to
+evaluating the `tanh`, which rounds to `1.0` in Float64 from $x \approx 19.06$,
+so the common path — bulk concentrations orders of magnitude above the
+threshold — pays no transcendental. The implementation:
 
 ```julia
-ξ_raw = max(ξ[idx], zero(eltype(ξ)))
-conc_factor *= _fast_pow(ξ_raw, order)
 if limiter.enabled
-    conc_factor *= _depletion_factor(ξ_raw, limiter.threshold)
+    ξ <= 0 && return zero(conc) * zero(ξ)
+    conc *= _fast_pow(_finite_base(ξ, limiter.base_scale), order)
+    conc *= one_sided_factor(ξ / limiter.threshold, limiter.join)
+    return conc
 end
+return conc * _finite_power(ξ, limiter.base_scale, order)
 ```
 
-(src/Physics/kinetics.jl). The `max(ξ, 0)` clip guarantees a non-negative
-base for the power even if the integrator transiently produces $\xi_j < 0$, and
-it pins the depletion factor at $\tanh 0 = 0$ there — an overshooting cell
-consumes nothing. `_depletion_factor` short-circuits to `one(ξ)` above
-$20\,\xi_{\mathrm{th}}$, which is **bit-identical** to evaluating the `tanh`
-(Float64 `tanh(x)` rounds to exactly `1.0` for $x \gtrsim 19.1$), so the common
-path — bulk concentrations orders of magnitude above the threshold — pays no
-transcendental (src/Physics/kinetics.jl).
+(`_reactant_factor`, src/Physics/kinetics.jl). At and below zero the factor and
+every derivative of it are exactly zero, so an absent or negative trial
+concentration is never consumed, whatever the reaction order: an overshooting
+cell consumes nothing, and the reaction kernel skips a cell in which every
+reaction lacks a reactant (§6.1.2).
 
-Applying the factor to the rate rather than substituting an effective
+Applying the onset to the rate rather than substituting an effective
 concentration into the power-law base matters for low orders: a base-applied
 limiter leaves a zero-order reactant unguarded ($\xi_{\mathrm{eff}}^{\,0}\equiv 1$)
 and, for $0 < n < 0.5$, behaves as $(\xi^2/\xi_{\mathrm{th}})^n$ near zero with a
 still-singular $\partial r/\partial\xi \sim \xi^{\,2n-1}$. The multiplicative
-form removes the singular eigenvalue for **every** order $n \ge 0$.
+form removes the singular eigenvalue for **every** order $n \ge 0$: near
+depletion (with $\delta_b \ll \xi \ll \xi_{\mathrm{th}}$ and the default join)
+
+$$
+r_i \;\approx\; 1.865\,k_i(T)\,\frac{\xi_j^{\,n+2}}{\xi_{\mathrm{th}}^2},
+$$
+
+so $\partial r_i/\partial\xi_j \to 0$ for every $n \ge 0$.
 
 ### 6.3.3 Behaviour and default values
 
@@ -281,78 +355,109 @@ whose defaults are
 
 | field | default | meaning |
 |---|---|---|
-| `threshold` ($\xi_{\mathrm{th}}$) | $1.0$ kg·m⁻³ | rate roll-off scale |
-| `enabled` | `true` | set `false` to recover the bare Arrhenius rate |
+| `threshold` ($\xi_{\mathrm{th}}$) | $1.0$ kg·m⁻³ | concentration scale of the roll-off |
+| `join` ($x_J$) | $1.0$ | where the cubic onset joins `tanh`, in units of `threshold` |
+| `base_scale` ($\delta_b$) | $10^{-8}$ kg·m⁻³ | scale of the finite power base |
+| `enabled` | `true` | apply the onset; `false` keeps only the finite base |
 
-Each `Material` carries its own limiter in `material.depletion_limiter`, set
-with the `Material` constructor's `depletion_limiter` keyword (default
-`DepletionLimiter()`); the solver's kinetics path `evaluate_reactions!` reads it
-for every rate evaluation. `DEFAULT_DEPLETION_LIMITER = DepletionLimiter()`
+`threshold`, `join` and `base_scale` must be positive; the constructor refuses
+anything else with an `ArgumentError`. Each `Material` carries its own limiter
+in `material.depletion_limiter`, set with the `Material` constructor's
+`depletion_limiter` keyword (default `DepletionLimiter()`); the reaction kernel
+is built from it (`ReactionKernel(material)`) and passes it to every rate
+evaluation. `DEFAULT_DEPLETION_LIMITER = DepletionLimiter()`
 (src/Physics/kinetics.jl) backs only the standalone `reaction_rate` entry point
 when no `limiter` keyword is passed.
 
-The factor $\tanh(\xi/\xi_{\mathrm{th}})$ has the key properties:
+The factor has the key properties:
 
-- **Smooth everywhere.** There is no threshold branch: the rate is $C^\infty$ in
-  $\xi > 0$ (the only non-smooth point left is the `max(ξ, 0)` clip exactly at
-  zero). Neither the rate nor $\partial r/\partial\xi$ jumps anywhere.
+- **One-sided and C¹.** It is exactly zero at and below zero concentration, C¹
+  through zero and through the join, and smooth everywhere else. Neither the
+  rate nor $\partial r/\partial\xi$ jumps anywhere.
 - $\xi \gg \xi_{\mathrm{th}}$: the bare rate is recovered double-exponentially —
-  the relative deficit is $2e^{-2\xi/\xi_{\mathrm{th}}}$, i.e. $\sim\!3.7\%$ at
-  $2\,\xi_{\mathrm{th}}$, $4\times10^{-9}$ at $10\,\xi_{\mathrm{th}}$, and exactly
-  zero in Float64 beyond $\approx 19.1\,\xi_{\mathrm{th}}$.
-- $\xi \to 0$: the rate vanishes as $k\,\xi^{\,n+1}/\xi_{\mathrm{th}}$ with
-  $\partial r/\partial\xi \to 0$ for $n > 0$ and $\to k/\xi_{\mathrm{th}}$
-  (finite) for $n = 0$ — the stiff eigenvalue is removed for every order
-  $n \ge 0$. For $n = 1$ the limited rate is exactly
-  $k\,\xi\tanh(\xi/\xi_{\mathrm{th}})$.
+  the relative deficit $1 - \tanh x \approx 2e^{-2\xi/\xi_{\mathrm{th}}}$ is
+  $3.6\%$ at $2\,\xi_{\mathrm{th}}$, $4.1\times10^{-9}$ at $10\,\xi_{\mathrm{th}}$,
+  and exactly zero in Float64 beyond $\approx 19.06\,\xi_{\mathrm{th}}$; the base
+  differs from $\xi$ by less than $\delta_b$.
+- $\xi \to 0$: the rate vanishes as $1.865\,k\,\xi^{\,n+2}/\xi_{\mathrm{th}}^2$
+  with $\partial r/\partial\xi \to 0$ for every $n \ge 0$ — the stiff eigenvalue
+  is removed for every order.
 
 The robustness is bought with a rate **bias near depletion**: the suppression is
-$\sim\!24\%$ at $\xi = \xi_{\mathrm{th}}$ ($\tanh 1 \approx 0.762$) and grows as
-the reactant runs out — $90\%$ at $0.1\,\xi_{\mathrm{th}}$. For first-order
-kinetics the limited rate behaves as $k\,\xi^2/\xi_{\mathrm{th}}$ near zero,
-which converts the exponential burnout tail into an algebraic
-$\xi \approx \xi_{\mathrm{th}}/(kt)$ tail. Choose $\xi_{\mathrm{th}}$ well below
-the concentrations that matter for the quantities of interest.
+$24\%$ at $\xi = \xi_{\mathrm{th}}$ ($g(1) = \tanh 1 \approx 0.762$), $67\%$ at
+$0.5\,\xi_{\mathrm{th}}$ ($g = 0.328$) and $98\%$ at $0.1\,\xi_{\mathrm{th}}$
+($g = 0.0175$). For first-order kinetics the limited rate behaves as
+$1.865\,k\,\xi^3/\xi_{\mathrm{th}}^2$ near zero, which converts the exponential
+burnout tail into an algebraic one: integrating
+$\mathrm d\xi/\mathrm dt = -1.865\,k\,\xi^3/\xi_{\mathrm{th}}^2$ gives
+$\xi \approx \xi_{\mathrm{th}}/\sqrt{3.73\,k\,t}$ at late times. Choose
+$\xi_{\mathrm{th}}$ well below the concentrations that matter for the quantities
+of interest.
 
 Reaction orders are validated at construction: $n < 0$ is rejected
 (`_validate_reaction_order`, src/Materials/reactions.jl), since a negative-order
 rate is singular at depletion and no limiter can repair it.
 
-For validation studies that need the unbiased Arrhenius rate, the limiter is
+For validation studies that need the bare Arrhenius rate, the onset is
 disabled per call:
 
 ```julia
-r = reaction_rate(rxn, ξ, T; limiter = DepletionLimiter(enabled = false))
+using Pyrolysis
+using Pyrolysis.Physics: reaction_rate
+
+rxn = Reaction(:decomp, 1 => 2; A = 8.5e12, E = 188e3, h = 870e3)
+r = reaction_rate(rxn, (2.0, 0.0), 650.0; limiter = DepletionLimiter(enabled = false))
 ```
 
 or for an entire solve, per material:
 
 ```julia
-Material(name = …, components = …, reactions = …,
-         depletion_limiter = DepletionLimiter(enabled = false))
+pmma = Material(
+    name = :PMMA,
+    components = (
+        SolidComponent(:virgin, ρ = 1190.0, c = 1420.0, k = 0.21, ε = 0.86),
+        GaseousComponent(:MMA, M = 0.100, c = 1500.0, k = 0.02, λ = 1e-5),
+    ),
+    reactions = (Reaction(:decomposition, :virgin => :MMA; A = 8.5e12, E = 188e3,
+                          h = 870e3),),
+    depletion_limiter = DepletionLimiter(enabled = false),
+)
 ```
 
-Disabling removes the only depletion guard: zero-order reactions then consume
-reactant through $\xi = 0$ without bound, and orders $0 < n < 1$ have a singular
-$\partial r/\partial\xi$ at depletion.
+Disabling keeps only the finite base: for $\xi > 0$ the factor is $b(\xi)^n$, and
+for $\xi \le 0$ the power is formed in log space, where the value and its slope
+underflow together (`_finite_power`, src/Physics/kinetics.jl). An absent reactant
+then reacts at the rate of a $\delta_b$ concentration, a zero-order reaction
+runs at its full rate at any concentration, and orders $0 < n < 1$ have a steep
+$\partial r/\partial\xi$ near depletion. The guard is then the solver's domain
+test, which rejects a proposed step that takes a cell's mass more negative than
+its absolute tolerance (§15.5.4).
+
+The approach to depletion is tested for orders 0, 0.5 and 1: a single cell
+decays monotonically without its concentration going below `-1e-9`, the two
+components summing to their initial total throughout
+(`test/kernels/test_kinetics.jl`, "approach to depletion"; the limiter's C¹ join
+and its finite derivatives at absent reactants are tested in the same file and
+in `test/physics/test_kinetics.jl`).
 
 > **Implementation note.** Limiter struct: `DepletionLimiter`,
 > src/Materials/reactions.jl (carried per material in
 > `material.depletion_limiter`; re-exported from Pyrolysis.Physics).
-> Per-reactant application inside the concentration product loop:
+> Per-reactant application inside the concentration product loop
+> (`_reactant_factor`, `_finite_base`, `_finite_power`, `one_sided_factor`):
 > src/Physics/kinetics.jl.
 
 ---
 
 ## 6.4 Reaction Order and the Concentration Product
 
-The composition factor is the product over all reactants of the clipped
-concentration raised to its per-reactant order, times the per-reactant
-depletion factor of §6.3:
+The composition factor is the product over all reactants of the per-reactant
+factor of §6.3, the finite base raised to its order times the onset:
 
 $$
-\Phi_i(\boldsymbol{\xi}) = \prod_{j\,\in\,\mathrm{reactants}(i)}
-\xi_j^{\,n_{i,j}}\,\tanh\!\bigl(\xi_j/\xi_{\mathrm{th}}\bigr).
+\Phi_i(\boldsymbol{\xi}) = \prod_{j\,\in\,\mathrm{reactants}(i)} f(\xi_j;\,n_{i,j})
+= \prod_{j\,\in\,\mathrm{reactants}(i)} b(\xi_j)^{\,n_{i,j}}\,g\!\bigl(\xi_j/\xi_{\mathrm{th}}\bigr)
+\quad (\text{all } \xi_j > 0).
 \tag{6.4}
 $$
 
@@ -373,12 +478,12 @@ most common orders:
 
 (src/Physics/kinetics.jl). For $n=1$ it returns $x$ directly (no `pow` call);
 for $n=0$ it returns `one(x)` — a zero-order reactant contributes no
-concentration dependence to the power law, but its depletion factor
-$\tanh(\xi/\xi_{\mathrm{th}})$ still gates the rate to zero as it runs out
-(§6.3.2); otherwise it falls back to the general
-`x^n`. Because the `max(ξ,0)` clip (§6.3) guarantees a non-negative base,
-$x^n$ is always real-valued even for fractional $n$. The accumulator is
-initialised at the promoted scalar type so Duals carry through:
+concentration dependence to the power law, but its onset
+$g(\xi/\xi_{\mathrm{th}})$ still gates the rate to zero as it runs out
+(§6.3.2); otherwise it falls back to the general `x^n`. Because the finite base
+$b(\xi)$ is positive, $x^n$ is always real-valued even for fractional $n$. The
+accumulator is initialised at the promoted scalar type so dual numbers carry
+through:
 
 ```julia
 conc_factor = one(promote_type(eltype(ξ), typeof(T)))
@@ -419,15 +524,15 @@ $$
 where $\nu_{i,j}$ is the stoichiometric (mass) coefficient: **negative** when $j$
 is a reactant of reaction $i$, **positive** when $j$ is a product. This $S_j$ is
 the chemical contribution to the species conservation equation of §3, Governing
-Equations; for gases it adds to the transport divergence, for solids/liquids it is
-the entire right-hand side (§6.5.4).
+Equations; in the discrete mass rows it enters times the cell volume, beside the
+face fluxes (§6.5.4).
 
 ### 6.5.2 The single-reactant mass convention
 
-The current model supports exactly one reactant per reaction. Per unit reaction
+The model supports exactly one reactant per reaction. Per unit reaction
 extent, that reactant is consumed with **unit mass stoichiometry** (an implicit
 $\nu = -1$), and the products are produced with their explicit per-product mass
-yields. The kernel that applies one reaction to the source vector is:
+yields. The function that applies one reaction to the source vector is:
 
 ```julia
 @inline function _apply_reaction_source!(src, rxn::Reaction{NRin}, r) where {NRin}
@@ -510,28 +615,34 @@ validation utilities of §6.8 exist purely as diagnostics.
 
 The species source $S_j$ is the same expression for every phase; the phase
 distinction lives in the *conservation equation* into which $S_j$ is inserted, not
-in the kinetics. At final RHS assembly (src/Discretization/finite_volume.jl)
-the code calls `apply_species_residual_unrolled!`, which assembles
+in the kinetics. The integrated states are the cell masses, and the row
+assembly (`assemble_rows!`, src/Assembly/residual.jl) writes, for every
+component of every cell,
 
 $$
-\frac{d\xi_j}{dt} =
-\begin{cases}
--(\nabla\!\cdot\! \mathbf J_j)_{\mathrm{cell}} + S_j, & j\ \text{gaseous},\\[4pt]
-S_j, & j\ \text{solid or liquid},
-\end{cases}
+\frac{dm_{j,\mathrm{cell}}}{dt} = S_j\,V + \dot M_j ,
+\qquad
+\dot M_j = -\sum_f s_f\,A_f\,F_{j,f},
 \tag{6.7}
 $$
 
-so solids/liquids have **no transport term** — they are Lagrangian, fixed to the
-material point (in the ALE frame, §11) — while gases carry the divergence of their
-mass flux $\mathbf J_j$ (§9). The dispatch is resolved at compile time from the
-component's static phase type (`is_gas`, src/Materials/components.jl), with no
-run-time branching. The full energy/species RHS assembly sequence is documented in
-§7, Heat Conduction, Convection & Energy Assembly.
+with $S_j V$ the reaction kernel's mass source [kg·s⁻¹] (§6.1.2) and
+$\dot M_j$ the face-flux part of the mass rate, scattered from the face fluxes
+$F_{j,f}$ the kernels wrote. The gas-transport kernel writes face fluxes for the
+gas components only (its `gas` flags, `map(is_gas, material.components)`), so on
+a mesh that rides the skeleton the solids and liquids have **no transport
+term** — they move with the material point (§11) — while the gases carry their
+diffusive and Darcy fluxes (§9). Where a correction moves the mesh relative to
+the solid, the relative-flux kernel carries *every* component across the faces
+at the relative velocity (§11.6). Because the masses are the states and every
+face flux is added to one cell and subtracted from its neighbour, mass is
+conserved exactly; the energy row assembled beside (6.7) is documented in §7,
+Heat Conduction, Gas Convection, and Energy Assembly.
 
 > **Implementation note.** Species source: `species_source_terms!` and the
 > `@generated` kernel `_species_source_terms_gen!`, src/Physics/kinetics.jl;
-> per-reaction application `_apply_reaction_source!` (same file).
+> per-reaction application `_apply_reaction_source!` (same file); the cell
+> sources `S_mass = S_j V`: `ReactionKernel`, src/Kernels/reactions.jl.
 > Build-time balance: `_validate_stoichiometry`, src/Materials/reactions.jl.
 
 ---
@@ -583,19 +694,24 @@ material:
   cell is heated, as char oxidation should.
 
 The source comment states this explicitly (src/Physics/kinetics.jl). In
-the energy equation $Q_{\mathrm{rxn}}$ enters additively on the right-hand side
-together with the conduction divergence, gas-advection source, and radiation
-source, and the whole is divided by the mixture volumetric heat capacity
-$\rho c_p^{\mathrm{eff}}$ (every component; see §3, §5, §7):
+the energy row of a cell $Q_{\mathrm{rxn}}$ enters, times the cell volume, as part
+of the cell's energy source together with the absorbed radiation, beside the
+conduction and the sensible enthalpy the mass fluxes carry across its faces;
+the temperature form divides by the heat-capacity sum $C$ of every component
+(§5.4, §7.3). For a cell of volume $V$ whose faces $f$ carry the conductive flux
+$q_f$ and the mass fluxes $F_{j,f}$ at the face temperature $T_f$ ($s_f = \pm1$
+the orientation of face $f$ relative to the cell, §2):
 
 $$
-\frac{dT_{\mathrm{cell}}}{dt} =
-\frac{-\,(\nabla\!\cdot\! q_{\mathrm{cond}}) + S_{\mathrm{conv}}
-+ Q_{\mathrm{rad}} + Q_{\mathrm{rxn}}}{\rho c_p^{\mathrm{eff}}}
+C\,\frac{dT_{\mathrm{cell}}}{dt} =
+\bigl(Q_{\mathrm{rxn}} + Q_{\mathrm{rad}}\bigr)V
+- \sum_{f} s_f A_f\Bigl[q_f + \sum_j F_{j,f}\bigl(h_j(T_f) - h_j(T_{\mathrm{cell}})\bigr)\Bigr]
 \tag{6.9}
 $$
 
-(`compute_rhs!`, Step 8, src/Discretization/finite_volume.jl).
+(`assemble_rows!`, src/Assembly/residual.jl; the energy-state alternative, the
+enthalpy inventory, adds the formation term $\sum_j S_j V\,h_j(T_{\mathrm{cell}})$
+instead, §7.3.3).
 
 **Units check.** $[h_i] = $ J·kg⁻¹ (per kg of first reactant) and $[r_i] = $
 kg·m⁻³·s⁻¹, so $[h_i r_i] = $ J·m⁻³·s⁻¹ $=$ W·m⁻³, the volumetric power density
@@ -666,21 +782,25 @@ $h_i$ is referenced.
 
 A heat of reaction is only defined relative to a **datum**: $h_i$ may be quoted
 
-- **at the local reaction temperature** — $h_i(T) = \sum_j \nu_{ji}\,h_j(T)$,
+- **at the local reaction temperature** — $h_i(T) = \sum_j \nu_{i,j}\,h_j(T)$,
   the heat a DSC measures at the decomposition temperature, and the usual
   meaning of inverse-calibrated (ThermaKin/Gpyro-style) effective heats; or
 - **at the fixed ambient datum** $T_{\text{ref}} = 298.15$ K —
-  $h_i = \sum_j \nu_{ji}\,h_j(T_{\text{ref}})$, the formation-enthalpy style.
+  $h_i = \sum_j \nu_{i,j}\,h_j(T_{\text{ref}})$, the formation-enthalpy style.
 
 The energy equation (§3.3) uses the first. With heats at the local reaction
 temperature, subtracting the species equations from the total-enthalpy balance
 gives the **exact** temperature equation
-$\rho c_p\,\partial_t T = -\nabla\cdot q + S_{\text{conv}} + Q_{\text{rad}} +
-Q_{\text{rxn}}$ — no further term exists, because the gas products' sensible
-enthalpy $\Delta h_g(T, T_{\text{ref}}) = \int_{T_{\text{ref}}}^{T} c_{p,g}\,\mathrm{d}T'$ is already *inside* $h_i(T)$.
+$\rho c_p\,\partial_t T = -\nabla\cdot q - \sum_g c_{p,g}\,\mathbf J_g\cdot\nabla T
++ Q_{\text{rad}} + Q_{\text{rxn}}$, whose second term is the temperature-form
+reading of the gas enthalpy flux at the faces (§7.4) — no further term exists,
+because the gas products' sensible enthalpy
+$\Delta h_g(T, T_{\text{ref}}) = \int_{T_{\text{ref}}}^{T} c_{p,g}\,\mathrm{d}T'$ is
+already *inside* $h_i(T)$. The reaction kernel evaluates the heats at the local
+temperature (§6.1.2), consistent with this datum.
 
 A heat quoted at the $T_{\text{ref}}$ datum is converted by Kirchhoff's law,
-$h_i(T) = h_i(T_{\text{ref}}) + \sum_j \nu_{ji}\,\Delta h_j(T, T_{\text{ref}})$,
+$h_i(T) = h_i(T_{\text{ref}}) + \sum_j \nu_{i,j}\,\Delta h_j(T, T_{\text{ref}})$,
 with the sum running over the reactant ($\nu = -1$) and the products; the
 converted heat can be supplied as a temperature-dependent heat property (§6.6.2).
 The conversion is the integral of the heat-capacity change across the reaction,
@@ -701,9 +821,10 @@ evaluation, so it is engineered to allocate nothing and to specialise completely
 on the (compile-time-known) reaction and component counts $N_R$ and $N_C$. Two
 `@generated` kernels and one inline reduction achieve this.
 
-**Rate and heat evaluation.** `evaluate_reactions!` forwards to
-`_evaluate_reactions_gen!` (src/Physics/kinetics.jl), which the compiler
-expands into a flat block — one explicit `rates[i] = reaction_rate(...)` and
+**Rate and heat evaluation.** `evaluate_reactions!(rates, heats, ξ, T, material,
+limiter = material.depletion_limiter)` forwards to `_evaluate_reactions_gen!`
+(src/Physics/kinetics.jl), which the compiler expands into a flat block — one
+explicit `rates[i] = reaction_rate(rxn, ξ, T; limiter)` and
 `heats[i] = rxn.heat(T, ξ)` statement per reaction — with no run-time loop over
 the heterogeneous `reactions` tuple. Heterogeneity (each `Reaction` may have a
 different `NRin`, `NRout`, and heat property type) is therefore handled by static
@@ -711,23 +832,25 @@ dispatch with no `Union` boxing and no allocation.
 
 **Species sources.** `species_source_terms!(sources, rates, material)` zeroes the
 output and calls `_species_source_terms_gen!`, again unrolled to one
-`_apply_reaction_source!` per reaction. It is the single method, called from
-`compute_rhs!` and from the Jacobian operators that need the reaction sources.
+`_apply_reaction_source!` per reaction. It is the single method, called by the
+reaction kernel (§6.1.2).
 
 **Heat sum.** `reaction_heat_source` is a single `@inline` reduction over the
 pre-filled `rates`/`heats` vectors (src/Physics/kinetics.jl), promoting the
-accumulator type so Duals carry through.
+accumulator type so dual numbers carry through.
 
-All three use the promoted scalar type so that, in a Dual-typed (AD) pass, the
-caches hold Duals and derivatives propagate end-to-end. The per-cell scratch
-(`rates`, `heats`, `dξ_rxn`, `Q_rxn`) lives in the RHS cache and is sized by
-$N_R$, $N_C$, and the cell count (`RHSCache`,
-src/Discretization/finite_volume.jl), so the hot loop reuses storage
-across cells and time steps.
+All three use the promoted scalar type, so the colored Jacobian (§15) runs the
+same code on dual numbers and derivatives propagate end-to-end. The per-cell
+scratch (`rates` and `heats`, sized by $N_R$; `species`, sized by $N_C$) lives in
+the kernel contributions (`Contributions.rates`, `.heats`, `.species`,
+src/Kernels/contributions.jl) and is reused across cells and evaluations; the
+cell sources go to `S_mass` and `S_energy` of the same buffer. A dual-number
+evaluation uses the dual twin of the buffer (§7.7).
 
 > **Implementation note.** Generated kernels: `_evaluate_reactions_gen!` and
-> `_species_source_terms_gen!` (src/Physics/kinetics.jl). Compile-time constants $N_C, N_R$ are the
-> `Material{NC,NR}` type parameters (src/Materials/materials.jl).
+> `_species_source_terms_gen!` (src/Physics/kinetics.jl). Compile-time constants
+> $N_C, N_R$ are the `Material{NC,NR}` type parameters
+> (src/Materials/materials.jl).
 
 ---
 
@@ -744,13 +867,17 @@ $$
 $$
 
 For a single-reactant reaction it compares the implicit unit reactant mass against
-the product-yield sum; for $N_{\mathrm{in}} > 1$ it returns `NaN` (unsupported).
-The function warns and returns `false` if $\varepsilon_{\mathrm{mb}} > $ `tol`.
-`validate_problem`, which `solve` calls unless `validate = false`, checks that the
-material has at least one component and that every reactant and product index
-lies in $1..N_C$ (numeric reactions are not index-checked when the `Material` is
-built); with `strict = true` it also runs `verify_stoichiometry` over every
-reaction of the material.
+the product-yield sum; for $N_{\mathrm{in}} > 1$ `mass_balance_error` returns
+`NaN` (unsupported), which the comparison does not flag. The function warns and
+returns `false` if $\varepsilon_{\mathrm{mb}} > $ `tol`. `validate_problem`, which
+`solve` calls with `strict = false` unless `validate = false`, checks among other
+things (the mesh, the boundary conditions, the time span, the initial
+conditions, the initial porosity of a Darcy–Fick problem) that the material has
+at least one component and that every reactant and product index lies in
+$1..N_C$ (numeric reactions are not index-checked when the `Material` is built),
+and warns about degenerate Fickian gas transport (§5.6). Called by the user with
+`strict = true` (`Pyrolysis.validate_problem(problem; strict = true)`), it also
+runs `verify_stoichiometry` over every reaction of the material.
 
 Symbolic reactions are resolved to integer indices by `resolve_reaction` against
 the component name→index map when the `Material` is built, so a reaction that
@@ -793,12 +920,13 @@ with the convention that "in the absence of a second reactant, $\xi_{\mathrm{COM
 is set to 1." Pyrolysis.jl differs in two ways. First, our rate is **n-ary in the
 order but single-reactant in the mass**: we allow an arbitrary order $n_{i,j}$ on
 the single supported reactant (a strict generalisation of ThermaKin's
-unit-exponent factor for COMP1), but we do not yet support a genuine second
+unit-exponent factor for COMP1), but we do not support a genuine second
 mass-bearing reactant (§6.10). ThermaKin's COMP2 mechanism is precisely what our
 multi-reactant extension would need. Second, ThermaKin's temperature limit is a
 **hard cutoff** ("if temperature decreases below the lower limit or increases above
 the upper limit, the rate of reaction is set to 0"), whereas we use a smooth tanh
-ramp (§6.2) for AD/Newton compatibility. ThermaKin's species/heat assembly
+ramp (§6.2), which the colored Jacobian and the integrators' linearization
+require. ThermaKin's species/heat assembly
 ($\partial\xi_j/\partial t = \sum_i \theta_i^{\,j} r_i + \text{transport}$, their
 Eqs. 15–16, and heat $= h\,r$) is identical in form to our (6.5) and (6.8).
 
@@ -868,8 +996,9 @@ thus Gpyro's per-reactant-consumed heat (the $\Delta H_{\mathrm{sol}} =
 specify a heat "per kg of reactant consumed" — precisely our per-first-reactant
 basis (§6.6.1). Gpyro additionally separates sensible-enthalpy transport into the
 $\sum(\dot\omega_f - \dot\omega_d)h_i$ term of its gas energy equation; in
-Pyrolysis.jl that bookkeeping is the gas-advection source $S_{\text{conv}}$ of
-§7 together with the reaction-temperature datum of $h_i$ (§6.6.3).
+Pyrolysis.jl that bookkeeping is the sensible enthalpy the gas fluxes carry across
+the faces (§7.4) together with the reaction-temperature datum of $h_i$
+(§6.6.3).
 
 ### 6.9.3 FDS
 
@@ -929,7 +1058,7 @@ Verification & Validation, and the User Guide).
 | Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro | FDS |
 |---|---|---|---|---|
 | Rate basis | mass conc. $\xi_j$ | mass conc. $\xi$ | $\bar\rho Y_i$ (= $\xi$) | $\rho_{s,\alpha}$ (= $\xi$) |
-| Reactant factor | $\xi_j^{n_{i,j}}\tanh(\xi_j/\xi_{\mathrm{th}})$ (1 reactant) | $\xi_{\mathrm{C1}}\xi_{\mathrm{C2}}$ (bimolec.) | $(1-\alpha)^{n_k}$ + models | $\rho_s^{n_s}$ |
+| Reactant factor | $b(\xi_j)^{n_{i,j}}\,g(\xi_j/\xi_{\mathrm{th}})$ (1 reactant) | $\xi_{\mathrm{C1}}\xi_{\mathrm{C2}}$ (bimolec.) | $(1-\alpha)^{n_k}$ + models | $\rho_s^{n_s}$ |
 | Extra factors | — | — | $g(Y_{\mathrm{O_2}})$ | $X_{\mathrm{O_2}}^{n_{\mathrm{O_2}}} T_s^{n_t}$ |
 | Temp. gate | smooth tanh | hard cutoff | hard $H(T-T_{\mathrm{crit}})$ | (none / power) |
 | Stoich. yields | $\nu_{i,j}$, $\sum y=1$ | $\theta_i^j$ | $\mathrm{SF}_k$ / yields | $v$, $\sum v=1$ |
@@ -978,9 +1107,10 @@ intumescent solids, moisture). Its boundaries, with the source-of-truth guards:
    distribution or fitting helper for it.
 
 5. **Depletion-limiter bias.** The limiter (6.3) under-predicts the rate near
-   and below $\xi_{\mathrm{th}} = 1$ kg·m⁻³ (~24% at the threshold, growing as
-   the reactant runs out) and converts exponential burnout tails into algebraic
-   ones (§6.3.3). For materials whose physically meaningful residue
+   and below $\xi_{\mathrm{th}} = 1$ kg·m⁻³ (24 % at the threshold, 98 % at
+   $0.1\,\xi_{\mathrm{th}}$) and converts exponential burnout tails into
+   algebraic ones, $\xi \approx \xi_{\mathrm{th}}/\sqrt{3.73\,k\,t}$ for
+   first-order kinetics (§6.3.3). For materials whose physically meaningful residue
    concentrations are comparable to the default threshold, the threshold should
    be lowered (at some cost in stiffness) or the limiter disabled for
    validation.

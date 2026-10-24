@@ -21,20 +21,24 @@ the kinetics convention in the nomenclature.
 Every reaction in Pyrolysis.jl evaluates the same volumetric rate (kg·m⁻³·s⁻¹):
 
 ```
-r_i = A_i · exp(−E_i / (R_g · T)) · Π_j ξ_j^{n_{i,j}} · tanh(ξ_j/ξ_th) · gate(T)
+r_i = A_i · exp(−E_i / (R_g · T)) · Π_j b(ξ_j)^{n_{i,j}} · g(ξ_j/ξ_th) · gate(T)
 ```
 
 where
 
 - `A_i` is the Arrhenius pre-exponential factor (units depend on order; see §4.4),
 - `E_i` is the activation energy (J·mol⁻¹),
-- `R_g = 8.314462618` J·mol⁻¹·K⁻¹ is the universal gas constant,
-- `T` is the absolute temperature (K),
+- `R_g = 8.31446261815324` J·mol⁻¹·K⁻¹ is the universal gas constant,
+- `T` is the cell's trial temperature (K): the cell temperature smoothly
+  clamped into the property bracket `[200, 3000]` K with 1 K transitions, which
+  is the cell temperature on every physical state,
 - `ξ_j` is the mass concentration of reactant `j` (kg·m⁻³) — note
   **mass concentration**, not mole fraction or mass fraction,
 - `n_{i,j}` is the reaction order with respect to reactant `j` (must be ≥ 0;
   negative orders are rejected at construction),
-- `tanh(ξ_j/ξ_th)` is the smooth depletion roll-off of §4.10, and
+- `b(ξ_j)` is the finite power base of the depletion limiter (equal to `ξ_j`
+  to within `10⁻⁸` kg·m⁻³) and `g(ξ_j/ξ_th)` its one-sided onset, exactly zero
+  at and below zero concentration (§4.10), and
 - `gate(T)` is a smooth temperature window built from `T_min` / `T_max` (§4.6).
 
 The rate is on a **mass-concentration** basis, which is what makes the species
@@ -73,7 +77,7 @@ is not in the components tuple, `Material(...)` raises a clear error. Prefer the
 ### Single-product form
 
 ```
-Reaction(name, reactant => product; A, E, h, n=1.0, T_min=0.0, T_max=Inf, validate_mass=true)
+Reaction(name, reactant => product; A, E, h, n=1.0, T_min=0.0, T_max=Inf, gate_width=1.0, validate_mass=true)
 ```
 
 The product receives the full mass yield of 1.0 automatically; you do not pass
@@ -87,7 +91,7 @@ Reaction(:decomposition, :virgin => :MMA; A = 8.5e12, E = 188e3, h = 870e3, n = 
 ### Two-product form
 
 ```
-Reaction(name, reactant => (product1, product2); A, E, h, yields, n=1.0, T_min=0.0, T_max=Inf, validate_mass=true)
+Reaction(name, reactant => (product1, product2); A, E, h, yields, n=1.0, T_min=0.0, T_max=Inf, gate_width=1.0, validate_mass=true)
 ```
 
 Here `yields = (y1, y2)` gives the mass split between the two products and **must
@@ -110,6 +114,7 @@ Reaction(:charring, :virgin => (:char, :gas); A = 1e15, E = 200e3, h = 500e3,
 | `n` | Reaction order w.r.t. the reactant | – | `1.0` |
 | `T_min` | Lower temperature gate | K | `0.0` |
 | `T_max` | Upper temperature gate | K | `Inf` |
+| `gate_width` | Width of the tanh ramp of both gates (finite, > 0) | K | `1.0` |
 | `validate_mass` | Enforce mass balance at construction | – | `true` |
 
 `A`, `E`, and `h` are **required** keyword arguments — there are no defaults, and
@@ -200,10 +205,12 @@ They are **not hard cutoffs**: instead of step functions, Pyrolysis.jl multiplie
 the rate by smooth `tanh` ramps,
 
 ```
-r ← r · ½(1 + tanh(T − T_min)) · ½(1 + tanh(T_max − T))
+r ← r · ½(1 + tanh((T − T_min)/w_gate)) · ½(1 + tanh((T_max − T)/w_gate))
 ```
 
-so the reaction turns on and off smoothly. The smoothness is deliberate — hard
+with `w_gate = gate_width` (default 1 K), so the reaction turns on and off
+smoothly. A narrower width approaches the hard step at the cost of a stiffer
+Jacobian near the gate. The smoothness is deliberate — hard
 steps create discontinuities in the Jacobian that break automatic differentiation
 and Newton convergence (Technical Reference §6.2).
 
@@ -219,9 +226,9 @@ Defaults are `T_min = 0.0` and `T_max = Inf`. The lower gate is applied only whe
 is finite; with the defaults, neither gate fires and the bare Arrhenius rate is
 used at all temperatures.
 
-> **Caveat — gate leakage.** Because the ramp uses `tanh(T − T_min)` (argument in
-> kelvin), the transition is sharp on the kelvin scale but not instantaneous: the
-> reaction is "weakly active" within roughly ±10 K of each bound. If you need a
+> **Caveat — gate leakage.** The ramp `tanh((T − T_min)/w_gate)` is sharp on the
+> scale of the gate width but not instantaneous: the reaction is "weakly active"
+> within roughly ±10 gate widths of each bound (±10 K at the default width). If you need a
 > hard kinetic threshold, the gates are an approximation; for the AD- and
 > Newton-stability reasons above, they are intentional. See Technical Reference
 > §6.2.
@@ -295,9 +302,9 @@ into a source: an endothermic reaction (`h > 0`) gives `Q_rxn < 0` (cooling), an
 an exothermic reaction (`h < 0`) gives `Q_rxn > 0` (heating). See Technical
 Reference §6.6.
 
-> **Important — opposite to ThermaKin / Gpyro.** ThermaKin2Ds and Gpyro publish
-> heats of reaction with the *opposite* sign (in those codes `h > 0` is
-> exothermic). When you port parameters from a ThermaKin or Gpyro input file,
+> **Important — opposite to ThermaKin.** ThermaKin2Ds publishes heats of
+> reaction with the *opposite* sign (there `h > 0` is exothermic; Gpyro and FDS
+> use the sign of this package). When you port parameters from a ThermaKin input file,
 > **flip the sign of every heat of reaction.** The shipped examples annotate this
 > conversion explicitly; e.g. a ThermaKin "+2.78E6 J/kg" (exothermic there)
 > becomes `h = -2.78e6` here (exothermic in this convention) — and a ThermaKin
@@ -363,16 +370,19 @@ the property-function types.
 A common practical task is fitting Arrhenius parameters to a single-step
 thermogravimetric analysis (TGA) curve. The FDS approach uses two readouts from a
 constant-heating-rate TGA run: the **peak-rate temperature** `T_p` (K, where the
-mass-loss rate is maximal) and the **peak reaction rate** `r_p` (s⁻¹, the maximum
-fractional mass-loss rate divided by the heating rate `β_h` in K·s⁻¹). For a
-first-order reaction the standard estimates are
+mass-loss rate is maximal) and the **peak reaction rate** `r_p` (s⁻¹, the
+maximum of the normalized mass-loss rate `−(1/m_0) dm/dt`; a curve reported per
+kelvin is multiplied by the heating rate `β_h` in K·s⁻¹). For a first-order
+reaction of a pure material the standard estimates are
 
 ```
-E ≈ e · r_p · R_g · T_p²
+E ≈ e · r_p · R_g · T_p² / β_h
 A ≈ e · r_p · exp(E / (R_g · T_p))
 ```
 
-where `e ≈ 2.71828` is Euler's number and `R_g = 8.314462618` J·mol⁻¹·K⁻¹. As a
+where `e ≈ 2.71828` is Euler's number and `R_g = 8.314462618` J·mol⁻¹·K⁻¹
+(Technical Reference §6.9.3 gives the general form with the initial mass
+fraction). As a
 runnable example, suppose the TGA peak is at `T_p = 640 K` with a heating rate of
 10 K·min⁻¹ and a peak fractional mass-loss rate of 0.012 K⁻¹:
 
@@ -383,13 +393,15 @@ const R_g = 8.314462618    # J/(mol·K)
 T_p = 640.0                # peak-rate temperature, K
 r_p = 0.012 * β_h          # peak reaction rate, s⁻¹  (0.012 K⁻¹ × β_h)
 
-E = exp(1) * r_p * R_g * T_p^2          # J/mol
-A = exp(1) * r_p * exp(E / (R_g * T_p)) # s⁻¹
+E = exp(1) * r_p * R_g * T_p^2 / β_h   # J/mol  (≈ 111.1 kJ/mol)
+A = exp(1) * r_p * exp(E / (R_g * T_p)) # s⁻¹    (≈ 6.3e6 s⁻¹)
 
 rxn = Reaction(:decomposition, :virgin => :gas; A = A, E = E, h = 500e3)
 ```
 
-These are first-pass estimates; for production fits, refine `A`, `E`, and `h`
+These are first-pass estimates (a first-order TGA integrated with these values
+peaks at 640 K with a peak rate about 9 % above `r_p`, the error of the
+approximation behind the formulas); for production fits, refine `A`, `E`, and `h`
 against the measured curve using the sensitivity / inverse-analysis tooling (User
 Guide Chapter 13). See Technical Reference §6.9 for the relationship to the FDS,
 ThermaKin, and Gpyro kinetic formulations.
@@ -400,64 +412,89 @@ ThermaKin, and Gpyro kinetic formulations.
 
 As a reactant concentration approaches zero, a bare Arrhenius rate can still try
 to react at a finite speed, which makes implicit solvers stiff — and for a
-zero-order fit it would keep consuming reactant straight through zero.
-Pyrolysis.jl rolls the rate off smoothly by multiplying it with a `tanh` factor
-per reactant:
+zero-order fit it would keep consuming reactant straight through zero. An
+implicit solver also evaluates trial states on which a concentration is
+slightly negative. Pyrolysis.jl therefore multiplies the rate, per reactant, by
+a one-sided factor and evaluates the order's power on a finite base:
 
 ```
-r *= tanh(ξ / threshold)
+r ∝ b(ξ)^n · g(ξ / threshold)
+
+g(x) = 0                                   for x ≤ 0
+g(x) = (s − 2y) t³ + (3y − s) t²           for 0 < x < join,  t = x/join,
+                                           y = tanh(join), s = join·sech²(join)
+g(x) = tanh(x)                             for x ≥ join
+
+b(ξ) = base_scale · ln(1 + e^{ξ/base_scale})
 ```
 
-with negative concentrations clamped to zero first. The factor is smooth
-everywhere (no threshold branch): it is ≈ 1 well above `threshold` (within 4%
-at `2·threshold`, indistinguishable from 1 beyond `~20·threshold`) and drives
-the rate to zero with a bounded derivative as the reactant runs out — for every
-reaction order `n ≥ 0`, including zero-order. The limiter is configured by the
-`DepletionLimiter` type (top-level exported, and also exported by the `Physics`
-and `Materials` submodules):
+The onset `g` has zero value and zero slope at `x = 0` and matches `tanh` and
+its slope at `x = join`, so it is C¹ everywhere. The rate and every derivative
+of it are exactly zero at and below zero concentration, for every order
+`n ≥ 0`, including zero order: an absent or negative trial concentration is
+never consumed. The base `b(ξ)` equals `ξ` to within `base_scale · ln 2` and is
+finite for every real `ξ`, so the derivative of `ξⁿ` stays finite at
+depletion for fractional orders. Far above the threshold the factor rounds to
+one and the bare Arrhenius rate is recovered: the relative deficit is
+`2 e^{−2ξ/threshold}`, below 4 % at `2·threshold` and below 5e-9 at
+`10·threshold`, and the factor is exactly 1 from `20·threshold`.
+
+The limiter is configured by the `DepletionLimiter` type (exported at the top
+level, and by the `Physics` and `Materials` submodules):
 
 ```julia
-Base.@kwdef struct DepletionLimiter
-    threshold::Float64 = 1.0    # kg/m³ — rate roll-off scale
-    enabled::Bool      = true
-end
+DepletionLimiter(; threshold = 1.0, join = 1.0, base_scale = 1e-8, enabled = true)
 ```
 
 | Field | Meaning | Units | Default |
 |---|---|---|---|
-| `threshold` | Concentration scale of the rate roll-off | kg·m⁻³ | `1.0` |
-| `enabled` | Turn limiting on/off | – | `true` |
+| `threshold` | Concentration scale of the roll-off | kg·m⁻³ | `1.0` |
+| `join` | Where the onset joins `tanh`, in units of `threshold` | – | `1.0` |
+| `base_scale` | Scale of the finite power base | kg·m⁻³ | `1e-8` |
+| `enabled` | Apply the onset factor | – | `true` |
 
-The default limiter (`threshold = 1.0`, `enabled = true`) is applied
-automatically during a solve. The limiter is a property of the **material**, not
-of individual reactions or of `solve`: pass a custom one with the `Material`
-constructor's `depletion_limiter` keyword,
+`threshold`, `join` and `base_scale` must be positive (an `ArgumentError`
+otherwise). With `enabled = false` the onset factor is one and only the finite
+base remains: an order-zero reaction then runs at its full rate at any
+concentration, and an absent reactant reacts at the rate of a `base_scale`
+concentration; the integrator's admissibility check is then the only guard.
+
+The limiter is a property of the **material**, not of individual reactions or
+of `solve`: the default `DepletionLimiter()` is applied to every rate the
+solver evaluates, and a custom one is passed with the `Material` constructor's
+`depletion_limiter` keyword,
 
 ```julia
 material = Material(name = …, components = …, reactions = …,
                     depletion_limiter = DepletionLimiter(threshold = 0.1))
 ```
 
-and the solver's kinetics path reads `material.depletion_limiter` for every rate
-evaluation. **When to tune:** the default `threshold = 1.0` kg·m⁻³ is appropriate for
-most condensed-phase materials whose concentrations are hundreds to thousands of
-kg·m⁻³. If you work with very dilute species (e.g. trace moisture at a few
-kg·m⁻³), the default threshold may damp them more than intended; conversely, if a
-solve is stiff or produces small negative concentrations near full conversion, a
-slightly larger threshold can help. See Technical Reference §6.3.
+The reaction kernel reads `material.depletion_limiter` for every rate
+evaluation, and with an enabled limiter it skips a cell in which every reaction
+lacks its reactant (that cell's rates and their derivatives are exactly zero).
+**When to tune:** the default `threshold = 1.0` kg·m⁻³ is appropriate for most
+condensed-phase materials, whose concentrations are hundreds to thousands of
+kg·m⁻³. A lower threshold keeps the kinetics closer to the bare rate law near
+depletion, which matters for genuinely dilute species (e.g. trace moisture at a
+few kg·m⁻³); a higher one damps the stiffness of a vanishing reactant. See
+Technical Reference §6.3.
 
-You can evaluate a single rate with a custom or disabled limiter for testing:
+You can evaluate a single rate with a custom or disabled limiter for testing,
+and the onset itself with `one_sided_factor`:
 
 ```julia
 using Pyrolysis
-using Pyrolysis.Physics: reaction_rate   # exported by Physics, not re-exported at the top level
+using Pyrolysis.Physics: reaction_rate, one_sided_factor   # exported by Physics only
 
-# Disable limiting (validation / verification only — may be stiff in a full
-# solve, and removes the only guard that stops zero-order reactions at ξ = 0).
-r_raw = reaction_rate(rxn, ξ_cell, T_cell; limiter = DepletionLimiter(enabled = false))
+rxn = Reaction(:decomp, 1 => 2; A = 1e10, E = 150e3, h = 5e5)
+r      = reaction_rate(rxn, (0.5, 0.0), 700.0)   # the default limiter
+r_bare = reaction_rate(rxn, (0.5, 0.0), 700.0; limiter = DepletionLimiter(enabled = false))
+one_sided_factor(2.0, 1.0)                        # g(2) = tanh(2) ≈ 0.964
 ```
 
-where `ξ_cell` is the concentration `NTuple` and `T_cell` the temperature.
+`reaction_rate(rxn, ξ, T; limiter)` takes a resolved (index-form) reaction, the
+concentration `NTuple` of the cell and its temperature; without `limiter` it
+uses `DepletionLimiter()`, not the material's.
 
 ---
 
@@ -510,12 +547,16 @@ balanced and issues a warning and returns `false` otherwise:
 ```julia
 using Pyrolysis.Materials: verify_stoichiometry
 
-rxn = Reaction(:charring, :virgin => (:char, :gas);
+rxn = Reaction(:charring, 1 => (2, 3);
                A = 1e15, E = 200e3, h = 500e3, yields = (0.25, 0.75))
 verify_stoichiometry(rxn)   # true: 0.25 + 0.75 = 1.0
 
 all(verify_stoichiometry, material.reactions)   # every reaction of a material
 ```
+
+It takes a resolved `Reaction`: a reaction built with symbols is a
+`PendingReaction` until `Material(...)` resolves it, so check the material's
+`reactions` (or use the index form) rather than the symbolic object itself.
 
 It is a diagnostic: mass conservation is enforced by the single-reactant
 construction convention (§4.3), not by a projection during the solve, so the
@@ -542,14 +583,15 @@ virgin = SolidComponent(:virgin, ρ = 1190, c = 1420, k = 0.21, ε = 0.86)
 char   = SolidComponent(:char,   ρ = 5.0,  c = 1000, k = 0.10, ε = 0.95)
 gas    = GaseousComponent(:MMA,  M = 0.10012, c = 1500, k = 0.02, λ = 1e-5)
 
-rxn = Reaction(:decomposition, :virgin => (:char, :MMA);
+rxn_spec = Reaction(:decomposition, :virgin => (:char, :MMA);
                A = 1.5e14,     # s⁻¹
                E = 2.03e5,     # J/mol
                h = 820e3,      # J/kg  (positive ⇒ endothermic ⇒ cools)
                n = 1.0,
                yields = (0.002, 0.998))
 
-material = Material(name = :PMMA, components = (virgin, char, gas), reactions = (rxn,))
+material = Material(name = :PMMA, components = (virgin, char, gas), reactions = (rxn_spec,))
+rxn = material.reactions[1]                          # the resolved reaction
 
 # Verify mass balance.
 @assert verify_stoichiometry(rxn)                  # 0.002 + 0.998 = 1.0
@@ -558,7 +600,7 @@ material = Material(name = :PMMA, components = (virgin, char, gas), reactions = 
 # Evaluate the rate at one cell state (concentrations in kg/m³, T in K).
 T_cell = 700.0
 ξ_cell = (1000.0, 0.0, 0.0)                         # (virgin, char, MMA)
-r = reaction_rate(rxn, ξ_cell, T_cell)             # kg·m⁻³·s⁻¹
+r = reaction_rate(rxn, ξ_cell, T_cell; limiter = material.depletion_limiter)  # kg·m⁻³·s⁻¹ (≈ 106.7)
 
 Q_rxn = -rxn.heat(T_cell, ξ_cell) * r              # W·m⁻³  (= -h·r); endothermic ⇒ < 0
 S = (-r, 0.002 * r, 0.998 * r)                     # species sources (virgin, char, gas)
@@ -568,27 +610,30 @@ S = (-r, 0.002 * r, 0.998 * r)                     # species sources (virgin, ch
 `r` is the volumetric reaction rate, `Q_rxn = −h·r` is the volumetric heat source
 (negative here because the reaction is endothermic), and the species sources `S`
 conserve mass (the products' generation balances the reactant's consumption).
-This is exactly the per-cell computation the solver performs internally; see
-Technical Reference §6.7.
+The solver performs this computation in every cell with the material's
+limiter at the cell's trial temperature and multiplies the sources by the cell
+volume, since the component masses are the states; see Technical Reference §6.7.
 
 ---
 
 ## 4.14 Summary and limitations
 
-- A `Reaction` is `A·exp(−E/R_gT)·ξ^n` with smooth `T_min`/`T_max` gates and a
-  heat of reaction `h`.
+- A `Reaction` is `A·exp(−E/R_gT)·ξ^n`, times the limiter's onset, with smooth
+  `T_min`/`T_max` gates of width `gate_width` and a heat of reaction `h`.
 - Reference components by **symbol** (recommended) or integer index; product
   `yields` must sum to **1.0**, enforced at construction unless
   `validate_mass = false`.
 - **Sign convention: `h > 0` is endothermic, `h < 0` is exothermic** — opposite
-  to ThermaKin/Gpyro; flip the sign when porting parameters.
+  to ThermaKin; flip the sign when porting ThermaKin parameters.
 - Only **single-reactant** reactions are supported; build multi-step schemes as
   chains of single-reactant reactions. Multi-reactant (e.g. O₂-dependent)
   kinetics, temperature-dependent `A`, and pressure-dependent rates are not
   supported (Technical Reference §6.10).
 - The **depletion limiter** (default `threshold = 1.0` kg·m⁻³) is applied
-  automatically and is rarely tuned; lower it only for genuinely dilute species
-  and raise it only to relieve stiffness near full conversion.
+  automatically: each reactant's rate factor is exactly zero at and below zero
+  concentration and joins `tanh(ξ/threshold)` above it. It is rarely tuned;
+  lower it only for genuinely dilute species and raise it only to relieve
+  stiffness near full conversion.
 - Re-check a reaction's mass balance with `verify_stoichiometry`.
 
 For the mathematics behind the rate law, the smooth gates, the depletion limiter,

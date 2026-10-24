@@ -12,9 +12,9 @@ and the pitfalls that make a sensitivity ill-defined. For the mathematics — th
 finite-difference error balance and the variance decomposition — see Technical
 Reference §17.
 
-> **Coordinate and symbol conventions.** `z = 0` is the bottom/substrate
-> (boundary id 2, tag `:bottom`); `z = L` is the top/exposed surface (boundary id
-> 1, tag `:top`); heat enters from the top. The Arrhenius parameters are the
+> **Coordinate and symbol conventions.** `z = 0` is the back face (tag
+> `:bottom`); `z = L` is the exposed surface (tag `:top`); heat enters from the
+> top. The Arrhenius parameters are the
 > pre-exponential `A_i` [s⁻¹] (or [m³·kg⁻¹·s⁻¹] for higher-order reactions), the
 > activation energy `E_i` [J·mol⁻¹], and the heat of reaction `h` [J·kg⁻¹] with
 > the **`h > 0` endothermic** storage convention (Technical Reference §2 and §6).
@@ -34,15 +34,18 @@ Local sensitivities linearize about a single parameter point `θ`. Sobol is
 to inputs, but it gives no derivative.
 
 Neither needs an extension. The local recipe uses `FiniteDiff`, which you add to
-your own environment (`Pkg.add("FiniteDiff")`); the Sobol path is
-`parameter_sweep` plus your choice of sampling package.
+your own environment (`Pkg.add("FiniteDiff")`; the `examples/` environment
+already has it); the Sobol path is `parameter_sweep` plus your choice of
+sampling package.
 
-Automatic differentiation through `solve` is not available. The material
-constructors convert every number to `Float64` and the integrator is
-`Float64`-typed, so a `θ` carrying `ForwardDiff.Dual` numbers fails at
-construction (`MethodError: no method matching Float64(::ForwardDiff.Dual{…})`)
-and reverse-mode tools have no parameter vector to differentiate (Technical
-Reference §17.3).
+Pyrolysis.jl gives sensitivities by finite differences of whole solves; no
+derivative is taken through the solve. The material constructors convert every
+number to `Float64` and the integrator is `Float64`-typed, so a `θ` carrying
+`ForwardDiff.Dual` numbers fails at construction
+(`MethodError: no method matching Float64(::ForwardDiff.Dual{…})`), and
+reverse-mode tools have no parameter vector to differentiate (Technical
+Reference §17.3). The forward-mode automatic differentiation inside the solver
+builds the Jacobian with respect to the state, not to the parameters.
 
 ---
 
@@ -94,7 +97,7 @@ function p_inject(base, θ)
         reactions  = (rxn,),
     )
 
-    mesh = create_uniform_mesh(10.0e-3, 40, Val(3); cross_section_area = 1.0)
+    mesh = create_uniform_mesh(10.0e-3, 40)          # 10 mm, 40 cells, 1 m² cross section
 
     bc_set = BoundaryConditionSet(
         thermal = (top    = HeatFluxBC(50e3) + RadiativeBC(ε = 0.9, T_inf = 300.0)
@@ -142,7 +145,7 @@ handles:
 | `h` (heat of reaction) | `Reaction(...; h=)` | scalar, tuple `(a,b)` → linear, or a closure |
 | `ρ_j`, `c_p`, `k_j` | `SolidComponent(...; ρ=, c=, k=)` | pass a number, or a `CallableProperty` closing over `θ` |
 | `λ_j`, `κ_j` | component `λ=`, `κ=` | gas-transfer / permeability for Darcy mode |
-| `ε_j`, `α_j` | component `ε=`, `α=` | emissivity / mass-absorption |
+| `ε_j`, `a_j`, `α_j` | component `ε=`, `absorptivity=`, `α=` | emissivity / surface absorptivity / mass-basis absorption coefficient |
 | BC parameters | `HeatFluxBC`, `ConvectiveBC(h=,T_inf=)`, `RadiativeFluxBC(flux=)`, … | external flux, `h_conv`, `T_∞` |
 | mixing `β` | `MixingSpec(WEIGHTED, β)` | conductivity / transport blend weight |
 
@@ -182,7 +185,7 @@ using Pyrolysis, FiniteDiff
 base = p_inject(nothing, θ0)          # this p_inject ignores `base`
 
 solve_opts = (radiation_model = SURFACE_ABSORPTION, abstol = 1e-9, reltol = 1e-7)
-qoi(sol) = [sol.extras.total_mass[end],                     # mass left [kg]
+qoi(sol) = [sol.extras.total_mass[end],                     # mass left [kg/m²]
             sum(sol.surface_T) / length(sol.surface_T)]     # mean surface T [K]
 y(θ) = qoi(solve(p_inject(base, θ); progress = false, solve_opts...))
 
@@ -193,8 +196,8 @@ J  = FiniteDiff.finite_difference_jacobian(y, θ0, Val(:central); relstep = 1e-4
 
 - `y` must return a vector of the same length at every `θ`. Values on the fixed
   `output_times` grid are fine; anything whose length depends on the trajectory
-  (the number of steps taken, a profile filtered of the `NaN` slots that
-  depletion parking leaves) breaks the Jacobian assembly.
+  (the number of steps taken, a profile filtered of the `NaN` entries of
+  deactivated cells) breaks the Jacobian assembly.
 - For a scalar output use
   `FiniteDiff.finite_difference_gradient(f, θ, Val(:central); relstep)`.
 - The step for entry `k` is `max(relstep * abs(θ_k), absstep)`, and `absstep`
@@ -205,8 +208,11 @@ J  = FiniteDiff.finite_difference_jacobian(y, θ0, Val(:central); relstep = 1e-4
   They are independent, so they parallelize (§13.5).
 
 Pass every option that changes the solution — `radiation_model`, `use_ale`,
-`jacobian`, tolerances — identically to every solve, here through
-`solve_opts`.
+`energy_state`, `deactivation`, `threshold`, `band`, the tolerances,
+`integrator_policy`, `linear_solver`, `dtmax`, `saveat` — identically to every
+solve, here through `solve_opts` (Technical Reference §17.7.1). An option that
+differs between the `+h` and the `−h` solve adds its own effect, divided by
+`2h`, to the estimate.
 
 ---
 
@@ -217,30 +223,139 @@ for central differences, and the noise `ε` the time integration leaves in `y`,
 which contributes about `ε/h`. On a well-posed problem the noise is small and
 changes smoothly with `θ` — a small enough perturbation leaves the integrator's
 step sequence unchanged — so the estimate settles over a wide range of steps.
-On the §13.2 problem at `reltol = 1e-7`, the derivatives differ from those at
-`relstep = 1e-4` by:
+On the §13.2 problem at `reltol = 1e-7` and `abstol = 1e-9` (the default
+integrator; the base solve accepts 295 steps and rejects 23, in about 0.03 s
+once compiled), the derivatives with respect to the three entries of `θ`
+differ from those at `relstep = 1e-4` by at most (measured):
 
 | Output | `relstep = 1e-2` | `1e-3` | `1e-5` to `1e-7` |
 |---|---|---|---|
-| peak surface temperature | 6 % | 0.06 % | ≤ 0.01 % |
-| `T_s` at `t = 150 s` | 29 % | 0.4 % | ≤ 0.004 % |
-| mean surface temperature | 0.2 % | 0.002 % | ≤ 0.0003 % |
-| final mass, `total_mass[end]` | 0.06 % | 0.0006 % | ≤ 0.00002 % |
+| peak surface temperature | 5.5 % | 0.061 % | ≤ 0.024 % |
+| `T_s` at `t = 150 s` | 28 % | 0.40 % | ≤ 0.018 % |
+| mean surface temperature | 0.19 % | 0.0016 % | ≤ 0.0065 % |
+| final mass, `total_mass[end]` | 0.067 % | 0.0007 % | ≤ 0.0007 % |
 
 The large steps are truncation error, worst for values at one time, which move
-with the reaction front. So:
+with the reaction front; the small steps differ by the integration error the
+tolerance leaves. So:
 
-1. **Start from `relstep = 1e-4`.**
+1. **Start from `relstep = 1e-4`** for an output that passes no event, as here.
 2. **Check** by repeating with a step ten times larger and ten times smaller. If
    the estimates agree, keep them. If they scatter, the output is not smooth in
    `θ` at this point; look for one of the causes in §13.9.
-3. **Do not ignore validation warnings.** A configuration `solve` warns about is
+3. **Qualify a derivative you rely on** — for a calibration, an uncertainty
+   estimate, or an objective that samples a burnout — with the convergence
+   check of §13.4.1, which chooses the step and the tolerance together.
+4. **Do not ignore validation warnings.** A configuration `solve` warns about is
    often non-smooth in `θ` as well. The §13.2 material with its solids left at
-   the default `λ = 0` (§13.9) needs 38 failed Newton iterations per solve, a
-   `1e-6` relative change in `A` moves `T_s` by 0.35 K, and its derivatives
-   change sign from one step to the next; with `λ = 1e-6` all of that is gone.
+   the default `λ = 0` (§13.9) needs 2,016 accepted and 379 rejected steps
+   where `λ = 1e-6` needs 295 and 23; a `1e-6` relative change in `A` moves
+   `T_s` by up to 0.29 K (`8e-6` K with `λ = 1e-6`); and the derivative of the
+   peak surface temperature with respect to `log10(A)` reads −1.08, −0.83,
+   −3.1 and +48.8 K at `relstep = 1e-3`, `1e-4`, `1e-5` and `1e-6`, against
+   −1.123 K at every one of those steps with `λ = 1e-6` (measured at
+   `reltol = 1e-7`).
 
----
+### 13.4.1 The convergence check
+
+The step and the tolerance are chosen per case by a convergence check. Perturb
+each parameter relatively by `±h` at `h` = 1, 2, 4 and 8e-3 and at two
+tolerances (`reltol = 1e-7` and `1e-8`, `abstol` scaled with `reltol`), form
+the central differences `D(h)` and the Richardson extrapolants of successive
+steps,
+
+```text
+R(h) = (4 D(h) − D(2h)) / 3
+```
+
+which remove the `h²` truncation term, and take the value where the
+extrapolants of two successive pairs agree within 5 % and the two tolerances
+agree within 5 % at those steps. A step too large carries the objective's
+curvature; a step too small carries the solve's error, or the objective's own
+roughness where it samples an event, such as a deactivation, at the data's
+times (§13.4.2). The check costs `8p` solves per tolerance for `p`
+parameters; they are independent and parallelize like any other perturbed
+solves (§13.5).
+
+A self-contained helper for one parameter and a scalar output; `y(θ, reltol)`
+solves the problem at `θ` with that tolerance and reduces the solution to a
+number:
+
+```julia
+# The relative spread of two values; infinite when their signs differ.
+spread(a, b) = sign(a) == sign(b) != 0 ? abs(a - b) / min(abs(a), abs(b)) : Inf
+
+function fd_check(y, θ0, k; steps = (1e-3, 2e-3, 4e-3, 8e-3), reltols = (1e-7, 1e-8),
+                  agree = 0.05)
+    D = map(reltols) do rt                                # D[tolerance][step]
+        map(steps) do η
+            δ = η * abs(θ0[k])
+            θp = copy(θ0); θp[k] += δ
+            θm = copy(θ0); θm[k] -= δ
+            (y(θp, rt) - y(θm, rt)) / (2δ)
+        end
+    end
+    Dt = D[end]                                           # the tighter tolerance
+    R = [(4Dt[j] - Dt[j+1]) / 3 for j in 1:length(steps)-1]
+    s = [spread(R[j], R[j+1]) for j in 1:length(R)-1]     # windows of three steps
+    j = argmin(s)
+    s[j] <= agree || return (value = NaN, window = (), tolerances_agree = false, D, R)
+    window = steps[j:j+2]
+    ok = all(i -> abs(D[1][i] - Dt[i]) <= agree * abs(Dt[i]), j:j+2)
+    return (value = R[j], window, tolerances_agree = ok, D, R)
+end
+```
+
+A derivative is qualified when a window is found and `tolerances_agree` is
+`true`; its value is the extrapolant of the window's smaller pair. On the
+§13.2 problem:
+
+```julia
+opts_at(rt) = (radiation_model = SURFACE_ABSORPTION, reltol = rt, abstol = 1e-2 * rt)
+Ts150(θ, rt) = solve(p_inject(base, θ); opts_at(rt)...).surface_T[76]   # T_s at 150 s
+
+c = fd_check(Ts150, θ0, 1)            # ∂T_s(150 s)/∂log10(A)
+c.value, c.window, c.tolerances_agree
+# (1.99706…, (0.001, 0.002, 0.004), true)
+```
+
+Here the differences at `reltol = 1e-8` are 1.9929, 1.9803, 1.9304 and 1.7383 K
+per decade of `A` at the four steps — the largest step 13 % off through its
+truncation error — and the extrapolants 1.9971, 1.9969 and 1.9944; the window
+is 1 to 4e-3 and the value lies within 0.02 % of the `relstep = 1e-4` estimate
+at the same tolerance. All twelve derivatives of the four outputs of the table
+above with respect to the three entries of `θ` pass, with the window 1 to 4e-3
+or 2 to 8e-3 (measured).
+
+For the V-BO-01 burnout deck (Technical Reference §18; 60 PMMA cells, the mean
+square misfit `J` of the mass-loss rate against Gpyro V2, in
+(g m⁻² s⁻¹)²), with each parameter perturbed relatively, `p = p₀ (1 ± h)`,
+the check gives `dJ/d ln α` = −24.65 (the PMMA absorption coefficient),
+`dJ/d ln q` = 957.7 (the incident flux) and `dJ/d ln A` = 32.57, with steps
+of 1 to 4e-3, 2 to 8e-3 and 1 to 2e-3 usable within 5 % at `reltol` 1e-6 to
+1e-8; a step of 2e-3 at `reltol = 1e-7` serves all three. These numbers are
+that case's; repeat the check for another deck or objective.
+
+### 13.4.2 Steps through a burnout
+
+With `deactivation = true` (Chapter 10) a burnout rewrites the state in
+events. A located event happens at the first root of the threshold margin, so
+its time is a smooth function of the parameters and the derivative of an
+output through the event exists. An objective that samples the solution at
+fixed times sees the event's burst move across its sample times, which adds a
+roughness with the period of one sample interval in the event time. On V-BO-01
+the deactivation moves 0.46 s per 1e-3 of flux against the reference's 1 s
+samples, and the difference at `h = 1e-3` departs by 6 % at every tolerance,
+the misfit before the burnout staying smooth to 1e-5; the convergence check's
+usable steps exclude that step, which is why the flux derivative uses 2 to
+8e-3.
+
+A perturbation that changes an event's decision — a cell moving into or out of
+the near-threshold band, or one invocation splitting into two — changes the
+merged state by a finite amount, and a pair of solves on the two sides of such
+a change measures the jump, not the derivative. Compare
+`sol.statistics.invocations` and `sol.events` between the perturbed solves;
+they should match (on V-BO-01 every run of the check has one invocation).
 
 ## 13.5 Running the perturbed solves in parallel
 
@@ -256,7 +371,10 @@ J   = reduce(hcat, [(ys[2k-1] .- ys[2k]) ./ (2h[k]) for k in eachindex(θ0)])
 ```
 
 This builds the same central-difference Jacobian as §13.3. Define `p_inject`
-and `qoi` with `@everywhere` when you run on workers (Chapter 12).
+and `qoi` with `@everywhere` when you run on workers (Chapter 12). The `8p`
+solves of a convergence check (§13.4.1) run the same way, with the points
+`θ0 ± η |θ0[k]| e_k` for each step `η` and one sweep per tolerance (the
+tolerances are `solve` keywords, the same for every point of a sweep).
 
 ---
 
@@ -308,7 +426,9 @@ res = optimize(loss, g!, θ0, LBFGS())
 ```
 
 Gradient methods stall when the loss is not smooth in `θ` (§13.9); switch to
-`NelderMead()` if the line search keeps failing.
+`NelderMead()` if the line search keeps failing. A loss that compares a curve
+through a burnout with data at fixed times carries the roughness of §13.4.2;
+take its gradient's step from the convergence check (§13.4.1).
 
 > **Scale your parameters.** Optimize `log10(A)` rather than `A`, and
 > non-dimensionalize the rest if their magnitudes differ widely, so the optimizer
@@ -317,10 +437,11 @@ Gradient methods stall when the loss is not smooth in `θ` (§13.9); switch to
 
 The shipped `examples/df_sensitivity_comparison.jl` is **not** a programmatic
 fitter — it parses a ThermaKin2Ds reference output
-(`docs/DF_sensitivity_Cone_output.txt`) and an already-fitted Julia result CSV and
-overlays them (MLR, surface/back temperature, mass, thickness, component MLR). Use
-it as a template for *validating* a fit against a reference code, not for
-generating one. The actual fitting workflows live under
+(`docs/DF_sensitivity_Cone_output.txt`) and an already-fitted Julia result CSV
+(`douglas_fir_results_50kWm2_fit.csv`, which `examples/07_douglas_fir_cone.jl`
+writes when run with `q_external = 50e3`) and overlays them (MLR, surface/back
+temperature, mass, component MLR). Use it as a template for *validating* a fit
+against a reference code, not for generating one. The actual fitting workflows live under
 `examples/inverse_analysis/`.
 
 ---
@@ -374,8 +495,12 @@ This is the same separation as `parameter_sweep`: an immutable base, a `modify`/
 `build_and_solve` that materializes a fresh problem per point, and an `extract`
 that pulls out quantities of interest (peak MLR, time to ignition, total mass
 loss, peak surface temperature, MLR/temperature curves, …). The example's solve
-uses `use_ale = true`, `radiation_model = SURFACE_ABSORPTION`, and the default
-Jacobian, which under ALE is `Structured(strategy = ApproxSolve())`.
+uses `use_ale = true`, `radiation_model = SURFACE_ABSORPTION`, `abstol = 1e-9`,
+`reltol = 1e-7`, `min_thickness = 0.5e-3` and the default integrator. Its
+`pmap` runs over the sample ids that have no result on disk yet, wraps each
+solve in `try`/`catch` and writes each run's curves as it finishes, so an
+interrupted study resumes where it stopped (§12.7 treats the same fault
+tolerance for sweeps).
 
 **3. Decompose the variance.** `sensitivity_sobol.jl` fits a Polynomial Chaos
 Expansion (PCE) surrogate to each scalar QoI and reads first-order and total
@@ -404,42 +529,56 @@ harness, see Technical Reference §17.5.
 ## 13.9 Pitfalls
 
 Sensitivities are only meaningful where the map `θ -> output` is well-behaved.
-The package uses smooth constructions where it can (tanh temperature gates and
-depletion limiter, smooth flux limiters — Technical Reference §17.6), but several
-configurations still spoil a derivative:
+The package uses smooth constructions where it can (tanh temperature gates, the
+one-sided depletion limiter, limited face values, C¹ guards — Technical
+Reference §17.6), but several configurations still spoil a derivative:
 
 - **Degenerate gas transport.** Condensed components default to `λ = 0`. Under
   Fickian gas transport, gas then cannot enter a cell that holds none: the gas
   field ends in a sharp front that advances only when integration noise seeds
-  the next cell. The implicit Newton fails repeatedly on that front, the
-  trajectory carries errors far above the tolerance whose timing changes from
+  the next cell. The integrator rejects step after step on that front (2,016
+  accepted and 379 rejected steps on the §13.2 material, against 295 and 23
+  with `λ = 1e-6`), the trajectory carries errors whose timing changes from
   one `θ` to the next, and finite differences of it are meaningless (§13.4).
-  `solve` warns in this configuration; give the condensed components a small
-  `λ` (e.g. `1e-6`), as §13.2 does.
+  `solve` warns in this configuration ("… the gas field forms a sharp front,
+  and the integrator rejects step after step on it. Give the condensed
+  components a small λ …"); give the condensed components a small `λ` (e.g.
+  `1e-6` m²/s), as §13.2 does.
 
-- **Warm start.** Reusing a prior solution as the initial state
-  (`warm_start = previous_solution`) makes the result depend on history that
-  `p_inject` does not rebuild. For sensitivity studies, **start each solve from
-  the problem's own initial conditions** (do not pass `warm_start`), so every
-  perturbed solve integrates the same map. This is why the sweep/sensitivity
-  examples build a fresh problem per point and do not warm-start.
+- **Each solve from its own initial state.** Every perturbed solve must
+  integrate the same map from the initial state its own problem defines.
+  `solve` always does: `setup` evaluates the problem's `T_initial` and
+  `ξ_initial` at the cell centres. On the custom-loop path (`setup` and
+  `integrate`, §11.8), set up each perturbed problem afresh and keep
+  `integrate`'s default `u0`; a state carried over from another solve makes
+  the result depend on history that `p_inject` does not rebuild. A parameter
+  that enters the initial condition (an initial density) also sets the cells'
+  reference condensed masses, and with them the mass tolerances and the
+  deactivation threshold; the finite difference includes that dependence, as
+  it should.
 
-- **Non-smooth lateral-shrinkage laws (WithChi mode).** The cross-section law
-  `A(t) = A_0 · law(χ̄)` is differentiated with ForwardDiff inside the residual
-  (Technical Reference §10.6). A `law` with a kink (e.g. a hard `min`/`max` or a
-  piecewise definition with a slope discontinuity) makes the output non-smooth in
-  any parameter that moves `χ̄` across the kink. Use smooth shrink/swell laws.
+- **Non-smooth lateral-shrinkage laws.** Under a `lateral_shrinkage_law` the
+  cross section follows `A = A₀ · law(χ̄)`, closed by two algebraic rows, one of
+  which differentiates the law with ForwardDiff along the column's conversion
+  rates (Technical Reference §17.6, item 3, and §17.7.2). A `law` with a kink
+  (a hard `min`/`max`, or a piecewise definition with a slope discontinuity)
+  makes the output non-smooth in any parameter that moves `χ̄` across the kink.
+  Use smooth shrink/swell laws.
 
-- **Park events are discrete.** With `handle_depletion = true` a park rewrites
-  the state in place; the trajectory is smooth in the parameters between events
-  and jumps across one. A finite difference whose perturbed solves park at
-  different times measures the jump. Keep depletion off in sensitivity work, or
-  restrict the horizon to one without park events.
+- **Deactivation events.** With `deactivation = true` the located event's time
+  is a smooth function of the parameters, so the derivative through a burnout
+  exists; but an objective sampled at fixed times sees the event's burst move
+  across its sample times, and a perturbation that changes which cells an
+  event takes changes the state by a finite amount. §13.4.2 shows how the
+  convergence check handles the first; compare `sol.statistics.invocations`
+  and `sol.events` between the perturbed solves to detect the second.
 
-- **Tanh-gate leakage.** The smooth temperature gates leak a few percent of the
-  reaction rate within roughly ±10 K of `T_min`/`T_max` (Technical Reference
-  §6.2). Near those edges, `∂r/∂T_min` and `∂r/∂T_max` are smooth but small and
-  not physically meaningful at the very edge of the window; interpret
+- **Tanh-gate leakage.** A reaction with a finite `T_min` or `T_max` is gated
+  by `0.5·(1 + tanh((T − T_min)/gate_width))` (mirrored at `T_max`), with
+  `gate_width` 1 K by default (Technical Reference §6.2). The factor is 0.5 at
+  the edge, about 0.12 one gate width outside the window and 0.02 two widths
+  outside. Near those edges, `∂r/∂T_min` and `∂r/∂T_max` are smooth but not
+  physically meaningful at the very edge of the window; interpret
   gate-boundary sensitivities with care.
 
 ---
@@ -450,14 +589,18 @@ configurations still spoil a derivative:
 |---|---|
 | Jacobian of an output | `FiniteDiff.finite_difference_jacobian(θ -> y(solve(p_inject(base, θ))), θ0, Val(:central); relstep)` |
 | Gradient of a scalar loss | `FiniteDiff.finite_difference_gradient(loss, θ0, Val(:central); relstep)` |
+| Qualify a derivative | `fd_check(y, θ0, k)`: steps 1, 2, 4, 8e-3, `reltol` 1e-7 and 1e-8, Richardson extrapolants within 5 % (§13.4.1) |
 | Perturbed solves in parallel | `parameter_sweep(base, pts; modify = p_inject, extract)` (§13.5) |
 | Global/Sobol | sample → `pmap`/`parameter_sweep` → PCE or SRRC (see examples) |
 
 **Defaults to remember.** Start from `relstep = 1e-4` and check it with steps
-ten times larger and smaller (§13.4); pass `log10(A)`, not `A`; heed `solve`'s
-validation warnings (§13.9). For sensitivity-safe
-solves: keep `warm_start = nothing`, `handle_depletion = false`, and the same
-`solve` options for every perturbed solve.
+ten times larger and smaller (§13.4); qualify a derivative you rely on, and any
+derivative through a burnout, with the convergence check (§13.4.1); pass
+`log10(A)`, not `A`; heed `solve`'s validation warnings and give the condensed
+components a small `λ` (§13.9). For sensitivity-safe solves: start every
+solve from its own problem's initial state, pass the same `solve` options to
+every perturbed solve, and compare `sol.statistics.invocations` between them
+when `deactivation = true`.
 
 For parameter sweeps (discrete response maps) see Chapter 12; for the solution
 fields and accessors used in the outputs see Chapter 9; for the solver options

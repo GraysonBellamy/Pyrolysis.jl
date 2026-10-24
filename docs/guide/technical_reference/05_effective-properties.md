@@ -2,19 +2,21 @@
 
 This chapter derives, in full, how Pyrolysis.jl collapses the per-component
 thermophysical and transport properties of a multi-phase pyrolyzing solid into
-the *single* effective property each governing equation needs. It covers the two
-averaging bases (mass fractions and volume fractions, and the two flavours of the
-latter), the swelling-aware mixture density, the intrinsic-density porosity, the
-mixture effective heat capacity, the four
-conductivity mixing rules (parallel / series / weighted / Bruggeman) together
-with the Bruggeman Newton solve, the effective gas-transfer and permeability
-closures (component mixing versus Carman–Kozeny), the radiative properties
-(emissivity and absorption), the gas viscosity (Sutherland) and Chapman–Enskog
-diffusivity, the absence of per-species transport scaling, the distance-weighted
-harmonic face averaging, the property cache, and the mixing derivatives the
-Jacobian consumes. Every equation, constant, guard, threshold, and sign below has
-been confirmed line-by-line against `src/Properties/mixture_rules.jl`,
-`src/Properties/effective_properties.jl`, `src/Properties/property_cache.jl`,
+the *single* effective property each governing equation needs. It covers the
+averaging bases (mass fractions and volume fractions, the two flavours of the
+latter, and the blend between them in an emptying cell), the swelling-aware
+mixture density, the intrinsic-density pore fraction, the mixture heat capacity
+and the sensible enthalpies the energy row reads, the four conductivity mixing
+rules (parallel / series / weighted / Bruggeman) together with the Bruggeman
+Newton solve, the effective gas-transfer and permeability closures (component
+mixing versus Carman–Kozeny), the radiative properties (emissivity, surface
+absorptivity and absorption), the gas viscosity (Sutherland) and Chapman–Enskog
+diffusivity, the absence of per-species transport scaling, the guarded
+distance-weighted harmonic face mean, the cell properties the state mapping
+evaluates, and how the colored Jacobian obtains their derivatives. Every
+equation, constant, guard, threshold, and sign below follows
+`src/Properties/mixture_rules.jl`, `src/Properties/effective_properties.jl`,
+`src/States/derived.jl`, `src/States/caloric.jl`, `src/States/guards.jl`,
 `src/Materials/components.jl`, and `src/Materials/materials.jl`; where the
 implementation departs from the textbook form (most importantly which basis each
 property uses, the harmonic-mean face average, and which mixing rules are
@@ -23,13 +25,20 @@ called out explicitly.
 
 Throughout this chapter `j` is the **component (species) index** running over the
 `N_C` components of a `Material`, and `i` is the **cell index** running over the
-`n` finite volumes (overload resolution I1, §2). The primary species state is the
-**mass concentration** `ξ_j` (kg·m⁻³), not the mass fraction (§3, Governing
-Equations). Two density symbols are used with care: the **bulk** (pure-phase)
-density `ρ_j` drives all mixing rules and the mixture density, while the
-**intrinsic** (skeletal, cell-wall) density `ρ_{i,j}` appears *only* in the
-porosity formula (overload resolution A7, §2). The three binding sign conventions
-of §2 are assumed without restatement.
+`n` finite volumes (overload resolution I1, §2). The primary species variable is
+the **mass concentration** `ξ_j` (kg·m⁻³), not the mass fraction (§3, Governing
+Equations); the integrated state is the cell mass `m_{j,i} = ξ_{j,i} V_i`. Two
+density symbols are used with care: the **bulk** (pure-phase) density `ρ_j`
+drives all mixing rules and the mixture density, while the **intrinsic**
+(skeletal, cell-wall) density `ρ_{i,j}` appears *only* in the pore-fraction
+formula (overload resolution A7, §2). The three binding sign conventions of §2
+are assumed without restatement.
+
+The property functions below are written in `(ξ, T)`. The residual evaluates
+every one of them once per cell, in the state mapping, at the positive-part
+concentrations `ξ⁺_{j,i}` and the trial temperature `T_trial` (§5.13); both
+equal `ξ_{j,i}` and `T_i` on every physical state the tolerances can
+distinguish.
 
 ---
 
@@ -64,8 +73,9 @@ $$
 Mass fractions are the conceptual weights for the swelling mixture density
 (§5.2), where `Y_j` is folded in inline (with an empty-cell guard
 `ρ_tot < 1e-20`) so that no mass-fraction tuple is built; the heat-capacity
-storage term weights by the raw concentrations `ξ_j` directly (§5.4). They are
-*not* the right weights for transport properties, which act over volumes.
+sum of the energy row weights by the cell masses `m_{j,i}` directly (§5.4).
+They are *not* the right weights for transport properties, which act over
+volumes.
 
 ### 5.1.2 All-phase volume fractions
 
@@ -131,31 +141,37 @@ volume) is retained with weight γ.
 
 > **Void-cell blend.** Conductivity and emissivity consumers go through
 > `mixing_volume_fractions`, which returns the swelling-weighted matrix
-> fractions while the matrix volume fraction $\varphi_m = \sum_j \gamma_j\xi_j/\rho_j$
-> is above $10^{-3}$, the all-phase occupancy (5.3) below $10^{-4}$, and a cubic
-> smoothstep blend of the two in between. A fully converted cell thus degrades
-> to the gas-mixture conductivity instead of 0 (which would zero both adjacent
-> harmonic face means and, via Kirchhoff, its absorption), and because the
-> matrix fractions are normalised by $\varphi_m$ their derivatives grow as
-> $1/\varphi_m^2$ — the smooth blend keeps $\partial k_{\rm eff}/\partial\xi$
-> bounded while a cell empties on a fixed mesh, which parks only its top live
-> cell (§14.3.2).
+> fractions while the matrix volume fraction $v_m = \sum_j \gamma_j\xi_j/\rho_j$
+> (`matrix_volume_fraction`) is at or above $10^{-3}$ (`MIXING_BLEND_HI`), the
+> all-phase occupancy (5.3) at or below $10^{-4}$ (`MIXING_BLEND_LO`), and a
+> cubic smoothstep blend $w\,v_j^{\text{solid}} + (1-w)\,v_j$,
+> $w = s^2(3-2s)$, $s = (v_m - 10^{-4})/(10^{-3}-10^{-4})$, in between. A fully
+> converted cell thus degrades to the gas-mixture conductivity instead of 0
+> (which would zero both adjacent harmonic face means and, via Kirchhoff, its
+> absorption), and because the matrix fractions are normalised by $v_m$ their
+> derivatives grow as $1/v_m^2$: the smooth blend keeps
+> $\partial k_{\rm eff}/\partial\xi$ bounded while a cell empties. An emptying
+> cell stays in the system until deactivation removes it (§14), and with
+> deactivation off it stays to the end of the solve, so the bound matters on
+> every mesh.
 
 The three bases and their consumers are summarized below; this mapping is the
 single most error-prone part of effective-property bookkeeping, so it is stated
-once authoritatively from the code in `update_properties!`
-(`property_cache.jl`):
+once authoritatively from the code. The authority is the state mapping
+`derive!` (`src/States/derived.jl`), which evaluates every cell property once
+per residual (§5.13):
 
 | Basis | Symbol | Built by | Consumed by |
 |---|---|---|---|
-| Mass fraction | `Y_j` | inline in `_specific_vol_with_swelling_direct` | swelling mixture density (§5.2; the heat-capacity storage term weights by raw `ξ_j`, §5.4) |
+| Mass fraction | `Y_j` | inline in `_specific_vol_with_swelling_direct` | `mixture_density` (§5.2); the heat-capacity sum weights by the cell masses (§5.4) |
 | All-phase volume fraction | `v_j` | `volume_fractions` | `effective_gas_transfer` |
-| Swelling-weighted volume fraction | `v_j^solid` | `solid_volume_fractions` (via `mixing_volume_fractions`, which adds the depleted-cell all-phase fallback) | `effective_conductivity`, `effective_emissivity`, `effective_absorptivity`; `effective_permeability` reads `solid_volume_fractions` directly |
+| Swelling-weighted volume fraction | `v_j^solid` | `solid_volume_fractions` (through `mixing_volume_fractions`, which adds the void blend) | `effective_conductivity`, `mixture_emissivity`, `mixture_absorptivity`; `effective_permeability` reads `solid_volume_fractions` directly |
 
 Note in particular that **gas transfer uses the all-phase basis `v_j`** while
-**conductivity and emissivity use the solid basis `v_j^solid`** — this is what
-`update_properties!` does (`cache.λ[i] = _gas_transfer_from_v(v_full, …)` versus
-`cache.k[i] = _conductivity_from_v(v_solid, …)`).
+**conductivity and emissivity use the solid basis `v_j^solid`**: in `derive!`,
+`effective_conductivity`, `mixture_emissivity` and `mixture_absorptivity` each
+build `mixing_volume_fractions`, while `effective_gas_transfer` builds
+`volume_fractions`.
 
 ---
 
@@ -197,7 +213,11 @@ The semantics of `γ_j` follow directly from (5.6):
 The volumetric strain rate `θ` that converts (5.6) into actual cell-volume change
 (and hence into mesh motion under ALE) is derived in §10 (Volume Change and
 Lateral Shrinkage) and §11 (The ALE Framework); here we only fix the
-constitutive density.
+constitutive density. In the residual the mixture density has one consumer: the
+film flux of a mass boundary condition, which multiplies the boundary cell's
+gas-transfer coefficient by `ρ` (the product `λρ`), both at the cell's
+positive-part concentrations and trial temperature (`GasTransportKernel`,
+`src/Kernels/gas_transport.jl`; §9, §12).
 
 > **Implementation note.** `mixture_density` computes the mass fractions
 > *inline* via `_specific_vol_with_swelling_direct(ξ, inv_ρ, T, comps, Val(NC))`
@@ -219,46 +239,68 @@ skeleton. It is the only place the **intrinsic (skeletal) density** `ρ_{i,j}` i
 used. The canonical definition is
 
 $$
-\phi \;=\; \operatorname{clamp}\!\left(
-1 - \sum_{j\in\{\text{solid,liquid}\}} \frac{\xi_j}{\rho_{i,j}(T)},
-\;0,\;1\right),
+\varphi \;=\; 1 - \sum_{j\in\{\text{solid,liquid}\}} \frac{\xi_j}{\rho_{i,j}(T)},
 \tag{5.7}
 $$
 
-implemented as `porosity(ξ, T, material)` →
-`_porosity_void_frac` (`mixture_rules.jl`). The sum runs over **solid and
-liquid** components only — the generated code branches on
-`is_solid(c) || is_liquid(c)`, and each term is taken only if
-`ρ_intr > 0`. Gases are *excluded from the sum* because they occupy the pore
-space being measured, not the skeleton. The result is clamped to `[0,1]`; a
-clamp to 0 occurs only in the (numerical-error) case where the computed solid
-volume exceeds the bulk volume.
+with **no clamp**. The sum is `skeletal_volume_fraction(ξ, T, material)`
+(`mixture_rules.jl`), the bulk-volume fraction the skeleton occupies; the pore
+fraction is one minus it. The sum runs over **solid and liquid** components
+only — the generated code branches on `is_solid(c) || is_liquid(c)`, and each
+term is taken only if `ρ_intr > 0`. Gases are *excluded from the sum* because
+they occupy the pore space being measured, not the skeleton.
 
 The distinction between bulk and intrinsic density is essential here. The
 *intrinsic* density is the density of the cell-wall material itself, ignoring any
 micro-pores inside the pure phase; the *bulk* density is the apparent density of
 that phase as it sits in the composite. For a porous solid these differ, and
-using the intrinsic density in (5.7) correctly recovers the void fraction. When a
-component is constructed **without** an explicit intrinsic density,
-`get_intrinsic_density` falls back to the bulk density (`components.jl`),
-which makes the summand `ξ_j/ρ_j`: the pure phase is taken to have no internal
-pores. For a gas, `get_intrinsic_density(::GaseousComponent,
-::Real) = 0.0`, consistent with its exclusion from the sum.
+using the intrinsic density in (5.7) correctly recovers the void fraction. A
+component constructor takes either `ρ_intrinsic` or the pure phase's own
+porosity `φ` (which, with a constant bulk density, sets
+`ρ_intrinsic = ρ/(1 − φ)`). When a component is constructed with neither,
+`get_intrinsic_density` falls back to the bulk density (`components.jl`), which
+makes the summand `ξ_j/ρ_j`: the pure phase is taken to have no internal pores.
+For a gas, `get_intrinsic_density(::GaseousComponent, ::Real) = 0.0`, consistent
+with its exclusion from the sum.
 
-Porosity feeds two downstream models:
+Because (5.7) carries no clamp, a trial state can give `φ < 0` (a skeleton
+larger than the cell) or `φ > 1` (negative condensed masses). Each consumer
+guards the pore fraction as its own use requires:
 
-1. the **ideal-gas pressure closure** `P = N(ξ,T)/φ`, with
-   `N = Σ_{g} ξ_g R_g T / M_g` the partial-pressure numerator (§9, Gas-Phase
-   Mass Transport and Pressure); and
-2. the **Carman–Kozeny permeability** closure (§5.7).
+1. **The state mapping**, under Darcy–Fick transport only, evaluates
+   $$
+   \varphi_i = \operatorname{smooth\_floor}\bigl(1 - s(\boldsymbol\xi^+_i, T_{\text{trial},i}),\ 10^{-12}\bigr),
+   $$
+   with `s` the skeletal volume fraction and `POROSITY_FLOOR = 1e-12`
+   (`src/States/derived.jl`; the smooth floor is defined in §5.13). This `φ_i`
+   feeds the **ideal-gas pressure closure** `P = N(ξ,T)/φ`, with
+   `N = Σ_{g} ξ_g R_g T / M_g` the partial-pressure numerator
+   (`ideal_gas_pressure`, which additionally takes `max(φ, 1e-12)`; §9), the
+   **Carman–Kozeny permeability** closure (§5.7.2), and the face porosity of the
+   Darcy advection (the arithmetic mean of the two cells' floored values, §9).
+   Under Fickian transport no porosity is evaluated.
+2. **The domain test** (`DomainCheck`, §15.5.4), under Darcy–Fick transport,
+   reads the *unguarded* pore fraction of every live cell from its masses
+   `m_{j,i}/V_i` at the trial temperature and rejects a proposed step when
+   `φ < −tol` or `φ > 1 + tol`, `tol` being the skeletal volume fraction of the
+   cell's mass tolerances (`src/Integration/checks.jl`).
+3. **`background_gas_concentration`** (the pore gas at a given pressure, used to
+   initialize a Darcy–Fick problem; §9) uses `max(1 − s, 0)`.
+4. **`validate_darcy_initial_porosity`**, which `solve` runs through
+   `validate_problem`, refuses a Darcy–Fick problem in which a cell with a
+   positive effective permeability starts with an unclamped pore fraction below
+   `1e-6` — the usual cause being a solid constructed without `ρ_intrinsic`
+   (`src/Problem/problem_validation.jl`).
+5. **Deactivation on a moving mesh** adds the pore volume (cell volume less the
+   skeletal volume of its masses) of the cells it removes to the receiving
+   cell, so pore space is conserved through the transfer (§14.3.3).
 
 ### 5.3.2 Porosity derivatives
 
-Differentiating (5.7) term by term, and recognizing that the clamp is inactive in
-the physical interior `0 < φ < 1` (where derivatives are needed), gives
+Differentiating (5.7) term by term gives
 
 $$
-\frac{\partial \phi}{\partial \xi_j}
+\frac{\partial \varphi}{\partial \xi_j}
 =
 \begin{cases}
 -\dfrac{1}{\rho_{i,j}(T)}, & j\in\{\text{solid, liquid}\}\ \text{and}\ \rho_{i,j}>0,\\[8pt]
@@ -270,12 +312,11 @@ $$
 The sign is negative for the skeleton: adding solid mass reduces the void
 fraction. Gases contribute zero — they fill pore space already accounted for by
 the solid complement, so changing a gas concentration does not change `φ`.
-These derivatives are not hand-coded: the Jacobian path that needs them
-(the `DarcyTransportOperator`'s Carman–Kozeny permeability and pressure
-chains, §5.15, §15.8.3) differentiates
-`porosity` itself with forward-mode `Dual`s, which is clamp-consistent by
-construction — at the `clamp(·, 0, 1)` bounds the propagated derivative is 0,
-exactly matching the residual's clamped value.
+These derivatives are not hand-coded: the colored Jacobian (§15) differentiates
+the whole residual, the state mapping included, with forward-mode dual numbers,
+so (5.8) is carried through the smooth floor exactly as the residual evaluates
+it — the floor's derivative is zero at and below `10⁻¹²`, one at and above
+`2·10⁻¹²`, and the cubic join's slope in between.
 
 ---
 
@@ -292,46 +333,115 @@ $$
 \tag{5.9}
 $$
 
-implemented as `effective_heat_capacity(ξ, T, material)` →
-`_sum_heat_capacity` (`effective_properties.jl`). The generated helper adds
-`ξ[j] * comps[j].heat_capacity(T)` for every component with no phase branch,
-so **gas sensible storage is part of the left-hand side of the energy
-equation**. The units check: `[kg·m⁻³] · [J·kg⁻¹·K⁻¹] = [J·m⁻³·K⁻¹]`.
+summed over every component with no phase branch, so **gas sensible storage is
+part of the left-hand side of the energy equation**. The units check:
+`[kg·m⁻³] · [J·kg⁻¹·K⁻¹] = [J·m⁻³·K⁻¹]`.
 
-The result is floored at `RHO_CP_FLOOR = 10³` J·m⁻³·K⁻¹
-(`src/Materials/constants.jl`), the thermal mass of pore gas at ambient
+Because the cell masses are the states, the energy row does not divide by a
+volume (§7.3) and reads the extensive form of (5.9), the **heat-capacity sum**
+of the cell,
+
+$$
+C_i \;=\; \operatorname{smooth\_floor}\Bigl(\sum_{j=1}^{N_C} m_{j,i}\,c_{p,j}(T_{\text{trial},i}),\ \ \rho c_{p,\text{floor}}\,V_i(0)\Bigr)
+\qquad [\text{J·K}^{-1}],
+\tag{5.10}
+$$
+
+evaluated in the state mapping (`cp_sum`, `src/States/derived.jl`) with the
+masses as stored and the trial temperature (§5.13), so that `C_i/V_i` is the
+discrete `(ρc_p)_eff`. The sum (`heat_capacity_sum`, `src/States/caloric.jl`)
+does not evaluate the heat capacity of a component whose mass is exactly zero:
+its term would add an exact zero for every finite heat capacity, and the test
+`iszero` of a dual number reads its partials too, so no derivative is lost.
+
+The floor is `RHO_CP_FLOOR = 10³` J·m⁻³·K⁻¹ (`src/Materials/constants.jl`) times
+the cell's initial volume (`CellReference.capacity_floor`,
+`src/States/tolerances.jl`): the thermal mass of pore gas at ambient
 (ρ_g c_{p,g} ≈ 1.2 × 1000; Gpyro floors the same quantity). Because every
-component is summed, ρc_p reaches the floor only in a cell emptied of all
-mass — a burned-out cell whose pore gas has also left; without it the 1/ρc_p
-factor in dT/dt would blow up there. Virgin solids carry ρc_p ~ 10⁵–10⁶
-J·m⁻³·K⁻¹, so the floor never binds in a cell that holds material. The floor
-is applied *inside* `effective_heat_capacity`, so every consumer — the
-residual, the property cache and the
-structured-Jacobian operators that extract ∂ρc_p/∂(T, ξ) through Duals —
-sees the identical clamped value and the consistent (zero) derivative at the
-floor.
+component is summed, the sum reaches the floor only in a cell emptied of all
+mass — a burned-out cell whose pore gas has also left; without it the `1/C_i`
+factor in `dT_i/dt` would blow up there. Virgin solids carry ρc_p ~ 10⁵–10⁶
+J·m⁻³·K⁻¹, so the floor never binds in a cell that holds material. The floor is
+the C¹ smooth floor of §5.13, applied in the state mapping, so the residual and
+the colored Jacobian, which differentiates the state mapping, see the same
+value and its consistent derivative.
 
 ### 5.4.2 Why the gas is stored
 
 The one-temperature model puts the pore gas at the matrix temperature (§3.1.2),
 so the gas stores sensible heat `ξ_g c_{p,g} ∂T/∂t` exactly like every other
-component. Its concentration `ξ_g` is an integrated state, so the term costs
-nothing; dropping it — Gpyro's default *quasi-steady-gas approximation*, which
-its `FULL_QSG` option reverses, and the implicit convention of FDS, which has
-no in-depth gas — would be an approximation with no benefit. The in-pore gas
-heat capacity is roughly `φ ρ_g c_{p,g}` against the matrix `(1−φ) ρ_s c_{p,s}`;
-at 1 atm and pyrolysis temperatures the ratio is a few tenths of a percent and
-it scales with pressure. On white-pine cone decks the term is at most about
-half a percent of ρc_p and shifts the response by a uniform time lag of about
-a tenth of a percent — small, but a thousand times above the solver's noise
-floor and therefore worth keeping exact.
+component. Its mass is an integrated state, so the term costs nothing; dropping
+it — Gpyro's default *quasi-steady-gas approximation*, which its `FULL_QSG`
+option reverses, and the implicit convention of FDS, which has no in-depth gas —
+would be an approximation with no benefit. The in-pore gas heat capacity is
+roughly `φ ρ_g c_{p,g}` against the matrix `(1−φ) ρ_s c_{p,s}`, with `ρ_s` the
+intrinsic density of the matrix. At 1 atm and 700 K, with comparable specific
+heats and `ρ_s = 1500` kg·m⁻³, the ratio is about 3·10⁻⁴ for air in a matrix of
+porosity 0.5 (ρ_g ≈ 0.50 kg·m⁻³) and about 5·10⁻³ for volatiles of molar mass
+0.1 kg·mol⁻¹ in a char of porosity 0.8 (ρ_g ≈ 1.74 kg·m⁻³): from a few hundredths
+to about half a percent of the storage, scaling with pressure. Small, but kept
+exact because it is free.
 
-The gas *flux* relative to the skeleton enters the energy equation only
-through the advective source `S_conv = −Σ_g c_{p,g}(T) J̄_g (∂T/∂z)` (§7). This is
-the ThermaKin Eq. 17 convention term for term (§3.3.2).
+The gas *flux* relative to the skeleton enters the energy equation only through
+the sensible enthalpy it carries across the faces (§7.4). This is the ThermaKin
+Eq. 17 convention term for term (§3.3.2).
 
-No separate mass-averaged specific heat is computed or cached; consumers that
-need `c_p` per unit mass divide `(ρc_p)_eff` by `ρ_tot`.
+No mass-averaged specific heat of the mixture enters the residual; the
+enthalpy-form tolerance of a cell uses the mass-averaged heat capacity of its
+initial contents as a scale (§15.5.6).
+
+### 5.4.3 Sensible enthalpies and the extended caloric relation
+
+The energy row reads, besides `C_i`, the **sensible enthalpy** of every
+component on the common datum `T_ref = 298.15` K,
+
+$$
+h_j(T) \;=\; \int_{T_{\text{ref}}}^{T} c_{p,j}(T')\,\mathrm dT'
+\qquad [\text{J·kg}^{-1}].
+\tag{5.11}
+$$
+
+A property law evaluates at its argument clamped to the property bracket
+`[200, 3000]` K (§4.4), so `c_{p,j}` is constant outside the bracket and `h_j`
+continues linearly there. Constant, linear, polynomial and tabulated
+heat-capacity laws are integrated in closed form, piecewise across the bracket
+ends and the table knots, so `dh_j/dT` is the law itself to round-off. Any other
+law is integrated once, at setup, into a `TabulatedEnthalpy`: the integral at
+1 K knots over the bracket, accumulated by five-point Gauss–Legendre quadrature
+on each interval, and evaluated between the knots by the cubic Hermite
+interpolant of the integral and the law, whose exact derivative is the slope
+the residual uses (`enthalpy_slope`). The state mapping evaluates `h_j(T_i)` at
+the cell temperature itself, for every component (`src/States/caloric.jl`).
+
+`h_j` enters the energy row in three places (§7.3, §7.4): the temperature form
+subtracts `Σ_j h_j(T_i) Ṁ_{j,i}`, each face carries `Σ_j F_{j,f} h_j(T_f)`, and
+the inventory form adds the formation term `Σ_j ω_{j,i} V_i h_j(T_i)`.
+
+In the inventory form (`energy_state = :enthalpy`) the energy state of cell `i`
+is its enthalpy inventory, and the state mapping recovers `T_i` from it by
+inverting the **extended caloric relation**
+
+$$
+H_i \;=\; \sum_{j} m^{+}_{j,i}\,h_j(T_i) \;+\; C_{\mathrm{reg},i}(\boldsymbol m_i)\,\bigl(T_i - T_{\text{ref}}\bigr),
+\tag{5.12}
+$$
+
+with `m⁺_{j,i}` the one-sided positive part of the mass at the cell's scale
+`δ_i` (§5.13) and `C_reg,i` a C¹ capacity switch: with
+`C_g = Σ_j m⁺_{j,i} c_{j,min}` the guaranteed heat capacity (`c_{j,min}` half the
+smallest value of the component's law sampled at 1 K over the bracket) and
+`C_floor,i = ρc_{p,floor} V_i(0)`, it is zero while `C_g ≥ 2 C_floor,i` and
+`C_floor,i (1 − C_g/(2C_floor,i))²` below. The relation is strictly increasing
+in `T` with slope at least `C_floor,i`, so it has exactly one root for every
+real inventory, and it equals the physical `Σ_j m_{j,i} h_j(T_i)` on every state
+in which each component is absent or holds at least `δ_i` and the guaranteed
+capacity is at least `2 C_floor,i` (`CaloricExtension`, `src/States/caloric.jl`).
+The inversion is a bracketed Newton iteration started at the cell's previous
+temperature (`invert_caloric`); a dual-number inventory is differentiated
+through the defining relation, by one Newton correction of the primal root per
+nesting level, which carries the implicit-function derivatives exactly. A
+negative heat capacity is refused at setup; a gas with zero heat capacity is
+admitted and adds nothing to `C_g`.
 
 ---
 
@@ -340,11 +450,20 @@ need `c_p` per unit mass divide `(ρc_p)_eff` by `ρ_tot`.
 The effective thermal conductivity is computed from the swelling-weighted
 volume fractions `v_j^solid` (5.4) and the per-component conductivities
 `k_j(T)` under one of four mixing rules selected by `material.mixing.k.rule`:
-`effective_conductivity(ξ, T, material)` builds
-`v = mixing_volume_fractions(…)` (the (5.4) weights, with the depleted-cell
-all-phase fallback of §5.1.3) then dispatches to `_conductivity_from_v`
-(`effective_properties.jl`). The default rule is `WEIGHTED` with
-`β = 0.5` (`materials.jl`).
+`effective_conductivity(ξ, T, material; skip_absent)` builds
+`v = mixing_volume_fractions(…)` (the (5.4) weights, with the void blend of
+§5.1.3) then dispatches to `_conductivity_from_v` (`effective_properties.jl`).
+The default rule is `WEIGHTED` with `β = 0.5` (`materials.jl`).
+
+The state mapping evaluates `k_i = effective_conductivity(ξ⁺_i, T_trial,i,
+material; skip_absent = Val(true))` and floors it smoothly at
+`CONDUCTIVITY_FLOOR = 1e-6` W·m⁻¹·K⁻¹ (`src/States/derived.jl`), far below any
+material's conductivity: a trial state with no mass left has none, and the
+surface-temperature solve of a boundary face divides by the cell conductivity
+(§12). With `skip_absent = Val(true)` the parallel, series and weighted rules
+do not evaluate the conductivity law of a component whose volume fraction is
+exactly zero (its partials included, under automatic differentiation); the
+result is the same for every finite conductivity.
 
 ### 5.5.1 Parallel and series bounds
 
@@ -373,7 +492,7 @@ The true effective conductivity of any two-phase mixture lies between these
 Hashin–Shtrikman-bracketed bounds.
 
 > **Implementation note.** Both sums are produced in one pass by the generated
-> `_conductivity_sums(v, T, comps, Val(NC))`
+> `_conductivity_sums(v, T, comps, Val(NC), Val(skip_absent))`
 > (`effective_properties.jl`). The series accumulation is guarded:
 > `inv_k_series += v[i]/k` is taken only when `v[i] > 1e-20 && k > 1e-20`, so a
 > phase with zero volume or (pathologically) zero conductivity does not blow up
@@ -422,7 +541,7 @@ phase) reflects an isotropic, statistically self-similar microstructure.
 #### Newton–Raphson solve
 
 Equation (5.15) is solved by Newton's method in
-`bruggeman_effective_property(v, k; tol, maxiter, k_init)`
+`bruggeman_effective_property(v, k; tol = 1e-10, maxiter = 100)`
 (`effective_properties.jl`). Writing the residual
 `f(k_{\text{eff}}) = \sum_j v_j (k_j - k_{\text{eff}})/(k_j + 2 k_{\text{eff}})`,
 the exact derivative is
@@ -445,12 +564,10 @@ the implementation:
   one is active, return its (volume-weighted) parallel mean `k_parallel`
   immediately (`effective_properties.jl`). This is exact, since a
   single-phase Bruggeman medium is that phase.
-- **Warm start.** The Newton seed is `k_init` when a positive `k_init` is supplied
-  (`k_init > 1e-20`), otherwise the parallel mean `k_parallel`
-  (`effective_properties.jl`). In production `k_init` is the *previous time
-  step's converged* `k_eff` for the cell (passed by `update_properties!` as
-  `cache.k[i]`, `property_cache.jl`), so on smooth time-stepping the solve
-  needs only 1–3 iterations.
+- **Seed.** Every call starts the Newton iteration from the parallel mean
+  `k_parallel`, the volume-weighted arithmetic mean of the active phases
+  (`effective_properties.jl`); no value is carried from one evaluation to the
+  next, so the result is a function of `(v, k)` alone.
 - **Per-term contributions.** A phase enters the residual when `v_i > 1e-20`.
   A conducting phase (`k_i > 1e-20`) contributes the standard term; an
   **insulating** phase (`k_i ≤ 1e-20`) contributes its exact k → 0 limit
@@ -479,7 +596,8 @@ the implementation:
 > (`effective_properties.jl`), so the Bruggeman path is allocation-free.
 > The dispatch in `_conductivity_from_v` checks `mixing == BRUGGEMAN` first and
 > only otherwise computes the parallel/series sums
-> (`effective_properties.jl`).
+> (`effective_properties.jl`); the Bruggeman path evaluates every component's
+> conductivity, so `skip_absent` does not apply to it.
 
 ---
 
@@ -497,10 +615,15 @@ $$
 $$
 
 `effective_gas_transfer(ξ, T, material)` builds `v = volume_fractions(…)` and
-dispatches to `_gas_transfer_from_v` (`effective_properties.jl`). This is
-confirmed in `update_properties!` where the cached gas-transfer property is
-`cache.λ[i] = _gas_transfer_from_v(v_full, T_i, material)`
-(`property_cache.jl`). The supported rules mirror conductivity:
+dispatches to `_gas_transfer_from_v` (`effective_properties.jl`). The state
+mapping evaluates `λ_i = effective_gas_transfer(ξ⁺_i, T_trial,i, material)`
+only when gas can move (§5.13). Which transport a problem has is decided once,
+at setup (`_gas_transport`, `src/Integration/setup.jl`): none without a gas
+component; Darcy–Fick when some condensed component carries a permeability law
+that is not identically zero (`has_darcy_flow`, §5.7); Fickian when some
+component carries a gas-transfer coefficient that is not identically zero or a
+boundary condition passes mass; none otherwise. The supported rules mirror
+conductivity:
 
 $$
 \lambda_\parallel = \sum_j v_j\,\lambda_j,\qquad
@@ -515,19 +638,20 @@ The default rule for `λ` is **PARALLEL** with `β = 0.5` (`materials.jl`).
 condensed component with no gas-transfer coefficient contributes nothing to
 (5.18), so a cell of that component holding no gas has $\lambda_{\text{eff}}
 \approx v_{\rm gas}\lambda_{\rm gas} \to 0$ under PARALLEL (and exactly zero
-under SERIES), and the face harmonic mean (5.29) vanishes when either side does.
-Gas transport then stops where the gas fraction stops: the gas field of a
-gas-producing material ends in a sharp front, and a Newton iterate that drives
-the front cell's gas concentration below zero closes both of its faces and
-flattens its residual row. The implicit solve fails repeatedly on that front.
-On the Landau ablation case V-CPL-02 a solid coefficient of
-$10^{-6}$ m²/s halves the step count and removes more than half of the
-Newton failures, while the measured regression rate moves by $10^{-5}$
-relative.
+under SERIES), and the guarded face mean (5.29) goes to zero continuously as
+either side does (§5.12). Gas transport then stops where the gas fraction stops:
+the gas field of a gas-producing material ends in a sharp front, a trial state
+that drives the front cell's gas concentration to zero closes both of its faces
+and flattens its residual row, and the integrator rejects step after step on
+that front. A small coefficient on the condensed components keeps the transport
+non-degenerate; the Landau ablation case V-CPL-02 gives its solid
+$\lambda = 10^{-6}$ m²/s for this reason (`test/verification/cases/V-CPL-02.jl`).
 `validate_problem`, which `solve` calls, therefore warns when a material with a
 gas-producing reaction and Fickian transport (no permeable component) has a
 condensed component with $\lambda_j = 0$
-(`warn_degenerate_gas_transport`, `src/Problem/problem_validation.jl`).
+(`warn_degenerate_gas_transport`, `src/Problem/problem_validation.jl`): "the
+integrator rejects step after step on it. Give the condensed components a small
+λ (for example `λ = 1e-6` m²/s)."
 
 ### 5.6.1 Bruggeman is rejected for gas transfer
 
@@ -559,8 +683,17 @@ Permeability `κ` [m²] is the resistance-to-flow property in Darcy's law
 gases flow *through* the matrix and `get_permeability(::GaseousComponent, T) =
 0.0` (`components.jl`). Pyrolysis.jl offers two **mutually exclusive**
 closures, selected by `material.mixing.κ.rule`
-(`effective_permeability(ξ, T, material)`, `effective_properties.jl`).
-The default rule for `κ` is **WEIGHTED** with `β = 0.5` (`materials.jl`).
+(`effective_permeability(ξ, T, material, φ)`, `effective_properties.jl`; the
+porosity argument `φ` is read by the Carman–Kozeny rule only). The default rule
+for `κ` is **WEIGHTED** with `β = 0.5` (`materials.jl`).
+
+Darcy–Fick transport, and with it the permeability, is active when some
+condensed component carries a permeability law that is not identically zero
+(`has_darcy_flow`, `src/Materials/materials.jl`), whatever the mixing rule: a
+material whose components all have `κ = 0` is Fickian even under
+`CARMAN_KOZENY`. The state mapping then evaluates the cell mobility from the
+permeability at the positive-part concentrations, the trial temperature and the
+smoothly floored pore fraction of §5.3.1 (§5.7.4, §5.13).
 
 ### 5.7.1 Component mixing
 
@@ -594,37 +727,39 @@ When the rule is `CARMAN_KOZENY`, permeability is *not* a per-component mix but 
 porosity-based closure:
 
 $$
-\kappa \;=\; \min\!\left(\frac{\ell^2\,\phi^3}{180\,(1-\phi)^2},\;\ell^2\right),
+\kappa \;=\; \min\!\left(\frac{\ell^2\,\varphi^3}{180\,(1-\varphi)^2},\;\ell^2\right),
 \tag{5.20}
 $$
 
 `_carman_kozeny_permeability(φ, ℓ)` (`effective_properties.jl`), where
 `ℓ` is the characteristic particle/pore diameter [m] supplied through the
-`MixingSpec` `length_scale` and `φ` is the *canonical* porosity (5.7). The
-constant **180** is the Kozeny constant for a packed bed of spheres. The
+`MixingSpec` `length_scale` and `φ` is the porosity the caller passes: in the
+residual, the pore fraction (5.7) smoothly floored at `10⁻¹²` (§5.3.1), so the
+permeability is smooth in the state. The constant **180** is the Kozeny
+constant for a packed bed of spheres. The
 `φ³/(1−φ)²` dependence captures the steep growth of permeability as porosity
 rises during virgin → char conversion: as `φ → 0` (fully solid), `κ → 0`
 (impermeable). As `φ → 1` the packed-bed closure loses validity and diverges,
 so `κ` is capped at the physical free-flow scale `ℓ²` (an open channel of width
 `ℓ` has `κ ~ ℓ²/32`; `ℓ²` is a generous upper bound). The cap binds for
-`φ ≳ 0.93`, where `180(1−φ)² < φ³`; a tiny `1e-30` denominator guard remains
+`φ > 0.9328`, where `180(1−φ)² < φ³`; a tiny `1e-30` denominator guard remains
 solely to avoid `Inf`/`NaN` at exactly `φ = 1` before the `min` resolves
 (`effective_properties.jl`).
 
-Because Carman–Kozeny needs the porosity (which depends on `ξ` through the
-intrinsic densities), it must be called through `effective_permeability(ξ, T,
-material)` — calling the cache-aware `_permeability_from_v` with this rule throws
-an `ArgumentError` explaining that concentrations are required
-(`effective_properties.jl`). `MixingSpec(CARMAN_KOZENY; length_scale=ℓ)`
-fails fast at construction if `ℓ` is not a positive, finite number
-(`materials.jl`).
+Because Carman–Kozeny needs the porosity, it is evaluated through
+`effective_permeability(ξ, T, material, φ)` — calling the volume-fraction
+variant `_permeability_from_v` with this rule throws an `ArgumentError`
+explaining that concentrations are required (`effective_properties.jl`).
+`MixingSpec(CARMAN_KOZENY; length_scale=ℓ)` fails fast at construction if `ℓ`
+is not a positive, finite number (`materials.jl`).
 
 The closure derivative needed for the Jacobian (§5.15) is not hand-coded: the
-`DarcyTransportOperator` (§15) differentiates `effective_permeability` itself by
-forward-mode AD, so the Carman–Kozeny chain
-(through the porosity's composition dependence) is picked up automatically. On
+colored Jacobian (§15) differentiates the state mapping, `effective_permeability`
+and the floored pore fraction included, with dual numbers, so the Carman–Kozeny
+chain through the porosity's composition dependence is carried as evaluated. On
 the capped branch the `min` gives the value-consistent zero `dκ/dφ` — value and
-derivative saturate at the same point.
+derivative saturate at the same point (a kink of the derivative at the cap,
+§5.15).
 
 ### 5.7.3 Bruggeman is rejected for permeability
 
@@ -640,16 +775,30 @@ virgin → char transition.
 ### 5.7.4 Face-averaged permeability
 
 For the Darcy velocity at a face, the resistance-in-series combination is
-applied to the **mobility** κ/μ rather than to κ alone: the production path
-(`update_darcy_properties!`, src/Discretization/finite_volume.jl) forms each
-cell's mobility mobᵢ = κᵢ/μ(Tᵢ) and combines the two sides with the
-distance-weighted harmonic mean (§5.12),
+applied to the **mobility** κ/μ rather than to κ alone. The state mapping forms
+each cell's mobility
 
-    mob_face = (d_L + d_R) / (d_L/mob_L + d_R/mob_R),
+$$
+\text{mob}_i = \frac{\kappa_{\text{eff}}(\boldsymbol\xi^+_i, T_{\text{trial},i}, \varphi_i)}
+{\operatorname{smooth\_floor}\bigl(\mu(T_{\text{trial},i}),\ \mu_{\text{floor}}\bigr)},
+\qquad \mu_{\text{floor}} = 10^{-12}\ \text{Pa·s}
+$$
 
-with mob_face = 0 exactly when either side's mobility is below `1e-30` — an
-impermeable cell is an infinite series resistance, so gas cannot cross into it.
-The Jacobian operator's `_dt_mobility_face` applies the identical rule.
+(`mob`, `src/States/derived.jl`; `μ` is the material's `gas_viscosity`, §5.9,
+and `MU_FLOOR` the floor), and the gas-transport kernel combines the two sides
+of an interior face with the guarded distance-weighted harmonic mean (§5.12)
+with the mobility guard `MOBILITY_GUARD = 1e-30` m²·Pa⁻¹·s⁻¹ in place of the
+default `10⁻²⁰` (`src/Kernels/gas_transport.jl`):
+
+$$
+\text{mob}_f = \frac{(d_o + d_n)\,\text{mob}_o\,\text{mob}_n}
+{d_o\,\text{mob}_n + d_n\,\text{mob}_o + 10^{-30}(d_o + d_n)} .
+$$
+
+The guard lies far below the mobility of any permeable solid (κ = 10⁻¹⁸ m² and
+μ = 5·10⁻⁵ Pa·s give 2·10⁻¹⁴), and the mean goes to zero continuously as either
+side's mobility vanishes: an impermeable cell is an infinite series resistance,
+so gas cannot cross into it, and the face's derivative stays finite.
 
 ---
 
@@ -658,32 +807,34 @@ The Jacobian operator's `_dt_mobility_face` applies the identical rule.
 ### 5.8.1 Effective emissivity
 
 The surface emissivity is a **solid**-volume-fraction average of the component
-emissivities, each evaluated at the cell temperature, clamped to the physical
-range:
+emissivities, each evaluated at the cell temperature:
 
 $$
-\varepsilon_{\text{eff}}(T,\xi) \;=\; \operatorname{clamp}\!\left(
-\sum_j v_j^{\text{solid}}\,\varepsilon_j(T),\ 0,\ 1\right),
+\varepsilon_{\text{eff}}(T,\xi) \;=\; \sum_j v_j^{\text{solid}}\,\varepsilon_j(T),
 \tag{5.22}
 $$
 
-`effective_emissivity(ξ, T, material)` builds the solid basis and calls
-`_emissivity_from_v(v, T, material)`, which evaluates `get_emissivity(comp, T)`
-per component and applies `clamp(ε_eff, 0, 1)` (`effective_properties.jl`). The
-solid basis is used for the same physical reason as conductivity (§5.1.3): the
-radiating surface is the solid/liquid material, not trapped non-swelling gas.
-Component emissivities are property functions (`ε` accepts the same forms as
-`k`: number, linear tuple, callable, property function) with defaults of `0.9`
-for `SolidComponent`, `0.95` for `LiquidComponent` (condensed liquids are strong
-emitters — water ≈ 0.96), and `0.0` for `GaseousComponent`
-(`src/Materials/components.jl`). Because the sum is evaluated generically over
-the scalar type, a `ForwardDiff.Dual` temperature returns
-$\partial\varepsilon_{\text{eff}}/\partial T$, which the surface-emission
-(§12) and Beer–Lambert (§8) Jacobians pick up without operator-level
-bookkeeping. The effective emissivity is the surface property used by the
-re-radiation boundary condition (§12) and as the gray-body factor in the
-volumetric P1 emission source of the experimental P1 model (§8), which `solve`
-does not accept.
+`mixture_emissivity(ξ, T, material)` builds the mixing weights
+(`mixing_volume_fractions`, the solid basis with the void blend of §5.1.3) and
+sums `v_j · get_emissivity(comp, T)` over the components
+(`effective_properties.jl`). **No clamp** is applied, and none is needed: the
+weights are a convex combination (non-negative, summing to one, in the blend as
+on either side of it), and every component's emissivity law is validated to lie
+in `[0, 1]` over the property bracket when the component is built
+(`src/Materials/components.jl`), so the sum stays in `[0, 1]` to round-off and
+its derivative has no kink. The solid basis is used for the same physical reason
+as conductivity (§5.1.3): the radiating surface is the solid/liquid material,
+not trapped non-swelling gas. Component emissivities are property functions
+(`ε` accepts the same forms as `k`: number, linear tuple, callable, property
+function) with defaults of `0.9` for `SolidComponent`, `0.95` for
+`LiquidComponent` (condensed liquids are strong emitters — water ≈ 0.96), and
+`0.0` for `GaseousComponent` (`src/Materials/components.jl`); a cell holding only
+gases of the default emissivity therefore has `ε_eff = a_eff = 0`. Because the
+sum is evaluated generically over the scalar type, a dual-number temperature
+carries $\partial\varepsilon_{\text{eff}}/\partial T$ into the colored Jacobian
+(§15). The effective emissivity is the surface property of the re-radiation
+boundary condition (§12): the surface balance of a boundary face reads the
+emissivity of its cell.
 
 ### 5.8.2 Effective surface absorptivity
 
@@ -691,8 +842,7 @@ The absorptivity for *incident* (heater-spectrum) radiation is mixed with the
 same weights,
 
 $$
-a_{\text{eff}}(T,\xi) \;=\; \operatorname{clamp}\!\left(
-\sum_j v_j^{\text{solid}}\,a_j,\ 0,\ 1\right),\qquad
+a_{\text{eff}}(T,\xi) \;=\; \sum_j v_j^{\text{solid}}\,a_j,\qquad
 a_j = \begin{cases}
 \texttt{surface\_absorptivity}_j & \text{if set}\\
 \varepsilon_j(T) & \text{otherwise (Kirchhoff)}
@@ -700,26 +850,32 @@ a_j = \begin{cases}
 \tag{5.22b}
 $$
 
-via `effective_absorptivity(ξ, T, material)` → `_absorptivity_from_v` →
-`get_absorptivity(comp, T)`. The Kirchhoff branch resolves at compile time
-(`Nothing` vs `Float64` is a type parameter of the component), and for a
-material in which no component sets a surface absorptivity the two generated
-sums perform the same floating-point operations in the same order, so
-$a_{\text{eff}} \equiv \varepsilon_{\text{eff}}$ bit-for-bit — a material that sets no absorptivity
-absorbs exactly as Kirchhoff's law predicts. A component with an explicit
-$a_j$ decouples the absorbed heater flux from the temperature-dependent
-emission: an emissivity that falls with temperature (integrating-sphere data for
-virgin wood, for instance) does not drag the absorbed cone flux down with it.
-$a_{\text{eff}}$ is consumed by a `RadiativeFluxBC` with
-`absorptivity = nothing` (§12.2.6) and as the Beer–Lambert surface
-transmissivity (§8.3); surface emission always uses
+via `mixture_absorptivity(ξ, T, material)`, which sums
+`v_j · get_absorptivity(comp, T)`; like (5.22) it is unclamped, a component's
+explicit absorptivity being validated in `[0, 1]` at construction. The
+Kirchhoff branch resolves at compile time (`Nothing` vs `Float64` is a type
+parameter of the component), and for a material in which no component sets a
+surface absorptivity the two generated sums perform the same floating-point
+operations in the same order, so
+$a_{\text{eff}} \equiv \varepsilon_{\text{eff}}$ bit-for-bit — a material that
+sets no absorptivity absorbs exactly as Kirchhoff's law predicts
+(`test/materials/test_emissivity_absorptivity.jl`, "a_eff: Kirchhoff invariant
+and per-component override"). A component with an explicit $a_j$ decouples the
+absorbed heater flux from the temperature-dependent emission: an emissivity that
+falls with temperature (integrating-sphere data for virgin wood, for instance)
+does not drag the absorbed cone flux down with it. $a_{\text{eff}}$ is consumed
+by a `RadiativeFluxBC` with `absorptivity = nothing`: in the surface balance of
+its face under `NO_RADIATION` and `SURFACE_ABSORPTION` (§12.2.6), and under
+`BEER_LAMBERT` as the fraction of the incident flux that enters the first live
+cell, the absorptivity of that cell (`incident_intensity`,
+`src/Kernels/radiation.jl`; §8.3). Surface emission always uses
 $\varepsilon_{\text{eff}}$.
 
 ### 5.8.3 Effective absorption coefficient
 
-The volumetric (extinction) absorption coefficient used by the in-depth radiation
-models (Beer–Lambert, and the experimental P1 model, §8) is a **concentration**-weighted sum of the
-component *mass* absorption coefficients `α_j` [m²·kg⁻¹]:
+The volumetric (extinction) absorption coefficient of the in-depth radiation
+model (`BEER_LAMBERT`, §8) is a **concentration**-weighted sum of the component
+*mass* absorption coefficients `α_j` [m²·kg⁻¹]:
 
 $$
 \alpha_{\text{eff}} \;=\; \sum_j \xi_j\, \alpha_j \quad [\text{m}^{-1}],
@@ -727,15 +883,15 @@ $$
 $$
 
 `effective_absorption(ξ, material)` → `_sum_absorption`
-(`effective_properties.jl`). The dimensional bookkeeping is the key
-point: a *mass* absorption coefficient `α_j` [m²·kg⁻¹] times a mass concentration
-`ξ_j` [kg·m⁻³] yields a *volumetric* absorption coefficient [m⁻¹], which is what
-the Beer–Lambert optical thickness `τ = α Δz` and the P1 diffusion coefficient
-`D_rad = 1/(3α)` require. Because the weight is the raw concentration `ξ_j` (not a
-normalized fraction), `α_eff` correctly scales down as material is consumed — a
-thinning, depleting layer becomes optically thinner. Component absorption
-coefficients default to `0.0` (no absorption) and carry no temperature
-dependence.
+(`effective_properties.jl`), evaluated by the state mapping at the positive-part
+concentrations, and only under `BEER_LAMBERT`. The dimensional bookkeeping is
+the key point: a *mass* absorption coefficient `α_j` [m²·kg⁻¹] times a mass
+concentration `ξ_j` [kg·m⁻³] yields a *volumetric* absorption coefficient
+[m⁻¹], which is what the optical thickness of a cell, `τ_i = α_i Δz_i`,
+requires. Because the weight is the concentration `ξ_j` (not a normalized
+fraction), `α_eff` correctly scales down as material is consumed — a thinning,
+depleting layer becomes optically thinner. Component absorption coefficients
+default to `0.0` (no absorption) and carry no temperature dependence.
 
 ---
 
@@ -776,21 +932,36 @@ high-`T` limit), the opposite of liquid behaviour. It is valid roughly over
 ### Material-supplied viscosity
 
 The air constants are only the **default**. Each `Material` carries its own
-pore-gas viscosity curve in the `gas_viscosity` field, and the Darcy path reads
-it through `effective_gas_viscosity(T, material)`, which evaluates
-`material.gas_viscosity(T)` on the property bracket and floors the result at
-`MU_FLOOR`. A material that says nothing
-carries `SutherlandProperty()` — the air triple above — so this reduces to
-(5.24).
+pore-gas viscosity curve in the `gas_viscosity` field, and under Darcy–Fick
+transport the state mapping evaluates it at the cell's trial temperature and
+floors the result smoothly at `MU_FLOOR`,
+`μ_i = smooth_floor(material.gas_viscosity(T_trial,i), 10⁻¹² Pa·s)`, the
+denominator of the cell mobility (§5.7.4; `src/States/derived.jl`). A material
+that says nothing carries `SutherlandProperty()` — the air triple above — so
+this reduces to (5.24).
 
-The field accepts anything `to_property` understands, so a fitted correlation
-drops in directly:
+The field accepts anything `to_property` understands (a number, a `(p0, p1)`
+tuple, a `Function`, or a property function), so another Sutherland triple or a
+fitted correlation — a `PolynomialProperty` of ascending coefficients, for
+instance a mixture-averaged fit for the material's pyrolyzates — drops in
+directly:
 
 ```julia
-# Cantera mixture-averaged fit for wood pyrolyzates, ascending coefficients,
-# valid 280–1200 K.
-Material(name = :WhitePine, components = (...), reactions = (...),
-         gas_viscosity = PolynomialProperty(mu_coeffs))
+using Pyrolysis
+
+virgin = SolidComponent(:virgin, ρ = 500.0, c = 1500.0, k = 0.15, κ = 1e-15,
+                        ρ_intrinsic = 1500.0)
+char = SolidComponent(:char, ρ = 150.0, c = 1100.0, k = 0.08, κ = 1e-12,
+                      ρ_intrinsic = 1500.0)
+gas = GaseousComponent(:gas, M = 0.03, c = 1500.0, k = 0.03, λ = 1e-5)
+wood = Material(
+    name = :wood,
+    components = (virgin, char, gas),
+    reactions = (Reaction(:pyrolysis, :virgin => (:char, :gas); A = 1e8, E = 125e3,
+                          h = 300e3, yields = (0.3, 0.7)),),
+    gas_viscosity = SutherlandProperty(2.0e-5, 350.0, 120.0),  # μ_ref, T_ref, S
+)
+wood.gas_viscosity(600.0)   # 2.930e-5 Pa·s
 ```
 
 **Why the guards matter.** μ enters the model *only* as the Darcy mobility
@@ -799,32 +970,32 @@ error in permeability — and a μ that reaches zero or changes sign does not
 degrade the answer, it reverses or blows up the gas velocity. Hence:
 
 - the curve is a property law, so it evaluates on the property bracket
-  $[200, 3000]$ K (§4.4): diverging Newton trial states cannot kill the solve
-  on `T^{3/2}` or evaluate a fitted polynomial absurdly far outside its range
-  (the Chapman–Enskog diffusivity formula, which is not a property law, keeps
-  its own 100 K floor `T_GAS_PROPERTY_FLOOR`);
-- the result is floored at `MU_FLOOR` (1e-12 Pa·s, seven orders below any real
-  gas) so an extrapolated fit cannot go non-positive;
-- `Material`'s constructor probes the curve over 200–1800 K and refuses one that
-  is already non-positive or non-finite there, in the spirit of `MixingSpec`'s
-  `CARMAN_KOZENY`/`length_scale` check.
+  $[200, 3000]$ K (§4.4), and the state mapping evaluates it at the trial
+  temperature, itself inside the bracket: a wild trial state cannot evaluate a
+  fitted polynomial absurdly far outside its range (the Chapman–Enskog
+  diffusivity formula, which is not a property law, keeps its own 100 K floor
+  `T_GAS_PROPERTY_FLOOR`);
+- the result is floored smoothly at `MU_FLOOR` (1e-12 Pa·s, seven orders below
+  any real gas) so an extrapolated fit cannot go non-positive;
+- `Material`'s constructor probes the curve at 200, 300, 500, 800, 1200 and
+  1800 K and refuses one that is non-positive or non-finite at any of them, in
+  the spirit of `MixingSpec`'s `CARMAN_KOZENY`/`length_scale` check
+  (`src/Materials/materials.jl`).
 
 Because the bracket belongs to every property law and the floor is applied in
-`effective_gas_viscosity(T, material)`, every curve a material can carry is
-protected, not just the built-in Sutherland form.
+the state mapping, every curve a material can carry is protected, not just the
+built-in Sutherland form.
 
 **Accuracy.** Air is within ~2 % for an N₂-swept pore space, but overstates the
-viscosity of wood pyrolyzates by roughly 1.7× at 300 K falling to 1.3× at
-1000 K — a bias in one direction everywhere, growing as the pore space fills
-with volatiles.
+viscosity of pyrolysis volatiles by roughly 1.3–1.7× over 300–1000 K (the
+`Material` docstring) — a bias in one direction everywhere, growing as the pore
+space fills with volatiles.
 
-**Composition dependence.** `mixture_gas_viscosity(ξ, T, material)` takes `ξ`
-and every Darcy call site passes it, but the function returns the
-material's own curve regardless: the model carries **one curve per material**, an average over the
-composition that material is expected to produce. It cannot resolve the pore gas
-shifting from background air to volatiles as pyrolysis proceeds. A
-composition-dependent rule (Wilke) would be introduced by changing that one
-function — but see §5.16 item 1 for why that is not a local change.
+**Composition dependence.** The model carries **one curve per material**, a
+function of the temperature alone: an average over the composition that material
+is expected to produce. It cannot resolve the pore gas shifting from background
+air to volatiles as pyrolysis proceeds. A composition-dependent rule (Wilke)
+would be evaluated in the same place, the state mapping — see §5.16 item 1.
 
 ---
 
@@ -845,8 +1016,14 @@ $$
 with `T` in K, `M_A, M_B` in **kg·mol⁻¹**, `P` in **Pa**, `σ_{AB}` in **Å**, and
 `D_{AB}` in **m²·s⁻¹**.
 
-`chapman_enskog_diffusivity(T, M; P, σ, ε_k)`
-(`effective_properties.jl`). The prefactor and unit handling deserve
+`chapman_enskog_diffusivity(T, M; P = 101325, σ = nothing, ε_k = nothing)`
+(`effective_properties.jl`). It is not a property law, so it carries its own
+temperature floor: it evaluates at `max(T, 100 K)` (`T_GAS_PROPERTY_FLOOR`),
+which keeps `T^{3/2}` real at any trial temperature. Besides serving as the
+first-principles estimate of a component's `λ` (§5.10.3), it supplies the gas
+diffusivity of the blowing models of a `ConvectiveBC` when a species carries
+neither an explicit diffusivity nor Fuller diffusion volumes
+(`src/BoundaryConditions/blowing.jl`; §12.3.3). The prefactor and unit handling deserve
 care, because the *textbook* Chapman–Enskog constant is `1.8583 × 10⁻³` in
 **cgs-mixed** units (`T` in K, `M` in g·mol⁻¹, `P` in atm, `σ` in Å, `D` in
 cm²·s⁻¹), stored as `CHAPMAN_ENSKOG_PREFACTOR = 1.8583e-3`
@@ -956,110 +1133,147 @@ appears only inside the Chapman–Enskog combining rules of §5.10.)
 
 ## 5.12 Face averaging: distance-weighted harmonic mean
 
-All cell-centered transport properties (`k`, `λ`, `κ`) must be transferred to
-**faces** to form the finite-volume fluxes (§13). For a conserved flux crossing a
-material interface, the correct face value is the one that preserves flux
-continuity, which makes the property behave as a **resistance in series**. With
-distances `d_L, d_R` from the two cell centers to the face, the
-**distance-weighted harmonic mean** is
+The cell-centered transport properties (`k`, `λ`, and the Darcy mobility `κ/μ`)
+must be transferred to **faces** to form the finite-volume fluxes (§13). For a
+conserved flux crossing a material interface, the correct face value is the one
+that preserves flux continuity, which makes the property behave as a
+**resistance in series**. With distances `d_L, d_R` from the two cell centers to
+the face, the **distance-weighted harmonic mean** is
 
 $$
 \varphi_{\text{face}}
-\;=\; \frac{d_L + d_R}{\,d_L/\varphi_L + d_R/\varphi_R\,},
+\;=\; \frac{d_L + d_R}{\,d_L/\varphi_L + d_R/\varphi_R\,} .
+\tag{5.28}
+$$
+
+The derivation: the conductance of each half-cell along the flux path is
+`φ/d`, the two resistances `d_L/φ_L` and `d_R/φ_R` add, and the effective face
+property over the total span `d_L + d_R` is (5.28). On a uniform mesh
+`d_L = d_R` and (5.28) reduces to the standard harmonic mean
+`2 φ_L φ_R/(φ_L + φ_R)`. On a stretched mesh (e.g. boundary refinement) the
+distance weighting keeps the steady flux through a piecewise-constant property
+exact whatever the two spacings, where the unweighted mean would not.
+
+The kernels evaluate (5.28) in a guarded product form,
+`guarded_harmonic_mean(a, b, d_a, d_b, η)` (`effective_properties.jl`),
+
+$$
+\varphi_{\text{face}}
+\;=\; \frac{(d_L + d_R)\,\varphi_L\,\varphi_R}
+{d_L\,\varphi_R + d_R\,\varphi_L + \eta\,(d_L + d_R)} ,
 \tag{5.29}
 $$
 
-`harmonic_mean_weighted(a, b, d_a, d_b)`
-(`effective_properties.jl`). The derivation: the conductance of each
-half-cell along the flux path is `φ/d`, the two resistances `d_L/φ_L` and
-`d_R/φ_R` add, and the effective face property over the total span `d_L + d_R` is
-(5.29). On a uniform mesh `d_L = d_R` and (5.29) reduces to the standard harmonic
-mean `2 φ_L φ_R/(φ_L + φ_R)`. On a stretched mesh (e.g. boundary refinement) the
-distance weighting corrects the averaging and improves boundary fluxes by ~1–5 %.
+which is smooth in every argument for non-negative values and positive
+distances. Writing (5.28) as `H`, (5.29) is `H/(1 + η/H)`: it equals the
+resistance mean to a relative `η/H`, and it goes to zero continuously, with a
+finite slope, as either value vanishes, instead of being cut off below a
+threshold (for `d_R = 3 d_L` the slope with respect to `φ_L` at `φ_L = 0` is
+`(d_L + d_R)/d_L = 4`). The guard `η` carries the property's units and lies far
+below its physical values: `FACE_MEAN_GUARD = 1e-20` for the conductivity and
+the gas-transfer coefficient, `MOBILITY_GUARD = 1e-30` m²·Pa⁻¹·s⁻¹ for the Darcy
+mobility (§5.7.4).
 
-> **Implementation note.** `update_properties!` applies (5.29) to fill `k_face`
-> and `λ_face` for every interior face; at a boundary face (where one
-> `cell_id == 0`) it simply copies the adjacent interior cell's value
-> (`property_cache.jl`). The distances are computed from the live state
-> positions `d_L = |z_face − z^c_L|`, `d_R = |z^c_R − z_face|`, so the averaging
-> is correct under ALE mesh motion. A small-value guard returns 0 if either input
-> is below `1e-20` (`effective_properties.jl`), preventing `Inf`/`NaN`
-> from a vanished cell. The harmonic mean is applied to `λ` itself, **not** to
-> the product `λρ` that a mass-fraction-gradient discretization
-> `J = −λρ ∂Y/∂x` would average: the volume-fraction-gradient flux used by the
-> gas transport (§9) carries the density dependence in the `ξT` driving
-> potential and averages `λ` alone.
+> **Implementation note.** The face means are formed inside the kernels, on the
+> interior faces between two live cells only (`ConductionKernel`,
+> `src/Kernels/conduction.jl`, for `k`; `GasTransportKernel`,
+> `src/Kernels/gas_transport.jl`, for `λ` and the mobility); nothing is cached
+> between evaluations. The distances are the center-to-face distances of the
+> current geometry along the face normal (so the averaging follows a moving
+> mesh), each smoothly floored at `10⁻⁸` of its reference value
+> (`DISTANCE_FLOOR_FRACTION`), so an inverted trial mesh keeps finite fluxes. A
+> boundary face takes no mean: its flux reads the boundary cell's own property
+> (§7.1.3, §9, §12). On a mesh of more than one dimension the conduction face
+> tensor is the face mean `k_f` times the distance-weighted mean of the two
+> cells' dimensionless conductivity tensors (§7.1.3). The harmonic mean is
+> applied to `λ` itself, **not** to the product `λρ` that a
+> mass-fraction-gradient discretization `J = −λρ ∂Y/∂x` would average: the
+> volume-fraction-gradient flux used by the gas transport (§9) carries the
+> density dependence in the `ξT` driving potential and averages `λ` alone.
 
-The same resistance-in-series averaging is used for permeability at faces
-(§5.7.4) and for the P1 radiation diffusion coefficient `D_rad` at faces (§8).
+The same resistance-in-series averaging is used for the mobility at faces
+(§5.7.4).
 
 ---
 
-## 5.13 The property cache
+## 5.13 Cell properties in the state mapping
 
-Effective properties are not recomputed inside every inner flux loop; they are
-evaluated **once per cell per residual** and stored in a `PropertyCache`, then
-read by the conduction, transport, radiation, and boundary kernels.
+The effective properties of this chapter are evaluated **once per cell per
+residual evaluation**, in the state mapping `derive!` (`src/States/derived.jl`),
+the only reader of the state vector, and stored in the derived state
+(`DerivedState`) that every kernel reads. Nothing is carried from one evaluation
+to the next. The full mapping — masses, volumes, temperatures, the moving-mesh
+and radiation unknowns — is the subject of §13; this section states where and
+how the cell properties are evaluated.
 
-### 5.13.1 Layout
+### 5.13.1 The evaluation point
 
-`PropertyCache{Tu, DarcyT}` (`property_cache.jl`) is parameterized on the
-live scalar type `Tu` so the entire cache holds `ForwardDiff.Dual` values
-unchanged during automatic differentiation (§15), and on `DarcyT` so the
-optional Darcy sub-cache is either present (`DarcyCache{Tu}`) or `Nothing`. The
-per-cell arrays (length `n`) are
+Every property law is evaluated at the cell's **positive-part concentrations**
+and **trial temperature**,
 
-| Field | Symbol | Units | Built from |
-|---|---|---|---|
-| `ρ` | mixture density | kg·m⁻³ | `mixture_density` (5.6) |
-| `ρcp` | `(ρc_p)_eff` | J·m⁻³·K⁻¹ | `effective_heat_capacity` (5.9) |
-| `k` | `k_eff` | W·m⁻¹·K⁻¹ | `_conductivity_from_v` (§5.5) |
-| `λ` | `λ_eff` | m²·s⁻¹ | `_gas_transfer_from_v` (§5.6) |
-| `ε` | `ε_eff` | – | `_emissivity_from_v` (5.22) |
-| `a` | `a_eff` | – | `_absorptivity_from_v` (5.22b) |
-| `α` | `α_eff` | m⁻¹ | `effective_absorption` (5.23) |
+$$
+\xi^+_{j,i} = \frac{m^+_{j,i}}{V_{\text{eval},i}},\qquad
+m^+ = \begin{cases} 0, & m\le 0,\\ m\,(3t^2 - 2t^3),\ t = m/\delta_i, & 0 < m < \delta_i,\\ m, & m \ge \delta_i,\end{cases}
+\qquad
+T_{\text{trial},i} = \operatorname{smooth\_clamp}(T_i,\ 200,\ 3000,\ 1\ \text{K}),
+$$
 
-and the per-face arrays (length `n+1`) are `k_face` and `λ_face` (5.29). The
-**Darcy sub-cache** `DarcyCache{Tu}` (`property_cache.jl`) is allocated only
-for pressure-driven modes (`with_darcy = true`) and adds per-cell `P, φ, κ, μ` and
-per-face `v_gas, ∇P` — keeping the four extra per-cell and two per-face arrays out
-of memory for the common Fickian-only configuration. Note `ρcp` caches the
-mixture `(ρc_p)_eff` of (5.9) — the storage term the energy
-RHS divides by (§7).
+with
 
-### 5.13.2 The update kernel
+- `δ_i = reltol · ε_m · m^s_i(0)` the cell's positive-part scale, equal to its
+  mass absolute tolerance (`reltol` and `threshold` of the solve, `m^s_i(0)` the
+  cell's initial condensed mass; `src/States/tolerances.jl`);
+- `Ṽ_i = smooth_floor(V_i, 10⁻⁸ V_i(0))` the smoothly floored cell volume (`ds.V_eval`);
+- `smooth_clamp(x, lo, hi, w)` constant outside `[lo, hi]`, the identity on
+  `[lo + w, hi − w]`, and the cubic join `lo + w t²(2 − t)`, `t = (x − lo)/w`
+  (mirrored at `hi`) between; `T_trial` is therefore `T_i` on every physical
+  state (`trial_temperature`, `src/States/guards.jl`);
+- `smooth_floor(x, a)` equal to `a` at and below `a`, to `x` at and above `2a`,
+  and to the cubic `a(1 + 2t² − t³)`, `t = x/a − 1`, between.
 
-`update_properties!(cache, state, mesh, material)`
-(`property_cache.jl`) is the single entry point. It (i) resizes the cache
-if its length differs from the state's; (ii) loops over the live cells
-`1:n_active_cells` (parked ghost slots, §14.3, are left untouched), building `v_full =
-volume_fractions(ξ_i, T_i, …)` and `v_solid = mixing_volume_fractions(ξ_i, T_i,
-…)` (the swelling-weighted basis with the depleted-cell fallback, §5.1.3)
-once each and threading them into the effective-property helpers; and (iii)
-loops over faces applying the distance-weighted harmonic mean. The cell loop is
-exactly:
+Each guard is C¹ and is exactly the identity on the physical states the
+tolerances can distinguish, so a trial state outside the physical domain still
+has finite properties with finite derivatives, while the domain test reads the
+unguarded quantities (§15.5.4). The kernels read the signed concentrations
+`ξ_{j,i} = m_{j,i}/Ṽ_i` where a sign matters (the reaction rates, §6; the
+gas fluxes, §9); the property laws see only `ξ⁺`.
 
-```julia
-cache.ρ[i]   = mixture_density(ξ_i, T_i, material)
-cache.ρcp[i] = effective_heat_capacity(ξ_i, T_i, material)
-cache.k[i]   = _conductivity_from_v(v_solid, T_i, material; k_init = k_prev)
-cache.λ[i]   = _gas_transfer_from_v(v_full, T_i, material)
-cache.ε[i]   = _emissivity_from_v(v_solid, T_i, material)
-cache.a[i]   = _absorptivity_from_v(v_solid, T_i, material)
-cache.α[i]   = effective_absorption(ξ_i, material)
-```
+### 5.13.2 The cell properties
 
-This is the authoritative statement of which basis each property uses:
-**conductivity, emissivity, and surface absorptivity from `v_solid`, gas
-transfer from `v_full`**
-(§5.1.3). The previous step's conductivity `k_prev = cache.k[i]` is passed as the
-Bruggeman warm-start `k_init` (§5.5.3). After sizing, the loop is **allocation
-free**: all composition-dependent dispatch is generated (compile-time unrolled),
-all intermediate tuples are statically sized, and the Bruggeman Newton iteration
-reuses scalars.
+| Field | Symbol | Units | Evaluated as | Filled |
+|---|---|---|---|---|
+| `cp_sum` | `C_i` | J·K⁻¹ | (5.10): `Σ_j m_{j,i} c_{p,j}(T_trial)`, smoothly floored at `ρc_{p,floor} V_i(0)` | always |
+| `h` | `h_j(T_i)` | J·kg⁻¹ | (5.11), at the cell temperature itself | always |
+| `k` | `k_eff` | W·m⁻¹·K⁻¹ | `effective_conductivity(ξ⁺, T_trial; skip_absent = Val(true))` (§5.5), smoothly floored at `10⁻⁶` | always |
+| `ε` | `ε_eff` | – | `mixture_emissivity(ξ⁺, T_trial)` (5.22) | always |
+| `a` | `a_eff` | – | `mixture_absorptivity(ξ⁺, T_trial)` (5.22b) | always |
+| `α` | `α_eff` | m⁻¹ | `effective_absorption(ξ⁺)` (5.23) | `BEER_LAMBERT` |
+| `λ` | `λ_eff` | m²·s⁻¹ | `effective_gas_transfer(ξ⁺, T_trial)` (5.17) | Fickian or Darcy–Fick transport |
+| `φ` | `φ` | – | `smooth_floor(1 − skeletal_volume_fraction(ξ⁺, T_trial), 10⁻¹²)` (§5.3) | Darcy–Fick transport |
+| `P` | `P` | Pa | `ideal_gas_pressure(ξ⁺, T_trial, φ)` (§9) | Darcy–Fick transport |
+| `mob` | `κ/μ` | m²·Pa⁻¹·s⁻¹ | `effective_permeability(ξ⁺, T_trial, φ) / smooth_floor(μ(T_trial), 10⁻¹²)` (§5.7.4) | Darcy–Fick transport |
 
-`resize_cache!` grows all arrays (and the Darcy sub-cache, if
-present) in place after a mesh change.
+The gas transport of a problem (`NoGasTransport`, `FickTransport` or
+`DarcyFickTransport`, chosen at setup, §5.6) and the radiation model are type
+parameters of the setup, so the selection costs nothing at run time; the
+buffers of the conditional fields exist for every problem and are filled only
+when their consumers exist. The mixture density is not stored: its one
+consumer, the film flux of a mass boundary condition, evaluates it at the
+boundary cell (§5.2).
+
+### 5.13.3 Buffers and element types
+
+The derived state is allocated once per element type: with `Float64` elements
+for the residual, and as a twin for every dual-number type the colored Jacobian
+evaluates the residual at, built on first use (`buffers`,
+`src/Assembly/definition.jl`; §7.7, §15.2). Its sizes are fixed for the whole
+solve: a deactivated cell keeps its slot and is marked dead in `active`, so no
+buffer is ever resized (§14.3.1). After warm-up a residual evaluation allocates
+nothing (`test/assembly/test_residual_jacobian.jl` asserts
+`@allocated residual!(du, u0, def, 0.0, ws) == 0`): all composition-dependent
+dispatch is generated and unrolled at compile time over the component tuple,
+every intermediate tuple is statically sized, and the Bruggeman Newton
+iteration works on scalars.
 
 ---
 
@@ -1103,59 +1317,69 @@ mixing as a mutually exclusive alternative.
 
 **Radiation properties.** FDS works with a solid absorption coefficient `κ_s`
 (our `α`, §2) and a surface emissivity/absorptivity tied by Kirchhoff's law; our
-`α_eff = Σ ξ_j α_j` (5.23) and `ε_eff` (5.22) provide exactly these, with the
-`α = ε_eff` Kirchhoff identity used at the boundary (§12).
+`α_eff = Σ ξ_j α_j` (5.23) and `ε_eff` (5.22) provide exactly these. The surface
+absorptivity `a_eff` (5.22b) equals `ε_eff` bit-for-bit unless a component sets
+its own `surface_absorptivity`, which decouples the absorbed heater flux from the
+emission (§5.8.2).
 
 ---
 
 ## 5.15 Mixing derivatives for the Jacobian
 
-The structured Jacobian (§15) needs the sensitivity of each effective property to
-the state `(T, ξ)`. No mixing rule carries a hand-coded derivative: the Jacobian
-operators evaluate the mixing functions on `ForwardDiff.Dual` arguments, so every
-derivative follows the closure as implemented.
+The colored Jacobian (§15) differentiates the whole residual — the state
+mapping, every kernel and the row assembly — with forward-mode dual numbers on
+the sparsity pattern of the mesh connectivity. No mixing rule carries a
+hand-coded derivative, and no face flux or transmission chain is composed by
+hand: every derivative follows the closure as the residual evaluates it, at the
+same evaluation point `(ξ⁺, T_trial)` and through the same guards (§5.13).
 
 ### 5.15.1 Permeability and porosity derivatives
 
-The `DarcyTransportOperator` (§15) differentiates `effective_permeability` and
-`porosity` per cell with a single stack-allocated `Dual` pass over `(T, ξ)`
-(`NC+1` partials) and feeds the results into its analytical Darcy-flux Jacobian.
-The mixing rule therefore has a single source of truth: the derivatives track
-every closure — the renormalized-solid-basis PARALLEL/SERIES/WEIGHTED mixing
-including the impermeable-phase series hard-zero (where the derivative is
-exactly 0 on the zero branch), the CARMAN_KOZENY porosity chain, and any
-user-supplied `κ_j(T)` (so `∂κ/∂T` is exact for temperature-dependent κ).
+The pore fraction and the cell mobility are evaluated on dual numbers inside the
+state mapping, so their derivatives track every closure: the
+renormalized-solid-basis PARALLEL/SERIES/WEIGHTED mixing, including the
+impermeable-phase series hard zero (where the derivative is exactly 0 on the
+zero branch); the CARMAN_KOZENY chain through the smoothly floored pore fraction
+(5.7); any user-supplied `κ_j(T)` (so `∂κ/∂T` is exact for a
+temperature-dependent κ); and the viscosity curve with its smooth floor.
 BRUGGEMAN is rejected for permeability (§5.7.3).
 
 ### 5.15.2 Conductivity, gas-transfer, and other derivatives
 
 For `k_eff`, `λ_eff`, `ε_eff`, `a_eff`, and `α_eff`, the temperature dependence
 enters through the component laws `k_j(T)`, `λ_j(T)`, `ε_j(T)` (§4.5) and the
-composition dependence through the volume fractions (5.3)/(5.4) (for `α_eff`,
-through ξ directly). The conduction, gas-transport and Beer–Lambert operators
-evaluate these mixing functions once per cell on `Dual` arguments over `(T, ξ)`
-and compose the face fluxes or the transmission chain by hand in their
-analytical Jacobians; the reaction-source and boundary operators run ForwardDiff
-over stencil-local kernels (§15). The Bruggeman `k_eff` is differentiated by AD
-through its Newton solve (started from `k_parallel` in the Jacobian, warm-started
-from the cached `k` in `update_properties!`),
-which is differentiable because every operation in the iteration is smooth (the
-step limiter is inactive and the per-term branch selection is locally constant
-at a converged interior solution).
-This AD-cleanliness — together with the smooth `tanh` kinetics gates (§6) and the
-clamped property laws (§4.4) — is what keeps the structured Jacobian (§15) exact
-and the finite-difference sensitivities of §17 well-defined.
+composition dependence through the volume fractions (5.3)/(5.4) and the void
+blend (for `α_eff`, through `ξ` directly). Because the properties are evaluated
+at `ξ⁺ = m⁺/Ṽ`, the derivatives with respect to the masses carry the slope
+of the positive part, and on a moving mesh the derivatives with respect to the
+node positions arrive through the cell volume. The Bruggeman `k_eff` is
+differentiated through its Newton iteration. The iteration starts from
+`k_parallel`, carrying the partials of the parallel mean, and its convergence
+test reads only the value; but the test follows the update, so at least one
+dual-propagating Newton update runs before it is passed, and by the
+implicit-function property each update brings the partials to those of the
+implicit closure (5.15) to `O(tol)`. The one exception is the `|df| < 1e-20`
+break before the first update, which requires degenerate inputs (all contrasts
+≈ 0) that do not arise from valid materials.
 
-**Warm-start caveat.** The Bruggeman iteration's convergence test is on the
-*value* only, and in an AD pass the Dual-typed cache means the warm start
-`k_init` carries the *previous* step's partials. This is benign in the normal
-path: at least one Dual-propagating Newton update always executes before the
-tolerance break, and by the implicit-function property a single update
-annihilates stale partials to O(tol) — the returned derivatives are those of
-the implicit closure, not of the stale seed. The one failure mode is the
-pre-update `|df| < 1e-20` degenerate-input break, which can return before any
-update has run and thus pass the stale partials through; it requires
-degenerate inputs (all contrasts ≈ 0) that do not arise from valid materials.
+The remaining non-smooth points of the mixing rules are thresholds and
+branches, at which the derivative is that of the branch the value takes:
+
+- the Carman–Kozeny cap `min(·, ℓ²)` (a kink of `dκ/dφ` at `φ = 0.9328`);
+- the `10⁻²⁰` thresholds of the conductivity and gas-transfer series sums and
+  the `10⁻³⁰` threshold of the permeability series sum, with the switch to an
+  infinite series resistance once an active phase falls below its threshold;
+- the empty-cell guards of the volume fractions and of the mixture density
+  (`< 10⁻²⁰`);
+- the Bruggeman branch selections (active and insulating phases, the step
+  limiter, the collapse below `10⁻³⁰`), locally constant at a converged
+  interior solution.
+
+Together with the smooth `tanh` temperature gates and the C¹ depletion limiter
+(§6), the C¹ guards of the state mapping (§5.13) and the property bracket
+(§4.4), this is what keeps the colored Jacobian the exact derivative of the
+residual — it is checked against a dense forward-mode Jacobian (§15.13) — and
+the finite-difference sensitivities of §17 well-defined.
 
 ---
 
@@ -1165,29 +1389,18 @@ The following modelling limitations of the effective-property subsystem are
 recorded from the source; several are flagged here for the
 verification and validation discussion of §18.
 
-1. **Single-value mixture gas viscosity.** `mixture_gas_viscosity` ignores
-   composition and returns the material's single viscosity curve. The
-   *material* dependence is resolved — a material supplies the blend correlation
-   for the gas it produces — but the *composition* dependence within a material
-   is not: one curve averages over the pore gas shifting from background air to
+1. **Single-curve gas viscosity.** The pore-gas viscosity is one curve per
+   material, a function of the temperature alone (§5.9). The *material*
+   dependence is resolved — a material supplies the blend correlation for the
+   gas it produces — but the *composition* dependence within a material is not:
+   one curve averages over the pore gas shifting from background air to
    volatiles as pyrolysis proceeds. A Wilke mixing rule over per-component
-   μⱼ(T) would resolve that transition.
-
-   Two things make this more than a one-function change, and both are worth
-   knowing before attempting it:
-
-   - The production Darcy Jacobian is the **analytical override** in
-     `Jacobian/operators/darcy_transport.jl`, not the AD path (which is retained
-     only as the rtol = 1e-12 equivalence reference). Its mobility chain rule
-     assumes `dμ/dξ = 0` and takes the ξ-path through κ alone; every
-     `dvg_dξ_*_j` expression would need a `− mob·dμ_dξ[j]` term.
-   - That equivalence gate **cannot catch the omission** while every Darcy test
-     fixture carries a single gas component, because a one-species mixture rule
-     is the identity. A multi-gas Darcy fixture has to land first.
-
-   `test/discretization/test_darcy.jl` asserts ξ-invariance of
-   `mixture_gas_viscosity` as a tripwire, so the day this changes the failure is
-   loud and points here.
+   μⱼ(T) would resolve that transition. It would be evaluated where the
+   viscosity is evaluated, in the pore-gas properties of the state mapping
+   (`_gas_properties!`, `src/States/derived.jl`), from `ξ⁺` and `T_trial`, and
+   the colored Jacobian would carry its composition derivatives with no further
+   change. A Darcy–Fick test with more than one gas component would be needed to
+   exercise it, since a one-species mixing rule is the identity.
 
 2. **Unvalidated Chapman–Enskog LJ defaults.** The heuristic `σ(M)` and
    `ε/k_B(M)` correlations (5.27) are rough estimates anchored to small organics
@@ -1197,7 +1410,7 @@ verification and validation discussion of §18.
 3. **Permeability microstructure evolution.** Real materials may exhibit
    permeability changes with thermal stress and cracking beyond what the
    `κ_j(T)` property functions and porosity-based closures can represent;
-   the Darcy Jacobian differentiates whatever closure is supplied
+   the colored Jacobian differentiates whatever closure is supplied
    (including `κ_j(T)` and the Carman–Kozeny porosity chain), but the closure
    itself remains the modelling limitation.
 
@@ -1218,11 +1431,11 @@ verification and validation discussion of §18.
    may have a fractal or anisotropic pore structure for which a different closure
    (or a measured `κ(φ)` curve) would be more accurate.
 
-The matching subsystem discussions are: the energy assembly that consumes
-`(ρc_p)_eff` and the face conductivities — §7 (Heat Conduction, Convection &
-Energy Assembly); the gas fluxes that consume `λ_eff`, `λ_j`, `κ_eff`, `μ`, and
-`φ` — §9 (Gas-Phase Mass Transport & Pressure); the radiation models that consume
-`α_eff` and `ε_eff` — §8 (Thermal Radiation); the swelling/volume-change use of
-`ρ`, `γ_j` — §10 (Volume Change and Lateral Shrinkage); and the structured
-assembly of every mixing derivative — §15 (Temporal Integration and Structured
-Jacobian).
+The matching subsystem discussions are: the energy assembly that consumes the
+heat-capacity sum, the sensible enthalpies and the face conductivities — §7
+(Heat Conduction, Gas Convection, and Energy Assembly); the gas fluxes that
+consume `λ_eff`, `λ_j`, `κ_eff`, `μ`, and `φ` — §9 (Gas-Phase Mass Transport and
+Pressure); the radiation models that consume `α_eff`, `ε_eff` and `a_eff` — §8
+(Thermal Radiation); the swelling/volume-change use of `ρ`, `γ_j` — §10 (Volume
+Change, Swelling, Intumescence, and Lateral Shrinkage); and the differentiation
+of every mixing rule — §15.

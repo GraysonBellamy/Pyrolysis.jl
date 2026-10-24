@@ -6,18 +6,21 @@ from an empty Julia session to plotted results. We model a slab of PMMA
 into a monomer gas plus a small char residue. By the end you will have built a
 material, defined boundary conditions, created a mesh, assembled a problem,
 solved it, and extracted surface temperature and mass-loss rate. Every code
-snippet uses the real public API and can be pasted into the REPL as-is. The
-deeper "why" of each physics choice is deferred to the Technical Reference; the
-goal here is to get you to a working run and a mental model you can reuse.
+snippet uses the public API and can be pasted into the REPL as-is. The deeper
+"why" of each physics choice is deferred to the Technical Reference; the goal
+here is to get you to a working run and a mental model you can reuse.
 
-The mental model is a five-step pipeline that this chapter follows in order:
+The mental model is a pipeline that this chapter follows in order:
 
 > **material → boundary conditions → mesh → problem → solve → solution**
 
 You define *what* decomposes (the `Material`), *how* energy and mass cross the
-edges (the `BoundaryConditionSet`), *where* the domain lives (the `Mesh1D`),
-bundle them into a `PyrolysisProblem`, hand that to `solve`, and read results
-off the returned `PyrolysisSolution`.
+edges (the `BoundaryConditionSet`), *where* the domain lives (the mesh), bundle
+them into a `PyrolysisProblem`, hand that to `solve`, and read results off the
+returned `PyrolysisSolution`.
+
+The deck is that of `examples/06_cone_calorimeter.jl`, with one addition: the
+two solids get a small gas-transfer coefficient `λ` (§2.2.2).
 
 ---
 
@@ -29,18 +32,18 @@ they govern how every boundary condition and result is interpreted.
 **Coordinate axis.** The single spatial coordinate is `z`, running through the
 thickness of the sample:
 
-- `z = 0` is the **bottom / substrate** (boundary tag `:bottom`, internal id 2).
-- `z = L` is the **top / exposed surface** (boundary tag `:top`, internal id 1).
+- `z = 0` is the **bottom / substrate** (boundary tag `:bottom`).
+- `z = L` is the **top / exposed surface** (boundary tag `:top`).
 
 Heat enters from the top; the material recedes toward the bottom as it
 decomposes. Positive flux is in the `+z` direction (bottom → top). See
 Technical Reference §13 for the finite-volume layout and §12 for the boundary
-tag/id bridge.
+conditions on the tagged faces.
 
 **Units.** Pyrolysis.jl is strict SI throughout — metres, kilograms, seconds,
 kelvin, joules, watts, pascals. There are no implicit "kW" or "mm". A 25 kW/m²
-cone flux is written `25e3`; a 5.8 mm sample is `5.8e-3`. The primary species
-state variable is the **mass concentration** `ξⱼ` in kg/m³ (not a mass
+cone flux is written `25e3`; a 5.8 mm sample is `5.8e-3`. The composition is
+given and reported as the **mass concentration** `ξⱼ` in kg/m³ (not a mass
 fraction). For the full symbol table see Technical Reference §2.
 
 **One import.** Everything in this tutorial comes from a single package, plus
@@ -52,9 +55,9 @@ using Plots          # optional; enables plot(sol) recipes
 ```
 
 `using Pyrolysis` brings in the curated public surface: the material and
-component constructors, the boundary-condition types, the mesh creators,
-`PyrolysisProblem`, `PyrolysisSolution`, and `solve`. Loading `Plots`
-automatically activates the plotting recipes described in §2.9.
+component constructors, the boundary-condition types, the mesh constructors,
+`PyrolysisProblem`, `PyrolysisSolution`, `solve`, and the solution's accessors.
+Loading `Plots` activates the plotting recipes described in §2.9.
 
 ---
 
@@ -77,19 +80,30 @@ way to encode an arbitrary `f(T)` is a `CallableProperty`, which wraps any
 single-argument function:
 
 ```julia
-# Heat capacity [J/(kg·K)], piecewise about 378 K
-pmma_cp = CallableProperty(T -> T < 378.0 ? (-2290.0 + 11.2 * T) : (1040.0 + 3.08 * T))
+# Heat capacity [J/(kg·K)], piecewise about 378 K, held constant below 300 K
+pmma_cp = CallableProperty(
+    T -> T < 378.0 ? (-2290.0 + 11.2 * max(T, 300.0)) : (1040.0 + 3.08 * T),
+)
 
-# Thermal conductivity [W/(m·K)], piecewise about 378 K
-pmma_k  = CallableProperty(T -> T < 378.0 ? 0.15 : (0.34 - 3.9e-4 * T))
+# Thermal conductivity [W/(m·K)], piecewise about 378 K, held constant above 700 K
+pmma_k = CallableProperty(T -> T < 378.0 ? 0.15 : (0.34 - 3.9e-4 * min(T, 700.0)))
 ```
+
+The fits are measured on about 300–700 K and are held constant outside that
+range. This is required, not cosmetic: property laws are evaluated on the bracket
+200–3000 K (their argument is clamped to it), and the component constructors
+sample every law over that bracket and refuse one that leaves its admissible
+range. The unclamped low-temperature heat-capacity line is negative below 204 K
+and the unclamped conductivity line crosses zero at 872 K, so either would be
+refused with an `ArgumentError` naming the temperature.
 
 `CallableProperty` is one of several property-function types. You can also pass
 a bare number (auto-converted to a `ConstantProperty`), a `LinearProperty(a, b)`
 for `a + b·T`, a `PolynomialProperty`, an `ArrheniusProperty`, a
 `TableProperty` for tabulated data, or a `SutherlandProperty(μ_ref, T_ref, S)`
-for the gas-viscosity correlation μ_ref·(T/T_ref)^{3/2}·(T_ref+S)/(T+S). Property types and their derivatives are
-covered in full in User Guide §UG-3 and Technical Reference §4.
+for the gas-viscosity correlation μ_ref·(T/T_ref)^{3/2}·(T_ref+S)/(T+S).
+Property types and their derivatives are covered in full in UG 3 and Technical
+Reference §4.
 
 ### 2.2.2 Component constructors
 
@@ -107,6 +121,7 @@ virgin = SolidComponent(
     k = pmma_k,     # thermal conductivity [W/(m·K)]
     ε = 0.96,       # surface emissivity [-]   (default 0.9)
     α = 1.47,       # mass absorption coefficient [m²/kg]  (default 0.0)
+    λ = 1e-6,       # gas-transfer coefficient [m²/s]  (default 0.0)
 )
 
 char = SolidComponent(
@@ -116,6 +131,7 @@ char = SolidComponent(
     k = pmma_k,
     ε = 0.96,
     α = 1.47,
+    λ = 1e-6,
 )
 
 mma = GaseousComponent(
@@ -143,11 +159,20 @@ thermophysical values are keywords. Defaults worth knowing:
 | `κ` | permeability [m²] | `0.0` (impermeable) | n/a (gases flow through) |
 | `M` | molar mass [kg/mol] | n/a | required |
 
+The solids' `λ = 1e-6` m²/s is the addition to the example's deck. The cell's
+gas-transfer coefficient is the volume-fraction mix of the component values, so
+with `λ = 0` on the solids a cell of virgin PMMA that holds no gas has no gas
+transport at all; the gas field then ends in a sharp front on which the implicit
+Newton iteration fails repeatedly, and problem validation warns about it. On this
+deck the small `λ` leaves the results unchanged to four digits and takes fewer
+steps (UG 15).
+
 A gas's density defaults to the ideal-gas law `ρ_g = P_ref·M/(R_g·T)` with
 `P_ref = 101325` Pa and `R_g = 8.314...` J/(mol·K). The bulk-vs-intrinsic
 density distinction (`ρ_intrinsic`, used only in the porosity formula) and the
 swelling factor `γ` are explained in Technical Reference §4 and §10; the
-defaults above are correct for this opaque, non-swelling case.
+defaults above are correct for this opaque, non-swelling case. The absorption
+coefficient `α` is read only by `BEER_LAMBERT` (§2.6.2).
 
 ### 2.2.3 The decomposition reaction
 
@@ -173,20 +198,20 @@ Two conventions to internalise:
 
 - **Heat-of-reaction sign:** `h > 0` is **endothermic** (the reaction absorbs
   heat and cools the material); `h < 0` is **exothermic**. PMMA pyrolysis is
-  endothermic, so `h = 820e3` is positive. (Note: ThermaKin and Gpyro publish
+  endothermic, so `h = 820e3` is positive. (Note: ThermaKin publishes
   the opposite sign convention — see Technical Reference §6 and the §2
   nomenclature note H1.)
 - **Single-reactant only:** each reaction consumes exactly one reactant species
   (with mass stoichiometry 1.0). Multi-reactant reactions are not supported.
   Multi-step schemes are modelled as a *tuple of single-reactant reactions* (see
-  User Guide §UG-4).
+  UG 4).
 
 For a one-product reaction the simpler form `Reaction(:name, 1 => 2; A, E, h)`
 omits `yields` (the single product then has stoichiometry 1.0). Temperature
 gates `T_min`/`T_max` default to `0.0` and `Inf` (always active); their smooth
-tanh ramp width is `gate_width` (default `1.0` K — narrow it for hard-switch
-gates, §UG-3.4.1). See Technical Reference §6 for the full rate law, the
-smooth `tanh` temperature gates, and the depletion limiter.
+tanh ramp width is `gate_width` (default `1.0` K, UG §4.6). See Technical
+Reference §6 for the full rate law, the smooth `tanh` temperature gates, and the
+depletion limiter.
 
 ### 2.2.4 Assemble the `Material`
 
@@ -215,8 +240,7 @@ argument of `MixingSpec`) is **only used by the `WEIGHTED` rule**; for `PARALLEL
 why the example above writes `λ = MixingSpec(PARALLEL)` with no weight. The
 available rules are `PARALLEL`, `SERIES`, `WEIGHTED` (with weight `β`),
 `BRUGGEMAN` (conductivity only), and `CARMAN_KOZENY` (permeability only). The
-mixing theory lives in Technical Reference §5; how to choose rules is in User
-Guide §UG-3.
+mixing theory lives in Technical Reference §5; how to choose rules is in UG 3.
 
 > **Tip — components reference by index, not name (here).** Because we passed
 > `virgin`, `char`, `mma` in that order, the reaction's `1 => (2, 3)` lines up
@@ -242,8 +266,8 @@ Thermal BC types **add** with the `+` operator, building a `CombinedThermalBC`
 whose flux is the sum of the parts. The top face combines three effects:
 
 ```julia
-q_external = 25e3   # incident cone flux [W/m²] = 25 kW/m²
-h_conv     = 7.2    # convective coefficient [W/(m²·K)]
+q_external = 0.9813 * 25e3   # incident cone flux [W/m²]: 25 kW/m², radially averaged
+h_conv     = 7.2             # convective coefficient [W/(m²·K)]
 
 top_thermal =
     RadiativeFluxBC(flux = q_external, absorptivity = 0.96) +  # incident cone radiation in
@@ -251,17 +275,20 @@ top_thermal =
     ConvectiveBC(h = h_conv, T_inf = 330.0)                    # convective loss out
 ```
 
+The nominal 25 kW/m² is scaled by 0.9813 for the radial non-uniformity of the
+heater's flux over the sample, as the example does.
+
 What each piece does:
 
 - **`RadiativeFluxBC(flux, absorptivity)`** is the *incident* external radiation
   from the cone heater. The absorbed flux is `flux × absorptivity`. If you pass
   `absorptivity = nothing` (the default), the material's effective surface
-  absorptivity `a_eff = Σ_j v_j a_j` is used instead, where each component's
-  `a_j` is its own `absorptivity` keyword when set and its emissivity `ε_j(T)`
-  otherwise (Kirchhoff's law, so `a_eff = ε_eff` unless a component sets one).
-  Either way it automatically tracks composition as the surface chars. The way
-  this flux is deposited depends on the `radiation_model` you choose at solve
-  time (see §2.6).
+  absorptivity `a_eff = Σ_j v_j a_j` of the exposed cell is used instead, where
+  each component's `a_j` is its own `absorptivity` keyword when set and its
+  emissivity `ε_j(T)` otherwise (Kirchhoff's law, so `a_eff = ε_eff` unless a
+  component sets one). Either way it tracks composition as the surface chars.
+  Where this flux is deposited depends on the `radiation_model` you choose at
+  solve time (see §2.6).
 - **`RadiativeBC(ε, T_inf, F)`** is the surface's own **re-radiation loss**,
   `q = F·ε·σ·(T_∞⁴ − T_s⁴)`. With `ε = nothing` it uses the effective
   emissivity; the view factor `F` defaults to `1.0`. Because `T_s` exceeds
@@ -273,6 +300,7 @@ What each piece does:
 > external radiation scaled by **`absorptivity`** — it has no `T_s⁴` term. The
 > example above is correct: `RadiativeFluxBC(... absorptivity = 0.96)` for the
 > cone flux in, and `RadiativeBC(ε = 0.96, ...)` for re-radiation out.
+
 - **`ConvectiveBC(h, T_inf)`** is Newton cooling, `q = h·(T_∞ − T_s)` — also a
   loss once the surface is hot.
 
@@ -284,8 +312,7 @@ bottom_thermal =
     ConvectiveBC(h = 4.0, T_inf = 307.0)
 ```
 
-Other thermal BCs available (full reference in User Guide §UG-5 / Technical
-Reference §12):
+Other thermal BCs available (full reference in UG 5 / Technical Reference §12):
 
 | Type | Flux | Notes |
 |---|---|---|
@@ -293,17 +320,17 @@ Reference §12):
 | `HeatFluxBC(q)` | prescribed `q` or `q(t)` | `+` into domain; not subject to absorptivity |
 | `ConvectiveBC(h, T_inf)` | `h(T_∞ − T_s)` | `h`, `T_inf` may be functions of `t` |
 | `RadiativeBC(ε, T_inf, F)` | `F·ε·σ·(T_∞⁴ − T_s⁴)` | re-radiation; `ε = nothing` ⇒ `ε_eff` |
-| `RadiativeFluxBC(flux, absorptivity)` | `flux·α` (model-dependent) | incident external radiation |
+| `RadiativeFluxBC(flux, absorptivity)` | `a·flux`, `a` the absorptivity (model-dependent) | incident external radiation |
 | `DirichletThermalBC(T)` | enforces `T_s = T` | fixed-temperature face |
 | `bc1 + bc2 + …` | sum | `CombinedThermalBC` |
 
 > **Note — surface temperature is solved, not assumed.** In a cell-centred
 > finite-volume method the temperature lives at cell *centres*, but the
 > radiative loss `σ T_s⁴` is highly nonlinear in the *surface* temperature.
-> Pyrolysis.jl therefore runs a small Newton solve at each boundary to find the
-> true `T_s` that balances applied and conducted flux. You never call this
-> yourself; the solved value lands in `solution.surface_T`. See Technical
-> Reference §12.
+> Pyrolysis.jl therefore solves, at each boundary face, the surface energy
+> balance `q_bc(T_s) = k (T_s − T_cell)/d` for the surface temperature `T_s` by a
+> small Newton iteration. You never call this yourself; the solved value lands in
+> `solution.surface_T`. See UG §5.4 and Technical Reference §12.
 
 ### 2.3.2 Mass boundary conditions
 
@@ -330,13 +357,13 @@ bottom_mass = ImpermeableBC()                            # no gas crosses
 Alternatives include `MassFluxBC(J)` (prescribed flux), `DiffusiveMassBC(h_m)`
 (internal-diffusion-limited with optional external resistance; `DiffusiveMassBC()`
 means no external resistance), and the pressure BCs used in Darcy mode. See
-User Guide §UG-5.
+UG 5.
 
-> **The escaping gas carries no enthalpy term at the surface.** The energy
-> equation already carries the gas enthalpy through the volumetric convection
-> source `S_conv`, so the boundary energy balance contains only the applied
-> thermal BC flux and the conducted flux; a surface gas-enthalpy term would
-> count the same enthalpy twice. See §5.4 and Technical Reference §7.
+> **The escaping gas leaves at the surface temperature.** The gas fluxes carry
+> their sensible enthalpy across every face; at the exposed face the outflow
+> carries `Σⱼ Jⱼ hⱼ(T_s)` out of the surface cell at the solved surface
+> temperature. The surface energy balance itself keeps no gas-enthalpy term, so
+> the enthalpy is counted once. See UG §5.4 and Technical Reference §7.
 
 ### 2.3.3 Collect into a `BoundaryConditionSet`
 
@@ -357,41 +384,36 @@ bc_set = BoundaryConditionSet(
 
 A 1D finite-volume mesh divides the sample thickness into `n_cells` cells.
 `create_uniform_mesh` is the workhorse; its signature is
-`create_uniform_mesh(L, n_cells, Val(NC); kwargs...)`, where `L` is the domain
-thickness in metres, `n_cells` is the cell count, and `Val(NC)` encodes the
-number of components (here 3) as a type parameter for compile-time
-specialisation.
+`create_uniform_mesh(L, n_cells; coordinates = Planar(), cross_section = 1.0)`,
+where `L` is the domain thickness in metres and `n_cells` is the cell count.
 
 ```julia
 sample_thickness = 5.8e-3   # 5.8 mm
 n_cells          = 72       # → 0.08 mm per cell
 T_ambient        = 300.0    # initial / ambient temperature [K]
 
-mesh = create_uniform_mesh(
-    sample_thickness,
-    n_cells,
-    Val(3);                          # NC = 3 components (virgin, char, MMA)
-    T_initial = T_ambient,           # initial cell temperature [K] (default 300.0)
-    ξ_initial = (1210.0, 0.0, 0.0),  # initial concentrations [kg/m³]: all virgin
-)
+mesh = create_uniform_mesh(sample_thickness, n_cells)
 ```
 
-The `Val(3)` argument **must match** the number of components in your material.
-`ξ_initial` is a tuple of one concentration per component: the sample starts as
-solid virgin PMMA at 1210 kg/m³, with no char and no gas. `cross_section_area`
-defaults to `1.0` m² — in a 1D model the cross-section is a gauge normalisation
-(MLR and mass are reported per unit area), so leaving it at 1.0 is correct and
-conventional. See User Guide §UG-6 for when to change it.
+The mesh holds geometry only: node positions, faces, cells, and the boundary
+tags (`:bottom` at `z = 0`, `:top` at `z = L`). It carries no component count
+and no initial state; the initial temperature and composition are the
+problem's (§2.5). `cross_section` defaults to `1.0` m² — in a 1D planar model
+the cross-section is a gauge normalisation (MLR and mass are reported per unit
+area), so leaving it at 1.0 is correct and conventional. See UG 6 for when to
+change it, and for cylindrical and spherical coordinates.
 
 To refine the mesh near the heated surface (where the reaction front is
-steepest), use `create_stretched_mesh(L, n_cells, Val(NC), stretch; stretch_from = :top)`
-instead, with a `stretch` factor above 1.0. That is optional; a uniform mesh is
-fine for a first run.
+steepest), use `create_stretched_mesh(L, n_cells, stretch; stretch_from = :top)`
+instead, with a `stretch` factor above 1.0, or place the nodes yourself with
+`create_mesh_from_nodes(z)`. That is optional; a uniform mesh is fine for a
+first run.
 
 > **Tip — resolution vs. cost.** 72 cells over 5.8 mm resolves the thermal
 > wave and reaction zone comfortably for PMMA. Too few cells smears the surface
-> gradient; too many slows the solve (the diffusion time-step scales like
-> `Δz²`). A mesh-convergence study is described in Technical Reference §18.
+> gradient; too many slows the solve, since every step's work grows with the
+> cell count. A grid-convergence study is UG §14.3; Technical Reference §18
+> describes the convergence studies of the verification suite.
 
 ---
 
@@ -411,8 +433,8 @@ problem = PyrolysisProblem(
     T_initial = z -> T_ambient,                         # uniform 300 K
     ξ_initial = [z -> 1210.0, z -> 0.0, z -> 0.0],      # one closure per component
     tspan     = (0.0, t_final),
-    dt_initial = 1e-3,                                  # initial step guess [s]
-    output_times = collect(range(0.0, t_final, length = 601)),  # save ~601 points
+    dt_initial = 1e-3,                                  # first step [s]
+    output_times = collect(range(0.0, t_final, length = 601)),  # save 601 points
 )
 ```
 
@@ -421,169 +443,197 @@ Argument notes:
 - **`T_initial`** — a closure `z -> T`. Defaults to `z -> 300.0` if omitted.
 - **`ξ_initial`** — a `Vector` of closures, one per component (`z -> ξⱼ`). If
   omitted, the first solid component defaults to its reference density and the
-  rest to zero. A single closure is broadcast to all components.
+  rest to zero. A single closure is used for every component.
 - **`tspan`** — the `(t_start, t_end)` time window in seconds (required).
-- **`dt_initial`** — the integrator's first-step guess (default `1e-4`); the
-  adaptive solver adjusts from there.
-- **`output_times`** — the times at which the solution is sampled and stored.
-  Fewer points means less interpolation overhead and memory; if left empty, a
-  reasonable default grid is generated.
+- **`dt_initial`** — the integrator's first step (default `1e-4`); the
+  adaptive integrator adjusts from there. It is also `solve`'s default `dt`.
+- **`output_times`** — the times at which the solution is saved. Fewer points
+  means less memory and less reconstruction work after the solve; if left empty,
+  11–101 evenly spaced times are generated. The state a solve ends on is always
+  saved.
 
-The mesh's `ξ_initial` (Step 3) and the problem's `ξ_initial` (here) describe
-the same starting state; the problem-level closures are authoritative for the
-solve. Keeping them consistent avoids confusion.
+When the problem is set up, `T_initial` and `ξ_initial` are evaluated at the
+cell centres, and the concentrations become the component masses of each cell
+(`mᵢⱼ = ξⱼ(zᵢ) Vᵢ`), the states the integrator carries.
 
-`PyrolysisProblem` does not yet choose the *physics modes* (ALE vs. fixed mesh,
-radiation model, etc.) — those are selected as options to `solve`, described
-next. The simulation-mode trait system is covered in User Guide §UG-7.
+`PyrolysisProblem` does not choose the *physics modes* (a moving or fixed mesh,
+the radiation model, deactivation, the energy state) — those are selected as
+options to `solve`, described next, together with what the material implies
+(UG 7).
 
 ---
 
 ## 2.6 Step 5 — Solve
 
 `solve(problem; kwargs...)` integrates the problem forward and returns a
-`PyrolysisSolution`. With no options it runs a fixed (Eulerian) mesh, no
-volumetric radiation, and a stiff implicit integrator. For a cone run we make two
-deliberate choices: track the receding surface with ALE mesh motion, and deposit
-the cone radiation at the surface.
+`PyrolysisSolution`. With no options it runs on a fixed mesh, with the incident
+flux absorbed at the surface, the `Rodas5P` integrator and the `StructuredKLU()`
+linear solver. For a cone run we make three deliberate choices: move the mesh
+with the receding solid, absorb the cone radiation at the surface, and let cells
+deactivate as the sample burns out.
 
 ```julia
 solution = solve(
     problem;
-    abstol = 1e-8,                          # absolute ODE tolerance (default 1e-8)
-    reltol = 1e-6,                          # relative ODE tolerance (default 1e-6)
-    use_ale = true,                         # move the mesh as the sample shrinks
-    radiation_model = SURFACE_ABSORPTION,   # absorb cone flux at the surface
-    min_thickness = 0.01e-3,                # terminate when sample < 0.01 mm thick
-    handle_depletion = true,                # park surface cells as they thin out
-    depletion_threshold = 0.05,             # park a cell below 5 % of its initial Δz
-    min_cells = 1,                          # never go below 1 cell
+    abstol = 1e-8,                          # temperature tolerance [K] (default 1e-8)
+    reltol = 1e-6,                          # relative tolerance (default 1e-6)
+    dtmin = 1e-14,                          # smallest step [s] (default 1e-12)
+    use_ale = true,                         # move the mesh with the solid as it shrinks
+    radiation_model = SURFACE_ABSORPTION,   # absorb the cone flux at the surface
+    min_thickness = 0.01e-3,                # stop when the sample is < 0.01 mm thick
+    deactivation = true,                    # deactivate burned-out cells
     progress = true,                        # show a progress bar
 )
 ```
 
-The first run in a Julia session compiles the residual and Jacobian for this
-problem's material and boundary-condition types, which takes 15–20 s; the time
-integrator itself comes precompiled with the package. Later runs in the same
-session reuse the compiled code, including runs with other parameter values
-(§15.11).
+The first solve in a Julia session compiles the kernels for this problem's
+types — its property, reaction, and boundary-condition types — unless a
+precompile workload of the package shares them; the time integrator itself comes
+compiled with the package. Later solves in the same session reuse the compiled
+code, also with other parameter values (UG 15).
 
 ### 2.6.1 The options you just used
 
 | Keyword | Default | What it does here |
 |---|---|---|
-| `abstol` / `reltol` | `1e-8` / `1e-6` | ODE error tolerances |
-| `use_ale` | `false` | enables moving-mesh tracking of surface recession |
+| `abstol` / `reltol` | `1e-8` / `1e-6` | error tolerances: `abstol` is the temperature tolerance [K]; the mass rows take theirs from each cell's initial condensed mass and `threshold` |
+| `dtmin` | `1e-12` | smallest step the integrator may take [s] |
+| `use_ale` | `false` | moves the mesh with the solid (surface recession) |
 | `radiation_model` | `NO_RADIATION` | `SURFACE_ABSORPTION` absorbs the cone flux at the surface |
-| `min_thickness` | `1e-6` | ALE termination thickness [m] |
-| `handle_depletion` | `false` | park depleted cells (ALE or fixed mesh) |
-| `depletion_threshold` | `0.05` | cell-thinness fraction that triggers a park |
-| `min_cells` | `2` | floor on cell count before termination |
-| `progress` | `true` | progress bar |
+| `min_thickness` | `1e-6` | on a moving mesh, ends the solve when the thickness falls below it [m] |
+| `deactivation` | `false` | deactivates a cell once its condensed mass falls below `threshold` (default `1e-2`) of its initial condensed mass |
+| `progress` | `false` | progress bar |
 
-This run sets `min_cells = 1` to let the mesh thin all the way down as the
-material decomposes fully. The default `min_cells = 2` is more conservative,
-keeping at least two cells for stability; use `min_cells = 1` only when you
-expect the sample to burn through completely (as for this PMMA slab). The solver
-validates `min_cells ≥ 1`, so `1` is the smallest legal value.
+With `use_ale = true` and `deactivation = true` on a layer that can burn out
+completely (here the char is 0.2 % of the mass, below the threshold), `solve`
+also moves the mesh relative to the solid with the equidistribution correction,
+which keeps the cells of the vanishing layer thinning together so that the layer
+goes in few deactivation events. The threshold, the band of near-threshold cells
+that go with a crossing cell, the correction, and the supported envelope are
+UG 10's subject.
 
 ### 2.6.2 Choosing the radiation model
 
-The cone heater's incident flux can be deposited four ways; for an opaque solid
-like PMMA, surface absorption is the right, fast choice:
+The cone heater's incident flux can be deposited at the surface or in depth;
+for an opaque solid like PMMA, surface absorption is the right, fast choice:
 
 | `radiation_model` | Behaviour | Use when |
 |---|---|---|
-| `NO_RADIATION` (default) | No volumetric absorption; a `RadiativeFluxBC` is still absorbed *at the surface* as a boundary flux | opaque material, radiation handled purely as a surface flux |
-| `SURFACE_ABSORPTION` | Absorbed flux `α·Φ` applied at the surface (boundary energy balance); O(1), tridiagonal Jacobian | opaque material (optical thickness ≫ 1) |
-| `BEER_LAMBERT` | In-depth exponential absorption using component `α`; `RadiativeFluxBC` becomes volumetric (zero boundary flux) | semi-transparent material (polymers, foams) |
-| `P1_QUASI_STEADY` | P1 diffusion approximation with re-radiation | optically thick + strong re-radiation (experimental) |
+| `NO_RADIATION` (default) | A `RadiativeFluxBC` is absorbed *at the surface*, in the surface energy balance | radiation handled purely as a surface flux |
+| `SURFACE_ABSORPTION` | The same: the absorbed flux enters the surface energy balance; component `α` is not read | opaque material (optical thickness ≫ 1) |
+| `BEER_LAMBERT` | In-depth exponential absorption using the component `α`; the `RadiativeFluxBC` contributes no boundary flux | semi-transparent material (polymers, foams) |
 
 Two important caveats:
 
-- Under `NO_RADIATION` and `SURFACE_ABSORPTION` the `RadiativeFluxBC` is
-  absorbed at the surface, so the two give essentially the same surface
-  behaviour for an opaque sample; the difference is bookkeeping. Under
-  `BEER_LAMBERT` the *same* `RadiativeFluxBC` is instead distributed
-  volumetrically (and returns zero as a boundary flux) — switching models
-  changes where the energy goes, by design. Set component `α` values for
-  `BEER_LAMBERT` or you will get a warning that no absorption occurs. In
-  `BEER_LAMBERT` mode the boundary-temperature Newton solver still runs (it
-  finds the `T_s` that balances conducted, convective, and re-radiation flux),
-  but `RadiativeFluxBC` contributes **zero** flux at the boundary; the absorbed
-  fraction of the incident cone radiation — `a_eff·Φ` with the live surface
-  cell's effective surface absorptivity (`= ε_eff` by Kirchhoff's law unless a
-  component sets `absorptivity`), or `α·Φ` with an explicit BC
-  `absorptivity` — is deposited volumetrically via
-  `compute_beer_lambert_source!` and reported in
-  `solution.extras.volumetric_absorption`.
-- **`P1_QUASI_STEADY` is experimental** and is *rejected* by the core `solve`
-  (it lives in `Pyrolysis.Experimental` with a separate residual path). Do not
-  pass it to `solve`.
+- `NO_RADIATION` and `SURFACE_ABSORPTION` give the same solve: both apply the
+  absorbed `RadiativeFluxBC` flux at the face, through the surface energy
+  balance. (The example script relies on the default; this tutorial names
+  `SURFACE_ABSORPTION` to make the choice visible.)
+- Under `BEER_LAMBERT` the *same* `RadiativeFluxBC` is instead absorbed in depth
+  (and returns zero as a boundary flux) — switching models changes where the
+  energy goes, by design. The face intensities become algebraic unknowns of the
+  state: the intensity entering the exposed face is `a·Φ`, with the condition's
+  explicit `absorptivity` or, without one, the exposed cell's effective surface
+  absorptivity (`= ε_eff` by Kirchhoff's law unless a component sets
+  `absorptivity`), and each cell absorbs what the beam loses across it at its
+  absorption coefficient. The surface temperature Newton solve still runs (it
+  balances conducted, convective, and re-radiated flux). The absorbed power is
+  reported in `solution.extras.volumetric_absorption` and the power leaving
+  through the back face in `solution.extras.radiation_transmitted`; with every
+  `α` zero the beam crosses the slab unabsorbed. `BEER_LAMBERT` needs planar
+  coordinates. See Technical Reference §8.
 
 ### 2.6.3 Other solve options worth knowing
 
 These are not needed for this run but round out the picture (full reference in
-User Guide §UG-8):
+UG 8):
 
-- **`integrator`** (default `KenCarp4`) and **`linear_solver`** (default
-  chosen from the Jacobian's sparsity pattern, §8.4) — the time integrator and
-  sparse linear solver.
+- **`integrator_policy`** (default `default_policy`, the `Rodas5P` Rosenbrock
+  method; `fbdf_policy` and `kencarp4_policy` are the alternatives) and
+  **`linear_solver`** (default `StructuredKLU()`, or LinearSolve's
+  `UMFPACKFactorization()`) — the time integrator and sparse linear solver
+  (UG 11).
+- **`energy_state`** (default `:temperature`) — `:enthalpy` integrates each
+  cell's enthalpy inventory instead of its temperature.
+- **`threshold`** (default `1e-2`) — the deactivation threshold `ε_m`, a fraction
+  of each cell's initial condensed mass, which also scales the mass tolerances
+  (UG 10).
+- **`saveat`** (default `problem.output_times`), **`dtmax`**, **`maxiters`** —
+  saving and step control.
+- **`callback`** — a read-only observer of the accepted steps; a
+  `ConservationRecorder()` there integrates the boundary mass and energy fluxes
+  over each step, and `conservation_audit(solution, recorder)` closes mass and
+  energy against the inventories (UG 9, Technical Reference §16).
 - The effect of outgassing on convective exchange is a property of each
-  `ConvectiveBC` (its `blowing` model, §5.2.3), not a solve option.
-- **`diagnostics`** (default `false`) — log a sensible-energy snapshot every
-  `diagnostics_stride` accepted steps (default 10) in
-  `solution.extras.diagnostics_log`.
-- **`handle_depletion`** — park depleted cells (Chapter 10). The state keeps
-  its size, so it combines with either Jacobian strategy.
-- **`warm_start`** — reuse a prior solution's final state as the initial
-  condition for a continuation run.
+  `ConvectiveBC` (its `blowing` model, UG §5.2.3), not a solve option.
 
 > **Unknown keywords are rejected.** `solve` validates its keyword arguments and
-> errors on anything it does not recognise, so a typo is caught immediately
-> rather than silently ignored.
+> throws an `ArgumentError` on anything it does not recognise, so a typo is
+> caught immediately rather than silently ignored.
 
 ---
 
 ## 2.7 The solution object
 
-`solve` returns a `PyrolysisSolution`. Its core fields are concretely typed; a
-typed `extras` NamedTuple holds opt-in diagnostics. The fields you will use most:
+`solve` returns a `PyrolysisSolution`. Its fields are concretely typed; a typed
+`extras` NamedTuple holds the secondary series. The fields you will use most:
 
 | Field | Type / shape | Meaning |
 |---|---|---|
 | `solution.t` | `Vector{Float64}` | saved times [s] |
-| `solution.T` | `Matrix{Float64}` `(n_cells, n_times)` | temperature profiles [K] |
-| `solution.ξ` | `Array{Float64,3}` `(NC, n_cells, n_times)` | concentrations [kg/m³] |
-| `solution.z` | `Matrix{Float64}` `(n_nodes, n_times)` | node positions [m] (ALE; `0×0` in Eulerian mode) |
+| `solution.T` | `Matrix{Float64}` `(n_cells, n_times)` | cell temperatures [K], `NaN` in a deactivated cell |
+| `solution.ξ` | `Array{Float64,3}` `(NC, n_cells, n_times)` | concentrations [kg/m³], `NaN` in a deactivated cell |
+| `solution.m` | `Array{Float64,3}` `(NC, n_cells, n_times)` | component masses per cell [kg], zero in a deactivated cell |
+| `solution.z` | `Matrix{Float64}` `(n_nodes, n_times)` | node positions [m] on a moving mesh (`0×0` on a fixed one), `NaN` beyond the outermost live node |
+| `solution.cell_centers` | `Matrix{Float64}` `(n_cells, n_times)` | cell-centre positions [m], `NaN` in a deactivated cell |
 | `solution.surface_T` | `Vector{Float64}` | solved surface temperature per time [K] |
-| `solution.mass_loss_rate` | `Vector{Float64}` | MLR per current area (top + permeable-bottom) [kg/(m²·s)] |
-| `solution.retcode` | `Symbol` | integrator status (`:Success`, `:Terminated`, …) |
+| `solution.mass_loss_rate` | `Vector{Float64}` | mass leaving through every boundary face, per unit current area of the top face [kg/(m²·s)] |
+| `solution.retcode` | `Symbol` | integrator status (`:Success`, `:Terminated`, `:Failure`, …) |
+| `solution.outcome` | `Symbol` | `:running` unless burnout or the thickness stop ended the solve |
+| `solution.events` | `Vector` | the deactivation events, in order |
+| `solution.statistics` | `SolverStatistics` | accepted and rejected steps, Jacobians, deactivation invocations, … |
 | `solution.solve_time` | `Float64` | wall-clock solve time [s] |
 
-The `extras` NamedTuple adds (among others) `gas_generation_rate`,
-`back_temperature`, `total_mass`, `thickness_history`, `MLR_gauge`, and a
-per-component surface heat-flux breakdown. A few are central to cone analysis:
+The `extras` NamedTuple adds (among others) the surface heat-flux breakdown,
+the live inventories, and these series central to cone analysis:
 
 | `solution.extras.…` | Meaning |
 |---|---|
-| `gas_generation_rate` | volumetric gas production rate, per initial area [kg/(m²·s)] |
+| `gas_generation_rate` | gas produced by the reactions of the live cells, per initial area [kg/(m²·s)] |
 | `back_temperature` | back-face (`z = 0`) temperature [K] |
 | `total_mass` | remaining sample mass per initial area [kg/m²] |
 | `thickness_history` | current sample thickness [m] |
-| `MLR_gauge` | MLR re-gauged to the *initial* area, `MLR·A(t)/A₀` |
+| `MLR_gauge` | mass-loss rate per *initial* area [kg/(m²·s)] |
+| `live_cells` | number of live cells |
+| `deactivation_times` | the time of every deactivation, one entry per cell [s] |
 
-Always check the return code first:
+Always check how the solve ended first:
 
 ```julia
-println("retcode  = ", solution.retcode)     # :Terminated means the sample burned through
+println("retcode  = ", solution.retcode)     # Success: the solve reached t_final
+println("outcome  = ", solution.outcome)     # running: neither burnout nor min_thickness ended it
 println("solve t  = ", round(solution.solve_time, digits = 2), " s")
 println("saved    = ", length(solution.t), " time points")
 ```
 
-For an ALE cone run that consumes the sample, `:Terminated` is the *expected*
-outcome (the thickness-termination callback fired); `:Success` means it ran the
-full `tspan` without depleting.
+This run reaches `t_final = 1600 s` with `retcode = :Success` and outcome
+`:running`: the sample has lost 92.7 % of its mass and 0.42 mm of it remain. The
+combinations you can meet are:
+
+| `retcode` | `outcome` | Meaning | `succeeded` | `completed` |
+|---|---|---|---|---|
+| `:Success` | `:running` | reached the end of `tspan` | true | true |
+| `:Terminated` | `:burned_out` | the last cell deactivated | true | false |
+| `:Terminated` | `:min_thickness` | the thickness fell below `min_thickness` | true | false |
+| `:Terminated` | `:interior` | a cell below the threshold lies inward of a live one; the solve warns and ends | false | false |
+| `:Failure` | — | the integrator gave up, or an event left an inadmissible state (with a warning) | false | false |
+
+`succeeded(solution)` and `completed(solution)` read these for you (UG 9). Run
+this deck to 2400 s and the layer burns out: in our run the cells deactivated in
+two events, at about 1040 s and 1935 s. The char, 0.2 % of the initial mass,
+collects in the last live cell, which keeps more than 1 % of its own initial
+condensed mass and so stays live, 0.012 mm thick: that solve also ends with
+`:Success`.
 
 ### 2.7.1 MLR vs. gas-generation rate (a common gotcha)
 
@@ -593,20 +643,19 @@ There are two related "mass-loss" quantities and they are *not* identical:
   per current cross-sectional area [kg/(m²·s)]. It counts both faces; with the
   usual impermeable holder the bottom term is zero, so this is the surface
   MLR. (The strictly top-face flux is `solution.extras.surface_mass_flux`.)
-- **`solution.extras.gas_generation_rate`** — the *volumetric* gas production
-  integrated over the domain, per *initial* area. It is a convenient proxy for
-  MLR and is what the shipped cone example plots, but it leads the surface flux
-  slightly because gas takes time to escape.
+- **`solution.extras.gas_generation_rate`** — the gas the reactions produce,
+  integrated over the live cells, per *initial* area. It is a convenient proxy
+  for MLR and is what the shipped cone example plots, but it leads the surface
+  flux slightly because gas takes time to escape.
 
 For a typical cone-calorimeter run with a **fixed** cross-sectional area (no
 lateral shrinkage), `A(t) = A₀` always, so `mass_loss_rate` and `MLR_gauge` are
 identical and the distinction is moot. The distinction becomes important only if
-you enable a **lateral-shrinkage law** (the `WithChi` cross-section mode), where
-`A(t)` shrinks over time: `MLR_gauge` then automatically re-normalises the
-surface flux by `A(t)/A₀`, making it directly comparable to standard
-cone-calorimeter data reported per *original* specimen area. For this fixed-area
-run (`cross_section_area = 1.0`, no lateral shrinkage law), `mass_loss_rate` and
-`MLR_gauge` coincide.
+you give the material a **lateral-shrinkage law** (`lateral_shrinkage_law`,
+which needs `use_ale = true`), where `A(t)` shrinks over time: `MLR_gauge` then
+re-normalises the surface flux by `A(t)/A₀`, making it directly comparable to
+standard cone-calorimeter data reported per *original* specimen area. For this
+fixed-area run, `mass_loss_rate` and `MLR_gauge` coincide.
 
 ---
 
@@ -617,63 +666,75 @@ is direct field access:
 
 ```julia
 times     = solution.t
-T_surface = solution.surface_T                       # [K]
-T_back    = solution.extras.back_temperature         # [K]
-mlr       = solution.mass_loss_rate .* 1000          # [g/(m²·s)]
+T_surface = solution.surface_T                           # [K]
+T_back    = solution.extras.back_temperature             # [K]
+mlr       = solution.mass_loss_rate .* 1000              # [g/(m²·s)]
 gen_rate  = solution.extras.gas_generation_rate .* 1000  # [g/(m²·s)] proxy
-total_m   = solution.extras.total_mass               # [kg/m²]
+total_m   = solution.extras.total_mass                   # [kg/m²]
 
 println("peak surface T = ", round(maximum(T_surface), digits = 1), " K")
 println("peak MLR       = ", round(maximum(mlr), digits = 2), " g/(m²·s)")
-println("mass loss      = ",
+println("mass lost      = ",
         round((1 - total_m[end] / total_m[1]) * 100, digits = 1), " %")
 ```
+
+For this deck the peak surface temperature is 672.3 K, the peak MLR
+5.49 g/(m²·s), and the mass lost 92.7 % (values from a run of this script).
+The surface series read `NaN` once no live cell borders the surface, so take
+`maximum(filter(isfinite, T_surface))` on a run that burns out completely.
 
 To pull a quantity at a particular time, find the nearest saved index and read
 the field:
 
 ```julia
 i600 = argmin(abs.(times .- 600.0))                  # index nearest t = 600 s
-println("at t≈600 s:  T_s = ", round(T_surface[i600], digits = 1), " K,",
+println("at t ≈ 600 s:  T_s = ", round(T_surface[i600], digits = 1), " K,",
         "  MLR = ", round(mlr[i600], digits = 2), " g/(m²·s)")
 ```
+
+(672.2 K and 5.47 g/(m²·s), with 4.22 mm of the sample left.)
 
 ### 2.8.1 Temperature profiles through the depth
 
 `solution.T[:, i]` is the temperature of every cell at saved time index `i`
-(bottom cell first, surface cell last). For a depth profile at, say, 120 s:
+(bottom cell first, surface cell last). On a moving mesh the cells move with the
+solid, so read their positions at the same time:
 
 ```julia
 i = argmin(abs.(times .- 120.0))
-T_profile = solution.T[:, i]                         # [K], one value per cell
-# Depth axis spans the *current* thickness at this time (ALE mesh shrinks):
-L_now  = solution.extras.thickness_history[i]
-depths = range(0.0, L_now, length = length(T_profile))  # [m], z = 0 at the back
+T_profile = solution.T[:, i]                       # [K], one value per cell
+z_cells   = get_cell_positions(solution; at = i)   # [m], the cell centres at that time
 ```
 
-In ALE mode the per-cell node positions are also available in `solution.z[:, i]`
-when you need the exact (non-uniform) cell spacing.
+`get_cell_positions(solution; at = i)` is the column `solution.cell_centers[:, i]`;
+a deactivated cell reads `NaN` in both arrays. The node positions are
+`solution.z[:, i]` (`get_profile(solution, :z, i)`), and the current thickness
+is `solution.extras.thickness_history[i]`.
 
-### 2.8.2 Convenience accessors (optional)
+### 2.8.2 Convenience accessors
 
-The Solver submodule provides a few helper accessors —
-`get_profile(solution, :T, i)`, `get_cell_positions(solution)`, and
-`interpolate_solution(solution, t)` (which interpolates the *raw* state vector
-at an arbitrary `t`). These are **not** part of the curated top-level export
-list, so `using Pyrolysis` alone does **not** bring them into bare scope. They
-live in the `Solver` submodule (re-exported through `Internal`); access them
-either by bringing them in with `using Pyrolysis.Internal` and calling them
-directly, or with fully-qualified names like `Pyrolysis.Solver.get_profile(...)`:
+The solution's accessors are exported with the package:
+
+| Accessor | Returns |
+|---|---|
+| `get_times(sol)`, `n_timesteps(sol)` | `sol.t`, its length |
+| `get_temperatures(sol)`, `get_concentrations(sol)` | `sol.T`, `sol.ξ` |
+| `get_gas_generation_rate(sol)` | `sol.extras.gas_generation_rate` |
+| `get_profile(sol, field, i)` | the field `:T`, `:ξ`, `:ξj`, `:m`, `:mj` or `:z` at saved index `i` |
+| `get_cell_positions(sol; at = lastindex(sol.t))` | the cell centres at saved index `at` |
+| `sol(t)`, `interpolate_solution(sol, t)` | the fields `(; t, T, ξ, m, z, cell_centers)` at any `t` in the span |
 
 ```julia
-using Pyrolysis.Internal     # exposes get_profile, get_cell_positions, interpolate_solution, …
-
-T_at_step = get_profile(solution, :T, i600)   # equivalent to solution.T[:, i600]
-state_t   = interpolate_solution(solution, 333.0)  # raw state vector at t = 333 s
+T_at_step = get_profile(solution, :T, i600)   # the same as solution.T[:, i600]
+fields    = solution(333.0)                   # the fields at t = 333 s, between saved times
+fields.T                                      # cell temperatures [K]
 ```
 
-For everyday use, direct field access (`solution.T`, `solution.surface_T`, …) is
-the simplest and most robust path.
+`solution(t)` reconstructs the fields from the integrator's interpolant between
+the saved states; it refuses a `t` inside a saved interval that a deactivation
+event separates, since the interpolant there is not the trajectory (UG 9). For
+everyday use, direct field access (`solution.T`, `solution.surface_T`, …) is the
+simplest path.
 
 ---
 
@@ -687,11 +748,11 @@ using Plots
 
 plot(solution)                      # surface-temperature trace (the default)
 plot(solution; kind = :mlr)         # mass-loss-rate curve [kg/(m²·s)]
-plot(solution; kind = :heatmap)     # T(z, t) field as a heatmap
+plot(solution; kind = :heatmap)     # T(cell, t) field as a heatmap
 ```
 
-The recognised `kind` values are `:surface_T` (default), `:mlr`, and `:heatmap`;
-any other value raises an informative error.
+The recognised `kind` values are `:surface_T` (default), `:mlr`, and `:heatmap`
+(time against cell index); any other value raises an informative error.
 
 For a publication-style multi-panel figure you build the series yourself from the
 fields. A typical cone summary — an MLR/gas-generation proxy, the surface and
@@ -710,15 +771,15 @@ p2 = plot(times, T_surface;
 plot!(p2, times, T_back; lw = 2, label = "Back (z = 0)")
 
 # Panel 3: through-thickness temperature profiles at selected times
-p3 = plot(xlabel = "Depth [mm]", ylabel = "Temperature [K]",
+p3 = plot(xlabel = "z [mm] (0 = back face)", ylabel = "Temperature [K]",
           title = "Temperature profiles")
 for t_target in (30, 120, 300, 600, 1200)
-    i = argmin(abs.(times .- t_target))
-    Tp = filter(!isnan, solution.T[:, i])            # live cells (parked slots read NaN)
-    length(Tp) <= 1 && continue                      # skip if one live cell remains
-    L_now = solution.extras.thickness_history[i]
-    z_mm  = range(0.0, L_now * 1000, length = length(Tp))
-    plot!(p3, z_mm, Tp; lw = 1.5, label = "t = $(round(times[i])) s")
+    k = argmin(abs.(times .- t_target))
+    z_k  = get_cell_positions(solution; at = k)
+    live = .!isnan.(z_k)                             # deactivated cells read NaN
+    count(live) > 1 || continue                      # skip if one live cell remains
+    plot!(p3, z_k[live] .* 1000, solution.T[live, k];
+          lw = 1.5, label = "t = $(round(Int, times[k])) s")
 end
 
 fig = plot(p1, p2, p3; layout = (1, 3), size = (1200, 380))
@@ -726,29 +787,36 @@ savefig(fig, "cone_quickstart.png")
 ```
 
 > **Note — true HRR needs a combustion-efficiency factor.** The cone HRR is
-> usually `HRR = MLR × Δh_c × χ`, where `Δh_c` is the effective heat of
-> combustion and `χ` the combustion efficiency. Pyrolysis.jl is a *condensed-
-> phase* solver and outputs the mass-loss rate (and a gas-generation proxy); it
-> does not model the gas-phase flame, so multiply by your `Δh_c·χ` to get an HRR
-> estimate. See Technical Reference §1 for the scope boundary.
+> usually `HRR = MLR × Δh_c,eff`, where the effective heat of combustion
+> `Δh_c,eff` is the complete heat of combustion times the combustion
+> efficiency. Pyrolysis.jl is a *condensed-phase* solver and outputs the
+> mass-loss rate (and a gas-generation proxy); it does not model the gas-phase
+> flame, so multiply by your `Δh_c,eff` to get an HRR estimate. See Technical
+> Reference §1 for the scope boundary.
 
 ---
 
 ## 2.10 Complete script
 
-The full tutorial in one runnable block. (Aside from the explanatory comments,
-this mirrors `examples/06_cone_calorimeter_surface_absorption.jl`.)
+The full tutorial in one runnable block. Apart from the solids' `λ` and the
+explicit `radiation_model` (which does not change the solve), this is the deck
+of `examples/06_cone_calorimeter.jl`; the example adds a ThermaKin overlay and a
+longer analysis of the results.
 
 ```julia
 using Pyrolysis
 using Plots
 
 # ---- Step 1: material -------------------------------------------------------
-pmma_cp = CallableProperty(T -> T < 378.0 ? (-2290.0 + 11.2 * T) : (1040.0 + 3.08 * T))
-pmma_k  = CallableProperty(T -> T < 378.0 ? 0.15 : (0.34 - 3.9e-4 * T))
+pmma_cp = CallableProperty(
+    T -> T < 378.0 ? (-2290.0 + 11.2 * max(T, 300.0)) : (1040.0 + 3.08 * T),
+)
+pmma_k = CallableProperty(T -> T < 378.0 ? 0.15 : (0.34 - 3.9e-4 * min(T, 700.0)))
 
-virgin = SolidComponent(:virgin, ρ = 1210.0, c = pmma_cp, k = pmma_k, ε = 0.96, α = 1.47)
-char   = SolidComponent(:char,   ρ = 1210.0, c = pmma_cp, k = pmma_k, ε = 0.96, α = 1.47)
+virgin = SolidComponent(:virgin, ρ = 1210.0, c = pmma_cp, k = pmma_k, ε = 0.96, α = 1.47,
+                        λ = 1e-6)
+char   = SolidComponent(:char,   ρ = 1210.0, c = pmma_cp, k = pmma_k, ε = 0.96, α = 1.47,
+                        λ = 1e-6)
 mma    = GaseousComponent(:MMA,  M = 0.10012, c = 1500.0, k = 0.02, λ = 1e-5)
 
 decomp = Reaction(:decomposition, 1 => (2, 3);
@@ -762,7 +830,7 @@ pmma = Material(
 )
 
 # ---- Step 2: boundary conditions -------------------------------------------
-q_external = 25e3
+q_external = 0.9813 * 25e3
 h_conv     = 7.2
 T_ambient  = 300.0
 
@@ -785,8 +853,7 @@ bc_set = BoundaryConditionSet(
 # ---- Step 3: mesh -----------------------------------------------------------
 sample_thickness = 5.8e-3
 n_cells          = 72
-mesh = create_uniform_mesh(sample_thickness, n_cells, Val(3);
-                           T_initial = T_ambient, ξ_initial = (1210.0, 0.0, 0.0))
+mesh = create_uniform_mesh(sample_thickness, n_cells)
 
 # ---- Step 4: problem --------------------------------------------------------
 t_final = 1600.0
@@ -801,11 +868,11 @@ problem = PyrolysisProblem(
 
 # ---- Step 5: solve ----------------------------------------------------------
 solution = solve(problem;
-    abstol = 1e-8, reltol = 1e-6,
+    abstol = 1e-8, reltol = 1e-6, dtmin = 1e-14,
     use_ale = true,
     radiation_model = SURFACE_ABSORPTION,
     min_thickness = 0.01e-3,
-    handle_depletion = true, depletion_threshold = 0.05, min_cells = 1,
+    deactivation = true,
     progress = true,
 )
 
@@ -814,7 +881,7 @@ times     = solution.t
 T_surface = solution.surface_T
 mlr       = solution.mass_loss_rate .* 1000
 gen_rate  = solution.extras.gas_generation_rate .* 1000
-println("retcode = ", solution.retcode)
+println("retcode = ", solution.retcode, ", outcome = ", solution.outcome)
 println("peak T_s = ", round(maximum(T_surface), digits = 1), " K")
 println("peak MLR = ", round(maximum(mlr), digits = 2), " g/(m²·s)")
 
@@ -826,24 +893,28 @@ plot(solution; kind = :mlr)
 
 ## 2.11 What to do next
 
-- **Switch to in-depth radiation.** Set `radiation_model = BEER_LAMBERT` and
-  give the solid components a non-zero absorption coefficient `α` to model a
-  semi-transparent polymer. Compare the surface-temperature trace to the
-  surface-absorption run above. (Technical Reference §8.)
+- **Switch to in-depth radiation.** Set `radiation_model = BEER_LAMBERT` (the
+  solids already carry `α = 1.47` m²/kg) to model a semi-transparent polymer.
+  Compare the surface-temperature trace to the surface-absorption run above.
+  (Technical Reference §8.)
 - **Add pressure-driven transport.** Give a component a permeability `κ > 0` to
   switch the solver into Darcy–Fick mode for pressure-treated wood or charring
-  systems. (User Guide §UG-7; Technical Reference §9.)
+  systems. (UG 7; Technical Reference §9.)
 - **Vary the cone flux.** Replace the scalar `q_external` with a function of
   time, `RadiativeFluxBC(flux = t -> ramp(t), absorptivity = 0.96)`; the solver
-  re-samples the flux at every RHS evaluation.
+  re-samples the flux at every right-hand-side evaluation.
+- **Run to burnout.** Extend `t_final` and read `solution.events`,
+  `solution.extras.live_cells` and `solution.outcome`; UG 10 explains the
+  threshold, the band, the mesh correction, and the envelope in which burnout is
+  verified.
 - **Sweep parameters.** Use `parameter_sweep` to run a grid of heat fluxes or
-  kinetic parameters (User Guide §UG-12), or finite differences of the same
-  solves to estimate derivatives of an output with respect to `A`, `E`, `h`,
-  or material properties (User Guide §UG-13).
-- **Watch the energy history.** Re-run with `diagnostics = true` and inspect
-  `solution.extras.diagnostics_log`, a sensible-energy snapshot every
-  `diagnostics_stride` accepted steps (UG §9.8; Technical Reference §16).
+  kinetic parameters (UG 12), or finite differences of the same solves to
+  estimate derivatives of an output with respect to `A`, `E`, `h`, or material
+  properties (UG 13).
+- **Audit the conservation.** Re-run with `rec = ConservationRecorder()` passed
+  as `callback = rec`, then call `conservation_audit(solution, rec)` for the
+  mass and energy closures over the solve (UG 9; Technical Reference §16).
 
 You now have the full pipeline — material, boundary conditions, mesh, problem,
 solve, solution — and can recombine these pieces for any of the worked cases in
-User Guide §UG-14.
+UG 14.
