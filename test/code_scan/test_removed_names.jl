@@ -40,7 +40,7 @@ end
 # ones git does not ignore (the local records are ignored); otherwise every
 # file under the scope's directories. Manifests list dependencies, not names.
 function _files()
-    rel = if isdir(joinpath(_ROOT, ".git")) && Sys.which("git") !== nothing
+    rel = if ispath(joinpath(_ROOT, ".git")) && Sys.which("git") !== nothing
         readlines(`git -C $_ROOT ls-files --cached --others --exclude-standard`)
     else
         [
