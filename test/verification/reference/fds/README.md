@@ -35,11 +35,19 @@ I_MPI_FABRICS=shm OMP_NUM_THREADS=1 <bundle>/bin/fds <case>.fds
 ```
 
 The FDS rows in `../timings.csv` are medians of five fresh-process runs of
-each matched deck after one warm-up, pinned to one CPU. They include process
-and MPI startup and output. The provenance also retains FDS's internally
-reported elapsed time and the full range of process times. These are
-indicative cross-code costs: the Julia report times the solve, and the codes
-use their own discretizations and time-stepping rules.
+each matched deck after one warm-up, pinned to one CPU. The primary `wall_s`
+value is FDS's **Total Elapsed Wall Clock Time**: input reading, setup,
+simulation and output after MPI initialization, ending at the final timing
+report before MPI finalization. It is not the time-stepping-only timer.
+`process_wall_s` retains the full process measurement, including launch and
+shutdown, for the supporting table. All samples of both timers and the
+time-stepping timer remain in `provenance.json`.
+
+Timer boundaries are defined in FDS's
+[main routine](https://github.com/firemodels/fds/blob/FDS-6.11.1/Source/main.f90)
+and [timing report](https://github.com/firemodels/fds/blob/FDS-6.11.1/Source/dump.f90).
+These are indicative cross-code costs: Julia times warmed model construction
+and solve, and the codes retain different output and time-stepping workloads.
 
 ## `custom/` — our decks, run with the same binary
 

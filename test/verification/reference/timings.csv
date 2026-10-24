@@ -1,15 +1,15 @@
-case,code,label,res,wall_s,note
-V-HC-01,FDS,FDS 6.11.1,133 cells (Δx≈0.38 mm),0.331230,vhc01_semi_infinite; span matched to ours; median of five fresh processes after one warm-up; includes MPI startup and output
-V-HC-01,Gpyro,Gpyro 0.8200,500 nodes (Δz=0.1 mm),0.484,dt=0.1 s
-V-HC-02a,FDS,FDS 6.11.1,101 cells (Δx≈1 mm),0.609200,heat_conduction_d_matched; span matched to ours; median of five fresh processes after one warm-up; includes MPI startup and output
-V-HC-02b,FDS,FDS 6.11.1,101 cells (Δx≈1 mm),0.610340,heat_conduction_c_matched; span matched to ours; median of five fresh processes after one warm-up; includes MPI startup and output
-V-HC-02c,FDS,FDS 6.11.1,101 cells (Δx≈1 mm),0.604478,heat_conduction_b_matched; span matched to ours; median of five fresh processes after one warm-up; includes MPI startup and output
-V-HC-02d,FDS,FDS 6.11.1,101 cells (Δx≈1 mm),0.606368,heat_conduction_a_ext; span matched to ours; median of five fresh processes after one warm-up; includes MPI startup and output
-V-HC-03,Gpyro,Gpyro 0.8200,201 nodes (Δz=0.1 mm),0.913,dt=0.1 s
-V-RAD-01,Gpyro,Gpyro 0.8200,101 nodes (Δz=0.1 mm),0.102,dt=0.1 s
-V-RX-01,FDS,FDS 6.11.1,1 solid cell,0.342032,two_step_solid_reaction_matched; span matched to ours; median of five fresh processes after one warm-up; includes MPI startup and output
-V-RX-01,Gpyro,Gpyro 0.8200,0D,0.044,dt=1 ms
-V-RX-02c,FDS,FDS 6.11.1,0D particle,0.504225,part_baking_soda_450K_matched; span matched to ours; median of five fresh processes after one warm-up; includes MPI startup and output
-V-CPL-01,Gpyro,Gpyro 0.8200,801 nodes (Δz=0.05 mm),15.662,adaptive dt from 0.02 s
-V-CPL-01b,Gpyro,Gpyro 0.8200,801 nodes (Δz=0.05 mm),15.662,same run as V-CPL-01 (one deck serves both routes)
-V-CPL-03,FDS,FDS 6.11.1,4 cells (2 mm slab; stretched),0.340202,vcpl03_shrink_swell_paths; span matched to ours; median of five fresh processes after one warm-up; includes MPI startup and output
+case,code,label,res,wall_s,process_wall_s,note
+V-HC-01,FDS,FDS 6.11.1,133 cells (Δx≈0.38 mm),0.073000,0.331230,vhc01_semi_infinite; span matched to ours; median internal total elapsed; setup and output included; process time retained separately
+V-HC-01,Gpyro,Gpyro 0.8200,500 nodes (Δz=0.1 mm),0.379000,0.381433,dt=0.1 s; median internal total elapsed at shutdown; GNU Fortran 14.4.0; setup and output included
+V-HC-02a,FDS,FDS 6.11.1,101 cells (Δx≈1 mm),0.352000,0.609200,heat_conduction_d_matched; span matched to ours; median internal total elapsed; setup and output included; process time retained separately
+V-HC-02b,FDS,FDS 6.11.1,101 cells (Δx≈1 mm),0.353000,0.610340,heat_conduction_c_matched; span matched to ours; median internal total elapsed; setup and output included; process time retained separately
+V-HC-02c,FDS,FDS 6.11.1,101 cells (Δx≈1 mm),0.346000,0.604478,heat_conduction_b_matched; span matched to ours; median internal total elapsed; setup and output included; process time retained separately
+V-HC-02d,FDS,FDS 6.11.1,101 cells (Δx≈1 mm),0.348000,0.606368,heat_conduction_a_ext; span matched to ours; median internal total elapsed; setup and output included; process time retained separately
+V-HC-03,Gpyro,Gpyro 0.8200,201 nodes (Δz=0.1 mm),0.707000,0.709430,dt=0.1 s; median internal total elapsed at shutdown; GNU Fortran 14.4.0; setup and output included
+V-RAD-01,Gpyro,Gpyro 0.8200,101 nodes (Δz=0.1 mm),0.086000,0.088431,dt=0.1 s; median internal total elapsed at shutdown; GNU Fortran 14.4.0; setup and output included
+V-RX-01,FDS,FDS 6.11.1,1 solid cell,0.084000,0.342032,two_step_solid_reaction_matched; span matched to ours; median internal total elapsed; setup and output included; process time retained separately
+V-RX-01,Gpyro,Gpyro 0.8200,0D,0.032000,0.033276,dt=1 ms; median internal total elapsed at shutdown; GNU Fortran 14.4.0; setup and output included
+V-RX-02c,FDS,FDS 6.11.1,0D particle,0.246000,0.504225,part_baking_soda_450K_matched; span matched to ours; median internal total elapsed; setup and output included; process time retained separately
+V-CPL-01,Gpyro,Gpyro 0.8200,801 nodes (Δz=0.05 mm),11.879000,11.880409,adaptive dt from 0.02 s; median internal total elapsed at shutdown; GNU Fortran 14.4.0; setup and output included
+V-CPL-01b,Gpyro,Gpyro 0.8200,801 nodes (Δz=0.05 mm),11.879000,11.880409,same run as V-CPL-01 (one deck serves both routes); median internal total elapsed at shutdown; GNU Fortran 14.4.0; setup and output included
+V-CPL-03,FDS,FDS 6.11.1,4 cells (2 mm slab; stretched),0.082000,0.340202,vcpl03_shrink_swell_paths; span matched to ours; median internal total elapsed; setup and output included; process time retained separately

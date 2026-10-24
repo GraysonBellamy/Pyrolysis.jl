@@ -196,8 +196,9 @@ function render_pointwise_error(curve::ReportCurve, path::String; crosscode::Boo
 end
 
 """
-Solve-time comparison: our wall time at every ladder rung vs the other codes'
-reference runs, as a log-x lollipop (bars can't start at 0 on a log axis).
+Setup-and-simulation comparison: our warmed build-and-solve wall time at every
+ladder rung vs the other codes' internal total elapsed wall time, as a log-x
+lollipop (bars can't start at 0 on a log axis).
 Ours colored, other codes muted gray — the reference runs differ in
 resolution and simulated span (see reference/timings.csv notes), so this is
 indicative, not a controlled benchmark; the subtitle says so.
@@ -210,7 +211,7 @@ function render_solve_time(
     path::String,
 )
     labels = vcat(
-        ["this solver (n = $(n))" for n in ns],
+        ["this solver, warm (n = $(n))" for n in ns],
         String[r.label * " — " * r.res for r in refs],
     )
     values = vcat(walls, Float64[r.wall for r in refs])
@@ -230,11 +231,9 @@ function render_solve_time(
     fig = Figure(size = FIG_SIZE)
     ax = Axis(
         fig[1, 1];
-        title = "$(case_id): wall time vs other codes",
-        subtitle = any(r -> _code_key(r.label) == "FDS", refs) ?
-                   "FDS includes process startup/output; see reference/timings.csv" :
-                   "same machine, spans matched to this case (reference/timings.csv)",
-        xlabel = "wall time (s)",
+        title = "$(case_id): setup and simulation wall time",
+        subtitle = "warm Julia vs internal elapsed; indicative (see timing protocol)",
+        xlabel = "elapsed wall time (s)",
         xscale = log10,
         yticks = (ys, labels),
     )

@@ -55,14 +55,22 @@ one compares magnitudes across codes.
 
 ![V-HC-03 front_back_dT_history_vs_codes_error](assets/V-HC-03/V-HC-03_front_back_dT_history_vs_codes_error.png)
 
-Wall times at every ladder rung against the reference runs.
-Resolutions and simulated spans differ where noted (details in
-`reference/timings.csv`), so cross-code timings are indicative
-rather than a controlled benchmark. FDS timings include
-process startup and output; the reference provenance records
-the measurement protocol.
+Setup and simulation wall times at every ladder rung against the
+reference runs. Julia times model construction and solve after warm-up;
+FDS and Gpyro use internal total elapsed wall time, including setup and
+simulation output. Process launch and Julia compilation are excluded
+from the figure. Output costs, discretizations and time-stepping rules
+still differ, so these are indicative costs, not pure solver speedups.
+See `test/verification/reference/README.md` and `timings.csv` for the
+timer boundaries, resolutions and measurement provenance.
 
 ![V-HC-03 solve_time](assets/V-HC-03/V-HC-03_solve_time.png)
+
+Reference timings below are medians of five runs after one warm-up. Full process time also includes launch and shutdown; it is shown separately and is not compared with Julia's warmed time.
+
+| Code | Resolution | Internal elapsed (s) | Full process (s) |
+| --- | --- | --- | --- |
+| Gpyro 0.8200 | 201 nodes (Δz=0.1 mm) | 0.707 | 0.7094 |
 
 Solution overlays including the other codes' points: [T_profiles_vs_codes](assets/V-HC-03/V-HC-03_T_profiles_vs_codes.png), [front_back_dT_history_vs_codes](assets/V-HC-03/V-HC-03_front_back_dT_history_vs_codes.png).
 

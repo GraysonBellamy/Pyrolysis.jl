@@ -66,14 +66,22 @@ one compares magnitudes across codes.
 
 ![V-HC-02a back_T_history_vs_codes_error](assets/V-HC-02a/V-HC-02a_back_T_history_vs_codes_error.png)
 
-Wall times at every ladder rung against the reference runs.
-Resolutions and simulated spans differ where noted (details in
-`reference/timings.csv`), so cross-code timings are indicative
-rather than a controlled benchmark. FDS timings include
-process startup and output; the reference provenance records
-the measurement protocol.
+Setup and simulation wall times at every ladder rung against the
+reference runs. Julia times model construction and solve after warm-up;
+FDS and Gpyro use internal total elapsed wall time, including setup and
+simulation output. Process launch and Julia compilation are excluded
+from the figure. Output costs, discretizations and time-stepping rules
+still differ, so these are indicative costs, not pure solver speedups.
+See `test/verification/reference/README.md` and `timings.csv` for the
+timer boundaries, resolutions and measurement provenance.
 
 ![V-HC-02a solve_time](assets/V-HC-02a/V-HC-02a_solve_time.png)
+
+Reference timings below are medians of five runs after one warm-up. Full process time also includes launch and shutdown; it is shown separately and is not compared with Julia's warmed time.
+
+| Code | Resolution | Internal elapsed (s) | Full process (s) |
+| --- | --- | --- | --- |
+| FDS 6.11.1 | 101 cells (Δx≈1 mm) | 0.352 | 0.6092 |
 
 Solution overlays including the other codes' points: [T_profiles_vs_codes](assets/V-HC-02a/V-HC-02a_T_profiles_vs_codes.png), [surface_T_history_vs_codes](assets/V-HC-02a/V-HC-02a_surface_T_history_vs_codes.png), [back_T_history_vs_codes](assets/V-HC-02a/V-HC-02a_back_T_history_vs_codes.png).
 
@@ -142,14 +150,22 @@ one compares magnitudes across codes.
 
 ![V-HC-02b back_T_history_vs_codes_error](assets/V-HC-02b/V-HC-02b_back_T_history_vs_codes_error.png)
 
-Wall times at every ladder rung against the reference runs.
-Resolutions and simulated spans differ where noted (details in
-`reference/timings.csv`), so cross-code timings are indicative
-rather than a controlled benchmark. FDS timings include
-process startup and output; the reference provenance records
-the measurement protocol.
+Setup and simulation wall times at every ladder rung against the
+reference runs. Julia times model construction and solve after warm-up;
+FDS and Gpyro use internal total elapsed wall time, including setup and
+simulation output. Process launch and Julia compilation are excluded
+from the figure. Output costs, discretizations and time-stepping rules
+still differ, so these are indicative costs, not pure solver speedups.
+See `test/verification/reference/README.md` and `timings.csv` for the
+timer boundaries, resolutions and measurement provenance.
 
 ![V-HC-02b solve_time](assets/V-HC-02b/V-HC-02b_solve_time.png)
+
+Reference timings below are medians of five runs after one warm-up. Full process time also includes launch and shutdown; it is shown separately and is not compared with Julia's warmed time.
+
+| Code | Resolution | Internal elapsed (s) | Full process (s) |
+| --- | --- | --- | --- |
+| FDS 6.11.1 | 101 cells (Δx≈1 mm) | 0.353 | 0.6103 |
 
 Solution overlays including the other codes' points: [T_profiles_vs_codes](assets/V-HC-02b/V-HC-02b_T_profiles_vs_codes.png), [surface_T_history_vs_codes](assets/V-HC-02b/V-HC-02b_surface_T_history_vs_codes.png), [back_T_history_vs_codes](assets/V-HC-02b/V-HC-02b_back_T_history_vs_codes.png).
 
@@ -218,14 +234,22 @@ one compares magnitudes across codes.
 
 ![V-HC-02c back_T_history_vs_codes_error](assets/V-HC-02c/V-HC-02c_back_T_history_vs_codes_error.png)
 
-Wall times at every ladder rung against the reference runs.
-Resolutions and simulated spans differ where noted (details in
-`reference/timings.csv`), so cross-code timings are indicative
-rather than a controlled benchmark. FDS timings include
-process startup and output; the reference provenance records
-the measurement protocol.
+Setup and simulation wall times at every ladder rung against the
+reference runs. Julia times model construction and solve after warm-up;
+FDS and Gpyro use internal total elapsed wall time, including setup and
+simulation output. Process launch and Julia compilation are excluded
+from the figure. Output costs, discretizations and time-stepping rules
+still differ, so these are indicative costs, not pure solver speedups.
+See `test/verification/reference/README.md` and `timings.csv` for the
+timer boundaries, resolutions and measurement provenance.
 
 ![V-HC-02c solve_time](assets/V-HC-02c/V-HC-02c_solve_time.png)
+
+Reference timings below are medians of five runs after one warm-up. Full process time also includes launch and shutdown; it is shown separately and is not compared with Julia's warmed time.
+
+| Code | Resolution | Internal elapsed (s) | Full process (s) |
+| --- | --- | --- | --- |
+| FDS 6.11.1 | 101 cells (Δx≈1 mm) | 0.346 | 0.6045 |
 
 Solution overlays including the other codes' points: [T_profiles_vs_codes](assets/V-HC-02c/V-HC-02c_T_profiles_vs_codes.png), [surface_T_history_vs_codes](assets/V-HC-02c/V-HC-02c_surface_T_history_vs_codes.png), [back_T_history_vs_codes](assets/V-HC-02c/V-HC-02c_back_T_history_vs_codes.png).
 
@@ -294,14 +318,22 @@ one compares magnitudes across codes.
 
 ![V-HC-02d back_T_history_vs_codes_error](assets/V-HC-02d/V-HC-02d_back_T_history_vs_codes_error.png)
 
-Wall times at every ladder rung against the reference runs.
-Resolutions and simulated spans differ where noted (details in
-`reference/timings.csv`), so cross-code timings are indicative
-rather than a controlled benchmark. FDS timings include
-process startup and output; the reference provenance records
-the measurement protocol.
+Setup and simulation wall times at every ladder rung against the
+reference runs. Julia times model construction and solve after warm-up;
+FDS and Gpyro use internal total elapsed wall time, including setup and
+simulation output. Process launch and Julia compilation are excluded
+from the figure. Output costs, discretizations and time-stepping rules
+still differ, so these are indicative costs, not pure solver speedups.
+See `test/verification/reference/README.md` and `timings.csv` for the
+timer boundaries, resolutions and measurement provenance.
 
 ![V-HC-02d solve_time](assets/V-HC-02d/V-HC-02d_solve_time.png)
+
+Reference timings below are medians of five runs after one warm-up. Full process time also includes launch and shutdown; it is shown separately and is not compared with Julia's warmed time.
+
+| Code | Resolution | Internal elapsed (s) | Full process (s) |
+| --- | --- | --- | --- |
+| FDS 6.11.1 | 101 cells (Δx≈1 mm) | 0.348 | 0.6064 |
 
 Solution overlays including the other codes' points: [T_profiles_vs_codes](assets/V-HC-02d/V-HC-02d_T_profiles_vs_codes.png), [surface_T_history_vs_codes](assets/V-HC-02d/V-HC-02d_surface_T_history_vs_codes.png), [back_T_history_vs_codes](assets/V-HC-02d/V-HC-02d_back_T_history_vs_codes.png).
 

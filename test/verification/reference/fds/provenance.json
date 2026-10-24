@@ -283,7 +283,7 @@
       5.95361328125
     ],
     "valid": true,
-    "protocol": "one warm-up followed by five fresh-process measurements per matched deck; published wall_s is median process wall time including MPI startup and output",
+    "protocol": "one warm-up followed by five fresh-process measurements per matched deck; wall_s is median FDS internal total elapsed wall time; process_wall_s separately retains median process wall time including launch and shutdown",
     "runs": [
       {
         "case": "heat_conduction_a_ext",
@@ -721,6 +721,12 @@
     "hardware": {
       "cpu_model": "Intel(R) Core(TM) Ultra 7 155H",
       "architecture": "x86_64"
+    },
+    "timer_boundaries": {
+      "start": "after MPI initialization; before input reading",
+      "end": "final timing report before MPI finalization",
+      "includes": "input reading; setup; simulation; output",
+      "excludes": "process/MPI startup; MPI finalization and process shutdown"
     }
   }
 }

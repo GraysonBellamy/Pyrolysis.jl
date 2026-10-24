@@ -7,14 +7,59 @@ Date: 2026-07-07
 - **Gpyro 0.8200** (banner of every `.out` file: `Gpyro 0.8200`,
   `https://github.com/reaxfire/gpyro`). Source checkout: commit
   `6d369dd0fa5a3621334272d0806f48c56e608c01` (2020-09-01), the current master
-  of the maintained Gpyro repository (reaxfire is the maintained home of
-  lautenberger/gpyro; identical v0.8200 source).
+  of the Gpyro repository (the reaxfire URL redirects to
+  [lautenberger/gpyro](https://github.com/lautenberger/gpyro)).
 - Serial standalone build (`build/linux/gpyro/gpyro`), compiled 2026-07-07
   with **GNU Fortran 15.2.0 (conda-forge gcc 15.2.0-19)**.
 - Smoke-tested against the shipped `samples/01-dtg` case before use.
 - Extraction/verification script: `extract_results.py` (same directory);
   it converts Gpyro's output (temperatures in deg C) to SI (K, m, s) and
   cross-checks every run against the analytical solution.
+
+## Timing measurements
+
+The five timing decks use the same pinned 0.8200 source and inputs as the
+reference cases. The timing executable is a serial **GNU Fortran 14.4.0**
+build using the upstream `gnu_linux` flags (`-O2 -unroll
+-frecord-marker=4 -ffree-line-length-none`). This compiler differs from the
+15.2.0 build that produced the original overlays, so the refreshed timings
+are not evidence of a performance change in Gpyro.
+
+`../timings.csv` uses the median **internal total elapsed wall time** in
+`wall_s` and retains median full process wall time in `process_wall_s`.
+Each deck has one warm-up followed by five fresh native processes, with
+`OMP_NUM_THREADS=1` and CPU affinity 1. `provenance.json` records every
+sample, input/output and executable hashes, compiler flags, CPU and load.
+The two V-CPL-01 routes share one Gpyro run.
+
+Upstream starts its elapsed wall timer before input reading and allocation,
+but normally prints elapsed time only at periodic progress reports.
+[`elapsed-timer.patch`](elapsed-timer.patch) adds a final print of that same
+timer at shutdown, after final timing-file output. The timer has 1 ms
+resolution and includes model setup, simulation and output; process launch
+and final runtime cleanup lie outside it. The separate routine and
+time-stepping timing statistics are not used in the comparison.
+
+The patch changes only timing output. Every timed run's numerical CSVs are
+checked byte for byte against an unmodified build of the same source and
+compiler. The numerical overlay CSVs remain unchanged.
+
+To reproduce the executable, check out source commit
+`6d369dd0fa5a3621334272d0806f48c56e608c01` from
+[the upstream repository](https://github.com/lautenberger/gpyro), apply the
+patch from its repository root with `patch -p1`, and build:
+
+```sh
+mkdir -p build/linux/gpyro
+cd build/linux/gpyro
+GPYRO_FCOMPL_SERIAL_GNU=gfortran make -f ../../Makefile_gpyro gnu_linux
+```
+
+Run each copied deck in a separate directory with
+`OMP_NUM_THREADS=1 taskset -c 1 /path/to/gpyro <case>.data`, recording the
+final `Total Elapsed Wall Clock Time (s)` line and measuring the complete
+subprocess separately. The compiler container is used only to build; its
+startup cost is not part of either timing.
 
 ## Conventions common to all decks
 

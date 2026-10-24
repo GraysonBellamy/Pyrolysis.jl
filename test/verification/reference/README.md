@@ -15,12 +15,35 @@ so plots are reproducible without installing the other codes.
 | `fds/` | FDS 6.11.1 (NIST), run locally on the shipped verification inputs | V-HC-01/02, V-RX-01/02, V-CPL-03 overlays |
 | `gpyro/` | Gpyro 0.8200 (Lautenberger), built from source, dissertation §3.4 decks | V-HC-01/03, V-RAD-01, V-CPL-01, V-RX-01 overlays |
 | `macfp/` | MaCFP-2 PMMA community submissions (9 institutions: FDS/Gpyro/ThermaKin/Sierra) | B-01 community-envelope comparison (case pending) |
-| `timings.csv` | wall times of the FDS/Gpyro runs above; timing protocols recorded with the data | per-case `solve_time` comparison figure |
+| `timings.csv` | internal elapsed and full process wall times; timing protocols recorded with the data | per-case `solve_time` figure and supporting timing table |
 
-Timing caveat: the reference runs use each code's own resolution, time step,
-and (for the shipped FDS heat_conduction cases) a longer simulated span — the
-solve-time figures are indicative, not a controlled benchmark; per-row
-details are in `timings.csv`'s note column.
+## Timing convention
+
+The primary figures compare **setup and simulation wall time**. Julia times
+`case.build(n)` and the solve after a discarded warm-up. Its process startup,
+compilation warm-up, and report/plot generation are outside the measurement.
+FDS and Gpyro use their **internal total elapsed wall time**, not their
+time-stepping-only or per-routine timing statistics. The `wall_s` column in
+`timings.csv` holds this internal elapsed time; `process_wall_s` separately
+holds full process wall time. Both reference columns are medians of five
+fresh-process runs after one warm-up, on one pinned CPU.
+
+| Code | Primary timer starts | Primary timer ends |
+|---|---|---|
+| Pyrolysis.jl | before model construction in a warmed Julia session | after solve returns |
+| FDS 6.11.1 | after MPI initialization; before input reading | final timing report before MPI finalization |
+| Gpyro 0.8200 | before input reading and allocation | shutdown timing print after simulation and final timing-file output |
+
+Full process wall times include launch and shutdown and appear in supporting
+tables, not in ratios against warmed Julia. No complete-process Julia
+measurement is supplied here. FDS/Gpyro output remains inside their internal
+timers; Julia report output is outside its timer. Discretizations, adaptive
+steps and output workloads also differ, so these are indicative costs, not
+pure solver speedups. The matched timing decks use the same simulated spans
+as the corresponding Julia cases; per-row details are in the note column.
+
+See [FDS provenance](fds/README.md) and [Gpyro provenance](gpyro/README.md) for
+build details, timer boundaries, repeated measurements and input hashes.
 
 ThermaKin2Ds is not yet represented: the distribution in `docs/refs/ThermaKin/`
 is a Windows-only console binary (PE32+), and no wine/mono is assumed on dev

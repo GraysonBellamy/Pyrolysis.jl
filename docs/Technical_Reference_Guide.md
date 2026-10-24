@@ -16731,9 +16731,13 @@ gas-generation rate). A series marked `crosscode = true` is drawn as a muted
 context layer in a separate `_vs_codes` variant of each affected figure, so the base
 figure keeps the solver's own error on its own scale; for exact-solution cases the
 other codes' *errors* against the same exact solution are compared.
-`reference/timings.csv` feeds a wall-time comparison (indicative only: each code
-runs at its own resolution and step). ThermaKin2Ds is not represented: its
-distribution is a Windows console binary.
+`reference/timings.csv` feeds the wall-time comparison: warmed Julia model
+construction and solve versus FDS/Gpyro internal total elapsed time, including
+setup and simulation. Full process times appear separately in supporting
+tables. Output workloads, resolutions and time steps differ, so these are
+indicative costs rather than pure solver speedups. The reference README
+defines the timer boundaries and provenance. ThermaKin2Ds is not represented:
+its distribution is a Windows console binary.
 
 ---
 

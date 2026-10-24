@@ -1,0 +1,1195 @@
+{
+  "source_commit": "6d369dd0fa5a3621334272d0806f48c56e608c01",
+  "compiler": "GNU Fortran (GCC) 14.4.0",
+  "flags": "-O2 -unroll -frecord-marker=4 -ffree-line-length-none",
+  "executable_sha256": "df59fffc56a7333cd0e4ccbf1165223aae2447d3c192aa234946e9ee288a745f",
+  "original_executable_sha256": "74813cc5eff12b131e1183957e204377872e68751d5da2232674cbc3c3f95d41",
+  "cpu_model": "Intel(R) Core(TM) Ultra 7 155H",
+  "cpu": 1,
+  "omp_threads": 1,
+  "runs": [
+    {
+      "case": "vhc01",
+      "repeat": 0,
+      "warmup": true,
+      "process_seconds": 0.38302570700034266,
+      "input_sha256": "417cacaace661116b8619040781d4dcfed726f4357771992f01254e1c5b8a529",
+      "output_sha256": {
+        "vhc01_profile_01_01_TEMPERATURE.csv": "4160a3856bda261fcff2e03f95cabda0e4ac3f747d599f84dd595a50f3b1a14e",
+        "vhc01_summary_01_0001.csv": "5b0a00a0ef2dd25045d06dcd6afa4d703c7836a09e4da5b4f5f1514b5c690bd7"
+      },
+      "load_before": [
+        1.615234375,
+        1.62939453125,
+        2.603515625
+      ],
+      "load_after": [
+        1.615234375,
+        1.62939453125,
+        2.603515625
+      ],
+      "exit_code": 0,
+      "command": [
+        "taskset",
+        "-c",
+        "1",
+        "<gpyro-executable>",
+        "vhc01.data"
+      ],
+      "log_sha256": "baa131b1968cc5de3ad45027f67a0f75fe09220448d46e023dadfee275c3d66f",
+      "internal_elapsed_seconds": 0.381,
+      "numerical_csvs_match_original_build": true
+    },
+    {
+      "case": "vhc01",
+      "repeat": 1,
+      "warmup": false,
+      "process_seconds": 0.3814332759993704,
+      "input_sha256": "417cacaace661116b8619040781d4dcfed726f4357771992f01254e1c5b8a529",
+      "output_sha256": {
+        "vhc01_profile_01_01_TEMPERATURE.csv": "4160a3856bda261fcff2e03f95cabda0e4ac3f747d599f84dd595a50f3b1a14e",
+        "vhc01_summary_01_0001.csv": "5b0a00a0ef2dd25045d06dcd6afa4d703c7836a09e4da5b4f5f1514b5c690bd7"
+      },
+      "load_before": [
+        1.615234375,
+        1.62939453125,
+        2.603515625
+      ],
+      "load_after": [
+        1.615234375,
+        1.62939453125,
+        2.603515625
+      ],
+      "exit_code": 0,
+      "command": [
+        "taskset",
+        "-c",
+        "1",
+        "<gpyro-executable>",
+        "vhc01.data"
+      ],
+      "log_sha256": "3db8ebd12def30aa1fd7a35ab466126498ddcc6feb737c4052771260169d9fc5",
+      "internal_elapsed_seconds": 0.379,
+      "numerical_csvs_match_original_build": true
+    },
+    {
+      "case": "vhc01",
+      "repeat": 2,
+      "warmup": false,
+      "process_seconds": 0.381153809999887,
+      "input_sha256": "417cacaace661116b8619040781d4dcfed726f4357771992f01254e1c5b8a529",
+      "output_sha256": {
+        "vhc01_profile_01_01_TEMPERATURE.csv": "4160a3856bda261fcff2e03f95cabda0e4ac3f747d599f84dd595a50f3b1a14e",
+        "vhc01_summary_01_0001.csv": "5b0a00a0ef2dd25045d06dcd6afa4d703c7836a09e4da5b4f5f1514b5c690bd7"
+      },
+      "load_before": [
+        1.615234375,
+        1.62939453125,
+        2.603515625
+      ],
+      "load_after": [
+        1.615234375,
+        1.62939453125,
+        2.603515625
+      ],
+      "exit_code": 0,
+      "command": [
+        "taskset",
+        "-c",
+        "1",
+        "<gpyro-executable>",
+        "vhc01.data"
+      ],
+      "log_sha256": "3db8ebd12def30aa1fd7a35ab466126498ddcc6feb737c4052771260169d9fc5",
+      "internal_elapsed_seconds": 0.379,
+      "numerical_csvs_match_original_build": true
+    },
+    {
+      "case": "vhc01",
+      "repeat": 3,
+      "warmup": false,
+      "process_seconds": 0.3854402850010956,
+      "input_sha256": "417cacaace661116b8619040781d4dcfed726f4357771992f01254e1c5b8a529",
+      "output_sha256": {
+        "vhc01_profile_01_01_TEMPERATURE.csv": "4160a3856bda261fcff2e03f95cabda0e4ac3f747d599f84dd595a50f3b1a14e",
+        "vhc01_summary_01_0001.csv": "5b0a00a0ef2dd25045d06dcd6afa4d703c7836a09e4da5b4f5f1514b5c690bd7"
+      },
+      "load_before": [
+        1.615234375,
+        1.62939453125,
+        2.603515625
+      ],
+      "load_after": [
+        1.615234375,
+        1.62939453125,
+        2.603515625
+      ],
+      "exit_code": 0,
+      "command": [
+        "taskset",
+        "-c",
+        "1",
+        "<gpyro-executable>",
+        "vhc01.data"
+      ],
+      "log_sha256": "b65773e02d4953a242061a13f176aa7320eb15a9c3f2f8ace960ca51c847b315",
+      "internal_elapsed_seconds": 0.383,
+      "numerical_csvs_match_original_build": true
+    },
+    {
+      "case": "vhc01",
+      "repeat": 4,
+      "warmup": false,
+      "process_seconds": 0.3821327570003632,
+      "input_sha256": "417cacaace661116b8619040781d4dcfed726f4357771992f01254e1c5b8a529",
+      "output_sha256": {
+        "vhc01_profile_01_01_TEMPERATURE.csv": "4160a3856bda261fcff2e03f95cabda0e4ac3f747d599f84dd595a50f3b1a14e",
+        "vhc01_summary_01_0001.csv": "5b0a00a0ef2dd25045d06dcd6afa4d703c7836a09e4da5b4f5f1514b5c690bd7"
+      },
+      "load_before": [
+        1.615234375,
+        1.62939453125,
+        2.603515625
+      ],
+      "load_after": [
+        1.615234375,
+        1.62939453125,
+        2.603515625
+      ],
+      "exit_code": 0,
+      "command": [
+        "taskset",
+        "-c",
+        "1",
+        "<gpyro-executable>",
+        "vhc01.data"
+      ],
+      "log_sha256": "3db8ebd12def30aa1fd7a35ab466126498ddcc6feb737c4052771260169d9fc5",
+      "internal_elapsed_seconds": 0.379,
+      "numerical_csvs_match_original_build": true
+    },
+    {
+      "case": "vhc01",
+      "repeat": 5,
+      "warmup": false,
+      "process_seconds": 0.3776552099989203,
+      "input_sha256": "417cacaace661116b8619040781d4dcfed726f4357771992f01254e1c5b8a529",
+      "output_sha256": {
+        "vhc01_profile_01_01_TEMPERATURE.csv": "4160a3856bda261fcff2e03f95cabda0e4ac3f747d599f84dd595a50f3b1a14e",
+        "vhc01_summary_01_0001.csv": "5b0a00a0ef2dd25045d06dcd6afa4d703c7836a09e4da5b4f5f1514b5c690bd7"
+      },
+      "load_before": [
+        1.615234375,
+        1.62939453125,
+        2.603515625
+      ],
+      "load_after": [
+        1.615234375,
+        1.62939453125,
+        2.603515625
+      ],
+      "exit_code": 0,
+      "command": [
+        "taskset",
+        "-c",
+        "1",
+        "<gpyro-executable>",
+        "vhc01.data"
+      ],
+      "log_sha256": "f4a3c057c53716370ffeb1d1ce74733ab31ca4a3e1febd3304083c17736dfa6b",
+      "internal_elapsed_seconds": 0.376,
+      "numerical_csvs_match_original_build": true
+    },
+    {
+      "case": "vhc03",
+      "repeat": 0,
+      "warmup": true,
+      "process_seconds": 0.703979348001667,
+      "input_sha256": "466c9b48d3d248c7f80c9d4d96c10c792a9fcf6dec2b90ca9fdf3d344472ea58",
+      "output_sha256": {
+        "vhc03_profile_01_01_TEMPERATURE.csv": "98297c7b95ace9a9cfd2e9320b48bd72c488aefbb24e6c9e84cefe1f19734818",
+        "vhc03_summary_01_0001.csv": "2203d124a4646b7c2e1fd7878718794e545df3315198dbaa5e7c67e409ba368f"
+      },
+      "load_before": [
+        1.646484375,
+        1.6357421875,
+        2.60009765625
+      ],
+      "load_after": [
+        1.646484375,
+        1.6357421875,
+        2.60009765625
+      ],
+      "exit_code": 0,
+      "command": [
+        "taskset",
+        "-c",
+        "1",
+        "<gpyro-executable>",
+        "vhc03.data"
+      ],
+      "log_sha256": "682f33c35a695650de6677c3f24b687c510a95de1df5365fbd837d331d809deb",
+      "internal_elapsed_seconds": 0.702,
+      "numerical_csvs_match_original_build": true
+    },
+    {
+      "case": "vhc03",
+      "repeat": 1,
+      "warmup": false,
+      "process_seconds": 0.7093336640009511,
+      "input_sha256": "466c9b48d3d248c7f80c9d4d96c10c792a9fcf6dec2b90ca9fdf3d344472ea58",
+      "output_sha256": {
+        "vhc03_profile_01_01_TEMPERATURE.csv": "98297c7b95ace9a9cfd2e9320b48bd72c488aefbb24e6c9e84cefe1f19734818",
+        "vhc03_summary_01_0001.csv": "2203d124a4646b7c2e1fd7878718794e545df3315198dbaa5e7c67e409ba368f"
+      },
+      "load_before": [
+        1.646484375,
+        1.6357421875,
+        2.60009765625
+      ],
+      "load_after": [
+        1.646484375,
+        1.6357421875,
+        2.60009765625
+      ],
+      "exit_code": 0,
+      "command": [
+        "taskset",
+        "-c",
+        "1",
+        "<gpyro-executable>",
+        "vhc03.data"
+      ],
+      "log_sha256": "aae4c3ebcf4262283b14f466a3707c2a7b4d1ad9e4a6d07d131aa0a9dc65a4bc",
+      "internal_elapsed_seconds": 0.707,
+      "numerical_csvs_match_original_build": true
+    },
+    {
+      "case": "vhc03",
+      "repeat": 2,
+      "warmup": false,
+      "process_seconds": 0.7190904740000406,
+      "input_sha256": "466c9b48d3d248c7f80c9d4d96c10c792a9fcf6dec2b90ca9fdf3d344472ea58",
+      "output_sha256": {
+        "vhc03_profile_01_01_TEMPERATURE.csv": "98297c7b95ace9a9cfd2e9320b48bd72c488aefbb24e6c9e84cefe1f19734818",
+        "vhc03_summary_01_0001.csv": "2203d124a4646b7c2e1fd7878718794e545df3315198dbaa5e7c67e409ba368f"
+      },
+      "load_before": [
+        1.646484375,
+        1.6357421875,
+        2.60009765625
+      ],
+      "load_after": [
+        1.646484375,
+        1.6357421875,
+        2.60009765625
+      ],
+      "exit_code": 0,
+      "command": [
+        "taskset",
+        "-c",
+        "1",
+        "<gpyro-executable>",
+        "vhc03.data"
+      ],
+      "log_sha256": "1917639c75c11bfa7b08557dbba8b882985064183a27ddc0396d2bed947c097a",
+      "internal_elapsed_seconds": 0.716,
+      "numerical_csvs_match_original_build": true
+    },
+    {
+      "case": "vhc03",
+      "repeat": 3,
+      "warmup": false,
+      "process_seconds": 0.6973904639999091,
+      "input_sha256": "466c9b48d3d248c7f80c9d4d96c10c792a9fcf6dec2b90ca9fdf3d344472ea58",
+      "output_sha256": {
+        "vhc03_profile_01_01_TEMPERATURE.csv": "98297c7b95ace9a9cfd2e9320b48bd72c488aefbb24e6c9e84cefe1f19734818",
+        "vhc03_summary_01_0001.csv": "2203d124a4646b7c2e1fd7878718794e545df3315198dbaa5e7c67e409ba368f"
+      },
+      "load_before": [
+        1.646484375,
+        1.6357421875,
+        2.60009765625
+      ],
+      "load_after": [
+        1.646484375,
+        1.6357421875,
+        2.60009765625
+      ],
+      "exit_code": 0,
+      "command": [
+        "taskset",
+        "-c",
+        "1",
+        "<gpyro-executable>",
+        "vhc03.data"
+      ],
+      "log_sha256": "d11ed876888ab46185a1f2b052a811c8187a8dcc2614e94fa7797a6578c1ff02",
+      "internal_elapsed_seconds": 0.696,
+      "numerical_csvs_match_original_build": true
+    },
+    {
+      "case": "vhc03",
+      "repeat": 4,
+      "warmup": false,
+      "process_seconds": 0.7094295999995666,
+      "input_sha256": "466c9b48d3d248c7f80c9d4d96c10c792a9fcf6dec2b90ca9fdf3d344472ea58",
+      "output_sha256": {
+        "vhc03_profile_01_01_TEMPERATURE.csv": "98297c7b95ace9a9cfd2e9320b48bd72c488aefbb24e6c9e84cefe1f19734818",
+        "vhc03_summary_01_0001.csv": "2203d124a4646b7c2e1fd7878718794e545df3315198dbaa5e7c67e409ba368f"
+      },
+      "load_before": [
+        1.646484375,
+        1.6357421875,
+        2.60009765625
+      ],
+      "load_after": [
+        1.646484375,
+        1.6357421875,
+        2.60009765625
+      ],
+      "exit_code": 0,
+      "command": [
+        "taskset",
+        "-c",
+        "1",
+        "<gpyro-executable>",
+        "vhc03.data"
+      ],
+      "log_sha256": "aae4c3ebcf4262283b14f466a3707c2a7b4d1ad9e4a6d07d131aa0a9dc65a4bc",
+      "internal_elapsed_seconds": 0.707,
+      "numerical_csvs_match_original_build": true
+    },
+    {
+      "case": "vhc03",
+      "repeat": 5,
+      "warmup": false,
+      "process_seconds": 0.7149100710012135,
+      "input_sha256": "466c9b48d3d248c7f80c9d4d96c10c792a9fcf6dec2b90ca9fdf3d344472ea58",
+      "output_sha256": {
+        "vhc03_profile_01_01_TEMPERATURE.csv": "98297c7b95ace9a9cfd2e9320b48bd72c488aefbb24e6c9e84cefe1f19734818",
+        "vhc03_summary_01_0001.csv": "2203d124a4646b7c2e1fd7878718794e545df3315198dbaa5e7c67e409ba368f"
+      },
+      "load_before": [
+        1.646484375,
+        1.6357421875,
+        2.60009765625
+      ],
+      "load_after": [
+        1.646484375,
+        1.6357421875,
+        2.60009765625
+      ],
+      "exit_code": 0,
+      "command": [
+        "taskset",
+        "-c",
+        "1",
+        "<gpyro-executable>",
+        "vhc03.data"
+      ],
+      "log_sha256": "d175bde431b49fe6796bc64732b01577c720a08cdee27f3e91c34b0b11ededf3",
+      "internal_elapsed_seconds": 0.712,
+      "numerical_csvs_match_original_build": true
+    },
+    {
+      "case": "vrad01",
+      "repeat": 0,
+      "warmup": true,
+      "process_seconds": 0.08865887400133943,
+      "input_sha256": "1e2f22abe7dbc87740f6dd0812438bafd3dd7be253ca5289c51eb0da9e5e8d38",
+      "output_sha256": {
+        "vrad01_profile_01_01_TEMPERATURE.csv": "43f2c6e5f8dbc3d3c55cf79436e9a42ec4051a5bafa89211fca3b33665d14e64",
+        "vrad01_summary_01_0001.csv": "8ca5b0e1a0c11aeed65cf4833ad25915004ab111019f4d55faad7425672fee7e"
+      },
+      "load_before": [
+        1.646484375,
+        1.6357421875,
+        2.60009765625
+      ],
+      "load_after": [
+        1.646484375,
+        1.6357421875,
+        2.60009765625
+      ],
+      "exit_code": 0,
+      "command": [
+        "taskset",
+        "-c",
+        "1",
+        "<gpyro-executable>",
+        "vrad01.data"
+      ],
+      "log_sha256": "d400fb34f04dd6970b00555cf281a2dd035e179a5c34ae7c74c6e7b725a0878c",
+      "internal_elapsed_seconds": 0.086,
+      "numerical_csvs_match_original_build": true
+    },
+    {
+      "case": "vrad01",
+      "repeat": 1,
+      "warmup": false,
+      "process_seconds": 0.08843068700116419,
+      "input_sha256": "1e2f22abe7dbc87740f6dd0812438bafd3dd7be253ca5289c51eb0da9e5e8d38",
+      "output_sha256": {
+        "vrad01_profile_01_01_TEMPERATURE.csv": "43f2c6e5f8dbc3d3c55cf79436e9a42ec4051a5bafa89211fca3b33665d14e64",
+        "vrad01_summary_01_0001.csv": "8ca5b0e1a0c11aeed65cf4833ad25915004ab111019f4d55faad7425672fee7e"
+      },
+      "load_before": [
+        1.646484375,
+        1.6357421875,
+        2.60009765625
+      ],
+      "load_after": [
+        1.646484375,
+        1.6357421875,
+        2.60009765625
+      ],
+      "exit_code": 0,
+      "command": [
+        "taskset",
+        "-c",
+        "1",
+        "<gpyro-executable>",
+        "vrad01.data"
+      ],
+      "log_sha256": "d400fb34f04dd6970b00555cf281a2dd035e179a5c34ae7c74c6e7b725a0878c",
+      "internal_elapsed_seconds": 0.086,
+      "numerical_csvs_match_original_build": true
+    },
+    {
+      "case": "vrad01",
+      "repeat": 2,
+      "warmup": false,
+      "process_seconds": 0.08790740899894445,
+      "input_sha256": "1e2f22abe7dbc87740f6dd0812438bafd3dd7be253ca5289c51eb0da9e5e8d38",
+      "output_sha256": {
+        "vrad01_profile_01_01_TEMPERATURE.csv": "43f2c6e5f8dbc3d3c55cf79436e9a42ec4051a5bafa89211fca3b33665d14e64",
+        "vrad01_summary_01_0001.csv": "8ca5b0e1a0c11aeed65cf4833ad25915004ab111019f4d55faad7425672fee7e"
+      },
+      "load_before": [
+        1.646484375,
+        1.6357421875,
+        2.60009765625
+      ],
+      "load_after": [
+        1.646484375,
+        1.6357421875,
+        2.60009765625
+      ],
+      "exit_code": 0,
+      "command": [
+        "taskset",
+        "-c",
+        "1",
+        "<gpyro-executable>",
+        "vrad01.data"
+      ],
+      "log_sha256": "d400fb34f04dd6970b00555cf281a2dd035e179a5c34ae7c74c6e7b725a0878c",
+      "internal_elapsed_seconds": 0.086,
+      "numerical_csvs_match_original_build": true
+    },
+    {
+      "case": "vrad01",
+      "repeat": 3,
+      "warmup": false,
+      "process_seconds": 0.0891468640002131,
+      "input_sha256": "1e2f22abe7dbc87740f6dd0812438bafd3dd7be253ca5289c51eb0da9e5e8d38",
+      "output_sha256": {
+        "vrad01_profile_01_01_TEMPERATURE.csv": "43f2c6e5f8dbc3d3c55cf79436e9a42ec4051a5bafa89211fca3b33665d14e64",
+        "vrad01_summary_01_0001.csv": "8ca5b0e1a0c11aeed65cf4833ad25915004ab111019f4d55faad7425672fee7e"
+      },
+      "load_before": [
+        1.646484375,
+        1.6357421875,
+        2.60009765625
+      ],
+      "load_after": [
+        1.6748046875,
+        1.64208984375,
+        2.5966796875
+      ],
+      "exit_code": 0,
+      "command": [
+        "taskset",
+        "-c",
+        "1",
+        "<gpyro-executable>",
+        "vrad01.data"
+      ],
+      "log_sha256": "2b4e7ff660c05aa5e208d441549ba769a15357a1d94b5efb9781d6094dfcae46",
+      "internal_elapsed_seconds": 0.087,
+      "numerical_csvs_match_original_build": true
+    },
+    {
+      "case": "vrad01",
+      "repeat": 4,
+      "warmup": false,
+      "process_seconds": 0.08848977100024058,
+      "input_sha256": "1e2f22abe7dbc87740f6dd0812438bafd3dd7be253ca5289c51eb0da9e5e8d38",
+      "output_sha256": {
+        "vrad01_profile_01_01_TEMPERATURE.csv": "43f2c6e5f8dbc3d3c55cf79436e9a42ec4051a5bafa89211fca3b33665d14e64",
+        "vrad01_summary_01_0001.csv": "8ca5b0e1a0c11aeed65cf4833ad25915004ab111019f4d55faad7425672fee7e"
+      },
+      "load_before": [
+        1.6748046875,
+        1.64208984375,
+        2.5966796875
+      ],
+      "load_after": [
+        1.6748046875,
+        1.64208984375,
+        2.5966796875
+      ],
+      "exit_code": 0,
+      "command": [
+        "taskset",
+        "-c",
+        "1",
+        "<gpyro-executable>",
+        "vrad01.data"
+      ],
+      "log_sha256": "d400fb34f04dd6970b00555cf281a2dd035e179a5c34ae7c74c6e7b725a0878c",
+      "internal_elapsed_seconds": 0.086,
+      "numerical_csvs_match_original_build": true
+    },
+    {
+      "case": "vrad01",
+      "repeat": 5,
+      "warmup": false,
+      "process_seconds": 0.0882786149995809,
+      "input_sha256": "1e2f22abe7dbc87740f6dd0812438bafd3dd7be253ca5289c51eb0da9e5e8d38",
+      "output_sha256": {
+        "vrad01_profile_01_01_TEMPERATURE.csv": "43f2c6e5f8dbc3d3c55cf79436e9a42ec4051a5bafa89211fca3b33665d14e64",
+        "vrad01_summary_01_0001.csv": "8ca5b0e1a0c11aeed65cf4833ad25915004ab111019f4d55faad7425672fee7e"
+      },
+      "load_before": [
+        1.6748046875,
+        1.64208984375,
+        2.5966796875
+      ],
+      "load_after": [
+        1.6748046875,
+        1.64208984375,
+        2.5966796875
+      ],
+      "exit_code": 0,
+      "command": [
+        "taskset",
+        "-c",
+        "1",
+        "<gpyro-executable>",
+        "vrad01.data"
+      ],
+      "log_sha256": "2b4e7ff660c05aa5e208d441549ba769a15357a1d94b5efb9781d6094dfcae46",
+      "internal_elapsed_seconds": 0.087,
+      "numerical_csvs_match_original_build": true
+    },
+    {
+      "case": "vrx01",
+      "repeat": 0,
+      "warmup": true,
+      "process_seconds": 0.033603225001570536,
+      "input_sha256": "0a76e62e6ba9d5c6fb24afce44c7e8ad8a0fccd6d09b7f964f0476dd6501080a",
+      "output_sha256": {
+        "vrx01_summary_01_0001.csv": "8a497735555035d09417de0db4186e68cf6d6dbdd757f06fa4d10b0e576bac47"
+      },
+      "load_before": [
+        1.6748046875,
+        1.64208984375,
+        2.5966796875
+      ],
+      "load_after": [
+        1.6748046875,
+        1.64208984375,
+        2.5966796875
+      ],
+      "exit_code": 0,
+      "command": [
+        "taskset",
+        "-c",
+        "1",
+        "<gpyro-executable>",
+        "vrx01.data"
+      ],
+      "log_sha256": "91939dcc2a2a868006998e4862e1f7799699f0cc8eee672451a078b1645116c1",
+      "internal_elapsed_seconds": 0.032,
+      "numerical_csvs_match_original_build": true
+    },
+    {
+      "case": "vrx01",
+      "repeat": 1,
+      "warmup": false,
+      "process_seconds": 0.0333309180005017,
+      "input_sha256": "0a76e62e6ba9d5c6fb24afce44c7e8ad8a0fccd6d09b7f964f0476dd6501080a",
+      "output_sha256": {
+        "vrx01_summary_01_0001.csv": "8a497735555035d09417de0db4186e68cf6d6dbdd757f06fa4d10b0e576bac47"
+      },
+      "load_before": [
+        1.6748046875,
+        1.64208984375,
+        2.5966796875
+      ],
+      "load_after": [
+        1.6748046875,
+        1.64208984375,
+        2.5966796875
+      ],
+      "exit_code": 0,
+      "command": [
+        "taskset",
+        "-c",
+        "1",
+        "<gpyro-executable>",
+        "vrx01.data"
+      ],
+      "log_sha256": "91939dcc2a2a868006998e4862e1f7799699f0cc8eee672451a078b1645116c1",
+      "internal_elapsed_seconds": 0.032,
+      "numerical_csvs_match_original_build": true
+    },
+    {
+      "case": "vrx01",
+      "repeat": 2,
+      "warmup": false,
+      "process_seconds": 0.0334711609993974,
+      "input_sha256": "0a76e62e6ba9d5c6fb24afce44c7e8ad8a0fccd6d09b7f964f0476dd6501080a",
+      "output_sha256": {
+        "vrx01_summary_01_0001.csv": "8a497735555035d09417de0db4186e68cf6d6dbdd757f06fa4d10b0e576bac47"
+      },
+      "load_before": [
+        1.6748046875,
+        1.64208984375,
+        2.5966796875
+      ],
+      "load_after": [
+        1.6748046875,
+        1.64208984375,
+        2.5966796875
+      ],
+      "exit_code": 0,
+      "command": [
+        "taskset",
+        "-c",
+        "1",
+        "<gpyro-executable>",
+        "vrx01.data"
+      ],
+      "log_sha256": "91939dcc2a2a868006998e4862e1f7799699f0cc8eee672451a078b1645116c1",
+      "internal_elapsed_seconds": 0.032,
+      "numerical_csvs_match_original_build": true
+    },
+    {
+      "case": "vrx01",
+      "repeat": 3,
+      "warmup": false,
+      "process_seconds": 0.033276285999818356,
+      "input_sha256": "0a76e62e6ba9d5c6fb24afce44c7e8ad8a0fccd6d09b7f964f0476dd6501080a",
+      "output_sha256": {
+        "vrx01_summary_01_0001.csv": "8a497735555035d09417de0db4186e68cf6d6dbdd757f06fa4d10b0e576bac47"
+      },
+      "load_before": [
+        1.6748046875,
+        1.64208984375,
+        2.5966796875
+      ],
+      "load_after": [
+        1.6748046875,
+        1.64208984375,
+        2.5966796875
+      ],
+      "exit_code": 0,
+      "command": [
+        "taskset",
+        "-c",
+        "1",
+        "<gpyro-executable>",
+        "vrx01.data"
+      ],
+      "log_sha256": "91939dcc2a2a868006998e4862e1f7799699f0cc8eee672451a078b1645116c1",
+      "internal_elapsed_seconds": 0.032,
+      "numerical_csvs_match_original_build": true
+    },
+    {
+      "case": "vrx01",
+      "repeat": 4,
+      "warmup": false,
+      "process_seconds": 0.03312469599950418,
+      "input_sha256": "0a76e62e6ba9d5c6fb24afce44c7e8ad8a0fccd6d09b7f964f0476dd6501080a",
+      "output_sha256": {
+        "vrx01_summary_01_0001.csv": "8a497735555035d09417de0db4186e68cf6d6dbdd757f06fa4d10b0e576bac47"
+      },
+      "load_before": [
+        1.6748046875,
+        1.64208984375,
+        2.5966796875
+      ],
+      "load_after": [
+        1.6748046875,
+        1.64208984375,
+        2.5966796875
+      ],
+      "exit_code": 0,
+      "command": [
+        "taskset",
+        "-c",
+        "1",
+        "<gpyro-executable>",
+        "vrx01.data"
+      ],
+      "log_sha256": "91939dcc2a2a868006998e4862e1f7799699f0cc8eee672451a078b1645116c1",
+      "internal_elapsed_seconds": 0.032,
+      "numerical_csvs_match_original_build": true
+    },
+    {
+      "case": "vrx01",
+      "repeat": 5,
+      "warmup": false,
+      "process_seconds": 0.033012591000442626,
+      "input_sha256": "0a76e62e6ba9d5c6fb24afce44c7e8ad8a0fccd6d09b7f964f0476dd6501080a",
+      "output_sha256": {
+        "vrx01_summary_01_0001.csv": "8a497735555035d09417de0db4186e68cf6d6dbdd757f06fa4d10b0e576bac47"
+      },
+      "load_before": [
+        1.6748046875,
+        1.64208984375,
+        2.5966796875
+      ],
+      "load_after": [
+        1.6748046875,
+        1.64208984375,
+        2.5966796875
+      ],
+      "exit_code": 0,
+      "command": [
+        "taskset",
+        "-c",
+        "1",
+        "<gpyro-executable>",
+        "vrx01.data"
+      ],
+      "log_sha256": "54ddf6e4fe5d774d7bd4d030f458833103d4ab1d0ca93f2461cebdc115fe571a",
+      "internal_elapsed_seconds": 0.031,
+      "numerical_csvs_match_original_build": true
+    },
+    {
+      "case": "vcpl01",
+      "repeat": 0,
+      "warmup": true,
+      "process_seconds": 11.96018781299972,
+      "input_sha256": "3e78d63b4a93399be15f315b8733f71acc6187caecd73a45d0be64daa812e175",
+      "output_sha256": {
+        "vcpl01_profile_01_01_TEMPERATURE.csv": "091e610eecb2ac432e7a49adb415ac63ddc36401e55340ea323f342772b4f9dd",
+        "vcpl01_summary_01_0001.csv": "adcdda0801b95e5eface594fefa43d6f906c7707b87a3882b8fa0428fe020863"
+      },
+      "load_before": [
+        1.8115234375,
+        1.6708984375,
+        2.595703125
+      ],
+      "load_after": [
+        1.8408203125,
+        1.68212890625,
+        2.5888671875
+      ],
+      "exit_code": 0,
+      "command": [
+        "taskset",
+        "-c",
+        "1",
+        "<gpyro-executable>",
+        "vcpl01.data"
+      ],
+      "log_sha256": "919889ad9c06dcd96f0c546d7d9163a661f5793418ab21d4ef5e33f7c389986d",
+      "internal_elapsed_seconds": 11.958,
+      "numerical_csvs_match_original_build": true
+    },
+    {
+      "case": "vcpl01",
+      "repeat": 1,
+      "warmup": false,
+      "process_seconds": 11.865300629000558,
+      "input_sha256": "3e78d63b4a93399be15f315b8733f71acc6187caecd73a45d0be64daa812e175",
+      "output_sha256": {
+        "vcpl01_profile_01_01_TEMPERATURE.csv": "091e610eecb2ac432e7a49adb415ac63ddc36401e55340ea323f342772b4f9dd",
+        "vcpl01_summary_01_0001.csv": "adcdda0801b95e5eface594fefa43d6f906c7707b87a3882b8fa0428fe020863"
+      },
+      "load_before": [
+        1.3740234375,
+        1.591796875,
+        2.4482421875
+      ],
+      "load_after": [
+        1.4765625,
+        1.60546875,
+        2.44384765625
+      ],
+      "exit_code": 0,
+      "command": [
+        "taskset",
+        "-c",
+        "1",
+        "<gpyro-executable>",
+        "vcpl01.data"
+      ],
+      "log_sha256": "600a6a49d59adc35dabaecf5f1dc612804ae2fe7703a0388443fcea80b7348dd",
+      "internal_elapsed_seconds": 11.863,
+      "numerical_csvs_match_original_build": true
+    },
+    {
+      "case": "vcpl01",
+      "repeat": 2,
+      "warmup": false,
+      "process_seconds": 11.93531040400012,
+      "input_sha256": "3e78d63b4a93399be15f315b8733f71acc6187caecd73a45d0be64daa812e175",
+      "output_sha256": {
+        "vcpl01_profile_01_01_TEMPERATURE.csv": "091e610eecb2ac432e7a49adb415ac63ddc36401e55340ea323f342772b4f9dd",
+        "vcpl01_summary_01_0001.csv": "adcdda0801b95e5eface594fefa43d6f906c7707b87a3882b8fa0428fe020863"
+      },
+      "load_before": [
+        1.3701171875,
+        1.5751953125,
+        2.42041015625
+      ],
+      "load_after": [
+        1.64599609375,
+        1.62890625,
+        2.42431640625
+      ],
+      "exit_code": 0,
+      "command": [
+        "taskset",
+        "-c",
+        "1",
+        "<gpyro-executable>",
+        "vcpl01.data"
+      ],
+      "log_sha256": "1ffd1f7511f74e936471b4161218903e54cbb929e182738d6e047e30ba8b52d6",
+      "internal_elapsed_seconds": 11.933,
+      "numerical_csvs_match_original_build": true
+    },
+    {
+      "case": "vcpl01",
+      "repeat": 3,
+      "warmup": false,
+      "process_seconds": 11.824721569000758,
+      "input_sha256": "3e78d63b4a93399be15f315b8733f71acc6187caecd73a45d0be64daa812e175",
+      "output_sha256": {
+        "vcpl01_profile_01_01_TEMPERATURE.csv": "091e610eecb2ac432e7a49adb415ac63ddc36401e55340ea323f342772b4f9dd",
+        "vcpl01_summary_01_0001.csv": "adcdda0801b95e5eface594fefa43d6f906c7707b87a3882b8fa0428fe020863"
+      },
+      "load_before": [
+        1.306640625,
+        1.54150390625,
+        2.34228515625
+      ],
+      "load_after": [
+        1.41943359375,
+        1.556640625,
+        2.3388671875
+      ],
+      "exit_code": 0,
+      "command": [
+        "taskset",
+        "-c",
+        "1",
+        "<gpyro-executable>",
+        "vcpl01.data"
+      ],
+      "log_sha256": "bc21488fbc128afa05b7e090482364dd24623d7396d43b645dcf7386709b7252",
+      "internal_elapsed_seconds": 11.822,
+      "numerical_csvs_match_original_build": true
+    },
+    {
+      "case": "vcpl01",
+      "repeat": 4,
+      "warmup": false,
+      "process_seconds": 11.889095146998443,
+      "input_sha256": "3e78d63b4a93399be15f315b8733f71acc6187caecd73a45d0be64daa812e175",
+      "output_sha256": {
+        "vcpl01_profile_01_01_TEMPERATURE.csv": "091e610eecb2ac432e7a49adb415ac63ddc36401e55340ea323f342772b4f9dd",
+        "vcpl01_summary_01_0001.csv": "adcdda0801b95e5eface594fefa43d6f906c7707b87a3882b8fa0428fe020863"
+      },
+      "load_before": [
+        1.3857421875,
+        1.54736328125,
+        2.33154296875
+      ],
+      "load_after": [
+        1.48046875,
+        1.56298828125,
+        2.32763671875
+      ],
+      "exit_code": 0,
+      "command": [
+        "taskset",
+        "-c",
+        "1",
+        "<gpyro-executable>",
+        "vcpl01.data"
+      ],
+      "log_sha256": "dfbc595ad2e37225ca105503dac4b753afd3d486a3003d3bc1cb23e403ac4029",
+      "internal_elapsed_seconds": 11.886,
+      "numerical_csvs_match_original_build": true
+    },
+    {
+      "case": "vcpl01",
+      "repeat": 5,
+      "warmup": false,
+      "process_seconds": 11.880409239000073,
+      "input_sha256": "3e78d63b4a93399be15f315b8733f71acc6187caecd73a45d0be64daa812e175",
+      "output_sha256": {
+        "vcpl01_profile_01_01_TEMPERATURE.csv": "091e610eecb2ac432e7a49adb415ac63ddc36401e55340ea323f342772b4f9dd",
+        "vcpl01_summary_01_0001.csv": "adcdda0801b95e5eface594fefa43d6f906c7707b87a3882b8fa0428fe020863"
+      },
+      "load_before": [
+        1.39794921875,
+        1.564453125,
+        2.25439453125
+      ],
+      "load_after": [
+        1.53173828125,
+        1.58642578125,
+        2.25
+      ],
+      "exit_code": 0,
+      "command": [
+        "taskset",
+        "-c",
+        "1",
+        "<gpyro-executable>",
+        "vcpl01.data"
+      ],
+      "log_sha256": "222782ded432af55478c7b95e263314f97dc4491795d402157d32577c7732f37",
+      "internal_elapsed_seconds": 11.879,
+      "numerical_csvs_match_original_build": true
+    }
+  ],
+  "baseline": [
+    {
+      "case": "vhc01",
+      "repeat": -1,
+      "warmup": false,
+      "process_seconds": 0.3866385849996732,
+      "input_sha256": "417cacaace661116b8619040781d4dcfed726f4357771992f01254e1c5b8a529",
+      "output_sha256": {
+        "vhc01_profile_01_01_TEMPERATURE.csv": "4160a3856bda261fcff2e03f95cabda0e4ac3f747d599f84dd595a50f3b1a14e",
+        "vhc01_summary_01_0001.csv": "5b0a00a0ef2dd25045d06dcd6afa4d703c7836a09e4da5b4f5f1514b5c690bd7"
+      },
+      "load_before": [
+        1.615234375,
+        1.62939453125,
+        2.603515625
+      ],
+      "load_after": [
+        1.615234375,
+        1.62939453125,
+        2.603515625
+      ],
+      "exit_code": 0,
+      "command": [
+        "taskset",
+        "-c",
+        "1",
+        "<gpyro-executable>",
+        "vhc01.data"
+      ],
+      "log_sha256": "69a56d4d34f84f9bc088183b57d1482958b22a6edc2df955e0d7e9e798ce3a19"
+    },
+    {
+      "case": "vhc03",
+      "repeat": -1,
+      "warmup": false,
+      "process_seconds": 0.7012267659993086,
+      "input_sha256": "466c9b48d3d248c7f80c9d4d96c10c792a9fcf6dec2b90ca9fdf3d344472ea58",
+      "output_sha256": {
+        "vhc03_profile_01_01_TEMPERATURE.csv": "98297c7b95ace9a9cfd2e9320b48bd72c488aefbb24e6c9e84cefe1f19734818",
+        "vhc03_summary_01_0001.csv": "2203d124a4646b7c2e1fd7878718794e545df3315198dbaa5e7c67e409ba368f"
+      },
+      "load_before": [
+        1.615234375,
+        1.62939453125,
+        2.603515625
+      ],
+      "load_after": [
+        1.646484375,
+        1.6357421875,
+        2.60009765625
+      ],
+      "exit_code": 0,
+      "command": [
+        "taskset",
+        "-c",
+        "1",
+        "<gpyro-executable>",
+        "vhc03.data"
+      ],
+      "log_sha256": "22d349b5ba280359da6932136aede2ed445ca69b8b6c0f138ce5c4ef9776b801"
+    },
+    {
+      "case": "vrad01",
+      "repeat": -1,
+      "warmup": false,
+      "process_seconds": 0.0895615560002625,
+      "input_sha256": "1e2f22abe7dbc87740f6dd0812438bafd3dd7be253ca5289c51eb0da9e5e8d38",
+      "output_sha256": {
+        "vrad01_profile_01_01_TEMPERATURE.csv": "43f2c6e5f8dbc3d3c55cf79436e9a42ec4051a5bafa89211fca3b33665d14e64",
+        "vrad01_summary_01_0001.csv": "8ca5b0e1a0c11aeed65cf4833ad25915004ab111019f4d55faad7425672fee7e"
+      },
+      "load_before": [
+        1.646484375,
+        1.6357421875,
+        2.60009765625
+      ],
+      "load_after": [
+        1.646484375,
+        1.6357421875,
+        2.60009765625
+      ],
+      "exit_code": 0,
+      "command": [
+        "taskset",
+        "-c",
+        "1",
+        "<gpyro-executable>",
+        "vrad01.data"
+      ],
+      "log_sha256": "69a56d4d34f84f9bc088183b57d1482958b22a6edc2df955e0d7e9e798ce3a19"
+    },
+    {
+      "case": "vrx01",
+      "repeat": -1,
+      "warmup": false,
+      "process_seconds": 0.03377517399894714,
+      "input_sha256": "0a76e62e6ba9d5c6fb24afce44c7e8ad8a0fccd6d09b7f964f0476dd6501080a",
+      "output_sha256": {
+        "vrx01_summary_01_0001.csv": "8a497735555035d09417de0db4186e68cf6d6dbdd757f06fa4d10b0e576bac47"
+      },
+      "load_before": [
+        1.6748046875,
+        1.64208984375,
+        2.5966796875
+      ],
+      "load_after": [
+        1.6748046875,
+        1.64208984375,
+        2.5966796875
+      ],
+      "exit_code": 0,
+      "command": [
+        "taskset",
+        "-c",
+        "1",
+        "<gpyro-executable>",
+        "vrx01.data"
+      ],
+      "log_sha256": "2b0ce63f22633beb82be96973307e6049b614899c67c5dd8b31b64b8954192ba"
+    },
+    {
+      "case": "vcpl01",
+      "repeat": -1,
+      "warmup": false,
+      "process_seconds": 11.922065431999727,
+      "input_sha256": "3e78d63b4a93399be15f315b8733f71acc6187caecd73a45d0be64daa812e175",
+      "output_sha256": {
+        "vcpl01_profile_01_01_TEMPERATURE.csv": "091e610eecb2ac432e7a49adb415ac63ddc36401e55340ea323f342772b4f9dd",
+        "vcpl01_summary_01_0001.csv": "adcdda0801b95e5eface594fefa43d6f906c7707b87a3882b8fa0428fe020863"
+      },
+      "load_before": [
+        1.6748046875,
+        1.64208984375,
+        2.5966796875
+      ],
+      "load_after": [
+        1.8115234375,
+        1.6708984375,
+        2.595703125
+      ],
+      "exit_code": 0,
+      "command": [
+        "taskset",
+        "-c",
+        "1",
+        "<gpyro-executable>",
+        "vcpl01.data"
+      ],
+      "log_sha256": "f5d4e956521fc8cb7ab9d38a54f56d1b065d7a0015fa46d2bf9dce29beaddfba"
+    }
+  ],
+  "valid": true,
+  "protocol": "Native serial executable; CPU 1; one warm-up and five fresh processes per deck; no Docker runtime in measurements. Internal timer starts before input reading and ends after final timing output; process timer brackets subprocess.run. Original build checked once per deck for identical numerical CSVs.",
+  "timer_resolution_seconds": 0.001,
+  "timer_patch": "elapsed-timer.patch",
+  "timer_patch_sha256": "214cfa35125219a0850c9b501fceebcfda7020ae111b1187003176348d8f74ea",
+  "timer_boundaries": {
+    "start": "before input reading and allocation",
+    "end": "shutdown after simulation and final timing-file output",
+    "includes": "setup; simulation; output",
+    "excludes": "process launch; runtime cleanup after final timer print"
+  },
+  "rejected_samples": [
+    {
+      "case": "vcpl01",
+      "repeat": 1,
+      "process_seconds": 11.932104316001642,
+      "internal_elapsed_seconds": 11.931,
+      "load_before": [
+        1.8408203125,
+        1.68212890625,
+        2.5888671875
+      ],
+      "load_after": [
+        2.037109375,
+        1.7314453125,
+        2.58984375
+      ],
+      "reason": "after-load exceeded the 2.0 acceptance limit; excluded from published sample set",
+      "numerical_csvs_match_original_build": true
+    }
+  ],
+  "overlay_checks": [
+    {
+      "file": "vcpl01_front.csv",
+      "sha256": "b9dc27b67a355c7ff09190490416fe210f16b0bf3c45fabeebc3dd3b3a485597",
+      "byte_identical": true
+    },
+    {
+      "file": "vcpl01_result.csv",
+      "sha256": "7ce746b173656b2ad3db5c760e08a3ad2d8ac5b62e8f79ed70b5d6cd1ae0ed81",
+      "byte_identical": true
+    },
+    {
+      "file": "vhc01_result.csv",
+      "sha256": "ad6043dceee926a2f36e291fc99d11ba376c23ca121aa52481d07b3e59a71708",
+      "byte_identical": true
+    },
+    {
+      "file": "vhc01_surfaceT.csv",
+      "sha256": "c63a290618728d18ff0094bbee0361b59d8700f23a8dd2d8a284fb202c66ba8c",
+      "byte_identical": true
+    },
+    {
+      "file": "vhc03_frontback.csv",
+      "sha256": "7da95dab58a851f20ee9d64e2f434a2ec6aad5b2c9b4fe428f39b47c4aa6ae1d",
+      "byte_identical": true
+    },
+    {
+      "file": "vhc03_result.csv",
+      "sha256": "6ea258b2f8a66de47c266eecdf2410a068b12af602801c8f2031275569b395c9",
+      "byte_identical": true
+    },
+    {
+      "file": "vrad01_result.csv",
+      "sha256": "8d202d981310fc244380ae5b490387eac4826e12352fad30aeb04cd5d832b4d5",
+      "byte_identical": true
+    },
+    {
+      "file": "vrad01_surfaceT.csv",
+      "sha256": "77d75dec3bafb9c25392c4162154d77cd5d124c5df3fb6d65d0c66507c903cae",
+      "byte_identical": true
+    },
+    {
+      "file": "vrx01_result.csv",
+      "sha256": "c21bec43be0c98dd9c893e30fa79681fe359422553aba9d2e4faa22d8346eee6",
+      "byte_identical": true
+    }
+  ]
+}

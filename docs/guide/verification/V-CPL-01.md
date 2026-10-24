@@ -87,14 +87,22 @@ one compares magnitudes across codes.
 
 ![V-CPL-01 front_trajectory_vs_codes_error](assets/V-CPL-01/V-CPL-01_front_trajectory_vs_codes_error.png)
 
-Wall times at every ladder rung against the reference runs.
-Resolutions and simulated spans differ where noted (details in
-`reference/timings.csv`), so cross-code timings are indicative
-rather than a controlled benchmark. FDS timings include
-process startup and output; the reference provenance records
-the measurement protocol.
+Setup and simulation wall times at every ladder rung against the
+reference runs. Julia times model construction and solve after warm-up;
+FDS and Gpyro use internal total elapsed wall time, including setup and
+simulation output. Process launch and Julia compilation are excluded
+from the figure. Output costs, discretizations and time-stepping rules
+still differ, so these are indicative costs, not pure solver speedups.
+See `test/verification/reference/README.md` and `timings.csv` for the
+timer boundaries, resolutions and measurement provenance.
 
 ![V-CPL-01 solve_time](assets/V-CPL-01/V-CPL-01_solve_time.png)
+
+Reference timings below are medians of five runs after one warm-up. Full process time also includes launch and shutdown; it is shown separately and is not compared with Julia's warmed time.
+
+| Code | Resolution | Internal elapsed (s) | Full process (s) |
+| --- | --- | --- | --- |
+| Gpyro 0.8200 | 801 nodes (Δz=0.05 mm) | 11.88 | 11.88 |
 
 Solution overlays including the other codes' points: [T_histories_at_depths_vs_codes](assets/V-CPL-01/V-CPL-01_T_histories_at_depths_vs_codes.png), [front_trajectory_vs_codes](assets/V-CPL-01/V-CPL-01_front_trajectory_vs_codes.png).
 
@@ -145,14 +153,22 @@ one compares magnitudes across codes.
 
 ![V-CPL-01b front_trajectory_vs_codes_error](assets/V-CPL-01b/V-CPL-01b_front_trajectory_vs_codes_error.png)
 
-Wall times at every ladder rung against the reference runs.
-Resolutions and simulated spans differ where noted (details in
-`reference/timings.csv`), so cross-code timings are indicative
-rather than a controlled benchmark. FDS timings include
-process startup and output; the reference provenance records
-the measurement protocol.
+Setup and simulation wall times at every ladder rung against the
+reference runs. Julia times model construction and solve after warm-up;
+FDS and Gpyro use internal total elapsed wall time, including setup and
+simulation output. Process launch and Julia compilation are excluded
+from the figure. Output costs, discretizations and time-stepping rules
+still differ, so these are indicative costs, not pure solver speedups.
+See `test/verification/reference/README.md` and `timings.csv` for the
+timer boundaries, resolutions and measurement provenance.
 
 ![V-CPL-01b solve_time](assets/V-CPL-01b/V-CPL-01b_solve_time.png)
+
+Reference timings below are medians of five runs after one warm-up. Full process time also includes launch and shutdown; it is shown separately and is not compared with Julia's warmed time.
+
+| Code | Resolution | Internal elapsed (s) | Full process (s) |
+| --- | --- | --- | --- |
+| Gpyro 0.8200 | 801 nodes (Δz=0.05 mm) | 11.88 | 11.88 |
 
 Solution overlays including the other codes' points: [T_histories_at_depths_vs_codes](assets/V-CPL-01b/V-CPL-01b_T_histories_at_depths_vs_codes.png), [front_trajectory_vs_codes](assets/V-CPL-01b/V-CPL-01b_front_trajectory_vs_codes.png).
 
