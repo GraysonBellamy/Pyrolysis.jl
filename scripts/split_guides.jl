@@ -23,7 +23,8 @@ function regenerate(monolith::AbstractString, chapterdir::AbstractString)
     )
     for (k, chunk) in enumerate(chapters)
         path = joinpath(chapterdir, files[k])
-        write(path, join(chunk, "\n") * "\n")
+        rebased = rebase_figure_paths(chunk, "../../assets/figures")
+        write(path, join(rebased, "\n") * "\n")
         println("  wrote $(files[k]) ($(length(chunk)) lines)")
     end
 end

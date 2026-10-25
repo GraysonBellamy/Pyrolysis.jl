@@ -1,5 +1,9 @@
 # 9. Gas-Phase Mass Transport and Pressure
 
+![Porous solid with bulk and pore gas densities, separate diffusion, Darcy and skeleton-motion contributions, and additive pressure and film boundary fluxes.](../../assets/figures/12_gas_transport.svg)
+
+**Figure 12. Gas storage and transport (schematic).** Bulk concentration $\xi$ uses total cell volume; pore density $\xi/\phi$ uses pore volume. Diffusion and Darcy flow are relative to the skeleton; skeleton transport relative to the mesh is $-c\xi$. At a boundary, pressure-driven venting and the mass-film contribution add, and the resulting gas flux carries sensible enthalpy. Arrows show representative directions; gradients can reverse them.
+
 This chapter derives the constitutive and discrete laws by which gaseous
 decomposition products move through the condensed-phase matrix in Pyrolysis.jl.
 Two transport mechanisms are treated: ordinary (Fickian) diffusion driven by a

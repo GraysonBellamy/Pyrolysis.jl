@@ -743,6 +743,10 @@ simplest path.
 
 ## 2.9 Step 7 — Plot the results
 
+![Actual tutorial solution: surface and back temperatures, boundary mass-loss rate compared with gas generation, and profiles plotted at current cell centres.](../../assets/figures/08_quickstart.svg)
+
+**Figure 8. Results of the complete tutorial in §2.10.** The 72-cell moving-mesh solve reaches 1,600 s successfully at an incident flux of 24.5325 kW/m². The solid green trace is the actual `solution.mass_loss_rate`; the dashed gas-generation trace is a reaction-rate proxy and can differ because gas is stored before it escapes. Both are displayed in g/(m²·s); this deck has constant cross section. Profiles use `solution.cell_centers[:, k]` at each saved time, and dots mark the current exposed-face temperature and position. The peak actual MLR is approximately 5.49 g/(m²·s). The editable Julia generator and the underlying CSV data are described in the Development page.
+
 With `Plots` loaded, the package's recipe gives you quick standard views off the
 solution directly:
 

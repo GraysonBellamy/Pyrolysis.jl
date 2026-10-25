@@ -248,6 +248,10 @@ a moving mesh moves with the solid.
 
 ## 7.4 Radiation model (`radiation_model`)
 
+![Matching slabs with surface deposition and Beer–Lambert face intensities, absorbed cell power, transmitted radiation and intensity decreasing with inward depth.](../../assets/figures/07_radiation.svg)
+
+**Figure 7. Where applied radiation is absorbed (schematic).** `NO_RADIATION` and `SURFACE_ABSORPTION` both apply `RadiativeFluxBC` at the surface; the former does **not** disable that boundary condition. Beer–Lambert introduces face-intensity unknowns and deposits the entering-minus-leaving radiant power in each cell. The exponential inset illustrates uniform optical thickness $\alpha L=2$; its depth coordinate $L-z$ increases inward, opposite to the common $+z$ direction. Radiation remaining at the back face is transmitted rather than absorbed.
+
 Where the incident radiation is absorbed is selected by the `radiation_model` keyword, which
 takes a `RadiationModel` value:
 
@@ -307,6 +311,10 @@ Technical Reference §8 for the models.
 ---
 
 ## 7.5 Gas transport: none, Fickian or Darcy–Fick (automatic)
+
+![Porous solid with bulk and pore gas densities, separate diffusion, Darcy and skeleton-motion contributions, and additive pressure and film boundary fluxes.](../../assets/figures/12_gas_transport.svg)
+
+**Figure 12. Gas storage and transport (schematic).** Bulk concentration $\xi$ uses total cell volume; pore density $\xi/\phi$ uses pore volume. Diffusion and Darcy flow are relative to the skeleton; skeleton transport relative to the mesh is $-c\xi$. At a boundary, pressure-driven venting and the mass-film contribution add, and the resulting gas flux carries sensible enthalpy. Arrows show representative directions; gradients can reverse them.
 
 The gas-transport model is not a `solve` keyword: `setup` infers it from the material and
 the mass boundary conditions.
@@ -408,6 +416,10 @@ Technical Reference §9.5.3 for the venting flux and §12.5 for the pressure con
 ---
 
 ## 7.6 Variable cross section (automatic)
+
+![Initial, axially shrunken, laterally shrunken and swollen one-dimensional samples, showing volume as area times thickness and two MLR normalizations.](../../assets/figures/11_shrinkage.svg)
+
+**Figure 11. Axial versus lateral volume change (schematic).** A planar cell has $V=A\Delta z$ and total strain rate $\theta=\theta_L+\theta_A$. The axial balance uses $\theta-\theta_A$, so lateral volume change is counted once. The drawn height stands for cross-sectional area, not a resolved lateral mesh. For the same total outward mass rate, `mass_loss_rate` divides by the current exposed area and `extras.MLR_gauge` by its initial area. Shrinking area makes the former larger than the latter.
 
 The cross section also follows from the material. If the material's
 `lateral_shrinkage_law` is `nothing` (the default), the column's cross section is fixed at

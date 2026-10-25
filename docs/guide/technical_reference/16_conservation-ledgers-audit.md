@@ -320,6 +320,10 @@ only a cell far below its capacity floor carries, is written to the event
 
 ## 16.5 The energy ledger
 
+![Mass and sensible-enthalpy inventories with internal transfers, boundary outflow, event losses and energy sources including sensible-enthalpy formation.](../../assets/figures/14_conservation.svg)
+
+**Figure 14. Conservation of the live inventory (schematic).** Shown for mass-balanced reactions without external mass sources. Internal face fluxes and conservative receiver transfers cancel over live cells. Boundary outflow and recorded event losses leave that inventory. Reactions conserve total mass; energy sources include reaction heat, in-depth radiation and sensible-enthalpy formation $\sum_{i,j}h_j(T_i)S_{\mathrm{mass},ij}$. Event energy losses include enthalpy and caloric regularization. The audit compares inventory change with integrated transport, sources and event losses.
+
 ### 16.5.1 The enthalpy rate, from the energy row
 
 The energy flux through face $f$ along its normal is conduction plus the

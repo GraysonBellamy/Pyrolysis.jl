@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="525" viewBox="0 0 1200 525" role="img" aria-labelledby="title desc">
+<title id="title">Figure 10. One-Dimensional Coordinate Geometry (Schematic)</title><desc id="desc">A planar slice, cylindrical radial shell and spherical radial shell illustrate cross section as area, axial length or solid angle. Each model resolves one coordinate only, with face area determined by radius.</desc>
+<defs>
+<marker id="ink" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#202020" stroke-width="1.3"/></marker>
+<marker id="blue" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#295674" stroke-width="1.3"/></marker>
+<marker id="teal" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#365b58" stroke-width="1.3"/></marker>
+<marker id="orange" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#92512f" stroke-width="1.3"/></marker>
+<marker id="purple" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#675878" stroke-width="1.3"/></marker>
+</defs><rect width="100%" height="100%" fill="white"/><g font-family="Liberation Sans, Arial, sans-serif" fill="#202020">
+<text x="32.000" y="39.000" font-size="24" fill="#202020" text-anchor="start" font-weight="bold" >Figure 10. One-Dimensional Coordinate Geometry (Schematic)</text>
+<line x1="30" y1="85" x2="380" y2="85" stroke="#555555" stroke-width="1" stroke-dasharray="" />
+<text x="48.000" y="115.000" font-size="20" fill="#202020" text-anchor="start" font-weight="bold" >(a) Planar Slice</text>
+<line x1="425" y1="85" x2="775" y2="85" stroke="#555555" stroke-width="1" stroke-dasharray="" />
+<text x="443.000" y="115.000" font-size="20" fill="#202020" text-anchor="start" font-weight="bold" >(b) Cylindrical Shell</text>
+<line x1="820" y1="85" x2="1170" y2="85" stroke="#555555" stroke-width="1" stroke-dasharray="" />
+<text x="838.000" y="115.000" font-size="20" fill="#202020" text-anchor="start" font-weight="bold" >(c) Spherical Shell</text>
+<rect x="95" y="195" width="155" height="160" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<path d="M 95 195 L 130 165 L 285 165 L 250 195 Z" fill="#ededed" stroke="#365b58" stroke-width="1.5" stroke-dasharray=""/>
+<path d="M 250 195 L 285 165 L 285 325 L 250 355 Z" fill="#ededed" stroke="#365b58" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="85" y1="395" x2="290" y2="395" stroke="#202020" stroke-width="1.5" stroke-dasharray="" marker-end="url(#ink)"/>
+<text x="290.000" y="422.000" font-size="20" fill="#202020" text-anchor="end" font-weight="normal" >+z</text>
+<text x="268.000" y="270.000" font-size="23" fill="#365b58" text-anchor="middle" font-weight="normal" >A</text>
+<text x="48.000" y="466.000" font-size="19" fill="#202020" text-anchor="start" font-weight="normal" ><tspan font-family="Liberation Mono, monospace" font-size="90%">cross_section</tspan> = A [m²]</text>
+<text x="48.000" y="497.000" font-size="19" fill="#202020" text-anchor="start" font-weight="normal" >Face Area: A</text>
+<circle cx="595" cy="260" r="96" fill="#f7f7f7" stroke="#295674" stroke-width="1.3"/>
+<circle cx="595" cy="260" r="55" fill="white" stroke="#295674" stroke-width="1.3"/>
+<line x1="595" y1="260" x2="701" y2="260" stroke="#202020" stroke-width="1.5" stroke-dasharray="" marker-end="url(#ink)"/>
+<text x="666.000" y="245.000" font-size="18" fill="#202020" text-anchor="start" font-weight="normal" >r₊</text>
+<text x="624.000" y="284.000" font-size="18" fill="#202020" text-anchor="start" font-weight="normal" >r₋</text>
+<text x="595.000" y="395.000" font-size="18" fill="#202020" text-anchor="middle" font-weight="normal" >Axial Length A (Out of Plane)</text>
+<text x="443.000" y="466.000" font-size="19" fill="#202020" text-anchor="start" font-weight="normal" ><tspan font-family="Liberation Mono, monospace" font-size="90%">cross_section</tspan> = A [m]</text>
+<text x="443.000" y="497.000" font-size="19" fill="#202020" text-anchor="start" font-weight="normal" >Face Area: 2πr A</text>
+<circle cx="995" cy="260" r="96" fill="#f7f7f7" stroke="#295674" stroke-width="1.3"/>
+<circle cx="995" cy="260" r="55" fill="white" stroke="#295674" stroke-width="1.3"/>
+<path d="M 995 260 L 1063 192 A 96 96 0 0 1 1091 260 Z" fill="#ededed" stroke="#365b58" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="995" y1="260" x2="1103" y2="260" stroke="#202020" stroke-width="1.5" stroke-dasharray="" marker-end="url(#ink)"/>
+<text x="1043.000" y="229.000" font-size="23" fill="#365b58" text-anchor="start" font-weight="normal" >A</text>
+<text x="1100.000" y="286.000" font-size="18" fill="#202020" text-anchor="start" font-weight="normal" >r₊</text>
+<text x="1025.000" y="286.000" font-size="18" fill="#202020" text-anchor="start" font-weight="normal" >r₋</text>
+<text x="1000.000" y="395.000" font-size="18" fill="#202020" text-anchor="middle" font-weight="normal" >A: Solid Angle of Radial Sector</text>
+<text x="838.000" y="466.000" font-size="19" fill="#202020" text-anchor="start" font-weight="normal" ><tspan font-family="Liberation Mono, monospace" font-size="90%">cross_section</tspan> = A [sr]</text>
+<text x="838.000" y="497.000" font-size="19" fill="#202020" text-anchor="start" font-weight="normal" >Face Area: A r²</text>
+</g></svg>

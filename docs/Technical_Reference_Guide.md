@@ -6692,6 +6692,10 @@ Stefan–Boltzmann constant is $\sigma = 5.670374419\times10^{-8}\ \mathrm{W\,m^
 
 ## 8.1 The Radiation Model Family
 
+![Matching slabs with surface deposition and Beer–Lambert face intensities, absorbed cell power, transmitted radiation and intensity decreasing with inward depth.](assets/figures/07_radiation.svg)
+
+**Figure 7. Where applied radiation is absorbed (schematic).** `NO_RADIATION` and `SURFACE_ABSORPTION` both apply `RadiativeFluxBC` at the surface; the former does **not** disable that boundary condition. Beer–Lambert introduces face-intensity unknowns and deposits the entering-minus-leaving radiant power in each cell. The exponential inset illustrates uniform optical thickness $\alpha L=2$; its depth coordinate $L-z$ increases inward, opposite to the common $+z$ direction. Radiation remaining at the back face is transmitted rather than absorbed.
+
 ### 8.1.1 The three models
 
 The radiation treatment is selected at `solve` (or `setup`) time by one
@@ -7472,6 +7476,10 @@ are the open issues most likely to matter in practice.
 ---
 
 # 9. Gas-Phase Mass Transport and Pressure
+
+![Porous solid with bulk and pore gas densities, separate diffusion, Darcy and skeleton-motion contributions, and additive pressure and film boundary fluxes.](assets/figures/12_gas_transport.svg)
+
+**Figure 12. Gas storage and transport (schematic).** Bulk concentration $\xi$ uses total cell volume; pore density $\xi/\phi$ uses pore volume. Diffusion and Darcy flow are relative to the skeleton; skeleton transport relative to the mesh is $-c\xi$. At a boundary, pressure-driven venting and the mass-film contribution add, and the resulting gas flux carries sensible enthalpy. Arrows show representative directions; gradients can reverse them.
 
 This chapter derives the constitutive and discrete laws by which gaseous
 decomposition products move through the condensed-phase matrix in Pyrolysis.jl.
@@ -8828,6 +8836,10 @@ The lateral law is **empirical / phenomenological** — a calibration handle, no
 
 ## 10.6 The lateral strain rate $\theta_A$ and the axial/lateral decomposition
 
+![Initial, axially shrunken, laterally shrunken and swollen one-dimensional samples, showing volume as area times thickness and two MLR normalizations.](assets/figures/11_shrinkage.svg)
+
+**Figure 11. Axial versus lateral volume change (schematic).** A planar cell has $V=A\Delta z$ and total strain rate $\theta=\theta_L+\theta_A$. The axial balance uses $\theta-\theta_A$, so lateral volume change is counted once. The drawn height stands for cross-sectional area, not a resolved lateral mesh. For the same total outward mass rate, `mass_loss_rate` divides by the current exposed area and `extras.MLR_gauge` by its initial area. Shrinking area makes the former larger than the latter.
+
 ### 10.6.1 Definition, chain-rule derivation, and the lateral-rate row
 
 A time-varying cross-section contributes its own volumetric strain. Define the **column-global lateral (radial) volumetric strain rate**
@@ -9147,6 +9159,10 @@ below cell $i$) and $r$ the reaction index (overload note I1).
 ---
 
 ## 11.1 Motivation: tracking a receding/expanding surface
+
+![Aligned before and after strips for fixed, Lagrangian and corrected ALE meshes, with distinct mesh nodes and material markers.](assets/figures/03_mesh_motion.svg)
+
+**Figure 3. Three mesh descriptions (schematic).** All panels share the same initial length and pinned back. A fixed mesh represents conversion as condensed-density loss in unchanged volumes, shown by lighter shading. With `c = 0`, nodes follow the solid. Corrected ALE lets interior nodes move relative to the same material motion: $w=v_s+c$ and the inventory transport velocity relative to the mesh is $v_s-w=-c$. The hollow material markers are separate from the filled mesh nodes; their redistribution is illustrative, not a computed trajectory.
 
 ### 11.1.1 The moving-boundary problem and three classical responses
 
@@ -9879,6 +9895,10 @@ face carries its own cell's whichever way the mesh crosses it.
 
 ## 11.7 The equidistribution correction
 
+![Uneven cells relax within a reacting layer above an inert substrate; the implementation activation curve rises as remaining thickness falls from 0.3 to 0.1.](assets/figures/04_equidistribution.svg)
+
+**Figure 4. Equidistribution within a vanishing layer.** The left schematic isolates redistribution toward equal cell widths. Correction is zero in the inert substrate and at layer boundaries; those boundaries can still move with the solid. The curve evaluates the implemented thickness-activation switch. Its input is remaining **thickness**, distinct from the **condensed-mass** criterion for burnout in Figure 5.
+
 ### 11.7.1 Purpose
 
 On a mesh that rides the skeleton, the cells of a gasifying layer thin at rates set
@@ -10395,6 +10415,10 @@ points out of the live cells, so the same outward convention holds there.
 ---
 
 ## 12.2 The surface energy balance and the Newton solve
+
+![Surface cell with incoming radiation, inward conduction and outward radiative and convective losses; gas enthalpy appears separately in the outward face flux.](assets/figures/06_surface_energy.svg)
+
+**Figure 6. Surface energy transfers (schematic, surface absorption).** Incoming radiation balances conduction into the solid and convective and radiative losses. The surface-temperature calculation uses $T_s$, the adjacent cell temperature and distance $d$. Gas outflow modifies convection through blowing; its sensible enthalpy enters the face energy flux separately, as shown below. The arrows depict losses from a hot surface; signed exchanges can reverse. Beer–Lambert absorption instead deposits radiation within the cells (Figure 7).
 
 The surface temperature $T_s$ is the keystone of the thermal boundary. It is the
 temperature of the exposed face itself, distinct from the adjacent cell-center
@@ -11735,6 +11759,10 @@ Conventions (binding, from §2, Nomenclature):
 
 ## 13.1 Cell-Centered Finite-Volume Layout in 1D
 
+![Nonuniform column with cell centres, node faces, outward boundary normals and equal-and-opposite owner/neighbour flux contributions.](assets/figures/01_mesh_anatomy.svg)
+
+**Figure 1. Finite-volume mesh anatomy (schematic).** The pinned back is at `z = 0`; heat enters at the exposed face `z = L(t)`. In one dimension each node is a face. An interior flux is oriented from owner to neighbour and contributes equal and opposite extensive rates, so it cancels from the global balance. Widths are deliberately nonuniform. See Technical Reference §13.1 for the face convention and Figure 2 in §13.4 for the framework.
+
 ### 13.1.1 Topology: nodes, faces, cells
 
 Pyrolysis.jl stores its primary unknowns, the component masses and the energy
@@ -12052,6 +12080,10 @@ cell, and the boundary kernels apply their conditions at `live_face` (§13.1.2).
 ---
 
 ## 13.4 Kernels and the Assembly Order
+
+![Flow from fixed topology and reference data through setup and evolving state to geometry, derived fields, correction, kernels, closures and residual assembly.](assets/figures/02_mesh_framework.svg)
+
+**Figure 2. Mesh framework (schematic).** Read left to right for one residual evaluation. Setup fixes connectivity and row layout; positions, inventories, cross section and the activity mask evolve. Geometry and derived fields feed correction, kernels and closure before assembly. Correction precedes face fluxes, and gas transport precedes the thermal boundary calculation. External sources and masking enter the final assembly; §13.4 gives the implementation details.
 
 ### 13.4.1 The kernel contract
 
@@ -13125,6 +13157,10 @@ cells. The full statement, with its limits, is User Guide chapter 10.
 
 ## 14.3 Deactivation
 
+![Surface-connected burnout transfers inventory to an inward receiver while retaining inactive state slots; insets show fixed-mesh gas venting and interior-void termination.](assets/figures/05_deactivation.svg)
+
+**Figure 5. Burnout and retained state (schematic).** Here $r_i$ is the remaining condensed-mass ratio. A threshold crossing selects a surface-connected band; on a moving mesh its inventories and volume transfer to the inward receiver. Dead nodes coincide at the merged face, while state slots and topology remain allocated. The insets show fixed-mesh gas venting and an interior void blocked by live material. A callback can re-test the receiver and emit multiple per-cell records; gas venting and a final cell without a receiver enter the loss ledger.
+
 The deactivation state of a solve is a `CellDeactivation{P,NC,E}`
 (`src/Deactivation/events.jl`), built by `setup` when `deactivation = true`:
 the policy (`ConservativeTransfer()`), the threshold $\varepsilon_m$, the band
@@ -13831,6 +13867,10 @@ Conventions used in this chapter (binding, from §2, Nomenclature):
 
 ## 15.1 The state vector: layout and row kinds
 
+![Interleaved node and cell state strip and three actual six-cell Jacobian patterns, distinguishing algebraic rows, local coupling, wider correction reach and global area coupling.](assets/figures/15_state_jacobian.svg)
+
+**Figure 15. State layout and Jacobian structure.** The schematic strip shows the interleaved ordering of a six-cell, two-component, variable-area setup. The matrices are actual stored patterns, with Beer–Lambert intensity unknowns. Grey entries are allocated dependencies; blue entries are nonzero initial-state AD derivatives. Correction reserves a wider stencil even while initially inactive. Variable area adds history and the two global algebraic rows outlined in purple. Deactivation preserves this allocation. The CSV records each stored entry and its initial derivative.
+
 ### 15.1.1 Interleaved blocks
 
 The state is described by a `StateLayout{NC,E,Mov,Rad,Chi,D,U,Car}`
@@ -14448,6 +14488,8 @@ derivative of the code is also the derivative of the function it computes.
 ---
 
 ## 15.9 Non-local dependence: algebraic rows and the two dense rows
+
+Figure 15 in §15.1 compares the actual sparsity patterns with and without correction and variable cross section. Its purple outlines identify the two global algebraic rows; pale entries separate structural dependencies from the derivatives that are nonzero at the initial state.
 
 A moving mesh's node velocity is the swept integral of the strain rates of every
 cell between it and the pinned node, and the intensity reaching a cell is the
@@ -15148,6 +15190,10 @@ only a cell far below its capacity floor carries, is written to the event
 ---
 
 ## 16.5 The energy ledger
+
+![Mass and sensible-enthalpy inventories with internal transfers, boundary outflow, event losses and energy sources including sensible-enthalpy formation.](assets/figures/14_conservation.svg)
+
+**Figure 14. Conservation of the live inventory (schematic).** Shown for mass-balanced reactions without external mass sources. Internal face fluxes and conservative receiver transfers cancel over live cells. Boundary outflow and recorded event losses leave that inventory. Reactions conserve total mass; energy sources include reaction heat, in-depth radiation and sensible-enthalpy formation $\sum_{i,j}h_j(T_i)S_{\mathrm{mass},ij}$. Event energy losses include enthalpy and caloric regularization. The audit compares inventory change with integrated transport, sources and event losses.
 
 ### 16.5.1 The enthalpy rate, from the energy row
 

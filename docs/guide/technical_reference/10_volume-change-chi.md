@@ -254,6 +254,10 @@ The lateral law is **empirical / phenomenological** — a calibration handle, no
 
 ## 10.6 The lateral strain rate $\theta_A$ and the axial/lateral decomposition
 
+![Initial, axially shrunken, laterally shrunken and swollen one-dimensional samples, showing volume as area times thickness and two MLR normalizations.](../../assets/figures/11_shrinkage.svg)
+
+**Figure 11. Axial versus lateral volume change (schematic).** A planar cell has $V=A\Delta z$ and total strain rate $\theta=\theta_L+\theta_A$. The axial balance uses $\theta-\theta_A$, so lateral volume change is counted once. The drawn height stands for cross-sectional area, not a resolved lateral mesh. For the same total outward mass rate, `mass_loss_rate` divides by the current exposed area and `extras.MLR_gauge` by its initial area. Shrinking area makes the former larger than the latter.
+
 ### 10.6.1 Definition, chain-rule derivation, and the lateral-rate row
 
 A time-varying cross-section contributes its own volumetric strain. Define the **column-global lateral (radial) volumetric strain rate**

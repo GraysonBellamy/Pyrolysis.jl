@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="495" viewBox="0 0 1200 495" role="img" aria-labelledby="title desc">
+<title id="title">Figure 11. Axial and Lateral Volume Change (Schematic)</title><desc id="desc">Initial volume compared with axial shrinkage, lateral shrinkage and swelling. Thickness and cross-sectional area are independent geometric factors, and mass-loss rate may be normalized by current or initial area.</desc>
+<defs>
+<marker id="ink" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#202020" stroke-width="1.3"/></marker>
+<marker id="blue" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#295674" stroke-width="1.3"/></marker>
+<marker id="teal" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#365b58" stroke-width="1.3"/></marker>
+<marker id="orange" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#92512f" stroke-width="1.3"/></marker>
+<marker id="purple" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#675878" stroke-width="1.3"/></marker>
+</defs><rect width="100%" height="100%" fill="white"/><g font-family="Liberation Sans, Arial, sans-serif" fill="#202020">
+<text x="32.000" y="39.000" font-size="24" fill="#202020" text-anchor="start" font-weight="bold" >Figure 11. Axial and Lateral Volume Change (Schematic)</text>
+<text x="35.000" y="105.000" font-size="21" fill="#202020" text-anchor="start" font-weight="bold" >Initial Geometry</text>
+<rect x="45" y="150" width="190" height="155" rx="0" fill="none" stroke="#555555" stroke-width="1.2" stroke-dasharray="6 4"/>
+<rect x="45" y="150.0" width="190" height="155" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<line x1="45" y1="340" x2="235" y2="340" stroke="#202020" stroke-width="1.5" stroke-dasharray="" marker-end="url(#ink)"/>
+<text x="140.000" y="371.000" font-size="20" fill="#202020" text-anchor="middle" font-weight="normal" >Δz</text>
+<text x="140.000" y="236.000" font-size="26" fill="#365b58" text-anchor="middle" font-weight="normal" >A</text>
+<text x="35.000" y="413.000" font-size="18" fill="#202020" text-anchor="start" font-weight="normal" >V₀ = A₀ Δz₀</text>
+<text x="330.000" y="105.000" font-size="21" fill="#202020" text-anchor="start" font-weight="bold" >Axial Shrinkage</text>
+<rect x="340" y="150" width="190" height="155" rx="0" fill="none" stroke="#555555" stroke-width="1.2" stroke-dasharray="6 4"/>
+<rect x="340" y="150.0" width="130" height="155" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<line x1="340" y1="340" x2="470" y2="340" stroke="#202020" stroke-width="1.5" stroke-dasharray="" marker-end="url(#ink)"/>
+<text x="405.000" y="371.000" font-size="20" fill="#202020" text-anchor="middle" font-weight="normal" >Δz</text>
+<text x="405.000" y="236.000" font-size="26" fill="#365b58" text-anchor="middle" font-weight="normal" >A</text>
+<text x="330.000" y="413.000" font-size="18" fill="#202020" text-anchor="start" font-weight="normal" >A = A₀; Δz &lt; Δz₀</text>
+<text x="625.000" y="105.000" font-size="21" fill="#202020" text-anchor="start" font-weight="bold" >Lateral Shrinkage</text>
+<rect x="635" y="150" width="190" height="155" rx="0" fill="none" stroke="#555555" stroke-width="1.2" stroke-dasharray="6 4"/>
+<rect x="635" y="177.5" width="190" height="100" rx="0" fill="#ededed" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<line x1="635" y1="340" x2="825" y2="340" stroke="#202020" stroke-width="1.5" stroke-dasharray="" marker-end="url(#ink)"/>
+<text x="730.000" y="371.000" font-size="20" fill="#202020" text-anchor="middle" font-weight="normal" >Δz</text>
+<text x="730.000" y="236.000" font-size="26" fill="#365b58" text-anchor="middle" font-weight="normal" >A</text>
+<text x="625.000" y="413.000" font-size="18" fill="#202020" text-anchor="start" font-weight="normal" >A &lt; A₀</text>
+<text x="920.000" y="105.000" font-size="21" fill="#202020" text-anchor="start" font-weight="bold" >Swelling</text>
+<rect x="930" y="150" width="190" height="155" rx="0" fill="none" stroke="#555555" stroke-width="1.2" stroke-dasharray="6 4"/>
+<rect x="930" y="135.0" width="220" height="185" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<line x1="930" y1="340" x2="1150" y2="340" stroke="#202020" stroke-width="1.5" stroke-dasharray="" marker-end="url(#ink)"/>
+<text x="1040.000" y="371.000" font-size="20" fill="#202020" text-anchor="middle" font-weight="normal" >Δz</text>
+<text x="1040.000" y="236.000" font-size="26" fill="#365b58" text-anchor="middle" font-weight="normal" >A</text>
+<text x="920.000" y="413.000" font-size="18" fill="#202020" text-anchor="start" font-weight="normal" >A and/or Δz increase</text>
+<text x="600.000" y="472.000" font-size="23" fill="#202020" text-anchor="middle" font-weight="normal" >V = A Δz;  θ = θ<tspan baseline-shift="sub" font-size="75%">L</tspan> + θ<tspan baseline-shift="sub" font-size="75%">A</tspan></text>
+</g></svg>

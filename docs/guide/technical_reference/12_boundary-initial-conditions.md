@@ -144,6 +144,10 @@ points out of the live cells, so the same outward convention holds there.
 
 ## 12.2 The surface energy balance and the Newton solve
 
+![Surface cell with incoming radiation, inward conduction and outward radiative and convective losses; gas enthalpy appears separately in the outward face flux.](../../assets/figures/06_surface_energy.svg)
+
+**Figure 6. Surface energy transfers (schematic, surface absorption).** Incoming radiation balances conduction into the solid and convective and radiative losses. The surface-temperature calculation uses $T_s$, the adjacent cell temperature and distance $d$. Gas outflow modifies convection through blowing; its sensible enthalpy enters the face energy flux separately, as shown below. The arrows depict losses from a hot surface; signed exchanges can reverse. Beer–Lambert absorption instead deposits radiation within the cells (Figure 7).
+
 The surface temperature $T_s$ is the keystone of the thermal boundary. It is the
 temperature of the exposed face itself, distinct from the adjacent cell-center
 temperature $T_{\text{cell}}$, and it is determined by an instantaneous balance

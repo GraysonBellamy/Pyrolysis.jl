@@ -551,6 +551,10 @@ early with `solution.retcode == :Terminated` and `solution.outcome` set to
 
 ## 9.8 The conservation recorder and audit
 
+![Mass and sensible-enthalpy inventories with internal transfers, boundary outflow, event losses and energy sources including sensible-enthalpy formation.](../../assets/figures/14_conservation.svg)
+
+**Figure 14. Conservation of the live inventory (schematic).** Shown for mass-balanced reactions without external mass sources. Internal face fluxes and conservative receiver transfers cancel over live cells. Boundary outflow and recorded event losses leave that inventory. Reactions conserve total mass; energy sources include reaction heat, in-depth radiation and sensible-enthalpy formation $\sum_{i,j}h_j(T_i)S_{\mathrm{mass},ij}$. Event energy losses include enthalpy and caloric regularization. The audit compares inventory change with integrated transport, sources and event losses.
+
 `conservation_audit` closes the mass and energy ledgers of the live region: the change in
 its inventories against the time integral of what entered it and what the deactivation
 events took out. It reads its integrals from a `ConservationRecorder` that observed the

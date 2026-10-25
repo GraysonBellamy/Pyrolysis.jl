@@ -52,6 +52,10 @@ with the default integrator and tolerances, measured on that deck).
 
 ## 10.2 Deactivation
 
+![Surface-connected burnout transfers inventory to an inward receiver while retaining inactive state slots; insets show fixed-mesh gas venting and interior-void termination.](../../assets/figures/05_deactivation.svg)
+
+**Figure 5. Burnout and retained state (schematic).** Here $r_i$ is the remaining condensed-mass ratio. A threshold crossing selects a surface-connected band; on a moving mesh its inventories and volume transfer to the inward receiver. Dead nodes coincide at the merged face, while state slots and topology remain allocated. The insets show fixed-mesh gas venting and an interior void blocked by live material. A callback can re-test the receiver and emit multiple per-cell records; gas venting and a final cell without a receiver enter the loss ledger.
+
 A deactivated cell keeps its slots: nothing changes size. The state vector,
 the mesh arrays and the Jacobian's pattern keep their allocation for the
 whole solve; a dead cell's rows are masked (identity rows of the Newton
@@ -352,6 +356,10 @@ is below `ε_m` (§10.8).
 ---
 
 ## 10.5 The equidistribution correction
+
+![Uneven cells relax within a reacting layer above an inert substrate; the implementation activation curve rises as remaining thickness falls from 0.3 to 0.1.](../../assets/figures/04_equidistribution.svg)
+
+**Figure 4. Equidistribution within a vanishing layer.** The left schematic isolates redistribution toward equal cell widths. Correction is zero in the inert substrate and at layer boundaries; those boundaries can still move with the solid. The curve evaluates the implemented thickness-activation switch. Its input is remaining **thickness**, distinct from the **condensed-mass** criterion for burnout in Figure 5.
 
 On a moving mesh the nodes move with the solid velocity plus a correction,
 `w = v_s + c`. With `c = 0` (`NoCorrection()`) the mesh is Lagrangian: each

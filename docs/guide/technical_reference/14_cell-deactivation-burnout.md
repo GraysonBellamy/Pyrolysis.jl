@@ -232,6 +232,10 @@ cells. The full statement, with its limits, is User Guide chapter 10.
 
 ## 14.3 Deactivation
 
+![Surface-connected burnout transfers inventory to an inward receiver while retaining inactive state slots; insets show fixed-mesh gas venting and interior-void termination.](../../assets/figures/05_deactivation.svg)
+
+**Figure 5. Burnout and retained state (schematic).** Here $r_i$ is the remaining condensed-mass ratio. A threshold crossing selects a surface-connected band; on a moving mesh its inventories and volume transfer to the inward receiver. Dead nodes coincide at the merged face, while state slots and topology remain allocated. The insets show fixed-mesh gas venting and an interior void blocked by live material. A callback can re-test the receiver and emit multiple per-cell records; gas venting and a final cell without a receiver enter the loss ledger.
+
 The deactivation state of a solve is a `CellDeactivation{P,NC,E}`
 (`src/Deactivation/events.jl`), built by `setup` when `deactivation = true`:
 the policy (`ConservativeTransfer()`), the threshold $\varepsilon_m$, the band

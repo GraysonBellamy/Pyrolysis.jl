@@ -72,6 +72,12 @@ plot(sol; kind = :mlr)        # mass-loss rate
 The [quick-start tutorial](guide/user_guide/02_quickstart-cone.md) walks
 through every line of a run like this one.
 
+![Surface and back temperatures and actual boundary mass-loss rate from the full PMMA tutorial.](assets/figures/08_quickstart_compact.svg)
+
+Actual results from the [full 1,600-second tutorial](guide/user_guide/02_quickstart-cone.md),
+which uses a different material and boundary-condition deck from the short example above.
+The full figure also compares gas generation with actual MLR and plots profiles at the current cell positions.
+
 ## How the documentation is organised
 
 - **[User Guide](guide/user_guide/01_introduction-installation.md)** — how to

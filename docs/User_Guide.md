@@ -1424,6 +1424,10 @@ simplest path.
 
 ## 2.9 Step 7 — Plot the results
 
+![Actual tutorial solution: surface and back temperatures, boundary mass-loss rate compared with gas generation, and profiles plotted at current cell centres.](assets/figures/08_quickstart.svg)
+
+**Figure 8. Results of the complete tutorial in §2.10.** The 72-cell moving-mesh solve reaches 1,600 s successfully at an incident flux of 24.5325 kW/m². The solid green trace is the actual `solution.mass_loss_rate`; the dashed gas-generation trace is a reaction-rate proxy and can differ because gas is stored before it escapes. Both are displayed in g/(m²·s); this deck has constant cross section. Profiles use `solution.cell_centers[:, k]` at each saved time, and dots mark the current exposed-face temperature and position. The peak actual MLR is approximately 5.49 g/(m²·s). The editable Julia generator and the underlying CSV data are described in the Development page.
+
 With `Plots` loaded, the package's recipe gives you quick standard views off the
 solution directly:
 
@@ -2835,6 +2839,10 @@ used at all temperatures.
 
 ## 4.7 The single-reactant restriction and multi-step schemes
 
+![Three-step wood scheme: virgin to two intermediates to char, with gas mass-yield branches and exothermic or endothermic heat signs at each step.](assets/figures/13_reaction_network.svg)
+
+**Figure 13. The three-step wood example (schematic).** This is the reaction tuple immediately below: each arrow consumes exactly one component and its two product yields sum to one. Yields are per kilogram of the current step’s reactant, so complete conversion gives 0.5624 kg of char and 0.4376 kg of gases per kilogram of virgin wood. The package convention is $h>0$ for endothermic consumption and $h<0$ for exothermic release. Intermediate components are explicit state inventories, not additional reactants to a single reaction.
+
 The current implementation supports **single-reactant reactions only**
 (`NRin == 1`). Each `Reaction` consumes exactly one component. Attempting to apply
 a multi-reactant reaction is rejected by problem validation. This means you cannot
@@ -3674,6 +3682,10 @@ research/validation studies.
 
 ## 5.4 The surface energy balance (how thermal BCs are applied)
 
+![Surface cell with incoming radiation, inward conduction and outward radiative and convective losses; gas enthalpy appears separately in the outward face flux.](assets/figures/06_surface_energy.svg)
+
+**Figure 6. Surface energy transfers (schematic, surface absorption).** Incoming radiation balances conduction into the solid and convective and radiative losses. The surface-temperature calculation uses $T_s$, the adjacent cell temperature and distance $d$. Gas outflow modifies convection through blowing; its sensible enthalpy enters the face energy flux separately, as shown below. The arrows depict losses from a hot surface; signed exchanges can reverse. Beer–Lambert absorption instead deposits radiation within the cells (Figure 7).
+
 Thermal BCs are not applied as a raw flux in the cell; instead the solver finds
 the **surface (face) temperature** `T_s` that makes the boundary energy balance
 close, then conducts the resulting flux into the adjacent cell. The balance is
@@ -4151,6 +4163,10 @@ formulation, Technical Reference §11.
 
 ## 6.1 The mesh in one dimension
 
+![Nonuniform column with cell centres, node faces, outward boundary normals and equal-and-opposite owner/neighbour flux contributions.](assets/figures/01_mesh_anatomy.svg)
+
+**Figure 1. Finite-volume mesh anatomy (schematic).** The pinned back is at `z = 0`; heat enters at the exposed face `z = L(t)`. In one dimension each node is a face. An interior flux is oriented from owner to neighbour and contributes equal and opposite extensive rates, so it cancels from the global balance. Widths are deliberately nonuniform. See Technical Reference §13.1 for the face convention and Figure 2 in §13.4 for the framework.
+
 A line mesh consists of:
 
 - **Nodes**, the points that bound the cells. A mesh of `n` cells has `n + 1` nodes at
@@ -4191,6 +4207,10 @@ See Technical Reference §13 for the cell, face and node layout and the operator
 ---
 
 ## 6.2 Creating a mesh
+
+![Actual constructor coordinates for uniform, surface-refined, back-refined and layered meshes on one 7 mm scale, with a layer-interface node at 6 mm.](assets/figures/09_mesh_constructors.svg)
+
+**Figure 9. Constructor comparison (actual coordinates).** Each mesh spans 7 mm with twelve cells. The stretched meshes use `stretch = 1.2` with opposite refined ends. The layered node list gives eight substrate cells over 6 mm and four coating cells over 1 mm, with a node exactly on the material interface. These modest cell counts make the geometry readable; they are not a resolution recommendation. The Julia generator saves the constructor coordinates as CSV.
 
 Three mesh constructors are exported at the top level (`using Pyrolysis` makes them
 available):
@@ -4390,6 +4410,10 @@ When successive lines agree to your target tolerance, you have enough cells.
 
 ## 6.4 Coordinate systems and the cross section
 
+![Planar slice, cylindrical shell and spherical shell with face-area formulas and the units of the cross-section measure.](assets/figures/10_coordinate_geometry.svg)
+
+**Figure 10. Coordinate-system geometry (schematic).** These are one-dimensional models: only the through-thickness coordinate or radius is resolved. The drawings illustrate the symmetry used to integrate face area and cell volume; they do not imply a multidimensional simulation. `cross_section` means area in a slab, axial length in a cylinder, and solid angle in a sphere. The inner and outer shell faces use their own radii; radial meshes starting at the centre have zero inner-face area.
+
 ### 6.4.1 Coordinate systems
 
 The coordinate system is a property of the mesh, chosen with the `coordinates` keyword of
@@ -4586,6 +4610,10 @@ temperatures and volumes.
 ---
 
 ## 6.7 Fixed and moving meshes
+
+![Aligned before and after strips for fixed, Lagrangian and corrected ALE meshes, with distinct mesh nodes and material markers.](assets/figures/03_mesh_motion.svg)
+
+**Figure 3. Three mesh descriptions (schematic).** All panels share the same initial length and pinned back. A fixed mesh represents conversion as condensed-density loss in unchanged volumes, shown by lighter shading. With `c = 0`, nodes follow the solid. Corrected ALE lets interior nodes move relative to the same material motion: $w=v_s+c$ and the inventory transport velocity relative to the mesh is $v_s-w=-c$. The hollow material markers are separate from the filled mesh nodes; their redistribution is illustrative, not a computed trajectory.
 
 The `use_ale` keyword of `solve` (default `false`) decides whether the nodes move.
 
@@ -4990,6 +5018,10 @@ a moving mesh moves with the solid.
 
 ## 7.4 Radiation model (`radiation_model`)
 
+![Matching slabs with surface deposition and Beer–Lambert face intensities, absorbed cell power, transmitted radiation and intensity decreasing with inward depth.](assets/figures/07_radiation.svg)
+
+**Figure 7. Where applied radiation is absorbed (schematic).** `NO_RADIATION` and `SURFACE_ABSORPTION` both apply `RadiativeFluxBC` at the surface; the former does **not** disable that boundary condition. Beer–Lambert introduces face-intensity unknowns and deposits the entering-minus-leaving radiant power in each cell. The exponential inset illustrates uniform optical thickness $\alpha L=2$; its depth coordinate $L-z$ increases inward, opposite to the common $+z$ direction. Radiation remaining at the back face is transmitted rather than absorbed.
+
 Where the incident radiation is absorbed is selected by the `radiation_model` keyword, which
 takes a `RadiationModel` value:
 
@@ -5049,6 +5081,10 @@ Technical Reference §8 for the models.
 ---
 
 ## 7.5 Gas transport: none, Fickian or Darcy–Fick (automatic)
+
+![Porous solid with bulk and pore gas densities, separate diffusion, Darcy and skeleton-motion contributions, and additive pressure and film boundary fluxes.](assets/figures/12_gas_transport.svg)
+
+**Figure 12. Gas storage and transport (schematic).** Bulk concentration $\xi$ uses total cell volume; pore density $\xi/\phi$ uses pore volume. Diffusion and Darcy flow are relative to the skeleton; skeleton transport relative to the mesh is $-c\xi$. At a boundary, pressure-driven venting and the mass-film contribution add, and the resulting gas flux carries sensible enthalpy. Arrows show representative directions; gradients can reverse them.
 
 The gas-transport model is not a `solve` keyword: `setup` infers it from the material and
 the mass boundary conditions.
@@ -5150,6 +5186,10 @@ Technical Reference §9.5.3 for the venting flux and §12.5 for the pressure con
 ---
 
 ## 7.6 Variable cross section (automatic)
+
+![Initial, axially shrunken, laterally shrunken and swollen one-dimensional samples, showing volume as area times thickness and two MLR normalizations.](assets/figures/11_shrinkage.svg)
+
+**Figure 11. Axial versus lateral volume change (schematic).** A planar cell has $V=A\Delta z$ and total strain rate $\theta=\theta_L+\theta_A$. The axial balance uses $\theta-\theta_A$, so lateral volume change is counted once. The drawn height stands for cross-sectional area, not a resolved lateral mesh. For the same total outward mass rate, `mass_loss_rate` divides by the current exposed area and `extras.MLR_gauge` by its initial area. Shrinking area makes the former larger than the latter.
 
 The cross section also follows from the material. If the material's
 `lateral_shrinkage_law` is `nothing` (the default), the column's cross section is fixed at
@@ -6920,6 +6960,10 @@ early with `solution.retcode == :Terminated` and `solution.outcome` set to
 
 ## 9.8 The conservation recorder and audit
 
+![Mass and sensible-enthalpy inventories with internal transfers, boundary outflow, event losses and energy sources including sensible-enthalpy formation.](assets/figures/14_conservation.svg)
+
+**Figure 14. Conservation of the live inventory (schematic).** Shown for mass-balanced reactions without external mass sources. Internal face fluxes and conservative receiver transfers cancel over live cells. Boundary outflow and recorded event losses leave that inventory. Reactions conserve total mass; energy sources include reaction heat, in-depth radiation and sensible-enthalpy formation $\sum_{i,j}h_j(T_i)S_{\mathrm{mass},ij}$. Event energy losses include enthalpy and caloric regularization. The audit compares inventory change with integrated transport, sources and event losses.
+
 `conservation_audit` closes the mass and energy ledgers of the live region: the change in
 its inventories against the time integral of what entered it and what the deactivation
 events took out. It reads its integrals from a `ConservationRecorder` that observed the
@@ -7155,6 +7199,10 @@ with the default integrator and tolerances, measured on that deck).
 ---
 
 ## 10.2 Deactivation
+
+![Surface-connected burnout transfers inventory to an inward receiver while retaining inactive state slots; insets show fixed-mesh gas venting and interior-void termination.](assets/figures/05_deactivation.svg)
+
+**Figure 5. Burnout and retained state (schematic).** Here $r_i$ is the remaining condensed-mass ratio. A threshold crossing selects a surface-connected band; on a moving mesh its inventories and volume transfer to the inward receiver. Dead nodes coincide at the merged face, while state slots and topology remain allocated. The insets show fixed-mesh gas venting and an interior void blocked by live material. A callback can re-test the receiver and emit multiple per-cell records; gas venting and a final cell without a receiver enter the loss ledger.
 
 A deactivated cell keeps its slots: nothing changes size. The state vector,
 the mesh arrays and the Jacobian's pattern keep their allocation for the
@@ -7456,6 +7504,10 @@ is below `ε_m` (§10.8).
 ---
 
 ## 10.5 The equidistribution correction
+
+![Uneven cells relax within a reacting layer above an inert substrate; the implementation activation curve rises as remaining thickness falls from 0.3 to 0.1.](assets/figures/04_equidistribution.svg)
+
+**Figure 4. Equidistribution within a vanishing layer.** The left schematic isolates redistribution toward equal cell widths. Correction is zero in the inert substrate and at layer boundaries; those boundaries can still move with the solid. The curve evaluates the implemented thickness-activation switch. Its input is remaining **thickness**, distinct from the **condensed-mass** criterion for burnout in Figure 5.
 
 On a moving mesh the nodes move with the solid velocity plus a correction,
 `w = v_s + c`. With `c = 0` (`NoCorrection()`) the mesh is Lagrangian: each

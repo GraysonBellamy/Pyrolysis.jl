@@ -44,6 +44,10 @@ below cell $i$) and $r$ the reaction index (overload note I1).
 
 ## 11.1 Motivation: tracking a receding/expanding surface
 
+![Aligned before and after strips for fixed, Lagrangian and corrected ALE meshes, with distinct mesh nodes and material markers.](../../assets/figures/03_mesh_motion.svg)
+
+**Figure 3. Three mesh descriptions (schematic).** All panels share the same initial length and pinned back. A fixed mesh represents conversion as condensed-density loss in unchanged volumes, shown by lighter shading. With `c = 0`, nodes follow the solid. Corrected ALE lets interior nodes move relative to the same material motion: $w=v_s+c$ and the inventory transport velocity relative to the mesh is $v_s-w=-c$. The hollow material markers are separate from the filled mesh nodes; their redistribution is illustrative, not a computed trajectory.
+
 ### 11.1.1 The moving-boundary problem and three classical responses
 
 A pyrolyzing slab loses mass through gasification reactions of the form
@@ -774,6 +778,10 @@ face carries its own cell's whichever way the mesh crosses it.
 ---
 
 ## 11.7 The equidistribution correction
+
+![Uneven cells relax within a reacting layer above an inert substrate; the implementation activation curve rises as remaining thickness falls from 0.3 to 0.1.](../../assets/figures/04_equidistribution.svg)
+
+**Figure 4. Equidistribution within a vanishing layer.** The left schematic isolates redistribution toward equal cell widths. Correction is zero in the inert substrate and at layer boundaries; those boundaries can still move with the solid. The curve evaluates the implemented thickness-activation switch. Its input is remaining **thickness**, distinct from the **condensed-mass** criterion for burnout in Figure 5.
 
 ### 11.7.1 Purpose
 

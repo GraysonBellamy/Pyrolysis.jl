@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="510" viewBox="0 0 1200 510" role="img" aria-labelledby="title desc">
+<title id="title">Figure 12. Gas Storage and Transport (Schematic)</title><desc id="desc">A porous cell distinguishes gas mass per bulk volume from pore density. Three arrows identify diffusion, Darcy flow and skeleton motion. A separate boundary diagram adds pressure and film contributions to the gas flux.</desc>
+<defs>
+<marker id="ink" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#202020" stroke-width="1.3"/></marker>
+<marker id="blue" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#295674" stroke-width="1.3"/></marker>
+<marker id="teal" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#365b58" stroke-width="1.3"/></marker>
+<marker id="orange" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#92512f" stroke-width="1.3"/></marker>
+<marker id="purple" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#675878" stroke-width="1.3"/></marker>
+</defs><rect width="100%" height="100%" fill="white"/><g font-family="Liberation Sans, Arial, sans-serif" fill="#202020">
+<text x="32.000" y="39.000" font-size="24" fill="#202020" text-anchor="start" font-weight="bold" >Figure 12. Gas Storage and Transport (Schematic)</text>
+<rect x="65" y="115" width="430" height="190" rx="0" fill="#d9d9d9" stroke="#555555" stroke-width="1.2" stroke-dasharray=""/>
+<circle cx="120" cy="165" r="27" fill="white" stroke="#365b58" stroke-width="1.3"/>
+<circle cx="205" cy="240" r="35" fill="white" stroke="#365b58" stroke-width="1.3"/>
+<circle cx="295" cy="175" r="31" fill="white" stroke="#365b58" stroke-width="1.3"/>
+<circle cx="395" cy="240" r="34" fill="white" stroke="#365b58" stroke-width="1.3"/>
+<circle cx="450" cy="155" r="22" fill="white" stroke="#365b58" stroke-width="1.3"/>
+<text x="205.000" y="247.000" font-size="18" fill="#202020" text-anchor="middle" font-weight="normal" >Gas</text>
+<text x="80.000" y="285.000" font-size="18" fill="#202020" text-anchor="start" font-weight="normal" >Solid Matrix</text>
+<text x="65.000" y="345.000" font-size="20" fill="#202020" text-anchor="start" font-weight="normal" >Bulk: ξ = m<tspan baseline-shift="sub" font-size="75%">gas</tspan>/V</text>
+<text x="295.000" y="345.000" font-size="20" fill="#202020" text-anchor="start" font-weight="normal" >Pores: ρ<tspan baseline-shift="sub" font-size="75%">gas</tspan> = ξ/φ</text>
+<line x1="540" y1="150" x2="805" y2="150" stroke="#295674" stroke-width="2.2" stroke-dasharray="" marker-end="url(#blue)"/>
+<text x="830.000" y="157.000" font-size="20" fill="#295674" text-anchor="start" font-weight="normal" >Diffusion</text>
+<line x1="540" y1="215" x2="805" y2="215" stroke="#365b58" stroke-width="2.2" stroke-dasharray="" marker-end="url(#teal)"/>
+<text x="830.000" y="222.000" font-size="20" fill="#365b58" text-anchor="start" font-weight="normal" >Darcy Flow</text>
+<line x1="540" y1="280" x2="805" y2="280" stroke="#675878" stroke-width="2.2" stroke-dasharray="" marker-end="url(#purple)"/>
+<text x="830.000" y="287.000" font-size="20" fill="#675878" text-anchor="start" font-weight="normal" >Skeleton Motion vₛ</text>
+<text x="600.000" y="345.000" font-size="20" fill="#202020" text-anchor="start" font-weight="normal" >Relative to Mesh: vₛ − w = −c</text>
+<line x1="35" y1="385" x2="1165" y2="385" stroke="#555555" stroke-width="0.8" stroke-dasharray="" />
+<text x="65.000" y="430.000" font-size="20" fill="#202020" text-anchor="start" font-weight="bold" >Boundary Contributions</text>
+<text x="65.000" y="478.000" font-size="20" fill="#365b58" text-anchor="start" font-weight="normal" >Pressure (Darcy)</text>
+<text x="290.000" y="478.000" font-size="26" fill="#202020" text-anchor="start" font-weight="normal" >+</text>
+<text x="340.000" y="478.000" font-size="20" fill="#295674" text-anchor="start" font-weight="normal" >Mass Film</text>
+<line x1="520" y1="472" x2="675" y2="472" stroke="#202020" stroke-width="1.5" stroke-dasharray="" marker-end="url(#ink)"/>
+<text x="700.000" y="478.000" font-size="20" fill="#202020" text-anchor="start" font-weight="normal" >Gas Flux + Carried Enthalpy</text>
+</g></svg>

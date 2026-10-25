@@ -69,6 +69,81 @@ documents. Two derived views are generated from them:
    (`docs/generate_guide.jl`) also converts `$`-delimited math to Documenter
    syntax and fails the build if anything is left unconverted.
 
+### Explanatory figures
+
+`docs/assets/figures/` is the canonical asset directory. The SVGs retain editable
+text and vector shapes; their reproducible drawing sources are in
+`scripts/figures/`. Edit those Julia sources before regenerating the SVG exports.
+No plotting package or raster image generator is needed. Use a technical-report
+style: white backgrounds, square outlines, fine rules, conventional label
+capitalization, and explicit mathematical subscripts and superscripts. Preserve
+the case of physical symbols and API identifiers; render API identifiers in
+monospace. Mesh connectivity is black, with restrained blue for thermal fields
+and numerical entries, teal for inventory transport and correction, brown for
+heat, muted purple for global coupling, and grey for reference/inactive material.
+Schematics say so in their titles and captions; plots identify computed
+quantities and units.
+
+Each figure should make one visual comparison or mechanism clear beside the
+text. Prefer direct labels, aligned geometry and transfer arrows. Keep derivations,
+API details, procedural qualifications and explanatory paragraphs in the guide
+or caption; do not repeat them as text panels inside an image.
+
+| Figure | Subject | User Guide | Technical Reference |
+|:---|:---|:---|:---|
+| 1 | Finite-volume mesh anatomy | §6.1 | §13.1 |
+| 2 | Mesh framework and residual evaluation | reference in §6.1 | §13.4 |
+| 3 | Fixed, Lagrangian and corrected ALE | §6.7 | §11.1 |
+| 4 | Equidistribution and thickness activation | §10.5 | §11.7 |
+| 5 | Burnout, transfers and retained state slots | §10.2 | §14.3 |
+| 6 | Surface energy balance | §5.4 | §12.2 |
+| 7 | Surface versus in-depth absorption | §7.4 | §8.1 |
+| 8 | Actual quick-start results | §2.9; compact copy on Home | — |
+| 9 | Constructor coordinates | §6.2 | — |
+| 10 | One-dimensional coordinate geometry | §6.4 | — |
+| 11 | Axial and lateral shrinkage/swelling | §7.6 | §10.6 |
+| 12 | Porous gas transport | §7.5 | Chapter 9 |
+| 13 | Three-step wood reaction network | §4.7 | — |
+| 14 | Mass and energy accounting | §9.8 | §16.5 |
+| 15 | State layout and actual Jacobian patterns | — | §15.1; reference in §15.9 |
+
+After setting up the documentation environment below, regenerate from the
+repository root:
+
+```bash
+julia --project=docs scripts/figures/generate.jl
+julia scripts/test_guide_assets.jl
+julia scripts/split_guides.jl
+julia --project=docs docs/make.jl
+```
+
+The figure generator supports `--first` (1–8) and `--second` (9–15). Figure 8
+executes the complete runnable block in canonical User Guide §2.10, omitting
+only the optional Plots import and progress display, then saves the actual
+boundary MLR, gas-generation proxy, temperatures and current positions in
+`docs/assets/figures/data/`. Its TOML provenance records the Julia version,
+source revision, executed-deck hash and solve outcome. For appearance-only
+changes, `--from-data` redraws that figure from the committed CSVs without
+another solve. Figure 9 exports the actual constructor coordinates. Figure 15
+exports the stored sparsity entries and initial dense-AD derivatives for three
+six-cell setups, and asserts that every nonzero derivative lies in the stored
+pattern. Figure 4 evaluates the implemented thickness-activation switch;
+Figure 7's exponential inset illustrates the labelled uniform optical depth.
+
+Canonical Markdown embeds `assets/figures/name.svg`. The shared
+`rebase_figure_paths` helper rewrites those destinations to
+`../../assets/figures/name.svg` for both chapter views, leaving code examples
+and external URLs untouched. The Documenter generator copies only SVG exports
+to the ignored `docs/src/assets/figures/`; numerical data and drawing sources
+remain in their canonical locations. The Home page uses that copied asset
+directory too. Do not hand-edit either set of derived chapters or copied SVGs.
+
+After regeneration, inspect the SVGs and representative rendered pages at
+their normal display width. `rsvg-convert` or a browser can render SVGs for
+inspection. The focused asset checks cover rebasing (including fenced and
+inline code) and the existence of all fifteen canonical figure destinations;
+the documentation build also exercises the Markdown conversion and asset copy.
+
 ## Building the documentation site
 
 ```bash

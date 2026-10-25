@@ -26,6 +26,10 @@ formulation, Technical Reference §11.
 
 ## 6.1 The mesh in one dimension
 
+![Nonuniform column with cell centres, node faces, outward boundary normals and equal-and-opposite owner/neighbour flux contributions.](../../assets/figures/01_mesh_anatomy.svg)
+
+**Figure 1. Finite-volume mesh anatomy (schematic).** The pinned back is at `z = 0`; heat enters at the exposed face `z = L(t)`. In one dimension each node is a face. An interior flux is oriented from owner to neighbour and contributes equal and opposite extensive rates, so it cancels from the global balance. Widths are deliberately nonuniform. See Technical Reference §13.1 for the face convention and Figure 2 in §13.4 for the framework.
+
 A line mesh consists of:
 
 - **Nodes**, the points that bound the cells. A mesh of `n` cells has `n + 1` nodes at
@@ -66,6 +70,10 @@ See Technical Reference §13 for the cell, face and node layout and the operator
 ---
 
 ## 6.2 Creating a mesh
+
+![Actual constructor coordinates for uniform, surface-refined, back-refined and layered meshes on one 7 mm scale, with a layer-interface node at 6 mm.](../../assets/figures/09_mesh_constructors.svg)
+
+**Figure 9. Constructor comparison (actual coordinates).** Each mesh spans 7 mm with twelve cells. The stretched meshes use `stretch = 1.2` with opposite refined ends. The layered node list gives eight substrate cells over 6 mm and four coating cells over 1 mm, with a node exactly on the material interface. These modest cell counts make the geometry readable; they are not a resolution recommendation. The Julia generator saves the constructor coordinates as CSV.
 
 Three mesh constructors are exported at the top level (`using Pyrolysis` makes them
 available):
@@ -265,6 +273,10 @@ When successive lines agree to your target tolerance, you have enough cells.
 
 ## 6.4 Coordinate systems and the cross section
 
+![Planar slice, cylindrical shell and spherical shell with face-area formulas and the units of the cross-section measure.](../../assets/figures/10_coordinate_geometry.svg)
+
+**Figure 10. Coordinate-system geometry (schematic).** These are one-dimensional models: only the through-thickness coordinate or radius is resolved. The drawings illustrate the symmetry used to integrate face area and cell volume; they do not imply a multidimensional simulation. `cross_section` means area in a slab, axial length in a cylinder, and solid angle in a sphere. The inner and outer shell faces use their own radii; radial meshes starting at the centre have zero inner-face area.
+
 ### 6.4.1 Coordinate systems
 
 The coordinate system is a property of the mesh, chosen with the `coordinates` keyword of
@@ -461,6 +473,10 @@ temperatures and volumes.
 ---
 
 ## 6.7 Fixed and moving meshes
+
+![Aligned before and after strips for fixed, Lagrangian and corrected ALE meshes, with distinct mesh nodes and material markers.](../../assets/figures/03_mesh_motion.svg)
+
+**Figure 3. Three mesh descriptions (schematic).** All panels share the same initial length and pinned back. A fixed mesh represents conversion as condensed-density loss in unchanged volumes, shown by lighter shading. With `c = 0`, nodes follow the solid. Corrected ALE lets interior nodes move relative to the same material motion: $w=v_s+c$ and the inventory transport velocity relative to the mesh is $v_s-w=-c$. The hollow material markers are separate from the filled mesh nodes; their redistribution is illustrative, not a computed trajectory.
 
 The `use_ale` keyword of `solve` (default `false`) decides whether the nodes move.
 

@@ -48,6 +48,10 @@ Conventions (binding, from §2, Nomenclature):
 
 ## 13.1 Cell-Centered Finite-Volume Layout in 1D
 
+![Nonuniform column with cell centres, node faces, outward boundary normals and equal-and-opposite owner/neighbour flux contributions.](../../assets/figures/01_mesh_anatomy.svg)
+
+**Figure 1. Finite-volume mesh anatomy (schematic).** The pinned back is at `z = 0`; heat enters at the exposed face `z = L(t)`. In one dimension each node is a face. An interior flux is oriented from owner to neighbour and contributes equal and opposite extensive rates, so it cancels from the global balance. Widths are deliberately nonuniform. See Technical Reference §13.1 for the face convention and Figure 2 in §13.4 for the framework.
+
 ### 13.1.1 Topology: nodes, faces, cells
 
 Pyrolysis.jl stores its primary unknowns, the component masses and the energy
@@ -365,6 +369,10 @@ cell, and the boundary kernels apply their conditions at `live_face` (§13.1.2).
 ---
 
 ## 13.4 Kernels and the Assembly Order
+
+![Flow from fixed topology and reference data through setup and evolving state to geometry, derived fields, correction, kernels, closures and residual assembly.](../../assets/figures/02_mesh_framework.svg)
+
+**Figure 2. Mesh framework (schematic).** Read left to right for one residual evaluation. Setup fixes connectivity and row layout; positions, inventories, cross section and the activity mask evolve. Geometry and derived fields feed correction, kernels and closure before assembly. Correction precedes face fluxes, and gas transport precedes the thermal boundary calculation. External sources and masking enter the final assembly; §13.4 gives the implementation details.
 
 ### 13.4.1 The kernel contract
 

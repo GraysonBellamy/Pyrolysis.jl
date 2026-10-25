@@ -237,6 +237,10 @@ used at all temperatures.
 
 ## 4.7 The single-reactant restriction and multi-step schemes
 
+![Three-step wood scheme: virgin to two intermediates to char, with gas mass-yield branches and exothermic or endothermic heat signs at each step.](../../assets/figures/13_reaction_network.svg)
+
+**Figure 13. The three-step wood example (schematic).** This is the reaction tuple immediately below: each arrow consumes exactly one component and its two product yields sum to one. Yields are per kilogram of the current step’s reactant, so complete conversion gives 0.5624 kg of char and 0.4376 kg of gases per kilogram of virgin wood. The package convention is $h>0$ for endothermic consumption and $h<0$ for exothermic release. Intermediate components are explicit state inventories, not additional reactants to a single reaction.
+
 The current implementation supports **single-reactant reactions only**
 (`NRin == 1`). Each `Reaction` consumes exactly one component. Attempting to apply
 a multi-reactant reaction is rejected by problem validation. This means you cannot

@@ -39,6 +39,10 @@ Conventions used in this chapter (binding, from §2, Nomenclature):
 
 ## 15.1 The state vector: layout and row kinds
 
+![Interleaved node and cell state strip and three actual six-cell Jacobian patterns, distinguishing algebraic rows, local coupling, wider correction reach and global area coupling.](../../assets/figures/15_state_jacobian.svg)
+
+**Figure 15. State layout and Jacobian structure.** The schematic strip shows the interleaved ordering of a six-cell, two-component, variable-area setup. The matrices are actual stored patterns, with Beer–Lambert intensity unknowns. Grey entries are allocated dependencies; blue entries are nonzero initial-state AD derivatives. Correction reserves a wider stencil even while initially inactive. Variable area adds history and the two global algebraic rows outlined in purple. Deactivation preserves this allocation. The CSV records each stored entry and its initial derivative.
+
 ### 15.1.1 Interleaved blocks
 
 The state is described by a `StateLayout{NC,E,Mov,Rad,Chi,D,U,Car}`
@@ -656,6 +660,8 @@ derivative of the code is also the derivative of the function it computes.
 ---
 
 ## 15.9 Non-local dependence: algebraic rows and the two dense rows
+
+Figure 15 in §15.1 compares the actual sparsity patterns with and without correction and variable cross section. Its purple outlines identify the two global algebraic rows; pale entries separate structural dependencies from the derivatives that are nonzero at the initial state.
 
 A moving mesh's node velocity is the swept integral of the strain rates of every
 cell between it and the pinned node, and the intensity reaching a cell is the

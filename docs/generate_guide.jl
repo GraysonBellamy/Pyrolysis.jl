@@ -194,6 +194,16 @@ end
 # --- driver -----------------------------------------------------------------
 
 function generate_guide_sources(; verbose::Bool = true)
+    # Copy canonical exports into the Documenter source tree. Editable sources
+    # and numerical data stay in their canonical locations.
+    figure_src = joinpath(@__DIR__, "assets", "figures")
+    figure_dst = joinpath(@__DIR__, "src", "assets", "figures")
+    rm(figure_dst; force = true, recursive = true)
+    mkpath(figure_dst)
+    for file in readdir(figure_src)
+        endswith(file, ".svg") || continue
+        cp(joinpath(figure_src, file), joinpath(figure_dst, file))
+    end
     specs = (
         (monolith = "User_Guide.md", name = "user_guide"),
         (monolith = "Technical_Reference_Guide.md", name = "technical_reference"),
@@ -213,7 +223,9 @@ function generate_guide_sources(; verbose::Bool = true)
         mkpath(outdir)
         for (k, chunk) in enumerate(chapters)
             label = "guide/$(spec.name)/$(files[k])"
-            transformed = transform_chapter(chunk, label)
+            transformed = transform_chapter(
+                rebase_figure_paths(chunk, "../../assets/figures"), label,
+            )
             validate_chapter!(problems, transformed, label)
             write(joinpath(outdir, files[k]), join(transformed, "\n") * "\n")
         end
