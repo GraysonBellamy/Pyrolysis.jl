@@ -93,7 +93,10 @@ function build_macfp_bcs(q_inc::Real)
     # equilibrium and the surface T runs away.
     # No convection (per MaCFP-4 idealized spec).
     top_thermal = RadiativeFluxBC(flux = float(q_inc)) + RadiativeBC(T_inf = T_INITIAL_K)
-    top_mass = DiffusiveMassBC(0.05) + DirichletPressureBC(101325.0)
+    top_mass = AmbientGasBC(
+        GasReservoir(P = 101325.0, T = T_INITIAL_K, mole_fractions = (AIR = 1.0,));
+        film = MassTransferFilm(0.05*101325.0*0.02897/(8.31446261815324*T_INITIAL_K)),
+    )
     # Bottom: perfectly insulated, impermeable.
     bottom_thermal = AdiabaticBC()
     bottom_mass = ImpermeableBC()
@@ -139,7 +142,10 @@ function build_and_solve_macfp(
         0.0,
         0.0,# 9-13. pyrolysis gases
         0.0,                    # 14. water vapor
+        0.0,                    # 15. background air
     )
+    ξ_air = background_gas_concentration(material, :AIR, ξ0, T_INITIAL_K)
+    ξ0 = Base.setindex(ξ0, ξ_air, NC_WP)
     ξ_initial_funcs = [
         let v = ξ0[j]
             _ -> v

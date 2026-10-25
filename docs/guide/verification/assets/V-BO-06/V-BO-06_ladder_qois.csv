@@ -1,6 +1,9 @@
 "n_cells","qoi","value","exact","error","tol","within_tol"
-60,"complete burnout: live thickness at t_end is the substrate",0.011981012052429008,0.01198101164980643,4.026225776387893e-10,1.0e-5,true
-60,"mass loss of the gasified PMMA layer",69.94809227063851,69.9480970457636,4.775125091782684e-6,0.3,true
-60,"mass ledger closure",9.437223022573799e-8,0.0,9.437223022573799e-8,3.0e-5,true
+60,"complete burnout: live thickness at t_end is the substrate",0.01198101205242473,0.01198101164980643,4.026182998106975e-10,1.0e-5,true
+60,"mass loss of the gasified PMMA layer",69.9480922711071,69.9480970457636,4.774656503059305e-6,0.3,true
+60,"peak MLR",32.288219109718305,32.39,0.003142355365288522,0.03,true
+60,"mass ledger closure",1.9315860249356635e-11,0.0,1.9315860249356635e-11,3.0e-5,true
 60,"clamped surface balances on accepted states",0.0,0.0,0.0,0.5,true
+60,"time of peak MLR",334.0,335.0,0.0029850746268656717,0.03,true
+60,"burnout time (live thickness < 12.0 mm)",364.0,363.5,0.001375515818431912,0.01,true
 60,"deactivation invocations for the PMMA layer (reported)",1.0,1.0,0.0,Inf,true

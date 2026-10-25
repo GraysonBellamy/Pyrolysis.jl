@@ -77,12 +77,13 @@ The swelling factor $\gamma_j$ is a per-component scalar field on every `Abstrac
 | Liquid | $0.0$ | Fills pore space; default treats it as volume-neutral | none unless overridden |
 | Gas | $0.0$ | Escapes through pores; does not set matrix dimensions | none |
 
-> **Implementation note.** Defaults are set in the convenience constructors of `src/Materials/components.jl`: `SolidComponent(...; γ::Real = 1.0, ...)`, `GaseousComponent(...; γ::Real = 0.0, ...)`, and `LiquidComponent(...; γ::Real = 0.0, ...)`. The field is `swelling_factor::Float64` on each struct, validated to $\gamma\in[0,1]$ at construction (an `ArgumentError` names the component otherwise). The factor has one meaning everywhere: the strain rate (10.2), the mixture density (§5.2) and the mixing volume fractions that weight the conductivity and the surface emissivity (§5.1.3) all use the same $\gamma_j\,\xi_j/\rho_j$ weighting.
+> **Implementation note.** Defaults are set in the convenience constructors of `src/Materials/components.jl`: `SolidComponent(...; γ::Real = 1.0, ...)`, `GaseousComponent(...; γ::Real = 0.0, ...)`, and `LiquidComponent(...; γ::Real = 0.0, ...)`. The field is `swelling_factor::Float64` on each struct, validated to $\gamma\in[0,1]$ at construction (an `ArgumentError` names the component otherwise). The factor has one meaning everywhere: the strain rate (10.2), the condensed transport weights and the thermal mixing volume fractions that weight the conductivity and the surface emissivity (§5.1.3) all use the same $\gamma_j\,\xi_j/\rho_j$ weighting.
 
 **Modeling guidance.**
 
 - **Non-charring shrinkage (e.g. a polymer converting to gas):** keep the virgin solid at $\gamma=1$ and the gas product at $\gamma=0$. As the solid converts to gas, $\theta<0$ and the column recedes — the classic shrinking-slab picture.
-- **Charring with a rigid char:** give the char $\gamma=0$ to "freeze" its volume contribution (`rigid_char = SolidComponent(:char, ρ=200, c=1000, k=0.10, γ=0.0)`, the example in the `SolidComponent` docstring); then only the mass converted out of the cell drives axial motion. Because $\gamma$ has one meaning everywhere, such a char is also volumeless in the mixture density and carries no weight in the conductivity and emissivity mixing: it stops contributing its $k$ and $\varepsilon$ to the cell. This is a modeling choice, not a default; the default char is $\gamma=1$.
+- **Zero-swelling char:** `γ=0` removes the char's direct strain and its matrix property weight. Its skeletal occupancy, mass and heat storage remain. Such a phase must have zero transport coefficients; a state with no γ-weighted matrix still needs a declared endpoint whose skeletal-occupancy domain includes that state. This choice does not make residual char an unobstructed void.
+
 - **Intumescence (gas-producing expansion):** assign the trapped/blowing gas a swelling factor $\gamma_g\in(0,1]$. A positive $d\xi_g/dt$ (gas being produced) with $\gamma_g>0$ contributes $\theta>0$, i.e. the matrix *inflates*. Combined with a swelling lateral law (§10.5) this reproduces the order-of-magnitude expansion of intumescent coatings. Axial intumescence (through-thickness swell) is captured by $\theta>0$ in (10.2); radial intumescence (lateral swell of the column) is captured by $\mathrm{law}(\bar\chi)>1$ in (10.8). A factor $\gamma>1$ is not representable.
 
 Because $\gamma_j$ is a free per-component parameter, the model spans the full range from pure shrinkage ($\gamma=1$ solid, $\gamma=0$ gas) through volume-neutral ($\gamma=0$ everywhere) to intumescent ($\gamma_g>0$).
@@ -218,9 +219,11 @@ A complete solve with the linear shrink law, a 1 cm column of a solid that conve
 ```julia
 using Pyrolysis
 
-solid = SolidComponent(:solid; ρ = 1000.0, c = 1000.0, k = 0.2, ε = 0.9, λ = 1e-6)
-gas = GaseousComponent(:gas; M = 0.050, c = 1000.0, k = 0.02, λ = 1e-5)
+solid = SolidComponent(:solid; ρ = 1000.0, φ=.3, c = 1000.0, k = 0.2, ε = 0.9, λ = 1e-6)
+gas = GaseousComponent(:gas; M = 0.050, c = 1000.0, k = 0.02,)
 shrink = Material(
+    gas_transport=LumpedTransfer(endpoint=LumpedEndpoint(λ=1e-6,κ=0.,max_skeletal_occupancy=.001)),
+
     name = :shrink,
     components = (solid, gas),
     reactions = (Reaction(:decomp, 1 => 2, A = 1e5, E = 5e4, h = 1e5),),
@@ -231,7 +234,7 @@ problem = PyrolysisProblem(
     material = shrink,
     bc_set = BoundaryConditionSet(
         thermal = (top = HeatFluxBC(3e4), bottom = AdiabaticBC()),
-        mass = (top = DiffusiveMassBC(), bottom = ImpermeableBC()),
+        mass = (top = AmbientGasBC(GasReservoir(P=0., T=300.)), bottom = ImpermeableBC()),
     ),
     ξ_initial = [z -> 1000.0, z -> 0.0],
     tspan = (0.0, 30.0),
@@ -463,48 +466,70 @@ whatever the temperature history. The verification case V-CPL-03 asserts this en
 
 ## 10.11 Comparison to ThermaKin2Ds, Gpyro, and FDS
 
-All three reference solid-phase pyrolysis codes confront the same physics — a condensed phase that loses mass and changes volume — but each encodes the deformation differently. We map their notation to ours on first use.
+### 10.11.1 ThermaKin2Ds — deformation and remeshing
 
-### 10.11.1 ThermaKin2Ds — the single-reference-point deformation source
-
-ThermaKin2Ds (Stoliarov & Lyon) advances mass concentrations on a *fixed* spatial grid and represents volume change through a **deformation source term** rather than a moving mesh. Its species balance in 1D Cartesian is, in ThermaKin notation,
+TK Eq. 15 gives, in one dimension,
 
 $$
-\frac{\partial \xi_i}{\partial t}
-= \sum_{\alpha\beta} \theta_i^{\alpha\beta}\,r_{\alpha\beta}
-\;-\; \xi_i\,\frac{1}{\bar\rho}\frac{\partial \bar\rho}{\partial t}
-\;-\; \frac{\partial J_i}{\partial x},
+\partial_t\xi_j=\sum_r\theta_r^j r_r-\partial_xJ_j+
+\partial_x\left[\xi_j\int_0^x\rho^{-1}\partial_t\rho\,dx'\right].
 $$
 
-where ThermaKin's $\theta_i^{\alpha\beta}$ is a **stoichiometric coefficient** (mapped to our $\nu_{r,j}$; recall the binding resolution A2 that reserves $\theta$ for strain rate), $r_{\alpha\beta}$ a reaction rate (our $r_r$), and $\bar\rho$ the mixture density. The middle term $-\xi_i\,\bar\rho^{-1}\,\partial_t\bar\rho$ is ThermaKin's deformation/dilation source: as the local mixture density changes, the fixed grid must "concentrate" or "dilute" the surviving species. Integrating $\bar\rho^{-1}\partial_x\rho$ (the single-reference-point construction) yields the displacement of material relative to the fixed grid.
+The full divergence contains both transport and dilation; it cannot be
+replaced by $-\xi_j\rho^{-1}\partial_t\rho$. The reference plane is
+stationary. TK §3 describes changing element thicknesses and conservative
+splitting/combining, not a permanently fixed mesh. Its density law includes
+solid and liquid volumes and a mixture-dependent gas swelling factor
+(Eqs. 3–4). Our reaction-only $\sum_j\gamma_j\omega_j/\rho_j$ closure
+does not include all density-change effects and is not a general equivalent.
+TK restricts deformation to its primary coordinate; our empirical scalar
+lateral-area law is a separate constitutive choice.
 
-The Pyrolysis.jl equivalent splits into two pieces that together reproduce ThermaKin's source: (i) the **mesh moves** with the solid velocity of the balance rows (10.13), built from $\theta_i$ of (10.2), so that the grid follows the deformation instead of staying fixed; and (ii) the **dilation** $-\xi_j\theta_i$ of (10.15) follows from carrying the masses as states and dividing by the current volume. Pyrolysis.jl's $\theta=\sum_j\gamma_j\rho_j^{-1}\,d\xi_j/dt$ is the additive-volume analog of ThermaKin's $-\bar\rho^{-1}\partial_t\bar\rho$: both express that the matrix volume tracks the per-phase pure-volume balance, and indeed $\bar\rho^{-1}\partial_t\bar\rho = \sum_j \rho_j^{-1}\partial_t\xi_j$ for an additive-volume mixture (the $\gamma_j$ generalize this to selective swelling). The key structural difference is **moving mesh vs. fixed grid with a source**: ThermaKin keeps $x$ fixed and carries the deformation algebraically; Pyrolysis.jl moves the nodes and recomputes the geometry. The two are mathematically equivalent in the continuum limit, but the moving mesh keeps the cell-centered states co-located with the material they describe. ThermaKin treats the cross-section as fixed in its core 1D form; Pyrolysis.jl's lateral-shrinkage law (§10.5) has no direct ThermaKin counterpart.
+### 10.11.2 Gpyro — reaction yields and changing control volumes
 
-### 10.11.2 Gpyro — solid-fraction / mechanism-selection swelling
+GP Eqs. 22–24 define a **reaction-specific** solid mass yield
 
-Gpyro (Lautenberger & Fernandez-Pello) solves control-volume conservation of $\bar\rho\,\Delta z$, $\bar\rho Y_i\,\Delta z$, gas mass, and energy on a variable-$\Delta z$ grid. Volume change is handled by allowing each control volume's thickness $\Delta z$ to change so that the **mass-weighted bulk density** stays consistent with the prescribed solid-fraction behavior of each species. Gpyro lets the user pick, per condensed species, how its volume responds: a species can be **non-shrinking** (its contribution to $\Delta z$ is held), **shrinking** (its volume is removed as it is consumed), or **swelling/intumescent** (it adds volume). In Gpyro's notation the bulk density $\bar\rho$ and per-species solid fraction control the $\Delta z$ update; conversion $\alpha_{\mathrm{conv}}$ tracks reaction extent.
+$$\mathrm{SF}_k=1+\left(\rho_{B_k}/\rho_{A_k}-1\right)\chi_k.$$
 
-The Pyrolysis.jl mapping is direct: Gpyro's per-species shrink/non-shrink/swell selection is our **swelling factor** $\gamma_j$ — $\gamma_j=1$ reproduces a shrinking species, $\gamma_j=0$ a non-shrinking one, and $\gamma_j>0$ on a gas reproduces an intumescent (volume-adding) species. Gpyro's variable $\Delta z$ is our moving-mesh $\Delta z_i=V_i/A$, driven by the axial strain $\theta_{L,i}$ through the balance rows. Gpyro's conversion variable $\alpha_{\mathrm{conv}}$ is the close analog of our pyrolysis progress $\chi$, but Pyrolysis.jl uses $\chi$ for a *different* purpose — driving the *lateral* (cross-sectional) law (10.8) — whereas Gpyro's swelling acts on the axial $\Delta z$. In effect, Pyrolysis.jl has two channels (axial via $\theta$, lateral via $\mathrm{law}(\bar\chi)$) where Gpyro's 1D model has only the axial one; the lateral channel is Pyrolysis.jl's surrogate for the transverse swelling Gpyro would need a multi-dimensional model to resolve.
+Together with bulk component densities and the mass balances, this determines
+the changing $\Delta z$ (GP Eqs. 3, 56–57). It is not a per-species
+shrink/non-shrink/swell flag. $\chi_k$ is not the conversion variable
+$\alpha_A$ and neither is our dry-gas progress $\chi$.
 
-### 10.11.3 FDS — the max/sum density-ratio swell/shrink rule
+For constant densities, fixed area, no additional volume contributions and
+condensed $\gamma_j=1$, our volume change for $A\to y_BB+\text{gas}$
+is proportional to $y_B/\rho_B-1/\rho_A$. Matching $y_B=\mathrm{SF}_k$
+can match this restricted Gpyro volume balance. There is no universal
+$\chi_k\leftrightarrow\gamma_j$ conversion. Our lateral law is not the
+analogue of Gpyro's axial shrinkage law.
 
-The FDS solid-phase pyrolysis model (McGrattan et al., *FDS Technical Reference Guide*, Solid Phase chapter) updates the layer thickness using a **density-ratio** rule. Each material component $\alpha$ has a reference (initial) density; as reactions change the component densities $\rho_{s,\alpha}$, FDS adjusts the cell thickness $\delta$ by the ratio of current to initial total density. FDS provides two limiting behaviors via a user flag:
+### 10.11.3 FDS — implemented density-sum rule and constraints
 
-- **Shrinking / "sum" behavior:** the layer thickness scales with the *sum* of component density ratios, so the cell shrinks in proportion to total mass lost (the standard charring-solid recession).
-- **Swelling / "max" behavior:** the thickness scales with the *maximum* density ratio (the most-expanding component dominates), capturing intumescence where one product inflates the layer.
+In FDS 6.11.0 `Source/wall.f90`, `REGRID_FACTOR` is accumulated as the sum
+of updated component densities divided by their adjusted reference densities.
+A remaining component with `ALLOW_SHRINKING=.FALSE.` bounds that factor below
+by one; `ALLOW_SWELLING=.FALSE.` bounds it above by one. Component densities
+are divided by the resulting factor to conserve mass, coordinates are
+updated, and layers can be remeshed.
 
-In FDS notation (their $\rho_{s,\alpha}$ for solid component densities, $X_\alpha$ for volume fractions), the thickness factor is built from $\sum_\alpha \rho_{s,\alpha}/\rho_{s,\alpha}^{0}$ (shrink) or a max-based variant (swell). Mapping to ours: FDS's $X_\alpha$ is our volume fraction $v_j$, and FDS's $\kappa_s$ (solid absorption) maps to our $\alpha$ (overload A5). The Pyrolysis.jl axial volume change (10.2) is the differential, additive-volume analog of FDS's *sum* rule: $\theta=\sum_j\gamma_j\rho_j^{-1}d\xi_j/dt$ is exactly a density-weighted sum of per-component mass-change rates, and integrating it reproduces a thickness that scales with total mass lost (the endpoint of §10.10, which V-CPL-03 checks in the manner of the FDS `shrink_swell` verification). The FDS *max* (swelling) behavior has no exact Pyrolysis.jl counterpart in the axial channel — Pyrolysis.jl represents swell additively (a $\gamma_g>0$ gas adds a positive term to the *sum*), not by a max selection. Lateral swell is instead handled by the explicit $\mathrm{law}(\bar\chi)$ (§10.5), which FDS does not have (FDS keeps a fixed surface area and changes only thickness). A practical implication: FDS's max-rule can produce abrupt, single-component-dominated swelling, whereas Pyrolysis.jl's additive $\theta$ and smooth $\mathrm{law}$ give continuously differentiable deformation — what the automatic-differentiation Jacobian (Chapter 15) and well-defined finite-difference sensitivities (Chapter 17) need.
+The same release's solid-phase manual still prints a max/sum expression.
+That expression does **not** describe this source path: in particular, the
+source does not select the most-expanding component as the swelling factor.
+This comparison follows the [implemented regrid calculation](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/wall.f90#L2388-L2455).
+The V-CPL-03 endpoint examples are restricted checks of matched volume
+balances, not proof that every FDS material maps to our $\gamma_j$.
 
 ### 10.11.4 Summary of mappings
 
-| Concept | Pyrolysis.jl | ThermaKin2Ds | Gpyro | FDS |
-|---|---|---|---|---|
-| Axial deformation mechanism | moving mesh, solid velocity from the balance rows, $v_s=\int\theta_L\,dz$ | Fixed grid + deformation source $-\xi_i\bar\rho^{-1}\partial_t\bar\rho$ | Variable $\Delta z$ control volumes | Density-ratio thickness update |
-| Per-species volume response | $\gamma_j\in[0,1]$ | implicit via $\bar\rho$ | shrink/non-shrink/swell flag | shrink (sum) / swell (max) flag |
-| Strain rate | $\theta=\sum_j\gamma_j\rho_j^{-1}d\xi_j/dt$ | $\bar\rho^{-1}\partial_t\bar\rho$ (sign-equiv.) | bulk-density consistency | $\sum_\alpha\rho_{s,\alpha}/\rho_{s,\alpha}^0$ |
-| Lateral (cross-section) law | $A=A_0\,\mathrm{law}(\bar\chi)$ | none (fixed $A$) | none in 1D | none (fixed area) |
-| Progress / conversion variable | $\chi$ (dry gas, for $\mathrm{law}$) | reaction extent | $\alpha_{\mathrm{conv}}$ | density ratio |
-| Concentration rescaling under shrink | implicit: masses are states, $\xi=m/V$ | deformation source term | $\Delta z$ rebalance | thickness rebalance |
+| Model | Volume-change input | Numerical geometry |
+|---|---|---|
+| Pyrolysis.jl | reaction-volume sum with component $\gamma_j$; optional lateral law | coupled node positions/velocities and scalar area |
+| ThermaKin2Ds | mixture density with gas swelling factor, TK Eqs. 3–4 | changing elements, splitting and combining |
+| Gpyro 1D | reaction yield, component bulk densities and mass conservation | changing control-volume thicknesses |
+| FDS 6.11.0 | density sum constrained by material shrink/swell flags | thickness and coordinate update, remeshing |
+
+Primary source definitions are listed in §1.6.5. In particular, equality of
+endpoint thicknesses does not establish equality of transient mesh dynamics.
 
 ---
 

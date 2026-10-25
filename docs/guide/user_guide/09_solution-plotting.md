@@ -35,8 +35,8 @@ using Pyrolysis
 pmma = Material(
     name = :PMMA,
     components = (
-        SolidComponent(:virgin, ρ = 1190.0, c = 1420.0, k = 0.19, ε = 0.95, λ = 1e-6),
-        GaseousComponent(:MMA, M = 0.100, c = 1500.0, k = 0.02, λ = 1e-5),
+        SolidComponent(:virgin, ρ = 1190.0, φ=.3, c = 1420.0, k = 0.19, ε = 0.95, λ = 1e-6),
+        GaseousComponent(:MMA, M = 0.100, c = 1500.0, k = 0.02,),
     ),
     reactions = (Reaction(:decomposition, 1 => 2, A = 8.5e12, E = 188e3, h = 870e3),),
 )
@@ -49,7 +49,7 @@ problem = PyrolysisProblem(
                   ConvectiveBC(h = 10.0, T_inf = 300.0),
             bottom = AdiabaticBC(),
         ),
-        mass = (top = ConvectiveMassBC(h_m = 0.05, ξ_inf = 0.0), bottom = ImpermeableBC()),
+        mass = (top = AmbientGasBC(GasReservoir(P=0., T=300.)), bottom = ImpermeableBC()),
     ),
     T_initial = z -> 300.0,
     ξ_initial = [z -> 1190.0, z -> 0.0],
@@ -621,8 +621,8 @@ Edot = solution.extras.energy_rate    # W
 ```
 
 The ledger equations, the energy convention they book (the gas enthalpy carried across
-the faces by the mass fluxes, DSC-style reaction heats, no surface gas-enthalpy term in
-the boundary balance) and the event records are derived in Technical Reference §16.
+the faces by the mass fluxes, DSC-style reaction heats, and the conditional
+LTE-film conversion to the reservoir control surface) and the event records are derived in Technical Reference §16.
 
 ---
 

@@ -61,8 +61,9 @@ Section 3.1 (Heat Capacity of Virgin Wood).
 | **Low** | Hostikka & Matala (2017), birch char | c_p ≈ −0.370 + 2.122 × 10⁻³ T (linear fit to 5 tabulated points) | 471–723 K | 25–44% below |
 | **High** | Edrich (1980), pine char | c_p = −0.29227 + 4.1387 × 10⁻³ T − 1.58261 × 10⁻⁶ T² | 473–773 K | 11–15% above |
 
-Hostikka & Matala is widely used in FDS fire modeling studies and represents the extreme
-low end. Edrich pine char represents the high end for softwood chars.
+Within the correlations selected here, the Hostikka & Matala fit supplies
+the low comparison and the Edrich fit supplies the high comparison. These
+choices do not establish how frequently either is used in FDS models.
 
 **Where in the paper:** Add at the end of Section 3.2 (Heat Capacity of Char).
 
@@ -467,7 +468,7 @@ HoS(MC) = 2450.4 + 875.6 · exp(−0.112 · MC) kJ/kg
 
 | Label | Value | Rationale |
 |-------|-------|-----------|
-| **Free water only** | 2442 kJ/kg (constant, no MC dependence) | Standard fire model assumption; what most FDS/GPYRO users implement |
+| **Free water only** | 2442 kJ/kg (constant, no MC dependence) | Constant latent-heat approximation used for this comparison |
 
 This is the latent heat of vaporization of water at 25°C. It ignores the bound-water
 excess entirely, which at 6% MC represents a ~19% underestimate of the energy required.

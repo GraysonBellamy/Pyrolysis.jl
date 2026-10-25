@@ -191,7 +191,7 @@ against an exact or manufactured solution; the burnout cases V-BO-01, 02, 03 and
 | Heat conduction | V-HC-01 – V-HC-05 | Carslaw–Jaeger erfc and eigenfunction series, resistance network, Kirchhoff transform | the convective surface Newton (V-HC-01; Biot sweep V-HC-02a–d), the constant-flux slab to its back-face plateau (V-HC-03), the harmonic-mean face conductivity at a layer jump on and off a face (V-HC-04a–c), $k(T)$ (V-HC-05) |
 | Kinetics and surface radiation | V-RX-01 – V-RX-04 | Bateman chain, Khawam–Flanagan isothermal integrals, parallel-reaction splits, implicit radiative-cooling law | multi-step coupling, reaction order and the depletion limiter (V-RX-02d keeps it on as a guard), two-product yields and heat superposition, `RadiativeBC` through the surface Newton |
 | In-depth radiation | V-RAD-01 | Lautenberger eigenfunction series | Beer–Lambert absorption with conduction and a convective face, including the sub-surface temperature peak |
-| Gas transport | V-GT-01, V-GT-02 | Gaussian plane source; steady compressible Darcy $P^2$ profile | the Fickian flux and mass conservation; the pressure closure, Darcy mobility, upwinding and the pressure outflow condition |
+| Gas transport | V-GT-01, V-GT-02 | Gaussian plane source; steady compressible Darcy $P^2$ profile | the lumped wall flux and mass conservation; the pressure closure, Darcy mobility, upwinding and the pressure outflow condition |
 | Coupled physics | V-CPL-01 – V-CPL-05 | Neumann two-phase Stefan solution, Landau ablation wave, exact shrink/swell endpoints, Frank-Kamenetskii slab, 0D TGA curve | a latent-heat front (apparent heat capacity, V-CPL-01; gated reaction, V-CPL-01b), surface regression on a moving mesh (V-CPL-02, 02b), volume change and the lateral-shrinkage law, the reaction–conduction bifurcation, the boundary and volume coupling of the kinetics |
 | Manufactured solutions | V-MMS-01 – V-MMS-04 | the manufactured-solution driver of §18.2 | design order of the coupled residual on a fixed mesh in space and time, free-stream preservation under prescribed motion, order under prescribed and reaction-driven motion |
 | Burnout | V-BO-01 – V-BO-08 | exact exponential thickness (V-BO-04); otherwise mass budgets, ledgers and a pinned reference run | deactivation through complete burnout on a moving mesh under in-depth absorption (V-BO-01) and on a fixed mesh under surface absorption (V-BO-02); the transmitted-flux series (V-BO-03); the interior-void stop (V-BO-05, `expected_retcode = :Terminated`); a graded mesh (V-BO-06), a layer of mixed composition (V-BO-07) and a thin layer on a deep substrate (V-BO-08) |
@@ -239,19 +239,20 @@ provenance README: FDS 6.11.0 and Gpyro 0.8200 runs of the same problems, a Gpyr
 run of the V-BO-01 deck, and the MaCFP-2 PMMA community submissions (which no case
 reads). They are read only inside a case's report `curves`; assert mode never
 touches them. Overlays are drawn for V-HC-01 (FDS and Gpyro), V-HC-02 (FDS), V-HC-03
-(Gpyro; FDS cannot run a pure-Neumann slab), V-RAD-01 (Gpyro), V-RX-01 (FDS and
+(Gpyro; the FDS 6.11.0 flux-input restriction is discussed in §12.11.3), V-RAD-01 (Gpyro), V-RX-01 (FDS and
 Gpyro), V-RX-02 (FDS), V-CPL-01 (Gpyro), V-CPL-03 (FDS) and V-BO-01 (the Gpyro V2
 gas-generation rate). A series marked `crosscode = true` is drawn as a muted
 context layer in a separate `_vs_codes` variant of each affected figure, so the base
 figure keeps the solver's own error on its own scale; for exact-solution cases the
 other codes' *errors* against the same exact solution are compared.
-`reference/timings.csv` feeds the wall-time comparison: warmed Julia model
-construction and solve versus FDS/Gpyro internal total elapsed time, including
-setup and simulation. Full process times appear separately in supporting
-tables. Output workloads, resolutions and time steps differ, so these are
-indicative costs rather than pure solver speedups. The reference README
-defines the timer boundaries and provenance. ThermaKin2Ds is not represented:
-its distribution is a Windows console binary.
+`reference/timings.csv` feeds a historical wall-time comparison. The Julia
+harness times case construction and solve after a warm-up. The retained
+reference CSV does not specify equally complete timer boundaries or repeated
+measurements, and resolutions and timestep controls differ. Matching a cell
+count does not make a solver-speed ratio controlled. ThermaKin2Ds has no
+verification overlay here; the locally supplied executable is a Windows
+console binary. This is a limitation of this dataset, not of all ThermaKin
+distributions.
 
 ---
 
@@ -603,7 +604,7 @@ of the reference and equal it per entry at `rtol = 1e-12`. The containment tests
 finite residual and reference, an empty `missing_entries`, a colored Jacobian with
 the pattern's structure, and that agreement. They cover fixed and moving columns of a
 PMMA-like and a permeable wood-like material, without radiation, with surface
-absorption and with in-depth absorption, under Fickian and Darcy–Fick transport, in
+absorption and with in-depth absorption, with wall and pressure-driven lumped transport, in
 both energy forms and at 6 and 8 cells; at the set-up state, at uniform hot, hot and
 gas-heavy, partially decomposed and mixed reacting states, and at trial states
 outside the physical domain (perturbed, zero and negated states); the chain-rule
@@ -635,9 +636,9 @@ using Pyrolysis.Internal: jac_prototype, jacobian!, dense_jacobian, missing_entr
     compare_entries
 
 # A charring slab on a moving mesh, integrated to a reacting state.
-virgin = SolidComponent(:virgin, ρ = 1190.0, c = 1500.0, k = 0.2, λ = 1e-6)
-char = SolidComponent(:char, ρ = 200.0, c = 1200.0, k = 0.1, λ = 1e-6)
-gas = GaseousComponent(:gas, M = 0.1, c = 1500.0, k = 0.02, λ = 1e-5)
+virgin = SolidComponent(:virgin, ρ = 1190.0, φ=.3, c = 1500.0, k = 0.2, λ = 1e-6)
+char = SolidComponent(:char, ρ = 200.0, φ=.3, c = 1200.0, k = 0.1, λ = 1e-6)
+gas = GaseousComponent(:gas, M = 0.1, c = 1500.0, k = 0.02,)
 rxn = Reaction(:decomp, 1 => (2, 3); A = 1e13, E = 1.88e5, h = 8.7e5, yields = (0.2, 0.8))
 material = Material(name = :slab, components = (virgin, char, gas), reactions = (rxn,))
 problem = PyrolysisProblem(
@@ -648,7 +649,7 @@ problem = PyrolysisProblem(
             top = HeatFluxBC(50e3) + RadiativeBC(ε = 0.9, T_inf = 300.0),
             bottom = AdiabaticBC(),
         ),
-        mass = (top = DiffusiveMassBC(Inf), bottom = ImpermeableBC()),
+        mass = (top = AmbientGasBC(GasReservoir(P=0., T=300.)), bottom = ImpermeableBC()),
     ),
     T_initial = z -> 300.0,
     ξ_initial = [z -> 1190.0, z -> 0.0, z -> 0.0],
@@ -671,7 +672,7 @@ println(compare_entries(Matrix(J), J_ref; rtol = 1e-12))
 prints
 
 ```
-Success, (122, 122), 880 nonzero reference entries
+Success, (122, 122), 888 nonzero reference entries
 true
 (passed = true, max_abs_dev = 0.0, worst_ratio = 0.0, worst_index = (1, 1))
 ```
@@ -688,7 +689,7 @@ nodes into identity rows, so the colored Jacobian is the one the integrator uses
 through burnout and the containment check covers it.
 `test/deactivation/test_deactivation.jl` ("masked rows are identity rows and the live
 block is the compacted problem's") builds a six-cell problem and a problem of only its
-live cells, on fixed and moving meshes, under in-depth radiation, Darcy–Fick transport
+live cells, on fixed and moving meshes, under in-depth radiation, gas transport
 with a surface balance, and a lateral-shrinkage law, in both energy forms, with one and
 two dead cells, at the set-up state and a perturbed one. It requires the live rows'
 residual to equal the compacted problem's to $10^{-11}$ of the magnitude of their
@@ -750,16 +751,13 @@ both energy forms**: in the enthalpy form $H_\text{live}-\int\dot H_\text{in}\,d
 linear invariant of the semi-discrete system, which a fixed-step solve closes to
 round-off (at most $10^{-13}$ of the integrated rate in
 `test/outputs/test_energy_ledger.jl`); in the temperature form the closure converges at
-the integrator's order (observed orders 2.1, 2.5 and 3.2 under Fickian transport, 2.7,
-3.3 and 4.3 under Darcy–Fick, with fixed steps of a fourth-order method halved three
-times; §16.5.2). With the recorder, the module tests assert a relative energy defect of
+the integrator's order under fixed-step refinement (§16.5.2). With the recorder, the module tests assert a relative energy defect of
 at most $10^{-6}$ in both energy forms on a gasifying column whose escaping gas carries
 its enthalpy out, and at the tighter tolerance across deactivation events (§16.5.4). A
 defect that does not fall with the tolerance is a bookkeeping bug.
 
 **The boundary flux.** The ledger's boundary term is the energy flux of the live
-boundary faces: the condition's flux conducted into the cell (§13.7.5) plus the
-enthalpy the outward mass fluxes carry at the surface temperature. The ledger *audits
+boundary faces: reservoir-control-surface heat minus the signed donor-enthalpy sum (§9.9). The ledger *audits
 bookkeeping, not double counting*: it reads the same kernel contributions the residual
 assembles, so if the residual counted a mechanism twice the ledger would still close.
 Detecting a double count requires an *independent* check (§18.4.3).
@@ -769,14 +767,15 @@ Detecting a double count requires an *independent* check (§18.4.3).
 The gas enthalpy is carried by the face energy flux: on an interior face the
 gas-transport kernel adds $\sum_jJ_{j,f}h_j(T_f)$ at the distance-weighted face
 temperature, on a boundary face the thermal boundary kernel adds the enthalpy of the
-outward fluxes at the surface temperature, and the surface balance carries no
-gas-enthalpy term (§7.4.3, §13.7.4–§13.7.5). A surface term
+outward fluxes at the surface temperature and inward fluxes at their specified
+incoming temperatures. Thermal-film heat is converted to the reservoir
+control surface (§9.9). An additional outgoing surface term
 $\sum_g\dot m_g\,\Delta h_g(T_s,T_\infty)$ added on top would count the escaping
 enthalpy twice, and the ledger of §18.4.2 would record both and still close. The
 coupling is therefore pinned by checks built independently of the residual:
 
 - **The energy row term by term** (`test/outputs/test_energy_ledger.jl`, "energy row
-  term by term against the ledger"): in both energy forms, under Fickian and Darcy–Fick
+  term by term against the ledger"): in both energy forms, with wall and pressure-driven lumped
   transport, on uniform and stretched meshes, every face energy flux equals the
   conduction (Fourier between cells with the distance-weighted harmonic-mean
   conductivity; the condition's conducted flux on the boundary) plus the enthalpy its
@@ -785,7 +784,7 @@ coupling is therefore pinned by checks built independently of the residual:
   $10^{-11}$ of their scale. The carried term is not small and the surface temperature
   departs from the cell temperature by more than 1 K, so an omission, a double count or
   enthalpy taken at the cell temperature would show.
-- **No gas enthalpy in the surface balance**
+- **Prescribed-heat independence**
   (`test/boundary_conditions/test_boundary_temperature.jl`, "Outward gas flux enters
   only through blowing"): under a prescribed flux, the solved surface temperature and
   the conducted flux are identical with and without a gas flux across the face.
@@ -794,10 +793,12 @@ coupling is therefore pinned by checks built independently of the residual:
   every temperature at rest in both energy forms.
 - **An exact solution that would see a spurious term.** V-CPL-02 sets the gas heat
   capacity equal to the solid's, which makes the Landau travelling-wave identity
-  $v=v_{ss}(T_s)$ exact for any kinetics; a spurious advection of the temperature at
+  $v=v_{ss}(T_s)$ exact for a steady wave with stationary virgin material in
+  the far field and steady gas holdup. A cold reaction gate, the domain length
+  and the measurement window establish these prerequisites. A spurious advection of the temperature at
   the mesh velocity on a mesh that rides the collapsing solid would break it by about
   $c\,(T_s-\bar T_\text{form})\approx R T_s^2c/E$ per kilogram, a few percent, and the
-  case pins the identity at $2.1\times10^{-3}$ (observed $7.1\times10^{-4}$ at 160 cells).
+  case pins the identity at $2.1\times10^{-3}$ and reports mesh refinement.
 
 ---
 
@@ -967,7 +968,7 @@ quantitative agreement and are themselves verified:
 `examples/07_douglas_fir_cone.jl` is the most fully featured validation case:
 multi-step wood decomposition kinetics (five sequential steps through four
 intermediates to char, and moisture evaporation), surface absorption of the incident flux (wood is opaque),
-Darcy–Fick gas transport with the pore gas initialized at ambient pressure
+gas gas transport with the pore gas initialized at ambient pressure
 (`background_gas_concentration`; the species molar masses enter the pressure
 closure, and all gases share one diffusive transfer coefficient, §5.11), and a
 moving mesh tracking the shrinking sample, solved at `abstol = 1e-9`,
@@ -989,14 +990,14 @@ fit, the distinction §18.1.1 insists on.
 
 ### 18.6.3 Pressure-treated wood and moisture transport
 
-`examples/08_pressure_treated_wood_cone.jl` (and its ThermaKin comparison
-`ptw_comparison.jl`) validates the Darcy-driven transport path: a permeable charring
+`examples/08_pressure_treated_wood_cone.jl` demonstrates the Darcy-driven
+transport path: a permeable charring
 solid develops an internal pressure $P=\sum_g\xi_jR_gT/(M_j\varphi)$ (§9.4), and the
 Darcy velocity $v_g=-(\kappa/\mu)\,\partial P/\partial z$ (§9.5) advects the pyrolysis
-gases outward. The validation QoIs are the MLR augmentation and the internal-pressure
-history relative to a Fickian-only run; `08_darcy_fick_demo.jl` isolates the
+gases outward. Diagnostics include the MLR change and the internal-pressure
+history relative to a lumped wall-only run; `08_gas_transport.jl` isolates the
 pressure-driven transport for a controlled check. Moisture transport
-(`moisture_hos_comparison.jl`) validates the state-dependent heat-of-sorption path:
+(`moisture_hos_comparison.jl`) demonstrates the state-dependent heat-of-sorption path:
 the evaporation reaction carries a `StateDependentProperty` heat $h(T,\xi)$ that
 depends on the local moisture concentration (§6.6), and the moisture front, the
 evaporation plateau in $T(t)$ (the constant-temperature stall while water boils
@@ -1004,56 +1005,34 @@ off) and the dried-mass profile are the comparison targets.
 
 ### 18.6.4 Comparison to ThermaKin2Ds, Gpyro, and FDS
 
-Code-to-code comparison (`examples/literature_comparison/`,
-`examples/macfp/macfp_gasification.jl`, and the cross-code overlays of the
-verification suite, §18.1.3) is run alongside experimental validation because it
-isolates *modelling-convention* differences from *numerical* ones. The three
-reference codes differ from Pyrolysis.jl in documented, specific ways; mapping their
-notation to ours:
+Cross-code agreement is evidence of consistency for the equations and inputs
+actually matched. It does not by itself validate the physical model or
+separate modeling differences from numerical errors. Remaining disagreement
+can arise from either, from input transcription, or from output definitions.
 
-- **ThermaKin2Ds.** Maps its stoichiometric coefficients $\theta_i^{\,j}$ to our
-  $\nu_{i,j}$ and its component concentrations to our $\xi_j$, and publishes its
-  heats of reaction with $h>0$ exothermic (the opposite of ours). ThermaKin's energy
-  equation (its Eq. 17) stores sensible heat in every component, gas included, and
-  carries the gas enthalpy by the convective term $c_g\,(J_g\cdot\partial T/\partial x)$;
-  Pyrolysis.jl stores every component in $C_i$ and carries the gas enthalpy as the face
-  flux $\sum_jJ_{j,f}h_j(T_f)$, the conservative form of the same term (§13.3.4), so the
-  convective coupling is a clean cross-check. ThermaKin supports *bimolecular*
-  reactions; Pyrolysis.jl enforces single-reactant kinetics (§6.5), so multi-reactant
-  ThermaKin schemes must be re-expressed as reaction sequences before comparison.
-- **Gpyro.** Maps its pre-exponential $Z$ to our $A_i$, its permeability $K$ to our
-  $\kappa$, its volume fractions $X_\alpha$ to our $v_j$, and its volumetric rate
-  $\dot\omega'''$ to our $r$. Gpyro is fully conservative (control-volume balances of
-  $\bar\rho\Delta z$, $\bar\rho Y_i\Delta z$, gas mass and energy) and uses
-  volume-fraction property averaging with power-law temperature dependence;
-  Pyrolysis.jl's WEIGHTED/PARALLEL/SERIES/BRUGGEMAN mixing rules (§5.5) span and
-  generalize Gpyro's averaging. Gpyro's Darcian flux
-  $\dot m''=-(K/\nu)(\partial P/\partial z-g\rho_g)$ matches our Darcy form (§9.5) up
-  to the buoyancy term, which Pyrolysis.jl omits (negligible for thin condensed-phase
-  slabs). Gpyro selects swelling and shrinkage mechanisms by solid-fraction state;
-  Pyrolysis.jl's lateral-shrinkage law $A(t)=A_0\,\mathrm{law}(\bar\chi)$ (§10.5) is the
-  1D analogue. Gpyro's solver is fully implicit backward Euler with Patankar
-  linearization and TDMA; Pyrolysis.jl integrates with `Rodas5P` and the colored
-  Jacobian, so code-to-code agreement on a steady or slowly varying case validates the
-  *physics* independent of the time integrator. Gpyro 0.8200 runs of V-HC-01, V-HC-03,
-  V-RAD-01, V-RX-01 and V-CPL-01, and a Gpyro V2 run of the V-BO-01 deck, are overlaid
-  in report mode.
-- **FDS solid phase.** Maps its absorption coefficient $\kappa_s$ to our $\alpha$ and its
-  pre-exponential $Z$ to our $A_i$. FDS solves 1D Fourier conduction with Arrhenius
-  kinetics (with $\rho^n$, $O_2^n$ and $T^n$ rate forms) and a two-flux in-depth
-  radiation model; Pyrolysis.jl's in-depth model is the one-directional Beer–Lambert
-  beam of the incident flux (§8.3), so the two agree where in-depth emission is
-  negligible. FDS carries no in-depth gas, so its energy equation is the
-  condensed-phase limit of ours; its TGA-based kinetic recovery (peak temperature and
-  rate → $A$, $E$) is the recipe of §18.2.2 and §18.6.2. FDS's surface energy balance
-  $-k\,\partial T/\partial x=q_c''+q_r''$ is the multi-mechanism analogue of our surface
-  Newton balance (§12.2). FDS 6.11.0 runs of V-HC-01, V-HC-02, V-RX-01, V-RX-02 and
-  V-CPL-03 are overlaid in report mode.
+- **ThermaKin2Ds:** match reaction extent, heat sign, component properties,
+  gas-transport and radiation algorithms (§§6.9, 8.7, 9.10). Its bimolecular
+  kinetics and general 2D configurations are not represented by our
+  single-reactant 1D solves. Replacing a bimolecular reaction by a sequence
+  is a new model, not an exact conversion. The optional example overlays
+  are distinct from a reproducible ThermaKin verification dataset.
+- **Gpyro:** the retained 0.8200 overlays concern V-HC-01, V-HC-03,
+  V-RAD-01, V-RX-01 and V-CPL-01. A separate V2 PMMA result is used for
+  V-BO-01. Match condensed/gas density definitions, conversion-rate
+  normalization, diffusion and volume-change laws; do not substitute our
+  lateral law for Gpyro's axial model. The retained V2 CSV lacks the source
+  revision and exact original run provenance needed for full reproduction.
+- **FDS:** the retained 6.11.0 overlays concern V-HC-01, V-HC-02, V-RX-01,
+  V-RX-02 and V-CPL-03. Its instantaneous gas release and optional two-flux
+  radiation are not general equivalents of our transport and Beer–Lambert
+  models. Even negligible in-depth emission does not remove the angular
+  attenuation difference (§8.7.3).
 
-In all three comparisons, agreement *after* matching conventions (gas treatment,
-radiation model, kinetic form) is the verification that the shared physics is
-implemented consistently; *residual* disagreement after convention matching is
-attributable to the documented modelling differences, not to error.
+The benchmark definitions, actual input decks and exact-solution errors
+provide the evidence for each comparison (§18.1.3). The MaCFP community
+predictions use differing calibrated models; their spread is not a
+solver-only verification result. Timing rows are historical measurements,
+not controlled evidence of one solver's general superiority.
 
 ---
 
@@ -1101,7 +1080,7 @@ with caution.
 
 ### 18.7.3 Péclet number and upwind diffusion
 
-The Darcy–Fick species transport uses first-order upwinding for the advective part
+The gas species transport uses first-order upwinding for the advective part
 (§9.3, §13.7.3). First-order upwind introduces a numerical diffusion of order
 $|v_g|\Delta z/2$, so its importance is measured by the cell Péclet number
 $\mathrm{Pe}=|v_g|\Delta z/\lambda$; when $\mathrm{Pe}\gg1$ the scheme stays robust but the
@@ -1146,20 +1125,17 @@ sensitivities remain valid across a deactivation, with the caveats of §18.8.3.
 The following are documented incompletenesses that affect, or require re-checking of,
 validated results.
 
-### 18.8.1 Surface gas-enthalpy convention and calibrated parameters
+### 18.8.1 Energy-control-surface consistency in calibration
 
-The gas leaving through a face carries its sensible enthalpy at the face temperature in
-the face energy flux, and the surface balance has no gas-enthalpy term (§7.4.3,
-§18.4.3), since a surface term would count that enthalpy a second time. A balance that
-adds a surface term on top of a carried enthalpy artificially depresses the surface
-temperature, so parameter sets calibrated in a model that does so read a *higher* $T_s$
-and mass-loss rate here (§1.8, item 7). Imported calibrations must therefore be
-re-validated against data under this convention. The fitted kinetic and property
-parameters of the bundled calibrated examples (the inverse-analysis cases and the cone
-runs) are in that position, together with the flame heat-flux feedback (absent,
-§1.8.1) and the blowing reduction of the convective coefficient (`ConvectiveBC`'s
-blowing model, §12.3.3) that a recalibration should include. This is a validation-state
-issue, not a verification failure.
+Incoming gas carries the specified reservoir enthalpy and outgoing gas carries
+surface enthalpy. An LTE wall film converts its heat to the reservoir control
+surface with `q_r=q_s+H_r-H_s`; this gives the same total boundary energy
+flux in either description. Calibrations must use this complete species and
+energy closure, the declared gas model, physical pore volume and appropriate
+blowing correlation. Numerical convergence and conservation qualify the
+implementation; experimental data are needed to validate material parameters.
+
+---
 
 ### 18.8.2 The end-of-layer burst outside the supported envelope
 
@@ -1236,7 +1212,7 @@ manifest is not pinned to their dependencies (`.github/workflows/quality.yml`):
   reports (the CI job is advisory). The test suite's type analysis
   (`test/type_analysis/`, run in a fresh process by `Pkg.test()`) applies JET's
   `@test_call` to `residual!` and the colored `jacobian!` at the concrete types `setup`
-  builds (a fixed mesh; a moving mesh with in-depth radiation and Darcy–Fick transport; a
+  builds (a fixed mesh; a moving mesh with in-depth radiation and gas transport; a
   moving mesh under the equidistribution correction; both energy forms). A type
   instability or a dynamic dispatch in the hot paths would slow the solve and threaten the
   dual-number evaluation the colored Jacobian relies on.
@@ -1265,7 +1241,8 @@ through `Pkg.test()`. The verification machinery of this chapter has direct cove
   (the energy row term by term and the ledger's exactness in both energy forms),
   `test/assembly/test_residual_jacobian.jl` (the antisymmetric scatter), and
   `test/boundary_conditions/test_boundary_temperature.jl` (no gas enthalpy in the surface
-  balance).
+  balance for a prescribed-heat condition), plus `test/kernels/test_gas_exchange.jl`
+  for donor enthalpy and thermal-film conversion.
 - The verification suite: `test/verification/runcases.jl` runs every case of
   `test/verification/cases/` in assert mode (§18.1.3).
 - Radiation: `test/kernels/test_radiation.jl` (the beam's energy, the absorptivity
@@ -1301,8 +1278,8 @@ The V&V coverage above has gaps that a user should weigh:
 
 1. **MMS coverage.** The manufactured-solution driver (§18.2) covers the coupled residual
    on a fixed mesh (conduction with temperature-dependent properties, two-step kinetics
-   with reaction heat, Fickian gas transport) and the moving mesh under prescribed and
-   reaction-driven motion. In-depth radiation, Darcy–Fick transport, the variable cross
+   with reaction heat, lumped wall gas transport) and the moving mesh under prescribed and
+   reaction-driven motion. In-depth radiation, gas transport, the variable cross
    section and deactivation are verified by exact solutions and ledgers (V-RAD-01,
    V-GT-02, V-CPL-03, V-BO-04) rather than by a manufactured order study, and the boundary
    faces enter the manufactured cases as imposed fluxes only.
@@ -1335,6 +1312,6 @@ The V&V coverage above has gaps that a user should weigh:
    estimates and the empirical shrinkage laws are unvalidated or simplified, and cases that
    lean on them inherit that uncertainty.
 
-7. **Cross-code coverage.** ThermaKin2Ds is not among the overlays (its distribution is a
-   Windows console binary), and the MaCFP-2 PMMA community submissions, committed under
+7. **Cross-code coverage.** ThermaKin2Ds is not among the verification overlays
+   (the executable supplied locally is a Windows console binary), and the MaCFP-2 PMMA community submissions, committed under
    `test/verification/reference/macfp/`, are read by no case.

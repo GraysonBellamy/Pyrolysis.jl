@@ -401,9 +401,12 @@ Uses the mixing rule specified in the material:
 - BRUGGEMAN: Σⱼ vⱼ(kⱼ - k_eff)/(kⱼ + 2k_eff) = 0
 
 Note: Uses `mixing_volume_fractions` — the swelling-weighted (matrix) volume
-fractions, excluding γ ≈ 0 components. This matches ThermaKin behavior: "when
+fractions, excluding γ ≈ 0 components. For conventional non-swelling gases,
+this matches a ThermaKin limiting case: "when
 γ = 0, gaseous components do not contribute to the thermal conductivity"
-(ThermaKin2Ds Reference, Equations 8-10). For a fully depleted cell (no
+(ThermaKin2Ds Reference, Equations 8-10). Our per-component swelling weights
+are not its mixture gas swelling rule; its liquid volume remains at zero
+liquid swelling. For a fully depleted cell (no
 matrix volume left) it falls back to the actual phase occupancy so k_eff
 degrades to the gas-mixture conductivity instead of 0.
 
@@ -534,187 +537,6 @@ where αⱼ is the mass absorption coefficient [m²/kg].
     return _sum_absorption(ξ, material.components, Val(NC))
 end
 
-# ============================================================================
-# Gas transfer helpers
-# ============================================================================
-
-@generated function _gas_transfer_sums(v, T, comps::Tuple, ::Val{NC}) where {NC}
-    expr = quote
-        W = _prop_type(v, T)
-        λ_parallel = zero(W)
-        inv_λ_series = zero(W)
-    end
-    for i = 1:NC
-        push!(expr.args, quote
-            λ = comps[$i].gas_transfer_coeff(T)
-            λ_parallel += v[$i] * λ
-            if v[$i] > 1e-20 && !isinf(inv_λ_series)
-                if λ > 1e-20
-                    inv_λ_series += v[$i] / λ
-                else
-                    inv_λ_series = oftype(inv_λ_series, Inf)
-                end
-            end
-        end)
-    end
-    push!(expr.args, :(return λ_parallel, inv_λ_series))
-    return expr
-end
-
-"""
-	effective_gas_transfer(ξ::NTuple{NC,Float64}, T::Float64, material::Material) -> Float64
-
-Compute effective gas transfer coefficient [m²/s].
-
-Uses the same volume-fraction mixing *rules* as conductivity, EXCEPT BRUGGEMAN:
-- PARALLEL: λ = Σⱼ vⱼ λⱼ
-- SERIES: λ = 1 / Σⱼ (vⱼ / λⱼ)
-- WEIGHTED: λ = β·λ_parallel + (1-β)·λ_series
-
-but a different volume-fraction *basis*: the all-phase occupancy
-[`volume_fractions`](@ref) (gas included), not the matrix basis
-[`solid_volume_fractions`](@ref) used for k and ε — gas diffusion happens
-through the pore space, which the matrix basis excludes.
-
-BRUGGEMAN is NOT supported for gas transfer: the EMT closure has no physical
-justification for diffusivities, so this function throws an `ArgumentError` if
-`material.mixing.λ.rule == BRUGGEMAN`. Use PARALLEL (default), SERIES, or WEIGHTED.
-"""
-@inline function effective_gas_transfer(ξ::NTuple{NC,<:Real}, T::Real, material) where {NC}
-    v = volume_fractions(ξ, T, material)
-    return _gas_transfer_from_v(v, T, material)
-end
-
-# Cache-aware variant.
-@inline function _gas_transfer_from_v(v::Tuple, T::Real, material::Material{NC}) where {NC}
-    mixing = material.mixing.λ.rule
-    if mixing == BRUGGEMAN
-        throw(
-            ArgumentError(
-                "BRUGGEMAN mixing is not supported for gas-transfer (λ); the EMT closure has no physical justification for diffusivities. Use PARALLEL (default), SERIES, or WEIGHTED.",
-            ),
-        )
-    end
-
-    W = _prop_type(v, T)
-    λ_parallel, inv_λ_series = _gas_transfer_sums(v, T, material.components, Val(NC))
-    λ_series = inv_λ_series > 1e-20 ? convert(W, 1.0 / inv_λ_series) : zero(W)
-
-    if mixing == PARALLEL
-        return λ_parallel
-    elseif mixing == SERIES
-        return λ_series
-    else  # WEIGHTED
-        β = material.mixing.λ.β
-        return β * λ_parallel + (1.0 - β) * λ_series
-    end
-end
-
-# ============================================================================
-# Effective Permeability (Component-Based)
-# ============================================================================
-
-# Helper: compute parallel and series sums for permeability on the
-# renormalized solid basis (`solid_volume_fractions`). An impermeable phase
-# (κ ≈ 0) with finite volume fraction makes the Wiener series (lower) bound
-# exactly 0 — signalled by `inv_κ_series = Inf`, matching `_gas_transfer_sums`.
-@generated function _permeability_sums(v, T, comps::Tuple, ::Val{NC}) where {NC}
-    expr = quote
-        W = _prop_type(v, T)
-        κ_parallel = zero(W)
-        inv_κ_series = zero(W)
-    end
-    for i = 1:NC
-        push!(expr.args, quote
-            κ = get_permeability(comps[$i], T)
-            κ_parallel += v[$i] * κ
-            if v[$i] > 1e-20 && !isinf(inv_κ_series)
-                if κ > 1e-30
-                    inv_κ_series += v[$i] / κ
-                else
-                    inv_κ_series = oftype(inv_κ_series, Inf)
-                end
-            end
-        end)
-    end
-    push!(expr.args, :(return κ_parallel, inv_κ_series))
-    return expr
-end
-
-"""
-	effective_permeability(ξ::NTuple{NC,Float64}, T::Float64, material, φ) -> Float64
-
-Compute effective permeability [m²] using component mixing rules.
-
-Only solid and liquid components contribute to permeability (they form the matrix).
-Gases flow THROUGH the matrix and do not contribute (has_permeability returns false
-for gases, and get_permeability returns 0.0).
-
-Mixing operates on the renormalized solid basis (`solid_volume_fractions`),
-exactly like conductivity — gas volume is excluded and the surviving weights
-sum to 1, so the Wiener bounds are the matrix's true bounds:
-- PARALLEL: κ = Σⱼ vⱼ κⱼ (upper bound)
-- SERIES: κ = 1 / Σⱼ (vⱼ / κⱼ) (lower bound; **exactly 0** when any phase
-  with vⱼ > 0 is impermeable — gas cannot cross a series-stacked κ = 0 layer)
-- WEIGHTED: κ = β·κ_parallel + (1-β)·κ_series
-- CARMAN_KOZENY: porosity-based closure (see `_carman_kozeny_permeability`) on
-  the porosity `φ` the caller gives, so a caller that floors the pore fraction
-  `1 − skeletal_volume_fraction` smoothly gets a permeability smooth in the
-  state; the per-component mixes do not read it
-
-# Arguments
-- `ξ`: Mass concentrations [kg/m³]
-- `T`: Temperature [K]
-- `material`: Material with components and mixing rules
-- `φ`: Porosity, read by the Carman–Kozeny rule only
-
-# Returns
-Effective permeability [m²]. Returns 0.0 if no components have permeability.
-
-# Physical Interpretation
-Permeability determines resistance to pressure-driven (Darcy) gas flow:
-	v_gas = -(κ/μ) ∇P
-
-Typical values:
-- Virgin wood: ~10⁻¹⁵ m² (tight cellular structure)
-- Char: ~10⁻¹² m² (porous with open channels)
-- Impermeable: 0.0 m²
-
-As pyrolysis progresses and virgin material converts to char, the effective
-permeability increases, allowing easier gas escape.
-"""
-@inline function effective_permeability(
-    ξ::NTuple{NC,<:Real},
-    T::Real,
-    material,
-    φ::Real,
-) where {NC}
-    material.mixing.κ.rule == CARMAN_KOZENY &&
-        return _carman_kozeny_permeability(φ, material.mixing.κ.ℓ)
-    v = solid_volume_fractions(ξ, T, material)
-    return _permeability_from_v(v, T, material)
-end
-
-"""
-	_carman_kozeny_permeability(φ, ℓ) -> κ [m²]
-
-Kozeny–Carman permeability from porosity `φ` and characteristic particle/pore
-diameter `ℓ` [m]:
-
-	κ = min( ℓ² · φ³ / (180 · (1 - φ)²),  ℓ² )
-
-The constant 180 is the Kozeny constant for a packed bed of spheres. As φ → 0
-(fully solid) κ → 0 (impermeable). As φ → 1 the packed-bed closure loses
-validity and diverges; κ is **capped at the physical free-flow scale ℓ²**
-(an open channel of width ℓ has κ ~ ℓ²/32 — ℓ² is a generous upper bound).
-The cap binds for φ ≳ 0.93 (where 180(1−φ)² < φ³). The 1e-30 denominator
-guard only keeps φ = 1.0 finite (κ = ℓ²·1e30) before `min` caps it.
-
-AD-clean: pure arithmetic, `φ` may be a `Dual`; `min` gives the consistent
-(zero) dκ/dφ on the capped branch, so the ForwardDiff-extracted Jacobian
-chain matches the residual everywhere — value and derivative saturate at the
-same point.
-"""
 @inline function _carman_kozeny_permeability(φ::Real, ℓ::Real)
     one_minus = 1 - φ
     denom = 180 * one_minus * one_minus
@@ -722,37 +544,6 @@ same point.
     return min(κ_ck, ℓ * ℓ)
 end
 
-# Cache-aware variant. `v` must be the renormalized solid basis
-# (`solid_volume_fractions`), not the all-phase basis.
-@inline function _permeability_from_v(v::Tuple, T::Real, material::Material{NC}) where {NC}
-    mixing = material.mixing.κ.rule
-    if mixing == BRUGGEMAN
-        throw(
-            ArgumentError(
-                "BRUGGEMAN mixing is not supported for permeability (κ); EMT is only defined for scalar transport coefficients. Use PARALLEL/SERIES/WEIGHTED, or CARMAN_KOZENY (porosity-based) for permeability.",
-            ),
-        )
-    elseif mixing == CARMAN_KOZENY
-        throw(
-            ArgumentError(
-                "CARMAN_KOZENY permeability needs concentrations ξ to evaluate porosity; call effective_permeability(ξ, T, material, φ) rather than _permeability_from_v(v, ...).",
-            ),
-        )
-    end
-
-    W = _prop_type(v, T)
-    κ_parallel, inv_κ_series = _permeability_sums(v, T, material.components, Val(NC))
-    κ_series = inv_κ_series > 1e-30 ? convert(W, 1.0 / inv_κ_series) : zero(W)
-
-    if mixing == PARALLEL
-        return κ_parallel
-    elseif mixing == SERIES
-        return κ_series
-    else  # WEIGHTED
-        β = material.mixing.κ.β
-        return β * κ_parallel + (1.0 - β) * κ_series
-    end
-end
 
 # Guard of the smooth face mean [property units]: far below any physical
 # conductivity or transfer coefficient.

@@ -22,6 +22,10 @@ Thumbs.db
 .vscode/
 .idea/
 
+# Local tooling
+.claude/
+.codex
+
 # Generated output directories
 /output/
 scripts/profile/output/

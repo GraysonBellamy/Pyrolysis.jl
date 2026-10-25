@@ -45,9 +45,11 @@ abstract type AbstractPyrolysisProblem end
 # Include all subfiles (AFTER abstract types are defined)
 # ============================================================================
 include("constants.jl")
+include("guards.jl")
 include("property_functions.jl")
 include("components.jl")
 include("reactions.jl")
+include("gas_transport.jl")
 include("materials.jl")
 include("radiation_types.jl")
 include("blowing_models.jl")
@@ -99,7 +101,9 @@ export n_components, n_reactions
 export dry_pyrolysis_gas_indices
 
 # Gas transport (component-based permeability)
-export has_darcy_flow
+export gas_component_indices
+export LumpedTransfer, DustyGas, LumpedEndpoint, DustyEndpoint, has_gas
+export smooth_clamp, trial_temperature, positive_part, smooth_floor
 
 # Radiation model enum + predicates (trait dispatch; kept in the foundation)
 export RadiationModel, NO_RADIATION, SURFACE_ABSORPTION, BEER_LAMBERT

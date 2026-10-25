@@ -71,9 +71,9 @@ end
 
 # A decomposing slab: the kernel's sources are the material's rates and heats.
 @testset "reaction kernel: sources equal the material's rates" begin
-    virgin = SolidComponent(:virgin, ρ = 1100.0, c = 1500.0, k = 0.2)
-    char = SolidComponent(:char, ρ = 300.0, c = 1000.0, k = 0.1)
-    gas = GaseousComponent(:gas, M = 0.03, c = 1100.0, k = 0.03, λ = 0.0)
+    virgin = SolidComponent(:virgin, φ = 0.3, λ = 0.0, ρ = 1100.0, c = 1500.0, k = 0.2)
+    char = SolidComponent(:char, φ = 0.3, λ = 0.0, ρ = 300.0, c = 1000.0, k = 0.1)
+    gas = GaseousComponent(:gas, M = 0.03, c = 1100.0, k = 0.03)
     mat = Material(
         name = :slab,
         components = (virgin, char, gas),
@@ -115,14 +115,21 @@ end
 end
 
 @testset "reaction kernel: a cell where every reaction lacks a reactant contributes exact zeros" begin
-    virgin = SolidComponent(:virgin, ρ = 1100.0, c = 1500.0, k = 0.2)
-    char = SolidComponent(:char, ρ = 300.0, c = 1000.0, k = 0.1)
-    gas = GaseousComponent(:gas, M = 0.03, c = 1100.0, k = 0.03, λ = 0.0)
+    virgin = SolidComponent(:virgin, φ = 0.3, λ = 0.0, ρ = 1100.0, c = 1500.0, k = 0.2)
+    char = SolidComponent(:char, φ = 0.3, λ = 0.0, ρ = 300.0, c = 1000.0, k = 0.1)
+    gas = GaseousComponent(:gas, M = 0.03, c = 1100.0, k = 0.03)
     reactions = (
         Reaction(:pyro, 1 => (2, 3); A = 5e9, E = 1.4e5, h = 8e5, yields = (0.3, 0.7)),
         Reaction(:ox, 2 => 3; A = 1e3, E = 8e4, h = -2e6, n = 0.5),
     )
-    mat = Material(name = :slab, components = (virgin, char, gas), reactions = reactions)
+    mat = Material(
+        name = :slab,
+        components = (virgin, char, gas),
+        reactions = reactions,
+        gas_transport = LumpedTransfer(
+            endpoint = LumpedEndpoint(λ = 0.0, κ = 0.0, max_skeletal_occupancy = 0.01),
+        ),
+    )
     quenched = Pyrolysis.Kernels._all_quenched
     @test quenched((0.0, 0.0, 1.0), reactions)
     @test quenched((-1e-9, 0.0, 1.0), reactions)
@@ -167,8 +174,8 @@ end
 end
 
 @testset "trial temperature is safe in representative kernels" begin
-    gas = GaseousComponent(:gas, M = 0.03, c = 1100.0, k = 0.03, λ = 1e-5)
-    solid = SolidComponent(:solid, ρ = 500.0, c = (900.0, 1.5), k = (0.2, 2e-4))
+    gas = GaseousComponent(:gas, M = 0.03, c = 1100.0, k = 0.03)
+    solid = SolidComponent(:solid, λ = 0.0, ρ = 500.0, c = (900.0, 1.5), k = (0.2, 2e-4))
     mat = Material(name = :trial, components = (solid, gas), reactions = ())
     rxn = Reaction(:r, 1 => 2; A = 1e10, E = 1.5e5, h = 0.0, T_min = 400.0)
     kernels(T) = begin

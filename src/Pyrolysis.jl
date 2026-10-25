@@ -20,10 +20,11 @@ using Pyrolysis
 
 # Define a simple material
 pmma = Material(
-	name = :PMMA,
+	name = :porous_polymer,
+	gas_transport=LumpedTransfer(endpoint=LumpedEndpoint(λ=1e-6, κ=0., max_skeletal_occupancy=.001)),
 	components = (
-		SolidComponent(:virgin, ρ=1190, c=1420, k=0.21, ε=0.86, λ=1e-6),
-		GaseousComponent(:MMA, M=0.100, c=1500, k=0.02, λ=1e-5)
+		SolidComponent(:virgin, ρ=1190, φ=.3, c=1420, k=0.21, ε=0.86, λ=1e-6),
+		GaseousComponent(:MMA, M=0.100, c=1500, k=0.02,)
 	),
 	reactions = (
 		Reaction(:decomposition, :virgin => :MMA, A=8.5e12, E=188e3, h=870e3),  # h > 0 = endothermic
@@ -34,7 +35,7 @@ pmma = Material(
 mesh = create_uniform_mesh(0.01, 100)  # 1 cm, 100 cells
 bcs = BoundaryConditionSet(
 	thermal = (top = HeatFluxBC(50e3), bottom = AdiabaticBC()),
-	mass = (top = DiffusiveMassBC(), bottom = ImpermeableBC()),
+	mass = (top = AmbientGasBC(GasReservoir(P=0., T=300.)), bottom = ImpermeableBC()),
 )
 
 problem = PyrolysisProblem(
@@ -71,13 +72,13 @@ using .Materials
 include("Properties/Properties.jl")
 using .Properties
 
-# Boundary-condition types and their face-local evaluation (Materials, Properties)
-include("BoundaryConditions/BoundaryConditions.jl")
-using .BoundaryConditions
-
-# Physical models
+# Constitutive physics and local numerical solves (Materials, Properties).
 include("Physics/Physics.jl")
 using .Physics
+
+# Boundary conditions use the same qualified local solve as gas interfaces.
+include("BoundaryConditions/BoundaryConditions.jl")
+using .BoundaryConditions
 
 # The face-based mesh, the state and its mapping, the physics kernels, the
 # mesh closure, the residual, cell deactivation and the colored Jacobian.
@@ -108,6 +109,15 @@ using .Meshes: create_uniform_mesh, create_stretched_mesh, create_mesh_from_node
 using .Meshes: Planar, Cylindrical, Spherical, MeshTopology, MeshGeometry
 using .Closures: NoCorrection, EquidistributionCorrection, ActivationTime
 using .Outputs: PyrolysisSolution, SolverStatistics
+using .Outputs:
+    GasDiagnostics,
+    get_porosity,
+    get_pressure,
+    get_partial_pressures,
+    get_intrinsic_gas_densities,
+    get_gas_composition,
+    get_boundary_exchange,
+    gas_species_audit
 using .Outputs: get_times, get_temperatures, get_concentrations, get_gas_generation_rate
 using .Outputs: n_timesteps, succeeded, completed
 using .Outputs: get_profile, get_cell_positions, interpolate_solution
@@ -125,6 +135,7 @@ using .Integration: StructuredKLU
 
 # Materials
 export Material, SolidComponent, GaseousComponent, LiquidComponent
+export LumpedTransfer, DustyGas, LumpedEndpoint, DustyEndpoint
 export phase, molar_mass, is_gas, is_solid, is_liquid
 export Reaction, DepletionLimiter
 export MixingRule, PARALLEL, SERIES, WEIGHTED, BRUGGEMAN, CARMAN_KOZENY
@@ -142,15 +153,15 @@ export HeatFluxBC,
     CombinedThermalBC,
     DirichletThermalBC,
     AdiabaticBC
-export ImpermeableBC, MassFluxBC, ConvectiveMassBC, DiffusiveMassBC, CombinedMassBC
+export ImpermeableBC, MassFluxBC, GasReservoir, AmbientGasBC, MassTransferFilm
 # Blowing models for ConvectiveBC and the gas data they read
 export AbstractBlowingModel,
     NoBlowing, CouetteFilm, PropertyRatioFilm, PoolingFilm, FunctionBlowing
 export GasSpecies, NITROGEN, nasa7_heat_capacity, eucken_viscosity, fuller_diffusivity
 export BlowingFace, blowing_state, blowing_ratio, blowing_factor
-export DirichletPressureBC, NeumannPressureBC, ConvectivePressureBC
+export NeumannPressureBC, ConvectivePressureBC
 export BoundaryConditionSet
-# Background pore-air initialization for Darcy–Fick problems
+# Background pore-air initialization for gas-bearing problems
 export background_gas_concentration
 
 # Radiation models
@@ -172,6 +183,14 @@ export default_policy, rodas5p_policy, fbdf_policy, kencarp4_policy
 export StructuredKLU
 
 # The solution's accessors and the conservation audit
+export GasDiagnostics,
+    get_porosity,
+    get_pressure,
+    get_partial_pressures,
+    get_intrinsic_gas_densities,
+    get_gas_composition,
+    get_boundary_exchange,
+    gas_species_audit
 export get_times, get_temperatures, get_concentrations, get_gas_generation_rate
 export n_timesteps, succeeded, completed
 export get_profile, get_cell_positions, interpolate_solution

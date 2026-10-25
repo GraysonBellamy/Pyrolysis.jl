@@ -9,6 +9,9 @@ read-only observers (the progress bar and the conservation recorder), and
 parameter sweeps.
 """
 module Integration
+using ..Materials: gas_component_indices
+
+using ..Properties: transport_domain, closed_transport_channel
 
 using LinearAlgebra
 using SparseArrays
@@ -29,8 +32,10 @@ using ADTypes: AutoFiniteDiff
 using ProgressMeter: ProgressMeter, Progress
 using Distributed: pmap, nworkers
 using ..Materials
+import ..Physics
+using ForwardDiff
 using ..Properties: skeletal_volume_fraction
-using ..BoundaryConditions: ImpermeableBC
+using ..BoundaryConditions: ImpermeableBC, MassFluxBC, validate_gas_boundary
 using ..Meshes
 using ..States
 using ..Kernels
@@ -40,13 +45,16 @@ using ..Deactivation
 using ..ColoredJacobian
 using ..Outputs
 using ..Outputs: _extension
+import ..Problem
 using ..Problem: PyrolysisProblem, initial_fields, validate_problem
 
 include("erased.jl")
 include("policy.jl")
 include("linear_solve.jl")
+include("transport_support.jl")
 include("setup.jl")
 include("checks.jl")
+include("pressure_error.jl")
 include("observers.jl")
 include("solve.jl")
 include("parameter_sweep.jl")

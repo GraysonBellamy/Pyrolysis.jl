@@ -15,9 +15,17 @@ using LinearAlgebra: I, dot, det, tr, issymmetric, isposdef
 using ForwardDiff: value
 using ..Materials
 using ..BoundaryConditions
+import ..BoundaryConditions
 using ..BoundaryConditions: BoundaryState, solve_boundary_temperature!
-using ..Properties: guarded_harmonic_mean, mixture_density
-using ..Physics: evaluate_reactions!, species_source_terms!, reaction_heat_source, gas_flux
+using ..Properties: guarded_harmonic_mean, transport_coefficients, closed_transport_channel
+using ..Physics:
+    interface_flux,
+    pore_half_flux,
+    bounded_transport_root,
+    implicit_transport_root,
+    primal,
+    TransportFailure
+using ..Physics: evaluate_reactions!, species_source_terms!, reaction_heat_source
 using ..Meshes
 using ..States
 
@@ -27,12 +35,13 @@ include("conduction.jl")
 include("gas_transport.jl")
 include("radiation.jl")
 include("thermal_boundary.jl")
+include("gas_boundary.jl")
 include("relative_flux.jl")
 
 export Kernel, Contributions, reset!, contribute!, find_kernel
 export ReactionKernel
 export ConductionKernel, normal_conductivity, cell_gradient
-export GasTransportKernel, outward_darcy_velocity, MOBILITY_GUARD
+export GasTransportKernel
 export BeerLambertKernel, incident_intensity, sweep_intensities!, transmitted_face
 export exposed_face
 export BoundaryPatch, ThermalBoundaryKernel, boundary_energy_flux, boundary_condition

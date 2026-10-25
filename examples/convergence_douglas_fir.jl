@@ -119,11 +119,11 @@ const RESULTS_DIR = joinpath(@__DIR__, "convergence_results")
     )
 
     # Gas transfer and permeability (physically grounded values)
-    # λ_solid: D_free × ε/τ; λ_gas: free molecular diffusion at ~500K
+    # λ: superficial partial-pressure transfer of the condensed matrix
     # κ: intrinsic matrix permeability for Darcy flow
     λ_wood = 5.0e-7     # m²/s - virgin wood (ε~0.05, τ~5)
     λ_char = 1.0e-5     # m²/s - porous char (ε~0.7, τ~2)
-    λ_gas = 3.0e-5     # m²/s - reference free diffusion (M~29, ~500K)
+
     κ_virgin = 1.0e-15  # m² - tight virgin wood
     κ_char = 1.0e-12    # m² - open char pore network
 
@@ -207,48 +207,13 @@ const RESULTS_DIR = joinpath(@__DIR__, "convergence_results")
                 α = 0.0,
                 κ = 0.0,
             ),
-            GaseousComponent(
-                :DF_gas1,
-                M = 0.060,
-                c = 1400.0,
-                k = 0.020,
-                λ = λ_gas * sqrt(0.029/0.060),
-            ),
-            GaseousComponent(
-                :DF_gas2,
-                M = 0.070,
-                c = 1400.0,
-                k = 0.020,
-                λ = λ_gas * sqrt(0.029/0.070),
-            ),
-            GaseousComponent(
-                :DF_gas3,
-                M = 0.110,
-                c = 1300.0,
-                k = 0.018,
-                λ = λ_gas * sqrt(0.029/0.110),
-            ),
-            GaseousComponent(
-                :DF_gas4,
-                M = 0.070,
-                c = 1500.0,
-                k = 0.020,
-                λ = λ_gas * sqrt(0.029/0.070),
-            ),
-            GaseousComponent(
-                :DF_gas5,
-                M = 0.050,
-                c = 1600.0,
-                k = 0.025,
-                λ = λ_gas * sqrt(0.029/0.050),
-            ),
-            GaseousComponent(
-                :WATER_VAPOR,
-                M = 0.018,
-                c = water_vapor_cp,
-                k = 0.025,
-                λ = λ_gas * sqrt(0.029/0.018),
-            ),
+            GaseousComponent(:DF_gas1, M = 0.060, c = 1400.0, k = 0.020),
+            GaseousComponent(:DF_gas2, M = 0.070, c = 1400.0, k = 0.020),
+            GaseousComponent(:DF_gas3, M = 0.110, c = 1300.0, k = 0.018),
+            GaseousComponent(:DF_gas4, M = 0.070, c = 1500.0, k = 0.020),
+            GaseousComponent(:DF_gas5, M = 0.050, c = 1600.0, k = 0.025),
+            GaseousComponent(:WATER_VAPOR, M = 0.018, c = water_vapor_cp, k = 0.025),
+            GaseousComponent(:AIR; M = 0.02897, c = 1006.0, k = 0.026),
         ),
         reactions = (
             # Heats of reaction: nominal values from sensitivity analysis calibration
@@ -332,7 +297,10 @@ const RESULTS_DIR = joinpath(@__DIR__, "convergence_results")
             bottom = AdiabaticBC(),
         ),
         mass = (
-            top = DiffusiveMassBC(0.05) + DirichletPressureBC(101325.0),
+            top = AmbientGasBC(
+                GasReservoir(P = 101325.0, T = 300.0, mole_fractions = (AIR = 1.0,));
+                film = MassTransferFilm(0.05*101325.0*0.02897/(8.31446261815324*(300.0))),
+            ),
             bottom = ImpermeableBC(),
         ),
     )
@@ -352,6 +320,27 @@ const RESULTS_DIR = joinpath(@__DIR__, "convergence_results")
         z -> 0.0,
         z -> 0.0,
         z -> 0.0,
+        z -> background_gas_concentration(
+            material,
+            :AIR,
+            (
+                ρ_DF_initial,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                ρ_moisture_initial,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+            ),
+            T_ambient,
+        ),
     ]
 
     t_end = SMOKE ? 10.0 : 600.0   # [s]

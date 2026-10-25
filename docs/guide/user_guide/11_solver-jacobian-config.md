@@ -302,7 +302,7 @@ test. It reads only the proposals the error test accepts, and rejects one,
 cutting the step by the controller's smallest factor, when it is
 inadmissible (a live component mass more negative than its tolerance, a live
 cell at or below absolute zero, crossed nodes, a non-positive cross section),
-when under Darcy–Fick transport a cell's porosity leaves `[0, 1]` by more
+when under gas transport a cell's porosity leaves `[0, 1]` by more
 than its mass tolerances allow, or when an algebraic row's residual exceeds
 `reltol` times its own equation's scale plus its unknown's absolute
 tolerance. After more than 50 consecutive constraint rejections
@@ -399,7 +399,7 @@ up once and integrate it several times, or drive the integration yourself.
 
 | `setup` (what the problem is) | `integrate` (how it is run) |
 |---|---|
-| `energy_state`, `reltol`, `abstol`, `threshold`, `use_ale`, `radiation_model`, `w_override`, `correction`, `lagrangian`, `deactivation`, `band`, `sources`, `time_scale` (the first step, `solve`'s `dt`) | `u0`, `maxiters`, `dt`, `adaptive`, `dtmin`, `dtmax`, `saveat`, `callback`, `progress`, `min_thickness`, `linear_solver`, `integrator_policy`, `located_events`, `max_constraint_rejections` |
+| `energy_state`, `reltol`, `abstol`, `threshold`, `pressure_tolerance`, `use_ale`, `radiation_model`, `w_override`, `correction`, `lagrangian`, `deactivation`, `band`, `sources`, `time_scale` (the first step, `solve`'s `dt`) | `u0`, `maxiters`, `dt`, `adaptive`, `dtmin`, `dtmax`, `saveat`, `callback`, `progress`, `min_thickness`, `linear_solver`, `integrator_policy`, `located_events`, `max_constraint_rejections` |
 
 `setup` returns a `CoreProblem`: the problem, the definition the residual
 reads (`cp.def`), its buffers (`cp.ws`), the consistent initial state
@@ -531,7 +531,7 @@ layout.mask                          # the live rows
 Which configuration a problem gets follows from the problem and the
 keywords, never from a mode argument: `use_ale` moves the mesh,
 `radiation_model` adds the intensity rows, a permeable condensed component
-selects Darcy–Fick gas transport, a `lateral_shrinkage_law` adds the
+selects lumped gas transport gas transport, a `lateral_shrinkage_law` adds the
 cross-section rows, and `energy_state` picks the energy unknown (Chapter 7).
 
 ---

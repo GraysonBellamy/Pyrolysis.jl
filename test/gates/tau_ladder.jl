@@ -18,7 +18,7 @@
 # 2 and 1/2, every rate
 # times s and every time over s; V-BO-01's flux stepped to half and to one and
 # a half times its value at 150 s, after the layer's first activation; and
-# the long layer (a 10 mm Darcy–Fick wood column with deactivation, 300 s).
+# the long layer (a 10 mm lumped and Darcy wood column with deactivation, 300 s).
 # The restricted deck replaces the re-radiation by a convective loss, since
 # the emitted flux does not scale with the rates.
 #
@@ -96,6 +96,7 @@ function restricted_problem(n, s; t_end = 500.0)
     pmma = SolidComponent(
         :PMMA,
         ρ = VBO_RHO_PMMA,
+        φ = 0.01,
         c = CallableProperty(c_pmma),
         k = CallableProperty(T -> s * k_pmma(T)),
         ε = 0.96,
@@ -105,13 +106,14 @@ function restricted_problem(n, s; t_end = 500.0)
     kaowool = SolidComponent(
         :KAOWOOL,
         ρ = VBO_RHO_KW,
+        φ = 0.8,
         c = 1100.0,
         k = s * 0.058,
         ε = 1.0,
         λ = s * 2e-5,
         α = 8.0e6 / VBO_RHO_KW,
     )
-    gas = GaseousComponent(:MMA, M = 0.044, c = 0.0, k = s * 0.02, λ = s * 2e-2)
+    gas = GaseousComponent(:MMA, M = 0.044, c = 0.0, k = s * 0.02)
     rx =
         Reaction(:pmma_gasification, 1 => 3; A = s * 1.35e11, E = 164e3, h = 8.7e5, n = 1.0)
     material = Material(
@@ -129,7 +131,10 @@ function restricted_problem(n, s; t_end = 500.0)
                   ConvectiveBC(h = s * 30.0, T_inf = VBO_T_INF),
             bottom = AdiabaticBC(),
         ),
-        mass = (top = DiffusiveMassBC(), bottom = ImpermeableBC()),
+        mass = (
+            top = AmbientGasBC(GasReservoir(P = 0.0, T = VBO_T_INF)),
+            bottom = ImpermeableBC(),
+        ),
     )
     te = t_end / s
     return PyrolysisProblem(;
@@ -156,7 +161,7 @@ stepped_problem(n, f; t_step = 150.0, ramp = 5.0, t_end = 800.0) = _vbo_problem(
     t_end,
 )
 
-# A 10 mm permeable wood column, Darcy–Fick transport and in-depth
+# A 10 mm permeable wood column, lumped and Darcy transport and in-depth
 # absorption, `n` cells.
 function long_layer_problem(n; t_end = 300.0)
     wood = SolidComponent(
@@ -170,7 +175,7 @@ function long_layer_problem(n; t_end = 300.0)
         κ = 1e-14,
         λ = 1e-5,
     )
-    gas = GaseousComponent(:gas, M = 0.06, c = 1800.0, k = 0.03, λ = 5e-5)
+    gas = GaseousComponent(:gas, M = 0.06, c = 1800.0, k = 0.03)
     material = Material(
         name = :long_layer,
         components = (wood, gas),
@@ -183,7 +188,9 @@ function long_layer_problem(n; t_end = 300.0)
         bottom = AdiabaticBC(),
     )
     mass = (
-        top = DiffusiveMassBC(0.05) + DirichletPressureBC(101325.0),
+        top = AmbientGasBC(
+            GasReservoir(P = 101325.0, T = 300.0, mole_fractions = (gas = 1.0,)),
+        ),
         bottom = ImpermeableBC(),
     )
     return PyrolysisProblem(;

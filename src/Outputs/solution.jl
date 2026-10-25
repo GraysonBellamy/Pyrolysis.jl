@@ -19,6 +19,7 @@ Base.@kwdef struct SolverStatistics
     linear_solves::Int
     nonlinear_failures::Int
     domain_rejections::Int
+    pressure_error_evaluations::Int = 0
     largest_constraint_residual::Float64
     invocations::Int
 end
@@ -165,6 +166,7 @@ struct PyrolysisSolution{P,D<:CoreDefinition}
     boundary_mass_flux::Dict{Symbol,Vector{Float64}}
     boundary_blowing_ratio::Dict{Symbol,Vector{Float64}}
     extras::SolutionExtras
+    gas::GasDiagnostics
     events::Vector{DeactivationEvent}
     outcome::Symbol
     retcode::Symbol
@@ -211,8 +213,14 @@ _extras(nt::Int) = SolutionExtras((
 _live_faces(topo, active, tag) =
     filter!(!=(0), [live_face(topo, active, f) for f in boundary_faces(topo, tag)])
 
+# Orientation from the stored face normal to the remaining live region.
+@inline _outward_sign(topo, active, f) = active[topo.faces[f].cells[1]] ? 1.0 : -1.0
+@inline _live_owner(topo, active, f) =
+    active[topo.faces[f].cells[1]] ? topo.faces[f].cells[1] : topo.faces[f].cells[2]
+
 # The outward mass flux of every component through face `f` [kg/(m²·s)].
-_face_mass_fluxes(c::Contributions{NC}, f) where {NC} = ntuple(j -> c.F_mass[j, f], Val(NC))
+_face_mass_fluxes(c::Contributions{NC}, f, topo, active) where {NC} =
+    ntuple(j -> _outward_sign(topo, active, f)*c.F_mass[j, f], Val(NC))
 
 # The area-weighted heat fluxes of the faces `faces` under their thermal
 # condition: the applied (net), absorbed, re-radiated and convected fluxes of
@@ -223,16 +231,22 @@ function _face_heat_fluxes(thermal, tag, faces, c, ds, topo, material, t)
     A_total = sum(ds.geometry.face_area[f] for f in faces)
     A = 0.0
     for f in faces
-        i = topo.faces[f].cells[1]
+        i = _live_owner(topo, ds.active, f)
         T_s = c.T_face[f]
-        J = _face_mass_fluxes(c, f)
+        J = _face_mass_fluxes(c, f, topo, ds.active)
         q = compute_boundary_heat_fluxes(
             bc,
             T_s,
             Float64(t),
             ds.ε[i],
             thermal.radiation_model,
-            BlowingFace(J, T_s, material);
+            BlowingFace(
+                J,
+                T_s,
+                material;
+                surface_mole_fractions = sum(c.p_surface[:, f])>0 ?
+                                         Tuple(c.p_surface[:, f]/sum(c.p_surface[:, f])) : nothing,
+            );
             a_eff = ds.a[i],
         )
         q_cond = conducted_flux(thermal, c, ds, topo, f)
@@ -296,6 +310,7 @@ function PyrolysisSolution(
     boundary_blowing_ratio = Dict(tag => zeros(nt) for tag in tags)
     mass_loss_rate = zeros(nt)
     x = _extras(nt)
+    gas_output = GasDiagnostics(material, n, nt, tags)
     gas = map(is_gas, material.components)
     thermal = find_kernel(ThermalBoundaryKernel, def.kernels)
     beam = find_kernel(BeerLambertKernel, def.kernels)
@@ -312,6 +327,7 @@ function PyrolysisSolution(
     for (k, u) in enumerate(states)
         deactivation === nothing || replay_events!(deactivation, layout, t[k])
         residual!(du, u, def, t[k], ws)
+        _gas_diagnostics!(gas_output, k, def, ds, c)
         x.energy_rate[k], x.mass_outflow[k] = ledger_rates(def, c, ds)
         x.live_energy[k], x.live_mass[k] = live_inventories(def, ext, ds, u)
         @views T[:, k] .= ds.T
@@ -359,10 +375,16 @@ function PyrolysisSolution(
             A = sum(ds.geometry.face_area[f] for f in faces)
             wt(f) = A > 0 ? ds.geometry.face_area[f] / A : 1 / length(faces)
             boundary_T[tag][k] = sum(c.T_face[f] * wt(f) for f in faces)
-            out = sum(sum(view(c.F_mass, :, f)) * ds.geometry.face_area[f] for f in faces)
+            out = sum(
+                _outward_sign(topo, ds.active, f) *
+                sum(view(c.F_mass, :, f)) *
+                ds.geometry.face_area[f] for f in faces
+            )
             outflow += out
-            boundary_mass_flux[tag][k] =
-                sum(sum(view(c.F_mass, :, f)) * wt(f) for f in faces)
+            boundary_mass_flux[tag][k] = sum(
+                _outward_sign(topo, ds.active, f) * sum(view(c.F_mass, :, f)) * wt(f)
+                for f in faces
+            )
             boundary_blowing_ratio[tag][k] =
                 sum(thermal.states[f].blowing_ratio * wt(f) for f in faces)
         end
@@ -396,7 +418,7 @@ function PyrolysisSolution(
             x.surface_heat_flux_convection[k] = q.convection
             x.surface_heat_flux_conduction[k] = q.conduction
             f = first(top_faces)
-            i = topo.faces[f].cells[1]
+            i = _live_owner(topo, ds.active, f)
             state = thermal.states[f]
             x.surface_blowing_ratio[k] = boundary_blowing_ratio[:top][k]
             x.surface_pooling_factor[k] = state.pooling_factor
@@ -453,6 +475,7 @@ function PyrolysisSolution(
         boundary_mass_flux,
         boundary_blowing_ratio,
         x,
+        gas_output,
         deactivation === nothing ? DeactivationEvent[] : copy(deactivation.events),
         deactivation === nothing || deactivation.outcome[] === :running ? outcome :
         deactivation.outcome[],

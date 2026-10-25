@@ -36,11 +36,14 @@ end
 
 function _vcpl05_problem(L; n_cells, β = 0.5)
     P = _vcpl05_params(β = β)
-    solid = SolidComponent(:A, ρ = P.ξ0, c = P.c, k = P.k)
-    gas = GaseousComponent(:gas, M = 0.05, c = P.c, k = 0.02, λ = 1e-8)
+    solid = SolidComponent(:A, ρ = P.ξ0, φ = 0.3, c = P.c, k = P.k, λ = 0.0)
+    gas = GaseousComponent(:gas, M = 0.05, c = P.c, k = 0.02)
     rxn = Reaction(:decomp, 1 => 2; A = P.A, E = P.E, h = 0.0)
     mat = Material(
         name = :VCPL05,
+        gas_transport = LumpedTransfer(
+            endpoint = LumpedEndpoint(λ = 0.0, κ = 0.0, max_skeletal_occupancy = 1e-3),
+        ),
         components = (solid, gas),
         reactions = (rxn,),
         depletion_limiter = DepletionLimiter(enabled = false),

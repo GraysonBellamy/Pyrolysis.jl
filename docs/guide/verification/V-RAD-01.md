@@ -68,33 +68,23 @@ comparability of the dissertation figures (report mode).
 
 ### Comparison with other codes
 
-The same case was solved with Gpyro 0.8200 at 101 nodes (Δz=0.1 mm); decks, outputs, and
-run provenance are committed under `test/verification/reference/`.
-Each code's error against the same exact solution is drawn below
-on a log scale, muted gray behind this solver's series — the
-signed linear-scale panel above shows where the error lives, this
-one compares magnitudes across codes.
+Reference runs are available from Gpyro 0.8200 at 101 nodes (Δz=0.1 mm). Decks, outputs and
+available provenance are under `test/verification/reference/`; check
+case-specific parameters and transformations before comparing. Where
+error panels are present, they compare against the analytical reference.
+A timing entry alone does not establish an identical physical workload.
 
 ![V-RAD-01 T_profiles_vs_codes_error](assets/V-RAD-01/V-RAD-01_T_profiles_vs_codes_error.png)
 
 ![V-RAD-01 surface_T_history_vs_codes_error](assets/V-RAD-01/V-RAD-01_surface_T_history_vs_codes_error.png)
 
-Setup and simulation wall times at every ladder rung against the
-reference runs. Julia times model construction and solve after warm-up;
-FDS and Gpyro use internal total elapsed wall time, including setup and
-simulation output. Process launch and Julia compilation are excluded
-from the figure. Output costs, discretizations and time-stepping rules
-still differ, so these are indicative costs, not pure solver speedups.
-See `test/verification/reference/README.md` and `timings.csv` for the
-timer boundaries, resolutions and measurement provenance.
+Historical wall times at each ladder rung and for the reference runs.
+Resolution, time stepping, output workload and timer boundaries differ
+or are incompletely recorded (see `reference/timings.csv`). The Julia
+harness times a warmed build-and-solve. Matching cell count or span alone
+does not make these measurements a controlled solver-speed comparison.
 
 ![V-RAD-01 solve_time](assets/V-RAD-01/V-RAD-01_solve_time.png)
-
-Reference timings below are medians of five runs after one warm-up. Full process time also includes launch and shutdown; it is shown separately and is not compared with Julia's warmed time.
-
-| Code | Resolution | Internal elapsed (s) | Full process (s) |
-| --- | --- | --- | --- |
-| Gpyro 0.8200 | 101 nodes (Δz=0.1 mm) | 0.086 | 0.08843 |
 
 Solution overlays including the other codes' points: [T_profiles_vs_codes](assets/V-RAD-01/V-RAD-01_T_profiles_vs_codes.png), [surface_T_history_vs_codes](assets/V-RAD-01/V-RAD-01_surface_T_history_vs_codes.png).
 
@@ -102,11 +92,11 @@ Solution overlays including the other codes' points: [T_profiles_vs_codes](asset
 
 | n_cells | h | wall (s) | L2 | Linf |
 | --- | --- | --- | --- | --- |
-| 25 | 0.04 | 0.003642 | 0.2555 | 0.9054 |
-| 50 | 0.02 | 0.006789 | 0.06456 | 0.248 |
-| 100 | 0.01 | 0.01336 | 0.01618 | 0.06485 |
-| 200 | 0.005 | 0.02582 | 0.004048 | 0.01658 |
-| 400 | 0.0025 | 0.05292 | 0.001012 | 0.004191 |
+| 25 | 0.04 | 0.003581 | 0.2555 | 0.9054 |
+| 50 | 0.02 | 0.006697 | 0.06456 | 0.248 |
+| 100 | 0.01 | 0.01286 | 0.01618 | 0.06485 |
+| 200 | 0.005 | 0.02564 | 0.004048 | 0.01658 |
+| 400 | 0.0025 | 0.05251 | 0.001012 | 0.004191 |
 
 Observed order 1.996 (L2), expected 2.0.
 

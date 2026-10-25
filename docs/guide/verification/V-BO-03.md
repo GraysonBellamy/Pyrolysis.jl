@@ -39,6 +39,6 @@ reach more than 1 % of the entering flux.
 | deactivation | true |
 | min_thickness | 0.001 |
 | radiation_model | BEER_LAMBERT |
-| abstol | 1.0e-8 |
-| reltol | 1.0e-6 |
-
+| abstol | 1.0e-11 |
+| reltol | 1.0e-9 |
+| pressure_tolerance | 0.0001 |

@@ -23,7 +23,7 @@ time.
 | --- | --- | --- | --- | --- | --- | --- |
 | complete burnout: live thickness at t_end is the substrate | 0.012 | 0.012 | 4.476e-10 | 1e-05 | yes | every PMMA cell deactivated; 12.0 ± 0.01 mm |
 | mass loss of the gasified PMMA layer | 27.92 | 27.92 | 1.272e-05 | 0.3 | yes | percent of the initial mass; exact = the layer's initial mass / m₀ |
-| mass ledger closure | 5.731e-06 | 0 | 5.731e-06 | 3e-05 | yes | total-mass drop vs ∫ ṁ″ dt over the accepted steps (three-point Gauss–Legendre per step) and the mass deactivation vented |
+| mass ledger closure | 9.909e-11 | 0 | 9.909e-11 | 3e-05 | yes | total-mass drop vs ∫ ṁ″ dt over the accepted steps (three-point Gauss–Legendre per step) and the mass deactivation vented |
 | clamped surface balances on accepted states | 0 | 0 | 0 | 0.5 | yes | boundary temperature solve converged inside the property bracket at every accepted step |
 | deactivation invocations for the PMMA layer (reported) | 1 | 1 | 0 | Inf | yes | 10 cells; largest merged fraction 0.0135 (1.35 ε_m); reported, not asserted |
 | the correction is zero at every Kaowool node | 0 | 0 | 0 | 2.22e-16 | yes | m/s over the 123 substrate nodes and every saved time |
@@ -41,6 +41,6 @@ time.
 | deactivation | true |
 | min_thickness | 0.001 |
 | radiation_model | BEER_LAMBERT |
-| abstol | 1.0e-8 |
-| reltol | 1.0e-6 |
-
+| abstol | 1.0e-11 |
+| reltol | 1.0e-9 |
+| pressure_tolerance | 0.0001 |

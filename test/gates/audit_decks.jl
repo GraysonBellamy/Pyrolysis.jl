@@ -4,7 +4,7 @@
 #
 # The decks (`problem_for` below) are a PMMA column on a fixed mesh
 # (`eulerian`) and on a moving one (`ale`) and a permeable wood column with
-# Darcy–Fick transport on a moving mesh (`ale_darcy`), 80 s, three outputs,
+# lumped and Darcy transport on a moving mesh (`ale_darcy`), 80 s, three outputs,
 # at 25 and 100 cells. The two PMMA decks give the solid a gas-transfer
 # coefficient of 1e-6 m²/s: with none, gas transport vanishes in the solid,
 # the gas forms a sharp front, and no tolerance converges the solution (at
@@ -57,13 +57,20 @@ _tol(reltol) = (reltol = reltol, abstol = reltol / 100)
 # A deck: a 10 mm column under 50 kW/m² with re-radiation and convection at
 # the top and an adiabatic back, `n` cells, `t_end` [s] with `outputs` saved
 # times. PMMA (`eulerian`, `ale`) absorbs at its surface; the wood
-# (`ale_darcy`) absorbs in depth and carries Darcy–Fick gas transport with a
+# (`ale_darcy`) absorbs in depth and carries lumped and Darcy gas transport with a
 # pressure condition at the top. Returns the problem and its solve keywords.
 function problem_for(kind, n; t_end = 80.0, outputs = 3, solid_λ = nothing, flux = 50e3)
     wood = kind in (:ale_darcy, :eulerian_darcy)
     mat = if wood
         Material(
             name = :audit_wood,
+            gas_transport = LumpedTransfer(
+                endpoint = LumpedEndpoint(
+                    λ = something(solid_λ, 1e-5),
+                    κ = 1e-14,
+                    max_skeletal_occupancy = 0.001,
+                ),
+            ),
             components = (
                 SolidComponent(
                     :wood,
@@ -76,23 +83,31 @@ function problem_for(kind, n; t_end = 80.0, outputs = 3, solid_λ = nothing, flu
                     κ = 1e-14,
                     λ = something(solid_λ, 1e-5),
                 ),
-                GaseousComponent(:gas, M = 0.06, c = 1800.0, k = 0.03, λ = 5e-5),
+                GaseousComponent(:gas, M = 0.06, c = 1800.0, k = 0.03),
             ),
             reactions = (Reaction(:pyrolysis, 1 => 2, A = 1e10, E = 150e3, h = 300e3),),
         )
     else
         Material(
             name = :audit_pmma,
+            gas_transport = LumpedTransfer(
+                endpoint = LumpedEndpoint(
+                    λ = something(solid_λ, 0.0),
+                    κ = 0.0,
+                    max_skeletal_occupancy = 0.001,
+                ),
+            ),
             components = (
                 SolidComponent(
                     :pmma,
                     ρ = 1190.0,
+                    φ = 0.01,
                     c = 1420.0,
                     k = 0.21,
                     ε = 0.86,
                     λ = something(solid_λ, 0.0),
                 ),
-                GaseousComponent(:gas, M = 0.1, c = 1500.0, k = 0.02, λ = 1e-5),
+                GaseousComponent(:gas, M = 0.1, c = 1500.0, k = 0.02),
             ),
             reactions = (Reaction(:pyrolysis, 1 => 2, A = 8.5e12, E = 188e3, h = 870e3),),
         )
@@ -106,9 +121,11 @@ function problem_for(kind, n; t_end = 80.0, outputs = 3, solid_λ = nothing, flu
     mass =
         wood ?
         (
-            top = DiffusiveMassBC(0.05) + DirichletPressureBC(101325.0),
+            top = AmbientGasBC(
+                GasReservoir(P = 101325.0, T = 300.0, mole_fractions = (gas = 1.0,)),
+            ),
             bottom = ImpermeableBC(),
-        ) : (top = DiffusiveMassBC(0.05), bottom = ImpermeableBC())
+        ) : (top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)), bottom = ImpermeableBC())
     problem = PyrolysisProblem(
         mesh = create_uniform_mesh(0.01, n),
         material = mat,

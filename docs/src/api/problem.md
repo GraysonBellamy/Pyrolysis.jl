@@ -17,6 +17,4 @@ Problem.linear_profile
 Problem.gaussian_profile
 Problem.tanh_profile
 Problem.validate_problem
-Problem.validate_darcy_initial_porosity
-Problem.warn_degenerate_gas_transport
 ```

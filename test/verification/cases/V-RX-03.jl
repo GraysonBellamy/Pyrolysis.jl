@@ -22,7 +22,7 @@
 #
 # with Q̇ = −(h₁k₁ + h₂k₂)·ξ_A(t) the net volumetric source. Quasi-steady is
 # valid because the cell diffusion time Δz²/α = 0.02 s ≪ 1/(k₁+k₂) = 2.2 s.
-# The gas is retained (default ImpermeableBC, no Darcy/Fickian transport), so
+# The gas is retained (default ImpermeableBC, closed pore transport), so
 # the system is closed and Σξ = ξ₀ throughout.
 
 function _verification_case_vrx03()
@@ -48,10 +48,10 @@ function _verification_case_vrx03()
     Q̇(t) = -(h1 * k1 + h2 * k2) * ξ0 * exp(-ktot * t)
 
     function build(n_cells)
-        compA = SolidComponent(:A, ρ = ξ0, c = c_sol, k = k_cond)
-        compB = SolidComponent(:B, ρ = ξ0, c = c_sol, k = k_cond)
-        compC = SolidComponent(:C, ρ = ξ0, c = c_sol, k = k_cond)
-        gas = GaseousComponent(:G, M = 0.028, c = 1000.0, k = 0.03, λ = 0.0)
+        compA = SolidComponent(:A, ρ = ξ0, φ = 0.3, c = c_sol, k = k_cond, λ = 0.0)
+        compB = SolidComponent(:B, ρ = ξ0, φ = 0.3, c = c_sol, k = k_cond, λ = 0.0)
+        compC = SolidComponent(:C, ρ = ξ0, φ = 0.3, c = c_sol, k = k_cond, λ = 0.0)
+        gas = GaseousComponent(:G, M = 0.028, c = 1000.0, k = 0.03)
         r1 = Reaction(:r1, 1 => (2, 4); A = k1, E = 0.0, h = h1, yields = (νB, γB))
         r2 = Reaction(:r2, 1 => (3, 4); A = k2, E = 0.0, h = h2, yields = (νC, γC))
         mat = Material(

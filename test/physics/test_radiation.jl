@@ -25,6 +25,7 @@ using Pyrolysis.Properties: mixture_emissivity, effective_absorption
 function _radiation_material()
     virgin = SolidComponent(
         :virgin,
+        φ = 0.3,
         ρ = 600.0,
         c = 1500.0,
         k = 0.15,
@@ -32,9 +33,17 @@ function _radiation_material()
         α = 2.0,
         λ = 1e-5,
     )
-    char =
-        SolidComponent(:char, ρ = 150.0, c = 1700.0, k = 0.08, ε = 0.85, α = 50.0, λ = 2e-5)
-    gas = GaseousComponent(:pyrgas, M = 0.06, c = 1800.0, k = 0.03, λ = 5e-5)
+    char = SolidComponent(
+        :char,
+        φ = 0.3,
+        ρ = 150.0,
+        c = 1700.0,
+        k = 0.08,
+        ε = 0.85,
+        α = 50.0,
+        λ = 2e-5,
+    )
+    gas = GaseousComponent(:pyrgas, M = 0.06, c = 1800.0, k = 0.03)
     rxn = Reaction(:pyro, 1 => (2, 3), yields = (0.3, 0.7), A = 1e10, E = 150e3, h = -300e3)
     return Material(name = :wood, components = (virgin, char, gas), reactions = (rxn,))
 end
@@ -98,7 +107,9 @@ end
     @testset "the absorption coefficient is Σ ξ_k α_k of each cell's composition" begin
         one_component = Material(
             name = :one,
-            components = (SolidComponent(:s, ρ = 1000.0, c = 1000.0, k = 0.2, α = 5.0),),
+            components = (
+                SolidComponent(:s, λ = 0.0, ρ = 1000.0, c = 1000.0, k = 0.2, α = 5.0),
+            ),
             reactions = (),
         )
         @test effective_absorption((1000.0,), one_component) ≈ 1000.0 * 5.0 rtol = 1e-14

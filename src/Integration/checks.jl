@@ -78,9 +78,10 @@ mutable struct ConstraintMonitor
     cold_t::Float64
     failed::Bool
     message::String
+    outcome::Symbol
 end
 
-ConstraintMonitor() = ConstraintMonitor(0.0, 0.0, 0, 0, 0, NaN, false, "")
+ConstraintMonitor() = ConstraintMonitor(0.0, 0.0, 0, 0, 0, NaN, false, "", :running)
 
 """
 	MAX_CONSTRAINT_REJECTIONS
@@ -102,9 +103,9 @@ step shrunk by the controller's minimum factor, when
 - it is [`inadmissible`](@ref), a live cell at or below absolute zero
   included (recorded in the monitor, so a solve that cannot pass it says
   so);
-- under Darcy–Fick transport a live cell's porosity
-  `1 − Σⱼ mⱼ/(ρⱼ(T) V)`, read from the raw masses and volume, leaves `[0, 1]`
-  by more than the skeletal volume of its mass tolerances;
+- a gas-bearing cell lacks resolved physical pore volume above twice the
+  divisor floor plus its mass/thermal/geometry uncertainty, violates its
+  current negative-gas-pressure budget, or leaves the declared transport domain;
 - an algebraic row's residual exceeds `rtol · S + a`, with `S` its own
   equation's scale and `a` the absolute tolerance of its unknown in the
   residual's units ([`constraint_residual`](@ref)).
@@ -182,7 +183,25 @@ function (check::DomainCheck)(u, p, t)
     m.cold = 0
     residual!(check.du, u, check.def, t, check.ws)
     ds, c = check.ws.derived, check.ws.contributions
-    _porosity_out(check, ds, setup.gas) && return _reject!(m)
+    if _porosity_out(check, ds, setup.gas)
+        m.consecutive+=1
+        if m.consecutive>check.max_consecutive
+            m.failed=true
+            return false
+        end
+        return _reject!(m)
+    end
+    if any(x->x<0, c.surface_pressure_raw)
+        m.outcome=:negative_surface_pressure
+        m.message="the reconstructed boundary pressure is negative"
+        m.consecutive+=1
+        if m.consecutive>check.max_consecutive
+            m.failed=true
+            return false
+        end
+        return _reject!(m)
+    end
+    m.outcome=:running
     r = constraint_residual(check, ds, c, t)
     isfinite(r) || return _reject!(m)
     m.last = r
@@ -206,28 +225,104 @@ end
     return true
 end
 
-# Porosity outside [0, 1] beyond the skeletal volume of the mass tolerances;
-# only Darcy–Fick transport reads a porosity.
-@inline _porosity_out(check, ds, ::GasTransport) = false
-
-function _porosity_out(
+# Physical pore volume must lie above the guard identity region with a
+# resolved uncertainty margin. This includes mass, caloric and geometry errors.
+@inline _porosity_out(
     check::DomainCheck,
     ds::DerivedState{NC},
-    ::DarcyFickTransport,
-) where {NC}
-    layout = check.def.layout
-    material = check.def.setup.material
-    @inbounds for i = 1:n_cells(layout)
-        layout.mask[energy_index(layout, i)] || continue
-        V = ds.V[i]
-        T = ds.T_trial[i]
-        φ = 1 - skeletal_volume_fraction(ntuple(j -> ds.m[j, i] / V, Val(NC)), T, material)
-        tol = skeletal_volume_fraction(
-            ntuple(j -> check.abstol[mass_index(layout, i, j)] / V, Val(NC)),
-            T,
-            material,
+    ::NoGasTransport,
+) where {NC} = false
+function _pore_margin(check, ds, i)
+    setup=check.def.setup
+    layout=check.def.layout
+    mat=setup.material
+    NC=n_components(mat)
+    V=ds.V[i]
+    T=ds.T[i]
+    δT=check.abstol[energy_index(layout, i)]+check.reltol*abs(ds.T[i])
+    if energy_state(layout) isa EnthalpyState
+        δE=check.abstol[energy_index(layout, i)]+check.reltol*abs(
+            sum(j->ds.m[j, i]*ds.h[j, i], 1:NC),
         )
-        (φ < -tol || φ > 1 + tol) && return true
+        δT=(
+            δE+sum(
+                j->abs(ds.h[j, i])*(
+                    check.abstol[mass_index(layout, i, j)]+check.reltol*abs(ds.m[j, i])
+                ),
+                1:NC,
+            )
+        )/ds.cp_sum[i]
+    end
+    δV=0.0
+    if is_moving(layout)
+        topo=setup.topology
+        D=dimension(layout)
+        for f in topo.cells[i].faces
+            displacement=0.0
+            for nd in topo.faces[f].nodes
+                displacement=max(
+                    displacement,
+                    sqrt(
+                        sum(
+                            k->(
+                                check.abstol[position_index(layout, nd, k)]+check.reltol*abs(
+                                    ds.x[D*(nd-1)+k],
+                                )
+                            )^2,
+                            1:D,
+                        ),
+                    ),
+                )
+            end
+            δV+=ds.geometry.face_area[f]*displacement
+        end
+        has_chi(layout) &&
+            (δV+=abs(V/ds.A[])*(check.abstol[area_index(layout)]+check.reltol*abs(ds.A[])))
+    end
+    δφ=0.0
+    skeleton=0.0
+    for j = 1:NC
+        comp=mat.components[j]
+        is_gas(comp) && continue
+        ρ=get_intrinsic_density(comp, T)
+        dρ=ForwardDiff.derivative(z->get_intrinsic_density(comp, z), T)
+        skeleton+=ds.m[j, i]/ρ
+        δφ+=(check.abstol[mass_index(layout, i, j)]+check.reltol*abs(ds.m[j, i]))/(ρ*V)+abs(
+            ds.m[j, i]*dρ/(ρ^2*V),
+        )*δT
+    end
+    return δφ+abs(skeleton/V^2)*δV
+end
+function _porosity_out(check::DomainCheck, ds::DerivedState{NC}, ::GasTransport) where {NC}
+    layout=check.def.layout
+    mat=check.def.setup.material
+    for i = 1:n_cells(layout)
+        ds.active[i] || continue
+        ξ=ntuple(j->ds.m[j, i]/ds.V[i], Val(NC))
+        φ=1-skeletal_volume_fraction(ξ, ds.T[i], mat)
+        δφ=_pore_margin(check, ds, i)
+        if φ<2Physics.POROSITY_FLOOR+δφ || φ>1+δφ
+            check.monitor.outcome=:pore_closure
+            check.monitor.message="cell $i: raw porosity $φ is outside the resolved pore domain (uncertainty $δφ)"
+            return true
+        end
+        ng=count(is_gas, mat.components)
+        for j in gas_component_indices(mat.components)
+            budget=check.def.setup.reference.pressure_tolerance/ng*molar_mass(
+                mat.components[j],
+            )*φ*ds.V[i]/(R_GAS*ds.T[i])
+            if ds.m[j, i]<-budget
+                check.monitor.outcome=:negative_gas_pressure
+                check.monitor.message="cell $i: gas :$(mat.components[j].name) exceeds the negative-pressure tolerance at its current pore state"
+                return true
+            end
+        end
+        domain=transport_domain(ξ, ds.T[i], mat)
+        if !domain.admissible
+            check.monitor.outcome=domain.outcome
+            check.monitor.message="cell $i: $(domain.outcome) at matrix occupancy $(domain.q) and skeletal occupancy $(domain.skeletal)"
+            return true
+        end
     end
     return false
 end

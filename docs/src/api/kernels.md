@@ -21,7 +21,6 @@ Kernels.ThermalBoundaryKernel
 Kernels.RelativeFluxKernel
 Kernels.BoundaryPatch
 Kernels.exposed_face
-Kernels.outward_darcy_velocity
 Kernels.van_albada
 ```
 

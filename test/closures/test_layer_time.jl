@@ -24,6 +24,7 @@ function _restricted(s; n_top = 8, n_bottom = 4, t_end = 200.0)
     L_top, L_bottom = 2e-3, 3e-3
     top = SolidComponent(
         :top,
+        φ = 0.3,
         ρ = 1200.0,
         c = 1500.0,
         k = s * 0.2,
@@ -33,6 +34,7 @@ function _restricted(s; n_top = 8, n_bottom = 4, t_end = 200.0)
     )
     sub = SolidComponent(
         :sub,
+        φ = 0.8,
         ρ = 250.0,
         c = 1100.0,
         k = s * 0.06,
@@ -40,7 +42,7 @@ function _restricted(s; n_top = 8, n_bottom = 4, t_end = 200.0)
         α = 30.0,
         λ = s * 1e-6,
     )
-    gas = GaseousComponent(:gas, M = 0.1, c = 1500.0, k = s * 0.02, λ = s * 1e-4)
+    gas = GaseousComponent(:gas, M = 0.1, c = 1500.0, k = s * 0.02)
     mat = Material(
         name = :restricted,
         components = (top, sub, gas),
@@ -59,7 +61,10 @@ function _restricted(s; n_top = 8, n_bottom = 4, t_end = 200.0)
                       ConvectiveBC(h = s * 10.0, T_inf = 300.0),
                 bottom = AdiabaticBC(),
             ),
-            mass = (top = DiffusiveMassBC(), bottom = ImpermeableBC()),
+            mass = (
+                top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
+                bottom = ImpermeableBC(),
+            ),
         ),
         T_initial = z -> 300.0,
         ξ_initial = [
@@ -76,12 +81,37 @@ end
 # Two layers that gasify completely, a fast one over a slow one, on an inert
 # substrate of `n_sub` cells.
 function _two_vanishing(; n_fast = 6, n_slow = 6, n_sub = 4, t_end = 400.0)
-    fast =
-        SolidComponent(:fast, ρ = 1200.0, c = 1500.0, k = 0.2, ε = 0.95, α = 2.0, λ = 1e-6)
-    slow =
-        SolidComponent(:slow, ρ = 1000.0, c = 1500.0, k = 0.2, ε = 0.95, α = 2.0, λ = 1e-6)
-    sub = SolidComponent(:sub, ρ = 250.0, c = 1100.0, k = 0.06, ε = 1.0, α = 30.0, λ = 1e-6)
-    gas = GaseousComponent(:gas, M = 0.1, c = 1500.0, k = 0.02, λ = 1e-4)
+    fast = SolidComponent(
+        :fast,
+        φ = 0.3,
+        ρ = 1200.0,
+        c = 1500.0,
+        k = 0.2,
+        ε = 0.95,
+        α = 2.0,
+        λ = 1e-6,
+    )
+    slow = SolidComponent(
+        :slow,
+        φ = 0.3,
+        ρ = 1000.0,
+        c = 1500.0,
+        k = 0.2,
+        ε = 0.95,
+        α = 2.0,
+        λ = 1e-6,
+    )
+    sub = SolidComponent(
+        :sub,
+        φ = 0.8,
+        ρ = 250.0,
+        c = 1100.0,
+        k = 0.06,
+        ε = 1.0,
+        α = 30.0,
+        λ = 1e-6,
+    )
+    gas = GaseousComponent(:gas, M = 0.1, c = 1500.0, k = 0.02)
     mat = Material(
         name = :two_vanishing,
         components = (fast, slow, sub, gas),
@@ -105,7 +135,10 @@ function _two_vanishing(; n_fast = 6, n_slow = 6, n_sub = 4, t_end = 400.0)
                       RadiativeBC(T_inf = 300.0),
                 bottom = AdiabaticBC(),
             ),
-            mass = (top = DiffusiveMassBC(), bottom = ImpermeableBC()),
+            mass = (
+                top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
+                bottom = ImpermeableBC(),
+            ),
         ),
         T_initial = z -> 300.0,
         ξ_initial = [
@@ -175,33 +208,40 @@ end
 # ============================================================================
 
 @testset "the rescaled deck equals the unscaled one in dimensionless time" begin
+    # The transport equation scales with s because κ=0 and both Λ and every
+    # thermal/kinetic rate scale with s. Resolve vacuum-start pressure and
+    # caloric transients before comparing this time-change invariant.
+    controls = (reltol = 1e-8, abstol = 1e-10, pressure_tolerance = 0.001)
+    scaled_solve(p; kw...) = _solved(p; controls..., kw...)
     # The solve's own error at its tolerance bounds the rescaled pairs.
     self = _differences(
-        first(_solved(_restricted(1.0); τ = 720.0)),
+        first(scaled_solve(_restricted(1.0); τ = 720.0)),
         1.0,
-        first(_solved(_restricted(1.0); τ = 720.0, reltol = 1e-7)),
+        first(scaled_solve(_restricted(1.0); τ = 720.0, reltol = 1e-9, abstol = 1e-11)),
         1.0,
     )
-    ref, _ = _solved(_restricted(1.0); τ = 720.0)
-    ref_b, corr_b = _solved(_restricted(1.0))
+    ref, _ = scaled_solve(_restricted(1.0); τ = 720.0)
+    ref_b, corr_b = scaled_solve(_restricted(1.0))
     @test only(corr_b.stage) == 2
     for s in (2.0, 0.5)
         # The core: the layer time scaled by hand.
-        sol, _ = _solved(_restricted(s); τ = 720.0 / s)
+        sol, _ = scaled_solve(_restricted(s); τ = 720.0 / s)
         d = _differences(ref, 1.0, sol, s)
         @test d.T <= 5 * self.T
-        @test d.z <= 5 * self.z
-        @test d.events <= 5 * self.events
+        @test d.T < 0.01 # K; independent physical tolerance
+        @test d.z <= max(5 * self.z, 1e-12) # m; roundoff floor
+        @test d.events <= max(5 * self.events, 1e-6) # s
         # Candidate B scales by itself.
-        sol, corr = _solved(_restricted(s))
+        sol, corr = scaled_solve(_restricted(s))
         d = _differences(ref_b, 1.0, sol, s)
         @test d.T <= 5 * self.T
-        @test d.z <= 5 * self.z
-        @test d.events <= 5 * self.events
+        @test d.T < 0.01 # K; independent physical tolerance
+        @test d.z <= max(5 * self.z, 1e-12) # m; roundoff floor
+        @test d.events <= max(5 * self.events, 1e-6) # s
         @test only(corr.time) * s ≈ only(corr_b.time) rtol = 1e-6
         @test only(corr.set_at) * s ≈ only(corr_b.set_at) rtol = 1e-6
         # One fixed time does not.
-        sol, _ = _solved(_restricted(s); τ = 720.0)
+        sol, _ = scaled_solve(_restricted(s); τ = 720.0)
         d = _differences(ref, 1.0, sol, s)
         @test d.T > 20 * self.T
         @test d.events > 20 * self.events

@@ -8,10 +8,13 @@ using Pyrolysis.Meshes: Mesh, line_mesh, box_mesh
 using Pyrolysis.States: mass_index, energy_index, history_index, has_chi
 using Pyrolysis.Integration: setup
 
-_gas() = GaseousComponent(:g, M = 0.03, c = 1000.0, k = 0.03, λ = 1e-5)
+_gas() = GaseousComponent(:g, M = 0.03, c = 1000.0, k = 0.03)
 _material() = Material(;
     name = :inert,
-    components = (SolidComponent(:s, ρ = 1000.0, c = 1000.0, k = 0.2), _gas()),
+    components = (
+        SolidComponent(:s, φ = 0.25, λ = 0.0, ρ = 1000.0, c = 1000.0, k = 0.2),
+        _gas(),
+    ),
     reactions = (),
 )
 const _BCS = BoundaryConditionSet(thermal = (top = HeatFluxBC(1e4), bottom = AdiabaticBC()))
@@ -153,7 +156,10 @@ end
     # G = 0 and M its initial solid mass, the gas it holds excluded.
     shrinking = Material(;
         name = :shrinking,
-        components = (SolidComponent(:s, ρ = 1000.0, c = 1000.0, k = 0.2), _gas()),
+        components = (
+            SolidComponent(:s, φ = 0.25, λ = 0.0, ρ = 1000.0, c = 1000.0, k = 0.2),
+            _gas(),
+        ),
         reactions = (Reaction(:decomp, 1 => 2, A = 1e5, E = 5e4, h = 1e5),),
         lateral_shrinkage_law = χ -> 1.0 - 0.2χ,
     )
@@ -191,11 +197,13 @@ end
     @test occursin("[:top]", err)
     @test occursin(":surface", err)
 
-    # A per-species ambient concentration with the wrong component count.
+    # A reservoir containing an untracked gas is not a complete tracked state.
     bad_mass = BoundaryConditionSet(
         thermal = (top = HeatFluxBC(1e4), bottom = AdiabaticBC()),
         mass = (
-            top = ConvectiveMassBC(h_m = 0.05, ξ_inf = (0.0, 0.1, 0.2)),
+            top = AmbientGasBC(
+                GasReservoir(P = 1e5, T = 300.0, mole_fractions = (untracked = 1.0,)),
+            ),
             bottom = ImpermeableBC(),
         ),
     )
@@ -210,7 +218,15 @@ end
     dense = Material(;
         name = :wood,
         components = (
-            SolidComponent(:wood; ρ = 500.0, c = 1500.0, k = 0.15, ε = 0.9, κ = 1e-14),
+            SolidComponent(
+                :wood;
+                λ = 0.0,
+                ρ = 500.0,
+                c = 1500.0,
+                k = 0.15,
+                ε = 0.9,
+                κ = 1e-14,
+            ),
             _gas(),
         ),
         reactions = (Reaction(:pyrolysis, 1 => 2, A = 1e10, E = 150e3, h = -300e3),),
@@ -223,11 +239,11 @@ end
         sprint(showerror, e)
     end
     # The message names the fix.
-    @test occursin("ρ_intrinsic", err)
-    @test occursin("background_gas_concentration", err)
-    @test occursin("porosity", err)
+    @test occursin("physical pore volume", err)
+    @test occursin("raw φ", err)
+    @test occursin("pore", err)
     @test !is_valid_problem(darcy(z -> 500.0))
-    @test validate_problem(darcy(z -> 0.0))
+    @test_throws ErrorException validate_problem(darcy(z -> 0.0))
     # An intrinsic density gives the matrix its pore space; a region that
     # starts at it is still refused.
     porous = Material(;
@@ -235,6 +251,7 @@ end
         components = (
             SolidComponent(
                 :wood;
+                λ = 0.0,
                 ρ = 500.0,
                 c = 1500.0,
                 k = 0.15,
@@ -250,14 +267,14 @@ end
     @test_throws ErrorException validate_problem(
         darcy(z -> z < 0.005 ? 1500.0 : 500.0; material = porous),
     )
-    # Permeable only in a char the initial state holds none of: no flow to
-    # refuse in the dense cells.
+    # Pore volume is required even before a permeable char appears.
     charring = Material(;
         name = :charring,
         components = (
-            SolidComponent(:virgin; ρ = 500.0, c = 1500.0, k = 0.15, ε = 0.9),
+            SolidComponent(:virgin; λ = 0.0, ρ = 500.0, c = 1500.0, k = 0.15, ε = 0.9),
             SolidComponent(
                 :char;
+                λ = 0.0,
                 ρ = 100.0,
                 c = 1100.0,
                 k = 0.1,
@@ -278,13 +295,13 @@ end
             ),
         ),
     )
-    @test validate_problem(
+    @test_throws ErrorException validate_problem(
         _problem(mesh; material = charring, ξ_initial = [z -> 500.0, z -> 0.0, z -> 0.0]),
     )
 
     # Strict: the initial conditions must evaluate at a cell centre.
     throwing = _problem(mesh; T_initial = z -> error("no temperature"))
-    @test validate_problem(throwing)
+    @test_throws ErrorException validate_problem(throwing)
     @test_throws ErrorException validate_problem(throwing; strict = true)
 
     # The solve validates by default.
@@ -293,7 +310,7 @@ end
     )
 end
 
-@testset "validation warns when Fickian gas transport lacks a condensed transfer coefficient" begin
+@testset "construction rejects a lumped matrix without an explicit transfer coefficient" begin
     function ablating(; λ_solid = 0.0, κ = 0.0, reactive = true)
         solid = SolidComponent(
             :solid,
@@ -304,15 +321,16 @@ end
             κ = κ,
             ρ_intrinsic = 2000.0,
         )
-        gas = GaseousComponent(:gas, M = 0.05, c = 1000.0, k = 0.02, λ = 1e-4)
+        gas = GaseousComponent(:gas, M = 0.05, c = 1000.0, k = 0.02)
         reactions = reactive ? (Reaction(:ablate, 1 => 2; A = 1e10, E = 1e5, h = 1e6),) : ()
         return Material(; name = :ablation, components = (solid, gas), reactions)
     end
     mesh = create_uniform_mesh(0.01, 10)
     deck(material) = _problem(mesh; material, ξ_initial = [z -> 1000.0, z -> 0.0])
-    @test_logs (:warn, r"gas-transfer coefficient") validate_problem(deck(ablating()))
-    # A condensed coefficient, a permeable matrix or no gas production keeps
-    # validation silent.
+    @test_throws ArgumentError ablating(λ_solid = nothing)
+    # Explicitly closed wall and Darcy channels are legal, including a sealed
+    # material producing gas. Its EOS and pore-volume checks remain active.
+    @test_logs validate_problem(deck(ablating()))
     @test_logs validate_problem(deck(ablating(λ_solid = 1e-6)))
     @test_logs validate_problem(deck(ablating(κ = 1e-14)))
     @test_logs validate_problem(deck(ablating(reactive = false)))

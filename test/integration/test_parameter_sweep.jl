@@ -55,10 +55,13 @@ function _ablator_material(A)
     return Material(
         name = :ablator,
         components = (
-            SolidComponent(:solid, ρ = 1000.0, c = 1000.0, k = 1.0, λ = 1e-6),
-            GaseousComponent(:gas, M = 0.05, c = 1000.0, k = 0.02, λ = 1e-4),
+            SolidComponent(:solid, ρ = 1000.0, φ = 0.3, c = 1000.0, k = 1.0, λ = 1e-6),
+            GaseousComponent(:gas, M = 0.05, c = 1000.0, k = 0.02),
         ),
         reactions = (Reaction(:ablate, 1 => 2; A = A, E = 1.0e5, h = 1.0e6),),
+        gas_transport = LumpedTransfer(
+            endpoint = LumpedEndpoint(λ = 1e-6, κ = 0.0, max_skeletal_occupancy = 0.001),
+        ),
     )
 end
 
@@ -67,7 +70,10 @@ _ablator_problem(A) = PyrolysisProblem(
     material = _ablator_material(A),
     bc_set = BoundaryConditionSet(
         thermal = (top = HeatFluxBC(2.8e6), bottom = AdiabaticBC()),
-        mass = (top = ConvectiveMassBC(h_m = 10.0, ξ_inf = 0.0), bottom = ImpermeableBC()),
+        mass = (
+            top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
+            bottom = ImpermeableBC(),
+        ),
     ),
     T_initial = z -> 300.0 + 1e5 * z,
     ξ_initial = [z -> 1000.0, z -> 0.0],

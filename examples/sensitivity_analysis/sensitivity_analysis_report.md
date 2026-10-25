@@ -42,12 +42,12 @@ output variance.
 ## 2. Model Description
 
 The forward model is a one-dimensional reactive-transport pyrolysis simulation
-implemented in the ThermaKin framework (Julia). The simulation represents a
+implemented in Pyrolysis.jl. The simulation represents a
 12 mm thick Douglas Fir slab exposed to 50 kW/m² external radiant heat flux with
 convective cooling ($h = 10$ W/(m²·K)) at the heated surface and an adiabatic
 back face. The material undergoes five sequential pyrolysis reactions with
 moisture evaporation, producing gaseous products that transport through the
-porous char layer via Darcy flow and Fickian diffusion.
+porous char layer via Darcy flow and lumped wall diffusion.
 
 **Simulation parameters (fixed):**
 
@@ -577,7 +577,7 @@ The following diagnostic checks support the validity of the results:
 
 | Item | Value |
 |---|---|
-| Software | Julia + ThermaKin (Pyrolysis.jl) |
+| Software | Julia / Pyrolysis.jl |
 | PCE library | PolyChaos.jl |
 | Sampling | QuasiMonteCarlo.jl (Sobol sequences) |
 | Number of samples | 2048 |

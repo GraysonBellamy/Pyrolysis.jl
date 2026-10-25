@@ -48,9 +48,27 @@ end
 # ============================================================================
 
 function _material(NC; law = nothing, reacting = true)
-    a = SolidComponent(:a, ρ = 1000.0, c = 1000.0, k = 0.5, ε = 0.9, α = 2.0)
-    b = SolidComponent(:b, ρ = 400.0, c = 1200.0, k = 0.2, ε = 0.95, α = 20.0)
-    g = GaseousComponent(:g, M = 0.03, c = 1100.0, k = 0.03, λ = 1e-5)
+    a = SolidComponent(
+        :a,
+        φ = 0.3,
+        λ = 0.0,
+        ρ = 1000.0,
+        c = 1000.0,
+        k = 0.5,
+        ε = 0.9,
+        α = 2.0,
+    )
+    b = SolidComponent(
+        :b,
+        φ = 0.3,
+        λ = 0.0,
+        ρ = 400.0,
+        c = 1200.0,
+        k = 0.2,
+        ε = 0.95,
+        α = 20.0,
+    )
+    g = GaseousComponent(:g, M = 0.03, c = 1100.0, k = 0.03)
     components = NC == 2 ? (a, g) : (a, b, g)
     reactions =
         !reacting ? () :
@@ -70,7 +88,10 @@ function _problem(NC, n; law = nothing, reacting = true, coordinates = Planar())
                 top = RadiativeFluxBC(flux = 3e4) + RadiativeBC(T_inf = 300.0),
                 bottom = AdiabaticBC(),
             ),
-            mass = (top = DiffusiveMassBC(0.02), bottom = ImpermeableBC()),
+            mass = (
+                top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
+                bottom = ImpermeableBC(),
+            ),
         ),
         T_initial = z -> 500.0 + 2e4 * z,
         tspan = (0.0, 10.0),

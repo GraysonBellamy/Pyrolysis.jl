@@ -33,7 +33,7 @@ are the components' BULK densities (the strain kernel uses bulk ρ, not
 
 NOTE a γ > 1 intumescent branch is NOT representable: γ is
 validated to [0, 1] (universal volume-fraction semantics shared with
-mixture density and conductivity mixing). Swelling is exercised through
+volume-fraction and conductivity mixing). Swelling is exercised through
 ρ_B < ρ_A (P1) and the partial-contribution branch through γ_B ∈ (0, 1)
 (P6). Documented as a model limitation.
 
@@ -77,15 +77,15 @@ residual at fixed t_end grows ~1000×).
 | P3: final thickness ratio | 1 | 1 | 0 | 3e-06 | yes | path-independent endpoint of θ = Σγⱼω̇ⱼ/ρⱼ (case header) |
 | P3: total mass conservation | 2 | 2 | 3.331e-16 | 2e-06 | yes | solid-only permutation; impermeable everywhere |
 | P4: final thickness ratio | 0.3 | 0.3 | 2.626e-07 | 3e-06 | yes | path-independent endpoint of θ = Σγⱼω̇ⱼ/ρⱼ (case header) |
-| P4: total mass conservation | 2 | 2 | 9.992e-16 | 2e-06 | yes | held gas compresses with its cell under collapse; the sealed P4 corner anchors the dilation bookkeeping |
+| P4: total mass conservation | 2 | 2 | 4.441e-16 | 2e-06 | yes | held gas compresses with its cell under collapse; the sealed P4 corner anchors the dilation bookkeeping |
 | P4: final char mass (solid ledger) | 0.6 | 0.6 | 1.125e-07 | 2e-06 | yes | char endpoint is path-independent; complements the total-mass anchor |
 | P5: final thickness ratio | 1 | 1 | 0 | 3e-06 | yes | path-independent endpoint of θ = Σγⱼω̇ⱼ/ρⱼ (case header) |
-| P5: total mass conservation | 2 | 2 | 8.882e-16 | 2e-06 | yes | held gas compresses with its cell under collapse; the sealed P4 corner anchors the dilation bookkeeping |
+| P5: total mass conservation | 2 | 2 | 2.22e-16 | 2e-06 | yes | held gas compresses with its cell under collapse; the sealed P4 corner anchors the dilation bookkeeping |
 | P5: final char mass (solid ledger) | 1 | 1 | 1.125e-07 | 2e-06 | yes | char endpoint is path-independent; complements the total-mass anchor |
 | P6: final thickness ratio | 0.5 | 0.5 | 1.125e-07 | 3e-06 | yes | path-independent endpoint of θ = Σγⱼω̇ⱼ/ρⱼ (case header) |
 | P6: total mass conservation | 2 | 2 | 8.882e-16 | 2e-06 | yes | solid-only permutation; impermeable everywhere |
 | P7: final thickness ratio | 1.333 | 1.333 | 3.746e-08 | 3e-06 | yes | path-independent endpoint of θ = Σγⱼω̇ⱼ/ρⱼ (case header) |
-| P7: total mass conservation | 2 | 2 | 2.22e-16 | 2e-06 | yes | held gas compresses with its cell under collapse; the sealed P4 corner anchors the dilation bookkeeping |
+| P7: total mass conservation | 2 | 2 | 2.442e-15 | 2e-06 | yes | held gas compresses with its cell under collapse; the sealed P4 corner anchors the dilation bookkeeping |
 | P7: final char mass (solid ledger) | 1 | 1 | 1.125e-07 | 2e-06 | yes | char endpoint is path-independent; complements the total-mass anchor |
 | P7: final lateral area ratio A_f/A₀ = law(χ̄ = 1/2) | 0.75 | 0.75 | 3.751e-08 | 3e-06 | yes | χ̄_f = released dry-mass fraction = y_gas = 0.5 |
 
@@ -95,31 +95,21 @@ residual at fixed t_end grows ~1000×).
 
 ### Comparison with other codes
 
-The same case was solved with FDS 6.11.1 at 4 cells (2 mm slab; stretched); decks, outputs, and
-run provenance are committed under `test/verification/reference/`.
-Each code's error against the same exact solution is drawn below
-on a log scale, muted gray behind this solver's series — the
-signed linear-scale panel above shows where the error lives, this
-one compares magnitudes across codes.
+Reference runs are available from FDS 6.11.0 at 4 cells (2 mm slab; stretched). Decks, outputs and
+available provenance are under `test/verification/reference/`; check
+case-specific parameters and transformations before comparing. Where
+error panels are present, they compare against the analytical reference.
+A timing entry alone does not establish an identical physical workload.
 
 ![V-CPL-03 thickness_histories_vs_codes_error](assets/V-CPL-03/V-CPL-03_thickness_histories_vs_codes_error.png)
 
-Setup and simulation wall times at every ladder rung against the
-reference runs. Julia times model construction and solve after warm-up;
-FDS and Gpyro use internal total elapsed wall time, including setup and
-simulation output. Process launch and Julia compilation are excluded
-from the figure. Output costs, discretizations and time-stepping rules
-still differ, so these are indicative costs, not pure solver speedups.
-See `test/verification/reference/README.md` and `timings.csv` for the
-timer boundaries, resolutions and measurement provenance.
+Historical wall times at each ladder rung and for the reference runs.
+Resolution, time stepping, output workload and timer boundaries differ
+or are incompletely recorded (see `reference/timings.csv`). The Julia
+harness times a warmed build-and-solve. Matching cell count or span alone
+does not make these measurements a controlled solver-speed comparison.
 
 ![V-CPL-03 solve_time](assets/V-CPL-03/V-CPL-03_solve_time.png)
-
-Reference timings below are medians of five runs after one warm-up. Full process time also includes launch and shutdown; it is shown separately and is not compared with Julia's warmed time.
-
-| Code | Resolution | Internal elapsed (s) | Full process (s) |
-| --- | --- | --- | --- |
-| FDS 6.11.1 | 4 cells (2 mm slab; stretched) | 0.082 | 0.3402 |
 
 Solution overlays including the other codes' points: [thickness_histories_vs_codes](assets/V-CPL-03/V-CPL-03_thickness_histories_vs_codes.png).
 
@@ -132,4 +122,3 @@ Solution overlays including the other codes' points: [thickness_histories_vs_cod
 | min_thickness | 1.0e-5 |
 | abstol | 1.0e-10 |
 | reltol | 1.0e-8 |
-

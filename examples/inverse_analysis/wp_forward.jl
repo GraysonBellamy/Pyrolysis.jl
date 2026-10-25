@@ -7,13 +7,13 @@ boundary conditions for the given experimental scenario, runs the simulation,
 and returns the `PyrolysisSolution`. All other thermophysical properties and the
 selectable white-pine kinetics sets come from `wp_properties.jl`.
 
-Component schema (NC = 14):
+Component schema (NC = 15):
     1 = WP (virgin)        7 = Ash (inert)        12 = WP_gas4
     2 = WP_int1            8 = Moisture           13 = WP_gas5
     3 = WP_int2            9 = WP_gas1            14 = WATER_VAPOR
     4 = WP_int3           10 = WP_gas2
     5 = WP_int4           11 = WP_gas3
-    6 = Char
+    6 = Char              15 = AIR
 
 Ash (component 7) is inert (no reactions involve it). It sits in the char
 matrix throughout: same ρ, cp, ε, and k as char (per the property JSON).
@@ -29,7 +29,7 @@ using Logging
 
 include("wp_properties.jl")
 
-const NC_WP = 14   # Number of components
+const NC_WP = 15   # Number of components
 
 # ============================================================================
 # Scenario container
@@ -390,49 +390,14 @@ function build_material(
                 κ = 0.0,
             ),
             # 9-13. Pyrolysis gases (same speciation as DF; update if measured values exist)
-            GaseousComponent(
-                :WP_gas1,
-                M = 0.060,
-                c = WP_GAS_CP[1],
-                k = 0.020,
-                λ = WP_LAMBDA_GAS * sqrt(0.029/0.060),
-            ),
-            GaseousComponent(
-                :WP_gas2,
-                M = 0.070,
-                c = WP_GAS_CP[2],
-                k = 0.020,
-                λ = WP_LAMBDA_GAS * sqrt(0.029/0.070),
-            ),
-            GaseousComponent(
-                :WP_gas3,
-                M = 0.110,
-                c = WP_GAS_CP[3],
-                k = 0.018,
-                λ = WP_LAMBDA_GAS * sqrt(0.029/0.110),
-            ),
-            GaseousComponent(
-                :WP_gas4,
-                M = 0.070,
-                c = WP_GAS_CP[4],
-                k = 0.020,
-                λ = WP_LAMBDA_GAS * sqrt(0.029/0.070),
-            ),
-            GaseousComponent(
-                :WP_gas5,
-                M = 0.050,
-                c = WP_GAS_CP[5],
-                k = 0.025,
-                λ = WP_LAMBDA_GAS * sqrt(0.029/0.050),
-            ),
+            GaseousComponent(:WP_gas1, M = 0.060, c = WP_GAS_CP[1], k = 0.020),
+            GaseousComponent(:WP_gas2, M = 0.070, c = WP_GAS_CP[2], k = 0.020),
+            GaseousComponent(:WP_gas3, M = 0.110, c = WP_GAS_CP[3], k = 0.018),
+            GaseousComponent(:WP_gas4, M = 0.070, c = WP_GAS_CP[4], k = 0.020),
+            GaseousComponent(:WP_gas5, M = 0.050, c = WP_GAS_CP[5], k = 0.025),
             # 14. Water vapor
-            GaseousComponent(
-                :WATER_VAPOR,
-                M = 0.018,
-                c = water_vapor_cp_func,
-                k = 0.025,
-                λ = WP_LAMBDA_GAS * sqrt(0.029/0.018),
-            ),
+            GaseousComponent(:WATER_VAPOR, M = 0.018, c = water_vapor_cp_func, k = 0.025),
+            GaseousComponent(:AIR; M = 0.02897, c = 1006.0, k = 0.026),
         ),
         reactions = (
             Reaction(
@@ -543,7 +508,10 @@ function build_bcs(
         RadiativeBC(F = F_cone, T_inf = 0.0, validate = false) +
         RadiativeBC(F = 1.0 - F_cone, T_inf = scenario.T_top_surr) +
         ConvectiveBC(h = scenario.h_top, T_inf = scenario.T_top_gas, blowing = blowing)
-    top_mass = DiffusiveMassBC(0.05) + DirichletPressureBC(101325.0)
+    top_mass = AmbientGasBC(
+        GasReservoir(P = 101325.0, T = scenario.T_top_gas, mole_fractions = (AIR = 1.0,));
+        film = MassTransferFilm(0.05*101325.0*0.02897/(8.31446261815324*300.0)),
+    )
 
     # Bottom: free to surroundings, impermeable.
     # Bottom emissivity is fixed at 0.92 (e.g. high-emissivity coating /
@@ -563,7 +531,7 @@ end
 # Forward solve
 # ============================================================================
 
-# Dry-baseline initial concentration tuple — 14 components. Slot 8 (moisture)
+# Dry-baseline initial concentration tuple — 15 components. Slot 8 (moisture)
 # is overridden per scenario from `scenario.c0_moisture` inside `build_problem`.
 const WP_XI0_DRY = (
     WP_C0_VIRGIN,           # 1. virgin (mass_frac × ρ_virgin)
@@ -580,6 +548,7 @@ const WP_XI0_DRY = (
     0.0,
     0.0,# 9-13. pyrolysis gases
     0.0,                    # 14. water vapor
+    0.0,                    # 15. background air, set from the pore EOS
 )
 
 """
@@ -647,7 +616,10 @@ function build_problem(
         0.0,
         0.0,# 9-13
         0.0,                    # 14
+        0.0,                    # 15. background air
     )
+    ξ_air = background_gas_concentration(material, :AIR, ξ0, T0)
+    ξ0 = Base.setindex(ξ0, ξ_air, NC_WP)
     ξ_initial_funcs = [
         let v = ξ0[j]
             _ -> v

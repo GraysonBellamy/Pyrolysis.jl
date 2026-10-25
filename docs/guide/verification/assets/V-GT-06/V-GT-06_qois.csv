@@ -1,0 +1,6 @@
+"qoi","value","exact","error","tol","within_tol","comment"
+"coupled continuum flux",1.2787949835724177e-6,NaN,1.2787949835724177e-6,0.001,true,""
+"coupled surface temperature",550.28184317978,550.2822596779068,0.0004164981268104384,0.2,true,""
+"exponential thermal field",0.0037880165760952877,NaN,0.0037880165760952877,0.2,true,""
+"continuum reservoir heat",-44197.0600216239,-44197.1263945031,1.5017464847222328e-6,0.001,true,""
+"coupled local root residual",7.071455598855474e-17,NaN,7.071455598855474e-17,1.0e-9,true,""

@@ -31,7 +31,7 @@ using Pyrolysis
 bc_set = BoundaryConditionSet(
     thermal = (top    = HeatFluxBC(50e3) + RadiativeBC(ε = 0.9, T_inf = 300.0),
                bottom = AdiabaticBC()),
-    mass    = (top    = DiffusiveMassBC(0.01),
+    mass    = (top    = AmbientGasBC(GasReservoir(P=0., T=300.)),
                bottom = ImpermeableBC()),
 )
 ```
@@ -150,8 +150,7 @@ convective exchange, and a gas denser than the free stream can pool on the
 face. How a `ConvectiveBC` responds is its `blowing` model, `NoBlowing()` by
 default (the coefficient stays `h` whatever leaves the face). The surface
 balance hands the model the outward mass flux of every gas component at the
-face at each iterate, so the back face is unaffected automatically (no
-outflow). Four models ship:
+face at each iterate. A sealed face has zero species fluxes and is unaffected. Four models ship:
 
 ```julia
 ConvectiveBC(h = 15.0, T_inf = 300.0, blowing = CouetteFilm())        # h·B/(e^B − 1), B = ṁ″·c_p,g/h
@@ -164,7 +163,9 @@ ConvectiveBC(h = 11.2, T_inf = 360.0,
 
 - `CouetteFilm(λ = 0.5)`: the classical film law `h → h·R_b` with the
   blowing ratio `R_b = B_λ/(e^{B_λ} − 1)` and the film parameter
-  `B_λ = 2λ·ṁ″·c_p,g/h`, `c_p,g` the heat capacity of the gas leaving the face.
+  `B_λ = 2λ·Σ_j J_j c_p,j(T_s)/h`, using signed outward species fluxes.
+  This handles suction and counterflow; zero net mass flow need not give a zero
+  heat-capacity flux.
   `λ = 0.5` is the Couette film (`B_λ = B`). At a wood-like peak
   `ṁ″ ≈ 10 g·m⁻²·s⁻¹` against `h ≈ 10` this is a 35–50 % reduction of `h`;
   at PMMA-like peaks (`B ≈ 4`) convective cooling is essentially
@@ -180,8 +181,9 @@ ConvectiveBC(h = 11.2, T_inf = 360.0,
   floor `ψ_0` (keyword `ψ0`) when the gas at the face is denser than the free
   stream, switching over a logistic in the face buoyancy `Λ` centred at `Λ_c`
   with width `Λ_w` (keywords `Λc`, `Λw`). The face
-  composition comes from a species-by-species film balance with the binary
-  diffusivities into the free stream. The three switch constants belong to
+  composition uses the solved mass-film state when available; otherwise it
+  follows the empirical species film balance with binary diffusivities and
+  requires zero free-stream species flux. The three switch constants belong to
   the apparatus flow (the defaults are the CAPA chamber's); the gas enters
   through its properties. Describe the volatiles either through the
   material's gas components, with Fuller diffusion volumes
@@ -189,8 +191,12 @@ ConvectiveBC(h = 11.2, T_inf = 360.0,
   (`volatiles = ...`).
 - `FunctionBlowing(f)`: your own blowing ratio `R_b = f(face, h, T_inf)` from the
   `BlowingFace` (outward species fluxes `face.ṁ`, surface temperature
-  `face.T_s`, `face.material`). `f` must return 1 at zero outflow, be smooth and
+  `face.T_s`, `face.material`). `f` must return 1 at zero species fluxes, be smooth and
   accept dual numbers (branch only on `ForwardDiff.value`).
+
+The empirical property-ratio and pooling closures support outward products
+or pure free-stream suction and reject mixed counterflow. Use the signed
+Couette closure for counterflow.
 
 The free stream is a `GasSpecies` (molar mass, `c_p(T)`, `k(T)`, Fuller
 diffusion volume, optional viscosity); `NITROGEN` ships, and
@@ -321,7 +327,7 @@ bc_set = BoundaryConditionSet(
         bottom = AdiabaticBC(),
     ),
     mass = (
-        top    = ConvectiveMassBC(h_m = 0.05, ξ_inf = 0.0),
+        top    = AmbientGasBC(GasReservoir(P=0., T=300.)),
         bottom = ImpermeableBC(),
     ),
 )
@@ -332,222 +338,82 @@ bc_set = BoundaryConditionSet(
 
 ## 5.3 Mass boundary conditions
 
-Mass BCs (subtypes of `AbstractMassBC`) control how **gas** escapes (or enters)
-through a boundary. Solid and liquid components never transport across the
-boundary; only gaseous components do. The sign convention is **positive = mass
-into the domain**, so gas escaping at the top has a negative flux in the BC's
-own convention (the solver applies the correct face orientation internally).
+Species fluxes are positive outward, in kg/(m² s). Assign one complete mass
+condition to each tag; mass conditions do not combine with `+`.
 
-| BC type | Physical flux `J_j` | Key parameters (defaults) |
-|---|---|---|
-| `ImpermeableBC` | `0` | — |
-| `MassFluxBC` | `J(t)` (prescribed) | `flux` |
-| `ConvectiveMassBC` | `h_m·(ξ_∞ − ξ_s)` | `h_m`, `ξ_inf` (`0.0`) |
-| `DiffusiveMassBC` | combined internal + external resistance | `h_m` (`Inf`) |
-| `CombinedMassBC` | `Σ_i J_j,i` | built via `+` |
-
-Pressure BCs (§5.5) are also `AbstractMassBC` subtypes but only act in Darcy
-mode. All of these types (and the pressure BCs) are exported by
-`using Pyrolysis`; `CombinedMassBC` is produced by the `+` operator rather than
-called directly. Mass conditions act only when the problem has gas transport:
-a material with a gas component whose components carry a gas-transfer
-coefficient, or a mass condition that passes mass (Chapter 7).
-
-### 5.3.1 `ImpermeableBC` — no gas escape
+### 5.3.1 Impermeable and prescribed species flux
 
 ```julia
-bc = ImpermeableBC()
+sealed = ImpermeableBC()
+prescribed = MassFluxBC(fluxes=(product=1e-4,air=-2e-5),
+                       inflow_temperature=(air=350.,))
 ```
 
-Zero mass flux for every component. This is the default for both faces and the
-usual choice for the substrate.
+An inward species flux needs its incoming temperature. Fluxes and incoming
+temperatures may be functions of time. A prescribed flux requires no internal
+transport coefficient; its carried energy is still assembled.
 
-### 5.3.2 `MassFluxBC` — prescribed mass flux
+### 5.3.2 Complete reservoirs
 
 ```julia
-bc = MassFluxBC(0.0)             # constant prescribed flux [kg/(m²·s)]
-bc = MassFluxBC(t -> 1e-3)       # time-varying
+reservoir = GasReservoir(P=101325., T=300., mole_fractions=(air=1.,))
+mass = (top=AmbientGasBC(reservoir; film=MassTransferFilm(0.02)),
+        bottom=ImpermeableBC())
 ```
 
-Prescribes the boundary mass flux `J` directly (positive = into domain), as a
-constant or `J(t)`. The same value applies to all gas components.
+Reservoir mole fractions are named, nonnegative and sum to one. Unknown nonzero
+species are rejected. Pressure, temperature and composition may depend on time.
+An explicit vacuum `GasReservoir(P=0.,T=300.)` may omit composition. Atmospheric
+exchange requires the atmosphere's tracked species and appropriate initial pore
+gas. Both escape and ingress follow the same constitutive path.
 
-### 5.3.3 `ConvectiveMassBC` — external convective transfer
+### 5.3.3 Optional mass film
 
-```julia
-bc = ConvectiveMassBC(h_m = 0.05, ξ_inf = 0.0)   # gas swept away to clean atmosphere
-```
-
-External convective mass transfer, `J_j = h_m·(ξ_{j,∞} − ξ_{j,s})`. Fields:
-
-- `h_m` — external (film) mass-transfer coefficient `h_m` in **m/s**
-  (velocity-based). Constant or `h_m(t)`; validated non-negative. Typical
-  values: natural convection 0.01–0.05 m/s, forced convection 0.05–0.5 m/s. As
-  a rule of thumb from the heat–mass analogy,
-  `h_m ≈ h_conv / (ρ_air · c_{p,air})`; for `h_conv ≈ 10` W·m⁻²·K⁻¹ this gives
-  `h_m ≈ 0.008` m/s.
-- `ξ_inf` — ambient mass concentration `ξ_∞` in kg/m³, default `0.0` (gas
-  escapes into clean surroundings). Accepts a scalar (broadcast to every gas
-  species), a function of time `t -> ξ_∞(t)`, or an `NTuple` with one entry
-  per component (`ξ_inf = (0.0, 0.0, 0.27)` — e.g. ambient air ingress for a
-  background-air species without injecting pyrolyzate). Entries are validated
-  non-negative; a tuple's length must equal the material's component count.
-
-### 5.3.4 `DiffusiveMassBC` — internal diffusion with optional external resistance
-
-```julia
-bc = DiffusiveMassBC()            # pure internal diffusion (h_m = Inf, default)
-bc = DiffusiveMassBC(0.01)        # add a finite external film resistance, h_m = 0.01 m/s
-```
-
-Couples the **internal** Fickian diffusion gradient in the surface cell to an
-optional **external** film resistance. The single field is:
-
-- `h_m` — external mass-transfer coefficient in m/s. Default `Inf` (the
-  no-argument constructor `DiffusiveMassBC()` sets `h_m = Inf`), meaning *no*
-  external resistance — the flux is the pure diffusive limit
-  `J_j = −λ_eff ξ_{j,s}/d`, where `λ_eff` is the surface cell's effective
-  gas-transfer coefficient and `d` the distance from its center to the boundary
-  face. A finite `h_m` adds a series resistance:
-  `J_j = −λ_eff h_m ξ_{j,s}/(λ_eff + h_m d)`.
-
-This is the most physically consistent escape BC because it ties the surface
-loss to the same internal transport law used everywhere else. Use it (with `Inf` or a
-finite `h_m`) when you want gas escape governed by the material's own gas
-transfer coefficient rather than an imposed convective coefficient.
-
-### 5.3.5 `CombinedMassBC` — adding mass BCs with `+`
-
-```julia
-bc = DiffusiveMassBC(Inf) + ConvectiveMassBC(h_m = 0.01, ξ_inf = 0.0)
-```
-
-Sums component mass fluxes, `J_j = Σ_i J_{j,i}`, via the `+` operator (generated
-function, type-stable). For most pyrolysis runs a single mass BC suffices;
-combined mass BCs are for modeling competing transport mechanisms or
-research/validation studies.
+`MassTransferFilm(g)` is an isobaric common-diffusivity film with conductance
+`g=ρD/δ` in kg/(m² s), supplied as a number or temperature law. A finite film
+solves surface fractions jointly with the thermal balance. Infinite conductance
+fixes composition to the reservoir. Zero conductance permits only donor bulk
+flow. The model and signed blowing/reversal limits are in Technical Reference §9.8.
 
 ---
 
-## 5.4 The surface energy balance (how thermal BCs are applied)
+## 5.4 Surface temperature and carried energy
 
-![Surface cell with incoming radiation, inward conduction and outward radiative and convective losses; gas enthalpy appears separately in the outward face flux.](../../assets/figures/06_surface_energy.svg)
+The surface temperature is determined from the thermal condition and conduction
+through the current half-cell distance. With a mass film or hydraulic resistance,
+surface temperature, fractions and pressure are solved together whenever their
+equations couple. A bounded, scaled local Newton solve must converge and have a
+resolved nonsingular Jacobian; otherwise the solver diagnoses the local failure.
 
-**Figure 6. Surface energy transfers (schematic, surface absorption).** Incoming radiation balances conduction into the solid and convective and radiative losses. The surface-temperature calculation uses $T_s$, the adjacent cell temperature and distance $d$. Gas outflow modifies convection through blowing; its sensible enthalpy enters the face energy flux separately, as shown below. The arrows depict losses from a hot surface; signed exchanges can reverse. Beer–Lambert absorption instead deposits radiation within the cells (Figure 7).
+Outward gas carries surface enthalpy; inward gas carries its specified incoming
+enthalpy. The reported boundary heat uses the reservoir control surface. For an
+LTE wall heat film, `q_reservoir=q_surface+H_reservoir-H_surface`, so total outward
+energy is `H_reservoir-q_reservoir=H_surface-q_surface`. An adiabatic boundary
+has no hidden incoming-gas heating. A convective film and its reservoir must use
+the same incoming stream temperature; radiative surroundings can differ.
 
-Thermal BCs are not applied as a raw flux in the cell; instead the solver finds
-the **surface (face) temperature** `T_s` that makes the boundary energy balance
-close, then conducts the resulting flux into the adjacent cell. The balance is
-
-```
-q_BC(T_s) = k_eff · (T_s − T_cell) / d
-```
-
-— the applied BC flux equals the heat conducted from the surface face into the
-first cell center, with `k_eff` the cell's effective conductivity, `T_cell` its
-trial temperature, and `d` the face-to-center distance. It is solved by a Newton
-iteration on `T_s` (see Technical Reference §12.2). You do not call this
-yourself — it runs inside the residual — but it explains a few user-visible
-behaviors:
-
-- **Closed-form faces skip it.** An `AdiabaticBC`, a lone `HeatFluxBC` and a
-  lone `DirichletThermalBC` give the face flux directly; every other condition
-  (and every `CombinedThermalBC`) goes through the Newton iteration.
-- **It always has a root.** The Newton starts from the cell temperature clamped
-  to the property bracket `[200, 3000]` K and evaluates the condition at the
-  *trial clamp* of the iterate (the smooth clamp into the bracket with 1 K
-  transitions), so the balance has a root for any cell temperature and the
-  iterate itself is never clamped. A root outside the bracket belongs to a trial
-  state that the integrator's error control rejects.
-- **Convergence** is on the flux residual, relative tolerance `1e-10` of the
-  larger of the applied and conducted fluxes (with a round-off floor), in at
-  most 50 iterations; on the cone recipe of §5.11.1 (20 cells, 120 s, with a
-  blowing model) it converged in 4 to 5 iterations at every accepted step. A
-  balance that does not converge is not an error: the flux is taken at the last
-  iterate, no warning is printed, and the per-face diagnostics record
-  `converged` and `iterations`.
-- **It is differentiated exactly.** The iteration carries dual numbers, so the
-  Jacobian's derivatives with respect to the state flow through `T_s`.
-- The converged surface temperature is available afterwards as
-  `solution.surface_T` (and per tag in `solution.boundary_T`), and the flux
-  decomposition (absorbed, re-radiation, convection, conducted, net) in
-  `solution.extras` (§9.3).
-
-The balance has **no surface gas-enthalpy term**. The gas leaving through the
-face carries its sensible enthalpy at the face temperature, `Σ_j J_j h_j(T_s)`,
-in the face's energy flux, added once the balance has fixed `T_s`; a surface
-term `Σ_g ṁ_g Δh_g(T_s, T_∞)` in the balance would count that enthalpy a second
-time. The outward gas flux enters the balance only through the blowing model of
-a `ConvectiveBC` (§5.2.3).
+`CouetteFilm` uses the signed sum of species heat-capacity fluxes. Empirical
+pooling/property-ratio models support outward products or pure freestream
+suction and diagnose unsupported mixed counterflow. See Technical Reference
+§9.9 for the control surface, approximation and supported domains.
 
 ---
 
-## 5.5 Pressure boundary conditions (Darcy mode only)
-
-When the material has a permeability (so the solver runs in Darcy–Fick transport
-mode, see Technical Reference §9), gas transport is pressure-driven and you can
-prescribe **pressure** at a boundary. Pressure BCs are `AbstractMassBC` subtypes,
-so they go in the `mass` slot of the `BoundaryConditionSet`. They contribute no
-film (diffusive) mass flux; instead they set the outward Darcy velocity `v` of
-the boundary face from the boundary cell's pressure `P` and mobility `κ/μ`. An
-outflow (`v > 0`) carries the cell's gas out at its intrinsic density `ξ_j/φ`;
-an inflow carries none of the tracked gases (the ambient is taken to hold none
-of them). A mass condition that is not a pressure condition drives no Darcy
-velocity, so an `ImpermeableBC` face is sealed under Darcy–Fick as well. In
-Fickian (non-Darcy) mode pressure BCs have no effect.
-
-| BC type | Outward Darcy velocity | Parameters (defaults) |
-|---|---|---|
-| `DirichletPressureBC` | `v = (κ/μ)(P − P_bc)/d` | `P` (`101325.0`) |
-| `NeumannPressureBC` | `v = −(κ/μ)·∂P/∂n` | `∂P∂n` (`0.0` = no flow) |
-| `ConvectivePressureBC` | `v = h_P·(P − P_ext)` | `h_P`, `P_ext` |
-
-All three are exported by `using Pyrolysis`. A pressure condition combines with
-a film condition through `+`, e.g. `DiffusiveMassBC(0.01) +
-DirichletPressureBC(101325.0)` (diffusive escape plus pressure-driven venting),
-as `examples/08_darcy_fick_demo.jl` does.
-
-### 5.5.1 `DirichletPressureBC` — fixed pressure
+## 5.5 Pressure-gradient and hydraulic-resistance boundaries
 
 ```julia
-bc = DirichletPressureBC()           # default: atmospheric, 101325 Pa
-bc = DirichletPressureBC(101325.0)   # explicit atmospheric
+gradient = NeumannPressureBC(gradient=-1e5,T=300.,mole_fractions=(air=1.,))
+reservoir = GasReservoir(P=101325.,T=300.,mole_fractions=(air=1.,))
+resistive = ConvectivePressureBC(reservoir;resistance=1e6,flow=:darcy_velocity)
 ```
 
-Holds the boundary at pressure `P` (Pa). The outward Darcy velocity is the
-one-sided gradient between the interior cell and the boundary,
-`v = (κ/μ)·(P_interior − P_bc)/d`. This is the natural exposed-surface
-condition: the outer face sits at atmospheric pressure and gas flows out down the
-pressure gradient built up by pyrolysis.
-
-### 5.5.2 `NeumannPressureBC` — prescribed gradient
-
-```julia
-bc = NeumannPressureBC()         # default: zero gradient (no Darcy flow)
-bc = NeumannPressureBC(0.0)      # same as above
-bc = NeumannPressureBC(-1000.0)  # pressure falling outward at 1 kPa/m: an outflow
-```
-
-Sets the pressure gradient `∂P/∂n` (Pa/m) along the **outward** normal, default
-`0.0`. A zero gradient is a no-flow (impermeable) back face for the pressure
-field — the usual choice for a sealed substrate in Darcy mode. A positive
-gradient (pressure rising outward) would drive an inflow, which carries no gas.
-
-### 5.5.3 `ConvectivePressureBC` — Robin (resistive) outflow
-
-```julia
-bc = ConvectivePressureBC(1e-6, 101325.0)   # finite surface resistance, atmospheric exterior
-```
-
-A Robin-type condition, `v·n = h_P·(P_internal − P_external)`, for a surface
-with finite resistance to gas flow (a char skin, a coating). Fields:
-
-- `h_P` — pressure-transfer coefficient `h_P` in m·Pa⁻¹·s⁻¹.
-- `P_ext` — external pressure `P_external` in Pa.
-
-The velocity is gated to zero on an impermeable boundary cell. Limits:
-`h_P → ∞` approaches `DirichletPressureBC`; `h_P → 0` approaches an impermeable
-(zero-flow) boundary.
+The pressure gradient is outward [Pa/m]. It determines surface pressure through
+the current half-cell distance; accepted surface pressure must be nonnegative.
+The resistance law is `P_surface-P_reservoir=resistance*flow`. Choose
+`:darcy_velocity` [m/s], `:mass` [kg/(m² s)] or `:molar` [mol/(m² s)]; resistance
+units are pressure divided by that quantity. A zero resistance fixes pressure.
+`ConvectivePressureBC` also accepts `film=MassTransferFilm(...)`. Both variants
+supply complete composition and incoming energy data and support either gas model.
 
 ---
 
@@ -779,7 +645,7 @@ bc_set = BoundaryConditionSet(
         bottom = AdiabaticBC(),
     ),
     mass = (
-        top    = ConvectiveMassBC(h_m = 0.05, ξ_inf = 0.0),
+        top    = AmbientGasBC(GasReservoir(P=0., T=300.)),
         bottom = ImpermeableBC(),
     ),
 )
@@ -799,7 +665,7 @@ bc_set = BoundaryConditionSet(
               ConvectiveBC(h = 10.0, T_inf = 300.0),
         bottom = AdiabaticBC(),
     ),
-    mass = (top = DiffusiveMassBC(), bottom = ImpermeableBC()),
+    mass = (top = AmbientGasBC(GasReservoir(P=0., T=300.)), bottom = ImpermeableBC()),
 )
 solution = solve(problem; radiation_model = BEER_LAMBERT)
 ```
@@ -814,36 +680,35 @@ temperature with a time-dependent `DirichletThermalBC`:
 bc_set = BoundaryConditionSet(
     thermal = (top = DirichletThermalBC(t -> 300.0 + β * t),
                bottom = AdiabaticBC()),
-    mass    = (top = DiffusiveMassBC(), bottom = ImpermeableBC()),
+    mass    = (top = AmbientGasBC(GasReservoir(P=0., T=300.)), bottom = ImpermeableBC()),
 )
 ```
 
-### 5.11.4 Pressure-driven char (Darcy mode)
+### 5.11.4 A pressure reservoir for a gas-bearing char
 
-With a permeable material, set atmospheric pressure on the exposed face and a
-sealed (zero-gradient) back face. The transport mode switches to Darcy–Fick
-automatically when the material has permeability:
+For a material containing `:air`, an atmospheric boundary is:
 
 ```julia
-bc_set = BoundaryConditionSet(
-    thermal = (top = HeatFluxBC(50e3) + RadiativeBC(ε = 0.9, T_inf = 300.0),
-               bottom = AdiabaticBC()),
-    mass    = (top = DirichletPressureBC(101325.0),    # atmospheric exposed face
-               bottom = NeumannPressureBC(0.0)),       # sealed substrate
-)
+reservoir = GasReservoir(P=101325., T=300., mole_fractions=(air=1.,))
+bcs = BoundaryConditionSet(
+    thermal=(top=ConvectiveBC(h=10., T_inf=300.), bottom=AdiabaticBC()),
+    mass=(top=AmbientGasBC(reservoir), bottom=ImpermeableBC()))
 ```
+
+This permits both ingress and escape. Add `film=MassTransferFilm(g)` for
+finite external composition transfer. Use `ConvectivePressureBC` with a
+named flow measure when the exterior instead has a hydraulic resistance.
 
 ---
 
 ## 5.12 Caveats and pitfalls
 
-- **The escaping gas carries no surface enthalpy term.** The gas enthalpy flux
-  `Σ_j J_j h_j` through every face, the boundary face included at the surface
-  temperature, already carries the enthalpy of the escaping gas (Technical
-  Reference §7, §12.2); a surface term `Σ_g ṁ_g Δh_g(T_s, T_∞)` on top of it
-  would double-count that enthalpy, a spurious sink that under-predicts surface
-  temperature and mass-loss rate. Parameter sets calibrated with a code that
-  adds a surface gas-enthalpy term may need re-calibration.
+- **Incoming energy needs complete gas data.** Outflow carries enthalpy at the
+  surface temperature; inflow carries its specified reservoir enthalpy. An LTE
+  thermal film accounts for the adjustment between those control surfaces in
+  its coupled surface balance. Adiabatic and prescribed-heat boundaries use
+  reservoir carried enthalpy directly. Use the assembled boundary diagnostics
+  to avoid adding incoming energy twice (§5.4).
 
 - **`radiation_model` defaults to `NO_RADIATION`.** A `RadiativeFluxBC` only does
   something if you pass an appropriate `radiation_model` to `solve()`. With the
@@ -858,19 +723,16 @@ bc_set = BoundaryConditionSet(
   throws at construction. Mesh motion needs no BC at all (it is automatic
   with `use_ale = true`), and there is no radiation BC type.
 
-- **Pressure BCs need Darcy mode.** `DirichletPressureBC`/`NeumannPressureBC`/
-  `ConvectivePressureBC` only have an effect when the material has permeability
-  (Darcy–Fick transport). In Fickian mode they contribute zero flux and are
-  silently inert — use `ImpermeableBC`/`DiffusiveMassBC`/`ConvectiveMassBC` for
-  diffusion-only gas escape. The pressure conditions vent outflow only; an
-  inward Darcy velocity carries no gas.
+- **Complete gas data.** Pressure boundaries use the chosen gas model and
+  require species and incoming-energy data. Both ingress and escape are
+  represented. Sealed gas still has a pore EOS.
 
 - **Don't double-specify a radiation source.** Use `RadiativeFluxBC` (not also
   `HeatFluxBC`) for the cone/panel; use `RadiativeBC` for the surface's own
   re-radiation loss. They are different physical terms.
 
 - **Match `ξ_initial` to your component order.** The auto-default only fills
-  component 1 (if solid). For Darcy–Fick materials, initialize the pore gas at
+  component 1 (if solid). For lumped gas transport materials, initialize the pore gas at
   ambient pressure with `background_gas_concentration(material, :air, ξ_condensed, T)`
   (exported at the top level): a pore space started as a vacuum against a
   101325 Pa boundary draws early product gas inward. For multi-solid or moisture-bearing materials, supply

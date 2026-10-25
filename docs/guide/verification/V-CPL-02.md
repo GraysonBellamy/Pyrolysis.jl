@@ -8,8 +8,8 @@
 
 ## Problem statement
 
-H.G. Landau, Q. Appl. Math. 8:81 (1950). The flagship ALE case: none of
-FDS/Gpyro/ThermaKin verify against it. Semi-infinite solid, constant net
+H.G. Landau, Q. Appl. Math. 8:81 (1950). An analytical ALE check.
+Semi-infinite solid, constant net
 surface flux q″, material removed at ablation temperature T_p with heat of
 ablation ΔH_p. Exact steady traveling wave (exact/landau.jl):
 
@@ -28,58 +28,32 @@ measured regression rate v against the Landau balance evaluated at the
 MEASURED surface temperature — an identity that must hold for the steady
 wave regardless of kinetics — and the design locus is only a loose check.
 
-Gas heat capacity is set EQUAL to the solid's (c_gas = c_solid): then the
-heat of reaction ΔH(T) is T-independent (Kirchhoff) and the traveling-wave
-identity v = v_ss(measured T_s) is exact for ANY kinetics — the regression
-anchor. With c_gas ≈ 0 the identity is NOT exact at finite E: the true wave
-consumes only c(T̄_form − T₀) + ΔH per kg (conversion happens at T̄_form <
-T_s), so v runs ≈ +RT_s²/E·c/(cΔT+ΔH) fast against v_ss(T_s) — that
-configuration belongs to report-mode studies, not to this pinned QoI.
+With c_gas = c_solid the reaction enthalpy is constant. Integrating the
+steady first law from stationary virgin solid at T₀ to the escaping gas
+gives q″ = ρ v [c(T_s − T₀) + ΔH], independently of the front's kinetics.
+This identity requires a stationary cold far field and negligible changes
+in stored energy and gas holdup. The reaction gate leaves the virgin solid
+inert. The broader-front companion uses a longer domain and later window;
+both cases check the back temperature and report mesh refinement.
 
-The c_gas = c_solid anchor also guards the relative-velocity ALE energy
-formulation (tech-ref §11.2.2): a spurious full-mesh-velocity T-advection
-term (`+w·∂T/∂z` applied although the mesh rides the collapsing solid)
-would break this identity by ≈ c·(T_s − T̄_form) ≈ RT_s²/E·c per kg — a
-few-percent deficit. For the identity to be a sharp guard the QoI window
-must sit deep in the steady wave: from a uniform-T₀ start the true
-initial-value solution approaches the traveling wave as e^(−t/τ) with
-τ = α/v² ≈ 0.25 s — heat is still being banked into the growing thermal
-tail, so v(t) runs below v_ss(measured T_s) while T_s itself equilibrates
-early. That deficit is the correct transient of the initial-value problem,
-not solver error: the windowed first law (q″Δt = ΔE_stored + ablation
-enthalpy) closes throughout the approach, and the pre-ablation phase
-matches Landau's exact constant-flux heat-up T_s(t) = T₀ + 2q″√(t/(πρck)).
-The steady exact solution is simply not a valid reference before ~6τ: in
-a window at 2–4τ the residual deficit is ≈0.9% and mesh-INDEPENDENT
-(n=60→240 ladder, observed order 0.11). The window therefore sits at ≥6τ,
-where the remaining residual is the §12.3.2 half-cell T_s closure with the
-reaction zone inside the boundary half-cell — mesh-DEPENDENT as it should
-be (it shifts v_ss(measured T_s) but not the actual regression rate):
-~1.3% at Δz ≈ 2δ_r, ~7e-4 at the CI mesh Δz ≈ δ_r — so the pinned
-tolerance actually arms the ALE guard.
+The half-cell surface-temperature closure and finite front resolution
+contribute spatial error. The Laplace design locus remains a loose check;
+it is not the analytical reference for the measured regression rate.
+Prescribed net heat flux has no blowing correction. The depletion limiter
+is active as front cells approach deactivation.
 
-Blowing correction stays OFF (exact solution assumes prescribed net flux).
-Depletion limiter stays ON: the tanh roll-off is part of the regression
-physics here (front cells are consumed to zero) and its effect is contained
-in the pinned tolerances.
-
-CI runs no ConvergenceSpec: the case resolves a moving reaction front
-(δ_r ≈ δ·RT_s²/(E(T_s−T₀)) ≈ 53 μm ≈ Δz at the CI mesh) and a meaningful
-order study requires the report-mode Richardson ladder; the assert-mode
-QoIs below are all physics identities with pinned headroom instead.
-V-CPL-02b (broader front, E halved) doubles as the kinetics-limit
-insensitivity check of the ablation-temperature locus.
+## V-CPL-02 — Landau ablation: steady surface regression under ALE
 
 ### Quantities of interest (n = 240)
 
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
-| steady energy balance: v vs Landau v_ss(measured T_s) | 0.001949 | 0.00195 | 0.000893 | 0.0021 | yes | traveling-wave identity, exact at any E for c_gas = c_solid |
-| regression consistency: thickness slope vs gas generation | 0.001949 | 0.001948 | 0.0004392 | 0.0021 | yes | γ_gas = 0 ⇒ dL/dt = −ṁ‴_gas/ρ exactly |
-| mass ledger closure over plateau window | 0.7804 | 0.7793 | 0.001416 | 0.0049 | yes | total-mass drop vs ∫ ṁ″ dt; residual = holdup drift |
-| in-depth profile decay rate (surface-attached frame) | 0.001973 | 0.001949 | 0.0123 | 0.027 | yes | ln(T−T₀) slope over ζ/δ ∈ [0.75, 1.7], 12 cells |
-| design-locus regression rate (loose) | 0.001949 | 0.002 | 0.02568 | 0.1 | yes | leading-order Laplace locus only pins T_p to O(RT_p²/E); informational, tightens as E ↑ (see V-CPL-02b) |
-| back-face rise (semi-infinite validity) | 0.0003462 | 0 | 0.0003462 | 0.01 | yes | guards the semi-infinite assumption |
+| steady energy balance: v vs Landau v_ss(measured T_s) | 0.001952 | 0.001951 | 0.0003337 | 0.0021 | yes | steady first law with stationary virgin solid and c_gas = c_solid |
+| regression consistency: thickness slope vs gas generation | 0.001952 | 0.001952 | 2.133e-05 | 0.0021 | yes | γ_gas = 0 ⇒ dL/dt = −ṁ‴_gas/ρ exactly |
+| mass ledger closure over plateau window | 0.7771 | 0.7807 | 0.00462 | 0.0049 | yes | total-mass drop vs ∫ ṁ″ dt; residual = holdup drift |
+| in-depth profile decay rate (surface-attached frame) | 0.001967 | 0.001952 | 0.007865 | 0.027 | yes | ln(T−T₀) slope over ζ/δ ∈ [0.75, 1.7], 12 cells |
+| design-locus regression rate (loose) | 0.001952 | 0.002 | 0.0242 | 0.1 | yes | leading-order Laplace locus only pins T_p to O(RT_p²/E); informational, tightens as E ↑ (see V-CPL-02b) |
+| back-face rise (semi-infinite validity) | 0.0003587 | 0 | 0.0003587 | 0.01 | yes | guards the semi-infinite assumption |
 
 ![V-CPL-02 mlr_history](assets/V-CPL-02/V-CPL-02_mlr_history.png)
 
@@ -101,12 +75,12 @@ insensitivity check of the ablation-temperature locus.
 
 | n_cells | h | wall (s) | balance | consistency |
 | --- | --- | --- | --- | --- |
-| 60 | 0.01667 | 0.2645 | 0.003945 | 0.001565 |
-| 100 | 0.01 | 0.3305 | 0.0025 | 0.001839 |
-| 160 | 0.00625 | 0.5917 | 0.001867 | 0.0002906 |
-| 240 | 0.004167 | 1.466 | 0.000893 | 0.0004392 |
+| 60 | 0.01667 | 11.38 | 0.0006181 | 0.001283 |
+| 100 | 0.01 | 10.53 | 0.00116 | 0.00051 |
+| 160 | 0.00625 | 34.58 | 0.0003602 | 0.0001159 |
+| 240 | 0.004167 | 53.28 | 0.0003337 | 2.133e-05 |
 
-Observed order 1.016 (balance).
+Observed order 0.6363 (balance).
 
 ### Solver configuration
 
@@ -116,6 +90,44 @@ Observed order 1.016 (balance).
 | use_ale | true |
 | min_thickness | 0.0001 |
 | deactivation | true |
-| abstol | 1.0e-7 |
-| reltol | 1.0e-5 |
+| abstol | 1.0e-9 |
+| reltol | 1.0e-7 |
+| pressure_tolerance | 0.001 |
 
+## V-CPL-02b — Landau ablation: kinetics-limit insensitivity variant (E/2)
+
+### Quantities of interest (n = 320)
+
+| QoI | value | exact | error | tolerance | within tol | provenance |
+| --- | --- | --- | --- | --- | --- | --- |
+| steady energy balance: v vs Landau v_ss(measured T_s) | 0.001911 | 0.00191 | 0.0003182 | 0.002 | yes | identity must close at E = 50 kJ/mol as at 100 (locus check) |
+| regression consistency: thickness slope vs gas generation | 0.001911 | 0.00191 | 0.0004004 | 0.0017 | yes | γ_gas = 0 ⇒ dL/dt = −ṁ‴_gas/ρ exactly |
+| stationary far-field temperature | 3.481e-07 | 0 | 3.481e-07 | 0.0001 | yes | cold reaction gate and domain length qualify the steady reference |
+
+![V-CPL-02b mlr_history](assets/V-CPL-02b/V-CPL-02b_mlr_history.png)
+
+![V-CPL-02b mlr_history_error](assets/V-CPL-02b/V-CPL-02b_mlr_history_error.png)
+
+![V-CPL-02b convergence](assets/V-CPL-02b/V-CPL-02b_convergence.png)
+
+### Convergence
+
+| n_cells | h | wall (s) | balance | consistency |
+| --- | --- | --- | --- | --- |
+| 120 | 0.008333 | 19.78 | 0.004637 | 0.0002128 |
+| 200 | 0.005 | 50.78 | 0.0006218 | 0.0001949 |
+| 320 | 0.003125 | 100.3 | 0.0003182 | 0.0004004 |
+
+Observed order 2.749 (balance).
+
+### Solver configuration
+
+| setting | value |
+| --- | --- |
+| integrator | Rodas5P (default) |
+| use_ale | true |
+| min_thickness | 0.0001 |
+| deactivation | true |
+| abstol | 1.0e-9 |
+| reltol | 1.0e-7 |
+| pressure_tolerance | 0.001 |

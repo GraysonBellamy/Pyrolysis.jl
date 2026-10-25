@@ -23,12 +23,12 @@
 # pins focused on the relative energy flux); T and the gas field carry the
 # full space–time structure.
 #
-# Expected order: second. The gas converges at second order and the
-# temperature below it on coarse meshes (L2 rates 3.27, 1.70 on the CI
-# ladder; 1.63, 1.83, 1.92 from 64 to 512 cells): the upwind-biased face
-# temperature of the relative energy flux carries a pre-asymptotic
-# third-order error term of the opposite sign to the second-order one. A drop
-# below min_order flags a moving-mesh transport regression.
+# Expected order: second, from the centered spatial operators and reconstructed
+# ALE flux. The 16–64-cell temperature ladder is pre-asymptotic (L2 rates
+# 2.92, 1.38). The 128–512-cell ladder gives rates 1.86, 1.93 in both energy
+# formulations; tightening the time tolerances by 100 leaves those rates
+# unchanged to 0.001. The CI order check uses that resolved range, while the
+# report also retains the coarse meshes to show the approach to it.
 
 function _verification_case_vmms03()
     L = 0.01
@@ -55,7 +55,7 @@ function _verification_case_vmms03()
             k = T -> 0.20 + 3.0e-4 * T,
             λ = 2.0e-5,
         )
-        gas = GaseousComponent(:g, M = 0.028, c = 1000.0, k = 0.03, λ = 2.0e-5)
+        gas = GaseousComponent(:g, M = 0.028, c = 1000.0, k = 0.03)
         return Material(name = :VMMS03, components = (solid, gas), reactions = ())
     end
 
@@ -72,8 +72,14 @@ function _verification_case_vmms03()
                 bottom = HeatFluxBC(t -> mms_heat_flux(mat, fields, 0.0, t)),
             ),
             mass = (
-                top = MassFluxBC(t -> -mms_gas_flux(mat, fields, 2, z_top(t), t)),
-                bottom = MassFluxBC(t -> mms_gas_flux(mat, fields, 2, 0.0, t)),
+                top = MassFluxBC(
+                    fluxes = (g = t -> mms_gas_flux(mat, fields, 2, z_top(t), t),),
+                    inflow_temperature = (g = t -> fields.T(z_top(t), t),),
+                ),
+                bottom = MassFluxBC(
+                    fluxes = (g = t -> -mms_gas_flux(mat, fields, 2, 0.0, t),),
+                    inflow_temperature = (g = t -> fields.T(0.0, t),),
+                ),
             ),
         )
         return PyrolysisProblem(
@@ -154,20 +160,19 @@ function _verification_case_vmms03()
         solve_fn = solve_fn,
         qois = qois,
         ci = CIConfig(
-            n_cells = 32,
+            n_cells = 64,
             budget_s = 60.0,
             convergence = ConvergenceSpec(
-                # observed rates 3.27, 1.70 (see the header)
-                n_cells = [16, 32, 64],
+                n_cells = [128, 256, 512],
                 error_fn = l2_T_final,
                 expected_order = 2.0,
-                min_order = 1.5,
-                min_mean_order = 1.8,
+                min_order = 1.8,
+                min_mean_order = 1.85,
                 solve_kwargs = (abstol = 1e-11, reltol = 1e-9),
             ),
         ),
         report = (
-            n_cells_ladder = [16, 32, 64, 128],
+            n_cells_ladder = [16, 32, 64, 128, 256, 512],
             qoi_curves = (:T_profiles, :xi_profiles, :error_profiles, :thickness_history),
             curves = sol -> begin
                 m = length(sol.t)

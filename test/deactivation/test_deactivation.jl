@@ -32,17 +32,19 @@ function _ablator(
     radiating = false,
     from_bottom = false,
     porous = false,
+    porosity = 0.05,
     law = nothing,
     top = nothing,
-    mass_top = ConvectiveMassBC(h_m = 10.0, ξ_inf = 0.0),
+    mass_top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
     mesh = nothing,
     ξ_initial = nothing,
+    endpoint = nothing,
 )
     ρ, c, k = 1000.0, 1000.0, 1.0
     R, E, Tp, T0 = 8.314462618, 1.0e5, 700.0, 300.0
     v = 2.0e-3
     A = v^2 * E * (Tp - T0) * exp(E / (R * Tp)) / (k / (ρ * c) * R * Tp^2)
-    pores = porous ? (ρ_intrinsic = 1.25ρ, κ = 1e-12) : (;)
+    pores = porous ? (ρ_intrinsic = 1.25ρ, κ = 1e-12) : (φ = porosity,)
     solid = SolidComponent(
         :solid;
         ρ = ρ,
@@ -52,12 +54,13 @@ function _ablator(
         α = radiating ? 50.0 : 0.0,
         pores...,
     )
-    gas = GaseousComponent(:gas, M = 0.05, c = c, k = 0.02, λ = 1e-4)
+    gas = GaseousComponent(:gas, M = 0.05, c = c, k = 0.02)
     mat = Material(
         name = :ablator,
         components = (solid, gas),
         reactions = (Reaction(:ablate, 1 => 2; A = A, E = E, h = 1.0e6),),
         lateral_shrinkage_law = law,
+        gas_transport = LumpedTransfer(; endpoint),
     )
     heated = something(top, radiating ? RadiativeFluxBC(flux = q) : HeatFluxBC(q))
     thermal =
@@ -109,9 +112,9 @@ end
 # `n_bottom` cells, the layer interface at node `n_bottom + 1`.
 function _on_substrate(n_top, n_bottom; L_top = 2e-3, L_bottom = 1e-3)
     ρ, ρ_sub = 1000.0, 250.0
-    solid = SolidComponent(:solid; ρ = ρ, c = 1000.0, k = 1.0, λ = 1e-6)
-    sub = SolidComponent(:sub; ρ = ρ_sub, c = 1100.0, k = 0.06, λ = 1e-6)
-    gas = GaseousComponent(:gas, M = 0.05, c = 1000.0, k = 0.02, λ = 1e-4)
+    solid = SolidComponent(:solid; φ = 0.05, ρ = ρ, c = 1000.0, k = 1.0, λ = 1e-6)
+    sub = SolidComponent(:sub; φ = 0.8, ρ = ρ_sub, c = 1100.0, k = 0.06, λ = 1e-6)
+    gas = GaseousComponent(:gas, M = 0.05, c = 1000.0, k = 0.02)
     mat = Material(
         name = :on_substrate,
         components = (solid, sub, gas),
@@ -127,7 +130,7 @@ function _on_substrate(n_top, n_bottom; L_top = 2e-3, L_bottom = 1e-3)
         bc_set = BoundaryConditionSet(
             thermal = (top = HeatFluxBC(5e4), bottom = AdiabaticBC()),
             mass = (
-                top = ConvectiveMassBC(h_m = 10.0, ξ_inf = 0.0),
+                top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
                 bottom = ImpermeableBC(),
             ),
         ),
@@ -324,13 +327,15 @@ end
 end
 
 # The post-event test holds a merge's receiver to its own mass tolerance, the
-# one the domain test holds every later proposal to: three equal cells each
-# within their tolerance can merge into a receiver beyond it.
+# one the domain test holds every later proposal to. Equal-volume cells at
+# different initial temperatures have gas budgets proportional to 1/T.
+# Individually admissible negative trial inventories can exceed the receiver
+# budget when summed by a conservative merge.
 @testset "a merge's receiver is held to its own mass tolerance" begin
     cp = setup(_ablator(8); use_ale = true, deactivation = true)
     def, layout, cells = cp.def, cp.def.layout, cp.deactivation
     gas(i) = mass_index(layout, i, 2)
-    @test all(i -> cp.abstol[gas(i)] ≈ cp.abstol[gas(6)], 7:8)
+    @test all(i -> cp.abstol[gas(i)] / cp.abstol[gas(6)] ≈ cp.T0[6] / cp.T0[i], 7:8)
     for (k, expected) in ((0.6, true), (0.3, false))
         reset_cells!(cells, layout)
         u = copy(cp.u0)
@@ -343,7 +348,7 @@ end
         @test !inadmissible(u, layout, def.setup, cp.abstol)
         @test deactivate!(u, cells, def, 1.0) === :transferred
         @test top_live_cell(layout) == 6
-        @test u[gas(6)] ≈ -3k * cp.abstol[gas(6)]
+        @test u[gas(6)] ≈ -k * sum(cp.abstol[gas(i)] for i = 6:8)
         @test inadmissible(u, layout, def.setup, cp.abstol) == expected
     end
     @test DomainCheck(cp).abstol === cp.abstol
@@ -551,13 +556,15 @@ end
 
     # Through a solve: every cell that goes is below the threshold, widened by
     # the relative tolerance at a located event.
-    reltol = 1e-5
+    # The rapid ablation transient is resolved before event membership is tested.
+    reltol = 1e-6
     sol = Integration.solve(
         _ablator(30);
         use_ale = true,
         deactivation = true,
         band = ε_m,
-        abstol = 1e-7,
+        abstol = 1e-8,
+        pressure_tolerance = 0.001,
         reltol,
     )
     @test sol.retcode === :Success
@@ -603,7 +610,13 @@ end
     false,
 )
     gap(z) = 1e-3 < z < 1.5e-3
-    problem = _ablator(6; ξ_initial = [z -> gap(z) ? 0.0 : 1000.0, z -> gap(z) ? 1.0 : 0.0])
+    problem = _ablator(
+        6;
+        ξ_initial = [z -> gap(z) ? 0.0 : 1000.0, z -> gap(z) ? 1.0 : 0.0],
+        # ALE transport can introduce trace solid into the initially empty cell.
+        # The declared endpoint covers the entire q < 1e-3 blend interval.
+        endpoint = LumpedEndpoint(λ = 1e-6, κ = 0.0, max_skeletal_occupancy = 1e-3),
+    )
     cp = setup(problem; use_ale = moving, deactivation = true)
     def, layout, cells = cp.def, cp.def.layout, cp.deactivation
     ε_m = cells.threshold
@@ -629,8 +642,9 @@ end
             use_ale = true,
             deactivation = true,
             correction = EquidistributionCorrection(τ = EQUIDISTRIBUTION_TIME),
-            abstol = 1e-7,
-            reltol = 1e-5,
+            abstol = 1e-8,
+            reltol = 1e-6,
+            pressure_tolerance = 1e-3,
         )
         @test sol.retcode === :Success
         @test sol.outcome === :running
@@ -676,7 +690,7 @@ function _merge_pair(
     state_b;
     use_ale = true,
     components = _pair_components(),
-    ξ = (0.5, 0.4, 1e-4),
+    ξ = (0.3, 0.3, 1e-4),
 )
     NC = length(components)
     mat = Material(name = :pair, components = components, reactions = ())
@@ -727,9 +741,9 @@ end
 
 function _pair_components()
     c = 1e6
-    a = SolidComponent(:A, ρ = 1.0, c = c, k = 1.0, ρ_intrinsic = T -> 300 / T)
-    b = SolidComponent(:B, ρ = 1.0, c = c, k = 1.0, ρ_intrinsic = 1.0, κ = 1e-12)
-    g = GaseousComponent(:G, M = 0.028, c = c, k = 0.03, λ = 1e-5)
+    a = SolidComponent(:A, λ = 0.0, ρ = 1.0, c = c, k = 1.0, ρ_intrinsic = T -> 300 / T)
+    b = SolidComponent(:B, λ = 0.0, ρ = 1.0, c = c, k = 1.0, ρ_intrinsic = 1.0, κ = 1e-12)
+    g = GaseousComponent(:G, M = 0.028, c = c, k = 0.03)
     return (a, b, g)
 end
 
@@ -793,8 +807,8 @@ _sensible(laws, s) = sum(s.m[j] * sensible_enthalpy(laws.h[j], s.T) for j in eac
         # The gas at five times the solid's heat capacity: the merged
         # temperature is 677.2 K, the mass-weighted mean 669.0 K.
         components = (
-            SolidComponent(:s, ρ = 1000.0, c = 1000.0, k = 1.0),
-            GaseousComponent(:g, M = 0.028, c = 5000.0, k = 0.03, λ = 1e-5),
+            SolidComponent(:s, λ = 0.0, ρ = 1000.0, c = 1000.0, k = 1.0),
+            GaseousComponent(:g, M = 0.028, c = 5000.0, k = 0.03),
         )
         a, b = (m = [600.0, 20.0], T = 800.0), (m = [300.0, 2.0], T = 400.0)
         r = _merge_pair(a, b; components, ξ = (500.0, 1.0))
@@ -809,8 +823,8 @@ _sensible(laws, s) = sum(s.m[j] * sensible_enthalpy(laws.h[j], s.T) for j in eac
         # a T + b T²/2 = (h(T_a) + h(T_b))/2, the datum cancelling.
         ca, cb = 500.0, 2.0
         components = (
-            SolidComponent(:s, ρ = 1000.0, c = LinearProperty(ca, cb), k = 1.0),
-            GaseousComponent(:g, M = 0.028, c = 1000.0, k = 0.03, λ = 1e-5),
+            SolidComponent(:s, λ = 0.0, ρ = 1000.0, c = LinearProperty(ca, cb), k = 1.0),
+            GaseousComponent(:g, M = 0.028, c = 1000.0, k = 0.03),
         )
         a, b = (m = [600.0, 0.0], T = 800.0), (m = [600.0, 0.0], T = 400.0)
         r = _merge_pair(a, b; components, ξ = (500.0, 1.0))
@@ -845,7 +859,12 @@ const _masked_configurations = (
         options = (use_ale = true, radiation_model = BEER_LAMBERT),
     ),
     darcy = (
-        ablator = (porous = true, mass_top = DirichletPressureBC(101325.0)),
+        ablator = (
+            porous = true,
+            mass_top = AmbientGasBC(
+                GasReservoir(P = 101325.0, T = 300.0, mole_fractions = (gas = 1.0,)),
+            ),
+        ),
         options = (;),
     ),
     darcy_surface_balance = (
@@ -853,12 +872,17 @@ const _masked_configurations = (
             porous = true,
             radiating = true,
             top = _surface_balance_top,
-            mass_top = DirichletPressureBC(101325.0),
+            mass_top = AmbientGasBC(
+                GasReservoir(P = 101325.0, T = 300.0, mole_fractions = (gas = 1.0,)),
+            ),
         ),
         options = (use_ale = true, radiation_model = BEER_LAMBERT),
     ),
     lateral = (
-        ablator = (law = χ -> 1 - 0.2χ, mass_top = DiffusiveMassBC(0.01)),
+        ablator = (
+            law = χ -> 1 - 0.2χ,
+            mass_top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
+        ),
         options = (use_ale = true,),
     ),
 )
@@ -902,8 +926,7 @@ end
         config.options...,
     )
     layout = full.def.layout
-    name in (:darcy, :darcy_surface_balance) &&
-        @test full.def.setup.gas isa DarcyFickTransport
+    name in (:darcy, :darcy_surface_balance) && @test full.def.setup.gas isa LumpedTransfer
     rows = _compact_rows(layout, compact.def.layout)
     others = setdiff(1:length(full.u0), rows)
     u = zeros(length(full.u0))
@@ -975,8 +998,9 @@ end
         energy_state = energy,
         use_ale = moving,
         deactivation = true,
-        abstol = 1e-7,
-        reltol = 1e-5,
+        abstol = 1e-8,
+        reltol = 1e-6,
+        pressure_tolerance = 1e-3,
     )
     @test sol.retcode === :Success
     @test sol.outcome === :running
@@ -1014,8 +1038,9 @@ end
             use_ale = moving,
             deactivation = true,
             saveat = [0.0, 20.0],
-            abstol = 1e-7,
-            reltol = 1e-5,
+            abstol = 1e-8,
+            reltol = 1e-6,
+            pressure_tolerance = 1e-3,
         )
         @test sol.retcode === :Terminated
         @test sol.outcome === :burned_out
@@ -1031,8 +1056,9 @@ end
             use_ale = moving,
             deactivation = true,
             saveat = [0.0, t_event, 20.0],
-            abstol = 1e-7,
-            reltol = 1e-5,
+            abstol = 1e-8,
+            reltol = 1e-6,
+            pressure_tolerance = 1e-3,
         )
         k = findfirst(==(t_event), sol2.t)
         @test k !== nothing
@@ -1075,23 +1101,41 @@ end
     @test_throws ErrorException consistent_state!(u, cp.def, cp.ws, 0.0)
 end
 
-@testset "the domain test rejects proposals the error test accepts through a solve" begin
-    # The solver-chosen restart keeps the step through an event, and at a
-    # loose tolerance the error test accepts proposals after one that the
-    # domain test rejects.
+@testset "the domain test rejects error-accepted proposals with unresolved shrinking pores" begin
     policy = rodas5p_policy(KLUFactorization(); restart = :solver_chosen)
+    problem = _ablator(8; radiating = true, porosity = 0.3)
+    # Initially resolved pores become smaller than the mass/position error
+    # margin as cells shrink. The local error test alone cannot admit them.
     cp = setup(
-        _ablator(8; radiating = true);
+        problem;
         use_ale = true,
         radiation_model = BEER_LAMBERT,
         deactivation = true,
-        reltol = 1e-2,
-        abstol = 1e-4,
+        reltol = 1e-3,
+        abstol = 1e-5,
+        pressure_tolerance = 1e-3,
     )
     sol = integrate(cp; saveat = Float64[], integrator_policy = policy)
-    @test sol.retcode === :Success
+    @test !completed(sol)
+    @test sol.outcome === :pore_closure
     @test sol.statistics.domain_rejections > 0
     @test sol.statistics.largest_constraint_residual <= 1
+    @test minimum(filter(isfinite, vec(get_porosity(sol)))) > 0.29
+    # Refining the geometric and mass budget resolves the same physical
+    # trajectory and permits all four top-down deactivations.
+    refined = Integration.solve(
+        problem;
+        use_ale = true,
+        radiation_model = BEER_LAMBERT,
+        deactivation = true,
+        reltol = 1e-4,
+        abstol = 1e-6,
+        pressure_tolerance = 1e-3,
+        integrator_policy = policy,
+    )
+    @test completed(refined)
+    @test length(refined.events) == 4
+    @test refined.statistics.largest_constraint_residual <= 1
 end
 
 # A solve of the 30-cell ablator through its deactivations under `policy`,
@@ -1107,8 +1151,12 @@ function _stepped_solve(policy)
         _ablator(30);
         use_ale = true,
         deactivation = true,
-        abstol = 1e-7,
-        reltol = 1e-5,
+        abstol = 1e-8,
+        reltol = 1e-6,
+        pressure_tolerance = 1e-3,
+        # FBDF first-order startup resolves the initially absent gas against
+        # a 0.001 Pa budget before its order increases.
+        dtmin = 1e-18,
         integrator_policy = policy,
         callback = probe,
     )
@@ -1156,11 +1204,17 @@ end
 function _staggered_pair()
     ρ, c, R, E = 1000.0, 1000.0, 8.314462618, 1.0e5
     A = 40 * exp(E / (R * 700))
-    fast = SolidComponent(:fast, ρ = ρ, c = c, k = 1.0, λ = 1e-6)
-    slow = SolidComponent(:slow, ρ = ρ, c = c, k = 1.0, λ = 1e-6)
-    gas = GaseousComponent(:gas, M = 0.05, c = c, k = 0.02, λ = 1e-4)
+    fast = SolidComponent(:fast, φ = 0.3, ρ = ρ, c = c, k = 1.0, λ = 1e-6)
+    slow = SolidComponent(:slow, φ = 0.3, ρ = ρ, c = c, k = 1.0, λ = 1e-6)
+    gas = GaseousComponent(:gas, M = 0.05, c = c, k = 0.02)
     mat = Material(
         name = :pair,
+        # The initially sparse outer cell reaches q=1e-4 at its own 1 %
+        # threshold. Its finite channel supports the remaining skeleton
+        # throughout the declared endpoint blend (s ≤ 0.7e-3).
+        gas_transport = LumpedTransfer(
+            endpoint = LumpedEndpoint(λ = 1e-6, κ = 0.0, max_skeletal_occupancy = 1e-3),
+        ),
         components = (fast, slow, gas),
         reactions = (
             Reaction(:fast, 1 => 3; A = 1.02 * A, E = E, h = 0.0),
@@ -1175,7 +1229,7 @@ function _staggered_pair()
         bc_set = BoundaryConditionSet(
             thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
             mass = (
-                top = ConvectiveMassBC(h_m = 10.0, ξ_inf = 0.0),
+                top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
                 bottom = ImpermeableBC(),
             ),
         ),
@@ -1219,7 +1273,13 @@ end
     true,
     false,
 )
-    options = (use_ale = moving, deactivation = true, abstol = 1e-7, reltol = 1e-5)
+    options = (
+        use_ale = moving,
+        deactivation = true,
+        abstol = 1e-8,
+        reltol = 1e-6,
+        pressure_tolerance = 1e-3,
+    )
     discrete = Integration.solve(_ablator(30); options..., located_events = false)
     located = Integration.solve(_ablator(30); options..., located_events = true)
     @test located.retcode === discrete.retcode === :Success
@@ -1243,8 +1303,9 @@ end
         _ablator(4);
         use_ale = moving,
         deactivation = true,
-        abstol = 1e-7,
-        reltol = 1e-5,
+        abstol = 1e-8,
+        reltol = 1e-6,
+        pressure_tolerance = 1e-3,
     )
     cells, layout = cp.deactivation, cp.def.layout
     # The outer cell starts exactly at its threshold, where a located root
@@ -1307,8 +1368,9 @@ end
         use_ale = true,
         radiation_model = BEER_LAMBERT,
         deactivation = true,
-        abstol = 1e-7,
-        reltol = 1e-5,
+        abstol = 1e-8,
+        reltol = 1e-6,
+        pressure_tolerance = 1e-3,
     )
     def, layout, cells = cp.def, cp.def.layout, cp.deactivation
     du = zeros(length(cp.u0))
@@ -1361,8 +1423,9 @@ end
                 _ablator(6; from_bottom = true, t_end = 5.0);
                 use_ale = moving,
                 deactivation = true,
-                abstol = 1e-7,
-                reltol = 1e-5,
+                abstol = 1e-8,
+                reltol = 1e-6,
+                pressure_tolerance = 1e-3,
             )
         @test sol.retcode === :Terminated
         @test sol.outcome === :interior
@@ -1372,7 +1435,13 @@ end
 end
 
 @testset "deactivation under UMFPACK" begin
-    options = (use_ale = true, deactivation = true, abstol = 1e-7, reltol = 1e-5)
+    options = (
+        use_ale = true,
+        deactivation = true,
+        abstol = 1e-8,
+        reltol = 1e-6,
+        pressure_tolerance = 1e-3,
+    )
     klu = Integration.solve(_ablator(30); options...)
     umfpack =
         Integration.solve(_ablator(30); options..., linear_solver = UMFPACKFactorization())

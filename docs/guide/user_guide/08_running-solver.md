@@ -236,7 +236,7 @@ rejected, and the step cut by the controller's smallest factor, when
   tolerance, a live cell at or below absolute zero, or on a moving mesh
   crossed nodes (a non-positive cell volume) or a non-positive cross-section
   area;
-- under Darcy–Fick transport a live cell's porosity leaves `[0, 1]` by more
+- under gas transport a live cell's porosity leaves `[0, 1]` by more
   than the skeletal volume of its mass tolerances;
 - an algebraic row (a node velocity, a face intensity, the cross-section area
   or its lateral rate) misses its own equation by more than `reltol` times the
@@ -672,7 +672,7 @@ sol2 = integrate(cp; saveat = collect(0.0:1.0:300.0))   # bit-identical to sol1
 ```
 
 `setup` takes the keywords that define the problem the integrator runs
-(`energy_state`, `reltol`, `abstol`, `threshold`, `use_ale`, `radiation_model`,
+(`energy_state`, `reltol`, `abstol`, `threshold`, `pressure_tolerance`, `use_ale`, `radiation_model`,
 `correction`, `lagrangian`, `w_override`, `deactivation`, `band`, `sources`,
 and `time_scale`, the time scale of the velocity tolerances that `solve` sets
 from `dt`); `integrate` takes those of the integration (`maxiters`, `dt`,

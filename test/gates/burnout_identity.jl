@@ -77,13 +77,13 @@ digest(sol) = string(hash((sol.T, sol.m, sol.z, sol.t)); base = 16)
 # at z/L ∈ [0.2, 0.4], a fuel band that gasifies with no heat of reaction at
 # about 500–600 K; the gas diffuses up through the hotter layer above (the
 # top held near 900 K by convection) and vents at the top, picking up about
-# 330 K on its way out. Every component carries a gas-transfer coefficient,
+# 330 K on its way out. The condensed components carry gas-transfer coefficients,
 # so the solid-dominated column transports gas in its interior.
 function char_layer_problem(n_cells; t_end = 240.0)
     L = 0.01
     matrixc = SolidComponent(:matrix, ρ = 2000.0, c = 1000.0, k = 1.0, λ = 1e-4)
     fuel = SolidComponent(:fuel, ρ = 2000.0, c = 1000.0, k = 1.0, λ = 1e-4)
-    gas = GaseousComponent(:gas, M = 0.05, c = 1000.0, k = 0.02, λ = 1e-4)
+    gas = GaseousComponent(:gas, M = 0.05, c = 1000.0, k = 0.02)
     rxn = Reaction(:gasify, 2 => 3; A = 9.3e3, E = 8.0e4, h = 0.0)
     mat = Material(name = :VCPL06, components = (matrixc, fuel, gas), reactions = (rxn,))
     mesh = create_uniform_mesh(L, n_cells)
@@ -92,7 +92,10 @@ function char_layer_problem(n_cells; t_end = 240.0)
             top = ConvectiveBC(h = 1000.0, T_inf = 900.0),
             bottom = ConvectiveBC(h = 1000.0, T_inf = 300.0),
         ),
-        mass = (top = ConvectiveMassBC(h_m = 1.0, ξ_inf = 0.0), bottom = ImpermeableBC()),
+        mass = (
+            top = AmbientGasBC(GasReservoir(P = 0.0, T = 900.0)),
+            bottom = ImpermeableBC(),
+        ),
     )
     band(z) = (0.2 * L <= z <= 0.4 * L) ? 100.0 : 0.0
     return PyrolysisProblem(

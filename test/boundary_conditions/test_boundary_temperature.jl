@@ -28,7 +28,7 @@ using Pyrolysis.States: trial_temperature
 # Test helper: a tiny inert single-solid material (no gas component). Tests
 # below pass it with a zero outward flux to recover the no-blowing limit,
 # convenient for closed-form analytic verification.
-const _BC_TEST_SOLID = SolidComponent(:test_solid; ρ = 1000.0, c = 1000.0, k = 0.2)
+const _BC_TEST_SOLID = SolidComponent(:test_solid; λ = 0.0, ρ = 1000.0, c = 1000.0, k = 0.2)
 const _BC_TEST_MAT = Material(name = :bc_test_mat, components = (_BC_TEST_SOLID,))
 const _BC_ZERO_J = ntuple(_ -> 0.0, Val(1))
 
@@ -207,7 +207,7 @@ _bc_face(T_s) = BlowingFace(_BC_ZERO_J, T_s, _BC_TEST_MAT)
             state = _solve_bt(T_cell, k_eff, Δz_half, bc, 0.0, ε_eff)
 
             @test state.converged
-            @test state.iterations == 1  # Should converge immediately
+            @test state.iterations == 0  # Should converge immediately
             @test state.q_applied ≈ 0.0 atol=1e-12
             @test state.q_conducted ≈ 0.0 atol=1e-12
             @test state.T_surface ≈ T_cell rtol=1e-10
@@ -259,8 +259,8 @@ _bc_face(T_s) = BlowingFace(_BC_ZERO_J, T_s, _BC_TEST_MAT)
         end
 
         @testset "Outward gas flux enters only through blowing" begin
-            solid = SolidComponent(:test_solid; ρ = 1000.0, c = 1000.0, k = 0.2)
-            gas = GaseousComponent(:test_gas; M = 0.044, c = 1500.0, k = 0.03, λ = 1e-5)
+            solid = SolidComponent(:test_solid; λ = 0.0, ρ = 1000.0, c = 1000.0, k = 0.2)
+            gas = GaseousComponent(:test_gas; M = 0.044, c = 1500.0, k = 0.03)
             material = Material(name = :gas_flux_test, components = (solid, gas))
 
             # A prescribed flux has no convective member, so the gas crossing
@@ -499,8 +499,8 @@ _bc_face(T_s) = BlowingFace(_BC_ZERO_J, T_s, _BC_TEST_MAT)
             mat_face = Material(
                 name = :face,
                 components = (
-                    SolidComponent(:s; ρ = 1000.0, c = 1000.0, k = 0.2, ε = 0.9),
-                    GaseousComponent(:g; M = 0.03, c = 1000.0, k = 0.03, λ = 1e-5),
+                    SolidComponent(:s; λ = 0.0, ρ = 1000.0, c = 1000.0, k = 0.2, ε = 0.9),
+                    GaseousComponent(:g; M = 0.03, c = 1000.0, k = 0.03),
                 ),
                 reactions = (),
             )
@@ -588,7 +588,8 @@ _bc_face(T_s) = BlowingFace(_BC_ZERO_J, T_s, _BC_TEST_MAT)
 
         # An inert solid heated through the condition `top`, adiabatic below.
         function _heated_solid(top; tspan, output_times = nothing)
-            solid = SolidComponent(:solid, ρ = 1000.0, c = 2000.0, k = 0.2, ε = 0.9)
+            solid =
+                SolidComponent(:solid, λ = 0.0, ρ = 1000.0, c = 2000.0, k = 0.2, ε = 0.9)
             mat = Material(name = :TestSolid, components = (solid,), reactions = ())
             times = output_times === nothing ? (;) : (; output_times)
             return PyrolysisProblem(;
@@ -673,9 +674,10 @@ end  # main testset
 @testset "surface Newton: a_eff absorption vs. two-piece split" begin
     a_line, b_line = 0.30, 0.55
     ε_v, ε_c = 0.90, 0.80
-    gas = GaseousComponent(:g, M = 0.03, c = 1000.0, k = 0.03, λ = 1e-5)
+    gas = GaseousComponent(:g, M = 0.03, c = 1000.0, k = 0.03)
     virgin = SolidComponent(
         :v,
+        λ = 0.0,
         ρ = 500.0,
         c = 1500.0,
         k = 0.15,
@@ -684,6 +686,7 @@ end  # main testset
     )
     char = SolidComponent(
         :c,
+        λ = 0.0,
         ρ = 150.0,
         c = 1700.0,
         k = 0.08,
@@ -691,8 +694,8 @@ end  # main testset
         absorptivity = a_line + b_line * ε_c,
     )
     mat = Material(name = :line, components = (virgin, char, gas), reactions = ())
-    virgin_k = SolidComponent(:v, ρ = 500.0, c = 1500.0, k = 0.15, ε = ε_v)
-    char_k = SolidComponent(:c, ρ = 150.0, c = 1700.0, k = 0.08, ε = ε_c)
+    virgin_k = SolidComponent(:v, λ = 0.0, ρ = 500.0, c = 1500.0, k = 0.15, ε = ε_v)
+    char_k = SolidComponent(:c, λ = 0.0, ρ = 150.0, c = 1700.0, k = 0.08, ε = ε_c)
     mat_k =
         Material(name = :kirchhoff, components = (virgin_k, char_k, gas), reactions = ())
 
@@ -788,7 +791,7 @@ end
 
     # A non-finite cell temperature gives a non-finite result, which is returned
     # and not stored.
-    bad = @test_logs min_level = Logging.Warn solve!(
+    @test_throws Pyrolysis.Physics.TransportFailure solve!(
         poisoned,
         NaN,
         k_eff,
@@ -800,18 +803,15 @@ end
         ε;
         trial = trial_temperature,
     )
-    @test isnan(bad.T_s)
     @test poisoned.T_surface == fresh.T_surface
     @test poisoned.converged
 
 end
 
-# An exhausted iteration budget is recorded on the state; the trial-clamped
-# solve reports it there, not in the log.
-@testset "surface Newton: an exhausted iteration budget is recorded" begin
+# No unconverged surface flux may enter the residual.
+@testset "surface Newton diagnoses an exhausted iteration budget" begin
     bc = RadiativeBC(T_inf = 300.0) + ConvectiveBC(h = 10.0, T_inf = 300.0)
-    # One iteration cannot converge the quartic radiation balance.
-    state = @test_logs min_level = Logging.Warn _solve_bt(
+    @test_throws Pyrolysis.Physics.TransportFailure _solve_bt(
         800.0,
         0.15,
         1e-3,
@@ -820,9 +820,6 @@ end
         0.9;
         max_iter = 1,
     )
-    @test state.converged == false
-    @test state.iterations == 1
-    @test abs(state.q_applied - state.q_conducted) > 1.0
     # The default budget converges.
     state_ok = _solve_bt(800.0, 0.15, 1e-3, bc, 0.0, 0.9)
     @test state_ok.converged

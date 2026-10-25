@@ -12,6 +12,7 @@ post-processing.
 PyrolysisSolution
 Outputs.SolutionExtras
 SolverStatistics
+GasDiagnostics
 ```
 
 ## Accessors
@@ -21,6 +22,12 @@ get_times
 get_temperatures
 get_concentrations
 get_gas_generation_rate
+get_pressure
+get_partial_pressures
+get_intrinsic_gas_densities
+get_gas_composition
+get_porosity
+get_boundary_exchange
 n_timesteps
 succeeded
 completed
@@ -34,6 +41,7 @@ interpolate_solution
 ```@docs
 ConservationRecorder
 conservation_audit
+gas_species_audit
 Outputs.ledger_rates
 Outputs.live_inventories
 ```

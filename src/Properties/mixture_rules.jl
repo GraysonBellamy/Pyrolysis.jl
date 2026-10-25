@@ -131,10 +131,10 @@ end
 # Swelling-weighted (matrix) volume fractions
 # One universal γ semantics: every component contributes
 # v_j = γ_j·ξ_j/ρ_j of bulk volume — the same weighting used by the dilation
-# rate θ (Physics/volume_change.jl) and the mixture density below. For
+# rate θ (Physics/volume_change.jl). For
 # canonical materials (γ = 0 gas, γ = 1 condensed) this is a binary
 # include/exclude; a partial-γ component contributes the same volume fraction
-# here as it does to θ and ρ_bulk.
+# here as it does to θ.
 # ============================================================================
 
 # Sum of swelling-weighted specific volumes Σ γ_j·ξ_j/ρ_j
@@ -198,25 +198,27 @@ normalized to sum to 1 over the contributing components.
 
 The swelling factor γ has **one** meaning everywhere: the fraction of a
 component's intrinsic volume that contributes to the bulk (matrix) volume.
-This function shares it with the dilation rate θ = Σγⱼ(dξⱼ/dt)/ρⱼ and the
-mixture density 1/ρ = Σγⱼ·Yⱼ/ρⱼ. Consequences:
+This function shares its weights with the dilation rate θ = Σγⱼ(dξⱼ/dt)/ρⱼ.
+Skeletal occupancy and pore volume are separate quantities. Consequences:
 
 - Canonical gas (γ = 0): excluded — matches ThermaKin "when γ = 0, gaseous
   components do not contribute to the thermal conductivity" (ThermaKin2Ds
   Reference, Eqs. 8–10).
 - Canonical condensed (γ = 1): full ξ/ρ weight.
 - Partial γ: contributes the same γ-fraction of its volume here as it does
-  to θ and ρ_bulk. A γ = 0 condensed phase is consistently *volumeless*
-  (no strain, no density volume, no conductivity weight).
+  to θ. A γ = 0 condensed phase has no dilation or matrix conductivity weight;
+  it still occupies skeletal volume.
+
+This gas-exclusion limit does not identify our per-component gamma with
+ThermaKin's mixture gas swelling factor; in particular its liquid volume is
+not removed by `L SWELLING: 0` (ThermaKin Eqs. 3–4).
 
 Used for:
 - Effective thermal conductivity
 - Effective emissivity
 
-NOT used for the gas-transfer coefficient λ: gas diffusion happens *through*
-the pore space, so [`effective_gas_transfer`](@ref) mixes on the all-phase
-occupancy basis [`volume_fractions`](@ref) (gas included), never this
-matrix basis.
+Gas transport uses `transport_matrix_state`, which excludes gases even when
+a gas component has nonzero γ, and has its own explicit endpoint closure.
 """
 @inline function solid_volume_fractions(ξ::NTuple{NC,<:Real}, T::Real, material) where {NC}
     comps = material.components
@@ -277,75 +279,6 @@ the system on a fixed mesh.
     s = (φ_m - MIXING_BLEND_LO) / (MIXING_BLEND_HI - MIXING_BLEND_LO)
     w = s * s * (3 - 2 * s)
     return ntuple(j -> w * v_solid[j] + (1 - w) * v_full[j], Val(NC))
-end
-
-# ============================================================================
-# mixture_density with swelling
-# ============================================================================
-
-# Swelling-weighted specific volume of the bulk, mass fractions computed
-# inline: v = Σ γ_j·Y_j/ρ_j. Same universal γ semantics as
-# solid_volume_fractions and the θ kernel: γ applies to every component, with
-# a γ = 0 component contributing zero volume.
-@generated function _specific_vol_with_swelling_direct(
-    ξ,
-    inv_ρ,
-    T,
-    comps::Tuple,
-    ::Val{NC},
-) where {NC}
-    expr = quote
-        v = zero(_prop_type(ξ, T))
-    end
-    for i = 1:NC
-        push!(expr.args, quote
-            c = comps[$i]
-            γ = c.swelling_factor
-            if γ > 0.0
-                Y_i = ξ[$i] * inv_ρ  # Compute mass fraction inline
-                v += γ * Y_i / c.density(T)
-            end
-        end)
-    end
-    push!(expr.args, :(return v))
-    return expr
-end
-
-"""
-	mixture_density(ξ::NTuple{NC,Float64}, T::Float64, material::Material) -> Float64
-
-Compute bulk mixture density from mass concentrations.
-
-The bulk specific volume uses the universal swelling weighting
-
-	1/ρ = Σⱼ γⱼ·Yⱼ/ρⱼ
-
-— each component contributes the γ-fraction of its intrinsic volume to the
-bulk, exactly as it does to the dilation rate θ and to
-[`solid_volume_fractions`](@ref) (one γ semantics). For
-canonical materials (γ = 0 gas, γ = 1 condensed) this is the familiar
-condensed-only specific volume.
-
-PERFORMANCE: Uses optimized version that computes mass fractions inline to avoid
-allocating intermediate NTuple.
-"""
-@inline function mixture_density(ξ::NTuple{NC,<:Real}, T::Real, material) where {NC}
-    W = _prop_type(ξ, T)
-    ρ_total = sum(ξ)
-    if ρ_total < 1e-20
-        return zero(W)
-    end
-
-    inv_ρ = 1.0 / ρ_total
-    # Use optimized version that computes mass fractions inline
-    v_specific =
-        _specific_vol_with_swelling_direct(ξ, inv_ρ, T, material.components, Val(NC))
-
-    if v_specific < 1e-20
-        return zero(W)
-    end
-
-    return convert(W, 1.0 / v_specific)
 end
 
 """

@@ -96,7 +96,7 @@ Compute relative volume change rate [(m³/m³)/s].
 dV/dt / V = Σⱼ (γⱼ/ρⱼ) (dξⱼ/dt)
 
 Every component is weighted by its swelling factor γⱼ — the same universal
-γ semantics used by `Properties.mixture_density` (1/ρ = Σγⱼ·Yⱼ/ρⱼ) and
+γ-weighted bulk occupancy used by
 `Properties.solid_volume_fractions`: γⱼ is the fraction of
 component j's intrinsic volume that contributes to the bulk volume.
 Canonical values are γ = 0 (gas, escapes the matrix) and γ = 1 (condensed).

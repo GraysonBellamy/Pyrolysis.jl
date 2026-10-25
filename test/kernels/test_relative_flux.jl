@@ -241,8 +241,8 @@ const _gap_motion = (x, t) -> -0.64 * x * (x - 0.25) * (x - 0.75) * (x - 1.0)
 end
 
 @testset "an empty cell is not drained under the equidistribution correction" begin
-    s = SolidComponent(:solid; ρ = 1000.0, c = 1000.0, k = 0.5)
-    g = GaseousComponent(:gas; M = 0.032, c = 1000.0, k = 0.03, λ = 0.0)
+    s = SolidComponent(:solid; φ = 0.25, λ = 0.0, ρ = 1000.0, c = 1000.0, k = 0.5)
+    g = GaseousComponent(:gas; M = 0.032, c = 1000.0, k = 0.03)
     q(z) = z < 0.05 ? 2.0 : z < 0.1 ? 0.0 : 1.0
     problem = PyrolysisProblem(
         mesh = create_uniform_mesh(0.2, 4),

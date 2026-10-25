@@ -2,10 +2,19 @@ using Test
 using Pyrolysis
 
 # A solid→gas material, with a lateral shrinkage law on request, on a uniform
-# 1 cm column under a 10 kW/m² flux with Fickian venting at the top.
+# 1 cm column under a 10 kW/m² flux with lumped wall venting at the top.
 function _cross_section_problem(; lateral::Bool, tspan = (0.0, 0.02))
-    solid = SolidComponent(:solid; ρ = 1000.0, c = 1000.0, k = 0.2, ε = 0.9, γ = 1.0)
-    gas = GaseousComponent(:gas; M = 0.050, c = 1000.0, k = 0.02, λ = 1e-5, γ = 1.0)
+    solid = SolidComponent(
+        :solid;
+        φ = 0.25,
+        λ = 0.0,
+        ρ = 1000.0,
+        c = 1000.0,
+        k = 0.2,
+        ε = 0.9,
+        γ = 1.0,
+    )
+    gas = GaseousComponent(:gas; M = 0.050, c = 1000.0, k = 0.02, γ = 1.0)
     material = Material(
         name = :cross_section_test,
         components = (solid, gas),
@@ -17,7 +26,10 @@ function _cross_section_problem(; lateral::Bool, tspan = (0.0, 0.02))
         material = material,
         bc_set = BoundaryConditionSet(
             thermal = (top = HeatFluxBC(1e4), bottom = AdiabaticBC()),
-            mass = (top = DiffusiveMassBC(0.01), bottom = ImpermeableBC()),
+            mass = (
+                top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
+                bottom = ImpermeableBC(),
+            ),
         ),
         T_initial = z -> 300.0,
         ξ_initial = [z -> 1000.0, z -> 0.0],

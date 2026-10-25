@@ -8,61 +8,40 @@ required; omitting it underestimates gas pressure at low porosity.
 
 using ..Materials: R_GAS, GAS, is_gas, molar_mass, component_index
 
-# Floor on porosity used as a divisor — prevents 1/0 if a cell ever ends up
-# fully solid.
-const _PHI_FLOOR = 1e-12
+const POROSITY_FLOOR = 1e-12
 
-# ============================================================================
-# Ideal Gas Pressure Computation
-# ============================================================================
+"""
+    pore_state(ξ,T,material)
 
-# Sum of partial pressures Σⱼ ξⱼ R T / Mⱼ over gas components only.
-@generated function _gas_partial_pressure_sum(ξ, T, comps::Tuple, ::Val{NC}) where {NC}
-    expr = quote
-        N = zero(T)
-    end
-    for i = 1:NC
-        push!(expr.args, quote
-            c = comps[$i]
-            if is_gas(c) && molar_mass(c) > 0.0
-                N += ξ[$i] * R_GAS * T / molar_mass(c)
-            end
-        end)
-    end
-    push!(expr.args, :(return N))
-    return expr
+Central ideal-gas pore state from nonnegative property concentrations [kg/m³
+bulk] and an admissible property temperature [K]. Raw porosity is one minus
+condensed skeletal occupancy, independent of γ. The common C¹ divisor guard
+is an identity for φ ≥ 2 POROSITY_FLOOR. Its use on trial states does not make
+zero physical pore volume admissible. Vacuum has exactly zero pressures,
+intrinsic densities and fractions, without an imposed background species.
+"""
+@inline function pore_state(ξ::NTuple{NC}, T, material) where {NC}
+    raw = 1-skeletal_volume_fraction(ξ, T, material)
+    φ = smooth_floor(raw, POROSITY_FLOOR)
+    ρ = map((c, x)->is_gas(c) ? x/φ : zero(x+T), material.components, ξ)
+    p = map((c, r)->is_gas(c) ? r*R_GAS*T/molar_mass(c) : zero(r), material.components, ρ)
+    P = sum(p)
+    mass = sum(ρ)
+    x = primal(P) == 0 ? map(zero, p) : map(v->v/P, p)
+    Y = primal(mass) == 0 ? map(zero, ρ) : map(v->v/mass, ρ)
+    return (; raw_porosity = raw, φ, ρ, p, P, x, Y)
 end
 
-"""
-	ideal_gas_pressure(ξ::NTuple{NC,Float64}, T::Float64, φ::Float64, material) -> Float64
-
-Compute ideal gas pressure in a porous medium from mass concentrations of gas
-components and local porosity.
-
-	P = Σⱼ (ξⱼ × R × T / Mⱼ) / φ   for gaseous components j
-
-# Arguments
-- `ξ`: Mass concentrations of all components [kg/m³]
-- `T`: Temperature [K]
-- `φ`: Porosity (gas volume fraction) [-], expected in (0, 1]
-- `material`: Material definition with components
-
-# Returns
-- `P`: Pressure [Pa]
-
-# Notes
-Only components with `phase == GAS` and `molar_mass > 0` contribute to the partial
-pressure sum. Solid and liquid components are ignored. `φ` is floored at $(_PHI_FLOOR)
-to keep the divisor well-defined if a cell becomes fully solid.
-"""
-@inline function ideal_gas_pressure(
-    ξ::NTuple{NC,<:Real},
-    T::Real,
-    φ::Real,
-    material,
-) where {NC}
-    N = _gas_partial_pressure_sum(ξ, T, material.components, Val(NC))
-    return N / max(φ, _PHI_FLOOR)
+"""Ideal-gas pressure [Pa] using the common guarded porosity divisor."""
+@inline function ideal_gas_pressure(ξ::NTuple, T, φ, material)
+    pore = smooth_floor(φ, POROSITY_FLOOR)
+    return sum(
+        map(
+            (c, x)->is_gas(c) ? x*R_GAS*T/(molar_mass(c)*pore) : zero(x+T),
+            material.components,
+            ξ,
+        ),
+    )
 end
 
 """
@@ -75,7 +54,7 @@ single-species inverse of [`ideal_gas_pressure`](@ref):
 	ξⱼ = P · Mⱼ · φ / (R · T),  φ = max(1 − skeletal_volume_fraction(ξ, T), 0)
 
 Use this to initialize a background air component at ambient pressure in
-DarcyFick-mode problems: a pore space initialized to vacuum
+gas-bearing problems: a pore space initialized to vacuum
 (all gas ξⱼ = 0) against a 101325 Pa pressure boundary spuriously advects
 early product gas *inward* down the absolute-pressure slope, instead of the
 gas being resisted by ~1 atm of pore air.
@@ -88,7 +67,7 @@ add — this function pressurizes `species` alone to `P`.
 
 # Example
 ```julia
-air = GaseousComponent(:AIR, M = 0.02897, c = 1006.0, k = 0.026, λ = 2e-5)
+air = GaseousComponent(:AIR, M = 0.02897, c = 1006.0, k = 0.026,)
 # ... material includes `air`; ξ₀ is the condensed initial composition ...
 ξ_air = background_gas_concentration(material, :AIR, ξ₀, 300.0)
 ```
@@ -126,6 +105,12 @@ function background_gas_concentration(
             "background_gas_concentration: component $(c.name) has no molar mass",
         ),
     )
-    φ = max(1 - skeletal_volume_fraction(ξ, T, material), 0.0)
+    isfinite(P) && P >= 0 ||
+        throw(ArgumentError("background pressure must be finite and nonnegative"))
+    isfinite(T) && T > 0 ||
+        throw(ArgumentError("background temperature must be finite and positive"))
+    φ = 1 - skeletal_volume_fraction(ξ, T, material)
+    φ >= 2POROSITY_FLOOR ||
+        throw(ArgumentError("background gas requires positive physical pore volume"))
     return P * M * φ / (R_GAS * T)
 end

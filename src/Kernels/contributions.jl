@@ -62,6 +62,13 @@ struct Contributions{NC,T}
     rates::Vector{T}
     heats::Vector{T}
     species::Vector{T}
+    p_surface::Matrix{T}
+    darcy_velocity::Vector{T}
+    surface_residual::Vector{Float64}
+    surface_iterations::Vector{Int}
+    boundary_enthalpy::Vector{T}
+    boundary_heat::Vector{T}
+    surface_pressure_raw::Vector{T}
 end
 
 """
@@ -94,6 +101,13 @@ function Contributions{T}(
         zeros(T, NR),
         zeros(T, NR),
         zeros(T, NC),
+        zeros(T, NC, n_faces),
+        zeros(T, n_faces),
+        zeros(n_faces),
+        zeros(Int, n_faces),
+        zeros(T, n_faces),
+        zeros(T, n_faces),
+        zeros(T, n_faces),
     )
 end
 
@@ -103,6 +117,13 @@ end
 Zero every flux and source before the kernels run.
 """
 function reset!(c::Contributions)
+    fill!(c.p_surface, zero(eltype(c.p_surface)))
+    fill!(c.darcy_velocity, zero(eltype(c.darcy_velocity)))
+    fill!(c.surface_residual, 0.0)
+    fill!(c.surface_iterations, 0)
+    fill!(c.boundary_enthalpy, zero(eltype(c.boundary_enthalpy)))
+    fill!(c.boundary_heat, zero(eltype(c.boundary_heat)))
+    fill!(c.surface_pressure_raw, zero(eltype(c.surface_pressure_raw)))
     fill!(c.F_mass, zero(eltype(c.F_mass)))
     fill!(c.F_energy, zero(eltype(c.F_energy)))
     fill!(c.S_mass, zero(eltype(c.S_mass)))

@@ -159,9 +159,15 @@ const N2_BLOWN = GasSpecies(
 
 # A material whose one gas component stands for the lumped outflow; its own
 # properties are never read when `volatiles` is given.
-function _carrier_material(; cp = 1000.0, k = 0.02, M = 0.050)
-    solid = SolidComponent(:solid; ρ = 1000.0, c = 1000.0, k = 0.2, ε = 0.9)
-    gas = GaseousComponent(:gas; M = M, c = cp, k = k, λ = 1e-5)
+function _carrier_material(;
+    cp = 1000.0,
+    k = 0.02,
+    M = 0.050,
+    name = :gas,
+    validate_properties = true,
+)
+    solid = SolidComponent(:solid; λ = 0.0, ρ = 1000.0, c = 1000.0, k = 0.2, ε = 0.9)
+    gas = GaseousComponent(name; M = M, c = cp, k = k, validate_properties)
     rxn = Reaction(:decomp, 1 => 2, A = 1e5, E = 5e4, h = 1e5)
     return Material(name = :carrier, components = (solid, gas), reactions = (rxn,))
 end
@@ -264,6 +270,10 @@ const REFERENCE = (
     ),
 )
 
+# Measure the specialized evaluator after warming both wrapper and model.
+_blowing_bytes(model::M, face::F, h, T) where {M,F} =
+    @allocated blowing_state(model, face, h, T)
+
 @testset "Blowing models" begin
 
     # ========================================================================
@@ -328,7 +338,14 @@ const REFERENCE = (
         # Zero outflow: exactly 1. Net inflow: the free-stream Couette film.
         m = PropertyRatioFilm(NITROGEN; volatiles = SURROGATE)
         @test blowing_ratio(m, _face(mat, 0.0, 870.0), h, T_inf) === 1.0
-        s_in = blowing_state(m, _face(mat, -4.0, 870.0), h, T_inf)
+        @test_throws ArgumentError blowing_state(m, _face(mat, -4.0, 870.0), h, T_inf)
+        suction = _carrier_material(
+            name = NITROGEN.name,
+            M = NITROGEN.molar_mass,
+            cp = NITROGEN.heat_capacity,
+            validate_properties = false,
+        )
+        s_in = blowing_state(m, _face(suction, -4.0, 870.0), h, T_inf)
         @test s_in.φ ≈ -4e-3 * NITROGEN.heat_capacity(870.0) / h rtol = 1e-14
         @test s_in.χ > 1
 
@@ -394,7 +411,14 @@ const REFERENCE = (
         s_cold = blowing_state(m, _face(mat, 8.0, 350.0), 11.2, 360.0)
         @test s_cold.ψ == 1
         @test s_cold.χ ≈ blowing_factor(s_cold.φ) rtol = 1e-14
-        s_in = blowing_state(m, _face(mat, -8.0, 870.0), 11.2, 360.0)
+        @test_throws ArgumentError blowing_state(m, _face(mat, -8.0, 870.0), 11.2, 360.0)
+        suction = _carrier_material(
+            name = NITROGEN.name,
+            M = NITROGEN.molar_mass,
+            cp = NITROGEN.heat_capacity,
+            validate_properties = false,
+        )
+        s_in = blowing_state(m, _face(suction, -8.0, 870.0), 11.2, 360.0)
         @test s_in.ψ == 1 && s_in.χ > 1
 
         # Pooled gas keeps less exchange than the light-gas form at the same φ,
@@ -461,13 +485,12 @@ const REFERENCE = (
         # lumped description: same Γ ratio, same molar mass, same diffusivity
         # (its Fuller volume on the model, the calculator's D on the lumped gas
         # differ by the Fuller constant only).
-        solid = SolidComponent(:solid; ρ = 1000.0, c = 1000.0, k = 0.2, ε = 0.9)
+        solid = SolidComponent(:solid; λ = 0.0, ρ = 1000.0, c = 1000.0, k = 0.2, ε = 0.9)
         g1 = GaseousComponent(
             :pyro;
             M = 0.042,
             c = SURROGATE.heat_capacity,
             k = SURROGATE.thermal_conductivity,
-            λ = 1e-5,
         )
         mat1 = Material(
             name = :one,
@@ -494,8 +517,8 @@ const REFERENCE = (
         @test p_mix.χ ≈ p_lump.χ rtol = 2e-3
         @test p_mix.Y ≈ p_lump.Y rtol = 2e-3
 
-        # Free-stream gas venting from the pores is purge at the face: it
-        # counts in the outflow but not in the face composition.
+        # Pooling uses the physical surface composition when the free-stream
+        # species participates in outward flow.
         # The CFD-case polynomials are fitted below 1200 K; the component validator
         # samples the whole property bracket, so skip it for this fixture.
         n2 = GaseousComponent(
@@ -503,7 +526,6 @@ const REFERENCE = (
             M = 0.028014,
             c = NITROGEN.heat_capacity,
             k = NITROGEN.thermal_conductivity,
-            λ = 1e-5,
             validate_properties = false,
         )
         mat2 = Material(
@@ -512,7 +534,23 @@ const REFERENCE = (
             reactions = (Reaction(:d, 1 => 2, A = 1e5, E = 5e4, h = 1e5),),
         )
         m2 = PoolingFilm(NITROGEN; diffusion_volume = (pyro = 65.4,))
-        s_n2only = blowing_state(m2, BlowingFace((0.0, 0.0, 8e-3), T_s, mat2), h, T_inf)
+        @test_throws ArgumentError blowing_state(
+            m2,
+            BlowingFace((0.0, 0.0, 8e-3), T_s, mat2),
+            h,
+            T_inf,
+        )
+        s_n2only = blowing_state(
+            m2,
+            BlowingFace(
+                (0.0, 0.0, 8e-3),
+                T_s,
+                mat2;
+                surface_mole_fractions = (0.0, 0.0, 1.0),
+            ),
+            h,
+            T_inf,
+        )
         @test s_n2only.Y == 0
         @test s_n2only.Λ ≈ 1 atol = 1e-12
         # The logistic switch does not reach 1 at Λ = 1: ψ(1) = ψ0 + (1 − ψ0)/(1 + e^{−6.5}),
@@ -522,9 +560,35 @@ const REFERENCE = (
         φ_n2 = 8e-3 * NITROGEN.heat_capacity(T_s) / h
         @test s_n2only.φ ≈ φ_n2 rtol = 1e-12
         @test s_n2only.χ ≈ ψ1 * blowing_factor(φ_n2 / ψ1) rtol = 1e-10
-        s_both = blowing_state(m2, BlowingFace((0.0, 8e-3, 2e-3), T_s, mat2), h, T_inf)
+        s_both = blowing_state(
+            m2,
+            BlowingFace(
+                (0.0, 8e-3, 2e-3),
+                T_s,
+                mat2;
+                surface_mole_fractions = (0.0, 0.1, 0.9),
+            ),
+            h,
+            T_inf,
+        )
         @test 0 < s_both.Y < p_mix.Y          # the nitrogen share dilutes the face
         @test s_both.Λ > p_mix.Λ
+
+        # Heterogeneous condensed/gas property types must not allocate when
+        # checking species support, with or without a solved surface state.
+        for face in (
+            BlowingFace((0.0, 8e-3, 0.0), T_s, mat2),
+            BlowingFace(
+                (0.0, 8e-3, 2e-3),
+                T_s,
+                mat2;
+                surface_mole_fractions = (0.0, 0.1, 0.9),
+            ),
+        )
+            blowing_state(m2, face, h, T_inf)
+            _blowing_bytes(m2, face, h, T_inf)
+            @test _blowing_bytes(m2, face, h, T_inf)==0
+        end
 
         # Wilke mixing: two identical species give the species' conductivity;
         # two different ones lie between them.
@@ -538,7 +602,6 @@ const REFERENCE = (
                     M = 0.042,
                     c = SURROGATE.heat_capacity,
                     k = SURROGATE.thermal_conductivity,
-                    λ = 1e-5,
                 ),
             ),
             reactions = (Reaction(:d, 1 => 2, A = 1e5, E = 5e4, h = 1e5),),
@@ -561,13 +624,18 @@ const REFERENCE = (
               (5 * SURROGATE.heat_capacity(T_s) + 3 * NITROGEN.heat_capacity(T_s)) / 8 rtol =
             1e-12
 
-        # Components flowing inward do not enter the leaving mixture.
-        s_in = blowing_state(
+        # Mixed incoming/outgoing empirical states have no qualified extension.
+        @test_throws ArgumentError blowing_state(
             PropertyRatioFilm(NITROGEN),
             BlowingFace((0.0, 8e-3, -1e-3), T_s, mat2),
             h,
             T_inf,
         )
-        @test s_in.φ ≈ 7e-3 / 8e-3 * s_mix.φ rtol = 1e-12
+        # The constant-property Couette balance uses the signed cp sum,
+        # including counterflow at zero net mass flow.
+        face=BlowingFace((0.0, 1e-3, -1e-3), T_s, mat2)
+        expected=1e-3*(SURROGATE.heat_capacity(T_s)-NITROGEN.heat_capacity(T_s))/h
+        @test blowing_state(CouetteFilm(), face, h, T_inf).φ≈expected rtol=1e-13
+
     end
 end

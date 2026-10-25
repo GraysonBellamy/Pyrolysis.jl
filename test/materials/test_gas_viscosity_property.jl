@@ -28,12 +28,12 @@ using Pyrolysis.Properties: skeletal_volume_fraction, effective_permeability
 using Pyrolysis.Physics: ideal_gas_pressure, background_gas_concentration
 using Pyrolysis.Materials: DepletionLimiter
 using Pyrolysis.BoundaryConditions:
-    BoundaryConditionSet, DirichletThermalBC, DirichletPressureBC, ImpermeableBC
+    BoundaryConditionSet, DirichletThermalBC, AmbientGasBC, GasReservoir, ImpermeableBC
 
 # Minimal Darcy-capable material; `gas_viscosity` overridable per case.
 function _visc_material(; kwargs...)
     virgin = SolidComponent(:wood, ρ = 500.0, c = 1500.0, k = 0.15, λ = 1e-5, κ = 1e-14)
-    gas = GaseousComponent(:pyrgas, M = 0.06, c = 1800.0, k = 0.03, λ = 5e-5)
+    gas = GaseousComponent(:pyrgas, M = 0.06, c = 1800.0, k = 0.03)
     return Material(;
         name = :visc_test,
         components = (virgin, gas),
@@ -49,7 +49,12 @@ function _visc_derived(mat, T)
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
-            mass = (top = DirichletPressureBC(101325.0), bottom = ImpermeableBC()),
+            mass = (
+                top = AmbientGasBC(
+                    GasReservoir(P = 101325.0, T = 300.0, mole_fractions = (pyrgas = 1.0,)),
+                ),
+                bottom = ImpermeableBC(),
+            ),
         ),
         ξ_initial = [z -> 450.0, z -> 0.5],
         tspan = (0.0, 1.0),
@@ -62,7 +67,7 @@ function _visc_derived(mat, T)
     end
     du = zeros(length(u))
     Pyrolysis.Assembly.residual!(du, u, cp.def, 0.0, cp.ws)
-    @assert cp.def.setup.gas isa Pyrolysis.States.DarcyFickTransport
+    @assert cp.def.setup.gas isa LumpedTransfer
     ds, _ = Pyrolysis.Assembly.buffers(cp.ws, cp.def, Float64)
     return ds
 end
@@ -198,7 +203,7 @@ end
                 λ = 0.0,
                 ρ_intrinsic = 1e5,
             )
-            gas = GaseousComponent(:gas, M = M_gas, c = 1000.0, k = 0.03, λ = 0.0)
+            gas = GaseousComponent(:gas, M = M_gas, c = 1000.0, k = 0.03)
             rxn = Reaction(:generate, 1 => 2; A = ġ, E = 0.0, h = 0.0, n = 0.0)
             mat = Material(
                 name = :VGT02_visc,
@@ -214,7 +219,12 @@ end
                     top = DirichletThermalBC(T_iso),
                     bottom = DirichletThermalBC(T_iso),
                 ),
-                mass = (top = DirichletPressureBC(P∞), bottom = ImpermeableBC()),
+                mass = (
+                    top = AmbientGasBC(
+                        GasReservoir(P = P∞, T = T_iso, mole_fractions = (gas = 1.0,)),
+                    ),
+                    bottom = ImpermeableBC(),
+                ),
             )
             prob = PyrolysisProblem(
                 mesh = mesh,

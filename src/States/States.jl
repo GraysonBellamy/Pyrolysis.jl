@@ -28,7 +28,6 @@ using ..Meshes
 import ..Materials: n_components
 import ..Meshes: n_cells, n_nodes
 
-include("guards.jl")
 include("layout.jl")
 include("caloric.jl")
 include("derived.jl")
@@ -49,7 +48,7 @@ export sensible_enthalpy, enthalpy_slope, enthalpy_law, TabulatedEnthalpy, Calor
 export component_enthalpies, component_enthalpy_slopes, component_heat_capacities
 export CaloricExtension, regularization, extended_energy, extended_capacity
 export invert_caloric
-export GasTransport, NoGasTransport, FickTransport, DarcyFickTransport
+export GasTransport, NoGasTransport
 export CellReference, StateSetup, DerivedState, derive!, energy_state_value
 export abstol_vector
 export CarriedField, CONVERSION_HISTORY, material_axes, physical_tensor

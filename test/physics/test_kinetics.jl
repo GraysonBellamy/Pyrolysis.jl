@@ -193,8 +193,8 @@ _onset_slope(x) = 3(_ONSET_S - 2_ONSET_Y) * x^2 + 2(3_ONSET_Y - _ONSET_S) * x
         mat = Material(
             name = :gate_thread,
             components = (
-                SolidComponent(:virgin; ρ = 1000.0, c = 1000.0, k = 0.2),
-                GaseousComponent(:gas; M = 0.05, c = 1000.0, k = 0.02, λ = 1e-5),
+                SolidComponent(:virgin; λ = 0.0, ρ = 1000.0, c = 1000.0, k = 0.2),
+                GaseousComponent(:gas; M = 0.05, c = 1000.0, k = 0.02),
             ),
             reactions = (
                 Reaction(

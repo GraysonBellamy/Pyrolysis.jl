@@ -137,9 +137,10 @@ term** (the sensible enthalpy a reaction moves from its reactant to its
 products at the local temperature), and $Q_\mathrm{rad}$ the in-depth
 radiation the cells absorb (nonzero under `BEER_LAMBERT` only; under
 `SURFACE_ABSORPTION` the absorbed flux is part of the boundary condition's
-flux). At the exposed surface the gas leaves at the surface temperature $T_s$,
-so the carried term there is $\sum_j h_j(T_s)J_j$; the surface energy
-balance itself has no gas-enthalpy term (§7, §12.2).
+flux). At a boundary the signed donor sum $H_r$ uses the surface temperature
+for outflow and the specified incoming temperature for inflow. The boundary
+energy is $H_r-q_r$ with heat and enthalpy defined at the same control surface
+(§9.9).
 
 This is the law the energy ledger discretizes, and it is a balance of the
 conserved quantity: the change of composition at fixed temperature (the term
@@ -382,8 +383,8 @@ $H_\mathrm{live}-\int\dot H_\mathrm{in}\,dt$ is a linear invariant of the
 semi-discrete system, exactly as the mass ledger's. Carried as an extra state
 of a fixed-step solve, the ledger integral closes the inventory to round-off
 (at most $10^{-13}$ of the integrated rate in `test/outputs/test_energy_ledger.jl`,
-on a gasifying column whose integrated rate exceeds $10^5$ J, under Fickian and
-Darcy–Fick transport).
+on a gasifying column whose integrated rate exceeds $10^5$ J, under lumped wall and
+gas transport).
 
 **Temperature form.** $H_\mathrm{live}$ is a nonlinear function of the state,
 and the integrator advances $T$ and $m$, not $H$. The identity
@@ -395,7 +396,7 @@ $H_\mathrm{live}$ departs from the integral of the rate by the method's local
 error. The closure therefore **converges at the integrator's order**: in the
 same module test, with fixed steps of a fourth-order method halved three
 times, the defect falls at observed orders rising toward four (2.1, 2.5, 3.2
-under Fickian transport; 2.7, 3.3, 4.3 under Darcy–Fick), the rise being the
+under lumped wall transport; 2.7, 3.3, 4.3 under gas), the rise being the
 pre-asymptotic approach.
 
 ### 16.5.3 Per-step accumulation: the recorder
@@ -479,7 +480,7 @@ gas-enthalpy term on top of the enthalpy the face flux already carries, the
 ledger rate, read from the same contributions, would carry both and the audit
 would still close. The energy row is therefore checked term by term against
 an independent construction in `test/outputs/test_energy_ledger.jl`, in both
-energy forms, under Fickian and Darcy–Fick transport, on uniform and stretched
+energy forms, with wall and pressure-driven lumped transport, on uniform and stretched
 meshes: every face energy flux equals conduction (Fourier between cells with
 the distance-weighted harmonic-mean conductivity; the condition's flux
 conducted out of the cell on the boundary) plus the enthalpy its mass fluxes
@@ -490,10 +491,11 @@ more than 1 K, so an omission, a double count or enthalpy taken at the cell
 temperature would show; and every cell's energy row equals the sum of its
 conduction, carried, source and formation terms to $10^{-11}$ of their scale.
 Separately, `test/boundary_conditions/test_boundary_temperature.jl` asserts
-that under a prescribed flux the solved surface temperature and conducted
-flux are identical with and without a gas flux across the face: the surface
-balance carries no gas-enthalpy term. The exact-solution cases of §18 are the
-further, physical anchors.
+that under a prescribed heat flux the solved surface temperature and conducted
+flux are identical with and without gas flow. Independently,
+`test/kernels/test_gas_exchange.jl` checks incoming enthalpy, counterflow and
+the wall-film/control-surface conversion. The exact-solution cases of §18
+provide physical anchors.
 
 ---
 
@@ -502,26 +504,23 @@ further, physical anchors.
 On a live boundary face the ledger's term is
 
 $$
--F^E_f A_f = \Big(q_{\mathrm{in},f}-\sum_j F_{j,f}\,h_j(T_s)\Big)A_f ,
+-F^E_f A_f=(q_r-H_r)A_f.
 $$
 
-where $q_{\mathrm{in},f}=k\,(T_s-T_\mathrm{cell})/d$ is the heat conducted from the
-face into its cell at the surface temperature $T_s$ (§12.2). For a condition
-that goes through the surface energy balance, $T_s$ is the root of
+Here $H_r$ is the signed carried-enthalpy sum: outward species use $T_s$,
+inward species their prescribed incoming temperature. For an LTE thermal
+film, $q_r=q_s+H_r-H_s$ and $H_s=\sum_jJ_jh_j(T_s)$. Its surface temperature
+solves $q_s=k(T_s-T_{cell})/d$, jointly with the mass film and hydraulic
+condition when coupled. Thus the same total flux is $q_s-H_s$; adding either
+an extra incoming heating term or an outgoing enthalpy sink would double count
+energy. Adiabatic, prescribed-heat and prescribed-temperature boundaries use
+their heat directly with $H_r$. Blowing modifies the thermal-film heat and
+uses the signed species fluxes (§9.9).
 
-$$
-q_\mathrm{BC,applied}(T_s) = q_\mathrm{cond}(T_s),
-$$
-
-so the conducted flux **is** the applied flux of the condition at $T_s$: the
-absorbed incident radiation less the re-radiation and convective exchange for
-a `RadiativeFluxBC`-based condition, the prescribed $q(t)$ for a `HeatFluxBC`,
-the flux the prescribed temperature conducts for a `DirichletThermalBC`, zero
-for an `AdiabaticBC`. The surface balance carries no gas-enthalpy term: the gas
-leaving through the face takes its enthalpy at $T_s$ through the carried term
-of the face's energy flux. A blowing model (§12.3.3) lowers the convective
-coefficient at the face's outward mass flux; it changes $q_{\mathrm{in},f}$ and
-adds no enthalpy term.
+`get_boundary_exchange(sol, tag)` reports `heat` ($q_r$),
+`enthalpy` ($H_r$), species fluxes and the converged surface state.
+These fields are the assembly's actual exchanges and are the quantities to
+use for reservoir-control-surface accounting.
 
 The solution exposes the components of the exposed face's flux at every saved
 time (`sol.extras`, §9 of the User Guide; per unit current face area):
@@ -676,9 +675,11 @@ using Pyrolysis
 R, E, Tp, T0 = 8.314462618, 1.0e5, 700.0, 300.0
 ρ, c, k, v = 1000.0, 1000.0, 1.0, 2.0e-3
 A = v^2 * E * (Tp - T0) * exp(E / (R * Tp)) / (k / (ρ * c) * R * Tp^2)
-solid = SolidComponent(:solid, ρ = ρ, c = c, k = k, λ = 1e-6)
-gas = GaseousComponent(:gas, M = 0.05, c = c, k = 0.02, λ = 1e-4)
+solid = SolidComponent(:solid, ρ = ρ, φ=.3, c = c, k = k, λ = 1e-6)
+gas = GaseousComponent(:gas, M = 0.05, c = c, k = 0.02,)
 material = Material(
+    gas_transport=LumpedTransfer(endpoint=LumpedEndpoint(λ=1e-6,κ=0.,max_skeletal_occupancy=.001)),
+
     name = :ablator,
     components = (solid, gas),
     reactions = (Reaction(:ablate, 1 => 2; A = A, E = E, h = 1.0e6),),
@@ -688,7 +689,7 @@ problem = PyrolysisProblem(
     material = material,
     bc_set = BoundaryConditionSet(
         thermal = (top = HeatFluxBC(2.8e6), bottom = AdiabaticBC()),
-        mass = (top = ConvectiveMassBC(h_m = 10.0, ξ_inf = 0.0), bottom = ImpermeableBC()),
+        mass = (top = AmbientGasBC(GasReservoir(P=0., T=300.)), bottom = ImpermeableBC()),
     ),
     T_initial = z -> T0 + 1e5 * z,
     ξ_initial = [z -> ρ, z -> 0.0],
@@ -703,44 +704,34 @@ saved = conservation_audit(sol)             # trapezoid over the saved states
 audit.mass.relative, audit.energy.relative
 ```
 
-Run as written (1,156 accepted steps, five events of one cell each), the
-recorded audit closes the mass to a relative defect of $-1.9\times10^{-8}$ and
-the energy to $-3.2\times10^{-7}$. The five events vent $1.9\times10^{-4}$ kg of gas
-and 101.5 J of its enthalpy, against an inventory change of 1.40 kg and
-$1.77\times10^{5}$ J: without the event terms the defects would be the lost
-terms, $1.4\times10^{-4}$ and $5.7\times10^{-4}$ of the change. The saved-series
-audit of the same solution, at the 0.05 s saving interval, leaves relative
-defects of $-1.2\times10^{-2}$ (mass) and $-5.9\times10^{-2}$ (energy).
+The run completes with 575 accepted steps and five deactivation events. The
+recorded mass defect is $7.8\times10^{-10}$ relative to the inventory change;
+the energy defect is $-1.0\times10^{-7}$. The discrete event terms contribute
+0.2453 kg and 123.84 kJ to these balances and must be included. The saved-series
+audit uses the output interval's trapezoid rule; refine the saving interval
+separately when comparing it with the accepted-step recorder.
 
 ---
 
 ## 16.9 Comparison to ThermaKin2Ds, Gpyro, and FDS
 
-The ledger adds an explicit, per-solve conservation audit, which none of the
-three reference codes offers in this form.
+Pyrolysis.jl's ledgers explicitly include continuous boundary/source integrals
+and discrete deactivation records. This is supported by
+`src/Outputs/conservation.jl`; it does not establish that the reference codes
+lack conservation diagnostics.
 
-**Energy accounting.** **FDS** keeps an energy budget of its simulations and
-reports cumulative boundary, radiative and chemical contributions against the
-stored enthalpy; Pyrolysis.jl's energy ledger is the analog for the condensed
-phase, at the level of the live cells: it reconstructs the change of the
-stored sensible enthalpy from the integrated boundary and source rates and the
-event records and reports the closure defect.
+FDS documents reaction enthalpy consistency in Appendix P and whole-simulation
+energy-budget outputs in its User's Guide. Those quantities are not directly
+interchangeable with our condensed-only sensible-enthalpy ledger. Gpyro
+derives conservative control-volume mass and enthalpy balances (GP Eqs.
+56–61), and TK §3 requires species and energy conservation during element
+mixing. Each code's residuals, tolerances, remapping and output definitions
+must be checked before comparing an observed conservation defect.
 
-**Mass accounting.** **Gpyro** advances control-volume conservation of
-$\bar\rho\,\Delta z$ and $\bar\rho Y_i\,\Delta z$ with a fully implicit
-backward-Euler scheme, so conservation is enforced by the discretization and
-checked through its solid-density bookkeeping. Pyrolysis.jl is conservative in
-the same sense, its cell masses being states and its face fluxes scattered
-antisymmetrically, and it *audits* the result, including what deactivation
-vents, with the mass ledger.
-
-**Deformation.** ThermaKin represents condensed-phase deformation through a
-single-reference-point density-integral source term and Gpyro through a
-variable-$\Delta z$ control volume; Pyrolysis.jl moves the mesh with the solid
-(§10, §11). The ledger needs no deformation term of its own: it sums states
-over the live cells, reads the current face areas, and integrates over the live
-boundary faces, which move with the solid; what a deactivation event removes
-is on the event's record.
+Here deformation needs no additional ledger source: inventories are summed
+over current live cells and boundary fluxes use current areas. Event losses
+are accounted for separately (§16.4). A small ledger defect is evidence
+about this discrete balance, not proof of physical model validity.
 
 ---
 
@@ -795,8 +786,8 @@ The following are the known gaps of the ledger. They are caveats on
 ---
 
 *Cross-references.* The governing equations these ledgers audit are stated in
-§3 (Governing Equations); the energy row, its face fluxes and the absence of a
-surface gas-enthalpy term in §7 (Heat Conduction, Gas Convection, and Energy
+§3 (Governing Equations); the energy row, its face fluxes and the boundary control-surface
+accounting in §7 (Heat Conduction, Gas Convection, and Energy
 Assembly); the heat-of-reaction sign, its temperature datum and stoichiometric
 closure in §6 (Reaction Kinetics); the gas fluxes and the boundary venting in
 §9 (Gas-Phase Mass Transport and Pressure); the surface energy balance and the

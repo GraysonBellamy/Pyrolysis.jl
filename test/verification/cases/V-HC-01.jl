@@ -2,8 +2,9 @@
 # V-HC-01 — Semi-infinite solid, convective surface BC (Biot-coupled erfc)
 # =============================================================================
 #
-# The one verification case shared by all three reference codes
-# (FDS `ht3d_slab`, Gpyro §3.4.1, ThermaKin Eq. 25), in Gpyro's variant:
+# A semi-infinite conduction benchmark, using the parameters of
+# Lautenberger's dissertation §3.4.1 (ThermaKin Eq. 25 uses the same
+# analytical form with different parameters):
 # constant absorbed radiant flux q″ = 25 kW/m² plus convective exchange
 # h = 20 W/m²K with T∞ = T₀ = 300 K; k = 0.2 W/(m·K), ρ = 1000 kg/m³,
 # c = 1400 J/(kg·K), so profiles at t = 30/60/90/180 s are directly comparable

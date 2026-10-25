@@ -5,7 +5,7 @@ Answers "*where* is the time/allocation going?" — the complement to
 
 Runs five canonical configurations (a PMMA column on a fixed and a moving
 mesh, with surface absorption, and a permeable charring solid with
-Darcy–Fick transport, with Beer–Lambert absorption on a moving mesh) on the
+lumped wall and Darcy transport, with Beer–Lambert absorption on a moving mesh) on the
 problem `setup` builds, under:
 
 - **`summary`** — wall clock, bytes allocated, and GC share per residual

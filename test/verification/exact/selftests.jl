@@ -416,10 +416,9 @@ end
         λ = 2.0e-5
         cp_g = 1100.0
         solid = SolidComponent(:s, ρ = 800.0, c = 1000.0, k = 0.3, λ = λ)
-        gas = GaseousComponent(:g, M = 0.028, c = cp_g, k = 0.03, λ = λ)
+        gas = GaseousComponent(:g, M = 0.028, c = cp_g, k = 0.03)
         mat = Material(name = :MMSSelfGT, components = (solid, gas), reactions = ())
-        # Equal component λ ⇒ λ_eff = λ exactly under any volume weighting, so
-        # the hand flux needs no mixture algebra.
+        # One condensed matrix gives Λ=λ; φ=1−700/800=1/8.
         τ = 4.0
         T_f(z, t) = 400.0 + 50.0 * z / L
         ξg_f(z, t) = 2.0 + sin(π * z / L) * exp(-t / τ)
@@ -428,7 +427,7 @@ end
             T = T_f(z, t)
             dTdz = 50.0 / L
             dξdz = (π / L) * cos(π * z / L) * exp(-t / τ)
-            -(λ / T) * (dξdz * T + ξg_f(z, t) * dTdz)
+            -(λ / (T*(1-700/800))) * (dξdz * T + ξg_f(z, t) * dTdz)
         end
         for z in (0.0, 0.006, 0.015, L), t in (0.0, 1.5)
             @test mms_gas_flux(mat, fields, 2, z, t) ≈ J_hand(z, t) rtol = 1e-12
@@ -499,7 +498,7 @@ end
         ρs = 800.0
         A_r, E_r = 5.0e4, 80.0e3
         solid = SolidComponent(:s, ρ = ρs, c = 1200.0, k = 0.2, λ = 2.0e-5, γ = 1.0)
-        gas = GaseousComponent(:g, M = 0.028, c = 1000.0, k = 0.03, λ = 2.0e-5)  # γ = 0
+        gas = GaseousComponent(:g, M = 0.028, c = 1000.0, k = 0.03)  # γ = 0
         rxn = Reaction(:r, 1 => 2; A = A_r, E = E_r, h = 5.0e4)
         mat = Material(name = :MMSSelfIM, components = (solid, gas), reactions = (rxn,))
 

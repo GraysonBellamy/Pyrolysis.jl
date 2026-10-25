@@ -3,7 +3,8 @@ using Logging
 using ForwardDiff
 using Pyrolysis
 using Pyrolysis.Materials: BEER_LAMBERT, SURFACE_ABSORPTION, NO_RADIATION
-using Pyrolysis.Materials: STEFAN_BOLTZMANN, T_PROPERTY_MAX
+using Pyrolysis.Materials: STEFAN_BOLTZMANN, T_PROPERTY_MAX, R_GAS
+using Pyrolysis.Physics: TransportFailure
 using Pyrolysis.BoundaryConditions: BoundaryState, solve_boundary_temperature!
 using Pyrolysis.Meshes: boundary_faces
 using Pyrolysis.States
@@ -12,11 +13,19 @@ using Pyrolysis.Assembly: residual!, buffers
 using Pyrolysis.Integration
 using Pyrolysis.Integration: setup
 
-# A solid with an emissivity and an absorption coefficient, and a gas with a
-# gas-transfer coefficient.
+# A synthetic 40%-porous transporting matrix with emissivity and absorption.
 function _bc_material(; α::Real = 0.0)
-    solid = SolidComponent(:solid, ρ = 600.0, c = 1500.0, k = 0.15, ε = 0.9, α = α)
-    gas = GaseousComponent(:gas, M = 0.05, c = 1200.0, k = 0.03, λ = 1e-5)
+    solid = SolidComponent(
+        :solid,
+        ρ = 600.0,
+        c = 1500.0,
+        k = 0.15,
+        ε = 0.9,
+        α = α,
+        λ = 1e-5,
+        φ = 0.4,
+    )
+    gas = GaseousComponent(:gas, M = 0.05, c = 1200.0, k = 0.03)
     return Material(name = :bc, components = (solid, gas), reactions = ())
 end
 
@@ -36,7 +45,10 @@ _bc_problem(bc; n = 6, tspan = (0.0, 1.0), α = 0.0, kwargs...) = PyrolysisProbl
                   ConvectiveBC(h = 10.0, T_inf = 300.0),
             bottom = AdiabaticBC(),
         ),
-        mass = (top = DiffusiveMassBC(0.05), bottom = ImpermeableBC()),
+        mass = (
+            top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
+            bottom = ImpermeableBC(),
+        ),
     )
     # On a fixed and on a moving mesh.
     for energy in (:temperature, :enthalpy), use_ale in (false, true)
@@ -55,8 +67,11 @@ _bc_problem(bc; n = 6, tspan = (0.0, 1.0), α = 0.0, kwargs...) = PyrolysisProbl
             u_wild = copy(u)
             u_wild[energy_index(layout, 6)] = wild
             du_wild = similar(u)
-            residual!(du_wild, u_wild, cp.def, 0.0, cp.ws)
-            isnan(wild) && @test any(isnan, du_wild)
+            if isnan(wild)
+                @test_throws TransportFailure residual!(du_wild, u_wild, cp.def, 0.0, cp.ws)
+            else
+                residual!(du_wild, u_wild, cp.def, 0.0, cp.ws)
+            end
             residual!(du, u, cp.def, 0.0, cp.ws)
             @test all(isfinite, du)
             @test isapprox(du, du_fresh; rtol = 1e-12)
@@ -94,21 +109,27 @@ end
     # cell one for one.
     @test ForwardDiff.derivative(T -> face(hot, T).T_s, 2500.0) ≈ 1 rtol = 1e-12
     # A NaN cell temperature: a NaN face, no warning.
-    r = @test_logs min_level = Logging.Warn face(hot, NaN)
-    @test isnan(r.T_s)
+    @test_throws TransportFailure face(hot, NaN)
     # Through the residual: a trial state far outside the bracket neither
     # clamps nor warns.
     bc = BoundaryConditionSet(
         thermal = (top = hot, bottom = AdiabaticBC()),
-        mass = (top = DiffusiveMassBC(0.05), bottom = ImpermeableBC()),
+        mass = (
+            top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
+            bottom = ImpermeableBC(),
+        ),
     )
     cp = setup(_bc_problem(bc))
     for wild in (1e5, -1e5, NaN)
         u = copy(cp.u0)
         u[energy_index(cp.def.layout, 6)] = wild
         du = similar(u)
-        @test_logs min_level = Logging.Warn residual!(du, u, cp.def, 0.0, cp.ws)
-        @test isnan(wild) || all(isfinite, du)
+        if isnan(wild)
+            @test_throws TransportFailure residual!(du, u, cp.def, 0.0, cp.ws)
+        else
+            @test_logs min_level=Logging.Warn residual!(du, u, cp.def, 0.0, cp.ws)
+            @test all(isfinite, du)
+        end
     end
 end
 
@@ -116,7 +137,10 @@ end
     bc = BoundaryConditionSet(
         thermal = (top = HeatFluxBC(0.0), bottom = AdiabaticBC()),
         mass = (
-            top = ConvectiveMassBC(h_m = 0.05, ξ_inf = (0.0, 0.5)),
+            top = AmbientGasBC(
+                GasReservoir(P = 1e5, T = 400.0, mole_fractions = (gas = 1.0,));
+                film = MassTransferFilm(0.05),
+            ),
             bottom = ImpermeableBC(),
         ),
     )
@@ -129,41 +153,34 @@ end
     @test all(i -> du[mass_index(layout, i, 1)] == 0, 1:6)
     ds, c = buffers(cp.ws, cp.def, Float64)
     @test all(iszero, c.F_mass[1, :])
-    # The film law's value along the outward normal, −h_m (ξ_inf − ξ): the
-    # ambient gas enters at h_m ξ_inf, also at a slightly negative
-    # concentration, and the surface cell gains exactly that.
-    top = only(boundary_faces(cp.def.setup.topology, :top))
-    A = ds.geometry.face_area[top]
-    @test c.F_mass[2, top] ≈ -0.05 * 0.5 rtol = 1e-12
-    @test du[mass_index(layout, 6, 2)] ≈ A * 0.05 * 0.5 rtol = 1e-12
-    u = copy(cp.u0)
+    # A pure-gas film transmits bulk flow for every diffusion conductance.
+    # The pore wall resistance gives M Λ P/(R T d) at this vacuum start.
+    top=only(boundary_faces(cp.def.setup.topology, :top))
+    A=ds.geometry.face_area[top]
+    expected=-0.05*1e-5*1e5/(R_GAS*400*(0.01/12))
+    @test c.F_mass[2, top]≈expected rtol=1e-12
+    @test du[mass_index(layout, 6, 2)]≈-A*expected rtol=1e-12
+    u=copy(cp.u0)
     for i = 1:6
-        u[mass_index(layout, i, 2)] = -1e-12 * ds.V[i]
+        u[mass_index(layout, i, 2)]=-1e-12*ds.V[i]
     end
     residual!(du, u, cp.def, 0.0, cp.ws)
-    @test c.F_mass[2, top] ≈ -0.05 * (0.5 + 1e-12) rtol = 1e-12
-    # A uniform gas above the ambient: no interior flux, and the surface cell
-    # loses h_m (ξ − ξ_inf).
-    for i = 1:6
-        u[mass_index(layout, i, 2)] = 1.0 * ds.V[i]
-    end
-    residual!(du, u, cp.def, 0.0, cp.ws)
-    @test c.F_mass[2, top] ≈ 0.05 * (1.0 - 0.5) rtol = 1e-12
-    @test du[mass_index(layout, 6, 2)] ≈ -A * 0.05 * 0.5 rtol = 1e-12
-    @test all(i -> du[mass_index(layout, i, 2)] == 0, 1:5)
-    # The solution reports the inflow of the gas-free start, on a fixed and on
-    # a moving mesh.
+    @test c.F_mass[2, top]≈expected rtol=1e-9
     for use_ale in (false, true)
-        sol = Integration.solve(problem; use_ale)
-        @test sol.retcode === :Success
-        @test sol.boundary_mass_flux[:top][1] ≈ -0.05 * 0.5 rtol = 1e-12
+        sol=Integration.solve(problem; use_ale)
+        @test sol.retcode===:Success
+        @test sol.boundary_mass_flux[:top][1]≈expected rtol=1e-12
     end
+
 end
 
 @testset "mass leaving through both faces closes against the inventories" begin
     bc = BoundaryConditionSet(
         thermal = (top = HeatFluxBC(0.0), bottom = AdiabaticBC()),
-        mass = (top = DiffusiveMassBC(0.05), bottom = DiffusiveMassBC(0.05)),
+        mass = (
+            top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
+            bottom = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
+        ),
     )
     problem = _bc_problem(
         bc;
@@ -191,7 +208,10 @@ end
 @testset "a prescribed face temperature is the reported surface temperature" begin
     bc = BoundaryConditionSet(
         thermal = (top = DirichletThermalBC(600.0), bottom = AdiabaticBC()),
-        mass = (top = DiffusiveMassBC(0.01), bottom = ImpermeableBC()),
+        mass = (
+            top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
+            bottom = ImpermeableBC(),
+        ),
     )
     sol = Integration.solve(
         _bc_problem(bc; tspan = (0.0, 5.0), output_times = [0.0, 2.5, 5.0]),
@@ -275,8 +295,8 @@ end
 
 @testset "blowing lowers the convective loss of an outgassing surface" begin
     function run(model)
-        solid = SolidComponent(:solid, ρ = 1000.0, c = 1500.0, k = 0.2, λ = 1e-5)
-        gas = GaseousComponent(:gas, M = 0.03, c = 1100.0, k = 0.03, λ = 1e-5)
+        solid = SolidComponent(:solid, ρ = 1000.0, c = 1500.0, k = 0.2, λ = 1e-5, φ = 0.4)
+        gas = GaseousComponent(:gas, M = 0.03, c = 1100.0, k = 0.03)
         mat = Material(
             name = :outgas,
             components = (solid, gas),
@@ -288,7 +308,10 @@ end
                       ConvectiveBC(h = 15.0, T_inf = 300.0, blowing = model),
                 bottom = AdiabaticBC(),
             ),
-            mass = (top = DiffusiveMassBC(0.01), bottom = ImpermeableBC()),
+            mass = (
+                top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
+                bottom = ImpermeableBC(),
+            ),
         )
         problem = PyrolysisProblem(
             mesh = create_uniform_mesh(0.005, 8),
@@ -314,8 +337,11 @@ end
 @testset "blowing reads the outward gas flux of its face, at :top and at :bottom" begin
     exposed =
         HeatFluxBC(3e4) + ConvectiveBC(h = 20.0, T_inf = 300.0, blowing = CouetteFilm())
-    conditions =
-        (outflow = MassFluxBC(-0.01), none = ImpermeableBC(), inflow = MassFluxBC(0.01))
+    conditions = (
+        outflow = MassFluxBC(fluxes = (gas = 0.01,)),
+        none = ImpermeableBC(),
+        inflow = MassFluxBC(fluxes = (gas = -0.01,), inflow_temperature = (gas = 300.0,)),
+    )
     for (tag, other) in ((:top, :bottom), (:bottom, :top))
         face = map(conditions) do mass
             bc = BoundaryConditionSet(

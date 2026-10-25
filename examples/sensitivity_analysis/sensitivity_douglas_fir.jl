@@ -66,7 +66,7 @@ println("Running with $(nworkers()) worker(s)")
 
 @everywhere begin
     using Pyrolysis
-    using Pyrolysis: compute_surface_mass_flux, effective_gas_transfer, get_mass_bc
+    using Pyrolysis: get_boundary_exchange
 end
 
 using Distributions
@@ -585,11 +585,11 @@ end
         )
 
         # --- Gas transfer coefficients and permeability (FIXED) ---
-        # λ_solid: D_free × ε/τ; λ_gas: free molecular diffusion at ~500K
+        # λ: superficial partial-pressure transfer of the condensed matrix
         # κ: intrinsic matrix permeability for Darcy flow
         λ_wood = 5.0e-7     # m²/s - virgin wood (ε~0.05, τ~5)
         λ_char = 1.0e-5     # m²/s - porous char (ε~0.7, τ~2)
-        λ_gas = 3.0e-5     # m²/s - reference free diffusion (M~29, ~500K)
+
         κ_virgin = 1.0e-15    # m² - tight virgin wood
         κ_char = 1.0e-12    # m² - open char pore network
 
@@ -680,49 +680,14 @@ end
                     κ = 0.0,
                 ),
                 # 8-12. Gas products (λ scaled by √(M_ref/M) from kinetic theory)
-                GaseousComponent(
-                    :DF_gas1,
-                    M = 0.060,
-                    c = 1400.0,
-                    k = 0.020,
-                    λ = λ_gas * sqrt(0.029/0.060),
-                ),
-                GaseousComponent(
-                    :DF_gas2,
-                    M = 0.070,
-                    c = 1400.0,
-                    k = 0.020,
-                    λ = λ_gas * sqrt(0.029/0.070),
-                ),
-                GaseousComponent(
-                    :DF_gas3,
-                    M = 0.110,
-                    c = 1300.0,
-                    k = 0.018,
-                    λ = λ_gas * sqrt(0.029/0.110),
-                ),
-                GaseousComponent(
-                    :DF_gas4,
-                    M = 0.070,
-                    c = 1500.0,
-                    k = 0.020,
-                    λ = λ_gas * sqrt(0.029/0.070),
-                ),
-                GaseousComponent(
-                    :DF_gas5,
-                    M = 0.050,
-                    c = 1600.0,
-                    k = 0.025,
-                    λ = λ_gas * sqrt(0.029/0.050),
-                ),
+                GaseousComponent(:DF_gas1, M = 0.060, c = 1400.0, k = 0.020),
+                GaseousComponent(:DF_gas2, M = 0.070, c = 1400.0, k = 0.020),
+                GaseousComponent(:DF_gas3, M = 0.110, c = 1300.0, k = 0.018),
+                GaseousComponent(:DF_gas4, M = 0.070, c = 1500.0, k = 0.020),
+                GaseousComponent(:DF_gas5, M = 0.050, c = 1600.0, k = 0.025),
                 # 13. Water vapor
-                GaseousComponent(
-                    :WATER_VAPOR,
-                    M = 0.018,
-                    c = water_vapor_cp,
-                    k = 0.025,
-                    λ = λ_gas * sqrt(0.029/0.018),
-                ),
+                GaseousComponent(:WATER_VAPOR, M = 0.018, c = water_vapor_cp, k = 0.025),
+                GaseousComponent(:AIR; M = 0.02897, c = 1006.0, k = 0.026),
             ),
             reactions = (
                 Reaction(
@@ -806,7 +771,12 @@ end
                 bottom = AdiabaticBC(),
             ),
             mass = (
-                top = DiffusiveMassBC(0.05) + DirichletPressureBC(101325.0),
+                top = AmbientGasBC(
+                    GasReservoir(P = 101325.0, T = 300.0, mole_fractions = (AIR = 1.0,));
+                    film = MassTransferFilm(
+                        0.05*101325.0*0.02897/(8.31446261815324*(300.0)),
+                    ),
+                ),
                 bottom = ImpermeableBC(),
             ),
         )
@@ -826,6 +796,27 @@ end
             z -> 0.0,
             z -> 0.0,
             z -> 0.0,
+            z -> background_gas_concentration(
+                material,
+                :AIR,
+                (
+                    ρ_DF_initial,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    ρ_moisture_initial,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                ),
+                T_ambient,
+            ),
         ]
 
         t_end = SMOKE ? 10.0 : 600.0   # [s]
@@ -1037,51 +1028,14 @@ end
 	compute_combustible_mlr_series(sol) -> Vector{Float64}
 
 Compute the combustible-only surface mass flux [kg/(m²·s)] at each output time.
-Mirrors the solver's per-species flux computation but sums only over combustible
+Sums the assembled species boundary fluxes for combustible
 gas components (indices 8-12), excluding water vapor (index 13).
 """
 @everywhere function compute_combustible_mlr_series(sol)
-    nt = length(sol.t)
-    comb_mlr = zeros(nt)
-
-    mesh = sol.problem.mesh
-    material = sol.problem.material
-    bc_set = sol.problem.bc_set
-    mass_bc_top = get_mass_bc(bc_set, Val(:top))
-    n_cells = size(sol.T, 1)
-
-    # Half the initial thickness of the surface cell
-    d_surface = (mesh.positions[end][1] - mesh.positions[end-1][1]) / 2
-
-    for i = 1:nt
-        t = sol.t[i]
-        ξ_profile = sol.ξ[:, :, i]
-        T_surface = sol.surface_T[i]
-
-        ξ_surface = ntuple(k -> ξ_profile[k, n_cells], Val(length(material.components)))
-
-        flux = 0.0
-        for k in COMBUSTIBLE_GAS_INDICES
-            ξ_k = ξ_surface[k]
-            if ξ_k > 0.0
-                λρ = effective_gas_transfer(ξ_surface, T_surface, material) * sum(ξ_surface)
-                ρ_surface = sum(ξ_surface)
-                J_k = compute_surface_mass_flux(
-                    mass_bc_top,
-                    ξ_k,
-                    λρ,
-                    ρ_surface,
-                    d_surface,
-                    t,
-                    k,
-                )
-                flux += J_k
-            end
-        end
-        comb_mlr[i] = flux
-    end
-
-    return comb_mlr
+    names = [sol.problem.material.components[j].name for j in COMBUSTIBLE_GAS_INDICES]
+    rows = [findfirst(==(name), sol.gas.species) for name in names]
+    exchange = get_boundary_exchange(sol, :top)
+    return vec(sum(exchange.fluxes[rows, :]; dims = 1))
 end
 
 @everywhere """

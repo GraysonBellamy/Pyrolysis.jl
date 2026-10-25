@@ -9,7 +9,7 @@ using Pyrolysis.Assembly: residual!, buffers
 using OrdinaryDiffEq: DiscreteCallback
 
 # The char-layer column of V-CPL-06 with a reaction heat (the energy-ledger
-# test's Fickian deck): a reactive band low in a hot, gas-permeable matrix
+# test's lumped wall deck): a reactive band low in a hot, gas-permeable matrix
 # gasifies, and the gas diffuses up through the hot layer to leave through a
 # film at the top, carrying its enthalpy out.
 function _column(n)
@@ -30,7 +30,7 @@ function _column(n)
         λ = 1e-4,
         ρ_intrinsic = 2600.0,
     )
-    gas = GaseousComponent(:gas, M = 0.05, c = (900.0, 0.3), k = 0.02, λ = 1e-4)
+    gas = GaseousComponent(:gas, M = 0.05, c = (900.0, 0.3), k = 0.02)
     rxn = Reaction(:gasify, 2 => 3; A = 9.3e3, E = 8.0e4, h = 3e5)
     mat = Material(name = :column, components = (matrix, fuel, gas), reactions = (rxn,))
     band(z) = 100.0 * exp(-((z / L - 0.3) / 0.08)^2)
@@ -43,7 +43,7 @@ function _column(n)
                 bottom = ConvectiveBC(h = 1000.0, T_inf = 300.0),
             ),
             mass = (
-                top = ConvectiveMassBC(h_m = 1.0, ξ_inf = 0.0),
+                top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
                 bottom = ImpermeableBC(),
             ),
         ),
@@ -61,8 +61,8 @@ function _ablator(n; L = 3e-3, t_end = 0.8)
     R, E, Tp, T0 = 8.314462618, 1.0e5, 700.0, 300.0
     v = 2.0e-3
     A = v^2 * E * (Tp - T0) * exp(E / (R * Tp)) / (k / (ρ * c) * R * Tp^2)
-    solid = SolidComponent(:solid, ρ = ρ, c = c, k = k, λ = 1e-6)
-    gas = GaseousComponent(:gas, M = 0.05, c = c, k = 0.02, λ = 1e-4)
+    solid = SolidComponent(:solid, φ = 0.05, ρ = ρ, c = c, k = k, λ = 1e-6)
+    gas = GaseousComponent(:gas, M = 0.05, c = c, k = 0.02)
     mat = Material(
         name = :ablator,
         components = (solid, gas),
@@ -74,7 +74,7 @@ function _ablator(n; L = 3e-3, t_end = 0.8)
         bc_set = BoundaryConditionSet(
             thermal = (top = HeatFluxBC(2.8e6), bottom = AdiabaticBC()),
             mass = (
-                top = ConvectiveMassBC(h_m = 10.0, ξ_inf = 0.0),
+                top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
                 bottom = ImpermeableBC(),
             ),
         ),
@@ -188,15 +188,29 @@ end
     options = (; energy_state = energy, use_ale = moving, deactivation = true)
     audits = map(((1e-6, 1e-8), (1e-8, 1e-10))) do (reltol, abstol)
         rec = ConservationRecorder()
-        sol = Integration.solve(problem; callback = (rec,), options..., reltol, abstol)
+        sol = Integration.solve(
+            problem;
+            callback = (rec,),
+            options...,
+            reltol,
+            abstol,
+            pressure_tolerance = 1e6*reltol,
+        )
         @test sol.retcode === :Success
         @test length(sol.events) >= 3
         return conservation_audit(sol, rec), sol, rec
     end
     (coarse, _, _), (fine, sol, rec) = audits
     @test rec.steps == sol.statistics.accepted
-    @test _digest(sol) ==
-          _digest(Integration.solve(problem; options..., reltol = 1e-8, abstol = 1e-10))
+    @test _digest(sol) == _digest(
+        Integration.solve(
+            problem;
+            options...,
+            reltol = 1e-8,
+            abstol = 1e-10,
+            pressure_tolerance = 0.01,
+        ),
+    )
     @info "ablator ($(moving ? "moving" : "fixed"), $energy): recorder across events" coarse.mass coarse.energy fine.mass fine.energy
     # The events' terms are the events' records.
     @test fine.mass.lost == sum(sum(e.lost_mass) for e in sol.events)
@@ -241,9 +255,10 @@ function _shrinking_vent(n)
         κ = 1e-11,
         ρ_intrinsic = 1800.0,
     )
-    gas = GaseousComponent(:gas, M = 0.03, c = 1100.0, k = 0.03, λ = 3e-5)
+    gas = GaseousComponent(:gas, M = 0.03, c = 1100.0, k = 0.03)
     mat = Material(
         name = :shrinking_vent,
+        mixing = MaterialMixing(κ = PARALLEL),
         components = (virgin, char, gas),
         reactions = (
             Reaction(:pyro, 1 => (2, 3); A = 5e9, E = 1.4e5, h = 8e5, yields = (0.3, 0.7)),
@@ -259,7 +274,12 @@ function _shrinking_vent(n)
                 top = HeatFluxBC(3e4) + ConvectiveBC(h = 15.0, T_inf = 300.0),
                 bottom = AdiabaticBC(),
             ),
-            mass = (top = DirichletPressureBC(101325.0), bottom = ImpermeableBC()),
+            mass = (
+                top = AmbientGasBC(
+                    GasReservoir(P = 101325.0, T = 300.0, mole_fractions = (gas = 1.0,)),
+                ),
+                bottom = ImpermeableBC(),
+            ),
         ),
         T_initial = z -> 500.0 + 3e4 * z,
         ξ_initial = [z -> 1100.0 * (1 - 30z), z -> 300.0 * 30z, z -> 0.3],

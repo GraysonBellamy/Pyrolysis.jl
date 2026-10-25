@@ -18,14 +18,17 @@ the substrate beneath it far outside the property bracket.
 
 A cell deactivates when its condensed mass falls below ε_m of its initial
 value, and on a fixed mesh a crossing cell beneath a live cell ends the
-solve with outcome `:interior` and retcode Terminated. The run must stop
-before any deactivation, with the maximum live-cell temperature below
-1000 K. The histories report the time reached at each resolution.
+solve with outcome `:interior` and retcode Terminated. The run must stop at
+259.6 s, before any deactivation, with the maximum live-cell temperature
+below 1000 K; the stop time's tolerance is three times the CI resolution's
+distance from the 240-cell time (260.35, 259.79, 259.62 and 259.57 s at 30,
+60, 120 and 240 cells, both energy forms within 5 ms).
 
 ### Quantities of interest (n = 120)
 
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
+| stop time at the first interior crossing of ε_m | 259.6 | 259.6 | 0.05014 | 0.7 | yes | s; the 240-cell time (259.79 at 60 cells): a cell under the skin falls below ε_m of its initial condensed mass |
 | outcome :interior | 1 | 1 | 0 | 0.5 | yes | the solve ended with outcome :interior |
 | deactivation events before the stop | 0 | 0 | 0 | 0.5 | yes | the surface cell persists as a skin while the layer gasifies from within |
 | maximum live-cell temperature up to the stop | 693.4 | — | 693.4 | 1000 | yes | K over every accepted step (observed 693) |
@@ -46,6 +49,6 @@ before any deactivation, with the maximum live-cell temperature below
 | use_ale | false |
 | deactivation | true |
 | radiation_model | BEER_LAMBERT |
-| abstol | 1.0e-8 |
-| reltol | 1.0e-6 |
-
+| abstol | 1.0e-11 |
+| reltol | 1.0e-9 |
+| pressure_tolerance | 0.0001 |

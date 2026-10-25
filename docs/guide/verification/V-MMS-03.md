@@ -30,20 +30,20 @@ solid field is spatially UNIFORM but time-varying (uniform keeps the T
 pins focused on the relative energy flux); T and the gas field carry the
 full space–time structure.
 
-Expected order: second. The gas converges at second order and the
-temperature below it on coarse meshes (L2 rates 3.27, 1.70 on the CI
-ladder; 1.63, 1.83, 1.92 from 64 to 512 cells): the upwind-biased face
-temperature of the relative energy flux carries a pre-asymptotic
-third-order error term of the opposite sign to the second-order one. A drop
-below min_order flags a moving-mesh transport regression.
+Expected order: second, from the centered spatial operators and reconstructed
+ALE flux. The 16–64-cell temperature ladder is pre-asymptotic (L2 rates
+2.92, 1.38). The 128–512-cell ladder gives rates 1.86, 1.93 in both energy
+formulations; tightening the time tolerances by 100 leaves those rates
+unchanged to 0.001. The CI order check uses that resolved range, while the
+report also retains the coarse meshes to show the approach to it.
 
-### Quantities of interest (n = 128)
+### Quantities of interest (n = 512)
 
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
-| L∞ T error on moving mesh, t=10.0 s | 0.0006956 | — | 0.0006956 | 0.25 | yes | manufactured T* on 30%-compressed mesh |
-| relative L∞ ξ_solid (uniform) error, t=10.0 s | 4.942e-13 | — | 4.942e-13 | 1e-10 | yes | uniform solid: verifies the relative flux of a uniform field under the moving mesh + source injection |
-| relative L∞ ξ_gas error, t=10.0 s | 0.0001067 | — | 0.0001067 | 0.006 | yes | gas: diffusive + relative flux on the moving mesh |
+| L∞ T error on moving mesh, t=10.0 s | 6.456e-05 | — | 6.456e-05 | 0.25 | yes | manufactured T* on 30%-compressed mesh |
+| relative L∞ ξ_solid (uniform) error, t=10.0 s | 1.186e-12 | — | 1.186e-12 | 1e-10 | yes | uniform solid: verifies the relative flux of a uniform field under the moving mesh + source injection |
+| relative L∞ ξ_gas error, t=10.0 s | 3.14e-05 | — | 3.14e-05 | 0.006 | yes | gas: diffusive + relative flux on the moving mesh |
 
 ![V-MMS-03 T_profiles](assets/V-MMS-03/V-MMS-03_T_profiles.png)
 
@@ -69,12 +69,14 @@ below min_order flags a moving-mesh transport regression.
 
 | n_cells | h | wall (s) | L2_T | Linf_T |
 | --- | --- | --- | --- | --- |
-| 16 | 0.0625 | 0.02602 | 0.05036 | 0.1138 |
-| 32 | 0.03125 | 0.07228 | 0.004431 | 0.009085 |
-| 64 | 0.01562 | 0.2148 | 0.00145 | 0.002204 |
-| 128 | 0.007812 | 0.3569 | 0.0004783 | 0.0006956 |
+| 16 | 0.0625 | 0.4008 | 0.04149 | 0.09965 |
+| 32 | 0.03125 | 0.5682 | 0.005495 | 0.0096 |
+| 64 | 0.01562 | 1.743 | 0.002116 | 0.003183 |
+| 128 | 0.007812 | 1.743 | 0.0006559 | 0.0008895 |
+| 256 | 0.003906 | 2.605 | 0.0001806 | 0.0002461 |
+| 512 | 0.001953 | 3.84 | 4.724e-05 | 6.456e-05 |
 
-Observed order 2.177 (L2_T), expected 2.0.
+Observed order 1.867 (L2_T), expected 2.0.
 
 ### Solver configuration
 
@@ -83,4 +85,3 @@ Observed order 2.177 (L2_T), expected 2.0.
 | integrator | Rodas5P (default) |
 | abstol | 1.0e-11 |
 | reltol | 1.0e-9 |
-

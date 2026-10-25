@@ -28,6 +28,7 @@ const T_PROPERTY_MAX = 3000.0            # K
 # mass (a burned-out cell whose pore gas has also diffused out); there 1/ρcₚ
 # in dT/dt would explode (a stiffness blow-up, not literal Inf). The floor is
 # the thermal mass of pore gas at ambient (ρ ≈ 1.2 kg/m³ × cₚ ≈ 1000 J/(kg·K);
-# Gpyro floors the same quantity). It binds only when the cell holds
+# see the heat-capacity regularization in the Technical Reference). It binds
+# only when the cell holds
 # essentially nothing: virgin solids have ρcₚ ~ 1e5–1e6 J/(m³·K).
 const RHO_CP_FLOOR = 1.0e3               # J/(m³·K) - mixture ρcₚ floor

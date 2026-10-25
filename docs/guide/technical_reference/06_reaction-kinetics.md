@@ -82,9 +82,9 @@ well-mixed ideal gas of identifiable molecules. Working in $\xi_j$ sidesteps the
 need for a molar mass of the solid, makes $r_i$ directly the mass conversion rate,
 and lets the stoichiometric coefficients $\nu_{i,j}$ be pure **mass** yields that
 sum to unity (§6.5). The price is that $A_i$ inherits whatever units make the
-product dimensionally consistent (§6.4); this is the universal convention of the
-condensed-phase pyrolysis literature (ThermaKin, Gpyro, FDS all do the same — see
-§6.9).
+product dimensionally consistent (§6.4). ThermaKin and FDS also use mass-based
+rates, but their factors and stoichiometric bases differ; Gpyro's conversion
+rate includes a cumulative-mass normalization (§6.9).
 
 ### 6.1.2 Discrete (per-cell) form
 
@@ -124,7 +124,8 @@ spatial operator inside the reaction term**. Reactions are local (point-wise in
 space); all spatial coupling enters through transport (conduction §7, gas
 diffusion/Darcy §9) and through the mesh motion (§11). This is the
 cell-as-batch-reactor view: each control volume behaves, kinetically, like an
-isolated TGA sample, identical to the Gpyro and FDS interpretation (§6.9).
+isolated TGA sample. This local evaluation is also used in Gpyro and FDS,
+although their oxygen factors and rate normalization differ (§6.9).
 
 The single-reaction function is `reaction_rate` (src/Physics/kinetics.jl). It
 is fully scalar-type-generic (`<:Real` arguments), so the dual numbers of the
@@ -415,8 +416,8 @@ or for an entire solve, per material:
 pmma = Material(
     name = :PMMA,
     components = (
-        SolidComponent(:virgin, ρ = 1190.0, c = 1420.0, k = 0.21, ε = 0.86),
-        GaseousComponent(:MMA, M = 0.100, c = 1500.0, k = 0.02, λ = 1e-5),
+        SolidComponent(:virgin, ρ = 1190.0, φ=.01, c = 1420.0, k = 0.21, ε = 0.86, λ=1e-5),
+        GaseousComponent(:MMA, M = 0.100, c = 1500.0, k = 0.02,),
     ),
     reactions = (Reaction(:decomposition, :virgin => :MMA; A = 8.5e12, E = 188e3,
                           h = 870e3),),
@@ -783,8 +784,8 @@ $h_i$ is referenced.
 A heat of reaction is only defined relative to a **datum**: $h_i$ may be quoted
 
 - **at the local reaction temperature** — $h_i(T) = \sum_j \nu_{i,j}\,h_j(T)$,
-  the heat a DSC measures at the decomposition temperature, and the usual
-  meaning of inverse-calibrated (ThermaKin/Gpyro-style) effective heats; or
+  the reaction-temperature convention used here; an imported DSC or fitted
+  heat needs its units, reaction basis and datum checked explicitly (§6.9); or
 - **at the fixed ambient datum** $T_{\text{ref}} = 298.15$ K —
   $h_i = \sum_j \nu_{i,j}\,h_j(T_{\text{ref}})$, the formation-enthalpy style.
 
@@ -872,10 +873,10 @@ the product-yield sum; for $N_{\mathrm{in}} > 1$ `mass_balance_error` returns
 returns `false` if $\varepsilon_{\mathrm{mb}} > $ `tol`. `validate_problem`, which
 `solve` calls with `strict = false` unless `validate = false`, checks among other
 things (the mesh, the boundary conditions, the time span, the initial
-conditions, the initial porosity of a Darcy–Fick problem) that the material has
+conditions, the initial porosity of a gas problem) that the material has
 at least one component and that every reactant and product index lies in
 $1..N_C$ (numeric reactions are not index-checked when the `Material` is built),
-and warns about degenerate Fickian gas transport (§5.6). Called by the user with
+and checks initial physical pore volume and gas-boundary data (§9). Called by the user with
 `strict = true` (`Pyrolysis.validate_problem(problem; strict = true)`), it also
 runs `verify_stoichiometry` over every reaction of the material.
 
@@ -891,182 +892,107 @@ names a non-existent component errors with a clear message before any solve.
 
 ## 6.9 Comparison to ThermaKin2Ds, Gpyro, and FDS
 
-All three reference codes solve essentially the same condensed-phase chemistry —
-mass-concentration Arrhenius kinetics with mass-yield stoichiometry — and
-Pyrolysis.jl deliberately reproduces their physics. The differences are in
-generality, in the gating mechanism, and most consequentially in the **sign and
-basis of the heat of reaction**. We map each code's notation to ours on first use.
-
 ### 6.9.1 ThermaKin2Ds
 
-ThermaKin (Stoliarov & Lyon, *ThermaKin2Ds Reference v2*, Eq. 5) writes a reaction
-as a generalised two-reactant, two-product step
+TK Eqs. 5–6 define $\theta_1 C_1+\theta_2 C_2\to\theta_3 C_3+
+\theta_4 C_4+h$ and
 
-$$
-\theta_1\,\text{COMP1} + \theta_2\,\text{COMP2} \to
-\theta_3\,\text{COMP3} + \theta_4\,\text{COMP4} + h,
-$$
+$$r_{\mathrm{TK}}=A_{\mathrm{TK}}e^{-E/(RT)}\xi_{C_1}\xi_{C_2},$$
 
-with stoichiometric coefficients $\theta_i^{\,j}$ (their notation) which map to our
-$\nu_{i,j}$ (overload note A2 — $\theta$ is reserved for strain rate in our
-nomenclature). The rate is **explicitly bimolecular** (ThermaKin Eq. 6):
+where the second concentration factor is set to one for a single reactant.
+Pyrolysis.jl allows an arbitrary nonnegative concentration order for its
+single mass-bearing reactant; it does not support the general bimolecular
+source. A sequence of single-reactant steps is not in general equivalent to
+a bimolecular rate law.
 
-$$
-r = A\,\exp\!\Bigl(-\frac{E}{RT}\Bigr)\,\xi_{\mathrm{COMP1}}\,\xi_{\mathrm{COMP2}},
-\qquad \xi = mf\cdot\rho,
-$$
+TK applies hard lower/upper temperature limits. Pyrolysis.jl uses smooth
+tanh gates and a concentration depletion limiter. Even when the bare rates
+match, these modifiers can produce different near-onset and near-depletion
+behavior. Smoothness is our implementation choice, not a prerequisite for
+all implicit solvers or all uses of automatic differentiation.
 
-with the convention that "in the absence of a second reactant, $\xi_{\mathrm{COMP2}}$
-is set to 1." Pyrolysis.jl differs in two ways. First, our rate is **n-ary in the
-order but single-reactant in the mass**: we allow an arbitrary order $n_{i,j}$ on
-the single supported reactant (a strict generalisation of ThermaKin's
-unit-exponent factor for COMP1), but we do not support a genuine second
-mass-bearing reactant (§6.10). ThermaKin's COMP2 mechanism is precisely what our
-multi-reactant extension would need. Second, ThermaKin's temperature limit is a
-**hard cutoff** ("if temperature decreases below the lower limit or increases above
-the upper limit, the rate of reaction is set to 0"), whereas we use a smooth tanh
-ramp (§6.2), which the colored Jacobian and the integrators' linearization
-require. ThermaKin's species/heat assembly
-($\partial\xi_j/\partial t = \sum_i \theta_i^{\,j} r_i + \text{transport}$, their
-Eqs. 15–16, and heat $= h\,r$) is identical in form to our (6.5) and (6.8).
-
-The pivotal difference is the **heat-of-reaction sign**. ThermaKin states
-explicitly: "Following a convention frequently adopted in pyrolysis studies, a
-positive $h$ is used to represent an **exothermic** reaction." This is the
-**opposite** of our storage convention ($h>0$ endothermic). The two are reconciled
-by the minus sign in our $Q_{\mathrm{rxn}} = -\sum_i h_i r_i$: a ThermaKin input
-of $h_{\mathrm{TK}} = +870$ kJ·kg⁻¹ (their exothermic) corresponds to our
-$h = -870$ kJ·kg⁻¹, and both yield a positive (heating) source. A user porting a
-ThermaKin material **must flip the sign of every heat of reaction.** (ThermaKin
-also notes its reaction parameters are not constrained by mass or energy
-conservation — the user owns that; Pyrolysis.jl instead enforces mass balance at
-construction, §6.5.3.)
+TK's heat source is $+h_{\mathrm{TK}}r_{\mathrm{TK}}$, positive for an
+exothermic reaction; ours is $-h r$. For a single-reactant TK step with
+$\theta_1=1$, the conversion is $h=-h_{\mathrm{TK}}$. If
+$\theta_1\ne1$, normalize the rate and yields too:
+$r=\theta_1r_{\mathrm{TK}}$, $A=\theta_1A_{\mathrm{TK}}$,
+$\nu_j=\theta_j/\theta_1$, and $h=-h_{\mathrm{TK}}/\theta_1$.
+This is an algebraic mapping of TK Eqs. 5–6 to our unit-consumption source,
+not an implementation of two-reactant chemistry. Pyrolysis.jl validates the
+single-reactant product-yield sum by default; the low-level constructor can
+disable that validation (`validate_mass=false`).
 
 ### 6.9.2 Gpyro
 
-Gpyro (Lautenberger, *Gpyro Technical Reference*) tracks a **conversion** variable
-$\alpha_{A_k}$ for condensed-phase reactant $A_k$ and writes the $n^{\text{th}}$
--order heterogeneous rate (their Eq. 39, with $Z_k \to A_i$, $E_k\to E_i$,
-$n_k\to n_{i,j}$, and the Gpyro volumetric rate $\dot\omega''' \to r$):
+GP Eqs. 35–40 define a cumulative available reactant mass per area
+$M_\Sigma=(\bar\rho Y_A\Delta z)_\Sigma$, conversion
+$1-\alpha_A=\bar\rho Y_A\Delta z/M_\Sigma$, and
 
 $$
-r_k = f(\alpha_{A_k})\,
-\frac{(\bar\rho\,Y_{A_k}\Delta z)_\Sigma}{\Delta z}\,
-Z_k\,e^{-E_k/RT}\,g(Y_{\mathrm{O_2}})\,H(T - T_{\mathrm{crit},k}),
-\qquad f(\alpha_{A_k}) = (1-\alpha_{A_k})^{n_k}.
+r_k=(1-\alpha_A)^{n_k}\frac{M_\Sigma}{\Delta z}
+Z_k e^{-E_k/(RT)}g(Y_{O_2})H(T-T_{\mathrm{crit},k}).
 $$
 
-Two Gpyro features have no analogue in Pyrolysis.jl: the oxygen-sensitivity factor
-$g(Y_{\mathrm{O_2}})$ (their Eq. 40 — our kinetics have no $Y_{\mathrm{O_2}}$
-dependence, §6.10), and the rich library of specialised reaction models
-$f(\alpha)$ (nucleation, diffusion, Avrami, etc., their Table 1 — we offer only the
-$n^{\text{th}}$-order power law of (6.4)). Gpyro's critical temperature
-$H(T-T_{\mathrm{crit},k})$ is again a **hard** Heaviside, where we use a tanh ramp.
+For $n_k=1$, oxygen-independent kinetics and an open gate, the bare rate
+reduces to $\xi_A Z_k e^{-E_k/(RT)}$. It matches our unregularized
+first-order law, subject to our limiter and gate settings. For $n_k\ne1$
+there is an additional factor $(M_\Sigma/\Delta z)^{1-n_k}$: copying $Z_k$
+to $A$ does not generally reproduce the rate. Gpyro also provides other
+conversion models and local oxygen dependence absent here.
 
-The conversion formalism is worth dwelling on because it reveals when the two codes
-agree. Gpyro normalises by the cumulative species mass
-$(\bar\rho Y_{A_k}\Delta z)_\Sigma$ (the initial plus all subsequently formed mass
-of $A_k$), so that each cell "behaves as if it was a TGA sample." When $n_k=1$ and
-$n_{\mathrm{O_2},k}=0$, Gpyro's rate collapses (their Eq. 41) to
-
-$$
-r_k = \bar\rho\,Y_{A_k}\,Z_k\,e^{-E_k/RT} = \xi_{A_k}\,A_i\,e^{-E_i/RT},
-$$
-
-since $\bar\rho Y_{A_k} = \xi_{A_k}$ is exactly our mass concentration. **For
-first-order, oxygen-insensitive kinetics with no specialised model, our (6.1) and
-Gpyro's rate are identical** — the conversion bookkeeping reduces to plain mass
-concentration. Gpyro's stoichiometry (solid fraction $\mathrm{SF}_k$ and the
-gas-yield split, their Eqs. 23–24) is a parameterisation of the same mass-balanced
-yields we store directly as $\nu_{i,j}$; Gpyro's $\chi_k$ swelling parameter
-belongs to the volume-change model (§10), not the kinetics.
-
-On the **heat of reaction**, Gpyro (Eq. 43) splits the enthalpy into a solid part
-$\Delta H_{\mathrm{sol},k}$ and a volatilisation part $\Delta H_{\mathrm{vol},k}$
-and forms $\dot Q_{s,k}''' = -\dot\omega_{fB,k}'''\Delta H_{\mathrm{sol},k} -
-\dot\omega_{fg,k}'''\Delta H_{\mathrm{vol},k}$. Setting
-$\Delta H_{\mathrm{sol},k}=\Delta H_{\mathrm{vol},k}=\Delta H_k$ recovers (their
-Eq. 45) the per-reactant form $\dot Q_{s,k}''' = -\dot\omega_{dA_k}'''\Delta H_k$,
-which is **exactly our** (6.8) with $\Delta H_k \equiv h_i$ and
-$\dot\omega_{dA_k}''' \equiv r_i$. Gpyro's sign convention agrees with ours:
-"a positive value of $\Delta H_{\mathrm{vol},k}$ denotes an **endothermic**
-reaction, and a negative value … an exothermic reaction." Our single heat $h_i$ is
-thus Gpyro's per-reactant-consumed heat (the $\Delta H_{\mathrm{sol}} =
-\Delta H_{\mathrm{vol}}$ special case), which Gpyro itself documents as the way to
-specify a heat "per kg of reactant consumed" — precisely our per-first-reactant
-basis (§6.6.1). Gpyro additionally separates sensible-enthalpy transport into the
-$\sum(\dot\omega_f - \dot\omega_d)h_i$ term of its gas energy equation; in
-Pyrolysis.jl that bookkeeping is the sensible enthalpy the gas fluxes carry across
-the faces (§7.4) together with the reaction-temperature datum of $h_i$
-(§6.6.3).
+GP Eqs. 43–45 split reaction heat into condensed-product and volatilized-mass
+parts. The equivalent per-reactant heat is
+$h_k=\mathrm{SF}_k\Delta H_{\mathrm{sol},k}+
+(1-\mathrm{SF}_k)\Delta H_{\mathrm{vol},k}$, with matched sensible-enthalpy
+conventions. Setting the two heats equal is one special case. Positive heat
+is endothermic in both codes. Gpyro gas yields may include gas consumption;
+those oxidative reactions cannot generally be represented by our
+single-reactant source.
 
 ### 6.9.3 FDS
 
-The FDS solid-phase pyrolysis model (FDS *Technical Reference*, Eqs. 7.34–7.35)
-maps most closely term-for-term. With $\alpha,\beta$ the FDS material/reaction
-indices and $\rho_{s,\alpha}\to\xi_j$, $A_{\alpha\beta}\to A_i$,
-$E_{\alpha\beta}\to E_i$, FDS writes
+The FDS 6.11.0 solid-phase chapter and `PYROLYSIS` routine use
 
 $$
-r_{\alpha\beta} = \rho_{s,\alpha}^{\,n_{s,\alpha\beta}}\,
-A_{\alpha\beta}\,e^{-E_{\alpha\beta}/RT_s}\,
-[X_{\mathrm{O_2}}(x)]^{\,n_{\mathrm{O_2},\alpha\beta}}\,
-T_s^{\,n_{t,\alpha\beta}},
+r_{\alpha\beta}=\rho_{s,\alpha}^{n_s}A_{\alpha\beta}
+e^{-E_{\alpha\beta}/(RT_s)}X_{O_2}(x)^{n_{O_2}}T_s^{n_t}.
 $$
 
-a product of a reactant-concentration power, the Arrhenius factor, an oxygen
-power, **and a temperature power** $T_s^{n_t}$. Pyrolysis.jl reproduces the first
-two factors (with the same mass-concentration basis — FDS notes $A_{\alpha\beta}$
-has units 1/s for $n_s=1$, exactly our convention) and omits the oxygen and
-explicit-temperature powers (§6.10). FDS's species production
-$S_\alpha = \sum v_{\alpha,\alpha'\beta} r_{\alpha'\beta}$ (Eq. 7.37) and gas
-production $\dot m_\gamma''' = \sum v_{\gamma,\alpha\beta} r_{\alpha\beta}$
-(Eq. 7.38) with yields $v$ summing to 1 are our (6.5)–(6.6). FDS's chemical heat
-source $\dot q_{s,c}''' = -\sum r_{\alpha\beta} H_{r,\alpha\beta}$ (Eq. 7.42) is
-our (6.8) with $H_{r,\alpha\beta}\to h_i$, and FDS uses the **same** sign as Gpyro
-and Pyrolysis.jl ($H_r > 0$ endothermic). FDS interprets each in-depth cell as a
-virtual TGA sample, matching our cell-as-batch-reactor view.
+Thus the density-order and Arrhenius factors have the same basis as our bare
+single-reactant law. Pyrolysis.jl omits the explicit oxygen and temperature
+powers. FDS's oxygen profile is a prescribed exponential penetration model
+with surface oxygen determined by a mass-transfer balance, not a pore-gas
+species-transport solution. FDS's heat source has our endothermic-positive
+sign, but its temperature-dependent reaction enthalpy accounting must also
+be matched (FDS Appendix P). Older FDS 5 rate normalization must not be
+substituted for this release's formula.
 
-As Gpyro notes, FDS Version 5's kinetics are the special case of Gpyro's Eq. 42
-with $n_{\mathrm{O_2}}=0$, conventional reaction order, and no volume change — and
-therefore also the special case of our (6.1) for first/$n$-th-order
-oxygen-insensitive kinetics.
-
-**Kinetic-parameter recovery from TGA.** A practical FDS capability worth
-reproducing in user workflows is the closed-form estimate of $A_i, E_i$ from a TGA
-peak. Given a reference (peak) temperature $T_p$, the normalised peak mass-loss
-rate $r_p/Y_s(0)$ (s⁻¹), a constant heating rate $\dot T$ (K·s⁻¹), and residue
-yield $v_s$, FDS uses (FDS *User Guide*, Eqs. 9.4–9.5; the Lyon–Stoliarov
-relations)
+**Kinetic-parameter recovery from TGA.** The FDS User's Guide's
+`REFERENCE_TEMPERATURE` / `REFERENCE_RATE` prescription is a first-order
+estimate. With reference rate $r_p/Y_s(0)$ [s⁻¹], temperature $T_p$ [K]
+and heating rate $\dot T$ [K/s], its formulas are
 
 $$
-E_i = \frac{e\,r_p}{Y_s(0)}\,\frac{R\,T_p^2}{\dot T},
-\qquad
-A_i = \frac{e\,r_p}{Y_s(0)}\,e^{E_i/(R\,T_p)},
-\qquad
-\frac{r_p}{Y_s(0)} = \frac{2\dot T}{\Delta T}(1 - v_s),
+E=\frac{e r_p}{Y_s(0)}\frac{RT_p^2}{\dot T},\qquad
+A=\frac{e r_p}{Y_s(0)}e^{E/(RT_p)}.
 $$
 
-with $e$ Euler's number and $\Delta T$ the (triangular) pyrolysis-range width
-(default 80 K), $\dot T$ default 5 K·min⁻¹. These produce a first-order
-$(A_i, E_i)$ pair that, fed into our `Reaction(...)` constructor, reproduces the
-TGA peak — a recommended starting point for cone/TGA calibration (see §18,
-Verification & Validation, and the User Guide).
+In the 6.11.0 `READ_MATL` implementation, an omitted `REFERENCE_RATE`
+is replaced by $2\dot T/\Delta T$ using `PYROLYSIS_RANGE`; this branch
+does not multiply by a residue-yield factor. Defaults are 80 K and 5 K/min
+([source](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/read.f90#L7335-L7351)). FDS input temperatures are in °C; these equations use K.
+These are starting estimates, not an exact fit to a measured TGA peak.
+User Guide §4.9 shows their use to construct a Pyrolysis.jl `Reaction`;
+there is no automatic FDS input importer.
 
 ### 6.9.4 Summary of correspondences
 
-| Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro | FDS |
+| Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro | FDS 6.11.0 |
 |---|---|---|---|---|
-| Rate basis | mass conc. $\xi_j$ | mass conc. $\xi$ | $\bar\rho Y_i$ (= $\xi$) | $\rho_{s,\alpha}$ (= $\xi$) |
-| Reactant factor | $b(\xi_j)^{n_{i,j}}\,g(\xi_j/\xi_{\mathrm{th}})$ (1 reactant) | $\xi_{\mathrm{C1}}\xi_{\mathrm{C2}}$ (bimolec.) | $(1-\alpha)^{n_k}$ + models | $\rho_s^{n_s}$ |
-| Extra factors | — | — | $g(Y_{\mathrm{O_2}})$ | $X_{\mathrm{O_2}}^{n_{\mathrm{O_2}}} T_s^{n_t}$ |
-| Temp. gate | smooth tanh | hard cutoff | hard $H(T-T_{\mathrm{crit}})$ | (none / power) |
-| Stoich. yields | $\nu_{i,j}$, $\sum y=1$ | $\theta_i^j$ | $\mathrm{SF}_k$ / yields | $v$, $\sum v=1$ |
-| Heat sign ($h>0$) | **endothermic** | **exothermic** | endothermic | endothermic |
-| Heat source | $-\sum h_i r_i$ | $+h\,r$ | $-\sum \Delta H_k r_k$ | $-\sum H_r r$ |
-
-The lone sign reversal (ThermaKin's $h>0$ exothermic) is the single most important
-porting hazard; Gpyro and FDS agree with us.
+| Bare reactant factor | one $\xi^n$ | one or two concentrations | conversion model times cumulative available mass/volume | $\rho_s^{n_s}$ |
+| Extra rate factors | smooth gates and depletion limiter | hard temperature limits | oxygen dependence and critical temperature | oxygen and temperature powers, rate limits |
+| Positive heat | endothermic | exothermic | endothermic | endothermic |
+| Porting requirement | unit reactant consumption | normalize stoichiometry and flip heat sign | match conversion normalization and heat basis | match units, rate options and enthalpy datum |
 
 ---
 

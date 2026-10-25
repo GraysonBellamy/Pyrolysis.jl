@@ -160,7 +160,7 @@ function gas_figure()
     svg(
         "12_gas_transport",
         "Figure 12. Gas Storage and Transport (Schematic)",
-        "A porous cell distinguishes gas mass per bulk volume from pore density. Three arrows identify diffusion, Darcy flow and skeleton motion. A separate boundary diagram adds pressure and film contributions to the gas flux.";
+        "A porous cell distinguishes gas mass per bulk volume from pore density. The relative flux follows a lumped or dusty-gas closure; skeleton motion carries pore gas. A boundary diagram matches the porous flux to a reservoir through an optional mass film and accounts for carried enthalpy once.";
         height = 510,
     ) do io
         rect(io, 65, 115, 430, 190; fill = GREY, stroke = MUTED)
@@ -173,7 +173,7 @@ function gas_figure()
         label(io, 65, 345, "Bulk: ξ = m_{gas}/V"; size = 20)
         label(io, 295, 345, "Pores: ρ_{gas} = ξ/φ"; size = 20)
         for (y, title, color, marker) in (
-            (150, "Diffusion", BLUE, "blue"),
+            (150, "Wall / Molecular Friction", BLUE, "blue"),
             (215, "Darcy Flow", TEAL, "teal"),
             (280, "Skeleton Motion vₛ", PURPLE, "purple"),
         )
@@ -182,12 +182,12 @@ function gas_figure()
         end
         label(io, 600, 345, "Relative to Mesh: vₛ − w = −c"; size = 20)
         line(io, 35, 385, 1165, 385; color = MUTED, width = 0.8)
-        label(io, 65, 430, "Boundary Contributions"; weight = "bold")
-        label(io, 65, 478, "Pressure (Darcy)"; color = TEAL)
-        label(io, 290, 478, "+"; size = 26)
-        label(io, 340, 478, "Mass Film"; color = BLUE)
+        label(io, 65, 430, "One Transmitted Species Flux"; weight = "bold")
+        label(io, 65, 478, "Porous Medium"; color = TEAL)
+        label(io, 290, 478, "↔"; size = 26)
+        label(io, 340, 478, "Optional Film"; color = BLUE)
         line(io, 520, 472, 675, 472; arrow = "ink")
-        label(io, 700, 478, "Gas Flux + Carried Enthalpy")
+        label(io, 700, 478, "Reservoir: P, T, Composition")
     end
 end
 

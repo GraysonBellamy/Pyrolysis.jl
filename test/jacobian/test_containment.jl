@@ -18,8 +18,16 @@ using Pyrolysis.Integration: setup, consistent_state!, CoreProblem
 
 # The PMMA-like and wood-like materials of `test/perf/perf_helpers.jl`.
 function _pmma(; gas_c = 1500.0)
-    virgin = SolidComponent(:virgin, ρ = 1190.0, c = 1420.0, k = 0.21, ε = 0.86)
-    gas = GaseousComponent(:MMA, M = 0.100, c = gas_c, k = 0.02, λ = 1e-5)
+    virgin = SolidComponent(
+        :virgin,
+        φ = 0.05,
+        λ = 1e-5,
+        ρ = 1190.0,
+        c = 1420.0,
+        k = 0.21,
+        ε = 0.86,
+    )
+    gas = GaseousComponent(:MMA, M = 0.100, c = gas_c, k = 0.02)
     rxn = Reaction(:decomp, 1 => 2, A = 8.5e12, E = 188e3, h = -870e3)
     return Material(name = :PMMA, components = (virgin, gas), reactions = (rxn,))
 end
@@ -28,6 +36,7 @@ function _wood(; α = 1000.0, κ = 1e-14, law = nothing)
     virgin = SolidComponent(
         :wood,
         ρ = 500.0,
+        ρ_intrinsic = 1500.0,
         c = 1500.0,
         k = 0.15,
         ε = 0.9,
@@ -35,7 +44,7 @@ function _wood(; α = 1000.0, κ = 1e-14, law = nothing)
         κ = κ,
         λ = 1e-5,
     )
-    gas = GaseousComponent(:pyrgas, M = 0.06, c = 1800.0, k = 0.03, λ = 5e-5)
+    gas = GaseousComponent(:pyrgas, M = 0.06, c = 1800.0, k = 0.03)
     rxn = Reaction(:pyrolysis, 1 => 2, A = 1e10, E = 150e3, h = -300e3)
     return Material(
         name = :wood,
@@ -90,7 +99,7 @@ const _column_configurations = (
         options = (use_ale = true, radiation_model = BEER_LAMBERT),
         wood = true,
     ),
-    ale_beer_lambert_fickian_moderate = (
+    ale_beer_lambert_wall_moderate = (
         problem = n -> _column(_wood(α = 0.5, κ = 0.0), n; top = _incident),
         options = (use_ale = true, radiation_model = BEER_LAMBERT),
         wood = true,
@@ -141,7 +150,7 @@ function _states(cp, wood::Bool)
         zero_state = zeros(length(u0)),
         negative = -abs.(u0),
     )
-    return wood ? (; states..., overfilled = uniform(800.0, (550.0, 1.0))) : states
+    return wood ? (; states..., overfilled = uniform(800.0, (1650.0, 1.0))) : states
 end
 
 # The pattern contains the dense Jacobian's nonzeros and the colored Jacobian
@@ -197,7 +206,7 @@ end
                     1:n_nodes(layout),
                 )
             end
-            if state === :overfilled && cp.def.setup.gas isa DarcyFickTransport
+            if state === :overfilled && cp.def.setup.gas isa LumpedTransfer
                 # The porosity sits on its floor while gas is present, so the
                 # pore pressure is the gas's N/φ at the floor: large, finite.
                 residual!(zeros(length(u)), u, cp.def, 1.0, cp.ws)
@@ -215,28 +224,43 @@ end
 # positions differ by orders of magnitude.
 function _central_difference_jacobian(cp, u; t = 1.0)
     J = zeros(length(u), length(u))
-    du_p, du_m, v = similar(u), similar(u), copy(u)
+    du_p, du_m, du0, v = similar(u), similar(u), similar(u), copy(u)
+    layout = cp.def.layout
+    zero_gas = Dict(
+        mass_index(layout, i, g) => i for i = 1:n_cells(layout) for g in
+        Pyrolysis.Materials.gas_component_indices(cp.def.setup.material.components) if
+        iszero(u[mass_index(layout, i, g)])
+    )
+    residual!(du0, u, cp.def, t, cp.ws)
     for j in eachindex(u)
-        h = max(1e-7 * abs(u[j]), 1e-9)
-        v[j] = u[j] + h
-        residual!(du_p, v, cp.def, t, cp.ws)
-        v[j] = u[j] - h
-        residual!(du_m, v, cp.def, t, cp.ws)
+        if haskey(zero_gas, j)
+            # The C¹ positive part has the same derivative from either side
+            # at zero. Stay on its negative branch: a central step crossing
+            # the pressure-scale layer measures a secant, not that derivative.
+            h = 1e-7 * cp.def.setup.reference.solid_mass[zero_gas[j]]
+            v[j] = -h
+            residual!(du_p, v, cp.def, t, cp.ws)
+            v[j] = -2h
+            residual!(du_m, v, cp.def, t, cp.ws)
+            J[:, j] .= (3 .* (du0 .- du_p) .- (du_p .- du_m)) ./ (2h)
+        else
+            h = max(1e-7 * abs(u[j]), 1e-9)
+            v[j] = u[j] + h
+            residual!(du_p, v, cp.def, t, cp.ws)
+            v[j] = u[j] - h
+            residual!(du_m, v, cp.def, t, cp.ws)
+            J[:, j] .= (du_p .- du_m) ./ (2h)
+        end
         v[j] = u[j]
-        J[:, j] .= (du_p .- du_m) ./ 2h
     end
     return J
 end
 
-# The dense Jacobian, the reference of every containment check, against an
-# oracle independent of automatic differentiation, per entry with the row's
-# largest entry as its floor. At `u0` the gas masses are zero, the joint of
-# their positive part, which is narrower than the step: the enthalpy form's
-# energy rows read the gas mass there through its caloric inversion, so the
-# differences straddle the joint and that state is left to the temperature
-# form.
-@testset "the dense Jacobian equals central differences: $(name), $(energy) form" for name in
-                                                                                      (
+# Independent finite differences per entry, with a row-magnitude floor.
+# At zero gas mass the C¹ joint is evaluated from its negative side; mixed
+# physical states use central differences in both energy formulations.
+@testset "the dense Jacobian equals finite differences: $(name), $(energy) form" for name in
+                                                                                     (
         :baseline_eulerian,
         :ale_no_radiation,
     ),
@@ -261,8 +285,16 @@ end
 # A reaction confined to a temperature window, its smooth gates evaluated
 # within a kelvin of both edges.
 function _window(n)
-    virgin = SolidComponent(:virgin, ρ = 1190.0, c = 1420.0, k = 0.21, ε = 0.86)
-    gas = GaseousComponent(:MMA, M = 0.100, c = 1500.0, k = 0.02, λ = 1e-5)
+    virgin = SolidComponent(
+        :virgin,
+        φ = 0.05,
+        λ = 1e-5,
+        ρ = 1190.0,
+        c = 1420.0,
+        k = 0.21,
+        ε = 0.86,
+    )
+    gas = GaseousComponent(:MMA, M = 0.100, c = 1500.0, k = 0.02)
     rxn = Reaction(
         :decomp,
         1 => 2,
@@ -302,7 +334,7 @@ function _two_solids(n)
         λ = 1e-5,
         ρ_intrinsic = 1800.0,
     )
-    gas = GaseousComponent(:pyrgas, M = 0.06, c = 1800.0, k = 0.03, λ = 5e-5)
+    gas = GaseousComponent(:pyrgas, M = 0.06, c = 1800.0, k = 0.03)
     rxn = Reaction(
         :pyrolysis,
         1 => (2, 3);
@@ -512,7 +544,7 @@ _on(p, coordinates) = PyrolysisProblem(
     config = _radial_configurations[name]
     cp = setup(_on(config.problem(), coords); energy_state = energy, config.options...)
     @test cp.def.setup.topology.coordinates === coords
-    config.wood && @test cp.def.setup.gas isa DarcyFickTransport
+    config.wood && @test cp.def.setup.gas isa LumpedTransfer
     for (state, u) in pairs(_states(cp, config.wood))
         @testset "$state" begin
             _contained(cp, u)
@@ -542,8 +574,8 @@ function _ablator(n; L = 3e-3, q = 2.8e6, t_end = 0.8)
     R, E, Tp, T0 = 8.314462618, 1.0e5, 700.0, 300.0
     v = 2.0e-3
     A = v^2 * E * (Tp - T0) * exp(E / (R * Tp)) / (k / (ρ * c) * R * Tp^2)
-    solid = SolidComponent(:solid, ρ = ρ, c = c, k = k, λ = 1e-6, α = 50.0)
-    gas = GaseousComponent(:gas, M = 0.05, c = c, k = 0.02, λ = 1e-4)
+    solid = SolidComponent(:solid, φ = 0.3, ρ = ρ, c = c, k = k, λ = 1e-6, α = 50.0)
+    gas = GaseousComponent(:gas, M = 0.05, c = c, k = 0.02)
     mat = Material(
         name = :ablator,
         components = (solid, gas),
@@ -555,7 +587,7 @@ function _ablator(n; L = 3e-3, q = 2.8e6, t_end = 0.8)
         bc_set = BoundaryConditionSet(
             thermal = (top = RadiativeFluxBC(flux = q), bottom = AdiabaticBC()),
             mass = (
-                top = ConvectiveMassBC(h_m = 10.0, ξ_inf = 0.0),
+                top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
                 bottom = ImpermeableBC(),
             ),
         ),
@@ -611,14 +643,14 @@ end
 const _surface_balance =
     HeatFluxBC(50e3) + ConvectiveBC(h = 25.0, T_inf = 300.0) + RadiativeBC(T_inf = 300.0)
 const _boundary_flux_cases = (
-    fick_diffusive_top = (darcy = false, top = HeatFluxBC(50e3), bottom = ImpermeableBC()),
+    wall_diffusive_top = (darcy = false, top = HeatFluxBC(50e3), bottom = ImpermeableBC()),
     darcy_diffusive_top = (darcy = true, top = HeatFluxBC(50e3), bottom = ImpermeableBC()),
-    fick_diffusive_both = (
+    wall_diffusive_both = (
         darcy = false,
         top = HeatFluxBC(50e3),
-        bottom = DiffusiveMassBC(),
+        bottom = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
     ),
-    fick_surface_balance = (
+    wall_surface_balance = (
         darcy = false,
         top = _surface_balance,
         bottom = ImpermeableBC(),
@@ -635,21 +667,31 @@ function _boundary_flux_column(case)
         case.darcy ?
         SolidComponent(
             :wood,
+            φ = 0.3,
             ρ = 500.0,
             c = 1500.0,
             k = 0.15,
             ε = 0.9,
             κ = 1e-14,
             λ = 1e-5,
-        ) : SolidComponent(:virgin, ρ = 1190.0, c = 1420.0, k = 0.21, ε = 0.86, λ = 1e-5)
-    gas = GaseousComponent(:gas, M = 0.100, c = 1500.0, k = 0.02, λ = 1e-5)
+        ) :
+        SolidComponent(
+            :virgin,
+            φ = 0.3,
+            ρ = 1190.0,
+            c = 1420.0,
+            k = 0.21,
+            ε = 0.86,
+            λ = 1e-5,
+        )
+    gas = GaseousComponent(:gas, M = 0.100, c = 1500.0, k = 0.02)
     rxn = Reaction(:decomp, 1 => 2, A = 8.5e12, E = 188e3, h = -870e3)
     mat = Material(name = :m, components = (virgin, gas), reactions = (rxn,))
     return _column(
         mat,
         8;
         top = case.top,
-        mass = (top = DiffusiveMassBC(), bottom = case.bottom),
+        mass = (top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)), bottom = case.bottom),
     )
 end
 
@@ -673,7 +715,7 @@ end
     top = energy_index(layout, n)
     @test Jd[top, mass_index(layout, n, 2)] != 0
     @test Jd[top, energy_index(layout, n - 1)] != 0
-    if case.bottom isa DiffusiveMassBC
+    if case.bottom isa AmbientGasBC
         @test Jd[energy_index(layout, 1), mass_index(layout, 1, 2)] != 0
     end
 end
@@ -702,13 +744,23 @@ const _surface_radiators = (
 function _surface_absorber(radiators)
     virgin = SolidComponent(
         :virgin;
+        φ = 0.3,
+        λ = 0.0,
         ρ = 1100.0,
         c = (900.0, 1.5),
         k = (0.2, 2e-4),
         radiators.virgin...,
     )
-    char = SolidComponent(:char; ρ = 300.0, c = 1100.0, k = 0.1, radiators.char...)
-    gas = GaseousComponent(:gas, M = 0.03, c = 1100.0, k = 0.03, λ = 0.0)
+    char = SolidComponent(
+        :char;
+        φ = 0.3,
+        λ = 0.0,
+        ρ = 300.0,
+        c = 1100.0,
+        k = 0.1,
+        radiators.char...,
+    )
+    gas = GaseousComponent(:gas, M = 0.03, c = 1100.0, k = 0.03)
     return Material(
         name = :surface,
         components = (virgin, char, gas),

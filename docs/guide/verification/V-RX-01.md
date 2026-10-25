@@ -42,32 +42,24 @@ Setup notes (solver conventions that would corrupt the case):
 
 ### Comparison with other codes
 
-The same case was solved with FDS 6.11.1 at 1 solid cell and Gpyro 0.8200 at 0D; decks, outputs, and
-run provenance are committed under `test/verification/reference/`.
-Each code's error against the same exact solution is drawn below
-on a log scale, muted gray behind this solver's series — the
-signed linear-scale panel above shows where the error lives, this
-one compares magnitudes across codes.
+Reference runs are available from FDS 6.11.0 at 1 solid cell and Gpyro 0.8200 at 0D. Decks, outputs and
+available provenance are under `test/verification/reference/`; check
+case-specific parameters and transformations before comparing. Where
+error panels are present, they compare against the analytical reference.
+A timing entry alone does not establish an identical physical workload.
 
 ![V-RX-01 xi_histories_vs_codes_error](assets/V-RX-01/V-RX-01_xi_histories_vs_codes_error.png)
 
-Setup and simulation wall times at every ladder rung against the
-reference runs. Julia times model construction and solve after warm-up;
-FDS and Gpyro use internal total elapsed wall time, including setup and
-simulation output. Process launch and Julia compilation are excluded
-from the figure. Output costs, discretizations and time-stepping rules
-still differ, so these are indicative costs, not pure solver speedups.
-See `test/verification/reference/README.md` and `timings.csv` for the
-timer boundaries, resolutions and measurement provenance.
+Historical wall times at each ladder rung and for the reference runs.
+Resolution, time stepping, output workload and timer boundaries differ
+or are incompletely recorded (see `reference/timings.csv`). The Julia
+harness times a warmed build-and-solve. Matching cell count or span alone
+does not make these measurements a controlled solver-speed comparison.
 
-![V-RX-01 solve_time](assets/V-RX-01/V-RX-01_solve_time.png)
-
-Reference timings below are medians of five runs after one warm-up. Full process time also includes launch and shutdown; it is shown separately and is not compared with Julia's warmed time.
-
-| Code | Resolution | Internal elapsed (s) | Full process (s) |
-| --- | --- | --- | --- |
-| FDS 6.11.1 | 1 solid cell | 0.084 | 0.342 |
-| Gpyro 0.8200 | 0D | 0.032 | 0.03328 |
+The [archived timing figure](assets/V-RX-01/V-RX-01_solve_time.png) retains its
+original subtitle, whose matched-span implication is not sufficient evidence
+of comparability. The original Julia timing ladder was not saved as CSV for
+this case, so this audit does not reconstruct its plotted measurements.
 
 Solution overlays including the other codes' points: [xi_histories_vs_codes](assets/V-RX-01/V-RX-01_xi_histories_vs_codes.png).
 

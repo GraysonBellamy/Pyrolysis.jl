@@ -62,7 +62,7 @@ function _require_supported(
             throw(ArgumentError("closure must be :potential or :balance, got :$closure"))
         line = (
             "in-depth radiation" => radiation_model === BEER_LAMBERT,
-            "gas transport" => !(_gas_transport(problem) isa NoGasTransport),
+            "gas transport" => gas_can_move(problem),
             "the variable cross section" => material.lateral_shrinkage_law !== nothing,
             "deactivation" => deactivation,
             "the equidistribution correction" =>
@@ -199,18 +199,19 @@ _moves(closure) =
     closure.correction isa LayerCorrection &&
     any(!iszero, closure.correction.gain)
 
-# The gas transport a problem needs: none without a gas component, Darcy–Fick
-# when a condensed component is permeable, Fickian when gas can move at all
-# (some component carries a gas-transfer coefficient, or a boundary condition
-# passes mass), none otherwise.
-function _gas_transport(problem::PyrolysisProblem)
-    material = problem.material
-    any(is_gas, material.components) || return NoGasTransport()
-    has_darcy_flow(material) && return DarcyFickTransport()
-    moves =
-        any(c -> !identically_zero(c.gas_transfer_coeff), material.components) ||
-        any(bc -> !(bc isa ImpermeableBC), values(problem.bc_set.mass))
-    return moves ? FickTransport() : NoGasTransport()
+# Pore state exists for every gas-bearing material, independently of mobility.
+_gas_transport(problem::PyrolysisProblem) =
+    has_gas(problem.material) ? problem.material.gas_transport : NoGasTransport()
+
+function gas_can_move(problem::PyrolysisProblem)
+    mat=problem.material
+    has_gas(mat) || return false
+    any(
+        bc->!(bc isa ImpermeableBC) &&
+            !(bc isa MassFluxBC && all(x->x isa Real && iszero(x), values(bc.fluxes))),
+        values(problem.bc_set.mass),
+    ) && return true
+    return !closed_transport_channel(mat)
 end
 
 # The kernels in assembler order: reactions, gas transport (whose boundary
@@ -227,11 +228,12 @@ function _kernels(
     radiation_model,
     relative::Tuple,
     tensors,
+    pressure_tolerance,
 )
     material = problem.material
     reactions = n_reactions(material) > 0 ? (ReactionKernel(material),) : ()
     transport =
-        gas isa NoGasTransport ? () :
+        !gas_can_move(problem) ? () :
         (GasTransportKernel(gas, topo, g0, problem.bc_set, material, laws),)
     radiation =
         radiation_model === BEER_LAMBERT ? (BeerLambertKernel(topo, g0, problem.bc_set),) :
@@ -243,6 +245,8 @@ function _kernels(
         radiation_model,
         laws = gas isa NoGasTransport ? nothing : laws,
         tensor = tensors,
+        material,
+        pressure_tolerance,
     )
     return (
         reactions...,
@@ -472,6 +476,7 @@ function setup(
     reltol::Real = 1e-6,
     abstol::Real = 1e-8,
     threshold::Real = 1e-2,
+    pressure_tolerance::Real = 1.0,
     use_ale::Bool = false,
     radiation_model = NO_RADIATION,
     w_override = nothing,
@@ -497,9 +502,21 @@ function setup(
     NC = n_components(material)
     mesh = problem.mesh
     T0, ξ0 = initial_fields(problem, mesh)
+    isfinite(pressure_tolerance) && pressure_tolerance>0 ||
+        throw(ArgumentError("pressure_tolerance must be finite and positive"))
+    errors=Problem.validate_initial_pore_state(problem)
+    isempty(errors) || throw(ArgumentError(join(errors, "\n")))
+    for bc in values(problem.bc_set.mass)
+        validate_gas_boundary(bc, material, problem.tspan[1])
+    end
     correction = something(
         correction,
         _installed_correction(material, ξ0, use_ale, deactivation, threshold),
+    )
+    validate_transport_support(
+        material,
+        ξ0;
+        moving_support = !(correction isa NoCorrection),
     )
     closure = something(closure, D == 1 ? :balance : :potential)
     _require_supported(
@@ -533,6 +550,7 @@ function setup(
         material;
         reltol = Float64(reltol),
         threshold = Float64(threshold),
+        pressure_tolerance = Float64(pressure_tolerance),
     )
     energy = _energy_state(energy_state)
     laws = CaloricLaws(material)
@@ -612,7 +630,17 @@ function setup(
             ),
         ) : nothing
     tensors = D == 1 ? nothing : _tensors(tensor, g0, n, Val(D))
-    kernels = _kernels(problem, topo, g0, laws, gas, radiation_model, relative, tensors)
+    kernels = _kernels(
+        problem,
+        topo,
+        g0,
+        laws,
+        gas,
+        radiation_model,
+        relative,
+        tensors,
+        pressure_tolerance,
+    )
     def = CoreDefinition(layout, state_setup, kernels, cl, sources)
     ws = CoreWorkspace(def, T0)
 
@@ -650,7 +678,11 @@ function setup(
         time_scale = Float64(time_scale),
     )
     cj = ColoredJacobianCache(def, ws, u0, t0)
-    return CoreProblem(problem, def, ws, u0, Float64(reltol), tol, cj, T0, m0, cells)
+    cp=CoreProblem(problem, def, ws, u0, Float64(reltol), tol, cj, T0, m0, cells)
+    derive!(ws.derived, u0, layout, state_setup)
+    check=DomainCheck(cp)
+    _porosity_out(check, ws.derived, gas) && throw(ArgumentError(check.monitor.message))
+    return cp
 end
 
 # Every cell's dimensionless conductivity tensor.

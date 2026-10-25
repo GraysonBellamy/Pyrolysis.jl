@@ -18,8 +18,16 @@ function small_problem(; law = nothing)
     material = Material(
         name = :FigureMaterial,
         components = (
-            SolidComponent(:virgin; ρ = 1000.0, c = 1400.0, k = 0.2, α = 0.2, λ = 1e-6),
-            GaseousComponent(:gas; M = 0.03, c = 1100.0, k = 0.03, λ = 1e-5),
+            SolidComponent(
+                :virgin;
+                ρ = 1000.0,
+                φ = 0.3,
+                c = 1400.0,
+                k = 0.2,
+                α = 0.2,
+                λ = 1e-6,
+            ),
+            GaseousComponent(:gas; M = 0.03, c = 1100.0, k = 0.03),
         ),
         reactions = (
             Reaction(:decomposition, :virgin => :gas; A = 5e9, E = 1.4e5, h = 8e5),
@@ -34,7 +42,10 @@ function small_problem(; law = nothing)
                 top = RadiativeFluxBC(3e4) + RadiativeBC(T_inf = 300.0),
                 bottom = AdiabaticBC(),
             ),
-            mass = (top = DiffusiveMassBC(0.02), bottom = ImpermeableBC()),
+            mass = (
+                top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
+                bottom = ImpermeableBC(),
+            ),
         ),
         T_initial = z -> 500.0 + 2e4z,
         ξ_initial = [z -> 1000.0, z -> 0.1],

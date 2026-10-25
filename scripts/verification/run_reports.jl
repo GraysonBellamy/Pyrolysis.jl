@@ -77,17 +77,14 @@ for case in selected
     # invokelatest: case closures were defined during load_verification_cases
     # (Julia 1.12 world-age semantics — see casedefs.jl).
     r = Base.invokelatest(run_case_report, case, outdir)
-    r === nothing || push!(results, r)
-end
-
-if opts["chapters"] == "true" && !isempty(results)
-    Base.invokelatest(
-        write_chapters,
-        results,
-        all_cases,
-        outdir;
-        write_index = opts["cases"] == "all",
-    )
+    if r !== nothing
+        push!(results, r)
+        # Persist completed reports even if a subsequent case fails. Passing
+        # accumulated results retains every completed member of a case family.
+        if opts["chapters"] == "true"
+            Base.invokelatest(write_chapters, results, all_cases, outdir)
+        end
+    end
 end
 
 @info "report mode done" n_reported = length(results) outdir

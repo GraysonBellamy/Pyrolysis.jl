@@ -10,20 +10,17 @@
 #   P²(z) = P∞² + (μRT·ġ/(κM))·(L² − z²),    exit mass flux = ġ·L  (exact)
 #
 # Nonlinear in P; exercises the algebraic ideal-gas pressure closure, face
-# mobility, Darcy upwinding, and the DirichletPressureBC outflow — all at
+# mobility, Darcy upwinding, and the complete-reservoir outflow — all at
 # once. The existing Darcy test only checks v = −(κ/μ)∇P pointwise.
 #
-# Setup notes (the four pitfalls the survey flagged):
-# - P is NOT persisted in PyrolysisSolution: reconstructed per cell from
-#   sol.ξ/sol.T via the porosity 1 − skeletal_volume_fraction and
-#   ideal_gas_pressure with the same material.
+# The saved pressure accessor uses the central pore-state definition.
 # - Initial gas is seeded with background_gas_concentration so P(z,0) = P∞
 #   (starting from ξ_gas = 0 would start from vacuum).
 # - μ in the exact profile is the MATERIAL's own viscosity curve,
 #   mat.gas_viscosity(T_iso), not a hand-picked constant — so the
 #   case stays exact for whatever `gas_viscosity` the material carries, which
 #   is what lets the ×2-viscosity check in test_darcy.jl exercise that field.
-# - λ = 0 on every component kills the Fickian term: pure Darcy outflow.
+# - The condensed matrix has Λ = 0: pure Darcy outflow.
 # - ρ_intrinsic = 1e5 (φ = 0.99, verification-only value): solid→gas
 #   conversion frees pore volume at dφ/dt = ġ/ρ_intrinsic, and the gas
 #   stored in that new volume steals (P̄M/RT)/ρ_intrinsic of the exit flux —
@@ -55,7 +52,7 @@ function _verification_case_vgt02()
             λ = 0.0,
             ρ_intrinsic = 1e5,
         )
-        gas = GaseousComponent(:gas, M = M_gas, c = 1000.0, k = 0.03, λ = 0.0)
+        gas = GaseousComponent(:gas, M = M_gas, c = 1000.0, k = 0.03)
         rxn = Reaction(:generate, 1 => 2; A = ġ, E = 0.0, h = 0.0, n = 0.0)
         mat = Material(
             name = :VGT02,
@@ -67,7 +64,12 @@ function _verification_case_vgt02()
         mesh = create_uniform_mesh(L, n_cells)
         bc_set = BoundaryConditionSet(
             thermal = (top = DirichletThermalBC(T_iso), bottom = DirichletThermalBC(T_iso)),
-            mass = (top = DirichletPressureBC(P∞), bottom = ImpermeableBC()),
+            mass = (
+                top = AmbientGasBC(
+                    GasReservoir(P = P∞, T = T_iso, mole_fractions = (gas = 1.0,)),
+                ),
+                bottom = ImpermeableBC(),
+            ),
         )
         return PyrolysisProblem(
             mesh = mesh,
@@ -81,7 +83,15 @@ function _verification_case_vgt02()
     end
 
     function qois(sol)
-        out = QoIResult[]
+        drift=maximum(abs.(sol.T .- T_iso))
+        out = [
+            QoIResult(
+                name = "isothermal invariant",
+                value = drift,
+                error = drift,
+                tol = 1e-8,
+            ),
+        ]
         mat = sol.problem.material
         z = get_cell_positions(sol)
         μ = mat.gas_viscosity(T_iso)
@@ -89,12 +99,7 @@ function _verification_case_vgt02()
         P²_exact(zz) = P∞^2 + ΔP²_coeff * (L^2 - zz^2)
         ΔP²_scale = ΔP²_coeff * L^2  # back-face overpressure² scale
 
-        P_num = map(eachindex(z)) do i
-            ξi = (sol.ξ[1, i, end], sol.ξ[2, i, end])
-            Ti = sol.T[i, end]
-            φi = 1 - skeletal_volume_fraction(ξi, Ti, mat)
-            ideal_gas_pressure(ξi, Ti, φi, mat)
-        end
+        P_num = get_pressure(sol)[:, end]
 
         err_P² = maximum(abs(P_num[i]^2 - P²_exact(z[i])) / ΔP²_scale for i in eachindex(z))
         push!(
@@ -158,12 +163,8 @@ function _verification_case_vgt02()
         z = get_cell_positions(sol)
         μ = mat.gas_viscosity(T_iso)
         ΔP²_coeff = μ * R * T_iso * ġ / (κ_perm * M_gas)
-        maximum(eachindex(z)) do i
-            ξi = (sol.ξ[1, i, end], sol.ξ[2, i, end])
-            φi = 1 - skeletal_volume_fraction(ξi, T_iso, mat)
-            P = ideal_gas_pressure(ξi, T_iso, φi, mat)
-            abs(P^2 - (P∞^2 + ΔP²_coeff * (L^2 - z[i]^2))) / (ΔP²_coeff * L^2)
-        end
+        P=get_pressure(sol)[:, end]
+        maximum(abs.(P .^ 2 .- (P∞^2 .+ ΔP²_coeff .* (L^2 .- z .^ 2))))/(ΔP²_coeff*L^2)
     end
 
     return VerificationCase(
@@ -199,11 +200,7 @@ function _verification_case_vgt02()
                 z = get_cell_positions(sol)
                 μ = mat.gas_viscosity(T_iso)
                 ΔP²_coeff = μ * R * T_iso * ġ / (κ_perm * M_gas)
-                P_num = map(eachindex(z)) do i
-                    ξi = (sol.ξ[1, i, end], sol.ξ[2, i, end])
-                    φi = 1 - skeletal_volume_fraction(ξi, sol.T[i, end], mat)
-                    ideal_gas_pressure(ξi, sol.T[i, end], φi, mat)
-                end
+                P_num = get_pressure(sol)[:, end]
                 [
                     ReportCurve(
                         name = :P2_profile,
@@ -240,11 +237,9 @@ function _verification_case_vgt02()
                 z = get_cell_positions(sol)
                 μ = mat.gas_viscosity(T_iso)
                 ΔP²_coeff = μ * R * T_iso * ġ / (κ_perm * M_gas)
+                P = get_pressure(sol)[:, end]
                 e = map(eachindex(z)) do i
-                    ξi = (sol.ξ[1, i, end], sol.ξ[2, i, end])
-                    φi = 1 - skeletal_volume_fraction(ξi, T_iso, mat)
-                    P = ideal_gas_pressure(ξi, T_iso, φi, mat)
-                    (P^2 - (P∞^2 + ΔP²_coeff * (L^2 - z[i]^2))) / (ΔP²_coeff * L^2)
+                    (P[i]^2 - (P∞^2 + ΔP²_coeff * (L^2 - z[i]^2))) / (ΔP²_coeff * L^2)
                 end
                 (L2 = sqrt(sum(abs2, e) / length(e)), Linf = maximum(abs, e))
             end,

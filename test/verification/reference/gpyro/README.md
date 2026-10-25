@@ -5,16 +5,18 @@ Date: 2026-07-07
 ## Code
 
 - **Gpyro 0.8200** (banner of every `.out` file: `Gpyro 0.8200`,
-  `https://github.com/reaxfire/gpyro`). Source checkout: commit
-  `6d369dd0fa5a3621334272d0806f48c56e608c01` (2020-09-01), the current master
-  of the Gpyro repository (the reaxfire URL redirects to
-  [lautenberger/gpyro](https://github.com/lautenberger/gpyro)).
+  the historical repository URL in the banner may redirect). Source checkout:
+  [`lautenberger/gpyro`, commit `6d369dd0fa5a3621334272d0806f48c56e608c01`](https://github.com/lautenberger/gpyro/tree/6d369dd0fa5a3621334272d0806f48c56e608c01)
+  (2020-09-01). The revision, not a moving branch or repository alias,
+  identifies the implementation used.
 - Serial standalone build (`build/linux/gpyro/gpyro`), compiled 2026-07-07
   with **GNU Fortran 15.2.0 (conda-forge gcc 15.2.0-19)**.
 - Smoke-tested against the shipped `samples/01-dtg` case before use.
 - Extraction/verification script: `extract_results.py` (same directory);
   it converts Gpyro's output (temperatures in deg C) to SI (K, m, s) and
-  cross-checks every run against the analytical solution.
+  cross-checks the extracted runs against analytical solutions. Run
+  `python3 extract_results.py WORKSPACE` with raw runs under
+  `WORKSPACE/gpyro_run`; extracted files are written to `WORKSPACE/gpyro_out`.
 
 ## Timing measurements
 
@@ -73,6 +75,10 @@ startup cost is not part of either timing.
 - Gas-phase solvers disabled (`SOLVE_GAS_YJ/ENERGY/PRESSURE = .FALSE.` for the
   1D cases), `EMIS = 1` with `RERADIATION = .FALSE.` so the absorbed flux is
   exactly the prescribed `QE`, no melting/reactions unless the case needs them.
+
+The historical section and figure numbers below refer to [Lautenberger's
+2007 dissertation](https://escholarship.org/uc/item/7wz5m7dg), §§3.4.1–3.4.4,
+not the differently numbered Gpyro Technical Reference.
 
 ## Cases
 
@@ -153,8 +159,8 @@ QoI depths lie exactly on dumped nodes.
 ### vhc03 — V-HC-03 (not a dissertation case; C&J §3.8 finite-slab Neumann)
 
 Finite slab, constant net surface flux, adiabatic back — the pure Neumann BC
-that FDS's 1D solid cannot express without eps-scaling or sigma*T^4
-re-emission. Gpyro can: `EMIS=1`, `RERADIATION=.FALSE.`, `HC=0`, surface
+used here because the tested FDS 6.11.0 `MATL_ID` input path rejects net-flux
+inputs (see `../fds/README.md`). The Gpyro deck uses: `EMIS=1`, `RERADIATION=.FALSE.`, `HC=0`, surface
 absorption via `KAPPA=9D9` (> 1e6 deposits the full `QE` in the surface node;
 the in-depth kappa route was not needed).
 
@@ -205,13 +211,15 @@ M/M0 = 1 to machine output precision; T = 400.0000 K throughout.
 
 ## Run logs
 
-`<case>_run.log` (Gpyro stdout) each end with
-"End of simulation reached successfully"; the vcpl01 log additionally shows
-the 20 early adaptive-dt reductions at the apparent-cp spike (expected).
+The original run notes report successful completion and 20 early step
+reductions for vcpl01. The named `<case>_run.log` files are not committed
+in this directory, so those log details cannot be independently checked
+from the retained CSVs. The analytical errors above can be recomputed
+from the CSVs and agree with the stated rounded values.
 
 ### vbo01 — V-BO-01 (MaCFP PMMA gasification, 50 kW/m²)
 
-`vbo01_gpyro_v2_pmma.csv` is the **Gpyro V2** (SoftwareX release, GPL-3,
+`vbo01_gpyro_v2_pmma.csv` is the **Gpyro V2** (
 <https://github.com/Gedeben/GPYRO-V2>) run made here on the authors' MaCFP
 PMMA deck (`PMMA.data` in that repository: 5.9 mm PMMA on 12 mm Kaowool,
 50 kW/m², power-law k(T) and c(T) fits), unmodified. Gpyro V2 was built from
@@ -227,4 +235,8 @@ and run from the deck's directory with `OMP_NUM_THREADS=1 gpyro PMMA.data`. The
 first header row names the columns; column 2 (`001_MLR`) is the mass loss rate
 in **g m⁻² s⁻¹**, column 6 the remaining thickness in m, columns 3–5 the
 temperatures (°C) at the surface, 12 mm and 17.9 mm. Feeds the V-BO-01 MLR
-overlay in report mode.
+overlay in report mode. The retained file does not identify the source commit
+or executable hash used for this run, so it must not be attributed to a
+specific V2 revision. The source inspected for the comparison audit is
+`bff0126c68f2a35c084ef04490ae327185f281a3`; that inspection does not establish
+that this revision produced the CSV.

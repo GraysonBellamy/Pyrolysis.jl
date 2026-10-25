@@ -13,16 +13,26 @@ using Pyrolysis.Integration: setup
 
 # A reacting, conducting slab: a solid that decomposes to a char and a
 # retained gas, temperature-dependent properties, a Dirichlet back face and a
-# heated front face.
+# heated front face. The synthetic solid/char matrix has 30% pore space;
+# λ = κ = 0 retains the gas for this closed-system assembly test.
 function _slab(n; top = HeatFluxBC(3e4), bottom = DirichletThermalBC(400.0))
-    virgin = SolidComponent(:virgin, ρ = 1100.0, c = (900.0, 1.5), k = (0.2, 2e-4))
+    virgin = SolidComponent(
+        :virgin,
+        ρ = 1100.0,
+        c = (900.0, 1.5),
+        k = (0.2, 2e-4),
+        λ = 0.0,
+        φ = 0.3,
+    )
     char = SolidComponent(
         :char,
         ρ = 300.0,
         c = PolynomialProperty((700.0, 0.8, -1e-4)),
         k = 0.1,
+        λ = 0.0,
+        φ = 0.3,
     )
-    gas = GaseousComponent(:gas, M = 0.03, c = 1100.0, k = 0.03, λ = 0.0)
+    gas = GaseousComponent(:gas, M = 0.03, c = 1100.0, k = 0.03)
     mat = Material(
         name = :slab,
         components = (virgin, char, gas),

@@ -1,6 +1,6 @@
 "n_cells","qoi","value","exact","error","tol","within_tol"
-40,"thickness follows L₀ exp(−r t/ρ) through the event",8.229747042830714e-5,8.229747049020031e-5,1.271375860224449e-9,1.0e-6,true
-40,"solid concentration stays at ρ_s (dilation removes volume only)",1000.0,1000.0,8.354390956810676e-12,1.0e-8,true
+40,"thickness follows L₀ exp(−r t/ρ) through the event",8.22974704170027e-5,8.229747049020031e-5,8.894271635536892e-10,1.0e-6,true
+40,"solid concentration stays at ρ_s (dilation removes volume only)",1000.0,1000.0,8.498545867041685e-12,1.0e-8,true
 40,"isothermal: T stays at T₀",600.0,600.0,1.2505552149377763e-12,1.0e-6,true
 40,"one invocation deactivates the column into one survivor",1.0,1.0,0.0,0.5,true
-40,"the event is located at the exact crossing of ε_m",460.5170185263314,460.51701859880916,1.5738342676595664e-10,1.0e-6,true
+40,"the event is located at the exact crossing of ε_m",460.5170185126119,460.51701859880916,1.8717494292818834e-10,1.0e-6,true

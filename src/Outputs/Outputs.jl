@@ -11,16 +11,26 @@ module Outputs
 using ..Meshes
 using ..States
 using ..States: state_length
-using ..Materials: is_gas, T_REF
+using ..Materials: is_gas, T_REF, gas_component_indices
+using ..Physics: pore_state
 using ..BoundaryConditions: compute_boundary_heat_fluxes, BlowingFace, DirichletThermalBC
 using ..Kernels
 using ..Assembly
 using ..Deactivation
 
+include("gas_diagnostics.jl")
 include("solution.jl")
 include("conservation.jl")
 include("accessors.jl")
 
+export GasDiagnostics,
+    get_porosity,
+    get_pressure,
+    get_partial_pressures,
+    get_intrinsic_gas_densities,
+    get_gas_composition,
+    get_boundary_exchange,
+    gas_species_audit
 export PyrolysisSolution, SolutionExtras, SolverStatistics
 export get_times, get_temperatures, get_concentrations, get_gas_generation_rate
 export n_timesteps, succeeded, completed

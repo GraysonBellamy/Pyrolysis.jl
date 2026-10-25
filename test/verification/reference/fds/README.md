@@ -20,11 +20,11 @@ identity and timing samples are recorded in `provenance.json`.
 |---|---|---|
 | `heat_conduction_{a..d}_devc.csv` | finite slab, convective BC; FDS a/b/c/d = Bi 100/10/1/0.1 | V-HC-02 d/c/b/a (labels reversed; nondimensional θ–Fo overlay) |
 | `convective_cooling_devc.csv` | semi-infinite-like convective heating | V-HC-01 |
-| `insulated_steel_plate_prof_1.csv` | constant flux, insulated back | no matched FDS overlay; see the boundary-condition limitation below |
+| `insulated_steel_plate_devc/prof_1.csv` | heated steel plate | retained; not the V-HC-03 overlay |
 | `two_step_solid_reaction_devc.csv` | A→B→C series kinetics | V-RX-01 |
 | `part_baking_soda_{420K,450K,500K}_devc.csv` | isothermal NaHCO₃ decomposition | V-RX-02 |
-| `shrink_swell_devc.csv` | 6 shrink/swell variants, M_i/L_i/T_i | V-CPL-03 |
-| `matl_e_cons_{1..9}_devc.csv` | enthalpy conservation ledger | reference outputs; no report overlay |
+| `shrink_swell_devc.csv` | 6 shrink/swell variants, M_i/L_i/T_i | endpoint precedent; custom deck below supplies V-CPL-03 paths |
+| `matl_e_cons_{1..9}_devc.csv` | enthalpy conservation ledger | retained; not read by a current overlay |
 
 Run each deck in its own output directory with:
 
@@ -76,8 +76,9 @@ Where the shipped FDS case differs from ours, `custom/` holds minimal decks
   overlays and `timings.csv` rows therefore use these matched runs. The
   supplied-deck outputs are retained alongside the matched-deck outputs.
 
-Not representable in FDS: V-HC-03's pure Neumann BC (constant net flux, no
-convection, no re-radiation). `NET_HEAT_FLUX`/`CONVECTIVE_HEAT_FLUX` don't
-work with `MATL_ID`, and `EXTERNAL_FLUX` (even with `SKIP_INRAD=T`) always
-carries the ε·σ·Ts⁴ re-emission term. V-HC-03 gets its cross-code overlay
-from Gpyro instead.
+V-HC-03 uses Gpyro for its pure Neumann overlay (constant net flux, no
+convection or reradiation). In FDS 6.11.0's standard `MATL_ID` wall input path,
+[`READ_SURF`](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/read.f90#L8290-L8300)
+rejects `NET_HEAT_FLUX` and `CONVECTIVE_HEAT_FLUX`; `EXTERNAL_FLUX` is
+absorptivity-scaled and the material reradiates. This identifies the limitation
+of the tested input path, not every possible FDS configuration or release.

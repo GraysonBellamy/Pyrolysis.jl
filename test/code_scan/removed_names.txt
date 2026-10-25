@@ -76,7 +76,26 @@ effective_gas_viscosity
 re:Pyrolysis\.(Residual|Discretization|Adaptivity|Solver|Jacobian|Geometry|Diagnostics|Experimental)\b
 re:(using|import) \.\.(Residual|Discretization|Adaptivity|Solver|Jacobian|Geometry|Diagnostics|Experimental)\b
 
+FickTransport
+DarcyFickTransport
+gas_flux
+mixture_density
+has_darcy_flow
+warn_degenerate_gas_transport
+validate_darcy_initial_porosity
+MOBILITY_GUARD
+DiffusiveMassBC
+ConvectiveMassBC
+CombinedMassBC
+DirichletPressureBC
+mass_bc_flux
+get_mass_bc
+compute_surface_mass_flux
+outward_darcy_velocity
+ξ_inf
+
 [markers]
+re:Darcy(?:–|—|-|/| )Fick
 newcore
 NEWCORE
 new_core

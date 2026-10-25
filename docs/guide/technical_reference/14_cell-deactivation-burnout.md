@@ -526,7 +526,7 @@ rows and checks the result:
    §15.4); a velocity row left above round-off returns `:inconsistent`;
 3. admissibility (`inadmissible`, §15.5.4) with every live cell, the receiver
    included, held to its own mass tolerances, which are those the domain test
-   applies to every later proposal, and under Darcy–Fick transport a porosity in
+   applies to every later proposal, and under gas transport a porosity in
    $[0,1]$ within the skeletal volume of the mass tolerances; a failure returns
    `:inadmissible`.
 
@@ -698,9 +698,11 @@ and convection at the top and an adiabatic back:
 ```julia
 using Pyrolysis
 
-solid = SolidComponent(:solid, ρ = 1190.0, c = 1420.0, k = 0.21, ε = 0.86, λ = 1e-6)
-gas = GaseousComponent(:gas, M = 0.1, c = 1500.0, k = 0.02, λ = 1e-5)
+solid = SolidComponent(:solid, ρ = 1190.0, φ=.3, c = 1420.0, k = 0.21, ε = 0.86, λ = 1e-6)
+gas = GaseousComponent(:gas, M = 0.1, c = 1500.0, k = 0.02,)
 material = Material(
+    gas_transport=LumpedTransfer(endpoint=LumpedEndpoint(λ=1e-6,κ=0.,max_skeletal_occupancy=.001)),
+
     name = :slab,
     components = (solid, gas),
     reactions = (Reaction(:pyrolysis, 1 => 2, A = 8.5e12, E = 188e3, h = 870e3),),
@@ -714,7 +716,7 @@ problem = PyrolysisProblem(
                   ConvectiveBC(h = 10.0, T_inf = 300.0),
             bottom = AdiabaticBC(),
         ),
-        mass = (top = DiffusiveMassBC(0.05), bottom = ImpermeableBC()),
+        mass = (top = AmbientGasBC(GasReservoir(P=0., T=300.)), bottom = ImpermeableBC()),
     ),
     tspan = (0.0, 80.0),
     output_times = collect(0.0:10.0:80.0),
@@ -781,42 +783,26 @@ The deactivation is coupled to the time integration only through its callbacks
 
 ## 14.8 Comparison to ThermaKin2Ds, Gpyro, and FDS
 
-The reference codes for condensed-phase pyrolysis take different stances on how
-to represent a receding surface. Mapping their notation to ours on first use:
+The reference sources establish changing grids, but do not establish a common
+cell-removal or event-transfer algorithm across the codes.
 
-- **ThermaKin2Ds** (Stoliarov–Lyon) represents volume change by a dynamic-mesh
-  adjustment driven by the deformation source
-  $\int(1/\rho)(\partial\rho/\partial t)\,dx$ about a single moving reference
-  point, rather than by a topology change. The Pyrolysis.jl equivalent of that
-  motion is the moving mesh of §11, whose balance rows move the nodes with the
-  solid. What Pyrolysis.jl adds is the deactivation of a cell once its condensed
-  mass falls below $\varepsilon_m$ of its initial value, with its inventories
-  transferred conservatively to the cell beneath, and the correction that lets a
-  vanishing layer leave in one event.
-- **Gpyro** (Lautenberger–Fernandez-Pello) uses a control-volume mesh whose
-  thicknesses shrink as the solid is consumed, the front-most control volume
-  allowed to vanish. Its "cell disappears" behaviour corresponds to
-  deactivation here; the enthalpy-conserving transfer of §14.3.3 is the careful
-  form of folding a vanishing control volume's energy into its neighbour, and
-  the pore rule keeps the receiver's porosity admissible when the intrinsic
-  densities depend on temperature.
-- **FDS** (McGrattan et al.) solves the solid phase on a through-thickness grid
-  whose surface-cell removal as the surface regresses is the analogue of the
-  top-down deactivation of a fixed mesh here (§14.4), with swelling and
-  shrinking applied through a density-ratio rule on the cell sizes. Pyrolysis.jl
-  folds the removed cell's sensible enthalpy into its interior neighbour and
-  writes the vented gas and its enthalpy to the event.
+- **ThermaKin2Ds:** TK §3 explicitly splits large elements and combines part
+  of a neighboring element into small elements, conserving species and energy.
+  Its reference plane is stationary. This is a remeshing operation, not
+  evidence that the mesh topology never changes.
+- **Gpyro:** GP §4.1 derives a changing-thickness control-volume system.
+  Shrinking thickness alone does not establish the same threshold, event
+  location, residual-inventory transfer or vent accounting as Pyrolysis.jl.
+  Original Gpyro and V2 require separate implementation checks for burnout.
+- **FDS:** FDS 6.11.0 `wall.f90` detects cells approaching zero thickness,
+  remeshes affected layers and handles complete disappearance of a wall.
+  This differs from our fixed state length and mass-based deactivation event.
 
-All four codes reconcile a numerical grid with a physically receding boundary,
-and all four remove resolution at the surface as material is consumed.
-Pyrolysis.jl's choices are a threshold on mass rather than thickness, a
-conservative transfer with every loss recorded, a state length and Jacobian
-pattern that never change, and an event located inside the step.
-
-> Note: the reference comparison here is drawn from the general published
-> descriptions of these codes, so the mapping above is at the level of modeling
-> strategy rather than equation-by-equation correspondence. The Pyrolysis.jl side
-> of every statement is grounded in the source as cited throughout this chapter.
+Pyrolysis.jl's documented behavior is specific: a condensed-mass threshold,
+located event, transfer of inventories to a receiver, recorded vent losses,
+and unchanged state dimension (§14.3). These claims are supported by
+`src/Deactivation/events.jl`; no claim is made that other codes implement
+the same bookkeeping or lack an equivalent conservation check.
 
 ---
 

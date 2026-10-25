@@ -412,9 +412,9 @@ controller's smallest factor, when
   (a non-positive volume); or a non-positive cross-section area. The test reads
   the raw state, never through a guard: the trial clamp keeps such a state
   evaluable, and this test keeps it from being accepted;
-- under Darcy–Fick transport a live cell's porosity
-  $1-\sum_j m_j/(\rho_{i,j}(T)V)$, read from the raw masses and volume, leaves
-  $[0,1]$ by more than the skeletal volume of its mass tolerances;
+- a gas-bearing live cell lacks resolved physical pore volume above twice the
+  trial divisor floor plus its mass/thermal/geometry uncertainty, violates its
+  current negative-gas-pressure budget, or leaves its declared matrix domain;
 - an algebraic row's scaled residual exceeds one (`constraint_residual`):
 
   $$
@@ -478,7 +478,8 @@ the deactivation threshold $\varepsilon_m$ (`threshold`), `reltol` and `abstol`:
 
 | Row | Absolute tolerance |
 |---|---|
-| mass of any component in cell $i$ | $\mathrm{rtol}\,\varepsilon_m\,m^{\rm s}_i(0)$, never a per-species inventory, which is zero for a product |
+| condensed component mass in cell $i$ | $\mathrm{rtol}\,\varepsilon_m\,m^{\rm s}_i(0)$, never a per-species inventory, which is zero for a product |
+| gas component mass in cell $i$ | $p_{tol}M_j\phi_i(0)V_i(0)/(N_gRT_i(0))$; supplemented by the proposed-state pressure norm |
 | temperature | `abstol` [K] |
 | enthalpy inventory | $\varepsilon_m\,m^{\rm s}_i(0)\,c_{p,\rm ref}\,$`abstol`, $c_{p,\rm ref}$ the cell's mass-weighted heat capacity at its initial temperature, so a cell at the threshold resolves its temperature to `abstol` as the temperature form does |
 | face intensity | $\mathrm{rtol}\,I_{\rm scale}$, $I_{\rm scale}$ the largest incident intensity over the solve window (at least 1 W m⁻²) |
@@ -492,8 +493,10 @@ the deactivation threshold $\varepsilon_m$ (`threshold`), `reltol` and `abstol`:
 
 The defaults are `reltol` $=10^{-6}$ and `abstol` $=10^{-8}$ K. A position error
 within its tolerance moves a cell's concentrations by the relative amount its
-mass tolerance allows. The same mass tolerance is the scale below which the
-state mapping's positive part and the caloric extension act (§13).
+mass tolerance allows. Condensed caloric regularization uses its reference-mass scale. Gas transport
+guards instead use current pore volume and temperature. The pressure norm
+propagates mass, thermal and geometric error through the proposed-state EOS;
+initial gas-row tolerances alone do not control evolving pressure (§13.10.5).
 
 ### 15.5.7 Problem-independent integrator types
 
@@ -527,8 +530,8 @@ configuration (`test/integration/test_policies.jl`). A problem with other
 material or boundary-condition types compiles only the Pyrolysis kernels, the
 state mapping, the colored Jacobian and the solution's reconstruction. The
 precompile workloads (`src/precompile.jl`) cache the integrator for the fixed
-and moving meshes under surface absorption and Beer–Lambert absorption, Fickian
-and Darcy–Fick transport, with and without deactivation, and the enthalpy form
+and moving meshes under surface absorption and Beer–Lambert absorption, lumped wall
+and gas transport, with and without deactivation, and the enthalpy form
 once.
 
 ---
@@ -623,7 +626,7 @@ a term added to a kernel enters the Jacobian with it. Three kinds of code inside
 the residual need care to keep that derivative correct and finite.
 
 - **Smooth guards.** Every trial-state guard is $C^1$ and exactly the identity
-  on the states the tolerances can distinguish (`src/States/guards.jl`): the
+  on the states the tolerances can distinguish (`src/Materials/guards.jl`): the
   trial temperature, the cell temperature smoothly clamped into the property
   bracket $[200,3000]$ K with 1 K transitions, which keeps $\exp(-E/RT)$ finite
   with a finite derivative at zero and negative trial temperatures; the
@@ -858,9 +861,11 @@ using Pyrolysis.Internal: jac_prototype, jacobian!, dense_jacobian, missing_entr
     compare_entries, state_length, is_differential
 using SparseArrays
 
-solid = SolidComponent(:solid, ρ = 1190.0, c = 1420.0, k = 0.21, ε = 0.86, α = 2.0, λ = 1e-6)
-gas = GaseousComponent(:gas, M = 0.1, c = 1500.0, k = 0.02, λ = 1e-5)
+solid = SolidComponent(:solid, ρ = 1190.0, φ=.3, c = 1420.0, k = 0.21, ε = 0.86, α = 2.0, λ = 1e-6)
+gas = GaseousComponent(:gas, M = 0.1, c = 1500.0, k = 0.02,)
 material = Material(
+    gas_transport=LumpedTransfer(endpoint=LumpedEndpoint(λ=1e-6,κ=0.,max_skeletal_occupancy=.001)),
+
     name = :slab,
     components = (solid, gas),
     reactions = (Reaction(:pyrolysis, 1 => 2, A = 8.5e12, E = 188e3, h = 870e3),),
@@ -873,7 +878,7 @@ problem = PyrolysisProblem(
             top = RadiativeFluxBC(flux = 100e3) + RadiativeBC(T_inf = 300.0),
             bottom = AdiabaticBC(),
         ),
-        mass = (top = DiffusiveMassBC(0.05), bottom = ImpermeableBC()),
+        mass = (top = AmbientGasBC(GasReservoir(P=0., T=300.)), bottom = ImpermeableBC()),
     ),
     T_initial = z -> 600.0 + 2e5 * z,
     tspan = (0.0, 10.0),
@@ -914,76 +919,40 @@ moving, deactivation  62 rows (13 algebraic), half-bandwidth 14, 21 colors, 0 mi
 
 ## 15.14 Comparison to ThermaKin2Ds, Gpyro, and FDS
 
-We map each reference code's notation to ours on first use.
-
 ### 15.14.1 Gpyro
 
-Gpyro (Lautenberger & Fernandez-Pello) solves the condensed phase by a
-**fully-implicit backward-Euler** time discretization with **Patankar-style
-linearization** of the source terms and a **tridiagonal (TDMA / Thomas)** linear
-solve, sweeping the coupled energy/species/gas/pressure equations to convergence
-each step. Mapping: Gpyro's volume fractions $X_\alpha$ are our $v_j$; its
-pre-exponential $Z$ is our $A_i$; its permeability $K$ is our $\kappa$; its
-volumetric reaction rate $\dot\omega'''$ is our $r$; its mixture average
-$\bar\rho$ corresponds to our $\rho=\sum_j\xi_j$.
+The documented 1D Gpyro formulation uses fully implicit time differences,
+linearized source terms and iterative equation solves with TDMA (GP §6;
+Gpyro 0.8200 `gpyro_pyro.f90`). Its condensed energy unknown is enthalpy,
+with temperature recovered from composition and enthalpy. Its mesh
+thicknesses evolve with mass and density.
 
-Contrasts with Pyrolysis.jl:
-
-- **Time scheme.** Gpyro is first-order backward Euler with an outer
-  source-linearization sweep. Pyrolysis.jl integrates the mass-matrix DAE with
-  an adaptive higher-order method, `Rodas5P` by default, with error control on
-  every row and the restart after an event part of the integrator's contract.
-- **Jacobian.** Gpyro never forms a global Jacobian; its Patankar linearization
-  produces a tridiagonal coefficient matrix per equation, and the coupling
-  between equations is handled by the outer iteration. Pyrolysis.jl forms the
-  full coupled Jacobian of every row with respect to every unknown, by colored
-  automatic differentiation, so cross-equation coupling is inside each stage
-  solve. The banded block structure of our pattern on a line is the multi-field
-  analogue of Gpyro's per-equation tridiagonal matrix.
-- **Mesh.** Gpyro uses fixed (or prescribed variable-$\Delta z$) control volumes;
-  Pyrolysis.jl moves the mesh with the solid and carries the node velocities as
-  algebraic unknowns, so the volume-change kinematics stay local rows.
+Pyrolysis.jl instead forms a coupled state Jacobian with colored forward-mode
+AD and uses an adaptive stiff integrator (`Rodas5P` by default in this
+checkout, `src/Integration/policy.jl`). The distinction describes these
+implementations; it does not establish that every Gpyro version lacks a
+Jacobian, or that a higher formal time order always gives a faster or more
+accurate solve. V2 has different species and thermal solver implementations.
 
 ### 15.14.2 ThermaKin2Ds
 
-ThermaKin2Ds (Stoliarov et al.) solves the 1D (and 2D) condensed phase with a
-**Crank–Nicolson** scheme in the primary (through-thickness, here $x$/our $z$)
-direction and explicit treatment in the transverse directions, on a
-**dynamically adjusted mesh**. Mapping: ThermaKin's stoichiometric coefficients
-$\theta_i^j$ are our $\nu_{i,j}$ (we reserve $\theta$ for strain rate, overload
-resolution A2); its component concentrations are our $\xi_j$.
-
-Contrasts:
-
-- **Time scheme.** Crank–Nicolson is second-order and A-stable but not L-stable,
-  so it can ring on the stiff Arrhenius transients at ignition; `Rodas5P`,
-  `KenCarp4` and `FBDF` are L-stable or stiffly accurate methods with embedded
-  error control.
-- **Energy convention.** ThermaKin (Eq. 17) carries the gas enthalpy by the
-  convective term $c_g(\mathbf J_g\cdot\partial T/\partial x)$ with every
-  component in the storage term. Pyrolysis.jl stores every component as well and
-  carries the gas enthalpy in flux form, as the sensible enthalpy the face mass
-  fluxes carry (§7). The heat-of-reaction sign differs in publication ($h>0$
-  exothermic in ThermaKin, endothermic in Gpyro and internally here) and is mapped
-  by overload resolution H1.
-- **Mesh.** ThermaKin's dynamic mesh adjustment is the closest analogue to the
-  moving mesh here; both track a receding surface. In Pyrolysis.jl the mesh
-  motion is part of the coupled system: the node positions and velocities are
-  unknowns, and the Jacobian carries their coupling to the physics exactly.
+TK §3 specifies Crank–Nicolson in the primary direction and explicit
+transverse integration, and states timestep criteria and element-size
+adjustment. This differs from our adaptive mass-matrix integration with
+geometry in the coupled state. Crank–Nicolson's linear stability properties
+alone do not demonstrate ringing in an actual ThermaKin ignition calculation;
+that would need a matched numerical study. No comparative ringing or
+solver-performance claim is made here.
 
 ### 15.14.3 FDS
 
-The FDS (McDermott et al.) solid-phase pyrolysis model integrates a 1D Fourier
-conduction equation with Arrhenius source terms; the surface boundary couples to
-the gas-phase CFD. FDS uses a node-based 1D solid grid and an implicit/explicit
-split appropriate to its multiphysics coupling. Pyrolysis.jl is a standalone
-condensed-phase solver: it does not solve a gas-phase flow field, but it carries
-multi-component effective properties, in-depth radiation, Darcy gas transport
-and a moving mesh with a variable cross section. FDS carries no in-depth gas, so
-its energy equation is the condensed-phase limit of ours; it shares the
-Arrhenius kinetic form. On the temporal and Jacobian axis the comparison is
-methodological (implicit conduction with explicit or implicit coupling) rather
-than a mapping of Jacobian internals.
+The FDS mathematical model's one-dimensional heat-transfer appendix
+describes Crank–Nicolson conduction. FDS 6.11.0 `wall.f90` includes solid
+substeps, reaction evaluation, coordinate updates and layer remeshing, coupled
+to the CFD calculation. Our standalone condensed-phase system instead
+integrates the supported mass, energy and geometric unknowns together.
+Different coupling, tolerances, outputs and timing boundaries must be
+accounted for before comparing computational cost (§18.1.3).
 
 ---
 

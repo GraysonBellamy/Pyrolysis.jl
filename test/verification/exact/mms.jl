@@ -8,18 +8,18 @@
 # sources that make them the exact solution of the FULL coupled system, which
 # gives formal order-of-accuracy verification of the coupled operators.
 #
-# ## Continuous system targeted (Eulerian, Fickian transport, no radiation)
+# ## Continuous system targeted (Eulerian, partial-pressure transport, no radiation)
 #
 #   ρcp(T,ξ) ∂T/∂t = −∂z q + S_adv + Q_rxn + S_T,      q = −k_eff(T,ξ) ∂z T
 #       ρcp    = Σⱼ ξⱼ cp_j(T)   (every component, gas included)
 #       S_adv = −Σ_g cp_g(T) J_g ∂z T
 #       Q_rxn  = −Σ_r h_r(T,ξ) r_r(ξ,T)
-#   ∂ξ_g/∂t = −∂z J_g + ω̇_g + S_ξg,   J_g = −(λ_eff(T,ξ)/T)·∂z(ξ_g T)
+#   ∂ξ_g/∂t = −∂z J_g + ω̇_g + S_ξg,   J_g = −Λ(T,ξ) M_g/(RT)·∂z p_g,  p_g = ξ_g RT/(φ M_g)
 #   ∂ξ_s/∂t =            ω̇_s + S_ξs                          (condensed phases)
 #
-# The gas flux is the ThermaKin volume-fraction-gradient form (see
-# src/Physics/gas_transport.jl), NOT plain Fick — the manufactured source must
-# match it exactly or the "error" never converges.
+# The transport reference constructs matrix weights, porosity and partial
+# pressures independently from component data, then differentiates the
+# continuous potential. It never calls the production transport evaluator.
 #
 # ## Design decisions (mirror the case docstrings before changing)
 #
@@ -29,19 +29,13 @@
 #    residual through the solver's `VolumetricSources` hook, whose functions
 #    of position and time the colored Jacobian differentiates with the rest
 #    of the residual, so the Jacobian stays exact with MMS active.
-# 2. **Every coefficient is evaluated through the package's own property and
-#    kinetics functions** (the component heat capacities,
-#    `effective_conductivity`, `effective_gas_transfer`, `reaction_rate` with
-#    the material's own depletion limiter). The continuous operator therefore
-#    matches the discretization's consistency target by construction —
-#    including mixing rules, floors, tanh gates and limiter — with no
-#    re-derivation to drift.
-# 3. **Boundary conditions are manufactured Neumann fluxes**
-#    (`HeatFluxBC(t->…)` / `MassFluxBC(t->…)`, positive into domain): the FV
-#    scheme imposes face fluxes exactly, so the boundary contributes no
-#    order-reducing reconstruction (a prescribed face temperature enters
-#    through the one-sided difference k(T_cell − T_bc)/d over the
-#    centre-to-face distance, first-order at the face).
+# 2. Thermal and reaction properties use the material's declared laws. The
+#    gas reference independently assembles normalized condensed matrix weights
+#    and the continuous partial-pressure law, including spatially varying φ.
+# 3. Boundary heat flux is positive inward; named species mass flux is positive
+#    outward. Incoming enthalpy uses the manufactured boundary temperature.
+#    Manufactured Neumann fluxes avoid a first-order temperature boundary
+#    reconstruction entering the target truncation error.
 # 4. Spatial derivatives of the manufactured fields are taken with nested
 #    ForwardDiff on the field callables — no hand-derived formulas to
 #    transcribe wrong. The hand-derived checks live in selftests.jl.
@@ -64,8 +58,8 @@
 # Eulerian one. Sources are evaluated at the cell centers.
 #
 # Sign conventions: q_z = −k∂zT and J positive in +z; a boundary condition's
-# flux is positive into the domain, so the top condition is −(flux at L) and
-# the bottom one +(flux at 0).
+# heat flux is positive into the domain and species mass flux positive outward.
+# Thus heat uses (−q(L), +q(0)), and species use (+J(L), −J(0)).
 
 using ForwardDiff
 using LinearAlgebra: SymTridiagonal, eigen
@@ -108,17 +102,48 @@ function mms_heat_flux(material, fields::MMSFields, z, t)
     return -k * dTdz
 end
 
-"""
-Continuous gas mass flux of component `j` [kg/(m²·s)]:
-J_j = −(λ_eff/T)·∂z(ξ_j T) — the ThermaKin volume-fraction-gradient form the
-discrete `gas_flux` kernel approximates.
-"""
+"Continuous gas mass flux J_j = −Λ M_j/(RT) ∂z p_j [kg/(m² s)]."
 function mms_gas_flux(material, fields::MMSFields, j::Int, z, t)
+    material.gas_transport isa LumpedTransfer ||
+        error("this MMS reference requires lumped transport")
     T = fields.T(z, t)
     ξ = mms_xi_tuple(fields, z, t)
-    λ = Properties.effective_gas_transfer(ξ, T, material)
-    dξT = ForwardDiff.derivative(ζ -> fields.ξ[j](ζ, t) * fields.T(ζ, t), z)
-    return -(λ / T) * dξT
+    ids = [
+        k for k in eachindex(ξ) if
+        !is_gas(material.components[k]) && material.components[k].swelling_factor>0
+    ]
+    weights = [
+        material.components[k].swelling_factor*ξ[k]/material.components[k].density(T)
+        for k in ids
+    ]
+    weights ./= sum(weights)
+    values = [material.components[k].gas_transfer_coeff(T) for k in ids]
+    spec = material.mixing.λ
+    parallel = sum(weights .* values)
+    series =
+        any(k->weights[k]>0 && values[k]==0, eachindex(weights)) ? zero(T) :
+        inv(sum(weights ./ values))
+    Λ =
+        spec.rule==PARALLEL ? parallel :
+        spec.rule==SERIES ? series :
+        spec.rule==WEIGHTED ? spec.β*parallel+(1-spec.β)*series :
+        error("unsupported MMS matrix closure")
+    all(k->material.components[k].permeability(T)==0, ids) ||
+        error("this MMS reference requires κ=0")
+    potential(ζ) = begin
+        Θ = fields.T(ζ, t)
+        concentrations = mms_xi_tuple(fields, ζ, t)
+        φ =
+            1-sum(
+                concentrations[k]/Pyrolysis.Materials.get_intrinsic_density(
+                    material.components[k],
+                    Θ,
+                ) for k in eachindex(concentrations) if !is_gas(material.components[k])
+            )
+        φ>0 || error("manufactured fields leave the physical pore domain")
+        fields.ξ[j](ζ, t)*Θ/φ
+    end
+    return -(Λ/T)*ForwardDiff.derivative(potential, z)
 end
 
 # Reaction rate of reaction r at manufactured state — same rate law as the
@@ -297,22 +322,17 @@ function mms_thermal_bcs(material, fields::MMSFields, L)
     )
 end
 
-"""
-Time-dependent `MassFluxBC` pair for the manufactured gas flux. `MassFluxBC`
-applies the same flux to EVERY gas component (see `mass_bc_flux`), so the
-material must have exactly one gas component — asserted here.
-"""
+"Named outward species fluxes with complete incoming thermodynamic data."
 function mms_mass_bcs(material, fields::MMSFields, L)
-    gas_idx = findall(is_gas, collect(material.components))
-    length(gas_idx) == 1 || error(
-        "mms_mass_bcs requires exactly one gas component (MassFluxBC applies " *
-        "one flux to every gas species); got $(length(gas_idx))",
+    ids = findall(is_gas, collect(material.components))
+    names = Tuple(material.components[j].name for j in ids)
+    boundary(z, sign) = MassFluxBC(
+        fluxes = NamedTuple{names}(
+            Tuple(t->sign*mms_gas_flux(material, fields, j, z, t) for j in ids),
+        ),
+        inflow_temperature = NamedTuple{names}(Tuple(t->fields.T(z, t) for j in ids)),
     )
-    j = gas_idx[1]
-    return (
-        top = MassFluxBC(t -> -mms_gas_flux(material, fields, j, L, t)),
-        bottom = MassFluxBC(t -> mms_gas_flux(material, fields, j, 0.0, t)),
-    )
+    return (top = boundary(L, 1), bottom = boundary(0.0, -1))
 end
 
 # ----------------------------------------------------------------------------

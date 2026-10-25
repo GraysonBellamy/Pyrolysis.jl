@@ -72,9 +72,9 @@ properties:
 ```julia
 using Pyrolysis
 
-pmma    = SolidComponent(:PMMA;    ρ = 1210.0, c = 1600.0, k = 0.2,   ε = 0.96, λ = 2e-5, α = 2.37)
-kaowool = SolidComponent(:KAOWOOL; ρ = 256.0,  c = 1100.0, k = 0.058, ε = 1.0,  λ = 2e-5, α = 3.1e4)
-mma     = GaseousComponent(:MMA;   M = 0.1, c = 1500.0, k = 0.02, λ = 2e-2)
+pmma    = SolidComponent(:PMMA;    ρ = 1210.0, φ=.01, c = 1600.0, k = 0.2,   ε = 0.96, λ = 2e-5, α = 2.37)
+kaowool = SolidComponent(:KAOWOOL; ρ = 256.0, φ=.8,  c = 1100.0, k = 0.058, ε = 1.0,  λ = 2e-5, α = 3.1e4)
+mma     = GaseousComponent(:MMA;   M = 0.1, c = 1500.0, k = 0.02,)
 material = Material(
     name = :PMMA_on_Kaowool,
     components = (pmma, kaowool, mma),
@@ -96,7 +96,7 @@ bcs = BoundaryConditionSet(
               ConvectiveBC(h = 8.2, T_inf = 298.0),
         bottom = RadiativeBC(ε = 1.0, T_inf = 298.0),
     ),
-    mass = (top = DiffusiveMassBC(), bottom = ImpermeableBC()),
+    mass = (top = AmbientGasBC(GasReservoir(P=0., T=300.)), bottom = ImpermeableBC()),
 )
 problem = PyrolysisProblem(
     mesh = mesh,
@@ -556,7 +556,7 @@ the strict test, `:Success` only.
 | `:Terminated` | `:burned_out` | `true` | The last live cell went; its inventories are written to the last event as lost. |
 | `:Terminated` | `:min_thickness` | `true` | The live thickness of a moving mesh fell below `min_thickness` (§10.3). |
 | `:Terminated` | `:interior` | `false` | A cell below the threshold lies inward of a live cell that deactivation leaves; the solve warns and ends. |
-| `:Failure` | `:running` | `false` | The state after an event was inadmissible (a receiver outside its own mass tolerances, crossed nodes, a cell at or below absolute zero, under Darcy–Fick transport a porosity outside `[0, 1]`), or no consistent node velocities exist after it; the solve warns naming the event's time. |
+| `:Failure` | `:running` | `false` | The state after an event was inadmissible (a receiver outside its own mass tolerances, crossed nodes, a cell at or below absolute zero, under gas transport a porosity outside `[0, 1]`), or no consistent node velocities exist after it; the solve warns naming the event's time. |
 
 The state a solve ends on is always saved, whether or not `saveat` names its
 time.

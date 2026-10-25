@@ -173,8 +173,17 @@ end
 end
 
 @testset "outputs: the surface-flux decomposition and the mass-loss rate" begin
-    solid = SolidComponent(:s, ρ = 800.0, c = 1200.0, k = 0.4, ε = 0.9, α = 2.0, λ = 1e-6)
-    gas = GaseousComponent(:g, M = 0.03, c = 1000.0, k = 0.02, λ = 1e-5)
+    solid = SolidComponent(
+        :s,
+        ρ = 800.0,
+        φ = 0.3,
+        c = 1200.0,
+        k = 0.4,
+        ε = 0.9,
+        α = 2.0,
+        λ = 1e-6,
+    )
+    gas = GaseousComponent(:g, M = 0.03, c = 1000.0, k = 0.02)
     rxn = Reaction(:gasify, 1 => 2; A = 1e8, E = 1.2e5, h = 1e5)
     mat = Material(name = :charring, components = (solid, gas), reactions = (rxn,))
     h_back, T_back_inf = 5.0, 300.0
@@ -188,7 +197,10 @@ end
                       ConvectiveBC(h = 10.0, T_inf = 300.0),
                 bottom = ConvectiveBC(h = h_back, T_inf = T_back_inf),
             ),
-            mass = (top = DiffusiveMassBC(0.05), bottom = ImpermeableBC()),
+            mass = (
+                top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
+                bottom = ImpermeableBC(),
+            ),
         ),
         T_initial = z -> 500.0,
         ξ_initial = [z -> 800.0, z -> 0.0],
@@ -245,6 +257,7 @@ end
     virgin = SolidComponent(
         :virgin,
         ρ = 600.0,
+        φ = 0.3,
         c = 1500.0,
         k = 0.15,
         ε = 0.95,
@@ -252,11 +265,22 @@ end
         α = 0.5,
         λ = 1e-5,
     )
-    gas = GaseousComponent(:pyrgas, M = 0.06, c = 1800.0, k = 0.03, λ = 5e-5)
+    gas = GaseousComponent(:pyrgas, M = 0.06, c = 1800.0, k = 0.03)
     rxn = Reaction(:pyro, 1 => 2, A = 1e8, E = 7e4, h = -300e3)
     problem = PyrolysisProblem(
         mesh = create_uniform_mesh(0.005, 8),
-        material = Material(name = :wood, components = (virgin, gas), reactions = (rxn,)),
+        material = Material(
+            name = :wood,
+            components = (virgin, gas),
+            reactions = (rxn,),
+            gas_transport = LumpedTransfer(
+                endpoint = LumpedEndpoint(
+                    λ = 1e-5,
+                    κ = 0.0,
+                    max_skeletal_occupancy = 0.001,
+                ),
+            ),
+        ),
         bc_set = BoundaryConditionSet(
             thermal = (
                 top = RadiativeFluxBC(flux = q) +
@@ -264,7 +288,10 @@ end
                       ConvectiveBC(h = 10.0, T_inf = 300.0),
                 bottom = AdiabaticBC(),
             ),
-            mass = (top = DiffusiveMassBC(), bottom = ImpermeableBC()),
+            mass = (
+                top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
+                bottom = ImpermeableBC(),
+            ),
         ),
         ξ_initial = [z -> 600.0, z -> 0.0],
         tspan = (0.0, 10.0),
@@ -294,10 +321,13 @@ function _ablating_column(n)
     mat = Material(
         name = :ablator,
         components = (
-            SolidComponent(:solid, ρ = ρ, c = c, k = k, λ = 1e-6),
-            GaseousComponent(:gas, M = 0.05, c = c, k = 0.02, λ = 1e-4),
+            SolidComponent(:solid, ρ = ρ, φ = 0.3, c = c, k = k, λ = 1e-6),
+            GaseousComponent(:gas, M = 0.05, c = c, k = 0.02),
         ),
         reactions = (Reaction(:ablate, 1 => 2; A = A, E = E, h = 1.0e6),),
+        gas_transport = LumpedTransfer(
+            endpoint = LumpedEndpoint(λ = 1e-6, κ = 0.0, max_skeletal_occupancy = 0.001),
+        ),
     )
     return PyrolysisProblem(
         mesh = create_uniform_mesh(3e-3, n),
@@ -305,7 +335,7 @@ function _ablating_column(n)
         bc_set = BoundaryConditionSet(
             thermal = (top = HeatFluxBC(2.8e6), bottom = AdiabaticBC()),
             mass = (
-                top = ConvectiveMassBC(h_m = 10.0, ξ_inf = 0.0),
+                top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
                 bottom = ImpermeableBC(),
             ),
         ),

@@ -81,7 +81,6 @@ solve time.
 
 | Warning (abridged) | Meaning | See |
 |---|---|---|
-| `Material :name: the condensed component(s) … have gas-transfer coefficient λ = 0 under Fickian gas transport …` | problem validation: gas transport vanishes where a cell holds no gas | §15.5 |
 | `solve(): stopped at t = …: the last proposed state, at t = …, takes cell i to or below absolute zero` | the solve stopped while rejecting proposals that cool a cell to 0 K | §15.3.2 |
 | `solve(): a constraint residual stayed above its tolerance for N consecutive steps at t = … (scaled residual r)` | the domain test gave up; the solve ends with `:Failure` | §15.3.3 |
 | `solve(): the fixed step accepted at t = … is inadmissible …` | a fixed-step solve left the physical domain; `:Failure` | §15.3.4 |
@@ -143,27 +142,14 @@ non-positive `min_thickness`, and a `band` outside `[threshold, 1)`.
 
 ### 15.2.2 Problem validation
 
-Unless `validate = false`, `solve` first runs
-`Pyrolysis.Problem.validate_problem(problem; strict = false)`. It collects every
-error and throws one `ErrorException` ("Problem validation failed with N
-error(s)") listing them:
+Validation checks mesh tags, reaction indices, the initial field count and
+time span. Reservoir fractions must name gases in the material and sum to
+one; non-vacuum reservoirs need incoming temperature and composition.
+Every gas-bearing state needs physical pore volume, including sealed gas.
+Setup then checks its uncertainty margin, the matrix support path and any
+endpoint domain. See §7.9 and §7.5 for the governing conditions.
 
-- the mesh lacks the tags `:top` (the exposed surface) or `:bottom`, or a tag of
-  the mesh has no thermal condition;
-- a `ConvectiveMassBC` carries a per-species `ξ_inf` tuple whose length is not
-  the component count;
-- the time span: `t_start ≥ t_end`, a negative start time, `dt_initial ≤ 0`, or
-  `dt_initial` longer than the span;
-- the number of `ξ_initial` functions differs from the component count;
-- under Darcy–Fick transport, a cell starts with a (near-)zero porosity
-  (`φ₀ < 1e-6`) while its effective permeability is positive. The usual cause
-  is a solid built without `ρ_intrinsic` or `φ`, so that it fills its cell;
-  give the skeletal density (wood: `ρ = 500`, `ρ_intrinsic = 1500`, `φ₀ ≈ 0.67`)
-  and initialize the pore gas with `background_gas_concentration` (§15.10).
-
-`strict = true` adds the mass balance of every reaction, a call of each
-initial-condition function at the first cell centre, and positive cell volumes.
-The degenerate-gas-transport check warns rather than fails (§15.5).
+---
 
 ### 15.2.3 What `setup` refuses
 
@@ -219,7 +205,7 @@ smallest factor, when
   tolerance (`reltol · threshold · mˢᵢ(0)`, with `mˢᵢ(0)` the cell's initial
   condensed mass), a live cell at or below absolute zero, and on a moving mesh a
   cell whose nodes have crossed or a non-positive cross-section area;
-- under **Darcy–Fick** transport, a live cell's porosity
+- under **lumped gas transport** transport, a live cell's porosity
   `1 − Σⱼ mⱼ/(ρⱼ(T) V)` lies outside `[0, 1]` by more than the skeletal volume of
   its mass tolerances;
 - an **algebraic row's** scaled residual exceeds one: the node-velocity balance
@@ -344,7 +330,7 @@ Two warnings end a burnout run with `:Failure`, the outcome left `:running`:
 
 - "the state after deactivating cell(s) at t = … is inadmissible": the receiver,
   holding the merged inventories, fails admissibility against its own
-  tolerances, or a Darcy–Fick porosity leaves its range;
+  tolerances, or a lumped gas transport porosity leaves its range;
 - "no consistent node velocities after deactivating cell(s) at t = …": the sweep
   of the balance rows leaves a velocity row above round-off.
 
@@ -373,35 +359,16 @@ needs the finer mesh (Chapter 10).
 
 ---
 
-## 15.5 Gas transport that degenerates: condensed components at `λ = 0`
+## 15.5 Closed channels and disappearing matrix support
 
-```text
-Warning: Material :name: the condensed component(s) :solid have gas-transfer coefficient
-λ = 0 under Fickian gas transport. Gas transport vanishes where the gas fraction vanishes,
-the gas field forms a sharp front, and the integrator rejects step after step on it. Give the
-condensed components a small λ (for example `λ = 1e-6` m²/s).
-```
-
-Under Fickian transport the cell's gas-transfer coefficient is the
-volume-fraction mix of the component coefficients, so a cell of a solid with
-`λ = 0` that holds no gas has no gas transport at all. The gas field of a
-gas-producing material then ends in a sharp front, and an iterate that drives
-the front cell's gas concentration below zero closes both of its faces and
-flattens its residual: the implicit solve fails repeatedly on the front, which
-shows as many rejected steps and, under `fbdf_policy` or `kencarp4_policy`, as
-nonlinear failures. `SolidComponent` defaults to `λ = 0`; give the condensed
-components a small coefficient:
-
-```julia
-virgin = SolidComponent(:virgin, ρ = 1190.0, c = 1420.0, k = 0.21, λ = 1e-6)
-```
-
-`LiquidComponent` defaults to `λ = 2e-5` m²/s. A material with a permeable
-component uses Darcy–Fick transport and does not warn. Under a Newton-based
-policy, a step whose nonlinear solves needed retries also caps the next
-proposals: for 20 accepted steps the step stays at or below 1.25 times the step
-that needed them (`FAILURE_MEMORY_STEPS`, `FAILURE_MEMORY_GROWTH` in
-`Pyrolysis.Integration`). See §3.2.1 and Technical Reference §5.6.
+Zero `λ` and zero `κ` are legal explicit channel choices. A positive-weight
+zero in an exact series mixture closes that channel; a disappearing barrier
+can make its support discontinuous. Setup checks reachable support changes
+instead of adding a numerical conductance floor. Choose a continuous physical
+mixing closure or a persistent barrier when the material trajectory requires it.
+An exactly closed gas-bearing material still computes its pore EOS and enforces
+physical pore volume. A matrix-free endpoint is separate data with a declared
+skeletal-occupancy domain (§7.5).
 
 ---
 
@@ -429,17 +396,15 @@ extrema(T_live)                        # inside (200, 3000) K
 
 ### 15.6.2 The surface balance at the trial clamp
 
-On a face whose condition is neither a prescribed temperature, a prescribed
-flux nor adiabatic, the surface temperature `T_s` solves
-`q_bc(T_s) = k (T_s − T_cell)/d` by Newton iteration (tolerance `1e-10` of the
-larger flux, at most 50 iterations), started from the cell's trial temperature
-clamped into the bracket, with the condition evaluated at the trial temperature
-of the iterate (§5.4; Technical Reference §12.2). The balance therefore has a
-root for any cell temperature, and the iteration never clamps or aborts: when
-it does not converge, the face flux is evaluated at its last iterate, and
-nothing is printed.
+The gas-free surface balance solves `q_bc(T_s) = k (T_s − T_cell)/d`.
+Gas-bearing boundaries solve the mass and thermal equations together when
+coupled, with qualified roots and implicit derivatives. A failed coupled
+root raises a diagnostic; it is not accepted as a boundary flux. The saved
+`get_boundary_exchange(sol, tag)` fields include its residual and iteration
+count. Material properties use their declared trial-temperature bracket
+(§5.4; Technical Reference §12).
 
-On a trial state this is intended. On an accepted state, a surface temperature
+On an accepted state, a surface temperature
 within 1 K of either end of the bracket, or beyond it, means the condition was
 evaluated at the bracket's end: the re-radiation and convection are those of
 3000 K (or 200 K), not of `T_s`. Check the saved surface temperatures:
@@ -497,7 +462,7 @@ test rejects anything below that. Small negative values of that order in
   `enabled = false` the factor is one, an absent reactant reacts at the rate of
   a `base_scale` concentration, and the admissibility check is the only guard
   (§4.10; Technical Reference §6.3).
-- **Upwind advection.** The Darcy–Fick advective gas flux is first-order upwind
+- **Upwind advection.** The lumped gas transport advective gas flux is first-order upwind
   of the intrinsic gas density `ξ/φ`, stable and diffusive (Technical Reference
   §9).
 - **A reactant initialized at zero.** A reaction consumes only what `ξ_initial`
@@ -612,41 +577,19 @@ scale with the largest incident flux over the time span, sampled at 101 times.
 
 ---
 
-## 15.10 Gas transport and pressure (Darcy–Fick)
+## 15.10 Gas pressure and surface-solve diagnostics
 
-`setup` chooses the gas transport from the material and the mass conditions:
-none without a gas component, or when no component carries a gas-transfer
-coefficient and every mass condition is `ImpermeableBC`; Darcy–Fick when a
-condensed component is permeable (`κ > 0`); Fickian otherwise (Chapter 7;
-Technical Reference §9).
+Use `get_pressure(sol)` and `get_porosity(sol)` for current pore states,
+`get_boundary_exchange(sol,tag)` for signed species exchange and local residuals,
+and `gas_species_audit(sol,recorder)` to separate generation, escape, ingress
+and vented species. Do not rebuild boundary fluxes from initial cell widths.
 
-- **No pressure-driven flow.** The face velocity is `v = −m_f (P_nb − P_o)/d`,
-  with `m_f` the guarded distance-weighted harmonic mean of the two cells'
-  mobilities `κ/μ` (guard `1e-30` m²·Pa⁻¹·s⁻¹), so an impermeable neighbour
-  closes the face. If advection is expected and absent, check that the
-  *condensed* components carry `κ` (gases never do) and that a pressure
-  difference develops.
-- **Pressure spikes in nearly solid cells.** The pressure is
-  `P = (Σ_g ξ_g R_g T / M_g)/φ`, the porosity smoothly floored at `1e-12`. In a
-  cell that is almost entirely solid the same gas mass gives a high pressure:
-  confined gas, which is physical. Validation rejects a permeable cell that
-  starts with no pore space (§15.2.2).
-- **Pore air.** A pore space initialized to vacuum against an ambient pressure
-  boundary draws early product gas inward. Initialize a background gas
-  component at ambient pressure with
-  `background_gas_concentration(material, :AIR, ξ_condensed, T)`.
-- **Pressure conditions vent advectively, outflow only.** `DirichletPressureBC`,
-  `NeumannPressureBC` and `ConvectivePressureBC` set the boundary-face Darcy
-  velocity; its outflow carries the intrinsic gas density `ξ/φ` of the boundary
-  cell out, and an inflow carries none of the tracked gases. They add no film
-  flux: combine them with a diffusive condition by `+`
-  (`DiffusiveMassBC(0.05) + DirichletPressureBC()`) for both escape paths.
-- **All gas species move together.** One effective `λ` serves every gas species,
-  and advection carries them all at the same velocity; there is no per-species
-  scaling (Technical Reference §9.2).
-- **The viscosity.** `Material(; gas_viscosity)` sets the pore-gas viscosity
-  `μ(T)` (default `SutherlandProperty()`, air), which enters only the mobility
-  `κ/μ`: an error in `μ` is the reciprocal error in permeability.
+A local `TransportFailure` identifies an unresolved interface or surface root.
+Check coefficient support, complete reservoir data, physical pore volume and
+the reported failure reason. Very strong nearly isobaric coupling may exceed
+Float64 pressure resolution. A failed root is not an accepted boundary flux.
+Pressure-aware error control tracks proposed temperature and pore geometry;
+validate solution accuracy against a tighter solve, particularly during shrinkage.
 
 ---
 
@@ -743,69 +686,20 @@ Work top to bottom; each item is cheap to try and the early ones dominate.
 8. **Parallelise sweeps** (§15.11) and **keep one Julia session for many solves**
    (§15.12.2).
 
-### 15.12.2 Time to first solve and the precompile workloads
+### 15.12.2 Compilation and precompile workloads
 
-A solve compiles two layers. The **integrator** (OrdinaryDiffEq's stepper, its
-linear solve and the callbacks) compiles for the solver configuration only:
-whether the mesh moves, whether in-depth radiation adds algebraic rows on a
-fixed mesh, whether cells are deactivated, the policy, the linear solver and
-the callbacks (a callback of yours, a `ConservationRecorder`, the progress bar).
-The right-hand side, the Jacobian and the callbacks reach it behind
-problem-independent function types, so the problem's types do not enter it.
-The **kernels**, the state mapping, the colored Jacobian and the reconstruction
-of the solution compile for the types of the problem: the component, property,
-reaction and boundary-condition types, the component count, the radiation
-model, the gas transport and the energy state.
+Integrator code is shared across problems with the same solver configuration.
+Kernels and colored Jacobians compile for concrete material, boundary,
+transport and energy-state types. Changing numerical values within these
+types reuses compiled methods; creating a new callable property type can
+require compilation.
 
-The package image carries precompile workloads (`src/precompile.jl`) that solve
-the configurations most runs start from: fixed and moving meshes, surface and
-Beer–Lambert absorption, Fickian and Darcy–Fick transport, with and without
-deactivation, for a two-component material; a three-component material on a
-fixed mesh with surface absorption and on a moving mesh with Beer–Lambert
-absorption and Darcy–Fick transport; and the enthalpy energy state once. They
-use constant properties, one decomposition reaction and the cone boundary
-conditions:
-
-```julia
-thermal = (top = RadiativeFluxBC(flux = q) + RadiativeBC(T_inf = 300.0) +
-                 ConvectiveBC(h = 10.0, T_inf = 300.0),
-           bottom = AdiabaticBC())
-mass = (top = DiffusiveMassBC(0.05), bottom = ImpermeableBC())   # Darcy–Fick: + DirichletPressureBC(101325.0)
-```
-
-A workload caches the integrator for every problem solved in its configuration
-with the default policy, linear solver and callbacks, and the kernels for every
-problem whose types it shares. The test suite runs each workload
-(`test/integration/test_precompile_workloads.jl`); a workload that fails during
-precompilation only warns, and its configuration then compiles on first use.
-
-Measured wall times of `solve` calls in fresh sessions (Julia 1.13.0, Linux, a
-22-core workstation shared with other jobs; 20 cells, 60 s on a fixed mesh
-unless noted):
-
-| Solve | Wall time |
-|---|---|
-| `using Pyrolysis` | 2.7 s |
-| first solve, types of a workload (constant properties, cone conditions) | 0.02 s |
-| the same deck with other values (flux, `A`, cell count) | 0.00 s |
-| the 1 mm, 8-cell deck on a moving mesh with `deactivation = true` | 0.02 s |
-| one property law of another type (`k = LinearProperty(0.15, 1e-4)`) | 6.8 s |
-| a deck sharing no type with a workload (three components with a liquid, a `TableProperty`, `HeatFluxBC + ConvectiveBC`, `ConvectiveMassBC`) | 7.6 s |
-| that deck with `energy_state = :enthalpy` | 6.7 s |
-| `progress = true` | 3.0 s |
-| `callback = ConservationRecorder()` | 3.7 s |
-| a `DiscreteCallback` of yours | 3.3 s |
-| `integrator_policy = fbdf_policy(StructuredKLU())` | 3.5 s |
-
-Each compiles once per session: changing values (fluxes, kinetic parameters,
-mesh size, tolerances, time span) never recompiles. Every `CallableProperty`
-wraps a function of its own type, so re-evaluating a property closure at the
-REPL compiles the kernels again, while a sweep's `modify` that builds the same
-closure at every point compiles once.
-
-The allocation-free residual, the colored Jacobian's preparation and the
-problem-independent integrator types are automatic; the levers above are the
-ones you control.
+`src/precompile.jl` exercises representative fixed and moving meshes,
+radiation, deactivation, lumped and dusty gas, and both energy formulations.
+`test/integration/test_precompile_workloads.jl` executes these workloads.
+Separate first-call compilation from warmed timing, and compare complete
+solves at matched temperature, pressure and species accuracy. The pressure
+error budget and local nonlinear work are part of that comparison.
 
 ---
 

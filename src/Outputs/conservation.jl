@@ -21,9 +21,9 @@ function ledger_rates(def::CoreDefinition, c, ds)
         topo.faces[f0].cells[2] == 0 || continue
         f = live_face(topo, ds.active, f0)
         f == 0 && continue
-        E -= c.F_energy[f] * g.face_area[f]
+        E -= _outward_sign(topo, ds.active, f) * c.F_energy[f] * g.face_area[f]
         for j in axes(c.F_mass, 1)
-            out += c.F_mass[j, f] * g.face_area[f]
+            out += _outward_sign(topo, ds.active, f) * c.F_mass[j, f] * g.face_area[f]
         end
     end
     for i = 1:n_cells(topo)
@@ -98,6 +98,14 @@ mutable struct ConservationRecorder
     cut::Float64
     to_cut::NTuple{2,Float64}
     t_done::Float64
+    species::Vector{Symbol}
+    species_production::Vector{Float64}
+    species_escape::Vector{Float64}
+    species_ingress::Vector{Float64}
+    species_initial::Vector{Float64}
+    species_final::Vector{Float64}
+    step_species::Vector{Float64}
+    cut_species::Vector{Float64}
 end
 
 ConservationRecorder() = ConservationRecorder(
@@ -113,6 +121,8 @@ ConservationRecorder() = ConservationRecorder(
     NaN,
     (0.0, 0.0),
     NaN,
+    Symbol[],
+    (Float64[] for _ = 1:7)...,
 )
 
 """
@@ -166,5 +176,52 @@ function conservation_audit(
         method,
         mass = closure(initial[2], final[2], -out, lost_mass),
         energy = closure(initial[1], final[1], inflow, lost_energy),
+    )
+end
+
+"""
+    gas_species_audit(sol[, recorder])
+
+Species-resolved mass ledger [kg]. Each named gas reports initial/final live
+inventory, signed reaction production, separately integrated escape and ingress,
+and deactivation venting. The defect is final − initial − production + escape
+− ingress + vented. Vented ambient species retain their identity. With a
+recorder, integration uses accepted-step quadrature; otherwise saved-time
+trapezoids. No species is implicitly labelled a pyrolysis product.
+"""
+function gas_species_audit(
+    sol::PyrolysisSolution,
+    rec::Union{Nothing,ConservationRecorder} = nothing,
+)
+    d=sol.gas
+    ids=gas_component_indices(sol.definition.setup.material.components)
+    trap(v) = sum((sol.t[k]-sol.t[k-1])*(v[k]+v[k-1])/2 for k = 2:length(sol.t); init = 0.0)
+    rec===nothing ||
+        rec.species==d.species ||
+        throw(ArgumentError("recorder species do not match solution"))
+    events=rec===nothing ? filter(e->sol.t[1]<e.t<=sol.t[end], sol.events) : sol.events
+    balances=map(enumerate(ids)) do (g, j)
+        initial=rec===nothing ? d.inventories[g, 1] : rec.species_initial[g]
+        final=rec===nothing ? d.inventories[g, end] : rec.species_final[g]
+        production=rec===nothing ? trap(d.production[g, :]) : rec.species_production[g]
+        escape=rec===nothing ? trap(d.escape[g, :]) : rec.species_escape[g]
+        ingress=rec===nothing ? trap(d.ingress[g, :]) : rec.species_ingress[g]
+        vented=sum((e.lost_mass[j] for e in events); init = 0.0)
+        defect=final-initial-production+escape-ingress+vented
+        scale=max(abs(final-initial), abs(production), escape, ingress, vented)
+        (;
+            initial,
+            final,
+            production,
+            escape,
+            ingress,
+            vented,
+            defect,
+            relative = scale==0 ? 0.0 : defect/scale,
+        )
+    end
+    (;
+        method = rec===nothing ? :trapezoid : :recorder,
+        species = NamedTuple{Tuple(d.species)}(Tuple(balances)),
     )
 end

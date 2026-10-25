@@ -56,6 +56,8 @@ pmma_k = CallableProperty(T -> T < 378.0 ? 0.15 : (0.34 - 3.9e-4 * min(T, 700.0)
 # incident radiation at the exposed face and does not read it.
 α_surface_only = 0.0
 
+const PMMA_POROSITY = parse(Float64, get(ENV, "PYROLYSIS_PMMA_POROSITY", "0.01"))
+
 pmma = Material(
     name = :PMMA_surface_abs,
     components = (
@@ -63,7 +65,9 @@ pmma = Material(
         # NOTE: α = 0 because SURFACE_ABSORPTION model ignores material absorption coefficients
         SolidComponent(
             :virgin,
-            ρ = 1210.0,                    # kg/m³ - density
+            ρ = 1210.0,
+            φ = PMMA_POROSITY,
+            λ = 1e-5,                    # kg/m³ - density
             c = pmma_cp,                   # J/(kg·K) - piecewise temperature-dependent
             k = pmma_k,                    # W/(m·K) - piecewise temperature-dependent
             ε = 0.96,                      # surface emissivity
@@ -72,7 +76,9 @@ pmma = Material(
         # Char - solid residue
         SolidComponent(
             :char,
-            ρ = 1210.0,                    # kg/m³ - same as virgin PMMA
+            ρ = 1210.0,
+            φ = PMMA_POROSITY,
+            λ = 1e-5,                    # kg/m³ - same as virgin PMMA
             c = pmma_cp,                   # J/(kg·K) - same as virgin PMMA
             k = pmma_k,                    # W/(m·K) - same as virgin PMMA
             ε = 0.96,                      # same emissivity as virgin PMMA
@@ -84,8 +90,8 @@ pmma = Material(
             M = 0.10012,                   # kg/mol - molar mass of MMA
             c = 1500.0,                    # J/(kg·K) - gas heat capacity
             k = 0.02,                      # W/(m·K) - gas conductivity
-            λ = 1e-5,                       # m²/s - gas transfer coefficient
         ),
+        GaseousComponent(:AIR; M = 0.02897, c = 1006.0, k = 0.026),
     ),
     reactions = (
         # Single-step decomposition reaction with small char residue
@@ -108,7 +114,7 @@ pmma = Material(
 
 # Sample geometry
 sample_thickness = 5.8e-3    # 5.8 mm typical cone calorimeter sample
-n_cells = 72                 # 72 cells → 0.08 mm resolution
+n_cells = SMOKE ? 12 : 72                 # 72 cells → 0.08 mm resolution
 
 # Time parameters  
 t_final = SMOKE ? 20.0 : 1600.0  # simulation duration
@@ -156,7 +162,11 @@ top_thermal_bc =
     RadiativeBC(ε = 0.96, T_inf = 330) +
     ConvectiveBC(h = h_conv, T_inf = 330)
 
-top_mass_bc = ConvectiveMassBC(h_m = 0.05, ξ_inf = 0.0)
+# Air at the thermal stream temperature; g is a mass-film conductance [kg/(m² s)].
+top_mass_bc = AmbientGasBC(
+    GasReservoir(P = 101325.0, T = 330.0, mole_fractions = (AIR = 1.0,));
+    film = MassTransferFilm(0.05*101325.0*0.02897/(8.31446261815324*330.0)),
+)
 
 bottom_thermal_bc = RadiativeBC(ε = 0.95, T_inf = 307) + ConvectiveBC(h = 4, T_inf = 307)
 bottom_mass_bc = ImpermeableBC()
@@ -177,7 +187,12 @@ println("  - Bottom surface: Re-radiation + convection, impermeable")
 # ============================================================================
 
 T_initial_func = z -> T_ambient
-ξ_initial_funcs = [z -> 1210.0, z -> 0.0, z -> 0.0]
+ξ_initial_funcs = [
+    z -> 1210.0,
+    z -> 0.0,
+    z -> 0.0,
+    z -> background_gas_concentration(pmma, :AIR, (1210.0, 0.0, 0.0, 0.0), T_ambient),
+]
 
 problem = PyrolysisProblem(
     mesh = mesh,
@@ -206,8 +221,9 @@ println("This may take a few minutes...\n")
 # Solve using implicit solver with ALE enabled and SURFACE_ABSORPTION radiation model
 solution = solve(
     problem;
-    abstol = 1e-8,
-    reltol = 1e-6,
+    abstol = 1e-11,
+    reltol = 1e-9,
+    pressure_tolerance = 1e-4,
     dtmin = 1e-14,
     progress = true,
     use_ale = true,

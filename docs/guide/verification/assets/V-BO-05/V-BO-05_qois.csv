@@ -1,4 +1,5 @@
 "qoi","value","exact","error","tol","within_tol","comment"
+"stop time at the first interior crossing of ε_m",259.6201391311736,259.57,0.050139131173580154,0.7,true,"s; the 240-cell time (259.79 at 60 cells): a cell under the skin falls below ε_m of its initial condensed mass"
 "outcome :interior",1.0,1.0,0.0,0.5,true,"the solve ended with outcome :interior"
 "deactivation events before the stop",0.0,0.0,0.0,0.5,true,"the surface cell persists as a skin while the layer gasifies from within"
-"maximum live-cell temperature up to the stop",693.3891814994043,NaN,693.3891814994043,1000.0,true,"K over every accepted step (observed 693)"
+"maximum live-cell temperature up to the stop",693.3892347734915,NaN,693.3892347734915,1000.0,true,"K over every accepted step (observed 693)"

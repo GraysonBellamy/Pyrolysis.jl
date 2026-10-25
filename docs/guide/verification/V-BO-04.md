@@ -30,11 +30,11 @@ t = ln(1/ε_m) ρ_s/r, and ξ_s must stay at ρ_s to roundoff.
 
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
-| thickness follows L₀ exp(−r t/ρ) through the event | 8.23e-05 | 8.23e-05 | 1.271e-09 | 1e-06 | yes | max relative error over all output times |
-| solid concentration stays at ρ_s (dilation removes volume only) | 1000 | 1000 | 8.354e-12 | 1e-08 | yes | max \|ξ_s − ρ_s\|/ρ_s over live cells and times |
+| thickness follows L₀ exp(−r t/ρ) through the event | 8.23e-05 | 8.23e-05 | 8.894e-10 | 1e-06 | yes | max relative error over all output times |
+| solid concentration stays at ρ_s (dilation removes volume only) | 1000 | 1000 | 8.499e-12 | 1e-08 | yes | max \|ξ_s − ρ_s\|/ρ_s over live cells and times |
 | isothermal: T stays at T₀ | 600 | 600 | 1.251e-12 | 1e-06 | yes | K; no heat of reaction, no gradient |
 | one invocation deactivates the column into one survivor | 1 | 1 | 0 | 0.5 | yes | 39 events in 1 invocation(s), outcome running |
-| the event is located at the exact crossing of ε_m | 460.5 | 460.5 | 1.574e-10 | 1e-06 | yes | relative distance of the event from the exact crossing time (ε_m = 1e-2) |
+| the event is located at the exact crossing of ε_m | 460.5 | 460.5 | 1.872e-10 | 1e-06 | yes | relative distance of the event from the exact crossing time (ε_m = 1e-2) |
 
 ![V-BO-04 thickness_history](assets/V-BO-04/V-BO-04_thickness_history.png)
 
@@ -52,4 +52,3 @@ t = ln(1/ε_m) ρ_s/r, and ξ_s must stay at ρ_s to roundoff.
 | min_thickness | 1.0e-6 |
 | abstol | 1.0e-9 |
 | reltol | 1.0e-7 |
-

@@ -30,44 +30,12 @@ struct CellReference
     positions::Vector{Float64}
     thickness::Vector{Float64}
     cross_section::Float64
+    pressure_tolerance::Float64
 end
 
-# ============================================================================
-# Gas transport model
-# ============================================================================
-
-"""
-	GasTransport
-
-Which pore-gas properties the state mapping evaluates for gas transport.
-"""
-abstract type GasTransport end
-
-"""
-	NoGasTransport <: GasTransport
-
-No gas moves: no pore-gas property is evaluated.
-"""
-struct NoGasTransport <: GasTransport end
-
-"""
-	FickTransport <: GasTransport
-
-Diffusive transport `J = −(λ/T) ∂(ξT)/∂n`: the cell gas-transfer coefficients.
-"""
-struct FickTransport <: GasTransport end
-
-"""
-	DarcyFickTransport <: GasTransport
-
-Diffusive and pressure-driven transport: the gas-transfer coefficients, the
-porosity, the ideal-gas pressure and the Darcy mobility `κ/μ`.
-"""
-struct DarcyFickTransport <: GasTransport end
-
-# Smooth floor on the porosity the pressure divides by, the Darcy closure's
-# floor on the gas volume fraction.
-const POROSITY_FLOOR = 1e-12
+import ..Materials: GasTransport, NoGasTransport
+using ..Physics: POROSITY_FLOOR, pore_state
+using ..Properties: transport_coefficients
 
 # Smooth floor on the cell conductivity [W/(m·K)], far below any material's:
 # a trial state with no mass left has none, and the face temperatures of the
@@ -96,17 +64,19 @@ struct StateSetup{TopT<:MeshTopology,Mat<:Material,LawT<:CaloricLaws,CalT,G<:Gas
 end
 
 """
-	StateSetup(topology, material, reference, caloric; gas = NoGasTransport())
+	StateSetup(topology, material, reference, caloric)
 
 The setup with the material's caloric laws built.
 """
-StateSetup(
-    topo::MeshTopology,
-    material::Material,
-    reference::CellReference,
-    caloric;
-    gas::GasTransport = NoGasTransport(),
-) = StateSetup(topo, material, CaloricLaws(material), reference, caloric, gas)
+StateSetup(topo::MeshTopology, material::Material, reference::CellReference, caloric) =
+    StateSetup(
+        topo,
+        material,
+        CaloricLaws(material),
+        reference,
+        caloric,
+        has_gas(material) ? material.gas_transport : NoGasTransport(),
+    )
 
 # ============================================================================
 # Derived state
@@ -147,7 +117,7 @@ automatic differentiation):
 - `λ`: cell gas-transfer coefficients [m²/s] (gas transport)
 - `φ`, `P`, `mob`: the smoothly floored porosity, the ideal-gas pressure [Pa]
   and the Darcy mobility `κ/μ` with a smoothly floored viscosity [m²/(Pa·s)]
-  (Darcy–Fick transport)
+  (both gas transport models)
 - `active`: the live cells, those whose rows the layout's mask keeps; the
   kernels skip every face and patch beyond them
 - `T_warm`: the latest temperatures of the plain (non-dual) mapping, the
@@ -182,6 +152,9 @@ struct DerivedState{NC,T,G<:MeshGeometry}
     φ::Vector{T}
     P::Vector{T}
     mob::Vector{T}
+    p::Matrix{T}
+    K::Matrix{T}
+    molecular_resistance::Vector{T}
     active::BitVector
     T_warm::Vector{Float64}
 end
@@ -233,6 +206,9 @@ function DerivedState{T}(
         zeros(T, n),
         zeros(T, n),
         zeros(T, n),
+        zeros(T, n),
+        zeros(T, NC, n),
+        zeros(T, NC, n),
         zeros(T, n),
         trues(n),
         T_warm,
@@ -320,6 +296,20 @@ function derive!(
         for j = 1:NC
             ds.h[j, i] = h[j]
         end
+        if has_gas(material)
+            φ = smooth_floor(
+                1-skeletal_volume_fraction(ntuple(j->ds.ξ⁺[j, i], Val(NC)), Tt, material),
+                POROSITY_FLOOR,
+            )
+            ng = count(is_gas, material.components)
+            # Resolve the transition on the same scale as the gas error budget.
+            # A much narrower transition lets accepted local errors repeatedly
+            # cross its flat negative branch during trace-gas production.
+            # max₀≤s≤1 s(1-3s²+2s³) < 0.26, so the total pressure bias
+            # remains below 0.26 pressure_tolerance, independently of T and φV.
+            pressure_mass_scale=ref.pressure_tolerance/ng*φ*ds.V_eval[i]/(R_GAS*Tt)
+            _guard_gas_mass!(ds, material.components, i, 1, pressure_mass_scale)
+        end
         ξ⁺ = ntuple(j -> ds.ξ⁺[j, i], Val(NC))
         k = effective_conductivity(ξ⁺, Tt, material; skip_absent = Val(true))
         ds.k[i] = smooth_floor(k, CONDUCTIVITY_FLOOR)
@@ -351,20 +341,34 @@ end
 
 # Pore-gas properties of cell `i` at the positive-part concentrations and the
 # trial temperature.
-@inline _gas_properties!(ds, i, ξ⁺, Tt, material, ::NoGasTransport) = nothing
+@inline _gas_properties!(
+    ds::DerivedState{NC},
+    i,
+    ξ⁺,
+    Tt,
+    material,
+    ::NoGasTransport,
+) where {NC} = nothing
 
-@inline function _gas_properties!(ds, i, ξ⁺, Tt, material, ::FickTransport)
-    ds.λ[i] = effective_gas_transfer(ξ⁺, Tt, material)
-    return nothing
-end
-
-@inline function _gas_properties!(ds, i, ξ⁺, Tt, material, ::DarcyFickTransport)
-    ds.λ[i] = effective_gas_transfer(ξ⁺, Tt, material)
-    φ = smooth_floor(1 - skeletal_volume_fraction(ξ⁺, Tt, material), POROSITY_FLOOR)
-    ds.φ[i] = φ
-    ds.P[i] = ideal_gas_pressure(ξ⁺, Tt, φ, material)
-    μ = smooth_floor(material.gas_viscosity(Tt), MU_FLOOR)
-    ds.mob[i] = effective_permeability(ξ⁺, Tt, material, φ) / μ
+@inline function _gas_properties!(
+    ds::DerivedState{NC},
+    i,
+    ξ⁺,
+    Tt,
+    material,
+    ::GasTransport,
+) where {NC}
+    ps = pore_state(ξ⁺, Tt, material)
+    co = transport_coefficients(ξ⁺, Tt, material, ps.φ)
+    ds.λ[i] = co.λ
+    ds.φ[i] = ps.φ
+    ds.P[i] = ps.P
+    ds.mob[i] = co.κ/smooth_floor(material.gas_viscosity(Tt), MU_FLOOR)
+    ds.molecular_resistance[i] = co.t
+    for j = 1:NC
+        ds.p[j, i] = ps.p[j]
+        ds.K[j, i] = co.K[j]
+    end
     return nothing
 end
 
@@ -409,3 +413,13 @@ cell's [`CaloricExtension`](@ref), so the inversion returns `T` exactly.
 @inline energy_state_value(::TemperatureState, setup, T, m, i) = T
 @inline energy_state_value(::EnthalpyState, setup, T, m, i) =
     extended_energy(setup.caloric, setup.laws, T, m, i)
+
+@inline _guard_gas_mass!(ds, ::Tuple{}, i, j, scale) = nothing
+@inline function _guard_gas_mass!(ds, cs::Tuple, i, j, scale)
+    comp=first(cs)
+    if is_gas(comp)
+        ds.ξ⁺[j, i]=positive_part(ds.m[j, i], molar_mass(comp)*scale)/ds.V_eval[i]
+    end
+    _guard_gas_mass!(ds, Base.tail(cs), i, j+1, scale)
+    return nothing
+end

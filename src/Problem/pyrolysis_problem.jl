@@ -32,7 +32,7 @@ Complete specification of a pyrolysis simulation problem.
 ```julia
 bc_set = BoundaryConditionSet(
 	thermal = (top = HeatFluxBC(50e3), bottom = AdiabaticBC()),
-	mass    = (top = ConvectiveMassBC(h_m = 0.01), bottom = ImpermeableBC()),
+	mass    = (top = AmbientGasBC(GasReservoir(P=0., T=300.)), bottom = ImpermeableBC()),
 )
 
 problem = PyrolysisProblem(
@@ -85,7 +85,7 @@ exclusively by `bc_set` (`RadiativeFluxBC`, `ConvectiveBC`, `RadiativeBC`).
 bc_set = BoundaryConditionSet(
 	thermal = (top = HeatFluxBC(50e3) + RadiativeBC(ε = 0.9, T_inf = 300),
 	           bottom = AdiabaticBC()),
-	mass    = (top = DiffusiveMassBC(Inf), bottom = ImpermeableBC()),
+	mass    = (top = AmbientGasBC(GasReservoir(P=0., T=300.)), bottom = ImpermeableBC()),
 )
 
 problem = PyrolysisProblem(

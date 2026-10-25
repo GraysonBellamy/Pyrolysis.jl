@@ -26,7 +26,7 @@
 #
 # NOTE a γ > 1 intumescent branch is NOT representable: γ is
 # validated to [0, 1] (universal volume-fraction semantics shared with
-# mixture density and conductivity mixing). Swelling is exercised through
+# volume-fraction and conductivity mixing). Swelling is exercised through
 # ρ_B < ρ_A (P1) and the partial-contribution branch through γ_B ∈ (0, 1)
 # (P6). Documented as a model limitation.
 #
@@ -66,54 +66,77 @@ function _vcpl03_problem(perm; n_cells = 8, n_outputs = 3)
     t_end = 8.0
     L = 2e-3
 
-    solidA = SolidComponent(:A, ρ = ρ_A, c = 1000.0, k = 0.5)
-    gasG(name = :G) = GaseousComponent(name, M = 0.05, c = 1000.0, k = 0.02, λ = 1e-8)
+    solidA = SolidComponent(:A, ρ = ρ_A, c = 1000.0, k = 0.5, φ = 0.6, λ = 0.0)
+    gasG(name = :G) = GaseousComponent(name, M = 0.05, c = 1000.0, k = 0.02)
 
     comps, rxn, exact_Vf, chi_law = if perm == :P1
         (
-            (solidA, SolidComponent(:B, ρ = 500.0, c = 1000.0, k = 0.5)),
+            (solidA, SolidComponent(:B, ρ = 500.0, c = 1000.0, k = 0.5, φ = 0.6, λ = 0.0)),
             Reaction(:r, 1 => 2; A = A_r, E = 0.0, h = 0.0),
             2.0,
             nothing,
         )
     elseif perm == :P2
         (
-            (solidA, SolidComponent(:B, ρ = 2000.0, c = 1000.0, k = 0.5)),
+            (solidA, SolidComponent(:B, ρ = 2000.0, c = 1000.0, k = 0.5, φ = 0.6, λ = 0.0)),
             Reaction(:r, 1 => 2; A = A_r, E = 0.0, h = 0.0),
             0.5,
             nothing,
         )
     elseif perm == :P3
         (
-            (solidA, SolidComponent(:B, ρ = 1000.0, c = 1000.0, k = 0.5)),
+            (solidA, SolidComponent(:B, ρ = 1000.0, c = 1000.0, k = 0.5, φ = 0.6, λ = 0.0)),
             Reaction(:r, 1 => 2; A = A_r, E = 0.0, h = 0.0),
             1.0,
             nothing,
         )
     elseif perm == :P4
         (
-            (solidA, SolidComponent(:C, ρ = 1000.0, c = 1000.0, k = 0.5), gasG()),
+            (
+                solidA,
+                SolidComponent(:C, ρ = 1000.0, c = 1000.0, k = 0.5, φ = 0.6, λ = 0.0),
+                gasG(),
+            ),
             Reaction(:r, 1 => (2, 3); A = A_r, E = 0.0, h = 0.0, yields = (0.3, 0.7)),
             0.3,
             nothing,
         )
     elseif perm == :P5
         (
-            (solidA, SolidComponent(:C, ρ = 500.0, c = 1000.0, k = 0.5), gasG()),
+            (
+                solidA,
+                SolidComponent(:C, ρ = 500.0, c = 1000.0, k = 0.5, φ = 0.6, λ = 0.0),
+                gasG(),
+            ),
             Reaction(:r, 1 => (2, 3); A = A_r, E = 0.0, h = 0.0, yields = (0.5, 0.5)),
             1.0,
             nothing,
         )
     elseif perm == :P6
         (
-            (solidA, SolidComponent(:B, ρ = 1000.0, c = 1000.0, k = 0.5, γ = 0.5)),
+            (
+                solidA,
+                SolidComponent(
+                    :B,
+                    ρ = 1000.0,
+                    c = 1000.0,
+                    k = 0.5,
+                    γ = 0.5,
+                    φ = 0.6,
+                    λ = 0.0,
+                ),
+            ),
             Reaction(:r, 1 => 2; A = A_r, E = 0.0, h = 0.0),
             0.5,
             nothing,
         )
     elseif perm == :P7
         (
-            (solidA, SolidComponent(:C, ρ = 500.0, c = 1000.0, k = 0.5), gasG()),
+            (
+                solidA,
+                SolidComponent(:C, ρ = 500.0, c = 1000.0, k = 0.5, φ = 0.6, λ = 0.0),
+                gasG(),
+            ),
             Reaction(:r, 1 => (2, 3); A = A_r, E = 0.0, h = 0.0, yields = (0.5, 0.5)),
             1.0,
             χ̄ -> 1.0 - 0.5 * χ̄,

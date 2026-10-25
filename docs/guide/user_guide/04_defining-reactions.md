@@ -257,13 +257,13 @@ read identically):
 ```julia
 using Pyrolysis
 
-virgin = SolidComponent(:virgin, ρ = 530.0, c = 1500.0, k = 0.12)
-int1   = SolidComponent(:int1,   ρ = 400.0, c = 1400.0, k = 0.11)
-int2   = SolidComponent(:int2,   ρ = 250.0, c = 1300.0, k = 0.12)
-char   = SolidComponent(:char,   ρ = 130.0, c = 1100.0, k = 0.10, ε = 0.95)
-gas1   = GaseousComponent(:gas1, M = 0.030, c = 1500.0, k = 0.03, λ = 1e-5)
-gas2   = GaseousComponent(:gas2, M = 0.040, c = 1500.0, k = 0.03, λ = 1e-5)
-gas3   = GaseousComponent(:gas3, M = 0.050, c = 1500.0, k = 0.03, λ = 1e-5)
+virgin = SolidComponent(:virgin, ρ = 530.0, ρ_intrinsic=1500., c = 1500.0, k = 0.12, λ=2e-5)
+int1   = SolidComponent(:int1,   ρ = 400.0, ρ_intrinsic=1500., c = 1400.0, k = 0.11, λ=2e-5)
+int2   = SolidComponent(:int2,   ρ = 250.0, ρ_intrinsic=1500., c = 1300.0, k = 0.12, λ=2e-5)
+char   = SolidComponent(:char,   ρ = 130.0, ρ_intrinsic=1950., c = 1100.0, k = 0.10, ε = 0.95, λ=2e-5)
+gas1   = GaseousComponent(:gas1, M = 0.030, c = 1500.0, k = 0.03,)
+gas2   = GaseousComponent(:gas2, M = 0.040, c = 1500.0, k = 0.03,)
+gas3   = GaseousComponent(:gas3, M = 0.050, c = 1500.0, k = 0.03,)
 
 material = Material(
     name = :CharringWood,
@@ -515,9 +515,9 @@ using Pyrolysis
 material = Material(
     name = :PMMA,
     components = (
-        SolidComponent(:virgin, ρ = 1190, c = 1420, k = 0.21, ε = 0.86),
-        SolidComponent(:char,   ρ = 5.0,  c = 1000, k = 0.10, ε = 0.95),
-        GaseousComponent(:MMA,  M = 0.10012, c = 1500, k = 0.02, λ = 1e-5),
+        SolidComponent(:virgin, ρ = 1190, φ=.01, c = 1420, k = 0.21, ε = 0.86, λ=1e-5),
+        SolidComponent(:char,   ρ = 5.0, φ=.01, c = 1000, k = 0.10, ε = 0.95, λ=1e-5),
+        GaseousComponent(:MMA,  M = 0.10012, c = 1500, k = 0.02,),
     ),
     reactions = (
         Reaction(:decomposition, :virgin => (:char, :MMA);
@@ -583,9 +583,9 @@ using Pyrolysis.Physics: reaction_rate
 using Pyrolysis.Materials: verify_stoichiometry
 
 # Three components: virgin solid, char residue, gas product.
-virgin = SolidComponent(:virgin, ρ = 1190, c = 1420, k = 0.21, ε = 0.86)
-char   = SolidComponent(:char,   ρ = 5.0,  c = 1000, k = 0.10, ε = 0.95)
-gas    = GaseousComponent(:MMA,  M = 0.10012, c = 1500, k = 0.02, λ = 1e-5)
+virgin = SolidComponent(:virgin, ρ = 1190, φ=.01, c = 1420, k = 0.21, ε = 0.86, λ=1e-5)
+char   = SolidComponent(:char,   ρ = 5.0, φ=.01, c = 1000, k = 0.10, ε = 0.95, λ=1e-5)
+gas    = GaseousComponent(:MMA,  M = 0.10012, c = 1500, k = 0.02,)
 
 rxn_spec = Reaction(:decomposition, :virgin => (:char, :MMA);
                A = 1.5e14,     # s⁻¹

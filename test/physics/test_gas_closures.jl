@@ -7,7 +7,7 @@ Pointwise gas closures of the shared layer.
 - The permeability mixing rules on the renormalised solid basis, and the
   Carman–Kozeny closure of the pore fraction with its free-flow cap.
 - The Chapman–Enskog binary diffusivity and its Neufeld collision integral.
-- The volume-fraction-gradient gas flux J = −λ(ξ_R T_R − ξ_L T_L)/(T̄ d).
+- Partial-pressure fluxes are covered by the constitutive and interface suites.
 - The Bruggeman effective medium.
 """
 
@@ -28,7 +28,7 @@ using Pyrolysis.Properties:
     EPSILON_K_AIR,
     M_AIR,
     T_GAS_PROPERTY_FLOOR
-using Pyrolysis.Physics: ideal_gas_pressure, gas_flux
+using Pyrolysis.Physics: ideal_gas_pressure
 
 # The permeability at the state's pore fraction 1 − Σ skeletal volumes, the
 # porosity the state mapping forms; the per-component mixes do not read it.
@@ -38,23 +38,25 @@ _κ(ξ, T, material) =
 @testset "Gas closures" begin
     solid_only = Material(
         name = :solid_only,
-        components = (SolidComponent(:virgin, ρ = 1000.0, c = 1500.0, k = 0.2, κ = 1e-12),),
+        components = (
+            SolidComponent(:virgin, ρ = 1000.0, c = 1500.0, k = 0.2, κ = 1e-12, λ = 0.0),
+        ),
         reactions = (),
     )
     two_comp = Material(
         name = :two_comp,
         components = (
-            SolidComponent(:virgin, ρ = 1000.0, c = 1500.0, k = 0.2, κ = 1e-11),
-            GaseousComponent(:gas, M = 0.044, c = 1000.0, k = 0.03, λ = 1e-5),
+            SolidComponent(:virgin, ρ = 1000.0, c = 1500.0, k = 0.2, κ = 1e-11, λ = 0.0),
+            GaseousComponent(:gas, M = 0.044, c = 1000.0, k = 0.03),
         ),
         reactions = (),
     )
     three_comp = Material(
         name = :three_comp,
         components = (
-            SolidComponent(:virgin, ρ = 1000.0, c = 1500.0, k = 0.2, κ = 1e-11),
-            SolidComponent(:char, ρ = 200.0, c = 1000.0, k = 0.1, κ = 1e-10),
-            GaseousComponent(:gas, M = 0.028, c = 1000.0, k = 0.03, λ = 1e-5),
+            SolidComponent(:virgin, ρ = 1000.0, c = 1500.0, k = 0.2, κ = 1e-11, λ = 0.0),
+            SolidComponent(:char, ρ = 200.0, c = 1000.0, k = 0.1, κ = 1e-10, λ = 0.0),
+            GaseousComponent(:gas, M = 0.028, c = 1000.0, k = 0.03),
         ),
         reactions = (),
     )
@@ -109,7 +111,7 @@ _κ(ξ, T, material) =
         single = Material(
             name = :single_perm,
             components = (
-                SolidComponent(:solid, ρ = 1000.0, c = 1000.0, k = 0.2, κ = 1e-12),
+                SolidComponent(:solid, ρ = 1000.0, c = 1000.0, k = 0.2, κ = 1e-12, λ = 0.0),
             ),
             reactions = (),
         )
@@ -118,9 +120,16 @@ _κ(ξ, T, material) =
         mix = Material(
             name = :mix_perm,
             components = (
-                SolidComponent(:virgin, ρ = 1000.0, c = 1000.0, k = 0.2, κ = 1e-15),
-                SolidComponent(:char, ρ = 200.0, c = 800.0, k = 0.1, κ = 1e-12),
-                GaseousComponent(:gas, M = 0.044, c = 1000.0, k = 0.03, λ = 1e-4),
+                SolidComponent(
+                    :virgin,
+                    ρ = 1000.0,
+                    c = 1000.0,
+                    k = 0.2,
+                    κ = 1e-15,
+                    λ = 0.0,
+                ),
+                SolidComponent(:char, ρ = 200.0, c = 800.0, k = 0.1, κ = 1e-12, λ = 0.0),
+                GaseousComponent(:gas, M = 0.044, c = 1000.0, k = 0.03),
             ),
             reactions = (),
             mixing = MaterialMixing(κ = MixingSpec(PARALLEL)),
@@ -137,8 +146,8 @@ _κ(ξ, T, material) =
         with_gas = Material(
             name = :gas_test,
             components = (
-                SolidComponent(:solid, ρ = 1000.0, c = 1000.0, k = 0.2, κ = 1e-12),
-                GaseousComponent(:gas, M = 0.044, c = 1000.0, k = 0.03, λ = 1e-4),
+                SolidComponent(:solid, ρ = 1000.0, c = 1000.0, k = 0.2, κ = 1e-12, λ = 0.0),
+                GaseousComponent(:gas, M = 0.044, c = 1000.0, k = 0.03),
             ),
             reactions = (),
         )
@@ -153,9 +162,9 @@ _κ(ξ, T, material) =
         uniform(rule) = Material(
             name = :c3_uniform,
             components = (
-                SolidComponent(:s1, ρ = 1000.0, c = 1500.0, k = 0.2, κ = 1e-13),
-                SolidComponent(:s2, ρ = 1000.0, c = 1000.0, k = 0.1, κ = 1e-13),
-                GaseousComponent(:gas, M = 0.028, c = 1000.0, k = 0.03, λ = 1e-5),
+                SolidComponent(:s1, ρ = 1000.0, c = 1500.0, k = 0.2, κ = 1e-13, λ = 0.0),
+                SolidComponent(:s2, ρ = 1000.0, c = 1000.0, k = 0.1, κ = 1e-13, λ = 0.0),
+                GaseousComponent(:gas, M = 0.028, c = 1000.0, k = 0.03),
             ),
             reactions = (),
             mixing = MaterialMixing(κ = MixingSpec(rule)),
@@ -167,9 +176,9 @@ _κ(ξ, T, material) =
         impermeable(rule) = Material(
             name = :c3_impermeable,
             components = (
-                SolidComponent(:virgin, ρ = 1000.0, c = 1500.0, k = 0.2),
-                SolidComponent(:char, ρ = 1000.0, c = 1000.0, k = 0.1, κ = 1e-12),
-                GaseousComponent(:gas, M = 0.028, c = 1000.0, k = 0.03, λ = 1e-5),
+                SolidComponent(:virgin, ρ = 1000.0, c = 1500.0, k = 0.2, λ = 0.0),
+                SolidComponent(:char, ρ = 1000.0, c = 1000.0, k = 0.1, κ = 1e-12, λ = 0.0),
+                GaseousComponent(:gas, M = 0.028, c = 1000.0, k = 0.03),
             ),
             reactions = (),
             mixing = MaterialMixing(κ = MixingSpec(rule)),
@@ -203,8 +212,9 @@ _κ(ξ, T, material) =
                     k = 0.2,
                     κ = 1e-14,
                     ρ_intrinsic = 1500.0,
+                    λ = 0.0,
                 ),
-                GaseousComponent(:gas, M = 0.030, c = 1100.0, k = 0.05, λ = 1e-5),
+                GaseousComponent(:gas, M = 0.030, c = 1100.0, k = 0.05),
             ),
             reactions = (),
             mixing = MaterialMixing(κ = MixingSpec(CARMAN_KOZENY; length_scale = ℓ)),
@@ -256,13 +266,6 @@ _κ(ξ, T, material) =
             @test g < 0.0
         end
 
-        @testset "the volume-fraction entry point refuses the closure" begin
-            @test_throws ArgumentError Pyrolysis.Properties._permeability_from_v(
-                (0.9, 0.1),
-                400.0,
-                ck,
-            )
-        end
     end
 
     # ========================================================================
@@ -324,36 +327,6 @@ _κ(ξ, T, material) =
     end
 
     # ========================================================================
-    @testset "gas flux: J = −λ(ξ_R T_R − ξ_L T_L)/(T̄ d)" begin
-        @testset "equal concentrations at unequal temperatures flow hot to cold" begin
-            J = gas_flux(2e-5, 10.0, 10.0, 400.0, 800.0, 0.001)
-            @test J < 0.0
-            @test J ≈ -2e-5 * (10.0 * 800.0 - 10.0 * 400.0) / (600.0 * 0.001) atol = 1e-12
-            @test J ≈ -2e-5 * 6666.6667 rtol = 1e-4
-        end
-
-        @testset "at a uniform temperature it is Fick's law" begin
-            J = gas_flux(2e-5, 5.0, 15.0, 500.0, 500.0, 0.001)
-            @test J ≈ -2e-5 * (15.0 - 5.0) / 0.001 atol = 1e-12
-            @test J ≈ -0.2 atol = 1e-12
-        end
-
-        @testset "the product form equals −λ[∂ξ + (ξ̄/T̄)∂T]" begin
-            ξL, ξR, TL, TR, λ, d = 8.0, 12.0, 500.0, 700.0, 3e-5, 0.002
-            T̄, ξ̄ = (TL + TR) / 2, (ξL + ξR) / 2
-            J_expanded = -λ * ((ξR - ξL) / d + (ξ̄ / T̄) * (TR - TL) / d)
-            @test gas_flux(λ, ξL, ξR, TL, TR, d) ≈ J_expanded atol = 1e-14
-        end
-
-        @testset "it is the partial-pressure form −(λM/(R T̄))∂P" begin
-            ξL, ξR, TL, TR, λ, d, M = 10.0, 10.0, 400.0, 800.0, 2e-5, 0.001, 0.028
-            ∂P = (ξR * R_GAS * TR / M - ξL * R_GAS * TL / M) / d
-            @test gas_flux(λ, ξL, ξR, TL, TR, d) ≈ -(λ * M) / (R_GAS * (TL + TR) / 2) * ∂P atol =
-                1e-12
-        end
-    end
-
-    # ========================================================================
     @testset "Bruggeman effective medium" begin
         @testset "a single phase, two equal phases and an empty phase return the property" begin
             @test bruggeman_effective_property((1.0,), (5.0,)) ≈ 5.0 rtol = 1e-10
@@ -408,8 +381,22 @@ _κ(ξ, T, material) =
             brugg = Material(
                 name = :brugg_test,
                 components = (
-                    SolidComponent(:comp1, ρ = 1000.0, c = 1500.0, k = 1.0, κ = 0.0),
-                    SolidComponent(:comp2, ρ = 500.0, c = 1000.0, k = 10.0, κ = 0.0),
+                    SolidComponent(
+                        :comp1,
+                        ρ = 1000.0,
+                        c = 1500.0,
+                        k = 1.0,
+                        κ = 0.0,
+                        λ = 0.0,
+                    ),
+                    SolidComponent(
+                        :comp2,
+                        ρ = 500.0,
+                        c = 1000.0,
+                        k = 10.0,
+                        κ = 0.0,
+                        λ = 0.0,
+                    ),
                 ),
                 reactions = (),
                 mixing = MaterialMixing(
@@ -420,7 +407,7 @@ _κ(ξ, T, material) =
             # Volume fractions 1/3 and 2/3: series 2.5, parallel 7.0.
             @test 2.5 < effective_conductivity((500.0, 500.0), 400.0, brugg) < 7.0
 
-            brugg_gas = Material(
+            @test_throws ArgumentError Material(
                 name = :brugg_gas_test,
                 components = (
                     SolidComponent(
@@ -431,16 +418,12 @@ _κ(ξ, T, material) =
                         κ = 0.0,
                         λ = 1e-6,
                     ),
-                    GaseousComponent(:gas, M = 0.044, c = 1000.0, k = 0.03, λ = 1e-4),
+                    GaseousComponent(:gas, M = 0.044, c = 1000.0, k = 0.03),
                 ),
                 reactions = (),
                 mixing = MaterialMixing(λ = MixingSpec(BRUGGEMAN)),
             )
-            @test_throws ArgumentError effective_gas_transfer(
-                (800.0, 0.5),
-                400.0,
-                brugg_gas,
-            )
+
         end
     end
 end

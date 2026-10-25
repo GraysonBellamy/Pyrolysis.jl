@@ -15,8 +15,8 @@ function _ablator(n; L = 3e-3, t_end = 0.8, from_bottom = false, output_times = 
     R, E, Tp, T0 = 8.314462618, 1.0e5, 700.0, 300.0
     v = 2.0e-3
     A = v^2 * E * (Tp - T0) * exp(E / (R * Tp)) / (k / (ρ * c) * R * Tp^2)
-    solid = SolidComponent(:solid, ρ = ρ, c = c, k = k, λ = 1e-6)
-    gas = GaseousComponent(:gas, M = 0.05, c = c, k = 0.02, λ = 1e-4)
+    solid = SolidComponent(:solid, ρ = ρ, φ = 0.3, c = c, k = k, λ = 1e-6)
+    gas = GaseousComponent(:gas, M = 0.05, c = c, k = 0.02)
     mat = Material(
         name = :ablator,
         components = (solid, gas),
@@ -32,7 +32,7 @@ function _ablator(n; L = 3e-3, t_end = 0.8, from_bottom = false, output_times = 
         bc_set = BoundaryConditionSet(
             thermal = thermal,
             mass = (
-                top = ConvectiveMassBC(h_m = 10.0, ξ_inf = 0.0),
+                top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
                 bottom = ImpermeableBC(),
             ),
         ),

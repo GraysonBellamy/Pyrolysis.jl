@@ -262,7 +262,7 @@ function first_batch(activation_curve)
     svg(
         "06_surface_energy",
         "Figure 6. Surface Energy Transfers (Schematic)",
-        "Absorbed radiation balances inward conduction and outward radiative and convective losses. Gas-carried enthalpy is shown separately as a contribution to the outward face energy flux, not to the surface-temperature balance.";
+        "Radiation, convection and conduction determine wall heat. The signed donor enthalpy uses the surface temperature for outflow and the incoming temperature for inflow. Thermal-film heat is converted to the reservoir control surface before assembling energy once.";
         height = 555,
     ) do io
         rect(io, 90, 140, 510, 200; fill = PALE)
@@ -282,7 +282,7 @@ function first_batch(activation_curve)
         dimension(io, 250, 600, 370, "d")
         line(io, 50, 425, 1150, 425; color = MUTED, width = 0.8)
         label(io, 80, 470, "Outward Face Flux"; weight = "bold")
-        label(io, 80, 510, "F_{E} = −q_{cond} + Σⱼ Jⱼ hⱼ(Tₛ)"; size = 23)
+        label(io, 80, 510, "F_{E} = Hᵣ − qᵣ  (LTE film: qᵣ = qₛ + Hᵣ − Hₛ)"; size = 23)
         line(io, 610, 475, 850, 475; arrow = "teal", color = TEAL, width = 2.5)
         label(io, 870, 482, "Gas Enthalpy"; color = TEAL)
     end

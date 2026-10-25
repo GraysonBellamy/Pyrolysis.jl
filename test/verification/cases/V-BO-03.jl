@@ -69,11 +69,12 @@ function _verification_case_vbo03()
             deactivation = true,
             min_thickness = 1e-3,
             radiation_model = BEER_LAMBERT,
-            abstol = 1e-8,
-            reltol = 1e-6,
+            abstol = 1e-11,
+            reltol = 1e-9,
+            pressure_tolerance = 1e-4,
         ),
         qois = qois,
-        ci = CIConfig(n_cells = 60, budget_s = 20.0),
+        ci = CIConfig(n_cells = 60, budget_s = 120.0),
         report = (
             n_cells_ladder = [30, 60, 120],
             curves = sol -> [

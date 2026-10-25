@@ -29,8 +29,7 @@ const ALLOWED_UNBOUND = Set([:TableProperty, :linear_interpolate])
     Aqua.test_project_extras(Pyrolysis)
     # Every exported name resolves to a binding (Internal included).
     Aqua.test_undefined_exports(Pyrolysis)
-    # No method ambiguities (the CombinedThermalBC/CombinedMassBC `+` pairs are
-    # disambiguated in src/BoundaryConditions/boundary_conditions.jl).
+    # No method ambiguities, including thermal composition and gas state dispatch.
     Aqua.test_ambiguities(Pyrolysis; recursive = true)
     # No unbound type parameters beyond the documented NTuple-element-type set.
     let unbound = Aqua.detect_unbound_args_recursively(Pyrolysis)

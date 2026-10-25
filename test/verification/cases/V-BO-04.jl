@@ -29,14 +29,17 @@ function _vbo04_setup(n_cells::Int; t_end = 480.0)
     E = 5.0e4
     R = 8.314462618
     A = r * exp(E / (R * T0))
-    solid = SolidComponent(:solid, ρ = ρ_s, c = c, k = k, λ = 1e-6)  # non-degenerate gas transport
-    gas = GaseousComponent(:gas, M = 0.03, c = 1000.0, k = 0.02, λ = 1e-5)
+    solid = SolidComponent(:solid, ρ = ρ_s, φ = 0.3, c = c, k = k, λ = 1e-6)  # non-degenerate gas transport
+    gas = GaseousComponent(:gas, M = 0.03, c = 1000.0, k = 0.02)
     rxn = Reaction(:burn, 1 => 2; A = A, E = E, h = 0.0, n = 0.0)
     mat = Material(name = :VBO04, components = (solid, gas), reactions = (rxn,))
     mesh = create_uniform_mesh(L0, n_cells)
     bcs = BoundaryConditionSet(
         thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
-        mass = (top = ConvectiveMassBC(h_m = 1.0, ξ_inf = 0.0), bottom = ImpermeableBC()),
+        mass = (
+            top = AmbientGasBC(GasReservoir(P = 0.0, T = T0)),
+            bottom = ImpermeableBC(),
+        ),
     )
     problem = PyrolysisProblem(
         mesh = mesh,

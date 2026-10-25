@@ -70,10 +70,10 @@ The choice of mass concentration $\xi_j$ (rather than mass fraction $Y_j = \xi_j
 
 The solver is designed for, and validated against, the following experiment and material classes (the shipped `examples/` directory exercises each):
 
-- **Cone calorimetry.** A sample is irradiated at a controlled flux (commonly 25–75 kW·m⁻²) while surface temperature, mass-loss rate (MLR), and a heat-release-rate proxy are recorded. The exposed top face takes a radiative-plus-convective boundary condition; the back face is typically adiabatic or a lumped loss, and impermeable. Examples `06_cone_calorimeter.jl` (5.8 mm of PMMA under 25 kW·m⁻² on a moving mesh, with cell deactivation) and `07_douglas_fir_cone.jl` (12 mm of charring Douglas fir under 75 kW·m⁻² on a moving mesh, with Darcy–Fick transport and surface absorption) are the reference configurations.
+- **Cone calorimetry.** A sample is irradiated at a controlled flux (commonly 25–75 kW·m⁻²) while surface temperature, mass-loss rate (MLR), and a heat-release-rate proxy are recorded. The exposed top face takes a radiative-plus-convective boundary condition; the back face is typically adiabatic or a lumped loss, and impermeable. Examples `06_cone_calorimeter.jl` (5.8 mm of PMMA under 25 kW·m⁻² on a moving mesh, with cell deactivation) and `07_douglas_fir_cone.jl` (12 mm of charring Douglas fir under 75 kW·m⁻² on a moving mesh, with gas transport and surface absorption) are the reference configurations.
 - **Idealized thermal-analysis experiments.** Thermogravimetric analysis (TGA), differential scanning calorimetry (DSC), and microscale combustion calorimetry (MCC) can be idealized as a thin, thermally-thin sample with a prescribed heating rate. In the limit of a single well-mixed cell, the species equations reduce to the 0-D Arrhenius mass-loss ODE that TGA inversion assumes; this idealization underpins the single-reaction verification case in §18 (Verification & Validation).
 - **Charring, non-charring, and intumescent solids.** Non-charring polymers (PMMA) leave essentially no residue; charring solids (wood) form an insulating char layer with conductivity and porosity that differ sharply from the virgin material; intumescent coatings swell by orders of magnitude. The component/reaction/property-function machinery (§4) plus the swelling factor $\gamma_j$ and lateral-shrinkage law (§10) span all three.
-- **Pressure-treated and wet wood / moisture transport.** Hygroscopic materials carry liquid water that evaporates endothermically and migrates as vapor under pressure gradients. Darcy–Fick transport (§9, Gas-Phase Mass Transport & Pressure; selected when a condensed component is permeable) and the `StateDependentProperty` heat-of-sorption closure (§4) handle these; examples `08_pressure_treated_wood_cone.jl`, `ptw_comparison.jl`, and `moisture_hos_comparison.jl` are the reference cases.
+- **Pressure-treated and wet wood / moisture transport.** Hygroscopic materials carry liquid water that evaporates endothermically and migrates as vapor under pressure gradients. gas transport (§9, Gas-Phase Mass Transport & Pressure; declared by the material) and the `StateDependentProperty` heat-of-sorption closure (§4) handle these; examples `08_pressure_treated_wood_cone.jl` and `moisture_hos_comparison.jl` demonstrate these models.
 
 ### 1.2.2 What is **not** modeled
 
@@ -81,7 +81,7 @@ The scope boundary is as important as the scope itself. The following are explic
 
 - **Multi-dimensional geometry.** Full solves are one-dimensional in $z$. The cross-section $A$ is a scalar gauge, not a resolved 2-D/3-D field; lateral shrinkage is a column-global area scaling driven by an empirical law (§10), not a resolved lateral transport. Meshes of two and three dimensions (`box_mesh`, `cell_mesh`) exist at the residual level — a potential closure of the mesh motion, conductivity tensors and element death are implemented and tested there (§11.3.5, §14.5) — but `setup` refuses gas transport, in-depth radiation, the variable cross section, the equidistribution correction and cell deactivation on them, and they are not a supported path for full solves.
 - **Full two-temperature gas.** The gas phase is *not* given its own energy equation with a separate gas temperature. Gas is assumed to be in local thermal equilibrium with the matrix at the cell temperature $T$: it stores sensible heat like every other phase, and its flux relative to the skeleton carries its sensible enthalpy across the cell faces (§1.4.3, §7).
-- **Multi-reactant reactions.** Each `Reaction` supports exactly one reactant ($N_{\text{in}}=1$; a reaction with more is rejected by problem validation; `_apply_reaction_source!` in `src/Physics/kinetics.jl` also guards source evaluation). The reactant is consumed with unit mass stoichiometry and products are explicit yields summing to 1.0 (§6). Bimolecular or competitive oxygen-sensitive schemes (which ThermaKin and Gpyro support natively) must be approximated as sequences of single-reactant steps. Extending the reactant tuple to a 3-ary `(idx, order, mass_stoich)` form is an open item (§1.8.1).
+- **Multi-reactant reactions.** Each `Reaction` supports exactly one reactant ($N_{\text{in}}=1$; a reaction with more is rejected by problem validation; `_apply_reaction_source!` in `src/Physics/kinetics.jl` also guards source evaluation). The reactant is consumed with unit mass stoichiometry and products are explicit yields summing to 1.0 (§6). ThermaKin supports bimolecular reactions and Gpyro supports gas-consuming oxidative schemes; these cannot generally be reproduced by sequences of single-reactant steps. Extending the reactant tuple to a 3-ary `(idx, order, mass_stoich)` form is an open item (§1.8.1).
 - **Pressure- or oxygen-dependent kinetics, and distributed activation energy.** The Arrhenius pre-exponential $A_i$ is temperature-independent, the rate has no explicit pressure or oxygen factor, and there is no built-in distributed-activation-energy (DAEM) tooling (§6).
 
 These exclusions are not accidental: they are the modeling simplifications that make the 1-D solver fast, type-stable, and differentiable with respect to its state, and they are shared (to varying degrees) by the reference codes discussed in §1.6.
@@ -102,7 +102,7 @@ The organizing principle of Pyrolysis.jl is a **single generalized model with op
 | Mesh motion | `use_ale` | node positions (differential) and node velocities (algebraic, the balance rows of `BalanceRowClosure`) join the state; without it every node is pinned |
 | Mesh correction | `correction`; by default a rule | `EquidistributionCorrection` where the mesh moves, cells are deactivated and some cell, converted completely, would fall below the deactivation threshold; the inventories then cross the faces at the relative velocity (`RelativeFluxKernel`, §11.7) |
 | Radiation | `radiation_model` | under `BEER_LAMBERT` the face intensities (algebraic) and `BeerLambertKernel`; otherwise the incident flux enters the surface energy balance (§8) |
-| Gas transport | the material and the mass boundary conditions | none (no gas component, or nothing can move it), Fickian (some component carries a gas-transfer coefficient or a boundary condition passes mass), Darcy–Fick (a condensed component is permeable); `GasTransportKernel` (§9) |
+| Gas transport | material model and mass conditions | `LumpedTransfer` or `DustyGas`; sealed gas retains its pore EOS |
 | Cross section | the material's `lateral_shrinkage_law` | the conversion-history pair per cell and the global rows of $A$ and $\theta_A$ (`LateralShrinkage`, §10); needs `use_ale = true` |
 | Burnout | `deactivation`, `threshold`, `band` | `CellDeactivation`: an event that removes cells whose condensed mass falls below the threshold (§14) |
 
@@ -114,7 +114,7 @@ The layout's type parameters are read by `@inline` accessors with zero runtime c
 @inline is_moving(::StateLayout{NC,E,Mov}) where {NC,E,Mov} = Mov
 ```
 
-The entry point `residual!(du, u, def::CoreDefinition, t, ws::CoreWorkspace)` (file `src/Assembly/residual.jl`, reached through `Pyrolysis.Internal`) runs the same sequence for every configuration — the state mapping `derive!`, the node corrections, the kernels in order, the mesh closure's rows, the external sources, the row assembly (§15.3). Its buffers are built once per problem, and once per dual-number type the Jacobian evaluates the residual at (`CoreWorkspace`, `src/Assembly/definition.jl`); a configuration without a moving mesh carries no position or velocity rows, one without Darcy–Fick transport evaluates no porosity, pressure or mobility.
+The entry point `residual!(du, u, def::CoreDefinition, t, ws::CoreWorkspace)` (file `src/Assembly/residual.jl`, reached through `Pyrolysis.Internal`) runs the same sequence for every configuration — the state mapping `derive!`, the node corrections, the kernels in order, the mesh closure's rows, the external sources, the row assembly (§15.3). Its buffers are built once per problem, and once per dual-number type the Jacobian evaluates the residual at (`CoreWorkspace`, `src/Assembly/definition.jl`); a configuration without a moving mesh carries no position or velocity rows, every gas-bearing configuration evaluates its pore EOS, including sealed gas.
 
 > **Implementation note.** `_gas_transport` chooses the transport model, `_installed_correction` the default correction, `_kernels` the kernel tuple, and `_require_supported` refuses a problem that needs physics its mesh does not support (`src/Integration/setup.jl`). The layout, closure and kernel types are not exported at the top level; they are reached through `Pyrolysis.Internal` or their submodules (`Pyrolysis.States`, `Pyrolysis.Closures`, `Pyrolysis.Kernels`).
 
@@ -123,12 +123,11 @@ The entry point `residual!(du, u, def::CoreDefinition, t, ws::CoreWorkspace)` (f
 The same opt-in philosophy governs the constitutive layers. Each of the following is off (or set to its cheapest closure) by default and is enabled only when the problem requires it:
 
 - **Radiation in depth.** `NO_RADIATION` and `SURFACE_ABSORPTION` both route the incident flux of a `RadiativeFluxBC` through the surface energy balance, with no volumetric deposit, at $O(1)$ cost (the two give identical residuals); `BEER_LAMBERT` resolves exponential in-depth absorption through face intensities that are algebraic unknowns of the state, which keeps the Jacobian banded. The models are mutually exclusive (§8).
-- **Darcy gas flow.** With Fickian transport, gas migrates only by (volume-fraction-gradient) diffusion. When a condensed component carries a permeability, `setup` selects Darcy–Fick transport, which adds pressure-driven bulk flow $v_g=-(\kappa/\mu)\nabla P$ with the ideal-gas pressure closure (§9); the state mapping then also evaluates every cell's porosity, pressure and mobility.
-- **ALE moving mesh.** A fixed mesh suffices for thermally-thin or non-receding problems. With `use_ale = true` the mesh moves with the solid: the node positions are differential unknowns, the node velocities algebraic unknowns held by each cell's volume balance, and the cell volumes follow from the positions, so the Geometric Conservation Law holds by construction (§11). Where cells must burn out, an equidistribution correction moves the mesh relative to the solid so that a vanishing layer's cells thin together (§11.7).
-- **Variable cross-section.** A material's `lateral_shrinkage_law` enables lateral shrinkage/swelling through the column conversion $\bar\chi$ and an empirical area law (§10).
-- **Burnout.** With `deactivation = true`, a cell whose condensed mass falls below the fraction `threshold` ($\varepsilon_m$, default $10^{-2}$) of its initial condensed mass is deactivated, together with the near-threshold cells outward of it (the band), in an event located inside the step; its inventories go to the live cell beneath, and the state keeps its size (§14, User Guide §10). There is no mesh refinement.
+- **Gas transport.** The material declares lumped superficial transfer or dusty-gas
+  friction. Both include independent Darcy permeability and use the same pore
+  EOS and conservative total-flux interface matching (Chapter 9).
 
-The cost of an optional layer is therefore paid only when it is used, and the modeling assumptions of the default (cheapest) configuration are exactly those of the reference codes (§1.6).
+The cost of an optional layer is therefore paid only when it is used, and the selected configuration must be checked against the specific reference model before comparing results (§1.6).
 
 ### 1.3.3 Implementation goals stated up front
 
@@ -136,9 +135,21 @@ Three implementation properties are treated as first-class requirements througho
 
 1. **Type stability.** Every hot-path function is written so the Julia compiler can infer concrete types, using heterogeneous tuples for the component/reaction lists and `@generated` or recursive tuple functions to unroll loops over $N_C$ components and $N_R$ reactions (e.g. `_gas_partial_pressure_sum`, `_heat_capacity_sum`, `dry_pyrolysis_gas_indices`). The number of components $N_C$ and reactions $N_R$ are static type parameters of `Material{NC,NR,…}` (§4), and every physics option is a type parameter of the definition the residual reads.
 2. **Allocation-free assembly.** The residual and the colored Jacobian evaluate with zero heap allocation per call. All scratch storage lives in the derived state and the kernel contributions of the `CoreWorkspace`, with twins for each dual-number element type built on first use; the state mapping `derive!` is the only reader of the state vector and the row assembly the only writer of its derivative (§15.2). A dedicated test (`test/jacobian/test_allocations.jl`) asserts zero bytes for one residual and one Jacobian evaluation on every configuration it builds, in both energy forms.
-3. **AD-compatibility (differentiability).** The entire residual — including the geometry from the node positions, the surface-temperature Newton solve, the caloric inversion of the enthalpy form, and the property evaluations — propagates `ForwardDiff.Dual` numbers, and the colored Jacobian is its exact derivative. This requires every non-smooth construct to take the form of a C¹ surrogate or by a guard that is the identity on physical states: the kernels evaluate the property laws at the *trial temperature*, the cell temperature smoothly clamped into the property bracket [200, 3000] K with 1 K joins; masses enter the property laws through a one-sided positive part; the floors on the heat capacity, the conductivity, the porosity and the viscosity are smooth (§13); hard temperature gates become $\tfrac12(1+\tanh(\cdot))$ ramps; and the depletion limiter multiplies each reactant's rate by a C¹ factor that is exactly zero at and below zero concentration (§6.3). The one deliberate exception is an upwind side, which is read from the value of its velocity, so an upwind flux has a kink where its velocity changes sign (§9, §11.6). Differentiability is what makes the exact Jacobian (§15) possible, and the same smoothness keeps the finite-difference sensitivities of §17 well-defined.
+3. **AD-compatible local derivatives.** Geometry, caloric inversion and property
+   evaluations propagate `ForwardDiff.Dual` numbers. The colored Jacobian
+   differentiates the evaluated residual on its selected branch. Trial-state
+   guards use C¹ joins for temperature, positive masses and positive divisors
+   (§13); these extensions do not make inadmissible physical pore volumes
+   acceptable. Gas interface and coupled boundary solves supply implicit first
+   derivatives only at qualified, converged roots with nonsingular local
+   Jacobians (§9). Upwind choices use primal values, and their derivatives can
+   differ across flow reversal. Degenerate channels and vacuum use the explicit
+   branches specified in §9, without a claim of global smoothness or a unique
+   derivative at every branch intersection. Sensitivity calculations (§17) must
+   remain within the corresponding local differentiability assumptions.
 
-These three goals are not merely engineering niceties: AD-compatibility in particular *constrains the physics formulation*, because every modeling term must be expressible as a smooth function of the state.
+These requirements make the evaluated constitutive branches and their numerical
+qualification part of the residual's derivative contract.
 
 ---
 
@@ -148,7 +159,7 @@ The single most important modeling decision in Pyrolysis.jl is the form of the e
 
 ### 1.4.1 The energy equation and its derivation
 
-Let $\xi_j$ be the bulk mass concentration of component $j$, $\mathbf v_s$ the velocity of the skeleton (every condensed component moves with it), and $\mathbf J_g = \xi_g(\mathbf v_g - \mathbf v_s)$ the gas mass flux *relative to the skeleton* — the quantity Darcy's law and the volume-fraction-gradient diffusion law return (§3.4, §3.5, §11.1.2). Every component's enthalpy is written on one datum as $h_j^0 + h_j(T)$, with $h_j^0$ its formation enthalpy at $T_{\text{ref}}$ and $h_j(T)=\int_{T_{\text{ref}}}^{T} c_{p,j}\,dT'$ its sensible enthalpy. The species balance is $\partial_t\xi_j + \nabla\!\cdot(\mathbf v_s\xi_j) = \omega_j - \nabla\!\cdot\mathbf J_j$, with $\mathbf J_j = 0$ for condensed $j$ and $\omega_j = \sum_r \nu_{r,j}\,r_r$ the net production by reaction.
+Let $\xi_j$ be the bulk mass concentration of component $j$, $\mathbf v_s$ the velocity of the skeleton (every condensed component moves with it), and $\mathbf J_g = \xi_g(\mathbf v_g - \mathbf v_s)$ the gas mass flux *relative to the skeleton* — the quantity the lumped and dusty-gas closures return (§3.4, §3.5, §11.1.2). Every component's enthalpy is written on one datum as $h_j^0 + h_j(T)$, with $h_j^0$ its formation enthalpy at $T_{\text{ref}}$ and $h_j(T)=\int_{T_{\text{ref}}}^{T} c_{p,j}\,dT'$ its sensible enthalpy. The species balance is $\partial_t\xi_j + \nabla\!\cdot(\mathbf v_s\xi_j) = \omega_j - \nabla\!\cdot\mathbf J_j$, with $\mathbf J_j = 0$ for condensed $j$ and $\omega_j = \sum_r \nu_{r,j}\,r_r$ the net production by reaction.
 
 **The conservative balance.** The total enthalpy has no reaction source: per bulk volume,
 $\partial_t\sum_j \xi_j(h_j^0+h_j) + \nabla\!\cdot\big(\mathbf v_s\sum_j\xi_j(h_j^0+h_j)\big) + \nabla\!\cdot\sum_g (h_g^0+h_g)\mathbf J_g = -\nabla\!\cdot\mathbf q_{\text{cond}} + Q_{\text{rad}}$.
@@ -179,9 +190,9 @@ $$
 \tag{1.3}
 $$
 
-which is ThermaKin Eq. 17 term for term: the all-component storage sum, the convective term $c_g(\mathbf J_g\!\cdot\!\nabla T)$, and the deformation term, which is the $\mathbf v_s\!\cdot\!\nabla T$ part of $D_sT/Dt$. On a fixed mesh $D_s/Dt = \partial_t$; on a mesh that moves with the skeleton $D_sT/Dt$ is the mesh-frame rate, and neither (1.1) nor (1.3) carries an advection term of any kind. Where the equidistribution correction moves the mesh relative to the skeleton, every inventory crosses the faces at the relative velocity $-\mathbf c$ (§11.2.2, §11.6).
+whose storage and gas temperature-advection terms correspond to the 1D reduction of ThermaKin Eq. 17 when constitutive laws are matched (§7.8). On a fixed skeleton $D_s/Dt = \partial_t$; on a mesh that moves with the skeleton $D_sT/Dt$ is the mesh-frame rate. Skeleton motion then needs no additional mesh-relative advection term; gas transport remains. Where the equidistribution correction moves the mesh relative to the skeleton, every inventory crosses the faces at the relative velocity $-\mathbf c$ (§11.2.2, §11.6).
 
-**Why the gas is stored.** The gas concentration $\xi_g$ is an integrated state, so the term $\xi_g c_{p,g}\,\partial_t T$ is available at no cost and dropping it would be an approximation with no benefit. Gpyro drops it in its default thermal-equilibrium form (the quasi-steady-gas approximation, restored by its `FULL_QSG` option); FDS has no in-depth gas, so the term is identically zero there. Its size is $\varphi\rho_g c_{p,g}$ against the matrix heat capacity: for a char of porosity 0.8 and bulk heat capacity $1.5\times10^5$ J·m⁻³·K⁻¹ holding pore gas at 1 atm and 800 K ($\rho_g \approx 0.44$ kg·m⁻³, $c_{p,g}\approx 1100$ J·kg⁻¹·K⁻¹), about a quarter of a percent of $\rho c_p$ — small, but exact at no cost.
+**Why the gas is stored.** The gas concentration $\xi_g$ is an integrated state, so the term $\xi_g c_{p,g}\,\partial_t T$ is retained without a separate gas-temperature unknown. Gpyro neglects gas storage and gas conduction in its default thermal-equilibrium exchange model; `FULL_QSG` retains both. The standard FDS wall model has no pore-gas inventory. Its size is $\varphi\rho_g c_{p,g}$ against the matrix heat capacity: for a char of porosity 0.8 and bulk heat capacity $1.5\times10^5$ J·m⁻³·K⁻¹ holding pore gas at 1 atm and 800 K ($\rho_g \approx 0.44$ kg·m⁻³, $c_{p,g}\approx 1100$ J·kg⁻¹·K⁻¹), about a quarter of a percent of $\rho c_p$ — small for this example, but retained.
 
 ### 1.4.2 The two energy states
 
@@ -192,16 +203,30 @@ The integrator carries one energy unknown per cell, chosen by `energy_state`. Bo
 
 The two rows are one equation: applying the product rule to $H_i$ with the mass rows $dm_{j,i}/dt = \omega_{j,i}V_i + \dot M_{j,i}$ turns either into the other. The conserved density is $\sum_j\xi_j h_j(T)$, not $\rho c_p^{\text{eff}}\,T$, which is not an enthalpy density ($h_j(T) \ne c_{p,j}\,T$ in general); both forms conserve it, and the energy ledger closes exactly in both, to round-off in the inventory form and at the integrator's order in the temperature form (§16.5.2). The temperature form is the default because the temperature is the observable that the property laws and the surface Newton solve read directly, and because it is the form of the reference codes (§1.6); the inventory form is the choice when the energy ledger must close to round-off.
 
-### 1.4.3 The source terms and the surface gas enthalpy
+### 1.4.3 Sources and boundary carried enthalpy
 
-The terms of (1.1) and (1.3) are (full derivations in §7, §8, §6):
+The energy equation includes Fourier conduction, the enthalpy carried by
+conservative species fluxes, radiation absorption and reaction heat. The
+reaction source includes the formation term $\sum_j\omega_jh_j(T)$ in the
+inventory formulation (§6–8). Interior mass and energy assembly use the same
+species flux; its carried enthalpy uses the declared face-temperature closure.
 
-- $-\nabla\!\cdot\mathbf{q}_{\text{cond}}$, the conductive flux divergence, with Fourier's law $\mathbf{q}_{\text{cond}}=-k\,\nabla T$ and a distance-weighted harmonic-mean face conductivity (§1.4.4).
-- The **gas enthalpy flux** $\nabla\!\cdot(\sum_g h_g\mathbf J_g)$: the sensible enthalpy carried by the through-flow of volatiles relative to the skeleton. It is assembled at the faces in flux form — every face carries $\sum_g J_{g,f}\,h_g(T_f)$, with the same $J_{g,f}$ the mass rows carry and $T_f$ the distance-weighted face temperature between two cells, the surface temperature on a boundary face — and its temperature-form reading is the term $-\sum_g c_{p,g}\,\mathbf J_g\!\cdot\!\nabla T$ of (1.3). It is active wherever gas moves, and it is the only place the gas flux enters the energy balance.
-- $Q_{\text{rad}}$, the volumetric radiation absorption (model-dependent; §8).
-- $Q_{\text{rxn}} = -\sum_r h_r r_r$, the reaction heat (sign convention in §1.5.3), with $h_r$ at the local temperature; in (1.1) it is accompanied by the formation term $\sum_j\omega_j h_j(T)$.
+At an exterior boundary the outward flux of species $j$ is $N_j$. Define
+$H_s=\sum_jN_jh_j(T_s)$ and
+$H_r=\sum_{N_j\ge0}N_jh_j(T_s)+\sum_{N_j<0}N_jh_j(T_{in,j})$.
+The reservoir temperature therefore supplies incoming enthalpy even for an
+adiabatic or prescribed-heat boundary. For those boundaries the total outward
+energy flux is $E_{out}=H_r-q_{prescribed}$, with prescribed heat positive inward.
 
-The surface balance itself carries no gas-enthalpy term. Under local thermal equilibrium the gas leaves through the exposed face at $T_s$: the outward mass flux of the boundary face carries its sensible enthalpy at $T_s$ in that face's energy flux, and the surface balance reduces to conducted flux equals applied flux, $q_{\text{BC}}(T_s) = q_{\text{cond}}(T_s)$. The sensible heat the escaping gas carries away is thereby counted once: its enthalpy at formation sits in $h_r(T)$, and its heating from the formation temperature to $T_s$ is the enthalpy the face fluxes carry along its path. A surface term $\sum_g \dot m_g \Delta h_g(T_s, T_\infty)$ in the balance would count that heating a second time — for an outflow of 10 g·m⁻²·s⁻¹ with $c_{p,g} = 1.5$ kJ·kg⁻¹·K⁻¹ heated by 500 K, a spurious sink of about 7.5 kW·m⁻² — and would under-predict surface temperature and MLR. The surface balance is therefore a plain convective + radiative balance — the ThermaKin Eq. 17 convention, which Gpyro's thermal-equilibrium form shares. The only boundary use of the gas flux inside the balance is the blowing model of a convective BC, which reads the outward gas flux to reduce the heat-transfer coefficient (§12.3.3).
+For an LTE thermal film, its surface-side heat $q_s$ is converted to the
+reservoir control surface by $q_r=q_s+H_r-H_s$. The assembled total energy is
+$E_{out}=H_r-q_r=H_s-q_s$. The coupled surface root accounts for this incoming
+thermal adjustment exactly once; purely outward flow has $H_r=H_s$.
+A blowing correlation modifies the film heat law and does not replace this
+energy accounting. Chapter 12 derives the coupled temperature, composition
+and pressure equations and specifies each boundary's control surface.
+
+---
 
 ### 1.4.4 The discrete energy update
 
@@ -232,9 +257,9 @@ k_f = \frac{(d_o+d_n)\,k_o k_n}{d_o k_n + d_n k_o + \eta\,(d_o+d_n)},
 \tag{1.6}
 $$
 
-with $d_o$, $d_n$ the distances of the two cell centers from the face. The face conductivity $k_f$ is the **distance-weighted harmonic mean** (resistance-in-series) of the two cell conductivities, derived from flux continuity across the interface (the total thermal resistance $R = d_o/(k_o A) + d_n/(k_n A)$ inverts to it); it reduces to $2k_ok_n/(k_o+k_n)$ on a uniform mesh, and the guard $\eta = 10^{-20}$ W·m⁻¹·K⁻¹ makes it vanish continuously, with a finite derivative, as either side's conductivity does (`guarded_harmonic_mean`, `src/Properties/effective_properties.jl`). The same mean is applied to the gas-transfer coefficient and, with a smaller guard, to the Darcy mobility (§5, §9).
+with $d_o$, $d_n$ the distances of the two cell centers from the face. The face conductivity $k_f$ is the **distance-weighted harmonic mean** (resistance-in-series) of the two cell conductivities, derived from flux continuity across the interface (the total thermal resistance $R = d_o/(k_o A) + d_n/(k_n A)$ inverts to it); it reduces to $2k_ok_n/(k_o+k_n)$ on a uniform mesh, and the guard $\eta = 10^{-20}$ W·m⁻¹·K⁻¹ makes it vanish continuously, with a finite derivative, as either side's conductivity does (`guarded_harmonic_mean`, `src/Properties/effective_properties.jl`). Gas transport instead matches total species flux across half-cell interface states (§9); independent averaging of its two channels cannot represent all legal material pairs.
 
-> **Implementation note.** Each kernel adds its face fluxes, per unit area along the face normal, and its cell sources to the contributions: conduction in `ConductionKernel` (`src/Kernels/conduction.jl`), the gas mass fluxes and the enthalpy they carry in `GasTransportKernel` (`src/Kernels/gas_transport.jl`), the boundary energy fluxes with the enthalpy of the outward mass fluxes at $T_s$ in `ThermalBoundaryKernel` (`src/Kernels/thermal_boundary.jl`), and the reaction sources in `ReactionKernel`. The row assembly `assemble_rows!` (`src/Assembly/residual.jl`) is the only writer of the derivative: it scatters each face flux as $-F_fA_f$ into the owner and $+F_fA_f$ into the neighbour and forms (1.5). The kernel order and the full residual sequence are documented in §7.6 and §15.3.
+> **Implementation note.** Each kernel adds its face fluxes, per unit area along the face normal, and its cell sources to the contributions: conduction in `ConductionKernel` (`src/Kernels/conduction.jl`), the gas mass fluxes and the enthalpy they carry in `GasTransportKernel` (`src/Kernels/gas_transport.jl`), the boundary energy fluxes with outgoing enthalpy at $T_s$ and incoming reservoir enthalpy in `ThermalBoundaryKernel` (`src/Kernels/thermal_boundary.jl`), and the reaction sources in `ReactionKernel`. The row assembly `assemble_rows!` (`src/Assembly/residual.jl`) is the only writer of the derivative: it scatters each face flux as $-F_fA_f$ into the owner and $+F_fA_f$ into the neighbour and forms (1.5). The kernel order and the full residual sequence are documented in §7.6 and §15.3.
 
 The species equation is solved in conservative form, the cell masses being the unknowns:
 
@@ -279,7 +304,7 @@ $$
 
 verified verbatim in `reaction_heat_source` (`src/Physics/kinetics.jl`, `Q -= heats[i]*rates[i]`). Hence an endothermic reaction ($h>0$, $r>0$) gives $Q_{\text{rxn}}<0$ (cooling), and an exothermic reaction ($h<0$) gives $Q_{\text{rxn}}>0$ (heating).
 
-> **Overload caution (binding).** ThermaKin *publishes* the opposite sign — in its manual $h>0$ denotes an exothermic reaction — so a heat of reaction taken from ThermaKin input is entered in Pyrolysis.jl with its sign flipped. Gpyro and FDS use the same convention as Pyrolysis.jl ($h>0$ endothermic; §6.9.2), and their heats are entered as published. This is overload resolution H1 of the nomenclature (§2); the minus sign in (1.8) is what turns the stored heat into the volumetric source.
+> **Overload caution (binding).** ThermaKin *publishes* the opposite sign — in its manual $h>0$ denotes an exothermic reaction — so a heat of reaction taken from ThermaKin input is entered in Pyrolysis.jl with its sign flipped and its reaction-extent basis normalized (§6.9.1). Gpyro and FDS use the same convention as Pyrolysis.jl ($h>0$ endothermic; §6.9.2), but their heat basis, units and temperature datum must also be converted when necessary (§6.9). This is overload resolution H1 of the nomenclature (§2); the minus sign in (1.8) is what turns the stored heat into the volumetric source.
 
 Two further nomenclature overloads that recur in this guide and are worth flagging here (full list in §2): the symbol $A$ denotes **cross-sectional area** in the physics chapters (and $A_f$ the area of face $f$), while the Arrhenius pre-exponential is always written subscripted, $A_i$ (or $A_{\alpha\beta}$); and $\chi$ always denotes **pyrolysis progress**, never a cross-section ratio (the area ratio is $A/A_0=\mathrm{law}(\bar\chi)$).
 
@@ -301,52 +326,99 @@ The numerical constants and defaults — the property bracket, the floors of the
 
 ## 1.6 Relation to ThermaKin2Ds, Gpyro, and the FDS solid-phase model
 
-Pyrolysis.jl deliberately adopts the established modeling conventions of three reference solvers so that its results are directly comparable and its inputs largely portable. This subsection maps notation and contrasts conventions; detailed equation-by-equation comparisons appear in the relevant later chapters (§3, §6, §7, §9, §15).
+These codes share several conservation laws and constitutive models, but their
+inputs and predictions are not interchangeable. Comparisons below concern the
+versions and formulations listed in §1.6.5. A correspondence between individual
+terms does not establish equivalence of the complete models.
 
 ### 1.6.1 ThermaKin2Ds
 
-ThermaKin2Ds is a 1-D/quasi-2-D condensed-phase pyrolysis solver widely used for inverse parameter estimation from cone/TGA data. The correspondence:
+ThermaKin2Ds supports 1D, Cartesian 2D and axisymmetric 2D objects. Heat and gas
+transport are resolved in both coordinates of its 2D formulations; deformation
+and external radiative transfer are restricted to the primary coordinate.
+Its numerical elements carry component masses and temperature, change thickness
+with deformation, and are split or combined before a step (TK §§1.3, 2–3).
 
-- **Energy convention.** ThermaKin's energy equation (its Eq. 17) is the same equation as (1.3): the storage term sums $c_p$ over **all** components including gas, its convective term $c_g(\mathbf{J}_g\!\cdot\!\nabla T)$ is the temperature-form reading of the gas enthalpy flux that Pyrolysis.jl assembles at the faces, and its deformation term is the skeleton-following derivative that the ALE mesh frame absorbs (§11). Because the face fluxes carry the gas enthalpy, the surface balance has no gas-enthalpy term (§1.4.3). ThermaKin's Eq. 15 applies the same deformation term to every component, gas included — the frame choice Pyrolysis.jl makes in §11.1.2.
-- **Stoichiometry.** ThermaKin writes stoichiometric coefficients as $\theta_i^j$; Pyrolysis.jl uses $\nu_{i,j}$ (negative for reactants, positive for products). The symbol $\theta$ is reserved here for the volumetric strain rate, so $\theta_i^j$ appears only in ThermaKin-comparison passages and is mapped immediately to $\nu_{i,j}$ (overload A2, §2).
-- **Heat of reaction.** ThermaKin publishes $h>0$ as exothermic, the opposite of Pyrolysis.jl (§1.5.3).
-- **Kinetics.** ThermaKin supports bimolecular rates ($\xi_{\text{COMP1}}\xi_{\text{COMP2}}$); Pyrolysis.jl is single-reactant only (§6).
-- **Boundary fluxes and mesh.** ThermaKin uses piecewise external/flame BCs with reflected incident flux, and a dynamically adjusted mesh; Pyrolysis.jl's ALE framework (§11) with cell deactivation (§14) and its surface-temperature Newton solve (§12) are the analogs.
+The all-component heat-capacity sum and gas temperature-advection term in
+TK Eq. 17 correspond to the 1D temperature balance derived here, after matching
+the heat convention, deformation and radiation terms. ThermaKin2Ds permits one
+or two reactants; Pyrolysis.jl's species-source assembly permits one. TK uses
+positive reaction heat for exothermic reactions; Pyrolysis.jl uses positive
+heat for endothermic reactions. Porting also requires matching the reaction
+extent and mass basis (§6.9.1).
 
 ### 1.6.2 Gpyro
 
-Gpyro is a generalized 1-D (with limited multi-D) condensed-phase pyrolysis model built on Patankar-style control-volume discretization.
+Gpyro 0.8200 has 0D, 1D and multidimensional transport paths. Its documented
+1D volume-change model conserves condensed mass on cells whose thicknesses
+change; it is not a fixed-grid approximation to recession (GP §4.1).
+Gpyro V2 is a separate implementation and must be identified separately.
+Neither multidimensional transport nor a V2 feature establishes general
+multidimensional deformation support in every Gpyro version.
 
-- **Conservation form.** Gpyro writes control-volume conservation of $\bar\rho\,\Delta z$, $\bar\rho Y_i\,\Delta z$, gas mass, and energy. Its bulk density $\bar\rho$ and volume fractions $X_\alpha$ map to Pyrolysis.jl's mixture density $\rho$ and volume fractions $v_j$; its pre-exponential $Z$ maps to $A_i$; its permeability $K$ maps to $\kappa$; its conversion variable $\alpha_{\text{conv}}$ is distinct from the absorption coefficient $\alpha$ (overloads A3, A4, A5, §2). Pyrolysis.jl's cell masses $m_{j,i}$ are Gpyro's $\bar\rho Y_i\,\Delta z$ times the cell's area.
-- **Energy storage and gas frame.** Gpyro's thermal-equilibrium form drops the gas storage $\rho_g\bar\psi c_{pg}\,\partial T/\partial t$ by default (its Eq. 65) and restores it with `FULL_QSG`; Pyrolysis.jl always keeps it (1.2). Gpyro writes its gas balance (Eq. 58) on control volumes that deform with the solid, with only the Darcy flux crossing their faces — the same skeleton-bound frame as the ALE mesh (§11.1.2).
-- **Gas momentum.** Gpyro uses a Darcian mass flux $\dot m''=-(K/\nu)(\partial P/\partial z - g\rho_g)$ with a pressure-evolution equation; Pyrolysis.jl's Darcy–Fick transport uses $v_g=-(\kappa/\mu)\nabla P$ with an ideal-gas pressure closure (§9), omitting the buoyancy term (negligible in a heated thin sample).
-- **Discretization and solve.** Gpyro uses Patankar's Peclet-based scheme selection, harmonic interface interpolation, and TDMA within a fully-implicit backward-Euler linearization. Pyrolysis.jl shares the harmonic interface interpolation (§1.4.4) but writes the semi-discrete system as a mass-matrix DAE and advances it with a stiff Rosenbrock integrator and the exact colored Jacobian instead of a hand-linearized backward Euler (§13, §15).
-- **Mixing rules.** Gpyro averages properties by volume fraction with power-law $T$-dependence; Pyrolysis.jl offers parallel, series, weighted, Bruggeman, and Carman–Kozeny rules per property (§5).
+Gpyro separates condensed and pore-gas inventories. Its thermal-equilibrium
+approximation normally omits gas heat storage and gas conduction from the
+solid-to-gas exchange term; `FULL_QSG` includes both (GP Eqs. 63–65).
+Pyrolysis.jl stores gas sensible heat but does not thereby reproduce that full
+exchange model. Gpyro also has a two-temperature formulation, oxygen-dependent
+kinetics, gas mass-fraction diffusion, and Darcy flow with gravity. The
+correspondences and restrictions are detailed in §§6–9.
 
 ### 1.6.3 The FDS solid-phase pyrolysis model
 
-FDS (Fire Dynamics Simulator) embeds a 1-D solid-phase pyrolysis model behind each wall/boundary cell of its CFD gas solver.
+The comparison concerns FDS 6.11.0's standard 1D thermally thick wall model,
+not the scope of FDS as a whole. FDS also documents an `HT3D` heat-transfer
+option. The standard model combines conduction, reactions, a changing solid
+grid, and coupling to the surrounding CFD gas. It assumes instantaneous
+release of generated gas; it does not solve pore-gas storage or transport.
+Reaction and gas/solid enthalpy accounting still matter (§7.8.4).
 
-- **Energy and storage.** FDS solves a 1-D Fourier conduction equation with the condensed-phase heat capacity and Arrhenius source terms; it carries no in-depth gas, so the gas term of (1.2) is identically zero there. The FDS boundary condition $-k\,\partial T/\partial x = \dot q_c'' + \dot q_r''$ (convective + radiative) corresponds to Pyrolysis.jl's surface energy balance (§12).
-- **Kinetics.** FDS rates can include density, oxygen, and temperature powers ($\rho^n O_2^n T^n$) and provide a recipe for recovering $A_i,E_i$ from a TGA reference temperature and peak rate; Pyrolysis.jl supports the same TGA-recovery recipe (§6, User Guide §4.9) but without the oxygen/density power factors.
-- **Swelling/shrinkage.** FDS uses max/sum density-ratio rules for swelling and shrinkage; Pyrolysis.jl uses the swelling factor $\gamma_j$ and the $\chi$-driven lateral-shrinkage law (§10).
-- **Radiation.** FDS uses a two-flux (Schuster–Schwarzschild) in-depth radiation treatment; Pyrolysis.jl offers surface absorption and Beer–Lambert in-depth absorption (§8), with no in-depth emission and no scattering.
-- **Energy accounting.** The Pyrolysis.jl conservation ledgers and audit (§16) are the analog of FDS's energy-conservation accounting (its Appendix P).
+FDS permits density-order, oxygen and temperature factors in its reaction
+rates. Pyrolysis.jl supports the density-order factor but omits the explicit
+oxygen and temperature-power factors. FDS offers surface absorption by default
+and a two-flux model for in-depth absorption and emission; Pyrolysis.jl's
+in-depth option is an incident Beer–Lambert beam without internal emission.
+The implemented FDS thickness rule is discussed in §10.11.3, including a
+discrepancy between the 6.11.0 manual and source.
 
 ### 1.6.4 Summary contrast
 
-| Aspect | ThermaKin2Ds | Gpyro | FDS solid phase | **Pyrolysis.jl** |
+| Aspect | ThermaKin2Ds | Gpyro 0.8200 | FDS 6.11.0 wall model | Pyrolysis.jl |
 |---|---|---|---|---|
-| Dimensionality | 1-D / quasi-2-D | 1-D (limited multi-D) | 1-D per face | **1-D** |
-| Gas sensible storage in $\rho c_p$ | included | dropped by default (`FULL_QSG` restores) | no in-depth gas | **included** |
-| Gas enthalpy transport | $c_g\mathbf J_g\!\cdot\!\nabla T$ | conservative div | surface BC | **face fluxes $\sum_g J_g h_g(T_f)$ (ThermaKin's term in flux form)** |
-| Heat-of-reaction sign | $h>0$ exo | $h>0$ endo | $h>0$ endo | **$h>0$ endo**, $Q=-\sum h r$ |
-| Reactants per reaction | bimolecular | nth-order conv. | $\rho^nO_2^nT^n$ | **single reactant** |
-| Gas momentum | Boyle-law Darcy | Darcy + buoyancy | — | **Darcy (no buoyancy)** |
-| Time integration | Crank–Nicolson | implicit BE + TDMA | implicit | **mass-matrix DAE, `Rodas5P` with the colored Jacobian** |
-| Residual differentiable by AD | no | no | no | **yes, with respect to the state** |
+| Geometry in this comparison | 1D, Cartesian/axisymmetric 2D | deforming 1D; multidimensional transport also available | standard 1D wall; `HT3D` separately documented | supported full pyrolysis solves in 1D (§1.2.2) |
+| Pore-gas heat storage | included | optional in thermal equilibrium; separate gas-energy formulation also available | no pore-gas inventory | included |
+| Heat sign, positive | exothermic | endothermic | endothermic | endothermic |
+| Gas transport | volume-fraction-gradient law | Darcy with gravity and mass-fraction diffusion | instantaneous release | lumped superficial transfer or dusty-gas friction, each with optional Darcy flow |
+| Time integration | Crank–Nicolson in primary direction, explicit transverse terms | fully implicit balances with iterative equation solves | Crank–Nicolson conduction and separate reaction/grid updates | mass-matrix DAE; `Rodas5P` default in this checkout |
+| Deforming grid | changing elements with splitting/combining | changing 1D control-volume thicknesses | thickness update and remeshing | node positions and velocities in the coupled system |
 
-The last row is the distinguishing capability: the Pyrolysis.jl residual is automatically differentiable with respect to the state, which gives the integrator its exact Jacobian by colored forward-mode differentiation (§15). Parameter sensitivities, as in the reference codes, come from repeated forward runs (§17).
+Pyrolysis.jl forms its state Jacobian by colored automatic differentiation
+(`src/ColoredJacobian/colored.jl`). This is an implementation fact, not evidence
+that the other codes cannot be differentiated. Whole-solve parameter
+sensitivities supported here use finite differences (§17).
+
+### 1.6.5 Primary sources and version scope
+
+The abbreviations used in the comparison sections identify these sources:
+
+- **TK:** *Technical Reference for Numerical Pyrolysis Model ThermaKin2Ds*,
+  supplied file `docs/refs/ThermaKin/ThermaKin2Ds Reference v2.pdf`, especially
+  Eqs. 1–23 and §3. This manual distinguishes ThermaKin2Ds from earlier ThermaKin.
+- **GP:** Lautenberger, *Gpyro Technical Reference*, supplied in
+  `docs/refs/Gpyro/gpyro_technical_reference.md`, and its *Users' Guide*.
+  Implementation checks use Gpyro 0.8200, commit
+  `6d369dd0fa5a3621334272d0806f48c56e608c01`, recorded by the reference decks.
+  Statements about Eq. 65, the 1D mesh and TDMA concern that formulation.
+- **FDS:** [FDS 6.11.0 mathematical model, solid-phase chapter](https://github.com/firemodels/fds/blob/FDS-6.11.0/Manuals/FDS_Technical_Reference_Guide/Solid_Chapter.tex),
+  its User's Guide and [wall implementation](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/wall.f90).
+  Source behavior takes precedence where the manual and implementation disagree.
+- **GP V2:** [Gpyro V2 source at `bff0126`](https://github.com/Gedeben/GPYRO-V2/tree/bff0126c68f2a35c084ef04490ae327185f281a3),
+  inspected separately. This inspection does not establish the revision used
+  for the retained V-BO-01 CSV: that CSV's original provenance lacks a commit.
+
+The Pyrolysis.jl side is checked against the implementation paths cited in each
+chapter. Numerical overlays concern the committed decks, not every capability
+of a code; timings have additional limits (§18.1.3).
 
 ---
 
@@ -356,7 +428,7 @@ The Technical Reference Guide proceeds from continuum theory to discretization t
 
 - **§2 Nomenclature** — the verbatim symbol table and the three sign conventions; binding overload resolutions.
 - **§3 Governing Equations of the Continuum Model** — the full coupled PDE system and its discrete unknowns, the gas-vs-solid species transport, the energy balance and its two energy states, the ideal-gas pressure closure, deformation as mesh motion, and side-by-side comparison tables with the reference codes.
-- **§4 Materials & Property Functions** and **§5 Effective Properties & Mixing Rules** — the constitutive layer: components, phases, property-function types and the derivatives automatic differentiation takes of them, mixture density and porosity, and the conductivity/transfer/permeability mixing rules.
+- **§4 Materials & Property Functions** and **§5 Effective Properties & Mixing Rules** — the constitutive layer: components, phases, property-function types and the derivatives automatic differentiation takes of them, skeletal porosity, and the conductivity/transfer/permeability mixing rules.
 - **§6 Reaction Kinetics** — the Arrhenius rate law, smooth temperature gates, the one-sided depletion limiter, stoichiometry, and the heat-of-reaction source.
 - **§7 Heat Conduction, Gas Convection & Energy Assembly** — Fourier conduction, the gas enthalpy flux, the energy rows, and the residual sequence.
 - **§8 Thermal Radiation** — the three radiation models and the Beer–Lambert face intensities.
@@ -376,11 +448,11 @@ The model carries several known limitations, recorded here so that users size th
 2. **One temperature.** The matrix and the pore gas share one temperature (local thermal equilibrium); there is no two-temperature gas energy equation, so regimes with very fast, hot gas throughput are outside the model (§3.9).
 3. **Single-reactant kinetics only.** Multi-reactant (bimolecular, competitive) reactions are unsupported, as are temperature-dependent activation energy, pressure dependence, and distributed-activation-energy tooling (§6).
 4. **The heat-of-reaction datum.** The energy balance takes the heats of reaction at the local temperature (the DSC-style, inverse-calibrated convention), which the formation term $\sum_j\omega_j h_j(T)$ of (1.1) converts to the sensible-enthalpy datum exactly. A heat quoted at the datum $T_{\text{ref}}$ differs from the local-temperature heat by Kirchhoff's law, $h_r(T) = h_r(T_{\text{ref}}) + \sum_j\nu_{r,j}h_j(T)$, and must be converted before it is supplied (§6.6.3). The datum decides which heat is released, not whether energy is conserved: the energy ledger closes exactly in both energy forms for any composition change (§16.5.2).
-5. **Transport closures are first-order / heuristic in places.** Gas advection uses first-order upwind, diffusion applies one mixture transfer coefficient to every gas species (no per-species discrimination, with only heuristic Lennard-Jones parameter estimates available for sizing it), and the pore-gas viscosity is one curve per material with no composition-dependent (Wilke) mixing (§5, §9).
+5. **Transport closures and spatial accuracy.** Donor selection makes advective contributions first order. The lumped model uses one superficial matrix coefficient; the dusty-gas model adds species-dependent wall friction and declared binary diffusivity. The pore-gas viscosity is one curve per material, without composition-dependent mixing (§5, §9).
 6. **Burnout inside an envelope; sensitivities across events.** Cell deactivation is verified under joint refinement of the mesh and the tolerance inside the envelope stated in User Guide §10.9 — the threshold, the band, the cells across a vanishing layer, the tolerance — and outside it the end-of-layer transient need not converge with resolution (§14.2.4). Finite-difference parameter sensitivities remain valid across located deactivation events, whose times are smooth functions of the parameters, but an objective that samples an event at the data's times can be rough at small steps, so the step is chosen by a convergence check (§17.7.3).
-7. **Imported calibrations must respect the surface convention.** Pyrolysis.jl carries the gas enthalpy in the face fluxes and applies no surface gas-enthalpy term (§1.4.3); parameters calibrated against a solver that applies both will predict higher $T_s$ and MLR here and should be re-validated (§18).
+7. **Material calibration.** Experimental comparison requires the complete species and energy boundary closure, declared pore structure and transport model. Numerical convergence does not establish the validity of material parameters (§18).
 
-These limitations bound the model's domain of applicability; within that domain — 1-D, single-reactant, atmospheric-to-moderate-pressure condensed-phase pyrolysis — the formulation is rigorous, differentiable, and conservation-audited.
+These limitations bound the model's domain of applicability; within that domain — 1-D, single-reactant, atmospheric-to-moderate-pressure condensed-phase pyrolysis — local roots, constitutive branches, solution accuracy and conservation must be qualified for each application.
 
 ### 1.8.1 Known gaps and missing physics
 
@@ -393,18 +465,17 @@ The physics below is absent from the model. It is ordered by its expected effect
 
 **Relevant to near-term applications**
 
-3. **Oxidative pyrolysis and char oxidation with O₂ ingress** (about 32.8 MJ per kg of carbon). It dominates at sub-critical fluxes, after flameout, and in smoldering, and it controls the late-time MLR tail and the residue mass of the Douglas-fir case. It needs multi-reactant kinetics (item 2) and a per-species ambient concentration, which `ConvectiveMassBC` already accepts (`ξ_inf` per species). The upwind Darcy outflow suppresses ingress at high MLR.
-4. **Equilibrium (pressure-dependent) moisture evaporation and recondensation.** Drying is a pressure-independent Arrhenius reaction; no saturation pressure $P_{\text{sat}}(T)$ appears anywhere. Vapor recondensation ahead of the drying front (which raises the local moisture content by 30–50 %) is absent, and at the 1.5–2 atm pore pressure of pressure-treated wood the boiling point shifts to 112–121 °C, which Arrhenius drying cannot represent. It needs item 2 and a smooth $r \propto (P_v - P_{\text{sat}}(T))$ closure; the pressure is already evaluated in the state mapping under Darcy–Fick transport.
+3. **Oxidative pyrolysis and char oxidation with O₂ ingress** (about 32.8 MJ per kg of carbon). It dominates at sub-critical fluxes, after flameout, and in smoldering, and it controls the late-time MLR tail and the residue mass of the Douglas-fir case. It needs multi-reactant kinetics (item 2) and an explicit reservoir composition supplied by `GasReservoir`. The upwind Darcy outflow suppresses ingress at high MLR.
+4. **Equilibrium (pressure-dependent) moisture evaporation and recondensation.** Drying is a pressure-independent Arrhenius reaction; no saturation pressure $P_{\text{sat}}(T)$ appears anywhere. Vapor recondensation ahead of the drying front (which raises the local moisture content by 30–50 %) is absent, and at the 1.5–2 atm pore pressure of pressure-treated wood the boiling point shifts to 112–121 °C, which Arrhenius drying cannot represent. It needs item 2 and a smooth $r \propto (P_v - P_{\text{sat}}(T))$ closure; the pressure is evaluated for all gas-bearing materials.
 5. **Backing layer and contact resistance at the back face.** There is no contact-resistance or substrate model. An adiabatic back face over-predicts late-time back-half temperatures (the missing loss is about 0.7–3 kW·m⁻² for 25 mm of wood over 10–20 min); a lumped Robin condition on the bottom face (radiative + convective, as in example `06_cone_calorimeter.jl`) is the available approximation. A contact conductance plus a semi-infinite-substrate $h(t)$ would close the gap.
 6. **Kinetics expressiveness.** Normalized-conversion ($\alpha$) tracking, a $T^n$ pre-factor, and DAEM-style stacking are absent. Any real order $n \ge 0$ per reactant ($\xi^n$) is supported and equals $\xi_0^n(1-\alpha)^n$ up to a rescaling of $A_i$, so the gap is $\alpha$-normalization, not the conversion order.
-7. **Transport-closure accuracy** (item 5 above): no composition-dependent (Wilke) viscosity mixing, air-default Lennard-Jones parameters for the Chapman–Enskog estimate, and first-order upwind Darcy advection with no TVD limiter; and under Darcy–Fick transport the diffusive flux keeps the isobaric driving potential $-(\lambda/T)\,\partial(\xi T)/\partial z$, dropping the term proportional to $\nabla(\varphi P)$ that a resolved pressure field and sharp char fronts carry (`gas_flux`, `src/Physics/gas_transport.jl`).
+7. **Transport-closure accuracy** (item 5 above). The gas viscosity is a material curve without composition-dependent mixing. Binary diffusivity and pore geometry must be supplied for the dusty-gas model. Both closures exclude thermal diffusion and gravity; donor advection is first order. A matrix endpoint supplies finite porous resistance, not a free-flow momentum model (§9).
 
 **Niche or future**
 
 - Spectral (two-band) radiation and in-depth emission from glowing char; a model of that kind would add further algebraic intensity rows to the state, as the Beer–Lambert face intensities do (§8).
 - Substrate reflection; scattering ($\sigma_s$ is not modeled); view-factor edge fall-off.
-- Knudsen/Klinkenberg slip, $\kappa_{\text{eff}} = \kappa(1 + b/P)$: $b \approx 28$ kPa for 1 µm pores but about 280 kPa for 0.1 µm, up to about 4× $\kappa$ at 1 atm in sub-µm char.
-- Stefan–Maxwell multicomponent diffusion (first relevant with O₂ ingress against the pyrolyzate efflux) and a tortuosity factor (the porosity $\varphi$ over the tortuosity, a factor of 2–10) on the diffusivity and the gas-transfer coefficient.
+- Species-pair-dependent molecular diffusivities and thermal-transpiration effects beyond the declared common-diffusivity dusty-gas closure.
 - Liquid free-water capillarity (relevant only above the fiber-saturation point, about 30 % moisture content) and bound-water diffusion ($\sqrt{Dt} \approx 0.25$ mm over a cone test, negligible at fire heating rates).
 - Mechanics (char cracking, delamination, spalling), anisotropic conductivity (about 2× along the wood grain), melting and dripping, and 2-D/3-D edge burning (about a 10–20 % effect on late-time MLR in cone tests; item 1 above).
 
@@ -472,7 +543,7 @@ Conventions:
 | `a`, `a_s` | Absorptivity applied to the incident flux of a `RadiativeFluxBC`: the condition's own `absorptivity` when it has one, otherwise `a_eff` of the outermost live cell (§8.3.2, §12.3.5) | – |
 | `a_i`, `a_n` | Activation switch of cell *i* / node *n* of the equidistribution correction (§11; overload A9) | – |
 | `B` | Spalding blowing number `ṁ''c_{p,g}/h` of the convective blowing models (§12.3.3) | – |
-| `B_λ`, `B_Γ` | Film parameters of the blowing models: `B_λ = 2λ ṁ'' c_{p,g}/h` (`CouetteFilm`, `λ` its film constant, overload A6); `B_Γ = (ṁ'' c_{p,∞}/h)(Γ_∞/Γ_g)^{n_Γ}` (`PropertyRatioFilm`, `PoolingFilm`) (§12.3.3; overload B1) | – |
+| `B_λ`, `B_Γ` | Film parameters of the blowing models: `B_λ = 2λ Σ_j N_j c_{p,j}(T_s)/h` (`CouetteFilm`, `λ` its film constant, overload A6); `B_Γ = (ṁ'' c_{p,∞}/h)(Γ_∞/Γ_g)^{n_Γ}` (`PropertyRatioFilm`, `PoolingFilm`) (§12.3.3; overload B1) | – |
 | `C_i` | Heat-capacity sum of cell *i*, `Σ_j m_{j,i} c_{p,j}(T̃_i)` at the trial temperature, smoothly floored at `C_{floor,i}` | J·K⁻¹ |
 | `C_{floor,i}` | Capacity floor of cell *i*, `ρc_{p,floor} V_i(0)` (§5.4.3, §13.10.4) | J·K⁻¹ |
 | `C_{reg,i}` | Regularizing capacity of the extended caloric relation: zero while the cell's guaranteed heat capacity is at least `2C_{floor,i}`, rising to `C_{floor,i}` as that capacity vanishes (§5.4.3, §13.10.4, §16.4) | J·K⁻¹ |
@@ -520,8 +591,9 @@ Conventions:
 | `J` | Jacobian `∂f/∂u` of the residual (linear-algebra context only) | mixed |
 | `J_j`, `J_{j,f}` | Mass flux of (gas) component *j* relative to the solid (at face *f*: the gas-transport flux, §9, §13.7) | kg·m⁻²·s⁻¹ |
 | `J_j^diff`, `J_j^adv` | Diffusive / advective part of the gas flux | kg·m⁻²·s⁻¹ |
-| `J_{bc,j}` | Flux of component *j* into the domain that a mass condition prescribes at a boundary face (§12.4, §13.7.5) | kg·m⁻²·s⁻¹ |
-| `K`, `κ` | Permeability — **use `κ`**; `K` reserved for Gpyro-comparison text only | m² |
+| `J_{bc,j}` | Outward flux of component *j* prescribed at a boundary face (§12.4, §13.7.5) | kg·m⁻²·s⁻¹ |
+| `κ` | Effective condensed-matrix permeability | m² |
+| `K_j` | Species wall diffusivity in the gas-friction equations | m²·s⁻¹ |
 | `k`, `k_j` | Thermal conductivity (of component *j*) | W·m⁻¹·K⁻¹ |
 | `k_eff`, `k_f` | Effective (mixture) / face-averaged thermal conductivity | W·m⁻¹·K⁻¹ |
 | `k_B` | Boltzmann constant (reduced temperature `T* = k_B T/ε`) | J·K⁻¹ |
@@ -543,8 +615,8 @@ Conventions:
 | `ṁ_g`, `ṁ''`, `ṁ''_k` | Outward gas mass flux at the surface (`ṁ''` in the blowing models, `ṁ''_k` of species *k*; §12.3.3) | kg·m⁻²·s⁻¹ |
 | `ṁ_out` | Outflow rate of the live region, positive leaving, `Σ_{f∈𝓕_live} Σ_j F_{j,f} A_f` (§16.3.2) | kg·s⁻¹ |
 | `Ṁ_{j,i}` | Face-flux part of the mass rate of component *j* in cell *i*, `−Σ_f s_if A_f F_{j,f}` | kg·s⁻¹ |
-| `mob_i`, `mob_f` | Gas mobility `κ/μ` of cell *i* (permeability over the floored viscosity) / its guarded harmonic face mean (§5.7.4, §9.5.2; overload M1) | m²·Pa⁻¹·s⁻¹ |
-| `N` | Partial-pressure sum (numerator of ideal-gas pressure; overload N1) | Pa |
+| `mob_i`, `mob_f` | Gas mobility `κ/μ` of cell *i*; interface fluxes use each half-cell mobility (§5.7.4, §9.6; overload M1) | m²·Pa⁻¹·s⁻¹ |
+| `N_j`, `n_j` | Species mass flux and molar flux relative to the skeleton | kg·m⁻²·s⁻¹; mol·m⁻²·s⁻¹ |
 | `N_C` (`NC`) | Number of chemical components (type parameter) | – |
 | `N_R` (`NR`) | Number of reactions (type parameter) | – |
 | `N_state` | Length of the state vector (§3.1.2, §15.1.1) | – |
@@ -564,7 +636,7 @@ Conventions:
 | `q_BC` | Boundary-condition heat flux (positive into domain) | W·m⁻² |
 | `q_inc` | Incident radiative flux of a `RadiativeFluxBC` | W·m⁻² |
 | `q'''`, `q_rad'''`, `q^rad_i` | Volumetric radiation source (Beer–Lambert; `q^rad_i` its average over cell *i*, §8.3.2) | W·m⁻³ |
-| `R_b` | Blowing ratio `h_eff/h` of a convective condition's blowing model, 1 at zero outflow (§12.3.3; the code's `χ`, overload B1) | – |
+| `R_b` | Blowing ratio `h_eff/h` of a convective condition's blowing model, 1 at zero species fluxes (§12.3.3; the code's `χ`, overload B1) | – |
 | `R_g` (`R`, `R_gas`) | Universal gas constant (= 8.31446261815324) | J·mol⁻¹·K⁻¹ |
 | `r`, `r_i` | Reaction rate (per unit volume) of reaction *i* | kg·m⁻³·s⁻¹ |
 | `r_hi`, `r_lo` | Activation bounds of the equidistribution correction, fractions of a cell's initial thickness (defaults 0.3, 0.1) | – |
@@ -581,8 +653,8 @@ Conventions:
 | `T_cell` | Temperature at the cell center adjacent to a boundary | K |
 | `T_∞` | Ambient / surroundings temperature | K |
 | `T_ref` | Reference temperature for enthalpy datum (= 298.15) | K |
-| `T_f` | Face temperature of the enthalpy the gas fluxes carry: the distance-weighted interpolation `(d_n T_o + d_o T_n)/(d_o + d_n)` at an interior face, the surface temperature on a boundary face (§13.6.2) | K |
-| `T̄_f`, `T_face` | Mean `(T̃_o + T̃_n)/2` of the two cells' trial temperatures inside the Fickian flux (written `T_face = (T_L + T_R)/2` in §3.4 and §9.1; §13.6.2, §13.7.2) | K |
+| `T_f` | Face temperature of the enthalpy the gas fluxes carry: the distance-weighted interpolation `(d_n T_o + d_o T_n)/(d_o + d_n)` at an interior face, the surface temperature for boundary outflow and specified incoming temperature for inflow (§13.6.2) | K |
+| `T̄_f`, `T_face` | Mean `(T̃_o + T̃_n)/2` of the two cells' trial temperatures inside the lumped wall flux (written `T_face = (T_L + T_R)/2` in §3.4 and §9.1; §13.6.2, §13.7.2) | K |
 | `T̃_f` | Face temperature of the relative fluxes: the upwind van Albada reconstruction on the stencil of the mass flux it carries (§11.6.4, §13.6.2) | K |
 | `T_trial`, `T̃_i` | Trial temperature: `T` smoothly clamped into the property bracket `[200, 3000]` K with 1 K transitions | K |
 | `T_m` | Merged temperature of a deactivation receiver: the root of the extended caloric relation at `H_m` and the merged masses (§14.3.3, §16.7) | K |
@@ -607,7 +679,7 @@ Conventions:
 | `x`, `y` | Transverse/lateral coordinates (multi-dimensional meshes and comparison text) | m |
 | `x_J` | Join of the depletion limiter's onset, in units of `ξ_th` (`join`, default 1; §6.3.2) | – |
 | `Y_j` | Mass fraction of component *j*, `ξ_j/ρ` (`Y_k` of species *k* at the face in the pooling film, §12.3.3) | – |
-| `Z` | Pre-exponential factor (Gpyro/FDS comparison notation; internally `A`) | varies |
+| `Z` | Pre-exponential factor (Gpyro notation; FDS uses `A_{αβ}`; internally `A`) | varies |
 | `z` | Axial / through-thickness coordinate (primary spatial variable) | m |
 | `z_n` | Position of mesh node *n* (a differential unknown on a moving mesh) | m |
 | `z_i^c` | Cell-center position of cell *i* | m |
@@ -642,14 +714,13 @@ Conventions:
 | `ε_AB` | Lennard-Jones well depth (collision integral) | J |
 | `ϵ_ξ`, `ϵ_T`, `ϵ_G` | Slope scales of the van Albada reconstruction for the concentrations, the temperature and the history values: the square of a tolerance over the upwind cell's reference thickness (§11.6.2; overload E1) | (field units)²·m⁻² |
 | `ϵ_LS` | Relative regularization of the least-squares normal matrix, 10⁻⁸ (`GRADIENT_REGULARIZATION`; §13.6.4; overload E1) | – |
-| `η` | Guard of the distance-weighted harmonic face means, 10⁻²⁰ in the property's units (`FACE_MEAN_GUARD`; §1.4.4, §5.12, §7.1.2, §9.1.4); in §17 the relative finite-difference step (overload E2) | property units |
-| `η_m` | Guard of the face mobility mean, 10⁻³⁰ (`MOBILITY_GUARD`; §9.5.2; overload E2) | m²·Pa⁻¹·s⁻¹ |
+| `η` | Guard of the distance-weighted harmonic face means, 10⁻²⁰ in the property's units (`FACE_MEAN_GUARD`; §1.4.4, §5.12, §7.1.2); in §17 the relative finite-difference step (overload E2) | property units |
 | `θ`, `θ_i` | Volumetric strain rate (dilation) of cell *i*, `(1/V) dV/dt` (bold `θ` in §17 is the parameter vector; overload A2) | s⁻¹ |
 | `θ_A` | Column-global **radial** volumetric strain rate, `(1/A) dA/dt` (an algebraic unknown under a lateral-shrinkage law) | s⁻¹ |
 | `θ_L` | **Axial** volumetric strain rate (`θ − θ_A`) | s⁻¹ |
 | `θ_i^j` | Stoichiometric coefficient (ThermaKin comparison notation; internally `ν_{i,j}`) | – |
 | `κ` (`κ_j`, `κ_eff`) | Permeability (Darcy) of component *j* / of the cell's mixture | m² |
-| `κ_s` | Solid absorption coefficient (FDS comparison notation; internally `α`) | m⁻¹ |
+| `κ_s` | Solid absorption coefficient (FDS; compare effective `α_eff`, not mass-specific `α_j`) | m⁻¹ |
 | `Λ` | Face buoyancy of the pooling film relative to the hot free stream, `[1 − (M_face/T_s)(T_∞/M_∞)]/(1 − T_∞/T_s)` (§12.3.3; overload B1) | – |
 | `Λ_c`, `Λ_w` | Centre and width of the pooling factor's logistic switch in `Λ` (`PoolingFilm` keywords `Λc`, `Λw`, defaults 0.35, 0.10; §12.3.3) | – |
 | `λ` (`λ_j`, `λ_face`, `λ_eff`) | Gas transfer (diffusion) coefficient | m²·s⁻¹ |
@@ -663,7 +734,7 @@ Conventions:
 | `ξ⁺_{j,i}` | Positive-part concentration `(m_{j,i})⁺/Ṽ_i` at which the property laws are evaluated | kg·m⁻³ |
 | `ξ_th` | Concentration scale of the depletion limiter (`DepletionLimiter` `threshold`, default 1 kg·m⁻³) | kg·m⁻³ |
 | `ξ_{tol,i}` | Mass tolerance of cell *i* over its initial volume, the positivity scale of the relative-flux face states (§11.6.2, §11.6.3) | kg·m⁻³ |
-| `ρ` | Mixture / bulk density (`Σ ξ_j` for total; mixture-density formula for effective) | kg·m⁻³ |
+| `ρ` | Bulk density (`Σ ξ_j` for the total inventory density) | kg·m⁻³ |
 | `ρ_j` | Bulk (pure-phase) density of component *j* | kg·m⁻³ |
 | `ρ_{i,j}` | Intrinsic / skeletal density of component *j* (skeletal volume fraction only) | kg·m⁻³ |
 | `ρ_g` | Gas-phase density (ideal-gas law) | kg·m⁻³ |
@@ -795,7 +866,6 @@ Conventions:
 | Porosity floor (smooth) | — | 10⁻¹² | – | `POROSITY_FLOOR` |
 | Viscosity floor (smooth) | — | 10⁻¹² | Pa·s | `MU_FLOOR` |
 | Guard of the harmonic face means | `η` | 10⁻²⁰ | property units | `FACE_MEAN_GUARD` |
-| Guard of the face mobility mean | `η_m` | 10⁻³⁰ | m²·Pa⁻¹·s⁻¹ | `MOBILITY_GUARD` |
 | Regularization of the least-squares gradient | `ϵ_LS` | 10⁻⁸ | – | `GRADIENT_REGULARIZATION` |
 | Half-width of the clamp band of `χ̄_c` | — | 10⁻³ | – | `LATERAL_CLAMP_WIDTH` |
 | Deactivation threshold | `ε_m` | 10⁻² | – | `solve(...; threshold)` |
@@ -836,7 +906,7 @@ below is authoritative; writers must use the disambiguating subscript/context.
   area** and `A_f` the area of face `f`; the Arrhenius pre-exponential is `A_i` /
   `A_{αβ}` (always subscripted by reaction). **Resolution:** bare `A` = area in
   physics chapters; `A_f` = face area; `A_i` = pre-exponential (kinetics). The
-  FDS/Gpyro pre-exponential `Z` is mapped to `A_i` on first use. In the
+  Gpyro pre-exponential `Z` and FDS `A_{αβ}` are compared with `A_i`; copying values requires matching the rate basis (§6.9). In the
   mesh-motion rows on a line (§10, §11, §15) a face is named by its node, so
   `A_i` and `A_{i+1}` there are the areas of the faces at nodes `i` and `i + 1`,
   the two faces of cell `i`; a reaction subscript never appears in those rows.
@@ -846,7 +916,7 @@ below is authoritative; writers must use the disambiguating subscript/context.
 
 - **α — A5 [absorption vs. conversion vs. absorptivity].** `α` (or `α_eff`) =
   **volumetric absorption coefficient** (m⁻¹); `α_j` = mass-basis absorption
-  coefficient (m²·kg⁻¹). Conversion (Gpyro) is `α_conv`; FDS `κ_s` maps to `α`.
+  coefficient (m²·kg⁻¹). Conversion (Gpyro) is `α_conv`; FDS `κ_s` has the units of `α_eff`, not `α_j`; matching attenuation also requires the angular closure (§8.7.3).
   The absorptivity of a surface for incident radiation is **`a`** (`a_j`,
   `a_eff`, `a_s`), never `α`; it equals `ε_eff` under Kirchhoff's law unless a
   component sets its own `surface_absorptivity`. The correction's monitor
@@ -929,7 +999,7 @@ below is authoritative; writers must use the disambiguating subscript/context.
 
 - **η — E2 [guards vs. finite-difference step].** `η` is the guard added to the
   denominator of a guarded harmonic face mean, in the units of the averaged
-  property (10⁻²⁰); the mobility mean's guard is `η_m` (10⁻³⁰ m²·Pa⁻¹·s⁻¹). In
+  property (10⁻²⁰), for thermal conduction. In
   §17 `η` is the relative finite-difference step and `η_abs` its absolute
   floor; no face mean appears there.
 
@@ -956,8 +1026,9 @@ below is authoritative; writers must use the disambiguating subscript/context.
   switches. A row's absolute tolerance is written `atol_r` (§15.5.4), never
   `a_r`.
 
-- **N — N1 [partial-pressure sum vs. counts].** `N` in the pressure closure is
-  the partial-pressure sum; every count carries a subscript: `N_C`, `N_R`,
+- **N — N1 [species fluxes vs. counts].** `N_j` is species mass flux and
+  `n_j` is species molar flux. Total pressure is `P = Σ_j p_j`.
+  Every count carries a subscript: `N_C`, `N_R`,
   `N_state`, `N_node`, `N_cell`, `N_blk`. The number of cells across a layer of
   the equidistribution correction is `n_layer`, in the gain `n_layer²/τ_eq`.
 
@@ -1180,47 +1251,16 @@ inventory (§3.3). Each term and its sign are derived in the sections that follo
 
 ## 3.2 Condensed-phase mass and total density
 
-### 3.2.1 Mixture (total) density
+### 3.2.1 Total density and pore density
 
-The bulk **total density** of the mixture is the sum of all component mass
-concentrations,
+The bulk total density is $\rho_{tot}=\sum_j\xi_j$, the total inventory per
+bulk volume. Each gas has intrinsic pore density $\rho_j^g=\xi_j/\phi$.
+These definitions serve different control volumes. Skeletal occupancy uses
+condensed intrinsic densities without swelling weights; matrix transport
+weights use condensed $\gamma_j\xi_j/\rho_{b,j}$. The volume-change law
+uses its own per-component $\gamma_j/\rho_{b,j}$ (§3.6).
 
-$$
-\boxed{\;\rho = \sum_{j=1}^{N_C} \xi_j. \;}
-$$
-
-This is exact by the definition of $\xi_j$ as mass-per-bulk-volume and requires no
-property evaluation. Mass fractions $Y_j = \xi_j/\rho$ are formed from it wherever
-they are needed.
-
-The **mixture density used by the swelling/specific-volume bookkeeping**,
-`mixture_density`, is a *different* quantity: it is the density a parcel would have if
-its components occupied their pure-phase volumes, every component contributing volume
-through its swelling factor $\gamma_j$ (the universal γ weighting, shared with the
-dilation rate θ and the conductivity/emissivity volume fractions, §5):
-
-$$
-\frac{1}{\rho_{\mathrm{mix}}}
-= \sum_{j} \gamma_j\,\frac{Y_j}{\rho_j},
-$$
-
-where $\rho_j(T)$ is the **bulk pure-phase density** of component $j$ (overload note A7
-of §2: $\rho_j$ is the bulk density, distinct from the skeletal/intrinsic density
-$\rho_{i,j}$ that appears only in porosity). For canonical materials
-($\gamma_j = 1$ condensed, $\gamma_j = 0$ gas) the gas terms drop out and the
-mixture occupies only the solid/liquid volume; for intumescent gases
-($\gamma_j=1$) the escaping gas creates matrix volume; a $\gamma_j = 0$
-condensed phase (the `LiquidComponent` default) is volumeless. The
-distinction between $\rho=\sum_j\xi_j$ (total) and $\rho_{\mathrm{mix}}$ (specific-volume
-form) matters because the two enter different parts of the model: $\rho=\sum\xi_j$ is
-the conserved bulk inventory per unit volume; $\rho_{\mathrm{mix}}$ enters the film
-flux of the mass boundary conditions (§12.4), and the per-component specific volumes
-$\gamma_j/\rho_j$ feed the volume-change rate of §3.6. The full derivation of the
-swelling mixture density is in §5.
-
-> **Implementation notes.** `mixture_density` is in `src/Properties/mixture_rules.jl`;
-> the $\rho_{\mathrm{mix}}$ swelling form is `_specific_vol_with_swelling_direct` (same
-> file).
+---
 
 ### 3.2.2 No separate bulk-continuity PDE
 
@@ -1259,8 +1299,7 @@ The decisive modeling choice is *which components transport*. In Pyrolysis.jl th
 matrix is rigid relative to itself: solids and liquids do **not** flux between cells
 — they are consumed/produced in place by reactions and (on a moving mesh) carried by
 the mesh, never by molecular transport. Only gas components diffuse and advect through
-the pore network, and they do so *relative to the skeleton*: Darcy's law and the
-volume-fraction-gradient diffusion law both return the gas velocity relative to the
+the pore network, and they do so *relative to the skeleton*: the wall-friction, molecular-friction and Darcy closures return fluxes relative to the
 pore walls, so the laboratory-frame gas flux is $\xi_g\mathbf v_s + \mathbf J_g$ and the
 pore gas is carried with the pores it occupies (§11.1.2). Hence the **gas-vs-solid
 dispatch**, in the frame of the skeleton:
@@ -1277,7 +1316,7 @@ $$
 \;}
 $$
 
-The continuous gas flux $\mathbf J_j$ is the Fickian or Darcy–Fick flux closed in §3.4,
+The continuous gas flux $\mathbf J_j$ follows the selected lumped or dusty-gas closure in §3.4,
 §3.5 and detailed in §9; the reaction source $\omega_j = \sum_r \nu_{r,j}\,r_r$ is the
 stoichiometry-weighted sum of reaction rates ($\nu_{r,j}<0$ reactant, $>0$ product;
 §6). The discrete realization is one mass row per component and cell,
@@ -1393,10 +1432,9 @@ bracket), smoothly floored at $\rho c_{p,\mathrm{floor}}V_i(0)$ with
 $\rho c_{p,\mathrm{floor}} = 10^3$ J·m⁻³·K⁻¹ so that a cell emptied of all mass keeps a
 finite rate. The pore gas is at the matrix temperature (one-temperature model,
 §3.1.2) and its concentration $\xi_g$ is an integrated state, so its sensible storage
-$\xi_g c_{p,g}\,\partial_t T$ is available at no cost and is kept. Dropping it — the
-*quasi-steady-gas approximation* of Gpyro's default thermal-equilibrium form, and of
-FDS, which carries no in-depth gas at all — would be an approximation with no benefit
-here; its size, $\varphi\rho_gc_{p,g}$ against the matrix heat capacity, is estimated
+$\xi_g c_{p,g}\,\partial_t T$ is retained. Gpyro's default thermal-equilibrium exchange model
+neglects gas storage and gas conduction (`FULL_QSG` retains both); the standard
+FDS wall model has no pore-gas inventory. The size of our gas storage, $\varphi\rho_gc_{p,g}$ against the matrix heat capacity, is estimated
 in §1.4.1 at about a quarter of a percent of $\rho c_p$ in a porous char at 1 atm.
 
 Where the rest of the gas enthalpy goes follows from the derivation of §1.4.1,
@@ -1443,10 +1481,9 @@ the temperature equation of §3.3.1. Three things follow:
    correction moves the mesh relative to the skeleton, the inventories, and the
    enthalpy they carry, cross the faces at the relative velocity (§11.2.2, §11.6).
 
-This is ThermaKin Eq. 17 term for term (all-component storage, the convective term
-$c_g\mathbf J_g\!\cdot\!\nabla T$, and the deformation term as the
-$\mathbf v_s\!\cdot\!\nabla T$ piece); Gpyro's `FULL_QSG` form is the same equation
-(§3.7).
+The storage and gas temperature-advection terms correspond to ThermaKin Eq. 17
+in 1D when the other closures match. Gpyro's `FULL_QSG` also retains gas
+conduction, so it is not generally the same equation (§3.7).
 
 > **Implementation notes.** The heat-capacity sum is `heat_capacity_sum`
 > (`src/States/caloric.jl`), which has no phase branch and skips only a component
@@ -1501,62 +1538,27 @@ the smoothly-gated Arrhenius form of §6, evaluated at the trial temperature.
 > cell's energy source. The Beer–Lambert rows and cell sources are formed by
 > `BeerLambertKernel` (`src/Kernels/radiation.jl`).
 
-### 3.3.4 The gas enthalpy flux and the surface gas enthalpy
+### 3.3.4 Gas enthalpy flux and surface energy
 
-**The face flux (active wherever gas moves).** The sensible enthalpy convected by the
-gas flux is assembled in flux form: every face carries, in its energy flux,
+Every interior gas flux carries $\sum_gF_{g,f}h_g(T_f)$, using the same
+species flux as the mass rows and the common interface temperature. The
+shared face value makes this contribution conservative. Subtracting
+$\sum_jh_j(T_i)\dot M_{j,i}$ in a temperature row leaves the transported
+sensible-enthalpy differences from the cell temperature. Both energy
+formulations therefore use identical mass and carried-energy fluxes.
 
-$$
-\sum_g F_{g,f}\,h_g(T_f),
-$$
+At a boundary, outward gas carries $h_g(T_s)$ and inward gas carries its
+specified reservoir enthalpy. An LTE wall film has heat $q_s$ into the wall;
+the reservoir control surface has $q_r=q_s+H_r-H_s$, where $H_s$ uses surface
+enthalpy for every signed species flux. Thus
+$E_{out}=H_r-q_r=H_s-q_s$. Without a thermal film, imposed heat and donor
+enthalpy enter directly, including cold gas entering an adiabatic wall.
+Chapter 9 states the conditional coupling and supported blowing domains.
+No additional incoming-gas heating term is added. The internal-energy and
+pressure-work storage convention is as stated in §1.4 and is independent of
+this carried-enthalpy balance.
 
-with $F_{g,f}$ the same mass flux the mass rows carry and $T_f$ the face temperature
-of the flux that carries the mass: between two live cells the distance-weighted
-interpolation $T_f = (d_n T_o + d_o T_n)/(d_o + d_n)$ of the owner and neighbour
-temperatures; on a boundary face the surface temperature $T_s$ of the surface energy
-balance; for the fluxes relative to a corrected mesh the reconstructed face
-temperature of §11.6. In the temperature row the subtraction of
-$\sum_jh_j(T_i)\dot M_{j,i}$ leaves each face contributing
-$-s_{if}A_f\sum_g F_{g,f}\big(h_g(T_f) - h_g(T_i)\big)$ to cell $i$, which is the cell
-integral of $-\sum_g c_{p,g}\mathbf J_g\!\cdot\!\nabla T$ to the order of the face
-interpolation. The flux form has three properties the volumetric reading lacks: it is
-conservative (the enthalpy leaving one cell enters its neighbour), it is exact for a
-temperature-dependent $c_{p,g}$ (no linearization of $h_g$), and a uniform
-temperature field stays exactly at rest, since then $h_g(T_f) = h_g(T_i)$. It is the
-only carrier of gas sensible enthalpy in the energy balance (§7.4).
-
-**No surface gas-enthalpy term.** The gas-enthalpy divergence splits by the product
-rule as
-
-$$
-\nabla\cdot\Big(\sum_g h_g\,\mathbf J_g\Big)
-= \sum_g c_{p,g}\,\mathbf J_g\cdot\nabla T + \sum_g h_g\,\nabla\cdot\mathbf J_g ,
-$$
-
-exactly even for temperature-dependent $c_{p,g}$, since $\nabla h_g = c_{p,g}(T)\,\nabla T$.
-The first piece is the temperature-form term; the second cancels exactly against the
-transport part of the gas composition-change term ($\partial_t\xi_g = \omega_g -
-\nabla\cdot\mathbf J_g$ in the skeleton's frame, §3.3.2), whose reaction part is
-carried by $Q_{\mathrm{rxn}}$ and the formation term. The gas enthalpy is therefore
-carried entirely by the face fluxes, and at the exposed face the outward mass flux
-carries its sensible enthalpy at $T_s$ in the boundary face's energy flux: the gas
-leaves at the surface temperature. The surface boundary condition is then a plain
-convective + radiative balance, $q_{\mathrm{BC}}(T_s) = q_{\mathrm{cond}}(T_s)$, with
-**no** gas-enthalpy term. A surface term $\sum_g \dot m_g\,\Delta h_g(T_s,T_\infty)$
-would apply the outflow's heating a second time, on top of what the face fluxes carry —
-for an outflow of 10 g·m⁻²·s⁻¹ with $c_{p,g}=1.5$ kJ·kg⁻¹·K⁻¹ heated by 500 K, a
-spurious sink of about 7.5 kW·m⁻². The gas flux reaches the surface balance only
-through the blowing model of a `ConvectiveBC`, which reduces the convective
-coefficient (§12.3.3); it sees the gas-transport fluxes alone, because the fluxes
-relative to a corrected mesh are formed after the thermal boundary kernel. The surface
-energy balance is detailed in §12.
-
-> **Implementation notes.** The interior-face enthalpy flux is formed with the gas
-> mass fluxes in `GasTransportKernel` (`src/Kernels/gas_transport.jl`); the boundary
-> face's, at $T_s$, by `ThermalBoundaryKernel` (`_carried_enthalpy`,
-> `src/Kernels/thermal_boundary.jl`); the relative-flux faces' by `RelativeFluxKernel`
-> (`src/Kernels/relative_flux.jl`). The surface solve and its convention are in
-> `src/BoundaryConditions/surface_balance.jl`.
+---
 
 ### 3.3.5 Temperature or enthalpy: the two energy states
 
@@ -1567,7 +1569,7 @@ The energy row of every cell carries one of two unknowns, chosen by `energy_stat
 - **Temperature form** (`:temperature`, the default). The unknown is $T_i$ and the row
   is $C_i\,dT_i/dt = E_i - \sum_jh_j(T_i)\dot M_{j,i}$. The temperature is directly
   observable, the property laws and the surface Newton solve read it with no
-  inversion, and it is the FDS/Gpyro/ThermaKin tradition for solid-phase pyrolysis.
+  inversion. ThermaKin2Ds and FDS use temperature, while the documented Gpyro method solves condensed enthalpy and then recovers temperature (§7.8).
   Energy is conserved to the integrator's order: the identity
   $dH_i/dt = E_i + \sum_j\omega_{j,i}V_ih_j(T_i)$ holds at every state, but a step's
   change of $H_i$ departs from the integral of its rate by the method's local error.
@@ -1617,181 +1619,39 @@ which the inversion starts.
 
 ## 3.4 Gas-phase mass conservation and the pressure closure
 
-### 3.4.1 The gas species balance and its flux
+For each gas, $\partial_t\xi_j+\nabla\cdot(\mathbf v_s\xi_j)=-\nabla\cdot\mathbf J_j+\omega_j$.
+The skeleton-relative flux uses the material's `LumpedTransfer` or `DustyGas`
+model (Chapter 9). A single face flux is shared by adjacent species rows.
 
-For each gas component the balance is the gas branch of §3.2.3,
-$\partial_t \xi_j + \nabla\cdot(\mathbf v_s\xi_j) = -\nabla\cdot\mathbf J_j + \omega_j$.
-The flux $\mathbf J_j$ closes by one of two constitutive models, which `setup` chooses
-from the material and the mass boundary conditions (§3.5): Darcy–Fick transport when a
-condensed component is permeable, Fickian transport otherwise. In Fickian transport
-the flux is the volume-fraction-gradient form,
+### 3.4.1 The pressure potential
 
-$$
-J_j = -\,\lambda_{\mathrm{face}}\,
-\frac{\xi_R T_R - \xi_L T_L}{T_{\mathrm{face}}\,d_{LR}},
-\qquad T_{\mathrm{face}} = \tfrac12(T_L+T_R),
-$$
+$\phi=1-\sum_{S\cup L}\xi_j/\rho_{i,j}(T)$ and
+$p_j=\xi_jRT/(M_j\phi)$ define the intrinsic pore state. The gas EOS is
+algebraic; gas storage remains in the evolved species inventories. It is
+evaluated even with impermeable boundaries and zero transport coefficients.
+For lumped transfer, $J_j^D=-\Lambda M_j\nabla p_j/(RT)$.
 
-evaluated at the trial temperatures and the cell concentrations $\xi=m/V$, with
-$\lambda_{\mathrm{face}}$ the guarded distance-weighted harmonic mean of the cell
-gas-transfer coefficients (§5.12). The reason the gradient is of $\xi T$, not of
-$\xi$, is the ideal-gas density dependence: for a gas $\rho_g\propto P/T$, so the
-mass-fraction gradient that actually drives Fickian diffusion expands by the product
-rule as
+### 3.4.2 Physical and trial pore states
 
-$$
-\xi_R T_R - \xi_L T_L = T_{\mathrm{face}}(\xi_R-\xi_L) + \xi_{\mathrm{face}}(T_R-T_L),
-$$
-
-cleanly separating ordinary (composition) diffusion from thermal (Soret) diffusion. The
-derivation, the partial-pressure-gradient equivalence, and the boundary fluxes
-are all in §9;
-here the essential point for the governing system is simply that $\mathbf J_j$ is a
-known constitutive function of the state.
-
-> **Implementation notes.** The Fickian gas flux is `gas_flux` in
-> `src/Physics/gas_transport.jl`, applied on every interior face between live cells by
-> `GasTransportKernel` (`src/Kernels/gas_transport.jl`). The face mean
-> $\lambda_{\mathrm{face}}$ is `guarded_harmonic_mean` in
-> `src/Properties/effective_properties.jl`.
-
-### 3.4.2 Algebraic gas-pressure closure: the ideal-gas law in a porous medium
-
-The gas pressure is not an independent evolved variable; it is closed algebraically
-— an **exact equation-of-state evaluation**, not a quasi-steady approximation: the
-gas storage is fully retained in the mass rows of the gas components, and the summed
-gas rows reproduce total gas continuity with no spurious source. The closure is built
-from the gas concentrations, temperature, and porosity by the ideal-gas law applied to
-the **pore volume**. Summing partial pressures over gas components and dividing by the
-porosity $\varphi$ (the gas occupies only the void fraction of the bulk volume),
-
-$$
-\boxed{\;
-P = \frac{N(\xi,T)}{\varphi},
-\qquad
-N(\xi,T) = \sum_{j:\,\mathrm{is\_gas}(j)} \frac{\xi_j R_g T}{M_j} .
-\;}
-$$
-
-Only gas components with $M_j>0$ contribute to $N$ (the `GaseousComponent`
-constructor requires a positive molar mass); solids and liquids are skipped. The
-division by $\varphi$ is physically essential: the same gas mass concentration in a
-nearly-solid cell occupies a much smaller pore volume and therefore exerts a higher
-pressure (confined gas).
-
-The porosity is the **intrinsic-density form** (overload note A8 of §2), one minus the
-skeletal volume fraction,
-
-$$
-\varphi = 1 - \sum_{j\in\{\text{solid},\text{liquid}\}} \frac{\xi_j}{\rho_{i,j}(T)},
-$$
-
-where $\rho_{i,j}$ is the **intrinsic (skeletal, cell-wall) density** — the density of
-the condensed material itself, ignoring pore volume — and gases do not enter the sum.
-When a component is constructed without an explicit intrinsic density, $\rho_{i,j}$
-falls back to its bulk density, and the component contributes no pore volume. (The
-all-phase gas volume fraction $\sum_j v_j^{\text{gas}}$ of §5.1.2 is a different
-quantity; the intrinsic-density form above is the porosity the pressure closure and
-the Carman–Kozeny permeability use.) The formula carries no clamp; the code applies it
-in two ways:
-
-- **In the state mapping**, under Darcy–Fick transport, every cell's porosity is
-  evaluated at the positive-part concentrations $\xi^+$ and the trial temperature and
-  floored smoothly, $\varphi_i = \mathrm{smooth\_floor}\big(1 - \sum\xi^+_j/\rho_{i,j},
-  \,10^{-12}\big)$, so that the pressure stays finite, with a finite derivative, as a
-  cell approaches fully solid; `ideal_gas_pressure` itself divides by
-  $\max(\varphi, 10^{-12})$. The derivatives the Jacobian needs
-  ($\partial\varphi/\partial\xi_j = -1/\rho_{i,j}$ for solid/liquid, $0$ for gas, and
-  the floor's slope) are taken by the colored forward-mode differentiation of the
-  state mapping itself (§5.3.2, §15).
-- **In the integrator's domain test**, the porosity is read unguarded from the raw
-  masses and volume of each live cell, and a proposed state whose porosity leaves
-  $[0,1]$ by more than the skeletal volume of the cell's mass tolerances is rejected
-  (`DomainCheck`, §15.5.4).
-
-Pressure matters only under Darcy–Fick transport. Under Fickian transport the state
-mapping evaluates neither porosity nor pressure; the gas flux is purely diffusive and
-the pressure closure is inert. The pressure derivatives $\partial P/\partial T$ and
-$\partial P/\partial\xi_k$ (the gas direct term plus the porosity-coupling term) are
-obtained by forward-mode differentiation of the closure itself — see §9.6.
-
-> **Implementation notes.** $P = N/\max(\varphi,10^{-12})$ is `ideal_gas_pressure`
-> in `src/Physics/pressure.jl` (porosity floor `_PHI_FLOOR = 1e-12`; gas-only
-> partial-pressure sum `_gas_partial_pressure_sum`). The skeletal volume fraction is
-> `skeletal_volume_fraction` in `src/Properties/mixture_rules.jl`; the state mapping
-> forms $\varphi$, $P$ and the mobility in `_gas_properties!` (`src/States/derived.jl`,
-> `POROSITY_FLOOR = 1e-12`); the domain test is `DomainCheck`
-> (`src/Integration/checks.jl`).
+Skeletal occupancy is independent of the swelling factor. All gas-bearing
+initial and accepted states must have resolved positive pore volume, including
+uncertainty from mass, temperature and geometry. Trial evaluation uses a C¹
+porosity divisor guard of $10^{-12}$, an identity above twice that value.
+`pore_state` centralizes pressure, intrinsic densities and fractions. The
+pressure-aware controller and current gas guard scale are described in §9.10.
 
 ---
 
 ## 3.5 Gas-phase momentum: Darcy's law
 
-### 3.5.1 Darcy velocity and the Darcy–Fick flux
-
-When pressure-driven flow is significant — some condensed component of the material
-has a permeability law that is not identically zero (`has_darcy_flow`), so `setup`
-selects Darcy–Fick transport — the bulk gas velocity is given by **Darcy's law**,
-
-$$
-\boxed{\; v_g = -\frac{\kappa}{\mu}\,\nabla P. \;}
-$$
-
-The state mapping forms the per-cell **mobility** $\kappa/\mu$, with $\kappa$ the
-cell's effective permeability at its smoothly floored porosity (§5.7) and $\mu$ the
-material's pore-gas viscosity at the trial temperature (Sutherland's law for air by
-default), smoothly floored at $\mu_{\mathrm{floor}} = 10^{-12}$ Pa·s (`MU_FLOOR`). A face
-combines the two sides with the guarded distance-weighted harmonic mean (§9.5.2),
-whose guard of $10^{-30}$ m²·Pa⁻¹·s⁻¹ (`MOBILITY_GUARD`) lets the face mobility vanish
-continuously, with a finite derivative, when either side is impermeable (an
-impermeable cell is an infinite series resistance). The pressure gradient is the
-two-point difference across the face:
-
-$$
-v_g = -\,\mathrm{mob}_{\mathrm{face}}\,\frac{P_R-P_L}{d_{LR}} .
-$$
-
-Gases flow *through* the matrix, so only solid/liquid components carry
-permeability; `get_permeability` returns $0$ for a `GaseousComponent`.
-
-The full gas flux under Darcy–Fick transport superposes advection and diffusion,
-
-$$
-J_j^{\mathrm{DF}} = \underbrace{\frac{\xi_j^{\mathrm{upwind}}}{\varphi_{\mathrm{face}}}\, v_g}_{\text{advection}}
-\;+\; \underbrace{\Bigl(-\lambda_{\mathrm{face}}\frac{\xi_R T_R - \xi_L T_L}{T_{\mathrm{face}}\,d_{LR}}\Bigr)}_{\text{diffusion}},
-\qquad
-\xi_j^{\mathrm{upwind}} =
-\begin{cases}\xi_{L,j}, & v_g\ge 0,\\ \xi_{R,j}, & v_g<0,\end{cases}
-$$
-
-a first-order upwind selection for the advected concentration, with
-$\varphi_{\mathrm{face}}$ the arithmetic mean of the two cells' floored porosities; the
-$1/\varphi_{\mathrm{face}}$ converts the bulk concentration to the intrinsic pore
-density that the superficial Darcy velocity transports (§9.4). The upwind side is read
-from the value of $v_g$ alone, so at $v_g = 0$ every derivative pass takes the
-$v_g\ge0$ side and the flux has a kink there. All gas species are carried equally by
-the bulk velocity $v_g$, and they share a single diffusive transfer coefficient —
-there is no per-species molecular-weight scaling (§9.2). At a boundary face the
-pressure condition drives an outward Darcy velocity from the boundary cell's pressure
-and mobility, and only outflow carries gas (the ambient carries none of the tracked
-gases). The permeability and viscosity closures are detailed in §5 and §9.
-
-> **Implementation notes.** The face velocity, the face porosity and the upwind
-> advective flux are `_darcy_face` and `_advective_flux` in `GasTransportKernel`
-> (`src/Kernels/gas_transport.jl`); the boundary-face velocity is
-> `outward_darcy_velocity` (same file). The cell mobility is formed in
-> `_gas_properties!` (`src/States/derived.jl`) from `effective_permeability` and the
-> material's `gas_viscosity` property (§5.9).
-
-### 3.5.2 Where momentum is not solved
-
-There is no separate momentum PDE, no inertial or viscous-stress terms in the gas, and
-no two-temperature treatment. Darcy's law is an algebraic constitutive closure for the
-bulk velocity given the (algebraically closed) pressure field of §3.4. This is the
-standard porous-medium-pyrolysis assumption: pore Reynolds numbers are tiny and the
-flow is creeping. The pressure boundary conditions (Dirichlet/Neumann/Convective) enter
-through the outward Darcy velocity at the boundary faces, not through a pressure
-evolution equation (§12).
+Both gas models include $v_D=-\kappa\nabla P/\mu$ and transport each species
+with its donor intrinsic density $\rho_j^g=\xi_j/\phi$. The donor's own
+porosity and temperature define this density. `κ=0` closes this mechanism;
+wall transfer can still conduct. Material interfaces match total species flux
+through an interface pressure state, including legal wall-only/Darcy-only
+layer pairs. The common interface thermal state also supplies carried
+enthalpy (§9.6). Darcy velocity is superficial and differs from total mass or
+molar flow when wall/molecular transport is present.
 
 ---
 
@@ -1829,15 +1689,22 @@ on a mesh that moves with the skeleton.
 > (`src/Closures/balance.jl`). It is the swelling-weighted per-component form, not
 > $-(\sum_j\omega_j)/\rho$.
 
-### 3.6.2 The ThermaKin/Gpyro single-reference-point deformation source
+### 3.6.2 The reference models' deformation formulations
 
-In ThermaKin and Gpyro the same physics is expressed as a *deformation source* added to
-the transport equations on a fixed (Eulerian) grid that is then re-mapped to a single
-reference point. Schematically, ThermaKin introduces a convective-like term
-$\int (1/\rho)(\partial\rho/\partial t)\,dx$ that displaces material relative to a
-reference coordinate as the density changes; Gpyro tracks a per-cell solid fraction /
-conversion and rescales control-volume thicknesses. Both encode the *same* local strain
-$\theta$ but realize the resulting mesh deformation by re-referencing the grid.
+ThermaKin2Ds writes its continuum balances in stationary coordinates. Its
+deformation term is the complete divergence
+$\partial_x[\xi_j\int_0^x\rho^{-1}\partial_t\rho\,dx']$ (TK Eq. 15),
+with a stationary reference plane. Numerically, element thicknesses change and
+elements are split or combined (TK §3). An Eulerian equation does not imply
+fixed numerical element sizes.
+
+Gpyro's 1D balances instead contain $\bar\rho Y_i\Delta z$ directly and
+determine $\Delta z$ from mass and bulk-density consistency (GP Eqs. 3, 56–57).
+Condensed mass does not cross these deforming cell boundaries. Neither model
+is generally identical to our reaction-only strain closure: their density and
+volume constitutive laws must also be matched (§10.11).
+
+---
 
 ### 3.6.3 Pyrolysis.jl's recasting via ALE mesh motion
 
@@ -1886,8 +1753,8 @@ component's mass, the sensible enthalpy it carries and the conversion-history pa
 crosses the faces at the relative velocity $-c$ (§11.6). The mesh kinematics, the
 geometric conservation law and the correction are derived in full in §11 (The ALE
 Framework) and the strain rate in §10 (Volume Change & Lateral Shrinkage). This chapter
-records only that the deformation physics is *the same* as ThermaKin/Gpyro's; the
-implementation choice is a moving mesh rather than a reference-point source.
+compares deformation strategies; equality of their constitutive volume laws
+must be checked for the material and reaction mechanism (§10.11).
 
 > **Implementation notes.** The balance rows are `BalanceRowClosure` and
 > `closure_rows!` in `src/Closures/balance.jl`; the position rows $dz_n/dt = w_n$ and
@@ -1957,87 +1824,52 @@ first-principles-vs-empirical discussion are in §10.
 
 ## 3.7 Comparison to ThermaKin2Ds, Gpyro, and FDS
 
-Pyrolysis.jl is, by design, a synthesis of the three established condensed-phase
-pyrolysis solvers. This section maps their governing forms onto ours and contrasts the
-modeling choices. On first use we map each code's notation to the unified symbols of §2:
-ThermaKin's stoichiometric coefficient $\theta_i^j \to \nu_{r,j}$; Gpyro/FDS
-pre-exponential $Z \to A_r$, permeability $K\to\kappa$, kinematic viscosity
-$\nu\to\mu/\rho_g$, volumetric reaction rate $\dot\omega''' \to r$, volume fraction
-$X_\alpha\to v_j$; FDS solid absorption $\kappa_s\to\alpha$. **Heat-of-reaction sign:**
-ThermaKin publishes $h>0=$ exothermic; Gpyro and FDS publish $h>0=$ endothermic, as
-Pyrolysis.jl stores it (§6.9.2). Pyrolysis.jl carries the minus sign in
-$Q_{\mathrm{rxn}}=-\sum_r h_r r_r$, so a ThermaKin exothermic $h_{\text{pub}}>0$
-corresponds to our $h_r<0$, while Gpyro and FDS heats are entered as published.
+Source scope is given in §1.6.5. The following mappings are conditional on
+matching material definitions, boundary conditions and reaction conventions.
 
 ### 3.7.1 Species / mass conservation
 
-| Quantity | Pyrolysis.jl | ThermaKin2Ds | Gpyro | FDS solid phase |
+| Quantity | Pyrolysis.jl | ThermaKin2Ds | Gpyro 1D | FDS standard solid model |
 |---|---|---|---|---|
-| Species state | cell masses $m_{j,i}$; mass concentration $\xi_j = m/V$ [kg·m⁻³] the constitutive variable | mass concentration | $\bar\rho Y_i$ (mass per bulk volume) | $\rho_{s,\alpha}$ component densities |
-| Solid transport | none (in place; carried by the mesh, crossing faces only at a correction's relative velocity) | none (in-place) | none; control-volume $\Delta z$ rescaled | none; layer thicknesses adjusted |
-| Gas transport | face fluxes of $\mathbf J_j$ (Fickian or Darcy–Fick) | $-\nabla\cdot\mathbf J_j$, $J=-\rho_g\lambda\,\partial(\xi_g/\rho_g)/\partial x$ | Darcian $\dot m'' = -(K/\nu)(\partial P/\partial z - g\rho_g)$ + pressure-evolution eq. | lumped gas release |
-| Reaction source | $\sum_r\nu_{r,j}r_r$, single reactant, $\sum_{\text{prod}}\nu=1$ | $\sum_i\theta_i^j r_i$ (bimolecular $\xi_{\mathrm{C1}}\xi_{\mathrm{C2}}$ allowed) | $n$-th order in conversion, O₂ sensitivity | $\rho^n\,Y_{\mathrm O_2}^{n}$ |
+| Species representation | cell masses; $\xi_j=m_j/V$ | continuum concentrations; numerical component masses | condensed mass fractions and mass per area; separate gas inventories | condensed component densities |
+| Condensed motion | skeleton-following mesh; relative flux if corrected | deformation term and changing elements | no condensed flux through deforming cells | thickness update and remapping |
+| Gas transport | lumped superficial transfer or dusty-gas friction, with optional Darcy | volume-fraction-gradient law | Darcy plus gas mass-fraction diffusion | instantaneous release to CFD gas |
 
-All four share the central idea that condensed components are immobile and only gas
-fluxes. ThermaKin's gas flux $J=-\rho_g\lambda\,\partial(\xi_g/\rho_g)/\partial x$ is the
-mass-fraction-gradient form; Pyrolysis.jl's $\xi T$-gradient form (§3.4) is the same
-physics written so the $\rho_g\propto P/T$ density dependence appears explicitly,
-splitting ordinary and thermal diffusion. Gpyro additionally evolves the pressure field
-through a gas-mass-balance PDE and uses Darcian mass flux; Pyrolysis.jl closes pressure
-*algebraically* ($P=N/\varphi$) and uses Darcy's law only for the velocity. ThermaKin
-supports bimolecular reactions; Pyrolysis.jl enforces a single reactant (§6).
+TK Eq. 13 uses a **volume-fraction**, not a mass-fraction, gradient.
+Its reduction to $J=-(\lambda/T)\partial_x(\xi T)$ requires component
+reference density proportional to $1/T$ at fixed defining pressure.
+GP Eq. 60 uses a different mass-fraction diffusion law (§9.10).
 
 ### 3.7.2 Energy equation
 
-| Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro | FDS |
-|---|---|---|---|---|
-| Primary unknown | temperature $T$ (default) or the sensible-enthalpy inventory $H$ | $T$ | $T$ | $T$ |
-| Storage coefficient | all phases $\sum_j\xi_j c_{p,j}$ | all phases $\sum_j\xi_j c_{p,j}$ (Eq. 17) | matrix by default; all phases with `FULL_QSG` | matrix (no in-depth gas) |
-| Gas sensible transport | face fluxes $\sum_g J_g h_g(T_f)$; temperature-form reading $-\sum_g c_{p,g}\mathbf J_g\!\cdot\!\nabla T$ | convective term $c_g(\mathbf J_g\!\cdot\!\nabla T)$ | $\dot m'' c_{pg}\,\partial T/\partial z$ (thermal-equilibrium form) | boundary outflow |
-| Conduction | Fourier, harmonic-mean face $k$ | Fourier | Fourier, Patankar harmonic interface | 1D Fourier |
-| Reaction heat | $-\sum_r h_r r_r$ ($h>0$ endo) | $\sum h_i r_i$ ($h>0$ exo) | $-\sum_k\dot\omega'''_k\Delta H_k$ ($\Delta H>0$ endo) | $-\sum r_{\alpha\beta}H_{r,\alpha\beta}$ ($H_r>0$ endo) |
+ThermaKin2Ds stores all components at one temperature (TK Eq. 17).
+Pyrolysis.jl's temperature equation has the corresponding storage and gas
+temperature-advection terms in 1D. Full equivalence also requires matching
+radiation, deformation, property laws and heat-of-reaction basis.
 
-Pyrolysis.jl's energy equation is ThermaKin Eq. 17 term for term: the all-phase
-storage coefficient, the convective term $c_g(\mathbf J_g\cdot\nabla T)$ (the
-temperature-form reading of our face enthalpy flux), and the deformation term, which
-the ALE mesh frame absorbs (§3.3.2, §11.2.2). Gpyro's thermal-equilibrium form drops the
-gas storage $\rho_g\bar\psi c_{pg}\,\partial T/\partial t$ by default and restores it
-with `FULL_QSG`, which makes its Eq. 65 the same equation; FDS carries no in-depth gas,
-so the gas storage is identically zero there. The one-dimensional Cartesian energy
-equation is otherwise identical in all four codes; ThermaKin additionally supports a
-cylindrical (radial) Laplacian $\frac1r\partial_r(rk\partial_r T)$. A Pyrolysis.jl line
-may likewise be cylindrical or spherical (its mesh's `coordinates`, §13), but a sample's
-lateral shrinkage is represented only through the scalar area $A(t)$ of a planar line,
-not by resolving a radial coordinate.
+Gpyro solves condensed sensible enthalpy, recovers temperature, and optionally
+solves a separate gas energy equation (GP Eqs. 61, 70 and §6.8).
+`FULL_QSG` restores gas storage **and gas conduction** in thermal equilibrium
+(Eq. 65), so keeping gas heat capacity alone does not reproduce that option.
+FDS has no pore-gas inventory but retains reaction and gas/solid enthalpy
+exchange accounting (§7.8.4).
 
 ### 3.7.3 Control-volume conservation forms
 
-Gpyro writes its discretization as control-volume balances of $\bar\rho\,\Delta z$ (bulk
-mass per area), $\bar\rho Y_i\,\Delta z$ (per-species mass), gas mass, and energy, with
-$\Delta z$ itself a state (variable control-volume thickness); its gas balance (Eq. 58)
-is written on those deforming volumes with only the Darcy flux $\dot m''$ crossing
-their faces. Pyrolysis.jl's ALE mesh motion (§3.6.3) is the moving-mesh analog of the
-same frame: its unknowns are the cell masses (Gpyro's $\bar\rho Y_i\,\Delta z$ times the
-area), the nodes move so that $V_i = A|z_{i+1}-z_i|$ tracks the strain, every component
-including the pore gas rides the cell, and the cell volumes computed from the node
-positions make the volume bookkeeping exact (§11). ThermaKin's Eqs. 15 and 17 apply one
-deformation term to every component and to the energy equation — again the same frame.
-FDS adjusts solid-layer thicknesses according to a max/sum density-ratio swell/shrink
-rule (§10). All three strategies enforce the same physical volume change; they differ
-in *bookkeeping*.
+Gpyro's $\bar\rho Y_i\Delta z$ times a fixed area corresponds to a
+condensed species inventory, not to the total solid-plus-gas mixture density.
+All four methods account for changing material inventory and geometry in
+different ways. Those shared conservation requirements do not imply identical
+volume-change constitutive laws (§10.11) or identical remapping errors.
 
 ### 3.7.4 Reaction kinetics
 
-FDS recovers Arrhenius parameters from a TGA reference temperature and peak rate
-($A$, $E$ from $T_{\mathrm{peak}}$ and $r_{\mathrm{peak}}$) and uses rate laws of the form
-$\rho^n Y_{\mathrm O_2}^{n} T^{n}$; Gpyro uses $n$-th order in conversion $\alpha_{\mathrm{conv}}$
-with optional oxygen sensitivity $g(Y_{\mathrm O_2})$ and critical-temperature Heaviside
-gates; ThermaKin permits bimolecular products $\xi_{\mathrm{C1}}\xi_{\mathrm{C2}}$.
-Pyrolysis.jl uses the mass-concentration Arrhenius law $r = A\,e^{-E/R_gT}\prod_j\xi_j^{n_{r,j}}$
-with smooth `tanh` temperature gates and a one-sided depletion limiter (a C¹ factor
-that is exactly zero at and below zero concentration), restricted to a single reactant
-(§6). These are *kinetics* details; for the governing system the only relevant fact is
-that $r_r$ and $\nu_{r,j}$ are known functions of $(\xi,T)$.
+ThermaKin2Ds permits two concentration factors. Gpyro's heterogeneous rates
+use conversion history and optional local oxygen dependence. FDS uses a
+reactant density power with optional oxygen and temperature powers.
+Pyrolysis.jl uses one reactant concentration power, smooth temperature gates
+and a depletion limiter. Only the matched special cases of §6.9 have the same
+unregularized rate law; there is no general automatic parameter conversion.
 
 ---
 
@@ -2059,12 +1891,12 @@ This is the contract that makes the residual a *pure function* of the state.
 | Species source $\omega_j$ | stoichiometry | $\sum_r\nu_{r,j}r_r$ | §6 |
 | Reaction heat $Q_{\mathrm{rxn}}$ | enthalpy of reaction at the local temperature | $-\sum_r h_r(T,\xi)\,r_r$ | §6 |
 | Radiation source $Q_{\mathrm{rad}}$ | radiation model | surface balance / Beer–Lambert face intensities | §8 |
-| Gas enthalpy flux | face flux | $\sum_g J_{g,f}h_g(T_f)$, $T_f$ distance-weighted or $T_s$ | §7 |
-| Gas diffusive flux $\mathbf J_j^{\mathrm{diff}}$ | Fick (volume-fraction gradient) | $-\lambda_{\mathrm{face}}(\xi_R T_R-\xi_L T_L)/(T_{\mathrm{face}}d_{LR})$ | §9 |
-| Gas advective flux $\mathbf J_j^{\mathrm{adv}}$ | upwind intrinsic density $\times$ Darcy | $(\xi_j^{\mathrm{upwind}}/\varphi_{\mathrm{face}})\,v_g$ | §9 |
+| Gas enthalpy flux | conservative face flux | interior face-temperature closure; outward surface enthalpy and specified incoming reservoir enthalpy | §7, §12 |
+| Wall and molecular gas flux | lumped transfer or dusty-gas friction | partial-pressure driving force, one consistent face pressure, total-flux interface matching | §9 |
+| Gas advective flux | donor pore density × Darcy velocity | $p_{j,up}M_jv/(RT_{up})$ in each half-cell | §9 |
 | Pressure $P$ | ideal gas in pores | $N(\xi,T)/\varphi$ | §9 |
 | Porosity $\varphi$ | intrinsic density | $1-\sum_{S/L}\xi_j/\rho_{i,j}$, smoothly floored at $10^{-12}$ where divided by | §5 |
-| Gas velocity $v_g$ | Darcy | $-(\kappa/\mu)\nabla P$, guarded harmonic mobility $\kappa/\mu$, material $\mu(T)$ smoothly floored | §9 |
+| Gas velocity $v_g$ | Darcy | $-(\kappa/\mu)\nabla P$, half-cell mobility $\kappa/\mu$, interface pressure from total species-flux continuity | §9 |
 | Effective $k_{\mathrm{eff}},\lambda_{\mathrm{eff}},\kappa_{\mathrm{eff}},\varepsilon_{\mathrm{eff}},a_{\mathrm{eff}},\alpha_{\mathrm{eff}}$ | mixing rules | parallel/series/weighted/Bruggeman/Carman–Kozeny | §5 |
 | Volume-change rate $\theta$ | swelling continuity | $\sum_j\gamma_j\omega_j/\rho_j(T)$, reaction sources only | §10 |
 | Node velocity $w$ | balance rows | $0=A_{i+1}(w-c)_{i+1}-A_i(w-c)_i-(\theta_i-\theta_A)V_i$, $0 = w_1$ | §11.3.2, (11.9)–(11.10) |
@@ -2096,11 +1928,12 @@ regimes. The most important, with the section that quantifies or discusses each:
 - **One temperature.** Matrix and in-pore gas are assumed in local thermal equilibrium;
   there is no two-temperature gas energy equation. This breaks for very fast, hot gas
   throughput, where the pore gas does not equilibrate with the walls within a cell.
-- **Algebraic (not evolved) pressure.** Pressure is closed instantaneously by
-  $P=N/\varphi$ (§3.4.2), with $\varphi$ smoothly floored at $10^{-12}$; there is no
-  transient gas-mass-balance pressure PDE as in Gpyro. Acoustic and fast
-  compressibility transients are not represented.
-- **First-order upwind advection** for the Darcy–Fick advective flux (§3.5.1); no TVD or
+- **Darcy momentum closure.** Pressure is evaluated from the evolving gas
+  masses through $P=N/\varphi$ (§3.4.2), with a porosity floor. Compressible
+  gas storage is retained. A separate pressure-evolution equation, as in
+  Gpyro, is an alternative choice of dependent variable; neither Darcy model
+  resolves acoustic momentum waves (§9.10).
+- **First-order upwind advection** for the gas advective flux (§3.5.1); no TVD or
   MUSCL limiter on the gas advection. The scheme is monotone but numerically
   diffusive where the cell Péclet number exceeds one, and its upwind switch is a kink
   in the residual (§17.7.6).
@@ -2198,72 +2031,23 @@ compiler folds it to a constant. The runtime `Phase` enum (`SOLID=1`,
 > skeleton, where an equidistribution correction moves the mesh relative to it
 > (`RelativeFluxKernel`, §11.6).
 
-### 4.1.2 The three component types
+### 4.1.2 Component storage
 
-**`SolidComponent`** is the matrix-forming condensed phase. It carries seven
-property-function fields, an optional constant surface absorptivity, and two
-scalar (`Float64`) fields:
+`SolidComponent` and `LiquidComponent` store bulk and intrinsic density,
+heat capacity, conductivity, optional superficial matrix transfer,
+permeability, emissivity, incident absorptivity, absorption and swelling.
+Property laws have concrete type parameters. Participating lumped matrices
+require explicit transfer; zero-`γ` condensed phases cannot have nonzero
+transfer or permeability. Liquid defaults to zero swelling participation.
 
-```julia
-struct SolidComponent{Pρ,Pc,Pk,Pλ,Pκ,Pε,Pa,Pρi} <: AbstractComponent
-    name::Symbol
-    density::Pρ                # bulk density ρ_j           [kg/m³]
-    heat_capacity::Pc          # c_{p,j}(T)                 [J/(kg·K)]
-    thermal_conductivity::Pk   # k_j(T)                     [W/(m·K)]
-    gas_transfer_coeff::Pλ     # λ_j(T)                     [m²/s]
-    permeability::Pκ           # κ_j(T)                     [m²]
-    emissivity::Pε             # ε_j(T)                     [-]
-    surface_absorptivity::Pa   # a_j, Nothing = Kirchhoff   [-]
-    absorption_coeff::Float64  # α_j (mass basis)           [m²/kg]
-    swelling_factor::Float64   # γ_j                        [-]
-    intrinsic_density::Pρi     # skeletal density ρ_{i,j}   [kg/m³]
-end
-```
+`GaseousComponent` stores molar mass, reference-density law, heat capacity,
+conductivity, emissivity, absorption and swelling. It has no matrix transfer,
+permeability or intrinsic-density field. Its local intrinsic pore density is
+derived from the conserved inventory and pore volume, separately from its
+reference-density law. Concrete property types preserve specialization through
+the heterogeneous component tuple.
 
-The seven property fields are each parameterized by their own type (`Pρ`, `Pc`, …),
-so a component built with a constant conductivity and a polynomial heat capacity
-is a *distinct concrete type* from one built with two constants. This preserves
-type stability and allocation-free evaluation through the heterogeneous component
-tuple. The emissivity `ε_j(T)` is a property function like `k_j(T)` (the `ε`
-keyword accepts the same forms) and is evaluated at the cell's trial temperature
-by the mixing rule (§5.8). `surface_absorptivity` is the optional constant absorptivity
-`a_j` for *incident* (heater-spectrum) radiation, `Pa <: Union{Nothing,Float64}`:
-`Nothing` selects Kirchhoff's law `a_j = ε_j(T)` at the type level, so the
-absorptivity mixture (§5.8.2) is a static sum. The two scalar fields (`α_j`, `γ_j`)
-are stored as plain `Float64` because they are not given temperature dependence
-in the current model.
-
-**`LiquidComponent`** has the *identical* field layout to `SolidComponent`
-(bulk and intrinsic density, the five property functions, the optional surface
-absorptivity, the two scalars). It
-is the matrix-forming condensed phase used for moisture / liquid water in
-hygroscopic materials. Its convenience constructor differs only in defaults
-(see §4.1.5): $\lambda$ defaults to $2\times10^{-5}$ m²·s⁻¹, $\varepsilon$ to
-0.95 (condensed liquids are strong emitters — water ≈ 0.96),
-$\gamma$ to 0 (volumeless bound moisture, ThermaKin `L SWELLING: 0`), and
-$\kappa$ to 0 (a liquid normally fills pore space and blocks gas flow).
-
-**`GaseousComponent`** represents species that flow *through* the matrix:
-
-```julia
-struct GaseousComponent{Pρ,Pc,Pk,Pλ,Pε} <: AbstractComponent
-    name::Symbol
-    molar_mass::Float64        # M_j                        [kg/mol]
-    density::Pρ                # ρ_g(T), default ideal gas  [kg/m³]
-    heat_capacity::Pc
-    thermal_conductivity::Pk
-    gas_transfer_coeff::Pλ
-    emissivity::Pε             # ε_j(T)
-    absorption_coeff::Float64
-    swelling_factor::Float64
-end
-```
-
-A gas has **no permeability field, no intrinsic density, and no surface
-absorptivity** (`get_absorptivity` always returns its `ε_j(T)`) — it is not part
-of the matrix skeleton. It carries instead a `molar_mass` $M_j$, used by the ideal-
-gas density law (§4.3), the ideal-gas pressure closure (Chapter 9), and the
-Chapman–Enskog diffusivity estimate (§5.10).
+---
 
 ### 4.1.3 Compile-time phase accessors
 
@@ -2301,7 +2085,7 @@ between two densities (overload note A7 of Chapter 2):
 
 - **Bulk (pure-phase) density** $\rho_j$ [kg·m⁻³] — the mass of pure phase $j$ per
   unit of the *bulk volume it would occupy in the mixture*. This is the density
-  used by every mixing rule, by the mixture-density formula, and by the volume-
+  used to form thermal and matrix transport weights and by the volume-
   change kernels (Chapter 10). Field `density`.
 
 - **Intrinsic / skeletal density** $\rho_{i,j}$ [kg·m⁻³] — the density of the
@@ -2351,29 +2135,18 @@ the mass simply enter/leave the existing pore space?
 - $\gamma_j \in (0,1)$: partial contribution, the intumescent case, where evolved
   gas creates new bulk volume.
 
-$\gamma_j$ enters two places: the mixture-density formula (§4.2.2, where a gas with
-$\gamma_j=0$ contributes zero specific volume) and the volumetric strain rate
-$\theta = \sum_j \gamma_j \rho_j^{-1}\,\mathrm{d}\xi_j/\mathrm{d}t$ that drives the
-ALE mesh motion (Chapter 10). It also weights the **matrix volume fractions**
-used for conductivity/emissivity (Chapter 5, §5.1): every component carries
-weight $\gamma_j\,\xi_j/\rho_j$ there, so a $\gamma_j = 0$ component (the
-canonical gas) carries no weight in the matrix radiative surface.
+$\gamma_j$ weights the volumetric strain rate
+$\theta = \sum_j\gamma_j\rho_j^{-1}\mathrm{d}\xi_j/\mathrm{d}t$ (Chapter 10)
+and the thermal matrix volume fractions. Transport weights use the same bulk
+occupancy but exclude gases explicitly. Every condensed component contributes
+to skeletal pore occupancy even when its $\gamma_j$ is zero (§9).
 
-> **Why the cap $\gamma_j \le 1$ is a model decision, not a missing feature.**
-> Construction rejects $\gamma_j > 1$ (`_validate_swelling_factor`) because
-> the *same* $\gamma$ weight feeds three mixing rules with volume-fraction
-> semantics — the strain kernel, the mixture density, and the $k/\varepsilon$
-> matrix volume fractions — and a weight above 1 corrupts all three (volume
-> fractions would not sum consistently). Expansion beyond the reactant's
-> volume is already expressible the physical way: give the product a **low
-> bulk density** ($V_f/V_0 = \sum_j y_j\gamma_j\rho_A/\rho_j$ — the swelling
-> permutation of the V-CPL-03 verification case, a reactant of
-> $\rho_A = 1000$ kg·m⁻³ converted to a product of half its bulk density,
-> ends at $V_f/V_0 = 2$), with $\gamma \in
-> (0,1]$ tuning how much of that specific volume the matrix keeps. A
-> *decoupled* intumescent expansion factor (strain contribution independent
-> of the mixing weight) would be a separate modeling design; no use case
-> demands it.
+The supported range $0\le\gamma_j\le1$ is a constitutive restriction:
+$\gamma_j$ represents the retained fraction of the declared bulk occupancy.
+Normalized property weights still sum to one for any positive denominator;
+normalization alone does not establish this range. Expansion can be represented
+by a lower product bulk density: a complete conversion with unit swelling
+factors gives $V_f/V_0=\sum_jy_j\rho_A/\rho_j$.
 
 ---
 
@@ -2390,7 +2163,7 @@ consumed downstream:
 | `intrinsic_density` | $\rho_{i,j}$ | kg·m⁻³ | S, L | porosity $\varphi$ (§4.2.3, Eq. 4.2) |
 | `heat_capacity` | $c_{p,j}(T)$ | J·kg⁻¹·K⁻¹ | all | heat-capacity sum $C_i$ and sensible enthalpies $h_j(T)$ (§4.4.10): energy rows, gas enthalpy fluxes, deactivation transfer, energy ledger (Ch. 5, 7, 14, 16) |
 | `thermal_conductivity` | $k_j(T)$ | W·m⁻¹·K⁻¹ | all | $k_\mathrm{eff}$ (Ch. 5), Fourier flux (Ch. 7) |
-| `gas_transfer_coeff` | $\lambda_j(T)$ | m²·s⁻¹ | all | $\lambda_\mathrm{eff}$ (Ch. 5), gas diffusion (Ch. 9) |
+| `gas_transfer_coeff` | $\lambda_j(T)$ | m²·s⁻¹ | S, L | $\lambda_\mathrm{eff}$ (Ch. 5), gas diffusion (Ch. 9) |
 | `permeability` | $\kappa_j(T)$ | m² | S, L | $\kappa_\mathrm{eff}$ (Ch. 5), Darcy velocity (Ch. 9) |
 | `emissivity` | $\varepsilon_j(T)$ | – | all | $\varepsilon_\mathrm{eff}$ (Ch. 5), radiative BC (Ch. 12) |
 | `surface_absorptivity` | $a_j$ (or `nothing` ⇒ $\varepsilon_j(T)$) | – | S, L | $a_\mathrm{eff}$ (§5.8.2), incident-flux BC (Ch. 12), Beer–Lambert incident intensity (Ch. 8) |
@@ -2401,130 +2174,42 @@ consumed downstream:
 Note that $\alpha_j$ is a **mass-basis** absorption coefficient [m²·kg⁻¹]; it is
 multiplied by concentration to give the volumetric (extinction) absorption
 coefficient $\alpha_\mathrm{eff}=\sum_j\xi_j\alpha_j$ [m⁻¹] used by Beer–Lambert
-radiation (Chapter 8), at the positive-part concentrations. A solid usually carries a nonzero $\lambda_j$
-in practice (e.g. $2\times10^{-5}$ m²·s⁻¹; the `SolidComponent` default is 0, and
-`validate_problem` warns when a gas-producing Fickian material leaves it there,
-§5.6): although solids do not themselves
-diffuse, their $\lambda_j$ contributes to the *mixture* gas-transfer coefficient
-through the volume-weighted mixing rule, matching the ThermaKin convention.
+radiation (Chapter 8), at the positive-part concentrations. Condensed
+superficial transfer is explicit under the lumped model and uses condensed
+matrix weights. Its value is constitutive data, independent of gas loading.
 
-### 4.2.2 Mixture density with per-component swelling
+### 4.2.2 Bulk density, matrix occupancy and gas loading
 
-The mixture density combines per-component bulk densities through specific
-volumes (volume per unit mass), every component weighted by its own swelling
-factor (the universal γ semantics shared with θ and the mixing-rule volume
-fractions, §5.1.3):
-
-$$
-\frac{1}{\rho}
-= \sum_{j} \gamma_j\,\frac{Y_j}{\rho_j},
-\qquad Y_j = \frac{\xi_j}{\rho_\mathrm{tot}},\quad
-\rho_\mathrm{tot}=\sum_k \xi_k.
-\tag{4.3}
-$$
-
-Here $Y_j$ is the mass fraction. A non-swelling gas ($\gamma_j=0$) contributes
-**zero** specific volume — its mass is "free" in the pore space and does not
-change the bulk volume — whereas a swelling gas ($\gamma_j=1$) contributes its
-full specific volume like a solid. This is the discrete realization of the
-swelling semantics of §4.1.5.
-
-> **Important — correction to a common gloss.** The swelling weight in Eq. (4.3)
-> is applied **per component**, with each component's *own* `swelling_factor` —
-> not an averaged $\gamma_\mathrm{avg}$ multiplying the gas sum, and not gases
-> only. The source evaluates `γ_j · Y_j/ρ_j` term by term for every component
-> (a γ = 0 term contributes nothing).
-
-> **Implementation note.** `mixture_density` and the inline, allocation-free
-> kernel `_specific_vol_with_swelling_direct`,
-> `src/Properties/mixture_rules.jl`. The
-> inline form computes $Y_j=\xi_j\,/\rho_\mathrm{tot}$ on the fly to avoid
-> allocating an intermediate mass-fraction tuple. Degeneracy guards: if
-> $\rho_\mathrm{tot}<10^{-20}$ or the accumulated specific volume
-> $<10^{-20}$, the function returns `0.0`.
-
-### 4.2.3 Porosity and its single use
-
-Porosity $\varphi$ (Eq. 4.2) is the void fraction of the bulk *not* occupied by the
-solid/liquid skeletal frame. It is computed from **intrinsic** densities as one
-minus the skeletal volume fraction, $\varphi = 1-\sum_{j\in\{S,L\}}\xi_j/\rho_{i,j}$,
-with no clamp. Its derivatives are exactly
-
-$$
-\frac{\partial \varphi}{\partial \xi_j} =
-\begin{cases}
--\,1/\rho_{i,j} & j\in\{S,L\},\\
-0 & j\in G.
-\end{cases}
-\tag{4.4}
-$$
-
-A gas does not enter $\varphi$ because it occupies the void that the solid frame
-leaves; adding gas mass does not displace skeletal material. Porosity feeds (i)
-the ideal-gas pressure closure $P=N(\xi,T)/\varphi$ (Chapter 9) and (ii) the
-Carman–Kozeny permeability closure (Chapter 5, §5.7), both through the state
-mapping, which under Darcy–Fick transport evaluates it at the positive-part
-concentrations and the trial temperature and floors it smoothly at $10^{-12}$
-(the floor's slope is part of the derivative the colored Jacobian takes); and
-(iii) the integrator's domain test, which reads it unguarded from the raw masses
-and volume of each live cell (§3.4.2). The all-phase gas volume fraction
-$\sum_{j\in G} v_j$ is a different quantity; the **intrinsic-density form
-Eq. (4.2) is canonical**, the complement of what `skeletal_volume_fraction`
-computes (overload note A8 of Chapter 2).
-
-> **Implementation note.** The skeletal volume fraction is
-> `skeletal_volume_fraction` → `_skeletal_volume`, in
-> `src/Properties/mixture_rules.jl`; a component contributes
-> $\xi_j/\rho_{i,j}$ only when `is_solid(c) || is_liquid(c)` *and*
-> $\rho_{i,j}>0$. The state mapping forms the floored porosity in
-> `_gas_properties!` (`src/States/derived.jl`); the domain test is `DomainCheck`
-> (`src/Integration/checks.jl`). Full development is in Chapter 5.
+The bulk mixture mass density is $\rho_{tot}=\sum_j\xi_j$. Matrix transport
+uses $q_j=\gamma_j\xi_j/\rho_{b,j}$ only for condensed components and normalizes
+by their sum. Gas loading cannot alter these weights, even if gas has nonzero
+`γ`. Thermal mixing and the volume-change law retain their own stated bases.
+Skeletal occupancy is a separate sum using intrinsic densities and no `γ`.
 
 ---
 
-## 4.3 Ideal-gas density and the gaseous-component default
+### 4.2.3 Pore volume
 
-By default a `GaseousComponent` constructed via the convenience constructor is
-given a density obeying the ideal-gas law at the **reference pressure**:
+$\phi=1-\sum_{S\cup L}\xi_j/\rho_{i,j}(T)$ enters the pore EOS, intrinsic
+densities, dusty-gas geometry and physical admissibility. For condensed
+species, $\partial\phi/\partial\xi_j=-1/\rho_{i,j}$; for gas this derivative
+is zero. Temperature dependence of skeletal density is differentiated too.
+A condensed component with `γ=0` still occupies this skeletal volume.
+Chapter 9 specifies the common trial extension and accepted-state margin.
 
-$$
-\rho_g(T) = \frac{P_\mathrm{ref}\,M_j}{R_g\,T},
-\tag{4.5}
-$$
+---
 
-with $P_\mathrm{ref}=101325$ Pa, $R_g=8.31446261815324$ J·mol⁻¹·K⁻¹, and $M_j$
-the gas molar mass. The constructor wraps this in a `CallableProperty`:
+## 4.3 Gas reference density and the local pore EOS
 
-```julia
-ρ_func = CallableProperty(T -> P_REF * M_float / (R_GAS * T))
-```
+The gas component's reference density is
+$\rho_{ref}(T)=P_{ref}M_j/(RT)$, with $P_{ref}=101325$ Pa. It supplies the
+component's thermal-volume and swelling-property law. It is independent of
+the local pressure. The actual pore density is $\rho_j^g=\xi_j/\phi$ and the
+partial pressure is $p_j=\rho_j^gRT/M_j$ (Chapter 9).
 
-Two modeling points deserve emphasis:
-
-1. **The density used for mixing/volume is at $P_\mathrm{ref}$, not the local
-   pressure $P$.** The component's `density(T)` is consulted for volume fractions,
-   specific volumes, and the mixture density. The *local* pressure-dependent gas
-   density (which matters for the pore-pressure closure $P=N/\varphi$) is handled
-   separately by the ideal-gas formula of the pressure closure (Chapter 9), not by
-   the component's `density` field. The component-level density at $P_\mathrm{ref}$
-   is what enters the **specific volume** in mixing rules. In the
-   swelling-weighted bases (mixture density, conductivity/emissivity weights)
-   the gas's contribution is usually gated to zero by $\gamma_j=0$ (Eq. 4.3);
-   in the **all-phase** basis used for λ mixing (§5.6) the gas volume is
-   present regardless of γ and is over-weighted by ~$P/P_\mathrm{ref}$ in a
-   pressurized cell — acceptable at the ≤ atm-scale overpressures of the
-   validated cases. The pressure closure $P=N/\varphi$ and the porosity are
-   unaffected (they never use this density).
-
-2. **The user may override the gas density** by passing any property function
-   (constant, polynomial, table, callable) — Eq. (4.5) is merely the default
-   produced when one constructs a gas with `GaseousComponent(:name; M=…, c=…, k=…,
-   λ=…)`.
-
-> **Implementation note.** `GaseousComponent(name; M, c, k, λ, ε=0.0, α=0.0,
-> γ=0.0)` constructor, `src/Materials/components.jl`. Defaults for a gas are
-> $\varepsilon=0$, $\alpha=0$, $\gamma=0$ (a gas escapes without swelling and is
-> not part of the radiating surface).
+Gas reference density and gas swelling never enter condensed matrix transport
+weights. `GaseousComponent(name;M,c,k,ε=0,α=0,γ=0)` declares caloric and thermal
+properties; matrix transfer belongs to the gas model and condensed components.
 
 ---
 
@@ -2547,7 +2232,7 @@ any physical state; outside it the law sees the nearest bracket end. The kernels
 do not hand a law the raw cell temperature: they pass the **trial temperature**
 $T_{\mathrm{trial}}$, the cell temperature smoothly clamped into the same bracket
 with cubic joins 1 K wide (`trial_temperature`,
-`src/States/guards.jl`), so the composite $p(T_{\mathrm{trial}}(T))$ is C¹ in the
+`src/Materials/guards.jl`), so the composite $p(T_{\mathrm{trial}}(T))$ is C¹ in the
 state. A trial state with a nonphysical (even negative) temperature therefore
 gives a finite residual with a finite derivative, not a `DomainError` out of a
 fractional power or a fitted polynomial's far extrapolation, and the
@@ -3083,87 +2768,52 @@ per cell per step.
 
 ## 4.8 Comparison to ThermaKin2Ds, Gpyro, and FDS
 
-Pyrolysis.jl's material model is a deliberate synthesis of the three reference
-condensed-phase pyrolysis codes. We map their notation to ours on first use.
-
 ### 4.8.1 Component / species representation
 
-**ThermaKin2Ds** represents a material as a set of *components* with mass
-concentrations as the primary state — the convention Pyrolysis.jl adopts wholesale
-($\xi_j$ in kg·m⁻³ is the species state, not mass fraction). ThermaKin distinguishes
-condensed from gaseous components and applies the *solid-volume-fraction*
-convention to conductivity and emissivity — exactly Pyrolysis.jl's
-`solid_volume_fractions` (Chapter 5, §5.1), which excludes non-swelling gases
-(ThermaKin: "when $\gamma=0$, gaseous components do not contribute to the thermal
-conductivity"). ThermaKin's stoichiometric coefficient $\theta_i^{\,j}$ maps to our
-$\nu_{i,j}$ (overload note A2).
+ThermaKin2Ds distinguishes solid, liquid and gas components. Its numerical
+states are component masses and temperature (TK §3), as opposed to its
+continuum concentration notation. Pyrolysis.jl likewise carries masses, with
+temperature or enthalpy as its energy state.
 
-**Gpyro** uses a control-volume formulation with $\bar\rho\,\Delta z$ (mass per
-unit area) and mass fractions $Y_i$ of *condensed-phase species*; its gas species
-are tracked separately. Gpyro's volume-fraction property averaging $X_\alpha$
-maps to our $v_j$, and its power-law temperature dependence of properties is
-representable here as a `PolynomialProperty` or `CallableProperty`. Gpyro's
-solid-fraction $\mathrm{SF}_k$ / conversion $\chi_k$ mechanism for selecting
-non-charring / charring / intumescent / shrinkage behavior corresponds to our
-swelling-factor $\gamma_j$ plus the lateral-shrinkage law (Chapter 10).
-
-**FDS** (solid phase) uses a layered material model with per-material density,
-$c_p$, $k$, and emissivity, plus Arrhenius reaction parameters; its
-pre-exponential $Z$ maps to our $A_i$ (overload note A3) and its solid absorption
-coefficient $\kappa_s$ maps to our volumetric $\alpha$ (overload note A5). FDS's
-material density-ratio swell/shrink rule corresponds to our $\gamma_j$-weighted
-volume change (Chapter 10).
+Gpyro's $\bar\rho$ is the bulk density of the condensed mixture in vacuum,
+excluding pore-gas mass (GP §§2.1, 4.1); it is not generally
+$\sum_{j\in\mathrm{all}}\xi_j$. FDS similarly tracks condensed material
+components separately from its CFD gas. Gpyro's reaction parameter $\chi_k$
+and solid yield $\mathrm{SF}_k$ are not Pyrolysis.jl's component swelling
+weights or lateral conversion variable (§10.11).
 
 ### 4.8.2 Heat capacity and the gas-storage convention
 
-ThermaKin's energy equation (its Eq. 17) sums the volumetric heat capacity
-over **all** components, gas included:
-$\rho c_p^{\,\text{ThermaKin}} = \sum_{j\in\text{all}} \xi_j c_{p,j}$. Pyrolysis.jl
-uses the same sum as the storage coefficient of its temperature equation
-(Chapter 3), discretely the cell's heat-capacity sum $C_i$:
+The common all-component storage coefficient of Pyrolysis.jl and TK Eq. 17 is
 
 $$
-\rho c_p^\mathrm{eff} = \sum_{j=1}^{N_C} \xi_j\, c_{p,j}(T),
+\rho c_p^\mathrm{eff} = \sum_{j=1}^{N_C}\xi_j c_{p,j}(T).
 \tag{4.11}
 $$
 
-because the pore gas shares the matrix temperature and its concentration is an
-integrated state, so its sensible storage is available at no cost (Chapter 5,
-§5.4 and Chapter 7). Gpyro's default thermal-equilibrium form drops the gas
-term (restored by its `FULL_QSG` option) and FDS has no in-depth gas; both are
-approximations of (4.11) that Pyrolysis.jl does not make. The gas *flux*
-relative to the skeleton enters the energy balance only through the sensible
-enthalpy its face fluxes carry, $\sum_g J_{g,f}h_g(T_f)$ (Chapter 3, §3.3.4;
-Chapter 7).
-
-> **Implementation note.** `heat_capacity_sum` → `_heat_capacity_sum` (every
-> component, no phase branch; §4.6.5), `src/States/caloric.jl`, evaluated by the
-> state mapping at the trial temperature and smoothly floored
-> (`src/States/derived.jl`).
+Gpyro's default thermal-equilibrium exchange neglects gas storage and gas
+conduction; `FULL_QSG` retains both (GP Eq. 65). FDS's standard solid model
+has no pore-gas inventory. These are distinct energy closures (§7.8).
 
 ### 4.8.3 Reaction kinetics representation
 
-ThermaKin supports bimolecular rates $\propto \xi_{\text{COMP1}}\xi_{\text{COMP2}}$;
-Gpyro uses an nth-order-in-conversion rate with optional O₂ sensitivity
-$g(Y_{O_2})$ and a critical-temperature Heaviside; FDS uses
-$\rho^n\cdot Y_{O_2}^{n}\cdot$ a temperature factor with kinetic-parameter recovery
-from a TGA reference temperature and peak rate. Pyrolysis.jl restricts to
-**single-reactant** mass-action kinetics in mass-concentration basis with smooth
-tanh temperature gates and a one-sided depletion limiter, exactly zero at and
-below zero concentration and C¹ through it (Chapter 6). The
-representation of heats of reaction as property functions — including the
-state-dependent moisture-sorption heat via `StateDependentProperty` — generalizes
-all three codes' scalar heats. The full kinetic comparison is in Chapter 6.
+The restrictions and heat-basis conversions are in §6.9. It is incorrect to
+describe all reference heats as scalars: ThermaKin2Ds allows a temperature
+function for reaction heat (TK Eq. 1 and §1.1), and FDS constructs
+temperature-dependent reaction heats from its enthalpy accounting (FDS
+mathematical model, Appendix P). Pyrolysis.jl accepts temperature-dependent
+and state-dependent heat functions; matching their datum remains necessary.
 
 ### 4.8.4 Property functions and temperature dependence
 
-ThermaKin and Gpyro both permit temperature-dependent properties (tabulated or
-power-law). Pyrolysis.jl's property-function abstraction subsumes both: a Gpyro
-power law $p(T)=p_0(T/T_0)^m$ is a `CallableProperty`; a ThermaKin table is a
-`TableProperty`; FDS ramp-style piecewise data is a `TableProperty` with linear
-interpolation and flat extrapolation. The distinctive addition is the uniform
-$(T,\xi)$ call signature, which allows composition-dependent properties (heat of
-sorption) without a special-case code path.
+TK Eq. 1 specifies $p_0+p_1T+p_2T^n$ for density, heat capacity, conductivity
+and gas transfer, with constant component emissivity and absorption.
+This is representable by a Pyrolysis.jl callable; it is not a documented
+ThermaKin table input. GP §§2.1–2.5 specify power-law properties, optional
+Gaussian melting heat capacity and a $T^3$ radiative conductivity term.
+FDS supports temperature ramps for material properties. Each law can be
+transcribed here, but interpolation, extrapolation, units and mixture weights
+must be matched explicitly (§5.14).
 
 ---
 
@@ -3216,28 +2866,15 @@ revisited where the relevant physics is developed.
 
 # 5. Effective (Mixture) Properties and Mixing Rules
 
-This chapter derives, in full, how Pyrolysis.jl collapses the per-component
-thermophysical and transport properties of a multi-phase pyrolyzing solid into
-the *single* effective property each governing equation needs. It covers the
-averaging bases (mass fractions and volume fractions, the two flavours of the
-latter, and the blend between them in an emptying cell), the swelling-aware
-mixture density, the intrinsic-density pore fraction, the mixture heat capacity
-and the sensible enthalpies the energy row reads, the four conductivity mixing
-rules (parallel / series / weighted / Bruggeman) together with the Bruggeman
-Newton solve, the effective gas-transfer and permeability closures (component
-mixing versus Carman–Kozeny), the radiative properties (emissivity, surface
-absorptivity and absorption), the gas viscosity (Sutherland) and Chapman–Enskog
-diffusivity, the absence of per-species transport scaling, the guarded
-distance-weighted harmonic face mean, the cell properties the state mapping
-evaluates, and how the colored Jacobian obtains their derivatives. Every
-equation, constant, guard, threshold, and sign below follows
-`src/Properties/mixture_rules.jl`, `src/Properties/effective_properties.jl`,
-`src/States/derived.jl`, `src/States/caloric.jl`, `src/States/guards.jl`,
-`src/Materials/components.jl`, and `src/Materials/materials.jl`; where the
-implementation departs from the textbook form (most importantly which basis each
-property uses, the harmonic-mean face average, and which mixing rules are
-rejected for which channel), **the code is authoritative** and the deviation is
-called out explicitly.
+This chapter defines the property bases used in the conservation equations.
+Thermal conductivity, emissivity and absorptivity use thermal volume weights;
+gas transfer and permeability use condensed bulk occupancy. Skeletal density
+sets pore volume independently of both. Heat capacity and sensible enthalpy
+are assembled from component masses and caloric laws.
+
+The transport closures and their interface matching are specified here and
+in Chapter 9. Property evaluation is implemented in `src/Properties`, with
+trial-state extensions and caloric maps in `src/States` and `src/Materials`.
 
 Throughout this chapter `j` is the **component (species) index** running over the
 `N_C` components of a `Material`, and `i` is the **cell index** running over the
@@ -3245,7 +2882,7 @@ Throughout this chapter `j` is the **component (species) index** running over th
 the **mass concentration** `ξ_j` (kg·m⁻³), not the mass fraction (§3, Governing
 Equations); the integrated state is the cell mass `m_{j,i} = ξ_{j,i} V_i`. Two
 density symbols are used with care: the **bulk** (pure-phase) density `ρ_j`
-drives all mixing rules and the mixture density, while the **intrinsic**
+sets declared bulk occupancy in mixing and strain, while the **intrinsic**
 (skeletal, cell-wall) density `ρ_{i,j}` appears *only* in the pore-fraction
 formula (overload resolution A7, §2). The three binding sign conventions of §2
 are assumed without restatement.
@@ -3258,281 +2895,80 @@ distinguish.
 
 ---
 
-## 5.1 Averaging bases: mass fractions and volume fractions
+## 5.1 Inventory and property-weighting bases
 
-A homogenized property must be a weighted combination of its component values,
-and the *correct weight* depends on the physics. Pyrolysis.jl uses three distinct
-weighting bases, each computed from the cell's mass-concentration tuple
-`ξ = (ξ_1,…,ξ_{N_C})` and (for the volume bases) the temperature `T`.
+### 5.1.1 Mass fractions
 
-### 5.1.1 Total density and mass fractions
+$Y_j=\xi_j/\sum_k\xi_k$ weights properties expressed per unit total mixture
+mass. Heat capacity is assembled directly as $\sum_jm_jc_{p,j}$; the
+conservative energy row does not need a normalized mixture heat capacity.
 
-The **total (bulk) density** of a cell is simply the sum of mass concentrations,
+### 5.1.2 Thermal volume fractions
 
-$$
-\rho_{\text{tot}}(\boldsymbol\xi) \;=\; \sum_{j=1}^{N_C} \xi_j ,
-\tag{5.1}
-$$
+`volume_fractions` normalizes all-phase $\xi_j/\rho_{b,j}$.
+`solid_volume_fractions` normalizes all-phase
+$\gamma_j\xi_j/\rho_{b,j}$. Thermal conductivity, emissivity and absorptivity
+use `mixing_volume_fractions`: the swelling-weighted basis above matrix
+occupancy $10^{-3}$, the all-phase basis below $10^{-4}$, and a cubic
+smoothstep blend between them. Gas with nonzero `γ` participates in this
+thermal basis. The trial extension at a vanishing total occupancy is stated
+in the property implementation.
 
-This is the density in *bulk-density space* — the mass per unit bulk volume — before any
-swelling correction (§5.2). It is the natural denominator for **per-unit-mass**
-properties, because such a property averaged over the mixture must weight each
-component by its share of the mass.
+### 5.1.3 Gas matrix weights and skeletal occupancy
 
-The **mass fraction** of component `j` is
+Gas transport has a distinct basis: only condensed components enter
+$q_j=\gamma_j\xi_j/\rho_{b,j}$, and their normalized weights determine
+$\Lambda$ and component-mixed $\kappa$. Gas loading never changes these
+weights. At absent matrix support, the specified transport endpoint and
+its skeletal-occupancy domain apply (§9.2).
 
-$$
-Y_j \;=\; \frac{\xi_j}{\rho_{\text{tot}}}, \qquad \sum_j Y_j = 1 ,
-\tag{5.2}
-$$
+A zero-`γ` condensed component has no matrix weight or direct contribution
+to the strain law. It still has mass, heat capacity and skeletal volume
+$\xi_j/\rho_{i,j}$. Zero weighted matrix occupancy is therefore insufficient
+to identify an unobstructed void.
 
-Mass fractions are the conceptual weights for the swelling mixture density
-(§5.2), where `Y_j` is folded in inline (with an empty-cell guard
-`ρ_tot < 1e-20`) so that no mass-fraction tuple is built; the heat-capacity
-sum of the energy row weights by the cell masses `m_{j,i}` directly (§5.4).
-They are *not* the right weights for transport properties, which act over
-volumes.
-
-### 5.1.2 All-phase volume fractions
-
-A transport property such as thermal conductivity is governed by *how much
-volume* each phase occupies along the heat-flow path, not by how much mass it
-carries. The **bulk volume fraction** of component `j` is
-
-$$
-v_j \;=\; \frac{\xi_j/\rho_j(T)}{\displaystyle\sum_{k=1}^{N_C}\xi_k/\rho_k(T)},
-\qquad \sum_j v_j = 1 ,
-\tag{5.3}
-$$
-
-where `ρ_j(T)` is the component's **bulk** density evaluated through its property
-function (constant, polynomial, table, or callable — §4). The quantity
-`ξ_j/ρ_j` is the volume occupied by component `j` per unit bulk volume, so (5.3)
-normalizes those volumes to a partition of unity. This is `volume_fractions(ξ, T,
-material)` (`mixture_rules.jl`).
-
-The function builds the denominator `v_total = Σ_k ξ_k/ρ_k` via
-`_sum_specific_vol` and, if `v_total < 1e-20` (a vanished cell), returns the zero
-tuple. Each per-component term is itself guarded `ξ_k > 0 && ρ_k > 0`, so a
-component with zero concentration or a (non-physical) zero density contributes
-nothing. The all-phase basis is used for **gas transfer** (§5.6), where every
-phase — including the gas that occupies pore space — participates in the
-volumetric averaging; component-based permeability (§5.7.1) uses the
-swelling-weighted basis (5.4).
-
-### 5.1.3 Swelling-weighted (matrix) volume fractions and why surface properties use them
-
-Thermal conductivity and surface emissivity are determined by the *condensed
-matrix*, not by gas transiently occupying the pores. Pyrolysis.jl therefore
-defines a **swelling-weighted volume fraction** in which every component
-contributes the γ-fraction of its intrinsic volume:
-
-$$
-v_j^{\text{solid}} \;=\;
-\dfrac{\gamma_j\,\xi_j/\rho_j(T)}{\displaystyle\sum_{k}\gamma_k\,\xi_k/\rho_k(T)},
-\tag{5.4}
-$$
-
-so the fractions sum to one over the contributing (γ > 0) components. This is
-`solid_volume_fractions(ξ, T, material)` (`mixture_rules.jl`). The swelling
-factor here has **one universal meaning** — the fraction of a component's
-intrinsic volume contributing to the bulk volume — shared with the dilation
-rate $\theta = \sum_j\gamma_j(\mathrm{d}\xi_j/\mathrm{d}t)/\rho_j$ (§3.6,
-§10) and the swelling mixture density (5.6).
-
-The physical justification is the **ThermaKin convention**: "when γ = 0,
-gaseous components do not contribute to the thermal conductivity"
-(ThermaKin2Ds Reference, Eqs. 8–10), reproduced verbatim in the source
-docstring. A non-swelling gas (`γ = 0`, the default for `GaseousComponent`,
-§4) fills *existing* pore space and escapes; it neither forms a continuous
-solid conduction path nor presents a radiating surface, so it carries zero
-weight. A gas given `γ > 0` (an intumescent foaming agent that *creates* new
-volume) is retained with weight γ.
-
-> **Subtlety (γ = 0 condensed phases).** Because the weighting is universal,
-> a *condensed* component with `γ = 0` (the `LiquidComponent` default, and
-> the "rigid char" pattern) is consistently **volumeless**: zero weight here,
-> zero strain in θ, and zero volume in the mixture density. Such a component
-> contributes its mass and heat capacity but not its k or ε.
-
-> **Void-cell blend.** Conductivity and emissivity consumers go through
-> `mixing_volume_fractions`, which returns the swelling-weighted matrix
-> fractions while the matrix volume fraction $v_m = \sum_j \gamma_j\xi_j/\rho_j$
-> (`matrix_volume_fraction`) is at or above $10^{-3}$ (`MIXING_BLEND_HI`), the
-> all-phase occupancy (5.3) at or below $10^{-4}$ (`MIXING_BLEND_LO`), and a
-> cubic smoothstep blend $w\,v_j^{\text{solid}} + (1-w)\,v_j$,
-> $w = s^2(3-2s)$, $s = (v_m - 10^{-4})/(10^{-3}-10^{-4})$, in between. A fully
-> converted cell thus degrades to the gas-mixture conductivity instead of 0
-> (which would zero both adjacent harmonic face means and, via Kirchhoff, its
-> absorption), and because the matrix fractions are normalised by $v_m$ their
-> derivatives grow as $1/v_m^2$: the smooth blend keeps
-> $\partial k_{\rm eff}/\partial\xi$ bounded while a cell empties. An emptying
-> cell stays in the system until deactivation removes it (§14), and with
-> deactivation off it stays to the end of the solve, so the bound matters on
-> every mesh.
-
-The three bases and their consumers are summarized below; this mapping is the
-single most error-prone part of effective-property bookkeeping, so it is stated
-once authoritatively from the code. The authority is the state mapping
-`derive!` (`src/States/derived.jl`), which evaluates every cell property once
-per residual (§5.13):
-
-| Basis | Symbol | Built by | Consumed by |
-|---|---|---|---|
-| Mass fraction | `Y_j` | inline in `_specific_vol_with_swelling_direct` | `mixture_density` (§5.2); the heat-capacity sum weights by the cell masses (§5.4) |
-| All-phase volume fraction | `v_j` | `volume_fractions` | `effective_gas_transfer` |
-| Swelling-weighted volume fraction | `v_j^solid` | `solid_volume_fractions` (through `mixing_volume_fractions`, which adds the void blend) | `effective_conductivity`, `mixture_emissivity`, `mixture_absorptivity`; `effective_permeability` reads `solid_volume_fractions` directly |
-
-Note in particular that **gas transfer uses the all-phase basis `v_j`** while
-**conductivity and emissivity use the solid basis `v_j^solid`**: in `derive!`,
-`effective_conductivity`, `mixture_emissivity` and `mixture_absorptivity` each
-build `mixing_volume_fractions`, while `effective_gas_transfer` builds
-`volume_fractions`.
+| Quantity | Basis | Consumer |
+|---|---|---|
+| Bulk density | $\sum_j\xi_j$ | inventory |
+| Thermal fractions | all-phase bulk volume, with thermal blend | conductivity and surface optical properties |
+| Gas matrix weights | condensed $\gamma_j\xi_j/\rho_{b,j}$ | $\Lambda$, component-mixed $\kappa$ |
+| Skeletal occupancy | condensed $\xi_j/\rho_{i,j}$ | physical porosity and endpoint validity |
+| Gas fractions | intrinsic gas inventories | friction, film and reservoir exchange |
 
 ---
 
-## 5.2 Mixture density with swelling
+## 5.2 Volume-change coefficients
 
-The **mixture (bulk) density** `ρ` answers a different question than
-`ρ_tot`: it is the mass per unit *bulk volume* once each phase is allowed to
-contribute, or not contribute, to that bulk volume according to its swelling
-factor `γ_j`. The constitutive relation is a swelling-weighted harmonic
-(specific-volume) average with the **universal** γ weighting (every
-component, not gases only — the same weighting as θ and (5.4)),
-
-$$
-\frac{1}{\rho}
-\;=\; \sum_{j} \gamma_j\,\frac{Y_j}{\rho_j(T)},
-\tag{5.6}
-$$
-
-with `Y_j = ξ_j/ρ_tot` the mass fraction. This is `mixture_density(ξ, T,
-material)` (`mixture_rules.jl`).
-
-The semantics of `γ_j` follow directly from (5.6):
-
-- **`γ_j = 1` (default for solids, `SolidComponent`).** The
-  component contributes its full specific volume. When such a component depletes,
-  its specific volume disappears and `1/ρ` decreases, i.e. the bulk *shrinks*.
-  This is the ordinary charring/recession behaviour.
-- **`γ_j = 0` (default for gases, `GaseousComponent`, **and for liquids**,
-  `LiquidComponent`).** The term drops out of (5.6) entirely. Gas generated by
-  a reaction fills pre-existing pore space and escapes through the matrix
-  without inflating the bulk; a γ = 0 liquid is moisture bound in cell walls
-  (ThermaKin `L SWELLING: 0`) — consistently volumeless across (5.4), (5.6),
-  and θ. Set `γ = 1` for a liquid that physically occupies bulk volume (a
-  melt layer).
-- **`γ_j ∈ (0,1)`.** Partial contribution — the model for an intumescent
-  blowing agent that *does* create new bulk volume as it is produced. Setting a
-  gas's `γ_j` near 1 makes the generated gas expand the solid.
-
-The volumetric strain rate `θ` that converts (5.6) into actual cell-volume change
-(and hence into mesh motion under ALE) is derived in §10 (Volume Change and
-Lateral Shrinkage) and §11 (The ALE Framework); here we only fix the
-constitutive density. In the residual the mixture density has one consumer: the
-film flux of a mass boundary condition, which multiplies the boundary cell's
-gas-transfer coefficient by `ρ` (the product `λρ`), both at the cell's
-positive-part concentrations and trial temperature (`GasTransportKernel`,
-`src/Kernels/gas_transport.jl`; §9, §12).
-
-> **Implementation note.** `mixture_density` computes the mass fractions
-> *inline* via `_specific_vol_with_swelling_direct(ξ, inv_ρ, T, comps, Val(NC))`
-> (`mixture_rules.jl`), folding `Y_j = ξ_j · (1/ρ_tot)` into the
-> specific-volume accumulation so that no intermediate `Y` tuple is allocated.
-> Two empty-cell guards bracket the computation: `ρ_tot < 1e-20 ⇒ 0`, and
-> `v_specific < 1e-20 ⇒ 0` (`mixture_rules.jl`). The swelling factor is
-> applied per component (one universal γ semantics, §5.1.3), so a mixture may
-> contain swelling and non-swelling components of any phase simultaneously.
+The strain law uses $\gamma_j/\rho_{b,j}(T)$ for each component and its
+reaction source (§3.6, Chapter 10). A nonzero gas swelling factor can change
+bulk geometry without entering gas matrix weights. The pore EOS follows
+the actual cell volume minus condensed skeletal volume; it does not replace
+that geometric volume by a mixture-specific-volume average.
 
 ---
 
 ## 5.3 Porosity
 
-### 5.3.1 The canonical intrinsic-density form
+Porosity is the complement of condensed skeletal occupancy,
+$\phi=1-\sum_{S\cup L}\xi_j/\rho_{i,j}(T)$, independent of `γ` and gas loading.
+It is evaluated for every gas-bearing material. The pressure, intrinsic
+species density and gas fractions use this same pore state (§9.1).
 
-**Porosity** `φ` is the bulk-volume fraction *not* occupied by the solid/liquid
-skeleton. It is the only place the **intrinsic (skeletal) density** `ρ_{i,j}` is
-used. The canonical definition is
+### 5.3.1 Evaluation and admissibility
 
-$$
-\varphi \;=\; 1 - \sum_{j\in\{\text{solid,liquid}\}} \frac{\xi_j}{\rho_{i,j}(T)},
-\tag{5.7}
-$$
-
-with **no clamp**. The sum is `skeletal_volume_fraction(ξ, T, material)`
-(`mixture_rules.jl`), the bulk-volume fraction the skeleton occupies; the pore
-fraction is one minus it. The sum runs over **solid and liquid** components
-only — the generated code branches on `is_solid(c) || is_liquid(c)`, and each
-term is taken only if `ρ_intr > 0`. Gases are *excluded from the sum* because
-they occupy the pore space being measured, not the skeleton.
-
-The distinction between bulk and intrinsic density is essential here. The
-*intrinsic* density is the density of the cell-wall material itself, ignoring any
-micro-pores inside the pure phase; the *bulk* density is the apparent density of
-that phase as it sits in the composite. For a porous solid these differ, and
-using the intrinsic density in (5.7) correctly recovers the void fraction. A
-component constructor takes either `ρ_intrinsic` or the pure phase's own
-porosity `φ` (which, with a constant bulk density, sets
-`ρ_intrinsic = ρ/(1 − φ)`). When a component is constructed with neither,
-`get_intrinsic_density` falls back to the bulk density (`components.jl`), which
-makes the summand `ξ_j/ρ_j`: the pure phase is taken to have no internal pores.
-For a gas, `get_intrinsic_density(::GaseousComponent, ::Real) = 0.0`, consistent
-with its exclusion from the sum.
-
-Because (5.7) carries no clamp, a trial state can give `φ < 0` (a skeleton
-larger than the cell) or `φ > 1` (negative condensed masses). Each consumer
-guards the pore fraction as its own use requires:
-
-1. **The state mapping**, under Darcy–Fick transport only, evaluates
-   $$
-   \varphi_i = \operatorname{smooth\_floor}\bigl(1 - s(\boldsymbol\xi^+_i, T_{\text{trial},i}),\ 10^{-12}\bigr),
-   $$
-   with `s` the skeletal volume fraction and `POROSITY_FLOOR = 1e-12`
-   (`src/States/derived.jl`; the smooth floor is defined in §5.13). This `φ_i`
-   feeds the **ideal-gas pressure closure** `P = N(ξ,T)/φ`, with
-   `N = Σ_{g} ξ_g R_g T / M_g` the partial-pressure numerator
-   (`ideal_gas_pressure`, which additionally takes `max(φ, 1e-12)`; §9), the
-   **Carman–Kozeny permeability** closure (§5.7.2), and the face porosity of the
-   Darcy advection (the arithmetic mean of the two cells' floored values, §9).
-   Under Fickian transport no porosity is evaluated.
-2. **The domain test** (`DomainCheck`, §15.5.4), under Darcy–Fick transport,
-   reads the *unguarded* pore fraction of every live cell from its masses
-   `m_{j,i}/V_i` at the trial temperature and rejects a proposed step when
-   `φ < −tol` or `φ > 1 + tol`, `tol` being the skeletal volume fraction of the
-   cell's mass tolerances (`src/Integration/checks.jl`).
-3. **`background_gas_concentration`** (the pore gas at a given pressure, used to
-   initialize a Darcy–Fick problem; §9) uses `max(1 − s, 0)`.
-4. **`validate_darcy_initial_porosity`**, which `solve` runs through
-   `validate_problem`, refuses a Darcy–Fick problem in which a cell with a
-   positive effective permeability starts with an unclamped pore fraction below
-   `1e-6` — the usual cause being a solid constructed without `ρ_intrinsic`
-   (`src/Problem/problem_validation.jl`).
-5. **Deactivation on a moving mesh** adds the pore volume (cell volume less the
-   skeletal volume of its masses) of the cells it removes to the receiving
-   cell, so pore space is conserved through the transfer (§14.3.3).
+Trial concentrations are nonnegative extensions of raw inventories and the
+porosity divisor has a C¹ floor at $10^{-12}$. A physical state must lie above
+twice that floor plus its mass/temperature/geometry uncertainty margin.
+Initial validation, step acceptance and post-deactivation checks enforce this
+condition; smoothing does not legalize a filled pore volume.
 
 ### 5.3.2 Porosity derivatives
 
-Differentiating (5.7) term by term gives
-
-$$
-\frac{\partial \varphi}{\partial \xi_j}
-=
-\begin{cases}
--\dfrac{1}{\rho_{i,j}(T)}, & j\in\{\text{solid, liquid}\}\ \text{and}\ \rho_{i,j}>0,\\[8pt]
-0, & j\in\text{gas (or }\rho_{i,j}\le 0).
-\end{cases}
-\tag{5.8}
-$$
-
-The sign is negative for the skeleton: adding solid mass reduces the void
-fraction. Gases contribute zero — they fill pore space already accounted for by
-the solid complement, so changing a gas concentration does not change `φ`.
-These derivatives are not hand-coded: the colored Jacobian (§15) differentiates
-the whole residual, the state mapping included, with forward-mode dual numbers,
-so (5.8) is carried through the smooth floor exactly as the residual evaluates
-it — the floor's derivative is zero at and below `10⁻¹²`, one at and above
-`2·10⁻¹²`, and the cubic join's slope in between.
+The derivative with respect to condensed concentration is $-1/\rho_{i,j}$,
+and the temperature derivative is
+$\sum_{S\cup L}\xi_j\rho'_{i,j}/\rho_{i,j}^2$. Inventory and geometry
+derivatives follow $\xi_j=m_j/V$. These derivatives enter both the colored
+Jacobian and proposed-state pressure-error control.
 
 ---
 
@@ -3573,7 +3009,7 @@ its term would add an exact zero for every finite heat capacity, and the test
 The floor is `RHO_CP_FLOOR = 10³` J·m⁻³·K⁻¹ (`src/Materials/constants.jl`) times
 the cell's initial volume (`CellReference.capacity_floor`,
 `src/States/tolerances.jl`): the thermal mass of pore gas at ambient
-(ρ_g c_{p,g} ≈ 1.2 × 1000; Gpyro floors the same quantity). Because every
+(ρ_g c_{p,g} ≈ 1.2 × 1000). Because every
 component is summed, the sum reaches the floor only in a cell emptied of all
 mass — a burned-out cell whose pore gas has also left; without it the `1/C_i`
 factor in `dT_i/dt` would blow up there. Virgin solids carry ρc_p ~ 10⁵–10⁶
@@ -3586,21 +3022,21 @@ value and its consistent derivative.
 
 The one-temperature model puts the pore gas at the matrix temperature (§3.1.2),
 so the gas stores sensible heat `ξ_g c_{p,g} ∂T/∂t` exactly like every other
-component. Its mass is an integrated state, so the term costs nothing; dropping
-it — Gpyro's default *quasi-steady-gas approximation*, which its `FULL_QSG`
-option reverses, and the implicit convention of FDS, which has no in-depth gas —
-would be an approximation with no benefit. The in-pore gas heat capacity is
+component. Its mass is an integrated state, and no separate gas-temperature
+unknown is needed. Gpyro's default thermal-equilibrium exchange neglects both
+gas storage and gas conduction, restored by `FULL_QSG`; the standard FDS wall
+model instead has no pore-gas inventory. The in-pore gas heat capacity is
 roughly `φ ρ_g c_{p,g}` against the matrix `(1−φ) ρ_s c_{p,s}`, with `ρ_s` the
 intrinsic density of the matrix. At 1 atm and 700 K, with comparable specific
 heats and `ρ_s = 1500` kg·m⁻³, the ratio is about 3·10⁻⁴ for air in a matrix of
 porosity 0.5 (ρ_g ≈ 0.50 kg·m⁻³) and about 5·10⁻³ for volatiles of molar mass
 0.1 kg·mol⁻¹ in a char of porosity 0.8 (ρ_g ≈ 1.74 kg·m⁻³): from a few hundredths
-to about half a percent of the storage, scaling with pressure. Small, but kept
-exact because it is free.
+to about half a percent of the storage, scaling with pressure. These estimates are small,
+but our model retains this storage term.
 
 The gas *flux* relative to the skeleton enters the energy equation only through
-the sensible enthalpy it carries across the faces (§7.4). This is the ThermaKin
-Eq. 17 convention term for term (§3.3.2).
+the sensible enthalpy it carries across the faces (§7.4). This corresponds to the gas temperature-advection term of ThermaKin
+Eq. 17 under the matching assumptions in §7.8.
 
 No mass-averaged specific heat of the mixture enters the residual; the
 enthalpy-form tolerance of a cell uses the mass-averaged heat capacity of its
@@ -3817,204 +3253,52 @@ the implementation:
 
 ---
 
-## 5.6 Effective gas-transfer coefficient
+## 5.6 Effective superficial gas transfer
 
-The diffusive gas flux (§9) uses an effective Fickian transfer coefficient
-`λ_eff` [m²·s⁻¹], homogenized from the per-component `λ_j(T)`. Crucially — and
-unlike conductivity — gas transfer is averaged over the **all-phase** volume
-fractions `v_j` (5.3), *not* the solid basis:
+`effective_gas_transfer(ξ,T,material)` returns the lumped superficial
+coefficient $\Lambda$ [m²/s], including a declared endpoint blend. Only
+condensed $\gamma$-weighted bulk occupancies enter its normalized matrix
+weights. Participating condensed components require explicit `λ`; gases
+have no transfer-coefficient input. The coefficient multiplies the intrinsic
+partial-pressure gradient, $J_j^D=-\Lambda M_j\nabla p_j/(RT)$.
 
-$$
-\lambda_{\text{eff}}(T,\boldsymbol\xi)
-\;=\; \text{MixingRule}\bigl(v_j,\ \lambda_j(T)\bigr),
-\tag{5.17}
-$$
-
-`effective_gas_transfer(ξ, T, material)` builds `v = volume_fractions(…)` and
-dispatches to `_gas_transfer_from_v` (`effective_properties.jl`). The state
-mapping evaluates `λ_i = effective_gas_transfer(ξ⁺_i, T_trial,i, material)`
-only when gas can move (§5.13). Which transport a problem has is decided once,
-at setup (`_gas_transport`, `src/Integration/setup.jl`): none without a gas
-component; Darcy–Fick when some condensed component carries a permeability law
-that is not identically zero (`has_darcy_flow`, §5.7); Fickian when some
-component carries a gas-transfer coefficient that is not identically zero or a
-boundary condition passes mass; none otherwise. The supported rules mirror
-conductivity:
-
-$$
-\lambda_\parallel = \sum_j v_j\,\lambda_j,\qquad
-\frac{1}{\lambda_{\text{series}}}=\sum_j\frac{v_j}{\lambda_j},\qquad
-\lambda_{\text{eff}}=\beta\lambda_\parallel+(1-\beta)\lambda_{\text{series}}.
-\tag{5.18}
-$$
-
-The default rule for `λ` is **PARALLEL** with `β = 0.5` (`materials.jl`).
-
-**Degenerate transport.** `SolidComponent` defaults to $\lambda_j = 0$. A
-condensed component with no gas-transfer coefficient contributes nothing to
-(5.18), so a cell of that component holding no gas has $\lambda_{\text{eff}}
-\approx v_{\rm gas}\lambda_{\rm gas} \to 0$ under PARALLEL (and exactly zero
-under SERIES), and the guarded face mean (5.29) goes to zero continuously as
-either side does (§5.12). Gas transport then stops where the gas fraction stops:
-the gas field of a gas-producing material ends in a sharp front, a trial state
-that drives the front cell's gas concentration to zero closes both of its faces
-and flattens its residual row, and the integrator rejects step after step on
-that front. A small coefficient on the condensed components keeps the transport
-non-degenerate; the Landau ablation case V-CPL-02 gives its solid
-$\lambda = 10^{-6}$ m²/s for this reason (`test/verification/cases/V-CPL-02.jl`).
-`validate_problem`, which `solve` calls, therefore warns when a material with a
-gas-producing reaction and Fickian transport (no permeable component) has a
-condensed component with $\lambda_j = 0$
-(`warn_degenerate_gas_transport`, `src/Problem/problem_validation.jl`): "the
-integrator rejects step after step on it. Give the condensed components a small
-λ (for example `λ = 1e-6` m²/s)."
-
-### 5.6.1 Bruggeman is rejected for gas transfer
-
-Applying the effective-medium closure (5.15) to a diffusivity is **rejected**:
-`_gas_transfer_from_v` throws an `ArgumentError` if `mixing == BRUGGEMAN`
-(`effective_properties.jl`), with the message that the EMT closure "has
-no physical justification for diffusivities." The reasoning is that a Fickian
-transfer coefficient is already an average over a heterogeneous pore network
-(molecular and Knudsen regimes), so wrapping it in a *second* effective-medium
-self-consistency relation derived for a thermodynamic-like coefficient is not
-physically supported. (The `effective_gas_transfer` docstring
-(`effective_properties.jl`) explicitly states that `BRUGGEMAN` is **not**
-supported for gas transfer and lists only `PARALLEL`/`SERIES`/`WEIGHTED`,
-matching the running code, which is authoritative.)
-
-> **Implementation note.** The series guard for `λ` is more elaborate than for
-> `k`: in `_gas_transfer_sums` (`effective_properties.jl`), once any
-> active phase has `λ ≤ 1e-20` the running `inv_λ_series` is set to `Inf` and the
-> rest of the sum is short-circuited, which drives `λ_series → 0`. This is the
-> correct series limit: a single impermeable-to-diffusion layer blocks the
-> series path entirely.
+`PARALLEL`, `SERIES` and `WEIGHTED` use the exact matrix rules of §9.2.
+Positive-weight zero coefficients close the series channel. Support changes
+at disappearing constituents require qualification; arbitrary positive floors
+are not used. `BRUGGEMAN` is a thermal closure and is rejected for gas transfer.
+A matrix-free limit requires an explicit endpoint and occupancy domain.
 
 ---
 
 ## 5.7 Effective permeability
 
-Permeability `κ` [m²] is the resistance-to-flow property in Darcy's law
-`v_g = −(κ/μ)∇P` (§9). Only **solid and liquid** components carry a permeability;
-gases flow *through* the matrix and `get_permeability(::GaseousComponent, T) =
-0.0` (`components.jl`). Pyrolysis.jl offers two **mutually exclusive**
-closures, selected by `material.mixing.κ.rule`
-(`effective_permeability(ξ, T, material, φ)`, `effective_properties.jl`; the
-porosity argument `φ` is read by the Carman–Kozeny rule only). The default rule
-for `κ` is **WEIGHTED** with `β = 0.5` (`materials.jl`).
-
-Darcy–Fick transport, and with it the permeability, is active when some
-condensed component carries a permeability law that is not identically zero
-(`has_darcy_flow`, `src/Materials/materials.jl`), whatever the mixing rule: a
-material whose components all have `κ = 0` is Fickian even under
-`CARMAN_KOZENY`. The state mapping then evaluates the cell mobility from the
-permeability at the positive-part concentrations, the trial temperature and the
-smoothly floored pore fraction of §5.3.1 (§5.7.4, §5.13).
+`effective_permeability(ξ,T,material,φ)` returns $\kappa$ [m²]. Condensed
+component mixing uses the same matrix basis as $\Lambda$. The default
+`WEIGHTED` rule combines parallel and exact series values. Gases and
+zero-`γ` constituents carry no matrix permeability weight.
 
 ### 5.7.1 Component mixing
 
-When the rule is `PARALLEL`, `SERIES`, or `WEIGHTED`, the effective permeability
-is a volume-fraction mixture of the component permeabilities, exactly as for
-conductivity: on the **renormalized swelling-weighted basis** `v_j`
-(`solid_volume_fractions` (5.4) — γ = 0 components carry no weight and the
-surviving weights sum to 1):
+For normalized condensed weights $w_j$, $\kappa_\parallel=\sum_jw_j\kappa_j$,
+$\kappa_{series}=(\sum_jw_j/\kappa_j)^{-1}$ and
+$\kappa_{weighted}=\beta\kappa_\parallel+(1-\beta)\kappa_{series}$.
+A positive-weight zero closes the series value exactly. `κ=0` remains a legal
+mechanism switch independently of wall transfer.
 
-$$
-\kappa_\parallel = \sum_j v_j\,\kappa_j,\qquad
-\frac{1}{\kappa_{\text{series}}}=\sum_j\frac{v_j}{\kappa_j},\qquad
-\kappa_{\text{eff}}=\beta\kappa_\parallel+(1-\beta)\kappa_{\text{series}},
-\tag{5.19}
-$$
+### 5.7.2 Carman–Kozeny closure
 
-`_permeability_from_v` (`effective_properties.jl`), with the parallel/series
-sums from `_permeability_sums`. An **impermeable phase** (`κ ≈ 0`, the
-`SolidComponent` default) with `v_j > 0` makes the series (Wiener lower) bound
-**exactly zero** — gas cannot cross a series-stacked impermeable layer; the
-accumulator signals this with `1/κ_series = ∞`, the same convention as the
-gas-transfer channel. The series guard floor is tighter than for
-conductivity — `κ > 1e-30` rather than `1e-20` — because permeabilities
-themselves are tiny (virgin wood ~10⁻¹⁵ m², char ~10⁻¹² m²). Representative
-component values from the source docstring: virgin wood `~10⁻¹⁵ m²` (tight
-cellular structure), char `~10⁻¹² m²` (open channels), impermeable `0.0 m²`.
+`MixingSpec(CARMAN_KOZENY;length_scale=ℓ)` instead gives
+$\kappa=\min(\ell^2\phi^3/[180(1-\phi)^2],\ell^2)$, with a finite divisor
+extension at unit porosity. The length scale is positive physical data.
+The cap and its branch derivative are part of this constitutive closure.
+It is evaluated even when component permeabilities are zero.
 
-### 5.7.2 Carman–Kozeny porosity closure
+### 5.7.3 Constitutive and interface derivatives
 
-When the rule is `CARMAN_KOZENY`, permeability is *not* a per-component mix but a
-porosity-based closure:
-
-$$
-\kappa \;=\; \min\!\left(\frac{\ell^2\,\varphi^3}{180\,(1-\varphi)^2},\;\ell^2\right),
-\tag{5.20}
-$$
-
-`_carman_kozeny_permeability(φ, ℓ)` (`effective_properties.jl`), where
-`ℓ` is the characteristic particle/pore diameter [m] supplied through the
-`MixingSpec` `length_scale` and `φ` is the porosity the caller passes: in the
-residual, the pore fraction (5.7) smoothly floored at `10⁻¹²` (§5.3.1), so the
-permeability is smooth in the state. The constant **180** is the Kozeny
-constant for a packed bed of spheres. The
-`φ³/(1−φ)²` dependence captures the steep growth of permeability as porosity
-rises during virgin → char conversion: as `φ → 0` (fully solid), `κ → 0`
-(impermeable). As `φ → 1` the packed-bed closure loses validity and diverges,
-so `κ` is capped at the physical free-flow scale `ℓ²` (an open channel of width
-`ℓ` has `κ ~ ℓ²/32`; `ℓ²` is a generous upper bound). The cap binds for
-`φ > 0.9328`, where `180(1−φ)² < φ³`; a tiny `1e-30` denominator guard remains
-solely to avoid `Inf`/`NaN` at exactly `φ = 1` before the `min` resolves
-(`effective_properties.jl`).
-
-Because Carman–Kozeny needs the porosity, it is evaluated through
-`effective_permeability(ξ, T, material, φ)` — calling the volume-fraction
-variant `_permeability_from_v` with this rule throws an `ArgumentError`
-explaining that concentrations are required (`effective_properties.jl`).
-`MixingSpec(CARMAN_KOZENY; length_scale=ℓ)` fails fast at construction if `ℓ`
-is not a positive, finite number (`materials.jl`).
-
-The closure derivative needed for the Jacobian (§5.15) is not hand-coded: the
-colored Jacobian (§15) differentiates the state mapping, `effective_permeability`
-and the floored pore fraction included, with dual numbers, so the Carman–Kozeny
-chain through the porosity's composition dependence is carried as evaluated. On
-the capped branch the `min` gives the value-consistent zero `dκ/dφ` — value and
-derivative saturate at the same point (a kink of the derivative at the cap,
-§5.15).
-
-### 5.7.3 Bruggeman is rejected for permeability
-
-As with gas transfer, `BRUGGEMAN` is rejected for permeability:
-`_permeability_from_v` throws an `ArgumentError` if `mixing == BRUGGEMAN`
-("EMT is only defined for scalar transport coefficients … use
-PARALLEL/SERIES/WEIGHTED, or CARMAN_KOZENY", `effective_properties.jl`).
-Permeability is a flow-resistance of the matrix geometry, not a polarizable
-scalar property to which the symmetric EMT applies. Carman–Kozeny is the
-physically motivated porosity-based alternative for the percolation-like
-virgin → char transition.
-
-### 5.7.4 Face-averaged permeability
-
-For the Darcy velocity at a face, the resistance-in-series combination is
-applied to the **mobility** κ/μ rather than to κ alone. The state mapping forms
-each cell's mobility
-
-$$
-\text{mob}_i = \frac{\kappa_{\text{eff}}(\boldsymbol\xi^+_i, T_{\text{trial},i}, \varphi_i)}
-{\operatorname{smooth\_floor}\bigl(\mu(T_{\text{trial},i}),\ \mu_{\text{floor}}\bigr)},
-\qquad \mu_{\text{floor}} = 10^{-12}\ \text{Pa·s}
-$$
-
-(`mob`, `src/States/derived.jl`; `μ` is the material's `gas_viscosity`, §5.9,
-and `MU_FLOOR` the floor), and the gas-transport kernel combines the two sides
-of an interior face with the guarded distance-weighted harmonic mean (§5.12)
-with the mobility guard `MOBILITY_GUARD = 1e-30` m²·Pa⁻¹·s⁻¹ in place of the
-default `10⁻²⁰` (`src/Kernels/gas_transport.jl`):
-
-$$
-\text{mob}_f = \frac{(d_o + d_n)\,\text{mob}_o\,\text{mob}_n}
-{d_o\,\text{mob}_n + d_n\,\text{mob}_o + 10^{-30}(d_o + d_n)} .
-$$
-
-The guard lies far below the mobility of any permeable solid (κ = 10⁻¹⁸ m² and
-μ = 5·10⁻⁵ Pa·s give 2·10⁻¹⁴), and the mean goes to zero continuously as either
-side's mobility vanishes: an impermeable cell is an infinite series resistance,
-so gas cannot cross into it, and the face's derivative stays finite.
+`BRUGGEMAN` is rejected for permeability. State differentiation includes
+matrix weights, property laws, pore geometry and endpoint blending. Interior
+faces match total flux from the two half paths; independently averaging
+permeability and transfer would not preserve mixed-mechanism paths (§9.6).
 
 ---
 
@@ -4081,7 +3365,7 @@ absorbed heater flux from the temperature-dependent emission: an emissivity that
 falls with temperature (integrating-sphere data for virgin wood, for instance)
 does not drag the absorbed cone flux down with it. $a_{\text{eff}}$ is consumed
 by a `RadiativeFluxBC` with `absorptivity = nothing`: in the surface balance of
-its face under `NO_RADIATION` and `SURFACE_ABSORPTION` (§12.2.6), and under
+its face under `NO_RADIATION` and `SURFACE_ABSORPTION` (§5.8.2), and under
 `BEER_LAMBERT` as the fraction of the incident flux that enters the first live
 cell, the absorptivity of that cell (`incident_intensity`,
 `src/Kernels/radiation.jl`; §8.3). Surface emission always uses
@@ -4148,7 +3432,7 @@ high-`T` limit), the opposite of liquid behaviour. It is valid roughly over
 ### Material-supplied viscosity
 
 The air constants are only the **default**. Each `Material` carries its own
-pore-gas viscosity curve in the `gas_viscosity` field, and under Darcy–Fick
+pore-gas viscosity curve in the `gas_viscosity` field, and under gas
 transport the state mapping evaluates it at the cell's trial temperature and
 floors the result smoothly at `MU_FLOOR`,
 `μ_i = smooth_floor(material.gas_viscosity(T_trial,i), 10⁻¹² Pa·s)`, the
@@ -4165,11 +3449,11 @@ directly:
 ```julia
 using Pyrolysis
 
-virgin = SolidComponent(:virgin, ρ = 500.0, c = 1500.0, k = 0.15, κ = 1e-15,
+virgin = SolidComponent(:virgin, ρ = 500.0, c = 1500.0, k = 0.15, λ=2e-5, κ = 1e-15,
                         ρ_intrinsic = 1500.0)
-char = SolidComponent(:char, ρ = 150.0, c = 1100.0, k = 0.08, κ = 1e-12,
+char = SolidComponent(:char, ρ = 150.0, c = 1100.0, k = 0.08, λ=2e-5, κ = 1e-12,
                       ρ_intrinsic = 1500.0)
-gas = GaseousComponent(:gas, M = 0.03, c = 1500.0, k = 0.03, λ = 1e-5)
+gas = GaseousComponent(:gas, M = 0.03, c = 1500.0, k = 0.03,)
 wood = Material(
     name = :wood,
     components = (virgin, char, gas),
@@ -4217,8 +3501,7 @@ would be evaluated in the same place, the state mapping — see §5.16 item 1.
 
 ## 5.10 Chapman–Enskog binary diffusivity
 
-For materials where an explicit per-component `λ_j` is not supplied, the package
-can compute a first-principles binary diffusion coefficient from
+The package provides a binary molecular diffusion estimate from
 **Chapman–Enskog kinetic theory** (Bird, Stewart & Lightfoot). For a species `A`
 diffusing through a background gas `B` (taken as air),
 
@@ -4236,7 +3519,7 @@ with `T` in K, `M_A, M_B` in **kg·mol⁻¹**, `P` in **Pa**, `σ_{AB}` in **Å*
 (`effective_properties.jl`). It is not a property law, so it carries its own
 temperature floor: it evaluates at `max(T, 100 K)` (`T_GAS_PROPERTY_FLOOR`),
 which keeps `T^{3/2}` real at any trial temperature. Besides serving as the
-first-principles estimate of a component's `λ` (§5.10.3), it supplies the gas
+estimate for explicit molecular reference data (§5.10.3), it supplies the gas
 diffusivity of the blowing models of a `ConvectiveBC` when a species carries
 neither an explicit diffusivity nor Fuller diffusion volumes
 (`src/BoundaryConditions/blowing.jl`; §12.3.3). The prefactor and unit handling deserve
@@ -4321,94 +3604,36 @@ estimates** suitable for organic vapours; they have **not** been validated
 against tabulated LJ parameters for the specific multi-component gas mixtures that
 arise in pyrolysis, and precise values should be supplied when available (§5.16).
 
-### 5.10.3 Conversion to a gas-transfer coefficient
+### 5.10.3 Transport-model inputs
 
-The model's diffusive flux is written in terms of a transfer coefficient `λ`
-[m²·s⁻¹] with the convention `J = −λ ∂ξ/∂x` (the gas-density factor is folded
-into `λ`), so for gas-in-gas diffusion `λ ≈ D` is the consistent
-identification: assign the `chapman_enskog_diffusivity` value (optionally
-porosity/tortuosity-corrected, and optionally wrapped in a temperature-dependent
-property function) as the gaseous component's `λ`. There is no separate
-conversion routine — the identification is one-to-one (§9 derives the precise
-volume-fraction-gradient flux that `λ` multiplies).
+A molecular diffusivity estimate can inform the explicitly supplied `D_ref`
+of `DustyGas`, with its `T_ref` and `P_ref`. That model assumes one common
+molecular diffusivity and derives species Knudsen coefficients from molar
+mass and pore diameter. A fitted lumped coefficient belongs to the condensed
+matrix and is superficial; its numerical value must respect that definition.
 
 ---
 
-## 5.11 No per-species transport scaling
+## 5.11 Species dependence
 
-The effective gas-transfer coefficient `λ_eff` of §5.6 is a property of the
-**mixture**, and the gas flux kernels apply the same face value to every gas
-species (§9.2). There is no kinetic-theory per-species scaling of the diffusive
-flux: a light gas and a heavy gas in the same simulation diffuse identically.
-Species-faithful magnitudes enter only through the values the user assigns to
-the component `λ_j(T)` properties — for which the Chapman–Enskog estimate of
-§5.10 is the first-principles starting point. (The nomenclature symbol `M_ref`
-appears only inside the Chapman–Enskog combining rules of §5.10.)
+`LumpedTransfer` uses one superficial matrix coefficient for all partial
+pressure potentials. `DustyGas` has $K_j\propto M_j^{-1/2}$ and couples all
+gas fluxes through a common molecular-friction law. Species mass flux is
+$M_j$ times molar flux. Neither model derives matrix weights from gas loading.
 
 ---
 
-## 5.12 Face averaging: distance-weighted harmonic mean
+## 5.12 Conductive averaging and gas interface continuity
 
-The cell-centered transport properties (`k`, `λ`, and the Darcy mobility `κ/μ`)
-must be transferred to **faces** to form the finite-volume fluxes (§13). For a
-conserved flux crossing a material interface, the correct face value is the one
-that preserves flux continuity, which makes the property behave as a
-**resistance in series**. With distances `d_L, d_R` from the two cell centers to
-the face, the **distance-weighted harmonic mean** is
-
-$$
-\varphi_{\text{face}}
-\;=\; \frac{d_L + d_R}{\,d_L/\varphi_L + d_R/\varphi_R\,} .
-\tag{5.28}
-$$
-
-The derivation: the conductance of each half-cell along the flux path is
-`φ/d`, the two resistances `d_L/φ_L` and `d_R/φ_R` add, and the effective face
-property over the total span `d_L + d_R` is (5.28). On a uniform mesh
-`d_L = d_R` and (5.28) reduces to the standard harmonic mean
-`2 φ_L φ_R/(φ_L + φ_R)`. On a stretched mesh (e.g. boundary refinement) the
-distance weighting keeps the steady flux through a piecewise-constant property
-exact whatever the two spacings, where the unweighted mean would not.
-
-The kernels evaluate (5.28) in a guarded product form,
-`guarded_harmonic_mean(a, b, d_a, d_b, η)` (`effective_properties.jl`),
-
-$$
-\varphi_{\text{face}}
-\;=\; \frac{(d_L + d_R)\,\varphi_L\,\varphi_R}
-{d_L\,\varphi_R + d_R\,\varphi_L + \eta\,(d_L + d_R)} ,
-\tag{5.29}
-$$
-
-which is smooth in every argument for non-negative values and positive
-distances. Writing (5.28) as `H`, (5.29) is `H/(1 + η/H)`: it equals the
-resistance mean to a relative `η/H`, and it goes to zero continuously, with a
-finite slope, as either value vanishes, instead of being cut off below a
-threshold (for `d_R = 3 d_L` the slope with respect to `φ_L` at `φ_L = 0` is
-`(d_L + d_R)/d_L = 4`). The guard `η` carries the property's units and lies far
-below its physical values: `FACE_MEAN_GUARD = 1e-20` for the conductivity and
-the gas-transfer coefficient, `MOBILITY_GUARD = 1e-30` m²·Pa⁻¹·s⁻¹ for the Darcy
-mobility (§5.7.4).
-
-> **Implementation note.** The face means are formed inside the kernels, on the
-> interior faces between two live cells only (`ConductionKernel`,
-> `src/Kernels/conduction.jl`, for `k`; `GasTransportKernel`,
-> `src/Kernels/gas_transport.jl`, for `λ` and the mobility); nothing is cached
-> between evaluations. The distances are the center-to-face distances of the
-> current geometry along the face normal (so the averaging follows a moving
-> mesh), each smoothly floored at `10⁻⁸` of its reference value
-> (`DISTANCE_FLOOR_FRACTION`), so an inverted trial mesh keeps finite fluxes. A
-> boundary face takes no mean: its flux reads the boundary cell's own property
-> (§7.1.3, §9, §12). On a mesh of more than one dimension the conduction face
-> tensor is the face mean `k_f` times the distance-weighted mean of the two
-> cells' dimensionless conductivity tensors (§7.1.3). The harmonic mean is
-> applied to `λ` itself, **not** to the product `λρ` that a
-> mass-fraction-gradient discretization `J = −λρ ∂Y/∂x` would average: the
-> volume-fraction-gradient flux used by the gas transport (§9) carries the
-> density dependence in the `ξT` driving potential and averages `λ` alone.
-
-The same resistance-in-series averaging is used for the mobility at faces
-(§5.7.4).
+The conductive face coefficient uses the distance-weighted harmonic mean,
+$k_f=(d_L+d_R)/(d_L/k_L+d_R/k_R)$, with its finite trial extension. This
+combines two conductive resistances in series. Pore gas faces instead match
+the total species flux through two half-cell paths (§9.6). For an isolated
+linear wall channel this reduces to the series resistance
+$R(d_LT_L/K_{j,L}+d_RT_R/K_{j,R})$. The coupled wall/molecular/Darcy law
+requires the interface pressure state and cannot generally be represented
+by separate harmonic means of its mechanisms. All distances use current
+geometry, including ALE motion.
 
 ---
 
@@ -4436,14 +3661,16 @@ $$
 
 with
 
-- `δ_i = reltol · ε_m · m^s_i(0)` the cell's positive-part scale, equal to its
+- `δ_i = reltol · ε_m · m^s_i(0)` for condensed components, equal to their
   mass absolute tolerance (`reltol` and `threshold` of the solve, `m^s_i(0)` the
-  cell's initial condensed mass; `src/States/tolerances.jl`);
+  cell's initial condensed mass; `src/States/tolerances.jl`). For gas properties
+  and transport, use the current pressure-budget scale `δ_{j,i}` of §9.10;
+  the separate caloric extension keeps its reference-mass scales;
 - `Ṽ_i = smooth_floor(V_i, 10⁻⁸ V_i(0))` the smoothly floored cell volume (`ds.V_eval`);
 - `smooth_clamp(x, lo, hi, w)` constant outside `[lo, hi]`, the identity on
   `[lo + w, hi − w]`, and the cubic join `lo + w t²(2 − t)`, `t = (x − lo)/w`
   (mirrored at `hi`) between; `T_trial` is therefore `T_i` on every physical
-  state (`trial_temperature`, `src/States/guards.jl`);
+  state (`trial_temperature`, `src/Materials/guards.jl`);
 - `smooth_floor(x, a)` equal to `a` at and below `a`, to `x` at and above `2a`,
   and to the cubic `a(1 + 2t² − t³)`, `t = x/a − 1`, between.
 
@@ -4451,31 +3678,21 @@ Each guard is C¹ and is exactly the identity on the physical states the
 tolerances can distinguish, so a trial state outside the physical domain still
 has finite properties with finite derivatives, while the domain test reads the
 unguarded quantities (§15.5.4). The kernels read the signed concentrations
-`ξ_{j,i} = m_{j,i}/Ṽ_i` where a sign matters (the reaction rates, §6; the
-gas fluxes, §9); the property laws see only `ξ⁺`.
+`ξ_{j,i} = m_{j,i}/Ṽ_i` in the reaction rates (§6) and relative solid-motion
+fluxes (§11); pore-gas transport and the property laws read `ξ⁺`.
 
-### 5.13.2 The cell properties
+### 5.13.2 Cell properties
 
-| Field | Symbol | Units | Evaluated as | Filled |
-|---|---|---|---|---|
-| `cp_sum` | `C_i` | J·K⁻¹ | (5.10): `Σ_j m_{j,i} c_{p,j}(T_trial)`, smoothly floored at `ρc_{p,floor} V_i(0)` | always |
-| `h` | `h_j(T_i)` | J·kg⁻¹ | (5.11), at the cell temperature itself | always |
-| `k` | `k_eff` | W·m⁻¹·K⁻¹ | `effective_conductivity(ξ⁺, T_trial; skip_absent = Val(true))` (§5.5), smoothly floored at `10⁻⁶` | always |
-| `ε` | `ε_eff` | – | `mixture_emissivity(ξ⁺, T_trial)` (5.22) | always |
-| `a` | `a_eff` | – | `mixture_absorptivity(ξ⁺, T_trial)` (5.22b) | always |
-| `α` | `α_eff` | m⁻¹ | `effective_absorption(ξ⁺)` (5.23) | `BEER_LAMBERT` |
-| `λ` | `λ_eff` | m²·s⁻¹ | `effective_gas_transfer(ξ⁺, T_trial)` (5.17) | Fickian or Darcy–Fick transport |
-| `φ` | `φ` | – | `smooth_floor(1 − skeletal_volume_fraction(ξ⁺, T_trial), 10⁻¹²)` (§5.3) | Darcy–Fick transport |
-| `P` | `P` | Pa | `ideal_gas_pressure(ξ⁺, T_trial, φ)` (§9) | Darcy–Fick transport |
-| `mob` | `κ/μ` | m²·Pa⁻¹·s⁻¹ | `effective_permeability(ξ⁺, T_trial, φ) / smooth_floor(μ(T_trial), 10⁻¹²)` (§5.7.4) | Darcy–Fick transport |
+`derive!` evaluates conductivity, emissivity, absorptivity, caloric properties
+and, when present, radiation absorption. Every gas-bearing material also
+gets the common physical/trial pore state: porosity, intrinsic gas densities,
+partial and total pressures, and fractions. The declared transport model
+supplies gas-only wall coefficients, molecular resistance and Darcy mobility.
+A sealed gas material retains its EOS. Gas-free materials use the internal
+`NoGasTransport` specialization. Properties and derivatives use the same
+state and constitutive branches.
 
-The gas transport of a problem (`NoGasTransport`, `FickTransport` or
-`DarcyFickTransport`, chosen at setup, §5.6) and the radiation model are type
-parameters of the setup, so the selection costs nothing at run time; the
-buffers of the conditional fields exist for every problem and are filled only
-when their consumers exist. The mixture density is not stored: its one
-consumer, the film flux of a mass boundary condition, evaluates it at the
-boundary cell (§5.2).
+---
 
 ### 5.13.3 Buffers and element types
 
@@ -4495,48 +3712,33 @@ iteration works on scalars.
 
 ## 5.14 Comparison to ThermaKin2Ds, Gpyro, and FDS
 
-The mixing-rule choices map cleanly onto the established condensed-phase pyrolysis
-codes. Mapping their notation onto ours on first use: ThermaKin's stoichiometric
-`θ_i^j` is our `ν_{i,j}`, Gpyro's volume fraction `X_α` is our `v_j`, Gpyro's
-mixture average `\barρ` corresponds to our swelling mixture density `ρ`, and the
-FDS/Gpyro pre-exponential `Z` is our `A_i` (§2).
+**Heat capacity.** TK Eqs. 2 and 17 include gas sensible storage.
+GP Eqs. 11–12 mass-weight the condensed heat capacity and enthalpy; gas
+storage is separate and enters thermal equilibrium through `FULL_QSG`
+(Eq. 65). FDS's solid heat capacity sums condensed component contributions.
+Pyrolysis.jl sums all component masses times their heat capacities.
 
-**Effective heat capacity / gas storage.** ThermaKin (Eq. 17) keeps the gas
-sensible-storage term — it sums `Σ_j ξ_j c_j` over *all* components, gas included
-— and Pyrolysis.jl does the same in (5.9). Gpyro's default thermal-equilibrium
-form drops gas storage from `ρc_p` (its `FULL_QSG` option restores it) and FDS
-carries no in-depth gas; both are approximations of (5.9) that Pyrolysis.jl
-does not make (§5.4.2).
+**Conductivity and emissivity.** TK Eqs. 8–10 blend volume-weighted parallel
+and series conductivity limits, corresponding to our `WEIGHTED` rule when
+the volume fractions match. TK's mixture gas swelling factor (Eqs. 3–4)
+is not generally our independent $\gamma_j$. In particular, `L SWELLING: 0`
+does not remove liquid volume from TK Eq. 3. GP Eqs. 7–8 volume-average
+condensed conductivities, including an optional pore-radiation term.
+Our `PARALLEL` rule matches that averaging only on the same volume basis.
+Additional mixing choices do not establish a more accurate physical model.
 
-**Conductivity / emissivity basis.** ThermaKin determines surface properties from
-the *solid* matrix: "when γ = 0, gaseous components do not contribute to the
-thermal conductivity" (Eqs. 8–10). Pyrolysis.jl reproduces this with the
-**swelling-weighted volume-fraction basis** (5.4) for both `k_eff` and `ε_eff`;
-the `γ_j·ξ_j/ρ_j` weighting reduces exactly to ThermaKin's `γ = 0` rule for
-canonical gases (zero weight) and condensed phases (full weight).
+**Permeability.** GP Eq. 15 volume-averages prescribed component
+permeabilities. It does not specify our Carman–Kozeny closure. In Pyrolysis.jl
+that closure is an alternative to component mixing (§5.7).
 
-**Conductivity blend.** ThermaKin blends the series and parallel limits with a
-weighting parameter — our `WEIGHTED` rule (5.14) with `β` is the direct analogue
-(`k = β k_∥ + (1−β) k_series`), default `β = 0.5`. Gpyro homogenizes by
-volume-fraction averaging (its `X_α`-weighted properties) with power-law
-temperature dependence built into the component properties; our `PARALLEL` rule
-(5.13, the volume-weighted arithmetic mean) is the volume-fraction average, and
-arbitrary `k_j(T)` (including power laws) is supported through the property
-functions (§4). The **BRUGGEMAN** effective-medium option (5.15) is an addition
-beyond the volume-average/blend menu of ThermaKin and Gpyro, motivated by the
-self-similar char microstructure.
-
-**Permeability.** Gpyro uses a porosity-dependent permeability for its Darcian
-gas transport; our **Carman–Kozeny** closure (5.20) is the canonical
-porosity-based form (Kozeny constant 180), and is offered alongside component
-mixing as a mutually exclusive alternative.
-
-**Radiation properties.** FDS works with a solid absorption coefficient `κ_s`
-(our `α`, §2) and a surface emissivity/absorptivity tied by Kirchhoff's law; our
-`α_eff = Σ ξ_j α_j` (5.23) and `ε_eff` (5.22) provide exactly these. The surface
-absorptivity `a_eff` (5.22b) equals `ε_eff` bit-for-bit unless a component sets
-its own `surface_absorptivity`, which decouples the absorbed heater flux from the
-emission (§5.8.2).
+**Absorption units.** TK Eq. 11 and Pyrolysis.jl use mass-specific component
+coefficients $\alpha_j$ [m²/kg], with
+$\alpha_{\mathrm{eff}}=\sum_j\xi_j\alpha_j$ [m⁻¹]. Gpyro's $\kappa_i$
+(GP Eqs. 13–14) and FDS's $\kappa_{s,i}$ are already per length and are
+volume-averaged. Match the **effective optical depth**. For a single pure
+component at a specified density, $\alpha_j=\kappa_i/\rho_i$; this does not
+establish a universal constant conversion for a changing mixture.
+The radiation models themselves still differ (§8.7).
 
 ---
 
@@ -4562,10 +3764,12 @@ BRUGGEMAN is rejected for permeability (§5.7.3).
 
 ### 5.15.2 Conductivity, gas-transfer, and other derivatives
 
-For `k_eff`, `λ_eff`, `ε_eff`, `a_eff`, and `α_eff`, the temperature dependence
-enters through the component laws `k_j(T)`, `λ_j(T)`, `ε_j(T)` (§4.5) and the
-composition dependence through the volume fractions (5.3)/(5.4) and the void
-blend (for `α_eff`, through `ξ` directly). Because the properties are evaluated
+For `k_eff`, `ε_eff`, `a_eff`, and `α_eff`, temperature dependence enters
+through the component laws (§4.5), and composition dependence through the
+thermal volume fractions and their void blend (for `α_eff`, through `ξ`
+directly). Gas transfer and permeability use condensed bulk-occupancy weights
+and the explicitly configured transport endpoint window. Their derivatives
+follow those closures, including temperature-dependent pore geometry. Because the properties are evaluated
 at `ξ⁺ = m⁺/Ṽ`, the derivatives with respect to the masses carry the slope
 of the positive part, and on a moving mesh the derivatives with respect to the
 node positions arrive through the cell volume. The Bruggeman `k_eff` is
@@ -4582,11 +3786,10 @@ The remaining non-smooth points of the mixing rules are thresholds and
 branches, at which the derivative is that of the branch the value takes:
 
 - the Carman–Kozeny cap `min(·, ℓ²)` (a kink of `dκ/dφ` at `φ = 0.9328`);
-- the `10⁻²⁰` thresholds of the conductivity and gas-transfer series sums and
-  the `10⁻³⁰` threshold of the permeability series sum, with the switch to an
-  infinite series resistance once an active phase falls below its threshold;
-- the empty-cell guards of the volume fractions and of the mixture density
-  (`< 10⁻²⁰`);
+- the numerical thresholds of thermal conductivity mixing;
+- exact zero coefficients in a participating transport series channel, whose
+  reachable support changes are validated at setup (§9);
+- the empty-cell guards of thermal volume fractions (`< 10⁻²⁰`);
 - the Bruggeman branch selections (active and insulating phases, the step
   limiter, the collapse below `10⁻³⁰`), locally constant at a converged
   interior solution.
@@ -4615,7 +3818,7 @@ verification and validation discussion of §18.
    viscosity is evaluated, in the pore-gas properties of the state mapping
    (`_gas_properties!`, `src/States/derived.jl`), from `ξ⁺` and `T_trial`, and
    the colored Jacobian would carry its composition derivatives with no further
-   change. A Darcy–Fick test with more than one gas component would be needed to
+   change. A gas test with more than one gas component would be needed to
    exercise it, since a one-species mixing rule is the identity.
 
 2. **Unvalidated Chapman–Enskog LJ defaults.** The heuristic `σ(M)` and
@@ -4742,9 +3945,9 @@ well-mixed ideal gas of identifiable molecules. Working in $\xi_j$ sidesteps the
 need for a molar mass of the solid, makes $r_i$ directly the mass conversion rate,
 and lets the stoichiometric coefficients $\nu_{i,j}$ be pure **mass** yields that
 sum to unity (§6.5). The price is that $A_i$ inherits whatever units make the
-product dimensionally consistent (§6.4); this is the universal convention of the
-condensed-phase pyrolysis literature (ThermaKin, Gpyro, FDS all do the same — see
-§6.9).
+product dimensionally consistent (§6.4). ThermaKin and FDS also use mass-based
+rates, but their factors and stoichiometric bases differ; Gpyro's conversion
+rate includes a cumulative-mass normalization (§6.9).
 
 ### 6.1.2 Discrete (per-cell) form
 
@@ -4784,7 +3987,8 @@ spatial operator inside the reaction term**. Reactions are local (point-wise in
 space); all spatial coupling enters through transport (conduction §7, gas
 diffusion/Darcy §9) and through the mesh motion (§11). This is the
 cell-as-batch-reactor view: each control volume behaves, kinetically, like an
-isolated TGA sample, identical to the Gpyro and FDS interpretation (§6.9).
+isolated TGA sample. This local evaluation is also used in Gpyro and FDS,
+although their oxygen factors and rate normalization differ (§6.9).
 
 The single-reaction function is `reaction_rate` (src/Physics/kinetics.jl). It
 is fully scalar-type-generic (`<:Real` arguments), so the dual numbers of the
@@ -5075,8 +4279,8 @@ or for an entire solve, per material:
 pmma = Material(
     name = :PMMA,
     components = (
-        SolidComponent(:virgin, ρ = 1190.0, c = 1420.0, k = 0.21, ε = 0.86),
-        GaseousComponent(:MMA, M = 0.100, c = 1500.0, k = 0.02, λ = 1e-5),
+        SolidComponent(:virgin, ρ = 1190.0, φ=.01, c = 1420.0, k = 0.21, ε = 0.86, λ=1e-5),
+        GaseousComponent(:MMA, M = 0.100, c = 1500.0, k = 0.02,),
     ),
     reactions = (Reaction(:decomposition, :virgin => :MMA; A = 8.5e12, E = 188e3,
                           h = 870e3),),
@@ -5443,8 +4647,8 @@ $h_i$ is referenced.
 A heat of reaction is only defined relative to a **datum**: $h_i$ may be quoted
 
 - **at the local reaction temperature** — $h_i(T) = \sum_j \nu_{i,j}\,h_j(T)$,
-  the heat a DSC measures at the decomposition temperature, and the usual
-  meaning of inverse-calibrated (ThermaKin/Gpyro-style) effective heats; or
+  the reaction-temperature convention used here; an imported DSC or fitted
+  heat needs its units, reaction basis and datum checked explicitly (§6.9); or
 - **at the fixed ambient datum** $T_{\text{ref}} = 298.15$ K —
   $h_i = \sum_j \nu_{i,j}\,h_j(T_{\text{ref}})$, the formation-enthalpy style.
 
@@ -5532,10 +4736,10 @@ the product-yield sum; for $N_{\mathrm{in}} > 1$ `mass_balance_error` returns
 returns `false` if $\varepsilon_{\mathrm{mb}} > $ `tol`. `validate_problem`, which
 `solve` calls with `strict = false` unless `validate = false`, checks among other
 things (the mesh, the boundary conditions, the time span, the initial
-conditions, the initial porosity of a Darcy–Fick problem) that the material has
+conditions, the initial porosity of a gas problem) that the material has
 at least one component and that every reactant and product index lies in
 $1..N_C$ (numeric reactions are not index-checked when the `Material` is built),
-and warns about degenerate Fickian gas transport (§5.6). Called by the user with
+and checks initial physical pore volume and gas-boundary data (§9). Called by the user with
 `strict = true` (`Pyrolysis.validate_problem(problem; strict = true)`), it also
 runs `verify_stoichiometry` over every reaction of the material.
 
@@ -5551,182 +4755,107 @@ names a non-existent component errors with a clear message before any solve.
 
 ## 6.9 Comparison to ThermaKin2Ds, Gpyro, and FDS
 
-All three reference codes solve essentially the same condensed-phase chemistry —
-mass-concentration Arrhenius kinetics with mass-yield stoichiometry — and
-Pyrolysis.jl deliberately reproduces their physics. The differences are in
-generality, in the gating mechanism, and most consequentially in the **sign and
-basis of the heat of reaction**. We map each code's notation to ours on first use.
-
 ### 6.9.1 ThermaKin2Ds
 
-ThermaKin (Stoliarov & Lyon, *ThermaKin2Ds Reference v2*, Eq. 5) writes a reaction
-as a generalised two-reactant, two-product step
+TK Eqs. 5–6 define $\theta_1 C_1+\theta_2 C_2\to\theta_3 C_3+
+\theta_4 C_4+h$ and
 
-$$
-\theta_1\,\text{COMP1} + \theta_2\,\text{COMP2} \to
-\theta_3\,\text{COMP3} + \theta_4\,\text{COMP4} + h,
-$$
+$$r_{\mathrm{TK}}=A_{\mathrm{TK}}e^{-E/(RT)}\xi_{C_1}\xi_{C_2},$$
 
-with stoichiometric coefficients $\theta_i^{\,j}$ (their notation) which map to our
-$\nu_{i,j}$ (overload note A2 — $\theta$ is reserved for strain rate in our
-nomenclature). The rate is **explicitly bimolecular** (ThermaKin Eq. 6):
+where the second concentration factor is set to one for a single reactant.
+Pyrolysis.jl allows an arbitrary nonnegative concentration order for its
+single mass-bearing reactant; it does not support the general bimolecular
+source. A sequence of single-reactant steps is not in general equivalent to
+a bimolecular rate law.
 
-$$
-r = A\,\exp\!\Bigl(-\frac{E}{RT}\Bigr)\,\xi_{\mathrm{COMP1}}\,\xi_{\mathrm{COMP2}},
-\qquad \xi = mf\cdot\rho,
-$$
+TK applies hard lower/upper temperature limits. Pyrolysis.jl uses smooth
+tanh gates and a concentration depletion limiter. Even when the bare rates
+match, these modifiers can produce different near-onset and near-depletion
+behavior. Smoothness is our implementation choice, not a prerequisite for
+all implicit solvers or all uses of automatic differentiation.
 
-with the convention that "in the absence of a second reactant, $\xi_{\mathrm{COMP2}}$
-is set to 1." Pyrolysis.jl differs in two ways. First, our rate is **n-ary in the
-order but single-reactant in the mass**: we allow an arbitrary order $n_{i,j}$ on
-the single supported reactant (a strict generalisation of ThermaKin's
-unit-exponent factor for COMP1), but we do not support a genuine second
-mass-bearing reactant (§6.10). ThermaKin's COMP2 mechanism is precisely what our
-multi-reactant extension would need. Second, ThermaKin's temperature limit is a
-**hard cutoff** ("if temperature decreases below the lower limit or increases above
-the upper limit, the rate of reaction is set to 0"), whereas we use a smooth tanh
-ramp (§6.2), which the colored Jacobian and the integrators' linearization
-require. ThermaKin's species/heat assembly
-($\partial\xi_j/\partial t = \sum_i \theta_i^{\,j} r_i + \text{transport}$, their
-Eqs. 15–16, and heat $= h\,r$) is identical in form to our (6.5) and (6.8).
-
-The pivotal difference is the **heat-of-reaction sign**. ThermaKin states
-explicitly: "Following a convention frequently adopted in pyrolysis studies, a
-positive $h$ is used to represent an **exothermic** reaction." This is the
-**opposite** of our storage convention ($h>0$ endothermic). The two are reconciled
-by the minus sign in our $Q_{\mathrm{rxn}} = -\sum_i h_i r_i$: a ThermaKin input
-of $h_{\mathrm{TK}} = +870$ kJ·kg⁻¹ (their exothermic) corresponds to our
-$h = -870$ kJ·kg⁻¹, and both yield a positive (heating) source. A user porting a
-ThermaKin material **must flip the sign of every heat of reaction.** (ThermaKin
-also notes its reaction parameters are not constrained by mass or energy
-conservation — the user owns that; Pyrolysis.jl instead enforces mass balance at
-construction, §6.5.3.)
+TK's heat source is $+h_{\mathrm{TK}}r_{\mathrm{TK}}$, positive for an
+exothermic reaction; ours is $-h r$. For a single-reactant TK step with
+$\theta_1=1$, the conversion is $h=-h_{\mathrm{TK}}$. If
+$\theta_1\ne1$, normalize the rate and yields too:
+$r=\theta_1r_{\mathrm{TK}}$, $A=\theta_1A_{\mathrm{TK}}$,
+$\nu_j=\theta_j/\theta_1$, and $h=-h_{\mathrm{TK}}/\theta_1$.
+This is an algebraic mapping of TK Eqs. 5–6 to our unit-consumption source,
+not an implementation of two-reactant chemistry. Pyrolysis.jl validates the
+single-reactant product-yield sum by default; the low-level constructor can
+disable that validation (`validate_mass=false`).
 
 ### 6.9.2 Gpyro
 
-Gpyro (Lautenberger, *Gpyro Technical Reference*) tracks a **conversion** variable
-$\alpha_{A_k}$ for condensed-phase reactant $A_k$ and writes the $n^{\text{th}}$
--order heterogeneous rate (their Eq. 39, with $Z_k \to A_i$, $E_k\to E_i$,
-$n_k\to n_{i,j}$, and the Gpyro volumetric rate $\dot\omega''' \to r$):
+GP Eqs. 35–40 define a cumulative available reactant mass per area
+$M_\Sigma=(\bar\rho Y_A\Delta z)_\Sigma$, conversion
+$1-\alpha_A=\bar\rho Y_A\Delta z/M_\Sigma$, and
 
 $$
-r_k = f(\alpha_{A_k})\,
-\frac{(\bar\rho\,Y_{A_k}\Delta z)_\Sigma}{\Delta z}\,
-Z_k\,e^{-E_k/RT}\,g(Y_{\mathrm{O_2}})\,H(T - T_{\mathrm{crit},k}),
-\qquad f(\alpha_{A_k}) = (1-\alpha_{A_k})^{n_k}.
+r_k=(1-\alpha_A)^{n_k}\frac{M_\Sigma}{\Delta z}
+Z_k e^{-E_k/(RT)}g(Y_{O_2})H(T-T_{\mathrm{crit},k}).
 $$
 
-Two Gpyro features have no analogue in Pyrolysis.jl: the oxygen-sensitivity factor
-$g(Y_{\mathrm{O_2}})$ (their Eq. 40 — our kinetics have no $Y_{\mathrm{O_2}}$
-dependence, §6.10), and the rich library of specialised reaction models
-$f(\alpha)$ (nucleation, diffusion, Avrami, etc., their Table 1 — we offer only the
-$n^{\text{th}}$-order power law of (6.4)). Gpyro's critical temperature
-$H(T-T_{\mathrm{crit},k})$ is again a **hard** Heaviside, where we use a tanh ramp.
+For $n_k=1$, oxygen-independent kinetics and an open gate, the bare rate
+reduces to $\xi_A Z_k e^{-E_k/(RT)}$. It matches our unregularized
+first-order law, subject to our limiter and gate settings. For $n_k\ne1$
+there is an additional factor $(M_\Sigma/\Delta z)^{1-n_k}$: copying $Z_k$
+to $A$ does not generally reproduce the rate. Gpyro also provides other
+conversion models and local oxygen dependence absent here.
 
-The conversion formalism is worth dwelling on because it reveals when the two codes
-agree. Gpyro normalises by the cumulative species mass
-$(\bar\rho Y_{A_k}\Delta z)_\Sigma$ (the initial plus all subsequently formed mass
-of $A_k$), so that each cell "behaves as if it was a TGA sample." When $n_k=1$ and
-$n_{\mathrm{O_2},k}=0$, Gpyro's rate collapses (their Eq. 41) to
-
-$$
-r_k = \bar\rho\,Y_{A_k}\,Z_k\,e^{-E_k/RT} = \xi_{A_k}\,A_i\,e^{-E_i/RT},
-$$
-
-since $\bar\rho Y_{A_k} = \xi_{A_k}$ is exactly our mass concentration. **For
-first-order, oxygen-insensitive kinetics with no specialised model, our (6.1) and
-Gpyro's rate are identical** — the conversion bookkeeping reduces to plain mass
-concentration. Gpyro's stoichiometry (solid fraction $\mathrm{SF}_k$ and the
-gas-yield split, their Eqs. 23–24) is a parameterisation of the same mass-balanced
-yields we store directly as $\nu_{i,j}$; Gpyro's $\chi_k$ swelling parameter
-belongs to the volume-change model (§10), not the kinetics.
-
-On the **heat of reaction**, Gpyro (Eq. 43) splits the enthalpy into a solid part
-$\Delta H_{\mathrm{sol},k}$ and a volatilisation part $\Delta H_{\mathrm{vol},k}$
-and forms $\dot Q_{s,k}''' = -\dot\omega_{fB,k}'''\Delta H_{\mathrm{sol},k} -
-\dot\omega_{fg,k}'''\Delta H_{\mathrm{vol},k}$. Setting
-$\Delta H_{\mathrm{sol},k}=\Delta H_{\mathrm{vol},k}=\Delta H_k$ recovers (their
-Eq. 45) the per-reactant form $\dot Q_{s,k}''' = -\dot\omega_{dA_k}'''\Delta H_k$,
-which is **exactly our** (6.8) with $\Delta H_k \equiv h_i$ and
-$\dot\omega_{dA_k}''' \equiv r_i$. Gpyro's sign convention agrees with ours:
-"a positive value of $\Delta H_{\mathrm{vol},k}$ denotes an **endothermic**
-reaction, and a negative value … an exothermic reaction." Our single heat $h_i$ is
-thus Gpyro's per-reactant-consumed heat (the $\Delta H_{\mathrm{sol}} =
-\Delta H_{\mathrm{vol}}$ special case), which Gpyro itself documents as the way to
-specify a heat "per kg of reactant consumed" — precisely our per-first-reactant
-basis (§6.6.1). Gpyro additionally separates sensible-enthalpy transport into the
-$\sum(\dot\omega_f - \dot\omega_d)h_i$ term of its gas energy equation; in
-Pyrolysis.jl that bookkeeping is the sensible enthalpy the gas fluxes carry across
-the faces (§7.4) together with the reaction-temperature datum of $h_i$
-(§6.6.3).
+GP Eqs. 43–45 split reaction heat into condensed-product and volatilized-mass
+parts. The equivalent per-reactant heat is
+$h_k=\mathrm{SF}_k\Delta H_{\mathrm{sol},k}+
+(1-\mathrm{SF}_k)\Delta H_{\mathrm{vol},k}$, with matched sensible-enthalpy
+conventions. Setting the two heats equal is one special case. Positive heat
+is endothermic in both codes. Gpyro gas yields may include gas consumption;
+those oxidative reactions cannot generally be represented by our
+single-reactant source.
 
 ### 6.9.3 FDS
 
-The FDS solid-phase pyrolysis model (FDS *Technical Reference*, Eqs. 7.34–7.35)
-maps most closely term-for-term. With $\alpha,\beta$ the FDS material/reaction
-indices and $\rho_{s,\alpha}\to\xi_j$, $A_{\alpha\beta}\to A_i$,
-$E_{\alpha\beta}\to E_i$, FDS writes
+The FDS 6.11.0 solid-phase chapter and `PYROLYSIS` routine use
 
 $$
-r_{\alpha\beta} = \rho_{s,\alpha}^{\,n_{s,\alpha\beta}}\,
-A_{\alpha\beta}\,e^{-E_{\alpha\beta}/RT_s}\,
-[X_{\mathrm{O_2}}(x)]^{\,n_{\mathrm{O_2},\alpha\beta}}\,
-T_s^{\,n_{t,\alpha\beta}},
+r_{\alpha\beta}=\rho_{s,\alpha}^{n_s}A_{\alpha\beta}
+e^{-E_{\alpha\beta}/(RT_s)}X_{O_2}(x)^{n_{O_2}}T_s^{n_t}.
 $$
 
-a product of a reactant-concentration power, the Arrhenius factor, an oxygen
-power, **and a temperature power** $T_s^{n_t}$. Pyrolysis.jl reproduces the first
-two factors (with the same mass-concentration basis — FDS notes $A_{\alpha\beta}$
-has units 1/s for $n_s=1$, exactly our convention) and omits the oxygen and
-explicit-temperature powers (§6.10). FDS's species production
-$S_\alpha = \sum v_{\alpha,\alpha'\beta} r_{\alpha'\beta}$ (Eq. 7.37) and gas
-production $\dot m_\gamma''' = \sum v_{\gamma,\alpha\beta} r_{\alpha\beta}$
-(Eq. 7.38) with yields $v$ summing to 1 are our (6.5)–(6.6). FDS's chemical heat
-source $\dot q_{s,c}''' = -\sum r_{\alpha\beta} H_{r,\alpha\beta}$ (Eq. 7.42) is
-our (6.8) with $H_{r,\alpha\beta}\to h_i$, and FDS uses the **same** sign as Gpyro
-and Pyrolysis.jl ($H_r > 0$ endothermic). FDS interprets each in-depth cell as a
-virtual TGA sample, matching our cell-as-batch-reactor view.
+Thus the density-order and Arrhenius factors have the same basis as our bare
+single-reactant law. Pyrolysis.jl omits the explicit oxygen and temperature
+powers. FDS's oxygen profile is a prescribed exponential penetration model
+with surface oxygen determined by a mass-transfer balance, not a pore-gas
+species-transport solution. FDS's heat source has our endothermic-positive
+sign, but its temperature-dependent reaction enthalpy accounting must also
+be matched (FDS Appendix P). Older FDS 5 rate normalization must not be
+substituted for this release's formula.
 
-As Gpyro notes, FDS Version 5's kinetics are the special case of Gpyro's Eq. 42
-with $n_{\mathrm{O_2}}=0$, conventional reaction order, and no volume change — and
-therefore also the special case of our (6.1) for first/$n$-th-order
-oxygen-insensitive kinetics.
-
-**Kinetic-parameter recovery from TGA.** A practical FDS capability worth
-reproducing in user workflows is the closed-form estimate of $A_i, E_i$ from a TGA
-peak. Given a reference (peak) temperature $T_p$, the normalised peak mass-loss
-rate $r_p/Y_s(0)$ (s⁻¹), a constant heating rate $\dot T$ (K·s⁻¹), and residue
-yield $v_s$, FDS uses (FDS *User Guide*, Eqs. 9.4–9.5; the Lyon–Stoliarov
-relations)
+**Kinetic-parameter recovery from TGA.** The FDS User's Guide's
+`REFERENCE_TEMPERATURE` / `REFERENCE_RATE` prescription is a first-order
+estimate. With reference rate $r_p/Y_s(0)$ [s⁻¹], temperature $T_p$ [K]
+and heating rate $\dot T$ [K/s], its formulas are
 
 $$
-E_i = \frac{e\,r_p}{Y_s(0)}\,\frac{R\,T_p^2}{\dot T},
-\qquad
-A_i = \frac{e\,r_p}{Y_s(0)}\,e^{E_i/(R\,T_p)},
-\qquad
-\frac{r_p}{Y_s(0)} = \frac{2\dot T}{\Delta T}(1 - v_s),
+E=\frac{e r_p}{Y_s(0)}\frac{RT_p^2}{\dot T},\qquad
+A=\frac{e r_p}{Y_s(0)}e^{E/(RT_p)}.
 $$
 
-with $e$ Euler's number and $\Delta T$ the (triangular) pyrolysis-range width
-(default 80 K), $\dot T$ default 5 K·min⁻¹. These produce a first-order
-$(A_i, E_i)$ pair that, fed into our `Reaction(...)` constructor, reproduces the
-TGA peak — a recommended starting point for cone/TGA calibration (see §18,
-Verification & Validation, and the User Guide).
+In the 6.11.0 `READ_MATL` implementation, an omitted `REFERENCE_RATE`
+is replaced by $2\dot T/\Delta T$ using `PYROLYSIS_RANGE`; this branch
+does not multiply by a residue-yield factor. Defaults are 80 K and 5 K/min
+([source](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/read.f90#L7335-L7351)). FDS input temperatures are in °C; these equations use K.
+These are starting estimates, not an exact fit to a measured TGA peak.
+User Guide §4.9 shows their use to construct a Pyrolysis.jl `Reaction`;
+there is no automatic FDS input importer.
 
 ### 6.9.4 Summary of correspondences
 
-| Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro | FDS |
+| Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro | FDS 6.11.0 |
 |---|---|---|---|---|
-| Rate basis | mass conc. $\xi_j$ | mass conc. $\xi$ | $\bar\rho Y_i$ (= $\xi$) | $\rho_{s,\alpha}$ (= $\xi$) |
-| Reactant factor | $b(\xi_j)^{n_{i,j}}\,g(\xi_j/\xi_{\mathrm{th}})$ (1 reactant) | $\xi_{\mathrm{C1}}\xi_{\mathrm{C2}}$ (bimolec.) | $(1-\alpha)^{n_k}$ + models | $\rho_s^{n_s}$ |
-| Extra factors | — | — | $g(Y_{\mathrm{O_2}})$ | $X_{\mathrm{O_2}}^{n_{\mathrm{O_2}}} T_s^{n_t}$ |
-| Temp. gate | smooth tanh | hard cutoff | hard $H(T-T_{\mathrm{crit}})$ | (none / power) |
-| Stoich. yields | $\nu_{i,j}$, $\sum y=1$ | $\theta_i^j$ | $\mathrm{SF}_k$ / yields | $v$, $\sum v=1$ |
-| Heat sign ($h>0$) | **endothermic** | **exothermic** | endothermic | endothermic |
-| Heat source | $-\sum h_i r_i$ | $+h\,r$ | $-\sum \Delta H_k r_k$ | $-\sum H_r r$ |
-
-The lone sign reversal (ThermaKin's $h>0$ exothermic) is the single most important
-porting hazard; Gpyro and FDS agree with us.
+| Bare reactant factor | one $\xi^n$ | one or two concentrations | conversion model times cumulative available mass/volume | $\rho_s^{n_s}$ |
+| Extra rate factors | smooth gates and depletion limiter | hard temperature limits | oxygen dependence and critical temperature | oxygen and temperature powers, rate limits |
+| Positive heat | endothermic | exothermic | endothermic | endothermic |
+| Porting requirement | unit reactant consumption | normalize stoichiometry and flip heat sign | match conversion normalization and heat basis | match units, rate options and enthalpy datum |
 
 ---
 
@@ -5797,8 +4926,8 @@ forms the discrete divergence, the gas enthalpy flux and its face temperatures, 
 reaction-heat source $Q_{\text{rxn}}$, and the radiation source $Q_{\text{rad}}$ —
 and we trace the residual sequence that produces the energy and mass rows. Particular
 care is taken with the sign conventions of §2 (Nomenclature), with the precise set of
-terms the code includes and excludes, and with why the surface energy balance carries
-no gas-enthalpy term. Where useful, the Pyrolysis.jl forms are mapped to and
+terms the code includes and excludes, and with the conversion between wall-film
+heat and the direct-reservoir energy control surface (§9.9). Where useful, the Pyrolysis.jl forms are mapped to and
 contrasted with ThermaKin2Ds, Gpyro, and FDS.
 
 Index conventions for this chapter follow §2 overload note I1: **$i$ is the cell index**
@@ -6093,18 +5222,18 @@ $\rho c_{p,\text{floor}}V_i(0)$ with $\rho c_{p,\text{floor}} = 10^3$ J·m⁻³�
 equation (5.10)), so that a cell emptied of all mass keeps a finite rate.
 
 The pore gas is at the matrix temperature (one-temperature model, §3.1.2) and its mass is an
-integrated state, so its storage term costs nothing and is kept. Dropping it — the
-*quasi-steady-gas approximation* of Gpyro's default thermal-equilibrium form (restored there
-by `FULL_QSG`) and the implicit convention of FDS, which has no in-depth gas — would be an
-approximation with no benefit. At $1\,\text{atm}$ the in-pore gas heat capacity is a small
+integrated state, so its storage is retained without another energy unknown.
+Gpyro's default thermal-equilibrium exchange neglects gas storage and gas conduction;
+`FULL_QSG` retains both. The standard FDS wall model has no pore-gas inventory. At $1\,\text{atm}$ the in-pore gas heat capacity is a small
 fraction of the matrix heat capacity, from a few hundredths of a percent to about half a
 percent (the estimate is in §5.4.2), scaling with pressure.
 
 The gas enters the energy equation in two places and two places only: its storage in (7.7)
 and the sensible enthalpy its *flux relative to the skeleton* carries across the faces
 (§7.4). The derivation of §3.3.2 shows these two terms, plus the reaction heat with heats
-quoted at the reaction temperature, to be the complete equation — ThermaKin Eq. 17 term for
-term. On a moving mesh the whole $\rho c_p^{\text{eff}}$ rides the mesh with the skeleton, so
+quoted at the reaction temperature, to give our temperature balance. Its gas
+transport terms correspond to those in ThermaKin Eq. 17; the other closures
+still require matching (§7.8). On a moving mesh the whole $\rho c_p^{\text{eff}}$ rides the mesh with the skeleton, so
 there is no mesh-motion term in the energy equation (§11.2.2, §11.2.4).
 
 > **Implementation note.** $C_i$ is the field `cp_sum` of the derived state, evaluated by the
@@ -6264,16 +5393,15 @@ mass flux, each with the face temperature of its own flux:
   \tag{7.14}
   $$
 
-  the linear interpolation of the two cell temperatures to the face, at the cell
-  temperatures themselves. The mass flux it multiplies is computed separately, at the trial
-  temperatures, with the arithmetic mean $\bar T = (T_o + T_n)/2$ in its driving potential
-  (§9).
-- **Boundary face.** The thermal boundary kernel adds $\sum_j F_{j,f}\,h_j(T_s)$ with the
-  outward mass fluxes the gas-transport kernel wrote on that face (the film flux of the mass
-  condition and, under Darcy–Fick transport, the vent the pressure condition drives) at the
-  surface temperature $T_s$ of the face's energy balance, once that balance has fixed it
-  (`_carried_enthalpy`, `src/Kernels/thermal_boundary.jl`; §7.4.3). Gas leaves at the surface
-  temperature.
+  the linear interpolation of the two cell temperatures to the face. The mass
+  flux uses this interface temperature and each half-cell temperature in the
+  flux-matching solve (§9).
+- **Boundary face.** The coupled mass/thermal kernel assembles $E_{out}=H_r-q_r$.
+  Outgoing species carry $h_j(T_s)$ and incoming species carry their specified
+  reservoir enthalpy. An LTE thermal film converts its wall heat by
+  $q_r=q_s+H_r-H_s$, where $H_s=\sum_jJ_jh_j(T_s)$; hence its total energy is
+  also $H_s-q_s$. Adiabatic and prescribed-heat conditions use donor enthalpy
+  directly. No extra outgoing-gas heating sink is added (§9.9).
 - **Relative-flux face** (a moving mesh under a correction). The relative-flux kernel
   (`RelativeFluxKernel`, `src/Kernels/relative_flux.jl`) evaluates the enthalpies at the face
   temperature reconstructed from the same upwind stencil as the face's concentrations (the
@@ -6288,7 +5416,7 @@ The construction has three properties:
    heat-capacity laws (§5.4.3); no heat capacity is evaluated at an intermediate temperature.
 3. **A uniform temperature stays at rest.** On an isothermal field $T_f = T_i$ on every face,
    so the bracket $h_j(T_f) - h_j(T_i)$ of (7.11) vanishes identically, whatever the mass
-   fluxes. This is tested on a stretched mesh with Darcy–Fick transport, a heat capacity
+   fluxes. This is tested on a stretched mesh with gas transport, a heat capacity
    linear in $T$ and non-zero gas fluxes: the temperature rates vanish to $10^{-12}$ relative
    in the temperature form, and the inventory rates equal $\sum_j h_j\,dm_j/dt$ to the same
    accuracy in the inventory form (`test/kernels/test_gas_transport.jl`, "isothermal transport
@@ -6310,47 +5438,16 @@ the cell integral of $-c_{p,g}\mathbf J_g\cdot\nabla T$ in (7.6). On a uniform m
 interpolation (7.14) is the central one; on a stretched mesh its distance weighting keeps it
 exact for a linear temperature field.
 
-### 7.4.3 The surface carries no gas-enthalpy term
+### 7.4.3 Boundary carried energy
 
-The surface boundary condition is a *plain* convective + radiative balance,
-$q_{\text{BC}}(T_s) = k\,(T_s - T_{\text{cell}})/d$, with no gas-enthalpy term
-(`solve_boundary_temperature!`, `src/BoundaryConditions/surface_balance.jl`; §12.2). The gas
-energy leaving the domain is carried by the boundary face's energy flux instead: its outward
-mass flux carries its sensible enthalpy at $T_s$ (§7.4.2), and the heating of the gas on its
-way to the surface was carried by the interior face fluxes as it crossed the cells.
-
-Summing (7.11) over the column shows the bookkeeping. With heats of reaction at the reaction
-temperature, the gas leaves the reaction at the local temperature with its sensible enthalpy
-inside $h_r(T)$; the interior face terms $h(T_f) - h(T_i)$ heat it from its formation
-temperature to the temperature of the cells it crosses; and the boundary face carries it out
-at $T_s$. Under local thermal equilibrium the gas crosses the surface at $T_s$ on both sides,
-so its enthalpy flux is continuous there and the surface balance is conducted flux equals
-applied flux (§1.4.3). A surface term $\sum_g \dot m_g\,\Delta h_g(T_s,T_\infty)$ added to
-that balance would apply the outflow a second time — a spurious sink of order
-$\dot m''\,c_{p,g}\,(T_s - T_\infty)$, about $7.5\,\text{kW}\,\text{m}^{-2}$ for
-$10\,\text{g}\,\text{m}^{-2}\text{s}^{-1}$ of gas with $c_{p,g} = 1.5$ kJ·kg⁻¹·K⁻¹ heated
-by 500 K — that under-predicts the surface temperature and the mass-loss rate. The convention
-is ThermaKin Eq. 17; Gpyro's thermal-equilibrium form uses the same term. Parameter sets
-calibrated against a solver that applies a surface gas-enthalpy term *in addition to* the
-in-depth gas enthalpy transport predict lower $T_s$ and MLR there than here; re-validate
-imported calibrations (§18).
-
-**The mass-flux/convection coupling is the blowing model of each `ConvectiveBC`.** The
-*momentum-side* effect of the gas efflux — boundary-layer thickening that suppresses the
-convective exchange coefficient, and the pooling of a dense gas on the face — is independent
-of the enthalpy bookkeeping above and is the `blowing` model a `ConvectiveBC` carries
-(§12.3.3): the coefficient becomes $h\,R_b$ with the blowing ratio $R_b$ from the model and the outward gas
-flux at the face. Because it modifies only the coefficient, it composes exactly with the
-face enthalpy flux; no double-count arises. The surface balance reads the gas-transport
-fluxes of the face alone: the relative-flux kernel, which runs after the thermal boundary
-kernel (§7.6), adds its fluxes only afterwards. This is the only use of the gas flux in the
-surface balance.
-
-> **Implementation note.** The thermal boundary kernel calls the surface Newton solve
-> `solve_boundary_temperature!` (`src/BoundaryConditions/surface_balance.jl`) with the outward
-> mass fluxes of the face (`J_out`), which feed only the blowing models, and the emissivity
-> and absorptivity of the boundary cell; it then adds the conducted flux and the carried
-> enthalpy at the solved $T_s$ to the face's energy flux (`src/Kernels/thermal_boundary.jl`).
+Outward species carry surface enthalpy and inward species carry their
+specified reservoir enthalpy. An LTE wall heat film is converted to the
+reservoir control surface by $q_r=q_s+H_r-H_s$, giving
+$E_{out}=H_r-q_r=H_s-q_s$. Without a thermal film, prescribed heat and donor
+enthalpy enter directly. This includes adiabatic ingress. The complete signed
+balance, stream-temperature consistency and supported blowing domains are
+specified in §9.9. Adding an independent heating term to this balance would
+count incoming energy twice.
 
 ---
 
@@ -6550,87 +5647,55 @@ concrete element type.
 
 ## 7.8 Comparison to ThermaKin2Ds, Gpyro, and FDS
 
-We map each reference code's notation to the unified nomenclature on first use and contrast the
-energy assembly. (The reference codes are condensed-phase pyrolysis / fire solvers:
-ThermaKin2Ds by Stoliarov et al.; Gpyro by Lautenberger & Fernandez-Pello; the FDS solid-phase
-model by McGrattan et al.)
-
 ### 7.8.1 The energy-equation skeleton
 
-All four codes solve a 1D (through-thickness) Fourier-conduction energy balance with
-volumetric reaction heat and a gas-enthalpy coupling. In our symbols the common skeleton is
-
-$$
-(\rho c_p)\,\frac{\partial T}{\partial t}
-=
-\frac{\partial}{\partial z}\!\left(k\frac{\partial T}{\partial z}\right)
-+ Q_{\text{rxn}} + Q_{\text{rad}} + (\text{gas enthalpy term}),
-$$
-
-and the codes differ mainly in (i) whether gas heat capacity is in the storage term, (ii) how
-the gas enthalpy coupling is written, and (iii) the radiation closure.
+The models share conduction, reaction heat and radiative exchange. Gas storage,
+gas/solid exchange, radiation and deformation closures determine whether a
+particular reduced energy equation matches; there is no unconditional
+four-code energy-equation equivalence.
 
 ### 7.8.2 ThermaKin2Ds
 
-ThermaKin writes the through-thickness energy equation with the all-component storage
-$\sum_j \xi_j c_{p,j}\,\partial T/\partial t$, the gas-advection term
-$c_g\,(\mathbf{J}_g\!\cdot\!\partial T/\partial x)$ (its Eq. 17) — *exactly* the
-temperature-form reading $-\sum_g c_{p,g}\mathbf J_g\cdot\nabla T$ of the face enthalpy flux
-of §7.4 — and a deformation term that is the skeleton-following part of the time derivative,
-which the moving mesh absorbs (§11.2.2). Pyrolysis.jl's energy equation is therefore ThermaKin
-Eq. 17 term for term. ThermaKin maps to our symbols as: ThermaKin's stoichiometric
-$\theta_i^{\,j}\to \nu_{r,j}$ (the strain rate $\theta$ is reserved here for dilation; §2 note
-A2); ThermaKin's bimolecular concentration product $\xi_{\text{COMP1}}\xi_{\text{COMP2}}$ has
-no analog because Pyrolysis.jl enforces a single reactant (§6); ThermaKin's gas flux
-$J=-\rho_g\lambda\,\partial(\xi_g/\rho_g)/\partial x$ is the volume-fraction-gradient form
-implemented here (§9).
+TK Eq. 17 stores $\sum_j\xi_jc_j$ and contains
+$-\sum_g c_g\mathbf J_g\cdot\nabla T$. These terms correspond to our
+1D temperature balance after the conservative face enthalpy flux and species
+balance are combined. The reaction-heat sign must be converted. TK also
+includes its own deformation and absorption-weighted re-radiation terms;
+these must be matched separately (§§8.7, 10.11). Its 2D equation contains
+transverse transport absent from a 1D Pyrolysis.jl solve.
 
 ### 7.8.3 Gpyro
 
-Gpyro's energy equation (Lautenberger) uses a control-volume conservative formulation on
-$\bar\rho\,\Delta z$, with the bulk (averaged) density $\bar\rho$ (our $\rho$),
-volume-fraction ($X_\alpha\to v_j$) property averaging, and power-law temperature-dependent
-properties. Its thermal-equilibrium form carries the gas through the solid-to-gas heat
-transfer $\dot Q_{s-g}''' \approx \dot m'' c_{pg}\,\partial T/\partial z$ (its Eq. 65) — the
-temperature-form reading of our face enthalpy flux with the Darcy mass flux — and drops the gas
-storage $\rho_g\bar\psi c_{pg}\,\partial T/\partial t$ by default; its `FULL_QSG` option
-restores it, which makes the equation (7.6) with (7.7). The mapping: Gpyro's pre-exponential
-$Z\to A_r$; its conversion variable $\alpha_{\text{conv}}$ has no single analog (Pyrolysis.jl
-tracks the component masses directly, with $\chi$ as a separate progress variable for the
-cross section, §10); its permeability $K\to\kappa$; its mass flux
-$\dot m''=-(K/\nu)(\partial P/\partial z - g\rho_g)$ is the Darcy term of §9 (Pyrolysis.jl
-omits the gravity/buoyancy term $g\rho_g$ as negligible in the thin condensed phase).
-Numerically Gpyro uses Patankar control-volume discretization with Peclet-based scheme
-selection, harmonic interface interpolation, and a TDMA solve; Pyrolysis.jl uses the same
-harmonic interface interpolation (7.2) but a method-of-lines discretization advanced by a
-stiff integrator with the colored Jacobian of the whole residual (§15), rather than a
-hand-rolled implicit TDMA sweep.
+GP Eq. 61 advances condensed sensible enthalpy. In thermal equilibrium the
+default solid-to-gas exchange retains the gas temperature-advection term but
+neglects gas storage and gas conduction. `FULL_QSG` restores both omitted
+terms (GP Eq. 65; Gpyro 0.8200 `ENERGY_SOURCE_TERMS`). Merely retaining
+gas heat capacity does not make our energy equation identical. Gpyro also
+supports a separate gas energy equation and finite interphase exchange;
+Pyrolysis.jl assumes local thermal equilibrium throughout.
 
 ### 7.8.4 FDS
 
-The FDS solid-phase model solves a 1D Fourier conduction equation with the surface balance
-$-k\,\partial T/\partial x = \dot q_c'' + \dot q_r''$, Arrhenius reaction kinetics
-($\rho^n O_2^n T^n$ rate form), and no in-depth gas: volatiles leave instantaneously, so
-there is no gas storage and no in-depth gas-enthalpy coupling; the gas enthalpy is closed
-at the surface. FDS maps as: pre-exponential $Z\to A_r$; solid absorption coefficient
-$\kappa_s\to\alpha$; the surface energy balance with $\dot q_c''$ (convective) and
-$\dot q_r''$ (radiative) is the boundary Newton solve of §12. The radiation closure differs
-(FDS uses a two-flux Schuster–Schwarzschild model in depth; Pyrolysis.jl offers
-`NO_RADIATION`, `SURFACE_ABSORPTION` and `BEER_LAMBERT`, §8). Pyrolysis.jl, following
-ThermaKin, resolves the gas in depth and carries its enthalpy across every face with its mass
-flux rather than as a surface outflow term, and the surface balance carries no gas-enthalpy
-term on top of it (§7.4.3).
+FDS's standard solid model assumes gas is transported instantly to the
+surface (FDS solid-phase chapter, “Solid Fuels”). There is no pore-gas
+inventory or resolved in-depth advective enthalpy flux. This does not mean
+gas enthalpy is absent: `PYROLYSIS` evaluates reaction heat and the energy
+needed to bring produced/consumed gas between solid and CFD-gas temperatures
+(`Q_DOT_G_PPP`; FDS Appendix P). That accounting is not the same as storing
+gas in Pyrolysis.jl with its transport switched off. The latter traps any
+generated gas unless a separate removal mechanism is supplied.
 
-### 7.8.5 Summary table
+### 7.8.5 Summary
 
-| feature | Pyrolysis.jl | ThermaKin2Ds | Gpyro | FDS |
+| Feature | ThermaKin2Ds | Gpyro 1D | FDS standard solid model | Pyrolysis.jl |
 |---|---|---|---|---|
-| storage $\rho c_p$ | all components (7.7) | all components (incl. gas) | matrix by default; all with `FULL_QSG` | matrix (no in-depth gas) |
-| gas enthalpy coupling | $\sum_j F_{j,f}h_j(T_f)$ at every face (temperature form $-\sum_g c_{p,g}\mathbf J_g\cdot\nabla T$) | $c_g\,\mathbf J_g\cdot\partial T/\partial x$ volumetric (Eq. 17) | $\dot m'' c_{pg}\,\partial T/\partial z$ (thermal equilibrium) | surface outflow |
-| face conductivity | distance-weighted harmonic mean | harmonic | harmonic (Patankar) | — |
-| conduction discretization | cell-centered FV, method of lines + stiff integrator | Crank–Nicolson (x) | Patankar CV + TDMA | implicit FD |
-| radiation | none / surface / Beer–Lambert | Beer–Lambert + re-radiation | in-depth exp absorption | two-flux S–S |
-| heat-of-reaction sign | $h>0$ endothermic, $Q_{\text{rxn}}=-\sum hr$ | $h>0$ exothermic (flip) | $h>0$ endothermic | $h>0$ endothermic |
+| Gas temperature | local equilibrium | equilibrium or separate energy equation | no pore-gas state | local equilibrium |
+| Gas storage in equilibrium | included | optional with `FULL_QSG` | absent | included |
+| Energy state | element temperature | condensed sensible enthalpy, inverted to temperature | solid temperature | temperature or sensible-enthalpy inventory |
+| In-depth radiation | absorption distribution with MAX/RAND deposition and re-radiation | incident-beam absorption; optional radiative conductivity | optional two-flux absorption/emission | incident-beam absorption |
+
+Primary sources: TK Eqs. 11–18 and §3; GP Eqs. 61–70 and §6.8;
+FDS solid-phase chapter, Appendix P and `Source/wall.f90` (§1.6.5).
 
 ---
 
@@ -6789,7 +5854,7 @@ $$
 
 where $q_{\text{inc}}(t)$ [W·m⁻²] is the condition's incident flux and $a$ the
 surface absorptivity. With no explicit `absorptivity` on the condition, $a$ is the
-effective surface absorptivity of the boundary cell (§5.8.2, §12.2.6),
+effective surface absorptivity of the boundary cell (§5.8.2, §5.8.2),
 
 $$
 a_{\text{eff}}=\sum_j v_j\,a_j ,
@@ -7355,71 +6420,57 @@ $10^{-12}$. The residual allocates nothing.
 
 ## 8.7 Comparison to ThermaKin2Ds, Gpyro, and FDS
 
-We map each reference code's notation to ours on first use. All three reference
-solvers are condensed-phase pyrolysis models; their radiation treatments span the
-same idioms Pyrolysis.jl supports, plus a two-flux variant in FDS.
-
 ### 8.7.1 ThermaKin2Ds
 
-ThermaKin (Stoliarov & Lyon) uses **in-depth exponential (Beer–Lambert)
-absorption** of the external flux together with explicit surface **re-radiation**.
-In ThermaKin notation the external radiant flux is $\dot q''_{ex}$ (our
-$q_{\text{inc}}$), the absorption coefficient is per-component and forms a
-volumetric coefficient (our $\alpha_{\text{eff}}=\sum_j\xi_j\alpha_j$), and the
-in-depth source is $\dot q''_{ex}\,\alpha\,e^{-\int\alpha\,\mathrm{d}x}$ — identical
-in form to our $q'''=\alpha I$ with $I=I_e e^{-\int\alpha\,\mathrm{d}z}$ (our
-`BEER_LAMBERT`). ThermaKin additionally models re-radiation $\varepsilon\sigma T_s^4$
-at the surface (often with reflection of a fraction of $\dot q''_{ex}$), which
-Pyrolysis.jl supplies via a top `RadiativeBC` term
-$F\varepsilon_{\text{eff}}\sigma(T_\infty^4-T_s^4)$ in the surface balance and the
-reflected share $(1-a)\,q_{\text{inc}}$ (§8.3.2, §12). ThermaKin also offers a
-radiative-conductivity augmentation $k\propto T^3$ to mimic radiative diffusion in
-char; Pyrolysis.jl has no separate radiative-diffusion model, and the same
-augmentation is a component conductivity law with a $T^3$ term (a function or
-`PolynomialProperty` for `k`, §5.5). ThermaKin publishes heats of reaction with
-the opposite sign convention ($h>0$ exothermic); this does not touch the radiation
-terms (§6.9.2).
+TK Eq. 11 uses the same mass-specific Beer–Lambert attenuation coefficient
+$\sum_j\alpha_j\xi_j$ as Pyrolysis.jl. Its numerical deposition is different:
+TK §3 describes `MAX` (all absorbed radiation assigned to the maximum-absorption
+element) and `RAND` (an element sampled from the absorption distribution).
+Re-radiation uses the temperature and emissivity of that selected element.
+TK Eqs. 12 and 23 weight re-radiation and reflectivity by absorption through
+the object; they are not generally a surface-only $\varepsilon\sigma T_s^4$
+condition. Pyrolysis.jl deposits the attenuated beam in every traversed cell
+and applies `RadiativeBC` at the boundary.
+
+TK also describes a $T^3$ conductivity contribution for optically thick
+radiative diffusion. Such a property law can be supplied here, but it is not
+part of our Beer–Lambert kernel.
 
 ### 8.7.2 Gpyro
 
-Gpyro (Lautenberger & Fernandez-Pello) deposits the external radiant flux
-**in-depth** with an exponential absorption profile and treats the surface energy
-balance with combined radiative–convective exchange. In Gpyro notation the
-pre-exponential of any property is $Z$ (our $A_i$), the volume fraction is
-$X_\alpha$ (our $v_j$), and the in-depth absorbed flux follows
-$\dot q''_e\,\kappa\,e^{-\kappa x}$ — again our `BEER_LAMBERT` form, with Gpyro's
-$\kappa$ (the absorption coefficient, distinct from the permeability $K$ in §9)
-mapping to our volumetric $\alpha_{\text{eff}}$. Gpyro's effective radiative
-conductivity in optically thick char (a temperature-cubed conductivity
-contribution) plays the role a $T^3$ term in our $k_j(T)$ would play; Pyrolysis.jl
-carries it, if at all, in the mixture conductivity of §5 and §7. Gpyro's surface
-emissivity enters the boundary balance just as our
-$\varepsilon_{\text{eff}}=\sum_j v_j\varepsilon_j$ does.
+GP Eqs. 66–67 describe one-way attenuation of
+$\bar\varepsilon\dot q_e''$ with effective coefficient $\bar\kappa$
+[m⁻¹], without internal emission. This corresponds to our incident-beam
+model when optical depth, entering flux and boundary conditions are matched.
+GP Eq. 7 separately permits a $T^3$ pore-radiation conductivity contribution.
+The component coefficient units and mixture weights require the conversion
+in §5.14. Gpyro V2's multidimensional radiation changes are not implied by
+this comparison to the documented 1D model.
 
 ### 8.7.3 FDS
 
-The FDS solid-phase model uses a **two-flux (Schuster–Schwarzschild)** in-depth
-radiation model for the condensed phase: forward and backward hemispheric
-intensities $I^+,I^-$ are propagated with absorption coefficient $\kappa_s$ (our
-$\alpha$), and the radiative source in the 1D Fourier conduction equation is the
-divergence of the net radiative flux $I^+-I^-$. Pyrolysis.jl's `BEER_LAMBERT`
-corresponds to the single-flux limit: only the inward-going beam, with no internal
-re-emission. FDS applies surface absorptivity and emissivity through Kirchhoff's
-law at the gas–solid interface — the default ($a=\varepsilon_{\text{eff}}$)
-Pyrolysis.jl uses for `RadiativeFluxBC`. FDS's gray-band absorption maps to our
-gray (wavelength-independent) $\alpha_{\text{eff}}$. The principal difference is
-the explicit two-stream bookkeeping: FDS resolves $I^\pm$ with emission in depth,
-whereas Pyrolysis.jl resolves the inward beam only (§8.8).
+FDS 6.11.0 defaults to opaque surface absorption. Its optional in-depth
+Schuster–Schwarzschild model propagates forward and backward hemispheric
+intensities, including thermal emission. In the documented angular closure,
+$dI^+/dx=\kappa_s(\sigma T^4/\pi-I^+)/\mu_+$, with $\mu_+=1/2$.
+Consequently, even when internal emission is negligible, the attenuation
+length is not automatically our normally incident beam's $1/\alpha_{\mathrm{eff}}$.
+Match angular assumptions, optical depth and boundary reflection as well as
+units; do not simply copy $\kappa_s$ into a mass-specific $\alpha_j$.
+The condensed-phase model described here is gray; FDS's gas-phase spectral
+radiation options do not establish a gray-band solid model.
 
-### 8.7.4 Summary table
+### 8.7.4 Summary
 
-| Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro | FDS (solid) |
-|---|---|---|---|---|
-| In-depth absorption | Beer–Lambert $q'''=\alpha I$, face intensities as unknowns | Beer–Lambert | exp. in-depth | two-flux $I^\pm$ |
-| Radiative diffusion in depth | none (a $T^3$ term in $k_j(T)$ can carry it) | radiative $k\propto T^3$ | radiative $k$ | two-flux divergence |
-| Surface absorptivity | $a_{\text{eff}}$ (Kirchhoff $\varepsilon_{\text{eff}}$ unless a component sets $a_j$) | $\varepsilon$ + reflection | $\varepsilon$ | Kirchhoff |
-| Spectral model | gray | gray | gray | gray-band |
-| Surface re-radiation | `RadiativeBC` $F\varepsilon\sigma(T_\infty^4-T_s^4)$ | $\varepsilon\sigma T_s^4$ | radiative–convective | $\varepsilon\sigma T_s^4$ |
+| Model | External radiation treatment | Thermal emission treatment |
+|---|---|---|
+| Pyrolysis.jl | surface absorption or deterministic Beer–Lambert deposits | boundary `RadiativeBC`; no in-depth emission |
+| ThermaKin2Ds | Beer–Lambert distribution with MAX/RAND element selection | absorption-selected element; radiative conductivity separately |
+| Gpyro documented 1D | one-way exponential attenuation | surface emission; radiative conductivity separately |
+| FDS standard solid | surface absorption or two-flux transport | surface or in-depth emission according to selected model |
+
+Sources: TK Eqs. 11–12, 23 and §3; GP Eqs. 7, 66–67;
+FDS solid-phase chapter, “Thermal Radiation” (§1.6.5).
 
 ---
 
@@ -7458,11 +6509,10 @@ are the open issues most likely to matter in practice.
    issued. Nor is any warning issued for a model that does not match the material
    (§8.1.2).
 
-6. **The surface Newton derivative of a condition-supplied $\varepsilon(T)$.** A
-   `RadiativeBC` with its own emissivity law evaluates $\varepsilon(T_s)$ at the
-   surface temperature, and the derivative of the surface-balance Newton
-   iteration drops $\mathrm{d}\varepsilon/\mathrm{d}T_s$ (§12.2.4). This affects
-   only the convergence of the iteration, not its root. The default
+6. **Surface versus cell optical properties.** A `RadiativeBC` with its own
+   emissivity law evaluates $\varepsilon(T_s)$ at the surface temperature.
+   The surface iteration and its implicit derivative differentiate this
+   complete flux (§12.2.3). The default
    $\varepsilon_{\text{eff}}$ and $a_{\text{eff}}$ are those of the boundary cell
    at its composition and trial temperature, not at $T_s$; they are constants
    within the iteration.
@@ -7477,1108 +6527,324 @@ are the open issues most likely to matter in practice.
 
 # 9. Gas-Phase Mass Transport and Pressure
 
-![Porous solid with bulk and pore gas densities, separate diffusion, Darcy and skeleton-motion contributions, and additive pressure and film boundary fluxes.](assets/figures/12_gas_transport.svg)
+Gas mass is stored per bulk cell volume and transported relative to the condensed
+skeleton. `LumpedTransfer()` is the default material model. `DustyGas(...)` adds
+common-diffusivity molecular friction and species-dependent Knudsen resistance.
+Both models use the same pore state, Darcy term, conservative face assembly,
+reservoir data and boundary energy convention. Skeleton motion relative to the
+mesh is a separate ALE flux. Mobile pore transport is supported in one dimension.
 
-**Figure 12. Gas storage and transport (schematic).** Bulk concentration $\xi$ uses total cell volume; pore density $\xi/\phi$ uses pore volume. Diffusion and Darcy flow are relative to the skeleton; skeleton transport relative to the mesh is $-c\xi$. At a boundary, pressure-driven venting and the mass-film contribution add, and the resulting gas flux carries sensible enthalpy. Arrows show representative directions; gradients can reverse them.
+![Bulk and intrinsic pore gas densities, wall and molecular friction, Darcy flow, skeleton motion, and continuous species exchange through an optional film to a complete reservoir state.](assets/figures/12_gas_transport.svg)
 
-This chapter derives the constitutive and discrete laws by which gaseous
-decomposition products move through the condensed-phase matrix in Pyrolysis.jl.
-Two transport mechanisms are treated: ordinary (Fickian) diffusion driven by a
-volume-fraction / partial-pressure gradient, and Darcy advection driven by the
-gas-phase pressure field in a porous medium; together they form the *Darcy–Fick*
-flux. We establish the ideal-gas pressure closure in pore space, the Darcy
-velocity, the boundary venting and film fluxes, the flux form of the species
-rows, the sensible enthalpy the gas fluxes carry across faces, and the structure
-of their Jacobian. Every equation in this chapter has been checked against the
-implementing source and, where the textbook form and the code differ, the
-chapter documents what the code actually does.
+## 9.1 Pore state, units and assumptions
 
-Throughout, the spatial coordinate is the through-thickness axis $z$, with
-$z=0$ the back face (tag `:bottom`) and $z=L$ the exposed surface (tag `:top`).
-A face flux is stored **per unit face area along the face normal**, which points
-from the face's owner cell to its neighbour and out of the domain on a boundary
-face: on a line every interior face and the `:top` face have their normal along
-$+z$, and the `:bottom` face along $-z$, so a boundary-face flux is positive when
-gas leaves through it, at either end (§2). The assembler scatters
-$-F_fA_f$ into the owner's rows and $+F_fA_f$ into the neighbour's, so a positive
-flux removes the quantity from the owner (§7.2, §13.3). In this chapter the index
-$i$ denotes a **cell**, $j$ a **component**, and $f$ a **face**; $L,R$ denote the
-two cells bounding an interior face, $L$ its owner and $R$ its neighbour (below
-and above it on a line), and $d_L,d_R$ their center-to-face distances. The
-integrated species state is the cell mass $m_{j,i}$ [kg]; every kernel reads the
-mass concentration $\xi_{j,i}=m_{j,i}/V_i$ [kg·m⁻³], not the mass fraction
-$Y_j=\xi_j/\rho$.
-
-`setup` chooses the transport from the material and the mass conditions
-(§9.7): none without a gas component; **Darcy–Fick** when some condensed
-component is permeable; **Fickian** when gas can move at all (a component carries
-a non-zero gas-transfer coefficient, or a mass condition is not `ImpermeableBC`);
-none otherwise. One `GasTransportKernel` (`src/Kernels/gas_transport.jl`) then
-writes every gas flux of the residual.
-
----
-
-## 9.1 The volume-fraction-gradient diffusive flux
-
-### 9.1.1 Continuous form and physical origin
-
-Gaseous decomposition products in a hot porous solid diffuse down their
-concentration gradient. The natural driving potential for an ideal gas is not the
-mass concentration $\xi_j$ but the *mass fraction* $Y_j=\xi_j/\rho_g$, because
-Fick's first law for a dilute species in a carrier of density $\rho_g$ is
+For bulk concentration $\xi_j=m_j/V$, skeletal density $\rho_{i,j}$, molar mass
+$M_j$, and local temperature $T$,
 
 $$
-J_j = -\rho_g\,\lambda\,\frac{\partial Y_j}{\partial z}
-    = -\rho_g\,\lambda\,\frac{\partial}{\partial z}\!\left(\frac{\xi_j}{\rho_g}\right),
+\phi=1-\sum_{j\in S\cup L}\frac{\xi_j}{\rho_{i,j}(T)},\qquad
+\rho_j^g=\frac{\xi_j}{\phi},\qquad
+p_j=\frac{\xi_jRT}{M_j\phi},\qquad P=\sum_{j\in G}p_j.
 $$
 
-where $\lambda$ [m²·s⁻¹] is the effective gas-transfer (diffusion) coefficient of
-the porous medium (a tortuosity- and porosity-corrected molecular diffusivity;
-see §5 *Effective Properties and Mixing Rules*, and §9.2 below). For an ideal gas
-in the pore space, the gas density at fixed pressure scales as
+Gas mole and mass fractions are $x_j=p_j/P$ and
+$Y_j=\rho_j^g/\sum_k\rho_k^g$. At vacuum these fractions are reported as zero.
+The EOS is evaluated for every gas-bearing material, including a sealed one.
+The central implementation is `pore_state` in `src/Physics/pressure.jl`.
+
+Mass flux $J_j$ has units kg/(m² s), molar flux $n_j=J_j/M_j$ has units
+mol/(m² s), and both use bulk face area. Darcy velocity $v_D$ is superficial.
+The model assumes ideal pore gases and local thermal equilibrium in the cells.
+It excludes Soret diffusion, thermal transpiration, gravity, barodiffusion
+corrections and separate gas temperatures. Uniform partial pressures give zero
+transport even when temperature and porosity vary. This is a statement about
+the specified pressure potential, not a thermal-diffusion model.
+
+## 9.2 Condensed matrix coefficients
+
+Transport weights use condensed bulk occupancy only:
 
 $$
-\rho_g \propto \frac{P}{T},
+q_j=\gamma_j\xi_j/\rho_{b,j}(T),\quad q=\sum_{j\in S\cup L}q_j,\quad
+w_j=q_j/q.
 $$
 
-so along an isobar $\rho_g \propto 1/T$ and the volume fraction (equivalently, the
-mass-fraction-like ratio) of species $j$ obeys $\xi_j/\rho_g \propto \xi_j T$. Up
-to the pressure scale, then,
+Gas components have zero matrix weight for every value of their swelling
+factor. A condensed component with $\gamma=0$ has zero matrix weight but still
+occupies skeletal volume in the pore-state equation. Its matrix coefficients
+must be zero. For participating condensed components, the lumped model requires
+an explicit `λ`; `κ` defaults to zero. Gas components carry neither coefficient.
+
+For $a_j=\lambda_j$ or $\kappa_j$, `PARALLEL` gives $\sum_jw_ja_j$, `SERIES`
+gives $(\sum_jw_j/a_j)^{-1}$, and `WEIGHTED` combines these with weight
+$\beta$ on the parallel value. A positive-weight zero coefficient closes the
+series channel exactly. No positive coefficient floor opens a closed channel.
+A disappearing zero-coefficient constituent can make the exact series rule
+discontinuous; setup checks reachable support changes and rejects unsupported
+paths. `CARMAN_KOZENY` is a separate permeability closure (§5.7).
+
+A retained matrix-free cell requires explicit `LumpedEndpoint` or
+`DustyEndpoint` data. The model blends matrix and endpoint coefficients with a
+cubic smoothstep in the declared `blend=(lo,hi)` interval of $q$. Endpoint data
+include a maximum supported skeletal occupancy. Zero weighted occupancy alone
+does not establish an unobstructed void. Without an endpoint the supported
+domain ends at $q=hi$, with outcome `:matrix_exhausted`.
+
+## 9.3 Lumped transfer and Darcy transport
+
+The continuum law is
 
 $$
-J_j = -\rho_g\,\lambda\,\frac{\partial}{\partial z}\!\left(\frac{\xi_j}{\rho_g}\right)
-    = -\frac{\lambda}{T}\,\frac{\partial(\xi_j T)}{\partial z}.
+J_j=-\frac{\Lambda M_j}{RT}\nabla p_j+\rho_j^g v_D,
+\qquad v_D=-\frac{\kappa}{\mu}\nabla P.
 $$
 
-This is the **volume-fraction-gradient formulation** documented at the head of
-`src/Physics/gas_transport.jl`. Expanding the product derivative,
+$\Lambda$ is the effective superficial matrix transfer coefficient [m²/s].
+At constant temperature and porosity with $\kappa=0$, the diffusion coefficient
+for bulk concentration is $\Lambda/\phi$. The material's `gas_viscosity` supplies
+$\mu(T)$ [Pa s]. Either wall transfer or permeability may be exactly zero;
+a path can transmit total flux by different mechanisms in different layers.
+
+## 9.4 Dusty-gas friction
+
+The explicit inputs are `tortuosity ≥ 1`, positive `D_ref`, `T_ref`, `P_ref`,
+and either an explicit pore-diameter law or the effective capillary closure.
+The common molecular diffusivity and species wall diffusivities are
 
 $$
-\boxed{\;
-J_j = -\lambda\left(\frac{\partial \xi_j}{\partial z}
-       + \frac{\xi_j}{T}\,\frac{\partial T}{\partial z}\right)
-\;}
+D_m=D_{ref}(T/T_{ref})^{7/4}P_{ref}/P,\quad
+K_j=\frac{\phi d_p}{3\tau}\sqrt{\frac{8RT}{\pi M_j}},\quad
+ t=\frac{\tau}{\phi D_{ref}P_{ref}}(T_{ref}/T)^{7/4}.
 $$
 
-exposes the two physical contributions:
-
-- **Ordinary diffusion** $-\lambda\,\partial\xi_j/\partial z$: transport down the
-  composition gradient.
-- **Thermal coupling** $-\lambda(\xi_j/T)\,\partial T/\partial z$: a Soret-like
-  term arising *not* from genuine thermodiffusion but from the temperature
-  dependence of the ideal-gas density. A hotter cell holds the same mass
-  concentration in a more dilute gas (lower $\rho_g$), so equal $\xi_j$ across a
-  temperature gradient still corresponds to a volume-fraction gradient and hence a
-  flux.
-
-Casting the driving potential in terms of $\xi_j T$ rather than $Y_j$ avoids ever
-computing the gas density $\rho_g$ at the face, which would require evaluating $P$
-and $T$ at an intermediate point. The formulation is well behaved in the
-low-density (high-temperature, low-$P$) regime where $\rho_g\to0$ would otherwise
-appear in a denominator. Its isobaric assumption is discussed in §9.11.
-
-### 9.1.2 Discrete face flux
-
-Discretizing $-\frac{\lambda}{T}\,\partial(\xi T)/\partial z$ at an interior face
-$f$ between cells $L$ and $R$, with the temperature in the prefactor taken at the
-arithmetic-mean face value $T_{\text{face}}=\tfrac12(T_L+T_R)$, gives the
-implemented flux:
+Here $t$ is molecular resistance per pressure. With $g_j=-\nabla p_j/(RT)$,
+the wall/molecular flux solves
 
 $$
-\boxed{\;
-J_j = -\,\lambda_{\text{face}}\,\frac{\xi_R T_R - \xi_L T_L}{T_{\text{face}}\;d_{LR}}
-\;}
-\qquad T_{\text{face}}=\tfrac12(T_L+T_R),
+\left(K_j^{-1}+tP\right)n_j^D-tp_j\sum_kn_k^D=g_j.
 $$
 
-where $d_{LR}=d_L+d_R$ is the distance between the two cell centers along the
-face normal and $\lambda_{\text{face}}$ is the distance-weighted harmonic mean of
-the cell transfer coefficients (§9.1.4). This is exactly
+Darcy advection is added to this flux before matching paths. For one gas,
+molecular friction cancels exactly: $n^D=Kg$. A zero wall coefficient closes
+that species' wall channel without an artificial composition floor.
 
-```julia
-@inline function gas_flux(λ_face::Real, ξ_L::Real, ξ_R::Real, T_L::Real, T_R::Real,
-                          d_LR::Real)
-    T_face = (T_L + T_R) / 2
-    return -λ_face * (ξ_R * T_R - ξ_L * T_L) / (T_face * d_LR)
-end
-```
+The capillary choice is $d_p=\sqrt{32\tau\kappa_{eff}/\phi}$. It uses the
+effective permeability; averaging component square roots defines a different
+closure and is not performed. The exact square root is supported where its
+state path stays positive or the channel is identically closed. A path crossing
+zero requires an explicit diameter or `capillary_regularization=ε>0`, which
+uses $\sqrt{32\tau/\phi}\,\kappa/\sqrt{\kappa+\varepsilon}$. This preserves zero
+permeability but changes the constitutive law near $\varepsilon$; sensitivity
+to that physical regularization must be established for a chosen problem.
 
-The kernel evaluates it at every interior face whose two cells are live, for every
-gas component, with three choices that are load-bearing:
+## 9.5 Conditioned constitutive evaluation
 
-- **Trial temperatures.** $T_L$, $T_R$ are the cells' trial temperatures
-  $T_{\text{trial}}$ (the temperature smoothly clamped into the property bracket
-  $[200, 3000]$ K, §5.13), so a trial state far outside the bracket still gives a
-  finite, smooth flux.
-- **Raw concentrations.** $\xi_L$, $\xi_R$ are the stored masses over the volume,
-  $m/V$ (with the volume smoothly floored), not their positive parts: the flux is
-  linear in the masses, and the transported quantity is exactly what the mass rows
-  hold.
-- **Floored distances.** $d_L$ and $d_R$ are each smoothly floored at $10^{-8}$ of
-  their reference value (`DISTANCE_FLOOR_FRACTION`), which keeps a collapsing cell
-  on a moving mesh from dividing by zero.
-
-*Implementation note.* `gas_flux`, `src/Physics/gas_transport.jl`, called face by
-face by `contribute!` of the `GasTransportKernel`, `src/Kernels/gas_transport.jl`.
-
-### 9.1.3 The exact product-rule identity
-
-The composition / thermal split of §9.1.1 is not an approximation of the discrete
-kernel — it is algebraically identical to it when arithmetic-mean face values are
-used. The identity
+For one consistent face pressure state, define
 
 $$
-\xi_R T_R - \xi_L T_L
-   = T_{\text{face}}\,(\xi_R - \xi_L) + \xi_{\text{face}}\,(T_R - T_L),
-\qquad \xi_{\text{face}}=\tfrac12(\xi_L+\xi_R),
+u_j=tPK_j,\quad b_j=(1+u_j)^{-1},\quad a_j=K_jb_j,\quad
+c_j=u_jb_jx_j,\quad d=\sum_jx_jb_j.
 $$
 
-is proved by expanding both terms on the right:
+Then $n_t=(\sum_ja_jg_j)/d$ and $n_j^D=a_jg_j+c_jn_t$.
+The positive sum for $d$ avoids subtracting nearly equal numbers at strong
+coupling. At small $u$, the equivalent $d=1-\sum_jta_jp_j$ is well conditioned
+and supplies the finite vacuum continuation. At strong isobaric coupling the
+numerator is evaluated as $(\sum_jg_j-\sum_jb_jg_j)/(tP)$, with compensated
+summation and a total pressure difference formed from the original endpoint
+pressures. This avoids cancelling the common diagonal contribution.
+
+The half-path evaluator uses $\bar P=(P_L+P_R)/2$ throughout. It selects a
+collective donor from the sign of $S=\sum_ja_jg_j$ and sets
+$p_j^f=\bar P p_{j,up}/P_{up}$. Normalization has no composition floor.
+An empty donor on a nonnegative state has zero collective drive. Two-sided
+vacuum uses the finite wall-law continuation and its first state derivative.
+Darcy density uses its own velocity donor and that donor's actual temperature.
+Branch choices inspect primal values; the zero-drive choice is deterministic.
+
+## 9.6 Composite faces and qualified local roots
+
+Each interior face introduces nonnegative interface partial pressures $p_j^*$
+and enforces equality of **total** molar species flux through its two half
+cells. Each half retains its own coefficients and distance. The interface
+thermal state is $T^*=(d_RT_L+d_LT_R)/(d_L+d_R)$; it also supplies carried
+enthalpy. For an isolated linear wall channel,
 
 $$
-\begin{aligned}
-T_{\text{face}}(\xi_R-\xi_L) + \xi_{\text{face}}(T_R-T_L)
-&= \tfrac12(T_L+T_R)(\xi_R-\xi_L) + \tfrac12(\xi_L+\xi_R)(T_R-T_L) \\
-&= \tfrac12\big(2\,\xi_R T_R - 2\,\xi_L T_L\big)
- = \xi_R T_R - \xi_L T_L .
-\end{aligned}
+n_j=-\frac{p_{j,R}-p_{j,L}}{R(d_LT_L/K_{j,L}+d_RT_R/K_{j,R})}.
 $$
 
-Dividing by $T_{\text{face}}\,d_{LR}$ and multiplying by $-\lambda_{\text{face}}$
-recovers the discrete composition + thermal split
+For the full law the mechanisms are combined before continuity is imposed.
+In particular, a wall-only layer followed by a Darcy-only layer remains
+conducting. The lumped and pure-gas equations have a stable analytic quadratic
+reduction. Other cases use a scaled Newton solve, a nonnegative domain, a
+merit-function line search and a relative trust bound. Inactive equations are
+replaced by explicit choices of their unobservable interface pressures.
+
+Newton steps and implicit derivatives use the same row and column
+equilibration. It rescales equations and unknowns without altering pressures,
+compositions or fluxes. Conditioning is assessed on the equilibrated Jacobian,
+so a small trace-species flux does not by itself imply a singular system.
+Acceptance requires residual convergence, a finite nonsingular equilibrated
+Jacobian, a resolved correction and matching half-path fluxes. Failure raises
+`TransportFailure` with a reason; an unconverged flux is never assembled.
+Very strong nearly isobaric coupling can require pressure corrections below
+Float64 resolution and is diagnosed rather than accepted. Qualification is
+local; no global uniqueness theorem is claimed for arbitrary constitutive data.
+First derivatives use the implicit function theorem at the converged root.
+They require a regular root and a fixed branch; derivatives at a degenerate
+channel or a donor switch require the stated limiting branch. Higher implicit
+derivatives are not provided by this first-derivative construction.
+
+## 9.7 Dissipation, positivity and conservation
+
+For positive partial pressures on an isothermal fixed geometry and pore
+volume, write $g_j=-c\Delta p_j$ with $c>0$. The diagonal wall contribution is
+dissipative species by species. For a left collective donor,
 
 $$
-J_j = -\lambda_{\text{face}}\!\left(\frac{\xi_R-\xi_L}{d_{LR}}
-       + \frac{\xi_{\text{face}}}{T_{\text{face}}}\frac{T_R-T_L}{d_{LR}}\right).
+\sum_ja_jp_{j,L}\log(p_{j,R}/p_{j,L})\leq\sum_ja_j\Delta p_j=-S/c\leq0.
 $$
 
-This equivalence is verified to `atol = 1e-14` in
-`test/physics/test_gas_closures.jl`.
+For a right donor the reverse logarithmic inequality gives the corresponding
+nonpositive collective contribution after multiplying by its signed flux.
+The Darcy donor obeys the same argument. Thus
+$\sum_jn_j\Delta\log p_j\leq0$. At a positive, flux-matched interface the two
+log-pressure jumps telescope. Vacuum is handled by the limiting extensions;
+the logarithmic proof itself requires positive pressures. This argument does
+not establish nonisothermal entropy stability or time-discrete positivity.
 
-### 9.1.4 Why the harmonic mean is applied to $\lambda$, not $\lambda\rho$
+At an absent species endpoint the diagonal term points inward; donor terms
+are inward or zero. This gives semi-discrete positivity in the stated domain.
+Conservation is separate: a single face vector is added with opposite signs
+to its two cells, giving species-wise cancellation independent of the
+constitutive model. ALE fluxes and deactivation transfers use their own
+conservative assembly.
 
-At a material interface, *flux continuity* — not property continuity — is the
-physical constraint. Treating the two half-cells as transport resistances in
-series, the face transfer coefficient is the distance-weighted harmonic mean
+## 9.8 Reservoirs, films and pressure boundaries
 
-$$
-\lambda_{\text{face}} = \frac{d_L + d_R}{\dfrac{d_L}{\lambda_L} + \dfrac{d_R}{\lambda_R}} ,
-$$
+`GasReservoir(P=...,T=...,mole_fractions=(species=...,))` specifies complete
+external thermodynamic data. Fractions are named, nonnegative and normalized;
+unknown nonzero species are rejected. Pressure, temperature and composition
+may depend on time. An explicit vacuum has `P=0` and may omit composition.
+`AmbientGasBC(reservoir)` connects this state to the pore half path.
 
-which on a uniform mesh ($d_L=d_R$) reduces to the standard harmonic mean
-$2\lambda_L\lambda_R/(\lambda_L+\lambda_R)$. The distance weighting makes the
-scheme correct on stretched meshes (e.g. surface-refined grids); §7.1 gives the
-identical treatment of thermal conductivity. The kernel forms it in the guarded
-product form (`guarded_harmonic_mean`, `src/Properties/effective_properties.jl`;
-§5.12)
-
-$$
-\boxed{\;
-\lambda_{\text{face}} = \frac{(d_L + d_R)\,\lambda_L\lambda_R}{d_L\lambda_R + d_R\lambda_L + \eta\,(d_L+d_R)}
-\;},\qquad \eta = 10^{-20}\ \mathrm{m^2\,s^{-1}}\ (\texttt{FACE\_MEAN\_GUARD}),
-$$
-
-which equals the resistance-in-series mean to a relative $\eta/\lambda_{\text{face}}$,
-is smooth in every argument, and goes to zero continuously, with a finite
-derivative, as either cell coefficient vanishes: a cell with $\lambda=0$ is an
-infinite resistance and passes nothing, without a threshold that would cut the
-flux off discontinuously.
-
-A subtle but important modeling choice: the code takes the harmonic mean of
-$\lambda$ **alone**, not of the product $\lambda\rho_g$ that would appear in a
-true mass-fraction-gradient discretization $J=-\lambda\rho_g\,\partial Y/\partial z$.
-This is consistent with — indeed *required by* — the volume-fraction formulation,
-in which $\rho_g$ never appears explicitly: the density dependence is folded into
-the $\xi T$ driving potential, which uses *cell-center* concentrations $\xi_L,\xi_R$
-and the arithmetic-mean face temperature, with no face density. No
-$\lambda\rho$-averaging helper exists in the package.
-
-*Implementation note.* The per-cell $\lambda_i$ is evaluated once per cell and
-residual in the state mapping, `ds.λ[i] = effective_gas_transfer(ξ⁺, T_trial, material)`
-(`src/States/derived.jl`; §5.6, §5.13), at the positive-part concentrations and
-the trial temperature. The face mean is formed inside the kernel, face by face, in
-every evaluation; nothing is cached between evaluations.
-
-### 9.1.5 Partial-pressure equivalence
-
-Because the formulation is anchored to the ideal-gas relation, the same flux can
-be written as a partial-pressure gradient. With $P_j = \xi_j R_g T / M_j$ the
-partial pressure of species $j$,
+An optional `MassTransferFilm(g)` has common-diffusivity isobaric conductance
+$g=\rho D/\delta$ [kg/(m² s)]. With outward mass flux $m=\sum_jJ_j$,
 
 $$
-J_j = -\frac{\lambda_{\text{face}}\,M_j}{R_g\,T_{\text{face}}}\,\frac{\partial P_j}{\partial z}.
+J_j=Y_{j,s}m+g\,\beta(m/g)(Y_{j,s}-Y_{j,\infty}),\qquad
+\beta(B)=B/(e^B-1),\quad\beta(0)=1.
 $$
 
-To see the equivalence, note $\xi_j T = P_j M_j / R_g$, so
-$\xi_R T_R - \xi_L T_L = (M_j/R_g)(P_{j,R}-P_{j,L})$, and substituting into the
-discrete kernel gives the pressure form directly. This is verified to
-`atol = 1e-12` in `test/physics/test_gas_closures.jl`. The partial-pressure
-reading reinforces the physical picture: gas diffuses down its own
-partial-pressure gradient, with mobility $\lambda M_j/(R_g T)$.
+At $g=0$ only donor bulk flow remains; at infinite conductance the surface
+composition is fixed to the reservoir. A finite film solves $N_g-1$ surface
+fractions, with the last from normalization. Pressure, composition and surface
+temperature are solved together when coupled. A completely closed pore channel
+with zero film conductance has unobservable surface composition, which is
+explicitly pinned to the reservoir state.
 
----
+`NeumannPressureBC(gradient=...,T=...,mole_fractions=...)` specifies the outward
+pressure gradient and complete species/energy closure.
+`ConvectivePressureBC(reservoir;resistance=...,flow=:darcy_velocity)` specifies
+$P_s-P_\infty=R_h f$. `flow` may also be `:mass` or `:molar`; resistance units
+follow the selected rate per area. It may carry the same optional mass film.
+`ImpermeableBC()` closes all species. `MassFluxBC(fluxes=(...),
+inflow_temperature=(...))` prescribes named outward species fluxes, including
+negative inflow with required incoming temperature. Mass conditions do not add
+with `+`.
 
-## 9.2 One transfer coefficient for all species
+## 9.9 Boundary energy and thermal films
 
-Every gas component diffuses with the **same** effective transfer coefficient
-$\lambda_{\text{eff}}$: the face coefficient $\lambda_{\text{face}}$ entering
-the kernel of §9.1.2 is a single mixture property (§5.6), shared by all species
-at that face. The model therefore does not discriminate between light and heavy
-gases within one simulation — a light product (H₂O) and a heavy one (MMA)
-diffuse at the same rate through the same matrix. The per-component `λ_j(T)`
-property controls how each *condensed or gas phase* contributes to the mixture
-coefficient as composition evolves, not how individual gas species move
-relative to one another.
-
-Where a species-faithful magnitude is wanted, the Chapman–Enskog helper
-`chapman_enskog_diffusivity(T, M; P, σ, ε_k)` (§5.10) estimates the binary
-diffusivity of a given vapor in air; the user can fold that estimate (with a
-porosity/tortuosity correction) into the component `λ` values. Genuine
-multicomponent (Stefan–Maxwell) diffusion, or even a per-species kinetic-theory
-scaling of the diffusive flux, is not implemented (§9.11).
-
----
-
-## 9.3 The Darcy–Fick combined flux
-
-When the material has a permeable condensed component, pressure-driven (Darcy)
-advection augments diffusion. The total face flux is the sum of an advective and
-a diffusive part:
+All boundary energy is assembled at the direct-reservoir control surface.
+Outward species carry $h_j(T_s)$ and inward species carry their specified
+$h_j(T_{in})$. Define $H_s=\sum_jJ_jh_j(T_s)$ and the signed donor sum $H_r$.
+For an LTE wall heat film with heat $q_s$ positive inward,
 
 $$
-\boxed{\;
-J_j^{\text{DF}} = \underbrace{\frac{\xi_j^{\text{upwind}}}{\varphi_{\text{face}}}\,v_g}_{J_j^{\text{adv}}}
-   \;+\; \underbrace{\Big(\!-\lambda_{\text{face}}\frac{\xi_R T_R - \xi_L T_L}{T_{\text{face}}\,d_{LR}}\Big)}_{J_j^{\text{diff}}}
-\;}
+q_r=q_s+H_r-H_s,\qquad E_{out}=H_r-q_r=H_s-q_s.
 $$
 
-where $v_g$ is the superficial Darcy velocity at the face along its normal
-(§9.5, positive toward $R$, i.e. $+z$ on a line). The $1/\varphi_{\text{face}}$ is
-forced by the bookkeeping: $\xi_j$ is mass per **bulk** volume (the pressure
-closure $P=\sum\xi_jR_gT/(M_j\varphi)$ divides by $\varphi$ to recover the
-intrinsic pore concentration) while the Darcy velocity is **superficial**
-(volumetric flux per total cross-section), so the mass flux per bulk area is
-intrinsic density × superficial velocity, $J^{\text{adv}}=(\xi/\varphi)\,v_g$ —
-equivalently $\xi\,v_i$ with the interstitial velocity $v_i=v_g/\varphi$. The face
-porosity is the arithmetic mean $\varphi_{\text{face}}=\tfrac12(\varphi_L+\varphi_R)$
-of the two cell porosities, each already smoothly floored at $10^{-12}$ in the
-state mapping (§9.4), so the divisor is positive. The kernel's two helpers:
-
-```julia
-@inline function _darcy_face(::DarcyFickTransport, ds, o, nb, d_o, d_n)
-    m_f = guarded_harmonic_mean(ds.mob[o], ds.mob[nb], d_o, d_n, MOBILITY_GUARD)
-    v = -m_f * (ds.P[nb] - ds.P[o]) / (d_o + d_n)
-    return v, (ds.φ[o] + ds.φ[nb]) / 2
-end
-
-@inline _advective_flux(v, φ_f, ξ_o, ξ_n) = v * (value(v) >= 0 ? ξ_o : ξ_n) / φ_f
-```
-
-with `o` and `nb` the face's owner and neighbour ($L$ and $R$). Under Fickian
-transport `_darcy_face` returns nothing and the advective part is zero.
-
-### 9.3.1 First-order upwind selection
-
-The advected concentration is taken from the **upwind** cell — the cell from which
-the flow originates:
-
-$$
-\xi_j^{\text{upwind}} = \begin{cases}
-\xi_{j,L}, & v_g \ge 0 \quad (\text{flow from } L \text{ to } R), \\
-\xi_{j,R}, & v_g < 0 \quad (\text{flow from } R \text{ to } L).
-\end{cases}
-$$
-
-This first-order upwind rule is stable and conservative (the same face flux
-enters the two cells sharing the face with opposite signs). It is monotone: the
-advective outflow of a cell is proportional to its own concentration and vanishes
-with it, so advection alone cannot drive a gas inventory negative in the
-semi-discrete equations (a time step that overshoots is rejected by the domain
-test, §15.5.4). It is only first-order accurate; no slope reconstruction is applied
-to the Darcy–Fick advective term. (Second-order reconstruction with a smooth van
-Albada slope exists only for the fluxes relative to a moving mesh under a
-correction, §11.6.2.)
-
-The side is read from the **value** of $v_g$ alone (`value(v) >= 0`). Under the
-colored Jacobian $v_g$ is a dual number, and a dual of zero value compares by its
-partials, which differ between seeds; reading the value makes every derivative
-pass take the derivative of the same side, the $v_g\ge0$ side at $v_g=0$. The flux
-is continuous across $v_g=0$, with a kink there. The kernel tests check that the
-side does not depend on the seed (`test/kernels/test_gas_transport.jl`).
-
-### 9.3.2 Advection carries all species equally
-
-The Darcy–Fick flux uses the bulk velocity $v_g$ in the advective term for every
-component, and the diffusive term likewise uses one shared $\lambda_{\text{face}}$
-for all species (§9.2). Physically, bulk pore flow is a mixture motion; the model
-applies no molecular-weight discrimination in either term (§9.2, §9.11).
-
-In the pure-Fickian limit $v_g\to0$, the Darcy–Fick flux reduces exactly to the
-diffusion-only flux of §9.1; the kernel tests check an interior Darcy–Fick face
-against the Fick flux plus the upwind advection of $\xi/\varphi$, and that no
-advection crosses into an impermeable cell.
-
----
-
-## 9.4 Ideal-gas pressure in a porous medium
-
-The pressure that drives Darcy flow is the gas-phase pressure inside the pore
-space. Summing partial pressures of the gaseous components and dividing by the
-porosity (the fraction of bulk volume actually occupied by gas) gives the
-porous-medium ideal-gas law:
-
-$$
-\boxed{\;
-P = \frac{1}{\varphi}\sum_{j:\,\text{is\_gas}(j)} \frac{\xi_j R_g T}{M_j}
-  \equiv \frac{N(\xi,T)}{\varphi}
-\;},
-\qquad N \equiv \sum_{j:\,\text{gas}} \frac{\xi_j R_g T}{M_j}.
-$$
-
-The numerator $N$ is the sum of partial pressures *referred to the bulk volume*
-(mass per bulk volume times $R_g T/M_j$). Dividing by the porosity $\varphi$
-converts to the pressure *in the gas phase*, which occupies only the fraction
-$\varphi$ of the bulk: the same gas mass confined to a smaller void volume exerts
-a proportionally higher pressure. Without the $1/\varphi$ divisor the pressure
-would be underestimated in nearly-solid cells.
-
-The state mapping evaluates the pressure once per cell and residual, under
-Darcy–Fick transport only (`_gas_properties!`, `src/States/derived.jl`; §5.13):
-
-$$
-\varphi_i = \mathrm{smooth\_floor}\!\big(1-s(\xi^+_i,T_{\text{trial},i}),\,10^{-12}\big),
-\qquad
-P_i = \frac{N(\xi^+_i,T_{\text{trial},i})}{\max(\varphi_i,10^{-12})},
-$$
-
-with $s=\sum_{j\in\text{S/L}}\xi_j/\rho_{i,j}$ the skeletal volume fraction
-(`skeletal_volume_fraction`). Three implementation details are load-bearing:
-
-- **Only true gases contribute to $N$.** A component contributes iff
-  `is_gas(j)` is true *and* `molar_mass(j) > 0`; solids and liquids are skipped.
-  This is a compile-time-eliminated branch in the generated sum
-  `_gas_partial_pressure_sum` (`ideal_gas_pressure`, `src/Physics/pressure.jl`).
-- **The porosity floor is smooth.** `smooth_floor(x, a)` is $a$ for $x\le a$, $x$
-  for $x\ge 2a$ and a cubic join between (§5.3.2), so $\varphi_i\ge10^{-12}$ with a
-  continuous derivative, and the pressure stays finite even if a cell becomes
-  fully solid; the `max` inside `ideal_gas_pressure` is then inactive. No upper
-  clamp is needed: the skeletal fraction of non-negative concentrations is
-  non-negative, so $\varphi_i\le1$.
-- **Positive parts and trial temperatures.** The closure reads the positive-part
-  concentrations $\xi^+$ and the trial temperature, so a trial state with a
-  slightly negative mass or an out-of-bracket temperature still gives a finite,
-  physical pressure.
-
-The porosity is computed from *intrinsic* (skeletal) component densities
-$\rho_{i,j}$, not bulk densities (§5.3). It is the same porosity the Carman–Kozeny
-permeability closure (§9.5.2) and the face porosity of the advective flux (§9.3)
-read, so the pressure, the permeability and the advection share one void fraction.
-The domain test reads the *unguarded* pore fraction $1-s$ from the raw masses and
-rejects a proposed step in which it leaves $[0,1]$ by more than the skeletal volume
-of the mass tolerances (§15.5.4). `validate_problem` refuses a Darcy–Fick problem
-whose initial pore fraction falls below $10^{-6}$ at a cell centre with a positive
-effective permeability (`validate_darcy_initial_porosity`; §9.5.4).
-
-The constant is $R_g = 8.31446261815324$ J·mol⁻¹·K⁻¹ (`R_GAS`).
-
----
-
-## 9.5 Pressure gradient and Darcy velocity
-
-### 9.5.1 Pressure gradient
-
-At an interior face between two live cells the pressure gradient along the face
-normal is a plain central difference of the cell pressures:
-
-$$
-(\nabla P)_f = \frac{P_R - P_L}{d_{LR}},\qquad d_{LR}=d_L+d_R ,
-$$
-
-with the smoothly floored distances of §9.1.2, formed inside the kernel at each
-face (`_darcy_face`). $(\nabla P)_f>0$ when pressure increases toward $R$ ($+z$ on
-a line). Boundary faces take their velocity from the pressure condition instead
-(§9.5.3, §12.5).
-
-### 9.5.2 Darcy velocity
-
-Darcy's law gives the superficial (bulk) gas velocity at a face from the pressure
-gradient, the permeability, and the gas viscosity:
-
-$$
-\boxed{\;
-v_g = -\,\text{mob}_{\text{face}}\,(\nabla P)_f
-    = -\,\text{mob}_{\text{face}}\,\frac{P_R - P_L}{d_{LR}},
-\qquad \text{mob}=\frac{\kappa}{\mu}
-\;}
-$$
-
-with $v_g>0$ for flow toward $R$ (toward the surface on a line). The face
-properties combine the two cells consistently with their physical roles:
-
-- **Mobility — guarded distance-weighted harmonic mean.** Permeability is a flow
-  *resistance* in series across the interface. The state mapping forms the
-  per-cell mobility $\text{mob}_i=\kappa_i/\mu_i$, and the kernel combines the two
-  sides with the guarded harmonic mean of §9.1.4,
-
-  $$
-  \text{mob}_{\text{face}} = \frac{(d_L+d_R)\,\text{mob}_L\,\text{mob}_R}{d_L\,\text{mob}_R + d_R\,\text{mob}_L + \eta_m(d_L+d_R)},
-  \qquad \eta_m = 10^{-30}\ \mathrm{m^2\,Pa^{-1}\,s^{-1}}\ (\texttt{MOBILITY\_GUARD}),
-  $$
-
-  far below the mobility of any permeable solid ($\kappa=10^{-18}$ m² and
-  $\mu = 5\times10^{-5}$ Pa·s give $2\times10^{-14}$). It tends toward the
-  *smaller* of the two mobilities, so a single tight (low-$\kappa$) cell throttles
-  the interface flow, and it is **exactly 0** when either side's mobility is zero —
-  an impermeable cell is an infinite series resistance, and gas cannot cross into
-  it — while staying smooth, with a finite slope, as a mobility goes to zero.
-
-- **Viscosity — per-cell trial temperature.** Viscosity is an intensive,
-  smoothly varying gas property, evaluated per cell at the trial temperature and
-  smoothly floored, $\mu_i=\mathrm{smooth\_floor}\big(\mu_g(T_{\text{trial},i}),\,10^{-12}\ \mathrm{Pa\,s}\big)$
-  (`MU_FLOOR`); it enters the face through the per-cell mobilities. $\mu_g$ is the
-  material's `gas_viscosity` (§5.9), one curve per material, independent of the
-  pore-gas composition; the default `SutherlandProperty()` is Sutherland's law for
-  air,
-
-  $$
-  \mu_g(T) = \mu_{\text{ref}}\left(\frac{T}{T_{\text{ref}}^{\mu}}\right)^{3/2}
-             \frac{T_{\text{ref}}^{\mu}+S}{T+S},
-  $$
-
-  with the canonical air constants $\mu_{\text{ref}}=1.716\times10^{-5}$ Pa·s,
-  $S=110.4$ K. **Caveat on the reference temperature:** the Sutherland reference
-  is $T_{\text{ref}}^{\mu}=273.15$ K (the temperature at which $\mu_{\text{ref}}$ is
-  quoted for air), which is *distinct* from the enthalpy datum
-  $T_{\text{ref}}=298.15$ K used elsewhere in the model. The two should not be
-  conflated.
-
-- **Guards.** A cell's mobility is zero exactly when its permeability is zero; the
-  viscosity floor keeps the division finite without a threshold.
-
-*Implementation note.* `ds.mob[i] = effective_permeability(ξ⁺, T_trial, material, φ) / μ`
-in `_gas_properties!` (`src/States/derived.jl`); the face mobility and velocity
-in `_darcy_face` (`src/Kernels/gas_transport.jl`).
-
-The effective permeability $\kappa$ of a cell is either a component mixing rule
-(PARALLEL/SERIES/WEIGHTED on the renormalized solid basis, with the series bound
-exactly 0 when any condensed phase present is impermeable; §5.7.1) or the
-porosity-based **Carman–Kozeny** closure
-
-$$
-\kappa = \min\!\left(\frac{\ell^2\,\varphi^3}{180\,(1-\varphi)^2},\;\ell^2\right),
-$$
-
-with $\ell$ the characteristic pore/particle diameter and $180$ the Kozeny
-constant for a packed bed of spheres; as $\varphi\to1$ the packed-bed form
-diverges and $\kappa$ is capped at the free-flow scale $\ell^2$ (binding for
-$\varphi\gtrsim0.93$), with a $10^{-30}$ denominator guard solely against
-$\mathrm{Inf}$ at exactly $\varphi=1$. Carman–Kozeny is evaluated on the
-smoothly floored porosity $\varphi_i$ the state mapping passes — the same porosity
-the pressure formula uses — not on bulk-density volume fractions (§5.7). The two
-closures (component mixing vs. Carman–Kozeny) are mutually exclusive, and
-BRUGGEMAN is rejected for permeability (no physical basis for a transport
-resistance; an `ArgumentError` is thrown). As virgin material converts to porous
-char, $\varphi$ rises and $\kappa$ increases, easing gas escape.
-
-### 9.5.3 Pressure boundary conditions and the Darcy venting flux
-
-Pressure conditions do not enter the diffusive film flux; they set the outward
-Darcy velocity of the boundary face, which drives the **advective venting flux
-into the species rows**. Each tag's mass condition applies on the face that bounds
-the live cells on its side (`Meshes.live_face`: the boundary face itself, or after
-cells beyond it are deactivated the face of the outermost live cell; §14). With $i$
-the boundary cell, $d$ its smoothly floored center-to-face distance (half the cell
-on a line), and the face normal pointing **out of the domain at both ends**, the
-stored face flux of gas component $j$ is
-
-$$
-F_{j,f} \;=\; \underbrace{\frac{v_{\text{out}}^{+}}{\varphi_i}\,\xi_{j,i}}_{\text{venting}}
-\;-\;\underbrace{\texttt{mass\_bc\_flux}(bc,\,\xi_{j,i},\,\lambda_i\rho_i,\,\rho_i,\,d,\,t,\,j)}_{\text{film law, positive into the domain}},
-\qquad
-v_{\text{out}}^{+} = \begin{cases} v_{\text{out}}, & v_{\text{out}}\ge 0,\\ 0, & v_{\text{out}}<0,\end{cases}
-$$
-
-with $\rho_i$ the mixture density at $\xi^+_i$ and $T_{\text{trial},i}$
-(`_boundary_mass_flux!`, `src/Kernels/gas_transport.jl`). Only outflow advects the
-interior gas; inflow advects nothing, the ambient carrying none of the tracked
-gases. The outflow test reads the value of $v_{\text{out}}$, as the interior
-upwind side does (§9.3.1). Venting therefore depends on permeability and the
-pressure difference — the quantity Darcy–Fick transport exists to model. Under
-Fickian transport no velocity is formed and only the film law acts.
-
-`outward_darcy_velocity(bc, P_i, mob_i, d)` gives the superficial velocity along
-the outward normal, by condition:
-
-- **Dirichlet** ($P=P_{\text{bc}}$, default 101325 Pa):
-  $\;v_{\text{out}} = \text{mob}_i\,(P_i-P_{\text{bc}})/d$, the one-sided gradient:
-  an overpressure vents.
-- **Neumann** ($\partial P/\partial n$ given along the **outward normal**):
-  $\;v_{\text{out}} = -\,\text{mob}_i\,\partial P/\partial n$: a pressure falling
-  outward drives outflow; zero gradient $\Rightarrow$ impermeable.
-- **Convective (Robin)**:
-  $\;v_{\text{out}} = h_P\,(P_i-P_{\text{ext}})\,\dfrac{\text{mob}_i}{\text{mob}_i+\eta_m}$,
-  with $h_P$ [m·Pa⁻¹·s⁻¹] the pressure-transfer coefficient and the gate one on a
-  permeable cell (exactly, in floating point, for any physical mobility), zero on
-  an impermeable one and smooth between: an impermeable surface cell cannot vent
-  regardless of $h_P$. As $h_P\to\infty$ this approaches Dirichlet; as $h_P\to0$ it
-  approaches a zero-gradient (impermeable) Neumann condition.
-- Every other mass condition drives none; a `CombinedMassBC` sums its members.
-
-Because both boundary normals point outward, the same formula holds at `:top` and
-`:bottom` with no tag-dependent sign; the kernel tests check the closed forms and
-that a pressure condition on `:bottom` vents the bottom cell along its outward
-normal (`test/kernels/test_gas_transport.jl`). These conditions are detailed in
-§12.5. The residual, its Jacobian (the derivative of the same residual) and the
-saved-output diagnostics (the solution extraction re-evaluates the residual at
-every saved state) all read these fluxes from the one kernel.
-
-### 9.5.4 Initializing the pore gas: background air
-
-Darcy–Fick problems must **not** start with an evacuated pore space. With all
-gas $\xi_j = 0$ the closure gives $P \approx 0$ inside the solid against a
-101325 Pa boundary value, so early product gas is spuriously advected *inward*
-down the absolute-pressure slope instead of being resisted by ~1 atm of pore
-air (peer codes initialize $P = P_\infty$ with a background species or solve
-gauge pressure). Two ingredients make the initial state physical:
-
-1. **A real pore space.** The condensed components must declare an intrinsic
-   (skeletal) density via `ρ_intrinsic` (or the `φ` porosity keyword) on
-   `SolidComponent`/`LiquidComponent`. Without it, `get_intrinsic_density`
-   returns the bulk density — a phase with no pores of its own — and a cell
-   at full bulk density has $\varphi = 0$: there is no pore volume to hold
-   air, and any generated gas meets the $\varphi$ floor ($10^{-12}$) in
-   $P = N/\varphi$, producing absurd pressures. `validate_problem` refuses such a
-   problem when the cell is permeable (§9.4).
-2. **An inert background air component** initialized at ambient pressure.
-   `background_gas_concentration(material, species, ξ, T; P = 101325.0)`
-   (`src/Physics/pressure.jl`) is the single-species inverse of the pressure
-   closure, $\xi_j = P\,M_j\,\varphi(\xi,T)/(R_g\,T)$ with
-   $\varphi=\max(1-s,0)$ evaluated from the condensed entries of $\xi$, so the
-   initial cell pressure is exactly `P`:
-
-   ```julia
-   using Pyrolysis
-
-   wood = SolidComponent(:wood, ρ = 500.0, c = 1500.0, k = 0.12, κ = 1e-14,
-                         ρ_intrinsic = 1500.0)
-   volatiles = GaseousComponent(:volatiles, M = 0.05, c = 1500.0, k = 0.03, λ = 2e-5)
-   air = GaseousComponent(:AIR, M = 0.02897, c = 1006.0, k = 0.026, λ = 2e-5)
-   material = Material(name = :wood, components = (wood, volatiles, air), reactions = ())
-
-   ξ_air = background_gas_concentration(material, :AIR, (500.0, 0.0, 0.0), 300.0)
-   ξ_initial = [z -> 500.0, z -> 0.0, z -> ξ_air]   # ξ_air = 0.78455 kg/m³
-   ```
-
-   Here the skeleton fills a third of the bulk ($500/1500$), so $\varphi = 2/3$,
-   and the pressure of this composition at 300 K is 101325 Pa (checked with
-   `ideal_gas_pressure` in the documentation scratch environment).
-
-The shipped Darcy–Fick examples (`07_douglas_fir_cone.jl`,
-`08_darcy_fick_demo.jl`, `08_pressure_treated_wood_cone.jl`) follow this
-pattern. Caveat: the diffusive film condition (`DiffusiveMassBC`) drives every
-gas toward a zero-concentration ambient, so the background air slowly leaks out
-over an internal-diffusion time scale; the initialization matters most early in
-heating, before significant gas generation. A `ConvectiveMassBC` with a
-per-species ambient (`ξ_inf` an `NTuple`) can hold the air by film exchange
-(§12.4.3). Advective air ingress from the ambient is not modeled (boundary Darcy
-inflow carries nothing, §9.5.3).
-
----
-
-## 9.6 The gas-transport Jacobian
-
-The Jacobian of the gas-transport terms is part of the colored forward-mode
-derivative of the whole residual (`ColoredJacobian`, §15.6): the state is seeded
-with dual numbers, one partial per color, and the duals propagate through the
-state mapping (the concentrations, their positive parts, the trial temperatures,
-$\lambda_i$, $\varphi_i$, $P_i$, $\text{mob}_i$) and through the kernel (the face
-means, the fluxes, the enthalpy they carry). No derivative of the gas transport is
-hand-coded. Differentiating the executed code makes the Jacobian consistent with
-every guard by construction: the smooth floors of the porosity, the viscosity and
-the distances, the guarded face means, the positive-part concentrations and the
-trial clamp all carry continuous derivatives, and the derivative is that of the
-value the residual uses. This section states what the colored derivative
-contains.
-
-**Pressure.** In the interior of the guards ($\varphi$ above twice its floor,
-masses above their positive-part scale, temperatures inside the bracket) the
-quotient rule gives
-
-$$
-\frac{\partial P}{\partial T} = \frac{1}{\varphi}\,\frac{\partial N}{\partial T}
-- \frac{N}{\varphi^{2}}\frac{\partial\varphi}{\partial T},\qquad
-\frac{\partial P}{\partial \xi_k} = \frac{1}{\varphi}\frac{\partial N}{\partial \xi_k}
-- \frac{N}{\varphi^{2}}\frac{\partial\varphi}{\partial\xi_k},
-$$
-
-with $\partial N/\partial T = N/T$, $\partial N/\partial\xi_k = R_gT/M_k$ for a gas
-and $0$ otherwise, $\partial\varphi/\partial\xi_k = -1/\rho_{i,k}$ for a condensed
-phase and $0$ for a gas, and $\partial\varphi/\partial T$ non-zero only for
-temperature-dependent intrinsic densities $\rho_{i,j}(T)$. Two physical readings
-follow: a **gas** component raises $P$ directly through the partial-pressure sum;
-a **solid/liquid** component raises $P$ indirectly — adding condensed mass shrinks
-the void fraction, confining the same gas to a smaller volume. At the porosity
-floor the smooth floor's slope goes continuously to zero, so the
-$\varphi$-partial vanishes there exactly as the value saturates (a hand-written
-$N/\varphi^2$ would grow as $10^{24}N$). The state enters through
-$\partial\xi^+_k/\partial m_{k,i}$ ($1/V_i$ above the positive-part scale) and
-$\mathrm{d}T_{\text{trial}}/\mathrm{d}T$ (1 inside the bracket).
-
-**Darcy velocity.** At fixed mobility the velocity's pressure sensitivity is exact
-and constant in $P$,
-
-$$
-\frac{\partial v_g}{\partial P_L} = +\frac{\text{mob}_{\text{face}}}{d_{LR}},\qquad
-\frac{\partial v_g}{\partial P_R} = -\frac{\text{mob}_{\text{face}}}{d_{LR}},
-$$
-
-and the mobility adds its own chain to $(T,\xi)$ of both cells, through
-$\kappa(\xi^+,T,\varphi)$, $\mu(T)$ and the derivative of the guarded mean, which
-stays finite as a mobility goes to zero.
-
-**Diffusive flux.** The direct partial derivatives of the single-face flux
-
-$$
-J = -\lambda\,\frac{\xi_R T_R - \xi_L T_L}{T_{\text{face}}\,d},
-\qquad T_{\text{face}}=\tfrac12(T_L+T_R),
-$$
-
-with respect to each scalar argument are, writing $N_{\text{num}}=\xi_R T_R-\xi_L T_L$
-and $\text{denom}=T_{\text{face}}\,d$,
-
-$$
-\frac{\partial J}{\partial \lambda} = -\frac{N_{\text{num}}}{\text{denom}},
-\qquad
-\frac{\partial J}{\partial \xi_L} = \frac{\lambda T_L}{\text{denom}},
-\qquad
-\frac{\partial J}{\partial \xi_R} = -\frac{\lambda T_R}{\text{denom}},
-$$
-
-$$
-\frac{\partial J}{\partial T_L} = \frac{\lambda \xi_L}{\text{denom}} - \frac{J}{2\,T_{\text{face}}},
-\qquad
-\frac{\partial J}{\partial T_R} = -\frac{\lambda \xi_R}{\text{denom}} - \frac{J}{2\,T_{\text{face}}}.
-$$
-
-The temperature derivatives have two pieces: a direct effect through the numerator
-($\pm\lambda\xi/\text{denom}$) and an indirect effect through the
-$T_{\text{face}}$ prefactor in the denominator
-($-J/(2T_{\text{face}})$, since $\partial T_{\text{face}}/\partial T_{L,R}=\tfrac12$
-and $\partial(1/T_{\text{face}})/\partial T_{\text{face}}=-1/T_{\text{face}}^2$).
-A flat $\xi T$ field has no diffusive flux and no $\lambda$-sensitivity. The
-temperatures here are the trial temperatures, so each temperature partial is
-multiplied by $\mathrm{d}T_{\text{trial}}/\mathrm{d}T$.
-
-**Chains.** Beyond these direct partials, the colored derivative composes:
-
-- **The mixing-rule chain (via $\lambda_{\text{face}}$).** Since
-  $\lambda_{\text{face}}$ is a guarded mean of the cell coefficients, and each
-  $\lambda_{L/R}$ is itself a composition-dependent mixing rule, the flux
-  sensitivity to a concentration also includes
-
-  $$
-  \frac{\partial J}{\partial \xi_{L/R,k}}
-  \;\supset\;
-  \frac{\partial J}{\partial \lambda}\cdot
-  \frac{\partial \lambda_{\text{face}}}{\partial \lambda_{L/R}}\cdot
-  \frac{\partial \lambda_{L/R}}{\partial \xi_{L/R,k}}
-  $$
-
-  (§5.6, §5.15).
-- **The advective chain.** $\partial J^{\text{adv}}/\partial\xi_{\text{up}} = v_g/\varphi_{\text{face}}$
-  for the upwind cell, plus $\xi_{\text{up}}/\varphi_{\text{face}}$ times the
-  velocity's chain and $-J^{\text{adv}}/\varphi_{\text{face}}$ times the face
-  porosity's; at $v_g=0$ the derivative of the $v_g\ge0$ side (§9.3.1).
-- **The enthalpy chain.** The face energy flux $\sum_j F_j\,h_j(T_f)$ (§9.9.2)
-  differentiates to $\sum_j[\partial F_j\,h_j(T_f) + F_j\,c_{p,j}(T_f)\,\partial T_f]$,
-  with $\partial T_f/\partial T_L = d_R/d_{LR}$ and $\partial T_f/\partial T_R = d_L/d_{LR}$,
-  and the cell term $-\sum_j h_j(T_i)\dot M_{j,i}$ of the temperature row adds
-  $-\sum_j c_{p,j}(T_i)\dot M_{j,i}$ to its own temperature column.
-- **The boundary faces.** The film law contributes, for a `DiffusiveMassBC`,
-  $\partial F_{j,f}/\partial\xi_{j,i} = \lambda_i h_m/(\lambda_i + h_m d)$ plus the
-  chain through $\lambda_i$; the venting flux contributes $v_{\text{out}}/\varphi_i$
-  and the chain of $v_{\text{out}}$ through $P_i$, $\text{mob}_i$ and $\varphi_i$
-  while gas flows out, and nothing while $v_{\text{out}}<0$ (a kink at zero, read
-  from the value). The enthalpy the boundary fluxes carry at $T_s$ adds the chain
-  through the surface temperature of the thermal boundary kernel (§12.2.3).
-
-The Jacobian's pattern is built from the mesh connectivity, not from the kernels
-(§15.11): every cell row already reaches every unknown of its neighbours, so gas
-transport adds no entries, and the coloring needs $3(N_C+1)$ colors on a fixed
-mesh. The kernel tests (`test/kernels/test_gas_transport.jl`) compare the colored
-Jacobian with the dense forward-mode reference (§15.13) entry by entry to a
-relative $10^{-12}$ on five states (the initial state, a hot state, a perturbed
-state, the zero state and a negative state), in both energy forms, on 6 and 8
-cells, for Fickian and Darcy–Fick transport with film, convective, prescribed,
-pressure and combined mass conditions and the Couette, property-ratio and
-pooling film blowing models; they assert the
-color count, that the pattern contains every non-zero of the reference, and that
-the residual allocates nothing.
-
----
-
-## 9.7 Transport modes and the cell fields
-
-`setup` chooses one gas transport for the problem (`_gas_transport`,
-`src/Integration/setup.jl`) and builds the kernel and the state mapping for it:
-
-| Mode | Selected when | Cell fields of the state mapping | Face quantities in the kernel |
-|---|---|---|---|
-| none (`NoGasTransport`) | no gas component; or no component carries a non-zero $\lambda$ and every mass condition is `ImpermeableBC` | — | — (no kernel) |
-| Fickian (`FickTransport`) | gas can move and no condensed component is permeable | $\lambda_i$ | $\lambda_{\text{face}}$, $J^{\text{diff}}$, the film fluxes, $T_f$ |
-| Darcy–Fick (`DarcyFickTransport`) | some solid or liquid component has a permeability law not identically zero (`has_darcy_flow`) | $\lambda_i$, $\varphi_i$, $P_i$, $\text{mob}_i$ | the above, and $\text{mob}_{\text{face}}$, $v_g$, $\varphi_{\text{face}}$, $J^{\text{adv}}$, $v_{\text{out}}$ |
-
-The cell fields are evaluated **once per cell and residual**, in the state mapping
-(`derive!`, `src/States/derived.jl`; §5.13), before any kernel runs, at the
-positive-part concentrations and the trial temperature:
-
-$$
-\lambda_i = \lambda_{\text{eff}}(\xi^+_i,T_{\text{trial},i}),\quad
-\varphi_i = \mathrm{smooth\_floor}(1-s_i,10^{-12}),\quad
-P_i = \frac{N_i}{\varphi_i},\quad
-\text{mob}_i = \frac{\kappa(\xi^+_i,T_{\text{trial},i},\varphi_i)}{\mathrm{smooth\_floor}(\mu_g(T_{\text{trial},i}),10^{-12})}.
-$$
-
-The derived state holds the vectors for every problem and fills each only under
-the transport that reads it: a Fickian problem evaluates no pressure, porosity or
-mobility, and a problem without gas transport not even $\lambda_i$. The face
-quantities are formed inside the kernel, face by face, in every evaluation;
-nothing is cached between evaluations, and the dual twin of every buffer serves
-the colored Jacobian (§15.2). The kernels read only the derived state (§15.3), so
-the residual, its Jacobian and the saved-output diagnostics see one set of fields.
-
-Under Fickian transport the cell coefficient is the volume-fraction mix of the
-component values (§5.6), so a condensed component with $\lambda = 0$ stops all
-transport in a cell that holds no gas. The gas field then ends in a sharp front;
-`validate_problem` warns about the configuration (`warn_degenerate_gas_transport`:
-"… the integrator rejects step after step on it. Give the condensed components a
-small λ"), and a small $\lambda$ on the condensed components (for example
-$10^{-6}$ m²·s⁻¹) keeps the transport non-degenerate.
-
----
-
-## 9.8 Surface diffusive mass flux
-
-At a boundary face gas escapes to the environment. The diffusive part of the
-boundary flux is obtained from the internal-diffusion-only form
-$J=-\lambda\,\partial\xi/\partial z$ with the environment assumed to hold *zero*
-concentration of decomposition products, so the boundary gradient is approximated
-as $(\xi-0)/d=\xi/d$, with $d$ the smoothly floored distance from the boundary
-cell's center to the face (half the cell on a line) and $\xi$ the cell's raw
-concentration $m/V$.
-
-### 9.8.1 Infinite vs. finite external resistance
-
-- **Pure internal diffusion** (no external film resistance, $h_m\to\infty$,
-  `DiffusiveMassBC(Inf)`):
-
-  $$
-  J_j^{\text{surface}} = \frac{\lambda\,\xi_j}{d}.
-  $$
-
-  The kernel passes the surface coefficient as $\lambda\rho$, with $\lambda=\lambda_i$
-  and $\rho$ the mixture density of the boundary cell at $\xi^+$ and $T_{\text{trial}}$,
-  and the condition writes $J=\lambda\rho\,(\xi/\rho)/d=\lambda\xi/d$; the two forms
-  are identical because $\rho$ cancels (consistent with the volume-fraction
-  convention of §9.1.4). The condition recovers $\lambda$ by exact division
-  $\lambda=\lambda\rho/\rho$ and returns zero flux for $\rho \le 0$; no floor is
-  applied, so the division is exact for any positive density.
-
-- **Combined internal + external resistance** (finite film coefficient
-  $h_m$ [m·s⁻¹]):
-
-  $$
-  \boxed{\;
-  J_j^{\text{surface}} = \frac{\lambda\,h_m\,\xi_j}{\lambda + h_m\,d}
-  \;}
-  $$
-
-  This is two resistances in series. Writing the flux as
-  $J=\xi_j/(R_{\text{int}}+R_{\text{ext}})$ with internal resistance
-  $R_{\text{int}}=d/\lambda$ and external resistance $R_{\text{ext}}=1/h_m$,
-
-  $$
-  J_j = \frac{\xi_j}{\dfrac{d}{\lambda}+\dfrac{1}{h_m}}
-      = \frac{\lambda h_m \xi_j}{h_m d + \lambda},
-  $$
-
-  recovering the boxed form. As $h_m\to\infty$, $R_{\text{ext}}\to0$ and
-  $J\to\lambda\xi_j/d$ (pure internal limit); as $h_m\to0$, $J\to h_m\xi_j$
-  (external-controlled).
-
-A purely **convective** mass condition (`ConvectiveMassBC`, external transfer only)
-gives $J_j^{\text{surface}}=h_m(\xi_j-\xi_{j,\infty})$, with the ambient
-concentration $\xi_{j,\infty}$ a scalar for every gas, a function of $t$, or a
-per-species tuple (§12.4.3); it is typically zero for decomposition products
-venting to atmosphere. A `MassFluxBC` prescribes the flux into the domain. Pressure
-and impermeable conditions return zero *film* flux (a pressure condition acts
-through the Darcy velocity, §9.5.3). The catalogue is §12.4.
-
-### 9.8.2 Two sign conventions, reconciled
-
-The condition functions share the convention of the boundary-condition layer,
-**positive into the domain**: `mass_bc_flux(bc, ξ_surface, λρ, ρ, d, t, j)`
-(`src/BoundaryConditions/boundary_fluxes.jl`) returns a **negative** flux for gas
-escaping. The face fluxes of the residual follow the face-normal convention, and
-every boundary normal points out of the domain, so the kernel stores the negated
-film flux, `F[j, f] -= mass_bc_flux(...)`, at **both** boundaries, plus the
-venting flux of §9.5.3. A boundary-face flux is therefore positive when gas
-escapes, at `:top` and at `:bottom` alike, and it removes mass from the boundary
-cell through the same scatter as any other face. The diagnostic
-`compute_surface_mass_flux` returns $-$`mass_bc_flux`, positive for gas escaping.
-
-| Quantity | Convention |
-|---|---|
-| Interior face flux $F_{j,f}$ | $+$ = transport along the face normal, owner → neighbour ($+z$ on a line) |
-| Boundary face flux $F_{j,f}$ (`:top` and `:bottom`) | $+$ = gas leaving the domain (outward normal) |
-| `mass_bc_flux` (condition) | $+$ = into the domain; $-$ = gas escaping |
-| `compute_surface_mass_flux` | $+$ = gas escaping |
-| `sol.boundary_mass_flux[tag]`, `sol.extras.surface_mass_flux` | $+$ = outward, summed over the components |
-
-*Implementation note.* `mass_bc_flux` and `compute_surface_mass_flux`,
-`src/BoundaryConditions/boundary_fluxes.jl`; the face application in
-`_boundary_mass_flux!`, `src/Kernels/gas_transport.jl`. See §12.4 for the full
-mass-condition catalogue (Impermeable, MassFlux, Convective, Diffusive, Combined)
-and §16.6 for how the ledgers read the boundary fluxes.
-
----
-
-## 9.9 Species conservation in flux form
-
-The species mass-conservation PDE for a gaseous component $j$ is
-
-$$
-\frac{\partial \xi_j}{\partial t} = -\nabla\!\cdot J_j + S_j ,
-$$
-
-while a solid or liquid component has no transport flux and, on a fixed mesh,
-evolves by reaction only:
-
-$$
-\frac{\partial \xi_j}{\partial t} = S_j
-\qquad (j \text{ solid/liquid}),
-$$
-
-(see §3.2 for the gas-vs-solid distinction and §11.2.3 for the balances on a
-moving cell). The reaction source $S_j=\sum_r \nu_{r,j}\,r_r$ is treated in §6.
-
-### 9.9.1 The mass rows
-
-The state holds the cell masses $m_{j,i}$, and the mass row of cell $i$ is the
-cell-integrated balance (`assemble_rows!`, `src/Assembly/residual.jl`):
-
-$$
-\boxed{\;
-\frac{\mathrm{d}m_{j,i}}{\mathrm{d}t} = \omega_{j,i}\,V_i + \dot M_{j,i},
-\qquad
-\dot M_{j,i} = -\sum_{f\in\partial i} s_{i,f}\,A_f\,F_{j,f}
-\;}
-$$
-
-with $s_{i,f}=+1$ when cell $i$ owns face $f$ and $-1$ when it is the neighbour.
-On a line, with $R$ the face above cell $i$ and $L$ the face below,
-$\dot M_{j,i} = -(A_RF_{j,R} - A_LF_{j,L})$ on an interior cell, and a boundary
-face, owned by its cell, removes $A_fF_{j,f}$ from it. Each face flux is
-multiplied by its own face area, so the rows are exact for areas that differ
-between faces (cylindrical and spherical coordinates); on a planar line every face
-has the column's area $A$ (the variable area $A(t)$ under a lateral-shrinkage law,
-§10). Every interior face flux leaves one cell and enters its neighbour exactly,
-so the face fluxes telescope: the total mass of a component changes only by the
-boundary fluxes and by reaction, and mass is conserved exactly because the masses
-are the states (§16.3).
-
-The gas-transport kernel writes face fluxes for the gas components only (it skips
-every component that is not `is_gas`); the kernel tests check that the condensed
-components' rows receive no gas-transport flux. The flux that feeds the rows is
-the diffusion-only flux under Fickian transport or the Darcy–Fick flux under
-Darcy–Fick transport (§9.7).
-
-On a moving mesh (`use_ale = true`) the gas is mesh-bound: the mesh moves with the
-solid, $w = v_s$, unless a correction is installed, and the gas flux of this
-chapter is the flux relative to the skeleton, so it feeds the rows unchanged. The
-volume change of a moving cell needs no term of its own: the rows integrate the
-masses, and the concentrations $\xi=m/V$ follow the geometric volume, so the
-dilation is implicit (§11.3.4). Under a correction ($w = v_s + c$), the
-`RelativeFluxKernel` adds the flux $u\,\xi_{j,f}$, $u = -c\cdot n$, of **every**
-component across the moving faces (§11.6).
-
-### 9.9.2 Coupling to the energy equation: the gas enthalpy flux at faces
-
-Gas transport feeds back on temperature through the sensible enthalpy its fluxes
-carry across faces (§7.4). At every interior face the kernel adds to the face's
-energy flux the enthalpy of the same mass fluxes the mass rows carry,
-
-$$
-F^{E}_f \mathrel{+}= \sum_{j:\,\text{gas}} F_{j,f}\,h_j(T_f),
-\qquad T_f = \frac{d_R\,T_L + d_L\,T_R}{d_L + d_R},
-$$
-
-with $T_f$ the distance-weighted face temperature of the cell temperatures (not
-the trial temperatures). At a boundary face the thermal boundary kernel adds
-$\sum_j F_{j,f}\,h_j(T_s)$ to the outward energy flux once the surface balance has
-fixed $T_s$ (`_carried_enthalpy`, `src/Kernels/thermal_boundary.jl`): gas leaves at
-the surface temperature. The temperature row (§7.3) subtracts the enthalpy of the
-cell's net mass change at its own temperature,
-
-$$
-C_i\,\frac{\mathrm{d}T_i}{\mathrm{d}t} = E_i - \sum_j h_j(T_i)\,\dot M_{j,i},
-$$
-
-so each face contributes, net,
-
-$$
--\,A_f\,s_{i,f}\sum_{j:\,\text{gas}} F_{j,f}\,\big(h_j(T_f)-h_j(T_i)\big)
-$$
-
-to cell $i$: the flux form of $-\sum_j \mathbf J_j\cdot\nabla h_j$. For a cell with
-equal fluxes $F$ through both faces this is
-$-A F\,[h(T_{R,f})-h(T_{L,f})] \approx -V\,F\,c_p\,\partial T/\partial z$, the
-advective term of the energy equation. The form is conservative (each face carries
-one enthalpy flux, which leaves one cell and enters the other), exact for
-temperature-dependent $c_{p,j}$, and keeps a uniform temperature exactly at rest:
-with $T_f = T_i$ everywhere every face term vanishes, whatever the mass fluxes. The
-kernel tests check this to $10^{-12}$ in both energy forms, with Darcy flow
-through a non-uniform gas (`test/kernels/test_gas_transport.jl`). In the enthalpy
-form the same face fluxes enter the inventory row, which needs no cell term: the
-inventory $H_i=\sum_j m_{j,i}h_j(T_i)$ changes with the masses by itself (§7.3).
-
-The storage coefficient $C_i=\sum_j m_{j,i}c_{p,j}$ sums every component, the gas
-included (§5.4); the gas *flux* enters only through the enthalpy it carries across
-faces. The surface energy balance therefore carries no gas-enthalpy term: one on
-top of the boundary-face enthalpy flux would count the escaping enthalpy a second
-time (§7.4.3, §12.2). The blowing models of a convective condition read the
-outward gas-transport fluxes of the face (§12.3.3).
-
-*Implementation note.* The mass and enthalpy face fluxes in `contribute!` of the
-`GasTransportKernel`; the scatter and the rows in `assemble_rows!`,
-`src/Assembly/residual.jl`. The order of the kernels (reactions, gas transport,
-in-depth radiation, conduction, thermal boundary, relative fluxes) is described in
-§7.6; gas transport runs before the thermal boundary kernel so that the surface
-balance and the carried enthalpy see its boundary fluxes.
-
----
-
-## 9.10 Comparison to ThermaKin2Ds, Gpyro, and FDS
-
-The Pyrolysis.jl gas-transport model follows the ThermaKin2Ds and Gpyro
-condensed-phase formulations, with the FDS solid-phase model as the
-minimal-transport reference. The notation map below is used on first contact;
-internally all chapters use the unified symbols of §2.
-
-| External | Pyrolysis.jl | Meaning |
-|---|---|---|
-| ThermaKin $\theta_i^{\,j}$ | $\nu_{i,j}$ | stoichiometric yield |
-| Gpyro $K$ | $\kappa$ | permeability |
-| Gpyro $\bar\rho$, $X_\alpha$ | $\rho$, $v_j$ | mixture density, volume fraction |
-| Gpyro $\nu$ (Darcy) | $\mu/\rho_g$ | kinematic viscosity |
-| Gpyro, FDS $Z$ | $A_i$ | Arrhenius pre-exponential |
-
-### ThermaKin2Ds
-
-ThermaKin writes the gas mass flux as a volume-fraction-gradient diffusion law,
-$J = -\rho_g\,\lambda\,\partial(\xi_g/\rho_g)/\partial x$, which — for an ideal gas
-with $\rho_g\propto P/T$ — is identical to the Pyrolysis.jl form
-$J=-(\lambda/T)\,\partial(\xi T)/\partial x$ (§9.1; the header of
-`src/Physics/gas_transport.jl` cites ThermaKin §1.2). The two codes therefore
-share the same diffusive driving potential and the same composition + thermal
-split. Pyrolysis.jl additionally offers the Darcy advective augmentation (§9.3) for
-permeable, pressure-driven problems; in the rigid, non-swelling limit ($\gamma=0$
-for gases) ThermaKin's Boyle's-law Darcy treatment maps onto the porous-medium
-ideal-gas pressure (§9.4) with $\kappa$ controlling the flow resistance. The
-energy-equation convention is the same as ThermaKin's: its Eq. 17 sums
-$\sum_j \xi_j c_j$ over *all* components including gas and carries the gas flux
-through $c_g(\mathbf J_g\cdot\nabla T)$, which is $\rho c_p^{\text{eff}}$ (§5.4)
-and, discretely, the enthalpy the gas fluxes carry across faces (§9.9.2), a
-conservative form of the same term. ThermaKin's Eq. 15 applies its deformation term
-to every component, gas included — the skeleton-bound frame of §11.1.2.
-
-### Gpyro
-
-Gpyro solves pressure-driven gas transport with a Darcian mass flux
-$\dot m'' = -(K/\nu)(\partial P/\partial z - g\rho_g)$ together with a
-pressure-evolution equation derived from gas continuity and the ideal-gas law.
-Pyrolysis.jl uses the same Darcy constitutive law, $v_g=-(\kappa/\mu)\nabla P$
-(§9.5.2), with the guarded distance-weighted harmonic mean of the per-cell
-mobilities $\kappa/\mu$ (the material's viscosity curve at the cell temperature);
-the gravity/buoyancy term $g\rho_g$ is omitted (negligible for thin
-condensed-phase samples in the through-thickness direction). The pressure is
-closed algebraically by the porous-medium ideal-gas law $P=N/\varphi$ (§9.4)
-rather than time-integrated as a separate state. This is **not** an additional
-approximation relative to Gpyro's pressure equation: gas storage is fully retained
-in the mass rows of the gas components, and $P=N/\varphi$ is an exact evaluation of
-the equation of state at that evolving state — summing the species rows reproduces
-gas continuity with no spurious source. Gpyro's control-volume conservation of
-$\bar\rho\,\Delta z$, $\bar\rho Y_i\,\Delta z$, and gas mass — the gas balance
-written on control volumes that deform with the solid, with only $\dot m''$
-crossing their faces — corresponds to the cell mass rows of §9.9.1 on the moving
-mesh of §11, where every component rides the mesh; the harmonic interface
-interpolation of Gpyro's Patankar scheme is the same resistance-in-series face
-averaging used here (§9.1.4, §13.11).
-
-### FDS
-
-The FDS solid-phase model treats the condensed phase with 1D Fourier conduction
-and Arrhenius kinetics but, in its standard form, does **not** resolve in-depth
-gaseous mass transport — volatiles are assumed to escape instantaneously to the
-gas phase. A Pyrolysis.jl problem without gas transport (no gas component, or no
-transfer coefficient and impermeable mass conditions) is this minimal-transport
-limit; the diffusive and Darcy machinery of this chapter is the generalization
-FDS lacks, and with no in-depth gas FDS has neither gas storage nor the enthalpy
-the gas carries through the solid.
-
----
-
-## 9.11 Limitations and open issues
-
-- **First-order upwind advection only.** The Darcy–Fick advective term uses
-  unlimited first-order upwinding (§9.3.1). It is stable, conservative and
-  monotone but diffusive; sharp composition fronts are smeared. Second-order
-  reconstruction with a smooth van Albada slope is implemented only for the
-  fluxes relative to a moving mesh (§11.6.2) and is not used for the Darcy flux.
-  The upwind face state and the outflow-only vent switch on the value of the
-  velocity, so the flux has a kink at $v_g = 0$, where the Jacobian takes the
-  $v_g\ge0$ side.
-
-- **No species discrimination in diffusion.** All gas species share one
-  effective transfer coefficient $\lambda_{\text{eff}}$ (§9.2): light and heavy
-  vapors diffuse identically within a simulation. This is a simplified
-  surrogate for a full multicomponent (Stefan–Maxwell) diffusion model; the
-  Chapman–Enskog Lennard-Jones parameter estimates available for sizing
-  $\lambda$ (§5.10) are heuristic and unvalidated for pyrolysis vapors.
-
-- **Isobaric diffusive kernel.** $-(\lambda/T)\,\partial(\xi T)/\partial z$ equals
-  Fick's law $-\rho_g D\,\nabla Y$ only when $\nabla(\varphi P)=0$; the dropped term
-  is proportional to $-Y\,\nabla(\varphi P)/(\varphi P)$. Under Fickian transport,
-  which resolves no pressure field, the convention is consistent. Under Darcy–Fick
-  transport the code resolves $\nabla P$ (and sharp char fronts carry
-  $\nabla\varphi$), so the diffusive term is then an approximation: the
-  pressure-driven part of the transport is carried by the Darcy term while the
-  diffusive term keeps the isobaric form (`gas_flux` docstring).
-
-- **No Wilke mixing for viscosity.** The Darcy viscosity is one curve per material
-  (Sutherland's law for air by default; §5.9, §9.5.2), independent of the pore-gas
-  composition; a Wilke mixing rule would be required to capture mixtures of very
-  different molecular weights (e.g. H₂O + CO₂ at high temperature; §5.16). The
-  Sutherland reference temperature (273.15 K) differs from the enthalpy datum
-  (298.15 K) and must not be conflated.
-
-- **Zero-exterior-concentration film law.** The diffusive film condition assumes
-  the environment holds no decomposition products ($\xi_\infty=0$ implicit;
-  §9.8.1); only `ConvectiveMassBC` carries an ambient concentration. Re-entry or
-  accumulation of products in the boundary layer is not modeled, and boundary
-  Darcy inflow carries no ambient gas (§9.5.3).
-
-- **No gravity in Darcy's law.** The buoyancy term $g\rho_g$ is omitted (§9.10).
-
-- **One-temperature gas energy.** The pore gas is stored at the matrix
-  temperature and its fluxes carry enthalpy at the face temperature (§9.9.2);
-  there is no two-temperature gas energy equation, so regimes where the gas does
-  not equilibrate with the pore walls within a cell are outside the model. The
-  pressure itself is *not* approximated: $P=N/\varphi$ is an exact
-  equation-of-state evaluation with gas mass storage fully retained in the
-  mass rows (§3.4.2).
-
----
+This conversion accounts for incoming heating exactly once. An adiabatic,
+prescribed-flux or prescribed-temperature boundary without a thermal film
+uses its prescribed heat and donor enthalpy directly. A convective film and
+its gas reservoir must share the incoming stream temperature; radiative
+surroundings may differ.
+
+For constant conductivity and species heat capacities the Couette film gives
+$q_s=h\beta(C/h)(T_\infty-T_s)$ with the **signed**
+$C=\sum_jJ_jc_{p,j}$. The configurable $2\lambda$ factor has its classical
+value at $\lambda=1/2$. Temperature-dependent properties are evaluated at the
+surface as a frozen-property approximation. `PoolingFilm` uses the solved
+surface composition when supplied; empirical pooling/property-ratio closures
+support outward products or pure freestream suction and diagnose unsupported
+mixed counterflow. A custom `FunctionBlowing` receives signed species fluxes
+and the surface state.
+
+## 9.10 Admissibility and pressure-aware integration
+
+Physical pore volume must remain positive outside the trial guard:
+$\phi\geq2\,10^{-12}$ plus a resolved uncertainty margin from condensed masses,
+temperature and geometry. This holds initially, on accepted steps and after
+deactivation. A divisor floor does not make a zero-pore physical state valid.
+Negative trial masses and distorted trial geometry have finite extensions so
+Newton can recover; they are not accepted physical states.
+
+`pressure_tolerance` [Pa] sets an absolute local pressure-error budget shared
+among gases. Initial gas-row scales are proportional to
+$M_j\phi V p_{tol,j}/(RT)$. A proposed-state error norm also propagates thermal,
+condensed-mass and geometry errors through the current pore EOS. The gas
+positive-part scales are $\delta_{j}=M_j\phi V p_{tol}/(N_gRT)$ at the
+current state. For the cubic positive part, the pressure bias is at most
+$0.26p_{tol}$ summed over all gases: the maximum of
+$s(1-3s^2+2s^3)$ on $[0,1]$ is below 0.26. The smoothing transition and gas-row
+error scales therefore remain commensurate during trace-gas production.
+Exactly absent gas still contributes zero pressure. A prescribed reservoir
+pressure is used exactly; an unknown hydraulic surface pressure uses the
+corresponding total-pressure trial extension. Residual evaluation does not
+mutate solver tolerances. Local error control is not a global error
+bound; tight-reference comparisons remain necessary as pores evolve.
+
+The 5.8 mm PMMA cone deck uses nominal φ=0.01. Its qualification varies
+φ over 0.01–0.03, uses 24/48/72 cells and pressure budgets 1e-4/1e-5 Pa
+with reltol 1e-9 and temperature abstol 1e-11 K, in both energy formulations.
+Temperature and escaped-product differences contract with mesh refinement;
+these bounds qualify this deck and its coefficients, not arbitrary dense melts.
+The calorically passive-gas burnout fixture separately covers φ=0.003–0.03
+on 15/30/60 PMMA cells with pressure budgets 1e-3/1e-4 Pa. The heterogeneous
+burnout fixture uses φ=0.1 and qualifies φ=0.1–0.15 on the same mesh and
+pressure-budget ladder. Its moving-mesh redistribution produces a finite
+matrix-occupancy error: maximum occupancy is 1.091/1.036/1.016 at
+15/30/60 cells. The actual pore-volume check therefore matters even when
+nominal porosity is positive. Thermal independence of its calorically
+passive gas and a separate species ledger qualify that fixture.
+
+Nominal porosity in a dense melt is material data, separate from the trial
+floor. Its consequences must be checked jointly with mesh and pressure
+tolerance, including release, temperature, pressure, conservation and solver
+work. The separate pressure-work/internal-energy-storage formulation is not
+part of these transport equations; both supported energy states retain the
+package's sensible-enthalpy convention.
+
+## 9.11 Diagnostics and verification
+
+`get_porosity`, `get_pressure`, `get_partial_pressures`,
+`get_intrinsic_gas_densities` and `get_gas_composition` read saved central pore
+states. Gas arrays follow `sol.gas.species`. `get_boundary_exchange(sol,tag)`
+returns current-area averaged outward species fluxes, surface pressures,
+Darcy velocity, carried enthalpy, heat, total energy and local-solve diagnostics.
+Dead cells or absent live boundaries are NaN. Velocity means Darcy velocity,
+not total mass or molar flow. `gas_species_audit(sol,recorder)` separates
+reaction production, escape, ingress and deactivation venting by species.
+
+Independent verification includes high-precision full friction matrices,
+original-input vacuum/strong-coupling references, donor inequalities,
+interface continuity and implicit derivatives. V-GT-01 tests Gaussian variance
+$\sigma^2=\sigma_0^2+2\Lambda t/\phi$; V-GT-02 tests the Darcy pressure-squared
+profile; V-GT-03 tests integrated single/two-layer pressure potentials and
+mechanism switches; V-GT-04 tests Graham's binary flux relation and its
+logarithmic continuum integral. Manufactured cases exercise the coupled
+pressure potential and carried energy on fixed and moving meshes.
 
 # 10. Volume Change, Swelling, Intumescence, and Lateral Shrinkage
 
@@ -8659,12 +6925,13 @@ The swelling factor $\gamma_j$ is a per-component scalar field on every `Abstrac
 | Liquid | $0.0$ | Fills pore space; default treats it as volume-neutral | none unless overridden |
 | Gas | $0.0$ | Escapes through pores; does not set matrix dimensions | none |
 
-> **Implementation note.** Defaults are set in the convenience constructors of `src/Materials/components.jl`: `SolidComponent(...; γ::Real = 1.0, ...)`, `GaseousComponent(...; γ::Real = 0.0, ...)`, and `LiquidComponent(...; γ::Real = 0.0, ...)`. The field is `swelling_factor::Float64` on each struct, validated to $\gamma\in[0,1]$ at construction (an `ArgumentError` names the component otherwise). The factor has one meaning everywhere: the strain rate (10.2), the mixture density (§5.2) and the mixing volume fractions that weight the conductivity and the surface emissivity (§5.1.3) all use the same $\gamma_j\,\xi_j/\rho_j$ weighting.
+> **Implementation note.** Defaults are set in the convenience constructors of `src/Materials/components.jl`: `SolidComponent(...; γ::Real = 1.0, ...)`, `GaseousComponent(...; γ::Real = 0.0, ...)`, and `LiquidComponent(...; γ::Real = 0.0, ...)`. The field is `swelling_factor::Float64` on each struct, validated to $\gamma\in[0,1]$ at construction (an `ArgumentError` names the component otherwise). The factor has one meaning everywhere: the strain rate (10.2), the condensed transport weights and the thermal mixing volume fractions that weight the conductivity and the surface emissivity (§5.1.3) all use the same $\gamma_j\,\xi_j/\rho_j$ weighting.
 
 **Modeling guidance.**
 
 - **Non-charring shrinkage (e.g. a polymer converting to gas):** keep the virgin solid at $\gamma=1$ and the gas product at $\gamma=0$. As the solid converts to gas, $\theta<0$ and the column recedes — the classic shrinking-slab picture.
-- **Charring with a rigid char:** give the char $\gamma=0$ to "freeze" its volume contribution (`rigid_char = SolidComponent(:char, ρ=200, c=1000, k=0.10, γ=0.0)`, the example in the `SolidComponent` docstring); then only the mass converted out of the cell drives axial motion. Because $\gamma$ has one meaning everywhere, such a char is also volumeless in the mixture density and carries no weight in the conductivity and emissivity mixing: it stops contributing its $k$ and $\varepsilon$ to the cell. This is a modeling choice, not a default; the default char is $\gamma=1$.
+- **Zero-swelling char:** `γ=0` removes the char's direct strain and its matrix property weight. Its skeletal occupancy, mass and heat storage remain. Such a phase must have zero transport coefficients; a state with no γ-weighted matrix still needs a declared endpoint whose skeletal-occupancy domain includes that state. This choice does not make residual char an unobstructed void.
+
 - **Intumescence (gas-producing expansion):** assign the trapped/blowing gas a swelling factor $\gamma_g\in(0,1]$. A positive $d\xi_g/dt$ (gas being produced) with $\gamma_g>0$ contributes $\theta>0$, i.e. the matrix *inflates*. Combined with a swelling lateral law (§10.5) this reproduces the order-of-magnitude expansion of intumescent coatings. Axial intumescence (through-thickness swell) is captured by $\theta>0$ in (10.2); radial intumescence (lateral swell of the column) is captured by $\mathrm{law}(\bar\chi)>1$ in (10.8). A factor $\gamma>1$ is not representable.
 
 Because $\gamma_j$ is a free per-component parameter, the model spans the full range from pure shrinkage ($\gamma=1$ solid, $\gamma=0$ gas) through volume-neutral ($\gamma=0$ everywhere) to intumescent ($\gamma_g>0$).
@@ -8800,9 +7067,11 @@ A complete solve with the linear shrink law, a 1 cm column of a solid that conve
 ```julia
 using Pyrolysis
 
-solid = SolidComponent(:solid; ρ = 1000.0, c = 1000.0, k = 0.2, ε = 0.9, λ = 1e-6)
-gas = GaseousComponent(:gas; M = 0.050, c = 1000.0, k = 0.02, λ = 1e-5)
+solid = SolidComponent(:solid; ρ = 1000.0, φ=.3, c = 1000.0, k = 0.2, ε = 0.9, λ = 1e-6)
+gas = GaseousComponent(:gas; M = 0.050, c = 1000.0, k = 0.02,)
 shrink = Material(
+    gas_transport=LumpedTransfer(endpoint=LumpedEndpoint(λ=1e-6,κ=0.,max_skeletal_occupancy=.001)),
+
     name = :shrink,
     components = (solid, gas),
     reactions = (Reaction(:decomp, 1 => 2, A = 1e5, E = 5e4, h = 1e5),),
@@ -8813,7 +7082,7 @@ problem = PyrolysisProblem(
     material = shrink,
     bc_set = BoundaryConditionSet(
         thermal = (top = HeatFluxBC(3e4), bottom = AdiabaticBC()),
-        mass = (top = DiffusiveMassBC(), bottom = ImpermeableBC()),
+        mass = (top = AmbientGasBC(GasReservoir(P=0., T=300.)), bottom = ImpermeableBC()),
     ),
     ξ_initial = [z -> 1000.0, z -> 0.0],
     tspan = (0.0, 30.0),
@@ -9045,48 +7314,70 @@ whatever the temperature history. The verification case V-CPL-03 asserts this en
 
 ## 10.11 Comparison to ThermaKin2Ds, Gpyro, and FDS
 
-All three reference solid-phase pyrolysis codes confront the same physics — a condensed phase that loses mass and changes volume — but each encodes the deformation differently. We map their notation to ours on first use.
+### 10.11.1 ThermaKin2Ds — deformation and remeshing
 
-### 10.11.1 ThermaKin2Ds — the single-reference-point deformation source
-
-ThermaKin2Ds (Stoliarov & Lyon) advances mass concentrations on a *fixed* spatial grid and represents volume change through a **deformation source term** rather than a moving mesh. Its species balance in 1D Cartesian is, in ThermaKin notation,
+TK Eq. 15 gives, in one dimension,
 
 $$
-\frac{\partial \xi_i}{\partial t}
-= \sum_{\alpha\beta} \theta_i^{\alpha\beta}\,r_{\alpha\beta}
-\;-\; \xi_i\,\frac{1}{\bar\rho}\frac{\partial \bar\rho}{\partial t}
-\;-\; \frac{\partial J_i}{\partial x},
+\partial_t\xi_j=\sum_r\theta_r^j r_r-\partial_xJ_j+
+\partial_x\left[\xi_j\int_0^x\rho^{-1}\partial_t\rho\,dx'\right].
 $$
 
-where ThermaKin's $\theta_i^{\alpha\beta}$ is a **stoichiometric coefficient** (mapped to our $\nu_{r,j}$; recall the binding resolution A2 that reserves $\theta$ for strain rate), $r_{\alpha\beta}$ a reaction rate (our $r_r$), and $\bar\rho$ the mixture density. The middle term $-\xi_i\,\bar\rho^{-1}\,\partial_t\bar\rho$ is ThermaKin's deformation/dilation source: as the local mixture density changes, the fixed grid must "concentrate" or "dilute" the surviving species. Integrating $\bar\rho^{-1}\partial_x\rho$ (the single-reference-point construction) yields the displacement of material relative to the fixed grid.
+The full divergence contains both transport and dilation; it cannot be
+replaced by $-\xi_j\rho^{-1}\partial_t\rho$. The reference plane is
+stationary. TK §3 describes changing element thicknesses and conservative
+splitting/combining, not a permanently fixed mesh. Its density law includes
+solid and liquid volumes and a mixture-dependent gas swelling factor
+(Eqs. 3–4). Our reaction-only $\sum_j\gamma_j\omega_j/\rho_j$ closure
+does not include all density-change effects and is not a general equivalent.
+TK restricts deformation to its primary coordinate; our empirical scalar
+lateral-area law is a separate constitutive choice.
 
-The Pyrolysis.jl equivalent splits into two pieces that together reproduce ThermaKin's source: (i) the **mesh moves** with the solid velocity of the balance rows (10.13), built from $\theta_i$ of (10.2), so that the grid follows the deformation instead of staying fixed; and (ii) the **dilation** $-\xi_j\theta_i$ of (10.15) follows from carrying the masses as states and dividing by the current volume. Pyrolysis.jl's $\theta=\sum_j\gamma_j\rho_j^{-1}\,d\xi_j/dt$ is the additive-volume analog of ThermaKin's $-\bar\rho^{-1}\partial_t\bar\rho$: both express that the matrix volume tracks the per-phase pure-volume balance, and indeed $\bar\rho^{-1}\partial_t\bar\rho = \sum_j \rho_j^{-1}\partial_t\xi_j$ for an additive-volume mixture (the $\gamma_j$ generalize this to selective swelling). The key structural difference is **moving mesh vs. fixed grid with a source**: ThermaKin keeps $x$ fixed and carries the deformation algebraically; Pyrolysis.jl moves the nodes and recomputes the geometry. The two are mathematically equivalent in the continuum limit, but the moving mesh keeps the cell-centered states co-located with the material they describe. ThermaKin treats the cross-section as fixed in its core 1D form; Pyrolysis.jl's lateral-shrinkage law (§10.5) has no direct ThermaKin counterpart.
+### 10.11.2 Gpyro — reaction yields and changing control volumes
 
-### 10.11.2 Gpyro — solid-fraction / mechanism-selection swelling
+GP Eqs. 22–24 define a **reaction-specific** solid mass yield
 
-Gpyro (Lautenberger & Fernandez-Pello) solves control-volume conservation of $\bar\rho\,\Delta z$, $\bar\rho Y_i\,\Delta z$, gas mass, and energy on a variable-$\Delta z$ grid. Volume change is handled by allowing each control volume's thickness $\Delta z$ to change so that the **mass-weighted bulk density** stays consistent with the prescribed solid-fraction behavior of each species. Gpyro lets the user pick, per condensed species, how its volume responds: a species can be **non-shrinking** (its contribution to $\Delta z$ is held), **shrinking** (its volume is removed as it is consumed), or **swelling/intumescent** (it adds volume). In Gpyro's notation the bulk density $\bar\rho$ and per-species solid fraction control the $\Delta z$ update; conversion $\alpha_{\mathrm{conv}}$ tracks reaction extent.
+$$\mathrm{SF}_k=1+\left(\rho_{B_k}/\rho_{A_k}-1\right)\chi_k.$$
 
-The Pyrolysis.jl mapping is direct: Gpyro's per-species shrink/non-shrink/swell selection is our **swelling factor** $\gamma_j$ — $\gamma_j=1$ reproduces a shrinking species, $\gamma_j=0$ a non-shrinking one, and $\gamma_j>0$ on a gas reproduces an intumescent (volume-adding) species. Gpyro's variable $\Delta z$ is our moving-mesh $\Delta z_i=V_i/A$, driven by the axial strain $\theta_{L,i}$ through the balance rows. Gpyro's conversion variable $\alpha_{\mathrm{conv}}$ is the close analog of our pyrolysis progress $\chi$, but Pyrolysis.jl uses $\chi$ for a *different* purpose — driving the *lateral* (cross-sectional) law (10.8) — whereas Gpyro's swelling acts on the axial $\Delta z$. In effect, Pyrolysis.jl has two channels (axial via $\theta$, lateral via $\mathrm{law}(\bar\chi)$) where Gpyro's 1D model has only the axial one; the lateral channel is Pyrolysis.jl's surrogate for the transverse swelling Gpyro would need a multi-dimensional model to resolve.
+Together with bulk component densities and the mass balances, this determines
+the changing $\Delta z$ (GP Eqs. 3, 56–57). It is not a per-species
+shrink/non-shrink/swell flag. $\chi_k$ is not the conversion variable
+$\alpha_A$ and neither is our dry-gas progress $\chi$.
 
-### 10.11.3 FDS — the max/sum density-ratio swell/shrink rule
+For constant densities, fixed area, no additional volume contributions and
+condensed $\gamma_j=1$, our volume change for $A\to y_BB+\text{gas}$
+is proportional to $y_B/\rho_B-1/\rho_A$. Matching $y_B=\mathrm{SF}_k$
+can match this restricted Gpyro volume balance. There is no universal
+$\chi_k\leftrightarrow\gamma_j$ conversion. Our lateral law is not the
+analogue of Gpyro's axial shrinkage law.
 
-The FDS solid-phase pyrolysis model (McGrattan et al., *FDS Technical Reference Guide*, Solid Phase chapter) updates the layer thickness using a **density-ratio** rule. Each material component $\alpha$ has a reference (initial) density; as reactions change the component densities $\rho_{s,\alpha}$, FDS adjusts the cell thickness $\delta$ by the ratio of current to initial total density. FDS provides two limiting behaviors via a user flag:
+### 10.11.3 FDS — implemented density-sum rule and constraints
 
-- **Shrinking / "sum" behavior:** the layer thickness scales with the *sum* of component density ratios, so the cell shrinks in proportion to total mass lost (the standard charring-solid recession).
-- **Swelling / "max" behavior:** the thickness scales with the *maximum* density ratio (the most-expanding component dominates), capturing intumescence where one product inflates the layer.
+In FDS 6.11.0 `Source/wall.f90`, `REGRID_FACTOR` is accumulated as the sum
+of updated component densities divided by their adjusted reference densities.
+A remaining component with `ALLOW_SHRINKING=.FALSE.` bounds that factor below
+by one; `ALLOW_SWELLING=.FALSE.` bounds it above by one. Component densities
+are divided by the resulting factor to conserve mass, coordinates are
+updated, and layers can be remeshed.
 
-In FDS notation (their $\rho_{s,\alpha}$ for solid component densities, $X_\alpha$ for volume fractions), the thickness factor is built from $\sum_\alpha \rho_{s,\alpha}/\rho_{s,\alpha}^{0}$ (shrink) or a max-based variant (swell). Mapping to ours: FDS's $X_\alpha$ is our volume fraction $v_j$, and FDS's $\kappa_s$ (solid absorption) maps to our $\alpha$ (overload A5). The Pyrolysis.jl axial volume change (10.2) is the differential, additive-volume analog of FDS's *sum* rule: $\theta=\sum_j\gamma_j\rho_j^{-1}d\xi_j/dt$ is exactly a density-weighted sum of per-component mass-change rates, and integrating it reproduces a thickness that scales with total mass lost (the endpoint of §10.10, which V-CPL-03 checks in the manner of the FDS `shrink_swell` verification). The FDS *max* (swelling) behavior has no exact Pyrolysis.jl counterpart in the axial channel — Pyrolysis.jl represents swell additively (a $\gamma_g>0$ gas adds a positive term to the *sum*), not by a max selection. Lateral swell is instead handled by the explicit $\mathrm{law}(\bar\chi)$ (§10.5), which FDS does not have (FDS keeps a fixed surface area and changes only thickness). A practical implication: FDS's max-rule can produce abrupt, single-component-dominated swelling, whereas Pyrolysis.jl's additive $\theta$ and smooth $\mathrm{law}$ give continuously differentiable deformation — what the automatic-differentiation Jacobian (Chapter 15) and well-defined finite-difference sensitivities (Chapter 17) need.
+The same release's solid-phase manual still prints a max/sum expression.
+That expression does **not** describe this source path: in particular, the
+source does not select the most-expanding component as the swelling factor.
+This comparison follows the [implemented regrid calculation](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/wall.f90#L2388-L2455).
+The V-CPL-03 endpoint examples are restricted checks of matched volume
+balances, not proof that every FDS material maps to our $\gamma_j$.
 
 ### 10.11.4 Summary of mappings
 
-| Concept | Pyrolysis.jl | ThermaKin2Ds | Gpyro | FDS |
-|---|---|---|---|---|
-| Axial deformation mechanism | moving mesh, solid velocity from the balance rows, $v_s=\int\theta_L\,dz$ | Fixed grid + deformation source $-\xi_i\bar\rho^{-1}\partial_t\bar\rho$ | Variable $\Delta z$ control volumes | Density-ratio thickness update |
-| Per-species volume response | $\gamma_j\in[0,1]$ | implicit via $\bar\rho$ | shrink/non-shrink/swell flag | shrink (sum) / swell (max) flag |
-| Strain rate | $\theta=\sum_j\gamma_j\rho_j^{-1}d\xi_j/dt$ | $\bar\rho^{-1}\partial_t\bar\rho$ (sign-equiv.) | bulk-density consistency | $\sum_\alpha\rho_{s,\alpha}/\rho_{s,\alpha}^0$ |
-| Lateral (cross-section) law | $A=A_0\,\mathrm{law}(\bar\chi)$ | none (fixed $A$) | none in 1D | none (fixed area) |
-| Progress / conversion variable | $\chi$ (dry gas, for $\mathrm{law}$) | reaction extent | $\alpha_{\mathrm{conv}}$ | density ratio |
-| Concentration rescaling under shrink | implicit: masses are states, $\xi=m/V$ | deformation source term | $\Delta z$ rebalance | thickness rebalance |
+| Model | Volume-change input | Numerical geometry |
+|---|---|---|
+| Pyrolysis.jl | reaction-volume sum with component $\gamma_j$; optional lateral law | coupled node positions/velocities and scalar area |
+| ThermaKin2Ds | mixture density with gas swelling factor, TK Eqs. 3–4 | changing elements, splitting and combining |
+| Gpyro 1D | reaction yield, component bulk densities and mass conservation | changing control-volume thicknesses |
+| FDS 6.11.0 | density sum constrained by material shrink/swell flags | thickness and coordinate update, remeshing |
+
+Primary source definitions are listed in §1.6.5. In particular, equality of
+endpoint thicknesses does not establish equality of transient mesh dynamics.
 
 ---
 
@@ -9213,8 +7504,8 @@ The frame of each component follows from the frame of its transport closure:
   material velocity is $\mathbf v_s$. They have no transport flux of their own.
 
 - **Gas components** percolate through the porous skeleton. Darcy's law is a drag
-  balance between the gas and the pore walls, and the volume-fraction-gradient
-  diffusion law is likewise written relative to the pore walls, so the flux the
+  balance between the gas and the pore walls. The lumped and dusty-gas wall
+  laws use that same reference frame, so the flux the
   closures return, $\mathbf J_g = \xi_g(\mathbf v_{\text{gas}} - \mathbf v_s)$,
   is the gas flux **relative to the skeleton** (§3.2.3, Chapter 9). The
   laboratory-frame gas flux is $\xi_g\mathbf v_s + \mathbf J_g$: the pore gas is
@@ -9228,10 +7519,11 @@ the skeleton ($\mathbf c \ne 0$), the skeleton and the pore gas it holds cross t
 faces together at the relative velocity $-\mathbf c$, the gas then slipping through
 the skeleton by $\mathbf J_g$ as before (§11.2.3, §11.6).
 
-This is the frame ThermaKin writes (its Eq. 15 applies one deformation term to
-every component, gas included) and the frame Gpyro writes (its gas balance, Eq. 58,
-lives on control volumes that deform with the solid, with only $\dot m''$ crossing
-their faces). Treating the gas as fixed in the laboratory instead would count the
+ThermaKin writes Eq. 15 in stationary coordinates, including a deformation
+term for every component. Transforming that balance to a skeleton-following
+frame removes the corresponding mesh-relative term, provided the velocity and
+density closures are matched (§3.6.2). Gpyro Eq. 58 instead uses control
+volumes that deform with the solid, with $\dot m''$ crossing their faces. Treating the gas as fixed in the laboratory instead would count the
 skeleton's motion twice: once inside the frame of $\mathbf J_g$ and once as a sweep
 of the gas by the moving mesh.
 
@@ -9244,8 +7536,8 @@ of the gas by the moving mesh.
 > every inventory (each component's mass, its sensible enthalpy and the
 > conversion-history pair) across the faces at the relative velocity. With
 > $\mathbf c = 0$ that operator vanishes identically and is not assembled: the
-> mesh-frame rate of every field is then its material rate, and no equation carries an
-> advection term.
+> mesh-frame rate of every field is then its material rate. No additional
+> skeleton-advection term is needed; gas transport relative to the skeleton remains.
 
 ---
 
@@ -9346,8 +7638,8 @@ to the mesh.
 > $\int \rho c_p\, w\,\partial_z T\,dz \approx \dot m''\,c_s\,(T_s - \bar T_{\text{form}})$
 > — a few percent of the effective heat of gasification in every ALE run with volume
 > change and thermal gradients, and a systematic low-MLR bias against
-> regressing-mesh codes (FDS, Gpyro and ThermaKin advect enthalpy with the
-> material). The Landau ablation case V-CPL-02 verifies the traveling-wave identity
+> a consistently discretized material-following energy balance. This is a
+> formulation check, not a measured bias against every reference code. The Landau ablation case V-CPL-02 verifies the traveling-wave identity
 > that would expose such a term (Chapter 18).
 
 **Sign of the relative energy advection.** With $c>0$ (mesh sliding in $+z$ relative
@@ -9358,7 +7650,7 @@ physically correct convective reading of the chain rule.
 ### 11.2.3 The mass balance of every component
 
 For component $j$ with laboratory-frame flux $\xi_j\mathbf v_s + \mathbf J_j$
-($\mathbf J_j \equiv 0$ for condensed components, $\mathbf J_g$ the Darcy–Fick flux
+($\mathbf J_j \equiv 0$ for condensed components, $\mathbf J_g$ the gas flux
 for gases), the Eulerian balance is
 $\partial\xi_j/\partial t|_z + \nabla\cdot(\xi_j\mathbf v_s + \mathbf J_j) = S_j$, and
 (11.2) gives, for the mass $m_{j,i} = \int_{\Omega_i}\xi_j\,dV$,
@@ -9386,7 +7678,7 @@ skeleton the relative term vanishes for **every** component, and the mass of eve
 component in a cell changes only by reaction and by $\mathbf J_j$ through its faces,
 so the column total changes only through the boundary faces, exactly as on a fixed
 mesh. In a sealed collapsing column the pore gas is compressed cell by cell
-($\xi_g = m_g/V \uparrow$ as $V \downarrow$, V-CPL-03 P4), and under Darcy–Fick
+($\xi_g = m_g/V \uparrow$ as $V \downarrow$, V-CPL-03 P4), and under gas
 transport the pressure closure turns that compression into a venting response.
 
 **Why not a face-sweep flux for the gas.** Treating the gas as fixed in the
@@ -9408,12 +7700,12 @@ separate advection term either. The complementary gas enthalpy carried by the *f
 relative to the skeleton* is assembled at the faces, in flux form: every interior face
 carries $\sum_g J_{g,f}\,h_g(T_f)$ with the same $J_{g,f}$ the mass rows carry, and its
 temperature-form reading is the $-\sum_g c_{p,g}\,\mathbf J_g\cdot\nabla T$ term of
-(11.4) (Chapter 7). This is the ThermaKin Eq. 17 convention term for term, including
+(11.4) (Chapter 7). This corresponds to the 1D transport terms of ThermaKin Eq. 17, including
 its deformation term, which is the $\mathbf v_s\cdot\nabla T$ piece the mesh frame
 absorbs. At a boundary face the outward mass flux carries its sensible enthalpy at the
-surface temperature, so the gas leaves at $T_s$; the surface energy balance itself
-carries no gas-enthalpy term, which would count the gas heating a second time
-(Chapter 12).
+surface temperature, while incoming species carry their specified reservoir
+enthalpy. Wall-film heat and carried enthalpy are converted to the same energy
+control surface before assembly (§9.9); no additional outgoing-gas sink is added.
 
 ---
 
@@ -10050,9 +8342,9 @@ in User Guide Chapter 10.
 ```julia
 using Pyrolysis
 
-pmma = SolidComponent(:PMMA, ρ = 1190.0, c = 1420.0, k = 0.19, ε = 0.9, λ = 2e-5)
-board = SolidComponent(:board, ρ = 256.0, c = 1100.0, k = 0.06, ε = 0.9, λ = 2e-5)
-mma = GaseousComponent(:MMA, M = 0.100, c = 1500.0, k = 0.02, λ = 1e-5)
+pmma = SolidComponent(:PMMA, ρ = 1190.0, φ=.3, c = 1420.0, k = 0.19, ε = 0.9, λ = 2e-5)
+board = SolidComponent(:board, ρ = 256.0, φ=.8, c = 1100.0, k = 0.06, ε = 0.9, λ = 2e-5)
+mma = GaseousComponent(:MMA, M = 0.100, c = 1500.0, k = 0.02,)
 material = Material(
     name = :PMMA_on_board,
     components = (pmma, board, mma),
@@ -10063,7 +8355,7 @@ bcs = BoundaryConditionSet(
         top = HeatFluxBC(50e3) + RadiativeBC(ε = 0.9, T_inf = 300.0),
         bottom = AdiabaticBC(),
     ),
-    mass = (top = DiffusiveMassBC(), bottom = ImpermeableBC()),
+    mass = (top = AmbientGasBC(GasReservoir(P=0., T=300.)), bottom = ImpermeableBC()),
 )
 # 2 mm of PMMA (30 cells) on 2 mm of an inert board (30 cells).
 problem = PyrolysisProblem(
@@ -10150,67 +8442,38 @@ mechanisms keep a solve inside the physical domain:
 
 ## 11.9 Comparison to ThermaKin2Ds, Gpyro, and FDS
 
-The dynamic-mesh strategies of the three reference pyrolysis solvers map onto the
-Pyrolysis.jl ALE framework as follows. On first use we map their notation to ours:
-ThermaKin's stoichiometric coefficient $\theta_i^j$ is our $\nu_{i,j}$ (overload
-note A2); Gpyro's pre-exponential $Z$ is our $A_i$, its permeability $K$ is our
-$\kappa$, its volume fraction $X_\alpha$ is our $v_j$, and its conversion $\alpha$
-is our $\alpha_{\text{conv}}$; FDS's absorption $\kappa_s$ is our $\alpha$.
+All three reference models can change their 1D material geometry. Describing
+them as fixed-grid codes with no physical surface motion is incorrect.
 
-**ThermaKin2Ds — dynamic mesh adjustment.** ThermaKin2Ds (Stoliarov and co-workers)
-solves the condensed-phase equations on a mesh that contracts or expands as material
-is consumed or swells, with element thicknesses adjusted at each step to follow the
-local volume change — conceptually the solid velocity of (11.10) with $\mathbf c = 0$.
-Two differences are worth noting. First, Pyrolysis.jl makes the node positions
-*state variables* integrated by the same stiff implicit solver as the masses and the
-energy, with the node velocities algebraic unknowns of the balance rows (11.9), so the
-mesh deformation is fully coupled in the Jacobian (Chapter 15) rather than applied as
-an operator-split mesh-adjustment step. Second, the volume change in Pyrolysis.jl is
-governed by the per-component swelling factor $\gamma_j$ and bulk density $\rho_j$
-through (11.7), giving a single unified rule for shrinkage and swelling, whereas
-ThermaKin handles the cross-sectional (lateral) channel separately. Pyrolysis.jl
-mirrors that separation through $\theta_A$ (11.11): the *axial* mesh motion follows the
-axial strain (11.9), the *lateral* cross section follows the lateral shrinkage law
-$A=A_0\,\mathrm{law}(\bar\chi)$ (Chapter 10), and the two are kept from
-double-counting by subtracting $\theta_A$ from each cell's rate. The heat-of-reaction
-sign convention also differs at the publication level: ThermaKin publishes $h>0$ as
-exothermic, whereas Pyrolysis.jl's internal storage uses $h>0$ endothermic with
-$Q_{\text{rxn}}=-\sum_r h_r r_r$ (overload note H1) — a labeling difference, not a
-physics difference.
+**ThermaKin2Ds.** TK §3 describes deformation of element thicknesses followed
+by size control before each timestep: large elements split, and smaller ones
+receive part of a neighboring element with species and energy conservation.
+Its Eulerian continuum deformation term does not imply fixed numerical
+elements. Deformation is restricted to the primary coordinate.
 
-**Gpyro — variable-$\Delta z$ fixed control volumes.** Gpyro (Lautenberger &
-Fernandez-Pello) uses a *fixed* (Eulerian) set of control volumes whose thicknesses
-$\Delta z$ can be specified non-uniformly, and accounts for shrinkage and swelling
-through a volume-fraction bookkeeping rather than by physically moving the grid.
-Pyrolysis.jl reproduces the fixed-grid regime with `use_ale = false` (every node
-pinned, no positions or velocities in the state), in which case no balance row, no
-relative flux and no geometric update is assembled. Gpyro's gas balance is written on
-its deforming control volumes with only the Darcy flux crossing their faces — the
-same skeleton-bound frame as §11.1.2. The moving mesh adds, on top of Gpyro-style
-physics, the option of *physically* tracking the surface, which keeps in-depth
-resolution where it is needed without the non-uniform-$\Delta z$ tuning Gpyro relies
-on. Both codes share the same distance-weighted harmonic-mean face conductivity and
-volume-fraction/partial-pressure gradient gas-transport formulation (Chapters 7, 9),
-so on a constant cross section with $w=0$ the two discretizations are directly
-comparable. Gpyro's lateral (in-plane) area changes are captured by Pyrolysis.jl's
-$\mathrm{law}(\bar\chi)$ and $\theta_A$ path.
+**Gpyro.** GP Eqs. 56–57 conserve condensed inventories on cells whose
+thicknesses change. Only gas crosses the material cell boundaries in this
+1D formulation. Nonuniform initial spacing and evolving spacing are distinct
+features. Setting `use_ale=false` here does not reproduce Gpyro's deforming
+grid. Multidimensional transport must be distinguished from general mesh
+deformation; the inspected V2 `UPDATE_MESH` includes multiple deformation
+modes and explicitly flags limitations in its 2D/3D distortion treatment.
 
-**FDS — fixed solid grid, no domain motion.** The FDS pyrolysis model (McDermott,
-McGrattan, et al.) integrates the condensed-phase mass and energy equations on a
-*fixed* one-dimensional solid grid and represents shrinkage and swelling through layer
-thickness updates and a cell-shrinking algorithm rather than a continuously moving
-mesh. FDS carries no in-depth gas, so its energy convention is the condensed-phase
-limit of Pyrolysis.jl's (Chapter 7); it shares the in-depth Beer–Lambert and surface
-radiation absorption options (Chapter 8). The principal contrast is again the
-treatment of the moving boundary: FDS adjusts discrete layer thicknesses, while
-Pyrolysis.jl evolves node positions as continuous state with an exactly enforced GCL,
-and where it moves the mesh relative to the material (the correction of §11.7) it
-transfers the inventories by continuous relative fluxes instead of a discrete remap.
+**FDS.** FDS 6.11.0 updates solid-cell thicknesses and coordinates and remeshes
+layers (`REGRID_FACTOR`, `X_S_NEW` and `REMESH_LAYER` in `wall.f90`). This
+is motion of the internal solid grid; it is separate from the surrounding
+CFD mesh and obstruction representation.
 
-In all three comparisons the GCL discussion of §11.5 has no direct counterpart in the
-fixed-grid codes (a fixed grid trivially satisfies a degenerate GCL with $w\equiv 0$);
-it is specific to the continuously moving mesh and is what guarantees that the moving
-grid introduces no spurious source in the concentrations.
+**Pyrolysis.jl.** Node positions are differential unknowns and node velocities
+are algebraic unknowns in the same coupled system as mass and energy. The
+equidistribution correction transports inventories relative to that mesh;
+the geometry obeys the discrete volume identity of §11.5. These are specific
+implementation differences, not proof that the reference codes lack geometric
+conservation. Volume laws, remapping, radiation and gas transport still have
+to be matched before comparing solutions (§§8–10).
+
+Sources: TK §3; GP §4.1; [FDS wall source](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/wall.f90#L2388-L2679);
+[V2 mesh source](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_mesh.f90).
 
 ---
 
@@ -10258,7 +8521,7 @@ The principal limitations and open issues are:
 - The energy assembly, $\rho c_p^{\text{eff}}$ (every component), the gas enthalpy flux
   at the faces and the harmonic-mean face conductivity are in **Chapter 7, Heat
   Conduction, Convection & Energy Assembly**.
-- The volume-fraction/partial-pressure gas flux and the Darcy velocity are in
+- The partial-pressure gas flux and the Darcy velocity are in
   **Chapter 9, Gas-Phase Mass Transport & Pressure**.
 - The face-based mesh, the metrics, the state layout and mapping, the kernels and the
   row assembly are in **Chapter 13, Finite-Volume Discretization**.
@@ -10286,9 +8549,8 @@ initial fields at the cell centres and their defaults. Throughout, the equations
 checked term-by-term against the source so that the math and the code agree
 exactly — including the outward boundary normals, the surface balance evaluated at
 the trial clamp of the surface temperature, the Kirchhoff emissivity coupling, the
-neglected $d\varepsilon/dT$ term, and why the surface balance carries no
-gas-enthalpy term (the gas leaving through the face takes its enthalpy with the
-face's energy flux).
+material emissivity evaluated from the boundary cell, and the common energy
+control surface for incoming/outgoing gas and thermal-film heat (§9.9).
 
 This chapter conforms to the unified nomenclature of §2, Nomenclature, and uses
 the binding sign conventions: an interior face flux is positive in the $+z$
@@ -10304,86 +8566,32 @@ chapters.
 
 ## 12.1 Overview and design philosophy
 
-### 12.1.1 What a boundary condition must supply
+### 12.1.1 Boundary control volumes
 
-The continuum model of §3, Governing Equations, is a system of conservation laws
-for the condensed-phase temperature $T(z,t)$ and the per-component mass
-concentrations $\xi_j(z,t)$ (kg·m⁻³), with the gas-phase pressure $P$ as an
-algebraic closure in Darcy mode. In flux (divergence) form the spatial operators
-are
+The finite-volume rows share one outward mass vector and one outward energy
+flux at every live boundary. Thermal flux laws use the inward-positive
+convention, and assembly converts them to outward energy. A boundary may
+couple pore transport, external mass transfer, hydraulic resistance and a
+thermal film. Their interface state is solved jointly (§12.2); adiabatic and
+prescribed-heat conditions use the direct donor-enthalpy balance.
 
-$$
-\rho c_p^{\text{eff}}\,\frac{\partial T}{\partial t}
-= -\nabla\!\cdot\mathbf{q}_{\text{cond}} - \sum_j \mathbf J_j\cdot\nabla h_j
-   + Q_{\text{rad}} + Q_{\text{rxn}},
-\qquad
-\frac{\partial \xi_j}{\partial t}
-= -\nabla\!\cdot\mathbf{J}_j + S_{j},
-$$
+Surface temperature is an interface variable distinct from the adjacent
+cell temperature. Conduction through the current half-cell distance matches
+the supplied heat law. This captures nonlinear radiation and temperature-
+dependent blowing without evaluating the heat law at the cell center.
 
-the second term of the energy equation being the sensible enthalpy the gas
-carries relative to the skeleton (§7.4). The cell-centered finite-volume
-discretization (Chapter 13) integrates each equation over a cell $i$: the rows are
-extensive (the cell masses, and the cell temperature times the cell's heat
-capacity), and every face flux $F_f$, stored per unit area along the face normal,
-is scattered as $-F_fA_f$ into the face's owner and $+F_fA_f$ into its neighbour.
-For an interior face the flux is a constitutive law evaluated from the two
-adjacent cells (Fourier, Fick, Darcy–Fick). A **boundary face** has no neighbour,
-so its flux must be supplied by a boundary condition. The boundary-condition
-subsystem therefore has exactly one job: for each live boundary face, given the
-state of its cell and the time $t$, produce the outward energy flux, the outward
-gas mass fluxes, and (in Darcy mode) the outward venting the pressure condition
-drives.
-
-There is one subtlety unique to the **thermal** boundary: because temperature is
-stored at cell centers and radiative and convective fluxes depend nonlinearly on
-the *surface* temperature $T_s$ (which is not a state variable), the code does not
-simply evaluate the applied flux at the adjacent cell-center temperature. Doing so
-produces an $\sim$20 % energy imbalance for $T^4$ radiation. Instead it solves a
-small surface energy balance for $T_s$ (§12.2). Three conditions need no iteration: an adiabatic face, a prescribed
-flux and a prescribed temperature fix the face flux and $T_s$ in closed form
-(§12.3.1, §12.3.2, §12.3.6). The species and pressure boundaries have no such
-nonlinearity and are evaluated directly.
+---
 
 ### 12.1.2 Type hierarchy and dispatch
 
-Boundary conditions are organized by physical kind, each rooted in an abstract
-supertype declared in the `Materials` module:
+Thermal conditions subtype `AbstractThermalBC` and may be combined additively.
+Mass conditions subtype `AbstractMassBC`: `ImpermeableBC`, `MassFluxBC`,
+`AmbientGasBC`, `NeumannPressureBC` and `ConvectivePressureBC`. Each mass
+condition supplies one complete closure and is not additive. `GasReservoir`
+and `MassTransferFilm` supply its thermodynamic state and optional film data.
+Typed boundary bindings retain gas indices, molar masses and species names.
 
-- `AbstractThermalBC` — energy/heat boundary conditions;
-- `AbstractMassBC` — species and pressure-driven (Darcy) boundary conditions.
-
-Concrete types live in the `BoundaryConditions` module
-(`src/BoundaryConditions/boundary_conditions.jl`). The thermal flux laws with their
-$T_s$ derivatives (`evaluate_bc_flux_and_derivative`) and the surface-temperature
-Newton solve (`solve_boundary_temperature!`) live in
-`src/BoundaryConditions/surface_balance.jl`, the mass-condition flux laws
-(`mass_bc_flux`) and the diagnostic heat-flux decomposition
-(`compute_boundary_heat_fluxes`) in `src/BoundaryConditions/boundary_fluxes.jl`, the
-diagnostic record `BoundaryState` in `src/BoundaryConditions/boundary_state.jl`, and
-the blowing models in `src/BoundaryConditions/blowing.jl`. The whole set is stored
-in a type-stable, tag-keyed `BoundaryConditionSet` (§12.7).
-
-Two kernels apply the conditions in the residual. `ThermalBoundaryKernel`
-(`src/Kernels/thermal_boundary.jl`) applies the thermal conditions;
-`GasTransportKernel` (`src/Kernels/gas_transport.jl`) applies the mass and pressure
-conditions as the boundary part of the gas transport. Each holds one
-`BoundaryPatch` per boundary tag of the mesh — the tag, the faces it names, and the
-condition the set assigns to it — in a tuple that the kernel peels recursively, so
-every condition is a concrete type and the residual specializes statically on it.
-
-> **Implementation note.** `setup` builds both kernels from the problem's
-> `bc_set`. A tag in the set that the mesh does not have is refused with an
-> `ArgumentError` ("the boundary conditions name the tag :…, which the mesh does
-> not have (mesh tags: …)"), and `validate_problem` (run by `solve` unless
-> `validate = false`) requires the tags `:top` and `:bottom` among the mesh's and a
-> thermal condition for every tag of the mesh. The mass conditions are read only
-> when the solve transports gas: `setup` runs no gas transport for a material
-> without a gas component, or when nothing can move the gas (no component carries a
-> gas-transfer coefficient, no condensed component is permeable and every mass
-> condition is `ImpermeableBC`). The kernels run in the order reactions, gas
-> transport, in-depth radiation, conduction, thermal boundary, relative fluxes
-> (§7.6), so the surface balance sees the gas-transport fluxes of its face.
+---
 
 ### 12.1.3 The boundary-face sign convention
 
@@ -10404,305 +8612,54 @@ row assembly removes $F_fA_f$ from the face's cell like any other owner. A condi
 whose law gives the flux *into* the domain, $q_{\text{in}}$, therefore stores
 $-q_{\text{in}}$, at the top and at the bottom alike; there is no per-boundary sign
 flip and no integer boundary identifier. Fluxes in this chapter are written as the
-condition laws define them (positive into the domain for the thermal laws and for
-`mass_bc_flux`) and converted to the outward flux where they are stored.
+condition laws define them: inward for heat and outward for mass. Assembly
+converts heat and the live-face orientation to the stored outward convention.
 
 A patch applies on the **live face** of its tag (`Meshes.live_face`): the boundary
 face itself while its cell is live, and after cells beyond it are deactivated
-(Chapter 14), the face of the outermost live cell — an interior face whose normal
-points out of the live cells, so the same outward convention holds there.
+(Chapter 14), the face of the outermost live cell — an interior face whose stored orientation may differ from the outward
+normal of the remaining live cell. Assembly applies that orientation explicitly.
 
 ---
 
-## 12.2 The surface energy balance and the Newton solve
+## 12.2 Coupled surface balance
 
-![Surface cell with incoming radiation, inward conduction and outward radiative and convective losses; gas enthalpy appears separately in the outward face flux.](assets/figures/06_surface_energy.svg)
+### 12.2.1 Signed energy balance
 
-**Figure 6. Surface energy transfers (schematic, surface absorption).** Incoming radiation balances conduction into the solid and convective and radiative losses. The surface-temperature calculation uses $T_s$, the adjacent cell temperature and distance $d$. Gas outflow modifies convection through blowing; its sensible enthalpy enters the face energy flux separately, as shown below. The arrows depict losses from a hot surface; signed exchanges can reverse. Beer–Lambert absorption instead deposits radiation within the cells (Figure 7).
+Heat $q_s$ is positive into the material and species fluxes are positive
+outward. Conduction uses $k(T_s-T_{cell})/d$ with current face distance.
+For a wall thermal film, its heat correlation equals this conductive flux.
+Boundary assembly converts to the direct-reservoir energy control surface:
+$q_r=q_s+H_r-H_s$ and $E_{out}=H_r-q_r$. Inflow carries the specified incoming
+enthalpy even under adiabatic or prescribed thermal conditions (§9.9).
 
-The surface temperature $T_s$ is the keystone of the thermal boundary. It is the
-temperature of the exposed face itself, distinct from the adjacent cell-center
-temperature $T_{\text{cell}}$, and it is determined by an instantaneous balance
-between the externally applied flux and the heat conducted into the slab. Every
-thermal condition goes through this balance except a bare `AdiabaticBC`,
-`HeatFluxBC` or `DirichletThermalBC`, whose flux and face temperature follow in
-closed form (§12.3.1, §12.3.2, §12.3.6); any combination of conditions, including a
-combination of those three, goes through it.
+![Radiation, convection and conduction at the surface, with donor carried enthalpy and the conversion from thermal-film heat to the reservoir energy control surface.](assets/figures/06_surface_energy.svg)
 
-### 12.2.1 Continuous statement
+### 12.2.2 Local residuals and qualification
 
-Consider the exposed face. An energy balance on an infinitesimally thin control
-volume at the surface (zero thermal mass) equates the net flux applied by the
-environment to the flux conducted into the material:
+The unknowns are $T_s$, $N_g-1$ independent surface fractions when a finite
+mass film is present, and $P_s$ for a hydraulic resistance. Coefficients,
+Darcy donor density and blowing corrections are reevaluated together. The
+species residual matches pore and film flux; the hydraulic residual matches
+pressure drop and the selected flow; the thermal residual matches conduction
+and applied wall heat, or the prescribed surface temperature.
 
-$$
-q_{\text{BC}}(T_s) \;=\; q_{\text{cond}}(T_s, T_{\text{cell}}),
-$$
+Residuals and unknowns are scaled. Newton trials preserve nonnegative pressure
+and the composition simplex, with line search and a relative trust bound.
+Temperature-dependent properties use the finite trial-temperature extension;
+physical accepted states are checked separately. A converged residual, resolved
+correction and nonsingular local Jacobian are required. Failure is explicit;
+no exhausted Newton iterate supplies a flux. The initial guess is independent
+of diagnostic `BoundaryState` contents.
 
-with, for the most general thermal BC,
+### 12.2.3 Derivatives and output
 
-$$
-q_{\text{BC}}(T_s) = a_{\text{eff}}\,q_{\text{inc}}\;-\;\varepsilon_{\text{eff}}\sigma \bigl(T_s^4-T_\infty^4\bigr)
-\;-\;h_{\text{conv}}\,(T_s-T_\infty)
-$$
-
-(absorbed incident flux, re-radiation exchange, convective exchange; all signed
-positive into the domain) and the conducted flux written as a one-sided Fourier
-difference from the surface to the first cell center,
-
-$$
-q_{\text{cond}}(T_s,T_{\text{cell}})
-= k\,\frac{T_s - T_{\text{cell}}}{d},
-$$
-
-where $d$ is the distance from the boundary face to the center of its cell and $k$
-is the effective conductivity of the boundary cell (§5, Effective Properties &
-Mixing Rules). Both sides are positive when heat flows into the material.
-
-The balance carries no gas-enthalpy term. The gas leaving through the face takes
-its sensible enthalpy at the face temperature with the face's energy flux,
-$\sum_j J_j\,h_j(T_s)$ along the outward normal, which the thermal boundary kernel
-adds once the balance has fixed $T_s$ (§7.4.2): under local thermal equilibrium the
-gas crosses the surface at $T_s$, so a surface term
-$\sum_g \dot m_g\,\Delta h_g(T_s,T_\infty)$ on top of it would count that enthalpy
-twice (§1.4.3, §7.4.3). The outward gas flux enters the balance only through the
-blowing model of a `ConvectiveBC`, which scales the convective coefficient
-(§12.3.3).
-
-The conductive distance is the distance from the cell center to the face along the
-face normal, computed from the state-dependent geometry (so automatic
-differentiation and a moving mesh both reach it),
-
-$$
-d = \texttt{center\_to\_face\_distance}(\text{face}, \text{cell}),
-$$
-
-which on a line is exactly half the boundary cell's thickness (the cell center is
-the midpoint of its two nodes in every coordinate system). It is smoothly floored at
-$10^{-8}$ of its reference value, so a collapsing trial cell keeps it positive, and
-$k$ is the cell conductivity smoothly floored at $10^{-6}$ W·m⁻¹·K⁻¹. Using the
-half-width places the surface at the physical face and the datum $T_{\text{cell}}$
-at the cell center, which is the one-sided gradient of a cell-centered scheme.
-
-### 12.2.2 Residual and Newton iteration at the trial clamp
-
-The condition is evaluated at the **trial clamp** of the surface temperature,
-$\tilde T_s=\mathrm{trial}(T_s)$: $T_s$ smoothly clamped into the property bracket
-$[200,\,3000]$ K with 1 K joins, the identity inside (`trial_temperature`,
-`src/States/guards.jl`). Define the surface residual
-
-$$
-f(T_s) \;=\; q_{\text{BC}}\big(\tilde T_s\big)\;-\;q_{\text{cond}}(T_s).
-$$
-
-The root $f(T_s)=0$ is found by Newton iteration
-
-$$
-T_s^{(k+1)} = T_s^{(k)} - \frac{f(T_s^{(k)})}{f'(T_s^{(k)})},
-\qquad
-f'(T_s) = \frac{dq_{\text{BC}}}{dT}\Big|_{\tilde T_s}\,\mathrm{trial}'(T_s) - \frac{k}{d}
-$$
-
-(`solve_boundary_temperature!`, `surface_balance.jl`). The iterate itself is
-never clamped. Inside the bracket the trial clamp is the identity and the balance is
-the one of §12.2.1; outside it the condition is constant, the balance reduces to
-conduction against a constant applied flux, and $f$ has the root
-$T_s = T_{\text{cell}} + q_{\text{BC}}(T_{\text{bound}})\,d/k$. So the balance has a
-root for any cell temperature it receives, with finite derivatives; when the root
-lies beyond the bracket the face follows the cell one for one
-($\partial T_s/\partial T_{\text{cell}}=1$). A test drives the surface with an
-incident flux of 10 MW·m⁻² that the hottest admissible surface cannot re-radiate and
-checks exactly this root and derivative. In the residual the cell temperature passed
-to the balance is itself the cell's trial temperature, so a trial state of the
-integrator with a cell temperature far outside the bracket (a second test uses
-$\pm10^5$ K) gives a finite face flux and neither clamps nor warns.
-
-The initial guess is the adjacent cell temperature clamped to the property
-bracket, $T_s^{(0)} = \min\bigl(\max(T_{\text{cell}}, 200\ \text{K}),
-3000\ \text{K}\bigr)$, taken on the plain value, so the solve is a pure function of
-its arguments: it never starts from a stored state, and a residual evaluation never
-depends on the ones before it. The cell temperature it receives is the cell's trial
-temperature, the conductivity and emissivity are the cell's (§12.2.6), and the
-outward gas fluxes are the face's gas-transport fluxes (§12.3.3).
-
-**Convergence.** The residual is compared against a relative tolerance scaled by
-the dominant physical flux,
-
-$$
-|f(T_s)| < \max\!\Bigl(\texttt{tol}\cdot
-\max\!\bigl(|q_{\text{BC}}|,\,|q_{\text{cond}}|,\,1\bigr),\ f_{\text{floor}}\Bigr),
-\qquad \texttt{tol}=10^{-10},
-$$
-
-with a maximum of 50 iterations. The floor
-$f_{\text{floor}} = 32\,\epsilon_{\text{mach}}\max(|T_s|,1)\,\bigl(k/d+|dq_{\text{BC}}/dT|\,\mathrm{trial}'(T_s)\bigr)$
-is the flux change from a few ulps of $T_s$: the conducted flux is a difference of
-two temperatures, so a face with near-zero net flux cannot resolve its residual
-below it. Scaling by the dominant flux makes the criterion meaningful whether the
-surface flux is $\sim 10^4$ W·m⁻² (cone) or near zero (near-adiabatic).
-**Nothing aborts and nothing warns on non-convergence**: on max-iterations or a
-vanishing derivative ($|f'|<10^{-30}$) the flux is evaluated at the last iterate,
-and the face's diagnostic record notes the outcome (`converged`, `iterations`;
-§12.2.7, asserted by a test that limits the budget to one iteration). The
-integrator's error control and domain test (§15.5.4) are the backstop that rejects
-a step built on a bad surface state. A non-finite cell temperature gives a
-non-finite face temperature, which is returned and not stored.
-
-For the physical BCs, convergence is fast and robust: convection contributes a
-constant negative slope $-h_{\text{conv}}$ (one Newton step is exact), and
-radiation contributes a monotone cubic slope $-4F\varepsilon_{\text{eff}}\sigma
-T_s^3$ that Newton resolves in a few iterations. Combined BCs sum monotone
-contributions, and the trial clamp is monotone, so without blowing the residual is
-strictly decreasing in $T_s$ and the root is unique.
-
-### 12.2.3 Automatic differentiation through the solve
-
-The solver is written to carry whatever scalar type its inputs carry. It promotes
-to the widest type among $(T_{\text{cell}}, k, d, t, \varepsilon_{\text{eff}},
-a_{\text{eff}})$ and the outward gas fluxes; when the colored Jacobian evaluates the
-residual on dual numbers (Chapter 15) this is a `ForwardDiff.Dual`. The Newton
-*convergence test* uses the plain value of the residual, so the iteration count is
-identical with or without dual numbers, while the returned tuple
-$(T_s,\,q_{\text{applied}},\,q_{\text{conducted}})$ is fully dual-typed and carries
-the implicit-function derivatives into the Jacobian. One guard is needed: on the
-very first iteration with dual numbers the residual may pass the plain tolerance
-while the dual part has not yet propagated, so convergence is not accepted at the
-first iteration in that case. The diagnostic `BoundaryState` stores plain `Float64`
-(it is bookkeeping, never differentiated).
-
-### 12.2.4 Per-type flux and derivative
-
-The Newton kernel calls `evaluate_bc_flux_and_derivative(bc, T, t, ε_eff,
-radiation_model, face; a_eff)` at $T=\tilde T_s$ (the `BlowingFace` at the iterate,
-read only by convective BCs, §12.3.3), which returns $(q_{\text{BC}},
-dq_{\text{BC}}/dT)$ for each concrete thermal BC. The pairs (from
-`surface_balance.jl`) are collected below; $\varepsilon_{\text{eff}}$ is the
-composition-weighted surface emissivity of the boundary cell and the keyword `a_eff`
-(default $\varepsilon_{\text{eff}}$) its surface absorptivity for incident radiation
-(§12.2.6).
-
-| BC | $q_{\text{BC}}(T)$ | $dq_{\text{BC}}/dT$ |
-|---|---|---|
-| `AdiabaticBC` (inside a combination) | $0$ | $0$ |
-| `HeatFluxBC` (inside a combination) | $q(t)$ (const or $q(t)$) | $0$ |
-| `ConvectiveBC` | $h_{\text{conv}}(t)\,R_b\,(T_\infty(t)-T)$ | $-h_{\text{conv}}(t)\,R_b$ |
-| `RadiativeBC` | $F\,\varepsilon\,\sigma\,(T_\infty^4-T^4)$ | $-4F\,\varepsilon\,\sigma\,T^3$ |
-| `RadiativeFluxBC` (`NO_RADIATION`, `SURFACE_ABSORPTION`) | $a_s\,q_{\text{inc}}(t)$ | $0$ |
-| `RadiativeFluxBC` (`BEER_LAMBERT`) | $0$ | $0$ |
-| `DirichletThermalBC` (penalty, inside a combination) | $h_{\text{large}}\,(T_{\text{bc}}-T)$ | $-h_{\text{large}}$ |
-| `CombinedThermalBC` | $\sum_m q_{\text{BC},m}$ | $\sum_m dq_{\text{BC},m}/dT$ |
-
-Here $R_b = h_{\text{eff}}/h$ is the blowing ratio of the convective condition's
-model ($R_b=1$ without outflow or with `NoBlowing()`), and $a_s$ is the
-condition's own absorptivity or $a_{\text{eff}}$. Each BC is derived and motivated
-in §12.3.
-
-**Neglected emissivity slope.** For a `RadiativeBC` whose own emissivity is a
-function of the surface temperature, $\varepsilon=\varepsilon(T_s)$, the exact
-radiative derivative would be
-
-$$
-\frac{dq_{\text{BC}}}{dT_s}
-= -4F\varepsilon(T_s)\sigma T_s^3
-  \;+\; F\,\frac{d\varepsilon}{dT_s}\,\sigma\,(T_\infty^4 - T_s^4),
-$$
-
-but the code keeps only the first term. The
-omitted term is part of the Newton *derivative* of the iteration, not the residual
-itself — the residual still uses the true $\varepsilon(T_s)$ — so the converged
-$T_s$ is unbiased; only the convergence rate degrades from quadratic to
-super-linear when $d\varepsilon/dT$ is large. This is documented as a known
-limitation (§12.12). The Jacobian of the system is not affected: it differentiates
-the converged solve on dual numbers.
-
-### 12.2.5 Application into the flux array
-
-After the solve, the thermal boundary kernel writes the **conducted** flux
-$q_{\text{conducted}}$ (not the applied flux) into the energy face flux, along the
-outward normal, together with the enthalpy of the outward gas fluxes at the face
-temperature, and records the face temperature:
-
-$$
-F^{E}_f \mathrel{+}= -\,q_{\text{conducted}} + \sum_j J_{j,f}\,h_j(T_s),
-\qquad
-T_f = T_s
-$$
-
-(`ThermalBoundaryKernel`, `src/Kernels/thermal_boundary.jl`; the enthalpy term only
-when gas transport runs). Writing the conducted flux (rather than the applied flux)
-is what makes the scheme energy-conserving: the row assembly then removes from the
-boundary cell the flux that actually enters it, and the surface energy balance
-$q_{\text{BC}}=q_{\text{cond}}$ guarantees that the energy delivered at the surface
-equals the energy conducted inward. The saved solution reports both, and their
-difference is at round-off when the balance has converged (7×10⁻¹² W·m⁻² in the
-worked example of §12.10).
-
-No other kernel writes a boundary flux: the conduction kernel visits only the
-interior faces between two live cells (§7.1.3), and the boundary faces — and, after
-deactivation, the live face of each tag — belong to the thermal boundary kernel, so
-there is no double-counting.
-
-### 12.2.6 Effective surface emissivity and absorptivity (composition-weighted)
-
-When a `RadiativeBC` is constructed with $\varepsilon=\texttt{nothing}$, the
-re-radiation uses the boundary cell's effective emissivity
-$\varepsilon_{\text{eff}}$, the mean over the components weighted by the mixing
-(matrix) volume fractions, each component emissivity evaluated at the cell's trial
-temperature,
-
-$$
-\varepsilon_{\text{eff}} = \sum_j v_j\,\varepsilon_j(T_{\text{cell}}),
-$$
-
-a convex combination of values in $[0,1]$, so it stays in $[0,1]$ without a clamp
-(§5.8.1). When a `RadiativeFluxBC` is constructed with
-`absorptivity = nothing`, the absorbed incident flux uses the boundary cell's
-effective surface absorptivity
-
-$$
-a_{\text{eff}} = \sum_j v_j\,a_j,\qquad
-a_j = \texttt{surface\_absorptivity}_j \text{ if set, else } \varepsilon_j(T_{\text{cell}}),
-$$
-
-(§5.8.2). Two physical principles are encoded here. First, **Kirchhoff's law**
-$a=\varepsilon$ at thermal equilibrium is the default: with no component
-absorptivity set, $a_{\text{eff}}\equiv\varepsilon_{\text{eff}}$ and the same
-quantity serves as both emissivity (re-radiation) and absorptivity (absorbed
-incident flux). A component-level `absorptivity` relaxes this where the heater
-spectrum differs from the surface's own emission spectrum, keeping the two
-mixtures on the same volume weights. Second, surface emissivity is a
-*geometric* property of the exposed mixture, so a volume-weighted (not
-mass-weighted) average is appropriate and it **automatically tracks composition
-changes** during pyrolysis (e.g. polymer $\to$ char as $v_j$ shifts). The state
-mapping evaluates both per cell at the positive-part concentrations and the trial
-temperature (`ds.ε[i]`, `ds.a[i]`, `src/States/derived.jl`), and the thermal boundary
-kernel passes them to `solve_boundary_temperature!` as the positional
-$\varepsilon_{\text{eff}}$ and the keyword `a_eff`. They are evaluated at the *cell*
-temperature, so they are constants of the surface Newton iteration; the colored
-Jacobian evaluates them on dual numbers, so
-$\partial\varepsilon_{\text{eff}}/\partial T_{\text{cell}}$ and
-$\partial a_{\text{eff}}/\partial T_{\text{cell}}$ from a temperature-dependent
-component emissivity enter the energy rows exactly.
-
-### 12.2.7 `BoundaryState` storage
-
-The thermal boundary kernel holds one diagnostic record per face
-(`kernel.states[f]`, `BoundaryState`, `src/BoundaryConditions/boundary_state.jl`):
-the solved surface temperature, the applied flux, the conducted flux, the inputs
-$(T_{\text{cell}}, k, d)$, convergence metadata (`converged`, `iterations`), and the
-blowing diagnostics at the converged $T_s$ (`blowing_mcp`, `blowing_ratio`, and the
-pooling-model fields `pooling_factor`, `face_fraction`, `face_buoyancy`; §12.3.3).
-The fields are plain `Float64` (`converged` a `Bool`, `iterations` an `Int`); the
-surface balance writes them as output only and never reads them back, so the
-residual carries no state between evaluations (a test evaluates a wild trial state —
-a cell temperature of $-9.1\times10^{40}$ K, or `NaN` — and then the original state,
-and recovers the residual of a fresh setup to $10^{-12}$, on a fixed and a moving
-mesh in both energy forms; another starts the solve from a record poisoned with
-`NaN` and gets the fresh result). A face whose condition is a
-closed form does not run the balance and does not write its record. The live
-(possibly dual-typed) quantities are returned from the solve and flow into the
-residual; the solution's per-tag blowing ratio reads the records after evaluating the
-residual at each saved state.
+First derivatives are obtained from the implicit function theorem at the
+qualified primal root. They include species/temperature coupling and blowing
+properties, with deterministic primal branch choices. Degenerate channels and
+vacuum branches have their stated explicit continuations (§9.5–9.6).
+`get_boundary_exchange` reports the assembled fluxes, energy and local residual
+and iteration counts; `BoundaryState` records thermal diagnostics.
 
 ---
 
@@ -10773,122 +8730,54 @@ ambient this is a convective loss. Because the derivative is the constant
 $-h_{\text{conv}}$, the contribution to the Newton residual is linear and exactly
 resolved in a single step. (`surface_balance.jl`.)
 
-**Blowing.** Every `ConvectiveBC` carries a blowing model (`bc.blowing`, an
-`AbstractBlowingModel`, default `NoBlowing()`), and the surface balance applies
-it at every Newton iterate to the face state: the **signed outward** gas mass
-flux of every component, read from the face's gas-transport fluxes (`c.F_mass[:, f]`
-oriented out of the boundary cell: the film law of the mass condition plus, in
-Darcy–Fick mode, the pressure-condition venting; §12.4, §12.5), the trial clamp of
-the surface-temperature iterate and the material (`BlowingFace`,
-`src/BoundaryConditions/blowing.jl`). The convective flux is
-$h\,R_b\,(T_\infty - T_s)$ with $R_b = h_{\text{eff}}/h$ the blowing ratio of the
-model (`blowing_state`; the code calls it `χ`, a letter the nomenclature reserves for
-pyrolysis progress). It modifies only the convective *coefficient*, not the gas
-enthalpy accounting, so it composes exactly with the gas enthalpy flux of the face
-(§7.4.3) — no double-count is possible. Zero outflow gives $R_b = 1$ exactly for
-every shipped model, so a face without outflow, such as a sealed back face, is
-unaffected automatically. The gas-transport kernel runs before the thermal
-boundary kernel and the relative-flux kernel after it, so the blowing models see the
-gas-transport fluxes alone.
+**Blowing.** Each `ConvectiveBC` carries a model, default `NoBlowing()`.
+The coupled boundary solve supplies signed outward species fluxes, surface
+temperature and, when available, the solved surface composition. The model
+returns $R_b=h_{eff}/h$, giving wall-film heat
+$q_s=hR_b(T_\infty-T_s)$. Reservoir-control-surface heat then follows the
+enthalpy conversion in §9.9. Relative mesh transport is handled separately.
 
-*Film law with a fitted constant* (`CouetteFilm(λ)`):
+For `CouetteFilm(λ)`,
 
 $$
-R_b \;=\; \frac{B_\lambda}{e^{B_\lambda}-1},
-\qquad
-B_\lambda \;=\; \frac{2\lambda\,\dot m''\,c_{p,g}}{h},
-\qquad
-\dot m''\,c_{p,g} \;=\; \sum_{g}\dot m_g\,c_{p,g}(T_s).
+C=\sum_gJ_gc_{p,g}(T_s),\qquad
+B=2\lambda C/h,\qquad R_b=\beta(B),\qquad
+\beta(B)=\frac{B}{e^B-1},\quad\beta(0)=1.
 $$
 
-$\lambda = 1/2$ is the classical Couette-film (Spalding) factor, $B_\lambda = B =
-\dot m'' c_{p,g}/h$; a smaller $\lambda$ fitted to a resolved flow weakens the
-reduction at a given outflow and holds for that gas only. Limits in $B$:
-$B = 0$ recovers the bare $h$ exactly; $B = 4$ (peak-PMMA outgassing against
-canonical cone $h$) gives $h_{\text{eff}}/h = 0.075$; $B < 0$ (net inflow) is
-the smooth suction enhancement.
+The classical factor is $\lambda=1/2$. The signed sum remains well defined
+for counterflow, and suction enhances heat transfer. Zero net mass flow
+need not give $C=0$ when species heat capacities differ. Surface heat
+capacities give a frozen-property approximation for temperature-dependent
+properties. The stable Taylor/exponential branches of `blowing_factor`
+avoid cancellation at zero and overflow under strong blowing.
 
-*Property-ratio film for any light gas* (`PropertyRatioFilm(free_stream; n_Γ)`),
-anchored on the Couette film of the free stream:
+`PropertyRatioFilm(free_stream; n_Γ)` modifies the free-stream Couette
+parameter using $(\Gamma_\infty/\Gamma_g)^{n_\Gamma}$, where $\Gamma=k/c_p$.
+The outgoing mixture uses mass-weighted heat capacity and Wilke conductivity.
+`PoolingFilm(free_stream; n_Γ,n_D,ψ0,Λc,Λw)` additionally applies a retention
+factor $\psi$, returning $\psi\beta(B_\Gamma/\psi)$. It computes buoyancy from
+the solved surface composition when one is supplied. Without that state it
+uses its empirical outflow/exchange composition closure and requires zero
+free-stream species flux. Both empirical models support outward products or
+pure free-stream suction; they diagnose unsupported mixed counterflow.
+Their fitted parameters describe the external apparatus, not pore transport.
+The signed Couette model supplies the counterflow closure without those
+empirical composition assumptions.
 
-$$
-B_\Gamma \;=\; \frac{\dot m''\,c_{p,\infty}(T_s)}{h}\left(\frac{\Gamma_\infty}{\Gamma_g}\right)^{n_\Gamma},
-\qquad \Gamma = \frac{k}{c_p},
-\qquad R_b = \frac{B_\Gamma}{e^{B_\Gamma}-1},
-$$
+`FunctionBlowing(f)` evaluates `f(face,h,T_inf)` with signed species fluxes,
+surface temperature, material properties and the available surface composition.
+Each convective member of a combined condition applies its own model. The
+coupled root's Jacobian and implicit derivatives include the full dependence
+of mass flux and film response on the solved state (§12.2).
 
-with $\Gamma_\infty$ of the free stream and $\Gamma_g$ of the mixture leaving the
-face (heat capacity weighted by mass fraction, conductivity by Wilke's rule
-over the components with outward flux, each species' viscosity from Eucken's
-relation when the component carries none). $n_\Gamma = 0.6$ is Kays's turbulent
-exponent on the heat-capacity ratio, reproduced by the chamber CFD; with
-$n_\Gamma = 0$ this is the Couette film in the free-stream heat capacity. Under
-net inflow the arriving gas is the free stream and the ratio is 1.
-
-*Pooling* (`PoolingFilm(free_stream; n_Γ, n_D, ψ0, Λc, Λw)`): the same
-$B_\Gamma$ with a pooling factor $\psi$, the share of the no-outflow exchange the
-face keeps,
-
-$$
-R_b \;=\; \frac{B_\Gamma}{e^{B_\Gamma/\psi}-1} \;=\; \psi\,F_b(B_\Gamma/\psi),
-\qquad
-\psi \;=\; \psi_0 + \frac{1-\psi_0}{1+\exp[-(\Lambda-\Lambda_c)/\Lambda_w]},
-\qquad
-\Lambda \;=\; \frac{1-(M_{\text{face}}/T_s)(T_\infty/M_\infty)}{1-T_\infty/T_s},
-$$
-
-where $F_b(x)=x/(e^x-1)$ is the film factor and $\Lambda$ the face buoyancy relative
-to the hot free stream, from the face molar mass $M_{\text{face}}$ of the species
-mass fractions
-
-$$
-Y_k \;=\; \frac{\dot m''_k}{\dot m''}\left[1-\exp\!\left(-\frac{\dot m''}{\psi\,\mathcal G\,s_k^{\,n_D}}\right)\right],
-\qquad \mathcal G = \frac{h}{\bar c_{p,\infty}},
-\qquad s_k = \frac{D_{k,\infty}}{\alpha_{\text{th},\infty}},
-$$
-
-with $\dot m''_k/\dot m''$ the species' share of the outflow, $\mathcal G$ the
-gas-exchange conductance without outflow (the film analogy: $h$ over the free-stream
-heat capacity averaged between $T_\infty$ and $T_s$, a 5-point Gauss–Legendre mean),
-$D_{k,\infty}$ the binary diffusivity into the free stream (Fuller, from the
-component's diffusion volume on the model, else the Chapman–Enskog estimate
-from its molar mass; a lumped `volatiles` gas states its own),
-$\alpha_{\text{th},\infty}$ the thermal diffusivity of the free stream, and $n_D = 1/2$
-the penetration-theory exponent. Components whose name matches the free
-stream count in $\dot m''$ but not in the face composition. $\psi$ and the
-$Y_k$ are solved together: $G(\psi) = \Psi(\Lambda(Y(\psi))) - \psi$ has
-$G(\psi_0) > 0$ and $G(1) < 0$, so a 16-interval scan of $[\psi_0, 1]$ on the
-plain values brackets every root, each refined by safeguarded Newton; where
-two states are self-consistent the mean of the lowest and highest is taken
-(the resolved flow alternates between them). One Newton step in the working
-scalar type at the plain root then gives the implicit-function derivative,
-so `ForwardDiff` partials ride through the solve. A face no hotter than the
-free stream keeps $\psi = 1$. The three switch constants belong to the
-apparatus flow, as $h$ does.
-
-*User rule* (`FunctionBlowing(f)`): $R_b = f(\text{face}, h, T_\infty)$.
-
-The film factor is evaluated by the numerically stable `blowing_factor` (Taylor
-branch at $|x|<10^{-5}$, overflow-safe $x\,e^{-x}/(1-e^{-x})$ form for
-large $x$). The Newton derivative uses the frozen-ratio form $-h\,R_b$ —
-first-order consistent, so convergence is marginally sub-quadratic and the
-converged root is exact; the Jacobian of the system, which differentiates the
-converged solve on dual numbers, carries the full derivative. Each convective member
-of a `CombinedThermalBC` applies its own model against its own $h$ and $T_\infty$;
-all other BC types are untouched. At the converged $T_s$ the `BoundaryState`
-records the blowing conductance `blowing_mcp`, the applied ratio `blowing_ratio`
-and, for the pooling model, `pooling_factor`, `face_fraction` and `face_buoyancy`
-(the first convective member's), and the solution carries the ratio and the pooling
-fields per output time (`sol.extras.surface_blowing_ratio`, `surface_pooling_factor`,
-`surface_face_fraction`, `surface_face_buoyancy`; per tag,
-`sol.boundary_blowing_ratio`). The colored Jacobian evaluates the face's outward
-mass fluxes and the blowing model on dual numbers, so the
-$\partial(hR_b)/\partial(T,\xi)$ chain through the boundary cell's state is exact.
-Giving a convective BC a model on a case calibrated with the bare coefficient will
-raise $T_s$ and MLR; introduce it together with a flame heat-flux feedback, with
-which it partially cancels (§1.8.1).
-(`src/Materials/blowing_models.jl` types and gas data,
-`src/BoundaryConditions/blowing.jl` evaluation.)
+`BoundaryState` records `blowing_mcp`, `blowing_ratio`, `pooling_factor`,
+`face_fraction` and `face_buoyancy`. Saved solution fields include
+`surface_blowing_ratio`, `surface_pooling_factor`, `surface_face_fraction`,
+`surface_face_buoyancy` and per-tag `boundary_blowing_ratio`. Inspect
+`get_boundary_exchange` for the actual transmitted species and energy fluxes.
+The types and gas data are in `src/Materials/blowing_models.jl`; evaluation
+is in `src/BoundaryConditions/blowing.jl`.
 
 ### 12.3.4 `RadiativeBC` (gray surface exchange with surroundings)
 
@@ -10904,15 +8793,19 @@ with the Stefan–Boltzmann constant $\sigma=5.670374419\times10^{-8}$ W·m⁻²
 with surroundings at $T_\infty$; default $1$), the **emissivity** $\varepsilon$
 (either a supplied constant or function of the surface temperature, evaluated at the
 trial clamp of the iterate, or, when `nothing`, the composition-weighted
-$\varepsilon_{\text{eff}}$ of §12.2.6), and the surroundings temperature
+$\varepsilon_{\text{eff}}$ of §5.8.2), and the surroundings temperature
 $T_\infty$. This term is the surface's own re-radiation to and absorption from a
 gray environment; it is the dominant cooling mechanism for a hot pyrolyzing
 surface. Its quartic temperature dependence is why the face temperature, not the
 cell-center temperature, must enter it (§12.1.1). The condition stays at the
 surface under every radiation model. (`surface_balance.jl`.)
 
-The neglected $d\varepsilon/dT$ term (§12.2.4) applies here when $\varepsilon$ is
-a function of the surface temperature.
+The displayed slope holds emissivity fixed. If emissivity depends on surface
+temperature, the full derivative additionally contains
+$F\sigma\varepsilon'(T_s)(T_\infty^4-T_s^4)$. The surface-root Jacobian and
+its implicit derivative include that term by differentiating the flux residual.
+The low-level flux helper also returns a frozen-coefficient slope; this slope
+is not used to differentiate the qualified surface root.
 
 ### 12.3.5 `RadiativeFluxBC` (external incident radiation; model-dependent)
 
@@ -10922,7 +8815,7 @@ $a_s\,q_{\text{inc}}$, where $q_{\text{inc}}=$ `flux` (constant or $q(t)$) and
 the absorptivity $a_s$ (keyword `absorptivity`) is either supplied (a constant or a function of $t$) or,
 when `nothing`, the mixture surface absorptivity $a_{\text{eff}}$, which equals
 $\varepsilon_{\text{eff}}$ by Kirchhoff's law unless a component sets its own
-`absorptivity` (§12.2.6).
+`absorptivity` (§5.8.2).
 
 Its behavior is **dispatched on the `radiation_model`** passed to `solve` or
 `setup` (default `NO_RADIATION`; Chapter 8). The crucial design point is that
@@ -11035,214 +8928,41 @@ closed-form conditions of §12.3.1, §12.3.2 and §12.3.6.
 
 ---
 
-## 12.4 Mass (species) boundary conditions
+## 12.4 Mass and reservoir boundary conditions
 
-The species boundaries supply the gas mass flux $J_j$ at each live boundary face.
-Unlike the thermal boundary, there is no surface-temperature nonlinearity, so the
-flux is evaluated directly from the state of the boundary cell. The internal
-diffusive flux model is the volume-fraction (partial-pressure) gradient form of §9,
-Gas-Phase Mass Transport & Pressure; here it is closed at the surface by an
-external resistance. The conditions act only when the solve transports gas
-(§12.1.2), and only on the gas components; solids and liquids never cross a boundary
-face (on a moving mesh the correction vanishes at the end nodes, §11.7.5).
+`ImpermeableBC()` gives zero species flux. `MassFluxBC(fluxes=(gas=...,...),
+inflow_temperature=(gas=...,...))` prescribes named outward mass fluxes in
+kg/(m² s); each negative flux needs its incoming temperature.
 
-### 12.4.1 `ImpermeableBC` (default)
+`GasReservoir(P=...,T=...,mole_fractions=(gas=...,...))` defines pressure [Pa],
+incoming temperature [K] and normalized named gas mole fractions. Time-dependent
+values are permitted and checked when evaluated. Only an explicit vacuum
+`P=0` may omit composition. `AmbientGasBC(reservoir;film=nothing)` connects
+the complete state to the pore path and permits both ingress and escape.
 
-$J_j = 0$ for all components — no gas crosses the boundary. This is the default
-for both faces (`BoundaryConditionSet`) and is the physically correct choice for
-the substrate (sealed back face) and any non-venting surface. It is also the
-implicit closure for solid/liquid components everywhere, since only gas components
-are transported.
-
-### 12.4.2 `MassFluxBC`
-
-A prescribed species flux $J_j = J(t)$ (constant or function), positive into the
-domain (`boundary_fluxes.jl`), applied to every gas component. Used to impose a
-known gas influx/efflux, typically zero or negative (gas escaping).
-
-### 12.4.3 `ConvectiveMassBC` (external film transfer)
-
-$$
-J_j = h_m(t)\,\bigl(\xi_{j,\infty} - \xi_{j,s}\bigr),
-$$
-
-the mass-transfer analog of Newton's cooling law, with the film coefficient $h_m$
-(m·s⁻¹, velocity-based) and the ambient concentration $\xi_{j,\infty}$ (typically
-$0$ for pyrolysis gas escaping to atmosphere) (`boundary_fluxes.jl`). The
-coefficient may be estimated by the heat–mass analogy,
-
-$$
-h_m \approx \frac{h_{\text{conv}}}{\rho_{\text{air}}\,c_{p,\text{air}}},
-$$
-
-e.g. $h_{\text{conv}}\approx10$ W·m⁻²·K⁻¹ gives $h_m\approx0.008$ m·s⁻¹. With
-$\xi_{j,\infty}=0$ and $\xi_{j,s}>0$, $J_j<0$ (escaping), consistent with the
-flux-into-domain sign.
-
-The ambient $\xi_{j,\infty}$ accepts three forms, resolved per gas species $j$ by
-`ambient_concentration(bc, t, j)`: a `Real` (the same ambient for every gas species —
-typically 0, the atmosphere carrying no pyrolyzate), a `Function` of $t$ (time-varying
-scalar, broadcast to every gas species), or an `NTuple{NC}` of per-component ambient
-concentrations indexed by the material's component order (condensed-phase entries are
-ignored; entries are validated non-negative at construction and the tuple length against
-$N_C$ at problem validation). The per-species form is what represents ambient air ingress
-without injecting pyrolyzate: a scalar $\xi_\infty>0$ would feed that concentration of
-*every* gas species into the domain. A test lets an ambient gas
-(`ConvectiveMassBC(h_m = 0.05, ξ_inf = (0.0, 0.5))`) enter a gas-free column: the
-outward flux of the top face is $-0.025$ kg·m⁻²·s⁻¹, the surface cell gains exactly
-$A\cdot0.025$ kg/s, and the saved boundary mass flux reports the inflow on a fixed and
-on a moving mesh.
-
-### 12.4.4 `DiffusiveMassBC` (combined internal/external resistance)
-
-This BC couples the **internal** Fickian diffusion resistance from the surface
-cell to the face with an **external** film resistance, in series. Working in the
-volume-fraction formulation $J=-\lambda\,\partial\xi/\partial x$ with the surface
-gradient approximated as $(\xi_s-0)/d$ (zero exterior concentration), the two
-resistances are
-
-$$
-R_{\text{internal}} = \frac{d}{\lambda},
-\qquad
-R_{\text{external}} = \frac{1}{h_m},
-$$
-
-where $d$ is the cell-center-to-face distance and $\lambda$ is the
-effective gas-transfer coefficient. The combined flux is
-
-$$
-J_j = -\frac{\xi_{j,s}}{R_{\text{internal}}+R_{\text{external}}}
-    = -\frac{\lambda\,h_m\,\xi_{j,s}}{\lambda + h_m\,d}.
-$$
-
-The minus sign places escaping gas at $J_j<0$ (flux-into-domain convention). Two
-limits follow:
-
-- **No external resistance** ($h_m\to\infty$, the default `DiffusiveMassBC()` with
-  `h_m = Inf`): pure internal diffusion,
-  $$J_j = -\frac{\lambda\,\xi_{j,s}}{d};$$
-- **Impermeable** ($h_m\to0$): $J_j\to0$.
-
-> **Implementation note.** The flux law is `mass_bc_flux(bc::DiffusiveMassBC,
-> ξ_surface, λρ, ρ, d, t, j)` (`boundary_fluxes.jl`) — every mass-BC flux method carries
-> the trailing species index `j` so per-species ambients resolve correctly. The
-> gas-transport kernel (`_boundary_mass_flux!`, `src/Kernels/gas_transport.jl`) passes
-> the boundary cell's concentration $\xi_{j,s}=m_{j,s}/V_s$, the mixture density
-> $\rho$ at its positive-part concentrations and trial temperature, the *combined
-> transport coefficient* $\lambda\rho$ (the cell's gas-transfer coefficient times
-> $\rho$), and the center-to-face distance smoothly floored at $10^{-8}$ of its
-> reference value. For $\rho \le 0$ the flux is zero, and otherwise the function
-> recovers $\lambda = \lambda\rho/\rho$ by exact division (no floor — the caller
-> constructs $\lambda\rho$ as the product, so division is exact for any positive
-> density), because $h_m$ is defined per concentration, not per mass fraction.
-
-**Sign reconciliation.** Three sign conventions coexist and must be reconciled
-(`boundary_fluxes.jl`, `gas_transport.jl`):
-
-| Quantity | Convention |
-|---|---|
-| `mass_bc_flux(...)` | **negative** = gas escaping (flux-into-domain) |
-| `compute_surface_mass_flux(...)` (diagnostic) | **positive** = gas escaping |
-| boundary face flux `F[j, f]`, and `sol.boundary_mass_flux[tag]` | **positive** = along the outward normal (gas escaping), at both ends |
-
-The kernel bridges these by negating the condition's flux into the face's outward
-flux, `F[j, f] += v_out ξ_j/φ − mass_bc_flux(...)`, at the top and the bottom alike:
-with $J_{\text{bc}}<0$ for escaping gas, the stored flux is positive — gas leaving
-along the outward normal — which the row assembly removes from the boundary cell.
-The application **accumulates**: in Darcy–Fick mode the face also carries the
-pressure-condition venting flux $v_{\text{out}}\xi_j/\varphi$ (§12.5), and the film
-law adds to it; in Fickian mode the venting term is zero. A test vents a symmetric
-column through `DiffusiveMassBC(0.05)` at both faces: the bottom flux is outward and
-equal to the top one, the integral of both closes against the lost inventory to
-$10^{-3}$, and the mass-loss rate counts both faces.
-
-### 12.4.5 `CombinedMassBC`
-
-Like the thermal composite, $J_j=\sum_m J_{j,m}$, built by a `@generated` unrolled
-sum (`boundary_fluxes.jl`), e.g. `DiffusiveMassBC(Inf) +
-ConvectiveMassBC(h_m = 0.01, ξ_inf = 0.0)`. Pressure BCs (§12.5) participate in the
-composite by contributing zero *film* flux (they act through the outward Darcy
-velocity, not the film law), so they can be combined freely with `DiffusiveMassBC`
-(`boundary_fluxes.jl`); the outward Darcy velocity of a composite is the sum of its
-members' (§12.5).
+`MassTransferFilm(g)` adds the isobaric common-diffusivity film of §9.8, with
+conductance in kg/(m² s), a number or temperature law. Zero conductance permits
+only donor bulk flow; infinite conductance fixes composition. Pressure, species
+and thermal equations are solved consistently. These conditions do not combine
+with `+`; one closure is assigned to each tag.
 
 ---
 
-## 12.5 Pressure boundary conditions (Darcy flow)
+## 12.5 Pressure-gradient and hydraulic-resistance boundaries
 
-In Darcy–Fick transport mode (§9; selected when a condensed component is
-permeable), gas advection is driven by the Darcy velocity
-$v_g = -(\kappa/\mu)\nabla P$, and the pressure boundaries set the velocity at the
-boundary faces. These BCs are subtypes of `AbstractMassBC` so they live in the
-mass slot of the `BoundaryConditionSet`; they contribute **no** film flux
-(returning $0$ from `mass_bc_flux`, §12.4.5) — they act through
-`outward_darcy_velocity(bc, P, mob, d)` (`src/Kernels/gas_transport.jl`), the
-superficial velocity along the face's **outward** normal from the boundary cell's
-pressure $P$ and mobility $\mathrm{mob}=\kappa/\mu$ (the viscosity smoothly floored at
-$10^{-12}$ Pa·s, §5.9), its center lying $d$ from the face. That velocity enters the
-species rows as the boundary venting flux
+`NeumannPressureBC(gradient=...,T=...,mole_fractions=...)` sets the outward
+pressure gradient [Pa/m] and provides the species composition and incoming
+energy state. The surface pressure is the cell pressure plus gradient times
+the current half-cell distance, and physical accepted pressures must be
+nonnegative.
 
-$$
-F_{j,f} \mathrel{+}= \frac{v_{\text{out}}}{\varphi_s}\,\xi_{j,s}
-\quad (v_{\text{out}} \ge 0),
-$$
-
-outflow only: the ambient beyond the face carries none of the tracked gases, so an
-inward velocity draws no gas in (§9.5.3). $\varphi_s$ is the boundary cell's smoothly
-floored porosity, and the outflow test reads the plain value of $v_{\text{out}}$, as
-the interior upwind side does. The orientation is the same at both ends, so one
-formula serves the top and the bottom.
-
-### 12.5.1 `DirichletPressureBC` (prescribed pressure)
-
-Prescribes the boundary pressure $P_{\text{bc}}$ (default $101325$ Pa,
-atmospheric). The outward velocity follows from Darcy's law with a one-sided
-pressure gradient between the interior cell and the face:
-
-$$
-v_{\text{out}} = \mathrm{mob}\,\frac{P - P_{\text{bc}}}{d},
-$$
-
-with $d$ the cell-center-to-face distance and $\mathrm{mob}$ the cell's mobility. A higher
-interior pressure ($P>P_{\text{bc}}$) yields $v_{\text{out}}>0$, outflow, at either
-face; an impermeable cell ($\kappa = 0$) has zero mobility and vents nothing.
-
-### 12.5.2 `NeumannPressureBC` (prescribed gradient)
-
-Prescribes the pressure gradient $\partial P/\partial n$ along the **outward
-normal** (default $0$ = impermeable):
-
-$$
-v_{\text{out}} = -\mathrm{mob}\,\frac{\partial P}{\partial n}.
-$$
-
-The zero-gradient default makes a `NeumannPressureBC()` equivalent to an impermeable
-wall for Darcy flow.
-
-### 12.5.3 `ConvectivePressureBC` (Robin / surface resistance)
-
-A Robin-type law for a surface with finite resistance to gas escape (char layer,
-protective coating, blowing resistance):
-
-$$
-v_{\text{out}} = h_P\,\bigl(P - P_{\text{ext}}\bigr)\,\frac{\mathrm{mob}}{\mathrm{mob} + \eta_m},
-$$
-
-with $h_P$ the pressure-transfer coefficient (m·Pa⁻¹·s⁻¹), $P_{\text{ext}}$ the
-exterior pressure (`ConvectivePressureBC(h_P, P_ext)`), and the gate $\mathrm{mob}/(\mathrm{mob}+\eta_m)$, $\eta_m=10^{-30}$ m²·Pa⁻¹·s⁻¹,
-equal to one on any permeable cell (exactly, in floating point, for any physical
-mobility) and zero on an impermeable one, smooth between — an impermeable surface cell
-cannot vent regardless of $h_P$. The limits bracket the other two pressure BCs:
-$h_P\to\infty$ pins the boundary pressure (Dirichlet) and $h_P\to0$ seals it
-(zero-gradient Neumann / impermeable).
-
-> **Implementation note.** All three pressure BCs are methods of
-> `outward_darcy_velocity(bc, P, mobility, d)` (`src/Kernels/gas_transport.jl`); a
-> `CombinedMassBC` sums the contributions of its members, and every other mass
-> condition contributes $0$ (e.g. a `DiffusiveMassBC` in the mass slot does not set
-> a Darcy velocity). The gas-transport kernel evaluates it per live boundary face;
-> the colored Jacobian evaluates the same code on dual numbers and the solution
-> assembly on the saved states, so the three cannot drift apart.
+`ConvectivePressureBC(reservoir;resistance=...,flow=:darcy_velocity,film=nothing)`
+solves $P_s-P_\infty=R_h f$. The flow is Darcy velocity [m/s], total mass flux
+[kg/(m² s)] for `:mass`, or total molar flux [mol/(m² s)] for `:molar`.
+Resistance is finite and nonnegative, with units pressure divided by the chosen
+flow. A zero resistance fixes surface pressure. The complete reservoir and
+optional film provide species and energy closures in either direction.
+These pressure conditions are valid with either transport model.
 
 ---
 
@@ -11309,31 +9029,24 @@ impermeable on both faces — is the inert closure: a column with no defined BCs
 neither gains energy nor loses mass. The set is checked against the mesh when the
 problem is set up (§12.1.2): a tag the mesh does not have is refused, and
 `validate_problem` requires `:top` and `:bottom` and a thermal condition for every
-tag of the mesh, and checks the length of a per-species ambient tuple against $N_C$.
+tag of the mesh, and binds reservoir species names to the material gas components.
 
-### 12.7.3 Accessors and patches
+### 12.7.3 Typed bindings and patches
 
-Access by tag is through `Val{tag}` dispatch:
+`bc_set.thermal[tag]` and `bc_set.mass[tag]` provide the assigned conditions.
+Setup binds their gas species names and molar masses once. Boundary patches
+follow the live face of each tag after deactivation; flux orientation is
+converted to the stored mesh-face orientation before the row scatter.
 
-```julia
-@inline get_thermal_bc(bc_set, ::Val{tag}) where {tag} = bc_set.thermal[tag]
-@inline get_mass_bc(bc_set,    ::Val{tag}) where {tag} = bc_set.mass[tag]
-```
-
-At a call site such as `get_thermal_bc(bc_set, Val(:top))`, the `Val(:top)`
-resolves at compile time to a direct NamedTuple field read with zero overhead
-(`boundary_conditions.jl`). The kernels hold the conditions in their patches: one
-`BoundaryPatch(tag, faces, bc)` per boundary tag of the mesh, with `faces =
-boundary_faces(topology, tag)`, in a tuple peeled recursively so each patch's
-condition is a concrete type. `boundary_condition(kernel, tag)` returns the thermal
-condition the kernel applies on a tag. The faces are those of the mesh's topology;
-there is no integer boundary identifier anywhere.
+---
 
 ### 12.7.4 Constructor parameter validation
 
 Individual BC constructors optionally validate their physical parameters at build
 time (`validate_bc_params`, `boundary_conditions.jl`): $h\ge0$, $T>0$ K,
-$\varepsilon\in[0,1]$, $F\in[0,1]$, $a_s\in[0,1]$, $h_m\ge0$, $P>0$.
+$\varepsilon\in[0,1]$, $F\in[0,1]$, $a_s\in[0,1]$. Gas boundary constructors
+validate their own nonnegative pressure and conductance, positive temperature,
+and normalized composition; positive-pressure reservoirs require composition.
 Function-valued parameters cannot be checked at construction and are skipped
 (`_get_scalar_value` returns `nothing` for functions and property functions).
 
@@ -11484,228 +9197,101 @@ $4.5\times10^4$ W·m⁻²), and
 `surface_heat_flux_absorbed − surface_heat_flux_reradiation −
 surface_heat_flux_convection = surface_heat_flux_net` for a condition built from
 those members. The per-face `BoundaryState` records whether each Newton solve
-converged (§12.2.7). The balance of the whole column over a solve — the boundary
+converged (§12.2.3). The balance of the whole column over a solve — the boundary
 fluxes integrated over each accepted step against the inventories and the events —
 is the conservation audit (`ConservationRecorder`, `conservation_audit`; §16.8).
 
 ---
 
-## 12.10 Worked example: the cone-calorimeter top boundary
+## 12.10 Example: an atmospheric heat and mass film
 
-Assembling the canonical top boundary makes the pieces concrete. A 50 kW·m⁻² cone
-with surface re-radiation and natural convection to a 300 K ambient, on a
-sealed-but-venting slab, is
+A material with an `:air` gas can exchange with this complete reservoir:
 
 ```julia
-using Pyrolysis
-
-bc_set = BoundaryConditionSet(
-    thermal = (
-        top = RadiativeFluxBC(flux = 50e3) +              # absorbed incident flux, α = a_eff
-              RadiativeBC(ε = nothing, T_inf = 300.0) +   # re-radiation loss
-              ConvectiveBC(h = 10.0, T_inf = 300.0),      # convective loss
-        bottom = AdiabaticBC(),                           # insulated back
-    ),
-    mass = (
-        top = DiffusiveMassBC(),                          # gas vents, internal diffusion limit
-        bottom = ImpermeableBC(),                         # sealed back
-    ),
-)
+reservoir = GasReservoir(P=101325., T=300., mole_fractions=(air=1.,))
+bcs = BoundaryConditionSet(
+    thermal=(top=HeatFluxBC(30e3) + ConvectiveBC(h=10., T_inf=300., blowing=CouetteFilm()),
+             bottom=AdiabaticBC()),
+    mass=(top=AmbientGasBC(reservoir; film=MassTransferFilm(.06)),
+          bottom=ImpermeableBC()))
 ```
 
-With `radiation_model = SURFACE_ABSORPTION`, the surface energy
-balance solved by Newton at the top is
-
-$$
-\underbrace{a_{\text{eff}}\,(50{,}000)}_{\text{absorbed}}
-\;-\;\underbrace{\varepsilon_{\text{eff}}\,\sigma\,(T_s^4 - 300^4)}_{\text{re-radiation}}
-\;-\;\underbrace{10\,(T_s - 300)}_{\text{convection}}
-\;=\;
-k\,\frac{T_s - T_{\text{cell}}}{d},
-$$
-
-with $a_{\text{eff}}=\varepsilon_{\text{eff}}$ (Kirchhoff, both `nothing`). As the
-surface chars, $\varepsilon_{\text{eff}}$ tracks the composition automatically,
-changing both the absorbed and re-radiated terms. Inside the property bracket the
-Newton derivative is $f'(T_s) = -4\varepsilon_{\text{eff}}\sigma T_s^3 - 10 - k/d$
-(the absorbed term and the ambient parts are $T_s$-independent), which is strictly
-negative — guaranteeing a unique root reached in a few iterations. The conducted flux
-$q_{\text{conducted}}$ is written to the top face as the outward flux
-$-q_{\text{conducted}}$, and, for a gas-producing material, the vented gas leaves the
-top along its outward normal with the flux of `DiffusiveMassBC`, carrying its
-enthalpy at $T_s$. If `radiation_model = BEER_LAMBERT` is selected instead, the
-`RadiativeFluxBC` contributes zero to this balance and the 50 kW·m⁻² enters the
-energy rows as in-depth absorption through the face intensities (§8.3).
-
-On an inert slab ($\rho = 1000$ kg·m⁻³, $c = 1500$ J·kg⁻¹·K⁻¹,
-$k = 0.2$ W·m⁻¹·K⁻¹, $\varepsilon = 0.9$; 1 cm in 20 cells, starting at 300 K; the
-slab has no gas, so the mass conditions are not read):
-
-```julia
-slab = SolidComponent(:slab, ρ = 1000.0, c = 1500.0, k = 0.2, ε = 0.9)
-problem = PyrolysisProblem(
-    mesh = create_uniform_mesh(0.01, 20),
-    material = Material(name = :inert, components = (slab,), reactions = ()),
-    bc_set = bc_set,
-    T_initial = z -> 300.0,
-    ξ_initial = [z -> 1000.0],
-    tspan = (0.0, 60.0),
-    output_times = [0.0, 30.0, 60.0],
-)
-sol = solve(problem; radiation_model = SURFACE_ABSORPTION)
-x = sol.extras
-```
-
-the solve returns `:Success` with
-
-| $t$ [s] | `surface_T` [K] | absorbed [W·m⁻²] | re-radiation [W·m⁻²] | convection [W·m⁻²] |
-|---|---|---|---|---|
-| 0 | 355.06 | 45 000 | 397.75 | 550.65 |
-| 30 | 684.77 | 45 000 | 10 807.43 | 3 847.66 |
-| 60 | 758.41 | 45 000 | 16 470.06 | 4 584.06 |
-
-and `x.surface_heat_flux_net .- x.surface_heat_flux_conduction` of
-$\pm7.3\times10^{-12}$ W·m⁻² at every saved time. At $t=0$ the cell is at 300 K, yet
-the face is already at 355 K: the surface balance places the absorbed flux at the
-face, not at the cell center.
+The mass conductance is in kg/(m² s). The common incoming stream temperature
+is 300 K in both films. Other gases in the material have zero reservoir mole
+fraction and can escape; air can enter. Initialize the pore gas inventories
+from the declared initial pressure, temperature and physical porosity.
+See the executable cone-calorimeter examples for complete material data.
 
 ---
 
 ## 12.11 Comparison to ThermaKin2Ds, Gpyro, and FDS
 
-The three reference solvers express the same surface physics in their own
-notation; the subsections below map their symbols to ours on first use and
-contrast the modeling choices. (Pyrolysis.jl stores the heat of reaction with
-$h>0$ endothermic, $Q_{\text{rxn}}=-\sum h_r r_r$, as Gpyro and FDS do; ThermaKin
-publishes $h>0$ exothermic (§6.9.2). The sign concerns the volumetric reaction heat,
-not the surface BCs.)
-
 ### 12.11.1 ThermaKin2Ds
 
-ThermaKin2Ds applies piecewise external/flame boundary conditions and supports an
-external radiant source with surface re-radiation. The exposed-face energy
-balance, in ThermaKin's form, is
+TK §2 defines time- and position-dependent external heating and empirical
+flame feedback. Eq. 19 permits a linear gas-transfer boundary law and an
+exponential surface-loss law. These are broader than the boundary models
+used in our usual cone example. TK's $\alpha_i$ is a mass-specific absorption
+coefficient, not dimensionless surface absorptivity. $I_{ex}^0$ denotes the
+incident flux **after reflection**, not the reflected component.
 
-$$
--k\frac{\partial T}{\partial x}\Big|_{\text{surf}}
-= a\,\dot q''_{\text{ex}}
-  - \varepsilon\sigma\bigl(T_s^4 - T_\infty^4\bigr)
-  - h_{\text{conv}}\bigl(T_s - T_\infty\bigr),
-$$
-
-with $\dot q''_{\text{ex}}$ the incident external flux, $a$ the absorptivity
-(ThermaKin's $\alpha$) and $\varepsilon$ the emissivity (Kirchhoff $a=\varepsilon$). Pyrolysis.jl's
-cone BC `RadiativeFluxBC + RadiativeBC + ConvectiveBC` is exactly this
-balance, with our $q_{\text{inc}}=\dot q''_{\text{ex}}$ and our
-$\varepsilon_{\text{eff}}$ playing the role of ThermaKin's surface $\varepsilon$.
-ThermaKin also tracks a reflected component $I_{\text{ex}}^0$; our
-composition-weighted $a_{\text{eff}}$ supplies the absorptivity and the reflected
-fraction $(1-a_{\text{eff}})$ is implicitly discarded (opaque-surface assumption),
-consistent with the `SURFACE_ABSORPTION` model. The shared idea — that both the
-absorbed external flux and the surface re-radiation depend on the *true* surface
-temperature — is realized by ThermaKin through its Crank–Nicolson surface node and by
-Pyrolysis.jl through the surface-balance Newton solve of §12.2. ThermaKin carries gas
-enthalpy via a convective term $c_g(J_g\cdot\partial T/\partial x)$ (its Eq. 17),
-which corresponds to our gas enthalpy flux at the faces (§7.4) and is the reason the
-surface balance carries no gas-enthalpy term (§7.4.3).
+TK Eqs. 12 and 23 and its MAX/RAND algorithm use absorption-weighted or
+selected-element radiation properties. Only an appropriate surface-absorption
+limit resembles our `RadiativeFluxBC + RadiativeBC + ConvectiveBC` balance;
+the general TK model is not exactly that surface equation (§8.7.1).
+The manual does not establish that TK uses our separate surface-temperature
+Newton solve or an equivalent surface-node construction.
 
 ### 12.11.2 Gpyro
 
-Gpyro (Lautenberger & Fernandez-Pello) writes the exposed-surface balance as a
-radiative–convective balance with an impermeable back face by default. In Gpyro
-notation,
+GP §5 describes convective/radiative thermal boundaries and alternative gas
+pressure, flux and species conditions. Its 1D discretization puts temperature
+nodes at the exposed and back boundaries in half cells (GP §4.1.1); a surface
+temperature is not obtained by harmonic interpolation from a cell center.
+Our boundary temperature is recovered by a one-sided surface balance.
 
-$$
--\bar k\frac{\partial T}{\partial z}\Big|_{\text{surf}}
-= \dot q''_e - \varepsilon\sigma\bigl(T_s^4 - T_\infty^4\bigr)
-  - h_c\bigl(T_s - T_\infty\bigr),
-$$
-
-and gas escape at the surface uses a heat–mass transfer analogy for the film
-coefficient, $h_m \sim h_c/(\rho c_p)$ — the same estimate we recommend for
-`ConvectiveMassBC` (§12.4.3). Gpyro's control-volume formulation places the
-surface temperature at the face via its harmonic interface interpolation; our
-Newton solve achieves the equivalent by solving the one-sided Fourier balance for
-$T_s$. Gpyro permits a non-zero back-face pressure/mass boundary in its
-pressure-evolution model; our `DirichletPressureBC` / `NeumannPressureBC` /
-`ConvectivePressureBC` (§12.5) are the analogous Darcy boundary closures, with
-Gpyro's permeability $K$ mapping to our $\kappa$. Gpyro's default impermeable back
-face corresponds to our default `ImpermeableBC` + `NeumannPressureBC()` (zero
-gradient).
+The entering radiant flux includes absorptivity, and surface versus in-depth
+deposition must be selected consistently. An impermeable back is one
+configuration, not a general characterization of every Gpyro deck.
+Pyrolysis.jl likewise provides separate species and pressure boundary
+conditions; their matching requires checking the actual deck.
 
 ### 12.11.3 FDS
 
-The FDS solid-phase model imposes the 1D surface boundary condition
+The FDS solid-phase chapter imposes conducted flux equal to convective plus
+net radiative surface flux for opaque material. It sets the surface radiation
+source to zero when in-depth radiation carries that exchange. Our
+Beer–Lambert mode also avoids depositing the incident beam twice, but its
+one-way absorption model differs from FDS's emitting two-flux model (§8.7.3).
+FDS's Newton iteration for surface oxygen in oxidative reactions is separate
+from our Newton solve for surface temperature.
 
-$$
--k\frac{\partial T_s}{\partial x}\Big|_{x=0}
-= \dot q''_c + \dot q''_r,
-$$
+For FDS 6.11.0, `READ_SURF` rejects `NET_HEAT_FLUX` or
+`CONVECTIVE_HEAT_FLUX` combined with `MATL_ID` (error 306). This explains
+the retained V-HC-03 overlay choice; it is a version-specific input
+restriction, not a claim that all possible FDS configurations or later
+versions cannot impose a net flux.
 
-i.e. the conducted flux equals the sum of the convective and net radiative surface
-fluxes, with $\dot q''_r$ including absorbed incident and emitted re-radiation.
-This is the same content as our $q_{\text{cond}}=q_{\text{BC}}$ with
-$q_{\text{BC}}=a_{\text{eff}}q_{\text{inc}}-\varepsilon\sigma (T_s^4-T_\infty^4)-h_{\text{conv}}(T_s-
-T_\infty)$. FDS additionally performs a *surface oxygen* Newton iteration for
-oxidative pyrolysis (coupling surface $O_2$ to the gas phase); Pyrolysis.jl is a
-condensed-phase-only solver with no gas-phase $O_2$ feedback, so our surface
-Newton iterates on $T_s$ alone. FDS recovers Arrhenius parameters from TGA
-reference temperature/rate (a kinetics, not a BC, concern; see §6, §18). The FDS
-in-depth radiation (a two-flux Schuster–Schwarzschild model) corresponds to our
-`BEER_LAMBERT` in-depth absorption, under which the `RadiativeFluxBC` boundary
-flux is suppressed to avoid double-counting (§12.3.5), just as FDS deposits the
-in-depth absorbed fraction in the volume rather than at the face.
+Sources: TK §§2–3; GP §§4.1.1, 5; [FDS boundary input validation](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/read.f90#L8290-L8300)
+and solid-phase chapter (§1.6.5).
 
 ---
 
-## 12.12 Limitations and open issues
+## 12.12 Boundary-model domain and numerical qualification
 
-1. **Temperature-dependent emissivity derivative.** For a `RadiativeBC` whose
-   own `ε` is a function of $T_s$, the radiative Newton derivative omits the
-   $F\,(d\varepsilon/dT)\,\sigma\,(T_\infty^4-T_s^4)$ term (§12.2.4). The
-   converged $T_s$ is unbiased, but convergence can become sub-quadratic for
-   strongly temperature-sensitive $\varepsilon(T_s)$. This does not affect
-   component-level $\varepsilon_j(T)$: the mixture $\varepsilon_{\text{eff}}$
-   is evaluated at the *cell* temperature and is a constant of the surface
-   Newton iteration, and the Jacobian differentiates the converged solve exactly.
+Mass films assume isobaric transport with one common diffusivity. Their
+conductance is explicit data, supplied as a constant or temperature law.
+A hydraulic resistance specifies which of Darcy velocity, mass flux or molar
+flux it relates to pressure drop. A single surface temperature represents
+LTE at the wall; incoming enthalpy uses the complete reservoir state.
 
-2. **Dirichlet thermal BC via penalty inside a combination.** A bare
-   `DirichletThermalBC` is exact (closed form, §12.3.6). Nested in a
-   `CombinedThermalBC` it uses a large conductance $h_{\text{large}}=10^8$ in the
-   Newton solve, and the face misses the prescribed temperature by
-   $q_{\text{cond}}/h_{\text{large}}$ ($4.4\times10^{-4}$ K at 44 kW·m⁻²). An
-   algebraic surface-temperature row would remove the miss and the conditioning
-   sensitivity of the penalty.
-
-3. **One radiative-flux member under in-depth radiation.** Under `BEER_LAMBERT`
-   only the first `RadiativeFluxBC` member of the `:top` condition feeds the beam,
-   and every member contributes zero to the surface balance, so a second
-   radiative-flux member is dropped silently (§12.3.5). Give the incident flux as a
-   single condition (a function of time can combine several sources).
-
-4. **Half-cell surface temperature.** The face temperature is the one-sided
-   extrapolation over the boundary half-cell; a volumetric consumer inside that
-   half-cell (a reaction zone, in-depth absorption) biases it at coarse resolution
-   (§12.3.2). Refine the near-surface mesh when $T_s$ is a target quantity.
-
-5. **View-factor meaning in 1D.** The `RadiativeBC` view factor $F$ is a scalar
-   surrogate for a 3D geometric quantity; in a strictly 1D model it is best read as
-   a tuning factor for partial enclosure rather than a rigorously computed exchange
-   factor.
-
-6. **Mass-transfer coefficient estimation.** The film coefficient $h_m$ for
-   `ConvectiveMassBC` / `DiffusiveMassBC` is supplied by the user, typically via
-   the heat–mass analogy $h_m\approx h_{\text{conv}}/(\rho_{\text{air}}
-   c_{p,\text{air}})$; there is no built-in correlation, so its accuracy depends on
-   the user's estimate of $h_{\text{conv}}$ and the flow regime.
-
-7. **Pressure-BC scope.** The three pressure BCs act only under Darcy–Fick
-   transport, i.e. when a condensed component is permeable (`has_darcy_flow`); on a
-   Fickian material they are accepted and contribute nothing. Their venting is
-   outflow-only: the ambient beyond the face carries none of the tracked gas species,
-   so an exterior pressure above the interior pressure draws no gas into the slab
-   (§9.5.3). The residual, the Jacobian and the saved-output diagnostics evaluate
-   the one function `outward_darcy_velocity` (§12.5).
+The local nonlinear solve requires a physical, nonsingular root. Its
+residual, correction and implicit derivative are qualified numerically;
+there is no global uniqueness claim for arbitrary constitutive laws.
+Failures report `TransportFailure`. Vacuum and closed channels use explicit
+continuations, and empirical blowing laws reject mixtures outside their
+stated composition domain. Refine the boundary half-cell when a reaction
+zone or in-depth absorption makes its temperature variation significant.
 
 ---
 
@@ -12047,8 +9633,9 @@ $$
 C_i\frac{dT_i}{dt}=S_{E,i}-\sum_{f\in\partial i}s_{i,f}A_f\Bigl[q_f+\sum_jF_{j,f}\bigl(h_j(T_f)-h_j(T_i)\bigr)\Bigr]+C_iS_{T,i}:
 $$
 
-the gas enthalpy enters only through the difference between the face temperature
-and the cell's. A mass flux carried at the cell's own temperature neither heats
+the gas enthalpy enters through its difference from the cell enthalpy. At an
+incoming boundary, use the specified incoming temperature and reservoir heat;
+an LTE film uses the equivalent converted wall-film representation (§9.9). A mass flux carried at the cell's own temperature neither heats
 nor cools it; gas that leaves through a hotter face takes the enthalpy difference
 with it. This is the semi-discrete form of the gas-advection term
 $-\sum_j c_{p,j}\,\mathbf J_j\cdot\nabla T$ (§7.4), written as a face flux so that
@@ -12118,11 +9705,9 @@ kernels run; the assembler zeroes `M_flux`; `T_face` and `gradient` are overwrit
 `src/Integration/setup.jl`):
 
 1. `ReactionKernel`, when the material has reactions (§13.5.1).
-2. `GasTransportKernel{M}`, when gas can move: `M = FickTransport`, or
-   `DarcyFickTransport` when a condensed component is permeable; absent
-   (`NoGasTransport`) when the material has no gas component, or when no component
-   carries a gas-transfer coefficient and every mass condition is impermeable
-   (§13.7.2–§13.7.5).
+2. `GasTransportKernel{M}`, for mobile gas, with the declared `LumpedTransfer`
+   or `DustyGas`. Gas-bearing sealed materials still evaluate their EOS;
+   `NoGasTransport` is reserved for materials without gas components.
 3. `BeerLambertKernel`, under `BEER_LAMBERT` (§13.5.2).
 4. `ConductionKernel`, always (§13.7.1).
 5. `ThermalBoundaryKernel`, always (§13.7.5).
@@ -12136,10 +9721,9 @@ at the trial temperature, the history sources and the velocity-row residuals,
 §11.3), `add_sources!` (§13.5.3), and `assemble_rows!` (§13.3). The order matters in
 three places:
 
-- **Gas transport before the thermal boundary.** The surface balance of a boundary
-  face reads the face's outward mass fluxes, which feed the blowing models of its
-  convective conditions (§12.3.3), and adds the enthalpy they carry at the surface
-  temperature (§13.7.5).
+- **Coupled boundary exchange.** The thermal boundary kernel solves and stores
+  boundary species and carried-energy fluxes together. Interior gas transport
+  uses its own shared face state.
 - **The relative fluxes after the thermal boundary.** The surface balance and its
   blowing models see the gas-transport fluxes alone.
 - **The closure after the kernels and before the external sources.** The strain
@@ -12199,7 +9783,7 @@ $$
 $$
 
 with $q_\mathrm{inc}$ the incident flux of the `RadiativeFluxBC`, $a$ its explicit
-absorptivity or else the effective absorptivity of the first live cell (§12.2.6),
+absorptivity or else the effective absorptivity of the first live cell (§5.8.2),
 $\alpha_i$ the cell's absorption coefficient at the positive-part concentrations
 and $\Delta_i$ its thickness (the sum of its two floored centre-to-face distances).
 The cell absorbs
@@ -12260,7 +9844,7 @@ Four face temperatures appear, each where it is consistent:
 | Where | Face temperature |
 |---|---|
 | enthalpy carried by the gas fluxes, interior face | $T_f=(d_nT_o+d_oT_n)/(d_o+d_n)$, the linear interpolation to the face at the cell temperatures (exact for a linear profile) |
-| inside the Fickian flux | $\bar T_f=\tfrac12(\tilde T_o+\tilde T_n)$, the mean of the trial temperatures (§13.7.2) |
+| inside the lumped wall flux | $\bar T_f=\tfrac12(\tilde T_o+\tilde T_n)$, the mean of the trial temperatures (§13.7.2) |
 | boundary face | the surface temperature $T_s$ of the condition: closed form or surface Newton (§13.7.5) |
 | relative fluxes | $\tilde T_f$, the upwind van Albada reconstruction on the stencil of the mass fluxes it carries (§11.6.2) |
 
@@ -12301,7 +9885,7 @@ manufactured solution with a rotated tensor on a distorted mesh.
 
 ---
 
-## 13.7 Conductive, Gas-Diffusive, and Darcy–Fick Face Fluxes
+## 13.7 Conductive, Gas-Diffusive, and gas Face Fluxes
 
 This section states the discrete face fluxes. The physical derivations are in §7
 (conduction, the gas enthalpy flux), §9 (gas transport and pressure) and §12
@@ -12342,117 +9926,56 @@ gradients (§13.6.4), so a linear temperature field's flux is exact on any mesh 
 neighbours span every direction. On a line $\mathbf d$ is along the normal, the cross
 part vanishes identically and is not evaluated.
 
-### 13.7.2 Gas-diffusive flux
+### 13.7.2 Gas wall and molecular flux
 
-For every gas component $j$, `GasTransportKernel` writes on the interior faces
-between two live cells the volume-fraction-gradient flux
+The pore state $p_j=\xi_jRT/(M_j\phi)$ supplies the transported potential.
+A lumped half path gives $n_j^D=\Lambda(p_{j,L}-p_{j,R})/(RT_{path}d)$.
+Dusty-gas paths solve the coupled friction matrix using a consistent mean
+face pressure and collective donor composition (§9.4–9.5). The conditioned
+rank-one evaluator is linear in gas-species count and has explicit vacuum
+and pure-gas limits.
 
-$$
-J_{j,f}=-\lambda_f\,\frac{\xi_{j,n}\tilde T_n-\xi_{j,o}\tilde T_o}{\bar T_f\,(d_o+d_n)},\qquad
-\bar T_f=\tfrac12(\tilde T_o+\tilde T_n),
-$$
+---
 
-the discrete form of $J=-(\lambda/T)\,\partial(\xi T)/\partial z$ (§9.1), with
-$\lambda_f$ the guarded distance-weighted harmonic mean of the cells' gas-transfer
-coefficients ($\eta=10^{-20}$ m² s⁻¹) and $\lambda_i$ the effective coefficient at
-the positive-part concentrations and the trial temperature. The product $\xi T$ is
-proportional to the partial pressure, and
-$\xi_n\tilde T_n-\xi_o\tilde T_o=\bar T_f(\xi_n-\xi_o)+\bar\xi_f(\tilde T_n-\tilde T_o)$
-shows the ordinary and the thermal-diffusion parts in one expression. The harmonic
-mean is taken of $\lambda$ alone, the density dependence being carried by the
-concentrations; every gas component shares $\lambda_f$ (§9.2). The concentrations
-are $m/\tilde V$ as stored, so a negative trial concentration is transported as it
-is; the positive part enters only the properties.
+### 13.7.3 Total-flux interface matching
 
-### 13.7.3 Darcy–Fick combined flux
+Each half path adds Darcy flux $v_D p_{j,up}/(RT_{up})$. The interface partial
+pressures satisfy equality of total species flux through the two halves.
+This preserves a wall-only half connected to a Darcy-only half. The lumped
+and pure-gas systems have a positive analytic quadratic solution; general
+dusty-gas systems use a qualified local root and its first implicit derivative.
+Pressure increments retain resolved gradients near equilibrium without
+subtracting reconstructed absolute pressures. Chapter 9 gives degeneracies,
+donor assumptions and root acceptance criteria.
 
-Under `DarcyFickTransport` the flux adds a first-order upwind advective part,
+---
 
-$$
-J_{j,f}=J^\text{diff}_{j,f}+v_f\,\frac{\xi_{j,\text{up}}}{\varphi_f},\qquad
-v_f=-\mathrm{mob}_f\,\frac{P_n-P_o}{d_o+d_n},\qquad
-\xi_{j,\text{up}}=\begin{cases}\xi_{j,o},&v_f\ge0\\ \xi_{j,n},&v_f<0\end{cases}
-$$
+### 13.7.4 Carried enthalpy
 
-with $\mathrm{mob}_f$ the guarded distance-weighted harmonic mean of the cell mobilities
-$\mathrm{mob}_i=\kappa_i/\mu_i$ (guard $\eta_m=10^{-30}$ m² Pa⁻¹ s⁻¹, `MOBILITY_GUARD`, far below the
-mobility of any permeable solid), and $\varphi_f=\tfrac12(\varphi_o+\varphi_n)$ the
-mean of the cells' porosities, each smoothly floored at $10^{-12}$. The cell pressure
-$P_i$ is the ideal-gas closure at the positive-part concentrations, the trial
-temperature and the floored porosity (§9.4); the mobility is the effective
-permeability over the gas viscosity, the viscosity smoothly floored at
-$10^{-12}$ Pa s (§9.5). $\xi$ is per bulk volume and $v_f$ superficial, so the
-advected scalar is the intrinsic density $\xi/\varphi$. Every gas component shares
-$v_f$. The upwind choice is monotone and first-order; its numerical diffusion is
-the subject of §18.7.3.
+The single transmitted molar vector becomes $F_{j,f}=M_j n_{j,f}$ and carries
+$\sum_jF_{j,f}h_j(T_f)$, where
+$T_f=(d_RT_L+d_LT_R)/(d_L+d_R)$. Both species and energy rows scatter this
+shared face value conservatively. Temperature and enthalpy formulations
+use the same fluxes.
 
-### 13.7.4 The enthalpy carried by the gas fluxes
-
-On each interior face the gas-transport kernel adds to the face energy flux the
-sensible enthalpy of the same mass fluxes the mass rows carry,
-
-$$
-F_f\mathrel{+}=\sum_j J_{j,f}\,h_j(T_f),\qquad T_f=\frac{d_nT_o+d_oT_n}{d_o+d_n},
-$$
-
-which gives the energy row its difference form (§13.3.4). The energy-row test
-(`test/outputs/test_energy_ledger.jl`) checks every face energy flux against
-conduction plus the carried enthalpy at the face temperature to $10^{-12}$ relative,
-in both energy forms, under Fickian and Darcy–Fick transport, on uniform and
-stretched meshes (§16.5.5).
+---
 
 ### 13.7.5 Boundary faces
 
-**Mass patches.** The gas-transport kernel holds one patch of mass conditions per
-tag and applies it at `live_face`. With $i$ the boundary cell and $d$ its
-centre-to-face distance,
+`ThermalBoundaryKernel` assembles the complete boundary exchange. Named
+prescribed fluxes, reservoir transport, external films and hydraulic
+resistances provide the species closure. Outward species carry surface
+enthalpy; inward species carry their specified incoming enthalpy.
+For an LTE wall film, $q_r=q_s+H_r-H_s$ converts the wall heat to the
+reservoir control surface and $E_{out}=H_r-q_r$. For adiabatic or prescribed
+heat, donor enthalpy and imposed heat enter directly (§9.9).
 
-$$
-F_{j,f}\mathrel{+}=\frac{v_\text{out}}{\varphi_i}\,\xi_{j,i}-J_{\mathrm{bc},j},
-$$
+The mass and thermal residuals are coupled only when their constitutive
+closures require it. The solve reports its residual and iterations, and
+implicit differentiation includes all local couplings. The boundary state
+is a diagnostic, not a hidden solution-history input.
 
-where $J_{\mathrm{bc},j}$ is the condition's flux into the domain (`mass_bc_flux`,
-evaluated with the cell's $\lambda_i\rho_i$ and $\rho_i$, the mixture density at the
-positive-part concentrations and the trial temperature; §12.4), negated here to the
-outward normal, and $v_\text{out}$ the outward Darcy velocity the pressure condition
-drives (Darcy–Fick transport only; `outward_darcy_velocity`):
-$\mathrm{mob}_i(P_i-P_\mathrm{bc})/d$ for `DirichletPressureBC`, $-\mathrm{mob}_i\,\partial P/\partial n$ for
-`NeumannPressureBC`, $h_P(P_i-P_\mathrm{ext})\,\mathrm{mob}_i/(\mathrm{mob}_i+\eta_m)$ for
-`ConvectivePressureBC`, zero for every other condition, the sum over the members of
-a `CombinedMassBC`. Only outflow is taken (inflow carries none of the tracked gases),
-read from the value of the velocity.
-
-**Thermal patches.** `ThermalBoundaryKernel` holds one patch per tag, applied at
-`live_face`, and writes the outward energy flux $q$ and the face temperature $T_s$:
-
-| Condition | $q$ (along the outward normal) | $T_s$ |
-|---|---|---|
-| `AdiabaticBC` | $0$ | $T_i$ |
-| `HeatFluxBC` | $-q_\mathrm{in}(t)$ | $T_i+q_\mathrm{in}d/k_i$ |
-| `DirichletThermalBC` | $k_i\,(T_i-T_\mathrm{bc})/d$ | $T_\mathrm{bc}$ |
-| every other condition | $-k_i\,(T_s-\tilde T_i)/d$ at the root of $q_\mathrm{bc}(T_s)=k_i(T_s-\tilde T_i)/d$ | the root |
-
-The last row is the surface energy balance, solved by the Newton iteration of
-`solve_boundary_temperature!` started from the cell's trial temperature, with the
-condition evaluated at the trial temperature of the iterate so that the balance has
-a root at any trial state; the face's outward gas mass fluxes feed the blowing
-models of its convective members and the cell's emissivity and absorptivity its
-radiative members (§12.2). Then
-
-$$
-F_f\mathrel{+}=q+\sum_jF_{j,f}\,h_j(T_s):
-$$
-
-the gas leaves at the surface temperature, and the surface balance itself keeps no
-gas-enthalpy term (§7.4.3). The kernel stores $T_s$ in `T_face`; the solution's
-`surface_T` and the boundary-flux series read it. Because the relative fluxes are
-added after this kernel runs, the blowing models and the carried term see the
-gas-transport fluxes alone.
-
-On a mesh of more than one dimension the conductivity is a tensor, the conducted
-flux gains the tangential term of §13.7.1 with the cell's least-squares gradient,
-and a face between a live cell and a dead one is a boundary face of the live cell
-under the exposed tag's condition (element death, §14.5).
+---
 
 ### 13.7.6 Solid and liquid components carry no transport flux
 
@@ -12646,8 +10169,8 @@ order:
 6. per cell, the trial temperature $\tilde T_i$, the floored heat-capacity sum $C_i$,
    the sensible enthalpies $h_j(T_i)$, the floored conductivity $k_i$, the surface
    emissivity $\varepsilon_i$ and absorptivity $a_i$, the pore-gas properties the gas
-   transport needs ($\lambda_i$; under Darcy–Fick also the floored porosity
-   $\varphi_i$, the pressure $P_i$ and the mobility $\kappa_i/\mu_i$), and under in-depth
+   transport needs (the wall coefficients, molecular resistance, porosity,
+   partial pressures and mobility), and under in-depth
    radiation the absorption coefficient $\alpha_i$.
 
 The node corrections $c_n$ are written next, by the closure (`correction!`, §11.7).
@@ -12655,33 +10178,28 @@ Which value of each field a kernel reads is fixed:
 
 | Field | Read by |
 |---|---|
-| $\xi_{j,i}=m_{j,i}/\tilde V_i$ (signed, as stored) | reactions, gas fluxes, mass conditions, relative fluxes |
-| $\xi^+_{j,i}$ | every property: $k$, $\varepsilon$, $a$, $\alpha$, $\lambda$, mixture density, porosity, pressure, permeability |
-| $\tilde T_i$ | reactions, properties, the Fickian flux, pressure, the surface balance, the strain rate |
+| $\xi_{j,i}=m_{j,i}/\tilde V_i$ (signed, as stored) | reactions and relative solid-motion fluxes |
+| $\xi^+_{j,i}$ | properties, pore pressure, species transport and reservoir exchange |
+| $\tilde T_i$ | reactions, properties, the lumped wall flux, pressure, the surface balance, the strain rate |
 | $T_i$ | the conductive difference, the sensible enthalpies, the face temperatures $T_f$ |
 
-### 13.10.3 Smooth guards of trial states
+### 13.10.3 Trial extensions and physical admissibility
 
-An implicit or Rosenbrock stage evaluates the residual at trial states that no error
-test has judged yet: a negative mass, a temperature far outside any property law, an
-inverted cell. Every quantity the residual evaluates is therefore finite, with a
-finite derivative, at any real state, so the colored Jacobian is finite there too;
-and each guard is exactly the identity on the physical states the tolerances can
-distinguish. The admissibility part of the integrator's domain test reads the
-unguarded quantities (§15.5.4). The three guards (`src/States/guards.jl`) are $C^1$:
+The shared C¹ guards are defined in `src/Materials/guards.jl`:
+`smooth_clamp` for trial temperature, `positive_part` for inventories, and
+`smooth_floor` for positive divisors. The porosity divisor floor is $10^{-12}$
+and becomes the identity above twice that value. Such extensions let
+intermediate integrator states be evaluated within their finite envelope;
+they do not make a closed pore or an invalid constitutive root admissible.
 
-| Guard | Definition | Uses |
-|---|---|---|
-| `smooth_clamp(x, lo, hi, w)` | `lo` below `lo`, `hi` above `hi`, $x$ on $[lo+w,\,hi-w]$, joins $lo+w\,t^2(2-t)$ with $t=(x-lo)/w$ (and mirrored at $hi$) | the trial temperature $\tilde T=\mathrm{smooth\_clamp}(T,\,200\text{ K},\,3000\text{ K},\,1\text{ K})$ (`trial_temperature`) |
-| `positive_part(m, δ)` | $0$ at and below $0$, $m$ at and above $\delta$, $m\,(3t^2-2t^3)$ with $t=m/\delta$ | $\xi^+$; the caloric extension; the inventory bound of the relative fluxes |
-| `smooth_floor(x, f)` | $f$ at and below $f$, $x$ at and above $2f$, $f\,(1+t^2(2-t))$ with $t=x/f-1$ | volumes, distances, $C_i$, $k_i$, $\varphi_i$, the gas viscosity |
+Condensed caloric scales retain their reference-mass definition. The gas
+transport positive-part scale is recomputed from current temperature and
+pore volume, sharing the pressure-error budget among gas species. Its total
+pressure bias is below 0.26 times that budget (§9.10). Accepted physical states and post-event states are checked
+using raw quantities and a mass/thermal/geometry uncertainty margin. Local
+transport failures are diagnosed explicitly (Chapter 9).
 
-The scale of the positive part is the cell's mass absolute tolerance,
-$\delta_i=\texttt{reltol}\cdot\varepsilon_m\cdot m^s_i(0)$ (§13.10.5), so a mass the
-integrator cannot distinguish from zero gets no property weight and a mass it can is
-taken as it is. The trial clamp keeps $e^{-E/R\tilde T}$ finite with a finite
-derivative at zero and negative trial temperatures and is the temperature itself on
-every physical state.
+---
 
 ### 13.10.4 The energy state and the caloric extension
 
@@ -12714,26 +10232,23 @@ root is corrected by one Newton step per nesting level, which carries the
 implicit-function derivatives exactly. A non-finite inventory has temperature `NaN`,
 so the residual of such a trial state is `NaN` and the integrator rejects the step.
 
-### 13.10.5 Reference data and per-row tolerances
+### 13.10.5 Reference scales and pressure-aware error control
 
-`CellReference` (`src/States/tolerances.jl`) holds the constants fixed at setup, per
-cell: the initial volume $V_i(0)$; the reference condensed mass $m^s_i(0)$ (the
-cell's initial solid and liquid mass, or for a cell that starts with none its total
-initial mass, or $1$ kg m⁻³ times its volume), which is the deactivation reference
-(§14.3.2) and the scale of the mass tolerances; the positive-part scale $\delta_i$;
-the volume floor $10^{-8}V_i(0)$; the capacity floor $C_{\mathrm{floor},i}$; the
-reference node positions; the initial thicknesses $\Delta z_i(0)$; and $A_0$.
+`CellReference` holds initial volume, condensed mass, geometry, capacity
+floors and the pressure-error budget. Condensed-mass and geometry absolute
+tolerances retain their reference scales. Gas-row reference tolerances are
+$\phi_i(0)V_i(0)M_jp_{tol}/(N_gRT_i(0))$.
 
-The per-row absolute tolerances (`abstol_vector`, §15.5.6) follow the same scales:
-$\texttt{reltol}\,\varepsilon_m\,m^s_i(0)$ on every mass row of cell $i$ (never a
-per-component inventory, which is zero for a product) and on its history pair;
-`abstol` [K] on a temperature row; $\varepsilon_m\,m^s_i(0)\,c_{p,\mathrm{ref}}\,\texttt{abstol}$
-on an enthalpy row, so that a cell at the deactivation threshold resolves its
-temperature to `abstol` as the temperature form does; on a moving mesh
-$\texttt{reltol}\,\varepsilon_m\,\Delta z_n$ on node $n$'s position ($\Delta z_n$ the
-smallest initial thickness of the cells around it) and that over the first step on
-its velocity; $\texttt{reltol}$ times the largest incident intensity over the time
-span on a face intensity; $\texttt{reltol}\,A_0$ on the area.
+The internal error norm also reconstructs each unscaled local error at the
+proposed state and differentiates $p_j=m_jRT/(M_jW)$, with
+$W=V-\sum_{condensed}m_j/\rho_{i,j}(T)$. Temperature, condensed masses,
+positions, cross section and caloric inversion therefore contribute to the
+pressure-error estimate. Each species shares the absolute budget, and the
+sum of absolute partial-pressure errors is controlled by the total budget.
+This is a local estimate; accumulated global error is qualified against
+tighter trajectories. No residual evaluation mutates solver tolerances.
+
+---
 
 ### 13.10.6 Example
 
@@ -12744,9 +10259,11 @@ using Pyrolysis
 using Pyrolysis.Internal: residual!, buffers, mass_index, energy_index, position_index,
     velocity_index, state_length, is_differential
 
-solid = SolidComponent(:solid, ρ = 1190.0, c = 1420.0, k = 0.19, λ = 1e-6)
-gas = GaseousComponent(:gas, M = 0.1, c = 1500.0, k = 0.02, λ = 1e-5)
+solid = SolidComponent(:solid, ρ = 1190.0, φ=.3, c = 1420.0, k = 0.19, λ = 1e-6)
+gas = GaseousComponent(:gas, M = 0.1, c = 1500.0, k = 0.02,)
 material = Material(
+    gas_transport=LumpedTransfer(endpoint=LumpedEndpoint(λ=1e-6,κ=0.,max_skeletal_occupancy=.001)),
+
     name = :slab,
     components = (solid, gas),
     reactions = (Reaction(:gasification, 1 => 2, A = 8.5e12, E = 188e3, h = 8.7e5),),
@@ -12759,7 +10276,7 @@ problem = PyrolysisProblem(
             top = HeatFluxBC(50e3) + RadiativeBC(ε = 0.9, T_inf = 300.0),
             bottom = AdiabaticBC(),
         ),
-        mass = (top = DiffusiveMassBC(), bottom = ImpermeableBC()),
+        mass = (top = AmbientGasBC(GasReservoir(P=0., T=300.)), bottom = ImpermeableBC()),
     ),
     T_initial = z -> 300.0 + 2e5 * z,      # 300 K at the back, 700 K at the surface
     ξ_initial = [z -> 1190.0, z -> 0.0],
@@ -12785,8 +10302,8 @@ prints
 102 rows, 21 algebraic
 (1, 2, 3, 4, 5, 6)
 (0.11900000000000005, 0.00010000000000000005, 1190.0, 690.0, 168.98000000000008)
-(-38157.35851219801, 700.041410134789)
-(-29.60960700970245, -0.0059319424191924845)
+(-38157.35850998746, 700.0414101347891)
+(-29.609607022784147, -0.0059319424191924845)
 ```
 
 The state has $21\times2+20\times3=102$ rows: a position and a velocity per node and
@@ -12804,85 +10321,43 @@ at $59.3$ kg m⁻³ s⁻¹ times its volume.
 
 ## 13.11 Comparison to Gpyro and ThermaKin2Ds Discretizations
 
-We map the reference codes' notation onto the nomenclature of §2 on first use, then
-contrast the discretization choices.
+### 13.11.1 Gpyro
 
-### 13.11.1 Gpyro (Lautenberger & Fernandez-Pello)
+The documented 1D Gpyro method uses fully implicit control-volume balances,
+with changing cell thicknesses, harmonic interface transport coefficients,
+source linearization and tridiagonal solves in an iterative coupled solution
+(GP §§4.1, 6). Boundary nodes lie on half-cell boundaries.
 
-Gpyro is a 1D (optionally pseudo-2D) generalized condensed-phase pyrolysis solver
-using a **Patankar-style finite-volume** discretization (control volumes about
-cell-centred nodes). Mapping its symbols to ours: Gpyro's pre-exponential
-$Z\to A_i$, permeability $K\to\kappa$, kinematic viscosity $\nu$ (in
-$\dot m''=-(K/\nu)(\partial P/\partial z-g\rho_g)$), conversion $\alpha_\text{conv}$,
-and the overbarred mixture density $\bar\rho$.
+GP's convection–diffusion scheme is **selected by an input option**; central,
+upwind, hybrid, power-law and exponential forms have different Péclet-number
+coefficient functions (GP Table 2; 0.8200 `GET_A`/`GET_A_SINGLE`). It does
+not automatically choose among all schemes as the Péclet number changes.
+Pyrolysis.jl uses first-order upwind Darcy advection, a separate diffusive
+law and distance-weighted harmonic face coefficients. Its semi-discrete
+system is advanced with a stiff integrator and a coupled colored Jacobian.
+Those shared finite-volume features do not make the diffusion laws or time
+errors identical (§9.10).
 
-- **Conservation form.** Gpyro writes integral control-volume balances of
-  $\bar\rho\Delta z$, $\bar\rho Y_i\Delta z$, gas mass and energy on volumes that
-  deform with the solid. Pyrolysis.jl integrates extensive cell inventories too: the
-  component masses are the states and every flux is scattered antisymmetrically, so
-  mass telescopes exactly (§13.3.3). The energy state is the temperature (or the
-  sensible-enthalpy inventory), every component is stored in $C_i$, and the gas
-  enthalpy is a face flux (§13.3.4, §13.7.4). Both telescope to the same
-  boundary-flux balance.
-- **Interface interpolation.** Patankar's hallmark is the **harmonic interface
-  conductivity**, justified by flux continuity across a control-volume face; it is
-  the resistance-in-series mean of §13.7.1–§13.7.3, which Pyrolysis.jl
-  distance-weights for non-uniform meshes and guards smoothly so that it stays
-  differentiable as a coefficient vanishes.
-- **Convection scheme.** Patankar/Gpyro selects the face scheme by the cell
-  **Péclet number** (central below about 2, upwind or power-law above). Pyrolysis.jl
-  does not switch on the Péclet number: diffusion is always the
-  volume-fraction-gradient flux and Darcy advection is first-order upwind; keeping
-  the cell Péclet number moderate is left to the resolution (§18.7.3).
-- **Linear solver.** Gpyro is fully implicit (backward Euler) with Patankar
-  linearization solved by **TDMA** (the Thomas algorithm). Pyrolysis.jl assembles
-  the semi-discrete mass-matrix system and hands it to a stiff integrator, `Rodas5P`
-  by default, with the colored sparse Jacobian and a sparse LU factorization
-  (`StructuredKLU`, §15).
-- **Pressure and Darcy flow.** Gpyro's Darcian flux includes buoyancy; Pyrolysis.jl's
-  $v_g=-(\kappa/\mu)\,\partial P/\partial z$ (§13.7.3) omits the gravity term
-  (through-thickness 1D, gravity negligible) and uses the dynamic viscosity $\mu$.
+### 13.11.2 ThermaKin2Ds
 
-### 13.11.2 ThermaKin2Ds (Stoliarov et al.)
+TK §3 calls its spatial elements **finite volumes**, carrying component
+masses and temperature. It uses Crank–Nicolson integration in the primary
+coordinate and explicit updates in the transverse coordinate, with changing
+element sizes and conservative size adjustment. It should not be contrasted
+with Pyrolysis.jl as a fixed-grid finite-difference method with no volume
+inventory conservation.
 
-ThermaKin is a 1D (with 2D extensions) finite-difference pyrolysis solver. Mapping
-its symbols: the stoichiometric coefficient $\theta_i^j\to\nu_{i,j}$ (overload A2:
-ThermaKin's $\theta$ is stoichiometry, ours is the strain rate). ThermaKin publishes
-its heats of reaction with $h>0$ exothermic, the opposite of the storage convention
-here; Gpyro and FDS use the same sign as Pyrolysis.jl (§6.9.2).
-
-- **Gas transport.** The volume-fraction-gradient flux
-  $J=-(\lambda/T)\,\partial(\xi T)/\partial z$ (§13.7.2) is ThermaKin's
-  $J=-\rho_g\lambda\,\partial(\xi_g/\rho_g)/\partial x$ with the ideal-gas density.
-  For a rigid matrix ThermaKin recovers a Boyle's-law Darcy form; Pyrolysis.jl
-  provides the explicit Darcy–Fick path (§13.7.3) for that regime.
-- **Convective energy term.** ThermaKin's energy equation (its Eq. 17) carries the gas
-  sensible enthalpy as $c_g\,(J_g\cdot\partial T/\partial x)$ and stores every
-  component in the heat capacity. Pyrolysis.jl stores every component in $C_i$ and
-  carries the gas enthalpy as the face flux $\sum_jJ_{j,f}h_j(T_f)$, the temperature
-  row subtracting $\sum_jh_j(T_i)\dot M_{j,i}$: the conservative face form of the same
-  term (§13.3.4).
-- **Time discretization.** ThermaKin uses Crank–Nicolson in the through-thickness
-  direction and explicit updates in the transverse directions, with second-order
-  finite differences on a structured grid. Pyrolysis.jl is finite-volume (extensive
-  rows, antisymmetric scatter) and integrates in time with adaptive stiff methods
-  (§15).
-- **Moving mesh.** ThermaKin adjusts its mesh around a single reference point as the
-  material deforms; Pyrolysis.jl moves the node positions as states with the solid
-  velocity plus a correction (§11), and represents lateral shrinkage by the
-  cross-section rows (§10).
-
-The shared lineage (harmonic interface averaging, the volume-fraction-gradient gas
-flux, every component stored in the heat capacity) is intentional: Pyrolysis.jl
-reproduces the ThermaKin and Gpyro physics in a type-stable, allocation-free assembly
-that automatic differentiation passes through, which is what the colored Jacobian
-needs.
+Pyrolysis.jl carries extensive mass states, optional enthalpy states, and
+the moving geometry in one mass-matrix system. Its source code establishes
+these choices; TK's manual establishes its own method. Neither description
+alone establishes relative accuracy, computational cost, or stability on a
+particular ignition transient.
 
 ---
 
 ## 13.12 Limitations and Open Issues
 
-1. **First-order Darcy–Fick advection.** The pressure-driven advective face flux is
+1. **First-order gas advection.** The pressure-driven advective face flux is
    first-order upwind (§13.7.3); the second-order van Albada reconstruction exists
    only for the relative fluxes of a corrected moving mesh (§11.6). Sharp
    pressure-driven composition fronts are smeared at first order unless the mesh is
@@ -13451,7 +10926,7 @@ rows and checks the result:
    §15.4); a velocity row left above round-off returns `:inconsistent`;
 3. admissibility (`inadmissible`, §15.5.4) with every live cell, the receiver
    included, held to its own mass tolerances, which are those the domain test
-   applies to every later proposal, and under Darcy–Fick transport a porosity in
+   applies to every later proposal, and under gas transport a porosity in
    $[0,1]$ within the skeletal volume of the mass tolerances; a failure returns
    `:inadmissible`.
 
@@ -13623,9 +11098,11 @@ and convection at the top and an adiabatic back:
 ```julia
 using Pyrolysis
 
-solid = SolidComponent(:solid, ρ = 1190.0, c = 1420.0, k = 0.21, ε = 0.86, λ = 1e-6)
-gas = GaseousComponent(:gas, M = 0.1, c = 1500.0, k = 0.02, λ = 1e-5)
+solid = SolidComponent(:solid, ρ = 1190.0, φ=.3, c = 1420.0, k = 0.21, ε = 0.86, λ = 1e-6)
+gas = GaseousComponent(:gas, M = 0.1, c = 1500.0, k = 0.02,)
 material = Material(
+    gas_transport=LumpedTransfer(endpoint=LumpedEndpoint(λ=1e-6,κ=0.,max_skeletal_occupancy=.001)),
+
     name = :slab,
     components = (solid, gas),
     reactions = (Reaction(:pyrolysis, 1 => 2, A = 8.5e12, E = 188e3, h = 870e3),),
@@ -13639,7 +11116,7 @@ problem = PyrolysisProblem(
                   ConvectiveBC(h = 10.0, T_inf = 300.0),
             bottom = AdiabaticBC(),
         ),
-        mass = (top = DiffusiveMassBC(0.05), bottom = ImpermeableBC()),
+        mass = (top = AmbientGasBC(GasReservoir(P=0., T=300.)), bottom = ImpermeableBC()),
     ),
     tspan = (0.0, 80.0),
     output_times = collect(0.0:10.0:80.0),
@@ -13706,42 +11183,26 @@ The deactivation is coupled to the time integration only through its callbacks
 
 ## 14.8 Comparison to ThermaKin2Ds, Gpyro, and FDS
 
-The reference codes for condensed-phase pyrolysis take different stances on how
-to represent a receding surface. Mapping their notation to ours on first use:
+The reference sources establish changing grids, but do not establish a common
+cell-removal or event-transfer algorithm across the codes.
 
-- **ThermaKin2Ds** (Stoliarov–Lyon) represents volume change by a dynamic-mesh
-  adjustment driven by the deformation source
-  $\int(1/\rho)(\partial\rho/\partial t)\,dx$ about a single moving reference
-  point, rather than by a topology change. The Pyrolysis.jl equivalent of that
-  motion is the moving mesh of §11, whose balance rows move the nodes with the
-  solid. What Pyrolysis.jl adds is the deactivation of a cell once its condensed
-  mass falls below $\varepsilon_m$ of its initial value, with its inventories
-  transferred conservatively to the cell beneath, and the correction that lets a
-  vanishing layer leave in one event.
-- **Gpyro** (Lautenberger–Fernandez-Pello) uses a control-volume mesh whose
-  thicknesses shrink as the solid is consumed, the front-most control volume
-  allowed to vanish. Its "cell disappears" behaviour corresponds to
-  deactivation here; the enthalpy-conserving transfer of §14.3.3 is the careful
-  form of folding a vanishing control volume's energy into its neighbour, and
-  the pore rule keeps the receiver's porosity admissible when the intrinsic
-  densities depend on temperature.
-- **FDS** (McGrattan et al.) solves the solid phase on a through-thickness grid
-  whose surface-cell removal as the surface regresses is the analogue of the
-  top-down deactivation of a fixed mesh here (§14.4), with swelling and
-  shrinking applied through a density-ratio rule on the cell sizes. Pyrolysis.jl
-  folds the removed cell's sensible enthalpy into its interior neighbour and
-  writes the vented gas and its enthalpy to the event.
+- **ThermaKin2Ds:** TK §3 explicitly splits large elements and combines part
+  of a neighboring element into small elements, conserving species and energy.
+  Its reference plane is stationary. This is a remeshing operation, not
+  evidence that the mesh topology never changes.
+- **Gpyro:** GP §4.1 derives a changing-thickness control-volume system.
+  Shrinking thickness alone does not establish the same threshold, event
+  location, residual-inventory transfer or vent accounting as Pyrolysis.jl.
+  Original Gpyro and V2 require separate implementation checks for burnout.
+- **FDS:** FDS 6.11.0 `wall.f90` detects cells approaching zero thickness,
+  remeshes affected layers and handles complete disappearance of a wall.
+  This differs from our fixed state length and mass-based deactivation event.
 
-All four codes reconcile a numerical grid with a physically receding boundary,
-and all four remove resolution at the surface as material is consumed.
-Pyrolysis.jl's choices are a threshold on mass rather than thickness, a
-conservative transfer with every loss recorded, a state length and Jacobian
-pattern that never change, and an event located inside the step.
-
-> Note: the reference comparison here is drawn from the general published
-> descriptions of these codes, so the mapping above is at the level of modeling
-> strategy rather than equation-by-equation correspondence. The Pyrolysis.jl side
-> of every statement is grounded in the source as cited throughout this chapter.
+Pyrolysis.jl's documented behavior is specific: a condensed-mass threshold,
+located event, transfer of inventories to a receiver, recorded vent losses,
+and unchanged state dimension (§14.3). These claims are supported by
+`src/Deactivation/events.jl`; no claim is made that other codes implement
+the same bookkeeping or lack an equivalent conservation check.
 
 ---
 
@@ -14240,9 +11701,9 @@ controller's smallest factor, when
   (a non-positive volume); or a non-positive cross-section area. The test reads
   the raw state, never through a guard: the trial clamp keeps such a state
   evaluable, and this test keeps it from being accepted;
-- under Darcy–Fick transport a live cell's porosity
-  $1-\sum_j m_j/(\rho_{i,j}(T)V)$, read from the raw masses and volume, leaves
-  $[0,1]$ by more than the skeletal volume of its mass tolerances;
+- a gas-bearing live cell lacks resolved physical pore volume above twice the
+  trial divisor floor plus its mass/thermal/geometry uncertainty, violates its
+  current negative-gas-pressure budget, or leaves its declared matrix domain;
 - an algebraic row's scaled residual exceeds one (`constraint_residual`):
 
   $$
@@ -14306,7 +11767,8 @@ the deactivation threshold $\varepsilon_m$ (`threshold`), `reltol` and `abstol`:
 
 | Row | Absolute tolerance |
 |---|---|
-| mass of any component in cell $i$ | $\mathrm{rtol}\,\varepsilon_m\,m^{\rm s}_i(0)$, never a per-species inventory, which is zero for a product |
+| condensed component mass in cell $i$ | $\mathrm{rtol}\,\varepsilon_m\,m^{\rm s}_i(0)$, never a per-species inventory, which is zero for a product |
+| gas component mass in cell $i$ | $p_{tol}M_j\phi_i(0)V_i(0)/(N_gRT_i(0))$; supplemented by the proposed-state pressure norm |
 | temperature | `abstol` [K] |
 | enthalpy inventory | $\varepsilon_m\,m^{\rm s}_i(0)\,c_{p,\rm ref}\,$`abstol`, $c_{p,\rm ref}$ the cell's mass-weighted heat capacity at its initial temperature, so a cell at the threshold resolves its temperature to `abstol` as the temperature form does |
 | face intensity | $\mathrm{rtol}\,I_{\rm scale}$, $I_{\rm scale}$ the largest incident intensity over the solve window (at least 1 W m⁻²) |
@@ -14320,8 +11782,10 @@ the deactivation threshold $\varepsilon_m$ (`threshold`), `reltol` and `abstol`:
 
 The defaults are `reltol` $=10^{-6}$ and `abstol` $=10^{-8}$ K. A position error
 within its tolerance moves a cell's concentrations by the relative amount its
-mass tolerance allows. The same mass tolerance is the scale below which the
-state mapping's positive part and the caloric extension act (§13).
+mass tolerance allows. Condensed caloric regularization uses its reference-mass scale. Gas transport
+guards instead use current pore volume and temperature. The pressure norm
+propagates mass, thermal and geometric error through the proposed-state EOS;
+initial gas-row tolerances alone do not control evolving pressure (§13.10.5).
 
 ### 15.5.7 Problem-independent integrator types
 
@@ -14355,8 +11819,8 @@ configuration (`test/integration/test_policies.jl`). A problem with other
 material or boundary-condition types compiles only the Pyrolysis kernels, the
 state mapping, the colored Jacobian and the solution's reconstruction. The
 precompile workloads (`src/precompile.jl`) cache the integrator for the fixed
-and moving meshes under surface absorption and Beer–Lambert absorption, Fickian
-and Darcy–Fick transport, with and without deactivation, and the enthalpy form
+and moving meshes under surface absorption and Beer–Lambert absorption, lumped wall
+and gas transport, with and without deactivation, and the enthalpy form
 once.
 
 ---
@@ -14451,7 +11915,7 @@ a term added to a kernel enters the Jacobian with it. Three kinds of code inside
 the residual need care to keep that derivative correct and finite.
 
 - **Smooth guards.** Every trial-state guard is $C^1$ and exactly the identity
-  on the states the tolerances can distinguish (`src/States/guards.jl`): the
+  on the states the tolerances can distinguish (`src/Materials/guards.jl`): the
   trial temperature, the cell temperature smoothly clamped into the property
   bracket $[200,3000]$ K with 1 K transitions, which keeps $\exp(-E/RT)$ finite
   with a finite derivative at zero and negative trial temperatures; the
@@ -14686,9 +12150,11 @@ using Pyrolysis.Internal: jac_prototype, jacobian!, dense_jacobian, missing_entr
     compare_entries, state_length, is_differential
 using SparseArrays
 
-solid = SolidComponent(:solid, ρ = 1190.0, c = 1420.0, k = 0.21, ε = 0.86, α = 2.0, λ = 1e-6)
-gas = GaseousComponent(:gas, M = 0.1, c = 1500.0, k = 0.02, λ = 1e-5)
+solid = SolidComponent(:solid, ρ = 1190.0, φ=.3, c = 1420.0, k = 0.21, ε = 0.86, α = 2.0, λ = 1e-6)
+gas = GaseousComponent(:gas, M = 0.1, c = 1500.0, k = 0.02,)
 material = Material(
+    gas_transport=LumpedTransfer(endpoint=LumpedEndpoint(λ=1e-6,κ=0.,max_skeletal_occupancy=.001)),
+
     name = :slab,
     components = (solid, gas),
     reactions = (Reaction(:pyrolysis, 1 => 2, A = 8.5e12, E = 188e3, h = 870e3),),
@@ -14701,7 +12167,7 @@ problem = PyrolysisProblem(
             top = RadiativeFluxBC(flux = 100e3) + RadiativeBC(T_inf = 300.0),
             bottom = AdiabaticBC(),
         ),
-        mass = (top = DiffusiveMassBC(0.05), bottom = ImpermeableBC()),
+        mass = (top = AmbientGasBC(GasReservoir(P=0., T=300.)), bottom = ImpermeableBC()),
     ),
     T_initial = z -> 600.0 + 2e5 * z,
     tspan = (0.0, 10.0),
@@ -14742,76 +12208,40 @@ moving, deactivation  62 rows (13 algebraic), half-bandwidth 14, 21 colors, 0 mi
 
 ## 15.14 Comparison to ThermaKin2Ds, Gpyro, and FDS
 
-We map each reference code's notation to ours on first use.
-
 ### 15.14.1 Gpyro
 
-Gpyro (Lautenberger & Fernandez-Pello) solves the condensed phase by a
-**fully-implicit backward-Euler** time discretization with **Patankar-style
-linearization** of the source terms and a **tridiagonal (TDMA / Thomas)** linear
-solve, sweeping the coupled energy/species/gas/pressure equations to convergence
-each step. Mapping: Gpyro's volume fractions $X_\alpha$ are our $v_j$; its
-pre-exponential $Z$ is our $A_i$; its permeability $K$ is our $\kappa$; its
-volumetric reaction rate $\dot\omega'''$ is our $r$; its mixture average
-$\bar\rho$ corresponds to our $\rho=\sum_j\xi_j$.
+The documented 1D Gpyro formulation uses fully implicit time differences,
+linearized source terms and iterative equation solves with TDMA (GP §6;
+Gpyro 0.8200 `gpyro_pyro.f90`). Its condensed energy unknown is enthalpy,
+with temperature recovered from composition and enthalpy. Its mesh
+thicknesses evolve with mass and density.
 
-Contrasts with Pyrolysis.jl:
-
-- **Time scheme.** Gpyro is first-order backward Euler with an outer
-  source-linearization sweep. Pyrolysis.jl integrates the mass-matrix DAE with
-  an adaptive higher-order method, `Rodas5P` by default, with error control on
-  every row and the restart after an event part of the integrator's contract.
-- **Jacobian.** Gpyro never forms a global Jacobian; its Patankar linearization
-  produces a tridiagonal coefficient matrix per equation, and the coupling
-  between equations is handled by the outer iteration. Pyrolysis.jl forms the
-  full coupled Jacobian of every row with respect to every unknown, by colored
-  automatic differentiation, so cross-equation coupling is inside each stage
-  solve. The banded block structure of our pattern on a line is the multi-field
-  analogue of Gpyro's per-equation tridiagonal matrix.
-- **Mesh.** Gpyro uses fixed (or prescribed variable-$\Delta z$) control volumes;
-  Pyrolysis.jl moves the mesh with the solid and carries the node velocities as
-  algebraic unknowns, so the volume-change kinematics stay local rows.
+Pyrolysis.jl instead forms a coupled state Jacobian with colored forward-mode
+AD and uses an adaptive stiff integrator (`Rodas5P` by default in this
+checkout, `src/Integration/policy.jl`). The distinction describes these
+implementations; it does not establish that every Gpyro version lacks a
+Jacobian, or that a higher formal time order always gives a faster or more
+accurate solve. V2 has different species and thermal solver implementations.
 
 ### 15.14.2 ThermaKin2Ds
 
-ThermaKin2Ds (Stoliarov et al.) solves the 1D (and 2D) condensed phase with a
-**Crank–Nicolson** scheme in the primary (through-thickness, here $x$/our $z$)
-direction and explicit treatment in the transverse directions, on a
-**dynamically adjusted mesh**. Mapping: ThermaKin's stoichiometric coefficients
-$\theta_i^j$ are our $\nu_{i,j}$ (we reserve $\theta$ for strain rate, overload
-resolution A2); its component concentrations are our $\xi_j$.
-
-Contrasts:
-
-- **Time scheme.** Crank–Nicolson is second-order and A-stable but not L-stable,
-  so it can ring on the stiff Arrhenius transients at ignition; `Rodas5P`,
-  `KenCarp4` and `FBDF` are L-stable or stiffly accurate methods with embedded
-  error control.
-- **Energy convention.** ThermaKin (Eq. 17) carries the gas enthalpy by the
-  convective term $c_g(\mathbf J_g\cdot\partial T/\partial x)$ with every
-  component in the storage term. Pyrolysis.jl stores every component as well and
-  carries the gas enthalpy in flux form, as the sensible enthalpy the face mass
-  fluxes carry (§7). The heat-of-reaction sign differs in publication ($h>0$
-  exothermic in ThermaKin, endothermic in Gpyro and internally here) and is mapped
-  by overload resolution H1.
-- **Mesh.** ThermaKin's dynamic mesh adjustment is the closest analogue to the
-  moving mesh here; both track a receding surface. In Pyrolysis.jl the mesh
-  motion is part of the coupled system: the node positions and velocities are
-  unknowns, and the Jacobian carries their coupling to the physics exactly.
+TK §3 specifies Crank–Nicolson in the primary direction and explicit
+transverse integration, and states timestep criteria and element-size
+adjustment. This differs from our adaptive mass-matrix integration with
+geometry in the coupled state. Crank–Nicolson's linear stability properties
+alone do not demonstrate ringing in an actual ThermaKin ignition calculation;
+that would need a matched numerical study. No comparative ringing or
+solver-performance claim is made here.
 
 ### 15.14.3 FDS
 
-The FDS (McDermott et al.) solid-phase pyrolysis model integrates a 1D Fourier
-conduction equation with Arrhenius source terms; the surface boundary couples to
-the gas-phase CFD. FDS uses a node-based 1D solid grid and an implicit/explicit
-split appropriate to its multiphysics coupling. Pyrolysis.jl is a standalone
-condensed-phase solver: it does not solve a gas-phase flow field, but it carries
-multi-component effective properties, in-depth radiation, Darcy gas transport
-and a moving mesh with a variable cross section. FDS carries no in-depth gas, so
-its energy equation is the condensed-phase limit of ours; it shares the
-Arrhenius kinetic form. On the temporal and Jacobian axis the comparison is
-methodological (implicit conduction with explicit or implicit coupling) rather
-than a mapping of Jacobian internals.
+The FDS mathematical model's one-dimensional heat-transfer appendix
+describes Crank–Nicolson conduction. FDS 6.11.0 `wall.f90` includes solid
+substeps, reaction evaluation, coordinate updates and layer remeshing, coupled
+to the CFD calculation. Our standalone condensed-phase system instead
+integrates the supported mass, energy and geometric unknowns together.
+Different coupling, tolerances, outputs and timing boundaries must be
+accounted for before comparing computational cost (§18.1.3).
 
 ---
 
@@ -15008,9 +12438,10 @@ term** (the sensible enthalpy a reaction moves from its reactant to its
 products at the local temperature), and $Q_\mathrm{rad}$ the in-depth
 radiation the cells absorb (nonzero under `BEER_LAMBERT` only; under
 `SURFACE_ABSORPTION` the absorbed flux is part of the boundary condition's
-flux). At the exposed surface the gas leaves at the surface temperature $T_s$,
-so the carried term there is $\sum_j h_j(T_s)J_j$; the surface energy
-balance itself has no gas-enthalpy term (§7, §12.2).
+flux). At a boundary the signed donor sum $H_r$ uses the surface temperature
+for outflow and the specified incoming temperature for inflow. The boundary
+energy is $H_r-q_r$ with heat and enthalpy defined at the same control surface
+(§9.9).
 
 This is the law the energy ledger discretizes, and it is a balance of the
 conserved quantity: the change of composition at fixed temperature (the term
@@ -15253,8 +12684,8 @@ $H_\mathrm{live}-\int\dot H_\mathrm{in}\,dt$ is a linear invariant of the
 semi-discrete system, exactly as the mass ledger's. Carried as an extra state
 of a fixed-step solve, the ledger integral closes the inventory to round-off
 (at most $10^{-13}$ of the integrated rate in `test/outputs/test_energy_ledger.jl`,
-on a gasifying column whose integrated rate exceeds $10^5$ J, under Fickian and
-Darcy–Fick transport).
+on a gasifying column whose integrated rate exceeds $10^5$ J, under lumped wall and
+gas transport).
 
 **Temperature form.** $H_\mathrm{live}$ is a nonlinear function of the state,
 and the integrator advances $T$ and $m$, not $H$. The identity
@@ -15266,7 +12697,7 @@ $H_\mathrm{live}$ departs from the integral of the rate by the method's local
 error. The closure therefore **converges at the integrator's order**: in the
 same module test, with fixed steps of a fourth-order method halved three
 times, the defect falls at observed orders rising toward four (2.1, 2.5, 3.2
-under Fickian transport; 2.7, 3.3, 4.3 under Darcy–Fick), the rise being the
+under lumped wall transport; 2.7, 3.3, 4.3 under gas), the rise being the
 pre-asymptotic approach.
 
 ### 16.5.3 Per-step accumulation: the recorder
@@ -15350,7 +12781,7 @@ gas-enthalpy term on top of the enthalpy the face flux already carries, the
 ledger rate, read from the same contributions, would carry both and the audit
 would still close. The energy row is therefore checked term by term against
 an independent construction in `test/outputs/test_energy_ledger.jl`, in both
-energy forms, under Fickian and Darcy–Fick transport, on uniform and stretched
+energy forms, with wall and pressure-driven lumped transport, on uniform and stretched
 meshes: every face energy flux equals conduction (Fourier between cells with
 the distance-weighted harmonic-mean conductivity; the condition's flux
 conducted out of the cell on the boundary) plus the enthalpy its mass fluxes
@@ -15361,10 +12792,11 @@ more than 1 K, so an omission, a double count or enthalpy taken at the cell
 temperature would show; and every cell's energy row equals the sum of its
 conduction, carried, source and formation terms to $10^{-11}$ of their scale.
 Separately, `test/boundary_conditions/test_boundary_temperature.jl` asserts
-that under a prescribed flux the solved surface temperature and conducted
-flux are identical with and without a gas flux across the face: the surface
-balance carries no gas-enthalpy term. The exact-solution cases of §18 are the
-further, physical anchors.
+that under a prescribed heat flux the solved surface temperature and conducted
+flux are identical with and without gas flow. Independently,
+`test/kernels/test_gas_exchange.jl` checks incoming enthalpy, counterflow and
+the wall-film/control-surface conversion. The exact-solution cases of §18
+provide physical anchors.
 
 ---
 
@@ -15373,26 +12805,23 @@ further, physical anchors.
 On a live boundary face the ledger's term is
 
 $$
--F^E_f A_f = \Big(q_{\mathrm{in},f}-\sum_j F_{j,f}\,h_j(T_s)\Big)A_f ,
+-F^E_f A_f=(q_r-H_r)A_f.
 $$
 
-where $q_{\mathrm{in},f}=k\,(T_s-T_\mathrm{cell})/d$ is the heat conducted from the
-face into its cell at the surface temperature $T_s$ (§12.2). For a condition
-that goes through the surface energy balance, $T_s$ is the root of
+Here $H_r$ is the signed carried-enthalpy sum: outward species use $T_s$,
+inward species their prescribed incoming temperature. For an LTE thermal
+film, $q_r=q_s+H_r-H_s$ and $H_s=\sum_jJ_jh_j(T_s)$. Its surface temperature
+solves $q_s=k(T_s-T_{cell})/d$, jointly with the mass film and hydraulic
+condition when coupled. Thus the same total flux is $q_s-H_s$; adding either
+an extra incoming heating term or an outgoing enthalpy sink would double count
+energy. Adiabatic, prescribed-heat and prescribed-temperature boundaries use
+their heat directly with $H_r$. Blowing modifies the thermal-film heat and
+uses the signed species fluxes (§9.9).
 
-$$
-q_\mathrm{BC,applied}(T_s) = q_\mathrm{cond}(T_s),
-$$
-
-so the conducted flux **is** the applied flux of the condition at $T_s$: the
-absorbed incident radiation less the re-radiation and convective exchange for
-a `RadiativeFluxBC`-based condition, the prescribed $q(t)$ for a `HeatFluxBC`,
-the flux the prescribed temperature conducts for a `DirichletThermalBC`, zero
-for an `AdiabaticBC`. The surface balance carries no gas-enthalpy term: the gas
-leaving through the face takes its enthalpy at $T_s$ through the carried term
-of the face's energy flux. A blowing model (§12.3.3) lowers the convective
-coefficient at the face's outward mass flux; it changes $q_{\mathrm{in},f}$ and
-adds no enthalpy term.
+`get_boundary_exchange(sol, tag)` reports `heat` ($q_r$),
+`enthalpy` ($H_r$), species fluxes and the converged surface state.
+These fields are the assembly's actual exchanges and are the quantities to
+use for reservoir-control-surface accounting.
 
 The solution exposes the components of the exposed face's flux at every saved
 time (`sol.extras`, §9 of the User Guide; per unit current face area):
@@ -15547,9 +12976,11 @@ using Pyrolysis
 R, E, Tp, T0 = 8.314462618, 1.0e5, 700.0, 300.0
 ρ, c, k, v = 1000.0, 1000.0, 1.0, 2.0e-3
 A = v^2 * E * (Tp - T0) * exp(E / (R * Tp)) / (k / (ρ * c) * R * Tp^2)
-solid = SolidComponent(:solid, ρ = ρ, c = c, k = k, λ = 1e-6)
-gas = GaseousComponent(:gas, M = 0.05, c = c, k = 0.02, λ = 1e-4)
+solid = SolidComponent(:solid, ρ = ρ, φ=.3, c = c, k = k, λ = 1e-6)
+gas = GaseousComponent(:gas, M = 0.05, c = c, k = 0.02,)
 material = Material(
+    gas_transport=LumpedTransfer(endpoint=LumpedEndpoint(λ=1e-6,κ=0.,max_skeletal_occupancy=.001)),
+
     name = :ablator,
     components = (solid, gas),
     reactions = (Reaction(:ablate, 1 => 2; A = A, E = E, h = 1.0e6),),
@@ -15559,7 +12990,7 @@ problem = PyrolysisProblem(
     material = material,
     bc_set = BoundaryConditionSet(
         thermal = (top = HeatFluxBC(2.8e6), bottom = AdiabaticBC()),
-        mass = (top = ConvectiveMassBC(h_m = 10.0, ξ_inf = 0.0), bottom = ImpermeableBC()),
+        mass = (top = AmbientGasBC(GasReservoir(P=0., T=300.)), bottom = ImpermeableBC()),
     ),
     T_initial = z -> T0 + 1e5 * z,
     ξ_initial = [z -> ρ, z -> 0.0],
@@ -15574,44 +13005,34 @@ saved = conservation_audit(sol)             # trapezoid over the saved states
 audit.mass.relative, audit.energy.relative
 ```
 
-Run as written (1,156 accepted steps, five events of one cell each), the
-recorded audit closes the mass to a relative defect of $-1.9\times10^{-8}$ and
-the energy to $-3.2\times10^{-7}$. The five events vent $1.9\times10^{-4}$ kg of gas
-and 101.5 J of its enthalpy, against an inventory change of 1.40 kg and
-$1.77\times10^{5}$ J: without the event terms the defects would be the lost
-terms, $1.4\times10^{-4}$ and $5.7\times10^{-4}$ of the change. The saved-series
-audit of the same solution, at the 0.05 s saving interval, leaves relative
-defects of $-1.2\times10^{-2}$ (mass) and $-5.9\times10^{-2}$ (energy).
+The run completes with 575 accepted steps and five deactivation events. The
+recorded mass defect is $7.8\times10^{-10}$ relative to the inventory change;
+the energy defect is $-1.0\times10^{-7}$. The discrete event terms contribute
+0.2453 kg and 123.84 kJ to these balances and must be included. The saved-series
+audit uses the output interval's trapezoid rule; refine the saving interval
+separately when comparing it with the accepted-step recorder.
 
 ---
 
 ## 16.9 Comparison to ThermaKin2Ds, Gpyro, and FDS
 
-The ledger adds an explicit, per-solve conservation audit, which none of the
-three reference codes offers in this form.
+Pyrolysis.jl's ledgers explicitly include continuous boundary/source integrals
+and discrete deactivation records. This is supported by
+`src/Outputs/conservation.jl`; it does not establish that the reference codes
+lack conservation diagnostics.
 
-**Energy accounting.** **FDS** keeps an energy budget of its simulations and
-reports cumulative boundary, radiative and chemical contributions against the
-stored enthalpy; Pyrolysis.jl's energy ledger is the analog for the condensed
-phase, at the level of the live cells: it reconstructs the change of the
-stored sensible enthalpy from the integrated boundary and source rates and the
-event records and reports the closure defect.
+FDS documents reaction enthalpy consistency in Appendix P and whole-simulation
+energy-budget outputs in its User's Guide. Those quantities are not directly
+interchangeable with our condensed-only sensible-enthalpy ledger. Gpyro
+derives conservative control-volume mass and enthalpy balances (GP Eqs.
+56–61), and TK §3 requires species and energy conservation during element
+mixing. Each code's residuals, tolerances, remapping and output definitions
+must be checked before comparing an observed conservation defect.
 
-**Mass accounting.** **Gpyro** advances control-volume conservation of
-$\bar\rho\,\Delta z$ and $\bar\rho Y_i\,\Delta z$ with a fully implicit
-backward-Euler scheme, so conservation is enforced by the discretization and
-checked through its solid-density bookkeeping. Pyrolysis.jl is conservative in
-the same sense, its cell masses being states and its face fluxes scattered
-antisymmetrically, and it *audits* the result, including what deactivation
-vents, with the mass ledger.
-
-**Deformation.** ThermaKin represents condensed-phase deformation through a
-single-reference-point density-integral source term and Gpyro through a
-variable-$\Delta z$ control volume; Pyrolysis.jl moves the mesh with the solid
-(§10, §11). The ledger needs no deformation term of its own: it sums states
-over the live cells, reads the current face areas, and integrates over the live
-boundary faces, which move with the solid; what a deactivation event removes
-is on the event's record.
+Here deformation needs no additional ledger source: inventories are summed
+over current live cells and boundary fluxes use current areas. Event losses
+are accounted for separately (§16.4). A small ledger defect is evidence
+about this discrete balance, not proof of physical model validity.
 
 ---
 
@@ -15666,8 +13087,8 @@ The following are the known gaps of the ledger. They are caveats on
 ---
 
 *Cross-references.* The governing equations these ledgers audit are stated in
-§3 (Governing Equations); the energy row, its face fluxes and the absence of a
-surface gas-enthalpy term in §7 (Heat Conduction, Gas Convection, and Energy
+§3 (Governing Equations); the energy row, its face fluxes and the boundary control-surface
+accounting in §7 (Heat Conduction, Gas Convection, and Energy
 Assembly); the heat-of-reaction sign, its temperature datum and stoichiometric
 closure in §6 (Reaction Kinetics); the gas fluxes and the boundary venting in
 §9 (Gas-Phase Mass Transport and Pressure); the surface energy balance and the
@@ -16082,9 +13503,9 @@ Common $\boldsymbol{\theta}$ entries and how they enter the model:
 using Pyrolysis, FiniteDiff
 
 # The base problem: a charring slab under 50 kW/m² (User Guide §13.2).
-virgin = SolidComponent(:virgin; ρ = 1190.0, c = 1500.0, k = 0.20, λ = 1e-6)
-char = SolidComponent(:char; ρ = 200.0, c = 1200.0, k = 0.10, λ = 1e-6)
-gas = GaseousComponent(:gas; M = 0.100, c = 1500.0, k = 0.02, λ = 1e-5)
+virgin = SolidComponent(:virgin; ρ = 1190.0, φ=.3, c = 1500.0, k = 0.20, λ = 1e-6)
+char = SolidComponent(:char; ρ = 200.0, φ=.3, c = 1200.0, k = 0.10, λ = 1e-6)
+gas = GaseousComponent(:gas; M = 0.100, c = 1500.0, k = 0.02,)
 rxn0 = Reaction(:decomp, 1 => (2, 3); A = 1e13, E = 1.88e5, h = 8.7e5, yields = (0.2, 0.8))
 base_problem = PyrolysisProblem(;
     mesh = create_uniform_mesh(10.0e-3, 40),
@@ -16094,7 +13515,7 @@ base_problem = PyrolysisProblem(;
         thermal = (top = HeatFluxBC(50e3) + RadiativeBC(ε = 0.9, T_inf = 300.0)
                          + ConvectiveBC(h = 10.0, T_inf = 300.0),
                    bottom = AdiabaticBC()),
-        mass = (top = DiffusiveMassBC(Inf), bottom = ImpermeableBC()),
+        mass = (top = AmbientGasBC(GasReservoir(P=0., T=300.)), bottom = ImpermeableBC()),
     ),
     T_initial = z -> 300.0,
     ξ_initial = [z -> 1190.0, z -> 0.0, z -> 0.0],
@@ -16109,7 +13530,7 @@ function p_inject(prob, θ)
                    yields = (0.2, 0.8))
     mat = Material(; name = m.name, components = m.components, reactions = (rxn,),
                    mixing = m.mixing, lateral_shrinkage_law = m.lateral_shrinkage_law,
-                   depletion_limiter = m.depletion_limiter, gas_viscosity = m.gas_viscosity)
+                   depletion_limiter = m.depletion_limiter, gas_viscosity = m.gas_viscosity, gas_transport = m.gas_transport)
     return PyrolysisProblem(; mesh = prob.mesh, material = mat, bc_set = prob.bc_set,
                             T_initial = prob.T_initial, ξ_initial = prob.ξ_initial,
                             tspan = prob.tspan, dt_initial = prob.dt_initial,
@@ -16295,22 +13716,19 @@ guard switches the rate off. Because $\mathrm{law}'$ is taken by AD, *any
 differentiable* law gives an exact strain rate and Jacobian — but a non-smooth
 law breaks this (see §17.7.2).
 
-**(4) Guarded face means and C¹ guards elsewhere.** The face conductivity and
-gas-transfer coefficient are distance-weighted harmonic means with a guard
-($\eta=10^{-20}$ in the denominator) that makes them smooth in every argument
-and send them to zero continuously, with a finite derivative, as either side
-vanishes (§5.12). Every guard the state mapping and the kernels apply — the
-positive part of a mass at the cell's mass scale, the smooth floors on volumes,
-capacities and distances, the smooth clamp of the trial temperature into the
-property bracket $[200,3000]$ K — is C¹ and is the identity on the physical
-states the tolerances distinguish (`src/States/guards.jl`). The operations that
-remain non-smooth — the upwind switches of the Darcy advective flux and of the
-relative flux, the step decisions of the integrator, and the deactivation
-events — are localized and are exactly the pitfalls catalogued next.
+**(4) Physical branches and trial guards.** Conductivity uses a guarded
+resistance mean. Gas transport uses total-flux interface roots, explicit
+vacuum branches and deterministic donor selection. Its implicit derivative
+requires a nonsingular qualified root; support changes and donor switches
+need separate sensitivity checks (§17.7.7). Trial guards on temperature,
+masses, volumes and capacities are C¹ extensions, with accepted-state checks
+ensuring the physical solution remains in their identity region. Gas guard
+scales track current pore volume and temperature. Integrator decisions and
+deactivation events remain discrete operations.
 
 > **Implementation note.** The smoothness-critical kernels are
 > `reaction_rate` and `one_sided_factor` (`src/Physics/kinetics.jl`), the
-> guards (`src/States/guards.jl`), `guarded_harmonic_mean`
+> guards (`src/Materials/guards.jl`), `guarded_harmonic_mean`
 > (`src/Properties/effective_properties.jl`), the limited face values of
 > `src/Kernels/relative_flux.jl`, and the lateral rows (`src/Closures/lateral.jl`).
 > Each is written with `tanh`, polynomial joins or AD derivatives *in place of*
@@ -16412,70 +13830,53 @@ on the physical states, so this is rarely an issue for QoIs integrated over
 time, but it can surface in pointwise late-time sensitivities near burnout,
 where a cell's masses approach their mass scale.
 
-### 17.7.7 Degenerate gas transport
+### 17.7.7 Transport support and implicit derivatives
 
-Condensed components default to a gas-transfer coefficient $\lambda=0$. Under
-Fickian gas transport the cell coefficient is then $\sum_{j\in\text{gas}} v_j\lambda_j$,
-proportional to the cell's gas volume fraction (§9.2), and the face coefficient —
-the guarded harmonic mean of §17.6 — vanishes on every face into a cell that
-holds no gas. The gas field ends in a sharp front. The cell ahead of the front
-gains gas only once its concentration is positive, and its concentration sits
-at the integration noise, below `abstol`, crossing zero. Once seeded, its gas
-grows fast, so the right-hand side has a kink of large slope at that crossing.
-The integrator fails on it repeatedly (on the User Guide example the default
-Rodas5P rejects 379 steps where the non-degenerate slab needs 23; a
-Newton-based policy's Newton iteration fails on it), and the time at which each
-cell fills — and with it the whole trajectory — depends on the noise. Finite
-differences of such a trajectory measure the noise, not a derivative
-(§17.2.2). `solve` warns in this configuration (`warn_degenerate_gas_transport`);
-a small $\lambda$ on the condensed components (e.g.
-$10^{-6}\ \text{m}^2\,\text{s}^{-1}$) removes the front.
+Closed wall or Darcy channels are deliberate constitutive choices. Their
+combination at an interface is resolved by matching total species flux.
+When both paths are degenerate, composition may be unobservable and its
+continuation must be stated; a derivative through a support change is not
+implied by a successful residual evaluation.
+
+General local roots require a nonsingular, numerically resolved Jacobian.
+The implementation restores first state derivatives by the implicit function
+theorem at that root. Vacuum and inactive channels use explicit continuations;
+donor switches select a deterministic primal branch. Higher derivatives or
+parameter derivatives through a singular channel transition require separate
+qualification. Endpoint and capillary regularizations are constitutive inputs
+whose scales must be varied in solution studies.
 
 ---
 
 ## 17.8 Comparison to ThermaKin2Ds, Gpyro, and FDS
 
-None of the three reference codes differentiates its solver with respect to the
-model parameters, and neither does Pyrolysis.jl: all four obtain parameter
-sensitivities *externally*, through driver scripts and repeated forward runs.
+The sources support specific calibration workflows, not a universal claim
+that none of these codes can provide parameter derivatives.
 
-**ThermaKin2Ds.** ThermaKin couples a forward pyrolysis solver to inverse
-analysis via external optimization (e.g. Stochastic Hill-Climbing / Shuffled
-Complex Evolution over the kinetic and property parameters), evaluating the
-forward model as a black box and forming sensitivities by repeated forward runs
-(finite differences). Mapping notation: ThermaKin's stoichiometric coefficients
-$\theta_i^j$ are our yields $\nu_{r,j}$, and its heats of reaction carry the
-*opposite* sign ($h>0$ exothermic) which our $Q_{\text{rxn}}=-\sum_r h_r r_r$
-converts to (overload H1, §2). The local derivative of §17.2 is the same
-black-box construction, and its step-size analysis (§17.2.2) applies to either
-code: an adaptive stiff integrator leaves an error in each output that the step
-must dominate.
+**ThermaKin2Ds.** TK describes the forward solver and examples using
+experimentally determined or fitted material parameters. It does not specify
+a universal optimizer or sensitivity algorithm. A statement about hill
+climbing, shuffled complex evolution or finite differences must identify the
+particular inverse-study implementation; these are not inferred capabilities
+of the forward executable.
 
-**Gpyro.** Gpyro's calibration (Lautenberger & Fernandez-Pello) is built on a
-*genetic algorithm* (GA) that minimizes the mismatch between simulated and
-measured MLR/temperature over a population of parameter sets — derivative-free by
-design. Gpyro maps the pre-exponential $Z$ → our $A_r$ and the conversion-based
-nth-order kinetics to our mass-concentration form (§6.9). A GA explores a global
-landscape without gradients (robust to the $(A,E)$ degeneracy, to non-smooth
-responses and to solver noise) but needs many forward solves and gives no local
-sensitivity matrix. Pyrolysis.jl's shipped calibration is likewise
-derivative-free (Nelder–Mead); finite-difference gradients can drive local
-refinement (Gauss–Newton/L-BFGS) once a GA or sweep has found a basin, and the
-variance-based Sobol harness (§17.5) supplies the global parameter ranking that
-a GA does not.
+**Gpyro.** GP's property-estimation chapter documents a genetic algorithm
+using repeated forward evaluations. That procedure is derivative-free, not
+a finite-difference sensitivity calculation. It does not guarantee a unique
+fit or robustness to parameter non-identifiability, and does not establish
+that every other Gpyro calibration workflow uses the same algorithm.
 
-**FDS (solid phase).** The FDS solid-phase pyrolysis model recovers kinetic
-parameters from a reference TGA temperature and peak rate (the
-$A,E$-from-$T_{\text{peak}}$ recipe, §6.9) rather than offering a built-in
-sensitivity/adjoint capability; FDS's broader uncertainty treatment is the
-verification-and-validation accounting of its guides, not parametric
-differentiation of the solid solver.
+**FDS.** Its reference-temperature/rate prescription estimates Arrhenius
+parameters (§6.9.3). That feature is distinct from whole-solve parameter
+sensitivities. It is not evidence for a blanket absence of sensitivity or
+optimization workflows around FDS.
 
-In short, Pyrolysis.jl's sensitivity tooling is a set of recipes on top of
-`solve` — central differences for local derivatives, qualified by the
-convergence check of §17.2.2, the sweep harness and a PCE surrogate for global
-indices — sharing one rebuild-do-not-mutate discipline. Its automatic
-differentiation is confined to the state Jacobian (§15).
+**Pyrolysis.jl.** The supported workflow in this repository is qualified
+central differences of complete solves (§17.2), parameter sweeps and
+variance-based analysis. The inverse white-pine example uses Nelder–Mead.
+Colored AD of the state residual supplies the integration Jacobian; it does
+not provide exact whole-solve parameter gradients. These statements follow
+the source paths and examples cited earlier in this chapter.
 
 ---
 
@@ -16723,10 +14124,10 @@ against an exact or manufactured solution; the burnout cases V-BO-01, 02, 03 and
 | Heat conduction | V-HC-01 – V-HC-05 | Carslaw–Jaeger erfc and eigenfunction series, resistance network, Kirchhoff transform | the convective surface Newton (V-HC-01; Biot sweep V-HC-02a–d), the constant-flux slab to its back-face plateau (V-HC-03), the harmonic-mean face conductivity at a layer jump on and off a face (V-HC-04a–c), $k(T)$ (V-HC-05) |
 | Kinetics and surface radiation | V-RX-01 – V-RX-04 | Bateman chain, Khawam–Flanagan isothermal integrals, parallel-reaction splits, implicit radiative-cooling law | multi-step coupling, reaction order and the depletion limiter (V-RX-02d keeps it on as a guard), two-product yields and heat superposition, `RadiativeBC` through the surface Newton |
 | In-depth radiation | V-RAD-01 | Lautenberger eigenfunction series | Beer–Lambert absorption with conduction and a convective face, including the sub-surface temperature peak |
-| Gas transport | V-GT-01, V-GT-02 | Gaussian plane source; steady compressible Darcy $P^2$ profile | the Fickian flux and mass conservation; the pressure closure, Darcy mobility, upwinding and the pressure outflow condition |
+| Gas transport | V-GT-01, V-GT-02 | Gaussian plane source; steady compressible Darcy $P^2$ profile | the lumped wall flux and mass conservation; the pressure closure, Darcy mobility, upwinding and the pressure outflow condition |
 | Coupled physics | V-CPL-01 – V-CPL-05 | Neumann two-phase Stefan solution, Landau ablation wave, exact shrink/swell endpoints, Frank-Kamenetskii slab, 0D TGA curve | a latent-heat front (apparent heat capacity, V-CPL-01; gated reaction, V-CPL-01b), surface regression on a moving mesh (V-CPL-02, 02b), volume change and the lateral-shrinkage law, the reaction–conduction bifurcation, the boundary and volume coupling of the kinetics |
 | Manufactured solutions | V-MMS-01 – V-MMS-04 | the manufactured-solution driver of §18.2 | design order of the coupled residual on a fixed mesh in space and time, free-stream preservation under prescribed motion, order under prescribed and reaction-driven motion |
-| Burnout | V-BO-01 – V-BO-08 | exact exponential thickness (V-BO-04); otherwise mass budgets, ledgers and a pinned reference run | deactivation through complete burnout on a moving mesh under in-depth absorption (V-BO-01) and on a fixed mesh under surface absorption (V-BO-02); the transmitted-flux series (V-BO-03); the interior-void stop (V-BO-05, `expected_retcode = :Terminated`); a graded mesh (V-BO-06), a layer of mixed composition (V-BO-07) and a thin layer on a deep substrate (V-BO-08) |
+| Burnout | V-BO-01 – V-BO-08 | exact exponential thickness (V-BO-04); otherwise exact mass and thickness budgets, conservation ledgers and termination constraints | deactivation through complete burnout on a moving mesh under in-depth absorption (V-BO-01) and on a fixed mesh under surface absorption (V-BO-02); the transmitted-flux series (V-BO-03); the interior-void stop (V-BO-05, `expected_retcode = :Terminated`); a graded mesh (V-BO-06), a layer of mixed composition (V-BO-07) and a thin layer on a deep substrate (V-BO-08) |
 
 The burnout cases share V-BO-01's deck (`V-BO-01.jl` defines it, its step
 recorder and its QoIs): a 5.9 mm PMMA slab on 12 mm of Kaowool under 50 kW m⁻², the
@@ -16767,11 +14168,11 @@ gates open (§18.2.2), while V-RX-02d keeps the limiter on as a guard.
 
 **Cross-code overlays.** Where a case has an analogue in another code, that code's
 numerical output is committed under `test/verification/reference/<code>/` with a
-provenance README: FDS 6.11.0 and Gpyro 0.8200 runs of the same problems, a Gpyro V2
+provenance README: FDS 6.11.1 and Gpyro 0.8200 runs of the same problems, a Gpyro V2
 run of the V-BO-01 deck, and the MaCFP-2 PMMA community submissions (which no case
 reads). They are read only inside a case's report `curves`; assert mode never
 touches them. Overlays are drawn for V-HC-01 (FDS and Gpyro), V-HC-02 (FDS), V-HC-03
-(Gpyro; FDS cannot run a pure-Neumann slab), V-RAD-01 (Gpyro), V-RX-01 (FDS and
+(Gpyro; the FDS 6.11.0 flux-input restriction is discussed in §12.11.3), V-RAD-01 (Gpyro), V-RX-01 (FDS and
 Gpyro), V-RX-02 (FDS), V-CPL-01 (Gpyro), V-CPL-03 (FDS) and V-BO-01 (the Gpyro V2
 gas-generation rate). A series marked `crosscode = true` is drawn as a muted
 context layer in a separate `_vs_codes` variant of each affected figure, so the base
@@ -16782,8 +14183,10 @@ construction and solve versus FDS/Gpyro internal total elapsed time, including
 setup and simulation. Full process times appear separately in supporting
 tables. Output workloads, resolutions and time steps differ, so these are
 indicative costs rather than pure solver speedups. The reference README
-defines the timer boundaries and provenance. ThermaKin2Ds is not represented:
-its distribution is a Windows console binary.
+defines the timer boundaries and provenance. ThermaKin2Ds has no
+verification overlay here; the locally supplied executable is a Windows
+console binary. This is a limitation of this dataset, not of all ThermaKin
+distributions.
 
 ---
 
@@ -17135,7 +14538,7 @@ of the reference and equal it per entry at `rtol = 1e-12`. The containment tests
 finite residual and reference, an empty `missing_entries`, a colored Jacobian with
 the pattern's structure, and that agreement. They cover fixed and moving columns of a
 PMMA-like and a permeable wood-like material, without radiation, with surface
-absorption and with in-depth absorption, under Fickian and Darcy–Fick transport, in
+absorption and with in-depth absorption, with wall and pressure-driven lumped transport, in
 both energy forms and at 6 and 8 cells; at the set-up state, at uniform hot, hot and
 gas-heavy, partially decomposed and mixed reacting states, and at trial states
 outside the physical domain (perturbed, zero and negated states); the chain-rule
@@ -17167,9 +14570,9 @@ using Pyrolysis.Internal: jac_prototype, jacobian!, dense_jacobian, missing_entr
     compare_entries
 
 # A charring slab on a moving mesh, integrated to a reacting state.
-virgin = SolidComponent(:virgin, ρ = 1190.0, c = 1500.0, k = 0.2, λ = 1e-6)
-char = SolidComponent(:char, ρ = 200.0, c = 1200.0, k = 0.1, λ = 1e-6)
-gas = GaseousComponent(:gas, M = 0.1, c = 1500.0, k = 0.02, λ = 1e-5)
+virgin = SolidComponent(:virgin, ρ = 1190.0, φ=.3, c = 1500.0, k = 0.2, λ = 1e-6)
+char = SolidComponent(:char, ρ = 200.0, φ=.3, c = 1200.0, k = 0.1, λ = 1e-6)
+gas = GaseousComponent(:gas, M = 0.1, c = 1500.0, k = 0.02,)
 rxn = Reaction(:decomp, 1 => (2, 3); A = 1e13, E = 1.88e5, h = 8.7e5, yields = (0.2, 0.8))
 material = Material(name = :slab, components = (virgin, char, gas), reactions = (rxn,))
 problem = PyrolysisProblem(
@@ -17180,7 +14583,7 @@ problem = PyrolysisProblem(
             top = HeatFluxBC(50e3) + RadiativeBC(ε = 0.9, T_inf = 300.0),
             bottom = AdiabaticBC(),
         ),
-        mass = (top = DiffusiveMassBC(Inf), bottom = ImpermeableBC()),
+        mass = (top = AmbientGasBC(GasReservoir(P=0., T=300.)), bottom = ImpermeableBC()),
     ),
     T_initial = z -> 300.0,
     ξ_initial = [z -> 1190.0, z -> 0.0, z -> 0.0],
@@ -17203,7 +14606,7 @@ println(compare_entries(Matrix(J), J_ref; rtol = 1e-12))
 prints
 
 ```
-Success, (122, 122), 880 nonzero reference entries
+Success, (122, 122), 888 nonzero reference entries
 true
 (passed = true, max_abs_dev = 0.0, worst_ratio = 0.0, worst_index = (1, 1))
 ```
@@ -17220,7 +14623,7 @@ nodes into identity rows, so the colored Jacobian is the one the integrator uses
 through burnout and the containment check covers it.
 `test/deactivation/test_deactivation.jl` ("masked rows are identity rows and the live
 block is the compacted problem's") builds a six-cell problem and a problem of only its
-live cells, on fixed and moving meshes, under in-depth radiation, Darcy–Fick transport
+live cells, on fixed and moving meshes, under in-depth radiation, gas transport
 with a surface balance, and a lateral-shrinkage law, in both energy forms, with one and
 two dead cells, at the set-up state and a perturbed one. It requires the live rows'
 residual to equal the compacted problem's to $10^{-11}$ of the magnitude of their
@@ -17282,16 +14685,13 @@ both energy forms**: in the enthalpy form $H_\text{live}-\int\dot H_\text{in}\,d
 linear invariant of the semi-discrete system, which a fixed-step solve closes to
 round-off (at most $10^{-13}$ of the integrated rate in
 `test/outputs/test_energy_ledger.jl`); in the temperature form the closure converges at
-the integrator's order (observed orders 2.1, 2.5 and 3.2 under Fickian transport, 2.7,
-3.3 and 4.3 under Darcy–Fick, with fixed steps of a fourth-order method halved three
-times; §16.5.2). With the recorder, the module tests assert a relative energy defect of
+the integrator's order under fixed-step refinement (§16.5.2). With the recorder, the module tests assert a relative energy defect of
 at most $10^{-6}$ in both energy forms on a gasifying column whose escaping gas carries
 its enthalpy out, and at the tighter tolerance across deactivation events (§16.5.4). A
 defect that does not fall with the tolerance is a bookkeeping bug.
 
 **The boundary flux.** The ledger's boundary term is the energy flux of the live
-boundary faces: the condition's flux conducted into the cell (§13.7.5) plus the
-enthalpy the outward mass fluxes carry at the surface temperature. The ledger *audits
+boundary faces: reservoir-control-surface heat minus the signed donor-enthalpy sum (§9.9). The ledger *audits
 bookkeeping, not double counting*: it reads the same kernel contributions the residual
 assembles, so if the residual counted a mechanism twice the ledger would still close.
 Detecting a double count requires an *independent* check (§18.4.3).
@@ -17301,14 +14701,15 @@ Detecting a double count requires an *independent* check (§18.4.3).
 The gas enthalpy is carried by the face energy flux: on an interior face the
 gas-transport kernel adds $\sum_jJ_{j,f}h_j(T_f)$ at the distance-weighted face
 temperature, on a boundary face the thermal boundary kernel adds the enthalpy of the
-outward fluxes at the surface temperature, and the surface balance carries no
-gas-enthalpy term (§7.4.3, §13.7.4–§13.7.5). A surface term
+outward fluxes at the surface temperature and inward fluxes at their specified
+incoming temperatures. Thermal-film heat is converted to the reservoir
+control surface (§9.9). An additional outgoing surface term
 $\sum_g\dot m_g\,\Delta h_g(T_s,T_\infty)$ added on top would count the escaping
 enthalpy twice, and the ledger of §18.4.2 would record both and still close. The
 coupling is therefore pinned by checks built independently of the residual:
 
 - **The energy row term by term** (`test/outputs/test_energy_ledger.jl`, "energy row
-  term by term against the ledger"): in both energy forms, under Fickian and Darcy–Fick
+  term by term against the ledger"): in both energy forms, with wall and pressure-driven lumped
   transport, on uniform and stretched meshes, every face energy flux equals the
   conduction (Fourier between cells with the distance-weighted harmonic-mean
   conductivity; the condition's conducted flux on the boundary) plus the enthalpy its
@@ -17317,7 +14718,7 @@ coupling is therefore pinned by checks built independently of the residual:
   $10^{-11}$ of their scale. The carried term is not small and the surface temperature
   departs from the cell temperature by more than 1 K, so an omission, a double count or
   enthalpy taken at the cell temperature would show.
-- **No gas enthalpy in the surface balance**
+- **Prescribed-heat independence**
   (`test/boundary_conditions/test_boundary_temperature.jl`, "Outward gas flux enters
   only through blowing"): under a prescribed flux, the solved surface temperature and
   the conducted flux are identical with and without a gas flux across the face.
@@ -17326,10 +14727,12 @@ coupling is therefore pinned by checks built independently of the residual:
   every temperature at rest in both energy forms.
 - **An exact solution that would see a spurious term.** V-CPL-02 sets the gas heat
   capacity equal to the solid's, which makes the Landau travelling-wave identity
-  $v=v_{ss}(T_s)$ exact for any kinetics; a spurious advection of the temperature at
+  $v=v_{ss}(T_s)$ exact for a steady wave with stationary virgin material in
+  the far field and steady gas holdup. A cold reaction gate, the domain length
+  and the measurement window establish these prerequisites. A spurious advection of the temperature at
   the mesh velocity on a mesh that rides the collapsing solid would break it by about
   $c\,(T_s-\bar T_\text{form})\approx R T_s^2c/E$ per kilogram, a few percent, and the
-  case pins the identity at $2.1\times10^{-3}$ (observed $7.1\times10^{-4}$ at 160 cells).
+  case pins the identity at $2.1\times10^{-3}$ and reports mesh refinement.
 
 ---
 
@@ -17499,7 +14902,7 @@ quantitative agreement and are themselves verified:
 `examples/07_douglas_fir_cone.jl` is the most fully featured validation case:
 multi-step wood decomposition kinetics (five sequential steps through four
 intermediates to char, and moisture evaporation), surface absorption of the incident flux (wood is opaque),
-Darcy–Fick gas transport with the pore gas initialized at ambient pressure
+gas gas transport with the pore gas initialized at ambient pressure
 (`background_gas_concentration`; the species molar masses enter the pressure
 closure, and all gases share one diffusive transfer coefficient, §5.11), and a
 moving mesh tracking the shrinking sample, solved at `abstol = 1e-9`,
@@ -17521,14 +14924,14 @@ fit, the distinction §18.1.1 insists on.
 
 ### 18.6.3 Pressure-treated wood and moisture transport
 
-`examples/08_pressure_treated_wood_cone.jl` (and its ThermaKin comparison
-`ptw_comparison.jl`) validates the Darcy-driven transport path: a permeable charring
+`examples/08_pressure_treated_wood_cone.jl` demonstrates the Darcy-driven
+transport path: a permeable charring
 solid develops an internal pressure $P=\sum_g\xi_jR_gT/(M_j\varphi)$ (§9.4), and the
 Darcy velocity $v_g=-(\kappa/\mu)\,\partial P/\partial z$ (§9.5) advects the pyrolysis
-gases outward. The validation QoIs are the MLR augmentation and the internal-pressure
-history relative to a Fickian-only run; `08_darcy_fick_demo.jl` isolates the
+gases outward. Diagnostics include the MLR change and the internal-pressure
+history relative to a lumped wall-only run; `08_gas_transport.jl` isolates the
 pressure-driven transport for a controlled check. Moisture transport
-(`moisture_hos_comparison.jl`) validates the state-dependent heat-of-sorption path:
+(`moisture_hos_comparison.jl`) demonstrates the state-dependent heat-of-sorption path:
 the evaporation reaction carries a `StateDependentProperty` heat $h(T,\xi)$ that
 depends on the local moisture concentration (§6.6), and the moisture front, the
 evaporation plateau in $T(t)$ (the constant-temperature stall while water boils
@@ -17536,56 +14939,34 @@ off) and the dried-mass profile are the comparison targets.
 
 ### 18.6.4 Comparison to ThermaKin2Ds, Gpyro, and FDS
 
-Code-to-code comparison (`examples/literature_comparison/`,
-`examples/macfp/macfp_gasification.jl`, and the cross-code overlays of the
-verification suite, §18.1.3) is run alongside experimental validation because it
-isolates *modelling-convention* differences from *numerical* ones. The three
-reference codes differ from Pyrolysis.jl in documented, specific ways; mapping their
-notation to ours:
+Cross-code agreement is evidence of consistency for the equations and inputs
+actually matched. It does not by itself validate the physical model or
+separate modeling differences from numerical errors. Remaining disagreement
+can arise from either, from input transcription, or from output definitions.
 
-- **ThermaKin2Ds.** Maps its stoichiometric coefficients $\theta_i^{\,j}$ to our
-  $\nu_{i,j}$ and its component concentrations to our $\xi_j$, and publishes its
-  heats of reaction with $h>0$ exothermic (the opposite of ours). ThermaKin's energy
-  equation (its Eq. 17) stores sensible heat in every component, gas included, and
-  carries the gas enthalpy by the convective term $c_g\,(J_g\cdot\partial T/\partial x)$;
-  Pyrolysis.jl stores every component in $C_i$ and carries the gas enthalpy as the face
-  flux $\sum_jJ_{j,f}h_j(T_f)$, the conservative form of the same term (§13.3.4), so the
-  convective coupling is a clean cross-check. ThermaKin supports *bimolecular*
-  reactions; Pyrolysis.jl enforces single-reactant kinetics (§6.5), so multi-reactant
-  ThermaKin schemes must be re-expressed as reaction sequences before comparison.
-- **Gpyro.** Maps its pre-exponential $Z$ to our $A_i$, its permeability $K$ to our
-  $\kappa$, its volume fractions $X_\alpha$ to our $v_j$, and its volumetric rate
-  $\dot\omega'''$ to our $r$. Gpyro is fully conservative (control-volume balances of
-  $\bar\rho\Delta z$, $\bar\rho Y_i\Delta z$, gas mass and energy) and uses
-  volume-fraction property averaging with power-law temperature dependence;
-  Pyrolysis.jl's WEIGHTED/PARALLEL/SERIES/BRUGGEMAN mixing rules (§5.5) span and
-  generalize Gpyro's averaging. Gpyro's Darcian flux
-  $\dot m''=-(K/\nu)(\partial P/\partial z-g\rho_g)$ matches our Darcy form (§9.5) up
-  to the buoyancy term, which Pyrolysis.jl omits (negligible for thin condensed-phase
-  slabs). Gpyro selects swelling and shrinkage mechanisms by solid-fraction state;
-  Pyrolysis.jl's lateral-shrinkage law $A(t)=A_0\,\mathrm{law}(\bar\chi)$ (§10.5) is the
-  1D analogue. Gpyro's solver is fully implicit backward Euler with Patankar
-  linearization and TDMA; Pyrolysis.jl integrates with `Rodas5P` and the colored
-  Jacobian, so code-to-code agreement on a steady or slowly varying case validates the
-  *physics* independent of the time integrator. Gpyro 0.8200 runs of V-HC-01, V-HC-03,
-  V-RAD-01, V-RX-01 and V-CPL-01, and a Gpyro V2 run of the V-BO-01 deck, are overlaid
-  in report mode.
-- **FDS solid phase.** Maps its absorption coefficient $\kappa_s$ to our $\alpha$ and its
-  pre-exponential $Z$ to our $A_i$. FDS solves 1D Fourier conduction with Arrhenius
-  kinetics (with $\rho^n$, $O_2^n$ and $T^n$ rate forms) and a two-flux in-depth
-  radiation model; Pyrolysis.jl's in-depth model is the one-directional Beer–Lambert
-  beam of the incident flux (§8.3), so the two agree where in-depth emission is
-  negligible. FDS carries no in-depth gas, so its energy equation is the
-  condensed-phase limit of ours; its TGA-based kinetic recovery (peak temperature and
-  rate → $A$, $E$) is the recipe of §18.2.2 and §18.6.2. FDS's surface energy balance
-  $-k\,\partial T/\partial x=q_c''+q_r''$ is the multi-mechanism analogue of our surface
-  Newton balance (§12.2). FDS 6.11.0 runs of V-HC-01, V-HC-02, V-RX-01, V-RX-02 and
-  V-CPL-03 are overlaid in report mode.
+- **ThermaKin2Ds:** match reaction extent, heat sign, component properties,
+  gas-transport and radiation algorithms (§§6.9, 8.7, 9.10). Its bimolecular
+  kinetics and general 2D configurations are not represented by our
+  single-reactant 1D solves. Replacing a bimolecular reaction by a sequence
+  is a new model, not an exact conversion. The optional example overlays
+  are distinct from a reproducible ThermaKin verification dataset.
+- **Gpyro:** the retained 0.8200 overlays concern V-HC-01, V-HC-03,
+  V-RAD-01, V-RX-01 and V-CPL-01. A separate V2 PMMA result is used for
+  V-BO-01. Match condensed/gas density definitions, conversion-rate
+  normalization, diffusion and volume-change laws; do not substitute our
+  lateral law for Gpyro's axial model. The retained V2 CSV lacks the source
+  revision and exact original run provenance needed for full reproduction.
+- **FDS:** the retained 6.11.1 overlays concern V-HC-01, V-HC-02, V-RX-01,
+  V-RX-02 and V-CPL-03. Its instantaneous gas release and optional two-flux
+  radiation are not general equivalents of our transport and Beer–Lambert
+  models. Even negligible in-depth emission does not remove the angular
+  attenuation difference (§8.7.3).
 
-In all three comparisons, agreement *after* matching conventions (gas treatment,
-radiation model, kinetic form) is the verification that the shared physics is
-implemented consistently; *residual* disagreement after convention matching is
-attributable to the documented modelling differences, not to error.
+The benchmark definitions, actual input decks and exact-solution errors
+provide the evidence for each comparison (§18.1.3). The MaCFP community
+predictions use differing calibrated models; their spread is not a
+solver-only verification result. Timing rows are historical measurements,
+not controlled evidence of one solver's general superiority.
 
 ---
 
@@ -17633,7 +15014,7 @@ with caution.
 
 ### 18.7.3 Péclet number and upwind diffusion
 
-The Darcy–Fick species transport uses first-order upwinding for the advective part
+The gas species transport uses first-order upwinding for the advective part
 (§9.3, §13.7.3). First-order upwind introduces a numerical diffusion of order
 $|v_g|\Delta z/2$, so its importance is measured by the cell Péclet number
 $\mathrm{Pe}=|v_g|\Delta z/\lambda$; when $\mathrm{Pe}\gg1$ the scheme stays robust but the
@@ -17678,20 +15059,17 @@ sensitivities remain valid across a deactivation, with the caveats of §18.8.3.
 The following are documented incompletenesses that affect, or require re-checking of,
 validated results.
 
-### 18.8.1 Surface gas-enthalpy convention and calibrated parameters
+### 18.8.1 Energy-control-surface consistency in calibration
 
-The gas leaving through a face carries its sensible enthalpy at the face temperature in
-the face energy flux, and the surface balance has no gas-enthalpy term (§7.4.3,
-§18.4.3), since a surface term would count that enthalpy a second time. A balance that
-adds a surface term on top of a carried enthalpy artificially depresses the surface
-temperature, so parameter sets calibrated in a model that does so read a *higher* $T_s$
-and mass-loss rate here (§1.8, item 7). Imported calibrations must therefore be
-re-validated against data under this convention. The fitted kinetic and property
-parameters of the bundled calibrated examples (the inverse-analysis cases and the cone
-runs) are in that position, together with the flame heat-flux feedback (absent,
-§1.8.1) and the blowing reduction of the convective coefficient (`ConvectiveBC`'s
-blowing model, §12.3.3) that a recalibration should include. This is a validation-state
-issue, not a verification failure.
+Incoming gas carries the specified reservoir enthalpy and outgoing gas carries
+surface enthalpy. An LTE wall film converts its heat to the reservoir control
+surface with `q_r=q_s+H_r-H_s`; this gives the same total boundary energy
+flux in either description. Calibrations must use this complete species and
+energy closure, the declared gas model, physical pore volume and appropriate
+blowing correlation. Numerical convergence and conservation qualify the
+implementation; experimental data are needed to validate material parameters.
+
+---
 
 ### 18.8.2 The end-of-layer burst outside the supported envelope
 
@@ -17768,7 +15146,7 @@ manifest is not pinned to their dependencies (`.github/workflows/quality.yml`):
   reports (the CI job is advisory). The test suite's type analysis
   (`test/type_analysis/`, run in a fresh process by `Pkg.test()`) applies JET's
   `@test_call` to `residual!` and the colored `jacobian!` at the concrete types `setup`
-  builds (a fixed mesh; a moving mesh with in-depth radiation and Darcy–Fick transport; a
+  builds (a fixed mesh; a moving mesh with in-depth radiation and gas transport; a
   moving mesh under the equidistribution correction; both energy forms). A type
   instability or a dynamic dispatch in the hot paths would slow the solve and threaten the
   dual-number evaluation the colored Jacobian relies on.
@@ -17797,7 +15175,8 @@ through `Pkg.test()`. The verification machinery of this chapter has direct cove
   (the energy row term by term and the ledger's exactness in both energy forms),
   `test/assembly/test_residual_jacobian.jl` (the antisymmetric scatter), and
   `test/boundary_conditions/test_boundary_temperature.jl` (no gas enthalpy in the surface
-  balance).
+  balance for a prescribed-heat condition), plus `test/kernels/test_gas_exchange.jl`
+  for donor enthalpy and thermal-film conversion.
 - The verification suite: `test/verification/runcases.jl` runs every case of
   `test/verification/cases/` in assert mode (§18.1.3).
 - Radiation: `test/kernels/test_radiation.jl` (the beam's energy, the absorptivity
@@ -17833,8 +15212,8 @@ The V&V coverage above has gaps that a user should weigh:
 
 1. **MMS coverage.** The manufactured-solution driver (§18.2) covers the coupled residual
    on a fixed mesh (conduction with temperature-dependent properties, two-step kinetics
-   with reaction heat, Fickian gas transport) and the moving mesh under prescribed and
-   reaction-driven motion. In-depth radiation, Darcy–Fick transport, the variable cross
+   with reaction heat, lumped wall gas transport) and the moving mesh under prescribed and
+   reaction-driven motion. In-depth radiation, gas transport, the variable cross
    section and deactivation are verified by exact solutions and ledgers (V-RAD-01,
    V-GT-02, V-CPL-03, V-BO-04) rather than by a manufactured order study, and the boundary
    faces enter the manufactured cases as imposed fluxes only.
@@ -17867,6 +15246,6 @@ The V&V coverage above has gaps that a user should weigh:
    estimates and the empirical shrinkage laws are unvalidated or simplified, and cases that
    lean on them inherit that uncertainty.
 
-7. **Cross-code coverage.** ThermaKin2Ds is not among the overlays (its distribution is a
-   Windows console binary), and the MaCFP-2 PMMA community submissions, committed under
+7. **Cross-code coverage.** ThermaKin2Ds is not among the verification overlays
+   (the executable supplied locally is a Windows console binary), and the MaCFP-2 PMMA community submissions, committed under
    `test/verification/reference/macfp/`, are read by no case.

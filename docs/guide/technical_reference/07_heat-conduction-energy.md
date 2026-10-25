@@ -12,8 +12,8 @@ forms the discrete divergence, the gas enthalpy flux and its face temperatures, 
 reaction-heat source $Q_{\text{rxn}}$, and the radiation source $Q_{\text{rad}}$ —
 and we trace the residual sequence that produces the energy and mass rows. Particular
 care is taken with the sign conventions of §2 (Nomenclature), with the precise set of
-terms the code includes and excludes, and with why the surface energy balance carries
-no gas-enthalpy term. Where useful, the Pyrolysis.jl forms are mapped to and
+terms the code includes and excludes, and with the conversion between wall-film
+heat and the direct-reservoir energy control surface (§9.9). Where useful, the Pyrolysis.jl forms are mapped to and
 contrasted with ThermaKin2Ds, Gpyro, and FDS.
 
 Index conventions for this chapter follow §2 overload note I1: **$i$ is the cell index**
@@ -308,18 +308,18 @@ $\rho c_{p,\text{floor}}V_i(0)$ with $\rho c_{p,\text{floor}} = 10^3$ J·m⁻³�
 equation (5.10)), so that a cell emptied of all mass keeps a finite rate.
 
 The pore gas is at the matrix temperature (one-temperature model, §3.1.2) and its mass is an
-integrated state, so its storage term costs nothing and is kept. Dropping it — the
-*quasi-steady-gas approximation* of Gpyro's default thermal-equilibrium form (restored there
-by `FULL_QSG`) and the implicit convention of FDS, which has no in-depth gas — would be an
-approximation with no benefit. At $1\,\text{atm}$ the in-pore gas heat capacity is a small
+integrated state, so its storage is retained without another energy unknown.
+Gpyro's default thermal-equilibrium exchange neglects gas storage and gas conduction;
+`FULL_QSG` retains both. The standard FDS wall model has no pore-gas inventory. At $1\,\text{atm}$ the in-pore gas heat capacity is a small
 fraction of the matrix heat capacity, from a few hundredths of a percent to about half a
 percent (the estimate is in §5.4.2), scaling with pressure.
 
 The gas enters the energy equation in two places and two places only: its storage in (7.7)
 and the sensible enthalpy its *flux relative to the skeleton* carries across the faces
 (§7.4). The derivation of §3.3.2 shows these two terms, plus the reaction heat with heats
-quoted at the reaction temperature, to be the complete equation — ThermaKin Eq. 17 term for
-term. On a moving mesh the whole $\rho c_p^{\text{eff}}$ rides the mesh with the skeleton, so
+quoted at the reaction temperature, to give our temperature balance. Its gas
+transport terms correspond to those in ThermaKin Eq. 17; the other closures
+still require matching (§7.8). On a moving mesh the whole $\rho c_p^{\text{eff}}$ rides the mesh with the skeleton, so
 there is no mesh-motion term in the energy equation (§11.2.2, §11.2.4).
 
 > **Implementation note.** $C_i$ is the field `cp_sum` of the derived state, evaluated by the
@@ -479,16 +479,15 @@ mass flux, each with the face temperature of its own flux:
   \tag{7.14}
   $$
 
-  the linear interpolation of the two cell temperatures to the face, at the cell
-  temperatures themselves. The mass flux it multiplies is computed separately, at the trial
-  temperatures, with the arithmetic mean $\bar T = (T_o + T_n)/2$ in its driving potential
-  (§9).
-- **Boundary face.** The thermal boundary kernel adds $\sum_j F_{j,f}\,h_j(T_s)$ with the
-  outward mass fluxes the gas-transport kernel wrote on that face (the film flux of the mass
-  condition and, under Darcy–Fick transport, the vent the pressure condition drives) at the
-  surface temperature $T_s$ of the face's energy balance, once that balance has fixed it
-  (`_carried_enthalpy`, `src/Kernels/thermal_boundary.jl`; §7.4.3). Gas leaves at the surface
-  temperature.
+  the linear interpolation of the two cell temperatures to the face. The mass
+  flux uses this interface temperature and each half-cell temperature in the
+  flux-matching solve (§9).
+- **Boundary face.** The coupled mass/thermal kernel assembles $E_{out}=H_r-q_r$.
+  Outgoing species carry $h_j(T_s)$ and incoming species carry their specified
+  reservoir enthalpy. An LTE thermal film converts its wall heat by
+  $q_r=q_s+H_r-H_s$, where $H_s=\sum_jJ_jh_j(T_s)$; hence its total energy is
+  also $H_s-q_s$. Adiabatic and prescribed-heat conditions use donor enthalpy
+  directly. No extra outgoing-gas heating sink is added (§9.9).
 - **Relative-flux face** (a moving mesh under a correction). The relative-flux kernel
   (`RelativeFluxKernel`, `src/Kernels/relative_flux.jl`) evaluates the enthalpies at the face
   temperature reconstructed from the same upwind stencil as the face's concentrations (the
@@ -503,7 +502,7 @@ The construction has three properties:
    heat-capacity laws (§5.4.3); no heat capacity is evaluated at an intermediate temperature.
 3. **A uniform temperature stays at rest.** On an isothermal field $T_f = T_i$ on every face,
    so the bracket $h_j(T_f) - h_j(T_i)$ of (7.11) vanishes identically, whatever the mass
-   fluxes. This is tested on a stretched mesh with Darcy–Fick transport, a heat capacity
+   fluxes. This is tested on a stretched mesh with gas transport, a heat capacity
    linear in $T$ and non-zero gas fluxes: the temperature rates vanish to $10^{-12}$ relative
    in the temperature form, and the inventory rates equal $\sum_j h_j\,dm_j/dt$ to the same
    accuracy in the inventory form (`test/kernels/test_gas_transport.jl`, "isothermal transport
@@ -525,47 +524,16 @@ the cell integral of $-c_{p,g}\mathbf J_g\cdot\nabla T$ in (7.6). On a uniform m
 interpolation (7.14) is the central one; on a stretched mesh its distance weighting keeps it
 exact for a linear temperature field.
 
-### 7.4.3 The surface carries no gas-enthalpy term
+### 7.4.3 Boundary carried energy
 
-The surface boundary condition is a *plain* convective + radiative balance,
-$q_{\text{BC}}(T_s) = k\,(T_s - T_{\text{cell}})/d$, with no gas-enthalpy term
-(`solve_boundary_temperature!`, `src/BoundaryConditions/surface_balance.jl`; §12.2). The gas
-energy leaving the domain is carried by the boundary face's energy flux instead: its outward
-mass flux carries its sensible enthalpy at $T_s$ (§7.4.2), and the heating of the gas on its
-way to the surface was carried by the interior face fluxes as it crossed the cells.
-
-Summing (7.11) over the column shows the bookkeeping. With heats of reaction at the reaction
-temperature, the gas leaves the reaction at the local temperature with its sensible enthalpy
-inside $h_r(T)$; the interior face terms $h(T_f) - h(T_i)$ heat it from its formation
-temperature to the temperature of the cells it crosses; and the boundary face carries it out
-at $T_s$. Under local thermal equilibrium the gas crosses the surface at $T_s$ on both sides,
-so its enthalpy flux is continuous there and the surface balance is conducted flux equals
-applied flux (§1.4.3). A surface term $\sum_g \dot m_g\,\Delta h_g(T_s,T_\infty)$ added to
-that balance would apply the outflow a second time — a spurious sink of order
-$\dot m''\,c_{p,g}\,(T_s - T_\infty)$, about $7.5\,\text{kW}\,\text{m}^{-2}$ for
-$10\,\text{g}\,\text{m}^{-2}\text{s}^{-1}$ of gas with $c_{p,g} = 1.5$ kJ·kg⁻¹·K⁻¹ heated
-by 500 K — that under-predicts the surface temperature and the mass-loss rate. The convention
-is ThermaKin Eq. 17; Gpyro's thermal-equilibrium form uses the same term. Parameter sets
-calibrated against a solver that applies a surface gas-enthalpy term *in addition to* the
-in-depth gas enthalpy transport predict lower $T_s$ and MLR there than here; re-validate
-imported calibrations (§18).
-
-**The mass-flux/convection coupling is the blowing model of each `ConvectiveBC`.** The
-*momentum-side* effect of the gas efflux — boundary-layer thickening that suppresses the
-convective exchange coefficient, and the pooling of a dense gas on the face — is independent
-of the enthalpy bookkeeping above and is the `blowing` model a `ConvectiveBC` carries
-(§12.3.3): the coefficient becomes $h\,R_b$ with the blowing ratio $R_b$ from the model and the outward gas
-flux at the face. Because it modifies only the coefficient, it composes exactly with the
-face enthalpy flux; no double-count arises. The surface balance reads the gas-transport
-fluxes of the face alone: the relative-flux kernel, which runs after the thermal boundary
-kernel (§7.6), adds its fluxes only afterwards. This is the only use of the gas flux in the
-surface balance.
-
-> **Implementation note.** The thermal boundary kernel calls the surface Newton solve
-> `solve_boundary_temperature!` (`src/BoundaryConditions/surface_balance.jl`) with the outward
-> mass fluxes of the face (`J_out`), which feed only the blowing models, and the emissivity
-> and absorptivity of the boundary cell; it then adds the conducted flux and the carried
-> enthalpy at the solved $T_s$ to the face's energy flux (`src/Kernels/thermal_boundary.jl`).
+Outward species carry surface enthalpy and inward species carry their
+specified reservoir enthalpy. An LTE wall heat film is converted to the
+reservoir control surface by $q_r=q_s+H_r-H_s$, giving
+$E_{out}=H_r-q_r=H_s-q_s$. Without a thermal film, prescribed heat and donor
+enthalpy enter directly. This includes adiabatic ingress. The complete signed
+balance, stream-temperature consistency and supported blowing domains are
+specified in §9.9. Adding an independent heating term to this balance would
+count incoming energy twice.
 
 ---
 
@@ -765,87 +733,55 @@ concrete element type.
 
 ## 7.8 Comparison to ThermaKin2Ds, Gpyro, and FDS
 
-We map each reference code's notation to the unified nomenclature on first use and contrast the
-energy assembly. (The reference codes are condensed-phase pyrolysis / fire solvers:
-ThermaKin2Ds by Stoliarov et al.; Gpyro by Lautenberger & Fernandez-Pello; the FDS solid-phase
-model by McGrattan et al.)
-
 ### 7.8.1 The energy-equation skeleton
 
-All four codes solve a 1D (through-thickness) Fourier-conduction energy balance with
-volumetric reaction heat and a gas-enthalpy coupling. In our symbols the common skeleton is
-
-$$
-(\rho c_p)\,\frac{\partial T}{\partial t}
-=
-\frac{\partial}{\partial z}\!\left(k\frac{\partial T}{\partial z}\right)
-+ Q_{\text{rxn}} + Q_{\text{rad}} + (\text{gas enthalpy term}),
-$$
-
-and the codes differ mainly in (i) whether gas heat capacity is in the storage term, (ii) how
-the gas enthalpy coupling is written, and (iii) the radiation closure.
+The models share conduction, reaction heat and radiative exchange. Gas storage,
+gas/solid exchange, radiation and deformation closures determine whether a
+particular reduced energy equation matches; there is no unconditional
+four-code energy-equation equivalence.
 
 ### 7.8.2 ThermaKin2Ds
 
-ThermaKin writes the through-thickness energy equation with the all-component storage
-$\sum_j \xi_j c_{p,j}\,\partial T/\partial t$, the gas-advection term
-$c_g\,(\mathbf{J}_g\!\cdot\!\partial T/\partial x)$ (its Eq. 17) — *exactly* the
-temperature-form reading $-\sum_g c_{p,g}\mathbf J_g\cdot\nabla T$ of the face enthalpy flux
-of §7.4 — and a deformation term that is the skeleton-following part of the time derivative,
-which the moving mesh absorbs (§11.2.2). Pyrolysis.jl's energy equation is therefore ThermaKin
-Eq. 17 term for term. ThermaKin maps to our symbols as: ThermaKin's stoichiometric
-$\theta_i^{\,j}\to \nu_{r,j}$ (the strain rate $\theta$ is reserved here for dilation; §2 note
-A2); ThermaKin's bimolecular concentration product $\xi_{\text{COMP1}}\xi_{\text{COMP2}}$ has
-no analog because Pyrolysis.jl enforces a single reactant (§6); ThermaKin's gas flux
-$J=-\rho_g\lambda\,\partial(\xi_g/\rho_g)/\partial x$ is the volume-fraction-gradient form
-implemented here (§9).
+TK Eq. 17 stores $\sum_j\xi_jc_j$ and contains
+$-\sum_g c_g\mathbf J_g\cdot\nabla T$. These terms correspond to our
+1D temperature balance after the conservative face enthalpy flux and species
+balance are combined. The reaction-heat sign must be converted. TK also
+includes its own deformation and absorption-weighted re-radiation terms;
+these must be matched separately (§§8.7, 10.11). Its 2D equation contains
+transverse transport absent from a 1D Pyrolysis.jl solve.
 
 ### 7.8.3 Gpyro
 
-Gpyro's energy equation (Lautenberger) uses a control-volume conservative formulation on
-$\bar\rho\,\Delta z$, with the bulk (averaged) density $\bar\rho$ (our $\rho$),
-volume-fraction ($X_\alpha\to v_j$) property averaging, and power-law temperature-dependent
-properties. Its thermal-equilibrium form carries the gas through the solid-to-gas heat
-transfer $\dot Q_{s-g}''' \approx \dot m'' c_{pg}\,\partial T/\partial z$ (its Eq. 65) — the
-temperature-form reading of our face enthalpy flux with the Darcy mass flux — and drops the gas
-storage $\rho_g\bar\psi c_{pg}\,\partial T/\partial t$ by default; its `FULL_QSG` option
-restores it, which makes the equation (7.6) with (7.7). The mapping: Gpyro's pre-exponential
-$Z\to A_r$; its conversion variable $\alpha_{\text{conv}}$ has no single analog (Pyrolysis.jl
-tracks the component masses directly, with $\chi$ as a separate progress variable for the
-cross section, §10); its permeability $K\to\kappa$; its mass flux
-$\dot m''=-(K/\nu)(\partial P/\partial z - g\rho_g)$ is the Darcy term of §9 (Pyrolysis.jl
-omits the gravity/buoyancy term $g\rho_g$ as negligible in the thin condensed phase).
-Numerically Gpyro uses Patankar control-volume discretization with Peclet-based scheme
-selection, harmonic interface interpolation, and a TDMA solve; Pyrolysis.jl uses the same
-harmonic interface interpolation (7.2) but a method-of-lines discretization advanced by a
-stiff integrator with the colored Jacobian of the whole residual (§15), rather than a
-hand-rolled implicit TDMA sweep.
+GP Eq. 61 advances condensed sensible enthalpy. In thermal equilibrium the
+default solid-to-gas exchange retains the gas temperature-advection term but
+neglects gas storage and gas conduction. `FULL_QSG` restores both omitted
+terms (GP Eq. 65; Gpyro 0.8200 `ENERGY_SOURCE_TERMS`). Merely retaining
+gas heat capacity does not make our energy equation identical. Gpyro also
+supports a separate gas energy equation and finite interphase exchange;
+Pyrolysis.jl assumes local thermal equilibrium throughout.
 
 ### 7.8.4 FDS
 
-The FDS solid-phase model solves a 1D Fourier conduction equation with the surface balance
-$-k\,\partial T/\partial x = \dot q_c'' + \dot q_r''$, Arrhenius reaction kinetics
-($\rho^n O_2^n T^n$ rate form), and no in-depth gas: volatiles leave instantaneously, so
-there is no gas storage and no in-depth gas-enthalpy coupling; the gas enthalpy is closed
-at the surface. FDS maps as: pre-exponential $Z\to A_r$; solid absorption coefficient
-$\kappa_s\to\alpha$; the surface energy balance with $\dot q_c''$ (convective) and
-$\dot q_r''$ (radiative) is the boundary Newton solve of §12. The radiation closure differs
-(FDS uses a two-flux Schuster–Schwarzschild model in depth; Pyrolysis.jl offers
-`NO_RADIATION`, `SURFACE_ABSORPTION` and `BEER_LAMBERT`, §8). Pyrolysis.jl, following
-ThermaKin, resolves the gas in depth and carries its enthalpy across every face with its mass
-flux rather than as a surface outflow term, and the surface balance carries no gas-enthalpy
-term on top of it (§7.4.3).
+FDS's standard solid model assumes gas is transported instantly to the
+surface (FDS solid-phase chapter, “Solid Fuels”). There is no pore-gas
+inventory or resolved in-depth advective enthalpy flux. This does not mean
+gas enthalpy is absent: `PYROLYSIS` evaluates reaction heat and the energy
+needed to bring produced/consumed gas between solid and CFD-gas temperatures
+(`Q_DOT_G_PPP`; FDS Appendix P). That accounting is not the same as storing
+gas in Pyrolysis.jl with its transport switched off. The latter traps any
+generated gas unless a separate removal mechanism is supplied.
 
-### 7.8.5 Summary table
+### 7.8.5 Summary
 
-| feature | Pyrolysis.jl | ThermaKin2Ds | Gpyro | FDS |
+| Feature | ThermaKin2Ds | Gpyro 1D | FDS standard solid model | Pyrolysis.jl |
 |---|---|---|---|---|
-| storage $\rho c_p$ | all components (7.7) | all components (incl. gas) | matrix by default; all with `FULL_QSG` | matrix (no in-depth gas) |
-| gas enthalpy coupling | $\sum_j F_{j,f}h_j(T_f)$ at every face (temperature form $-\sum_g c_{p,g}\mathbf J_g\cdot\nabla T$) | $c_g\,\mathbf J_g\cdot\partial T/\partial x$ volumetric (Eq. 17) | $\dot m'' c_{pg}\,\partial T/\partial z$ (thermal equilibrium) | surface outflow |
-| face conductivity | distance-weighted harmonic mean | harmonic | harmonic (Patankar) | — |
-| conduction discretization | cell-centered FV, method of lines + stiff integrator | Crank–Nicolson (x) | Patankar CV + TDMA | implicit FD |
-| radiation | none / surface / Beer–Lambert | Beer–Lambert + re-radiation | in-depth exp absorption | two-flux S–S |
-| heat-of-reaction sign | $h>0$ endothermic, $Q_{\text{rxn}}=-\sum hr$ | $h>0$ exothermic (flip) | $h>0$ endothermic | $h>0$ endothermic |
+| Gas temperature | local equilibrium | equilibrium or separate energy equation | no pore-gas state | local equilibrium |
+| Gas storage in equilibrium | included | optional with `FULL_QSG` | absent | included |
+| Energy state | element temperature | condensed sensible enthalpy, inverted to temperature | solid temperature | temperature or sensible-enthalpy inventory |
+| In-depth radiation | absorption distribution with MAX/RAND deposition and re-radiation | incident-beam absorption; optional radiative conductivity | optional two-flux absorption/emission | incident-beam absorption |
+
+Primary sources: TK Eqs. 11–18 and §3; GP Eqs. 61–70 and §6.8;
+FDS solid-phase chapter, Appendix P and `Source/wall.f90` (§1.6.5).
 
 ---
 

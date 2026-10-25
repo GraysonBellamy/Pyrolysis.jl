@@ -51,9 +51,10 @@ function _slab(
         κ = κ,
         ρ_intrinsic = 1800.0,
     )
-    gas = GaseousComponent(:gas, M = 0.03, c = 1100.0, k = 0.03, λ = λ)
+    gas = GaseousComponent(:gas, M = 0.03, c = 1100.0, k = 0.03)
     mat = Material(
         name = :slab,
+        mixing = MaterialMixing(κ = PARALLEL),
         components = (virgin, char, gas),
         reactions = (
             Reaction(:pyro, 1 => (2, 3); A = 5e9, E = 1.4e5, h = 8e5, yields = (0.3, 0.7)),
@@ -98,12 +99,15 @@ const _configurations = (
         ),
         options = (radiation_model = BEER_LAMBERT,),
     ),
-    fick = (
+    wall = (
         problem = n -> _slab(
             n;
             λ = 3e-5,
             top = ConvectiveBC(h = 15.0, T_inf = 1000.0, blowing = CouetteFilm()),
-            mass = (top = DiffusiveMassBC(0.02), bottom = ImpermeableBC()),
+            mass = (
+                top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
+                bottom = ImpermeableBC(),
+            ),
         ),
         options = (;),
     ),
@@ -118,7 +122,10 @@ const _configurations = (
                       blowing = PoolingFilm(NITROGEN; diffusion_volume = (gas = 60.0,)),
                   ) +
                   RadiativeBC(T_inf = 300.0),
-            mass = (top = DiffusiveMassBC(0.02), bottom = ImpermeableBC()),
+            mass = (
+                top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
+                bottom = ImpermeableBC(),
+            ),
         ),
         options = (;),
     ),
@@ -129,7 +136,12 @@ const _configurations = (
             κ = 1e-11,
             law = χ -> 1 - 0.3χ,
             top = ConvectiveBC(h = 15.0, T_inf = 1000.0),
-            mass = (top = DirichletPressureBC(101325.0), bottom = ImpermeableBC()),
+            mass = (
+                top = AmbientGasBC(
+                    GasReservoir(P = 101325.0, T = 1000.0, mole_fractions = (gas = 1.0,)),
+                ),
+                bottom = ImpermeableBC(),
+            ),
         ),
         options = (;),
     ),
@@ -228,9 +240,9 @@ end
 # A slab that converts at the same rate everywhere: isothermal, uniform, the
 # activation energy zero. Its strain rate is uniform.
 function _uniform_slab(n; law = nothing, ρ_b = 400.0, coordinates = Planar())
-    a = SolidComponent(:a, ρ = 1000.0, c = 1000.0, k = 0.5)
-    b = SolidComponent(:b, ρ = ρ_b, c = 1000.0, k = 0.5)
-    g = GaseousComponent(:g, M = 0.03, c = 1000.0, k = 0.03, λ = 0.0)
+    a = SolidComponent(:a, φ = 0.25, λ = 0.0, ρ = 1000.0, c = 1000.0, k = 0.5)
+    b = SolidComponent(:b, φ = 0.25, λ = 0.0, ρ = ρ_b, c = 1000.0, k = 0.5)
+    g = GaseousComponent(:g, M = 0.03, c = 1000.0, k = 0.03)
     mat = Material(
         name = :uniform,
         components = (a, b, g),
@@ -318,8 +330,8 @@ end
 
 @testset "lateral rows: the lateral rate is the area row's logarithmic rate" begin
     law = χ -> 1 - 0.4χ + 0.1χ^2
-    a = SolidComponent(:a, ρ = 1000.0, c = 1000.0, k = 0.5)
-    g = GaseousComponent(:g, M = 0.03, c = 1000.0, k = 0.03, λ = 0.0)
+    a = SolidComponent(:a, λ = 0.0, ρ = 1000.0, c = 1000.0, k = 0.5)
+    g = GaseousComponent(:g, M = 0.03, c = 1000.0, k = 0.03)
     mat = Material(
         name = :m,
         components = (a, g),

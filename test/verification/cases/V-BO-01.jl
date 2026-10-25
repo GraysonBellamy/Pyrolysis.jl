@@ -37,7 +37,12 @@ const VBO_MASS_LOSS_EXACT =
 
 # The PMMA of the deck (the Gpyro V2 fits) under `name` and density `ρ`, the
 # Kaowool substrate and the MMA gas.
-function _vbo_pmma(; name = :PMMA, ρ = VBO_RHO_PMMA, pmma_alpha = 2870.0 / VBO_RHO_PMMA)
+function _vbo_pmma(;
+    name = :PMMA,
+    ρ = VBO_RHO_PMMA,
+    pmma_alpha = 2870.0 / VBO_RHO_PMMA,
+    porosity = 0.01,
+)
     k_pmma = CallableProperty(T -> T <= 394.0 ? 0.16 : 0.2156 * (T / 300.0)^-0.745)
     c_pmma = CallableProperty(
         T ->
@@ -46,6 +51,7 @@ function _vbo_pmma(; name = :PMMA, ρ = VBO_RHO_PMMA, pmma_alpha = 2870.0 / VBO_
     return SolidComponent(
         name,
         ρ = ρ,
+        φ = porosity,
         c = c_pmma,
         k = k_pmma,
         ε = 0.96,
@@ -56,23 +62,29 @@ end
 _vbo_kaowool(substrate_alpha) = SolidComponent(
     :KAOWOOL,
     ρ = VBO_RHO_KW,
+    φ = 0.8,
     c = 1100.0,
     k = 0.058,
     ε = 1.0,
     λ = 2e-5,
     α = substrate_alpha,
 )
-_vbo_gas() = GaseousComponent(:MMA, M = 0.044, c = 0.0, k = 0.02, λ = 2e-2)
+_vbo_gas() = GaseousComponent(:MMA, M = 0.10012, c = 0.0, k = 0.02)
 
 function _vbo_material(;
     substrate_alpha = 8.0e6 / VBO_RHO_KW,
     pmma_alpha = 2870.0 / VBO_RHO_PMMA,
     A = 1.35e11,
+    porosity = 0.01,
 )
     rx = Reaction(:pmma_gasification, 1 => 3; A, E = 164e3, h = 8.7e5, n = 1.0)
     return Material(
         name = :PMMA_MaCFP,
-        components = (_vbo_pmma(; pmma_alpha), _vbo_kaowool(substrate_alpha), _vbo_gas()),
+        components = (
+            _vbo_pmma(; pmma_alpha, porosity),
+            _vbo_kaowool(substrate_alpha),
+            _vbo_gas(),
+        ),
         reactions = (rx,),
         mixing = MaterialMixing(k = PARALLEL, λ = PARALLEL),
     )
@@ -98,7 +110,10 @@ function _vbo_deck(mesh, material, ξ0; flux = 50e3, t_end = 500.0, save_every =
     bottom = RadiativeBC(ε = 1.0, T_inf = VBO_T_INF)
     bcs = BoundaryConditionSet(
         thermal = (top = top, bottom = bottom),
-        mass = (top = DiffusiveMassBC(), bottom = ImpermeableBC()),
+        mass = (
+            top = AmbientGasBC(GasReservoir(P = 0.0, T = VBO_T_INF)),
+            bottom = ImpermeableBC(),
+        ),
     )
     return PyrolysisProblem(
         mesh = mesh,
@@ -127,8 +142,9 @@ function _vbo_problem(
     save_every = 0.5,
     l_pmma = VBO_L_PMMA,
     grading = 1.0,
+    porosity = 0.01,
 )
-    mat = _vbo_material(; substrate_alpha, pmma_alpha, A)
+    mat = _vbo_material(; substrate_alpha, pmma_alpha, A, porosity)
     if grading == 1
         dz = l_pmma / n_pmma
         n_kw = round(Int, VBO_L_KW / dz)
@@ -546,8 +562,9 @@ const VBO_SOLVE_KWARGS = (
     deactivation = true,
     min_thickness = 1e-3,
     radiation_model = BEER_LAMBERT,
-    abstol = 1e-8,
-    reltol = 1e-6,
+    abstol = 1e-11,
+    reltol = 1e-9,
+    pressure_tolerance = 1e-4,
 )
 
 function _verification_case_vbo01()
@@ -571,7 +588,9 @@ function _verification_case_vbo01()
         solve_fn = _vbo_solve_fn(id),
         solve_kwargs = VBO_SOLVE_KWARGS,
         qois = qois,
-        ci = CIConfig(n_cells = 60, budget_s = 20.0),
+        # The tight pressure/ledger controls cost about 111 s for a warmed
+        # enthalpy run at 60 cells (8690 accepted steps, 1154 rejections).
+        ci = CIConfig(n_cells = 60, budget_s = 120.0),
         report = (
             n_cells_ladder = [30, 60, 120],
             qoi_curves = (:mlr_history, :thickness_history),

@@ -21,8 +21,8 @@ Active couplings, all with O(1) contributions over the space–time domain:
 - two-step kinetics A → 0.65 B + 0.35 gas (endothermic) and B → gas
   (exothermic): intermediate B produced and consumed, reaction heat feeding
   back into the energy equation, gas produced into the transport field;
-- Fickian gas transport in the ThermaKin volume-fraction-gradient form
-  J = −(λ_eff/T)∂z(ξT), with per-component λ so λ_eff is state-dependent;
+- partial-pressure gas transport J = −(Λ/T)∂z(ξT/φ), with condensed
+  matrix coefficients and the skeletal pore volume evaluated independently;
 - gas-advection energy source S_adv = −cp_g·J·∂zT;
 - manufactured Neumann BCs (HeatFluxBC/MassFluxBC callables of t) — the
   Dirichlet face reconstruction is first-order and would cap the observed
@@ -48,11 +48,11 @@ Fields (z̃ = z/L, smooth, strictly positive concentrations):
 
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
-| L∞ T error, t=10.0 s | 0.0002917 | — | 0.0002917 | 0.05 | yes | manufactured T* recovered on the coupled system; observed 0.0163/0.0124 K at t=10/20 s |
-| L∞ T error, t=20.0 s | 0.0002332 | — | 0.0002332 | 0.05 | yes | manufactured T* recovered on the coupled system; observed 0.0163/0.0124 K at t=10/20 s |
-| relative L∞ ξ_A error, t=20.0 s | 1.175e-06 | — | 1.175e-06 | 0.0002 | yes | scale = manufactured baseline; observed 6.8e-5; L∞ ξ orders ≈ 2.0 on [20,40,80] at pin time |
-| relative L∞ ξ_B error, t=20.0 s | 3.763e-07 | — | 3.763e-07 | 0.0001 | yes | scale = manufactured baseline; observed 2.2e-5; L∞ ξ orders ≈ 2.0 on [20,40,80] at pin time |
-| relative L∞ ξ_gas error, t=20.0 s | 0.0001729 | — | 0.0001729 | 0.03 | yes | scale = manufactured baseline; observed 9.8e-3; L∞ ξ orders ≈ 2.0 on [20,40,80] at pin time |
+| L∞ T error, t=10.0 s | 0.0003366 | — | 0.0003366 | 0.05 | yes | manufactured T* recovered on the coupled system; refined to 160 cells to resolve the pore-pressure gradients |
+| L∞ T error, t=20.0 s | 0.0008934 | — | 0.0008934 | 0.05 | yes | manufactured T* recovered on the coupled system; refined to 160 cells to resolve the pore-pressure gradients |
+| relative L∞ ξ_A error, t=20.0 s | 1.321e-06 | — | 1.321e-06 | 0.0002 | yes | scale = manufactured baseline; observed 5.3e-6; L∞ ξ order ≈ 2 on [20,40,80,160] |
+| relative L∞ ξ_B error, t=20.0 s | 4.21e-07 | — | 4.21e-07 | 0.0001 | yes | scale = manufactured baseline; observed 1.7e-6; L∞ ξ order ≈ 2 on [20,40,80,160] |
+| relative L∞ ξ_gas error, t=20.0 s | 0.003337 | — | 0.003337 | 0.03 | yes | scale = manufactured baseline; observed 1.34e-2; L∞ ξ order ≈ 2 on [20,40,80,160] |
 
 ![V-MMS-01 T_profiles](assets/V-MMS-01/V-MMS-01_T_profiles.png)
 
@@ -76,13 +76,13 @@ Fields (z̃ = z/L, smooth, strictly positive concentrations):
 
 | n_cells | h | wall (s) | L2_T | Linf_T |
 | --- | --- | --- | --- | --- |
-| 20 | 0.05 | 0.2368 | 0.02533 | 0.04771 |
-| 40 | 0.025 | 0.4488 | 0.00641 | 0.01351 |
-| 80 | 0.0125 | 0.7347 | 0.001607 | 0.00358 |
-| 160 | 0.00625 | 1.457 | 0.0004021 | 0.0009202 |
-| 320 | 0.003125 | 2.86 | 0.0001005 | 0.0002332 |
+| 20 | 0.05 | 0.7644 | 0.1112 | 0.2226 |
+| 40 | 0.025 | 1.961 | 0.02837 | 0.05681 |
+| 80 | 0.0125 | 3.423 | 0.007129 | 0.01427 |
+| 160 | 0.00625 | 6.651 | 0.001785 | 0.003573 |
+| 320 | 0.003125 | 11.54 | 0.0004463 | 0.0008934 |
 
-Observed order 1.995 (L2_T), expected 2.0.
+Observed order 1.991 (L2_T), expected 2.0.
 
 ### Solver configuration
 
@@ -91,4 +91,3 @@ Observed order 1.995 (L2_T), expected 2.0.
 | integrator | Rodas5P (default) |
 | abstol | 1.0e-11 |
 | reltol | 1.0e-9 |
-

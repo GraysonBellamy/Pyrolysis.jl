@@ -4,13 +4,13 @@ A Julia package for simulating thermal decomposition (pyrolysis) of materials
 under high heat flux. Pyrolysis.jl uses a finite-volume discretisation on a
 mesh that moves with the solid (Arbitrary Lagrangian–Eulerian), with cell
 deactivation at burnout, Arrhenius kinetics, in-depth radiation absorption,
-and pressure-driven gas transport (Darcy–Fick).
+and lumped or dusty-gas transport through a shared pore state.
 
 ## Features
 
 - Multi-component materials with temperature-dependent properties
 - Single-step and multi-step Arrhenius decomposition kinetics
-- Gas generation and transport through porous char (Fickian or Darcy–Fick)
+- Conservative species transport with lumped transfer or dusty-gas friction
 - In-depth radiation absorption via Beer–Lambert (or surface absorption)
 - Material volume changes — shrinkage, swelling, intumescence
 - Mesh motion with the solid, surface regression and internal interface
@@ -37,10 +37,12 @@ Pyrolysis.jl requires Julia 1.10 or newer.
 using Pyrolysis
 
 pmma = Material(
-    name = :PMMA,
+    name = :porous_polymer,
+    gas_transport = LumpedTransfer(endpoint=LumpedEndpoint(
+        λ=1e-6, κ=0., max_skeletal_occupancy=.001)),
     components = (
-        SolidComponent(:virgin, ρ = 1190, c = 1420, k = 0.21, ε = 0.86),
-        GaseousComponent(:MMA, M = 0.100, c = 1500, k = 0.02, λ = 1e-5),
+        SolidComponent(:virgin, ρ = 1190, φ = .3, c = 1420, k = 0.21, ε = 0.86, λ = 1e-6),
+        GaseousComponent(:MMA, M = 0.100, c = 1500, k = 0.02),
     ),
     reactions = (
         Reaction(:decomposition, :virgin => :MMA;
@@ -51,6 +53,7 @@ pmma = Material(
 mesh = create_uniform_mesh(0.01, 100)
 bcs  = BoundaryConditionSet(
     thermal = (top = HeatFluxBC(50e3), bottom = AdiabaticBC()),
+    mass    = (top = AmbientGasBC(GasReservoir(P=0., T=300.)), bottom = ImpermeableBC()),
 )
 
 problem = PyrolysisProblem(
@@ -60,7 +63,8 @@ problem = PyrolysisProblem(
     tspan = (0.0, 100.0),
 )
 
-sol = solve(problem; use_ale = true, radiation_model = SURFACE_ABSORPTION)
+# A mesh that moves with the solid; the cells the surface burns away deactivate
+sol = solve(problem; use_ale = true, deactivation = true)
 
 # Plot recipes (load `Plots` first)
 using Plots

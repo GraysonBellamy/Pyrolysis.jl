@@ -128,7 +128,7 @@ struct's fields. The relevant fields:
 - `PyrolysisProblem`: `mesh`, `material`, `bc_set`, `T_initial`, `ξ_initial`,
   `tspan`, `dt_initial`, `output_times`.
 - `Material`: `name`, `components` (a tuple), `reactions` (a tuple), `mixing`,
-  `lateral_shrinkage_law`, `depletion_limiter`, `gas_viscosity`.
+  `lateral_shrinkage_law`, `depletion_limiter`, `gas_viscosity`, `gas_transport`.
 - `Reaction`: `name`, `reactants`, `products`, `A`, `E`, `heat`, `T_min`,
   `T_max`, `gate_width`.
 
@@ -192,7 +192,7 @@ function modify_AE(prob, point)
         mixing                = mat.mixing,
         lateral_shrinkage_law = mat.lateral_shrinkage_law,
         depletion_limiter     = mat.depletion_limiter,
-        gas_viscosity         = mat.gas_viscosity,
+        gas_viscosity = mat.gas_viscosity, gas_transport = mat.gas_transport,
     )
 
     return PyrolysisProblem(
@@ -243,7 +243,7 @@ function modify_h(prob, point)
         mixing = mat.mixing,
         lateral_shrinkage_law = mat.lateral_shrinkage_law,
         depletion_limiter = mat.depletion_limiter,
-        gas_viscosity = mat.gas_viscosity,
+        gas_viscosity = mat.gas_viscosity, gas_transport = mat.gas_transport,
     )
     return PyrolysisProblem(
         mesh = prob.mesh, material = new_mat, bc_set = prob.bc_set,
@@ -394,7 +394,7 @@ addprocs(4)                       # start 4 worker processes
                        mixing = mat.mixing,
                        lateral_shrinkage_law = mat.lateral_shrinkage_law,
                        depletion_limiter = mat.depletion_limiter,
-                       gas_viscosity = mat.gas_viscosity)
+                       gas_viscosity = mat.gas_viscosity, gas_transport = mat.gas_transport)
     return PyrolysisProblem(mesh = prob.mesh, material = new_mat, bc_set = prob.bc_set,
                             T_initial = prob.T_initial, ξ_initial = prob.ξ_initial,
                             tspan = prob.tspan, dt_initial = prob.dt_initial,
@@ -594,7 +594,7 @@ dependency of Pyrolysis.jl.)
 
 This puts the pieces together on a self-contained PMMA cone problem (the deck of
 Chapter 2 and `examples/06_cone_calorimeter.jl` in condensed form, with a small
-gas-transfer coefficient on the solids so that Fickian gas transport does not
+gas-transfer coefficient on the solids so that lumped gas transport does not
 degenerate, §13.9). The sweep varies the incident cone flux and records peak
 surface temperature, peak mass-loss rate and final mass.
 
@@ -611,9 +611,9 @@ pmma_k = CallableProperty(T -> T < 378.0 ? 0.15 : (0.34 - 3.9e-4 * min(T, 700.0)
 pmma = Material(
     name = :PMMA,
     components = (
-        SolidComponent(:virgin, ρ = 1210.0, c = pmma_cp, k = pmma_k, ε = 0.96, λ = 1e-6),
-        SolidComponent(:char,   ρ = 1210.0, c = pmma_cp, k = pmma_k, ε = 0.96, λ = 1e-6),
-        GaseousComponent(:MMA,  M = 0.10012, c = 1500.0, k = 0.02, λ = 1e-5),
+        SolidComponent(:virgin, ρ = 1210.0, φ=.01, c = pmma_cp, k = pmma_k, ε = 0.96, λ = 1e-6),
+        SolidComponent(:char,   ρ = 1210.0, φ=.01, c = pmma_cp, k = pmma_k, ε = 0.96, λ = 1e-6),
+        GaseousComponent(:MMA,  M = 0.10012, c = 1500.0, k = 0.02,),
     ),
     reactions = (
         Reaction(:decomposition, 1 => (2, 3);
@@ -635,7 +635,7 @@ base_bc = BoundaryConditionSet(
                  ConvectiveBC(h = 4.0, T_inf = 307.0),
     ),
     mass = (
-        top    = ConvectiveMassBC(h_m = 0.05, ξ_inf = 0.0),
+        top    = AmbientGasBC(GasReservoir(P=0., T=300.)),
         bottom = ImpermeableBC(),
     ),
 )
@@ -745,7 +745,7 @@ function modify_AE2(prob, point)
                        mixing = mat.mixing,
                        lateral_shrinkage_law = mat.lateral_shrinkage_law,
                        depletion_limiter = mat.depletion_limiter,
-                       gas_viscosity = mat.gas_viscosity)
+                       gas_viscosity = mat.gas_viscosity, gas_transport = mat.gas_transport)
     return PyrolysisProblem(mesh = prob.mesh, material = new_mat, bc_set = prob.bc_set,
                             T_initial = prob.T_initial, ξ_initial = prob.ξ_initial,
                             tspan = prob.tspan, dt_initial = prob.dt_initial,

@@ -29,6 +29,7 @@ function CellReference(
     material::Material{NC};
     reltol::Float64,
     threshold::Float64,
+    pressure_tolerance::Float64 = 1.0,
 ) where {NC}
     topo = mesh.topology
     n = n_cells(topo)
@@ -52,6 +53,7 @@ function CellReference(
         x,
         _sizes(topo, x, V0),
         topo.cross_section,
+        pressure_tolerance,
     )
 end
 
@@ -65,9 +67,12 @@ _sizes(topo::MeshTopology{D}, x, V0) where {D} = V0 .^ (1 / D)
 	abstol_vector(layout, setup, m0, T0; reltol, abstol, threshold,
 	              intensity_scale = 1.0, time_scale = 1.0) -> Vector{Float64}
 
-Absolute tolerance per row. Mass rows `reltol · threshold · mˢᵢ(0)`, with
+Absolute tolerance per row. Condensed mass rows use `reltol · threshold · mˢᵢ(0)`, with
 `mˢᵢ(0)` the cell's total initial condensed mass (never a per-species
-inventory, which is zero for a product); temperature rows `abstol` [K];
+inventory, which is zero for a product). Gas mass rows divide the pressure
+budget equally among gas species: `pressure_tolerance · Mⱼ φᵢ Vᵢ/(Ng R Tᵢ)`
+at initialization. The integrator also checks proposed-state pressure errors
+as temperature and pore volume evolve. Temperature rows use `abstol` [K];
 enthalpy rows `threshold · mˢᵢ(0) · c_p,ref · abstol`, so a cell at the
 deactivation threshold resolves its temperature to `abstol` as the
 temperature form does; face-intensity rows `reltol · intensity_scale`, the
@@ -129,7 +134,16 @@ function abstol_vector(
     end
     for i = 1:n_cells(layout)
         for j = 1:NC
-            tol[mass_index(layout, i, j)] = ref.solid_mass[i] * reltol * threshold
+            comp = setup.material.components[j]
+            if is_gas(comp)
+                ξ = ntuple(k->m0[k, i]/ref.volume[i], Val(NC))
+                φ = pore_state(ξ, T0[i], setup.material).φ
+                ng = count(is_gas, setup.material.components)
+                tol[mass_index(layout, i, j)] =
+                    ref.pressure_tolerance/ng*φ*ref.volume[i]*molar_mass(comp)/(R_GAS*T0[i])
+            else
+                tol[mass_index(layout, i, j)] = ref.solid_mass[i] * reltol * threshold
+            end
         end
         if has_history(layout)
             for k = 1:2

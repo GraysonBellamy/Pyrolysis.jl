@@ -21,22 +21,25 @@ components supply the species properties. Built by the surface Newton at
 every iterate; `T` is `Float64` in the residual and `ForwardDiff.Dual` under
 AD.
 """
-struct BlowingFace{NC,T<:Real,M<:Material}
+struct BlowingFace{NC,T<:Real,M<:Material,X}
     ṁ::NTuple{NC,T}
     T_s::T
     material::M
+    surface_mole_fractions::X
 end
 
 @inline function BlowingFace(
     ṁ::NTuple{NC,<:Real},
     T_s::Real,
-    material::Material{NC},
+    material::Material{NC};
+    surface_mole_fractions = nothing,
 ) where {NC}
     Tu = promote_type(eltype(ṁ), typeof(T_s))
-    return BlowingFace{NC,Tu,typeof(material)}(
+    return BlowingFace{NC,Tu,typeof(material),typeof(surface_mole_fractions)}(
         ntuple(j -> Tu(ṁ[j]), Val(NC)),
         Tu(T_s),
         material,
+        surface_mole_fractions,
     )
 end
 
@@ -81,10 +84,9 @@ end
 # (outflow > 0 pushes the boundary layer off — blowing; net inflow gives a
 # negative conductance — suction — which `blowing_factor` maps to an
 # enhancement). cp is evaluated at the current surface-temperature iterate;
-# the temperature choice is second-order on an O(1) correction (film vs
-# surface differs by ~cp′·(T_s−T_∞)/2, well inside the ±30% uncertainty of
-# h₀ itself) and keeps the residual a pure function of state. Compile-time
-# unrolled, so the `is_gas` predicate is eliminated at codegen.
+# surface evaluation is a frozen-property thermal-film approximation. It
+# keeps the residual a pure function of state. Compile-time unrolling removes
+# the gas predicate from the generated evaluation.
 @generated function _blowing_conductance(
     material::Material{NC},
     ṁ::NTuple{NC,<:Real},
@@ -250,6 +252,7 @@ end
 end
 
 function blowing_state(m::PropertyRatioFilm, face::BlowingFace, h, T_inf)
+    _empirical_signed_domain(m, face)
     fs = m.free_stream
     ṁ = _gas_outflow(face.material, face.ṁ)
     cp∞ = fs.heat_capacity(gas_property_temperature(fs, face.T_s))
@@ -450,6 +453,8 @@ function _pool_roots(species, Minv∞, T_s, T_inf, ψ0, Λc, Λw)
 end
 
 function blowing_state(m::PoolingFilm, face::BlowingFace, h, T_inf)
+    _empirical_signed_domain(m, face)
+    names=map(c->c.name, face.material.components)
     fs = m.free_stream
     T_s = face.T_s
     T_p = gas_property_temperature(fs, T_s)      # property evaluations stay inside the fit range
@@ -461,6 +466,27 @@ function blowing_state(m::PoolingFilm, face::BlowingFace, h, T_inf)
     # No outflow, or a face no hotter than the free stream: nothing pools.
     if ForwardDiff.value(ṁ) <= 0 || ForwardDiff.value(d) <= 1e-6
         return (χ = blowing_factor(φ), φ = φ, ψ = o, Y = zero(o), Λ = o, states = 1)
+    end
+    if face.surface_mole_fractions !== nothing
+        x=face.surface_mole_fractions
+        masses=map(molar_mass, face.material.components)
+        Mface=sum(j->x[j]*masses[j], eachindex(x))
+        Λ=(1-Mface*T_inf/(fs.molar_mass*T_s))/d
+        z=clamp((Λ-m.Λc)/m.Λw, -60.0, 60.0)
+        ψ=m.ψ0+(1-m.ψ0)/(1+exp(-z))
+        Y=sum(j->names[j]===fs.name ? zero(φ) : x[j]*masses[j]/Mface, eachindex(x))
+        return (χ = ψ*blowing_factor(φ/ψ), φ = φ, ψ = ψ, Y = Y, Λ = Λ, states = 1)
+    end
+    # Without a solved mass film, this empirical closure assumes zero free-
+    # stream species flux. Product shares then sum to one by species balance.
+    for j in eachindex(face.ṁ)
+        if names[j]===fs.name && ForwardDiff.value(face.ṁ[j])!=0
+            throw(
+                ArgumentError(
+                    "PoolingFilm without a solved surface composition requires zero free-stream species flux",
+                ),
+            )
+        end
     end
     # Gas exchange without outflow, and the film parameter of each species.
     g = h / _mean_property(fs.heat_capacity, gas_property_temperature(fs, T_inf), T_p)
@@ -536,5 +562,34 @@ function _record_blowing!(state::BoundaryState, bc::AbstractThermalBC, face::Blo
         state.face_fraction = v(s.Y)
         state.face_buoyancy = v(s.Λ)
     end
+    return nothing
+end
+
+# Empirical property-ratio/pooling data support product outflow and pure
+# free-stream suction. Mixed counterflow has no derived empirical extension;
+# the signed Couette film supplies a separately derived closure for that regime.
+function _empirical_signed_domain(model, face)
+    names=map(c->c.name, face.material.components)
+    incoming=false
+    outgoing=false
+    for j in eachindex(face.ṁ)
+        v=ForwardDiff.value(face.ṁ[j])
+        incoming |= v<0
+        outgoing |= v>0
+        if v<0 && names[j]!==model.free_stream.name
+            throw(
+                ArgumentError(
+                    "$(typeof(model).name.name) supports suction of its free_stream species only",
+                ),
+            )
+        end
+    end
+    incoming &&
+        outgoing &&
+        throw(
+            ArgumentError(
+                "$(typeof(model).name.name) has no qualified mixed-ingress/outflow correlation",
+            ),
+        )
     return nothing
 end

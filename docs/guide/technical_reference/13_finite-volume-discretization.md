@@ -336,8 +336,9 @@ $$
 C_i\frac{dT_i}{dt}=S_{E,i}-\sum_{f\in\partial i}s_{i,f}A_f\Bigl[q_f+\sum_jF_{j,f}\bigl(h_j(T_f)-h_j(T_i)\bigr)\Bigr]+C_iS_{T,i}:
 $$
 
-the gas enthalpy enters only through the difference between the face temperature
-and the cell's. A mass flux carried at the cell's own temperature neither heats
+the gas enthalpy enters through its difference from the cell enthalpy. At an
+incoming boundary, use the specified incoming temperature and reservoir heat;
+an LTE film uses the equivalent converted wall-film representation (§9.9). A mass flux carried at the cell's own temperature neither heats
 nor cools it; gas that leaves through a hotter face takes the enthalpy difference
 with it. This is the semi-discrete form of the gas-advection term
 $-\sum_j c_{p,j}\,\mathbf J_j\cdot\nabla T$ (§7.4), written as a face flux so that
@@ -407,11 +408,9 @@ kernels run; the assembler zeroes `M_flux`; `T_face` and `gradient` are overwrit
 `src/Integration/setup.jl`):
 
 1. `ReactionKernel`, when the material has reactions (§13.5.1).
-2. `GasTransportKernel{M}`, when gas can move: `M = FickTransport`, or
-   `DarcyFickTransport` when a condensed component is permeable; absent
-   (`NoGasTransport`) when the material has no gas component, or when no component
-   carries a gas-transfer coefficient and every mass condition is impermeable
-   (§13.7.2–§13.7.5).
+2. `GasTransportKernel{M}`, for mobile gas, with the declared `LumpedTransfer`
+   or `DustyGas`. Gas-bearing sealed materials still evaluate their EOS;
+   `NoGasTransport` is reserved for materials without gas components.
 3. `BeerLambertKernel`, under `BEER_LAMBERT` (§13.5.2).
 4. `ConductionKernel`, always (§13.7.1).
 5. `ThermalBoundaryKernel`, always (§13.7.5).
@@ -425,10 +424,9 @@ at the trial temperature, the history sources and the velocity-row residuals,
 §11.3), `add_sources!` (§13.5.3), and `assemble_rows!` (§13.3). The order matters in
 three places:
 
-- **Gas transport before the thermal boundary.** The surface balance of a boundary
-  face reads the face's outward mass fluxes, which feed the blowing models of its
-  convective conditions (§12.3.3), and adds the enthalpy they carry at the surface
-  temperature (§13.7.5).
+- **Coupled boundary exchange.** The thermal boundary kernel solves and stores
+  boundary species and carried-energy fluxes together. Interior gas transport
+  uses its own shared face state.
 - **The relative fluxes after the thermal boundary.** The surface balance and its
   blowing models see the gas-transport fluxes alone.
 - **The closure after the kernels and before the external sources.** The strain
@@ -488,7 +486,7 @@ $$
 $$
 
 with $q_\mathrm{inc}$ the incident flux of the `RadiativeFluxBC`, $a$ its explicit
-absorptivity or else the effective absorptivity of the first live cell (§12.2.6),
+absorptivity or else the effective absorptivity of the first live cell (§5.8.2),
 $\alpha_i$ the cell's absorption coefficient at the positive-part concentrations
 and $\Delta_i$ its thickness (the sum of its two floored centre-to-face distances).
 The cell absorbs
@@ -549,7 +547,7 @@ Four face temperatures appear, each where it is consistent:
 | Where | Face temperature |
 |---|---|
 | enthalpy carried by the gas fluxes, interior face | $T_f=(d_nT_o+d_oT_n)/(d_o+d_n)$, the linear interpolation to the face at the cell temperatures (exact for a linear profile) |
-| inside the Fickian flux | $\bar T_f=\tfrac12(\tilde T_o+\tilde T_n)$, the mean of the trial temperatures (§13.7.2) |
+| inside the lumped wall flux | $\bar T_f=\tfrac12(\tilde T_o+\tilde T_n)$, the mean of the trial temperatures (§13.7.2) |
 | boundary face | the surface temperature $T_s$ of the condition: closed form or surface Newton (§13.7.5) |
 | relative fluxes | $\tilde T_f$, the upwind van Albada reconstruction on the stencil of the mass fluxes it carries (§11.6.2) |
 
@@ -590,7 +588,7 @@ manufactured solution with a rotated tensor on a distorted mesh.
 
 ---
 
-## 13.7 Conductive, Gas-Diffusive, and Darcy–Fick Face Fluxes
+## 13.7 Conductive, Gas-Diffusive, and gas Face Fluxes
 
 This section states the discrete face fluxes. The physical derivations are in §7
 (conduction, the gas enthalpy flux), §9 (gas transport and pressure) and §12
@@ -631,117 +629,56 @@ gradients (§13.6.4), so a linear temperature field's flux is exact on any mesh 
 neighbours span every direction. On a line $\mathbf d$ is along the normal, the cross
 part vanishes identically and is not evaluated.
 
-### 13.7.2 Gas-diffusive flux
+### 13.7.2 Gas wall and molecular flux
 
-For every gas component $j$, `GasTransportKernel` writes on the interior faces
-between two live cells the volume-fraction-gradient flux
+The pore state $p_j=\xi_jRT/(M_j\phi)$ supplies the transported potential.
+A lumped half path gives $n_j^D=\Lambda(p_{j,L}-p_{j,R})/(RT_{path}d)$.
+Dusty-gas paths solve the coupled friction matrix using a consistent mean
+face pressure and collective donor composition (§9.4–9.5). The conditioned
+rank-one evaluator is linear in gas-species count and has explicit vacuum
+and pure-gas limits.
 
-$$
-J_{j,f}=-\lambda_f\,\frac{\xi_{j,n}\tilde T_n-\xi_{j,o}\tilde T_o}{\bar T_f\,(d_o+d_n)},\qquad
-\bar T_f=\tfrac12(\tilde T_o+\tilde T_n),
-$$
+---
 
-the discrete form of $J=-(\lambda/T)\,\partial(\xi T)/\partial z$ (§9.1), with
-$\lambda_f$ the guarded distance-weighted harmonic mean of the cells' gas-transfer
-coefficients ($\eta=10^{-20}$ m² s⁻¹) and $\lambda_i$ the effective coefficient at
-the positive-part concentrations and the trial temperature. The product $\xi T$ is
-proportional to the partial pressure, and
-$\xi_n\tilde T_n-\xi_o\tilde T_o=\bar T_f(\xi_n-\xi_o)+\bar\xi_f(\tilde T_n-\tilde T_o)$
-shows the ordinary and the thermal-diffusion parts in one expression. The harmonic
-mean is taken of $\lambda$ alone, the density dependence being carried by the
-concentrations; every gas component shares $\lambda_f$ (§9.2). The concentrations
-are $m/\tilde V$ as stored, so a negative trial concentration is transported as it
-is; the positive part enters only the properties.
+### 13.7.3 Total-flux interface matching
 
-### 13.7.3 Darcy–Fick combined flux
+Each half path adds Darcy flux $v_D p_{j,up}/(RT_{up})$. The interface partial
+pressures satisfy equality of total species flux through the two halves.
+This preserves a wall-only half connected to a Darcy-only half. The lumped
+and pure-gas systems have a positive analytic quadratic solution; general
+dusty-gas systems use a qualified local root and its first implicit derivative.
+Pressure increments retain resolved gradients near equilibrium without
+subtracting reconstructed absolute pressures. Chapter 9 gives degeneracies,
+donor assumptions and root acceptance criteria.
 
-Under `DarcyFickTransport` the flux adds a first-order upwind advective part,
+---
 
-$$
-J_{j,f}=J^\text{diff}_{j,f}+v_f\,\frac{\xi_{j,\text{up}}}{\varphi_f},\qquad
-v_f=-\mathrm{mob}_f\,\frac{P_n-P_o}{d_o+d_n},\qquad
-\xi_{j,\text{up}}=\begin{cases}\xi_{j,o},&v_f\ge0\\ \xi_{j,n},&v_f<0\end{cases}
-$$
+### 13.7.4 Carried enthalpy
 
-with $\mathrm{mob}_f$ the guarded distance-weighted harmonic mean of the cell mobilities
-$\mathrm{mob}_i=\kappa_i/\mu_i$ (guard $\eta_m=10^{-30}$ m² Pa⁻¹ s⁻¹, `MOBILITY_GUARD`, far below the
-mobility of any permeable solid), and $\varphi_f=\tfrac12(\varphi_o+\varphi_n)$ the
-mean of the cells' porosities, each smoothly floored at $10^{-12}$. The cell pressure
-$P_i$ is the ideal-gas closure at the positive-part concentrations, the trial
-temperature and the floored porosity (§9.4); the mobility is the effective
-permeability over the gas viscosity, the viscosity smoothly floored at
-$10^{-12}$ Pa s (§9.5). $\xi$ is per bulk volume and $v_f$ superficial, so the
-advected scalar is the intrinsic density $\xi/\varphi$. Every gas component shares
-$v_f$. The upwind choice is monotone and first-order; its numerical diffusion is
-the subject of §18.7.3.
+The single transmitted molar vector becomes $F_{j,f}=M_j n_{j,f}$ and carries
+$\sum_jF_{j,f}h_j(T_f)$, where
+$T_f=(d_RT_L+d_LT_R)/(d_L+d_R)$. Both species and energy rows scatter this
+shared face value conservatively. Temperature and enthalpy formulations
+use the same fluxes.
 
-### 13.7.4 The enthalpy carried by the gas fluxes
-
-On each interior face the gas-transport kernel adds to the face energy flux the
-sensible enthalpy of the same mass fluxes the mass rows carry,
-
-$$
-F_f\mathrel{+}=\sum_j J_{j,f}\,h_j(T_f),\qquad T_f=\frac{d_nT_o+d_oT_n}{d_o+d_n},
-$$
-
-which gives the energy row its difference form (§13.3.4). The energy-row test
-(`test/outputs/test_energy_ledger.jl`) checks every face energy flux against
-conduction plus the carried enthalpy at the face temperature to $10^{-12}$ relative,
-in both energy forms, under Fickian and Darcy–Fick transport, on uniform and
-stretched meshes (§16.5.5).
+---
 
 ### 13.7.5 Boundary faces
 
-**Mass patches.** The gas-transport kernel holds one patch of mass conditions per
-tag and applies it at `live_face`. With $i$ the boundary cell and $d$ its
-centre-to-face distance,
+`ThermalBoundaryKernel` assembles the complete boundary exchange. Named
+prescribed fluxes, reservoir transport, external films and hydraulic
+resistances provide the species closure. Outward species carry surface
+enthalpy; inward species carry their specified incoming enthalpy.
+For an LTE wall film, $q_r=q_s+H_r-H_s$ converts the wall heat to the
+reservoir control surface and $E_{out}=H_r-q_r$. For adiabatic or prescribed
+heat, donor enthalpy and imposed heat enter directly (§9.9).
 
-$$
-F_{j,f}\mathrel{+}=\frac{v_\text{out}}{\varphi_i}\,\xi_{j,i}-J_{\mathrm{bc},j},
-$$
+The mass and thermal residuals are coupled only when their constitutive
+closures require it. The solve reports its residual and iterations, and
+implicit differentiation includes all local couplings. The boundary state
+is a diagnostic, not a hidden solution-history input.
 
-where $J_{\mathrm{bc},j}$ is the condition's flux into the domain (`mass_bc_flux`,
-evaluated with the cell's $\lambda_i\rho_i$ and $\rho_i$, the mixture density at the
-positive-part concentrations and the trial temperature; §12.4), negated here to the
-outward normal, and $v_\text{out}$ the outward Darcy velocity the pressure condition
-drives (Darcy–Fick transport only; `outward_darcy_velocity`):
-$\mathrm{mob}_i(P_i-P_\mathrm{bc})/d$ for `DirichletPressureBC`, $-\mathrm{mob}_i\,\partial P/\partial n$ for
-`NeumannPressureBC`, $h_P(P_i-P_\mathrm{ext})\,\mathrm{mob}_i/(\mathrm{mob}_i+\eta_m)$ for
-`ConvectivePressureBC`, zero for every other condition, the sum over the members of
-a `CombinedMassBC`. Only outflow is taken (inflow carries none of the tracked gases),
-read from the value of the velocity.
-
-**Thermal patches.** `ThermalBoundaryKernel` holds one patch per tag, applied at
-`live_face`, and writes the outward energy flux $q$ and the face temperature $T_s$:
-
-| Condition | $q$ (along the outward normal) | $T_s$ |
-|---|---|---|
-| `AdiabaticBC` | $0$ | $T_i$ |
-| `HeatFluxBC` | $-q_\mathrm{in}(t)$ | $T_i+q_\mathrm{in}d/k_i$ |
-| `DirichletThermalBC` | $k_i\,(T_i-T_\mathrm{bc})/d$ | $T_\mathrm{bc}$ |
-| every other condition | $-k_i\,(T_s-\tilde T_i)/d$ at the root of $q_\mathrm{bc}(T_s)=k_i(T_s-\tilde T_i)/d$ | the root |
-
-The last row is the surface energy balance, solved by the Newton iteration of
-`solve_boundary_temperature!` started from the cell's trial temperature, with the
-condition evaluated at the trial temperature of the iterate so that the balance has
-a root at any trial state; the face's outward gas mass fluxes feed the blowing
-models of its convective members and the cell's emissivity and absorptivity its
-radiative members (§12.2). Then
-
-$$
-F_f\mathrel{+}=q+\sum_jF_{j,f}\,h_j(T_s):
-$$
-
-the gas leaves at the surface temperature, and the surface balance itself keeps no
-gas-enthalpy term (§7.4.3). The kernel stores $T_s$ in `T_face`; the solution's
-`surface_T` and the boundary-flux series read it. Because the relative fluxes are
-added after this kernel runs, the blowing models and the carried term see the
-gas-transport fluxes alone.
-
-On a mesh of more than one dimension the conductivity is a tensor, the conducted
-flux gains the tangential term of §13.7.1 with the cell's least-squares gradient,
-and a face between a live cell and a dead one is a boundary face of the live cell
-under the exposed tag's condition (element death, §14.5).
+---
 
 ### 13.7.6 Solid and liquid components carry no transport flux
 
@@ -935,8 +872,8 @@ order:
 6. per cell, the trial temperature $\tilde T_i$, the floored heat-capacity sum $C_i$,
    the sensible enthalpies $h_j(T_i)$, the floored conductivity $k_i$, the surface
    emissivity $\varepsilon_i$ and absorptivity $a_i$, the pore-gas properties the gas
-   transport needs ($\lambda_i$; under Darcy–Fick also the floored porosity
-   $\varphi_i$, the pressure $P_i$ and the mobility $\kappa_i/\mu_i$), and under in-depth
+   transport needs (the wall coefficients, molecular resistance, porosity,
+   partial pressures and mobility), and under in-depth
    radiation the absorption coefficient $\alpha_i$.
 
 The node corrections $c_n$ are written next, by the closure (`correction!`, §11.7).
@@ -944,33 +881,28 @@ Which value of each field a kernel reads is fixed:
 
 | Field | Read by |
 |---|---|
-| $\xi_{j,i}=m_{j,i}/\tilde V_i$ (signed, as stored) | reactions, gas fluxes, mass conditions, relative fluxes |
-| $\xi^+_{j,i}$ | every property: $k$, $\varepsilon$, $a$, $\alpha$, $\lambda$, mixture density, porosity, pressure, permeability |
-| $\tilde T_i$ | reactions, properties, the Fickian flux, pressure, the surface balance, the strain rate |
+| $\xi_{j,i}=m_{j,i}/\tilde V_i$ (signed, as stored) | reactions and relative solid-motion fluxes |
+| $\xi^+_{j,i}$ | properties, pore pressure, species transport and reservoir exchange |
+| $\tilde T_i$ | reactions, properties, the lumped wall flux, pressure, the surface balance, the strain rate |
 | $T_i$ | the conductive difference, the sensible enthalpies, the face temperatures $T_f$ |
 
-### 13.10.3 Smooth guards of trial states
+### 13.10.3 Trial extensions and physical admissibility
 
-An implicit or Rosenbrock stage evaluates the residual at trial states that no error
-test has judged yet: a negative mass, a temperature far outside any property law, an
-inverted cell. Every quantity the residual evaluates is therefore finite, with a
-finite derivative, at any real state, so the colored Jacobian is finite there too;
-and each guard is exactly the identity on the physical states the tolerances can
-distinguish. The admissibility part of the integrator's domain test reads the
-unguarded quantities (§15.5.4). The three guards (`src/States/guards.jl`) are $C^1$:
+The shared C¹ guards are defined in `src/Materials/guards.jl`:
+`smooth_clamp` for trial temperature, `positive_part` for inventories, and
+`smooth_floor` for positive divisors. The porosity divisor floor is $10^{-12}$
+and becomes the identity above twice that value. Such extensions let
+intermediate integrator states be evaluated within their finite envelope;
+they do not make a closed pore or an invalid constitutive root admissible.
 
-| Guard | Definition | Uses |
-|---|---|---|
-| `smooth_clamp(x, lo, hi, w)` | `lo` below `lo`, `hi` above `hi`, $x$ on $[lo+w,\,hi-w]$, joins $lo+w\,t^2(2-t)$ with $t=(x-lo)/w$ (and mirrored at $hi$) | the trial temperature $\tilde T=\mathrm{smooth\_clamp}(T,\,200\text{ K},\,3000\text{ K},\,1\text{ K})$ (`trial_temperature`) |
-| `positive_part(m, δ)` | $0$ at and below $0$, $m$ at and above $\delta$, $m\,(3t^2-2t^3)$ with $t=m/\delta$ | $\xi^+$; the caloric extension; the inventory bound of the relative fluxes |
-| `smooth_floor(x, f)` | $f$ at and below $f$, $x$ at and above $2f$, $f\,(1+t^2(2-t))$ with $t=x/f-1$ | volumes, distances, $C_i$, $k_i$, $\varphi_i$, the gas viscosity |
+Condensed caloric scales retain their reference-mass definition. The gas
+transport positive-part scale is recomputed from current temperature and
+pore volume, sharing the pressure-error budget among gas species. Its total
+pressure bias is below 0.26 times that budget (§9.10). Accepted physical states and post-event states are checked
+using raw quantities and a mass/thermal/geometry uncertainty margin. Local
+transport failures are diagnosed explicitly (Chapter 9).
 
-The scale of the positive part is the cell's mass absolute tolerance,
-$\delta_i=\texttt{reltol}\cdot\varepsilon_m\cdot m^s_i(0)$ (§13.10.5), so a mass the
-integrator cannot distinguish from zero gets no property weight and a mass it can is
-taken as it is. The trial clamp keeps $e^{-E/R\tilde T}$ finite with a finite
-derivative at zero and negative trial temperatures and is the temperature itself on
-every physical state.
+---
 
 ### 13.10.4 The energy state and the caloric extension
 
@@ -1003,26 +935,23 @@ root is corrected by one Newton step per nesting level, which carries the
 implicit-function derivatives exactly. A non-finite inventory has temperature `NaN`,
 so the residual of such a trial state is `NaN` and the integrator rejects the step.
 
-### 13.10.5 Reference data and per-row tolerances
+### 13.10.5 Reference scales and pressure-aware error control
 
-`CellReference` (`src/States/tolerances.jl`) holds the constants fixed at setup, per
-cell: the initial volume $V_i(0)$; the reference condensed mass $m^s_i(0)$ (the
-cell's initial solid and liquid mass, or for a cell that starts with none its total
-initial mass, or $1$ kg m⁻³ times its volume), which is the deactivation reference
-(§14.3.2) and the scale of the mass tolerances; the positive-part scale $\delta_i$;
-the volume floor $10^{-8}V_i(0)$; the capacity floor $C_{\mathrm{floor},i}$; the
-reference node positions; the initial thicknesses $\Delta z_i(0)$; and $A_0$.
+`CellReference` holds initial volume, condensed mass, geometry, capacity
+floors and the pressure-error budget. Condensed-mass and geometry absolute
+tolerances retain their reference scales. Gas-row reference tolerances are
+$\phi_i(0)V_i(0)M_jp_{tol}/(N_gRT_i(0))$.
 
-The per-row absolute tolerances (`abstol_vector`, §15.5.6) follow the same scales:
-$\texttt{reltol}\,\varepsilon_m\,m^s_i(0)$ on every mass row of cell $i$ (never a
-per-component inventory, which is zero for a product) and on its history pair;
-`abstol` [K] on a temperature row; $\varepsilon_m\,m^s_i(0)\,c_{p,\mathrm{ref}}\,\texttt{abstol}$
-on an enthalpy row, so that a cell at the deactivation threshold resolves its
-temperature to `abstol` as the temperature form does; on a moving mesh
-$\texttt{reltol}\,\varepsilon_m\,\Delta z_n$ on node $n$'s position ($\Delta z_n$ the
-smallest initial thickness of the cells around it) and that over the first step on
-its velocity; $\texttt{reltol}$ times the largest incident intensity over the time
-span on a face intensity; $\texttt{reltol}\,A_0$ on the area.
+The internal error norm also reconstructs each unscaled local error at the
+proposed state and differentiates $p_j=m_jRT/(M_jW)$, with
+$W=V-\sum_{condensed}m_j/\rho_{i,j}(T)$. Temperature, condensed masses,
+positions, cross section and caloric inversion therefore contribute to the
+pressure-error estimate. Each species shares the absolute budget, and the
+sum of absolute partial-pressure errors is controlled by the total budget.
+This is a local estimate; accumulated global error is qualified against
+tighter trajectories. No residual evaluation mutates solver tolerances.
+
+---
 
 ### 13.10.6 Example
 
@@ -1033,9 +962,11 @@ using Pyrolysis
 using Pyrolysis.Internal: residual!, buffers, mass_index, energy_index, position_index,
     velocity_index, state_length, is_differential
 
-solid = SolidComponent(:solid, ρ = 1190.0, c = 1420.0, k = 0.19, λ = 1e-6)
-gas = GaseousComponent(:gas, M = 0.1, c = 1500.0, k = 0.02, λ = 1e-5)
+solid = SolidComponent(:solid, ρ = 1190.0, φ=.3, c = 1420.0, k = 0.19, λ = 1e-6)
+gas = GaseousComponent(:gas, M = 0.1, c = 1500.0, k = 0.02,)
 material = Material(
+    gas_transport=LumpedTransfer(endpoint=LumpedEndpoint(λ=1e-6,κ=0.,max_skeletal_occupancy=.001)),
+
     name = :slab,
     components = (solid, gas),
     reactions = (Reaction(:gasification, 1 => 2, A = 8.5e12, E = 188e3, h = 8.7e5),),
@@ -1048,7 +979,7 @@ problem = PyrolysisProblem(
             top = HeatFluxBC(50e3) + RadiativeBC(ε = 0.9, T_inf = 300.0),
             bottom = AdiabaticBC(),
         ),
-        mass = (top = DiffusiveMassBC(), bottom = ImpermeableBC()),
+        mass = (top = AmbientGasBC(GasReservoir(P=0., T=300.)), bottom = ImpermeableBC()),
     ),
     T_initial = z -> 300.0 + 2e5 * z,      # 300 K at the back, 700 K at the surface
     ξ_initial = [z -> 1190.0, z -> 0.0],
@@ -1074,8 +1005,8 @@ prints
 102 rows, 21 algebraic
 (1, 2, 3, 4, 5, 6)
 (0.11900000000000005, 0.00010000000000000005, 1190.0, 690.0, 168.98000000000008)
-(-38157.35851219801, 700.041410134789)
-(-29.60960700970245, -0.0059319424191924845)
+(-38157.35850998746, 700.0414101347891)
+(-29.609607022784147, -0.0059319424191924845)
 ```
 
 The state has $21\times2+20\times3=102$ rows: a position and a velocity per node and
@@ -1093,85 +1024,43 @@ at $59.3$ kg m⁻³ s⁻¹ times its volume.
 
 ## 13.11 Comparison to Gpyro and ThermaKin2Ds Discretizations
 
-We map the reference codes' notation onto the nomenclature of §2 on first use, then
-contrast the discretization choices.
+### 13.11.1 Gpyro
 
-### 13.11.1 Gpyro (Lautenberger & Fernandez-Pello)
+The documented 1D Gpyro method uses fully implicit control-volume balances,
+with changing cell thicknesses, harmonic interface transport coefficients,
+source linearization and tridiagonal solves in an iterative coupled solution
+(GP §§4.1, 6). Boundary nodes lie on half-cell boundaries.
 
-Gpyro is a 1D (optionally pseudo-2D) generalized condensed-phase pyrolysis solver
-using a **Patankar-style finite-volume** discretization (control volumes about
-cell-centred nodes). Mapping its symbols to ours: Gpyro's pre-exponential
-$Z\to A_i$, permeability $K\to\kappa$, kinematic viscosity $\nu$ (in
-$\dot m''=-(K/\nu)(\partial P/\partial z-g\rho_g)$), conversion $\alpha_\text{conv}$,
-and the overbarred mixture density $\bar\rho$.
+GP's convection–diffusion scheme is **selected by an input option**; central,
+upwind, hybrid, power-law and exponential forms have different Péclet-number
+coefficient functions (GP Table 2; 0.8200 `GET_A`/`GET_A_SINGLE`). It does
+not automatically choose among all schemes as the Péclet number changes.
+Pyrolysis.jl uses first-order upwind Darcy advection, a separate diffusive
+law and distance-weighted harmonic face coefficients. Its semi-discrete
+system is advanced with a stiff integrator and a coupled colored Jacobian.
+Those shared finite-volume features do not make the diffusion laws or time
+errors identical (§9.10).
 
-- **Conservation form.** Gpyro writes integral control-volume balances of
-  $\bar\rho\Delta z$, $\bar\rho Y_i\Delta z$, gas mass and energy on volumes that
-  deform with the solid. Pyrolysis.jl integrates extensive cell inventories too: the
-  component masses are the states and every flux is scattered antisymmetrically, so
-  mass telescopes exactly (§13.3.3). The energy state is the temperature (or the
-  sensible-enthalpy inventory), every component is stored in $C_i$, and the gas
-  enthalpy is a face flux (§13.3.4, §13.7.4). Both telescope to the same
-  boundary-flux balance.
-- **Interface interpolation.** Patankar's hallmark is the **harmonic interface
-  conductivity**, justified by flux continuity across a control-volume face; it is
-  the resistance-in-series mean of §13.7.1–§13.7.3, which Pyrolysis.jl
-  distance-weights for non-uniform meshes and guards smoothly so that it stays
-  differentiable as a coefficient vanishes.
-- **Convection scheme.** Patankar/Gpyro selects the face scheme by the cell
-  **Péclet number** (central below about 2, upwind or power-law above). Pyrolysis.jl
-  does not switch on the Péclet number: diffusion is always the
-  volume-fraction-gradient flux and Darcy advection is first-order upwind; keeping
-  the cell Péclet number moderate is left to the resolution (§18.7.3).
-- **Linear solver.** Gpyro is fully implicit (backward Euler) with Patankar
-  linearization solved by **TDMA** (the Thomas algorithm). Pyrolysis.jl assembles
-  the semi-discrete mass-matrix system and hands it to a stiff integrator, `Rodas5P`
-  by default, with the colored sparse Jacobian and a sparse LU factorization
-  (`StructuredKLU`, §15).
-- **Pressure and Darcy flow.** Gpyro's Darcian flux includes buoyancy; Pyrolysis.jl's
-  $v_g=-(\kappa/\mu)\,\partial P/\partial z$ (§13.7.3) omits the gravity term
-  (through-thickness 1D, gravity negligible) and uses the dynamic viscosity $\mu$.
+### 13.11.2 ThermaKin2Ds
 
-### 13.11.2 ThermaKin2Ds (Stoliarov et al.)
+TK §3 calls its spatial elements **finite volumes**, carrying component
+masses and temperature. It uses Crank–Nicolson integration in the primary
+coordinate and explicit updates in the transverse coordinate, with changing
+element sizes and conservative size adjustment. It should not be contrasted
+with Pyrolysis.jl as a fixed-grid finite-difference method with no volume
+inventory conservation.
 
-ThermaKin is a 1D (with 2D extensions) finite-difference pyrolysis solver. Mapping
-its symbols: the stoichiometric coefficient $\theta_i^j\to\nu_{i,j}$ (overload A2:
-ThermaKin's $\theta$ is stoichiometry, ours is the strain rate). ThermaKin publishes
-its heats of reaction with $h>0$ exothermic, the opposite of the storage convention
-here; Gpyro and FDS use the same sign as Pyrolysis.jl (§6.9.2).
-
-- **Gas transport.** The volume-fraction-gradient flux
-  $J=-(\lambda/T)\,\partial(\xi T)/\partial z$ (§13.7.2) is ThermaKin's
-  $J=-\rho_g\lambda\,\partial(\xi_g/\rho_g)/\partial x$ with the ideal-gas density.
-  For a rigid matrix ThermaKin recovers a Boyle's-law Darcy form; Pyrolysis.jl
-  provides the explicit Darcy–Fick path (§13.7.3) for that regime.
-- **Convective energy term.** ThermaKin's energy equation (its Eq. 17) carries the gas
-  sensible enthalpy as $c_g\,(J_g\cdot\partial T/\partial x)$ and stores every
-  component in the heat capacity. Pyrolysis.jl stores every component in $C_i$ and
-  carries the gas enthalpy as the face flux $\sum_jJ_{j,f}h_j(T_f)$, the temperature
-  row subtracting $\sum_jh_j(T_i)\dot M_{j,i}$: the conservative face form of the same
-  term (§13.3.4).
-- **Time discretization.** ThermaKin uses Crank–Nicolson in the through-thickness
-  direction and explicit updates in the transverse directions, with second-order
-  finite differences on a structured grid. Pyrolysis.jl is finite-volume (extensive
-  rows, antisymmetric scatter) and integrates in time with adaptive stiff methods
-  (§15).
-- **Moving mesh.** ThermaKin adjusts its mesh around a single reference point as the
-  material deforms; Pyrolysis.jl moves the node positions as states with the solid
-  velocity plus a correction (§11), and represents lateral shrinkage by the
-  cross-section rows (§10).
-
-The shared lineage (harmonic interface averaging, the volume-fraction-gradient gas
-flux, every component stored in the heat capacity) is intentional: Pyrolysis.jl
-reproduces the ThermaKin and Gpyro physics in a type-stable, allocation-free assembly
-that automatic differentiation passes through, which is what the colored Jacobian
-needs.
+Pyrolysis.jl carries extensive mass states, optional enthalpy states, and
+the moving geometry in one mass-matrix system. Its source code establishes
+these choices; TK's manual establishes its own method. Neither description
+alone establishes relative accuracy, computational cost, or stability on a
+particular ignition transient.
 
 ---
 
 ## 13.12 Limitations and Open Issues
 
-1. **First-order Darcy–Fick advection.** The pressure-driven advective face flux is
+1. **First-order gas advection.** The pressure-driven advective face flux is
    first-order upwind (§13.7.3); the second-order van Albada reconstruction exists
    only for the relative fluxes of a corrected moving mesh (§11.6). Sharp
    pressure-driven composition fronts are smeared at first order unless the mesh is

@@ -83,9 +83,9 @@ function p_inject(base, θ)
     A, E, h = 10.0^θ[1], θ[2], θ[3]
 
     # λ > 0 on the condensed components keeps gas transport non-degenerate (§13.9)
-    virgin = SolidComponent(:virgin; ρ = 1190.0, c = 1500.0, k = 0.20, λ = 1e-6)
-    char   = SolidComponent(:char;   ρ = 200.0,  c = 1200.0, k = 0.10, λ = 1e-6)
-    gas    = GaseousComponent(:gas;   M = 0.100, c = 1500.0, k = 0.02, λ = 1e-5)
+    virgin = SolidComponent(:virgin; ρ = 1190.0, φ=.3, c = 1500.0, k = 0.20, λ = 1e-6)
+    char   = SolidComponent(:char;   ρ = 200.0, φ=.3,  c = 1200.0, k = 0.10, λ = 1e-6)
+    gas    = GaseousComponent(:gas;   M = 0.100, c = 1500.0, k = 0.02,)
 
     rxn = Reaction(:decomp, 1 => (2, 3);
                    A = A, E = E, h = h,        # ← the perturbed parameters
@@ -103,7 +103,7 @@ function p_inject(base, θ)
         thermal = (top    = HeatFluxBC(50e3) + RadiativeBC(ε = 0.9, T_inf = 300.0)
                             + ConvectiveBC(h = 10.0, T_inf = 300.0),
                    bottom = AdiabaticBC()),
-        mass    = (top = DiffusiveMassBC(Inf), bottom = ImpermeableBC()),
+        mass    = (top = AmbientGasBC(GasReservoir(P=0., T=300.)), bottom = ImpermeableBC()),
     )
 
     return PyrolysisProblem(;
@@ -144,7 +144,7 @@ handles:
 | `A_i`, `E_i` | `Reaction(...; A=, E=)` | the dominant kinetic sensitivities; pass `log10(A)` |
 | `h` (heat of reaction) | `Reaction(...; h=)` | scalar, tuple `(a,b)` → linear, or a closure |
 | `ρ_j`, `c_p`, `k_j` | `SolidComponent(...; ρ=, c=, k=)` | pass a number, or a `CallableProperty` closing over `θ` |
-| `λ_j`, `κ_j` | component `λ=`, `κ=` | gas-transfer / permeability for Darcy mode |
+| `λ_j`, `κ_j` | component `λ=`, `κ=` | superficial matrix transfer / permeability |
 | `ε_j`, `a_j`, `α_j` | component `ε=`, `absorptivity=`, `α=` | emissivity / surface absorptivity / mass-basis absorption coefficient |
 | BC parameters | `HeatFluxBC`, `ConvectiveBC(h=,T_inf=)`, `RadiativeFluxBC(flux=)`, … | external flux, `h_conv`, `T_∞` |
 | mixing `β` | `MixingSpec(WEIGHTED, β)` | conductivity / transport blend weight |
@@ -435,14 +435,7 @@ take its gradient's step from the convergence check (§13.4.1).
 > sees comparable scales; otherwise the line search struggles and the gradient is
 > lopsided.
 
-The shipped `examples/df_sensitivity_comparison.jl` is **not** a programmatic
-fitter — it parses a ThermaKin2Ds reference output
-(`docs/DF_sensitivity_Cone_output.txt`) and an already-fitted Julia result CSV
-(`douglas_fir_results_50kWm2_fit.csv`, which `examples/07_douglas_fir_cone.jl`
-writes when run with `q_external = 50e3`) and overlays them (MLR, surface/back
-temperature, mass, component MLR). Use it as a template for *validating* a fit
-against a reference code, not for generating one. The actual fitting workflows live under
-`examples/inverse_analysis/`.
+The fitting workflows live under `examples/inverse_analysis/`.
 
 ---
 
@@ -533,17 +526,10 @@ The package uses smooth constructions where it can (tanh temperature gates, the
 one-sided depletion limiter, limited face values, C¹ guards — Technical
 Reference §17.6), but several configurations still spoil a derivative:
 
-- **Degenerate gas transport.** Condensed components default to `λ = 0`. Under
-  Fickian gas transport, gas then cannot enter a cell that holds none: the gas
-  field ends in a sharp front that advances only when integration noise seeds
-  the next cell. The integrator rejects step after step on that front (2,016
-  accepted and 379 rejected steps on the §13.2 material, against 295 and 23
-  with `λ = 1e-6`), the trajectory carries errors whose timing changes from
-  one `θ` to the next, and finite differences of it are meaningless (§13.4).
-  `solve` warns in this configuration ("… the gas field forms a sharp front,
-  and the integrator rejects step after step on it. Give the condensed
-  components a small λ …"); give the condensed components a small `λ` (e.g.
-  `1e-6` m²/s), as §13.2 does.
+- **Transport support and local roots.** Closed channels are legal. A changing
+  series barrier, an unsupported matrix endpoint, a singular interface root or
+  a donor switch can limit differentiability. Check the diagnosed root residual
+  and qualify finite differences within the same constitutive branch (§7.5).
 
 - **Each solve from its own initial state.** Every perturbed solve must
   integrate the same map from the initial state its own problem defines.

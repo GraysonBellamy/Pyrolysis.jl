@@ -2,7 +2,7 @@
 # V-CPL-01 — Neumann two-phase Stefan problem (latent-heat front)
 # =============================================================================
 #
-# Gpyro's flagship moving-front verification (Lautenberger §3.4.3, Eqs.
+# Gpyro's moving-front verification (Lautenberger dissertation §3.4.3, Eqs.
 # 3.137–3.138; Carslaw & Jaeger §11.2). Liquid initially at T₀ > T_m; wall
 # (top face) dropped to T∞ < T_m at t = 0; a solidification front
 # s(t) = 2λ√(αₛt) propagates inward releasing ΔH_m. Exact solution and

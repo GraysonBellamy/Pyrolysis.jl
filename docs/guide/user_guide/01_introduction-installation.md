@@ -82,7 +82,7 @@ To set expectations up front, the model does **not** support:
 | Multi-step Arrhenius kinetics | A tuple of `Reaction`s on the `Material` | TR §6 |
 | Effective (mixture) properties, mixing rules | `MixingSpec`, `MaterialMixing` | TR §5 |
 | Surface / in-depth radiation | `solve(...; radiation_model = …)` + `RadiativeFluxBC` | TR §8 |
-| Pressure-driven gas transport (Darcy–Fick) | Set `κ > 0` on a solid/liquid component | TR §9 |
+| Pressure-driven gas transport | Set `κ > 0` on a solid/liquid component | TR §9 |
 | Volume change, swelling, intumescence | The swelling factor `γ` on components | TR §10 |
 | Lateral shrinkage / variable cross-section | `lateral_shrinkage_law` on the `Material` (with `use_ale = true`) | TR §10 |
 | Mesh moving with the solid (surface recession) | `solve(...; use_ale = true)` | TR §11 |
@@ -376,144 +376,46 @@ together.
 
 ---
 
-## 1.8 A minimal "hello pyrolysis" example
+## 1.8 A minimal gas-producing slab
 
-The script below is a complete, runnable simulation: a 1 cm slab of PMMA-like
-material, modeled as one solid that decomposes into one gas, heated from the top
-by a constant 50 kW/m² flux, insulated at the bottom, integrated for 60 seconds.
-Every function, type, and keyword used here is part of the public API, and the
-script runs as written, returning `retcode = :Success`.
+This illustrative porous matrix decomposes into a gas and exchanges with
+an explicit vacuum at the exposed face. Its physical porosity is 0.3 and
+its lumped superficial coefficient is declared on the condensed component.
+The finite endpoint covers complete loss of matrix support.
 
 ```julia
 using Pyrolysis
-
-# 1. Define the material: one solid component + one gaseous product.
-pmma = Material(
-    name = :PMMA,
-    components = (
-        SolidComponent(:virgin, ρ = 1190, c = 1420, k = 0.21, ε = 0.86, λ = 1e-6),
-        GaseousComponent(:MMA,  M = 0.100, c = 1500, k = 0.02, λ = 1e-5),
-    ),
-    reactions = (
-        # :virgin → :MMA, endothermic (h > 0): absorbs 870 kJ/kg of reactant.
-        Reaction(:decomposition, :virgin => :MMA, A = 8.5e12, E = 188e3, h = 870e3),
-    ),
-)
-
-# 2. Build a uniform mesh: 1 cm thick, 40 cells.
-mesh = create_uniform_mesh(0.01, 40)
-
-# 3. Boundary conditions: constant heat flux on top, insulated bottom,
-#    gas free to diffuse out the top, impermeable bottom.
+material = Material(name=:porous_polymer,
+    components=(
+        SolidComponent(:virgin; ρ=1190., φ=.3, c=1420., k=.21, λ=1e-6),
+        GaseousComponent(:MMA; M=.100, c=1500., k=.02)),
+    reactions=(Reaction(:decomposition, :virgin=>:MMA;
+                        A=8.5e12, E=188e3, h=870e3),),
+    gas_transport=LumpedTransfer(endpoint=LumpedEndpoint(
+        λ=1e-6, κ=0., max_skeletal_occupancy=.001)))
 bcs = BoundaryConditionSet(
-    thermal = (top = HeatFluxBC(50e3),     bottom = AdiabaticBC()),
-    mass    = (top = DiffusiveMassBC(),    bottom = ImpermeableBC()),
-)
-
-# 4. Assemble the problem. T_initial defaults to z -> 300.0; ξ_initial defaults
-#    to the first solid at its reference density (1190 kg/m³) and the gas at 0.
-problem = PyrolysisProblem(
-    mesh      = mesh,
-    material  = pmma,
-    bc_set    = bcs,
-    T_initial = z -> 300.0,
-    tspan     = (0.0, 60.0),
-)
-
-# 5. Solve and inspect.
-solution = solve(problem)
-println("retcode      = ", solution.retcode)          # Success
-println("surface T(t) = ", solution.surface_T[end], " K")
-println("T field size = ", size(solution.T))           # (n_cells, n_times)
+    thermal=(top=HeatFluxBC(50e3), bottom=AdiabaticBC()),
+    mass=(top=AmbientGasBC(GasReservoir(P=0., T=300.)), bottom=ImpermeableBC()))
+problem = PyrolysisProblem(mesh=create_uniform_mesh(.01,40), material=material,
+    bc_set=bcs, T_initial=z->300., tspan=(0.,60.))
+solution = solve(problem; pressure_tolerance=1.)
+@assert completed(solution)
+println(solution.surface_T[end])
+println(maximum(get_pressure(solution)))
 ```
 
-A few notes on what each step does and what is defaulted:
+The default initial concentration fills the first solid at its bulk density;
+other species start empty. For a positive-pressure reservoir, declare its
+composition and initialize pore gas consistently when equilibrium is intended.
+`pressure_tolerance` is an absolute local pressure-error budget in Pa. The
+solver also controls the mass, thermal and geometry rows and checks physical
+pore-volume admissibility throughout the evolution.
 
-- **`Material(; name, components, reactions = (), mixing = MaterialMixing(),
-  lateral_shrinkage_law = nothing, depletion_limiter = DepletionLimiter(),
-  gas_viscosity = SutherlandProperty())`** — the components tuple is
-  heterogeneous (a `SolidComponent` and a `GaseousComponent`); the reaction's
-  symbolic `:virgin => :MMA` pair is resolved to component indices against the
-  components tuple inside the constructor. Materials and reactions are covered
-  in UG 3 and UG 4.
-- **`SolidComponent(:name; ρ, c, k, …)`** requires bulk density `ρ`, heat
-  capacity `c`, and conductivity `k`; `ε` (emissivity, a number or a property
-  function of temperature) defaults to `0.9`, the surface `absorptivity` for
-  incident radiation to `nothing` (Kirchhoff, `a = ε(T)`), the swelling factor
-  `γ` to `1.0`, permeability `κ` to `0.0` (impermeable, so no Darcy flow), the
-  gas-transfer coefficient `λ` to `0.0`, and the mass-absorption coefficient `α`
-  to `0.0`. Any of `ρ`, `c`, `k` may be a number or a property function (UG 3).
-  The example gives the solid a small `λ = 1e-6` m²/s: with `λ = 0` on a
-  condensed component of a gas-producing material, Fickian gas transport
-  vanishes in a cell that holds no gas, the gas field ends in a sharp front, and
-  problem validation warns (UG 15).
-- **`GaseousComponent(:name; M, c, k, λ)`** requires molar mass `M` (kg/mol),
-  heat capacity `c`, conductivity `k`, and gas-transfer coefficient `λ`. Its
-  density defaults to the ideal-gas law and its swelling factor `γ` to `0.0` (gas
-  escapes without changing the matrix volume).
-- **`Reaction(:name, reactant => product; A, E, h)`** with symbol payloads creates
-  a single-reactant, single-product reaction. `n` (reaction order) defaults to
-  `1.0`, `T_min` to `0.0`, `T_max` to `Inf`, `gate_width` (tanh gate ramp) to
-  `1.0` K. Remember `h > 0` is endothermic.
-- **`create_uniform_mesh(L, n_cells; coordinates = Planar(), cross_section = 1.0)`**
-  builds the mesh: `n_cells` equal cells from `z = 0` to `z = L`. The mesh holds
-  geometry only — no component count and no initial state. Geometry is covered
-  in UG 6.
-- **`BoundaryConditionSet(; thermal, mass)`** takes per-boundary NamedTuples keyed
-  by `:top` and `:bottom`. Unspecified slots default to `AdiabaticBC` (thermal)
-  and `ImpermeableBC` (mass). `DiffusiveMassBC()` defaults to infinite external
-  conductance (`h_m = Inf`, i.e. pure internal-diffusion-limited escape). Boundary
-  conditions are covered in UG 5.
-- **`PyrolysisProblem(; mesh, material, bc_set, tspan, …)`**: `T_initial` defaults
-  to `z -> 300.0`, `ξ_initial` defaults to the first solid component at its
-  reference density (others zero), `dt_initial` to `1e-4`, and `output_times` is
-  auto-generated (11–101 evenly spaced samples over `tspan`) when left empty.
-  The initial fields are evaluated at the cell centres when the problem is set up.
-- **`solve(problem; …)`** returns a `PyrolysisSolution`. Key defaults are the
-  `Rodas5P` integrator (`integrator_policy = default_policy`) with the
-  `StructuredKLU()` linear solver, `abstol = 1e-8` (the temperature tolerance,
-  K), `reltol = 1e-6`, `use_ale = false` (fixed mesh),
-  `radiation_model = NO_RADIATION`, `deactivation = false`, `validate = true`,
-  and `progress = false` (`progress = true` draws a progress bar). An unknown
-  keyword is refused with an `ArgumentError`. The full option set is documented
-  in UG 8.
-
-### Reading the result
-
-`solve` returns a `PyrolysisSolution`. The fields you will use most are:
-
-- `solution.t` — the vector of saved times (s).
-- `solution.T` — temperature field, an `n_cells × n_times` matrix (K).
-- `solution.ξ` — concentrations, an `NC × n_cells × n_times` array (kg/m³).
-- `solution.m` — component masses per cell, an `NC × n_cells × n_times` array (kg).
-- `solution.surface_T` — the exposed-surface (top) temperature per saved time (K).
-- `solution.mass_loss_rate` — the mass leaving through every boundary face, per
-  unit current area of the top face (the bottom term is zero for an impermeable
-  holder) (kg·m⁻²·s⁻¹).
-- `solution.retcode` — the integrator return code (`:Success`, `:Terminated`,
-  `:Failure`, …), and `solution.outcome` — `:running` unless burnout or the
-  `min_thickness` stop ended the solve.
-
-The solution's accessors are exported with the package:
-
-```julia
-T_profile = get_profile(solution, :T, 1)                     # temperature in every cell at the first saved time
-ξ1_final  = get_profile(solution, :ξ1, length(solution.t))   # ξ of component 1 at the last saved time
-positions = get_cell_positions(solution)                     # cell-centre z positions at the last saved time (m)
-fields    = solution(30.0)                                   # the fields at t = 30 s, between saved times
-```
-
-`succeeded(solution)` and `completed(solution)` test how the solve ended (UG 9).
-
-If you have `Plots` installed and loaded, the plotting extension provides recipes
-for the common views (covered fully in UG 9):
-
-```julia
-using Plots
-plot(solution)                       # default: surface temperature trace
-plot(solution; kind = :mlr)          # mass-loss rate vs time
-plot(solution; kind = :heatmap)      # T(z, t) heatmap
-```
+Gas properties are specified by `GaseousComponent(;M,c,k,...)`; transport data
+belong to the matrix and its declared `LumpedTransfer` or `DustyGas` model.
+The default mass boundary is impermeable and the default thermal boundary is
+adiabatic. A finite external mass film is an optional `MassTransferFilm(g)`
+with conductance in kg/(m² s). See Chapters 3, 5 and 7 for the complete inputs.
 
 ---
 
@@ -533,15 +435,15 @@ stable, user-facing API. The top-level exports cover:
 - **Boundary conditions:** the thermal conditions (`HeatFluxBC`, `ConvectiveBC`,
   `RadiativeBC`, `RadiativeFluxBC`, `CombinedThermalBC`, `DirichletThermalBC`,
   `AdiabaticBC`), the mass conditions (`ImpermeableBC`, `MassFluxBC`,
-  `ConvectiveMassBC`, `DiffusiveMassBC`, `CombinedMassBC`), the pressure
-  conditions (`DirichletPressureBC`, `NeumannPressureBC`, `ConvectivePressureBC`),
+  `AmbientGasBC`, `GasReservoir`, `MassTransferFilm`), the pressure
+  conditions (`NeumannPressureBC`, `ConvectivePressureBC`),
   the container `BoundaryConditionSet`; the blowing models of `ConvectiveBC`
   (`AbstractBlowingModel`, `NoBlowing`, `CouetteFilm`, `PropertyRatioFilm`,
   `PoolingFilm`, `FunctionBlowing`) with the gas data and helpers they read
   (`GasSpecies`, `NITROGEN`, `nasa7_heat_capacity`, `eucken_viscosity`,
   `fuller_diffusivity`, `BlowingFace`, `blowing_state`, `blowing_ratio`,
   `blowing_factor`); and `background_gas_concentration` for pore-air
-  initialization in Darcy–Fick problems.
+  initialization in lumped gas transport problems.
 - **Radiation models:** `RadiationModel`, `NO_RADIATION`, `SURFACE_ABSORPTION`,
   `BEER_LAMBERT`.
 - **The mesh:** `create_uniform_mesh`, `create_stretched_mesh`,
@@ -585,10 +487,10 @@ reach it through its submodule.
 
 A couple of practical notes you will encounter later in the guide:
 
-- The simulation modes — a fixed or moving mesh, the radiation rows, Fickian or
-  Darcy–Fick gas transport, the energy state, the variable cross-section — are
+- The simulation modes — a fixed or moving mesh, the radiation rows, lumped or
+  lumped gas transport gas transport, the energy state, the variable cross-section — are
   not types you pick. `setup` decides them from the material (a permeable
-  component selects Darcy–Fick transport, a `lateral_shrinkage_law` the
+  component selects gas transport, a `lateral_shrinkage_law` the
   cross-section rows) and from the `solve` keywords (`use_ale`,
   `radiation_model`, `energy_state`, `deactivation`) (UG 7).
 - Symbols reached through `Internal` or a submodule are **not** part of the stable
@@ -612,13 +514,11 @@ with:
 |---|---|
 | `examples/06_cone_calorimeter.jl` | PMMA, 5.8 mm, at 25 kW/m²: single-step kinetics, temperature-dependent properties, combined thermal conditions, a mesh moving with the solid and cell deactivation; overlays ThermaKin outputs when present |
 | `examples/06_cone_calorimeter_surface_absorption.jl` | The same case with `radiation_model = SURFACE_ABSORPTION`; writes figures and a CSV to `output/` |
-| `examples/07_douglas_fir_cone.jl` | Douglas fir, 12 mm, at 75 kW/m²: five-step kinetics with moisture evaporation, Darcy–Fick transport with background pore air, surface absorption, a moving mesh |
-| `examples/08_darcy_fick_demo.jl` | Pressure-driven (Darcy–Fick) gas transport through a charring, wood-like slab |
-| `examples/08_pressure_treated_wood_cone.jl` | Pressure-treated wood with moisture and temperature-limited reactions |
+| `examples/07_douglas_fir_cone.jl` | Douglas fir, 12 mm, at 75 kW/m²: five-step kinetics with moisture evaporation, gas transport with background pore air, surface absorption, a moving mesh |
+| `examples/08_gas_transport.jl` | Lumped and dusty-gas transport with a finite reservoir film |
+| `examples/08_pressure_treated_wood_cone.jl` | Pressure-treated wood with moisture and multi-step Arrhenius kinetics |
 | `examples/convergence_douglas_fir.jl` | Grid-convergence study (uses `Distributed`) |
 | `examples/moisture_hos_comparison.jl` | Moisture transport with state-dependent heat of sorption |
-| `examples/ptw_comparison.jl` | Pressure-treated wood results against ThermaKin output |
-| `examples/df_sensitivity_comparison.jl` | Inter-code sensitivity comparison for the Douglas fir case |
 | `examples/export_results_csv.jl` | Writes a solution's series and profiles to CSV files |
 
 The subdirectories hold larger studies: `inverse_analysis/` (fitting white-pine

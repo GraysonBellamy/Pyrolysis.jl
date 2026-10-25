@@ -19,8 +19,8 @@ edges (the `BoundaryConditionSet`), *where* the domain lives (the mesh), bundle
 them into a `PyrolysisProblem`, hand that to `solve`, and read results off the
 returned `PyrolysisSolution`.
 
-The deck is that of `examples/06_cone_calorimeter.jl`, with one addition: the
-two solids get a small gas-transfer coefficient `λ` (§2.2.2).
+The deck uses the material, atmospheric pore gas and boundary conditions of
+`examples/06_cone_calorimeter.jl`.
 
 ---
 
@@ -67,11 +67,12 @@ A `Material` is a tuple of **components** (the chemical species, each a phase
 with its own thermophysical properties) plus a tuple of **reactions** (the
 Arrhenius kinetics that convert one species into others), plus the
 **mixing rules** used to blend per-component properties into effective
-mixture properties. PMMA needs three components:
+mixture properties. This atmospheric PMMA model tracks four components:
 
 1. **Virgin PMMA** — the solid that decomposes.
 2. **Char** — a small solid residue left behind.
 3. **MMA gas** — the monomer that escapes through the matrix.
+4. **Air** — the initial pore gas and external reservoir species.
 
 ### 2.2.1 Temperature-dependent properties
 
@@ -107,72 +108,25 @@ Reference §4.
 
 ### 2.2.2 Component constructors
 
-Each component is built with a keyword constructor. Solids and liquids carry a
-bulk density, heat capacity, conductivity, emissivity, an in-depth radiation
-absorption coefficient, and optionally permeability and a swelling factor.
-Gases instead carry a molar mass (for the ideal-gas density) and a gas-transfer
-(diffusion) coefficient `λ`.
-
 ```julia
-virgin = SolidComponent(
-    :virgin,
-    ρ = 1210.0,     # bulk density [kg/m³]
-    c = pmma_cp,    # heat capacity [J/(kg·K)]
-    k = pmma_k,     # thermal conductivity [W/(m·K)]
-    ε = 0.96,       # surface emissivity [-]   (default 0.9)
-    α = 1.47,       # mass absorption coefficient [m²/kg]  (default 0.0)
-    λ = 1e-6,       # gas-transfer coefficient [m²/s]  (default 0.0)
-)
-
-char = SolidComponent(
-    :char,
-    ρ = 1210.0,
-    c = pmma_cp,
-    k = pmma_k,
-    ε = 0.96,
-    α = 1.47,
-    λ = 1e-6,
-)
-
-mma = GaseousComponent(
-    :MMA,
-    M = 0.10012,    # molar mass [kg/mol]  (required)
-    c = 1500.0,     # gas heat capacity [J/(kg·K)]
-    k = 0.02,       # gas conductivity [W/(m·K)]
-    λ = 1e-5,       # gas-transfer (diffusion) coefficient [m²/s]
-)
+virgin = SolidComponent(:virgin; ρ=1210., φ=.01, c=pmma_cp, k=pmma_k,
+                        ε=.96, λ=1e-5)
+char = SolidComponent(:char; ρ=1210., φ=.01, c=pmma_cp, k=pmma_k,
+                      ε=.96, λ=1e-5)
+mma = GaseousComponent(:MMA; M=.10012, c=1500., k=.02)
+air = GaseousComponent(:AIR; M=.02897, c=1006., k=.026)
 ```
 
-The first positional argument is the component **name** (a `Symbol`). All
-thermophysical values are keywords. Defaults worth knowing:
+The nominal pore fraction and superficial transfer coefficient are explicit
+material inputs. Gas has no matrix transfer coefficient. Here `κ` defaults
+to zero, so gas moves through the lumped wall channel. An open atmospheric
+problem includes a background gas and complete reservoir composition. The
+initial air loading is computed from the pore volume and reservoir pressure.
+The cone deck uses the nominal pore fraction φ=0.01 qualified over
+φ=0.01–0.03 with joint mesh and pressure-tolerance refinement (TR §9.10).
+For the complete component options see §16.2.1.
 
-| Keyword | Meaning | Default (`SolidComponent`) | Default (`GaseousComponent`) |
-|---|---|---|---|
-| `ρ` | bulk density [kg/m³] | required | ideal-gas law from `M` |
-| `c` | heat capacity [J/(kg·K)] | required | required |
-| `k` | thermal conductivity [W/(m·K)] | required | required |
-| `ε` | surface emissivity [-] (number or `ε(T)`) | `0.9` | `0.0` |
-| `absorptivity` | surface absorptivity for incident radiation [-] (`nothing` = Kirchhoff, `ε(T)`) | `nothing` | n/a (always Kirchhoff) |
-| `α` | mass absorption coeff. [m²/kg] | `0.0` | `0.0` |
-| `γ` | swelling factor [-] | `1.0` (solid shrinks) | `0.0` (gas escapes) |
-| `λ` | gas-transfer coeff. [m²/s] | `0.0` | required |
-| `κ` | permeability [m²] | `0.0` (impermeable) | n/a (gases flow through) |
-| `M` | molar mass [kg/mol] | n/a | required |
-
-The solids' `λ = 1e-6` m²/s is the addition to the example's deck. The cell's
-gas-transfer coefficient is the volume-fraction mix of the component values, so
-with `λ = 0` on the solids a cell of virgin PMMA that holds no gas has no gas
-transport at all; the gas field then ends in a sharp front on which the implicit
-Newton iteration fails repeatedly, and problem validation warns about it. On this
-deck the small `λ` leaves the results unchanged to four digits and takes fewer
-steps (UG 15).
-
-A gas's density defaults to the ideal-gas law `ρ_g = P_ref·M/(R_g·T)` with
-`P_ref = 101325` Pa and `R_g = 8.314...` J/(mol·K). The bulk-vs-intrinsic
-density distinction (`ρ_intrinsic`, used only in the porosity formula) and the
-swelling factor `γ` are explained in Technical Reference §4 and §10; the
-defaults above are correct for this opaque, non-swelling case. The absorption
-coefficient `α` is read only by `BEER_LAMBERT` (§2.6.2).
+---
 
 ### 2.2.3 The decomposition reaction
 
@@ -222,11 +176,11 @@ permeability (`κ`) are averaged into effective mixture properties:
 ```julia
 pmma = Material(
     name = :PMMA,
-    components = (virgin, char, mma),
+    components = (virgin, char, mma, air),
     reactions  = (decomp,),
     mixing = MaterialMixing(
         k = MixingSpec(WEIGHTED, 0.5),  # k = 0.5·k_parallel + 0.5·k_series
-        λ = MixingSpec(PARALLEL),       # volume-weighted gas transfer
+        λ = MixingSpec(PARALLEL),       # condensed bulk-occupancy-weighted transfer
     ),
 )
 ```
@@ -243,7 +197,7 @@ available rules are `PARALLEL`, `SERIES`, `WEIGHTED` (with weight `β`),
 mixing theory lives in Technical Reference §5; how to choose rules is in UG 3.
 
 > **Tip — components reference by index, not name (here).** Because we passed
-> `virgin`, `char`, `mma` in that order, the reaction's `1 => (2, 3)` lines up
+> `virgin`, `char`, `mma`, `air` in that order, the reaction's `1 => (2, 3)` lines up
 > with virgin → char + MMA. You can instead write reactions with *symbolic*
 > names (`Reaction(:decomp, :virgin => (:char, :MMA); ...)`), which `Material`
 > resolves to indices for you. Both styles are valid; the numeric style is used
@@ -328,42 +282,32 @@ Other thermal BCs available (full reference in UG 5 / Technical Reference §12):
 > finite-volume method the temperature lives at cell *centres*, but the
 > radiative loss `σ T_s⁴` is highly nonlinear in the *surface* temperature.
 > Pyrolysis.jl therefore solves, at each boundary face, the surface energy
-> balance `q_bc(T_s) = k (T_s − T_cell)/d` for the surface temperature `T_s` by a
-> small Newton iteration. You never call this yourself; the solved value lands in
+> balance `q_bc(T_s) = k (T_s − T_cell)/d` for the surface temperature `T_s`.
+> Gas-bearing faces solve the mass and thermal state jointly when coupled.
+> The solved value lands in
 > `solution.surface_T`. See UG §5.4 and Technical Reference §12.
 
 ### 2.3.2 Mass boundary conditions
 
-The top face lets MMA gas escape; the bottom is impermeable:
+Choose one complete species boundary per tag. The top exchanges gas with an
+air reservoir; the bottom is sealed. The reservoir supplies pressure,
+temperature and mole fractions:
 
 ```julia
-top_mass    = ConvectiveMassBC(h_m = 0.05, ξ_inf = 0.0)  # gas escapes; h_m in m/s
-bottom_mass = ImpermeableBC()                            # no gas crosses
+reservoir = GasReservoir(P=101325., T=330., mole_fractions=(AIR=1.,))
+g_film = 0.05 * 101325. * 0.02897 / (8.31446261815324 * 330.)
+top_mass = AmbientGasBC(reservoir; film=MassTransferFilm(g_film))
+bottom_mass = ImpermeableBC()
 ```
 
-- **`ConvectiveMassBC(h_m, ξ_inf)`** drives a per-species flux
-  `J = h_m·(ξ_∞ − ξ_s)`. With ambient concentration `ξ_inf = 0.0`, gas leaves
-  the surface at a rate set by the mass-transfer coefficient `h_m` [m/s].
-- **`ImpermeableBC()`** sets `J = 0` for all species — the default for a face if
-  you omit it.
+The finite external mass film uses a superficial conductance in kg/(m² s),
+here a transfer velocity of 0.05 m/s times the reservoir density. Flux can
+reverse; incoming gas brings its
+specified enthalpy. `MassFluxBC` prescribes named outward species fluxes with
+incoming temperatures for negative entries. Pressure-gradient and hydraulic
+resistance closures also require complete species and thermodynamic data (§5.5).
 
-> **Mind the units: `h_m` [m/s] is not `h` [W/(m²·K)].** The mass-transfer
-> coefficient `h_m ≈ 0.05 m/s` used here is typical for a cone heater with
-> moderate air flow. It is related to the convective heat-transfer coefficient
-> `h ≈ 7.2 W/(m²·K)` by the Chilton–Colburn analogy, roughly
-> `h_m ≈ h / (ρ·c_p)` (air `ρ·c_p ≈ 1.2 × 1005 ≈ 1.2e3 J/(m³·K)`). Do not swap
-> `h_m` and `h`: they have different units and different scaling.
-
-Alternatives include `MassFluxBC(J)` (prescribed flux), `DiffusiveMassBC(h_m)`
-(internal-diffusion-limited with optional external resistance; `DiffusiveMassBC()`
-means no external resistance), and the pressure BCs used in Darcy mode. See
-UG 5.
-
-> **The escaping gas leaves at the surface temperature.** The gas fluxes carry
-> their sensible enthalpy across every face; at the exposed face the outflow
-> carries `Σⱼ Jⱼ hⱼ(T_s)` out of the surface cell at the solved surface
-> temperature. The surface energy balance itself keeps no gas-enthalpy term, so
-> the enthalpy is counted once. See UG §5.4 and Technical Reference §7.
+---
 
 ### 2.3.3 Collect into a `BoundaryConditionSet`
 
@@ -425,13 +369,14 @@ conditions, and time span together. Initial conditions are given as
 
 ```julia
 t_final = 1600.0   # simulate 1600 s
+ξ_air = background_gas_concentration(pmma, 4, (1210., 0., 0., 0.), T_ambient; P=101325.)
 
 problem = PyrolysisProblem(
     mesh      = mesh,
     material  = pmma,
     bc_set    = bc_set,
     T_initial = z -> T_ambient,                         # uniform 300 K
-    ξ_initial = [z -> 1210.0, z -> 0.0, z -> 0.0],      # one closure per component
+    ξ_initial = [z -> 1210.0, z -> 0.0, z -> 0.0, z -> ξ_air],      # one closure per component
     tspan     = (0.0, t_final),
     dt_initial = 1e-3,                                  # first step [s]
     output_times = collect(range(0.0, t_final, length = 601)),  # save 601 points
@@ -475,8 +420,9 @@ deactivate as the sample burns out.
 ```julia
 solution = solve(
     problem;
-    abstol = 1e-8,                          # temperature tolerance [K] (default 1e-8)
-    reltol = 1e-6,                          # relative tolerance (default 1e-6)
+    abstol = 1e-11,                         # temperature tolerance [K]
+    reltol = 1e-9,                          # resolves thin-cell pore volume
+    pressure_tolerance = 1e-4,              # absolute local pressure budget [Pa]
     dtmin = 1e-14,                          # smallest step [s] (default 1e-12)
     use_ale = true,                         # move the mesh with the solid as it shrinks
     radiation_model = SURFACE_ABSORPTION,   # absorb the cone flux at the surface
@@ -496,7 +442,7 @@ code, also with other parameter values (UG 15).
 
 | Keyword | Default | What it does here |
 |---|---|---|
-| `abstol` / `reltol` | `1e-8` / `1e-6` | error tolerances: `abstol` is the temperature tolerance [K]; the mass rows take theirs from each cell's initial condensed mass and `threshold` |
+| `abstol` / `reltol` | `1e-8` / `1e-6` | error tolerances: `abstol` is the temperature tolerance [K]; condensed mass rows use initial condensed mass and `threshold`; gas rows and proposed-state pressure errors use `pressure_tolerance` |
 | `dtmin` | `1e-12` | smallest step the integrator may take [s] |
 | `use_ale` | `false` | moves the mesh with the solid (surface recession) |
 | `radiation_model` | `NO_RADIATION` | `SURFACE_ABSORPTION` absorbs the cone flux at the surface |
@@ -805,10 +751,9 @@ savefig(fig, "cone_quickstart.png")
 
 ## 2.10 Complete script
 
-The full tutorial in one runnable block. Apart from the solids' `λ` and the
-explicit `radiation_model` (which does not change the solve), this is the deck
-of `examples/06_cone_calorimeter.jl`; the example adds a ThermaKin overlay and a
-longer analysis of the results.
+The full tutorial in one runnable block uses the same material and atmospheric
+exchange as `examples/06_cone_calorimeter.jl`. The example adds a ThermaKin
+overlay and a longer analysis of the results.
 
 ```julia
 using Pyrolysis
@@ -820,18 +765,19 @@ pmma_cp = CallableProperty(
 )
 pmma_k = CallableProperty(T -> T < 378.0 ? 0.15 : (0.34 - 3.9e-4 * min(T, 700.0)))
 
-virgin = SolidComponent(:virgin, ρ = 1210.0, c = pmma_cp, k = pmma_k, ε = 0.96, α = 1.47,
-                        λ = 1e-6)
-char   = SolidComponent(:char,   ρ = 1210.0, c = pmma_cp, k = pmma_k, ε = 0.96, α = 1.47,
-                        λ = 1e-6)
-mma    = GaseousComponent(:MMA,  M = 0.10012, c = 1500.0, k = 0.02, λ = 1e-5)
+virgin = SolidComponent(:virgin, ρ = 1210.0, φ=.01, c = pmma_cp, k = pmma_k, ε = 0.96, α = 1.47,
+                        λ = 1e-5)
+char   = SolidComponent(:char,   ρ = 1210.0, φ=.01, c = pmma_cp, k = pmma_k, ε = 0.96, α = 1.47,
+                        λ = 1e-5)
+mma    = GaseousComponent(:MMA, M = 0.10012, c = 1500.0, k = 0.02)
+air    = GaseousComponent(:AIR, M = 0.02897, c = 1006.0, k = 0.026)
 
 decomp = Reaction(:decomposition, 1 => (2, 3);
                   A = 1.5e14, E = 2.03e5, h = 820e3, n = 1.0, yields = (0.002, 0.998))
 
 pmma = Material(
     name = :PMMA,
-    components = (virgin, char, mma),
+    components = (virgin, char, mma, air),
     reactions  = (decomp,),
     mixing = MaterialMixing(k = MixingSpec(WEIGHTED, 0.5), λ = MixingSpec(PARALLEL)),
 )
@@ -849,7 +795,9 @@ bottom_thermal =
     RadiativeBC(ε = 0.95, T_inf = 307.0) +
     ConvectiveBC(h = 4.0, T_inf = 307.0)
 
-top_mass    = ConvectiveMassBC(h_m = 0.05, ξ_inf = 0.0)
+reservoir   = GasReservoir(P=101325., T=330., mole_fractions=(AIR=1.,))
+g_film      = 0.05 * 101325. * 0.02897 / (8.31446261815324 * 330.)
+top_mass    = AmbientGasBC(reservoir; film=MassTransferFilm(g_film))
 bottom_mass = ImpermeableBC()
 
 bc_set = BoundaryConditionSet(
@@ -864,10 +812,11 @@ mesh = create_uniform_mesh(sample_thickness, n_cells)
 
 # ---- Step 4: problem --------------------------------------------------------
 t_final = 1600.0
+ξ_air = background_gas_concentration(pmma, 4, (1210., 0., 0., 0.), T_ambient; P=101325.)
 problem = PyrolysisProblem(
     mesh = mesh, material = pmma, bc_set = bc_set,
     T_initial = z -> T_ambient,
-    ξ_initial = [z -> 1210.0, z -> 0.0, z -> 0.0],
+    ξ_initial = [z -> 1210.0, z -> 0.0, z -> 0.0, z -> ξ_air],
     tspan = (0.0, t_final),
     dt_initial = 1e-3,
     output_times = collect(range(0.0, t_final, length = 601)),
@@ -875,7 +824,7 @@ problem = PyrolysisProblem(
 
 # ---- Step 5: solve ----------------------------------------------------------
 solution = solve(problem;
-    abstol = 1e-8, reltol = 1e-6, dtmin = 1e-14,
+    abstol = 1e-11, reltol = 1e-9, pressure_tolerance = 1e-4, dtmin = 1e-14,
     use_ale = true,
     radiation_model = SURFACE_ABSORPTION,
     min_thickness = 0.01e-3,
@@ -905,7 +854,7 @@ plot(solution; kind = :mlr)
   Compare the surface-temperature trace to the surface-absorption run above.
   (Technical Reference §8.)
 - **Add pressure-driven transport.** Give a component a permeability `κ > 0` to
-  switch the solver into Darcy–Fick mode for pressure-treated wood or charring
+  switch the solver into lumped gas transport mode for pressure-treated wood or charring
   systems. (UG 7; Technical Reference §9.)
 - **Vary the cone flux.** Replace the scalar `q_external` with a function of
   time, `RadiativeFluxBC(flux = t -> ramp(t), absorptivity = 0.96)`; the solver

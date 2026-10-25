@@ -44,7 +44,7 @@ function _verification_case_vbo06()
         solve_fn = _vbo_solve_fn(id),
         solve_kwargs = VBO_SOLVE_KWARGS,
         qois = qois,
-        ci = CIConfig(n_cells = n_default, budget_s = 20.0),
+        ci = CIConfig(n_cells = n_default, budget_s = 120.0),
         report = (curves = sol -> _vbo_history_curves(id, sol),),
     )
 end

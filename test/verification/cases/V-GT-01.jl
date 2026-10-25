@@ -2,31 +2,26 @@
 # V-GT-01 — Gaussian diffusion of a gas pulse (ThermaKin plane-source case)
 # =============================================================================
 #
-# Pure Fickian transport of gas released inside the solid (Crank/ThermaKin
+# Pure lumped wall transport of gas released inside the solid (Crank/ThermaKin
 # plane source). Instead of approximating a delta function, the initial
 # condition is a finite-width Gaussian — itself an exact solution — so the
 # comparison is IC-discretization-free:
 #
 #   ξ(z,t) = M_tot/√(2πσ²(t)) · exp(−(z−z₀)²/(2σ²(t))),  σ²(t) = σ₀² + 2dt
 #
-# Setup notes:
-# - All permeabilities are 0 ⇒ `has_darcy_flow` is false ⇒ the gas-transport
-#   kernel takes the Fickian path, whose face flux
-#   −(λ/T)·Δ(ξT)/Δz reduces exactly to Fick's law with diffusivity λ at
-#   uniform T (adiabatic faces + no sources keep T uniform to machine).
-# - λ = d is set on BOTH components: PARALLEL mixing is volume-fraction
-#   weighted, so equal per-component λ makes λ_eff ≡ d independent of
-#   composition (otherwise the pulse would see a composition-dependent d).
-# - Default ImpermeableBC on both faces: mass is conserved to machine
-#   precision; the sealed-boundary image-source correction to the infinite-
-#   domain reference is ≤ e^(−11.7) ≈ 8e-6 of the peak at t_end (domain
-#   half-width = 4.9σ(t_end)) — below the discretization error.
+# At constant physical porosity φ and temperature, J=−(Λ/φ)∂zξ.
+# The Gaussian variance therefore grows with diffusivity d=Λ/φ. Adiabatic
+# faces, no reaction/source, and internally carried enthalpy preserve the
+# initially uniform temperature; this is checked in the QoIs.
+# The sealed image-source correction is below the spatial error on this domain.
 #
 # QoIs: profile L∞ (relative to the evolving peak), total-mass conservation,
 # and the parameter-free variance growth law Var(t) = σ₀² + 2dt.
 
 function _verification_case_vgt01()
-    d = 1e-6            # gas-transfer coefficient λ [m²/s]
+    φ = 0.4
+    Λ = 4e-7           # superficial wall coefficient [m²/s]
+    d = Λ/φ             # bulk-concentration diffusivity [m²/s]
     L, z0, σ0 = 0.04, 0.02, 1e-3
     A_amp = 0.1         # peak bulk concentration [kg/m³]
     T_iso = 400.0
@@ -37,8 +32,8 @@ function _verification_case_vgt01()
     ξ_exact(z, t) = M_tot / sqrt(2π * σ2(t)) * exp(-(z - z0)^2 / (2 * σ2(t)))
 
     function build(n_cells)
-        solid = SolidComponent(:solid, ρ = 1000.0, c = 1000.0, k = 0.5, λ = d)
-        gas = GaseousComponent(:gas, M = 0.028, c = 1000.0, k = 0.03, λ = d)
+        solid = SolidComponent(:solid, ρ = 1000.0, c = 1000.0, k = 0.5, λ = Λ, φ = φ)
+        gas = GaseousComponent(:gas, M = 0.028, c = 1000.0, k = 0.03)
         mat = Material(name = :VGT01, components = (solid, gas), reactions = ())
         mesh = create_uniform_mesh(L, n_cells)
         bc_set =
@@ -55,7 +50,13 @@ function _verification_case_vgt01()
     end
 
     function qois(sol)
-        out = QoIResult[]
+        out = QoIResult[QoIResult(
+            name = "isothermal invariant",
+            value = maximum(abs, sol.T .- T_iso),
+            error = maximum(abs, sol.T .- T_iso),
+            tol = 1e-8,
+            comment = "sealed, source-free uniform-temperature state",
+        )]
         z = get_cell_positions(sol)
         Δz = L / length(z)
         for (j, t) in enumerate(ts)
@@ -124,7 +125,7 @@ function _verification_case_vgt01()
     return VerificationCase(
         id = "V-GT-01",
         title = "Gaussian gas-pulse diffusion (plane source)",
-        tags = [:gas_transport, :fickian, :mass_conservation],
+        tags = [:gas_transport, :lumped_transfer, :mass_conservation],
         references = [
             "J. Crank, The Mathematics of Diffusion (plane-source solution)",
             "Stoliarov & Lyon, FSS 9:1141 (2008), gas-transport verification",

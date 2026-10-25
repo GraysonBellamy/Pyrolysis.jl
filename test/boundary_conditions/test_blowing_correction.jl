@@ -46,9 +46,17 @@ using Pyrolysis.States: trial_temperature
 const _CP_GAS = 1000.0
 function _blowing_material(; darcy::Bool = false)
     solid_kwargs = darcy ? (; κ = 1e-14) : (;)
-    solid =
-        SolidComponent(:solid; ρ = 1000.0, c = 1000.0, k = 0.2, ε = 0.9, solid_kwargs...)
-    gas = GaseousComponent(:gas; M = 0.050, c = _CP_GAS, k = 0.02, λ = 1e-5)
+    solid = SolidComponent(
+        :solid;
+        φ = 0.3,
+        λ = 1e-5,
+        ρ = 1000.0,
+        c = 1000.0,
+        k = 0.2,
+        ε = 0.9,
+        solid_kwargs...,
+    )
+    gas = GaseousComponent(:gas; M = 0.050, c = _CP_GAS, k = 0.02)
     rxn = Reaction(:decomp, 1 => 2, A = 1e5, E = 5e4, h = 1e5)
     return Material(name = :blowing_test, components = (solid, gas), reactions = (rxn,))
 end
@@ -329,7 +337,10 @@ end
                           ConvectiveBC(h = 15.0, T_inf = 300.0, blowing = model),
                     bottom = AdiabaticBC(),
                 ),
-                mass = (top = DiffusiveMassBC(0.01), bottom = ImpermeableBC()),
+                mass = (
+                    top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
+                    bottom = ImpermeableBC(),
+                ),
             )
             problem = PyrolysisProblem(
                 mesh = mesh,

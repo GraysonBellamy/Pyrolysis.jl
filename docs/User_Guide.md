@@ -111,7 +111,7 @@ To set expectations up front, the model does **not** support:
 | Multi-step Arrhenius kinetics | A tuple of `Reaction`s on the `Material` | TR §6 |
 | Effective (mixture) properties, mixing rules | `MixingSpec`, `MaterialMixing` | TR §5 |
 | Surface / in-depth radiation | `solve(...; radiation_model = …)` + `RadiativeFluxBC` | TR §8 |
-| Pressure-driven gas transport (Darcy–Fick) | Set `κ > 0` on a solid/liquid component | TR §9 |
+| Pressure-driven gas transport | Set `κ > 0` on a solid/liquid component | TR §9 |
 | Volume change, swelling, intumescence | The swelling factor `γ` on components | TR §10 |
 | Lateral shrinkage / variable cross-section | `lateral_shrinkage_law` on the `Material` (with `use_ale = true`) | TR §10 |
 | Mesh moving with the solid (surface recession) | `solve(...; use_ale = true)` | TR §11 |
@@ -405,144 +405,46 @@ together.
 
 ---
 
-## 1.8 A minimal "hello pyrolysis" example
+## 1.8 A minimal gas-producing slab
 
-The script below is a complete, runnable simulation: a 1 cm slab of PMMA-like
-material, modeled as one solid that decomposes into one gas, heated from the top
-by a constant 50 kW/m² flux, insulated at the bottom, integrated for 60 seconds.
-Every function, type, and keyword used here is part of the public API, and the
-script runs as written, returning `retcode = :Success`.
+This illustrative porous matrix decomposes into a gas and exchanges with
+an explicit vacuum at the exposed face. Its physical porosity is 0.3 and
+its lumped superficial coefficient is declared on the condensed component.
+The finite endpoint covers complete loss of matrix support.
 
 ```julia
 using Pyrolysis
-
-# 1. Define the material: one solid component + one gaseous product.
-pmma = Material(
-    name = :PMMA,
-    components = (
-        SolidComponent(:virgin, ρ = 1190, c = 1420, k = 0.21, ε = 0.86, λ = 1e-6),
-        GaseousComponent(:MMA,  M = 0.100, c = 1500, k = 0.02, λ = 1e-5),
-    ),
-    reactions = (
-        # :virgin → :MMA, endothermic (h > 0): absorbs 870 kJ/kg of reactant.
-        Reaction(:decomposition, :virgin => :MMA, A = 8.5e12, E = 188e3, h = 870e3),
-    ),
-)
-
-# 2. Build a uniform mesh: 1 cm thick, 40 cells.
-mesh = create_uniform_mesh(0.01, 40)
-
-# 3. Boundary conditions: constant heat flux on top, insulated bottom,
-#    gas free to diffuse out the top, impermeable bottom.
+material = Material(name=:porous_polymer,
+    components=(
+        SolidComponent(:virgin; ρ=1190., φ=.3, c=1420., k=.21, λ=1e-6),
+        GaseousComponent(:MMA; M=.100, c=1500., k=.02)),
+    reactions=(Reaction(:decomposition, :virgin=>:MMA;
+                        A=8.5e12, E=188e3, h=870e3),),
+    gas_transport=LumpedTransfer(endpoint=LumpedEndpoint(
+        λ=1e-6, κ=0., max_skeletal_occupancy=.001)))
 bcs = BoundaryConditionSet(
-    thermal = (top = HeatFluxBC(50e3),     bottom = AdiabaticBC()),
-    mass    = (top = DiffusiveMassBC(),    bottom = ImpermeableBC()),
-)
-
-# 4. Assemble the problem. T_initial defaults to z -> 300.0; ξ_initial defaults
-#    to the first solid at its reference density (1190 kg/m³) and the gas at 0.
-problem = PyrolysisProblem(
-    mesh      = mesh,
-    material  = pmma,
-    bc_set    = bcs,
-    T_initial = z -> 300.0,
-    tspan     = (0.0, 60.0),
-)
-
-# 5. Solve and inspect.
-solution = solve(problem)
-println("retcode      = ", solution.retcode)          # Success
-println("surface T(t) = ", solution.surface_T[end], " K")
-println("T field size = ", size(solution.T))           # (n_cells, n_times)
+    thermal=(top=HeatFluxBC(50e3), bottom=AdiabaticBC()),
+    mass=(top=AmbientGasBC(GasReservoir(P=0., T=300.)), bottom=ImpermeableBC()))
+problem = PyrolysisProblem(mesh=create_uniform_mesh(.01,40), material=material,
+    bc_set=bcs, T_initial=z->300., tspan=(0.,60.))
+solution = solve(problem; pressure_tolerance=1.)
+@assert completed(solution)
+println(solution.surface_T[end])
+println(maximum(get_pressure(solution)))
 ```
 
-A few notes on what each step does and what is defaulted:
+The default initial concentration fills the first solid at its bulk density;
+other species start empty. For a positive-pressure reservoir, declare its
+composition and initialize pore gas consistently when equilibrium is intended.
+`pressure_tolerance` is an absolute local pressure-error budget in Pa. The
+solver also controls the mass, thermal and geometry rows and checks physical
+pore-volume admissibility throughout the evolution.
 
-- **`Material(; name, components, reactions = (), mixing = MaterialMixing(),
-  lateral_shrinkage_law = nothing, depletion_limiter = DepletionLimiter(),
-  gas_viscosity = SutherlandProperty())`** — the components tuple is
-  heterogeneous (a `SolidComponent` and a `GaseousComponent`); the reaction's
-  symbolic `:virgin => :MMA` pair is resolved to component indices against the
-  components tuple inside the constructor. Materials and reactions are covered
-  in UG 3 and UG 4.
-- **`SolidComponent(:name; ρ, c, k, …)`** requires bulk density `ρ`, heat
-  capacity `c`, and conductivity `k`; `ε` (emissivity, a number or a property
-  function of temperature) defaults to `0.9`, the surface `absorptivity` for
-  incident radiation to `nothing` (Kirchhoff, `a = ε(T)`), the swelling factor
-  `γ` to `1.0`, permeability `κ` to `0.0` (impermeable, so no Darcy flow), the
-  gas-transfer coefficient `λ` to `0.0`, and the mass-absorption coefficient `α`
-  to `0.0`. Any of `ρ`, `c`, `k` may be a number or a property function (UG 3).
-  The example gives the solid a small `λ = 1e-6` m²/s: with `λ = 0` on a
-  condensed component of a gas-producing material, Fickian gas transport
-  vanishes in a cell that holds no gas, the gas field ends in a sharp front, and
-  problem validation warns (UG 15).
-- **`GaseousComponent(:name; M, c, k, λ)`** requires molar mass `M` (kg/mol),
-  heat capacity `c`, conductivity `k`, and gas-transfer coefficient `λ`. Its
-  density defaults to the ideal-gas law and its swelling factor `γ` to `0.0` (gas
-  escapes without changing the matrix volume).
-- **`Reaction(:name, reactant => product; A, E, h)`** with symbol payloads creates
-  a single-reactant, single-product reaction. `n` (reaction order) defaults to
-  `1.0`, `T_min` to `0.0`, `T_max` to `Inf`, `gate_width` (tanh gate ramp) to
-  `1.0` K. Remember `h > 0` is endothermic.
-- **`create_uniform_mesh(L, n_cells; coordinates = Planar(), cross_section = 1.0)`**
-  builds the mesh: `n_cells` equal cells from `z = 0` to `z = L`. The mesh holds
-  geometry only — no component count and no initial state. Geometry is covered
-  in UG 6.
-- **`BoundaryConditionSet(; thermal, mass)`** takes per-boundary NamedTuples keyed
-  by `:top` and `:bottom`. Unspecified slots default to `AdiabaticBC` (thermal)
-  and `ImpermeableBC` (mass). `DiffusiveMassBC()` defaults to infinite external
-  conductance (`h_m = Inf`, i.e. pure internal-diffusion-limited escape). Boundary
-  conditions are covered in UG 5.
-- **`PyrolysisProblem(; mesh, material, bc_set, tspan, …)`**: `T_initial` defaults
-  to `z -> 300.0`, `ξ_initial` defaults to the first solid component at its
-  reference density (others zero), `dt_initial` to `1e-4`, and `output_times` is
-  auto-generated (11–101 evenly spaced samples over `tspan`) when left empty.
-  The initial fields are evaluated at the cell centres when the problem is set up.
-- **`solve(problem; …)`** returns a `PyrolysisSolution`. Key defaults are the
-  `Rodas5P` integrator (`integrator_policy = default_policy`) with the
-  `StructuredKLU()` linear solver, `abstol = 1e-8` (the temperature tolerance,
-  K), `reltol = 1e-6`, `use_ale = false` (fixed mesh),
-  `radiation_model = NO_RADIATION`, `deactivation = false`, `validate = true`,
-  and `progress = false` (`progress = true` draws a progress bar). An unknown
-  keyword is refused with an `ArgumentError`. The full option set is documented
-  in UG 8.
-
-### Reading the result
-
-`solve` returns a `PyrolysisSolution`. The fields you will use most are:
-
-- `solution.t` — the vector of saved times (s).
-- `solution.T` — temperature field, an `n_cells × n_times` matrix (K).
-- `solution.ξ` — concentrations, an `NC × n_cells × n_times` array (kg/m³).
-- `solution.m` — component masses per cell, an `NC × n_cells × n_times` array (kg).
-- `solution.surface_T` — the exposed-surface (top) temperature per saved time (K).
-- `solution.mass_loss_rate` — the mass leaving through every boundary face, per
-  unit current area of the top face (the bottom term is zero for an impermeable
-  holder) (kg·m⁻²·s⁻¹).
-- `solution.retcode` — the integrator return code (`:Success`, `:Terminated`,
-  `:Failure`, …), and `solution.outcome` — `:running` unless burnout or the
-  `min_thickness` stop ended the solve.
-
-The solution's accessors are exported with the package:
-
-```julia
-T_profile = get_profile(solution, :T, 1)                     # temperature in every cell at the first saved time
-ξ1_final  = get_profile(solution, :ξ1, length(solution.t))   # ξ of component 1 at the last saved time
-positions = get_cell_positions(solution)                     # cell-centre z positions at the last saved time (m)
-fields    = solution(30.0)                                   # the fields at t = 30 s, between saved times
-```
-
-`succeeded(solution)` and `completed(solution)` test how the solve ended (UG 9).
-
-If you have `Plots` installed and loaded, the plotting extension provides recipes
-for the common views (covered fully in UG 9):
-
-```julia
-using Plots
-plot(solution)                       # default: surface temperature trace
-plot(solution; kind = :mlr)          # mass-loss rate vs time
-plot(solution; kind = :heatmap)      # T(z, t) heatmap
-```
+Gas properties are specified by `GaseousComponent(;M,c,k,...)`; transport data
+belong to the matrix and its declared `LumpedTransfer` or `DustyGas` model.
+The default mass boundary is impermeable and the default thermal boundary is
+adiabatic. A finite external mass film is an optional `MassTransferFilm(g)`
+with conductance in kg/(m² s). See Chapters 3, 5 and 7 for the complete inputs.
 
 ---
 
@@ -562,15 +464,15 @@ stable, user-facing API. The top-level exports cover:
 - **Boundary conditions:** the thermal conditions (`HeatFluxBC`, `ConvectiveBC`,
   `RadiativeBC`, `RadiativeFluxBC`, `CombinedThermalBC`, `DirichletThermalBC`,
   `AdiabaticBC`), the mass conditions (`ImpermeableBC`, `MassFluxBC`,
-  `ConvectiveMassBC`, `DiffusiveMassBC`, `CombinedMassBC`), the pressure
-  conditions (`DirichletPressureBC`, `NeumannPressureBC`, `ConvectivePressureBC`),
+  `AmbientGasBC`, `GasReservoir`, `MassTransferFilm`), the pressure
+  conditions (`NeumannPressureBC`, `ConvectivePressureBC`),
   the container `BoundaryConditionSet`; the blowing models of `ConvectiveBC`
   (`AbstractBlowingModel`, `NoBlowing`, `CouetteFilm`, `PropertyRatioFilm`,
   `PoolingFilm`, `FunctionBlowing`) with the gas data and helpers they read
   (`GasSpecies`, `NITROGEN`, `nasa7_heat_capacity`, `eucken_viscosity`,
   `fuller_diffusivity`, `BlowingFace`, `blowing_state`, `blowing_ratio`,
   `blowing_factor`); and `background_gas_concentration` for pore-air
-  initialization in Darcy–Fick problems.
+  initialization in lumped gas transport problems.
 - **Radiation models:** `RadiationModel`, `NO_RADIATION`, `SURFACE_ABSORPTION`,
   `BEER_LAMBERT`.
 - **The mesh:** `create_uniform_mesh`, `create_stretched_mesh`,
@@ -614,10 +516,10 @@ reach it through its submodule.
 
 A couple of practical notes you will encounter later in the guide:
 
-- The simulation modes — a fixed or moving mesh, the radiation rows, Fickian or
-  Darcy–Fick gas transport, the energy state, the variable cross-section — are
+- The simulation modes — a fixed or moving mesh, the radiation rows, lumped or
+  lumped gas transport gas transport, the energy state, the variable cross-section — are
   not types you pick. `setup` decides them from the material (a permeable
-  component selects Darcy–Fick transport, a `lateral_shrinkage_law` the
+  component selects gas transport, a `lateral_shrinkage_law` the
   cross-section rows) and from the `solve` keywords (`use_ale`,
   `radiation_model`, `energy_state`, `deactivation`) (UG 7).
 - Symbols reached through `Internal` or a submodule are **not** part of the stable
@@ -641,13 +543,11 @@ with:
 |---|---|
 | `examples/06_cone_calorimeter.jl` | PMMA, 5.8 mm, at 25 kW/m²: single-step kinetics, temperature-dependent properties, combined thermal conditions, a mesh moving with the solid and cell deactivation; overlays ThermaKin outputs when present |
 | `examples/06_cone_calorimeter_surface_absorption.jl` | The same case with `radiation_model = SURFACE_ABSORPTION`; writes figures and a CSV to `output/` |
-| `examples/07_douglas_fir_cone.jl` | Douglas fir, 12 mm, at 75 kW/m²: five-step kinetics with moisture evaporation, Darcy–Fick transport with background pore air, surface absorption, a moving mesh |
-| `examples/08_darcy_fick_demo.jl` | Pressure-driven (Darcy–Fick) gas transport through a charring, wood-like slab |
-| `examples/08_pressure_treated_wood_cone.jl` | Pressure-treated wood with moisture and temperature-limited reactions |
+| `examples/07_douglas_fir_cone.jl` | Douglas fir, 12 mm, at 75 kW/m²: five-step kinetics with moisture evaporation, gas transport with background pore air, surface absorption, a moving mesh |
+| `examples/08_gas_transport.jl` | Lumped and dusty-gas transport with a finite reservoir film |
+| `examples/08_pressure_treated_wood_cone.jl` | Pressure-treated wood with moisture and multi-step Arrhenius kinetics |
 | `examples/convergence_douglas_fir.jl` | Grid-convergence study (uses `Distributed`) |
 | `examples/moisture_hos_comparison.jl` | Moisture transport with state-dependent heat of sorption |
-| `examples/ptw_comparison.jl` | Pressure-treated wood results against ThermaKin output |
-| `examples/df_sensitivity_comparison.jl` | Inter-code sensitivity comparison for the Douglas fir case |
 | `examples/export_results_csv.jl` | Writes a solution's series and profiles to CSV files |
 
 The subdirectories hold larger studies: `inverse_analysis/` (fitting white-pine
@@ -700,8 +600,8 @@ edges (the `BoundaryConditionSet`), *where* the domain lives (the mesh), bundle
 them into a `PyrolysisProblem`, hand that to `solve`, and read results off the
 returned `PyrolysisSolution`.
 
-The deck is that of `examples/06_cone_calorimeter.jl`, with one addition: the
-two solids get a small gas-transfer coefficient `λ` (§2.2.2).
+The deck uses the material, atmospheric pore gas and boundary conditions of
+`examples/06_cone_calorimeter.jl`.
 
 ---
 
@@ -748,11 +648,12 @@ A `Material` is a tuple of **components** (the chemical species, each a phase
 with its own thermophysical properties) plus a tuple of **reactions** (the
 Arrhenius kinetics that convert one species into others), plus the
 **mixing rules** used to blend per-component properties into effective
-mixture properties. PMMA needs three components:
+mixture properties. This atmospheric PMMA model tracks four components:
 
 1. **Virgin PMMA** — the solid that decomposes.
 2. **Char** — a small solid residue left behind.
 3. **MMA gas** — the monomer that escapes through the matrix.
+4. **Air** — the initial pore gas and external reservoir species.
 
 ### 2.2.1 Temperature-dependent properties
 
@@ -788,72 +689,25 @@ Reference §4.
 
 ### 2.2.2 Component constructors
 
-Each component is built with a keyword constructor. Solids and liquids carry a
-bulk density, heat capacity, conductivity, emissivity, an in-depth radiation
-absorption coefficient, and optionally permeability and a swelling factor.
-Gases instead carry a molar mass (for the ideal-gas density) and a gas-transfer
-(diffusion) coefficient `λ`.
-
 ```julia
-virgin = SolidComponent(
-    :virgin,
-    ρ = 1210.0,     # bulk density [kg/m³]
-    c = pmma_cp,    # heat capacity [J/(kg·K)]
-    k = pmma_k,     # thermal conductivity [W/(m·K)]
-    ε = 0.96,       # surface emissivity [-]   (default 0.9)
-    α = 1.47,       # mass absorption coefficient [m²/kg]  (default 0.0)
-    λ = 1e-6,       # gas-transfer coefficient [m²/s]  (default 0.0)
-)
-
-char = SolidComponent(
-    :char,
-    ρ = 1210.0,
-    c = pmma_cp,
-    k = pmma_k,
-    ε = 0.96,
-    α = 1.47,
-    λ = 1e-6,
-)
-
-mma = GaseousComponent(
-    :MMA,
-    M = 0.10012,    # molar mass [kg/mol]  (required)
-    c = 1500.0,     # gas heat capacity [J/(kg·K)]
-    k = 0.02,       # gas conductivity [W/(m·K)]
-    λ = 1e-5,       # gas-transfer (diffusion) coefficient [m²/s]
-)
+virgin = SolidComponent(:virgin; ρ=1210., φ=.01, c=pmma_cp, k=pmma_k,
+                        ε=.96, λ=1e-5)
+char = SolidComponent(:char; ρ=1210., φ=.01, c=pmma_cp, k=pmma_k,
+                      ε=.96, λ=1e-5)
+mma = GaseousComponent(:MMA; M=.10012, c=1500., k=.02)
+air = GaseousComponent(:AIR; M=.02897, c=1006., k=.026)
 ```
 
-The first positional argument is the component **name** (a `Symbol`). All
-thermophysical values are keywords. Defaults worth knowing:
+The nominal pore fraction and superficial transfer coefficient are explicit
+material inputs. Gas has no matrix transfer coefficient. Here `κ` defaults
+to zero, so gas moves through the lumped wall channel. An open atmospheric
+problem includes a background gas and complete reservoir composition. The
+initial air loading is computed from the pore volume and reservoir pressure.
+The cone deck uses the nominal pore fraction φ=0.01 qualified over
+φ=0.01–0.03 with joint mesh and pressure-tolerance refinement (TR §9.10).
+For the complete component options see §16.2.1.
 
-| Keyword | Meaning | Default (`SolidComponent`) | Default (`GaseousComponent`) |
-|---|---|---|---|
-| `ρ` | bulk density [kg/m³] | required | ideal-gas law from `M` |
-| `c` | heat capacity [J/(kg·K)] | required | required |
-| `k` | thermal conductivity [W/(m·K)] | required | required |
-| `ε` | surface emissivity [-] (number or `ε(T)`) | `0.9` | `0.0` |
-| `absorptivity` | surface absorptivity for incident radiation [-] (`nothing` = Kirchhoff, `ε(T)`) | `nothing` | n/a (always Kirchhoff) |
-| `α` | mass absorption coeff. [m²/kg] | `0.0` | `0.0` |
-| `γ` | swelling factor [-] | `1.0` (solid shrinks) | `0.0` (gas escapes) |
-| `λ` | gas-transfer coeff. [m²/s] | `0.0` | required |
-| `κ` | permeability [m²] | `0.0` (impermeable) | n/a (gases flow through) |
-| `M` | molar mass [kg/mol] | n/a | required |
-
-The solids' `λ = 1e-6` m²/s is the addition to the example's deck. The cell's
-gas-transfer coefficient is the volume-fraction mix of the component values, so
-with `λ = 0` on the solids a cell of virgin PMMA that holds no gas has no gas
-transport at all; the gas field then ends in a sharp front on which the implicit
-Newton iteration fails repeatedly, and problem validation warns about it. On this
-deck the small `λ` leaves the results unchanged to four digits and takes fewer
-steps (UG 15).
-
-A gas's density defaults to the ideal-gas law `ρ_g = P_ref·M/(R_g·T)` with
-`P_ref = 101325` Pa and `R_g = 8.314...` J/(mol·K). The bulk-vs-intrinsic
-density distinction (`ρ_intrinsic`, used only in the porosity formula) and the
-swelling factor `γ` are explained in Technical Reference §4 and §10; the
-defaults above are correct for this opaque, non-swelling case. The absorption
-coefficient `α` is read only by `BEER_LAMBERT` (§2.6.2).
+---
 
 ### 2.2.3 The decomposition reaction
 
@@ -903,11 +757,11 @@ permeability (`κ`) are averaged into effective mixture properties:
 ```julia
 pmma = Material(
     name = :PMMA,
-    components = (virgin, char, mma),
+    components = (virgin, char, mma, air),
     reactions  = (decomp,),
     mixing = MaterialMixing(
         k = MixingSpec(WEIGHTED, 0.5),  # k = 0.5·k_parallel + 0.5·k_series
-        λ = MixingSpec(PARALLEL),       # volume-weighted gas transfer
+        λ = MixingSpec(PARALLEL),       # condensed bulk-occupancy-weighted transfer
     ),
 )
 ```
@@ -924,7 +778,7 @@ available rules are `PARALLEL`, `SERIES`, `WEIGHTED` (with weight `β`),
 mixing theory lives in Technical Reference §5; how to choose rules is in UG 3.
 
 > **Tip — components reference by index, not name (here).** Because we passed
-> `virgin`, `char`, `mma` in that order, the reaction's `1 => (2, 3)` lines up
+> `virgin`, `char`, `mma`, `air` in that order, the reaction's `1 => (2, 3)` lines up
 > with virgin → char + MMA. You can instead write reactions with *symbolic*
 > names (`Reaction(:decomp, :virgin => (:char, :MMA); ...)`), which `Material`
 > resolves to indices for you. Both styles are valid; the numeric style is used
@@ -1009,42 +863,32 @@ Other thermal BCs available (full reference in UG 5 / Technical Reference §12):
 > finite-volume method the temperature lives at cell *centres*, but the
 > radiative loss `σ T_s⁴` is highly nonlinear in the *surface* temperature.
 > Pyrolysis.jl therefore solves, at each boundary face, the surface energy
-> balance `q_bc(T_s) = k (T_s − T_cell)/d` for the surface temperature `T_s` by a
-> small Newton iteration. You never call this yourself; the solved value lands in
+> balance `q_bc(T_s) = k (T_s − T_cell)/d` for the surface temperature `T_s`.
+> Gas-bearing faces solve the mass and thermal state jointly when coupled.
+> The solved value lands in
 > `solution.surface_T`. See UG §5.4 and Technical Reference §12.
 
 ### 2.3.2 Mass boundary conditions
 
-The top face lets MMA gas escape; the bottom is impermeable:
+Choose one complete species boundary per tag. The top exchanges gas with an
+air reservoir; the bottom is sealed. The reservoir supplies pressure,
+temperature and mole fractions:
 
 ```julia
-top_mass    = ConvectiveMassBC(h_m = 0.05, ξ_inf = 0.0)  # gas escapes; h_m in m/s
-bottom_mass = ImpermeableBC()                            # no gas crosses
+reservoir = GasReservoir(P=101325., T=330., mole_fractions=(AIR=1.,))
+g_film = 0.05 * 101325. * 0.02897 / (8.31446261815324 * 330.)
+top_mass = AmbientGasBC(reservoir; film=MassTransferFilm(g_film))
+bottom_mass = ImpermeableBC()
 ```
 
-- **`ConvectiveMassBC(h_m, ξ_inf)`** drives a per-species flux
-  `J = h_m·(ξ_∞ − ξ_s)`. With ambient concentration `ξ_inf = 0.0`, gas leaves
-  the surface at a rate set by the mass-transfer coefficient `h_m` [m/s].
-- **`ImpermeableBC()`** sets `J = 0` for all species — the default for a face if
-  you omit it.
+The finite external mass film uses a superficial conductance in kg/(m² s),
+here a transfer velocity of 0.05 m/s times the reservoir density. Flux can
+reverse; incoming gas brings its
+specified enthalpy. `MassFluxBC` prescribes named outward species fluxes with
+incoming temperatures for negative entries. Pressure-gradient and hydraulic
+resistance closures also require complete species and thermodynamic data (§5.5).
 
-> **Mind the units: `h_m` [m/s] is not `h` [W/(m²·K)].** The mass-transfer
-> coefficient `h_m ≈ 0.05 m/s` used here is typical for a cone heater with
-> moderate air flow. It is related to the convective heat-transfer coefficient
-> `h ≈ 7.2 W/(m²·K)` by the Chilton–Colburn analogy, roughly
-> `h_m ≈ h / (ρ·c_p)` (air `ρ·c_p ≈ 1.2 × 1005 ≈ 1.2e3 J/(m³·K)`). Do not swap
-> `h_m` and `h`: they have different units and different scaling.
-
-Alternatives include `MassFluxBC(J)` (prescribed flux), `DiffusiveMassBC(h_m)`
-(internal-diffusion-limited with optional external resistance; `DiffusiveMassBC()`
-means no external resistance), and the pressure BCs used in Darcy mode. See
-UG 5.
-
-> **The escaping gas leaves at the surface temperature.** The gas fluxes carry
-> their sensible enthalpy across every face; at the exposed face the outflow
-> carries `Σⱼ Jⱼ hⱼ(T_s)` out of the surface cell at the solved surface
-> temperature. The surface energy balance itself keeps no gas-enthalpy term, so
-> the enthalpy is counted once. See UG §5.4 and Technical Reference §7.
+---
 
 ### 2.3.3 Collect into a `BoundaryConditionSet`
 
@@ -1106,13 +950,14 @@ conditions, and time span together. Initial conditions are given as
 
 ```julia
 t_final = 1600.0   # simulate 1600 s
+ξ_air = background_gas_concentration(pmma, 4, (1210., 0., 0., 0.), T_ambient; P=101325.)
 
 problem = PyrolysisProblem(
     mesh      = mesh,
     material  = pmma,
     bc_set    = bc_set,
     T_initial = z -> T_ambient,                         # uniform 300 K
-    ξ_initial = [z -> 1210.0, z -> 0.0, z -> 0.0],      # one closure per component
+    ξ_initial = [z -> 1210.0, z -> 0.0, z -> 0.0, z -> ξ_air],      # one closure per component
     tspan     = (0.0, t_final),
     dt_initial = 1e-3,                                  # first step [s]
     output_times = collect(range(0.0, t_final, length = 601)),  # save 601 points
@@ -1156,8 +1001,9 @@ deactivate as the sample burns out.
 ```julia
 solution = solve(
     problem;
-    abstol = 1e-8,                          # temperature tolerance [K] (default 1e-8)
-    reltol = 1e-6,                          # relative tolerance (default 1e-6)
+    abstol = 1e-11,                         # temperature tolerance [K]
+    reltol = 1e-9,                          # resolves thin-cell pore volume
+    pressure_tolerance = 1e-4,              # absolute local pressure budget [Pa]
     dtmin = 1e-14,                          # smallest step [s] (default 1e-12)
     use_ale = true,                         # move the mesh with the solid as it shrinks
     radiation_model = SURFACE_ABSORPTION,   # absorb the cone flux at the surface
@@ -1177,7 +1023,7 @@ code, also with other parameter values (UG 15).
 
 | Keyword | Default | What it does here |
 |---|---|---|
-| `abstol` / `reltol` | `1e-8` / `1e-6` | error tolerances: `abstol` is the temperature tolerance [K]; the mass rows take theirs from each cell's initial condensed mass and `threshold` |
+| `abstol` / `reltol` | `1e-8` / `1e-6` | error tolerances: `abstol` is the temperature tolerance [K]; condensed mass rows use initial condensed mass and `threshold`; gas rows and proposed-state pressure errors use `pressure_tolerance` |
 | `dtmin` | `1e-12` | smallest step the integrator may take [s] |
 | `use_ale` | `false` | moves the mesh with the solid (surface recession) |
 | `radiation_model` | `NO_RADIATION` | `SURFACE_ABSORPTION` absorbs the cone flux at the surface |
@@ -1486,10 +1332,9 @@ savefig(fig, "cone_quickstart.png")
 
 ## 2.10 Complete script
 
-The full tutorial in one runnable block. Apart from the solids' `λ` and the
-explicit `radiation_model` (which does not change the solve), this is the deck
-of `examples/06_cone_calorimeter.jl`; the example adds a ThermaKin overlay and a
-longer analysis of the results.
+The full tutorial in one runnable block uses the same material and atmospheric
+exchange as `examples/06_cone_calorimeter.jl`. The example adds a ThermaKin
+overlay and a longer analysis of the results.
 
 ```julia
 using Pyrolysis
@@ -1501,18 +1346,19 @@ pmma_cp = CallableProperty(
 )
 pmma_k = CallableProperty(T -> T < 378.0 ? 0.15 : (0.34 - 3.9e-4 * min(T, 700.0)))
 
-virgin = SolidComponent(:virgin, ρ = 1210.0, c = pmma_cp, k = pmma_k, ε = 0.96, α = 1.47,
-                        λ = 1e-6)
-char   = SolidComponent(:char,   ρ = 1210.0, c = pmma_cp, k = pmma_k, ε = 0.96, α = 1.47,
-                        λ = 1e-6)
-mma    = GaseousComponent(:MMA,  M = 0.10012, c = 1500.0, k = 0.02, λ = 1e-5)
+virgin = SolidComponent(:virgin, ρ = 1210.0, φ=.01, c = pmma_cp, k = pmma_k, ε = 0.96, α = 1.47,
+                        λ = 1e-5)
+char   = SolidComponent(:char,   ρ = 1210.0, φ=.01, c = pmma_cp, k = pmma_k, ε = 0.96, α = 1.47,
+                        λ = 1e-5)
+mma    = GaseousComponent(:MMA, M = 0.10012, c = 1500.0, k = 0.02)
+air    = GaseousComponent(:AIR, M = 0.02897, c = 1006.0, k = 0.026)
 
 decomp = Reaction(:decomposition, 1 => (2, 3);
                   A = 1.5e14, E = 2.03e5, h = 820e3, n = 1.0, yields = (0.002, 0.998))
 
 pmma = Material(
     name = :PMMA,
-    components = (virgin, char, mma),
+    components = (virgin, char, mma, air),
     reactions  = (decomp,),
     mixing = MaterialMixing(k = MixingSpec(WEIGHTED, 0.5), λ = MixingSpec(PARALLEL)),
 )
@@ -1530,7 +1376,9 @@ bottom_thermal =
     RadiativeBC(ε = 0.95, T_inf = 307.0) +
     ConvectiveBC(h = 4.0, T_inf = 307.0)
 
-top_mass    = ConvectiveMassBC(h_m = 0.05, ξ_inf = 0.0)
+reservoir   = GasReservoir(P=101325., T=330., mole_fractions=(AIR=1.,))
+g_film      = 0.05 * 101325. * 0.02897 / (8.31446261815324 * 330.)
+top_mass    = AmbientGasBC(reservoir; film=MassTransferFilm(g_film))
 bottom_mass = ImpermeableBC()
 
 bc_set = BoundaryConditionSet(
@@ -1545,10 +1393,11 @@ mesh = create_uniform_mesh(sample_thickness, n_cells)
 
 # ---- Step 4: problem --------------------------------------------------------
 t_final = 1600.0
+ξ_air = background_gas_concentration(pmma, 4, (1210., 0., 0., 0.), T_ambient; P=101325.)
 problem = PyrolysisProblem(
     mesh = mesh, material = pmma, bc_set = bc_set,
     T_initial = z -> T_ambient,
-    ξ_initial = [z -> 1210.0, z -> 0.0, z -> 0.0],
+    ξ_initial = [z -> 1210.0, z -> 0.0, z -> 0.0, z -> ξ_air],
     tspan = (0.0, t_final),
     dt_initial = 1e-3,
     output_times = collect(range(0.0, t_final, length = 601)),
@@ -1556,7 +1405,7 @@ problem = PyrolysisProblem(
 
 # ---- Step 5: solve ----------------------------------------------------------
 solution = solve(problem;
-    abstol = 1e-8, reltol = 1e-6, dtmin = 1e-14,
+    abstol = 1e-11, reltol = 1e-9, pressure_tolerance = 1e-4, dtmin = 1e-14,
     use_ale = true,
     radiation_model = SURFACE_ABSORPTION,
     min_thickness = 0.01e-3,
@@ -1586,7 +1435,7 @@ plot(solution; kind = :mlr)
   Compare the surface-temperature trace to the surface-absorption run above.
   (Technical Reference §8.)
 - **Add pressure-driven transport.** Give a component a permeability `κ > 0` to
-  switch the solver into Darcy–Fick mode for pressure-treated wood or charring
+  switch the solver into lumped gas transport mode for pressure-treated wood or charring
   systems. (UG 7; Technical Reference §9.)
 - **Vary the cone flux.** Replace the scalar `q_external` with a function of
   time, `RadiativeFluxBC(flux = t -> ramp(t), absorptivity = 0.96)`; the solver
@@ -1666,13 +1515,13 @@ package's top-level docstring and in Chapter 2; this chapter expands every optio
 >
 > - From the `Materials` submodule: `Pyrolysis.Materials.n_components`,
 >   `Pyrolysis.Materials.n_reactions`, `Pyrolysis.Materials.dry_pyrolysis_gas_indices`,
->   and `Pyrolysis.Materials.has_darcy_flow` are *exported* from `Materials`; the
+>   are *exported* from `Materials`; the
 >   stoichiometry helpers `Pyrolysis.Materials.verify_stoichiometry` and
 >   `Pyrolysis.Materials.mass_balance_error` are *internal* (not exported, not part
 >   of the stable public API) but are still callable through the same qualified
 >   path.
 > - From the `Properties` submodule: the effective-property functions
->   (`Pyrolysis.Properties.mixture_density`, `effective_conductivity`,
+>   (`Pyrolysis.Properties.effective_conductivity`,
 >   `mixture_emissivity`, `mixture_absorptivity`, `effective_permeability`,
 >   `skeletal_volume_fraction`, …; §3.5.4).
 > - From the `Physics` submodule: `reaction_rate` and `one_sided_factor`
@@ -1680,7 +1529,7 @@ package's top-level docstring and in Chapter 2; this chapter expands every optio
 >
 > For convenience you may `using Pyrolysis.Internal`, which re-exports the union of
 > every submodule's *exports* and so brings the exported helpers
-> (`n_components`, `dry_pyrolysis_gas_indices`, `has_darcy_flow`, …) into scope
+> (`n_components`, `dry_pyrolysis_gas_indices`, …) into scope
 > unqualified — but **not** the internal stoichiometry helpers above, which still
 > require the `Pyrolysis.Materials.` prefix. `Internal` is not the stable public
 > surface; prefer qualified access in production code. Material validation happens
@@ -1693,229 +1542,86 @@ package's top-level docstring and in Chapter 2; this chapter expands every optio
 
 ### 3.2.1 `SolidComponent`
 
-A solid is the canonical matrix-forming component. The keyword constructor is:
-
 ```julia
-SolidComponent(name::Symbol;
-               ρ, c, k,
-               ε = 0.9, absorptivity = nothing, α = 0.0, γ = 1.0,
-               λ = 0.0, κ = 0.0,
-               ρ_intrinsic = nothing, φ = nothing,
-               validate_properties = true)
+virgin = SolidComponent(:virgin; ρ=530., ρ_intrinsic=1500.,
+    c=(1500.,1.), k=.12, ε=.88, λ=2e-5, κ=1e-15)
+char = SolidComponent(:char; ρ=150., ρ_intrinsic=1950.,
+    c=1000., k=.10, ε=.95, α=5., λ=2e-5, κ=1e-12)
 ```
 
-| Keyword | Symbol | Meaning | Units | Default |
-|---|---|---|---|---|
-| `name` | — | Component identifier (positional, a `Symbol`) | — | required |
-| `ρ` | `ρ_j` | **Bulk** (pure-phase) density | kg·m⁻³ | required |
-| `c` | `c_{p,j}` | Specific heat capacity | J·kg⁻¹·K⁻¹ | required |
-| `k` | `k_j` | Thermal conductivity | W·m⁻¹·K⁻¹ | required |
-| `ε` | `ε_j(T)` | Surface emissivity (number or property function of `T`) | – | `0.9` |
-| `absorptivity` | `a_j` | Surface absorptivity for incident radiation (`nothing` = Kirchhoff, `a_j = ε_j(T)`) | – | `nothing` |
-| `α` | `α_j` | Mass-basis absorption coefficient | m²·kg⁻¹ | `0.0` |
-| `γ` | `γ_j` | Swelling factor (volume-change participation) | – | `1.0` |
-| `λ` | `λ_j` | Gas-transfer (diffusion) coefficient contribution | m²·s⁻¹ | `0.0` |
-| `κ` | `κ_j` | Darcy permeability | m² | `0.0` |
-| `ρ_intrinsic` | `ρ_{i,j}` | Skeletal/intrinsic density (porosity only) | kg·m⁻³ | `= ρ` |
-| `φ` | — | Pure-phase porosity (alternative to `ρ_intrinsic`) | – | `nothing` |
-| `validate_properties` | — | Check the property laws on the property bracket (§3.7) | – | `true` |
+Bulk density `ρ`, heat capacity `c` and conductivity `k` are required.
+Participating lumped matrices also require explicit superficial transfer `λ`.
+Zero `λ` closes wall transfer independently of `κ`; zero permeability closes
+Darcy flow. Neither coefficient is inferred from gas loading.
 
-```julia
-using Pyrolysis
+`ε` accepts a temperature law; `absorptivity` sets a constant incident-radiation
+absorptivity, with `nothing` applying Kirchhoff's relation. `α` is mass-based
+in-depth absorption and is used under `BEER_LAMBERT`.
 
-# Virgin wood: temperature-rising heat capacity, opaque, tight matrix
-virgin = SolidComponent(:virgin,
-    ρ = 530.0,            # bulk density [kg/m³]
-    c = (1500.0, 1.0),    # LinearProperty: cp(T) = 1500 + 1.0·T  [J/(kg·K)]
-    k = 0.12,             # ConstantProperty 0.12 W/(m·K)
-    ε = 0.88,             # emissivity
-    λ = 2e-5,             # contributes to mixture gas-transfer coefficient
-    κ = 1e-15)            # very low permeability (tight cellular structure)
+`γ` sets participation in the volume-change law and property weights. A
+zero-`γ` condensed phase still occupies skeletal volume and must not carry
+nonzero `λ` or `κ`. Specify intrinsic density or pure-phase porosity to
+describe that skeletal volume. Full signatures and units are in §16.2.1.
 
-# Char: lighter, more conductive, more emissive, absorbing, porous
-char = SolidComponent(:char,
-    ρ = 150.0, c = 1000.0, k = 0.10,
-    ε = 0.95,
-    α = 5.0,              # mass absorption coeff (used only by in-depth radiation)
-    λ = 2e-5,
-    κ = 1e-12)            # open, porous char conducts gas readily
-```
-
-Notes on the less-obvious fields:
-
-- **`ε` accepts the same forms as `k`** — a number, a `(p0, p1)` linear tuple, a
-  function of `T`, or a property function — and is evaluated at the cell
-  temperature in the mixing rule `ε_eff = Σ_j v_j ε_j(T)` (TR §5.8). The
-  Jacobian carries the resulting `dε/dT` automatically. `α` and `absorptivity` are plain constants.
-- **`absorptivity` decouples the absorbed heater flux from the emission.** Leave it
-  `nothing` for Kirchhoff's law (`a_j = ε_j(T)`); set the spectrum-specific value
-  when the heater's spectrum differs from a blackbody at the surface temperature
-  (integrating-sphere data typically give it). A `RadiativeFluxBC` with
-  `absorptivity = nothing` then absorbs `Σ_j v_j a_j · Φ` while the surface still
-  re-radiates at `ε_eff` — no need to split the incident flux into two BC terms.
-- **`α` (absorption) is read only by in-depth radiation.** With
-  `radiation_model = SURFACE_ABSORPTION` (or `NO_RADIATION`) the absorbed part of
-  the incident flux is applied at the surface through the boundary energy balance
-  and the component `α` values are not read. Choose `BEER_LAMBERT` to make `α`
-  matter (Chapter 5 §5.6, Technical Reference §8).
-- **`λ` on a solid** does not transport the solid (solids are stationary); it is the
-  solid's *contribution* to the effective mixture gas-transfer coefficient through
-  the mixing rule (see §3.5). ThermaKin-style setups typically use `λ ≈ 2e-5`.
-  Leaving it at the default `0.0` in a gas-producing material with Fickian
-  transport stops gas transport in every cell that holds no gas: the gas field
-  ends in a sharp front, and the integrator rejects step after step on it.
-  `solve` warns in that configuration; a small value such as `λ = 1e-6` removes
-  the degeneracy (Technical Reference §5.6).
-- **`κ = 0.0` (default) means impermeable.** A solid or liquid component whose
-  permeability law is not identically zero (a non-zero constant, or any law given
-  as a function) switches the whole problem into Darcy–Fick (pressure-driven) gas
-  transport (§3.6.2 and Technical Reference §9).
-- **Swelling factor `γ`** is the fraction of the component's volume that counts as
-  bulk (matrix) volume, with **one meaning everywhere**: the dilation rate θ, the
-  mixture density, and the conductivity/emissivity volume weights all use the same
-  `γ_j·ξ_j/ρ_j` weighting. `γ = 1.0` (default for solids) means the solid shrinks as
-  it is consumed; `γ = 0.0` makes the component consistently *volumeless* — no volume
-  change, no volume in the bulk density, and **no weight in conductivity/emissivity
-  mixing** (use with care for a "rigid char"); intermediate values are for
-  intumescent/partial-expansion cases. Values outside [0, 1] are rejected at
-  construction. See Technical Reference §5.1–5.2 and §10.
+---
 
 ### 3.2.2 `LiquidComponent`
 
-Liquids are matrix-forming like solids (same field set) and are the standard way to
-represent **bound/free moisture** in hygroscopic materials. The defaults differ from
-solids: a liquid by default is strongly emissive (ε = 0.95, near water's ≈ 0.96),
-non-swelling, and blocks gas flow. (For the default γ = 0 the emissivity carries no
-weight in the mixture anyway — a γ = 0 liquid is volumeless in the emissivity mixing;
-the 0.95 matters as soon as you give the liquid γ > 0.)
+Liquids have the condensed component fields. Their defaults are `γ=0`,
+`ε=.95`, `κ=0` and `λ=nothing`.
 
 ```julia
-LiquidComponent(name::Symbol;
-                ρ, c, k,
-                λ = 2e-5, κ = 0.0,
-                ε = 0.95, absorptivity = nothing, α = 0.0, γ = 0.0,
-                ρ_intrinsic = nothing, φ = nothing)
+moisture = LiquidComponent(:moisture; ρ=1000., c=4180., k=.60)
+melt = LiquidComponent(:melt; ρ=900., φ=.02, c=2000., k=.2,
+                       γ=1., λ=1e-6, κ=0.)
 ```
 
-| Keyword | Meaning | Units | Default |
-|---|---|---|---|
-| `ρ`, `c`, `k` | bulk density, heat capacity, conductivity | (as solid) | required |
-| `λ` | gas-transfer contribution | m²·s⁻¹ | `2e-5` |
-| `κ` | permeability | m² | `0.0` (liquid blocks pores) |
-| `ε` | emissivity (number or `ε(T)`) | – | `0.95` (water ≈ 0.96) |
-| `absorptivity` | surface absorptivity for incident radiation (`nothing` = Kirchhoff) | – | `nothing` |
-| `α` | mass absorption | m²·kg⁻¹ | `0.0` |
-| `γ` | swelling factor | – | `0.0` |
-| `ρ_intrinsic` / `φ` | skeletal density / pure-phase porosity | kg·m⁻³ / – | `= ρ` / `nothing` |
+Bound moisture with `γ=0` contributes no direct strain or matrix transport
+weight, but it occupies skeletal volume and stores heat. A matrix-forming
+melt with `γ>0` supplies explicit lumped transfer. The initialized sum of
+all condensed skeletal volumes must leave resolved positive gas pore volume.
 
-```julia
-# Liquid water (moisture) in wood
-moisture = LiquidComponent(:moisture,
-    ρ = 1000.0, c = 4180.0, k = 0.60)   # λ defaults to 2e-5, κ=0 (blocks flow)
-```
-
-The default `γ = 0.0` for liquids means moisture evaporation does **not** by itself
-drive bulk shrinkage; set `γ = 1.0` if you want liquid loss to shrink the matrix.
+---
 
 ### 3.2.3 `GaseousComponent`
 
-Gases flow *through* the matrix; they are the products of decomposition reactions.
-A gaseous component has **no permeability field** (`get_permeability` returns 0 for
-gases) and carries a **molar mass** instead, which feeds the ideal-gas density and
-the pore-pressure closure `P = Σ_g ξ_g R_g T/(M_g φ)`.
+```julia
+air = GaseousComponent(:air; M=0.02897, c=1006., k=0.026)
+product = GaseousComponent(:product; M=0.044, c=1200., k=0.03)
+```
+
+`M` is a positive molar mass [kg/mol]. Heat capacity `c`, conductivity `k`,
+emissivity `ε`, absorption `α` and swelling `γ` have their usual property-law
+meaning. Gases carry no matrix `λ` or `κ`. `LumpedTransfer` uses coefficients
+on the condensed matrix; `DustyGas` derives gas-specific Knudsen transport
+from molar mass and pore geometry. Gas loading does not enter matrix transport
+weights, regardless of `γ`. Bulk concentration is stored per total cell volume;
+the central pore EOS divides by skeletal porosity to obtain intrinsic density.
+
+---
+
+### 3.2.4 Bulk and intrinsic density, pore volume
+
+The condensed bulk density `ρ` defines volume-change and mixing data. The
+intrinsic density `ρ_intrinsic` defines skeletal occupancy. For constant bulk
+density, `φ` is a convenient alternative: `ρ_intrinsic=ρ/(1-φ)`.
 
 ```julia
-GaseousComponent(name::Symbol;
-                 M, c, k, λ,
-                 ε = 0.0, α = 0.0, γ = 0.0,
-                 validate_properties = true)
+matrix = SolidComponent(:matrix; ρ=500., ρ_intrinsic=1500.,
+    c=1500., k=.2, λ=1e-5, κ=1e-14)
 ```
 
-`M` must be positive (a gas with `M ≤ 0` would be transported but exert no
-pressure, so the constructor throws an `ArgumentError`).
+For the actual initialized composition, pore volume is
+`φ = 1 - sum(ξ[j]/ρ_intrinsic[j](T) for condensed j)`. It must be resolved and
+positive in every gas-bearing cell, even for sealed gas and zero permeability.
+A missing intrinsic density defaults to bulk density; a partially filled cell
+can therefore still be admissible. A name search cannot determine admissibility.
+Zero `γ` excludes a component from matrix transport but not skeletal occupancy.
+For dense melts, an explicit nominal pore volume requires joint porosity,
+mesh and tolerance qualification (§7.5); the numerical divisor floor is not a
+physical porosity choice.
 
-| Keyword | Symbol | Meaning | Units | Default |
-|---|---|---|---|---|
-| `M` | `M_j` | Molar mass | kg·mol⁻¹ | required |
-| `c` | `c_{p,j}` | Heat capacity | J·kg⁻¹·K⁻¹ | required |
-| `k` | `k_j` | Thermal conductivity | W·m⁻¹·K⁻¹ | required |
-| `λ` | `λ_j` | Gas-transfer (diffusion) coefficient | m²·s⁻¹ | required |
-| `ε` | `ε_j(T)` | Emissivity (number or property function; no `absorptivity` — gases always follow Kirchhoff) | – | `0.0` |
-| `α` | `α_j` | Mass absorption | m²·kg⁻¹ | `0.0` |
-| `γ` | `γ_j` | Swelling factor | – | `0.0` |
-
-```julia
-# Pyrolysis gas (modelled as a CO₂-like vapour) and water vapour
-gas   = GaseousComponent(:gas, M = 0.044, c = 1800.0, k = 0.03, λ = 1e-4)
-vapor = GaseousComponent(:H2O, M = 0.018, c = 2000.0, k = 0.025, λ = 2e-5)
-```
-
-**Density is automatic.** Unlike solids/liquids, you do *not* pass `ρ` to a gas. The
-constructor installs the ideal-gas law
-
-```
-ρ_g(T) = P_ref · M / (R_g · T)
-```
-
-with `P_ref = 101325 Pa` and `R_g = 8.31446261815324 J·mol⁻¹·K⁻¹`. For example a
-`M = 0.044` gas gives `ρ_g(300) ≈ 1.787 kg·m⁻³`. The ideal-gas default is correct for
-almost all pyrolysis applications. See Technical Reference §4.3.
-
-**Naming and water vapour.** Components named so that the name contains `H2O` or
-`water` (case-insensitive, e.g. `:H2O`, `:water_vapor`) are treated as *moisture*
-gases and are **excluded** from the dry-pyrolysis-gas set that drives lateral
-shrinkage `χ` (Technical Reference §10.3). Name your dry-pyrolysis gas anything else
-(`:gas`, `:MMA`, `:volatiles`). You can inspect the classification:
-
-```julia
-Pyrolysis.Materials.dry_pyrolysis_gas_indices(material)    # gas indices, excluding :H2O / :water*
-```
-
-### 3.2.4 Bulk vs. intrinsic density and porosity
-
-Two densities coexist, and getting them right matters for porous-media physics:
-
-- **Bulk density `ρ_j`** is the pure-phase density used by *mixing rules*, *mixture
-  density*, and *volume-change* kernels. This is what you pass as `ρ`.
-- **Intrinsic (skeletal) density `ρ_{i,j}`** is the density of the cell-wall
-  material itself, ignoring pores within that component. It is used **only** by the
-  porosity formula
-
-  ```
-  φ = 1 − Σ_{j∈solid,liquid} ξ_j / ρ_{i,j}      (= 1 − skeletal_volume_fraction)
-  ```
-
-  and, through `φ`, by the gas-pressure closure `P = N/φ` and the Carman–Kozeny
-  permeability model (Technical Reference §5.3, §9.4). The pore fraction is
-  computed without a clamp; the solver floors it smoothly (at 1e-12) where the
-  pressure divides by it, and under Darcy–Fick transport its integrator refuses a
-  step whose porosity leaves `[0, 1]`.
-
-If you never supply an intrinsic density, it **defaults to the bulk density**, which
-makes the pure phase pore-free and gives `φ = 0` for a fully solid cell. To model a
-genuinely porous solid you must supply *either* `ρ_intrinsic` *or* `φ` (not both —
-passing both raises an `ArgumentError`):
-
-```julia
-# Option A: give the skeletal density directly
-porous_char = SolidComponent(:char, ρ = 150.0, c = 1000.0, k = 0.10,
-                             ρ_intrinsic = 1450.0)   # cell-wall density of carbon
-
-# Option B: give the pure-phase porosity (only valid with a constant bulk ρ)
-porous = SolidComponent(:porous, ρ = 400.0, c = 1000.0, k = 0.10, φ = 0.5)
-# → intrinsic_density = ρ / (1 − φ) = 400 / 0.5 = 800 kg/m³
-```
-
-The `φ` shortcut requires a **constant** bulk `ρ`; for a temperature-dependent bulk
-density you must pass `ρ_intrinsic` explicitly. `φ` must satisfy `0 ≤ φ < 1`.
-
-> **Practical implication.** If you intend to use Carman–Kozeny permeability or the
-> gas-pressure formula and you leave intrinsic density at its default, porosity will
-> be ~0 and those closures will behave degenerately. Always set `ρ_intrinsic`/`φ`
-> on the solids when porosity matters. A Darcy–Fick problem in which a cell starts
-> with a pore fraction below 1e-6 and a non-zero permeability is refused by problem
-> validation (§3.7), and the pore gas is best initialized at ambient pressure with
-> `background_gas_concentration` (Chapter 5 §5.10).
+---
 
 ### 3.2.5 Inspecting a component
 
@@ -2156,7 +1862,9 @@ Pyrolysis.jl uses the **storage convention `h > 0 = endothermic`** (cools the
 material). The volumetric source is `Q_rxn = −Σ h_r r_r`, so an endothermic reaction
 produces `Q_rxn < 0`. This is the *opposite* of the ThermaKin publication
 convention (`h > 0 = exothermic`); when you transcribe ThermaKin parameters, flip
-the sign (Gpyro and FDS use the convention of this package). Examples:
+the sign and normalize the reaction extent (Technical Reference §6.9.1).
+Gpyro and FDS use the convention of this package but still require basis and
+unit checks. Examples:
 
 ```julia
 endo = Reaction(:pyrolysis, :virgin => :gas, A = 1e10, E = 140e3, h =  500e3)  # cools
@@ -2221,7 +1929,7 @@ material (§3.7).
 The solver integrates **effective** (homogenized) bulk properties, not individual
 component properties. Three properties are mixed per material — thermal conductivity
 `k`, gas-transfer coefficient `λ`, and permeability `κ` — and **each may use a
-different rule**. Heat capacity, mixture density, emissivity, and absorption are not
+different rule**. Heat capacity, emissivity, and absorption are not
 configurable: they always use fixed weighting rules (concentration- or
 volume-weighted; see Technical Reference §5).
 
@@ -2236,6 +1944,12 @@ The available rules are the `MixingRule` enum values (all exported):
 | `WEIGHTED` | `k = β·k_∥ + (1−β)·k_series` | k, λ, κ |
 | `BRUGGEMAN` | EMT: `Σ_j v_j (k_j−k)/(k_j+2k) = 0` | **k only** |
 | `CARMAN_KOZENY` | `κ = min(ℓ²φ³ / (180(1−φ)²), ℓ²)` (porosity-based) | **κ only** |
+
+For thermal conductivity, `v_j` is the normalized thermal volume weight.
+For `λ` and component-based `κ`, replace it with normalized condensed matrix
+occupancy `a_j ∝ γ_j ξ_j/ρ_bulk,j`; gases do not contribute. Mixing within
+a cell is separate from matching total species flux through adjacent half cells
+(Technical Reference §9).
 
 A `MixingSpec` bundles a rule with its parameters:
 
@@ -2301,17 +2015,10 @@ If you omit `mixing` from `Material(...)`, the defaults above are used.
      (`φ ≳ 0.93`). This captures the steep rise in permeability as virgin → char
      raises porosity.
 
-> **Important caveat for Carman–Kozeny.** Whether the solver runs in Darcy–Fick
-> (pressure-driven) mode is decided by `has_darcy_flow(material)`, which checks
-> whether any *component* carries `κ > 0` — it does **not** look at the κ mixing
-> rule. So choosing `CARMAN_KOZENY` alone does **not** turn on Darcy transport: with
-> all component `κ = 0`, `has_darcy_flow` returns `false` and gas transport stays
-> Fickian. If you want pressure-driven flow *and* a Carman–Kozeny effective
-> permeability, set a non-zero component `κ` (to trip `has_darcy_flow`) while using
-> the `CARMAN_KOZENY` rule for the effective value, or use component-based κ mixing.
-> Also remember that Carman–Kozeny needs a real porosity, so set `ρ_intrinsic`/`φ`
-> on the solids (§3.2.4) — otherwise `φ ≈ 0` and `κ ≈ 0`. The solver evaluates
-> the Carman–Kozeny law at the smoothly floored pore fraction.
+Carman–Kozeny directly supplies the effective permeability, including when
+all component permeabilities are zero. Both gas models use this permeability.
+The material still needs resolved physical porosity and a qualified matrix
+endpoint or termination domain (§7.5).
 
 ### 3.5.4 Inspecting effective properties
 
@@ -2327,7 +2034,7 @@ P = Pyrolysis.Properties
 ξ = (300.0, 50.0, 0.5)   # (virgin, char, gas) concentrations [kg/m³]
 T = 600.0
 
-P.mixture_density(ξ, T, material)          # ρ with swelling
+sum(ξ)                                   # total bulk mass density
 P.effective_conductivity(ξ, T, material)   # k_eff
 P.effective_gas_transfer(ξ, T, material)   # λ_eff
 φ = 1 - P.skeletal_volume_fraction(ξ, T, material)   # pore fraction (porosity)
@@ -2357,15 +2064,17 @@ Two physics notes worth remembering (both in Technical Reference §5):
   (Technical Reference §7).
 - **Conductivity and emissivity use the swelling-weighted (matrix) volume
   fractions** — γ = 0 components (canonical gases) carry no weight in these
-  surface/matrix properties, matching the ThermaKin convention; as a cell's
+  surface/matrix properties. Gas exclusion agrees with ThermaKin at zero gas
+  swelling, but its liquid and mixture swelling rules differ (Technical Reference
+  §5.14). As a cell's
   matrix volume fraction drops through `1e-3 … 1e-4` the weights blend smoothly
   into the all-phase occupancy, so an emptied cell degrades to the gas-mixture
-  conductivity instead of 0. **Gas transfer uses the all-phase volume fractions**
-  (gas included) — diffusion happens through the pore space the matrix basis
-  excludes. The emissivity and absorptivity are convex combinations of component
-  values in `[0, 1]`, so they stay in `[0, 1]` without a clamp. Component-based permeability mixes on the matrix basis. Absorption uses
-  concentration weighting; mixture density uses mass fractions with the swelling
-  factor.
+  conductivity instead of 0. Transport uses a separate, strictly condensed
+  γ-weighted bulk-volume basis. Both superficial transfer and component-based
+  permeability use those matrix weights, with an explicit endpoint and domain
+  when that matrix disappears. Skeletal pore occupancy includes every condensed
+  phase regardless of γ. Absorption retains concentration weighting.
+
 
 ---
 
@@ -2380,7 +2089,8 @@ Material(; name::Symbol,
            mixing = MaterialMixing(),
            lateral_shrinkage_law = nothing,
            depletion_limiter = DepletionLimiter(),
-           gas_viscosity = SutherlandProperty())
+           gas_viscosity = SutherlandProperty(),
+           gas_transport = LumpedTransfer())
 ```
 
 | Keyword | Meaning | Default |
@@ -2391,6 +2101,7 @@ Material(; name::Symbol,
 | `mixing` | `(k, λ, κ)` NamedTuple from `MaterialMixing` | `MaterialMixing()` |
 | `lateral_shrinkage_law` | `A(t)/A_0 = law(χ̄)` or `nothing` (identity) | `nothing` |
 | `depletion_limiter` | `DepletionLimiter` applied to every reaction-rate evaluation (a C¹ rate factor that is zero at and below zero concentration and joins `tanh(ξ/threshold)` above it; §4.10) | `DepletionLimiter()` (`threshold = 1.0` kg·m⁻³, `join = 1.0`, `base_scale = 1e-8` kg·m⁻³, enabled) |
+| `gas_transport` | declared pore-gas model and endpoint domain | `LumpedTransfer()` for gas-bearing materials |
 | `gas_viscosity` | pore-gas dynamic viscosity μ(T) [Pa·s]; number, `(p0, p1)` tuple, `Function`, or property function | `SutherlandProperty()` (air) |
 
 - **Component order defines the index space.** The first component is index 1, the
@@ -2404,7 +2115,7 @@ Material(; name::Symbol,
   `nothing`. Most simulations leave it `nothing`. A material that carries a law
   must be solved on a moving mesh (`use_ale = true`) in planar coordinates; `setup`
   refuses it otherwise. See Technical Reference §10.5 and Chapters 6 and 7.
-- **`gas_viscosity`** matters only in Darcy–Fick mode, where it enters as the
+- **`gas_viscosity`** matters only in lumped gas transport mode, where it enters as the
   mobility `κ/μ` — so getting μ wrong by a factor is exactly the same as getting
   permeability wrong by the reciprocal factor. The default is air, which is fine
   for an N₂-swept pore space but overstates the viscosity of wood pyrolyzates by
@@ -2429,7 +2140,7 @@ Material(; name::Symbol,
 ### 3.6.2 Worked example: charring wood with moisture
 
 A wood with virgin solid, char solid, liquid moisture, a dry pyrolysis gas, and water
-vapour. The solids carry permeabilities, so the material will run in Darcy–Fick mode;
+vapour. The solids carry permeabilities, so the material will run in lumped gas transport mode;
 it uses `WEIGHTED` conductivity and `CARMAN_KOZENY` permeability, with porosity set
 on the solids via `φ`.
 
@@ -2451,8 +2162,8 @@ char = SolidComponent(:char,
 
 moisture = LiquidComponent(:moisture, ρ = 1000.0, c = 4180.0, k = 0.60)
 
-gas   = GaseousComponent(:gas, M = 0.044, c = 1800.0, k = 0.03, λ = 1e-4)
-vapor = GaseousComponent(:H2O, M = 0.018, c = 2000.0, k = 0.025, λ = 2e-5)
+gas   = GaseousComponent(:gas, M = 0.044, c = 1800.0, k = 0.03,)
+vapor = GaseousComponent(:H2O, M = 0.018, c = 2000.0, k = 0.025,)
 
 # --- Reactions ------------------------------------------------------------
 pyrolysis = Reaction(:pyrolysis, :virgin => (:char, :gas),
@@ -2483,39 +2194,23 @@ wood = Material(
 # All reached via the Materials submodule (none are top-level Pyrolysis exports).
 Pyrolysis.Materials.n_components(wood)              # 5
 Pyrolysis.Materials.n_reactions(wood)               # 2
-Pyrolysis.Materials.has_darcy_flow(wood)            # true (virgin/char κ > 0)
+
 Pyrolysis.Materials.dry_pyrolysis_gas_indices(wood) # (4,)  — :H2O (5) excluded
 ```
 
-### 3.6.3 Worked example: a simple polymer (PMMA)
+### 3.6.3 A polymer with specified pore volume
 
-A non-charring polymer needs only a virgin solid and a single gas, one decomposition
-reaction, and no permeability (so transport stays Fickian). The solid carries a
-small gas-transfer coefficient, `λ = 1e-6`, so Fickian transport does not
-degenerate where the cell holds no gas (§3.2.1); without it `solve` warns. Note the positive `h`:
-PMMA depolymerization is endothermic (≈ 870 kJ·kg⁻¹ absorbed), so under the
-`h > 0 = endothermic` convention it takes a positive value.
+A gas-bearing polymer needs a physical pore volume even when the Darcy
+permeability is zero. The PMMA cone examples declare nominal porosity and
+lumped transfer separately from thermal and kinetic properties. Set
+`PYROLYSIS_PMMA_POROSITY` to vary their pore-volume input. The transport
+coefficient is superficial; changing porosity changes storage and the
+pressure potential. Qualify this input with mesh and pressure-tolerance
+refinement, rather than treating a trial divisor floor as a material property.
 
-```julia
-using Pyrolysis
-
-pmma = Material(
-    name = :PMMA,
-    components = (
-        SolidComponent(:virgin, ρ = 1190.0, c = 1420.0, k = 0.21, ε = 0.86, λ = 1e-6),
-        GaseousComponent(:MMA, M = 0.100, c = 1500.0, k = 0.02, λ = 1e-5),
-    ),
-    reactions = (
-        Reaction(:depolymerization, :virgin => :MMA,
-                 A = 8.5e12, E = 188e3, h = 870e3),   # h > 0 = endothermic
-    ),
-    mixing = MaterialMixing(k = MixingSpec(WEIGHTED, 0.5)),
-)
-```
-
-With `κ = 0` on every component, `has_darcy_flow(pmma)` is `false` and gas leaves by
-Fickian diffusion only — the default transport mode. To make MMA absorb in depth you
-would set `α` on the solid and choose `radiation_model = BEER_LAMBERT` at solve time.
+A positive permeability adds Darcy flow to either gas model. `κ=0` retains
+a legal wall-only material; `λ=0, κ>0` is a legal Darcy-only lumped material.
+A closed material can set both to zero and still has a pore EOS.
 
 ---
 
@@ -2541,21 +2236,18 @@ outside its measured range (`T -> law(clamp(T, T_lo, T_hi))`), or pass
 parameters and an unphysical value should reach the objective instead of
 throwing.
 
-The problem-level check runs when `solve` starts (`validate = true`, the default)
-or when you call `Pyrolysis.Problem.validate_problem(problem)` yourself. For the
-material it checks that there is at least one component and that every
-reaction's reactant/product indices are in range `1:NC`; it also warns when a
-gas-producing Fickian material has a condensed component with `λ = 0`. For the
-rest of the problem it checks the mesh's node positions, that the mesh has the
-`:top` and `:bottom` tags and a thermal condition for each of its tags, the
-length of a per-species `ξ_inf` tuple, the time span and initial step, the
-number of initial-concentration functions, and, under Darcy–Fick transport,
-that no cell starts with a pore fraction below 1e-6 while its effective
-permeability is non-zero. `validate_problem(problem; strict = true)`
-additionally re-checks every reaction's mass balance with
-`verify_stoichiometry`, calls the initial-condition functions at the first cell
-centre, and checks that every cell volume is positive. Errors are collected and
-thrown together in one message.
+Component and material construction validate transport inputs, including explicit
+lumped matrix coefficients, named gas species and endpoint geometry. The
+problem check validates mesh geometry, boundary tags and complete reservoir
+states, initial-condition dimensions, the time span and initial step. Every
+gas-bearing initial state must leave positive skeletal pore volume, including
+sealed materials. Setup then checks the pore margin against the actual solver
+tolerances, reachable matrix support and endpoint assumptions. Proposed and
+post-event states undergo the same physical-domain checks. An explicitly zero
+transport channel is valid; an omitted required coefficient is an error.
+
+`validate_problem(problem; strict=true)` also rechecks reaction mass balance.
+Errors are collected into one diagnostic when possible.
 
 ---
 
@@ -2569,7 +2261,7 @@ thrown together in one message.
 | `absorptivity` (surface absorptivity) | `nothing` (Kirchhoff) | `nothing` (Kirchhoff) | n/a |
 | `α` (absorption) | `0.0` | `0.0` | `0.0` |
 | `γ` (swelling) | `1.0` | `0.0` | `0.0` |
-| `λ` (gas transfer) | `0.0` | `2e-5` | required |
+| `λ` (superficial matrix transfer) | explicit under lumped transport | explicit for participating liquid | not a gas input |
 | `κ` (permeability) | `0.0` | `0.0` | n/a (no field) |
 | `ρ_intrinsic` | `= ρ` | `= ρ` | n/a |
 | density | required `ρ` | required `ρ` | ideal gas from `M` |
@@ -2859,13 +2551,13 @@ read identically):
 ```julia
 using Pyrolysis
 
-virgin = SolidComponent(:virgin, ρ = 530.0, c = 1500.0, k = 0.12)
-int1   = SolidComponent(:int1,   ρ = 400.0, c = 1400.0, k = 0.11)
-int2   = SolidComponent(:int2,   ρ = 250.0, c = 1300.0, k = 0.12)
-char   = SolidComponent(:char,   ρ = 130.0, c = 1100.0, k = 0.10, ε = 0.95)
-gas1   = GaseousComponent(:gas1, M = 0.030, c = 1500.0, k = 0.03, λ = 1e-5)
-gas2   = GaseousComponent(:gas2, M = 0.040, c = 1500.0, k = 0.03, λ = 1e-5)
-gas3   = GaseousComponent(:gas3, M = 0.050, c = 1500.0, k = 0.03, λ = 1e-5)
+virgin = SolidComponent(:virgin, ρ = 530.0, ρ_intrinsic=1500., c = 1500.0, k = 0.12, λ=2e-5)
+int1   = SolidComponent(:int1,   ρ = 400.0, ρ_intrinsic=1500., c = 1400.0, k = 0.11, λ=2e-5)
+int2   = SolidComponent(:int2,   ρ = 250.0, ρ_intrinsic=1500., c = 1300.0, k = 0.12, λ=2e-5)
+char   = SolidComponent(:char,   ρ = 130.0, ρ_intrinsic=1950., c = 1100.0, k = 0.10, ε = 0.95, λ=2e-5)
+gas1   = GaseousComponent(:gas1, M = 0.030, c = 1500.0, k = 0.03,)
+gas2   = GaseousComponent(:gas2, M = 0.040, c = 1500.0, k = 0.03,)
+gas3   = GaseousComponent(:gas3, M = 0.050, c = 1500.0, k = 0.03,)
 
 material = Material(
     name = :CharringWood,
@@ -3117,9 +2809,9 @@ using Pyrolysis
 material = Material(
     name = :PMMA,
     components = (
-        SolidComponent(:virgin, ρ = 1190, c = 1420, k = 0.21, ε = 0.86),
-        SolidComponent(:char,   ρ = 5.0,  c = 1000, k = 0.10, ε = 0.95),
-        GaseousComponent(:MMA,  M = 0.10012, c = 1500, k = 0.02, λ = 1e-5),
+        SolidComponent(:virgin, ρ = 1190, φ=.01, c = 1420, k = 0.21, ε = 0.86, λ=1e-5),
+        SolidComponent(:char,   ρ = 5.0, φ=.01, c = 1000, k = 0.10, ε = 0.95, λ=1e-5),
+        GaseousComponent(:MMA,  M = 0.10012, c = 1500, k = 0.02,),
     ),
     reactions = (
         Reaction(:decomposition, :virgin => (:char, :MMA);
@@ -3185,9 +2877,9 @@ using Pyrolysis.Physics: reaction_rate
 using Pyrolysis.Materials: verify_stoichiometry
 
 # Three components: virgin solid, char residue, gas product.
-virgin = SolidComponent(:virgin, ρ = 1190, c = 1420, k = 0.21, ε = 0.86)
-char   = SolidComponent(:char,   ρ = 5.0,  c = 1000, k = 0.10, ε = 0.95)
-gas    = GaseousComponent(:MMA,  M = 0.10012, c = 1500, k = 0.02, λ = 1e-5)
+virgin = SolidComponent(:virgin, ρ = 1190, φ=.01, c = 1420, k = 0.21, ε = 0.86, λ=1e-5)
+char   = SolidComponent(:char,   ρ = 5.0, φ=.01, c = 1000, k = 0.10, ε = 0.95, λ=1e-5)
+gas    = GaseousComponent(:MMA,  M = 0.10012, c = 1500, k = 0.02,)
 
 rxn_spec = Reaction(:decomposition, :virgin => (:char, :MMA);
                A = 1.5e14,     # s⁻¹
@@ -3282,7 +2974,7 @@ using Pyrolysis
 bc_set = BoundaryConditionSet(
     thermal = (top    = HeatFluxBC(50e3) + RadiativeBC(ε = 0.9, T_inf = 300.0),
                bottom = AdiabaticBC()),
-    mass    = (top    = DiffusiveMassBC(0.01),
+    mass    = (top    = AmbientGasBC(GasReservoir(P=0., T=300.)),
                bottom = ImpermeableBC()),
 )
 ```
@@ -3401,8 +3093,7 @@ convective exchange, and a gas denser than the free stream can pool on the
 face. How a `ConvectiveBC` responds is its `blowing` model, `NoBlowing()` by
 default (the coefficient stays `h` whatever leaves the face). The surface
 balance hands the model the outward mass flux of every gas component at the
-face at each iterate, so the back face is unaffected automatically (no
-outflow). Four models ship:
+face at each iterate. A sealed face has zero species fluxes and is unaffected. Four models ship:
 
 ```julia
 ConvectiveBC(h = 15.0, T_inf = 300.0, blowing = CouetteFilm())        # h·B/(e^B − 1), B = ṁ″·c_p,g/h
@@ -3415,7 +3106,9 @@ ConvectiveBC(h = 11.2, T_inf = 360.0,
 
 - `CouetteFilm(λ = 0.5)`: the classical film law `h → h·R_b` with the
   blowing ratio `R_b = B_λ/(e^{B_λ} − 1)` and the film parameter
-  `B_λ = 2λ·ṁ″·c_p,g/h`, `c_p,g` the heat capacity of the gas leaving the face.
+  `B_λ = 2λ·Σ_j J_j c_p,j(T_s)/h`, using signed outward species fluxes.
+  This handles suction and counterflow; zero net mass flow need not give a zero
+  heat-capacity flux.
   `λ = 0.5` is the Couette film (`B_λ = B`). At a wood-like peak
   `ṁ″ ≈ 10 g·m⁻²·s⁻¹` against `h ≈ 10` this is a 35–50 % reduction of `h`;
   at PMMA-like peaks (`B ≈ 4`) convective cooling is essentially
@@ -3431,8 +3124,9 @@ ConvectiveBC(h = 11.2, T_inf = 360.0,
   floor `ψ_0` (keyword `ψ0`) when the gas at the face is denser than the free
   stream, switching over a logistic in the face buoyancy `Λ` centred at `Λ_c`
   with width `Λ_w` (keywords `Λc`, `Λw`). The face
-  composition comes from a species-by-species film balance with the binary
-  diffusivities into the free stream. The three switch constants belong to
+  composition uses the solved mass-film state when available; otherwise it
+  follows the empirical species film balance with binary diffusivities and
+  requires zero free-stream species flux. The three switch constants belong to
   the apparatus flow (the defaults are the CAPA chamber's); the gas enters
   through its properties. Describe the volatiles either through the
   material's gas components, with Fuller diffusion volumes
@@ -3440,8 +3134,12 @@ ConvectiveBC(h = 11.2, T_inf = 360.0,
   (`volatiles = ...`).
 - `FunctionBlowing(f)`: your own blowing ratio `R_b = f(face, h, T_inf)` from the
   `BlowingFace` (outward species fluxes `face.ṁ`, surface temperature
-  `face.T_s`, `face.material`). `f` must return 1 at zero outflow, be smooth and
+  `face.T_s`, `face.material`). `f` must return 1 at zero species fluxes, be smooth and
   accept dual numbers (branch only on `ForwardDiff.value`).
+
+The empirical property-ratio and pooling closures support outward products
+or pure free-stream suction and reject mixed counterflow. Use the signed
+Couette closure for counterflow.
 
 The free stream is a `GasSpecies` (molar mass, `c_p(T)`, `k(T)`, Fuller
 diffusion volume, optional viscosity); `NITROGEN` ships, and
@@ -3572,7 +3270,7 @@ bc_set = BoundaryConditionSet(
         bottom = AdiabaticBC(),
     ),
     mass = (
-        top    = ConvectiveMassBC(h_m = 0.05, ξ_inf = 0.0),
+        top    = AmbientGasBC(GasReservoir(P=0., T=300.)),
         bottom = ImpermeableBC(),
     ),
 )
@@ -3583,222 +3281,82 @@ bc_set = BoundaryConditionSet(
 
 ## 5.3 Mass boundary conditions
 
-Mass BCs (subtypes of `AbstractMassBC`) control how **gas** escapes (or enters)
-through a boundary. Solid and liquid components never transport across the
-boundary; only gaseous components do. The sign convention is **positive = mass
-into the domain**, so gas escaping at the top has a negative flux in the BC's
-own convention (the solver applies the correct face orientation internally).
+Species fluxes are positive outward, in kg/(m² s). Assign one complete mass
+condition to each tag; mass conditions do not combine with `+`.
 
-| BC type | Physical flux `J_j` | Key parameters (defaults) |
-|---|---|---|
-| `ImpermeableBC` | `0` | — |
-| `MassFluxBC` | `J(t)` (prescribed) | `flux` |
-| `ConvectiveMassBC` | `h_m·(ξ_∞ − ξ_s)` | `h_m`, `ξ_inf` (`0.0`) |
-| `DiffusiveMassBC` | combined internal + external resistance | `h_m` (`Inf`) |
-| `CombinedMassBC` | `Σ_i J_j,i` | built via `+` |
-
-Pressure BCs (§5.5) are also `AbstractMassBC` subtypes but only act in Darcy
-mode. All of these types (and the pressure BCs) are exported by
-`using Pyrolysis`; `CombinedMassBC` is produced by the `+` operator rather than
-called directly. Mass conditions act only when the problem has gas transport:
-a material with a gas component whose components carry a gas-transfer
-coefficient, or a mass condition that passes mass (Chapter 7).
-
-### 5.3.1 `ImpermeableBC` — no gas escape
+### 5.3.1 Impermeable and prescribed species flux
 
 ```julia
-bc = ImpermeableBC()
+sealed = ImpermeableBC()
+prescribed = MassFluxBC(fluxes=(product=1e-4,air=-2e-5),
+                       inflow_temperature=(air=350.,))
 ```
 
-Zero mass flux for every component. This is the default for both faces and the
-usual choice for the substrate.
+An inward species flux needs its incoming temperature. Fluxes and incoming
+temperatures may be functions of time. A prescribed flux requires no internal
+transport coefficient; its carried energy is still assembled.
 
-### 5.3.2 `MassFluxBC` — prescribed mass flux
+### 5.3.2 Complete reservoirs
 
 ```julia
-bc = MassFluxBC(0.0)             # constant prescribed flux [kg/(m²·s)]
-bc = MassFluxBC(t -> 1e-3)       # time-varying
+reservoir = GasReservoir(P=101325., T=300., mole_fractions=(air=1.,))
+mass = (top=AmbientGasBC(reservoir; film=MassTransferFilm(0.02)),
+        bottom=ImpermeableBC())
 ```
 
-Prescribes the boundary mass flux `J` directly (positive = into domain), as a
-constant or `J(t)`. The same value applies to all gas components.
+Reservoir mole fractions are named, nonnegative and sum to one. Unknown nonzero
+species are rejected. Pressure, temperature and composition may depend on time.
+An explicit vacuum `GasReservoir(P=0.,T=300.)` may omit composition. Atmospheric
+exchange requires the atmosphere's tracked species and appropriate initial pore
+gas. Both escape and ingress follow the same constitutive path.
 
-### 5.3.3 `ConvectiveMassBC` — external convective transfer
+### 5.3.3 Optional mass film
 
-```julia
-bc = ConvectiveMassBC(h_m = 0.05, ξ_inf = 0.0)   # gas swept away to clean atmosphere
-```
-
-External convective mass transfer, `J_j = h_m·(ξ_{j,∞} − ξ_{j,s})`. Fields:
-
-- `h_m` — external (film) mass-transfer coefficient `h_m` in **m/s**
-  (velocity-based). Constant or `h_m(t)`; validated non-negative. Typical
-  values: natural convection 0.01–0.05 m/s, forced convection 0.05–0.5 m/s. As
-  a rule of thumb from the heat–mass analogy,
-  `h_m ≈ h_conv / (ρ_air · c_{p,air})`; for `h_conv ≈ 10` W·m⁻²·K⁻¹ this gives
-  `h_m ≈ 0.008` m/s.
-- `ξ_inf` — ambient mass concentration `ξ_∞` in kg/m³, default `0.0` (gas
-  escapes into clean surroundings). Accepts a scalar (broadcast to every gas
-  species), a function of time `t -> ξ_∞(t)`, or an `NTuple` with one entry
-  per component (`ξ_inf = (0.0, 0.0, 0.27)` — e.g. ambient air ingress for a
-  background-air species without injecting pyrolyzate). Entries are validated
-  non-negative; a tuple's length must equal the material's component count.
-
-### 5.3.4 `DiffusiveMassBC` — internal diffusion with optional external resistance
-
-```julia
-bc = DiffusiveMassBC()            # pure internal diffusion (h_m = Inf, default)
-bc = DiffusiveMassBC(0.01)        # add a finite external film resistance, h_m = 0.01 m/s
-```
-
-Couples the **internal** Fickian diffusion gradient in the surface cell to an
-optional **external** film resistance. The single field is:
-
-- `h_m` — external mass-transfer coefficient in m/s. Default `Inf` (the
-  no-argument constructor `DiffusiveMassBC()` sets `h_m = Inf`), meaning *no*
-  external resistance — the flux is the pure diffusive limit
-  `J_j = −λ_eff ξ_{j,s}/d`, where `λ_eff` is the surface cell's effective
-  gas-transfer coefficient and `d` the distance from its center to the boundary
-  face. A finite `h_m` adds a series resistance:
-  `J_j = −λ_eff h_m ξ_{j,s}/(λ_eff + h_m d)`.
-
-This is the most physically consistent escape BC because it ties the surface
-loss to the same internal transport law used everywhere else. Use it (with `Inf` or a
-finite `h_m`) when you want gas escape governed by the material's own gas
-transfer coefficient rather than an imposed convective coefficient.
-
-### 5.3.5 `CombinedMassBC` — adding mass BCs with `+`
-
-```julia
-bc = DiffusiveMassBC(Inf) + ConvectiveMassBC(h_m = 0.01, ξ_inf = 0.0)
-```
-
-Sums component mass fluxes, `J_j = Σ_i J_{j,i}`, via the `+` operator (generated
-function, type-stable). For most pyrolysis runs a single mass BC suffices;
-combined mass BCs are for modeling competing transport mechanisms or
-research/validation studies.
+`MassTransferFilm(g)` is an isobaric common-diffusivity film with conductance
+`g=ρD/δ` in kg/(m² s), supplied as a number or temperature law. A finite film
+solves surface fractions jointly with the thermal balance. Infinite conductance
+fixes composition to the reservoir. Zero conductance permits only donor bulk
+flow. The model and signed blowing/reversal limits are in Technical Reference §9.8.
 
 ---
 
-## 5.4 The surface energy balance (how thermal BCs are applied)
+## 5.4 Surface temperature and carried energy
 
-![Surface cell with incoming radiation, inward conduction and outward radiative and convective losses; gas enthalpy appears separately in the outward face flux.](assets/figures/06_surface_energy.svg)
+The surface temperature is determined from the thermal condition and conduction
+through the current half-cell distance. With a mass film or hydraulic resistance,
+surface temperature, fractions and pressure are solved together whenever their
+equations couple. A bounded, scaled local Newton solve must converge and have a
+resolved nonsingular Jacobian; otherwise the solver diagnoses the local failure.
 
-**Figure 6. Surface energy transfers (schematic, surface absorption).** Incoming radiation balances conduction into the solid and convective and radiative losses. The surface-temperature calculation uses $T_s$, the adjacent cell temperature and distance $d$. Gas outflow modifies convection through blowing; its sensible enthalpy enters the face energy flux separately, as shown below. The arrows depict losses from a hot surface; signed exchanges can reverse. Beer–Lambert absorption instead deposits radiation within the cells (Figure 7).
+Outward gas carries surface enthalpy; inward gas carries its specified incoming
+enthalpy. The reported boundary heat uses the reservoir control surface. For an
+LTE wall heat film, `q_reservoir=q_surface+H_reservoir-H_surface`, so total outward
+energy is `H_reservoir-q_reservoir=H_surface-q_surface`. An adiabatic boundary
+has no hidden incoming-gas heating. A convective film and its reservoir must use
+the same incoming stream temperature; radiative surroundings can differ.
 
-Thermal BCs are not applied as a raw flux in the cell; instead the solver finds
-the **surface (face) temperature** `T_s` that makes the boundary energy balance
-close, then conducts the resulting flux into the adjacent cell. The balance is
-
-```
-q_BC(T_s) = k_eff · (T_s − T_cell) / d
-```
-
-— the applied BC flux equals the heat conducted from the surface face into the
-first cell center, with `k_eff` the cell's effective conductivity, `T_cell` its
-trial temperature, and `d` the face-to-center distance. It is solved by a Newton
-iteration on `T_s` (see Technical Reference §12.2). You do not call this
-yourself — it runs inside the residual — but it explains a few user-visible
-behaviors:
-
-- **Closed-form faces skip it.** An `AdiabaticBC`, a lone `HeatFluxBC` and a
-  lone `DirichletThermalBC` give the face flux directly; every other condition
-  (and every `CombinedThermalBC`) goes through the Newton iteration.
-- **It always has a root.** The Newton starts from the cell temperature clamped
-  to the property bracket `[200, 3000]` K and evaluates the condition at the
-  *trial clamp* of the iterate (the smooth clamp into the bracket with 1 K
-  transitions), so the balance has a root for any cell temperature and the
-  iterate itself is never clamped. A root outside the bracket belongs to a trial
-  state that the integrator's error control rejects.
-- **Convergence** is on the flux residual, relative tolerance `1e-10` of the
-  larger of the applied and conducted fluxes (with a round-off floor), in at
-  most 50 iterations; on the cone recipe of §5.11.1 (20 cells, 120 s, with a
-  blowing model) it converged in 4 to 5 iterations at every accepted step. A
-  balance that does not converge is not an error: the flux is taken at the last
-  iterate, no warning is printed, and the per-face diagnostics record
-  `converged` and `iterations`.
-- **It is differentiated exactly.** The iteration carries dual numbers, so the
-  Jacobian's derivatives with respect to the state flow through `T_s`.
-- The converged surface temperature is available afterwards as
-  `solution.surface_T` (and per tag in `solution.boundary_T`), and the flux
-  decomposition (absorbed, re-radiation, convection, conducted, net) in
-  `solution.extras` (§9.3).
-
-The balance has **no surface gas-enthalpy term**. The gas leaving through the
-face carries its sensible enthalpy at the face temperature, `Σ_j J_j h_j(T_s)`,
-in the face's energy flux, added once the balance has fixed `T_s`; a surface
-term `Σ_g ṁ_g Δh_g(T_s, T_∞)` in the balance would count that enthalpy a second
-time. The outward gas flux enters the balance only through the blowing model of
-a `ConvectiveBC` (§5.2.3).
+`CouetteFilm` uses the signed sum of species heat-capacity fluxes. Empirical
+pooling/property-ratio models support outward products or pure freestream
+suction and diagnose unsupported mixed counterflow. See Technical Reference
+§9.9 for the control surface, approximation and supported domains.
 
 ---
 
-## 5.5 Pressure boundary conditions (Darcy mode only)
-
-When the material has a permeability (so the solver runs in Darcy–Fick transport
-mode, see Technical Reference §9), gas transport is pressure-driven and you can
-prescribe **pressure** at a boundary. Pressure BCs are `AbstractMassBC` subtypes,
-so they go in the `mass` slot of the `BoundaryConditionSet`. They contribute no
-film (diffusive) mass flux; instead they set the outward Darcy velocity `v` of
-the boundary face from the boundary cell's pressure `P` and mobility `κ/μ`. An
-outflow (`v > 0`) carries the cell's gas out at its intrinsic density `ξ_j/φ`;
-an inflow carries none of the tracked gases (the ambient is taken to hold none
-of them). A mass condition that is not a pressure condition drives no Darcy
-velocity, so an `ImpermeableBC` face is sealed under Darcy–Fick as well. In
-Fickian (non-Darcy) mode pressure BCs have no effect.
-
-| BC type | Outward Darcy velocity | Parameters (defaults) |
-|---|---|---|
-| `DirichletPressureBC` | `v = (κ/μ)(P − P_bc)/d` | `P` (`101325.0`) |
-| `NeumannPressureBC` | `v = −(κ/μ)·∂P/∂n` | `∂P∂n` (`0.0` = no flow) |
-| `ConvectivePressureBC` | `v = h_P·(P − P_ext)` | `h_P`, `P_ext` |
-
-All three are exported by `using Pyrolysis`. A pressure condition combines with
-a film condition through `+`, e.g. `DiffusiveMassBC(0.01) +
-DirichletPressureBC(101325.0)` (diffusive escape plus pressure-driven venting),
-as `examples/08_darcy_fick_demo.jl` does.
-
-### 5.5.1 `DirichletPressureBC` — fixed pressure
+## 5.5 Pressure-gradient and hydraulic-resistance boundaries
 
 ```julia
-bc = DirichletPressureBC()           # default: atmospheric, 101325 Pa
-bc = DirichletPressureBC(101325.0)   # explicit atmospheric
+gradient = NeumannPressureBC(gradient=-1e5,T=300.,mole_fractions=(air=1.,))
+reservoir = GasReservoir(P=101325.,T=300.,mole_fractions=(air=1.,))
+resistive = ConvectivePressureBC(reservoir;resistance=1e6,flow=:darcy_velocity)
 ```
 
-Holds the boundary at pressure `P` (Pa). The outward Darcy velocity is the
-one-sided gradient between the interior cell and the boundary,
-`v = (κ/μ)·(P_interior − P_bc)/d`. This is the natural exposed-surface
-condition: the outer face sits at atmospheric pressure and gas flows out down the
-pressure gradient built up by pyrolysis.
-
-### 5.5.2 `NeumannPressureBC` — prescribed gradient
-
-```julia
-bc = NeumannPressureBC()         # default: zero gradient (no Darcy flow)
-bc = NeumannPressureBC(0.0)      # same as above
-bc = NeumannPressureBC(-1000.0)  # pressure falling outward at 1 kPa/m: an outflow
-```
-
-Sets the pressure gradient `∂P/∂n` (Pa/m) along the **outward** normal, default
-`0.0`. A zero gradient is a no-flow (impermeable) back face for the pressure
-field — the usual choice for a sealed substrate in Darcy mode. A positive
-gradient (pressure rising outward) would drive an inflow, which carries no gas.
-
-### 5.5.3 `ConvectivePressureBC` — Robin (resistive) outflow
-
-```julia
-bc = ConvectivePressureBC(1e-6, 101325.0)   # finite surface resistance, atmospheric exterior
-```
-
-A Robin-type condition, `v·n = h_P·(P_internal − P_external)`, for a surface
-with finite resistance to gas flow (a char skin, a coating). Fields:
-
-- `h_P` — pressure-transfer coefficient `h_P` in m·Pa⁻¹·s⁻¹.
-- `P_ext` — external pressure `P_external` in Pa.
-
-The velocity is gated to zero on an impermeable boundary cell. Limits:
-`h_P → ∞` approaches `DirichletPressureBC`; `h_P → 0` approaches an impermeable
-(zero-flow) boundary.
+The pressure gradient is outward [Pa/m]. It determines surface pressure through
+the current half-cell distance; accepted surface pressure must be nonnegative.
+The resistance law is `P_surface-P_reservoir=resistance*flow`. Choose
+`:darcy_velocity` [m/s], `:mass` [kg/(m² s)] or `:molar` [mol/(m² s)]; resistance
+units are pressure divided by that quantity. A zero resistance fixes pressure.
+`ConvectivePressureBC` also accepts `film=MassTransferFilm(...)`. Both variants
+supply complete composition and incoming energy data and support either gas model.
 
 ---
 
@@ -4030,7 +3588,7 @@ bc_set = BoundaryConditionSet(
         bottom = AdiabaticBC(),
     ),
     mass = (
-        top    = ConvectiveMassBC(h_m = 0.05, ξ_inf = 0.0),
+        top    = AmbientGasBC(GasReservoir(P=0., T=300.)),
         bottom = ImpermeableBC(),
     ),
 )
@@ -4050,7 +3608,7 @@ bc_set = BoundaryConditionSet(
               ConvectiveBC(h = 10.0, T_inf = 300.0),
         bottom = AdiabaticBC(),
     ),
-    mass = (top = DiffusiveMassBC(), bottom = ImpermeableBC()),
+    mass = (top = AmbientGasBC(GasReservoir(P=0., T=300.)), bottom = ImpermeableBC()),
 )
 solution = solve(problem; radiation_model = BEER_LAMBERT)
 ```
@@ -4065,36 +3623,35 @@ temperature with a time-dependent `DirichletThermalBC`:
 bc_set = BoundaryConditionSet(
     thermal = (top = DirichletThermalBC(t -> 300.0 + β * t),
                bottom = AdiabaticBC()),
-    mass    = (top = DiffusiveMassBC(), bottom = ImpermeableBC()),
+    mass    = (top = AmbientGasBC(GasReservoir(P=0., T=300.)), bottom = ImpermeableBC()),
 )
 ```
 
-### 5.11.4 Pressure-driven char (Darcy mode)
+### 5.11.4 A pressure reservoir for a gas-bearing char
 
-With a permeable material, set atmospheric pressure on the exposed face and a
-sealed (zero-gradient) back face. The transport mode switches to Darcy–Fick
-automatically when the material has permeability:
+For a material containing `:air`, an atmospheric boundary is:
 
 ```julia
-bc_set = BoundaryConditionSet(
-    thermal = (top = HeatFluxBC(50e3) + RadiativeBC(ε = 0.9, T_inf = 300.0),
-               bottom = AdiabaticBC()),
-    mass    = (top = DirichletPressureBC(101325.0),    # atmospheric exposed face
-               bottom = NeumannPressureBC(0.0)),       # sealed substrate
-)
+reservoir = GasReservoir(P=101325., T=300., mole_fractions=(air=1.,))
+bcs = BoundaryConditionSet(
+    thermal=(top=ConvectiveBC(h=10., T_inf=300.), bottom=AdiabaticBC()),
+    mass=(top=AmbientGasBC(reservoir), bottom=ImpermeableBC()))
 ```
+
+This permits both ingress and escape. Add `film=MassTransferFilm(g)` for
+finite external composition transfer. Use `ConvectivePressureBC` with a
+named flow measure when the exterior instead has a hydraulic resistance.
 
 ---
 
 ## 5.12 Caveats and pitfalls
 
-- **The escaping gas carries no surface enthalpy term.** The gas enthalpy flux
-  `Σ_j J_j h_j` through every face, the boundary face included at the surface
-  temperature, already carries the enthalpy of the escaping gas (Technical
-  Reference §7, §12.2); a surface term `Σ_g ṁ_g Δh_g(T_s, T_∞)` on top of it
-  would double-count that enthalpy, a spurious sink that under-predicts surface
-  temperature and mass-loss rate. Parameter sets calibrated with a code that
-  adds a surface gas-enthalpy term may need re-calibration.
+- **Incoming energy needs complete gas data.** Outflow carries enthalpy at the
+  surface temperature; inflow carries its specified reservoir enthalpy. An LTE
+  thermal film accounts for the adjustment between those control surfaces in
+  its coupled surface balance. Adiabatic and prescribed-heat boundaries use
+  reservoir carried enthalpy directly. Use the assembled boundary diagnostics
+  to avoid adding incoming energy twice (§5.4).
 
 - **`radiation_model` defaults to `NO_RADIATION`.** A `RadiativeFluxBC` only does
   something if you pass an appropriate `radiation_model` to `solve()`. With the
@@ -4109,19 +3666,16 @@ bc_set = BoundaryConditionSet(
   throws at construction. Mesh motion needs no BC at all (it is automatic
   with `use_ale = true`), and there is no radiation BC type.
 
-- **Pressure BCs need Darcy mode.** `DirichletPressureBC`/`NeumannPressureBC`/
-  `ConvectivePressureBC` only have an effect when the material has permeability
-  (Darcy–Fick transport). In Fickian mode they contribute zero flux and are
-  silently inert — use `ImpermeableBC`/`DiffusiveMassBC`/`ConvectiveMassBC` for
-  diffusion-only gas escape. The pressure conditions vent outflow only; an
-  inward Darcy velocity carries no gas.
+- **Complete gas data.** Pressure boundaries use the chosen gas model and
+  require species and incoming-energy data. Both ingress and escape are
+  represented. Sealed gas still has a pore EOS.
 
 - **Don't double-specify a radiation source.** Use `RadiativeFluxBC` (not also
   `HeatFluxBC`) for the cone/panel; use `RadiativeBC` for the surface's own
   re-radiation loss. They are different physical terms.
 
 - **Match `ξ_initial` to your component order.** The auto-default only fills
-  component 1 (if solid). For Darcy–Fick materials, initialize the pore gas at
+  component 1 (if solid). For lumped gas transport materials, initialize the pore gas at
   ambient pressure with `background_gas_concentration(material, :air, ξ_condensed, T)`
   (exported at the top level): a pore space started as a vacuum against a
   101325 Pa boundary draws early product gas inward. For multi-solid or moisture-bearing materials, supply
@@ -4379,15 +3933,17 @@ A complete convergence loop: the same problem at each resolution, two scalars pe
 ```julia
 using Pyrolysis
 
-virgin = SolidComponent(:virgin; ρ = 1190.0, c = 1500.0, k = 0.20, λ = 1e-6)
-gas    = GaseousComponent(:MMA; M = 0.100, c = 1500.0, k = 0.02, λ = 1e-5)
-pmma   = Material(name = :PMMA, components = (virgin, gas),
+virgin = SolidComponent(:virgin; ρ = 1190.0, φ=.3, c = 1500.0, k = 0.20, λ = 1e-6)
+gas    = GaseousComponent(:MMA; M = 0.100, c = 1500.0, k = 0.02,)
+pmma   = Material(
+    gas_transport=LumpedTransfer(endpoint=LumpedEndpoint(λ=1e-6,κ=0.,max_skeletal_occupancy=.001)),
+    name = :PMMA, components = (virgin, gas),
                   reactions = (Reaction(:pyrolysis, :virgin => :MMA;
                                         A = 8.5e12, E = 188e3, h = 870e3),))
 bcs = BoundaryConditionSet(
     thermal = (top = HeatFluxBC(50e3) + RadiativeBC(ε = 0.9, T_inf = 300.0),
                bottom = AdiabaticBC()),
-    mass    = (top = DiffusiveMassBC(0.01), bottom = ImpermeableBC()),
+    mass    = (top = AmbientGasBC(GasReservoir(P=0., T=300.)), bottom = ImpermeableBC()),
 )
 
 for n in (25, 50, 100, 200)
@@ -4775,8 +4331,8 @@ material with components, reactions and properties (Chapters 3–4), and a
 `BoundaryConditionSet` (Chapter 5). This chapter shows how to assemble them into a
 `PyrolysisProblem` and how the *physics* the solver integrates is selected. Pyrolysis.jl is
 a generalized model with optional physics: one problem can be solved on a fixed or a moving
-mesh, with one of three radiation models, with no gas transport, Fickian transport or
-pressure-driven Darcy–Fick transport, with a fixed or a variable cross section, and with the
+mesh, with one of three radiation models, with no gas transport, lumped transport or
+pressure-driven gas transport, with a fixed or a variable cross section, and with the
 temperature or the enthalpy inventory as the energy state. Some of these choices are `solve`
 keywords; the others follow from the material and the boundary conditions. `setup`, which
 `solve` calls first, reads them all and builds the state and the residual they need. This
@@ -4816,13 +4372,15 @@ heat flux on the exposed surface, an adiabatic and impermeable back):
 using Pyrolysis
 
 # --- Material: one solid that decomposes into a gas ---
-virgin = SolidComponent(:virgin; ρ = 1190.0, c = 1500.0, k = 0.20, λ = 1e-6)
-gas    = GaseousComponent(:MMA;  M = 0.100, c = 1500.0, k = 0.02, λ = 1e-5)
+virgin = SolidComponent(:virgin; ρ = 1190.0, φ=.3, c = 1500.0, k = 0.20, λ = 1e-6)
+gas    = GaseousComponent(:MMA;  M = 0.100, c = 1500.0, k = 0.02,)
 
 decomp = Reaction(:pyrolysis, :virgin => :MMA;
                   A = 8.5e12, E = 188e3, h = 870e3)   # h > 0 = endothermic
 
-pmma = Material(name = :PMMA,
+pmma = Material(
+    gas_transport=LumpedTransfer(endpoint=LumpedEndpoint(λ=1e-6,κ=0.,max_skeletal_occupancy=.001)),
+    name = :PMMA,
                 components = (virgin, gas),
                 reactions  = (decomp,))
 
@@ -4833,7 +4391,7 @@ mesh = create_uniform_mesh(0.01, 100)
 bc_set = BoundaryConditionSet(
     thermal = (top    = HeatFluxBC(50e3) + RadiativeBC(ε = 0.9, T_inf = 300.0),
                bottom = AdiabaticBC()),
-    mass    = (top    = DiffusiveMassBC(0.01),   # gas escapes to the atmosphere
+    mass    = (top    = AmbientGasBC(GasReservoir(P=0., T=300.)),   # gas escapes to the specified vacuum
                bottom = ImpermeableBC()),
 )
 
@@ -4851,8 +4409,8 @@ sol = solve(problem)
 
 The mesh knows nothing about the material: the component count comes from the material
 alone, and the validator (§7.9) checks that `ξ_initial` has one closure per component. The
-small gas-transfer coefficient on the solid (`λ = 1e-6`) keeps Fickian gas transport from
-degenerating where the solid holds no gas (§7.5, §7.9).
+declared coefficient `λ = 1e-6` specifies superficial wall transport through
+the illustrative porous solid (§7.5).
 
 ### 7.1.2 Initial conditions
 
@@ -4898,7 +4456,7 @@ problem = PyrolysisProblem(
 
 Under a lateral shrinkage law (§7.6) the initial state also holds each cell's conversion
 history, `G_i = 0` and `M_i` the cell's initial solid mass, the denominator of the column
-conversion `χ̄`. A Darcy–Fick material's pore gas is initialized through `ξ_initial` as well
+conversion `χ̄`. A lumped gas transport material's pore gas is initialized through `ξ_initial` as well
 (§7.5.1). See Technical Reference §12 for the initial and boundary conditions.
 
 ### 7.1.3 Time span and output times
@@ -4936,7 +4494,7 @@ nothing is dispatched on during the integration. The choices:
 |---|---|---|---|
 | Mesh motion | `use_ale` keyword | fixed (`false`), moving (`true`) | fixed |
 | Radiation | `radiation_model` keyword | `NO_RADIATION`, `SURFACE_ABSORPTION`, `BEER_LAMBERT` | `NO_RADIATION` |
-| Gas transport | the material and the mass conditions | none, Fickian, Darcy–Fick | from the problem |
+| Gas transport | material model and complete mass conditions | `LumpedTransfer` or `DustyGas`; EOS for every gas-bearing material, including sealed gas | from the problem |
 | Cross section | the material's `lateral_shrinkage_law` | fixed, variable | fixed |
 | Energy state | `energy_state` keyword | `:temperature`, `:enthalpy` | `:temperature` |
 | Deactivation | `deactivation` keyword | off, on | off |
@@ -5080,108 +4638,65 @@ Technical Reference §8 for the models.
 
 ---
 
-## 7.5 Gas transport: none, Fickian or Darcy–Fick (automatic)
+## 7.5 Gas transport and pore-state control
 
-![Porous solid with bulk and pore gas densities, separate diffusion, Darcy and skeleton-motion contributions, and additive pressure and film boundary fluxes.](assets/figures/12_gas_transport.svg)
-
-**Figure 12. Gas storage and transport (schematic).** Bulk concentration $\xi$ uses total cell volume; pore density $\xi/\phi$ uses pore volume. Diffusion and Darcy flow are relative to the skeleton; skeleton transport relative to the mesh is $-c\xi$. At a boundary, pressure-driven venting and the mass-film contribution add, and the resulting gas flux carries sensible enthalpy. Arrows show representative directions; gradients can reverse them.
-
-The gas-transport model is not a `solve` keyword: `setup` infers it from the material and
-the mass boundary conditions.
-
-| Model | Selected when | Gas flux |
-|---|---|---|
-| none | the material has no gas component, or no component has a gas-transfer coefficient `λ` and every mass condition is `ImpermeableBC` | no gas moves |
-| Fickian | gas can move and no condensed component is permeable (every `κ = 0`) | diffusive: `J = −(λ_f/T_f)(ξ_nb T_nb − ξ_o T_o)/d` |
-| Darcy–Fick | some solid or liquid component has `κ > 0` (`has_darcy_flow(material)`) | diffusive plus advective: `J = J_diff + v ξ_up/φ_f`, with the superficial velocity `v = −(κ/μ)∇P` |
-
-In the Fickian flux `λ_f` is the face mean of the cells' gas-transfer coefficients and `d`
-the distance between the cell centres; in the Darcy–Fick flux `ξ_up` is the concentration
-upwind of `v` and `φ_f` the face porosity, so that the advected quantity is the intrinsic
-gas density `ξ/φ` (`ξ` is per bulk volume, `v` superficial). The pressure `P` is the
-ideal-gas pressure of the pore gas, and it and the Darcy velocity are evaluated only under
-Darcy–Fick transport, so a Fickian material carries no pressure computation. See Technical
-Reference §9 for the transport model.
-
-Under Fickian transport the cell coefficient is the volume-fraction mix of the component
-values, so a condensed component with `λ = 0` stops all transport in a cell that holds no gas.
-The validator warns about it (§7.9); give the condensed components a small `λ` (for example
-`1e-6` m²/s).
-
-### 7.5.1 Enabling Darcy–Fick
-
-Put a permeability on the relevant solid and liquid components:
+`Material(...;gas_transport=LumpedTransfer())` uses the default superficial
+partial-pressure law plus Darcy transport. Participating condensed components
+require an explicit `λ` [m²/s]; `κ` [m²] defaults to zero. Gas components have
+no matrix coefficients.
 
 ```julia
-# Diffusion only (Fickian): no κ, all gas transport is diffusive
-virgin = SolidComponent(:virgin; ρ = 500.0, c = 2000.0, k = 0.15, λ = 1e-6)
-
-# Darcy–Fick: a permeability selects it
-virgin = SolidComponent(:virgin; ρ = 500.0, c = 2000.0, k = 0.15, κ = 1e-15,
-                        ρ_intrinsic = 1500.0)  # skeletal density: a real pore volume
-char   = SolidComponent(:char;   ρ = 150.0, c = 1500.0, k = 0.10, κ = 1e-12,
-                        ρ_intrinsic = 1950.0)
-gas    = GaseousComponent(:volatiles; M = 0.030, c = 1100.0, k = 0.02, λ = 1e-5)
-air    = GaseousComponent(:air; M = 0.02897, c = 1006.0, k = 0.026, λ = 2e-5)
-
-decomp = Reaction(:pyrolysis, :virgin => (:char, :volatiles);
-                  A = 1e10, E = 150e3, h = 300e3, yields = (0.25, 0.75))
-
-wood = Material(name = :CharringWood,
-                components = (virgin, char, gas, air),
-                reactions  = (decomp,),
-                mixing = MaterialMixing(k = MixingSpec(PARALLEL, 0.5),
-                                        κ = MixingSpec(WEIGHTED, 0.5)))
+matrix = SolidComponent(:matrix;ρ=500.,ρ_intrinsic=1500.,c=1500.,k=.2,
+                        λ=1e-5,κ=1e-14)
+air = GaseousComponent(:air;M=.02897,c=1006.,k=.026)
+material = Material(name=:PorousSlab,components=(matrix,air))
+ξ_air = background_gas_concentration(material,:air,(500.,0.),300.)
+reservoir = GasReservoir(P=101325.,T=300.,mole_fractions=(air=1.,))
+problem = PyrolysisProblem(mesh=create_uniform_mesh(.01,10),material=material,
+    bc_set=BoundaryConditionSet(thermal=(top=HeatFluxBC(1000.),bottom=AdiabaticBC()),
+        mass=(top=AmbientGasBC(reservoir),bottom=ImpermeableBC())),
+    T_initial=z->300.,ξ_initial=[z->500.,z->ξ_air],tspan=(0.,.1))
+sol = solve(problem;pressure_tolerance=.1,reltol=1e-7)
+pressure = get_pressure(sol)
+exchange = get_boundary_exchange(sol,:top)
 ```
 
-> **Initialize the pore gas.** A Darcy–Fick problem needs (i) skeletal densities on the
-> condensed components (`ρ_intrinsic`, or the `φ` keyword, §3.2.4) so that a real pore volume
-> exists, and (ii) an inert background air component initialized at ambient pressure with
-> `background_gas_concentration(material, :air, ξ_condensed₀, T₀)`; otherwise the pore space
-> starts as a vacuum against the 1 atm boundary and early product gas is spuriously advected
-> inward. A permeable cell with no pore space is refused by the validator (§7.9). See
-> Technical Reference §9.5.4 and `examples/08_darcy_fick_demo.jl`.
+### 7.5.1 Dusty-gas transport
 
 ```julia
-# Pore air at 1 atm in the virgin solid at 300 K
-ξ_air = background_gas_concentration(wood, :air, (500.0, 0.0, 0.0, 0.0), 300.0)
-ξ_initial = [z -> 500.0, z -> 0.0, z -> 0.0, z -> ξ_air]
+dusty = DustyGas(tortuosity=2.,D_ref=2e-5,T_ref=300.,P_ref=101325.,
+                 pore_diameter=1e-6)
+material = Material(name=:DustySlab,components=(matrix,air),gas_transport=dusty)
 ```
 
-The effective permeability is computed from the component values with the `κ` mixing rule
-(§3.5). As virgin converts to char, `κ` rises and the bulk gas flow gains weight. Gas
-components carry no permeability (the gas flows *through* the matrix); only solids and
-liquids contribute.
+The common molecular-diffusion reference data and tortuosity are explicit.
+An explicit pore diameter may be a temperature law. If omitted, the diameter
+comes from effective permeability, `sqrt(32τκ_eff/φ)`. A path crossing zero
+permeability needs an explicit diameter or a positive, zero-preserving
+`capillary_regularization` whose sensitivity is checked for that problem.
+Per-component pore-diameter averaging is not used.
 
-### 7.5.2 Pressure boundary conditions
+### 7.5.2 Domain, endpoints and tolerances
 
-Darcy flow is driven by the gradient of the ideal-gas pore pressure. To control the pressure
-at a boundary, attach a pressure condition to the **mass** entry of that tag with the `+`
-operator. Pressure conditions are not a separate field of `BoundaryConditionSet`; they ride
-along with the mass condition:
+Pore pressure, intrinsic density and fractions are computed for all gas-bearing
+materials, including sealed ones. Physical initial and accepted pore volumes
+must remain above the trial floor with a resolved error margin. The default
+`pressure_tolerance=1.0` Pa is an absolute local error budget shared among gas
+species. Proposed-state control includes changing temperature, condensed masses
+and geometry; it is not a bound on accumulated global error. Tighten it along
+with mesh/time tolerances when qualifying pressure-sensitive predictions.
 
-```julia
-# Top surface: gas diffuses out AND is held at atmospheric pressure
-top_mass = DiffusiveMassBC(0.05) + DirichletPressureBC(101325.0)
+Matrix transport weights use condensed `γξ/ρ_bulk`; skeletal volume is a
+separate sum without `γ`. Retained cells that lose their matrix need a declared
+endpoint, for example `LumpedTransfer(endpoint=LumpedEndpoint(λ=1e-5,κ=0.,
+max_skeletal_occupancy=1e-3))`. The finite coefficients and supported occupancy
+are physical data. Without an endpoint, the model ends at `:matrix_exhausted`.
+A nominal porosity for a dense melt must be tested jointly with mesh and
+pressure tolerance; it cannot be inferred from the numerical floor.
 
-bc_set = BoundaryConditionSet(
-    thermal = (top = HeatFluxBC(75e3) + RadiativeBC(ε = 0.9, T_inf = 300.0),
-               bottom = AdiabaticBC()),
-    mass    = (top = top_mass, bottom = ImpermeableBC()),
-)
-```
-
-The pressure conditions are `DirichletPressureBC(P)` (fixed pressure),
-`NeumannPressureBC(∂P/∂n)` (prescribed gradient) and `ConvectivePressureBC` (a resistive
-outflow law). Each sets the outward Darcy velocity of its boundary face, which vents gas
-advectively against an ambient that carries none of the tracked gases; they contribute no
-diffusive film flux of their own: that comes from the mass condition they are combined with,
-and the two add. Under Fickian transport a pressure condition drives nothing. See §5.5,
-Technical Reference §9.5.3 for the venting flux and §12.5 for the pressure conditions.
-
-> The shipped Darcy–Fick examples (`08_darcy_fick_demo.jl`, `07_douglas_fir_cone.jl`,
-> `08_pressure_treated_wood_cone.jl`) run on a moving mesh, since pressure-driven outflow
-> accompanies recession.
+The single conservative face flux matches total species flow through the two
+half paths. Wall-only and Darcy-only layers may therefore conduct in series.
+Gas transport remains limited to one dimension when gases can move.
 
 ---
 
@@ -5205,7 +4720,9 @@ shrink_law = χ̄ -> 1.0 - 0.2 * χ̄
 # Linear lateral swelling (intumescence): the area grows by 50%
 swell_law  = χ̄ -> 1.0 + 0.5 * χ̄
 
-pmma_shrinking = Material(name = :PMMA,
+pmma_shrinking = Material(
+    gas_transport=LumpedTransfer(endpoint=LumpedEndpoint(λ=1e-6,κ=0.,max_skeletal_occupancy=.001)),
+    name = :PMMA,
                           components = (virgin, gas),
                           reactions  = (decomp,),
                           lateral_shrinkage_law = shrink_law)
@@ -5262,30 +4779,34 @@ The solver assembles it in flux form. Every face carries the conducted heat and 
 enthalpy `Σ_j J_j h_j(T_f)` of the gas crossing it at the face temperature; every cell's row
 subtracts the enthalpy `Σ_j h_j(T_i)·Ṁ_{i,j}` that its net gas inflow brings at the cell's own
 temperature, which leaves exactly the exchange term above. The gas that leaves through a
-boundary face carries its enthalpy at the surface temperature. On a moving mesh under a
+boundary outflow carries surface enthalpy, while inflow carries its specified
+incoming enthalpy with the control-surface heat conversion of §5.4. On a moving mesh under a
 correction the mass and enthalpy inventories also cross the faces at the relative velocity
-`−c`. This is the ThermaKin convention (Technical Reference §3 and §7).
+`−c`. The gas temperature-advection term corresponds to ThermaKin Eq. 17;
+matching a complete model also requires its other closures (Technical Reference §7.8).
 
-**Reaction heats are DSC-style.** A heat `h` measured by DSC, or calibrated in ThermaKin or
-Gpyro, is quoted at the reaction temperature, so it already contains the gas products'
-sensible enthalpy at that temperature; the reaction kernel evaluates it at the cell's
-temperature. The energy equation therefore has no separate gas-generation enthalpy term. Such
+**Reaction heats use the local reaction-temperature convention.** The kernel
+evaluates `h` at the cell temperature. Before importing a DSC or calibrated
+ThermaKin/Gpyro value, check its sign, units, reaction basis and temperature datum
+(Technical Reference §6.9). A heat consistent with this convention already
+accounts for the products' enthalpies at that temperature. The energy equation therefore has no separate gas-generation enthalpy term. Such
 a term, `−Σ_g Δh_g(T, T_ref)(∇·J_g)`, belongs only with heats referenced to the
 `T_ref ≈ 298.15 K` ambient datum (formation-enthalpy style); with DSC-style heats it would
 subtract the gas products' sensible enthalpy a second time (≈0.7–1.2 MJ per kg of volatiles
 at 900 K, comparable to the heat of pyrolysis itself). If your heats are referenced to the
 ambient datum, convert them to the reaction temperature before use (Technical Reference §6).
 
-### 7.7.1 No surface gas-enthalpy term
+### 7.7.1 Boundary energy control surface
 
-The surface energy balance contains no gas-enthalpy term: the flux the boundary condition
-applies equals the conducted flux (§5.4), and the enthalpy of the escaping gas leaves through
-the face's energy flux at the surface temperature, as above. A surface term
-`Σ_g ṁ_g Δh_g(T_s, T_∞)` would remove that enthalpy a second time, a spurious sink that
-under-predicts the surface temperature and the mass-loss rate. Use a plain convective and
-radiative boundary condition; the escaping gas influences the boundary balance only through
-the blowing model of a `ConvectiveBC` (§5.2.3). See Technical Reference §7 and §16 for the
-energy accounting.
+Boundary species carry signed donor enthalpy. Outflow uses the surface
+caloric enthalpy and inflow the specified reservoir enthalpy. A wall thermal
+film is converted to the reservoir control surface as described in §5.4,
+so incoming energy is counted exactly once. Thermal-film temperature and its
+reservoir stream temperature must agree; radiative surroundings are separate.
+The energy-state choice below retains the package's sensible-enthalpy storage
+convention. A pressure-work/internal-energy-storage redesign is outside this model.
+
+---
 
 ### 7.7.2 The energy state (`energy_state`)
 
@@ -5334,7 +4855,7 @@ before the solve starts (Chapter 8, Technical Reference §15). Because the masse
 states, mass is conserved exactly.
 
 The residual runs its kernels in a fixed order, each present only when the problem needs it:
-the reactions (when the material has reactions), the gas transport (Fickian or Darcy–Fick),
+the reactions (when the material has reactions), the gas transport (lumped or dusty-gas transport),
 the in-depth radiation (`BEER_LAMBERT`), the conduction, the thermal boundary conditions,
 and, under a correction, the relative fluxes of the inventories across the moving faces;
 then, on a moving mesh, the volume-balance rows. You do not choose a path through the code;
@@ -5343,7 +4864,7 @@ built:
 
 ```julia
 cp = setup(problem; use_ale = true)
-cp.def.setup.gas                            # FickTransport(): the gas transport chosen
+cp.def.setup.gas                            # LumpedTransfer(): the declared gas model
 map(k -> nameof(typeof(k)), cp.def.kernels) # the kernels, in order
 length(cp.u0)                               # 502 for the problem of §7.1.1
 ```
@@ -5356,63 +4877,27 @@ and §15 the assembly and the integration.
 
 ---
 
-## 7.9 Validating a problem (`validate_problem`)
-
-Before solving, run the validator to catch structural mistakes early:
+## 7.9 Validating a problem
 
 ```julia
 using Pyrolysis.Problem: validate_problem, is_valid_problem
-
-validate_problem(problem)                 # throws on any error, returns true if OK
-validate_problem(problem; strict = true)  # adds the checks below
-is_valid_problem(problem)                 # a Bool, never throws
+validate_problem(problem)
+is_valid_problem(problem)
 ```
 
-`solve` calls `validate_problem(problem; strict = false)` unless you pass `validate = false`.
-The default checks are:
+Validation checks geometry, reaction indices, boundary tags, initial fields
+and the time span. Gas-bearing initial states must have positive physical
+pore volume. Setup strengthens this to a resolved margin using the actual
+mass, thermal and geometry tolerances, including sealed gas. Named reservoir
+fractions must refer to gases in the material and sum to one; non-vacuum
+reservoirs require complete temperature and composition data. Incoming
+prescribed species fluxes require their temperatures.
 
-- the mesh has one finite position per node;
-- the material has at least one component, and every reaction references valid component
-  indices;
-- the mesh carries the boundary tags `:top` (the exposed surface) and `:bottom`, every
-  boundary tag of the mesh has a thermal condition, and a per-species `ξ_inf` tuple on a
-  `ConvectiveMassBC` has one entry per component;
-- the time span is valid (`t_start < t_end`, `t_start ≥ 0`, a positive `dt_initial` no larger
-  than the span);
-- the number of initial concentration functions equals the component count;
-- a Darcy–Fick material does not start with (near-)zero porosity, the pore fraction
-  `1 − skeletal_volume_fraction` evaluated at the cell centres, in a cell whose effective
-  permeability is nonzero (§7.5.1).
-
-It also warns, without failing, when a gas-producing Fickian material has a condensed
-component with gas-transfer coefficient `λ = 0`: gas transport then vanishes where the gas
-fraction vanishes, the gas field forms a sharp front, and the integrator rejects step
-after step on it. Give such components a small `λ`, for example `1e-6` m²/s. Errors are
-collected and thrown together in one message.
-
-`strict = true` additionally verifies the reactions' stoichiometric mass balance (product
-yields summing to one), that the initial-condition functions evaluate at the first cell
-centre, and that every cell volume is positive.
-
-### 7.9.1 What `setup` refuses
-
-Some combinations pass validation but are not implemented; `setup` refuses them with an
-`ArgumentError` before anything is integrated, whether or not `solve` validated:
-
-- a lateral shrinkage law without `use_ale = true`, on a non-planar mesh, or a law that is
-  not positive and finite on `[−0.001, 1.001]` or not one at zero conversion;
-- `BEER_LAMBERT` on a cylindrical or spherical mesh, or with a `RadiativeFluxBC` on a tag
-  other than `:top`;
-- a `correction` other than `NoCorrection()` without `use_ale = true`;
-- a `w_override` (a prescribed mesh velocity, for verification) without `use_ale = true`,
-  with a reacting material, with `deactivation`, or together with a correction;
-- under the equidistribution correction, a `lagrangian` list that leaves out an interior node
-  between cells that start with different condensed components;
-- a `band` outside `[threshold, 1)`, and an `energy_state` other than `:temperature` or
-  `:enthalpy`.
-
-`solve` itself refuses an unknown keyword and a non-positive `min_thickness`, also with an
-`ArgumentError`.
+Participating condensed components require explicit lumped `λ`, and
+transport support changes must have a valid constitutive path. A matrix
+endpoint declares its remaining skeletal-occupancy domain. Step acceptance
+and post-event checks enforce pore and endpoint admissibility as the state
+evolves; `validate=false` does not disable these physical checks.
 
 ---
 
@@ -5423,11 +4908,11 @@ material, not from a `solve` keyword.
 
 | Scenario | `use_ale` | `radiation_model` | gas transport (auto) | cross section (auto) | `deactivation` |
 |---|---|---|---|---|---|
-| TGA-like thin sample, no recession | `false` | `NO_RADIATION` | Fickian | fixed | `false` |
-| Cone calorimeter, opaque charring solid | `true` | `SURFACE_ABSORPTION` | Fickian or Darcy–Fick | fixed or variable | `false` |
-| Cone calorimeter, semi-transparent polymer to burnout | `true` | `BEER_LAMBERT` (set `α`) | Fickian | fixed | `true` |
-| Intumescent coating (swelling) | `true` | `SURFACE_ABSORPTION` | Darcy–Fick (`κ > 0`) | variable (swelling law) | `false` |
-| Pressure-driven char, pressure-treated wood | `true` | `SURFACE_ABSORPTION` | Darcy–Fick (`κ > 0`) | fixed or variable | `false` |
+| TGA-like thin sample, no recession | `false` | `NO_RADIATION` | lumped | fixed | `false` |
+| Cone calorimeter, opaque charring solid | `true` | `SURFACE_ABSORPTION` | lumped or dusty-gas transport | fixed or variable | `false` |
+| Cone calorimeter, semi-transparent polymer to burnout | `true` | `BEER_LAMBERT` (set `α`) | lumped | fixed | `true` |
+| Intumescent coating (swelling) | `true` | `SURFACE_ABSORPTION` | lumped gas transport (`κ > 0`) | variable (swelling law) | `false` |
+| Pressure-driven char, pressure-treated wood | `true` | `SURFACE_ABSORPTION` | lumped gas transport (`κ > 0`) | fixed or variable | `false` |
 
 ### 7.10.1 Worked example: TGA-like, minimal mode
 
@@ -5437,23 +4922,25 @@ diffusion-only gas escape through the top, on a fixed mesh:
 ```julia
 using Pyrolysis
 
-virgin = SolidComponent(:virgin; ρ = 1190.0, c = 1500.0, k = 0.20, λ = 1e-6)
-gas    = GaseousComponent(:MMA;  M = 0.100, c = 1500.0, k = 0.02, λ = 1e-5)
+virgin = SolidComponent(:virgin; ρ = 1190.0, φ=.3, c = 1500.0, k = 0.20, λ = 1e-6)
+gas    = GaseousComponent(:MMA;  M = 0.100, c = 1500.0, k = 0.02,)
 decomp = Reaction(:pyrolysis, :virgin => :MMA; A = 8.5e12, E = 188e3, h = 870e3)
-pmma   = Material(name = :PMMA, components = (virgin, gas), reactions = (decomp,))
+pmma   = Material(
+    gas_transport=LumpedTransfer(endpoint=LumpedEndpoint(λ=1e-6,κ=0.,max_skeletal_occupancy=.001)),
+    name = :PMMA, components = (virgin, gas), reactions = (decomp,))
 
 mesh = create_uniform_mesh(1e-4, 10)                  # 0.1 mm, 10 cells
 
 heating = t -> 300.0 + t / 6                          # 10 K/min
 bc_set = BoundaryConditionSet(
     thermal = (top = DirichletThermalBC(heating), bottom = DirichletThermalBC(heating)),
-    mass    = (top = DiffusiveMassBC(0.01), bottom = ImpermeableBC()),
+    mass    = (top = AmbientGasBC(GasReservoir(P=0., T=300.)), bottom = ImpermeableBC()),
 )
 
 problem = PyrolysisProblem(mesh = mesh, material = pmma, bc_set = bc_set,
                            tspan = (0.0, 2400.0))
 
-sol = solve(problem)        # fixed mesh, NO_RADIATION, Fickian, fixed cross section
+sol = solve(problem)        # fixed mesh, NO_RADIATION, lumped, fixed cross section
 
 # Mass-loss fraction against the furnace temperature
 loss = 1 .- sol.extras.total_mass ./ sol.extras.total_mass[1]
@@ -5463,18 +4950,18 @@ T_furnace = heating.(sol.t)
 ### 7.10.2 Worked example: cone calorimeter, opaque, recession and Darcy flow
 
 A charring wood under a cone heater, with surface absorption, a moving mesh and
-pressure-driven gas escape (Darcy–Fick selected by the component permeabilities), its pore
+pressure-driven gas escape (the default lumped model with nonzero permeability), its pore
 space filled with air at 1 atm:
 
 ```julia
 using Pyrolysis
 
-virgin = SolidComponent(:virgin; ρ = 500.0, c = 2000.0, k = 0.15, κ = 1e-15,
+virgin = SolidComponent(:virgin; ρ = 500.0, c = 2000.0, k = 0.15, λ=2e-5, κ = 1e-15,
                         ρ_intrinsic = 1500.0)
-char   = SolidComponent(:char;   ρ = 150.0, c = 1500.0, k = 0.10, κ = 1e-12,
+char   = SolidComponent(:char;   ρ = 150.0, c = 1500.0, k = 0.10, λ=2e-5, κ = 1e-12,
                         ρ_intrinsic = 1950.0)
-gas    = GaseousComponent(:volatiles; M = 0.030, c = 1100.0, k = 0.02, λ = 1e-5)
-air    = GaseousComponent(:air; M = 0.02897, c = 1006.0, k = 0.026, λ = 2e-5)
+gas    = GaseousComponent(:volatiles; M = 0.030, c = 1100.0, k = 0.02,)
+air    = GaseousComponent(:air; M = 0.02897, c = 1006.0, k = 0.026,)
 decomp = Reaction(:pyrolysis, :virgin => (:char, :volatiles);
                   A = 1e10, E = 150e3, h = 300e3, yields = (0.25, 0.75))
 
@@ -5496,7 +4983,7 @@ bc_set = BoundaryConditionSet(
                      RadiativeBC(ε = 0.9, T_inf = 300.0) +
                      ConvectiveBC(h = 10.0, T_inf = 300.0),
                bottom = AdiabaticBC()),
-    mass    = (top = DiffusiveMassBC(0.05) + DirichletPressureBC(101325.0),
+    mass    = (top = AmbientGasBC(GasReservoir(P=101325., T=300., mole_fractions=(air=1.,))),
                bottom = ImpermeableBC()),
 )
 
@@ -5507,7 +4994,7 @@ problem = PyrolysisProblem(mesh = mesh, material = wood, bc_set = bc_set,
 sol = solve(problem;
             use_ale         = true,                 # the mesh follows the solid
             radiation_model = SURFACE_ABSORPTION)   # opaque: absorb at the surface
-# gas transport = Darcy–Fick (from κ); cross section fixed (no law)
+# Lumped gas transport uses the condensed-phase λ and κ; cross section is fixed.
 ```
 
 To add lateral intumescent swelling, give `wood` a `lateral_shrinkage_law`
@@ -5526,7 +5013,7 @@ than the deactivation threshold, so a burnout solve of it would get no correctio
   - *mesh motion* (`use_ale`, default `false`), *radiation* (`radiation_model`, default
     `NO_RADIATION`) and the *energy state* (`energy_state`, default `:temperature`) are
     chosen at solve time;
-  - *gas transport* (none, Fickian or Darcy–Fick) and the *cross section* (fixed or
+  - *gas transport* (none, lumped or dusty-gas transport) and the *cross section* (fixed or
     variable) follow from the material: its gas components and transfer coefficients, the
     mass conditions, the component permeabilities `κ`, and its `lateral_shrinkage_law`;
   - *deactivation* is a keyword, and on a moving mesh `setup` installs the equidistribution
@@ -5535,8 +5022,10 @@ than the deactivation threshold, so a burnout solve of it would get no correctio
   velocities on a moving mesh; face intensities under `BEER_LAMBERT`; the conversion history
   and the cross section under a lateral law) and the kernels of the residual.
 - There is one energy equation, assembled in flux form with the gas enthalpy carried across
-  the faces and DSC-style reaction heats; the surface balance has no gas-enthalpy term, which
-  would count the escaping gas's enthalpy twice.
+  the faces and DSC-style reaction heats. Outflow carries surface enthalpy; inflow
+  carries its specified incoming enthalpy. Thermal-film heat is converted to the
+  same reservoir control surface before assembly (§5.4), accounting for incoming
+  energy once.
 - `validate_problem` (run by `solve` unless `validate = false`) catches structural errors,
   and `setup` refuses unsupported combinations, before integration.
 
@@ -5784,7 +5273,7 @@ rejected, and the step cut by the controller's smallest factor, when
   tolerance, a live cell at or below absolute zero, or on a moving mesh
   crossed nodes (a non-positive cell volume) or a non-positive cross-section
   area;
-- under Darcy–Fick transport a live cell's porosity leaves `[0, 1]` by more
+- under gas transport a live cell's porosity leaves `[0, 1]` by more
   than the skeletal volume of its mass tolerances;
 - an algebraic row (a node velocity, a face intensity, the cross-section area
   or its lateral rate) misses its own equation by more than `reltol` times the
@@ -6220,7 +5709,7 @@ sol2 = integrate(cp; saveat = collect(0.0:1.0:300.0))   # bit-identical to sol1
 ```
 
 `setup` takes the keywords that define the problem the integrator runs
-(`energy_state`, `reltol`, `abstol`, `threshold`, `use_ale`, `radiation_model`,
+(`energy_state`, `reltol`, `abstol`, `threshold`, `pressure_tolerance`, `use_ale`, `radiation_model`,
 `correction`, `lagrangian`, `w_override`, `deactivation`, `band`, `sources`,
 and `time_scale`, the time scale of the velocity tolerances that `solve` sets
 from `dt`); `integrate` takes those of the integration (`maxiters`, `dt`,
@@ -6444,8 +5933,8 @@ using Pyrolysis
 pmma = Material(
     name = :PMMA,
     components = (
-        SolidComponent(:virgin, ρ = 1190.0, c = 1420.0, k = 0.19, ε = 0.95, λ = 1e-6),
-        GaseousComponent(:MMA, M = 0.100, c = 1500.0, k = 0.02, λ = 1e-5),
+        SolidComponent(:virgin, ρ = 1190.0, φ=.3, c = 1420.0, k = 0.19, ε = 0.95, λ = 1e-6),
+        GaseousComponent(:MMA, M = 0.100, c = 1500.0, k = 0.02,),
     ),
     reactions = (Reaction(:decomposition, 1 => 2, A = 8.5e12, E = 188e3, h = 870e3),),
 )
@@ -6458,7 +5947,7 @@ problem = PyrolysisProblem(
                   ConvectiveBC(h = 10.0, T_inf = 300.0),
             bottom = AdiabaticBC(),
         ),
-        mass = (top = ConvectiveMassBC(h_m = 0.05, ξ_inf = 0.0), bottom = ImpermeableBC()),
+        mass = (top = AmbientGasBC(GasReservoir(P=0., T=300.)), bottom = ImpermeableBC()),
     ),
     T_initial = z -> 300.0,
     ξ_initial = [z -> 1190.0, z -> 0.0],
@@ -7030,8 +6519,8 @@ Edot = solution.extras.energy_rate    # W
 ```
 
 The ledger equations, the energy convention they book (the gas enthalpy carried across
-the faces by the mass fluxes, DSC-style reaction heats, no surface gas-enthalpy term in
-the boundary balance) and the event records are derived in Technical Reference §16.
+the faces by the mass fluxes, DSC-style reaction heats, and the conditional
+LTE-film conversion to the reservoir control surface) and the event records are derived in Technical Reference §16.
 
 ---
 
@@ -7220,9 +6709,9 @@ properties:
 ```julia
 using Pyrolysis
 
-pmma    = SolidComponent(:PMMA;    ρ = 1210.0, c = 1600.0, k = 0.2,   ε = 0.96, λ = 2e-5, α = 2.37)
-kaowool = SolidComponent(:KAOWOOL; ρ = 256.0,  c = 1100.0, k = 0.058, ε = 1.0,  λ = 2e-5, α = 3.1e4)
-mma     = GaseousComponent(:MMA;   M = 0.1, c = 1500.0, k = 0.02, λ = 2e-2)
+pmma    = SolidComponent(:PMMA;    ρ = 1210.0, φ=.01, c = 1600.0, k = 0.2,   ε = 0.96, λ = 2e-5, α = 2.37)
+kaowool = SolidComponent(:KAOWOOL; ρ = 256.0, φ=.8,  c = 1100.0, k = 0.058, ε = 1.0,  λ = 2e-5, α = 3.1e4)
+mma     = GaseousComponent(:MMA;   M = 0.1, c = 1500.0, k = 0.02,)
 material = Material(
     name = :PMMA_on_Kaowool,
     components = (pmma, kaowool, mma),
@@ -7244,7 +6733,7 @@ bcs = BoundaryConditionSet(
               ConvectiveBC(h = 8.2, T_inf = 298.0),
         bottom = RadiativeBC(ε = 1.0, T_inf = 298.0),
     ),
-    mass = (top = DiffusiveMassBC(), bottom = ImpermeableBC()),
+    mass = (top = AmbientGasBC(GasReservoir(P=0., T=300.)), bottom = ImpermeableBC()),
 )
 problem = PyrolysisProblem(
     mesh = mesh,
@@ -7704,7 +7193,7 @@ the strict test, `:Success` only.
 | `:Terminated` | `:burned_out` | `true` | The last live cell went; its inventories are written to the last event as lost. |
 | `:Terminated` | `:min_thickness` | `true` | The live thickness of a moving mesh fell below `min_thickness` (§10.3). |
 | `:Terminated` | `:interior` | `false` | A cell below the threshold lies inward of a live cell that deactivation leaves; the solve warns and ends. |
-| `:Failure` | `:running` | `false` | The state after an event was inadmissible (a receiver outside its own mass tolerances, crossed nodes, a cell at or below absolute zero, under Darcy–Fick transport a porosity outside `[0, 1]`), or no consistent node velocities exist after it; the solve warns naming the event's time. |
+| `:Failure` | `:running` | `false` | The state after an event was inadmissible (a receiver outside its own mass tolerances, crossed nodes, a cell at or below absolute zero, under gas transport a porosity outside `[0, 1]`), or no consistent node velocities exist after it; the solve warns naming the event's time. |
 
 The state a solve ends on is always saved, whether or not `saveat` names its
 time.
@@ -8162,7 +7651,7 @@ test. It reads only the proposals the error test accepts, and rejects one,
 cutting the step by the controller's smallest factor, when it is
 inadmissible (a live component mass more negative than its tolerance, a live
 cell at or below absolute zero, crossed nodes, a non-positive cross section),
-when under Darcy–Fick transport a cell's porosity leaves `[0, 1]` by more
+when under gas transport a cell's porosity leaves `[0, 1]` by more
 than its mass tolerances allow, or when an algebraic row's residual exceeds
 `reltol` times its own equation's scale plus its unknown's absolute
 tolerance. After more than 50 consecutive constraint rejections
@@ -8259,7 +7748,7 @@ up once and integrate it several times, or drive the integration yourself.
 
 | `setup` (what the problem is) | `integrate` (how it is run) |
 |---|---|
-| `energy_state`, `reltol`, `abstol`, `threshold`, `use_ale`, `radiation_model`, `w_override`, `correction`, `lagrangian`, `deactivation`, `band`, `sources`, `time_scale` (the first step, `solve`'s `dt`) | `u0`, `maxiters`, `dt`, `adaptive`, `dtmin`, `dtmax`, `saveat`, `callback`, `progress`, `min_thickness`, `linear_solver`, `integrator_policy`, `located_events`, `max_constraint_rejections` |
+| `energy_state`, `reltol`, `abstol`, `threshold`, `pressure_tolerance`, `use_ale`, `radiation_model`, `w_override`, `correction`, `lagrangian`, `deactivation`, `band`, `sources`, `time_scale` (the first step, `solve`'s `dt`) | `u0`, `maxiters`, `dt`, `adaptive`, `dtmin`, `dtmax`, `saveat`, `callback`, `progress`, `min_thickness`, `linear_solver`, `integrator_policy`, `located_events`, `max_constraint_rejections` |
 
 `setup` returns a `CoreProblem`: the problem, the definition the residual
 reads (`cp.def`), its buffers (`cp.ws`), the consistent initial state
@@ -8391,7 +7880,7 @@ layout.mask                          # the live rows
 Which configuration a problem gets follows from the problem and the
 keywords, never from a mode argument: `use_ale` moves the mesh,
 `radiation_model` adds the intensity rows, a permeable condensed component
-selects Darcy–Fick gas transport, a `lateral_shrinkage_law` adds the
+selects lumped gas transport gas transport, a `lateral_shrinkage_law` adds the
 cross-section rows, and `energy_state` picks the energy unknown (Chapter 7).
 
 ---
@@ -8575,7 +8064,7 @@ struct's fields. The relevant fields:
 - `PyrolysisProblem`: `mesh`, `material`, `bc_set`, `T_initial`, `ξ_initial`,
   `tspan`, `dt_initial`, `output_times`.
 - `Material`: `name`, `components` (a tuple), `reactions` (a tuple), `mixing`,
-  `lateral_shrinkage_law`, `depletion_limiter`, `gas_viscosity`.
+  `lateral_shrinkage_law`, `depletion_limiter`, `gas_viscosity`, `gas_transport`.
 - `Reaction`: `name`, `reactants`, `products`, `A`, `E`, `heat`, `T_min`,
   `T_max`, `gate_width`.
 
@@ -8639,7 +8128,7 @@ function modify_AE(prob, point)
         mixing                = mat.mixing,
         lateral_shrinkage_law = mat.lateral_shrinkage_law,
         depletion_limiter     = mat.depletion_limiter,
-        gas_viscosity         = mat.gas_viscosity,
+        gas_viscosity = mat.gas_viscosity, gas_transport = mat.gas_transport,
     )
 
     return PyrolysisProblem(
@@ -8690,7 +8179,7 @@ function modify_h(prob, point)
         mixing = mat.mixing,
         lateral_shrinkage_law = mat.lateral_shrinkage_law,
         depletion_limiter = mat.depletion_limiter,
-        gas_viscosity = mat.gas_viscosity,
+        gas_viscosity = mat.gas_viscosity, gas_transport = mat.gas_transport,
     )
     return PyrolysisProblem(
         mesh = prob.mesh, material = new_mat, bc_set = prob.bc_set,
@@ -8841,7 +8330,7 @@ addprocs(4)                       # start 4 worker processes
                        mixing = mat.mixing,
                        lateral_shrinkage_law = mat.lateral_shrinkage_law,
                        depletion_limiter = mat.depletion_limiter,
-                       gas_viscosity = mat.gas_viscosity)
+                       gas_viscosity = mat.gas_viscosity, gas_transport = mat.gas_transport)
     return PyrolysisProblem(mesh = prob.mesh, material = new_mat, bc_set = prob.bc_set,
                             T_initial = prob.T_initial, ξ_initial = prob.ξ_initial,
                             tspan = prob.tspan, dt_initial = prob.dt_initial,
@@ -9041,7 +8530,7 @@ dependency of Pyrolysis.jl.)
 
 This puts the pieces together on a self-contained PMMA cone problem (the deck of
 Chapter 2 and `examples/06_cone_calorimeter.jl` in condensed form, with a small
-gas-transfer coefficient on the solids so that Fickian gas transport does not
+gas-transfer coefficient on the solids so that lumped gas transport does not
 degenerate, §13.9). The sweep varies the incident cone flux and records peak
 surface temperature, peak mass-loss rate and final mass.
 
@@ -9058,9 +8547,9 @@ pmma_k = CallableProperty(T -> T < 378.0 ? 0.15 : (0.34 - 3.9e-4 * min(T, 700.0)
 pmma = Material(
     name = :PMMA,
     components = (
-        SolidComponent(:virgin, ρ = 1210.0, c = pmma_cp, k = pmma_k, ε = 0.96, λ = 1e-6),
-        SolidComponent(:char,   ρ = 1210.0, c = pmma_cp, k = pmma_k, ε = 0.96, λ = 1e-6),
-        GaseousComponent(:MMA,  M = 0.10012, c = 1500.0, k = 0.02, λ = 1e-5),
+        SolidComponent(:virgin, ρ = 1210.0, φ=.01, c = pmma_cp, k = pmma_k, ε = 0.96, λ = 1e-6),
+        SolidComponent(:char,   ρ = 1210.0, φ=.01, c = pmma_cp, k = pmma_k, ε = 0.96, λ = 1e-6),
+        GaseousComponent(:MMA,  M = 0.10012, c = 1500.0, k = 0.02,),
     ),
     reactions = (
         Reaction(:decomposition, 1 => (2, 3);
@@ -9082,7 +8571,7 @@ base_bc = BoundaryConditionSet(
                  ConvectiveBC(h = 4.0, T_inf = 307.0),
     ),
     mass = (
-        top    = ConvectiveMassBC(h_m = 0.05, ξ_inf = 0.0),
+        top    = AmbientGasBC(GasReservoir(P=0., T=300.)),
         bottom = ImpermeableBC(),
     ),
 )
@@ -9192,7 +8681,7 @@ function modify_AE2(prob, point)
                        mixing = mat.mixing,
                        lateral_shrinkage_law = mat.lateral_shrinkage_law,
                        depletion_limiter = mat.depletion_limiter,
-                       gas_viscosity = mat.gas_viscosity)
+                       gas_viscosity = mat.gas_viscosity, gas_transport = mat.gas_transport)
     return PyrolysisProblem(mesh = prob.mesh, material = new_mat, bc_set = prob.bc_set,
                             T_initial = prob.T_initial, ξ_initial = prob.ξ_initial,
                             tspan = prob.tspan, dt_initial = prob.dt_initial,
@@ -9354,9 +8843,9 @@ function p_inject(base, θ)
     A, E, h = 10.0^θ[1], θ[2], θ[3]
 
     # λ > 0 on the condensed components keeps gas transport non-degenerate (§13.9)
-    virgin = SolidComponent(:virgin; ρ = 1190.0, c = 1500.0, k = 0.20, λ = 1e-6)
-    char   = SolidComponent(:char;   ρ = 200.0,  c = 1200.0, k = 0.10, λ = 1e-6)
-    gas    = GaseousComponent(:gas;   M = 0.100, c = 1500.0, k = 0.02, λ = 1e-5)
+    virgin = SolidComponent(:virgin; ρ = 1190.0, φ=.3, c = 1500.0, k = 0.20, λ = 1e-6)
+    char   = SolidComponent(:char;   ρ = 200.0, φ=.3,  c = 1200.0, k = 0.10, λ = 1e-6)
+    gas    = GaseousComponent(:gas;   M = 0.100, c = 1500.0, k = 0.02,)
 
     rxn = Reaction(:decomp, 1 => (2, 3);
                    A = A, E = E, h = h,        # ← the perturbed parameters
@@ -9374,7 +8863,7 @@ function p_inject(base, θ)
         thermal = (top    = HeatFluxBC(50e3) + RadiativeBC(ε = 0.9, T_inf = 300.0)
                             + ConvectiveBC(h = 10.0, T_inf = 300.0),
                    bottom = AdiabaticBC()),
-        mass    = (top = DiffusiveMassBC(Inf), bottom = ImpermeableBC()),
+        mass    = (top = AmbientGasBC(GasReservoir(P=0., T=300.)), bottom = ImpermeableBC()),
     )
 
     return PyrolysisProblem(;
@@ -9415,7 +8904,7 @@ handles:
 | `A_i`, `E_i` | `Reaction(...; A=, E=)` | the dominant kinetic sensitivities; pass `log10(A)` |
 | `h` (heat of reaction) | `Reaction(...; h=)` | scalar, tuple `(a,b)` → linear, or a closure |
 | `ρ_j`, `c_p`, `k_j` | `SolidComponent(...; ρ=, c=, k=)` | pass a number, or a `CallableProperty` closing over `θ` |
-| `λ_j`, `κ_j` | component `λ=`, `κ=` | gas-transfer / permeability for Darcy mode |
+| `λ_j`, `κ_j` | component `λ=`, `κ=` | superficial matrix transfer / permeability |
 | `ε_j`, `a_j`, `α_j` | component `ε=`, `absorptivity=`, `α=` | emissivity / surface absorptivity / mass-basis absorption coefficient |
 | BC parameters | `HeatFluxBC`, `ConvectiveBC(h=,T_inf=)`, `RadiativeFluxBC(flux=)`, … | external flux, `h_conv`, `T_∞` |
 | mixing `β` | `MixingSpec(WEIGHTED, β)` | conductivity / transport blend weight |
@@ -9706,14 +9195,7 @@ take its gradient's step from the convergence check (§13.4.1).
 > sees comparable scales; otherwise the line search struggles and the gradient is
 > lopsided.
 
-The shipped `examples/df_sensitivity_comparison.jl` is **not** a programmatic
-fitter — it parses a ThermaKin2Ds reference output
-(`docs/DF_sensitivity_Cone_output.txt`) and an already-fitted Julia result CSV
-(`douglas_fir_results_50kWm2_fit.csv`, which `examples/07_douglas_fir_cone.jl`
-writes when run with `q_external = 50e3`) and overlays them (MLR, surface/back
-temperature, mass, component MLR). Use it as a template for *validating* a fit
-against a reference code, not for generating one. The actual fitting workflows live under
-`examples/inverse_analysis/`.
+The fitting workflows live under `examples/inverse_analysis/`.
 
 ---
 
@@ -9804,17 +9286,10 @@ The package uses smooth constructions where it can (tanh temperature gates, the
 one-sided depletion limiter, limited face values, C¹ guards — Technical
 Reference §17.6), but several configurations still spoil a derivative:
 
-- **Degenerate gas transport.** Condensed components default to `λ = 0`. Under
-  Fickian gas transport, gas then cannot enter a cell that holds none: the gas
-  field ends in a sharp front that advances only when integration noise seeds
-  the next cell. The integrator rejects step after step on that front (2,016
-  accepted and 379 rejected steps on the §13.2 material, against 295 and 23
-  with `λ = 1e-6`), the trajectory carries errors whose timing changes from
-  one `θ` to the next, and finite differences of it are meaningless (§13.4).
-  `solve` warns in this configuration ("… the gas field forms a sharp front,
-  and the integrator rejects step after step on it. Give the condensed
-  components a small λ …"); give the condensed components a small `λ` (e.g.
-  `1e-6` m²/s), as §13.2 does.
+- **Transport support and local roots.** Closed channels are legal. A changing
+  series barrier, an unsupported matrix endpoint, a singular interface root or
+  a donor switch can limit differentiability. Check the diagnosed root residual
+  and qualify finite differences within the same constitutive branch (§7.5).
 
 - **Each solve from its own initial state.** Every perturbed solve must
   integrate the same map from the initial state its own problem defines.
@@ -9883,7 +9358,7 @@ see Chapter 8; for the underlying theory see Technical Reference §17.
 
 This chapter walks through the example scripts shipped in the `examples/`
 directory of Pyrolysis.jl. Each example is a complete, runnable workflow that
-exercises a different combination of physics (radiation models, Darcy–Fick
+exercises a different combination of physics (radiation models, lumped gas transport
 transport, moisture, ALE shrinkage), solver options, and post-processing. For
 each one we state what is being modeled, which simulation modes and boundary
 conditions are configured, how to run it, what outputs to look at, and which
@@ -9935,509 +9410,61 @@ A roadmap of what each example demonstrates:
 |---|---|---|---|
 | `06_cone_calorimeter.jl` | PMMA cone, single-step kinetics, incident flux at the surface (`NO_RADIATION`) | ALE, deactivation | 14.1 |
 | `06_cone_calorimeter_surface_absorption.jl` | PMMA cone, surface-only radiation | ALE, SURFACE_ABSORPTION, deactivation | 14.1 |
-| `07_douglas_fir_cone.jl` | Wood, multi-step kinetics, Darcy–Fick, moisture | ALE, SURFACE_ABSORPTION, DarcyFick | 14.2 |
+| `07_douglas_fir_cone.jl` | Wood, multi-step kinetics, lumped gas transport, moisture | ALE, SURFACE_ABSORPTION, LumpedTransfer | 14.2 |
 | `convergence_douglas_fir.jl` | Grid-convergence study | as 07 at 50 kW/m², swept over `n_cells` | 14.3 |
-| `08_pressure_treated_wood_cone.jl`, `ptw_comparison.jl` | Treated wood + moisture, Darcy–Fick | ALE, SURFACE_ABSORPTION, DarcyFick | 14.4 |
-| `08_darcy_fick_demo.jl` | Pressure-driven gas transport, permeability | ALE, DarcyFick | 14.5 |
-| `moisture_hos_comparison.jl` | State-dependent heat of sorption | ALE, SURFACE_ABSORPTION, DarcyFick | 14.6 |
+| `08_pressure_treated_wood_cone.jl` | Treated wood + moisture, lumped gas transport | ALE, SURFACE_ABSORPTION, LumpedTransfer | 14.4 |
+| `08_gas_transport.jl` | Lumped and dusty-gas transport, finite film | Moving mesh, both transport models | 14.5 |
+| `moisture_hos_comparison.jl` | State-dependent heat of sorption | ALE, SURFACE_ABSORPTION, LumpedTransfer | 14.6 |
 | `macfp/macfp_gasification.jl` | MaCFP-4 white-pine gasification targets (10/30/60 kW/m², 6/18 mm), the calibrated model of §14.7 at a constant cross section | ALE, SURFACE_ABSORPTION, threads | — |
 | `inverse_analysis/inverse_white_pine.jl` (with `validate_thickness.jl`, `plot_diagnostics.jl`, `plot_stage2_theta.jl`) | Parameter estimation from data | ALE, optimization | 14.7 |
-| `sensitivity_analysis/sensitivity_douglas_fir.jl`, `sensitivity_analysis/sensitivity_sobol.jl`, `sensitivity_analysis/compare_degrees.jl`, `df_sensitivity_comparison.jl` | Uncertainty / Sobol / inter-code | parameter sweep, post-process | 14.8 |
+| `sensitivity_analysis/sensitivity_douglas_fir.jl`, `sensitivity_analysis/sensitivity_sobol.jl`, `sensitivity_analysis/compare_degrees.jl` | Uncertainty / Sobol | parameter sweep, post-process | 14.8 |
 | `literature_comparison/literature_comparison.jl` | Property-variant comparison | as 07 at 50 kW/m², swept over property sets | 14.9 |
 
 ---
 
-## 14.1 Cone calorimeter: PMMA (`06_cone_calorimeter.jl`)
+## 14.1 PMMA cone calorimeter (`06_cone_calorimeter.jl`)
 
-### What it models
+The executable example defines virgin polymer, residual char, MMA and inert
+air, with temperature-dependent thermal properties and decomposition into
+MMA. The condensed phases declare nominal pore volume and superficial
+lumped transfer. `PYROLYSIS_PMMA_POROSITY` selects the nominal porosity for
+sensitivity studies. The atmospheric reservoir contains air, and the initial
+air inventory follows the pore EOS at 300 K.
 
-Standard cone-calorimeter pyrolysis of poly(methyl methacrylate) (PMMA), a
-non-charring thermoplastic that depolymerizes almost entirely to gaseous MMA
-monomer. The sample is a 5.8 mm slab heated from the top by a radiant cone
-heater; it recedes as the material decomposes and gas escapes. This is the
-canonical "your first cone run" workflow: one solid that becomes a small char
-residue plus a gas, temperature-dependent `c_p` and `k`, combined thermal
-boundary conditions, a moving (ALE) mesh that follows the receding surface, and
-cell deactivation to remove the surface cells that burn out. The physics is
-derived in Technical Reference §3 (governing equations), §6 (kinetics), §7
-(energy assembly), §8 (radiation), §10–§11 (volume change and the moving mesh)
-and §14 (deactivation).
+The top receives radiation, reradiates, and exchanges with a 330 K heat and
+mass film. Incoming air carries that reservoir enthalpy. The bottom is
+insulated and impermeable. The solve uses ALE, in-depth absorption and
+surface deactivation. `06_cone_calorimeter_surface_absorption.jl` uses the
+surface-absorption radiation choice with the same explicit gas closure.
 
-### Material
-
-The material has three components — virgin PMMA, char, and MMA gas — and one
-endothermic decomposition reaction. Temperature-dependent properties are
-supplied as `CallableProperty` closures (piecewise functions of `T`):
-
-```julia
-using Pyrolysis
-
-# Piecewise temperature-dependent heat capacity and conductivity (break at 378 K).
-# The fits are measured on ~300–700 K and held constant outside that range: the
-# low-T cp line is negative below 204 K and the high-T k line crosses zero at 872 K.
-pmma_cp = CallableProperty(T -> T < 378.0 ? (-2290.0 + 11.2 * max(T, 300.0)) : (1040.0 + 3.08 * T))
-pmma_k  = CallableProperty(T -> T < 378.0 ? 0.15 : (0.34 - 3.9e-4 * min(T, 700.0)))
-
-pmma = Material(
-    name = :PMMA,
-    components = (
-        SolidComponent(:virgin;
-            ρ = 1210.0,      # bulk density [kg/m³]
-            c = pmma_cp,     # specific heat [J/(kg·K)]
-            k = pmma_k,      # thermal conductivity [W/(m·K)]
-            ε = 0.96,        # surface emissivity
-            α = 1.47,        # mass absorption coefficient [m²/kg] (used by BEER_LAMBERT)
-        ),
-        SolidComponent(:char;
-            ρ = 1210.0, c = pmma_cp, k = pmma_k, ε = 0.96, α = 1.47,
-        ),
-        GaseousComponent(:MMA;
-            M = 0.10012,     # molar mass [kg/mol]
-            c = 1500.0,      # gas heat capacity [J/(kg·K)]
-            k = 0.02,        # gas conductivity [W/(m·K)]
-            λ = 1e-5,        # gas transfer (diffusion) coefficient [m²/s]
-        ),
-    ),
-    reactions = (
-        # virgin (1) -> char (2) + MMA gas (3); products carry mass yields
-        Reaction(:decomposition, 1 => (2, 3);
-            A = 1.5e14,            # pre-exponential factor [s⁻¹]
-            E = 2.03e5,            # activation energy [J/mol]
-            h = 820e3,             # heat of reaction [J/kg] (h > 0 = endothermic)
-            n = 1.0,               # reaction order
-            yields = (0.002, 0.998),  # 0.2% char, 99.8% gas; must sum to 1.0
-        ),
-    ),
-    mixing = MaterialMixing(k = MixingSpec(WEIGHTED, 0.5), λ = MixingSpec(PARALLEL)),
-)
+```bash
+PYROLYSIS_SMOKE=1 julia --project=examples examples/06_cone_calorimeter.jl
+PYROLYSIS_SMOKE=1 julia --project=examples examples/06_cone_calorimeter_surface_absorption.jl
 ```
 
-Annotations on the non-obvious arguments:
-
-- **`α` (mass-basis absorption coefficient, m²·kg⁻¹).** Only consumed when
-  `radiation_model = BEER_LAMBERT`; with `SURFACE_ABSORPTION` or `NO_RADIATION`
-  it is ignored (all incident flux enters the surface energy balance). See
-  Technical Reference §8.
-- **`h` sign.** Pyrolysis.jl uses the storage convention `h > 0 endothermic`
-  (the volumetric source is `Q_rxn = −Σ h_r r_r`). ThermaKin publishes the
-  opposite sign (`h > 0` exothermic); Gpyro and FDS use the same sign as
-  Pyrolysis.jl (Technical Reference §6.9 and the nomenclature overload note
-  H1). PMMA depolymerization is endothermic, hence `h = +820e3`.
-- **`yields`.** For a single-reactant reaction with two products, the implicit
-  reactant coefficient is `−1` and the product yields must sum to `1.0`
-  (mass conservation, enforced at construction).
-- **`mixing`.** `MaterialMixing(k = MixingSpec(WEIGHTED, 0.5), λ = MixingSpec(PARALLEL))`
-  selects the conductivity mixing rule (`WEIGHTED` with `β = 0.5`, a 50/50
-  parallel/series blend) and the gas-transfer mixing rule (`PARALLEL`). The
-  third slot, permeability `κ`, defaults to `MixingSpec(WEIGHTED, 0.5)`.
-  Mixing rules are derived in Technical Reference §5.
-
-### Mesh
-
-A uniform mesh is created with `create_uniform_mesh(L, n_cells)`. The mesh
-holds the geometry only — no component count and no initial state:
-
-```julia
-sample_thickness = 5.8e-3   # 5.8 mm
-n_cells = 72                # ~0.08 mm cells
-
-mesh = create_uniform_mesh(sample_thickness, n_cells)
-```
-
-The initial temperature and concentrations are the problem's `T_initial` and
-`ξ_initial` (below), functions of the height `z` that `setup` evaluates at the
-cell centres. `ξ_initial` gives the initial mass concentrations `ξ_j`
-(kg·m⁻³) of the components, not mass fractions. The cross section defaults to
-1 m² (`cross_section` keyword); in 1D it is a gauge normalization for
-per-area outputs (Chapter 6).
-
-### Boundary conditions
-
-Thermal BCs are composed with the `+` operator, which builds a
-`CombinedThermalBC`. The top surface receives a radiative cone flux, re-radiates
-to the surroundings, and loses heat by convection; the bottom re-radiates and
-convects to ambient and is impermeable:
-
-```julia
-q_external = 0.9813 * 25e3   # 25 kW/m² cone flux (with a radial-uniformity factor)
-h_conv = 7.2                 # convective coefficient [W/(m²·K)]
-
-top_thermal_bc =
-    RadiativeFluxBC(flux = q_external, absorptivity = 0.96) +  # incident cone flux
-    RadiativeBC(ε = 0.96, T_inf = 330) +                       # re-radiation loss
-    ConvectiveBC(h = h_conv, T_inf = 330)                      # convective loss
-
-top_mass_bc = ConvectiveMassBC(h_m = 0.05, ξ_inf = 0.0)        # external mass transfer
-
-bottom_thermal_bc = RadiativeBC(ε = 0.95, T_inf = 307) + ConvectiveBC(h = 4, T_inf = 307)
-bottom_mass_bc = ImpermeableBC()
-
-bc_set = BoundaryConditionSet(
-    thermal = (top = top_thermal_bc, bottom = bottom_thermal_bc),
-    mass    = (top = top_mass_bc,    bottom = bottom_mass_bc),
-)
-```
-
-Key points:
-
-- **`RadiativeFluxBC`** supplies the incident cone flux. `flux` may be a number
-  (constant) or a function of time `t -> q(t)`; `absorptivity` fixes the
-  absorbed fraction (default `nothing` → the composition-weighted surface
-  absorptivity of the cell under the face, which is the emissivity for a
-  component without its own `absorptivity`, by Kirchhoff). With
-  `SURFACE_ABSORPTION` or `NO_RADIATION` the absorbed flux is applied at the
-  surface through the boundary energy balance; with `BEER_LAMBERT` it is
-  attenuated in depth.
-- **`RadiativeBC(; ε = nothing, T_inf, F = 1.0)`** is a *loss* term
-  `q = Fεσ(T_∞⁴ − T_s⁴)`, not a heat input. With `ε = nothing` it uses the
-  mixture emissivity of the cell under the face (which tracks the virgin→char
-  transition).
-- **`ConvectiveMassBC(; h_m, ξ_inf = 0.0)`** lets gas escape with an external
-  film coefficient `h_m`; `DiffusiveMassBC(h_m)` is the diffusion-resistance
-  variant, and `DiffusiveMassBC()` (no argument) is pure internal diffusion
-  (`h_m = ∞`). Mass BCs are derived in Technical Reference §9 and §12.
-
-### Problem and solve
-
-```julia
-problem = PyrolysisProblem(
-    mesh = mesh,
-    material = pmma,
-    bc_set = bc_set,
-    T_initial = z -> 300.0,                  # initial-condition closures (function of z)
-    ξ_initial = [z -> 1210.0, z -> 0.0, z -> 0.0],
-    tspan = (0.0, 1600.0),
-    dt_initial = 1e-3,
-    output_times = collect(range(0.0, 1600.0, length = 601)),  # save every ~2.7 s
-)
-
-solution = solve(problem;
-    abstol = 1e-8, reltol = 1e-6,
-    dtmin = 1e-14,                # allow tiny steps through the rapid reaction front
-    progress = true,              # draw a progress bar
-    use_ale = true,               # moving mesh follows the receding surface
-    min_thickness = 0.01e-3,      # stop when the sample is thinner than 0.01 mm
-    deactivation = true,          # remove burned-out surface cells
-)
-```
-
-Notes on the solve options (full reference: Chapter 8 and the `solve`
-docstring):
-
-- **`use_ale = true`** adds the node positions and velocities to the state
-  (the velocities as algebraic balance rows) so the mesh follows the solid
-  (Technical Reference §11). Without it the mesh is fixed and the surface does
-  not recede.
-- **`radiation_model`** is omitted here, so it defaults to `NO_RADIATION`.
-  The incident flux of `RadiativeFluxBC` then enters the surface energy
-  balance exactly as under `SURFACE_ABSORPTION`: this script and its
-  surface-absorption variant (§14.1.1) solve the same equations (their
-  surface temperatures agree to the last digit on the first 300 s, measured).
-  To distribute the flux in depth, pass `radiation_model = BEER_LAMBERT`
-  (PMMA is semi-transparent; the `α = 1.47` values then matter).
-- **`deactivation = true`** removes a surface cell once its condensed mass
-  falls below 1 % of its initial condensed mass (the default `threshold`),
-  in an event located inside the step (Chapter 10, Technical Reference §14).
-  PMMA leaves 0.2 % char, so every cell can burn out, and `setup` installs the
-  equidistribution correction, which moves the mesh relative to the solid so
-  that the layer thins evenly and its cells go together. The solve ends with
-  outcome `:burned_out` when the last cell goes, or `:min_thickness` below
-  `min_thickness`. At 25 kW/m² neither happens within the 1600 s: the run
-  ends with `:Success` at 1600 s, with 0.42 mm and 7 % of the mass left and no
-  deactivation event (measured).
-- **Gas transport.** The solids keep the default gas-transfer coefficient
-  `λ = 0` under Fickian transport, so `solve` warns that the gas transport is
-  degenerate and the integrator rejects many steps. A small `λ` on the solids
-  (`λ = 1e-6`, as in the condensed version of this deck in §12.9) removes
-  the warning (§15.5).
-
-### What to look at
-
-Outputs live on the returned `PyrolysisSolution`:
-
-```julia
-times    = solution.t                                    # saved times [s]
-T_surf   = solution.surface_T                            # surface temperature [K]
-T_back   = solution.extras.back_temperature              # back-face temperature [K]
-total_m  = solution.extras.total_mass                    # mass per initial area [kg/m²]
-gen_rate = solution.extras.gas_generation_rate           # gas the reactions produce, per initial area [kg/(m²·s)]
-thick    = solution.extras.thickness_history             # current thickness [m]
-
-println("Return code: ", solution.retcode, ", outcome: ", solution.outcome)
-println("Peak surface T: ", round(maximum(T_surf), digits = 1), " K")
-println("Mass loss: ", round((1 - total_m[end]/total_m[1]) * 100, digits = 1), " %")
-println("Deactivation events: ", solution.statistics.invocations)
-```
-
-`surface_T` and `back_temperature` are the solved face temperatures, not
-cell-centre temperatures: at every evaluation the face temperature is the
-root of the face energy balance, found by a Newton iteration, which matters
-for `T⁴` radiative BCs (Technical Reference §12). After a deactivation they
-are the temperatures of the face bounding the live cells, and the dead cells
-read `NaN` in `solution.T` and `solution.ξ` (Chapter 9). The
-script prints a side-by-side comparison with ThermaKin values at t ≈ 600 s
-(hard-coded in the script) and overlays ThermaKin traces only when
-`docs/thermakin_output/` is present; the repository does not ship those traces.
-
-If you have `Plots` loaded, the package's plot recipe gives quick views:
-
-```julia
-using Plots
-plot(solution; kind = :surface_T)   # surface temperature vs time
-plot(solution; kind = :mlr)         # mass-loss rate, solution.mass_loss_rate
-plot(solution; kind = :heatmap)     # T over time and cell index
-```
-
-> Caveat: this example's parameter set is pending re-validation against measured
-> data (Technical Reference §18.8.1), so the ThermaKin comparison is indicative,
-> not a regression target; treat the printed peak-surface-T and mass-loss numbers as a
-> reference for magnitude and time scale rather than exact values to match.
-
-### 14.1.1 Surface-absorption variant (`06_cone_calorimeter_surface_absorption.jl`)
-
-This companion script selects the surface-only radiation model explicitly.
-The absorption coefficients are set to `α = 0.0` to make explicit that they
-are unused, and the solve passes `radiation_model = SURFACE_ABSORPTION`; it
-writes its figures and a CSV to `output/`:
-
-```julia
-solution = solve(problem;
-    abstol = 1e-8, reltol = 1e-6,
-    dtmin = 1e-14,
-    progress = true,
-    use_ale = true,
-    radiation_model = SURFACE_ABSORPTION,   # all incident flux in the surface balance
-    min_thickness = 0.01e-3,
-    deactivation = true,
-)
-```
-
-`SURFACE_ABSORPTION` adds no unknowns: the absorbed flux is a term of the
-surface energy balance. `BEER_LAMBERT` adds the face intensities as algebraic
-rows of the state, each reading one cell and its two faces, so its Jacobian
-stays banded (Technical Reference §8). Surface absorption is the right choice
-for optically thick (opaque) materials, where the optical depth of a cell,
-`τ = α_eff Δz` with `α_eff = Σ_j α_j ξ_j`, is much larger than one.
-Because `06_cone_calorimeter.jl` leaves the radiation model at `NO_RADIATION`,
-the two scripts give the same result; to see the difference between in-depth
-and surface deposition, run `06_cone_calorimeter.jl` with
-`radiation_model = BEER_LAMBERT`. On this deck at 300 s the in-depth case has
-a surface 38 K cooler (630 K against 668 K) and a peak mass-loss rate of
-6.2 g/(m²·s) over the first 300 s against 3.9 (measured): the absorbed flux
-heats a layer beneath the surface instead of the surface itself, so the
-surface re-radiates less.
+Inspect `get_pressure`, `get_porosity` and `get_boundary_exchange` alongside
+temperatures, mass loss and thickness. Mesh, nominal porosity and pressure
+error budget must be varied jointly when assessing dense-polymer results.
 
 ---
 
-## 14.2 Cone calorimeter: Douglas fir (`07_douglas_fir_cone.jl`)
+## 14.2 Douglas fir cone calorimeter (`07_douglas_fir_cone.jl`)
 
-### What it models
+The wood example includes multi-step pyrolysis, absorbed moisture, water
+vapor and inert pore air. Condensed phases provide skeletal densities,
+lumped matrix transfer and permeability. The complete atmospheric reservoir
+has incoming air at the same temperature as the external thermal film.
+The initial air inventory follows the actual pore fraction; zero swelling
+weight on absorbed water does not remove its skeletal occupancy.
 
-Pyrolysis of Douglas fir wood — an opaque charring solid with moisture — under a
-75 kW/m² cone. This is the flagship "everything on" example: multi-step
-decomposition kinetics (five solid→solid+gas steps that march virgin wood
-through four intermediates to char, plus a moisture-evaporation step), a
-state-dependent heat of sorption, Darcy–Fick gas transport with
-kinetic-theory-sized gas diffusion coefficients, background air in the pores,
-surface-absorption radiation, and ALE mesh motion. The physics spans Technical
-Reference §5–§12.
-
-### Material highlights
-
-The material declares 14 components — six solids (`DF`, `DF_int1`…`DF_int4`,
-`Char`), one liquid (`MOISTURE`), and seven gases (`DF_gas1`…`DF_gas5`,
-`WATER_VAPOR`, and the inert background `AIR`, whose initial concentration
-`background_gas_concentration(douglas_fir, :AIR, ξ_condensed_initial, T_ambient)`
-sets to a 1 atm partial pressure in the pores) — and six reactions. A few
-patterns worth lifting:
-
-**Kinetic-theory sizing of the gas `λ` values.** Each gas component's transfer
-coefficient `λ` is *assigned* a value scaled by `√(M_ref/M_j)` from kinetic
-theory (lighter molecules get a larger `λ`), where `M_ref = 0.029` kg/mol
-(air). These per-component values feed the single mixture coefficient that all
-species share at a face — the flux kernels apply no per-species scaling of
-their own (Technical Reference §9.2):
-
-```julia
-λ_gas = 3.0e-5  # reference free-molecular diffusion at ~500 K [m²/s]
-
-GaseousComponent(:DF_gas3; M = 0.110, c = 1300.0, k = 0.018,
-                 λ = λ_gas * sqrt(0.029 / 0.110))   # heavy tar: slowest
-GaseousComponent(:WATER_VAPOR; M = 0.018, c = water_vapor_cp, k = 0.025,
-                 λ = λ_gas * sqrt(0.029 / 0.018))   # H₂O: fastest
+```bash
+PYROLYSIS_SMOKE=1 julia --project=examples examples/07_douglas_fir_cone.jl
 ```
 
-**Composition-dependent permeability.** Virgin wood is nearly impermeable
-(`κ ≈ 1e-15` m²) and char is open-pored (`κ ≈ 1e-12` m²); the per-component `κ`
-values make the effective permeability rise naturally as the matrix chars,
-driving Darcy flow (Technical Reference §9). Any non-zero `κ` switches the
-problem into Darcy–Fick transport mode automatically. The solids also declare
-skeletal densities (`ρ_intrinsic`, from 1500 kg/m³ for the virgin wood to
-1950 kg/m³ for the char),
-which give the matrix a real pore volume to hold the background air.
-
-**State-dependent heat of sorption.** The moisture-evaporation reaction uses a
-`StateDependentProperty` whose value depends on the local moisture concentration
-(more energy is needed to release the remaining tightly-bound water):
-
-```julia
-const MOISTURE_IDX = 7
-const ρ_DRY_BASIS = 530.0   # dry wood density for the % moisture-content basis
-
-heat_of_sorption = StateDependentProperty((T, ξ) -> begin
-    MC = 100.0 * ξ[MOISTURE_IDX] / ρ_DRY_BASIS    # moisture content [% dry basis]
-    return (2450.420909987441 + 875.6441221735336 * exp(-0.1121684273316275 * MC)) * 1e3  # J/kg
-end)
-
-# ...used as the heat of one reaction:
-Reaction(:moisture_evaporation, 7 => 13;
-    A = 2.997e5, E = 5.0e4, h = heat_of_sorption, n = 1.0)
-```
-
-`StateDependentProperty` closures receive `(T, ξ)` where `ξ` is the full
-component tuple. They are evaluated on the dual numbers of the Jacobian like
-every other property, so they must be generic Julia (no `Float64`
-conversions), and may be used for any property field or for a reaction heat.
-See Technical Reference §4 (property functions) and §6.
-
-**Multi-step kinetics.** The five wood-decomposition reactions are sequential —
-each consumes the previous intermediate. Pyrolysis.jl enforces a single reactant
-per reaction (Technical Reference §6), so multi-step schemes are built as a chain
-of single-reactant reactions:
-
-```julia
-Reaction(:pyrolysis_step1, 1 => (2, 8);  A = 74816.95,      E = 71.59e3,
-         h = -19200.66, n = 1.0, yields = (0.95, 0.05)),   # exothermic (h < 0)
-Reaction(:pyrolysis_step3, 3 => (4, 10); A = 7.744618e12,   E = 181.0e3,
-         h = 264424.79, n = 1.0, yields = (0.37, 0.63)),   # endothermic (h > 0)
-# ... steps 2, 4, 5 similarly
-```
-
-The full 14-component, six-reaction definition is the `douglas_fir = Material(...)`
-block of `examples/07_douglas_fir_cone.jl`.
-
-### Boundary conditions
-
-The top combines incident flux (absorbed at the material's surface
-absorptivity, by omitting `absorptivity`), re-radiation (at the material's
-emissivity, by omitting `ε`), and convection; the back is adiabatic. The top
-mass BC combines diffusive escape with a Dirichlet pressure (atmospheric exhaust)
-so gas can both diffuse and be pushed out by Darcy flow:
-
-```julia
-top_thermal_bc =
-    RadiativeFluxBC(flux = 75e3) +            # absorptivity = nothing: the material's a_eff
-    RadiativeBC(T_inf = 300) +                # ε = nothing: the material's ε_eff
-    ConvectiveBC(h = 10.0, T_inf = 300)
-
-top_mass_bc = DiffusiveMassBC(0.05) + DirichletPressureBC(101325.0)
-
-bc_set = BoundaryConditionSet(
-    thermal = (top = top_thermal_bc, bottom = AdiabaticBC()),
-    mass    = (top = top_mass_bc,    bottom = ImpermeableBC()),
-)
-```
-
-`DirichletPressureBC(P)` sets the surface pressure for the Darcy velocity
-computation (Technical Reference §9, §12). Pressure BCs are only meaningful when
-the material has permeability (Darcy–Fick mode).
-
-### Solve
-
-```julia
-solution = solve(problem;
-    abstol = 1e-9, reltol = 1e-7,
-    dtmin = 1e-14,
-    progress = true,
-    use_ale = true,
-    radiation_model = SURFACE_ABSORPTION,   # opaque wood: deposit at surface
-    min_thickness = 0.5e-3,                 # stop at 0.5 mm
-)
-```
-
-Everything else is the default: the `Rodas5P` integrator with the
-`StructuredKLU` linear solver, and the Jacobian by colored sparse forward-mode
-differentiation on the pattern of the mesh connectivity (Chapter 11). There is
-no Jacobian to choose. Deactivation is off: the char layer stays in place, and
-the run ends at the end of `tspan` (600 s) or when the sample is thinner than
-0.5 mm. To try another integrator, pass
-`integrator_policy = fbdf_policy(StructuredKLU())` or
-`kencarp4_policy(StructuredKLU())` (§11.3).
-
-### What to look at
-
-The solver records a full boundary-flux decomposition in `extras`:
-
-```julia
-mlr           = solution.extras.surface_mass_flux           # actual MLR at surface [kg/(m²·s)]
-q_absorbed    = solution.extras.surface_heat_flux_absorbed  # absorbed radiation [W/m²]
-q_reradiation = solution.extras.surface_heat_flux_reradiation
-q_convection  = solution.extras.surface_heat_flux_convection
-q_conduction  = solution.extras.surface_heat_flux_conduction
-q_net         = solution.extras.surface_heat_flux_net
-ε_eff_front   = solution.extras.surface_emissivity          # tracks virgin -> char
-k_eff_front   = solution.extras.surface_conductivity
-```
-
-Two distinct mass-loss measures are available and worth distinguishing:
-
-- **`solution.extras.surface_mass_flux`** — gas actually leaving through the
-  surface, summed over species. This is the physical MLR.
-- **`solution.extras.gas_generation_rate`** — the gas the reactions produce,
-  integrated over the live cells, per initial area. In quasi-steady burning the
-  two agree; during transients they differ because generated gas may be stored
-  in pores before escaping.
-
-Component-specific generation rates require post-processing. The script
-re-evaluates the reactions at each saved state and weights by the product mass
-yield. Note the access pattern for internal helpers and for the reaction's
-`.products` field (here at saved time `i`, with the cell volumes from the saved
-node positions of the moving mesh):
-
-```julia
-NC, NR = 14, 6
-rates, heats = zeros(NR), zeros(NR)
-z = solution.z[:, i]                                 # node positions [m]
-gas1_gen = 0.0
-for j in axes(solution.T, 1)
-    isfinite(solution.T[j, i]) || continue           # a deactivated cell reads NaN
-    ξ = ntuple(k -> solution.ξ[k, j, i], NC)
-    cell_vol = (z[j+1] - z[j]) * 1.0                 # cross section 1 m²
-    Pyrolysis.Physics.evaluate_reactions!(rates, heats, ξ, solution.T[j, i], douglas_fir)
-    # reaction 1: .products is ((comp_idx1, yield1), (comp_idx2, yield2));
-    # products[2][2] is the second product's mass yield (the gas)
-    gas1_gen += douglas_fir.reactions[1].products[2][2] * rates[1] * cell_vol  # kg/s
-end
-```
-
-`rates` are the reactant consumption rates [kg/(m³·s)]. The script itself takes
-uniform cells of the current thickness, an approximation on this mesh.
-
-`evaluate_reactions!` lives in the `Pyrolysis.Physics` submodule (not a
-top-level export); reach it via the qualified path as shown, or via
-`using Pyrolysis.Internal`. A `Reaction` stores its stoichiometry in two
-fields: `.reactants`, an `NTuple` of `(component_idx, reaction_order)` pairs,
-and `.products`, an `NTuple` of `(component_idx, mass_yield)` pairs. For a
-reaction with two products, `products[2][2]` is the second product's mass yield
-and `products[1][2]` the first; the per-product yields sum to `1.0`. This is an
-internal API and may change; prefer the solver's own `surface_mass_flux` /
-`gas_generation_rate` when they suffice.
-
-The surface-temperature solve is the headline diagnostic here: in a
-cell-centred finite-volume method the cell temperature under the face is not
-the face temperature, and using it in the `T⁴` boundary terms would misstate
-the radiative loss, so the face temperature is solved from the face energy
-balance by a Newton iteration. The solved face temperatures are on the
-solution at every saved time: `solution.surface_T` for the exposed face and
-`solution.boundary_T[:bottom]` (equal to `solution.extras.back_temperature`)
-for the back face, `solution.boundary_T` holding one series per boundary tag.
-The script closes by checking the surface balance at the last saved time: the
-flux the top condition applies, `solution.extras.surface_heat_flux_net[end]`,
-against the flux conducted into the surface cell,
-`solution.extras.surface_heat_flux_conduction[end]`, whose relative difference
-it expects below `1e-6`, and it prints the jump between each solved face
-temperature and the centre temperature of the outermost and innermost live
-cells.
+The moving mesh, radiation and deactivation choices are explicit solve
+keywords. Use the species boundary diagnostics to separate combustible-gas
+escape from vapor transport and air ingress. Reconstructing flux from the
+initial mesh or only the pressure gradient would omit parts of this balance.
 
 ---
 
@@ -10516,12 +9543,12 @@ mlr_l2 = norm(r.mlr_curve .- ref.mlr_curve) / norm(ref.mlr_curve) * 100   # [%]
 
 Cross-reference: the same kind of distributed sweep is also available through the
 package's `parameter_sweep` helper, with a `modify` that replaces the mesh
-(§12.6 and §14.8.4); this script calls `pmap` over its own
+(§12.6 and §14.8.3); this script calls `pmap` over its own
 `build_and_solve(n_cells)`, which builds the whole problem at each resolution.
 
 ---
 
-## 14.4 Pressure-treated wood (`08_pressure_treated_wood_cone.jl`, `ptw_comparison.jl`)
+## 14.4 Pressure-treated wood (`08_pressure_treated_wood_cone.jl`)
 
 ### What it models
 
@@ -10529,9 +9556,7 @@ Cone pyrolysis of fire-retardant pressure-treated wood (PTW) with moisture, at
 50 kW/m², 12 mm on 240 cells. Structurally similar to Douglas fir but with a
 different component ordering (water and water vapor come first), three solid
 intermediates between the virgin wood and the char instead of four, and five
-reactions taken from a ThermaKin material file. It exercises the same
-Darcy–Fick + surface-absorption + ALE stack and is a good template for adapting
-a ThermaKin `.cmp` material file into Pyrolysis.jl.
+reactions. It exercises the same lumped gas transport + surface-absorption + ALE stack.
 
 ### Material highlights
 
@@ -10543,7 +9568,7 @@ the cell walls, not a separate phase:
 
 ```julia
 LiquidComponent(:WATER;
-    ρ = 1e5,           # pseudo-density [kg/m³] carried over from the ThermaKin file
+    ρ = 1e5,           # pseudo-density [kg/m³]
     c = water_cp,
     k = 0.145,
     ε = 0.81,
@@ -10552,21 +9577,17 @@ LiquidComponent(:WATER;
 )
 ```
 
-A liquid's swelling factor defaults to `γ = 0`, which makes it volumeless: it
-contributes no strain, no volume to the bulk and no weight in the conductivity
-and emissivity mixing — ThermaKin's `L SWELLING: 0` behavior for bound water.
-The large pseudo-density is therefore not needed for that; it is kept to match
-the ThermaKin input. Set `γ = 1` for a liquid that occupies bulk volume (a melt
-layer), as solids do by default (Technical Reference §10).
+A liquid's default `γ=0` removes its direct strain and matrix transport
+weight. Its mass, heat capacity, evaporation energy and skeletal occupancy
+remain. The imported pseudo-density is a constitutive input to the latter;
+it does not prove an unobstructed void. Set `γ=1` for a matrix-forming melt
+and provide its transport coefficients explicitly.
 
-### ThermaKin-to-Pyrolysis sign mapping
+### Reaction heats and rates
 
-PTW reactions illustrate the heat-of-reaction sign flip between the codes.
-ThermaKin publishes `h > 0 = exothermic`; Pyrolysis.jl stores `h > 0 =
-endothermic`. So ThermaKin's `HEAT: -2.78E6 J/kg` for the evaporation and
-`HEAT: -6.82E3 J/kg` for the first decomposition step (both endothermic) are
-entered as `h = +2.78e6` and `h = +6.82e3`, while ThermaKin's `HEAT: 1.82E5`
-(exothermic) becomes `h = -1.82e5`:
+Pyrolysis.jl uses `h > 0` for endothermic reactions and `h < 0` for
+exothermic reactions. Water evaporation and the first decomposition step
+absorb heat; the third decomposition step releases it:
 
 ```julia
 Reaction(:water_evaporation, 1 => 2; A = 15532.2434, E = 43528.868,
@@ -10577,14 +9598,9 @@ Reaction(:ptw_step3, 5 => (6, 10); A = 179027.4062, E = 100963.197,
          h = -1.82e5, n = 1.0, yields = (0.81744, 0.18256)),   # exothermic
 ```
 
-When porting from ThermaKin, always re-read Technical Reference §6 / nomenclature
-note H1 and flip the sign deliberately (the comments in the script describe
-ThermaKin's sign the other way round; the values follow the rule above).
-ThermaKin's `TEMP LIMIT` lower bounds (290 K for the evaporation, 378 K for the
-decomposition steps) appear in the script as comments only: Arrhenius rates
-fall off naturally below the onset temperature, and the smooth `tanh` gates
-(`T_min`/`T_max` on `Reaction`, defaults `0.0`/`Inf`, width `gate_width`)
-provide the same effect when a cutoff is required.
+These reactions use Arrhenius rates without explicit temperature cutoffs.
+`Reaction` also supports smooth `tanh` gates through `T_min`, `T_max` and
+`gate_width` (Technical Reference §6).
 
 ### Solve and outputs
 
@@ -10593,116 +9609,24 @@ The solve call is the same as Douglas fir's (ALE + `SURFACE_ABSORPTION`,
 integrator). The script writes two CSVs — a per-time summary
 (`ptw_results_50kWm2.csv`) and a spatial dump (`ptw_spatial_50kWm2.csv`) sampling
 `solution.T` and `solution.ξ` at selected times and cell positions — which is the
-pattern to copy when exporting profiles for external plotting or for
-inter-code comparison. The companion `ptw_comparison.jl` (in `examples/`) parses
-the ThermaKin text output `docs/PTW_Cone_output.txt` and overlays it on
-`ptw_results_50kWm2.csv`, which a full run of the cone script writes.
+pattern to copy when exporting profiles for external plotting.
 
 ---
 
-## 14.5 Darcy–Fick gas transport demo (`08_darcy_fick_demo.jl`)
+## 14.5 Gas transport example (`08_gas_transport.jl`)
 
-### What it models
+The example solves a charring slab with `LumpedTransfer` and `DustyGas`, using
+independent wall-transfer data for the two constitutive closures. Both use the
+same matrix permeability, skeletal pore volume, atmospheric air initialization,
+complete reservoir and optional species film. It prints pressure, product
+escape and species ledger defects using saved diagnostics.
 
-A minimal demonstration of pressure-driven gas transport in a charring material
-under 75 kW/m². The point is the transport physics, not a specific real material:
-a single decomposition `virgin → 0.20 char + 0.80 gas`, with the solid matrix
-carrying permeability so generated gas builds internal pressure and is pushed
-toward the surface by Darcy flow (Technical Reference §9):
-
-- Darcy–Fick flux: `J_j = (ξ_j/φ) v_g + J_diff` (intrinsic density advected by the superficial velocity)
-- Darcy velocity: `v_g = −(κ/μ) ∇P`
-- Ideal-gas pressure in pores: `P = Σ_g ξ_j R_g T / M_j / φ`
-
-### Enabling Darcy flow
-
-There is no flag for Darcy mode — it is selected automatically when any
-component carries `κ > 0`:
-
-```julia
-virgin = SolidComponent(:virgin; ρ = 500.0, c = 2000.0, k = 0.15, ε = 0.9, α = 5.0,
-                        κ = 1e-15,            # tight virgin structure
-                        ρ_intrinsic = 1500.0) # cell-wall (skeletal) density → φ ≈ 0.67
-char   = SolidComponent(:char;   ρ = 150.0, c = 1500.0, k = 0.10, ε = 0.95, α = 50.0,
-                        κ = 1e-12,            # porous char
-                        ρ_intrinsic = 1950.0) # carbon skeletal density → φ ≈ 0.92
-gas    = GaseousComponent(:volatiles; M = 0.044, c = 1200.0, k = 0.03, λ = 2e-5)
-air    = GaseousComponent(:air;       M = 0.02897, c = 1006.0, k = 0.026, λ = 2e-5)
-
-material = Material(
-    name = :CharringWood,
-    components = (virgin, char, gas, air),
-    reactions = (Reaction(:pyrolysis, 1 => (2, 3);
-                          yields = (0.20, 0.80), A = 1.0e13, E = 150e3, h = 300e3,
-                          T_min = 400.0, T_max = 1500.0),),
-    mixing = MaterialMixing(k = MixingSpec(PARALLEL, 0.5), κ = MixingSpec(WEIGHTED, 0.5)),
-)
-
-# The pore space must not start as a vacuum: the solids declare skeletal
-# (intrinsic) densities so the material has a real pore volume, and an inert
-# background air component is initialized to 1 atm partial pressure with the
-# single-species inverse of the pressure closure:
-ξ_air = background_gas_concentration(material, :air, (500.0, 0.0, 0.0, 0.0), 300.0)
-# ξ_initial = (virgin = 500.0, char = 0.0, volatiles = 0.0, air = ξ_air)
+```sh
+PYROLYSIS_SMOKE=1 julia --project=examples examples/08_gas_transport.jl
 ```
 
-A Darcy–Fick run started with an evacuated pore space (all gas ξ = 0) against a
-101325 Pa boundary spuriously advects early product gas *inward* down the
-absolute-pressure slope; the background-air initialization (Technical Reference
-§9.5.4) makes the initial state mechanically neutral.
-
-The reaction here uses temperature gates `T_min = 400` and `T_max = 1500`,
-implemented as smooth `tanh` ramps (Technical Reference §6.2) — handy when you
-want a reaction to be inactive outside a band.
-
-### Solve
-
-```julia
-solution_darcy = solve(problem;
-    use_ale = true,
-    min_thickness = 0.5e-3,
-    progress = true,
-)
-```
-
-The mesh is `create_uniform_mesh(0.010, 50)` (10 mm, 50 cells); the top
-condition is `HeatFluxBC(75e3) + RadiativeBC(ε = 0.9, T_inf = 300.0)` with the
-mass condition `DiffusiveMassBC(0.01) + DirichletPressureBC(101325.0)`, whose
-pressure anchor gives the face its Darcy venting velocity; the back is
-adiabatic and impermeable. The run covers 120 s with the default tolerances and
-integrator.
-
-The script suggests a comparison experiment: rebuild the same material with all
-`κ = 0.0` (diffusion-only Fickian transport) and overlay the MLR curves — Darcy
-flow typically shows faster initial gas release and lower peak internal pressure
-because bulk flow drains the pores that diffusion alone would leave pressurized.
-
-### What to look at
-
-```julia
-peak_mlr   = maximum(solution_darcy.mass_loss_rate)            # MLR per current area
-initial_m  = solution_darcy.extras.total_mass[1]
-final_m    = solution_darcy.extras.total_mass[end]
-println("Mass released: ", round((1 - final_m/initial_m) * 100, digits = 1), " %")
-```
-
-Use `solution.mass_loss_rate` (a top-level field, MLR per the current area
-`A(t)`) or `solution.extras.surface_mass_flux` for the surface flux; index both
-by `solution.t`. Mass conservation across the run is the headline check — the
-released mass should equal the integrated surface efflux to integrator
-tolerance. Pass a `ConservationRecorder` and audit the run (§9.8, Technical
-Reference §16):
-
-```julia
-rec = ConservationRecorder()
-sol = solve(problem; use_ale = true, min_thickness = 0.5e-3, callback = rec)
-audit = conservation_audit(sol, rec)
-audit.mass.relative, audit.energy.relative     # relative defects of the two ledgers
-```
-
-On this deck over the 120 s the run releases 38 % of the mass, and the
-recorder closes the mass ledger to 2e-7 and the energy ledger to 5e-7 relative
-(measured).
+The full example uses a moving mesh. The reported Darcy velocity is distinct
+from total species flow, which includes wall/molecular transport.
 
 ---
 
@@ -10882,8 +9806,7 @@ res = optimize(loss_fn, g!, lower, upper, θ0, Fminbox(LBFGS()))
 
 ## 14.8 Sensitivity studies
 
-Three scripts under `examples/sensitivity_analysis/` (plus the inter-code
-comparison `examples/df_sensitivity_comparison.jl`) build a full
+Three scripts under `examples/sensitivity_analysis/` build a full
 uncertainty-quantification pipeline around the Douglas fir cone case.
 
 ### 14.8.1 Forward uncertainty propagation (`sensitivity_douglas_fir.jl`)
@@ -10906,7 +9829,7 @@ parallel, over the sample ids that have no result on disk yet, each solve in a
 using Distributed
 @everywhere begin
     using Pyrolysis
-    using Pyrolysis: compute_surface_mass_flux, effective_gas_transfer, get_mass_bc
+    using Pyrolysis: get_boundary_exchange
 end
 
 samples = generate_samples(CORR_GROUPS, N_SAMPLES)   # 16 × 8192 parameter matrix
@@ -10934,11 +9857,9 @@ Each run is reduced to scalar QoIs (peak MLR, time to ignition, surface/back
 temperature rise times, combustible-only burning metrics, etc.) and a few
 curves; the script then computes Standardized Rank Regression Coefficients
 (SRRC) for the sensitivity ranking and prediction-envelope percentiles. Note the
-qualified imports of internal helpers (`compute_surface_mass_flux`,
-`effective_gas_transfer`, `get_mass_bc`) used to reconstruct a combustible-only
-MLR by summing only over the fuel-gas species — an example of reaching into the
-`Pyrolysis`/`Pyrolysis.Internal` surface for a post-processing computation the
-solver does not provide directly.
+public `get_boundary_exchange` accessor: the script sums the assembled
+species fluxes over combustible gases, with the current face area and
+geometry already accounted for.
 
 ### 14.8.2 Global Sobol indices (`sensitivity_sobol.jl`, `compare_degrees.jl`)
 
@@ -10956,18 +9877,7 @@ run. They need `PolyChaos`, which `examples/Project.toml` does not list: add it
 to your environment before running them. The variance-decomposition theory is
 Technical Reference §17.
 
-### 14.8.3 Inter-code comparison (`df_sensitivity_comparison.jl`)
-
-A pure post-processing/plotting script in `examples/` that parses a ThermaKin
-text output file (`docs/DF_sensitivity_Cone_output.txt`, a 50 kW/m² run) and a
-Pyrolysis.jl results CSV (`douglas_fir_results_50kWm2_fit.csv` in the repository
-root, which `07_douglas_fir_cone.jl` writes when run with `q_external = 50e3`)
-and overlays MLR, surface/back temperature, mass, and per-component MLR,
-writing its figures to `output/`. It contains no `solve` call — it is the
-template for validating Pyrolysis.jl against a reference code once you have
-both result files (Technical Reference §18).
-
-### 14.8.4 The `parameter_sweep` helper
+### 14.8.3 The `parameter_sweep` helper
 
 For sweeps that do not need a fully bespoke driver, the package provides
 `parameter_sweep(problem, grid; modify, extract)`. The `modify` closure builds a
@@ -11078,17 +9988,16 @@ Reading the examples together, a few idioms recur and are worth internalizing:
   reaction heats that depend on local composition (e.g. heat of sorption). A bare
   number becomes a `ConstantProperty`.
 - **Combine BCs with `+`.** `RadiativeFluxBC(...) + RadiativeBC(...) + ConvectiveBC(...)`
-  forms a `CombinedThermalBC`; the same works for mass BCs
-  (`DiffusiveMassBC(...) + DirichletPressureBC(...)`).
-- **Modes are inferred, then opted into.** Darcy–Fick turns on whenever a
-  component has `κ > 0`. The moving mesh, the radiation model and deactivation
+  forms a `CombinedThermalBC`. Assign one complete mass closure to each tag.
+- **Declare the model and geometry choices.** `Material` selects
+  `LumpedTransfer` or `DustyGas`, each with independent Darcy permeability. The moving mesh, the radiation model and deactivation
   are explicit `solve` keywords (`use_ale`, `radiation_model`, `deactivation`).
   A variable cross section turns on when the `Material` is given a
   `lateral_shrinkage_law` (a function `χ̄ -> A/A_0` of the column's conversion,
   e.g. `chi -> 1 - 0.2chi`), which needs `use_ale = true`. See Chapter 7 and
   Technical Reference §10.
-- **Pore air for Darcy–Fick.** In `07_douglas_fir_cone.jl`,
-  `08_pressure_treated_wood_cone.jl` and `08_darcy_fick_demo.jl` the solids
+- **Pore air and complete reservoirs.** In `07_douglas_fir_cone.jl`,
+  `08_pressure_treated_wood_cone.jl` and `08_gas_transport.jl` the solids
   declare skeletal densities (`ρ_intrinsic`) and an inert gas component starts
   at a 1 atm partial pressure (`background_gas_concentration`), so the pore
   space is not a vacuum against the atmospheric pressure boundary (Technical
@@ -11111,16 +10020,14 @@ Reading the examples together, a few idioms recur and are worth internalizing:
   `NO_RADIATION` (flux via the BC, applied in the surface balance exactly as
   under `SURFACE_ABSORPTION`) or `SURFACE_ABSORPTION`; `BEER_LAMBERT` is one
   keyword away in `06_cone_calorimeter.jl`.
-- **The boundary energy balance has no surface gas-enthalpy term**, because the
-  gas enthalpy is carried in flux form by the mass fluxes across the faces,
-  the boundary face included (a surface term would double count it; §5.4,
-  Technical Reference §7).
-- **The cone examples' parameter sets are pending re-validation against data**;
-  treat their experimental and ThermaKin overlays as indicative comparisons rather
-  than tight regression targets (Technical Reference §18.8.1). Parameters
-  calibrated in a solver that adds a surface gas-enthalpy term on top of the
-  enthalpy the gas carries predict a higher surface temperature and MLR here
-  (Technical Reference §1.8).
+- **Boundary energy.** Incoming gas carries reservoir enthalpy and outgoing
+  gas carries surface enthalpy. The coupled LTE film converts heat to the
+  reservoir control surface; adiabatic and prescribed-heat boundaries use the
+  incoming enthalpy directly. `get_boundary_exchange` reports the assembled
+  species flux, carried enthalpy, heat and total energy (§5.4).
+- **Experimental validation.** The cone examples need validation of their
+  material parameters against experimental data. Numerical convergence and
+  conservation alone do not establish that calibration (§14.1).
 
 For deeper troubleshooting (rejected steps, ledger imbalance, crossed mesh
 nodes, radiation surprises), see the Troubleshooting and Performance chapter
@@ -11212,7 +10119,6 @@ solve time.
 
 | Warning (abridged) | Meaning | See |
 |---|---|---|
-| `Material :name: the condensed component(s) … have gas-transfer coefficient λ = 0 under Fickian gas transport …` | problem validation: gas transport vanishes where a cell holds no gas | §15.5 |
 | `solve(): stopped at t = …: the last proposed state, at t = …, takes cell i to or below absolute zero` | the solve stopped while rejecting proposals that cool a cell to 0 K | §15.3.2 |
 | `solve(): a constraint residual stayed above its tolerance for N consecutive steps at t = … (scaled residual r)` | the domain test gave up; the solve ends with `:Failure` | §15.3.3 |
 | `solve(): the fixed step accepted at t = … is inadmissible …` | a fixed-step solve left the physical domain; `:Failure` | §15.3.4 |
@@ -11274,27 +10180,14 @@ non-positive `min_thickness`, and a `band` outside `[threshold, 1)`.
 
 ### 15.2.2 Problem validation
 
-Unless `validate = false`, `solve` first runs
-`Pyrolysis.Problem.validate_problem(problem; strict = false)`. It collects every
-error and throws one `ErrorException` ("Problem validation failed with N
-error(s)") listing them:
+Validation checks mesh tags, reaction indices, the initial field count and
+time span. Reservoir fractions must name gases in the material and sum to
+one; non-vacuum reservoirs need incoming temperature and composition.
+Every gas-bearing state needs physical pore volume, including sealed gas.
+Setup then checks its uncertainty margin, the matrix support path and any
+endpoint domain. See §7.9 and §7.5 for the governing conditions.
 
-- the mesh lacks the tags `:top` (the exposed surface) or `:bottom`, or a tag of
-  the mesh has no thermal condition;
-- a `ConvectiveMassBC` carries a per-species `ξ_inf` tuple whose length is not
-  the component count;
-- the time span: `t_start ≥ t_end`, a negative start time, `dt_initial ≤ 0`, or
-  `dt_initial` longer than the span;
-- the number of `ξ_initial` functions differs from the component count;
-- under Darcy–Fick transport, a cell starts with a (near-)zero porosity
-  (`φ₀ < 1e-6`) while its effective permeability is positive. The usual cause
-  is a solid built without `ρ_intrinsic` or `φ`, so that it fills its cell;
-  give the skeletal density (wood: `ρ = 500`, `ρ_intrinsic = 1500`, `φ₀ ≈ 0.67`)
-  and initialize the pore gas with `background_gas_concentration` (§15.10).
-
-`strict = true` adds the mass balance of every reaction, a call of each
-initial-condition function at the first cell centre, and positive cell volumes.
-The degenerate-gas-transport check warns rather than fails (§15.5).
+---
 
 ### 15.2.3 What `setup` refuses
 
@@ -11350,7 +10243,7 @@ smallest factor, when
   tolerance (`reltol · threshold · mˢᵢ(0)`, with `mˢᵢ(0)` the cell's initial
   condensed mass), a live cell at or below absolute zero, and on a moving mesh a
   cell whose nodes have crossed or a non-positive cross-section area;
-- under **Darcy–Fick** transport, a live cell's porosity
+- under **lumped gas transport** transport, a live cell's porosity
   `1 − Σⱼ mⱼ/(ρⱼ(T) V)` lies outside `[0, 1]` by more than the skeletal volume of
   its mass tolerances;
 - an **algebraic row's** scaled residual exceeds one: the node-velocity balance
@@ -11475,7 +10368,7 @@ Two warnings end a burnout run with `:Failure`, the outcome left `:running`:
 
 - "the state after deactivating cell(s) at t = … is inadmissible": the receiver,
   holding the merged inventories, fails admissibility against its own
-  tolerances, or a Darcy–Fick porosity leaves its range;
+  tolerances, or a lumped gas transport porosity leaves its range;
 - "no consistent node velocities after deactivating cell(s) at t = …": the sweep
   of the balance rows leaves a velocity row above round-off.
 
@@ -11504,35 +10397,16 @@ needs the finer mesh (Chapter 10).
 
 ---
 
-## 15.5 Gas transport that degenerates: condensed components at `λ = 0`
+## 15.5 Closed channels and disappearing matrix support
 
-```text
-Warning: Material :name: the condensed component(s) :solid have gas-transfer coefficient
-λ = 0 under Fickian gas transport. Gas transport vanishes where the gas fraction vanishes,
-the gas field forms a sharp front, and the integrator rejects step after step on it. Give the
-condensed components a small λ (for example `λ = 1e-6` m²/s).
-```
-
-Under Fickian transport the cell's gas-transfer coefficient is the
-volume-fraction mix of the component coefficients, so a cell of a solid with
-`λ = 0` that holds no gas has no gas transport at all. The gas field of a
-gas-producing material then ends in a sharp front, and an iterate that drives
-the front cell's gas concentration below zero closes both of its faces and
-flattens its residual: the implicit solve fails repeatedly on the front, which
-shows as many rejected steps and, under `fbdf_policy` or `kencarp4_policy`, as
-nonlinear failures. `SolidComponent` defaults to `λ = 0`; give the condensed
-components a small coefficient:
-
-```julia
-virgin = SolidComponent(:virgin, ρ = 1190.0, c = 1420.0, k = 0.21, λ = 1e-6)
-```
-
-`LiquidComponent` defaults to `λ = 2e-5` m²/s. A material with a permeable
-component uses Darcy–Fick transport and does not warn. Under a Newton-based
-policy, a step whose nonlinear solves needed retries also caps the next
-proposals: for 20 accepted steps the step stays at or below 1.25 times the step
-that needed them (`FAILURE_MEMORY_STEPS`, `FAILURE_MEMORY_GROWTH` in
-`Pyrolysis.Integration`). See §3.2.1 and Technical Reference §5.6.
+Zero `λ` and zero `κ` are legal explicit channel choices. A positive-weight
+zero in an exact series mixture closes that channel; a disappearing barrier
+can make its support discontinuous. Setup checks reachable support changes
+instead of adding a numerical conductance floor. Choose a continuous physical
+mixing closure or a persistent barrier when the material trajectory requires it.
+An exactly closed gas-bearing material still computes its pore EOS and enforces
+physical pore volume. A matrix-free endpoint is separate data with a declared
+skeletal-occupancy domain (§7.5).
 
 ---
 
@@ -11560,17 +10434,15 @@ extrema(T_live)                        # inside (200, 3000) K
 
 ### 15.6.2 The surface balance at the trial clamp
 
-On a face whose condition is neither a prescribed temperature, a prescribed
-flux nor adiabatic, the surface temperature `T_s` solves
-`q_bc(T_s) = k (T_s − T_cell)/d` by Newton iteration (tolerance `1e-10` of the
-larger flux, at most 50 iterations), started from the cell's trial temperature
-clamped into the bracket, with the condition evaluated at the trial temperature
-of the iterate (§5.4; Technical Reference §12.2). The balance therefore has a
-root for any cell temperature, and the iteration never clamps or aborts: when
-it does not converge, the face flux is evaluated at its last iterate, and
-nothing is printed.
+The gas-free surface balance solves `q_bc(T_s) = k (T_s − T_cell)/d`.
+Gas-bearing boundaries solve the mass and thermal equations together when
+coupled, with qualified roots and implicit derivatives. A failed coupled
+root raises a diagnostic; it is not accepted as a boundary flux. The saved
+`get_boundary_exchange(sol, tag)` fields include its residual and iteration
+count. Material properties use their declared trial-temperature bracket
+(§5.4; Technical Reference §12).
 
-On a trial state this is intended. On an accepted state, a surface temperature
+On an accepted state, a surface temperature
 within 1 K of either end of the bracket, or beyond it, means the condition was
 evaluated at the bracket's end: the re-radiation and convection are those of
 3000 K (or 200 K), not of `T_s`. Check the saved surface temperatures:
@@ -11628,7 +10500,7 @@ test rejects anything below that. Small negative values of that order in
   `enabled = false` the factor is one, an absent reactant reacts at the rate of
   a `base_scale` concentration, and the admissibility check is the only guard
   (§4.10; Technical Reference §6.3).
-- **Upwind advection.** The Darcy–Fick advective gas flux is first-order upwind
+- **Upwind advection.** The lumped gas transport advective gas flux is first-order upwind
   of the intrinsic gas density `ξ/φ`, stable and diffusive (Technical Reference
   §9).
 - **A reactant initialized at zero.** A reaction consumes only what `ξ_initial`
@@ -11743,41 +10615,19 @@ scale with the largest incident flux over the time span, sampled at 101 times.
 
 ---
 
-## 15.10 Gas transport and pressure (Darcy–Fick)
+## 15.10 Gas pressure and surface-solve diagnostics
 
-`setup` chooses the gas transport from the material and the mass conditions:
-none without a gas component, or when no component carries a gas-transfer
-coefficient and every mass condition is `ImpermeableBC`; Darcy–Fick when a
-condensed component is permeable (`κ > 0`); Fickian otherwise (Chapter 7;
-Technical Reference §9).
+Use `get_pressure(sol)` and `get_porosity(sol)` for current pore states,
+`get_boundary_exchange(sol,tag)` for signed species exchange and local residuals,
+and `gas_species_audit(sol,recorder)` to separate generation, escape, ingress
+and vented species. Do not rebuild boundary fluxes from initial cell widths.
 
-- **No pressure-driven flow.** The face velocity is `v = −m_f (P_nb − P_o)/d`,
-  with `m_f` the guarded distance-weighted harmonic mean of the two cells'
-  mobilities `κ/μ` (guard `1e-30` m²·Pa⁻¹·s⁻¹), so an impermeable neighbour
-  closes the face. If advection is expected and absent, check that the
-  *condensed* components carry `κ` (gases never do) and that a pressure
-  difference develops.
-- **Pressure spikes in nearly solid cells.** The pressure is
-  `P = (Σ_g ξ_g R_g T / M_g)/φ`, the porosity smoothly floored at `1e-12`. In a
-  cell that is almost entirely solid the same gas mass gives a high pressure:
-  confined gas, which is physical. Validation rejects a permeable cell that
-  starts with no pore space (§15.2.2).
-- **Pore air.** A pore space initialized to vacuum against an ambient pressure
-  boundary draws early product gas inward. Initialize a background gas
-  component at ambient pressure with
-  `background_gas_concentration(material, :AIR, ξ_condensed, T)`.
-- **Pressure conditions vent advectively, outflow only.** `DirichletPressureBC`,
-  `NeumannPressureBC` and `ConvectivePressureBC` set the boundary-face Darcy
-  velocity; its outflow carries the intrinsic gas density `ξ/φ` of the boundary
-  cell out, and an inflow carries none of the tracked gases. They add no film
-  flux: combine them with a diffusive condition by `+`
-  (`DiffusiveMassBC(0.05) + DirichletPressureBC()`) for both escape paths.
-- **All gas species move together.** One effective `λ` serves every gas species,
-  and advection carries them all at the same velocity; there is no per-species
-  scaling (Technical Reference §9.2).
-- **The viscosity.** `Material(; gas_viscosity)` sets the pore-gas viscosity
-  `μ(T)` (default `SutherlandProperty()`, air), which enters only the mobility
-  `κ/μ`: an error in `μ` is the reciprocal error in permeability.
+A local `TransportFailure` identifies an unresolved interface or surface root.
+Check coefficient support, complete reservoir data, physical pore volume and
+the reported failure reason. Very strong nearly isobaric coupling may exceed
+Float64 pressure resolution. A failed root is not an accepted boundary flux.
+Pressure-aware error control tracks proposed temperature and pore geometry;
+validate solution accuracy against a tighter solve, particularly during shrinkage.
 
 ---
 
@@ -11874,69 +10724,20 @@ Work top to bottom; each item is cheap to try and the early ones dominate.
 8. **Parallelise sweeps** (§15.11) and **keep one Julia session for many solves**
    (§15.12.2).
 
-### 15.12.2 Time to first solve and the precompile workloads
+### 15.12.2 Compilation and precompile workloads
 
-A solve compiles two layers. The **integrator** (OrdinaryDiffEq's stepper, its
-linear solve and the callbacks) compiles for the solver configuration only:
-whether the mesh moves, whether in-depth radiation adds algebraic rows on a
-fixed mesh, whether cells are deactivated, the policy, the linear solver and
-the callbacks (a callback of yours, a `ConservationRecorder`, the progress bar).
-The right-hand side, the Jacobian and the callbacks reach it behind
-problem-independent function types, so the problem's types do not enter it.
-The **kernels**, the state mapping, the colored Jacobian and the reconstruction
-of the solution compile for the types of the problem: the component, property,
-reaction and boundary-condition types, the component count, the radiation
-model, the gas transport and the energy state.
+Integrator code is shared across problems with the same solver configuration.
+Kernels and colored Jacobians compile for concrete material, boundary,
+transport and energy-state types. Changing numerical values within these
+types reuses compiled methods; creating a new callable property type can
+require compilation.
 
-The package image carries precompile workloads (`src/precompile.jl`) that solve
-the configurations most runs start from: fixed and moving meshes, surface and
-Beer–Lambert absorption, Fickian and Darcy–Fick transport, with and without
-deactivation, for a two-component material; a three-component material on a
-fixed mesh with surface absorption and on a moving mesh with Beer–Lambert
-absorption and Darcy–Fick transport; and the enthalpy energy state once. They
-use constant properties, one decomposition reaction and the cone boundary
-conditions:
-
-```julia
-thermal = (top = RadiativeFluxBC(flux = q) + RadiativeBC(T_inf = 300.0) +
-                 ConvectiveBC(h = 10.0, T_inf = 300.0),
-           bottom = AdiabaticBC())
-mass = (top = DiffusiveMassBC(0.05), bottom = ImpermeableBC())   # Darcy–Fick: + DirichletPressureBC(101325.0)
-```
-
-A workload caches the integrator for every problem solved in its configuration
-with the default policy, linear solver and callbacks, and the kernels for every
-problem whose types it shares. The test suite runs each workload
-(`test/integration/test_precompile_workloads.jl`); a workload that fails during
-precompilation only warns, and its configuration then compiles on first use.
-
-Measured wall times of `solve` calls in fresh sessions (Julia 1.13.0, Linux, a
-22-core workstation shared with other jobs; 20 cells, 60 s on a fixed mesh
-unless noted):
-
-| Solve | Wall time |
-|---|---|
-| `using Pyrolysis` | 2.7 s |
-| first solve, types of a workload (constant properties, cone conditions) | 0.02 s |
-| the same deck with other values (flux, `A`, cell count) | 0.00 s |
-| the 1 mm, 8-cell deck on a moving mesh with `deactivation = true` | 0.02 s |
-| one property law of another type (`k = LinearProperty(0.15, 1e-4)`) | 6.8 s |
-| a deck sharing no type with a workload (three components with a liquid, a `TableProperty`, `HeatFluxBC + ConvectiveBC`, `ConvectiveMassBC`) | 7.6 s |
-| that deck with `energy_state = :enthalpy` | 6.7 s |
-| `progress = true` | 3.0 s |
-| `callback = ConservationRecorder()` | 3.7 s |
-| a `DiscreteCallback` of yours | 3.3 s |
-| `integrator_policy = fbdf_policy(StructuredKLU())` | 3.5 s |
-
-Each compiles once per session: changing values (fluxes, kinetic parameters,
-mesh size, tolerances, time span) never recompiles. Every `CallableProperty`
-wraps a function of its own type, so re-evaluating a property closure at the
-REPL compiles the kernels again, while a sweep's `modify` that builds the same
-closure at every point compiles once.
-
-The allocation-free residual, the colored Jacobian's preparation and the
-problem-independent integrator types are automatic; the levers above are the
-ones you control.
+`src/precompile.jl` exercises representative fixed and moving meshes,
+radiation, deactivation, lumped and dusty gas, and both energy formulations.
+`test/integration/test_precompile_workloads.jl` executes these workloads.
+Separate first-call compilation from warmed timing, and compare complete
+solves at matched temperature, pressure and species accuracy. The pressure
+error budget and local nonlinear work are part of that comparison.
 
 ---
 
@@ -12023,8 +10824,8 @@ The 99 top-level exports, by group:
 | Property functions | `ConstantProperty`, `LinearProperty`, `PolynomialProperty`, `SutherlandProperty`, `ArrheniusProperty`, `TableProperty`, `CallableProperty`, `StateDependentProperty` | 16.2.2 |
 | Radiation models | `RadiationModel`, `NO_RADIATION`, `SURFACE_ABSORPTION`, `BEER_LAMBERT` | 16.2.6 |
 | Thermal conditions | `AdiabaticBC`, `HeatFluxBC`, `ConvectiveBC`, `RadiativeBC`, `RadiativeFluxBC`, `DirichletThermalBC`, `CombinedThermalBC` | 16.4.1 |
-| Mass conditions | `ImpermeableBC`, `MassFluxBC`, `ConvectiveMassBC`, `DiffusiveMassBC`, `CombinedMassBC` | 16.4.2 |
-| Pressure conditions | `DirichletPressureBC`, `NeumannPressureBC`, `ConvectivePressureBC` | 16.4.3 |
+| Mass conditions | `ImpermeableBC`, `MassFluxBC`, `AmbientGasBC`, `GasReservoir`, `MassTransferFilm` | 16.4.2 |
+| Pressure conditions | `NeumannPressureBC`, `ConvectivePressureBC` | 16.4.3 |
 | Condition set and pore air | `BoundaryConditionSet`, `background_gas_concentration` | 16.4.5, 16.4.6 |
 | Blowing models and gas data | `AbstractBlowingModel`, `NoBlowing`, `CouetteFilm`, `PropertyRatioFilm`, `PoolingFilm`, `FunctionBlowing`, `GasSpecies`, `NITROGEN`, `nasa7_heat_capacity`, `eucken_viscosity`, `fuller_diffusivity`, `BlowingFace`, `blowing_state`, `blowing_ratio`, `blowing_factor` | 16.4.7 |
 | Meshes | `create_uniform_mesh`, `create_stretched_mesh`, `create_mesh_from_nodes`, `Planar`, `Cylindrical`, `Spherical`, `MeshTopology`, `MeshGeometry` | 16.3 |
@@ -12105,64 +10906,35 @@ stated otherwise.
 
 ### 16.2.1 Components
 
-Three component types encode the phase in the type. Each has a keyword
-constructor:
-
 ```julia
-SolidComponent(name::Symbol; ρ, c, k,
-               ε = 0.9, absorptivity = nothing, α = 0.0, γ = 1.0, λ = 0.0, κ = 0.0,
-               ρ_intrinsic = nothing, φ = nothing, validate_properties = true)
-
-LiquidComponent(name::Symbol; ρ, c, k,
-                λ = 2e-5, κ = 0.0, ε = 0.95, absorptivity = nothing, α = 0.0, γ = 0.0,
-                ρ_intrinsic = nothing, φ = nothing, validate_properties = true)
-
-GaseousComponent(name::Symbol; M, c, k, λ,
-                 ε = 0.0, α = 0.0, γ = 0.0, validate_properties = true)
+SolidComponent(name::Symbol; ρ, c, k, ε=.9, absorptivity=nothing,
+    α=0., γ=1., λ=nothing, κ=0., ρ_intrinsic=nothing, φ=nothing,
+    validate_properties=true)
+LiquidComponent(name::Symbol; ρ, c, k, ε=.95, absorptivity=nothing,
+    α=0., γ=0., λ=nothing, κ=0., ρ_intrinsic=nothing, φ=nothing,
+    validate_properties=true)
+GaseousComponent(name::Symbol; M, c, k, ε=0., α=0., γ=0.,
+    validate_properties=true)
 ```
 
-| Keyword | Meaning (symbol) | Units | Default |
-|---|---|---|---|
-| `ρ` | bulk (pure-phase) density `ρ_j`; number or property function | kg·m⁻³ | required (solid, liquid) |
-| `M` | molar mass `M_j`, positive; sets the ideal-gas density `ρ_g = P_ref M/(R_g T)` | kg·mol⁻¹ | required (gas) |
-| `c` | specific heat `c_p,j`; number or property function | J·kg⁻¹·K⁻¹ | required |
-| `k` | thermal conductivity `k_j`; number or property function | W·m⁻¹·K⁻¹ | required |
-| `λ` | gas-transfer coefficient `λ_j` | m²·s⁻¹ | `0.0` (solid, a number), `2e-5` (liquid), required (gas) |
-| `κ` | permeability `κ_j` (solid and liquid only), a number | m² | `0.0` |
-| `ε` | emissivity `ε_j(T)`; number or property function | – | `0.9` (solid), `0.95` (liquid), `0.0` (gas) |
-| `absorptivity` | surface absorptivity `a_j` for incident radiation, a number in `[0, 1]` (solid and liquid only); `nothing` is Kirchhoff, `a_j = ε_j(T)` | – | `nothing` |
-| `α` | mass absorption coefficient `α_j` (in-depth absorption under `BEER_LAMBERT`) | m²·kg⁻¹ | `0.0` |
-| `γ` | swelling factor `γ_j`, in `[0, 1]`: the fraction of the component's volume that counts toward the bulk volume | – | `1.0` (solid), `0.0` (liquid, gas) |
-| `ρ_intrinsic` | skeletal (intrinsic) density `ρ_i,j`, used by the pore fraction only | kg·m⁻³ | `= ρ` |
-| `φ` | pure-phase porosity; sets `ρ_intrinsic = ρ/(1 − φ)` (constant `ρ` only) | – | `nothing` |
-| `validate_properties` | sample the laws at 1 K steps on `[200, 3000]` K and refuse `ρ`, `ρ_intrinsic`, `c`, `k` ≤ 0 (a gas may have `c = 0`), `λ`, `κ` < 0, or `ε` outside `[0, 1]`; a `StateDependentProperty` is not sampled | – | `true` |
+Density is in kg/m³, heat capacity in J/(kg K), conductivity in W/(m K),
+molar mass in kg/mol, condensed `λ` in m²/s and permeability in m².
+Participating condensed components require explicit `λ` for `LumpedTransfer`;
+zero is a deliberate closed wall channel. `γ=0` condensed components may
+have neither nonzero `λ` nor nonzero `κ`.
 
-A number is converted to a `ConstantProperty`, a two-tuple `(a, b)` to a
-`LinearProperty`, a function of `T` to a `CallableProperty`
-(`Pyrolysis.Materials.to_property`); a property object passes through. Pass
-either `ρ_intrinsic` or `φ`, never both (an `ArgumentError`). The bulk density
-`ρ` is what the mixing rules and the mixture density use; `ρ_intrinsic` enters
-only the pore fraction `1 − Σ_j ξ_j/ρ_i,j` (the sum over the condensed
-components, `Pyrolysis.Properties.skeletal_volume_fraction`), which the Darcy–Fick
-pressure divides by after a smooth floor at `1e-12` (Technical Reference §5,
-§9). A gas-producing material under Fickian transport whose condensed
-components keep the default `λ = 0` makes `validate_problem` warn: the gas
-field then forms a sharp front on which the integrator rejects step after step.
-Give such components a small `λ`, for example `1e-6` m²·s⁻¹ (Chapter 15,
-§15.5).
+Specify either intrinsic density or a pure-phase porosity, with
+`ρ_intrinsic=ρ/(1-φ)` for constant bulk density. Every condensed component
+occupies skeletal volume regardless of `γ`. Gas-bearing initialized and
+accepted states need resolved positive pore volume. A gas component has no
+matrix transport coefficient. Its `γ` may affect volume change but never
+matrix transport weights.
 
-```julia
-virgin = SolidComponent(:virgin, ρ = 530, c = 2000, k = 0.12, ε = 0.9, κ = 1e-15)
-char   = SolidComponent(:char,   ρ = 150, c = 1500, k = 0.20, ε = 0.95, α = 5.0, κ = 1e-12)
-water  = LiquidComponent(:H2O_l, ρ = 1000, c = 4180, k = 0.6)
-gas    = GaseousComponent(:gas,  M = 0.044, c = 1800, k = 0.03, λ = 1e-4)
-vapor  = GaseousComponent(:H2O,  M = 0.018, c = 2000, k = 0.025, λ = 2e-5)
-```
+Numeric properties become `ConstantProperty`; tuples, callables and explicit
+property objects follow the conversion rules in §16.2.2. The phase predicates
+`is_solid`, `is_liquid`, `is_gas`, `phase` and `molar_mass` are exported.
 
-Phase predicates and accessors (top-level exports): `is_solid(c)`,
-`is_liquid(c)`, `is_gas(c)`, `phase(c)` (a `Pyrolysis.Materials.Phase`:
-`SOLID`, `LIQUID` or `GAS`) and `molar_mass(c)` (`0.0` for a condensed
-component).
+---
 
 ### 16.2.2 Property-function types
 
@@ -12300,7 +11072,8 @@ Material(; name::Symbol,
            mixing = MaterialMixing(),
            lateral_shrinkage_law = nothing,
            depletion_limiter = DepletionLimiter(),
-           gas_viscosity = SutherlandProperty())
+           gas_viscosity = SutherlandProperty(),
+           gas_transport = LumpedTransfer())
 ```
 
 | Keyword | Meaning | Default |
@@ -12311,7 +11084,8 @@ Material(; name::Symbol,
 | `mixing` | the `(k, λ, κ)` NamedTuple of `MaterialMixing` | `MaterialMixing()` |
 | `lateral_shrinkage_law` | `χ̄ ↦ A/A₀`, a function of the column-average conversion; `nothing` keeps the cross section fixed | `nothing` |
 | `depletion_limiter` | the limiter applied to every reaction rate of the material | `DepletionLimiter()` |
-| `gas_viscosity` | pore-gas viscosity `μ(T)` [Pa·s] in the Darcy mobility `κ/μ` (Darcy–Fick transport only); number or property, positive and finite at sample temperatures from 200 to 1800 K | `SutherlandProperty()` (air) |
+| `gas_transport` | declared pore-gas model and endpoint domain | `LumpedTransfer()` for gas-bearing materials |
+| `gas_viscosity` | pore-gas viscosity `μ(T)` [Pa·s] in the Darcy mobility `κ/μ` (both gas models); number or property, positive and finite at sample temperatures from 200 to 1800 K | `SutherlandProperty()` (air) |
 
 A `lateral_shrinkage_law` adds the variable cross section: the
 conversion-history pair and the area with its lateral rate join the state.
@@ -12324,8 +11098,8 @@ finite on `[−0.001, 1.001]` and equal one at zero conversion, for example
 pmma = Material(
     name = :PMMA,
     components = (
-        SolidComponent(:virgin, ρ = 1190, c = 1420, k = 0.21, ε = 0.86, λ = 1e-6),
-        GaseousComponent(:MMA, M = 0.100, c = 1500, k = 0.02, λ = 1e-5),
+        SolidComponent(:virgin, ρ = 1190, φ=.3, c = 1420, k = 0.21, ε = 0.86, λ = 1e-6),
+        GaseousComponent(:MMA, M = 0.100, c = 1500, k = 0.02,),
     ),
     reactions = (
         Reaction(:decomposition, :virgin => :MMA; A = 8.5e12, E = 188e3, h = 870e3),
@@ -12528,38 +11302,32 @@ Notes:
 - Combine conditions with `+`:
   `RadiativeFluxBC(50e3) + RadiativeBC(ε = 0.9, T_inf = 300.0) + ConvectiveBC(h = 10.0, T_inf = 300.0)`.
 
-### 16.4.2 Mass conditions
+### 16.4.2 Mass and reservoir conditions
 
-| Type | Constructor | Flux `J_j` (positive into the domain) |
+| Type | Construction | Meaning |
 |---|---|---|
-| `ImpermeableBC` | `ImpermeableBC()` | `0` (the default) |
-| `MassFluxBC` | `MassFluxBC(flux)`, a number or `t -> J` | `flux`, for each gas component |
-| `ConvectiveMassBC` | `ConvectiveMassBC(; h_m, ξ_inf = 0.0, validate = true)` | `h_m (ξ_∞ − ξ_s)` |
-| `DiffusiveMassBC` | `DiffusiveMassBC()` or `DiffusiveMassBC(h_m)` | outflow through the internal diffusive resistance and an external one in series |
-| `CombinedMassBC` | `bc1 + bc2 + …` | the sum of its members |
+| `ImpermeableBC` | `ImpermeableBC()` | zero species flow |
+| `GasReservoir` | `GasReservoir(P=...,T=...,mole_fractions=(air=1.,))` | complete external ideal-gas state |
+| `AmbientGasBC` | `AmbientGasBC(reservoir;film=nothing)` | pore/reservoir exchange in either direction |
+| `MassTransferFilm` | `MassTransferFilm(g)` | isobaric common-diffusivity conductance [kg/(m² s)] |
+| `MassFluxBC` | `MassFluxBC(fluxes=(air=-1e-4,),inflow_temperature=(air=300.,))` | prescribed outward species flux and incoming energy |
 
-`DiffusiveMassBC()` has `h_m = Inf` (no external resistance), the outflow
-`λ ξ/d` with `d` the distance from the cell centre to the face; a finite `h_m`
-gives `λ h_m ξ/(λ + h_m d)`. `ConvectiveMassBC`'s `h_m` [m/s] is a number or a
-function of `t` (non-negative when constant and validated); `ξ_inf` [kg·m⁻³] is
-a number or a function of `t` applied to every gas component, or an `NTuple`
-with one non-negative entry per component (condensed entries ignored). The mass
-conditions act on the gas components only. Which gas transport a problem gets
-follows from the material and these conditions (§16.6).
+Mass conditions are complete closures and do not add with `+`. Reservoir
+fractions are normalized named gas fractions; explicit vacuum may omit them.
 
-### 16.4.3 Pressure conditions (Darcy–Fick transport)
+---
 
-| Type | Constructor | Meaning |
+### 16.4.3 Pressure conditions
+
+| Type | Construction | Meaning |
 |---|---|---|
-| `DirichletPressureBC` | `DirichletPressureBC(P; validate = true)` or `DirichletPressureBC()` | fixed boundary pressure `P` [Pa], positive; default `101325.0` |
-| `NeumannPressureBC` | `NeumannPressureBC(∂P∂n)` or `NeumannPressureBC()` | prescribed `∂P/∂n` [Pa/m]; default `0.0` (impermeable to Darcy flow) |
-| `ConvectivePressureBC` | `ConvectivePressureBC(h_P, P_ext)` | Robin condition `v_g·n = h_P (P_int − P_ext)`, `h_P` in m·Pa⁻¹·s⁻¹ |
+| `ConvectivePressureBC` | `ConvectivePressureBC(reservoir;resistance=...,flow=:mass,film=nothing)` | pressure drop proportional to selected flow |
 
-The pressure conditions are mass conditions: they go in the `mass` slot of the
-`BoundaryConditionSet`, usually combined with a diffusive condition,
-`DiffusiveMassBC() + DirichletPressureBC()`. They act only under Darcy–Fick
-transport, which a permeable condensed component (`κ > 0`) selects (Chapter 5,
-§5.5; Technical Reference §9).
+The hydraulic flow selector is `:darcy_velocity`, `:mass` or `:molar`.
+Resistance units match that selector and values must be finite/nonnegative.
+These conditions work with either material gas model.
+
+---
 
 ### 16.4.4 Mesh motion
 
@@ -12589,7 +11357,7 @@ bcs = BoundaryConditionSet(
         bottom = AdiabaticBC(),
     ),
     mass = (
-        top    = DiffusiveMassBC(),     # gas escapes at the surface
+        top    = AmbientGasBC(GasReservoir(P=0., T=300.)),     # gas escapes at the surface
         bottom = ImpermeableBC(),
     ),
 )
@@ -12616,28 +11384,29 @@ both fields). The profile helpers of `Pyrolysis.Problem` build such functions:
 `background_gas_concentration(material, species, ξ, T; P = 101325.0)` returns
 the concentration [kg·m⁻³] of the gas component `species` (an index or a name)
 whose partial pressure is `P` in the pore space of the condensed composition
-`ξ` (an `NTuple` with one entry per component) at temperature `T`: the pore air
-a Darcy–Fick problem should start with against a pressure condition (Chapter 7,
-§7.5.1).
+`ξ` (an `NTuple` with one entry per component) at temperature `T`. Use the
+intended initial pore gas for either transport model (§7.5.1).
 
-The boundary energy balance has no surface gas-enthalpy term: the gas leaves
-with its enthalpy at the face temperature through the gas flux of the energy
-equation (Chapter 7, §7.7.1; Technical Reference §7).
+Incoming gas carries its specified reservoir enthalpy. Outgoing gas carries
+surface enthalpy. The heat closure determines whether a coupled LTE-film
+adjustment is required (§5.4; Technical Reference §12).
 
 ### 16.4.7 Blowing models and gas data
 
 A `ConvectiveBC`'s `blowing` keyword takes one of these models
-(`AbstractBlowingModel` is their supertype); each turns the outward gas flux at
-the face into the blowing ratio `R_b = h_eff/h` (Chapter 5, §5.2.3):
+(`AbstractBlowingModel` is their supertype); each evaluates its declared flux domain and returns
+the blowing ratio `R_b = h_eff/h` (Chapter 5, §5.2.3):
 
 | Model | Constructor | Ratio |
 |---|---|---|
 | `NoBlowing` | `NoBlowing()` (the default) | `R_b = 1` |
-| `CouetteFilm` | `CouetteFilm(λ = 0.5)` or `CouetteFilm(; λ)` | `B_λ/(e^{B_λ} − 1)`, `B_λ = 2λ ṁ″ c_p,g/h` |
+| `CouetteFilm` | `CouetteFilm(λ = 0.5)` or `CouetteFilm(; λ)` | `B_λ/(e^{B_λ} − 1)`, `B_λ = 2λ Σ_j N_j c_p,j(T_s)/h`, including signed counterflow |
 | `PropertyRatioFilm` | `PropertyRatioFilm(free_stream; n_Γ = 0.6, volatiles = nothing)` | `B_Γ/(e^{B_Γ} − 1)` with `B_Γ = (ṁ″ c_p,∞/h)(Γ_∞/Γ_g)^n_Γ`, `Γ = k/c_p` |
 | `PoolingFilm` | `PoolingFilm(free_stream; n_Γ = 0.6, n_D = 0.5, ψ0 = 0.59, Λc = 0.35, Λw = 0.10, volatiles = nothing, diffusion_volume = (;))` | `B_Γ/(e^{B_Γ/ψ} − 1)` with a pooling factor `ψ` falling from 1 to `ψ_0` (keyword `ψ0`) when the gas at the face is denser than the free stream |
-| `FunctionBlowing` | `FunctionBlowing(f)` | `R_b = f(face, h, T_inf)`; `f` returns 1 at zero outflow, is smooth and accepts dual numbers |
+| `FunctionBlowing` | `FunctionBlowing(f)` | `R_b = f(face, h, T_inf)`; `f` returns 1 at zero species fluxes, is smooth and accepts dual numbers |
 
+`CouetteFilm` supports signed fluxes. `PropertyRatioFilm` and `PoolingFilm`
+require their declared outward-flow domain and reject unsupported counterflow.
 The gas data the models read:
 
 | Name | Signature and meaning |
@@ -12706,9 +11475,9 @@ problem = PyrolysisProblem(
 `validate_problem(problem; strict = false)` (`Pyrolysis.Problem`) checks the
 mesh positions, the material's components and reaction indices, the boundary
 tags and conditions, the time span, the number of initial-concentration
-functions and, under Darcy–Fick transport, the initial porosity; it collects
+functions and, under gas transport, the initial porosity; it collects
 every error and throws them in one message (an `ErrorException`), and it warns
-about degenerate Fickian gas transport (a gas-producing material with a condensed component at `λ = 0`).
+about invalid material or boundary data.
 `strict = true` adds the stoichiometry, an evaluation of the initial-condition
 functions and the cell volumes. `is_valid_problem(problem)` returns a `Bool`.
 `solve` runs `validate_problem` unless `validate = false` (Chapter 7, §7.9).
@@ -12844,7 +11613,7 @@ match.
 |---|---|---|---|
 | Mesh motion | `use_ale` | fixed, moving (`w = v_s + c`) | fixed |
 | Radiation | `radiation_model` | `NO_RADIATION`, `SURFACE_ABSORPTION`, `BEER_LAMBERT` | `NO_RADIATION` |
-| Gas transport | the material and the mass conditions | none without a gas component; Darcy–Fick when a condensed component is permeable (`κ > 0`); Fickian when some component has a nonzero `λ` or a mass condition other than `ImpermeableBC` lets gas out; none otherwise | from the problem |
+| Gas transport | material model and complete mass conditions | `LumpedTransfer` or `DustyGas`; EOS for every gas-bearing material, including sealed gas | from the problem |
 | Cross section | the material's `lateral_shrinkage_law` | fixed, variable (needs `use_ale = true` and planar coordinates) | fixed |
 | Energy state | `energy_state` | `:temperature`, `:enthalpy` | `:temperature` |
 | Deactivation | `deactivation` | off, on | off |
@@ -12884,6 +11653,7 @@ layer interface under the equidistribution correction; with deactivation, a
 |---|---|---|---|
 | `energy_state` | `Symbol` | `:temperature` | The energy unknown of each cell: `:temperature` (the cell temperature) or `:enthalpy` (the sensible-enthalpy inventory) |
 | `abstol` | `Real` | `1e-8` | Absolute tolerance of the temperature rows [K]; the enthalpy rows take `threshold · m_s,i(0) · c_p,ref · abstol`, the other rows derive theirs from `reltol` and `threshold` |
+| `pressure_tolerance` | `1.0` | Absolute local pressure-error budget [Pa], with proposed-state pore/thermal/geometry sensitivities |
 | `reltol` | `Real` | `1e-6` | Relative tolerance of every row; also scales the mass, position, velocity, intensity and cross-section tolerances, the domain test's constraint allowance, and the widening of a located event's threshold |
 | `threshold` | `Real` | `1e-2` | `ε_m`, the deactivation threshold as a fraction of a cell's initial condensed mass; also scales the mass and position tolerances, with or without `deactivation` |
 | `maxiters` | `Int` | `1_000_000` | Maximum number of integrator steps |
@@ -12933,21 +11703,26 @@ it starts empty):
 |---|---|
 | temperature | `abstol` [K] |
 | enthalpy inventory (`energy_state = :enthalpy`) | `threshold · m_s,i(0) · c_p,ref · abstol` [J] |
-| component mass of cell `i` | `reltol · threshold · m_s,i(0)` [kg] |
+| condensed component mass of cell `i` | `reltol · threshold · m_s,i(0)` [kg] |
+| gas component mass | initial `pressure_tolerance · M_j · φ_i · V_i/(N_g R T_i)` [kg], supplemented by the proposed-state pressure norm |
 | node position (moving mesh) | `reltol · threshold · h_n`, `h_n` the smallest initial size of the cells around node `n` |
 | node velocity (moving mesh) | the position tolerance over `dt` |
 | face intensity (`BEER_LAMBERT`) | `reltol` times the largest incident intensity over the time span (at least 1 W/m²) |
 | conversion-history pair (lateral shrinkage) | the cell's mass tolerance |
 | cross-section area and lateral rate (lateral shrinkage) | `reltol · A₀`; the smallest node-velocity tolerance over the initial thickness |
 
-The integrator's domain test (`DomainCheck`, no keyword) rejects an accepted
-proposal that is inadmissible (a live mass below its negative tolerance, a live
-cell at or below absolute zero, crossed nodes, a non-positive cross section),
-whose porosity leaves `[0, 1]` beyond its mass tolerances under Darcy–Fick
-transport, or whose algebraic rows miss their equations by more than `reltol`
-times the equation's scale plus the unknown's tolerance; after more than
-`MAX_CONSTRAINT_REJECTIONS = 50` consecutive constraint rejections the solve
-ends with `:Failure` (Chapter 8, §8.3; Technical Reference §15.5.4).
+The pressure norm evaluates the proposed temperature, masses, pore volume
+and geometry, including caloric inversion in the enthalpy formulation. Gas
+trial-guard scales follow those same evolving quantities. Tighten
+`pressure_tolerance` and compare complete trajectories when qualifying a
+solution; it is a local-error budget, not a global pressure bound.
+
+The domain test rejects invalid masses, temperatures or geometry and checks
+algebraic constraints. Every gas-bearing state, including sealed gas, must
+have physical pore volume above twice the divisor floor plus its mass,
+thermal and geometric uncertainty margin. Accepted and post-event states
+must also remain in the declared transport domain. Repeated constraint
+rejections or an invalid fixed step terminate with a diagnosed failure.
 
 How a solve ends:
 
@@ -12987,7 +11762,7 @@ setup(problem; kwargs...) -> CoreProblem
 
 | `setup` keyword | Default | Meaning |
 |---|---|---|
-| `energy_state`, `reltol`, `abstol`, `threshold`, `use_ale`, `radiation_model`, `w_override`, `correction`, `lagrangian`, `deactivation`, `band`, `sources` | as in §16.7 | as in §16.7 |
+| `energy_state`, `reltol`, `abstol`, `threshold`, `pressure_tolerance`, `use_ale`, `radiation_model`, `w_override`, `correction`, `lagrangian`, `deactivation`, `band`, `sources` | as in §16.7 | as in §16.7 |
 | `time_scale` | `problem.dt_initial` | time scale of the node-velocity tolerances [s]; `solve` passes its `dt` |
 | `closure` | `nothing` | the mesh closure of a mesh of two or three dimensions, `:potential` (its default) or `:balance`; a line moves by its balance rows and takes no other |
 | `slip` | `()` | `tag => k` pairs fixing velocity component `k` to zero on a tag (two or three dimensions) |
@@ -13165,7 +11940,7 @@ grid = [(A = a, E = e) for a in (1e12, 1e13, 1e14), e in (1.5e5, 2.0e5)]
                         reactions = (reaction,), mixing = m.mixing,
                         lateral_shrinkage_law = m.lateral_shrinkage_law,
                         depletion_limiter = m.depletion_limiter,
-                        gas_viscosity = m.gas_viscosity)
+                        gas_viscosity = m.gas_viscosity, gas_transport = m.gas_transport)
     return PyrolysisProblem(; mesh = problem.mesh, material, bc_set = problem.bc_set,
                             T_initial = problem.T_initial, ξ_initial = problem.ξ_initial,
                             tspan = problem.tspan, dt_initial = problem.dt_initial,
@@ -13209,7 +11984,7 @@ dy = [(y(θ0 .* (1 .+ h .* (1:2 .== k))) - y(θ0 .* (1 .- h .* (1:2 .== k)))) /
 | step and tolerance | choose them per case by a convergence check: central differences at relative steps of 1, 2, 4 and 8e-3 at two tolerances (reltol 1e-7 and 1e-8, `abstol` scaled with it), and take a value where the Richardson extrapolants of successive steps agree within 5 % and the two tolerances agree (Chapter 13, §13.4) |
 | parallel | `parameter_sweep` over the perturbed parameter vectors (Chapter 13, §13.5) |
 | events | a deactivation's time is a smooth function of the parameters, but an objective that samples the solution at fixed times across it is rough on the scale of one sample interval; the convergence check excludes such steps (Technical Reference §17) |
-| avoid | condensed components at `λ = 0` under Fickian gas transport, whose sharp gas front makes the solve stiff and rough in the parameters (Chapter 13, §13.9) |
+| qualify | transport support changes, endpoint blends and local interface roots before differentiating outputs |
 
 ---
 
@@ -13363,6 +12138,7 @@ Technical Reference chapter.
 |---|---|
 | `energy_state` | `:temperature` |
 | `abstol` / `reltol` | `1e-8` (K) / `1e-6` |
+| `pressure_tolerance` | `1.0` Pa |
 | `threshold` | `1e-2` |
 | `maxiters` | `1_000_000` |
 | `dt` | `problem.dt_initial` |
@@ -13391,8 +12167,8 @@ Technical Reference chapter.
 
 | Quantity | Default |
 |---|---|
-| `SolidComponent` `ε`, `α`, `γ`, `λ`, `κ` | `0.9`, `0.0`, `1.0`, `0.0`, `0.0` |
-| `LiquidComponent` `ε`, `α`, `γ`, `λ`, `κ` | `0.95`, `0.0`, `0.0`, `2e-5` m²·s⁻¹, `0.0` |
+| `SolidComponent` `ε`, `α`, `γ`, `λ`, `κ` | `0.9`, `0.0`, `1.0`, `nothing`, `0.0` |
+| `LiquidComponent` `ε`, `α`, `γ`, `λ`, `κ` | `0.95`, `0.0`, `0.0`, `nothing`, `0.0` |
 | `GaseousComponent` `ε`, `α`, `γ` | `0.0`, `0.0`, `0.0` |
 | `absorptivity` (solid, liquid) | `nothing` (Kirchhoff, `a_j = ε_j(T)`) |
 | `ρ_intrinsic` | `= ρ` (no pure-phase pores) |
@@ -13412,12 +12188,10 @@ Technical Reference chapter.
 | `ConvectiveBC` `blowing`, `validate` | `NoBlowing()`, `true` |
 | `RadiativeBC` `ε`, `F` | `nothing` (the effective emissivity), `1.0` |
 | `RadiativeFluxBC` `absorptivity` | `nothing` (the effective absorptivity, the effective emissivity unless a component sets `absorptivity`) |
-| `ConvectiveMassBC` `ξ_inf` | `0.0` |
-| `DiffusiveMassBC` `h_m` | `Inf` (no external resistance) |
-| `DirichletPressureBC` `P` | `101325.0` Pa |
-| `NeumannPressureBC` `∂P∂n` | `0.0` |
 | `BoundaryConditionSet` `thermal` / `mass` | `(top = AdiabaticBC(), bottom = AdiabaticBC())` / `(top = ImpermeableBC(), bottom = ImpermeableBC())` |
 | `background_gas_concentration` `P` | `101325.0` Pa |
+| `AmbientGasBC` `film` | `nothing` |
+| `LumpedTransfer` `endpoint`, `blend` | `nothing`, `(1e-4,1e-3)` |
 | `CouetteFilm` `λ` | `0.5` |
 | `PropertyRatioFilm` `n_Γ` | `0.6` |
 | `PoolingFilm` `n_Γ`, `n_D`, `ψ0`, `Λc`, `Λw` | `0.6`, `0.5`, `0.59`, `0.35`, `0.10` |
@@ -13454,18 +12228,18 @@ Technical Reference chapter.
 | Quantity | Value | Name (submodule) | TR |
 |---|---|---|---|
 | property bracket: law argument clamp, constructor validation range, the trial temperature of the kernels | `[200, 3000]` K | `T_PROPERTY_MIN`, `T_PROPERTY_MAX` (`Materials`) | §4 |
-| width of the smooth trial-temperature clamp at the bracket ends | `1.0` K | `TRIAL_TEMPERATURE_WIDTH` (`States`) | §12 |
+| width of the smooth trial-temperature clamp at the bracket ends | `1.0` K | `TRIAL_TEMPERATURE_WIDTH` (`Materials`) | §12 |
 | surface-temperature Newton tolerance / iterations | `1e-10` / `50` | keywords of `solve_boundary_temperature!` (`BoundaryConditions`) | §12 |
 | `DirichletThermalBC` conductance inside a combination | `1e8` W·m⁻²·K⁻¹ | — | §12 |
-| pore-fraction floor (Darcy–Fick pressure) | `1e-12` | `POROSITY_FLOOR` (`States`) | §9 |
-| smallest initial porosity `validate_problem` accepts under Darcy–Fick transport | `1e-6` | — | §9 |
+| pore-fraction divisor floor (both gas models) | `1e-12` | `POROSITY_FLOOR` (`Physics`) | §9 |
+| admissible pore margin | raw porosity greater than twice the divisor floor plus mass/thermal/geometry uncertainty | initial, proposed and post-event checks | §9 |
 | smooth floor on a cell's heat capacity `Σ_j m_ij c_p,j` | `RHO_CP_FLOOR · Vᵢ(0)`, `RHO_CP_FLOOR = 1e3` J·m⁻³·K⁻¹ | `RHO_CP_FLOOR` (`Materials`) | §5 |
 | cell-conductivity floor | `1e-6` W·m⁻¹·K⁻¹ | `CONDUCTIVITY_FLOOR` (`States`) | §5 |
 | cell-volume floor | `1e-8 · Vᵢ(0)` | `VOLUME_FLOOR_FRACTION` (`States`) | §13 |
 | gas-viscosity floor | `1e-12` Pa·s | `MU_FLOOR` (`Properties`) | §5 |
 | temperature floor of the Chapman–Enskog diffusivity (the blowing models) | `100` K | `T_GAS_PROPERTY_FLOOR` (`Properties`) | §12 |
-| Darcy mobility guard | `1e-30` m²·Pa⁻¹·s⁻¹ | `MOBILITY_GUARD` (`Kernels`) | §9 |
-| mixing-weight blend window (matrix volume fraction) | `1e-4 … 1e-3` | `MIXING_BLEND_LO`, `MIXING_BLEND_HI` (`Properties`) | §5 |
+| thermal-property mixing-weight blend window (matrix volume fraction) | `1e-4 … 1e-3` | `MIXING_BLEND_LO`, `MIXING_BLEND_HI` (`Properties`) | §5 |
+| gas-transport endpoint blend window (condensed matrix occupancy) | `(1e-4,1e-3)` by default | `LumpedTransfer` / `DustyGas` keyword `blend` (`Materials`) | §9 |
 | Kozeny constant | `180` | — | §5 |
 | clamp band of the column conversion before the lateral law | `1e-3` outside `[0, 1]` | `LATERAL_CLAMP_WIDTH` (`Closures`) | §10 |
 | reference temperature `T_ref` | `298.15` K | `T_REF` (`Materials`) | §2 |

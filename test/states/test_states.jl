@@ -158,9 +158,16 @@ end
 _caloric_material() = Material(
     name = :caloric,
     components = (
-        SolidComponent(:poly, ρ = 1000.0, c = PolynomialProperty((700.0, 0.9)), k = 0.3),
-        SolidComponent(:peak, ρ = 800.0, c = _cp_laws[5], k = 0.2),
-        GaseousComponent(:gas, M = 0.03, c = 1100.0, k = 0.03, λ = 0.0),
+        SolidComponent(
+            :poly,
+            φ = 0.3,
+            λ = 0.0,
+            ρ = 1000.0,
+            c = PolynomialProperty((700.0, 0.9)),
+            k = 0.3,
+        ),
+        SolidComponent(:peak, φ = 0.3, λ = 0.0, ρ = 800.0, c = _cp_laws[5], k = 0.2),
+        GaseousComponent(:gas, M = 0.03, c = 1100.0, k = 0.03),
     ),
     reactions = (),
 )
@@ -290,8 +297,8 @@ end
     cold = Material(;
         name = :cold_gas,
         components = (
-            SolidComponent(:s, ρ = 1000.0, c = 900.0, k = 0.3),
-            GaseousComponent(:g, M = 0.1, c = 0.0, k = 0.02, λ = 0.0),
+            SolidComponent(:s, λ = 0.0, ρ = 1000.0, c = 900.0, k = 0.3),
+            GaseousComponent(:g, M = 0.1, c = 0.0, k = 0.02),
         ),
         reactions = (),
     )
@@ -414,10 +421,27 @@ end
 # A slab that thins (the char is lighter), absorbs in depth and shrinks
 # laterally, on a stretched mesh: every row kind of the tolerance vector.
 function _thinning_slab(; law = χ -> 1 - 0.3χ, coordinates = Planar())
-    virgin =
-        SolidComponent(:virgin, ρ = 1100.0, c = (900.0, 1.5), k = 0.2, ε = 0.8, α = 1.5)
-    char = SolidComponent(:char, ρ = 300.0, c = 1100.0, k = 0.1, ε = 0.95, α = 20.0)
-    gas = GaseousComponent(:gas, M = 0.03, c = 1100.0, k = 0.03, λ = 1e-5)
+    virgin = SolidComponent(
+        :virgin,
+        φ = 0.3,
+        λ = 0.0,
+        ρ = 1100.0,
+        c = (900.0, 1.5),
+        k = 0.2,
+        ε = 0.8,
+        α = 1.5,
+    )
+    char = SolidComponent(
+        :char,
+        φ = 0.3,
+        λ = 0.0,
+        ρ = 300.0,
+        c = 1100.0,
+        k = 0.1,
+        ε = 0.95,
+        α = 20.0,
+    )
+    gas = GaseousComponent(:gas, M = 0.03, c = 1100.0, k = 0.03)
     mat = Material(
         name = :thinning,
         components = (virgin, char, gas),
@@ -473,9 +497,13 @@ end
         condensed = m0[1, i] + m0[2, i]
         @test ref.solid_mass[i] ≈ condensed rtol = 1e-14
         mass_tol = reltol * threshold * condensed
-        for j = 1:3
+        for j = 1:2
             @test tol[mass_index(layout, i, j)] ≈ mass_tol rtol = 1e-14
         end
+        # One gas shares the pressure budget in the explicitly 30%-porous
+        # initial mixture. This mass scale follows directly from its EOS.
+        gas_tol=0.3*ref.volume[i]*0.03/(Pyrolysis.Materials.R_GAS*cp.T0[i])
+        @test tol[mass_index(layout, i, 3)]≈gas_tol rtol=1e-14
         for k = 1:2
             @test tol[history_index(layout, i, k)] ≈ mass_tol rtol = 1e-14
         end

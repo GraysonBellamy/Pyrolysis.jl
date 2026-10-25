@@ -56,7 +56,7 @@ function _verification_case_vmms04()
 
     function make_material()
         solid = SolidComponent(:s, ρ = ρ_s, c = 1200.0, k = 0.2, λ = 2.0e-5, γ = 1.0)
-        gas = GaseousComponent(:g, M = 0.028, c = 1000.0, k = 0.03, λ = 2.0e-5)  # γ = 0
+        gas = GaseousComponent(:g, M = 0.028, c = 1000.0, k = 0.03)  # γ = 0
         rxn = Reaction(:pyro, 1 => 2, A = A_rxn, E = E_rxn, h = 5.0e4)
         return Material(name = :VMMS04, components = (solid, gas), reactions = (rxn,))
     end
@@ -90,8 +90,14 @@ function _verification_case_vmms04()
                 bottom = HeatFluxBC(t -> mms_heat_flux(mat, fields, 0.0, t)),
             ),
             mass = (
-                top = MassFluxBC(t -> -mms_gas_flux(mat, fields, 2, z_top(t), t)),
-                bottom = MassFluxBC(t -> mms_gas_flux(mat, fields, 2, 0.0, t)),
+                top = MassFluxBC(
+                    fluxes = (g = t -> mms_gas_flux(mat, fields, 2, z_top(t), t),),
+                    inflow_temperature = (g = t -> fields.T(z_top(t), t),),
+                ),
+                bottom = MassFluxBC(
+                    fluxes = (g = t -> -mms_gas_flux(mat, fields, 2, 0.0, t),),
+                    inflow_temperature = (g = t -> fields.T(0.0, t),),
+                ),
             ),
         )
         return PyrolysisProblem(
@@ -206,7 +212,7 @@ function _verification_case_vmms04()
         solve_fn = solve_fn,
         qois = qois,
         ci = CIConfig(
-            n_cells = 32,
+            n_cells = 64,
             budget_s = 60.0,
             convergence = ConvergenceSpec(
                 # observed rates 2.003, 2.007 (n = 16→32→64; L2 ξ_s errors

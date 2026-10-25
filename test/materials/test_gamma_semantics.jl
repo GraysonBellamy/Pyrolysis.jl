@@ -1,20 +1,10 @@
-"""
-Tests for the swelling-factor (γ) semantics.
-
-- The swelling factor γ has ONE semantics everywhere — every component
-  contributes v_j = γ_j·ξ_j/ρ_j to the dilation rate θ, the mixture
-  density, and the conductivity/emissivity volume weights, so the three
-  kernels agree for partial-γ condensed phases.
-- A fully-converted cell is not a perfect non-emitting insulator: k_eff
-  falls back to the gas-mixture conductivity. Liquids default to a
-  realistic emissivity (0.95), not 0.
-- γ range validation at construction.
-"""
+"""Dilation and matrix weights use γ; skeletal occupancy is independent of γ."""
 
 using Test
 using Pyrolysis
 using Pyrolysis.Properties:
-    mixture_density,
+    transport_matrix_state,
+    skeletal_volume_fraction,
     solid_volume_fractions,
     mixing_volume_fractions,
     effective_conductivity,
@@ -26,55 +16,39 @@ function _gamma_material(; γ_liq = 0.0, ε_liq = nothing)
     Material(
         name = :gamma_test,
         components = (
-            SolidComponent(:s, ρ = 1000.0, c = 1000.0, k = 0.30, ε = 0.90),
-            LiquidComponent(:w, ρ = 1000.0, c = 4186.0, k = 0.60, γ = γ_liq, liq_kwargs...),
-            GaseousComponent(:g, M = 0.05, c = 1200.0, k = 0.03, λ = 1e-5),
+            SolidComponent(:s, ρ = 1000.0, c = 1000.0, k = 0.30, ε = 0.90, λ = 1e-5),
+            LiquidComponent(
+                :w,
+                ρ = 1000.0,
+                c = 4186.0,
+                k = 0.60,
+                γ = γ_liq,
+                λ = 0.0,
+                liq_kwargs...,
+            ),
+            GaseousComponent(:g, M = 0.05, c = 1200.0, k = 0.03),
         ),
         reactions = (),
     )
 end
 
-@testset "one γ semantics across θ, ρ_mix, and mixing weights" begin
-    T = 300.0
-    ξ = (500.0, 500.0, 0.0)
-
-    # γ = 0 liquid: consistently volumeless.
-    mat0 = _gamma_material(γ_liq = 0.0)
-    # mixture density: only the solid's volume counts. Y_s = 0.5,
-    # 1/ρ = 0.5/1000 → ρ = 2000 (counting the liquid would give 1000).
-    @test mixture_density(ξ, T, mat0) ≈ 2000.0
-    # mixing weights: all on the solid (not split 50/50 with the liquid).
-    @test solid_volume_fractions(ξ, T, mat0)[1] ≈ 1.0
-    @test solid_volume_fractions(ξ, T, mat0)[2] == 0.0
-    # θ: evaporating liquid adds no strain.
-    @test volume_change_rate((0.0, -10.0, 10.0), T, mat0) == 0.0
-
-    # γ = 1 liquid: full contribution in all three kernels.
-    mat1 = _gamma_material(γ_liq = 1.0)
-    @test mixture_density(ξ, T, mat1) ≈ 1000.0
-    v1 = solid_volume_fractions(ξ, T, mat1)
-    @test v1[1] ≈ 0.5 && v1[2] ≈ 0.5
-    @test volume_change_rate((0.0, -10.0, 10.0), T, mat1) ≈ -10.0 / 1000.0
-
-    # Partial γ: the SAME fraction shows up in all three kernels —
-    # the defining unification.
-    matp = _gamma_material(γ_liq = 0.5)
-    # 1/ρ = 0.5/1000 + 0.5·0.5/1000 = 0.75e-3
-    @test mixture_density(ξ, T, matp) ≈ 1000.0 / 0.75
-    vp = solid_volume_fractions(ξ, T, matp)
-    @test vp[1] ≈ 0.5 / 0.75 && vp[2] ≈ 0.25 / 0.75
-    @test volume_change_rate((0.0, -10.0, 10.0), T, matp) ≈ 0.5 * (-10.0) / 1000.0
-
+@testset "γ-weighted matrix and independent skeleton" begin
+    T=300.0
+    ξ=(500.0, 500.0, 0.0)
+    for γ in (0.0, 0.5, 1.0)
+        mat=_gamma_material(γ_liq = γ)
+        q, w=transport_matrix_state(ξ, T, mat)
+        @test q≈0.5*(1+γ)
+        @test w[1]≈1/(1+γ)
+        @test w[2]≈γ/(1+γ)
+        @test w[3]==0
+        @test all(isapprox.(solid_volume_fractions(ξ, T, mat), w))
+        @test skeletal_volume_fraction(ξ, T, mat)==1.0
+        @test volume_change_rate((0.0, -10.0, 10.0), T, mat)≈-γ*10/1000
+    end
     # γ is validated to [0, 1] at construction.
     @test_throws ArgumentError SolidComponent(:bad, ρ = 1.0, c = 1.0, k = 1.0, γ = 1.5)
-    @test_throws ArgumentError GaseousComponent(
-        :bad,
-        M = 0.05,
-        c = 1.0,
-        k = 1.0,
-        λ = 1e-5,
-        γ = -0.1,
-    )
+    @test_throws ArgumentError GaseousComponent(:bad, M = 0.05, c = 1.0, k = 1.0, γ = -0.1)
     @test_throws ArgumentError LiquidComponent(:bad, ρ = 1.0, c = 1.0, k = 1.0, γ = 2.0)
 end
 
@@ -104,9 +78,9 @@ end
     mat_wet = Material(
         name = :wet,
         components = (
-            SolidComponent(:s, ρ = 1000.0, c = 1000.0, k = 0.30, ε = 0.90),
-            LiquidComponent(:w, ρ = 1000.0, c = 4186.0, k = 0.60, γ = 1.0),
-            GaseousComponent(:g, M = 0.05, c = 1200.0, k = 0.03, λ = 1e-5),
+            SolidComponent(:s, ρ = 1000.0, c = 1000.0, k = 0.30, ε = 0.90, λ = 1e-5),
+            LiquidComponent(:w, ρ = 1000.0, c = 4186.0, k = 0.60, γ = 1.0, λ = 0.0),
+            GaseousComponent(:g, M = 0.05, c = 1200.0, k = 0.03),
         ),
         reactions = (),
     )

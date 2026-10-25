@@ -10,17 +10,20 @@ where:
 - q_BC = q_ext - εσT_s⁴ - h(T_s - T_∞)  [applied heat flux, positive into domain]
 - q_cond = k(T_s - T_cell) / Δz_half    [conduction into material, positive when T_s > T_cell]
 
-The balance has no gas-enthalpy term. The gas leaving through the face carries
-its sensible enthalpy at the face temperature through the gas-transport flux,
-so a surface term `Σ_g ṁ_g · Δh_g(T_s, T_∞)` would count it twice. The outward
-gas flux enters the balance only through the blowing models of the convective
-conditions.
+This wall-heat balance adds no separate outgoing-gas enthalpy sink. The
+boundary assembler combines signed donor enthalpy with heat at the same
+control surface. For an LTE film it converts wall heat using
+`q_r = q_s + H_r - H_s`; imposed heat and adiabatic conditions use incoming
+reservoir enthalpy directly. Gas flux affects wall heat through the blowing
+model. Coupled species/thermal roots are assembled in `Kernels/gas_boundary.jl`.
 """
 
 using ..Materials: STEFAN_BOLTZMANN, T_PROPERTY_MIN, T_PROPERTY_MAX
 using ..Materials: evaluate_param, evaluate_param_T
 using ..Materials: RadiationModel, NO_RADIATION, SURFACE_ABSORPTION, BEER_LAMBERT
 using ForwardDiff
+using StaticArrays: SVector
+using ..Physics: primal, bounded_transport_root, implicit_transport_root
 
 # ============================================================================
 # Main Solver
@@ -36,8 +39,7 @@ In-place Newton solve of the surface energy balance
 
 The condition is evaluated at `trial(T_s)`, the smooth clamp of the iterate
 into the property bracket, so the balance has a root for any cell temperature
-and the iterate itself is never clamped. The Newton starts from `T_cell`
-clamped to the property bracket, so the result is a pure function of the
+and the iterate itself is never clamped. The Newton starts from `T_cell`, so the result is a pure function of the
 arguments. `state` is output only: it receives the converged surface
 temperature and fluxes for diagnostics, and is left untouched when the final
 iterate is not finite.
@@ -69,11 +71,9 @@ marginally sub-quadratically, and the Dual fixed point is the exact
 implicit-function-theorem derivative.
 
 # Non-convergence
-On max-iteration exhaustion or a singular Newton derivative the solve does not
-abort: the boundary flux is evaluated at the last iterate, and the
-`state.converged` / `state.iterations` diagnostics record the outcome. A cell
-temperature or a root outside the property bracket is a trial state the
-integrator's error control rejects, and the derivatives stay finite there.
+An unconverged or singular balance raises `TransportFailure`; no flux from an
+unconverged iterate is assembled. Derivatives follow the converged residual
+through the implicit function theorem.
 """
 @inline function solve_boundary_temperature!(
     state::BoundaryState,
@@ -91,108 +91,69 @@ integrator's error control rejects, and the derivatives stay finite there.
     max_iter::Int = 50,
     trial,
 ) where {NC}
-    # Newton iterates carry whatever scalar type the inputs do (Float64 in
-    # the canonical RHS, ForwardDiff.Dual under AD). Storage on `state` stays
-    # Float64 — we strip with ForwardDiff.value at the end. The returned
-    # (T_s, q_bc, q_cond) are typed and propagate derivatives correctly.
-    Tu = promote_type(
-        typeof(T_cell),
-        typeof(k_eff),
-        typeof(Δz_half),
-        typeof(t),
-        typeof(ε_eff),
-        typeof(a_eff),
-        eltype(J_outward),
+    # Solve a primal scalar balance, then differentiate the converged equation.
+    # The residual scale includes the resolvable conduction difference at T_s.
+    residual =
+        (z, T_cell, k_eff, Δz_half, ε_eff, a_eff, J_outward, t) -> begin
+            temp_local=z[1]
+            eval_local=trial(temp_local)
+            face_local=BlowingFace(J_outward, eval_local, material)
+            heat_local, _=evaluate_bc_flux_and_derivative(
+                bc,
+                eval_local,
+                t,
+                ε_eff,
+                radiation_model,
+                face_local;
+                a_eff,
+            )
+            conducted_local=k_eff*(temp_local-T_cell)/Δz_half
+            scale_local=max(
+                abs(primal(heat_local)),
+                abs(primal(conducted_local)),
+                1.0,
+                64eps(Float64)*max(abs(primal(temp_local)), 1.0)*abs(primal(k_eff/Δz_half))/tol,
+            )
+            SVector((heat_local-conducted_local)/scale_local)
+        end
+    z0=SVector(primal(T_cell))
+    root=bounded_transport_root(
+        z->residual(
+            z,
+            primal(T_cell),
+            primal(k_eff),
+            primal(Δz_half),
+            primal(ε_eff),
+            primal(a_eff),
+            map(primal, J_outward),
+            primal(t),
+        ),
+        z0;
+        tolerance = tol,
+        maxiters = max_iter,
+        lower = SVector(-Inf),
     )
-    # The Newton starts from the cell temperature clamped to the property bracket,
-    # never from `state`: the result is a pure function of the arguments, so a wild
-    # trial state of the outer Newton cannot leak into later residual evaluations.
-    T_s::Tu = Tu(clamp(ForwardDiff.value(T_cell), T_PROPERTY_MIN, T_PROPERTY_MAX))
-    dual_mode = Tu <: ForwardDiff.Dual
-    converged = false
-    iter = 0
-    f_val = 0.0
-    f_floor = 0.0
-    scale = 1.0
-
-    for i = 1:max_iter
-        iter = i
-
-        # The face at the trial clamp of the iterate: every convective member
-        # applies its blowing model to it (`NoBlowing` returns the exact
-        # uncorrected flux).
-        T_eval = trial(T_s)
-        face = BlowingFace(J_outward, T_eval, material)
-        q_bc, dq_bc_dT = evaluate_bc_flux_and_derivative(
-            bc,
-            T_eval,
-            t,
-            ε_eff,
-            radiation_model,
-            face;
-            a_eff = a_eff,
-        )
-        dq_bc_dT *= ForwardDiff.derivative(trial, ForwardDiff.value(T_s))
-
-        q_cond = k_eff * (T_s - T_cell) / Δz_half
-        dq_cond_dT = k_eff / Δz_half
-
-        f = q_bc - q_cond
-        df = dq_bc_dT - dq_cond_dT
-
-        # Convergence on value (Newton residual; Dual derivatives ride along).
-        f_val = ForwardDiff.value(f)
-        scale = max(abs(ForwardDiff.value(q_bc)), abs(ForwardDiff.value(q_cond)), 1.0)
-        # Round-off floor: the flux change from a few ulps of T_s. The conduction term is a
-        # difference of two ~T numbers, so the residual cannot resolve below this; a face
-        # with near-zero net flux would otherwise stall at round-off and report failure.
-        f_floor =
-            32 *
-            eps(Float64) *
-            max(abs(ForwardDiff.value(T_s)), 1.0) *
-            (abs(ForwardDiff.value(dq_cond_dT)) + abs(ForwardDiff.value(dq_bc_dT)))
-        if abs(f_val) < max(tol * scale, f_floor) && !(dual_mode && i == 1)
-            converged = true
-            break
-        end
-
-        if abs(ForwardDiff.value(df)) < 1e-30
-            break
-        end
-
-        ΔT = -f / df
-        T_s = T_s + ΔT
+    z=implicit_transport_root(
+        z->residual(z, T_cell, k_eff, Δz_half, ε_eff, a_eff, J_outward, t),
+        root,
+    )
+    T_s=z[1]
+    Te=trial(T_s)
+    face=BlowingFace(J_outward, Te, material)
+    q, _=evaluate_bc_flux_and_derivative(bc, Te, t, ε_eff, radiation_model, face; a_eff)
+    qc=k_eff*(T_s-T_cell)/Δz_half
+    if !(T_s isa ForwardDiff.Dual)
+        state.T_surface=T_s
+        state.q_applied=q
+        state.q_conducted=qc
+        state.T_cell=T_cell
+        state.k_eff=k_eff
+        state.Δz_half=Δz_half
+        state.converged=true
+        state.iterations=root.iterations
+        _record_blowing!(state, bc, face, t)
     end
-
-    # Final flux evaluation (typed) — these are what the caller will read.
-    T_eval = trial(T_s)
-    face_final = BlowingFace(J_outward, T_eval, material)
-    q_bc_final, _ = evaluate_bc_flux_and_derivative(
-        bc,
-        T_eval,
-        t,
-        ε_eff,
-        radiation_model,
-        face_final;
-        a_eff = a_eff,
-    )
-    q_cond_final = k_eff * (T_s - T_cell) / Δz_half
-
-    # Float64 storage on the diagnostic BoundaryState, skipped for a non-finite
-    # iterate so the diagnostics keep the last finite solve.
-    isfinite(ForwardDiff.value(T_s)) ||
-        return (T_s = T_s, q_applied = q_bc_final, q_conducted = q_cond_final)
-    state.T_surface = ForwardDiff.value(T_s)
-    state.q_applied = ForwardDiff.value(q_bc_final)
-    state.q_conducted = ForwardDiff.value(q_cond_final)
-    _record_blowing!(state, bc, face_final, t)
-    state.T_cell = ForwardDiff.value(T_cell)
-    state.k_eff = ForwardDiff.value(k_eff)
-    state.Δz_half = ForwardDiff.value(Δz_half)
-    state.converged = converged
-    state.iterations = iter
-
-    return (T_s = T_s, q_applied = q_bc_final, q_conducted = q_cond_final)
+    return (T_s = T_s, q_applied = q, q_conducted = qc)
 end
 
 # ============================================================================
@@ -202,7 +163,10 @@ end
 """
 	evaluate_bc_flux_and_derivative(bc, T_s, t, ε_eff; a_eff = ε_eff)
 
-Evaluate boundary condition flux and its temperature derivative.
+Evaluate boundary heat flux and a frozen-coefficient temperature slope.
+The slope holds heat-transfer, blowing and emissivity coefficients fixed.
+Surface roots and their implicit derivatives differentiate the complete flux
+residual with automatic differentiation; they do not use this approximate slope.
 
 # Arguments
 - `bc::AbstractThermalBC`: Boundary condition
@@ -214,7 +178,7 @@ Evaluate boundary condition flux and its temperature derivative.
   reads it. Every overload accepts the keyword and forwards it.
 
 # Returns
-- `(q, dq_dT)`: Flux [W/m²] and derivative [W/(m²·K)], positive into domain
+- `(q, dq_dT)`: Flux [W/m²] and frozen-coefficient slope [W/(m²·K)], positive into domain
 """
 function evaluate_bc_flux_and_derivative end
 
@@ -247,8 +211,8 @@ Blowing-aware variant. `face` is the [`BlowingFace`](@ref) at this boundary
 convective BCs consume it — each `ConvectiveBC` asks its own blowing model for
 the ratio `χ = h_eff/h` against its own `h` and ambient temperature
 ([`blowing_ratio`](@ref)); every other BC type ignores `face` and falls
-through to the radiation-model-aware 5-argument method. Zero outflow
-reproduces the uncorrected flux exactly for every shipped model.
+through to the radiation-model-aware 5-argument method. Zero species fluxes
+reproduce the uncorrected flux exactly for every shipped model.
 """
 @inline function evaluate_bc_flux_and_derivative(
     bc::AbstractThermalBC,
@@ -399,9 +363,8 @@ end
     q = F * ε * STEFAN_BOLTZMANN * (T_inf^4 - T_s^4)
     dq_dT = -4 * F * ε * STEFAN_BOLTZMANN * T_s^3
 
-    # Note: If ε depends on T, there's an additional term:
-    # dq_dT += F * dε_dT * σ * (T_inf^4 - T_s^4)
-    # This is usually small and we neglect it for simplicity
+    # This returned slope freezes ε. Surface solves differentiate q directly,
+    # including F*dε_dT*σ*(T_inf^4-T_s^4) when ε depends on temperature.
 
     return q, dq_dT
 end

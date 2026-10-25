@@ -25,21 +25,18 @@ by element death, a face between a live cell and a dead one is a boundary face
 of the live cell, its normal turned out of it, and carries the condition of
 the exposed tag (`exposed`, the condition itself, or `nothing` on a line).
 
-A prescribed temperature or heat flux, or an adiabatic face, gives the flux in
-closed form. Every other condition goes through the surface energy balance
-`q_bc(T_s) = k (T_s − T_cell) / d` of the face, solved by the Newton iteration
-of `BoundaryConditions.solve_boundary_temperature!` started from the cell's
-trial temperature, with the condition evaluated at the trial temperature of
-the iterate ([`trial_temperature`](@ref)), so the balance has a root at any
-trial state and its solve never clamps; the outward gas mass flux of the face
-feeds the blowing models of its convective members, and the cell's emissivity
-and absorptivity its radiative members. `states` holds the per-face
-diagnostics of the balance.
+For gas-free boundaries, a prescribed temperature or heat flux, or an
+adiabatic face, gives the flux in closed form. Other conditions solve
+`q_bc(T_s) = k (T_s − T_cell) / d` with a qualified local root and implicit
+derivatives. Properties are evaluated at the trial temperature; a failed or
+singular root raises `TransportFailure`. The cell's emissivity and
+absorptivity supply its radiative members. `states` holds per-face diagnostics.
 
-With gas transport (`laws` the caloric laws, `nothing` without), the face's
-energy flux also carries the sensible enthalpy `Σⱼ Jⱼ hⱼ(T_s)` of its outward
-mass fluxes at the face temperature: gas leaves at the surface temperature,
-and the surface balance itself keeps no gas-enthalpy term.
+Gas-bearing boundaries bind the complete mass and thermal closure. Outflow
+carries surface enthalpy and inflow carries the specified reservoir enthalpy.
+An LTE thermal film converts its heat to the reservoir control surface using
+`q_r=q_s+H_r-H_s`; adiabatic and prescribed-heat conditions use `H_r` directly.
+The assembled outward energy `H_r-q_r` includes incoming energy exactly once.
 
 On a mesh of more than one dimension the conductivity is a tensor `K = k A`
 (`tensor` holds the cells' dimensionless `A`, shared with the
@@ -50,7 +47,7 @@ gradient, so a linear field's flux is exact; the surface balance solves for
 `T_s` with the cross part folded into the cell temperature. On a line the
 cross part vanishes and `n·K·n` is the cell's conductivity.
 """
-struct ThermalBoundaryKernel{P<:Tuple,R,L,A,X} <: Kernel
+struct ThermalBoundaryKernel{P<:Tuple,R,L,A,X,B} <: Kernel
     patches::P
     d_floor::Vector{Float64}
     states::Vector{BoundaryState}
@@ -58,6 +55,8 @@ struct ThermalBoundaryKernel{P<:Tuple,R,L,A,X} <: Kernel
     laws::L
     tensor::A
     exposed::X
+    exchange::B
+    pressure_tolerance::Float64
 end
 
 """
@@ -79,6 +78,8 @@ function ThermalBoundaryKernel(
     laws::Union{Nothing,CaloricLaws} = nothing,
     tensor = nothing,
     exposed::Symbol = :top,
+    material = nothing,
+    pressure_tolerance::Real = 1.0,
 ) where {D}
     (D == 1) == (tensor === nothing) || throw(
         ArgumentError(
@@ -114,6 +115,12 @@ function ThermalBoundaryKernel(
         laws,
         tensor,
         condition,
+        material===nothing || !has_gas(material) ? nothing :
+        Tuple(
+            GasBoundaryBinding(get(bc_set.mass, tag, ImpermeableBC()), material) for
+            tag in tags
+        ),
+        Float64(pressure_tolerance),
     )
 end
 
@@ -125,7 +132,7 @@ function contribute!(
     material,
     t,
 )
-    _patches!(c, kernel.patches, kernel, ds, topo, material, t)
+    _boundary_patches!(c, kernel.patches, kernel.exchange, kernel, ds, topo, material, t)
     _exposed!(c, kernel.exposed, kernel, ds, topo, material, t)
     return c
 end
@@ -153,6 +160,7 @@ end
         f == 0 && continue
         q, T_s = boundary_energy_flux(p.bc, f, kernel, c, ds, topo, material, t)
         c.F_energy[f] += q + _carried_enthalpy(kernel.laws, c, f, T_s)
+        c.boundary_heat[f] = -q
         c.T_face[f] = T_s
     end
     return _patches!(c, Base.tail(patches), kernel, ds, topo, material, t)
@@ -313,4 +321,35 @@ end
         trial = trial_temperature,
     )
     return -r.q_conducted, r.T_s
+end
+
+@inline _boundary_patches!(c, patches, ::Nothing, kernel, ds, topo, material, t) =
+    _patches!(c, patches, kernel, ds, topo, material, t)
+@inline _boundary_patches!(c, ::Tuple{}, ::Tuple{}, kernel, ds, topo, material, t) = nothing
+@inline function _boundary_patches!(
+    c,
+    patches::Tuple,
+    exchange::Tuple,
+    kernel,
+    ds,
+    topo,
+    material,
+    t,
+)
+    p=first(patches)
+    for f0 in p.faces
+        f=live_face(topo, ds.active, f0)
+        f==0 && continue
+        _exchange_patch!(c, p.bc, first(exchange), f, kernel, ds, topo, material, t)
+    end
+    return _boundary_patches!(
+        c,
+        Base.tail(patches),
+        Base.tail(exchange),
+        kernel,
+        ds,
+        topo,
+        material,
+        t,
+    )
 end

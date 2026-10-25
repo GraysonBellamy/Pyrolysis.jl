@@ -40,9 +40,10 @@ function _slab(n; κ = 0.0, radiating = false)
         κ = κ,
         ρ_intrinsic = 1800.0,
     )
-    gas = GaseousComponent(:gas, M = 0.03, c = 1100.0, k = 0.03, λ = 3e-5)
+    gas = GaseousComponent(:gas, M = 0.03, c = 1100.0, k = 0.03)
     mat = Material(
         name = :slab,
+        mixing = MaterialMixing(κ = PARALLEL),
         components = (virgin, char, gas),
         reactions = (
             Reaction(:pyro, 1 => (2, 3); A = 5e9, E = 1.4e5, h = 8e5, yields = (0.3, 0.7)),
@@ -55,7 +56,12 @@ function _slab(n; κ = 0.0, radiating = false)
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = top, bottom = DirichletThermalBC(500.0)),
-            mass = (top = DirichletPressureBC(101325.0), bottom = ImpermeableBC()),
+            mass = (
+                top = AmbientGasBC(
+                    GasReservoir(P = 101325.0, T = 300.0, mole_fractions = (gas = 1.0,)),
+                ),
+                bottom = ImpermeableBC(),
+            ),
         ),
         T_initial = z -> 500.0 + 4e4 * z,
         ξ_initial = [z -> 1100.0 * (1 - 30z), z -> 300.0 * 30z, z -> 0.5],
@@ -285,9 +291,9 @@ end
 # A slab that converts at the same rate everywhere: isothermal, uniform, the
 # activation energy zero, so its thickness follows the conversion exactly.
 function _uniform_slab(n)
-    a = SolidComponent(:a, ρ = 1000.0, c = 1000.0, k = 0.5)
-    b = SolidComponent(:b, ρ = 400.0, c = 1000.0, k = 0.5)
-    g = GaseousComponent(:g, M = 0.03, c = 1000.0, k = 0.03, λ = 0.0)
+    a = SolidComponent(:a, φ = 0.25, λ = 0.0, ρ = 1000.0, c = 1000.0, k = 0.5)
+    b = SolidComponent(:b, φ = 0.25, λ = 0.0, ρ = 400.0, c = 1000.0, k = 0.5)
+    g = GaseousComponent(:g, M = 0.03, c = 1000.0, k = 0.03)
     mat = Material(
         name = :uniform,
         components = (a, b, g),
@@ -349,8 +355,16 @@ function _plain_deck()
     mat = Material(
         name = :plain_deck,
         components = (
-            SolidComponent(:resin, ρ = 1300.0, c = 1700.0, k = 0.20, ε = 0.9, λ = 2e-5),
-            GaseousComponent(:vapor, M = 0.080, c = 1400.0, k = 0.03, λ = 1e-5),
+            SolidComponent(
+                :resin,
+                φ = 0.3,
+                ρ = 1300.0,
+                c = 1700.0,
+                k = 0.20,
+                ε = 0.9,
+                λ = 2e-5,
+            ),
+            GaseousComponent(:vapor, M = 0.080, c = 1400.0, k = 0.03),
         ),
         reactions = (Reaction(:cure, 1 => 2, A = 1e12, E = 1.6e5, h = 300e3),),
     )
@@ -363,7 +377,7 @@ function _plain_deck()
                 bottom = AdiabaticBC(),
             ),
             mass = (
-                top = ConvectiveMassBC(h_m = 0.05, ξ_inf = 0.0),
+                top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
                 bottom = ImpermeableBC(),
             ),
         ),
@@ -395,7 +409,7 @@ function _rich_deck()
         ρ_intrinsic = 1500.0,
         λ = 1e-5,
     )
-    gas = GaseousComponent(:gas, M = 0.06, c = 1800.0, k = 0.03, λ = 5e-5)
+    gas = GaseousComponent(:gas, M = 0.06, c = 1800.0, k = 0.03)
     mat = Material(
         name = :rich_deck,
         components = (virgin, char, gas),
@@ -421,7 +435,9 @@ function _rich_deck()
                 bottom = RadiativeBC(ε = 0.9, T_inf = 300.0),
             ),
             mass = (
-                top = DiffusiveMassBC(0.05) + DirichletPressureBC(101325.0),
+                top = AmbientGasBC(
+                    GasReservoir(P = 101325.0, T = 300.0, mole_fractions = (gas = 1.0,)),
+                ),
                 bottom = ImpermeableBC(),
             ),
         ),
@@ -561,12 +577,13 @@ function _ablating(n)
         components = (
             SolidComponent(
                 :solid,
+                φ = 0.3,
                 ρ = ρ,
                 c = PolynomialProperty((700.0, 0.8, -1e-4)),
                 k = k,
                 λ = 1e-6,
             ),
-            GaseousComponent(:gas, M = 0.05, c = c, k = 0.02, λ = 1e-4),
+            GaseousComponent(:gas, M = 0.05, c = c, k = 0.02),
         ),
         reactions = (Reaction(:ablate, 1 => 2; A = A, E = E, h = 1.0e6),),
     )
@@ -576,7 +593,7 @@ function _ablating(n)
         bc_set = BoundaryConditionSet(
             thermal = (top = HeatFluxBC(2.8e6), bottom = AdiabaticBC()),
             mass = (
-                top = ConvectiveMassBC(h_m = 10.0, ξ_inf = 0.0),
+                top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
                 bottom = ImpermeableBC(),
             ),
         ),
@@ -678,7 +695,9 @@ _klu(cacheval::Integration.StructuredKLUCache) = cacheval.inner.cacheval
             use_ale = ale,
             linear_solver,
             callback = probe,
-            saveat = Float64[],
+            # Adaptive step times can differ by roundoff across factorizations.
+            # Compare the trajectories at common physical times.
+            saveat = collect(range(problem.tspan...; length = 21)),
             abstol = 1e-8,
             reltol = 1e-6,
         )
@@ -701,5 +720,7 @@ _klu(cacheval::Integration.StructuredKLUCache) = cacheval.inner.cacheval
     @test all(j -> j in rowvals(c.union)[nzrange(c.union, j)], 1:size(c.union, 2))
     @test structured.statistics.accepted == plain.statistics.accepted
     @test structured.statistics.rejected == plain.statistics.rejected
+    @test structured.t == plain.t == umfpack.t
     @test maximum(abs, structured.T .- plain.T) <= 1e-9
+    @test maximum(abs, structured.T .- umfpack.T) <= 1e-9
 end

@@ -10,8 +10,8 @@ to track the material as it decomposes:
 - Multi-step pyrolysis kinetics with char formation
 - Sparse Jacobian by colored forward-mode differentiation, with the default
   integrator (Rodas5P with a sparse KLU solve)
-- Bruggeman mixing rules for effective properties
-- Temperature-limited reactions (piecewise activation)
+- Blended parallel/series mixing rules for effective properties
+- Imported Arrhenius kinetics; the reference temperature cutoffs are not applied
 
 Reference: Standard cone calorimeter test per ISO 5660-1
 
@@ -22,11 +22,9 @@ Physical Setup:
 - Surface regresses as material decomposes and gas escapes
 
 Surface Absorption Radiation Model:
-- All incident radiation absorbed at the exposed face (z=L)
-- Computationally efficient O(1) with tridiagonal Jacobian
+- The absorbed portion of incident radiation is deposited at the exposed face (z=L)
 - Appropriate for opaque materials like wood (optical thickness τ >> 1)
 - Absorption coefficients (α) not used - radiation does not penetrate into depth
-- Provides ~5-15× speedup over Beer-Lambert for opaque materials
 
 Coordinate Convention:
 - z = 0: Bottom (substrate/sample holder), tag :bottom, fixed
@@ -36,7 +34,7 @@ Coordinate Convention:
 
 PTW Properties (from PTW.cmp):
 - Virgin wood density: 498.46 kg/m³
-- Multi-step decomposition with 4 intermediate states
+- Four decomposition steps through three intermediate solids to char
 - Final char density: 98.28 kg/m³
 - Includes moisture content with evaporation
 - Products: char + various gases + water vapor
@@ -44,13 +42,13 @@ PTW Properties (from PTW.cmp):
 ThermaKin Temperature Limits:
 - ThermaKin uses "TEMP LIMIT: L T_limit" to prevent reactions below T_limit
 - This script does not apply them: every reaction follows its Arrhenius rate
-  at every temperature, which is negligible below the ThermaKin limits
-  (a `Reaction`'s `T_min` would gate it)
+  at every temperature. A `Reaction`'s `T_min` would apply a smooth gate;
+  neither choice exactly reproduces ThermaKin's hard cutoff.
 
 New Features Demonstrated:
 - Surface absorption radiation model (radiation_model=SURFACE_ABSORPTION)
-- Darcy-Fick gas transport (diffusion + pressure-driven flow)
-- Temperature-dependent permeability evolution (virgin wood → porous char)
+- lumped wall and Darcy gas transport (diffusion + pressure-driven flow)
+- Composition-dependent permeability evolution (virgin wood → porous char)
 - ALE mesh motion
 """
 
@@ -103,21 +101,11 @@ water_vapor_cp = CallableProperty(T -> 1716.7 + 0.4154 * T + 1.530e-4 * T^2)
 # Gas Transfer Coefficients and Permeability
 # ============================================================================
 #
-# ThermaKin uses TRANSPORT parameter which combines both Fickian diffusion
-# and Darcy flow. For PTW, TRANSPORT = 2e-5 m²/s for most components.
-#
-# We separate these into:
-# - λ: Fickian gas transfer coefficient [m²/s]
-# - κ: Darcy permeability [m²]
-#
-# Physical guidance for λ (from literature on wood pyrolysis):
-# - Virgin wood: λ ~ 1e-6 m²/s (tight cellular structure)
-# - Porous char: λ ~ 1e-5 m²/s (open pore network after volatiles escape)
-
-# Base gas transfer coefficients for pyrolysis gases (Fickian diffusion)
-λ_wood = 2.0e-5     # m²/s - matches ThermaKin TRANSPORT for PTW
-λ_char = 2.0e-5     # m²/s - same for PTW components
-λ_gas = 2.0e-5      # m²/s - gas phase diffusion
+# The lumped model uses superficial matrix transfer Λ [m²/s] and independent
+# Darcy permeability κ [m²]. Condensed γ-weighted bulk occupancy determines
+# their effective values; neither coefficient is a gas-species property.
+λ_wood = 2.0e-5     # m²/s - superficial transfer through PTW matrix
+λ_char = 2.0e-5     # m²/s - superficial transfer through PTW char
 
 # Permeability parameters for Darcy flow (pressure-driven transport)
 # PTW appears to have more uniform transport properties than Douglas Fir
@@ -147,10 +135,10 @@ const PTW_GAS4_IDX = 11        # Gas product from reaction 5
 ptw_material = Material(
     name = :PressureTreatedWood,
     components = (
-        # 1. Water (liquid moisture) - SWELLING: 0 means negligible volume
-        # ThermaKin uses ρ=10000 kg/m³ as a "pseudo-density" for liquid water
-        # This matches L SWELLING: 0 behavior where bound liquid doesn't contribute
-        # to the material's bulk volume (absorbed into wood cell walls)
+        # 1. Water (liquid moisture), modeled here with default γ=0.
+        # The imported pseudo-density makes liquid volume small in ThermaKin;
+        # its L SWELLING: 0 affects gas swelling, not liquid volume.
+        # Our γ=0 instead removes the liquid's bulk-volume contribution.
         LiquidComponent(
             :WATER,
             ρ = 1e5,                       # kg/m³ - pseudo-density (high to minimize volume)
@@ -166,7 +154,7 @@ ptw_material = Material(
             M = 0.018,                     # kg/mol - H₂O (18 g/mol)
             c = water_vapor_cp,            # J/(kg·K) - NIST polynomial fit
             k = 0.025,                     # W/(m·K) - H₂O vapor at ~400K
-            λ = λ_gas * 1.6,               # m²/s - lightest molecule, fastest diffusion
+            # m²/s - lightest molecule, fastest diffusion
         ),
         # 3. Virgin Pressure Treated Wood - solid phase
         SolidComponent(
@@ -243,7 +231,6 @@ ptw_material = Material(
             M = 0.060,                     # kg/mol - mix of acids and light organics
             c = 1500.0,                    # J/(kg·K) - organic vapor cp range
             k = 0.020,                     # W/(m·K) - organic vapors
-            λ = λ_gas,
         ),
         # 9. PTW_gas2 - gaseous product from reaction 3 (PTW1 → PTW2)
         # Main cellulose decomposition (57% gas yield — largest gas-producing step)
@@ -253,7 +240,6 @@ ptw_material = Material(
             M = 0.110,                     # kg/mol - dominated by levoglucosan/tars
             c = 1300.0,                    # J/(kg·K) - heavy organics have lower mass-specific cp
             k = 0.020,                     # W/(m·K)
-            λ = λ_gas,
         ),
         # 10. PTW_gas3 - gaseous product from reaction 4 (PTW2 → PTW3)
         # Secondary decomposition (18% gas yield)
@@ -263,7 +249,6 @@ ptw_material = Material(
             M = 0.080,                     # kg/mol - medium organics
             c = 1500.0,                    # J/(kg·K)
             k = 0.020,                     # W/(m·K)
-            λ = λ_gas,
         ),
         # 11. PTW_gas4 - gaseous product from reaction 5 (PTW3 → Char)
         # Final charring stage (23% gas yield)
@@ -273,7 +258,6 @@ ptw_material = Material(
             M = 0.050,                     # kg/mol - lighter end of pyrolysis products
             c = 1600.0,                    # J/(kg·K) - lighter molecules, higher mass-specific cp
             k = 0.020,                     # W/(m·K)
-            λ = λ_gas,
         ),
         # 12. Background pore air, initialized at ~1 atm partial pressure:
         # without it the pore space starts as a vacuum against the 101325 Pa
@@ -284,7 +268,7 @@ ptw_material = Material(
             M = 0.02897,                   # kg/mol - air
             c = 1006.0,                    # J/(kg·K) - air near 300-500 K
             k = 0.026,                     # W/(m·K) - air at ~300 K
-            λ = λ_gas,                     # m²/s
+            # m²/s
         ),
     ),
     reactions = (
@@ -354,7 +338,7 @@ ptw_material = Material(
             yields = (0.76882, 0.23118),
         ),
     ),
-    # Mixing rules for effective properties (matches ThermaKin2Ds defaults)
+    # Imported blend parameters; the codes use different liquid-volume weights.
     mixing = MaterialMixing(
         k = MixingSpec(WEIGHTED, 0.5),  # PARALL CONDUCTIVITY: 0.5
         λ = MixingSpec(WEIGHTED, 0.5),  # PARALL TRANSPORT: 0.5
@@ -368,7 +352,7 @@ ptw_material = Material(
 
 # Sample geometry
 sample_thickness = 12.0e-3   # 12 mm typical wood sample
-n_cells = 240             # 240 cells → 0.05 mm resolution
+n_cells = SMOKE ? 24 : 240  # Full run: 0.05 mm resolution
 
 # Time parameters
 t_final = SMOKE ? 20.0 : 600.0  # 10 minutes - typical cone test duration for wood
@@ -449,7 +433,10 @@ top_thermal_bc =
 
 # Top surface mass BC: diffusive gas escape with Darcy flow to atmosphere
 # h_m = 0.05 m/s matches ThermaKin typical boundary condition
-top_mass_bc = DiffusiveMassBC(0.05) + DirichletPressureBC(101325.0)
+top_mass_bc = AmbientGasBC(
+    GasReservoir(P = 101325.0, T = 300.0, mole_fractions = (AIR = 1.0,));
+    film = MassTransferFilm(0.05*101325.0*0.02897/(8.31446261815324*300.0)),
+)
 
 # Bottom surface (:bottom): back face
 bottom_thermal_bc = AdiabaticBC()    # Adiabatic (no heat loss through substrate)
@@ -465,7 +452,7 @@ println("\nBoundary conditions:")
 println(
     "  - Top surface: RadiativeFluxBC ($(q_external/1000) kW/m²) + re-radiation + convection",
 )
-println("  - Top mass: DiffusiveMassBC + DirichletPressureBC (101325 Pa)")
+println("  - Top mass: Air reservoir at 101325 Pa with a species film")
 println("  - Bottom surface: Adiabatic, impermeable")
 
 # ============================================================================
@@ -524,9 +511,13 @@ println("  - Darcy flow: ENABLED (κ_virgin = $(κ_virgin) m², κ_char = $(κ_c
 # Solve with ALE Mesh Motion and Surface Absorption
 # ============================================================================
 
-println("\nSolving with ALE mesh motion, Darcy-Fick transport and surface absorption...")
+println(
+    "\nSolving with ALE mesh motion, lumped wall and Darcy transport and surface absorption...",
+)
 println("Surface absorption model absorbs all radiation at the exposed face.")
-println("Darcy-Fick combines diffusion (λ-driven) + pressure-driven flow (κ-driven).")
+println(
+    "lumped wall and Darcy combines diffusion (λ-driven) + pressure-driven flow (κ-driven).",
+)
 println("This may take several minutes for wood pyrolysis...\n")
 
 # Solve using implicit solver with ALE enabled and surface absorption radiation
@@ -640,13 +631,17 @@ for i = 1:n_times
     T_profile = solution.T[:, i]
     n_cells_i = size(ξ_profile, 2)
 
-    # Get volumes at this time (from thickness history for ALE)
-    current_thickness = thickness_values[i]
-    # Assume uniform cells for simplicity (good approximation for this case)
-    cell_vol = current_thickness / n_cells_i * 1.0  # cross-section area = 1 m²
+    # Integrate over the actual moving cells, per unit initial exposed area.
+    nodes = get_profile(solution, :z, i)
+    area_ratio =
+        solution.extras.cross_section_area_history[i] /
+        solution.extras.cross_section_area_history[1]
+    cell_depths = diff(nodes) .* area_ratio
 
     # === Gas Generation Rates (Volumetric) ===
     for j = 1:n_cells_i
+        isfinite(T_profile[j]) || continue
+        cell_vol = cell_depths[j]
         T = T_profile[j]
         ξ = ntuple(k -> ξ_profile[k, j], NC)
 
@@ -1027,16 +1022,14 @@ open("ptw_spatial_50kWm2.csv", "w") do io
         ξ_profile = solution.ξ[:, :, idx]
         n_cells_i = length(T_profile)
 
-        # Get current thickness
-        t_idx = argmin(abs.(thickness_times .- actual_t))
-        current_thickness = thickness_values[t_idx]
-
-        # Cell positions (from back, z=0 at back)
-        dz = current_thickness / n_cells_i
+        nodes = get_profile(solution, :z, idx)
+        centers = get_cell_positions(solution; at = idx)
+        live_front = maximum(filter(isfinite, nodes))
 
         for cell_idx = 1:n_cells_i
-            from_back = (cell_idx - 0.5) * dz  # Cell center position
-            from_front = current_thickness - from_back
+            isfinite(T_profile[cell_idx]) || continue
+            from_back = centers[cell_idx] - nodes[1]
+            from_front = live_front - centers[cell_idx]
 
             T_cell = T_profile[cell_idx]
             ξ_cell = [ξ_profile[k, cell_idx] for k = 1:12]
@@ -1070,10 +1063,10 @@ println("Spatial data saved to: ptw_spatial_50kWm2.csv")
 
 println("\nSimulation complete!")
 println("\nFeatures used in this example:")
-println("  ✓ WEIGHTED mixing rule for thermal conductivity (β=0.5, matches ThermaKin)")
+println("  ✓ WEIGHTED conductivity mixing (β=0.5; volume weights differ from ThermaKin)")
 println("  ✓ WEIGHTED mixing rule for gas transfer coefficient (β_λ=0.5)")
-println("  ✓ Darcy-Fick gas transport (diffusion + pressure-driven flow)")
+println("  ✓ lumped wall and Darcy gas transport (diffusion + pressure-driven flow)")
 println("  ✓ Temperature-dependent permeability (κ = $(κ_virgin) m²)")
 println("  ✓ ALE mesh motion")
 println("  ✓ Solver-computed boundary fluxes (MLR, heat flux decomposition)")
-println("  ✓ Piecewise property handling from ThermaKin TEMP LIMIT parameters")
+println("  ✓ Arrhenius kinetics; ThermaKin TEMP LIMIT cutoffs are not applied")

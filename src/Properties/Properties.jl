@@ -8,18 +8,22 @@ permeability, the gas diffusivity) a cell's composition and temperature give.
 """
 module Properties
 
+using ForwardDiff
 using ..Materials
 
 # Include subfiles
 include("mixture_rules.jl")
 include("effective_properties.jl")
+include("gas_transport.jl")
 
 # Exports
-export mixture_density, volume_fractions, solid_volume_fractions
+export volume_fractions, solid_volume_fractions
 export skeletal_volume_fraction
 export effective_conductivity
 export effective_absorption
 export mixture_emissivity, mixture_absorptivity
+export transport_matrix_state,
+    transport_coefficients, transport_domain, closed_transport_channel
 export effective_gas_transfer
 export effective_permeability  # Component-based permeability
 export guarded_harmonic_mean

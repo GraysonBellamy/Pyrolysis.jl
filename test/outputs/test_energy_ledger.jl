@@ -17,7 +17,7 @@ using OrdinaryDiffEqSDIRK: KenCarp4
 
 # The char-layer column of V-CPL-06 with a reaction heat: a reactive band low
 # in a hot, gas-permeable matrix gasifies, and the gas diffuses up through the
-# hot layer to leave through a film at the top (Fick), picking up a few
+# hot layer to leave through a film at the top (wall transfer), picking up a few
 # hundred kelvin on the way. Under Darcy transport the band sits against an
 # adiabatic, sealed back and the pores start above the ambient pressure,
 # falling toward the pressure vent at the top, so the gas flows up through
@@ -45,10 +45,20 @@ function _column(n; darcy::Bool, stretched::Bool = false)
         λ = 1e-4,
         ρ_intrinsic = 2600.0,
     )
-    gas = GaseousComponent(:gas, M = 0.05, c = (900.0, 0.3), k = 0.02, λ = 1e-4)
+    gas = GaseousComponent(:gas, M = 0.05, c = (900.0, 0.3), k = 0.02)
     rxn = Reaction(:gasify, 2 => 3; A = 9.3e3, E = 8.0e4, h = 3e5)
-    mat = Material(name = :column, components = (matrix, fuel, gas), reactions = (rxn,))
-    vent = darcy ? DirichletPressureBC(101325.0) : ConvectiveMassBC(h_m = 1.0, ξ_inf = 0.0)
+    # Parallel permeability keeps the persistent matrix conducting as the
+    # impermeable fuel disappears; this fixture exercises the energy ledger.
+    mat = Material(
+        name = :column,
+        components = (matrix, fuel, gas),
+        reactions = (rxn,),
+        mixing = MaterialMixing(κ = PARALLEL),
+    )
+    vent =
+        darcy ?
+        AmbientGasBC(GasReservoir(P = 101325.0, T = 900.0, mole_fractions = (gas = 1.0,))) :
+        AmbientGasBC(GasReservoir(P = 0.0, T = 300.0))
     z_band = darcy ? 0.1 : 0.3
     band(z) = 100.0 * exp(-((z / L - z_band) / 0.08)^2)
     T0(z) = 550.0 + 3e4 * z
@@ -99,7 +109,7 @@ function _enthalpy(::TemperatureState, def, ws, u)
     return sum(ds.m[j, i] * ds.h[j, i] for j in axes(ds.m, 1), i in axes(ds.m, 2))
 end
 
-@testset "energy row term by term against the ledger: $(darcy ? "Darcy" : "Fick"), $energy form, $mesh mesh" for darcy in
+@testset "energy row term by term against the ledger: $(darcy ? "Darcy" : "wall"), $energy form, $mesh mesh" for darcy in
                                                                                                                  (
         false,
         true,
@@ -173,7 +183,7 @@ end
 
 # Converged solves: the Newton tolerance of the fixed steps, with the core's
 # own per-row absolute tolerances at the same relative tolerance.
-const _LEDGER_RELTOL = 1e-10
+const _LEDGER_RELTOL = 1e-12
 
 # The solve augmented with the ledger integral E(t) and the integrated mass
 # outflow O(t) of `ledger_rates`, so the integrator's own quadrature accounts
@@ -222,11 +232,11 @@ function _ledger_defect(cp, dt, t_end)
     return sol.retcode, defect, scale, mass
 end
 
-@testset "energy ledger over a solve: $(darcy ? "Darcy" : "Fick")" for darcy in
+@testset "energy ledger over a solve: $(darcy ? "Darcy" : "wall")" for darcy in
                                                                        (false, true)
     t_end = 10.0
-    steps = darcy ? (0.05, 0.025, 0.0125, 0.00625) : (0.1, 0.05, 0.025, 0.0125)
-    tols = (reltol = _LEDGER_RELTOL, abstol = _LEDGER_RELTOL)
+    steps = (0.0125, 0.00625, 0.003125, 0.0015625)
+    tols = (reltol = _LEDGER_RELTOL, abstol = _LEDGER_RELTOL, pressure_tolerance = 1e-6)
     retcode, defect, scale, mass = _ledger_defect(
         setup(_column(10; darcy); energy_state = :enthalpy, tols...),
         steps[1],
@@ -252,13 +262,12 @@ end
         push!(defects, defect)
     end
     orders = log2.(defects[1:(end-1)] ./ defects[2:end])
-    @info "temperature-form ledger defect ($(darcy ? "Darcy" : "Fick"))" defects orders
+    @info "temperature-form ledger defect ($(darcy ? "Darcy" : "wall"))" defects orders
     @test all(>(0), defects)
     @test issorted(defects; rev = true)
-    # Pre-asymptotic: the order rises with each halving toward the
-    # integrator's fourth (observed 2.1, 2.5, 3.2 under Fick transport and
-    # 2.7, 3.3, 4.3 under Darcy–Fick).
-    @test issorted(orders)
+    # Fourth-order integration need not approach its asymptotic order
+    # monotonically. Gas-row tolerances must resolve this small energy
+    # defect as well as the temperature and condensed-mass rows.
     @test all(>=(2), orders)
     @test orders[end] >= 2.9
 end

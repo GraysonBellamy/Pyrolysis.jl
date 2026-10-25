@@ -60,7 +60,7 @@ Conventions:
 | `a`, `a_s` | Absorptivity applied to the incident flux of a `RadiativeFluxBC`: the condition's own `absorptivity` when it has one, otherwise `a_eff` of the outermost live cell (§8.3.2, §12.3.5) | – |
 | `a_i`, `a_n` | Activation switch of cell *i* / node *n* of the equidistribution correction (§11; overload A9) | – |
 | `B` | Spalding blowing number `ṁ''c_{p,g}/h` of the convective blowing models (§12.3.3) | – |
-| `B_λ`, `B_Γ` | Film parameters of the blowing models: `B_λ = 2λ ṁ'' c_{p,g}/h` (`CouetteFilm`, `λ` its film constant, overload A6); `B_Γ = (ṁ'' c_{p,∞}/h)(Γ_∞/Γ_g)^{n_Γ}` (`PropertyRatioFilm`, `PoolingFilm`) (§12.3.3; overload B1) | – |
+| `B_λ`, `B_Γ` | Film parameters of the blowing models: `B_λ = 2λ Σ_j N_j c_{p,j}(T_s)/h` (`CouetteFilm`, `λ` its film constant, overload A6); `B_Γ = (ṁ'' c_{p,∞}/h)(Γ_∞/Γ_g)^{n_Γ}` (`PropertyRatioFilm`, `PoolingFilm`) (§12.3.3; overload B1) | – |
 | `C_i` | Heat-capacity sum of cell *i*, `Σ_j m_{j,i} c_{p,j}(T̃_i)` at the trial temperature, smoothly floored at `C_{floor,i}` | J·K⁻¹ |
 | `C_{floor,i}` | Capacity floor of cell *i*, `ρc_{p,floor} V_i(0)` (§5.4.3, §13.10.4) | J·K⁻¹ |
 | `C_{reg,i}` | Regularizing capacity of the extended caloric relation: zero while the cell's guaranteed heat capacity is at least `2C_{floor,i}`, rising to `C_{floor,i}` as that capacity vanishes (§5.4.3, §13.10.4, §16.4) | J·K⁻¹ |
@@ -108,8 +108,9 @@ Conventions:
 | `J` | Jacobian `∂f/∂u` of the residual (linear-algebra context only) | mixed |
 | `J_j`, `J_{j,f}` | Mass flux of (gas) component *j* relative to the solid (at face *f*: the gas-transport flux, §9, §13.7) | kg·m⁻²·s⁻¹ |
 | `J_j^diff`, `J_j^adv` | Diffusive / advective part of the gas flux | kg·m⁻²·s⁻¹ |
-| `J_{bc,j}` | Flux of component *j* into the domain that a mass condition prescribes at a boundary face (§12.4, §13.7.5) | kg·m⁻²·s⁻¹ |
-| `K`, `κ` | Permeability — **use `κ`**; `K` reserved for Gpyro-comparison text only | m² |
+| `J_{bc,j}` | Outward flux of component *j* prescribed at a boundary face (§12.4, §13.7.5) | kg·m⁻²·s⁻¹ |
+| `κ` | Effective condensed-matrix permeability | m² |
+| `K_j` | Species wall diffusivity in the gas-friction equations | m²·s⁻¹ |
 | `k`, `k_j` | Thermal conductivity (of component *j*) | W·m⁻¹·K⁻¹ |
 | `k_eff`, `k_f` | Effective (mixture) / face-averaged thermal conductivity | W·m⁻¹·K⁻¹ |
 | `k_B` | Boltzmann constant (reduced temperature `T* = k_B T/ε`) | J·K⁻¹ |
@@ -131,8 +132,8 @@ Conventions:
 | `ṁ_g`, `ṁ''`, `ṁ''_k` | Outward gas mass flux at the surface (`ṁ''` in the blowing models, `ṁ''_k` of species *k*; §12.3.3) | kg·m⁻²·s⁻¹ |
 | `ṁ_out` | Outflow rate of the live region, positive leaving, `Σ_{f∈𝓕_live} Σ_j F_{j,f} A_f` (§16.3.2) | kg·s⁻¹ |
 | `Ṁ_{j,i}` | Face-flux part of the mass rate of component *j* in cell *i*, `−Σ_f s_if A_f F_{j,f}` | kg·s⁻¹ |
-| `mob_i`, `mob_f` | Gas mobility `κ/μ` of cell *i* (permeability over the floored viscosity) / its guarded harmonic face mean (§5.7.4, §9.5.2; overload M1) | m²·Pa⁻¹·s⁻¹ |
-| `N` | Partial-pressure sum (numerator of ideal-gas pressure; overload N1) | Pa |
+| `mob_i`, `mob_f` | Gas mobility `κ/μ` of cell *i*; interface fluxes use each half-cell mobility (§5.7.4, §9.6; overload M1) | m²·Pa⁻¹·s⁻¹ |
+| `N_j`, `n_j` | Species mass flux and molar flux relative to the skeleton | kg·m⁻²·s⁻¹; mol·m⁻²·s⁻¹ |
 | `N_C` (`NC`) | Number of chemical components (type parameter) | – |
 | `N_R` (`NR`) | Number of reactions (type parameter) | – |
 | `N_state` | Length of the state vector (§3.1.2, §15.1.1) | – |
@@ -152,7 +153,7 @@ Conventions:
 | `q_BC` | Boundary-condition heat flux (positive into domain) | W·m⁻² |
 | `q_inc` | Incident radiative flux of a `RadiativeFluxBC` | W·m⁻² |
 | `q'''`, `q_rad'''`, `q^rad_i` | Volumetric radiation source (Beer–Lambert; `q^rad_i` its average over cell *i*, §8.3.2) | W·m⁻³ |
-| `R_b` | Blowing ratio `h_eff/h` of a convective condition's blowing model, 1 at zero outflow (§12.3.3; the code's `χ`, overload B1) | – |
+| `R_b` | Blowing ratio `h_eff/h` of a convective condition's blowing model, 1 at zero species fluxes (§12.3.3; the code's `χ`, overload B1) | – |
 | `R_g` (`R`, `R_gas`) | Universal gas constant (= 8.31446261815324) | J·mol⁻¹·K⁻¹ |
 | `r`, `r_i` | Reaction rate (per unit volume) of reaction *i* | kg·m⁻³·s⁻¹ |
 | `r_hi`, `r_lo` | Activation bounds of the equidistribution correction, fractions of a cell's initial thickness (defaults 0.3, 0.1) | – |
@@ -169,8 +170,8 @@ Conventions:
 | `T_cell` | Temperature at the cell center adjacent to a boundary | K |
 | `T_∞` | Ambient / surroundings temperature | K |
 | `T_ref` | Reference temperature for enthalpy datum (= 298.15) | K |
-| `T_f` | Face temperature of the enthalpy the gas fluxes carry: the distance-weighted interpolation `(d_n T_o + d_o T_n)/(d_o + d_n)` at an interior face, the surface temperature on a boundary face (§13.6.2) | K |
-| `T̄_f`, `T_face` | Mean `(T̃_o + T̃_n)/2` of the two cells' trial temperatures inside the Fickian flux (written `T_face = (T_L + T_R)/2` in §3.4 and §9.1; §13.6.2, §13.7.2) | K |
+| `T_f` | Face temperature of the enthalpy the gas fluxes carry: the distance-weighted interpolation `(d_n T_o + d_o T_n)/(d_o + d_n)` at an interior face, the surface temperature for boundary outflow and specified incoming temperature for inflow (§13.6.2) | K |
+| `T̄_f`, `T_face` | Mean `(T̃_o + T̃_n)/2` of the two cells' trial temperatures inside the lumped wall flux (written `T_face = (T_L + T_R)/2` in §3.4 and §9.1; §13.6.2, §13.7.2) | K |
 | `T̃_f` | Face temperature of the relative fluxes: the upwind van Albada reconstruction on the stencil of the mass flux it carries (§11.6.4, §13.6.2) | K |
 | `T_trial`, `T̃_i` | Trial temperature: `T` smoothly clamped into the property bracket `[200, 3000]` K with 1 K transitions | K |
 | `T_m` | Merged temperature of a deactivation receiver: the root of the extended caloric relation at `H_m` and the merged masses (§14.3.3, §16.7) | K |
@@ -195,7 +196,7 @@ Conventions:
 | `x`, `y` | Transverse/lateral coordinates (multi-dimensional meshes and comparison text) | m |
 | `x_J` | Join of the depletion limiter's onset, in units of `ξ_th` (`join`, default 1; §6.3.2) | – |
 | `Y_j` | Mass fraction of component *j*, `ξ_j/ρ` (`Y_k` of species *k* at the face in the pooling film, §12.3.3) | – |
-| `Z` | Pre-exponential factor (Gpyro/FDS comparison notation; internally `A`) | varies |
+| `Z` | Pre-exponential factor (Gpyro notation; FDS uses `A_{αβ}`; internally `A`) | varies |
 | `z` | Axial / through-thickness coordinate (primary spatial variable) | m |
 | `z_n` | Position of mesh node *n* (a differential unknown on a moving mesh) | m |
 | `z_i^c` | Cell-center position of cell *i* | m |
@@ -230,14 +231,13 @@ Conventions:
 | `ε_AB` | Lennard-Jones well depth (collision integral) | J |
 | `ϵ_ξ`, `ϵ_T`, `ϵ_G` | Slope scales of the van Albada reconstruction for the concentrations, the temperature and the history values: the square of a tolerance over the upwind cell's reference thickness (§11.6.2; overload E1) | (field units)²·m⁻² |
 | `ϵ_LS` | Relative regularization of the least-squares normal matrix, 10⁻⁸ (`GRADIENT_REGULARIZATION`; §13.6.4; overload E1) | – |
-| `η` | Guard of the distance-weighted harmonic face means, 10⁻²⁰ in the property's units (`FACE_MEAN_GUARD`; §1.4.4, §5.12, §7.1.2, §9.1.4); in §17 the relative finite-difference step (overload E2) | property units |
-| `η_m` | Guard of the face mobility mean, 10⁻³⁰ (`MOBILITY_GUARD`; §9.5.2; overload E2) | m²·Pa⁻¹·s⁻¹ |
+| `η` | Guard of the distance-weighted harmonic face means, 10⁻²⁰ in the property's units (`FACE_MEAN_GUARD`; §1.4.4, §5.12, §7.1.2); in §17 the relative finite-difference step (overload E2) | property units |
 | `θ`, `θ_i` | Volumetric strain rate (dilation) of cell *i*, `(1/V) dV/dt` (bold `θ` in §17 is the parameter vector; overload A2) | s⁻¹ |
 | `θ_A` | Column-global **radial** volumetric strain rate, `(1/A) dA/dt` (an algebraic unknown under a lateral-shrinkage law) | s⁻¹ |
 | `θ_L` | **Axial** volumetric strain rate (`θ − θ_A`) | s⁻¹ |
 | `θ_i^j` | Stoichiometric coefficient (ThermaKin comparison notation; internally `ν_{i,j}`) | – |
 | `κ` (`κ_j`, `κ_eff`) | Permeability (Darcy) of component *j* / of the cell's mixture | m² |
-| `κ_s` | Solid absorption coefficient (FDS comparison notation; internally `α`) | m⁻¹ |
+| `κ_s` | Solid absorption coefficient (FDS; compare effective `α_eff`, not mass-specific `α_j`) | m⁻¹ |
 | `Λ` | Face buoyancy of the pooling film relative to the hot free stream, `[1 − (M_face/T_s)(T_∞/M_∞)]/(1 − T_∞/T_s)` (§12.3.3; overload B1) | – |
 | `Λ_c`, `Λ_w` | Centre and width of the pooling factor's logistic switch in `Λ` (`PoolingFilm` keywords `Λc`, `Λw`, defaults 0.35, 0.10; §12.3.3) | – |
 | `λ` (`λ_j`, `λ_face`, `λ_eff`) | Gas transfer (diffusion) coefficient | m²·s⁻¹ |
@@ -251,7 +251,7 @@ Conventions:
 | `ξ⁺_{j,i}` | Positive-part concentration `(m_{j,i})⁺/Ṽ_i` at which the property laws are evaluated | kg·m⁻³ |
 | `ξ_th` | Concentration scale of the depletion limiter (`DepletionLimiter` `threshold`, default 1 kg·m⁻³) | kg·m⁻³ |
 | `ξ_{tol,i}` | Mass tolerance of cell *i* over its initial volume, the positivity scale of the relative-flux face states (§11.6.2, §11.6.3) | kg·m⁻³ |
-| `ρ` | Mixture / bulk density (`Σ ξ_j` for total; mixture-density formula for effective) | kg·m⁻³ |
+| `ρ` | Bulk density (`Σ ξ_j` for the total inventory density) | kg·m⁻³ |
 | `ρ_j` | Bulk (pure-phase) density of component *j* | kg·m⁻³ |
 | `ρ_{i,j}` | Intrinsic / skeletal density of component *j* (skeletal volume fraction only) | kg·m⁻³ |
 | `ρ_g` | Gas-phase density (ideal-gas law) | kg·m⁻³ |
@@ -383,7 +383,6 @@ Conventions:
 | Porosity floor (smooth) | — | 10⁻¹² | – | `POROSITY_FLOOR` |
 | Viscosity floor (smooth) | — | 10⁻¹² | Pa·s | `MU_FLOOR` |
 | Guard of the harmonic face means | `η` | 10⁻²⁰ | property units | `FACE_MEAN_GUARD` |
-| Guard of the face mobility mean | `η_m` | 10⁻³⁰ | m²·Pa⁻¹·s⁻¹ | `MOBILITY_GUARD` |
 | Regularization of the least-squares gradient | `ϵ_LS` | 10⁻⁸ | – | `GRADIENT_REGULARIZATION` |
 | Half-width of the clamp band of `χ̄_c` | — | 10⁻³ | – | `LATERAL_CLAMP_WIDTH` |
 | Deactivation threshold | `ε_m` | 10⁻² | – | `solve(...; threshold)` |
@@ -424,7 +423,7 @@ below is authoritative; writers must use the disambiguating subscript/context.
   area** and `A_f` the area of face `f`; the Arrhenius pre-exponential is `A_i` /
   `A_{αβ}` (always subscripted by reaction). **Resolution:** bare `A` = area in
   physics chapters; `A_f` = face area; `A_i` = pre-exponential (kinetics). The
-  FDS/Gpyro pre-exponential `Z` is mapped to `A_i` on first use. In the
+  Gpyro pre-exponential `Z` and FDS `A_{αβ}` are compared with `A_i`; copying values requires matching the rate basis (§6.9). In the
   mesh-motion rows on a line (§10, §11, §15) a face is named by its node, so
   `A_i` and `A_{i+1}` there are the areas of the faces at nodes `i` and `i + 1`,
   the two faces of cell `i`; a reaction subscript never appears in those rows.
@@ -434,7 +433,7 @@ below is authoritative; writers must use the disambiguating subscript/context.
 
 - **α — A5 [absorption vs. conversion vs. absorptivity].** `α` (or `α_eff`) =
   **volumetric absorption coefficient** (m⁻¹); `α_j` = mass-basis absorption
-  coefficient (m²·kg⁻¹). Conversion (Gpyro) is `α_conv`; FDS `κ_s` maps to `α`.
+  coefficient (m²·kg⁻¹). Conversion (Gpyro) is `α_conv`; FDS `κ_s` has the units of `α_eff`, not `α_j`; matching attenuation also requires the angular closure (§8.7.3).
   The absorptivity of a surface for incident radiation is **`a`** (`a_j`,
   `a_eff`, `a_s`), never `α`; it equals `ε_eff` under Kirchhoff's law unless a
   component sets its own `surface_absorptivity`. The correction's monitor
@@ -517,7 +516,7 @@ below is authoritative; writers must use the disambiguating subscript/context.
 
 - **η — E2 [guards vs. finite-difference step].** `η` is the guard added to the
   denominator of a guarded harmonic face mean, in the units of the averaged
-  property (10⁻²⁰); the mobility mean's guard is `η_m` (10⁻³⁰ m²·Pa⁻¹·s⁻¹). In
+  property (10⁻²⁰), for thermal conduction. In
   §17 `η` is the relative finite-difference step and `η_abs` its absolute
   floor; no face mean appears there.
 
@@ -544,8 +543,9 @@ below is authoritative; writers must use the disambiguating subscript/context.
   switches. A row's absolute tolerance is written `atol_r` (§15.5.4), never
   `a_r`.
 
-- **N — N1 [partial-pressure sum vs. counts].** `N` in the pressure closure is
-  the partial-pressure sum; every count carries a subscript: `N_C`, `N_R`,
+- **N — N1 [species fluxes vs. counts].** `N_j` is species mass flux and
+  `n_j` is species molar flux. Total pressure is `P = Σ_j p_j`.
+  Every count carries a subscript: `N_C`, `N_R`,
   `N_state`, `N_node`, `N_cell`, `N_blk`. The number of cells across a layer of
   the equidistribution correction is `n_layer`, in the gain `n_layer²/τ_eq`.
 

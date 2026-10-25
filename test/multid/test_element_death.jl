@@ -13,9 +13,25 @@ using Pyrolysis.Deactivation: element_death!
 using Pyrolysis.Integration: setup
 
 function _wood()
-    virgin = SolidComponent(:wood, ρ = 500.0, c = 1500.0, k = 0.15, ε = 0.9)
-    char = SolidComponent(:char, ρ = 150.0, c = 1100.0, k = 0.08, ε = 0.95)
-    gas = GaseousComponent(:gas, M = 0.06, c = 1800.0, k = 0.03, λ = 0.0)
+    virgin = SolidComponent(
+        :wood,
+        ρ_intrinsic = 1500.0,
+        λ = 0.0,
+        ρ = 500.0,
+        c = 1500.0,
+        k = 0.15,
+        ε = 0.9,
+    )
+    char = SolidComponent(
+        :char,
+        ρ_intrinsic = 1800.0,
+        λ = 0.0,
+        ρ = 150.0,
+        c = 1100.0,
+        k = 0.08,
+        ε = 0.95,
+    )
+    gas = GaseousComponent(:gas, M = 0.06, c = 1800.0, k = 0.03)
     rxn = Reaction(
         :pyrolysis,
         1 => (2, 3);

@@ -15,8 +15,15 @@ PMMA–Kaowool interface to one half at the exposed surface, each cell's
 concentrations filling its volume. The layer's density therefore varies
 across one activated region, which is where the equidistribution monitor's
 mass term acts. Both solids gasify completely, so the run loses exactly the
-layer's initial mass and ends on the bare Kaowool. Peak mass loss rate and
-timing are reported through the history curves.
+layer's initial mass and ends on the bare Kaowool. The references of the
+peak, its time and the burnout time are those of a reference run at 240
+PMMA cells.
+
+Nominal pore fraction 0.1 supplies resolved gas storage during heterogeneous
+ALE redistribution. The maximum matrix occupancy decreases from 1.091 to
+1.016 over 15/30/60 PMMA cells. The joint pore/mesh/pressure gate verifies
+the 0.1–0.15 range, both energy forms, thermal independence of the passive
+gas, and the independent species ledger.
 
 The layer deactivates in one invocation. The burn
 runs down from the surface: the upper cells lose their PMMA first and keep
@@ -33,8 +40,11 @@ falls by two per doubling (test/gates/burnout_envelope.jl measures it).
 | --- | --- | --- | --- | --- | --- | --- |
 | complete burnout: live thickness at t_end is the substrate | 0.012 | 0.012 | 1.902e-09 | 1e-05 | yes | every PMMA cell deactivated; 12.0 ± 0.01 mm |
 | mass loss of the gasified PMMA layer | 65.34 | 65.34 | 1.475e-05 | 0.3 | yes | percent of the initial mass; exact = the layer's initial mass / m₀ |
-| mass ledger closure | 6.091e-08 | 0 | 6.091e-08 | 3e-05 | yes | total-mass drop vs ∫ ṁ″ dt over the accepted steps (three-point Gauss–Legendre per step) and the mass deactivation vented |
+| peak MLR | 30.54 | 30.64 | 0.003205 | 0.03 | yes | g m⁻² s⁻¹, gas generation rate |
+| mass ledger closure | 1.479e-11 | 0 | 1.479e-11 | 3e-05 | yes | total-mass drop vs ∫ ṁ″ dt over the accepted steps (three-point Gauss–Legendre per step) and the mass deactivation vented |
 | clamped surface balances on accepted states | 0 | 0 | 0 | 0.5 | yes | boundary temperature solve converged inside the property bracket at every accepted step |
+| time of peak MLR | 287.5 | 288 | 0.001736 | 0.03 | yes | s |
+| burnout time (live thickness < 12.02 mm) | 324 | 325 | 0.003077 | 0.01 | yes | s |
 | deactivation invocations for the PMMA layer (reported) | 1 | 1 | 0 | Inf | yes | 60 cells; largest merged fraction 0.0614 (6.14 ε_m); reported, not asserted |
 
 ![V-BO-07 mlr_history](assets/V-BO-07/V-BO-07_mlr_history.png)
@@ -50,6 +60,6 @@ falls by two per doubling (test/gates/burnout_envelope.jl measures it).
 | deactivation | true |
 | min_thickness | 0.001 |
 | radiation_model | BEER_LAMBERT |
-| abstol | 1.0e-8 |
-| reltol | 1.0e-6 |
-
+| abstol | 1.0e-11 |
+| reltol | 1.0e-9 |
+| pressure_tolerance | 0.0001 |

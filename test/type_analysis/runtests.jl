@@ -5,7 +5,7 @@ analysis.
 
 JET's `@test_call` analyses `residual!` and the colored `jacobian!` at the
 concrete types `setup` builds, on a fixed mesh, a moving mesh with in-depth
-radiation and Darcy–Fick transport, and a moving mesh under the
+radiation and lumped wall and Darcy transport, and a moving mesh under the
 equidistribution correction, in both energy forms. Reports are limited to the
 package's own modules.
 """
@@ -34,8 +34,16 @@ function _load_jet()
 end
 
 function _pmma()
-    virgin = SolidComponent(:virgin, ρ = 1190.0, c = 1420.0, k = 0.21, ε = 0.86)
-    gas = GaseousComponent(:MMA, M = 0.100, c = 1500.0, k = 0.02, λ = 1e-5)
+    virgin = SolidComponent(
+        :virgin,
+        φ = 0.05,
+        λ = 1e-5,
+        ρ = 1190.0,
+        c = 1420.0,
+        k = 0.21,
+        ε = 0.86,
+    )
+    gas = GaseousComponent(:MMA, M = 0.100, c = 1500.0, k = 0.02)
     rxn = Reaction(:decomp, 1 => 2, A = 8.5e12, E = 188e3, h = -870e3)
     return Material(name = :PMMA, components = (virgin, gas), reactions = (rxn,))
 end
@@ -52,7 +60,7 @@ function _wood()
         λ = 1e-5,
         ρ_intrinsic = 1500.0,
     )
-    gas = GaseousComponent(:pyrgas, M = 0.06, c = 1800.0, k = 0.03, λ = 5e-5)
+    gas = GaseousComponent(:pyrgas, M = 0.06, c = 1800.0, k = 0.03)
     rxn = Reaction(:pyrolysis, 1 => 2, A = 1e10, E = 150e3, h = -300e3)
     return Material(name = :wood, components = (virgin, gas), reactions = (rxn,))
 end

@@ -92,14 +92,12 @@ using Pyrolysis.Materials:
             M = 0.03,
             c = T -> 100.0 - 0.1 * T,
             k = 0.03,
-            λ = 1e-5,
         )
         @test_throws ArgumentError GaseousComponent(
             :g,
             M = 0.03,
             c = 1000.0,
             k = 0.03,
-            λ = 1e-5,
             ε = 1.5,
         )
         # Laws positive on the whole bracket build normally.
@@ -111,7 +109,7 @@ using Pyrolysis.Materials:
             ε = (0.95, -1.8e-4),
         )
         @test s.thermal_conductivity(T_PROPERTY_MAX) > 0
-        g = GaseousComponent(:g, M = 0.028, c = T -> 950.0 + 0.3 * T, k = 0.03, λ = 2e-5)
+        g = GaseousComponent(:g, M = 0.028, c = T -> 950.0 + 0.3 * T, k = 0.03)
         @test g.heat_capacity(T_PROPERTY_MIN) > 0
         w = LiquidComponent(:w, ρ = 1000.0, c = 4180.0, k = 0.6)
         @test w.density(300.0) == 1000.0

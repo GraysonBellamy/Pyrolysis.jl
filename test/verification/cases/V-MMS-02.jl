@@ -35,7 +35,7 @@ function _verification_case_vmms02()
 
     function make_material()
         solid = SolidComponent(:s, ρ = 800.0, c = 1000.0, k = 0.3, λ = 2.0e-5)
-        gas = GaseousComponent(:g, M = 0.028, c = 1000.0, k = 0.03, λ = 2.0e-5)
+        gas = GaseousComponent(:g, M = 0.028, c = 1000.0, k = 0.03)
         return Material(name = :VMMS02, components = (solid, gas), reactions = ())
     end
 

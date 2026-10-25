@@ -97,7 +97,7 @@ end
 # ============================================================================
 
 """
-	Material{NC,NR,C,RT,LSL,Pμ,DL} <: AbstractMaterial
+	Material{NC,NR,C,RT,LSL,Pμ,DL,GT} <: AbstractMaterial
 
 A complete material definition with components, reactions, mixing rules, and gas transport.
 
@@ -149,18 +149,20 @@ the material is expected to produce; it cannot resolve the pore gas shifting
 from background air to volatiles as pyrolysis proceeds.
 
 # Gas Transport
-Darcy-Fick gas transport is enabled when any solid/liquid component has κ > 0.
-The effective permeability is computed from component values via mixing rules,
-similar to thermal conductivity and gas transfer coefficient.
+`gas_transport=LumpedTransfer()` selects the superficial partial-pressure law.
+`DustyGas` selects coupled molecular/Knudsen friction. Both include independent
+Darcy permeability and use the same physical pore EOS. Participating lumped
+matrices require explicit condensed λ. Gas-bearing initial states require
+resolved pore volume. See the model constructors for endpoint closures.
 
 Specify κ on each component:
 ```julia
 charring = Material(
 	name = :CharringWood,
 	components = (
-		SolidComponent(:virgin, ρ=530, c=2000, k=0.12, κ=1e-15),  # tight structure
-		SolidComponent(:char, ρ=150, c=1500, k=0.20, κ=1e-12),    # porous char
-		GaseousComponent(:gas, M=0.044, c=1800, k=0.03, λ=1e-4),
+		SolidComponent(:virgin, ρ=530, φ=.6, c=2000, k=0.12, λ=1e-5, κ=1e-15),  # tight structure
+		SolidComponent(:char, ρ=150, φ=.85, c=1500, k=0.20, λ=1e-5, κ=1e-12),    # porous char
+		GaseousComponent(:gas, M=0.044, c=1800, k=0.03,),
 	),
 	reactions = (...),
 	mixing = MaterialMixing(κ = MixingSpec(WEIGHTED, 0.5)),
@@ -174,7 +176,7 @@ pmma = Material(
 	name = :PMMA,
 	components = (
 		SolidComponent(:virgin, ρ=1190, c=1420, k=0.21, ε=0.86),
-		GaseousComponent(:MMA, M=0.100, c=1500, k=0.02, λ=1e-5)
+		GaseousComponent(:MMA, M=0.100, c=1500, k=0.02,)
 	),
 	reactions = (
 		Reaction(:decomposition, 1 => 2, A=8.5e12, E=188e3, h=870e3),  # h > 0 = endothermic
@@ -183,8 +185,16 @@ pmma = Material(
 )
 ```
 """
-struct Material{NC,NR,C<:Tuple,RT<:Tuple,LSL,Pμ,DL<:AbstractDepletionLimiter} <:
-       AbstractMaterial
+struct Material{
+    NC,
+    NR,
+    C<:Tuple,
+    RT<:Tuple,
+    LSL,
+    Pμ,
+    DL<:AbstractDepletionLimiter,
+    GT<:GasTransport,
+} <: AbstractMaterial
     name::Symbol
     components::C
     reactions::RT  # Full tuple type to preserve heterogeneous reaction types
@@ -208,9 +218,10 @@ struct Material{NC,NR,C<:Tuple,RT<:Tuple,LSL,Pμ,DL<:AbstractDepletionLimiter} <
     # than a per-component property: it describes the gas mixture this material
     # actually produces. Defaults to `SutherlandProperty()` (air).
     gas_viscosity::Pμ
+    gas_transport::GT
 
     # Inner constructor with validation
-    function Material{NC,NR,C,RT,LSL,Pμ,DL}(
+    function Material{NC,NR,C,RT,LSL,Pμ,DL,GT}(
         name::Symbol,
         components::C,
         reactions::RT,
@@ -218,7 +229,8 @@ struct Material{NC,NR,C<:Tuple,RT<:Tuple,LSL,Pμ,DL<:AbstractDepletionLimiter} <
         lateral_shrinkage_law::LSL,
         depletion_limiter::DL,
         gas_viscosity::Pμ,
-    ) where {NC,NR,C<:Tuple,RT<:Tuple,LSL,Pμ,DL<:AbstractDepletionLimiter}
+        gas_transport::GT,
+    ) where {NC,NR,C<:Tuple,RT<:Tuple,LSL,Pμ,DL<:AbstractDepletionLimiter,GT<:GasTransport}
         # Validate component count matches
         length(components) == NC || throw(ArgumentError("Component count mismatch"))
         length(reactions) == NR || throw(ArgumentError("Reaction count mismatch"))
@@ -226,7 +238,8 @@ struct Material{NC,NR,C<:Tuple,RT<:Tuple,LSL,Pμ,DL<:AbstractDepletionLimiter} <
             LSL <: Function ||
             throw(ArgumentError("lateral_shrinkage_law must be a Function or nothing"))
         _validate_gas_viscosity(gas_viscosity, name)
-        new{NC,NR,C,RT,LSL,Pμ,DL}(
+        _validate_transport_inputs(components, gas_transport, mixing)
+        new{NC,NR,C,RT,LSL,Pμ,DL,GT}(
             name,
             components,
             reactions,
@@ -234,6 +247,7 @@ struct Material{NC,NR,C<:Tuple,RT<:Tuple,LSL,Pμ,DL<:AbstractDepletionLimiter} <
             lateral_shrinkage_law,
             depletion_limiter,
             gas_viscosity,
+            gas_transport,
         )
     end
 end
@@ -272,7 +286,8 @@ end
 			  mixing = MaterialMixing(),
 			  lateral_shrinkage_law = nothing,
 			  depletion_limiter = DepletionLimiter(),
-			  gas_viscosity = SutherlandProperty())
+			  gas_viscosity = SutherlandProperty(),
+			  gas_transport = LumpedTransfer())
 
 Create a material with keyword arguments.
 
@@ -282,13 +297,16 @@ Create a material with keyword arguments.
 - `reactions`: Tuple of reactions (can be empty tuple `()`)
 - `mixing`: A `NamedTuple{(:k,:λ,:κ),Tuple{MixingSpec,MixingSpec,MixingSpec}}`,
   typically built via [`MaterialMixing`](@ref). Defaults: k = `WEIGHTED, β=0.5`,
-  λ = `PARALLEL, β=0.5` (gas transfer; `BRUGGEMAN` is rejected at evaluation
-  time as physically unjustified for this channel), κ = `WEIGHTED, β=0.5`.
+  λ = `PARALLEL, β=0.5` (superficial matrix transfer), κ = `WEIGHTED, β=0.5`.
+  `BRUGGEMAN` is rejected for both transport coefficients at construction.
 - `lateral_shrinkage_law`: optional A(t)/A_0 = law(χ̄). `nothing` ⇒ identity.
 - `depletion_limiter`: the [`AbstractDepletionLimiter`](@ref) applied to every
   reaction-rate evaluation for this material. Default: a
   [`DepletionLimiter`](@ref) (a roll-off near reactant depletion that is zero
   at and below zero concentration) with `threshold = 1.0` kg/m³, enabled.
+- `gas_transport`: [`LumpedTransfer`](@ref) or [`DustyGas`](@ref), including
+  the explicit endpoint and its domain when needed. Gas-free materials bind
+  the internal no-gas specialization.
 - `gas_viscosity`: dynamic viscosity μ(T) of the pore gas [Pa·s], a number or
   a property function of temperature, used only in the Darcy mobility κ/μ.
   Default: [`SutherlandProperty`](@ref) (air). It must be positive and finite
@@ -314,6 +332,7 @@ function Material(;
     lateral_shrinkage_law::Union{Function,Nothing} = nothing,
     depletion_limiter::AbstractDepletionLimiter = DepletionLimiter(),
     gas_viscosity = SutherlandProperty(),
+    gas_transport::GasTransport = LumpedTransfer(),
 ) where {C<:Tuple}
     # Resolve any PendingReactions (symbolic component names → integer indices)
     # against the components tuple's name → index map.
@@ -330,6 +349,7 @@ function Material(;
         lateral_shrinkage_law,
         depletion_limiter,
         to_property(gas_viscosity),
+        gas_transport,
     )
 end
 
@@ -341,8 +361,9 @@ function _construct_material(
     lateral_shrinkage_law::LSL,
     depletion_limiter::DL,
     gas_viscosity::Pμ,
-) where {C<:Tuple,RT<:Tuple,LSL,Pμ,DL<:AbstractDepletionLimiter}
-    Material{length(components),length(resolved),C,RT,LSL,Pμ,DL}(
+    gas_transport::GT,
+) where {C<:Tuple,RT<:Tuple,LSL,Pμ,DL<:AbstractDepletionLimiter,GT<:GasTransport}
+    Material{length(components),length(resolved),C,RT,LSL,Pμ,DL,GT}(
         name,
         components,
         resolved,
@@ -350,6 +371,7 @@ function _construct_material(
         lateral_shrinkage_law,
         depletion_limiter,
         gas_viscosity,
+        gas_transport,
     )
 end
 
@@ -392,20 +414,6 @@ n_components(::Material{NC}) where {NC} = NC
 Get the number of reactions in a material.
 """
 n_reactions(::Material{NC,NR}) where {NC,NR} = NR
-
-"""
-	has_darcy_flow(m::Material) -> Bool
-
-Check if material uses Darcy-Fick gas transport.
-
-Returns true if the permeability law of any solid/liquid component is not
-[`identically_zero`](@ref).
-
-The component-based approach: define κ on each solid component,
-and the effective permeability will be computed via mixing rules.
-"""
-has_darcy_flow(m::Material) =
-    any(c -> has_permeability(c) && !identically_zero(c.permeability), m.components)
 
 """
 	component_index(m::Material, name::Symbol)

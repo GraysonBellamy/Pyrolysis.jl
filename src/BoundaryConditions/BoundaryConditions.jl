@@ -11,7 +11,7 @@ It also holds the face-local, mesh-free evaluation of those conditions: the
 surface energy balance of a boundary face (`solve_boundary_temperature!`) with
 the flux and derivative of every thermal condition, the blowing models' effect
 on a convective face (`BlowingFace`, `blowing_state`), the mass-condition film
-fluxes (`mass_bc_flux`), the heat-flux decomposition for diagnostics, and the
+complete reservoir/species closures, the heat-flux decomposition for diagnostics, and the
 `BoundaryState` that records a converged balance.
 
 Depends on `Materials` for the abstract BC supertypes (`AbstractThermalBC`,
@@ -34,30 +34,31 @@ export AdiabaticBC, HeatFluxBC, ConvectiveBC, RadiativeBC, DirichletThermalBC
 export CombinedThermalBC, RadiativeFluxBC
 
 # Mass boundary conditions
-export ImpermeableBC, MassFluxBC, ConvectiveMassBC, DiffusiveMassBC, CombinedMassBC
+export ImpermeableBC, MassFluxBC, GasReservoir, AmbientGasBC, MassTransferFilm
+export validate_gas_boundary, mass_film_flux
 
 # Pressure boundary conditions (Darcy flow)
-export DirichletPressureBC, NeumannPressureBC, ConvectivePressureBC
+export NeumannPressureBC, ConvectivePressureBC
 
 # Radiative-flux helpers
 export get_radiative_flux_bc
 
 # Type-stable boundary-condition container
-export BoundaryConditionSet, get_thermal_bc, get_mass_bc
+export BoundaryConditionSet, get_thermal_bc
 
 # Ambient-temperature evaluation (evaluate_param / evaluate_param_T live in Materials)
-export ambient_concentration
+
 
 # Surface energy balance of a boundary face and its diagnostics
 export BoundaryState
 export solve_boundary_temperature!
 export evaluate_bc_flux_and_derivative
-export compute_boundary_heat_fluxes, compute_surface_mass_flux
+export compute_boundary_heat_fluxes
 
 # Blowing models evaluated at a face
 export blowing_factor, BlowingFace, blowing_state, blowing_ratio
 
 # Mass-condition film fluxes
-export mass_bc_flux
+
 
 end # module BoundaryConditions

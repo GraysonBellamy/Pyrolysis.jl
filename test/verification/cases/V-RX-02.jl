@@ -10,7 +10,8 @@
 #                 taken on the finite base base_scale·softplus(ξ/base_scale),
 #                 so at ξ = 0 the n = 0 rate stays A and would integrate ξ
 #                 negative (`DepletionLimiter(enabled = false)`).
-#   b) n = 2    — ThermaKin's second-order case as single-reactant n = 2:
+#   b) n = 2    — single-species second-order decay (a C+C kinetic analog,
+#                 not a reproduced ThermaKin run):
 #                 ξ = ξ₀/(1 + ξ₀kt).
 #   c) n = 2/3  — contracting-sphere R3 model with FDS's NaHCO₃ parameters
 #                 A_pub = 3.4e11 1/s, E = 103 kJ/mol at T = 450 K; the marker

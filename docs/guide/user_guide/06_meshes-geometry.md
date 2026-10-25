@@ -242,15 +242,17 @@ A complete convergence loop: the same problem at each resolution, two scalars pe
 ```julia
 using Pyrolysis
 
-virgin = SolidComponent(:virgin; ρ = 1190.0, c = 1500.0, k = 0.20, λ = 1e-6)
-gas    = GaseousComponent(:MMA; M = 0.100, c = 1500.0, k = 0.02, λ = 1e-5)
-pmma   = Material(name = :PMMA, components = (virgin, gas),
+virgin = SolidComponent(:virgin; ρ = 1190.0, φ=.3, c = 1500.0, k = 0.20, λ = 1e-6)
+gas    = GaseousComponent(:MMA; M = 0.100, c = 1500.0, k = 0.02,)
+pmma   = Material(
+    gas_transport=LumpedTransfer(endpoint=LumpedEndpoint(λ=1e-6,κ=0.,max_skeletal_occupancy=.001)),
+    name = :PMMA, components = (virgin, gas),
                   reactions = (Reaction(:pyrolysis, :virgin => :MMA;
                                         A = 8.5e12, E = 188e3, h = 870e3),))
 bcs = BoundaryConditionSet(
     thermal = (top = HeatFluxBC(50e3) + RadiativeBC(ε = 0.9, T_inf = 300.0),
                bottom = AdiabaticBC()),
-    mass    = (top = DiffusiveMassBC(0.01), bottom = ImpermeableBC()),
+    mass    = (top = AmbientGasBC(GasReservoir(P=0., T=300.)), bottom = ImpermeableBC()),
 )
 
 for n in (25, 50, 100, 200)

@@ -97,8 +97,8 @@ The frame of each component follows from the frame of its transport closure:
   material velocity is $\mathbf v_s$. They have no transport flux of their own.
 
 - **Gas components** percolate through the porous skeleton. Darcy's law is a drag
-  balance between the gas and the pore walls, and the volume-fraction-gradient
-  diffusion law is likewise written relative to the pore walls, so the flux the
+  balance between the gas and the pore walls. The lumped and dusty-gas wall
+  laws use that same reference frame, so the flux the
   closures return, $\mathbf J_g = \xi_g(\mathbf v_{\text{gas}} - \mathbf v_s)$,
   is the gas flux **relative to the skeleton** (§3.2.3, Chapter 9). The
   laboratory-frame gas flux is $\xi_g\mathbf v_s + \mathbf J_g$: the pore gas is
@@ -112,10 +112,11 @@ the skeleton ($\mathbf c \ne 0$), the skeleton and the pore gas it holds cross t
 faces together at the relative velocity $-\mathbf c$, the gas then slipping through
 the skeleton by $\mathbf J_g$ as before (§11.2.3, §11.6).
 
-This is the frame ThermaKin writes (its Eq. 15 applies one deformation term to
-every component, gas included) and the frame Gpyro writes (its gas balance, Eq. 58,
-lives on control volumes that deform with the solid, with only $\dot m''$ crossing
-their faces). Treating the gas as fixed in the laboratory instead would count the
+ThermaKin writes Eq. 15 in stationary coordinates, including a deformation
+term for every component. Transforming that balance to a skeleton-following
+frame removes the corresponding mesh-relative term, provided the velocity and
+density closures are matched (§3.6.2). Gpyro Eq. 58 instead uses control
+volumes that deform with the solid, with $\dot m''$ crossing their faces. Treating the gas as fixed in the laboratory instead would count the
 skeleton's motion twice: once inside the frame of $\mathbf J_g$ and once as a sweep
 of the gas by the moving mesh.
 
@@ -128,8 +129,8 @@ of the gas by the moving mesh.
 > every inventory (each component's mass, its sensible enthalpy and the
 > conversion-history pair) across the faces at the relative velocity. With
 > $\mathbf c = 0$ that operator vanishes identically and is not assembled: the
-> mesh-frame rate of every field is then its material rate, and no equation carries an
-> advection term.
+> mesh-frame rate of every field is then its material rate. No additional
+> skeleton-advection term is needed; gas transport relative to the skeleton remains.
 
 ---
 
@@ -230,8 +231,8 @@ to the mesh.
 > $\int \rho c_p\, w\,\partial_z T\,dz \approx \dot m''\,c_s\,(T_s - \bar T_{\text{form}})$
 > — a few percent of the effective heat of gasification in every ALE run with volume
 > change and thermal gradients, and a systematic low-MLR bias against
-> regressing-mesh codes (FDS, Gpyro and ThermaKin advect enthalpy with the
-> material). The Landau ablation case V-CPL-02 verifies the traveling-wave identity
+> a consistently discretized material-following energy balance. This is a
+> formulation check, not a measured bias against every reference code. The Landau ablation case V-CPL-02 verifies the traveling-wave identity
 > that would expose such a term (Chapter 18).
 
 **Sign of the relative energy advection.** With $c>0$ (mesh sliding in $+z$ relative
@@ -242,7 +243,7 @@ physically correct convective reading of the chain rule.
 ### 11.2.3 The mass balance of every component
 
 For component $j$ with laboratory-frame flux $\xi_j\mathbf v_s + \mathbf J_j$
-($\mathbf J_j \equiv 0$ for condensed components, $\mathbf J_g$ the Darcy–Fick flux
+($\mathbf J_j \equiv 0$ for condensed components, $\mathbf J_g$ the gas flux
 for gases), the Eulerian balance is
 $\partial\xi_j/\partial t|_z + \nabla\cdot(\xi_j\mathbf v_s + \mathbf J_j) = S_j$, and
 (11.2) gives, for the mass $m_{j,i} = \int_{\Omega_i}\xi_j\,dV$,
@@ -270,7 +271,7 @@ skeleton the relative term vanishes for **every** component, and the mass of eve
 component in a cell changes only by reaction and by $\mathbf J_j$ through its faces,
 so the column total changes only through the boundary faces, exactly as on a fixed
 mesh. In a sealed collapsing column the pore gas is compressed cell by cell
-($\xi_g = m_g/V \uparrow$ as $V \downarrow$, V-CPL-03 P4), and under Darcy–Fick
+($\xi_g = m_g/V \uparrow$ as $V \downarrow$, V-CPL-03 P4), and under gas
 transport the pressure closure turns that compression into a venting response.
 
 **Why not a face-sweep flux for the gas.** Treating the gas as fixed in the
@@ -292,12 +293,12 @@ separate advection term either. The complementary gas enthalpy carried by the *f
 relative to the skeleton* is assembled at the faces, in flux form: every interior face
 carries $\sum_g J_{g,f}\,h_g(T_f)$ with the same $J_{g,f}$ the mass rows carry, and its
 temperature-form reading is the $-\sum_g c_{p,g}\,\mathbf J_g\cdot\nabla T$ term of
-(11.4) (Chapter 7). This is the ThermaKin Eq. 17 convention term for term, including
+(11.4) (Chapter 7). This corresponds to the 1D transport terms of ThermaKin Eq. 17, including
 its deformation term, which is the $\mathbf v_s\cdot\nabla T$ piece the mesh frame
 absorbs. At a boundary face the outward mass flux carries its sensible enthalpy at the
-surface temperature, so the gas leaves at $T_s$; the surface energy balance itself
-carries no gas-enthalpy term, which would count the gas heating a second time
-(Chapter 12).
+surface temperature, while incoming species carry their specified reservoir
+enthalpy. Wall-film heat and carried enthalpy are converted to the same energy
+control surface before assembly (§9.9); no additional outgoing-gas sink is added.
 
 ---
 
@@ -934,9 +935,9 @@ in User Guide Chapter 10.
 ```julia
 using Pyrolysis
 
-pmma = SolidComponent(:PMMA, ρ = 1190.0, c = 1420.0, k = 0.19, ε = 0.9, λ = 2e-5)
-board = SolidComponent(:board, ρ = 256.0, c = 1100.0, k = 0.06, ε = 0.9, λ = 2e-5)
-mma = GaseousComponent(:MMA, M = 0.100, c = 1500.0, k = 0.02, λ = 1e-5)
+pmma = SolidComponent(:PMMA, ρ = 1190.0, φ=.3, c = 1420.0, k = 0.19, ε = 0.9, λ = 2e-5)
+board = SolidComponent(:board, ρ = 256.0, φ=.8, c = 1100.0, k = 0.06, ε = 0.9, λ = 2e-5)
+mma = GaseousComponent(:MMA, M = 0.100, c = 1500.0, k = 0.02,)
 material = Material(
     name = :PMMA_on_board,
     components = (pmma, board, mma),
@@ -947,7 +948,7 @@ bcs = BoundaryConditionSet(
         top = HeatFluxBC(50e3) + RadiativeBC(ε = 0.9, T_inf = 300.0),
         bottom = AdiabaticBC(),
     ),
-    mass = (top = DiffusiveMassBC(), bottom = ImpermeableBC()),
+    mass = (top = AmbientGasBC(GasReservoir(P=0., T=300.)), bottom = ImpermeableBC()),
 )
 # 2 mm of PMMA (30 cells) on 2 mm of an inert board (30 cells).
 problem = PyrolysisProblem(
@@ -1034,67 +1035,38 @@ mechanisms keep a solve inside the physical domain:
 
 ## 11.9 Comparison to ThermaKin2Ds, Gpyro, and FDS
 
-The dynamic-mesh strategies of the three reference pyrolysis solvers map onto the
-Pyrolysis.jl ALE framework as follows. On first use we map their notation to ours:
-ThermaKin's stoichiometric coefficient $\theta_i^j$ is our $\nu_{i,j}$ (overload
-note A2); Gpyro's pre-exponential $Z$ is our $A_i$, its permeability $K$ is our
-$\kappa$, its volume fraction $X_\alpha$ is our $v_j$, and its conversion $\alpha$
-is our $\alpha_{\text{conv}}$; FDS's absorption $\kappa_s$ is our $\alpha$.
+All three reference models can change their 1D material geometry. Describing
+them as fixed-grid codes with no physical surface motion is incorrect.
 
-**ThermaKin2Ds — dynamic mesh adjustment.** ThermaKin2Ds (Stoliarov and co-workers)
-solves the condensed-phase equations on a mesh that contracts or expands as material
-is consumed or swells, with element thicknesses adjusted at each step to follow the
-local volume change — conceptually the solid velocity of (11.10) with $\mathbf c = 0$.
-Two differences are worth noting. First, Pyrolysis.jl makes the node positions
-*state variables* integrated by the same stiff implicit solver as the masses and the
-energy, with the node velocities algebraic unknowns of the balance rows (11.9), so the
-mesh deformation is fully coupled in the Jacobian (Chapter 15) rather than applied as
-an operator-split mesh-adjustment step. Second, the volume change in Pyrolysis.jl is
-governed by the per-component swelling factor $\gamma_j$ and bulk density $\rho_j$
-through (11.7), giving a single unified rule for shrinkage and swelling, whereas
-ThermaKin handles the cross-sectional (lateral) channel separately. Pyrolysis.jl
-mirrors that separation through $\theta_A$ (11.11): the *axial* mesh motion follows the
-axial strain (11.9), the *lateral* cross section follows the lateral shrinkage law
-$A=A_0\,\mathrm{law}(\bar\chi)$ (Chapter 10), and the two are kept from
-double-counting by subtracting $\theta_A$ from each cell's rate. The heat-of-reaction
-sign convention also differs at the publication level: ThermaKin publishes $h>0$ as
-exothermic, whereas Pyrolysis.jl's internal storage uses $h>0$ endothermic with
-$Q_{\text{rxn}}=-\sum_r h_r r_r$ (overload note H1) — a labeling difference, not a
-physics difference.
+**ThermaKin2Ds.** TK §3 describes deformation of element thicknesses followed
+by size control before each timestep: large elements split, and smaller ones
+receive part of a neighboring element with species and energy conservation.
+Its Eulerian continuum deformation term does not imply fixed numerical
+elements. Deformation is restricted to the primary coordinate.
 
-**Gpyro — variable-$\Delta z$ fixed control volumes.** Gpyro (Lautenberger &
-Fernandez-Pello) uses a *fixed* (Eulerian) set of control volumes whose thicknesses
-$\Delta z$ can be specified non-uniformly, and accounts for shrinkage and swelling
-through a volume-fraction bookkeeping rather than by physically moving the grid.
-Pyrolysis.jl reproduces the fixed-grid regime with `use_ale = false` (every node
-pinned, no positions or velocities in the state), in which case no balance row, no
-relative flux and no geometric update is assembled. Gpyro's gas balance is written on
-its deforming control volumes with only the Darcy flux crossing their faces — the
-same skeleton-bound frame as §11.1.2. The moving mesh adds, on top of Gpyro-style
-physics, the option of *physically* tracking the surface, which keeps in-depth
-resolution where it is needed without the non-uniform-$\Delta z$ tuning Gpyro relies
-on. Both codes share the same distance-weighted harmonic-mean face conductivity and
-volume-fraction/partial-pressure gradient gas-transport formulation (Chapters 7, 9),
-so on a constant cross section with $w=0$ the two discretizations are directly
-comparable. Gpyro's lateral (in-plane) area changes are captured by Pyrolysis.jl's
-$\mathrm{law}(\bar\chi)$ and $\theta_A$ path.
+**Gpyro.** GP Eqs. 56–57 conserve condensed inventories on cells whose
+thicknesses change. Only gas crosses the material cell boundaries in this
+1D formulation. Nonuniform initial spacing and evolving spacing are distinct
+features. Setting `use_ale=false` here does not reproduce Gpyro's deforming
+grid. Multidimensional transport must be distinguished from general mesh
+deformation; the inspected V2 `UPDATE_MESH` includes multiple deformation
+modes and explicitly flags limitations in its 2D/3D distortion treatment.
 
-**FDS — fixed solid grid, no domain motion.** The FDS pyrolysis model (McDermott,
-McGrattan, et al.) integrates the condensed-phase mass and energy equations on a
-*fixed* one-dimensional solid grid and represents shrinkage and swelling through layer
-thickness updates and a cell-shrinking algorithm rather than a continuously moving
-mesh. FDS carries no in-depth gas, so its energy convention is the condensed-phase
-limit of Pyrolysis.jl's (Chapter 7); it shares the in-depth Beer–Lambert and surface
-radiation absorption options (Chapter 8). The principal contrast is again the
-treatment of the moving boundary: FDS adjusts discrete layer thicknesses, while
-Pyrolysis.jl evolves node positions as continuous state with an exactly enforced GCL,
-and where it moves the mesh relative to the material (the correction of §11.7) it
-transfers the inventories by continuous relative fluxes instead of a discrete remap.
+**FDS.** FDS 6.11.0 updates solid-cell thicknesses and coordinates and remeshes
+layers (`REGRID_FACTOR`, `X_S_NEW` and `REMESH_LAYER` in `wall.f90`). This
+is motion of the internal solid grid; it is separate from the surrounding
+CFD mesh and obstruction representation.
 
-In all three comparisons the GCL discussion of §11.5 has no direct counterpart in the
-fixed-grid codes (a fixed grid trivially satisfies a degenerate GCL with $w\equiv 0$);
-it is specific to the continuously moving mesh and is what guarantees that the moving
-grid introduces no spurious source in the concentrations.
+**Pyrolysis.jl.** Node positions are differential unknowns and node velocities
+are algebraic unknowns in the same coupled system as mass and energy. The
+equidistribution correction transports inventories relative to that mesh;
+the geometry obeys the discrete volume identity of §11.5. These are specific
+implementation differences, not proof that the reference codes lack geometric
+conservation. Volume laws, remapping, radiation and gas transport still have
+to be matched before comparing solutions (§§8–10).
+
+Sources: TK §3; GP §4.1; [FDS wall source](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/wall.f90#L2388-L2679);
+[V2 mesh source](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_mesh.f90).
 
 ---
 
@@ -1142,7 +1114,7 @@ The principal limitations and open issues are:
 - The energy assembly, $\rho c_p^{\text{eff}}$ (every component), the gas enthalpy flux
   at the faces and the harmonic-mean face conductivity are in **Chapter 7, Heat
   Conduction, Convection & Energy Assembly**.
-- The volume-fraction/partial-pressure gas flux and the Darcy velocity are in
+- The partial-pressure gas flux and the Darcy velocity are in
   **Chapter 9, Gas-Phase Mass Transport & Pressure**.
 - The face-based mesh, the metrics, the state layout and mapping, the kernels and the
   row assembly are in **Chapter 13, Finite-Volume Discretization**.

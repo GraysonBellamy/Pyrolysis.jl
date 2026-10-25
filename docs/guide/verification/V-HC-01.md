@@ -10,8 +10,9 @@
 
 ## Problem statement
 
-The one verification case shared by all three reference codes
-(FDS `ht3d_slab`, Gpyro §3.4.1, ThermaKin Eq. 25), in Gpyro's variant:
+A semi-infinite conduction benchmark, using the parameters of
+Lautenberger's dissertation §3.4.1 (ThermaKin Eq. 25 uses the same
+analytical form with different parameters):
 constant absorbed radiant flux q″ = 25 kW/m² plus convective exchange
 h = 20 W/m²K with T∞ = T₀ = 300 K; k = 0.2 W/(m·K), ρ = 1000 kg/m³,
 c = 1400 J/(kg·K), so profiles at t = 30/60/90/180 s are directly comparable
@@ -55,34 +56,23 @@ tolerances; the back-face-rise QoI enforces this assumption explicitly.
 
 ### Comparison with other codes
 
-The same case was solved with FDS 6.11.1 at 133 cells (Δx≈0.38 mm) and Gpyro 0.8200 at 500 nodes (Δz=0.1 mm); decks, outputs, and
-run provenance are committed under `test/verification/reference/`.
-Each code's error against the same exact solution is drawn below
-on a log scale, muted gray behind this solver's series — the
-signed linear-scale panel above shows where the error lives, this
-one compares magnitudes across codes.
+Reference runs are available from FDS 6.11.0 at 133 cells (Δx≈0.38 mm) and Gpyro 0.8200 at 500 nodes (Δz=0.1 mm). Decks, outputs and
+available provenance are under `test/verification/reference/`; check
+case-specific parameters and transformations before comparing. Where
+error panels are present, they compare against the analytical reference.
+A timing entry alone does not establish an identical physical workload.
 
 ![V-HC-01 T_profiles_vs_codes_error](assets/V-HC-01/V-HC-01_T_profiles_vs_codes_error.png)
 
 ![V-HC-01 surface_T_history_vs_codes_error](assets/V-HC-01/V-HC-01_surface_T_history_vs_codes_error.png)
 
-Setup and simulation wall times at every ladder rung against the
-reference runs. Julia times model construction and solve after warm-up;
-FDS and Gpyro use internal total elapsed wall time, including setup and
-simulation output. Process launch and Julia compilation are excluded
-from the figure. Output costs, discretizations and time-stepping rules
-still differ, so these are indicative costs, not pure solver speedups.
-See `test/verification/reference/README.md` and `timings.csv` for the
-timer boundaries, resolutions and measurement provenance.
+Historical wall times at each ladder rung and for the reference runs.
+Resolution, time stepping, output workload and timer boundaries differ
+or are incompletely recorded (see `reference/timings.csv`). The Julia
+harness times a warmed build-and-solve. Matching cell count or span alone
+does not make these measurements a controlled solver-speed comparison.
 
 ![V-HC-01 solve_time](assets/V-HC-01/V-HC-01_solve_time.png)
-
-Reference timings below are medians of five runs after one warm-up. Full process time also includes launch and shutdown; it is shown separately and is not compared with Julia's warmed time.
-
-| Code | Resolution | Internal elapsed (s) | Full process (s) |
-| --- | --- | --- | --- |
-| FDS 6.11.1 | 133 cells (Δx≈0.38 mm) | 0.073 | 0.3312 |
-| Gpyro 0.8200 | 500 nodes (Δz=0.1 mm) | 0.379 | 0.3814 |
 
 Solution overlays including the other codes' points: [T_profiles_vs_codes](assets/V-HC-01/V-HC-01_T_profiles_vs_codes.png), [surface_T_history_vs_codes](assets/V-HC-01/V-HC-01_surface_T_history_vs_codes.png).
 
@@ -90,13 +80,13 @@ Solution overlays including the other codes' points: [T_profiles_vs_codes](asset
 
 | n_cells | h | wall (s) | L2 | Linf |
 | --- | --- | --- | --- | --- |
-| 25 | 0.04 | 0.0021 | 0.7857 | 2.901 |
-| 50 | 0.02 | 0.004584 | 0.2003 | 0.8012 |
-| 100 | 0.01 | 0.009917 | 0.05027 | 0.2059 |
-| 133 | 0.007519 | 0.01361 | 0.02844 | 0.117 |
-| 200 | 0.005 | 0.02184 | 0.01258 | 0.05197 |
-| 400 | 0.0025 | 0.04863 | 0.003146 | 0.01304 |
-| 500 | 0.002 | 0.06373 | 0.002013 | 0.008354 |
+| 25 | 0.04 | 0.002099 | 0.7857 | 2.901 |
+| 50 | 0.02 | 0.004722 | 0.2003 | 0.8012 |
+| 100 | 0.01 | 0.00995 | 0.05027 | 0.2059 |
+| 133 | 0.007519 | 0.01354 | 0.02844 | 0.117 |
+| 200 | 0.005 | 0.02253 | 0.01258 | 0.05197 |
+| 400 | 0.0025 | 0.05211 | 0.003146 | 0.01304 |
+| 500 | 0.002 | 0.06535 | 0.002013 | 0.008354 |
 
 Observed order 1.993 (L2), expected 2.0.
 

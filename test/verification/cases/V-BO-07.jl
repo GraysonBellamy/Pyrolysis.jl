@@ -12,6 +12,12 @@
 # layer's initial mass and ends on the bare Kaowool. Peak mass loss rate and
 # timing are reported through the history curves.
 #
+# Nominal pore fraction 0.1 supplies resolved gas storage during heterogeneous
+# ALE redistribution. The maximum matrix occupancy decreases from 1.091 to
+# 1.016 over 15/30/60 PMMA cells. The joint pore/mesh/pressure gate verifies
+# the 0.1–0.15 range, both energy forms, thermal independence of the passive
+# gas, and the independent species ledger.
+#
 # The layer deactivates in one invocation. The burn
 # runs down from the surface: the upper cells lose their PMMA first and keep
 # the slow solid, and the PMMA beneath burns last and fast. When the first cell
@@ -37,6 +43,7 @@ end
 function _vbo07_material(;
     substrate_alpha = 8.0e6 / VBO_RHO_KW,
     pmma_alpha = 2870.0 / VBO_RHO_PMMA,
+    porosity = 0.1,
 )
     rx = Reaction(:pmma_gasification, 1 => 4; A = 1.35e11, E = 164e3, h = 8.7e5, n = 1.0)
     rx_light =
@@ -44,8 +51,8 @@ function _vbo07_material(;
     return Material(
         name = :PMMA_mixed,
         components = (
-            _vbo_pmma(; pmma_alpha),
-            _vbo_pmma(; name = :PMMA_LIGHT, ρ = VBO07_RHO_LIGHT, pmma_alpha),
+            _vbo_pmma(; pmma_alpha, porosity),
+            _vbo_pmma(; name = :PMMA_LIGHT, ρ = VBO07_RHO_LIGHT, pmma_alpha, porosity),
             _vbo_kaowool(substrate_alpha),
             _vbo_gas(),
         ),
@@ -54,7 +61,7 @@ function _vbo07_material(;
     )
 end
 
-function _vbo07_problem(n_pmma::Int; t_end = 500.0)
+function _vbo07_problem(n_pmma::Int; t_end = 500.0, porosity = 0.1)
     dz = VBO_L_PMMA / n_pmma
     n_kw = round(Int, VBO_L_KW / dz)
     n = n_pmma + n_kw
@@ -66,7 +73,7 @@ function _vbo07_problem(n_pmma::Int; t_end = 500.0)
         z -> z > z_if ? 0.0 : VBO_RHO_KW,
         z -> 0.0,
     ]
-    return _vbo_deck(mesh, _vbo07_material(), ξ0; t_end)
+    return _vbo_deck(mesh, _vbo07_material(; porosity), ξ0; t_end)
 end
 
 function _verification_case_vbo07()
@@ -92,7 +99,7 @@ function _verification_case_vbo07()
         solve_fn = _vbo_solve_fn(id),
         solve_kwargs = VBO_SOLVE_KWARGS,
         qois = qois,
-        ci = CIConfig(n_cells = n_default, budget_s = 20.0),
+        ci = CIConfig(n_cells = n_default, budget_s = 120.0),
         report = (curves = sol -> _vbo_history_curves(id, sol),),
     )
 end

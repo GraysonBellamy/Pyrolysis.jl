@@ -37,3 +37,12 @@ MixingRule
 MixingSpec
 MaterialMixing
 ```
+
+## Gas transport
+
+```@docs
+LumpedTransfer
+DustyGas
+LumpedEndpoint
+DustyEndpoint
+```

@@ -401,9 +401,9 @@ Common $\boldsymbol{\theta}$ entries and how they enter the model:
 using Pyrolysis, FiniteDiff
 
 # The base problem: a charring slab under 50 kW/m² (User Guide §13.2).
-virgin = SolidComponent(:virgin; ρ = 1190.0, c = 1500.0, k = 0.20, λ = 1e-6)
-char = SolidComponent(:char; ρ = 200.0, c = 1200.0, k = 0.10, λ = 1e-6)
-gas = GaseousComponent(:gas; M = 0.100, c = 1500.0, k = 0.02, λ = 1e-5)
+virgin = SolidComponent(:virgin; ρ = 1190.0, φ=.3, c = 1500.0, k = 0.20, λ = 1e-6)
+char = SolidComponent(:char; ρ = 200.0, φ=.3, c = 1200.0, k = 0.10, λ = 1e-6)
+gas = GaseousComponent(:gas; M = 0.100, c = 1500.0, k = 0.02,)
 rxn0 = Reaction(:decomp, 1 => (2, 3); A = 1e13, E = 1.88e5, h = 8.7e5, yields = (0.2, 0.8))
 base_problem = PyrolysisProblem(;
     mesh = create_uniform_mesh(10.0e-3, 40),
@@ -413,7 +413,7 @@ base_problem = PyrolysisProblem(;
         thermal = (top = HeatFluxBC(50e3) + RadiativeBC(ε = 0.9, T_inf = 300.0)
                          + ConvectiveBC(h = 10.0, T_inf = 300.0),
                    bottom = AdiabaticBC()),
-        mass = (top = DiffusiveMassBC(Inf), bottom = ImpermeableBC()),
+        mass = (top = AmbientGasBC(GasReservoir(P=0., T=300.)), bottom = ImpermeableBC()),
     ),
     T_initial = z -> 300.0,
     ξ_initial = [z -> 1190.0, z -> 0.0, z -> 0.0],
@@ -428,7 +428,7 @@ function p_inject(prob, θ)
                    yields = (0.2, 0.8))
     mat = Material(; name = m.name, components = m.components, reactions = (rxn,),
                    mixing = m.mixing, lateral_shrinkage_law = m.lateral_shrinkage_law,
-                   depletion_limiter = m.depletion_limiter, gas_viscosity = m.gas_viscosity)
+                   depletion_limiter = m.depletion_limiter, gas_viscosity = m.gas_viscosity, gas_transport = m.gas_transport)
     return PyrolysisProblem(; mesh = prob.mesh, material = mat, bc_set = prob.bc_set,
                             T_initial = prob.T_initial, ξ_initial = prob.ξ_initial,
                             tspan = prob.tspan, dt_initial = prob.dt_initial,
@@ -614,22 +614,19 @@ guard switches the rate off. Because $\mathrm{law}'$ is taken by AD, *any
 differentiable* law gives an exact strain rate and Jacobian — but a non-smooth
 law breaks this (see §17.7.2).
 
-**(4) Guarded face means and C¹ guards elsewhere.** The face conductivity and
-gas-transfer coefficient are distance-weighted harmonic means with a guard
-($\eta=10^{-20}$ in the denominator) that makes them smooth in every argument
-and send them to zero continuously, with a finite derivative, as either side
-vanishes (§5.12). Every guard the state mapping and the kernels apply — the
-positive part of a mass at the cell's mass scale, the smooth floors on volumes,
-capacities and distances, the smooth clamp of the trial temperature into the
-property bracket $[200,3000]$ K — is C¹ and is the identity on the physical
-states the tolerances distinguish (`src/States/guards.jl`). The operations that
-remain non-smooth — the upwind switches of the Darcy advective flux and of the
-relative flux, the step decisions of the integrator, and the deactivation
-events — are localized and are exactly the pitfalls catalogued next.
+**(4) Physical branches and trial guards.** Conductivity uses a guarded
+resistance mean. Gas transport uses total-flux interface roots, explicit
+vacuum branches and deterministic donor selection. Its implicit derivative
+requires a nonsingular qualified root; support changes and donor switches
+need separate sensitivity checks (§17.7.7). Trial guards on temperature,
+masses, volumes and capacities are C¹ extensions, with accepted-state checks
+ensuring the physical solution remains in their identity region. Gas guard
+scales track current pore volume and temperature. Integrator decisions and
+deactivation events remain discrete operations.
 
 > **Implementation note.** The smoothness-critical kernels are
 > `reaction_rate` and `one_sided_factor` (`src/Physics/kinetics.jl`), the
-> guards (`src/States/guards.jl`), `guarded_harmonic_mean`
+> guards (`src/Materials/guards.jl`), `guarded_harmonic_mean`
 > (`src/Properties/effective_properties.jl`), the limited face values of
 > `src/Kernels/relative_flux.jl`, and the lateral rows (`src/Closures/lateral.jl`).
 > Each is written with `tanh`, polynomial joins or AD derivatives *in place of*
@@ -731,70 +728,53 @@ on the physical states, so this is rarely an issue for QoIs integrated over
 time, but it can surface in pointwise late-time sensitivities near burnout,
 where a cell's masses approach their mass scale.
 
-### 17.7.7 Degenerate gas transport
+### 17.7.7 Transport support and implicit derivatives
 
-Condensed components default to a gas-transfer coefficient $\lambda=0$. Under
-Fickian gas transport the cell coefficient is then $\sum_{j\in\text{gas}} v_j\lambda_j$,
-proportional to the cell's gas volume fraction (§9.2), and the face coefficient —
-the guarded harmonic mean of §17.6 — vanishes on every face into a cell that
-holds no gas. The gas field ends in a sharp front. The cell ahead of the front
-gains gas only once its concentration is positive, and its concentration sits
-at the integration noise, below `abstol`, crossing zero. Once seeded, its gas
-grows fast, so the right-hand side has a kink of large slope at that crossing.
-The integrator fails on it repeatedly (on the User Guide example the default
-Rodas5P rejects 379 steps where the non-degenerate slab needs 23; a
-Newton-based policy's Newton iteration fails on it), and the time at which each
-cell fills — and with it the whole trajectory — depends on the noise. Finite
-differences of such a trajectory measure the noise, not a derivative
-(§17.2.2). `solve` warns in this configuration (`warn_degenerate_gas_transport`);
-a small $\lambda$ on the condensed components (e.g.
-$10^{-6}\ \text{m}^2\,\text{s}^{-1}$) removes the front.
+Closed wall or Darcy channels are deliberate constitutive choices. Their
+combination at an interface is resolved by matching total species flux.
+When both paths are degenerate, composition may be unobservable and its
+continuation must be stated; a derivative through a support change is not
+implied by a successful residual evaluation.
+
+General local roots require a nonsingular, numerically resolved Jacobian.
+The implementation restores first state derivatives by the implicit function
+theorem at that root. Vacuum and inactive channels use explicit continuations;
+donor switches select a deterministic primal branch. Higher derivatives or
+parameter derivatives through a singular channel transition require separate
+qualification. Endpoint and capillary regularizations are constitutive inputs
+whose scales must be varied in solution studies.
 
 ---
 
 ## 17.8 Comparison to ThermaKin2Ds, Gpyro, and FDS
 
-None of the three reference codes differentiates its solver with respect to the
-model parameters, and neither does Pyrolysis.jl: all four obtain parameter
-sensitivities *externally*, through driver scripts and repeated forward runs.
+The sources support specific calibration workflows, not a universal claim
+that none of these codes can provide parameter derivatives.
 
-**ThermaKin2Ds.** ThermaKin couples a forward pyrolysis solver to inverse
-analysis via external optimization (e.g. Stochastic Hill-Climbing / Shuffled
-Complex Evolution over the kinetic and property parameters), evaluating the
-forward model as a black box and forming sensitivities by repeated forward runs
-(finite differences). Mapping notation: ThermaKin's stoichiometric coefficients
-$\theta_i^j$ are our yields $\nu_{r,j}$, and its heats of reaction carry the
-*opposite* sign ($h>0$ exothermic) which our $Q_{\text{rxn}}=-\sum_r h_r r_r$
-converts to (overload H1, §2). The local derivative of §17.2 is the same
-black-box construction, and its step-size analysis (§17.2.2) applies to either
-code: an adaptive stiff integrator leaves an error in each output that the step
-must dominate.
+**ThermaKin2Ds.** TK describes the forward solver and examples using
+experimentally determined or fitted material parameters. It does not specify
+a universal optimizer or sensitivity algorithm. A statement about hill
+climbing, shuffled complex evolution or finite differences must identify the
+particular inverse-study implementation; these are not inferred capabilities
+of the forward executable.
 
-**Gpyro.** Gpyro's calibration (Lautenberger & Fernandez-Pello) is built on a
-*genetic algorithm* (GA) that minimizes the mismatch between simulated and
-measured MLR/temperature over a population of parameter sets — derivative-free by
-design. Gpyro maps the pre-exponential $Z$ → our $A_r$ and the conversion-based
-nth-order kinetics to our mass-concentration form (§6.9). A GA explores a global
-landscape without gradients (robust to the $(A,E)$ degeneracy, to non-smooth
-responses and to solver noise) but needs many forward solves and gives no local
-sensitivity matrix. Pyrolysis.jl's shipped calibration is likewise
-derivative-free (Nelder–Mead); finite-difference gradients can drive local
-refinement (Gauss–Newton/L-BFGS) once a GA or sweep has found a basin, and the
-variance-based Sobol harness (§17.5) supplies the global parameter ranking that
-a GA does not.
+**Gpyro.** GP's property-estimation chapter documents a genetic algorithm
+using repeated forward evaluations. That procedure is derivative-free, not
+a finite-difference sensitivity calculation. It does not guarantee a unique
+fit or robustness to parameter non-identifiability, and does not establish
+that every other Gpyro calibration workflow uses the same algorithm.
 
-**FDS (solid phase).** The FDS solid-phase pyrolysis model recovers kinetic
-parameters from a reference TGA temperature and peak rate (the
-$A,E$-from-$T_{\text{peak}}$ recipe, §6.9) rather than offering a built-in
-sensitivity/adjoint capability; FDS's broader uncertainty treatment is the
-verification-and-validation accounting of its guides, not parametric
-differentiation of the solid solver.
+**FDS.** Its reference-temperature/rate prescription estimates Arrhenius
+parameters (§6.9.3). That feature is distinct from whole-solve parameter
+sensitivities. It is not evidence for a blanket absence of sensitivity or
+optimization workflows around FDS.
 
-In short, Pyrolysis.jl's sensitivity tooling is a set of recipes on top of
-`solve` — central differences for local derivatives, qualified by the
-convergence check of §17.2.2, the sweep harness and a PCE surrogate for global
-indices — sharing one rebuild-do-not-mutate discipline. Its automatic
-differentiation is confined to the state Jacobian (§15).
+**Pyrolysis.jl.** The supported workflow in this repository is qualified
+central differences of complete solves (§17.2), parameter sweeps and
+variance-based analysis. The inverse white-pine example uses Nelder–Mead.
+Colored AD of the state residual supplies the integration Jacobian; it does
+not provide exact whole-solve parameter gradients. These statements follow
+the source paths and examples cited earlier in this chapter.
 
 ---
 

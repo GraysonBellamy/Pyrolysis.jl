@@ -6,5 +6,6 @@
 "use_ale","true"
 "min_thickness","0.0001"
 "deactivation","true"
-"abstol","1.0e-7"
-"reltol","1.0e-5"
+"abstol","1.0e-9"
+"reltol","1.0e-7"
+"pressure_tolerance","0.001"

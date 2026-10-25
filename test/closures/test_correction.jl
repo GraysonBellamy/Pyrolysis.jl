@@ -59,9 +59,9 @@ end
 
 # A uniform reaction at a uniform temperature: a uniform strain rate.
 function _uniform_slab(n; coordinates = Planar())
-    a = SolidComponent(:a, ρ = 1000.0, c = 1000.0, k = 0.5)
-    b = SolidComponent(:b, ρ = 400.0, c = 1000.0, k = 0.5)
-    g = GaseousComponent(:g, M = 0.03, c = 1000.0, k = 0.03, λ = 0.0)
+    a = SolidComponent(:a, φ = 0.25, λ = 0.0, ρ = 1000.0, c = 1000.0, k = 0.5)
+    b = SolidComponent(:b, φ = 0.25, λ = 0.0, ρ = 400.0, c = 1000.0, k = 0.5)
+    g = GaseousComponent(:g, M = 0.03, c = 1000.0, k = 0.03)
     mat = Material(
         name = :uniform,
         components = (a, b, g),
@@ -87,9 +87,27 @@ end
 # configuration: three components, in-depth radiation, a moving mesh).
 function _two_layer(n_top, n_bottom; t_end = 100.0)
     L_top, L_bottom = 2e-3, 3e-3
-    top = SolidComponent(:top, ρ = 1200.0, c = 1500.0, k = 0.2, ε = 0.95, α = 2.0, λ = 1e-6)
-    sub = SolidComponent(:sub, ρ = 250.0, c = 1100.0, k = 0.06, ε = 1.0, α = 30.0, λ = 1e-6)
-    gas = GaseousComponent(:gas, M = 0.1, c = 1500.0, k = 0.02, λ = 1e-4)
+    top = SolidComponent(
+        :top,
+        φ = 0.3,
+        ρ = 1200.0,
+        c = 1500.0,
+        k = 0.2,
+        ε = 0.95,
+        α = 2.0,
+        λ = 1e-6,
+    )
+    sub = SolidComponent(
+        :sub,
+        φ = 0.8,
+        ρ = 250.0,
+        c = 1100.0,
+        k = 0.06,
+        ε = 1.0,
+        α = 30.0,
+        λ = 1e-6,
+    )
+    gas = GaseousComponent(:gas, M = 0.1, c = 1500.0, k = 0.02)
     mat = Material(
         name = :two_layer,
         components = (top, sub, gas),
@@ -107,7 +125,10 @@ function _two_layer(n_top, n_bottom; t_end = 100.0)
                 top = RadiativeFluxBC(flux = 5e4) + RadiativeBC(T_inf = 300.0),
                 bottom = AdiabaticBC(),
             ),
-            mass = (top = DiffusiveMassBC(), bottom = ImpermeableBC()),
+            mass = (
+                top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
+                bottom = ImpermeableBC(),
+            ),
         ),
         T_initial = z -> 600.0 + 5e4 * (z - L_bottom) * (z > L_bottom),
         ξ_initial = [
@@ -124,8 +145,8 @@ end
 function _zero_order(n; t_end = 480.0)
     T0, ρ_s, r, E = 600.0, 1000.0, 10.0, 5.0e4
     A = r * exp(E / (8.314462618 * T0))
-    solid = SolidComponent(:solid, ρ = ρ_s, c = 1000.0, k = 0.2, λ = 1e-6)
-    gas = GaseousComponent(:gas, M = 0.03, c = 1000.0, k = 0.02, λ = 1e-5)
+    solid = SolidComponent(:solid, φ = 0.3, ρ = ρ_s, c = 1000.0, k = 0.2, λ = 1e-6)
+    gas = GaseousComponent(:gas, M = 0.03, c = 1000.0, k = 0.02)
     mat = Material(
         name = :zero_order,
         components = (solid, gas),
@@ -137,7 +158,7 @@ function _zero_order(n; t_end = 480.0)
         bc_set = BoundaryConditionSet(
             thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
             mass = (
-                top = ConvectiveMassBC(h_m = 1.0, ξ_inf = 0.0),
+                top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
                 bottom = ImpermeableBC(),
             ),
         ),
@@ -153,9 +174,9 @@ end
 # varies within the layer and the monitor's mass term acts.
 function _mixed(n)
     L = 4e-3
-    a = SolidComponent(:a, ρ = 1200.0, c = 1500.0, k = 0.2, ε = 0.95, λ = 1e-6)
-    b = SolidComponent(:b, ρ = 600.0, c = 1500.0, k = 0.2, ε = 0.95, λ = 1e-6)
-    gas = GaseousComponent(:gas, M = 0.1, c = 1500.0, k = 0.02, λ = 1e-4)
+    a = SolidComponent(:a, φ = 0.3, ρ = 1200.0, c = 1500.0, k = 0.2, ε = 0.95, λ = 1e-6)
+    b = SolidComponent(:b, φ = 0.3, ρ = 600.0, c = 1500.0, k = 0.2, ε = 0.95, λ = 1e-6)
+    gas = GaseousComponent(:gas, M = 0.1, c = 1500.0, k = 0.02)
     mat = Material(
         name = :mixed,
         components = (a, b, gas),
@@ -170,7 +191,10 @@ function _mixed(n)
         material = mat,
         bc_set = BoundaryConditionSet(
             thermal = (top = HeatFluxBC(5e4), bottom = AdiabaticBC()),
-            mass = (top = DiffusiveMassBC(), bottom = ImpermeableBC()),
+            mass = (
+                top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
+                bottom = ImpermeableBC(),
+            ),
         ),
         T_initial = z -> 650.0 + 2e4 * z,
         ξ_initial = [z -> 1200.0 * (1 - f(z)), z -> 600.0 * f(z), z -> 0.0],
@@ -184,8 +208,8 @@ function _ablator(n; L = 3e-3, q = 2.8e6, t_end = 0.8)
     R, E, Tp, T0 = 8.314462618, 1.0e5, 700.0, 300.0
     v = 2.0e-3
     A = v^2 * E * (Tp - T0) * exp(E / (R * Tp)) / (k / (ρ * c) * R * Tp^2)
-    solid = SolidComponent(:solid, ρ = ρ, c = c, k = k, λ = 1e-6)
-    gas = GaseousComponent(:gas, M = 0.05, c = c, k = 0.02, λ = 1e-4)
+    solid = SolidComponent(:solid, φ = 0.3, ρ = ρ, c = c, k = k, λ = 1e-6)
+    gas = GaseousComponent(:gas, M = 0.05, c = c, k = 0.02)
     mat = Material(
         name = :ablator,
         components = (solid, gas),
@@ -197,7 +221,7 @@ function _ablator(n; L = 3e-3, q = 2.8e6, t_end = 0.8)
         bc_set = BoundaryConditionSet(
             thermal = (top = HeatFluxBC(q), bottom = AdiabaticBC()),
             mass = (
-                top = ConvectiveMassBC(h_m = 10.0, ξ_inf = 0.0),
+                top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
                 bottom = ImpermeableBC(),
             ),
         ),
@@ -306,9 +330,9 @@ end
 # The components of a material with `reactions` among condensed `a`, `b` and
 # the gas `g`.
 function _network(reactions...)
-    a = SolidComponent(:a, ρ = 1000.0, c = 1000.0, k = 0.5)
-    b = SolidComponent(:b, ρ = 500.0, c = 1000.0, k = 0.5)
-    g = GaseousComponent(:g, M = 0.03, c = 1000.0, k = 0.03, λ = 1e-4)
+    a = SolidComponent(:a, φ = 0.3, λ = 0.0, ρ = 1000.0, c = 1000.0, k = 0.5)
+    b = SolidComponent(:b, φ = 0.3, λ = 0.0, ρ = 500.0, c = 1000.0, k = 0.5)
+    g = GaseousComponent(:g, M = 0.03, c = 1000.0, k = 0.03)
     return Material(name = :network, components = (a, b, g), reactions = reactions)
 end
 

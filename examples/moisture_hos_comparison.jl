@@ -120,7 +120,6 @@ const INTERP_PROGRESS = [
 # Gas transfer coefficients
 const λ_WOOD = 5.0e-7
 const λ_CHAR = 1.0e-5
-const λ_GAS = 3.0e-5
 const κ_VIRGIN = 1.0e-15
 const κ_CHAR = 1.0e-12
 
@@ -277,48 +276,13 @@ function build_and_solve(mc_db::Float64, hos_model::Symbol)
                 α = 0.0,
                 κ = 0.0,
             ),
-            GaseousComponent(
-                :DF_gas1,
-                M = 0.060,
-                c = 1400.0,
-                k = 0.020,
-                λ = λ_GAS * sqrt(0.029/0.060),
-            ),
-            GaseousComponent(
-                :DF_gas2,
-                M = 0.070,
-                c = 1400.0,
-                k = 0.020,
-                λ = λ_GAS * sqrt(0.029/0.070),
-            ),
-            GaseousComponent(
-                :DF_gas3,
-                M = 0.110,
-                c = 1300.0,
-                k = 0.018,
-                λ = λ_GAS * sqrt(0.029/0.110),
-            ),
-            GaseousComponent(
-                :DF_gas4,
-                M = 0.070,
-                c = 1500.0,
-                k = 0.020,
-                λ = λ_GAS * sqrt(0.029/0.070),
-            ),
-            GaseousComponent(
-                :DF_gas5,
-                M = 0.050,
-                c = 1600.0,
-                k = 0.025,
-                λ = λ_GAS * sqrt(0.029/0.050),
-            ),
-            GaseousComponent(
-                :WATER_VAPOR,
-                M = 0.018,
-                c = water_vapor_cp,
-                k = 0.025,
-                λ = λ_GAS * sqrt(0.029/0.018),
-            ),
+            GaseousComponent(:DF_gas1, M = 0.060, c = 1400.0, k = 0.020),
+            GaseousComponent(:DF_gas2, M = 0.070, c = 1400.0, k = 0.020),
+            GaseousComponent(:DF_gas3, M = 0.110, c = 1300.0, k = 0.018),
+            GaseousComponent(:DF_gas4, M = 0.070, c = 1500.0, k = 0.020),
+            GaseousComponent(:DF_gas5, M = 0.050, c = 1600.0, k = 0.025),
+            GaseousComponent(:WATER_VAPOR, M = 0.018, c = water_vapor_cp, k = 0.025),
+            GaseousComponent(:AIR; M = 0.02897, c = 1006.0, k = 0.026),
         ),
         reactions = (
             Reaction(
@@ -399,7 +363,10 @@ function build_and_solve(mc_db::Float64, hos_model::Symbol)
             bottom = AdiabaticBC(),
         ),
         mass = (
-            top = DiffusiveMassBC(0.05) + DirichletPressureBC(101325.0),
+            top = AmbientGasBC(
+                GasReservoir(P = 101325.0, T = 300.0, mole_fractions = (AIR = 1.0,));
+                film = MassTransferFilm(0.05*101325.0*0.02897/(8.31446261815324*(300.0))),
+            ),
             bottom = ImpermeableBC(),
         ),
     )
@@ -424,6 +391,27 @@ function build_and_solve(mc_db::Float64, hos_model::Symbol)
             z -> 0.0,
             z -> 0.0,
             z -> 0.0,
+            z -> background_gas_concentration(
+                material,
+                :AIR,
+                (
+                    ρ_DF_initial,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    ρ_moisture_initial,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                ),
+                T_ambient,
+            ),
         ],
         tspan = (0.0, t_end),
         dt_initial = 1e-3,

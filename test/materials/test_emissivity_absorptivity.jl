@@ -29,7 +29,7 @@ using Pyrolysis.Materials:
 using Pyrolysis.Properties:
     mixture_emissivity, mixture_absorptivity, mixing_volume_fractions
 
-const _EA_GAS = GaseousComponent(:g, M = 0.03, c = 1000.0, k = 0.03, λ = 1e-5)
+const _EA_GAS = GaseousComponent(:g, M = 0.03, c = 1000.0, k = 0.03)
 
 # Two condensed components with constant bulk densities, so the mixing
 # weights v_j = γ_j ξ_j / ρ_j (normalised over the matrix) are independent of
@@ -42,6 +42,8 @@ function _ea_material(; a_virgin = nothing, a_char = nothing, ε_virgin = (0.95,
     # the constructor's own range check is bypassed for this fixture.
     virgin = SolidComponent(
         :virgin,
+        φ = 0.3,
+        λ = 0.0,
         ρ = 500.0,
         c = 1500.0,
         k = 0.15,
@@ -51,6 +53,8 @@ function _ea_material(; a_virgin = nothing, a_char = nothing, ε_virgin = (0.95,
     )
     char = SolidComponent(
         :char,
+        φ = 0.3,
+        λ = 0.0,
         ρ = 150.0,
         c = 1700.0,
         k = 0.08,
@@ -88,7 +92,7 @@ end
     @test get_emissivity(LiquidComponent(:l, ρ = 1.0, c = 1.0, k = 1.0), 400.0) == 0.95
     @test get_emissivity(_EA_GAS, 400.0) == 0.0
     @test _EA_GAS.emissivity isa AbstractPropertyFunction
-    g_T = GaseousComponent(:g, M = 0.03, c = 1.0, k = 1.0, λ = 1e-5, ε = (0.1, 1e-4))
+    g_T = GaseousComponent(:g, M = 0.03, c = 1.0, k = 1.0, ε = (0.1, 1e-4))
     @test get_emissivity(g_T, 500.0) ≈ 0.15
 
     # Duals propagate through the component evaluation.
@@ -152,8 +156,8 @@ end
     mat_c = Material(
         name = :ea_const,
         components = (
-            SolidComponent(:virgin, ρ = 500.0, c = 1500.0, k = 0.15, ε = 0.9),
-            SolidComponent(:char, ρ = 150.0, c = 1700.0, k = 0.08, ε = 0.85),
+            SolidComponent(:virgin, λ = 0.0, ρ = 500.0, c = 1500.0, k = 0.15, ε = 0.9),
+            SolidComponent(:char, λ = 0.0, ρ = 150.0, c = 1700.0, k = 0.08, ε = 0.85),
             _EA_GAS,
         ),
         reactions = (),

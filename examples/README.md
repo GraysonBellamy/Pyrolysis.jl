@@ -43,17 +43,17 @@ PYROLYSIS_SMOKE=1 julia --project=examples examples/06_cone_calorimeter.jl
   repository). Smoke: 20 s.
   `PYROLYSIS_SMOKE=1 julia --project=examples examples/06_cone_calorimeter_surface_absorption.jl`
 - **`07_douglas_fir_cone.jl`** — Douglas fir, 12 mm, at 75 kW/m²: five-step
-  pyrolysis with moisture evaporation, Darcy–Fick gas transport with background
+  pyrolysis with moisture evaporation, lumped wall and Darcy gas transport with background
   pore air, surface absorption, ALE mesh; writes figures and the
   `douglas_fir_results_<q>kWm2_fit.csv` / `douglas_fir_spatial_<q>kWm2_fit.csv`
   tables to the working directory. Fixtures: none. Smoke: 20 s.
   `PYROLYSIS_SMOKE=1 julia --project=examples examples/07_douglas_fir_cone.jl`
-- **`08_darcy_fick_demo.jl`** — a charring wood-like slab at 75 kW/m² with
+- **`08_gas_transport.jl`** — a charring wood-like slab at 75 kW/m² with
   pressure-driven (Darcy) and diffusive gas transport; prints MLR, surface
   temperature and the mass budget. Fixtures: none. Smoke: 20 s.
-  `PYROLYSIS_SMOKE=1 julia --project=examples examples/08_darcy_fick_demo.jl`
+  `PYROLYSIS_SMOKE=1 julia --project=examples examples/08_gas_transport.jl`
 - **`08_pressure_treated_wood_cone.jl`** — pressure-treated wood, 12 mm, at
-  50 kW/m² with Darcy–Fick gas transport; writes figures and
+  50 kW/m² with lumped wall and Darcy gas transport; writes figures and
   `ptw_results_50kWm2.csv` / `ptw_spatial_50kWm2.csv` to the working directory.
   Fixtures: none. Smoke: 20 s.
   `PYROLYSIS_SMOKE=1 julia --project=examples examples/08_pressure_treated_wood_cone.jl`

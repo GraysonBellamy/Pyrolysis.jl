@@ -33,9 +33,9 @@ on the prescribed-motion path (temporal tolerance only).
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
 | free-stream T drift (all cells, all snapshots) | 3.411e-13 | 0 | 3.411e-13 | 1e-10 | yes | uniform field must survive 30% mesh compression |
-| free-stream ξ_solid relative drift | 1.838e-14 | 0 | 1.838e-14 | 1e-12 | yes | relative flux + cell-volume change must cancel for a uniform state |
-| free-stream ξ_gas relative drift | 2.916e-14 | 0 | 2.916e-14 | 1e-12 | yes | relative flux + cell-volume change must cancel for a uniform state |
-| top cell-center trajectory vs z₀·s(t_end) | 0.006825 | 0.006825 | 7.322e-09 | 1.5e-06 | yes | node ODE ż = (ṡ/s)z integrated at solver tolerance |
+| free-stream ξ_solid relative drift | 2.975e-14 | 0 | 2.975e-14 | 1e-12 | yes | relative flux + cell-volume change must cancel for a uniform state |
+| free-stream ξ_gas relative drift | 2.05e-13 | 0 | 2.05e-13 | 1e-12 | yes | relative flux + cell-volume change must cancel for a uniform state |
+| top cell-center trajectory vs z₀·s(t_end) | 0.006825 | 0.006825 | 7.151e-09 | 1.5e-06 | yes | node ODE ż = (ṡ/s)z integrated at solver tolerance |
 
 ![V-MMS-02 thickness_history](assets/V-MMS-02/V-MMS-02_thickness_history.png)
 
@@ -48,4 +48,3 @@ on the prescribed-motion path (temporal tolerance only).
 | integrator | Rodas5P (default) |
 | abstol | 1.0e-10 |
 | reltol | 1.0e-8 |
-

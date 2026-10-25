@@ -6,6 +6,7 @@ const _SOLVE_KEYWORDS = (
     :energy_state,
     :abstol,
     :reltol,
+    :pressure_tolerance,
     :threshold,
     :maxiters,
     :dt,
@@ -97,6 +98,7 @@ function _solve(
     abstol::Real = 1e-8,
     reltol::Real = 1e-6,
     threshold::Real = 1e-2,
+    pressure_tolerance::Real = 1.0,
     maxiters::Int = 1_000_000,
     dt::Real = problem.dt_initial,
     adaptive::Bool = true,
@@ -127,6 +129,7 @@ function _solve(
         reltol,
         abstol,
         threshold,
+        pressure_tolerance,
         use_ale,
         radiation_model,
         w_override,
@@ -244,9 +247,18 @@ function integrate(
     out_of_domain = _DomainWrapper(check)
     monitor = check.monitor
     cap = NewtonCap()
-    violation = _ViolationWrapper(let layout = layout, setup = def.setup, abstol = cp.abstol
-        u -> _violation(u, layout, setup, abstol)
-    end)
+    violation = _ViolationWrapper(
+        let layout = layout, setup = def.setup, abstol = cp.abstol
+            (u, t) -> begin
+                v=_violation(u, layout, setup, abstol)
+                v==0 || return v
+                ds=_derived(check, u, t)
+                return _porosity_out(check, ds, setup.gas) ||
+                       any(x->x<0, check.ws.contributions.surface_pressure_raw) ?
+                       -1 : 0
+            end
+        end,
+    )
     observer = DiscreteCallback(
         (u, t, integrator) -> true,
         integrator -> _observe!(integrator, monitor, cap, policy, violation);
@@ -275,6 +287,7 @@ function integrate(
     callbacks =
         CallbackSet(observer, events..., layer_times..., thin..., observers..., recorder)
 
+    pressure_norm=PressureErrorNorm(cp)
     integrator = OrdinaryDiffEq.init(
         ode,
         policy.alg;
@@ -288,9 +301,11 @@ function integrate(
         saveat = saveat isa Number ? Float64(saveat) : collect(Float64, saveat),
         callback = callbacks,
         isoutofdomain = out_of_domain,
+        internalnorm = ErasedPressureNorm(pressure_norm.callback),
         initializealg = NoInit(),
         save_end = true,
     )
+    bind_pressure_norm!(pressure_norm, integrator)
     bind_error_test!(check, integrator)
     raw = OrdinaryDiffEq.solve!(integrator)
     monitor.cold == 0 ||
@@ -310,6 +325,7 @@ function integrate(
         linear_solves = s.nsolve,
         nonlinear_failures = s.nnonlinconvfail,
         domain_rejections = check.monitor.rejections,
+        pressure_error_evaluations = pressure_norm.evaluations[],
         largest_constraint_residual = check.monitor.largest,
         invocations = cells === nothing || isempty(cells.events) ? 0 :
                       last(cells.events).invocation,
@@ -325,7 +341,7 @@ function integrate(
         stats,
         raw;
         deactivation = cells,
-        outcome = outcome[],
+        outcome = monitor.outcome === :running ? outcome[] : monitor.outcome,
     )
 end
 
@@ -350,7 +366,7 @@ end
 NewtonCap() = NewtonCap(0, 0, Inf)
 
 const _DomainWrapper = FunctionWrapper{Bool,Tuple{_StateVector,NullParameters,Float64}}
-const _ViolationWrapper = FunctionWrapper{Int,Tuple{_StateVector}}
+const _ViolationWrapper = FunctionWrapper{Int,Tuple{_StateVector,Float64}}
 
 # The last state the integrator accepted and its time, recorded by a
 # read-only observer after every other callback of the step.
@@ -414,7 +430,7 @@ end
 function _observe!(integrator, m::ConstraintMonitor, cap::NewtonCap, policy, violation)
     m.largest = max(m.largest, m.last)
     if !integrator.opts.adaptive
-        v = violation(integrator.u)
+        v = violation(integrator.u, integrator.t)
         if v != 0
             m.failed = true
             m.message =

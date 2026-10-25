@@ -208,3 +208,28 @@ function Base.show(io::IO, ::MIME"text/plain", sol::PyrolysisSolution)
     println(io, "  Accepted steps: $(sol.statistics.accepted)")
     print(io, "  Solve time: $(round(sol.solve_time, digits = 3)) s")
 end
+
+"""Saved pore fractions, cells × times; NaN in dead cells."""
+get_porosity(sol::PyrolysisSolution) = sol.gas.porosity
+"""Saved total gas pressure [Pa], cells × times."""
+get_pressure(sol::PyrolysisSolution) = sol.gas.pressure
+"""Saved partial pressures [Pa], gas species × cells × times; order `sol.gas.species`."""
+get_partial_pressures(sol::PyrolysisSolution) = sol.gas.partial_pressure
+"""Gas densities per pore volume [kg/m³ pore], gas species × cells × times."""
+get_intrinsic_gas_densities(sol::PyrolysisSolution) = sol.gas.intrinsic_density
+"""Gas fractions in `sol.gas.species` order; basis is `:mole` or `:mass`, zero at vacuum."""
+function get_gas_composition(sol::PyrolysisSolution; basis = :mole)
+    basis===:mole && return sol.gas.mole_fraction
+    basis===:mass && return sol.gas.mass_fraction
+    throw(ArgumentError("composition basis must be :mole or :mass"))
+end
+"""
+    get_boundary_exchange(sol, tag)
+
+Exact assembled outward species mass flux and energy flux, inward reservoir
+heat flux, carried enthalpy, surface partial pressure, Darcy velocity, and
+maximum scaled surface residual/iteration count at each saved time. Fluxes
+are area-weighted over live faces [kg/(m² s), W/m²]; see `GasDiagnostics`.
+"""
+get_boundary_exchange(sol::PyrolysisSolution, tag::Symbol) =
+    (; species = sol.gas.species, sol.gas.boundary[tag]...)

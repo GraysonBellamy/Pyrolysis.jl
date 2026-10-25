@@ -126,7 +126,7 @@ $$
 
 where $q_{\text{inc}}(t)$ [W·m⁻²] is the condition's incident flux and $a$ the
 surface absorptivity. With no explicit `absorptivity` on the condition, $a$ is the
-effective surface absorptivity of the boundary cell (§5.8.2, §12.2.6),
+effective surface absorptivity of the boundary cell (§5.8.2, §5.8.2),
 
 $$
 a_{\text{eff}}=\sum_j v_j\,a_j ,
@@ -692,71 +692,57 @@ $10^{-12}$. The residual allocates nothing.
 
 ## 8.7 Comparison to ThermaKin2Ds, Gpyro, and FDS
 
-We map each reference code's notation to ours on first use. All three reference
-solvers are condensed-phase pyrolysis models; their radiation treatments span the
-same idioms Pyrolysis.jl supports, plus a two-flux variant in FDS.
-
 ### 8.7.1 ThermaKin2Ds
 
-ThermaKin (Stoliarov & Lyon) uses **in-depth exponential (Beer–Lambert)
-absorption** of the external flux together with explicit surface **re-radiation**.
-In ThermaKin notation the external radiant flux is $\dot q''_{ex}$ (our
-$q_{\text{inc}}$), the absorption coefficient is per-component and forms a
-volumetric coefficient (our $\alpha_{\text{eff}}=\sum_j\xi_j\alpha_j$), and the
-in-depth source is $\dot q''_{ex}\,\alpha\,e^{-\int\alpha\,\mathrm{d}x}$ — identical
-in form to our $q'''=\alpha I$ with $I=I_e e^{-\int\alpha\,\mathrm{d}z}$ (our
-`BEER_LAMBERT`). ThermaKin additionally models re-radiation $\varepsilon\sigma T_s^4$
-at the surface (often with reflection of a fraction of $\dot q''_{ex}$), which
-Pyrolysis.jl supplies via a top `RadiativeBC` term
-$F\varepsilon_{\text{eff}}\sigma(T_\infty^4-T_s^4)$ in the surface balance and the
-reflected share $(1-a)\,q_{\text{inc}}$ (§8.3.2, §12). ThermaKin also offers a
-radiative-conductivity augmentation $k\propto T^3$ to mimic radiative diffusion in
-char; Pyrolysis.jl has no separate radiative-diffusion model, and the same
-augmentation is a component conductivity law with a $T^3$ term (a function or
-`PolynomialProperty` for `k`, §5.5). ThermaKin publishes heats of reaction with
-the opposite sign convention ($h>0$ exothermic); this does not touch the radiation
-terms (§6.9.2).
+TK Eq. 11 uses the same mass-specific Beer–Lambert attenuation coefficient
+$\sum_j\alpha_j\xi_j$ as Pyrolysis.jl. Its numerical deposition is different:
+TK §3 describes `MAX` (all absorbed radiation assigned to the maximum-absorption
+element) and `RAND` (an element sampled from the absorption distribution).
+Re-radiation uses the temperature and emissivity of that selected element.
+TK Eqs. 12 and 23 weight re-radiation and reflectivity by absorption through
+the object; they are not generally a surface-only $\varepsilon\sigma T_s^4$
+condition. Pyrolysis.jl deposits the attenuated beam in every traversed cell
+and applies `RadiativeBC` at the boundary.
+
+TK also describes a $T^3$ conductivity contribution for optically thick
+radiative diffusion. Such a property law can be supplied here, but it is not
+part of our Beer–Lambert kernel.
 
 ### 8.7.2 Gpyro
 
-Gpyro (Lautenberger & Fernandez-Pello) deposits the external radiant flux
-**in-depth** with an exponential absorption profile and treats the surface energy
-balance with combined radiative–convective exchange. In Gpyro notation the
-pre-exponential of any property is $Z$ (our $A_i$), the volume fraction is
-$X_\alpha$ (our $v_j$), and the in-depth absorbed flux follows
-$\dot q''_e\,\kappa\,e^{-\kappa x}$ — again our `BEER_LAMBERT` form, with Gpyro's
-$\kappa$ (the absorption coefficient, distinct from the permeability $K$ in §9)
-mapping to our volumetric $\alpha_{\text{eff}}$. Gpyro's effective radiative
-conductivity in optically thick char (a temperature-cubed conductivity
-contribution) plays the role a $T^3$ term in our $k_j(T)$ would play; Pyrolysis.jl
-carries it, if at all, in the mixture conductivity of §5 and §7. Gpyro's surface
-emissivity enters the boundary balance just as our
-$\varepsilon_{\text{eff}}=\sum_j v_j\varepsilon_j$ does.
+GP Eqs. 66–67 describe one-way attenuation of
+$\bar\varepsilon\dot q_e''$ with effective coefficient $\bar\kappa$
+[m⁻¹], without internal emission. This corresponds to our incident-beam
+model when optical depth, entering flux and boundary conditions are matched.
+GP Eq. 7 separately permits a $T^3$ pore-radiation conductivity contribution.
+The component coefficient units and mixture weights require the conversion
+in §5.14. Gpyro V2's multidimensional radiation changes are not implied by
+this comparison to the documented 1D model.
 
 ### 8.7.3 FDS
 
-The FDS solid-phase model uses a **two-flux (Schuster–Schwarzschild)** in-depth
-radiation model for the condensed phase: forward and backward hemispheric
-intensities $I^+,I^-$ are propagated with absorption coefficient $\kappa_s$ (our
-$\alpha$), and the radiative source in the 1D Fourier conduction equation is the
-divergence of the net radiative flux $I^+-I^-$. Pyrolysis.jl's `BEER_LAMBERT`
-corresponds to the single-flux limit: only the inward-going beam, with no internal
-re-emission. FDS applies surface absorptivity and emissivity through Kirchhoff's
-law at the gas–solid interface — the default ($a=\varepsilon_{\text{eff}}$)
-Pyrolysis.jl uses for `RadiativeFluxBC`. FDS's gray-band absorption maps to our
-gray (wavelength-independent) $\alpha_{\text{eff}}$. The principal difference is
-the explicit two-stream bookkeeping: FDS resolves $I^\pm$ with emission in depth,
-whereas Pyrolysis.jl resolves the inward beam only (§8.8).
+FDS 6.11.0 defaults to opaque surface absorption. Its optional in-depth
+Schuster–Schwarzschild model propagates forward and backward hemispheric
+intensities, including thermal emission. In the documented angular closure,
+$dI^+/dx=\kappa_s(\sigma T^4/\pi-I^+)/\mu_+$, with $\mu_+=1/2$.
+Consequently, even when internal emission is negligible, the attenuation
+length is not automatically our normally incident beam's $1/\alpha_{\mathrm{eff}}$.
+Match angular assumptions, optical depth and boundary reflection as well as
+units; do not simply copy $\kappa_s$ into a mass-specific $\alpha_j$.
+The condensed-phase model described here is gray; FDS's gas-phase spectral
+radiation options do not establish a gray-band solid model.
 
-### 8.7.4 Summary table
+### 8.7.4 Summary
 
-| Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro | FDS (solid) |
-|---|---|---|---|---|
-| In-depth absorption | Beer–Lambert $q'''=\alpha I$, face intensities as unknowns | Beer–Lambert | exp. in-depth | two-flux $I^\pm$ |
-| Radiative diffusion in depth | none (a $T^3$ term in $k_j(T)$ can carry it) | radiative $k\propto T^3$ | radiative $k$ | two-flux divergence |
-| Surface absorptivity | $a_{\text{eff}}$ (Kirchhoff $\varepsilon_{\text{eff}}$ unless a component sets $a_j$) | $\varepsilon$ + reflection | $\varepsilon$ | Kirchhoff |
-| Spectral model | gray | gray | gray | gray-band |
-| Surface re-radiation | `RadiativeBC` $F\varepsilon\sigma(T_\infty^4-T_s^4)$ | $\varepsilon\sigma T_s^4$ | radiative–convective | $\varepsilon\sigma T_s^4$ |
+| Model | External radiation treatment | Thermal emission treatment |
+|---|---|---|
+| Pyrolysis.jl | surface absorption or deterministic Beer–Lambert deposits | boundary `RadiativeBC`; no in-depth emission |
+| ThermaKin2Ds | Beer–Lambert distribution with MAX/RAND element selection | absorption-selected element; radiative conductivity separately |
+| Gpyro documented 1D | one-way exponential attenuation | surface emission; radiative conductivity separately |
+| FDS standard solid | surface absorption or two-flux transport | surface or in-depth emission according to selected model |
+
+Sources: TK Eqs. 11–12, 23 and §3; GP Eqs. 7, 66–67;
+FDS solid-phase chapter, “Thermal Radiation” (§1.6.5).
 
 ---
 
@@ -795,11 +781,10 @@ are the open issues most likely to matter in practice.
    issued. Nor is any warning issued for a model that does not match the material
    (§8.1.2).
 
-6. **The surface Newton derivative of a condition-supplied $\varepsilon(T)$.** A
-   `RadiativeBC` with its own emissivity law evaluates $\varepsilon(T_s)$ at the
-   surface temperature, and the derivative of the surface-balance Newton
-   iteration drops $\mathrm{d}\varepsilon/\mathrm{d}T_s$ (§12.2.4). This affects
-   only the convergence of the iteration, not its root. The default
+6. **Surface versus cell optical properties.** A `RadiativeBC` with its own
+   emissivity law evaluates $\varepsilon(T_s)$ at the surface temperature.
+   The surface iteration and its implicit derivative differentiate this
+   complete flux (§12.2.3). The default
    $\varepsilon_{\text{eff}}$ and $a_{\text{eff}}$ are those of the boundary cell
    at its composition and trial temperature, not at $T_s$; they are constants
    within the iteration.

@@ -39,7 +39,7 @@ const _absorbers = (
 function _translucent_slab(
     n;
     top,
-    gas_λ = 0.0,
+    λ = 0.0,
     bottom = AdiabaticBC(),
     reacting = true,
     coordinates = Planar(),
@@ -47,6 +47,8 @@ function _translucent_slab(
 )
     virgin = SolidComponent(
         :virgin;
+        ρ_intrinsic = 1600.0,
+        λ = λ,
         c = (900.0, 1.5),
         k = (0.2, 2e-4),
         α = 1.5,
@@ -54,13 +56,15 @@ function _translucent_slab(
     )
     char = SolidComponent(
         :char;
+        ρ_intrinsic = 1800.0,
+        λ = λ,
         ρ = 300.0,
         c = 1100.0,
         k = 0.1,
         α = 20.0,
         _absorbers[absorber].char...,
     )
-    gas = GaseousComponent(:gas, M = 0.03, c = 1100.0, k = 0.03, λ = gas_λ)
+    gas = GaseousComponent(:gas, M = 0.03, c = 1100.0, k = 0.03)
     mat = Material(
         name = :translucent,
         components = (virgin, char, gas),
@@ -113,7 +117,7 @@ end
     λ in (0.0, 1e-5)
 
     cp = setup(
-        _translucent_slab(n; top = _radiation_tops[name], gas_λ = λ, absorber);
+        _translucent_slab(n; top = _radiation_tops[name], λ = λ, absorber);
         energy_state = energy,
         radiation_model = BEER_LAMBERT,
     )
