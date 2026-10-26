@@ -7,6 +7,65 @@
 # part of the verification suite.
 
 @testset "Exact-solution library self-tests" begin
+    @testset "Gpyro-inspired independent references" begin
+        # Robin uptake must equal the spatial integral of the concentration
+        # and its time derivative must equal the imposed surface exchange.
+        D, t = 2e-5, 150.0
+        for b in (5.0, 500.0)
+            response(x, time) = semiinf_convective_theta(x, time; h = b, k = 1.0, α = D)
+            xmax, n = 16sqrt(D*t), 4000
+            dx = xmax/n
+            integral =
+                dx/3*(
+                    response(0.0, t) +
+                    response(xmax, t) +
+                    4sum(response(i*dx, t) for i = 1:2:(n-1)) +
+                    2sum(response(i*dx, t) for i = 2:2:(n-2))
+                )
+            @test robin_diffusion_uptake(t; D, b) ≈ integral rtol = 1e-9
+            δ = 1e-3
+            derivative =
+                (robin_diffusion_uptake(t+δ; D, b)-robin_diffusion_uptake(t-δ; D, b))/(2δ)
+            @test derivative ≈ D*b*(1-response(0.0, t)) rtol = 1e-8
+            # Independent one-sided derivative of the continuum surface BC.
+            δx = 1e-7
+            gradient = (-3response(0.0, t)+4response(δx, t)-response(2δx, t))/(2δx)
+            @test -gradient ≈ b*(1-response(0.0, t)) rtol = 1e-7
+        end
+        @test robin_diffusion_uptake(0.0; D, b = 5.0) == 0.0
+
+        # Darcy reference satisfies the constitutive law, with pressure and
+        # gradient independently evaluated from the exact profile.
+        Pout, flux, μ, T, κ, M = 1e5, 10.0, 2e-5, 300.0, 5e-10, 0.029
+        p(x) = darcy_imposed_flux_pressure(x; Pout, flux, μ, T, κ, M)
+        @test p(0.0) == Pout
+        for x in (0.01, 0.05, 0.09)
+            δ = 1e-6
+            dpdx = (p(x+δ)-p(x-δ))/(2δ)
+            @test κ*M/(μ*Pyrolysis.Materials.R_GAS*T)*p(x)*dpdx ≈ flux rtol = 1e-8
+        end
+
+        # Differentiate the temperature reference and check the independent
+        # adiabatic energy equation, including the equal-capacity limit.
+        T0, rate, ca = 1000.0, 0.2, 1200.0
+        for cb in (ca, 1900.0, 1360.0), heat in (1e6, -1e5, 0.0)
+            temp(t) = adiabatic_reaction_temperature(t; T0, rate, heat, ca, cb)
+            @test temp(0.0) == T0
+            for t in (0.5, 5.0, 20.0)
+                δ = 1e-4
+                derivative = (temp(t+δ)-temp(t-δ))/(2δ)
+                a = exp(-rate*t)
+                @test (ca*a+cb*(1-a))*derivative ≈ -heat*rate*a rtol = 1e-7 atol = 1e-6
+                heat == 0 && @test temp(t) == T0
+            end
+        end
+        for heat in (1e6, -1e5)
+            equal = adiabatic_reaction_temperature(5.0; T0, rate, heat, ca, cb = ca)
+            nearly = adiabatic_reaction_temperature(5.0; T0, rate, heat, ca, cb = ca+1e-8)
+            @test nearly ≈ equal rtol = 1e-10
+        end
+    end
+
     @testset "semi-infinite convective erfc (C&J §2.7)" begin
         # Gpyro §3.4.1 parameters
         h, k = 20.0, 0.2

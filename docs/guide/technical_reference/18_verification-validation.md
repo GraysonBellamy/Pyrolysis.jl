@@ -129,7 +129,7 @@ environment should not carry.
   dependencies):
 
   ```
-  julia --project=scripts/verification scripts/verification/run_reports.jl [--cases=… --outdir=… --chapters=…]
+  julia --project=scripts/verification scripts/verification/run_reports.jl [--cases=… --outdir=… --chapters=… --timings=false]
   ```
 
   `run_reports.jl` runs each case over its report resolution ladder with its report
@@ -141,6 +141,8 @@ environment should not carry.
   rung, the ladder QoI errors and the solver configuration (`report_harness.jl`,
   with all plotting in `render.jl`). `chapters.jl` then writes one Markdown chapter
   per case family (problem statement, figures, error and order tables) and an index.
+  Use `--timings=false` for accuracy-only runs on a loaded machine: it skips the
+  timing warm-up, wall-clock measurements, timing columns and timing comparisons.
   Report mode does not assert the QoIs (a failed solve still aborts the run): coarse
   ladder rungs may exceed the pinned tolerances, and the tables record
   within-tolerance yes/no instead. The default output directory is the committed
@@ -181,20 +183,48 @@ shared library `test/verification/exact/` (series, roots, the manufactured-solut
 driver), which carries its own self-tests.
 
 **Case catalogue.** Each case family has one file in `test/verification/cases/`;
-lettered members (V-HC-02a–d, V-HC-04a–c, V-RX-02a–d, V-RX-04a/b, V-CPL-01b,
-V-CPL-02b) share the family's file and its report chapter. Most families compare
+lettered members (V-HC-02a–d, V-HC-04a–c, V-RX-02a–d, V-RX-04a/b, V-RX-05a–c,
+V-GT-03b–d, V-GT-07a/b, V-GT-08a/b, V-CPL-01b, V-CPL-02b) share the family's
+file and its report chapter. Most families compare
 against an exact or manufactured solution; the burnout cases V-BO-01, 02, 03 and
 05 to 08 check mass budgets, ledgers and a pinned reference run instead.
 
 | Family | Cases | Reference solution | What it verifies |
 |---|---|---|---|
 | Heat conduction | V-HC-01 – V-HC-05 | Carslaw–Jaeger erfc and eigenfunction series, resistance network, Kirchhoff transform | the convective surface Newton (V-HC-01; Biot sweep V-HC-02a–d), the constant-flux slab to its back-face plateau (V-HC-03), the harmonic-mean face conductivity at a layer jump on and off a face (V-HC-04a–c), $k(T)$ (V-HC-05) |
-| Kinetics and surface radiation | V-RX-01 – V-RX-04 | Bateman chain, Khawam–Flanagan isothermal integrals, parallel-reaction splits, implicit radiative-cooling law | multi-step coupling, reaction order and the depletion limiter (V-RX-02d keeps it on as a guard), two-product yields and heat superposition, `RadiativeBC` through the surface Newton |
+| Kinetics and surface radiation | V-RX-01 – V-RX-05 | Bateman chain, Khawam–Flanagan isothermal integrals, parallel-reaction splits, implicit radiative-cooling law, insulated-reaction logarithmic temperature history | multi-step coupling, reaction order and the depletion limiter (V-RX-02d keeps it on as a guard), two-product yields and heat superposition, `RadiativeBC` through the surface Newton, reaction heat and sensible-enthalpy formation with unequal species heat capacities |
 | In-depth radiation | V-RAD-01 | Lautenberger eigenfunction series | Beer–Lambert absorption with conduction and a convective face, including the sub-surface temperature peak |
-| Gas transport | V-GT-01, V-GT-02 | Gaussian plane source; steady compressible Darcy $P^2$ profile | the lumped wall flux and mass conservation; the pressure closure, Darcy mobility, upwinding and the pressure outflow condition |
+| Gas transport | V-GT-01 – V-GT-08 | Gaussian plane source, integrated wall/Darcy resistance, binary dusty-gas exchange, coupled thermal-film solution, Robin diffusion, prescribed-inflow Darcy $P^2$ profile | wall transport and conservation, pressure closure and upwinding, interfaces and flow reversal, binary exchange, nonisothermal transport, transient mass-film uptake, imposed gas inflow and pressure outflow |
 | Coupled physics | V-CPL-01 – V-CPL-05 | Neumann two-phase Stefan solution, Landau ablation wave, exact shrink/swell endpoints, Frank-Kamenetskii slab, 0D TGA curve | a latent-heat front (apparent heat capacity, V-CPL-01; gated reaction, V-CPL-01b), surface regression on a moving mesh (V-CPL-02, 02b), volume change and the lateral-shrinkage law, the reaction–conduction bifurcation, the boundary and volume coupling of the kinetics |
 | Manufactured solutions | V-MMS-01 – V-MMS-04 | the manufactured-solution driver of §18.2 | design order of the coupled residual on a fixed mesh in space and time, free-stream preservation under prescribed motion, order under prescribed and reaction-driven motion |
 | Burnout | V-BO-01 – V-BO-08 | exact exponential thickness (V-BO-04); otherwise exact mass and thickness budgets, conservation ledgers and termination constraints | deactivation through complete burnout on a moving mesh under in-depth absorption (V-BO-01) and on a fixed mesh under surface absorption (V-BO-02); the transmitted-flux series (V-BO-03); the interior-void stop (V-BO-05, `expected_retcode = :Terminated`); a graded mesh (V-BO-06), a layer of mixed composition (V-BO-07) and a thin layer on a deep substrate (V-BO-08) |
+
+**Gpyro guide adaptations.** V-GT-07a/b, V-GT-08a/b and V-RX-05a–c cite
+Abdelhafiz et al., [*Gpyro Verification and Validation Manual*, version 1.0
+(15 January 2026), Gpyro V2.0](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/documentation/gpyro_verification_manual.pdf).
+The case statements document each change from the guide's problem:
+
+- **§4.4, pp. 30–31:** V-GT-07 compares transient binary diffusion through
+  a mass-transfer film at two conductances with the Robin erfc solution,
+  its surface flux and its integrated uptake. Equal-mass tracers preserve
+  constant pressure and temperature; the run ends before the sealed back
+  affects the semi-infinite reference. The wall coefficient is chosen to
+  reproduce the guide's constant diffusivity.
+- **§4.3, p. 29 and Appendix A.2:** V-GT-08 checks the analytical $P^2$
+  profile with prescribed gas inflow and a pressure outlet, including the
+  mirrored flow direction. A specified constant viscosity replaces the
+  guide's Chapman–Enskog correlation.
+- **§3.6, p. 23:** V-RX-05 retains the endothermic, exothermic and zero-heat
+  gas-producing variants, but uses an insulated cell and $E=0$ to obtain
+  independent closed-form species, temperature and sensible-enthalpy
+  histories. Unequal heat capacities exercise formation terms in the
+  enthalpy formulation. Unlike the guide's source-term comparison, these
+  references do not use reaction rates extracted from the numerical solution.
+
+The gas cases assert spatial convergence; all three families run in both
+energy formulations through the existing suite harness. Their reference
+functions have independent integral, constitutive-law and ODE checks in
+`test/verification/exact/selftests.jl`.
 
 The burnout cases share V-BO-01's deck (`V-BO-01.jl` defines it, its step
 recorder and its QoIs): a 5.9 mm PMMA slab on 12 mm of Kaowool under 50 kW m⁻², the
@@ -236,19 +266,23 @@ gates open (§18.2.2), while V-RX-02d keeps the limiter on as a guard.
 **Cross-code overlays.** Where a case has an analogue in another code, that code's
 numerical output is committed under `test/verification/reference/<code>/` with a
 provenance README: FDS 6.11.1 and Gpyro 0.8200 runs of the same problems, a Gpyro V2
-run of the V-BO-01 deck, and the MaCFP-2 PMMA community submissions (which no case
-reads). They are read only inside a case's report `curves`; assert mode never
+run of the V-BO-01 deck, matched Gpyro V2 accuracy runs for V-GT-07, V-GT-08
+and V-RX-05, and the MaCFP-2 PMMA community submissions (which no case reads). They are read only inside a case's report `curves`; assert mode never
 touches them. Overlays are drawn for V-HC-01 (FDS and Gpyro), V-HC-02 (FDS), V-HC-03
 (Gpyro; the FDS 6.11.0 flux-input restriction is discussed in §12.11.3), V-RAD-01 (Gpyro), V-RX-01 (FDS and
 Gpyro), V-RX-02 (FDS), V-CPL-01 (Gpyro), V-CPL-03 (FDS) and V-BO-01 (the Gpyro V2
-gas-generation rate). A series marked `crosscode = true` is drawn as a muted
+gas-generation rate), plus V-GT-07, V-GT-08 and V-RX-05 (Gpyro V2 accuracy).
+A series marked `crosscode = true` is drawn as a muted
 context layer in a separate `_vs_codes` variant of each affected figure, so the base
 figure keeps the solver's own error on its own scale; for exact-solution cases the
 other codes' *errors* against the same exact solution are compared.
 The guide's formulation comparisons now target V2 at the revision in
-§1.6.5. These retained datasets and their version labels have not been
-replaced. V2 verification and performance reruns are pending; the older
-overlays and timings do not establish results for the new reference revision.
+§1.6.5. The V-GT-07, V-GT-08 and V-RX-05 comparisons use that pinned V2
+revision, retain raw numerical outputs and refinement checks, and omit timings.
+Their source and transformations are documented in
+`test/verification/reference/gpyro/v2_accuracy/README.md`. The older datasets
+retain their original version labels; their overlays and timings do not
+establish results for the new reference revision.
 
 `reference/timings.csv` feeds the wall-time comparison: warmed Julia model
 construction and solve versus FDS/Gpyro internal total elapsed time, including

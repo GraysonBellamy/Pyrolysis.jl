@@ -103,6 +103,7 @@ Base.@kwdef struct CaseReportResult
     observed_order::Union{Nothing,Float64}
     figures::Vector{Pair{Symbol,String}}   # kind => relative path
     solve_kwargs::NamedTuple
+    timings_recorded::Bool = true
 end
 
 _relfig(outdir, path) = relpath(path, outdir)
@@ -112,7 +113,7 @@ Run `case` through its report ladder and write every artifact under
 `<outdir>/assets/<id>/`. Returns a `CaseReportResult`, or `nothing` when the
 case opts out of report mode (`report = (;)`).
 """
-function run_case_report(case::VerificationCase, outdir::String)
+function run_case_report(case::VerificationCase, outdir::String; timings::Bool = true)
     isempty(pairs(case.report)) && return nothing
     assets = joinpath(outdir, "assets", case.id)
     mkpath(assets)
@@ -126,9 +127,11 @@ function run_case_report(case::VerificationCase, outdir::String)
     # compilation for its concrete problem types, which would otherwise be
     # billed to the coarsest rung's wall time (and dwarf the solve-time
     # comparison). Errors are ignored here — the timed loop re-raises them.
-    try
-        _case_solve(case, case.build(ns[1]); skw...)
-    catch
+    if timings
+        try
+            _case_solve(case, case.build(ns[1]); skw...)
+        catch
+        end
     end
 
     walls = Float64[]
@@ -137,7 +140,12 @@ function run_case_report(case::VerificationCase, outdir::String)
     finest_sol = nothing
     for n in ns
         local sol
-        wall = @elapsed sol = _case_solve(case, case.build(n); skw...)
+        wall = if timings
+            @elapsed sol = _case_solve(case, case.build(n); skw...)
+        else
+            sol = _case_solve(case, case.build(n); skw...)
+            NaN
+        end
         sol.retcode == case.expected_retcode ||
             error("$(case.id): solve failed at n = $(n) (retcode $(sol.retcode))")
         push!(walls, wall)
@@ -195,7 +203,7 @@ function run_case_report(case::VerificationCase, outdir::String)
 
     # Solve-time comparison, when other codes' reference runs exist for this
     # case (reference/timings.csv; provenance in reference/*/README.md).
-    ref_times = _reference_timings(case.id)
+    ref_times = timings ? _reference_timings(case.id) : NamedTuple[]
     if !isempty(ref_times)
         p = render_solve_time(case.id, ns, walls, ref_times, apath("solve_time.png"))
         push!(figures, :solve_time => _relfig(outdir, p))
@@ -214,10 +222,11 @@ function run_case_report(case::VerificationCase, outdir::String)
         norm_names = collect(keys(norms_per_n[1]))
         write_csv(
             apath("ladder.csv"),
-            vcat(["n_cells", "h", "wall_s"], string.(norm_names)),
+            vcat(["n_cells", "h"], timings ? ["wall_s"] : String[], string.(norm_names)),
             [
                 vcat(
-                    Any[ns[i], hs[i], walls[i]],
+                    Any[ns[i], hs[i]],
+                    timings ? Any[walls[i]] : Any[],
                     Any[getproperty(norms_per_n[i], nm) for nm in norm_names],
                 ) for i in eachindex(ns)
             ],
@@ -361,5 +370,6 @@ function run_case_report(case::VerificationCase, outdir::String)
         observed_order = observed,
         figures = figures,
         solve_kwargs = skw,
+        timings_recorded = timings,
     )
 end

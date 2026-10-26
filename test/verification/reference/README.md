@@ -16,6 +16,7 @@ and Gpyro 0.8200 timing measurements have separate provenance records.
 |---|---|---|
 | `fds/` | FDS 6.11.1 (NIST), run locally on the shipped verification inputs | V-HC-01/02, V-RX-01/02, V-CPL-03 overlays |
 | `gpyro/` | Gpyro 0.8200 (Lautenberger), built from source, dissertation §3.4 decks | V-HC-01/03, V-RAD-01, V-CPL-01, V-RX-01 overlays |
+| `gpyro/v2_accuracy/` | Gpyro V2 at pinned revision `bff0126c68f2`, matched inputs, raw outputs and refinement checks | V-GT-07a/b, V-GT-08a/b, V-RX-05a–c accuracy overlays; no timings |
 | `macfp/` | MaCFP-2 PMMA community submissions (9 institutions: FDS/Gpyro/ThermaKin/Sierra) | B-01 community-envelope comparison (case pending) |
 | `timings.csv` | internal elapsed and full process wall times; timing protocols recorded with the data | per-case `solve_time` figure and supporting timing table |
 

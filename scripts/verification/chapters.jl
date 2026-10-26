@@ -139,26 +139,44 @@ function _write_member!(io, r::CaseReportResult)
     cc_err = [(k, p) for (k, p) in r.figures if _is_vs_err(k)]
     cc_over = [(k, p) for (k, p) in r.figures if _is_vs(k)]
     cc_time = [(k, p) for (k, p) in r.figures if k === :solve_time]
-    if !(isempty(cc_err) && isempty(cc_time))
+    if !(isempty(cc_err) && isempty(cc_over) && isempty(cc_time))
         println(io, "### Comparison with other codes\n")
-        refs = _reference_timings(case.id)
-        codes_txt =
-            isempty(refs) ? "the reference codes" :
-            join(("$(t.label) at $(t.res)" for t in refs), " and ")
-        println(
-            io,
-            """
-            Reference runs are available from $(codes_txt). Decks, outputs and
-            available provenance are under `test/verification/reference/`; check
-            case-specific parameters and transformations before comparing. Where
-            error panels are present, they compare against the analytical reference.
-            A timing entry alone does not establish an identical physical workload.
-            """,
-        )
+        if haskey(case.report, :comparison_note)
+            println(io, case.report.comparison_note, "\n")
+        else
+            refs = _reference_timings(case.id)
+            codes_txt =
+                isempty(refs) ? "the reference codes" :
+                join(("$(t.label) at $(t.res)" for t in refs), " and ")
+            println(
+                io,
+                """
+                Reference runs are available from $(codes_txt). Decks, outputs and
+                available provenance are under `test/verification/reference/`; check
+                case-specific parameters and transformations before comparing. Where
+                error panels are present, they compare against the analytical reference.
+                """,
+            )
+        end
+        if !r.timings_recorded
+            println(io, "Accuracy comparison only; timing measurements are omitted.\n")
+        end
+        if !isempty(cc_err)
+            println(
+                io,
+                "Error panels show absolute error at each code's output points. " *
+                "Zeros are displayed at 1e-12 on the logarithmic axis; the reference " *
+                "CSV precision limits the discernible error.\n",
+            )
+        end
         for (kind, path) in cc_err
             println(io, "![$(case.id) $(kind)]($(path))\n")
         end
         if !isempty(cc_time)
+            println(
+                io,
+                "A timing entry alone does not establish an identical physical workload.\n",
+            )
             _write_timing_comparison(io, case.id, cc_time)
         end
         if !isempty(cc_over)
@@ -176,10 +194,15 @@ function _write_member!(io, r::CaseReportResult)
         norm_names = collect(keys(r.norms[1]))
         _md_table(
             io,
-            vcat(["n_cells", "h", "wall (s)"], string.(norm_names)),
+            vcat(
+                ["n_cells", "h"],
+                r.timings_recorded ? ["wall (s)"] : String[],
+                string.(norm_names),
+            ),
             [
                 vcat(
-                    Any[r.ladder_ns[i], _fmt(1.0 / r.ladder_ns[i]), _fmt(r.ladder_wall[i])],
+                    Any[r.ladder_ns[i], _fmt(1.0 / r.ladder_ns[i])],
+                    r.timings_recorded ? Any[_fmt(r.ladder_wall[i])] : Any[],
                     Any[_fmt(getproperty(r.norms[i], nm)) for nm in norm_names],
                 ) for i in eachindex(r.ladder_ns)
             ],
@@ -284,7 +307,7 @@ function write_chapters(
         exact/reference solution, markers are the solver. Tolerances are
         pinned at ~3× the observed error at pin time (the provenance column).
 
-        Selected cases include retained FDS 6.11.1 or Gpyro 0.8200 results.
+        Selected cases include retained FDS 6.11.1, Gpyro 0.8200 or Gpyro V2 results.
         Their decks, transformations and available provenance are documented in
         `test/verification/reference/`. Error overlays compare matched analytical
         problems where indicated; the V-BO-01 Gpyro V2 curve is a separate numerical

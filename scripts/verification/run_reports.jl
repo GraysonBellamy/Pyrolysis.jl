@@ -20,6 +20,8 @@
 #                            and CSVs under assets/<case id>/. The default is
 #                            the COMMITTED guide location — review the diff.
 #   --chapters=true          also (re)generate <outdir>/*.md guide chapters
+#   --timings=true           record wall times and include timing comparisons;
+#                            false produces accuracy-only reports
 #
 # Cases with `report = (;)` are skipped (listed in the index dashboard).
 # Nothing here asserts: coarse ladder rungs may exceed the pinned CI
@@ -37,6 +39,7 @@ function parse_cli(args)
         "cases" => "all",
         "outdir" => joinpath(ROOT, "docs", "guide", "verification"),
         "chapters" => "true",
+        "timings" => "true",
     )
     for a in args
         startswith(a, "--") || error("unrecognized argument $a (use --key=value)")
@@ -59,6 +62,7 @@ function select_cases(cases, spec::AbstractString)
 end
 
 opts = parse_cli(ARGS)
+opts["timings"] in ("true", "false") || error("--timings must be true or false")
 outdir = abspath(opts["outdir"])
 mkpath(outdir)
 set_theme!(report_theme())
@@ -76,7 +80,12 @@ for case in selected
     @info "running case report" case.id
     # invokelatest: case closures were defined during load_verification_cases
     # (Julia 1.12 world-age semantics — see casedefs.jl).
-    r = Base.invokelatest(run_case_report, case, outdir)
+    r = Base.invokelatest(
+        run_case_report,
+        case,
+        outdir;
+        timings = opts["timings"] == "true",
+    )
     if r !== nothing
         push!(results, r)
         # Persist completed reports even if a subsequent case fails. Passing

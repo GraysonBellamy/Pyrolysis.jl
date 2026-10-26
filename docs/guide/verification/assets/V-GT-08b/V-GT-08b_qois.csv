@@ -1,0 +1,7 @@
+"qoi","value","exact","error","tol","within_tol","comment"
+"linear P² profile / pressure-squared rise",0.0008129388415221033,NaN,0.0008129388415221033,0.0025,true,"Gpyro Eq. (4.5), μRT/M in place of α; n=80 observed 8.13e-4, ~3× margin"
+"prescribed signed inlet flux",-10.0,-10.0,0.0,1.0e-12,true,""
+"outlet flux vs imposed inflow",10.000000000000197,10.0,1.9761969838327786e-14,1.0e-8,true,"independent steady mass balance after pressure relaxation"
+"steady signed boundary balance",1.971756091734278e-13,NaN,1.971756091734278e-14,1.0e-8,true,""
+"gas inventory steadiness",0.0,NaN,0.0,1.0e-8,true,"relative inventory change between 0.5 and 1 s"
+"isothermal invariant",1.0800249583553523e-12,NaN,1.0800249583553523e-12,1.0e-8,true,""

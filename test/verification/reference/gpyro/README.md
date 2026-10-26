@@ -2,6 +2,11 @@
 
 Date: 2026-07-07
 
+The newer [Gpyro V2 accuracy comparisons](v2_accuracy/README.md) cover
+V-GT-07, V-GT-08 and V-RX-05 at pinned revision `bff0126c68f2`.
+Those runs retain inputs, raw numerical outputs and refinement checks;
+they do not contribute timing measurements.
+
 ## Code
 
 - **Gpyro 0.8200** (banner of every `.out` file: `Gpyro 0.8200`,
