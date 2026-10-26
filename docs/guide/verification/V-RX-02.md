@@ -43,6 +43,20 @@ published constants for normalized m = ξ/ξ₀ convert as A_ours = k_pub·ξ₀
 
 ![V-RX-02a xi_histories_error](assets/V-RX-02a/V-RX-02a_xi_histories_error.png)
 
+### Comparison with other codes
+
+See the [mesh/time audit and rerun policy](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). These overlays establish physical-problem comparisons; equal spacing and equal achieved accuracy require the qualifications listed there.
+
+Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [base and refined analytical errors](assets/V-RX-02a/V-RX-02a_comparison_accuracy.csv) are retained separately. These additions carry no timing measurements.
+
+Accuracy comparison only; timing measurements are omitted.
+
+Error panels show absolute error at each code's output points. Zeros are displayed at 1e-12 on the logarithmic axis; the reference CSV precision limits the discernible error.
+
+![V-RX-02a xi_histories_vs_codes_error](assets/V-RX-02a/V-RX-02a_xi_histories_vs_codes_error.png)
+
+Solution overlays including the other codes' points: [xi_histories_vs_codes](assets/V-RX-02a/V-RX-02a_xi_histories_vs_codes.png).
+
 ### Solver configuration
 
 | setting | value |
@@ -63,6 +77,20 @@ published constants for normalized m = ξ/ξ₀ convert as A_ours = k_pub·ξ₀
 ![V-RX-02b xi_histories](assets/V-RX-02b/V-RX-02b_xi_histories.png)
 
 ![V-RX-02b xi_histories_error](assets/V-RX-02b/V-RX-02b_xi_histories_error.png)
+
+### Comparison with other codes
+
+See the [mesh/time audit and rerun policy](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). These overlays establish physical-problem comparisons; equal spacing and equal achieved accuracy require the qualifications listed there.
+
+Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [base and refined analytical errors](assets/V-RX-02b/V-RX-02b_comparison_accuracy.csv) are retained separately. These additions carry no timing measurements.
+
+Accuracy comparison only; timing measurements are omitted.
+
+Error panels show absolute error at each code's output points. Zeros are displayed at 1e-12 on the logarithmic axis; the reference CSV precision limits the discernible error.
+
+![V-RX-02b xi_histories_vs_codes_error](assets/V-RX-02b/V-RX-02b_xi_histories_vs_codes_error.png)
+
+Solution overlays including the other codes' points: [xi_histories_vs_codes](assets/V-RX-02b/V-RX-02b_xi_histories_vs_codes.png).
 
 ### Solver configuration
 
@@ -87,30 +115,15 @@ published constants for normalized m = ξ/ξ₀ convert as A_ours = k_pub·ξ₀
 
 ### Comparison with other codes
 
-Reference runs are available from FDS 6.11.1 at 0D particle. Decks, outputs and
-available provenance are under `test/verification/reference/`; check
-case-specific parameters and transformations before comparing. Where
-error panels are present, they compare against the analytical reference.
-A timing entry alone does not establish an identical physical workload.
+See the [mesh/time audit and rerun policy](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). These overlays establish physical-problem comparisons; equal spacing and equal achieved accuracy require the qualifications listed there.
+
+Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [base and refined analytical errors](assets/V-RX-02c/V-RX-02c_comparison_accuracy.csv) are retained separately. These additions carry no timing measurements.
+
+Accuracy comparison only; timing measurements are omitted.
+
+Error panels show absolute error at each code's output points. Zeros are displayed at 1e-12 on the logarithmic axis; the reference CSV precision limits the discernible error.
 
 ![V-RX-02c xi_histories_vs_codes_error](assets/V-RX-02c/V-RX-02c_xi_histories_vs_codes_error.png)
-
-Setup and simulation wall times at every ladder rung against the
-reference runs. Julia times model construction and solve after warm-up;
-FDS and Gpyro use internal total elapsed wall time, including setup and
-simulation output. Process launch and Julia compilation are excluded
-from the figure. Output costs, discretizations and time-stepping rules
-still differ, so these are indicative costs, not pure solver speedups.
-See `test/verification/reference/README.md` and `timings.csv` for the
-timer boundaries, resolutions and measurement provenance.
-
-![V-RX-02c solve_time](assets/V-RX-02c/V-RX-02c_solve_time.png)
-
-Reference timings below are medians of five runs after one warm-up. Full process time also includes launch and shutdown; it is shown separately and is not compared with Julia's warmed time.
-
-| Code | Resolution | Internal elapsed (s) | Full process (s) |
-| --- | --- | --- | --- |
-| FDS 6.11.1 | 0D particle | 0.246 | 0.5042 |
 
 Solution overlays including the other codes' points: [xi_histories_vs_codes](assets/V-RX-02c/V-RX-02c_xi_histories_vs_codes.png).
 

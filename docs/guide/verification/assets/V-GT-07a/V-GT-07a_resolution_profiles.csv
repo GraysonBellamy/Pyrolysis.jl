@@ -1,0 +1,9 @@
+"series","mesh spacing (m)","maximum error / reservoir fraction","exact"
+"Pyrolysis.jl center values",0.025,0.0016401584114598556,
+"Pyrolysis.jl center values",0.0125,0.0004898326910129041,
+"Pyrolysis.jl center values",0.00625,0.0001282973279319689,
+"Pyrolysis.jl cell averages",0.025,0.003825023084891063,
+"Pyrolysis.jl cell averages",0.0125,0.0010372558963354422,
+"Pyrolysis.jl cell averages",0.00625,0.0002638882348394673,
+"Gpyro V2 point values",0.006250000000000089,0.0003344885857482834,
+"Gpyro V2 point values",0.0031250000000000444,9.52956117419541e-5,

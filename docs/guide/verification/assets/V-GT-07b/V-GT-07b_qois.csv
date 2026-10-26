@@ -1,5 +1,6 @@
 "qoi","value","exact","error","tol","within_tol","comment"
 "transient tracer profile / reservoir fraction",0.0012820313581798663,NaN,0.0012820313581798663,0.004,true,"n=160: observed 1.28e-4 / 1.28e-3 for h_m=1e-4 / 1e-2; ~3× margin"
+"transient tracer cell average / reservoir fraction",0.0016590121345892968,NaN,0.0016590121345892968,0.004,true,"analytical integral over each cell; same tolerance as the center-value metric"
 "surface uptake vs analytical flux",0.002445083241487067,NaN,0.002445083241487067,0.0075,true,"h_m Y∞ erfcx(b√(Dt)); observed 3.34e-4 / 2.45e-3; ~3× margin"
 "stored tracer vs integrated analytical influx",0.0025486096476228237,NaN,0.0025486096476228237,0.008,true,"integrated exact influx; observed 9.25e-4 / 2.55e-3; ~3× margin"
 "total gas inventory conservation",2.8910207561239076e-13,NaN,2.8910207561239076e-13,1.0e-10,true,"equal-mass binary counterdiffusion has zero net mass influx"

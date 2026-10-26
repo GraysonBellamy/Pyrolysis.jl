@@ -25,6 +25,8 @@ Thumbs.db
 # Local tooling
 .claude/
 .codex
+__pycache__/
+*.py[cod]
 
 # Generated output directories
 /output/

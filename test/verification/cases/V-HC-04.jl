@@ -21,10 +21,23 @@
 # gap (1.64% in flux, 1.47 K in profile at Δz = 0.5 mm) — pinned here against
 # its a-priori Δz/2 sensitivity bound.
 #
-# No convergence spec: (a)/(b) are nodally exact (error is integrator-, not
+# Variant (d) uses the same prescribed 10.2 mm interface as (c), with a mesh
+# face placed there using create_mesh_from_nodes. Both have 40 cells. Its
+# physical problem is unchanged, so the same native FDS/Gpyro runs apply.
+# Every member reports errors against the prescribed and represented geometry
+# separately; the off-face case remains a deliberate geometry-resolution test.
+#
+# No convergence spec: (a)/(b)/(d) are nodally exact (error is integrator-, not
 # mesh-limited); (c) is quantization-dominated and non-monotone in n.
 
-function _vhc04_case(label::String; k1::Float64, k2::Float64, z_i::Float64, n_ci::Int)
+function _vhc04_case(
+    label::String;
+    k1::Float64,
+    k2::Float64,
+    z_i::Float64,
+    n_ci::Int,
+    align_interface::Bool = false,
+)
     ρ, c = 1000.0, 1000.0
     L = 0.02
     T_bot, T_top = 300.0, 400.0
@@ -43,7 +56,16 @@ function _vhc04_case(label::String; k1::Float64, k2::Float64, z_i::Float64, n_ci
         s1 = SolidComponent(:layer1, ρ = ρ, c = c, k = k1)
         s2 = SolidComponent(:layer2, ρ = ρ, c = c, k = k2)
         mat = Material(name = :VHC04, components = (s1, s2), reactions = ())
-        mesh = create_uniform_mesh(L, n_cells)
+        mesh = if align_interface
+            n_left = clamp(round(Int, n_cells*z_i/L), 1, n_cells-1)
+            nodes = vcat(
+                collect(range(0.0, z_i; length = n_left+1)),
+                collect(range(z_i, L; length = n_cells-n_left+1))[2:end],
+            )
+            create_mesh_from_nodes(nodes)
+        else
+            create_uniform_mesh(L, n_cells)
+        end
         bc_set = BoundaryConditionSet(
             thermal = (top = DirichletThermalBC(T_top), bottom = DirichletThermalBC(T_bot)),
         )
@@ -61,16 +83,28 @@ function _vhc04_case(label::String; k1::Float64, k2::Float64, z_i::Float64, n_ci
         )
     end
 
+    function represented_interface(sol)
+        nodes = first.(sol.problem.mesh.positions)
+        last_left = findlast(>(ρ/2), sol.ξ[1, :, 1])
+        return nodes[last_left+1]
+    end
+    function represented_profile(sol)
+        z_q = represented_interface(sol)
+        q = (T_top-T_bot)/(z_q/k1+(L-z_q)/k2)
+        return z -> T_bot+q*(min(z, z_q)/k1+max(z-z_q, 0.0)/k2)
+    end
+
     function qois(sol)
         out = QoIResult[]
         z = get_cell_positions(sol)
         n = length(z)
-        Δz = L / n
+        nodes = first.(sol.problem.mesh.positions)
+        Δz = maximum(diff(nodes))
         Tn = @view sol.T[:, end]
 
         # Composition sampling quantizes the interface to the nearest face;
         # the numerics must be nodally exact against THAT network.
-        z_q = round(z_i / Δz) * Δz
+        z_q = represented_interface(sol)
         Rq = z_q / k1 + (L - z_q) / k2
         q_q = (T_top - T_bot) / Rq
         T_iface_q = T_bot + q_q * z_q / k1
@@ -80,7 +114,7 @@ function _vhc04_case(label::String; k1::Float64, k2::Float64, z_i::Float64, n_ci
         push!(
             out,
             QoIResult(
-                name = "L∞ steady profile vs (quantized) network",
+                name = "L∞ steady profile vs represented interface",
                 value = err,
                 error = err,
                 tol = 1e-8,  # observed 1.5e-11 (a), 3.0e-11 (b), same for c
@@ -91,13 +125,13 @@ function _vhc04_case(label::String; k1::Float64, k2::Float64, z_i::Float64, n_ci
 
         # Boundary fluxes from the discrete half-cell Dirichlet conductance;
         # both must equal the quantized-network flux at steady state.
-        q_bot = k1 * (Tn[1] - T_bot) / (Δz / 2)
-        q_top = k2 * (T_top - Tn[n]) / (Δz / 2)
+        q_bot = k1 * (Tn[1] - T_bot) / (z[1]-nodes[1])
+        q_top = k2 * (T_top - Tn[n]) / (nodes[end]-z[end])
         for (name, q_num) in (("bottom", q_bot), ("top", q_top))
             push!(
                 out,
                 QoIResult(
-                    name = "steady $(name)-face flux vs network",
+                    name = "steady $(name)-face flux vs represented interface",
                     value = q_num,
                     exact = q_q,
                     error = abs(q_num - q_q) / q_q,
@@ -105,7 +139,39 @@ function _vhc04_case(label::String; k1::Float64, k2::Float64, z_i::Float64, n_ci
                     comment = "both faces must carry the exact series flux",
                 ),
             )
+            push!(
+                out,
+                QoIResult(
+                    name = "steady $(name)-face flux vs prescribed interface",
+                    value = q_num,
+                    exact = q_exact,
+                    error = abs(q_num-q_exact)/q_exact,
+                    tol = abs(q_q-q_exact)/q_exact+1e-8,
+                    comment = "exact geometry discrepancy plus the 1e-8 discrete-solve allowance",
+                ),
+            )
         end
+
+        geometry_error = maximum(abs(T_quant(zz)-T_exact(zz)) for zz in z)
+        push!(
+            out,
+            QoIResult(
+                name = "L∞ steady profile vs prescribed interface",
+                value = maximum(abs(Tn[i]-T_exact(z[i])) for i in eachindex(z)),
+                error = maximum(abs(Tn[i]-T_exact(z[i])) for i in eachindex(z)),
+                tol = geometry_error+1e-8,
+                comment = "exact geometry discrepancy plus the 1e-8 K discrete-solve allowance",
+            ),
+            QoIResult(
+                name = "represented interface position (m)",
+                value = z_q,
+                exact = z_i,
+                error = abs(z_q-z_i),
+                tol = align_interface ? 1e-14 : Δz/2+eps(L),
+                comment = align_interface ? "mesh face at the prescribed interface" :
+                          "cell-center composition sampling; at most half a cell displacement",
+            ),
+        )
 
         # For an off-face interface, the user-facing smearing error is the
         # true-vs-quantized network gap, bounded a priori by the flux
@@ -143,8 +209,10 @@ function _vhc04_case(label::String; k1::Float64, k2::Float64, z_i::Float64, n_ci
 
     return VerificationCase(
         id = "V-HC-04$(label)",
-        title = "two-layer slab, k-ratio $(k1 / k2):1" *
-                (label == "c" ? " (off-face interface)" : ""),
+        title = "two-layer slab, k-ratio $(k1 / k2):1" * (
+            label == "c" ? " (off-face interface)" :
+            align_interface ? " (10.2 mm interface aligned to a mesh face)" : ""
+        ),
         tags = [:heat_conduction, :laminate, :harmonic_mean, :steady],
         references = [
             "series thermal-resistance network (exact)",
@@ -157,9 +225,15 @@ function _vhc04_case(label::String; k1::Float64, k2::Float64, z_i::Float64, n_ci
         report = (
             profile_times = [t_end],
             qoi_curves = (:T_profile_steady,),
+            comparison_note = align_interface ?
+                              "V-HC-04d changes only the Julia mesh: its 10.2 mm interface, " *
+                              "materials and boundary conditions are identical to V-HC-04c. " *
+                              "The manifests explicitly reuse the same native V-HC-04c runs; " *
+                              "their meshes and errors are retained without adjustment." :
+                              "",
             curves = sol -> begin
                 z = get_cell_positions(sol)
-                [
+                curves = [
                     ReportCurve(
                         name = :T_profile_steady,
                         title = "V-HC-04$(label): steady two-layer profile " *
@@ -178,6 +252,26 @@ function _vhc04_case(label::String; k1::Float64, k2::Float64, z_i::Float64, n_ci
                         ],
                     ),
                 ]
+                if label == "c"
+                    push!(
+                        curves,
+                        ReportCurve(
+                            name = :T_profile_represented,
+                            title = "V-HC-04c: steady profile against represented geometry",
+                            xlabel = "z (m)",
+                            ylabel = "T (K)",
+                            series = [
+                                CurveSeries(
+                                    label = "represented interface at $(represented_interface(sol)) m",
+                                    x = z,
+                                    y = sol.T[:, end],
+                                    exact = represented_profile(sol),
+                                ),
+                            ],
+                        ),
+                    )
+                end
+                curves
             end,
         ),
     )
@@ -197,4 +291,15 @@ push!(
 push!(
     VERIFICATION_CASE_BUILDERS,
     () -> _vhc04_case("c"; k1 = 1.0, k2 = 0.1, z_i = 0.0102, n_ci = 40),
+)
+push!(
+    VERIFICATION_CASE_BUILDERS,
+    () -> _vhc04_case(
+        "d";
+        k1 = 1.0,
+        k2 = 0.1,
+        z_i = 0.0102,
+        n_ci = 40,
+        align_interface = true,
+    ),
 )

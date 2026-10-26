@@ -12,8 +12,9 @@
 # The run must burn out completely, lose exactly the mass of the PMMA layer,
 # close the mass ledger, and converge the surface temperature at every
 # accepted step, within a wall-time budget at 0.098 mm cells.
-# Peak mass loss rate and timing are reported through the history curves;
-# the report also compares the histories with Gpyro V2.
+# Peak mass loss rate and timing are reported through the history curves.
+# The archival Gpyro PMMA run has different gas/burnout closures and is not
+# a matched comparison for this regression.
 #
 # The mesh moves by the equidistribution correction, the PMMA–Kaowool
 # interface a Lagrangian node, so the PMMA cells thin together and the layer
@@ -596,12 +597,6 @@ function _verification_case_vbo01()
             qoi_curves = (:mlr_history, :thickness_history),
             curves = sol -> begin
                 m = _vbo_measures(sol)
-                names, cols = read_reference_csv(
-                    "gpyro/vbo01_gpyro_v2_pmma.csv";
-                    header_rows = 1,
-                )
-                t_g = cols[1]
-                mlr_g = cols[2]                      # Gpyro writes MLR in g m⁻² s⁻¹
                 [
                     ReportCurve(
                         name = :mlr_history,
@@ -613,12 +608,6 @@ function _verification_case_vbo01()
                                 label = "gas generation rate",
                                 x = sol.t,
                                 y = m.mlr,
-                            ),
-                            CurveSeries(
-                                label = "Gpyro V2",
-                                x = t_g,
-                                y = mlr_g,
-                                crosscode = true,
                             ),
                         ],
                     ),

@@ -58,6 +58,20 @@ The δ_c bisection itself (turning-point hunt) is report-mode work.
 
 ![V-CPL-04 convergence](assets/V-CPL-04/V-CPL-04_convergence.png)
 
+### Comparison with other codes
+
+See the [mesh/time audit and rerun policy](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). These overlays establish physical-problem comparisons; equal spacing and equal achieved accuracy require the qualifications listed there.
+
+Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [base and refined analytical errors](assets/V-CPL-04/V-CPL-04_comparison_accuracy.csv) are retained separately. These additions carry no timing measurements.
+
+Accuracy comparison only; timing measurements are omitted.
+
+Error panels show absolute error at each code's output points. Zeros are displayed at 1e-12 on the logarithmic axis; the reference CSV precision limits the discernible error.
+
+![V-CPL-04 steady_profiles_vs_codes_error](assets/V-CPL-04/V-CPL-04_steady_profiles_vs_codes_error.png)
+
+Solution overlays including the other codes' points: [steady_profiles_vs_codes](assets/V-CPL-04/V-CPL-04_steady_profiles_vs_codes.png).
+
 ### Convergence
 
 | n_cells | h | wall (s) | norm |

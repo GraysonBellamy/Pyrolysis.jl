@@ -53,10 +53,20 @@ the other three assert QoIs at the CI mesh.
 
 ### Comparison with other codes
 
-Reference runs are available from FDS 6.11.1 at 101 cells (Δx≈1 mm). Decks, outputs and
-available provenance are under `test/verification/reference/`; check
-case-specific parameters and transformations before comparing. Where
-error panels are present, they compare against the analytical reference.
+See the [mesh/time audit and rerun policy](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). These overlays establish physical-problem comparisons; equal spacing and equal achieved accuracy require the qualifications listed there.
+
+Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [base and refined analytical errors](assets/V-HC-02a/V-HC-02a_comparison_accuracy.csv) are retained separately. These additions carry no timing measurements.
+
+The previously published timing measurements below are retained without a refresh.
+
+Error panels show absolute error at each code's output points. Zeros are displayed at 1e-12 on the logarithmic axis; the reference CSV precision limits the discernible error.
+
+![V-HC-02a T_profiles_vs_codes_error](assets/V-HC-02a/V-HC-02a_T_profiles_vs_codes_error.png)
+
+![V-HC-02a surface_T_history_vs_codes_error](assets/V-HC-02a/V-HC-02a_surface_T_history_vs_codes_error.png)
+
+![V-HC-02a back_T_history_vs_codes_error](assets/V-HC-02a/V-HC-02a_back_T_history_vs_codes_error.png)
+
 A timing entry alone does not establish an identical physical workload.
 
 ![V-HC-02a T_profiles_vs_codes_error](assets/V-HC-02a/V-HC-02a_T_profiles_vs_codes_error.png)
@@ -65,22 +75,7 @@ A timing entry alone does not establish an identical physical workload.
 
 ![V-HC-02a back_T_history_vs_codes_error](assets/V-HC-02a/V-HC-02a_back_T_history_vs_codes_error.png)
 
-Setup and simulation wall times at every ladder rung against the
-reference runs. Julia times model construction and solve after warm-up;
-FDS and Gpyro use internal total elapsed wall time, including setup and
-simulation output. Process launch and Julia compilation are excluded
-from the figure. Output costs, discretizations and time-stepping rules
-still differ, so these are indicative costs, not pure solver speedups.
-See `test/verification/reference/README.md` and `timings.csv` for the
-timer boundaries, resolutions and measurement provenance.
-
-![V-HC-02a solve_time](assets/V-HC-02a/V-HC-02a_solve_time.png)
-
-Reference timings below are medians of five runs after one warm-up. Full process time also includes launch and shutdown; it is shown separately and is not compared with Julia's warmed time.
-
-| Code | Resolution | Internal elapsed (s) | Full process (s) |
-| --- | --- | --- | --- |
-| FDS 6.11.1 | 101 cells (Δx≈1 mm) | 0.352 | 0.6092 |
+Historical runtime comparisons are withheld pending shared accuracy and observation qualification. The measurements remain in `test/verification/reference/timings.csv`; see the [comparison basis audit](comparison_coverage.md#comparison-basis-audit).
 
 Solution overlays including the other codes' points: [T_profiles_vs_codes](assets/V-HC-02a/V-HC-02a_T_profiles_vs_codes.png), [surface_T_history_vs_codes](assets/V-HC-02a/V-HC-02a_surface_T_history_vs_codes.png), [back_T_history_vs_codes](assets/V-HC-02a/V-HC-02a_back_T_history_vs_codes.png).
 
@@ -136,10 +131,20 @@ Observed order 2 (L2).
 
 ### Comparison with other codes
 
-Reference runs are available from FDS 6.11.1 at 101 cells (Δx≈1 mm). Decks, outputs and
-available provenance are under `test/verification/reference/`; check
-case-specific parameters and transformations before comparing. Where
-error panels are present, they compare against the analytical reference.
+See the [mesh/time audit and rerun policy](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). These overlays establish physical-problem comparisons; equal spacing and equal achieved accuracy require the qualifications listed there.
+
+Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [base and refined analytical errors](assets/V-HC-02b/V-HC-02b_comparison_accuracy.csv) are retained separately. These additions carry no timing measurements.
+
+The previously published timing measurements below are retained without a refresh.
+
+Error panels show absolute error at each code's output points. Zeros are displayed at 1e-12 on the logarithmic axis; the reference CSV precision limits the discernible error.
+
+![V-HC-02b T_profiles_vs_codes_error](assets/V-HC-02b/V-HC-02b_T_profiles_vs_codes_error.png)
+
+![V-HC-02b surface_T_history_vs_codes_error](assets/V-HC-02b/V-HC-02b_surface_T_history_vs_codes_error.png)
+
+![V-HC-02b back_T_history_vs_codes_error](assets/V-HC-02b/V-HC-02b_back_T_history_vs_codes_error.png)
+
 A timing entry alone does not establish an identical physical workload.
 
 ![V-HC-02b T_profiles_vs_codes_error](assets/V-HC-02b/V-HC-02b_T_profiles_vs_codes_error.png)
@@ -148,22 +153,7 @@ A timing entry alone does not establish an identical physical workload.
 
 ![V-HC-02b back_T_history_vs_codes_error](assets/V-HC-02b/V-HC-02b_back_T_history_vs_codes_error.png)
 
-Setup and simulation wall times at every ladder rung against the
-reference runs. Julia times model construction and solve after warm-up;
-FDS and Gpyro use internal total elapsed wall time, including setup and
-simulation output. Process launch and Julia compilation are excluded
-from the figure. Output costs, discretizations and time-stepping rules
-still differ, so these are indicative costs, not pure solver speedups.
-See `test/verification/reference/README.md` and `timings.csv` for the
-timer boundaries, resolutions and measurement provenance.
-
-![V-HC-02b solve_time](assets/V-HC-02b/V-HC-02b_solve_time.png)
-
-Reference timings below are medians of five runs after one warm-up. Full process time also includes launch and shutdown; it is shown separately and is not compared with Julia's warmed time.
-
-| Code | Resolution | Internal elapsed (s) | Full process (s) |
-| --- | --- | --- | --- |
-| FDS 6.11.1 | 101 cells (Δx≈1 mm) | 0.353 | 0.6103 |
+Historical runtime comparisons are withheld pending shared accuracy and observation qualification. The measurements remain in `test/verification/reference/timings.csv`; see the [comparison basis audit](comparison_coverage.md#comparison-basis-audit).
 
 Solution overlays including the other codes' points: [T_profiles_vs_codes](assets/V-HC-02b/V-HC-02b_T_profiles_vs_codes.png), [surface_T_history_vs_codes](assets/V-HC-02b/V-HC-02b_surface_T_history_vs_codes.png), [back_T_history_vs_codes](assets/V-HC-02b/V-HC-02b_back_T_history_vs_codes.png).
 
@@ -219,10 +209,20 @@ Observed order 2 (L2).
 
 ### Comparison with other codes
 
-Reference runs are available from FDS 6.11.1 at 101 cells (Δx≈1 mm). Decks, outputs and
-available provenance are under `test/verification/reference/`; check
-case-specific parameters and transformations before comparing. Where
-error panels are present, they compare against the analytical reference.
+See the [mesh/time audit and rerun policy](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). These overlays establish physical-problem comparisons; equal spacing and equal achieved accuracy require the qualifications listed there.
+
+Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [base and refined analytical errors](assets/V-HC-02c/V-HC-02c_comparison_accuracy.csv) are retained separately. These additions carry no timing measurements.
+
+The previously published timing measurements below are retained without a refresh.
+
+Error panels show absolute error at each code's output points. Zeros are displayed at 1e-12 on the logarithmic axis; the reference CSV precision limits the discernible error.
+
+![V-HC-02c T_profiles_vs_codes_error](assets/V-HC-02c/V-HC-02c_T_profiles_vs_codes_error.png)
+
+![V-HC-02c surface_T_history_vs_codes_error](assets/V-HC-02c/V-HC-02c_surface_T_history_vs_codes_error.png)
+
+![V-HC-02c back_T_history_vs_codes_error](assets/V-HC-02c/V-HC-02c_back_T_history_vs_codes_error.png)
+
 A timing entry alone does not establish an identical physical workload.
 
 ![V-HC-02c T_profiles_vs_codes_error](assets/V-HC-02c/V-HC-02c_T_profiles_vs_codes_error.png)
@@ -231,22 +231,7 @@ A timing entry alone does not establish an identical physical workload.
 
 ![V-HC-02c back_T_history_vs_codes_error](assets/V-HC-02c/V-HC-02c_back_T_history_vs_codes_error.png)
 
-Setup and simulation wall times at every ladder rung against the
-reference runs. Julia times model construction and solve after warm-up;
-FDS and Gpyro use internal total elapsed wall time, including setup and
-simulation output. Process launch and Julia compilation are excluded
-from the figure. Output costs, discretizations and time-stepping rules
-still differ, so these are indicative costs, not pure solver speedups.
-See `test/verification/reference/README.md` and `timings.csv` for the
-timer boundaries, resolutions and measurement provenance.
-
-![V-HC-02c solve_time](assets/V-HC-02c/V-HC-02c_solve_time.png)
-
-Reference timings below are medians of five runs after one warm-up. Full process time also includes launch and shutdown; it is shown separately and is not compared with Julia's warmed time.
-
-| Code | Resolution | Internal elapsed (s) | Full process (s) |
-| --- | --- | --- | --- |
-| FDS 6.11.1 | 101 cells (Δx≈1 mm) | 0.346 | 0.6045 |
+Historical runtime comparisons are withheld pending shared accuracy and observation qualification. The measurements remain in `test/verification/reference/timings.csv`; see the [comparison basis audit](comparison_coverage.md#comparison-basis-audit).
 
 Solution overlays including the other codes' points: [T_profiles_vs_codes](assets/V-HC-02c/V-HC-02c_T_profiles_vs_codes.png), [surface_T_history_vs_codes](assets/V-HC-02c/V-HC-02c_surface_T_history_vs_codes.png), [back_T_history_vs_codes](assets/V-HC-02c/V-HC-02c_back_T_history_vs_codes.png).
 
@@ -302,10 +287,20 @@ Observed order 2.001 (L2), expected 2.0.
 
 ### Comparison with other codes
 
-Reference runs are available from FDS 6.11.1 at 101 cells (Δx≈1 mm). Decks, outputs and
-available provenance are under `test/verification/reference/`; check
-case-specific parameters and transformations before comparing. Where
-error panels are present, they compare against the analytical reference.
+See the [mesh/time audit and rerun policy](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). These overlays establish physical-problem comparisons; equal spacing and equal achieved accuracy require the qualifications listed there.
+
+Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [base and refined analytical errors](assets/V-HC-02d/V-HC-02d_comparison_accuracy.csv) are retained separately. These additions carry no timing measurements.
+
+The previously published timing measurements below are retained without a refresh.
+
+Error panels show absolute error at each code's output points. Zeros are displayed at 1e-12 on the logarithmic axis; the reference CSV precision limits the discernible error.
+
+![V-HC-02d T_profiles_vs_codes_error](assets/V-HC-02d/V-HC-02d_T_profiles_vs_codes_error.png)
+
+![V-HC-02d surface_T_history_vs_codes_error](assets/V-HC-02d/V-HC-02d_surface_T_history_vs_codes_error.png)
+
+![V-HC-02d back_T_history_vs_codes_error](assets/V-HC-02d/V-HC-02d_back_T_history_vs_codes_error.png)
+
 A timing entry alone does not establish an identical physical workload.
 
 ![V-HC-02d T_profiles_vs_codes_error](assets/V-HC-02d/V-HC-02d_T_profiles_vs_codes_error.png)
@@ -314,22 +309,7 @@ A timing entry alone does not establish an identical physical workload.
 
 ![V-HC-02d back_T_history_vs_codes_error](assets/V-HC-02d/V-HC-02d_back_T_history_vs_codes_error.png)
 
-Setup and simulation wall times at every ladder rung against the
-reference runs. Julia times model construction and solve after warm-up;
-FDS and Gpyro use internal total elapsed wall time, including setup and
-simulation output. Process launch and Julia compilation are excluded
-from the figure. Output costs, discretizations and time-stepping rules
-still differ, so these are indicative costs, not pure solver speedups.
-See `test/verification/reference/README.md` and `timings.csv` for the
-timer boundaries, resolutions and measurement provenance.
-
-![V-HC-02d solve_time](assets/V-HC-02d/V-HC-02d_solve_time.png)
-
-Reference timings below are medians of five runs after one warm-up. Full process time also includes launch and shutdown; it is shown separately and is not compared with Julia's warmed time.
-
-| Code | Resolution | Internal elapsed (s) | Full process (s) |
-| --- | --- | --- | --- |
-| FDS 6.11.1 | 101 cells (Δx≈1 mm) | 0.348 | 0.6064 |
+Historical runtime comparisons are withheld pending shared accuracy and observation qualification. The measurements remain in `test/verification/reference/timings.csv`; see the [comparison basis audit](comparison_coverage.md#comparison-basis-audit).
 
 Solution overlays including the other codes' points: [T_profiles_vs_codes](assets/V-HC-02d/V-HC-02d_T_profiles_vs_codes.png), [surface_T_history_vs_codes](assets/V-HC-02d/V-HC-02d_surface_T_history_vs_codes.png), [back_T_history_vs_codes](assets/V-HC-02d/V-HC-02d_back_T_history_vs_codes.png).
 

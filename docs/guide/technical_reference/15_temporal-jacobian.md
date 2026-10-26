@@ -979,7 +979,8 @@ uses colored forward-mode automatic differentiation (§15.5).
 
 The retained timing rows describe their original versions and workloads
 (§18.1.3). They establish neither V2 timings nor a general ranking of these
-integration methods. New verification and performance runs remain pending.
+integration methods. Independent temporal refinements are retained for the
+new V2 verification runs; matched-accuracy performance runs remain outstanding.
 User Guide §§8.3 and 12.6 covers tolerance and step-size studies.
 
 ---

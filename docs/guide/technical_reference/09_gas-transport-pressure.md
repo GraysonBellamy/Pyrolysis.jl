@@ -1002,12 +1002,13 @@ the reduced constitutive evaluator. These checks verify the implemented laws;
 they are not matched runs of the three external solvers.
 
 Numerical agreement between the complete gas-transport models is **not
-established** by the retained reference datasets. The FDS 6.11.1 and Gpyro
-0.8200 overlays described in §18.6.4 address other specified cases. ThermaKin
-example overlays and the Gpyro V2 burnout CSV have the provenance limitations
-recorded there and in `test/verification/reference/README.md`. The V2 CSV
-does not identify the source revision used for that run; the V2 equations
-and implementation can still be compared at the revision linked above.
+established** by the retained reference datasets. The pinned Gpyro V2
+GT-07/08 runs check the specified diffusion and Darcy reductions; the other
+FDS 6.11.1 and Gpyro V2 overlays in §18.6.4 address their stated cases.
+ThermaKin example overlays and the archival Gpyro V2 burnout CSV have the
+provenance limitations recorded there and in
+`test/verification/reference/README.md`. The burnout CSV does not identify
+its source revision and remains excluded from active comparisons.
 The FDS version used for the retained runs also differs from the 6.11.0
 formulation examined here. These distinctions keep a source-based
 correspondence separate from agreement demonstrated by a numerical experiment.

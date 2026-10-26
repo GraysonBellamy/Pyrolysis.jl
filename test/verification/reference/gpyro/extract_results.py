@@ -9,7 +9,9 @@ import csv, math, os, shutil
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("workspace", help="directory containing gpyro_run")
-workspace = parser.parse_args().workspace
+parser.add_argument("--metrics", help="optional structured analytical-error CSV")
+args = parser.parse_args()
+workspace = args.workspace
 RUN = os.path.join(workspace, "gpyro_run")
 OUT = os.path.join(workspace, "gpyro_out")
 os.makedirs(OUT, exist_ok=True)
@@ -36,6 +38,7 @@ def nearest(data, t_target):
     return min(data, key=lambda p: abs(p[0] - t_target))
 
 report = []
+metrics = []
 
 # ---------------------------------------------------------------- V-HC-01
 # exact: erfc solution, absorbed flux + convection == convection to Tinf_eff
@@ -60,6 +63,7 @@ with open(f"{OUT}/vhc01_result.csv", "w", newline="") as f:
     for tt in times:
         t, T = nearest(prof, tt)
         err = max(abs(Ti - T_hc01(xi, t)) for xi, Ti in zip(z, T))
+        metrics.append(("V-HC-01", "profile_Linf_K", t, err))
         report.append(f"V-HC-01  t={t:7.2f} s: Linf |Gpyro - exact erfc| = {err:.3f} K "
                       f"(T_s gpyro {T[0]:.2f} K, exact {T_hc01(0,t):.2f} K)")
         for xi, Ti in zip(z, T):
@@ -118,6 +122,7 @@ with open(f"{OUT}/vrad01_result.csv", "w", newline="") as f:
     for tt in times:
         t, T = nearest(prof, tt)
         err = max(abs(Ti - T_rad01(xi, t)) for xi, Ti in zip(z, T))
+        metrics.append(("V-RAD-01", "profile_Linf_K", t, err))
         ipk = max(range(len(T)), key=lambda i: T[i])
         report.append(f"V-RAD-01 t={t:7.2f} s: Linf |Gpyro - exact eigenfn| = {err:.3f} K "
                       f"(peak {T[ipk]:.2f} K at x={z[ipk]*1e3:.2f} mm; exact T(0)={T_rad01(0,t):.2f} K, gpyro {T[0]:.2f} K)")
@@ -181,6 +186,8 @@ for tt in [100.0, 200.0, 299.0]:
     t, T = nearest(prof, tt)
     s_num = front_pos(T); s_ex = 2 * lam * math.sqrt(alpha_s * t)
     errs = [abs(T[didx[d]] - T_stefan(d, t)) for d in depths]
+    metrics.append(("V-CPL-01", "probe_Linf_K", t, max(errs)))
+    metrics.append(("V-CPL-01", "front_abs_error_m", t, abs(s_num-s_ex)))
     report.append(f"V-CPL-01 t={t:7.2f} s: front {s_num*1e3:.3f} mm vs exact {s_ex*1e3:.3f} mm "
                   f"({100*(s_num-s_ex)/s_ex:+.2f}%); |dT| at 0.5/1/1.5/2 mm = "
                   + "/".join(f"{e:.3f}" for e in errs) + " K")
@@ -208,6 +215,7 @@ with open(f"{OUT}/vhc03_result.csv", "w", newline="") as f:
     for tt in [80.0, 400.0, 1200.0]:
         t, T = nearest(prof, tt)
         err = max(abs(Ti - T_hc03(xi, t)) for xi, Ti in zip(z, T))
+        metrics.append(("V-HC-03", "profile_Linf_K", t, err))
         meanT = sum(T) / len(T)   # uniform nodes incl. half-weight ends -> trapezoid
         meanT_trap = (0.5 * T[0] + sum(T[1:-1]) + 0.5 * T[-1]) / (len(T) - 1)
         report.append(f"V-HC-03  t={t:7.2f} s (Fo={alpha3*t/L3**2:.2f}): Linf |Gpyro - exact series| = {err:.3f} K; "
@@ -243,6 +251,15 @@ with open(f"{OUT}/vrx01_result.csv", "w", newline="") as f:
         w.writerow([f"{t:.4f}", f"{ya:.7f}", f"{yb:.7f}", f"{yc:.7f}"])
 report.append(f"V-RX-01  max |Y - Bateman| A/B/C = {maxe[0]:.2e}/{maxe[1]:.2e}/{maxe[2]:.2e}; "
               f"max |M/M0 - 1| = {maxm:.1e}; max |T - 400 K| = {maxTdrift:.1e} K")
+metrics.extend(("V-RX-01", f"Y_{species}_Linf", "all", err)
+               for species, err in zip("ABC", maxe))
+metrics.extend([("V-RX-01", "mass_ratio_error", "all", maxm),
+                ("V-RX-01", "temperature_drift_K", "all", maxTdrift)])
+if args.metrics:
+    with open(args.metrics, "w", newline="") as f:
+        w = csv.writer(f, lineterminator="\n")
+        w.writerow(["case", "metric", "time_s", "error"])
+        w.writerows(metrics)
 
 # copy decks + run logs
 for case in ["vhc01", "vrad01", "vcpl01", "vrx01", "vhc03"]:

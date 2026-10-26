@@ -102,6 +102,19 @@ let src = joinpath(@__DIR__, "guide", "verification"),
     if isdir(src)
         rm(dst; force = true, recursive = true)
         cp(src, dst)
+        # Preserve the GitHub-style fragment used by links in the canonical
+        # guides; Documenter's automatic heading IDs retain capitalization.
+        audit = joinpath(dst, "comparison_coverage.md")
+        if isfile(audit)
+            write(
+                audit,
+                replace(
+                    read(audit, String),
+                    "## Comparison basis audit" => "## [Comparison basis audit](@id comparison-basis-audit)",
+                    "## Gpyro V2 migration" => "## [Gpyro V2 migration](@id gpyro-v2-migration)",
+                ),
+            )
+        end
     end
 end
 

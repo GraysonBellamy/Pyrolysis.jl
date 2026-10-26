@@ -18,6 +18,28 @@ function robin_diffusion_uptake(t; D, b)
 end
 
 """
+    robin_diffusion_cell_average(xlo, xhi, t; D, b)
+
+Cell average of the dimensionless semi-infinite Robin response. Integrating
+`erfc(x/(2s)) - exp(-x²/(4s²))*erfcx(x/(2s)+b*s)`, with `s=√(Dt)`, gives
+the primitive `(x+1/b)erfc(x/(2s)) - 2s exp(-x²/(4s²))/√π
+- exp(-x²/(4s²))*erfcx(x/(2s)+b*s)/b`.
+The endpoint difference is divided by the actual cell width. Self-tests check
+this formula against independent quadrature at the verification resolutions.
+"""
+function robin_diffusion_cell_average(xlo, xhi, t; D, b)
+    0 <= xlo < xhi || throw(ArgumentError("cell depths must satisfy 0 ≤ xlo < xhi"))
+    D > 0 && b >= 0 || throw(ArgumentError("require D > 0 and b ≥ 0"))
+    (t <= 0 || b == 0) && return 0.0
+    s = sqrt(D*t)
+    function primitive(x)
+        η = x/(2s)
+        return (x+1/b)*erfc(η) - exp(-η^2)*(2s/sqrt(π)+erfcx(η+b*s)/b)
+    end
+    return (primitive(xhi)-primitive(xlo))/(xhi-xlo)
+end
+
+"""
     darcy_imposed_flux_pressure(x; Pout, flux, μ, T, κ, M)
 
 Steady isothermal pure-gas pressure at distance `x` inward from the outlet,

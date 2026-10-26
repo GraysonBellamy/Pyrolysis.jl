@@ -23,7 +23,7 @@ c_A = 1200 and c_B = 1900 J/(kg K); retained gas has c_G = 1000 J/(kg K).
 For solid yield ν, c_products = ν c_B + (1-ν)c_G. The temperature obeys
 [c_A a + c_products(1-a)] dT/dt = -h A a, with the closed-form logarithmic
 solution in exact/gpyro_verification.jl. The sensible-enthalpy reference is
-H = m₀[c_A a + c_products(1-a)](T-T_REF), evaluated without solver rates.
+`H = m₀[c_A a + c_products(1-a)](T-T_REF)`, evaluated without solver rates.
 
 Cases a/b convert A entirely to B; c produces 0.4 B + 0.6 G with h = 0.
 Case c must keep T constant even though its sensible enthalpy changes:
@@ -55,6 +55,10 @@ inside the cell, the depletion limiter is disabled, and no mesh moves.
 ![V-RX-05a enthalpy_error](assets/V-RX-05a/V-RX-05a_enthalpy_error.png)
 
 ### Comparison with other codes
+
+See the [mesh/time audit and rerun policy](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). These overlays establish physical-problem comparisons; equal spacing and equal achieved accuracy require the qualifications listed there.
+
+Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [base and refined analytical errors](assets/V-RX-05a/V-RX-05a_comparison_accuracy.csv) are retained separately. These additions carry no timing measurements.
 
 Gpyro V2 (`bff0126c68f2`) uses two boundary nodes on a uniform insulated slab, Δt = 0.001 s, E = 0, and the same reaction heat, yields and heat capacities. A 1e-6 Pa initial gas pressure avoids a singular vacuum diffusivity; its initial mass is negligible (about 1e-15 kg/m²). Sensible enthalpy is reconstructed from native concentrations and temperature at the common 298.15 K datum. Inputs, raw outputs, refinement checks and extraction are in `test/verification/reference/gpyro/v2_accuracy/`.
 
@@ -104,6 +108,10 @@ Solution overlays including the other codes' points: [temperature_vs_codes](asse
 
 ### Comparison with other codes
 
+See the [mesh/time audit and rerun policy](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). These overlays establish physical-problem comparisons; equal spacing and equal achieved accuracy require the qualifications listed there.
+
+Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [base and refined analytical errors](assets/V-RX-05b/V-RX-05b_comparison_accuracy.csv) are retained separately. These additions carry no timing measurements.
+
 Gpyro V2 (`bff0126c68f2`) uses two boundary nodes on a uniform insulated slab, Δt = 0.001 s, E = 0, and the same reaction heat, yields and heat capacities. A 1e-6 Pa initial gas pressure avoids a singular vacuum diffusivity; its initial mass is negligible (about 1e-15 kg/m²). Sensible enthalpy is reconstructed from native concentrations and temperature at the common 298.15 K datum. Inputs, raw outputs, refinement checks and extraction are in `test/verification/reference/gpyro/v2_accuracy/`.
 
 Accuracy comparison only; timing measurements are omitted.
@@ -151,6 +159,8 @@ Solution overlays including the other codes' points: [temperature_vs_codes](asse
 ![V-RX-05c enthalpy_error](assets/V-RX-05c/V-RX-05c_enthalpy_error.png)
 
 ### Comparison with other codes
+
+See the [mesh/time audit and rerun policy](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). These overlays establish physical-problem comparisons; equal spacing and equal achieved accuracy require the qualifications listed there.
 
 Gpyro V2 (`bff0126c68f2`) uses two boundary nodes on a uniform insulated slab, Δt = 0.001 s, E = 0, and the same reaction heat, yields and heat capacities. A 1e-6 Pa initial gas pressure avoids a singular vacuum diffusivity; its initial mass is negligible (about 1e-15 kg/m²). Sensible enthalpy is reconstructed from native concentrations and temperature at the common 298.15 K datum. The retained-gas case has a Gpyro mass discrepancy of about 3.27e-5 of initial mass that persists when Δt is halved; its density and pressure routines use different gas constants. Inputs, raw outputs, refinement checks and extraction are in `test/verification/reference/gpyro/v2_accuracy/`.
 

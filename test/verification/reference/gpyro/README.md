@@ -1,4 +1,10 @@
-# Gpyro reference-code runs for the Pyrolysis.jl verification suite
+# Archived Gpyro reference-code runs
+
+The five 0.8200 overlays documented below have been replaced by
+[pinned V2 reruns](v2_migration/README.md). All active Gpyro verification
+comparisons now use revision `bff0126c68f2a35c084ef04490ae327185f281a3`.
+These original decks, CSVs and timing provenance remain archival evidence
+for their original version; the numerical values below describe that archive.
 
 Date: 2026-07-07
 
@@ -37,7 +43,9 @@ are not evidence of a performance change in Gpyro.
 Each deck has one warm-up followed by five fresh native processes, with
 `OMP_NUM_THREADS=1` and CPU affinity 1. `provenance.json` records every
 sample, input/output and executable hashes, compiler flags, CPU and load.
-The two V-CPL-01 routes share one Gpyro run.
+The retained Gpyro run matches V-CPL-01 route A only. Its former route-B
+overlay and timing alias have been removed: route B has different
+temperatures, latent heat and a gated reaction closure.
 
 Upstream starts its elapsed wall timer before input reading and allocation,
 but normally prints elapsed time only at periodic progress reports.
@@ -100,7 +108,7 @@ Semi-infinite inert solid, absorbed radiant flux + convective loss
 | q_e (absorbed) | 25 kW/m2 | yes (EMIS=1, KAPPA=9e9 -> surface absorption) |
 | h_c | 20 W/m2-K, T_inf = T0 = 300 K | yes |
 | L | 0.05 m, adiabatic back | yes (dissertation used 0.04 m) |
-| Grid / dt | dz = 0.1 mm (500 nodes), dt = 0.1 s | dissertation numerics |
+| Grid / dt | dz = 0.05/499 m ≈ 0.1002004 mm (500 boundary nodes), dt = 0.1 s | dissertation numerics; 499 intervals |
 
 Deltas from the Julia case: **none** in physics.
 Result files: `vhc01_result.csv` (t_s, x_m, T_K profiles at t = 30/60/90/180 s),
@@ -146,7 +154,7 @@ melt-enthalpy term).
 | T_m / DH_m / sigma_m^2 | 433 K / 50 kJ/kg / 0.1 K^2 | yes |
 | T0 / T_wall | 438 K / 428 K (TFIXED pins the z=0 surface node) | yes |
 | L | 0.04 m, adiabatic back | yes |
-| Grid / dt | uniform dz = 0.05 mm (801 nodes), dt0 = 0.02 s | **delta**: Julia case uses a stretched mesh (~14 um at wall); Gpyro uses the dissertation's uniform 0.05 mm. dt: Gpyro's own step controller cut dt to ~0.01 s after early convergence failures at the cp spike (logged; run completes cleanly). |
+| Grid / dt | uniform dz = 0.05 mm (801 boundary nodes), dt0 = 0.02 s | Julia's plotted 800-cell rung is also uniform at 0.05 mm; only lower rungs are stretched. Gpyro's own step controller reportedly cut dt to ~0.01 s after early convergence failures at the cp spike; the original logs are not retained. |
 
 Both the dissertation and V-CPL-01.jl use this exact parameter set, so a
 single deck serves both.
@@ -239,8 +247,10 @@ docker run --rm --user $(id -u):$(id -g) -e HOME=/tmp -e GPYRO_FCOMPL_GNU=gfortr
 and run from the deck's directory with `OMP_NUM_THREADS=1 gpyro PMMA.data`. The
 first header row names the columns; column 2 (`001_MLR`) is the mass loss rate
 in **g m⁻² s⁻¹**, column 6 the remaining thickness in m, columns 3–5 the
-temperatures (°C) at the surface, 12 mm and 17.9 mm. Feeds the V-BO-01 MLR
-overlay in report mode. The retained file does not identify the source commit
+temperatures (°C) at the surface, 12 mm and 17.9 mm. This is archival context,
+not a matched V-BO-01 overlay: native gas transport, burnout and surface
+closures differ, and escaped mass loss is not our gas-generation observable.
+The retained file does not identify the source commit
 or executable hash used for this run, so it must not be attributed to a
 specific V2 revision. The source inspected for the comparison audit is
 `bff0126c68f2a35c084ef04490ae327185f281a3`; that inspection does not establish

@@ -1,5 +1,6 @@
 "n_cells","qoi","value","exact","error","tol","within_tol"
 40,"transient tracer profile / reservoir fraction",0.021375081895160155,NaN,0.021375081895160155,0.004,false
+40,"transient tracer cell average / reservoir fraction",0.027509024285568184,NaN,0.027509024285568184,0.004,false
 40,"surface uptake vs analytical flux",0.04882470381791215,NaN,0.04882470381791215,0.0075,false
 40,"stored tracer vs integrated analytical influx",0.0436625189780373,NaN,0.0436625189780373,0.008,false
 40,"total gas inventory conservation",3.2951419370874646e-13,NaN,3.2951419370874646e-13,1.0e-10,true
@@ -9,6 +10,7 @@
 40,"isothermal invariant",0.0,NaN,0.0,1.0e-8,true
 40,"semi-infinite reference tail at back",2.4269795915561515e-15,NaN,2.4269795915561515e-15,1.0e-12,true
 80,"transient tracer profile / reservoir fraction",0.00523149898957086,NaN,0.00523149898957086,0.004,false
+80,"transient tracer cell average / reservoir fraction",0.006681373293381796,NaN,0.006681373293381796,0.004,false
 80,"surface uptake vs analytical flux",0.010128597445544507,NaN,0.010128597445544507,0.0075,false
 80,"stored tracer vs integrated analytical influx",0.010311671007173895,NaN,0.010311671007173895,0.008,false
 80,"total gas inventory conservation",3.170796958329447e-13,NaN,3.170796958329447e-13,1.0e-10,true
@@ -18,6 +20,7 @@
 80,"isothermal invariant",0.0,NaN,0.0,1.0e-8,true
 80,"semi-infinite reference tail at back",2.4269795915561515e-15,NaN,2.4269795915561515e-15,1.0e-12,true
 160,"transient tracer profile / reservoir fraction",0.0012820313581798663,NaN,0.0012820313581798663,0.004,true
+160,"transient tracer cell average / reservoir fraction",0.0016590121345892968,NaN,0.0016590121345892968,0.004,true
 160,"surface uptake vs analytical flux",0.002445083241487067,NaN,0.002445083241487067,0.0075,true
 160,"stored tracer vs integrated analytical influx",0.0025486096476228237,NaN,0.0025486096476228237,0.008,true
 160,"total gas inventory conservation",2.8910207561239076e-13,NaN,2.8910207561239076e-13,1.0e-10,true

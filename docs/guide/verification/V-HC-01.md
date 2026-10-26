@@ -56,47 +56,31 @@ tolerances; the back-face-rise QoI enforces this assumption explicitly.
 
 ### Comparison with other codes
 
-Reference runs are available from FDS 6.11.1 at 133 cells (Δx≈0.38 mm) and Gpyro 0.8200 at 500 nodes (Δz=0.1 mm). Decks, outputs and
-available provenance are under `test/verification/reference/`; check
-case-specific parameters and transformations before comparing. Where
-error panels are present, they compare against the analytical reference.
-A timing entry alone does not establish an identical physical workload.
+Physical-problem agreement does not establish equal discretization or cost. See the [mesh/time audit and rerun policy](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). Archived runtime curves are excluded by default until a shared accuracy target is met.
+
+Gpyro V2 revision `bff0126c68f2` uses 501 boundary nodes (500 intervals, 0.1 mm spacing). The base mesh matches the plotted Julia spacing where spatially resolved. Independent time and space refinements, native outputs, and provenance are retained under `test/verification/reference/gpyro/v2_migration/`. See the [V2 migration and analytical checks](comparison_coverage.md#gpyro-v2-migration). These runs carry no timing measurements.
+
+Accuracy comparison only; timing measurements are omitted.
+
+Error panels show absolute error at each code's output points. Zeros are displayed at 1e-12 on the logarithmic axis; the reference CSV precision limits the discernible error.
 
 ![V-HC-01 T_profiles_vs_codes_error](assets/V-HC-01/V-HC-01_T_profiles_vs_codes_error.png)
 
 ![V-HC-01 surface_T_history_vs_codes_error](assets/V-HC-01/V-HC-01_surface_T_history_vs_codes_error.png)
 
-Setup and simulation wall times at every ladder rung against the
-reference runs. Julia times model construction and solve after warm-up;
-FDS and Gpyro use internal total elapsed wall time, including setup and
-simulation output. Process launch and Julia compilation are excluded
-from the figure. Output costs, discretizations and time-stepping rules
-still differ, so these are indicative costs, not pure solver speedups.
-See `test/verification/reference/README.md` and `timings.csv` for the
-timer boundaries, resolutions and measurement provenance.
-
-![V-HC-01 solve_time](assets/V-HC-01/V-HC-01_solve_time.png)
-
-Reference timings below are medians of five runs after one warm-up. Full process time also includes launch and shutdown; it is shown separately and is not compared with Julia's warmed time.
-
-| Code | Resolution | Internal elapsed (s) | Full process (s) |
-| --- | --- | --- | --- |
-| FDS 6.11.1 | 133 cells (Δx≈0.38 mm) | 0.073 | 0.3312 |
-| Gpyro 0.8200 | 500 nodes (Δz=0.1 mm) | 0.379 | 0.3814 |
-
 Solution overlays including the other codes' points: [T_profiles_vs_codes](assets/V-HC-01/V-HC-01_T_profiles_vs_codes.png), [surface_T_history_vs_codes](assets/V-HC-01/V-HC-01_surface_T_history_vs_codes.png).
 
 ### Convergence
 
-| n_cells | h | wall (s) | L2 | Linf |
-| --- | --- | --- | --- | --- |
-| 25 | 0.04 | 0.0021 | 0.7857 | 2.901 |
-| 50 | 0.02 | 0.004584 | 0.2003 | 0.8012 |
-| 100 | 0.01 | 0.009917 | 0.05027 | 0.2059 |
-| 133 | 0.007519 | 0.01361 | 0.02844 | 0.117 |
-| 200 | 0.005 | 0.02184 | 0.01258 | 0.05197 |
-| 400 | 0.0025 | 0.04863 | 0.003146 | 0.01304 |
-| 500 | 0.002 | 0.06373 | 0.002013 | 0.008354 |
+| n_cells | h | L2 | Linf |
+| --- | --- | --- | --- |
+| 25 | 0.04 | 0.7857 | 2.901 |
+| 50 | 0.02 | 0.2003 | 0.8012 |
+| 100 | 0.01 | 0.05027 | 0.2059 |
+| 133 | 0.007519 | 0.02844 | 0.117 |
+| 200 | 0.005 | 0.01258 | 0.05197 |
+| 400 | 0.0025 | 0.003146 | 0.01304 |
+| 500 | 0.002 | 0.002013 | 0.008354 |
 
 Observed order 1.993 (L2), expected 2.0.
 

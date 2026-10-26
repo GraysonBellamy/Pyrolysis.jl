@@ -1,0 +1,15 @@
+{
+  "coordinates_m": [
+    0.0,
+    0.0005,
+    0.001
+  ],
+  "layer_indices": [],
+  "coordinate_convention": "boundary-centered nodes; half control volumes at boundaries",
+  "spatial_unknowns": 3,
+  "intervals": 2,
+  "spacing_min_m": 0.0005,
+  "spacing_max_m": 0.0005,
+  "declared_domain_m": 0.001,
+  "coordinates_span_domain": true
+}

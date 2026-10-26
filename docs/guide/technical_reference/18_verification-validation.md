@@ -183,7 +183,7 @@ shared library `test/verification/exact/` (series, roots, the manufactured-solut
 driver), which carries its own self-tests.
 
 **Case catalogue.** Each case family has one file in `test/verification/cases/`;
-lettered members (V-HC-02a–d, V-HC-04a–c, V-RX-02a–d, V-RX-04a/b, V-RX-05a–c,
+lettered members (V-HC-02a–d, V-HC-04a–d, V-RX-02a–d, V-RX-04a/b, V-RX-05a–c,
 V-GT-03b–d, V-GT-07a/b, V-GT-08a/b, V-CPL-01b, V-CPL-02b) share the family's
 file and its report chapter. Most families compare
 against an exact or manufactured solution; the burnout cases V-BO-01, 02, 03 and
@@ -191,7 +191,7 @@ against an exact or manufactured solution; the burnout cases V-BO-01, 02, 03 and
 
 | Family | Cases | Reference solution | What it verifies |
 |---|---|---|---|
-| Heat conduction | V-HC-01 – V-HC-05 | Carslaw–Jaeger erfc and eigenfunction series, resistance network, Kirchhoff transform | the convective surface Newton (V-HC-01; Biot sweep V-HC-02a–d), the constant-flux slab to its back-face plateau (V-HC-03), the harmonic-mean face conductivity at a layer jump on and off a face (V-HC-04a–c), $k(T)$ (V-HC-05) |
+| Heat conduction | V-HC-01 – V-HC-05 | Carslaw–Jaeger erfc and eigenfunction series, resistance network, Kirchhoff transform | the convective surface Newton (V-HC-01; Biot sweep V-HC-02a–d), the constant-flux slab to its back-face plateau (V-HC-03), the harmonic-mean face conductivity at a layer jump on and off a face, including the same interface on a fitted mesh (V-HC-04a–d), $k(T)$ (V-HC-05) |
 | Kinetics and surface radiation | V-RX-01 – V-RX-05 | Bateman chain, Khawam–Flanagan isothermal integrals, parallel-reaction splits, implicit radiative-cooling law, insulated-reaction logarithmic temperature history | multi-step coupling, reaction order and the depletion limiter (V-RX-02d keeps it on as a guard), two-product yields and heat superposition, `RadiativeBC` through the surface Newton, reaction heat and sensible-enthalpy formation with unequal species heat capacities |
 | In-depth radiation | V-RAD-01 | Lautenberger eigenfunction series | Beer–Lambert absorption with conduction and a convective face, including the sub-surface temperature peak |
 | Gas transport | V-GT-01 – V-GT-08 | Gaussian plane source, integrated wall/Darcy resistance, binary dusty-gas exchange, coupled thermal-film solution, Robin diffusion, prescribed-inflow Darcy $P^2$ profile | wall transport and conservation, pressure closure and upwinding, interfaces and flow reversal, binary exchange, nonisothermal transport, transient mass-film uptake, imposed gas inflow and pressure outflow |
@@ -210,6 +210,11 @@ The case statements document each change from the guide's problem:
   constant pressure and temperature; the run ends before the sealed back
   affects the semi-infinite reference. The wall coefficient is chosen to
   reproduce the guide's constant diffusivity.
+  Cell-average profile errors use the analytical integral over each Julia
+  cell alongside the existing center-value metric. Gpyro retains its nodal
+  point reference. Resolution plots use actual mesh spacing and maximum
+  errors over all output times; the spatial-order check retains the 400 s
+  point profile. Gpyro's refinement changes both space and time resolution.
 - **§4.3, p. 29 and Appendix A.2:** V-GT-08 checks the analytical $P^2$
   profile with prescribed gas inflow and a pressure outlet, including the
   mirrored flow direction. A specified constant viscosity replaces the
@@ -263,15 +268,20 @@ same sign as Pyrolysis.jl, §6.9.2); and most exact-kinetics cases disable the
 depletion limiter (`DepletionLimiter(enabled = false)`) and leave the temperature
 gates open (§18.2.2), while V-RX-02d keeps the limiter on as a guard.
 
-**Cross-code overlays.** Where a case has an analogue in another code, that code's
-numerical output is committed under `test/verification/reference/<code>/` with a
-provenance README: FDS 6.11.1 and Gpyro 0.8200 runs of the same problems, a Gpyro V2
-run of the V-BO-01 deck, matched Gpyro V2 accuracy runs for V-GT-07, V-GT-08
-and V-RX-05, and the MaCFP-2 PMMA community submissions (which no case reads). They are read only inside a case's report `curves`; assert mode never
-touches them. Overlays are drawn for V-HC-01 (FDS and Gpyro), V-HC-02 (FDS), V-HC-03
-(Gpyro; the FDS 6.11.0 flux-input restriction is discussed in §12.11.3), V-RAD-01 (Gpyro), V-RX-01 (FDS and
-Gpyro), V-RX-02 (FDS), V-CPL-01 (Gpyro), V-CPL-03 (FDS) and V-BO-01 (the Gpyro V2
-gas-generation rate), plus V-GT-07, V-GT-08 and V-RX-05 (Gpyro V2 accuracy).
+**Cross-code overlays.** Native inputs must represent the same active equations,
+material laws, boundaries and observable before a curve is included. Retained
+outputs, provenance and transformations are under `test/verification/reference/`.
+Report-mode case curves or the matched-series registry read them; assert mode
+never touches them. The coverage matrix in
+`docs/guide/verification/comparison_coverage.md` identifies full and partial matches.
+Both FDS and Gpyro cover V-HC-01/02/04/05, V-RX-01, V-RX-02a–c, V-RX-04,
+V-RX-05a–b, V-CPL-03 P1/P2/P3 and the subcritical V-CPL-04 steady profile.
+Gpyro additionally covers V-HC-03, V-RAD-01, the apparent-heat-capacity route
+of V-CPL-01, V-GT-07/08 and V-RX-05c. The FDS flux-input restriction is
+discussed in §12.11.3. The archival V-BO-01 PMMA curve is excluded because
+its gas/burnout closures and escaped-mass-loss observable do not match this
+regression's gas-generation history. It also lacks pinned executable provenance.
+The MaCFP-2 community submissions remain archival context and no case reads them.
 A series marked `crosscode = true` is drawn as a muted
 context layer in a separate `_vs_codes` variant of each affected figure, so the base
 figure keeps the solver's own error on its own scale; for exact-solution cases the
@@ -283,16 +293,14 @@ Their source and transformations are documented in
 `test/verification/reference/gpyro/v2_accuracy/README.md`. The older datasets
 retain their original version labels; their overlays and timings do not
 establish results for the new reference revision.
+The added conduction, reaction and deformation comparisons use the same pinned
+Gpyro V2 revision and FDS 6.11.1, with native base and independent time/space refinement outputs and executable
+hashes under `test/verification/reference/matched/`. They add no timing samples.
+In particular, FDS V-RX-05a–b uses `ADJUST_H=F` to match the specified local
+reaction heat. No gas-transport comparison is attributed to FDS, and the
+V-CPL-04 comparison does not extend to the upper-temperature-gated runaway branch.
 
-`reference/timings.csv` feeds the wall-time comparison: warmed Julia model
-construction and solve versus FDS/Gpyro internal total elapsed time, including
-setup and simulation. Full process times appear separately in supporting
-tables. Output workloads, resolutions and time steps differ, so these are
-indicative costs rather than pure solver speedups. The reference README
-defines the timer boundaries and provenance. ThermaKin2Ds has no
-verification overlay here; the locally supplied executable is a Windows
-console binary. This is a limitation of this dataset, not of all ThermaKin
-distributions.
+`reference/timings.csv` retains historical setup-plus-simulation costs. Current report generation excludes their cross-code figures by default because no pair is qualified at a shared achieved accuracy. See the [comparison-basis audit](../verification/comparison_coverage.md#comparison-basis-audit) for mesh conventions, independent time refinement, and the matched-accuracy runtime policy. `--historical-timings=true` restores archival cost context explicitly. ThermaKin2Ds has no verification overlay here; the locally supplied executable is a Windows console binary. This is a limitation of this dataset, not of all ThermaKin distributions.
 
 ---
 
@@ -398,7 +406,10 @@ temperatures and the boundary fluxes match the series-resistance network to
 integrator precision for ratios 10:1 and 100:1; with the interface off a face
 (V-HC-04c) the numerics match the network of the face-quantized interface to
 $10^{-11}$, and the whole error against the true interface is that quantization
-(§13.12). V-HC-05 measures the genuine discretization error of a $k(T)$ slab against
+(§13.12). V-HC-04d places a mesh face at the same prescribed 10.2 mm interface
+using `create_mesh_from_nodes`; the prescribed and represented geometries then
+coincide. Both c and d report the two error measures separately and use the
+same physical native-solver comparisons. V-HC-05 measures the discretization error of a $k(T)$ slab against
 the Kirchhoff-transform solution, with a convergence check.
 
 > **Implementation note.** `ConductionKernel` (`src/Kernels/conduction.jl`) writes
@@ -1058,14 +1069,15 @@ can arise from either, from input transcription, or from output definitions.
   are distinct from a reproducible ThermaKin verification dataset.
 - **Gpyro V2:** this is the reference for formulation comparisons (§1.6.5).
   Match condensed/gas density definitions, conversion-rate normalization,
-  diffusion, thermal exchange and volume-change laws. The retained **0.8200**
-  overlays for V-HC-01, V-HC-03, V-RAD-01, V-RX-01 and V-CPL-01 remain
-  historical evidence for that version. A separate V2 PMMA result is used
-  for V-BO-01, but its CSV lacks the source revision and exact original run
-  provenance. Verification and timing comparisons against the pinned V2
-  revision await reruns; no existing result is relabeled as such a run.
-- **FDS:** the retained 6.11.1 overlays concern V-HC-01, V-HC-02, V-RX-01,
-  V-RX-02 and V-CPL-03. Its instantaneous gas release and optional two-flux
+  diffusion, thermal exchange and volume-change laws. All active overlays,
+  including V-HC-01, V-HC-03, V-RAD-01, V-RX-01 and V-CPL-01 route A,
+  now use the pinned V2 executable. Native outputs and independent refinement
+  audits are retained for the cases listed in §18.1.3; they supply no timing
+  measurements. The original 0.8200 data remain archival. The unpinned PMMA result is
+  retained as an archive and excluded from V-BO-01's comparison.
+- **FDS:** the retained 6.11.1 overlays concern matched solid conduction,
+  reaction kinetics/heat, radiative boundaries, solid-only volume change
+  and subcritical thermal feedback (§18.1.3). Its instantaneous gas release and optional two-flux
   radiation are not general equivalents of our transport and Beer–Lambert
   models. Even negligible in-depth emission does not remove the angular
   attenuation difference (§8.7.3).

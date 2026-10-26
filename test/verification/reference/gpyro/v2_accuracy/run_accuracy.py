@@ -29,7 +29,7 @@ def digest(path):
 
 def write_csv(path, names, rows):
     with path.open('w', newline='') as f:
-        writer = csv.writer(f)
+        writer = csv.writer(f, lineterminator='\n')
         writer.writerow(names)
         writer.writerows(rows)
 
@@ -166,15 +166,19 @@ def main():
                       generated_utc=datetime.now(timezone.utc).isoformat(), OMP_NUM_THREADS=1,
                       purpose='accuracy only; no timing measurements retained', runs=[])
     metrics_rows = []
-    for level in ('runs', 'refined'):
+    # Time-only triplet at the base mesh, then space-only refinement at dt/4.
+    # Keep the original coupled refinement as an explicitly separate sample.
+    levels = {'runs': (1, 1), 'refined': (2, 2), 'time_half': (1, 2),
+              'time_quarter': (1, 4), 'space_half': (2, 4)}
+    for level, (space_factor, time_factor) in levels.items():
         for case in CASES:
             text = (HERE/'decks'/f'{case}.data').read_text()
-            if level == 'refined':
+            if level != 'runs':
                 dt = float(re.search(r'DT0=([^,]+)', text)[1])
-                text = re.sub(r'DT0=[^,]+', f'DT0={dt/2:.16g}', text)
+                text = re.sub(r'DT0=[^,]+', f'DT0={dt/time_factor:.16g}', text)
                 if case.startswith('vgt'):
                     n = int(re.search(r'NCELLZ\(1\)=(\d+)', text)[1])
-                    text = re.sub(r'NCELLZ\(1\)=\d+', f'NCELLZ(1)={2*n-1}', text)
+                    text = re.sub(r'NCELLZ\(1\)=\d+', f'NCELLZ(1)={space_factor*(n-1)+1}', text)
             path = work/level/case
             path.mkdir(parents=True, exist_ok=True)
             deck = path/f'{case}.data'
@@ -188,11 +192,11 @@ def main():
             log = (path/'run.log').read_text()
             assert SUCCESS in log and REVISION in log, f'incomplete or wrong-version run: {path}'
             assert not re.search(r'NaN|Infinity|Failed timestep', log), f'nonfinite/rejected step: {path}'
-            dest = HERE if level == 'runs' else HERE/'refined'
+            dest = HERE if level == 'runs' else HERE/level
             dest.mkdir(exist_ok=True)
             metrics = extract(path, case, dest)
             for metric, value in metrics.items():
-                metrics_rows.append((case, 'base' if level == 'runs' else 'refined', metric, value))
+                metrics_rows.append((case, 'base' if level == 'runs' else level, metric, value))
             raw = HERE/'raw'/level/case
             raw.mkdir(parents=True, exist_ok=True)
             output_hashes = {}

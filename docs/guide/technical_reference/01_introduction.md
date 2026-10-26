@@ -405,11 +405,13 @@ chapter. Equation mappings state their assumptions and do not establish
 whole-model equivalence. Numerical agreement requires matched runs; performance
 claims also require matched workloads and timing boundaries.
 
-The retained Gpyro 0.8200 verification overlays and timings remain historical
-results (§18.1.3). The retained V2 burnout CSV does not identify its source
-commit. Neither dataset establishes results for the V2 revision used in these
-formulation comparisons. Replacement verification and performance runs are
-pending; the version change in the guides does not relabel those datasets.
+All active Gpyro verification overlays now use the pinned V2 revision
+(§18.1.3). The five original 0.8200 comparisons have been rerun with matched
+base mesh spacing and independent time/space refinements. Their original
+CSVs and timings remain historical archives. The unpinned V2 burnout CSV
+remains excluded for its physics, observable and provenance mismatches.
+The new V2 runs establish accuracy evidence; shared-accuracy performance
+qualification remains outstanding.
 
 
 ---

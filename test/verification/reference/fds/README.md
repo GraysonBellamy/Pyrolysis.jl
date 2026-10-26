@@ -1,5 +1,13 @@
 # FDS 6.11.1 verification outputs
 
+New matched conduction, reaction and thermal-feedback runs, including a direct
+replacement for the rescaled V-RX-02c particle curve, are documented in
+[`../matched/README.md`](../matched/README.md). The baking-soda particle outputs
+and original measurements here remain archival; they no longer supply that
+case's accuracy or timing overlay. New instantaneous P1/P2/P3 thickness
+histories also replace the older interval-averaged V-CPL-03 accuracy curves;
+the old timing workload remains documented separately.
+
 These device outputs and the in-depth profile come from the official FDS
 6.11.1 Linux release bundle. The twenty supplied verification decks are the
 unmodified files under its `Examples/Heat_Transfer/` and `Examples/Pyrolysis/`
@@ -72,8 +80,9 @@ Where the shipped FDS case differs from ours, `custom/` holds minimal decks
   case's simulated span (5000 s ⇒ Fo = 0.5; 20 s; 2.4 s ≈ 0.9·t_burnout).
   The shipped originals simulate up to 10× longer (mostly the featureless
   asymptote), which would inflate their wall times in the solve-time
-  comparison and stretch the overlay axes; all V-HC-02/V-RX-01/V-RX-02c
-  overlays and `timings.csv` rows therefore use these matched runs. The
+  comparison and stretch the overlay axes. V-HC-02/V-RX-01 overlays and
+  `timings.csv` rows use these span-matched runs. V-RX-02c now uses the
+  direct native-input accuracy run in `../matched/`, with no timing row. The
   supplied-deck outputs are retained alongside the matched-deck outputs.
 
 V-HC-03 uses Gpyro for its pure Neumann overlay (constant net flux, no

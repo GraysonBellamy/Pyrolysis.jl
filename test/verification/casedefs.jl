@@ -118,6 +118,9 @@ if !isdefined(@__MODULE__, :VerificationCase)
       (fallback: single run at `ci.n_cells`).
     - `curves::Function` — `sol -> Vector{ReportCurve}`; the case-authored
       overlay/error figure data (fallback: tables only, no figures).
+    - `resolution_curves::Function` — `(ns, qois_per_n) -> Vector{ReportCurve}`;
+      additional figures using the completed ladder, e.g. errors against
+      physical mesh spacing with retained native-solver refinement results.
     - `error_norms::Function` — `sol -> NamedTuple` of named error norms,
       e.g. `(L2 = …, Linf = …)` (fallback: `ci.convergence.error_fn` as a
       single `(norm = …,)` entry).

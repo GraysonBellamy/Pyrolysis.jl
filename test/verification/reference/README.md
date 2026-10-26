@@ -9,18 +9,34 @@ Each subdirectory records the available version, input, run-date and extraction
 information. FDS files are native outputs; Gpyro reference CSVs are extracted
 and converted to SI; MaCFP files are row-downsampled. Plotting the retained
 curves is reproducible without the external codes. Reproducing every original
-run is a stronger claim: the V2 CSV lacks a pinned revision. Repeated FDS
+run is a stronger claim: the archival PMMA V2 CSV lacks a pinned revision.
+It is no longer used as a matched verification overlay. Repeated FDS
 and Gpyro 0.8200 timing measurements have separate provenance records.
 
 | Directory | Code | What it feeds |
 |---|---|---|
-| `fds/` | FDS 6.11.1 (NIST), run locally on the shipped verification inputs | V-HC-01/02, V-RX-01/02, V-CPL-03 overlays |
-| `gpyro/` | Gpyro 0.8200 (Lautenberger), built from source, dissertation §3.4 decks | V-HC-01/03, V-RAD-01, V-CPL-01, V-RX-01 overlays |
+| `fds/` | FDS 6.11.1 (NIST), run locally on the shipped verification inputs | V-HC-01/02, V-RX-01, V-CPL-03 overlays; historical V-RX-02 particle outputs retained as archives |
+| `gpyro/` | Gpyro 0.8200 (Lautenberger), original dissertation §3.4 decks | Archived overlays and historical timings; no active accuracy overlay reads these CSVs |
+| `gpyro/v2_migration/` | Gpyro V2 at pinned revision `bff0126c68f2`, 25 native runs with matched base spacing and independent refinements | Current V-HC-01/03, V-RAD-01, V-CPL-01 route A and V-RX-01 overlays; no timings |
 | `gpyro/v2_accuracy/` | Gpyro V2 at pinned revision `bff0126c68f2`, matched inputs, raw outputs and refinement checks | V-GT-07a/b, V-GT-08a/b, V-RX-05a–c accuracy overlays; no timings |
+| `matched/` | FDS 6.11.1 and pinned Gpyro V2, native decks and independent time/space refinements | Added HC-02/04/05, RX-02/04/05, CPL-03/04 coverage; see [mappings and reproduction](matched/README.md); no timings |
 | `macfp/` | MaCFP-2 PMMA community submissions (9 institutions: FDS/Gpyro/ThermaKin/Sierra) | B-01 community-envelope comparison (case pending) |
 | `timings.csv` | internal elapsed and full process wall times; timing protocols recorded with the data | per-case `solve_time` figure and supporting timing table |
 
 ## Timing convention
+
+The basis audit found that **none of these archived timing pairs is qualified
+at a shared achieved accuracy**. Current report generation excludes their
+comparison figures by default; `--historical-timings=true` restores historical
+cost context explicitly. Data remain here for provenance. The
+[mesh/time inventory and runtime policy](../../../../docs/guide/verification/comparison_coverage.md#comparison-basis-audit)
+specify which simulations and observations must be rerun before new runtime
+ratios can be published. The new native refinement runs contain no timings.
+
+The retired route-B Stefan alias and rescaled baking-soda particle timing
+rows have been removed from `timings.csv`; those workloads do not represent
+the corresponding current comparison. Original measurements remain in the
+solver-specific provenance archives. Other retained timing values are unchanged.
 
 The primary figures compare **setup and simulation wall time**. Julia times
 `case.build(n)` and the solve after a discarded warm-up. Its process startup,

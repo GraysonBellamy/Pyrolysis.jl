@@ -49,6 +49,8 @@ _The steady mass-balance plot shows the saved samples at 0.5 and 1 s. Markers sh
 
 ### Comparison with other codes
 
+See the [mesh/time audit and rerun policy](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). These overlays establish physical-problem comparisons; equal spacing and equal achieved accuracy require the qualifications listed there.
+
 Gpyro V2 (`bff0126c68f2`) uses 81 boundary-centered nodes (80 intervals) and Δt = 0.005 s, with temperature held at 300 K. Its molecular collision parameters match the Darcy coefficient νP = μRT/M used in this problem. Native gauge pressure is converted to absolute pressure, depth to z = L − depth, and boundary fluxes to outward-positive kg/(m² s). Both codes are compared with the same steady solution. Inputs, raw outputs, refinement checks and extraction are in `test/verification/reference/gpyro/v2_accuracy/`.
 
 Accuracy comparison only; timing measurements are omitted.
@@ -106,6 +108,8 @@ _The steady mass-balance plot shows the saved samples at 0.5 and 1 s. Markers sh
 ![V-GT-08b convergence](assets/V-GT-08b/V-GT-08b_convergence.png)
 
 ### Comparison with other codes
+
+See the [mesh/time audit and rerun policy](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). These overlays establish physical-problem comparisons; equal spacing and equal achieved accuracy require the qualifications listed there.
 
 Gpyro V2 (`bff0126c68f2`) uses 81 boundary-centered nodes (80 intervals) and Δt = 0.005 s, with temperature held at 300 K. Its molecular collision parameters match the Darcy coefficient νP = μRT/M used in this problem. Native gauge pressure is converted to absolute pressure, depth to z = L − depth, and boundary fluxes to outward-positive kg/(m² s). Both codes are compared with the same steady solution. Inputs, raw outputs, refinement checks and extraction are in `test/verification/reference/gpyro/v2_accuracy/`.
 

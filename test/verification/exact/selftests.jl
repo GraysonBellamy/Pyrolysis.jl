@@ -34,6 +34,37 @@
         end
         @test robin_diffusion_uptake(0.0; D, b = 5.0) == 0.0
 
+        # Average references are checked by quadrature of the point solution,
+        # independently of the primitive used by the new error metric.
+        for b in (6.5, 650.0),
+            t in (50.0, 150.0, 400.0),
+            width in (1/40, 1/160, 1/320),
+            xlo in (0.0, 0.03, 0.3, 0.8)
+
+            response(x) = semiinf_convective_theta(x, t; h = b, k = 1.0, α = D)
+            n = 128
+            dx = width/n
+            quadrature =
+                (
+                    response(xlo) +
+                    response(xlo+width) +
+                    4sum(response(xlo+i*dx) for i = 1:2:(n-1)) +
+                    2sum(response(xlo+i*dx) for i = 2:2:(n-2))
+                )/(3n)
+            average = robin_diffusion_cell_average(xlo, xlo+width, t; D, b)
+            @test average ≈ quadrature rtol = 1e-9 atol = 2e-12
+        end
+        for b in (6.5, 650.0)
+            width = 1/160
+            integral = sum(
+                robin_diffusion_cell_average(i*width, (i+1)*width, 400.0; D, b)*width
+                for i = 0:159
+            )
+            @test integral ≈ robin_diffusion_uptake(400.0; D, b) rtol = 1e-11
+        end
+        @test robin_diffusion_cell_average(0.0, 0.01, 0.0; D, b = 5.0) == 0.0
+        @test robin_diffusion_cell_average(0.0, 0.01, 50.0; D, b = 0.0) == 0.0
+
         # Darcy reference satisfies the constitutive law, with pressure and
         # gradient independently evaluated from the exact profile.
         Pout, flux, μ, T, κ, M = 1e5, 10.0, 2e-5, 300.0, 5e-10, 0.029

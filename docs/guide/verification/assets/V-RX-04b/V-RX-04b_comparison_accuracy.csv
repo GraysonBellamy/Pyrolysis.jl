@@ -1,0 +1,11 @@
+"code","curve","reference","resolution","samples","Linf","RMS"
+"FDS 6.11.1","surface_T_history","surface temperature","base",101,432.7973467682259,68.7517200961023
+"FDS 6.11.1","surface_T_history","surface temperature","refined",101,432.7973467682259,68.70389572562325
+"FDS 6.11.1","surface_T_history","surface temperature","time_half",101,432.7973467682259,68.70166674045281
+"FDS 6.11.1","surface_T_history","surface temperature","time_quarter",101,432.7973467682259,68.66300320988996
+"FDS 6.11.1","surface_T_history","surface temperature","space_half",101,432.7973467682259,68.66522751979093
+"Gpyro V2","surface_T_history","surface temperature","base",101,432.7973467682259,68.62130173863763
+"Gpyro V2","surface_T_history","surface temperature","refined",101,432.7973467682259,68.63256970688813
+"Gpyro V2","surface_T_history","surface temperature","time_half",101,432.7973467682259,68.63347497103861
+"Gpyro V2","surface_T_history","surface temperature","time_quarter",101,432.7973467682259,68.63956227237495
+"Gpyro V2","surface_T_history","surface temperature","space_half",101,432.7973467682259,68.63865753957275

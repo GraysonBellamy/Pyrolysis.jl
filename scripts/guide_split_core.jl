@@ -47,14 +47,15 @@ function chapter_files(chapterdir::AbstractString)
 end
 
 """
-    rebase_figure_paths(lines, prefix)
+    rebase_guide_paths(lines, prefix)
 
-Rebase canonical `assets/figures/` Markdown destinations for a derived view.
+Rebase canonical `assets/figures/` and `guide/` Markdown destinations for a
+chapter view under `guide/<name>/`.
 Only standalone image/link destinations outside fenced code are rewritten;
 code examples and external URLs stay unchanged. `prefix` is the relative
 path to that view's figure directory, with no trailing slash.
 """
-function rebase_figure_paths(lines::Vector{String}, prefix::AbstractString)
+function rebase_guide_paths(lines::Vector{String}, prefix::AbstractString)
     out = String[]
     fence = 0
     for line in lines
@@ -80,7 +81,14 @@ function rebase_figure_paths(lines::Vector{String}, prefix::AbstractString)
             spans = collect(eachmatch(r"`+[^`]*`+", line))
             rebased = IOBuffer()
             for (i, piece) in enumerate(pieces)
-                print(rebased, replace(piece, r"\]\(assets/figures/" => "]($prefix/"))
+                print(
+                    rebased,
+                    replace(
+                        piece,
+                        r"\]\(assets/figures/" => "]($prefix/",
+                        r"\]\(guide/" => "](../",
+                    ),
+                )
                 i <= length(spans) && print(rebased, spans[i].match)
             end
             push!(out, String(take!(rebased)))

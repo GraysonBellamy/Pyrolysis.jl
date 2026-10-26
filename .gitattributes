@@ -1,0 +1,6 @@
+# Native evidence is retained byte-for-byte for provenance hash checks.
+test/verification/reference/**/raw/** -text -whitespace
+
+# Generated TOML registries separate records with a final blank line.
+test/verification/reference/comparison_targets.toml whitespace=-blank-at-eof
+test/verification/reference/matched/*.toml whitespace=-blank-at-eof

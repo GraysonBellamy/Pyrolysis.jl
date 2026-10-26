@@ -22,6 +22,10 @@
 #   --chapters=true          also (re)generate <outdir>/*.md guide chapters
 #   --timings=true           record wall times and include timing comparisons;
 #                            false produces accuracy-only reports
+#   --historical-timings=false include archived, unequal-accuracy external timings
+#                            as historical cost figures (never speedup claims)
+#   --comparisons-only=false render only curves with external comparison data
+#                            (use a separate outdir for these partial chapters)
 #
 # Cases with `report = (;)` are skipped (listed in the index dashboard).
 # Nothing here asserts: coarse ladder rungs may exceed the pinned CI
@@ -32,6 +36,7 @@ const ROOT = dirname(dirname(@__DIR__))
 include(joinpath(ROOT, "test", "verification", "casedefs.jl"))
 include(joinpath(@__DIR__, "render.jl"))
 include(joinpath(@__DIR__, "report_harness.jl"))
+include(joinpath(@__DIR__, "comparisons.jl"))
 include(joinpath(@__DIR__, "chapters.jl"))
 
 function parse_cli(args)
@@ -40,6 +45,8 @@ function parse_cli(args)
         "outdir" => joinpath(ROOT, "docs", "guide", "verification"),
         "chapters" => "true",
         "timings" => "true",
+        "historical-timings" => "false",
+        "comparisons-only" => "false",
     )
     for a in args
         startswith(a, "--") || error("unrecognized argument $a (use --key=value)")
@@ -63,6 +70,10 @@ end
 
 opts = parse_cli(ARGS)
 opts["timings"] in ("true", "false") || error("--timings must be true or false")
+opts["historical-timings"] in ("true", "false") ||
+    error("--historical-timings must be true or false")
+opts["comparisons-only"] in ("true", "false") ||
+    error("--comparisons-only must be true or false")
 outdir = abspath(opts["outdir"])
 mkpath(outdir)
 set_theme!(report_theme())
@@ -85,6 +96,8 @@ for case in selected
         case,
         outdir;
         timings = opts["timings"] == "true",
+        historical_timings = opts["historical-timings"] == "true",
+        comparisons_only = opts["comparisons-only"] == "true",
     )
     if r !== nothing
         push!(results, r)

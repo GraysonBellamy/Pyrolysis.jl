@@ -1,0 +1,31 @@
+{
+  "coordinates_m": [
+    0.0,
+    0.00025,
+    0.0005,
+    0.00075,
+    0.001,
+    0.00125,
+    0.0015,
+    0.00175,
+    0.002
+  ],
+  "layer_indices": [
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1
+  ],
+  "coordinate_convention": "cell faces in mesh table; native thermal unknowns at centers; matched PROF uses CELL_CENTERED=T",
+  "spatial_unknowns": 8,
+  "intervals": 8,
+  "spacing_min_m": 0.00025,
+  "spacing_max_m": 0.00025,
+  "declared_domain_m": 0.002,
+  "coordinates_span_domain": true
+}

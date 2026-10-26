@@ -16,7 +16,7 @@
 # For solid yield ν, c_products = ν c_B + (1-ν)c_G. The temperature obeys
 # [c_A a + c_products(1-a)] dT/dt = -h A a, with the closed-form logarithmic
 # solution in exact/gpyro_verification.jl. The sensible-enthalpy reference is
-# H = m₀[c_A a + c_products(1-a)](T-T_REF), evaluated without solver rates.
+# `H = m₀[c_A a + c_products(1-a)](T-T_REF)`, evaluated without solver rates.
 #
 # Cases a/b convert A entirely to B; c produces 0.4 B + 0.6 G with h = 0.
 # Case c must keep T constant even though its sensible enthalpy changes:

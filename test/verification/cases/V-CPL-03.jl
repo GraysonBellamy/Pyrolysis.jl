@@ -341,37 +341,12 @@ function _verification_case_vcpl03()
                         ),
                     )
                 end
-                # FDS 6.11.1 overlay (reference/fds/custom/): the shipped
-                # shrink_swell case heats with an Arrhenius transient (only
-                # endpoints comparable), so vcpl03_shrink_swell_paths.fds
-                # reruns FDS isothermally with our P1/P2 densities and
-                # A_r = 2 s⁻¹, E = 0 — the whole path then follows the same
-                # exact curve. devc values average over the 0.1 s output
-                # interval (plot at t − 0.05 s).
-                fds = reference_columns(
-                    "fds/custom/vcpl03_shrink_swell_paths_devc.csv",
-                    "Time",
-                    "L_P2",
-                    "L_P1",
-                )
-                t_fds = fds[1][2:end] .- 0.05
-                for (perm, col, Vf) in ((:P1, 3, 2.0), (:P2, 2, 0.5))
-                    push!(
-                        series,
-                        CurveSeries(
-                            label = "FDS 6.11.1 $(perm)",
-                            crosscode = true,
-                            x = t_fds,
-                            y = fds[col][2:end] ./ 0.002,
-                            exact = t -> 1.0 + (Vf - 1.0) * (1.0 - exp(-2.0 * t)),
-                        ),
-                    )
-                end
+                # Native FDS/Gpyro P1/P2/P3 histories are bound to these
+                # references by report mode (reference/matched/).
                 [
                     ReportCurve(
                         name = :thickness_histories,
-                        title = "V-CPL-03: thickness-ratio histories, all permutations " *
-                                "(exact linear-in-conversion paths)",
+                        title = "V-CPL-03: thickness-ratio histories",
                         xlabel = "t (s)",
                         ylabel = "L(t)/L₀",
                         series = series,

@@ -38,9 +38,9 @@ Route B (V-CPL-01b): latent heat via a T_max-gated reaction melt → solid
 
 Geometry: cold Dirichlet wall on TOP (z = L; depth x = L − z), adiabatic
 bottom, L = 4 cm ≫ liquid penetration √(4α_l t) ≈ 1.25 cm (back-face guard
-asserts undisturbedness). Geometrically stretched mesh, finest at the wall
-(Δz_top ≈ 14 μm, ≈ 103 μm at the deepest front position ≈ 3 mm — Gpyro
-used uniform 50 μm).
+asserts undisturbedness). Lower report rungs use a geometrically stretched
+mesh, finest at the wall. The plotted 800-cell route-A rung is uniform at
+50 μm, matching the 800 intervals between Gpyro V2's 801 boundary nodes.
 
 No CI ConvergenceSpec: with fixed peak width σ (route A) or gate width
 (route B) the solver converges to the smeared problem, whose offset from
@@ -76,32 +76,17 @@ convergence study).
 
 ### Comparison with other codes
 
-Reference runs are available from Gpyro 0.8200 at 801 nodes (Δz=0.05 mm). Decks, outputs and
-available provenance are under `test/verification/reference/`; check
-case-specific parameters and transformations before comparing. Where
-error panels are present, they compare against the analytical reference.
-A timing entry alone does not establish an identical physical workload.
+Physical-problem agreement does not establish equal discretization or cost. See the [mesh/time audit and rerun policy](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). Archived runtime curves are excluded by default until a shared accuracy target is met.
+
+Gpyro V2 revision `bff0126c68f2` uses 801 boundary nodes (800 intervals, 0.05 mm spacing), with every node retained for front interpolation. The base mesh matches the plotted Julia spacing where spatially resolved. Independent time and space refinements, native outputs, and provenance are retained under `test/verification/reference/gpyro/v2_migration/`. See the [V2 migration and analytical checks](comparison_coverage.md#gpyro-v2-migration). These runs carry no timing measurements.
+
+Accuracy comparison only; timing measurements are omitted.
+
+Error panels show absolute error at each code's output points. Zeros are displayed at 1e-12 on the logarithmic axis; the reference CSV precision limits the discernible error.
 
 ![V-CPL-01 T_histories_at_depths_vs_codes_error](assets/V-CPL-01/V-CPL-01_T_histories_at_depths_vs_codes_error.png)
 
 ![V-CPL-01 front_trajectory_vs_codes_error](assets/V-CPL-01/V-CPL-01_front_trajectory_vs_codes_error.png)
-
-Setup and simulation wall times at every ladder rung against the
-reference runs. Julia times model construction and solve after warm-up;
-FDS and Gpyro use internal total elapsed wall time, including setup and
-simulation output. Process launch and Julia compilation are excluded
-from the figure. Output costs, discretizations and time-stepping rules
-still differ, so these are indicative costs, not pure solver speedups.
-See `test/verification/reference/README.md` and `timings.csv` for the
-timer boundaries, resolutions and measurement provenance.
-
-![V-CPL-01 solve_time](assets/V-CPL-01/V-CPL-01_solve_time.png)
-
-Reference timings below are medians of five runs after one warm-up. Full process time also includes launch and shutdown; it is shown separately and is not compared with Julia's warmed time.
-
-| Code | Resolution | Internal elapsed (s) | Full process (s) |
-| --- | --- | --- | --- |
-| Gpyro 0.8200 | 801 nodes (Δz=0.05 mm) | 11.88 | 11.88 |
 
 Solution overlays including the other codes' points: [T_histories_at_depths_vs_codes](assets/V-CPL-01/V-CPL-01_T_histories_at_depths_vs_codes.png), [front_trajectory_vs_codes](assets/V-CPL-01/V-CPL-01_front_trajectory_vs_codes.png).
 
@@ -138,37 +123,6 @@ Solution overlays including the other codes' points: [T_histories_at_depths_vs_c
 ![V-CPL-01b front_trajectory_error](assets/V-CPL-01b/V-CPL-01b_front_trajectory_error.png)
 
 ![V-CPL-01b param_A_rate](assets/V-CPL-01b/V-CPL-01b_param_A_rate.png)
-
-### Comparison with other codes
-
-Reference runs are available from Gpyro 0.8200 at 801 nodes (Δz=0.05 mm). Decks, outputs and
-available provenance are under `test/verification/reference/`; check
-case-specific parameters and transformations before comparing. Where
-error panels are present, they compare against the analytical reference.
-A timing entry alone does not establish an identical physical workload.
-
-![V-CPL-01b T_histories_at_depths_vs_codes_error](assets/V-CPL-01b/V-CPL-01b_T_histories_at_depths_vs_codes_error.png)
-
-![V-CPL-01b front_trajectory_vs_codes_error](assets/V-CPL-01b/V-CPL-01b_front_trajectory_vs_codes_error.png)
-
-Setup and simulation wall times at every ladder rung against the
-reference runs. Julia times model construction and solve after warm-up;
-FDS and Gpyro use internal total elapsed wall time, including setup and
-simulation output. Process launch and Julia compilation are excluded
-from the figure. Output costs, discretizations and time-stepping rules
-still differ, so these are indicative costs, not pure solver speedups.
-See `test/verification/reference/README.md` and `timings.csv` for the
-timer boundaries, resolutions and measurement provenance.
-
-![V-CPL-01b solve_time](assets/V-CPL-01b/V-CPL-01b_solve_time.png)
-
-Reference timings below are medians of five runs after one warm-up. Full process time also includes launch and shutdown; it is shown separately and is not compared with Julia's warmed time.
-
-| Code | Resolution | Internal elapsed (s) | Full process (s) |
-| --- | --- | --- | --- |
-| Gpyro 0.8200 | 801 nodes (Δz=0.05 mm) | 11.88 | 11.88 |
-
-Solution overlays including the other codes' points: [T_histories_at_depths_vs_codes](assets/V-CPL-01b/V-CPL-01b_T_histories_at_depths_vs_codes.png), [front_trajectory_vs_codes](assets/V-CPL-01b/V-CPL-01b_front_trajectory_vs_codes.png).
 
 ### Solver configuration
 

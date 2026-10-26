@@ -42,6 +42,20 @@ implementation's constant.
 
 ![V-RX-04a T_history_vs_exact_error](assets/V-RX-04a/V-RX-04a_T_history_vs_exact_error.png)
 
+### Comparison with other codes
+
+See the [mesh/time audit and rerun policy](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). These overlays establish physical-problem comparisons; equal spacing and equal achieved accuracy require the qualifications listed there.
+
+Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [base and refined analytical errors](assets/V-RX-04a/V-RX-04a_comparison_accuracy.csv) are retained separately. These additions carry no timing measurements.
+
+Accuracy comparison only; timing measurements are omitted.
+
+Error panels show absolute error at each code's output points. Zeros are displayed at 1e-12 on the logarithmic axis; the reference CSV precision limits the discernible error.
+
+![V-RX-04a T_history_vs_exact_vs_codes_error](assets/V-RX-04a/V-RX-04a_T_history_vs_exact_vs_codes_error.png)
+
+Solution overlays including the other codes' points: [T_history_vs_exact_vs_codes](assets/V-RX-04a/V-RX-04a_T_history_vs_exact_vs_codes.png).
+
 ### Solver configuration
 
 | setting | value |
@@ -63,6 +77,20 @@ implementation's constant.
 ![V-RX-04b surface_T_history](assets/V-RX-04b/V-RX-04b_surface_T_history.png)
 
 ![V-RX-04b surface_T_history_error](assets/V-RX-04b/V-RX-04b_surface_T_history_error.png)
+
+### Comparison with other codes
+
+See the [mesh/time audit and rerun policy](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). These overlays establish physical-problem comparisons; equal spacing and equal achieved accuracy require the qualifications listed there.
+
+Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [base and refined analytical errors](assets/V-RX-04b/V-RX-04b_comparison_accuracy.csv) are retained separately. These additions carry no timing measurements.
+
+Accuracy comparison only; timing measurements are omitted.
+
+Error panels show absolute error at each code's output points. Zeros are displayed at 1e-12 on the logarithmic axis; the reference CSV precision limits the discernible error.
+
+![V-RX-04b surface_T_history_vs_codes_error](assets/V-RX-04b/V-RX-04b_surface_T_history_vs_codes_error.png)
+
+Solution overlays including the other codes' points: [surface_T_history_vs_codes](assets/V-RX-04b/V-RX-04b_surface_T_history_vs_codes.png).
 
 ### Solver configuration
 

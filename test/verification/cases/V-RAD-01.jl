@@ -179,6 +179,7 @@ function _verification_case_vrad01()
             ),
         ),
         report = (
+            comparison_note = "Gpyro V2 revision `bff0126c68f2` uses 401 boundary nodes (400 intervals, 0.025 mm spacing). The base mesh matches the plotted Julia spacing where spatially resolved. Independent time and space refinements, native outputs, and provenance are retained under `test/verification/reference/gpyro/v2_migration/`. See the [V2 migration and analytical checks](comparison_coverage.md#gpyro-v2-migration). These runs carry no timing measurements.",
             n_cells_ladder = [25, 50, 100, 200, 400],
             profile_times = times,
             qoi_curves = (:T_profiles, :surface_T_history, :peak_trajectory),
@@ -188,18 +189,18 @@ function _verification_case_vrad01()
                 xs_fine = range(0.0, δ, length = 2001)
                 peak_depth_exact(t) =
                     xs_fine[argmax([ex.T_exact(x, t) for x in xs_fine])]
-                # Gpyro 0.8200 overlay (reference/gpyro/): dissertation §3.4.2
+                # Gpyro V2 overlay (reference/gpyro/v2_migration/): dissertation §3.4.2
                 # deck (identical parameters — the same eigenfunction case),
-                # in-depth Beer–Lambert via KAPPA, Δz = 0.1 mm, dt = 0.1 s.
+                # in-depth Beer–Lambert via KAPPA, Δz = 0.025 mm, dt = 0.1 s.
                 gp_t, gp_x, gp_T = reference_columns(
-                    "gpyro/vrad01_result.csv",
+                    "gpyro/v2_migration/vrad01_result.csv",
                     "t_s",
                     "x_m",
                     "T_K";
                     header_rows = 1,
                 )
                 gp_ts, gp_Ts = reference_columns(
-                    "gpyro/vrad01_surfaceT.csv",
+                    "gpyro/v2_migration/vrad01_surfaceT.csv",
                     "t_s",
                     "T_front_K";
                     header_rows = 1,
@@ -222,7 +223,7 @@ function _verification_case_vrad01()
                             [
                                 let rows = findall(τ -> abs(τ - t) < 1e-6, gp_t)
                                     CurveSeries(
-                                        label = "Gpyro 0.8200, t = $(t) s",
+                                        label = "Gpyro V2, t = $(t) s",
                                         crosscode = true,
                                         x = gp_x[rows],
                                         y = gp_T[rows],
@@ -245,7 +246,7 @@ function _verification_case_vrad01()
                                 exact = t -> ex.T_exact(0.0, t),
                             ),
                             CurveSeries(
-                                label = "Gpyro 0.8200",
+                                label = "Gpyro V2",
                                 crosscode = true,
                                 x = gp_ts[2:end],
                                 y = gp_Ts[2:end],

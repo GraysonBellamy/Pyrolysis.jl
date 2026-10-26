@@ -31,9 +31,9 @@
 #
 # Geometry: cold Dirichlet wall on TOP (z = L; depth x = L − z), adiabatic
 # bottom, L = 4 cm ≫ liquid penetration √(4α_l t) ≈ 1.25 cm (back-face guard
-# asserts undisturbedness). Geometrically stretched mesh, finest at the wall
-# (Δz_top ≈ 14 μm, ≈ 103 μm at the deepest front position ≈ 3 mm — Gpyro
-# used uniform 50 μm).
+# asserts undisturbedness). Lower report rungs use a geometrically stretched
+# mesh, finest at the wall. The plotted 800-cell route-A rung is uniform at
+# 50 μm, matching the 800 intervals between Gpyro V2's 801 boundary nodes.
 #
 # No CI ConvergenceSpec: with fixed peak width σ (route A) or gate width
 # (route B) the solver converges to the smeared problem, whose offset from
@@ -165,24 +165,24 @@ function _vcpl01_report_curves(p, λ, L, id)
         ts = sol.t[js]
         front = [F.front(j) for j in js]
         keep = findall(!isnan, front)   # pre-detection outputs (front inside wall cell)
-        # Gpyro 0.8200 overlay (reference/gpyro/): dissertation §3.4.3 deck —
+        # Gpyro V2 overlay (reference/gpyro/v2_migration/): dissertation §3.4.3 deck —
         # the identical Stefan setup, latent heat via Gpyro's apparent-c_p
         # Gaussian (σₘ² = 0.1), Δz = 0.05 mm. Long-format depth histories +
         # T_m-isotherm front trajectory.
         gp_t, gp_x, gp_T = reference_columns(
-            "gpyro/vcpl01_result.csv",
+            "gpyro/v2_migration/vcpl01_result.csv",
             "t_s",
             "x_m",
             "T_K";
             header_rows = 1,
         )
         gp_ft, gp_fs = reference_columns(
-            "gpyro/vcpl01_front.csv",
+            "gpyro/v2_migration/vcpl01_front.csv",
             "t_s",
             "s_front_m";
             header_rows = 1,
         )
-        [
+        curves = [
             ReportCurve(
                 name = :T_histories_at_depths,
                 title = "$(id): T histories at the dissertation depths (cf. Fig. 3.11)",
@@ -200,7 +200,7 @@ function _vcpl01_report_curves(p, λ, L, id)
                     [
                         let rows = findall(x -> abs(x - d) < 1e-8, gp_x)
                             CurveSeries(
-                                label = "Gpyro 0.8200, x = $(d * 1e3) mm",
+                                label = "Gpyro V2, x = $(d * 1e3) mm",
                                 crosscode = true,
                                 x = gp_t[rows],
                                 y = gp_T[rows],
@@ -223,7 +223,7 @@ function _vcpl01_report_curves(p, λ, L, id)
                         exact = t -> stefan_front(t; λ = λ, αs = αs),
                     ),
                     CurveSeries(
-                        label = "Gpyro 0.8200 (T_m isotherm)",
+                        label = "Gpyro V2 (T_m isotherm)",
                         crosscode = true,
                         x = gp_ft,
                         y = gp_fs,
@@ -232,6 +232,12 @@ function _vcpl01_report_curves(p, λ, L, id)
                 ],
             ),
         ]
+        # The retained Gpyro deck matches route A only. Route B has different
+        # temperatures, latent heat, and a gated reaction closure.
+        if id != "V-CPL-01"
+            foreach(c -> filter!(s -> !s.crosscode, c.series), curves)
+        end
+        return curves
     end
 end
 
@@ -311,6 +317,7 @@ function _verification_case_vcpl01()
         qois = qois,
         ci = CIConfig(n_cells = 150, budget_s = 35.0),
         report = (
+            comparison_note = "Gpyro V2 revision `bff0126c68f2` uses 801 boundary nodes (800 intervals, 0.05 mm spacing), with every node retained for front interpolation. The base mesh matches the plotted Julia spacing where spatially resolved. Independent time and space refinements, native outputs, and provenance are retained under `test/verification/reference/gpyro/v2_migration/`. See the [V2 migration and analytical checks](comparison_coverage.md#gpyro-v2-migration). These runs carry no timing measurements.",
             n_cells_ladder = [75, 150, 300, 800],
             qoi_curves = (:T_histories_at_depths, :front_trajectory),
             curves = _vcpl01_report_curves(p, λ, L, "V-CPL-01"),

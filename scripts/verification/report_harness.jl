@@ -113,7 +113,13 @@ Run `case` through its report ladder and write every artifact under
 `<outdir>/assets/<id>/`. Returns a `CaseReportResult`, or `nothing` when the
 case opts out of report mode (`report = (;)`).
 """
-function run_case_report(case::VerificationCase, outdir::String; timings::Bool = true)
+function run_case_report(
+    case::VerificationCase,
+    outdir::String;
+    timings::Bool = true,
+    historical_timings::Bool = false,
+    comparisons_only::Bool = false,
+)
     isempty(pairs(case.report)) && return nothing
     assets = joinpath(outdir, "assets", case.id)
     mkpath(assets)
@@ -170,6 +176,11 @@ function run_case_report(case::VerificationCase, outdir::String; timings::Bool =
     # the base figures stay ours-vs-exact only (so our error is discernible),
     # the variants add the other codes' data as a muted context layer.
     curves = haskey(case.report, :curves) ? case.report.curves(finest_sol) : ReportCurve[]
+    if haskey(case.report, :resolution_curves)
+        append!(curves, case.report.resolution_curves(ns, qois_per_n))
+    end
+    add_matched_comparisons!(case.id, curves, apath("comparison_accuracy.csv"))
+    comparisons_only && filter!(c -> any(s -> s.crosscode, c.series), curves)
     for curve in curves
         p = render_overlay(curve, apath("$(curve.name).png"))
         push!(figures, curve.name => _relfig(outdir, p))
@@ -203,7 +214,9 @@ function run_case_report(case::VerificationCase, outdir::String; timings::Bool =
 
     # Solve-time comparison, when other codes' reference runs exist for this
     # case (reference/timings.csv; provenance in reference/*/README.md).
-    ref_times = timings ? _reference_timings(case.id) : NamedTuple[]
+    # Archive costs have no shared accuracy qualification. They must not be
+    # presented by default as a current cross-code performance comparison.
+    ref_times = timings && historical_timings ? _reference_timings(case.id) : NamedTuple[]
     if !isempty(ref_times)
         p = render_solve_time(case.id, ns, walls, ref_times, apath("solve_time.png"))
         push!(figures, :solve_time => _relfig(outdir, p))

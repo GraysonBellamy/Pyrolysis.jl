@@ -5,6 +5,13 @@ Gpyro V2 and the independent analytical solutions used by Pyrolysis.jl.
 They were generated on 2026-10-26. **No timing measurements are retained or
 used for this comparison.** The machine was loaded during the runs.
 
+The comparison-basis audit added `time_half/` and `time_quarter/` runs at
+the unchanged base mesh, plus `space_half/` at the same dt/4. The original
+`refined/` pair is retained. `accuracy.csv` now records all five configurations;
+these are still accuracy runs, with no benchmark measurements. Reaction-only
+cases keep their two boundary nodes at every level. See the
+[comparison policy](../../../../../docs/guide/verification/comparison_coverage.md#comparison-basis-audit).
+
 The problem sources are the [Gpyro Verification and Validation Manual v1.0
 (15 January 2026)](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/documentation/gpyro_verification_manual.pdf):
 §4.4, pp. 30–31, Eqs. (4.7)–(4.11) for diffusion; §4.3, p. 29,
@@ -94,6 +101,15 @@ simulation output. Temperature is fixed at 300 K (`FIX_DOMAIN_TEMPERATURE`
 with `BETA=0`). The slab is 1 m deep; the base run has 161 boundary-centered
 nodes (160 intervals) and dt = 0.05 s. The refined run has 321 nodes and
 dt = 0.025 s. Profiles are compared at 50, 150 and 400 s.
+
+Julia also reports errors against analytical cell averages, obtained by
+integrating the Robin solution over each finite-volume cell. Gpyro's nodal
+outputs retain their point-value reference. The V-GT-07 resolution figures
+compare profile, surface-flux and inventory errors over all three times at
+each code's actual mesh spacing. Julia's separate convergence table uses
+400 s; the original `refined/` sample simultaneously changes time and space.
+The added `time_quarter/` and `space_half/` pair holds dt fixed to isolate
+spatial sensitivity. Existing pointwise metrics and CI tolerances are unchanged.
 
 Gpyro clamps `HM=0` to the single-precision machine epsilon,
 1.1920928955078125e-7 kg/(m² s), in

@@ -224,7 +224,7 @@ function generate_guide_sources(; verbose::Bool = true)
         for (k, chunk) in enumerate(chapters)
             label = "guide/$(spec.name)/$(files[k])"
             transformed = transform_chapter(
-                rebase_figure_paths(chunk, "../../assets/figures"), label,
+                rebase_guide_paths(chunk, "../../assets/figures"), label,
             )
             validate_chapter!(problems, transformed, label)
             write(joinpath(outdir, files[k]), join(transformed, "\n") * "\n")

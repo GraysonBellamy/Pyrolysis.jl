@@ -1,0 +1,110 @@
+
+        (      (   '  )      (      (         )(    
+      ()/)   (()     ((       )    )/(      ()/(    
+   /█(▌▌))  (█(███)  (█)    (▌) (████(▖)  (/ ██\\)  
+  |█(  __   |█|__)█|  (██\_/█)  |█(__)▌|  |█|  |█|  
+  |█( |██|  |█ ███/    \███/    |█████/   |█|  |█|  
+  |█(__|█|  |█|         |█|     |█| \█\   |█|__|█|  
+   \█████|  |█|          █|     |█|  \█\   \████/   
+                                                    
+             STANDALONE SIMULATION MODE             
+                                                    
+ Revision         : bff0126c68f2a35c084ef04490ae327185f281a3-archive
+ Revision Date    : unspecified
+ Compilation Date : Oct 26, 2026  16:57:53
+ https://gitlab.imft.fr/gpyro/gpyro
+
+ OpenMP Disabled                                                                                    
+
+
+ Entering main timestepping loop.
+ Timestep #:       1  Time:     0.0050 s
+ Timestep #:       2  Time:     0.0100 s
+ Timestep #:       3  Time:     0.0150 s
+ Timestep #:       4  Time:     0.0200 s
+ Timestep #:       5  Time:     0.0250 s
+ Timestep #:       6  Time:     0.0300 s
+ Timestep #:       7  Time:     0.0350 s
+ Timestep #:       8  Time:     0.0400 s
+ Timestep #:       9  Time:     0.0450 s
+ Timestep #:      10  Time:     0.0500 s
+ Timestep #:      20  Time:     0.1000 s
+ Timestep #:      30  Time:     0.1500 s
+ Timestep #:      40  Time:     0.2000 s
+ Timestep #:      50  Time:     0.2500 s
+ Timestep #:      60  Time:     0.3000 s
+ Timestep #:      70  Time:     0.3500 s
+ Timestep #:      80  Time:     0.4000 s
+ Timestep #:      90  Time:     0.4500 s
+ Timestep #:     100  Time:     0.5000 s
+ Timestep #:     200  Time:     1.0000 s
+ Timestep #:     300  Time:     1.5000 s
+ Timestep #:     400  Time:     2.0000 s
+ Timestep #:     500  Time:     2.5000 s
+ Timestep #:     600  Time:     3.0000 s
+ Timestep #:     700  Time:     3.5000 s
+ Timestep #:     800  Time:     4.0000 s
+ Timestep #:     900  Time:     4.5000 s
+ Timestep #:    1000  Time:     5.0000 s
+ Timestep #:    2000  Time:    10.0000 s
+ Timestep #:    3000  Time:    15.0000 s
+ Timestep #:    4000  Time:    20.0000 s
+ Timestep #:    5000  Time:    25.0000 s
+ Timestep #:    6000  Time:    30.0000 s
+ Timestep #:    7000  Time:    35.0000 s
+ Timestep #:    8000  Time:    40.0000 s
+ Timestep #:    9000  Time:    45.0000 s
+ Timestep #:   10000  Time:    50.0000 s
+ Timestep #:   11000  Time:    55.0000 s
+ Timestep #:   12000  Time:    60.0000 s
+ Timestep #:   13000  Time:    65.0000 s
+ Timestep #:   14000  Time:    70.0000 s
+ Timestep #:   15000  Time:    75.0000 s
+ Timestep #:   16000  Time:    80.0000 s
+ Timestep #:   17000  Time:    85.0000 s
+ Timestep #:   18000  Time:    90.0000 s
+ Timestep #:   19000  Time:    95.0000 s
+ Timestep #:   20000  Time:   100.0000 s
+ Timestep #:   21000  Time:   105.0000 s
+ Timestep #:   22000  Time:   110.0000 s
+ Timestep #:   23000  Time:   115.0000 s
+ Timestep #:   24000  Time:   120.0000 s
+ Timestep #:   25000  Time:   125.0000 s
+ Timestep #:   26000  Time:   130.0000 s
+ Timestep #:   27000  Time:   135.0000 s
+ Timestep #:   28000  Time:   140.0000 s
+ Timestep #:   29000  Time:   145.0000 s
+ Timestep #:   30000  Time:   150.0000 s
+ Timestep #:   31000  Time:   155.0000 s
+ Timestep #:   32000  Time:   160.0000 s
+ Timestep #:   33000  Time:   165.0000 s
+ Timestep #:   34000  Time:   170.0000 s
+ Timestep #:   35000  Time:   175.0000 s
+ Timestep #:   36000  Time:   180.0000 s
+ Timestep #:   37000  Time:   185.0000 s
+ Timestep #:   38000  Time:   190.0000 s
+ Timestep #:   39000  Time:   195.0000 s
+ Timestep #:   40000  Time:   200.0000 s
+ Timestep #:   41000  Time:   205.0000 s
+ Timestep #:   42000  Time:   210.0000 s
+ Timestep #:   43000  Time:   215.0000 s
+ Timestep #:   44000  Time:   220.0000 s
+ Timestep #:   45000  Time:   225.0000 s
+ Timestep #:   46000  Time:   230.0000 s
+ Timestep #:   47000  Time:   235.0000 s
+ Timestep #:   48000  Time:   240.0000 s
+ Timestep #:   49000  Time:   245.0000 s
+ Timestep #:   50000  Time:   250.0000 s
+Note: The following floating-point exceptions are signalling: IEEE_UNDERFLOW_FLAG IEEE_DENORMAL
+ Timestep #:   51000  Time:   255.0000 s
+ Timestep #:   52000  Time:   260.0000 s
+ Timestep #:   53000  Time:   265.0000 s
+ Timestep #:   54000  Time:   270.0000 s
+ Timestep #:   55000  Time:   275.0000 s
+ Timestep #:   56000  Time:   280.0000 s
+ Timestep #:   57000  Time:   285.0000 s
+ Timestep #:   58000  Time:   290.0000 s
+ Timestep #:   59000  Time:   295.0000 s
+ Timestep #:   60000  Time:   300.0000 s
+ Timestep #:   60001  Time:   300.0050 s
+End of simulation reached successfully. Shutting down.
