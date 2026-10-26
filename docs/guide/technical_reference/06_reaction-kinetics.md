@@ -9,7 +9,7 @@ convention. Every governing equation, default value, and sign is derived from
 first principles and then matched line-for-line to the implementation in
 `src/Physics/kinetics.jl`, `src/Materials/reactions.jl` and the reaction kernel
 `src/Kernels/reactions.jl`. We close with a careful contrast against ThermaKin2Ds,
-Gpyro, and FDS, and a statement of the model's limitations.
+Gpyro V2, and FDS, and a statement of the model's limitations.
 
 Throughout this chapter the index `i` denotes the **reaction index** and `j` the
 **component (species) index** — the kinetics convention of overload note I1 in
@@ -83,7 +83,7 @@ need for a molar mass of the solid, makes $r_i$ directly the mass conversion rat
 and lets the stoichiometric coefficients $\nu_{i,j}$ be pure **mass** yields that
 sum to unity (§6.5). The price is that $A_i$ inherits whatever units make the
 product dimensionally consistent (§6.4). ThermaKin and FDS also use mass-based
-rates, but their factors and stoichiometric bases differ; Gpyro's conversion
+rates, but their factors and stoichiometric bases differ; Gpyro V2's conversion
 rate includes a cumulative-mass normalization (§6.9).
 
 ### 6.1.2 Discrete (per-cell) form
@@ -124,7 +124,7 @@ spatial operator inside the reaction term**. Reactions are local (point-wise in
 space); all spatial coupling enters through transport (conduction §7, gas
 diffusion/Darcy §9) and through the mesh motion (§11). This is the
 cell-as-batch-reactor view: each control volume behaves, kinetically, like an
-isolated TGA sample. This local evaluation is also used in Gpyro and FDS,
+isolated TGA sample. This local evaluation is also used in Gpyro V2 and FDS,
 although their oxygen factors and rate normalization differ (§6.9).
 
 The single-reaction function is `reaction_rate` (src/Physics/kinetics.jl). It
@@ -890,7 +890,20 @@ names a non-existent component errors with a clear message before any solve.
 
 ---
 
-## 6.9 Comparison to ThermaKin2Ds, Gpyro, and FDS
+## 6.9 Comparison with reference solvers
+
+Reaction parameters can be transferred only after the reaction rate and heat
+have been put on the same mass basis. The versions in §1.6.5 differ in
+reactant factors, conversion history, temperature gates and enthalpy
+conventions. The table gives the main porting checks; the equations below
+state the restricted cases in which a mapping exists.
+
+| Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro V2 | FDS 6.11.0 |
+|---|---|---|---|---|
+| Bare reactant factor | one $\xi_j^n$ | one or two concentrations | conversion model times cumulative available mass/volume | $\rho_{s,\alpha}^{n_s}=\xi_\alpha^{n_s}$ |
+| Extra rate factors | smooth gates and depletion limiter | hard temperature limits | oxygen dependence and critical temperature | oxygen and temperature powers, rate limits |
+| Positive heat | endothermic | exothermic | endothermic | endothermic |
+| Porting requirement | unit reactant consumption | normalize stoichiometry and flip heat sign | match conversion normalization and heat basis | match units, rate options and enthalpy datum |
 
 ### 6.9.1 ThermaKin2Ds
 
@@ -922,32 +935,48 @@ not an implementation of two-reactant chemistry. Pyrolysis.jl validates the
 single-reactant product-yield sum by default; the low-level constructor can
 disable that validation (`validate_mass=false`).
 
-### 6.9.2 Gpyro
+### 6.9.2 Gpyro V2
 
-GP Eqs. 35–40 define a cumulative available reactant mass per area
-$M_\Sigma=(\bar\rho Y_A\Delta z)_\Sigma$, conversion
-$1-\alpha_A=\bar\rho Y_A\Delta z/M_\Sigma$, and
+For the default reaction-order model with cumulative reactant accounting,
+V2 uses the mass $m_\Sigma$ initially present plus that subsequently formed
+in the cell, and $1-\alpha_A=m_A/m_\Sigma$. In cell-volume notation,
 
 $$
-r_k=(1-\alpha_A)^{n_k}\frac{M_\Sigma}{\Delta z}
-Z_k e^{-E_k/(RT)}g(Y_{O_2})H(T-T_{\mathrm{crit},k}).
+r_k=(1-\alpha_A)^{n_k}\frac{m_\Sigma}{V}
+Z_k e^{-E_k/(RT)}g(Y_{O_2})\,s_k(T).
 $$
 
-For $n_k=1$, oxygen-independent kinetics and an open gate, the bare rate
-reduces to $\xi_A Z_k e^{-E_k/(RT)}$. It matches our unregularized
-first-order law, subject to our limiter and gate settings. For $n_k\ne1$
-there is an additional factor $(M_\Sigma/\Delta z)^{1-n_k}$: copying $Z_k$
-to $A$ does not generally reproduce the rate. Gpyro also provides other
-conversion models and local oxygen dependence absent here.
+This is the rate in GP Eqs. 35–40 and V2 user guide §11.4, with the
+implemented temperature gate
+$s_k(T)=\min[\max((T-T_{\mathrm{crit},k})/(1\,\mathrm{K}),0),1]$.
+The manual states a cutoff below `TCRIT`; the
+[`REACTION_RATE_T` implementation](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_mass.f90#L68-L125)
+also ramps the rate over the next kelvin. For $n_k=1$, oxygen-independent
+kinetics and a fully open gate, the bare rate reduces to
+$\xi_A Z_k e^{-E_k/(RT)}$. It matches our unregularized first-order law,
+subject to our own limiter and gate settings. For $n_k\ne1$ there is an
+additional factor $(m_\Sigma/V)^{1-n_k}$: copying $Z_k$ to $A$ does not
+generally reproduce the rate. Other conversion models and the
+`CONVENTIONAL_RXN_ORDER` option change this accounting
+([`REACTION_RATE_Y`](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_mass.f90#L129-L259)).
+Local oxygen dependence and gas-consuming yields cannot generally be
+represented by our single-reactant source.
 
-GP Eqs. 43–45 split reaction heat into condensed-product and volatilized-mass
-parts. The equivalent per-reactant heat is
+GP Eqs. 43–45 and V2 user guide §11.5 split reaction heat into
+condensed-product and volatilized-mass parts. With `CONSTANT_DHVOL=.TRUE.`,
+the equivalent per-reactant heat is
 $h_k=\mathrm{SF}_k\Delta H_{\mathrm{sol},k}+
-(1-\mathrm{SF}_k)\Delta H_{\mathrm{vol},k}$, with matched sensible-enthalpy
-conventions. Setting the two heats equal is one special case. Positive heat
-is endothermic in both codes. Gpyro gas yields may include gas consumption;
-those oxidative reactions cannot generally be represented by our
-single-reactant source.
+(1-\mathrm{SF}_k)\Delta H_{\mathrm{vol},k}$, after matching the sensible
+enthalpy convention. Setting the two heats equal is one special case.
+Positive heat is endothermic in both codes.
+
+With `CONSTANT_DHVOL=.FALSE.`, the
+[`CHEMICAL_SOURCE_TERM` implementation](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_thermal.f90#L717-L814)
+also subtracts $\dot\omega_{fg,k}[h_g(T)-h_A(T)]$, using
+$h_g(T)=c_{p,g}T$. V2 user guide Eq. 44 prints the enthalpy difference
+in the opposite order under the same minus sign. Use the implemented
+correction and its enthalpy datum when converting this option; the fixed
+heat formula alone is insufficient.
 
 ### 6.9.3 FDS
 
@@ -958,9 +987,11 @@ r_{\alpha\beta}=\rho_{s,\alpha}^{n_s}A_{\alpha\beta}
 e^{-E_{\alpha\beta}/(RT_s)}X_{O_2}(x)^{n_{O_2}}T_s^{n_t}.
 $$
 
-Thus the density-order and Arrhenius factors have the same basis as our bare
-single-reactant law. Pyrolysis.jl omits the explicit oxygen and temperature
-powers. FDS's oxygen profile is a prescribed exponential penetration model
+Here $\rho_{s,\alpha}=\xi_\alpha=m_\alpha/V$ is the reactant's mass
+concentration (§4.8.3). Thus the concentration-order and Arrhenius factors
+have the same basis as our bare single-reactant law. Pyrolysis.jl omits
+the explicit oxygen and temperature powers. FDS's oxygen profile is a
+prescribed exponential penetration model
 with surface oxygen determined by a mass-transfer balance, not a pore-gas
 species-transport solution. FDS's heat source has our endothermic-positive
 sign, but its temperature-dependent reaction enthalpy accounting must also
@@ -985,14 +1016,19 @@ These are starting estimates, not an exact fit to a measured TGA peak.
 User Guide §4.9 shows their use to construct a Pyrolysis.jl `Reaction`;
 there is no automatic FDS input importer.
 
-### 6.9.4 Summary of correspondences
+### 6.9.4 Sources and numerical evidence
 
-| Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro | FDS 6.11.0 |
-|---|---|---|---|---|
-| Bare reactant factor | one $\xi^n$ | one or two concentrations | conversion model times cumulative available mass/volume | $\rho_s^{n_s}$ |
-| Extra rate factors | smooth gates and depletion limiter | hard temperature limits | oxygen dependence and critical temperature | oxygen and temperature powers, rate limits |
-| Positive heat | endothermic | exothermic | endothermic | endothermic |
-| Porting requirement | unit reactant consumption | normalize stoichiometry and flip heat sign | match conversion normalization and heat basis | match units, rate options and enthalpy datum |
+TK Eqs. 1, 5–6 describe the documented rate and heat basis. GP §§3.1–3.5
+and V2 user guide §11 are checked against the linked V2 rate and heat-source
+routines. The FDS solid-phase reaction equations and Appendix P are checked
+against [`PYROLYSIS`](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/wall.f90#L3184-L3580) and the parameter
+recovery path linked above. Our rate and source assembly are in
+`src/Physics/kinetics.jl`.
+
+V-RX-01 and V-RX-02 test specified reaction networks; the retained external
+overlays have the version scope in §18.1.3. They do not establish agreement
+for oxygen-dependent kinetics or arbitrary reaction-heat conventions.
+User Guide §§4.4–4.9 covers the practical parameter and heat conversions.
 
 ---
 
@@ -1013,7 +1049,7 @@ intumescent solids, moisture). Its boundaries, with the source-of-truth guards:
    **sequences** of single-reactant reactions.
 
 2. **No oxygen or pressure dependence.** The rate (6.1) depends only on $T$ and
-   condensed-phase mass concentrations. There is no $g(Y_{\mathrm{O_2}})$ (Gpyro)
+   condensed-phase mass concentrations. There is no $g(Y_{\mathrm{O_2}})$ (Gpyro V2)
    or $X_{\mathrm{O_2}}^{n_{\mathrm{O_2}}}$ (FDS) factor and no partial-pressure
    term, so oxidative pyrolysis and pressure-enhanced decomposition cannot be
    modelled directly. Pressure effects enter only through the separate gas

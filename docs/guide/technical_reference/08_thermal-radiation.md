@@ -690,7 +690,19 @@ $10^{-12}$. The residual allocates nothing.
 
 ---
 
-## 8.7 Comparison to ThermaKin2Ds, Gpyro, and FDS
+## 8.7 Comparison with reference solvers
+
+Radiation comparisons must match where energy is deposited as well as how
+much enters the material. The versions in §1.6.5 differ in beam attenuation,
+emission and surface treatment. For the 1D configurations below, compare
+optical depth, entering flux and deposition profile before interpreting a
+temperature difference as a discretization error.
+
+| Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro V2 | FDS 6.11.0 solid wall |
+|:---|:---|:---|:---|:---|
+| In-depth transport | incident Beer–Lambert beam | Beer–Lambert absorption distribution | face-normal exponential attenuation | optional hemispheric two-flux model |
+| Numerical deposition | each traversed cell | MAX or RAND element selection | each traversed cell | forward/backward flux balance |
+| Emission treatment | surface emission separately | absorption-weighted/selected-element emission | surface re-radiation subtracted before positive net-flux attenuation | surface or internal emission, according to model |
 
 ### 8.7.1 ThermaKin2Ds
 
@@ -708,16 +720,31 @@ TK also describes a $T^3$ conductivity contribution for optically thick
 radiative diffusion. Such a property law can be supplied here, but it is not
 part of our Beer–Lambert kernel.
 
-### 8.7.2 Gpyro
+### 8.7.2 Gpyro V2
 
-GP Eqs. 66–67 describe one-way attenuation of
-$\bar\varepsilon\dot q_e''$ with effective coefficient $\bar\kappa$
-[m⁻¹], without internal emission. This corresponds to our incident-beam
-model when optical depth, entering flux and boundary conditions are matched.
-GP Eq. 7 separately permits a $T^3$ pore-radiation conductivity contribution.
-The component coefficient units and mixture weights require the conversion
-in §5.14. Gpyro V2's multidimensional radiation changes are not implied by
-this comparison to the documented 1D model.
+GP Eqs. 66–67 and V2 user guide §4.2 describe exponential attenuation with
+an effective absorption coefficient $\bar\kappa$ [m⁻¹]. V2's
+[`IN_DEPTH_RADIATION_ABSORPTION`](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_thermal.f90#L122-L179)
+marches along the coordinate normal to the irradiated face, transmitting
+$q_{i+1}=q_i\exp(-\bar\kappa_i\Delta_i)$ and depositing the difference
+in each cell. It has no internal emission term. This attenuation law
+corresponds to our incident-beam model when optical depth and entering
+flux match. The component units and mixture weights require §5.14's conversion.
+
+The entering flux needs a separate check. In the active
+[thermal boundary path](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_thermal.f90#L1239-L1312),
+V2 forms `QENET` from absorbed irradiation minus surface re-radiation when
+`RERAD` is enabled. If `QENET` is positive and the boundary-cell absorption
+coefficient is below $10^6$ m⁻¹, that **net** flux enters the attenuation
+routine; otherwise it is applied at the boundary cell. Pyrolysis.jl
+attenuates incident irradiation and handles surface emission separately.
+Thus identical incident heat flux and absorption coefficients do not by
+themselves establish the same radiative source distribution.
+
+GP Eq. 7 separately permits a $T^3$ pore-radiation conductivity term,
+implemented in the [thermal property assembly](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_thermal.f90#L252-L305).
+That contribution belongs in a matched conductivity law, not in the
+Beer–Lambert attenuation coefficient.
 
 ### 8.7.3 FDS
 
@@ -732,17 +759,19 @@ units; do not simply copy $\kappa_s$ into a mass-specific $\alpha_j$.
 The condensed-phase model described here is gray; FDS's gas-phase spectral
 radiation options do not establish a gray-band solid model.
 
-### 8.7.4 Summary
+### 8.7.4 Sources and numerical evidence
 
-| Model | External radiation treatment | Thermal emission treatment |
-|---|---|---|
-| Pyrolysis.jl | surface absorption or deterministic Beer–Lambert deposits | boundary `RadiativeBC`; no in-depth emission |
-| ThermaKin2Ds | Beer–Lambert distribution with MAX/RAND element selection | absorption-selected element; radiative conductivity separately |
-| Gpyro documented 1D | one-way exponential attenuation | surface emission; radiative conductivity separately |
-| FDS standard solid | surface absorption or two-flux transport | surface or in-depth emission according to selected model |
+TK Eqs. 11–12, 23 and §3 describe its attenuation, emission and deposition.
+GP Eqs. 7, 66–67 and V2 user guide §§4.2, 8 are checked against the
+linked V2 routines. FDS's [radiation equations](https://github.com/firemodels/fds/blob/FDS-6.11.0/Manuals/FDS_Technical_Reference_Guide/Solid_Chapter.tex#L52-L90)
+and [two-flux implementation](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/wall.f90#L2255-L2295) establish
+its angular and emission terms. Our beam deposits are assembled in
+`src/Kernels/radiation.jl`.
 
-Sources: TK Eqs. 11–12, 23 and §3; GP Eqs. 7, 66–67;
-FDS solid-phase chapter, “Thermal Radiation” (§1.6.5).
+V-RAD-01 checks a specified absorption/conduction problem. Its retained Gpyro
+overlay belongs to 0.8200 (§18.1.3), so it is not evidence for the pinned
+V2 boundary treatment. User Guide §5.6 explains the incident-flux and
+surface-emission choices needed for a new comparison.
 
 ---
 

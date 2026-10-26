@@ -1,6 +1,6 @@
 # 1. Introduction, Scope, and Modeling Philosophy
 
-This chapter establishes what Pyrolysis.jl is, the class of physical problems it solves, and the modeling decisions that govern every later chapter. Pyrolysis.jl is a one-dimensional (through-thickness) condensed-phase pyrolysis solver: it integrates the coupled heat-conduction, multi-species reaction-transport, and (optionally) gas-pressure equations that describe a solid heated to thermal decomposition. We position the code relative to the three established reference solvers it is most often compared to — ThermaKin2Ds, Gpyro, and the FDS solid-phase pyrolysis model — and we state the binding conventions (coordinate orientation, flux sign, divergence sign, heat-of-reaction sign) and the energy equation that the remainder of the Technical Reference Guide derives and exploits. Everything asserted here is grounded in the actual implementation; where a textbook form and the code differ, the code is authoritative and the deviation is flagged.
+This chapter establishes what Pyrolysis.jl is, the class of physical problems it solves, and the modeling decisions that govern every later chapter. Pyrolysis.jl is a one-dimensional (through-thickness) condensed-phase pyrolysis solver: it integrates the coupled heat-conduction, multi-species reaction-transport, and (optionally) gas-pressure equations that describe a solid heated to thermal decomposition. We position the code relative to the three established reference solvers it is most often compared to — ThermaKin2Ds, Gpyro V2, and the FDS solid-phase pyrolysis model — and we state the binding conventions (coordinate orientation, flux sign, divergence sign, heat-of-reaction sign) and the energy equation that the remainder of the Technical Reference Guide derives and exploits. Everything asserted here is grounded in the actual implementation; where a textbook form and the code differ, the code is authoritative and the deviation is flagged.
 
 ---
 
@@ -10,7 +10,7 @@ Pyrolysis.jl simulates the thermal decomposition (pyrolysis) of condensed-phase 
 
 This document — the **Technical Reference Guide** — derives and justifies all of the mathematics and physics: the continuum governing equations (§3, Governing Equations of the Continuum Model), the constitutive closures (§4, Materials & Property Functions; §5, Effective Properties & Mixing Rules; §6, Reaction Kinetics; §8, Thermal Radiation), the discretization (§7, Heat Conduction, Gas Convection & Energy Assembly; §13, Finite-Volume Discretization), the moving-mesh framework (§10, Volume Change & Lateral Shrinkage; §11, The ALE Framework), the boundary treatment (§12, Boundary & Initial Conditions), burnout (§14, Cell Deactivation and Burnout), the temporal integration and Jacobian machinery (§15, Temporal Integration, the DAE, and the Colored Jacobian), and the conservation, sensitivity, and verification apparatus (§16 Conservation Ledgers and the Audit, §17, §18). It is a *reference*, not a tutorial: it states the equations as the code implements them, with file-and-function attribution, and explains why each modeling choice was made. The companion **User Guide** (Part II of the documentation) teaches workflow — how to build materials, set boundary conditions, choose the physics options, and run the solver.
 
-The reader is assumed to be comfortable with the heat equation, the Arrhenius law, finite-volume / finite-difference discretization, and the basic vocabulary of stiff ODE integration. No prior knowledge of ThermaKin2Ds, Gpyro, or FDS is required, but readers familiar with any of them will find explicit notation-mapping and contrast subsections throughout.
+The reader is assumed to be comfortable with the heat equation, the Arrhenius law, finite-volume / finite-difference discretization, and the basic vocabulary of stiff ODE integration. No prior knowledge of ThermaKin2Ds, Gpyro V2, or FDS is required, but readers familiar with any of them will find explicit notation-mapping and contrast subsections throughout.
 
 ### 1.1.1 How to read the two guides
 
@@ -50,7 +50,7 @@ The scope boundary is as important as the scope itself. The following are explic
 
 - **Multi-dimensional geometry.** Full solves are one-dimensional in $z$. The cross-section $A$ is a scalar gauge, not a resolved 2-D/3-D field; lateral shrinkage is a column-global area scaling driven by an empirical law (§10), not a resolved lateral transport. Meshes of two and three dimensions (`box_mesh`, `cell_mesh`) exist at the residual level — a potential closure of the mesh motion, conductivity tensors and element death are implemented and tested there (§11.3.5, §14.5) — but `setup` refuses gas transport, in-depth radiation, the variable cross section, the equidistribution correction and cell deactivation on them, and they are not a supported path for full solves.
 - **Full two-temperature gas.** The gas phase is *not* given its own energy equation with a separate gas temperature. Gas is assumed to be in local thermal equilibrium with the matrix at the cell temperature $T$: it stores sensible heat like every other phase, and its flux relative to the skeleton carries its sensible enthalpy across the cell faces (§1.4.3, §7).
-- **Multi-reactant reactions.** Each `Reaction` supports exactly one reactant ($N_{\text{in}}=1$; a reaction with more is rejected by problem validation; `_apply_reaction_source!` in `src/Physics/kinetics.jl` also guards source evaluation). The reactant is consumed with unit mass stoichiometry and products are explicit yields summing to 1.0 (§6). ThermaKin supports bimolecular reactions and Gpyro supports gas-consuming oxidative schemes; these cannot generally be reproduced by sequences of single-reactant steps. Extending the reactant tuple to a 3-ary `(idx, order, mass_stoich)` form is an open item (§1.8.1).
+- **Multi-reactant reactions.** Each `Reaction` supports exactly one reactant ($N_{\text{in}}=1$; a reaction with more is rejected by problem validation; `_apply_reaction_source!` in `src/Physics/kinetics.jl` also guards source evaluation). The reactant is consumed with unit mass stoichiometry and products are explicit yields summing to 1.0 (§6). ThermaKin supports bimolecular reactions and Gpyro V2 supports gas-consuming oxidative schemes; these cannot generally be reproduced by sequences of single-reactant steps. Extending the reactant tuple to a 3-ary `(idx, order, mass_stoich)` form is an open item (§1.8.1).
 - **Pressure- or oxygen-dependent kinetics, and distributed activation energy.** The Arrhenius pre-exponential $A_i$ is temperature-independent, the rate has no explicit pressure or oxygen factor, and there is no built-in distributed-activation-energy (DAEM) tooling (§6).
 
 These exclusions are not accidental: they are the modeling simplifications that make the 1-D solver fast, type-stable, and differentiable with respect to its state, and they are shared (to varying degrees) by the reference codes discussed in §1.6.
@@ -161,7 +161,7 @@ $$
 
 whose storage and gas temperature-advection terms correspond to the 1D reduction of ThermaKin Eq. 17 when constitutive laws are matched (§7.8). On a fixed skeleton $D_s/Dt = \partial_t$; on a mesh that moves with the skeleton $D_sT/Dt$ is the mesh-frame rate. Skeleton motion then needs no additional mesh-relative advection term; gas transport remains. Where the equidistribution correction moves the mesh relative to the skeleton, every inventory crosses the faces at the relative velocity $-\mathbf c$ (§11.2.2, §11.6).
 
-**Why the gas is stored.** The gas concentration $\xi_g$ is an integrated state, so the term $\xi_g c_{p,g}\,\partial_t T$ is retained without a separate gas-temperature unknown. Gpyro neglects gas storage and gas conduction in its default thermal-equilibrium exchange model; `FULL_QSG` retains both. The standard FDS wall model has no pore-gas inventory. Its size is $\varphi\rho_g c_{p,g}$ against the matrix heat capacity: for a char of porosity 0.8 and bulk heat capacity $1.5\times10^5$ J·m⁻³·K⁻¹ holding pore gas at 1 atm and 800 K ($\rho_g \approx 0.44$ kg·m⁻³, $c_{p,g}\approx 1100$ J·kg⁻¹·K⁻¹), about a quarter of a percent of $\rho c_p$ — small for this example, but retained.
+**Why the gas is stored.** The gas component mass is an integrated state, so the term $\xi_g c_{p,g}\,\partial_t T$ is retained without a separate gas-temperature unknown. Gpyro V2 neglects gas storage and gas conduction in its default thermal-equilibrium exchange model; `FULL_QSG` retains both. The standard FDS wall model has no pore-gas inventory. Its size is $\varphi\rho_g c_{p,g}$ against the matrix heat capacity: for a char of porosity 0.8 and bulk heat capacity $1.5\times10^5$ J·m⁻³·K⁻¹ holding pore gas at 1 atm and 800 K ($\rho_g \approx 0.44$ kg·m⁻³, $c_{p,g}\approx 1100$ J·kg⁻¹·K⁻¹), about a quarter of a percent of $\rho c_p$ — small for this example, but retained.
 
 ### 1.4.2 The two energy states
 
@@ -273,7 +273,7 @@ $$
 
 verified verbatim in `reaction_heat_source` (`src/Physics/kinetics.jl`, `Q -= heats[i]*rates[i]`). Hence an endothermic reaction ($h>0$, $r>0$) gives $Q_{\text{rxn}}<0$ (cooling), and an exothermic reaction ($h<0$) gives $Q_{\text{rxn}}>0$ (heating).
 
-> **Overload caution (binding).** ThermaKin *publishes* the opposite sign — in its manual $h>0$ denotes an exothermic reaction — so a heat of reaction taken from ThermaKin input is entered in Pyrolysis.jl with its sign flipped and its reaction-extent basis normalized (§6.9.1). Gpyro and FDS use the same convention as Pyrolysis.jl ($h>0$ endothermic; §6.9.2), but their heat basis, units and temperature datum must also be converted when necessary (§6.9). This is overload resolution H1 of the nomenclature (§2); the minus sign in (1.8) is what turns the stored heat into the volumetric source.
+> **Overload caution (binding).** ThermaKin *publishes* the opposite sign — in its manual $h>0$ denotes an exothermic reaction — so a heat of reaction taken from ThermaKin input is entered in Pyrolysis.jl with its sign flipped and its reaction-extent basis normalized (§6.9.1). Gpyro V2 and FDS use the same convention as Pyrolysis.jl ($h>0$ endothermic; §6.9.2), but their heat basis, units and temperature datum must also be converted when necessary (§6.9). This is overload resolution H1 of the nomenclature (§2); the minus sign in (1.8) is what turns the stored heat into the volumetric source.
 
 Two further nomenclature overloads that recur in this guide and are worth flagging here (full list in §2): the symbol $A$ denotes **cross-sectional area** in the physics chapters (and $A_f$ the area of face $f$), while the Arrhenius pre-exponential is always written subscripted, $A_i$ (or $A_{\alpha\beta}$); and $\chi$ always denotes **pyrolysis progress**, never a cross-section ratio (the area ratio is $A/A_0=\mathrm{law}(\bar\chi)$).
 
@@ -293,7 +293,7 @@ The numerical constants and defaults — the property bracket, the floors of the
 
 ---
 
-## 1.6 Relation to ThermaKin2Ds, Gpyro, and the FDS solid-phase model
+## 1.6 Relation to ThermaKin2Ds, Gpyro V2, and the FDS solid-phase model
 
 These codes share several conservation laws and constitutive models, but their
 inputs and predictions are not interchangeable. Comparisons below concern the
@@ -316,22 +316,25 @@ positive reaction heat for exothermic reactions; Pyrolysis.jl uses positive
 heat for endothermic reactions. Porting also requires matching the reaction
 extent and mass basis (§6.9.1).
 
-### 1.6.2 Gpyro
+### 1.6.2 Gpyro V2
 
-Gpyro 0.8200 has 0D, 1D and multidimensional transport paths. Its documented
-1D volume-change model conserves condensed mass on cells whose thicknesses
-change; it is not a fixed-grid approximation to recession (GP §4.1).
-Gpyro V2 is a separate implementation and must be identified separately.
-Neither multidimensional transport nor a V2 feature establishes general
-multidimensional deformation support in every Gpyro version.
+Gpyro V2 separates condensed and pore-gas inventories. It provides 0D,
+1D and multidimensional transport calculations; the comparisons here use
+its 1D formulation with the relevant transport and deformation options
+enabled. Condensed species masses determine cell volume through the mixture
+bulk density. The axial deformation modes and their limitations are described
+in §11.9; multidimensional transport does not establish general
+multidimensional deformation support.
 
-Gpyro separates condensed and pore-gas inventories. Its thermal-equilibrium
-approximation normally omits gas heat storage and gas conduction from the
-solid-to-gas exchange term; `FULL_QSG` includes both (GP Eqs. 63–65).
-Pyrolysis.jl stores gas sensible heat but does not thereby reproduce that full
-exchange model. Gpyro also has a two-temperature formulation, oxygen-dependent
-kinetics, gas mass-fraction diffusion, and Darcy flow with gravity. The
-correspondences and restrictions are detailed in §§6–9.
+With pressure and gas-species transport enabled, V2 combines Darcy flow with
+mass-fraction diffusion. Its working thermal comparison uses a common gas
+and solid temperature. The default equilibrium exchange omits gas heat
+storage and gas conduction; `FULL_QSG` includes both. The documented
+separate gas-energy equation has no corresponding solve in the pinned
+driver (§7.8.3). V2 advances condensed species masses directly with a
+reaction-rate correction for overconsumption and uses a directional thermal
+solver (§§13.11 and 15.14). These choices affect both the model to be matched
+and its numerical error.
 
 ### 1.6.3 The FDS solid-phase pyrolysis model
 
@@ -342,8 +345,8 @@ grid, and coupling to the surrounding CFD gas. It assumes instantaneous
 release of generated gas; it does not solve pore-gas storage or transport.
 Reaction and gas/solid enthalpy accounting still matter (§7.8.4).
 
-FDS permits density-order, oxygen and temperature factors in its reaction
-rates. Pyrolysis.jl supports the density-order factor but omits the explicit
+FDS permits concentration-order, oxygen and temperature factors in its reaction
+rates. Pyrolysis.jl supports the concentration-order factor but omits the explicit
 oxygen and temperature-power factors. FDS offers surface absorption by default
 and a two-flux model for in-depth absorption and emission; Pyrolysis.jl's
 in-depth option is an incident Beer–Lambert beam without internal emission.
@@ -352,13 +355,13 @@ discrepancy between the 6.11.0 manual and source.
 
 ### 1.6.4 Summary contrast
 
-| Aspect | ThermaKin2Ds | Gpyro 0.8200 | FDS 6.11.0 wall model | Pyrolysis.jl |
+| Aspect | ThermaKin2Ds | Gpyro V2 | FDS 6.11.0 wall model | Pyrolysis.jl |
 |---|---|---|---|---|
 | Geometry in this comparison | 1D, Cartesian/axisymmetric 2D | deforming 1D; multidimensional transport also available | standard 1D wall; `HT3D` separately documented | supported full pyrolysis solves in 1D (§1.2.2) |
-| Pore-gas heat storage | included | optional in thermal equilibrium; separate gas-energy formulation also available | no pore-gas inventory | included |
+| Pore-gas heat storage | included | optional in thermal equilibrium; no separate gas-enthalpy solve | no pore-gas inventory | included |
 | Heat sign, positive | exothermic | endothermic | endothermic | endothermic |
-| Gas transport | volume-fraction-gradient law | Darcy with gravity and mass-fraction diffusion | instantaneous release | lumped superficial transfer or dusty-gas friction, each with optional Darcy flow |
-| Time integration | Crank–Nicolson in primary direction, explicit transverse terms | fully implicit balances with iterative equation solves | Crank–Nicolson conduction and separate reaction/grid updates | mass-matrix DAE; `Rodas5P` default in this checkout |
+| Gas transport | volume-fraction-gradient law | Darcy and mass-fraction diffusion when enabled (§9.12.2) | instantaneous release | lumped superficial transfer or dusty-gas friction, each with optional Darcy flow |
+| Time integration | Crank–Nicolson in primary direction, explicit transverse terms | direct mass updates; directional semi-implicit enthalpy solve | Crank–Nicolson conduction and separate reaction/grid updates | mass-matrix DAE; `Rodas5P` default in this checkout |
 | Deforming grid | changing elements with splitting/combining | changing 1D control-volume thicknesses | thickness update and remeshing | node positions and velocities in the coupled system |
 
 Pyrolysis.jl forms its state Jacobian by colored automatic differentiation
@@ -368,26 +371,46 @@ sensitivities supported here use finite differences (§17).
 
 ### 1.6.5 Primary sources and version scope
 
+Solver comparisons in both guides use **Gpyro V2** at commit
+[`bff0126`](https://github.com/Gedeben/GPYRO-V2/tree/bff0126c68f2a35c084ef04490ae327185f281a3).
+Gpyro V2 and FDS comparisons check the relevant guide equations against
+active source paths. Where they disagree, the text identifies the difference
+and follows the implementation for claims about executable behavior.
+ThermaKin2Ds comparisons are supported by its manual; its source is not
+available in this checkout. They establish the documented formulation and
+numerical procedure, without claiming a source-level implementation check.
+A documented equation or input flag alone does not establish a working option.
+
+The chapter comparisons begin with the question being compared and an
+overview, then explain each solver in the order ThermaKin2Ds, Gpyro V2 and
+FDS. Equation correspondences state their assumptions. The closing sources
+and numerical-evidence discussion distinguishes those correspondences from
+agreement demonstrated by matched runs.
+
 The abbreviations used in the comparison sections identify these sources:
 
-- **TK:** *Technical Reference for Numerical Pyrolysis Model ThermaKin2Ds*,
-  supplied file `docs/refs/ThermaKin/ThermaKin2Ds Reference v2.pdf`, especially
-  Eqs. 1–23 and §3. This manual distinguishes ThermaKin2Ds from earlier ThermaKin.
-- **GP:** Lautenberger, *Gpyro Technical Reference*, supplied in
-  `docs/refs/Gpyro/gpyro_technical_reference.md`, and its *Users' Guide*.
-  Implementation checks use Gpyro 0.8200, commit
-  `6d369dd0fa5a3621334272d0806f48c56e608c01`, recorded by the reference decks.
-  Statements about Eq. 65, the 1D mesh and TDMA concern that formulation.
+- **TK:** ThermaKin2Ds v2, especially Eqs. 1–23 and §3. This formulation
+  is distinct from earlier ThermaKin.
+- **GP:** the [technical guide distributed with Gpyro V2](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/documentation/gpyro_technical_guide.pdf),
+  read alongside the [V2 user guide](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/documentation/gpyro_users_guide.pdf) and the
+  pinned source linked in each comparison. The technical guide retains a
+  0.800 cover label but includes revised mass and thermal solver sections
+  (§§6.5 and 6.8); the program revision above defines the comparison scope.
 - **FDS:** [FDS 6.11.0 mathematical model, solid-phase chapter](https://github.com/firemodels/fds/blob/FDS-6.11.0/Manuals/FDS_Technical_Reference_Guide/Solid_Chapter.tex),
-  its User's Guide and [wall implementation](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/wall.f90).
+  its user guide and [wall implementation](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/wall.f90).
   Source behavior takes precedence where the manual and implementation disagree.
-- **GP V2:** [Gpyro V2 source at `bff0126`](https://github.com/Gedeben/GPYRO-V2/tree/bff0126c68f2a35c084ef04490ae327185f281a3),
-  inspected separately. This inspection does not establish the revision used
-  for the retained V-BO-01 CSV: that CSV's original provenance lacks a commit.
 
 The Pyrolysis.jl side is checked against the implementation paths cited in each
-chapter. Numerical overlays concern the committed decks, not every capability
-of a code; timings have additional limits (§18.1.3).
+chapter. Equation mappings state their assumptions and do not establish
+whole-model equivalence. Numerical agreement requires matched runs; performance
+claims also require matched workloads and timing boundaries.
+
+The retained Gpyro 0.8200 verification overlays and timings remain historical
+results (§18.1.3). The retained V2 burnout CSV does not identify its source
+commit. Neither dataset establishes results for the V2 revision used in these
+formulation comparisons. Replacement verification and performance runs are
+pending; the version change in the guides does not relabel those datasets.
+
 
 ---
 

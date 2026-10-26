@@ -307,7 +307,7 @@ an exothermic reaction (`h < 0`) gives `Q_rxn > 0` (heating). See Technical
 Reference §6.6.
 
 > **Important — opposite to ThermaKin.** ThermaKin2Ds publishes heats of
-> reaction with the *opposite* sign (there `h > 0` is exothermic; Gpyro and FDS
+> reaction with the *opposite* sign (there `h > 0` is exothermic; Gpyro V2 and FDS
 > use the sign of this package). When you port parameters from a ThermaKin input file,
 > **flip the sign of every heat of reaction.** The shipped examples annotate this
 > conversion explicitly; e.g. a ThermaKin "+2.78E6 J/kg" (exothermic there)
@@ -408,7 +408,14 @@ peaks at 640 K with a peak rate about 9 % above `r_p`, the error of the
 approximation behind the formulas); for production fits, refine `A`, `E`, and `h`
 against the measured curve using the sensitivity / inverse-analysis tooling (User
 Guide Chapter 13). See Technical Reference §6.9 for the relationship to the FDS,
-ThermaKin, and Gpyro kinetic formulations.
+ThermaKin, and Gpyro V2 kinetic formulations.
+
+For a transferred reaction, also compare the rate over the relevant
+temperature and conversion range. ThermaKin2Ds reaction extent may require
+normalization; Gpyro V2 reaction order can depend on cumulative available
+mass; FDS rates can include oxygen and temperature factors absent here.
+Technical Reference §6.9 gives the mappings and their limits. A matching
+`A` and `E` pair alone does not establish matching kinetics.
 
 ---
 

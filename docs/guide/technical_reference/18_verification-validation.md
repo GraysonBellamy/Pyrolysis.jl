@@ -49,7 +49,7 @@ explicitly.
 - **Validation** — *Are we solving the right equations?* This is external. It
   compares the code's predictions against measured cone-calorimeter mass-loss and
   surface-temperature histories, against thermogravimetric (TGA) curves, and
-  against the output of established codes (ThermaKin2Ds, Gpyro, the FDS solid
+  against the output of established codes (ThermaKin2Ds, Gpyro V2, the FDS solid
   phase). A validation discrepancy can be a modelling choice (one-temperature gas,
   gray-body radiation, single-reactant kinetics), a parameter-calibration issue,
   or genuinely missing physics. Validation is never exact: it is bounded by
@@ -228,7 +228,7 @@ upwind side at zero velocity (`test/kernels/test_gas_transport.jl`); the relativ
 fluxes' free stream, isothermal advection and convergence order
 (`test/kernels/test_relative_flux.jl`); and the closures of `test/physics/`. Two
 conventions matter when a case transcribes literature parameters: $h>0$ is
-endothermic here, the opposite of ThermaKin's published sign (Gpyro and FDS use the
+endothermic here, the opposite of ThermaKin's published sign (Gpyro V2 and FDS use the
 same sign as Pyrolysis.jl, §6.9.2); and most exact-kinetics cases disable the
 depletion limiter (`DepletionLimiter(enabled = false)`) and leave the temperature
 gates open (§18.2.2), while V-RX-02d keeps the limiter on as a guard.
@@ -245,6 +245,11 @@ gas-generation rate). A series marked `crosscode = true` is drawn as a muted
 context layer in a separate `_vs_codes` variant of each affected figure, so the base
 figure keeps the solver's own error on its own scale; for exact-solution cases the
 other codes' *errors* against the same exact solution are compared.
+The guide's formulation comparisons now target V2 at the revision in
+§1.6.5. These retained datasets and their version labels have not been
+replaced. V2 verification and performance reruns are pending; the older
+overlays and timings do not establish results for the new reference revision.
+
 `reference/timings.csv` feeds the wall-time comparison: warmed Julia model
 construction and solve versus FDS/Gpyro internal total elapsed time, including
 setup and simulation. Full process times appear separately in supporting
@@ -758,7 +763,7 @@ its enthalpy out, and at the tighter tolerance across deactivation events (§16.
 defect that does not fall with the tolerance is a bookkeeping bug.
 
 **The boundary flux.** The ledger's boundary term is the energy flux of the live
-boundary faces: reservoir-control-surface heat minus the signed donor-enthalpy sum (§9.9). The ledger *audits
+boundary faces: reservoir-control-surface heat minus the signed donor-enthalpy sum (§9.5). The ledger *audits
 bookkeeping, not double counting*: it reads the same kernel contributions the residual
 assembles, so if the residual counted a mechanism twice the ledger would still close.
 Detecting a double count requires an *independent* check (§18.4.3).
@@ -770,7 +775,7 @@ gas-transport kernel adds $\sum_jJ_{j,f}h_j(T_f)$ at the distance-weighted face
 temperature, on a boundary face the thermal boundary kernel adds the enthalpy of the
 outward fluxes at the surface temperature and inward fluxes at their specified
 incoming temperatures. Thermal-film heat is converted to the reservoir
-control surface (§9.9). An additional outgoing surface term
+control surface (§9.5). An additional outgoing surface term
 $\sum_g\dot m_g\,\Delta h_g(T_s,T_\infty)$ added on top would count the escaping
 enthalpy twice, and the ledger of §18.4.2 would record both and still close. The
 coupling is therefore pinned by checks built independently of the residual:
@@ -993,8 +998,8 @@ fit, the distinction §18.1.1 insists on.
 
 `examples/08_pressure_treated_wood_cone.jl` demonstrates the Darcy-driven
 transport path: a permeable charring
-solid develops an internal pressure $P=\sum_g\xi_jR_gT/(M_j\varphi)$ (§9.4), and the
-Darcy velocity $v_g=-(\kappa/\mu)\,\partial P/\partial z$ (§9.5) advects the pyrolysis
+solid develops an internal pressure $P=\sum_g\xi_jR_gT/(M_j\varphi)$ (§9.1), and the
+Darcy velocity $v_g=-(\kappa/\mu)\,\partial P/\partial z$ (§9.2) advects the pyrolysis
 gases outward. Diagnostics include the MLR change and the internal-pressure
 history relative to a lumped wall-only run; `08_gas_transport.jl` isolates the
 pressure-driven transport for a controlled check. Moisture transport
@@ -1004,7 +1009,7 @@ depends on the local moisture concentration (§6.6), and the moisture front, the
 evaporation plateau in $T(t)$ (the constant-temperature stall while water boils
 off) and the dried-mass profile are the comparison targets.
 
-### 18.6.4 Comparison to ThermaKin2Ds, Gpyro, and FDS
+### 18.6.4 Comparison to ThermaKin2Ds, Gpyro V2, and FDS
 
 Cross-code agreement is evidence of consistency for the equations and inputs
 actually matched. It does not by itself validate the physical model or
@@ -1012,17 +1017,19 @@ separate modeling differences from numerical errors. Remaining disagreement
 can arise from either, from input transcription, or from output definitions.
 
 - **ThermaKin2Ds:** match reaction extent, heat sign, component properties,
-  gas-transport and radiation algorithms (§§6.9, 8.7, 9.10). Its bimolecular
+  gas-transport and radiation algorithms (§§6.9, 8.7, 9.2). Its bimolecular
   kinetics and general 2D configurations are not represented by our
   single-reactant 1D solves. Replacing a bimolecular reaction by a sequence
   is a new model, not an exact conversion. The optional example overlays
   are distinct from a reproducible ThermaKin verification dataset.
-- **Gpyro:** the retained 0.8200 overlays concern V-HC-01, V-HC-03,
-  V-RAD-01, V-RX-01 and V-CPL-01. A separate V2 PMMA result is used for
-  V-BO-01. Match condensed/gas density definitions, conversion-rate
-  normalization, diffusion and volume-change laws; do not substitute our
-  lateral law for Gpyro's axial model. The retained V2 CSV lacks the source
-  revision and exact original run provenance needed for full reproduction.
+- **Gpyro V2:** this is the reference for formulation comparisons (§1.6.5).
+  Match condensed/gas density definitions, conversion-rate normalization,
+  diffusion, thermal exchange and volume-change laws. The retained **0.8200**
+  overlays for V-HC-01, V-HC-03, V-RAD-01, V-RX-01 and V-CPL-01 remain
+  historical evidence for that version. A separate V2 PMMA result is used
+  for V-BO-01, but its CSV lacks the source revision and exact original run
+  provenance. Verification and timing comparisons against the pinned V2
+  revision await reruns; no existing result is relabeled as such a run.
 - **FDS:** the retained 6.11.1 overlays concern V-HC-01, V-HC-02, V-RX-01,
   V-RX-02 and V-CPL-03. Its instantaneous gas release and optional two-flux
   radiation are not general equivalents of our transport and Beer–Lambert
@@ -1082,7 +1089,7 @@ with caution.
 ### 18.7.3 Péclet number and upwind diffusion
 
 The gas species transport uses first-order upwinding for the advective part
-(§9.3, §13.7.3). First-order upwind introduces a numerical diffusion of order
+(§9.7.2, §13.7.3). First-order upwind introduces a numerical diffusion of order
 $|v_g|\Delta z/2$, so its importance is measured by the cell Péclet number
 $\mathrm{Pe}=|v_g|\Delta z/\lambda$; when $\mathrm{Pe}\gg1$ the scheme stays robust but the
 artificial diffusion can smear a gas-composition front. The convergence study (§18.5.1)

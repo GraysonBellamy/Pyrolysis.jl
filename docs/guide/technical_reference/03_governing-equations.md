@@ -39,7 +39,7 @@ them:
    source therefore carries an explicit minus sign,
    $Q_{\mathrm{rxn}} = -\sum_r h_r r_r$, so an endothermic reaction
    ($h_r>0$, $r_r>0$) gives $Q_{\mathrm{rxn}}<0$. (ThermaKin publishes the opposite
-   convention, $h>0=$ exothermic; Gpyro and FDS share ours. The mapping is given in
+   convention, $h>0=$ exothermic; Gpyro V2 and FDS share ours. The mapping is given in
    §3.7 and in overload note H1 of §2.)
 
 ---
@@ -367,8 +367,8 @@ and at the trial temperature (the cell temperature smoothly clamped into the pro
 bracket), smoothly floored at $\rho c_{p,\mathrm{floor}}V_i(0)$ with
 $\rho c_{p,\mathrm{floor}} = 10^3$ J·m⁻³·K⁻¹ so that a cell emptied of all mass keeps a
 finite rate. The pore gas is at the matrix temperature (one-temperature model,
-§3.1.2) and its concentration $\xi_g$ is an integrated state, so its sensible storage
-$\xi_g c_{p,g}\,\partial_t T$ is retained. Gpyro's default thermal-equilibrium exchange model
+§3.1.2) and its component mass is an integrated state, so its sensible storage
+$\xi_g c_{p,g}\,\partial_t T$ is retained. Gpyro V2's default thermal-equilibrium exchange model
 neglects gas storage and gas conduction (`FULL_QSG` retains both); the standard
 FDS wall model has no pore-gas inventory. The size of our gas storage, $\varphi\rho_gc_{p,g}$ against the matrix heat capacity, is estimated
 in §1.4.1 at about a quarter of a percent of $\rho c_p$ in a porous char at 1 atm.
@@ -418,7 +418,7 @@ the temperature equation of §3.3.1. Three things follow:
    enthalpy they carry, cross the faces at the relative velocity (§11.2.2, §11.6).
 
 The storage and gas temperature-advection terms correspond to ThermaKin Eq. 17
-in 1D when the other closures match. Gpyro's `FULL_QSG` also retains gas
+in 1D when the other closures match. Gpyro V2's `FULL_QSG` also retains gas
 conduction, so it is not generally the same equation (§3.7).
 
 > **Implementation notes.** The heat-capacity sum is `heat_capacity_sum`
@@ -505,7 +505,7 @@ The energy row of every cell carries one of two unknowns, chosen by `energy_stat
 - **Temperature form** (`:temperature`, the default). The unknown is $T_i$ and the row
   is $C_i\,dT_i/dt = E_i - \sum_jh_j(T_i)\dot M_{j,i}$. The temperature is directly
   observable, the property laws and the surface Newton solve read it with no
-  inversion. ThermaKin2Ds and FDS use temperature, while the documented Gpyro method solves condensed enthalpy and then recovers temperature (§7.8).
+  inversion. ThermaKin2Ds and FDS use temperature, while the documented Gpyro V2 method solves condensed enthalpy and then recovers temperature (§7.8).
   Energy is conserved to the integrator's order: the identity
   $dH_i/dt = E_i + \sum_j\omega_{j,i}V_ih_j(T_i)$ holds at every state, but a step's
   change of $H_i$ departs from the integral of its rate by the method's local error.
@@ -634,10 +634,13 @@ with a stationary reference plane. Numerically, element thicknesses change and
 elements are split or combined (TK §3). An Eulerian equation does not imply
 fixed numerical element sizes.
 
-Gpyro's 1D balances instead contain $\bar\rho Y_i\Delta z$ directly and
-determine $\Delta z$ from mass and bulk-density consistency (GP Eqs. 3, 56–57).
-Condensed mass does not cross these deforming cell boundaries. Neither model
-is generally identical to our reaction-only strain closure: their density and
+Gpyro V2 advances condensed cell masses $m_i=\bar\rho Y_iV$ directly
+(GP §6.5; [`SOLVE_SPECIES_CONSERVATION_IN_CELL`](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_mass.f90#L495-L632)).
+With axial deformation enabled, [`UPDATE_MESH`](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_mesh.f90#L16-L126)
+sets $V=m_s/\bar\rho$ and $\Delta z=V/A$ for fixed transverse area.
+This reduces to the per-area balances of GP Eqs. 56–57 in 1D; condensed mass
+does not cross the material cell boundaries. Neither reference model is
+generally identical to our reaction-only strain closure: their density and
 volume constitutive laws must also be matched (§10.11).
 
 ---
@@ -758,54 +761,79 @@ first-principles-vs-empirical discussion are in §10.
 
 ---
 
-## 3.7 Comparison to ThermaKin2Ds, Gpyro, and FDS
+## 3.7 Comparison with reference solvers
 
-Source scope is given in §1.6.5. The following mappings are conditional on
-matching material definitions, boundary conditions and reaction conventions.
+Before comparing temperatures or mass-loss rates, establish what each solver
+stores and what can cross its material boundary. The 1D formulations scoped
+in §1.6.5 share conservation requirements, but their gas inventories, energy
+states and deformation closures differ. This overview identifies those
+choices; the later comparison sections derive the individual mappings.
 
-### 3.7.1 Species / mass conservation
+Pyrolysis.jl and ThermaKin2Ds call $m_j/V$ a **mass concentration**;
+FDS calls it a **component density**. For the same condensed component and
+current cell volume, $\rho_{s,j}=\xi_j=m_j/V$ [kg/m³]. The species row below
+compares which numerical variables are stored: masses in Pyrolysis.jl and
+ThermaKin2Ds, and concentrations in FDS.
 
-| Quantity | Pyrolysis.jl | ThermaKin2Ds | Gpyro 1D | FDS standard solid model |
-|---|---|---|---|---|
-| Species representation | cell masses; $\xi_j=m_j/V$ | continuum concentrations; numerical component masses | condensed mass fractions and mass per area; separate gas inventories | condensed component densities |
-| Condensed motion | skeleton-following mesh; relative flux if corrected | deformation term and changing elements | no condensed flux through deforming cells | thickness update and remapping |
-| Gas transport | lumped superficial transfer or dusty-gas friction, with optional Darcy | volume-fraction-gradient law | Darcy plus gas mass-fraction diffusion | instantaneous release to CFD gas |
+| Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro V2 | FDS 6.11.0 solid wall |
+|:---|:---|:---|:---|:---|
+| Stored species variables | component cell masses | component cell masses | condensed cell masses; separate pore-gas state | condensed component concentrations, $\rho_{s,j}$ |
+| Gas release | finite-rate transport | finite-rate volume-fraction-gradient transfer | Darcy and mass-fraction diffusion when enabled | instantaneous release |
+| Energy state | temperature or sensible-enthalpy inventory | element temperature | condensed sensible enthalpy | solid temperature |
+| Material geometry | coupled moving mesh | changing elements with size adjustment | mass/density volume reconstruction | thickness update and remapping |
 
-TK Eq. 13 uses a **volume-fraction**, not a mass-fraction, gradient.
-Its reduction to $J=-(\lambda/T)\partial_x(\xi T)$ requires component
-reference density proportional to $1/T$ at fixed defining pressure.
-GP Eq. 60 uses a different mass-fraction diffusion law (§9.10).
+### 3.7.1 ThermaKin2Ds
 
-### 3.7.2 Energy equation
+ThermaKin2Ds carries component masses and temperature in its numerical
+elements (TK §3). Its all-component heat storage and gas temperature-advection
+terms correspond to our 1D temperature balance when the other closures match
+(TK Eq. 17; §7.8.2). The continuum equations also contain a deformation
+term, represented numerically through changing elements (§3.6.2).
 
-ThermaKin2Ds stores all components at one temperature (TK Eq. 17).
-Pyrolysis.jl's temperature equation has the corresponding storage and gas
-temperature-advection terms in 1D. Full equivalence also requires matching
-radiation, deformation, property laws and heat-of-reaction basis.
+The gas-transfer potential is a volume fraction (TK Eq. 13), whereas our
+models use partial-pressure transfer or dusty-gas friction with optional
+Darcy flow. The restricted correspondence is derived in §9.12.1. Match
+that flux law, reaction extent and heat basis before treating two material
+descriptions as the same governing problem (§6.9.1).
 
-Gpyro solves condensed sensible enthalpy, recovers temperature, and optionally
-solves a separate gas energy equation (GP Eqs. 61, 70 and §6.8).
-`FULL_QSG` restores gas storage **and gas conduction** in thermal equilibrium
-(Eq. 65), so keeping gas heat capacity alone does not reproduce that option.
-FDS has no pore-gas inventory but retains reaction and gas/solid enthalpy
-exchange accounting (§7.8.4).
+### 3.7.2 Gpyro V2
 
-### 3.7.3 Control-volume conservation forms
+V2's $m_i=\bar\rho Y_iV$ is a condensed species inventory; $\bar\rho$
+excludes pore gas. Its direct mass update and volume reconstruction are
+described in §3.6.2. With pressure and gas-species transport enabled, gas
+accumulates and moves by Darcy flow and mass-fraction diffusion (§9.12.2).
 
-Gpyro's $\bar\rho Y_i\Delta z$ times a fixed area corresponds to a
-condensed species inventory, not to the total solid-plus-gas mixture density.
-All four methods account for changing material inventory and geometry in
-different ways. Those shared conservation requirements do not imply identical
-volume-change constitutive laws (§10.11) or identical remapping errors.
+V2 recovers temperature from condensed sensible enthalpy. Its driver has no
+separate gas-enthalpy solve. In thermal equilibrium, `FULL_QSG` retains both
+gas heat storage and gas conduction, so keeping gas heat capacity alone
+does not reproduce that option (§7.8.3). Compare condensed and gaseous
+inventories separately and select the same thermal closure before interpreting
+differences in total mass or temperature.
 
-### 3.7.4 Reaction kinetics
+### 3.7.3 FDS
 
-ThermaKin2Ds permits two concentration factors. Gpyro's heterogeneous rates
-use conversion history and optional local oxygen dependence. FDS uses a
-reactant density power with optional oxygen and temperature powers.
-Pyrolysis.jl uses one reactant concentration power, smooth temperature gates
-and a depletion limiter. Only the matched special cases of §6.9 have the same
-unregularized rate law; there is no general automatic parameter conversion.
+The standard wall model tracks condensed components and releases generated
+gas immediately to the surrounding computational fluid dynamics (CFD)
+calculation. It has no evolving pore-gas inventory. Reaction heat and
+gas/solid enthalpy accounting still enter its thermal problem (§7.8.4).
+
+Its solid grid changes thickness and can be remapped as composition changes
+(§10.11.3). Turning off our gas transport traps generated gas; it does not
+reproduce this instantaneous-release assumption. Any rapid-transport
+approximation must establish negligible storage and delay (§9.12.3).
+
+### 3.7.4 Sources and numerical evidence
+
+TK Eqs. 6, 13–18 and §3 support the ThermaKin2Ds description. GP §§4.1, 6.5
+and 6.8 are checked against the V2 mass, mesh and thermal paths linked in
+§§3.6.2 and 7.8.3. FDS's [solid-phase equations](https://github.com/firemodels/fds/blob/FDS-6.11.0/Manuals/FDS_Technical_Reference_Guide/Solid_Chapter.tex)
+and [`wall.f90`](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/wall.f90) establish the wall inventory and
+gas-release scope. Our state and balance assembly are described in §§3.1–3.6.
+
+The analytical and manufactured-solution checks in §18.2 test specified
+Pyrolysis.jl balances. They do not establish whole-model agreement among
+these solvers; retained external-code datasets have the version and scope
+limits in §18.1.3.
 
 ---
 
@@ -867,8 +895,8 @@ regimes. The most important, with the section that quantifies or discusses each:
 - **Darcy momentum closure.** Pressure is evaluated from the evolving gas
   masses through $P=N/\varphi$ (§3.4.2), with a porosity floor. Compressible
   gas storage is retained. A separate pressure-evolution equation, as in
-  Gpyro, is an alternative choice of dependent variable; neither Darcy model
-  resolves acoustic momentum waves (§9.10).
+  Gpyro V2, is an alternative choice of dependent variable; neither Darcy model
+  resolves acoustic momentum waves (§9.2).
 - **First-order upwind advection** for the gas advective flux (§3.5.1); no TVD or
   MUSCL limiter on the gas advection. The scheme is monotone but numerically
   diffusive where the cell Péclet number exceeds one, and its upwind switch is a kink

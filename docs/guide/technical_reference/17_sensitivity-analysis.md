@@ -45,8 +45,8 @@ Conventions used in this chapter (binding, from §2, Nomenclature):
 
 A pyrolysis simulation maps a finite set of material and boundary parameters
 $\boldsymbol{\theta}$ — Arrhenius pre-exponentials $A_r$ and activation energies
-$E_r$, heats of reaction $h_r$, component densities $\rho_j$, conductivities
-$k_j$, emissivities $\varepsilon_j$, incident-flux histories, convective
+$E_r$, heats of reaction $h_r$, bulk material density properties $\rho_j$,
+conductivities $k_j$, emissivities $\varepsilon_j$, incident-flux histories, convective
 coefficients $h_{\text{conv}}$ — to time-resolved fields and to derived scalar
 observables: surface temperature $T_s(t)$, mass-loss rate (MLR), peak heat
 release rate, time to ignition, residual char fraction, burnout time. The
@@ -746,35 +746,61 @@ whose scales must be varied in solution studies.
 
 ---
 
-## 17.8 Comparison to ThermaKin2Ds, Gpyro, and FDS
+## 17.8 Comparison with reference solvers
 
-The sources support specific calibration workflows, not a universal claim
-that none of these codes can provide parameter derivatives.
+Parameter fitting, parameter sensitivity and the state Jacobian answer
+different questions. Compare the actual inverse workflow and objective,
+not just the forward solver's name. The sources scoped in §1.6.5 support
+the specific procedures below; they do not establish every workflow that
+could be built around a solver.
 
-**ThermaKin2Ds.** TK describes the forward solver and examples using
+| Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro V2 | FDS 6.11.0 solid wall |
+|:---|:---|:---|:---|:---|
+| Documented workflow | finite-difference solve sensitivities, sweeps and inverse examples | forward model with fitted material parameters | property-estimation search drivers | reference-temperature/rate kinetic estimates |
+| Derivative claim | state Jacobian uses automatic differentiation; whole-solve parameters use finite differences | no universal parameter-derivative method established here | search branches do not establish whole-solve derivatives | kinetic estimates do not establish whole-solve derivatives |
+| Fair comparison | same objective, perturbation checks and solver tolerances | identify the inverse-study method | record optimizer and objective | identify any surrounding inverse workflow |
+
+### 17.8.1 ThermaKin2Ds
+
+TK describes the forward solver and examples using
 experimentally determined or fitted material parameters. It does not specify
 a universal optimizer or sensitivity algorithm. A statement about hill
 climbing, shuffled complex evolution or finite differences must identify the
 particular inverse-study implementation; these are not inferred capabilities
 of the forward executable.
 
-**Gpyro.** GP's property-estimation chapter documents a genetic algorithm
-using repeated forward evaluations. That procedure is derivative-free, not
-a finite-difference sensitivity calculation. It does not guarantee a unique
-fit or robustness to parameter non-identifiability, and does not establish
-that every other Gpyro calibration workflow uses the same algorithm.
+### 17.8.2 Gpyro V2
 
-**FDS.** Its reference-temperature/rate prescription estimates Arrhenius
+GP §7 and V2 user guide §14 primarily document genetic
+algorithm property estimation; the user guide's introduction also notes
+additional methods. The [property-estimation driver](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/propest/propest_main.f90)
+contains branches for a genetic algorithm (`GA`), stochastic hill climbing
+(`SHC`) and shuffled complex evolution (`SCE`). These repeated-forward search workflows are
+distinct from computing whole-solve derivatives. Record the actual optimizer
+and objective when comparing calibration studies; neither the method name
+nor an apparently good fit guarantees parameter identifiability.
+
+### 17.8.3 FDS
+
+Its reference-temperature/rate prescription estimates Arrhenius
 parameters (§6.9.3). That feature is distinct from whole-solve parameter
 sensitivities. It is not evidence for a blanket absence of sensitivity or
 optimization workflows around FDS.
 
-**Pyrolysis.jl.** The supported workflow in this repository is qualified
-central differences of complete solves (§17.2), parameter sweeps and
-variance-based analysis. The inverse white-pine example uses Nelder–Mead.
-Colored AD of the state residual supplies the integration Jacobian; it does
-not provide exact whole-solve parameter gradients. These statements follow
-the source paths and examples cited earlier in this chapter.
+### 17.8.4 Sources and numerical evidence
+
+TK's model and examples support its use of fitted parameters, without
+establishing a universal optimizer. GP §7 and V2 user guide §14 are checked
+against the linked property-estimation driver. FDS's kinetic-parameter
+prescription is checked against `READ_MATL` (§6.9.3).
+Our qualified finite differences are described in §17.2; the white-pine
+inverse example uses Nelder–Mead in
+`examples/inverse_analysis/inverse_white_pine.jl`.
+
+The perturbation-step studies in §17.2 qualify particular Pyrolysis.jl
+derivatives. They do not benchmark optimizer robustness or parameter
+identifiability across solvers. User Guide §§13.4 and 13.7 explains the
+practical sensitivity and fitting checks.
 
 ---
 

@@ -15,7 +15,7 @@ checked term-by-term against the source so that the math and the code agree
 exactly — including the outward boundary normals, the surface balance evaluated at
 the trial clamp of the surface temperature, the Kirchhoff emissivity coupling, the
 material emissivity evaluated from the boundary cell, and the common energy
-control surface for incoming/outgoing gas and thermal-film heat (§9.9).
+control surface for incoming/outgoing gas and thermal-film heat (§9.5).
 
 This chapter conforms to the unified nomenclature of §2, Nomenclature, and uses
 the binding sign conventions: an interior face flux is positive in the $+z$
@@ -96,7 +96,7 @@ outward. Conduction uses $k(T_s-T_{cell})/d$ with current face distance.
 For a wall thermal film, its heat correlation equals this conductive flux.
 Boundary assembly converts to the direct-reservoir energy control surface:
 $q_r=q_s+H_r-H_s$ and $E_{out}=H_r-q_r$. Inflow carries the specified incoming
-enthalpy even under adiabatic or prescribed thermal conditions (§9.9).
+enthalpy even under adiabatic or prescribed thermal conditions (§9.5).
 
 ![Radiation, convection and conduction at the surface, with donor carried enthalpy and the conversion from thermal-film heat to the reservoir energy control surface.](../../assets/figures/06_surface_energy.svg)
 
@@ -122,7 +122,7 @@ of diagnostic `BoundaryState` contents.
 First derivatives are obtained from the implicit function theorem at the
 qualified primal root. They include species/temperature coupling and blowing
 properties, with deterministic primal branch choices. Degenerate channels and
-vacuum branches have their stated explicit continuations (§9.5–9.6).
+vacuum branches have their stated explicit continuations (§9.7–9.8).
 `get_boundary_exchange` reports the assembled fluxes, energy and local residual
 and iteration counts; `BoundaryState` records thermal diagnostics.
 
@@ -200,7 +200,7 @@ The coupled boundary solve supplies signed outward species fluxes, surface
 temperature and, when available, the solved surface composition. The model
 returns $R_b=h_{eff}/h$, giving wall-film heat
 $q_s=hR_b(T_\infty-T_s)$. Reservoir-control-surface heat then follows the
-enthalpy conversion in §9.9. Relative mesh transport is handled separately.
+enthalpy conversion in §9.5. Relative mesh transport is handled separately.
 
 For `CouetteFilm(λ)`,
 
@@ -405,7 +405,7 @@ values are permitted and checked when evaluated. Only an explicit vacuum
 `P=0` may omit composition. `AmbientGasBC(reservoir;film=nothing)` connects
 the complete state to the pore path and permits both ingress and escape.
 
-`MassTransferFilm(g)` adds the isobaric common-diffusivity film of §9.8, with
+`MassTransferFilm(g)` adds the isobaric common-diffusivity film of §9.4, with
 conductance in kg/(m² s), a number or temperature law. Zero conductance permits
 only donor bulk flow; infinite conductance fixes composition. Pressure, species
 and thermal equations are solved consistently. These conditions do not combine
@@ -689,7 +689,19 @@ See the executable cone-calorimeter examples for complete material data.
 
 ---
 
-## 12.11 Comparison to ThermaKin2Ds, Gpyro, and FDS
+## 12.11 Comparison with reference solvers
+
+A shared nominal heat flux or ambient temperature does not guarantee a
+shared boundary problem. Compare the incident, absorbed and net fluxes,
+the temperature at which losses are evaluated, and the composition of any
+incoming gas. The configurations below follow §1.6.5; radiation and interior
+transport are compared separately in §§8.7 and 9.12.
+
+| Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro V2 | FDS 6.11.0 solid wall |
+|:---|:---|:---|:---|:---|
+| Thermal exchange | composable flux, convection and radiation laws | external heating and empirical feedback laws | thermal conditions at boundary cells | wall exchange coupled to external CFD gas |
+| Boundary temperature | one-sided surface balance | manual describes boundary exchange; no source check | active half-cell thermal path | surface/ghost-temperature treatment in wall solve |
+| Gas exchange | reservoirs, films, prescribed flux and pressure conditions | component surface-loss laws | pressure/flux and species boundary conditions | generated gas released to external flow |
 
 ### 12.11.1 ThermaKin2Ds
 
@@ -707,19 +719,25 @@ the general TK model is not exactly that surface equation (§8.7.1).
 The manual does not establish that TK uses our separate surface-temperature
 Newton solve or an equivalent surface-node construction.
 
-### 12.11.2 Gpyro
+### 12.11.2 Gpyro V2
 
-GP §5 describes convective/radiative thermal boundaries and alternative gas
-pressure, flux and species conditions. Its 1D discretization puts temperature
-nodes at the exposed and back boundaries in half cells (GP §4.1.1); a surface
-temperature is not obtained by harmonic interpolation from a cell center.
-Our boundary temperature is recovered by a one-sided surface balance.
+GP §5 and V2 user guide §8 describe convective/radiative thermal boundaries
+and alternative pressure, flux and gas-species conditions. The default
+`HALF_CELLS_AT_BC=.TRUE.` places boundary temperature nodes at the exposed
+and back surfaces, as in GP §4.1.1. The [V2 grid generator](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_mesh.f90#L437-L593)
+also contains an experimental full-cell/ghost-cell option. However, the
+active [`BC_FOR_SOLID_ENTHALPY_SOLVER`](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_thermal.f90#L1041-L1087)
+unconditionally calls `BC_FOR_HALF_CELLS`; dispatch to `BC_FOR_FULL_CELLS`
+is commented out. A full-cell surface solve is therefore not an established
+alternative in this revision merely because the option and routine exist.
+Our boundary temperature is recovered from a one-sided surface balance.
 
-The entering radiant flux includes absorptivity, and surface versus in-depth
-deposition must be selected consistently. An impermeable back is one
-configuration, not a general characterization of every Gpyro deck.
-Pyrolysis.jl likewise provides separate species and pressure boundary
-conditions; their matching requires checking the actual deck.
+In the active V2 boundary routine, convection and re-radiation use the
+boundary-cell temperature. Absorptivity is included in the entering radiation,
+and positive net radiation can be attenuated in depth (§8.7.2). Our incident
+beam and surface emission are accounted for separately. An impermeable back
+is one configuration, not a property of every V2 deck; match the actual
+pressure/flux conditions and external gas composition (§9.12.2).
 
 ### 12.11.3 FDS
 
@@ -737,8 +755,19 @@ the retained V-HC-03 overlay choice; it is a version-specific input
 restriction, not a claim that all possible FDS configurations or later
 versions cannot impose a net flux.
 
-Sources: TK §§2–3; GP §§4.1.1, 5; [FDS boundary input validation](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/read.f90#L8290-L8300)
-and solid-phase chapter (§1.6.5).
+### 12.11.4 Sources and numerical evidence
+
+TK §§2–3 support the documented heating and surface-loss laws. GP §§4.1.1,
+5 and V2 user guide §8 are checked against the linked grid and boundary
+routines. FDS's solid-phase boundary equations are checked against the
+[wall thermal solve](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/wall.f90#L2849-L2936) and
+[input validation](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/read.f90#L8290-L8300).
+Our surface, species and energy assembly is described in §§12.2–12.5.
+
+V-HC-01–03 exercise specified thermal boundaries, while §9.11's gas cases
+exercise our transport closures. Those checks do not establish equivalence
+of arbitrary combined boundary models. User Guide §§5.2–5.6 gives the
+corresponding setup choices; historical overlay limits remain in §18.1.3.
 
 ---
 

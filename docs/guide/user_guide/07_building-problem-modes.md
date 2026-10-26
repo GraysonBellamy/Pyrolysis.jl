@@ -461,7 +461,7 @@ matching a complete model also requires its other closures (Technical Reference 
 
 **Reaction heats use the local reaction-temperature convention.** The kernel
 evaluates `h` at the cell temperature. Before importing a DSC or calibrated
-ThermaKin/Gpyro value, check its sign, units, reaction basis and temperature datum
+ThermaKin/Gpyro V2 value, check its sign, units, reaction basis and temperature datum
 (Technical Reference §6.9). A heat consistent with this convention already
 accounts for the products' enthalpies at that temperature. The energy equation therefore has no separate gas-generation enthalpy term. Such
 a term, `−Σ_g Δh_g(T, T_ref)(∇·J_g)`, belongs only with heats referenced to the
@@ -469,6 +469,16 @@ a term, `−Σ_g Δh_g(T, T_ref)(∇·J_g)`, belongs only with heats referenced 
 subtract the gas products' sensible enthalpy a second time (≈0.7–1.2 MJ per kg of volatiles
 at 900 K, comparable to the heat of pyrolysis itself). If your heats are referenced to the
 ambient datum, convert them to the reaction temperature before use (Technical Reference §6).
+
+When matching a Gpyro V2 deck, check whether pressure and gas-species
+transport are enabled and whether its equilibrium exchange includes gas
+heat storage. In the pinned source these controls are `SOLVE_PRESSURE`,
+`SOLVE_GAS_YJ`, `THERMAL_EQUILIBRIUM`, `SOLVE_GAS_ENERGY` and `FULL_QSG`;
+the V2 user guide's `QSG_MODEL` name is not an accepted input in that
+revision. Its driver has no separate gas-temperature solve. Match boundary
+exchange and radiation as well as these switches (Technical Reference
+§§7.8.3, 8.7.2 and 9.12.2); copying coefficients alone does not establish
+the same thermal problem.
 
 ### 7.7.1 Boundary energy control surface
 

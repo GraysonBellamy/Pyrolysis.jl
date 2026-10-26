@@ -25,7 +25,7 @@ Conventions:
 - Heat-of-reaction sign convention: **h > 0 endothermic (cools)**,
   **h < 0 exothermic (heats)**; the volumetric heat source is `Q_rxn = −Σ h_r r_r`,
   so endothermic reactions give `Q_rxn < 0`. (This is the storage convention used
-  internally; note ThermaKin publishes `h > 0 = exothermic`; Gpyro and FDS use this convention — see overload
+  internally; note ThermaKin publishes `h > 0 = exothermic`; Gpyro V2 and FDS use this convention — see overload
   note H1.)
 - "Bulk" density `ρ_j` is the pure-phase density used by mixing rules and mixture
   density; "intrinsic/skeletal" density `ρ_{i,j}` (cell-wall density) is used
@@ -34,6 +34,12 @@ Conventions:
   mass fraction: `ξ_j = Y_j ρ`. The integrated discrete state is the cell
   inventory `m_{j,i} = ξ_{j,i} V_i` (kg); every kernel reads
   `ξ_{j,i} = m_{j,i}/Ṽ_i`, with `Ṽ_i` the smoothly floored cell volume.
+- **Solver notation.** ThermaKin2Ds's mass concentration and FDS's component
+  density describe the same quantity as `ξ_j`: component mass per whole
+  current cell volume. For a condensed component, `ρ_{s,j} = ξ_j = m_j/V`.
+  FDS's total condensed density is `ρ_s = Σ_{S,L} ξ_j`. These inventory
+  densities are distinct from the material density properties `ρ_j` and
+  `ρ_{i,j}` (§§3.7, 4.8).
 - The chapters write their mathematics in LaTeX; this table gives each symbol in
   Unicode. Two pairs of glyphs are distinct symbols and must not be interchanged:
   porosity is **`φ`** (U+03C6, LaTeX `\varphi`) and the potential-closure
@@ -171,7 +177,7 @@ Conventions:
 | `T_∞` | Ambient / surroundings temperature | K |
 | `T_ref` | Reference temperature for enthalpy datum (= 298.15) | K |
 | `T_f` | Face temperature of the enthalpy the gas fluxes carry: the distance-weighted interpolation `(d_n T_o + d_o T_n)/(d_o + d_n)` at an interior face, the surface temperature for boundary outflow and specified incoming temperature for inflow (§13.6.2) | K |
-| `T̄_f`, `T_face` | Mean `(T̃_o + T̃_n)/2` of the two cells' trial temperatures inside the lumped wall flux (written `T_face = (T_L + T_R)/2` in §3.4 and §9.1; §13.6.2, §13.7.2) | K |
+| `T̄_f`, `T_face` | Face temperature; gas transport uses the distance-weighted interface state $T^*=(d_RT_L+d_LT_R)/(d_L+d_R)$, reducing to the arithmetic mean for equal half-cell distances (§9.6) | K |
 | `T̃_f` | Face temperature of the relative fluxes: the upwind van Albada reconstruction on the stencil of the mass flux it carries (§11.6.4, §13.6.2) | K |
 | `T_trial`, `T̃_i` | Trial temperature: `T` smoothly clamped into the property bracket `[200, 3000]` K with 1 K transitions | K |
 | `T_m` | Merged temperature of a deactivation receiver: the root of the extended caloric relation at `H_m` and the merged masses (§14.3.3, §16.7) | K |
@@ -192,11 +198,11 @@ Conventions:
 | `W` | The integrator's iteration matrix `J − M/(γ_RK Δt)` | – |
 | `w`, `w_n` | Mesh node velocity (at node *n*), `w = v_s + c`; an algebraic unknown on a moving mesh (overload W1) | m·s⁻¹ |
 | `w_k` | Weight `\|𝐝_k\|⁻²` of neighbour *k* in the least-squares gradient (§13.6.4); a quadrature weight in §16.5.3 (overload W1) | m⁻²; – |
-| `X_α` | Volume fraction (FDS/Gpyro comparison notation; internally `v_j`) | – |
+| `X_α` | Volume fraction (FDS/Gpyro V2 comparison notation; internally `v_j`) | – |
 | `x`, `y` | Transverse/lateral coordinates (multi-dimensional meshes and comparison text) | m |
 | `x_J` | Join of the depletion limiter's onset, in units of `ξ_th` (`join`, default 1; §6.3.2) | – |
 | `Y_j` | Mass fraction of component *j*, `ξ_j/ρ` (`Y_k` of species *k* at the face in the pooling film, §12.3.3) | – |
-| `Z` | Pre-exponential factor (Gpyro notation; FDS uses `A_{αβ}`; internally `A`) | varies |
+| `Z` | Pre-exponential factor (Gpyro V2 notation; FDS uses `A_{αβ}`; internally `A`) | varies |
 | `z` | Axial / through-thickness coordinate (primary spatial variable) | m |
 | `z_n` | Position of mesh node *n* (a differential unknown on a moving mesh) | m |
 | `z_i^c` | Cell-center position of cell *i* | m |
@@ -210,7 +216,7 @@ Conventions:
 |---|---|---|
 | `α` (`α_eff`) | Volumetric absorption (extinction) coefficient | m⁻¹ |
 | `α_j` | Mass-basis absorption coefficient of component *j* | m²·kg⁻¹ |
-| `α_conv` | Conversion / extent variable (Gpyro kinetics comparison) | – |
+| `α_conv` | Conversion / extent variable (Gpyro V2 kinetics comparison) | – |
 | `α_{th,∞}` | Thermal diffusivity of the free stream (pooling film, §12.3.3; overload A5) | m²·s⁻¹ |
 | `α_M`, `β_M` | Monitor coefficients of the equidistribution correction, `monitor = (α_M, β_M)` (defaults 1, 0) | – |
 | `β` | Weighting parameter of the WEIGHTED mixing rule, `k = βk_∥ + (1−β)k_series` | – |
@@ -245,7 +251,7 @@ Conventions:
 | `ℓ` | Characteristic particle/pore diameter (Carman–Kozeny); in §17 the scalar loss | m |
 | `μ`, `μ_i` | Gas dynamic (Sutherland) viscosity (of cell *i*) | Pa·s |
 | `μ_ref` | Reference viscosity (= 1.716×10⁻⁵ at 273.15 K, air) | Pa·s |
-| `ν` | Kinematic viscosity (Gpyro Darcy comparison) | m²·s⁻¹ |
+| `ν` | Kinematic viscosity (Gpyro V2 Darcy comparison) | m²·s⁻¹ |
 | `ν_{i,j}` | Stoichiometric coefficient (yield) of component *j* in reaction *i* (negative reactant, positive product) | – |
 | `ξ_j`, `ξ_{j,i}` | Mass concentration of component *j* (in cell *i*), `m_{j,i}/Ṽ_i` — **constitutive species variable** | kg·m⁻³ |
 | `ξ⁺_{j,i}` | Positive-part concentration `(m_{j,i})⁺/Ṽ_i` at which the property laws are evaluated | kg·m⁻³ |
@@ -255,6 +261,8 @@ Conventions:
 | `ρ_j` | Bulk (pure-phase) density of component *j* | kg·m⁻³ |
 | `ρ_{i,j}` | Intrinsic / skeletal density of component *j* (skeletal volume fraction only) | kg·m⁻³ |
 | `ρ_g` | Gas-phase density (ideal-gas law) | kg·m⁻³ |
+| `ρ_{s,j}` (`ρ_{s,α}`) | FDS component density: the condensed-component mass concentration `ξ_j = m_j/V` | kg·m⁻³ |
+| `ρ_s` (FDS comparisons) | Total condensed-material density, `Σ_{S,L} ξ_j` | kg·m⁻³ |
 | `ρc_p^eff` | Effective (mixture) volumetric heat capacity, every component, `Σ_j ξ_j c_{p,j}` (discretely `C_i/V_i`) | J·m⁻³·K⁻¹ |
 | `σ` | Stefan–Boltzmann constant (= 5.670374419×10⁻⁸) | W·m⁻²·K⁻⁴ |
 | `σ_s` | Scattering coefficient (not modeled) | m⁻¹ |
@@ -272,7 +280,7 @@ Conventions:
 | `Ω(t)`, `Ω_i(t)` | Live region of the column (§16.2); region of cell *i* (§7.2, §11.2.1) | – |
 | `Ω_D` | Diffusion collision integral (Neufeld) | – |
 | `ω_{j,i}` | Net volumetric production rate of component *j* by reaction in cell *i*, `Σ_r ν_{r,j} r_r` (= `S_{j,i}`; the code's `ω`); the cell's reaction source is `ω_{j,i} Ṽ_i` | kg·m⁻³·s⁻¹ |
-| `ω̇'''` | Volumetric reaction rate (Gpyro comparison notation; internally `r`) | kg·m⁻³·s⁻¹ |
+| `ω̇'''` | Volumetric reaction rate (Gpyro V2 comparison notation; internally `r`) | kg·m⁻³·s⁻¹ |
 
 ---
 
@@ -335,10 +343,10 @@ Conventions:
 | `lost`, `reg` | What a deactivation event removes from the live region / the caloric regularization it writes to its record (`m^lost_e`, `H^lost_e`, `H^reg_e`) |
 | `rel` (on a defect) | Relative defect (`d_m^rel`, `d_H^rel`) |
 | `^c` | Cell-center (e.g. `z_i^c`) |
-| `‾` (overbar) | Column / spatial average (e.g. `χ̄`, `J̄_g`), a two-point face mean (`T̄_f`), or Gpyro-style mixture average (`ρ̄`); `c̄_{p,∞}` the free-stream heat capacity averaged between `T_∞` and `T_s` |
+| `‾` (overbar) | Column / spatial average (e.g. `χ̄`, `J̄_g`), a two-point face mean (`T̄_f`), or Gpyro V2-style mixture average (`ρ̄`); `c̄_{p,∞}` the free-stream heat capacity averaged between `T_∞` and `T_s` |
 | `~` (tilde) | Normalized, clamped or guarded trial-state quantity (e.g. `𝓜̃`, `T̃_i` the trial temperature, `Ṽ_i` the floored volume); on a face temperature, `T̃_f`, the relative-flux reconstruction |
 | `·` (overdot) | Time rate / flux (e.g. `ṁ`, `Ṁ`, `ω̇`) |
-| `'`, `''`, `'''` | Per-length / per-area / per-volume (blowing-model fluxes `ṁ''`; FDS/Gpyro comparison notation) |
+| `'`, `''`, `'''` | Per-length / per-area / per-volume (blowing-model fluxes `ṁ''`; FDS/Gpyro V2 comparison notation) |
 
 ## 5. Operators
 
@@ -423,17 +431,17 @@ below is authoritative; writers must use the disambiguating subscript/context.
   area** and `A_f` the area of face `f`; the Arrhenius pre-exponential is `A_i` /
   `A_{αβ}` (always subscripted by reaction). **Resolution:** bare `A` = area in
   physics chapters; `A_f` = face area; `A_i` = pre-exponential (kinetics). The
-  Gpyro pre-exponential `Z` and FDS `A_{αβ}` are compared with `A_i`; copying values requires matching the rate basis (§6.9). In the
+  Gpyro V2 pre-exponential `Z` and FDS `A_{αβ}` are compared with `A_i`; copying values requires matching the rate basis (§6.9). In the
   mesh-motion rows on a line (§10, §11, §15) a face is named by its node, so
   `A_i` and `A_{i+1}` there are the areas of the faces at nodes `i` and `i + 1`,
   the two faces of cell `i`; a reaction subscript never appears in those rows.
 
 - **κ vs. K — A4 [permeability].** Use **`κ`** for permeability throughout.
-  `K` (Gpyro permeability) appears only in comparison text and is mapped to `κ`.
+  `K` (Gpyro V2 permeability) appears only in comparison text and is mapped to `κ`.
 
 - **α — A5 [absorption vs. conversion vs. absorptivity].** `α` (or `α_eff`) =
   **volumetric absorption coefficient** (m⁻¹); `α_j` = mass-basis absorption
-  coefficient (m²·kg⁻¹). Conversion (Gpyro) is `α_conv`; FDS `κ_s` has the units of `α_eff`, not `α_j`; matching attenuation also requires the angular closure (§8.7.3).
+  coefficient (m²·kg⁻¹). Conversion (Gpyro V2) is `α_conv`; FDS `κ_s` has the units of `α_eff`, not `α_j`; matching attenuation also requires the angular closure (§8.7.3).
   The absorptivity of a surface for incident radiation is **`a`** (`a_j`,
   `a_eff`, `a_s`), never `α`; it equals `ε_eff` under Kirchhoff's law unless a
   component sets its own `surface_absorptivity`. The correction's monitor
@@ -458,7 +466,7 @@ below is authoritative; writers must use the disambiguating subscript/context.
 
 - **h — H1 [heat of reaction; sign; sensible enthalpy].** `h` (kinetics) and
   `h_r` = heat of reaction per kg of first reactant, with **h > 0 endothermic**
-  internally; ThermaKin publishes `h > 0 = exothermic` (Gpyro and FDS do not). The conversion to the
+  internally; ThermaKin publishes `h > 0 = exothermic` (Gpyro V2 and FDS do not). The conversion to the
   volumetric source carries the minus sign: `Q_rxn = −Σ h_r r_r`. With a
   *component* subscript, `h_j(T)` is the component's **sensible enthalpy**
   `∫_{T_ref}^{T} c_{p,j} dT`; the two never share a subscript (`r` reaction, `j`

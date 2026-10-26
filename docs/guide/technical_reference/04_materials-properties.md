@@ -10,8 +10,9 @@ supplied; the homogenization of per-component properties into mixture (effective
 properties is the subject of Chapter 5, *Effective Properties and Mixing Rules*,
 to which this chapter forwards repeatedly. Throughout, the spatial coordinate is
 $z$ (axial, through-thickness, $z=0$ substrate / bottom, $z=L$ exposed surface),
-the primary species state variable is the **mass concentration** $\xi_j$ [kg·m⁻³],
-and the heat-of-reaction sign convention is $h>0$ endothermic with the volumetric
+the constitutive species variable is the **mass concentration** $\xi_j$ [kg·m⁻³],
+derived from the integrated component cell mass $m_j$. The heat-of-reaction
+sign convention is $h>0$ endothermic with the volumetric
 source $Q_\mathrm{rxn} = -\sum_r h_r r_r$ (overload note H1 of Chapter 2). In the
 kinetics passages of this chapter the index $i$ denotes a **reaction** and $j$ a
 **component** (overload note I1); elsewhere $i$ is a cell index.
@@ -809,54 +810,87 @@ per cell per step.
 
 ---
 
-## 4.8 Comparison to ThermaKin2Ds, Gpyro, and FDS
+## 4.8 Comparison with reference solvers
 
-### 4.8.1 Component / species representation
+A material definition distinguishes the density properties assigned to a
+material from its component mass concentration $m_j/V$. FDS calls the latter
+a component density, $\rho_{s,j}$; it is the same quantity as our $\xi_j$.
+Total inventory densities can include different components, as shown below.
+The comparison uses the version scope of §1.6.5; §5.14 covers mixing rules.
 
-ThermaKin2Ds distinguishes solid, liquid and gas components. Its numerical
-states are component masses and temperature (TK §3), as opposed to its
-continuum concentration notation. Pyrolysis.jl likewise carries masses, with
-temperature or enthalpy as its energy state.
+| Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro V2 | FDS 6.11.0 solid wall |
+|:---|:---|:---|:---|:---|
+| Material components | solid, liquid and gas | solid, liquid and gas | condensed species and separate gas species | condensed materials; external gas species |
+| Total inventory density | $\sum_{\mathrm{all}}\xi_j$, including retained gas | $\sum_{\mathrm{all}}\xi_j$, including retained gas | $\bar\rho$, condensed mass per cell volume | $\rho_s=\sum_{S,L}\xi_j$, condensed mass per cell volume |
+| Property functions | constants, callables and tables | specified temperature function | power laws and optional thermal terms | temperature ramps for thermal properties |
 
-Gpyro's $\bar\rho$ is the bulk density of the condensed mixture in vacuum,
-excluding pore-gas mass (GP §§2.1, 4.1); it is not generally
-$\sum_{j\in\mathrm{all}}\xi_j$. FDS similarly tracks condensed material
-components separately from its CFD gas. Gpyro's reaction parameter $\chi_k$
-and solid yield $\mathrm{SF}_k$ are not Pyrolysis.jl's component swelling
-weights or lateral conversion variable (§10.11).
+### 4.8.1 ThermaKin2Ds
 
-### 4.8.2 Heat capacity and the gas-storage convention
-
-The common all-component storage coefficient of Pyrolysis.jl and TK Eq. 17 is
+ThermaKin2Ds distinguishes solid, liquid and gas components, carrying their
+masses and the element temperature (TK §§1, 3). Its all-component storage
+coefficient has the same form as ours,
 
 $$
-\rho c_p^\mathrm{eff} = \sum_{j=1}^{N_C}\xi_j c_{p,j}(T).
+\rho c_p^\mathrm{eff}=\sum_{j=1}^{N_C}\xi_jc_{p,j}(T).
 \tag{4.11}
 $$
 
-Gpyro's default thermal-equilibrium exchange neglects gas storage and gas
-conduction; `FULL_QSG` retains both (GP Eq. 65). FDS's standard solid model
-has no pore-gas inventory. These are distinct energy closures (§7.8).
+TK Eq. 1 specifies $p_0+p_1T+p_2T^n$ for density, heat capacity,
+conductivity and gas transfer; component emissivity and absorption are
+constant. The same temperature-function family is available for reaction
+heat. These laws can be represented by Pyrolysis.jl callables, but TK's
+mixture swelling law must also match to obtain the same volume fractions
+(§10.11.1). Matching a property curve alone does not match its mixture value.
 
-### 4.8.3 Reaction kinetics representation
+### 4.8.2 Gpyro V2
 
-The restrictions and heat-basis conversions are in §6.9. It is incorrect to
-describe all reference heats as scalars: ThermaKin2Ds allows a temperature
-function for reaction heat (TK Eq. 1 and §1.1), and FDS constructs
-temperature-dependent reaction heats from its enthalpy accounting (FDS
-mathematical model, Appendix P). Pyrolysis.jl accepts temperature-dependent
-and state-dependent heat functions; matching their datum remains necessary.
+V2's $\bar\rho$ is the bulk density of the condensed mixture in vacuum,
+excluding pore-gas mass (GP §§2.1, 4.1). It is therefore not generally
+$\sum_{j\in\mathrm{all}}\xi_j$. The
+[mass and volume-fraction reconstruction](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_mass.f90#L495-L632)
+uses that condensed basis. Its reaction parameter $\chi_k$ and solid yield
+$\mathrm{SF}_k$ are distinct from our component swelling weights and
+lateral conversion variable (§10.11.2).
 
-### 4.8.4 Property functions and temperature dependence
+GP §§2.1–2.5 and V2 user guide §9 define power-law properties, an optional
+Gaussian melting heat-capacity contribution and a $T^3$ radiative conductivity
+term. The [component laws](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_funcs.f90#L345-L422) and
+[mixture assembly](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_thermal.f90#L184-L305) implement these
+thermal contributions. Gas heat storage follows the separate exchange option
+in §7.8.3. Match both the property law and the inventory to which it applies.
 
-TK Eq. 1 specifies $p_0+p_1T+p_2T^n$ for density, heat capacity, conductivity
-and gas transfer, with constant component emissivity and absorption.
-This is representable by a Pyrolysis.jl callable; it is not a documented
-ThermaKin table input. GP §§2.1–2.5 specify power-law properties, optional
-Gaussian melting heat capacity and a $T^3$ radiative conductivity term.
-FDS supports temperature ramps for material properties. Each law can be
-transcribed here, but interpolation, extrapolation, units and mixture weights
-must be matched explicitly (§5.14).
+### 4.8.3 FDS
+
+FDS's standard wall model tracks condensed material components separately
+from the external CFD gas. Its [density definitions](https://github.com/firemodels/fds/blob/FDS-6.11.0/Manuals/FDS_Technical_Reference_Guide/Solid_Chapter.tex#L203-L224)
+give $\rho_{s,\alpha}=\rho_sY_\alpha$ for each component and
+$\rho_s=\sum_\alpha\rho_{s,\alpha}$ for the condensed mixture.
+Here $Y_\alpha$ is a mass fraction within that condensed mixture, while
+our all-component mass fractions also include retained gas. FDS separately
+specifies a material density property $\rho_\alpha$; that property is
+distinct from the evolving concentration $\rho_{s,\alpha}$.
+The [thermal-property assembly](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/wall.f90#L2817-L2844)
+uses these component concentrations to assemble condensed heat storage
+and conductivity.
+
+FDS accepts temperature ramps for thermal properties. Its
+[input processing](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/read.f90#L7585-L7615) samples those ramps
+and constructs component enthalpies. A Pyrolysis.jl function or table must
+match the units, interpolation and enthalpy datum over the temperature
+range used. Reaction heat can also vary with temperature through FDS's
+enthalpy accounting (§6.9.3); it is not generally a transferable scalar.
+
+### 4.8.4 Sources and numerical evidence
+
+TK Eqs. 1–4, 17 and §3 provide the component definitions. The V2 and FDS
+source paths above are read alongside GP §2, V2 user guide §9 and the FDS
+solid-phase chapter's component-averaged thermal properties (§1.6.5).
+Pyrolysis.jl's component and property interfaces are defined in
+`src/Materials/components.jl` and `src/Properties/`.
+
+These are definition and property-law mappings. Numerical agreement requires
+matching the resulting effective properties and coupled problem. User Guide
+§§3.2, 3.3 and 3.5 provide the corresponding setup workflow.
 
 ---
 
@@ -902,5 +936,5 @@ revisited where the relevant physics is developed.
 7. **Heat-of-reaction sign mapping to reference codes.** Internally $h>0$ is
    endothermic ($Q_\mathrm{rxn}=-\sum_r h_r r_r$), whereas ThermaKin publishes
    $h>0$ as exothermic. Users porting parameters from ThermaKin must flip the
-   sign; Gpyro and FDS use the same convention as Pyrolysis.jl, and their heats
+   sign; Gpyro V2 and FDS use the same convention as Pyrolysis.jl, and their heats
    are entered as published (Chapter 2, overload note H1; Chapter 6, §6.9.2).

@@ -12,7 +12,7 @@ trial-state extensions and caloric maps in `src/States` and `src/Materials`.
 
 Throughout this chapter `j` is the **component (species) index** running over the
 `N_C` components of a `Material`, and `i` is the **cell index** running over the
-`n` finite volumes (overload resolution I1, §2). The primary species variable is
+`n` finite volumes (overload resolution I1, §2). The constitutive species variable is
 the **mass concentration** `ξ_j` (kg·m⁻³), not the mass fraction (§3, Governing
 Equations); the integrated state is the cell mass `m_{j,i} = ξ_{j,i} V_i`. Two
 density symbols are used with care: the **bulk** (pure-phase) density `ρ_j`
@@ -54,7 +54,7 @@ Gas transport has a distinct basis: only condensed components enter
 $q_j=\gamma_j\xi_j/\rho_{b,j}$, and their normalized weights determine
 $\Lambda$ and component-mixed $\kappa$. Gas loading never changes these
 weights. At absent matrix support, the specified transport endpoint and
-its skeletal-occupancy domain apply (§9.2).
+its skeletal-occupancy domain apply (§9.3).
 
 A zero-`γ` condensed component has no matrix weight or direct contribution
 to the strain law. It still has mass, heat capacity and skeletal volume
@@ -157,7 +157,7 @@ value and its consistent derivative.
 The one-temperature model puts the pore gas at the matrix temperature (§3.1.2),
 so the gas stores sensible heat `ξ_g c_{p,g} ∂T/∂t` exactly like every other
 component. Its mass is an integrated state, and no separate gas-temperature
-unknown is needed. Gpyro's default thermal-equilibrium exchange neglects both
+unknown is needed. Gpyro V2's default thermal-equilibrium exchange neglects both
 gas storage and gas conduction, restored by `FULL_QSG`; the standard FDS wall
 model instead has no pore-gas inventory. The in-pore gas heat capacity is
 roughly `φ ρ_g c_{p,g}` against the matrix `(1−φ) ρ_s c_{p,s}`, with `ρ_s` the
@@ -396,7 +396,7 @@ weights. Participating condensed components require explicit `λ`; gases
 have no transfer-coefficient input. The coefficient multiplies the intrinsic
 partial-pressure gradient, $J_j^D=-\Lambda M_j\nabla p_j/(RT)$.
 
-`PARALLEL`, `SERIES` and `WEIGHTED` use the exact matrix rules of §9.2.
+`PARALLEL`, `SERIES` and `WEIGHTED` use the exact matrix rules of §9.3.
 Positive-weight zero coefficients close the series channel. Support changes
 at disappearing constituents require qualification; arbitrary positive floors
 are not used. `BRUGGEMAN` is a thermal closure and is rejected for gas transfer.
@@ -844,35 +844,91 @@ iteration works on scalars.
 
 ---
 
-## 5.14 Comparison to ThermaKin2Ds, Gpyro, and FDS
+## 5.14 Comparison with reference solvers
 
-**Heat capacity.** TK Eqs. 2 and 17 include gas sensible storage.
-GP Eqs. 11–12 mass-weight the condensed heat capacity and enthalpy; gas
-storage is separate and enters thermal equilibrium through `FULL_QSG`
-(Eq. 65). FDS's solid heat capacity sums condensed component contributions.
-Pyrolysis.jl sums all component masses times their heat capacities.
+Component values determine a simulation only after they have been combined
+into mixture properties. When porting a material, compare the resulting
+heat storage, conductivity, permeability and optical depth as composition
+changes. The 1D comparisons below use §1.6.5's versions and the same material
+state; equal initial values alone are insufficient.
 
-**Conductivity and emissivity.** TK Eqs. 8–10 blend volume-weighted parallel
-and series conductivity limits, corresponding to our `WEIGHTED` rule when
-the volume fractions match. TK's mixture gas swelling factor (Eqs. 3–4)
-is not generally our independent $\gamma_j$. In particular, `L SWELLING: 0`
-does not remove liquid volume from TK Eq. 3. GP Eqs. 7–8 volume-average
-condensed conductivities, including an optional pore-radiation term.
-Our `PARALLEL` rule matches that averaging only on the same volume basis.
-Additional mixing choices do not establish a more accurate physical model.
+| Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro V2 | FDS 6.11.0 solid wall |
+|:---|:---|:---|:---|:---|
+| Heat storage | sum over all component inventories | all-component sum | condensed sum; optional gas contribution | condensed sum |
+| Conductivity | selectable mixing rule | blend of parallel and series limits | condensed volume average in the aligned 1D case | condensed volume average |
+| Permeability | component mixing or Carman–Kozeny | effective gas-transfer coefficient, not our permeability input | component mixing; optional Kozeny–Carman factor | no resolved pore-flow permeability |
+| Absorption input | mass-specific, m²/kg | mass-specific, m²/kg | per length, m⁻¹ | per length, m⁻¹ |
 
-**Permeability.** GP Eq. 15 volume-averages prescribed component
-permeabilities. It does not specify our Carman–Kozeny closure. In Pyrolysis.jl
-that closure is an alternative to component mixing (§5.7).
+### 5.14.1 ThermaKin2Ds
 
-**Absorption units.** TK Eq. 11 and Pyrolysis.jl use mass-specific component
-coefficients $\alpha_j$ [m²/kg], with
-$\alpha_{\mathrm{eff}}=\sum_j\xi_j\alpha_j$ [m⁻¹]. Gpyro's $\kappa_i$
-(GP Eqs. 13–14) and FDS's $\kappa_{s,i}$ are already per length and are
-volume-averaged. Match the **effective optical depth**. For a single pure
-component at a specified density, $\alpha_j=\kappa_i/\rho_i$; this does not
-establish a universal constant conversion for a changing mixture.
-The radiation models themselves still differ (§8.7).
+TK Eqs. 2 and 17 include gas sensible storage. Eqs. 8–10 blend the
+volume-weighted parallel and series conductivity limits, corresponding to
+our `WEIGHTED` rule when the component laws, blend weight and volume
+fractions match. Its mixture gas swelling factor (Eqs. 3–4) is not generally
+our independent $\gamma_j$. In particular, `L SWELLING: 0` does not
+remove liquid volume from TK Eq. 3.
+
+TK Eq. 11 and Pyrolysis.jl use mass-specific component absorption
+$\alpha_j$ [m²/kg], giving
+$\alpha_{\mathrm{eff}}=\sum_j\xi_j\alpha_j$ [m⁻¹]. This matches
+the attenuation coefficient at the same component concentrations; the
+radiation deposition and emission algorithms still differ (§8.7.1).
+
+### 5.14.2 Gpyro V2
+
+GP Eqs. 11–12 mass-weight condensed heat capacity and enthalpy. Gas storage
+is separate (§7.8.3). In the aligned 1D formulation, GP Eqs. 7–8 and the
+[thermal mixture assembly](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_thermal.f90#L184-L305)
+volume-average condensed conductivities, including an optional pore-radiation
+term. Our `PARALLEL` rule matches only on the same volume basis.
+The [surface emissivity](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_funcs.f90#L527-L541) is also
+weighted by condensed volume fraction.
+
+V2 supports both component-averaged permeability and `KOZENY_CARMAN`
+(V2 user guide §9.3.2;
+[`CALCULATE_WEIGHTED_POINT_PERMEABILITY`](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_gas.f90#L1249-L1323)).
+The latter multiplies $\sum_iX_i\kappa_i$ by
+$\phi^3/\max[(1-\phi)^2,10^{-20}]$. Our `CARMAN_KOZENY` uses
+$\ell^2/180$ as its scale and caps permeability at $\ell^2$.
+The uncapped forms correspond when porosity and
+$\sum_iX_i\kappa_i=\ell^2/180$ match throughout the calculation.
+The caps and near-unit-porosity guards differ (§5.7).
+
+V2's component absorption $\kappa_i$ is already per length and is
+volume-averaged (GP Eqs. 13–14). For a pure component at a specified density,
+$\alpha_j=\kappa_i/\rho_i$ matches our coefficient. For a changing mixture,
+compare effective optical depth directly rather than assuming this is a
+universal constant conversion.
+
+### 5.14.3 FDS
+
+The FDS solid-phase chapter defines conductivity as a condensed volume
+average and volumetric heat capacity as
+$\sum_j\rho_{s,j}c_{p,j}=\sum_{j\in S\cup L}\xi_jc_{p,j}$.
+Its component densities are the mass concentrations defined in §4.8.3.
+The [wall property assembly](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/wall.f90#L2817-L2844)
+forms conductivity weights by normalizing the ratios of component
+concentration to adjusted material density.
+Our `PARALLEL` conductivity can match when those fractions and component
+properties match; our pore-gas heat storage remains an additional term.
+
+FDS component absorption coefficients are per length. The
+[in-depth radiation assembly](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/wall.f90#L2255-L2295)
+volume-averages them unless a layer coefficient is specified. Matching
+optical depth is necessary, but the two-flux angular closure and internal
+emission remain different from our incident beam (§8.7.3).
+
+### 5.14.4 Sources and numerical evidence
+
+The mappings use TK Eqs. 2–14, GP §§2.1–2.5, V2 user guide §9 and the
+FDS solid-phase sections on thermal properties and radiation, checked against
+the linked source paths where source is available (§1.6.5). Our mixing rules
+and permeability cap are in `src/Properties/effective_properties.jl`.
+
+The conduction and radiation checks in §18.2 exercise particular
+effective laws; they do not show that different mixing rules are interchangeable
+for reacting mixtures. User Guide §3.5 explains how to inspect the properties
+before running a transferred material model.
 
 ---
 

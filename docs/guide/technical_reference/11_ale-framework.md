@@ -115,7 +115,7 @@ the skeleton by $\mathbf J_g$ as before (§11.2.3, §11.6).
 ThermaKin writes Eq. 15 in stationary coordinates, including a deformation
 term for every component. Transforming that balance to a skeleton-following
 frame removes the corresponding mesh-relative term, provided the velocity and
-density closures are matched (§3.6.2). Gpyro Eq. 58 instead uses control
+density closures are matched (§3.6.2). Gpyro V2 Eq. 58 instead uses control
 volumes that deform with the solid, with $\dot m''$ crossing their faces. Treating the gas as fixed in the laboratory instead would count the
 skeleton's motion twice: once inside the frame of $\mathbf J_g$ and once as a sweep
 of the gas by the moving mesh.
@@ -298,7 +298,7 @@ its deformation term, which is the $\mathbf v_s\cdot\nabla T$ piece the mesh fra
 absorbs. At a boundary face the outward mass flux carries its sensible enthalpy at the
 surface temperature, while incoming species carry their specified reservoir
 enthalpy. Wall-film heat and carried enthalpy are converted to the same energy
-control surface before assembly (§9.9); no additional outgoing-gas sink is added.
+control surface before assembly (§9.5); no additional outgoing-gas sink is added.
 
 ---
 
@@ -1033,40 +1033,66 @@ mechanisms keep a solve inside the physical domain:
 
 ---
 
-## 11.9 Comparison to ThermaKin2Ds, Gpyro, and FDS
+## 11.9 Comparison with reference solvers
 
-All three reference models can change their 1D material geometry. Describing
-them as fixed-grid codes with no physical surface motion is incorrect.
+Even when two solvers use the same physical volume law, their cells need not
+move or exchange inventories in the same way. The deforming 1D configurations
+in §1.6.5 all allow surface motion. Here the comparison concerns mesh motion
+and remapping; the material volume laws are compared in §10.11.
 
-**ThermaKin2Ds.** TK §3 describes deformation of element thicknesses followed
+| Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro V2 | FDS 6.11.0 solid wall |
+|:---|:---|:---|:---|:---|
+| Motion | node positions and velocities in the coupled system | element thickness changes | axial thickness reconstructed from mass/density | solid-cell thickness and coordinates updated |
+| Size control | optional equidistribution correction | splitting and partial combination | selected deformation mode | layer remeshing |
+| Inventory transfer | relative fluxes when mesh and skeleton differ | conservative mixing during size adjustment | condensed inventories follow material cells | inventory remapping on the solid grid |
+
+### 11.9.1 ThermaKin2Ds
+
+TK §3 describes deformation of element thicknesses followed
 by size control before each timestep: large elements split, and smaller ones
 receive part of a neighboring element with species and energy conservation.
 Its Eulerian continuum deformation term does not imply fixed numerical
 elements. Deformation is restricted to the primary coordinate.
 
-**Gpyro.** GP Eqs. 56–57 conserve condensed inventories on cells whose
-thicknesses change. Only gas crosses the material cell boundaries in this
-1D formulation. Nonuniform initial spacing and evolving spacing are distinct
-features. Setting `use_ale=false` here does not reproduce Gpyro's deforming
-grid. Multidimensional transport must be distinguished from general mesh
-deformation; the inspected V2 `UPDATE_MESH` includes multiple deformation
-modes and explicitly flags limitations in its 2D/3D distortion treatment.
+### 11.9.2 Gpyro V2
 
-**FDS.** FDS 6.11.0 updates solid-cell thicknesses and coordinates and remeshes
+GP Eqs. 56–57 and §6.5 conserve condensed cell inventories;
+only gas crosses material cell boundaries in the deforming 1D formulation.
+The [mesh update](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_mesh.f90#L16-L222) distinguishes
+`SOLVER_DEFORMATION_MODE=1`, which keeps axial thicknesses fixed while
+updating the mass/density volume, from modes ≥2, which reconstruct axial
+thickness as $m_s/(\bar\rho A)$. Mode ≥3 also attempts to account for
+distortion in transport geometry, but the source explicitly flags its
+2D/3D deformation treatment as unfinished. The guide's changing-volume
+equations do not establish general multidimensional deformation support.
+Record the selected mode; setting `use_ale=false` here does not reproduce
+V2's deforming-grid configuration.
+
+### 11.9.3 FDS
+
+FDS 6.11.0 updates solid-cell thicknesses and coordinates and remeshes
 layers (`REGRID_FACTOR`, `X_S_NEW` and `REMESH_LAYER` in `wall.f90`). This
 is motion of the internal solid grid; it is separate from the surrounding
 CFD mesh and obstruction representation.
 
-**Pyrolysis.jl.** Node positions are differential unknowns and node velocities
-are algebraic unknowns in the same coupled system as mass and energy. The
-equidistribution correction transports inventories relative to that mesh;
-the geometry obeys the discrete volume identity of §11.5. These are specific
-implementation differences, not proof that the reference codes lack geometric
-conservation. Volume laws, remapping, radiation and gas transport still have
-to be matched before comparing solutions (§§8–10).
 
-Sources: TK §3; GP §4.1; [FDS wall source](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/wall.f90#L2388-L2679);
-[V2 mesh source](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_mesh.f90).
+The wall grid is internal to the solid model. Matching it to our moving
+column does not require moving the surrounding CFD mesh, but does require
+matching surface fluxes, the volume law and remapping effects.
+
+### 11.9.4 Sources and numerical evidence
+
+TK §3 documents element adjustment. GP §§4.1, 6.5 and the linked V2 mesh
+source distinguish mass-following cells from optional distortion treatment.
+FDS's solid-phase deformation description is checked against the
+[grid and remapping implementation](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/wall.f90#L2388-L2805).
+Our coupled geometry and relative-flux assembly are in `src/Closures/balance.jl`
+and `src/Kernels/relative_flux.jl` (§§11.5–11.6).
+
+The moving-mesh manufactured solutions V-MMS-02–04 test specified Pyrolysis.jl
+geometric and transport balances (§18.2). They do not compare the reference
+codes' remapping errors. User Guide §9.7 explains how to compare profiles
+using their current coordinates rather than initial node positions.
 
 ---
 

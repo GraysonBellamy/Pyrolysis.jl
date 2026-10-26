@@ -15,8 +15,9 @@ correctly.
 
 Throughout, the spatial coordinate is `z` (through-thickness): `z = 0` is the
 bottom/substrate, `z = L` is the top/exposed surface (see Technical Reference §1).
-The primary species state variable is the **mass concentration** `ξ_j` in kg·m⁻³
-(not mass fraction). All inputs are SI: densities in kg·m⁻³, heat capacities in
+Composition is specified and reported as the **mass concentration** `ξ_j`
+in kg·m⁻³; the integrator stores component cell masses `m_j` and derives
+`ξ_j = m_j/V`. All inputs are SI: densities in kg·m⁻³, heat capacities in
 J·kg⁻¹·K⁻¹, conductivities in W·m⁻¹·K⁻¹, activation energies in J·mol⁻¹.
 
 ---
@@ -90,6 +91,11 @@ char = SolidComponent(:char; ρ=150., ρ_intrinsic=1950.,
 ```
 
 Bulk density `ρ`, heat capacity `c` and conductivity `k` are required.
+The constructor's `ρ` describes the pure material. Set its amount in a
+mixture through `ξ_initial` (§5.10). An FDS component density `ρ_{s,j}`
+corresponds to that concentration, while FDS's material density property
+is a separate input (§1.3; Technical Reference §4.8.3).
+
 Participating lumped matrices also require explicit superficial transfer `λ`.
 Zero `λ` closes wall transfer independently of `κ`; zero permeability closes
 Darcy flow. Neither coefficient is inferred from gas loading.
@@ -403,13 +409,19 @@ material). The volumetric source is `Q_rxn = −Σ h_r r_r`, so an endothermic r
 produces `Q_rxn < 0`. This is the *opposite* of the ThermaKin publication
 convention (`h > 0 = exothermic`); when you transcribe ThermaKin parameters, flip
 the sign and normalize the reaction extent (Technical Reference §6.9.1).
-Gpyro and FDS use the convention of this package but still require basis and
+Gpyro V2 and FDS use the convention of this package but still require basis and
 unit checks. Examples:
 
 ```julia
 endo = Reaction(:pyrolysis, :virgin => :gas, A = 1e10, E = 140e3, h =  500e3)  # cools
 exo  = Reaction(:char_ox,   :char   => :ash, A = 1e6,  E = 120e3, h = -300e3)  # heats
 ```
+
+When transferring a Gpyro V2 reaction with `CONSTANT_DHVOL=.TRUE.`, combine
+its solid-product and volatile heats on a per-reactant basis; equal `DHS`
+and `DHV` are one simple case. The other setting adds a temperature-dependent
+sensible-enthalpy correction whose sign differs between the V2 user guide
+and source. Technical Reference §6.9.2 gives the implemented conversion.
 
 See the overload note H1 in the nomenclature and Technical Reference §6.6.
 
@@ -559,6 +571,14 @@ Carman–Kozeny directly supplies the effective permeability, including when
 all component permeabilities are zero. Both gas models use this permeability.
 The material still needs resolved physical porosity and a qualified matrix
 endpoint or termination domain (§7.5).
+
+When porting a material, inspect the effective properties at the initial
+state and at representative heated and reacted states. ThermaKin2Ds volume
+fractions depend on its swelling law; Gpyro V2 and FDS thermal mixing uses
+condensed volume fractions. Their per-length absorption coefficients also
+need conversion before use as our mass-specific `α` (Technical Reference
+§5.14). Matching conductivity or optical depth only at the initial state
+does not establish the same evolving material.
 
 ### 3.5.4 Inspecting effective properties
 

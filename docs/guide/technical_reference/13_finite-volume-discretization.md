@@ -338,7 +338,7 @@ $$
 
 the gas enthalpy enters through its difference from the cell enthalpy. At an
 incoming boundary, use the specified incoming temperature and reservoir heat;
-an LTE film uses the equivalent converted wall-film representation (§9.9). A mass flux carried at the cell's own temperature neither heats
+an LTE film uses the equivalent converted wall-film representation (§9.5). A mass flux carried at the cell's own temperature neither heats
 nor cools it; gas that leaves through a hotter face takes the enthalpy difference
 with it. This is the semi-discrete form of the gas-advection term
 $-\sum_j c_{p,j}\,\mathbf J_j\cdot\nabla T$ (§7.4), written as a face flux so that
@@ -634,7 +634,7 @@ part vanishes identically and is not evaluated.
 The pore state $p_j=\xi_jRT/(M_j\phi)$ supplies the transported potential.
 A lumped half path gives $n_j^D=\Lambda(p_{j,L}-p_{j,R})/(RT_{path}d)$.
 Dusty-gas paths solve the coupled friction matrix using a consistent mean
-face pressure and collective donor composition (§9.4–9.5). The conditioned
+face pressure and collective donor composition (§9.2.2 and §9.7). The conditioned
 rank-one evaluator is linear in gas-species count and has explicit vacuum
 and pure-gas limits.
 
@@ -671,7 +671,7 @@ resistances provide the species closure. Outward species carry surface
 enthalpy; inward species carry their specified incoming enthalpy.
 For an LTE wall film, $q_r=q_s+H_r-H_s$ converts the wall heat to the
 reservoir control surface and $E_{out}=H_r-q_r$. For adiabatic or prescribed
-heat, donor enthalpy and imposed heat enter directly (§9.9).
+heat, donor enthalpy and imposed heat enter directly (§9.5).
 
 The mass and thermal residuals are coupled only when their constitutive
 closures require it. The solve reports its residual and iterations, and
@@ -1022,39 +1022,91 @@ at $59.3$ kg m⁻³ s⁻¹ times its volume.
 
 ---
 
-## 13.11 Comparison to Gpyro and ThermaKin2Ds Discretizations
+## 13.11 Comparison with reference solvers
 
-### 13.11.1 Gpyro
+Spatial discretization determines how continuum fluxes become exchanges
+between cells. The 1D formulations in §1.6.5 share some finite-volume
+features, but differ in transported states, face laws and mesh adjustment.
+Matching a scheme name is insufficient: compare the actual flux and its
+coefficient before interpreting a convergence difference.
 
-The documented 1D Gpyro method uses fully implicit control-volume balances,
-with changing cell thicknesses, harmonic interface transport coefficients,
-source linearization and tridiagonal solves in an iterative coupled solution
-(GP §§4.1, 6). Boundary nodes lie on half-cell boundaries.
+| Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro V2 | FDS 6.11.0 solid wall |
+|:---|:---|:---|:---|:---|
+| Stored cell variables | component masses and thermal state | component masses and temperature | condensed masses and enthalpy; separate gas state | condensed component concentrations, $\rho_{s,j}$, and temperature |
+| Transport across faces | harmonic coefficients; upwind Darcy advection | finite-volume heat and gas transfer | harmonic coefficients; selectable gas convection–diffusion scheme | harmonic wall conductivity; no pore-gas flux |
+| Changing geometry | coupled mesh and relative fluxes | element size adjustment | volume reconstruction | solid-grid update and remapping |
 
-GP's convection–diffusion scheme is **selected by an input option**; central,
-upwind, hybrid, power-law and exponential forms have different Péclet-number
-coefficient functions (GP Table 2; 0.8200 `GET_A`/`GET_A_SINGLE`). It does
-not automatically choose among all schemes as the Péclet number changes.
+FDS's stored component densities are the same mass-per-volume quantities
+as our derived $\xi_j$ (§3.7). This row distinguishes the numerical
+representation of composition.
+
+### 13.11.1 ThermaKin2Ds
+
+TK §3 calls its spatial elements **finite volumes**, carrying component
+masses and temperature. Element sizes change with deformation and are
+adjusted by conservative splitting and mixing. This shares the inventory
+view of our discretization, while using a different mesh-update procedure
+(§11.9.1). The documented time integration uses Crank–Nicolson in the
+primary coordinate and explicit transverse updates (§15.14.1).
+
+Our species masses, optional enthalpy inventories and moving geometry enter
+one coupled mass-matrix system. Compare the face laws and mesh transfer as
+well as the inventory variables before expecting equal spatial errors.
+
+### 13.11.2 Gpyro V2
+
+V2 uses finite-volume transport with harmonic interface coefficients and
+an iterative coupling of reaction, gas and thermal updates. Its current
+condensed-species method is a direct mass update with corrections for
+overconsumption (GP §6.5;
+[`SOLVE_SPECIES_CONSERVATION_IN_CELL`](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_mass.f90#L495-L742)).
+The thermal solver treats one coordinate direction implicitly through a
+tridiagonal solve and transverse terms explicitly (GP §6.8; V2 user guide
+§6.2; [`SOLVE_TDMA_ACCORDING_SWEEP_DIRECTION`](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_thermal.f90#L1361-L1469)).
+In 1D the sole transport direction is implicit; the species update still
+uses the direct mass calculation. Boundary treatment follows the active
+half-cell path discussed in §12.11.2.
+
+The gas convection–diffusion scheme is selected by `CONV_DIFF_SCHEME`.
+Central, upwind, hybrid, power-law and exponential forms have different
+Péclet-number coefficient functions (GP Table 2;
+[`GET_A_SINGLE`](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_funcs.f90#L726-L751)). The
+[default is 3, hybrid](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_io.f90#L942-L951); V2 does not
+automatically select among all five schemes as the Péclet number changes.
+Its [interface property routine](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_funcs.f90#L576-L720)
+uses distance-weighted harmonic interpolation.
+
 Pyrolysis.jl uses first-order upwind Darcy advection, a separate diffusive
 law and distance-weighted harmonic face coefficients. Its semi-discrete
 system is advanced with a stiff integrator and a coupled colored Jacobian.
 Those shared finite-volume features do not make the diffusion laws or time
 errors identical (§9.10).
 
-### 13.11.2 ThermaKin2Ds
+### 13.11.3 FDS
 
-TK §3 calls its spatial elements **finite volumes**, carrying component
-masses and temperature. It uses Crank–Nicolson integration in the primary
-coordinate and explicit updates in the transverse coordinate, with changing
-element sizes and conservative size adjustment. It should not be contrasted
-with Pyrolysis.jl as a fixed-grid finite-difference method with no volume
-inventory conservation.
+FDS's standard wall discretizes through-thickness conduction and the local
+reaction sources. Its [wall implementation](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/wall.f90#L2817-L2917)
+forms distance-weighted harmonic face conductivities and solves a tridiagonal
+temperature system. Generated gas has no resolved pore-transport path
+(§9.12.3), so matching the conductive stencil does not match our full
+species/energy discretization.
 
-Pyrolysis.jl carries extensive mass states, optional enthalpy states, and
-the moving geometry in one mass-matrix system. Its source code establishes
-these choices; TK's manual establishes its own method. Neither description
-alone establishes relative accuracy, computational cost, or stability on a
-particular ignition transient.
+The thickness update and remapping are additional parts of the discrete
+problem (§11.9.3). Compare cell locations, flux areas and material inventories
+as well as temperature profiles; temporal coupling is discussed in §15.14.3.
+
+### 13.11.4 Sources and numerical evidence
+
+TK §3 establishes its documented finite-volume method. GP §6, Table 2 and
+V2 user guide §6.2 are checked against the linked coefficient, mass and thermal
+routines. The FDS solid-phase heat-transfer discretization is checked against
+the wall source above. Our face laws and residual assembly are in
+`src/Physics/interface_transport.jl` and `src/Assembly/residual.jl`.
+
+The exact-solution and manufactured-solution studies in §18.2 test particular
+spatial operators and configurations. Shared harmonic interpolation does not
+establish equal truncation error for the coupled models. User Guide §12.6
+describes resolution studies; time-integration differences follow in §15.14.
 
 ---
 

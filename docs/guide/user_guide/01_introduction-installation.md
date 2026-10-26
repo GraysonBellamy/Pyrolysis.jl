@@ -45,13 +45,36 @@ lateral shrinkage, burnout — by setting the corresponding component fields or
 `solve` keywords. Nothing you do not ask for is computed.
 
 Pyrolysis.jl is intended for the same class of problems as **ThermaKin2Ds**,
-**Gpyro**, and the **FDS** solid-phase pyrolysis model: cone-calorimeter
+**Gpyro V2**, and the **FDS** solid-phase pyrolysis model: cone-calorimeter
 simulations, TGA/DSC/MCC idealizations, charring and non-charring solids,
 intumescent coatings, pressure-treated wood, and moisture transport. The energy
 balance is that of a one-temperature porous medium: every component, the pore
 gas included, stores sensible heat at the cell temperature, and the gas fluxes
 carry their sensible enthalpy across the faces, leaving the exposed surface at
 the surface temperature (see Technical Reference §3 and §7).
+
+Solver versions and source scope are pinned in Technical Reference §1.6.5;
+Gpyro comparisons use **V2**. This guide gives practical porting checks,
+while the Technical Reference explains equation mappings, assumptions and
+differences between manuals and active implementations. ThermaKin2Ds
+comparisons describe its documented formulation; its source is not available
+in this checkout. Historical verification curves and timings retain their
+original version labels until the V2 cases are rerun.
+
+When transferring an existing model, work through the checks in this order:
+
+| Check | User Guide setup | Technical Reference comparison |
+|:---|:---|:---|
+| Composition, material density properties and mixing | §§1.3, 3.2–3.5 | §§2, 4.8 and 5.14 |
+| Reaction rate, yields and heat basis | §§4.4–4.9 | §6.9 |
+| Thermal boundaries and radiation | §§5.2–5.6 | §§7.8, 8.7, 12.11 |
+| Gas transport, storage and carried energy | §§7.5–7.7 | §9.12 |
+| Deformation and burnout criteria | Chapters 6 and 10 | §§10.11, 11.9, 14.8 |
+| Numerical controls and reported observables | §§9.5, 9.7–9.8, 12.6 | §§13.11, 15.14, 16.9 |
+
+Matching a parameter name or an initial value is only a starting point.
+Check the resulting laws over the temperature and composition range of the
+run, then compare the same physical observable.
 
 ### What is not modeled
 
@@ -133,7 +156,7 @@ Key state and input units:
 | Component mass per cell (the integrator's state) | `m_ij` | kg |
 | Domain thickness | `L` | m |
 | Heat flux | `q` | W·m⁻² |
-| Density (bulk) | `ρ_j` | kg·m⁻³ |
+| Material density property (bulk) | `ρ_j` | kg·m⁻³ |
 | Heat capacity | `c_p` | J·kg⁻¹·K⁻¹ |
 | Thermal conductivity | `k` | W·m⁻¹·K⁻¹ |
 | Pre-exponential factor | `A_i` | s⁻¹ (first order) |
@@ -145,17 +168,28 @@ Key state and input units:
 > **Sign convention for the heat of reaction.** Internally Pyrolysis.jl uses
 > **`h > 0` = endothermic** (the reaction absorbs heat and cools the material) and
 > **`h < 0` = exothermic**. Note this is the *opposite* of the ThermaKin
-> publishing convention (`h > 0` = exothermic); Gpyro and FDS use this one. The volumetric heat source is
+> publishing convention (`h > 0` = exothermic); Gpyro V2 and FDS use this one. The volumetric heat source is
 > `Q_rxn = −Σ h_r r_r`, so an endothermic reaction (`h > 0`) produces
 > `Q_rxn < 0`. See Technical Reference §6 (overload note H1 in §2).
 
 The composition you specify and read is the **mass concentration `ξ_j`**
-(kg/m³), not the mass fraction: `ξ_j = Y_j ρ`. A component initially present at
-its bulk density `ρ_j` has `ξ_j(0) = ρ_j`. This is why the default initial
-condition places the first solid component at its reference density (see §1.8).
+(kg/m³): component mass divided by the whole current cell volume,
+`ξ_j = m_j/V = Y_j ρ`. Here `Y_j` is its mass fraction and `ρ = Σ_j ξ_j`
+includes every component, including retained gas. A pure component filling
+the cell at its bulk density `ρ_j` has `ξ_j(0) = ρ_j`. This is why the default
+initial condition places the first solid component at its reference density
+(see §1.8).
 At the start of a solve the concentrations are evaluated at the cell centres
 `z_i` and turned into the component masses `m_ij = ξ_j(z_i) V_i` the integrator
 carries; the solution reports both.
+
+ThermaKin2Ds uses the same mass-concentration convention. FDS calls this
+quantity a **component density**: `ρ_{s,j} = ξ_j` for a condensed component.
+Its total condensed density is `ρ_s = Σ_condensed ξ_j`, summed over solids
+and liquids and excluding retained gas.
+These concentrations are distinct from the material density property `ρ_j`
+specified in a component constructor (§3.2). Technical Reference §§2 and 4.8
+give the notation and source definitions.
 
 ---
 

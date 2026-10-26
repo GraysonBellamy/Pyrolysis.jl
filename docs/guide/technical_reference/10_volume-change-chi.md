@@ -1,6 +1,6 @@
 # 10. Volume Change, Swelling, Intumescence, and Lateral Shrinkage
 
-This chapter derives the volume-change model of Pyrolysis.jl: how reaction-driven mass exchange between condensed and gaseous phases produces a per-cell volumetric strain rate $\theta$, how that strain enters the balance rows that fix the node velocities of a moving mesh, and how a column-global *lateral* shrinkage / swelling / intumescence law deforms the cross-sectional area $A(t)$ through the column's conversion $\bar\chi$, which a per-cell *conversion-history pair* carries. We give the continuous balance, the discrete rows as implemented, why integrating the component masses makes the dilation of every concentration implicit, and a comparison to the deformation treatments in ThermaKin2Ds, Gpyro, and FDS. Every equation here is grounded in the source: `src/Physics/volume_change.jl` (the strain rate), `src/Closures/balance.jl` (the balance rows), `src/Closures/lateral.jl` (the variable cross section), `src/Kernels/relative_flux.jl` (the history pair on a mesh that moves relative to the solid), `src/Assembly/residual.jl` (the row assembly), `src/Integration/setup.jl` (the initial state and the validation), and `src/Materials/materials.jl` (the dry-gas set).
+This chapter derives the volume-change model of Pyrolysis.jl: how reaction-driven mass exchange between condensed and gaseous phases produces a per-cell volumetric strain rate $\theta$, how that strain enters the balance rows that fix the node velocities of a moving mesh, and how a column-global *lateral* shrinkage / swelling / intumescence law deforms the cross-sectional area $A(t)$ through the column's conversion $\bar\chi$, which a per-cell *conversion-history pair* carries. We give the continuous balance, the discrete rows as implemented, why integrating the component masses makes the dilation of every concentration implicit, and a comparison to the deformation treatments in ThermaKin2Ds, Gpyro V2, and FDS. Every equation here is grounded in the source: `src/Physics/volume_change.jl` (the strain rate), `src/Closures/balance.jl` (the balance rows), `src/Closures/lateral.jl` (the variable cross section), `src/Kernels/relative_flux.jl` (the history pair on a mesh that moves relative to the solid), `src/Assembly/residual.jl` (the row assembly), `src/Integration/setup.jl` (the initial state and the validation), and `src/Materials/materials.jl` (the dry-gas set).
 
 The mesh-motion machinery (the node positions as differential unknowns, the balance rows that fix the node velocities, the geometric volume from the node positions, the equidistribution correction and the relative fluxes) is developed in Chapter 11, *The ALE Framework*; here we develop the *constitutive* content — the strain rates and the cross-section law that feed Chapter 11 — and the bookkeeping of the history pair. The state layout that carries the history pair and the cross-section rows is detailed in §15.1, and the Jacobian of the two dense cross-section rows in §15.9.
 
@@ -368,7 +368,7 @@ $$
 \tag{10.15}
 $$
 
-holds as an identity of the discrete system, not as a term the residual adds. It says: when a cell shrinks ($\theta<0$) the concentration of every component it carries rises (mass conserved in less volume); when a cell swells ($\theta>0$) the concentration falls. For the pore gas this is the compression of the gas in the shrinking pores, which the pressure closure $P = N/\varphi$ (§9.4) turns into a Darcy response.
+holds as an identity of the discrete system, not as a term the residual adds. It says: when a cell shrinks ($\theta<0$) the concentration of every component it carries rises (mass conserved in less volume); when a cell swells ($\theta>0$) the concentration falls. For the pore gas this is the compression of the gas in the shrinking pores, which the pressure closure $P = N/\varphi$ (§9.1) turns into a Darcy response.
 
 > **Implementation note.** The row assembly writes the mass rows as `du[mass_index(layout, i, j)] = c.S_mass[j, i] + c.M_flux[j, i]` (`assemble_rows!`, `src/Assembly/residual.jl`): the reaction source plus the scattered face fluxes, with no geometric term. The state mapping (`derive!`, `src/States/derived.jl`) forms `ξ[j, i] = m / V_eval[i]` from the current geometry, with $\tilde V_i$ the volume smoothly floored at $10^{-8}V_i(0)$, and every kernel reads the concentrations from there. The derivation is repeated, in the ALE setting, in §11.3.4.
 
@@ -464,9 +464,20 @@ whatever the temperature history. The verification case V-CPL-03 asserts this en
 
 ---
 
-## 10.11 Comparison to ThermaKin2Ds, Gpyro, and FDS
+## 10.11 Comparison with reference solvers
 
-### 10.11.1 ThermaKin2Ds — deformation and remeshing
+Shrinking or swelling changes both the material thickness and the distances
+over which heat and gas move. A useful comparison therefore starts with the
+volume law, before considering how the mesh follows it. The 1D mappings
+below use §1.6.5's versions; §11.9 separately compares their mesh updates.
+
+| Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro V2 | FDS 6.11.0 solid wall |
+|:---|:---|:---|:---|:---|
+| Volume law | reaction-volume sum with component weights | mixture density with gas swelling | reaction yield and condensed bulk density | component-density sum with shrink/swell constraints |
+| Geometry update | coupled node positions; optional scalar area | changing elements with size adjustment | mass/density volume reconstruction | thickness/coordinate update and remeshing |
+| Porting requirement | specify component weights and lateral law | match the full density law | match yields, densities and deformation mode | match density ratios and shrink/swell flags |
+
+### 10.11.1 ThermaKin2Ds
 
 TK Eq. 15 gives, in one dimension,
 
@@ -485,32 +496,42 @@ does not include all density-change effects and is not a general equivalent.
 TK restricts deformation to its primary coordinate; our empirical scalar
 lateral-area law is a separate constitutive choice.
 
-### 10.11.2 Gpyro — reaction yields and changing control volumes
+### 10.11.2 Gpyro V2
 
 GP Eqs. 22–24 define a **reaction-specific** solid mass yield
 
 $$\mathrm{SF}_k=1+\left(\rho_{B_k}/\rho_{A_k}-1\right)\chi_k.$$
 
-Together with bulk component densities and the mass balances, this determines
-the changing $\Delta z$ (GP Eqs. 3, 56–57). It is not a per-species
+V2 user guide §11.2 and the
+[`SPECIES_SOURCE_TERMS`](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_mass.f90#L263-L425)
+implementation use this yield. With axial deformation enabled,
+[`UPDATE_MESH`](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_mesh.f90#L16-L126) reconstructs
+$V=m_s/\bar\rho$ and $\Delta z=V/A$ from the updated condensed mass and
+bulk density (GP Eqs. 3, 56–57; §6.5). The yield is not a per-species
 shrink/non-shrink/swell flag. $\chi_k$ is not the conversion variable
 $\alpha_A$ and neither is our dry-gas progress $\chi$.
 
 For constant densities, fixed area, no additional volume contributions and
 condensed $\gamma_j=1$, our volume change for $A\to y_BB+\text{gas}$
 is proportional to $y_B/\rho_B-1/\rho_A$. Matching $y_B=\mathrm{SF}_k$
-can match this restricted Gpyro volume balance. There is no universal
+can match this restricted Gpyro V2 volume balance. There is no universal
 $\chi_k\leftrightarrow\gamma_j$ conversion. Our lateral law is not the
-analogue of Gpyro's axial shrinkage law.
+analogue of Gpyro V2's axial shrinkage law.
 
-### 10.11.3 FDS — implemented density-sum rule and constraints
+### 10.11.3 FDS
 
 In FDS 6.11.0 `Source/wall.f90`, `REGRID_FACTOR` is accumulated as the sum
-of updated component densities divided by their adjusted reference densities.
+of updated component concentrations ($\rho_{s,j}=\xi_j$; §4.8.3) divided
+by their adjusted reference material densities.
 A remaining component with `ALLOW_SHRINKING=.FALSE.` bounds that factor below
-by one; `ALLOW_SWELLING=.FALSE.` bounds it above by one. Component densities
+by one; `ALLOW_SWELLING=.FALSE.` bounds it above by one. Component concentrations
 are divided by the resulting factor to conserve mass, coordinates are
 updated, and layers can be remeshed.
+
+This rescaling accounts for the change of current cell volume. Pyrolysis.jl
+obtains the same mass-to-volume relationship by deriving $\xi_j=m_j/V$
+from its stored masses and current geometry (§10.7); the volume-change
+laws and update procedures still need to be matched.
 
 The same release's solid-phase manual still prints a max/sum expression.
 That expression does **not** describe this source path: in particular, the
@@ -519,17 +540,19 @@ This comparison follows the [implemented regrid calculation](https://github.com/
 The V-CPL-03 endpoint examples are restricted checks of matched volume
 balances, not proof that every FDS material maps to our $\gamma_j$.
 
-### 10.11.4 Summary of mappings
+### 10.11.4 Sources and numerical evidence
 
-| Model | Volume-change input | Numerical geometry |
-|---|---|---|
-| Pyrolysis.jl | reaction-volume sum with component $\gamma_j$; optional lateral law | coupled node positions/velocities and scalar area |
-| ThermaKin2Ds | mixture density with gas swelling factor, TK Eqs. 3–4 | changing elements, splitting and combining |
-| Gpyro 1D | reaction yield, component bulk densities and mass conservation | changing control-volume thicknesses |
-| FDS 6.11.0 | density sum constrained by material shrink/swell flags | thickness and coordinate update, remeshing |
+TK Eqs. 3–4, 15 and §3 give its density and deformation laws. GP
+Eqs. 22–24, 56–57, §6.5 and V2 user guide §11.2 are checked against the
+linked yield and mesh routines. The FDS solid-phase swelling/shrinking
+description is checked against the linked regrid calculation; its max/sum
+discrepancy is identified above. Our closure is in
+`src/Physics/volume_change.jl` and `src/Closures/lateral.jl`.
 
-Primary source definitions are listed in §1.6.5. In particular, equality of
-endpoint thicknesses does not establish equality of transient mesh dynamics.
+V-CPL-03 tests restricted endpoint balances, including lateral-area choices.
+Equal endpoint thicknesses do not establish equal transient geometry or
+remapping error. Retained external curves keep the versions in §18.1.3.
+User Guide §§6.7 and 7.6 covers deformation setup.
 
 ---
 

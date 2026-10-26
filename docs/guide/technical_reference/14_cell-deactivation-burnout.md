@@ -781,28 +781,60 @@ The deactivation is coupled to the time integration only through its callbacks
 
 ---
 
-## 14.8 Comparison to ThermaKin2Ds, Gpyro, and FDS
+## 14.8 Comparison with reference solvers
 
-The reference sources establish changing grids, but do not establish a common
-cell-removal or event-transfer algorithm across the codes.
+Near depletion, the numerical treatment of a vanishing cell affects the
+reported residual mass, final thickness and escaped energy. Compare what
+triggers the change and where the remaining inventory goes. The versions
+in §1.6.5 do not share a common cell-removal or inventory-transfer algorithm.
 
-- **ThermaKin2Ds:** TK §3 explicitly splits large elements and combines part
-  of a neighboring element into small elements, conserving species and energy.
-  Its reference plane is stationary. This is a remeshing operation, not
-  evidence that the mesh topology never changes.
-- **Gpyro:** GP §4.1 derives a changing-thickness control-volume system.
-  Shrinking thickness alone does not establish the same threshold, event
-  location, residual-inventory transfer or vent accounting as Pyrolysis.jl.
-  Original Gpyro and V2 require separate implementation checks for burnout.
-- **FDS:** FDS 6.11.0 `wall.f90` detects cells approaching zero thickness,
-  remeshes affected layers and handles complete disappearance of a wall.
-  This differs from our fixed state length and mass-based deactivation event.
+| Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro V2 | FDS 6.11.0 solid wall |
+|:---|:---|:---|:---|:---|
+| Small-cell treatment | located mass-threshold deactivation | element splitting and partial combination | consumed-cell flag and inert residual | thin-cell/layer checks and remeshing |
+| Inventory consequence | receiver transfer and recorded vent losses | species and energy conserved during mixing | residual retained when reactions stop | wall inventories remapped; disappearance handled |
+| Meaning of burnout | specified mass threshold and event outcome | must identify the chosen run/output criterion | source uses remaining-mass ratio | wall/layer disappearance criteria |
 
-Pyrolysis.jl's documented behavior is specific: a condensed-mass threshold,
-located event, transfer of inventories to a receiver, recorded vent losses,
-and unchanged state dimension (§14.3). These claims are supported by
-`src/Deactivation/events.jl`; no claim is made that other codes implement
-the same bookkeeping or lack an equivalent conservation check.
+### 14.8.1 ThermaKin2Ds
+
+TK §3 describes splitting large elements and combining part of a neighboring
+element into small elements, conserving species and energy. Its reference
+plane remains stationary while the element sizes change.
+
+The manual's remeshing description does not establish a threshold or vent
+ledger equivalent to ours. A burnout comparison must state its observable
+and termination criterion rather than infer them from shrinking elements.
+
+### 14.8.2 Gpyro V2
+
+GP §6.5 describes retaining a thin inert residual layer when
+a cell is nearly consumed. It states a current-to-initial **volume** ratio,
+but the active [`NEW_UPDATE_SOLUTION`](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_pyro.f90#L450-L468)
+marks a reacting cell `CONSUMED` when its current-to-initial **condensed
+mass** ratio is at most `EPS`. These criteria differ when bulk density
+changes. The [reaction-rate evaluation](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_mass.f90#L68-L125)
+then skips consumed cells. This retains a residual inventory instead of
+performing our located deactivation event and receiver/vent transfers.
+
+### 14.8.3 FDS
+
+The [wall update](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/wall.f90#L2440-L2700) checks vanishing
+thickness, remeshes layers and handles a wall whose thickness reaches zero.
+Pyrolysis.jl keeps a fixed state length and locates a condensed-mass event.
+Match the stopping criterion and residual inventory before comparing their
+reported burnout times.
+
+### 14.8.4 Sources and numerical evidence
+
+TK §3 documents element adjustment. GP §6.5 is checked against the linked
+consumption and reaction-rate routines; the mass-versus-volume discrepancy
+is identified above. The FDS solid-phase deformation description is checked
+against its wall update. Our located events, receiver transfers and loss
+records are implemented in `src/Deactivation/events.jl` (§14.3).
+
+The V-BO cases test specified deactivation and ledger behavior. The retained
+V-BO-01 V2 curve lacks a source revision (§18.1.3), so it does not demonstrate
+agreement with the pinned implementation. User Guide §§10.2–10.4 explains
+how to choose a threshold and distinguish deactivation from a thickness stop.
 
 ---
 

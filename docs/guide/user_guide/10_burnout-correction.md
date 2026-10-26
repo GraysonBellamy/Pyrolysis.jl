@@ -353,6 +353,14 @@ threshold: on the verification decks 0.4 to 3.9 % at `ε_m = 3e-3` and 1.4 to
 On a fixed mesh the band is not read: the outermost live cell goes while it
 is below `ε_m` (§10.8).
 
+When comparing burnout with another solver, record both the stopping
+criterion and the residual inventory. Gpyro V2's active cutoff uses a
+remaining condensed-mass ratio and leaves an inert residual; its manual
+describes a volume ratio. FDS wall disappearance and ThermaKin2Ds element
+adjustment are also different from our located deactivation event.
+Technical Reference §14.8 explains the consequences. Equal numerical
+threshold values do not necessarily define the same burnout state.
+
 ---
 
 ## 10.5 The equidistribution correction

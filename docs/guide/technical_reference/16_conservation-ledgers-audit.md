@@ -140,7 +140,7 @@ radiation the cells absorb (nonzero under `BEER_LAMBERT` only; under
 flux). At a boundary the signed donor sum $H_r$ uses the surface temperature
 for outflow and the specified incoming temperature for inflow. The boundary
 energy is $H_r-q_r$ with heat and enthalpy defined at the same control surface
-(§9.9).
+(§9.5).
 
 This is the law the energy ledger discretizes, and it is a balance of the
 conserved quantity: the change of composition at fixed temperature (the term
@@ -515,7 +515,7 @@ condition when coupled. Thus the same total flux is $q_s-H_s$; adding either
 an extra incoming heating term or an outgoing enthalpy sink would double count
 energy. Adiabatic, prescribed-heat and prescribed-temperature boundaries use
 their heat directly with $H_r$. Blowing modifies the thermal-film heat and
-uses the signed species fluxes (§9.9).
+uses the signed species fluxes (§9.5).
 
 `get_boundary_exchange(sol, tag)` reports `heat` ($q_r$),
 `enthalpy` ($H_r$), species fluxes and the converged surface state.
@@ -713,25 +713,66 @@ separately when comparing it with the accepted-step recorder.
 
 ---
 
-## 16.9 Comparison to ThermaKin2Ds, Gpyro, and FDS
+## 16.9 Comparison with reference solvers
 
-Pyrolysis.jl's ledgers explicitly include continuous boundary/source integrals
-and discrete deactivation records. This is supported by
-`src/Outputs/conservation.jl`; it does not establish that the reference codes
-lack conservation diagnostics.
+A conservation comparison needs the same control volume, stored inventory
+and boundary fluxes. A quantity called mass-loss rate may report gas
+generation in one configuration and boundary escape in another. The scope
+below follows §1.6.5 and identifies what must be aligned before comparing
+ledger defects.
 
-FDS documents reaction enthalpy consistency in Appendix P and whole-simulation
-energy-budget outputs in its User's Guide. Those quantities are not directly
-interchangeable with our condensed-only sensible-enthalpy ledger. Gpyro
-derives conservative control-volume mass and enthalpy balances (GP Eqs.
-56–61), and TK §3 requires species and energy conservation during element
-mixing. Each code's residuals, tolerances, remapping and output definitions
-must be checked before comparing an observed conservation defect.
+| Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro V2 | FDS 6.11.0 solid wall |
+|:---|:---|:---|:---|:---|
+| Inventory scope | live condensed and pore-gas inventories | component inventories in elements | condensed inventory; gas included in total mass when pressure is solved | solid wall and external CFD gas accounted for separately |
+| Changing cells | explicit transfer and vent records | conservative element mixing | residual mass retained at consumed-cell cutoff | solid-grid remapping |
+| Output check | escape versus generation; current areas | identify the documented output and domain | check pressure option and mass-loss output definition | match wall outputs or whole-simulation energy-budget scope |
 
-Here deformation needs no additional ledger source: inventories are summed
-over current live cells and boundary fluxes use current areas. Event losses
-are accounted for separately (§16.4). A small ledger defect is evidence
-about this discrete balance, not proof of physical model validity.
+### 16.9.1 ThermaKin2Ds
+
+TK §3 requires species and energy conservation when elements are mixed
+during size adjustment. This supports a conservation requirement for that
+operation, but does not establish an output ledger with the same terms as
+ours. Match the reported inventory, surface flux and integration interval
+before interpreting a difference as a conservation defect.
+
+### 16.9.2 Gpyro V2
+
+GP Eqs. 56–61 give control-volume mass and enthalpy balances. V2 user guide
+§13 describes the corresponding outputs, whose exact scope comes from the
+[output functions](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_funcs.f90#L135-L328).
+`TOTAL_MASS(0)` adds pore-gas mass when pressure is solved. With pressure
+enabled, `INTEGRATED_MASS_LOSS_RATE` sums boundary Darcy fluxes; its
+species-resolved value weights those fluxes by gas mass fraction without
+adding a separate diffusive boundary flux.
+
+`INTEGRATED_GAS_GENERATION_RATE` instead integrates reaction sources.
+Generation and escape can differ while gas is stored. Match the output
+definition and included fluxes before comparing either quantity with our
+mass-loss rate or mass ledger.
+
+### 16.9.3 FDS
+
+FDS documents reaction-enthalpy consistency in Appendix P and an energy
+budget in its user guide. Its
+[`UPDATE_HRR` and `DUMP_HRR` routines](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/dump.f90#L10286-L10501)
+accumulate and report whole-simulation energy terms. That budget has a
+different control volume from our material-column sensible-enthalpy ledger.
+Select corresponding wall quantities and boundary exchanges before comparing
+balance residuals; a whole-domain heat-release output is not a substitute
+for a solid-column energy audit.
+
+### 16.9.4 Sources and numerical evidence
+
+TK §3 supplies the element-mixing requirement. GP §§4.1, 6.5, V2 user
+guide §13 and the linked output functions establish V2's inventory and flux
+scope. FDS's energy-budget documentation and output source establish its
+whole-simulation scope. Our boundary/source integrals and discrete event
+records are in `src/Outputs/conservation.jl`.
+
+The ledger checks in §18.4 test our accounting, including event
+losses. A small residual supports the tested discrete balance; it does not
+establish physical validity or equal bookkeeping in another solver. User
+Guide §§9.5 and 9.8 shows which observables and audit quantities to compare.
 
 ---
 

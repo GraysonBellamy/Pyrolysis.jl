@@ -917,32 +917,46 @@ moving, deactivation  62 rows (13 algebraic), half-bandwidth 14, 21 colors, 0 mi
 
 ---
 
-## 15.14 Comparison to ThermaKin2Ds, Gpyro, and FDS
+## 15.14 Comparison with reference solvers
 
-### 15.14.1 Gpyro
+Time-integration choices control how reaction, transport and changing
+geometry interact within a step. The 1D comparisons in §1.6.5 concern those
+updates and their error controls. Computational cost is meaningful only
+after the physical problem, output workload and required accuracy agree.
 
-The documented 1D Gpyro formulation uses fully implicit time differences,
-linearized source terms and iterative equation solves with TDMA (GP §6;
-Gpyro 0.8200 `gpyro_pyro.f90`). Its condensed energy unknown is enthalpy,
-with temperature recovered from composition and enthalpy. Its mesh
-thicknesses evolve with mass and density.
+| Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro V2 | FDS 6.11.0 solid wall |
+|:---|:---|:---|:---|:---|
+| Thermal update | adaptive stiff mass-matrix integration | Crank–Nicolson in primary direction | directional semi-implicit enthalpy solve | Crank–Nicolson wall conduction |
+| Reaction/geometry coupling | states in the coupled system | component and element updates | direct mass update with corrections; iterative equation coupling | reaction, grid and thermal substeps |
+| Comparison controls | tolerances and step limits | time step and element sizes | time step, convergence controls and sweep direction | wall substeps and external-flow coupling |
 
-Pyrolysis.jl instead forms a coupled state Jacobian with colored forward-mode
-AD and uses an adaptive stiff integrator (`Rodas5P` by default in this
-checkout, `src/Integration/policy.jl`). The distinction describes these
-implementations; it does not establish that every Gpyro version lacks a
-Jacobian, or that a higher formal time order always gives a faster or more
-accurate solve. V2 has different species and thermal solver implementations.
-
-### 15.14.2 ThermaKin2Ds
+### 15.14.1 ThermaKin2Ds
 
 TK §3 specifies Crank–Nicolson in the primary direction and explicit
 transverse integration, and states timestep criteria and element-size
 adjustment. This differs from our adaptive mass-matrix integration with
-geometry in the coupled state. Crank–Nicolson's linear stability properties
-alone do not demonstrate ringing in an actual ThermaKin ignition calculation;
-that would need a matched numerical study. No comparative ringing or
-solver-performance claim is made here.
+geometry in the coupled state. Compare time-step refinement and element-size
+changes together: the formal properties of the time scheme alone do not
+determine error or cost for a reacting, deforming sample.
+
+### 15.14.2 Gpyro V2
+
+V2's [driver](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_pyro.f90#L19-L151) iterates condensed-species,
+gas-pressure, gas-species and condensed-enthalpy updates according to the
+enabled physics and convergence flags. Condensed masses are updated directly;
+when a reaction would make a species mass negative, the
+[correction routine](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_mass.f90#L495-L742) adjusts the
+relevant reaction rates (GP §6.5). Mesh volume follows mass and bulk density
+when deformation is enabled (§11.9).
+
+The thermal unknown is condensed sensible enthalpy, inverted to temperature
+after the directional tridiagonal solve (GP §6.8;
+[`SOLID_ENTHALPY_SOLVER`](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_thermal.f90#L15-L117)).
+The selected direction is implicit and transverse contributions are explicit;
+their stability restriction remains relevant in multiple dimensions (V2
+user guide §6.2; §13.11.2 here). Parallel loops use OpenMP in these source
+paths. This describes the implementation, without establishing a speedup
+for a particular workload.
 
 ### 15.14.3 FDS
 
@@ -953,6 +967,20 @@ to the CFD calculation. Our standalone condensed-phase system instead
 integrates the supported mass, energy and geometric unknowns together.
 Different coupling, tolerances, outputs and timing boundaries must be
 accounted for before comparing computational cost (§18.1.3).
+
+### 15.14.4 Sources and numerical evidence
+
+TK §3 specifies its integration and size-adjustment procedure. GP §§6.5,
+6.8 and V2 user guide §6.2 are checked against the linked V2 driver and
+solvers. The FDS heat-transfer discretization is checked against its
+[Crank–Nicolson coefficients and tridiagonal solve](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/wall.f90#L2849-L2917).
+Our default policy is in `src/Integration/policy.jl`; the state Jacobian
+uses colored forward-mode automatic differentiation (§15.5).
+
+The retained timing rows describe their original versions and workloads
+(§18.1.3). They establish neither V2 timings nor a general ranking of these
+integration methods. New verification and performance runs remain pending.
+User Guide §§8.3 and 12.6 covers tolerance and step-size studies.
 
 ---
 

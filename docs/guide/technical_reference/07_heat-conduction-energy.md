@@ -13,8 +13,8 @@ reaction-heat source $Q_{\text{rxn}}$, and the radiation source $Q_{\text{rad}}$
 and we trace the residual sequence that produces the energy and mass rows. Particular
 care is taken with the sign conventions of §2 (Nomenclature), with the precise set of
 terms the code includes and excludes, and with the conversion between wall-film
-heat and the direct-reservoir energy control surface (§9.9). Where useful, the Pyrolysis.jl forms are mapped to and
-contrasted with ThermaKin2Ds, Gpyro, and FDS.
+heat and the direct-reservoir energy control surface (§9.5). Where useful, the Pyrolysis.jl forms are mapped to and
+contrasted with ThermaKin2Ds, Gpyro V2, and FDS.
 
 Index conventions for this chapter follow §2 overload note I1: **$i$ is the cell index**
 ($1\le i\le n$) and **$r$ is the reaction index**; the component/species index is $j$
@@ -309,7 +309,7 @@ equation (5.10)), so that a cell emptied of all mass keeps a finite rate.
 
 The pore gas is at the matrix temperature (one-temperature model, §3.1.2) and its mass is an
 integrated state, so its storage is retained without another energy unknown.
-Gpyro's default thermal-equilibrium exchange neglects gas storage and gas conduction;
+Gpyro V2's default thermal-equilibrium exchange neglects gas storage and gas conduction;
 `FULL_QSG` retains both. The standard FDS wall model has no pore-gas inventory. At $1\,\text{atm}$ the in-pore gas heat capacity is a small
 fraction of the matrix heat capacity, from a few hundredths of a percent to about half a
 percent (the estimate is in §5.4.2), scaling with pressure.
@@ -487,7 +487,7 @@ mass flux, each with the face temperature of its own flux:
   reservoir enthalpy. An LTE thermal film converts its wall heat by
   $q_r=q_s+H_r-H_s$, where $H_s=\sum_jJ_jh_j(T_s)$; hence its total energy is
   also $H_s-q_s$. Adiabatic and prescribed-heat conditions use donor enthalpy
-  directly. No extra outgoing-gas heating sink is added (§9.9).
+  directly. No extra outgoing-gas heating sink is added (§9.5).
 - **Relative-flux face** (a moving mesh under a correction). The relative-flux kernel
   (`RelativeFluxKernel`, `src/Kernels/relative_flux.jl`) evaluates the enthalpies at the face
   temperature reconstructed from the same upwind stencil as the face's concentrations (the
@@ -532,7 +532,7 @@ reservoir control surface by $q_r=q_s+H_r-H_s$, giving
 $E_{out}=H_r-q_r=H_s-q_s$. Without a thermal film, prescribed heat and donor
 enthalpy enter directly. This includes adiabatic ingress. The complete signed
 balance, stream-temperature consistency and supported blowing domains are
-specified in §9.9. Adding an independent heating term to this balance would
+specified in §9.5. Adding an independent heating term to this balance would
 count incoming energy twice.
 
 ---
@@ -568,7 +568,7 @@ worth stating precisely against the implementation: the accumulator computes
 reactions, so an exothermic reaction ($h_r<0$) produces $Q>0$.
 
 > **Caution on external conventions.** ThermaKin publishes $h>0=$ *exothermic*, the opposite
-> of the internal storage convention here; Gpyro and FDS use the same sign as Pyrolysis.jl
+> of the internal storage convention here; Gpyro V2 and FDS use the same sign as Pyrolysis.jl
 > ($h>0$ endothermic, §6.9). With ThermaKin's published $h$ one would write
 > $Q_{\text{rxn}}=+\sum h r$; Pyrolysis.jl stores $h$ with $h>0=$ endothermic and forms
 > $Q_{\text{rxn}}=-\sum h r$, so a user porting a ThermaKin heat of reaction must flip its
@@ -731,14 +731,24 @@ concrete element type.
 
 ---
 
-## 7.8 Comparison to ThermaKin2Ds, Gpyro, and FDS
+## 7.8 Comparison with reference solvers
 
-### 7.8.1 The energy-equation skeleton
+The same heating history and reaction scheme can produce different
+temperatures if the solvers store different sensible heat or account for
+gas-carried energy differently. This comparison uses the 1D configurations
+in §1.6.5, with a common gas and solid temperature where pore gas is resolved.
 
-The models share conduction, reaction heat and radiative exchange. Gas storage,
-gas/solid exchange, radiation and deformation closures determine whether a
-particular reduced energy equation matches; there is no unconditional
-four-code energy-equation equivalence.
+### 7.8.1 Comparison basis
+
+All four formulations include conduction, reaction heat and radiative exchange.
+The storage inventory and gas-energy terms must be matched before their
+temperature balances can be compared.
+
+| Aspect | Pyrolysis.jl | ThermaKin2Ds | Gpyro V2 | FDS 6.11.0 solid wall |
+|:---|:---|:---|:---|:---|
+| Energy state | temperature or sensible-enthalpy inventory | element temperature | condensed sensible enthalpy | solid temperature |
+| Pore-gas heat storage | included | included | optional with `FULL_QSG` in equilibrium | no pore-gas inventory |
+| Gas energy transport | conservative carried enthalpy | gas temperature-advection term | exchange depends on selected option | release and external gas/solid enthalpy accounting |
 
 ### 7.8.2 ThermaKin2Ds
 
@@ -750,15 +760,27 @@ includes its own deformation and absorption-weighted re-radiation terms;
 these must be matched separately (§§8.7, 10.11). Its 2D equation contains
 transverse transport absent from a 1D Pyrolysis.jl solve.
 
-### 7.8.3 Gpyro
+### 7.8.3 Gpyro V2
 
-GP Eq. 61 advances condensed sensible enthalpy. In thermal equilibrium the
-default solid-to-gas exchange retains the gas temperature-advection term but
-neglects gas storage and gas conduction. `FULL_QSG` restores both omitted
-terms (GP Eq. 65; Gpyro 0.8200 `ENERGY_SOURCE_TERMS`). Merely retaining
-gas heat capacity does not make our energy equation identical. Gpyro also
-supports a separate gas energy equation and finite interphase exchange;
-Pyrolysis.jl assumes local thermal equilibrium throughout.
+V2 advances condensed sensible enthalpy and inverts it to temperature
+(GP §6.8; [`SOLID_ENTHALPY_SOLVER`](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_thermal.f90#L15-L117)).
+For a 1D calculation in local thermal equilibrium, its default gas-to-solid
+exchange retains gas temperature advection but omits gas storage and gas
+conduction. `FULL_QSG` retains both omitted terms (GP Eq. 65;
+[`GAS_SOLID_THERMAL_EXCHANGE`](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_thermal.f90#L579-L713)).
+Our gas heat storage alone therefore does not make the energy equations
+identical. Reaction-heat basis (§6.9.2), transported enthalpy and boundary
+exchange must also match.
+
+V2 user guide §4.2 describes these exchange choices using `QSG_MODEL`.
+That name is absent from the pinned input namelist, which instead exposes
+`THERMAL_EQUILIBRIUM`, `SOLVE_GAS_ENERGY` and `FULL_QSG`
+([input definitions](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_io.f90#L120-L137)). The comparisons
+here use those implemented controls. The separate gas-energy equation in
+GP Eq. 70 is not advanced by the
+[V2 driver](https://github.com/Gedeben/GPYRO-V2/blob/bff0126c68f2a35c084ef04490ae327185f281a3/src/common/gpyro_pyro.f90#L123-L136), consistent with the
+clarification in V2 user guide §4.5. A two-temperature calculation is
+therefore outside this implementation comparison.
 
 ### 7.8.4 FDS
 
@@ -771,17 +793,19 @@ needed to bring produced/consumed gas between solid and CFD-gas temperatures
 gas in Pyrolysis.jl with its transport switched off. The latter traps any
 generated gas unless a separate removal mechanism is supplied.
 
-### 7.8.5 Summary
+### 7.8.5 Sources and numerical evidence
 
-| Feature | ThermaKin2Ds | Gpyro 1D | FDS standard solid model | Pyrolysis.jl |
-|---|---|---|---|---|
-| Gas temperature | local equilibrium | equilibrium or separate energy equation | no pore-gas state | local equilibrium |
-| Gas storage in equilibrium | included | optional with `FULL_QSG` | absent | included |
-| Energy state | element temperature | condensed sensible enthalpy, inverted to temperature | solid temperature | temperature or sensible-enthalpy inventory |
-| In-depth radiation | absorption distribution with MAX/RAND deposition and re-radiation | incident-beam absorption; optional radiative conductivity | optional two-flux absorption/emission | incident-beam absorption |
+TK Eqs. 15–18 and §3 support the documented 1D energy correspondence.
+GP Eqs. 61–70, §6.8 and V2 user guide §§4.2, 4.5 are checked against
+the linked enthalpy and exchange routines. The FDS solid-phase chapter and
+Appendix P are checked against the
+[reaction and gas enthalpy accounting](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/wall.f90#L3540-L3580).
+Our energy and boundary-flux assembly are described in §§7.2–7.7 and 12.4.
 
-Primary sources: TK Eqs. 11–18 and §3; GP Eqs. 61–70 and §6.8;
-FDS solid-phase chapter, Appendix P and `Source/wall.f90` (§1.6.5).
+Conduction-only checks cannot establish agreement of gas-carried energy or
+reaction-heat conventions. The coupled cases in §18.6 apply to their stated
+inputs, and the historical external datasets retain §18.1.3's version limits.
+User Guide §7.7 gives the energy conventions to check when porting a deck.
 
 ---
 

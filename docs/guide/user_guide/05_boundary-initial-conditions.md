@@ -373,7 +373,7 @@ gas. Both escape and ingress follow the same constitutive path.
 `g=ρD/δ` in kg/(m² s), supplied as a number or temperature law. A finite film
 solves surface fractions jointly with the thermal balance. Infinite conductance
 fixes composition to the reservoir. Zero conductance permits only donor bulk
-flow. The model and signed blowing/reversal limits are in Technical Reference §9.8.
+flow. The model and signed blowing/reversal limits are in Technical Reference §9.4.
 
 ---
 
@@ -395,7 +395,7 @@ the same incoming stream temperature; radiative surroundings can differ.
 `CouetteFilm` uses the signed sum of species heat-capacity fluxes. Empirical
 pooling/property-ratio models support outward products or pure freestream
 suction and diagnose unsupported mixed counterflow. See Technical Reference
-§9.9 for the control surface, approximation and supported domains.
+§9.5 for the control surface, approximation and supported domains.
 
 ---
 
@@ -434,6 +434,15 @@ Under `BEER_LAMBERT` the face intensities are unknowns of the state, each tied t
 its neighbour by the exact attenuation across one cell, so the Jacobian stays
 banded (Technical Reference §8.3). An in-depth radiative transfer with
 re-emission (a P1 model) is not implemented.
+
+For a solver comparison, distinguish incident irradiation, absorbed
+irradiation and net heat entering the material. ThermaKin2Ds can assign
+absorbed radiation to a selected element; the pinned Gpyro V2 boundary path
+can attenuate positive net radiation after re-radiation is subtracted; FDS's
+optional two-flux model includes internal emission. Copying the same incident
+flux and absorption coefficient does not reproduce all three treatments.
+Match the deposition and loss model using Technical Reference §§8.7 and
+12.11 before comparing temperature histories.
 
 ---
 

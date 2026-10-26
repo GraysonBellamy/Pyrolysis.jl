@@ -74,13 +74,36 @@ lateral shrinkage, burnout — by setting the corresponding component fields or
 `solve` keywords. Nothing you do not ask for is computed.
 
 Pyrolysis.jl is intended for the same class of problems as **ThermaKin2Ds**,
-**Gpyro**, and the **FDS** solid-phase pyrolysis model: cone-calorimeter
+**Gpyro V2**, and the **FDS** solid-phase pyrolysis model: cone-calorimeter
 simulations, TGA/DSC/MCC idealizations, charring and non-charring solids,
 intumescent coatings, pressure-treated wood, and moisture transport. The energy
 balance is that of a one-temperature porous medium: every component, the pore
 gas included, stores sensible heat at the cell temperature, and the gas fluxes
 carry their sensible enthalpy across the faces, leaving the exposed surface at
 the surface temperature (see Technical Reference §3 and §7).
+
+Solver versions and source scope are pinned in Technical Reference §1.6.5;
+Gpyro comparisons use **V2**. This guide gives practical porting checks,
+while the Technical Reference explains equation mappings, assumptions and
+differences between manuals and active implementations. ThermaKin2Ds
+comparisons describe its documented formulation; its source is not available
+in this checkout. Historical verification curves and timings retain their
+original version labels until the V2 cases are rerun.
+
+When transferring an existing model, work through the checks in this order:
+
+| Check | User Guide setup | Technical Reference comparison |
+|:---|:---|:---|
+| Composition, material density properties and mixing | §§1.3, 3.2–3.5 | §§2, 4.8 and 5.14 |
+| Reaction rate, yields and heat basis | §§4.4–4.9 | §6.9 |
+| Thermal boundaries and radiation | §§5.2–5.6 | §§7.8, 8.7, 12.11 |
+| Gas transport, storage and carried energy | §§7.5–7.7 | §9.12 |
+| Deformation and burnout criteria | Chapters 6 and 10 | §§10.11, 11.9, 14.8 |
+| Numerical controls and reported observables | §§9.5, 9.7–9.8, 12.6 | §§13.11, 15.14, 16.9 |
+
+Matching a parameter name or an initial value is only a starting point.
+Check the resulting laws over the temperature and composition range of the
+run, then compare the same physical observable.
 
 ### What is not modeled
 
@@ -162,7 +185,7 @@ Key state and input units:
 | Component mass per cell (the integrator's state) | `m_ij` | kg |
 | Domain thickness | `L` | m |
 | Heat flux | `q` | W·m⁻² |
-| Density (bulk) | `ρ_j` | kg·m⁻³ |
+| Material density property (bulk) | `ρ_j` | kg·m⁻³ |
 | Heat capacity | `c_p` | J·kg⁻¹·K⁻¹ |
 | Thermal conductivity | `k` | W·m⁻¹·K⁻¹ |
 | Pre-exponential factor | `A_i` | s⁻¹ (first order) |
@@ -174,17 +197,28 @@ Key state and input units:
 > **Sign convention for the heat of reaction.** Internally Pyrolysis.jl uses
 > **`h > 0` = endothermic** (the reaction absorbs heat and cools the material) and
 > **`h < 0` = exothermic**. Note this is the *opposite* of the ThermaKin
-> publishing convention (`h > 0` = exothermic); Gpyro and FDS use this one. The volumetric heat source is
+> publishing convention (`h > 0` = exothermic); Gpyro V2 and FDS use this one. The volumetric heat source is
 > `Q_rxn = −Σ h_r r_r`, so an endothermic reaction (`h > 0`) produces
 > `Q_rxn < 0`. See Technical Reference §6 (overload note H1 in §2).
 
 The composition you specify and read is the **mass concentration `ξ_j`**
-(kg/m³), not the mass fraction: `ξ_j = Y_j ρ`. A component initially present at
-its bulk density `ρ_j` has `ξ_j(0) = ρ_j`. This is why the default initial
-condition places the first solid component at its reference density (see §1.8).
+(kg/m³): component mass divided by the whole current cell volume,
+`ξ_j = m_j/V = Y_j ρ`. Here `Y_j` is its mass fraction and `ρ = Σ_j ξ_j`
+includes every component, including retained gas. A pure component filling
+the cell at its bulk density `ρ_j` has `ξ_j(0) = ρ_j`. This is why the default
+initial condition places the first solid component at its reference density
+(see §1.8).
 At the start of a solve the concentrations are evaluated at the cell centres
 `z_i` and turned into the component masses `m_ij = ξ_j(z_i) V_i` the integrator
 carries; the solution reports both.
+
+ThermaKin2Ds uses the same mass-concentration convention. FDS calls this
+quantity a **component density**: `ρ_{s,j} = ξ_j` for a condensed component.
+Its total condensed density is `ρ_s = Σ_condensed ξ_j`, summed over solids
+and liquids and excluding retained gas.
+These concentrations are distinct from the material density property `ρ_j`
+specified in a component constructor (§3.2). Technical Reference §§2 and 4.8
+give the notation and source definitions.
 
 ---
 
@@ -1475,8 +1509,9 @@ correctly.
 
 Throughout, the spatial coordinate is `z` (through-thickness): `z = 0` is the
 bottom/substrate, `z = L` is the top/exposed surface (see Technical Reference §1).
-The primary species state variable is the **mass concentration** `ξ_j` in kg·m⁻³
-(not mass fraction). All inputs are SI: densities in kg·m⁻³, heat capacities in
+Composition is specified and reported as the **mass concentration** `ξ_j`
+in kg·m⁻³; the integrator stores component cell masses `m_j` and derives
+`ξ_j = m_j/V`. All inputs are SI: densities in kg·m⁻³, heat capacities in
 J·kg⁻¹·K⁻¹, conductivities in W·m⁻¹·K⁻¹, activation energies in J·mol⁻¹.
 
 ---
@@ -1550,6 +1585,11 @@ char = SolidComponent(:char; ρ=150., ρ_intrinsic=1950.,
 ```
 
 Bulk density `ρ`, heat capacity `c` and conductivity `k` are required.
+The constructor's `ρ` describes the pure material. Set its amount in a
+mixture through `ξ_initial` (§5.10). An FDS component density `ρ_{s,j}`
+corresponds to that concentration, while FDS's material density property
+is a separate input (§1.3; Technical Reference §4.8.3).
+
 Participating lumped matrices also require explicit superficial transfer `λ`.
 Zero `λ` closes wall transfer independently of `κ`; zero permeability closes
 Darcy flow. Neither coefficient is inferred from gas loading.
@@ -1863,13 +1903,19 @@ material). The volumetric source is `Q_rxn = −Σ h_r r_r`, so an endothermic r
 produces `Q_rxn < 0`. This is the *opposite* of the ThermaKin publication
 convention (`h > 0 = exothermic`); when you transcribe ThermaKin parameters, flip
 the sign and normalize the reaction extent (Technical Reference §6.9.1).
-Gpyro and FDS use the convention of this package but still require basis and
+Gpyro V2 and FDS use the convention of this package but still require basis and
 unit checks. Examples:
 
 ```julia
 endo = Reaction(:pyrolysis, :virgin => :gas, A = 1e10, E = 140e3, h =  500e3)  # cools
 exo  = Reaction(:char_ox,   :char   => :ash, A = 1e6,  E = 120e3, h = -300e3)  # heats
 ```
+
+When transferring a Gpyro V2 reaction with `CONSTANT_DHVOL=.TRUE.`, combine
+its solid-product and volatile heats on a per-reactant basis; equal `DHS`
+and `DHV` are one simple case. The other setting adds a temperature-dependent
+sensible-enthalpy correction whose sign differs between the V2 user guide
+and source. Technical Reference §6.9.2 gives the implemented conversion.
 
 See the overload note H1 in the nomenclature and Technical Reference §6.6.
 
@@ -2019,6 +2065,14 @@ Carman–Kozeny directly supplies the effective permeability, including when
 all component permeabilities are zero. Both gas models use this permeability.
 The material still needs resolved physical porosity and a qualified matrix
 endpoint or termination domain (§7.5).
+
+When porting a material, inspect the effective properties at the initial
+state and at representative heated and reacted states. ThermaKin2Ds volume
+fractions depend on its swelling law; Gpyro V2 and FDS thermal mixing uses
+condensed volume fractions. Their per-length absorption coefficients also
+need conversion before use as our mass-specific `α` (Technical Reference
+§5.14). Matching conductivity or optical depth only at the initial state
+does not establish the same evolving material.
 
 ### 3.5.4 Inspecting effective properties
 
@@ -2601,7 +2655,7 @@ an exothermic reaction (`h < 0`) gives `Q_rxn > 0` (heating). See Technical
 Reference §6.6.
 
 > **Important — opposite to ThermaKin.** ThermaKin2Ds publishes heats of
-> reaction with the *opposite* sign (there `h > 0` is exothermic; Gpyro and FDS
+> reaction with the *opposite* sign (there `h > 0` is exothermic; Gpyro V2 and FDS
 > use the sign of this package). When you port parameters from a ThermaKin input file,
 > **flip the sign of every heat of reaction.** The shipped examples annotate this
 > conversion explicitly; e.g. a ThermaKin "+2.78E6 J/kg" (exothermic there)
@@ -2702,7 +2756,14 @@ peaks at 640 K with a peak rate about 9 % above `r_p`, the error of the
 approximation behind the formulas); for production fits, refine `A`, `E`, and `h`
 against the measured curve using the sensitivity / inverse-analysis tooling (User
 Guide Chapter 13). See Technical Reference §6.9 for the relationship to the FDS,
-ThermaKin, and Gpyro kinetic formulations.
+ThermaKin, and Gpyro V2 kinetic formulations.
+
+For a transferred reaction, also compare the rate over the relevant
+temperature and conversion range. ThermaKin2Ds reaction extent may require
+normalization; Gpyro V2 reaction order can depend on cumulative available
+mass; FDS rates can include oxygen and temperature factors absent here.
+Technical Reference §6.9 gives the mappings and their limits. A matching
+`A` and `E` pair alone does not establish matching kinetics.
 
 ---
 
@@ -3316,7 +3377,7 @@ gas. Both escape and ingress follow the same constitutive path.
 `g=ρD/δ` in kg/(m² s), supplied as a number or temperature law. A finite film
 solves surface fractions jointly with the thermal balance. Infinite conductance
 fixes composition to the reservoir. Zero conductance permits only donor bulk
-flow. The model and signed blowing/reversal limits are in Technical Reference §9.8.
+flow. The model and signed blowing/reversal limits are in Technical Reference §9.4.
 
 ---
 
@@ -3338,7 +3399,7 @@ the same incoming stream temperature; radiative surroundings can differ.
 `CouetteFilm` uses the signed sum of species heat-capacity fluxes. Empirical
 pooling/property-ratio models support outward products or pure freestream
 suction and diagnose unsupported mixed counterflow. See Technical Reference
-§9.9 for the control surface, approximation and supported domains.
+§9.5 for the control surface, approximation and supported domains.
 
 ---
 
@@ -3377,6 +3438,15 @@ Under `BEER_LAMBERT` the face intensities are unknowns of the state, each tied t
 its neighbour by the exact attenuation across one cell, so the Jacobian stays
 banded (Technical Reference §8.3). An in-depth radiative transfer with
 re-emission (a P1 model) is not implemented.
+
+For a solver comparison, distinguish incident irradiation, absorbed
+irradiation and net heat entering the material. ThermaKin2Ds can assign
+absorbed radiation to a selected element; the pinned Gpyro V2 boundary path
+can attenuate positive net radiation after re-radiation is subtracted; FDS's
+optional two-flux model includes internal emission. Copying the same incident
+flux and absorption coefficient does not reproduce all three treatments.
+Match the deposition and loss model using Technical Reference §§8.7 and
+12.11 before comparing temperature histories.
 
 ---
 
@@ -4787,7 +4857,7 @@ matching a complete model also requires its other closures (Technical Reference 
 
 **Reaction heats use the local reaction-temperature convention.** The kernel
 evaluates `h` at the cell temperature. Before importing a DSC or calibrated
-ThermaKin/Gpyro value, check its sign, units, reaction basis and temperature datum
+ThermaKin/Gpyro V2 value, check its sign, units, reaction basis and temperature datum
 (Technical Reference §6.9). A heat consistent with this convention already
 accounts for the products' enthalpies at that temperature. The energy equation therefore has no separate gas-generation enthalpy term. Such
 a term, `−Σ_g Δh_g(T, T_ref)(∇·J_g)`, belongs only with heats referenced to the
@@ -4795,6 +4865,16 @@ a term, `−Σ_g Δh_g(T, T_ref)(∇·J_g)`, belongs only with heats referenced 
 subtract the gas products' sensible enthalpy a second time (≈0.7–1.2 MJ per kg of volatiles
 at 900 K, comparable to the heat of pyrolysis itself). If your heats are referenced to the
 ambient datum, convert them to the reaction temperature before use (Technical Reference §6).
+
+When matching a Gpyro V2 deck, check whether pressure and gas-species
+transport are enabled and whether its equilibrium exchange includes gas
+heat storage. In the pinned source these controls are `SOLVE_PRESSURE`,
+`SOLVE_GAS_YJ`, `THERMAL_EQUILIBRIUM`, `SOLVE_GAS_ENERGY` and `FULL_QSG`;
+the V2 user guide's `QSG_MODEL` name is not an accepted input in that
+revision. Its driver has no separate gas-temperature solve. Match boundary
+exchange and radiation as well as these switches (Technical Reference
+§§7.8.3, 8.7.2 and 9.12.2); copying coefficients alone does not establish
+the same thermal problem.
 
 ### 7.7.1 Boundary energy control surface
 
@@ -6315,6 +6395,14 @@ hrr_proxy = solution.extras.MLR_gauge .* ΔH_c    # W/m²
 
 State this assumption plainly in any comparison; the proxy is only as good as `ΔH_c`.
 
+For external-code curves, check whether the reported quantity is reaction
+gas generation or boundary escape, whether stored gas is included, and
+which area and units normalize the result. In the pinned Gpyro V2 source,
+the pressure-enabled mass-loss output sums Darcy boundary flow; its
+species-resolved form does not add a separate diffusive boundary flux.
+Technical Reference §16.9 gives the output mappings. Use the corresponding
+Pyrolysis.jl observable before calculating an error or fitting parameters.
+
 ---
 
 ## 9.6 Plotting with the `Plots.jl` recipes
@@ -6989,6 +7077,14 @@ threshold: on the verification decks 0.4 to 3.9 % at `ε_m = 3e-3` and 1.4 to
 
 On a fixed mesh the band is not read: the outermost live cell goes while it
 is below `ε_m` (§10.8).
+
+When comparing burnout with another solver, record both the stopping
+criterion and the residual inventory. Gpyro V2's active cutoff uses a
+remaining condensed-mass ratio and leaves an inert residual; its manual
+describes a volume ratio. FDS wall disappearance and ThermaKin2Ds element
+adjustment are also different from our located deactivation event.
+Technical Reference §14.8 explains the consequences. Equal numerical
+threshold values do not necessarily define the same burnout state.
 
 ---
 
@@ -8778,7 +8874,8 @@ Reference §17.
 > pre-exponential `A_i` [s⁻¹] (or [m³·kg⁻¹·s⁻¹] for higher-order reactions), the
 > activation energy `E_i` [J·mol⁻¹], and the heat of reaction `h` [J·kg⁻¹] with
 > the **`h > 0` endothermic** storage convention (Technical Reference §2 and §6).
-> Mass concentration `ξ_j` [kg·m⁻³] is the primary species state.
+> Component cell masses are the integrated species states; mass concentrations
+> `ξ_j = m_j/V` [kg·m⁻³] are derived and reported.
 
 ---
 

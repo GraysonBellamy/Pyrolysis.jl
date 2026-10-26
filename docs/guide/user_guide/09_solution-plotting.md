@@ -417,6 +417,14 @@ hrr_proxy = solution.extras.MLR_gauge .* ΔH_c    # W/m²
 
 State this assumption plainly in any comparison; the proxy is only as good as `ΔH_c`.
 
+For external-code curves, check whether the reported quantity is reaction
+gas generation or boundary escape, whether stored gas is included, and
+which area and units normalize the result. In the pinned Gpyro V2 source,
+the pressure-enabled mass-loss output sums Darcy boundary flow; its
+species-resolved form does not add a separate diffusive boundary flux.
+Technical Reference §16.9 gives the output mappings. Use the corresponding
+Pyrolysis.jl observable before calculating an error or fitting parameters.
+
 ---
 
 ## 9.6 Plotting with the `Plots.jl` recipes

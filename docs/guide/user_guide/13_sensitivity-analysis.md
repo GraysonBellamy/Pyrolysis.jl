@@ -18,7 +18,8 @@ Reference §17.
 > pre-exponential `A_i` [s⁻¹] (or [m³·kg⁻¹·s⁻¹] for higher-order reactions), the
 > activation energy `E_i` [J·mol⁻¹], and the heat of reaction `h` [J·kg⁻¹] with
 > the **`h > 0` endothermic** storage convention (Technical Reference §2 and §6).
-> Mass concentration `ξ_j` [kg·m⁻³] is the primary species state.
+> Component cell masses are the integrated species states; mass concentrations
+> `ξ_j = m_j/V` [kg·m⁻³] are derived and reported.
 
 ---
 
