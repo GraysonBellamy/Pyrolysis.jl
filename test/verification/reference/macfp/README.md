@@ -15,16 +15,21 @@ T [K], top-surface T [K]; TGA: time [s], T [K], mass [mg]. Header text varies
 by institution (NIST swaps the name/unit rows; UMD has a trailing comma) —
 parse tolerantly.
 
-Codes behind the submissions: Aalto = FDS; BUW-FZJ = FDS (PROPTI, sets A/B);
-DBI = FDS + Gpyro; GIDAZE+ = Gpyro; NIST = FDS; Sandia = Sierra
-Thermal/Fluids; UCLan = ThermaKin; UMD = ThermaKin2D; UMET = ThermaKin (`_TK`)
-and Gpyro (`_GP`). `MaCFP_TGA_10K_*Stats.csv` are the workshop's precomputed
-ensemble statistics.
+The authors' [2021 material-property files](https://github.com/MaCFP/matl-db/tree/master/PMMA/Material_Properties/2021)
+record calibration methods as well as codes. For example, Aalto records
+Gpyro for kinetics and FDS/PROPTI for thermal-property fitting; BUW-FZJ and
+NIST record FDS; GIDAZE+ records Gpyro; UCLAN and UMD record ThermaKin;
+Sandia records Sierra. A calibration code is not necessarily the generator
+of every submitted curve. Do not infer an exact solver/version from an
+institution name or these calibration fields alone.
+`MaCFP_TGA_10K_*Stats.csv` are the workshop's supplied ensemble statistics.
 
-**Caveat for plots:** each institution used its own calibrated property set,
-so the spread mixes code differences with calibration differences. For a
-comparison that isolates our solver, run our PMMA case with the
-community-designated "central" model `MaCFP_PMMA_UMD.json` (committed here;
-from `PMMA/Material_Properties/2021/`) under the v1.3 scenario and present
-these curves as the community envelope. No verification case reads these
-files yet; they are staged for a MaCFP-2 PMMA code-to-code case.
+**Interpretation:** the [authors' computational-results description](https://github.com/MaCFP/matl-db/blob/master/PMMA/Computational_Results/README.md)
+explicitly excludes these idealized scenarios from verification and validation.
+Each institution uses its own calibrated material model, so the envelope
+combines parameter and implementation differences. `MaCFP_PMMA_UMD.json` is
+one submitted property set, not a designated universal central model. Using
+it here does not isolate solver differences against other submissions with
+different inputs. A numerical comparison requires matching the complete
+material model, constitutive laws, conditions and discretization study.
+No verification case currently reads these files.

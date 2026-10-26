@@ -1,5 +1,5 @@
 "key","value"
-"integrator","KenCarp4 (default)"
+"integrator","Rodas5P (default)"
 "julia","1.13.0"
 "Pyrolysis","0.1.0"
 "n_cells_ladder","1"

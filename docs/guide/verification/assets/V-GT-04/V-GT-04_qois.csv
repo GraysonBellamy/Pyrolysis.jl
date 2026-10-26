@@ -1,0 +1,6 @@
+"qoi","value","exact","error","tol","within_tol","comment"
+"Graham wall-weighted flux ratio",-0.31622776601683794,-0.31622776601683794,0.0,1.0e-7,true,""
+"logarithmic binary flux",0.19232934672265617,0.19217062881742664,0.0008259217665376184,0.015,true,""
+"exponential composition profile",2.220446049250313e-16,NaN,2.220446049250313e-16,0.005,true,""
+"isobaric solution",3.346940502524376e-10,NaN,3.346940502524376e-10,0.01,true,""
+"isothermal solution",0.0,NaN,0.0,1.0e-8,true,""

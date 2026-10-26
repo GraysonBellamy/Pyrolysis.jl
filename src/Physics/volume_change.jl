@@ -96,7 +96,7 @@ Compute relative volume change rate [(m³/m³)/s].
 dV/dt / V = Σⱼ (γⱼ/ρⱼ) (dξⱼ/dt)
 
 Every component is weighted by its swelling factor γⱼ — the same universal
-γ semantics used by `Properties.mixture_density` (1/ρ = Σγⱼ·Yⱼ/ρⱼ) and
+γ-weighted bulk occupancy used by
 `Properties.solid_volume_fractions`: γⱼ is the fraction of
 component j's intrinsic volume that contributes to the bulk volume.
 Canonical values are γ = 0 (gas, escapes the matrix) and γ = 1 (condensed).
@@ -104,18 +104,5 @@ Canonical values are γ = 0 (gas, escapes the matrix) and γ = 1 (condensed).
 PERFORMANCE: Uses dispatch-based helpers to avoid allocations from heterogeneous tuple access.
 """
 @inline function volume_change_rate(dξ::NTuple{NC,<:Real}, T::Real, material) where {NC}
-    return _volume_change_rate(dξ, T, material.components, Val(NC))
-end
-
-"""
-	volume_change_rate(dξ, T, material::Material{NC}) -> Real
-
-Vector version for pre-allocated storage.
-"""
-@inline function volume_change_rate(
-    dξ::AbstractVector,
-    T::Real,
-    material::Material{NC},
-) where {NC}
     return _volume_change_rate(dξ, T, material.components, Val(NC))
 end

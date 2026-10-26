@@ -33,6 +33,8 @@ Usage:
 using Distributed
 using Printf
 
+@everywhere const SMOKE = get(ENV, "PYROLYSIS_SMOKE", "0") == "1"   # PYROLYSIS_SMOKE=1: a short run that checks the script works
+
 println("Running with $(nworkers()) worker(s)")
 
 # Load Printf on all workers before the main @everywhere block so that
@@ -45,12 +47,7 @@ println("Running with $(nworkers()) worker(s)")
 
 @everywhere begin
     using Pyrolysis
-    using Pyrolysis: compute_surface_mass_flux, effective_gas_transfer
-    using OrdinaryDiffEq
-    using OrdinaryDiffEqSDIRK: KenCarp4   # v7 split: KenCarp4 not re-exported by the umbrella pkg
-    using LinearSolve
-    using Sparspak
-    using LinearSolve: SparspakFactorization
+    using Pyrolysis: get_boundary_exchange
     using Printf
 
     # ========================================================================
@@ -114,8 +111,13 @@ println("Running with $(nworkers()) worker(s)")
     # Char cp — Hostikka & Matala (2017): cp ≈ -0.370 + 2.122e-3*T kJ/(kg·K)
     hostikka_char_cp(T) = -370.0 + 2.122 * T
 
-    # Char cp — Edrich (1980): cp = -0.29227 + 4.1387e-3*T - 1.58261e-6*T² kJ/(kg·K)
-    edrich_char_cp(T) = -292.27 + 4.1387 * T - 1.58261e-3 * T^2
+    # Char cp — Edrich (1980): cp = -0.29227 + 4.1387e-3*T - 1.58261e-6*T² kJ/(kg·K),
+    # fit on 473–773 K. Above the quadratic's maximum (T = 4.1387/(2·1.58261e-3)
+    # ≈ 1308 K) it is held at its peak value: unclamped it turns down and goes
+    # negative near 2540 K, which the material's property check refuses.
+    const EDRICH_T_PEAK = 4.1387 / (2 * 1.58261e-3)
+    edrich_char_cp(T) =
+        (Tc = min(T, EDRICH_T_PEAK); -292.27 + 4.1387 * Tc - 1.58261e-3 * Tc^2)
 
     # HoS — Free water only: constant 2442 kJ/kg = 2.442e6 J/kg
     free_water_hos(T, ξ) = 2.442e6
@@ -208,7 +210,7 @@ println("Running with $(nworkers()) worker(s)")
         # Gas transfer / permeability constants (physically grounded)
         λ_wood = 5.0e-7     # m²/s - virgin wood (ε~0.05, τ~5)
         λ_char = 1.0e-5     # m²/s - porous char (ε~0.7, τ~2)
-        λ_gas = 3.0e-5     # m²/s - reference free diffusion (M~29, ~500K)
+
         κ_virgin = 1.0e-15    # m² - tight virgin wood
         κ_char = 1.0e-12    # m² - open char pore network
 
@@ -224,6 +226,7 @@ println("Running with $(nworkers()) worker(s)")
                     α = 0.0,
                     λ = λ_wood,
                     κ = κ_virgin,
+                    ρ_intrinsic = 1500.0,  # kg/m³, wood cell-wall (skeletal) density
                 ),
                 SolidComponent(
                     :DF_int1,
@@ -234,6 +237,7 @@ println("Running with $(nworkers()) worker(s)")
                     α = 0.0,
                     λ = λ_wood * 2.0,
                     κ = κ_virgin * 3.0,
+                    ρ_intrinsic = 1578.0,  # kg/m³, toward char by progress 0.173
                 ),
                 SolidComponent(
                     :DF_int2,
@@ -244,6 +248,7 @@ println("Running with $(nworkers()) worker(s)")
                     α = 0.0,
                     λ = λ_wood * 5.0,
                     κ = κ_virgin * 10.0,
+                    ρ_intrinsic = 1597.0,  # kg/m³, toward char by progress 0.216
                 ),
                 SolidComponent(
                     :DF_int3,
@@ -254,6 +259,7 @@ println("Running with $(nworkers()) worker(s)")
                     α = 0.0,
                     λ = λ_char * 0.3,
                     κ = κ_char * 0.01,
+                    ρ_intrinsic = 1763.0,  # kg/m³, toward char by progress 0.585
                 ),
                 SolidComponent(
                     :DF_int4,
@@ -264,6 +270,7 @@ println("Running with $(nworkers()) worker(s)")
                     α = 0.0,
                     λ = λ_char * 0.7,
                     κ = κ_char * 0.1,
+                    ρ_intrinsic = 1833.0,  # kg/m³, toward char by progress 0.74
                 ),
                 SolidComponent(
                     :Char,
@@ -274,6 +281,7 @@ println("Running with $(nworkers()) worker(s)")
                     α = 0.0,
                     λ = λ_char,
                     κ = κ_char,
+                    ρ_intrinsic = 1950.0,  # kg/m³, carbon skeletal density
                 ),
                 LiquidComponent(
                     :MOISTURE,
@@ -284,48 +292,13 @@ println("Running with $(nworkers()) worker(s)")
                     α = 0.0,
                     κ = 0.0,
                 ),
-                GaseousComponent(
-                    :DF_gas1,
-                    M = 0.060,
-                    c = 1400.0,
-                    k = 0.020,
-                    λ = λ_gas * sqrt(0.029/0.060),
-                ),
-                GaseousComponent(
-                    :DF_gas2,
-                    M = 0.070,
-                    c = 1400.0,
-                    k = 0.020,
-                    λ = λ_gas * sqrt(0.029/0.070),
-                ),
-                GaseousComponent(
-                    :DF_gas3,
-                    M = 0.110,
-                    c = 1300.0,
-                    k = 0.018,
-                    λ = λ_gas * sqrt(0.029/0.110),
-                ),
-                GaseousComponent(
-                    :DF_gas4,
-                    M = 0.070,
-                    c = 1500.0,
-                    k = 0.020,
-                    λ = λ_gas * sqrt(0.029/0.070),
-                ),
-                GaseousComponent(
-                    :DF_gas5,
-                    M = 0.050,
-                    c = 1600.0,
-                    k = 0.025,
-                    λ = λ_gas * sqrt(0.029/0.050),
-                ),
-                GaseousComponent(
-                    :WATER_VAPOR,
-                    M = 0.018,
-                    c = water_vapor_cp,
-                    k = 0.025,
-                    λ = λ_gas * sqrt(0.029/0.018),
-                ),
+                GaseousComponent(:DF_gas1, M = 0.060, c = 1400.0, k = 0.020),
+                GaseousComponent(:DF_gas2, M = 0.070, c = 1400.0, k = 0.020),
+                GaseousComponent(:DF_gas3, M = 0.110, c = 1300.0, k = 0.018),
+                GaseousComponent(:DF_gas4, M = 0.070, c = 1500.0, k = 0.020),
+                GaseousComponent(:DF_gas5, M = 0.050, c = 1600.0, k = 0.025),
+                GaseousComponent(:WATER_VAPOR, M = 0.018, c = water_vapor_cp, k = 0.025),
+                GaseousComponent(:AIR; M = 0.02897, c = 1006.0, k = 0.026),
             ),
             reactions = (
                 Reaction(
@@ -394,27 +367,7 @@ println("Running with $(nworkers()) worker(s)")
         ρ_DF_initial = 530.0
         ρ_moisture_initial = 0.06 * ρ_DF_initial
 
-        mesh = create_uniform_mesh(
-            12.0e-3,
-            240,
-            Val(13);
-            T_initial = T_ambient,
-            ξ_initial = (
-                ρ_DF_initial,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                ρ_moisture_initial,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-            ),
-        )
+        mesh = create_uniform_mesh(12.0e-3, 240)
 
         bc_set = BoundaryConditionSet(
             thermal = (
@@ -424,11 +377,17 @@ println("Running with $(nworkers()) worker(s)")
                 bottom = AdiabaticBC(),
             ),
             mass = (
-                top = DiffusiveMassBC(0.05) + DirichletPressureBC(101325.0),
+                top = AmbientGasBC(
+                    GasReservoir(P = 101325.0, T = 300.0, mole_fractions = (AIR = 1.0,));
+                    film = MassTransferFilm(
+                        0.05*101325.0*0.02897/(8.31446261815324*(300.0)),
+                    ),
+                ),
                 bottom = ImpermeableBC(),
             ),
         )
 
+        t_end = SMOKE ? 10.0 : 600.0   # [s]
         problem = PyrolysisProblem(
             mesh = mesh,
             material = material,
@@ -448,10 +407,31 @@ println("Running with $(nworkers()) worker(s)")
                 z -> 0.0,
                 z -> 0.0,
                 z -> 0.0,
+                z -> background_gas_concentration(
+                    material,
+                    :AIR,
+                    (
+                        ρ_DF_initial,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        ρ_moisture_initial,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                    ),
+                    T_ambient,
+                ),
             ],
-            tspan = (0.0, 600.0),
+            tspan = (0.0, t_end),
             dt_initial = 1e-3,
-            output_times = collect(range(0.0, 600.0, length = 3601)),
+            output_times = collect(range(0.0, t_end, length = SMOKE ? 11 : 3601)),
         )
 
         solution = solve(
@@ -463,9 +443,6 @@ println("Running with $(nworkers()) worker(s)")
             use_ale = true,
             radiation_model = SURFACE_ABSORPTION,
             min_thickness = 0.5e-3,
-            handle_depletion = false,
-            # Default Jacobian is `Structured(strategy = DirectSolve())`.
-            integrator = KenCarp4(linsolve = SparspakFactorization()),
         )
 
         return solution
@@ -535,17 +512,13 @@ println("Running with $(nworkers()) worker(s)")
 
     function compute_dry_mass_series(sol)
         nt = length(sol.t)
-        A = sol.problem.mesh.cross_section_area
+        A = sol.problem.mesh.topology.cross_section
         dry_mass = Vector{Float64}(undef, nt)
         for i = 1:nt
-            ξ = sol.ξ[:, :, i]
-            n_cells = size(ξ, 2)
+            # Component masses per cell [kg], zero in a deactivated cell
             m = 0.0
-            for j = 1:n_cells
-                v = sol.problem.mesh.cell_volumes[j]
-                for k in LC_SOLID_COMPONENT_INDICES
-                    m += ξ[k, j] * v
-                end
+            for k in LC_SOLID_COMPONENT_INDICES
+                m += sum(@view sol.m[k, :, i])
             end
             dry_mass[i] = m / A
         end
@@ -606,52 +579,15 @@ println("Running with $(nworkers()) worker(s)")
     		compute_combustible_mlr_series(sol) -> Vector{Float64}
 
     	Compute the combustible-only surface mass flux [kg/(m²·s)] at each output
-    	time. Mirrors the solver's per-species flux computation but sums only over
+        time. Sums the assembled species boundary fluxes for
     	combustible gas components (indices 8-12), excluding water vapor (13).
     	"""
     function compute_combustible_mlr_series(sol)
-        nt = length(sol.t)
-        comb_mlr = zeros(nt)
-
-        mesh = sol.problem.mesh
-        material = sol.problem.material
-        bc_set = sol.problem.bc_set
-        mass_bc_top = get_mass_bc(bc_set, Val(:top))
-        n_cells = length(mesh.cells)
-
-        d_surface = mesh.cell_volumes[n_cells] / mesh.cross_section_area / 2
-
-        for i = 1:nt
-            t = sol.t[i]
-            ξ_profile = sol.ξ[:, :, i]
-            T_surface = sol.surface_T[i]
-
-            ξ_surface = ntuple(k -> ξ_profile[k, n_cells], Val(length(material.components)))
-
-            flux = 0.0
-            for k in LC_COMBUSTIBLE_GAS_INDICES
-                ξ_k = ξ_surface[k]
-                if ξ_k > 0.0
-                    λρ =
-                        effective_gas_transfer(ξ_surface, T_surface, material) *
-                        sum(ξ_surface)
-                    ρ_surface = sum(ξ_surface)
-                    J_k = compute_surface_mass_flux(
-                        mass_bc_top,
-                        ξ_k,
-                        λρ,
-                        ρ_surface,
-                        d_surface,
-                        t,
-                        k,
-                    )
-                    flux += J_k
-                end
-            end
-            comb_mlr[i] = flux
-        end
-
-        return comb_mlr
+        names =
+            [sol.problem.material.components[j].name for j in LC_COMBUSTIBLE_GAS_INDICES]
+        rows = [findfirst(==(name), sol.gas.species) for name in names]
+        exchange = get_boundary_exchange(sol, :top)
+        return vec(sum(exchange.fluxes[rows, :]; dims = 1))
     end
 
     """
@@ -824,7 +760,7 @@ end # @everywhere
 
 const RESULTS_DIR = joinpath(@__DIR__, "results")
 
-const RUNS = [
+const ALL_RUNS = [
     LitCompRunSpec("baseline", :baseline, :baseline, 1.0, NaN, :baseline),
     LitCompRunSpec("virgin_cp_harada", :harada, :baseline, 1.0, NaN, :baseline),
     LitCompRunSpec("virgin_cp_dupont", :dupont, :baseline, 1.0, NaN, :baseline),
@@ -843,6 +779,8 @@ const RUNS = [
         :baseline,
     ),  # Rath two-zone (f_P=1.234, f_S=0.638)
 ]
+# PYROLYSIS_SMOKE=1: the baseline and the first variant
+const RUNS = SMOKE ? ALL_RUNS[1:2] : ALL_RUNS
 
 # ============================================================================
 # Main

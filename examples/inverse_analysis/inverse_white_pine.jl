@@ -15,7 +15,6 @@ USAGE
 	julia -t auto --project=. examples/inverse_analysis/inverse_white_pine.jl --fit=30kW,50kW                       # UMD-only fit (drops all FSRI)
 	julia -t auto --project=. examples/inverse_analysis/inverse_white_pine.jl --fit=20kW,40kW,60kW --val=          # FSRI-only fit, no validation
 	julia -t auto --project=. examples/inverse_analysis/inverse_white_pine.jl --fit=20kW,30kW,40kW,50kW,60kW,70kW   # everything in fit (no val)
-	julia -t auto --project=. examples/inverse_analysis/inverse_white_pine.jl --approx-solve                        # ApproxSolve Jacobian (faster, ~14% nnz)
 
 Spread the heavy work across cores via `-t auto` (or `-t N`); the loss runs
 all fit scenarios in parallel via `Threads.@spawn`.
@@ -64,7 +63,28 @@ using FiniteDiff
 using Plots
 using QuasiMonteCarlo
 
+const SMOKE = get(ENV, "PYROLYSIS_SMOKE", "0") == "1"   # PYROLYSIS_SMOKE=1: a short run that checks the script works
+
 include("wp_objective.jl")
+
+"""
+	smoke_dataset(ds; t_final = 20.0)
+
+The dataset entry `ds` over the first `t_final` seconds: the scenario's
+horizon and the experimental series cut to it (the PYROLYSIS_SMOKE=1 run).
+"""
+function smoke_dataset(ds; t_final::Real = 20.0)
+    scenario, t_exp, T_back, T_back_std, n_reps = ds
+    m = t_exp .<= t_final
+    n_reps = n_reps isa AbstractVector ? n_reps[m] : n_reps
+    return (
+        merge(scenario, (t_final = t_final,)),
+        t_exp[m],
+        T_back[m],
+        T_back_std[m],
+        n_reps,
+    )
+end
 
 # ============================================================================
 # CLI parsing
@@ -79,7 +99,6 @@ function parse_args(args)
     prior_weight = 0.5   # weight on HFM/LFA k(T) prior; clamped to [0, 1]
     fit_labels = nothing   # nothing = use registry defaults
     val_labels = nothing
-    use_approx_solve = false
     for a in args
         if startswith(a, "--stage=")
             stage = parse(Int, split(a, "=")[2])
@@ -105,122 +124,15 @@ function parse_args(args)
             val_labels =
                 isempty(rhs) ? String[] :
                 String[strip(s) for s in split(rhs, ',') if !isempty(strip(s))]
-        elseif a == "--approx-solve"
-            use_approx_solve = true
         elseif a in ("-h", "--help")
             println(@doc("inverse_white_pine.jl"))
             exit(0)
         end
     end
-    (;
-        stage,
-        do_grid,
-        n_starts,
-        max_iter,
-        bootstrap,
-        prior_weight,
-        fit_labels,
-        val_labels,
-        use_approx_solve,
-    )
+    (; stage, do_grid, n_starts, max_iter, bootstrap, prior_weight, fit_labels, val_labels)
 end
 
 const OPTS = parse_args(ARGS)
-
-# Cone heater calibration: actual delivered flux is 97.3% of the nominal
-# setpoint for the UMD CAPA cone. Apply to nominal labels (30/50/70 kW/m²)
-# when constructing scenarios so the simulation sees the real radiative input.
-const HEAT_FLUX_CAL = 0.973
-
-# FSRI 20 kW gasification cone uses a 0.98 area-averaged multiplier per
-# the FSRI calibration documentation.
-const FSRI_HEAT_FLUX_CAL = 0.98
-
-# Enable the variable-cross-section (radial shrinkage) law for the inverse fit.
-# It is NOT free of the fitted trajectories: the ALE solver conserves cell volume
-# V = A·Δz, and the density-driven volumetric strain rate θ_cell is A-independent,
-# so the z-node velocity is the *residual* axial strain θ_L = θ_cell − θ_A (see
-# src/Residual/residual.jl `_compute_ale_mesh_velocity!`). With the law off the
-# radial channel θ_A ≡ 0 and the entire volume loss is forced into the thickness,
-# making the sample ~13–17% thinner in z at end-of-test (A/A₀ ≈ 0.86 at χ̄≈0.65–
-# 0.75) than the validated radial geometry — a shorter conduction path that biases
-# back-surface temperatures and hence the fitted properties. The naive "q″·A and
-# k·A·∂T/∂z both scale with A so it cancels" argument holds only at *fixed*
-# geometry; A enters the geometry evolution, which is exactly where the law acts.
-# The radial channel is calibrated/validated (validate_thickness.jl) against
-# the experimental conversion χ̄=1−m_f/m_0; its
-# fit residual sits at the ±0.013 D-measurement noise floor (see WP_SR2 block),
-# so `true` is the more physical setting. Cost is per-eval only (χ-block
-# tracking + a denser ∂physics/∂χⱼ Jacobian coupling).
-const INVERSE_USE_VARIABLE_CROSS_SECTION = true
-
-# ============================================================================
-# Dataset registry — single source of truth for which fluxes exist and how
-# each one is loaded. Each entry knows its lab (which sets BC stack, cone
-# calibration, sample thickness, MC, replicate-file prefix) and a
-# `default_role` that says whether the flux defaults to fit / val / off.
-#
-# CLI flags `--fit=<csv>` and `--val=<csv>` override the defaults — pass any
-# subset of the labels below. Pass `--val=` (empty) to skip validation.
-# ============================================================================
-
-const FSRI_C0_MOISTURE = 0.03 * WP_RHO_DRY_BASIS   # 10.8 kg/m³
-const FSRI_SAMPLE_THICK = 8.68e-3
-const UMD_SAMPLE_THICK = 8.5e-3   # `load_scenario` default
-
-# Order matters: this is the order in which defaults get assembled.
-const DATASET_REGISTRY = [
-    "20kW" => (lab = :fsri_gas, q_nom_kw = 20.0, default_role = :fit),
-    "30kW" => (lab = :umd, q_nom_kw = 30.0, default_role = :fit),
-    "40kW" => (lab = :fsri_capa, q_nom_kw = 40.0, default_role = :fit),
-    "50kW" => (lab = :umd, q_nom_kw = 50.0, default_role = :fit),
-    "60kW" => (lab = :fsri_capa, q_nom_kw = 60.0, default_role = :fit),
-    "70kW" => (lab = :umd, q_nom_kw = 70.0, default_role = :val),
-]
-
-const REGISTRY_LABELS = String[p.first for p in DATASET_REGISTRY]
-_registry_lookup(label) = first(filter(p -> p.first == label, DATASET_REGISTRY)).second
-
-function load_registry_dataset(
-    label::AbstractString;
-    verbose::Bool = true,
-    use_variable_cross_section::Bool = INVERSE_USE_VARIABLE_CROSS_SECTION,
-)
-    label in REGISTRY_LABELS ||
-        error("unknown dataset $label; choose from $(REGISTRY_LABELS)")
-    spec = _registry_lookup(label)
-    if spec.lab == :umd
-        return load_scenario(
-            label,
-            spec.q_nom_kw * 1e3 * HEAT_FLUX_CAL;
-            sample_thickness = UMD_SAMPLE_THICK,
-            verbose = verbose,
-            use_variable_cross_section = use_variable_cross_section,
-        )
-    elseif spec.lab == :fsri_gas
-        return load_fsri_scenario(
-            label,
-            spec.q_nom_kw * 1e3 * FSRI_HEAT_FLUX_CAL;
-            c0_moisture = FSRI_C0_MOISTURE,
-            sample_thickness = FSRI_SAMPLE_THICK,
-            replicate_prefix = FSRI_REPLICATE_PATTERN_PREFIX,
-            verbose = verbose,
-            use_variable_cross_section = use_variable_cross_section,
-        )
-    elseif spec.lab == :fsri_capa
-        return load_fsri_scenario(
-            label,
-            spec.q_nom_kw * 1e3 * FSRI_HEAT_FLUX_CAL;
-            c0_moisture = FSRI_C0_MOISTURE,
-            sample_thickness = FSRI_SAMPLE_THICK,
-            replicate_prefix = FSRI_CAPA_REPLICATE_PATTERN_PREFIX,
-            verbose = verbose,
-            use_variable_cross_section = use_variable_cross_section,
-        )
-    else
-        error("registry: unknown lab tag $(spec.lab) for $label")
-    end
-end
 
 "Pick labels for a role from the registry, honoring CLI overrides."
 function select_labels(role::Symbol, override::Union{Nothing,Vector{String}})
@@ -475,7 +387,6 @@ function bootstrap_covariance(
     refit_max_iter::Int = 50,
     seed::Int = 42,
     verbose::Bool = true,
-    jacobian_strategy::Union{Nothing,LinearSolveStrategy} = nothing,
 )
 
     p = length(θ_hat)
@@ -488,12 +399,7 @@ function bootstrap_covariance(
     base_traj = []
     base_residuals = []
     for (scenario, t_exp, T_back_exp, T_back_std, n_reps) in dataset
-        sol = build_and_solve(
-            θ_hat,
-            scenario;
-            stage = stage,
-            jacobian_strategy = jacobian_strategy,
-        )
+        sol = build_and_solve(θ_hat, scenario; stage = stage)
         sol === nothing && error("base solve failed at θ_hat — cannot bootstrap")
         mask = t_exp .> t_skip
         t_q = t_exp[mask]
@@ -532,7 +438,6 @@ function bootstrap_covariance(
                         T_back;
                         stage = stage,
                         t_skip = t_skip,
-                        jacobian_strategy = jacobian_strategy,
                     )
                     rv === nothing && return 1e6
                     m = t_exp .> t_skip
@@ -600,24 +505,12 @@ end
 # Output / plotting
 # ============================================================================
 
-function plot_fits(
-    θ_hat,
-    fit_dataset,
-    val_dataset,
-    stage::Int;
-    outpath::AbstractString,
-    jacobian_strategy::Union{Nothing,LinearSolveStrategy} = nothing,
-)
+function plot_fits(θ_hat, fit_dataset, val_dataset, stage::Int; outpath::AbstractString)
     plots = Plots.Plot[]
 
     for (label_prefix, ds) in (("Fit", fit_dataset), ("Validation", val_dataset))
         for (scenario, t_exp, T_back_exp, _, _) in ds
-            sol = build_and_solve(
-                θ_hat,
-                scenario;
-                stage = stage,
-                jacobian_strategy = jacobian_strategy,
-            )
+            sol = build_and_solve(θ_hat, scenario; stage = stage)
 
             # FSRI scenarios also report a partial top-surface temperature.
             # Add a front-surface panel ABOVE the back-surface one so the
@@ -750,10 +643,7 @@ function main()
     run_dir = joinpath(RESULTS_DIR, "run_$(run_stamp)_s$(stage)_pw$(pw_tag)")
     set_run_dir!(run_dir)
 
-    jac_strat = OPTS.use_approx_solve ? ApproxSolve() : nothing
-    @info "Inverse analysis configuration" stage=stage names=cfg.names θ_init=cfg.θ_init bounds=cfg.bounds threads=Threads.nthreads() run_dir=run_dir jacobian=OPTS.use_approx_solve ?
-                                                                                                                                                               "ApproxSolve" :
-                                                                                                                                                               "DirectSolve"
+    @info "Inverse analysis configuration" stage=stage names=cfg.names θ_init=cfg.θ_init bounds=cfg.bounds threads=Threads.nthreads() run_dir=run_dir
 
     # --- Load datasets via registry ---
     # Registry-driven loader: each flux carries its lab tag (UMD vs FSRI gas
@@ -773,6 +663,8 @@ function main()
     for label in fit_labels_used
         push!(fit_dataset, load_registry_dataset(label))
     end
+    # PYROLYSIS_SMOKE=1: the fit datasets over their first 20 s
+    SMOKE && (fit_dataset = Any[smoke_dataset(ds) for ds in fit_dataset])
 
     val_dataset = []
     for label in val_labels_used
@@ -814,12 +706,7 @@ function main()
     if isempty(k_prior) || OPTS.prior_weight == 0.0
         reason = isempty(k_prior) ? "no HFM/LFA priors found" : "--prior-weight=0"
         @info "Running without k_prior ($reason)"
-        loss_fit = make_loss(
-            fit_dataset;
-            stage = stage,
-            verbose = true,
-            jacobian_strategy = jac_strat,
-        )
+        loss_fit = make_loss(fit_dataset; stage = stage, verbose = true)
     else
         @info "Using $(length(k_prior)) combined HFM+LFA k(T) prior points" weight=OPTS.prior_weight
         loss_fit = make_loss(
@@ -828,8 +715,13 @@ function main()
             verbose = true,
             k_prior = k_prior,
             k_prior_weight = OPTS.prior_weight,
-            jacobian_strategy = jac_strat,
         )
+    end
+
+    # PYROLYSIS_SMOKE=1: one objective evaluation at the initial θ, then exit
+    if SMOKE
+        @info "Smoke run: one objective evaluation" loss = loss_fit(cfg.θ_init)
+        return nothing
     end
 
     # --- Optional grid scan (Stage 1 only) ---
@@ -870,7 +762,6 @@ function main()
             n_boot = OPTS.bootstrap,
             stage = stage,
             verbose = true,
-            jacobian_strategy = jac_strat,
         )
     else
         @info "Estimating parameter covariance via Hessian (FD central diff)..."
@@ -908,7 +799,6 @@ function main()
         val_dataset,
         stage;
         outpath = joinpath(RUN_DIR[], "fit_plots.png"),
-        jacobian_strategy = jac_strat,
     )
 
     @info "Done."

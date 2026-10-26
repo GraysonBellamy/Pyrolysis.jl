@@ -2,8 +2,9 @@
 # V-HC-01 — Semi-infinite solid, convective surface BC (Biot-coupled erfc)
 # =============================================================================
 #
-# The one verification case shared by all three reference codes
-# (FDS `ht3d_slab`, Gpyro §3.4.1, ThermaKin Eq. 25), in Gpyro's variant:
+# A semi-infinite conduction benchmark, using the parameters of
+# Lautenberger's dissertation §3.4.1 (ThermaKin Eq. 25 uses the same
+# analytical form with different parameters):
 # constant absorbed radiant flux q″ = 25 kW/m² plus convective exchange
 # h = 20 W/m²K with T∞ = T₀ = 300 K; k = 0.2 W/(m·K), ρ = 1000 kg/m³,
 # c = 1400 J/(kg·K), so profiles at t = 30/60/90/180 s are directly comparable
@@ -35,7 +36,7 @@ function _verification_case_vhc01()
     function build(n_cells)
         solid = SolidComponent(:solid, ρ = ρ, c = c, k = k)
         mat = Material(name = :VHC01, components = (solid,), reactions = ())
-        mesh = create_uniform_mesh(L, n_cells, Val(1); T_initial = T0, ξ_initial = (ρ,))
+        mesh = create_uniform_mesh(L, n_cells)
         bc_set = BoundaryConditionSet(
             thermal = (
                 top = HeatFluxBC(q_abs) + ConvectiveBC(h = h, T_inf = T0),
@@ -141,7 +142,7 @@ function _verification_case_vhc01()
             solve_kwargs = (abstol = 1e-12, reltol = 1e-10),
             curves = sol -> begin
                 x = L .- get_cell_positions(sol)
-                # FDS 6.11.0 overlay (reference/fds/custom/): our deck
+                # FDS 6.11.1 overlay (reference/fds/custom/): our deck
                 # vhc01_semi_infinite.fds solves this exact case via the same
                 # Robin-BC equivalence (pure convection toward T∞_eff = 1550 K,
                 # ε = 0). devc depths from the exposed face; T in °C.
@@ -191,7 +192,7 @@ function _verification_case_vhc01()
                             ],
                             [
                                 CurveSeries(
-                                    label = "FDS 6.11.0, t = $(t) s",
+                                    label = "FDS 6.11.1, t = $(t) s",
                                     crosscode = true,
                                     x = fds_depths,
                                     y = [fds_T[i][fds_row(t)] for i = 1:6],
@@ -225,7 +226,7 @@ function _verification_case_vhc01()
                             ),
                             # devc averages over the 0.2 s output interval
                             CurveSeries(
-                                label = "FDS 6.11.0",
+                                label = "FDS 6.11.1",
                                 crosscode = true,
                                 x = fds[1][2:end] .- 0.1,
                                 y = fds_T[1][2:end],

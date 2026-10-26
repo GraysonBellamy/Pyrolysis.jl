@@ -1,0 +1,7 @@
+--- a/src/common/gpyro_io.f90
++++ b/src/common/gpyro_io.f90
+@@ -4408,0 +4409 @@
++USE GPYRO_FUNCS, ONLY: WALL_CLOCK_TIME_THANKS_FDS
+@@ -4423,0 +4425,2 @@
++WRITE(*,'(A,F14.6)') 'Total Elapsed Wall Clock Time (s): ', &
++   WALL_CLOCK_TIME_THANKS_FDS() - GPG%GPYRO_WALL_CLOCK_START

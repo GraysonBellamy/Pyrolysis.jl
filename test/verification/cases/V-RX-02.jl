@@ -6,10 +6,12 @@
 # `part_baking_soda` case against the same forms). Sub-cases:
 #
 #   a) n = 0    — linear decay, exact finite burnout time. Compared only up to
-#                 0.9·t_b with the depletion limiter DISABLED: the solver
-#                 clamps ξ ≥ 0 inside ξⁿ, so at ξ = 0 the n = 0 rate stays A
-#                 and would integrate ξ negative (kinetics.jl `_fast_pow`).
-#   b) n = 2    — ThermaKin's second-order case as single-reactant n = 2:
+#                 0.9·t_b with the depletion limiter DISABLED: the power is
+#                 taken on the finite base base_scale·softplus(ξ/base_scale),
+#                 so at ξ = 0 the n = 0 rate stays A and would integrate ξ
+#                 negative (`DepletionLimiter(enabled = false)`).
+#   b) n = 2    — single-species second-order decay (a C+C kinetic analog,
+#                 not a reproduced ThermaKin run):
 #                 ξ = ξ₀/(1 + ξ₀kt).
 #   c) n = 2/3  — contracting-sphere R3 model with FDS's NaHCO₃ parameters
 #                 A_pub = 3.4e11 1/s, E = 103 kJ/mol at T = 450 K; the marker
@@ -42,13 +44,7 @@ function _vrx02_build(;
             reactions = (rxn,),
             depletion_limiter = DepletionLimiter(enabled = limiter_enabled),
         )
-        mesh = create_uniform_mesh(
-            1e-3,
-            n_cells,
-            Val(2);
-            T_initial = T_iso,
-            ξ_initial = (ξ0, 0.0),
-        )
+        mesh = create_uniform_mesh(1e-3, n_cells)
         bc_set = BoundaryConditionSet(
             thermal = (top = DirichletThermalBC(T_iso), bottom = DirichletThermalBC(T_iso)),
         )
@@ -228,7 +224,7 @@ push!(
             tol_xi = 1e-9,  # 3× observed 2.8e-10
             comment = "m^(1/3) linear in t; k_pub=$(round(k_pub, sigdigits=4)) 1/s at 450 K; " *
                       "exercises live Arrhenius (E ≠ 0) at pinned T",
-            # FDS 6.11.0 overlay (reference/fds/custom/): the span-matched
+            # FDS 6.11.1 overlay (reference/fds/custom/): the span-matched
             # part_baking_soda_450K re-run (T_END = 2.4 s ≈ our window). Its
             # spherical variant follows the same R3 master curve, but FDS's
             # input A = 1.33e13 is a surface-regression convention — its
@@ -251,7 +247,7 @@ push!(
                 keep = findall(t -> 0 < t_scale * t ≤ ts[end], t_fds)
                 [
                     CurveSeries(
-                        label = "FDS 6.11.0 (rate-rescaled)",
+                        label = "FDS 6.11.1 (rate-rescaled)",
                         crosscode = true,
                         x = t_scale .* t_fds[keep],
                         y = ξ0 .* ρ_fds[keep] ./ 2200.0,

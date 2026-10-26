@@ -8,68 +8,58 @@
 # sources that make them the exact solution of the FULL coupled system, which
 # gives formal order-of-accuracy verification of the coupled operators.
 #
-# ## Continuous system targeted (Eulerian, Fickian transport, no radiation)
+# ## Continuous system targeted (Eulerian, partial-pressure transport, no radiation)
 #
-#   ρcp(T,ξ) ∂T/∂t = −∂z q + S_conv + Q_rxn + S_T,      q = −k_eff(T,ξ) ∂z T
+#   ρcp(T,ξ) ∂T/∂t = −∂z q + S_adv + Q_rxn + S_T,      q = −k_eff(T,ξ) ∂z T
 #       ρcp    = Σⱼ ξⱼ cp_j(T)   (every component, gas included)
-#       S_conv = −Σ_g cp_g(T) J_g ∂z T
+#       S_adv = −Σ_g cp_g(T) J_g ∂z T
 #       Q_rxn  = −Σ_r h_r(T,ξ) r_r(ξ,T)
-#   ∂ξ_g/∂t = −∂z J_g + ω̇_g + S_ξg,   J_g = −(λ_eff(T,ξ)/T)·∂z(ξ_g T)
+#   ∂ξ_g/∂t = −∂z J_g + ω̇_g + S_ξg,   J_g = −Λ(T,ξ) M_g/(RT)·∂z p_g,  p_g = ξ_g RT/(φ M_g)
 #   ∂ξ_s/∂t =            ω̇_s + S_ξs                          (condensed phases)
 #
-# The gas flux is the ThermaKin volume-fraction-gradient form (see
-# src/Physics/gas_transport.jl), NOT plain Fick — the manufactured source must
-# match it exactly or the "error" never converges.
+# The transport reference constructs matrix weights, porosity and partial
+# pressures independently from component data, then differentiates the
+# continuous potential. It never calls the production transport evaluator.
 #
 # ## Design decisions (mirror the case docstrings before changing)
 #
 # 1. **Sources are injected at the state-derivative level** (K/s for T,
 #    kg/(m³·s) for ξ), with the energy source divided by ρcp evaluated on
-#    the *manufactured* fields — a pure function of (z,t). A W/m³ source
-#    divided by the numerical ρcp(u) would be state-dependent and silently
-#    invalidate the analytic Jacobian; this way ∂S/∂u ≡ 0 and the shipped
-#    `Structured` Jacobian remains exact with MMS active.
-# 2. **Every coefficient is evaluated through the package's own property and
-#    kinetics functions** (`effective_heat_capacity`, `effective_conductivity`,
-#    `effective_gas_transfer`, `reaction_rate` with the material's own
-#    depletion limiter). The continuous operator therefore matches the
-#    discretization's consistency target by construction — including mixing
-#    rules, floors, tanh gates and limiter — with no re-derivation to drift.
-# 3. **Boundary conditions are manufactured Neumann fluxes**
-#    (`HeatFluxBC(t->…)` / `MassFluxBC(t->…)`, positive into domain): the FV
-#    scheme imposes face fluxes exactly, so the boundary contributes no
-#    order-reducing reconstruction (the Dirichlet path is first-order at the
-#    face, see finite_volume.jl `dz_half` reconstruction).
+#    the *manufactured* fields — a pure function of (z,t). They enter the
+#    residual through the solver's `VolumetricSources` hook, whose functions
+#    of position and time the colored Jacobian differentiates with the rest
+#    of the residual, so the Jacobian stays exact with MMS active.
+# 2. Thermal and reaction properties use the material's declared laws. The
+#    gas reference independently assembles normalized condensed matrix weights
+#    and the continuous partial-pressure law, including spatially varying φ.
+# 3. Boundary heat flux is positive inward; named species mass flux is positive
+#    outward. Incoming enthalpy uses the manufactured boundary temperature.
+#    Manufactured Neumann fluxes avoid a first-order temperature boundary
+#    reconstruction entering the target truncation error.
 # 4. Spatial derivatives of the manufactured fields are taken with nested
 #    ForwardDiff on the field callables — no hand-derived formulas to
 #    transcribe wrong. The hand-derived checks live in selftests.jl.
 #
 # ## ALE
-# Every component rides the mesh (the mesh is the skeleton, and the gas flux
-# J_g is relative to it), so on a moving mesh the species equations carry no
-# advection operator — only the dilation −ξθ with the reaction-driven strain
-# rate θ. A z-varying manufactured field therefore needs its source assembled
-# in the material-following frame (`w` keyword of the source functions):
+# Masses are the states. Under REACTION-DRIVEN (induced) motion — the
+# `MMSMotion` companion, no `w_override` — the mesh is the solid and every
+# inventory rides it (the gas flux J_g is relative to it), so a z-varying
+# manufactured field needs its source assembled in the material-following
+# frame (`w` keyword of the source functions):
 #
 #   S_j = ∂tξ*_j + w·∂zξ*_j + [∂zJ*_j]_gas − ω̇*_j + ξ*_j·θ*
 #
-# where w·∂zξ* is the moving-point chain rule (no discrete operator supplies
-# it) and +ξ*θ* balances the discrete dilation. Under REACTION-DRIVEN
-# (induced) motion — the `MMSMotion` companion, no `w_override` — w is the
-# prefix sum of θ* on the manufactured fields (`mms_mesh_velocity`) and the
-# temperature source is assembled in the same frame (the discrete energy
-# equation has no T advection either). Under PRESCRIBED motion
-# (`Workspace.w_override`) the mesh is decoupled from the material: the
-# species still ride the applied mesh (material-frame source with w = the
-# override), while T keeps the Eulerian source because the discrete
-# mesh-relative advection kernel supplies w_rel·∂zT* itself (w_physical = 0
-# without reactions). Sources are evaluated at the LIVE cell centers read
-# from the z-block.
+# where w·∂zξ* is the moving-point chain rule and ξ*θ* the growth of the cell
+# volume at the reaction-driven strain rate θ*, with w the prefix sum of θ*
+# on the manufactured fields (`mms_mesh_velocity`); the temperature source is
+# assembled in the same frame. Under PRESCRIBED motion (`w_override`) the
+# mesh moves over a solid at rest and every inventory, T's energy with it,
+# crosses the faces at the mesh-relative velocity, so every source is the
+# Eulerian one. Sources are evaluated at the cell centers.
 #
-# Sign conventions (verified against finite_volume.jl):
-#   q_z = −k∂zT, J positive in +z; "into domain" flux at top = −(flux at L),
-#   at bottom = +(flux at 0). Mass BCs: J[j,f] += σ·flux_into_domain with
-#   σ = −1 (top), +1 (bottom); thermal BCs write q[f] = ∓q_conducted.
+# Sign conventions: q_z = −k∂zT and J positive in +z; a boundary condition's
+# heat flux is positive into the domain and species mass flux positive outward.
+# Thus heat uses (−q(L), +q(0)), and species use (+J(L), −J(0)).
 
 using ForwardDiff
 using LinearAlgebra: SymTridiagonal, eigen
@@ -77,12 +67,6 @@ using OrdinaryDiffEq
 using Pyrolysis
 using Pyrolysis.Materials: is_gas, n_components, n_reactions
 using Pyrolysis: Properties, Physics
-# The default integrator lives in the SDIRK sub-library, not the umbrella
-# (same split solve() works around — see src/Solver/Solver.jl). AutoFiniteDiff
-# is needed for the :fd Jacobian path: the canonical workspace is Float64-typed,
-# so the integrator's default ForwardDiff cannot pass Duals through the wrapped
-# RHS (solve() makes the same choice for its no-Jacobian fallback).
-using Pyrolysis.Solver: KenCarp4, AutoFiniteDiff
 
 # ----------------------------------------------------------------------------
 # Manufactured fields
@@ -118,17 +102,48 @@ function mms_heat_flux(material, fields::MMSFields, z, t)
     return -k * dTdz
 end
 
-"""
-Continuous gas mass flux of component `j` [kg/(m²·s)]:
-J_j = −(λ_eff/T)·∂z(ξ_j T) — the ThermaKin volume-fraction-gradient form the
-discrete `gas_flux` kernel approximates.
-"""
+"Continuous gas mass flux J_j = −Λ M_j/(RT) ∂z p_j [kg/(m² s)]."
 function mms_gas_flux(material, fields::MMSFields, j::Int, z, t)
+    material.gas_transport isa LumpedTransfer ||
+        error("this MMS reference requires lumped transport")
     T = fields.T(z, t)
     ξ = mms_xi_tuple(fields, z, t)
-    λ = Properties.effective_gas_transfer(ξ, T, material)
-    dξT = ForwardDiff.derivative(ζ -> fields.ξ[j](ζ, t) * fields.T(ζ, t), z)
-    return -(λ / T) * dξT
+    ids = [
+        k for k in eachindex(ξ) if
+        !is_gas(material.components[k]) && material.components[k].swelling_factor>0
+    ]
+    weights = [
+        material.components[k].swelling_factor*ξ[k]/material.components[k].density(T)
+        for k in ids
+    ]
+    weights ./= sum(weights)
+    values = [material.components[k].gas_transfer_coeff(T) for k in ids]
+    spec = material.mixing.λ
+    parallel = sum(weights .* values)
+    series =
+        any(k->weights[k]>0 && values[k]==0, eachindex(weights)) ? zero(T) :
+        inv(sum(weights ./ values))
+    Λ =
+        spec.rule==PARALLEL ? parallel :
+        spec.rule==SERIES ? series :
+        spec.rule==WEIGHTED ? spec.β*parallel+(1-spec.β)*series :
+        error("unsupported MMS matrix closure")
+    all(k->material.components[k].permeability(T)==0, ids) ||
+        error("this MMS reference requires κ=0")
+    potential(ζ) = begin
+        Θ = fields.T(ζ, t)
+        concentrations = mms_xi_tuple(fields, ζ, t)
+        φ =
+            1-sum(
+                concentrations[k]/Pyrolysis.Materials.get_intrinsic_density(
+                    material.components[k],
+                    Θ,
+                ) for k in eachindex(concentrations) if !is_gas(material.components[k])
+            )
+        φ>0 || error("manufactured fields leave the physical pore domain")
+        fields.ξ[j](ζ, t)*Θ/φ
+    end
+    return -(Λ/T)*ForwardDiff.derivative(potential, z)
 end
 
 # Reaction rate of reaction r at manufactured state — same rate law as the
@@ -162,8 +177,8 @@ function mms_rxn_source(material, j::Int, ξ::Tuple, T)
     return s
 end
 
-"Continuous gas-advection energy source S_conv = −Σ_g cp_g(T)·J_g·∂zT [W/m³]."
-function mms_S_conv(material, fields::MMSFields, z, t)
+"Continuous gas-advection energy source S_adv = −Σ_g cp_g(T)·J_g·∂zT [W/m³]."
+function mms_S_adv(material, fields::MMSFields, z, t)
     T = fields.T(z, t)
     dTdz = ForwardDiff.derivative(ζ -> fields.T(ζ, t), z)
     NC = n_components(material)
@@ -182,23 +197,23 @@ end
 Manufactured energy source in **K/s** (state-derivative units — see design
 decision 1):
 
-S_T(z,t) = ∂tT* + w·∂zT* + (∂z q* − S_conv* − Q_rxn*) / ρcp(T*,ξ*)
+S_T(z,t) = ∂tT* + w·∂zT* + (∂z q* − S_adv* − Q_rxn*) / ρcp(T*,ξ*)
 
-Added to `du` on the temperature block, it makes T* the exact solution of the
-continuous energy equation while leaving the analytic Jacobian untouched.
-`w = nothing` (Eulerian mesh, or prescribed motion whose mesh-relative T
-advection the kernel supplies) drops the chain-rule term; under induced
-motion pass the reaction-driven `w(z,t)`.
+Added to the energy row, it makes T* the exact solution of the continuous
+energy equation; a function of (z,t) alone, it leaves the Jacobian exact.
+`w = nothing` (fixed mesh, or prescribed motion, whose sources are Eulerian)
+drops the chain-rule term; under induced motion pass the reaction-driven
+`w(z,t)`.
 """
 function mms_energy_source(material, fields::MMSFields, z, t; w = nothing)
     T = fields.T(z, t)
     ξ = mms_xi_tuple(fields, z, t)
-    ρcp = Properties.effective_heat_capacity(ξ, T, material)
+    ρcp = sum(ξ[j] * material.components[j].heat_capacity(T) for j in eachindex(ξ))
     dTdt = ForwardDiff.derivative(τ -> fields.T(z, τ), t)
     div_q = ForwardDiff.derivative(ζ -> mms_heat_flux(material, fields, ζ, t), z)
-    S_conv = mms_S_conv(material, fields, z, t)
+    S_adv = mms_S_adv(material, fields, z, t)
     Q_rxn = mms_Q_rxn(material, ξ, T)
-    S = dTdt + (div_q - S_conv - Q_rxn) / ρcp
+    S = dTdt + (div_q - S_adv - Q_rxn) / ρcp
     if w !== nothing
         S += w(z, t) * ForwardDiff.derivative(ζ -> fields.T(ζ, t), z)
     end
@@ -210,13 +225,12 @@ Manufactured species source for component `j` in **kg/(m³·s)**:
 
 S_ξj(z,t) = ∂tξ*_j + w·∂zξ*_j + ∂z J*_j·[gas only] − ω̇*_j + ξ*_j·θ*
 
-`w = nothing` (Eulerian mesh) drops the two mesh-motion terms. On a moving
-mesh every component rides it, so pass the mesh velocity `w(z,t)` — the
-reaction-driven `mms_mesh_velocity` under induced motion, the override
-function under prescribed motion — and the source is assembled in the
-material-following frame: `w·∂zξ*` is the moving-point chain rule (no
-discrete operator supplies it) and `+ξ*θ*` balances the discrete dilation
-with the reaction-driven strain rate θ* (`mms_theta`).
+`w = nothing` (fixed mesh, or prescribed motion over a solid at rest) drops
+the two mesh-motion terms. Under induced motion every component rides the
+mesh, so pass the reaction-driven mesh velocity `w(z,t)`
+(`mms_mesh_velocity`) and the source is assembled in the material-following
+frame: `w·∂zξ*` is the moving-point chain rule and `+ξ*θ*` the growth of the
+cell volume at the reaction-driven strain rate θ* (`mms_theta`).
 """
 function mms_species_source(material, fields::MMSFields, j::Int, z, t; w = nothing)
     T = fields.T(z, t)
@@ -239,15 +253,14 @@ end
 #
 # Under REACTION-DRIVEN motion (no `w_override`) the mesh velocity is the
 # prefix sum of the volumetric strain rate θ computed from the REACTION rates
-# (`_compute_ale_mesh_velocity!` → `Physics.volume_change_rate` on
-# `dξ_rxn`). The manufactured counterparts below mirror that chain exactly —
-# same kinetics calls, same γ/ρ weighting — per driver design decision 2
-# (never re-derive coefficients by hand).
+# (`Physics.volume_change_rate` on `dξ_rxn`). The manufactured counterparts
+# below mirror that chain exactly — same kinetics calls, same γ/ρ weighting —
+# per driver design decision 2 (never re-derive coefficients by hand).
 
 """
 Continuous volumetric strain rate θ*(z,t) [1/s] on the manufactured fields:
 θ* = Σⱼ (γⱼ/ρⱼ(T*))·dξⱼ_rxn — REACTION rates only, via the same
-`Physics.volume_change_rate` the residual's ALE mesh velocity uses.
+`Physics.volume_change_rate` the mesh closure's strain rates use.
 """
 function mms_theta(material, fields::MMSFields, z, t)
     T = fields.T(z, t)
@@ -309,35 +322,30 @@ function mms_thermal_bcs(material, fields::MMSFields, L)
     )
 end
 
-"""
-Time-dependent `MassFluxBC` pair for the manufactured gas flux. `MassFluxBC`
-applies the same flux to EVERY gas component (see `mass_bc_flux`), so the
-material must have exactly one gas component — asserted here.
-"""
+"Named outward species fluxes with complete incoming thermodynamic data."
 function mms_mass_bcs(material, fields::MMSFields, L)
-    gas_idx = findall(is_gas, collect(material.components))
-    length(gas_idx) == 1 || error(
-        "mms_mass_bcs requires exactly one gas component (MassFluxBC applies " *
-        "one flux to every gas species); got $(length(gas_idx))",
+    ids = findall(is_gas, collect(material.components))
+    names = Tuple(material.components[j].name for j in ids)
+    boundary(z, sign) = MassFluxBC(
+        fluxes = NamedTuple{names}(
+            Tuple(t->sign*mms_gas_flux(material, fields, j, z, t) for j in ids),
+        ),
+        inflow_temperature = NamedTuple{names}(Tuple(t->fields.T(z, t) for j in ids)),
     )
-    j = gas_idx[1]
-    return (
-        top = MassFluxBC(t -> -mms_gas_flux(material, fields, j, L, t)),
-        bottom = MassFluxBC(t -> mms_gas_flux(material, fields, j, 0.0, t)),
-    )
+    return (top = boundary(L, 1), bottom = boundary(0.0, -1))
 end
 
 # ----------------------------------------------------------------------------
-# Solve path — wrapped-RHS ODEProblem around the pure residual layer
+# Solve path — the solver's volumetric-source hook
 # ----------------------------------------------------------------------------
 
 """
 Minimal solution container for MMS runs (the harness only needs `retcode`
-plus state trajectories; `PyrolysisSolution`'s extras don't apply to the
-wrapped-RHS path).
+plus state trajectories).
 
 Fields: `t` (n_times), `T` (n_cells × n_times), `ξ` (NC × n_cells × n_times),
-`z` (n_cells × n_times cell centers — constant columns for Eulerian).
+`z` (n_cells × n_times cell centers — constant columns on a fixed mesh), and
+`statistics`, the solve's `SolverStatistics`.
 """
 struct MMSSolution
     retcode::Symbol
@@ -345,6 +353,7 @@ struct MMSSolution
     T::Matrix{Float64}
     ξ::Array{Float64,3}
     z::Matrix{Float64}
+    statistics::Any
 end
 
 """
@@ -365,32 +374,21 @@ end
 """
     solve_mms(problem, fields; kwargs...) -> MMSSolution
 
-Solve `problem` with the manufactured sources for `fields` injected into the
-pure residual (`residual!`). Replicates `solve()`'s ODE setup (same default
-integrator and analytic-Jacobian attachment) but wraps the RHS — `solve()`
-rejects unknown kwargs and has no volumetric source hook, so this IS the
-supported injection point (design note in the file header).
+Solve `problem` with the manufactured sources for `fields`, entering through
+the solver's `VolumetricSources` hook in the energy state `energy_state`: the
+species sources on the mass rows as `S_ξ V`, the temperature-rate source on
+the energy row (multiplied by the cell's heat capacity in the inventory
+form). Both are functions of `(z, t)` at the cell centers, which the colored
+Jacobian differentiates with the rest of the residual.
 
 Keywords:
-- `use_ale=false`: ALE mode (cell centers for source evaluation are then read
-  from the live z-block each RHS call).
-- `w_override=nothing`: prescribed mesh-velocity function `(z_node, t) -> w`,
-  forwarded to the workspace hook (ALE only; requires `jacobian = :fd` — the
-  structured geometry Jacobian assumes reaction-driven motion). Every
-  species source is then assembled in the material-following frame with
-  the override as `w`; T keeps the Eulerian source (the mesh-relative
-  advection kernel supplies its chain-rule term).
+- `use_ale=false`: move the mesh.
+- `w_override=nothing`: prescribed mesh-velocity function `(z_node, t) -> w`
+  (ALE only), moving the mesh over a solid at rest; every source is then the
+  Eulerian one.
 - `motion=nothing`: opt-in [`MMSMotion`](@ref) for REACTION-DRIVEN mesh
   motion (ALE only, no `w_override`): every source — T and all species —
   switches to the material-following frame with `motion.w`.
-- `jacobian=:analytic`: `:analytic` attaches the `Structured(DirectSolve())`
-  Jacobian; `:approx` attaches `Structured(ApproxSolve())` (valid only for
-  reaction-driven motion); `:fd` lets the integrator use its own colored
-  finite differences. NOTE (induced-motion caveat): with sources evaluated at
-  live cell centers, `du += S(z(u), t)` has a real ∂S/∂z chain that neither
-  structured backend carries — harmless for solution correctness and observed
-  order (inexact Newton matrix), and DirectSolve-vs-ApproxSolve comparisons
-  stay clean because both share the omission.
 - `dt=nothing`: fixed step (sets `adaptive=false`) for temporal-order sweeps.
 - `saveat=nothing`: defaults to `problem.output_times` if non-empty, else the
   final time.
@@ -401,119 +399,45 @@ function solve_mms(
     use_ale::Bool = false,
     w_override = nothing,
     motion::Union{Nothing,MMSMotion} = nothing,
-    jacobian::Symbol = :analytic,
-    integrator = KenCarp4(),
     abstol::Real = 1e-10,
     reltol::Real = 1e-8,
     dt::Union{Nothing,Real} = nothing,
     saveat = nothing,
     maxiters::Int = 10^6,
+    energy_state::Symbol = :temperature,
 )
     material = problem.material
-    # The problem's callable ICs live on the PyrolysisProblem, not the mesh;
-    # initialize_state applies them before packing u0 (same path as solve()).
-    def, ws, u0 = initialize_state(problem; use_ale = use_ale)
-    if w_override !== nothing
-        use_ale || error("w_override requires use_ale = true")
-        motion === nothing ||
-            error("w_override (prescribed motion) and motion (induced) are exclusive")
-        jacobian === :fd || error(
-            "w_override requires jacobian = :fd: the structured geometry " *
-            "Jacobian assumes reaction-driven mesh velocity (see Workspace.w_override)",
-        )
-        ws.w_override = w_override
-    end
-    motion === nothing ||
-        use_ale ||
-        error("motion (induced mesh motion) requires use_ale = true")
-
-    n = ws.layout.n_cells
-    NC = n_components(material)
-    zoff = n * (1 + NC)
-    zc0 = copy(ws.state_cache.cell_centers)
-    # Mesh velocity for the material-frame sources (nothing = Eulerian form).
-    w_species =
-        w_override !== nothing ? w_override : (motion === nothing ? nothing : motion.w)
-    w_energy = motion === nothing ? nothing : motion.w
-
-    rhs! = function (du, u, p, t)
-        residual!(du, u, def, t, ws)
-        @inbounds for i = 1:n
-            z_i = use_ale ? (u[zoff+i] + u[zoff+i+1]) / 2 : zc0[i]
-            du[i] += mms_energy_source(material, fields, z_i, t; w = w_energy)
-            for j = 1:NC
-                du[n+(j-1)*n+i] +=
-                    mms_species_source(material, fields, j, z_i, t; w = w_species)
-            end
-        end
-        return nothing
-    end
-
-    tspan = problem.tspan
-    ode_problem = if jacobian === :analytic || jacobian === :approx
-        strategy = jacobian === :approx ? ApproxSolve() : DirectSolve()
-        spec = JacobianSpec(Structured(strategy = strategy), def, ws)
-        jac! = (J, u, p, t) -> compute_jacobian!(J, spec, u, def, t, ws)
-        proto = if spec.sparsity_phys !== nothing
-            S =
-                spec.sparsity_geom === nothing ? spec.sparsity_phys :
-                (spec.sparsity_phys .| spec.sparsity_geom)
-            Float64.(S)
-        else
-            nothing
-        end
-        fn =
-            proto === nothing ? OrdinaryDiffEq.ODEFunction(rhs!; jac = jac!) :
-            OrdinaryDiffEq.ODEFunction(rhs!; jac = jac!, jac_prototype = proto)
-        OrdinaryDiffEq.ODEProblem(fn, u0, tspan)
-    elseif jacobian === :fd
-        # No Jacobian attached: the integrator differentiates the wrapped RHS
-        # itself, which requires finite differences (Float64 workspace).
-        if integrator isa KenCarp4
-            integrator = KenCarp4(autodiff = AutoFiniteDiff())
-        end
-        OrdinaryDiffEq.ODEProblem(rhs!, u0, tspan)
-    else
-        error("jacobian must be :analytic, :approx, or :fd, got $(repr(jacobian))")
-    end
-
     save_times = if saveat !== nothing
         saveat
     elseif !isempty(problem.output_times)
         problem.output_times
     else
-        [tspan[2]]
+        [problem.tspan[2]]
     end
-
+    (w_override !== nothing || motion !== nothing) &&
+        !use_ale &&
+        error("w_override and motion require use_ale = true")
+    w_override !== nothing &&
+        motion !== nothing &&
+        error("w_override (prescribed motion) and motion (induced) are exclusive")
+    NC = n_components(material)
+    w = motion === nothing ? nothing : motion.w
+    mass = (z, t) -> ntuple(j -> mms_species_source(material, fields, j, z, t; w), Val(NC))
+    energy = (z, t) -> mms_energy_source(material, fields, z, t; w)
     step_kwargs = dt === nothing ? (;) : (dt = dt, adaptive = false)
-    ode_sol = OrdinaryDiffEq.solve(
-        ode_problem,
-        integrator;
-        abstol = abstol,
-        reltol = reltol,
+    sol = solve(
+        problem;
+        energy_state,
+        use_ale,
+        w_override,
+        abstol,
+        reltol,
         saveat = save_times,
-        maxiters = maxiters,
+        maxiters,
+        sources = Pyrolysis.Assembly.VolumetricSources(mass, energy),
         step_kwargs...,
     )
-
-    nt = length(ode_sol.t)
-    T = Matrix{Float64}(undef, n, nt)
-    ξ = Array{Float64,3}(undef, NC, n, nt)
-    z = Matrix{Float64}(undef, n, nt)
-    for m = 1:nt
-        u = ode_sol.u[m]
-        @inbounds for i = 1:n
-            T[i, m] = u[i]
-            z[i, m] = use_ale ? (u[zoff+i] + u[zoff+i+1]) / 2 : zc0[i]
-            for j = 1:NC
-                ξ[j, i, m] = u[n+(j-1)*n+i]
-            end
-        end
-    end
-    retcode =
-        OrdinaryDiffEq.SciMLBase.successful_retcode(ode_sol) ? :Success :
-        Symbol(ode_sol.retcode)
-    return MMSSolution(retcode, collect(ode_sol.t), T, ξ, z)
+    return MMSSolution(sol.retcode, sol.t, sol.T, sol.ξ, sol.cell_centers, sol.statistics)
 end
 
 # ----------------------------------------------------------------------------

@@ -7,8 +7,8 @@ with runtime indices. Each component access uses a compile-time constant index.
 """
 
 # Promoted working scalar type for property evaluation with a (possibly
-# heterogeneous) tuple input and a temperature-like scalar. The analytical
-# Jacobian operators feed `ForwardDiff.Dual`s through these helpers; computing
+# heterogeneous) tuple input and a temperature-like scalar. The colored
+# Jacobian feeds `ForwardDiff.Dual`s through these helpers; computing
 # accumulator inits and guarded zero branches in this type keeps every helper
 # type-stable. Literal-`0.0` zeros instead produce `Union{Float64, Dual}`
 # locals and returns, which box and allocate on the hot Jacobian path.
@@ -131,10 +131,10 @@ end
 # Swelling-weighted (matrix) volume fractions
 # One universal γ semantics: every component contributes
 # v_j = γ_j·ξ_j/ρ_j of bulk volume — the same weighting used by the dilation
-# rate θ (Physics/volume_change.jl) and the mixture density below. For
+# rate θ (Physics/volume_change.jl). For
 # canonical materials (γ = 0 gas, γ = 1 condensed) this is a binary
 # include/exclude; a partial-γ component contributes the same volume fraction
-# here as it does to θ and ρ_bulk.
+# here as it does to θ.
 # ============================================================================
 
 # Sum of swelling-weighted specific volumes Σ γ_j·ξ_j/ρ_j
@@ -198,25 +198,27 @@ normalized to sum to 1 over the contributing components.
 
 The swelling factor γ has **one** meaning everywhere: the fraction of a
 component's intrinsic volume that contributes to the bulk (matrix) volume.
-This function shares it with the dilation rate θ = Σγⱼ(dξⱼ/dt)/ρⱼ and the
-mixture density 1/ρ = Σγⱼ·Yⱼ/ρⱼ. Consequences:
+This function shares its weights with the dilation rate θ = Σγⱼ(dξⱼ/dt)/ρⱼ.
+Skeletal occupancy and pore volume are separate quantities. Consequences:
 
 - Canonical gas (γ = 0): excluded — matches ThermaKin "when γ = 0, gaseous
   components do not contribute to the thermal conductivity" (ThermaKin2Ds
   Reference, Eqs. 8–10).
 - Canonical condensed (γ = 1): full ξ/ρ weight.
 - Partial γ: contributes the same γ-fraction of its volume here as it does
-  to θ and ρ_bulk. A γ = 0 condensed phase is consistently *volumeless*
-  (no strain, no density volume, no conductivity weight).
+  to θ. A γ = 0 condensed phase has no dilation or matrix conductivity weight;
+  it still occupies skeletal volume.
+
+This gas-exclusion limit does not identify our per-component gamma with
+ThermaKin's mixture gas swelling factor; in particular its liquid volume is
+not removed by `L SWELLING: 0` (ThermaKin Eqs. 3–4).
 
 Used for:
 - Effective thermal conductivity
 - Effective emissivity
 
-NOT used for the gas-transfer coefficient λ: gas diffusion happens *through*
-the pore space, so [`effective_gas_transfer`](@ref) mixes on the all-phase
-occupancy basis [`volume_fractions`](@ref) (gas included), never this
-matrix basis.
+Gas transport uses `transport_matrix_state`, which excludes gases even when
+a gas component has nonzero γ, and has its own explicit endpoint closure.
 """
 @inline function solid_volume_fractions(ξ::NTuple{NC,<:Real}, T::Real, material) where {NC}
     comps = material.components
@@ -265,8 +267,8 @@ absorption too; with it the void cell degrades to the gas-mixture
 conductivity (heat still conducts through the pore gas). The blend keeps
 ∂k_eff/∂ξ bounded through the transition: the matrix fractions are
 normalised by `φ_m`, so their derivatives grow as `1/φ_m²` and a hard switch
-would hand the Jacobian entries of order `1/φ_m²` in a cell that a fixed
-mesh cannot park.
+would hand the Jacobian entries of order `1/φ_m²` in a cell that stays in
+the system on a fixed mesh.
 """
 @inline function mixing_volume_fractions(ξ::NTuple{NC,<:Real}, T::Real, material) where {NC}
     φ_m = matrix_volume_fraction(ξ, T, material)
@@ -279,105 +281,26 @@ mesh cannot park.
     return ntuple(j -> w * v_solid[j] + (1 - w) * v_full[j], Val(NC))
 end
 
-# ============================================================================
-# mixture_density with swelling
-# ============================================================================
+"""
+	skeletal_volume_fraction(ξ::NTuple{NC,<:Real}, T::Real, material) -> Real
 
-# Swelling-weighted specific volume of the bulk, mass fractions computed
-# inline: v = Σ γ_j·Y_j/ρ_j. Same universal γ semantics as
-# solid_volume_fractions and the θ kernel: γ applies to every component, with
-# a γ = 0 component contributing zero volume.
-@generated function _specific_vol_with_swelling_direct(
-    ξ,
-    inv_ρ,
-    T,
-    comps::Tuple,
-    ::Val{NC},
+The bulk-volume fraction occupied by the condensed (solid and liquid)
+skeleton, `Σⱼ ξⱼ / ρⱼ_intrinsic(T)` over the condensed components, without a
+clamp: `1 − skeletal_volume_fraction` is the pore fraction (porosity), which a
+caller floors smoothly where it divides by it and reads unclamped for
+admissibility. The intrinsic density is that of the cell-wall material itself,
+ignoring pore volume; a component constructed without `ρ_intrinsic` or `φ`
+falls back to its bulk density and contributes no pore volume.
+"""
+@inline function skeletal_volume_fraction(
+    ξ::NTuple{NC,<:Real},
+    T::Real,
+    material,
 ) where {NC}
-    expr = quote
-        v = zero(_prop_type(ξ, T))
-    end
-    for i = 1:NC
-        push!(expr.args, quote
-            c = comps[$i]
-            γ = c.swelling_factor
-            if γ > 0.0
-                Y_i = ξ[$i] * inv_ρ  # Compute mass fraction inline
-                v += γ * Y_i / c.density(T)
-            end
-        end)
-    end
-    push!(expr.args, :(return v))
-    return expr
+    return _skeletal_volume(ξ, T, material.components, Val(NC))
 end
 
-"""
-	mixture_density(ξ::NTuple{NC,Float64}, T::Float64, material::Material) -> Float64
-
-Compute bulk mixture density from mass concentrations.
-
-The bulk specific volume uses the universal swelling weighting
-
-	1/ρ = Σⱼ γⱼ·Yⱼ/ρⱼ
-
-— each component contributes the γ-fraction of its intrinsic volume to the
-bulk, exactly as it does to the dilation rate θ and to
-[`solid_volume_fractions`](@ref) (one γ semantics). For
-canonical materials (γ = 0 gas, γ = 1 condensed) this is the familiar
-condensed-only specific volume.
-
-PERFORMANCE: Uses optimized version that computes mass fractions inline to avoid
-allocating intermediate NTuple.
-"""
-@inline function mixture_density(ξ::NTuple{NC,<:Real}, T::Real, material) where {NC}
-    W = _prop_type(ξ, T)
-    ρ_total = sum(ξ)
-    if ρ_total < 1e-20
-        return zero(W)
-    end
-
-    inv_ρ = 1.0 / ρ_total
-    # Use optimized version that computes mass fractions inline
-    v_specific =
-        _specific_vol_with_swelling_direct(ξ, inv_ρ, T, material.components, Val(NC))
-
-    if v_specific < 1e-20
-        return zero(W)
-    end
-
-    return convert(W, 1.0 / v_specific)
-end
-
-# ============================================================================
-# Porosity
-# ============================================================================
-
-"""
-	porosity(ξ::NTuple{NC,Float64}, T::Float64, material::Material) -> Float64
-
-Compute porosity (void fraction): the bulk-volume fraction not occupied by the
-solid/liquid skeletal frame. With component **intrinsic** (skeletal) densities
-ρⱼ_intrinsic:
-
-	φ = clamp(1 - Σⱼ_solid_or_liquid (ξⱼ / ρⱼ_intrinsic), 0.0, 1.0)
-
-The intrinsic density is the density of the cell-wall material itself,
-ignoring pore volume — distinct from the bulk density used for thermal mixing
-rules. When a component was constructed without an explicit `ρ_intrinsic` /
-`φ` kwarg, `get_intrinsic_density` falls back to the bulk density, so the
-component contributes no pore volume.
-
-The result enters the gas-pressure formula `P = N(ξ,T)/φ`. Derivatives are
-taken by ForwardDiff through this function (the live structured Jacobian
-differentiates the clamped expression directly — there is no separate
-analytic-derivative path). The single canonical implementation used by
-production property updates lives here.
-"""
-@inline function porosity(ξ::NTuple{NC,<:Real}, T::Real, material) where {NC}
-    return _porosity_void_frac(ξ, T, material.components, Val(NC))
-end
-
-@generated function _porosity_void_frac(
+@generated function _skeletal_volume(
     ξ::NTuple{NC,<:Real},
     T::Real,
     comps::Tuple,
@@ -397,7 +320,7 @@ end
             end
         end)
     end
-    push!(expr.args, :(return clamp(1.0 - solid_vol, 0.0, 1.0)))
+    push!(expr.args, :(return solid_vol))
     return expr
 end
 

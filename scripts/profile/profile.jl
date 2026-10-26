@@ -1,6 +1,6 @@
 #!/usr/bin/env julia
-# Deep-profiling harness for Pyrolysis.jl: runs the canonical configurations
-# from test/perf/perf_helpers.jl under Profile (CPU flamegraphs) and
+# Deep-profiling harness for Pyrolysis.jl: runs five canonical configurations
+# under Profile (CPU flamegraphs) and
 # Profile.Allocs (allocation sites), plus a wall-clock/GC summary, so
 # slowdowns and allocations can be attributed to file:line.
 #
@@ -8,10 +8,10 @@
 #   julia --project=scripts/profile scripts/profile/profile.jl [options]
 #
 # Options (all --key=value):
-#   --config=NAME    baseline_eulerian | ale_no_radiation |
-#                    eulerian_surface_absorption | baseline_eulerian_darcy |
-#                    ale_beer_lambert_darcy | all
-#                    (default: ale_beer_lambert_darcy — the heaviest physics)
+#   --config=NAME    fixed_no_radiation | moving_no_radiation |
+#                    fixed_surface_absorption | fixed_darcy |
+#                    moving_beer_lambert_darcy | all
+#                    (default: moving_beer_lambert_darcy — the heaviest physics)
 #   --mode=MODE      summary | cpu | allocs | all   (default: all)
 #   --target=T       residual | jacobian | solve | all   (default: all)
 #   --t-final=SEC    end-to-end solve horizon [s]   (default: 5.0)
@@ -23,11 +23,6 @@
 #                    unbounded run has OOM-killed a 30 GiB machine.
 #   --from-c=BOOL    include C/runtime frames (GC, libm) in CPU profiles
 #                    (default: false — Julia-only frames attribute cleanest)
-#   --strategy=S     direct | approx | structured | matrixfree — the
-#                    Structured-backend linear-solve strategy (default:
-#                    direct = full assembly, the verification anchor;
-#                    approx = the reduced-ALE profile that drops the dense
-#                    ALE couplings — the production target for ALE)
 #
 # Outputs:
 #   - Terminal: timing/allocation/GC summary, integrator stats, top CPU frames,
@@ -37,33 +32,139 @@
 #       julia --project=scripts/profile -e 'using PProf; PProf.refresh(file="<file>"); readline()'
 #     or `pprof -http=:8080 <file>` if you have the pprof binary.
 #
-# Note: residual/jacobian hot ops are evaluated at the *initial* state (same
-# convention as the zero-allocation gates in test/perf/). The end-to-end solve
-# target exercises the realistic mixed-state path.
+# Note: residual/jacobian hot ops are evaluated at the *initial* state of the
+# problem `setup` builds (the convention of the allocation tests in
+# test/jacobian/). The end-to-end solve target exercises the realistic
+# mixed-state path.
 
 using Logging
 using Profile
 using Printf
 using PProf
 using Pyrolysis
-using Pyrolysis: residual!
-using Pyrolysis.Jacobian:
-    JacobianSpec, Structured, DirectSolve, ApproxSolve, compute_jacobian!
-using Pyrolysis.Materials: SURFACE_ABSORPTION, BEER_LAMBERT, NO_RADIATION
+using Pyrolysis.Assembly: residual!
+using Pyrolysis.ColoredJacobian: jac_prototype, jacobian!
 
 const ROOT = dirname(dirname(@__DIR__))
 const OUTDIR = joinpath(@__DIR__, "output")
 
-# Canonical (def, ws, u, du) builders + canonical materials.
-include(joinpath(ROOT, "test", "perf", "perf_helpers.jl"))
+const N_CELLS = 100
 
-const BUILDERS = Dict(
-    "baseline_eulerian" => build_baseline_eulerian,
-    "ale_no_radiation" => build_ale_no_radiation,
-    "eulerian_surface_absorption" => build_eulerian_surface_absorption,
-    "baseline_eulerian_darcy" => build_baseline_eulerian_darcy,
-    "ale_beer_lambert_darcy" => build_ale_beer_lambert_darcy,
+function _pmma()
+    virgin = SolidComponent(
+        :virgin,
+        ρ = 1190.0,
+        φ = 0.01,
+        λ = 1e-6,
+        c = 1420.0,
+        k = 0.21,
+        ε = 0.86,
+    )
+    gas = GaseousComponent(:MMA, M = 0.100, c = 1500.0, k = 0.02)
+    rxn = Reaction(:decomp, 1 => 2, A = 8.5e12, E = 188e3, h = 870e3)
+    return Material(
+        name = :PMMA,
+        gas_transport = LumpedTransfer(
+            endpoint = LumpedEndpoint(λ = 1e-6, κ = 0.0, max_skeletal_occupancy = 0.001),
+        ),
+        components = (virgin, gas),
+        reactions = (rxn,),
+    )
+end
+
+# A permeable charring solid; an intrinsic density of 1500 kg/m³ gives an
+# initial porosity of 2/3.
+function _wood()
+    virgin = SolidComponent(
+        :wood,
+        ρ = 500.0,
+        c = 1500.0,
+        k = 0.15,
+        ε = 0.9,
+        α = 1000.0,
+        κ = 1e-14,
+        λ = 1e-5,
+        ρ_intrinsic = 1500.0,
+    )
+    gas = GaseousComponent(:pyrgas, M = 0.06, c = 1800.0, k = 0.03)
+    rxn = Reaction(:pyrolysis, 1 => 2, A = 1e10, E = 150e3, h = 300e3)
+    return Material(
+        name = :wood,
+        gas_transport = LumpedTransfer(
+            endpoint = LumpedEndpoint(λ = 1e-5, κ = 1e-14, max_skeletal_occupancy = 0.001),
+        ),
+        components = (virgin, gas),
+        reactions = (rxn,),
+    )
+end
+
+_radiative_top() =
+    RadiativeFluxBC(flux = 50e3) +
+    RadiativeBC(T_inf = 300.0) +
+    ConvectiveBC(h = 10.0, T_inf = 300.0)
+
+# Darcy flow vents at the ambient pressure through the exposed face.
+_venting() = (
+    top = AmbientGasBC(
+        GasReservoir(P = 101325.0, T = 300.0, mole_fractions = (pyrgas = 1.0,)),
+    ),
+    bottom = ImpermeableBC(),
 )
+
+# Each configuration: its material, boundary conditions and solve options.
+const CONFIGS = Dict(
+    "fixed_no_radiation" => (
+        material = _pmma,
+        bc = () -> BoundaryConditionSet(
+            thermal = (top = HeatFluxBC(50e3), bottom = AdiabaticBC()),
+        ),
+        options = (;),
+    ),
+    "moving_no_radiation" => (
+        material = _pmma,
+        bc = () -> BoundaryConditionSet(
+            thermal = (top = HeatFluxBC(50e3), bottom = AdiabaticBC()),
+        ),
+        options = (use_ale = true,),
+    ),
+    "fixed_surface_absorption" => (
+        material = _pmma,
+        bc = () -> BoundaryConditionSet(
+            thermal = (top = _radiative_top(), bottom = AdiabaticBC()),
+        ),
+        options = (radiation_model = SURFACE_ABSORPTION,),
+    ),
+    "fixed_darcy" => (
+        material = _wood,
+        bc = () -> BoundaryConditionSet(
+            thermal = (top = HeatFluxBC(50e3), bottom = AdiabaticBC()),
+            mass = _venting(),
+        ),
+        options = (;),
+    ),
+    "moving_beer_lambert_darcy" => (
+        material = _wood,
+        bc = () -> BoundaryConditionSet(
+            thermal = (top = _radiative_top(), bottom = AdiabaticBC()),
+            mass = _venting(),
+        ),
+        options = (use_ale = true, radiation_model = BEER_LAMBERT),
+    ),
+)
+
+# The configuration's problem over `t_final` and its solve options.
+function build_case(name; t_final)
+    c = CONFIGS[name]
+    problem = PyrolysisProblem(
+        mesh = create_uniform_mesh(0.01, N_CELLS),
+        material = c.material(),
+        bc_set = c.bc(),
+        tspan = (0.0, t_final),
+        dt_initial = 1e-3,
+        output_times = [0.0, t_final / 2, t_final],
+    )
+    return problem, c.options
+end
 
 # ---------------------------------------------------------------------------
 # CLI
@@ -77,7 +178,6 @@ function parse_cli(args)
         "seconds" => "3.0",
         "alloc-rate" => "0.01",
         "from-c" => "false",
-        "strategy" => "direct",
     )
     for a in args
         startswith(a, "--") || error("unrecognized argument $a (use --key=value)")
@@ -90,90 +190,6 @@ function parse_cli(args)
 end
 
 _expand(value, all_names) = value == "all" ? all_names : [value]
-
-const STRATEGIES = Dict("direct" => DirectSolve, "approx" => ApproxSolve)
-
-# ---------------------------------------------------------------------------
-# End-to-end solve cases — mirror the canonical hot-op configs, but with the
-# radiative flux delivered through a RadiativeFluxBC so `solve` picks it up
-# (the hot-op builders inject intensity via `to_problem_def` instead).
-# ---------------------------------------------------------------------------
-function build_solve_case(name; t_final, strat_name = "direct")
-    radiative_top() =
-        RadiativeFluxBC(flux = 50e3) +
-        RadiativeBC(T_inf = 300.0) +
-        ConvectiveBC(h = 10.0, T_inf = 300.0)
-    # Darcy needs somewhere for the pressure to vent — cone-style top mass BCs
-    # (matches examples/07; the hot-op fixtures keep the impermeable default
-    # because they never integrate).
-    venting_mass_bcs() = (
-        top = DiffusiveMassBC(0.05) + DirichletPressureBC(101325.0),
-        bottom = ImpermeableBC(),
-    )
-    # Solvable wood variant: the hot-op fixture (`_wood_like_material`) has no
-    # ρ_intrinsic, so φ₀ = 0 and `solve` rejects it at validation for any
-    # permeable material. Wood ρ_intrinsic ≈ 1500 kg/m³ gives φ₀ = 2/3. The
-    # hot-op fixture itself must stay as-is — the perf gates pin it.
-    function _wood_solvable()
-        virgin = SolidComponent(
-            :wood,
-            ρ = 500.0,
-            c = 1500.0,
-            k = 0.15,
-            ε = 0.9,
-            α = 1000.0,
-            κ = 1e-14,
-            λ = 1e-5,
-            ρ_intrinsic = 1500.0,
-        )
-        gas = GaseousComponent(:pyrgas, M = 0.06, c = 1800.0, k = 0.03, λ = 5e-5)
-        rxn = Reaction(:pyrolysis, 1 => 2, A = 1e10, E = 150e3, h = -300e3)
-        return Material(name = :wood, components = (virgin, gas), reactions = (rxn,))
-    end
-
-    if name == "baseline_eulerian" || name == "ale_no_radiation"
-        mat = _pmma_material()
-        bc =
-            BoundaryConditionSet(thermal = (top = HeatFluxBC(50e3), bottom = AdiabaticBC()))
-        radiation_model = NO_RADIATION
-    elseif name == "eulerian_surface_absorption"
-        mat = _pmma_material()
-        bc = BoundaryConditionSet(thermal = (top = radiative_top(), bottom = AdiabaticBC()))
-        radiation_model = SURFACE_ABSORPTION
-    elseif name == "baseline_eulerian_darcy"
-        mat = _wood_solvable()
-        bc = BoundaryConditionSet(
-            thermal = (top = HeatFluxBC(50e3), bottom = AdiabaticBC()),
-            mass = venting_mass_bcs(),
-        )
-        radiation_model = NO_RADIATION
-    elseif name == "ale_beer_lambert_darcy"
-        mat = _wood_solvable()
-        bc = BoundaryConditionSet(
-            thermal = (top = radiative_top(), bottom = AdiabaticBC()),
-            mass = venting_mass_bcs(),
-        )
-        radiation_model = BEER_LAMBERT
-    else
-        error("unknown config $name")
-    end
-
-    use_ale = startswith(name, "ale_")
-    mesh = create_uniform_mesh(0.01, PERF_N_CELLS, Val(PERF_NC))
-    problem = PyrolysisProblem(
-        mesh = mesh,
-        material = mat,
-        bc_set = bc,
-        tspan = (0.0, t_final),
-        dt_initial = 1e-3,
-        output_times = [0.0, t_final / 2, t_final],
-    )
-    kwargs = (progress = false, use_ale = use_ale, radiation_model = radiation_model)
-    if strat_name != "direct"
-        kwargs = (kwargs..., jacobian = Structured(strategy = STRATEGIES[strat_name]()))
-    end
-    return problem, kwargs
-end
 
 # ---------------------------------------------------------------------------
 # Pretty-printing helpers
@@ -225,9 +241,9 @@ function summarize_hot_op(label, loop!, n)
     )
 end
 
-function summarize_solve(config; t_final, strat_name)
+function summarize_solve(config; t_final)
     # Compilation is excluded by the warm-up solve in `run_config`.
-    problem, kwargs = build_solve_case(config; t_final, strat_name)
+    problem, kwargs = build_case(config; t_final)
     GC.gc()
     stats = @timed solve(problem; kwargs...)
     sol = stats.value
@@ -426,27 +442,17 @@ end
 # ---------------------------------------------------------------------------
 # Per-config driver
 # ---------------------------------------------------------------------------
-function run_config(
-    config;
-    modes,
-    targets,
-    t_final,
-    seconds,
-    alloc_rate,
-    from_c,
-    strat_name,
-)
-    # File stems keep the historical names for the default strategy.
-    sfx = strat_name == "direct" ? "" : "__$(strat_name)"
-    backend() = Structured(strategy = STRATEGIES[strat_name]())
+function run_config(config; modes, targets, t_final, seconds, alloc_rate, from_c)
     banner("config: $config")
 
     if "residual" in targets || "jacobian" in targets
-        def, ws, u, du = BUILDERS[config]()
-
-        jac_spec = JacobianSpec(backend(), def, ws)
-        J = Pyrolysis.Jacobian._alloc_target(jac_spec, length(u))
-        compute_jacobian!(J, jac_spec, u, def, 0.0, ws)
+        problem, options = build_case(config; t_final)
+        cp = setup(problem; options...)
+        def, ws, cj = cp.def, cp.ws, cp.jacobian
+        u = copy(cp.u0)
+        du = similar(u)
+        J = jac_prototype(cj)
+        jacobian!(J, cj, u, 0.0)
 
         residual_loop! = n -> begin
             for _ = 1:n
@@ -455,8 +461,7 @@ function run_config(
         end
         jacobian_loop! = n -> begin
             for _ = 1:n
-                fill!(J, 0.0)
-                compute_jacobian!(J, jac_spec, u, def, 0.0, ws)
+                jacobian!(J, cj, u, 0.0)
             end
         end
 
@@ -475,7 +480,7 @@ function run_config(
             if "cpu" in modes
                 profile_cpu(
                     "$config/$name",
-                    joinpath(OUTDIR, "$(config)__$(name)$(sfx)__cpu.pb.gz"),
+                    joinpath(OUTDIR, "$(config)__$(name)__cpu.pb.gz"),
                     () -> loop!(n);
                     delay = 1e-4,
                     from_c = from_c,
@@ -487,7 +492,7 @@ function run_config(
                 n_alloc = calibrate_alloc_evals(loop!)
                 profile_allocs(
                     "$config/$name",
-                    joinpath(OUTDIR, "$(config)__$(name)$(sfx)__allocs.pb.gz"),
+                    joinpath(OUTDIR, "$(config)__$(name)__allocs.pb.gz"),
                     () -> loop!(n_alloc);
                     sample_rate = 1.0,
                 )
@@ -500,18 +505,18 @@ function run_config(
         # Warm-up: compiles the solve path and proves the case integrates at
         # all; skip the expensive profiled runs if it cannot.
         ok = _guarded("solve warm-up") do
-            wp, wkw = build_solve_case(config; t_final = min(t_final, 0.5), strat_name)
+            wp, wkw = build_case(config; t_final = min(t_final, 0.5))
             solve(wp; wkw...)
         end
         if ok && "summary" in modes
-            _guarded(() -> summarize_solve(config; t_final, strat_name), "solve summary")
+            _guarded(() -> summarize_solve(config; t_final), "solve summary")
         end
         if ok && "cpu" in modes
-            problem, kwargs = build_solve_case(config; t_final, strat_name)
+            problem, kwargs = build_case(config; t_final)
             _guarded("solve CPU profile") do
                 profile_cpu(
                     "$config/solve",
-                    joinpath(OUTDIR, "$(config)__solve$(sfx)__cpu.pb.gz"),
+                    joinpath(OUTDIR, "$(config)__solve__cpu.pb.gz"),
                     () -> solve(problem; kwargs...);
                     delay = 1e-3,
                     from_c = from_c,
@@ -519,11 +524,11 @@ function run_config(
             end
         end
         if ok && "allocs" in modes && enough_memory("solve allocation profile")
-            problem, kwargs = build_solve_case(config; t_final, strat_name)
+            problem, kwargs = build_case(config; t_final)
             _guarded("solve allocation profile") do
                 profile_allocs(
                     "$config/solve",
-                    joinpath(OUTDIR, "$(config)__solve$(sfx)__allocs.pb.gz"),
+                    joinpath(OUTDIR, "$(config)__solve__allocs.pb.gz"),
                     () -> solve(problem; kwargs...);
                     sample_rate = alloc_rate,
                 )
@@ -535,21 +540,18 @@ end
 # ---------------------------------------------------------------------------
 function main()
     opts = parse_cli(ARGS)
-    configs = _expand(opts["config"], sort(collect(keys(BUILDERS))))
+    configs = _expand(opts["config"], sort(collect(keys(CONFIGS))))
     modes = _expand(opts["mode"], ["summary", "cpu", "allocs"])
     targets = _expand(opts["target"], ["residual", "jacobian", "solve"])
     t_final = parse(Float64, opts["t-final"])
     seconds = parse(Float64, opts["seconds"])
     alloc_rate = parse(Float64, opts["alloc-rate"])
     from_c = parse(Bool, opts["from-c"])
-    strat_name = opts["strategy"]
 
     for c in configs
-        haskey(BUILDERS, c) ||
-            error("unknown config $c — choose from $(join(keys(BUILDERS), ", "))")
+        haskey(CONFIGS, c) ||
+            error("unknown config $c — choose from $(join(keys(CONFIGS), ", "))")
     end
-    haskey(STRATEGIES, strat_name) ||
-        error("unknown strategy $strat_name — choose from $(join(keys(STRATEGIES), ", "))")
 
     mkpath(OUTDIR)
     println(
@@ -562,12 +564,10 @@ function main()
         join(modes, ", "),
         " | targets: ",
         join(targets, ", "),
-        " | strategy: ",
-        strat_name,
     )
 
     for config in configs
-        run_config(config; modes, targets, t_final, seconds, alloc_rate, from_c, strat_name)
+        run_config(config; modes, targets, t_final, seconds, alloc_rate, from_c)
         GC.gc()   # drop per-config workspaces/solutions before the next build
     end
 

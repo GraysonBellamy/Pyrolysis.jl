@@ -11,17 +11,17 @@ through the physics and the code of the main studies in detail.
 
 | Script | What it models |
 |:---|:---|
-| [`06_cone_calorimeter.jl`](https://github.com/GraysonBellamy/Pyrolysis.jl/blob/main/examples/06_cone_calorimeter.jl) | PMMA slab under a 25 kW/m² cone heat flux with Beer–Lambert in-depth absorption, single-step Arrhenius kinetics, and gas release, overlaid on ThermaKin reference outputs when they are present. |
-| [`06_cone_calorimeter_surface_absorption.jl`](https://github.com/GraysonBellamy/Pyrolysis.jl/blob/main/examples/06_cone_calorimeter_surface_absorption.jl) | The same PMMA case with the opaque surface-absorption radiation model, for comparison against the semi-transparent variant. |
-| [`07_douglas_fir_cone.jl`](https://github.com/GraysonBellamy/Pyrolysis.jl/blob/main/examples/07_douglas_fir_cone.jl) | Douglas fir with multi-step kinetics, moisture, Darcy–Fick transport, and ALE mesh motion. |
-| [`08_pressure_treated_wood_cone.jl`](https://github.com/GraysonBellamy/Pyrolysis.jl/blob/main/examples/08_pressure_treated_wood_cone.jl) | Pressure-treated wood with moisture, mapped from a ThermaKin calibration. |
+| [`06_cone_calorimeter.jl`](https://github.com/GraysonBellamy/Pyrolysis.jl/blob/main/examples/06_cone_calorimeter.jl) | PMMA slab under a 25 kW/m² cone heat flux with the incident radiation absorbed at the surface, single-step Arrhenius kinetics, and gas release, overlaid on ThermaKin reference outputs when they are present. |
+| [`06_cone_calorimeter_surface_absorption.jl`](https://github.com/GraysonBellamy/Pyrolysis.jl/blob/main/examples/06_cone_calorimeter_surface_absorption.jl) | The same PMMA case with the surface-absorption radiation model set explicitly; it absorbs the radiation at the exposed face as the default does. |
+| [`07_douglas_fir_cone.jl`](https://github.com/GraysonBellamy/Pyrolysis.jl/blob/main/examples/07_douglas_fir_cone.jl) | Douglas fir with multi-step kinetics, moisture, lumped wall transfer and Darcy flow, and a mesh that moves with the solid. |
+| [`08_pressure_treated_wood_cone.jl`](https://github.com/GraysonBellamy/Pyrolysis.jl/blob/main/examples/08_pressure_treated_wood_cone.jl) | Pressure-treated wood with moisture and multi-step Arrhenius kinetics. |
 | [`macfp/macfp_gasification.jl`](https://github.com/GraysonBellamy/Pyrolysis.jl/blob/main/examples/macfp/macfp_gasification.jl) | MaCFP gasification benchmark with parallel solves. |
 
 ## Transport and physics demonstrations
 
 | Script | What it models |
 |:---|:---|
-| [`08_darcy_fick_demo.jl`](https://github.com/GraysonBellamy/Pyrolysis.jl/blob/main/examples/08_darcy_fick_demo.jl) | Pressure-driven Darcy–Fick gas transport through a charring, wood-like material. |
+| [`08_gas_transport.jl`](https://github.com/GraysonBellamy/Pyrolysis.jl/blob/main/examples/08_gas_transport.jl) | Lumped and dusty-gas transport through a charring slab, with atmospheric reservoir exchange and species diagnostics. |
 | [`moisture_hos_comparison.jl`](https://github.com/GraysonBellamy/Pyrolysis.jl/blob/main/examples/moisture_hos_comparison.jl) | Effect of the moisture heat-of-sorption model on drying and pyrolysis. |
 | [`convergence_douglas_fir.jl`](https://github.com/GraysonBellamy/Pyrolysis.jl/blob/main/examples/convergence_douglas_fir.jl) | Grid-convergence study over mesh resolutions (uses `Distributed`). |
 
@@ -29,8 +29,6 @@ through the physics and the code of the main studies in detail.
 
 | Script | What it models |
 |:---|:---|
-| [`ptw_comparison.jl`](https://github.com/GraysonBellamy/Pyrolysis.jl/blob/main/examples/ptw_comparison.jl) | Pressure-treated wood results against ThermaKin output (includes a ThermaKin output parser). |
-| [`df_sensitivity_comparison.jl`](https://github.com/GraysonBellamy/Pyrolysis.jl/blob/main/examples/df_sensitivity_comparison.jl) | Inter-code sensitivity comparison for the Douglas fir case. |
 | [`literature_comparison/literature_comparison.jl`](https://github.com/GraysonBellamy/Pyrolysis.jl/blob/main/examples/literature_comparison/literature_comparison.jl) | Runs the cone cases across literature property sets via serialisable run specs. |
 
 ## Inverse analysis
@@ -51,6 +49,12 @@ contains forward uncertainty propagation via Latin Hypercube sampling
 expansion (`sensitivity_sobol.jl`), and a PCE degree-selection study
 (`compare_degrees.jl`), together with write-ups of the results.
 
+## Saving results to a file
+
+| Script | What it models |
+|:---|:---|
+| [`export_results_csv.jl`](https://github.com/GraysonBellamy/Pyrolysis.jl/blob/main/examples/export_results_csv.jl) | Writes a solution to two CSV files that open in Excel: surface and back-face temperature, mass, mass-loss rate and thickness against time, and the temperature and concentration profiles. Its `write_results_csv` function can be copied into any script. |
+
 ## Running the examples
 
 ```julia
@@ -60,4 +64,7 @@ julia --project=examples examples/06_cone_calorimeter.jl
 
 The examples environment adds Plots and other post-processing dependencies on
 top of the package itself. Scripts that use `Distributed` (the convergence and
-sweep studies) document their worker setup at the top of the file.
+sweep studies) document their worker setup at the top of the file. Every
+simulation script runs a short check of itself with `PYROLYSIS_SMOKE=1`; the
+[examples README](https://github.com/GraysonBellamy/Pyrolysis.jl/blob/main/examples/README.md)
+lists each script's smoke command, its class and the data files it needs.

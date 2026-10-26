@@ -1,0 +1,6 @@
+"qoi","value","exact","error","tol","within_tol","comment"
+"complete burnout: live thickness at t_end is the substrate",0.011996668568697568,0.011996666666666666,1.9020309025702398e-9,1.0e-5,true,"every PMMA cell deactivated; 12.0 ± 0.01 mm"
+"mass loss of the gasified PMMA layer",65.33831728695898,65.338332041327,1.4754368024227915e-5,0.3,true,"percent of the initial mass; exact = the layer's initial mass / m₀"
+"mass ledger closure",1.4785364774139537e-11,0.0,1.4785364774139537e-11,3.0e-5,true,"total-mass drop vs ∫ ṁ″ dt over the accepted steps (three-point Gauss–Legendre per step) and the mass deactivation vented"
+"clamped surface balances on accepted states",0.0,0.0,0.0,0.5,true,"boundary temperature solve converged inside the property bracket at every accepted step"
+"deactivation invocations for the PMMA layer (reported)",1.0,1.0,0.0,Inf,true,"60 cells; largest merged fraction 0.0614 (6.14 ε_m); reported, not asserted"

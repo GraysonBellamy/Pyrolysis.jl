@@ -2,16 +2,16 @@
 # V-CPL-02 — Landau ablation problem (exact steadily-regressing surface)
 # =============================================================================
 #
-# H.G. Landau, Q. Appl. Math. 8:81 (1950). The flagship ALE case: none of
-# FDS/Gpyro/ThermaKin verify against it. Semi-infinite solid, constant net
+# H.G. Landau, Q. Appl. Math. 8:81 (1950). An analytical ALE check.
+# Semi-infinite solid, constant net
 # surface flux q″, material removed at ablation temperature T_p with heat of
 # ablation ΔH_p. Exact steady traveling wave (exact/landau.jl):
 #
 #   v_ss = q″/(ρ[c(T_p − T₀) + ΔH_p]),  T(ζ) = T₀ + (T_p − T₀)e^(−v_ss ζ/α)
 #
 # Realization: single reaction solid → gas with γ_gas = 0 (volume loss at
-# intrinsic density ⇒ surface regression) under ALE with depletion-driven
-# cell merging. The kinetics-controlled front approximates the fixed-T_p
+# intrinsic density ⇒ surface regression) under ALE with cell
+# deactivation. The kinetics-controlled front approximates the fixed-T_p
 # ablation limit; (A, E) are chosen on the leading-order Laplace locus
 #
 #   A = v² E (T_p − T₀) e^(E/RT_p) / (α R T_p²)
@@ -22,75 +22,52 @@
 # MEASURED surface temperature — an identity that must hold for the steady
 # wave regardless of kinetics — and the design locus is only a loose check.
 #
-# Gas heat capacity is set EQUAL to the solid's (c_gas = c_solid): then the
-# heat of reaction ΔH(T) is T-independent (Kirchhoff) and the traveling-wave
-# identity v = v_ss(measured T_s) is exact for ANY kinetics — the regression
-# anchor. With c_gas ≈ 0 the identity is NOT exact at finite E: the true wave
-# consumes only c(T̄_form − T₀) + ΔH per kg (conversion happens at T̄_form <
-# T_s), so v runs ≈ +RT_s²/E·c/(cΔT+ΔH) fast against v_ss(T_s) — that
-# configuration belongs to report-mode studies, not to this pinned QoI.
+# With c_gas = c_solid the reaction enthalpy is constant. Integrating the
+# steady first law from stationary virgin solid at T₀ to the escaping gas
+# gives q″ = ρ v [c(T_s − T₀) + ΔH], independently of the front's kinetics.
+# This identity requires a stationary cold far field and negligible changes
+# in stored energy and gas holdup. The reaction gate leaves the virgin solid
+# inert. The broader-front companion uses a longer domain and later window;
+# both cases check the back temperature and report mesh refinement.
 #
-# The c_gas = c_solid anchor also guards the relative-velocity ALE energy
-# formulation (tech-ref §11.2.2): a spurious full-mesh-velocity T-advection
-# term (`+w·∂T/∂z` applied although the mesh rides the collapsing solid)
-# would break this identity by ≈ c·(T_s − T̄_form) ≈ RT_s²/E·c per kg — a
-# few-percent deficit. For the identity to be a sharp guard the QoI window
-# must sit deep in the steady wave: from a uniform-T₀ start the true
-# initial-value solution approaches the traveling wave as e^(−t/τ) with
-# τ = α/v² ≈ 0.25 s — heat is still being banked into the growing thermal
-# tail, so v(t) runs below v_ss(measured T_s) while T_s itself equilibrates
-# early. That deficit is the correct transient of the initial-value problem,
-# not solver error: the windowed first law (q″Δt = ΔE_stored + ablation
-# enthalpy) closes throughout the approach, and the pre-ablation phase
-# matches Landau's exact constant-flux heat-up T_s(t) = T₀ + 2q″√(t/(πρck)).
-# The steady exact solution is simply not a valid reference before ~6τ: in
-# a window at 2–4τ the residual deficit is ≈0.9% and mesh-INDEPENDENT
-# (n=60→240 ladder, observed order 0.11). The window therefore sits at ≥6τ,
-# where the remaining residual is the §12.3.2 half-cell T_s closure with the
-# reaction zone inside the boundary half-cell — mesh-DEPENDENT as it should
-# be (it shifts v_ss(measured T_s) but not the actual regression rate):
-# ~1.3% at Δz ≈ 2δ_r, ~7e-4 at the CI mesh Δz ≈ δ_r — so the pinned
-# tolerance actually arms the ALE guard.
-#
-# Blowing correction stays OFF (exact solution assumes prescribed net flux).
-# Depletion limiter stays ON: the tanh roll-off is part of the regression
-# physics here (front cells are consumed to zero) and its effect is contained
-# in the pinned tolerances.
-#
-# CI runs no ConvergenceSpec: the case resolves a moving reaction front
-# (δ_r ≈ δ·RT_s²/(E(T_s−T₀)) ≈ 53 μm ≈ Δz at the CI mesh) and a meaningful
-# order study requires the report-mode Richardson ladder; the assert-mode
-# QoIs below are all physics identities with pinned headroom instead.
-# V-CPL-02b (broader front, E halved) doubles as the kinetics-limit
-# insensitivity check of the ablation-temperature locus.
+# The half-cell surface-temperature closure and finite front resolution
+# contribute spatial error. The Laplace design locus remains a loose check;
+# it is not the analytical reference for the measured regression rate.
+# Prescribed net heat flux has no blowing correction. The depletion limiter
+# is active as front cells approach deactivation.
 
-function _vcpl02_common(; E::Float64, v_target::Float64, n_default::Int)
+function _vcpl02_common(;
+    E::Float64,
+    v_target::Float64,
+    n_default::Int,
+    L = 10e-3,
+    t_end = 2.0,
+    window = (1.5, 1.9),
+)
     ρ, c, k = 1000.0, 1000.0, 1.0
     α = k / (ρ * c)
     T0, Tp, ΔH = 300.0, 700.0, 1.0e6
     q = v_target * ρ * (c * (Tp - T0) + ΔH)
     R = 8.314462618
     A = v_target^2 * E * (Tp - T0) * exp(E / (R * Tp)) / (α * R * Tp^2)
-    L = 10e-3            # v·t_end = 4 mm consumed; 6 mm ≈ 12δ remains
-    t_end = 2.0
-    w1, w2 = 1.5, 1.9    # ≥6 development time constants (τ = α/v² = 0.25 s):
-    # the e^(−t/τ) transient is <1e-3 of v_ss by w1 (see header)
+    w1, w2 = window
 
     function build(n_cells)
         # A small gas-transfer coefficient keeps gas transport alive in the
         # gas-free solid ahead of the front; with none the gas field ends in a
-        # sharp front on which the implicit Newton fails repeatedly.
-        solid = SolidComponent(:solid, ρ = ρ, c = c, k = k, λ = 1e-6)
+        # sharp front on which the integrator rejects step after step.
+        solid = SolidComponent(:solid, ρ = ρ, φ = 0.3, c = c, k = k, λ = 1e-6)
         # c_gas = c_solid: constant-ΔH(T) anchor — the Landau identity is
         # exact for any kinetics (see header).
-        gas = GaseousComponent(:gas, M = 0.05, c = c, k = 0.02, λ = 1e-4)
-        rxn = Reaction(:ablate, 1 => 2; A = A, E = E, h = ΔH)
+        gas = GaseousComponent(:gas, M = 0.05, c = c, k = 0.02)
+        rxn =
+            Reaction(:ablate, 1 => 2; A = A, E = E, h = ΔH, T_min = 400.0, gate_width = 1.0)
         mat = Material(name = :VCPL02, components = (solid, gas), reactions = (rxn,))
-        mesh = create_uniform_mesh(L, n_cells, Val(2); T_initial = T0, ξ_initial = (ρ, 0.0))
+        mesh = create_uniform_mesh(L, n_cells)
         bc_set = BoundaryConditionSet(
             thermal = (top = HeatFluxBC(q), bottom = AdiabaticBC()),
             mass = (
-                top = ConvectiveMassBC(h_m = 10.0, ξ_inf = 0.0),
+                top = AmbientGasBC(GasReservoir(P = 0.0, T = T0)),
                 bottom = ImpermeableBC(),
             ),
         )
@@ -106,11 +83,12 @@ function _vcpl02_common(; E::Float64, v_target::Float64, n_default::Int)
     end
 
     # Window means/differences shared by both cases' QoIs. sol.z stores NODE
-    # positions, NaN-padded above the surface after depletion merges.
-    function measures(sol)
+    # positions, NaN above the surface once cells deactivate.
+    function measures(sol; measurement_window = (w1, w2))
         th = sol.extras.thickness_history
-        i1 = findfirst(>=(w1), sol.t)
-        i2 = findlast(<=(w2), sol.t)
+        lo, hi=measurement_window
+        i1 = findfirst(>=(lo), sol.t)
+        i2 = findlast(<=(hi), sol.t)
         Δt = sol.t[i2] - sol.t[i1]
         v_thick = (th[i1] - th[i2]) / Δt
         v_ggr = sum(@view sol.extras.gas_generation_rate[i1:i2]) / (i2 - i1 + 1) / ρ
@@ -144,7 +122,7 @@ function _verification_case_vcpl02()
                 tol = 2.1e-3,  # 3× observed: 7.1e-4 (n=160, window [1.5,1.9] s
                 # ≈ 6–7.6τ; residual = front-in-half-cell T_s closure at
                 # Δz ≈ δ_r + holdup drift — see case header)
-                comment = "traveling-wave identity, exact at any E for c_gas = c_solid",
+                comment = "steady first law with stationary virgin solid and c_gas = c_solid",
             ),
         )
 
@@ -258,10 +236,10 @@ function _verification_case_vcpl02()
         solve_kwargs = (
             use_ale = true,
             min_thickness = 1e-4,
-            handle_depletion = true,
-            depletion_threshold = 0.05,
-            abstol = 1e-7,
-            reltol = 1e-5,
+            deactivation = true,
+            abstol = 1e-9,
+            reltol = 1e-7,
+            pressure_tolerance = 1e-3,
         ),
         qois = qois,
         # Observed 5–6 s for a warm solve and 20 s in the harness (load 18–21).
@@ -342,18 +320,25 @@ function _verification_case_vcpl02()
                     consistency = abs(m.v_thick - m.v_ggr) / m.v_ggr,
                 )
             end,
-            # Kinetics-limit insensitivity: the Landau balance must close at
-            # every E on the constant-ablation-temperature locus — as long as
-            # the front stays resolved: δ_r ∝ 1/E, so at n = 160 the E = 2e5
-            # point has δ_r ≈ 26 μm < Δz and its ~1% miss is the §12.3.2
-            # front-in-half-cell T_s bias (resolution, not physics).
+            # Use the same stationary far field and late window throughout
+            # the kinetics sweep. A high-E front still requires spatial
+            # refinement: its finite-mesh identity error is reported, not
+            # interpreted as a change in the steady first law.
             param_sweep = (
                 name = :E,
                 values = [5e4, 1e5, 1.5e5, 2e5],
-                build = (n, E) ->
-                    _vcpl02_common(E = E, v_target = 2.0e-3, n_default = n).build(n),
+                build = (n, E) -> _vcpl02_common(
+                    E = E,
+                    v_target = 2.0e-3,
+                    n_default = n,
+                    L = 20e-3,
+                    t_end = 5.0,
+                    window = (4.5, 4.9),
+                ).build(
+                    n,
+                ),
                 measure = sol -> begin
-                    m = C.measures(sol)  # q, ρ, c, ΔH, T0 are E-independent
+                    m = C.measures(sol; measurement_window = (4.5, 4.9))  # thermodynamic constants are E-independent
                     (
                         balance_err = abs(m.v_thick - m.v_landau) / m.v_landau,
                         consistency_err = abs(m.v_thick - m.v_ggr) / m.v_ggr,
@@ -370,8 +355,15 @@ function _verification_case_vcpl02b()
     # (δ_r/δ = RT_s²/(E·(T_s−T₀)) ≈ 0.09), resolvable on a coarser mesh. The
     # Landau balance with measured T_s must close at ANY E — comparing the
     # closure here and in V-CPL-02 is the ablation-limit insensitivity check.
-    # n = 100 keeps Δz = 100 μm on the L = 10 mm domain.
-    C = _vcpl02_common(E = 5.0e4, v_target = 2.0e-3, n_default = 100)
+    # Δz = 100 μm on a 20 mm domain; the late window resolves holdup drift.
+    C = _vcpl02_common(
+        E = 5.0e4,
+        v_target = 2.0e-3,
+        n_default = 200,
+        L = 20e-3,
+        t_end = 5.0,
+        window = (4.5, 4.9),
+    )
 
     function qois(sol)
         m = C.measures(sol)
@@ -383,9 +375,7 @@ function _verification_case_vcpl02b()
                 value = m.v_thick,
                 exact = m.v_landau,
                 error = err_bal,
-                tol = 2e-3,  # 3× observed: 6.7e-4 (n=100; Δz ≈ δ_r here since
-                # the E/2 front is twice as wide — matches the ~7e-4 closure
-                # of V-CPL-02 at ITS δ_r-resolving mesh)
+                tol = 2e-3,  # measured 6.22e-4 at n=200; 3.18e-4 at n=320, both energies
                 comment = "identity must close at E = 50 kJ/mol as at 100 (locus check)",
             ),
             QoIResult(
@@ -393,8 +383,16 @@ function _verification_case_vcpl02b()
                 value = m.v_thick,
                 exact = m.v_ggr,
                 error = err_int,
-                tol = 1.7e-3,  # 3× observed: 5.5e-4 (n=100)
+                tol = 1.7e-3,  # measured <4.1e-4 on the 200/320-cell ladder
                 comment = "γ_gas = 0 ⇒ dL/dt = −ṁ‴_gas/ρ exactly",
+            ),
+            QoIResult(
+                name = "stationary far-field temperature",
+                value = sol.T[1, m.i2] - C.T0,
+                exact = 0.0,
+                error = abs(sol.T[1, m.i2] - C.T0),
+                tol = 1e-4,
+                comment = "cold reaction gate and domain length qualify the steady reference",
             ),
         ]
     end
@@ -408,15 +406,42 @@ function _verification_case_vcpl02b()
         solve_kwargs = (
             use_ale = true,
             min_thickness = 1e-4,
-            handle_depletion = true,
-            depletion_threshold = 0.05,
-            abstol = 1e-7,
-            reltol = 1e-5,
+            deactivation = true,
+            abstol = 1e-9,
+            reltol = 1e-7,
+            pressure_tolerance = 1e-3,
         ),
         qois = qois,
-        # Observed 2.1–2.9 s (load 18–21).
-        ci = CIConfig(n_cells = 100, budget_s = 9.0),
-        report = (;),
+        ci = CIConfig(n_cells = 200, budget_s = 90.0),
+        report = (
+            n_cells_ladder = [120, 200, 320],
+            curves = sol -> begin
+                m = C.measures(sol)
+                [
+                    ReportCurve(
+                        name = :mlr_history,
+                        title = "V-CPL-02b: approach to steady regression",
+                        xlabel = "t (s)",
+                        ylabel = "ṁ″ (kg/m²s)",
+                        series = [
+                            CurveSeries(
+                                label = "gas generation",
+                                x = sol.t,
+                                y = sol.extras.gas_generation_rate,
+                                exact = t->C.ρ*m.v_landau,
+                            ),
+                        ],
+                    ),
+                ]
+            end,
+            error_norms = sol -> begin
+                m=C.measures(sol)
+                (
+                    balance = abs(m.v_thick/m.v_landau-1),
+                    consistency = abs(m.v_thick/m.v_ggr-1),
+                )
+            end,
+        ),
     )
 end
 

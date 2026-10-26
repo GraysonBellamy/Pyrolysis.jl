@@ -8,32 +8,27 @@
 #
 #   w*(z, t) = (ṡ/s)·z,   s(t) = 1 − 0.15·(1 − cos(2πt/20)),  z_i(t) = z_i(0)·s(t)
 #
-# through the `Workspace.w_override` hook. On a grid point moving with w, the
-# grid time derivative is ∂tT* + w·∂zT*. For T the discrete mesh-relative
-# advection kernel supplies the w·∂zT* part (w_physical = 0 without
-# reactions), so the Eulerian manufactured T source — evaluated at the LIVE
-# cell centers read from the z-block — makes T* exact on the moving mesh. The
-# species ride the applied mesh (no advection operator), so their sources are
-# assembled in the material frame with w = the override (see exact/mms.jl
-# header, "ALE"). The T error norm therefore measures exactly the moving-mesh
-# transport truncation: ALE advection (van-Leer-limited upwind
-# reconstruction) + lab-frame operators on a nonuniform-in-time mesh; the gas
-# error measures the diffusive flux and geometry on the moving mesh.
+# through the solve's `w_override` hook. The mesh moves over a solid at rest
+# and every inventory, T's energy with it, crosses the faces at the
+# mesh-relative velocity, so the Eulerian manufactured sources — evaluated at
+# the cell centers — make the fields exact on the moving mesh (see
+# exact/mms.jl header, "ALE"). The T error norm therefore measures exactly
+# the moving-mesh transport truncation: the relative energy flux (upwind-biased
+# face temperature) + lab-frame operators on a nonuniform-in-time mesh; the
+# gas error measures the diffusive and relative fluxes on the moving mesh.
 #
 # No reactions: mesh motion is prescribed, not volume-change-driven, so the
 # case isolates GCL/advection from kinetics (V-MMS-01 covers those). The
-# solid field is spatially UNIFORM but time-varying (the material-frame
-# source would admit a z-varying one; uniform keeps the T pins focused on
-# the advection kernel); T and the gas field carry the full space–time
-# structure.
+# solid field is spatially UNIFORM but time-varying (uniform keeps the T
+# pins focused on the relative energy flux); T and the gas field carry the
+# full space–time structure.
 #
-# Expected order: the limiter's slope reconstruction is formally 2nd order on
-# smooth data but clips at extrema (the sin peak crosses the domain), so the
-# observed order sits between 1.5 and 2 — recorded at pin time; a drop below
-# min_order flags a moving-mesh transport regression.
-#
-# Jacobian: dense FD (`jacobian = :fd`) — the structured geometry Jacobian
-# assumes reaction-driven mesh velocity (see `Workspace.w_override` note).
+# Expected order: second, from the centered spatial operators and reconstructed
+# ALE flux. The 16–64-cell temperature ladder is pre-asymptotic (L2 rates
+# 2.92, 1.38). The 128–512-cell ladder gives rates 1.86, 1.93 in both energy
+# formulations; tightening the time tolerances by 100 leaves those rates
+# unchanged to 0.001. The CI order check uses that resolved range, while the
+# report also retains the coarse meshes to show the approach to it.
 
 function _verification_case_vmms03()
     L = 0.01
@@ -60,19 +55,13 @@ function _verification_case_vmms03()
             k = T -> 0.20 + 3.0e-4 * T,
             λ = 2.0e-5,
         )
-        gas = GaseousComponent(:g, M = 0.028, c = 1000.0, k = 0.03, λ = 2.0e-5)
+        gas = GaseousComponent(:g, M = 0.028, c = 1000.0, k = 0.03)
         return Material(name = :VMMS03, components = (solid, gas), reactions = ())
     end
 
     function build(n_cells)
         mat = make_material()
-        mesh = create_uniform_mesh(
-            L,
-            n_cells,
-            Val(2);
-            T_initial = 500.0,
-            ξ_initial = (600.0, 1.5),
-        )
+        mesh = create_uniform_mesh(L, n_cells)
         # Manufactured BC fluxes must be evaluated at the MOVING boundary:
         # the top face sits at z_top(t) = L·s(t) (bottom pinned at 0), so the
         # fixed-L helpers do not apply here.
@@ -83,8 +72,14 @@ function _verification_case_vmms03()
                 bottom = HeatFluxBC(t -> mms_heat_flux(mat, fields, 0.0, t)),
             ),
             mass = (
-                top = MassFluxBC(t -> -mms_gas_flux(mat, fields, 2, z_top(t), t)),
-                bottom = MassFluxBC(t -> mms_gas_flux(mat, fields, 2, 0.0, t)),
+                top = MassFluxBC(
+                    fluxes = (g = t -> mms_gas_flux(mat, fields, 2, z_top(t), t),),
+                    inflow_temperature = (g = t -> fields.T(z_top(t), t),),
+                ),
+                bottom = MassFluxBC(
+                    fluxes = (g = t -> -mms_gas_flux(mat, fields, 2, 0.0, t),),
+                    inflow_temperature = (g = t -> fields.T(0.0, t),),
+                ),
             ),
         )
         return PyrolysisProblem(
@@ -103,11 +98,7 @@ function _verification_case_vmms03()
         fields;
         use_ale = true,
         w_override = w_star,
-        # Dense FD for offline report runs too: do NOT hand a
-        # physics+geometry union prototype to colored FD without first
-        # proving the pattern covers the override's ∂(dz/dt)/∂z coupling —
-        # silent-drop hazard.
-        jacobian = :fd,
+        energy_state = VERIFICATION_ENERGY_STATE,
         kwargs...,
     )
 
@@ -125,18 +116,18 @@ function _verification_case_vmms03()
         )
         for (name, idx, scale, tol, comment) in (
             (
-                "ξ_solid (mesh-bound)",
+                "ξ_solid (uniform)",
                 1,
                 600.0,
                 1e-10,  # observed 7.3e-12 (n=32): exact to integrator tol
-                "uniform solid: verifies the mesh-bound (no-advection) species path + source injection",
+                "uniform solid: verifies the relative flux of a uniform field under the moving mesh + source injection",
             ),
             (
                 "ξ_gas",
                 2,
                 1.5,
                 6e-3,  # 3× observed: 1.8e-3 (n=32), second order
-                "gas rides the applied mesh: diffusive flux + geometry on the moving mesh",
+                "gas: diffusive + relative flux on the moving mesh",
             ),
         )
             err = mms_Linf_xi(sol, fields, idx) / scale
@@ -169,22 +160,19 @@ function _verification_case_vmms03()
         solve_fn = solve_fn,
         qois = qois,
         ci = CIConfig(
-            n_cells = 32,
+            n_cells = 64,
             budget_s = 60.0,
             convergence = ConvergenceSpec(
-                # observed rates 2.24, 2.18 — the anticipated
-                # limiter clipping at the sin extremum did not depress the
-                # global L2 order
-                n_cells = [16, 32, 64],
+                n_cells = [128, 256, 512],
                 error_fn = l2_T_final,
                 expected_order = 2.0,
-                min_order = 1.5,
-                min_mean_order = 1.8,
+                min_order = 1.8,
+                min_mean_order = 1.85,
                 solve_kwargs = (abstol = 1e-11, reltol = 1e-9),
             ),
         ),
         report = (
-            n_cells_ladder = [16, 32, 64, 128],
+            n_cells_ladder = [16, 32, 64, 128, 256, 512],
             qoi_curves = (:T_profiles, :xi_profiles, :error_profiles, :thickness_history),
             curves = sol -> begin
                 m = length(sol.t)
@@ -208,7 +196,7 @@ function _verification_case_vmms03()
                     ),
                     ReportCurve(
                         name = :xi_profiles,
-                        title = "V-MMS-03: mesh-bound solid recovery (z-uniform, " *
+                        title = "V-MMS-03: solid recovery (z-uniform, " *
                                 "time-decaying), t = $(t_end) s",
                         xlabel = "z (m)",
                         ylabel = "ξ_s (kg/m³)",

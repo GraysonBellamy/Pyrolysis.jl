@@ -38,6 +38,8 @@ using Plots
 using DelimitedFiles
 using LinearAlgebra: BLAS
 
+const SMOKE = get(ENV, "PYROLYSIS_SMOKE", "0") == "1"   # PYROLYSIS_SMOKE=1: a short run that checks the script works
+
 # Pin BLAS to a single thread so OpenBLAS doesn't spawn its own pool inside
 # each parallel solve (standard practice for `Threads.@spawn`-based workloads).
 BLAS.set_num_threads(1)
@@ -91,7 +93,10 @@ function build_macfp_bcs(q_inc::Real)
     # equilibrium and the surface T runs away.
     # No convection (per MaCFP-4 idealized spec).
     top_thermal = RadiativeFluxBC(flux = float(q_inc)) + RadiativeBC(T_inf = T_INITIAL_K)
-    top_mass = DiffusiveMassBC(0.05) + DirichletPressureBC(101325.0)
+    top_mass = AmbientGasBC(
+        GasReservoir(P = 101325.0, T = T_INITIAL_K, mole_fractions = (AIR = 1.0,));
+        film = MassTransferFilm(0.05*101325.0*0.02897/(8.31446261815324*T_INITIAL_K)),
+    )
     # Bottom: perfectly insulated, impermeable.
     bottom_thermal = AdiabaticBC()
     bottom_mass = ImpermeableBC()
@@ -137,21 +142,17 @@ function build_and_solve_macfp(
         0.0,
         0.0,# 9-13. pyrolysis gases
         0.0,                    # 14. water vapor
+        0.0,                    # 15. background air
     )
+    ξ_air = background_gas_concentration(material, :AIR, ξ0, T_INITIAL_K)
+    ξ0 = Base.setindex(ξ0, ξ_air, NC_WP)
     ξ_initial_funcs = [
         let v = ξ0[j]
             _ -> v
         end for j = 1:NC_WP
     ]
 
-    mesh = create_uniform_mesh(
-        thickness_m,
-        N_CELLS,
-        Val(NC_WP);
-        T_initial = T_INITIAL_K,
-        ξ_initial = ξ0,
-        cross_section_area = A_SAMPLE_M2,
-    )
+    mesh = create_uniform_mesh(thickness_m, N_CELLS; cross_section = A_SAMPLE_M2)
 
     problem = PyrolysisProblem(
         mesh = mesh,
@@ -173,9 +174,6 @@ function build_and_solve_macfp(
         use_ale = true,
         radiation_model = SURFACE_ABSORPTION,
         min_thickness = 0.5e-3,
-        handle_depletion = false,
-        # Default Jacobian is `Structured(strategy = DirectSolve())`.
-        integrator = KenCarp4(linsolve = SparspakFactorization()),
     )
 end
 
@@ -641,9 +639,9 @@ function main()
     for (lbl, q_kW, th_mm, t_final) in CASES
         q_inc = q_kW * 1000.0
         th_m = th_mm / 1000.0
-        @info "  scheduling" case=lbl q_inc_kW=q_kW thickness_mm=th_mm t_final_s=t_final
-        tasks[lbl] =
-            Threads.@spawn build_and_solve_macfp(THETA_STAGE2, q_inc, th_m, t_final)
+        t_end = SMOKE ? 10.0 : t_final   # PYROLYSIS_SMOKE=1: every case over 10 s
+        @info "  scheduling" case=lbl q_inc_kW=q_kW thickness_mm=th_mm t_final_s=t_end
+        tasks[lbl] = Threads.@spawn build_and_solve_macfp(THETA_STAGE2, q_inc, th_m, t_end)
     end
 
     sols = Dict{String,Any}()
@@ -659,11 +657,7 @@ function main()
         if sol === nothing
             @warn "  failed" case=lbl wall_s=wall
         else
-            ok = (
-                sol.retcode == :Success ||
-                sol.retcode == ReturnCode.Success ||
-                sol.retcode == :Terminated
-            )
+            ok = (sol.retcode == :Success || sol.retcode == :Terminated)
             @info "  done" case=lbl retcode=sol.retcode wall_s=wall n_times=length(sol.t) ok=ok
             csv_path = joinpath(out_dir, "macfp_$(lbl).csv")
             write_case_csv(csv_path, sol)

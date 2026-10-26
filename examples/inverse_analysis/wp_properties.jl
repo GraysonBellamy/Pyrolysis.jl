@@ -546,11 +546,9 @@ const WP_T_EMIT_REP = 700.0
 # folded into q_ext here (the centerline column sees ≈ nominal).
 const WP_F_CONE = 0.586
 
-# Gas-phase transport properties — using DF defaults
-# (Chapman-Enskog scaling: λ_gas ∝ √(M_ref/M))
+# Superficial condensed-matrix transfer and Darcy permeability.
 const WP_LAMBDA_WOOD = 5.0e-7
 const WP_LAMBDA_CHAR = 1.0e-5
-const WP_LAMBDA_GAS = 3.0e-5
 const WP_KAPPA_VIRGIN = 1.0e-15
 const WP_KAPPA_CHAR = 1.0e-12
 

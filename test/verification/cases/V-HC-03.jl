@@ -26,7 +26,7 @@ function _verification_case_vhc03()
     function build(n_cells)
         solid = SolidComponent(:solid, ρ = ρ, c = c, k = k)
         mat = Material(name = :VHC03, components = (solid,), reactions = ())
-        mesh = create_uniform_mesh(L, n_cells, Val(1); T_initial = T0, ξ_initial = (ρ,))
+        mesh = create_uniform_mesh(L, n_cells)
         bc_set =
             BoundaryConditionSet(thermal = (top = HeatFluxBC(q), bottom = AdiabaticBC()))
         return PyrolysisProblem(
@@ -134,7 +134,7 @@ function _verification_case_vhc03()
                 n = length(z)
                 Fo_of_t(t) = α * t / L^2
                 # Gpyro 0.8200 overlay (reference/gpyro/): our vhc03 deck —
-                # FDS can't express a pure Neumann BC on its 1D solid (see
+                # FDS 6.11.0 rejects net-flux inputs with MATL_ID (see
                 # reference/fds/README.md), Gpyro can (surface-absorbed QE
                 # with RERADIATION off, h = 0). Δz = 0.1 mm; x_m is depth
                 # from the heated face, so x̃ = 1 − x/L; Gpyro's front/back

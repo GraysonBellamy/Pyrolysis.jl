@@ -7,13 +7,13 @@ boundary conditions for the given experimental scenario, runs the simulation,
 and returns the `PyrolysisSolution`. All other thermophysical properties and the
 selectable white-pine kinetics sets come from `wp_properties.jl`.
 
-Component schema (NC = 14):
+Component schema (NC = 15):
     1 = WP (virgin)        7 = Ash (inert)        12 = WP_gas4
     2 = WP_int1            8 = Moisture           13 = WP_gas5
     3 = WP_int2            9 = WP_gas1            14 = WATER_VAPOR
     4 = WP_int3           10 = WP_gas2
     5 = WP_int4           11 = WP_gas3
-    6 = Char
+    6 = Char              15 = AIR
 
 Ash (component 7) is inert (no reactions involve it). It sits in the char
 matrix throughout: same ρ, cp, ε, and k as char (per the property JSON).
@@ -25,21 +25,11 @@ boundary-condition time-series interpolators, sample geometry, duration).
 """
 
 using Pyrolysis
-using OrdinaryDiffEq
-# OrdinaryDiffEq v7 split the integrators into sublibraries; the umbrella package
-# only re-exports the default solver set, so `KenCarp4` must be pulled from
-# `OrdinaryDiffEqSDIRK` explicitly (see src/Solver/solve.jl docstring). Without
-# this the `KenCarp4(...)` call in `build_and_solve` throws an UndefVarError that
-# the surrounding try/catch silently turns into a failed solve.
-using OrdinaryDiffEqSDIRK: KenCarp4
-using LinearSolve
-using Sparspak
 using Logging
-using LinearSolve: SparspakFactorization
 
 include("wp_properties.jl")
 
-const NC_WP = 14   # Number of components
+const NC_WP = 15   # Number of components
 
 # ============================================================================
 # Scenario container
@@ -85,8 +75,8 @@ function Scenario(;
     T_initial::Union{Nothing,Real} = nothing,
     c0_moisture::Real = 0.0,
     # When false, the material is built with `lateral_shrinkage_law = nothing`
-    # and the solver skips the χ-block tracking + dense ∂physics/∂χⱼ Jacobian
-    # coupling — the inverse fit doesn't need post-test thickness/diameter and
+    # and the solver skips the cross-section closure rows and their dense
+    # Jacobian coupling — the inverse fit doesn't need post-test thickness/diameter and
     # pays a real per-evaluation cost for it. The validation driver
     # (validate_thickness.jl) leaves the default on.
     use_variable_cross_section::Bool = true,
@@ -400,49 +390,14 @@ function build_material(
                 κ = 0.0,
             ),
             # 9-13. Pyrolysis gases (same speciation as DF; update if measured values exist)
-            GaseousComponent(
-                :WP_gas1,
-                M = 0.060,
-                c = WP_GAS_CP[1],
-                k = 0.020,
-                λ = WP_LAMBDA_GAS * sqrt(0.029/0.060),
-            ),
-            GaseousComponent(
-                :WP_gas2,
-                M = 0.070,
-                c = WP_GAS_CP[2],
-                k = 0.020,
-                λ = WP_LAMBDA_GAS * sqrt(0.029/0.070),
-            ),
-            GaseousComponent(
-                :WP_gas3,
-                M = 0.110,
-                c = WP_GAS_CP[3],
-                k = 0.018,
-                λ = WP_LAMBDA_GAS * sqrt(0.029/0.110),
-            ),
-            GaseousComponent(
-                :WP_gas4,
-                M = 0.070,
-                c = WP_GAS_CP[4],
-                k = 0.020,
-                λ = WP_LAMBDA_GAS * sqrt(0.029/0.070),
-            ),
-            GaseousComponent(
-                :WP_gas5,
-                M = 0.050,
-                c = WP_GAS_CP[5],
-                k = 0.025,
-                λ = WP_LAMBDA_GAS * sqrt(0.029/0.050),
-            ),
+            GaseousComponent(:WP_gas1, M = 0.060, c = WP_GAS_CP[1], k = 0.020),
+            GaseousComponent(:WP_gas2, M = 0.070, c = WP_GAS_CP[2], k = 0.020),
+            GaseousComponent(:WP_gas3, M = 0.110, c = WP_GAS_CP[3], k = 0.018),
+            GaseousComponent(:WP_gas4, M = 0.070, c = WP_GAS_CP[4], k = 0.020),
+            GaseousComponent(:WP_gas5, M = 0.050, c = WP_GAS_CP[5], k = 0.025),
             # 14. Water vapor
-            GaseousComponent(
-                :WATER_VAPOR,
-                M = 0.018,
-                c = water_vapor_cp_func,
-                k = 0.025,
-                λ = WP_LAMBDA_GAS * sqrt(0.029/0.018),
-            ),
+            GaseousComponent(:WATER_VAPOR, M = 0.018, c = water_vapor_cp_func, k = 0.025),
+            GaseousComponent(:AIR; M = 0.02897, c = 1006.0, k = 0.026),
         ),
         reactions = (
             Reaction(
@@ -553,7 +508,10 @@ function build_bcs(
         RadiativeBC(F = F_cone, T_inf = 0.0, validate = false) +
         RadiativeBC(F = 1.0 - F_cone, T_inf = scenario.T_top_surr) +
         ConvectiveBC(h = scenario.h_top, T_inf = scenario.T_top_gas, blowing = blowing)
-    top_mass = DiffusiveMassBC(0.05) + DirichletPressureBC(101325.0)
+    top_mass = AmbientGasBC(
+        GasReservoir(P = 101325.0, T = scenario.T_top_gas, mole_fractions = (AIR = 1.0,));
+        film = MassTransferFilm(0.05*101325.0*0.02897/(8.31446261815324*300.0)),
+    )
 
     # Bottom: free to surroundings, impermeable.
     # Bottom emissivity is fixed at 0.92 (e.g. high-emissivity coating /
@@ -573,8 +531,8 @@ end
 # Forward solve
 # ============================================================================
 
-# Dry-baseline initial concentration tuple — 14 components. Slot 8 (moisture)
-# is overridden per scenario from `scenario.c0_moisture` inside `build_and_solve`.
+# Dry-baseline initial concentration tuple — 15 components. Slot 8 (moisture)
+# is overridden per scenario from `scenario.c0_moisture` inside `build_problem`.
 const WP_XI0_DRY = (
     WP_C0_VIRGIN,           # 1. virgin (mass_frac × ρ_virgin)
     0.0,
@@ -590,26 +548,20 @@ const WP_XI0_DRY = (
     0.0,
     0.0,# 9-13. pyrolysis gases
     0.0,                    # 14. water vapor
+    0.0,                    # 15. background air, set from the pore EOS
 )
 
 """
-	build_and_solve(θ, scenario; stage=1, n_output=601, verbose=false, kinetics_set=:constant, jacobian_strategy=nothing)
+	build_problem(θ, scenario; stage=1, n_output=601, kinetics_set=:constant,
+	              blowing=CouetteFilm(), use_emission_split=true,
+	              kinetics_dE=ntuple(_ -> 0.0, 5)) -> PyrolysisProblem
 
-Build a white pine pyrolysis problem with conductivities determined by θ at the
-given parameter stage, run it for `scenario.t_final` seconds, and return the
-solution. Returns `nothing` if the solve fails (allowing the caller to apply a
-penalty in the loss function).
+The white pine pyrolysis problem with conductivities determined by θ at the
+given parameter stage, over `scenario.t_final` seconds with `n_output` saved
+times.
 
 Initial moisture concentration is read from `scenario.c0_moisture` (kg/m³).
 `kinetics_set` selects `:constant`, `:kirchhoff_123`, or `:kirchhoff_all`.
-
-`jacobian_strategy` overrides the Jacobian strategy. `nothing` (default)
-keeps solve's ALE default, `ApproxSolve()`: the `:ale_reduced` sparsity
-profile drops the cumulative ALE mesh-velocity widening and the dense
-z-column geometry block, paying ~14% of the prototype nnz and ~1% of the
-per-step solve cost on MaCFP-shape problems, while Newton absorbs the
-approximation with a few extra iterations. Pass `DirectSolve()` for the
-exact Jacobian.
 
 `blowing` is the blowing model every `ConvectiveBC` of the surface BC set
 carries, `CouetteFilm()` by default: the film coefficient is rescaled by the
@@ -619,18 +571,15 @@ the residual and the Jacobian see the same physics. NOTE: changing the model
 changes the forward model, so conductivities fit with another one are no
 longer optimal — re-run the calibration.
 """
-function build_and_solve(
+function build_problem(
     θ::AbstractVector,
     scenario;
     stage::Int = 1,
     n_output::Int = 601,
-    verbose::Bool = false,
-    log_level::Union{Nothing,Logging.LogLevel} = nothing,
     kinetics_set::Symbol = :constant,
     blowing::AbstractBlowingModel = CouetteFilm(),
     use_emission_split::Bool = true,
     kinetics_dE = ntuple(_ -> 0.0, 5),
-    jacobian_strategy::Union{Nothing,LinearSolveStrategy} = nothing,
 )
 
     use_var_cs = get(scenario, :use_variable_cross_section, true)
@@ -667,7 +616,10 @@ function build_and_solve(
         0.0,
         0.0,# 9-13
         0.0,                    # 14
+        0.0,                    # 15. background air
     )
+    ξ_air = background_gas_concentration(material, :AIR, ξ0, T0)
+    ξ0 = Base.setindex(ξ0, ξ_air, NC_WP)
     ξ_initial_funcs = [
         let v = ξ0[j]
             _ -> v
@@ -676,14 +628,11 @@ function build_and_solve(
 
     mesh = create_uniform_mesh(
         scenario.sample_thickness,
-        scenario.n_cells,
-        Val(NC_WP);
-        T_initial = T0,
-        ξ_initial = ξ0,
-        cross_section_area = get(scenario, :A_0, WP_A0),
+        scenario.n_cells;
+        cross_section = get(scenario, :A_0, WP_A0),
     )
 
-    problem = PyrolysisProblem(
+    return PyrolysisProblem(
         mesh = mesh,
         material = material,
         bc_set = bc_set,
@@ -693,31 +642,62 @@ function build_and_solve(
         dt_initial = 1e-3,
         output_times = collect(range(0.0, scenario.t_final, length = n_output)),
     )
+end
 
+"""
+	solve_keywords(; verbose=false) -> NamedTuple
+
+The keywords of the forward solve, with the default integrator and linear
+solver.
+"""
+function solve_keywords(; verbose::Bool = false)
+    return (
+        abstol = 1e-7,
+        reltol = 1e-7,
+        # Cap dt and total step count so high-flux stiffness fails fast
+        # instead of grinding for hours at microscopic dt. dtmax ~ saveat
+        # interval; maxiters chosen with healthy naccept ~3k headroom.
+        dtmin = 1e-8,
+        dtmax = 2.0,
+        maxiters = 200_000,
+        progress = verbose,
+        use_ale = true,
+        radiation_model = SURFACE_ABSORPTION,
+        min_thickness = 0.5e-3,
+    )
+end
+
+"""
+	build_and_solve(θ, scenario; stage=1, n_output=601, verbose=false, kinetics_set=:constant)
+
+Solve [`build_problem`](@ref)'s problem with [`solve_keywords`](@ref) and
+return the solution, or `nothing` if the solve fails (allowing the caller to
+apply a penalty in the loss function). The remaining keywords are theirs.
+"""
+function build_and_solve(
+    θ::AbstractVector,
+    scenario;
+    stage::Int = 1,
+    n_output::Int = 601,
+    verbose::Bool = false,
+    log_level::Union{Nothing,Logging.LogLevel} = nothing,
+    kinetics_set::Symbol = :constant,
+    blowing::AbstractBlowingModel = CouetteFilm(),
+    use_emission_split::Bool = true,
+    kinetics_dE = ntuple(_ -> 0.0, 5),
+)
+    problem = build_problem(
+        θ,
+        scenario;
+        stage,
+        n_output,
+        kinetics_set,
+        blowing,
+        use_emission_split,
+        kinetics_dE,
+    )
     try
-        # `jacobian = nothing` keeps solve's ALE default,
-        # `Structured(strategy = ApproxSolve())`.
-        jac_backend =
-            jacobian_strategy === nothing ? nothing :
-            Structured(strategy = jacobian_strategy)
-
-        solver_kwargs = (
-            abstol = 1e-7,
-            reltol = 1e-7,
-            # Cap dt and total step count so high-flux stiffness fails fast
-            # instead of grinding for hours at microscopic dt. dtmax ~ saveat
-            # interval; maxiters chosen with healthy naccept ~3k headroom.
-            dtmin = 1e-8,
-            dtmax = 2.0,
-            maxiters = 200_000,
-            progress = verbose,
-            use_ale = true,
-            radiation_model = SURFACE_ABSORPTION,
-            min_thickness = 0.5e-3,
-            handle_depletion = false,
-            jacobian = jac_backend,
-            integrator = KenCarp4(linsolve = SparspakFactorization()),
-        )
+        solver_kwargs = solve_keywords(; verbose)
         if log_level === nothing
             solution = solve(problem; solver_kwargs...)
         else

@@ -45,3 +45,46 @@ end
 function chapter_files(chapterdir::AbstractString)
     return sort(filter(f -> occursin(r"^\d{2}_.*\.md$", f), readdir(chapterdir)))
 end
+
+"""
+    rebase_figure_paths(lines, prefix)
+
+Rebase canonical `assets/figures/` Markdown destinations for a derived view.
+Only standalone image/link destinations outside fenced code are rewritten;
+code examples and external URLs stay unchanged. `prefix` is the relative
+path to that view's figure directory, with no trailing slash.
+"""
+function rebase_figure_paths(lines::Vector{String}, prefix::AbstractString)
+    out = String[]
+    fence = 0
+    for line in lines
+        m = match(r"^\s{0,3}(`{3,}|~{3,})", line)
+        if m !== nothing
+            n = length(m[1])
+            # Positive = backticks, negative = tildes. A closing fence must
+            # use the same character and contain no info string.
+            kind = startswith(m[1], "`") ? 1 : -1
+            if fence == 0
+                fence = kind * n
+            elseif sign(fence) == kind &&
+                   n >= abs(fence) &&
+                   occursin(r"^\s{0,3}(`{3,}|~{3,})\s*$", line)
+                fence = 0
+            end
+            push!(out, line)
+        elseif fence != 0
+            push!(out, line)
+        else
+            # Do not touch literal Markdown links inside inline code spans.
+            pieces = split(line, r"(`+[^`]*`+)", keepempty = true)
+            spans = collect(eachmatch(r"`+[^`]*`+", line))
+            rebased = IOBuffer()
+            for (i, piece) in enumerate(pieces)
+                print(rebased, replace(piece, r"\]\(assets/figures/" => "]($prefix/"))
+                i <= length(spans) && print(rebased, spans[i].match)
+            end
+            push!(out, String(take!(rebased)))
+        end
+    end
+    return out
+end

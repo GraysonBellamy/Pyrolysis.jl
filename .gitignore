@@ -11,6 +11,7 @@ docs/build/
 docs/site/
 docs/refs/
 docs/src/guide/
+docs/src/assets/figures/
 docs/Manifest.toml
 
 # OS / editor
@@ -54,3 +55,13 @@ scripts/burnout/
 docs/Performance_Audit.md
 docs/performance_audit/
 scripts/performance_audit/
+
+# Local records: the mesh design, plans, gate and review documents, the gate
+# scripts' recorded measurements and the prototyping harness
+docs/Mesh_Framework_*.md
+test/gates/measurements/
+scripts/mesh_phase0/
+
+# Local research notes and reports
+reports/
+research_notes/

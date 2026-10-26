@@ -1,0 +1,11 @@
+julia_version = "1.13.0"
+tutorial = "docs/User_Guide.md section 2.10"
+executed_deck_sha256 = "2e335ce7bacb60c59a6a227d4f324096e61920beec85ce493eb678a175500126"
+source_revision = "478e99dcd6a0248d9bd11354b53ded447b176900"
+retcode = "Success"
+outcome = "running"
+cells = 72
+saved_times = 601
+final_time_s = 1600.0
+peak_mlr_kg_m2_s = 0.005487380832367841
+peak_surface_K = 672.3414293271595

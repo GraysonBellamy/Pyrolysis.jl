@@ -4,45 +4,43 @@
 #
 # The V-BO-01 deck on a fixed mesh, with the incident flux absorbed at the
 # surface. A fixed mesh keeps every cell's volume, so a gasifying cell empties
-# instead of thinning, and only the top live cell parks: once its condensed
-# concentration falls below 5 % of its initial value it merges into the cell
-# beneath, which becomes the surface. With the flux absorbed at the surface,
-# the surface cell is the hottest and empties first, so the layer burns top
-# down and no cell below the surface empties before it.
+# instead of thinning, and only the top live cell deactivates: once its
+# condensed mass falls below ε_m (1 %) of its initial value it merges into the
+# cell beneath, which becomes the surface. With the flux absorbed at the
+# surface, the surface cell is the hottest and empties first, so the layer
+# burns top down and no cell below the surface empties before it.
 #
-# The run must park all 60 PMMA cells, lose exactly the mass of the PMMA
-# layer, end on the bare substrate, close the mass ledger, keep the maximum
-# live-cell temperature below 1000 K, and take no step below the post-park
-# reset. The peak mass loss rate is informational: surface absorption is a
-# different problem from the in-depth reference of V-BO-01.
-
-# Peak of the CI run (0.098 mm cells).
-const VBO02_PEAK_REF = 24.62    # g m⁻² s⁻¹, at 429.5 s
+# The run must deactivate all 60 PMMA cells, lose exactly the mass of the
+# PMMA layer, end on the bare substrate, close the mass ledger, keep the
+# maximum live-cell temperature below 1000 K, and resolve each gas-release
+# transient without approaching the minimum allowed step. The peak mass loss rate is informational:
+# surface absorption is a different problem from the in-depth reference of
+# V-BO-01.
 
 function _verification_case_vbo02()
     id = "V-BO-02"
     function qois(sol)
-        m = _vbo_measures(sol)
+        m = _vbo_measures(sol; id)
         out = _vbo_common_qois(
             m;
             id,
-            peak_ref = VBO02_PEAK_REF,
-            peak_tol = 0.25,
-            peak_comment = "g m⁻² s⁻¹; surface absorption on a fixed mesh, a different problem from the in-depth reference (informational)",
+            ledger_tol = 3e-4,
+            ledger_comment = VBO_LEDGER_COMMENT *
+                             "; gas-release transients are resolved at reltol 1e-9 and a 1e-4 Pa pressure budget (relative ledger defects below 1e-10 in both energy forms at 60 cells)",
         )
         st = sol.raw_solution.stats
         rec = VBO_STEP_STATS[id]
-        n_park = length(sol.extras.park_times)
+        n_events = length(sol.extras.deactivation_times)
         n_pmma = count(>(0.0), view(sol.ξ, 1, :, 1))
         push!(
             out,
             QoIResult(
-                name = "park events",
-                value = Float64(n_park),
+                name = "deactivation events",
+                value = Float64(n_events),
                 exact = Float64(n_pmma),
-                error = abs(n_park - n_pmma),
+                error = abs(n_events - n_pmma),
                 tol = 0.5,
-                comment = "every PMMA cell parks as the top live cell, top down",
+                comment = "every PMMA cell deactivates as the top live cell, top down",
             ),
         )
         push!(
@@ -60,10 +58,10 @@ function _verification_case_vbo02()
             QoIResult(
                 name = "smallest accepted step",
                 value = rec.dt_min,
-                exact = Pyrolysis.Solver.DT_AFTER_PARK,
-                error = max(0.0, 1.0 - rec.dt_min / Pyrolysis.Solver.DT_AFTER_PARK),
+                exact = 1e-8,
+                error = max(0.0, 1.0 - rec.dt_min / 1e-8),
                 tol = 1e-3,
-                comment = "s; no step below the post-park reset (observed 1e-6 s)",
+                comment = "s; lower work bound 1e-8, above dtmin=1e-12; gas transients can require steps shorter than the proposed restart step (minimum 4.87e-7 at 60 cells across the two energy forms)",
             ),
         )
         push!(
@@ -74,7 +72,7 @@ function _verification_case_vbo02()
                 exact = 0.0,
                 error = Float64(st.nnonlinconvfail),
                 tol = 100.0,
-                comment = "budget at the CI resolution (60 PMMA cells); observed 56, about one per park interval",
+                comment = "budget at the CI resolution (60 PMMA cells); observed 0: the default integrator, Rodas5P, is a Rosenbrock method and solves no nonlinear system",
             ),
         )
         push!(
@@ -84,30 +82,30 @@ function _verification_case_vbo02()
                 value = Float64(st.naccept),
                 exact = 0.0,
                 error = Float64(st.naccept),
-                tol = 2000.0,
-                comment = "budget at the CI resolution (60 PMMA cells); observed 1572, about 26 per park interval",
+                tol = (VERIFICATION_ENERGY_STATE === :enthalpy ? 35000.0 : 25000.0) *
+                      max(1, n_pmma / 60),
+                comment = "work budget at reltol 1e-9 and pressure tolerance 1e-4 Pa, scaled by cell count; 60-cell qualification: 15884 temperature steps, 21868 enthalpy steps",
             ),
         )
         return out
     end
     return VerificationCase(
         id = id,
-        title = "PMMA-on-Kaowool burnout on a fixed mesh under surface absorption (top-cell parking)",
+        title = "PMMA-on-Kaowool burnout on a fixed mesh under surface absorption (top-cell deactivation)",
         tags = [:eulerian, :burnout, :depletion, :surface_absorption, :coupled],
         references = ["MaCFP-2 PMMA gasification case (NIST), 50 kW/m²"],
         build = n -> _vbo_problem(n; substrate_alpha = 0.0, pmma_alpha = 0.0),
         solve_fn = _vbo_solve_fn(id),
         solve_kwargs = (
             use_ale = false,
-            handle_depletion = true,
-            depletion_threshold = 0.05,
-            min_cells = 2,
+            deactivation = true,
             radiation_model = SURFACE_ABSORPTION,
-            abstol = 1e-8,
-            reltol = 1e-6,
+            abstol = 1e-11,
+            reltol = 1e-9,
+            pressure_tolerance = 1e-4,
         ),
         qois = qois,
-        ci = CIConfig(n_cells = 60, budget_s = 20.0),
+        ci = CIConfig(n_cells = 60, budget_s = 180.0),
         report = (
             n_cells_ladder = [30, 60, 120],
             curves = sol -> [

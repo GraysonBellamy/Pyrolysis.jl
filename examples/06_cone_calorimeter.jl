@@ -16,8 +16,8 @@ Physical Setup:
 - Surface regresses as material decomposes and gas escapes
 
 Coordinate Convention:
-- z = 0: Bottom (substrate/sample holder), boundary_id = 2, fixed
-- z = L(t): Top (exposed surface), boundary_id = 1, moves with material
+- z = 0: Bottom (substrate/sample holder), tag :bottom, fixed
+- z = L(t): Top (exposed surface), tag :top, moves with material
 - Heat enters from top, material shrinks toward bottom
 - Mesh follows the shrinking material (ALE formulation)
 
@@ -43,6 +43,8 @@ using Pyrolysis
 using Plots
 using DelimitedFiles
 
+const SMOKE = get(ENV, "PYROLYSIS_SMOKE", "0") == "1"   # PYROLYSIS_SMOKE=1: a short run that checks the script works
+
 # ============================================================================
 # Material Definition: PMMA
 # ============================================================================
@@ -56,7 +58,7 @@ PMMA undergoes thermal depolymerization, releasing MMA gas with a small char res
 The reaction is endothermic (absorbs heat).
 """
 
-# Create PMMA material with three components:
+# PMMA, char, product gas and background air:
 # 1. Virgin PMMA (solid)
 # 2. Char residue (solid)
 # 3. MMA gas (gaseous product)
@@ -75,13 +77,17 @@ pmma_cp = CallableProperty(
 #                       k = 0.34 - 3.9e-4*T for T > 378 K
 pmma_k = CallableProperty(T -> T < 378.0 ? 0.15 : (0.34 - 3.9e-4 * min(T, 700.0)))
 
+const PMMA_POROSITY = parse(Float64, get(ENV, "PYROLYSIS_PMMA_POROSITY", "0.01"))
+
 pmma = Material(
     name = :PMMA,
     components = (
         # Virgin PMMA - solid phase
         SolidComponent(
             :virgin,
-            ρ = 1210.0,                    # kg/m³ - density
+            ρ = 1210.0,
+            φ = PMMA_POROSITY,
+            λ = 1e-5,                    # kg/m³ - density
             c = pmma_cp,                   # J/(kg·K) - piecewise temperature-dependent
             k = pmma_k,                    # W/(m·K) - piecewise temperature-dependent
             ε = 0.96,                      # surface emissivity
@@ -90,7 +96,9 @@ pmma = Material(
         # Char - solid residue (same properties as virgin PMMA)
         SolidComponent(
             :char,
-            ρ = 1210.0,                    # kg/m³ - same as virgin PMMA
+            ρ = 1210.0,
+            φ = PMMA_POROSITY,
+            λ = 1e-5,                    # kg/m³ - same as virgin PMMA
             c = pmma_cp,                   # J/(kg·K) - same as virgin PMMA
             k = pmma_k,                    # W/(m·K) - same as virgin PMMA
             ε = 0.96,                      # same emissivity as virgin PMMA
@@ -102,8 +110,8 @@ pmma = Material(
             M = 0.10012,                   # kg/mol - molar mass of MMA
             c = 1500.0,                    # J/(kg·K) - gas heat capacity
             k = 0.02,                      # W/(m·K) - gas conductivity
-            λ = 1e-5,                       # m²/s - gas transfer coefficient
         ),
+        GaseousComponent(:AIR; M = 0.02897, c = 1006.0, k = 0.026),
     ),
     reactions = (
         # Single-step decomposition reaction with small char residue
@@ -127,10 +135,10 @@ pmma = Material(
 
 # Sample geometry
 sample_thickness = 5.8e-3    # 5.8 mm typical cone calorimeter sample
-n_cells = 72               # 72 cells → 0.08 mm resolution
+n_cells = SMOKE ? 12 : 72               # 72 cells → 0.08 mm resolution
 
 # Time parameters  
-t_final = 1600.0            # 10 minutes - typical cone test duration
+t_final = SMOKE ? 20.0 : 1600.0  # 10 minutes - typical cone test duration
 dt_initial = 1e-3          # initial timestep
 
 # Environmental conditions
@@ -145,14 +153,12 @@ h_conv = 7.2              # W/(m²·K)
 # Mesh Creation
 # ============================================================================
 
-# Create uniform mesh with 3 components (virgin PMMA + char + MMA gas)
-# Convention: z=0 is the exposed TOP surface, z=L is the BOTTOM
+# Create uniform mesh; the initial temperature and concentrations (virgin PMMA
+# + char + MMA gas) come from the problem's T_initial and ξ_initial below.
+# Convention: z=0 is the back face, z=L the exposed surface
 mesh = create_uniform_mesh(
     sample_thickness,      # domain length [m]
     n_cells,               # number of cells
-    Val(3);                # number of components (NC): virgin, char, gas
-    T_initial = T_ambient, # initial temperature
-    ξ_initial = (1210.0, 0.0, 0.0),  # initial concentrations: full virgin, no char, no gas
 )
 
 println("Mesh created:")
@@ -164,7 +170,7 @@ println("  - Cell size: $(sample_thickness/n_cells*1000) mm")
 # Boundary Conditions
 # ============================================================================
 
-# Top surface (boundary_id = 1): exposed surface
+# Top surface (:top): exposed surface
 # - External radiant heat flux (25 kW/m²) with in-depth absorption controlled by radiation_model
 # - Re-radiation losses (surface radiates to surroundings)
 # - Convective losses (natural + forced convection)
@@ -173,7 +179,7 @@ println("  - Cell size: $(sample_thickness/n_cells*1000) mm")
 # - RadiativeFluxBC: External radiative source (cone heater)
 #   → Subject to absorptivity (fraction absorbed = α × incident)
 #   → radiation_model=BEER_LAMBERT: absorbed radiation distributed via Beer-Lambert
-#   → radiation_model=SURFACE_ABSORPTION: all absorbed in surface cell
+#   → radiation_model=SURFACE_ABSORPTION (or the default NO_RADIATION): all absorbed at the exposed face
 # - HeatFluxBC: Direct contact heating or fully opaque surface absorption
 #   → NOT subject to absorptivity - full flux applied at surface
 # - RadiativeBC: Re-radiation losses to surroundings (σεT⁴)
@@ -182,16 +188,16 @@ println("  - Cell size: $(sample_thickness/n_cells*1000) mm")
 top_thermal_bc =
     RadiativeFluxBC(flux = q_external, absorptivity = 0.96) +  # Cone heater (model-dependent)
     # RadiativeBC(ε = 0.96, T_inf = 360) +                 # Re-radiation losses (original)
-    RadiativeBC(ε = 0.96, T_inf = 330) +                 # Re-radiation losses (ThermaKin match)
+    RadiativeBC(ε = 0.96, T_inf = 330) +                 # Re-radiation at the boundary; TK deposition may differ
     ConvectiveBC(h = h_conv, T_inf = 330)                # Convective losses
 
-# Top surface mass BC: diffusive gas escape
-# DiffusiveMassBC uses J = λ × ξ / d (internal diffusion model) by default
-# This is consistent with the surface regression calculation
-# top_mass_bc = DiffusiveMassBC()  # Pure internal diffusion (h_m = Inf) (original)
-top_mass_bc = ConvectiveMassBC(h_m = 0.05, ξ_inf = 0.0)  # ThermaKin match: h_m = 0.05 m/s
+# Air at the thermal stream temperature; g is a mass-film conductance [kg/(m² s)].
+top_mass_bc = AmbientGasBC(
+    GasReservoir(P = 101325.0, T = 330.0, mole_fractions = (AIR = 1.0,));
+    film = MassTransferFilm(0.05*101325.0*0.02897/(8.31446261815324*330.0)),
+)
 
-# Bottom surface (boundary_id = 2): back face with heat losses
+# Bottom surface (:bottom): back face with heat losses
 # - Re-radiation losses to ambient (back face radiates to surroundings)
 # - Convective losses (natural convection from back face)
 bottom_thermal_bc =
@@ -220,7 +226,8 @@ T_initial_func = z -> T_ambient           # Uniform initial temperature
 ξ_initial_funcs = [
     z -> 1210.0,    # Virgin PMMA at full density
     z -> 0.0,       # No char initially
-    z -> 0.0,       # No gas initially
+    z -> 0.0,       # No gas initially,
+    z -> background_gas_concentration(pmma, :AIR, (1210.0, 0.0, 0.0, 0.0), T_ambient),
 ]
 
 # Create the pyrolysis problem
@@ -235,7 +242,7 @@ problem = PyrolysisProblem(
     dt_initial = dt_initial,
     # PERFORMANCE: Reduce output times from 6030 to 601 points (every 1s instead of 0.1s)
     # This significantly reduces interpolation overhead and memory usage
-    output_times = collect(range(0.0, t_final, length = 601)),  # Output every 1s
+    output_times = collect(range(0.0, t_final, length = SMOKE ? 21 : 601)),  # Output every 1s
 )
 
 println("\nProblem created:")
@@ -254,22 +261,20 @@ println("This may take a few minutes...\n")
 # Solve using implicit solver with ALE enabled
 # - use_ale=true: enables integrated ALE mesh motion (node positions in state vector)
 # - min_thickness: stops simulation when material becomes too thin
-# - handle_depletion: parks the surface cell (merging it into its neighbour) when it becomes too thin
-# - depletion_threshold: cell thickness fraction (0.05 = park when cell is 5% of initial thickness)
-#   IMPORTANT: This controls WHEN cells are parked. If too low, cells become extremely thin
-#   and the diffusion timestep (dt ∝ Δx²) becomes very small, causing slow simulation.
+# - deactivation: removes the surface cell once its condensed mass is below 1% of its
+#   initial mass (the default `threshold`); the mesh correction thins the layer so that
+#   it goes in one event
 # - dtmin: allows very small timesteps during rapid reaction fronts
 solution = solve(
     problem;
-    abstol = 1e-8,
-    reltol = 1e-6,
+    abstol = 1e-11,
+    reltol = 1e-9,
+    pressure_tolerance = 1e-4,
     dtmin = 1e-14,    # Allow very small timesteps during rapid reaction
     progress = true,
     use_ale = true,                        # Enable ALE mesh motion
     min_thickness = 0.01e-3,               # Stop when thickness < 0.01 mm
-    handle_depletion = true,               # Enable surface cell depletion handling
-    depletion_threshold = 0.05,            # Park cells when thickness < 5% of initial
-    min_cells = 1,                         # Keep at least 1 cell
+    deactivation = true,                   # Deactivate burned-out surface cells
 )
 
 println("\nSolution completed!")
@@ -317,41 +322,17 @@ println(
 println("\n" * "-" ^ 60)
 println("Mass vs Thickness Diagnostic (separating solid and gas):")
 println("-" ^ 60)
-ρ_solid = 1210.0  # PMMA solid intrinsic density
-# Focus on the active pyrolysis phase
-for i = 1:length(times)
+ρ_solid = 1210.0  # declared bulk density of condensed PMMA
+# Integrate the saved inventories on the actual ALE cells.
+for i in eachindex(times)
     t_i = times[i]
     L_i = thickness_values[i]
     m_total = total_mass[i]
-
-    # Compute SOLID mass only (component 1 = virgin PMMA)
-    ξ_profile = solution.ξ[:, :, i]
-    n_cells = size(ξ_profile, 2)
-
-    # Get cell volumes from node positions at this time
-    # Note: we don't have direct access to volumes, so use total_mass calculation
-    # For now, compute solid fraction as ξ_solid / (ξ_solid + ξ_gas)
-    total_solid = 0.0
-    total_gas = 0.0
-    for j = 1:n_cells
-        total_solid += ξ_profile[1, j]  # solid component (index 1)
-        total_gas += ξ_profile[2, j]    # gas component (index 2)
-    end
-
-    # Average concentrations (per cell, which ~ per unit volume since cells are similar size)
-    avg_solid_conc = total_solid / n_cells
-    avg_gas_conc = total_gas / n_cells
-
-    # Solid mass ≈ avg_solid_conc × L × A
-    # The total_mass already integrates correctly, so solid_mass = total_mass × (solid_fraction)
-    # Actually, let's be more careful: solid_mass = Σ ξ_solid[j] × V[j]
-    # For now, assume uniform cell sizes: solid_mass ≈ (Σ ξ_solid / Σ(ξ_solid + ξ_gas)) × total_mass
-    if (total_solid + total_gas) > 1e-10
-        solid_fraction = total_solid / (total_solid + total_gas)
-    else
-        solid_fraction = 0.0
-    end
-    m_solid = m_total * solid_fraction
+    masses = get_profile(solution, :m, i)
+    live = findall(isfinite, solution.T[:, i])
+    m_solid = sum(masses[j, c] for j in (1, 2), c in live)
+    m_gas = sum(masses[j, c] for j in (3, 4), c in live)
+    n_cells = length(live)
 
     # Expected thickness from solid mass
     L_expected = m_solid / ρ_solid
@@ -361,7 +342,7 @@ for i = 1:length(times)
     should_print = (i <= 10) || (i >= length(times)-2) || (mod(i, 10) == 0)  # Print every 10th point
     if should_print
         println(
-            "  t=$(round(t_i, digits=1))s: L=$(round(L_i*1000, digits=3))mm, m_solid=$(round(m_solid, digits=4))kg/m², m_gas=$(round(m_total-m_solid, digits=4))kg/m², L_exp=$(round(L_expected*1000, digits=3))mm, ratio=$(round(ratio, digits=3)), n=$n_cells",
+            "  t=$(round(t_i, digits=1))s: L=$(round(L_i*1000, digits=3))mm, m_solid=$(round(m_solid, digits=4))kg/m², m_gas=$(round(m_gas, digits=4))kg/m², L_exp=$(round(L_expected*1000, digits=3))mm, ratio=$(round(ratio, digits=3)), n=$n_cells",
         )
     end
 end
@@ -382,9 +363,10 @@ end
 
 println("\nGenerating plots...")
 
-# ThermaKin reference outputs for this case (`docs/thermakin_output/`, from a
-# ThermaKin run of `docs/PMMA_cone.cmp` + `docs/PMMA_cone.cnd`). The overlay is
-# skipped when they are absent.
+# Optional externally supplied ThermaKin outputs in `docs/thermakin_output/`.
+# Verify their actual input deck before comparing: the locally supplied
+# `docs/PMMA_cone.cnd` contains DF/moisture, not this PMMA problem.
+# These files have no pinned run provenance here; absent files skip the overlay.
 thermakin_output_dir = joinpath(@__DIR__, "..", "docs", "thermakin_output")
 has_thermakin = isdir(thermakin_output_dir)
 if has_thermakin
@@ -658,7 +640,7 @@ for target_t in [200.0, 400.0, 600.0, 800.0]
 
     # Reaction heat absorption
     h_rxn = 820e3  # J/kg
-    q_rxn = mlr_val * h_rxn
+    q_rxn = gen_rate_val * h_rxn
 
     # Conduction estimate (q_net - q_rxn goes into conduction + storage)
     q_remaining = q_net - q_rxn
@@ -667,7 +649,7 @@ for target_t in [200.0, 400.0, 600.0, 800.0]
     println("State:")
     println("  Surface T: $(round(T_surf, digits=1)) K")
     println("  Back T: $(round(T_back_val, digits=1)) K")
-    println("  MLR: $(round(mlr_val*1000, digits=3)) g/(m²·s)")
+    println("  MLR: $(round(gen_rate_val*1000, digits=3)) g/(m²·s)")
     println("  Thickness: $(round(thick*1000, digits=3)) mm")
     println("  Cells: $n_cells")
 
@@ -708,77 +690,11 @@ for target_t in [200.0, 400.0, 600.0, 800.0]
 end
 
 println("\n" * "="^70)
-println("COMPARISON WITH THERMAKIN AT t ≈ 600s")
+println("THERMAKIN COMPARISON PROVENANCE")
 println("="^70)
-
-# Find our values at t=600s
-idx_600 = argmin(abs.(times .- 600.0))
-if idx_600 <= length(times)
-    println("\n                          Pyrolysis.jl    ThermaKin    Difference")
-    println("-"^70)
-
-    T_surf_PJ = T_surface[idx_600]
-    T_surf_TK = 649.0
-    println(
-        "Surface T [K]             $(round(T_surf_PJ, digits=1))          $T_surf_TK        $(round(T_surf_TK - T_surf_PJ, digits=1))",
-    )
-
-    T_back_PJ = T_back[idx_600]
-    T_back_TK = 507.2
-    println(
-        "Back T [K]                $(round(T_back_PJ, digits=1))          $T_back_TK        $(round(T_back_TK - T_back_PJ, digits=1))",
-    )
-
-    gen_rate_PJ = gas_generation_rate[idx_600] * 1000  # g/m²/s
-    mlr_TK = 6.47  # ThermaKin reports actual MLR
-    println(
-        "Gen rate [g/(m²·s)]       $(round(gen_rate_PJ, digits=2))           $mlr_TK         $(round(mlr_TK - gen_rate_PJ, digits=2))",
-    )
-
-    thick_PJ = thickness_values[idx_600] * 1000  # mm
-    thick_TK = 3.89
-    println(
-        "Thickness [mm]            $(round(thick_PJ, digits=2))           $thick_TK         $(round(thick_TK - thick_PJ, digits=2))",
-    )
-
-    println("-"^70)
-    println("\nAnalysis:")
-    println(
-        "  ThermaKin shows HIGHER surface T (+$(round(T_surf_TK - T_surf_PJ, digits=0)) K)",
-    )
-    println(
-        "  ThermaKin shows LOWER MLR (-$(round(gen_rate_PJ - mlr_TK, digits=2)) g/(m²·s))",
-    )
-    println()
-    println("  This is physically consistent:")
-    println("  - Higher T → more re-radiation loss → less heat for pyrolysis")
-    println("  - OR: concentrated reaction zone → higher local T, lower total MLR")
-    println()
-
-    # Estimate reaction zone width
-    A = 1.5e14
-    E = 2.03e5
-    R_gas = 8.314
-
-    k_TK = A * exp(-E/(R_gas*T_surf_TK))
-    k_PJ = A * exp(-E/(R_gas*T_surf_PJ))
-
-    ξ_TK = 1192.8  # ThermaKin PMMA_glass concentration at surface
-    ξ_PJ = idx_600 <= size(solution.ξ, 3) ? solution.ξ[:, :, idx_600][1, end] : 1200.0
-
-    r_TK = k_TK * ξ_TK
-    r_PJ = k_PJ * ξ_PJ
-
-    # Reaction zone width (if uniform): δ = MLR / r
-    δ_TK = mlr_TK/1000 / r_TK * 1000  # mm
-    δ_PJ = gen_rate_PJ/1000 / r_PJ * 1000  # mm
-
-    println("  Estimated reaction zone width:")
-    println("    Pyrolysis.jl: $(round(δ_PJ, digits=2)) mm")
-    println("    ThermaKin:    $(round(δ_TK, digits=2)) mm")
-    println()
-    println("  Pyrolysis.jl has WIDER reaction zone spreading heat absorption")
-    println("  → Lower peak temperature, higher total MLR")
-end
+println("Optional overlays require outputs from a verified matching input deck.")
+println(
+    "Compare species-resolved escaped mass and use matching thermal and gas boundaries.",
+)
 
 println("\n" * "="^70)

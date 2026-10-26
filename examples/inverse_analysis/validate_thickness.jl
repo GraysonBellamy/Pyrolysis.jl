@@ -20,7 +20,9 @@ physics rather than as radial-law fitting targets.
 """
 
 using Printf
-using Pyrolysis: StateLayout, to_problem_def, column_chi_bar_from_state
+using Pyrolysis.States: history_index
+
+const SMOKE = get(ENV, "PYROLYSIS_SMOKE", "0") == "1"   # PYROLYSIS_SMOKE=1: a short run that checks the script works
 
 include("wp_forward.jl")
 include("wp_objective.jl")
@@ -73,12 +75,15 @@ struct ScenarioResult
     rho_f::Float64             # residue bulk density ρ_0·(m_f/m_0)/(V_f/V_0), kg/m³
 end
 
+# The column conversion χ̄ = Σ Gᵢ / Σ Mᵢ of the final state: Gᵢ the cumulative
+# dry pyrolysis gas cell i has produced, Mᵢ its initial dry solid mass.
 function compute_χ̄(sol)
     u_end = sol.raw_solution.u[end]
-    mesh = sol.problem.mesh
-    def = to_problem_def(sol.problem; use_ale = true)
-    layout = StateLayout(NC_WP, length(mesh.cells), length(mesh.nodes), def.mode)
-    return column_chi_bar_from_state(u_end, layout, mesh)
+    layout = sol.definition.layout
+    cells = 1:size(sol.T, 1)
+    ΣG = sum(u_end[history_index(layout, i, 1)] for i in cells)
+    ΣM = sum(u_end[history_index(layout, i, 2)] for i in cells)
+    return ΣG / ΣM
 end
 
 function run_scenario(label::AbstractString, q_ext::Real)
@@ -97,6 +102,7 @@ function run_scenario(label::AbstractString, q_ext::Real)
     # matches the population this flux's replicates were drawn from.
     A_0_flux = wp_A0_for_flux(q_ext / 1000)
     scenario = merge(scenario_base, (A_0 = A_0_flux,))
+    SMOKE && (scenario = merge(scenario, (t_final = 20.0,)))   # PYROLYSIS_SMOKE=1: 20 s
     @info "  scenario loaded" label q_ext_kW=q_ext/1000 t_final=scenario.t_final A_0_mm2=scenario.A_0*1e6
     @info "  D_0 from per-flux mean" D0_mm=2*sqrt(scenario.A_0/π)*1000
 
@@ -123,7 +129,7 @@ function run_scenario(label::AbstractString, q_ext::Real)
     mass = sol.extras.total_mass     # already per-A_0 (kg/m²)
     m_ratio = mass[end] / mass[1]
 
-    # Use raw mesh state at end to read χ̄
+    # Read χ̄ from the final state's conversion history
     χ̄_final = try
 
         compute_χ̄(sol)

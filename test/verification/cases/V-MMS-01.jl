@@ -13,18 +13,17 @@
 # - two-step kinetics A → 0.65 B + 0.35 gas (endothermic) and B → gas
 #   (exothermic): intermediate B produced and consumed, reaction heat feeding
 #   back into the energy equation, gas produced into the transport field;
-# - Fickian gas transport in the ThermaKin volume-fraction-gradient form
-#   J = −(λ_eff/T)∂z(ξT), with per-component λ so λ_eff is state-dependent;
-# - gas-advection energy source S_conv = −cp_g·J·∂zT;
+# - partial-pressure gas transport J = −(Λ/T)∂z(ξT/φ), with condensed
+#   matrix coefficients and the skeletal pore volume evaluated independently;
+# - gas-advection energy source S_adv = −cp_g·J·∂zT;
 # - manufactured Neumann BCs (HeatFluxBC/MassFluxBC callables of t) — the
 #   Dirichlet face reconstruction is first-order and would cap the observed
 #   order (see exact/mms.jl header, design decision 3).
 #
 # The manufactured sources are assembled by nested ForwardDiff through the
-# package's own property/kinetics functions (exact/mms.jl), injected at the
-# state-derivative level so the analytic Structured Jacobian remains exact —
-# this case runs with the DirectSolve Jacobian attached (its agreement with
-# colored FD is asserted in the driver self-tests).
+# package's own property/kinetics functions (exact/mms.jl) and injected at the
+# state-derivative level as functions of (z, t), so the colored Jacobian stays
+# exact.
 #
 # The depletion limiter is left at the material default: the source generator
 # evaluates the identical rate law, and every reactant concentration stays
@@ -65,8 +64,7 @@ function _verification_case_vmms01()
             k = T -> 0.32 + 3.0e-4 * T,
             λ = 2.5e-5,
         )
-        gas =
-            GaseousComponent(:g, M = 0.028, c = T -> 950.0 + 0.3 * T, k = 0.03, λ = 2.0e-5)
+        gas = GaseousComponent(:g, M = 0.028, c = T -> 950.0 + 0.3 * T, k = 0.03)
         r1 = Reaction(
             :r1,
             1 => (2, 3);
@@ -85,13 +83,7 @@ function _verification_case_vmms01()
 
     function build(n_cells)
         mat = make_material()
-        mesh = create_uniform_mesh(
-            L,
-            n_cells,
-            Val(3);
-            T_initial = 500.0,
-            ξ_initial = (400.0, 250.0, 1.5),
-        )
+        mesh = create_uniform_mesh(L, n_cells)
         thermal = mms_thermal_bcs(mat, fields, L)
         mass = mms_mass_bcs(mat, fields, L)
         bc_set = BoundaryConditionSet(
@@ -109,7 +101,8 @@ function _verification_case_vmms01()
         )
     end
 
-    solve_fn(problem; kwargs...) = solve_mms(problem, fields; kwargs...)
+    solve_fn(problem; kwargs...) =
+        solve_mms(problem, fields; energy_state = VERIFICATION_ENERGY_STATE, kwargs...)
 
     function qois(sol)
         out = QoIResult[]
@@ -121,16 +114,16 @@ function _verification_case_vmms01()
                     name = "L∞ T error, t=$(t) s",
                     value = mms_Linf_T(sol, fields; m = m),
                     error = mms_Linf_T(sol, fields; m = m),
-                    tol = 0.05,  # 3× observed max: 0.0163 K at t=10 s (n=40)
+                    tol = 0.05,  # K; prescribed physical accuracy bound
                     comment = "manufactured T* recovered on the coupled system; " *
-                              "observed 0.0163/0.0124 K at t=10/20 s",
+                              "refined to 160 cells to resolve the pore-pressure gradients",
                 ),
             )
         end
         for (name, idx, scale, tol, obs) in (
-            ("ξ_A", 1, 350.0, 2e-4, "6.8e-5"),
-            ("ξ_B", 2, 220.0, 1e-4, "2.2e-5"),
-            ("ξ_gas", 3, 1.2, 3e-2, "9.8e-3"),
+            ("ξ_A", 1, 350.0, 2e-4, "5.3e-6"),
+            ("ξ_B", 2, 220.0, 1e-4, "1.7e-6"),
+            ("ξ_gas", 3, 1.2, 3e-2, "1.34e-2"),
         )
             err = mms_Linf_xi(sol, fields, idx) / scale
             push!(
@@ -139,9 +132,9 @@ function _verification_case_vmms01()
                     name = "relative L∞ $(name) error, t=$(t_end) s",
                     value = err,
                     error = err,
-                    tol = tol,  # 3× observed (n=40)
+                    tol = tol,  # fixed concentration accuracy bounds
                     comment = "scale = manufactured baseline; observed $(obs); " *
-                              "L∞ ξ orders ≈ 2.0 on [20,40,80] at pin time",
+                              "L∞ ξ order ≈ 2 on [20,40,80,160]",
                 ),
             )
         end
@@ -164,11 +157,11 @@ function _verification_case_vmms01()
         solve_fn = solve_fn,
         qois = qois,
         ci = CIConfig(
-            n_cells = 40,
+            n_cells = 160,
             budget_s = 30.0,
             convergence = ConvergenceSpec(
-                # observed rates 1.980, 1.994; L∞ ξ_A/ξ_gas also
-                # order ≈ 2.00 on the same ladder at pin time
+                # The independent pressure-potential source gives second-order
+                # temperature and species convergence on this ladder.
                 n_cells = [20, 40, 80],
                 error_fn = l2_T_final,
                 expected_order = 2.0,

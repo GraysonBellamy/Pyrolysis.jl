@@ -33,7 +33,7 @@ function _verification_case_vhc05()
     function build(n_cells)
         solid = SolidComponent(:solid, ρ = ρ, c = c, k = LinearProperty(k0, k0 * β))
         mat = Material(name = :VHC05, components = (solid,), reactions = ())
-        mesh = create_uniform_mesh(L, n_cells, Val(1); T_initial = T_bot, ξ_initial = (ρ,))
+        mesh = create_uniform_mesh(L, n_cells)
         bc_set = BoundaryConditionSet(
             thermal = (top = DirichletThermalBC(T_top), bottom = DirichletThermalBC(T_bot)),
         )

@@ -13,12 +13,9 @@ Newton, and the `CouetteFilm` model end to end.
    `blowing_ratio` diagnostics, off/on ordering, exact no-outflow identity.
 5. AD cleanliness — ForwardDiff derivatives of `T_s` w.r.t. `T_cell` and the
    blowing mass flux match central finite differences.
-6. Structured-backend Jacobian — strict support-complete agreement with
-   `DenseAD_ForwardDiff` with a blowing model on the top face (Fickian and
-   Darcy–Fick, Eulerian and ALE, film and pooling models).
-7. Integration — `solve` with a film model raises the surface temperature
-   under convective cooling, and the saved flux decomposition stays
-   consistent with the boundary ledger.
+6. Integration — the finite-volume core's `solve` with a film model raises
+   the surface temperature under convective cooling, and the saved flux
+   decomposition stays consistent with the boundary ledger.
 
 The property-ratio and pooling models are checked against their reference
 values in `test_blowing_models.jl`.
@@ -29,19 +26,18 @@ using ForwardDiff
 using Pyrolysis
 using Pyrolysis.Materials
 using Pyrolysis.BoundaryConditions
-using Pyrolysis.Geometry: BoundaryState
-using Pyrolysis.Discretization:
+using Pyrolysis.BoundaryConditions:
+    BoundaryState,
     blowing_factor,
     BlowingFace,
     blowing_state,
     blowing_ratio,
-    solve_boundary_temperature,
     solve_boundary_temperature!,
     evaluate_bc_flux_and_derivative,
-    compute_boundary_heat_fluxes
-using Pyrolysis.Discretization: _blowing_conductance
+    compute_boundary_heat_fluxes,
+    _blowing_conductance
 using Pyrolysis.Materials: SURFACE_ABSORPTION, NO_RADIATION
-using Pyrolysis.Jacobian: verify_jacobian_at, JacobianSpec, DenseAD_ForwardDiff, Structured
+using Pyrolysis.States: trial_temperature
 
 # ----------------------------------------------------------------------------
 # Shared fixtures: 2-component solid + gas, constant cp_g so the blowing
@@ -50,15 +46,42 @@ using Pyrolysis.Jacobian: verify_jacobian_at, JacobianSpec, DenseAD_ForwardDiff,
 const _CP_GAS = 1000.0
 function _blowing_material(; darcy::Bool = false)
     solid_kwargs = darcy ? (; κ = 1e-14) : (;)
-    solid =
-        SolidComponent(:solid; ρ = 1000.0, c = 1000.0, k = 0.2, ε = 0.9, solid_kwargs...)
-    gas = GaseousComponent(:gas; M = 0.050, c = _CP_GAS, k = 0.02, λ = 1e-5)
+    solid = SolidComponent(
+        :solid;
+        φ = 0.3,
+        λ = 1e-5,
+        ρ = 1000.0,
+        c = 1000.0,
+        k = 0.2,
+        ε = 0.9,
+        solid_kwargs...,
+    )
+    gas = GaseousComponent(:gas; M = 0.050, c = _CP_GAS, k = 0.02)
     rxn = Reaction(:decomp, 1 => 2, A = 1e5, E = 5e4, h = 1e5)
     return Material(name = :blowing_test, components = (solid, gas), reactions = (rxn,))
 end
 
 # Reference factor straight from the definition (only valid away from 0/∞).
 _f_exact(B) = B / (exp(B) - 1)
+
+# The surface balance at the trial clamp of each iterate, as the residual
+# evaluates it; returns the diagnostic state.
+function _blowing_surface(T_cell, k_eff, Δz_half, bc, mat, J, t, ε)
+    state = BoundaryState()
+    solve_boundary_temperature!(
+        state,
+        T_cell,
+        k_eff,
+        Δz_half,
+        bc,
+        mat,
+        J,
+        t,
+        ε;
+        trial = trial_temperature,
+    )
+    return state
+end
 
 @testset "Blowing correction" begin
 
@@ -127,19 +150,18 @@ _f_exact(B) = B / (exp(B) - 1)
         @test q ≈ h * χ * (T_inf - T_s) rtol = 1e-14
         @test dq ≈ -h * χ rtol = 1e-14
 
-        # Zero outflow reproduces the 5-arg flux exactly.
+        # Zero outflow reproduces the uncorrected flux exactly.
         q0, dq0 = evaluate_bc_flux_and_derivative(conv, T_s, t, ε, NO_RADIATION, face0)
-        q5, dq5 = evaluate_bc_flux_and_derivative(conv, T_s, t, ε, NO_RADIATION)
-        @test q0 === q5
-        @test dq0 === dq5
+        @test q0 === h * (T_inf - T_s)
+        @test dq0 === -h
 
         # The default model leaves the coefficient alone whatever the outflow.
         bare = ConvectiveBC(h = h, T_inf = T_inf)
         @test bare.blowing === NoBlowing()
         @test ConvectiveBC(h, T_inf).blowing === NoBlowing()
         qb, dqb = evaluate_bc_flux_and_derivative(bare, T_s, t, ε, NO_RADIATION, face)
-        @test qb === q5
-        @test dqb === dq5
+        @test qb === q0
+        @test dqb === dq0
 
         # Non-convective BCs ignore the face.
         rad = RadiativeBC(T_inf = T_inf)
@@ -226,7 +248,7 @@ _f_exact(B) = B / (exp(B) - 1)
         J_zero = (0.0, 0.0)
         J_blow = (0.0, J_gas)
 
-        state = solve_boundary_temperature(T_cell, k_eff, Δz_half, bc, mat, J_blow, t, ε)
+        state = _blowing_surface(T_cell, k_eff, Δz_half, bc, mat, J_blow, t, ε)
         @test state.converged
 
         # Constant cp_g → mcp is exactly J·cp, independent of T_s.
@@ -246,24 +268,21 @@ _f_exact(B) = B / (exp(B) - 1)
 
         # Blowing suppresses convective cooling → hotter surface than the
         # bare coefficient under the same outflow.
-        state_off =
-            solve_boundary_temperature(T_cell, k_eff, Δz_half, bc_bare, mat, J_blow, t, ε)
+        state_off = _blowing_surface(T_cell, k_eff, Δz_half, bc_bare, mat, J_blow, t, ε)
         @test state.T_surface > state_off.T_surface
         @test state_off.blowing_mcp ≈ mcp rtol = 1e-12   # the conductance is reported
         @test state_off.blowing_ratio == 1.0             # but not applied
 
         # Zero mass flux with a model is the exact no-blowing state.
-        state_zero =
-            solve_boundary_temperature(T_cell, k_eff, Δz_half, bc, mat, J_zero, t, ε)
-        state_bare0 =
-            solve_boundary_temperature(T_cell, k_eff, Δz_half, bc_bare, mat, J_zero, t, ε)
+        state_zero = _blowing_surface(T_cell, k_eff, Δz_half, bc, mat, J_zero, t, ε)
+        state_bare0 = _blowing_surface(T_cell, k_eff, Δz_half, bc_bare, mat, J_zero, t, ε)
         @test state_zero.T_surface === state_bare0.T_surface
         @test state_zero.q_applied === state_bare0.q_applied
         @test state_zero.blowing_ratio == 1.0
 
         # Net suction (inflow) enhances cooling → colder surface than bare.
         state_suction =
-            solve_boundary_temperature(T_cell, k_eff, Δz_half, bc, mat, (0.0, -J_gas), t, ε)
+            _blowing_surface(T_cell, k_eff, Δz_half, bc, mat, (0.0, -J_gas), t, ε)
         @test state_suction.T_surface < state_off.T_surface
         @test state_suction.blowing_mcp < 0.0
         @test state_suction.blowing_ratio > 1.0
@@ -287,7 +306,8 @@ _f_exact(B) = B / (exp(B) - 1)
                 mat,
                 (zero(J_gas), J_gas),
                 t,
-                ε,
+                ε;
+                trial = trial_temperature,
             )
             return result.T_s
         end
@@ -307,91 +327,30 @@ _f_exact(B) = B / (exp(B) - 1)
     end
 
     # ========================================================================
-    @testset "Structured Jacobian: strict agreement with blowing" begin
-        function _build(; darcy::Bool, use_ale::Bool, model)
-            mat = _blowing_material(darcy = darcy)
-            mesh = create_uniform_mesh(0.01, 12, Val(2))
-            bcs = BoundaryConditionSet(
-                thermal = (
-                    top = HeatFluxBC(50e3) +
-                          ConvectiveBC(h = 10.0, T_inf = 300.0, blowing = model),
-                    bottom = AdiabaticBC(),
-                ),
-                mass = (top = DiffusiveMassBC(0.01), bottom = ImpermeableBC()),
-            )
-            problem = PyrolysisProblem(
-                mesh = mesh,
-                material = mat,
-                bc_set = bcs,
-                tspan = (0.0, 100.0),
-            )
-            def, ws, u = initialize_state(problem; use_ale = use_ale)
-            n = ws.layout.n_cells
-            # Hot state with free gas so the boundary mass flux (and hence B)
-            # is genuinely nonzero.
-            for i = 1:n
-                u[i] = 1000.0
-                u[n+i] = 400.0          # ξ_solid
-                u[2n+i] = 8.0           # ξ_gas
-            end
-            return def, ws, u
-        end
-
-        pooling = PoolingFilm(NITROGEN; diffusion_volume = (gas = 60.0,))
-        for (name, darcy, use_ale, model) in (
-            ("eulerian Fickian", false, false, CouetteFilm()),
-            ("eulerian Darcy-Fick", true, false, CouetteFilm()),
-            ("ALE Fickian", false, true, CouetteFilm()),
-            ("eulerian Fickian, λ = 0.31", false, false, CouetteFilm(0.31)),
-            ("eulerian Fickian, property ratio", false, false, PropertyRatioFilm(NITROGEN)),
-            ("eulerian Fickian, pooling", false, false, pooling),
-            ("eulerian Darcy-Fick, pooling", true, false, pooling),
-            ("ALE Fickian, pooling", false, true, pooling),
-        )
-            def, ws, u = _build(darcy = darcy, use_ale = use_ale, model = model)
-            ref_spec = JacobianSpec(DenseAD_ForwardDiff(), def, ws)
-            spec = JacobianSpec(Structured(), def, ws)
-            report = verify_jacobian_at(
-                spec,
-                def,
-                ws,
-                u,
-                0.0;
-                reference_spec = ref_spec,
-                rtol = 1e-6,
-                atol = 1e-10,
-            )
-            @test report.mode == :strict
-            @test report.passed
-        end
-    end
-
-    # ========================================================================
     @testset "integration: solve() with blowing" begin
         function _solve(model)
             mat = _blowing_material()
-            mesh = create_uniform_mesh(
-                0.005,
-                8,
-                Val(2);
-                T_initial = 600.0,
-                ξ_initial = (1000.0, 0.0),
-            )
+            mesh = create_uniform_mesh(0.005, 8)
             bcs = BoundaryConditionSet(
                 thermal = (
                     top = HeatFluxBC(50e3) +
                           ConvectiveBC(h = 15.0, T_inf = 300.0, blowing = model),
                     bottom = AdiabaticBC(),
                 ),
-                mass = (top = DiffusiveMassBC(0.01), bottom = ImpermeableBC()),
+                mass = (
+                    top = AmbientGasBC(GasReservoir(P = 0.0, T = 300.0)),
+                    bottom = ImpermeableBC(),
+                ),
             )
             problem = PyrolysisProblem(
                 mesh = mesh,
                 material = mat,
                 bc_set = bcs,
+                T_initial = z -> 300.0,
+                ξ_initial = [z -> 1000.0, z -> 0.0],
                 tspan = (0.0, 5.0),
             )
-            return solve(problem; saveat = [0.0, 2.5, 5.0], progress = false)
+            return Pyrolysis.Integration.solve(problem; saveat = [0.0, 2.5, 5.0])
         end
 
         sol_off = _solve(NoBlowing())

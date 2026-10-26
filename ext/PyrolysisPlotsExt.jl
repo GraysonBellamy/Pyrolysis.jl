@@ -1,11 +1,9 @@
 """
-PyrolysisPlotsExt — Plots.jl recipes for `PyrolysisSolution`.
+PyrolysisPlotsExt — Plots.jl recipes for the solution of `Pyrolysis`.
 
 Loaded automatically when both `Pyrolysis` and `Plots` (or `RecipesBase`)
-are available in the user's environment. Consumes the fixed core schema
-of `PyrolysisSolution` (`t`, `T`, `ξ`, `z`, `surface_T`, `mass_loss_rate`)
-so the recipes work regardless of which optional diagnostics extras were
-turned on.
+are available in the user's environment. Consumes the solution's `t`, `T`,
+`surface_T` and `mass_loss_rate`.
 
 # Usage
 

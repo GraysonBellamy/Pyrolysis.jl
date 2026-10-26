@@ -1,485 +1,1100 @@
 # 13. Finite-Volume Spatial Discretization
 
-This chapter derives the cell-centered finite-volume (FVM) spatial discretization that converts the continuous coupled PDE system of §3 (Governing Equations) into the spatially discrete semi-discrete system of ordinary differential / differential-algebraic equations integrated in §15 (Temporal Integration & Structured Jacobian). It documents the 1D mesh layout (nodes, cells, faces), the geometric quantities that enter every flux, the divergence operator and its sign conventions, the conductive / gas-diffusive / Darcy–Fick face-value formulas, the TVD flux limiters and gradient-reconstruction machinery, the moving-mesh (ALE) advection discretization, mesh generation (uniform and geometric-stretch), and the block-major state-vector packing with allocation-free geometry-from-state. Every equation, sign, factor, guard, and limiter below has been confirmed against the implementation; where the code deviates from the textbook form (or from the design-document prose), the code is reported as ground truth and the deviation is called out.
+This chapter derives the cell-centered finite-volume discretization that turns the
+continuum balances of §3 (Governing Equations) into the semi-discrete mass-matrix
+system integrated in §15 (Temporal Integration, the DAE, and the Colored Jacobian). It
+describes the face-based mesh (nodes, faces, cells and boundary tags,
+`src/Meshes`), the metrics computed from the node positions, the scatter of face
+fluxes into extensive cell rows, the kernels that compute the fluxes and the cell
+sources (`src/Kernels`), the order in which the residual runs them
+(`src/Assembly`), the face values and gradients the fluxes use, mesh generation,
+and the mapping from the state vector to the quantities the kernels read
+(`src/States`). Every formula below is the one the code evaluates; where the
+implementation adds a guard, a floor or a sign choice, it is stated.
 
-The unifying design principle is that **all transport is expressed as fluxes evaluated at cell faces**, and the time derivative of every conserved or quasi-conserved cell quantity is the discrete divergence of those face fluxes plus volumetric sources. This guarantees discrete conservation up to the boundary-flux treatment (see §16, Conservation Diagnostics) and produces a sparse, banded coupling structure that the structured Jacobian of §15 exploits.
+The organising principle is that **every transport process is a flux through a
+face, and every cell row is extensive**. The integrated unknowns are the
+component masses of every cell, $m_{j,i}$ [kg], and an energy state per cell. A
+kernel writes a flux per unit area along each face normal; the assembler adds
+$-F_fA_f$ to the face's owner and $+F_fA_f$ to its neighbour. Interior faces
+therefore cancel in any sum over cells, mass is conserved exactly by the
+semi-discrete system, and the energy ledger closes against the boundary fluxes,
+the sources and the deactivation events (§16). The coupling of every row to its
+neighbours is local, which gives the banded sparsity the colored Jacobian of §15
+exploits.
 
-Throughout this chapter the index `i` is the **cell index** (overload resolution I1: `i` = cell in discretization; the reaction index is `r`), `j` is the **component index** (`1…N_C`), and `f` is the **face index**. The spatial coordinate is `z` with `z = 0` at the bottom/substrate (boundary id 2, tag `:bottom`) and `z = L` at the top/exposed surface (boundary id 1, tag `:top`); heat enters from the top and the material recedes downward. The three sign conventions of §2 (Nomenclature) are in force: positive flux is transport in `+z`; the divergence `(F_R − F_L)A/V` is positive for net outflow; and the heat-of-reaction convention `h > 0` endothermic, `Q_rxn = −Σ_r h_r r_r`.
+Conventions (binding, from §2, Nomenclature):
+
+- The spatial coordinate is $z$; $z=0$ is the back (tag `:bottom`) and $z=L$ the
+  exposed surface (tag `:top`). Heat enters from the top and the material recedes
+  downward.
+- $i$ is a cell index, $j$ a component index, $f$ a face index, $n$ a node index
+  (and, where it is a count, the number of cells), $r$ a reaction index (overload
+  I1). $N_C$ is the number of components.
+- A face's normal points from its **owner** cell to its **neighbour** cell, out of
+  the domain on a boundary face. $s_{i,f}=+1$ when cell $i$ owns face $f$ and $-1$
+  when it is the neighbour. On a face quantity the subscripts $o$ and $n$ denote
+  the face's owner and neighbour cells ($d_o$, $T_n$, …).
+- A face flux $F_f$ (energy, W m⁻²) or $F_{j,f}$ (mass of component $j$,
+  kg m⁻² s⁻¹) is the transport per unit face area along the normal: along $+z$ on
+  every interior face and on the `:top` face, along $-z$ (outward) on the
+  `:bottom` face.
+- Heat of reaction: $h>0$ endothermic, $Q_\mathrm{rxn}=-\sum_r h_r r_r$.
+  $h_j(T)$ is the sensible enthalpy of component $j$ on the $T_\mathrm{ref}$ datum.
+- A tilde marks a guarded trial-state quantity (§13.10.3): $\tilde T_i$ the trial
+  temperature, $\tilde V_i$ the floored cell volume.
 
 ---
 
 ## 13.1 Cell-Centered Finite-Volume Layout in 1D
 
-### 13.1.1 Topology: nodes, cells, faces
+![Nonuniform column with cell centres, node faces, outward boundary normals and equal-and-opposite owner/neighbour flux contributions.](../../assets/figures/01_mesh_anatomy.svg)
 
-Pyrolysis.jl stores its primary unknowns — temperature `T` and the mass concentrations `ξ_j` — at **cell centers**, not at faces or nodes. This is the classic cell-centered (collocated) finite-volume arrangement. The 1D mesh consists of three topological entity types whose counts are rigidly linked:
+**Figure 1. Finite-volume mesh anatomy (schematic).** The pinned back is at `z = 0`; heat enters at the exposed face `z = L(t)`. In one dimension each node is a face. An interior flux is oriented from owner to neighbour and contributes equal and opposite extensive rates, so it cancels from the global balance. Widths are deliberately nonuniform. See Technical Reference §13.1 for the face convention and Figure 2 in §13.4 for the framework.
 
-$$
-n_{\text{nodes}} = n_{\text{faces}} = n + 1, \qquad n \equiv n_{\text{cells}}.
-$$
+### 13.1.1 Topology: nodes, faces, cells
 
-- A **node** (`Node1D`) is a mesh vertex at position `z_i`. Node 1 sits at `z = 0` (bottom, `boundary_id = 2`), node `n+1` sits at `z = L` (top, `boundary_id = 1`); the rest are interior (`boundary_id = 0`). In ALE mode the node positions become part of the ODE state (§13.10).
-- A **cell** (`Cell1D`) is the finite volume. Cell `i` spans the two adjacent nodes `(i, i+1)` and is bounded by the two faces `(i, i+1)`. Cells carry the unknowns through their `CellState{NC}` (`T`, the `NTuple{NC}` of `ξ_j`, and a diagnostic `volume`). Cells are immutable in connectivity; depletion parking (§14.3) changes only the live cell count `n_active_cells`, never the arrays.
-- A **face** (`Face1D`) is, in 1D, a single point co-located with a node. Face `f` carries its `cell_ids = (left, right)` with `0` marking a domain boundary: the bottom face (id 1, at `z = 0`) has `cell_ids = (0, 1)`; the top face (id `n+1`, at `z = L`) has `cell_ids = (n, 0)`; interior face `i` has `cell_ids = (i−1, i)`.
-
-"Left" always denotes the lower-`z` (toward substrate) side of a face and "Right" the higher-`z` (toward surface) side. Cell indices increase from bottom to top, so node `i` is the left endpoint of cell `i` and the right endpoint of cell `i−1`; face `i` co-locates with node `i`.
-
-> **Implementation note.** The data structures are defined in `Node1D` (src/Geometry/nodes.jl), `Cell1D`/`CellState` (src/Geometry/cells.jl), `Face1D` (src/Geometry/faces.jl), and the container `Mesh1D{NC}` (src/Geometry/mesh.jl). The connectivity view `MeshTopology` and the per-step `MeshGeometry` (src/Geometry/topology.jl, src/Geometry/mesh_geometry.jl) are placeholders for a multi-dimensional extension: the 1D residual reads the `Mesh1D` connectivity and the state-derived geometry held in the typed `StateCache` (§13.10.2), which is what makes pure (mesh-non-mutating) residual and Jacobian evaluation possible.
-
-### 13.1.2 Boundary identifier convention
-
-The internal representation uses integer boundary ids; the user-facing API uses symbols. The bridge is
+Pyrolysis.jl stores its primary unknowns, the component masses and the energy
+state, per **cell**: the classic cell-centered (collocated) finite-volume
+arrangement. A line of $n$ cells has
 
 $$
-\texttt{tag\_to\_boundary\_id}: \;\; :\texttt{top} \mapsto 1, \quad :\texttt{bottom} \mapsto 2, \quad \text{otherwise} \mapsto 0,
+n_\text{nodes}=n_\text{faces}=n+1 .
 $$
 
-with the inverse `boundary_id_to_tag` (src/Geometry/topology.jl). The boundary-face map `mesh.boundary_faces` stores `1 => [n+1]` (top) and `2 => [1]` (bottom). This convention propagates into the boundary-temperature solver, the mass/pressure/mesh boundary conditions of §12, and the diagnostics of §16.
+- **Node** $n$ sits at position $z_n$. Node 1 ($z=0$) is pinned. On a moving mesh
+  (`use_ale = true`) the node positions are differential unknowns and the node
+  velocities algebraic ones (§11.4, §13.10); on a fixed mesh every node is pinned
+  and the geometry is computed once.
+- **Face** $f$ (`Face{1,1}`) sits at node $f$ and carries its nodes, its two cells
+  `cells = (owner, neighbour)`, the neighbour `0` on a boundary face, and a tag:
+  face 1 has cells `(1, 0)` and tag `:bottom`; interior face $f$ ($2\le f\le n$)
+  has cells `(f − 1, f)` and tag `:interior`; face $n+1$ has cells `(n, 0)` and
+  tag `:top`.
+- **Cell** $i$ (`Cell{1,2,2}`) lies between nodes $i$ and $i+1$ and is bounded by
+  faces $i$ and $i+1$.
 
-### 13.1.3 What a "cell-centered" scheme means for accuracy
+Every interior face's owner is the cell below it and its neighbour the cell above,
+so its normal points along $+z$; the boundary faces' normals point out of the
+domain, $-z$ at face 1 and $+z$ at face $n+1$. A positive interior flux therefore
+carries its quantity upward, toward the exposed surface; a positive flux on either
+boundary face carries it out of the domain.
 
-Because unknowns live at cell centers but fluxes are needed at faces, every flux requires an *interpolation/reconstruction* from cell values to faces. For diffusion this is a face-property average plus a two-point gradient (§13.7); for advection it is an upwind or limited reconstruction (§13.4, §13.5). On a uniform mesh the central two-point gradient at a face is second-order; the cell-centered gradient (§13.6) is second-order in the interior and degrades to first-order one-sided at boundaries. The harmonic-mean face conductivity (§13.7) preserves flux continuity exactly across material interfaces, which is the physically correct behavior for a layered/heterogeneous medium and the main reason the cell-centered scheme is preferred over a vertex-centered one here.
+> **Implementation note.** `Face`, `Cell`, `MeshTopology` and `Mesh`
+> (`src/Meshes/topology.jl`). `MeshTopology{D,C,FT,CT}` holds the coordinate
+> system, the faces, the cells, the node count, the boundary tags (tag → face
+> ids), the pinned nodes, the Lagrangian nodes (layer interfaces that always move
+> with the solid, §11.7.5) and the cross-section measure $A_0$. `Mesh{D}` is the
+> topology plus the reference positions of the nodes, the positions at which
+> `setup` evaluates the problem's `T_initial` and `ξ_initial` (at the cell
+> centres, §12.8). The mesh carries no component count, no initial state and no
+> per-cell inventory. Its topology never changes during a solve: deactivation
+> (§14) changes which cells are live, recorded in the state layout's mask, and
+> never resizes an array.
+
+### 13.1.2 Boundary tags
+
+Boundary conditions are keyed by tag; there are no numeric boundary
+identifiers. `line_mesh` tags face 1 `:bottom` and face $n+1$ `:top` (other names
+through its `bottom` and `top` keywords); `boundary_tags(topology)` returns the
+sorted tags and `boundary_faces(topology, tag)` the face ids that carry one, an
+unknown tag being an `ArgumentError`. The thermal boundary kernel and the
+gas-transport kernel hold one patch per tag (§13.7.5), and `setup` refuses a
+boundary-condition set that names a tag the mesh does not have.
+
+A patch is applied on the face that bounds the live cells on its side,
+`live_face(topology, active, f)`: $f$ while its owner is live; otherwise, walking
+inward across the block of dead cells, the first face whose owner is live; zero
+when no live cell remains on that side. After cells are deactivated from the
+exposed side, the `:top` condition therefore applies at the upper face of the
+outermost live cell, an interior face whose $+z$ normal points out of the live
+region (§14.3.1).
+
+### 13.1.3 What a cell-centered scheme means for accuracy
+
+The unknowns are cell inventories, but fluxes are needed at faces, so every flux
+needs a reconstruction from cell values to the face. Diffusion uses a face
+coefficient (the distance-weighted harmonic mean) and the two-point difference
+along the normal (§13.6, §13.7): for smooth fields on a mesh whose non-uniformity
+is smooth, the face gradient is second-order. The resistance-in-series mean keeps
+the flux continuous across a material interface that lies on a face; V-HC-04
+reproduces the steady piecewise-linear profile of a two-layer slab to integrator
+precision for conductivity ratios 10:1 and 100:1 (§18). Because the initial
+conditions are sampled at the cell centres, a composition interface that does not
+lie on a face is moved to the nearest face (there are no mixed cells); a node
+placed on each interface (`create_mesh_from_nodes`, §13.9.4) avoids that
+quantization.
+
+Two places are first-order by construction. A **boundary face** is reached from
+its cell centre by a one-sided difference over the centre-to-face distance
+(§13.2.3), so a face value the condition fixes (a prescribed temperature, the
+solved surface temperature) enters with a first-order error at the face; this is
+the surface-temperature closure error the coarse-mesh verification cases measure
+(§13.12). **Darcy advection** is first-order upwind (§13.7.3). The fluxes relative
+to a corrected moving mesh are second-order upwind with a smooth slope (§11.6).
 
 ---
 
 ## 13.2 Geometric Quantities
 
-All discrete operators are built from a small set of geometric quantities derived from node positions and the (possibly time-varying) cross-sectional area `A(t)`.
+Every metric is computed from the node positions and the cross-section measure by
+`geometry!` (`src/Meshes/geometry.jl`), the only writer of a `MeshGeometry`. The
+element type of the metrics follows the positions, so a dual-number state carries
+geometry sensitivities and automatic differentiation passes through the geometry.
 
-### 13.2.1 Cell volume and cell center
+### 13.2.1 Face areas and cell volumes
 
-For cell `i` spanning nodes `{z_i, z_{i+1}}`:
+With $r$ the node coordinate (the position $z$ in planar geometry, the radius in
+cylindrical and spherical geometry) and $A$ the mesh's cross-section measure (the
+planar face area [m²], the axial length of a cylinder [m], the solid angle of a
+sphere), the coordinate system fixes the face areas and the cell volumes:
+
+| Coordinates | Face area at $r$ | Volume of cell $i$ | $d$ (`geometric_dimension`) | Default $A$ |
+|---|---|---|---|---|
+| `Planar()` | $A$ | $A\,(r_{i+1}-r_i)$ | 1 | 1 |
+| `Cylindrical()` | $2\pi rA$ | $\pi\,(r_{i+1}^2-r_i^2)\,A$ | 2 | 1 |
+| `Spherical()` | $Ar^2$ | $A\,(r_{i+1}^3-r_i^3)/3$ | 3 | $4\pi$ |
+
+In every coordinate system $\partial V_i/\partial r_{i+1}=A_{i+1}$ and
+$\partial V_i/\partial r_i=-A_i$: the volume changes by the volume its faces sweep,
+which is the discrete Geometric Conservation Law (§11.5.2; `test/meshes/test_meshes.jl`,
+"volume derivative by AD equals the face sweep operator"), and every cell satisfies
+$V_i=\tfrac1d\sum_f A_f\,(x_f\cdot n_f)$. A cylindrical or spherical line that
+starts at the axis or the centre has a zero face area there, so that face carries
+no flux whatever its condition. On a line from the axis to $r=1$ cm in four
+cylindrical cells the face areas are $0$, $0.0157$, $0.0314$, $0.0471$ and
+$0.0628$ m² per metre of axial length and the volumes sum to $\pi r^2$ exactly
+(`geometry!` on `create_uniform_mesh(0.01, 4; coordinates = Cylindrical())`).
+
+The volume is **signed**: an inverted trial mesh gives a non-positive volume,
+which the state mapping floors for evaluation (§13.2.4) and the admissibility test
+reads unfloored (§15.5.4). Under a variable cross section $A$ is an algebraic
+unknown of the state (§11.3.3) and enters every area and volume.
+
+### 13.2.2 Cell centres and distances along the normal
+
+The centre of a cell is the midpoint of its two nodes,
+$z_i^c=\tfrac12(z_i+z_{i+1})$, in every coordinate system (a radial cell's centre
+is the midpoint of its radii, not its volume centroid). Distances are measured
+along the face normal:
 
 $$
-V_i = |z_{i+1} - z_i|\, A, \qquad z_i^c = \tfrac{1}{2}\,(z_i + z_{i+1}).
+d_{f,i}=\pm\,(x_f-x_i^c)\cdot n_f\quad(\text{positive out of cell }i),\qquad
+d_o+d_n=(x_n^c-x_o^c)\cdot n_f ,
 $$
 
-The absolute value guards against transiently inverted nodes during ALE motion; the cross-sectional area `A` is the **current** column area (it equals `A_0` unless a lateral-shrinkage law is active — see §10, Volume Change). All faces in 1D carry the same area `A_f = A`.
-
-> **Implementation note.** `update_geometry!` (src/Geometry/geometric_quantities.jl) writes the mesh-resident `cell_centers[i]`, `cell_volumes[i] = abs(z_right − z_left) * A`, and `face_areas[f] = A`; it is used between integrator steps. During residual/Jacobian assembly the same quantities are rebuilt from the state by `update_state_geometry!` (src/Problem/state_cache.jl; §13.10).
-
-### 13.2.2 Interior face distance
-
-Diffusive fluxes use the **center-to-center distance** across a face, not the cell width. For an interior face `f` with neighbors `L` and `R`:
-
-$$
-d_{LR} = |z_R^c - z_L^c|.
-$$
-
-This is the denominator of every two-point gradient in §13.7 and is the correct choice for second-order accuracy on non-uniform meshes (using cell width instead would introduce a zeroth-order multiplicative bias).
+`center_to_face_distance(g, topology, f, i)` and `cell_distance(g, topology, f)`.
+On an interior face of a line, $d_o=z_f-z_o^c$ and $d_n=z_n^c-z_f$ are the
+half-widths of the two cells and $d_o+d_n$ is the centre-to-centre distance, the
+denominator of every two-point gradient. On a uniform mesh $d_o=d_n=\Delta z/2$.
+A gradient formed over the cell width instead of the centre distance would carry a
+zeroth-order error wherever the mesh's non-uniformity does not vanish under
+refinement.
 
 ### 13.2.3 Boundary distances
 
-At a boundary face the "other side" cell is absent. Every boundary flux is formed over the **center-to-face** distance of the adjacent cell,
+At a boundary face the neighbour is absent, and every boundary flux is formed over
+the centre-to-face distance $d$ of the face's cell, its half-width
+$\tfrac12\Delta z_i$ on a line: the surface energy balance
+$q_\mathrm{bc}(T_s)=k\,(T_s-T_\mathrm{cell})/d$ (§12.2), the film-law mass
+conditions (§12.4) and the pressure conditions (§12.5). On the face that bounds
+the live cells after a deactivation, $d$ is the distance from the outermost live
+cell's centre to that face.
 
-$$
-d_f^{\text{bnd}} = |z_f - z^c_{\text{adj}}| = \tfrac12\,\frac{V_{\text{adj}}}{A},
-$$
+The interior kernels (conduction, gas transport) visit only interior faces between
+two live cells; the boundary faces, and the face that bounds the live cells after
+a deactivation, belong to the boundary kernels (§13.7.5). No flux is therefore
+computed twice, and no distance other than $d$ enters a boundary flux.
 
-the one-sided gradient from the surface to the first cell center: the surface energy balance (§12.2.1), the film-law mass BCs (§12.4), and the pressure BCs (§12.5) all use it. The interior conductive pass zeroes the boundary faces (§7.1.3), so no other boundary distance enters the diffusive fluxes.
+### 13.2.4 Distance and volume floors
 
-### 13.2.4 The ALE advection boundary distance
+Each kernel holds, per face, floors of the two centre-to-face distances:
+`DISTANCE_FLOOR_FRACTION = 1e-8` times their values on the reference mesh. Every
+distance a flux divides by passes through `smooth_floor(d, d_floor)`, and the
+volume used for the concentrations through `smooth_floor(V, V_floor)` with
+$V_\mathrm{floor}=10^{-8}\,V_i(0)$ (`VOLUME_FLOOR_FRACTION`). The floors act only
+on inverted or collapsed trial meshes: a cell is deactivated long before its
+volume approaches $10^{-8}$ of its initial value, and `smooth_floor` is the
+identity above twice the floor (§13.10.3), so on every admissible state the
+floored value is the geometric one.
 
-The ALE advection operator (§13.8) needs an *upwind* distance, computed by `_upwind_gradient_distance` (src/Discretization/ale_fluxes.jl). For an interior upwind neighbor it returns the center-to-center distance, consistent with §13.2.2. For a boundary (`neighbor_id == 0`) it returns
+### 13.2.5 Meshes of more than one dimension (residual level)
 
-$$
-d^{\text{bnd}}_{\text{upwind}} = \frac{V_i}{A} = \Delta z_i,
-$$
+`MeshGeometry` also stores the face normals and centres, the **sweep vectors**
+`face_sweep[q, f]` $=\int_f N_q\,\mathbf n\,dA$ (the volume face $f$ sweeps per unit
+velocity of its $q$-th node; they sum to the area vector $A_f\mathbf n_f$) and the
+lumped corner volumes `cell_node_volume[a, i]` $=\int_i N_a\,dV$. On a line the
+sweep vector of a face is its area vector and the corner volumes integrate the two
+linear shape functions over the shell by two-point Gauss–Legendre quadrature.
 
-i.e. the **full cell width**: the spacing from the cell center to a mirror ghost cell reflected across the boundary face, twice the center-to-face distance of §13.2.3 — the same footing as the interior center-to-center distance. At a boundary the value is in any case inert: the zero-gradient ghost makes the first-order gradient identically zero in that direction, so no residual or Jacobian entry depends on it (§11.6.3).
-
-> **Implementation note.** The ALE state-vector geometry lives in the typed `StateCache` (`volume`, `cell_centers`, `face_positions`, `A_face`, `A_section`), rebuilt from the node positions by `update_state_geometry!` at every residual evaluation (§13.10.2). Face distances are not stored; each kernel forms the center-to-center or center-to-face distance it needs from `cell_centers` and `face_positions`.
-
----
-
-## 13.3 The Divergence Operator
-
-### 13.3.1 Discrete divergence of a scalar flux field
-
-The control-volume integral of a divergence reduces, via the divergence theorem, to a sum of outward face fluxes. In 1D with a left face (outward normal `−ẑ`) and a right face (outward normal `+ẑ`):
-
-$$
-(\nabla\!\cdot\!\mathbf F)_i \;=\; \frac{1}{V_i}\oint_{\partial V_i}\mathbf F\cdot \hat{\mathbf n}\,\mathrm dS
-\;\xrightarrow{\text{1D}}\;
-\boxed{\;\text{div}[i] = \frac{(F_{f_R} - F_{f_L})\,A}{V_i}\;}
-$$
-
-where `F_{f_L}`, `F_{f_R}` are the face fluxes at the left and right faces of cell `i`, `A` is the (common) face area, and `V_i` is the cell volume. Because positive flux is `+z` transport, the right-face flux is outflow `(+)` and the left-face flux is inflow `(−)`; a positive divergence therefore means **net efflux from the cell**, which in the energy equation enters with a leading minus sign so that net efflux cools the cell.
-
-> **Implementation note.** `divergence_1d!` (src/Discretization/finite_volume.jl) reads `V_i = state.volume[i]` and `A = state.A_face[f_left]` and computes `(fluxes[f_right] − fluxes[f_left]) * A / V_i`. Both `V_i` and `A` carry the live scalar type, so in ALE/variable-cross-section mode the divergence is differentiable through the geometry (essential for the Jacobian, §15).
-
-### 13.3.2 Multi-component (species) divergence
-
-For the gas mass fluxes, the same operator is applied component-wise to the `NC × n_faces` flux matrix `J`, producing the `NC × n_cells` divergence matrix:
-
-$$
-\text{div}_j[i] = \frac{(J_{j,f_R} - J_{j,f_L})\,A}{V_i}, \qquad j = 1,\dots,N_C.
-$$
-
-> **Implementation note.** `divergence_species_1d!` (src/Discretization/finite_volume.jl) loops over cells and components with the identical formula. Solid/liquid components carry zero face flux (they are mesh-bound, §13.7.4), so their divergence is identically zero and the species residual reduces to reactions only (§13.3.4).
-
-### 13.3.3 Discrete conservation property
-
-Summing the scalar divergence over all cells telescopes:
-
-$$
-\sum_{i=1}^{n} V_i\,(\nabla\!\cdot\!\mathbf F)_i = A\sum_{i=1}^{n}(F_{f_R(i)} - F_{f_L(i)}) = A\,(F_{\text{top face}} - F_{\text{bottom face}}),
-$$
-
-so the integral of the divergence equals the net boundary flux exactly — the discrete analog of Gauss's theorem. This identity is the foundation of the conservation diagnostics in §16 and is exercised by the unit tests (constant flux → zero divergence; linear flux → constant divergence; integral closure to boundary fluxes; test/discretization/test_discretization.jl, test/discretization/test_conservation.jl).
-
-### 13.3.4 Sign assembly in the final residual
-
-The cell-wise temperature derivative assembled at the end of `compute_rhs!` is
-
-$$
-\frac{dT_i}{dt} = \frac{1}{\rho c_{p,\text{eff},i}}\Bigl[\,-(\nabla\!\cdot\!\mathbf q)_i + S_{\text{conv},i} + Q_{\text{rad},i} + Q_{\text{rxn},i}\,\Bigr],
-$$
-
-and the species derivative (per cell, per component) is
-
-$$
-\frac{d\xi_{j,i}}{dt} =
-\begin{cases}
--(\nabla\!\cdot\!\mathbf J_j)_i + S_{j,\text{rxn},i}, & \text{component } j \text{ is gas},\\[4pt]
-S_{j,\text{rxn},i}, & \text{component } j \text{ is solid/liquid}.
-\end{cases}
-$$
-
-The leading `1/ρc_{p,\text{eff}}` uses the mixture volumetric heat capacity (every component; see §7, Heat Conduction & Energy Assembly, and §13.7.5). The gas/solid dispatch is exactly the `is_gas`-branch in `apply_species_residual_unrolled!` (src/Materials/materials.jl): gas → `-div_J + dξ_rxn`, solid/liquid → `dξ_rxn`. The full eight-step assembly order is given in §7.6; this chapter is concerned only with the spatial operators that produce `div_q`, `div_J`, and the face fluxes feeding them.
+On planar meshes of quadrilaterals and hexahedra (dimension $D=2$ or 3; `box_mesh`,
+`cell_mesh`, §13.9.6; 2D cells per unit depth) `geometry!` integrates the sweep vectors exactly over
+straight or bilinear faces, takes each face's area vector as their sum, its area
+as the vector's length and its normal as the vector over the area, computes the
+volumes from the divergence identity
+$V_i=\tfrac1D\sum_f s_{i,f}\sum_q\mathbf x_q\cdot\mathbf s_{q,f}$, and the
+centroids and corner volumes by Gauss quadrature of the multilinear map;
+`cell_volume_quadrature` is an independent path the tests compare against
+(`test/multid/test_meshes.jl`). These meshes are assembled and differentiated at
+the residual level (the reactions, conduction with conductivity tensors, the
+thermal boundary, element death §14.5, the potential closure §11.3.5); they are
+not a supported path for full solves. In-depth radiation, gas transport, the
+variable cross section, deactivation and the equidistribution correction are a
+line's: `setup` refuses them on a mesh of more dimensions.
 
 ---
 
-## 13.4 Flux Limiters (TVD Schemes)
+## 13.3 The Divergence: Face Fluxes Scattered into Extensive Rows
 
-Advective transport with a centered reconstruction is second-order but oscillatory near steep fronts; a pure upwind reconstruction is monotone but only first-order and excessively diffusive. Total-Variation-Diminishing (TVD) flux limiters blend the two: they recover second order in smooth regions and degrade gracefully to first order near extrema, provably not increasing the total variation `Σ|φ_{i+1}−φ_i|`. Pyrolysis.jl uses TVD limiting only in the mesh-relative temperature advection of the ALE verification hook (§13.8).
+### 13.3.1 The scatter
 
-### 13.4.1 The limiter enumeration
-
-A small `@enum Limiter` selects the scheme (src/Discretization/flux_limiters.jl):
-
-| Enum | `ψ(r)` | Character |
-|---|---|---|
-| `MINMOD` | `max(0, min(1, r))` | Most diffusive; strictly TVD |
-| `VANLEER` | `(r + \|r\|)/(1 + \|r\|)` | Balanced; **default in ALE** |
-| `SUPERBEE` | `max(0, min(2r, 1), min(r, 2))` | Least diffusive; compressive |
-| `NONE` | `0` | First-order upwind (no limiting) |
-| `CENTRAL` | `1` | Second-order central (no limiting) |
-
-The dispatcher `apply_limiter(r, limiter)` returns the corresponding `ψ(r)`.
-
-### 13.4.2 Limiter functions and the TVD region
-
-The slope ratio `r` measures the smoothness of the field across the upwind direction (defined in §13.5). Each limiter is a function `ψ(r)` of that ratio:
+By the divergence theorem the rate of change of a cell inventory is its source
+minus the net flux out through its faces. With $F_f$ the flux per unit area along
+the normal of face $f$,
 
 $$
-\psi_{\text{minmod}}(r) = \max(0,\min(1,r)), \qquad
-\psi_{\text{vanLeer}}(r) = \frac{r + |r|}{1 + |r|}, \qquad
-\psi_{\text{superbee}}(r) = \max\bigl(0,\min(2r,1),\min(r,2)\bigr).
+-\oint_{\partial\Omega_i}\mathbf F\cdot\hat{\mathbf n}\,dS
+\;\longrightarrow\;
+-\sum_{f\in\partial i}s_{i,f}\,A_f\,F_f .
 $$
 
-All three satisfy `ψ(r) = 0` for `r ≤ 0` (extremum → first-order upwind), `ψ(1) = 1` (smooth → second order), and lie within Sweby's TVD region `0 ≤ ψ(r) ≤ min(2r, 2)`. Minmod hugs the lower edge of the region (maximal dissipation, maximal robustness); superbee hugs the upper edge (minimal dissipation, mild steepening/compression that can clip smooth extrema); van Leer is the smooth symmetric interior choice — it is the analytic harmonic mean of `r` and `1`, is differentiable for `r ≠ 0` (which matters for the AD-based Jacobian of §15), and is the reason it is the package default.
+The assembler loops over the faces once: with $(o,n)$ the face's cells it
+subtracts $F_fA_f$ from the row of $o$ and, on an interior face, adds it to the
+row of $n$. For cell $i$ of a line, face $i$ (below, cell $i$ its neighbour)
+contributes $+A_iF_i$ and face $i+1$ (above, cell $i$ its owner) contributes
+$-A_{i+1}F_{i+1}$: the inflow from below minus the outflow above. On the bottom face
+cell 1 is the owner and the normal points out through the back, so a positive
+$F_1$ removes $A_1F_1$ from cell 1.
 
-> **Implementation note.** `minmod`, `vanleer`, `superbee`, `no_limiter`, `central_limiter`, and the `apply_limiter` dispatcher are all `@inline` scalar functions (src/Discretization/flux_limiters.jl). The hard `max`/`min` in minmod/superbee make those two non-differentiable at the kink points; van Leer is preferred when smooth derivatives are required end-to-end.
+The rows are **extensive** (kg s⁻¹ for masses, W for energy) and the code never
+divides by a volume: $(1/V_i)\sum_f s_{i,f}A_fF_f$ is the discrete divergence of §2,
+positive for net outflow, but the volume enters only through the concentrations
+$\xi_{j,i}=m_{j,i}/\tilde V_i$ the kernels read.
+
+> **Implementation note.** `assemble_rows!` (`src/Assembly/residual.jl`) is the
+> only writer of `du`. It scatters `F_energy` into the energy rows and `F_mass`
+> into the face-flux part of the mass rates (`M_flux`), writes the mass, energy,
+> intensity, position, velocity, history, cross-section and deformation rows, and
+> writes the dead rows last.
+
+### 13.3.2 The mass rows
+
+$$
+\frac{dm_{j,i}}{dt}=\omega_{j,i}\tilde V_i+\dot M_{j,i},\qquad
+\dot M_{j,i}=-\sum_{f\in\partial i}s_{i,f}\,A_f\,F_{j,f},
+$$
+
+with $\omega_{j,i}\tilde V_i$ [kg s⁻¹] the cell's reaction source (plus an external
+mass source, §13.5.3). The face fluxes $F_{j,f}$ are those of the gas transport
+(gas components only, §13.7) and, under a correction, the relative fluxes (every
+component, §13.8). On a mesh that rides the skeleton, a condensed component has
+no face flux and its row is its reaction source. Because the masses are the
+states, a shrinking cell needs no dilation term: its concentrations rise as its
+volume falls (§11.3.4).
+
+### 13.3.3 Discrete conservation
+
+Summing the face-flux parts over the cells, every interior face appears once with
+$s_{i,f}=+1$ and once with $s_{i,f}=-1$ and the same $A_fF_{j,f}$, so
+
+$$
+\sum_{i}\dot M_{j,i}=-\sum_{f\ \text{boundary}}A_f\,F_{j,f},
+$$
+
+the discrete analogue of Gauss's theorem. The stoichiometry closes per reaction
+(§6.5.3), so $\sum_j\omega_{j,i}=0$ and the column's total mass changes only by the
+boundary outflow. The relation is linear in the state, so every step of a
+Runge–Kutta or Rosenbrock method preserves it to round-off; the mass ledger of §16
+closes to the integrator's tolerance on that basis. `test/assembly/test_residual_jacobian.jl`
+("row assembly conserves mass and scatters fluxes antisymmetrically") asserts it on
+a closed slab: the mass rows sum to zero within $10^{-12}$ of the largest mass row,
+and in the enthalpy form the energy rows sum to the reaction heats and formation
+terms within $10^{-12}$ relative, the conduction fluxes cancelling pairwise.
+
+### 13.3.4 The energy row
+
+With $S_{E,i}$ [W] the cell's energy sources (the reaction heat
+$Q_{\mathrm{rxn},i}\tilde V_i$ and the absorbed in-depth radiation, §13.5) and $F_f$ the face energy flux (the
+conduction, the enthalpy the mass fluxes carry, and on a boundary face the flux of
+the condition, §13.7), the cell's energy right-hand side is
+
+$$
+E_i=S_{E,i}-\sum_{f\in\partial i}s_{i,f}\,A_f\,F_f .
+$$
+
+**Temperature form** (`energy_state = :temperature`, the default):
+
+$$
+\frac{dT_i}{dt}=\frac{E_i-\sum_j h_j(T_i)\,\dot M_{j,i}}{C_i}+S_{T,i},
+\qquad C_i=\mathrm{smooth\_floor}\Bigl(\sum_j m_{j,i}\,c_{p,j}(\tilde T_i),\ \rho c_{p,\mathrm{floor}}V_i(0)\Bigr),
+$$
+
+with $\rho c_{p,\mathrm{floor}}=10^3$ J m⁻³ K⁻¹. Substituting $E_i$ and the face
+flux of §13.7,
+
+$$
+C_i\frac{dT_i}{dt}=S_{E,i}-\sum_{f\in\partial i}s_{i,f}A_f\Bigl[q_f+\sum_jF_{j,f}\bigl(h_j(T_f)-h_j(T_i)\bigr)\Bigr]+C_iS_{T,i}:
+$$
+
+the gas enthalpy enters through its difference from the cell enthalpy. At an
+incoming boundary, use the specified incoming temperature and reservoir heat;
+an LTE film uses the equivalent converted wall-film representation (§9.9). A mass flux carried at the cell's own temperature neither heats
+nor cools it; gas that leaves through a hotter face takes the enthalpy difference
+with it. This is the semi-discrete form of the gas-advection term
+$-\sum_j c_{p,j}\,\mathbf J_j\cdot\nabla T$ (§7.4), written as a face flux so that
+it telescopes with the rest.
+
+**Enthalpy form** (`energy_state = :enthalpy`):
+
+$$
+\frac{dH_i}{dt}=E_i+\sum_j\omega_{j,i}\tilde V_i\,h_j(T_i)+C_iS_{T,i},
+\qquad H_i=\sum_j m_{j,i}h_j(T_i)\ \ (\text{regularized, §13.10.4}).
+$$
+
+The formation term $\sum_j\omega_{j,i}\tilde V_ih_j(T_i)$ appears because the
+reaction heats are quoted at the local temperature (§6.6.3). The two forms are the
+same balance, $dH_i/dt=C_i\,dT_i/dt+\sum_jh_j(T_i)\,dm_{j,i}/dt$. The enthalpy form is
+a linear invariant every Runge–Kutta step conserves to round-off; the temperature
+form conserves energy to the integrator's order (§16.5.2). $S_{T,i}$ is an external
+temperature-rate source (§13.5.3), zero in a production solve.
+
+### 13.3.5 Dead rows
+
+After a deactivation (§14.3) the rows of a dead cell, and of the nodes and faces
+beyond the live region, are identity rows: a zero derivative on a differential row
+and $u_r$ itself on an algebraic row (`_dead_rows!`). The state length never
+changes, the integrator's matrix stays nonsingular, and the live block is the
+compacted problem's (§15.12). The interior kernels skip every face with a dead
+cell, and the boundary kernels apply their conditions at `live_face` (§13.1.2).
 
 ---
 
-## 13.5 Limited Reconstruction: What Is Live
+## 13.4 Kernels and the Assembly Order
 
-The TVD machinery in `src/Discretization/flux_limiters.jl` consists of the
-limiter functions $\psi(r)$ (minmod, van Leer, superbee; §13.8.2) and the
-`Limiter` enum / `apply_limiter` dispatcher. Their consumer is the mesh-relative
-temperature advection's cell-centered limited gradient `_limited_gradient`
-(§11.6.2, §13.8.2), which reconstructs $\partial f/\partial z$ donor-side with the
-distance-correct blend $\beta = d_0/(d_0+d_1)$ and runs only under the
-`w_override` verification hook.
+![Flow from fixed topology and reference data through setup and evolving state to geometry, derived fields, correction, kernels, closures and residual assembly.](../../assets/figures/02_mesh_framework.svg)
 
-There is no limited *face-value* reconstruction in production: the Eulerian
-gas-advection face value is first-order upwind on the Darcy velocity
-(`gas_flux_darcy_fick`, §9; a TVD upgrade is a documented accuracy-debt item),
-and conduction/diffusion use the exact two-point face gradients of §13.7.
+**Figure 2. Mesh framework (schematic).** Read left to right for one residual evaluation. Setup fixes connectivity and row layout; positions, inventories, cross section and the activity mask evolve. Geometry and derived fields feed correction, kernels and closure before assembly. Correction precedes face fluxes, and gas transport precedes the thermal boundary calculation. External sources and masking enter the final assembly; §13.4 gives the implementation details.
+
+### 13.4.1 The kernel contract
+
+A kernel (a subtype of `Kernel`, `src/Kernels`) implements
+`contribute!(c, kernel, ds, topology, material, t)`: it adds its face fluxes and cell
+sources to a `Contributions` buffer `c`, reading only the derived state `ds`
+(§13.10), the topology and metrics, the material and the boundary conditions it
+holds. It never reads the state vector, the row derivatives, or another kernel's
+output except through the buffer, in the order the assembler fixes. The buffer's
+fields:
+
+| Field | Size | Units | Written by |
+|---|---|---|---|
+| `F_mass` | $N_C\times n_\text{faces}$ | kg m⁻² s⁻¹ | gas transport, relative fluxes |
+| `F_energy` | $n_\text{faces}$ | W m⁻² | conduction, gas transport (carried enthalpy), thermal boundary, relative fluxes |
+| `S_mass` | $N_C\times n$ | kg s⁻¹ | reactions, external sources |
+| `S_energy` | $n$ | W | reactions, in-depth radiation |
+| `θ` | $n$ | s⁻¹ | mesh closure (strain rates) |
+| `M_flux` | $N_C\times n$ | kg s⁻¹ | assembler ($\dot M_{j,i}$) |
+| `T_face` | $n_\text{faces}$ | K | thermal boundary (surface temperatures) |
+| `r_intensity` | $n_\text{faces}$ | W m⁻² | in-depth radiation (algebraic residuals) |
+| `r_velocity`, `r_multiplier` | $D\,n_\text{nodes}$, $n$ | — | mesh closure (algebraic residuals) |
+| `F_carried`, `S_carried` | $2\times n_\text{faces}$, $2\times n$ | kg m⁻² s⁻¹, kg s⁻¹ | relative fluxes, mesh closure (conversion-history pair) |
+| `gradient` | $D\times n$ | K m⁻¹ | conduction ($D\ge2$) |
+
+`reset!` zeroes the fluxes, the sources and the algebraic residuals before the
+kernels run; the assembler zeroes `M_flux`; `T_face` and `gradient` are overwritten.
+
+### 13.4.2 The kernels and their order
+
+`setup` builds the kernel tuple in assembler order (`_kernels`,
+`src/Integration/setup.jl`):
+
+1. `ReactionKernel`, when the material has reactions (§13.5.1).
+2. `GasTransportKernel{M}`, for mobile gas, with the declared `LumpedTransfer`
+   or `DustyGas`. Gas-bearing sealed materials still evaluate their EOS;
+   `NoGasTransport` is reserved for materials without gas components.
+3. `BeerLambertKernel`, under `BEER_LAMBERT` (§13.5.2).
+4. `ConductionKernel`, always (§13.7.1).
+5. `ThermalBoundaryKernel`, always (§13.7.5).
+6. `RelativeFluxKernel`, when the correction is not `NoCorrection`: the
+   equidistribution correction or a prescribed mesh velocity (§13.8).
+
+One residual evaluation (§15.3) runs `derive!` (the state mapping, §13.10), then
+`correction!` (the node corrections $c_n$, §11.7), `reset!`, the kernels in this
+order, `closure_rows!` (the strain rates $\theta_i$ from the reaction mass sources
+at the trial temperature, the history sources and the velocity-row residuals,
+§11.3), `add_sources!` (§13.5.3), and `assemble_rows!` (§13.3). The order matters in
+three places:
+
+- **Coupled boundary exchange.** The thermal boundary kernel solves and stores
+  boundary species and carried-energy fluxes together. Interior gas transport
+  uses its own shared face state.
+- **The relative fluxes after the thermal boundary.** The surface balance and its
+  blowing models see the gas-transport fluxes alone.
+- **The closure after the kernels and before the external sources.** The strain
+  rates are the reactions' alone; a manufactured mass source does not move the mesh.
+
+Every physics option is a type parameter of the definition (the kernel tuple's
+type, the layout's flags, the closure), so `residual!` has one method and
+`find_kernel` resolves a kernel at compile time.
+
+### 13.4.3 Buffers and element types
+
+The residual is a pure function of the state, the time and an immutable
+`CoreDefinition` (the layout, the state setup, the kernels, the closure and the
+external sources), writing into a `CoreWorkspace` of buffers: the derived state and
+the contributions with `Float64` elements, and their twins for every dual-number
+element type the colored Jacobian evaluates the residual at, built on first use
+(`src/Assembly/definition.jl`; §15.2). The sizes are fixed for the whole solve; a
+dead cell keeps its slots and the kernels skip it. After warm-up a residual and a
+colored Jacobian allocate nothing (`test/jacobian/test_allocations.jl`, on 100-cell
+columns in both energy forms).
 
 ---
 
-## 13.6 Gradient Reconstruction
+## 13.5 Cell Sources: Reactions, In-Depth Radiation, External Sources
 
-### 13.6.1 Cell-centered gradient on non-uniform meshes
+### 13.5.1 Reaction sources
 
-The gas-advection source `S_conv` of §7.4 and the error indicators and $r$-refinement monitors of §14 require a cell-centered gradient. The interior formula combines the two one-sided center-to-center slopes with **opposite-distance weights** (`opposite_distance_gradient`, src/Geometry/geometric_quantities.jl):
-
-$$
-\nabla\varphi_i = \frac{d_R\,s_L + d_L\,s_R}{d_L+d_R},
-\qquad
-s_L = \frac{\varphi_i - \varphi_{i-1}}{d_L},\quad
-s_R = \frac{\varphi_{i+1} - \varphi_i}{d_R},
-$$
-
-with $d_L = z_i^c - z_{i-1}^c$ and $d_R = z_{i+1}^c - z_i^c$. Each one-sided slope estimates $\varphi'$ at its segment midpoint; the opposite-distance weighting interpolates them back to $z_i^c$, cancelling the leading $\varphi''$ truncation term — second order on arbitrary nonuniform meshes. On a uniform mesh this reduces to the familiar central difference $(\varphi_{i+1}-\varphi_{i-1})/(2\Delta z)$. The wide-stencil form $(\varphi_{i+1}-\varphi_{i-1})/(z_{i+1}^c-z_{i-1}^c)$ — which weights each slope by its *own* distance — carries a first-order $\tfrac12(d_R-d_L)\varphi''$ error on stretched meshes and is not used.
-
-### 13.6.2 One-sided boundary gradients
-
-At domain edges, one neighbor is missing, so the gradient degrades to a one-sided difference:
+`ReactionKernel` evaluates, cell by cell, at the concentrations
+$\xi_{j,i}=m_{j,i}/\tilde V_i$ as stored (not their positive part) and at the trial
+temperature $\tilde T_i$: the reaction rates $r_r$ (Arrhenius with the smooth
+temperature gates and the material's `DepletionLimiter`, the one-sided limiter whose
+rate is zero at and below zero reactant concentration, §6.1–§6.3), the species
+sources $\omega_{j,i}=\sum_r\nu_{r,j}r_r$ and the reaction heat
+$Q_{\mathrm{rxn},i}=-\sum_rh_rr_r$ with the heats quoted at the local temperature
+(§6.6). It adds
 
 $$
-\nabla\varphi_i =
-\begin{cases}
-\dfrac{\varphi_{i+1} - \varphi_i}{z_{i+1}^c - z_i^c}, & \text{bottom cell (left\_id = 0)},\\[10pt]
-\dfrac{\varphi_i - \varphi_{i-1}}{z_i^c - z_{i-1}^c}, & \text{top cell (right\_id = 0)},\\[10pt]
-0, & \text{isolated cell (both ids = 0; degenerate)}.
-\end{cases}
+S_{\text{mass},j,i}\mathrel{+}=\omega_{j,i}\tilde V_i,\qquad
+S_{E,i}\mathrel{+}=Q_{\mathrm{rxn},i}\tilde V_i .
 $$
 
-> **Implementation note.** `compute_gradient_1d(φ, mesh, i)` (src/Adaptivity/error_indicators.jl) implements these branches on the mesh-resident cell centers for the error indicators and the $r$-refinement monitors (src/Adaptivity/error_indicators.jl, r_refinement.jl). The interior `opposite_distance_gradient` also serves the `S_conv` temperature gradient (src/Physics/convection.jl), which reads the state's `cell_centers` so the gradient carries AD sensitivities through the geometry and upgrades the boundary cells to the surface-slope blend of §7.4.2 (the thermal BC supplies a solved $T_s$ there; a generic field has no boundary value, so the one-sided fallback above is the right one for `compute_gradient_1d`).
+With the limiter enabled, a cell in which every reaction has a reactant at or
+below zero concentration is skipped: its rates and every derivative of them are
+exactly zero. The mass sources are also what the mesh closure reads for the strain
+rates (§11.3.1).
+
+### 13.5.2 In-depth radiation: the face intensities
+
+Under `BEER_LAMBERT` the intensity of every face is an algebraic unknown of the
+state. `BeerLambertKernel` orders the cells from the exposed face (the single
+`:top` face) into the depth and, for each cell $i$, records its upstream face
+(toward the exposed face) and its downstream face. Its rows are
+
+$$
+0=I_e-a\,q_\mathrm{inc}(t)\quad\text{(the face the beam enters)},\qquad
+0=I_\text{down}-I_\text{up}\,e^{-\alpha_i\Delta_i}\quad\text{(the downstream face of each live cell)},
+$$
+
+with $q_\mathrm{inc}$ the incident flux of the `RadiativeFluxBC`, $a$ its explicit
+absorptivity or else the effective absorptivity of the first live cell (§5.8.2),
+$\alpha_i$ the cell's absorption coefficient at the positive-part concentrations
+and $\Delta_i$ its thickness (the sum of its two floored centre-to-face distances).
+The cell absorbs
+
+$$
+S_{E,i}\mathrel{+}=I_\text{up}A_\text{up}-I_\text{down}A_\text{down},
+$$
+
+the exact cell average of the attenuated beam, so the absorbed energy telescopes
+to the entering intensity minus the transmitted one
+(`test/kernels/test_radiation.jl`, "the beam's energy telescopes"). Each row reads
+one cell and its two faces, so the Jacobian stays banded where the eliminated
+recurrence would couple every cell to every cell above it. After cells are
+deactivated from the exposed side the beam enters the first live cell's upstream
+face, and the faces upstream of it carry identity rows. Under `BEER_LAMBERT` the
+incident flux contributes nothing to the surface balance; the condition's other
+members (re-radiation, convection) stay at the surface. `setup` refuses in-depth
+radiation off planar coordinates, where the attenuated intensity and the face
+areas would disagree. The model and its limits are §8.3.
+
+### 13.5.3 External sources
+
+`VolumetricSources(mass, energy)` (`src/Assembly/definition.jl`) adds external
+sources for verification by manufactured solutions (§18.2): `mass(z, t)` returns
+the volumetric mass source of every component [kg m⁻³ s⁻¹], added to `S_mass` as
+$S\,\tilde V_i$ after the closure has read the reaction sources; `energy(z, t)`
+returns a temperature-rate source $S_T$ [K s⁻¹], added to the temperature row as
+$S_T$ and to the enthalpy row as $C_iS_T$. Both are pure functions of the cell-centre
+position and the time, so the colored Jacobian differentiates the residual with
+them exactly. The default is `NoSources()`. The ledger of §16 does not include them.
 
 ---
 
-## 13.7 Conductive, Gas-Diffusive, and Darcy–Fick Face Values
+## 13.6 Gradient and Face-Value Reconstruction
 
-This section states the discrete face fluxes as they appear in the FVM. The physical derivations are in §7 (conduction, convection) and §9 (gas transport); here the focus is on the *discrete* form, the face averaging, and the signs.
+### 13.6.1 Two-point normal gradients
+
+On a line every gradient a flux uses is the two-point difference along the face
+normal, for a cell field $\Phi$,
+
+$$
+\Bigl(\frac{\partial\Phi}{\partial n}\Bigr)_f=\frac{\Phi_n-\Phi_o}{d_o+d_n},
+$$
+
+second-order at the face for a smooth field on a uniform mesh and on a mesh whose
+non-uniformity is smooth. No cell-centred gradient is formed on a line: neither
+conduction nor gas transport needs one, and the enthalpy the gas carries is a face
+flux (§13.7.4), not a cell source built on a cell gradient. At a boundary face the
+gradient is one-sided over the centre-to-face distance, $(\Phi_s-\Phi_i)/d$,
+with $\Phi_s$ the face value the condition supplies (the surface temperature of
+the surface balance, the film law's face concentration); it is first-order at the
+face (§13.1.3).
+
+### 13.6.2 Face temperatures
+
+Four face temperatures appear, each where it is consistent:
+
+| Where | Face temperature |
+|---|---|
+| enthalpy carried by the gas fluxes, interior face | $T_f=(d_nT_o+d_oT_n)/(d_o+d_n)$, the linear interpolation to the face at the cell temperatures (exact for a linear profile) |
+| inside the lumped wall flux | $\bar T_f=\tfrac12(\tilde T_o+\tilde T_n)$, the mean of the trial temperatures (§13.7.2) |
+| boundary face | the surface temperature $T_s$ of the condition: closed form or surface Newton (§13.7.5) |
+| relative fluxes | $\tilde T_f$, the upwind van Albada reconstruction on the stencil of the mass fluxes it carries (§11.6.2) |
+
+### 13.6.3 Upwind face values
+
+Two fluxes are advective. The Darcy flux carries the upwind cell's intrinsic gas
+density $\xi/\varphi_f$, first-order (§13.7.3). The relative fluxes of a corrected
+moving mesh carry a second-order upwind reconstruction with a smooth van Albada
+slope and a positivity-preserving bound on every inventory (§11.6.2–§11.6.3); a
+smooth slope is used because a limiter with a kink would put the kink into the
+Jacobian and into finite-difference sensitivities. Both read the upwind side from
+the value of the velocity alone, so at zero velocity every derivative pass takes
+the derivative of the $v\ge0$ side, whatever its dual seeds
+(`test/kernels/test_gas_transport.jl`, "at zero Darcy velocity every seed takes the
+v ≥ 0 side").
+
+### 13.6.4 Least-squares cell gradients (more than one dimension)
+
+On a mesh of quadrilaterals or hexahedra, the conduction kernel computes for every
+live cell the least-squares temperature gradient over its live face neighbours $k$,
+each difference weighted by the inverse squared distance,
+
+$$
+\bigl(\mathsf N_i+\epsilon_\mathrm{LS}\,\mathrm{tr}(\mathsf N_i)\,I\bigr)\nabla T_i=\sum_k w_k\,(T_k-T_i)\,\mathbf d_k,
+\qquad \mathsf N_i=\sum_k w_k\,\mathbf d_k\mathbf d_k^{\mathsf T},\quad w_k=|\mathbf d_k|^{-2},
+$$
+
+with $\mathbf d_k$ the vector between the cell centres and $\epsilon_\mathrm{LS}=10^{-8}$
+(`GRADIENT_REGULARIZATION`) where the neighbours do not span every direction (the
+normal matrix has $\det\mathsf N_i\le10^{-6}(\mathrm{tr}\,\mathsf N_i/D)^D$, `GRADIENT_SPAN`, decided
+on its plain values; zero otherwise): a column one cell wide, or a cell beside dead ones, then has
+a zero gradient component in the unresolved direction instead of an undetermined
+one. The gradients feed the cross-diffusion part of the face flux (§13.7.1) and the
+tangential correction of the thermal boundary kernel.
+`test/multid/test_conduction.jl` asserts exact fluxes for linear fields with rotated
+anisotropic tensors on distorted meshes and second-order convergence of a steady
+manufactured solution with a rotated tensor on a distorted mesh.
+
+---
+
+## 13.7 Conductive, Gas-Diffusive, and gas Face Fluxes
+
+This section states the discrete face fluxes. The physical derivations are in §7
+(conduction, the gas enthalpy flux), §9 (gas transport and pressure) and §12
+(boundary conditions).
 
 ### 13.7.1 Conductive heat flux
 
-Fourier's law at a face, discretized with a distance-weighted harmonic-mean conductivity:
+`ConductionKernel` visits the interior faces between two live cells:
 
 $$
-q_f = -k_f\,\frac{T_R - T_L}{d_L + d_R}, \qquad
-k_f = \frac{d_L + d_R}{\dfrac{d_L}{k_L} + \dfrac{d_R}{k_R}}.
+q_f=-k_f\,\frac{T_n-T_o}{d_o+d_n},\qquad
+k_f=\frac{(d_o+d_n)\,k_ok_n}{d_ok_n+d_nk_o+\eta\,(d_o+d_n)},\quad\eta=10^{-20}\ \text{W m}^{-1}\text{K}^{-1}.
 $$
 
-The harmonic mean is the **resistance-in-series** average: across an interface the thermal resistances `d_L/k_L` and `d_R/k_R` add, and continuity of heat flux then fixes `k_f` as above. On a uniform mesh `d_L = d_R` and this collapses to the standard harmonic mean `2k_Lk_R/(k_L+k_R)`; on stretched meshes the distance weighting improves near-boundary flux accuracy by roughly 1–5%. The minus sign is Fourier's law: `T_R > T_L` gives `q_f < 0` (heat flows toward `−z`, down the gradient).
+$k_f$ (`guarded_harmonic_mean`, guard `FACE_MEAN_GUARD`) is the distance-weighted
+**resistance-in-series** mean $(d_o+d_n)/(d_o/k_o+d_n/k_n)$ in product form: equal
+to it to a relative $\eta/k_f$, it goes to zero continuously, with a finite
+derivative, as either cell's conductivity vanishes. On a uniform mesh it is the
+harmonic mean $2k_ok_n/(k_o+k_n)$. The cell conductivities $k_i$ are the effective
+conductivities at the positive-part concentrations and the trial temperature (the
+mixing rule of §5), smoothly floored at $10^{-6}$ W m⁻¹ K⁻¹ (`CONDUCTIVITY_FLOOR`);
+the temperatures in the difference are the cell temperatures themselves. With
+constant $k$ on a uniform mesh this is the textbook central difference; with a
+conductivity jump on a face the steady profile is nodally exact (V-HC-04); with
+$k(T)$ it carries a genuine second-order discretization error (V-HC-05).
 
-> **Implementation note.** `conductive_flux(k_face, T_L, T_R, d_LR) = -k_face*(T_R−T_L)/d_LR` (src/Physics/heat_conduction.jl) consumes the face conductivity `update_properties!` pre-computes with `harmonic_mean_weighted`. The assembly `compute_conductive_fluxes!` loops all faces using the precomputed `cache.k_face[f]` and `d_LR = |z_R^c − z_L^c|`, and **explicitly zeros boundary faces** (`left_id == 0 || right_id == 0 → q_cond[f] = 0`). The zero is then overwritten by the surface-energy-balance Newton solve (§12); zeroing first prevents double-counting (the interior operator must not see a boundary flux that the BC solver will also supply).
-
-### 13.7.2 Gas-diffusive (volume-fraction-gradient) flux
-
-The gas diffusive flux is written in **volume-fraction (equivalently partial-pressure) gradient** form. Starting from `J_g = −ρ_g λ ∂(ξ_g/ρ_g)/∂x` with the ideal-gas relation `ρ_g ∝ P/T`, this collapses to `J = −(λ/T)·∂(ξT)/∂x`, whose discrete face form is
-
-$$
-\boxed{\;J_f = -\lambda_f\,\frac{\xi_R T_R - \xi_L T_L}{T_f\,d_{LR}}\;}, \qquad T_f = \tfrac12(T_L + T_R).
-$$
-
-The product `ξT` is proportional to partial pressure (`P_j = ξ_j R_g T / M_j`), so this is diffusion down the partial-pressure gradient. The algebraic identity
-
-$$
-\xi_R T_R - \xi_L T_L = T_f\,(\xi_R - \xi_L) + \xi_f\,(T_R - T_L)
-$$
-
-shows the flux contains both an ordinary-diffusion term (`∝ ∂ξ/∂x`) and a thermal-diffusion / Soret-like term (`∝ ξ/T·∂T/∂x`); the single combined expression captures both without ever forming `ρ_g` at the face.
-
-Crucially, the **harmonic mean is taken of `λ` alone, not of `λρ`**. The density dependence is carried implicitly by the mass concentrations `ξ` in the numerator, so averaging `λ` (a transport resistance) is the correct interface treatment:
+On a mesh of more than one dimension the face's conductivity tensor is
+$K_f=k_f$ times the distance-weighted mean of the cells' dimensionless tensors, and
+the flux along the normal splits into a two-point part and a cross-diffusion part,
 
 $$
-\lambda_f = \frac{d_L + d_R}{\dfrac{d_L}{\lambda_L} + \dfrac{d_R}{\lambda_R}}.
+q_f=-(\mathbf n\cdot K_f\mathbf n)\,\frac{T_n-T_o}{d_o+d_n}-\mathbf t\cdot\nabla T_f,\qquad
+\mathbf t=K_f\mathbf n-(\mathbf n\cdot K_f\mathbf n)\,\frac{\mathbf d}{d_o+d_n},
 $$
 
-> **Implementation note.** `gas_flux(λ_face, ξ_L, ξ_R, T_L, T_R, d_LR)` (src/Physics/gas_transport.jl) returns exactly `-λ_face*(ξ_R*T_R − ξ_L*T_L)/(T_face*d_LR)` with `T_face = (T_L+T_R)/2`. The face coefficient `λ_face` is the distance-weighted harmonic mean from `harmonic_mean_weighted` (src/Properties/effective_properties.jl). All gas species share the same `λ_face`; there is no per-species scaling of the diffusive term (§9.2).
+with $\nabla T_f$ the distance-weighted mean of the two cells' least-squares
+gradients (§13.6.4), so a linear temperature field's flux is exact on any mesh whose
+neighbours span every direction. On a line $\mathbf d$ is along the normal, the cross
+part vanishes identically and is not evaluated.
 
-### 13.7.3 Darcy–Fick combined advection–diffusion flux
+### 13.7.2 Gas wall and molecular flux
 
-When pressure-driven Darcy flow is active, the face flux adds a first-order-upwinded advective term to the diffusive term:
-
-$$
-J_f^{\text{DF}} = \underbrace{\frac{\xi^{\text{upwind}}}{\varphi_f}\,v_g}_{\text{advection}} \;+\; \underbrace{\Bigl(-\lambda_f\,\frac{\xi_R T_R - \xi_L T_L}{T_f\,d_{LR}}\Bigr)}_{\text{diffusion}},
-\qquad
-\xi^{\text{upwind}} =
-\begin{cases}
-\xi_L, & v_g \ge 0,\\
-\xi_R, & v_g < 0,
-\end{cases}
-$$
-
-with $\varphi_f=\max(\tfrac12(\varphi_L+\varphi_R),10^{-12})$ the face porosity: $\xi$ is per bulk volume and $v_g$ is superficial, so the advected scalar is the intrinsic density $\xi/\varphi$ (§9.3). The upwinding chooses the cell *from which* the bulk gas flows, which is the monotone first-order choice. The bulk Darcy velocity at the face is
-
-$$
-v_g = -\text{mob}_f\,\frac{P_R - P_L}{d_{LR}},\qquad
-\text{mob}_f = \frac{d_L+d_R}{d_L\mu_L/\kappa_L + d_R\mu_R/\kappa_R},
-$$
-
-the **distance-weighted harmonic mean of the cell mobilities** $\kappa/\mu$, with `mob_f = 0` exactly when either side's mobility is below $10^{-30}$ (an impermeable side is an infinite series resistance) and `μ > 10^{-20}` guards per cell. The ideal-gas pressure closure `P = (Σ_g ξ_j R_g T/M_j)/φ` (porosity floor `10^{-12}`) and the pressure gradient are derived in §9; here they enter only as the velocity driving the advective face flux. All gas species share the same `v_g` (advection carries every species equally) and the same `λ_face` (§9.2).
-
-> **Implementation note.** `gas_flux_darcy_fick(v_g, ξ_L, ξ_R, φ_L, φ_R, λ_face, T_L, T_R, d_LR)` (src/Physics/gas_transport.jl) computes `J_diff` exactly as above, sets `ξ_upwind = v_g ≥ 0 ? ξ_L : ξ_R`, and returns `J_adv + J_diff` with `J_adv = v_g·ξ_upwind/φ_face`. The face velocity and mobility come from `update_darcy_properties!` (src/Discretization/finite_volume.jl). `compute_rhs!` takes this path when the property cache carries a Darcy sub-cache (`nothing` ⇔ Fickian): it refreshes pressure and velocity first, calls the Darcy–Fick flux instead of the diffusion-only flux, and writes the boundary-face advective venting flux from the pressure BCs (§9.5.3).
-
-### 13.7.4 Solid/liquid components carry no transport flux
-
-Solid and liquid components are mesh-bound (Lagrangian): they are not transported by diffusion or Darcy flow. Their face fluxes are identically zero, so `divergence_species_1d!` produces zero for them and the species residual reduces to reactions only (§13.3.4). This is what locks solid mass-thickness `ρ_s·Δz` to the mesh and makes the ALE motion (§13.8) the mechanism by which solids are advected. The gas fluxes of §13.7.2–§13.7.3 are defined relative to that skeleton, so under ALE the gas rides the mesh too and the same divergence is the whole of its transport (§11.1.2).
-
-### 13.7.5 The energy-storage convention
-
-The conductive divergence feeds the energy equation with the mixture heat capacity `ρc_{p,\text{eff}} = Σ_j ξ_j c_{p,j}(T)` in the denominator — every component, gas included, stores sensible heat. The enthalpy carried by the gas flux relative to the skeleton is the volumetric advection source `S_conv`, always on. This is the ThermaKin Eq. 17 convention. The discretization layer simply assembles `div_q`, `S_conv`, `Q_rad`, `Q_rxn` and divides by `prop_cache.ρcp[i]`. See §7.3–§7.4 for the full derivation, and §13.3.4 for the assembled formula.
+The pore state $p_j=\xi_jRT/(M_j\phi)$ supplies the transported potential.
+A lumped half path gives $n_j^D=\Lambda(p_{j,L}-p_{j,R})/(RT_{path}d)$.
+Dusty-gas paths solve the coupled friction matrix using a consistent mean
+face pressure and collective donor composition (§9.4–9.5). The conditioned
+rank-one evaluator is linear in gas-species count and has explicit vacuum
+and pure-gas limits.
 
 ---
 
-## 13.8 ALE Flux Discretization (Recap)
+### 13.7.3 Total-flux interface matching
 
-This section summarizes how the moving mesh modifies the spatial operators; the full ALE theory (mesh-velocity construction, GCL) is in §11, The ALE Framework.
+Each half path adds Darcy flux $v_D p_{j,up}/(RT_{up})$. The interface partial
+pressures satisfy equality of total species flux through the two halves.
+This preserves a wall-only half connected to a Darcy-only half. The lumped
+and pure-gas systems have a positive analytic quadratic solution; general
+dusty-gas systems use a qualified local root and its first implicit derivative.
+Pressure increments retain resolved gradients near equilibrium without
+subtracting reconstructed absolute pressures. Chapter 9 gives degeneracies,
+donor assumptions and root acceptance criteria.
 
-### 13.8.1 The ALE advection correction
+---
 
-The arbitrary Lagrangian–Eulerian time-derivative identity for a moving sample point is
+### 13.7.4 Carried enthalpy
+
+The single transmitted molar vector becomes $F_{j,f}=M_j n_{j,f}$ and carries
+$\sum_jF_{j,f}h_j(T_f)$, where
+$T_f=(d_RT_L+d_LT_R)/(d_L+d_R)$. Both species and energy rows scatter this
+shared face value conservatively. Temperature and enthalpy formulations
+use the same fluxes.
+
+---
+
+### 13.7.5 Boundary faces
+
+`ThermalBoundaryKernel` assembles the complete boundary exchange. Named
+prescribed fluxes, reservoir transport, external films and hydraulic
+resistances provide the species closure. Outward species carry surface
+enthalpy; inward species carry their specified incoming enthalpy.
+For an LTE wall film, $q_r=q_s+H_r-H_s$ converts the wall heat to the
+reservoir control surface and $E_{out}=H_r-q_r$. For adiabatic or prescribed
+heat, donor enthalpy and imposed heat enter directly (§9.9).
+
+The mass and thermal residuals are coupled only when their constitutive
+closures require it. The solve reports its residual and iterations, and
+implicit differentiation includes all local couplings. The boundary state
+is a diagnostic, not a hidden solution-history input.
+
+---
+
+### 13.7.6 Solid and liquid components carry no transport flux
+
+Condensed components are not transported by diffusion or Darcy flow: the
+gas-transport kernel writes fluxes for the gas components only. On a mesh that rides
+the skeleton, a condensed component's row is its reaction source, its mass stays in
+its cell, and the mesh motion is what carries it (§11.1.2). The gas-transport fluxes
+are relative to the skeleton; on a moving mesh the gas is mesh-bound, and these
+fluxes are the whole of its transport (§11.2.3). Under a correction the relative
+fluxes carry every component, condensed and gas, across the moving faces (§13.8).
+
+---
+
+## 13.8 Fluxes Relative to a Moving Mesh (Recap)
+
+On a moving mesh the node velocities are $w=v_s+c$, the solid velocity from the
+balance rows plus a correction (§11.3, §11.7). Where $c\ne0$, `RelativeFluxKernel`
+carries every inventory across the faces at the relative velocity
+$v_{\mathrm{rel},f}=-c_f\,n_f$:
 
 $$
-\frac{\partial f}{\partial t}\bigg|_{\chi} = \frac{\partial f}{\partial t}\bigg|_{x} + w\,\frac{\partial f}{\partial z},
+F_{j,f}\mathrel{+}=v_{\mathrm{rel},f}\,\xi_{j,f},\qquad
+F_f\mathrel{+}=\sum_jF_{j,f}\,h_j(\tilde T_f),
 $$
 
-so a field whose capacity is carried by material moving at velocity $v$ picks up the advection term $(w - v)\cdot\nabla f$ in the mesh frame. Every component rides the skeleton and the mesh moves with it (§11.1.2, §11.2.2), so in production $w = v$ and no advection term is assembled. The term is computed only under the `w_override` verification hook, with $w$ replaced by the relative velocity $w_{\text{rel}} = w_{\text{applied}} - w_{\text{physical}}$, cell by cell, and **added** to the assembled Eulerian RHS:
+and the conversion-history pair at the solid mass flux times its per-solid-mass
+values. The face states are second-order upwind reconstructions with the smooth van
+Albada slope, an inventory's face state is bounded by the upwind cell's inventory,
+a boundary face takes the one-sided extrapolation of its cell, and a face with an
+exactly zero relative velocity is skipped (§11.6). The energy is never reconstructed
+separately, so an isothermal composition profile advected across the mesh stays
+isothermal. A prescribed mesh velocity (`w_override`, §11.7.8) moves the mesh over a
+solid at rest, and the same kernel carries every inventory at the mesh-relative
+velocity. Under `NoCorrection` the kernel is absent.
 
-$$
-\frac{dT_i}{dt}\bigg|_{\text{ALE}} = \frac{dT_i}{dt}\bigg|_{\text{Euler}} + w_{\text{cell},i}\,\Bigl(\frac{\partial T}{\partial z}\Bigr)_i,
-\qquad
-w_{\text{cell},i} = \tfrac12\,(w_{n_L} + w_{n_R}).
-$$
-
-The cell velocity is the average of its two node velocities; node velocities are built by bottom-up integration of the per-cell dilation (`w_1 = 0` pinned at the substrate; §11.3).
-
-### 13.8.2 Upwind, TVD-limited gradient for the advection term
-
-Because the correction `w·∇φ` is *added* to the Eulerian RHS, the mesh-frame equation is `∂φ/∂τ + c·∂φ/∂z = RHS` with apparent transport velocity `c = −w` (the lab-frame field drifts at `−w` relative to the mesh). The advected gradient `∂φ/∂z` is therefore reconstructed **donor-side with respect to `c = −w`** — the right neighbor for `w > 0`, the left for `w < 0` — with an optional TVD limiter (default `VANLEER`). The first-order donor-side gradient, always written in the `+z` sense, is
-
-$$
-\text{grad}_1 =
-\begin{cases}
-(T_{\text{donor}} - T_i)/d, & w_{\text{cell}} > 0 \;(c<0,\ \text{donor on the right}),\\[4pt]
-(T_i - T_{\text{donor}})/d, & w_{\text{cell}} < 0 \;(c>0,\ \text{donor on the left}),
-\end{cases}
-$$
-
-and the second-order TVD correction, using the next-donor-side gradient `grad_0`, the **near/far** ratio `r = grad_1/grad_0` (see §11.6.2 for why the inverse ratio is unbounded), and the distance-correct blend `β = d₀/(d₀+d₁)` (½ on uniform meshes; §11.6.2), is
-
-$$
-\text{grad}_{\text{TVD}} = \text{grad}_1 + \beta\,\psi(r)\,(\text{grad}_1 - \text{grad}_0).
-$$
-
-The correction is dropped (first order only) when there is no donor-donor cell, when `limiter == NONE`, or when `|grad_0| < 10^{-20}` (flat far slope — ratio undefined). Boundary neighbors use zero-gradient (ghost = cell value) extrapolation; in the standard shrinking case (`w < 0`) the surface cell's donor is the interior neighbor, so the receding surface receives a real gradient rather than the boundary ghost's zero. A negligible mesh velocity `|w_cell| < 10^{-20}` short-circuits the advection to zero.
-
-> **Implementation note.** `compute_ale_advection_term!` (energy) and `_limited_gradient` (src/Discretization/ale_fluxes.jl) implement these formulas; the assignment is `advection[i] = w_cell * dT_dz` and this is added to `dT` in `_apply_ale_T_advection!` (src/Residual/residual.jl) — **only under `Workspace.w_override`**, with `w = w_rel = w_applied − w_physical` (§11.2.2): production ALE has no energy advection because the matrix carrying the thermal mass moves with the mesh.
-
-### 13.8.3 Species: dilation only
-
-Every component rides the mesh (§11.1.2), so the species equations carry no mesh-motion advection at all. The Eulerian species RHS (`-div_J + dξ_rxn` for gases, `dξ_rxn` for solids/liquids) is used unchanged, and the residual adds the dilation `−ξ_{j,i}·θ_i` to every component (§11.2.3, §11.3.4): per cell, `d(ξ_j V)/dt = S_j V − [J_j A]_faces`, so each component's mass changes only by reaction and by its skeleton-relative flux through the faces, and the column total changes only through the boundary faces. In a sealed collapsing column the pore gas compresses cell by cell (V-CPL-03 P4 pins exact conservation); at an open face the gas leaves only through the mass BC's diffusive or Darcy flux.
-
-> **Implementation note.** `_apply_ale_dilation_correction!` (src/Residual/residual.jl): `dξ[j, i] -= state.ξ[j, i] * θ[i]` for every component, with `θ` the cell's reaction-driven strain rate. Its Jacobian is the cell-local block of §15.8.4.
+No dilation term is assembled: the masses are the states, so a cell's concentrations
+follow from its masses and its volume (§11.3.4), and the volume is recomputed from
+the node positions at every evaluation, so the discrete GCL holds identically
+(§11.5).
 
 ---
 
 ## 13.9 Mesh Generation
 
-### 13.9.1 Uniform mesh
+### 13.9.1 Line meshes
 
-The simplest mesh divides `[0, L]` into `n` equal cells:
+`line_mesh(x; coordinates = Planar(), cross_section, bottom = :bottom, top = :top,
+fixed = false, lagrangian = Int[])` (`src/Meshes/generators.jl`) builds a line with
+nodes at the strictly increasing, finite positions `x` (non-negative radii in
+cylindrical and spherical coordinates), cell $i$ between nodes $i$ and $i+1$, face
+$f$ at node $f$, and the topology of §13.1. It pins node 1 (every node with
+`fixed = true`) and records the Lagrangian nodes. The cross section must be finite
+and positive and defaults to 1, 1 and $4\pi$ in planar, cylindrical and spherical
+coordinates. The three user constructors below build on it; each returns a
+`Mesh{1}`.
 
-$$
-\Delta z = \frac{L}{n}, \qquad z_i = (i-1)\,\Delta z \;\; (i = 1,\dots,n+1), \qquad V_i = \Delta z\,A.
-$$
+### 13.9.2 Uniform mesh
 
-Node 1 (`z = 0`) is the bottom boundary (`boundary_id = 2`); node `n+1` (`z = L`) is the top (`boundary_id = 1`). Faces, cells, the active-cell mask (all `true`), the per-cell dry-solid-mass denominator `m_dry_solid_initial` (zeroed, populated later at problem setup), and the boundary-face map (`1 => [n+1]`, `2 => [1]`) are all initialized, and `update_geometry!` computes the cached centers/volumes/areas.
-
-> **Implementation note.** `create_uniform_mesh(L, n_cells, Val(NC); T_initial, ξ_initial, cross_section_area)` (src/Geometry/mesh_generation.jl).
-
-### 13.9.2 Geometric-stretch mesh
-
-To resolve the steep thermal and reaction fronts near the heated surface without paying for fine resolution everywhere, a geometric stretch concentrates cells near one boundary. With a stretch ratio `s` (`Δz_{i+1}/Δz_i = s`), the cell widths form a geometric series whose sum is `L`:
-
-$$
-L = \sum_{i=1}^{n}\Delta z_i = \Delta z_0\,\frac{s^{\,n} - 1}{s - 1}
-\;\;\Longrightarrow\;\;
-\Delta z_0 = L\,\frac{s - 1}{s^{\,n} - 1}, \qquad \Delta z_i = \Delta z_0\,s^{\,i-1}.
-$$
-
-Node positions are accumulated `z_{i} = z_{i-1} + Δz_{i-1}` and then **renormalized** by `L/z_{n+1}` so that `z_{n+1} = L` exactly (removing floating-point drift in the partial sums). For `|s − 1| < 10^{-10}` the code falls back to the uniform `range(0, L, n+1)`.
-
-The `stretch_from` keyword names the boundary that gets the **finest** cells. The series is always built fine-end-first from `z = 0` (smallest cell `Δz_0` at the bottom, cells growing toward `z = L`); with the default `stretch_from = :top` the positions are then reflected so the finest cells sit at the exposed surface `z = L`:
+`create_uniform_mesh(L, n; coordinates = Planar(), cross_section)` divides $[0,L]$
+into $n\ge1$ equal cells:
 
 $$
-\tilde z_i = L - z_{n+2-i}.
+\Delta z=\frac Ln,\qquad z_k=(k-1)\,\Delta z\quad(k=1,\dots,n+1),
 $$
 
-`stretch_from = :bottom` keeps the unreflected series (finest cells at the substrate). The constructor requires `stretch ≥ 1` and `stretch_from ∈ (:top, :bottom)`; orientation is selected only by `stretch_from`, never by a sub-unity ratio.
+with the volumes of §13.2.1 ($V_i=A\,\Delta z$ in planar coordinates). In
+cylindrical and spherical coordinates the positions are radii, so the line runs from
+the axis or the centre to the surface at radius $L$.
 
-> **Implementation note.** `create_stretched_mesh(L, n_cells, Val(NC), stretch; stretch_from=:top, ...)` (src/Geometry/mesh_generation.jl). The geometric series uses `Δz_i = Δz_0 * stretch^(i-2)` in the node-accumulation loop (so the first interior gap is `Δz_0 * s^0 = Δz_0`), followed by the `positions .*= L/positions[end]` renormalization, and the `:top` reflection `positions = L .- reverse(positions)`. For convergence studies on stretched meshes see §18 (Verification & Validation), e.g. `convergence_douglas_fir`.
+### 13.9.3 Geometric-stretch mesh
+
+`create_stretched_mesh(L, n, s; stretch_from = :top, coordinates, cross_section)`
+concentrates cells near one boundary to resolve the steep thermal and reaction fronts
+there. Neighbouring cells differ by the ratio $s\ge1$, and the cell widths form a
+geometric series summing to $L$:
+
+$$
+L=\Delta z_0\,\frac{s^n-1}{s-1}\quad\Longrightarrow\quad\Delta z_0=L\,\frac{s-1}{s^n-1}.
+$$
+
+The series is built from the finest cell at $z=0$, $z_k=z_{k-1}+\Delta z_0\,s^{k-2}$
+($k=2,\dots,n+1$), and scaled by $L/z_{n+1}$ to end at $L$. `stretch_from` names the
+boundary that receives the finest cell: with the default `:top` the positions are
+reflected, $\tilde z_k=L-z_{n+2-k}$, so the finest cell lies at the exposed surface;
+`:bottom` keeps the finest cell at the back. The end positions are then set to $0$
+and $L$ exactly. For $|s-1|<10^{-10}$ the mesh is the uniform range. The constructor
+refuses $s<1$ and any `stretch_from` other than `:top` and `:bottom`: the
+orientation is chosen by `stretch_from` alone, never by a ratio below one.
+
+### 13.9.4 Mesh from a node list
+
+`create_mesh_from_nodes(z; coordinates, cross_section)` builds a line on strictly
+increasing positions that start at zero. It puts a node on every layer interface so
+that no cell straddles a composition change (§13.1.3), and builds graded layered
+meshes such as the one of V-BO-06 (§18).
+
+### 13.9.5 Example
+
+```julia
+using Pyrolysis
+using Pyrolysis.Internal: geometry!, center_to_face_distance, boundary_faces
+
+mesh = create_stretched_mesh(0.01, 5, 1.2)      # 1 cm, 5 cells, finest at z = L
+topo = mesh.topology
+x = [p[1] for p in mesh.positions]
+println(diff(x))                                 # cell widths [m]
+println(topo.faces[1], "\n", topo.faces[2], "\n", topo.faces[6])
+println(boundary_faces(topo, :top), " ", topo.pinned)
+
+g = MeshGeometry{Float64}(topo)
+geometry!(g, x, topo.cross_section, topo)
+println([n[1] for n in g.face_normal])           # face normals
+println(center_to_face_distance(g, topo, 2, 1), " ",
+        center_to_face_distance(g, topo, 2, 2))  # d_o, d_n of face 2
+```
+
+prints (the type prefix `Pyrolysis.Meshes.` shortened)
+
+```
+[0.00278649752741346, 0.002322081272844549, 0.0019350677273704585, 0.0016125564394753808, 0.0013437970328961518]
+Face{1, 1}((1,), (1, 0), :bottom)
+Face{1, 1}((2,), (1, 2), :interior)
+Face{1, 1}((6,), (5, 0), :top)
+[6] [1]
+[-1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+0.00139324876370673 0.0011610406364222746
+```
+
+The widths fall by the factor 1.2 toward the surface, the finest equals
+$L(s-1)/(s^n-1)=1.3438$ mm, the bottom face's normal points out through the back,
+and the two distances of face 2 are the half-widths of cells 1 and 2.
+
+### 13.9.6 Quadrilaterals and hexahedra (residual level)
+
+`box_mesh(xs, ys[, zs]; transform = identity, pinned = (:bottom,), fixed = false,
+lagrangian = Int[])` builds a structured planar mesh of quadrilaterals or hexahedra
+on the tensor product of the node coordinates, each node then moved by `transform`;
+its sides are tagged `:left` and `:right` along $x$, `:front` and `:back` along $y$
+(3D), and `:bottom` and `:top` along the last axis. `cell_mesh(positions, cells; tag,
+…)` builds one from node positions and per-cell node lists, matching faces by their
+node sets. These meshes serve the residual-level machinery of §13.2.5.
 
 ---
 
-## 13.10 State-Vector Packing and Geometry-from-State
+## 13.10 The State and its Mapping
 
-### 13.10.1 Block-major layout `[T | ξ | z | χ]`
+### 13.10.1 The state vector
 
-The flat ODE/DAE state vector `u` is packed **block-major**: all temperatures first, then each component's concentration block, then (in ALE) the node positions, then (in WithChi) the pyrolysis-progress block. With `n = n_cells`:
+The state is a sequence of node and cell blocks followed by global scalars, laid out
+by `StateLayout` (`src/States/layout.jl`; the full layout and its index formulas are
+§15.1):
+
+- **cell block** $i$: the component masses $m_{1,i},\dots,m_{N_C,i}$ [kg], the energy
+  state ($T_i$ [K], or the sensible-enthalpy inventory $H_i$ [J] with
+  `energy_state = :enthalpy`), and under a variable cross section the
+  conversion-history pair $(G_i, m_{\mathrm{dry},i})$;
+- **node block** $n$: on a moving mesh the position $z_n$ (differential) and the
+  velocity $w_n$ (algebraic); under `BEER_LAMBERT` the intensity of the face at
+  node $n$ (algebraic);
+- **globals**, under a variable cross section: the area $A$ and its lateral strain
+  rate $\theta_A$ (algebraic).
+
+On a line the order is node 1, cell 1, node 2, …, cell $n$, node $n+1$, so every row's
+unknowns and its neighbours' lie within a fixed distance and the Jacobian is banded.
+No kernel computes an index: every access goes through `mass_index`,
+`energy_index`, `position_index`, `velocity_index`, `intensity_index`,
+`history_index`, `area_index` and `lateral_rate_index`. `setup` fills the initial
+state from the problem: $m_{j,i}=\xi_j(z_i^c)\,V_i(0)$ and the energy state from
+$T(z_i^c)$ at the cell centres of the reference mesh, then makes the algebraic
+unknowns consistent (§15.4).
+
+### 13.10.2 The state mapping
+
+`derive!(ds, u, layout, setup)` (`src/States/derived.jl`) maps the state vector to
+the `DerivedState` every kernel reads; it is the only reader of $\boldsymbol u$. In
+order:
+
+1. the live cells, from the layout's mask;
+2. on a moving mesh, the node positions and velocities (or, under the potential
+   closure of more dimensions, the cells' multipliers), under a variable cross section
+   $A$ and $\theta_A$, and the
+   geometry from the positions (`geometry!`, §13.2); a fixed mesh keeps the
+   reference geometry computed when its buffers are built;
+3. the carried fields (the history pair; in more dimensions the deformation
+   gradient) and the face intensities;
+4. per cell, the signed volume $V_i$ and $\tilde V_i=\mathrm{smooth\_floor}(V_i,10^{-8}V_i(0))$,
+   the masses, the concentrations $\xi_{j,i}=m_{j,i}/\tilde V_i$ and the positive-part
+   concentrations $\xi^+_{j,i}=(m_{j,i})^+/\tilde V_i$ at the cell's scale $\delta_i$;
+5. the temperatures: the stored temperature, or the inversion of the enthalpy
+   inventory (§13.10.4);
+6. per cell, the trial temperature $\tilde T_i$, the floored heat-capacity sum $C_i$,
+   the sensible enthalpies $h_j(T_i)$, the floored conductivity $k_i$, the surface
+   emissivity $\varepsilon_i$ and absorptivity $a_i$, the pore-gas properties the gas
+   transport needs (the wall coefficients, molecular resistance, porosity,
+   partial pressures and mobility), and under in-depth
+   radiation the absorption coefficient $\alpha_i$.
+
+The node corrections $c_n$ are written next, by the closure (`correction!`, §11.7).
+Which value of each field a kernel reads is fixed:
+
+| Field | Read by |
+|---|---|
+| $\xi_{j,i}=m_{j,i}/\tilde V_i$ (signed, as stored) | reactions and relative solid-motion fluxes |
+| $\xi^+_{j,i}$ | properties, pore pressure, species transport and reservoir exchange |
+| $\tilde T_i$ | reactions, properties, the lumped wall flux, pressure, the surface balance, the strain rate |
+| $T_i$ | the conductive difference, the sensible enthalpies, the face temperatures $T_f$ |
+
+### 13.10.3 Trial extensions and physical admissibility
+
+The shared C¹ guards are defined in `src/Materials/guards.jl`:
+`smooth_clamp` for trial temperature, `positive_part` for inventories, and
+`smooth_floor` for positive divisors. The porosity divisor floor is $10^{-12}$
+and becomes the identity above twice that value. Such extensions let
+intermediate integrator states be evaluated within their finite envelope;
+they do not make a closed pore or an invalid constitutive root admissible.
+
+Condensed caloric scales retain their reference-mass definition. The gas
+transport positive-part scale is recomputed from current temperature and
+pore volume, sharing the pressure-error budget among gas species. Its total
+pressure bias is below 0.26 times that budget (§9.10). Accepted physical states and post-event states are checked
+using raw quantities and a mass/thermal/geometry uncertainty margin. Local
+transport failures are diagnosed explicitly (Chapter 9).
+
+---
+
+### 13.10.4 The energy state and the caloric extension
+
+The sensible enthalpies $h_j(T)=\int_{T_\mathrm{ref}}^Tc_{p,j}\,dT'$ have closed forms
+for constant, linear, polynomial and tabulated heat-capacity laws (each law constant
+outside the property bracket, so the enthalpy continues linearly there), and a
+`TabulatedEnthalpy` for any other law: the integral at 1 K knots on the bracket by
+five-point Gauss–Legendre quadrature and the cubic Hermite interpolant between.
+
+In the temperature form the cell temperature is read from the state. In the
+enthalpy form it is the root of the cell's **extended caloric relation**
+(`CaloricExtension`, `src/States/caloric.jl`)
 
 $$
-\underbrace{T_1,\dots,T_n}_{\text{T block: }1..n}\;\bigl|\;
-\underbrace{\xi_{1,1},\dots,\xi_{1,n}}_{\xi_1}\,,\dots,\,\underbrace{\xi_{N_C,1},\dots,\xi_{N_C,n}}_{\xi_{N_C}}\;\bigl|\;
-\underbrace{z_1,\dots,z_{n+1}}_{\text{z block (ALE)}}\;\bigl|\;
-\underbrace{\chi_1,\dots,\chi_n}_{\text{$\chi$ block (WithChi)}}.
+H_i=\sum_j(m_{j,i})^+\,h_j(T)+C_{\mathrm{reg},i}(\boldsymbol m)\,(T-T_\mathrm{ref}),
 $$
 
-The exact ranges (1-based) are:
+where $C_{\mathrm{reg},i}$ [J K⁻¹] is a $C^1$ regularizing capacity that is zero while the guaranteed heat capacity
+$\sum_j(m_{j,i})^+c_{p,j,\min}$ is at least twice the cell's capacity floor
+$C_{\mathrm{floor},i}=\rho c_{p,\mathrm{floor}}V_i(0)$ and rises to $C_{\mathrm{floor},i}$ as
+it vanishes ($c_{p,j,\min}$ is half the sampled minimum of the component's law). The
+relation is strictly increasing in $T$ with slope at least $C_{\mathrm{floor},i}$, so it
+has exactly one root for every real $H_i$, and it agrees with the physical relation
+on every state in which each component is absent or holds at least $\delta_i$ and the
+guaranteed capacity is at least $2C_{\mathrm{floor},i}$. `invert_caloric` solves it by a
+bracketed Newton iteration started at the cell's temperature from the latest plain
+evaluation, replacing a step that does not contract the bracket by bisection. A
+dual-number inventory is differentiated through the defining relation: the primal
+root is corrected by one Newton step per nesting level, which carries the
+implicit-function derivatives exactly. A non-finite inventory has temperature `NaN`,
+so the residual of such a trial state is `NaN` and the integrator rejects the step.
 
-$$
-T:\;1..n, \qquad
-\xi_j:\;n + (j-1)n + (1..n), \qquad
-z:\;n(1+N_C) + (1..n_{\text{nodes}}), \qquad
-\chi:\;\text{trailing }n.
-$$
+### 13.10.5 Reference scales and pressure-aware error control
 
-Block presence is determined **strictly** by the `SimulationMode` trait: `T` and `ξ` always present; `z` iff `mesh_mode(mode) isa ALE`; `χ` iff `chi_mode(mode) isa WithChi`. The total length is `n(1+N_C)` plus `n_nodes` (ALE) plus `n` (WithChi).
+`CellReference` holds initial volume, condensed mass, geometry, capacity
+floors and the pressure-error budget. Condensed-mass and geometry absolute
+tolerances retain their reference scales. Gas-row reference tolerances are
+$\phi_i(0)V_i(0)M_jp_{tol}/(N_gRT_i(0))$.
 
-> **Implementation note.** `StateLayout{NC,Mode}` (src/Problem/state_layout.jl) is the single source of truth for every pack/unpack/view. Accessors: `temperature_range`, `concentration_range(l, j)`, `z_range`, `chi_range`, `z_offset`, `chi_offset`, `state_length`, plus the compile-time `block_view(u, l, Val{:T}|Val{:ξ}|Val{:z}|Val{:χ})`. `pack_state!` writes `mesh.cell_states` and (ALE) node positions into `u`; the χ block is initialized to zero because χ is reconstructed each residual rather than integrated as raw state (§10.3).
+The internal error norm also reconstructs each unscaled local error at the
+proposed state and differentiates $p_j=m_jRT/(M_jW)$, with
+$W=V-\sum_{condensed}m_j/\rho_{i,j}(T)$. Temperature, condensed masses,
+positions, cross section and caloric inversion therefore contribute to the
+pressure-error estimate. Each species shares the absolute budget, and the
+sum of absolute partial-pressure errors is controlled by the total budget.
+This is a local estimate; accumulated global error is qualified against
+tighter trajectories. No residual evaluation mutates solver tolerances.
 
-### 13.10.2 Geometry-from-state during assembly
+---
 
-In ALE mode the geometry is a function of the `z` block, so it must be recomputed from `u` *without mutating the mesh* (the residual and Jacobian must be pure functions of `u`). The geometry kernel reads node positions directly from `u` at the `z_offset`:
+### 13.10.6 Example
 
-$$
-V_i = |u_{z_{\text{off}}+i+1} - u_{z_{\text{off}}+i}|\,A, \quad
-z_i^c = \tfrac12\,(u_{z_{\text{off}}+i} + u_{z_{\text{off}}+i+1}), \quad
-z_f = u_{z_{\text{off}}+f},
-$$
+The mapping of a set-up problem, read through `Pyrolysis.Internal`:
 
-with face distances formed by each kernel from these centers and positions (§13.2). Because `A` and the `u`-derived positions carry the live scalar type, the entire geometry — and every flux and divergence built on it — is differentiable end-to-end.
+```julia
+using Pyrolysis
+using Pyrolysis.Internal: residual!, buffers, mass_index, energy_index, position_index,
+    velocity_index, state_length, is_differential
 
-> **Implementation note.** `update_state_geometry!(cache, mesh, ::ALE)` (src/Problem/state_cache.jl) recomputes `face_positions`, `A_face`, `cell_centers`, and `volume` from `cache.z` and `cache.A_section[]` once per RHS evaluation in ALE mode (the Eulerian method is a no-op: that geometry is mirrored once at workspace construction). Between *accepted* integrator steps, `update_mesh_from_state!` (src/Problem/state_layout.jl) mirrors the state back into `mesh.nodes[i].z` for the depletion checks and post-processing. The `StateCache` holds `T`, `ξ`, `z`, `χ`, the geometry quantities `volume`/`A_face`/`A_section`, `cell_centers`, and `face_positions`, all parameterized on the scalar type `Tu`.
+solid = SolidComponent(:solid, ρ = 1190.0, φ=.3, c = 1420.0, k = 0.19, λ = 1e-6)
+gas = GaseousComponent(:gas, M = 0.1, c = 1500.0, k = 0.02,)
+material = Material(
+    gas_transport=LumpedTransfer(endpoint=LumpedEndpoint(λ=1e-6,κ=0.,max_skeletal_occupancy=.001)),
 
-### 13.10.3 RHS cache
+    name = :slab,
+    components = (solid, gas),
+    reactions = (Reaction(:gasification, 1 => 2, A = 8.5e12, E = 188e3, h = 8.7e5),),
+)
+problem = PyrolysisProblem(
+    mesh = create_uniform_mesh(0.002, 20),
+    material = material,
+    bc_set = BoundaryConditionSet(
+        thermal = (
+            top = HeatFluxBC(50e3) + RadiativeBC(ε = 0.9, T_inf = 300.0),
+            bottom = AdiabaticBC(),
+        ),
+        mass = (top = AmbientGasBC(GasReservoir(P=0., T=300.)), bottom = ImpermeableBC()),
+    ),
+    T_initial = z -> 300.0 + 2e5 * z,      # 300 K at the back, 700 K at the surface
+    ξ_initial = [z -> 1190.0, z -> 0.0],
+    tspan = (0.0, 60.0),
+)
+cp = setup(problem; use_ale = true)
+layout = cp.def.layout
+println(state_length(layout), " rows, ", count(!, is_differential(layout)), " algebraic")
+println((position_index(layout, 1), velocity_index(layout, 1), mass_index(layout, 1, 1),
+         mass_index(layout, 1, 2), energy_index(layout, 1), position_index(layout, 2)))
 
-The face fluxes, sources, and divergences are stored in a preallocated `RHSCache{Tu}` (src/Discretization/finite_volume.jl) carrying `q_cond`, `q_total`, `S_conv`, `J_gas` (`NC × n_faces`), `Q_rxn`, `Q_rad`, `dξ_rxn` (`NC × n_cells`), the reaction workspaces `rates`/`heats`/`species_src`, and the divergences `div_q`/`div_J`. The type parameter `Tu` is `Float64` for ordinary evaluation and `ForwardDiff.Dual` for AD-based Jacobian passes, so no reallocation occurs when switching modes. The cache keeps its size for the whole solve: depletion parking (§14.3) leaves ghost slots in place and the kernels loop over the live cells only.
+du = similar(cp.u0)
+residual!(du, cp.u0, cp.def, 0.0, cp.ws)
+ds, c = buffers(cp.ws, cp.def, Float64)
+println((ds.m[1, 20], ds.V[20], ds.ξ[1, 20], ds.T[20], ds.cp_sum[20]))
+println((c.F_energy[21], c.T_face[21]))
+println((du[energy_index(layout, 20)], du[mass_index(layout, 20, 1)]))
+```
+
+prints
+
+```
+102 rows, 21 algebraic
+(1, 2, 3, 4, 5, 6)
+(0.11900000000000005, 0.00010000000000000005, 1190.0, 690.0, 168.98000000000008)
+(-38157.35850998746, 700.0414101347891)
+(-29.609607022784147, -0.0059319424191924845)
+```
+
+The state has $21\times2+20\times3=102$ rows: a position and a velocity per node and
+two masses and a temperature per cell, the 21 velocities algebraic; node 1's block
+comes first, then cell 1's, then node 2's. The top cell (centre at 1.95 mm, so
+690 K) holds $1190\times10^{-4}$ kg in $10^{-4}$ m³ and $C=0.119\times1420$ J K⁻¹. The
+surface balance of the `:top` face gives $T_s=700.04$ K, and its outward flux is
+$-38.16$ kW m⁻² (into the domain: 50 kW m⁻² less the re-radiation
+$0.9\,\sigma(T_s^4-300^4)$). The conduction into the cell and out of it nearly
+cancel on this linear profile; the endothermic gasification at 690 K (a rate of
+$0.05$ s⁻¹ on 1190 kg m⁻³) cools the cell at about 30 K s⁻¹ and removes its solid
+at $59.3$ kg m⁻³ s⁻¹ times its volume.
 
 ---
 
 ## 13.11 Comparison to Gpyro and ThermaKin2Ds Discretizations
 
-We map the reference codes' notation onto the unified nomenclature of §2 on first use, then contrast the discretization choices.
+### 13.11.1 Gpyro
 
-### 13.11.1 Gpyro (Lautenberger & Fernandez-Pello)
+The documented 1D Gpyro method uses fully implicit control-volume balances,
+with changing cell thicknesses, harmonic interface transport coefficients,
+source linearization and tridiagonal solves in an iterative coupled solution
+(GP §§4.1, 6). Boundary nodes lie on half-cell boundaries.
 
-Gpyro is a 1D (optionally pseudo-2D) generalized condensed-phase pyrolysis solver using a **Patankar-style finite-volume** discretization (control volumes about cell-centered nodes). Mapping its symbols to ours: Gpyro's pre-exponential `Z → A_i`, permeability `K → κ`, kinematic viscosity `ν` (in `ṁ'' = −(K/ν)(∂P/∂z − gρ_g)`), conversion `α_conv`, and the overbarred mixture density `ρ̄`.
+GP's convection–diffusion scheme is **selected by an input option**; central,
+upwind, hybrid, power-law and exponential forms have different Péclet-number
+coefficient functions (GP Table 2; 0.8200 `GET_A`/`GET_A_SINGLE`). It does
+not automatically choose among all schemes as the Péclet number changes.
+Pyrolysis.jl uses first-order upwind Darcy advection, a separate diffusive
+law and distance-weighted harmonic face coefficients. Its semi-discrete
+system is advanced with a stiff integrator and a coupled colored Jacobian.
+Those shared finite-volume features do not make the diffusion laws or time
+errors identical (§9.10).
 
-- **Conservation form vs. non-conservative.** Gpyro writes integral control-volume balances of `ρ̄Δz`, `ρ̄Y_iΔz`, gas mass, and energy on volumes that deform with the solid. Pyrolysis.jl uses the same cell-centered FVM divergence operator (§13.3) on the ALE mesh, with every component riding the mesh, but solves the **non-conservative** temperature equation, storing every component in `ρc_p` and carrying the gas-flux enthalpy via `S_conv` (§13.7.5). Both telescope to the same boundary-flux balance (§13.3.3).
-- **Interface interpolation.** Patankar's hallmark is the **harmonic interface conductivity** for diffusion coefficients, justified by flux continuity across a control-volume face — identical in spirit to the harmonic-mean `k_f`, `λ_f`, `κ_f` of §13.7.1–§13.7.3. Pyrolysis.jl additionally distance-weights the harmonic mean for non-uniform meshes.
-- **Convection scheme selection.** Patankar/Gpyro selects the face scheme by the cell **Péclet number** (central below ≈2, upwind/power-law above), a built-in switching. Pyrolysis.jl does not auto-switch on Péclet: diffusion is always the volume-fraction-gradient flux and gas advection is first-order upwind (Darcy–Fick; under ALE the gas rides the mesh and has no mesh-motion advection, §13.8.3). Choosing resolution to keep the cell Péclet number moderate is left to the user (see §18.7).
-- **Linear solver.** Gpyro is fully implicit (backward Euler) with Patankar linearization solved by **TDMA (Thomas algorithm)** for the tridiagonal system. Pyrolysis.jl delegates time integration to stiff OrdinaryDiffEq integrators with a structured/sparse Jacobian (§15); a TDMA appears internally only in the P1 radiation solve (§8.7).
-- **Pressure/Darcy.** Gpyro's Darcian gas flux `ṁ'' = −(K/ν)(∂P/∂z − gρ_g)` includes buoyancy; Pyrolysis.jl's `v_g = −(κ/μ)∇P` (§13.7.3) omits the gravity term (1D through-thickness, gravity negligible) and uses dynamic viscosity `μ` rather than kinematic `ν`.
+### 13.11.2 ThermaKin2Ds
 
-### 13.11.2 ThermaKin2Ds (Stoliarov et al.)
+TK §3 calls its spatial elements **finite volumes**, carrying component
+masses and temperature. It uses Crank–Nicolson integration in the primary
+coordinate and explicit updates in the transverse coordinate, with changing
+element sizes and conservative size adjustment. It should not be contrasted
+with Pyrolysis.jl as a fixed-grid finite-difference method with no volume
+inventory conservation.
 
-ThermaKin is a 1D (with 2D extensions) finite-difference pyrolysis solver. Mapping its symbols: stoichiometric coefficient `θ_i^j → ν_{i,j}` (overload A2; ThermaKin's `θ` is stoichiometry, ours is strain rate), and its published heat-of-reaction sign is `h > 0 = exothermic` (overload H1; internally we use `h > 0` endothermic with `Q_rxn = −Σh_r r_r`).
-
-- **Gas transport.** Pyrolysis.jl's volume-fraction-gradient flux `J = −(λ/T)∂(ξT)/∂x` (§13.7.2) is taken directly from ThermaKin's Section 1.2 gas-transport formulation `J = −ρ_g λ ∂(ξ_g/ρ_g)/∂x`. For a rigid non-swelling matrix (`γ = 0`) ThermaKin recovers a Boyle's-law Darcy form; Pyrolysis.jl provides the explicit Darcy–Fick path (§13.7.3) for that regime.
-- **Convective energy term.** ThermaKin's Eq. 17 carries gas sensible enthalpy as `c_g (J_g·∂T/∂x)`, which is exactly the `S_conv` source of §13.7.5 (the S_conv-only convention), and sums every component in the storage term — both as here.
-- **Time discretization.** ThermaKin uses Crank–Nicolson in the primary (through-thickness, `x`) direction and explicit updates in the transverse `(y, z)` directions; the spatial operators are second-order finite differences on a structured grid. Pyrolysis.jl is finite-**volume** (flux-based, conservative-divergence) rather than finite-difference, and offloads temporal integration to adaptive stiff solvers (§15).
-- **Moving mesh.** ThermaKin performs dynamic mesh adjustment around a single reference point as the material deforms; Pyrolysis.jl recasts the same deformation through the ALE framework (§11) with cumulative mesh velocity built from per-cell dilation, and (optionally) a separate lateral-shrinkage `χ` channel (§10).
-
-The shared lineage (harmonic interface averaging, S_conv gas-enthalpy convention, volume-fraction-gradient gas flux) is intentional — Pyrolysis.jl is designed to reproduce ThermaKin/Gpyro physics while adding type-stable, allocation-free, AD-compatible assembly and a structured Jacobian.
+Pyrolysis.jl carries extensive mass states, optional enthalpy states, and
+the moving geometry in one mass-matrix system. Its source code establishes
+these choices; TK's manual establishes its own method. Neither description
+alone establishes relative accuracy, computational cost, or stability on a
+particular ignition transient.
 
 ---
 
 ## 13.12 Limitations and Open Issues
 
-The following discretization-specific issues are open (drawn from the source annotations and the verification against the implementation):
+1. **First-order gas advection.** The pressure-driven advective face flux is
+   first-order upwind (§13.7.3); the second-order van Albada reconstruction exists
+   only for the relative fluxes of a corrected moving mesh (§11.6). Sharp
+   pressure-driven composition fronts are smeared at first order unless the mesh is
+   refined.
 
-1. **ALE advection limiter is fixed.** `VANLEER` is the default `limiter` keyword of `compute_ale_advection_term!` (the mesh-relative temperature advection, override-only), and the residual calls it with that default; neither the workspace nor `solve` exposes another choice (minmod/superbee/none), which would aid verification studies.
+2. **First-order boundary faces.** A boundary face is reached from its cell centre
+   over the half-width (§13.2.3), so a face value fixed by a condition (a prescribed
+   temperature, the solved surface temperature) carries a first-order error at the
+   face. It is visible where a steep profile sits inside the boundary half-cell: in
+   V-CPL-02 the surface-temperature closure, with the reaction zone inside that
+   half-cell, shifts the steady-wave identity by about 1.3 % at $\Delta z\approx2\delta_r$
+   and $7\times10^{-4}$ at $\Delta z\approx\delta_r$ ($\delta_r$ the reaction-zone
+   thickness; the case's comments). The manufactured-solution cases impose boundary
+   fluxes, not face values, for that reason (§18.2).
 
-2. **First-order Darcy–Fick advection only.** The pressure-driven advective face flux uses first-order upwinding (§13.7.3); no TVD/MUSCL option exists for Darcy advection (the TVD machinery is wired only into the verification-hook ALE temperature advection). Sharp pressure-driven composition fronts are therefore smeared at first order unless the mesh is refined.
+3. **No mixed cells.** Initial compositions are sampled at the cell centres, so an
+   interface that does not lie on a face is moved to the nearest face. V-HC-04c
+   measures the effect on a two-layer slab: the numerics match the moved-interface
+   resistance network to $10^{-11}$, and the whole error against the true interface,
+   1.64 % in flux and 1.47 K in the profile at $\Delta z=0.5$ mm, is the quantization.
+   Put a node on every interface (§13.9.4).
 
-3. **Multi-dimensional generalization.** All geometry, the divergence operator, the GCL, and the face structures are specialized to 1D (one face per node, scalar face areas, all faces sharing `A`). The `MeshTopology{D,...}` and `MeshGeometry{D}` types are parameterized by dimension `D` but are placeholders the 1D residual does not read; 2D/3D would require vector node positions, per-face normals and variable areas, and a full divergence-theorem GCL.
+4. **In-depth radiation on planar lines only.** `setup` refuses `BEER_LAMBERT` off
+   planar coordinates and on meshes of more dimensions. Only the first
+   `RadiativeFluxBC` member of a combined `:top` condition feeds the beam; a second
+   radiative member is dropped without a warning (§8).
 
-For the temporal integration and Jacobian that consume the operators of this chapter, see §15 (Temporal Integration & Structured Jacobian); for depletion parking and the refinement building blocks, see §14 (Adaptive Mesh Refinement and Surface Depletion); for the conservation audits that exploit the telescoping divergence of §13.3.3, see §16 (Conservation Diagnostics).
+5. **More dimensions at the residual level.** Meshes of quadrilaterals and
+   hexahedra are assembled and differentiated (§13.2.5, §13.6.4) but are not a
+   supported path for full solves: gas transport, in-depth radiation, the variable
+   cross section, deactivation and the equidistribution correction are a line's, and
+   the relative fluxes are first-order there (§11.6.5).
+
+For the temporal integration and the Jacobian that consume the rows of this chapter,
+see §15 (Temporal Integration, the DAE, and the Colored Jacobian); for deactivation
+and burnout, §14 (Cell Deactivation and Burnout); for the ledgers that exploit the
+antisymmetric scatter of §13.3.3, §16 (Conservation Ledgers and the Audit).

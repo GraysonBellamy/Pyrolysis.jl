@@ -2,15 +2,19 @@
 CurrentModule = Pyrolysis
 ```
 
-# Problem and solution
+# Problem
 
-See the User Guide's
-[problem-building chapter](../guide/user_guide/07_building-problem-modes.md)
-for the simulation-mode axes, and the
-[solution chapter](../guide/user_guide/09_solution-plotting.md) for
-post-processing.
+A [`PyrolysisProblem`](@ref) holds the mesh, the material, the boundary
+conditions, the initial conditions as functions of position, the time span
+and the output times. See the User Guide's
+[problem-building chapter](../guide/user_guide/07_building-problem-modes.md).
 
 ```@docs
 PyrolysisProblem
-PyrolysisSolution
+Problem.initial_fields
+Problem.step_profile
+Problem.linear_profile
+Problem.gaussian_profile
+Problem.tanh_profile
+Problem.validate_problem
 ```

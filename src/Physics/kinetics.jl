@@ -2,24 +2,63 @@
 Reaction kinetics.
 """
 
-# DepletionLimiter is defined in Materials/reactions.jl (each Material carries
+# The limiter types are defined in Materials/reactions.jl (each Material carries
 # its own limiter in `material.depletion_limiter`); re-exported from Physics
 # for the kinetics-facing API.
 
 # Immutable default for the standalone `reaction_rate` entry point. The solver
-# path never uses it — `evaluate_reactions!` reads `material.depletion_limiter`.
+# paths never use it: `evaluate_reactions!` reads `material.depletion_limiter`
+# unless a caller passes its own limiter.
 const DEFAULT_DEPLETION_LIMITER = DepletionLimiter()
 
 # PERFORMANCE: Fast power function for common reaction orders (0, 1).
 # Scalar-type-generic so AD passes carry Duals through.
 @inline _fast_pow(x::Real, n::Real) = n == 1 ? x : (n == 0 ? one(x) : x^n)
 
-# tanh(x) rounds to exactly 1.0 in Float64 for x ≳ 19.1, so skipping the call
-# above 20·threshold is bit-identical to evaluating it. PERFORMANCE: bulk
-# concentrations sit orders of magnitude above the default 1 kg/m³ threshold,
-# so the common path pays no transcendental.
-@inline _depletion_factor(ξ::Real, threshold::Float64) =
-    ξ < 20.0 * threshold ? tanh(ξ / threshold) : one(ξ)
+# The concentration factor of one reactant, multiplied onto `conc`: the power
+# of the finite base times the onset, which is zero at and below zero.
+@inline function _reactant_factor(conc, limiter::DepletionLimiter, ξ::Real, order::Real)
+    if limiter.enabled
+        # The onset and its slope vanish at and below zero, so the rate and
+        # every derivative of it are exactly zero there.
+        ξ <= 0 && return zero(conc) * zero(ξ)
+        conc *= _fast_pow(_finite_base(ξ, limiter.base_scale), order)
+        conc *= one_sided_factor(ξ / limiter.threshold, limiter.join)
+        return conc
+    end
+    return conc * _finite_power(ξ, limiter.base_scale, order)
+end
+
+# δ·softplus(ξ/δ) for ξ > 0: equal to ξ to within δ·log 2, and exactly ξ once
+# ξ/δ is large enough for the correction to round away.
+@inline _finite_base(ξ::Real, δ::Float64) = ξ + δ * log1p(exp(-ξ / δ))
+
+# (δ·softplus(ξ/δ))^order for every real ξ. Below zero the power is formed in
+# log space, where log softplus(x) = x once exp(x) is below round-off, so the
+# value and its slope underflow together instead of meeting as 0 · ∞.
+@inline function _finite_power(ξ::Real, δ::Float64, order::Real)
+    x = ξ / δ
+    x > 0 && return _fast_pow(_finite_base(ξ, δ), order)
+    order == 0 && return one(ξ)
+    log_softplus = x < -36 ? x : log(log1p(exp(x)))
+    return exp(order * (log(δ) + log_softplus))
+end
+
+"""
+	one_sided_factor(x, join) -> Real
+
+The onset of [`DepletionLimiter`](@ref): zero at and below zero, the cubic
+`(s − 2y) t³ + (3y − s) t²` (`t = x/join`, `y = tanh(join)`,
+`s = join·sech²(join)`) up to `join`, and `tanh(x)` above. C¹ everywhere.
+"""
+@inline function one_sided_factor(x::Real, join::Float64)
+    x <= 0 && return zero(x)
+    x >= join && return x < 20.0 ? tanh(x) : one(x)
+    t = x / join
+    y = tanh(join)
+    s = join / cosh(join)^2
+    return t * t * ((s - 2y) * t + (3y - s))
+end
 
 """
 	reaction_rate(rxn::Reaction, ξ::NTuple{NC,Float64}, T::Float64;
@@ -27,15 +66,16 @@ const DEFAULT_DEPLETION_LIMITER = DepletionLimiter()
 
 Compute the reaction rate [kg/(m³·s)] for a single reaction.
 
-r = A * exp(-E/RT) * ∏ᵢ ξᵢ^nᵢ * ∏ᵢ tanh(ξᵢ/ξ_th) * H(T - T_min) * H(T_max - T)
+r = A * exp(-E/RT) * ∏ᵢ ξᵢ^nᵢ * ∏ᵢ g(ξᵢ/ξ_th) * H(T - T_min) * H(T_max - T)
 
 # Depletion Protection
-Each reactant contributes a smooth `tanh(ξ/ξ_th)` rate factor
-(`ξ_th = limiter.threshold`, default 1.0 kg/m³): the rate recovers the bare
-Arrhenius law for ξ ≫ ξ_th and vanishes with bounded ∂r/∂ξ as ξ → 0 for every
-reaction order n ≥ 0. See [`DepletionLimiter`](@ref).
+Each reactant contributes a rate factor set by the [`DepletionLimiter`](@ref)
+(`ξ_th = limiter.threshold`, default 1.0 kg/m³): the power of a finite base
+times a C¹ onset `g` ([`one_sided_factor`](@ref)) that is exactly zero at and
+below ξ = 0 and equals `tanh(ξ/ξ_th)` above `join · ξ_th`, so the rate recovers
+the bare Arrhenius law for ξ ≫ ξ_th.
 
-Pass a custom `DepletionLimiter` via the `limiter` keyword to override per-call.
+Pass a limiter via the `limiter` keyword to override per-call.
 
 # Temperature Gates
 The hard steps `H(·)` are realized as smooth tanh ramps of width
@@ -48,7 +88,7 @@ function reaction_rate(
     rxn::Reaction{NRin},
     ξ::NTuple{NC,<:Real},
     T::Real;
-    limiter::DepletionLimiter = DEFAULT_DEPLETION_LIMITER,
+    limiter::AbstractDepletionLimiter = DEFAULT_DEPLETION_LIMITER,
 ) where {NRin,NC}
     # Arrhenius rate constant
     k = rxn.A * exp(-rxn.E / (R_GAS * T))
@@ -60,11 +100,7 @@ function reaction_rate(
     # unrolled by the compiler when NRin is a static type parameter.
     conc_factor = one(promote_type(eltype(ξ), typeof(T)))
     @inbounds for (idx, order) in rxn.reactants
-        ξ_raw = max(ξ[idx], zero(eltype(ξ)))
-        conc_factor *= _fast_pow(ξ_raw, order)
-        if limiter.enabled
-            conc_factor *= _depletion_factor(ξ_raw, limiter.threshold)
-        end
+        conc_factor = _reactant_factor(conc_factor, limiter, ξ[idx], order)
     end
 
     r = k * conc_factor
@@ -85,7 +121,8 @@ end
 
 """
 	evaluate_reactions!(rates::Vector{Float64}, heats::Vector{Float64},
-					   ξ::NTuple{NC,Float64}, T::Float64, material::Material)
+					   ξ::NTuple{NC,Float64}, T::Float64, material::Material,
+					   limiter = material.depletion_limiter)
 
 Evaluate all reaction rates and heats of reaction.
 
@@ -99,9 +136,9 @@ Evaluate all reaction rates and heats of reaction.
 This function is designed to be allocation-free using @generated for compile-time unrolling.
 
 # Depletion Limiter
-Rates are evaluated with the material's own [`DepletionLimiter`](@ref)
+Rates are evaluated with `limiter`, by default the material's own
 (`material.depletion_limiter`, settable via the `Material` constructor's
-`depletion_limiter` keyword).
+`depletion_limiter` keyword); see [`DepletionLimiter`](@ref).
 
 # State-Dependent Heats
 Heats of reaction can depend on temperature only (standard) or on both
@@ -114,16 +151,9 @@ function evaluate_reactions!(
     ξ::NTuple{NC,<:Real},
     T::Real,
     material::Material{NC,NR},
+    limiter::AbstractDepletionLimiter = material.depletion_limiter,
 ) where {NC,NR}
-    _evaluate_reactions_gen!(
-        rates,
-        heats,
-        ξ,
-        T,
-        material.reactions,
-        material.depletion_limiter,
-        Val(NR),
-    )
+    _evaluate_reactions_gen!(rates, heats, ξ, T, material.reactions, limiter, Val(NR))
     return nothing
 end
 
@@ -135,7 +165,7 @@ end
     ξ::NTuple{NC,<:Real},
     T::Real,
     reactions::Tuple{Vararg{Any,NR}},
-    limiter::DepletionLimiter,
+    limiter::AbstractDepletionLimiter,
     ::Val{NR},
 ) where {NC,NR}
     exprs = Expr[]

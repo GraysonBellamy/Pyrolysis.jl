@@ -1,0 +1,5 @@
+"qoi","value","exact","error","tol","within_tol","comment"
+"continuum pressure profile",4.168960600189166e-5,NaN,4.168960600189166e-5,0.01,true,""
+"integrated continuum species flux",-0.005968980088724723,-0.005968677350183726,5.07212106193311e-5,0.015,true,""
+"steady signed boundary balance",5.082739784612045e-16,NaN,8.515688629836206e-14,1.0e-7,true,""
+"isothermal invariant",5.684341886080802e-14,NaN,5.684341886080802e-14,1.0e-8,true,""

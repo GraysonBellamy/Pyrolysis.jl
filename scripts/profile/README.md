@@ -3,11 +3,13 @@
 Answers "*where* is the time/allocation going?" — the complement to
 [`benchmark/`](../../benchmark/) (which answers "*did* it get slower?").
 
-Runs the canonical configurations from
-[`test/perf/perf_helpers.jl`](../../test/perf/perf_helpers.jl) under:
+Runs five canonical configurations (a PMMA column on a fixed and a moving
+mesh, with surface absorption, and a permeable charring solid with
+lumped wall and Darcy transport, with Beer–Lambert absorption on a moving mesh) on the
+problem `setup` builds, under:
 
 - **`summary`** — wall clock, bytes allocated, and GC share per residual
-  evaluation, per Jacobian assembly, and per end-to-end solve (plus
+  evaluation, per colored Jacobian, and per end-to-end solve (plus
   integrator stats: `nf`, `njacs`, `naccept`, `nreject`).
 - **`cpu`** — `Profile.@profile` flamegraphs exported as pprof `.pb.gz`
   files, with a flat top-frames teaser printed to the terminal.
@@ -24,15 +26,15 @@ julia --project=scripts/profile -e 'using Pkg; Pkg.instantiate()'
 julia --project=scripts/profile scripts/profile/profile.jl
 ```
 
-Defaults profile the heaviest configuration (`ale_beer_lambert_darcy`) in
+Defaults profile the heaviest configuration (`moving_beer_lambert_darcy`) in
 all modes and targets. Narrow it down with:
 
 ```sh
 # Allocation hunt in the full solve of the PMMA cone case, 20 s horizon
 julia --project=scripts/profile scripts/profile/profile.jl \
-  --config=eulerian_surface_absorption --target=solve --mode=allocs --t-final=20
+  --config=fixed_surface_absorption --target=solve --mode=allocs --t-final=20
 
-# CPU flamegraph of just the structured Jacobian, every config
+# CPU flamegraph of just the colored Jacobian, every config
 julia --project=scripts/profile scripts/profile/profile.jl \
   --config=all --target=jacobian --mode=cpu
 ```
@@ -40,19 +42,7 @@ julia --project=scripts/profile scripts/profile/profile.jl \
 Options: `--config`, `--mode`, `--target` (each accepts `all`),
 `--t-final` (solve horizon, s), `--seconds` (wall-clock budget per hot-op
 profile window), `--alloc-rate` (allocation sample rate for the solve
-target; hot ops always sample at 1.0), `--strategy` (Structured-backend
-strategy: `direct` (default, full assembly — the verification anchor),
-`approx` (the `:ale_reduced` profile that drops the dense ALE couplings —
-the production target for ALE), `structured`, `matrixfree`). Non-default
-strategies are suffixed into the output filenames, e.g.
-`ale_no_radiation__jacobian__approx__cpu.pb.gz`, so direct/approx profiles
-can sit side by side.
-
-```sh
-# Quantify what ApproxSolve buys on the ALE Jacobian
-julia --project=scripts/profile scripts/profile/profile.jl \
-  --config=ale_no_radiation --mode=summary --strategy=approx
-```
+target; hot ops always sample at 1.0).
 
 ## Inspecting profiles
 
@@ -85,13 +75,8 @@ systemd-run --user --scope -p MemoryMax=12G -p MemorySwapMax=2G \
 
 ## Caveats
 
-- The wood/Darcy `solve` cases use a `ρ_intrinsic = 1500` variant of the
-  hot-op fixture: the perf-gate fixture has no skeletal density (φ₀ = 0),
-  which `solve` rejects at validation for permeable materials. The
-  residual/jacobian targets keep the exact gate fixture.
-
 - Residual/Jacobian hot ops are evaluated at the **initial state** — the
-  same convention as the zero-allocation gates in `test/perf/`. Branches
+  same convention as the allocation tests in `test/jacobian/`. Branches
   that only activate mid-burn (e.g. deep char) show up in the `solve`
   target instead.
 - The end-to-end solve includes a short warm-up solve so compilation is

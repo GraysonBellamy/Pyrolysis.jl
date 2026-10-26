@@ -4,26 +4,22 @@
 #
 # The sharpest possible discrete-GCL assert: spatially uniform T*, ξ* with no
 # reactions and zero-flux manufactured BCs, while the mesh is compressed to
-# 70 % of its initial thickness through the `Workspace.w_override` hook with
-# the uniform-stretch velocity
+# 70 % of its initial thickness by the solve's `w_override` hook with the
+# uniform-stretch velocity
 #
 #   w*(z, t) = (ṡ/s)·z,   s(t) = 1 − 0.15·(1 − cos(2πt/20)),   z_bottom pinned
 #
-# (node trajectories z_i(t) = z_i(0)·s(t) exactly). A uniform state must stay
-# uniform to machine precision on the moving mesh: the ALE advection of a
-# constant field must vanish discretely (limiter slope ≡ 0), the dilation
-# correction is zero (θ reaction-driven, no reactions), and the conductive/
-# species fluxes are zero. Any drift is a moving-mesh transport defect that
-# smooth-field order studies (V-MMS-03) can hide inside their truncation
-# error.
+# (node trajectories z_i(t) = z_i(0)·s(t) exactly). The mesh moves over a
+# solid at rest, every inventory crossing the faces at the mesh-relative
+# velocity. A uniform state must stay uniform to machine precision on the
+# moving mesh: the relative flux of a constant field must balance the change
+# of the cell volumes discretely, and the conductive/species fluxes are zero.
+# Any drift is a moving-mesh transport defect that smooth-field order studies
+# (V-MMS-03) can hide inside their truncation error.
 #
 # The node-motion ODE ż_i = w*(z_i,t) is integrated by the same stiff
 # integrator, so the top-cell-center trajectory doubles as an exactness check
 # on the prescribed-motion path (temporal tolerance only).
-#
-# Jacobian: colored/dense FD (`jacobian = :fd`) — the structured geometry
-# Jacobian assumes reaction-driven mesh velocity and does not model the
-# override (documented on `Workspace.w_override`).
 
 function _verification_case_vmms02()
     L = 0.01
@@ -39,14 +35,13 @@ function _verification_case_vmms02()
 
     function make_material()
         solid = SolidComponent(:s, ρ = 800.0, c = 1000.0, k = 0.3, λ = 2.0e-5)
-        gas = GaseousComponent(:g, M = 0.028, c = 1000.0, k = 0.03, λ = 2.0e-5)
+        gas = GaseousComponent(:g, M = 0.028, c = 1000.0, k = 0.03)
         return Material(name = :VMMS02, components = (solid, gas), reactions = ())
     end
 
     function build(n_cells)
         mat = make_material()
-        mesh =
-            create_uniform_mesh(L, n_cells, Val(2); T_initial = T0, ξ_initial = (ξs0, ξg0))
+        mesh = create_uniform_mesh(L, n_cells)
         # Uniform fields ⇒ every manufactured flux is identically zero; the
         # BCs still go through the manufactured-flux callables so the whole
         # path is the one V-MMS-03 uses.
@@ -72,7 +67,7 @@ function _verification_case_vmms02()
         fields;
         use_ale = true,
         w_override = w_star,
-        jacobian = :fd,
+        energy_state = VERIFICATION_ENERGY_STATE,
         kwargs...,
     )
 
@@ -100,7 +95,7 @@ function _verification_case_vmms02()
                     exact = 0.0,
                     error = drift,
                     tol = 1e-12,  # observed 0.0 (solid) / 1.5e-16 (gas) at n=20
-                    comment = "ALE advection + dilation must vanish for a uniform state",
+                    comment = "relative flux + cell-volume change must cancel for a uniform state",
                 ),
             )
         end

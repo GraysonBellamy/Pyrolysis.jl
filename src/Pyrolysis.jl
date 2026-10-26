@@ -2,8 +2,8 @@
 	Pyrolysis.jl
 
 A Julia package for simulating thermal decomposition (pyrolysis) of materials
-under high heat flux using an Arbitrary Lagrangian-Eulerian (ALE) adaptive
-meshing framework.
+under high heat flux with a finite-volume method on a mesh that moves with the
+solid (Arbitrary Lagrangian–Eulerian).
 
 # Main Features
 - Multi-component materials with temperature-dependent properties
@@ -12,7 +12,7 @@ meshing framework.
 - In-depth radiation absorption (Beer-Lambert)
 - Material volume changes (shrinkage, swelling, intumescence)
 - Surface regression and internal interface motion
-- Surface burnout by depleted-cell parking
+- Surface burnout by cell deactivation
 
 # Quick Start
 ```julia
@@ -20,10 +20,11 @@ using Pyrolysis
 
 # Define a simple material
 pmma = Material(
-	name = :PMMA,
+	name = :porous_polymer,
+	gas_transport=LumpedTransfer(endpoint=LumpedEndpoint(λ=1e-6, κ=0., max_skeletal_occupancy=.001)),
 	components = (
-		SolidComponent(:virgin, ρ=1190, c=1420, k=0.21, ε=0.86),
-		GaseousComponent(:MMA, M=0.100, c=1500, k=0.02, λ=1e-5)
+		SolidComponent(:virgin, ρ=1190, φ=.3, c=1420, k=0.21, ε=0.86, λ=1e-6),
+		GaseousComponent(:MMA, M=0.100, c=1500, k=0.02,)
 	),
 	reactions = (
 		Reaction(:decomposition, :virgin => :MMA, A=8.5e12, E=188e3, h=870e3),  # h > 0 = endothermic
@@ -31,9 +32,10 @@ pmma = Material(
 )
 
 # Create mesh and solve
-mesh = create_uniform_mesh(0.01, 100, Val(2))  # 1 cm, 100 cells, 2 components
+mesh = create_uniform_mesh(0.01, 100)  # 1 cm, 100 cells
 bcs = BoundaryConditionSet(
 	thermal = (top = HeatFluxBC(50e3), bottom = AdiabaticBC()),
+	mass = (top = AmbientGasBC(GasReservoir(P=0., T=300.)), bottom = ImpermeableBC()),
 )
 
 problem = PyrolysisProblem(
@@ -44,7 +46,8 @@ problem = PyrolysisProblem(
 	ξ_initial = [z -> 1190.0, z -> 0.0],
 	tspan = (0.0, 100.0),
 )
-solution = solve(problem; progress = false)
+# A mesh that moves with the solid; the cells the surface burns away deactivate
+solution = solve(problem; use_ale = true, deactivation = true)
 ```
 """
 module Pyrolysis
@@ -65,68 +68,74 @@ using OrdinaryDiffEq
 include("Materials/Materials.jl")
 using .Materials
 
-# Boundary-condition types (depends only on Materials)
-include("BoundaryConditions/BoundaryConditions.jl")
-using .BoundaryConditions
-
-# Geometry and mesh infrastructure
-include("Geometry/Geometry.jl")
-using .Geometry
-
-# Material property evaluation
+# Material property evaluation (depends only on Materials)
 include("Properties/Properties.jl")
 using .Properties
 
-# Physical models
+# Constitutive physics and local numerical solves (Materials, Properties).
 include("Physics/Physics.jl")
 using .Physics
 
-# Mesh adaptation (depleted-cell parking; refinement building blocks)
-include("Adaptivity/Adaptivity.jl")
-using .Adaptivity
+# Boundary conditions use the same qualified local solve as gas interfaces.
+include("BoundaryConditions/BoundaryConditions.jl")
+using .BoundaryConditions
 
-# Spatial discretization (finite volume)
-include("Discretization/Discretization.jl")
-using .Discretization
+# The face-based mesh, the state and its mapping, the physics kernels, the
+# mesh closure, the residual, cell deactivation and the colored Jacobian.
+# Reached by module path (`Pyrolysis.Meshes`, …); the user-facing names are
+# exported below.
+include("Meshes/Meshes.jl")
+include("States/States.jl")
+include("Kernels/Kernels.jl")
+include("Closures/Closures.jl")
+include("Assembly/Assembly.jl")
+include("Deactivation/Deactivation.jl")
+include("ColoredJacobian/ColoredJacobian.jl")
 
-# Problem definition and setup (ProblemDef + Workspace + traits).
+# The problem definition and its validation
 include("Problem/Problem.jl")
 using .Problem
 
-# Unified pure residual! (loaded after Problem; traits stay in Problem to avoid
-# an upstream/downstream cycle).
-include("Residual/Residual.jl")
-using .Residual
-
-# Operator-based Jacobian backend and solve strategies.
-include("Jacobian/Jacobian.jl")
-using .Jacobian
-
-# Experimental namespace (research-grade P1 radiation, h-AMR) — load before Solver.
-include("Experimental/Experimental.jl")
-
-# First-class runtime conservation diagnostics (discrete + physical
-# energy residuals; mass and reaction-balance ledgers).
-include("Diagnostics/Diagnostics.jl")
-using .Diagnostics
-
-# Solution algorithms (consume Problem, Jacobian, Experimental, Diagnostics)
-include("Solver/Solver.jl")
-using .Solver
+# The solution and its accessors, and the time integration of a
+# `PyrolysisProblem`
+include("Outputs/Outputs.jl")
+include("Integration/Integration.jl")
 
 # Umbrella namespace re-exporting every submodule's public surface for advanced
 # users (`using Pyrolysis.Internal`). Must load after every other submodule.
 include("Internal.jl")
+
+using .Meshes: create_uniform_mesh, create_stretched_mesh, create_mesh_from_nodes
+using .Meshes: Planar, Cylindrical, Spherical, MeshTopology, MeshGeometry
+using .Closures: NoCorrection, EquidistributionCorrection, ActivationTime
+using .Outputs: PyrolysisSolution, SolverStatistics
+using .Outputs:
+    GasDiagnostics,
+    get_porosity,
+    get_pressure,
+    get_partial_pressures,
+    get_intrinsic_gas_densities,
+    get_gas_composition,
+    get_boundary_exchange,
+    gas_species_audit
+using .Outputs: get_times, get_temperatures, get_concentrations, get_gas_generation_rate
+using .Outputs: n_timesteps, succeeded, completed
+using .Outputs: get_profile, get_cell_positions, interpolate_solution
+using .Outputs: ConservationRecorder, conservation_audit
+using .Integration: solve, setup, integrate, CoreProblem, parameter_sweep
+using .Integration: default_policy, rodas5p_policy, fbdf_policy, kencarp4_policy
+using .Integration: StructuredKLU
 
 # ============================================================================
 # Public API surface.
 # ============================================================================
 #
 # Everything not listed here is reachable as `Pyrolysis.<Submodule>.X` or
-# `Pyrolysis.Experimental.X`.
+# through `Pyrolysis.Internal`.
 
 # Materials
 export Material, SolidComponent, GaseousComponent, LiquidComponent
+export LumpedTransfer, DustyGas, LumpedEndpoint, DustyEndpoint
 export phase, molar_mass, is_gas, is_solid, is_liquid
 export Reaction, DepletionLimiter
 export MixingRule, PARALLEL, SERIES, WEIGHTED, BRUGGEMAN, CARMAN_KOZENY
@@ -144,59 +153,52 @@ export HeatFluxBC,
     CombinedThermalBC,
     DirichletThermalBC,
     AdiabaticBC
-export ImpermeableBC, MassFluxBC, ConvectiveMassBC, DiffusiveMassBC, CombinedMassBC
+export ImpermeableBC, MassFluxBC, GasReservoir, AmbientGasBC, MassTransferFilm
 # Blowing models for ConvectiveBC and the gas data they read
 export AbstractBlowingModel,
     NoBlowing, CouetteFilm, PropertyRatioFilm, PoolingFilm, FunctionBlowing
 export GasSpecies, NITROGEN, nasa7_heat_capacity, eucken_viscosity, fuller_diffusivity
 export BlowingFace, blowing_state, blowing_ratio, blowing_factor
-export DirichletPressureBC, NeumannPressureBC, ConvectivePressureBC
+export NeumannPressureBC, ConvectivePressureBC
 export BoundaryConditionSet
-# Background pore-air initialization for DarcyFick-mode problems
+# Background pore-air initialization for gas-bearing problems
 export background_gas_concentration
 
-# Radiation models (P1_QUASI_STEADY is exported from Pyrolysis.Experimental)
+# Radiation models
 export RadiationModel, NO_RADIATION, SURFACE_ABSORPTION, BEER_LAMBERT
 
-# Geometry
+# The mesh
 export create_uniform_mesh, create_stretched_mesh, create_mesh_from_nodes
-
-# Problem & solve
-export PyrolysisProblem, PyrolysisSolution
-export solve
-export parameter_sweep
-
-# Pure residual + Workspace surface.
-export SimulationMode
-export StateLayout
-export ProblemDef, Workspace
-export initialize_state
-export to_problem_def, build_workspace, build_ad_workspace
-export residual!
-export state_length, pack_state!, update_mesh_from_state!, create_state_vector
-export block_view
-export get_temperature,
-    get_concentration, get_node_position, get_node_positions, get_thickness_from_state
-export column_chi_bar_from_state, cross_section_area_from_state
+export Planar, Cylindrical, Spherical
 export MeshTopology, MeshGeometry
 
-# Jacobian backends and harness. Re-exported at the top level so
-# `using Pyrolysis` exposes them without forcing users to reach into
-# `Pyrolysis.Jacobian`.
-export JacobianBackend, JacobianSpec, compute_jacobian!
-export Structured, LinearSolveStrategy, DirectSolve, ApproxSolve
-export DenseAD_ForwardDiff   # verifier reference only
-export verify_jacobian_at, is_approximate
-export Operator,
-    StructuredJacobian,
-    StructuredCoupling,
-    PrefixSumCoupling,
-    EmbeddedScaledSuffixSumCoupling,
-    EmbeddedRank1Coupling
+# Problem & solve
+export PyrolysisProblem, PyrolysisSolution, SolverStatistics
+export solve, setup, integrate, CoreProblem
+export parameter_sweep
+
+# The mesh correction and the integrator
+export NoCorrection, EquidistributionCorrection, ActivationTime
+export default_policy, rodas5p_policy, fbdf_policy, kencarp4_policy
+export StructuredKLU
+
+# The solution's accessors and the conservation audit
+export GasDiagnostics,
+    get_porosity,
+    get_pressure,
+    get_partial_pressures,
+    get_intrinsic_gas_densities,
+    get_gas_composition,
+    get_boundary_exchange,
+    gas_species_audit
+export get_times, get_temperatures, get_concentrations, get_gas_generation_rate
+export n_timesteps, succeeded, completed
+export get_profile, get_cell_positions, interpolate_solution
+export ConservationRecorder, conservation_audit
 
 # ============================================================================
-# Precompile workload — warms up the canonical Material × SimulationMode
-# combinations so TTFX drops to seconds for standard cases.
+# Precompile workload — solves the canonical configurations so that a
+# session's first solve of such a problem reuses cached native code.
 # ============================================================================
 
 include("precompile.jl")

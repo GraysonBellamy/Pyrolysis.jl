@@ -8,14 +8,10 @@ detection.
 - [`benchmarks.jl`](benchmarks.jl) — entry point. Defines a top-level
   `SUITE::BenchmarkGroup` covering canonical problems (PMMA cone,
   white-pine-style charring, generic charring polymer) × the three hot
-  operations (residual, `Structured(strategy = DirectSolve())` Jacobian,
-  end-to-end solve).
+  operations (residual, colored Jacobian, end-to-end solve) on the problem
+  `setup` builds.
 - [`Project.toml`](Project.toml) — pinned `BenchmarkTools` /
   `PkgBenchmark` versions plus `Pyrolysis` itself.
-
-The suite reuses canonical builders from
-[`../test/perf/perf_helpers.jl`](../test/perf/perf_helpers.jl) so the
-benchmark configurations track the perf-invariant tests.
 
 ## Running
 
@@ -43,11 +39,11 @@ should investigate the offending benchmark in isolation:
 ```julia
 using BenchmarkTools, Pyrolysis
 include("benchmark/benchmarks.jl")
-run(SUITE["wood_ale_beer_lambert_darcy"]["jacobian"])
+run(SUITE["wood_moving_beer_lambert_darcy"]["jacobian"])
 ```
 
 ## CI
 
 Wire `benchmarkpkg` into CI as a non-blocking job (the suite runs in
-~2–5 minutes); the perf-invariant tests under `test/perf/` remain the
-hard correctness gate.
+~2–5 minutes); the allocation and pattern tests under `test/jacobian/` remain
+the hard correctness gate.

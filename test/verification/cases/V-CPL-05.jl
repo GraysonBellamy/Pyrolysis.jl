@@ -36,17 +36,19 @@ end
 
 function _vcpl05_problem(L; n_cells, β = 0.5)
     P = _vcpl05_params(β = β)
-    solid = SolidComponent(:A, ρ = P.ξ0, c = P.c, k = P.k)
-    gas = GaseousComponent(:gas, M = 0.05, c = P.c, k = 0.02, λ = 1e-8)
+    solid = SolidComponent(:A, ρ = P.ξ0, φ = 0.3, c = P.c, k = P.k, λ = 0.0)
+    gas = GaseousComponent(:gas, M = 0.05, c = P.c, k = 0.02)
     rxn = Reaction(:decomp, 1 => 2; A = P.A, E = P.E, h = 0.0)
     mat = Material(
         name = :VCPL05,
+        gas_transport = LumpedTransfer(
+            endpoint = LumpedEndpoint(λ = 0.0, κ = 0.0, max_skeletal_occupancy = 1e-3),
+        ),
         components = (solid, gas),
         reactions = (rxn,),
         depletion_limiter = DepletionLimiter(enabled = false),
     )
-    mesh =
-        create_uniform_mesh(L, n_cells, Val(2); T_initial = P.T0, ξ_initial = (P.ξ0, 0.0))
+    mesh = create_uniform_mesh(L, n_cells)
     ramp = t -> P.T0 + P.β * t
     bc_set = BoundaryConditionSet(
         thermal = (top = DirichletThermalBC(ramp), bottom = DirichletThermalBC(ramp)),
@@ -87,12 +89,7 @@ function _verification_case_vcpl05()
         out = QoIResult[]
         errs = [ladder_error(sol)]
         for L in L_ladder[2:end]
-            s = solve(
-                _vcpl05_problem(L; n_cells = 16);
-                progress = false,
-                abstol = 1e-10,
-                reltol = 1e-8,
-            )
+            s = suite_solve(_vcpl05_problem(L; n_cells = 16); abstol = 1e-10, reltol = 1e-8)
             push!(errs, ladder_error(s))
         end
 
@@ -159,9 +156,8 @@ function _verification_case_vcpl05()
             curves = _ -> begin
                 Ls = [4e-3, 2e-3, 1e-3, 0.5e-3, 0.25e-3]
                 sols = [
-                    solve(
+                    suite_solve(
                         _vcpl05_problem(L; n_cells = 16);
-                        progress = false,
                         abstol = 1e-10,
                         reltol = 1e-8,
                     ) for L in Ls

@@ -1,0 +1,4 @@
+"qoi","value","exact","error","tol","within_tol","comment"
+"steady energy balance: v vs Landau v_ss(measured T_s)",0.001911015986080778,0.0019104080654936651,0.00031821504425855055,0.002,true,"identity must close at E = 50 kJ/mol as at 100 (locus check)"
+"regression consistency: thickness slope vs gas generation",0.001911015986080778,0.0019102511119682144,0.0004004050084156745,0.0017,true,"γ_gas = 0 ⇒ dL/dt = −ṁ‴_gas/ρ exactly"
+"stationary far-field temperature",3.480870418570703e-7,0.0,3.480870418570703e-7,0.0001,true,"cold reaction gate and domain length qualify the steady reference"

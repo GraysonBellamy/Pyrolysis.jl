@@ -1,31 +1,28 @@
 "n_cells","qoi","value","exact","error","tol","within_tol"
 30,"complete burnout: live thickness at t_end is the substrate",0.011996666666666666,0.012,3.333333333334354e-6,1.0e-5,true
-30,"mass loss of the gasified PMMA layer",69.92064000855518,69.9147977671139,0.005842241441285978,0.3,true
-30,"peak MLR",24.92028975384253,24.61,0.012608279310952007,0.25,true
-30,"mass ledger closure",0.0002284193357097292,0.0,0.0002284193357097292,0.001,true
-30,"surface-Newton warnings",0.0,0.0,0.0,0.5,true
-30,"park events",30.0,30.0,0.0,0.5,true
-30,"maximum live-cell temperature",911.3842760191588,NaN,911.3842760191588,1000.0,true
-30,"smallest accepted step",9.999999974752427e-7,1.0e-6,2.5247572921216488e-9,0.001,true
-30,"Newton failures",45.0,0.0,45.0,100.0,true
-30,"accepted steps",1013.0,0.0,1013.0,2000.0,true
+30,"mass loss of the gasified PMMA layer",69.92061224713292,69.9147977671139,0.005814480019026291,0.3,true
+30,"mass ledger closure",3.0733922102691974e-11,0.0,3.0733922102691974e-11,0.0003,true
+30,"clamped surface balances on accepted states",0.0,0.0,0.0,0.5,true
+30,"deactivation events",30.0,30.0,0.0,0.5,true
+30,"maximum live-cell temperature",908.1435403803537,NaN,908.1435403803537,1000.0,true
+30,"smallest accepted step",3.668991622518547e-6,1.0e-8,0.0,0.001,true
+30,"Newton failures",0.0,0.0,0.0,100.0,true
+30,"accepted steps",11273.0,0.0,11273.0,25000.0,true
 60,"complete burnout: live thickness at t_end is the substrate",0.011996666666666666,0.012,3.333333333334354e-6,1.0e-5,true
-60,"mass loss of the gasified PMMA layer",69.9206405952086,69.9147977671139,0.005842828094699826,0.3,true
-60,"peak MLR",24.622561285376204,24.61,0.0005104138714426765,0.25,true
-60,"mass ledger closure",2.2963836669122463e-5,0.0,2.2963836669122463e-5,0.001,true
-60,"surface-Newton warnings",0.0,0.0,0.0,0.5,true
-60,"park events",60.0,60.0,0.0,0.5,true
-60,"maximum live-cell temperature",915.4182496385404,NaN,915.4182496385404,1000.0,true
-60,"smallest accepted step",9.999999974752427e-7,1.0e-6,2.5247572921216488e-9,0.001,true
-60,"Newton failures",56.0,0.0,56.0,100.0,true
-60,"accepted steps",1572.0,0.0,1572.0,2000.0,true
+60,"mass loss of the gasified PMMA layer",69.9206277067817,69.9147977671139,0.005829939667805206,0.3,true
+60,"mass ledger closure",3.579973065785092e-11,0.0,3.579973065785092e-11,0.0003,true
+60,"clamped surface balances on accepted states",0.0,0.0,0.0,0.5,true
+60,"deactivation events",60.0,60.0,0.0,0.5,true
+60,"maximum live-cell temperature",912.6282133476464,NaN,912.6282133476464,1000.0,true
+60,"smallest accepted step",5.023831683992341e-6,1.0e-8,0.0,0.001,true
+60,"Newton failures",0.0,0.0,0.0,100.0,true
+60,"accepted steps",15884.0,0.0,15884.0,25000.0,true
 120,"complete burnout: live thickness at t_end is the substrate",0.011996666666666666,0.012,3.333333333334354e-6,1.0e-5,true
-120,"mass loss of the gasified PMMA layer",69.92064081675686,69.9147977671139,0.005843049642962228,0.3,true
-120,"peak MLR",24.24617820549225,24.61,0.014783494291253555,0.25,true
-120,"mass ledger closure",0.0008932720957632515,0.0,0.0008932720957632515,0.001,true
-120,"surface-Newton warnings",0.0,0.0,0.0,0.5,true
-120,"park events",120.0,120.0,0.0,0.5,true
-120,"maximum live-cell temperature",916.9860002795947,NaN,916.9860002795947,1000.0,true
-120,"smallest accepted step",9.999999974752427e-7,1.0e-6,2.5247572921216488e-9,0.001,true
-120,"Newton failures",102.0,0.0,102.0,100.0,false
-120,"accepted steps",4198.0,0.0,4198.0,2000.0,false
+120,"mass loss of the gasified PMMA layer",69.92063420266847,69.9147977671139,0.005836435554570585,0.3,true
+120,"mass ledger closure",3.594043750013224e-11,0.0,3.594043750013224e-11,0.0003,true
+120,"clamped surface balances on accepted states",0.0,0.0,0.0,0.5,true
+120,"deactivation events",120.0,120.0,0.0,0.5,true
+120,"maximum live-cell temperature",914.505576230797,NaN,914.505576230797,1000.0,true
+120,"smallest accepted step",2.320751390172404e-6,1.0e-8,0.0,0.001,true
+120,"Newton failures",0.0,0.0,0.0,100.0,true
+120,"accepted steps",25690.0,0.0,25690.0,50000.0,true

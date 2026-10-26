@@ -2,7 +2,7 @@
 # V-CPL-01 — Neumann two-phase Stefan problem (latent-heat front)
 # =============================================================================
 #
-# Gpyro's flagship moving-front verification (Lautenberger §3.4.3, Eqs.
+# Gpyro's moving-front verification (Lautenberger dissertation §3.4.3, Eqs.
 # 3.137–3.138; Carslaw & Jaeger §11.2). Liquid initially at T₀ > T_m; wall
 # (top face) dropped to T∞ < T_m at t = 0; a solidification front
 # s(t) = 2λ√(αₛt) propagates inward releasing ΔH_m. Exact solution and
@@ -266,17 +266,9 @@ function _verification_case_vcpl01()
         # dies at t = 0). No convergence fit runs on this case, so the mixed
         # mesh family is harmless.
         mesh = if n_cells >= 600
-            create_uniform_mesh(L, n_cells, Val(1); T_initial = p.T0, ξ_initial = (p.ρ,))
+            create_uniform_mesh(L, n_cells)
         else
-            create_stretched_mesh(
-                L,
-                n_cells,
-                Val(1),
-                1.03;
-                T_initial = p.T0,
-                ξ_initial = (p.ρ,),
-                stretch_from = :top,
-            )
+            create_stretched_mesh(L, n_cells, 1.03; stretch_from = :top)
         end
         bc_set = BoundaryConditionSet(
             thermal = (top = DirichletThermalBC(p.T∞), bottom = AdiabaticBC()),
@@ -367,17 +359,9 @@ function _verification_case_vcpl01b()
         )
         # Same matched-resolution rule as route A (uniform grid for n ≥ 600).
         mesh = if n_cells >= 600
-            create_uniform_mesh(L, n_cells, Val(2); T_initial = p.T0, ξ_initial = (p.ρ, 0.0))
+            create_uniform_mesh(L, n_cells)
         else
-            create_stretched_mesh(
-                L,
-                n_cells,
-                Val(2),
-                1.03;
-                T_initial = p.T0,
-                ξ_initial = (p.ρ, 0.0),
-                stretch_from = :top,
-            )
+            create_stretched_mesh(L, n_cells, 1.03; stretch_from = :top)
         end
         bc_set = BoundaryConditionSet(
             thermal = (top = DirichletThermalBC(p.T∞), bottom = AdiabaticBC()),

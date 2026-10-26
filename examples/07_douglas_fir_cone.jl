@@ -8,9 +8,10 @@ to track the material as it decomposes:
 - ALE mesh motion for accurate shrinkage modeling
 - Surface absorption radiation model for efficient opaque material simulation
 - Multi-step pyrolysis kinetics with char formation
-- Structured Jacobian (`ApproxSolve`, the ALE default) for fast assembly
-- Bruggeman mixing rules for effective properties
-- Species-specific transport (light gases diffuse faster)
+- Sparse Jacobian by colored forward-mode differentiation, with the default
+  integrator (Rodas5P with a sparse KLU solve)
+- Blended parallel/series mixing rules for effective properties
+- Component gas-transfer coefficients mixed into one shared face coefficient
 
 Reference: Standard cone calorimeter test per ISO 5660-1
 
@@ -21,21 +22,19 @@ Physical Setup:
 - Surface regresses as material decomposes and gas escapes
 
 Surface Absorption Radiation Model:
-- All incident radiation deposited in the surface cell (z=L)
-- Computationally efficient O(1) with tridiagonal Jacobian
+- The absorbed portion of incident radiation is deposited at the exposed face (z=L)
 - Appropriate for opaque materials like wood (optical thickness τ >> 1)
 - Absorption coefficients (α) not used - radiation does not penetrate into depth
-- Provides ~5-15× speedup over Beer-Lambert for opaque materials
 
 Coordinate Convention:
-- z = 0: Bottom (substrate/sample holder), boundary_id = 2, fixed
-- z = L(t): Top (exposed surface), boundary_id = 1, moves with material
+- z = 0: Bottom (substrate/sample holder), tag :bottom, fixed
+- z = L(t): Top (exposed surface), tag :top, moves with material
 - Heat enters from top, material shrinks toward bottom
 - Mesh follows the shrinking material (ALE formulation)
 
 Douglas Fir Properties (from DF.cmp):
 - Virgin wood density: 530 kg/m³
-- Multi-step decomposition with 5 intermediate states
+- Five decomposition steps through four intermediate solids to char
 - Final char density: 150 kg/m³
 - Includes moisture content with evaporation
 - Products: char + various gases + water vapor
@@ -43,20 +42,15 @@ Douglas Fir Properties (from DF.cmp):
 New Features Demonstrated:
 - Surface absorption radiation model (radiation_model=SURFACE_ABSORPTION)
 - Physically-based gas transfer coefficients (λ ~ 1e-5 to 1e-4 m²/s)
-- Darcy-Fick gas transport (diffusion + pressure-driven flow)
-- Temperature-dependent permeability evolution (virgin wood → porous char)
+- lumped wall and Darcy gas transport (diffusion + pressure-driven flow)
+- Composition-dependent permeability evolution (virgin wood → porous char)
 - Species molar masses in the ideal-gas pore pressure (Darcy)
-- ALE mesh motion with analytical Jacobian for performance
+- ALE mesh motion
 """
 
 using Pyrolysis
 using Plots
-using LinearSolve
-using Sparspak
-using OrdinaryDiffEq
-using OrdinaryDiffEqSDIRK: KenCarp4   # v7 split: KenCarp4 not re-exported by the umbrella pkg
 using Statistics
-using LinearSolve: SparspakFactorization
 
 # ============================================================================
 # Material Definition: Douglas Fir
@@ -175,36 +169,16 @@ heat_of_sorption = StateDependentProperty(
 # Gas Transfer Coefficients and Permeability (Physically Realistic)
 # ============================================================================
 # 
-# Gas transport uses the volume-fraction-gradient (partial pressure) formulation:
-#   J = -(λ/T) × ∂(ξT)/∂x = -λ × [∂ξ/∂x + (ξ/T)∂T/∂x]
-#
-# Each component has a λ [m²/s] value representing its intrinsic gas diffusivity.
-# The effective mixture λ is computed via WEIGHTED mixing (β=0.5, parallel/series).
-#
-# For SOLID components, λ represents gas diffusion through that phase's pore structure:
-#   λ_solid ≈ D_free × (ε/τ)
-#   where D_free is free molecular diffusion (~3e-5 m²/s at 500K for typical gas),
-#   ε is the porosity, and τ is the tortuosity.
-#
-# For GAS components, λ represents free molecular diffusion of that species:
-#   λ_gas ≈ D_free(T, M) from Chapman-Enskog theory
-#   D_free scales as T^1.5 / √M. At 500K, air-like gas: ~3e-5 m²/s
-#   Lighter molecules (H₂O) diffuse ~1.5-2× faster than heavier ones (tars).
-#
-# For LIQUID (moisture): λ represents moisture migration rate through the wood
-#   structure (capillary + vapor pressure driven). Much faster than gas diffusion.
-
-# Solid phase gas transfer coefficients (D_free × ε/τ estimates)
-# D_free at ~500-600K for typical pyrolysis gas ≈ 3-5e-5 m²/s
-λ_wood = 5.0e-7     # m²/s - virgin wood (ε~0.05, τ~5 → ε/τ~0.01)
-λ_char = 1.0e-5     # m²/s - porous char (ε~0.7, τ~2 → ε/τ~0.35)
-
-# Gas phase free molecular diffusion (at representative ~500K)
-# Reference: D(M=29 gas in air, 500K) ≈ 3e-5 m²/s (Chapman-Enskog)
-λ_gas = 3.0e-5      # m²/s - reference for M~30 gas at ~500K
+# Superficial wall transfer is J_j = -M_j Λ/(R T) ∂p_j/∂z.
+# Only condensed γ-weighted bulk occupancy enters the effective Λ. These
+# coefficients specify the pore matrix; gas components have caloric properties
+# and molar masses but no transfer coefficient. Moisture with γ=0 occupies
+# skeletal volume and contributes no matrix transport weight.
+λ_wood = 5.0e-7     # m²/s - superficial transfer through virgin wood
+λ_char = 1.0e-5     # m²/s - superficial transfer through char
 
 # Permeability for Darcy flow (pressure-driven bulk transport through solid matrix)
-# κ determines resistance to pressure-driven gas flow, separate from Fickian diffusion.
+# κ determines resistance to pressure-driven gas flow, separate from lumped wall diffusion.
 # Virgin softwood (transverse): κ ~ 1e-16 to 1e-14 m²
 # Char (open pore network): κ ~ 1e-12 to 1e-11 m²
 κ_virgin = 1.0e-15  # m² - tight virgin wood cellular structure
@@ -317,11 +291,11 @@ douglas_fir = Material(
             ρ_intrinsic = 1950.0,
         ),
         # 7. Moisture (liquid water bound in wood structure)
-        # ThermaKin uses ρ=1e6 kg/m³ as a "pseudo-density" to give moisture
-        # negligible volume fraction. This matches L SWELLING: 0 behavior where
-        # bound liquid doesn't contribute to the material's bulk volume.
+        # The imported ρ=1e6 kg/m³ pseudo-density makes the liquid volume
+        # small in ThermaKin. Its L SWELLING: 0 does not remove liquid volume.
+        # Here the default liquid γ=0 gives zero bulk-volume contribution.
         # Physical interpretation: moisture is absorbed into wood cell walls,
-        # not occupying separate volume.
+        # with zero γ-weighted matrix occupancy; its skeletal volume is still counted.
         LiquidComponent(
             :MOISTURE,
             ρ = 1e6,                       # kg/m³ - pseudo-density (matches ThermaKin)
@@ -333,15 +307,12 @@ douglas_fir = Material(
         ),
         # 8. DF_gas1 - gaseous product from reaction 1 (5% yield, low-T onset)
         # Early hemicellulose decomposition: acetic acid (60), furfural (96), formic acid (46)
-        # Gas component λ values: free molecular diffusion scaled by √(M_ref/M)
-        # D_free ∝ 1/√M (kinetic theory). Reference: λ_gas at M_ref=0.029 (air).
-        # At 500K: D(M=18)≈5.4e-5, D(M=60)≈2.6e-5, D(M=110)≈1.7e-5 m²/s
         GaseousComponent(
             :DF_gas1,
             M = 0.060,                     # kg/mol - acetic acid-like (CH₃COOH = 60 g/mol)
             c = 1400.0,                    # J/(kg·K) - organic acids/aldehydes
             k = 0.020,                     # W/(m·K) - organic vapors
-            λ = λ_gas * sqrt(0.029/0.060), # m²/s - ~2.1e-5 (moderate molecule)
+            # m²/s - ~2.1e-5 (moderate molecule)
         ),
         # 9. DF_gas2 - gaseous product from reaction 2 (20% yield)
         # Continued hemicellulose / early cellulose: mix of organic fragments, some CO₂
@@ -350,7 +321,7 @@ douglas_fir = Material(
             M = 0.070,                     # kg/mol - mix of organics heavier than pure CO₂
             c = 1400.0,                    # J/(kg·K) - organic fragments
             k = 0.020,                     # W/(m·K)
-            λ = λ_gas * sqrt(0.029/0.070), # m²/s - ~1.9e-5 (heavier organics)
+            # m²/s - ~1.9e-5 (heavier organics)
         ),
         # 10. DF_gas3 - gaseous product from reaction 3 (63% yield — dominant gas-producing step)
         # Main cellulose pyrolysis: levoglucosan (162), anhydrosugars, heavy tars
@@ -359,7 +330,7 @@ douglas_fir = Material(
             M = 0.110,                     # kg/mol - dominated by levoglucosan/anhydrosugars
             c = 1300.0,                    # J/(kg·K) - heavy organics, lower mass-specific cp
             k = 0.018,                     # W/(m·K) - heavy organic vapors
-            λ = λ_gas * sqrt(0.029/0.110), # m²/s - ~1.5e-5 (heavy tars, slowest)
+            # m²/s - ~1.5e-5 (heavy tars, slowest)
         ),
         # 11. DF_gas4 - gaseous product from reaction 4 (21% yield)
         # Secondary decomposition: lighter organics, phenol fragments from lignin
@@ -368,7 +339,7 @@ douglas_fir = Material(
             M = 0.070,                     # kg/mol - phenolics (94), guaiacol (124), lighter organics
             c = 1500.0,                    # J/(kg·K) - medium organics
             k = 0.020,                     # W/(m·K)
-            λ = λ_gas * sqrt(0.029/0.070), # m²/s - ~1.9e-5
+            # m²/s - ~1.9e-5
         ),
         # 12. DF_gas5 - gaseous product from reaction 5 (26% yield, final charring)
         # Last volatiles released during charring: CH₄, light hydrocarbons, residual phenolics
@@ -377,7 +348,7 @@ douglas_fir = Material(
             M = 0.050,                     # kg/mol - mix of CH₄ (16), phenol fragments, light organics
             c = 1600.0,                    # J/(kg·K) - lighter molecules, higher mass-specific cp
             k = 0.025,                     # W/(m·K)
-            λ = λ_gas * sqrt(0.029/0.050), # m²/s - ~2.3e-5 (lighter mix)
+            # m²/s - ~2.3e-5 (lighter mix)
         ),
         # 13. Water vapor - gaseous product from moisture evaporation (lightest, fastest)
         GaseousComponent(
@@ -385,7 +356,7 @@ douglas_fir = Material(
             M = 0.018,                     # kg/mol - H₂O (18 g/mol, lightest species)
             c = water_vapor_cp,            # J/(kg·K) - NIST polynomial fit
             k = 0.025,                     # W/(m·K) - H₂O vapor at ~400K
-            λ = λ_gas * sqrt(0.029/0.018), # m²/s - ~3.8e-5 (lightest molecule, fastest)
+            # m²/s - ~3.8e-5 (lightest molecule, fastest)
         ),
         # 14. Background pore air, initialized at ~1 atm partial pressure:
         # without it the pore space starts as a vacuum against the 101325 Pa
@@ -396,7 +367,7 @@ douglas_fir = Material(
             M = 0.02897,                   # kg/mol - air
             c = 1006.0,                    # J/(kg·K) - air near 300-500 K
             k = 0.026,                     # W/(m·K) - air at ~300 K
-            λ = λ_gas,                     # m²/s - reference M~29 diffusivity
+            # m²/s - reference M~29 diffusivity
         ),
     ),
     reactions = (
@@ -462,7 +433,7 @@ douglas_fir = Material(
             n = 1.0,
         ),
     ),
-    # Mixing rules for effective properties (matches ThermaKin2Ds default behavior)
+    # Example mixing choices; TK has similar blends but different volume weights
     mixing = MaterialMixing(
         k = MixingSpec(WEIGHTED, 0.5),  # 50/50 parallel/series
         λ = MixingSpec(WEIGHTED, 0.5),  # weighted average for gas transfer
@@ -476,10 +447,11 @@ douglas_fir = Material(
 
 # Sample geometry
 sample_thickness = 12.0e-3   # 12 mm typical wood sample
-n_cells = 240             # 240 cells → 0.05 mm resolution
+n_cells = get(ENV, "PYROLYSIS_SMOKE", "0") == "1" ? 24 : 240  # Full run: 0.05 mm
 
-# Time parameters  
-t_final = 600.0             # 10 minutes - typical cone test duration for wood
+# Time parameters
+const SMOKE = get(ENV, "PYROLYSIS_SMOKE", "0") == "1"   # PYROLYSIS_SMOKE=1: a short run that checks the script works
+t_final = SMOKE ? 20.0 : 600.0  # 10 minutes - typical cone test duration for wood
 dt_initial = 1e-3           # initial timestep
 
 # Environmental conditions
@@ -501,7 +473,7 @@ h_conv = 10.0                # W/(m²·K)
 
 # Initial concentrations:
 # - DF at full density (530 kg/m³)
-# - Moisture content 15% on dry basis: 530 * 0.15 ≈ 79.5 kg/m³
+# - Moisture content 6% on dry basis: 530 * 0.06 = 31.8 kg/m³
 # - Background pore air at ~1 atm partial pressure
 # - All others initially zero
 moisture_content_db = 0.06  # 6% moisture content on dry basis
@@ -530,27 +502,11 @@ moisture_content_db = 0.06  # 6% moisture content on dry basis
 ξ_air_initial =
     background_gas_concentration(douglas_fir, :AIR, ξ_condensed_initial, T_ambient)
 
+# The initial temperature and concentrations (DF + moisture + pore air, rest
+# zero) come from the problem's T_initial and ξ_initial below.
 mesh = create_uniform_mesh(
     sample_thickness,      # domain length [m]
     n_cells,               # number of cells
-    Val(14);               # number of components (NC)
-    T_initial = T_ambient, # initial temperature
-    ξ_initial = (
-        ρ_DF_initial,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        ρ_moisture_initial,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        ξ_air_initial,
-    ),  # DF + moisture + pore air, rest zero
 )
 
 println("Mesh created:")
@@ -580,7 +536,7 @@ println(
 # Boundary Conditions
 # ============================================================================
 
-# Top surface (boundary_id = 1): exposed surface
+# Top surface (:top): exposed surface
 # - External radiant heat flux with Beer-Lambert in-depth absorption
 # - Re-radiation losses (surface radiates to surroundings)
 # - Convective losses (natural + forced convection)
@@ -595,14 +551,15 @@ top_thermal_bc =
     ConvectiveBC(h = h_conv, T_inf = 300)                     # Convective losses
 
 # Top surface mass BC: diffusive gas escape with Darcy flow to atmosphere
-# For cone calorimeter with continuous exhaust in nitrogen:
-# - DiffusiveMassBC(h_m): External mass transfer coefficient [m/s] (matches ThermaKin "a" parameter)
-# - DirichletPressureBC: Surface at atmospheric pressure (exhaust maintains ~1 atm)
-# This combines Fickian diffusion (driven by λ) with Darcy flow (driven by pressure)
-# h_m = 0.05 m/s matches ThermaKin boundary condition: "DF_gas1 LIN 0.05 0"
-top_mass_bc = DiffusiveMassBC(0.05) + DirichletPressureBC(101325.0)
+# The air reservoir supplies ingress composition and temperature. The common
+# film uses g=ρ_air h_m with the declared h_m=0.05 m/s. Interior wall and
+# Darcy transport share the species-flux continuity closure.
+top_mass_bc = AmbientGasBC(
+    GasReservoir(P = 101325.0, T = 300.0, mole_fractions = (AIR = 1.0,));
+    film = MassTransferFilm(0.05*101325.0*0.02897/(8.31446261815324*300.0)),
+)
 
-# Bottom surface (boundary_id = 2): back face
+# Bottom surface (:bottom): back face
 # bottom_thermal_bc = RadiativeBC(T_inf = 300) +                                # Re-radiation losses (uses material ε)
 # 					ConvectiveBC(h = h_conv, T_inf = 300)                     # Convective losses
 bottom_thermal_bc = AdiabaticBC()    # Adiabatic (no heat loss through substrate)
@@ -618,7 +575,7 @@ println("\nBoundary conditions:")
 println(
     "  - Top surface: RadiativeFluxBC ($(q_external/1000) kW/m²) + re-radiation + convection",
 )
-println("  - Top mass: DiffusiveMassBC + DirichletPressureBC (101325 Pa)")
+println("  - Top mass: Air reservoir at 101325 Pa with a species film")
 println("  - Bottom surface: Adiabatic, impermeable")
 
 # ============================================================================
@@ -656,7 +613,7 @@ problem = PyrolysisProblem(
     ξ_initial = ξ_initial_funcs,
     tspan = (0.0, t_final),
     dt_initial = dt_initial,
-    output_times = collect(range(0.0, t_final, length = 3601)),  # Output every 1s
+    output_times = collect(range(0.0, t_final, length = SMOKE ? 21 : 3601)),  # Output every 1s
 )
 
 println("Problem created successfully!")
@@ -680,17 +637,17 @@ println("  - Darcy flow: ENABLED (κ_virgin = $(κ_virgin) m², κ_char = $(κ_c
 # ============================================================================
 
 println(
-    "\nSolving with ALE mesh motion, Darcy-Fick transport, surface absorption, and analytical Jacobian...",
+    "\nSolving with ALE mesh motion, lumped wall and Darcy transport and surface absorption...",
 )
-println("Surface absorption model deposits all radiation in the surface cell.")
-println("Darcy-Fick combines diffusion (λ-driven) + pressure-driven flow (κ-driven).")
+println("Surface absorption model absorbs all radiation at the exposed face.")
+println(
+    "lumped wall and Darcy combines diffusion (λ-driven) + pressure-driven flow (κ-driven).",
+)
 println("This may take several minutes for wood pyrolysis...\n")
 
-# Solve using implicit solver with ALE enabled and surface absorption radiation
-# The reduced Jacobian omits the dense ALE mesh velocity coupling, reducing the
-# Jacobian from 588K to 141K non-zeros and restoring O(N) factorization scaling.
-# Combined with the analytical Jacobian, this gives ~400× speedup over dense FD.
-# The solution is identical to the full Jacobian within solver tolerance.
+# Solve using implicit solver with ALE enabled and surface absorption radiation.
+# The default integrator (Rodas5P with a sparse KLU solve) takes the Jacobian
+# from colored forward-mode differentiation over the mesh sparsity pattern.
 solution = solve(
     problem;
     abstol = 1e-9,
@@ -700,11 +657,6 @@ solution = solve(
     use_ale = true,                        # Enable ALE mesh motion
     radiation_model = SURFACE_ABSORPTION,  # All radiation absorbed at surface (opaque material)
     min_thickness = 0.5e-3,                # Stop when sample is < 0.5 mm
-    handle_depletion = false,              # Disable surface cell depletion (uses ALE instead)
-    # The ALE default Jacobian is Structured(strategy = ApproxSolve()), which
-    # drops the dense ALE mesh-velocity coupling. Pass
-    # `jacobian = Structured(strategy = DirectSolve())` for the exact one.
-    integrator = KenCarp4(linsolve = SparspakFactorization()),
 )
 
 println("Solve() returned at $(time())!")
@@ -815,13 +767,17 @@ for i = 1:n_times
     T_profile = solution.T[:, i]
     n_cells_i = size(ξ_profile, 2)
 
-    # Get volumes at this time (from thickness history for ALE)
-    current_thickness = thickness_values[i]
-    # Assume uniform cells for simplicity (good approximation for this case)
-    cell_vol = current_thickness / n_cells_i * 1.0  # cross-section area = 1 m²
+    # Integrate over the actual moving cells, per unit initial exposed area.
+    nodes = get_profile(solution, :z, i)
+    area_ratio =
+        solution.extras.cross_section_area_history[i] /
+        solution.extras.cross_section_area_history[1]
+    cell_depths = diff(nodes) .* area_ratio
 
     # === Gas Generation Rates (Volumetric) ===
     for j = 1:n_cells_i
+        isfinite(T_profile[j]) || continue
+        cell_vol = cell_depths[j]
         T = T_profile[j]
         ξ = ntuple(k -> ξ_profile[k, j], NC)
 
@@ -830,19 +786,19 @@ for i = 1:n_times
 
         # Accumulate gas production from each reaction
         # Reaction 1: DF → 0.95 DF_int1 + 0.05 DF_gas1
-        mlr_gen_gas1[i] += douglas_fir.reactions[1].stoich[4] * rates[1] * cell_vol
+        mlr_gen_gas1[i] += douglas_fir.reactions[1].products[2][2] * rates[1] * cell_vol
 
         # Reaction 2: DF_int1 → 0.80 DF_int2 + 0.20 DF_gas2
-        mlr_gen_gas2[i] += douglas_fir.reactions[2].stoich[4] * rates[2] * cell_vol
+        mlr_gen_gas2[i] += douglas_fir.reactions[2].products[2][2] * rates[2] * cell_vol
 
         # Reaction 3: DF_int2 → 0.37 DF_int3 + 0.63 DF_gas3
-        mlr_gen_gas3[i] += douglas_fir.reactions[3].stoich[4] * rates[3] * cell_vol
+        mlr_gen_gas3[i] += douglas_fir.reactions[3].products[2][2] * rates[3] * cell_vol
 
         # Reaction 4: DF_int3 → 0.79 DF_int4 + 0.21 DF_gas4
-        mlr_gen_gas4[i] += douglas_fir.reactions[4].stoich[4] * rates[4] * cell_vol
+        mlr_gen_gas4[i] += douglas_fir.reactions[4].products[2][2] * rates[4] * cell_vol
 
         # Reaction 5: DF_int4 → 0.74 Char + 0.26 DF_gas5
-        mlr_gen_gas5[i] += douglas_fir.reactions[5].stoich[4] * rates[5] * cell_vol
+        mlr_gen_gas5[i] += douglas_fir.reactions[5].products[2][2] * rates[5] * cell_vol
 
         # Reaction 6: MOISTURE → WATER_VAPOR (single product reaction)
         mlr_gen_water[i] += 1.0 * rates[6] * cell_vol  # yield = 1.0 for single product
@@ -1192,7 +1148,7 @@ for i = 1:n_times
         mass_balance_error[i] = (sum_all_components[i] - bulk_density[i]) / bulk_density[i]
 
         # === Front Surface Diagnostics ===
-        # Front surface is the last cell (z = L, boundary_id = 1)
+        # Front surface is the last cell (z = L, tag :top)
         T_front = T_profile[end]
         ξ_front = ntuple(k -> ξ_profile[k, end], 14)
 
@@ -1572,16 +1528,14 @@ open(spatial_csv, "w") do io
         ξ_profile = solution.ξ[:, :, idx]
         n_cells_i = length(T_profile)
 
-        # Get current thickness
-        t_idx = argmin(abs.(thickness_times .- actual_t))
-        current_thickness = thickness_values[t_idx]
-
-        # Cell positions (from back, z=0 at back)
-        dz = current_thickness / n_cells_i
+        nodes = get_profile(solution, :z, idx)
+        centers = get_cell_positions(solution; at = idx)
+        live_front = maximum(filter(isfinite, nodes))
 
         for cell_idx = 1:n_cells_i
-            from_back = (cell_idx - 0.5) * dz  # Cell center position
-            from_front = current_thickness - from_back
+            isfinite(T_profile[cell_idx]) || continue
+            from_back = centers[cell_idx] - nodes[1]
+            from_front = live_front - centers[cell_idx]
 
             T_cell = T_profile[cell_idx]
             ξ_cell = [ξ_profile[k, cell_idx] for k = 1:14]
@@ -1628,28 +1582,26 @@ println("Spatial data saved to: $(spatial_csv)")
 # energy balance:
 #     q_applied(T_s) = q_conducted(T_s, T_cell)
 #
-# This is stored in mesh.boundary_states and used for:
+# The solution holds it at every saved time (`solution.surface_T`,
+# `solution.boundary_T`), together with the face heat fluxes it balances
+# (`solution.extras.surface_heat_flux_*`):
 # - Correct boundary flux computation
 # - Accurate surface temperature reporting
 # - Energy balance verification
-
-using Pyrolysis.Discretization:
-    get_surface_temperature, get_back_face_temperature, check_boundary_energy_balance
 
 println("\n" * "="^70)
 println("Boundary Temperature Analysis")
 println("="^70)
 
-# Get final boundary state information. `solve` integrates its own copy of the
-# mesh; `solution.problem.mesh` holds the final state.
-final_mesh = solution.problem.mesh
-T_surface_final = get_surface_temperature(final_mesh)
-T_back_final = get_back_face_temperature(final_mesh)
+# Final boundary temperatures (solved face temperatures)
+T_surface_final = solution.surface_T[end]
+T_back_final = solution.boundary_T[:bottom][end]
 
-# Get cell-center temperatures for comparison
-n_cells_final = length(final_mesh.cell_states)
-T_cell_top = final_mesh.cell_states[n_cells_final].T
-T_cell_bottom = final_mesh.cell_states[1].T
+# Cell-center temperatures of the outermost and innermost live cells
+T_cells_final = solution.T[:, end]
+live_final = findall(isfinite, T_cells_final)
+T_cell_top = T_cells_final[last(live_final)]
+T_cell_bottom = T_cells_final[first(live_final)]
 
 # Compute temperature jumps at boundaries
 ΔT_surface = T_surface_final - T_cell_top
@@ -1666,34 +1618,30 @@ println("  T_back (solved)     = $(round(T_back_final, digits=2)) K")
 println("  T_cell (bottom)     = $(round(T_cell_bottom, digits=2)) K")
 println("  ΔT = T_back - T_cell = $(round(ΔT_back, digits=2)) K")
 
-# Check energy balance at boundaries
-balance_results = check_boundary_energy_balance(final_mesh)
-println("\nEnergy balance at boundaries (should be < 1e-6):")
-for (boundary_id, imbalance) in balance_results
-    boundary_name = boundary_id == 1 ? "Top surface" : "Back surface"
-    status = imbalance < 1e-6 ? "✓" : "✗"
-    println(
-        "  $(boundary_name): relative imbalance = $(round(imbalance, sigdigits=3)) $status",
-    )
-end
+# Check energy balance at the surface: the applied flux against the flux
+# conducted into the surface cell
+q_applied_final = solution.extras.surface_heat_flux_net[end]
+q_conducted_final = solution.extras.surface_heat_flux_conduction[end]
+imbalance = abs(q_applied_final - q_conducted_final) / max(abs(q_applied_final), 1e-12)
+println("\nEnergy balance at the top surface (should be < 1e-6):")
+status = imbalance < 1e-6 ? "✓" : "✗"
+println("  Top surface: relative imbalance = $(round(imbalance, sigdigits=3)) $status")
 
 # Show boundary state details
 println("\nBoundary state details:")
-top_state = final_mesh.boundary_states[1]
 println("  Top surface:")
-println("    q_applied   = $(round(top_state.q_applied/1000, digits=2)) kW/m²")
-println("    q_conducted = $(round(top_state.q_conducted/1000, digits=2)) kW/m²")
-println("    converged   = $(top_state.converged) ($(top_state.iterations) iterations)")
+println("    q_applied   = $(round(q_applied_final/1000, digits=2)) kW/m²")
+println("    q_conducted = $(round(q_conducted_final/1000, digits=2)) kW/m²")
 
 println("\nSimulation complete!")
 println("\nFeatures used in this example:")
-println("  ✓ WEIGHTED mixing rule for thermal conductivity (β=0.5, matches ThermaKin)")
+println("  ✓ WEIGHTED conductivity mixing (β=0.5; volume weights differ from ThermaKin)")
 println("  ✓ WEIGHTED mixing rule for gas transfer coefficient (β_λ=0.5)")
 println("  ✓ Physically-based gas transfer coefficients (λ ~ 1e-5 to 1e-4 m²/s)")
-println("  ✓ Darcy-Fick gas transport (diffusion + pressure-driven flow)")
+println("  ✓ lumped wall and Darcy gas transport (diffusion + pressure-driven flow)")
 println(
     "  ✓ Temperature-dependent permeability (virgin: $(κ_virgin) m², char: $(κ_char) m²)",
 )
 println("  ✓ Species molar masses in the ideal-gas pore pressure (Darcy)")
-println("  ✓ ALE mesh motion with analytical Jacobian")
+println("  ✓ ALE mesh motion")
 println("  ✓ Solver-computed boundary fluxes (MLR, heat flux decomposition)")

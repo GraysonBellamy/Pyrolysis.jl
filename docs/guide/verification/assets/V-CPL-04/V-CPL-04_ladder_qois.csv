@@ -1,25 +1,25 @@
 "n_cells","qoi","value","exact","error","tol","within_tol"
-20,"steady center temperature vs full-Arrhenius shooting",503.4611162155924,503.45017703879313,0.00317061318196123,0.0025,false
-20,"steady center rise vs FK closed form (limit check)",0.2768892972473941,0.2772420232456262,0.0012722674365985421,0.006,true
-20,"steady profile L∞ vs shooting (relative to center rise)",0.003162319537456522,NaN,0.003162319537456522,0.0025,false
-20,"steady-state reached (last-output drift)",0.0003920541702200353,0.0,0.0003920541702200353,0.001,true
-20,"near-critical δ = 0.80 δ_c stays on the stable branch",0.552043877603628,0.5575368522716622,0.009852218101194927,0.03,true
-20,"supercritical δ = 1.50 δ_c ignites (thermal runaway)",104.17949351551192,NaN,0.0,0.5,true
-40,"steady center temperature vs full-Arrhenius shooting",503.4595188696827,503.4569632815113,0.0007392581185509855,0.0025,true
-40,"steady center rise vs FK closed form (limit check)",0.27676150957461687,0.2772420232456262,0.0017331920514214471,0.006,true
-40,"steady profile L∞ vs shooting (relative to center rise)",0.0007387746402085839,NaN,0.0007387746402085839,0.0025,true
-40,"steady-state reached (last-output drift)",0.00038543246250810625,0.0,0.00038543246250810625,0.001,true
-40,"near-critical δ = 0.80 δ_c stays on the stable branch",0.552043877603628,0.5575368522716622,0.009852218101194927,0.03,true
-40,"supercritical δ = 1.50 δ_c ignites (thermal runaway)",104.17949351551192,NaN,0.0,0.5,true
-80,"steady center temperature vs full-Arrhenius shooting",503.4591199186568,503.4586600314618,0.00013296686890968733,0.0025,true
-80,"steady center rise vs FK closed form (limit check)",0.276729593492546,0.2772420232456262,0.0018483119805621834,0.006,true
-80,"steady profile L∞ vs shooting (relative to center rise)",0.00013294512818265425,NaN,0.00013294512818265425,0.0025,true
-80,"steady-state reached (last-output drift)",0.0003835931444200469,0.0,0.0003835931444200469,0.001,true
-80,"near-critical δ = 0.80 δ_c stays on the stable branch",0.552043877603628,0.5575368522716622,0.009852218101194927,0.03,true
-80,"supercritical δ = 1.50 δ_c ignites (thermal runaway)",104.17949351551192,NaN,0.0,0.5,true
-160,"steady center temperature vs full-Arrhenius shooting",503.4590204730238,503.45908423078095,1.8431975882794777e-5,0.0025,true
-160,"steady center rise vs FK closed form (limit check)",0.2767216378419062,0.2772420232456262,0.0018770076687074661,0.006,true
-160,"steady profile L∞ vs shooting (relative to center rise)",3.0593206562527306e-5,NaN,3.0593206562527306e-5,0.0025,true
-160,"steady-state reached (last-output drift)",0.0003825766616500914,0.0,0.0003825766616500914,0.001,true
-160,"near-critical δ = 0.80 δ_c stays on the stable branch",0.552043877603628,0.5575368522716622,0.009852218101194927,0.03,true
-160,"supercritical δ = 1.50 δ_c ignites (thermal runaway)",104.17949351551192,NaN,0.0,0.5,true
+20,"steady center temperature vs full-Arrhenius shooting",503.4611162327018,503.45017703879313,0.003170618140940811,0.0025,false
+20,"steady center rise vs FK closed form (limit check)",0.2768892986161427,0.2772420232456262,0.0012722624995814248,0.006,true
+20,"steady profile L∞ vs shooting (relative to center rise)",0.00316232448349734,NaN,0.00316232448349734,0.0025,false
+20,"steady-state reached (last-output drift)",0.0003922910255482748,0.0,0.0003922910255482748,0.001,true
+20,"near-critical δ = 0.80 δ_c stays on the stable branch",0.5520439555362964,0.5575368522716622,0.009852078320895201,0.03,true
+20,"supercritical δ = 1.50 δ_c ignites (thermal runaway)",104.17949347205615,NaN,0.0,0.5,true
+40,"steady center temperature vs full-Arrhenius shooting",503.45951897740736,503.4569632815113,0.0007392892801909659,0.0025,true
+40,"steady center rise vs FK closed form (limit check)",0.2767615181925885,0.2772420232456262,0.0017331609667701623,0.006,true
+40,"steady profile L∞ vs shooting (relative to center rise)",0.0007388057814687029,NaN,0.0007388057814687029,0.0025,true
+40,"steady-state reached (last-output drift)",0.00038547603293181965,0.0,0.00038547603293181965,0.001,true
+40,"near-critical δ = 0.80 δ_c stays on the stable branch",0.5520439555362964,0.5575368522716622,0.009852078320895201,0.03,true
+40,"supercritical δ = 1.50 δ_c ignites (thermal runaway)",104.17949347205615,NaN,0.0,0.5,true
+80,"steady center temperature vs full-Arrhenius shooting",503.45911994331544,503.4586600314618,0.00013297399843905248,0.0025,true
+80,"steady center rise vs FK closed form (limit check)",0.27672959546523546,0.2772420232456262,0.001848304865156542,0.006,true
+80,"steady profile L∞ vs shooting (relative to center rise)",0.00013295225654630683,NaN,0.00013295225654630683,0.0025,true
+80,"steady-state reached (last-output drift)",0.00038375178610294824,0.0,0.00038375178610294824,0.001,true
+80,"near-critical δ = 0.80 δ_c stays on the stable branch",0.5520439555362964,0.5575368522716622,0.009852078320895201,0.03,true
+80,"supercritical δ = 1.50 δ_c ignites (thermal runaway)",104.17949347205615,NaN,0.0,0.5,true
+160,"steady center temperature vs full-Arrhenius shooting",503.45902020215163,503.45908423078095,1.8510283369447282e-5,0.0025,true
+160,"steady center rise vs FK closed form (limit check)",0.27672161617213076,0.2772420232456262,0.001877085830651189,0.006,true
+160,"steady profile L∞ vs shooting (relative to center rise)",3.0592434962215484e-5,NaN,3.0592434962215484e-5,0.0025,true
+160,"steady-state reached (last-output drift)",0.0003833777301451846,0.0,0.0003833777301451846,0.001,true
+160,"near-critical δ = 0.80 δ_c stays on the stable branch",0.5520439555362964,0.5575368522716622,0.009852078320895201,0.03,true
+160,"supercritical δ = 1.50 δ_c ignites (thermal runaway)",104.17949347205615,NaN,0.0,0.5,true

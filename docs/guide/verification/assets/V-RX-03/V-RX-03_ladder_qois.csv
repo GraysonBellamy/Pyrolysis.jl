@@ -1,7 +1,7 @@
 "n_cells","qoi","value","exact","error","tol","within_tol"
-1,"max relative ξ_A error",2.2807843436112306e-9,NaN,2.2807843436112306e-9,1.0e-8,true
-1,"max relative ξ_B error",1.0643657901709958e-9,NaN,1.0643657901709958e-9,1.0e-8,true
-1,"max relative ξ_C error",3.041045317786484e-10,NaN,3.041045317786484e-10,1.0e-8,true
-1,"max relative ξ_G error",9.123136806010735e-10,NaN,9.123136806010735e-10,1.0e-8,true
-1,"total-mass conservation (incl. retained gas)",7.958078640513122e-16,NaN,7.958078640513122e-16,1.0e-13,true
-1,"reaction-heat superposition (quasi-steady cell drift)",2.767015422677245e-5,NaN,2.767015422677245e-5,0.0001,true
+1,"max relative ξ_A error",2.001911525439937e-12,NaN,2.001911525439937e-12,1.0e-8,true
+1,"max relative ξ_B error",9.34107902139658e-13,NaN,9.34107902139658e-13,1.0e-8,true
+1,"max relative ξ_C error",2.6690827326092403e-13,NaN,2.6690827326092403e-13,1.0e-8,true
+1,"max relative ξ_G error",8.009806151676457e-13,NaN,8.009806151676457e-13,1.0e-8,true
+1,"total-mass conservation (incl. retained gas)",1.1368683772161603e-15,NaN,1.1368683772161603e-15,1.0e-13,true
+1,"reaction-heat superposition (quasi-steady cell drift)",3.2352718962730745e-5,NaN,3.2352718962730745e-5,0.0001,true

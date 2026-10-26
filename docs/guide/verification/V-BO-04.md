@@ -1,4 +1,4 @@
-# V-BO-04 — Uniform zero-order burnout: exact thickness through park cascades
+# V-BO-04 — Uniform zero-order burnout: exact thickness through the deactivation event
 
 **Tags:** `ale`, `burnout`, `depletion`, `kinetics`, `exact`
 
@@ -17,20 +17,24 @@ volume per unit time. Under ALE the solid concentration stays at ρ_s
 
   L(t) = L₀ · exp(−r t / ρ_s).
 
-Every cell reaches the depletion threshold at the same instant, so the
-parking machinery meets its worst case: a cascade of park events, one per
-step, surface-first, halving the live cell count at t_k = ln(2^k·20) ρ_s/r.
-L(t) and the solid mass must follow the exact law through every cascade,
-and ξ_s must stay at ρ_s to roundoff.
+Every cell reaches the deactivation threshold at the same instant, so
+deactivation meets its worst case. The cells deactivate at a fraction ε_m
+of their initial mass and every cell is in the near-threshold band when the
+first crosses it, so the whole column merges into the innermost cell in one
+invocation; that survivor holds the column's mass, about 40 ε_m of its own
+initial mass, at ρ_s and burns on at the exact rate past t_end. L(t) must
+follow the exact law through the event, located at the exact crossing
+t = ln(1/ε_m) ρ_s/r, and ξ_s must stay at ρ_s to roundoff.
 
 ### Quantities of interest (n = 40)
 
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
-| thickness follows L₀ exp(−r t/ρ) through the park cascades | 8.23e-05 | 8.23e-05 | 1.932e-07 | 0.0001 | yes | max relative error over all output times |
-| solid concentration stays at ρ_s (dilation removes volume only) | 1000 | 1000 | 2.274e-16 | 1e-08 | yes | max \|ξ_s − ρ_s\|/ρ_s over live cells and times |
-| isothermal: T stays at T₀ | 600 | 600 | 1.137e-13 | 1e-06 | yes | K; no heat of reaction, no gradient |
-| park cascade: 40 → 5 live cells | 5 | 5 | 0 | 0.5 | yes | 35 park events; every cell hits the threshold at once |
+| thickness follows L₀ exp(−r t/ρ) through the event | 8.23e-05 | 8.23e-05 | 8.894e-10 | 1e-06 | yes | max relative error over all output times |
+| solid concentration stays at ρ_s (dilation removes volume only) | 1000 | 1000 | 8.499e-12 | 1e-08 | yes | max \|ξ_s − ρ_s\|/ρ_s over live cells and times |
+| isothermal: T stays at T₀ | 600 | 600 | 1.251e-12 | 1e-06 | yes | K; no heat of reaction, no gradient |
+| one invocation deactivates the column into one survivor | 1 | 1 | 0 | 0.5 | yes | 39 events in 1 invocation(s), outcome running |
+| the event is located at the exact crossing of ε_m | 460.5 | 460.5 | 1.872e-10 | 1e-06 | yes | relative distance of the event from the exact crossing time (ε_m = 1e-2) |
 
 ![V-BO-04 thickness_history](assets/V-BO-04/V-BO-04_thickness_history.png)
 
@@ -42,12 +46,9 @@ and ξ_s must stay at ρ_s to roundoff.
 
 | setting | value |
 | --- | --- |
-| integrator | KenCarp4 (default) |
+| integrator | Rodas5P (default) |
 | use_ale | true |
-| handle_depletion | true |
-| depletion_threshold | 0.05 |
-| min_cells | 2 |
+| deactivation | true |
 | min_thickness | 1.0e-6 |
 | abstol | 1.0e-9 |
 | reltol | 1.0e-7 |
-

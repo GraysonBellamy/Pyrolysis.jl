@@ -6,17 +6,17 @@ Single source consumed by both harnesses: assert mode (`runcases.jl`, run by
 Technical Reference Guide §18.1.3 describes both modes. This file deliberately depends on nothing from `Test` so the report runner can
 include it from its isolated plotting environment.
 
-Coordinate convention (matches `test_analytical.jl`): z = 0 bottom/substrate,
-z = L top/exposed surface; exact solutions use depth x = L − z.
+Coordinate convention: z = 0 bottom/substrate, z = L top/exposed surface;
+exact solutions use depth x = L − z.
 """
 
 using Pyrolysis
-using Pyrolysis.Solver: get_cell_positions
+using Pyrolysis.Outputs: get_cell_positions
 using Pyrolysis.Materials: DepletionLimiter, STEFAN_BOLTZMANN
-using Pyrolysis.Discretization: BEER_LAMBERT
+using Pyrolysis.Materials: BEER_LAMBERT
 using Pyrolysis.Problem: step_profile
 using Pyrolysis.Physics: ideal_gas_pressure, background_gas_concentration
-using Pyrolysis.Properties: porosity, effective_gas_viscosity
+using Pyrolysis.Properties: skeletal_volume_fraction
 using Statistics: mean
 using SpecialFunctions: erfc, erfcx
 
@@ -101,11 +101,11 @@ if !isdefined(@__MODULE__, :VerificationCase)
     `qois(sol) -> Vector{QoIResult}`.
 
     `solve_fn` overrides how a built problem is solved: `nothing` (default)
-    uses the standard `solve(problem; progress=false, kwargs...)`; a function
+    uses `suite_solve(problem; kwargs...)`; a function
     is called as `solve_fn(problem; kwargs...)` and must return an object with
-    a `retcode` field (`:Success` on success). MMS cases use this to route
-    through the wrapped-RHS `solve_mms` path (exact/mms.jl). The override
-    applies to the convergence sweep as well.
+    a `retcode` field (`:Success` on success). MMS cases use this to inject
+    their manufactured sources through `solve_mms` (exact/mms.jl). The
+    override applies to the convergence sweep as well.
 
     `expected_retcode` is the return code assert mode requires: `:Success`
     by default, `:Terminated` for a case whose answer is that a callback
@@ -148,9 +148,25 @@ if !isdefined(@__MODULE__, :VerificationCase)
         report::NamedTuple = (;)
     end
 
+    """
+    The energy state every solve of the suite uses, from
+    `PYROLYSIS_ENERGY_STATE`: `temperature` (the default) or `enthalpy`.
+    """
+    const VERIFICATION_ENERGY_STATE =
+        Symbol(get(ENV, "PYROLYSIS_ENERGY_STATE", "temperature"))
+
+    """
+    Solve `problem` in the suite's energy state, `VERIFICATION_ENERGY_STATE`.
+    Every solve a case makes, its sub-solves inside `qois` and report `curves`
+    included, goes through this, so all of a case's quantities come from one
+    energy form.
+    """
+    suite_solve(problem; kwargs...) =
+        solve(problem; energy_state = VERIFICATION_ENERGY_STATE, kwargs...)
+
     @inline _case_solve(case::VerificationCase, problem; kwargs...) =
-        case.solve_fn === nothing ? solve(problem; progress = false, kwargs...) :
-        case.solve_fn(problem; kwargs...)
+        case.solve_fn !== nothing ? case.solve_fn(problem; kwargs...) :
+        suite_solve(problem; kwargs...)
 
     observed_orders(errors, hs) =
         [log(errors[i-1] / errors[i]) / log(hs[i-1] / hs[i]) for i = 2:length(errors)]

@@ -46,8 +46,7 @@ function _vcpl04_problem(δ; n_cells, t_end, n_outputs = 11)
     rxn =
         Reaction(:fk_source, 1 => 1; A = A_r, E = E, h = h_rxn, n = 0.0, T_max = T0 + 100.0)
     mat = Material(name = :VCPL04, components = (comp,), reactions = (rxn,))
-    mesh =
-        create_uniform_mesh(2 * L_half, n_cells, Val(1); T_initial = T0, ξ_initial = (ρξ,))
+    mesh = create_uniform_mesh(2 * L_half, n_cells)
     bc_set = BoundaryConditionSet(
         thermal = (top = DirichletThermalBC(T0), bottom = DirichletThermalBC(T0)),
     )
@@ -149,7 +148,7 @@ function _verification_case_vcpl04()
         # bounded near its steady value; supercritical: δ = 1.5 δ_c must run
         # away beyond a 50 K rise (T_max gate caps it at ~100 K).
         r_sub = _vcpl04_problem(0.70; n_cells = 40, t_end = 5000.0)
-        sol_sub = solve(r_sub.problem; progress = false, abstol = 1e-8, reltol = 1e-6)
+        sol_sub = suite_solve(r_sub.problem; abstol = 1e-8, reltol = 1e-6)
         rise_sub = maximum(sol_sub.T[:, end]) - P.T0
         θ_sub = rise_sub / P.εT
         θ_sub_ref = fk_theta_max(0.70)
@@ -165,7 +164,7 @@ function _verification_case_vcpl04()
             ),
         )
         r_sup = _vcpl04_problem(1.32; n_cells = 40, t_end = 4000.0)
-        sol_sup = solve(r_sup.problem; progress = false, abstol = 1e-8, reltol = 1e-6)
+        sol_sup = suite_solve(r_sup.problem; abstol = 1e-8, reltol = 1e-6)
         rise_sup = maximum(sol_sup.T) - P.T0
         push!(
             out,
@@ -229,9 +228,8 @@ function _verification_case_vcpl04()
                     k = P.k,
                     L = P.L_half,
                 )
-                fksolve(δ; t_end) = solve(
+                fksolve(δ; t_end) = suite_solve(
                     _vcpl04_problem(δ; n_cells = 40, t_end = t_end, n_outputs = 41).problem;
-                    progress = false,
                     abstol = 1e-8,
                     reltol = 1e-6,
                 )

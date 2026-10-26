@@ -10,11 +10,11 @@
 # across a void, so the flux transmitted through the void column would heat
 # the substrate beneath it far outside the property bracket.
 #
-# The depletion callback stops a fixed-mesh solve when a live cell below the
-# top live cell becomes a void (matrix volume fraction below 1e-4). The run
-# must stop between 330 and 345 s with the interior-void warning, before any
-# park, with the maximum live-cell temperature below 1000 K. The solve ends
-# with retcode Terminated.
+# A cell deactivates when its condensed mass falls below ε_m of its initial
+# value, and on a fixed mesh a crossing cell beneath a live cell ends the
+# solve with outcome `:interior` and retcode Terminated. The run must stop
+# before any deactivation, with the maximum live-cell temperature below
+# 1000 K. The histories report the time reached at each resolution.
 
 # Histories up to the stop, and the PMMA and temperature profiles at the last
 # output before it: the skin at the top, the emptying layer beneath.
@@ -66,47 +66,40 @@ function _vbo05_report_curves(sol)
     ]
 end
 
+# The QoIs: the stop at the first ε_m crossing beneath a live cell, its
+# outcome, no deactivation before it, and the temperature bound.
+function _vbo05_qois(sol, rec)
+    n_events = length(sol.events)
+    return [
+        QoIResult(
+            name = "outcome :interior",
+            value = sol.outcome == :interior ? 1.0 : 0.0,
+            exact = 1.0,
+            error = sol.outcome == :interior ? 0.0 : 1.0,
+            tol = 0.5,
+            comment = "the solve ended with outcome :$(sol.outcome)",
+        ),
+        QoIResult(
+            name = "deactivation events before the stop",
+            value = Float64(n_events),
+            exact = 0.0,
+            error = Float64(n_events),
+            tol = 0.5,
+            comment = "the surface cell persists as a skin while the layer gasifies from within",
+        ),
+        QoIResult(
+            name = "maximum live-cell temperature up to the stop",
+            value = rec.T_max,
+            error = rec.T_max,
+            tol = 1000.0,
+            comment = "K over every accepted step (observed 693)",
+        ),
+    ]
+end
+
 function _verification_case_vbo05()
     id = "V-BO-05"
-    function qois(sol)
-        rec = VBO_STEP_STATS[id]
-        t_stop = rec.t_last
-        n_void = get(VBO_VOID_WARNINGS, id, -1)
-        n_park = length(sol.extras.park_times)
-        return [
-            QoIResult(
-                name = "stop time at the first interior void",
-                value = t_stop,
-                exact = 337.5,
-                error = abs(t_stop - 337.5),
-                tol = 7.5,
-                comment = "s; window 330–345 s (observed 337.0): the lowest PMMA cell reaches matrix volume fraction < MIXING_BLEND_LO under the skin",
-            ),
-            QoIResult(
-                name = "interior-void warning",
-                value = Float64(n_void),
-                exact = 1.0,
-                error = abs(n_void - 1.0),
-                tol = 0.5,
-                comment = "the stop names the cause and the ALE mesh",
-            ),
-            QoIResult(
-                name = "park events before the stop",
-                value = Float64(n_park),
-                exact = 0.0,
-                error = Float64(n_park),
-                tol = 0.5,
-                comment = "the surface cell persists as a skin while the layer gasifies from within",
-            ),
-            QoIResult(
-                name = "maximum live-cell temperature up to the stop",
-                value = rec.T_max,
-                error = rec.T_max,
-                tol = 1000.0,
-                comment = "K over every accepted step (observed 912); the solve stops before the void column runs away",
-            ),
-        ]
-    end
+    qois(sol) = _vbo05_qois(sol, VBO_STEP_STATS[id])
     return VerificationCase(
         id = id,
         title = "PMMA-on-Kaowool burnout on a fixed mesh under in-depth absorption stops at the first interior void",
@@ -117,15 +110,14 @@ function _verification_case_vbo05()
         expected_retcode = :Terminated,
         solve_kwargs = (
             use_ale = false,
-            handle_depletion = true,
-            depletion_threshold = 0.05,
-            min_cells = 2,
+            deactivation = true,
             radiation_model = BEER_LAMBERT,
-            abstol = 1e-8,
-            reltol = 1e-6,
+            abstol = 1e-11,
+            reltol = 1e-9,
+            pressure_tolerance = 1e-4,
         ),
         qois = qois,
-        ci = CIConfig(n_cells = 60, budget_s = 10.0),
+        ci = CIConfig(n_cells = 60, budget_s = 90.0),
         report = (n_cells_ladder = [30, 60, 120], curves = _vbo05_report_curves),
     )
 end

@@ -2,47 +2,23 @@
 CurrentModule = Pyrolysis
 ```
 
-# Jacobian backends and linear-solve strategies
+# Jacobian
 
-The operator-based `Structured` Jacobian assembles per-physics operator
-blocks and structured couplings; a linear-solve strategy then decides how the
-implicit-integrator linear systems are solved. See the User Guide's
-[solver-configuration chapter](../guide/user_guide/11_solver-jacobian-config.md)
-and the Technical Reference's
-[temporal-integration chapter](../guide/technical_reference/15_temporal-jacobian.md).
-
-## Backends
+The Jacobian is colored sparse forward-mode automatic differentiation of the
+residual on a sparsity pattern built from the mesh connectivity; a dense
+forward-mode Jacobian is the reference the pattern must contain and the
+values must match. Reached through `Pyrolysis.ColoredJacobian` or
+[`Pyrolysis.Internal`](internal.md).
 
 ```@docs
-JacobianBackend
-JacobianSpec
-Structured
-DenseAD_ForwardDiff
-compute_jacobian!
-```
-
-## Linear-solve strategies
-
-```@docs
-LinearSolveStrategy
-DirectSolve
-ApproxSolve
-is_approximate
-```
-
-## Verification
-
-```@docs
-verify_jacobian_at
-```
-
-## Operator architecture
-
-```@docs
-Operator
-StructuredJacobian
-StructuredCoupling
-PrefixSumCoupling
-EmbeddedScaledSuffixSumCoupling
-EmbeddedRank1Coupling
+ColoredJacobian.jacobian_pattern
+ColoredJacobian.ColoredJacobianCache
+ColoredJacobian.jacobian!
+ColoredJacobian.jac_prototype
+ColoredJacobian.dense_jacobian
+ColoredJacobian.compare_entries
+ColoredJacobian.LateralRows
+ColoredJacobian.dense_rows
+ColoredJacobian.COLORING_ORDERS
+ColoredJacobian.MAX_CHUNK
 ```

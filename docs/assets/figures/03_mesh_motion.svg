@@ -1,0 +1,113 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="655" viewBox="0 0 1200 655" role="img" aria-labelledby="title desc">
+<title id="title">Figure 3. Mesh Motion (Schematic)</title><desc id="desc">Aligned initial and evolved states distinguish mesh nodes from material markers. Fixed cells lose condensed density; Lagrangian nodes follow material; corrected ALE nodes move relative to material.</desc>
+<defs>
+<marker id="ink" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#202020" stroke-width="1.3"/></marker>
+<marker id="blue" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#295674" stroke-width="1.3"/></marker>
+<marker id="teal" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#365b58" stroke-width="1.3"/></marker>
+<marker id="orange" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#92512f" stroke-width="1.3"/></marker>
+<marker id="purple" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#675878" stroke-width="1.3"/></marker>
+</defs><rect width="100%" height="100%" fill="white"/><g font-family="Liberation Sans, Arial, sans-serif" fill="#202020">
+<text x="32.000" y="39.000" font-size="24" fill="#202020" text-anchor="start" font-weight="bold" >Figure 3. Mesh Motion (Schematic)</text>
+<text x="245.000" y="87.000" font-size="20" fill="#202020" text-anchor="start" font-weight="bold" >Initial</text>
+<text x="780.000" y="87.000" font-size="20" fill="#202020" text-anchor="start" font-weight="bold" >Evolved</text>
+<circle cx="380" cy="81" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<text x="394.000" y="87.000" font-size="18" fill="#202020" text-anchor="start" font-weight="normal" >Mesh Node</text>
+<circle cx="535" cy="81" r="5" fill="white" stroke="#92512f" stroke-width="1.3"/>
+<text x="549.000" y="87.000" font-size="18" fill="#202020" text-anchor="start" font-weight="normal" >Material</text>
+<text x="35.000" y="157.000" font-size="20" fill="#202020" text-anchor="start" font-weight="bold" >Fixed</text>
+<rect x="245.0" y="130" width="80.0" height="48" rx="0" fill="#d9d9d9" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="325.0" y="130" width="80.0" height="48" rx="0" fill="#d9d9d9" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="405.0" y="130" width="80.0" height="48" rx="0" fill="#d9d9d9" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="485.0" y="130" width="80.0" height="48" rx="0" fill="#d9d9d9" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<circle cx="245.0" cy="178" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="325.0" cy="178" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="405.0" cy="178" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="485.0" cy="178" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="565.0" cy="178" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<rect x="780.0" y="130" width="80.0" height="48" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="860.0" y="130" width="80.0" height="48" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="940.0" y="130" width="80.0" height="48" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="1020.0" y="130" width="80.0" height="48" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<circle cx="780.0" cy="178" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="860.0" cy="178" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="940.0" cy="178" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="1020.0" cy="178" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="1100.0" cy="178" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="283.4" cy="205" r="6" fill="white" stroke="#92512f" stroke-width="1.3"/>
+<circle cx="363.4" cy="205" r="6" fill="white" stroke="#92512f" stroke-width="1.3"/>
+<circle cx="443.4" cy="205" r="6" fill="white" stroke="#92512f" stroke-width="1.3"/>
+<circle cx="523.4" cy="205" r="6" fill="white" stroke="#92512f" stroke-width="1.3"/>
+<circle cx="818.4" cy="205" r="6" fill="white" stroke="#92512f" stroke-width="1.3"/>
+<circle cx="898.4" cy="205" r="6" fill="white" stroke="#92512f" stroke-width="1.3"/>
+<circle cx="978.4" cy="205" r="6" fill="white" stroke="#92512f" stroke-width="1.3"/>
+<circle cx="1058.4" cy="205" r="6" fill="white" stroke="#92512f" stroke-width="1.3"/>
+<line x1="610" y1="154" x2="720" y2="154" stroke="#202020" stroke-width="1.5" stroke-dasharray="" marker-end="url(#ink)"/>
+<line x1="780" y1="122" x2="780" y2="218" stroke="#555555" stroke-width="1.5" stroke-dasharray="4 4" />
+<line x1="1100" y1="122" x2="1100" y2="218" stroke="#555555" stroke-width="1.5" stroke-dasharray="4 4" />
+<text x="245.000" y="247.000" font-size="20" fill="#202020" text-anchor="start" font-weight="normal" >w = 0; ρₛ decreases</text>
+<text x="35.000" y="314.000" font-size="20" fill="#202020" text-anchor="start" font-weight="bold" >Lagrangian</text>
+<rect x="245.0" y="287" width="80.0" height="48" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="325.0" y="287" width="80.0" height="48" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="405.0" y="287" width="80.0" height="48" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="485.0" y="287" width="80.0" height="48" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<circle cx="245.0" cy="335" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="325.0" cy="335" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="405.0" cy="335" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="485.0" cy="335" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="565.0" cy="335" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<rect x="780.0" y="287" width="64.0" height="48" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="844.0" y="287" width="54.39999999999998" height="48" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="898.4" y="287" width="44.80000000000007" height="48" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="943.2" y="287" width="35.19999999999993" height="48" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<circle cx="780.0" cy="335" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="844.0" cy="335" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="898.4" cy="335" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="943.2" cy="335" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="978.4" cy="335" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="283.4" cy="362" r="6" fill="white" stroke="#92512f" stroke-width="1.3"/>
+<circle cx="363.4" cy="362" r="6" fill="white" stroke="#92512f" stroke-width="1.3"/>
+<circle cx="443.4" cy="362" r="6" fill="white" stroke="#92512f" stroke-width="1.3"/>
+<circle cx="523.4" cy="362" r="6" fill="white" stroke="#92512f" stroke-width="1.3"/>
+<circle cx="812.0" cy="362" r="6" fill="white" stroke="#92512f" stroke-width="1.3"/>
+<circle cx="871.2" cy="362" r="6" fill="white" stroke="#92512f" stroke-width="1.3"/>
+<circle cx="920.8" cy="362" r="6" fill="white" stroke="#92512f" stroke-width="1.3"/>
+<circle cx="960.8" cy="362" r="6" fill="white" stroke="#92512f" stroke-width="1.3"/>
+<line x1="610" y1="311" x2="720" y2="311" stroke="#202020" stroke-width="1.5" stroke-dasharray="" marker-end="url(#ink)"/>
+<line x1="780" y1="279" x2="780" y2="375" stroke="#555555" stroke-width="1.5" stroke-dasharray="4 4" />
+<line x1="1100" y1="279" x2="1100" y2="375" stroke="#555555" stroke-width="1.5" stroke-dasharray="4 4" />
+<text x="245.000" y="404.000" font-size="20" fill="#202020" text-anchor="start" font-weight="normal" >w = vₛ; c = 0</text>
+<text x="35.000" y="471.000" font-size="20" fill="#202020" text-anchor="start" font-weight="bold" >Corrected ALE</text>
+<rect x="245.0" y="444" width="80.0" height="48" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="325.0" y="444" width="80.0" height="48" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="405.0" y="444" width="80.0" height="48" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="485.0" y="444" width="80.0" height="48" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<circle cx="245.0" cy="492" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="325.0" cy="492" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="405.0" cy="492" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="485.0" cy="492" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="565.0" cy="492" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<rect x="780.0" y="444" width="49.60000000000002" height="48" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="829.6" y="444" width="49.60000000000002" height="48" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="879.2" y="444" width="49.59999999999991" height="48" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<rect x="928.8" y="444" width="49.60000000000002" height="48" rx="0" fill="#f7f7f7" stroke="#202020" stroke-width="1.2" stroke-dasharray=""/>
+<circle cx="780.0" cy="492" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="829.6" cy="492" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="879.2" cy="492" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="928.8" cy="492" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="978.4" cy="492" r="3.5" fill="#202020" stroke="#202020" stroke-width="1.3"/>
+<circle cx="283.4" cy="519" r="6" fill="white" stroke="#92512f" stroke-width="1.3"/>
+<circle cx="363.4" cy="519" r="6" fill="white" stroke="#92512f" stroke-width="1.3"/>
+<circle cx="443.4" cy="519" r="6" fill="white" stroke="#92512f" stroke-width="1.3"/>
+<circle cx="523.4" cy="519" r="6" fill="white" stroke="#92512f" stroke-width="1.3"/>
+<circle cx="812.0" cy="519" r="6" fill="white" stroke="#92512f" stroke-width="1.3"/>
+<circle cx="871.2" cy="519" r="6" fill="white" stroke="#92512f" stroke-width="1.3"/>
+<circle cx="920.8" cy="519" r="6" fill="white" stroke="#92512f" stroke-width="1.3"/>
+<circle cx="960.8" cy="519" r="6" fill="white" stroke="#92512f" stroke-width="1.3"/>
+<line x1="610" y1="468" x2="720" y2="468" stroke="#202020" stroke-width="1.5" stroke-dasharray="" marker-end="url(#ink)"/>
+<line x1="780" y1="436" x2="780" y2="532" stroke="#555555" stroke-width="1.5" stroke-dasharray="4 4" />
+<line x1="1100" y1="436" x2="1100" y2="532" stroke="#555555" stroke-width="1.5" stroke-dasharray="4 4" />
+<text x="245.000" y="561.000" font-size="20" fill="#365b58" text-anchor="start" font-weight="normal" >w = vₛ + c; vₛ − w = −c</text>
+<line x1="800" y1="607" x2="1080" y2="607" stroke="#202020" stroke-width="1.5" stroke-dasharray="" marker-end="url(#ink)"/>
+<text x="800.000" y="636.000" font-size="18" fill="#202020" text-anchor="start" font-weight="normal" >Pinned Back</text>
+<text x="1100.000" y="636.000" font-size="18" fill="#202020" text-anchor="end" font-weight="normal" >+z → Surface</text>
+</g></svg>

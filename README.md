@@ -3,23 +3,26 @@
 [![Documentation](https://img.shields.io/badge/docs-pyrolysis.graysonbellamy.dev-blue)](https://pyrolysis.graysonbellamy.dev)
 
 A Julia package for simulating thermal decomposition (pyrolysis) of
-materials under high heat flux. Uses an Arbitrary Lagrangian-Eulerian
-(ALE) finite-volume discretisation with surface-cell depletion, Arrhenius
-kinetics, in-depth radiation absorption, and pressure-driven gas
-transport (Darcy–Fick).
+materials under high heat flux. Uses a finite-volume discretisation on a mesh
+that moves with the solid (Arbitrary Lagrangian–Eulerian), with cell
+deactivation at burnout, Arrhenius kinetics, in-depth radiation absorption,
+and conservative lumped or dusty-gas transport.
 
 ## Features
 
 - Multi-component materials with temperature-dependent properties
 - Single-step and multi-step Arrhenius decomposition kinetics
-- Gas generation and transport through porous char (Fickian or Darcy–Fick)
+- Gas generation, pore pressure and conservative lumped or dusty-gas transport
 - In-depth radiation absorption via Beer–Lambert (or surface absorption)
 - Material volume changes — shrinkage, swelling, intumescence
-- ALE mesh motion with surface regression and internal interface tracking
-- Surface burnout by depleted-cell parking
-- Operator-based `Structured` Jacobian with selectable solve strategies,
-  a dense AD verifier, and pluggable linear solvers
-- Pluggable extensions for Plots recipes and SciML sensitivities
+- Mesh motion with the solid, surface regression and internal interface
+  tracking; component masses as the states, so mass is conserved exactly
+- Surface burnout by cell deactivation in located events, with an
+  equidistribution mesh correction that lets a layer vanish in one event
+- Colored sparse automatic-differentiation Jacobian on a pattern built from
+  the mesh connectivity, a stiff Rosenbrock integrator by default, and a
+  conservation recorder and audit
+- A Plots recipe extension
 
 ## Quick start
 
@@ -27,10 +30,12 @@ transport (Darcy–Fick).
 using Pyrolysis
 
 pmma = Material(
-    name = :PMMA,
+    name = :porous_polymer,
+    gas_transport = LumpedTransfer(endpoint=LumpedEndpoint(
+        λ=1e-6, κ=0., max_skeletal_occupancy=.001)),
     components = (
-        SolidComponent(:virgin, ρ = 1190, c = 1420, k = 0.21, ε = 0.86),
-        GaseousComponent(:MMA, M = 0.100, c = 1500, k = 0.02, λ = 1e-5),
+        SolidComponent(:virgin, ρ = 1190, φ = .3, c = 1420, k = 0.21, ε = 0.86, λ = 1e-6),
+        GaseousComponent(:MMA, M = 0.100, c = 1500, k = 0.02),
     ),
     reactions = (
         Reaction(:decomposition, :virgin => :MMA;
@@ -38,9 +43,10 @@ pmma = Material(
     ),
 )
 
-mesh = create_uniform_mesh(0.01, 100, Val(2))
+mesh = create_uniform_mesh(0.01, 100)
 bcs  = BoundaryConditionSet(
     thermal = (top = HeatFluxBC(50e3), bottom = AdiabaticBC()),
+    mass    = (top = AmbientGasBC(GasReservoir(P=0., T=300.)), bottom = ImpermeableBC()),
 )
 
 problem = PyrolysisProblem(
@@ -50,8 +56,8 @@ problem = PyrolysisProblem(
     tspan = (0.0, 100.0),
 )
 
-sol = solve(problem; progress = false, use_ale = true,
-            radiation_model = SURFACE_ABSORPTION)
+# A mesh that moves with the solid; the cells the surface burns away deactivate
+sol = solve(problem; use_ale = true, deactivation = true)
 
 # Plot recipes (load `Plots` first)
 using Plots
@@ -80,11 +86,13 @@ advanced users. Highlights:
 |-------|-------|
 | Materials | `Material`, `SolidComponent`, `GaseousComponent`, `LiquidComponent`, `Reaction`, `MaterialMixing`, `MixingSpec`, `PARALLEL`, `SERIES`, `WEIGHTED`, `BRUGGEMAN` |
 | Properties | `ConstantProperty`, `LinearProperty`, `PolynomialProperty`, `ArrheniusProperty`, `TableProperty`, `CallableProperty`, `SutherlandProperty`, `StateDependentProperty` |
-| Boundary conditions | `HeatFluxBC`, `ConvectiveBC`, `RadiativeBC`, `RadiativeFluxBC`, `CombinedThermalBC`, `DirichletThermalBC`, `AdiabaticBC`, `ImpermeableBC`, `MassFluxBC`, `ConvectiveMassBC`, `DiffusiveMassBC`, `BoundaryConditionSet` |
+| Boundary conditions | `HeatFluxBC`, `ConvectiveBC`, `RadiativeBC`, `RadiativeFluxBC`, `CombinedThermalBC`, `DirichletThermalBC`, `AdiabaticBC`, `ImpermeableBC`, `MassFluxBC`, `GasReservoir`, `AmbientGasBC`, `MassTransferFilm`, `NeumannPressureBC`, `ConvectivePressureBC`, `BoundaryConditionSet` |
+| Gas model | `LumpedTransfer`, `DustyGas`, `LumpedEndpoint`, `DustyEndpoint` |
 | Radiation | `RadiationModel`, `NO_RADIATION`, `SURFACE_ABSORPTION`, `BEER_LAMBERT` |
-| Geometry | `create_uniform_mesh`, `create_stretched_mesh` |
-| Problem & solve | `PyrolysisProblem`, `PyrolysisSolution`, `solve`, `parameter_sweep` |
-| Jacobian backends | `JacobianBackend`, `JacobianSpec`, `Structured`, `LinearSolveStrategy`, `DirectSolve`, `ApproxSolve`, `compute_jacobian!` |
+| Mesh | `create_uniform_mesh`, `create_stretched_mesh`, `create_mesh_from_nodes`, `Planar`, `Cylindrical`, `Spherical` |
+| Problem & solve | `PyrolysisProblem`, `solve`, `setup`, `integrate`, `parameter_sweep` |
+| Solver configuration | `default_policy`, `rodas5p_policy`, `fbdf_policy`, `kencarp4_policy`, `StructuredKLU`, `EquidistributionCorrection`, `ActivationTime`, `NoCorrection` |
+| Solution | `PyrolysisSolution`, `get_times`, `get_temperatures`, `get_concentrations`, `get_pressure`, `get_porosity`, `get_boundary_exchange`, `get_profile`, `get_cell_positions`, `succeeded`, `completed`, `ConservationRecorder`, `conservation_audit` |
 
 ## Package extensions
 
@@ -104,34 +112,30 @@ addprocs(4)
 
 grid = [(A = a, E = e) for a in (1e12, 1e13, 1e14), e in (1.5e5, 2.0e5)]
 
-mesh_factory() = create_uniform_mesh(0.01, 100, Val(2))
-
-function modify(prob, p)
+@everywhere function modify(prob, p)
+    m = prob.material
     material = Material(
-        name = prob.material.name,
-        components = prob.material.components,
-        reactions = (Reaction(:decomp, :virgin => :MMA;
-                              A = p.A, E = p.E, h = 870e3),),
-        mixing = prob.material.mixing,
-        lateral_shrinkage_law = prob.material.lateral_shrinkage_law,
+        name = m.name,
+        components = m.components,
+        reactions = (Reaction(:decomp, :virgin => :MMA; A = p.A, E = p.E, h = 870e3),),
+        mixing = m.mixing,
     )
-
-    PyrolysisProblem(
-        mesh = mesh_factory(), # fresh mesh per run
+    # A solve never changes the problem, so the points share its mesh.
+    return PyrolysisProblem(
+        mesh = prob.mesh,
         material = material,
         bc_set = prob.bc_set,
         T_initial = prob.T_initial,
         ξ_initial = prob.ξ_initial,
         tspan = prob.tspan,
-        dt_initial = prob.dt_initial,
         output_times = prob.output_times,
     )
 end
 
-extract(sol) = (peak_T = maximum(sol.surface_T),
-                final_thickness = sol.extras.thickness_history[end])
+@everywhere extract(sol) = (peak_T = maximum(sol.surface_T),
+                            final_thickness = sol.extras.thickness_history[end])
 
-results = parameter_sweep(problem, grid; modify, extract)
+results = parameter_sweep(problem, grid; modify, extract, use_ale = true)
 ```
 
 ## Examples
@@ -142,7 +146,7 @@ End-to-end studies under [`examples/`](examples/) cover:
   radiation models)
 - Douglas fir cone calorimeter
 - Pressure-treated wood with moisture
-- Darcy–Fick gas-transport demonstration
+- Lumped and dusty-gas transport demonstration
 - Inverse analysis of white-pine kinetics
 - Sensitivity analysis (Latin Hypercube + Sobol indices)
 - Literature comparison and validation

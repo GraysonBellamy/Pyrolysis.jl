@@ -26,14 +26,11 @@ Output:
 
 using Pyrolysis
 using Plots
-using LinearSolve
-using Sparspak
-using OrdinaryDiffEq
-using OrdinaryDiffEqSDIRK: KenCarp4   # v7 split: KenCarp4 not re-exported by the umbrella pkg
 using Statistics
-using LinearSolve: SparspakFactorization
 using Printf
 using DelimitedFiles
+
+const SMOKE = get(ENV, "PYROLYSIS_SMOKE", "0") == "1"   # PYROLYSIS_SMOKE=1: a short run that checks the script works
 
 # ============================================================================
 # Output Directory
@@ -123,7 +120,6 @@ const INTERP_PROGRESS = [
 # Gas transfer coefficients
 const λ_WOOD = 5.0e-7
 const λ_CHAR = 1.0e-5
-const λ_GAS = 3.0e-5
 const κ_VIRGIN = 1.0e-15
 const κ_CHAR = 1.0e-12
 
@@ -214,6 +210,7 @@ function build_and_solve(mc_db::Float64, hos_model::Symbol)
                 α = 0.0,
                 λ = λ_WOOD,
                 κ = κ_VIRGIN,
+                ρ_intrinsic = 1500.0,  # kg/m³, wood cell-wall (skeletal) density
             ),
             SolidComponent(
                 :DF_int1,
@@ -224,6 +221,7 @@ function build_and_solve(mc_db::Float64, hos_model::Symbol)
                 α = 0.0,
                 λ = λ_WOOD * 2.0,
                 κ = κ_VIRGIN * 3.0,
+                ρ_intrinsic = 1578.0,  # kg/m³, toward char by progress 0.173
             ),
             SolidComponent(
                 :DF_int2,
@@ -234,6 +232,7 @@ function build_and_solve(mc_db::Float64, hos_model::Symbol)
                 α = 0.0,
                 λ = λ_WOOD * 5.0,
                 κ = κ_VIRGIN * 10.0,
+                ρ_intrinsic = 1597.0,  # kg/m³, toward char by progress 0.216
             ),
             SolidComponent(
                 :DF_int3,
@@ -244,6 +243,7 @@ function build_and_solve(mc_db::Float64, hos_model::Symbol)
                 α = 0.0,
                 λ = λ_CHAR * 0.3,
                 κ = κ_CHAR * 0.01,
+                ρ_intrinsic = 1763.0,  # kg/m³, toward char by progress 0.585
             ),
             SolidComponent(
                 :DF_int4,
@@ -254,6 +254,7 @@ function build_and_solve(mc_db::Float64, hos_model::Symbol)
                 α = 0.0,
                 λ = λ_CHAR * 0.7,
                 κ = κ_CHAR * 0.1,
+                ρ_intrinsic = 1833.0,  # kg/m³, toward char by progress 0.74
             ),
             SolidComponent(
                 :Char,
@@ -264,6 +265,7 @@ function build_and_solve(mc_db::Float64, hos_model::Symbol)
                 α = 0.0,
                 λ = λ_CHAR,
                 κ = κ_CHAR,
+                ρ_intrinsic = 1950.0,  # kg/m³, carbon skeletal density
             ),
             LiquidComponent(
                 :MOISTURE,
@@ -274,48 +276,13 @@ function build_and_solve(mc_db::Float64, hos_model::Symbol)
                 α = 0.0,
                 κ = 0.0,
             ),
-            GaseousComponent(
-                :DF_gas1,
-                M = 0.060,
-                c = 1400.0,
-                k = 0.020,
-                λ = λ_GAS * sqrt(0.029/0.060),
-            ),
-            GaseousComponent(
-                :DF_gas2,
-                M = 0.070,
-                c = 1400.0,
-                k = 0.020,
-                λ = λ_GAS * sqrt(0.029/0.070),
-            ),
-            GaseousComponent(
-                :DF_gas3,
-                M = 0.110,
-                c = 1300.0,
-                k = 0.018,
-                λ = λ_GAS * sqrt(0.029/0.110),
-            ),
-            GaseousComponent(
-                :DF_gas4,
-                M = 0.070,
-                c = 1500.0,
-                k = 0.020,
-                λ = λ_GAS * sqrt(0.029/0.070),
-            ),
-            GaseousComponent(
-                :DF_gas5,
-                M = 0.050,
-                c = 1600.0,
-                k = 0.025,
-                λ = λ_GAS * sqrt(0.029/0.050),
-            ),
-            GaseousComponent(
-                :WATER_VAPOR,
-                M = 0.018,
-                c = water_vapor_cp,
-                k = 0.025,
-                λ = λ_GAS * sqrt(0.029/0.018),
-            ),
+            GaseousComponent(:DF_gas1, M = 0.060, c = 1400.0, k = 0.020),
+            GaseousComponent(:DF_gas2, M = 0.070, c = 1400.0, k = 0.020),
+            GaseousComponent(:DF_gas3, M = 0.110, c = 1300.0, k = 0.018),
+            GaseousComponent(:DF_gas4, M = 0.070, c = 1500.0, k = 0.020),
+            GaseousComponent(:DF_gas5, M = 0.050, c = 1600.0, k = 0.025),
+            GaseousComponent(:WATER_VAPOR, M = 0.018, c = water_vapor_cp, k = 0.025),
+            GaseousComponent(:AIR; M = 0.02897, c = 1006.0, k = 0.026),
         ),
         reactions = (
             Reaction(
@@ -386,27 +353,7 @@ function build_and_solve(mc_db::Float64, hos_model::Symbol)
     ρ_DF_initial = 530.0
     ρ_moisture_initial = mc_db * ρ_DF_initial
 
-    mesh = create_uniform_mesh(
-        sample_thickness,
-        n_cells,
-        Val(13);
-        T_initial = T_ambient,
-        ξ_initial = (
-            ρ_DF_initial,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            ρ_moisture_initial,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-        ),
-    )
+    mesh = create_uniform_mesh(sample_thickness, n_cells)
 
     bc_set = BoundaryConditionSet(
         thermal = (
@@ -416,11 +363,15 @@ function build_and_solve(mc_db::Float64, hos_model::Symbol)
             bottom = AdiabaticBC(),
         ),
         mass = (
-            top = DiffusiveMassBC(0.05) + DirichletPressureBC(101325.0),
+            top = AmbientGasBC(
+                GasReservoir(P = 101325.0, T = 300.0, mole_fractions = (AIR = 1.0,));
+                film = MassTransferFilm(0.05*101325.0*0.02897/(8.31446261815324*(300.0))),
+            ),
             bottom = ImpermeableBC(),
         ),
     )
 
+    t_end = SMOKE ? 10.0 : 600.0   # [s]
     problem = PyrolysisProblem(
         mesh = mesh,
         material = material,
@@ -440,10 +391,31 @@ function build_and_solve(mc_db::Float64, hos_model::Symbol)
             z -> 0.0,
             z -> 0.0,
             z -> 0.0,
+            z -> background_gas_concentration(
+                material,
+                :AIR,
+                (
+                    ρ_DF_initial,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    ρ_moisture_initial,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                ),
+                T_ambient,
+            ),
         ],
-        tspan = (0.0, 600.0),
+        tspan = (0.0, t_end),
         dt_initial = 1e-3,
-        output_times = collect(range(0.0, 600.0, length = 3601)),
+        output_times = collect(range(0.0, t_end, length = SMOKE ? 11 : 3601)),
     )
 
     # --- Solve ---
@@ -456,9 +428,6 @@ function build_and_solve(mc_db::Float64, hos_model::Symbol)
         use_ale = true,
         radiation_model = SURFACE_ABSORPTION,
         min_thickness = 0.5e-3,
-        handle_depletion = false,
-        # Default Jacobian under ALE is `Structured(strategy = ApproxSolve())`.
-        integrator = KenCarp4(linsolve = SparspakFactorization()),
     )
 
     return solution

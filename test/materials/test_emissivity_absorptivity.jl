@@ -9,9 +9,10 @@ absorptivity.
   mixture `a_eff = Σⱼ vⱼ aⱼ` uses `aⱼ = εⱼ(T)` (Kirchhoff) for components
   that leave it unset, so with none set `a_eff == ε_eff` bit-for-bit — the
   invariant for materials that set no absorptivity.
-- The property cache carries both (`cache.ε`, `cache.a`).
-- ForwardDiff through `effective_emissivity` / `effective_absorptivity`
-  yields the component-emissivity slope.
+- The derived state of the finite-volume core carries both per cell
+  (`ds.ε`, `ds.a`), the unclamped mixtures `mixture_emissivity` and
+  `mixture_absorptivity` at the cell's composition and temperature.
+- ForwardDiff through the mixtures yields the component-emissivity slope.
 """
 
 using Test
@@ -26,14 +27,9 @@ using Pyrolysis.Materials:
     CallableProperty,
     AbstractPropertyFunction
 using Pyrolysis.Properties:
-    effective_emissivity,
-    effective_absorptivity,
-    mixing_volume_fractions,
-    PropertyCache,
-    update_properties!
-using Pyrolysis.Problem: populate!
+    mixture_emissivity, mixture_absorptivity, mixing_volume_fractions
 
-const _EA_GAS = GaseousComponent(:g, M = 0.03, c = 1000.0, k = 0.03, λ = 1e-5)
+const _EA_GAS = GaseousComponent(:g, M = 0.03, c = 1000.0, k = 0.03)
 
 # Two condensed components with constant bulk densities, so the mixing
 # weights v_j = γ_j ξ_j / ρ_j (normalised over the matrix) are independent of
@@ -46,6 +42,8 @@ function _ea_material(; a_virgin = nothing, a_char = nothing, ε_virgin = (0.95,
     # the constructor's own range check is bypassed for this fixture.
     virgin = SolidComponent(
         :virgin,
+        φ = 0.3,
+        λ = 0.0,
         ρ = 500.0,
         c = 1500.0,
         k = 0.15,
@@ -55,6 +53,8 @@ function _ea_material(; a_virgin = nothing, a_char = nothing, ε_virgin = (0.95,
     )
     char = SolidComponent(
         :char,
+        φ = 0.3,
+        λ = 0.0,
         ρ = 150.0,
         c = 1700.0,
         k = 0.08,
@@ -92,7 +92,7 @@ end
     @test get_emissivity(LiquidComponent(:l, ρ = 1.0, c = 1.0, k = 1.0), 400.0) == 0.95
     @test get_emissivity(_EA_GAS, 400.0) == 0.0
     @test _EA_GAS.emissivity isa AbstractPropertyFunction
-    g_T = GaseousComponent(:g, M = 0.03, c = 1.0, k = 1.0, λ = 1e-5, ε = (0.1, 1e-4))
+    g_T = GaseousComponent(:g, M = 0.03, c = 1.0, k = 1.0, ε = (0.1, 1e-4))
     @test get_emissivity(g_T, 500.0) ≈ 0.15
 
     # Duals propagate through the component evaluation.
@@ -148,31 +148,27 @@ end
 
     for T in (500.0, 1000.0)
         ε_hand = v[1] * _ε_lin(T) + v[2] * _ε_fun(T)
-        @test effective_emissivity(ξ, T, mat) ≈ ε_hand rtol = 1e-14
+        @test mixture_emissivity(ξ, T, mat) ≈ ε_hand rtol = 1e-14
     end
-    @test effective_emissivity(ξ, 500.0, mat) != effective_emissivity(ξ, 1000.0, mat)
+    @test mixture_emissivity(ξ, 500.0, mat) != mixture_emissivity(ξ, 1000.0, mat)
 
     # Scalar ε on every component: the constant volume-weighted sum.
     mat_c = Material(
         name = :ea_const,
         components = (
-            SolidComponent(:virgin, ρ = 500.0, c = 1500.0, k = 0.15, ε = 0.9),
-            SolidComponent(:char, ρ = 150.0, c = 1700.0, k = 0.08, ε = 0.85),
+            SolidComponent(:virgin, λ = 0.0, ρ = 500.0, c = 1500.0, k = 0.15, ε = 0.9),
+            SolidComponent(:char, λ = 0.0, ρ = 150.0, c = 1700.0, k = 0.08, ε = 0.85),
             _EA_GAS,
         ),
         reactions = (),
     )
     ε_old = v[1] * 0.9 + v[2] * 0.85
-    @test effective_emissivity(ξ, 500.0, mat_c) ≈ ε_old rtol = 1e-14
-    @test effective_emissivity(ξ, 1000.0, mat_c) == effective_emissivity(ξ, 500.0, mat_c)
-
-    # The clamp still applies.
-    mat_hot = _ea_material(ε_virgin = 1.3)
-    @test effective_emissivity((300.0, 0.0, 0.0), 500.0, mat_hot) == 1.0
+    @test mixture_emissivity(ξ, 500.0, mat_c) ≈ ε_old rtol = 1e-14
+    @test mixture_emissivity(ξ, 1000.0, mat_c) == mixture_emissivity(ξ, 500.0, mat_c)
 
     # AD: dε_eff/dT is the weighted component slope (v is T-independent here).
-    dε = ForwardDiff.derivative(T -> effective_emissivity(ξ, T, mat), 700.0)
-    @test dε ≈ v[1] * (-1e-4) + v[2] * 5e-5 rtol = 1e-12
+    dε_mix = ForwardDiff.derivative(T -> mixture_emissivity(ξ, T, mat), 700.0)
+    @test dε_mix ≈ v[1] * (-1e-4) + v[2] * 5e-5 rtol = 1e-12
 end
 
 @testset "a_eff: Kirchhoff invariant and per-component override" begin
@@ -182,69 +178,78 @@ end
     # No component sets an absorptivity → a_eff is ε_eff, bit-for-bit, for
     # T-dependent and constant emissivities alike.
     for mat in (_ea_material(), _ea_material(ε_virgin = 0.9)), T in (400.0, 800.0)
-        @test effective_absorptivity(ξ, T, mat) === effective_emissivity(ξ, T, mat)
+        @test mixture_absorptivity(ξ, T, mat) === mixture_emissivity(ξ, T, mat)
     end
 
     # One component overrides: its constant replaces ε_j(T) in the same sum.
     mat_a = _ea_material(a_char = 0.6)
     for T in (500.0, 1000.0)
         a_hand = v[1] * _ε_lin(T) + v[2] * 0.6
-        @test effective_absorptivity(ξ, T, mat_a) ≈ a_hand rtol = 1e-14
-        @test effective_absorptivity(ξ, T, mat_a) != effective_emissivity(ξ, T, mat_a)
+        @test mixture_absorptivity(ξ, T, mat_a) ≈ a_hand rtol = 1e-14
+        @test mixture_absorptivity(ξ, T, mat_a) != mixture_emissivity(ξ, T, mat_a)
         # Emission is untouched by the override.
-        @test effective_emissivity(ξ, T, mat_a) ==
-              effective_emissivity(ξ, T, _ea_material())
+        @test mixture_emissivity(ξ, T, mat_a) == mixture_emissivity(ξ, T, _ea_material())
     end
     # Only the Kirchhoff component contributes a temperature slope.
-    da = ForwardDiff.derivative(T -> effective_absorptivity(ξ, T, mat_a), 700.0)
+    da = ForwardDiff.derivative(T -> mixture_absorptivity(ξ, T, mat_a), 700.0)
     @test da ≈ v[1] * (-1e-4) rtol = 1e-12
 
     # Both override: a_eff is T-independent.
     mat_ab = _ea_material(a_virgin = 0.75, a_char = 0.6)
-    @test effective_absorptivity(ξ, 500.0, mat_ab) ≈ v[1] * 0.75 + v[2] * 0.6 rtol = 1e-14
-    @test effective_absorptivity(ξ, 500.0, mat_ab) ==
-          effective_absorptivity(ξ, 1000.0, mat_ab)
+    @test mixture_absorptivity(ξ, 500.0, mat_ab) ≈ v[1] * 0.75 + v[2] * 0.6 rtol = 1e-14
+    @test mixture_absorptivity(ξ, 500.0, mat_ab) == mixture_absorptivity(ξ, 1000.0, mat_ab)
 
     # Depleted cell (gas only): both radiative mixtures are 0.
-    @test effective_emissivity((0.0, 0.0, 1.0), 500.0, mat_a) == 0.0
-    @test effective_absorptivity((0.0, 0.0, 1.0), 500.0, mat_a) == 0.0
+    @test mixture_emissivity((0.0, 0.0, 1.0), 500.0, mat_a) == 0.0
+    @test mixture_absorptivity((0.0, 0.0, 1.0), 500.0, mat_a) == 0.0
 end
 
-@testset "property cache fills ε and a per cell" begin
-    function _cache_for(mat)
-        mesh = create_uniform_mesh(0.01, 5, Val(3))
-        bc = BoundaryConditionSet(thermal = (top = HeatFluxBC(0.0), bottom = AdiabaticBC()))
-        problem =
-            PyrolysisProblem(mesh = mesh, material = mat, bc_set = bc, tspan = (0.0, 1.0))
-        def, ws, u = initialize_state(problem; use_ale = false)
-        n = ws.layout.n_cells
-        for i = 1:n
-            u[i] = 400.0 + 100.0 * i
-            u[n+i] = 300.0 - 20.0 * i
-            u[2n+i] = 10.0 * i
-            u[3n+i] = 0.5
+# The per-cell values the residual reads: one evaluation at a graded state.
+@testset "the derived state fills ε and a per cell at the cell's composition and temperature" begin
+    _composition(i) = (300.0 - 20.0 * i, 10.0 * i, 0.5)
+    _temperature(i) = 400.0 + 100.0 * i
+    function _derived_for(mat)
+        problem = PyrolysisProblem(
+            mesh = create_uniform_mesh(0.01, 5),
+            material = mat,
+            bc_set = BoundaryConditionSet(
+                thermal = (top = HeatFluxBC(0.0), bottom = AdiabaticBC()),
+            ),
+            tspan = (0.0, 1.0),
+        )
+        cp = Pyrolysis.Integration.setup(problem)
+        layout = cp.def.layout
+        V = Pyrolysis.Problem.cell_volumes(problem.mesh)
+        u = copy(cp.u0)
+        for i = 1:5
+            u[Pyrolysis.States.energy_index(layout, i)] = _temperature(i)
+            for (j, ξ) in enumerate(_composition(i))
+                u[Pyrolysis.States.mass_index(layout, i, j)] = ξ * V[i]
+            end
         end
-        populate!(ws.state_cache, u, ws.layout)
-        update_properties!(ws.prop_cache, ws.state_cache, ws.mesh, def.material)
-        return ws.prop_cache, ws.state_cache, n
+        du = zeros(length(u))
+        Pyrolysis.Assembly.residual!(du, u, cp.def, 0.0, cp.ws)
+        ds, _ = Pyrolysis.Assembly.buffers(cp.ws, cp.def, Float64)
+        return ds
     end
 
-    cache_k, st, n = _cache_for(_ea_material())
-    @test length(cache_k.a) == n
-    @test cache_k.a == cache_k.ε
-    for i = 1:n
-        ξ_i = (st.ξ[1, i], st.ξ[2, i], st.ξ[3, i])
-        @test cache_k.ε[i] ≈ effective_emissivity(ξ_i, st.T[i], _ea_material()) rtol = 1e-14
+    mat_k = _ea_material()
+    ds_k = _derived_for(mat_k)
+    @test length(ds_k.a) == 5
+    @test ds_k.a == ds_k.ε
+    for i = 1:5
+        @test ds_k.ε[i] ≈ mixture_emissivity(_composition(i), _temperature(i), mat_k) rtol =
+            1e-14
     end
     # ε varies with the cell temperature across the graded state.
-    @test length(unique(round.(cache_k.ε; digits = 6))) == n
+    @test length(unique(round.(ds_k.ε; digits = 6))) == 5
 
     mat_a = _ea_material(a_char = 0.6)
-    cache_a, st_a, _ = _cache_for(mat_a)
-    @test cache_a.a != cache_a.ε
-    for i = 1:n
-        ξ_i = (st_a.ξ[1, i], st_a.ξ[2, i], st_a.ξ[3, i])
-        @test cache_a.a[i] ≈ effective_absorptivity(ξ_i, st_a.T[i], mat_a) rtol = 1e-14
-        @test cache_a.ε[i] ≈ effective_emissivity(ξ_i, st_a.T[i], mat_a) rtol = 1e-14
+    ds_a = _derived_for(mat_a)
+    @test ds_a.a != ds_a.ε
+    for i = 1:5
+        ξ, T = _composition(i), _temperature(i)
+        @test ds_a.a[i] ≈ mixture_absorptivity(ξ, T, mat_a) rtol = 1e-14
+        @test ds_a.ε[i] ≈ mixture_emissivity(ξ, T, mat_a) rtol = 1e-14
     end
 end

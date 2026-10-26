@@ -1,4 +1,4 @@
 "qoi","value","exact","error","tol","within_tol","comment"
-"L∞ T error on moving mesh, t=10.0 s",0.0038569038093783092,NaN,0.0038569038093783092,0.25,true,"manufactured T* on 30%-compressed mesh"
-"relative L∞ ξ_solid (mesh-bound) error, t=10.0 s",6.204080212531456e-12,NaN,6.204080212531456e-12,1.0e-10,true,"uniform solid: verifies the Lagrangian (no-advection) solid path + source injection"
-"relative L∞ ξ_gas error, t=10.0 s",0.0006196631904115494,NaN,0.0006196631904115494,0.006,true,"gas is advected relative to the mesh: moving-mesh transport error channel"
+"L∞ T error on moving mesh, t=10.0 s",6.456267038856822e-5,NaN,6.456267038856822e-5,0.25,true,"manufactured T* on 30%-compressed mesh"
+"relative L∞ ξ_solid (uniform) error, t=10.0 s",1.1855642393735858e-12,NaN,1.1855642393735858e-12,1.0e-10,true,"uniform solid: verifies the relative flux of a uniform field under the moving mesh + source injection"
+"relative L∞ ξ_gas error, t=10.0 s",3.139567208905921e-5,NaN,3.139567208905921e-5,0.006,true,"gas: diffusive + relative flux on the moving mesh"

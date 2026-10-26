@@ -841,16 +841,9 @@ function residual_vector(
     T_back_exp;
     stage::Int = 1,
     t_skip::Real = 1.0,
-    jacobian_strategy::Union{Nothing,LinearSolveStrategy} = nothing,
 )
 
-    sol = build_and_solve(
-        θ,
-        scenario;
-        stage = stage,
-        log_level = Logging.Warn,
-        jacobian_strategy = jacobian_strategy,
-    )
+    sol = build_and_solve(θ, scenario; stage = stage, log_level = Logging.Warn)
     sol === nothing && return nothing
     # `PyrolysisSolution.retcode` is a `Symbol` (`:Success` on success).
     sol.retcode == :Success || return nothing
@@ -915,7 +908,6 @@ function loss(
     # k_prior: vector of tuples (phase, T, k_meas, sigma_k[, source])
     k_prior::Union{Nothing,AbstractVector} = nothing,
     k_prior_weight::Real = 0.5,
-    jacobian_strategy::Union{Nothing,LinearSolveStrategy} = nothing,
 )
 
     tstart = time()
@@ -936,21 +928,13 @@ function loss(
                 ds[3];
                 stage = stage,
                 t_skip = t_skip,
-                jacobian_strategy = jacobian_strategy,
             ) for ds in dataset
         ]
         fetch.(tasks)
     else
         [
-            residual_vector(
-                θ,
-                ds[1],
-                ds[2],
-                ds[3];
-                stage = stage,
-                t_skip = t_skip,
-                jacobian_strategy = jacobian_strategy,
-            ) for ds in dataset
+            residual_vector(θ, ds[1], ds[2], ds[3]; stage = stage, t_skip = t_skip) for
+            ds in dataset
         ]
     end
 
@@ -1180,5 +1164,104 @@ function reset_eval_counter!()
     if isfile(tp)
         stamp = Dates.format(Dates.now(), "yyyymmdd_HHMMSS")
         mv(tp, joinpath(RUN_DIR[], "trace_$(stamp).csv"))
+    end
+end
+
+# ============================================================================
+# The scenarios
+# ============================================================================
+
+# Cone heater calibration: actual delivered flux is 97.3% of the nominal
+# setpoint for the UMD CAPA cone. Apply to nominal labels (30/50/70 kW/m²)
+# when constructing scenarios so the simulation sees the real radiative input.
+const HEAT_FLUX_CAL = 0.973
+
+# FSRI 20 kW gasification cone uses a 0.98 area-averaged multiplier per
+# the FSRI calibration documentation.
+const FSRI_HEAT_FLUX_CAL = 0.98
+
+# Enable the variable-cross-section (radial shrinkage) law for the inverse fit.
+# It is NOT free of the fitted trajectories: the ALE solver conserves cell volume
+# V = A·Δz, and the density-driven volumetric strain rate θ_cell is A-independent,
+# so the z-node velocity is the *residual* axial strain θ_L = θ_cell − θ_A (see
+# src/Residual/residual.jl `_compute_ale_mesh_velocity!`). With the law off the
+# radial channel θ_A ≡ 0 and the entire volume loss is forced into the thickness,
+# making the sample ~13–17% thinner in z at end-of-test (A/A₀ ≈ 0.86 at χ̄≈0.65–
+# 0.75) than the validated radial geometry — a shorter conduction path that biases
+# back-surface temperatures and hence the fitted properties. The naive "q″·A and
+# k·A·∂T/∂z both scale with A so it cancels" argument holds only at *fixed*
+# geometry; A enters the geometry evolution, which is exactly where the law acts.
+# The radial channel is calibrated/validated (validate_thickness.jl) against
+# the experimental conversion χ̄=1−m_f/m_0; its
+# fit residual sits at the ±0.013 D-measurement noise floor (see WP_SR2 block),
+# so `true` is the more physical setting. Cost is per-eval only (the
+# cross-section closure rows and their dense Jacobian coupling).
+const INVERSE_USE_VARIABLE_CROSS_SECTION = true
+
+# ============================================================================
+# Dataset registry — single source of truth for which fluxes exist and how
+# each one is loaded. Each entry knows its lab (which sets BC stack, cone
+# calibration, sample thickness, MC, replicate-file prefix) and a
+# `default_role` that says whether the flux defaults to fit / val / off.
+#
+# CLI flags `--fit=<csv>` and `--val=<csv>` override the defaults — pass any
+# subset of the labels below. Pass `--val=` (empty) to skip validation.
+# ============================================================================
+
+const FSRI_C0_MOISTURE = 0.03 * WP_RHO_DRY_BASIS   # 10.8 kg/m³
+const FSRI_SAMPLE_THICK = 8.68e-3
+const UMD_SAMPLE_THICK = 8.5e-3   # `load_scenario` default
+
+# Order matters: this is the order in which defaults get assembled.
+const DATASET_REGISTRY = [
+    "20kW" => (lab = :fsri_gas, q_nom_kw = 20.0, default_role = :fit),
+    "30kW" => (lab = :umd, q_nom_kw = 30.0, default_role = :fit),
+    "40kW" => (lab = :fsri_capa, q_nom_kw = 40.0, default_role = :fit),
+    "50kW" => (lab = :umd, q_nom_kw = 50.0, default_role = :fit),
+    "60kW" => (lab = :fsri_capa, q_nom_kw = 60.0, default_role = :fit),
+    "70kW" => (lab = :umd, q_nom_kw = 70.0, default_role = :val),
+]
+
+const REGISTRY_LABELS = String[p.first for p in DATASET_REGISTRY]
+_registry_lookup(label) = first(filter(p -> p.first == label, DATASET_REGISTRY)).second
+
+function load_registry_dataset(
+    label::AbstractString;
+    verbose::Bool = true,
+    use_variable_cross_section::Bool = INVERSE_USE_VARIABLE_CROSS_SECTION,
+)
+    label in REGISTRY_LABELS ||
+        error("unknown dataset $label; choose from $(REGISTRY_LABELS)")
+    spec = _registry_lookup(label)
+    if spec.lab == :umd
+        return load_scenario(
+            label,
+            spec.q_nom_kw * 1e3 * HEAT_FLUX_CAL;
+            sample_thickness = UMD_SAMPLE_THICK,
+            verbose = verbose,
+            use_variable_cross_section = use_variable_cross_section,
+        )
+    elseif spec.lab == :fsri_gas
+        return load_fsri_scenario(
+            label,
+            spec.q_nom_kw * 1e3 * FSRI_HEAT_FLUX_CAL;
+            c0_moisture = FSRI_C0_MOISTURE,
+            sample_thickness = FSRI_SAMPLE_THICK,
+            replicate_prefix = FSRI_REPLICATE_PATTERN_PREFIX,
+            verbose = verbose,
+            use_variable_cross_section = use_variable_cross_section,
+        )
+    elseif spec.lab == :fsri_capa
+        return load_fsri_scenario(
+            label,
+            spec.q_nom_kw * 1e3 * FSRI_HEAT_FLUX_CAL;
+            c0_moisture = FSRI_C0_MOISTURE,
+            sample_thickness = FSRI_SAMPLE_THICK,
+            replicate_prefix = FSRI_CAPA_REPLICATE_PATTERN_PREFIX,
+            verbose = verbose,
+            use_variable_cross_section = use_variable_cross_section,
+        )
+    else
+        error("registry: unknown lab tag $(spec.lab) for $label")
     end
 end

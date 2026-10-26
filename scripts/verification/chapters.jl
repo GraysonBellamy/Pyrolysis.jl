@@ -15,7 +15,6 @@
 # chapter generation.
 
 using Printf
-using Dates
 
 "Family id: member ids differ only by a trailing letter (V-HC-02a → V-HC-02)."
 base_case_id(id::String) = replace(id, r"(?<=\d)[a-z]+$" => "")
@@ -30,6 +29,39 @@ function _md_table(io, header::Vector{String}, rows)
         println(io, "| ", join(_md_cell.(string.(collect(row))), " | "), " |")
     end
     println(io)
+end
+
+function _write_timing_comparison(io, case_id::String, figures)
+    println(
+        io,
+        """
+        Setup and simulation wall times at every ladder rung against the
+        reference runs. Julia times model construction and solve after warm-up;
+        FDS and Gpyro use internal total elapsed wall time, including setup and
+        simulation output. Process launch and Julia compilation are excluded
+        from the figure. Output costs, discretizations and time-stepping rules
+        still differ, so these are indicative costs, not pure solver speedups.
+        See `test/verification/reference/README.md` and `timings.csv` for the
+        timer boundaries, resolutions and measurement provenance.
+        """,
+    )
+    for (kind, path) in figures
+        println(io, "![$(case_id) $(kind)]($(path))\n")
+    end
+    println(
+        io,
+        "Reference timings below are medians of five runs after one warm-up. ",
+        "Full process time also includes launch and shutdown; it is shown ",
+        "separately and is not compared with Julia's warmed time.\n",
+    )
+    _md_table(
+        io,
+        ["Code", "Resolution", "Internal elapsed (s)", "Full process (s)"],
+        [
+            (r.label, r.res, _fmt(r.wall), _fmt(r.process_wall)) for
+            r in _reference_timings(case_id)
+        ],
+    )
 end
 
 """
@@ -116,31 +148,18 @@ function _write_member!(io, r::CaseReportResult)
         println(
             io,
             """
-            The same case was solved with $(codes_txt); decks, outputs, and
-            run provenance are committed under `test/verification/reference/`.
-            Each code's error against the same exact solution is drawn below
-            on a log scale, muted gray behind this solver's series — the
-            signed linear-scale panel above shows where the error lives, this
-            one compares magnitudes across codes.
+            Reference runs are available from $(codes_txt). Decks, outputs and
+            available provenance are under `test/verification/reference/`; check
+            case-specific parameters and transformations before comparing. Where
+            error panels are present, they compare against the analytical reference.
+            A timing entry alone does not establish an identical physical workload.
             """,
         )
         for (kind, path) in cc_err
             println(io, "![$(case.id) $(kind)]($(path))\n")
         end
         if !isempty(cc_time)
-            println(
-                io,
-                """
-                Wall times at every ladder rung against the reference runs.
-                Resolutions and simulated spans differ where noted (details in
-                `reference/timings.csv`), so cross-code timings are indicative
-                rather than a controlled benchmark; rungs at a matched
-                resolution are directly comparable.
-                """,
-            )
-            for (kind, path) in cc_time
-                println(io, "![$(case.id) $(kind)]($(path))\n")
-            end
+            _write_timing_comparison(io, case.id, cc_time)
         end
         if !isempty(cc_over)
             println(
@@ -180,8 +199,8 @@ function _write_member!(io, r::CaseReportResult)
         vcat(
             [(
                 "integrator",
-                haskey(r.solve_kwargs, :alg) ? string(r.solve_kwargs.alg) :
-                "KenCarp4 (default)",
+                haskey(r.solve_kwargs, :integrator_policy) ?
+                string(r.solve_kwargs.integrator_policy) : "Rodas5P (default)",
             )],
             [(string(k), repr(v)) for (k, v) in pairs(r.solve_kwargs)],
         ),
@@ -232,13 +251,13 @@ function write_chapters(
             haskey(r.case.report, :note) && println(io, "_$(r.case.report.note)_\n")
             _write_member!(io, r)
         end
-        text = String(take!(io))
+        text = rstrip(String(take!(io))) * "\n"
         validate_chapter("$(base).md", text)
         write(joinpath(outdir, "$(base).md"), text)
     end
 
-    # Dashboard index — only rewritten when this run covered every case; a
-    # partial --cases run would otherwise drop the unselected rows.
+    # A partial report refreshes its rows and preserves unselected cases.
+    # Drop rows for cases that are no longer present in the suite.
     write_index || return nothing
     io = IOBuffer()
     println(
@@ -246,28 +265,35 @@ function write_chapters(
         """
         # Verification suite report
 
-        Exact-solution verification of Pyrolysis.jl: every case solves a
-        problem with a closed-form (or manufactured) reference solution and
-        reports error norms, pinned tolerances with provenance, and observed
-        convergence orders. Methodology, case selection, and the dual-mode
+        Verification and regression checks for Pyrolysis.jl use analytical,
+        manufactured and independent conservation constraints as identified in
+        each case. The report includes error norms, tolerances with provenance,
+        and observed convergence orders where available. Burnout histories without
+        an independent peak or timing reference are reported without asserting
+        those quantities. Methodology, case selection, and the dual-mode
         (CI assert / report) architecture are described in the Technical
         Reference Guide, §18.1–§18.2; the assert-mode twin of
         this report runs in `Pkg.test()` from the same case definitions
         (`test/verification/`).
 
+        The summary tables use each case’s finest report resolution. Coarser
+        resolutions are retained to show convergence and can exceed the unchanged
+        CI tolerances; their CSV rows record those failures explicitly.
+
         Figures follow the FDS Verification Guide convention: lines are the
         exact/reference solution, markers are the solver. Tolerances are
         pinned at ~3× the observed error at pin time (the provenance column).
 
-        Where a case has a published analog in another solver, it carries a
-        "Comparison with other codes" section: FDS 6.11.0 and Gpyro 0.8200
-        were run locally on the same problems (decks and outputs committed
-        with provenance in `test/verification/reference/`), and their errors
-        against the same exact solutions are overlaid — muted gray, log
-        scale — together with a wall-time comparison at every resolution
-        rung.
+        Selected cases include retained FDS 6.11.1 or Gpyro 0.8200 results.
+        Their decks, transformations and available provenance are documented in
+        `test/verification/reference/`. Error overlays compare matched analytical
+        problems where indicated; the V-BO-01 Gpyro V2 curve is a separate numerical
+        overlay. Timing figures compare warmed Julia model construction and solve
+        with FDS/Gpyro internal total elapsed wall time. Full process timings
+        appear separately in supporting tables; output and numerical workloads
+        still differ between codes.
 
-        Generated $(Dates.format(Dates.now(), "yyyy-mm-dd")) by
+        Generated by
         `scripts/verification/run_reports.jl`. Regenerate with:
         `julia --project=scripts/verification scripts/verification/run_reports.jl`
         """,
@@ -289,13 +315,24 @@ function write_chapters(
             ),
         )
     end
+    refreshed = Set(r.case.id for r in results)
+    available = Set(c.id for c in all_cases if !isempty(pairs(c.report)))
+    existing_index = joinpath(outdir, "index.md")
+    if isfile(existing_index)
+        for line in eachline(existing_index)
+            id = match(r"^\| \[(V-[A-Z]+-[0-9]+[a-z]*)\]", line)
+            id === nothing && continue
+            id[1] in available && !(id[1] in refreshed) || continue
+            push!(rows, Tuple(strip.(split(strip(line, ['|', ' ']), r"(?<!\\)\|"))))
+        end
+    end
+    sort!(rows; by = first)
     _md_table(
         io,
         ["case", "title", "tags", "QoIs within tol", "worst error/tol", "observed order"],
         rows,
     )
-    reported = Set(r.case.id for r in results)
-    skipped = [c.id for c in all_cases if !(c.id in reported)]
+    skipped = [c.id for c in all_cases if isempty(pairs(c.report))]
     if !isempty(skipped)
         println(
             io,
@@ -304,7 +341,7 @@ function write_chapters(
             ".",
         )
     end
-    text = String(take!(io))
+    text = rstrip(String(take!(io))) * "\n"
     validate_chapter("index.md", text)
     write(joinpath(outdir, "index.md"), text)
     return nothing

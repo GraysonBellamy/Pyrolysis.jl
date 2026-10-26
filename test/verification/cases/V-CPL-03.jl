@@ -26,15 +26,16 @@
 #
 # NOTE a γ > 1 intumescent branch is NOT representable: γ is
 # validated to [0, 1] (universal volume-fraction semantics shared with
-# mixture density and conductivity mixing). Swelling is exercised through
+# volume-fraction and conductivity mixing). Swelling is exercised through
 # ρ_B < ρ_A (P1) and the partial-contribution branch through γ_B ∈ (0, 1)
 # (P6). Documented as a model limitation.
 #
 # Permutations (ρ_A = 1000, γ_A = 1, isothermal via E = 0, h = 0, everything
 # impermeable). Mass QoIs: EVERY permutation asserts total-mass conservation
-# to integrator tolerance — every component rides the mesh and carries the
-# dilation −ξθ (tech-ref §11.2.3), so the gas held in a collapsing
-# impermeable matrix compresses cell by cell (ξ_g ↑ as V ↓) and leaves only
+# to integrator tolerance — every component's mass is a state that rides the
+# mesh, so its concentration ξ = m/V follows the cell volume (tech-ref
+# §11.3.4): the gas held in a collapsing impermeable matrix compresses cell
+# by cell (ξ_g ↑ as V ↓) and leaves only
 # through the (closed) faces. P4 is the sealed-column anchor for that
 # bookkeeping. Gas-producing permutations additionally assert the SOLID
 # ledger (char endpoint = y_char·m_A0 exactly).
@@ -45,7 +46,7 @@
 #   P4 char + gas:       A → 0.3 C(ρ=1000) + 0.7 G  V_f/V₀ = 0.3
 #   P5 mass loss, ΔV=0:  A → 0.5 C(ρ=500)  + 0.5 G  V_f/V₀ = 1
 #   P6 partial γ:        A → B(ρ=1000, γ=0.5)       V_f/V₀ = 1/2
-#   P7 WithChi:          P5 chemistry + lateral law A/A₀ = 1 − 0.5·χ̄
+#   P7 lateral law:      P5 chemistry + lateral law A/A₀ = 1 − 0.5·χ̄
 #        χ̄_f = 0.5 (released dry-mass fraction) ⇒ A_f/A₀ = 0.75 exactly,
 #        L_f/L₀ = (V_f/V₀)/(A_f/A₀) = 4/3.
 #
@@ -65,54 +66,77 @@ function _vcpl03_problem(perm; n_cells = 8, n_outputs = 3)
     t_end = 8.0
     L = 2e-3
 
-    solidA = SolidComponent(:A, ρ = ρ_A, c = 1000.0, k = 0.5)
-    gasG(name = :G) = GaseousComponent(name, M = 0.05, c = 1000.0, k = 0.02, λ = 1e-8)
+    solidA = SolidComponent(:A, ρ = ρ_A, c = 1000.0, k = 0.5, φ = 0.6, λ = 0.0)
+    gasG(name = :G) = GaseousComponent(name, M = 0.05, c = 1000.0, k = 0.02)
 
     comps, rxn, exact_Vf, chi_law = if perm == :P1
         (
-            (solidA, SolidComponent(:B, ρ = 500.0, c = 1000.0, k = 0.5)),
+            (solidA, SolidComponent(:B, ρ = 500.0, c = 1000.0, k = 0.5, φ = 0.6, λ = 0.0)),
             Reaction(:r, 1 => 2; A = A_r, E = 0.0, h = 0.0),
             2.0,
             nothing,
         )
     elseif perm == :P2
         (
-            (solidA, SolidComponent(:B, ρ = 2000.0, c = 1000.0, k = 0.5)),
+            (solidA, SolidComponent(:B, ρ = 2000.0, c = 1000.0, k = 0.5, φ = 0.6, λ = 0.0)),
             Reaction(:r, 1 => 2; A = A_r, E = 0.0, h = 0.0),
             0.5,
             nothing,
         )
     elseif perm == :P3
         (
-            (solidA, SolidComponent(:B, ρ = 1000.0, c = 1000.0, k = 0.5)),
+            (solidA, SolidComponent(:B, ρ = 1000.0, c = 1000.0, k = 0.5, φ = 0.6, λ = 0.0)),
             Reaction(:r, 1 => 2; A = A_r, E = 0.0, h = 0.0),
             1.0,
             nothing,
         )
     elseif perm == :P4
         (
-            (solidA, SolidComponent(:C, ρ = 1000.0, c = 1000.0, k = 0.5), gasG()),
+            (
+                solidA,
+                SolidComponent(:C, ρ = 1000.0, c = 1000.0, k = 0.5, φ = 0.6, λ = 0.0),
+                gasG(),
+            ),
             Reaction(:r, 1 => (2, 3); A = A_r, E = 0.0, h = 0.0, yields = (0.3, 0.7)),
             0.3,
             nothing,
         )
     elseif perm == :P5
         (
-            (solidA, SolidComponent(:C, ρ = 500.0, c = 1000.0, k = 0.5), gasG()),
+            (
+                solidA,
+                SolidComponent(:C, ρ = 500.0, c = 1000.0, k = 0.5, φ = 0.6, λ = 0.0),
+                gasG(),
+            ),
             Reaction(:r, 1 => (2, 3); A = A_r, E = 0.0, h = 0.0, yields = (0.5, 0.5)),
             1.0,
             nothing,
         )
     elseif perm == :P6
         (
-            (solidA, SolidComponent(:B, ρ = 1000.0, c = 1000.0, k = 0.5, γ = 0.5)),
+            (
+                solidA,
+                SolidComponent(
+                    :B,
+                    ρ = 1000.0,
+                    c = 1000.0,
+                    k = 0.5,
+                    γ = 0.5,
+                    φ = 0.6,
+                    λ = 0.0,
+                ),
+            ),
             Reaction(:r, 1 => 2; A = A_r, E = 0.0, h = 0.0),
             0.5,
             nothing,
         )
     elseif perm == :P7
         (
-            (solidA, SolidComponent(:C, ρ = 500.0, c = 1000.0, k = 0.5), gasG()),
+            (
+                solidA,
+                SolidComponent(:C, ρ = 500.0, c = 1000.0, k = 0.5, φ = 0.6, λ = 0.0),
+                gasG(),
+            ),
             Reaction(:r, 1 => (2, 3); A = A_r, E = 0.0, h = 0.0, yields = (0.5, 0.5)),
             1.0,
             χ̄ -> 1.0 - 0.5 * χ̄,
@@ -129,8 +153,7 @@ function _vcpl03_problem(perm; n_cells = 8, n_outputs = 3)
         depletion_limiter = DepletionLimiter(enabled = false),
         lateral_shrinkage_law = chi_law,
     )
-    ξinit_t = ntuple(i -> i == 1 ? ρ_A : 0.0, nc)
-    mesh = create_uniform_mesh(L, n_cells, Val(nc); T_initial = T_iso, ξ_initial = ξinit_t)
+    mesh = create_uniform_mesh(L, n_cells)
     bc_set = BoundaryConditionSet(
         thermal = (top = DirichletThermalBC(T_iso), bottom = DirichletThermalBC(T_iso)),
     )
@@ -148,11 +171,10 @@ end
 
 function _vcpl03_solve(perm; n_cells = 8, n_outputs = 3)
     r = _vcpl03_problem(perm; n_cells = n_cells, n_outputs = n_outputs)
-    sol = solve(
+    sol = suite_solve(
         r.problem;
         use_ale = true,
         min_thickness = 1e-5,
-        progress = false,
         abstol = 1e-10,
         reltol = 1e-8,
     )
@@ -272,7 +294,7 @@ function _verification_case_vcpl03()
 
     return VerificationCase(
         id = "V-CPL-03",
-        title = "shrink/swell exact endpoints (6 permutations + WithChi law)",
+        title = "shrink/swell exact endpoints (6 permutations + lateral law)",
         tags = [:ale, :volume_change, :swelling, :chi, :mass_conservation],
         references = [
             "FDS Verification Guide `shrink_swell` (endpoint concept)",
@@ -319,7 +341,7 @@ function _verification_case_vcpl03()
                         ),
                     )
                 end
-                # FDS 6.11.0 overlay (reference/fds/custom/): the shipped
+                # FDS 6.11.1 overlay (reference/fds/custom/): the shipped
                 # shrink_swell case heats with an Arrhenius transient (only
                 # endpoints comparable), so vcpl03_shrink_swell_paths.fds
                 # reruns FDS isothermally with our P1/P2 densities and
@@ -337,7 +359,7 @@ function _verification_case_vcpl03()
                     push!(
                         series,
                         CurveSeries(
-                            label = "FDS 6.11.0 $(perm)",
+                            label = "FDS 6.11.1 $(perm)",
                             crosscode = true,
                             x = t_fds,
                             y = fds[col][2:end] ./ 0.002,

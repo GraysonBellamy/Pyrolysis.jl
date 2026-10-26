@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
-"""Extract clean SI CSVs from the four Gpyro verification runs and check
-each against its exact solution. Writes into $SP/gpyro_out/."""
+"""Extract SI CSVs from four Gpyro verification runs and check exact solutions.
+
+Run as `python3 extract_results.py WORKSPACE`, with raw runs under
+WORKSPACE/gpyro_run. Results are written to WORKSPACE/gpyro_out.
+"""
+import argparse
 import csv, math, os, shutil
 
-SP = "/tmp/claude-1000/-home-gbellamy-Documents-git-Pyrolysis-jl/1a2eca1a-8b5b-4897-8460-8250976c6e1e/scratchpad"
-RUN = os.path.join(SP, "gpyro_run")
-OUT = os.path.join(SP, "gpyro_out")
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("workspace", help="directory containing gpyro_run")
+workspace = parser.parse_args().workspace
+RUN = os.path.join(workspace, "gpyro_run")
+OUT = os.path.join(workspace, "gpyro_out")
 os.makedirs(OUT, exist_ok=True)
 C2K = 273.15
 

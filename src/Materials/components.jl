@@ -65,7 +65,7 @@ struct SolidComponent{
     Pρ<:AbstractPropertyFunction,
     Pc<:AbstractPropertyFunction,
     Pk<:AbstractPropertyFunction,
-    Pλ<:AbstractPropertyFunction,
+    Pλ<:Union{Nothing,AbstractPropertyFunction},
     Pκ<:AbstractPropertyFunction,
     Pε<:AbstractPropertyFunction,
     Pa<:Union{Nothing,Float64},
@@ -85,7 +85,7 @@ struct SolidComponent{
 end
 
 """
-	GaseousComponent{Pρ,Pc,Pk,Pλ,Pε} <: AbstractComponent
+	GaseousComponent{Pρ,Pc,Pk,Pε} <: AbstractComponent
 
 A gas-phase component. Density is typically the ideal-gas law. Gases flow
 *through* the matrix, not part of it — there is no `permeability` field, and
@@ -95,7 +95,6 @@ struct GaseousComponent{
     Pρ<:AbstractPropertyFunction,
     Pc<:AbstractPropertyFunction,
     Pk<:AbstractPropertyFunction,
-    Pλ<:AbstractPropertyFunction,
     Pε<:AbstractPropertyFunction,
 } <: AbstractComponent
     name::Symbol
@@ -103,7 +102,6 @@ struct GaseousComponent{
     density::Pρ
     heat_capacity::Pc
     thermal_conductivity::Pk
-    gas_transfer_coeff::Pλ
     emissivity::Pε
     absorption_coeff::Float64
     swelling_factor::Float64
@@ -121,7 +119,7 @@ struct LiquidComponent{
     Pρ<:AbstractPropertyFunction,
     Pc<:AbstractPropertyFunction,
     Pk<:AbstractPropertyFunction,
-    Pλ<:AbstractPropertyFunction,
+    Pλ<:Union{Nothing,AbstractPropertyFunction},
     Pκ<:AbstractPropertyFunction,
     Pε<:AbstractPropertyFunction,
     Pa<:Union{Nothing,Float64},
@@ -146,7 +144,7 @@ end
 
 """
 	SolidComponent(name; ρ, c, k, ε=0.9, absorptivity=nothing, α=0.0, γ=1.0,
-	               λ=0.0, κ=0.0, ρ_intrinsic=nothing, φ=nothing)
+	               λ=nothing, κ=0.0, ρ_intrinsic=nothing, φ=nothing)
 
 Create a solid component with simplified interface.
 
@@ -167,37 +165,28 @@ Create a solid component with simplified interface.
 - `α=0.0`: Mass absorption coefficient [m²/kg] (Beer-Lambert in-depth
   absorption, unrelated to `absorptivity`)
 - `γ=1.0`: Swelling factor [-] (default 1.0: solid contributes to volume change)
-- `λ=0.0`: Gas transfer coefficient [m²/s] for mixture property calculation
+- `λ=nothing`: Condensed superficial transfer [m²/s]; explicit for participating lumped matrices
 - `κ=0.0`: Permeability [m²] for Darcy flow (0 = impermeable)
 - `ρ_intrinsic=nothing`: Skeletal/intrinsic density of the cell-wall material
   [kg/m³]. Used **only** by the porosity formula `φ = 1 − Σ ξⱼ/ρⱼ_intrinsic`,
-  not by mixing rules, mixture density, or volume-change kernels (those keep
+  not by bulk mixing rules or volume-change kernels (those keep
   using bulk `ρ`). When omitted, defaults to `ρ` — i.e. the pure phase has no
   pores, the implicit assumption.
 - `φ=nothing`: Alternative to `ρ_intrinsic`. Porosity of the pure phase
   (dimensionless, 0 ≤ φ < 1). When given with constant bulk `ρ`, sets
   `ρ_intrinsic = ρ / (1 − φ)`. Pass either `ρ_intrinsic` *or* `φ`, not both.
 
-# Note on swelling_factor
-γ is the fraction of this component's intrinsic volume that contributes to
-the bulk (matrix) volume. It has **one** meaning everywhere: the dilation
-rate θ = Σγⱼ(dξⱼ/dt)/ρⱼ, the mixture density 1/ρ = Σγⱼ·Yⱼ/ρⱼ, and the
-conductivity/emissivity volume weights (`solid_volume_fractions`) all use
-the same γⱼ·ξⱼ/ρⱼ weighting.
-- γ=1.0: Full contribution (default for solids — when solid depletes, volume shrinks)
-- γ=0.0: Consistently *volumeless* — no strain on conversion, no volume in
-  the bulk density, **and no weight in conductivity/emissivity mixing**. Use
-  with care: a γ=0 "rigid char" stops contributing its k and ε to the mixture.
-- γ∈(0,1): Partial contribution (advanced use cases)
+# Swelling, skeletal occupancy and gas transport
+The strain law and thermal volume weights use γ ξ/ρ_bulk. Gas matrix weights
+use that quantity only for condensed components. Skeletal occupancy ξ/ρ_intrinsic
+is independent of γ, so γ=0 does not make a component physically volumeless.
+A zero-γ condensed component must have zero λ and κ (or omit λ).
 
-# Note on gas_transfer_coeff (λ)
-Although solids don't transport themselves, they contribute to the effective gas
-transfer coefficient of the mixture through volume-weighted mixing rules. Set to
-a non-zero value (e.g., 2e-5 m²/s) to match ThermaKin conventions. With the
-default `λ = 0`, Fickian gas transport vanishes in a cell of this solid that
-holds no gas, and the gas field of a gas-producing material ends in a sharp
-front on which the implicit Newton fails repeatedly; problem validation warns
-in that configuration (`warn_degenerate_gas_transport`).
+`LumpedTransfer` requires explicit λ on each participating condensed component.
+This superficial coefficient multiplies the intrinsic partial-pressure gradient.
+Zero is a legal closed wall channel independently of permeability; gas loading
+cannot open it. `DustyGas` supplies wall/molecular coefficients from its declared
+geometry and molecular reference data.
 
 # Note on permeability (κ)
 Permeability determines resistance to pressure-driven (Darcy) gas flow through
@@ -225,8 +214,8 @@ function SolidComponent(
     absorptivity::Union{Nothing,Real} = nothing,
     α::Real = 0.0,
     γ::Real = 1.0,
-    λ::Real = 0.0,
-    κ::Real = 0.0,
+    λ = nothing,
+    κ = 0.0,
     ρ_intrinsic = nothing,
     φ = nothing,
     validate_properties::Bool = true,
@@ -239,7 +228,7 @@ function SolidComponent(
         bulk_ρ,
         to_property(c),
         to_property(k),
-        to_property(λ),  # contributes to effective gas transfer coefficient
+        λ === nothing ? nothing : to_property(λ),  # contributes to effective gas transfer coefficient
         to_property(κ),  # permeability for Darcy flow
         to_property(ε),
         _resolve_surface_absorptivity(absorptivity, name),
@@ -247,6 +236,7 @@ function SolidComponent(
         Float64(γ),
         intrinsic_ρ,
     )
+    _validate_matrix_participation(comp)
     validate_properties && _validate_condensed_properties(comp)
     return comp
 end
@@ -309,8 +299,9 @@ function _validate_condensed_properties(c::Union{SolidComponent,LiquidComponent}
     _validate_property_law(c.intrinsic_density, n, "intrinsic density", "kg/m³")
     _validate_property_law(c.heat_capacity, n, "heat capacity", "J/(kg·K)")
     _validate_property_law(c.thermal_conductivity, n, "thermal conductivity", "W/(m·K)")
-    _validate_property_law(
-        c.gas_transfer_coeff,
+    transfer = c.gas_transfer_coeff
+    transfer !== nothing && _validate_property_law(
+        transfer,
         n,
         "gas transfer coefficient",
         "m²/s";
@@ -330,7 +321,7 @@ end
 
 function _validate_gas_properties(c::GaseousComponent)
     n = c.name
-    # A gas with c = 0 carries no sensible enthalpy (S_conv vanishes); the
+    # A gas with c = 0 carries no sensible enthalpy (its enthalpy flux vanishes); the
     # matrix heat capacity floor keeps the energy equation
     # well posed, so zero is admissible here where it is not for a solid.
     _validate_property_law(
@@ -341,13 +332,6 @@ function _validate_gas_properties(c::GaseousComponent)
         strict_lower = false,
     )
     _validate_property_law(c.thermal_conductivity, n, "thermal conductivity", "W/(m·K)")
-    _validate_property_law(
-        c.gas_transfer_coeff,
-        n,
-        "gas transfer coefficient",
-        "m²/s";
-        strict_lower = false,
-    )
     _validate_property_law(
         c.emissivity,
         n,
@@ -374,30 +358,29 @@ end
 end
 
 # γ is a volume fraction weight; values outside [0,1] have no physical
-# meaning under the universal swelling semantics (θ, mixture density, and
-# conductivity/emissivity weights all share it).
+# meaning under the declared bulk-occupancy semantics used by strain and
+# conductivity/emissivity weights.
 @inline function _validate_swelling_factor(γ::Real, name::Symbol)
     0.0 <= γ <= 1.0 || throw(
         ArgumentError(
             "component :$name has swelling factor γ = $γ outside [0, 1]. γ is " *
-            "the fraction of the component's intrinsic volume contributing to " *
-            "the bulk volume (θ, mixture density, and conductivity/emissivity " *
-            "mixing all share this weighting).",
+            "the fraction of the component's declared bulk occupancy contributing " *
+            "to volume change and conductivity/emissivity mixing.",
         ),
     )
     return nothing
 end
 
 """
-	GaseousComponent(name; M, c, k, λ, ε=0.0, α=0.0, γ=0.0)
+	GaseousComponent(name; M, c, k, ε=0.0, α=0.0, γ=0.0)
 
 Create a gaseous component with simplified interface.
 
 For ideal gases, density is computed from the ideal gas law **at the
-reference pressure**: ρ_g(T) = P_REF·M/(R·T). Property functions carry no
-pressure argument, so in pressurized cells the gas volume fraction used in
-λ/κ mixing (and the γ > 0 swelling-gas mixture density) is over-weighted by
-~P/P_REF. The pressure closure P = N/φ and porosity are unaffected.
+reference pressure**: ρ_g(T) = P_REF·M/(R·T). This T-only property supplies
+thermal volume weights and any declared gas swelling contribution. Pore
+density and pressure instead use the actual gas inventories and skeletal
+pore volume. Matrix transport weights exclude gases for every value of γ.
 
 Gases do NOT have permeability - they flow THROUGH the solid matrix.
 
@@ -406,7 +389,6 @@ Gases do NOT have permeability - they flow THROUGH the solid matrix.
 - `M`: Molar mass [kg/mol]
 - `c`: Heat capacity [J/(kg·K)] (number or property function)
 - `k`: Thermal conductivity [W/(m·K)] (number or property function)
-- `λ`: Gas transfer coefficient [m²/s] (number or property function)
 - `ε=0.0`: Surface emissivity [-] (number or property function of `T`;
   typically 0 for gases)
 - `α=0.0`: Mass absorption coefficient [m²/kg]
@@ -423,10 +405,10 @@ Only solid and liquid components contribute to the effective permeability.
 
 # Example
 ```julia
-MMA = GaseousComponent(:MMA, M=0.100, c=1500, k=0.02, λ=1e-5)
-water_vapor = GaseousComponent(:H2O, M=0.018, c=2000, k=0.025, λ=2e-5)
+MMA = GaseousComponent(:MMA, M=0.100, c=1500, k=0.02,)
+water_vapor = GaseousComponent(:H2O, M=0.018, c=2000, k=0.025,)
 # Intumescent gas that creates new volume:
-intumescent_gas = GaseousComponent(:gas, M=0.040, c=1000, k=0.02, λ=1e-5, γ=1.0)
+intumescent_gas = GaseousComponent(:gas, M=0.040, c=1000, k=0.02, γ=1.0)
 ```
 """
 function GaseousComponent(
@@ -434,7 +416,6 @@ function GaseousComponent(
     M::Real,
     c,
     k,
-    λ,
     ε = 0.0,
     α::Real = 0.0,
     γ::Real = 0.0,
@@ -443,7 +424,7 @@ function GaseousComponent(
     # A gas with M ≤ 0 would silently exert no pressure: the ideal-gas closure
     # P = Σ ξⱼRT/(Mⱼφ) filters on molar_mass > 0, while transport does not —
     # the species would advect/diffuse but never contribute to P.
-    M > 0 || throw(
+    isfinite(M) && M > 0 || throw(
         ArgumentError(
             "GaseousComponent :$name requires a positive molar mass M [kg/mol], " *
             "got $M. A gas with M ≤ 0 is excluded from the pressure closure " *
@@ -452,13 +433,8 @@ function GaseousComponent(
     )
     _validate_swelling_factor(γ, name)
     # Ideal gas density: ρ = PM/(RT), evaluated at the REFERENCE pressure.
-    # Property functions are T-only, so every consumer of this density
-    # (volume_fractions → λ/κ mixing; γ > 0 swelling-gas mixture density)
-    # sees ρ_g(T, P_REF): in a pressurized cell the gas volume is
-    # over-weighted by ~P/P_REF. The pressure closure
-    # P = N/φ and the porosity formula are unaffected — they never use this
-    # density. Acceptable at the ≤ atm-scale overpressures of validated
-    # cases; revisit if property functions ever gain a pressure argument.
+    # Thermal volume weights and gas swelling use this reference-state
+    # property. The pore EOS and condensed transport weights do not.
     M_float = Float64(M)
     ρ_func = CallableProperty(T -> P_REF * M_float / (R_GAS * T))
 
@@ -468,7 +444,6 @@ function GaseousComponent(
         ρ_func,
         to_property(c),
         to_property(k),
-        to_property(λ),
         to_property(ε),
         Float64(α),
         Float64(γ),
@@ -478,7 +453,7 @@ function GaseousComponent(
 end
 
 """
-	LiquidComponent(name; ρ, c, k, λ=2e-5, κ=0.0, ε=0.95, absorptivity=nothing,
+	LiquidComponent(name; ρ, c, k, λ=nothing, κ=0.0, ε=0.95, absorptivity=nothing,
 	                α=0.0, γ=0.0)
 
 Create a liquid component with simplified interface.
@@ -488,7 +463,7 @@ Create a liquid component with simplified interface.
 - `ρ`: Density [kg/m³] (number or property function)
 - `c`: Heat capacity [J/(kg·K)] (number or property function)
 - `k`: Thermal conductivity [W/(m·K)] (number or property function)
-- `λ=2e-5`: Transport coefficient [m²/s] for mixture property calculation
+- `λ=nothing`: Condensed superficial transfer [m²/s]; explicit for participating lumped matrices
 - `κ=0.0`: Permeability [m²] for Darcy flow (0 = blocks flow, typical for liquids)
 - `ε=0.95`: Surface emissivity [-] (number or property function of `T`).
   Condensed liquids are strong thermal emitters (water ≈ 0.96), so a low
@@ -499,30 +474,20 @@ Create a liquid component with simplified interface.
 - `α=0.0`: Mass absorption coefficient [m²/kg]
 - `γ=0.0`: Swelling factor [-]
 
-# Note on swelling_factor
-The default γ = 0 makes a liquid **volumeless** under the universal swelling
-semantics: it contributes no strain to θ, no volume to the bulk density, and
-no weight in conductivity/emissivity mixing — ThermaKin's `L SWELLING: 0`
-behavior for moisture bound in cell walls (no pseudo-density such as
-ρ ≈ 1e6 is needed). Set γ = 1 for a
-liquid that physically occupies bulk volume (e.g. a melt layer).
-
-# Note on gas_transfer_coeff (λ)
-Like solids, liquids contribute to the effective gas transfer coefficient of the
-mixture through volume-weighted mixing rules. The default value (2e-5 m²/s)
-matches ThermaKin conventions.
-
-# Note on permeability (κ)
-Liquids typically block gas flow (κ=0), as the liquid fills pore space.
-Set to non-zero only for special cases like partially saturated porous media.
+# Swelling and transport
+The default γ=0 removes the liquid from matrix transport weights and the
+strain law, while its skeletal occupancy remains ξ/ρ_intrinsic. Such a liquid
+must omit λ or set it to zero and must have κ=0. A matrix-forming liquid with
+γ>0 supplies explicit λ under `LumpedTransfer`. Either gas model uses the
+physical pore volume after all condensed skeletal occupancies are subtracted.
 """
 function LiquidComponent(
     name::Symbol;
     ρ,
     c,
     k,
-    λ = 2e-5,
-    κ::Real = 0.0,
+    λ = nothing,
+    κ = 0.0,
     ε = 0.95,
     absorptivity::Union{Nothing,Real} = nothing,
     α::Real = 0.0,
@@ -539,7 +504,7 @@ function LiquidComponent(
         bulk_ρ,
         to_property(c),
         to_property(k),
-        to_property(λ),
+        λ === nothing ? nothing : to_property(λ),
         to_property(κ),  # permeability for Darcy flow
         to_property(ε),
         _resolve_surface_absorptivity(absorptivity, name),
@@ -547,6 +512,7 @@ function LiquidComponent(
         Float64(γ),
         intrinsic_ρ,
     )
+    _validate_matrix_participation(comp)
     validate_properties && _validate_condensed_properties(comp)
     return comp
 end
@@ -712,37 +678,15 @@ liquids (which do not carry a molar-mass field).
 @inline molar_mass(comp::GaseousComponent) = comp.molar_mass
 @inline molar_mass(::AbstractComponent) = 0.0
 
-# ============================================================================
-# Radiation Property Queries
-# ============================================================================
-
-"""
-	has_absorption_coefficients(components::Tuple) -> Bool
-
-Returns true if any solid component has a non-zero absorption coefficient.
-
-This is used to warn users when SURFACE_ABSORPTION radiation model is selected
-but material components have α values set (which will be ignored).
-
-# Arguments
-- `components`: Tuple of Component objects from a Material
-
-# Returns
-- `true` if any component has absorption_coeff > 0
-- `false` otherwise
-
-# Example
-```julia
-if has_absorption_coefficients(material.components)
-	@warn "Absorption coefficients will be ignored with SURFACE_ABSORPTION model"
-end
-```
-"""
-function has_absorption_coefficients(components::Tuple)
-    for comp in components
-        if comp.absorption_coeff > 0.0
-            return true
-        end
+function _validate_matrix_participation(c::Union{SolidComponent,LiquidComponent})
+    if c.swelling_factor == 0
+        λ = c.gas_transfer_coeff
+        ((λ === nothing || identically_zero(λ)) && identically_zero(c.permeability)) ||
+            throw(
+                ArgumentError(
+                    "component :$(c.name): γ=0 excludes it from the transport matrix; nonzero λ or κ cannot be used",
+                ),
+            )
     end
-    return false
+    return nothing
 end

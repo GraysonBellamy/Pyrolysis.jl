@@ -40,15 +40,15 @@ comparability of the dissertation figures (report mode).
 
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
-| L∞ T-profile error, t=30.0 s | 0.002864 | — | 0.002864 | 0.25 | yes | observed 0.044/0.057/0.065/0.080 K at t=30/60/90/180 s |
-| L∞ T-profile error, t=60.0 s | 0.003685 | — | 0.003685 | 0.25 | yes | observed 0.044/0.057/0.065/0.080 K at t=30/60/90/180 s |
-| L∞ T-profile error, t=90.0 s | 0.004193 | — | 0.004193 | 0.25 | yes | observed 0.044/0.057/0.065/0.080 K at t=30/60/90/180 s |
+| L∞ T-profile error, t=30.0 s | 0.002856 | — | 0.002856 | 0.25 | yes | observed 0.044/0.057/0.065/0.080 K at t=30/60/90/180 s |
+| L∞ T-profile error, t=60.0 s | 0.003682 | — | 0.003682 | 0.25 | yes | observed 0.044/0.057/0.065/0.080 K at t=30/60/90/180 s |
+| L∞ T-profile error, t=90.0 s | 0.004191 | — | 0.004191 | 0.25 | yes | observed 0.044/0.057/0.065/0.080 K at t=30/60/90/180 s |
 | L∞ T-profile error, t=180.0 s | 0.005112 | — | 0.005112 | 0.25 | yes | observed 0.044/0.057/0.065/0.080 K at t=30/60/90/180 s |
-| front-face temperature, t=30.0 s | 468.6 | 468.6 | 0.005034 | 0.25 | yes | convective-only surface balance under BEER_LAMBERT |
-| front-face temperature, t=60.0 s | 548.2 | 548.2 | 0.00485 | 0.25 | yes | convective-only surface balance under BEER_LAMBERT |
-| front-face temperature, t=90.0 s | 604.4 | 604.4 | 0.004632 | 0.25 | yes | convective-only surface balance under BEER_LAMBERT |
+| front-face temperature, t=30.0 s | 468.6 | 468.6 | 0.005042 | 0.25 | yes | convective-only surface balance under BEER_LAMBERT |
+| front-face temperature, t=60.0 s | 548.2 | 548.2 | 0.004853 | 0.25 | yes | convective-only surface balance under BEER_LAMBERT |
+| front-face temperature, t=90.0 s | 604.4 | 604.4 | 0.004634 | 0.25 | yes | convective-only surface balance under BEER_LAMBERT |
 | front-face temperature, t=180.0 s | 717.7 | 717.7 | 0.004051 | 0.25 | yes | convective-only surface balance under BEER_LAMBERT |
-| sub-surface peak value, t=90 s | 608.9 | 608.9 | 0.00153 | 0.05 | yes | the coupled-physics marker no uncoupled test checks |
+| sub-surface peak value, t=90 s | 608.9 | 608.9 | 0.001528 | 0.05 | yes | the coupled-physics marker no uncoupled test checks |
 | sub-surface peak location, t=90 s | 0.0003125 | 0.000319 | 6.5e-06 | 3.75e-05 | yes | peak must sit strictly below the surface |
 | peak strictly interior, t=90 s | 388 | — | 0 | 0.5 | yes | argmax at a boundary cell would mean no sub-surface peak |
 
@@ -68,24 +68,32 @@ comparability of the dissertation figures (report mode).
 
 ### Comparison with other codes
 
-The same case was solved with Gpyro 0.8200 at 101 nodes (Δz=0.1 mm); decks, outputs, and
-run provenance are committed under `test/verification/reference/`.
-Each code's error against the same exact solution is drawn below
-on a log scale, muted gray behind this solver's series — the
-signed linear-scale panel above shows where the error lives, this
-one compares magnitudes across codes.
+Reference runs are available from Gpyro 0.8200 at 101 nodes (Δz=0.1 mm). Decks, outputs and
+available provenance are under `test/verification/reference/`; check
+case-specific parameters and transformations before comparing. Where
+error panels are present, they compare against the analytical reference.
+A timing entry alone does not establish an identical physical workload.
 
 ![V-RAD-01 T_profiles_vs_codes_error](assets/V-RAD-01/V-RAD-01_T_profiles_vs_codes_error.png)
 
 ![V-RAD-01 surface_T_history_vs_codes_error](assets/V-RAD-01/V-RAD-01_surface_T_history_vs_codes_error.png)
 
-Wall times at every ladder rung against the reference runs.
-Resolutions and simulated spans differ where noted (details in
-`reference/timings.csv`), so cross-code timings are indicative
-rather than a controlled benchmark; rungs at a matched
-resolution are directly comparable.
+Setup and simulation wall times at every ladder rung against the
+reference runs. Julia times model construction and solve after warm-up;
+FDS and Gpyro use internal total elapsed wall time, including setup and
+simulation output. Process launch and Julia compilation are excluded
+from the figure. Output costs, discretizations and time-stepping rules
+still differ, so these are indicative costs, not pure solver speedups.
+See `test/verification/reference/README.md` and `timings.csv` for the
+timer boundaries, resolutions and measurement provenance.
 
 ![V-RAD-01 solve_time](assets/V-RAD-01/V-RAD-01_solve_time.png)
+
+Reference timings below are medians of five runs after one warm-up. Full process time also includes launch and shutdown; it is shown separately and is not compared with Julia's warmed time.
+
+| Code | Resolution | Internal elapsed (s) | Full process (s) |
+| --- | --- | --- | --- |
+| Gpyro 0.8200 | 101 nodes (Δz=0.1 mm) | 0.086 | 0.08843 |
 
 Solution overlays including the other codes' points: [T_profiles_vs_codes](assets/V-RAD-01/V-RAD-01_T_profiles_vs_codes.png), [surface_T_history_vs_codes](assets/V-RAD-01/V-RAD-01_surface_T_history_vs_codes.png).
 
@@ -93,20 +101,19 @@ Solution overlays including the other codes' points: [T_profiles_vs_codes](asset
 
 | n_cells | h | wall (s) | L2 | Linf |
 | --- | --- | --- | --- | --- |
-| 25 | 0.04 | 0.01848 | 0.2555 | 0.9054 |
-| 50 | 0.02 | 0.03966 | 0.06456 | 0.248 |
-| 100 | 0.01 | 0.1096 | 0.01618 | 0.06485 |
-| 200 | 0.005 | 0.3643 | 0.00405 | 0.01658 |
-| 400 | 0.0025 | 4.467 | 0.001013 | 0.004193 |
+| 25 | 0.04 | 0.003642 | 0.2555 | 0.9054 |
+| 50 | 0.02 | 0.006789 | 0.06456 | 0.248 |
+| 100 | 0.01 | 0.01336 | 0.01618 | 0.06485 |
+| 200 | 0.005 | 0.02582 | 0.004048 | 0.01658 |
+| 400 | 0.0025 | 0.05292 | 0.001012 | 0.004191 |
 
-Observed order 1.995 (L2), expected 2.0.
+Observed order 1.996 (L2), expected 2.0.
 
 ### Solver configuration
 
 | setting | value |
 | --- | --- |
-| integrator | KenCarp4 (default) |
+| integrator | Rodas5P (default) |
 | abstol | 1.0e-12 |
 | reltol | 1.0e-10 |
 | radiation_model | BEER_LAMBERT |
-

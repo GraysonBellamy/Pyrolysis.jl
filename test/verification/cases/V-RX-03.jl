@@ -11,9 +11,9 @@
 #
 # Verifies stoichiometric bookkeeping (two-product yields) and heat-release
 # superposition. E = 0 keeps rates exactly T-independent, so the reaction
-# heats (h₁ endothermic, h₂ exothermic — h > 0 endothermic in THIS code,
-# opposite to Gpyro/ThermaKin/FDS) perturb only the temperature, not the
-# species solution.
+# heats (h₁ endothermic, h₂ exothermic — h > 0 endothermic in THIS code, as
+# in Gpyro and FDS, opposite to ThermaKin) perturb only the temperature, not
+# the species solution.
 #
 # Heat-release superposition target: a single cell pinned by Dirichlet faces
 # satisfies the DISCRETE quasi-steady balance exactly:
@@ -22,7 +22,7 @@
 #
 # with Q̇ = −(h₁k₁ + h₂k₂)·ξ_A(t) the net volumetric source. Quasi-steady is
 # valid because the cell diffusion time Δz²/α = 0.02 s ≪ 1/(k₁+k₂) = 2.2 s.
-# The gas is retained (default ImpermeableBC, no Darcy/Fickian transport), so
+# The gas is retained (default ImpermeableBC, closed pore transport), so
 # the system is closed and Σξ = ξ₀ throughout.
 
 function _verification_case_vrx03()
@@ -48,10 +48,10 @@ function _verification_case_vrx03()
     Q̇(t) = -(h1 * k1 + h2 * k2) * ξ0 * exp(-ktot * t)
 
     function build(n_cells)
-        compA = SolidComponent(:A, ρ = ξ0, c = c_sol, k = k_cond)
-        compB = SolidComponent(:B, ρ = ξ0, c = c_sol, k = k_cond)
-        compC = SolidComponent(:C, ρ = ξ0, c = c_sol, k = k_cond)
-        gas = GaseousComponent(:G, M = 0.028, c = 1000.0, k = 0.03, λ = 0.0)
+        compA = SolidComponent(:A, ρ = ξ0, φ = 0.3, c = c_sol, k = k_cond, λ = 0.0)
+        compB = SolidComponent(:B, ρ = ξ0, φ = 0.3, c = c_sol, k = k_cond, λ = 0.0)
+        compC = SolidComponent(:C, ρ = ξ0, φ = 0.3, c = c_sol, k = k_cond, λ = 0.0)
+        gas = GaseousComponent(:G, M = 0.028, c = 1000.0, k = 0.03)
         r1 = Reaction(:r1, 1 => (2, 4); A = k1, E = 0.0, h = h1, yields = (νB, γB))
         r2 = Reaction(:r2, 1 => (3, 4); A = k2, E = 0.0, h = h2, yields = (νC, γC))
         mat = Material(
@@ -60,13 +60,7 @@ function _verification_case_vrx03()
             reactions = (r1, r2),
             depletion_limiter = DepletionLimiter(enabled = false),
         )
-        mesh = create_uniform_mesh(
-            L,
-            n_cells,
-            Val(4);
-            T_initial = T_iso,
-            ξ_initial = (ξ0, 0.0, 0.0, 0.0),
-        )
+        mesh = create_uniform_mesh(L, n_cells)
         bc_set = BoundaryConditionSet(
             thermal = (top = DirichletThermalBC(T_iso), bottom = DirichletThermalBC(T_iso)),
         )

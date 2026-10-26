@@ -18,8 +18,6 @@ Validate boundary condition parameters. Called by BC constructors when
 - `ε`: Emissivity must be in [0, 1]
 - `F`: View factor must be in [0, 1]
 - `α`: Absorptivity must be in [0, 1]
-- `h_m`: Mass transfer coefficient must be non-negative
-- `P`: Pressure must be positive
 
 Throws `ArgumentError` if validation fails.
 """
@@ -29,8 +27,6 @@ function validate_bc_params(;
     ε::Union{Real,Nothing} = nothing,
     F::Union{Real,Nothing} = nothing,
     α::Union{Real,Nothing} = nothing,
-    h_m::Union{Real,Nothing} = nothing,
-    P::Union{Real,Nothing} = nothing,
 )
 
     if h !== nothing && h < 0
@@ -47,12 +43,6 @@ function validate_bc_params(;
     end
     if α !== nothing && (α < 0 || α > 1)
         throw(ArgumentError("Absorptivity α must be in [0, 1], got $α"))
-    end
-    if h_m !== nothing && h_m < 0
-        throw(ArgumentError("Mass transfer coefficient h_m must be non-negative, got $h_m"))
-    end
-    if P !== nothing && P <= 0
-        throw(ArgumentError("Pressure must be positive, got $P"))
     end
     return nothing
 end
@@ -259,9 +249,8 @@ which applies flux directly at the surface, `RadiativeFluxBC` accounts for:
 The absorbed flux is: q_absorbed = absorptivity × incident_flux
 
 The distribution of absorbed radiation depends on the `radiation_model` passed to `solve()`:
-- `SURFACE_ABSORPTION`: All absorbed radiation deposited in surface cell (opaque materials)
+- `NO_RADIATION`, `SURFACE_ABSORPTION`: absorbed at the exposed face, through the surface energy balance (opaque materials)
 - `BEER_LAMBERT`: In-depth volumetric absorption via Beer-Lambert law (semi-transparent)
-- `P1_QUASI_STEADY`: P1 radiative transfer with volumetric emission
 
 # Fields
 - `flux::F`: Incident radiative flux [W/m²] (constant or time-dependent)
@@ -327,259 +316,7 @@ Zero mass flux (impermeable) boundary condition.
 """
 struct ImpermeableBC <: AbstractMassBC end
 
-"""
-	MassFluxBC{F} <: AbstractMassBC
-
-Prescribed mass flux boundary condition.
-
-# Fields
-- `flux::F`: Mass flux [kg/(m²·s)] for each gas component
-"""
-struct MassFluxBC{F} <: AbstractMassBC
-    flux::F  # J(t) for each gas component
-end
-
-"""
-	ConvectiveMassBC{Fh,Fξ} <: AbstractMassBC
-
-Convective mass transfer boundary condition for gas escape at boundaries.
-
-The mass flux is computed as:
-	J = h_m × (ξ_inf - ξ_surface) [kg/(m²·s)]
-
-where ξ is mass concentration [kg/m³]. This represents external convective
-mass transfer where gas is carried away by the external flow.
-
-# Fields
-- `h_m::Fh`: External mass transfer coefficient [m/s]. This is a velocity-based
-  coefficient representing the convective mass transfer rate. Typical values:
-  - Natural convection: 0.01 - 0.05 m/s
-  - Forced convection (low velocity): 0.05 - 0.1 m/s
-  - Forced convection (high velocity): 0.1 - 0.5 m/s
-- `ξ_inf::Fξ`: Ambient mass concentration [kg/m³]. One of:
-  - a `Real` — the same ambient concentration for **every** gas species
-    (typically 0: the atmosphere carries no pyrolyzate);
-  - a `Function` of `t` — time-varying scalar, broadcast to every gas species;
-  - an `NTuple{NC,Real}` — **per-species** ambient concentrations, indexed by
-    the material's component index (condensed-phase entries are ignored —
-    mass BCs only act on gas species). Required to represent ambient air
-    ingress without injecting pyrolyzate: a scalar `ξ_inf > 0` would feed that
-    concentration of *every* gas species into the domain.
-
-# Physical Interpretation
-The coefficient h_m can be estimated from heat-mass transfer analogy:
-	h_m ≈ h / (ρ_air × cp_air)
-where h is the convective heat transfer coefficient [W/(m²·K)].
-
-For a typical cone calorimeter with h ≈ 10 W/(m²·K):
-	h_m ≈ 10 / (1.2 × 1000) ≈ 0.008 m/s
-
-# Example
-```julia
-bc = ConvectiveMassBC(h_m=0.05, ξ_inf=0.0)  # Gas escapes to atmosphere
-bc = ConvectiveMassBC(h_m=t -> 0.05*(1 + 0.1*t), ξ_inf=0.0)  # Time-varying
-# Per-species: components = (virgin_solid, pyrolyzate, O₂); ambient carries
-# O₂ at 0.27 kg/m³ but no pyrolyzate:
-bc = ConvectiveMassBC(h_m=0.05, ξ_inf=(0.0, 0.0, 0.27))
-```
-"""
-struct ConvectiveMassBC{Fh,Fξ} <: AbstractMassBC
-    h_m::Fh         # mass transfer coefficient [m/s]
-    ξ_inf::Fξ       # ambient concentration: Real | Function | NTuple per species [kg/m³]
-end
-
-function ConvectiveMassBC(; h_m, ξ_inf = 0.0, validate::Bool = true)
-    if validate
-        h_m_val = _get_scalar_value(h_m)
-        validate_bc_params(h_m = h_m_val)
-        if ξ_inf isa Tuple
-            all(x -> x isa Real && x >= 0, ξ_inf) || throw(
-                ArgumentError(
-                    "ConvectiveMassBC per-species ξ_inf must be non-negative reals, got $ξ_inf",
-                ),
-            )
-        end
-    end
-    ConvectiveMassBC(h_m, ξ_inf)
-end
-
-"""
-	ambient_concentration(bc::ConvectiveMassBC, t, j::Integer) -> Float64
-
-Resolve the ambient concentration seen by gas species `j` at time `t`:
-a scalar `ξ_inf` (number or function of `t`) broadcasts to every species;
-an `NTuple` resolves by component index (per-species ambient, required
-for species-resolved ambient air ingress).
-"""
-@inline ambient_concentration(bc::ConvectiveMassBC, t, j::Integer) =
-    _ambient_concentration(bc.ξ_inf, t, j)
-@inline _ambient_concentration(ξ_inf::Real, t, j::Integer) = Float64(ξ_inf)
-@inline _ambient_concentration(ξ_inf::Function, t, j::Integer) = Float64(ξ_inf(t))
-@inline _ambient_concentration(ξ_inf::NTuple{N,<:Real}, t, j::Integer) where {N} =
-    Float64(ξ_inf[j])
-
-"""
-	DiffusiveMassBC{Fh} <: AbstractMassBC
-
-Diffusive mass transfer boundary condition using the internal diffusion model.
-
-The flux is computed as: J = λ × ξ / d × h_m_factor
-
-where:
-- λ = gas transfer coefficient from material [m²/s]
-- ξ = gas concentration at surface cell [kg/m³]
-- d = distance from cell center to boundary [m]
-- h_m_factor = external resistance factor (default Inf = no external resistance)
-
-For combined internal + external resistance:
-  J = ξ / (d/λ + 1/h_m) = λ × h_m × ξ / (λ + h_m × d)
-
-When h_m → ∞: J = λ × ξ / d (pure diffusion, default)
-When h_m → 0: J = 0 (impermeable)
-
-This BC ensures consistency between species transport and ALE regression.
-
-# Fields
-- `h_m::Fh`: External mass transfer coefficient [m/s] (Inf = no external resistance)
-"""
-struct DiffusiveMassBC{Fh} <: AbstractMassBC
-    h_m::Fh  # external mass transfer coefficient (Inf = no resistance)
-end
-
-# Convenience constructors
-DiffusiveMassBC() = DiffusiveMassBC{Float64}(Inf)
-
-"""
-	CombinedMassBC{BCs<:Tuple} <: AbstractMassBC
-
-Combined mass boundary condition (sum of multiple BCs).
-
-This mirrors `CombinedThermalBC` and allows combining multiple mass BCs
-at a single boundary. The total mass flux is the sum of individual BC fluxes.
-
-# Fields
-- `bcs::BCs`: Tuple of boundary conditions
-
-# Example
-```julia
-# Combine diffusive and convective mass transfer
-bc = DiffusiveMassBC(Inf) + ConvectiveMassBC(h_m=0.01, ξ_inf=0.0)
-```
-
-# Note
-For most pyrolysis applications, a single mass BC (usually `DiffusiveMassBC`
-or `ConvectiveMassBC`) is sufficient. Combined mass BCs are useful for:
-- Modeling competing transport mechanisms
-- Complex surface resistance models
-- Research/experimental validation
-"""
-struct CombinedMassBC{BCs<:Tuple} <: AbstractMassBC
-    bcs::BCs
-end
-
-# Combine BCs with + operator
-Base.:+(bc1::AbstractMassBC, bc2::AbstractMassBC) = CombinedMassBC((bc1, bc2))
-Base.:+(cbc::CombinedMassBC, bc::AbstractMassBC) = CombinedMassBC((cbc.bcs..., bc))
-Base.:+(bc::AbstractMassBC, cbc::CombinedMassBC) = CombinedMassBC((bc, cbc.bcs...))
-# Disambiguate cbc + cbc (both prepend and append methods would otherwise match).
-Base.:+(cbc1::CombinedMassBC, cbc2::CombinedMassBC) =
-    CombinedMassBC((cbc1.bcs..., cbc2.bcs...))
-
-# ============================================================================
-# Pressure Boundary Conditions (for Darcy Flow)
-# ============================================================================
-
-"""
-	DirichletPressureBC <: AbstractMassBC
-
-Fixed pressure at boundary (typically atmospheric at exposed surface).
-
-When Darcy flow is enabled, this BC computes the gas velocity from the 
-pressure gradient between the boundary and the interior cell:
-	v_g = -(κ/μ) × (P_bc - P_interior) / d
-
-where d is the distance from the cell center to the boundary.
-
-# Fields
-- `P::Float64`: Boundary pressure [Pa]
-
-# Example
-```julia
-bc = DirichletPressureBC(101325.0)  # Atmospheric pressure
-bc = DirichletPressureBC()          # Default: 101325 Pa
-```
-"""
-struct DirichletPressureBC <: AbstractMassBC
-    P::Float64  # Pressure [Pa]
-end
-
-# Constructors with optional validation
-function DirichletPressureBC(P::Real; validate::Bool = true)
-    if validate
-        validate_bc_params(P = P)
-    end
-    DirichletPressureBC(Float64(P))
-end
-
-# Default constructor: standard atmospheric pressure
-DirichletPressureBC() = DirichletPressureBC(101325.0)
-
-"""
-	NeumannPressureBC <: AbstractMassBC
-
-Zero or prescribed pressure gradient at boundary (impermeable or specified flux).
-
-For Darcy flow:
-- ∂P/∂n = 0 (default): Zero gas velocity (impermeable)
-- ∂P/∂n ≠ 0: Gas velocity v_g = -(κ/μ) × ∂P/∂n
-
-# Fields
-- `∂P∂n::Float64`: Pressure gradient normal to boundary [Pa/m] (default: 0 = impermeable)
-
-# Example
-```julia
-bc = NeumannPressureBC()      # Impermeable (zero gradient)
-bc = NeumannPressureBC(0.0)   # Same as above
-bc = NeumannPressureBC(1000.0)  # Prescribed pressure gradient
-```
-"""
-struct NeumannPressureBC <: AbstractMassBC
-    ∂P∂n::Float64  # Pressure gradient [Pa/m]
-end
-
-# Default constructor: zero gradient (impermeable)
-NeumannPressureBC() = NeumannPressureBC(0.0)
-
-"""
-	ConvectivePressureBC <: AbstractMassBC
-
-Pressure-driven outflow with resistance (Robin-type BC for pressure).
-
-The gas velocity at the boundary is computed as:
-	v_g·n = h_P × (P_internal - P_external)
-
-This models a surface with finite resistance to gas flow, such as:
-- Surface char layer with limited permeability
-- Protective coating or membrane
-- Blowing resistance at high mass flux
-
-# Fields
-- `h_P::Float64`: Pressure transfer coefficient [m/(Pa·s)]
-- `P_ext::Float64`: External pressure [Pa]
-
-# Example
-```julia
-bc = ConvectivePressureBC(1e-6, 101325.0)  # Typical resistance, atmospheric exterior
-```
-
-# Note
-h_P → ∞ approaches DirichletPressureBC behavior
-h_P → 0 approaches ImpermeableBC behavior
-"""
-struct ConvectivePressureBC <: AbstractMassBC
-    h_P::Float64     # Pressure transfer coefficient [m/(Pa·s)]
-    P_ext::Float64   # External pressure [Pa]
-end
+include("gas_boundaries.jl")
 
 # ============================================================================
 # Type-Stable Boundary Condition Set
@@ -612,14 +349,14 @@ richer tag set without changing the field shape.
 bc_set = BoundaryConditionSet(
 	thermal = (top    = HeatFluxBC(50e3) + RadiativeBC(ε = 0.9, T_inf = 300),
 	           bottom = AdiabaticBC()),
-	mass    = (top    = DiffusiveMassBC(Inf),
+	mass    = (top    = AmbientGasBC(GasReservoir(P=0., T=300.)),
 	           bottom = ImpermeableBC()),
 )
 ```
 
 # Accessors
 - `get_thermal_bc(bc_set, Val(:top))` / `Val(:bottom)`
-- `get_mass_bc(bc_set, Val(:top))` / `Val(:bottom)`
+- `bc_set.mass.top` / `bc_set.mass.bottom`
 """
 struct BoundaryConditionSet{TT<:NamedTuple,MT<:NamedTuple}
     thermal::TT
@@ -644,7 +381,7 @@ of `tag => BC` mappings. The 1D convention uses `:top` and `:bottom`; future
 bc_set = BoundaryConditionSet(
     thermal = (top = HeatFluxBC(50e3) + RadiativeBC(ε = 0.9, T_inf = 300),
                bottom = AdiabaticBC()),
-    mass    = (top = DiffusiveMassBC(0.01),
+    mass    = (top = AmbientGasBC(GasReservoir(P=0., T=300.)),
                bottom = ImpermeableBC()),
 )
 ```
@@ -682,13 +419,6 @@ via `Val{tag}` resolves to a direct NamedTuple field read.
 @inline get_thermal_bc(bc_set::BoundaryConditionSet, ::Val{tag}) where {tag} =
     bc_set.thermal[tag]
 
-"""
-	get_mass_bc(bc_set, ::Val{tag::Symbol})
-
-Look up the mass BC at a tag (`:top`, `:bottom`, …). Compile-time dispatch
-via `Val{tag}` resolves to a direct NamedTuple field read.
-"""
-@inline get_mass_bc(bc_set::BoundaryConditionSet, ::Val{tag}) where {tag} = bc_set.mass[tag]
 
 # ============================================================================
 # RadiativeFluxBC Evaluation Helpers
@@ -711,65 +441,4 @@ function get_radiative_flux_bc(bc::CombinedThermalBC)
         end
     end
     return nothing
-end
-
-# ============================================================================
-# Type-Stable BoundaryConditionSet Signatures
-# ============================================================================
-
-"""
-	extract_radiative_flux_from_bcs(bc_set::BoundaryConditionSet, ::Val{tag}, t::Real) where tag -> Tuple{Float64, Bool}
-
-Extract the incident radiation intensity from thermal BCs using compile-time
-tag dispatch (`Val(:top)`, `Val(:bottom)`, …).
-
-# Returns
-(I, has_explicit_absorptivity) where:
-- `I`: radiation intensity at the surface [W/m²]. When the `RadiativeFluxBC`
-  carries an explicit `absorptivity`, it is evaluated at `t` and already
-  folded in (`I = α(t)·q_ext`); otherwise `I` is the bare incident flux.
-- `has_explicit_absorptivity`: `true` iff the BC supplied an explicit
-  `absorptivity`. When `false` (the Kirchhoff default path), the surface
-  cell's live `a_eff` (`cache.a[end]`, equal to ε_eff unless a component
-  sets `surface_absorptivity`) is applied at injection by
-  `compute_beer_lambert_source!` — consumers must not apply it again.
-"""
-function extract_radiative_flux_from_bcs(
-    bc_set::BoundaryConditionSet,
-    ::Val{tag},
-    t::Real,
-) where {tag}
-    bc = get_thermal_bc(bc_set, Val(tag))
-
-    rad_bc = get_radiative_flux_bc(bc)
-    if rad_bc === nothing
-        return (0.0, false)
-    end
-
-    # Evaluate flux (may be time-dependent)
-    flux = rad_bc.flux isa Function ? rad_bc.flux(t) : Float64(rad_bc.flux)
-
-    if rad_bc.absorptivity !== nothing
-        # Explicit absorptivity: fold it in here; the injection path must not
-        # rescale by ε_eff.
-        α =
-            rad_bc.absorptivity isa Function ? rad_bc.absorptivity(t) :
-            Float64(rad_bc.absorptivity)
-        return (flux * α, true)
-    else
-        # Kirchhoff default: bare incident flux; the live surface-cell a_eff
-        # (= ε_eff unless a component overrides) is applied at injection in
-        # compute_beer_lambert_source!.
-        return (flux, false)
-    end
-end
-
-"""
-	has_radiative_flux_bc(bc_set::BoundaryConditionSet, ::Val{tag}) where tag -> Bool
-
-Check if a boundary has a RadiativeFluxBC using compile-time tag dispatch.
-"""
-function has_radiative_flux_bc(bc_set::BoundaryConditionSet, ::Val{tag}) where {tag}
-    bc = get_thermal_bc(bc_set, Val(tag))
-    return get_radiative_flux_bc(bc) !== nothing
 end

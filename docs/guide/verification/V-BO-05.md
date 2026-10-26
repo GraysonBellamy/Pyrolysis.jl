@@ -16,20 +16,19 @@ conductivity and absorbs nothing, and nothing in the model carries heat
 across a void, so the flux transmitted through the void column would heat
 the substrate beneath it far outside the property bracket.
 
-The depletion callback stops a fixed-mesh solve when a live cell below the
-top live cell becomes a void (matrix volume fraction below 1e-4). The run
-must stop between 330 and 345 s with the interior-void warning, before any
-park, with the maximum live-cell temperature below 1000 K. The solve ends
-with retcode Terminated.
+A cell deactivates when its condensed mass falls below ε_m of its initial
+value, and on a fixed mesh a crossing cell beneath a live cell ends the
+solve with outcome `:interior` and retcode Terminated. The run must stop
+before any deactivation, with the maximum live-cell temperature below
+1000 K. The histories report the time reached at each resolution.
 
 ### Quantities of interest (n = 120)
 
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
-| stop time at the first interior void | 336.7 | 337.5 | 0.7651 | 7.5 | yes | s; window 330–345 s (observed 337.0): the lowest PMMA cell reaches matrix volume fraction < MIXING_BLEND_LO under the skin |
-| interior-void warning | 1 | 1 | 0 | 0.5 | yes | the stop names the cause and the ALE mesh |
-| park events before the stop | 0 | 0 | 0 | 0.5 | yes | the surface cell persists as a skin while the layer gasifies from within |
-| maximum live-cell temperature up to the stop | 890.8 | — | 890.8 | 1000 | yes | K over every accepted step (observed 912); the solve stops before the void column runs away |
+| outcome :interior | 1 | 1 | 0 | 0.5 | yes | the solve ended with outcome :interior |
+| deactivation events before the stop | 0 | 0 | 0 | 0.5 | yes | the surface cell persists as a skin while the layer gasifies from within |
+| maximum live-cell temperature up to the stop | 693.4 | — | 693.4 | 1000 | yes | K over every accepted step (observed 693) |
 
 ![V-BO-05 mlr_history](assets/V-BO-05/V-BO-05_mlr_history.png)
 
@@ -43,12 +42,10 @@ with retcode Terminated.
 
 | setting | value |
 | --- | --- |
-| integrator | KenCarp4 (default) |
+| integrator | Rodas5P (default) |
 | use_ale | false |
-| handle_depletion | true |
-| depletion_threshold | 0.05 |
-| min_cells | 2 |
+| deactivation | true |
 | radiation_model | BEER_LAMBERT |
-| abstol | 1.0e-8 |
-| reltol | 1.0e-6 |
-
+| abstol | 1.0e-11 |
+| reltol | 1.0e-9 |
+| pressure_tolerance | 0.0001 |

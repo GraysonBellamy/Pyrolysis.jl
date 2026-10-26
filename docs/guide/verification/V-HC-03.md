@@ -22,11 +22,11 @@ Two parameter-free exact targets beyond the profiles:
 
 | QoI | value | exact | error | tolerance | within tol | provenance |
 | --- | --- | --- | --- | --- | --- | --- |
-| L∞ T-profile error, Fo=0.1 | 0.0001225 | — | 0.0001225 | 0.006 | yes | observed 2.0e-3/1.5e-3/1.3e-3 K at Fo=0.1/0.5/1.5 |
-| L∞ T-profile error, Fo=0.5 | 9.172e-05 | — | 9.172e-05 | 0.006 | yes | observed 2.0e-3/1.5e-3/1.3e-3 K at Fo=0.1/0.5/1.5 |
-| L∞ T-profile error, Fo=1.5 | 8.139e-05 | — | 8.139e-05 | 0.006 | yes | observed 2.0e-3/1.5e-3/1.3e-3 K at Fo=0.1/0.5/1.5 |
-| front–back ΔT plateau, Fo=1.5 | 99.69 | 99.69 | 1.155e-08 | 1e-05 | yes | steady-shape plateau q″L/2k = 100 K between faces |
-| mean-temperature rise (global energy) | 200 | 200 | 3.411e-13 | 1e-05 | yes | exact constant q″/(ρcL) = 0.25 K/s; integrator-tolerance limited |
+| L∞ T-profile error, Fo=0.1 | 0.0001229 | — | 0.0001229 | 0.006 | yes | observed 2.0e-3/1.5e-3/1.3e-3 K at Fo=0.1/0.5/1.5 |
+| L∞ T-profile error, Fo=0.5 | 9.176e-05 | — | 9.176e-05 | 0.006 | yes | observed 2.0e-3/1.5e-3/1.3e-3 K at Fo=0.1/0.5/1.5 |
+| L∞ T-profile error, Fo=1.5 | 8.138e-05 | — | 8.138e-05 | 0.006 | yes | observed 2.0e-3/1.5e-3/1.3e-3 K at Fo=0.1/0.5/1.5 |
+| front–back ΔT plateau, Fo=1.5 | 99.69 | 99.69 | 3.535e-09 | 1e-05 | yes | steady-shape plateau q″L/2k = 100 K between faces |
+| mean-temperature rise (global energy) | 200 | 200 | 1.307e-12 | 1e-05 | yes | exact constant q″/(ρcL) = 0.25 K/s; integrator-tolerance limited |
 
 ![V-HC-03 T_profiles](assets/V-HC-03/V-HC-03_T_profiles.png)
 
@@ -44,24 +44,32 @@ Two parameter-free exact targets beyond the profiles:
 
 ### Comparison with other codes
 
-The same case was solved with Gpyro 0.8200 at 201 nodes (Δz=0.1 mm); decks, outputs, and
-run provenance are committed under `test/verification/reference/`.
-Each code's error against the same exact solution is drawn below
-on a log scale, muted gray behind this solver's series — the
-signed linear-scale panel above shows where the error lives, this
-one compares magnitudes across codes.
+Reference runs are available from Gpyro 0.8200 at 201 nodes (Δz=0.1 mm). Decks, outputs and
+available provenance are under `test/verification/reference/`; check
+case-specific parameters and transformations before comparing. Where
+error panels are present, they compare against the analytical reference.
+A timing entry alone does not establish an identical physical workload.
 
 ![V-HC-03 T_profiles_vs_codes_error](assets/V-HC-03/V-HC-03_T_profiles_vs_codes_error.png)
 
 ![V-HC-03 front_back_dT_history_vs_codes_error](assets/V-HC-03/V-HC-03_front_back_dT_history_vs_codes_error.png)
 
-Wall times at every ladder rung against the reference runs.
-Resolutions and simulated spans differ where noted (details in
-`reference/timings.csv`), so cross-code timings are indicative
-rather than a controlled benchmark; rungs at a matched
-resolution are directly comparable.
+Setup and simulation wall times at every ladder rung against the
+reference runs. Julia times model construction and solve after warm-up;
+FDS and Gpyro use internal total elapsed wall time, including setup and
+simulation output. Process launch and Julia compilation are excluded
+from the figure. Output costs, discretizations and time-stepping rules
+still differ, so these are indicative costs, not pure solver speedups.
+See `test/verification/reference/README.md` and `timings.csv` for the
+timer boundaries, resolutions and measurement provenance.
 
 ![V-HC-03 solve_time](assets/V-HC-03/V-HC-03_solve_time.png)
+
+Reference timings below are medians of five runs after one warm-up. Full process time also includes launch and shutdown; it is shown separately and is not compared with Julia's warmed time.
+
+| Code | Resolution | Internal elapsed (s) | Full process (s) |
+| --- | --- | --- | --- |
+| Gpyro 0.8200 | 201 nodes (Δz=0.1 mm) | 0.707 | 0.7094 |
 
 Solution overlays including the other codes' points: [T_profiles_vs_codes](assets/V-HC-03/V-HC-03_T_profiles_vs_codes.png), [front_back_dT_history_vs_codes](assets/V-HC-03/V-HC-03_front_back_dT_history_vs_codes.png).
 
@@ -69,12 +77,12 @@ Solution overlays including the other codes' points: [T_profiles_vs_codes](asset
 
 | n_cells | h | wall (s) | L2 | Linf |
 | --- | --- | --- | --- | --- |
-| 20 | 0.05 | 0.0152 | 0.02373 | 0.0314 |
-| 40 | 0.025 | 0.02775 | 0.005935 | 0.007862 |
-| 80 | 0.0125 | 0.05262 | 0.001484 | 0.001966 |
-| 160 | 0.00625 | 0.1024 | 0.000371 | 0.0004916 |
-| 200 | 0.005 | 0.1186 | 0.0002372 | 0.0003141 |
-| 320 | 0.003125 | 0.19 | 9.254e-05 | 0.0001225 |
+| 20 | 0.05 | 0.002844 | 0.02373 | 0.0314 |
+| 40 | 0.025 | 0.005356 | 0.005935 | 0.007862 |
+| 80 | 0.0125 | 0.01033 | 0.001484 | 0.001966 |
+| 160 | 0.00625 | 0.02108 | 0.000371 | 0.0004916 |
+| 200 | 0.005 | 0.02694 | 0.0002374 | 0.0003146 |
+| 320 | 0.003125 | 0.04415 | 9.275e-05 | 0.0001229 |
 
 Observed order 2 (L2), expected 2.0.
 
@@ -82,7 +90,6 @@ Observed order 2 (L2), expected 2.0.
 
 | setting | value |
 | --- | --- |
-| integrator | KenCarp4 (default) |
+| integrator | Rodas5P (default) |
 | abstol | 1.0e-12 |
 | reltol | 1.0e-10 |
-

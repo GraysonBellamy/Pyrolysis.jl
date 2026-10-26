@@ -2,15 +2,14 @@
 Cone Calorimeter Simulation of PMMA with Surface-Only Radiation Absorption
 
 This example demonstrates the use of the SURFACE_ABSORPTION radiation model,
-which deposits all incident radiation in the surface cell for computationally
-efficient simulation of opaque materials.
+which absorbs all incident radiation at the exposed face, through the surface
+energy balance, for opaque materials.
 
 RADIATION MODEL:
-Uses `radiation_model = SURFACE_ABSORPTION` which provides:
-- O(1) computational cost (vs O(n) for Beer-Lambert)
-- Tridiagonal Jacobian sparsity (vs upper triangular for Beer-Lambert)
-- 5-15× speedup compared to high-α workaround
-- Physically appropriate for opaque materials (optical thickness τ >> 1)
+Uses `radiation_model = SURFACE_ABSORPTION` (the same residual as the default
+NO_RADIATION), which:
+- adds no intensity rows (Beer-Lambert adds one algebraic row per face)
+- is physically appropriate for opaque materials (optical thickness τ >> 1)
 
 Physical Setup:
 - Sample thickness: 5.8 mm (typical for cone calorimeter samples)
@@ -19,8 +18,8 @@ Physical Setup:
 - Surface regresses as material decomposes and gas escapes
 
 Coordinate Convention:
-- z = 0: Bottom (substrate/sample holder), boundary_id = 2, fixed
-- z = L(t): Top (exposed surface), boundary_id = 1, moves with material
+- z = 0: Bottom (substrate/sample holder), tag :bottom, fixed
+- z = L(t): Top (exposed surface), tag :top, moves with material
 - Heat enters from top, material shrinks toward bottom
 - Mesh follows the shrinking material (ALE formulation)
 """
@@ -28,6 +27,8 @@ Coordinate Convention:
 using Pyrolysis
 using Plots
 using DelimitedFiles
+
+const SMOKE = get(ENV, "PYROLYSIS_SMOKE", "0") == "1"   # PYROLYSIS_SMOKE=1: a short run that checks the script works
 
 # ============================================================================
 # Material Definition: PMMA with Surface-Only Absorption
@@ -37,11 +38,11 @@ using DelimitedFiles
 Define PMMA material for surface absorption radiation model.
 
 NOTE: With radiation_model = SURFACE_ABSORPTION, the absorption coefficient α
-is NOT used - all radiation is deposited directly in the surface cell regardless
-of material optical properties. We set α = 0 to make this explicit.
+is NOT used - all radiation is absorbed at the exposed face regardless of the
+material's optical properties. We set α = 0 to make this explicit.
 
-For comparison with in-depth absorption, see example 06_cone_calorimeter.jl
-which uses α = 1.47 m²/kg with radiation_model = BEER_LAMBERT.
+For in-depth absorption, solve with radiation_model = BEER_LAMBERT and a nonzero
+α; the material of 06_cone_calorimeter.jl carries α = 1.47 m²/kg for that.
 """
 
 # Temperature-dependent properties for PMMA (piecewise at T = 378 K); the fits
@@ -51,6 +52,12 @@ pmma_cp = CallableProperty(
 )
 pmma_k = CallableProperty(T -> T < 378.0 ? 0.15 : (0.34 - 3.9e-4 * min(T, 700.0)))
 
+# Absorption coefficient of the solids [m²/kg]: SURFACE_ABSORPTION deposits the
+# incident radiation at the exposed face and does not read it.
+α_surface_only = 0.0
+
+const PMMA_POROSITY = parse(Float64, get(ENV, "PYROLYSIS_PMMA_POROSITY", "0.01"))
+
 pmma = Material(
     name = :PMMA_surface_abs,
     components = (
@@ -58,20 +65,24 @@ pmma = Material(
         # NOTE: α = 0 because SURFACE_ABSORPTION model ignores material absorption coefficients
         SolidComponent(
             :virgin,
-            ρ = 1210.0,                    # kg/m³ - density
+            ρ = 1210.0,
+            φ = PMMA_POROSITY,
+            λ = 1e-5,                    # kg/m³ - density
             c = pmma_cp,                   # J/(kg·K) - piecewise temperature-dependent
             k = pmma_k,                    # W/(m·K) - piecewise temperature-dependent
             ε = 0.96,                      # surface emissivity
-            α = 0.0,                        # m²/kg - not used with SURFACE_ABSORPTION model
+            α = α_surface_only,             # m²/kg - not used with SURFACE_ABSORPTION model
         ),
         # Char - solid residue
         SolidComponent(
             :char,
-            ρ = 1210.0,                    # kg/m³ - same as virgin PMMA
+            ρ = 1210.0,
+            φ = PMMA_POROSITY,
+            λ = 1e-5,                    # kg/m³ - same as virgin PMMA
             c = pmma_cp,                   # J/(kg·K) - same as virgin PMMA
             k = pmma_k,                    # W/(m·K) - same as virgin PMMA
             ε = 0.96,                      # same emissivity as virgin PMMA
-            α = 0.0,                        # m²/kg - not used with SURFACE_ABSORPTION model
+            α = α_surface_only,             # m²/kg - not used with SURFACE_ABSORPTION model
         ),
         # MMA gas - gaseous product
         GaseousComponent(
@@ -79,8 +90,8 @@ pmma = Material(
             M = 0.10012,                   # kg/mol - molar mass of MMA
             c = 1500.0,                    # J/(kg·K) - gas heat capacity
             k = 0.02,                      # W/(m·K) - gas conductivity
-            λ = 1e-5,                       # m²/s - gas transfer coefficient
         ),
+        GaseousComponent(:AIR; M = 0.02897, c = 1006.0, k = 0.026),
     ),
     reactions = (
         # Single-step decomposition reaction with small char residue
@@ -103,10 +114,10 @@ pmma = Material(
 
 # Sample geometry
 sample_thickness = 5.8e-3    # 5.8 mm typical cone calorimeter sample
-n_cells = 72                 # 72 cells → 0.08 mm resolution
+n_cells = SMOKE ? 12 : 72                 # 72 cells → 0.08 mm resolution
 
 # Time parameters  
-t_final = 1600.0             # simulation duration
+t_final = SMOKE ? 20.0 : 1600.0  # simulation duration
 dt_initial = 1e-3            # initial timestep
 
 # Environmental conditions
@@ -120,13 +131,7 @@ h_conv = 7.2                 # W/(m²·K)
 # Mesh Creation
 # ============================================================================
 
-mesh = create_uniform_mesh(
-    sample_thickness,
-    n_cells,
-    Val(3);
-    T_initial = T_ambient,
-    ξ_initial = (1210.0, 0.0, 0.0),
-)
+mesh = create_uniform_mesh(sample_thickness, n_cells)
 
 println("=" ^ 70)
 println("SURFACE-ONLY RADIATION ABSORPTION TEST")
@@ -141,7 +146,7 @@ println("  Modified: α = $(α_surface_only) m²/kg (surface-only)")
 println()
 println("EXPECTED RESULT:")
 println("  With surface-only absorption, Monte Carlo and continuous Beer-Lambert")
-println("  should give IDENTICAL results since all energy goes to surface cell.")
+println("  should give IDENTICAL results since all of it is absorbed at the exposed face.")
 println()
 println("Mesh created:")
 println("  - Thickness: $(sample_thickness*1000) mm")
@@ -157,7 +162,11 @@ top_thermal_bc =
     RadiativeBC(ε = 0.96, T_inf = 330) +
     ConvectiveBC(h = h_conv, T_inf = 330)
 
-top_mass_bc = ConvectiveMassBC(h_m = 0.05, ξ_inf = 0.0)
+# Air at the thermal stream temperature; g is a mass-film conductance [kg/(m² s)].
+top_mass_bc = AmbientGasBC(
+    GasReservoir(P = 101325.0, T = 330.0, mole_fractions = (AIR = 1.0,));
+    film = MassTransferFilm(0.05*101325.0*0.02897/(8.31446261815324*330.0)),
+)
 
 bottom_thermal_bc = RadiativeBC(ε = 0.95, T_inf = 307) + ConvectiveBC(h = 4, T_inf = 307)
 bottom_mass_bc = ImpermeableBC()
@@ -178,7 +187,12 @@ println("  - Bottom surface: Re-radiation + convection, impermeable")
 # ============================================================================
 
 T_initial_func = z -> T_ambient
-ξ_initial_funcs = [z -> 1210.0, z -> 0.0, z -> 0.0]
+ξ_initial_funcs = [
+    z -> 1210.0,
+    z -> 0.0,
+    z -> 0.0,
+    z -> background_gas_concentration(pmma, :AIR, (1210.0, 0.0, 0.0, 0.0), T_ambient),
+]
 
 problem = PyrolysisProblem(
     mesh = mesh,
@@ -188,7 +202,7 @@ problem = PyrolysisProblem(
     ξ_initial = ξ_initial_funcs,
     tspan = (0.0, t_final),
     dt_initial = dt_initial,
-    output_times = collect(range(0.0, t_final, length = 601)),
+    output_times = collect(range(0.0, t_final, length = SMOKE ? 21 : 601)),
 )
 
 println("\nProblem created:")
@@ -207,16 +221,15 @@ println("This may take a few minutes...\n")
 # Solve using implicit solver with ALE enabled and SURFACE_ABSORPTION radiation model
 solution = solve(
     problem;
-    abstol = 1e-8,
-    reltol = 1e-6,
+    abstol = 1e-11,
+    reltol = 1e-9,
+    pressure_tolerance = 1e-4,
     dtmin = 1e-14,
     progress = true,
     use_ale = true,
-    radiation_model = SURFACE_ABSORPTION,  # All radiation deposited in surface cell
+    radiation_model = SURFACE_ABSORPTION,  # All radiation absorbed at the exposed face
     min_thickness = 0.01e-3,
-    handle_depletion = true,
-    depletion_threshold = 0.05,
-    min_cells = 1,
+    deactivation = true,  # Deactivate a surface cell below 1% of its initial condensed mass
 )
 
 println("\nSimulation completed!")
@@ -235,7 +248,7 @@ println("\n" * "=" ^ 70)
 println("RESULTS SUMMARY (SURFACE_ABSORPTION MODEL)")
 println("=" ^ 70)
 println("Radiation model: SURFACE_ABSORPTION")
-println("  - All radiation deposited in surface cell")
+println("  - All radiation absorbed at the exposed face")
 println("  - O(1) computational cost")
 println("  - Tridiagonal Jacobian sparsity")
 println("  - Ideal for opaque materials")

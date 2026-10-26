@@ -1,18 +1,18 @@
-# FDS 6.11.0 verification outputs
+# FDS 6.11.1 verification outputs
 
-Generated locally on 2026-07-07 by running the official FDS release binary on
-the verification input files shipped in the `firemodels/fds` repository at tag
-`FDS-6.11.0` (`Verification/Heat_Transfer/` and `Verification/Pyrolysis/`),
-unmodified. These are FDS's *predictions* (`*_devc.csv` device outputs, plus
-one `_prof_1.csv` in-depth profile); FDS does not commit its own outputs
-anywhere public — firebot regenerates them nightly for the Verification Guide —
-so a local run is the only way to obtain them as data.
+These device outputs and the in-depth profile come from the official FDS
+6.11.1 Linux release bundle. The twenty supplied verification decks are the
+unmodified files under its `Examples/Heat_Transfer/` and `Examples/Pyrolysis/`
+directories. The eight matched decks in `custom/` use the same executable.
+Every run completed successfully. Input and output SHA-256 hashes, executable
+identity and timing samples are recorded in `provenance.json`.
 
-- Binary: `FDS-6.11.0-0-g369a20b-release` (Intel Fortran 2025.3.2 build,
-  official Linux bundle `FDS-6.11.0_SMV-6.11.0_lnx.sh`), single MPI rank,
-  `I_MPI_FABRICS=shm`.
-- Inputs: `https://raw.githubusercontent.com/firemodels/fds/FDS-6.11.0/Verification/<dir>/<case>.fds`
-- All 20 runs ended with `STOP: FDS completed successfully`.
+- Executable: `FDS-6.11.1-0-gff928db-release`, Intel Fortran 2025.3.2.
+- [Official release](https://github.com/firemodels/fds/releases/tag/FDS-6.11.1):
+  `FDS-6.11.1_SMV-6.11.2_lnx.sh`.
+- Bundle SHA-256: `ba8793b974150fdb778b3db0b69ab8db4e4668d5c52987a317e7f5ed58102ea0`.
+- Executable SHA-256: `fe2b123dfc759dbebb161cc91912ed60861f3fe2a141602634b53f417f731b1d`.
+- One MPI rank and one OpenMP thread, with `I_MPI_FABRICS=shm`.
 - Units are FDS-native (first header row): time s, temperature **°C**, mass
   kg or kg/m², thickness m. Convert T with +273.15 when overlaying.
 
@@ -20,14 +20,34 @@ so a local run is the only way to obtain them as data.
 |---|---|---|
 | `heat_conduction_{a..d}_devc.csv` | finite slab, convective BC; FDS a/b/c/d = Bi 100/10/1/0.1 | V-HC-02 d/c/b/a (labels reversed; nondimensional θ–Fo overlay) |
 | `convective_cooling_devc.csv` | semi-infinite-like convective heating | V-HC-01 |
-| `insulated_steel_plate_devc/prof_1.csv` | constant flux, insulated back | V-HC-03 |
+| `insulated_steel_plate_devc/prof_1.csv` | heated steel plate | retained; not the V-HC-03 overlay |
 | `two_step_solid_reaction_devc.csv` | A→B→C series kinetics | V-RX-01 |
 | `part_baking_soda_{420K,450K,500K}_devc.csv` | isothermal NaHCO₃ decomposition | V-RX-02 |
-| `shrink_swell_devc.csv` | 6 shrink/swell variants, M_i/L_i/T_i | V-CPL-03 |
-| `matl_e_cons_{1..9}_devc.csv` | enthalpy conservation ledger | V-CPL-06 |
+| `shrink_swell_devc.csv` | 6 shrink/swell variants, M_i/L_i/T_i | endpoint precedent; custom deck below supplies V-CPL-03 paths |
+| `matl_e_cons_{1..9}_devc.csv` | enthalpy conservation ledger | retained; not read by a current overlay |
 
-To regenerate: download the release bundle, extract, and run each input with
-`LD_LIBRARY_PATH=<bundle>/bin/intelmpi/lib FI_PROVIDER_PATH=<bundle>/bin/intelmpi/prov I_MPI_FABRICS=shm <bundle>/bin/fds <case>.fds`.
+Run each deck in its own output directory with:
+
+```sh
+LD_LIBRARY_PATH=<bundle>/bin/intelmpi/lib \
+FI_PROVIDER_PATH=<bundle>/bin/intelmpi/prov \
+I_MPI_FABRICS=shm OMP_NUM_THREADS=1 <bundle>/bin/fds <case>.fds
+```
+
+The FDS rows in `../timings.csv` are medians of five fresh-process runs of
+each matched deck after one warm-up, pinned to one CPU. The primary `wall_s`
+value is FDS's **Total Elapsed Wall Clock Time**: input reading, setup,
+simulation and output after MPI initialization, ending at the final timing
+report before MPI finalization. It is not the time-stepping-only timer.
+`process_wall_s` retains the full process measurement, including launch and
+shutdown, for the supporting table. All samples of both timers and the
+time-stepping timer remain in `provenance.json`.
+
+Timer boundaries are defined in FDS's
+[main routine](https://github.com/firemodels/fds/blob/FDS-6.11.1/Source/main.f90)
+and [timing report](https://github.com/firemodels/fds/blob/FDS-6.11.1/Source/dump.f90).
+These are indicative cross-code costs: Julia times warmed model construction
+and solve, and the codes retain different output and time-stepping workloads.
 
 ## `custom/` — our decks, run with the same binary
 
@@ -54,10 +74,11 @@ Where the shipped FDS case differs from ours, `custom/` holds minimal decks
   asymptote), which would inflate their wall times in the solve-time
   comparison and stretch the overlay axes; all V-HC-02/V-RX-01/V-RX-02c
   overlays and `timings.csv` rows therefore use these matched runs. The
-  original outputs remain in `fds/` untouched.
+  supplied-deck outputs are retained alongside the matched-deck outputs.
 
-Not representable in FDS: V-HC-03's pure Neumann BC (constant net flux, no
-convection, no re-radiation). `NET_HEAT_FLUX`/`CONVECTIVE_HEAT_FLUX` don't
-work with `MATL_ID`, and `EXTERNAL_FLUX` (even with `SKIP_INRAD=T`) always
-carries the ε·σ·Ts⁴ re-emission term. V-HC-03 gets its cross-code overlay
-from Gpyro instead.
+V-HC-03 uses Gpyro for its pure Neumann overlay (constant net flux, no
+convection or reradiation). In FDS 6.11.0's standard `MATL_ID` wall input path,
+[`READ_SURF`](https://github.com/firemodels/fds/blob/FDS-6.11.0/Source/read.f90#L8290-L8300)
+rejects `NET_HEAT_FLUX` and `CONVECTIVE_HEAT_FLUX`; `EXTERNAL_FLUX` is
+absorptivity-scaled and the material reradiates. This identifies the limitation
+of the tested input path, not every possible FDS configuration or release.

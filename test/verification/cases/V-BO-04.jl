@@ -1,5 +1,5 @@
 # =============================================================================
-# V-BO-04 — uniform zero-order burnout (exact L(t) through the park cascade)
+# V-BO-04 — uniform zero-order burnout (exact L(t) through the deactivation event)
 # =============================================================================
 #
 # An adiabatic slab at uniform T₀ with one zero-order reaction solid → gas,
@@ -11,13 +11,17 @@
 #
 #   L(t) = L₀ · exp(−r t / ρ_s).
 #
-# Every cell reaches the depletion threshold at the same instant, so the
-# parking machinery meets its worst case: a cascade of park events, one per
-# step, surface-first, halving the live cell count at t_k = ln(2^k·20) ρ_s/r.
-# L(t) and the solid mass must follow the exact law through every cascade,
-# and ξ_s must stay at ρ_s to roundoff.
+# Every cell reaches the deactivation threshold at the same instant, so
+# deactivation meets its worst case. The cells deactivate at a fraction ε_m
+# of their initial mass and every cell is in the near-threshold band when the
+# first crosses it, so the whole column merges into the innermost cell in one
+# invocation; that survivor holds the column's mass, about 40 ε_m of its own
+# initial mass, at ρ_s and burns on at the exact rate past t_end. L(t) must
+# follow the exact law through the event, located at the exact crossing
+# t = ln(1/ε_m) ρ_s/r, and ξ_s must stay at ρ_s to roundoff.
 
-function _vbo04_setup(n_cells::Int)
+# `t_end` defaults to just past the crossing at ε_m = 1e-2 (460.5 s).
+function _vbo04_setup(n_cells::Int; t_end = 480.0)
     ρ_s, c, k = 1000.0, 1000.0, 0.2
     T0 = 600.0
     L0 = 10e-3
@@ -25,15 +29,17 @@ function _vbo04_setup(n_cells::Int)
     E = 5.0e4
     R = 8.314462618
     A = r * exp(E / (R * T0))
-    t_end = 480.0                                # three cascades (40 → 20 → 10 → 5 cells)
-    solid = SolidComponent(:solid, ρ = ρ_s, c = c, k = k, λ = 1e-6)  # non-degenerate gas transport
-    gas = GaseousComponent(:gas, M = 0.03, c = 1000.0, k = 0.02, λ = 1e-5)
+    solid = SolidComponent(:solid, ρ = ρ_s, φ = 0.3, c = c, k = k, λ = 1e-6)  # non-degenerate gas transport
+    gas = GaseousComponent(:gas, M = 0.03, c = 1000.0, k = 0.02)
     rxn = Reaction(:burn, 1 => 2; A = A, E = E, h = 0.0, n = 0.0)
     mat = Material(name = :VBO04, components = (solid, gas), reactions = (rxn,))
-    mesh = create_uniform_mesh(L0, n_cells, Val(2); T_initial = T0, ξ_initial = (ρ_s, 0.0))
+    mesh = create_uniform_mesh(L0, n_cells)
     bcs = BoundaryConditionSet(
         thermal = (top = AdiabaticBC(), bottom = AdiabaticBC()),
-        mass = (top = ConvectiveMassBC(h_m = 1.0, ξ_inf = 0.0), bottom = ImpermeableBC()),
+        mass = (
+            top = AmbientGasBC(GasReservoir(P = 0.0, T = T0)),
+            bottom = ImpermeableBC(),
+        ),
     )
     problem = PyrolysisProblem(
         mesh = mesh,
@@ -47,6 +53,9 @@ function _vbo04_setup(n_cells::Int)
     return (; problem, ρ_s, T0, L0, r, t_end)
 end
 
+# The exact thickness of the solved column.
+_vbo04_exact(S) = t -> S.L0 * exp(-S.r / S.ρ_s * t)
+
 function _verification_case_vbo04()
     n_default = 40
     function build(n)
@@ -54,27 +63,33 @@ function _verification_case_vbo04()
     end
     function qois(sol)
         S = _vbo04_setup(n_default)
-        L_exact = t -> S.L0 * exp(-S.r * t / S.ρ_s)
+        L_exact = _vbo04_exact(S)
         th = sol.extras.thickness_history
         err_L = maximum(
             abs(th[i] - L_exact(sol.t[i])) / L_exact(sol.t[i]) for i in eachindex(sol.t)
         )
-        # Solid concentration stays at ρ_s in every live cell.
-        ξs = sol.ξ[1, :, :]
-        err_ξ = maximum(abs(x - S.ρ_s) / S.ρ_s for x in ξs if !isnan(x))
+        # Solid concentration stays at ρ_s in every live cell (a deactivated
+        # cell has a NaN temperature).
+        err_ξ = maximum(
+            abs(sol.ξ[1, i, k] - S.ρ_s) / S.ρ_s for
+            i in axes(sol.T, 1), k in axes(sol.T, 2) if
+            !isnan(sol.T[i, k]) && !isnan(sol.ξ[1, i, k])
+        )
         # Temperature stays at T0.
         err_T = maximum(abs(x - S.T0) for x in sol.T if !isnan(x))
-        n_parks = length(sol.extras.park_times)
+        n_events = length(sol.extras.deactivation_times)
         live_end = sol.extras.live_cells[end]
-        return [
-            QoIResult(
-                name = "thickness follows L₀ exp(−r t/ρ) through the park cascades",
-                value = th[end],
-                exact = L_exact(sol.t[end]),
-                error = err_L,
-                tol = 1e-4,
-                comment = "max relative error over all output times",
-            ),
+        thickness = QoIResult(
+            name = "thickness follows L₀ exp(−r t/ρ) through the event",
+            value = th[end],
+            exact = L_exact(sol.t[end]),
+            error = err_L,
+            # observed 1.5e-9 (temperature form), 1.2e-9 (enthalpy form)
+            tol = 1e-6,
+            comment = "max relative error over all output times",
+        )
+        common = [
+            thickness,
             QoIResult(
                 name = "solid concentration stays at ρ_s (dilation removes volume only)",
                 value = S.ρ_s,
@@ -91,27 +106,41 @@ function _verification_case_vbo04()
                 tol = 1e-6,
                 comment = "K; no heat of reaction, no gradient",
             ),
+        ]
+        invocations = length(unique(e.invocation for e in sol.events))
+        # The exact time the identical cells cross ε_m; the event is located
+        # on it.
+        t_cross = log(1 / 1e-2) * S.ρ_s / S.r
+        t_e = isempty(sol.events) ? Inf : first(sol.events).t
+        return [
+            common...,
             QoIResult(
-                name = "park cascade: 40 → 5 live cells",
+                name = "one invocation deactivates the column into one survivor",
                 value = Float64(live_end),
-                exact = 5.0,
-                error = abs(live_end - 5.0),
+                exact = 1.0,
+                error = abs(live_end - 1.0) + abs(invocations - 1) + abs(n_events - 39),
                 tol = 0.5,
-                comment = "$(n_parks) park events; every cell hits the threshold at once",
+                comment = "$(n_events) events in $(invocations) invocation(s), outcome $(sol.outcome)",
+            ),
+            QoIResult(
+                name = "the event is located at the exact crossing of ε_m",
+                value = t_e,
+                exact = t_cross,
+                error = abs(t_e - t_cross) / t_cross,
+                tol = 1e-6,  # observed 3.1e-10 (temperature form), 1.8e-10 (enthalpy form)
+                comment = "relative distance of the event from the exact crossing time (ε_m = 1e-2)",
             ),
         ]
     end
     return VerificationCase(
         id = "V-BO-04",
-        title = "Uniform zero-order burnout: exact thickness through park cascades",
+        title = "Uniform zero-order burnout: exact thickness through the deactivation event",
         tags = [:ale, :burnout, :depletion, :kinetics, :exact],
         references = ["closed form L(t) = L₀ exp(−r t/ρ_s)"],
         build = build,
         solve_kwargs = (
             use_ale = true,
-            handle_depletion = true,
-            depletion_threshold = 0.05,
-            min_cells = 2,
+            deactivation = true,
             min_thickness = 1e-6,
             abstol = 1e-9,
             reltol = 1e-7,
@@ -126,7 +155,7 @@ function _verification_case_vbo04()
                 [
                     ReportCurve(
                         name = :thickness_history,
-                        title = "V-BO-04: thickness through three park cascades",
+                        title = "V-BO-04: thickness through the deactivation events",
                         xlabel = "t (s)",
                         ylabel = "thickness (m)",
                         series = [
@@ -134,7 +163,7 @@ function _verification_case_vbo04()
                                 label = "live thickness",
                                 x = sol.t,
                                 y = sol.extras.thickness_history,
-                                exact = t -> S.L0 * exp(-S.r * t / S.ρ_s),
+                                exact = _vbo04_exact(S),
                             ),
                         ],
                     ),

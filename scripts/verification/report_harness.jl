@@ -56,9 +56,11 @@ report_expected_order(case::VerificationCase) =
     case.ci.convergence === nothing ? nothing : case.ci.convergence.expected_order
 
 """
-Other codes' wall times for a case, from `reference/timings.csv`
-(case,code,label,res,wall_s,note — plain commas, notes use semicolons; `res`
+Other codes' internal and process wall times, from `reference/timings.csv`
+(case,code,label,res,wall_s,process_wall_s,note — plain commas; `res`
 is the resolution text shown next to the code's label on the figure).
+`wall_s` includes setup and simulation; `process_wall_s` also includes launch
+and shutdown and is shown separately from the warmed Julia comparison.
 Empty when the file or the case's rows are absent.
 """
 function _reference_timings(case_id::AbstractString)
@@ -67,8 +69,8 @@ function _reference_timings(case_id::AbstractString)
     out = NamedTuple[]
     for ln in Iterators.drop(readlines(path), 1)
         isempty(strip(ln)) && continue
-        f = split(ln, ','; limit = 6)
-        length(f) == 6 || continue
+        f = split(ln, ','; limit = 7)
+        length(f) == 7 || error("expected seven reference timing fields: $ln")
         strip(f[1]) == case_id || continue
         push!(
             out,
@@ -77,7 +79,8 @@ function _reference_timings(case_id::AbstractString)
                 label = String(strip(f[3])),
                 res = String(strip(f[4])),
                 wall = parse(Float64, f[5]),
-                note = String(strip(f[6])),
+                process_wall = parse(Float64, f[6]),
+                note = String(strip(f[7])),
             ),
         )
     end
@@ -336,7 +339,11 @@ function run_case_report(case::VerificationCase, outdir::String)
         ["key", "value"],
         vcat(
             [
-                ("integrator", haskey(skw, :alg) ? string(skw.alg) : "KenCarp4 (default)"),
+                (
+                    "integrator",
+                    haskey(skw, :integrator_policy) ? string(skw.integrator_policy) :
+                    "Rodas5P (default)",
+                ),
                 ("julia", string(VERSION)),
                 ("Pyrolysis", pyro_version),
                 ("n_cells_ladder", join(ns, " ")),

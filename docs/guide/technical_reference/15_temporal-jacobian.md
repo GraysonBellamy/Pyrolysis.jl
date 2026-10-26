@@ -1,1535 +1,1009 @@
-# 15. Temporal Integration, DAE/Residual Formulation, and the Structured Jacobian
+# 15. Temporal Integration, the DAE, and the Colored Jacobian
 
-This chapter describes how the spatially-discretized governing equations of §13
-(Finite-Volume Spatial Discretization) are assembled into a single flat
-ODE/DAE right-hand side, integrated in time by stiff implicit Runge–Kutta
-methods, and linearized through a structured-operator Jacobian. We derive the
-block-major state-vector layout and the two dispatched residual paths; the
-unified `residual!` entry point and the immutable-definition / mutable-workspace
-split that makes it pure and thread-safe; the full ALE residual assembly
-sequence; the link to OrdinaryDiffEq's implicit-RK $W$-matrix; the
-three-layer structured-Jacobian architecture (operators → couplings →
-linear-solve strategies); the exact per-operator Jacobian formulas with their
-sign conventions; the O(N) prefix/suffix/rank-1 couplings that represent the
-non-local terms; the linear-solve strategies and iterative solvers; the
-two-pattern sparsity construction; and the verification
-machinery that anchors every backend to a dense AD reference. Every discrete
-rule is grounded in the implementing function so the mathematics is traceable to
-the code; where the code makes an approximation, a guard, or a sign choice, we
-state it and trust the code over any idealized form.
+This chapter describes how the finite-volume rows of §13 become a system the
+integrator advances: the state vector and its layout, the immutable definition
+and the buffers one residual evaluation writes, the residual as a pure function
+of the state, the algebraic rows and the consistent state they start from, the
+mass-matrix DAE and the integrator policies that advance it, the domain test
+that keeps accepted states physical, the per-row tolerances, and the Jacobian:
+colored sparse forward-mode automatic differentiation of the whole residual on
+a pattern built from the mesh connectivity, with the linear solve of the
+integrator's matrix and the dense reference the pattern and the values are
+tested against. Every rule is grounded in the implementing function
+(`src/States/`, `src/Assembly/`, `src/Integration/`, `src/ColoredJacobian/`);
+where the code makes an approximation, a guard or a sign choice, we state it and
+trust the code over any idealized form.
 
 Conventions used in this chapter (binding, from §2, Nomenclature):
 
-- The spatial coordinate is $z$ (axial, through-thickness). **$z=0$ is the
-  bottom/substrate** (boundary id 2, tag `:bottom`); **$z=L$ is the top/exposed
-  surface** (boundary id 1, tag `:top`). Cell indices increase from bottom to
-  top.
-- **Flux sign convention:** positive flux is transport in the $+z$ direction.
-- **Divergence convention:** the discrete divergence $(F_R-F_L)A/V$ is positive
-  when the quantity flows *out* of the cell; the energy RHS carries
-  $-(\nabla\cdot\mathbf{q})$.
-- **Heat-of-reaction sign convention:** $h>0$ endothermic (cools), $h<0$
-  exothermic (heats); the volumetric source is $Q_{\rm rxn}=-\sum_r h_r r_r$
-  (overload resolution H1 of §2).
-- In this chapter $i$ is the **cell index** ($1,\dots,n$), $f$ a face index, $j$
-  a component index, $r$ a reaction index, $k$ either a node index or a generic
-  loop index where stated. In the linear-algebra sections, $\mathsf{A}$ denotes
-  the sparse Jacobian block (not the cross-sectional area $A$); the disambiguation
-  follows overload resolution A3 of §2 and is stated where both appear.
-
-The state vector is denoted $\boldsymbol{u}$; its time derivative is
-$\boldsymbol{du}=d\boldsymbol{u}/dt$. The residual function (in the
-method-of-lines sense, an *explicit* RHS, not an implicit DAE residual
-$F(\boldsymbol{u},\boldsymbol{du},t)=0$) is `residual!`, which writes
-$\boldsymbol{du}=\mathrm{RHS}(\boldsymbol{u},t)$.
+- The spatial coordinate is $z$. **$z=0$ is the bottom/substrate** (tag
+  `:bottom`); **$z=L$ is the top/exposed surface** (tag `:top`). On a line, cell
+  $i$ lies between nodes $i$ and $i+1$, which are also its faces.
+- A face flux $F_f$ is the transport per unit area along the face normal, which
+  points from the face's owner cell to its neighbour ($+z$ on every interior
+  face and on `:top`, out of the domain, $-z$, on `:bottom`); it is scattered as
+  $\mp F_fA_f$ into the owner and the neighbour, and $s_{if}=\pm1$ is the
+  orientation of face $f$ relative to cell $i$ ($+1$ when $i$ owns it).
+- Heat of reaction: $h>0$ endothermic, $Q_{\rm rxn}=-\sum_r h_r r_r$ (overload
+  resolution H1).
+- $i$ is a cell index, $j$ a component index, $n$ a node index, $f$ a face
+  index; $r$ indexes a row of the state vector where stated. $N_C$ is the number
+  of components and $n$ the number of cells where it is a count.
+- $\boldsymbol u$ is the state vector, $\boldsymbol f(\boldsymbol u,t)$ the
+  residual (the right-hand side the residual function writes into
+  $\boldsymbol{du}$), $\mathsf M$ the diagonal mass matrix and
+  $J=\partial\boldsymbol f/\partial\boldsymbol u$ the Jacobian. The sans-serif
+  $\mathsf M$ distinguishes the mass matrix from a molar mass $M_j$.
 
 ---
 
-## 15.1 State layout and the simulation-mode trait
+## 15.1 The state vector: layout and row kinds
 
-### 15.1.1 Block-major packing
+![Interleaved node and cell state strip and three actual six-cell Jacobian patterns, distinguishing algebraic rows, local coupling, wider correction reach and global area coupling.](../../assets/figures/15_state_jacobian.svg)
 
-All time-dependent unknowns are packed into a single flat vector
-$\boldsymbol{u}\in\mathbb{R}^{N_{\rm state}}$ in **block-major** order, with the
-block set determined by the active `SimulationMode`. The descriptor is
-`StateLayout`:
+**Figure 15. State layout and Jacobian structure.** The schematic strip shows the interleaved ordering of a six-cell, two-component, variable-area setup. The matrices are actual stored patterns, with Beer–Lambert intensity unknowns. Grey entries are allocated dependencies; blue entries are nonzero initial-state AD derivatives. Correction reserves a wider stencil even while initially inactive. Variable area adds history and the two global algebraic rows outlined in purple. Deactivation preserves this allocation. The CSV records each stored entry and its initial derivative.
+
+### 15.1.1 Interleaved blocks
+
+The state is described by a `StateLayout{NC,E,Mov,Rad,Chi,D,U,Car}`
+(`src/States/layout.jl`): a sequence of node blocks and cell blocks, then the
+global scalars. On a line the order is
 
 $$
-\boldsymbol{u} =
-\big[\,\underbrace{T_1,\dots,T_n}_{T\ \text{block}}\ \big|\
-\underbrace{\xi_{1,1},\dots,\xi_{1,n}}_{\xi_1\ \text{block}},\dots,
-\underbrace{\xi_{N_C,1},\dots,\xi_{N_C,n}}_{\xi_{N_C}\ \text{block}}\ \big|\
-\underbrace{z_1,\dots,z_{n_{\rm nodes}}}_{z\ \text{block (ALE)}}\ \big|\
-\underbrace{\chi_1,\dots,\chi_n}_{\chi\ \text{block (WithChi)}}\,\big].
+\boldsymbol u=\bigl[\,\text{node }1,\ \text{cell }1,\ \text{node }2,\ \text{cell }2,\ \dots,\ \text{cell }n,\ \text{node }n{+}1,\ \text{globals}\,\bigr],
 $$
 
-The explicit index map (used verbatim by every pack/unpack routine and by the
-Jacobian's `FastSparsityMap`) is
+so every row's unknowns and those of its neighbours lie within a fixed distance
+of it and the Jacobian is banded in every geometry. In more dimensions each
+cell's block follows the blocks of its nodes not yet placed, cell by cell
+(`block_order`).
+
+| Block | Unknowns, in order | Present |
+|---|---|---|
+| node $n$ | position $z_n$; velocity $w_n$; intensity $I_n$ of the face at node $n$ | position and velocity on a moving mesh (`use_ale`, the velocities when the closure's unknowns are the node velocities); intensity under `BEER_LAMBERT` (a line) |
+| cell $i$ | masses $m_{1,i},\dots,m_{N_C,i}$ [kg]; the energy state; the carried fields; the closure's multiplier | always; the energy state is $T_i$ [K] (`energy_state = :temperature`) or the enthalpy inventory $H_i$ [J] (`:enthalpy`); carried fields: the conversion-history pair (under a variable cross section) and, in more dimensions, the deformation gradient; the multiplier under the potential closure of more dimensions |
+| globals | cross-section area $A$; its lateral strain rate $\theta_A$ | under a variable cross section (a line) |
+
+With $N_{\rm node}=2\delta_{\rm mov}+\delta_{\rm BL}$ the width of a node block and
+$N_{\rm cell}=N_C+1+2\delta_\chi$ that of a cell block on a line ($\delta_{\rm mov}$,
+$\delta_{\rm BL}$, $\delta_\chi$ equal to one on a moving mesh, under in-depth
+radiation and under a variable cross section, zero otherwise, as in §3.1.2), and
+$N_{\rm blk}=N_{\rm node}+N_{\rm cell}$ the stride, the indices are
 
 $$
 \begin{aligned}
-\text{T index}        &: \quad i, &&i=1,\dots,n,\\[2pt]
-\text{$\xi_{j,i}$ index} &: \quad n + (j-1)\,n + i, &&j=1,\dots,N_C,\ i=1,\dots,n,\\[2pt]
-\text{$z_k$ index}     &: \quad n(1+N_C) + k, &&k=1,\dots,n_{\rm nodes}\ \text{(ALE only)},\\[2pt]
-\text{$\chi_i$ index}  &: \quad n(1+N_C) + \delta_{\rm ALE}\,n_{\rm nodes} + i, &&i=1,\dots,n\ \text{(WithChi only)},
+z_n&: (n-1)N_{\rm blk}+1, & w_n&: (n-1)N_{\rm blk}+2, & I_n&: (n-1)N_{\rm blk}+2\delta_{\rm mov}+1,\\
+m_{j,i}&: (i-1)N_{\rm blk}+N_{\rm node}+j, & \text{energy}_i&: (i-1)N_{\rm blk}+N_{\rm node}+N_C+1, & \text{history}_{i,1..2}&: (i-1)N_{\rm blk}+N_{\rm node}+N_C+1+(1,2),\\
+A&: nN_{\rm blk}+N_{\rm node}+1, & \theta_A&: nN_{\rm blk}+N_{\rm node}+2, & N_{\rm state}&=nN_{\rm blk}+N_{\rm node}+2\delta_\chi,
 \end{aligned}
 $$
 
-and the total length is
+which `test/multid/test_layout.jl` checks against every index function. Code
+never computes an index: kernels, the closure, the deactivation and the outputs
+go through `mass_index`, `energy_index`, `history_index`, `position_index`,
+`velocity_index`, `intensity_index`, `area_index`, `lateral_rate_index`,
+`cell_rows` and `node_rows`.
 
-$$
-N_{\rm state} = n\,(1+N_C) + \delta_{\rm ALE}\,n_{\rm nodes} + \delta_{\rm WithChi}\,n,
-$$
+For two components on 12 cells the state has 36 rows on a fixed mesh, 49 under
+in-depth radiation, 62 on a moving mesh and 75 on a moving mesh under in-depth
+radiation (measured with the script of §15.13).
 
-with $\delta_X=1$ if the mode includes block $X$ and $0$ otherwise. In 1D
-$n_{\rm nodes}=n+1$. The $\chi$ block is **appended after** the $z$ block, not
-interleaved; its offset arithmetic is therefore dense and is the single source
-of subtle indexing bugs the code guards against by always going through the
-range accessors `temperature_range`, `concentration_range(l,j)`, `z_range(l)`,
-and `chi_range(l)`.
+### 15.1.2 Row kinds and the mask
 
-> **Implementation note.** The layout, accessors, and the
-> `pack_state!`/`update_mesh_from_state!`/`create_state_vector` operations live
-> in `StateLayout`, src/Problem/state_layout.jl. The same packing is mirrored in
-> the Jacobian sparsity module's index helpers `_xi_idx` and `_z_idx`,
-> src/Jacobian/sparsity.jl, and in solution extraction,
-> src/Solver/solve.jl. The block order $[T\mid\xi\mid z\mid\chi]$ is binding: any
-> code that reads or writes raw state must respect it.
->
-> **IC contract.** `create_state_vector` packs the mesh **as-is** — it does not
-> consult the problem's initial-condition closures (which live on the
-> `PyrolysisProblem`, not the mesh) and does not populate
-> `mesh.m_dry_solid_initial`. The canonical setup path is the exported
-> `initialize_state(problem; …) -> (def, ws, u0)`
-> (src/Problem/adapter.jl), which mirrors `solve()` exactly:
-> `apply_initial_conditions!(problem)` → `to_problem_def` → `build_workspace` →
-> `create_state_vector`. Hand-rolled compositions that skip the IC step
-> integrate from the mesh constructor's placeholder state — a
-> resolution-independent error that still returns `retcode == :Success` —
-> and, under `WithChi`, leave the χ denominator at zero (§12.8.3).
+Every row is **differential** (masses, energy state, node positions, carried
+fields) or **algebraic** (node velocities, multipliers, face intensities, the
+area and the lateral rate); `is_differential(layout)` flags them and
+`mass_matrix(layout)` is the diagonal matrix with one on the differential rows
+and zero on the algebraic ones (§15.5.1).
 
-The block-major (rather than cell-major / interleaved) choice is deliberate. It
-makes each physical field a contiguous slice, which (i) lets `block_view` expose
-a strided sub-vector for diagnostics and callbacks without
-copying, (ii) keeps the conduction/transport stencils as small offsets within a
-block, and (iii) makes the ALE geometry coupling a clean rectangular sub-block
-(the $z$-columns), which the two-pattern sparsity construction of §15.11
-exploits.
-
-The experimental P1 radiation path (quarantined to
-`Pyrolysis.Experimental.RadiationP1`) uses this *same* layout: the
-incident-radiation field $G$ is an algebraic (quasi-steady) field stored in
-the `RadiationCache` and re-solved at every residual evaluation, never a
-state block (see §8.12). The layout above is therefore the canonical one for
-every mode, production and experimental alike.
-
-### 15.1.2 The bundled `SimulationMode` trait
-
-Rather than carry four orthogonal trait axes and suffer combinatorial method
-explosion, Pyrolysis.jl bundles all four into a single type parameter:
-
-$$
-\texttt{SimulationMode}\{\,\underbrace{\text{Mesh}}_{\rm Eulerian/ALE},\ \underbrace{\text{Rad}}_{\rm NoRadiation/SurfaceAbsorption/BeerLambert},\ \underbrace{\text{Trans}}_{\rm Fickian/DarcyFick},\ \underbrace{\text{Chi}}_{\rm NoChi/WithChi}\,\}.
-$$
-
-The four axes are:
-
-| Axis | Type | Values | Effect |
-|---|---|---|---|
-| Mesh motion | `MeshMode` | `Eulerian`, `ALE` | $z$ block present iff ALE; geometry constant iff Eulerian |
-| Radiation transport | `RadiationMode` | `NoRadiation`, `SurfaceAbsorption`, `BeerLambert` | volumetric source $Q_{\rm rad}$ and Jacobian non-locality |
-| Gas transport | `TransportMode` | `Fickian`, `DarcyFick` | diffusion-only vs. pressure-driven Darcy + diffusion |
-| Cross-section | `ChiMode` | `NoChi`, `WithChi` | $\chi$ block present iff `WithChi`; $A(t)=A_0\,\mathrm{law}(\bar\chi)$ |
-
-Accessors extract the type parameters at compile time:
-
-```julia
-@inline mesh_mode(::SimulationMode{M,R,T,C})      where {M,R,T,C} = M()
-@inline radiation_mode(::SimulationMode{M,R,T,C}) where {M,R,T,C} = R()
-@inline transport_mode(::SimulationMode{M,R,T,C}) where {M,R,T,C} = T()
-@inline chi_mode(::SimulationMode{M,R,T,C})       where {M,R,T,C} = C()
-```
-
-Because the mode is a type parameter, `mesh_mode(def.mode) isa ALE` and friends
-resolve to compile-time constants, and the residual's dispatch chain
-specializes fully — no runtime branching on the mode. The residual entry
-dispatches on the mesh mode only, giving **two residual paths**, Eulerian and
-ALE. Inside each, the transport law follows the property cache (a Darcy sub-cache
-exists only in `DarcyFick` mode, and `compute_rhs!` selects the Darcy–Fick flux
-from it), the $\chi$ block is included iff `WithChi`, and the radiation model
-specializes the source.
-
-> **Implementation note.** `SimulationMode`, the `MeshMode`/`RadiationMode`/
-> `TransportMode`/`ChiMode` abstract hierarchies, and the accessors are in
-> src/Problem/traits.jl. The mode is *derived*, not user-set directly:
-> `to_problem_def(problem; use_ale, radiation_model, radiation_intensity,
-> radiation_kirchhoff)` (src/Problem/adapter.jl) assembles it from the `use_ale`
-> flag, the radiation
-> model, and the material's Darcy/$\chi$ traits (`has_darcy_flow`, the presence
-> of a `lateral_shrinkage_law`). The `RadiationModel` enum value
-> `P1_QUASI_STEADY` is rejected at solve setup (it lives in `Experimental`), so
-> the production `RadiationMode` axis spans only the first three values.
+`layout.mask` marks the live rows. Every row is live at the start of an
+integration; deactivation (§14.3.1) and element death (§14.5) clear rows, and
+the assembly writes each dead row as an identity row of the system: a zero
+derivative on a differential row, $0=u_r$ on an algebraic one. The state length
+never changes during a solve.
 
 ---
 
-## 15.2 The problem definition / workspace separation
+## 15.2 The definition and the workspace
 
-The single most important structural decision in the temporal layer is that the
-residual is a **pure function** of state and time, parameterized by an
-*immutable* problem definition and a *mutable* scratch workspace:
+The residual is a pure function of the state and the time, parameterized by an
+immutable definition and a set of buffers:
 
 ```julia
-residual!(du, u, def::ProblemDef, t, ws::Workspace)  ->  nothing
+residual!(du, u, def::CoreDefinition, t, ws::CoreWorkspace) -> nothing
 ```
 
-- `def::ProblemDef` is **immutable** and shareable across threads / sweep
-  workers. It carries the mesh connectivity (`MeshTopology`, a placeholder the
-  1D residual does not read) and the *unchanging* specification: the material,
-  the BC set, the `SimulationMode`, and a NamedTuple of runtime options
-  (`radiation_model`, `radiation_intensity`, `radiation_kirchhoff`).
-- `ws::Workspace` is **mutable** and owned by exactly one worker. It holds the
-  typed state mirror (`StateCache`), property cache (`PropertyCache`), RHS work
-  arrays (`RHSCache`), and (in ALE mode) the ALE work arrays. It also caches the
-  dry-gas component indices and the boundary face IDs.
-- `t` is a plain `Real`; the kernel accepts whatever scalar type $\boldsymbol{u}$
-  and $\boldsymbol{du}$ carry — `Float64` for ordinary evaluation, or
-  `ForwardDiff.Dual` for AD Jacobian assembly.
+- `def::CoreDefinition` (`src/Assembly/definition.jl`) holds the state layout;
+  the state setup (the topology, the material, the caloric laws of its
+  components, the per-cell reference data, the caloric extension of the
+  enthalpy form, and the gas transport the problem needs); the kernels, a tuple
+  in assembler order; the mesh closure (`nothing` on a fixed mesh); and the
+  external sources (`NoSources()`, or `VolumetricSources` for manufactured
+  solutions).
+- `ws::CoreWorkspace` holds the buffers of one evaluation: the derived state
+  (`DerivedState`, the quantities the state mapping produces) and the kernel
+  contributions (`Contributions`) with `Float64` elements, their twins for every
+  dual-number element type automatic differentiation evaluates the residual at
+  (built on first use, keyed by the element type), and `T_warm`, the latest
+  temperatures of a plain evaluation.
+- `t` is a plain number. A dual-number state evaluates in its own buffers,
+  chosen by the state's element type; a forward-mode derivative in time alone
+  (a dual `t` with a `Float64` state) is not supported, and every integrator
+  policy takes the time derivative of the residual by finite differences
+  (§15.5.1).
 
-This split is what makes parameter sweeps (§ User Guide UG-12) and the
-AD Jacobians possible without re-allocating problem metadata: every worker shares
-one `def` and owns one `ws`; the AD Jacobian builds a *parallel* `Dual`-typed
-workspace (`build_ad_workspace`) that shares the mesh, layout, and boundary
-indices but carries independent `Dual`-typed caches.
+In the temperature form the residual is a pure function of $(\boldsymbol u,t)$
+given `def`. In the enthalpy form the caloric inversion starts from `T_warm`,
+so the result also depends on the evaluation history at the inversion's
+round-off; `integrate` copies the set-up temperatures into `T_warm` at the start
+of every integration, so repeated integrations are bit-identical.
 
-A defining invariant is that **the mutable `Mesh1D` is read-only during residual
-and Jacobian assembly** — connectivity only. All state and all state-derived
-geometry (cell centers, volumes, face areas, cross-section) live in the typed
-`StateCache`, which is populated once at residual entry by `populate!` and
-carries `eltype(u)` end-to-end. The mutable mesh is re-synchronized from the
-accepted integrator state *only between steps*, by the `StepUpdateCallback`
-(§15.5). This guarantees that the many residual evaluations inside one implicit
-step (Newton iterations, Jacobian evaluations) all see a
-consistent geometry, and that AD sensitivities propagate cleanly through
-geometry because the geometry is a function of `cache.z` and `cache.A_section`,
-both `Dual`-typed in the AD pass.
+Every physics option is a type parameter of the definition (the layout's flags,
+the kernel tuple, the closure's correction), not a method of the residual:
+`residual!` has one method, and an evaluation after warm-up allocates nothing
+(`test/jacobian/test_allocations.jl`). The definition also holds the two pieces
+of state a solve mutates, the layout's mask and the correction's layer times,
+so one set-up problem serves one integration at a time; `integrate` resets both
+at its start.
 
-> **Implementation note.** `ProblemDef` and the runtime-option NamedTuple:
-> src/Problem/problem_def.jl. `Workspace`: src/Problem/workspace.jl;
-> `build_workspace` and `build_ad_workspace`: src/Problem/adapter.jl. `StateCache`, `populate!`,
-> `update_state_geometry!`, `update_cross_section_area!`:
-> src/Problem/state_cache.jl. The user-facing `PyrolysisProblem` and the
-> `to_problem_def` adapter: src/Problem/pyrolysis_problem.jl and
-> src/Problem/adapter.jl. The canonical `(def, ws, u0)` front door is
-> `initialize_state(problem; …)` (same file) — it applies the problem's
-> initial conditions before packing and is the path `solve()` itself takes;
-> `to_problem_def`/`build_workspace`/`create_state_vector` are public as
-> the advanced layer (AD workspaces, mid-simulation repacking, warm starts)
-> with the IC step on the caller (§15.1.1).
+`setup(problem; …)` builds the definition, the buffers and everything else the
+integrator needs into a `CoreProblem` (`src/Integration/setup.jl`): the problem,
+`def`, `ws`, the initial state `u0` (the masses $m_{j,i}=\xi_j(z^c_i)V_i$ and the
+energy state from $T(z^c_i)$ at the cell centres, the algebraic unknowns made
+consistent, §15.4), the relative tolerance and the absolute-tolerance vector
+(§15.5.6), the colored Jacobian (§15.6), the initial temperatures and masses,
+and the deactivation state (§14.3; `nothing` without deactivation). `solve` is
+`setup` followed by `integrate`; a custom loop calls the two itself.
 
 ---
 
-## 15.3 The unified residual and its dispatch
+## 15.3 The residual
 
-The top-level entry is a one-line dispatcher on the mesh mode:
+### 15.3.1 One evaluation, in order
 
-```julia
-@inline function residual!(du, u, def::ProblemDef, t, ws::Workspace)
-    _residual!(du, u, def, t, ws, mesh_mode(def.mode))
-    return nothing
-end
-```
+`residual!` runs, in this order (`src/Assembly/residual.jl`):
 
-### 15.3.1 Eulerian path
+1. **The state mapping** (`derive!`, §13), the only reader of $\boldsymbol u$:
+   the live cells from the mask; on a moving mesh the geometry from the node
+   positions, with the node velocities (or the multipliers) and, under a
+   variable cross section, the area and its lateral rate; the carried fields;
+   the face intensities; the masses, volumes and concentrations; the
+   temperatures (the stored temperature, or the inversion of the enthalpy
+   inventory); their trial clamp; the heat-capacity sum; the sensible
+   enthalpies; the cell properties; the pore-gas properties the gas transport
+   needs.
+2. **The node corrections** $c_n$ of the mesh closure (`correction!`): zero
+   without a correction, the node velocities under a prescribed mesh velocity,
+   the layers' relaxed equidistribution under the equidistribution correction
+   (§11).
+3. **The kernels**, in assembler order (`_kernels`, `src/Integration/setup.jl`):
+   the reactions (if the material has any); the gas transport (if gas can
+   move); the in-depth radiation (`BEER_LAMBERT`); conduction; the thermal
+   boundary; and, under a correction, the inventory fluxes relative to the mesh.
+   Each adds its face fluxes and cell sources to the contributions.
+4. **The mesh closure** (`closure_rows!`): the cells' strain rates $\theta_i$
+   from the reactions' mass sources, the history sources under a variable cross
+   section, then the residuals of the velocity rows (§15.4).
+5. **The external sources** (`add_sources!`).
+6. **The row assembly** (`assemble_rows!`), the only writer of
+   $\boldsymbol{du}$.
 
-For a fixed mesh the geometry is constant (mirrored at workspace construction),
-so the residual is a pure function of $(\boldsymbol{u},t)$ in four steps:
+### 15.3.2 The rows
 
-1. `populate!(ws.state_cache, u, layout)` — unpack $T,\xi$ from $\boldsymbol{u}$
-   into the typed cache (single source of truth).
-2. `Properties.update_properties!` — evaluate all state-dependent properties
-   ($k_{\rm eff}$, $\rho c_p^{\rm eff}$, $\lambda$, $\varepsilon$, $\alpha$, and
-   face-averaged $k_{\rm face}$, $\lambda_{\rm face}$).
-3. `_compute_physics_rhs!` — calls `Discretization.compute_rhs!`, which picks
-   the transport law from the property cache's Darcy sub-cache (`nothing` ⇔
-   Fickian), refreshes that sub-cache ($P,\varphi,\kappa,\mu$ and the Darcy
-   velocity, `update_darcy_properties!`) in its first step under `DarcyFick`, and
-   populates `ws.dT_work[i]`, `ws.dξ_work[j,i]`, and
-   `ws.rhs_cache.dξ_rxn[j,i]`.
-4. Pack $\boldsymbol{du}$: $du[i]=dT_i/dt$, $du[n+(j-1)n+i]=d\xi_{j,i}/dt$.
-
-The discrete updates assembled in step 3 are exactly those derived in §7 and
-§13 (repeated here for completeness):
+The assembly scatters every face flux into its owner and neighbour and writes:
 
 $$
-\frac{dT_i}{dt} = \frac{1}{\rho c_p^{\rm eff}{}_{,i}}\Big[-(\nabla\cdot\mathbf{q})_i + S_{{\rm conv},i} + Q_{{\rm rad},i} + Q_{{\rm rxn},i}\Big],
+\frac{dm_{j,i}}{dt}=\omega_{j,i}\tilde V_i+\dot M_{j,i},\qquad
+\dot M_{j,i}=-\sum_{f\in\partial i}s_{if}\,A_f\,F_{j,f},
 $$
 
+with $\omega_{j,i}\tilde V_i$ [kg s⁻¹] the cell's reaction source ($\tilde V_i$
+the smoothly floored cell volume, §13.10.3; an external mass source, §13.5.3,
+adds to it here and in the formation term below), $\dot M_{j,i}$ the face-flux
+part of its mass rate and $s_{if}=\pm1$ the orientation of face $f$ relative to
+cell $i$. With $E_i$ [W] the cell's energy sources plus its face energy fluxes
+(conduction, the enthalpy the mass fluxes carry, the boundary fluxes; §7, §13.3.4)
+and $C_i=\sum_j m_{j,i}c_{p,j}(\tilde T_i)$ the heat-capacity sum at the trial
+temperature, smoothly floored at $C_{{\rm floor},i}$, the energy row is
+
 $$
-\frac{d\xi_{j,i}}{dt} = -(\nabla\cdot\mathbf{J}_j)_i + S_{j,{\rm rxn},i}\quad(\text{gas}),\qquad
-\frac{d\xi_{j,i}}{dt} = S_{j,{\rm rxn},i}\quad(\text{solid/liquid}),
+\text{temperature form:}\quad \frac{dT_i}{dt}=\frac{E_i-\sum_j h_j(T_i)\,\dot M_{j,i}}{C_i},
+\qquad
+\text{enthalpy form:}\quad \frac{dH_i}{dt}=E_i+\sum_j \omega_{j,i}\tilde V_i\,h_j(T_i),
 $$
 
-with the face fluxes, harmonic-mean conductivity, smooth-gated Arrhenius rates,
-and the radiation model all as specified in their respective chapters. The
-reaction heat source carries the storage sign convention,
-$Q_{{\rm rxn},i}=-\sum_r h_r\,r_{r}(T_i,\xi_i)$ (endothermic $h>0$ gives
-$Q_{\rm rxn}<0$); the conduction divergence enters with a leading minus so that
-outflow cools the cell.
+with $h_j(T)$ the sensible enthalpy of component $j$ on the $T_{\rm ref}$ datum.
+The two are the same balance: $dH_i/dt=C_i\,dT_i/dt+\sum_j h_j(T_i)\,dm_{j,i}/dt$.
+The enthalpy form is a linear invariant every Runge–Kutta step conserves to
+round-off; the temperature form conserves energy to the integrator's order. An
+external temperature-rate source $S_T$ adds $S_T$ to the temperature row and
+$C_iS_T$ to the enthalpy row.
 
-> **Implementation note.** Eulerian path: `_residual!(…, ::Eulerian)`,
-> src/Residual/residual.jl. The 8-step `compute_rhs!` assembly is in
-> src/Discretization/finite_volume.jl (see §7.6 for the strict step ordering).
+On a moving mesh the position rows are $dz_n/dt=w_n$ and the velocity rows
+carry the closure's residuals; the face-intensity rows carry the residuals of
+their attenuation equations; the history rows take their sources and face
+fluxes; the area and lateral-rate rows take the residuals of the lateral rows
+at the column sums of the live cells' history pairs and their rates; the
+deformation-gradient rows (more dimensions) are $dF_i/dt=(\nabla v_s)_iF_i$.
+The dead rows come last (§15.1.2).
 
-### 15.3.2 Order dependencies inside the physics RHS
+### 15.3.3 Order dependencies
 
-The 8-step `compute_rhs!` sequence (transport properties and conductive fluxes →
-reactions → gas transport → thermal BCs → radiation → $S_{\rm conv}$ →
-divergences → final RHS) is *ordered* for correctness, not convenience:
+The order is fixed for correctness:
 
-- **Gas fluxes before thermal BCs.** The mass BCs (step 3) must finish before
-  the boundary-temperature Newton solve (step 4), because the blowing model of
-  each convective BC reads the outward gas mass flux $\dot{m}_g$ at the face.
-- **Thermal BCs before $S_{\rm conv}$.** The boundary cells' temperature
-  gradient in $S_{\rm conv}$ (step 6) blends in the boundary-face slope at the
-  solved $T_s$, read from the flux that step 4 wrote.
-- **Reaction rates before mesh velocity (ALE).** The ALE mesh velocity is built
-  from the per-cell strain rate $\theta_i$, which is a function of the species
-  reaction sources `dξ_rxn`; hence the physics RHS (which fills `dξ_rxn`) runs
-  before the mesh-velocity integration.
+- **The corrections before the kernels.** The relative-flux kernel reads the
+  node corrections.
+- **The gas transport before the thermal boundary.** The surface energy balance
+  of a boundary face reads the face's outward mass fluxes, which feed the
+  blowing models of its convective conditions and the sensible enthalpy the
+  gas carries out at the face temperature (§12.2).
+- **The closure after the kernels and before the sources.** The strain rates
+  are the reactions' alone, read from the mass sources the reaction kernel
+  wrote; a manufactured mass source does not move the mesh.
+- **The assembly last.** It is the only writer of $\boldsymbol{du}$, so every
+  kernel only adds to the contributions.
 
 ---
 
-## 15.4 The full ALE residual assembly
+## 15.4 The algebraic rows and the consistent state
 
-When `mesh_mode(def.mode) isa ALE`, mesh motion is part of the coupled system,
-and the residual additionally evolves the node positions $z_k$ and (under
-`WithChi`) the pyrolysis-progress $\chi_i$. The assembly is the following
-sequence; we present it as the canonical pipeline and give the governing
-equation for each step. Cross-references: the ALE kinematics and GCL are in §11;
-the volume-change / $\chi$ model is in §10.
+The algebraic rows carry every non-local dependence of the physics as a local
+equation (§15.9):
 
-1. **Populate state cache.** Unpack $T,\xi,z,\chi$ from $\boldsymbol{u}$ into the
-   typed cache.
+- **The balance rows** of the node velocities (`BalanceRowClosure`, §11): the
+  pinned node at rest, $0=w_1$, and for each cell, on the velocity row of its
+  node farther from the pinned node,
 
-2. **Update $\chi$-driven cross-section** (`update_cross_section_area!`,
-   dispatched on `chi_mode`). Under `WithChi`, compute the mass-weighted
-   column-average progress and set the column area:
-   $$
-   \bar\chi = \frac{\sum_i \chi_i\,m_{{\rm dry},i}}{\sum_i m_{{\rm dry},i}},\qquad
-   A = A_0\,\mathrm{law}(\bar\chi),
-   $$
-   storing $A$ in `cache.A_section[]` carrying `eltype(u)` (AD-safe). The
-   numerator accumulates `Dual` types; the denominator $M_{\rm dry}$ is a
-   `Float64` constant stored on the mesh. Under `NoChi` this is a no-op
-   returning $A_0$.
+  $$
+  0=A_{i+1}(w-c)_{i+1}-A_i(w-c)_i-(\theta_i-\theta_A)V_i ,
+  $$
 
-3. **Update state-derived geometry** (`update_state_geometry!(…, ALE())`).
-   Recompute face positions $z_{f}=z_{{\rm node}(f)}$, face areas $A_f=A$, cell
-   centers $z_i^c=\tfrac12(z_L+z_R)$, and cell volumes $V_i=|z_R-z_L|\,A$, all
-   from `cache.z` and `cache.A_section`, preserving the scalar type.
+  the solid velocity $w-c$ satisfying the cell's volume balance. The rows are
+  bidiagonal from the pinned node. Under a prescribed mesh velocity every row
+  is $0=w_n-w(z_n,t)$.
+- **The face-intensity rows** (`BeerLambertKernel`, §8.3): at the exposed face
+  $0=I_e-a\,q_{\rm inc}(t)$, and at every other face, the face of its cell
+  farther from the exposed one, $0=I_{\rm down}-I_{\rm up}\exp(-\alpha_i\Delta_i)$,
+  with $\alpha_i$ the cell's absorption coefficient and $\Delta_i$ its thickness
+  along the beam (§8.3.3).
+- **The cross-section rows** (`LateralShrinkage`, §10):
+  $0=A-A_0\,\mathrm{law}(\bar\chi_c)$ and
+  $0=\theta_A-\frac{d}{dt}\log\mathrm{law}(\bar\chi_c)$, with $\bar\chi_c$ the
+  column's conversion smoothly clamped into a neighbourhood of $[0,1]$.
+- **The multipliers** of the potential closure on meshes of more dimensions,
+  one per cell (residual level, §14.5).
 
-4. **Update properties.** As in the Eulerian path, but now on the moving
-   geometry.
+Each block is solvable for its own unknowns given the differential ones: the
+balance rows by one sweep from the pinned node, the intensity rows by the
+attenuation recurrence from the exposed face, the cross-section rows
+explicitly, the multipliers by one symmetric positive-definite solve. The
+system is therefore a semi-explicit DAE of index one.
 
-5. **Physics RHS.** Same `compute_rhs!` as Eulerian; importantly it also fills
-   `ws.rhs_cache.dξ_rxn`, which the ALE steps reuse.
-
-6. **Column-global radial strain and cumulative mesh velocity.** First compute
-   $\theta_A$ (the column-global radial channel; $0$ under `NoChi`), then
-   integrate the axial strain bottom-up to obtain the node velocities. The
-   per-cell volumetric strain rate is the volume-change law of §10,
-   $$
-   \theta_i = \frac{1}{V_i}\frac{dV_i}{dt} = \sum_{j}\gamma_j\,\frac{1}{\rho_j}\,\frac{d\xi_{j,i}}{dt}\bigg|_{\rm rxn},
-   $$
-   (only $\gamma_j>0$ components contribute; gases with $\gamma=0$ escape without
-   changing matrix volume). The axial part removes the radial channel,
-   $\theta_{L,i}=\theta_i-\theta_A$, and the cumulative integration with pinned
-   bottom node $w_1=0$ gives
-   $$
-   w_{k+1} = w_k + (\theta_i-\theta_A)\,\Delta z_i,\qquad \Delta z_i = \frac{V_i}{A},
-   $$
-   i.e. $w_k=\sum_{i<k}\theta_{L,i}\,\Delta z_i$ (an exclusive cumulative sum;
-   this is exactly the structure of the prefix-sum couplings in the Jacobian,
-   §15.9). The radial channel under `WithChi` is, by the chain rule,
-   $$
-   \theta_A = \frac{1}{A}\frac{dA}{dt} = \frac{\mathrm{law}'(\bar\chi)}{\mathrm{law}(\bar\chi)}\frac{d\bar\chi}{dt},\qquad
-   \frac{d\bar\chi}{dt} = \frac{1}{M_{\rm dry}}\sum_i S_{{\rm dry},i}\,V_i,
-   $$
-   with $\mathrm{law}'(\bar\chi)$ obtained by `ForwardDiff.derivative(law, χ̄)`
-   and $S_{{\rm dry},i}=\sum_{j\in\text{dry-gas}}(d\xi_{j,i}/dt)|_{\rm rxn}$. The
-   guard `law(χ̄) > ε` prevents the radial channel from diverging as the
-   cross-section collapses.
-
-7. **Mesh-relative temperature advection** (`compute_ale_advection_term!`,
-   override-only). Every component rides the mesh, so the thermal mass
-   $\rho c_p^{\rm eff}$ moves with it and $T$ is advected only by the mesh
-   velocity relative to the material, $w_{\rm rel} = w_{\rm applied} −
-   w_{\rm physical}$ (§11.2.2): in production $w_{\rm rel} \equiv 0$ and nothing
-   fires; under `Workspace.w_override` the TVD-limited kernel adds
-   $w_{\rm rel}\,\partial T/\partial z$ to $dT$.
-
-8. **Dilation correction** for every component
-   (`_apply_ale_dilation_correction!`):
-   $$
-   \frac{d\xi_{j,i}}{dt}\bigg|_{\rm dilation} \mathrel{-}= \xi_{j,i}\,\theta_i\quad(\text{every } j),
-   $$
-   which keeps each component's cell mass on its reaction-and-flux budget as
-   the cell volume changes: $d(\xi_jV)/dt = S_jV − [J_jA]_{\rm faces}$. The gas
-   is included — it is carried with the pores it occupies, and its flux
-   $J_g$ is relative to the skeleton (§11.2.3).
-
-9. **Pack the $T,\xi,z$ blocks.** $du[i]=dT_i/dt$ (with the ALE correction),
-    $du[n+(j-1)n+i]=d\xi_{j,i}/dt$ (with dilation), and
-    $du[n(1+N_C)+k]=w_k$ — i.e. $dz_k/dt=w_k$ (Euler-forward node motion
-    realized by the integrator).
-
-10. **Pack the $\chi$ block** (`_pack_chi_derivative_dispatched!`, `WithChi`
-    only). The progress variable obeys
-    $$
-    \frac{d\chi_i}{dt} = \frac{S_{{\rm dry},i}\,V_i}{m_{{\rm dry},i}},\qquad
-    S_{{\rm dry},i}=\sum_{j\in\text{dry-gas}}\frac{d\xi_{j,i}}{dt}\bigg|_{\rm rxn},
-    $$
-    with a `max(m_init, eps())` guard against division by zero. Note $\chi$ is
-    *reconstructed* from `dξ_rxn` each residual rather than carried as an
-    independent integral — it is still a genuine ODE state (the integrator
-    advances it), but its derivative is recomputed from first principles every
-    evaluation, keeping it exactly in sync with cumulative dry-gas production.
-    Under identity-law materials the $\chi$ derivatives are zeroed.
-
-The complete ALE discrete updates therefore read
-
-$$
-\frac{dz_k}{dt}=w_k,
-$$
-$$
-\frac{dT_i}{dt}=\frac{-(\nabla\cdot\mathbf{q})_i+S_{{\rm conv},i}+Q_{{\rm rad},i}+Q_{{\rm rxn},i}}{\rho c_p^{\rm eff}{}_{,i}}
-\;\Bigl[\,+ w_{{\rm rel},i}\Big(\frac{\partial T}{\partial z}\Big)_i \text{ under \texttt{w\_override} only; } w_{\rm rel}\equiv 0 \text{ in production}\Bigr],
-$$
-$$
-\frac{d\xi_{j,i}}{dt}=-(\nabla\cdot\mathbf{J}_j)_i+S_{j,{\rm rxn},i}
-- \underbrace{\xi_{j,i}\,\theta_i}_{\text{dilation (every component)}}.
-$$
-
-> **Implementation note.** ALE path: `_residual!(…, ::ALE)`,
-> `_compute_ale_mesh_velocity!`, `_compute_theta_A` / `_compute_theta_A_dispatched`,
-> `_apply_ale_T_advection!`, `_apply_ale_dilation_correction!`, and
-> `_pack_chi_derivative!` are all in src/Residual/residual.jl. The strain-rate
-> law `volume_change_rate` is in src/Physics/volume_change.jl. The ALE flux
-> kernels are in src/Discretization/ale_fluxes.jl.
+`consistent_state!(u, def, ws, t)` overwrites the algebraic unknowns of
+$\boldsymbol u$ with the values that satisfy their rows at $t$, given its
+differential unknowns: the face intensities by the recurrence; under a variable
+cross section, one residual pass for the strain and history rates, the area and
+lateral rate from the column sums, and a second pass at the consistent lateral
+rate; then the node velocities by one sweep (one pass is exact, since the
+corrections read positions and masses only) or the multipliers by one solve. A
+closure row left above $10^{-10}$ of its scale is an error. `setup` calls it at
+$t_0$, and the deactivation event calls its parts after every transfer
+(§14.3.5); the integrator itself runs no initialization (`initializealg =
+NoInit()`). `integrate` refuses an inadmissible initial state (§15.5.4) with an
+`ArgumentError`.
 
 ---
 
 ## 15.5 Time integration
 
-### 15.5.1 The method-of-lines ODE and the integrator
+### 15.5.1 The mass-matrix DAE and the integrator policies
 
-The packed residual turns the PDE system into the autonomous-in-form ODE
-$\boldsymbol{du}/dt=\mathrm{RHS}(\boldsymbol{u},t)$, which `solve` hands to
-OrdinaryDiffEq.jl. Pyrolysis kinetics are *stiff* (Arrhenius source terms span
-many decades over a narrow temperature window; conduction adds the usual
-parabolic stiffness $\sim\Delta t/\Delta z^2$), so the default integrator is an
-L-stable singly-diagonally-implicit Runge–Kutta (SDIRK) method:
+The integrator advances
 
 $$
-\texttt{KenCarp4}\big(\text{autodiff}=\text{AutoFiniteDiff()}\big).
+\mathsf M\,\frac{d\boldsymbol u}{dt}=\boldsymbol f(\boldsymbol u,t),\qquad
+\mathsf M=\mathrm{diag}(\text{1 on differential rows, 0 on algebraic rows}),
 $$
 
-KenCarp4 is a 4th-order ESDIRK pair with an embedded error estimator for
-adaptive step-size control; its singly-diagonal structure means every implicit
-stage shares the same Newton iteration matrix, which we exploit below.
-
-**Default linear solver.** `_resolve_integrator` picks the sparse direct
-factorization from the Jacobian's pattern: `UMFPACKFactorization` when the
-Jacobian materializes the ALE geometry block (`DirectSolve` under ALE,
-`materializes_geometry_block`, §15.11.2), and `KLUFactorization` for every
-other sparse Jacobian. The rule depends on the mode and the strategy, never on
-the mesh size. It rests on end-to-end KenCarp4 runs of 100-cell PMMA and
-charring-wood decks (Eulerian and ALE, surface and Beer–Lambert absorption,
-with and without a lateral shrinkage law) and of V-BO-01:
-
-- On the local patterns (every `ApproxSolve` Jacobian, Eulerian `DirectSolve`
-  with surface absorption) KLU is 2.6–4.4× faster than Sparspak and 1.1–1.4×
-  faster than UMFPACK, allocates 8–83 MB per solve against 19–534 MB for
-  Sparspak, and takes the same steps to within 1%.
-- On the exact ALE Jacobian UMFPACK is 1.5–1.9× faster than Sparspak and
-  2.6–2.7× faster than KLU, with identical step and Newton counts.
-- On the Eulerian Beer–Lambert pattern of `DirectSolve` KLU is 1.7× faster
-  than Sparspak. UMFPACK's threshold pivoting (relative pivot tolerance 0.1)
-  produced a factor with growth near $10^{50}$ on a $W$ of condition number
-  about 30; the resulting Newton steps failed, and the run took 50 times the
-  steps. That pattern therefore uses KLU.
-- All three factorizations are backward stable on these systems (normwise
-  backward error below $3\times10^{-15}$). Sparspak does not pivot: on the
-  Darcy decks its componentwise backward error reaches 1 in individual rows,
-  where KLU's and UMFPACK's stay below $10^{-13}$. On the exact ALE Jacobian the
-  relative residuals $\lVert Wx-b\rVert/\lVert b\rVert$ reach
-  $6\times10^{-11}$ for UMFPACK, $2\times10^{-11}$ for KLU and
-  $3\times10^{-9}$ for Sparspak, without effect on the Newton iteration.
-
-Sparspak, KLU, UMFPACK and the ILU-Krylov solvers of §15.12 are interchangeable
-through `linear_solver`.
-
-> **Implementation note.** Integrator resolution: `_resolve_integrator`,
-> src/Solver/solve.jl. A user may pass a constructor (`integrator=Rodas5P`) plus
-> a `linear_solver=`, or a fully-built algorithm. The RHS closure re-samples
-> the incident radiation at every evaluation (`ws.I_radiation = radiation_flux(t)`)
-> whenever the active model consumes it (`SURFACE_ABSORPTION` / `BEER_LAMBERT`)
-> — constant and time-varying fluxes alike (§8.3.4). The Jacobian closure
-> refreshes `ws.I_radiation` at its own $t$ the same way, so a time-varying flux
-> enters the Beer–Lambert Jacobian at the time the Jacobian is evaluated.
-
-**Problem-independent integrator types.** OrdinaryDiffEq compiles its stepper,
-nonlinear solver and factorization for the types of the functions it is handed.
-The RHS and Jacobian closures capture the `ProblemDef` and workspace, whose
-types carry the material, boundary-condition and mode types. `solve` therefore
-hands them to the integrator behind fixed-signature `FunctionWrapper`s:
-`ErasedRHS` for `(du, u, p, t)` with `Vector{Float64}` state and `Float64`
-time, and `ErasedJacobian{M}` for the Jacobian matrix type `M`. The callbacks
-do the same (§15.5.3). The integrator's type then depends only on the solver
-configuration: the mesh mode, depletion handling, the installed optional
-callbacks, the integrator and its factorization. A problem with new material or
-boundary-condition types compiles only the Pyrolysis kernels (initialization,
-residual, Jacobian, solution extraction). The precompile workloads
-(`src/precompile.jl`) cache the integrator for the default configurations. An
-algorithm that calls the RHS with other argument types, such as dual numbers
-for a ForwardDiff time derivative, reaches the closure by dynamic dispatch. A
-call of the Jacobian with a different matrix type is a `MethodError`, because
-a converted copy would silently drop the entries.
-
-> **Implementation note.** src/Solver/integrator_functions.jl (`ErasedRHS`,
-> `ErasedJacobian`); the `ODEFunction` is built in `solve`, src/Solver/solve.jl.
-> `solve` also converts the tolerances, step bounds and `saveat` to `Float64`,
-> because the solve keywords enter the integrator's type.
-> test/solver/test_integrator_type.jl checks that two decks differing in every
-> problem type share one integrator type.
-
-### 15.5.2 The implicit-RK $W$ matrix and warm start
-
-Each implicit SDIRK stage solves a nonlinear algebraic system for the stage
-increment by Newton's method. The Newton iteration matrix — OrdinaryDiffEq's
-"$W$" matrix — is
-
-$$
-\boxed{\,W = \frac{1}{\gamma_{\rm RK}\,\Delta t}\,I - J\,,}\qquad J = \frac{\partial\,\mathrm{RHS}}{\partial\boldsymbol{u}},
-$$
-
-where $\gamma_{\rm RK}$ is the (common, by the singly-diagonal property) stage
-coefficient and $J$ is the residual Jacobian. (Equivalently $W$ may be scaled by
-$\gamma_{\rm RK}\Delta t$ to $W=I-\gamma_{\rm RK}\Delta t\,J$; the scaling is an
-internal detail of the integrator. The factor that matters for our purposes is
-that $W$ is a *diagonal shift of $-J$*, so the diagonal of $J$ adds to the
-$1/(\gamma_{\rm RK}\Delta t)$ scale.) Each Newton step solves
-$W\,\delta\boldsymbol{u}=-r$ for the stage residual $r$ with the sparse
-factorization of §15.5.1; the strategy (`DirectSolve` / `ApproxSolve`, §15.10)
-decides which entries of $J$ are assembled.
-
-The Jacobian $J$ is supplied to the integrator through an `ODEFunction` carrying
-both `jac = jac!` and a `jac_prototype` sparsity pattern (the union of the
-physics and geometry patterns of §15.11). `solve` builds the spec for its own
-`(def, ws)`:
+handed to OrdinaryDiffEq as
 
 ```julia
-jac_spec = JacobianSpec(backend, def, ws)
-jac! = (J, u, p, t) -> compute_jacobian!(J, jac_spec, u, def, t, ws)
-jac_prototype = Float64.(jac_spec.sparsity_phys .| jac_spec.sparsity_geom)
-ode_fn = ODEFunction{true,FullSpecialize}(ErasedRHS(rhs!);
-    jac = ErasedJacobian{typeof(jac_prototype)}(jac!),
-    jac_prototype = jac_prototype)
+f = ODEFunction{true,FullSpecialize}(ErasedRHS(rhs!);
+    mass_matrix = M, jac = ErasedJacobian{typeof(J0)}(jac!), jac_prototype = J0)
 ```
 
-(with the incident flux refreshed at the Jacobian's own $t$ inside `jac!`,
-§15.5.1).
+with $\mathsf M$ the identity when every row is differential (a fixed mesh
+without in-depth radiation, an ODE) and the diagonal `mass_matrix(layout)`
+otherwise; `jac!` the colored Jacobian (§15.6) and `J0 = jac_prototype(cj)` a
+zero matrix of its pattern (`integrate`, `src/Integration/solve.jl`). The
+integrator is initialized with the per-row absolute tolerances, the relative
+tolerance, `maxiters`, `dtmin`, `dtmax`, the first step `dt` (the fixed step
+with `adaptive = false`), `saveat`, the callback set of §15.5.3, the domain test
+of §15.5.4 as `isoutofdomain`, `initializealg = NoInit()` and `save_end = true`.
 
-**Warm start.** A prior solution's final state can seed a new solve's initial
-condition (`warm_start=prev_solution`), provided the component count, mesh size,
-ALE mode, and $\chi$ mode all agree (enforced implicitly by a state-vector
-length check) and the prior solve parked no cells. The integrator's `tspan[1]` still defines the start time, so
-warm-starting treats the prior final state as fresh initial data — useful for
-continuation studies and for sensitivity sweeps, with the caveat (§17.7) that
-warm-start artifacts can perturb finite-difference sensitivities.
+An **integrator policy** (`IntegratorPolicy`, `src/Integration/policy.jl`) is an
+algorithm together with the two rules that are part of its contract: the
+**restart** after an event that modifies the state, and the **observer flag**,
+what a per-step observer does with the derivative-discontinuity flag that the
+callback machinery raises before every discrete callback's `affect!`.
 
-> **Implementation note.** ODE construction, Jacobian wiring, and warm-start
-> application: src/Solver/solve.jl (`solve`, `_apply_warm_start!`). The
-> per-step linear-solve protocol is OrdinaryDiffEq's; Pyrolysis supplies only
-> $J$ and the strategy.
-
-### 15.5.3 Output-time handling and callbacks
-
-Snapshots are saved at `saveat=problem.output_times` (11–101 evenly spaced
-samples by default). Callbacks are assembled in a fixed order and combined into
-a `CallbackSet`:
-
-| Order | Callback | Type | Role |
+| Policy | Method | Restart after an event | Observer flag |
 |---|---|---|---|
-| 1 | `StepUpdateCallback` | discrete (every accepted step) | mirror integrator $\boldsymbol{u}\to$ mutable mesh; sync geometry & cross-section |
-| 2 | thickness termination | continuous (ALE) | terminate when the live thickness $z_{n_{\rm live}+1}-z_1<$ `min_thickness` |
-| 3 | `DepletionCallback` | discrete (opt-in) | park cells below their depletion threshold; the state keeps its size |
-| 4 | Newton-failure cap | discrete (every accepted step; Newton integrators) | after a step whose Newton needed retries, hold the proposed step at or below 1.25× that step for 20 steps |
-| 5 | progress bar | discrete (every accepted step) | progress bar |
-| 6 | `DiagnosticsCallback` | discrete (every `diagnostics_stride`) | log a sensible-energy snapshot row (ledger fields NaN; §16.8.3) |
-| 7 | Jacobian verification | discrete (at sample times) | compare active Jacobian vs. dense AD reference |
-| 8 | user callback | — | custom |
+| `rodas5p_policy(ls)` (the default, `default_policy`) | `Rodas5P`, a Rosenbrock method: one linear solve per stage with the Jacobian evaluated at every step | `:heuristic` (keyword `restart`; also `:forced_dt`, `:solver_chosen`) | cleared |
+| `kencarp4_policy(ls)` | `KenCarp4`, an ESDIRK method with Newton stage solves, the raw (unsmoothed) error estimate | `:solver_chosen` | kept |
+| `fbdf_policy(ls)` | `FBDF`, variable-order backward differentiation | `:forced_dt` | cleared |
 
-Every callback of rows 1–7 keeps its problem-typed work behind a fixed-signature
-`FunctionWrapper` on the state vector and the time: the mesh sync, the
-live-thickness evaluation, the depletion check and park, the diagnostics row and
-the Jacobian comparison. Only the actions on the integrator itself stay in the
-callback: `terminate!`, `set_proposed_dt!`, `derivative_discontinuity!` and the
-reads of its step and Newton-failure counters. The `CallbackSet`'s type
-therefore depends on which callbacks are installed, not on the problem (§15.5.1).
+`ls` is the linear solver (§15.10). Every policy takes the Jacobian from the
+colored one and the time derivative of the right-hand side, where the method
+needs it, by finite differences (`autodiff = AutoFiniteDiff()`). The restarts:
+`:solver_chosen` keeps the integrator's own proposal; `:forced_dt` proposes
+`DT_AFTER_EVENT` $=10^{-6}$ s; `:heuristic` proposes the integrator's
+initial-step estimate at the state the event left (two right-hand-side
+evaluations). For `Rodas5P` the heuristic restart rejects fewer steps after an
+event than keeping the step and keeps the mass ledger closer than either other
+kind. The flag rules: `:keep` leaves the flag raised, so the integrator
+re-evaluates the derivative at the accepted state; `:clear` clears it, so a
+read-only observer is numerically inert. `Rodas5P` rebuilds its Jacobian every
+step and is indifferent to the flag; `FBDF` with the flag raised restarts at
+order one on every step, and after an event it restarts at order one, hence the
+forced small step. `solve` takes a policy through `integrator_policy` and a
+linear solver through `linear_solver`; without either it uses
+`default_policy(StructuredKLU())`.
 
-The **`StepUpdateCallback`** is the linchpin of the read-only-mesh design: after
-each accepted step it sets `mesh.cross_section_area = cross_section_area_from_state(…)`
-and calls `update_mesh_from_state!(mesh, u, layout)`, so all between-step
-consumers (depletion detection, diagnostics, the surface BC solve in
-post-processing) see a mesh consistent with the integrator state.
+### 15.5.2 The W matrix and the stage solves
 
-The **`DepletionCallback`** (§14.3) detects cells whose current thickness has
-fallen below `depletion_threshold × Δz_init,i` (default $5\%$ of each cell's
-own initial thickness; on a fixed mesh, the top live cell whose condensed
-concentration has fallen below the same fraction of its initial value), merges
-it into a neighbour with the sensible-enthalpy-conserving temperature merge of
-§14.3.3,
+Each stage solves a linear system with the matrix
 
 $$
-\sum_{j} m_j\!\int_{T_{\rm ref}}^{T_{\rm merged}}\! c_{p,j}\,dT'
-= H_a(T_a) + H_b(T_b)
-\ \text{(bracketed Newton; every component, gas included)},\qquad
-\xi_{{\rm merged},j} = \frac{V_a\,\xi_{a,j}+V_b\,\xi_{b,j}}{V_{\rm keep}},
+W=J-\frac{\mathsf M}{\gamma_{\rm RK}\Delta t},
 $$
 
-and parks the freed slot above the live surface
-(`derivative_discontinuity!(integrator, true)`). The state keeps its size, so
-the Jacobian's sparsity pattern and caches stay valid and `saveat`
-interpolation is unaffected (§14.3.5–§14.3.6).
+OrdinaryDiffEq's sign convention (the negative of the textbook
+$I/(\gamma_{\rm RK}\Delta t)-J$, with the mass matrix in place of the identity;
+the sign changes neither the structure nor the solve). `Rodas5P` solves one
+linear system per stage with $W$ at the step's Jacobian and no Newton iteration;
+`KenCarp4` and `FBDF` solve each stage by a Newton iteration on $W$, reusing the
+Jacobian across steps as the method decides. On an algebraic row
+$\mathsf M_{rr}=0$, so the row of $W$ is the Jacobian's row: the constraint is
+linearized exactly in every stage. On a dead row $W$ is a scaled identity row
+(§14.3.1). Every row of the Jacobian's pattern stores its diagonal, so $W$'s
+stored entries are a subset of the pattern's whatever $\Delta t$.
 
-The **Newton-failure cap** (`create_newton_failure_cap_callback`) is a step cap with a memory of Newton failures. After
-every accepted step it reads the integrator's count of failed nonlinear solves.
-When the step just accepted needed retries, the proposed next step is held at or
-below $g\,\Delta t_{\rm acc}$ with $g = 1.25$ (`FAILURE_MEMORY_GROWTH`) for the
-next $M = 20$ accepted steps (`FAILURE_MEMORY_STEPS`); a further failure
-restarts the memory from the new step. The error controller alone regrows the
-step to its accuracy limit after a failure, and on a strongly nonlinear front
-that limit lies beyond the range in which the stage Newton converges, so the
-integrator settles into a fail–halve–regrow rhythm. On the Landau ablation case
-V-CPL-02 the Newton fails near $\Delta t = 5$ ms and converges at 2.5 ms while
-the controller keeps proposing 5 ms: the cap takes the case from 1087 steps and
-892 Newton failures to 1032 steps and 78 failures. A run without Newton
-failures never triggers the cap and keeps its trajectory exactly. It is
-installed for every integrator that solves its stages by Newton (an
-algorithm with an `nlsolve` field).
+### 15.5.3 Output times, callbacks and observers
 
-> **Implementation note.** Callbacks: src/Solver/callbacks.jl
-> (`create_step_update_callback`, `create_thickness_termination_callback`,
-> `create_depletion_callback`, `park!`, `create_newton_failure_cap_callback`)
-> and src/Solver/solve.jl (assembly, diagnostics, verify-Jacobian). The
-> cross-keyword checks are in `_validate_solve_kwargs`, src/Solver/solve.jl.
+States are saved at `saveat` (default `problem.output_times`); the state a solve
+ends on is always saved. A solve its controller stopped saves its last
+proposal, which it rejected, at the last accepted time; `integrate` reports the
+accepted state there instead. Every callback reaches the problem through a
+fixed-signature function wrapper (§15.5.7) and is assembled into one
+`CallbackSet` (`integrate`):
+
+| Callback | Kind | Role |
+|---|---|---|
+| step observer | discrete, every accepted step | records the largest constraint residual of the accepted states; ends the solve with `ReturnCode.Failure` and a warning once the domain test gave up (§15.5.4) or a fixed step left the domain; applies the Newton-failure step cap (§15.5.5); applies the flag rule |
+| located deactivation | continuous, on the threshold margin (`deactivation`, `located_events`) | §14.3.5 |
+| deactivation safety net | discrete, every accepted step (`deactivation`) | §14.3.5 |
+| layer times | continuous, on the activation margin (every moving mesh) | sets the layers' equidistribution times (§14.2.2) |
+| thickness stop | continuous, on the live thickness minus `min_thickness` (moving mesh) | ends the solve with outcome `:min_thickness` |
+| conservation recorders | continuous, never firing (one per `ConservationRecorder` in `callback`) | read each step's end before its events (§16) |
+| progress bar | discrete (`progress = true`) | a read-only observer |
+| the caller's `callback` | as given | a read-only observer: the flag rule follows each discrete callback's `affect!` |
+| accepted-state recorder | discrete, every accepted step, last | records the accepted state and commits the recorders' step integrals; applies the flag rule |
+
+Continuous callbacks are located inside the step on the integrator's
+interpolant, and the earliest crossing ends the step there; the discrete ones
+run at each accepted step's end in the order listed. The step observer is
+always installed, so a further read-only observer leaves the trajectory
+unchanged under every policy: a probe callback, alone or in a `CallbackSet`,
+leaves the saved times, the states, the accepted steps and the right-hand-side
+evaluations bit-identical (`test/integration/test_policies.jl`). A continuous
+callback of the caller's raises the flag at its event as any event does.
+
+### 15.5.4 The domain test
+
+`DomainCheck(cp)` (`src/Integration/checks.jl`) is the integrator's
+`isoutofdomain` test. A proposed state is rejected, and the step cut by the
+controller's smallest factor, when
+
+- it is **inadmissible** (`inadmissible`): a live component mass more negative
+  than its absolute tolerance; a live cell at or below absolute zero (its
+  energy state at or below the value of zero kelvin at its masses,
+  `below_absolute_zero`); on a moving mesh a live cell whose nodes have crossed
+  (a non-positive volume); or a non-positive cross-section area. The test reads
+  the raw state, never through a guard: the trial clamp keeps such a state
+  evaluable, and this test keeps it from being accepted;
+- a gas-bearing live cell lacks resolved physical pore volume above twice the
+  trial divisor floor plus its mass/thermal/geometry uncertainty, violates its
+  current negative-gas-pressure budget, or leaves its declared matrix domain;
+- an algebraic row's scaled residual exceeds one (`constraint_residual`):
+
+  $$
+  \max_{r\ \text{algebraic, live}}\frac{|f_r|}{\mathrm{rtol}\,s_r+\mathrm{atol}_r}>1,
+  $$
+
+  with $s_r$ the row's own equation scale and $\mathrm{atol}_r$ the absolute tolerance of
+  its unknown in the residual's units:
+
+  | Row | Scale $s_r$ | $\mathrm{atol}_r$ |
+  |---|---|---|
+  | balance row of cell $k$ | $(\lvert\theta_k\rvert+\lvert\theta_A\rvert)V_k+\sum_f A_f\lvert w_f\rvert+\sum_f A_f\lvert c_f\rvert$ | the node's velocity tolerance times its face area |
+  | pinned or prescribed velocity | $\lvert w_n\rvert$ | the node's velocity tolerance |
+  | face intensity | the incident-intensity scale | its tolerance |
+  | area | $\lvert A\rvert$ | its tolerance |
+  | lateral rate | $\lvert\theta_A\rvert$ plus the volume-weighted mean $\lvert\theta\rvert$ | its tolerance |
+
+The algebraic rows are also in the integrator's error norm through their
+absolute tolerances; the constraint test is a separate check of the
+constraint's accuracy in its own equation's units, which the state tolerance of
+a velocity, in length per time, does not provide.
+
+The test reads only the proposals the integrator's error test accepts: it is
+bound to the integrator's step controller (`bind_error_test!`) and returns
+"inside the domain" for a proposal the error test rejects, which that test and
+its controller's own cut then handle. The residual is evaluated once per tested
+state. After more than `MAX_CONSTRAINT_REJECTIONS` $=50$ consecutive constraint
+rejections the state is accepted and the monitor marked failed, and the step
+observer ends the solve with `ReturnCode.Failure` and a warning. A proposal
+rejected for a cell at or below absolute zero is recorded, and a solve that
+stops there warns naming the cell and the time.
+
+A fixed-step solve (`adaptive = false`) never reaches the domain test; the step
+observer holds each accepted state to admissibility and ends the solve with
+`ReturnCode.Failure` at the first inadmissible one. The counts are in
+`sol.statistics`: `domain_rejections` and `largest_constraint_residual` (one or
+below passes; zero for a fixed-step solve), beside the integrator's accepted
+and rejected steps, right-hand-side evaluations, Jacobians, linear solves and
+nonlinear failures.
+
+### 15.5.5 The Newton-failure step cap
+
+After an accepted step whose nonlinear solves needed retries, the proposed step
+is held at or below $1.25\,\Delta t_{\rm acc}$ (`FAILURE_MEMORY_GROWTH`), with
+$\Delta t_{\rm acc}$ the step just accepted, for
+the next $20$ accepted steps (`FAILURE_MEMORY_STEPS`); a further failure
+restarts the memory from that step (`cap_step!`). The error controller alone
+regrows the step to its accuracy limit after a failure, and on a strongly
+nonlinear front that limit can lie beyond the range in which the stage Newton
+converges, which sets up a fail–halve–regrow rhythm. A run without nonlinear
+failures never engages the cap and keeps its trajectory exactly. Rosenbrock
+methods have no nonlinear solve, so under the default policy the cap never
+engages.
+
+### 15.5.6 Per-row absolute tolerances
+
+`abstol_vector` (`src/States/tolerances.jl`) gives every row its own absolute
+tolerance, from the cell's initial condensed mass $m^{\rm s}_i(0)$ (for a cell
+that starts with none, its total initial mass, or 1 kg m⁻³ times its volume),
+the deactivation threshold $\varepsilon_m$ (`threshold`), `reltol` and `abstol`:
+
+| Row | Absolute tolerance |
+|---|---|
+| condensed component mass in cell $i$ | $\mathrm{rtol}\,\varepsilon_m\,m^{\rm s}_i(0)$, never a per-species inventory, which is zero for a product |
+| gas component mass in cell $i$ | $p_{tol}M_j\phi_i(0)V_i(0)/(N_gRT_i(0))$; supplemented by the proposed-state pressure norm |
+| temperature | `abstol` [K] |
+| enthalpy inventory | $\varepsilon_m\,m^{\rm s}_i(0)\,c_{p,\rm ref}\,$`abstol`, $c_{p,\rm ref}$ the cell's mass-weighted heat capacity at its initial temperature, so a cell at the threshold resolves its temperature to `abstol` as the temperature form does |
+| face intensity | $\mathrm{rtol}\,I_{\rm scale}$, $I_{\rm scale}$ the largest incident intensity over the solve window (at least 1 W m⁻²) |
+| node position | $\mathrm{rtol}\,\varepsilon_m\,\Delta z_n^{\min}$, $\Delta z_n^{\min}$ the smallest initial size of the cells around node $n$ |
+| node velocity | $\mathrm{rtol}\,\varepsilon_m\,\Delta z_n^{\min}/\Delta t_0$, $\Delta t_0$ the first step `dt` |
+| multiplier (more dimensions) | $\mathrm{rtol}\,\varepsilon_m\,\Delta z_i(0)^2/\Delta t_0$, $\Delta z_i(0)=V_i(0)^{1/D}$ the cell's initial size |
+| history pair | the cell's mass tolerance |
+| deformation gradient | $\mathrm{rtol}$ |
+| area | $\mathrm{rtol}\,A_0$ |
+| lateral rate | the smallest velocity tolerance over the initial thickness |
+
+The defaults are `reltol` $=10^{-6}$ and `abstol` $=10^{-8}$ K. A position error
+within its tolerance moves a cell's concentrations by the relative amount its
+mass tolerance allows. Condensed caloric regularization uses its reference-mass scale. Gas transport
+guards instead use current pore volume and temperature. The pressure norm
+propagates mass, thermal and geometric error through the proposed-state EOS;
+initial gas-row tolerances alone do not control evolving pressure (§13.10.5).
+
+### 15.5.7 Problem-independent integrator types
+
+OrdinaryDiffEq compiles its stepper, nonlinear solver and factorization for the
+types of the functions it is handed. A closure over a problem's definition and
+buffers carries the material, boundary-condition and kernel types, so every
+problem would compile that whole stack again. The right-hand side and the
+Jacobian therefore reach the integrator behind fixed-signature
+`FunctionWrapper`s (`src/Integration/erased.jl`):
+
+- `ErasedRHS(rhs!)`: calls with `Vector{Float64}` state and `Float64` time go
+  through the wrapper; any other argument types go to `rhs!` by dynamic
+  dispatch;
+- `ErasedJacobian{M}(jac!)`: for the matrix type `M` the integrator allocates
+  from the prototype (`SparseMatrixCSC{Float64,Int}`); a call with any other
+  matrix type is a `MethodError`, since a converted copy would hand the
+  integrator a matrix it never sees.
+
+The domain test and every callback reach the problem through wrappers in the
+same way; only the actions on the integrator itself (`terminate!`,
+`set_proposed_dt!`, `auto_dt_reset!`, `derivative_discontinuity!`, the reads of
+its counters) stay in the callbacks. `solve` converts the tolerances, step
+bounds and `saveat` to `Float64`, since they enter the integrator's type. The
+integrator's type then depends on the solver configuration only: whether the
+mesh moves, whether in-depth radiation adds algebraic rows on a fixed mesh (a
+mass matrix), whether cells are deactivated, the policy and its linear solver,
+and the optional callbacks installed. Two decks that differ in component count,
+property types, reactions, boundary conditions, radiation model and gas
+transport share one integrator type and one solution type in each such
+configuration (`test/integration/test_policies.jl`). A problem with other
+material or boundary-condition types compiles only the Pyrolysis kernels, the
+state mapping, the colored Jacobian and the solution's reconstruction. The
+precompile workloads (`src/precompile.jl`) cache the integrator for the fixed
+and moving meshes under surface absorption and Beer–Lambert absorption, lumped wall
+and gas transport, with and without deactivation, and the enthalpy form
+once.
 
 ---
 
-## 15.6 Jacobian backends
+## 15.6 The colored Jacobian
 
-The production backend is **`Structured{S}`**, parameterized by a
-`LinearSolveStrategy` $S$ (`DirectSolve` or `ApproxSolve`). It assembles the
-Jacobian *operator by operator*, exploiting the block-tridiagonal physics
-structure and representing the non-local terms as O(N) couplings until they are
-written into the sparse matrix. A second backend, **`DenseAD_ForwardDiff`**,
-runs `ForwardDiff` over the *entire* residual vector and returns a dense
-Jacobian. It is correct by construction (it differentiates the same `residual!`
-the integrator uses) but $O(N^2)$ in storage and slow; it is the
-**verification reference** (§15.13), not a solve backend.
+The Jacobian $J=\partial\boldsymbol f/\partial\boldsymbol u$ is the forward-mode
+derivative of the whole residual, evaluated on a sparsity pattern built from
+the mesh connectivity (§15.11) with its columns colored (§15.7). There is one
+Jacobian and no option that selects another: every solve uses it, and the dense
+forward-mode Jacobian of §15.13 is the reference it is tested against.
 
-`solve` takes the bare backend: `jacobian = Structured(strategy =
-DirectSolve())` or `Structured(strategy = ApproxSolve())`. With `jacobian =
-nothing` (the default) it picks `DirectSolve` on a fixed mesh — exact assembly
-plus a sparse direct solve — and `ApproxSolve` under ALE, which drops the
-structured couplings (§15.10.2). `solve` builds the spec for its own mesh copy,
-mode, and options; the `jacobian` keyword is typed `Union{Structured,Nothing}`,
-so passing a prebuilt spec or `DenseAD_ForwardDiff()` raises a `TypeError`.
+`ColoredJacobianCache(def, ws, u, t)` (`src/ColoredJacobian/colored.jl`), built
+once by `setup` at the initial state, holds
 
-`JacobianSpec` bundles the backend with everything the integrator needs:
+- the residual as `f!(du, u, t)` (`ResidualFunction(def, ws)`), with the time a
+  constant of the differentiation;
+- the backend, DifferentiationInterface's `AutoSparse(AutoForwardDiff(;
+  chunksize))` with the connectivity pattern as a known sparsity
+  (`KnownJacobianSparsityDetector`) and SparseMatrixColorings' greedy column
+  coloring;
+- the preparation (`prepare_jacobian`), done once per problem structure and
+  reused at every state and time;
+- the full pattern, the colored pattern (the dense rows reduced to their
+  diagonal, §15.9), the decompression target and its scatter into the full
+  pattern, the dense-row assembler (`LateralRows`, or `nothing`), a residual
+  buffer and the color count.
+
+`jacobian!(J, cj, u, t)` writes the Jacobian at $(\boldsymbol u,t)$ into `J`,
+whose structure must be the pattern's: the decompression writes stored values
+in order and checks only the matrix size and stored-entry count, so the cache's
+construction asserts that the prepared pattern and the colored pattern share
+`colptr` and `rowval`, and the integrator's `jac!` checks
+`same_structure(J, pattern)` on every call and errors if the matrix lost the
+structure. The integrator allocates its Jacobian from `jac_prototype(cj)`, a
+zero matrix with exactly the pattern's structure. After warm-up a Jacobian
+evaluation allocates nothing (`test/jacobian/test_allocations.jl`, 100 cells,
+every physics configuration, both energy forms).
+
+---
+
+## 15.7 Coloring, batching and decompression
+
+Two columns may share a color when no row holds both; one dual-number residual
+evaluation then carries the derivatives of every column of a color at once,
+each row reading its entry from the column of that color it stores.
+
+**Coloring.** SparseMatrixColorings colors the columns greedily in each of four
+vertex orders (`COLORING_ORDERS`: natural, largest-first, smallest-last and
+incidence-degree) and keeps the coloring with the fewest colors $n_c$. The
+largest number of stored entries in a row is a lower bound on any column
+coloring; on every configuration of the test suite the chosen coloring reaches
+it, and the count is constant in the cell count
+(`test/jacobian/test_pattern.jl`). On a line it follows
+
+$$
+n_c=\begin{cases}
+3N_C+9+2\delta_{\rm BL}+7\delta_\chi-n_{\rm mesh}, & \text{no relative fluxes},\\
+5N_C+13+2\delta_{\rm BL}+11\delta_\chi-n_{\rm mesh}, & \text{relative fluxes (a correction)},
+\end{cases}
+\qquad
+n_{\rm mesh}=\begin{cases}6 & \text{fixed mesh},\\ 2 & \text{moving mesh},\\ 0 & \text{prescribed mesh velocity},\end{cases}
+$$
+
+with $\delta_{\rm BL}$ and $\delta_\chi$ the flags of §15.1.1. For two
+components on 12 cells this gives 9 colors on a fixed mesh, 11 under in-depth
+radiation, 13 on a moving mesh, 15 on a moving mesh under in-depth radiation
+and 21 on a moving mesh with deactivation, which installs the equidistribution
+correction and its relative fluxes (measured with the script of §15.13).
+
+**Batching.** One dual-number evaluation carries at most `MAX_CHUNK` $=24$
+partials. The colors are split into the fewest batches of at most 24, of equal
+width $\lceil n_c/\lceil n_c/24\rceil\rceil$, so up to 24 colors cost one
+evaluation of the residual at a dual type of that width; the dense reference
+(§15.13) uses the same width, so both evaluate the residual at one dual-number
+type at every mesh size.
+
+**Decompression.** DifferentiationInterface decompresses the colored result
+into a `SparseMatrixCSC` with the colored pattern. Without dense rows that
+matrix is the Jacobian. With them, the colored result is scattered into the
+full pattern through a precomputed index map and the two dense rows are then
+written by `LateralRows` (§15.9).
+
+---
+
+## 15.8 What the Jacobian differentiates
+
+The colored Jacobian is the derivative of the residual as executed: every
+kernel, every guard and every iteration inside one evaluation is differentiated
+by the dual numbers that pass through it. No derivative is written by hand, and
+a term added to a kernel enters the Jacobian with it. Three kinds of code inside
+the residual need care to keep that derivative correct and finite.
+
+- **Smooth guards.** Every trial-state guard is $C^1$ and exactly the identity
+  on the states the tolerances can distinguish (`src/Materials/guards.jl`): the
+  trial temperature, the cell temperature smoothly clamped into the property
+  bracket $[200,3000]$ K with 1 K transitions, which keeps $\exp(-E/RT)$ finite
+  with a finite derivative at zero and negative trial temperatures; the
+  one-sided positive part of the masses, exactly zero at and below zero and the
+  mass itself above the cell's mass tolerance; the smooth floors of the volume,
+  the heat-capacity sum, the conductivity and the porosity; the activation
+  switch of the correction. The derivatives are therefore finite at every real
+  state, and they are the physical ones on every physical state.
+- **The surface energy balance.** Each boundary face solves
+  $q_{\rm BC}(T_s)=k(T_s-T_{\rm cell})/d$ by a Newton iteration
+  (`solve_boundary_temperature!`, §12.2) whose iterates carry the dual numbers.
+  In dual mode the first iterate is never accepted, so at least one Newton
+  update propagates the partials, and the converged dual fixed point carries
+  the implicit-function derivative of $T_s$ with respect to the cell state and
+  the face's outward mass fluxes; the blowing models are evaluated at every
+  iterate from those fluxes, so their derivatives enter exactly.
+- **The caloric inversion** (enthalpy form). The temperature of a cell is the
+  root of its extended caloric relation (§13). For dual inputs the primal root
+  is found by the bracketed Newton iteration on the values, then corrected by
+  one Newton step per level of dual nesting, which carries the implicit
+  derivatives exactly (`invert_caloric`).
+
+The lateral-rate row differentiates the log-area along the history rates by a
+nested `ForwardDiff.derivative` inside the residual; its Jacobian row is
+assembled separately (§15.9). Nothing else in the residual iterates: the
+non-local recurrences of the physics are algebraic unknowns of the state
+(§15.4).
+
+The dense reference equals central differences of the residual over every
+column, per entry against each row's largest entry to $10^{-6}$, at the
+containment states of §15.13 (`test/jacobian/test_containment.jl`), so the
+derivative of the code is also the derivative of the function it computes.
+
+---
+
+## 15.9 Non-local dependence: algebraic rows and the two dense rows
+
+Figure 15 in §15.1 compares the actual sparsity patterns with and without correction and variable cross section. Its purple outlines identify the two global algebraic rows; pale entries separate structural dependencies from the derivatives that are nonzero at the initial state.
+
+A moving mesh's node velocity is the swept integral of the strain rates of every
+cell between it and the pinned node, and the intensity reaching a cell is the
+incident flux attenuated by every cell above it. Eliminated, either would couple
+every node or cell to every other one, filling the Jacobian. Both are instead
+algebraic unknowns of the state whose rows are local (§15.4): a balance row
+reads one cell and its two nodes, besides what the corrections of those nodes
+read, and an intensity row reads one cell and its two faces. The pattern stays
+banded on a line, and the coloring stays bounded independently of the cell
+count.
+
+What remains dense are the two rows of a variable cross section: the area row
+and the lateral-rate row read every cell's history pair, the lateral one also
+their rates. One dense row would make every pair of columns conflict, so the
+coloring sees them reduced to their diagonal (`dense_rows`, `_colored_pattern`)
+and `LateralRows` (`src/ColoredJacobian/colored.jl`) writes them after the
+colored pass. Every dependence of the two rows on the state passes through six
+column sums
+
+$$
+\boldsymbol s=\Bigl(\textstyle\sum_i G_i,\ \sum_i m_{{\rm dry},i},\ \sum_i\dot G_i,\ \sum_i\dot m_{{\rm dry},i},\ \theta_A,\ A\Bigr)
+$$
+
+over the live cells, with $(G_i,m_{{\rm dry},i})$ cell $i$'s history pair and
+$(\dot G_i,\dot m_{{\rm dry},i})$ its rates (`lateral_rows`), so each entry is
+
+$$
+\frac{\partial f_\ell}{\partial u_c}=\sum_{q=1}^{6}\frac{\partial f_\ell}{\partial s_q}\,\frac{\partial s_q}{\partial u_c},
+\qquad \ell\in\{A,\theta_A\},
+$$
+
+with $f_\ell$ the residual of row $\ell$, $\partial f_\ell/\partial s_q$ by forward
+differentiation of the six-number function, $\partial(\sum\dot G)/\partial u_c$ and
+$\partial(\sum\dot m_{\rm dry})/\partial u_c$ the column sums of the live history rows of
+the colored Jacobian, which the colored pass gets exactly, and the remaining
+$\partial s_q/\partial u_c$ unit vectors. The cell rows read the area and the
+lateral rate as ordinary columns of the pattern.
+
+---
+
+## 15.10 The linear solve of W: StructuredKLU
+
+The default linear solver of every layout is `StructuredKLU()`
+(`default_linear_solver()`, `src/Integration/linear_solve.jl`), KLU applied to
+$W$ on the entries of $W$ that have been nonzero at some step of the solve.
+
+The Jacobian's prototype holds every entry the connectivity allows, most of
+which are zero at any one step, and KLU factors a stored zero like any other
+entry, so factoring $W$ on the prototype's structure carries the fill of entries
+that never matter. For a mass matrix that is not a multiple of the identity,
+OrdinaryDiffEq forms $W$ by a sparse broadcast that stores only the entries
+that compute to nonzero, so $W$'s own structure changes whenever an entry passes
+through zero, and a KLU on that structure would analyse afresh at every such
+step.
+
+The cache keeps the union of the prototype's entries that have been nonzero in
+this solve, with the diagonal, and copies each fresh $W$ into a matrix of that
+structure, where the inner KLU refactors it numerically. A nonzero outside the
+union grows it, and the inner KLU analyses the grown structure afresh; the union
+only grows, so the analyses stop once every entry the solve reaches has
+appeared. $W$'s stored entries must be a subset of the prototype's (the
+integrator hands the solver's initialization an all-ones $W$ of the prototype);
+an entry outside the prototype is an error. The tests check that the union is
+smaller than the prototype, that the inner KLU analyses once per growth of the
+union, and that repeated solves are bit-identical under `StructuredKLU()`,
+LinearSolve's `KLUFactorization()` and `UMFPACKFactorization()`, on fixed and
+moving meshes and under in-depth radiation (`test/integration/test_policies.jl`).
+
+Another LinearSolve factorization is selected with `linear_solver` (for example
+`UMFPACKFactorization()`), which `solve` passes to the default policy, or by
+passing a policy built with it (`integrator_policy = fbdf_policy(KLUFactorization())`).
+The linear solve is a sparse direct factorization; the package configures no
+iterative solver or preconditioner.
+
+---
+
+## 15.11 The sparsity pattern from connectivity
+
+`jacobian_pattern(def)` (`src/ColoredJacobian/pattern.jl`) builds the
+structural pattern of $J$ from the connectivity alone: the cells within a reach
+of each cell, their nodes, and the nodes' cells. It is not traced from the code;
+§15.13 tests that it contains the dense reference. The reach of a cell row is two
+faces where a kernel reads a neighbour's neighbour (the inventory fluxes relative
+to the mesh, whose face states are reconstructed from two cells upwind; the
+cross-diffusion part of tensor conduction in more dimensions, which reads the
+neighbours' least-squares gradients), one otherwise.
+
+- **A cell row** (a mass, the energy state, the history pair) reaches the
+  masses, energy states and history pairs of the cells within the reach and, on
+  a moving mesh, the positions of their nodes: conduction reads the neighbouring
+  cell centres, the concentrations the neighbours' volumes, the relative fluxes
+  everything the corrections of the cell's nodes read; under a prescribed mesh
+  velocity with relative fluxes, also the velocities of its nodes. On a line it
+  reads the intensities of its two faces and, under a variable cross section,
+  the area.
+- **A face-intensity row** reaches the intensities of nodes $f-1$ to $f+1$, the
+  unknowns of the cells on either side of its face (the attenuation of the cell
+  it leaves, the absorptivity of the exposed cell), on a moving mesh the
+  positions of those nodes, and the area.
+- **A node-position row** reaches its node's velocity, or, when the closure's
+  unknowns are the cells' multipliers, the multipliers of the cells around the
+  node and the positions of their nodes.
+- **A velocity row** reaches its node's velocity and position; on a line a
+  balance row also reaches the velocity and position of its cell's other node,
+  its cell's masses and energy state (through the strain rate), the area and the
+  lateral rate, and under an equidistribution correction what the corrections
+  of its cell's two nodes read: the positions of the nodes of the cells beside
+  it and, when the monitor reads the masses, those cells' masses.
+- **A multiplier row** reaches the multipliers of the cells that share a node
+  with its cell, the positions of their nodes, and its cell's masses and energy
+  state; a **deformation-gradient row** also reaches the velocities of its
+  cell's nodes, or the multipliers and node positions those velocities read.
+- **The cross-section rows**: the area row reaches every cell's history pair and
+  the area, the lateral-rate row everything the history rows reach, the history
+  pair, the area and the lateral rate.
+
+Every row holds its diagonal. The pattern is fixed for a solve: dead rows keep
+their entries and take zero values (§15.12). Radial meshes (cylindrical and
+spherical coordinates) share the planar mesh's pattern, colors and bandwidth.
+For two components on 12 cells the half-bandwidth is 5 on a fixed mesh, 6 under
+in-depth radiation, 9 on a moving mesh, 11 on a moving mesh under in-depth
+radiation and 14 with the equidistribution correction (measured with the script
+of §15.13); it is constant in the cell count.
+
+---
+
+## 15.12 The Jacobian through deactivation
+
+Deactivation (§14.3) and element death (§14.5) mask rows of the layout and leave
+the state length and the pattern unchanged. The Jacobian of a dead differential
+row is a zero row and that of a dead algebraic row the unit row $e_r^{\mathsf
+T}$; the entries of live rows in dead columns are zero, since the kernels skip
+every face beyond the live cells and the boundary conditions act on the live
+faces. The preparation, the coloring, the integrator's matrices and the linear
+solver's union structure all carry through every event, and $W$ splits into the
+live block and scaled identity rows.
+
+The tests apply `deactivate!` to the state and compare the colored Jacobian
+with the dense reference afterwards: a single transfer on fixed and moving
+meshes, a run merging into the cell beneath, a run through a layer's innermost
+cell into the substrate, a merge under a variable cross section, and an exposed
+cell deactivated under in-depth radiation, where the exposed face becomes the
+receiver's far face. In every case the pattern contains the dense Jacobian and
+the two agree per entry to $10^{-12}$ (`test/deactivation/test_deactivation.jl`,
+`test/jacobian/test_containment.jl`). Element death on a 3 × 3 mesh leaves the
+pattern unchanged and containing the Jacobian (`test/multid/test_element_death.jl`).
+
+---
+
+## 15.13 The dense reference and the containment tests
+
+`dense_jacobian(def, ws, u, t)` (`src/ColoredJacobian/oracle.jl`) differentiates
+every column of the residual by forward mode, without the pattern or the
+coloring, in batches of the colored Jacobian's width. It is the reference: it
+differentiates the same `residual!` the integrator integrates.
+
+- `missing_entries(J_ref, pattern)` lists the nonzero entries of the reference
+  that the pattern does not contain, empty when the pattern contains it.
+- `compare_entries(J, J_ref; rtol = 1e-12, atol = 0.0)` compares each entry (row $r$,
+  column $c$) with a row-magnitude floor,
+
+  $$
+  |J_{rc}-J^{\rm ref}_{rc}|\le \mathrm{atol}+\mathrm{rtol}\,\max\bigl(|J^{\rm ref}_{rc}|,\ \max_{c'}|J^{\rm ref}_{rc'}|\bigr),
+  $$
+
+  and returns `(passed, max_abs_dev, worst_ratio, worst_index)`. The rows of a
+  pyrolysis Jacobian span many orders of magnitude (an Arrhenius mass row above
+  a velocity row), so a single global normalization would let a wholly missing
+  small-magnitude row pass behind the matrix maximum; with the row floor a
+  missing entry cannot hide in its own row, while round-off at a true zero of a
+  stiff row stays within $\mathrm{rtol}$ times the row's maximum.
+
+The containment tests (`test/jacobian/test_containment.jl`) require, at every
+state they visit, a finite residual and reference, a pattern that contains the
+reference, a colored Jacobian with the pattern's structure, and per-entry
+agreement to $10^{-12}$. They cover fixed and moving columns of a PMMA-like and a
+permeable wood-like material without radiation, with surface absorption and with
+in-depth absorption, in both energy forms, at uniform hot, hot and gas-heavy,
+partially decomposed and mixed reacting states and at trial states outside the
+physical domain; the chain-rule regimes of the smooth reaction gates and of
+permeability mixing; the cross section's back-reaction; radial meshes and a
+prescribed mesh velocity; the states after a deactivation; the boundary mass
+flux on the energy row; and a surface absorptivity and an emissivity that depend
+on temperature. The dense reference itself equals central differences
+(§15.8). The pattern tests (`test/jacobian/test_pattern.jl`) check the color
+counts and the per-entry comparison's behaviour on a stiff row above a small
+one.
+
+The same checks run from a script through `Pyrolysis.Internal`:
 
 ```julia
-struct JacobianSpec{B<:JacobianBackend, S, C}
-    backend::B
-    sparsity_phys::S      # SparseMatrixCSC{Bool,Int}, or nothing (dense reference)
-    sparsity_geom::S      # geometry (z-column) pattern; nothing for Eulerian
-    cache::C              # backend-private workspace (not shareable)
+using Pyrolysis
+using Pyrolysis.Internal: jac_prototype, jacobian!, dense_jacobian, missing_entries,
+    compare_entries, state_length, is_differential
+using SparseArrays
+
+solid = SolidComponent(:solid, ρ = 1190.0, φ=.3, c = 1420.0, k = 0.21, ε = 0.86, α = 2.0, λ = 1e-6)
+gas = GaseousComponent(:gas, M = 0.1, c = 1500.0, k = 0.02,)
+material = Material(
+    gas_transport=LumpedTransfer(endpoint=LumpedEndpoint(λ=1e-6,κ=0.,max_skeletal_occupancy=.001)),
+
+    name = :slab,
+    components = (solid, gas),
+    reactions = (Reaction(:pyrolysis, 1 => 2, A = 8.5e12, E = 188e3, h = 870e3),),
+)
+problem = PyrolysisProblem(
+    mesh = create_uniform_mesh(1e-3, 12),
+    material = material,
+    bc_set = BoundaryConditionSet(
+        thermal = (
+            top = RadiativeFluxBC(flux = 100e3) + RadiativeBC(T_inf = 300.0),
+            bottom = AdiabaticBC(),
+        ),
+        mass = (top = AmbientGasBC(GasReservoir(P=0., T=300.)), bottom = ImpermeableBC()),
+    ),
+    T_initial = z -> 600.0 + 2e5 * z,
+    tspan = (0.0, 10.0),
+)
+
+for (name, kw) in (
+    ("fixed", (;)),
+    ("fixed, Beer-Lambert", (radiation_model = BEER_LAMBERT,)),
+    ("moving", (use_ale = true,)),
+    ("moving, Beer-Lambert", (use_ale = true, radiation_model = BEER_LAMBERT)),
+    ("moving, deactivation", (use_ale = true, deactivation = true)),
+)
+    cp = setup(problem; kw...)
+    J = jac_prototype(cp.jacobian)
+    jacobian!(J, cp.jacobian, cp.u0, 0.0)
+    Jd = dense_jacobian(cp.def, cp.ws, cp.u0, 0.0)
+    rows = rowvals(J)
+    bandwidth = maximum(abs(rows[k] - c) for c in axes(J, 2) for k in nzrange(J, c))
+    println(rpad(name, 22), state_length(cp.def.layout), " rows (",
+            count(!, is_differential(cp.def.layout)), " algebraic), half-bandwidth ",
+            bandwidth, ", ", cp.jacobian.n_colors, " colors, ",
+            length(missing_entries(Jd, cp.jacobian.pattern)), " missing, passed = ",
+            compare_entries(Matrix(J), Jd; rtol = 1e-12).passed)
 end
 ```
 
-It is built by `JacobianSpec(backend, def, ws)` — the constructor `solve` calls,
-and the one the verifier and other advanced callers use with a `(def, ws)` pair
-from `initialize_state`. A single entry point
-`compute_jacobian!(J, spec, u, def, t, ws)` dispatches to
-`_compute_jacobian!(J, spec.backend, …)`.
-
-> **Implementation note.** Backend contract and `JacobianSpec`:
-> src/Jacobian/interface.jl. Dense reference: src/Jacobian/dense_ad_reference.jl.
-> Structured backend assembly: src/Jacobian/structured_backend.jl. The
-> `is_approximate(backend)` trait (default `false`; `true` for
-> `Structured{ApproxSolve}`) selects strict vs. masked verification (§15.13).
-
----
-
-## 15.7 The structured-operator architecture
-
-The structured Jacobian is organized into three orthogonal layers.
-
-### 15.7.1 Layer 1 — Operators
-
-Each physics block is an `Operator` subtype: a lightweight stateless tag with two
-methods, its residual contribution `apply!` (a thin wrapper over the residual
-kernel it differentiates) and its Jacobian contribution
-`contribute_to_jacobian!(jac, op, u, t, ws, args...)`, where `ws` is the
-operator's workspace from the backend cache and the remaining arguments are
-operator-specific. There is no default fallback: each operator implements its
-own contribution, as `ForwardDiff` over a stencil-local kernel (the
-`GeometryOperator` differentiates the full residual with respect to the $z$
-block), or as an analytical override (conduction, gas transport, Darcy transport)
-tested against a ForwardDiff reference of the same kernel at `rtol = 1e-12`. Local entries are added into the
-sparse block `jac.A`; non-local blocks are pushed onto `jac.structured` as
-`StructuredCoupling`s. The ALE mesh-velocity operator emits its non-local
-blocks through a separate `contribute_to_structured!`; the $\chi$ operator pushes
-its rank-1 block from its own `contribute_to_jacobian!`.
-
-The backend walks the operators in a fixed order:
+It prints
 
 ```
-1. (ALE)      ALEMeshVelocityOperator      apply! + strain-rate (and θ_A) derivatives,
-                                           then contribute_to_structured! (z-row prefix sums, θ_A rank-1)
-2. ReactionSourceOperator
-3. ConductionOperator
-4. GasTransportOperator | DarcyTransportOperator
-5. RadiationOperator
-6. BCThermalOperator
-7. BCMassOperator
-8. BCConvectionOperator                    (boundary-cell S_conv energy row)
-9. (ALE)      dilation rows                (cell-local, from the cached ∂θ)
-10.(ALE & :full) GeometryOperator          (full-residual AD over z-columns)
-11.(WithChi)  ChiOperator                  (cell-local rows; χ-column rank-1)
+fixed                 36 rows (0 algebraic), half-bandwidth 5, 9 colors, 0 missing, passed = true
+fixed, Beer-Lambert   49 rows (13 algebraic), half-bandwidth 6, 11 colors, 0 missing, passed = true
+moving                62 rows (13 algebraic), half-bandwidth 9, 13 colors, 0 missing, passed = true
+moving, Beer-Lambert  75 rows (26 algebraic), half-bandwidth 11, 15 colors, 0 missing, passed = true
+moving, deactivation  62 rows (13 algebraic), half-bandwidth 14, 21 colors, 0 missing, passed = true
 ```
-
-The order is fixed so that the data each step reads exists: the state cache,
-the ALE geometry, and the properties are refreshed first (mirroring the
-residual), the mesh-velocity workspace and its strain-rate derivatives are filled
-before the dilation rows read them, and the $\chi$ operator reads the
-cross-section derivatives the mesh-velocity workspace holds. The radiation,
-mesh-velocity and $\chi$ operators build their embedded couplings at the global
-row/column offsets of the blocks they fill; `compose_into!` embeds the prefix-sum
-factor vectors at the node rows.
-
-> **Implementation note.** Operator interface: src/Jacobian/operators/Operator.jl;
-> per-operator implementations under src/Jacobian/operators/; the walk is
-> `_compute_jacobian!` in src/Jacobian/structured_backend.jl. Per-operator
-> `ForwardDiff` chunk sizes: reaction `1+N_C`; conduction $3(1+N_C)$; gas
-> transport $3(1+N_C)$; BC thermal $1+N_C$; BC mass $1+N_C$; BC convection
-> $2(1+N_C)$; $\chi$ $1+N_C$. The ALE dilation derivatives come from the
-> mesh-velocity operator's strain-rate sweep.
-
-### 15.7.2 Layer 2 — `StructuredJacobian`
-
-The assembled Jacobian is *not* a monolithic sparse matrix. It is
-
-```julia
-struct StructuredJacobian
-    A::SparseMatrixCSC{Float64,Int}        # local block: block-tridiag physics + sparse augments
-    structured::Vector{StructuredCoupling} # non-local couplings in factored form
-    smap::FastSparsityMap                  # O(1) sparse-write helper
-    n::Int                                 # full state dimension
-end
-```
-
-The split is the architectural heart of the design: the sparse block
-$\mathsf{A}$ carries everything *local* (block-tridiagonal mass / conduction /
-reaction / transport plus the cell-local self-terms), and the `structured`
-vector carries everything *non-local* (the cumulative ALE mesh velocity, the
-Beer–Lambert optical-depth suffix, the column-global $\theta_A$ and $\chi$
-back-reactions) in factored form. The assembly writes them into the sparse
-Jacobian with `densify!` only under the exact `:full` profile.
-
-`FastSparsityMap` is an O(1) sparse-write helper: a dense lookup table
-`indices[row + (col-1)*n_rows] = nz_idx` (zero meaning "not in pattern"). It
-trades quadratic memory ($\sim2.5\,\mathrm{MB}$ at 560 DOFs, $\sim90\,\mathrm{MB}$ at
-3360 DOFs) for O(1) scattered additions via `fast_sparse_add!`.
-
-### 15.7.3 Layer 3 — `LinearSolveStrategy`
-
-A strategy selects which couplings the assembled Jacobian carries; it is
-orthogonal to the assembling backend. `DirectSolve` writes every structured
-coupling into the sparse matrix (the exact Jacobian), and `ApproxSolve` drops
-them (the reduced pattern). The integrator then factors the resulting sparse $W$
-with KLU or UMFPACK (§15.5.1). The two strategies are detailed in §15.10.
-
----
-
-## 15.8 Per-operator Jacobian formulas
-
-We give the exact discrete derivative each operator contributes, with the sign
-conventions verified against the code. Throughout, the residual writes
-$dT_i\mathrel{+}=(\text{source})/\rho c_p^{\rm eff}$ and the conduction
-divergence enters with a leading minus, so signs are tracked *per operator* and
-accumulated additively.
-
-### 15.8.1 Reaction source
-
-The cell-local contribution is
-
-$$
-\frac{dT_i}{dt}\bigg|_{\rm rxn}=\frac{Q_{\rm rxn}(T_i,\xi_i)}{\rho c_p^{\rm eff}(T_i,\xi_i)},\qquad
-\frac{d\xi_{j,i}}{dt}\bigg|_{\rm rxn}=S_{j,{\rm rxn}}(T_i,\xi_i),
-$$
-$$
-Q_{\rm rxn}=-\sum_r h_r\,r_r,\qquad S_{j,{\rm rxn}}=\sum_r \nu_{r,j}\,r_r.
-$$
-
-The Jacobian is purely cell-local — the $(1+N_C)\times(1+N_C)$ block coupling
-$(T_i,\xi_{1,i},\dots,\xi_{N_C,i})$ to itself — obtained by `ForwardDiff` over
-`apply_cell!` (which evaluates the reactions, the heat source *including the
-$1/\rho c_p$ division*, and the species sources in place). Note the energy row
-differentiates the *quotient* $Q_{\rm rxn}/\rho c_p^{\rm eff}$, so it captures
-both the explicit $T,\xi$ dependence of the rates *and* the $\xi$-dependence of
-the heat capacity. The smooth tanh temperature gates and the multiplicative
-$\tanh(\xi/\text{threshold})$ depletion rate factor (§6) make these
-derivatives well-defined and free of the spurious spikes a hard Heaviside or
-$\min$ would produce — this is the reason the kinetics are AD-clean.
-
-> **Implementation note.** `ReactionSourceOperator`, `apply_cell!`,
-> src/Jacobian/operators/reaction_source.jl. Chunk size $1+N_C$.
-
-### 15.8.2 Conduction (tridiagonal divergence)
-
-The energy row depends on the three cells $\{i-1,i,i+1\}$ through the divergence
-of the harmonic-mean face flux. With the distance-weighted harmonic-mean
-conductivity (§7.1)
-
-$$
-q_f=-k_f\frac{T_R-T_L}{d_L+d_R},\qquad k_f=\frac{d_L+d_R}{d_L/k_L+d_R/k_R},
-$$
-
-the operator computes (verified in src/Jacobian/operators/conduction.jl)
-
-$$
-q_{\rm right}=-k_{f,R}\frac{T_R-T_C}{d_{CR}},\quad
-q_{\rm left}=-k_{f,L}\frac{T_C-T_L}{d_{LC}},
-$$
-$$
-\frac{dT_i}{dt}\bigg|_{\rm cond}=-\frac{(q_{\rm right}A_{\rm right}-q_{\rm left}A_{\rm left})/V_C}{\rho c_p^{\rm eff}(T_C,\xi_C)}.
-$$
-
-The leading minus realizes "outflow on the right cools the cell," matching the
-discrete divergence $\mathrm{div}[i]=(q_R-q_L)A/V_i$ and the residual's
-$-\mathrm{div}[i]/\rho c_p$. In ALE with $\chi$-shrinkage, $A_{\rm left}$ and
-$A_{\rm right}$ can differ slightly (the face areas carry the geometry), so the
-code keeps them distinct rather than factoring out a single $A$. The Jacobian is
-the tridiagonal block, assembled by a hand-coded analytical override
-(`_contribute_to_jacobian_analytical!`) that is tested against a `ForwardDiff`
-reference over the 3-cell stencil (`_contribute_to_jacobian_ad!`, chunk size
-$3(1+N_C)$) at `rtol = 1e-12`; each of the three cells contributes
-$(T,\xi_1,\dots,\xi_{N_C})$ inputs because $k_f$ and $\rho c_p^{\rm eff}$ both
-depend on composition.
-
-**Boundary-cell self-fill.** At a boundary cell (cell 1 has no left neighbor,
-cell $n$ no right), the missing neighbor's $(T,\xi)$ in the AD stencil is filled
-with the cell's *own* value, and the missing face flux is zero (the BC operator
-owns the boundary flux). AD over a zero face produces structural-zero columns,
-which the sparse scatter respects. The genuine boundary flux contribution is the
-`BCThermalOperator`'s responsibility, computed through the surface-temperature
-Newton solve (§12.2).
-
-> **Implementation note.** `ConductionOperator`, `apply_cell!`, `_pack_stencil!`,
-> src/Jacobian/operators/conduction.jl.
-
-### 15.8.3 Gas transport / Darcy
-
-The Fickian gas-transport operator differentiates the volume-fraction-gradient
-flux (§9.1) over a $\le\pm1$-cell stencil (chunk $3(1+N_C)$), giving the direct
-derivatives $\partial J/\partial\lambda_f$, $\partial J/\partial\xi_L$,
-$\partial J/\partial\xi_R$ and their $T$-coupling through $T_{\rm face}$. The
-Darcy operator (`DarcyTransportOperator`) additionally carries the
-pressure-driven advection $(\xi_{\rm upwind}/\varphi_{\rm face})\,v_g$: it
-reconstructs the face velocity inside its own stencil closure from the
-cell-local state — $P_i$ from the ideal-gas closure, $\kappa_i$ from the mixing
-rule, $\mu_i$ from the material's viscosity curve, the face mobility by the residual's
-distance-weighted harmonic rule (`_dt_mobility_face`, zero when either side
-$\le10^{-30}$) — so the chain $\partial J/\partial\xi$ and
-$\partial J/\partial T$ through $P$, $\varphi$, $\kappa$, $\mu$ is
-differentiated through the same formulas the residual executes (including the
-$\xi/\varphi_{\rm face}^2$ porosity chain, zero when the $\varphi$ floor binds).
-First-order upwinding keeps the advective stencil local; the diffusive part uses
-harmonic-mean $\lambda_f$ as in the residual. Boundary faces are zeroed here —
-the boundary venting flux is `BCMassOperator`'s row, and the boundary cell's
-whole $S_{\rm conv}$ energy row (whose gradient runs through the surface-Newton
-$T_s$) is `BCConvectionOperator`'s (§15.8.8); the transport operators keep the
-boundary cell's ξ-rows but contribute no boundary-cell $S_{\rm conv}$. Each
-operator's `contribute_to_jacobian!` is a hand-coded analytical override, gated
-against a ForwardDiff reference of the same kernel (`_contribute_to_jacobian_ad!`)
-at `rtol = 1e-12`.
-
-> **Implementation note.** `GasTransportOperator`,
-> src/Jacobian/operators/gas_transport.jl; `DarcyTransportOperator`,
-> src/Jacobian/operators/darcy_transport.jl (`_dt_props` Dual pass,
-> `_dt_mobility_face`, `_dt_J_face_partials`, analytical override
-> `_contribute_to_jacobian_analytical!`).
-
-### 15.8.4 ALE mesh velocity and the dilation correction
-
-The mesh velocity operator does **not** AD a single residual; it builds the
-analytical chain-rule pieces and emits a structured coupling. Two derivative
-sweeps populate workspace buffers:
-
-- `compute_strain_rate_derivatives!` — cell-local `ForwardDiff` over
-  $\theta(T,\xi)=\big(\sum_j\gamma_j S_j(T,\xi)\big)/\rho(T)$, producing
-  $d\theta/dT_i$ and $d\theta/d\xi_{j,i}$.
-- `compute_theta_A_derivatives!` (WithChi) — analytical $d\theta_A/d\chi_j$ and
-  $dA/d\chi_j$.
-
-The cumulative velocity $w_k=\sum_{i<k}\theta_{L,i}\Delta z_i$ has the
-*exclusive prefix-sum* structure: $\partial w_k/\partial x_i=\Delta z_i\,
-\partial\theta_i/\partial x_i$ for $i<k$ (and $0$ for $i\ge k$). The per-cell
-scaling $v[i]=\Delta z_i\,\partial\theta_i/\partial x_i$ is held in a
-`PrefixSumCoupling{Float64}` (a plain carrier of the per-cell factors) per source
-channel ($T$ and each $\xi_j$), which `compose_into!` embeds at the z-row offsets
-as `EmbeddedNodePrefixSumCoupling` blocks. The z-row equations $dz_k/dt = w_k$
-are themselves consumers of the cumulative coupling, with $\partial(dz_k/dt)/\partial x_j =
-\mathbb{1}[j\le k-1]\,v[j]$. The geometry AD pass (§15.11.3) covers z
-*columns* only and plays no part in these rows; the z-row × $(T,\xi)$ block
-is owned entirely by these embedded couplings.
-
-Under `WithChi`, the column-global $\theta_A$ enters every
-$w_k = \sum_{i<k}(\theta_i-\theta_A)\Delta z_i$, so each source channel
-$y\in\{\chi,\,T,\,\xi_1..\xi_{N_C}\}$ contributes a genuinely rank-1 block
-$\partial w_k/\partial y_j = -\text{cumZ}_{\rm node}[k]\cdot
-\partial\theta_A/\partial y_j$ with
-
-$$
-\frac{\partial\theta_A}{\partial\chi_j} = G'\,\frac{m_{{\rm init},j}}{M}\,
-\frac{d\bar\chi}{dt} + G\,\frac{\partial A/\partial\chi_j}{M}\,
-\frac{\sum_i S_{{\rm dry},i}V_i}{A},\qquad
-\frac{\partial\theta_A}{\partial T_j} = \frac{G\,V_j}{M}\,
-\frac{\partial S_{{\rm dry},j}}{\partial T_j},\qquad
-\frac{\partial\theta_A}{\partial \xi_{k,j}} = \frac{G\,V_j}{M}\,
-\frac{\partial S_{{\rm dry},j}}{\partial \xi_{k,j}},
-$$
-
-where $G=\mathrm{law}'(\bar\chi)/\mathrm{law}(\bar\chi)$. The rank-1s (shared
-left factor $u[k]=-\text{cumZ}_{\rm node}[k]$) are embedded directly at the
-z-rows as `EmbeddedRank1Coupling` blocks.
-
-The **dilation correction** $d\xi_{j,i}\mathrel{-}=\xi_{j,i}\theta_i$ adds the
-cell-local Jacobian (every component $j$)
-
-$$
-\frac{\partial}{\partial T_i}:\ -\xi_{j,i}\frac{\partial\theta_i}{\partial T_i},\qquad
-\frac{\partial}{\partial\xi_{k,i}}:\ \begin{cases}
--\theta_i-\xi_{j,i}\dfrac{\partial\theta_i}{\partial\xi_{j,i}} & k=j,\\[6pt]
--\xi_{j,i}\dfrac{\partial\theta_i}{\partial\xi_{k,i}} & k\ne j,
-\end{cases}
-$$
-
-reusing the cached $d\theta/dT$, $d\theta/d\xi$ from the strain-rate sweep
-(`_apply_ale_dilation_jacobian!`).
-
-> **Implementation note.** `ALEMeshVelocityOperator`,
-> `compute_strain_rate_derivatives!`, `compute_theta_A_derivatives!`,
-> src/Jacobian/operators/ale_mesh_velocity.jl; dilation Jacobian in
-> src/Jacobian/structured_backend.jl. A documented sharp edge: the
-> $d\theta/dT$, $d\theta/d\xi$ buffers persist in the workspace and are reused by
-> both the prefix-sum builder and the dilation Jacobian; assembly is atomic per
-> Newton step, so the reuse is safe in practice.
-
-### 15.8.5 No ALE advection operator
-
-Every component rides the mesh and the thermal mass rides with it (§11.1.2,
-§11.2.2), so neither the ξ rows nor the T row carry a mesh-motion coupling
-through $w$ in production: the only mesh-motion term in the species rows is the
-cell-local dilation of §15.8.4, and the mesh-relative temperature kernel runs
-only under the `w_override` verification hook, which the structured Jacobian
-does not support (override runs use finite-difference Jacobians). The cumulative
-mesh velocity therefore couples only the z rows, through the prefix-sum blocks
-the mesh-velocity operator embeds itself. The block-tridiagonal physics
-pattern is identical under the `:full` and `:ale_reduced` profiles; the profiles
-differ in the geometry block and the structured couplings (§15.11.2).
-
-### 15.8.6 Variable cross-section ($\chi$)
-
-Under `WithChi` (and only for non-identity laws; identity-law materials have
-$d\chi/dt\equiv0$), the $\chi$ row is
-
-$$
-\frac{d\chi_i}{dt}=\frac{S_{{\rm dry},i}(T_i,\xi_i)\,V_i}{m_{{\rm init},i}}.
-$$
-
-Its Jacobian has three parts:
-
-- **Cell-local $(T,\xi)$**: `ForwardDiff` over $S_{\rm dry}\,V/m_{\rm init}$ gives
-  $\partial(d\chi_i/dt)/\partial T_i$ and $\partial(d\chi_i/dt)/\partial\xi_{j,i}$.
-- **$z$-columns (ALE)**: because $V_i=A|z_{i+1}-z_i|$ is linear in the two
-  bounding node positions, the entries are
-  $\partial(d\chi_i/dt)/\partial z_i=-A\,S_{\rm dry}/m_{\rm init}$ and
-  $\partial(d\chi_i/dt)/\partial z_{i+1}=+A\,S_{\rm dry}/m_{\rm init}$. The
-  `ChiOperator` does not write them: the `GeometryOperator`'s AD pass over the
-  $z$ subvector fills them under `:full` (§15.11.3), and `:ale_reduced` drops them.
-- **$\chi$-columns (rank-1)**: the area $A=A_0\,\mathrm{law}(\bar\chi)$ depends on
-  *every* $\chi_j$ through $\bar\chi$, giving a dense column coupling factored as
-  an `EmbeddedRank1Coupling` with
-  $u[i]=S_{{\rm dry},i}\,\Delta z_i/m_{{\rm init},i}$ ($\Delta z_i=V_i/A$) and
-  $v[j]=dA/d\chi_j$, pushed only under `:full`.
-
-> **Implementation note.** `ChiOperator`, `apply!`, `_chi_residual_kernel!`,
-> src/Jacobian/operators/chi.jl. Chunk size $1+N_C$. The $\chi$ block is appended
-> after $(T,\xi,z)$; the offset is $\chi_{\rm off}=n(1+N_C)+\delta_{\rm ALE}n_{\rm nodes}$.
-
-### 15.8.7 Beer–Lambert non-local radiation
-
-In `BeerLambert` mode the absorbed flux in cell $i$ depends on the optical depth
-of *all cells above it*,
-$q_{\rm rad}[i]=I_{\rm in}\,(1-e^{-\tau_i})/\Delta z_i$ with
-$\tau_i=\alpha_i\Delta z_i$ and $I_{\rm in}$ the cumulative-attenuated intensity
-from the top. Differentiating (verified in src/Jacobian/operators/radiation.jl):
-
-$$
-\frac{\partial q_{\rm rad}[i]}{\partial x_j}=
-\begin{cases}
-I_{\rm in}\,e^{-\tau_i}\,\dfrac{\partial\alpha_i}{\partial x_j}=\big(I_{\rm in}-q_{\rm rad}[i]\,\Delta z_i\big)\dfrac{\partial\alpha_i}{\partial x_j} & j=i,\\[10pt]
--\,q_{\rm rad}[i]\,\Delta z_j\,\dfrac{\partial\alpha_j}{\partial x_j} & j>i,\\[6pt]
-0 & j<i.
-\end{cases}
-$$
-
-The energy row $T[i]$ therefore couples to the $\xi$-columns of every cell
-$j\ge i$ — an **upper-triangular** (strictly, a *suffix*) pattern. The diagonal
-$j=i$ term is added by the operator through a cell-local `ForwardDiff` pass (with
-$I_{\rm in}$ held fixed); the strict-suffix $j>i$
-couplings are captured as an `EmbeddedScaledSuffixSumCoupling`. The split
-($j=i$ cell-local, $j>i$ structured) avoids double-counting the diagonal.
-
-On the Kirchhoff default path (`radiation_kirchhoff = true`, §8.3.2) the
-injected intensity is $a_{\rm eff}(T_n,\xi_{\cdot,n})\,I_{\rm surface}$ (the
-effective surface absorptivity of §5.8.2, equal to $\varepsilon_{\rm eff}$ unless a
-component sets its own `absorptivity`), so every energy row $i<n$ additionally
-couples to the **surface cell**: the suffix vector carries
-$v_n \mathrel{-}= (\partial a_{\rm eff}/\partial x_n)/a_{\rm eff}$,
-the surface cell's diagonal closure recomputes $a_{\rm eff}(T,\xi)$
-live, and the sparsity pattern gains $T$-row($i$) × $T$-column($n$) slots for
-$i<n$ (`_emit_radiation_pattern!`). With an explicit BC absorptivity the factor
-is folded into $I_{\rm surface}$ upstream and these terms vanish.
-
-Under ALE the operator fills **T and ξ columns only**. The dependence of the
-deposit on the live geometry ($\Delta z_i = V_i/A$ from the z block) lands in the
-z columns, which the `GeometryOperator`'s AD pass over the full residual writes
-under the exact `:full` profile (§15.11.3); the `:ale_reduced` profile drops
-every z column (src/Jacobian/operators/radiation.jl).
-
-> **Implementation note.** `RadiationOperator`,
-> src/Jacobian/operators/radiation.jl. Active only in `BeerLambert` mode;
-> `SurfaceAbsorption`/`NoRadiation` leave a tridiagonal pattern.
-
-### 15.8.8 Boundary conditions
-
-`BCThermalOperator` overwrites the boundary-cell conductive flux with the
-BC-specified surface flux (convective + radiative + fixed-$T$), obtained from the
-surface-temperature Newton solve $f(T_s)=q_{\rm BC}(T_s)-k_{\rm eff}(T_s-T_{\rm cell})/\Delta z_{1/2}=0$
-(§12.2). Its Jacobian is taken by AD through that Newton solve, producing the
-boundary-cell row's dependence on $(T_{\rm cell},\xi_{\rm cell})$. The outward
-gas mass flux fed to the Newton solve is rebuilt from the stencil state by the
-shared boundary-face kernel `_bc_boundary_face_fluxes` (film law plus, in Darcy
-mode, the venting flux) — the same flux the residual passes to the blowing models
-— so the $(T_b,\xi_b)$ derivatives of a blowing model's coefficient $h\chi$ ($\chi$
-the blowing factor of §12.3.3, not the pyrolysis progress) are exact
-(§12.3.3). Chunk size $1+N_C$.
-
-`BCMassOperator` owns the species rows of the boundary-face gas flux $F_g$
-(film law plus, in Darcy mode, the pressure-BC advective venting),
-$d\xi_{g,\rm bdy} \mathrel{+}= F_g A_f/V$, because the residual's
-$\nabla\!\cdot\!J_{\rm gas}$ is formed *after* `apply_mass_bc_flux!` fills the
-boundary faces, while the transport operators zero those faces. Everything is
-cell-local on the boundary cell; its block is $N_C\times(1+N_C)$ and the chunk
-size $1+N_C$. The shared per-component flux kernel is
-`_bc_boundary_face_fluxes` (film law + venting, positive into the domain).
-
-`BCConvectionOperator` is the **single owner of the boundary cell's
-$S_{\rm conv}$ energy row**. At a boundary cell the residual's gradient
-blends the interior one-sided slope with the boundary-face slope at the
-solved surface temperature (§7.4.2), so the row is the product
-
-$$
-S_{\rm conv,b} = -\sum_g c_{p,g}(T_b)\,
-\underbrace{\tfrac12\bigl(J_{g,f_{\rm bc}} + J_{g,f_{\rm int}}\bigr)}_{\bar J_g}
-\,\underbrace{\frac{d_{\rm nb}\,s_{\rm face}(T_s) + \Delta z_{1/2}\,s_{\rm int}}
-{d_{\rm nb}+\Delta z_{1/2}}}_{(\partial T/\partial z)_b},
-$$
-
-whose factors are owned by three different operators — the BC face flux
-(mass-BC kernel), the interior face flux (transport kernel), and the $T_s$
-implicit chain (thermal-BC Newton). A split assembly would need
-$\bar J \times \partial(\partial T/\partial z)/\partial x$ cross-products
-spanning owners, so the whole row lives here instead: the operator re-runs
-the Dual-aware surface Newton (fed the outward flux from the shared
-boundary-face kernel, so each convective member's blowing model is differentiated
-exactly; $s_{\rm face} = \pm(T_s-T_b)/\Delta z_{1/2}$ is algebraically
-identical to the residual's $-q_{\rm total}[f]/k_b$ because the applied flux
-is exactly $\mp k_b(T_s-T_b)/\Delta z_{1/2}$), evaluates both face-flux
-kernels mode-appropriately (Fickian `gas_flux` or Darcy-Fick
-`gas_flux_darcy_fick` for the interior face; `_bc_boundary_face_fluxes` for
-the BC face), and ADs the whole product in one piece. The transport
-operators zero their boundary-cell $S_{\rm conv}$ (keeping the boundary
-cell's ξ-rows). Stencil: the
-boundary cell and its interior neighbor's $(T,\xi)$ — inside the physics
-tridiagonal; chunk size $2(1+N_C)$
-(src/Jacobian/operators/bc_convection.jl).
-
----
-
-## 15.9 Structured couplings
-
-The non-local terms are represented by typed coupling objects, subtypes of
-`StructuredCoupling`, each carrying O(N) data — a per-cell factor vector and its
-global row/column offsets — and implementing `densify!(M, c)`, the addition
-$M \mathrel{+}= C$ that the `:full` profile uses to write the block into the
-sparse Jacobian. All three shapes are *embedded*: they know where they sit in
-the full state vector.
-
-### 15.9.1 `EmbeddedNodePrefixSumCoupling` (exclusive prefix sum at the node rows)
-
-The cumulative ALE mesh velocity: node $k$'s velocity depends on the strain rates
-of all *lower* cells,
-
-$$
-M[\text{row}_k,\text{col}_j] \mathrel{+}= \mathbb{1}[j\le k-1]\,v[j],
-\qquad v[j]=\Delta z_j\,\frac{\partial\theta_j}{\partial x_j},
-$$
-
-i.e. $C=L\,\mathrm{diag}(v)$ with $L$ strictly lower-triangular all-ones
-(exclusive prefix sum). Node 1, the pinned bottom node, gets no entries. The
-per-cell factors arrive in a `PrefixSumCoupling` — a plain carrier of the vector
-$v$, not itself a `StructuredCoupling` — which `compose_into!` embeds at the node
-rows.
-
-### 15.9.2 `EmbeddedScaledSuffixSumCoupling` (strict suffix sum)
-
-The mirror image, with a per-row scale:
-
-$$
-M[\text{row}_i,\text{col}_j] \mathrel{+}= \text{row\_scale}[i]\;\mathbb{1}[j\ge i+1]\;v[j],
-$$
-
-i.e. $C=\mathrm{diag}(\text{row\_scale})\,U\,\mathrm{diag}(v)$ with $U$ strictly
-upper-triangular all-ones. This is the Beer–Lambert non-local absorption: cell
-$i$'s absorbed flux depends on all cells *above* it ($j>i$), with
-$\text{row\_scale}[i]=-q_{\rm rad}[i]/\rho c_{p,i}^{\rm eff}$ for the energy row
-(§15.8.7). The diagonal $j=i$ is not part of the coupling; the radiation operator
-adds it into $\mathsf{A}$ through a cell-local `ForwardDiff` pass.
-
-### 15.9.3 `EmbeddedRank1Coupling`
-
-A rank-1 block $C=u\,v^{\mathsf T}$ at given offsets:
-
-$$
-M[\text{row}_i,\text{col}_j] \mathrel{+}= u[i]\,v[j].
-$$
-
-This is the column-global $\theta_A$ / $\chi$ back-reaction in `WithChi`: the
-cross-section $A=A_0\,\mathrm{law}(\bar\chi)$ depends on *all* $\chi_j$, so the
-affected rows get a dense column dependence captured as a single outer product
-(the $\theta_A$ channels at the z rows, §15.8.4, and the $\chi$-column block of
-the $\chi$ rows, §15.8.6).
-
-> **Implementation note.** `PrefixSumCoupling`, the three embedded coupling types,
-> their `densify!`, and `compose_into!` are in src/Jacobian/structured_couplings.jl.
-> The couplings alias their factor vectors (no copies) and are rebuilt at every
-> Jacobian evaluation; `zero!` empties `jac.structured` at the start of each
-> assembly.
-
----
-
-## 15.10 Linear-solve strategies
-
-A strategy decides which couplings the assembled Jacobian carries. Both operate on
-the same assembled `StructuredJacobian`; the integrator then factors the sparse
-$W$ with the factorization of §15.5.1.
-
-### 15.10.1 `DirectSolve` (anchor)
-
-Write every structured coupling into the sparse matrix:
-$J=\mathsf{A}+\sum_j\mathrm{densify}(C_j)$ under the `:full` sparsity profile.
-The linear solve then sees the exact Jacobian. It is the verification anchor and
-the default on a fixed mesh. Under ALE the prefix-sum and geometry blocks couple
-every node to every cell below it, which makes the factorized $W$ effectively
-dense — the reason for the other strategy.
-
-### 15.10.2 `ApproxSolve` (Schur-style, drop couplings)
-
-Keep the local block only, $J=\mathsf{A}$, under the `:ale_reduced` sparsity
-profile: every structured coupling is omitted at its producer and the geometry
-block is not assembled. Newton then sees a Jacobian that omits the dense ALE
-block, while each linear solve stays local and cheap. `ApproxSolve` is the
-**only** strategy carrying the `is_approximate` trait, which switches the
-verifier to *masked* comparison (in-support only) since the dropped couplings are
-*expected* omissions.
-
-It is the default under ALE. With $W = I-\gamma\Delta t\,J$ the modified
-Newton iteration that factors the reduced matrix has the error operator
-$E = I - W_{\rm red}^{-1}W_{\rm full}$, whose spectral radius is its
-asymptotic contraction per iteration. It was estimated at every accepted step
-of KenCarp4 runs, at $\gamma$ times the larger of the step taken and the step
-proposed, by power iteration in the integrator's weighted norm and checked
-against dense eigenvalues, on plain-ALE decks without parking at 100 cells:
-PMMA at 25, 50 and 100 kW/m² (solid $\lambda = 10^{-6}$, and 0 at 50 kW/m²)
-run to 5 % of its thickness; a charring wood (Darcy, Beer–Lambert) whose char
-shrinks the cells to 0.83 of their volume under a lateral shrinkage law; an
-intumescent coating that swells 3.6× in volume under a widening lateral law;
-the Landau ablation deck of V-CPL-02; and 80-s cone decks of PMMA and charring
-wood. It never exceeded 0.19, and it peaked before any step collapse, so the
-iteration contracts by at least a factor of five per iteration. $E$ is
-strongly non-normal: because every $z$ column is dropped, its one-iteration
-weighted norm reaches $10^2$ on the cone decks and far more once cells
-collapse, with no visible cost in steps or Newton failures.
-
-The two strategies follow the same trajectories:
-
-- The decks that run to their end take the same steps to within two (54/54,
-  979/979, 82/83, 80/80, 337/336, 286/288 reduced/exact) and agree to
-  $3\times10^{-4}$ K in surface temperature and $5\times10^{-6}$ of the peak
-  in gas generation. PMMA at 25 kW/m² reaches 5 % of its thickness at the same
-  time, 1617.5 s, in 21,036 and 22,607 steps.
-- Without parking, surface cells burn down to $10^{-10}$ to $10^{-13}$ m. On
-  the faster burns the step then collapses, and both strategies stall alike:
-  at equal step counts they reach the same simulated time. PMMA at 50 kW/m²
-  with solid $\lambda = 0$ ends in `DtLessThanMin` at 225 s (reduced) and
-  232.5 s (exact), the ablation deck at 0.25 s with both, and PMMA at 50 and
-  100 kW/m² had not reached 5 % of its thickness after an hour of either. In
-  that regime the surface mass flux changes sign between outputs with either
-  Jacobian, while the gas generation and the thickness stay smooth and agree
-  to $10^{-7}$. Parking (§14.3) is what carries a run through burnout; the
-  exact Jacobian does not.
-
-Per unit of work the reduced strategy with KLU is 8–17× faster than
-`DirectSolve` with UMFPACK on these decks (median CPU time over five
-interleaved rounds: 0.057–0.121 of it where the decks run to their end, and
-0.107–0.120 for the stalling decks over an equal budget of 4000 integrator
-iterations), and allocates 20–8000 times less.
-
-| Strategy | Jacobian assembled | Exact? | Sparsity profile | Verification |
-|---|---|---|---|---|
-| `DirectSolve` | $\mathsf{A}+\sum C_j$ densified | yes | `:full` | strict |
-| `ApproxSolve` | $\mathsf{A}$ only | no | `:ale_reduced` | masked |
-
-> **Implementation note.** Strategy types: src/Jacobian/strategies.jl;
-> `sparsity_profile(::Strategy)` maps `DirectSolve` → `:full` and `ApproxSolve` →
-> `:ale_reduced`. The emit step `_emit_jacobian!` (src/Jacobian/structured_backend.jl)
-> copies $\mathsf{A}$ into the integrator's matrix and densifies the couplings only
-> under `:full`.
-
----
-
-## 15.11 Sparsity construction
-
-### 15.11.1 Two patterns: physics and geometry
-
-The ALE geometry coupling motivates a **two-pattern** model:
-
-- **$S_{\rm phys}$** — every coupling with $T$/$\xi$/$\chi$ columns:
-  block-tridiagonal physics ($T\!\leftrightarrow\!T$, $T\!\leftrightarrow\!\xi$,
-  $\xi\!\leftrightarrow\!\xi$ at each cell and its neighbors), the Beer–Lambert
-  suffix (row $i$ depends on $\xi$-columns $j\ge i$, plus — on the Kirchhoff
-  default path — the surface temperature column $T_{\rm col}(n)$ for every row
-  $i<n$, the $a_{\rm eff}(T_n,\xi_{\cdot,n})$ transmissivity chain of
-  §15.8.7), and the $\chi$-row block
-  (cell-local plus the dense $\chi$-column). The ALE dilation is cell-local and
-  lies inside the block-tridiagonal physics.
-- **$S_{\rm geom}$** — every coupling with $z$ columns (ALE only; empty for
-  Eulerian): physics$\to z$ (cells read nodes; reach $\le i+3$ without $\chi$,
-  full $1{:}n_{\rm nodes}$ with `WithChi` via the $\theta_A$ path, and full for
-  the energy rows under Beer–Lambert, whose optical depth
-  $\tau_i=\sum_{k>i}\alpha_k\Delta z_k$ depends on every node above the cell),
-  $z\to$physics (node $k$ depends on cells $i<k$, lower-triangular), and $z\to z$
-  (lower-triangular including the diagonal, the cumulative nature of mesh
-  velocity).
-
-Four emitter functions compose these patterns. `build_sparsity(layout, mode;
-profile)` builds $S_{\rm phys}$ from the first three, in this order, and
-$S_{\rm geom}$ from the fourth:
-
-1. `_emit_physics_pattern!` — block-tridiagonal;
-2. `_emit_radiation_pattern!` — Beer–Lambert suffix (BeerLambert);
-3. `_emit_chi_pattern!` — $\chi$-row and dense $\chi$-column (WithChi);
-4. `_emit_radiation_pattern!` — Beer–Lambert suffix (BeerLambert).
-
-The integrator's `jac_prototype` is the union $S_{\rm phys}\cup S_{\rm geom}$.
-Every row of the union stores its diagonal in every profile, so the shifted
-matrix $W$ of §15.5.2 has exactly the pattern of $J$; where no operator writes
-the diagonal (the node rows and the $\chi$ rows under `:ale_reduced`) it holds
-a structural zero. Patterns are memoized by the fingerprint
-$(\mathrm{typeof}(\text{mode}),N_C,n_{\rm cells},n_{\rm nodes},\text{profile})$ in
-`_SPARSITY_CACHE`.
-
-### 15.11.2 Profiles
-
-- `:full` (default) — all entries assembled; structured couplings emitted; the
-  geometry AD pass runs.
-- `:ale_reduced` (`ApproxSolve` only) — drops every structured coupling (the
-  z-row prefix-sum blocks, the $\theta_A$ rank-1
-  channels, the Beer–Lambert suffix, and the $\chi$-column rank-1) and the
-  geometry block, of which only the node rows' structural diagonal remains.
-  The masked verifier expects exactly this set of omissions, and counts the
-  stored but never-written diagonals of the node and $\chi$ rows
-  (`structural_zero_diagonal`) among them.
-
-Only `:full` couples cells an arbitrary distance apart, through the couplings
-it materializes: the ALE geometry block and prefix sums, the Beer–Lambert
-suffix, and the $\chi$-column rank-1. Each adds $O(N^2)$ entries; every other
-pattern couples a cell only to its immediate neighbours.
-`materializes_geometry_block(mode, profile)` (`:full` under ALE) selects the
-default factorization (§15.5.1).
-
-### 15.11.3 The geometry operator (z-column AD)
-
-Because $z$ couples through many indirect paths (mesh velocity, dilation,
-$\chi$-dependent area), the $z$-columns are filled by a *separate* full-residual
-`ForwardDiff` pass with respect to the $z$ subvector (`GeometryOperator`,
-`GeometryADCache`), run *after* the operator walk and skipped under
-`:ale_reduced`. This decouples the $z$-column computation from the per-operator
-framework, at the cost that its entries must be consistent with what the
-operators scattered into the $T/\xi/\chi$ rows independently — consistency that
-verification (§15.13) checks.
-
-The geometry pass covers **columns only**: it says nothing about the z-*rows*'
-dependence on $(T,\xi,\chi)$. Those entries are structured couplings emitted by
-`ALEMeshVelocityOperator` (§15.8.4) — the `EmbeddedNodePrefixSumCoupling`
-prefix-sum blocks and, under `WithChi`, the $\theta_A$ rank-1 channels.
-
-> **Implementation note.** `build_sparsity` and the four emitters:
-> src/Jacobian/sparsity.jl. `GeometryOperator`: src/Jacobian/operators/geometry.jl.
-> `FastSparsityMap`: src/Jacobian/fast_sparsity_map.jl.
-
----
-
-## 15.12 ILU-preconditioned Krylov solvers
-
-For very large ALE problems where the direct factorization of $W$ dominates, two
-iterative `LinearSolve.jl` factorizations are provided. They operate on the
-*concrete* sparse $W=I/(\gamma_{\rm RK}\Delta t)-J$ matrix the integrator forms,
-not on the `StructuredJacobian` (these are integrator-level linear solvers,
-orthogonal to the §15.10 strategies):
-
-- **`ILUGMRESFactorization(τ=0.1, gmres_rtol=1e-8, restart=30)`** — build an
-  ILU($\tau$) preconditioner $P=\mathrm{ilu}(W,\tau)$ and solve $Wx=b$ by
-  preconditioned GMRES. If ILU fails on a near-singular transient, it falls back
-  to diagonal scaling $P=\mathrm{Diagonal}(1/\max(|{\rm diag}(W)|,10^{-12}))$.
-- **`ILUBiCGSTABFactorization(τ=0.1, rtol=1e-8)`** — same preconditioner, BiCGSTAB
-  iteration (fixed memory, no restart).
-
-The drop tolerance default $\tau=0.1$ trades fill for preconditioner quality;
-inexact solves can increase Newton rejections on Arrhenius transients, so the
-iterative path is recommended only when the direct factorization is the
-bottleneck.
-
-**Linear-solver family.** Every `solve` attaches a sparse `jac_prototype`, which
-pairs with a sparse direct default chosen from its pattern (`KLUFactorization` or
-`UMFPACKFactorization`, §15.5.1). An explicit `linear_solver` — one of the
-iterative solvers above, `SparspakFactorization()`, or any other LinearSolve
-backend, such as `MKLPardisoFactorize()` (with `using LinearSolve` and the Pardiso
-/ MKL packages loaded) — always wins.
-
-> **Implementation note.** `ILUGMRESFactorization`, `ILUBiCGSTABFactorization`,
-> and the Krylov integration: src/Solver/ilu_gmres.jl.
-
----
-
-## 15.13 Verification
-
-Every backend is anchored to `DenseAD_ForwardDiff` — `ForwardDiff` over the whole
-residual, which is correct by definition because it differentiates the same
-`residual!` the integrator integrates. `verify_jacobian_at(spec, def, ws, u, t;
-reference=DenseAD_ForwardDiff(), rtol, atol)` compares the active backend's
-Jacobian against this reference at a state point and returns
-`(passed, max_abs_dev, max_rel_dev, worst_index, …, J_active, J_ref)`.
-
-Two comparison modes, selected by the `is_approximate` trait:
-
-- **Strict / support-complete** (exact backends, `is_approximate==false`):
-  compares the *full* Jacobian under a **per-entry** tolerance with a
-  row-magnitude floor,
-
-  $$
-  |\Delta J_{ij}| \le \text{atol} + \text{rtol}\cdot
-  \max\big(|J_{\rm ref}[i,j]|,\ \max_j |J_{\rm ref}[i,:]|\big).
-  $$
-
-  Pyrolysis Jacobians span ~10 orders of magnitude across rows (Arrhenius
-  ξ-rows ~$10^6$ vs ALE z-rows ~$10^{-2}$), so a global max-$|J_{\rm ref}|$
-  normalization would let a wholly missing small-magnitude block hide behind
-  the matrix maximum, with pass/fail depending on problem size rather than
-  correctness. Under the per-entry rule, a missing entry contributes to its
-  own row's reference scale and cannot hide, while honest roundoff at true
-  zeros of a stiff row stays within $\text{rtol}\cdot\text{row max}$. Any missing
-  entry the reference has nonzero (beyond its per-entry tolerance) is a
-  failure.
-- **Masked** (`is_approximate==true`, i.e. `Structured{ApproxSolve}`): compares
-  only inside the declared support, under the coarse global-scale rule
-  ($\max|\Delta J| \le \text{atol}$ or
-  $\max|\Delta J|/\max|J_{\rm ref}| \le \text{rtol}$); entries the strategy
-  *intentionally* omits (the dropped ALE/radiation/$\chi$ couplings of
-  `:ale_reduced`) are informational, not failures. The in-support values of an
-  approximate backend legitimately deviate by the dropped coupling magnitude,
-  so masked mode is a sanity check, not an exactness gate.
-
-Verification can run as a setup-time check or as a callback (`verify_jacobian = (rtol=, atol=, sample_times=)`)
-firing at chosen `sample_times` during a live solve. The callback *warns* on
-deviation rather than aborting — a single transient outlier should not kill an
-otherwise-good production run; the user reads `max_abs_dev`/`max_rel_dev` to
-judge severity.
-
-Depletion handling (§14.3) keeps the state size and the Jacobian's pattern and
-caches, so `verify_jacobian` runs through park events; the parked states of every
-mode are part of the verifier's own matrix
-(`test/jacobian/test_park_jacobian.jl`).
-
-> **Implementation note.** `verify_jacobian_at`, strict/masked compare:
-> src/Jacobian/verify.jl; `is_approximate`: src/Jacobian/interface.jl;
-> the verify callback: src/Solver/solve.jl.
 
 ---
 
 ## 15.14 Comparison to ThermaKin2Ds, Gpyro, and FDS
 
-We map each reference code's notation to ours on first use.
-
 ### 15.14.1 Gpyro
 
-Gpyro (Lautenberger & Fernandez-Pello) solves the condensed phase by a
-**fully-implicit backward-Euler** time discretization with **Patankar-style
-linearization** of the source terms and a **tridiagonal (TDMA / Thomas)** linear
-solve, sweeping the coupled energy/species/gas/pressure equations to convergence
-each step. Mapping: Gpyro's volume fractions $X_\alpha$ are our $v_j$; its
-pre-exponential $Z$ is our $A_i$; its permeability $K$ is our $\kappa$; its
-volumetric reaction rate $\dot\omega'''$ is our $r$; its mixture average
-$\bar\rho$ corresponds to our $\rho=\sum_j\xi_j$.
+The documented 1D Gpyro formulation uses fully implicit time differences,
+linearized source terms and iterative equation solves with TDMA (GP §6;
+Gpyro 0.8200 `gpyro_pyro.f90`). Its condensed energy unknown is enthalpy,
+with temperature recovered from composition and enthalpy. Its mesh
+thicknesses evolve with mass and density.
 
-Contrasts with Pyrolysis.jl:
-
-- **Time scheme.** Gpyro is first-order backward-Euler with an outer
-  source-linearization sweep; Pyrolysis.jl uses an adaptive higher-order SDIRK
-  (KenCarp4) with a true Newton solve per stage. Both are L-stable and implicit;
-  Pyrolysis.jl gains temporal order and step-size adaptivity, at the cost of a
-  more elaborate $W=I/(\gamma_{\rm RK}\Delta t)-J$ inversion than Gpyro's single
-  TDMA pass.
-- **Jacobian.** Gpyro never forms a global Jacobian; its Patankar linearization
-  produces a tridiagonal coefficient matrix per equation, solved by TDMA. The
-  coupling between equations is handled by the outer iteration. Pyrolysis.jl
-  forms the *full coupled* Jacobian as a structured operator (block-tridiagonal
-  $\mathsf{A}$ plus O(N) couplings), which captures cross-equation coupling
-  directly inside the Newton step. The block-tridiagonal core of our
-  $\mathsf{A}$ is the multi-field analog of Gpyro's per-equation tridiagonal
-  matrix; our prefix/suffix couplings have no Gpyro analog because Gpyro's
-  fixed-grid control volumes do not carry a cumulative-mesh-velocity term.
-- **Mesh.** Gpyro uses fixed (or prescribed variable-$\Delta z$) control volumes
-  with a solid-fraction / $\chi_k$ mechanism for swell/shrink; Pyrolysis.jl moves
-  the mesh by ALE and represents the cumulative volume-change kinematics as a
-  prefix-sum Jacobian coupling (§15.9).
+Pyrolysis.jl instead forms a coupled state Jacobian with colored forward-mode
+AD and uses an adaptive stiff integrator (`Rodas5P` by default in this
+checkout, `src/Integration/policy.jl`). The distinction describes these
+implementations; it does not establish that every Gpyro version lacks a
+Jacobian, or that a higher formal time order always gives a faster or more
+accurate solve. V2 has different species and thermal solver implementations.
 
 ### 15.14.2 ThermaKin2Ds
 
-ThermaKin2Ds (Stoliarov et al.) solves the 1D (and 2D) condensed phase with a
-**Crank–Nicolson** scheme in the primary (through-thickness, here $x$/our $z$)
-direction and explicit treatment in the transverse directions, on a **dynamically
-adjusted mesh**. Mapping: ThermaKin's stoichiometric coefficients $\theta_i^j$
-are our $\nu_{i,j}$ (we reserve $\theta$ for strain rate, overload resolution
-A2); its component concentrations are our $\xi_j$.
-
-Contrasts:
-
-- **Time scheme.** Crank–Nicolson is second-order and A-stable (not L-stable),
-  trapezoidal in time; KenCarp4 is fourth-order, L-stable, with embedded error
-  control. L-stability matters for the stiff Arrhenius transients at ignition,
-  where Crank–Nicolson can ring; the L-stable SDIRK damps the fast modes
-  cleanly. ThermaKin's fixed-$\theta$ trapezoidal rule contrasts with our
-  adaptive SDIRK $\gamma_{\rm RK}$.
-- **Energy convention.** ThermaKin (Eq. 17) carries gas enthalpy by the
-  convective term $c_g(\mathbf{J}_g\cdot\partial T/\partial x)$ — exactly our
-  $S_{\rm conv}$ — with every component in the storage term, which is the
-  energy-equation convention Pyrolysis.jl adopts. The sign convention
-  for heat of reaction differs in *publication* ($h>0$ exothermic in
-  ThermaKin/Gpyro vs. $h>0$ endothermic internally here), but the volumetric
-  source $Q_{\rm rxn}=-\sum h_r r_r$ is consistent once the convention is mapped
-  (overload H1).
-- **Mesh.** ThermaKin's dynamic mesh adjustment is the closest analog to our ALE
-  with depletion parking; both track a receding surface. Pyrolysis.jl's distinction is the
-  *Jacobian-aware* treatment: the moving-mesh kinematics enter the Newton matrix
-  through the geometry-AD $z$-columns and the prefix-sum couplings, so the
-  implicit step "knows" the mesh is moving.
+TK §3 specifies Crank–Nicolson in the primary direction and explicit
+transverse integration, and states timestep criteria and element-size
+adjustment. This differs from our adaptive mass-matrix integration with
+geometry in the coupled state. Crank–Nicolson's linear stability properties
+alone do not demonstrate ringing in an actual ThermaKin ignition calculation;
+that would need a matched numerical study. No comparative ringing or
+solver-performance claim is made here.
 
 ### 15.14.3 FDS
 
-The FDS (McDermott et al.) solid-phase pyrolysis model integrates a 1D Fourier
-conduction equation with Arrhenius source terms; the surface boundary couples to
-the gas-phase CFD. FDS uses a node-based 1D solid grid and an implicit/explicit
-split appropriate to its multiphysics coupling. Pyrolysis.jl is a *standalone*
-condensed-phase solver: it does not solve a gas-phase flow field, but it provides
-a far richer in-solid model (multi-component effective properties, four radiation
-models, Darcy gas transport, ALE with variable cross-section). FDS carries no
-in-depth gas, so its energy equation is the condensed-phase limit of ours; it
-shares the Arrhenius kinetic form, and its
-two-flux (Schuster–Schwarzschild) radiation maps onto our Beer–Lambert / P1
-choices (§8). On the *temporal/Jacobian* axis specifically, FDS does not expose a
-structured-operator Jacobian of the kind described here — the relevant comparison
-is methodological (implicit conduction + explicit/implicit coupling) rather than
-a direct mapping of Jacobian internals.
+The FDS mathematical model's one-dimensional heat-transfer appendix
+describes Crank–Nicolson conduction. FDS 6.11.0 `wall.f90` includes solid
+substeps, reaction evaluation, coordinate updates and layer remeshing, coupled
+to the CFD calculation. Our standalone condensed-phase system instead
+integrates the supported mass, energy and geometric unknowns together.
+Different coupling, tolerances, outputs and timing boundaries must be
+accounted for before comparing computational cost (§18.1.3).
 
 ---
 
-## 15.15 Worked summary of the discrete update
+## 15.15 Worked summary of the discrete system
 
-Collecting the pieces, the production residual writes, for each cell $i$ and
-component $j$:
+The integrator advances, for each live cell $i$, component $j$ and node $n$,
 
 $$
-\frac{dT_i}{dt}=\frac{1}{\rho c_p^{\rm eff}{}_{,i}}\Big[-(\nabla\cdot\mathbf{q})_i+S_{{\rm conv},i}+Q_{{\rm rad},i}+Q_{{\rm rxn},i}\Big],
-$$
-$$
-\frac{d\xi_{j,i}}{dt}=-(\nabla\cdot\mathbf{J}_j)_i+S_{j,{\rm rxn},i}-\underbrace{\xi_{j,i}\theta_i}_{\text{ALE, every component}},
-$$
-$$
-\frac{dz_k}{dt}=w_k=\sum_{i<k}(\theta_i-\theta_A)\Delta z_i\quad(\text{ALE}),\qquad
-\frac{d\chi_i}{dt}=\frac{S_{{\rm dry},i}V_i}{m_{{\rm dry},i}}\quad(\text{WithChi}).
+\frac{dm_{j,i}}{dt}=\omega_{j,i}\tilde V_i+\dot M_{j,i},\qquad
+\frac{dT_i}{dt}=\frac{E_i-\sum_j h_j(T_i)\,\dot M_{j,i}}{C_i}
+\quad\Bigl(\text{or }\ \frac{dH_i}{dt}=E_i+\sum_j \omega_{j,i}\tilde V_i\,h_j(T_i)\Bigr),
 $$
 
-The Jacobian of this RHS, $J=\partial\,\mathrm{RHS}/\partial\boldsymbol{u}$, enters
-the implicit-RK $W=I/(\gamma_{\rm RK}\Delta t)-J$ and is assembled as the
-structured operator $J=\mathsf{A}+\sum_j C_j$, where $\mathsf{A}$ is the
-block-tridiagonal local block (reaction, conduction, transport, BC, dilation,
-$\chi$-local, $z$-columns) and the $C_j$ are the prefix-sum (mesh velocity),
-suffix-sum (Beer–Lambert), and rank-1 ($\theta_A$/$\chi$) couplings, written into
-the sparse matrix under `DirectSolve` and dropped under `ApproxSolve`. The linear
-solve $W\delta\boldsymbol{u}=-r$ is a sparse factorization of that matrix, and the
-whole construction is verified against the dense AD reference.
+$$
+\frac{dz_n}{dt}=w_n,\qquad
+0=A_{i+1}(w-c)_{i+1}-A_i(w-c)_i-(\theta_i-\theta_A)V_i,\qquad
+0=I_{\rm down}-I_{\rm up}e^{-\alpha_i\Delta_i},
+$$
+
+with the cross-section rows under a variable cross section and identity rows on
+the dead rows, as $\mathsf M\,d\boldsymbol u/dt=\boldsymbol f(\boldsymbol u,t)$.
+Its Jacobian $J=\partial\boldsymbol f/\partial\boldsymbol u$ is the colored
+forward-mode derivative of the whole residual on the connectivity pattern, with
+the two dense rows of a variable cross section assembled from six column sums;
+each stage solves a linear system in
+$W=J-\mathsf M/(\gamma_{\rm RK}\Delta t)$, factored by KLU on the union of its
+nonzeros; accepted states pass the domain test; and the whole construction is
+checked against the dense forward-mode reference.
 
 ---
 
 ## 15.16 Limitations and open issues
 
-- **Geometry operator under `:ale_reduced`.** The $z$-columns are dropped
-  entirely under `ApproxSolve`. Whether *any* residual $z$-coupling survives the
-  profile (i.e. whether the profile is guaranteed to leave exactly zero $z$-rows)
-  is asserted by the masked verifier rather than proven; the design intent is
-  zero, and verification is the safeguard.
-- **Chunk-size tuning.** Per-operator `ForwardDiff` chunk sizes are hardcoded
-  (e.g. $3(1+N_C)$ for conduction). They are the informationally-necessary
-  stencil widths, not adaptively tuned for cache behavior; no auto-tuning is
-  present.
-- **WithChi × Darcy.** `WithChi` is tested mainly with Fickian transport; the
-  interaction of the $\chi$ rank-1 coupling with the full Darcy operator set is
-  not exhaustively exercised.
-- **Sensitivities across park events.** A park is a discrete rewrite of
-  the state (§14.3.4); finite-difference sensitivities are valid only between
-  events.
-- **ILU drop tolerance.** The default $\tau=0.1$ for the ILU-Krylov solvers has
-  not been swept for optimality across pyrolysis regimes; inexact solves can
-  raise Newton rejections on Arrhenius transients.
-- **Warm-start artifacts.** Reusing a prior final state as fresh initial data can
-  perturb finite-difference sensitivities and continuation studies; its effect is
-  unquantified (§17.7).
-- **Diagnostics cadence.** The diagnostics snapshots are stride-based (every
-  `diagnostics_stride` steps), not interpolated to output times, and record the
-  sensible energy only; the ledger fields are NaN (§16.8.3).
+- **Full solves on meshes of more dimensions.** The layout, the pattern, the
+  coloring and the residual handle `Mesh{2}` and `Mesh{3}` meshes with the
+  potential closure, but gas transport, in-depth radiation, the variable cross
+  section, the equidistribution correction and deactivation are a line's, and
+  full solves on such meshes are not a supported path.
+- **The time derivative.** No policy differentiates the residual in time
+  alone by dual numbers; the time derivative is a finite difference.
+- **Jacobian cost.** One Jacobian costs one dual-number residual per batch of up
+  to 24 colors. The color count grows with the number of components and with
+  the relative fluxes of a correction ($5N_C$ against $3N_C$), and on meshes of
+  more dimensions the second-neighbour terms make it larger; it is measured, not
+  assumed.
+- **The union structure only grows.** `StructuredKLU` analyses afresh at each
+  growth of its union, so the first steps of a solve, and any step at which a
+  fresh entry becomes nonzero, carry an analysis.
+- **The enthalpy form's history dependence.** Its residual depends on the
+  evaluation history at the caloric inversion's round-off (§15.2).
+- **Fixed-step solves** bypass the domain test; only the admissibility of each
+  accepted state is checked.
+- **No derivative through the solve.** Sensitivities are finite differences of
+  whole solves (§17); the Jacobian serves the integrator only.
