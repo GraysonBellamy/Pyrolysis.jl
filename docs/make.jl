@@ -111,7 +111,7 @@ let src = joinpath(@__DIR__, "guide", "verification"),
                 replace(
                     read(audit, String),
                     "## Comparison basis audit" => "## [Comparison basis audit](@id comparison-basis-audit)",
-                    "## Gpyro V2 migration" => "## [Gpyro V2 migration](@id gpyro-v2-migration)",
+                    "## Gpyro V2 accuracy" => "## [Gpyro V2 accuracy](@id gpyro-v2-accuracy)",
                 ),
             )
         end

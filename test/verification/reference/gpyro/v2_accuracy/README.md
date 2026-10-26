@@ -2,13 +2,12 @@
 
 These runs compare all seven members of V-GT-07, V-GT-08 and V-RX-05 with
 Gpyro V2 and the independent analytical solutions used by Pyrolysis.jl.
-They were generated on 2026-10-26. **No timing measurements are retained or
-used for this comparison.** The machine was loaded during the runs.
+**These runs provide accuracy measurements.**
 
-The comparison-basis audit added `time_half/` and `time_quarter/` runs at
-the unchanged base mesh, plus `space_half/` at the same dt/4. The original
-`refined/` pair is retained. `accuracy.csv` now records all five configurations;
-these are still accuracy runs, with no benchmark measurements. Reaction-only
+The `time_half/` and `time_quarter/` runs use the base mesh, while
+`space_half/` halves the mesh spacing at the same dt/4. The `refined/` runs
+halve both mesh spacing and timestep. `accuracy.csv` records all five
+configurations. Reaction-only
 cases keep their two boundary nodes at every level. See the
 [comparison policy](../../../../../docs/guide/verification/comparison_coverage.md#comparison-basis-audit).
 
@@ -62,7 +61,7 @@ GPYRO_FCOMPL_GNU=gfortran make -f ../../Makefile_gpyro gnu_linux \
   GIT_STAT= GIT_BRANCH=archive GIT_DATE=unspecified
 ```
 
-Then run the retained decks, both base and refined resolutions, and extract:
+Then run the retained decks, all five configurations, and extract:
 
 ```sh
 python3 test/verification/reference/gpyro/v2_accuracy/run_accuracy.py \
@@ -75,8 +74,8 @@ The script requires successful termination, the pinned revision banner,
 finite outputs, the requested final time and the expected transport
 coefficients. Gpyro can exit with status zero after a failed solve, so exit
 status alone is not accepted. [decks/](decks/) contains the base inputs;
-[raw/](raw/) retains native numerical CSVs and the actual inputs for both
-resolutions. Native timing files are excluded. Extracted CSVs beside this
+[raw/](raw/) retains native numerical CSVs and the actual inputs for all
+configurations. Native timing files are excluded. Extracted CSVs beside this
 README feed report mode; [refined/](refined/) and [accuracy.csv](accuracy.csv)
 retain the refinement audit.
 
@@ -107,9 +106,9 @@ integrating the Robin solution over each finite-volume cell. Gpyro's nodal
 outputs retain their point-value reference. The V-GT-07 resolution figures
 compare profile, surface-flux and inventory errors over all three times at
 each code's actual mesh spacing. Julia's separate convergence table uses
-400 s; the original `refined/` sample simultaneously changes time and space.
-The added `time_quarter/` and `space_half/` pair holds dt fixed to isolate
-spatial sensitivity. Existing pointwise metrics and CI tolerances are unchanged.
+400 s; the `refined/` sample simultaneously changes time and space.
+The `time_quarter/` and `space_half/` pair holds dt fixed to isolate
+spatial sensitivity.
 
 Gpyro clamps `HM=0` to the single-precision machine epsilon,
 1.1920928955078125e-7 kg/(m² s), in

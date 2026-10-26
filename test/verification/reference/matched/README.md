@@ -1,11 +1,11 @@
 # Matched conduction, reaction and deformation comparisons
 
-These accuracy-only additions use native inputs to unmodified FDS 6.11.1 and
+These accuracy comparisons use native inputs to unmodified FDS 6.11.1 and
 Gpyro V2. There are 32 solver/subcase pairs, each run at five configurations (160
 successful runs), spanning 18 verification case IDs. V-HC-04c and V-HC-04d
 share the same physical problem and explicitly reuse the same native runs:
 only Julia's mesh differs. P1/P2/P3 are counted separately within V-CPL-03.
-No pressure cases or timing measurements are added.
+This dataset contains no pressure cases or timing measurements.
 See the [coverage matrix](../../../../docs/guide/verification/comparison_coverage.md)
 for partial comparisons and exclusions.
 
@@ -22,8 +22,7 @@ python3 test/verification/reference/matched/run_comparisons.py gpyro \
 
 `--extract-only` validates an existing workspace without running the solver.
 The default levels are `base` (h,dt), `refined` (h/2,dt/2), `time_half`
-(h,dt/2), `time_quarter` (h,dt/4), and `space_half` (h/2,dt/4). The original
-coupled refinement is not used to infer isolated spatial or temporal order.
+(h,dt/2), `time_quarter` (h,dt/4), and `space_half` (h/2,dt/4). The coupled refinement is not used to infer isolated spatial or temporal order.
 Use `--cases=vhc04a --levels=base,time_half,time_quarter,space_half
 --destination=/tmp/comparison-pilot` for a separate pilot; partial studies
 cannot overwrite this directory's complete manifests.
@@ -46,7 +45,7 @@ outputs. FDS is the official Linux release
 `FDS-6.11.1-0-gff928db-release`, compiled with Intel Fortran 2025.3.2. Gpyro is
 [revision bff0126c68f2a35c084ef04490ae327185f281a3](https://github.com/Gedeben/GPYRO-V2/tree/bff0126c68f2a35c084ef04490ae327185f281a3),
 built with GNU Fortran 14.4.0 and upstream `gnu_linux` flags; build details and
-the source archive hash are in [the earlier V2 audit](../gpyro/v2_accuracy/README.md).
+the source archive hash are in [the V2 build documentation](../gpyro/v2_accuracy/README.md).
 Each run requests one OpenMP thread and FDS uses one MPI rank. Gpyro's banner
 reports OpenMP disabled in this build.
 
@@ -60,10 +59,9 @@ julia --project=scripts/verification scripts/verification/run_reports.jl \
 ```
 
 Only base external curves are plotted. The other runs are retained to audit
-resolution sensitivity without crowding the plots. The committed chapters
-keep the older timing measurements as archival data; current reports exclude
-their figures unless `--historical-timings=true`. They are not qualified at
-equal accuracy. The command above produces accuracy-only partial chapters. Omit
+resolution sensitivity without crowding the plots. The command above
+produces accuracy-only partial chapters. Runtime comparisons require a
+shared achieved-accuracy target. Omit
 `--comparisons-only=true` to render every curve, including unrelated sweeps.
 
 ## Native-input mappings
@@ -76,22 +74,20 @@ convective-slab histories, where the eigenfunction expansion is singular at
 the initial corner. FDS can select a different internal wall grid, so the
 extractor checks its actual count and domain against the request. `grid.json`
 stores native mesh-table faces; `PROF CELL_CENTERED=T` explicitly stores
-thermal cell-center values. Earlier default face-interpolated profiles added
-an observation error at conductivity jumps and were replaced during the audit.
+thermal cell-center values.
 
 * **V-HC-02a–d:** Gpyro uses L = 0.1 m, ρ = c = 1000, k = 0.5,
   T₀ = 300 K, T∞ = 500 K and h = 0.5/5/50/500 W/(m² K).
   Base: 81 boundary nodes, dt = 2 s. Profile times are 1000, 2000,
-  4000 and 10000 s. Existing FDS curves remain the documented equivalent
+  4000 and 10000 s. FDS curves use the equivalent
   dimensionless slab problem.
 * **V-HC-04a–d:** both solvers use L = 0.02 m, 300/400 K boundaries,
   ρ = c = 1000, bottom k = 1 and top k = 0.1/0.01/0.1 W/(m K),
   interface z = 0.01/0.01/0.0102 m. Native Gpyro obstacle orientation is
   explicit (`GEOMETRY_IS_UPSIDE_DOWN=F`); both blocks cover the domain.
   Base: 80 requested intervals; dt = 10/100/10 s; final time 40000/400000/40000 s.
-  Both FDS layers now have explicit `CELL_SIZE(layer)` and `STRETCH_FACTOR(layer)`:
-  the earlier scalar assignments left layer 2 at its coarse, stretched default.
-  These runs were replaced during the basis audit. The native grid is retained;
+  Both FDS layers have explicit `CELL_SIZE(layer)` and `STRETCH_FACTOR(layer)`.
+  The native grid is retained;
   off-center layer thicknesses can give slightly different widths per layer.
   Each numerical interface is compared against the prescribed physical
   interface, with no coordinate correction. Off-face quantization remains.
@@ -121,8 +117,7 @@ an observation error at conductivity jumps and were replaced during the audit.
   Base: four intervals, dt = 0.002 s, final time 8 s. Slab means use
   native control-volume weights: trapezoidal weights on Gpyro boundary nodes
   and equal cell-volume weights on FDS probes placed at its thermal cell
-  centers (four base / eight refined cells). This replaces the earlier
-  surface/depth quadrature. The analytical
+  centers (four base / eight refined cells). The analytical
   reference is the thermally thin cooling limit, as in the Julia case.
 * **V-RX-04b:** L = 0.005 m, k = 1, ρ = c = 1000, T₀ = T∞ = 300 K,
   ε = 0.85, h = 15 and absorbed irradiance 20000 W/m², insulated back.
@@ -132,7 +127,7 @@ an observation error at conductivity jumps and were replaced during the audit.
   (that option bypasses external flux). The analytical line is the steady
   root, not an exact heating transient. Both native solvers use
   σ = 5.670373e-8 versus Pyrolysis.jl's 5.670374419e-8 W/(m² K⁴).
-* **V-RX-05a–b:** FDS uses the existing insulated A → B problem, rate
+* **V-RX-05a–b:** FDS uses the insulated A → B problem, rate
   0.2 s⁻¹, initial density 1000 kg/m³, L = 0.001 m, T₀ = 1000 K,
   heat capacities 1200/1900 J/(kg K), and reaction heats +1e6/−1e5 J/kg.
   `ADJUST_H=F` on both materials disables FDS's default reference-temperature
@@ -146,8 +141,8 @@ an observation error at conductivity jumps and were replaced during the audit.
   zero reaction heat, initial density 1000 and product density 500/2000/1000
   kg/m³, L = 0.002 m. Gpyro uses `CHI=0`, `SOLVER_DEFORMATION_MODE=3`;
   there is no gas product or pressure solve. Base: eight intervals,
-  dt = 0.001 s, final time 8 s. Native instantaneous FDS samples replace
-  the older interval-averaged P1/P2 curves and add P3.
+  dt = 0.001 s, final time 8 s. FDS outputs instantaneous thickness samples
+  for all three paths.
   The native decks are insulated: uniform initial temperature, equal heat
   capacities and zero reaction heat keep T exactly constant, making the
   Julia case's prescribed 400 K front boundary redundant for these paths.

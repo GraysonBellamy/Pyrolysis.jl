@@ -1,14 +1,13 @@
-# Archived Gpyro reference-code runs
+# Gpyro reference datasets
 
-The five 0.8200 overlays documented below have been replaced by
-[pinned V2 reruns](v2_migration/README.md). All active Gpyro verification
-comparisons now use revision `bff0126c68f2a35c084ef04490ae327185f281a3`.
-These original decks, CSVs and timing provenance remain archival evidence
-for their original version; the numerical values below describe that archive.
+All Gpyro verification comparisons use V2 revision
+`bff0126c68f2a35c084ef04490ae327185f281a3`. The
+[conduction, radiation, kinetics and Stefan datasets](v2_migration/README.md)
+cover V-HC-01/03, V-RAD-01, V-RX-01 and V-CPL-01 route A.
+The 0.8200 files directly in this directory are not read by accuracy reports;
+their inputs, numerical values and timing provenance are documented below.
 
-Date: 2026-07-07
-
-The newer [Gpyro V2 accuracy comparisons](v2_accuracy/README.md) cover
+The [Gpyro V2 transport and reaction comparisons](v2_accuracy/README.md) cover
 V-GT-07, V-GT-08 and V-RX-05 at pinned revision `bff0126c68f2`.
 Those runs retain inputs, raw numerical outputs and refinement checks;
 they do not contribute timing measurements.
@@ -16,7 +15,7 @@ they do not contribute timing measurements.
 ## Code
 
 - **Gpyro 0.8200** (banner of every `.out` file: `Gpyro 0.8200`,
-  the historical repository URL in the banner may redirect). Source checkout:
+  the repository URL in the banner may redirect). Source checkout:
   [`lautenberger/gpyro`, commit `6d369dd0fa5a3621334272d0806f48c56e608c01`](https://github.com/lautenberger/gpyro/tree/6d369dd0fa5a3621334272d0806f48c56e608c01)
   (2020-09-01). The revision, not a moving branch or repository alias,
   identifies the implementation used.
@@ -35,16 +34,15 @@ The five timing decks use the same pinned 0.8200 source and inputs as the
 reference cases. The timing executable is a serial **GNU Fortran 14.4.0**
 build using the upstream `gnu_linux` flags (`-O2 -unroll
 -frecord-marker=4 -ffree-line-length-none`). This compiler differs from the
-15.2.0 build that produced the original overlays, so the refreshed timings
-are not evidence of a performance change in Gpyro.
+15.2.0 build used for the numerical CSVs. The two builds have distinct
+executable hashes and measurement provenance.
 
 `../timings.csv` uses the median **internal total elapsed wall time** in
 `wall_s` and retains median full process wall time in `process_wall_s`.
 Each deck has one warm-up followed by five fresh native processes, with
 `OMP_NUM_THREADS=1` and CPU affinity 1. `provenance.json` records every
 sample, input/output and executable hashes, compiler flags, CPU and load.
-The retained Gpyro run matches V-CPL-01 route A only. Its former route-B
-overlay and timing alias have been removed: route B has different
+The Gpyro Stefan deck represents V-CPL-01 route A. Route B has different
 temperatures, latent heat and a gated reaction closure.
 
 Upstream starts its elapsed wall timer before input reading and allocation,
@@ -57,7 +55,7 @@ time-stepping timing statistics are not used in the comparison.
 
 The patch changes only timing output. Every timed run's numerical CSVs are
 checked byte for byte against an unmodified build of the same source and
-compiler. The numerical overlay CSVs remain unchanged.
+compiler. The check covers every numerical output CSV.
 
 To reproduce the executable, check out source commit
 `6d369dd0fa5a3621334272d0806f48c56e608c01` from
@@ -89,7 +87,7 @@ startup cost is not part of either timing.
   1D cases), `EMIS = 1` with `RERADIATION = .FALSE.` so the absorbed flux is
   exactly the prescribed `QE`, no melting/reactions unless the case needs them.
 
-The historical section and figure numbers below refer to [Lautenberger's
+The section and figure numbers below refer to [Lautenberger's
 2007 dissertation](https://escholarship.org/uc/item/7wz5m7dg), §§3.4.1–3.4.4,
 not the differently numbered Gpyro Technical Reference.
 
@@ -247,8 +245,8 @@ docker run --rm --user $(id -u):$(id -g) -e HOME=/tmp -e GPYRO_FCOMPL_GNU=gfortr
 and run from the deck's directory with `OMP_NUM_THREADS=1 gpyro PMMA.data`. The
 first header row names the columns; column 2 (`001_MLR`) is the mass loss rate
 in **g m⁻² s⁻¹**, column 6 the remaining thickness in m, columns 3–5 the
-temperatures (°C) at the surface, 12 mm and 17.9 mm. This is archival context,
-not a matched V-BO-01 overlay: native gas transport, burnout and surface
+temperatures (°C) at the surface, 12 mm and 17.9 mm. This file is not a
+matched V-BO-01 dataset: native gas transport, burnout and surface
 closures differ, and escaped mass loss is not our gas-generation observable.
 The retained file does not identify the source commit
 or executable hash used for this run, so it must not be attributed to a

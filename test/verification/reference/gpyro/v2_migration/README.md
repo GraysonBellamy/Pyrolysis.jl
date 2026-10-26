@@ -1,9 +1,9 @@
-# Gpyro V2 migration of the five original verification comparisons
+# Gpyro V2 conduction, radiation, kinetics and Stefan comparisons
 
-All active Gpyro verification overlays now use unmodified V2 revision
+All Gpyro verification overlays use unmodified V2 revision
 `bff0126c68f2a35c084ef04490ae327185f281a3`, built with GNU Fortran 14.4.0
-and the upstream `gnu_linux` flags. This directory replaces the five 0.8200
-overlays; the parent directory retains their original data and timing history.
+and the upstream `gnu_linux` flags. This directory contains the HC-01,
+HC-03, RAD-01, CPL-01 route A and RX-01 comparison datasets.
 The executable hash agrees with the `v2_accuracy/` and `matched/` runs.
 
 | Case | Base native unknowns | Intervals / spacing | Requested initial dt |
@@ -17,8 +17,8 @@ The executable hash agrees with the `v2_accuracy/` and `matched/` runs.
 The four spatial grids match the finest plotted Julia meshes. Boundary
 control volumes are half width; unknown counts differ by one from Julia's
 cell counts. Full native profiles verify the coordinates and counts. There
-is no half-cell shift. V2 supports full-width profiles, so the Stefan front
-uses every native node instead of the old alternate-node output.
+is no half-cell shift. Stefan front interpolation uses every native node
+in the full profiles.
 
 Each case has `base` (h,dt), `refined` (h/2,dt/2), `time_half` (h,dt/2),
 `time_quarter` (h,dt/4), and `space_half` (h/2,dt/4) runs: 25 successful
@@ -28,13 +28,10 @@ level repeats the finest temporal configuration and is not spatial evidence.
 logs report successful completion without failed-step messages. The console
 step log is sparse and does not replace an accepted-step history.
 
-Physical properties, reaction rates, boundaries, and output quantities are
-unchanged from the archived decks. The generated inputs explicitly select
-half boundary control volumes and fixed geometry, tighten nonlinear solver
-tolerances, and use endpoint probes. Two obsolete input settings needed
-correction: `IO2=2` is invalid with one gas species, so it becomes 1; RX-01's
-unused gas-species solve is disabled because the material has no porosity
-and the chain produces no gas. Neither changes the benchmark equations.
+The generated inputs use half boundary control volumes, fixed geometry,
+tight nonlinear solver tolerances and endpoint probes. The gas-species
+index is `IO2=1`. RX-01's gas-species solve is disabled because the material
+has no porosity and the chain produces no gas.
 
 Native `TSTOP` includes one requested timestep beyond the common observation
 horizon solely to retain the final dump. Extracted curves end at the common
@@ -42,7 +39,7 @@ horizon. These are accuracy runs without timing measurements; any future
 timed comparison must remove or account for that output guard.
 
 `accuracy.csv` records analytical errors at all five levels, evaluated at
-native observation coordinates/times. The unchanged analytical expressions
+native observation coordinates/times. The analytical expressions
 in the parent extractor provide the erfc, constant-flux slab, absorption,
 Stefan, and Bateman references. `analytical_checks.txt` retains the readable
 checks. Native inputs, logs and numerical outputs are under `raw/` and
@@ -65,8 +62,4 @@ python3 test/verification/reference/gpyro/v2_migration/run_migration.py \
 ```
 
 `--extract-only` validates generated inputs, successful termination and grids
-before re-extracting an existing workspace. No active verification case
-requires retention of a 0.8200 overlay. Historical timings remain labeled
-0.8200 because relabeling measurements would not establish V2 performance.
-The unrelated unpinned PMMA V2 curve remains excluded for its documented
-physics, observable and provenance mismatches.
+before re-extracting an existing workspace.

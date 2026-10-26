@@ -278,29 +278,24 @@ Both FDS and Gpyro cover V-HC-01/02/04/05, V-RX-01, V-RX-02a–c, V-RX-04,
 V-RX-05a–b, V-CPL-03 P1/P2/P3 and the subcritical V-CPL-04 steady profile.
 Gpyro additionally covers V-HC-03, V-RAD-01, the apparent-heat-capacity route
 of V-CPL-01, V-GT-07/08 and V-RX-05c. The FDS flux-input restriction is
-discussed in §12.11.3. The archival V-BO-01 PMMA curve is excluded because
-its gas/burnout closures and escaped-mass-loss observable do not match this
-regression's gas-generation history. It also lacks pinned executable provenance.
-The MaCFP-2 community submissions remain archival context and no case reads them.
+discussed in §12.11.3.
 A series marked `crosscode = true` is drawn as a muted
 context layer in a separate `_vs_codes` variant of each affected figure, so the base
 figure keeps the solver's own error on its own scale; for exact-solution cases the
 other codes' *errors* against the same exact solution are compared.
-The guide's formulation comparisons now target V2 at the revision in
+The guide's formulation comparisons use V2 at the revision in
 §1.6.5. The V-GT-07, V-GT-08 and V-RX-05 comparisons use that pinned V2
 revision, retain raw numerical outputs and refinement checks, and omit timings.
 Their source and transformations are documented in
-`test/verification/reference/gpyro/v2_accuracy/README.md`. The older datasets
-retain their original version labels; their overlays and timings do not
-establish results for the new reference revision.
-The added conduction, reaction and deformation comparisons use the same pinned
+`test/verification/reference/gpyro/v2_accuracy/README.md`.
+The conduction, reaction and deformation comparisons use the same pinned
 Gpyro V2 revision and FDS 6.11.1, with native base and independent time/space refinement outputs and executable
-hashes under `test/verification/reference/matched/`. They add no timing samples.
+hashes under `test/verification/reference/matched/`. These runs contain no timing measurements.
 In particular, FDS V-RX-05a–b uses `ADJUST_H=F` to match the specified local
 reaction heat. No gas-transport comparison is attributed to FDS, and the
 V-CPL-04 comparison does not extend to the upper-temperature-gated runaway branch.
 
-`reference/timings.csv` retains historical setup-plus-simulation costs. Current report generation excludes their cross-code figures by default because no pair is qualified at a shared achieved accuracy. See the [comparison-basis audit](../verification/comparison_coverage.md#comparison-basis-audit) for mesh conventions, independent time refinement, and the matched-accuracy runtime policy. `--historical-timings=true` restores archival cost context explicitly. ThermaKin2Ds has no verification overlay here; the locally supplied executable is a Windows console binary. This is a limitation of this dataset, not of all ThermaKin distributions.
+The reports compare accuracy. Runtime comparisons require a shared achieved-accuracy target; no pair is qualified under this criterion. See the [comparison basis](../verification/comparison_coverage.md#comparison-basis-audit) for mesh conventions, independent time refinement, and runtime qualification. ThermaKin2Ds has no verification overlay here; the locally supplied executable is a Windows console binary. This is a limitation of this dataset, not of all ThermaKin distributions.
 
 ---
 
@@ -1071,10 +1066,9 @@ can arise from either, from input transcription, or from output definitions.
   Match condensed/gas density definitions, conversion-rate normalization,
   diffusion, thermal exchange and volume-change laws. All active overlays,
   including V-HC-01, V-HC-03, V-RAD-01, V-RX-01 and V-CPL-01 route A,
-  now use the pinned V2 executable. Native outputs and independent refinement
-  audits are retained for the cases listed in §18.1.3; they supply no timing
-  measurements. The original 0.8200 data remain archival. The unpinned PMMA result is
-  retained as an archive and excluded from V-BO-01's comparison.
+  use the pinned V2 executable. Native outputs and independent refinement
+  studies are retained for the cases listed in §18.1.3; they supply no timing
+  measurements.
 - **FDS:** the retained 6.11.1 overlays concern matched solid conduction,
   reaction kinetics/heat, radiative boundaries, solid-only volume change
   and subcritical thermal feedback (§18.1.3). Its instantaneous gas release and optional two-flux
@@ -1085,8 +1079,8 @@ can arise from either, from input transcription, or from output definitions.
 The benchmark definitions, actual input decks and exact-solution errors
 provide the evidence for each comparison (§18.1.3). The MaCFP community
 predictions use differing calibrated models; their spread is not a
-solver-only verification result. Timing rows are historical measurements,
-not controlled evidence of one solver's general superiority.
+solver-only verification result. Runtime comparisons require qualified
+workloads at the same achieved accuracy.
 
 ---
 

@@ -95,21 +95,13 @@ residual at fixed t_end grows ~1000×).
 
 ### Comparison with other codes
 
-See the [mesh/time audit and rerun policy](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). These overlays establish physical-problem comparisons; equal spacing and equal achieved accuracy require the qualifications listed there.
+See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). These overlays establish physical-problem comparisons; equal spacing and equal achieved accuracy require the qualifications listed there.
 
-Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [base and refined analytical errors](assets/V-CPL-03/V-CPL-03_comparison_accuracy.csv) are retained separately. These additions carry no timing measurements.
-
-The previously published timing measurements below are retained without a refresh.
+Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [base and refined analytical errors](assets/V-CPL-03/V-CPL-03_comparison_accuracy.csv) are retained separately. These runs provide accuracy measurements.
 
 Error panels show absolute error at each code's output points. Zeros are displayed at 1e-12 on the logarithmic axis; the reference CSV precision limits the discernible error.
 
 ![V-CPL-03 thickness_histories_vs_codes_error](assets/V-CPL-03/V-CPL-03_thickness_histories_vs_codes_error.png)
-
-A timing entry alone does not establish an identical physical workload.
-
-![V-CPL-03 thickness_histories_vs_codes_error](assets/V-CPL-03/V-CPL-03_thickness_histories_vs_codes_error.png)
-
-Historical runtime comparisons are withheld pending shared accuracy and observation qualification. The measurements remain in `test/verification/reference/timings.csv`; see the [comparison basis audit](comparison_coverage.md#comparison-basis-audit).
 
 Solution overlays including the other codes' points: [thickness_histories_vs_codes](assets/V-CPL-03/V-CPL-03_thickness_histories_vs_codes.png).
 

@@ -58,11 +58,9 @@ mesh-limited); (c) is quantization-dominated and non-monotone in n.
 
 ### Comparison with other codes
 
-See the [mesh/time audit and rerun policy](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). These overlays establish physical-problem comparisons; equal spacing and equal achieved accuracy require the qualifications listed there.
+See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). These overlays establish physical-problem comparisons; equal spacing and equal achieved accuracy require the qualifications listed there.
 
-Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [base and refined analytical errors](assets/V-HC-04a/V-HC-04a_comparison_accuracy.csv) are retained separately. These additions carry no timing measurements.
-
-
+Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [base and refined analytical errors](assets/V-HC-04a/V-HC-04a_comparison_accuracy.csv) are retained separately. These runs provide accuracy measurements.
 
 Accuracy comparison only; timing measurements are omitted.
 
@@ -101,11 +99,9 @@ Solution overlays including the other codes' points: [T_profile_steady_vs_codes]
 
 ### Comparison with other codes
 
-See the [mesh/time audit and rerun policy](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). These overlays establish physical-problem comparisons; equal spacing and equal achieved accuracy require the qualifications listed there.
+See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). These overlays establish physical-problem comparisons; equal spacing and equal achieved accuracy require the qualifications listed there.
 
-Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [base and refined analytical errors](assets/V-HC-04b/V-HC-04b_comparison_accuracy.csv) are retained separately. These additions carry no timing measurements.
-
-
+Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [base and refined analytical errors](assets/V-HC-04b/V-HC-04b_comparison_accuracy.csv) are retained separately. These runs provide accuracy measurements.
 
 Accuracy comparison only; timing measurements are omitted.
 
@@ -149,11 +145,9 @@ Solution overlays including the other codes' points: [T_profile_steady_vs_codes]
 
 ### Comparison with other codes
 
-See the [mesh/time audit and rerun policy](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). These overlays establish physical-problem comparisons; equal spacing and equal achieved accuracy require the qualifications listed there.
+See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). These overlays establish physical-problem comparisons; equal spacing and equal achieved accuracy require the qualifications listed there.
 
-Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [base and refined analytical errors](assets/V-HC-04c/V-HC-04c_comparison_accuracy.csv) are retained separately. These additions carry no timing measurements.
-
-
+Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [base and refined analytical errors](assets/V-HC-04c/V-HC-04c_comparison_accuracy.csv) are retained separately. These runs provide accuracy measurements.
 
 Accuracy comparison only; timing measurements are omitted.
 
@@ -192,9 +186,9 @@ Solution overlays including the other codes' points: [T_profile_steady_vs_codes]
 
 ### Comparison with other codes
 
-See the [mesh/time audit and rerun policy](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). These overlays establish physical-problem comparisons; equal spacing and equal achieved accuracy require the qualifications listed there.
+See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). These overlays establish physical-problem comparisons; equal spacing and equal achieved accuracy require the qualifications listed there.
 
-Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [base and refined analytical errors](assets/V-HC-04d/V-HC-04d_comparison_accuracy.csv) are retained separately. These additions carry no timing measurements.
+Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [base and refined analytical errors](assets/V-HC-04d/V-HC-04d_comparison_accuracy.csv) are retained separately. These runs provide accuracy measurements.
 
 V-HC-04d changes only the Julia mesh: its 10.2 mm interface, materials and boundary conditions are identical to V-HC-04c. The manifests explicitly reuse the same native V-HC-04c runs; their meshes and errors are retained without adjustment.
 

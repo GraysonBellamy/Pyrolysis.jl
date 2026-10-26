@@ -58,8 +58,7 @@ Gpyro comparisons use **V2**. This guide gives practical porting checks,
 while the Technical Reference explains equation mappings, assumptions and
 differences between manuals and active implementations. ThermaKin2Ds
 comparisons describe its documented formulation; its source is not available
-in this checkout. Historical verification curves and timings retain their
-original version labels until the V2 cases are rerun.
+in this checkout.
 
 When transferring an existing model, work through the checks in this order:
 

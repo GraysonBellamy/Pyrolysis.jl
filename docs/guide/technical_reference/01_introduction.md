@@ -405,13 +405,10 @@ chapter. Equation mappings state their assumptions and do not establish
 whole-model equivalence. Numerical agreement requires matched runs; performance
 claims also require matched workloads and timing boundaries.
 
-All active Gpyro verification overlays now use the pinned V2 revision
-(§18.1.3). The five original 0.8200 comparisons have been rerun with matched
-base mesh spacing and independent time/space refinements. Their original
-CSVs and timings remain historical archives. The unpinned V2 burnout CSV
-remains excluded for its physics, observable and provenance mismatches.
-The new V2 runs establish accuracy evidence; shared-accuracy performance
-qualification remains outstanding.
+All Gpyro verification overlays use the pinned V2 revision (§18.1.3).
+The comparisons include independent time/space refinements, with mesh spacing
+and observation conventions documented for each case. They provide accuracy
+evidence; no runtime pair is qualified at a shared achieved accuracy.
 
 
 ---

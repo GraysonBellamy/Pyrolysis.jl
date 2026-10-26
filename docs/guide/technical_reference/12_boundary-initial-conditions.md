@@ -767,7 +767,7 @@ Our surface, species and energy assembly is described in §§12.2–12.5.
 V-HC-01–03 exercise specified thermal boundaries, while §9.11's gas cases
 exercise our transport closures. Those checks do not establish equivalence
 of arbitrary combined boundary models. User Guide §§5.2–5.6 gives the
-corresponding setup choices; historical overlay limits remain in §18.1.3.
+corresponding setup choices; §18.1.3 documents the scope of the numerical comparisons.
 
 ---
 

@@ -804,7 +804,7 @@ Our energy and boundary-flux assembly are described in §§7.2–7.7 and 12.4.
 
 Conduction-only checks cannot establish agreement of gas-carried energy or
 reaction-heat conventions. The coupled cases in §18.6 apply to their stated
-inputs, and the historical external datasets retain §18.1.3's version limits.
+inputs and the comparison scope documented in §18.1.3.
 User Guide §7.7 gives the energy conventions to check when porting a deck.
 
 ---

@@ -20,8 +20,6 @@ The run must burn out completely, lose exactly the mass of the PMMA layer,
 close the mass ledger, and converge the surface temperature at every
 accepted step, within a wall-time budget at 0.098 mm cells.
 Peak mass loss rate and timing are reported through the history curves.
-The archival Gpyro PMMA run has different gas/burnout closures and is not
-a matched comparison for this regression.
 
 The mesh moves by the equidistribution correction, the PMMA–Kaowool
 interface a Lagrangian node, so the PMMA cells thin together and the layer

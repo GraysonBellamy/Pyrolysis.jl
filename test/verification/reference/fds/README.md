@@ -1,12 +1,10 @@
 # FDS 6.11.1 verification outputs
 
-New matched conduction, reaction and thermal-feedback runs, including a direct
-replacement for the rescaled V-RX-02c particle curve, are documented in
-[`../matched/README.md`](../matched/README.md). The baking-soda particle outputs
-and original measurements here remain archival; they no longer supply that
-case's accuracy or timing overlay. New instantaneous P1/P2/P3 thickness
-histories also replace the older interval-averaged V-CPL-03 accuracy curves;
-the old timing workload remains documented separately.
+The conduction, reaction and thermal-feedback refinement studies are
+documented in [`../matched/README.md`](../matched/README.md), including the
+V-RX-02 direct native-input comparisons and V-CPL-03 instantaneous P1/P2/P3
+thickness histories. The files here contain the supplied-deck outputs and
+custom-deck measurements listed below.
 
 These device outputs and the in-depth profile come from the official FDS
 6.11.1 Linux release bundle. The twenty supplied verification decks are the
@@ -30,8 +28,8 @@ identity and timing samples are recorded in `provenance.json`.
 | `convective_cooling_devc.csv` | semi-infinite-like convective heating | V-HC-01 |
 | `insulated_steel_plate_devc/prof_1.csv` | heated steel plate | retained; not the V-HC-03 overlay |
 | `two_step_solid_reaction_devc.csv` | A→B→C series kinetics | V-RX-01 |
-| `part_baking_soda_{420K,450K,500K}_devc.csv` | isothermal NaHCO₃ decomposition | V-RX-02 |
-| `shrink_swell_devc.csv` | 6 shrink/swell variants, M_i/L_i/T_i | endpoint precedent; custom deck below supplies V-CPL-03 paths |
+| `part_baking_soda_{420K,450K,500K}_devc.csv` | isothermal NaHCO₃ decomposition | Not read by an accuracy overlay |
+| `shrink_swell_devc.csv` | 6 shrink/swell variants, M_i/L_i/T_i | Endpoint check; comparison paths are in `../matched/` |
 | `matl_e_cons_{1..9}_devc.csv` | enthalpy conservation ledger | retained; not read by a current overlay |
 
 Run each deck in its own output directory with:
@@ -81,7 +79,7 @@ Where the shipped FDS case differs from ours, `custom/` holds minimal decks
   The shipped originals simulate up to 10× longer (mostly the featureless
   asymptote), which would inflate their wall times in the solve-time
   comparison and stretch the overlay axes. V-HC-02/V-RX-01 overlays and
-  `timings.csv` rows use these span-matched runs. V-RX-02c now uses the
+  `timings.csv` rows use these span-matched runs. V-RX-02c uses the
   direct native-input accuracy run in `../matched/`, with no timing row. The
   supplied-deck outputs are retained alongside the matched-deck outputs.
 

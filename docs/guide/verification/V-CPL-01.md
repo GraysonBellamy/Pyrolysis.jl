@@ -76,9 +76,9 @@ convergence study).
 
 ### Comparison with other codes
 
-Physical-problem agreement does not establish equal discretization or cost. See the [mesh/time audit and rerun policy](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). Archived runtime curves are excluded by default until a shared accuracy target is met.
+Physical-problem agreement does not establish equal discretization or cost. See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). Runtime comparisons require a shared achieved-accuracy target.
 
-Gpyro V2 revision `bff0126c68f2` uses 801 boundary nodes (800 intervals, 0.05 mm spacing), with every node retained for front interpolation. The base mesh matches the plotted Julia spacing where spatially resolved. Independent time and space refinements, native outputs, and provenance are retained under `test/verification/reference/gpyro/v2_migration/`. See the [V2 migration and analytical checks](comparison_coverage.md#gpyro-v2-migration). These runs carry no timing measurements.
+Gpyro V2 revision `bff0126c68f2` uses 801 boundary nodes (800 intervals, 0.05 mm spacing), with every node retained for front interpolation. The base mesh matches the plotted Julia spacing where spatially resolved. Independent time and space refinements, native outputs, and provenance are retained under `test/verification/reference/gpyro/v2_migration/`. See the [V2 accuracy checks](comparison_coverage.md#gpyro-v2-accuracy). These runs carry no timing measurements.
 
 Accuracy comparison only; timing measurements are omitted.
 

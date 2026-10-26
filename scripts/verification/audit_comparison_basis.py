@@ -264,8 +264,8 @@ def main():
 
     audit_migration(julia, all_julia, rows, changes)
 
-    # Remaining older FDS overlays and the earlier V2 accuracy family.
-    # FDS counts below are the archived timing-deck
+    # FDS overlays and the V2 transport/reaction accuracy family.
+    # FDS counts below are the timing-deck
     # counts; their sparse DEVC samples cannot independently verify a mesh.
     legacy = [
         ("V-HC-01", "fds", "fds/custom/vhc01_semi_infinite.fds", 133, .05, .1,
@@ -279,13 +279,13 @@ def main():
     for suffix in "ab":
         legacy.extend([
             (f"V-GT-07{suffix}", "gpyro_v2", f"gpyro/v2_accuracy/decks/vgt07{suffix}.data", 160, 1., .05,
-             "161 boundary nodes; spatial/time refinement coupled; point vs cell-average inventory references differ"),
+             "161 boundary nodes; independent time/space refinements; point vs cell-average inventory references differ"),
             (f"V-GT-08{suffix}", "gpyro_v2", f"gpyro/v2_accuracy/decks/vgt08{suffix}.data", 80, .1, .005,
-             "81 boundary nodes; spatial/time refinement coupled; steady reference does not verify startup transient"),
+             "81 boundary nodes; independent time/space refinements; steady reference does not verify startup transient"),
         ])
     for suffix in "abc":
         legacy.append((f"V-RX-05{suffix}", "gpyro_v2", f"gpyro/v2_accuracy/decks/vrx05{suffix}.data",
-                       1, .001, .001, "two boundary nodes; existing refinement is time-only; add third dt; retained-gas constant mismatch in c"))
+                       1, .001, .001, "two boundary nodes; three time-refinement levels; homogeneous ODE; retained-gas constant mismatch in c"))
     for case, solver, source, n, length, dt, note in legacy:
         if not (REF / source).is_file():
             raise ValueError(f"missing legacy deck: {source}")

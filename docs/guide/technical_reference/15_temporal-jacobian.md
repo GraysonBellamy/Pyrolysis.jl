@@ -977,10 +977,9 @@ solvers. The FDS heat-transfer discretization is checked against its
 Our default policy is in `src/Integration/policy.jl`; the state Jacobian
 uses colored forward-mode automatic differentiation (§15.5).
 
-The retained timing rows describe their original versions and workloads
-(§18.1.3). They establish neither V2 timings nor a general ranking of these
-integration methods. Independent temporal refinements are retained for the
-new V2 verification runs; matched-accuracy performance runs remain outstanding.
+The verification studies retain independent temporal refinements while each
+solver uses its native integrator (§18.1.3). Runtime comparisons require a
+shared achieved-accuracy target; no solver pair is qualified at that target.
 User Guide §§8.3 and 12.6 covers tolerance and step-size studies.
 
 ---

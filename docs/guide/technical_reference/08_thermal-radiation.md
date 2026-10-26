@@ -768,7 +768,7 @@ and [two-flux implementation](https://github.com/firemodels/fds/blob/FDS-6.11.0/
 its angular and emission terms. Our beam deposits are assembled in
 `src/Kernels/radiation.jl`.
 
-V-RAD-01 now uses the pinned Gpyro V2 executable (§18.1.3), with 400
+V-RAD-01 uses the pinned Gpyro V2 executable (§18.1.3), with 400
 intervals matching Julia's plotted mesh, full native boundary-node profiles,
 and independent time/space refinements. It checks the specified
 absorption/conduction problem with reradiation disabled. User Guide §5.6

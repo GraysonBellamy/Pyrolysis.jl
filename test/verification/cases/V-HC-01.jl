@@ -136,7 +136,7 @@ function _verification_case_vhc01()
             ),
         ),
         report = (
-            comparison_note = "Gpyro V2 revision `bff0126c68f2` uses 501 boundary nodes (500 intervals, 0.1 mm spacing). The base mesh matches the plotted Julia spacing where spatially resolved. Independent time and space refinements, native outputs, and provenance are retained under `test/verification/reference/gpyro/v2_migration/`. See the [V2 migration and analytical checks](comparison_coverage.md#gpyro-v2-migration). These runs carry no timing measurements.",
+            comparison_note = "Gpyro V2 revision `bff0126c68f2` uses 501 boundary nodes (500 intervals, 0.1 mm spacing). The base mesh matches the plotted Julia spacing where spatially resolved. Independent time and space refinements, native outputs, and provenance are retained under `test/verification/reference/gpyro/v2_migration/`. See the [V2 accuracy checks](comparison_coverage.md#gpyro-v2-accuracy). These runs carry no timing measurements.",
             n_cells_ladder = [25, 50, 100, 133, 200, 400, 500],
             profile_times = times,
             qoi_curves = (:T_profiles, :surface_T_history),
