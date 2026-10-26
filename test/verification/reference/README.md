@@ -30,6 +30,12 @@ time-stepping-only or per-routine timing statistics. The `wall_s` column in
 holds full process wall time. Both reference columns are medians of five
 fresh-process runs after one warm-up, on one pinned CPU.
 
+The published Julia timing figures and wall-time columns retain measurements
+from source revision `a3016a55a68f7e1a2a5baf451f7cfd7dbdf9cb74`. They do not
+measure the current gas transport implementation. Updated numerical errors and
+QoIs come from separate verification runs. Configurations without a retained
+timing have an empty `wall_s` field in CSV and a dash in the displayed table.
+
 | Code | Primary timer starts | Primary timer ends |
 |---|---|---|
 | Pyrolysis.jl | before model construction in a warmed Julia session | after solve returns |
