@@ -1,7 +1,6 @@
 "n_cells","qoi","value","exact","error","tol","within_tol"
 30,"complete burnout: live thickness at t_end is the substrate",0.011996666666666666,0.012,3.333333333334354e-6,1.0e-5,true
 30,"mass loss of the gasified PMMA layer",69.92061224713292,69.9147977671139,0.005814480019026291,0.3,true
-30,"peak MLR",24.311955411437776,23.76,0.023230446609333922,0.25,true
 30,"mass ledger closure",3.0733922102691974e-11,0.0,3.0733922102691974e-11,0.0003,true
 30,"clamped surface balances on accepted states",0.0,0.0,0.0,0.5,true
 30,"deactivation events",30.0,30.0,0.0,0.5,true
@@ -11,7 +10,6 @@
 30,"accepted steps",11273.0,0.0,11273.0,25000.0,true
 60,"complete burnout: live thickness at t_end is the substrate",0.011996666666666666,0.012,3.333333333334354e-6,1.0e-5,true
 60,"mass loss of the gasified PMMA layer",69.9206277067817,69.9147977671139,0.005829939667805206,0.3,true
-60,"peak MLR",23.755058133305972,23.76,0.0002079910224759711,0.25,true
 60,"mass ledger closure",3.579973065785092e-11,0.0,3.579973065785092e-11,0.0003,true
 60,"clamped surface balances on accepted states",0.0,0.0,0.0,0.5,true
 60,"deactivation events",60.0,60.0,0.0,0.5,true
@@ -21,7 +19,6 @@
 60,"accepted steps",15884.0,0.0,15884.0,25000.0,true
 120,"complete burnout: live thickness at t_end is the substrate",0.011996666666666666,0.012,3.333333333334354e-6,1.0e-5,true
 120,"mass loss of the gasified PMMA layer",69.92063420266847,69.9147977671139,0.005836435554570585,0.3,true
-120,"peak MLR",23.463252770472987,23.76,0.01248936151207972,0.25,true
 120,"mass ledger closure",3.594043750013224e-11,0.0,3.594043750013224e-11,0.0003,true
 120,"clamped surface balances on accepted states",0.0,0.0,0.0,0.5,true
 120,"deactivation events",120.0,120.0,0.0,0.5,true

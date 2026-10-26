@@ -100,4 +100,3 @@ mesh-limited); (c) is quantization-dominated and non-monotone in n.
 | integrator | Rodas5P (default) |
 | abstol | 1.0e-10 |
 | reltol | 1.0e-8 |
-

@@ -54,13 +54,22 @@ A timing entry alone does not establish an identical physical workload.
 
 ![V-HC-03 front_back_dT_history_vs_codes_error](assets/V-HC-03/V-HC-03_front_back_dT_history_vs_codes_error.png)
 
-Historical wall times at each ladder rung and for the reference runs.
-Resolution, time stepping, output workload and timer boundaries differ
-or are incompletely recorded (see `reference/timings.csv`). The Julia
-harness times a warmed build-and-solve. Matching cell count or span alone
-does not make these measurements a controlled solver-speed comparison.
+Setup and simulation wall times at every ladder rung against the
+reference runs. Julia times model construction and solve after warm-up;
+FDS and Gpyro use internal total elapsed wall time, including setup and
+simulation output. Process launch and Julia compilation are excluded
+from the figure. Output costs, discretizations and time-stepping rules
+still differ, so these are indicative costs, not pure solver speedups.
+See `test/verification/reference/README.md` and `timings.csv` for the
+timer boundaries, resolutions and measurement provenance.
 
 ![V-HC-03 solve_time](assets/V-HC-03/V-HC-03_solve_time.png)
+
+Reference timings below are medians of five runs after one warm-up. Full process time also includes launch and shutdown; it is shown separately and is not compared with Julia's warmed time.
+
+| Code | Resolution | Internal elapsed (s) | Full process (s) |
+| --- | --- | --- | --- |
+| Gpyro 0.8200 | 201 nodes (Δz=0.1 mm) | 0.707 | 0.7094 |
 
 Solution overlays including the other codes' points: [T_profiles_vs_codes](assets/V-HC-03/V-HC-03_T_profiles_vs_codes.png), [front_back_dT_history_vs_codes](assets/V-HC-03/V-HC-03_front_back_dT_history_vs_codes.png).
 
@@ -68,12 +77,12 @@ Solution overlays including the other codes' points: [T_profiles_vs_codes](asset
 
 | n_cells | h | wall (s) | L2 | Linf |
 | --- | --- | --- | --- | --- |
-| 20 | 0.05 | 0.002868 | 0.02373 | 0.0314 |
-| 40 | 0.025 | 0.005245 | 0.005935 | 0.007862 |
-| 80 | 0.0125 | 0.009913 | 0.001484 | 0.001966 |
-| 160 | 0.00625 | 0.02021 | 0.000371 | 0.0004916 |
-| 200 | 0.005 | 0.0258 | 0.0002374 | 0.0003146 |
-| 320 | 0.003125 | 0.04263 | 9.275e-05 | 0.0001229 |
+| 20 | 0.05 | 0.006062 | 0.02373 | 0.0314 |
+| 40 | 0.025 | 0.01038 | 0.005935 | 0.007862 |
+| 80 | 0.0125 | 0.02064 | 0.001484 | 0.001966 |
+| 160 | 0.00625 | 0.04255 | 0.000371 | 0.0004916 |
+| 200 | 0.005 | 0.0547 | 0.0002374 | 0.0003146 |
+| 320 | 0.003125 | 0.4448 | 9.275e-05 | 0.0001229 |
 
 Observed order 2 (L2), expected 2.0.
 
@@ -84,4 +93,3 @@ Observed order 2 (L2), expected 2.0.
 | integrator | Rodas5P (default) |
 | abstol | 1.0e-12 |
 | reltol | 1.0e-10 |
-

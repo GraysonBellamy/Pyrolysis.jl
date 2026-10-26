@@ -1,7 +1,7 @@
 julia_version = "1.13.0"
 tutorial = "docs/User_Guide.md section 2.10"
 executed_deck_sha256 = "2e335ce7bacb60c59a6a227d4f324096e61920beec85ce493eb678a175500126"
-source_revision = "041d031b3e69194d99c11de06cb7c4b997e23f83"
+source_revision = "478e99dcd6a0248d9bd11354b53ded447b176900"
 retcode = "Success"
 outcome = "running"
 cells = 72

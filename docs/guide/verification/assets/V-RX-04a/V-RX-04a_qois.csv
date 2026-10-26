@@ -1,3 +1,3 @@
 "qoi","value","exact","error","tol","within_tol","comment"
-"max mean-T error vs implicit exact",0.004181498131174521,NaN,0.004181498131174521,0.012,true,"lumped T⁴ cooling; thin-limit bias ~7e-5 relative in flux"
-"internal ΔT (thin-limit validity)",0.006853743183796723,NaN,0.006853743183796723,0.05,true,"guards the lumped assumption of the reference solution"
+"max mean-T error vs implicit exact",0.004181604398468153,NaN,0.004181604398468153,0.012,true,"lumped T⁴ cooling; thin-limit bias ~7e-5 relative in flux"
+"internal ΔT (thin-limit validity)",0.0068537431641289,NaN,0.0068537431641289,0.05,true,"guards the lumped assumption of the reference solution"

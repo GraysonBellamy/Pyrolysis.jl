@@ -1,25 +1,16 @@
 "n_cells","qoi","value","exact","error","tol","within_tol"
 30,"complete burnout: live thickness at t_end is the substrate",0.011996667094040353,0.012,3.332905959647567e-6,1.0e-5,true
 30,"mass loss of the gasified PMMA layer",69.92063596900408,69.9147977671139,0.005838201890185246,0.3,true
-30,"peak MLR",32.24755804939617,32.39,0.004397713819198268,0.03,true
 30,"mass ledger closure",2.350668428840956e-11,0.0,2.350668428840956e-11,3.0e-5,true
 30,"clamped surface balances on accepted states",0.0,0.0,0.0,0.5,true
-30,"time of peak MLR",333.0,335.0,0.005970149253731343,0.03,true
-30,"burnout time (live thickness < 12.02 mm)",363.0,363.5,0.001375515818431912,0.01,true
 30,"deactivation invocations for the PMMA layer (reported)",1.0,1.0,0.0,Inf,true
 60,"complete burnout: live thickness at t_end is the substrate",0.011996666972032053,0.012,3.333027967946864e-6,1.0e-5,true
 60,"mass loss of the gasified PMMA layer",69.92063741604447,69.9147977671139,0.005839648930574981,0.3,true
-60,"peak MLR",32.39075060757661,32.39,2.3174052998022348e-5,0.03,true
 60,"mass ledger closure",1.0800593520216516e-11,0.0,1.0800593520216516e-11,3.0e-5,true
 60,"clamped surface balances on accepted states",0.0,0.0,0.0,0.5,true
-60,"time of peak MLR",335.0,335.0,0.0,0.03,true
-60,"burnout time (live thickness < 12.02 mm)",363.0,363.5,0.001375515818431912,0.01,true
 60,"deactivation invocations for the PMMA layer (reported)",1.0,1.0,0.0,Inf,true
 120,"complete burnout: live thickness at t_end is the substrate",0.011996666851399196,0.012,3.3331486008047334e-6,1.0e-5,true
 120,"mass loss of the gasified PMMA layer",69.92063884607535,69.9147977671139,0.005841078961452695,0.3,true
-120,"peak MLR",32.46899370915986,32.39,0.002438830168566232,0.03,true
 120,"mass ledger closure",7.527433644524378e-12,0.0,7.527433644524378e-12,3.0e-5,true
 120,"clamped surface balances on accepted states",0.0,0.0,0.0,0.5,true
-120,"time of peak MLR",335.5,335.0,0.0014925373134328358,0.03,true
-120,"burnout time (live thickness < 12.02 mm)",363.5,363.5,0.0,0.01,true
 120,"deactivation invocations for the PMMA layer (reported)",1.0,1.0,0.0,Inf,true

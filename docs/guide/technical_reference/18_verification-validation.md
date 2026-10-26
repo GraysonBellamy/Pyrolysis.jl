@@ -194,7 +194,7 @@ against an exact or manufactured solution; the burnout cases V-BO-01, 02, 03 and
 | Gas transport | V-GT-01, V-GT-02 | Gaussian plane source; steady compressible Darcy $P^2$ profile | the lumped wall flux and mass conservation; the pressure closure, Darcy mobility, upwinding and the pressure outflow condition |
 | Coupled physics | V-CPL-01 – V-CPL-05 | Neumann two-phase Stefan solution, Landau ablation wave, exact shrink/swell endpoints, Frank-Kamenetskii slab, 0D TGA curve | a latent-heat front (apparent heat capacity, V-CPL-01; gated reaction, V-CPL-01b), surface regression on a moving mesh (V-CPL-02, 02b), volume change and the lateral-shrinkage law, the reaction–conduction bifurcation, the boundary and volume coupling of the kinetics |
 | Manufactured solutions | V-MMS-01 – V-MMS-04 | the manufactured-solution driver of §18.2 | design order of the coupled residual on a fixed mesh in space and time, free-stream preservation under prescribed motion, order under prescribed and reaction-driven motion |
-| Burnout | V-BO-01 – V-BO-08 | exact exponential thickness (V-BO-04); otherwise mass budgets, ledgers and a pinned reference run | deactivation through complete burnout on a moving mesh under in-depth absorption (V-BO-01) and on a fixed mesh under surface absorption (V-BO-02); the transmitted-flux series (V-BO-03); the interior-void stop (V-BO-05, `expected_retcode = :Terminated`); a graded mesh (V-BO-06), a layer of mixed composition (V-BO-07) and a thin layer on a deep substrate (V-BO-08) |
+| Burnout | V-BO-01 – V-BO-08 | exact exponential thickness (V-BO-04); otherwise exact mass and thickness budgets, conservation ledgers and termination constraints | deactivation through complete burnout on a moving mesh under in-depth absorption (V-BO-01) and on a fixed mesh under surface absorption (V-BO-02); the transmitted-flux series (V-BO-03); the interior-void stop (V-BO-05, `expected_retcode = :Terminated`); a graded mesh (V-BO-06), a layer of mixed composition (V-BO-07) and a thin layer on a deep substrate (V-BO-08) |
 
 The burnout cases share V-BO-01's deck (`V-BO-01.jl` defines it, its step
 recorder and its QoIs): a 5.9 mm PMMA slab on 12 mm of Kaowool under 50 kW m⁻², the
@@ -235,7 +235,7 @@ gates open (§18.2.2), while V-RX-02d keeps the limiter on as a guard.
 
 **Cross-code overlays.** Where a case has an analogue in another code, that code's
 numerical output is committed under `test/verification/reference/<code>/` with a
-provenance README: FDS 6.11.0 and Gpyro 0.8200 runs of the same problems, a Gpyro V2
+provenance README: FDS 6.11.1 and Gpyro 0.8200 runs of the same problems, a Gpyro V2
 run of the V-BO-01 deck, and the MaCFP-2 PMMA community submissions (which no case
 reads). They are read only inside a case's report `curves`; assert mode never
 touches them. Overlays are drawn for V-HC-01 (FDS and Gpyro), V-HC-02 (FDS), V-HC-03
@@ -245,11 +245,12 @@ gas-generation rate). A series marked `crosscode = true` is drawn as a muted
 context layer in a separate `_vs_codes` variant of each affected figure, so the base
 figure keeps the solver's own error on its own scale; for exact-solution cases the
 other codes' *errors* against the same exact solution are compared.
-`reference/timings.csv` feeds a historical wall-time comparison. The Julia
-harness times case construction and solve after a warm-up. The retained
-reference CSV does not specify equally complete timer boundaries or repeated
-measurements, and resolutions and timestep controls differ. Matching a cell
-count does not make a solver-speed ratio controlled. ThermaKin2Ds has no
+`reference/timings.csv` feeds the wall-time comparison: warmed Julia model
+construction and solve versus FDS/Gpyro internal total elapsed time, including
+setup and simulation. Full process times appear separately in supporting
+tables. Output workloads, resolutions and time steps differ, so these are
+indicative costs rather than pure solver speedups. The reference README
+defines the timer boundaries and provenance. ThermaKin2Ds has no
 verification overlay here; the locally supplied executable is a Windows
 console binary. This is a limitation of this dataset, not of all ThermaKin
 distributions.
@@ -1022,7 +1023,7 @@ can arise from either, from input transcription, or from output definitions.
   normalization, diffusion and volume-change laws; do not substitute our
   lateral law for Gpyro's axial model. The retained V2 CSV lacks the source
   revision and exact original run provenance needed for full reproduction.
-- **FDS:** the retained 6.11.0 overlays concern V-HC-01, V-HC-02, V-RX-01,
+- **FDS:** the retained 6.11.1 overlays concern V-HC-01, V-HC-02, V-RX-01,
   V-RX-02 and V-CPL-03. Its instantaneous gas release and optional two-flux
   radiation are not general equivalents of our transport and Beer–Lambert
   models. Even negligible in-depth emission does not remove the angular

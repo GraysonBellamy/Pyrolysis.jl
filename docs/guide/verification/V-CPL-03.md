@@ -95,7 +95,7 @@ residual at fixed t_end grows ~1000×).
 
 ### Comparison with other codes
 
-Reference runs are available from FDS 6.11.0 at 4 cells (2 mm slab; stretched). Decks, outputs and
+Reference runs are available from FDS 6.11.1 at 4 cells (2 mm slab; stretched). Decks, outputs and
 available provenance are under `test/verification/reference/`; check
 case-specific parameters and transformations before comparing. Where
 error panels are present, they compare against the analytical reference.
@@ -103,13 +103,22 @@ A timing entry alone does not establish an identical physical workload.
 
 ![V-CPL-03 thickness_histories_vs_codes_error](assets/V-CPL-03/V-CPL-03_thickness_histories_vs_codes_error.png)
 
-Historical wall times at each ladder rung and for the reference runs.
-Resolution, time stepping, output workload and timer boundaries differ
-or are incompletely recorded (see `reference/timings.csv`). The Julia
-harness times a warmed build-and-solve. Matching cell count or span alone
-does not make these measurements a controlled solver-speed comparison.
+Setup and simulation wall times at every ladder rung against the
+reference runs. Julia times model construction and solve after warm-up;
+FDS and Gpyro use internal total elapsed wall time, including setup and
+simulation output. Process launch and Julia compilation are excluded
+from the figure. Output costs, discretizations and time-stepping rules
+still differ, so these are indicative costs, not pure solver speedups.
+See `test/verification/reference/README.md` and `timings.csv` for the
+timer boundaries, resolutions and measurement provenance.
 
 ![V-CPL-03 solve_time](assets/V-CPL-03/V-CPL-03_solve_time.png)
+
+Reference timings below are medians of five runs after one warm-up. Full process time also includes launch and shutdown; it is shown separately and is not compared with Julia's warmed time.
+
+| Code | Resolution | Internal elapsed (s) | Full process (s) |
+| --- | --- | --- | --- |
+| FDS 6.11.1 | 4 cells (2 mm slab; stretched) | 0.082 | 0.3402 |
 
 Solution overlays including the other codes' points: [thickness_histories_vs_codes](assets/V-CPL-03/V-CPL-03_thickness_histories_vs_codes.png).
 

@@ -86,16 +86,22 @@ A timing entry alone does not establish an identical physical workload.
 
 ![V-CPL-01 front_trajectory_vs_codes_error](assets/V-CPL-01/V-CPL-01_front_trajectory_vs_codes_error.png)
 
-Historical wall times at each ladder rung and for the reference runs.
-Resolution, time stepping, output workload and timer boundaries differ
-or are incompletely recorded (see `reference/timings.csv`). The Julia
-harness times a warmed build-and-solve. Matching cell count or span alone
-does not make these measurements a controlled solver-speed comparison.
+Setup and simulation wall times at every ladder rung against the
+reference runs. Julia times model construction and solve after warm-up;
+FDS and Gpyro use internal total elapsed wall time, including setup and
+simulation output. Process launch and Julia compilation are excluded
+from the figure. Output costs, discretizations and time-stepping rules
+still differ, so these are indicative costs, not pure solver speedups.
+See `test/verification/reference/README.md` and `timings.csv` for the
+timer boundaries, resolutions and measurement provenance.
 
-The [archived timing figure](assets/V-CPL-01/V-CPL-01_solve_time.png) retains its
-original subtitle, whose matched-span implication is not sufficient evidence
-of comparability. The original Julia timing ladder was not saved as CSV for
-this case, so this audit does not reconstruct its plotted measurements.
+![V-CPL-01 solve_time](assets/V-CPL-01/V-CPL-01_solve_time.png)
+
+Reference timings below are medians of five runs after one warm-up. Full process time also includes launch and shutdown; it is shown separately and is not compared with Julia's warmed time.
+
+| Code | Resolution | Internal elapsed (s) | Full process (s) |
+| --- | --- | --- | --- |
+| Gpyro 0.8200 | 801 nodes (Δz=0.05 mm) | 11.88 | 11.88 |
 
 Solution overlays including the other codes' points: [T_histories_at_depths_vs_codes](assets/V-CPL-01/V-CPL-01_T_histories_at_depths_vs_codes.png), [front_trajectory_vs_codes](assets/V-CPL-01/V-CPL-01_front_trajectory_vs_codes.png).
 
@@ -108,9 +114,6 @@ Solution overlays including the other codes' points: [T_histories_at_depths_vs_c
 | reltol | 1.0e-6 |
 
 ## V-CPL-01b — Neumann Stefan problem via gated reaction (±50 K rescaled)
-
-The reused Gpyro timing belongs to V-CPL-01's ±5 K apparent-heat-capacity
-deck, not this rescaled gated-reaction problem; it is only historical context.
 
 ### Quantities of interest (n = 800)
 
@@ -148,16 +151,22 @@ A timing entry alone does not establish an identical physical workload.
 
 ![V-CPL-01b front_trajectory_vs_codes_error](assets/V-CPL-01b/V-CPL-01b_front_trajectory_vs_codes_error.png)
 
-Historical wall times at each ladder rung and for the reference runs.
-Resolution, time stepping, output workload and timer boundaries differ
-or are incompletely recorded (see `reference/timings.csv`). The Julia
-harness times a warmed build-and-solve. Matching cell count or span alone
-does not make these measurements a controlled solver-speed comparison.
+Setup and simulation wall times at every ladder rung against the
+reference runs. Julia times model construction and solve after warm-up;
+FDS and Gpyro use internal total elapsed wall time, including setup and
+simulation output. Process launch and Julia compilation are excluded
+from the figure. Output costs, discretizations and time-stepping rules
+still differ, so these are indicative costs, not pure solver speedups.
+See `test/verification/reference/README.md` and `timings.csv` for the
+timer boundaries, resolutions and measurement provenance.
 
-The [archived timing figure](assets/V-CPL-01b/V-CPL-01b_solve_time.png) retains its
-original subtitle, whose matched-span implication is not sufficient evidence
-of comparability. The original Julia timing ladder was not saved as CSV for
-this case, so this audit does not reconstruct its plotted measurements.
+![V-CPL-01b solve_time](assets/V-CPL-01b/V-CPL-01b_solve_time.png)
+
+Reference timings below are medians of five runs after one warm-up. Full process time also includes launch and shutdown; it is shown separately and is not compared with Julia's warmed time.
+
+| Code | Resolution | Internal elapsed (s) | Full process (s) |
+| --- | --- | --- | --- |
+| Gpyro 0.8200 | 801 nodes (Δz=0.05 mm) | 11.88 | 11.88 |
 
 Solution overlays including the other codes' points: [T_histories_at_depths_vs_codes](assets/V-CPL-01b/V-CPL-01b_T_histories_at_depths_vs_codes.png), [front_trajectory_vs_codes](assets/V-CPL-01b/V-CPL-01b_front_trajectory_vs_codes.png).
 
@@ -168,4 +177,3 @@ Solution overlays including the other codes' points: [T_histories_at_depths_vs_c
 | integrator | Rodas5P (default) |
 | abstol | 1.0e-8 |
 | reltol | 1.0e-6 |
-

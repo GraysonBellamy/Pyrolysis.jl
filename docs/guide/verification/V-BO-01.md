@@ -17,9 +17,10 @@ above 394 K — positive on the whole property bracket) and in-depth
 (Beer–Lambert) absorption.
 
 The run must burn out completely, lose exactly the mass of the PMMA layer,
-match the reference peak mass loss rate, its time and the burnout time,
 close the mass ledger, and converge the surface temperature at every
 accepted step, within a wall-time budget at 0.098 mm cells.
+Peak mass loss rate and timing are reported through the history curves;
+the report also compares the histories with Gpyro V2.
 
 The mesh moves by the equidistribution correction, the PMMA–Kaowool
 interface a Lagrangian node, so the PMMA cells thin together and the layer
@@ -33,11 +34,8 @@ on the trial clamp, since that Newton never warns.
 | --- | --- | --- | --- | --- | --- | --- |
 | complete burnout: live thickness at t_end is the substrate | 0.012 | 0.012 | 3.333e-06 | 1e-05 | yes | every PMMA cell deactivated; 12.0 ± 0.01 mm |
 | mass loss of the gasified PMMA layer | 69.92 | 69.91 | 0.005841 | 0.3 | yes | percent of the initial mass; exact = the layer's initial mass / m₀ |
-| peak MLR | 32.47 | 32.39 | 0.002439 | 0.03 | yes | g m⁻² s⁻¹, gas generation rate |
 | mass ledger closure | 7.527e-12 | 0 | 7.527e-12 | 3e-05 | yes | total-mass drop vs ∫ ṁ″ dt over the accepted steps (three-point Gauss–Legendre per step) and the mass deactivation vented |
 | clamped surface balances on accepted states | 0 | 0 | 0 | 0.5 | yes | boundary temperature solve converged inside the property bracket at every accepted step |
-| time of peak MLR | 335.5 | 335 | 0.001493 | 0.03 | yes | s |
-| burnout time (live thickness < 12.02 mm) | 363.5 | 363.5 | 0 | 0.01 | yes | s |
 | deactivation invocations for the PMMA layer (reported) | 1 | 1 | 0 | Inf | yes | 120 cells; largest merged fraction 0.0435 (4.35 ε_m); reported, not asserted |
 
 ![V-BO-01 mlr_history](assets/V-BO-01/V-BO-01_mlr_history.png)

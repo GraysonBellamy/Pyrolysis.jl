@@ -1,4 +1,4 @@
 "n_cells","qoi","value","exact","error","tol","within_tol"
-20,"steady surface temperature vs algebraic root",732.797346767972,732.7973467682259,2.538627086323686e-10,1.0e-6,true
-20,"steadiness (last half-interval drift)",0.00010734332317952067,NaN,0.00010734332317952067,0.001,true
-20,"steady uniformity (adiabatic back)",2.467004378559068e-11,NaN,2.467004378559068e-11,1.0e-7,true
+20,"steady surface temperature vs algebraic root",732.7973467677068,732.7973467682259,5.190941010368988e-10,1.0e-6,true
+20,"steadiness (last half-interval drift)",0.00010734301326920104,NaN,0.00010734301326920104,0.001,true
+20,"steady uniformity (adiabatic back)",3.296918293926865e-12,NaN,3.296918293926865e-12,1.0e-7,true
