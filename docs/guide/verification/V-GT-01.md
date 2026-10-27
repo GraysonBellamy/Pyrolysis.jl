@@ -48,6 +48,22 @@ and the parameter-free variance growth law Var(t) = σ₀² + 2dt.
 
 ![V-GT-01 convergence](assets/V-GT-01/V-GT-01_convergence.png)
 
+### Comparison with other codes
+
+Physical-problem agreement does not establish equal discretization or cost. See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). Runtime comparisons require a shared achieved-accuracy target.
+
+Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [analytical errors at all retained resolutions](assets/V-GT-01/V-GT-01_comparison_accuracy.csv) are retained separately. These runs provide accuracy measurements.
+
+Accuracy comparison only; timing measurements are omitted.
+
+Error panels show absolute error at each code's output points. Zeros are displayed at 1e-12 on the logarithmic axis; the reference CSV precision limits the discernible error.
+
+![V-GT-01 xi_profiles_vs_codes_error](assets/V-GT-01/V-GT-01_xi_profiles_vs_codes_error.png)
+
+![V-GT-01 variance_history_vs_codes_error](assets/V-GT-01/V-GT-01_variance_history_vs_codes_error.png)
+
+Solution overlays including the other codes' points: [xi_profiles_vs_codes](assets/V-GT-01/V-GT-01_xi_profiles_vs_codes.png), [variance_history_vs_codes](assets/V-GT-01/V-GT-01_variance_history_vs_codes.png).
+
 ### Convergence
 
 | n_cells | h | wall (s) | L2 | Linf |

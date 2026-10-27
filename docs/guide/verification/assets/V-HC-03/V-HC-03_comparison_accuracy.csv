@@ -1,0 +1,21 @@
+"code","curve","reference","resolution","samples","Linf","RMS"
+"ThermaKin2Ds 7, Fo = 0.1","T_profiles","Fo = 0.1","base",320,0.00017097134326604646,9.743759495368957e-5
+"ThermaKin2Ds 7, Fo = 0.1","T_profiles","Fo = 0.1","refined",640,8.809160794953641e-5,3.8987773570504573e-5
+"ThermaKin2Ds 7, Fo = 0.1","T_profiles","Fo = 0.1","time_half",320,0.00017097134326604646,9.739343802354309e-5
+"ThermaKin2Ds 7, Fo = 0.1","T_profiles","Fo = 0.1","time_quarter",320,0.00017097134326604646,9.739343802354309e-5
+"ThermaKin2Ds 7, Fo = 0.1","T_profiles","Fo = 0.1","space_half",640,8.809160794953641e-5,3.898507237826832e-5
+"ThermaKin2Ds 7, Fo = 0.5","T_profiles","Fo = 0.5","base",320,0.0001410988134011859,8.732117737254393e-5
+"ThermaKin2Ds 7, Fo = 0.5","T_profiles","Fo = 0.5","refined",640,9.190354478505469e-5,4.0293298613587107e-5
+"ThermaKin2Ds 7, Fo = 0.5","T_profiles","Fo = 0.5","time_half",320,0.0001410988134011859,8.732117737254393e-5
+"ThermaKin2Ds 7, Fo = 0.5","T_profiles","Fo = 0.5","time_quarter",320,0.0001410988134011859,8.732117737254393e-5
+"ThermaKin2Ds 7, Fo = 0.5","T_profiles","Fo = 0.5","space_half",640,9.190354478505469e-5,4.0293298613587107e-5
+"ThermaKin2Ds 7, Fo = 1.5","T_profiles","Fo = 1.5","base",320,0.00012825184342091234,8.369780144837787e-5
+"ThermaKin2Ds 7, Fo = 1.5","T_profiles","Fo = 1.5","refined",640,8.971812837899051e-5,3.796809154939969e-5
+"ThermaKin2Ds 7, Fo = 1.5","T_profiles","Fo = 1.5","time_half",320,0.00012825184342091234,8.369780144837787e-5
+"ThermaKin2Ds 7, Fo = 1.5","T_profiles","Fo = 1.5","time_quarter",320,0.00012825184342091234,8.369780144837787e-5
+"ThermaKin2Ds 7, Fo = 1.5","T_profiles","Fo = 1.5","space_half",640,8.971812837899051e-5,3.796809154939969e-5
+"ThermaKin2Ds 7","mean_T_history","volume mean","base",61,3.4375000268482836e-6,1.8556895017672467e-6
+"ThermaKin2Ds 7","mean_T_history","volume mean","refined",61,3.2812500876389095e-6,1.6089409846668517e-6
+"ThermaKin2Ds 7","mean_T_history","volume mean","time_half",61,3.4375000268482836e-6,1.87243677641935e-6
+"ThermaKin2Ds 7","mean_T_history","volume mean","time_quarter",61,3.4375000268482836e-6,1.8647259546506537e-6
+"ThermaKin2Ds 7","mean_T_history","volume mean","space_half",61,3.2812500876389095e-6,1.6155195183770496e-6

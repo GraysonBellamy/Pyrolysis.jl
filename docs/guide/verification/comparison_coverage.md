@@ -6,8 +6,9 @@ name or matching endpoint is insufficient. Comparisons use the shared analytical
 reference at each solver's own output coordinates, without fitting simulation
 results. Different discretizations remain visible as numerical error.
 
-Comparisons use unmodified FDS 6.11.1 and Gpyro V2 revision
-`bff0126c68f2a35c084ef04490ae327185f281a3`. The native refinement studies
+Comparisons use unmodified FDS 6.11.1, Gpyro V2 revision
+`bff0126c68f2a35c084ef04490ae327185f281a3`, and ThermaKin2Ds 7 built from
+source with a start-time-banner portability change only. The native refinement studies
 include time-only runs at dt/2 and dt/4, spatial refinement at fixed dt/4,
 and coupled mesh/time refinement. Native inputs, outputs, executable hashes,
 extraction code and equation mappings are under `test/verification/reference/`.
@@ -24,12 +25,12 @@ qualification, and requirements for a matched comparison. The
 temporal sensitivity at fixed mesh. These differences have native observable
 units; they are not convergence orders or runtime qualifications.
 
-The inventory covers **52 case/code/subcase pairs across 28 case IDs**:
-12 have matching plotted spacing, 17 have different plotted meshes, 19 are
-spatially homogeneous ODE comparisons, and 4 require a separate material
-interface audit. There are 220 retained native accuracy runs across the
-three runners (44 native solver/subcase combinations × five configurations).
-The Julia study contains 105 solves across 35 case/mesh/variant workloads;
+The inventory covers **77 case/code/subcase pairs across 29 case IDs**:
+18 have matching plotted spacing, 26 have different plotted meshes, 27 are
+spatially homogeneous ODE comparisons, and 6 require a separate material
+interface audit. There are 340 retained native accuracy runs across the
+three runners (68 native solver/subcase combinations × five configurations).
+The Julia study contains 108 solves across 36 case/mesh/variant workloads;
 all three tolerance levels reached their expected return codes and the
 accepted-step observer counts agreed with the solver statistics.
 
@@ -38,6 +39,7 @@ The comparison basis and its limits are:
 | Comparisons | Mesh, observations and qualification |
 |:--|:--|
 | HC-01 / Gpyro V2 | 501 boundary nodes span 500 intervals at 0.1 mm, matching Julia's plotted mesh. Independent time/space refinements are retained. |
+| HC-01, HC-03 / ThermaKin | 500 and 320 uniform elements match Julia's plotted cells exactly. The surface value is the boundary-element center, Δx/2 below the face. |
 | HC-01 / FDS | Published Julia uses 500 cells versus the reported native 133; native probes are time averaged. A matched comparison requires instantaneous probes (or identical averaging), a retained native grid, and the same mesh in Julia. |
 | HC-02a–d | Julia's plotted 320 cells differ from Gpyro's 80 intervals and FDS's 101 cells. Julia's resolution ladder includes 80- and 101-cell meshes; the plots use the finest mesh. FDS uses t_Julia = 2 t_FDS, so its 0.5 s outer step represents 1 s on our axis. A matched comparison requires instantaneous FDS outputs and separate overlays at each native mesh spacing. |
 | HC-03 / Gpyro V2 | 321 nodes span 320 intervals at 0.0625 mm, matching Julia's plotted mesh. Independent refinements are retained. The 1200 s observation horizon uses a one-requested-step native output guard; exclude that guard from timed workloads. |
@@ -51,6 +53,8 @@ The comparison basis and its limits are:
 | CPL-03 P1/P2/P3 | Base spacing matches 8 Julia cells and 8 external intervals. Time only the same paths and output cadence, excluding unrelated Julia QoI sub-solves. |
 | CPL-04 stable branch | Julia's plotted 160 cells versus 80 native intervals; use the existing 80-cell rung. Time the δ = 0.44 solve only, excluding the report's unrelated bifurcation sweep. Establish settling at the common final time. |
 | GT-07a/b and GT-08a/b | Base spacing matches (160/80 intervals). Independent time and space refinements isolate their respective sensitivities. Preserve cell-average versus point-value distinctions and native constant differences. |
+| GT-01 / ThermaKin | 160 elements versus Julia's plotted 640 cells; Julia's ladder has a 160-cell rung. ThermaKin's 30000-character input limit caps the one-layer-per-element Gaussian initial state at 320 elements. |
+| ThermaKin boundary conditions | Fixed temperatures, films and fluxes act on boundary-element centers, so fixed-temperature and film cases carry an O(Δx) boundary offset that refinement reduces but the base comparison retains. |
 
 ### Spatial comparison rule
 
@@ -183,7 +187,9 @@ julia --project=scripts/verification scripts/verification/run_comparison_time_st
 python3 -m unittest discover -s scripts/verification -p test_comparison_basis.py
 ```
 
-`matched/run_comparisons.py` runs all five levels by default. Its `--cases`,
+`matched/run_comparisons.py` runs all five levels by default for FDS, Gpyro
+V2 and ThermaKin2Ds; `matched/build_thermakin.sh` builds the ThermaKin
+executable from a local, uncommitted source copy. Its `--cases`,
 `--levels` and `--destination` options support isolated pilots; a partial
 study cannot replace the complete reference manifest. The Gpyro V2 accuracy
 runner and `gpyro/v2_migration/run_migration.py` also retain the five levels.
@@ -225,22 +231,47 @@ temperature drift. CPL-01's maximum front error at the selected 100, 200 and
 front interpolation retain an offset from the sharp-interface reference.
 These sampled checks do not establish whole-history error bounds.
 
+## ThermaKin2Ds accuracy
+
+ThermaKin2Ds 7 contributes 24 native cases (120 runs) to the matched
+dataset. Its elements are cell centered, so HC-01, HC-03 and RX-04a/b use
+exactly Julia's plotted cells. Halving its fixed Crank–Nicolson step changes
+the outputs by at most a few units in the seventh printed digit, so its
+errors are spatial or observational.
+
+The homogeneous cases sit at its output precision: 5.6e-5 kg/m³ for
+RX-01, 4.9e-6 kg/m³ for RX-02b, 4.9e-4 K and 5e-5 kg/m³ for RX-05a–c and
+2.8e-7 relative thickness for CPL-03. The flux-driven HC-03 profiles
+(1.7e-4 K) and the sealed GT-01 profiles (5.6e-5 kg/m³) show second-order
+spatial error of the same size as Julia's at the same mesh. ThermaKin applies fixed temperatures, convection and mass-transfer
+films at the boundary element's center, Δx/2 inside the face. That location
+gives first-order errors which halve under spatial refinement: 1.1–1.2 K for
+HC-04a–d, 5.1 K for HC-05, 0.11 K for CPL-04, up to 3.1 K for the HC-02
+profiles, 5.1 K for the HC-01 surface history and 1.2e-3 to 1.2e-2 in tracer
+fraction for GT-07a/b. The [time-refinement
+differences](assets/comparison_time_changes.csv) and each case's
+comparison-accuracy CSV record all five configurations.
+
 ## Solver coverage
 
-| Verification problem | FDS | Gpyro V2 | Scope |
-|:--|:--|:--|:--|
-| V-HC-02a–d: convective slab / Biot sweep | Equivalent dimensionless problem | Profiles and histories | Four profiles and front/back histories |
-| V-HC-04a–d: layered conduction | Available | Available | Steady profile against the prescribed interface; c/d share native runs, with only Julia's mesh aligned in d |
-| V-HC-05: temperature-dependent conductivity | Available | Available | Steady Kirchhoff profile; same affine conductivity law |
-| V-RX-02a–c: reaction order | Direct inputs | Direct inputs | Zero-, second-, and two-thirds-order concentration histories |
-| V-RX-04a–b: radiative boundaries | Available | Available | Slab-mean cooling and surface approach to radiative/convective equilibrium |
-| V-RX-05a–b: unequal heat capacities / reaction heat | Available | Available | Temperature, solid concentrations and sensible enthalpy; FDS requires `ADJUST_H=F` |
-| V-CPL-03: volume change | P1/P2/P3 | P1/P2/P3 | Pure solid swelling, shrinking and constant-volume paths only |
-| V-CPL-04: thermal feedback | Partial | Partial | Subcritical steady profile at δ = 0.44 only; no claim about the gated runaway branch |
+| Verification problem | FDS | Gpyro V2 | ThermaKin2Ds | Scope |
+|:--|:--|:--|:--|:--|
+| V-HC-01: semi-infinite solid, flux and convection | Time-averaged probes | Available | Available | Profiles and surface history |
+| V-HC-02a–d: convective slab / Biot sweep | Equivalent dimensionless problem | Profiles and histories | Profiles and histories | Four profiles and front/back histories |
+| V-HC-03: finite slab, constant flux | Excluded | Available | Available | Profiles and volume-mean history |
+| V-HC-04a–d: layered conduction | Available | Available | Available | Steady profile against the prescribed interface; c/d share native runs, with only Julia's mesh aligned in d |
+| V-HC-05: temperature-dependent conductivity | Available | Available | Available | Steady Kirchhoff profile; same affine conductivity law |
+| V-RX-01: series chain | Available | Available | Available | Three concentration histories |
+| V-RX-02a–c: reaction order | Direct inputs | Direct inputs | b only | Zero-, second-, and two-thirds-order concentration histories |
+| V-RX-04a–b: radiative boundaries | Available | Available | Available | Slab-mean cooling and surface approach to radiative/convective equilibrium |
+| V-RX-05a–c: unequal heat capacities / reaction heat | a, b | a–c | a–c | Temperature, concentrations and sensible enthalpy; FDS requires `ADJUST_H=F` |
+| V-CPL-03: volume change | P1/P2/P3 | P1/P2/P3 | P1/P2/P3 | Pure solid swelling, shrinking and constant-volume paths only |
+| V-CPL-04: thermal feedback | Partial | Partial | Partial | Subcritical steady profile at δ = 0.44 only; no claim about the gated runaway branch |
+| V-GT-01: Gaussian gas diffusion | Excluded | Not run | Available | Profiles and variance growth |
+| V-GT-07a–b: diffusion through a mass film | Excluded | Available | Available | Profiles, uptake and inventory |
 
-Other retained comparisons include V-HC-01, V-HC-03 (Gpyro V2), V-RAD-01
-(Gpyro V2), V-RX-01, the apparent-heat-capacity route of V-CPL-01 (Gpyro V2),
-and Gpyro V-GT-07/08 and V-RX-05c runs.
+Other retained comparisons include V-RAD-01 (Gpyro V2), the
+apparent-heat-capacity route of V-CPL-01 (Gpyro V2) and Gpyro V-GT-08.
 
 V-HC-04c remains an off-face geometry-resolution test. V-HC-04d places a
 Julia mesh face at the same physical 10.2 mm interface; both report prescribed
@@ -270,7 +301,10 @@ temporal and spatial sensitivity.
 | V-CPL-02/02b, remaining V-CPL-03 permutations, V-CPL-05 | Full matching of gas retention/transport, reaction gates, deformation and lateral geometry laws has not been established; matching only an endpoint or an isolated TGA rate would not verify the full case |
 | V-CPL-04 runaway / bifurcation | Native Arrhenius self-heating alone lacks the benchmark's upper-temperature gate |
 | V-MMS and burnout regressions | Custom forcing, mesh/deactivation semantics or coupled gas laws are not represented by a matched native deck |
-| ThermaKin2Ds | No runnable local executable and retained verification run available; local material files alone do not establish comparison data |
+| V-RAD-01 / ThermaKin2Ds | External radiation is deposited in one element per step (maximum or random absorption), not distributed by Beer–Lambert absorption |
+| V-CPL-01 / ThermaKin2Ds | Properties are p₀ + p₁T + p₂Tⁿ; there is no Gaussian latent-heat peak |
+| V-RX-02a/c / ThermaKin2Ds | Rates are first order in each of at most two reactants |
+| V-GT-02 to V-GT-06, V-GT-08 / ThermaKin2Ds | Gas transport is volume-fraction diffusion; there is no pressure, Darcy or dusty-gas law |
 
 The radiative cooling reference is the thermally thin limit, and the heating
 reference is a steady equilibrium, not an exact transient. The external error

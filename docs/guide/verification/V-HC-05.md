@@ -46,9 +46,9 @@ a convergence check. Transient T-dependent {k,c} has no exact solution
 
 ### Comparison with other codes
 
-See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). These overlays establish physical-problem comparisons; equal spacing and equal achieved accuracy require the qualifications listed there.
+Physical-problem agreement does not establish equal discretization or cost. See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). Runtime comparisons require a shared achieved-accuracy target.
 
-Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [base and refined analytical errors](assets/V-HC-05/V-HC-05_comparison_accuracy.csv) are retained separately. These runs provide accuracy measurements.
+Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [analytical errors at all retained resolutions](assets/V-HC-05/V-HC-05_comparison_accuracy.csv) are retained separately. These runs provide accuracy measurements.
 
 Accuracy comparison only; timing measurements are omitted.
 

@@ -9,3 +9,8 @@
 "Gpyro V2","surface_T_history","surface temperature","time_half",101,432.7973467682259,68.63347497103861
 "Gpyro V2","surface_T_history","surface temperature","time_quarter",101,432.7973467682259,68.63956227237495
 "Gpyro V2","surface_T_history","surface temperature","space_half",101,432.7973467682259,68.63865753957275
+"ThermaKin2Ds 7","surface_T_history","surface temperature","base",101,432.7973467682259,68.83177401229699
+"ThermaKin2Ds 7","surface_T_history","surface temperature","refined",101,432.7973467682259,68.73888469716228
+"ThermaKin2Ds 7","surface_T_history","surface temperature","time_half",101,432.7973467682259,68.83179440588849
+"ThermaKin2Ds 7","surface_T_history","surface temperature","time_quarter",101,432.7973467682259,68.83179623999362
+"ThermaKin2Ds 7","surface_T_history","surface temperature","space_half",101,432.7973467682259,68.73888710612913

@@ -29,3 +29,33 @@
 "Gpyro V2","back_T_history","adiabatic back face","time_half",10,0.0035293080394467324,0.0022116446723115914
 "Gpyro V2","back_T_history","adiabatic back face","time_quarter",10,0.0021058609920601157,0.0011431414384631762
 "Gpyro V2","back_T_history","adiabatic back face","space_half",10,0.001650508039460874,0.0011074648737020275
+"ThermaKin2Ds 7, Fo = 0.05","T_profiles","Fo = 0.05","base",80,0.21044130514729886,0.07399949293138569
+"ThermaKin2Ds 7, Fo = 0.05","T_profiles","Fo = 0.05","refined",160,0.10674431885769309,0.03707281337165153
+"ThermaKin2Ds 7, Fo = 0.05","T_profiles","Fo = 0.05","time_half",80,0.21044130514729886,0.07399949293138569
+"ThermaKin2Ds 7, Fo = 0.05","T_profiles","Fo = 0.05","time_quarter",80,0.21044130514729886,0.07399949293138569
+"ThermaKin2Ds 7, Fo = 0.05","T_profiles","Fo = 0.05","space_half",160,0.10674431885769309,0.03707105355335634
+"ThermaKin2Ds 7, Fo = 0.1","T_profiles","Fo = 0.1","base",80,0.2603674669142606,0.10950060992818464
+"ThermaKin2Ds 7, Fo = 0.1","T_profiles","Fo = 0.1","refined",160,0.13134661437629802,0.0548014702287225
+"ThermaKin2Ds 7, Fo = 0.1","T_profiles","Fo = 0.1","time_half",80,0.2603674669142606,0.1094981601225161
+"ThermaKin2Ds 7, Fo = 0.1","T_profiles","Fo = 0.1","time_quarter",80,0.2603674669142606,0.1094981601225161
+"ThermaKin2Ds 7, Fo = 0.1","T_profiles","Fo = 0.1","space_half",160,0.13134661437629802,0.05480174726476843
+"ThermaKin2Ds 7, Fo = 0.2","T_profiles","Fo = 0.2","base",80,0.3060299648767568,0.15727061668647452
+"ThermaKin2Ds 7, Fo = 0.2","T_profiles","Fo = 0.2","refined",160,0.15386041824029917,0.07859640400698517
+"ThermaKin2Ds 7, Fo = 0.2","T_profiles","Fo = 0.2","time_half",80,0.3060299648767568,0.15727061668647452
+"ThermaKin2Ds 7, Fo = 0.2","T_profiles","Fo = 0.2","time_quarter",80,0.3060299648767568,0.15727061668647452
+"ThermaKin2Ds 7, Fo = 0.2","T_profiles","Fo = 0.2","space_half",160,0.15386041824029917,0.07859640400698517
+"ThermaKin2Ds 7, Fo = 0.5","T_profiles","Fo = 0.5","base",80,0.35295849171245663,0.25388406429235505
+"ThermaKin2Ds 7, Fo = 0.5","T_profiles","Fo = 0.5","refined",160,0.1768422934658247,0.12685332153221035
+"ThermaKin2Ds 7, Fo = 0.5","T_profiles","Fo = 0.5","time_half",80,0.35295849171245663,0.25388406429235505
+"ThermaKin2Ds 7, Fo = 0.5","T_profiles","Fo = 0.5","time_quarter",80,0.35295849171245663,0.25388406429235505
+"ThermaKin2Ds 7, Fo = 0.5","T_profiles","Fo = 0.5","space_half",160,0.1768422934658247,0.12685332153221035
+"ThermaKin2Ds 7","surface_T_history","front face","base",10,0.7707472701547431,0.48384543713704314
+"ThermaKin2Ds 7","surface_T_history","front face","refined",10,0.38554727015474555,0.24186761408319543
+"ThermaKin2Ds 7","surface_T_history","front face","time_half",10,0.7707472701547431,0.48384543713704314
+"ThermaKin2Ds 7","surface_T_history","front face","time_quarter",10,0.7707472701547431,0.48384543713704314
+"ThermaKin2Ds 7","surface_T_history","front face","space_half",10,0.38554727015474555,0.24186761408319543
+"ThermaKin2Ds 7","back_T_history","adiabatic back face","base",10,0.19297668476195895,0.11299889118648548
+"ThermaKin2Ds 7","back_T_history","adiabatic back face","refined",10,0.09587668476194722,0.0559066998493047
+"ThermaKin2Ds 7","back_T_history","adiabatic back face","time_half",10,0.19297668476195895,0.11299889118648548
+"ThermaKin2Ds 7","back_T_history","adiabatic back face","time_quarter",10,0.19297668476195895,0.11299889118648548
+"ThermaKin2Ds 7","back_T_history","adiabatic back face","space_half",10,0.09587668476194722,0.0559066998493047

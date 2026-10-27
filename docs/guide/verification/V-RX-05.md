@@ -56,11 +56,11 @@ inside the cell, the depletion limiter is disabled, and no mesh moves.
 
 ### Comparison with other codes
 
-See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). These overlays establish physical-problem comparisons; equal spacing and equal achieved accuracy require the qualifications listed there.
+Physical-problem agreement does not establish equal discretization or cost. See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). Runtime comparisons require a shared achieved-accuracy target.
 
-Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [base and refined analytical errors](assets/V-RX-05a/V-RX-05a_comparison_accuracy.csv) are retained separately. These runs provide accuracy measurements.
+Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [analytical errors at all retained resolutions](assets/V-RX-05a/V-RX-05a_comparison_accuracy.csv) are retained separately. These runs provide accuracy measurements.
 
-Gpyro V2 (`bff0126c68f2`) uses two boundary nodes on a uniform insulated slab, Δt = 0.001 s, E = 0, and the same reaction heat, yields and heat capacities. A 1e-6 Pa initial gas pressure avoids a singular vacuum diffusivity; its initial mass is negligible (about 1e-15 kg/m²). Sensible enthalpy is reconstructed from native concentrations and temperature at the common 298.15 K datum. Inputs, raw outputs, refinement checks and extraction are in `test/verification/reference/gpyro/v2_accuracy/`.
+Gpyro V2 (`bff0126c68f2`) uses two boundary nodes on a uniform insulated slab, Δt = 0.001 s, E = 0, and the same reaction heat, yields and heat capacities. A 1e-6 Pa initial gas pressure avoids a singular vacuum diffusivity; its initial mass is negligible (about 1e-15 kg/m²). Sensible enthalpy is reconstructed from native concentrations and temperature at the common 298.15 K datum. Inputs, raw outputs, refinement checks and extraction are in `test/verification/reference/gpyro/v2_accuracy/`. ThermaKin2Ds 7 uses one insulated element at dt = 0.001 s; its positive reaction heat is exothermic, so the sign is reversed.
 
 Accuracy comparison only; timing measurements are omitted.
 
@@ -108,11 +108,11 @@ Solution overlays including the other codes' points: [temperature_vs_codes](asse
 
 ### Comparison with other codes
 
-See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). These overlays establish physical-problem comparisons; equal spacing and equal achieved accuracy require the qualifications listed there.
+Physical-problem agreement does not establish equal discretization or cost. See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). Runtime comparisons require a shared achieved-accuracy target.
 
-Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [base and refined analytical errors](assets/V-RX-05b/V-RX-05b_comparison_accuracy.csv) are retained separately. These runs provide accuracy measurements.
+Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [analytical errors at all retained resolutions](assets/V-RX-05b/V-RX-05b_comparison_accuracy.csv) are retained separately. These runs provide accuracy measurements.
 
-Gpyro V2 (`bff0126c68f2`) uses two boundary nodes on a uniform insulated slab, Δt = 0.001 s, E = 0, and the same reaction heat, yields and heat capacities. A 1e-6 Pa initial gas pressure avoids a singular vacuum diffusivity; its initial mass is negligible (about 1e-15 kg/m²). Sensible enthalpy is reconstructed from native concentrations and temperature at the common 298.15 K datum. Inputs, raw outputs, refinement checks and extraction are in `test/verification/reference/gpyro/v2_accuracy/`.
+Gpyro V2 (`bff0126c68f2`) uses two boundary nodes on a uniform insulated slab, Δt = 0.001 s, E = 0, and the same reaction heat, yields and heat capacities. A 1e-6 Pa initial gas pressure avoids a singular vacuum diffusivity; its initial mass is negligible (about 1e-15 kg/m²). Sensible enthalpy is reconstructed from native concentrations and temperature at the common 298.15 K datum. Inputs, raw outputs, refinement checks and extraction are in `test/verification/reference/gpyro/v2_accuracy/`. ThermaKin2Ds 7 uses one insulated element at dt = 0.001 s; its positive reaction heat is exothermic, so the sign is reversed.
 
 Accuracy comparison only; timing measurements are omitted.
 
@@ -160,9 +160,11 @@ Solution overlays including the other codes' points: [temperature_vs_codes](asse
 
 ### Comparison with other codes
 
-See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). These overlays establish physical-problem comparisons; equal spacing and equal achieved accuracy require the qualifications listed there.
+Physical-problem agreement does not establish equal discretization or cost. See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). Runtime comparisons require a shared achieved-accuracy target.
 
-Gpyro V2 (`bff0126c68f2`) uses two boundary nodes on a uniform insulated slab, Δt = 0.001 s, E = 0, and the same reaction heat, yields and heat capacities. A 1e-6 Pa initial gas pressure avoids a singular vacuum diffusivity; its initial mass is negligible (about 1e-15 kg/m²). Sensible enthalpy is reconstructed from native concentrations and temperature at the common 298.15 K datum. The retained-gas case has a Gpyro mass discrepancy of about 3.27e-5 of initial mass that persists when Δt is halved; its density and pressure routines use different gas constants. Inputs, raw outputs, refinement checks and extraction are in `test/verification/reference/gpyro/v2_accuracy/`.
+Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [analytical errors at all retained resolutions](assets/V-RX-05c/V-RX-05c_comparison_accuracy.csv) are retained separately. These runs provide accuracy measurements.
+
+Gpyro V2 (`bff0126c68f2`) uses two boundary nodes on a uniform insulated slab, Δt = 0.001 s, E = 0, and the same reaction heat, yields and heat capacities. A 1e-6 Pa initial gas pressure avoids a singular vacuum diffusivity; its initial mass is negligible (about 1e-15 kg/m²). Sensible enthalpy is reconstructed from native concentrations and temperature at the common 298.15 K datum. The retained-gas case has a Gpyro mass discrepancy of about 3.27e-5 of initial mass that persists when Δt is halved; its density and pressure routines use different gas constants. Inputs, raw outputs, refinement checks and extraction are in `test/verification/reference/gpyro/v2_accuracy/`. ThermaKin2Ds 7 uses one insulated element at dt = 0.001 s; its positive reaction heat is exothermic, so the sign is reversed, and its gas product stays in the element without occupying volume.
 
 Accuracy comparison only; timing measurements are omitted.
 

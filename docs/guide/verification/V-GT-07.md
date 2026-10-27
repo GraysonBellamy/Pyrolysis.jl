@@ -78,7 +78,9 @@ not an isolated spatial-order measurement.
 
 ### Comparison with other codes
 
-See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). These overlays establish physical-problem comparisons; equal spacing and equal achieved accuracy require the qualifications listed there.
+Physical-problem agreement does not establish equal discretization or cost. See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). Runtime comparisons require a shared achieved-accuracy target.
+
+Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [analytical errors at all retained resolutions](assets/V-GT-07a/V-GT-07a_comparison_accuracy.csv) are retained separately. These runs provide accuracy measurements.
 
 Gpyro V2 (`bff0126c68f2`) uses 161 boundary-centered nodes (160 intervals) and Δt = 0.05 s. Molecular collision parameters give D = 2e-5 m²/s at 300 K and 1 bar. The far-side reservoir contains only carrier gas so Gpyro's positive floor on the zero film coefficient contributes negligible exchange. Both codes are compared with the analytical Robin solution, with their native gas constants retained. Inputs, raw outputs, refinement checks and extraction are in `test/verification/reference/gpyro/v2_accuracy/`. Cell-average errors apply only to Julia's cell inventories; Gpyro retains its native point-value reference. Resolution plots show maximum errors over all three output times against actual mesh spacing. Gpyro's two resolutions also halve the timestep; no spatial order is inferred from them.
 
@@ -156,7 +158,9 @@ Observed order 2 (Linf), expected 2.0.
 
 ### Comparison with other codes
 
-See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). These overlays establish physical-problem comparisons; equal spacing and equal achieved accuracy require the qualifications listed there.
+Physical-problem agreement does not establish equal discretization or cost. See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). Runtime comparisons require a shared achieved-accuracy target.
+
+Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [analytical errors at all retained resolutions](assets/V-GT-07b/V-GT-07b_comparison_accuracy.csv) are retained separately. These runs provide accuracy measurements.
 
 Gpyro V2 (`bff0126c68f2`) uses 161 boundary-centered nodes (160 intervals) and Δt = 0.05 s. Molecular collision parameters give D = 2e-5 m²/s at 300 K and 1 bar. The far-side reservoir contains only carrier gas so Gpyro's positive floor on the zero film coefficient contributes negligible exchange. Both codes are compared with the analytical Robin solution, with their native gas constants retained. Inputs, raw outputs, refinement checks and extraction are in `test/verification/reference/gpyro/v2_accuracy/`. Cell-average errors apply only to Julia's cell inventories; Gpyro retains its native point-value reference. Resolution plots show maximum errors over all three output times against actual mesh spacing. Gpyro's two resolutions also halve the timestep; no spatial order is inferred from them.
 

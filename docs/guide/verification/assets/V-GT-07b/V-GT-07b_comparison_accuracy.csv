@@ -1,0 +1,26 @@
+"code","curve","reference","resolution","samples","Linf","RMS"
+"ThermaKin2Ds 7, t = 50.0 s","profiles","t = 50.0 s","base",160,0.012212428487838517,0.0023961080452323514
+"ThermaKin2Ds 7, t = 50.0 s","profiles","t = 50.0 s","refined",320,0.006109956165903513,0.0011850868505906874
+"ThermaKin2Ds 7, t = 50.0 s","profiles","t = 50.0 s","time_half",160,0.012212428487838517,0.0023961078126987756
+"ThermaKin2Ds 7, t = 50.0 s","profiles","t = 50.0 s","time_quarter",160,0.012212428487838517,0.002396107485557027
+"ThermaKin2Ds 7, t = 50.0 s","profiles","t = 50.0 s","space_half",320,0.006109956165903513,0.0011850868623513274
+"ThermaKin2Ds 7, t = 150.0 s","profiles","t = 150.0 s","base",160,0.007071370314286701,0.0018351818509184414
+"ThermaKin2Ds 7, t = 150.0 s","profiles","t = 150.0 s","refined",320,0.0035363742135899323,0.0009120724924348403
+"ThermaKin2Ds 7, t = 150.0 s","profiles","t = 150.0 s","time_half",160,0.007071370314286701,0.0018351818553984502
+"ThermaKin2Ds 7, t = 150.0 s","profiles","t = 150.0 s","time_quarter",160,0.007071370314286701,0.0018351818553957848
+"ThermaKin2Ds 7, t = 150.0 s","profiles","t = 150.0 s","space_half",320,0.0035363742135899323,0.0009120724960887147
+"ThermaKin2Ds 7, t = 400.0 s","profiles","t = 400.0 s","base",160,0.004334307616807698,0.0014422091247359365
+"ThermaKin2Ds 7, t = 400.0 s","profiles","t = 400.0 s","refined",320,0.0021673160207638376,0.000718505390686794
+"ThermaKin2Ds 7, t = 400.0 s","profiles","t = 400.0 s","time_half",160,0.004334307616807698,0.0014422091247345056
+"ThermaKin2Ds 7, t = 400.0 s","profiles","t = 400.0 s","time_quarter",160,0.004334307616807698,0.0014422091247342256
+"ThermaKin2Ds 7, t = 400.0 s","profiles","t = 400.0 s","space_half",320,0.0021673160207638376,0.0007185053050568131
+"ThermaKin2Ds 7","uptake","surface influx","base",40,1.5987012787421425e-6,2.7714666615171397e-7
+"ThermaKin2Ds 7","uptake","surface influx","refined",40,1.204601278742139e-6,2.0893207734448284e-7
+"ThermaKin2Ds 7","uptake","surface influx","time_half",40,1.5991012787421434e-6,2.772088393144124e-7
+"ThermaKin2Ds 7","uptake","surface influx","time_quarter",40,1.5992012787421233e-6,2.772246571892583e-7
+"ThermaKin2Ds 7","uptake","surface influx","space_half",40,1.2047012787421189e-6,2.0894728106964608e-7
+"ThermaKin2Ds 7","inventory","stored tracer","base",41,0.0005241359986699438,0.0005138244465197776
+"ThermaKin2Ds 7","inventory","stored tracer","refined",41,0.0002607645163303328,0.00025463804092621295
+"ThermaKin2Ds 7","inventory","stored tracer","time_half",41,0.0005241359983159492,0.0005138243281512093
+"ThermaKin2Ds 7","inventory","stored tracer","time_quarter",41,0.0005241359982293588,0.0005138243192940727
+"ThermaKin2Ds 7","inventory","stored tracer","space_half",41,0.00026076448494690915,0.00025463801946198846

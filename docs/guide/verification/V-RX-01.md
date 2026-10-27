@@ -44,7 +44,9 @@ Setup notes (solver conventions that would corrupt the case):
 
 Physical-problem agreement does not establish equal discretization or cost. See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). Runtime comparisons require a shared achieved-accuracy target.
 
-Gpyro V2 revision `bff0126c68f2` uses one 0D isothermal unknown with unit condensed yields. The base mesh matches the plotted Julia spacing where spatially resolved. Independent time and space refinements, native outputs, and provenance are retained under `test/verification/reference/gpyro/v2_migration/`. See the [V2 accuracy checks](comparison_coverage.md#gpyro-v2-accuracy). These runs carry no timing measurements.
+Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [analytical errors at all retained resolutions](assets/V-RX-01/V-RX-01_comparison_accuracy.csv) are retained separately. These runs provide accuracy measurements.
+
+Gpyro V2 revision `bff0126c68f2` uses one 0D isothermal unknown with unit condensed yields. The base mesh matches the plotted Julia spacing where spatially resolved. Independent time and space refinements, native outputs, and provenance are retained under `test/verification/reference/gpyro/v2_migration/`. See the [V2 accuracy checks](comparison_coverage.md#gpyro-v2-accuracy). These runs carry no timing measurements. ThermaKin2Ds 7 uses one insulated element at dt = 0.001 s with the same rate constants and E = 0.
 
 Accuracy comparison only; timing measurements are omitted.
 

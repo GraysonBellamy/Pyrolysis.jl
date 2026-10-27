@@ -58,7 +58,9 @@ tolerances; the back-face-rise QoI enforces this assumption explicitly.
 
 Physical-problem agreement does not establish equal discretization or cost. See the [mesh and time comparison basis](comparison_coverage.md#comparison-basis-audit) and [per-pair inventory](assets/comparison_basis.csv). Runtime comparisons require a shared achieved-accuracy target.
 
-Gpyro V2 revision `bff0126c68f2` uses 501 boundary nodes (500 intervals, 0.1 mm spacing). The base mesh matches the plotted Julia spacing where spatially resolved. Independent time and space refinements, native outputs, and provenance are retained under `test/verification/reference/gpyro/v2_migration/`. See the [V2 accuracy checks](comparison_coverage.md#gpyro-v2-accuracy). These runs carry no timing measurements.
+Matched native-input runs, independent time refinement at fixed mesh (dt, dt/2, dt/4), and spatial refinement at fixed dt/4 are retained under `test/verification/reference/matched/`. See the [coverage and matching notes](comparison_coverage.md). The plotted external series use the base resolution; [analytical errors at all retained resolutions](assets/V-HC-01/V-HC-01_comparison_accuracy.csv) are retained separately. These runs provide accuracy measurements.
+
+Gpyro V2 revision `bff0126c68f2` uses 501 boundary nodes (500 intervals, 0.1 mm spacing). The base mesh matches the plotted Julia spacing where spatially resolved. Independent time and space refinements, native outputs, and provenance are retained under `test/verification/reference/gpyro/v2_migration/`. See the [V2 accuracy checks](comparison_coverage.md#gpyro-v2-accuracy). These runs carry no timing measurements. ThermaKin2Ds 7 uses 500 uniform elements (0.1 mm) at a fixed dt = 0.1 s. It has no pure flux boundary, so the absorbed flux is incident radiation q″/ε on the exposed element with ε = 1e-8; re-radiation stays below 1e-3 W/m². Its surface temperature is the boundary-element center value, 0.05 mm below the face.
 
 Accuracy comparison only; timing measurements are omitted.
 

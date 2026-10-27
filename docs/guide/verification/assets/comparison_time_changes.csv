@@ -59,6 +59,81 @@ V-CPL-03,gpyro,thickness_histories,P1,0.0007500000000000284,0.000349999999999850
 V-CPL-03,gpyro,thickness_histories,P2,0.00034999999999996145,0.00019999999999997797,81,81,0,0,linear interpolation on common support; native units; no order inferred
 V-CPL-03,gpyro,thickness_histories,P3,0.0,0.0,81,81,0,0,linear interpolation on common support; native units; no order inferred
 V-CPL-04,gpyro,steady_profiles,δ = 0.44 ≈ 0.50 δ_c,9.999999974752427e-07,9.999999974752427e-07,81,81,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-01,thermakin,T_profiles,t = 30.0 s,0.00010000000008858478,0.00010000000003174137,500,500,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-01,thermakin,T_profiles,t = 60.0 s,0.00010000000008858478,0.00010000000003174137,500,500,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-01,thermakin,T_profiles,t = 90.0 s,0.00010000000008858478,0.00010000000003174137,500,500,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-01,thermakin,T_profiles,t = 180.0 s,0.00010000000008858478,0.0,500,500,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-01,thermakin,surface_T_history,surface Newton solve,0.0011000000000080945,0.00029999999998153726,37,37,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02a,thermakin,T_profiles,Fo = 0.05,0.0,0.0,80,80,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02a,thermakin,T_profiles,Fo = 0.1,0.0,9.999999997489795e-05,80,80,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02a,thermakin,T_profiles,Fo = 0.2,0.0,0.0,80,80,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02a,thermakin,T_profiles,Fo = 0.5,0.0,0.0,80,80,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02a,thermakin,surface_T_history,front face,0.0,0.0,10,10,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02a,thermakin,back_T_history,adiabatic back face,0.0,0.0,10,10,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02b,thermakin,T_profiles,Fo = 0.05,0.0,0.0,80,80,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02b,thermakin,T_profiles,Fo = 0.1,0.00010000000003174137,0.0,80,80,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02b,thermakin,T_profiles,Fo = 0.2,0.0,0.0,80,80,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02b,thermakin,T_profiles,Fo = 0.5,0.0,0.0,80,80,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02b,thermakin,surface_T_history,front face,0.0,0.0,10,10,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02b,thermakin,back_T_history,adiabatic back face,0.0,0.0,10,10,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02c,thermakin,T_profiles,Fo = 0.05,0.00010000000003174137,0.00010000000003174137,80,80,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02c,thermakin,T_profiles,Fo = 0.1,0.00010000000003174137,0.0,80,80,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02c,thermakin,T_profiles,Fo = 0.2,9.999999997489795e-05,9.999999997489795e-05,80,80,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02c,thermakin,T_profiles,Fo = 0.5,0.0,0.0,80,80,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02c,thermakin,surface_T_history,front face,0.0,0.0,10,10,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02c,thermakin,back_T_history,adiabatic back face,0.0,0.0,10,10,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02d,thermakin,T_profiles,Fo = 0.05,0.00010000000003174137,0.00010000000003174137,80,80,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02d,thermakin,T_profiles,Fo = 0.1,9.999999997489795e-05,0.00010000000003174137,80,80,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02d,thermakin,T_profiles,Fo = 0.2,0.0,0.0,80,80,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02d,thermakin,T_profiles,Fo = 0.5,0.0,0.0,80,80,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02d,thermakin,surface_T_history,front face,0.0,0.0,10,10,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-02d,thermakin,back_T_history,adiabatic back face,0.0,0.0,10,10,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-03,thermakin,T_profiles,Fo = 0.1,9.999999997489795e-05,0.0,320,320,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-03,thermakin,T_profiles,Fo = 0.5,0.0,0.0,320,320,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-03,thermakin,T_profiles,Fo = 1.5,0.0,0.0,320,320,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-03,thermakin,mean_T_history,volume mean,1.2500000252657628e-06,6.250000410545908e-07,61,61,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-04a,thermakin,T_profile_steady,steady solver profile,0.0,0.0,80,80,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-04b,thermakin,T_profile_steady,steady solver profile,0.0,0.0,80,80,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-04c,thermakin,T_profile_steady,steady solver profile,0.0,0.0,80,80,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-04d,thermakin,T_profile_steady,steady solver profile,0.0,0.0,80,80,0,0,linear interpolation on common support; native units; no order inferred
+V-HC-05,thermakin,T_profile_steady,steady solver profile,0.0004000000000132786,0.0,80,80,0,0,linear interpolation on common support; native units; no order inferred
+V-RX-01,thermakin,xi_histories,ξ_A,0.00010000000003174137,1.0000000003174137e-05,201,201,0,0,linear interpolation on common support; native units; no order inferred
+V-RX-01,thermakin,xi_histories,ξ_B,0.00010000000003174137,0.0,201,201,0,0,linear interpolation on common support; native units; no order inferred
+V-RX-01,thermakin,xi_histories,ξ_C,0.00010000000000331966,9.999999996068709e-06,201,201,0,0,linear interpolation on common support; native units; no order inferred
+V-RX-02b,thermakin,xi_histories,ξ_A (n = 2.0),0.0,0.0,101,101,0,0,linear interpolation on common support; native units; no order inferred
+V-RX-04a,thermakin,T_history_vs_exact,slab mean temperature,7.500000015170372e-05,2.5000000050567905e-05,81,81,0,0,linear interpolation on common support; native units; no order inferred
+V-RX-04b,thermakin,surface_T_history,surface temperature,0.00010000000008858478,9.999999997489795e-05,101,101,0,0,linear interpolation on common support; native units; no order inferred
+V-RX-05a,thermakin,temperature,temperature,0.0,0.0,41,41,0,0,linear interpolation on common support; native units; no order inferred
+V-RX-05a,thermakin,species,A,0.0,0.0,41,41,0,0,linear interpolation on common support; native units; no order inferred
+V-RX-05a,thermakin,species,B,0.0,0.0,41,41,0,0,linear interpolation on common support; native units; no order inferred
+V-RX-05a,thermakin,enthalpy,enthalpy,0.0,0.0,41,41,0,0,linear interpolation on common support; native units; no order inferred
+V-RX-05b,thermakin,temperature,temperature,0.0,0.0,41,41,0,0,linear interpolation on common support; native units; no order inferred
+V-RX-05b,thermakin,species,A,0.0,0.0,41,41,0,0,linear interpolation on common support; native units; no order inferred
+V-RX-05b,thermakin,species,B,0.0,0.0,41,41,0,0,linear interpolation on common support; native units; no order inferred
+V-RX-05b,thermakin,enthalpy,enthalpy,0.0,0.0,41,41,0,0,linear interpolation on common support; native units; no order inferred
+V-RX-05c,thermakin,temperature,temperature,0.0,0.0,41,41,0,0,linear interpolation on common support; native units; no order inferred
+V-RX-05c,thermakin,species,A,0.0,0.0,41,41,0,0,linear interpolation on common support; native units; no order inferred
+V-RX-05c,thermakin,species,B,0.0,0.0,41,41,0,0,linear interpolation on common support; native units; no order inferred
+V-RX-05c,thermakin,species,G,9.999999997489795e-05,0.0,41,41,0,0,linear interpolation on common support; native units; no order inferred
+V-RX-05c,thermakin,enthalpy,enthalpy,0.07018499996047467,0.0,41,41,0,0,linear interpolation on common support; native units; no order inferred
+V-CPL-03,thermakin,thickness_histories,P1,5.000000002919336e-07,0.0,81,81,0,0,linear interpolation on common support; native units; no order inferred
+V-CPL-03,thermakin,thickness_histories,P2,0.0,4.999999999588667e-07,81,81,0,0,linear interpolation on common support; native units; no order inferred
+V-CPL-03,thermakin,thickness_histories,P3,0.0,0.0,81,81,0,0,linear interpolation on common support; native units; no order inferred
+V-CPL-04,thermakin,steady_profiles,δ = 0.44 ≈ 0.50 δ_c,0.0,0.0,80,80,0,0,linear interpolation on common support; native units; no order inferred
+V-GT-01,thermakin,xi_profiles,t = 2.0 s,7.000000000478845e-08,1.9999999999881224e-08,160,160,0,0,linear interpolation on common support; native units; no order inferred
+V-GT-01,thermakin,xi_profiles,t = 4.0 s,2.000000000335067e-08,1.0000000001675335e-08,160,160,0,0,linear interpolation on common support; native units; no order inferred
+V-GT-01,thermakin,xi_profiles,t = 8.0 s,9.999999999940612e-09,1.0000000001675335e-08,160,160,0,0,linear interpolation on common support; native units; no order inferred
+V-GT-01,thermakin,variance_history,discrete second moment,5.649043549832509e-13,4.600911479194858e-13,17,17,0,0,linear interpolation on common support; native units; no order inferred
+V-GT-07a,thermakin,profiles,t = 50.0 s,1.2991347841245782e-09,1.2991347841245782e-10,160,160,0,0,linear interpolation on common support; native units; no order inferred
+V-GT-07a,thermakin,profiles,t = 150.0 s,1.299134783582477e-10,1.2991347841245782e-09,160,160,0,0,linear interpolation on common support; native units; no order inferred
+V-GT-07a,thermakin,profiles,t = 400.0 s,1.2991347841245782e-09,1.2991347838535276e-11,160,160,0,0,linear interpolation on common support; native units; no order inferred
+V-GT-07a,thermakin,uptake,surface influx,0.0,0.0,40,40,0,0,linear interpolation on common support; native units; no order inferred
+V-GT-07a,thermakin,inventory,stored tracer,6.297420310913404e-11,1.671921566579089e-11,41,41,0,0,linear interpolation on common support; native units; no order inferred
+V-GT-07b,thermakin,profiles,t = 50.0 s,1.299134783083744e-08,1.299134783083744e-08,160,160,0,0,linear interpolation on common support; native units; no order inferred
+V-GT-07b,thermakin,profiles,t = 150.0 s,1.2991347841245782e-09,1.299134784531154e-11,160,160,0,0,linear interpolation on common support; native units; no order inferred
+V-GT-07b,thermakin,profiles,t = 400.0 s,1.299134784531154e-11,1.2991347838535276e-11,160,160,0,0,linear interpolation on common support; native units; no order inferred
+V-GT-07b,thermakin,uptake,surface influx,4.000000000008771e-10,9.999999997989048e-11,40,40,0,0,linear interpolation on common support; native units; no order inferred
+V-GT-07b,thermakin,inventory,stored tracer,1.739458677790795e-09,1.7672243052616055e-10,41,41,0,0,linear interpolation on common support; native units; no order inferred
 V-GT-07a,gpyro_v2,vgt07a_history:influx_kg_m2_s,native observable; time sensitivity only,3.018400000022502e-10,1.5093000000094962e-10,4,4,0,0,identical native coordinates/times; native units; no order inferred
 V-GT-07a,gpyro_v2,vgt07a_history:inventory_kg_m2,native observable; time sensitivity only,3.6645792276558675e-08,1.8322089506174477e-08,4,4,0,0,identical native coordinates/times; native units; no order inferred
 V-GT-07a,gpyro_v2,vgt07a_profiles:Y,native observable; time sensitivity only,3.0489000000036293e-06,1.5244999999955433e-06,483,483,0,0,identical native coordinates/times; native units; no order inferred

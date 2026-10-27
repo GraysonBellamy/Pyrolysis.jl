@@ -19,3 +19,23 @@
 "FDS 6.11.1","enthalpy","enthalpy","time_half",41,13.16261686339567,6.838067606509301
 "FDS 6.11.1","enthalpy","enthalpy","time_quarter",41,6.581385817902628,3.419826625749332
 "FDS 6.11.1","enthalpy","enthalpy","space_half",41,6.581385817902628,3.419826625749332
+"ThermaKin2Ds 7","temperature","temperature","base",41,4.882283622009709e-5,2.6875921806211064e-5
+"ThermaKin2Ds 7","temperature","temperature","refined",41,4.882283622009709e-5,2.6875921806211064e-5
+"ThermaKin2Ds 7","temperature","temperature","time_half",41,4.882283622009709e-5,2.6875921806211064e-5
+"ThermaKin2Ds 7","temperature","temperature","time_quarter",41,4.882283622009709e-5,2.6875921806211064e-5
+"ThermaKin2Ds 7","temperature","temperature","space_half",41,4.882283622009709e-5,2.6875921806211064e-5
+"ThermaKin2Ds 7 A","species","A","base",41,4.692201821399067e-5,2.326708032084112e-5
+"ThermaKin2Ds 7 A","species","A","refined",41,4.692201821399067e-5,2.326708032084112e-5
+"ThermaKin2Ds 7 A","species","A","time_half",41,4.692201821399067e-5,2.326708032084112e-5
+"ThermaKin2Ds 7 A","species","A","time_quarter",41,4.692201821399067e-5,2.326708032084112e-5
+"ThermaKin2Ds 7 A","species","A","space_half",41,4.692201821399067e-5,2.326708032084112e-5
+"ThermaKin2Ds 7 B","species","B","base",41,4.692201815714725e-5,2.8498103213236122e-5
+"ThermaKin2Ds 7 B","species","B","refined",41,4.692201815714725e-5,2.8498103213236122e-5
+"ThermaKin2Ds 7 B","species","B","time_half",41,4.692201815714725e-5,2.8498103213236122e-5
+"ThermaKin2Ds 7 B","species","B","time_quarter",41,4.692201815714725e-5,2.8498103213236122e-5
+"ThermaKin2Ds 7 B","species","B","space_half",41,4.692201815714725e-5,2.8498103213236122e-5
+"ThermaKin2Ds 7","enthalpy","enthalpy","base",41,0.09510552465508226,0.04725032469212079
+"ThermaKin2Ds 7","enthalpy","enthalpy","refined",41,0.09510552465508226,0.04725032469212079
+"ThermaKin2Ds 7","enthalpy","enthalpy","time_half",41,0.09510552465508226,0.04725032469212079
+"ThermaKin2Ds 7","enthalpy","enthalpy","time_quarter",41,0.09510552465508226,0.04725032469212079
+"ThermaKin2Ds 7","enthalpy","enthalpy","space_half",41,0.09510552465508226,0.04725032469212079
