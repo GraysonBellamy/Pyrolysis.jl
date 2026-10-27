@@ -60,6 +60,33 @@ class ComparisonBasisTest(unittest.TestCase):
         self.assertEqual(dt["space_half"], dt["time_quarter"])
         self.assertEqual(nodes["space_half"]-1, 2*(nodes["base"]-1))
 
+    def test_thermakin_independent_controls(self):
+        p = runner.parameters("vhc05")
+        decks = {level: runner.thermakin(p, level)[".cnd"] for level in runner.LEVELS}
+        values = lambda pattern: {k: float(re.search(pattern, v)[1]) for k, v in decks.items()}
+        dt, h = values(r"TIME STEP: (\S+)"), values(r"ELEMENT SIZE: (\S+)")
+        duration = values(r"DURATION: (\S+)")
+        self.assertEqual([dt[k] for k in ("base", "time_half", "time_quarter")], [.05, .025, .0125])
+        self.assertEqual({h[k] for k in ("base", "time_half", "time_quarter")}, {.02/80})
+        self.assertEqual((h["space_half"], dt["space_half"]), (.02/160, dt["time_quarter"]))
+        for level in runner.LEVELS:
+            self.assertEqual(duration[level], p["end"] - dt[level]/2)
+
+    def test_thermakin_boundary_elements(self):
+        # A fixed face starts at its fixed value in a one-element top layer.
+        cnd = runner.thermakin(runner.parameters("vhc04a"), "base")[".cnd"]
+        layers = re.findall(r"THICKNESS: (\S+)\nTEMPERATURE: (\S+)", cnd)
+        self.assertEqual([(float(a), float(b)) for a, b in layers[:1]], [(.02/80, 400.0)])
+        self.assertRegex(cnd, r"CONVECTION COEFF: 1000000000\n")
+        # Only the exposed element emits; absorption saturates every element.
+        cmp = runner.thermakin(runner.parameters("vrx04a"), "base")[".cmp"]
+        emissivity = dict(re.findall(r"COMPONENT: (\S+)(?:.|\n)*?ABSORPTION: (\S+) 1000000", cmp))
+        self.assertEqual(emissivity, {"A": "0", "A_surface": "0.90000000000000002"})
+        # Sealed diffusion still needs a listed boundary mass flux.
+        cnd = runner.thermakin(runner.parameters("vgt01"), "base")[".cnd"]
+        self.assertIn("MASS TRANSPORT: YES\nG LIN 0 0\n", cnd)
+        self.assertEqual(cnd.count("THICKNESS:"), 160)
+
     def test_fds_observation_location(self):
         text = runner.fds(runner.parameters("vrx04a"), "base")
         self.assertIn("CELL_CENTERED=T, FORMAT_INDEX=2", text)

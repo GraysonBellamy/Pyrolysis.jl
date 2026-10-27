@@ -19,7 +19,7 @@ Repeated timing measurements have separate provenance records.
 | `gpyro/` | Gpyro 0.8200 (Lautenberger), original dissertation §3.4 decks | Numerical datasets and timings; no active accuracy overlay reads these CSVs |
 | `gpyro/v2_migration/` | Gpyro V2 at pinned revision `bff0126c68f2`, 25 native runs with matched base spacing and independent refinements | Current V-HC-01/03, V-RAD-01, V-CPL-01 route A and V-RX-01 overlays; no timings |
 | `gpyro/v2_accuracy/` | Gpyro V2 at pinned revision `bff0126c68f2`, matched inputs, raw outputs and refinement checks | V-GT-07a/b, V-GT-08a/b, V-RX-05a–c accuracy overlays; no timings |
-| `matched/` | FDS 6.11.1 and pinned Gpyro V2, native decks and independent time/space refinements | HC-02/04/05, RX-02/04/05, CPL-03/04 coverage; see [mappings and reproduction](matched/README.md); no timings |
+| `matched/` | FDS 6.11.1, pinned Gpyro V2 and ThermaKin2Ds 7, native decks and independent time/space refinements | HC-02/04/05, RX-02/04/05, CPL-03/04 coverage, plus ThermaKin HC-01/03, RX-01 and GT-01/07; see [mappings and reproduction](matched/README.md); no timings |
 | `macfp/` | MaCFP-2 PMMA community submissions (9 institutions: FDS/Gpyro/ThermaKin/Sierra) | Community predictions; no verification case reads these files |
 | `timings.csv` | internal elapsed and full process wall times; timing protocols recorded with the data | Optional `solve_time` figures and supporting timing tables |
 
@@ -65,10 +65,10 @@ as the corresponding Julia cases; per-row details are in the note column.
 See [FDS provenance](fds/README.md) and [Gpyro provenance](gpyro/README.md) for
 build details, timer boundaries, repeated measurements and input hashes.
 
-ThermaKin2Ds has no retained verification output in this directory. The local
-executable in `docs/refs/ThermaKin/` is a Windows PE32+ console binary; this
-observation does not characterize every ThermaKin distribution. Stoliarov and
-Lyon's [original 2008 paper](https://publications.iafss.org/publications/fss/9/1141/view/fss_9-1141.pdf),
+ThermaKin2Ds 7 outputs are in `matched/`. Its source is not redistributable,
+so neither the source nor the executable is committed; the
+[matched README](matched/README.md) describes the local build, the native
+mappings and the cases ThermaKin cannot express. Stoliarov and Lyon's
+[original 2008 paper](https://publications.iafss.org/publications/fss/9/1141/view/fss_9-1141.pdf),
 pp. 1146–1149, verifies semi-infinite conduction, absorption, four coupled
-reactions and diffusion from a thin layer. These are analytical precedents,
-not evidence that a ThermaKin2Ds run has been performed for this report.
+reactions and diffusion from a thin layer.

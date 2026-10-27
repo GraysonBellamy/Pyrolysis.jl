@@ -7,6 +7,7 @@ from pathlib import Path
 import argparse
 import concurrent.futures
 import csv
+import gzip
 import hashlib
 import json
 import math
@@ -53,11 +54,54 @@ CASES = {
         "vcpl03p3",
         "vcpl04",
     ],
+    "thermakin": [
+        "vhc01",
+        "vhc02a",
+        "vhc02b",
+        "vhc02c",
+        "vhc02d",
+        "vhc03",
+        "vhc04a",
+        "vhc04b",
+        "vhc04c",
+        "vhc05",
+        "vrx01",
+        "vrx02b",
+        "vrx04a",
+        "vrx04b",
+        "vrx05a",
+        "vrx05b",
+        "vrx05c",
+        "vcpl03p1",
+        "vcpl03p2",
+        "vcpl03p3",
+        "vcpl04",
+        "vgt01",
+        "vgt07a",
+        "vgt07b",
+    ],
 }
 VERSIONS = {
     "gpyro": "bff0126c68f2a35c084ef04490ae327185f281a3",
     "fds": "FDS-6.11.1-0-gff928db-release",
+    "thermakin": "ThermaKin Program Version 7",
 }
+LABELS = {"fds": "FDS 6.11.1", "gpyro": "Gpyro V2", "thermakin": "ThermaKin2Ds 7"}
+
+# ThermaKin's own constants (Constants.h). Arrhenius energies are rescaled so
+# E/R matches; σ stays native, as for FDS and Gpyro.
+TK_R = 8.31447
+TK_SIGMA = 5.6704e-08
+# A fixed-temperature face is a convective coefficient on the boundary
+# element, whose initial temperature is the fixed value: Crank-Nicolson does
+# not damp a large-h mode, so an initial jump would oscillate indefinitely.
+TK_FIXED_H = 1e9
+# Mass absorption coefficient (m²/kg) that saturates the exposed element's
+# absorbed fraction, so external radiation is deposited at that element.
+TK_ABSORPTION = 1e6
+# Absorbed flux without re-radiation: the incident flux is q/ε at this
+# emissivity, leaving an emission loss εσT⁴ below 1e-3 W/m² for T < 1200 K.
+TK_FLUX_EMISSIVITY = 1e-8
 
 # Keep the original coupled refinement for reproducibility. The other three
 # runs isolate time error at the base mesh, then space error at a fixed dt.
@@ -92,7 +136,79 @@ def parameters(case):
         back="fixed",
         tb=300.0,
     )
-    if case.startswith("vhc02"):
+    if case == "vhc01":
+        p.update(
+            L=0.05,
+            cp=1400.0,
+            k=0.2,
+            front="flux",
+            q=25000.0,
+            h=20.0,
+            tf=300.0,
+            back="insulated",
+            end=180.0,
+            dt=0.1,
+            dump=5.0,
+            nodes=501,
+        )
+    elif case == "vhc03":
+        p.update(
+            front="flux",
+            q=5000.0,
+            h=0.0,
+            tf=300.0,
+            back="insulated",
+            end=1200.0,
+            dt=0.1,
+            dump=20.0,
+            nodes=321,
+        )
+    elif case == "vrx01":
+        p.update(
+            L=0.001,
+            ti=400.0,
+            front="insulated",
+            back="insulated",
+            end=20.0,
+            dt=0.001,
+            dump=0.1,
+            nodes=2,
+            rates=(0.389, 0.262),
+        )
+    elif case == "vgt01":
+        p.update(
+            L=0.04,
+            ti=400.0,
+            front="insulated",
+            back="insulated",
+            end=8.0,
+            dt=0.01,
+            dump=0.5,
+            nodes=161,
+            diffusivity=4e-07 / 0.4,
+            z0=0.02,
+            sigma0=0.001,
+            peak=0.1,
+        )
+    elif case.startswith("vgt07"):
+        porosity, gas_density = 0.6, 100000.0 * 0.032 / (8.314462618 * 300.0)
+        p.update(
+            L=1.0,
+            rho=400.0,
+            cp=1200.0,
+            k=0.2,
+            front="insulated",
+            back="insulated",
+            end=400.0,
+            dt=0.05,
+            dump=10.0,
+            nodes=161,
+            diffusivity=2e-05,
+            hm=0.0001 if case[-1] == "a" else 0.01,
+            pore_gas_density=porosity * gas_density,
+            ambient_fraction=0.22,
+        )
+    elif case.startswith("vhc02"):
         bi = dict(a=0.1, b=1.0, c=10.0, d=100.0)[case[-1]]
         p.update(
             L=0.1,
@@ -110,7 +226,8 @@ def parameters(case):
         p.update(end=10 * 0.02**2 * 1000000.0 / p["k"], dt=1 / p["k"])
         p["dump"] = p["end"] / 2
     elif case == "vhc05":
-        p.update(tf=800.0, end=5000.0, dt=1.0, dump=2500.0)
+        # ThermaKin's linearized step diverges for this k(T) at dt >= 0.1 s.
+        p.update(tf=800.0, end=5000.0, dt=1.0, dump=2500.0, thermakin_dt=0.05)
     elif case == "vrx04a":
         p.update(
             L=0.0001,
@@ -185,7 +302,8 @@ def parameters(case):
             nodes=2,
             n=1.0,
             a=0.2,
-            heat=1000000.0 if case[-1] == "a" else -100000.0,
+            heat=dict(a=1000000.0, b=-100000.0, c=0.0)[case[-1]],
+            solid_yield=0.4 if case[-1] == "c" else 1.0,
         )
     elif case.startswith("vcpl03"):
         p.update(
@@ -426,18 +544,233 @@ def fds(p, level):
     return "\n".join(lines) + "\n"
 
 
+def thermakin_dt(p, level):
+    return p.get("thermakin_dt", p["dt"]) / 2 ** refinement(level)[1]
+
+
+def thermakin(p, level):
+    """Components (.cmp) and conditions (.cnd) inputs, keyed by file suffix.
+
+    The first listed layer is the top (front) face. Elements are cell
+    centered, so N elements match N Julia cells of the same width.
+    """
+    case = p["case"]
+    space, _ = refinement(level)
+    n = (p["nodes"] - 1) * 2**space
+    dt = thermakin_dt(p, level)
+    L, ti = p["L"], p["ti"]
+    dx = L / n
+    num = lambda x: f"{x:.17g}"
+    exposed = p["front"] in ("radiative", "flux")
+    absorption = TK_ABSORPTION if exposed else 0.0
+    trn = p.get("diffusivity", 1e-06)
+
+    def component(name, state="S", rho=p["rho"], cp=p["cp"], k=p["k"], eps=0.0):
+        law = lambda v: " ".join(num(x) for x in (tuple(v) + (0, 0, 0))[:4])
+        return (
+            f"COMPONENT: {name}\nSTATE: {state}\nDENSITY: {law((rho,))}\n"
+            f"HEAT CAPACITY: {law((cp,))}\nCONDUCTIVITY: {law(k if isinstance(k, tuple) else (k,))}\n"
+            f"TRANSPORT: {law((trn,))}\n"
+            f"EMISSIVITY & ABSORPTION: {num(eps)} {num(absorption if state == 'S' else 0.0)}\n\n"
+        )
+
+    def reaction(r1, r2, p1, p2, stoich, a, e=0.0, heat=0.0, limit="L 0"):
+        return (
+            f"REACTION: {r1} + {r2} -> {p1} + {p2}\n"
+            f"STOICHIOMETRY: {' '.join(num(s) for s in stoich)}\n"
+            f"ARRHENIUS: {num(a)} {num(e)}\nHEAT: {num(heat)} 0 0 0\nTEMP LIMIT: {limit}\n\n"
+        )
+
+    comps, rxns = [], []
+    if case == "vhc05":
+        comps.append(component("A", k=(0.2, 0.002)))
+    elif case == "vgt01":
+        comps += [component("S"), component("G", "G", rho=1.0, k=0.03)]
+    elif case.startswith("vgt07"):
+        # With gas density φρ_g, ξ/ρ is the tracer mass fraction Y and the
+        # linear boundary law a·ρ·(ξ/ρ - b) is the film flux h_m (Y - Y∞).
+        # The inert carrier only fixes the pressure, which ThermaKin lacks.
+        comps += [component("MATRIX"),
+                  component("TRACER", "G", rho=p["pore_gas_density"], cp=1000.0, k=0.03)]
+    else:
+        comps.append(component("A"))
+    if exposed:
+        # Same material; only the exposed element emits and absorbs.
+        eps = p["eps"] if p["front"] == "radiative" else TK_FLUX_EMISSIVITY
+        comps.append(component("A_surface", eps=eps))
+    if case.startswith("vhc04"):
+        comps.append(component("B", k=1.0))
+    elif case == "vrx01":
+        comps += [component("B"), component("C")]
+        rxns += [
+            reaction("A", "NOCOMP", "B", "NOCOMP", (1, 0, 1, 0), p["rates"][0]),
+            reaction("B", "NOCOMP", "C", "NOCOMP", (1, 0, 1, 0), p["rates"][1]),
+        ]
+    elif case.startswith("vrx02"):
+        # A + A at half stoichiometry each: dξ_A/dt = -A ξ_A².
+        if p["n"] != 2.0:
+            raise ValueError(f"{case}: ThermaKin rates are first order in each reactant")
+        comps.append(component("B"))
+        rxns.append(reaction("A", "A", "B", "NOCOMP", (0.5, 0.5, 1, 0), p["a"] * p["rho"] ** (1 - p["n"])))
+    elif case.startswith("vrx05"):
+        y = p["solid_yield"]
+        comps.append(component("B", cp=1900.0))
+        if y < 1:
+            # With solid swelling 1, gas volume counts at the gas density;
+            # the solid density keeps the element volume fixed, as for gas
+            # retained in the pores.
+            comps.append(component("G", "G", rho=p["rho"], cp=1000.0, k=0.03))
+        # ThermaKin's positive heat is exothermic.
+        rxns.append(reaction("A", "NOCOMP", "B", "G" if y < 1 else "NOCOMP",
+                             (1, 0, y, 1 - y), p["a"], heat=-p["heat"]))
+    elif case.startswith("vcpl03"):
+        comps.append(component("B", rho=p["product_rho"]))
+        rxns.append(reaction("A", "NOCOMP", "B", "NOCOMP", (1, 0, 1, 0), p["a"]))
+    elif case == "vcpl04":
+        # Self-regenerating A keeps ξ_A = ρ, so A·ξ_A is the zero-order rate.
+        rxns.append(reaction("A", "NOCOMP", "A", "NOCOMP", (1, 0, 1, 0), p["a"],
+                             p["activation"] * TK_R / 8.314462618, -p["heat"], f"U {num(p['tf'] + 100)}"))
+    swelling = 1 if case.startswith("vrx05") and p["solid_yield"] < 1 else 0
+    mixtures = (f"MIXTURES\nS SWELLING: {swelling}\nL SWELLING: 0\nG SWELLING LIMIT: 1e-30\n"
+                # Series conduction is exact for layers normal to the heat flow.
+                "PARALL CONDUCTIVITY: 0\nPARALL TRANSPORT: 0\n\n")
+    cmp_text = "".join(comps) + mixtures + "".join(rxns)
+
+    # Layers, top first: (thickness, temperature, {component: mass fraction}).
+    if case.startswith("vhc04"):
+        layers = [[L - p["interface"], ti, {"A": 1}], [p["interface"], ti, {"B": 1}]]
+    elif case == "vgt01":
+        layers = []
+        for i in range(n):
+            z = L - (i + 0.5) * dx
+            xi = p["peak"] * math.exp(-((z - p["z0"]) ** 2) / (2 * p["sigma0"] ** 2))
+            layers.append([dx, ti, {"S": 1000, "G": float(f"{xi:.9g}")}])
+    elif case.startswith("vgt07"):
+        layers = [[L, ti, {"MATRIX": 1}]]
+    else:
+        layers = [[L, ti, {"A": 1}]]
+    top_fixed = p["front"] == "fixed" and p["tf"] != ti
+    if exposed or top_fixed:
+        first = layers[0]
+        fractions = {"A_surface": 1} if exposed else first[2]
+        layers[0:1] = [[dx, p["tf"] if top_fixed else ti, fractions], [first[0] - dx, ti, first[2]]]
+    if p["back"] == "fixed" and p["tb"] != ti:
+        last = layers[-1]
+        layers[-1:] = [[last[0] - dx, ti, last[2]], [dx, p["tb"], last[2]]]
+    structure = "".join(
+        f"THICKNESS: {num(t)}\nTEMPERATURE: {num(temp)}\nMASS FRACTIONS:\n"
+        + "".join(f"{c} {num(v)}\n" for c, v in fractions.items()) + "\n"
+        for t, temp, fractions in layers if t > 0
+    )
+
+    def boundary(name, face):
+        mode = p[face]
+        temp = p["tf" if face == "front" else "tb"]
+        h = TK_FIXED_H if mode == "fixed" else p.get("h", 0.0) if face == "front" else 0.0
+        # ThermaKin assembles gas transport only when a boundary lists a mass
+        # flux, so the sealed V-GT-01 slab carries a zero-coefficient entry.
+        mass = "NO\n"
+        if face == "front" and case == "vgt01":
+            mass = "YES\nG LIN 0 0\n"
+        elif face == "front" and case.startswith("vgt07"):
+            mass = (f"YES\nTRACER LIN {num(p['hm'] / p['pore_gas_density'])} "
+                    f"{num(p['ambient_fraction'])}\n")
+        text = (f"{name} BOUNDARY\n\nMASS TRANSPORT: {mass}\n"
+                f"OUTSIDE INIT TEMP: {num(temp if mode != 'insulated' else ti)}\n"
+                f"OUTSIDE HEAT RATE: 0 0 0 0\nCONVECTION COEFF: {num(h)}\n\n")
+        if face == "front" and exposed:
+            flux = (p["q"] / p["eps"] + TK_SIGMA * temp**4 if mode == "radiative"
+                    else p["q"] / TK_FLUX_EMISSIVITY)
+            text += (f"EXTERNAL RADIATION: YES\nTIME PROG1: {num(flux)} 0 1e30\n"
+                     f"TIME PROG2: {num(flux)} 0 0\nREPEAT: NO\nABSORPTION MODE: MAX\n\n")
+        else:
+            text += "EXTERNAL RADIATION: NO\n\n"
+        return text + "FLAME: NO\n\n"
+
+    steps = p["dump"] / dt
+    if abs(steps - round(steps)) > 1e-9 * steps:
+        raise ValueError(f"{case}: output interval is not a whole number of steps")
+    cnd_text = (
+        "OBJECT TYPE: 1D\n\nOBJECT STRUCTURE\n****************\n\n" + structure
+        + "OBJECT BOUNDARIES\n*****************\n\n"
+        + boundary("TOP", "front") + boundary("BOTTOM", "back")
+        + "INTEGRATION PARAMETERS\n**********************\n\n"
+        f"ELEMENT SIZE: {num(dx)}\nTIME STEP: {num(dt)}\n"
+        # Half a step short: the loop runs while t < DURATION with t = k·dt.
+        f"DURATION: {num(p['end'] - dt / 2)}\n\n"
+        f"OUTPUT FREQUENCY:\nELEMENTS: 1\nTIME STEPS: {round(steps)}\n"
+    )
+    return {".cmp": cmp_text, ".cnd": cnd_text}
+
+
+def thermakin_snapshots(path):
+    """Parse every reported state: time, element centers (depth), T, ξ and
+    boundary mass outflows (kg/s per unit area)."""
+    text = path.read_text()
+    if "Calculations are complete." not in text or "Error:" in text:
+        raise RuntimeError(f"{path}: unsuccessful ThermaKin termination")
+    snapshots = []
+    for block in text.split("Time [s] =")[1:]:
+        lines = block.splitlines()
+        names, rows, thickness, outflow = None, [], None, {}
+        for line in lines[1:]:
+            fields = [f for f in line.split("\t") if f.strip()]
+            if line.startswith("BOUNDARY"):
+                flow_names = fields[4:]
+            elif line.startswith(("TOP", "BOTTOM")):
+                values = [float(f) for f in fields[1:]]
+                outflow[fields[0].strip()] = dict(zip(flow_names, values[2:]))
+            elif line.startswith("FROM TOP"):
+                names = fields[3:]
+            elif line.startswith("Total thickness"):
+                thickness = float(fields[-1])
+            elif names is not None and fields and line[0] in "0123456789":
+                rows.append([float(f) for f in fields])
+        if names is None or not rows or thickness is None:
+            raise RuntimeError(f"{path}: incomplete output block")
+        snapshots.append(dict(
+            t=float(lines[0]),
+            depth=[r[0] for r in rows],
+            T=[r[1] for r in rows],
+            xi={c: [r[2 + i] for r in rows] for i, c in enumerate(names)},
+            thickness=thickness,
+            outflow=outflow,
+        ))
+    return snapshots
+
+
 def run(job, executable, workspace, extract_only):
     solver, case, level = job
     p = parameters(case)
     path = workspace / solver / level / case
     path.mkdir(parents=True, exist_ok=True)
-    deck = path / (case + (".fds" if solver == "fds" else ".data"))
-    expected = (fds if solver == "fds" else gpyro)(p, level)
-    if extract_only:
-        if deck.read_text() != expected:
-            raise RuntimeError(f"{deck}: input differs from generated deck; rerun")
+    if solver == "thermakin":
+        decks = {path / (case + suffix): text for suffix, text in thermakin(p, level).items()}
     else:
-        deck.write_text(expected)
+        deck = path / (case + (".fds" if solver == "fds" else ".data"))
+        decks = {deck: (fds if solver == "fds" else gpyro)(p, level)}
+    if extract_only:
+        for deck, expected in decks.items():
+            if deck.read_text() != expected:
+                raise RuntimeError(f"{deck}: input differs from generated deck; rerun")
+    elif solver == "thermakin":
+        for deck, expected in decks.items():
+            deck.write_text(expected)
+        out = path / f"{case}.out"
+        out.unlink(missing_ok=True)  # ThermaKin refuses to overwrite its output
+        with (path / "run.log").open("w") as log:
+            subprocess.run(
+                [str(executable)],
+                input=f"{case}.cmp\n{case}.cnd\n{case}.out\n",
+                cwd=path,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=3600,
+                check=True,
+            )
+    else:
+        deck.write_text(decks[deck])
         env = {**os.environ, "OMP_NUM_THREADS": "1"}
         if solver == "fds":
             env["I_MPI_FABRICS"] = "shm"
@@ -458,17 +791,21 @@ def run(job, executable, workspace, extract_only):
                 check=True,
             )
     log = (path / "run.log").read_text(errors="replace")
-    success = (
-        "FDS completed successfully"
-        if solver == "fds"
-        else "End of simulation reached successfully."
-    ) in log
+    if solver == "thermakin":
+        # Completion is checked in the output itself by thermakin_snapshots.
+        success = "Error:" not in log and "Done" in log
+    else:
+        success = (
+            "FDS completed successfully"
+            if solver == "fds"
+            else "End of simulation reached successfully."
+        ) in log
     if not success:
         raise RuntimeError(f"{job}: unsuccessful solver termination: {log[-500:]}")
-    banner = (path / f"{case}.out").read_text() if solver == "fds" else log
+    banner = (path / f"{case}.out").read_text() if solver != "gpyro" else log
     if VERSIONS[solver] not in banner:
         raise RuntimeError(f"{job}: expected pinned solver version {VERSIONS[solver]}")
-    return extract(solver, case, level, path, deck)
+    return extract(solver, case, level, path, list(decks))
 
 
 def numeric_csv(path, skip):
@@ -505,6 +842,21 @@ def native_grid(solver, case, path):
             layers.append(int(match[2]))
         convention = "cell faces in mesh table; native thermal unknowns at centers; matched PROF uses CELL_CENTERED=T"
         unknowns = len(coordinates) - 1
+    elif solver == "thermakin":
+        # Printed centers (7 significant digits) must equal the requested
+        # uniform layout; faces are depths from the top (front) face.
+        cnd = (path / f"{case}.cnd").read_text()
+        h = float(re.search(r"ELEMENT SIZE: (\S+)", cnd)[1])
+        first = thermakin_snapshots(path / f"{case}.out")[0]
+        n = len(first["depth"])
+        if any(abs(c - (i + 0.5) * h) > 1e-6 * n * h for i, c in enumerate(first["depth"])) or (
+                not math.isclose(first["thickness"], n * h, rel_tol=1e-6)):
+            raise RuntimeError(f"{case}: printed element centers differ from the requested layout")
+        coordinates = [i * h for i in range(n + 1)]
+        layers = []
+        convention = ("uniform element-centered unknowns; faces from ELEMENT SIZE, verified "
+                      "against printed centers; boundary conditions act on boundary-element centers")
+        unknowns = n
     else:
         profile = path / f"{case}_profile_01_01_TEMPERATURE.csv"
         coordinates = numeric_csv(profile, 0)[0][1:]
@@ -525,21 +877,9 @@ def case_id(case):
     return f"V-{case[1:3].upper()}-{case[3:]}"
 
 
-def extract(solver, case, level, path, deck):
+def extract(solver, case, level, path, decks):
     p = parameters(case)
-    space, time = refinement(level)
-    refined = level
-    label = "FDS 6.11.1" if solver == "fds" else "Gpyro V2"
-    native = path / (
-        f"{case}_devc.csv" if solver == "fds" else f"{case}_summary_01_0001.csv"
-    )
-    data = numeric_csv(native, 2 if solver == "fds" else 1)
-    tolerance = max(p["dt"], 0.0001) * 1.1
-    if abs(data[-1][0] - p["end"]) > tolerance:
-        raise RuntimeError(f"{native}: final time {data[-1][0]} != {p['end']}")
-    if any((b[0] <= a[0] for a, b in zip(data, data[1:]))):
-        raise RuntimeError(f"{native}: nonmonotone output times")
-    files = [deck, native]
+    label = LABELS[solver]
     samples = []
     metadata = []
 
@@ -557,6 +897,21 @@ def extract(solver, case, level, path, deck):
         )
         samples.extend(((index, float(x), float(y)) for x, y in xy))
 
+    if solver == "thermakin":
+        native = path / f"{case}.out"
+        thermakin_samples(p, thermakin_snapshots(native), add)
+        return retain(solver, case, level, path, decks + [native], samples, metadata)
+    space, _ = refinement(level)
+    native = path / (
+        f"{case}_devc.csv" if solver == "fds" else f"{case}_summary_01_0001.csv"
+    )
+    data = numeric_csv(native, 2 if solver == "fds" else 1)
+    tolerance = max(p["dt"], 0.0001) * 1.1
+    if abs(data[-1][0] - p["end"]) > tolerance:
+        raise RuntimeError(f"{native}: final time {data[-1][0]} != {p['end']}")
+    if any((b[0] <= a[0] for a, b in zip(data, data[1:]))):
+        raise RuntimeError(f"{native}: nonmonotone output times")
+    files = decks + [native]
     profile = None
     if case.startswith(("vhc", "vcpl04")) or case == "vrx04a":
         profile = path / (
@@ -661,6 +1016,122 @@ def extract(solver, case, level, path, deck):
         )
     else:
         raise ValueError(case)
+    return retain(solver, case, level, path, files, samples, metadata)
+
+
+def thermakin_samples(p, snapshots, add):
+    """Observables from element-center values (ThermaKin has no face values)."""
+    case, L = p["case"], p["L"]
+    times = [s["t"] for s in snapshots]
+    if any(b <= a for a, b in zip(times, times[1:])):
+        raise RuntimeError(f"{case}: nonmonotone output times")
+    if not math.isclose(times[-1], p["end"], rel_tol=1e-6):
+        raise RuntimeError(f"{case}: final time {times[-1]} != {p['end']}")
+
+    def at(t):
+        s = min(snapshots, key=lambda s: abs(s["t"] - t))
+        if not math.isclose(s["t"], t, rel_tol=1e-6):
+            raise RuntimeError(f"{case}: missing output at t={t}")
+        return s
+
+    def widths(s):
+        # Centers print with 7 significant digits, too coarse to difference
+        # into widths; verify the uniform layout and use thickness/N.
+        n = len(s["depth"])
+        h = s["thickness"] / n
+        if any(abs(c - (i + 0.5) * h) > 1e-6 * s["thickness"] for i, c in enumerate(s["depth"])):
+            raise RuntimeError(f"{case}: nonuniform elements at t={s['t']}")
+        return [h] * n
+
+    def history(curve, reference, value, suffix="", initial=True):
+        add(curve, reference,
+            ((s["t"], value(s)) for s in snapshots if initial or s["t"] > 0), suffix)
+
+    surface = lambda s: s["T"][0]
+    back = lambda s: s["T"][-1]
+    if case == "vhc01":
+        for t in (30.0, 60.0, 90.0, 180.0):
+            s = at(t)
+            add("T_profiles", f"t = {t} s", zip(s["depth"], s["T"]), f", t = {t} s")
+        history("surface_T_history", "surface Newton solve", surface)
+    elif case.startswith("vhc02"):
+        for fo in (0.05, 0.1, 0.2, 0.5):
+            s = at(fo * L**2 / (p["k"] / (p["rho"] * p["cp"])))
+            add("T_profiles", f"Fo = {fo}",
+                sorted(((L - d) / L, T) for d, T in zip(s["depth"], s["T"])), f", Fo = {fo}")
+        # The eigenfunction series is singular at the initial corner.
+        history("surface_T_history", "front face", surface, initial=False)
+        history("back_T_history", "adiabatic back face", back, initial=False)
+    elif case == "vhc03":
+        alpha = p["k"] / (p["rho"] * p["cp"])
+        for fo in (0.1, 0.5, 1.5):
+            s = at(fo * L**2 / alpha)
+            add("T_profiles", f"Fo = {fo}",
+                sorted((1 - d / L, T) for d, T in zip(s["depth"], s["T"])), f", Fo = {fo}")
+        history("mean_T_history", "volume mean",
+                lambda s: sum(w * T for w, T in zip(widths(s), s["T"])) / L)
+    elif case.startswith(("vhc04", "vhc05", "vcpl04")):
+        s = snapshots[-1]
+        add(
+            "steady_profiles" if case == "vcpl04" else "T_profile_steady",
+            "δ = 0.44 ≈ 0.50 δ_c" if case == "vcpl04" else "steady solver profile",
+            sorted((L - d, T) for d, T in zip(s["depth"], s["T"])),
+            ", δ = 0.44" if case == "vcpl04" else "",
+        )
+    elif case == "vrx01":
+        for name in ("A", "B", "C"):
+            history("xi_histories", f"ξ_{name}", lambda s: s["xi"][name][0], f" ξ_{name}")
+    elif case.startswith("vrx02"):
+        history("xi_histories", f"ξ_A (n = {p['n']})", lambda s: s["xi"]["A"][0])
+    elif case == "vrx04a":
+        history("T_history_vs_exact", "slab mean temperature",
+                lambda s: sum(w * T for w, T in zip(widths(s), s["T"])) / L)
+    elif case == "vrx04b":
+        history("surface_T_history", "surface temperature", surface)
+    elif case.startswith("vrx05"):
+        history("temperature", "temperature", lambda s: s["T"][0])
+        names = ("A", "B", "G") if p["solid_yield"] < 1 else ("A", "B")
+        for name in names:
+            history("species", name, lambda s: s["xi"][name][0], " " + name)
+        heat_capacity = dict(A=1200.0, B=1900.0, G=1000.0)
+        history("enthalpy", "enthalpy", lambda s: L * sum(
+            heat_capacity[c] * s["xi"][c][0] for c in names) * (s["T"][0] - 298.15))
+    elif case.startswith("vcpl03"):
+        perm = "P" + case[-1]
+        history("thickness_histories", perm, lambda s: s["thickness"] / L, " " + perm)
+    elif case == "vgt01":
+        for t in (2.0, 4.0, 8.0):
+            s = at(t)
+            add("xi_profiles", f"t = {t} s",
+                sorted((L - d, xi) for d, xi in zip(s["depth"], s["xi"]["G"])), f", t = {t} s")
+
+        def variance(s):
+            w, z, xi = widths(s), [L - d for d in s["depth"]], s["xi"]["G"]
+            m = sum(a * b for a, b in zip(xi, w))
+            mean = sum(a * b * c for a, b, c in zip(xi, w, z)) / m
+            return sum(a * b * (c - mean) ** 2 for a, b, c in zip(xi, w, z)) / m
+
+        history("variance_history", "discrete second moment", variance)
+    elif case.startswith("vgt07"):
+        for t in (50.0, 150.0, 400.0):
+            s = at(t)
+            add("profiles", f"t = {t} s",
+                zip(s["depth"], (xi / p["pore_gas_density"] for xi in s["xi"]["TRACER"])),
+                f", t = {t} s")
+        # Unit area: the printed boundary flow is the mass flux.
+        history("uptake", "surface influx",
+                lambda s: -s["outflow"]["TOP"]["TRACER"], initial=False)
+        history("inventory", "stored tracer",
+                lambda s: sum(w * xi for w, xi in zip(widths(s), s["xi"]["TRACER"])))
+    else:
+        raise ValueError(case)
+
+
+def retain(solver, case, level, path, files, samples, metadata):
+    """Write extracted samples; copy and hash native inputs/outputs and grid."""
+    p = parameters(case)
+    space, time = refinement(level)
+    refined = level
     if not samples or not all((math.isfinite(v) for row in samples for v in row)):
         raise RuntimeError(f"{case}: invalid extracted samples")
     if case == "vhc04c":
@@ -701,8 +1172,20 @@ def extract(solver, case, level, path, deck):
     hashes = {}
     hashes[str(grid_file.relative_to(DEST))] = sha256(grid_file)
     for f in files:
-        dest = raw / f.name
-        shutil.copyfile(f, dest)
+        if solver == "thermakin" and f.suffix == ".out":
+            # Full element profiles at every output. The start date and total
+            # runtime lines are timing records, not published; without them
+            # and with an mtime-free gzip the retained file is reproducible.
+            dest = raw / (f.name + ".gz")
+            text = "".join(line for line in f.read_text().splitlines(keepends=True)
+                           if not line.startswith(("Started on:", "Total runtime")))
+            with dest.open("wb") as stream, gzip.GzipFile(
+                filename="", mode="wb", fileobj=stream, mtime=0
+            ) as archive:
+                archive.write(text.encode())
+        else:
+            dest = raw / f.name
+            shutil.copyfile(f, dest)
         hashes[str(dest.relative_to(DEST))] = sha256(dest)
     hashes[str(out.relative_to(DEST))] = sha256(out)
     print(f"{solver} {case} {refined}: verified {len(samples)} samples", flush=True)
@@ -710,12 +1193,14 @@ def extract(solver, case, level, path, deck):
         dict(
             case=case,
             level=refined,
-            dt=p["dt"] / 2**time,
+            dt=thermakin_dt(p, level) if solver == "thermakin" else p["dt"] / 2**time,
             requested_intervals=(p["nodes"] - 1) * 2**space,
             grid=grid,
             observed_step_history="not retained; output intervals are not integration steps",
             timestep_interpretation=("outer step; native solid substepping permitted"
                                      if solver == "fds" else
+                                     "fixed step; Crank-Nicolson with one linearization per step"
+                                     if solver == "thermakin" else
                                      "requested initial step; native step reductions permitted"),
             successful_termination=True,
             files=hashes,
@@ -781,6 +1266,19 @@ def main():
         manifest_sha256=sha256(manifest),
         runs=[r[0] for r in results],
     )
+    if args.solver == "thermakin":
+        # build_thermakin.sh records the compiler and the source hash.
+        build = dict(line.split(": ", 1) for line in
+                     (executable.parent / "build_info.txt").read_text().splitlines())
+        if build["executable_sha256"] != provenance["executable_sha256"]:
+            raise RuntimeError("build_info.txt does not describe this executable")
+        provenance.update(
+            source_sha256=build["source_sha256"],
+            compiler=build["compiler"],
+            compiler_flags=build["flags"],
+            source_modifications=("start-time banner only: POSIX localtime_r/asctime_r "
+                                  "replace MSVC localtime_s/asctime_s"),
+        )
     (DEST / f"{args.solver}_provenance.json").write_text(
         json.dumps(provenance, indent=2) + "\n"
     )

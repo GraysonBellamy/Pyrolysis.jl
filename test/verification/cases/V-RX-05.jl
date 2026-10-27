@@ -140,7 +140,16 @@ function _vrx05_case(id, heat; solid_yield = 1.0)
                                   ""
                               ) *
                               "Inputs, raw outputs, refinement checks and extraction are in " *
-                              "`test/verification/reference/gpyro/v2_accuracy/`.",
+                              "`test/verification/reference/gpyro/v2_accuracy/`. " *
+                              "ThermaKin2Ds 7 uses one insulated element at dt = 0.001 s; " *
+                              "its positive reaction heat is exothermic, so the sign is " *
+                              "reversed" *
+                              (
+                                  solid_yield < 1 ?
+                                  ", and its gas product stays in the element without " *
+                                  "occupying volume." :
+                                  "."
+                              ),
             curves = sol -> begin
                 stem = "gpyro/v2_accuracy/" * lowercase(replace(id, "-" => ""))
                 gp_t, gp_T, gp_A, gp_B, gp_G, gp_H = reference_columns(

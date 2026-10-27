@@ -136,7 +136,7 @@ function _verification_case_vhc01()
             ),
         ),
         report = (
-            comparison_note = "Gpyro V2 revision `bff0126c68f2` uses 501 boundary nodes (500 intervals, 0.1 mm spacing). The base mesh matches the plotted Julia spacing where spatially resolved. Independent time and space refinements, native outputs, and provenance are retained under `test/verification/reference/gpyro/v2_migration/`. See the [V2 accuracy checks](comparison_coverage.md#gpyro-v2-accuracy). These runs carry no timing measurements.",
+            comparison_note = "Gpyro V2 revision `bff0126c68f2` uses 501 boundary nodes (500 intervals, 0.1 mm spacing). The base mesh matches the plotted Julia spacing where spatially resolved. Independent time and space refinements, native outputs, and provenance are retained under `test/verification/reference/gpyro/v2_migration/`. See the [V2 accuracy checks](comparison_coverage.md#gpyro-v2-accuracy). These runs carry no timing measurements. ThermaKin2Ds 7 uses 500 uniform elements (0.1 mm) at a fixed dt = 0.1 s. It has no pure flux boundary, so the absorbed flux is incident radiation q″/ε on the exposed element with ε = 1e-8; re-radiation stays below 1e-3 W/m². Its surface temperature is the boundary-element center value, 0.05 mm below the face.",
             n_cells_ladder = [25, 50, 100, 133, 200, 400, 500],
             profile_times = times,
             qoi_curves = (:T_profiles, :surface_T_history),

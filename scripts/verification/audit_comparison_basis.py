@@ -178,7 +178,7 @@ def audit_migration(julia, all_julia, rows, changes):
 def main():
     julia, all_julia = load_meshes()
     rows, changes = [], []
-    for solver in ("fds", "gpyro"):
+    for solver in ("fds", "gpyro", "thermakin"):
         root = REF / "matched"
         manifest = root / f"{solver}.toml"
         bindings = tomllib.loads(manifest.read_text())["series"]

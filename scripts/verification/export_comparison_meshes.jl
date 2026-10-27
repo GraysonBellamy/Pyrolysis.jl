@@ -19,7 +19,7 @@ function export_comparison_meshes(path)
         "V-GT-08b",
         "V-RX-05c",
     ])
-    for solver in ("fds", "gpyro")
+    for solver in ("fds", "gpyro", "thermakin")
         for entry in
             TOML.parsefile(joinpath(reference, "matched", "$(solver).toml"))["series"]
             push!(active, entry["case"])

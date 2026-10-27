@@ -5,7 +5,7 @@ using TOML
 const MATCHED_COMPARISONS = vcat(
     [
         TOML.parsefile(joinpath(REFERENCE_DIR, "matched", "$(solver).toml"))["series"]
-        for solver in ("fds", "gpyro")
+        for solver in ("fds", "gpyro", "thermakin")
     ]...,
 )
 

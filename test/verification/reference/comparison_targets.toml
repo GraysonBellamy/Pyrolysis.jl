@@ -29,6 +29,12 @@ variant = ""
 spatial_status = "mesh mismatch"
 
 [[targets]]
+case = "V-GT-01"
+n_cells = 160
+variant = ""
+spatial_status = "mesh mismatch"
+
+[[targets]]
 case = "V-GT-07a"
 n_cells = 160
 variant = ""

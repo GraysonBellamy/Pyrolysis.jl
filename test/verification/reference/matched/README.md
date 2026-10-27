@@ -1,11 +1,13 @@
-# Matched conduction, reaction and deformation comparisons
+# Matched conduction, reaction, deformation and gas-diffusion comparisons
 
 These accuracy comparisons use native inputs to unmodified FDS 6.11.1 and
-Gpyro V2. There are 32 solver/subcase pairs, each run at five configurations (160
-successful runs), spanning 18 verification case IDs. V-HC-04c and V-HC-04d
-share the same physical problem and explicitly reuse the same native runs:
-only Julia's mesh differs. P1/P2/P3 are counted separately within V-CPL-03.
-This dataset contains no pressure cases or timing measurements.
+Gpyro V2, and to ThermaKin2Ds 7 built from its source with a banner-only
+portability change. There are 56 solver/subcase pairs, each run at five
+configurations (280 successful runs), spanning 25 verification case IDs.
+V-HC-04c and V-HC-04d share the same physical problem and explicitly reuse
+the same native runs: only Julia's mesh differs. P1/P2/P3 are counted
+separately within V-CPL-03. This dataset contains no pressure cases or
+timing measurements.
 See the [coverage matrix](../../../../docs/guide/verification/comparison_coverage.md)
 for partial comparisons and exclusions.
 
@@ -18,7 +20,18 @@ python3 test/verification/reference/matched/run_comparisons.py fds \
   /path/to/fds /tmp/verification-comparisons
 python3 test/verification/reference/matched/run_comparisons.py gpyro \
   /path/to/gpyro /tmp/verification-comparisons
+test/verification/reference/matched/build_thermakin.sh
+python3 test/verification/reference/matched/run_comparisons.py thermakin \
+  docs/refs/thermakin_build/thermakin /tmp/verification-comparisons
 ```
+
+The ThermaKin2Ds source is not redistributable and is not committed. Place
+the authors' C++ source in `docs/refs/ThermaKin2Ds Code/` (ignored);
+`build_thermakin.sh` copies it to the ignored `docs/refs/thermakin_build/`,
+replaces the MSVC-only `localtime_s`/`asctime_s` start-time banner calls
+with POSIX `localtime_r`/`asctime_r`, and compiles with `g++ -std=c++11 -O2`.
+`thermakin_provenance.json` records the source and executable hashes and
+the compiler.
 
 `--extract-only` validates an existing workspace without running the solver.
 The default levels are `base` (h,dt), `refined` (h/2,dt/2), `time_half`
@@ -157,6 +170,76 @@ thermal cell-center values.
   final time 2500 s. The compared temperatures stay near 500–504 K, where
   the Julia upper-temperature gate at 600 K is inactive to floating-point
   precision. No runaway or critical-threshold comparison is implied.
+
+## ThermaKin2Ds mappings
+
+ThermaKin2Ds uses uniform, cell-centered elements, so N elements match N
+Julia cells of the same width; the first input layer is the top (front)
+face and z = L − depth. Each run takes fixed Crank–Nicolson steps with one
+linearization per step. `DURATION` is half a step short of the horizon so
+that the loop, which runs while k·dt < `DURATION`, ends exactly on it.
+Outputs print seven significant digits (about 1e-4 K at 500 K) and every
+element at every output. The retained `.out` files are gzipped with the
+start-date and total-runtime lines removed, so a rerun reproduces them
+byte for byte.
+
+The mappings below are native inputs, not corrections:
+
+* **Boundary location.** Boundary heat and mass exchange act on the
+  boundary element's center value. Surface and back-face histories are
+  therefore element-center values Δx/2 inside the face, and a fixed or
+  film boundary is applied there; the resulting O(Δx) offsets stay in the
+  errors.
+* **Fixed temperature** (V-HC-04, V-HC-05, V-CPL-04): convective coefficient
+  1e9 W/(m² K), with the boundary element initialized at the fixed value.
+  Crank–Nicolson does not damp the large-coefficient mode, so an initial
+  jump at that element would oscillate indefinitely.
+* **Radiation.** Each boundary deposits external radiation in, and emits
+  εσT⁴ from, the element selected by its absorption search. The exposed
+  element is a separately named copy of the material (`A_surface`) carrying
+  the case emissivity; every other element has ε = 0. A mass absorption
+  coefficient of 1e6 m²/kg saturates each boundary element, so deposition
+  stays in the exposed element and the back boundary's search stops at its
+  own non-emitting element. V-RX-04a/b use incident flux q_abs/ε + σT∞⁴ with
+  the native σ = 5.6704e-8 W/(m² K⁴).
+* **Absorbed flux without emission** (V-HC-01, V-HC-03): ThermaKin has no
+  net-flux boundary, so the incident flux is q″/ε on an exposed element with
+  ε = 1e-8; its emission loss stays below 1e-3 W/m² below 1200 K.
+* **Reactions.** The rate is A·exp(−E/RT)·ξ₁·ξ₂, first order in each of at
+  most two reactants. V-RX-02b is A + A with stoichiometry ½, ½ and
+  A = k ξ₀^(1−n). V-CPL-04 is a self-regenerating A → A, so A·ξ_A with
+  constant ξ_A is the zero-order source; its 600 K upper gate is
+  `TEMP LIMIT: U 600`. Activation energies preserve E/R with the native
+  R = 8.31447 J/(mol K). ThermaKin's positive reaction heat is exothermic,
+  so the sign is reversed.
+* **Gases.** ThermaKin's element volume is Σm/ρ over the condensed phases
+  plus γ times the gas volumes. V-GT-01 and V-GT-07 use solid swelling 0
+  and gas swelling limit 1e-30, so gases occupy no volume and ξ is per
+  element volume. V-RX-05c instead uses solid swelling 1 (γ = 1 exactly)
+  and gives the retained gas the solid density, so converting solid to gas
+  leaves the element volume fixed, as for gas held in the pores. The
+  transport law J = −ρ_g λ ∂(ξ/ρ_g)/∂x with constant ρ_g is
+  Fickian diffusion of ξ with coefficient λ, set to the case diffusivity on
+  every component. ThermaKin assembles gas transport only when a boundary
+  lists a mass flux, so the sealed V-GT-01 slab carries a `LIN 0 0` entry.
+  V-GT-01's Gaussian initial state is one layer per element at the element
+  center; the 30000-character input limit allows at most 320 such layers,
+  so its base mesh is 160 elements. V-GT-07 sets the tracer density to
+  φρ_g, making ξ/ρ the tracer mass fraction and the linear boundary law
+  a·ρ·(ξ/ρ − b) the film flux with a = h_m/(φρ_g) and b = Y∞; the inert
+  carrier only fixes the pressure, which ThermaKin does not model. The
+  printed boundary mass flow is the uptake flux on the unit area.
+* **Conductivity mixing** is series (`PARALL CONDUCTIVITY: 0`), exact for
+  layers normal to the heat flow; only the V-HC-04c element that straddles
+  the 10.2 mm interface contains both materials.
+* **Steps.** Base steps equal the Gpyro steps, except V-HC-05 at 0.05 s:
+  with k(T), ThermaKin's linearized step diverges at 0.1 s and above.
+
+ThermaKin cannot express V-RAD-01 (absorbed radiation is deposited in one
+element per step, not distributed by Beer–Lambert absorption), V-CPL-01
+(properties are p₀ + p₁T + p₂Tⁿ, which has no Gaussian latent-heat peak),
+V-RX-02a/c (zero and two-thirds order), or the pressure-driven cases
+V-GT-02 to V-GT-06 and V-GT-08.
 
 The refinement audit is not an assertion of monotone convergence. Steady
 profile errors include any residual approach to equilibrium at the fixed
