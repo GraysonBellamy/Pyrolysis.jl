@@ -64,6 +64,21 @@ docs/Mesh_Framework_*.md
 test/gates/measurements/
 scripts/mesh_phase0/
 
+# Local records: the heat-transport repair plan and its audit, investigation,
+# qualification and review scripts
+docs/Heat_Transport_Repair_Plan.md
+scripts/verification/audit_governing_equations.jl
+scripts/verification/benchmark_tensor_conduction_cost.jl
+scripts/verification/confirm_heat_transport_findings.jl
+scripts/verification/investigate_algebraic_tensor_limiter.jl
+scripts/verification/investigate_coercive_tensor_method.jl
+scripts/verification/investigate_general_tensor_method.jl
+scripts/verification/qualify_general_tensor_method.jl
+scripts/verification/review_heat_transport_plan.jl
+scripts/verification/review_layered_conduction_ladder.jl
+scripts/verification/review_reconstruction_support.jl
+scripts/verification/tensor_dissipation_fixture.jl
+
 # Local research notes and reports
 reports/
 research_notes/
