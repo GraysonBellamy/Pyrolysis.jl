@@ -41,7 +41,7 @@ include("relative_flux.jl")
 export Kernel, Contributions, reset!, contribute!, find_kernel
 export ReactionKernel
 export ConductionKernel, normal_conductivity, cell_gradient
-export GasTransportKernel
+export GasTransportKernel, face_peclet
 export BeerLambertKernel, incident_intensity, sweep_intensities!, transmitted_face
 export exposed_face
 export BoundaryPatch, ThermalBoundaryKernel, boundary_energy_flux, boundary_condition

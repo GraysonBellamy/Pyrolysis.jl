@@ -452,8 +452,14 @@ only); and `Q_rxn = −Σ_r h_r r_r` is the reaction heat (`h_r > 0` endothermic
 The solver assembles it in flux form. Every face carries the conducted heat and the sensible
 enthalpy `Σ_j J_j h_j(T_f)` of the gas crossing it at the face temperature; every cell's row
 subtracts the enthalpy `Σ_j h_j(T_i)·Ṁ_{i,j}` that its net gas inflow brings at the cell's own
-temperature, which leaves exactly the exchange term above. The gas that leaves through a
-boundary outflow carries surface enthalpy, while inflow carries its specified
+temperature, which leaves exactly the exchange term above. Where the gas flux outweighs
+conduction across a cell (for constant heat capacities, a cell Péclet number above 2), the
+face also adds just enough conduction that gas flow cannot create a hot or cold spot; there
+the face is upwind and first-order accurate, elsewhere second order. The solution saves, on
+every interior face, the cell Péclet number (`sol.gas.peclet`) and that added conductivity
+over the face conductivity (`sol.gas.numerical_diffusion`); a positive value marks a face the
+mesh does not resolve, and refining the mesh there restores second order (Technical
+Reference §7.4.2). The gas that leaves through a boundary outflow carries surface enthalpy, while inflow carries its specified
 incoming enthalpy with the control-surface heat conversion of §5.4. On a moving mesh under a
 correction the mass and enthalpy inventories also cross the faces at the relative velocity
 `−c`. The gas temperature-advection term corresponds to ThermaKin Eq. 17;

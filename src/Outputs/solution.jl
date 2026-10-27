@@ -310,7 +310,7 @@ function PyrolysisSolution(
     boundary_blowing_ratio = Dict(tag => zeros(nt) for tag in tags)
     mass_loss_rate = zeros(nt)
     x = _extras(nt)
-    gas_output = GasDiagnostics(material, n, nt, tags)
+    gas_output = GasDiagnostics(material, n, n_faces(topo), nt, tags)
     gas = map(is_gas, material.components)
     thermal = find_kernel(ThermalBoundaryKernel, def.kernels)
     beam = find_kernel(BeerLambertKernel, def.kernels)

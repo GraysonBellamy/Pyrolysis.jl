@@ -477,7 +477,9 @@ the smoothly-gated Arrhenius form of §6, evaluated at the trial temperature.
 ### 3.3.4 Gas enthalpy flux and surface energy
 
 Every interior gas flux carries $\sum_gF_{g,f}h_g(T_f)$, using the same
-species flux as the mass rows and the common interface temperature. The
+species flux as the mass rows and the common interface temperature, and,
+where the gas flux outweighs conduction across the face, the conduction that
+keeps each cell's coupling to the other nonnegative (§7.4.2). The
 shared face value makes this contribution conservative. Subtracting
 $\sum_jh_j(T_i)\dot M_{j,i}$ in a temperature row leaves the transported
 sensible-enthalpy differences from the cell temperature. Both energy
@@ -901,6 +903,10 @@ regimes. The most important, with the section that quantifies or discusses each:
   MUSCL limiter on the gas advection. The scheme is monotone but numerically
   diffusive where the cell Péclet number exceeds one, and its upwind switch is a kink
   in the residual (§17.7.6).
+- **Gas enthalpy flux second-order only where conduction outweighs it** (§7.4.2). Where
+  the gas flux outweighs conduction across a face (with constant heat capacities, a cell
+  Péclet number above 2) the face becomes upwind and first order, with no limiter beyond it; `GasDiagnostics` reports the cell Péclet number and the added
+  conductivity of every interior face (§9.11).
 - **Single reactant per reaction.** Multi-reactant (bimolecular) kinetics, supported by
   ThermaKin, is not implemented; the per-reactant tuple would need extending to carry a
   mass stoichiometry (§6). There is also no temperature-dependent $A$ or pressure

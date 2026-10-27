@@ -7,7 +7,7 @@ using Pyrolysis.Meshes
 using Pyrolysis.States
 using Pyrolysis.Assembly
 using Pyrolysis.Assembly: residual!, buffers
-using Pyrolysis.Kernels: GasTransportKernel, ThermalBoundaryKernel, find_kernel
+using Pyrolysis.Kernels: GasTransportKernel, ThermalBoundaryKernel, find_kernel, face_peclet
 using Pyrolysis.Kernels: conducted_flux
 using Pyrolysis.Outputs: ledger_rates
 using Pyrolysis.Integration: setup
@@ -133,7 +133,9 @@ end
     # Every face flux is conduction (Fourier between cells, the condition's
     # flux conducted out of the cell on the boundary) plus the enthalpy its
     # mass flux carries at the face temperature: the distance-weighted one
-    # between cells, the surface temperature on the boundary.
+    # between cells, the surface temperature on the boundary. Conduction
+    # outweighs the gas flux across every interior face, so the gas transport
+    # adds no conductivity of its own.
     carried = zeros(n_faces(topo))
     conducted = zeros(n_faces(topo))
     weights = Float64[]
@@ -147,6 +149,7 @@ end
             d_n = center_to_face_distance(g, topo, f, nb)
             push!(weights, d_o / d_n)
             T_f = (d_n * ds.T[o] + d_o * ds.T[nb]) / (d_o + d_n)
+            @test face_peclet(kernel, ds, topo, f).diffusion == 0
             k_f = guarded_harmonic_mean(ds.k[o], ds.k[nb], d_o, d_n)
             conducted[f] = -k_f * (ds.T[nb] - ds.T[o]) / (d_o + d_n)
         end

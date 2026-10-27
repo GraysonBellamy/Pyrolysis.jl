@@ -68,6 +68,20 @@ end
     @test vec(sum(top.fluxes; dims = 1))≈sol.boundary_mass_flux[:top]
     @test maximum(top.residual)<3e-12
     @test maximum(top.iterations)<60
+    # Interior faces carry the cell Péclet number of their gas flux; on equal
+    # cells with constant heat capacities the face adds max(0, Pe/2 − 1) face
+    # conductivities.
+    faces=sol.definition.setup.topology.faces
+    interior=findall(f->f.cells[2]!=0, faces)
+    boundary=setdiff(eachindex(faces), interior)
+    @test size(sol.gas.peclet)==(length(faces), length(sol.t))
+    @test all(isnan, sol.gas.peclet[boundary, :])
+    @test all(>=(0), sol.gas.peclet[interior, :])
+    @test maximum(sol.gas.peclet[interior, :])>0
+    @test sol.gas.numerical_diffusion[interior, :]≈max.(
+        0,
+        sol.gas.peclet[interior, :] ./ 2 .- 1,
+    )
     audit=gas_species_audit(sol, rec)
     @test audit.method===:recorder
     @test audit.species.product.escape>0

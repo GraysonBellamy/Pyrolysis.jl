@@ -718,7 +718,9 @@ The Darcy advective flux takes the upwind cell's concentration on the sign of
 the face velocity, and the relative flux on a moving mesh its upwind stencil on
 the sign of the mesh correction (§9, §11); the flux is continuous across the
 switch but its derivative is not, so a state with a face velocity at zero is a
-kink of the residual. In normal operation the gas flows one way through each
+kink of the residual. The gas enthalpy flux adds its conduction $D_f$ where the
+gas flux outweighs conduction (§7.4.2), a kink at a cell Péclet number of 2 on
+equal half cells with constant heat capacities. In normal operation the gas flows one way through each
 face and the switch is inactive; a flow that reverses at a face, or a
 correction that changes sign there, puts the kink on the trajectory. The guards
 of §17.6, item 4, are C¹: their second derivative jumps at the joints, which

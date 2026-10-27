@@ -714,7 +714,14 @@ end
     Jd = _contained(cp, u)
     top = energy_index(layout, n)
     @test Jd[top, mass_index(layout, n, 2)] != 0
-    @test Jd[top, energy_index(layout, n - 1)] != 0
+    # Conduction and the gas face couple the top cell to its neighbour. Under
+    # Darcy flow the gas runs down out of the hot top cell at a cell Péclet
+    # number of 4, so that face is upwind: in the temperature form the top
+    # cell's row no longer reads the neighbour's temperature, while the
+    # neighbour's row reads the top cell's.
+    upwind = case.darcy && energy === :temperature
+    @test (Jd[top, energy_index(layout, n - 1)] == 0) == upwind
+    @test Jd[energy_index(layout, n - 1), top] != 0
     if case.bottom isa AmbientGasBC
         @test Jd[energy_index(layout, 1), mass_index(layout, 1, 2)] != 0
     end

@@ -75,6 +75,7 @@ Conventions:
 | `c_{p,ref}` | Mass-weighted heat capacity of a cell at its initial temperature, the scale of its enthalpy-row tolerance (§13.10.5, §15.5.6) | J·kg⁻¹·K⁻¹ |
 | `c`, `c_n` | Node correction of a moving mesh, `c = w − v_s`: the mesh velocity relative to the solid's (overload C1) | m·s⁻¹ |
 | `D_{AB}`, `D_j`, `D_{k,∞}` | Binary diffusion coefficient (Chapman–Enskog, §5.10); `D_{k,∞}` of species *k* into the free stream (pooling film, §12.3.3) | m²·s⁻¹ |
+| `D_f`, `a_o`, `a_n` | Conductivity an interior face adds to its gas enthalpy flux, `max(0, a_o − k_f, a_n − k_f)`; the heat-capacity flux leaving the owner or the neighbour through the face times its center-to-face distance (§7.4.2) | W·m⁻¹·K⁻¹ |
 | `𝒟` | Set of dead cells that merge into the receiver *k* in one deactivation event, outermost first (§14.3.3, §16.7) | – |
 | `d`, `d_L`, `d_R`, `d_o`, `d_n`, `d_{LR}` | Distance from cell center to face (left/right, owner/neighbour) / between adjacent cell centers (overload D1) | m |
 | `d_m`, `d_H`, `d_m^rel`, `d_H^rel` | Mass and energy defects of the conservation audit, and each over the largest term of its balance (§16.3.3, §16.5.4; overload D1) | kg; J; – |
@@ -87,7 +88,7 @@ Conventions:
 | `F_b(x)` | Film factor `x/(e^x − 1)` of the blowing models (§12.3.3; overload F1) | – |
 | `F_i` | Deformation gradient of cell *i* (meshes of more dimensions, residual level; §15.3.2; overload F1) | – |
 | `F_f`, `F_{j,f}` | Face flux per unit area along the face normal (of component *j*: the mass flux the kernels write) | (flux units)·m⁻² |
-| `F^E_f`, `F^E_{rel,f}` | Face energy flux per unit area along the normal, `q_f + Σ_j F_{j,f} h_j(T_f)`: conduction plus the sensible enthalpy the mass fluxes carry; `F^E_{rel,f}` its relative-flux part (§1.4.4, §7.3.3, §11.6.4, §16.5.1) | W·m⁻² |
+| `F^E_f`, `F^E_{rel,f}` | Face energy flux per unit area along the normal, `q_f + Σ_j F_{j,f} h_j(T_f)`: conduction (at an interior face with the gas transport's added conduction `D_f (T_o − T_n)/(d_o + d_n)`) plus the sensible enthalpy the mass fluxes carry; `F^E_{rel,f}` its relative-flux part (§1.4.4, §7.3.3, §11.6.4, §16.5.1) | W·m⁻² |
 | `𝓕_live` | Set of live boundary faces: for each boundary face of the mesh, the face that bounds the live cells on its side (§16.3.2) | – |
 | `f` | Generic field, or Newton-residual function `f(T_s)` (`Φ` where the face index `f` is in the same formula) | varies |
 | `G_i` | Cumulative dry pyrolysis gas produced by cell *i*: first member of the conversion-history pair (variable cross section) | kg |

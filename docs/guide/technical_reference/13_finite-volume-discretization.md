@@ -546,7 +546,7 @@ Four face temperatures appear, each where it is consistent:
 
 | Where | Face temperature |
 |---|---|
-| enthalpy carried by the gas fluxes, interior face | $T_f=(d_nT_o+d_oT_n)/(d_o+d_n)$, the linear interpolation to the face at the cell temperatures (exact for a linear profile) |
+| enthalpy carried by the gas fluxes, interior face | $T_f=(d_nT_o+d_oT_n)/(d_o+d_n)$, the linear interpolation to the face at the cell temperatures (exact for a linear profile), with the conduction $D_f$ of §7.4.2 where the gas flux outweighs conduction |
 | inside the lumped wall flux | $\bar T_f=\tfrac12(\tilde T_o+\tilde T_n)$, the mean of the trial temperatures (§13.7.2) |
 | boundary face | the surface temperature $T_s$ of the condition: closed form or surface Newton (§13.7.5) |
 | relative fluxes | $\tilde T_f$, the upwind van Albada reconstruction on the stencil of the mass fluxes it carries (§11.6.2) |

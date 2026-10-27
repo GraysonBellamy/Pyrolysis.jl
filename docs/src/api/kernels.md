@@ -16,6 +16,7 @@ Reached through `Pyrolysis.Kernels` and `Pyrolysis.Closures` or
 Kernels.ReactionKernel
 Kernels.ConductionKernel
 Kernels.GasTransportKernel
+Kernels.face_peclet
 Kernels.BeerLambertKernel
 Kernels.ThermalBoundaryKernel
 Kernels.RelativeFluxKernel

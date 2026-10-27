@@ -812,7 +812,8 @@ Detecting a double count requires an *independent* check (§18.4.3).
 
 The gas enthalpy is carried by the face energy flux: on an interior face the
 gas-transport kernel adds $\sum_jJ_{j,f}h_j(T_f)$ at the distance-weighted face
-temperature, on a boundary face the thermal boundary kernel adds the enthalpy of the
+temperature, with the conduction of §7.4.2 where the gas flux outweighs conduction,
+on a boundary face the thermal boundary kernel adds the enthalpy of the
 outward fluxes at the surface temperature and inward fluxes at their specified
 incoming temperatures. Thermal-film heat is converted to the reservoir
 control surface (§9.5). An additional outgoing surface term
@@ -825,7 +826,8 @@ coupling is therefore pinned by checks built independently of the residual:
   transport, on uniform and stretched meshes, every face energy flux equals the
   conduction (Fourier between cells with the distance-weighted harmonic-mean
   conductivity; the condition's conducted flux on the boundary) plus the enthalpy its
-  mass fluxes carry at the face temperature, to $10^{-12}$ relative, and every cell's
+  mass fluxes carry at the face temperature (the column's faces are resolved, so they
+  add no conduction), to $10^{-12}$ relative, and every cell's
   energy row equals the sum of its conduction, carried, source and formation terms to
   $10^{-11}$ of their scale. The carried term is not small and the surface temperature
   departs from the cell temperature by more than 1 K, so an omission, a double count or
@@ -834,9 +836,14 @@ coupling is therefore pinned by checks built independently of the residual:
   (`test/boundary_conditions/test_boundary_temperature.jl`, "Outward gas flux enters
   only through blowing"): under a prescribed flux, the solved surface temperature and
   the conducted flux are identical with and without a gas flux across the face.
-- **Isothermal transport** (`test/kernels/test_gas_transport.jl`, "isothermal transport
-  leaves the temperature at rest"): gas diffusing through an isothermal column leaves
-  every temperature at rest in both energy forms.
+- **Isothermal transport** (`test/kernels/test_gas_transport.jl`, "gas enthalpy at a
+  uniform temperature: no transport heating"): two gases moving through an isothermal
+  column under both transport laws leave every temperature at rest in both energy forms.
+- **No extremum at an unresolved front** (`test/kernels/test_gas_transport.jl`, "gas
+  enthalpy at a plateau edge: no extremum"): at a cell Péclet number of 45 gas leaving a
+  hot plateau for a colder cell leaves the plateau at its temperature, in both flow
+  directions and both energy forms, and over a solve no temperature leaves its initial
+  range.
 - **An exact solution that would see a spurious term.** V-CPL-02 sets the gas heat
   capacity equal to the solid's, which makes the Landau travelling-wave identity
   $v=v_{ss}(T_s)$ exact for a steady wave with stationary virgin material in

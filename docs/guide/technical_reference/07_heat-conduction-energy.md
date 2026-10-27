@@ -343,7 +343,9 @@ $$
 
 with $S_{E,i}$ [W] the cell's energy source — the reaction heat $Q_{\text{rxn},i}V_i$ and the
 absorbed radiation (§7.5) — and $F^E_f$ the face's **energy flux**: conduction plus the
-sensible enthalpy its mass fluxes $F_{j,f}$ carry at the face temperature $T_f$ (§7.4.2). The
+sensible enthalpy its mass fluxes $F_{j,f}$ carry at the face temperature $T_f$ (§7.4.2), with
+$q_f$ including, at an interior face, the conduction $D_f(T_o-T_n)/(d_o+d_n)$ the gas transport
+adds where its flux outweighs conduction (§7.4.2). The
 energy row is then written in one of two energy states (`energy_state`):
 
 $$
@@ -481,7 +483,26 @@ mass flux, each with the face temperature of its own flux:
 
   the linear interpolation of the two cell temperatures to the face. The mass
   flux uses this interface temperature and each half-cell temperature in the
-  flux-matching solve (§9).
+  flux-matching solve (§9). The face adds the conduction
+
+  $$
+  D_f\,\frac{T_o-T_n}{d_o+d_n},
+  \qquad
+  D_f=\max\bigl(0,\;a_o-k_f,\;a_n-k_f\bigr),
+  \qquad
+  a_i=(d_o+d_n)\,\frac{\sum_jF_{j,f}\bigl[h_j(T_f)-h_j(T_i)\bigr]}{T_n-T_o},
+  $$
+
+  with $k_f$ the face conductivity of conduction (7.1). $a_o$ and $a_n$ are the
+  heat-capacity flux leaving the owner and the neighbour through the face times their
+  center-to-face distances, from the enthalpy secants between $T_f$ and the cell
+  temperatures; for constant heat capacities $a_o = C\,d_o$ and $a_n = -C\,d_n$, with
+  $C=\sum_jF_{j,f}c_{p,j}$ the face's net heat-capacity flux. Where the temperature
+  difference is below $10^{-11}$ of the larger cell temperature, where the enthalpy
+  difference has lost its digits to rounding, the secants take their limit, the heat
+  capacities at the mean temperatures; the coupling that limit sets differs from the
+  secants' by about $\lvert F\rvert c_p'\,\Delta T^2$, below the flux's rounding. $D_f$ is the least conductivity
+  that keeps both cells' couplings across the face nonnegative (property 4 below).
 - **Boundary face.** The coupled mass/thermal kernel assembles $E_{out}=H_r-q_r$.
   Outgoing species carry $h_j(T_s)$ and incoming species carry their specified
   reservoir enthalpy. An LTE thermal film converts its wall heat by
@@ -494,19 +515,53 @@ mass flux, each with the face temperature of its own flux:
   upwind cell's value plus its smooth van Albada slope times its distance to the face,
   §11.6.2), so an isothermal composition profile advected across the mesh stays isothermal.
 
-The construction has three properties:
+The construction has four properties:
 
 1. **Conservative.** Each face's enthalpy flux leaves one cell and enters the next, so the
    column's sensible enthalpy changes only through the boundary faces and the sources.
 2. **Exact for temperature-dependent $c_p$.** The enthalpies are the exact integrals of the
    heat-capacity laws (§5.4.3); no heat capacity is evaluated at an intermediate temperature.
 3. **A uniform temperature stays at rest.** On an isothermal field $T_f = T_i$ on every face,
-   so the bracket $h_j(T_f) - h_j(T_i)$ of (7.11) vanishes identically, whatever the mass
-   fluxes. This is tested on a stretched mesh with gas transport, a heat capacity
-   linear in $T$ and non-zero gas fluxes: the temperature rates vanish to $10^{-12}$ relative
-   in the temperature form, and the inventory rates equal $\sum_j h_j\,dm_j/dt$ to the same
-   accuracy in the inventory form (`test/kernels/test_gas_transport.jl`, "isothermal transport
-   leaves the temperature at rest").
+   so the bracket $h_j(T_f) - h_j(T_i)$ of (7.11) vanishes identically, and the added
+   conduction with it, whatever the mass fluxes. This is tested on a stretched mesh with two
+   gases, one with a heat capacity linear in $T$, and non-zero fluxes of both under both
+   transport laws: the temperature rates vanish to round-off in both energy forms, the
+   inventory form's read through the partial derivatives of its extended caloric relation
+   (`test/kernels/test_gas_transport.jl`, "gas enthalpy at a uniform temperature: no
+   transport heating").
+4. **No temperature extremum from conduction and gas transport.** Per unit area the face
+   moves heat into the owner's temperature row at $(k_f+D_f-a_o)(T_n-T_o)/(d_o+d_n)$ and into
+   the neighbour's at $(k_f+D_f-a_n)(T_o-T_n)/(d_o+d_n)$, conduction and gas transport
+   together; $D_f$ keeps both coefficients nonnegative, so a cell at a temperature maximum
+   is never heated across a face and a cell at a minimum never cooled, whatever the species
+   fluxes, their directions and the compositions. The inventory form has the same rates
+   where the partial derivatives of its extended caloric relation are the enthalpies and the
+   heat capacity: every changing inventory at or above its mass scale $\delta_i$ and the
+   capacity switch inactive (§5.4.3, §13.10.4). The property covers conduction and gas
+   transport; the relative fluxes of a corrected moving mesh carry their own enthalpy
+   (§11.6) and are not covered by it. Tested at a plateau edge in both flow directions,
+   with counterflowing species, on unequal cells, across the knots of a tabulated heat
+   capacity and over a solve (`test/kernels/test_gas_transport.jl`).
+
+**Accuracy.** Where $a_o$ and $a_n$ do not exceed $k_f$, $D_f$ is zero and the flux is the
+linear interpolation, second-order accurate. With constant heat capacities this is a cell
+Péclet number $\mathrm{Pe}_f=(d_o+d_n)\lvert C\rvert/k_f$ up to 2 on equal half cells; with
+temperature-dependent ones the secants decide, and counterflowing species whose heat
+capacities vary differently can need $D_f>0$ even where $C$ vanishes at $T_f$. Where the gas flux dominates, $D_f$
+grows with it, conduction no longer reaches the upstream cell across the face, and the face
+is upwind: the gas arrives at the upstream cell's enthalpy, and the flux is first order there.
+`face_peclet` evaluates $\mathrm{Pe}_f$ and $D_f/k_f$, and every solution saves them on each
+interior face as `sol.gas.peclet` and `sol.gas.numerical_diffusion` (§9.11); a positive
+`numerical_diffusion`, not $\mathrm{Pe}_f$, is what marks a face the mesh does not resolve.
+
+**Derivatives.** The secant limit and the branch of $D_f$ read primal values, so every
+derivative pass takes the branch the value selects. $D_f$ is continuous and its derivative
+jumps where it becomes positive (with constant heat capacities, at a cell Péclet number of 2
+on equal half cells; §17.7.6); at the secant limit it changes by about $c_p'\,\Delta T$
+relative, a jump below rounding.
+The dense and colored Jacobians agree with central differences on either side of that switch
+and of a flow reversal (`test/kernels/test_gas_transport.jl`, "gas enthalpy derivatives across
+a flow reversal and the upwind switch").
 
 **Consistency.** On a line, let cell $i$ of thickness $\Delta z$ carry a uniform gas flux $F$
 along $+z$ through its bottom face $L$ (where it is the neighbour, $s = -1$) and its top face
@@ -522,7 +577,8 @@ $$
 
 the cell integral of $-c_{p,g}\mathbf J_g\cdot\nabla T$ in (7.6). On a uniform mesh the
 interpolation (7.14) is the central one; on a stretched mesh its distance weighting keeps it
-exact for a linear temperature field.
+exact for a linear temperature field. A face with $D_f>0$ adds the conduction
+$D_f\,\partial_zT$ to this, the first-order error of an unresolved front.
 
 ### 7.4.3 Boundary carried energy
 
@@ -630,9 +686,9 @@ rather than skipped (§15.2). The sequence is:
    its face fluxes and cell sources:
    1. the **reactions** (if the material has any): the mass sources $\omega_{j,i}V_i$ and the
       reaction heat $Q_{\text{rxn},i}V_i$ (§7.5.1, §6);
-   2. the **gas transport** (if gas can move): the interior gas mass fluxes and the enthalpy
-      they carry at the face temperature (7.14), and the outward mass fluxes of the boundary
-      faces (§9, §7.4.2);
+   2. the **gas transport** (if gas can move): the interior gas mass fluxes, the enthalpy
+      they carry at the face temperature (7.14) and the face's added conduction, and the
+      outward mass fluxes of the boundary faces (§9, §7.4.2);
    3. the **in-depth radiation** (`BEER_LAMBERT`): the intensity residuals and the absorbed
       power (§7.5.2);
    4. **conduction**: the interior conductive fluxes (7.1) (and, in more dimensions, the

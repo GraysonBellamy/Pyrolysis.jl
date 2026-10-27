@@ -178,7 +178,9 @@ The energy equation includes Fourier conduction, the enthalpy carried by
 conservative species fluxes, radiation absorption and reaction heat. The
 reaction source includes the formation term $\sum_j\omega_jh_j(T)$ in the
 inventory formulation (§6–8). Interior mass and energy assembly use the same
-species flux; its carried enthalpy uses the declared face-temperature closure.
+species flux; its carried enthalpy is taken at the distance-weighted face
+temperature, with the conduction a face adds where its gas flux outweighs
+conduction (§7.4.2).
 
 At an exterior boundary the outward flux of species $j$ is $N_j$. Define
 $H_s=\sum_jN_jh_j(T_s)$ and

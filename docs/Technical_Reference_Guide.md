@@ -209,7 +209,9 @@ The energy equation includes Fourier conduction, the enthalpy carried by
 conservative species fluxes, radiation absorption and reaction heat. The
 reaction source includes the formation term $\sum_j\omega_jh_j(T)$ in the
 inventory formulation (§6–8). Interior mass and energy assembly use the same
-species flux; its carried enthalpy uses the declared face-temperature closure.
+species flux; its carried enthalpy is taken at the distance-weighted face
+temperature, with the conduction a face adds where its gas flux outweighs
+conduction (§7.4.2).
 
 At an exterior boundary the outward flux of species $j$ is $N_j$. Define
 $H_s=\sum_jN_jh_j(T_s)$ and
@@ -580,6 +582,7 @@ Conventions:
 | `c_{p,ref}` | Mass-weighted heat capacity of a cell at its initial temperature, the scale of its enthalpy-row tolerance (§13.10.5, §15.5.6) | J·kg⁻¹·K⁻¹ |
 | `c`, `c_n` | Node correction of a moving mesh, `c = w − v_s`: the mesh velocity relative to the solid's (overload C1) | m·s⁻¹ |
 | `D_{AB}`, `D_j`, `D_{k,∞}` | Binary diffusion coefficient (Chapman–Enskog, §5.10); `D_{k,∞}` of species *k* into the free stream (pooling film, §12.3.3) | m²·s⁻¹ |
+| `D_f`, `a_o`, `a_n` | Conductivity an interior face adds to its gas enthalpy flux, `max(0, a_o − k_f, a_n − k_f)`; the heat-capacity flux leaving the owner or the neighbour through the face times its center-to-face distance (§7.4.2) | W·m⁻¹·K⁻¹ |
 | `𝒟` | Set of dead cells that merge into the receiver *k* in one deactivation event, outermost first (§14.3.3, §16.7) | – |
 | `d`, `d_L`, `d_R`, `d_o`, `d_n`, `d_{LR}` | Distance from cell center to face (left/right, owner/neighbour) / between adjacent cell centers (overload D1) | m |
 | `d_m`, `d_H`, `d_m^rel`, `d_H^rel` | Mass and energy defects of the conservation audit, and each over the largest term of its balance (§16.3.3, §16.5.4; overload D1) | kg; J; – |
@@ -592,7 +595,7 @@ Conventions:
 | `F_b(x)` | Film factor `x/(e^x − 1)` of the blowing models (§12.3.3; overload F1) | – |
 | `F_i` | Deformation gradient of cell *i* (meshes of more dimensions, residual level; §15.3.2; overload F1) | – |
 | `F_f`, `F_{j,f}` | Face flux per unit area along the face normal (of component *j*: the mass flux the kernels write) | (flux units)·m⁻² |
-| `F^E_f`, `F^E_{rel,f}` | Face energy flux per unit area along the normal, `q_f + Σ_j F_{j,f} h_j(T_f)`: conduction plus the sensible enthalpy the mass fluxes carry; `F^E_{rel,f}` its relative-flux part (§1.4.4, §7.3.3, §11.6.4, §16.5.1) | W·m⁻² |
+| `F^E_f`, `F^E_{rel,f}` | Face energy flux per unit area along the normal, `q_f + Σ_j F_{j,f} h_j(T_f)`: conduction (at an interior face with the gas transport's added conduction `D_f (T_o − T_n)/(d_o + d_n)`) plus the sensible enthalpy the mass fluxes carry; `F^E_{rel,f}` its relative-flux part (§1.4.4, §7.3.3, §11.6.4, §16.5.1) | W·m⁻² |
 | `𝓕_live` | Set of live boundary faces: for each boundary face of the mesh, the face that bounds the live cells on its side (§16.3.2) | – |
 | `f` | Generic field, or Newton-residual function `f(T_s)` (`Φ` where the face index `f` is in the same formula) | varies |
 | `G_i` | Cumulative dry pyrolysis gas produced by cell *i*: first member of the conversion-history pair (variable cross section) | kg |
@@ -1571,7 +1574,9 @@ the smoothly-gated Arrhenius form of §6, evaluated at the trial temperature.
 ### 3.3.4 Gas enthalpy flux and surface energy
 
 Every interior gas flux carries $\sum_gF_{g,f}h_g(T_f)$, using the same
-species flux as the mass rows and the common interface temperature. The
+species flux as the mass rows and the common interface temperature, and,
+where the gas flux outweighs conduction across the face, the conduction that
+keeps each cell's coupling to the other nonnegative (§7.4.2). The
 shared face value makes this contribution conservative. Subtracting
 $\sum_jh_j(T_i)\dot M_{j,i}$ in a temperature row leaves the transported
 sensible-enthalpy differences from the cell temperature. Both energy
@@ -1995,6 +2000,10 @@ regimes. The most important, with the section that quantifies or discusses each:
   MUSCL limiter on the gas advection. The scheme is monotone but numerically
   diffusive where the cell Péclet number exceeds one, and its upwind switch is a kink
   in the residual (§17.7.6).
+- **Gas enthalpy flux second-order only where conduction outweighs it** (§7.4.2). Where
+  the gas flux outweighs conduction across a face (with constant heat capacities, a cell
+  Péclet number above 2) the face becomes upwind and first order, with no limiter beyond it; `GasDiagnostics` reports the cell Péclet number and the added
+  conductivity of every interior face (§9.11).
 - **Single reactant per reaction.** Multi-reactant (bimolecular) kinetics, supported by
   ThermaKin, is not implemented; the per-reactant tuple would need extending to carry a
   mass stoichiometry (§6). There is also no temperature-dependent $A$ or pressure
@@ -5441,7 +5450,9 @@ $$
 
 with $S_{E,i}$ [W] the cell's energy source — the reaction heat $Q_{\text{rxn},i}V_i$ and the
 absorbed radiation (§7.5) — and $F^E_f$ the face's **energy flux**: conduction plus the
-sensible enthalpy its mass fluxes $F_{j,f}$ carry at the face temperature $T_f$ (§7.4.2). The
+sensible enthalpy its mass fluxes $F_{j,f}$ carry at the face temperature $T_f$ (§7.4.2), with
+$q_f$ including, at an interior face, the conduction $D_f(T_o-T_n)/(d_o+d_n)$ the gas transport
+adds where its flux outweighs conduction (§7.4.2). The
 energy row is then written in one of two energy states (`energy_state`):
 
 $$
@@ -5579,7 +5590,26 @@ mass flux, each with the face temperature of its own flux:
 
   the linear interpolation of the two cell temperatures to the face. The mass
   flux uses this interface temperature and each half-cell temperature in the
-  flux-matching solve (§9).
+  flux-matching solve (§9). The face adds the conduction
+
+  $$
+  D_f\,\frac{T_o-T_n}{d_o+d_n},
+  \qquad
+  D_f=\max\bigl(0,\;a_o-k_f,\;a_n-k_f\bigr),
+  \qquad
+  a_i=(d_o+d_n)\,\frac{\sum_jF_{j,f}\bigl[h_j(T_f)-h_j(T_i)\bigr]}{T_n-T_o},
+  $$
+
+  with $k_f$ the face conductivity of conduction (7.1). $a_o$ and $a_n$ are the
+  heat-capacity flux leaving the owner and the neighbour through the face times their
+  center-to-face distances, from the enthalpy secants between $T_f$ and the cell
+  temperatures; for constant heat capacities $a_o = C\,d_o$ and $a_n = -C\,d_n$, with
+  $C=\sum_jF_{j,f}c_{p,j}$ the face's net heat-capacity flux. Where the temperature
+  difference is below $10^{-11}$ of the larger cell temperature, where the enthalpy
+  difference has lost its digits to rounding, the secants take their limit, the heat
+  capacities at the mean temperatures; the coupling that limit sets differs from the
+  secants' by about $\lvert F\rvert c_p'\,\Delta T^2$, below the flux's rounding. $D_f$ is the least conductivity
+  that keeps both cells' couplings across the face nonnegative (property 4 below).
 - **Boundary face.** The coupled mass/thermal kernel assembles $E_{out}=H_r-q_r$.
   Outgoing species carry $h_j(T_s)$ and incoming species carry their specified
   reservoir enthalpy. An LTE thermal film converts its wall heat by
@@ -5592,19 +5622,53 @@ mass flux, each with the face temperature of its own flux:
   upwind cell's value plus its smooth van Albada slope times its distance to the face,
   §11.6.2), so an isothermal composition profile advected across the mesh stays isothermal.
 
-The construction has three properties:
+The construction has four properties:
 
 1. **Conservative.** Each face's enthalpy flux leaves one cell and enters the next, so the
    column's sensible enthalpy changes only through the boundary faces and the sources.
 2. **Exact for temperature-dependent $c_p$.** The enthalpies are the exact integrals of the
    heat-capacity laws (§5.4.3); no heat capacity is evaluated at an intermediate temperature.
 3. **A uniform temperature stays at rest.** On an isothermal field $T_f = T_i$ on every face,
-   so the bracket $h_j(T_f) - h_j(T_i)$ of (7.11) vanishes identically, whatever the mass
-   fluxes. This is tested on a stretched mesh with gas transport, a heat capacity
-   linear in $T$ and non-zero gas fluxes: the temperature rates vanish to $10^{-12}$ relative
-   in the temperature form, and the inventory rates equal $\sum_j h_j\,dm_j/dt$ to the same
-   accuracy in the inventory form (`test/kernels/test_gas_transport.jl`, "isothermal transport
-   leaves the temperature at rest").
+   so the bracket $h_j(T_f) - h_j(T_i)$ of (7.11) vanishes identically, and the added
+   conduction with it, whatever the mass fluxes. This is tested on a stretched mesh with two
+   gases, one with a heat capacity linear in $T$, and non-zero fluxes of both under both
+   transport laws: the temperature rates vanish to round-off in both energy forms, the
+   inventory form's read through the partial derivatives of its extended caloric relation
+   (`test/kernels/test_gas_transport.jl`, "gas enthalpy at a uniform temperature: no
+   transport heating").
+4. **No temperature extremum from conduction and gas transport.** Per unit area the face
+   moves heat into the owner's temperature row at $(k_f+D_f-a_o)(T_n-T_o)/(d_o+d_n)$ and into
+   the neighbour's at $(k_f+D_f-a_n)(T_o-T_n)/(d_o+d_n)$, conduction and gas transport
+   together; $D_f$ keeps both coefficients nonnegative, so a cell at a temperature maximum
+   is never heated across a face and a cell at a minimum never cooled, whatever the species
+   fluxes, their directions and the compositions. The inventory form has the same rates
+   where the partial derivatives of its extended caloric relation are the enthalpies and the
+   heat capacity: every changing inventory at or above its mass scale $\delta_i$ and the
+   capacity switch inactive (§5.4.3, §13.10.4). The property covers conduction and gas
+   transport; the relative fluxes of a corrected moving mesh carry their own enthalpy
+   (§11.6) and are not covered by it. Tested at a plateau edge in both flow directions,
+   with counterflowing species, on unequal cells, across the knots of a tabulated heat
+   capacity and over a solve (`test/kernels/test_gas_transport.jl`).
+
+**Accuracy.** Where $a_o$ and $a_n$ do not exceed $k_f$, $D_f$ is zero and the flux is the
+linear interpolation, second-order accurate. With constant heat capacities this is a cell
+Péclet number $\mathrm{Pe}_f=(d_o+d_n)\lvert C\rvert/k_f$ up to 2 on equal half cells; with
+temperature-dependent ones the secants decide, and counterflowing species whose heat
+capacities vary differently can need $D_f>0$ even where $C$ vanishes at $T_f$. Where the gas flux dominates, $D_f$
+grows with it, conduction no longer reaches the upstream cell across the face, and the face
+is upwind: the gas arrives at the upstream cell's enthalpy, and the flux is first order there.
+`face_peclet` evaluates $\mathrm{Pe}_f$ and $D_f/k_f$, and every solution saves them on each
+interior face as `sol.gas.peclet` and `sol.gas.numerical_diffusion` (§9.11); a positive
+`numerical_diffusion`, not $\mathrm{Pe}_f$, is what marks a face the mesh does not resolve.
+
+**Derivatives.** The secant limit and the branch of $D_f$ read primal values, so every
+derivative pass takes the branch the value selects. $D_f$ is continuous and its derivative
+jumps where it becomes positive (with constant heat capacities, at a cell Péclet number of 2
+on equal half cells; §17.7.6); at the secant limit it changes by about $c_p'\,\Delta T$
+relative, a jump below rounding.
+The dense and colored Jacobians agree with central differences on either side of that switch
+and of a flow reversal (`test/kernels/test_gas_transport.jl`, "gas enthalpy derivatives across
+a flow reversal and the upwind switch").
 
 **Consistency.** On a line, let cell $i$ of thickness $\Delta z$ carry a uniform gas flux $F$
 along $+z$ through its bottom face $L$ (where it is the neighbour, $s = -1$) and its top face
@@ -5620,7 +5684,8 @@ $$
 
 the cell integral of $-c_{p,g}\mathbf J_g\cdot\nabla T$ in (7.6). On a uniform mesh the
 interpolation (7.14) is the central one; on a stretched mesh its distance weighting keeps it
-exact for a linear temperature field.
+exact for a linear temperature field. A face with $D_f>0$ adds the conduction
+$D_f\,\partial_zT$ to this, the first-order error of an unresolved front.
 
 ### 7.4.3 Boundary carried energy
 
@@ -5728,9 +5793,9 @@ rather than skipped (§15.2). The sequence is:
    its face fluxes and cell sources:
    1. the **reactions** (if the material has any): the mass sources $\omega_{j,i}V_i$ and the
       reaction heat $Q_{\text{rxn},i}V_i$ (§7.5.1, §6);
-   2. the **gas transport** (if gas can move): the interior gas mass fluxes and the enthalpy
-      they carry at the face temperature (7.14), and the outward mass fluxes of the boundary
-      faces (§9, §7.4.2);
+   2. the **gas transport** (if gas can move): the interior gas mass fluxes, the enthalpy
+      they carry at the face temperature (7.14) and the face's added conduction, and the
+      outward mass fluxes of the boundary faces (§9, §7.4.2);
    3. the **in-depth radiation** (`BEER_LAMBERT`): the intensity residuals and the absorbed
       power (§7.5.2);
    4. **conduction**: the interior conductive fluxes (7.1) (and, in more dimensions, the
@@ -7270,7 +7335,8 @@ T^*=\frac{d_RT_L+d_LT_R}{d_L+d_R}.
 $$
 
 It supplies the gas temperature at the interface for donor transport and the
-enthalpy carried by the shared face flux. The wall resistance on each half
+enthalpy carried by the shared face flux, to which the face adds conduction
+where the gas flux outweighs conduction (§7.4.2). The wall resistance on each half
 path uses that half-cell's temperature.
 
 For an isolated linear wall channel, eliminating the interface pressure gives
@@ -7546,6 +7612,13 @@ reservoir control surface, while enthalpy and total energy are positive
 outward, with `energy = enthalpy - heat` (§9.5). Dead-cell fields and absent
 live-boundary fields are `NaN`. The reported velocity is Darcy velocity;
 total mass or molar flow must be obtained from the species fluxes.
+
+`sol.gas.peclet` and `sol.gas.numerical_diffusion` (faces × saved times) give every
+interior face's cell Péclet number and the conductivity the face adds to its gas
+enthalpy flux over the face conductivity (§7.4.2); they are `NaN` on boundary faces and
+beside dead cells. `numerical_diffusion` is zero wherever conduction outweighs the gas
+flux and the face is second-order accurate; a positive value marks a face the mesh does
+not resolve, where the flux is upwind and first order.
 
 For an integrated check, `gas_species_audit(sol, recorder)` separates reaction
 production, escape, ingress and deactivation venting by species. This makes
@@ -10858,7 +10931,7 @@ Four face temperatures appear, each where it is consistent:
 
 | Where | Face temperature |
 |---|---|
-| enthalpy carried by the gas fluxes, interior face | $T_f=(d_nT_o+d_oT_n)/(d_o+d_n)$, the linear interpolation to the face at the cell temperatures (exact for a linear profile) |
+| enthalpy carried by the gas fluxes, interior face | $T_f=(d_nT_o+d_oT_n)/(d_o+d_n)$, the linear interpolation to the face at the cell temperatures (exact for a linear profile), with the conduction $D_f$ of §7.4.2 where the gas flux outweighs conduction |
 | inside the lumped wall flux | $\bar T_f=\tfrac12(\tilde T_o+\tilde T_n)$, the mean of the trial temperatures (§13.7.2) |
 | boundary face | the surface temperature $T_s$ of the condition: closed form or surface Newton (§13.7.5) |
 | relative fluxes | $\tilde T_f$, the upwind van Albada reconstruction on the stencil of the mass fluxes it carries (§11.6.2) |
@@ -14988,7 +15061,9 @@ The Darcy advective flux takes the upwind cell's concentration on the sign of
 the face velocity, and the relative flux on a moving mesh its upwind stencil on
 the sign of the mesh correction (§9, §11); the flux is continuous across the
 switch but its derivative is not, so a state with a face velocity at zero is a
-kink of the residual. In normal operation the gas flows one way through each
+kink of the residual. The gas enthalpy flux adds its conduction $D_f$ where the
+gas flux outweighs conduction (§7.4.2), a kink at a cell Péclet number of 2 on
+equal half cells with constant heat capacities. In normal operation the gas flows one way through each
 face and the switch is inactive; a flow that reverses at a face, or a
 correction that changes sign there, puts the kink on the trajectory. The guards
 of §17.6, item 4, are C¹: their second derivative jumps at the joints, which
@@ -15939,7 +16014,8 @@ Detecting a double count requires an *independent* check (§18.4.3).
 
 The gas enthalpy is carried by the face energy flux: on an interior face the
 gas-transport kernel adds $\sum_jJ_{j,f}h_j(T_f)$ at the distance-weighted face
-temperature, on a boundary face the thermal boundary kernel adds the enthalpy of the
+temperature, with the conduction of §7.4.2 where the gas flux outweighs conduction,
+on a boundary face the thermal boundary kernel adds the enthalpy of the
 outward fluxes at the surface temperature and inward fluxes at their specified
 incoming temperatures. Thermal-film heat is converted to the reservoir
 control surface (§9.5). An additional outgoing surface term
@@ -15952,7 +16028,8 @@ coupling is therefore pinned by checks built independently of the residual:
   transport, on uniform and stretched meshes, every face energy flux equals the
   conduction (Fourier between cells with the distance-weighted harmonic-mean
   conductivity; the condition's conducted flux on the boundary) plus the enthalpy its
-  mass fluxes carry at the face temperature, to $10^{-12}$ relative, and every cell's
+  mass fluxes carry at the face temperature (the column's faces are resolved, so they
+  add no conduction), to $10^{-12}$ relative, and every cell's
   energy row equals the sum of its conduction, carried, source and formation terms to
   $10^{-11}$ of their scale. The carried term is not small and the surface temperature
   departs from the cell temperature by more than 1 K, so an omission, a double count or
@@ -15961,9 +16038,14 @@ coupling is therefore pinned by checks built independently of the residual:
   (`test/boundary_conditions/test_boundary_temperature.jl`, "Outward gas flux enters
   only through blowing"): under a prescribed flux, the solved surface temperature and
   the conducted flux are identical with and without a gas flux across the face.
-- **Isothermal transport** (`test/kernels/test_gas_transport.jl`, "isothermal transport
-  leaves the temperature at rest"): gas diffusing through an isothermal column leaves
-  every temperature at rest in both energy forms.
+- **Isothermal transport** (`test/kernels/test_gas_transport.jl`, "gas enthalpy at a
+  uniform temperature: no transport heating"): two gases moving through an isothermal
+  column under both transport laws leave every temperature at rest in both energy forms.
+- **No extremum at an unresolved front** (`test/kernels/test_gas_transport.jl`, "gas
+  enthalpy at a plateau edge: no extremum"): at a cell Péclet number of 45 gas leaving a
+  hot plateau for a colder cell leaves the plateau at its temperature, in both flow
+  directions and both energy forms, and over a solve no temperature leaves its initial
+  range.
 - **An exact solution that would see a spurious term.** V-CPL-02 sets the gas heat
   capacity equal to the solid's, which makes the Landau travelling-wave identity
   $v=v_{ss}(T_s)$ exact for a steady wave with stationary virgin material in

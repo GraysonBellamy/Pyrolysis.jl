@@ -505,7 +505,8 @@ T^*=\frac{d_RT_L+d_LT_R}{d_L+d_R}.
 $$
 
 It supplies the gas temperature at the interface for donor transport and the
-enthalpy carried by the shared face flux. The wall resistance on each half
+enthalpy carried by the shared face flux, to which the face adds conduction
+where the gas flux outweighs conduction (§7.4.2). The wall resistance on each half
 path uses that half-cell's temperature.
 
 For an isolated linear wall channel, eliminating the interface pressure gives
@@ -781,6 +782,13 @@ reservoir control surface, while enthalpy and total energy are positive
 outward, with `energy = enthalpy - heat` (§9.5). Dead-cell fields and absent
 live-boundary fields are `NaN`. The reported velocity is Darcy velocity;
 total mass or molar flow must be obtained from the species fluxes.
+
+`sol.gas.peclet` and `sol.gas.numerical_diffusion` (faces × saved times) give every
+interior face's cell Péclet number and the conductivity the face adds to its gas
+enthalpy flux over the face conductivity (§7.4.2); they are `NaN` on boundary faces and
+beside dead cells. `numerical_diffusion` is zero wherever conduction outweighs the gas
+flux and the face is second-order accurate; a positive value marks a face the mesh does
+not resolve, where the flux is upwind and first order.
 
 For an integrated check, `gas_species_audit(sol, recorder)` separates reaction
 production, escape, ingress and deactivation venting by species. This makes

@@ -8,7 +8,12 @@ boundaries report NaN. Vacuum fractions are zero. Boundary fluxes are outward,
 area-weighted over the current live faces of each tag; Darcy velocity is [m/s],
 species mass flux [kg/(m² s)], partial pressure [Pa], and energy flux [W/m²].
 `heat` is positive inward at the reservoir control surface; `enthalpy` and
-`energy` are positive outward, with energy = enthalpy − heat.
+`energy` are positive outward, with energy = enthalpy − heat. `peclet` and
+`numerical_diffusion` (faces × times) are the cell Péclet number of every
+interior face and the conductivity the face adds to its gas enthalpy flux over
+the face conductivity, from [`Kernels.face_peclet`](@ref): zero where the face
+is resolved, positive where it is upwind; NaN on boundary faces, beside dead
+cells and without gas transport.
 """
 struct GasDiagnostics
     species::Vector{Symbol}
@@ -23,8 +28,10 @@ struct GasDiagnostics
     production::Matrix{Float64}
     escape::Matrix{Float64}
     ingress::Matrix{Float64}
+    peclet::Matrix{Float64}
+    numerical_diffusion::Matrix{Float64}
 end
-function GasDiagnostics(material, n, nt, tags)
+function GasDiagnostics(material, n, nf, nt, tags)
     species=[c.name for c in material.components if is_gas(c)]
     ng=length(species)
     boundary=Dict{Symbol,NamedTuple}(
@@ -46,6 +53,8 @@ function GasDiagnostics(material, n, nt, tags)
         (fill(NaN, ng, n, nt) for _ = 1:4)...,
         boundary,
         (zeros(ng, nt) for _ = 1:4)...,
+        fill(NaN, nf, nt),
+        fill(NaN, nf, nt),
     )
 end
 function _gas_diagnostics!(out::GasDiagnostics, k, def, ds, c)
@@ -90,6 +99,13 @@ function _gas_diagnostics!(out::GasDiagnostics, k, def, ds, c)
         )
         b.residual[k]=maximum(c.surface_residual[f] for f in faces)
         b.iterations[k]=maximum(c.surface_iterations[f] for f in faces)
+    end
+    kernel=find_kernel(GasTransportKernel, def.kernels)
+    kernel===nothing && return out
+    for f = 1:n_faces(topo)
+        r=face_peclet(kernel, ds, topo, f)
+        out.peclet[f, k]=r.peclet
+        out.numerical_diffusion[f, k]=r.diffusion
     end
     return out
 end
