@@ -129,7 +129,7 @@ of the cell,
 
 $$
 C_i \;=\; \operatorname{smooth\_floor}\Bigl(\sum_{j=1}^{N_C} m_{j,i}\,c_{p,j}(T_{\text{trial},i}),\ \ \rho c_{p,\text{floor}}\,V_i(0)\Bigr)
-\qquad [\text{J·K}^{-1}],
+\qquad [\text{J}\,\text{K}^{-1}],
 \tag{5.10}
 $$
 
@@ -183,7 +183,7 @@ component on the common datum `T_ref = 298.15` K,
 
 $$
 h_j(T) \;=\; \int_{T_{\text{ref}}}^{T} c_{p,j}(T')\,\mathrm dT'
-\qquad [\text{J·kg}^{-1}].
+\qquad [\text{J}\,\text{kg}^{-1}].
 \tag{5.11}
 $$
 

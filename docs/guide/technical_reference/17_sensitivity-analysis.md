@@ -589,7 +589,7 @@ purposes the benefit — globally finite $\partial r/\partial T$ — outweighs i
 and its parameter sensitivities blow up. Each reactant multiplies the rate by
 the one-sided factor $g(\xi/\xi_{\text{thr}})$ of the `DepletionLimiter`
 (`src/Materials/reactions.jl`, `one_sided_factor` in `src/Physics/kinetics.jl`;
-default threshold $\xi_{\text{thr}}=1.0\ \text{kg·m}^{-3}$): exactly zero at and
+default threshold $\xi_{\text{thr}}=1.0\ \text{kg}\,\text{m}^{-3}$): exactly zero at and
 below zero concentration, a cubic onset of zero value and slope at zero, joined
 with matching value and slope onto $\tanh(\xi/\xi_\text{thr})$ at the join
 (default one threshold), and $\tanh$ above it. The reaction-order power is taken

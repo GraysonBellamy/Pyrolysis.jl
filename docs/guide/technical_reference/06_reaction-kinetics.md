@@ -758,7 +758,7 @@ examples) is
 
 $$
 h_{\mathrm{sorp}}(T,\boldsymbol{\xi}) =
-\Bigl(2275 + 860\,e^{-0.120\,MC}\Bigr)\times 10^{3}\ \text{J·kg}^{-1},
+\Bigl(2275 + 860\,e^{-0.120\,MC}\Bigr)\times 10^{3}\ \text{J}\,\text{kg}^{-1},
 \qquad MC = 100\,\frac{\xi_{\mathrm{moist}}}{\sum_{k}\xi_k},
 $$
 

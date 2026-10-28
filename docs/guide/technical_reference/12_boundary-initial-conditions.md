@@ -366,7 +366,7 @@ constraint:
    (`surface_balance.jl`): a penalty "flux" with a very large conductance,
    $$q_{\text{BC}} = h_{\text{large}}\,(T_{\text{bc}} - T_s),\qquad
    dq_{\text{BC}}/dT_s = -h_{\text{large}}, \qquad h_{\text{large}}=10^{8}
-   \;\text{W·m}^{-2}\text{·K}^{-1}.$$
+   \;\text{W}\,\text{m}^{-2}\,\text{K}^{-1}.$$
    The large slope drives $T_s\to T_{\text{bc}}$ in one step, with the face missing
    the prescribed value by $q_{\text{cond}}/h_{\text{large}}$: in the example above,
    with a convective member of zero coefficient added, $T_s = 599.99956$ K, a miss of

@@ -3099,7 +3099,7 @@ of the cell,
 
 $$
 C_i \;=\; \operatorname{smooth\_floor}\Bigl(\sum_{j=1}^{N_C} m_{j,i}\,c_{p,j}(T_{\text{trial},i}),\ \ \rho c_{p,\text{floor}}\,V_i(0)\Bigr)
-\qquad [\text{J·K}^{-1}],
+\qquad [\text{J}\,\text{K}^{-1}],
 \tag{5.10}
 $$
 
@@ -3153,7 +3153,7 @@ component on the common datum `T_ref = 298.15` K,
 
 $$
 h_j(T) \;=\; \int_{T_{\text{ref}}}^{T} c_{p,j}(T')\,\mathrm dT'
-\qquad [\text{J·kg}^{-1}].
+\qquad [\text{J}\,\text{kg}^{-1}].
 \tag{5.11}
 $$
 
@@ -4786,7 +4786,7 @@ examples) is
 
 $$
 h_{\mathrm{sorp}}(T,\boldsymbol{\xi}) =
-\Bigl(2275 + 860\,e^{-0.120\,MC}\Bigr)\times 10^{3}\ \text{J·kg}^{-1},
+\Bigl(2275 + 860\,e^{-0.120\,MC}\Bigr)\times 10^{3}\ \text{J}\,\text{kg}^{-1},
 \qquad MC = 100\,\frac{\xi_{\mathrm{moist}}}{\sum_{k}\xi_k},
 $$
 
@@ -5198,7 +5198,7 @@ cell conductivities, in the guarded form of §5.12:
 $$
 \boxed{\;
 k_f \;=\; \frac{(d_o+d_n)\,k_o\,k_n}{d_o\,k_n + d_n\,k_o + \eta\,(d_o+d_n)},
-\qquad \eta = 10^{-20}\ \text{W·m}^{-1}\text{K}^{-1}
+\qquad \eta = 10^{-20}\ \text{W}\,\text{m}^{-1}\,\text{K}^{-1}
 \;}
 \tag{7.2}
 $$
@@ -10051,7 +10051,7 @@ constraint:
    (`surface_balance.jl`): a penalty "flux" with a very large conductance,
    $$q_{\text{BC}} = h_{\text{large}}\,(T_{\text{bc}} - T_s),\qquad
    dq_{\text{BC}}/dT_s = -h_{\text{large}}, \qquad h_{\text{large}}=10^{8}
-   \;\text{W·m}^{-2}\text{·K}^{-1}.$$
+   \;\text{W}\,\text{m}^{-2}\,\text{K}^{-1}.$$
    The large slope drives $T_s\to T_{\text{bc}}$ in one step, with the face missing
    the prescribed value by $q_{\text{cond}}/h_{\text{large}}$: in the example above,
    with a convective member of zero coefficient added, $T_s = 599.99956$ K, a miss of
@@ -15090,7 +15090,7 @@ purposes the benefit — globally finite $\partial r/\partial T$ — outweighs i
 and its parameter sensitivities blow up. Each reactant multiplies the rate by
 the one-sided factor $g(\xi/\xi_{\text{thr}})$ of the `DepletionLimiter`
 (`src/Materials/reactions.jl`, `one_sided_factor` in `src/Physics/kinetics.jl`;
-default threshold $\xi_{\text{thr}}=1.0\ \text{kg·m}^{-3}$): exactly zero at and
+default threshold $\xi_{\text{thr}}=1.0\ \text{kg}\,\text{m}^{-3}$): exactly zero at and
 below zero concentration, a cubic onset of zero value and slope at zero, joined
 with matching value and slope onto $\tanh(\xi/\xi_\text{thr})$ at the join
 (default one threshold), and $\tanh$ above it. The reaction-order power is taken

@@ -83,7 +83,7 @@ cell conductivities, in the guarded form of §5.12:
 $$
 \boxed{\;
 k_f \;=\; \frac{(d_o+d_n)\,k_o\,k_n}{d_o\,k_n + d_n\,k_o + \eta\,(d_o+d_n)},
-\qquad \eta = 10^{-20}\ \text{W·m}^{-1}\text{K}^{-1}
+\qquad \eta = 10^{-20}\ \text{W}\,\text{m}^{-1}\,\text{K}^{-1}
 \;}
 \tag{7.2}
 $$
