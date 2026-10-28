@@ -810,7 +810,7 @@ $$
 (`_correction!`), with $\Delta z_i = z_{i+1} - z_i$ the current cell thickness,
 $a_i$ the activation of §11.7.3, $\tilde{\mathcal M}$ the normalized monitor of
 §11.7.4 and $\tau_{\text{eq}}$ [s] the layer's equidistribution time (the keyword
-`τ`, §11.7.6). A positive $c_i$ moves the node in $+z$ relative to the solid, into the
+$\tau$, §11.7.6). A positive $c_i$ moves the node in $+z$ relative to the solid, into the
 outer cell: the correction moves each node into the thicker (or heavier) of its two
 cells, so $\tilde{\mathcal M}\Delta z$ relaxes toward a common value over the layer.
 
@@ -882,7 +882,7 @@ correction on layers that cannot vanish.
 
 ### 11.7.6 The layer time
 
-The equidistribution time is one value for every layer when `τ` is a number. By
+The equidistribution time is one value for every layer when $\tau$ is a number. By
 default it is `ActivationTime()`: each layer's time is set once, when its first cell
 activates (falls below $r_{\text{hi}}$ of its initial thickness), from the layer's
 thickness $L_{\text{layer}}$ (from its inner bounding node to its outermost live node)

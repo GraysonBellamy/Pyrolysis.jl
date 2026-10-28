@@ -14,9 +14,9 @@ Gpyro V2, and FDS, and a statement of the model's limitations.
 Throughout this chapter the index `i` denotes the **reaction index** and `j` the
 **component (species) index** — the kinetics convention of overload note I1 in
 §2, Nomenclature. The cell index, where it appears in the discretization
-discussion, is written explicitly. Mass concentration `ξ_j` (kg·m⁻³) is the
+discussion, is written explicitly. Mass concentration $\xi_j$ (kg·m⁻³) is the
 constitutive species variable (the integrated state of a cell is its mass
-`ξ_j V` of each component, §6.5.4); stoichiometric coefficients are `ν_{i,j}` (overload note
+$\xi_j V$ of each component, §6.5.4); stoichiometric coefficients are $\nu_{i,j}$ (overload note
 A2); the Arrhenius pre-exponential is `A_i` (overload note A3); and the heat of
 reaction `h` uses the storage sign convention `h > 0` endothermic (overload note
 H1).
@@ -215,7 +215,7 @@ only about 5 K inside the window; equivalently, the gate is
 $\approx 4.5\times10^{-5}$ about 5 K **outside** the window. All widths scale
 linearly with $w_{\text{gate}}$.
 
-### 6.2.3 The ~10·w_gate leakage caveat
+### 6.2.3 The ~$10\,w_{\text{gate}}$ leakage caveat
 
 The smoothing is not free: the reaction is "weakly active" within roughly
 $10\,w_{\text{gate}}$ of each boundary, where a hard step would have it
@@ -734,7 +734,7 @@ heats[$i] = rxn.heat(T, ξ)   # Pass ξ for state-dependent heats
 (src/Physics/kinetics.jl). The two-argument call dispatches as follows
 (src/Materials/property_functions.jl):
 
-- `ConstantProperty(h)` $\to h$ (the `(T,ξ)` method ignores both arguments);
+- `ConstantProperty(h)` $\to h$ (the $(T,\xi)$ method ignores both arguments);
 - `LinearProperty(a,b)` $\to a + bT$ (affine in temperature, $\xi$ ignored);
 - `PolynomialProperty` $\to \mathrm{evalpoly}(T,\text{coeffs})$;
 - `StateDependentProperty(f)` $\to f(T, \boldsymbol{\xi})$ — the only type that

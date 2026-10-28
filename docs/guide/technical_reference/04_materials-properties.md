@@ -81,7 +81,7 @@ compiler folds it to a constant. The runtime `Phase` enum (`SOLID=1`,
 heat capacity, conductivity, optional superficial matrix transfer,
 permeability, emissivity, incident absorptivity, absorption and swelling.
 Property laws have concrete type parameters. Participating lumped matrices
-require explicit transfer; zero-`γ` condensed phases cannot have nonzero
+require explicit transfer; zero-$\gamma$ condensed phases cannot have nonzero
 transfer or permeability. Liquid defaults to zero swelling participation.
 
 `GaseousComponent` stores molar mass, reference-density law, heat capacity,
@@ -160,7 +160,7 @@ never both:
 ```
 
 > **Implementation note.** `_resolve_intrinsic_density`, `src/Materials/components.jl`.
-> The `φ` path requires `raw_ρ isa Real` and `0 ≤ φ < 1`, throwing an
+> The $\varphi$ path requires `raw_ρ isa Real` and $0 \le \varphi < 1$, throwing an
 > `ArgumentError` otherwise. Gas components do not store an intrinsic density;
 > `get_intrinsic_density(::GaseousComponent, ::Real) = 0.0`, which is consistent
 > with Eq. (4.2) summing only over solid/liquid.
@@ -227,8 +227,8 @@ matrix weights. Its value is constitutive data, independent of gas loading.
 The bulk mixture mass density is $\rho_{tot}=\sum_j\xi_j$. Matrix transport
 uses $q_j=\gamma_j\xi_j/\rho_{b,j}$ only for condensed components and normalizes
 by their sum. Gas loading cannot alter these weights, even if gas has nonzero
-`γ`. Thermal mixing and the volume-change law retain their own stated bases.
-Skeletal occupancy is a separate sum using intrinsic densities and no `γ`.
+$\gamma$. Thermal mixing and the volume-change law retain their own stated bases.
+Skeletal occupancy is a separate sum using intrinsic densities and no $\gamma$.
 
 ---
 
@@ -238,7 +238,7 @@ $\phi=1-\sum_{S\cup L}\xi_j/\rho_{i,j}(T)$ enters the pore EOS, intrinsic
 densities, dusty-gas geometry and physical admissibility. For condensed
 species, $\partial\phi/\partial\xi_j=-1/\rho_{i,j}$; for gas this derivative
 is zero. Temperature dependence of skeletal density is differentiated too.
-A condensed component with `γ=0` still occupies this skeletal volume.
+A condensed component with $\gamma=0$ still occupies this skeletal volume.
 Chapter 9 specifies the common trial extension and accepted-state margin.
 
 ---
@@ -533,9 +533,9 @@ Sutherland) avoids it.
 ### 4.5.2 Concentration derivative $\partial p/\partial \xi_j$
 
 For every property type *except* `StateDependentProperty`, the two-argument call
-`p(T, ξ)` ignores $\xi$, so $\partial p/\partial \xi_j = 0$ exactly. For a
+$p(T, \xi)$ ignores $\xi$, so $\partial p/\partial \xi_j = 0$ exactly. For a
 `StateDependentProperty` the derivative is $\partial f/\partial \xi_j$, propagated by
-AD through `f(T, ξ)` with the concentration tuple carrying `Dual` entries. The
+AD through $f(T, \xi)$ with the concentration tuple carrying `Dual` entries. The
 kinetics evaluator passes the cell's concentrations to every heat-of-reaction
 property, so a moisture-dependent heat of sorption contributes its composition
 derivative to the rows of the cell's energy source.

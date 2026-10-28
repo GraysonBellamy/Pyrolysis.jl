@@ -46,7 +46,7 @@ with SI units of $\mathrm{s^{-1}}$. The interpretation is transparent: a unit de
 > ```julia
 > θ += γⱼ * dξ[j] / ρⱼ        # ρⱼ = comps[j].density(T)
 > ```
-> evaluated **only when `γⱼ > 0`**: components with $\gamma_j=0$ are skipped, so no density is evaluated and the term is exactly zero. There is **no minus sign** in the code: the sign of $\theta$ is carried entirely by the sign of $d\xi_j/dt$, which is negative for a depleting reactant (the species source consumes the reactant with coefficient $-1$; see §6.5). The density $\rho_j(T)$ is the *bulk* density property evaluated at the cell's trial temperature $T_{\mathrm{trial}}$ (the cell temperature smoothly clamped into the property bracket $[200, 3000]$ K, the identity on every physical state) — not the intrinsic/skeletal density $\rho_{i,j}$, which is reserved for the porosity (§5.3 and §2, overload A7).
+> evaluated **only when $\gamma_j > 0$**: components with $\gamma_j=0$ are skipped, so no density is evaluated and the term is exactly zero. There is **no minus sign** in the code: the sign of $\theta$ is carried entirely by the sign of $d\xi_j/dt$, which is negative for a depleting reactant (the species source consumes the reactant with coefficient $-1$; see §6.5). The density $\rho_j(T)$ is the *bulk* density property evaluated at the cell's trial temperature $T_{\mathrm{trial}}$ (the cell temperature smoothly clamped into the property bracket $[200, 3000]$ K, the identity on every physical state) — not the intrinsic/skeletal density $\rho_{i,j}$, which is reserved for the porosity (§5.3 and §2, overload A7).
 
 ### 10.1.2 What $d\xi_j/dt$ is in (10.2)
 
@@ -82,7 +82,7 @@ The swelling factor $\gamma_j$ is a per-component scalar field on every `Abstrac
 **Modeling guidance.**
 
 - **Non-charring shrinkage (e.g. a polymer converting to gas):** keep the virgin solid at $\gamma=1$ and the gas product at $\gamma=0$. As the solid converts to gas, $\theta<0$ and the column recedes — the classic shrinking-slab picture.
-- **Zero-swelling char:** `γ=0` removes the char's direct strain and its matrix property weight. Its skeletal occupancy, mass and heat storage remain. Such a phase must have zero transport coefficients; a state with no γ-weighted matrix still needs a declared endpoint whose skeletal-occupancy domain includes that state. This choice does not make residual char an unobstructed void.
+- **Zero-swelling char:** $\gamma=0$ removes the char's direct strain and its matrix property weight. Its skeletal occupancy, mass and heat storage remain. Such a phase must have zero transport coefficients; a state with no γ-weighted matrix still needs a declared endpoint whose skeletal-occupancy domain includes that state. This choice does not make residual char an unobstructed void.
 
 - **Intumescence (gas-producing expansion):** assign the trapped/blowing gas a swelling factor $\gamma_g\in(0,1]$. A positive $d\xi_g/dt$ (gas being produced) with $\gamma_g>0$ contributes $\theta>0$, i.e. the matrix *inflates*. Combined with a swelling lateral law (§10.5) this reproduces the order-of-magnitude expansion of intumescent coatings. Axial intumescence (through-thickness swell) is captured by $\theta>0$ in (10.2); radial intumescence (lateral swell of the column) is captured by $\mathrm{law}(\bar\chi)>1$ in (10.8). A factor $\gamma>1$ is not representable.
 
@@ -432,7 +432,7 @@ The history rows are differential (ones on the mass matrix), the area and latera
 
 ## 10.10 Worked sign check
 
-To verify the sign conventions end to end, consider a single charring step `virgin → ν_char·char + ν_gas·gas` in one cell, with $N_C=3$ ordered (virgin, char, gas), swelling factors $\gamma=(1,1,0)$, and reaction rate $r>0$ (kg·m⁻³·s⁻¹). The reaction species sources are (from §6.5: reactant $-1$, products $+\nu$):
+To verify the sign conventions end to end, consider a single charring step $\text{virgin} \to \nu_{\text{char}}\cdot\text{char} + \nu_{\text{gas}}\cdot\text{gas}$ in one cell, with $N_C=3$ ordered (virgin, char, gas), swelling factors $\gamma=(1,1,0)$, and reaction rate $r>0$ (kg·m⁻³·s⁻¹). The reaction species sources are (from §6.5: reactant $-1$, products $+\nu$):
 
 $$
 \left.\frac{d\xi_{\mathrm{virgin}}}{dt}\right|_{\mathrm{rxn}}=-r,

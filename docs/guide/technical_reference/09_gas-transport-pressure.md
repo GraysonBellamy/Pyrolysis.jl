@@ -174,7 +174,7 @@ concentration** is $\Lambda/\phi$, an important distinction when choosing
 coefficients or comparing with a diffusion benchmark. When temperature or
 porosity varies, the full partial-pressure potential must be retained.
 
-The effective $\Lambda$ comes from the condensed components' `λ` properties
+The effective $\Lambda$ comes from the condensed components' $\lambda$ properties
 (§9.3). It is shared by the gases, so this closure does not resolve
 species-dependent wall resistance. Either $\Lambda$ or $\kappa$ may be
 exactly zero: zero permeability removes Darcy flow, while zero transfer
@@ -261,10 +261,10 @@ serve a different purpose from the skeletal occupancies that determine
 $\phi$ in §9.1. A condensed component with $\gamma_j=0$ has zero matrix
 weight but still occupies physical volume. Its matrix coefficients must be
 zero. Gas components have zero matrix weight for every value of their
-swelling factor and carry neither `λ` nor `κ`.
+swelling factor and carry neither $\lambda$ nor $\kappa$.
 
 For participating condensed components, the lumped model requires explicit
-`λ` data; `κ` defaults to zero. For either coefficient $a_j$, the mixture
+$\lambda$ data; $\kappa$ defaults to zero. For either coefficient $a_j$, the mixture
 rules are
 
 $$
@@ -468,7 +468,7 @@ where $h$ is the heat-transfer coefficient and $\beta$ is the film function
 from §9.4.2. The sum $C$ is signed: outward blowing and inward suction have
 different effects. `CouetteFilm` allows a factor $2\lambda$ in the argument
 of $\beta$; its classical value is $\lambda=1/2$. This film parameter is
-separate from the matrix transfer coefficient `λ`.
+separate from the matrix transfer coefficient $\lambda$.
 
 Temperature-dependent properties are evaluated at the surface as a
 frozen-property approximation. `PoolingFilm` uses the solved surface
@@ -868,7 +868,7 @@ $$
 These continuum fluxes are **equivalent under the stated assumptions** when
 porosity is spatially uniform, $\Lambda=\phi\lambda_{\mathrm{TK}}$, and our
 separate Darcy term is zero. For varying porosity, the TK potential also
-produces a term proportional to $p_j\nabla\phi$. Copying a numerical `λ`
+produces a term proportional to $p_j\nabla\phi$. Copying a numerical $\lambda$
 value therefore does not generally reproduce the same transport law. Even
 in the uniform-porosity limit, the effective coefficients must match as the
 material changes; the component mixing bases and volume laws require the

@@ -166,7 +166,7 @@ $$
 \ (\texttt{ACTIVATION\_TIME\_FACTOR}),
 $$
 
-where $\lambda_\tau$ is the `λ` keyword of `ActivationTime`. Since $\dot L_{\rm layer}$
+where $\lambda_\tau$ is the $\lambda$ keyword of `ActivationTime`. Since $\dot L_{\rm layer}$
 scales with the physical rates and $\lambda_\tau$ is a pure number, a deck
 whose rates are all multiplied by $s$ gets $\tau_{\rm eq}/s$. Before the
 estimate the layer's correction is zero. A layer thinning no faster than its

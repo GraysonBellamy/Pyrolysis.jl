@@ -391,7 +391,7 @@ fields:
 | `F_energy` | $n_\text{faces}$ | W m⁻² | conduction, gas transport (carried enthalpy), thermal boundary, relative fluxes |
 | `S_mass` | $N_C\times n$ | kg s⁻¹ | reactions, external sources |
 | `S_energy` | $n$ | W | reactions, in-depth radiation |
-| `θ` | $n$ | s⁻¹ | mesh closure (strain rates) |
+| $\theta$ | $n$ | s⁻¹ | mesh closure (strain rates) |
 | `M_flux` | $N_C\times n$ | kg s⁻¹ | assembler ($\dot M_{j,i}$) |
 | `T_face` | $n_\text{faces}$ | K | thermal boundary (surface temperatures) |
 | `r_intensity` | $n_\text{faces}$ | W m⁻² | in-depth radiation (algebraic residuals) |

@@ -584,7 +584,7 @@ pressure-aware controller and current gas guard scale are described in §9.10.
 
 Both gas models include $v_D=-\kappa\nabla P/\mu$ and transport each species
 with its donor intrinsic density $\rho_j^g=\xi_j/\phi$. The donor's own
-porosity and temperature define this density. `κ=0` closes this mechanism;
+porosity and temperature define this density. $\kappa=0$ closes this mechanism;
 wall transfer can still conduct. Material interfaces match total species flux
 through an interface pressure state, including legal wall-only/Darcy-only
 layer pairs. The common interface thermal state also supplies carried

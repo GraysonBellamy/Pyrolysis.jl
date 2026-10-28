@@ -822,7 +822,7 @@ The kernels write into a pre-allocated buffer of contributions (`Contributions{N
 | `F_energy` | $n_{\text{faces}}$ | energy flux per unit face area along the normal: conduction and the enthalpy carried by the mass fluxes | $\text{W}\,\text{m}^{-2}$ |
 | `S_mass` | $N_C\times n_{\text{cells}}$ | reaction mass source of every component, $\omega_{j,i}V_i$ | $\text{kg}\,\text{s}^{-1}$ |
 | `S_energy` | $n_{\text{cells}}$ | cell energy source: reaction heat and absorbed radiation, without the formation term | W |
-| `θ` | $n_{\text{cells}}$ | cell strain rate (mesh closure) | $\text{s}^{-1}$ |
+| $\theta$ | $n_{\text{cells}}$ | cell strain rate (mesh closure) | $\text{s}^{-1}$ |
 | `M_flux` | $N_C\times n_{\text{cells}}$ | face-flux part of every mass rate, $\dot M_{j,i}$ (7.4), filled by the assembler | $\text{kg}\,\text{s}^{-1}$ |
 | `T_face` | $n_{\text{faces}}$ | face temperatures; on a boundary face the surface temperature of its energy balance | K |
 | `r_intensity` | $n_{\text{faces}}$ | residuals of the face-intensity rows (`BEER_LAMBERT`) | $\text{W}\,\text{m}^{-2}$ |
