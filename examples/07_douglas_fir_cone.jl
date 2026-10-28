@@ -170,10 +170,11 @@ heat_of_sorption = StateDependentProperty(
 # ============================================================================
 # 
 # Superficial wall transfer is J_j = -M_j Λ/(R T) ∂p_j/∂z.
-# Only condensed γ-weighted bulk occupancy enters the effective Λ. These
-# coefficients specify the pore matrix; gas components have caloric properties
-# and molar masses but no transfer coefficient. Moisture with γ=0 occupies
-# skeletal volume and contributes no matrix transport weight.
+# The bulk occupancy of the transport matrix (the wood and char components)
+# weights the effective Λ. These coefficients specify the pore matrix; gas
+# components have caloric properties and molar masses but no transfer
+# coefficient. Moisture declares neither λ nor κ: it occupies skeletal volume
+# but is no part of the transport matrix.
 λ_wood = 5.0e-7     # m²/s - superficial transfer through virgin wood
 λ_char = 1.0e-5     # m²/s - superficial transfer through char
 
@@ -185,7 +186,7 @@ heat_of_sorption = StateDependentProperty(
 κ_char = 1.0e-12    # m² - open char pore network
 
 # Create Douglas Fir material with multiple components:
-# Solid components: DF, DF_int1, DF_int2, DF_int3, DF_int4, Char, MOISTURE
+# Condensed components: DF, DF_int1, DF_int2, DF_int3, DF_int4, Char, MOISTURE
 # Gas components: DF_gas1-5, WATER_VAPOR
 
 douglas_fir = Material(
@@ -290,17 +291,14 @@ douglas_fir = Material(
             # Carbon skeletal density ~1950 kg/m³ → char-only φ ≈ 0.92
             ρ_intrinsic = 1950.0,
         ),
-        # 7. Moisture (liquid water bound in wood structure)
-        # The imported ρ=1e6 kg/m³ pseudo-density makes the liquid volume
-        # small in ThermaKin. Its L SWELLING: 0 does not remove liquid volume.
-        # Here the default liquid γ=0 gives zero bulk-volume contribution.
-        # Physical interpretation: moisture is absorbed into wood cell walls,
-        # with zero γ-weighted matrix occupancy; its skeletal volume is still counted.
+        # 7. Moisture: water bound in the cell walls, a liquid at the density
+        # of water. It holds its own volume, so drying shrinks the wood, and
+        # it adds to k_eff and ε_eff by its volume share.
         LiquidComponent(
             :MOISTURE,
-            ρ = 1e6,                       # kg/m³ - pseudo-density (matches ThermaKin)
+            ρ = 1000.0,                    # kg/m³ - liquid water
             c = moisture_cp,               # Moisture contributes to heat capacity
-            k = 0.145,                       # W/(m·K) - but not significantly to k_eff
+            k = 0.6,                       # W/(m·K) - liquid water
             ε = 0.81,
             α = 0.0,                       # m²/kg - not used with SURFACE_ABSORPTION model
             κ = 0.0,                        # m² - liquid blocks Darcy flow

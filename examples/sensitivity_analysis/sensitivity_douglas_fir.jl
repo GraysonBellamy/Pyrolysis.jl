@@ -669,12 +669,12 @@ end
                     κ = κ_char,
                     ρ_intrinsic = 1950.0,  # kg/m³, carbon skeletal density
                 ),
-                # 7. Moisture (liquid, pseudo-density)
+                # 7. Moisture (liquid water)
                 LiquidComponent(
                     :MOISTURE,
-                    ρ = 1e6,
+                    ρ = 1000.0,
                     c = moisture_cp,
-                    k = 0.145,
+                    k = 0.6,
                     ε = 0.81,
                     α = 0.0,
                     κ = 0.0,

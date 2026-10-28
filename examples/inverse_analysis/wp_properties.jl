@@ -660,7 +660,7 @@ const WP_STAGE3_BOUNDS =
 # The CAPA tests give mass, diameter AND thickness per flux, so shrinkage is a
 # closed, checkable system rather than one fitted area law:
 #   • VOLUME is NOT fitted — the solver derives it from component densities,
-#     dV/V = Σⱼ(γⱼ/ρⱼ)dξⱼ (src/Physics/volume_change.jl). The measured residue
+#     dV/V = Σⱼ dξⱼ/ρⱼ over the condensed components (src/Physics/volume_change.jl). The measured residue
 #     density m_f/V_f independently confirms the density set: pre-test bulk ρ₀
 #     = 358.9 ≈ WP_RHO_VIRGIN (+0.4%), and the ~fully-charred 70 kW residue
 #     ρ_f = 86.2 ≈ WP_RHO_CHAR (−3.3%, within the ±6% char-ρ uncertainty).

@@ -102,8 +102,9 @@ water_vapor_cp = CallableProperty(T -> 1716.7 + 0.4154 * T + 1.530e-4 * T^2)
 # ============================================================================
 #
 # The lumped model uses superficial matrix transfer Λ [m²/s] and independent
-# Darcy permeability κ [m²]. Condensed γ-weighted bulk occupancy determines
-# their effective values; neither coefficient is a gas-species property.
+# Darcy permeability κ [m²]. The bulk occupancy of the transport matrix (the
+# wood and char components) weights their effective values; neither
+# coefficient is a gas-species property.
 λ_wood = 2.0e-5     # m²/s - superficial transfer through PTW matrix
 λ_char = 2.0e-5     # m²/s - superficial transfer through PTW char
 
@@ -135,15 +136,15 @@ const PTW_GAS4_IDX = 11        # Gas product from reaction 5
 ptw_material = Material(
     name = :PressureTreatedWood,
     components = (
-        # 1. Water (liquid moisture), modeled here with default γ=0.
-        # The imported pseudo-density makes liquid volume small in ThermaKin;
-        # its L SWELLING: 0 affects gas swelling, not liquid volume.
-        # Our γ=0 instead removes the liquid's bulk-volume contribution.
+        # 1. Water (liquid moisture) at the density of water. It holds its own
+        # volume, so drying shrinks the wood, and it adds to k_eff and ε_eff
+        # by its volume share; it declares neither λ nor κ, so it is no part
+        # of the gas-transport matrix.
         LiquidComponent(
             :WATER,
-            ρ = 1e5,                       # kg/m³ - pseudo-density (high to minimize volume)
+            ρ = 1000.0,                    # kg/m³ - liquid water
             c = water_cp,                  # J/(kg·K) - temperature-dependent
-            k = 0.145,                      # W/(m·K) - thermal conductivity
+            k = 0.6,                       # W/(m·K) - liquid water
             ε = 0.81,                      # surface emissivity
             α = 1000.0,                    # m²/kg - absorption coefficient (not used with SURFACE_ABSORPTION)
             κ = 0.0,                        # m² - liquid blocks Darcy flow

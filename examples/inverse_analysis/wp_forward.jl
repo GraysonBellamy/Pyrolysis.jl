@@ -378,11 +378,11 @@ function build_material(
                 κ = WP_KAPPA_CHAR,
                 φ = WP_PHI_ASH,
             ),
-            # 8. Moisture (zero IC, but keep schema complete; pseudo-density
-            # ρ=1e6 already gives ξ/ρ ≈ 0 contribution to porosity, no override needed)
+            # 8. Moisture: liquid water (zero IC by default, kept so the schema
+            # is complete; `c0_moisture` sets it per scenario)
             LiquidComponent(
                 :MOISTURE,
-                ρ = 1e6,
+                ρ = 1000.0,
                 c = moisture_cp_func,
                 k = 0.6,
                 ε = ε_virgin,
