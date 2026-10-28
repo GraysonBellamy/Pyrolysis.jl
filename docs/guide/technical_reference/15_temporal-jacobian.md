@@ -636,13 +636,12 @@ the residual need care to keep that derivative correct and finite.
   switch of the correction. The derivatives are therefore finite at every real
   state, and they are the physical ones on every physical state.
 - **The surface energy balance.** Each boundary face solves
-  $q_{\rm BC}(T_s)=k(T_s-T_{\rm cell})/d$ by a Newton iteration
-  (`solve_boundary_temperature!`, §12.2) whose iterates carry the dual numbers.
-  In dual mode the first iterate is never accepted, so at least one Newton
-  update propagates the partials, and the converged dual fixed point carries
-  the implicit-function derivative of $T_s$ with respect to the cell state and
-  the face's outward mass fluxes; the blowing models are evaluated at every
-  iterate from those fluxes, so their derivatives enter exactly.
+  $q_{\rm BC}(T_s)=k(T_s-T_{\rm cell})/d$ by a Newton iteration on the plain
+  values (`solve_boundary_temperature!`, §12.2); one Newton correction at the
+  root, evaluated with the dual numbers, carries the implicit-function
+  derivative of $T_s$ with respect to the cell state and the face's outward
+  mass fluxes. The blowing models are evaluated in that correction from those
+  fluxes, so their derivatives enter exactly.
 - **The caloric inversion** (enthalpy form). The temperature of a cell is the
   root of its extended caloric relation (§13). For dual inputs the primal root
   is found by the bracketed Newton iteration on the values, then corrected by

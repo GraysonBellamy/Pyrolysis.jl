@@ -9798,6 +9798,20 @@ correction and nonsingular local Jacobian are required. Failure is explicit;
 no exhausted Newton iterate supplies a flux. The initial guess is independent
 of diagnostic `BoundaryState` contents.
 
+The thermal residual of a gas-free face is the balance divided by its local
+scale: the largest of the applied and conducted fluxes at the iterate, of
+1 W m⁻², and of the round-off of the conduction difference at $T_s$. Where
+conduction is weak against the boundary flux ($k/d$ of order
+$10^{-2}$ W m⁻² K⁻¹ or below under a temperature-dependent heat law), that
+scale is the applied flux itself on either side of the root, so the scaled
+residual stays near $\pm1$ away from it and no line-search step decreases
+it. The solve then converges first on the balance divided once by its scale
+at $T_{cell}$, and finishes on the local scale raised to the round-off of the
+applied flux, $64\,\epsilon\,|T_s|\,|\partial q_{\mathrm{BC}}/\partial T_s|/\mathrm{tol}$:
+near the root of a face heated at 1 MW m⁻² the applied flux is a difference
+of absorbed and emitted fluxes near $9\times10^5$ W m⁻². A root the first
+solve reaches is used as it is.
+
 ### 12.2.3 Derivatives and output
 
 First derivatives are obtained from the implicit function theorem at the
@@ -13229,13 +13243,12 @@ the residual need care to keep that derivative correct and finite.
   switch of the correction. The derivatives are therefore finite at every real
   state, and they are the physical ones on every physical state.
 - **The surface energy balance.** Each boundary face solves
-  $q_{\rm BC}(T_s)=k(T_s-T_{\rm cell})/d$ by a Newton iteration
-  (`solve_boundary_temperature!`, §12.2) whose iterates carry the dual numbers.
-  In dual mode the first iterate is never accepted, so at least one Newton
-  update propagates the partials, and the converged dual fixed point carries
-  the implicit-function derivative of $T_s$ with respect to the cell state and
-  the face's outward mass fluxes; the blowing models are evaluated at every
-  iterate from those fluxes, so their derivatives enter exactly.
+  $q_{\rm BC}(T_s)=k(T_s-T_{\rm cell})/d$ by a Newton iteration on the plain
+  values (`solve_boundary_temperature!`, §12.2); one Newton correction at the
+  root, evaluated with the dual numbers, carries the implicit-function
+  derivative of $T_s$ with respect to the cell state and the face's outward
+  mass fluxes. The blowing models are evaluated in that correction from those
+  fluxes, so their derivatives enter exactly.
 - **The caloric inversion** (enthalpy form). The temperature of a cell is the
   root of its extended caloric relation (§13). For dual inputs the primal root
   is found by the bracketed Newton iteration on the values, then corrected by

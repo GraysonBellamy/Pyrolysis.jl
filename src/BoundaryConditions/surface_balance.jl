@@ -23,7 +23,7 @@ using ..Materials: evaluate_param, evaluate_param_T
 using ..Materials: RadiationModel, NO_RADIATION, SURFACE_ABSORPTION, BEER_LAMBERT
 using ForwardDiff
 using StaticArrays: SVector
-using ..Physics: primal, bounded_transport_root, implicit_transport_root
+using ..Physics: primal, bounded_transport_root, implicit_transport_root, TransportFailure
 
 # ============================================================================
 # Main Solver
@@ -71,9 +71,17 @@ marginally sub-quadratically, and the Dual fixed point is the exact
 implicit-function-theorem derivative.
 
 # Non-convergence
-An unconverged or singular balance raises `TransportFailure`; no flux from an
-unconverged iterate is assembled. Derivatives follow the converged residual
-through the implicit function theorem.
+The Newton works on the balance divided by its local scale, the largest of
+the applied and conducted fluxes at the iterate. Where conduction is weak
+against the boundary flux (a small `k_eff/Δz_half`), that scale is the flux
+itself on either side of the root, the scaled residual stays near ±1 away
+from it, and no step decreases it; the solve then converges first on the
+balance divided by its scale at `T_cell` and finishes on the local scale,
+raised to the round-off of the applied flux, a difference of larger absorbed
+and emitted fluxes near the root. A balance on which neither solve converges
+raises `TransportFailure`; no flux from an unconverged iterate is assembled.
+Derivatives follow the converged residual through the implicit function
+theorem.
 """
 @inline function solve_boundary_temperature!(
     state::BoundaryState,
@@ -92,13 +100,15 @@ through the implicit function theorem.
     trial,
 ) where {NC}
     # Solve a primal scalar balance, then differentiate the converged equation.
-    # The residual scale includes the resolvable conduction difference at T_s.
-    residual =
+    # The balance at an iterate, its local scale, which includes the
+    # resolvable conduction difference at T_s, and the resolvable difference
+    # of the applied flux at T_s.
+    balance =
         (z, T_cell, k_eff, Δz_half, ε_eff, a_eff, J_outward, t) -> begin
             temp_local=z[1]
             eval_local=trial(temp_local)
             face_local=BlowingFace(J_outward, eval_local, material)
-            heat_local, _=evaluate_bc_flux_and_derivative(
+            heat_local, slope_local=evaluate_bc_flux_and_derivative(
                 bc,
                 eval_local,
                 t,
@@ -114,27 +124,47 @@ through the implicit function theorem.
                 1.0,
                 64eps(Float64)*max(abs(primal(temp_local)), 1.0)*abs(primal(k_eff/Δz_half))/tol,
             )
-            SVector((heat_local-conducted_local)/scale_local)
+            resolution_local=64eps(Float64)*max(abs(primal(temp_local)), 1.0)*abs(
+                primal(slope_local),
+            )/tol
+            (heat_local-conducted_local, scale_local, resolution_local)
         end
-    z0=SVector(primal(T_cell))
-    root=bounded_transport_root(
-        z->residual(
-            z,
-            primal(T_cell),
-            primal(k_eff),
-            primal(Δz_half),
-            primal(ε_eff),
-            primal(a_eff),
-            map(primal, J_outward),
-            primal(t),
-        ),
-        z0;
-        tolerance = tol,
-        maxiters = max_iter,
-        lower = SVector(-Inf),
+    # The balance divided by its local scale, raised under weak conduction to
+    # the applied flux's resolution.
+    residual =
+        (z, weak, T_cell, k_eff, Δz_half, ε_eff, a_eff, J_outward, t) -> begin
+            b, s, r = balance(z, T_cell, k_eff, Δz_half, ε_eff, a_eff, J_outward, t)
+            SVector(b/(weak ? max(s, r) : s))
+        end
+    plain = (
+        primal(T_cell),
+        primal(k_eff),
+        primal(Δz_half),
+        primal(ε_eff),
+        primal(a_eff),
+        map(primal, J_outward),
+        primal(t),
     )
+    z0=SVector(primal(T_cell))
+    attempt=try
+        root=bounded_transport_root(
+            z->residual(z, false, plain...),
+            z0;
+            tolerance = tol,
+            maxiters = max_iter,
+            lower = SVector(-Inf),
+        )
+        (root = root, weak = false)
+    catch failure
+        failure isa TransportFailure || rethrow()
+        (
+            root = _weak_conduction_root(balance, residual, plain, z0, tol, max_iter),
+            weak = true,
+        )
+    end
+    root, weak = attempt.root, attempt.weak
     z=implicit_transport_root(
-        z->residual(z, T_cell, k_eff, Δz_half, ε_eff, a_eff, J_outward, t),
+        z->residual(z, weak, T_cell, k_eff, Δz_half, ε_eff, a_eff, J_outward, t),
         root,
     )
     T_s=z[1]
@@ -154,6 +184,38 @@ through the implicit function theorem.
         _record_blowing!(state, bc, face, t)
     end
     return (T_s = T_s, q_applied = q, q_conducted = qc)
+end
+
+# The root of a balance whose conduction is weak against its boundary flux.
+# The local scale is then the flux itself on either side of the root, so the
+# scaled residual stays near ±1 away from it and no Newton step decreases it;
+# and near the root the applied flux, a difference of larger absorbed and
+# emitted ones, carries more round-off than the local scale resolves. Converge
+# first on the balance divided once by its scale at the cell temperature, then
+# finish on the local scale raised to the applied flux's resolution.
+function _weak_conduction_root(balance, residual, plain, z0, tol, max_iter)
+    _, s, r = balance(z0, plain...)
+    scale = max(s, r)
+    near = bounded_transport_root(
+        z->SVector(first(balance(z, plain...))/scale),
+        z0;
+        tolerance = tol,
+        maxiters = max_iter,
+        lower = SVector(-Inf),
+    )
+    root = bounded_transport_root(
+        z->residual(z, true, plain...),
+        near.x;
+        tolerance = tol,
+        maxiters = max_iter,
+        lower = SVector(-Inf),
+    )
+    return (
+        x = root.x,
+        linear = root.linear,
+        iterations = near.iterations + root.iterations,
+        residual = root.residual,
+    )
 end
 
 # ============================================================================

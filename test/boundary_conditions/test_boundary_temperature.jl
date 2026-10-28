@@ -24,6 +24,8 @@ using Pyrolysis.Materials: GaseousComponent, SolidComponent, Material, Reaction
 using Pyrolysis.BoundaryConditions: compute_boundary_heat_fluxes
 using Pyrolysis.Properties: mixture_emissivity, mixture_absorptivity
 using Pyrolysis.States: trial_temperature
+using Pyrolysis.Materials: SURFACE_ABSORPTION, STEFAN_BOLTZMANN
+using ForwardDiff
 
 # Test helper: a tiny inert single-solid material (no gas component). Tests
 # below pass it with a zero outward flux to recover the no-blowing limit,
@@ -331,6 +333,92 @@ _bc_face(T_s) = BlowingFace(_BC_ZERO_J, T_s, _BC_TEST_MAT)
             @test state.converged
             # Large temperature jump expected
             @test state.T_surface > T_cell + 100.0
+        end
+
+        # Conduction weak against the boundary flux: the balance divided by
+        # its local scale stays near ±1 on either side of the root, and at
+        # 1 MW/m² the applied flux, a difference of absorbed and emitted
+        # fluxes near 9e5 W/m², carries more round-off than that scale
+        # resolves. The surface lies at the root of the unscaled balance,
+        # found here by bisection, and its derivatives are the implicit
+        # function's.
+        @testset "Weak conduction: $(name), k/Δz = $(kd) W/(m²·K)" for (name, bc) in (
+                (
+                    "50 kW/m² absorbed and re-radiated",
+                    RadiativeFluxBC(flux = 5e4) + RadiativeBC(T_inf = 300.0),
+                ),
+                (
+                    "1 MW/m² absorbed and re-radiated",
+                    RadiativeFluxBC(flux = 1e6) + RadiativeBC(T_inf = 300.0),
+                ),
+                (
+                    "radiative and convective cooling",
+                    RadiativeBC(T_inf = 300.0) + ConvectiveBC(h = 20.0, T_inf = 300.0),
+                ),
+            ),
+            kd in (1e-8, 1e-5, 1e-3)
+
+            T_cell, Δz, ε = 526.25, 1e-3, 0.9
+            k = kd * Δz
+            q(T) = first(
+                evaluate_bc_flux_and_derivative(
+                    bc,
+                    trial_temperature(T),
+                    0.0,
+                    ε,
+                    SURFACE_ABSORPTION,
+                    _bc_face(trial_temperature(T)),
+                ),
+            )
+            g(T) = q(T) - k * (T - T_cell) / Δz
+            lo, hi = 0.0, 1e4
+            while hi - lo > 4eps(hi)
+                mid = (lo + hi) / 2
+                g(mid) > 0 ? (lo = mid) : (hi = mid)
+            end
+            state = _solve_bt(T_cell, k, Δz, bc, 0.0, ε)
+            @test state.converged
+            @test state.T_surface ≈ lo rtol = 1e-12
+            T_s(x, k) = solve_boundary_temperature!(
+                BoundaryState(),
+                x,
+                k,
+                Δz,
+                bc,
+                _BC_TEST_MAT,
+                _BC_ZERO_J,
+                0.0,
+                ε;
+                trial = trial_temperature,
+            ).T_s
+            den = k / Δz - ForwardDiff.derivative(q, state.T_surface)
+            @test ForwardDiff.derivative(x -> T_s(x, k), T_cell) ≈ (k / Δz) / den rtol =
+                1e-10
+            @test ForwardDiff.derivative(x -> T_s(T_cell, x), k) ≈
+                  -((state.T_surface - T_cell) / Δz) / den rtol = 1e-10
+        end
+
+        @testset "A radiatively heated poor conductor solves" begin
+            s = SolidComponent(:s, ρ = 100.0, c = 1000.0, k = 1e-5, ε = 0.9)
+            problem = PyrolysisProblem(
+                mesh = create_uniform_mesh(1.0, 4),
+                material = Material(name = :poor, components = (s,), reactions = ()),
+                bc_set = BoundaryConditionSet(
+                    thermal = (
+                        top = RadiativeFluxBC(flux = 5e4) + RadiativeBC(T_inf = 300.0),
+                        bottom = AdiabaticBC(),
+                    ),
+                ),
+                T_initial = z -> 300.0,
+                ξ_initial = [z -> 100.0],
+                tspan = (0.0, 100.0),
+            )
+            sol = solve(problem)
+            @test sol.retcode == :Success
+            # Radiative equilibrium: 0.9 × 50 kW/m² absorbed, emitted at ε = 0.9
+            # against 300 K, the conducted flux below 1e-3 W/m².
+            @test sol.surface_T[end] ≈ (5e4 / STEFAN_BOLTZMANN + 300.0^4)^(1 / 4) rtol =
+                1e-6
         end
 
     end

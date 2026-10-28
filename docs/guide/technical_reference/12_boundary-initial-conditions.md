@@ -117,6 +117,20 @@ correction and nonsingular local Jacobian are required. Failure is explicit;
 no exhausted Newton iterate supplies a flux. The initial guess is independent
 of diagnostic `BoundaryState` contents.
 
+The thermal residual of a gas-free face is the balance divided by its local
+scale: the largest of the applied and conducted fluxes at the iterate, of
+1 W m⁻², and of the round-off of the conduction difference at $T_s$. Where
+conduction is weak against the boundary flux ($k/d$ of order
+$10^{-2}$ W m⁻² K⁻¹ or below under a temperature-dependent heat law), that
+scale is the applied flux itself on either side of the root, so the scaled
+residual stays near $\pm1$ away from it and no line-search step decreases
+it. The solve then converges first on the balance divided once by its scale
+at $T_{cell}$, and finishes on the local scale raised to the round-off of the
+applied flux, $64\,\epsilon\,|T_s|\,|\partial q_{\mathrm{BC}}/\partial T_s|/\mathrm{tol}$:
+near the root of a face heated at 1 MW m⁻² the applied flux is a difference
+of absorbed and emitted fluxes near $9\times10^5$ W m⁻². A root the first
+solve reaches is used as it is.
+
 ### 12.2.3 Derivatives and output
 
 First derivatives are obtained from the implicit function theorem at the
